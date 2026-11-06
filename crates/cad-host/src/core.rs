@@ -333,6 +333,14 @@ pub struct HostCore {
     /// controller's retained async snapshot is only eligible when this equals the
     /// current [`Self::open_attempt`].
     pub(crate) async_report_attempt: Rc<Cell<Option<u64>>>,
+    /// The latest admitted drawing-edit receipt, handed to the render session
+    /// by the next post-commit sync. `None` when the last confirm created no
+    /// incremental transition (or it was already published).
+    pub(crate) pending_edit: Rc<RefCell<Option<cad_app::render_scene::DrawingEditReceipt>>>,
+    /// Whether the last confirmation supplied an admitted edit receipt to the
+    /// render sync. Contract-test observation only; never read by behaviour.
+    #[cfg(test)]
+    pub(crate) last_edit_receipt_for_test: Rc<Cell<bool>>,
     /// Per-instance pointer navigation state.
     pub(crate) navigation: Rc<NavInner>,
     /// Transient hover state feeding `OverlayInputs::hovered` (ADR-0012 §10 S2).

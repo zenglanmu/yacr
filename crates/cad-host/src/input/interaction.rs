@@ -438,16 +438,31 @@ impl HostCore {
             &self.controller.borrow().session.tool,
             ToolState::Measuring(_)
         );
+        // A confirm that does not produce an admitted edit must not leave a
+        // receipt from an earlier confirmation behind.
+        self.pending_edit.borrow_mut().take();
+        #[cfg(test)]
+        self.last_edit_receipt_for_test.set(false);
+        let mut edit = None;
         if measuring {
             self.immediate_command(CommandId::ConfirmMeasurement, CommandPayload::None)?;
         } else {
             // The draw confirmation is a real App command; collect its single
             // trace and surface an inner command failure explicitly (the
-            // capture is preserved by `confirm_draw_traced`).
-            let traced = self.controller.borrow_mut().confirm_draw_traced()?;
+            // capture is preserved by `confirm_draw_traced`). The trusted funnel
+            // also binds an optional incremental-display receipt to its own
+            // before/after database snapshots.
+            let (traced, receipt) = self
+                .controller
+                .borrow_mut()
+                .confirm_draw_traced_with_edit()?;
+            edit = receipt;
             self.pending_trace.borrow_mut().extend(traced.commands);
             traced.result?;
         }
+        *self.pending_edit.borrow_mut() = edit.clone();
+        #[cfg(test)]
+        self.last_edit_receipt_for_test.set(edit.is_some());
         self.full_dirty.set(true);
         // A draw tool may have created the drawing's first text (a dimension's
         // measurement): install its fallback engine before the rebuild, so the
@@ -455,7 +470,8 @@ impl HostCore {
         if let Err(error) = self.ensure_fonts_for_text() {
             self.note_post_commit_error(&error);
         }
-        if let Err(error) = self.sync_render() {
+        let edit = self.pending_edit.borrow_mut().take();
+        if let Err(error) = self.sync_render_with_edit(edit.as_ref()) {
             self.note_post_commit_error(&error);
         }
         Ok(InteractionOutcome::Confirmed)

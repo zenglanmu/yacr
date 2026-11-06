@@ -29,6 +29,7 @@ mod draw_intent_map;
 mod draw_pick;
 mod open_import;
 mod properties;
+mod render_edit;
 mod tolerance;
 mod vendor_properties;
 

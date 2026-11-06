@@ -17,6 +17,7 @@ mod box_select;
 mod box_select_edge_cases;
 mod capture_candidate;
 mod compat;
+mod edit_receipt;
 mod engine_config;
 mod file_open_save;
 mod fonts;

@@ -184,38 +184,15 @@ pub fn build_scene_stats_with_vendor(
     match space {
         SpaceSelection::Model => {
             for entity in crate::layers::visible_model_entities(database, overrides) {
-                let mut representation = registry.build_expanded(database, entity, &context)?;
-                append_vendor_fragments(
-                    &mut representation,
+                let representation = model_entity_representation(
                     database,
+                    entity,
                     &registry,
                     &context,
-                    entity,
-                    stamp.document,
+                    &stamp,
                     vendor,
                     fonts.as_deref(),
-                );
-                let block_vendor = BlockVendorContext {
-                    database,
-                    registry: &registry,
-                    context: &context,
-                    document: stamp.document,
-                    vendor,
-                    fonts: fonts.as_deref(),
-                };
-                let placement = InstancePlacement {
-                    transform: cad_domain::Transform3::identity(),
-                    path: InstancePath::default(),
-                };
-                append_block_vendor_fragments(
-                    &mut representation,
-                    &block_vendor,
-                    &entity.geometry,
-                    entity.id,
-                    &placement,
-                    0,
-                    &mut Vec::new(),
-                );
+                )?;
                 stats.fragments_in += representation.fragments.len();
                 let delta = cache.build_compact(&representation, stamp.clone())?;
                 stats.batches_out += delta.added.len() + delta.images.len() + delta.masks.len();
@@ -238,6 +215,94 @@ pub fn build_scene_stats_with_vendor(
     }
     tally_adjacent_merge_candidates(&combined.added, &mut stats);
     Ok((combined, stats))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn model_entity_representation(
+    database: &DrawingDatabase,
+    entity: &cad_db::DbEntity,
+    registry: &ProviderRegistry,
+    context: &RepresentationContext,
+    stamp: &TaskStamp,
+    vendor: Option<&VendorRepresentationStore>,
+    fonts: Option<&FontEngine>,
+) -> CadResult<cad_representation::DisplayRepresentation> {
+    let mut representation = registry.build_expanded(database, entity, context)?;
+    append_vendor_fragments(
+        &mut representation,
+        database,
+        registry,
+        context,
+        entity,
+        stamp.document,
+        vendor,
+        fonts,
+    );
+    let block_vendor = BlockVendorContext {
+        database,
+        registry,
+        context,
+        document: stamp.document,
+        vendor,
+        fonts,
+    };
+    let placement = InstancePlacement {
+        transform: cad_domain::Transform3::identity(),
+        path: InstancePath::default(),
+    };
+    append_block_vendor_fragments(
+        &mut representation,
+        &block_vendor,
+        &entity.geometry,
+        entity.id,
+        &placement,
+        0,
+        &mut Vec::new(),
+    );
+    Ok(representation)
+}
+
+/// Use precisely the full-build provider/style/compaction path for one entity.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_model_entity_scene(
+    database: &DrawingDatabase,
+    entity: &cad_db::DbEntity,
+    stamp: TaskStamp,
+    fonts: Option<Arc<FontEngine>>,
+    images: Option<Arc<DecodedImageCache>>,
+    overrides: &LayerOverrideSet,
+    vendor: Option<&VendorRepresentationStore>,
+) -> CadResult<SceneDelta> {
+    let mut cache = SceneCache::new(SceneBudget::default());
+    if !overrides.is_entity_visible(database, entity) {
+        return Ok(SceneDelta {
+            stamp,
+            added: vec![],
+            removed_chunks: vec![],
+            images: vec![],
+            masks: vec![],
+        });
+    }
+    let registry = ProviderRegistry::with_default_provider();
+    let mut context =
+        RepresentationContext::new(stamp.document, TolerancePolicy::default(), stamp.clone())
+            .with_packed_line_segments();
+    if let Some(fonts) = &fonts {
+        context = context.with_fonts(fonts.clone());
+    }
+    if let Some(images) = images {
+        context = context.with_images(images);
+    }
+    let representation = model_entity_representation(
+        database,
+        entity,
+        &registry,
+        &context,
+        &stamp,
+        vendor,
+        fonts.as_deref(),
+    )?;
+    cache.build_compact(&representation, stamp)
 }
 
 /// Read-only merge-ratio measurement for the model-space scene of `database`.

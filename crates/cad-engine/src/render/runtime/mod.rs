@@ -1,7 +1,7 @@
 //! Derived GPU state. Never builds representations or owns a window.
 use super::controller::PreparedScene;
 use super::*;
-use cad_app::render_scene::SceneDelta;
+use cad_app::render_scene::{BaseAppend, SceneDelta};
 use cad_domain::SelectionRef;
 use cad_render_wgpu::{wgpu, BackendCapabilities, RenderError, RenderTarget, Renderer};
 use std::sync::Arc;
@@ -160,6 +160,11 @@ struct PendingUpload {
     offset: usize,
     prepared: Option<cad_render_wgpu::PreparedUpload>,
     base_changed: bool,
+    /// Admitted append: skip this many already-resident base batches, stage only
+    /// the appended base suffix, and keep the resident prefix at commit.
+    append: bool,
+    /// Index of the first staged base batch inside `scene.base.added`.
+    base_offset: usize,
 }
 
 /// Read-only snapshot of an in-flight chunked upload (diagnostics only).
@@ -244,6 +249,66 @@ enum UploadDecision {
     ResetRevision,
     /// The pending upload continues for the same revision.
     Continue,
+}
+
+/// How a base change is uploaded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BaseUploadPlan {
+    /// Replace the whole resident scene (conservative fallback).
+    Full,
+    /// Keep `keep_prefix` already-resident base batches and stage only the
+    /// appended base suffix. The base revision still changes (it is not an
+    /// overlay-only suffix commit).
+    Append { keep_prefix: usize },
+}
+
+impl BaseUploadPlan {
+    fn keep_prefix(self) -> usize {
+        match self {
+            Self::Full => 0,
+            Self::Append { keep_prefix } => keep_prefix,
+        }
+    }
+    fn is_append(self) -> bool {
+        matches!(self, Self::Append { .. })
+    }
+}
+
+/// Admit an append only against the **exact** resident CPU base.
+///
+/// Pure so every guard is contract-tested without a GPU. `None` means the
+/// caller must fall back to a full replacement, which is always safe:
+/// - the device must be ready and a different base revision is pending;
+/// - the scene must carry a [`BaseAppend`];
+/// - its `predecessor` must be the exact `Arc` the GPU last committed (retained,
+///   so pointer equality cannot alias a freed allocation);
+/// - the resident base batch count must equal `keep_batches`, and at least one
+///   new base batch must exist (an equal-length "append" would be classified by
+///   the renderer as an overlay-only suffix, not a base change);
+/// - the new base must contain the kept prefix.
+fn admit_base_append(
+    device_ready: bool,
+    applied_base: Option<u64>,
+    ready_base: u64,
+    applied_base_scene: Option<&Arc<SceneDelta>>,
+    append: Option<&BaseAppend>,
+    resident_base_batches: usize,
+    new_base_batches: usize,
+) -> Option<BaseUploadPlan> {
+    if !device_ready || applied_base.is_none() || applied_base == Some(ready_base) {
+        return None;
+    }
+    let append = append?;
+    let applied_scene = applied_base_scene?;
+    if !Arc::ptr_eq(applied_scene, &append.predecessor) {
+        return None;
+    }
+    if resident_base_batches != append.keep_batches || append.keep_batches >= new_base_batches {
+        return None;
+    }
+    Some(BaseUploadPlan::Append {
+        keep_prefix: append.keep_batches,
+    })
 }
 
 fn upload_decision(
@@ -338,6 +403,14 @@ pub struct CadRenderRuntime {
     epoch: u64,
     applied_revision: Option<u64>,
     applied_base: Option<u64>,
+    /// The exact base `Arc` the GPU last committed.
+    ///
+    /// An edit receipt's [`cad_app::render_scene::BaseAppend`] may only be
+    /// admitted when its `predecessor` is this exact allocation. The strong
+    /// reference also keeps the address alive, so a freed-and-reallocated
+    /// `SceneDelta` cannot alias the predecessor (the same ABA guard the applied
+    /// overlay uses). Reset on detach: a fresh device starts with no base.
+    applied_base_scene: Option<Arc<SceneDelta>>,
     /// The entity-flag revision the renderer last applied. A flags-only publish
     /// advances this without touching `applied_revision`/`applied_base`: the
     /// committed geometry is unchanged and only the in-stream flags delta is
@@ -406,6 +479,7 @@ impl Default for CadRenderRuntime {
             epoch: 0,
             applied_revision: None,
             applied_base: None,
+            applied_base_scene: None,
             applied_flags_revision: None,
             base_batches: 0,
             target_size: None,

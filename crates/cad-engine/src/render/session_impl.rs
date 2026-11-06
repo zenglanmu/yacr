@@ -21,6 +21,28 @@ impl RenderSessionHandle {
     }
 
     pub fn sync_drawing(&self, drawing: Option<Arc<DrawingDatabase>>) -> bool {
+        self.sync_drawing_with_edit(drawing, None)
+    }
+
+    /// Atomically publish the authoritative drawing and (optionally) the edit
+    /// receipt that produced it.
+    ///
+    /// Receipt retention rules (the append path depends on them):
+    /// - a supplied receipt is kept only while its `after` drawing is the exact
+    ///   `Arc` being published; a constructor already validated before/after;
+    /// - a same-`Arc` sync without a receipt **keeps** the pending receipt, so a
+    ///   later post-commit `sync_render` cannot erase the append hint;
+    /// - a new/unrelated drawing (or `None`) clears it.
+    ///
+    /// A newly stored receipt advances only the preparation content revision
+    /// when the drawing `Arc` itself did not change, so a receipt that arrives
+    /// after the drawing publication still schedules the preparation that can
+    /// use it (never a silent late drop). Returns whether the drawing changed.
+    pub fn sync_drawing_with_edit(
+        &self,
+        drawing: Option<Arc<DrawingDatabase>>,
+        edit: Option<&DrawingEditReceipt>,
+    ) -> bool {
         let mut state = self.0.borrow_mut();
         let mut incoming = state.incoming.borrow_mut();
         let changed = match (incoming.as_ref(), &drawing) {
@@ -28,12 +50,36 @@ impl RenderSessionHandle {
             (None, None) => false,
             _ => true,
         };
+        let previous_edit = state.latest_edit.clone();
+        // A supplied receipt is only meaningful for the exact drawing it was
+        // produced from. Keep it across a same-`Arc` sync; never carry it to a
+        // different drawing.
+        let next_edit = match edit {
+            Some(edit) => drawing
+                .as_ref()
+                .filter(|after| Arc::ptr_eq(edit.after(), after))
+                .map(|_| edit.clone()),
+            None if changed => None,
+            None => state.latest_edit.clone(),
+        };
         if changed {
             *incoming = drawing;
         }
         drop(incoming);
+        let edit_changed = match (&previous_edit, &next_edit) {
+            (Some(previous), Some(next)) => !Arc::ptr_eq(previous.after(), next.after()),
+            (None, None) => false,
+            _ => true,
+        };
+        state.latest_edit = next_edit;
         if changed {
             state.observe_drawing();
+        } else if edit_changed && state.latest_edit.is_some() {
+            // The receipt belongs to an already-published drawing: schedule one
+            // preparation so the controller can turn it into an appended base.
+            // It does not change scene identity (`input_revision`), only the
+            // preparation token.
+            state.advance_content();
         }
         changed
     }

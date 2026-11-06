@@ -97,6 +97,13 @@ pub fn maybe_spawn_tool_evidence(webview: Option<&tauri::Webview>) {
 /// Every step is a dispatch only; the **real** outcome is the `cad_status`
 /// snapshot read from the host, never a value synthesized here.
 fn run_tool_evidence(webview: tauri::Webview) {
+    // Opt-in large-drawing reproduction: wait for initial uploads, zoom into
+    // detail, then drive the actual Enter handler rather than invoking CONFIRM.
+    // Normal four-line evidence retains its original schedule and coordinates.
+    if large_drawing_evidence_enabled(std::env::var("YACR_PROBE_TOOL_PERF").ok().as_deref()) {
+        run_large_drawing_evidence(webview);
+        return;
+    }
     let start = Instant::now();
 
     schedule_tool(&start, 10, "before cad_status", || {
@@ -170,6 +177,97 @@ fn run_tool_evidence(webview: tauri::Webview) {
             );
         })
     });
+}
+
+fn run_large_drawing_evidence(webview: tauri::Webview) {
+    let start = Instant::now();
+    schedule_tool(&start, 90, "large drawing zoom (synthetic wheel)", || {
+        webview.eval(
+            r#"(() => {
+          const el = document.querySelector('.native-input');
+          if (!el) throw new Error('missing native-input');
+          const r = el.getBoundingClientRect();
+          for (let i = 0; i < 8; i++) el.dispatchEvent(new WheelEvent('wheel', {
+            clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+            deltaY: -600, bubbles: true, cancelable: true
+          }));
+        })()"#,
+        )
+    });
+    schedule_tool(&start, 95, "large drawing baseline", || {
+        webview.eval(TOOL_BEFORE_JS)
+    });
+    schedule_tool(&start, 96, "large drawing LINE", || {
+        webview.eval(TOOL_START_JS)
+    });
+    for (at, fraction) in [(98, 0.45), (108, 0.55)] {
+        let js = format!(
+            r#"(() => {{
+          const el = document.querySelector('.native-input');
+          if (!el) throw new Error('missing native-input');
+          const r = el.getBoundingClientRect();
+          el.setPointerCapture = () => {{}};
+          el.hasPointerCapture = () => false;
+          el.releasePointerCapture = () => {{}};
+          for (const type of ['pointermove', 'pointerdown', 'pointerup'])
+            el.dispatchEvent(new PointerEvent(type, {{
+              pointerId: 1, pointerType: 'mouse', isPrimary: true,
+              button: 0, buttons: type === 'pointerdown' ? 1 : 0,
+              clientX: r.left + r.width * {fraction},
+              clientY: r.top + r.height * {fraction}, bubbles: true, cancelable: true
+            }}));
+          const t = window.__yacr_tool;
+          t.clicks = (t.clicks || 0) + 1;
+        }})()"#
+        );
+        schedule_tool(&start, at, "large drawing viewport click", || {
+            webview.eval(js)
+        });
+    }
+    schedule_tool(&start, 118, "large drawing Enter", || {
+        webview.eval(
+            r#"(async () => {
+          const status = await window.__TAURI_INTERNALS__.invoke('cad_status');
+          if (!status.tool || !status.tool.ready) {
+            window.__yacr_tool.confirm_failed = 'tool-not-ready-before-enter';
+            return;
+          }
+          const el = document.querySelector('.native-input');
+          if (!el) throw new Error('missing native-input');
+          el.focus();
+          window.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Enter', code: 'Enter', bubbles: true, cancelable: true
+          }));
+        })()"#,
+        )
+    });
+    schedule_tool(&start, 155, "large drawing after", || {
+        webview.eval(TOOL_AFTER_JS)
+    });
+    schedule_tool(&start, 157, "large drawing report", || {
+        webview.eval_with_callback(TOOL_REPORT_JS, |result| {
+            eprintln!(
+                "[probe] large-drawing Enter report (synthetic DOM, NOT real mouse): {result}"
+            );
+        })
+    });
+}
+
+fn large_drawing_evidence_enabled(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
+#[cfg(test)]
+mod perf_tests {
+    use super::large_drawing_evidence_enabled;
+
+    #[test]
+    fn large_drawing_driver_requires_explicit_opt_in() {
+        for value in [None, Some(""), Some("0"), Some("false")] {
+            assert!(!large_drawing_evidence_enabled(value));
+        }
+        assert!(large_drawing_evidence_enabled(Some("1")));
+    }
 }
 
 /// Decode the JSON-quoted eval-callback payload into the raw report string.

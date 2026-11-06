@@ -669,12 +669,19 @@ impl Application {
                 layer.0
             )));
         }
+        // The new rows go one past the highest **model-space** draw order. This is
+        // a single pass over the stored rows: `model_space()` allocates a `Vec` of
+        // every model entity and sorts it (`O(N log N)`) only to take the maximum.
+        // The filter is exactly `model_space()`'s (`SpaceId::Model`), so paper-space
+        // and block-definition rows never raise the base order — this deliberately
+        // stays model-space based even when the inserted row targets another space
+        // (OFFSET preserves the source space).
         let base_order = drawing
-            .model_space()
-            .iter()
-            .map(|e| e.draw_order)
+            .entities()
+            .filter(|entity| entity.space == SpaceId::Model)
+            .map(|entity| entity.draw_order)
             .max()
-            .map(|m| m.saturating_add(1))
+            .map(|order| order.saturating_add(1))
             .unwrap_or(0);
         let mut entities: Vec<DbEntity> = Vec::with_capacity(geometries.len());
         for (index, geometry) in geometries.into_iter().enumerate() {

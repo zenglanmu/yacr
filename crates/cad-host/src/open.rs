@@ -55,6 +55,26 @@ fn xref_options_for(_target: &FileTarget) -> Option<Arc<XrefOptions>> {
 }
 
 impl HostCore {
+    /// Open the configured `--open` drawing at startup (or fit the demo).
+    ///
+    /// Uses the already-owned render session; no UI bridge is required.
+    pub fn open_configured_drawing(&self) -> CadResult<()> {
+        self.metrics()?;
+        if let Some(path) = &self.options.drawing {
+            let target = FileTarget::from_path(&path.to_string_lossy());
+            self.begin_open_attempt();
+            self.open_pending.set(true);
+            if let Err(error) = self.files.begin_open_target(&target) {
+                self.open_pending.set(false);
+                return Err(error);
+            }
+            self.drain_files()?;
+        } else {
+            self.controller.borrow_mut().fit()?;
+        }
+        Ok(())
+    }
+
     /// Arm the supersession guard for a new open attempt.
     ///
     /// Captures the current drawing so an attempt whose document was replaced

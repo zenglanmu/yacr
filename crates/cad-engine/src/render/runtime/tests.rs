@@ -286,12 +286,76 @@ fn prepared_scene(revision: u64, base_revision: u64, flags_revision: u64) -> Pre
         base_revision,
         flags_revision,
         base: Arc::new(delta(revision)),
+        base_append: None,
         highlight: Arc::new(delta(revision)),
         entity_flags: Vec::new(),
         highlight_diagnostics: Vec::new(),
         highlight_completeness: Completeness::Complete,
         images: None,
     }
+}
+
+#[test]
+fn base_append_admission_requires_the_exact_resident_predecessor() {
+    let predecessor = Arc::new(delta(1));
+    let other = Arc::new(delta(1));
+    let append = |predecessor: &Arc<SceneDelta>, keep: usize| BaseAppend {
+        predecessor: predecessor.clone(),
+        keep_batches: keep,
+    };
+    let valid = append(&predecessor, 2);
+    // The only accepted shape: ready device, a base change, the exact retained
+    // predecessor allocation, the matching resident batch count, and at least
+    // one newly appended base batch.
+    assert_eq!(
+        admit_base_append(true, Some(4), 5, Some(&predecessor), Some(&valid), 2, 5,),
+        Some(BaseUploadPlan::Append { keep_prefix: 2 })
+    );
+    // Every guard falls back to a full replacement, never a partial append.
+    assert_eq!(
+        admit_base_append(false, Some(4), 5, Some(&predecessor), Some(&valid), 2, 5),
+        None,
+        "a detached device cannot append"
+    );
+    assert_eq!(
+        admit_base_append(true, None, 5, None, Some(&valid), 2, 5),
+        None,
+        "no resident base means a full rebuild"
+    );
+    assert_eq!(
+        admit_base_append(true, Some(5), 5, Some(&predecessor), Some(&valid), 2, 5),
+        None,
+        "the same base revision is not a base change"
+    );
+    assert_eq!(
+        admit_base_append(true, Some(4), 5, Some(&other), Some(&valid), 2, 5),
+        None,
+        "a different predecessor allocation must never be trusted"
+    );
+    assert_eq!(
+        admit_base_append(true, Some(4), 5, Some(&predecessor), Some(&valid), 3, 5),
+        None,
+        "the resident batch count must equal keep_batches"
+    );
+    assert_eq!(
+        admit_base_append(true, Some(4), 5, Some(&predecessor), Some(&valid), 2, 2),
+        None,
+        "an equal-length append would be an overlay-only suffix, not a base change"
+    );
+    assert_eq!(
+        admit_base_append(true, Some(4), 5, Some(&predecessor), None, 2, 5),
+        None,
+        "no append proof means a full upload"
+    );
+}
+
+#[test]
+fn base_append_plan_drives_prefix_and_classification() {
+    assert_eq!(BaseUploadPlan::Full.keep_prefix(), 0);
+    assert!(!BaseUploadPlan::Full.is_append());
+    let append = BaseUploadPlan::Append { keep_prefix: 7 };
+    assert_eq!(append.keep_prefix(), 7);
+    assert!(append.is_append());
 }
 
 #[test]

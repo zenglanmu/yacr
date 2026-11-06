@@ -98,7 +98,7 @@ fn moved_into(db: &DrawingDatabase, id: EntityId, block: BlockId, base: Point3) 
 }
 
 /// Run a combined batch and assert it is refused with `code`, leaving the
-/// revision and every stored table exactly as they were.
+/// revision, the allocators and every stored table exactly as they were.
 fn assert_refused_unchanged(
     mut db: DrawingDatabase,
     block_changes: &[(BlockId, Option<BlockRow>)],
@@ -106,6 +106,8 @@ fn assert_refused_unchanged(
     code: &str,
 ) {
     let revision = db.revision();
+    let next_entity = db.next_entity_id();
+    let next_block = db.next_block_id();
     let snapshot = format!("{db:?}");
     let error = db
         .apply_drawing_changes_with_blocks(
@@ -123,6 +125,16 @@ fn assert_refused_unchanged(
         db.revision(),
         revision,
         "a refusal does not bump the revision"
+    );
+    assert_eq!(
+        db.next_entity_id(),
+        next_entity,
+        "a refusal does not advance the entity allocator"
+    );
+    assert_eq!(
+        db.next_block_id(),
+        next_block,
+        "a refusal does not advance the block allocator"
     );
     assert_eq!(
         format!("{db:?}"),
@@ -314,6 +326,123 @@ fn a_refused_combined_batch_changes_nothing() {
         vec![(EntityId(1), Some(dangling))],
         "references missing block",
     );
+}
+
+#[test]
+fn an_entity_only_batch_inserts_updates_and_deletes_in_one_revision() {
+    let mut db = block_db();
+    let before = db.revision();
+    let mut updated = db.entity(EntityId(1)).unwrap().clone();
+    updated.geometry = SemanticGeometry::Line {
+        start: point(0.0, 0.0),
+        end: point(9.0, 0.0),
+    };
+    // Block 7 is stored, so this INSERT names a valid reference without staging
+    // any block row.
+    let inserted = reference_entity(3, BlockId(7), point(1.0, 2.0));
+
+    let changes = db
+        .apply_drawing_changes_with_blocks(
+            "entity-only batch",
+            TransactionId(1),
+            &[],
+            vec![
+                (EntityId(1), Some(updated.clone())),
+                (EntityId(3), Some(inserted)),
+                (EntityId(2), None),
+            ],
+        )
+        .expect("an entity-only batch must not need the block-batch view");
+
+    assert_eq!(changes.before, before);
+    assert_eq!(changes.after, Revision(before.0 + 1));
+    assert_eq!(db.revision(), Revision(before.0 + 1));
+    assert_eq!(
+        changes.changes,
+        vec![
+            ObjectChange::Update(ObjectId(1), ChangeMask::GEOMETRY),
+            ObjectChange::Insert(ObjectId(3)),
+            ObjectChange::Delete(ObjectId(2)),
+        ],
+        "caller order preserved, exactly like a plain entity batch"
+    );
+    assert_eq!(db.entity(EntityId(1)).unwrap().geometry, updated.geometry);
+    assert!(db.entity(EntityId(2)).is_none());
+    assert!(db.entity(EntityId(3)).is_some());
+    assert!(db.block(BlockId(8)).is_none(), "no block row was invented");
+    assert_eq!(db.next_block_id(), BlockId(8));
+    assert_eq!(db.next_entity_id(), EntityId(4));
+}
+
+#[test]
+fn an_invalid_entity_only_batch_rolls_back_without_revision_or_allocator_moves() {
+    let db = block_db();
+
+    // Deleting a row that does not exist is refused by the entity phase.
+    assert_refused_unchanged(
+        db.clone(),
+        &[],
+        vec![(EntityId(99), None)],
+        "does not exist",
+    );
+
+    // The same entity twice is a transaction-shape error.
+    let mut first = db.entity(EntityId(1)).unwrap().clone();
+    first.geometry = SemanticGeometry::Line {
+        start: point(0.0, 0.0),
+        end: point(1.0, 0.0),
+    };
+    assert_refused_unchanged(
+        db.clone(),
+        &[],
+        vec![(EntityId(1), Some(first)), (EntityId(1), None)],
+        "modifies entity",
+    );
+
+    // A space naming a missing block is still refused with no block row staged,
+    // so skipping the block-batch view cannot admit a dangling reference.
+    let mut orphan = db.entity(EntityId(1)).unwrap().clone();
+    orphan.space = SpaceId::Block(BlockId(77));
+    assert_refused_unchanged(
+        db,
+        &[],
+        vec![(EntityId(1), Some(orphan))],
+        "references missing block",
+    );
+}
+
+#[test]
+fn a_combined_block_batch_is_still_validated_when_entities_are_staged() {
+    let base = point(4.0, 0.0);
+    let block = BlockId(8);
+
+    // The block row claims no members, but the same batch moves entity 1 into
+    // its space. The post-batch member list — built only because block rows
+    // exist — must still catch the mismatch.
+    let db = block_db();
+    let member = moved_into(&db, EntityId(1), block, base);
+    assert_refused_unchanged(
+        db,
+        &[(block, Some(row("B1", block, Vec::new(), base)))],
+        vec![(EntityId(1), Some(member))],
+        "block.member_list_mismatch",
+    );
+
+    // The same combined shape with a matching member list commits once.
+    let mut db = block_db();
+    let member = moved_into(&db, EntityId(1), block, base);
+    let before = db.revision();
+    let changes = db
+        .apply_drawing_changes_with_blocks(
+            "combined create",
+            TransactionId(1),
+            &[(block, Some(row("B1", block, vec![EntityId(1)], base)))],
+            vec![(EntityId(1), Some(member))],
+        )
+        .expect("the member list matches the post-batch view");
+    assert_eq!(changes.after, Revision(before.0 + 1));
+    assert_eq!(db.block(block).unwrap().entities, vec![EntityId(1)]);
+    assert_eq!(db.entity(EntityId(1)).unwrap().space, SpaceId::Block(block));
 }
 
 #[test]

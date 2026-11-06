@@ -2,7 +2,9 @@
 use cad_app::layers::LayerOverrideSet;
 use cad_app::recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
 use cad_app::render_scene as controller;
-use cad_app::render_scene::{CadSceneController, DecodedImageCache, OverlayInputs, SnapHint};
+use cad_app::render_scene::{
+    CadSceneController, DecodedImageCache, DrawingEditReceipt, OverlayInputs, SnapHint,
+};
 use cad_app::vendor::VendorRepresentationStore;
 use cad_app::{Camera, MeasurementPreview, ProjectionKind, SelectionSet};
 use cad_db::DrawingDatabase;
@@ -230,6 +232,13 @@ struct State {
     /// invalidation.
     prepared_identity: Option<u64>,
     observed_drawing: usize,
+    /// Latest admitted drawing-edit receipt (see [`DrawingEditReceipt`]).
+    ///
+    /// Retained until the authoritative drawing `Arc` changes (a new/unrelated
+    /// drawing clears it) or a newer receipt replaces it. A same-`Arc`
+    /// `sync_render` never erases it: the receipt is an append hint for the
+    /// *next* preparation, not a one-shot side effect of a sync call.
+    latest_edit: Option<DrawingEditReceipt>,
     scene_publication_revision: u64,
     base_publication_revision: u64,
     published_base_identity: Option<BaseInputIdentity>,
@@ -283,6 +292,7 @@ impl Default for State {
             prepared_token: None,
             prepared_identity: None,
             observed_drawing: 0,
+            latest_edit: None,
             scene_publication_revision: 0,
             base_publication_revision: 0,
             published_base_identity: None,
@@ -544,6 +554,7 @@ fn preparation_input(state: &State) -> PreparationInput {
         vendor: state.vendor.clone(),
         layers: state.layers.clone(),
         overlays: state.overlays.clone(),
+        edit: state.latest_edit.clone(),
     }
 }
 
@@ -553,7 +564,7 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
     let input = preparation_input(state);
     let mut candidate = state.controller.clone();
     candidate.set_vendor_representations(input.vendor.clone());
-    candidate.prepare_shared_with_overlays_and_images(
+    candidate.prepare_shared_with_overlays_and_images_and_edit(
         input.drawing.clone(),
         input.document,
         input.fonts.clone(),
@@ -561,6 +572,7 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
         input.space,
         &input.overlays,
         input.images.clone(),
+        input.edit.as_ref(),
     )?;
     publish_controller(state, candidate, input.token);
     state.preparation.mark_synchronous(&input);
@@ -573,7 +585,7 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
     let token = state.content_revision;
     let mut candidate = state.controller.clone();
     candidate.set_vendor_representations(state.vendor.clone());
-    candidate.prepare_shared_with_overlays_and_images(
+    candidate.prepare_shared_with_overlays_and_images_and_edit(
         state.incoming.borrow().clone(),
         state.view.document,
         state.fonts.clone(),
@@ -581,6 +593,7 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
         state.view.space,
         &state.overlays,
         state.images.clone(),
+        state.latest_edit.as_ref(),
     )?;
     publish_controller(state, candidate, token);
     Ok(())

@@ -59,6 +59,7 @@ impl CadRenderRuntime {
         self.pending_upload = None;
         self.presented_revision = None;
         self.applied_base = None;
+        self.applied_base_scene = None;
         self.applied_flags_revision = None;
         self.target_size = None;
         self.base_batches = 0;
@@ -193,12 +194,28 @@ impl CadRenderRuntime {
                 // Unreachable by the guard above; keep the compiler honest.
                 UploadDecision::Continue | UploadDecision::ClearPending => {}
             }
+            let plan = if base_changed {
+                admit_base_append(
+                    matches!(self.lifecycle, RenderLifecycle::Ready { .. }),
+                    self.applied_base,
+                    ready.base_revision,
+                    self.applied_base_scene.as_ref(),
+                    ready.base_append.as_ref(),
+                    self.base_batches,
+                    ready.base.added.len(),
+                )
+                .unwrap_or(BaseUploadPlan::Full)
+            } else {
+                BaseUploadPlan::Full
+            };
             self.pending_upload = Some(PendingUpload {
                 scene: ready.clone(),
                 group: usize::from(!base_changed),
-                offset: 0,
+                offset: if base_changed { plan.keep_prefix() } else { 0 },
                 prepared: None,
                 base_changed,
+                append: base_changed && plan.is_append(),
+                base_offset: if base_changed { plan.keep_prefix() } else { 0 },
             });
         }
         let pending = self.pending_upload.as_mut().unwrap();
@@ -307,7 +324,14 @@ impl CadRenderRuntime {
         // base group; on a suffix-only commit the resident base prefix is
         // unchanged and the newly staged pieces are all overlay.
         let (keep_prefix, base_end) = if pending.base_changed {
-            (0, pending.scene.base.added.len())
+            if pending.append {
+                // Admitted append: keep the exact resident prefix and stage only
+                // the appended base suffix. `base_end` is the complete new base,
+                // so the renderer still classifies this as a base change.
+                (pending.base_offset, pending.scene.base.added.len())
+            } else {
+                (0, pending.scene.base.added.len())
+            }
         } else {
             (self.base_batches, self.base_batches)
         };
@@ -325,8 +349,15 @@ impl CadRenderRuntime {
         // re-uploads the textures after a backend rebuild/loss. An absent cache
         // or an empty batch list leaves no resident images and reports nothing:
         // a true no-op. Unresolved keys are surfaced, never silently dropped.
-        let mut image_diagnostic = None;
-        if pending.base_changed {
+        let mut image_diagnostic = if pending.append {
+            // An admitted append does not change the image/mask arrays: retain
+            // the resident textures, masks and their earlier diagnostics (a
+            // previous unresolved key must not become a silent success).
+            self.image_diagnostic.clone()
+        } else {
+            None
+        };
+        if pending.base_changed && !pending.append {
             let empty = super::controller::DecodedImageCache::new();
             let cache = ready.images.as_deref().unwrap_or(&empty);
             let report = renderer.upload_images(&ready.base.images, cache)?;
@@ -345,7 +376,7 @@ impl CadRenderRuntime {
         // scene. The renderer's final mask pass paints them last. A boundary it
         // could not fill is observable through `Renderer::mask_skips()`, never
         // silently dropped.
-        if pending.base_changed {
+        if pending.base_changed && !pending.append {
             renderer.upload_masks(&ready.base.masks)?;
         }
         // Push the entity-level flags for the freshly committed scene, **after**
@@ -359,6 +390,7 @@ impl CadRenderRuntime {
         // Publication follows successful GPU preparation/commit, never precedes it.
         self.base_batches = ready.base.added.len();
         self.applied_base = Some(ready.base_revision);
+        self.applied_base_scene = Some(ready.base.clone());
         self.applied_revision = Some(ready.revision);
         self.applied_flags_revision = Some(ready.flags_revision);
         self.applied_highlight = Some(ready.highlight.clone());

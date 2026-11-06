@@ -10,6 +10,10 @@ use cad_representation::{FontEngine, SpaceSelection};
 use std::sync::Arc;
 mod assembly;
 pub use assembly::*;
+mod edit;
+pub use edit::{BaseAppend, DrawingEditReceipt};
+#[cfg(test)]
+mod edit_tests;
 mod overlay;
 #[cfg(test)]
 mod vendor_tests;
@@ -29,6 +33,7 @@ struct SceneVersion {
     identity: SceneIdentity,
     document: DocumentId,
     fonts: u64,
+    font_identity: usize,
     layers: u64,
     space: SpaceSelection,
     document_epoch: u64,
@@ -40,6 +45,7 @@ struct SceneVersion {
     /// rebuilds the base so its primitives become visible without touching
     /// `cad-db`.
     vendor: Option<u64>,
+    vendor_identity: usize,
 }
 
 #[derive(Clone)]
@@ -56,6 +62,7 @@ pub struct PreparedScene {
     /// every publish, exactly as it owns `revision`/`base_revision`.
     pub flags_revision: u64,
     pub base: Arc<SceneDelta>,
+    pub base_append: Option<BaseAppend>,
     /// Transient sub-element-highlight and tool-preview batches.
     pub highlight: Arc<SceneDelta>,
     /// Entity-level selection/hover/hidden flags for the renderer's in-stream
@@ -84,6 +91,18 @@ pub struct CadSceneController {
     revision: u64,
     base_revision: u64,
     base: Option<Arc<SceneDelta>>,
+    /// Exact shared snapshot which produced the successfully published base.
+    /// Incoming/adopted documents are not evidence of successful preparation.
+    published_drawing: Option<Arc<DrawingDatabase>>,
+    // Retain resource identities, not just addresses: allocator reuse must not
+    // make a replacement engine/snapshot look like the preceding resource.
+    base_fonts: Option<Arc<FontEngine>>,
+    base_vendor: Option<Arc<VendorRepresentationStore>>,
+    base_append: Option<BaseAppend>,
+    edit: Option<DrawingEditReceipt>,
+    model_max_order: Option<i64>,
+    #[cfg(test)]
+    fail_after_point_staging: bool,
     visual_overlay: Option<Arc<SceneDelta>>,
     visual_diagnostics: Option<Vec<cad_domain::Diagnostic>>,
     visual_completeness: Option<cad_domain::Completeness>,
@@ -180,6 +199,33 @@ impl CadSceneController {
         overlays: &OverlayInputs,
         images: Option<Arc<DecodedImageCache>>,
     ) -> CadResult<()> {
+        self.prepare_shared_with_overlays_and_images_and_edit(
+            doc, document, fonts, layers, space, overlays, images, None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_shared_with_overlays_and_images_and_edit(
+        &mut self,
+        doc: Option<Arc<DrawingDatabase>>,
+        document: DocumentId,
+        fonts: Option<Arc<FontEngine>>,
+        layers: &LayerOverrideSet,
+        space: SpaceSelection,
+        overlays: &OverlayInputs,
+        images: Option<Arc<DecodedImageCache>>,
+        edit: Option<&DrawingEditReceipt>,
+    ) -> CadResult<()> {
+        self.edit = edit
+            .filter(|edit| {
+                self.published_drawing
+                    .as_ref()
+                    .is_some_and(|old| Arc::ptr_eq(old, &edit.before))
+                    && doc
+                        .as_ref()
+                        .is_some_and(|new| Arc::ptr_eq(new, &edit.after))
+            })
+            .cloned();
         let same = match (&self.shared_document, &doc) {
             (Some((old, _)), Some(new)) => Arc::ptr_eq(old, new),
             (None, None) => true,
@@ -226,6 +272,9 @@ impl CadSceneController {
         space: SpaceSelection,
         overlays: &OverlayInputs,
     ) -> CadResult<()> {
+        // A borrowed preparation cannot establish shared-snapshot provenance.
+        self.published_drawing = None;
+        self.edit = None;
         self.prepare_with_overlays_doc(doc, document, fonts, layers, space, overlays)
     }
 
@@ -263,6 +312,9 @@ impl CadSceneController {
                 .unwrap_or_else(|| db.scene_identity()),
             document,
             fonts: self.fonts_revision,
+            font_identity: fonts
+                .as_ref()
+                .map_or(0, |fonts| Arc::as_ptr(fonts) as usize),
             layers: layers.fingerprint(),
             space,
             document_epoch: self.document_epoch,
@@ -271,35 +323,75 @@ impl CadSceneController {
                 .as_ref()
                 .map_or(0, |cache| Arc::as_ptr(cache) as usize),
             vendor: self.vendor.as_ref().map(|store| store.revision()),
+            vendor_identity: self
+                .vendor
+                .as_ref()
+                .map_or(0, |store| Arc::as_ptr(store) as usize),
         });
         if let Some(db) = doc {
             crate::validate_space(db, space)?;
         }
         let base_changed = self.base.is_none() || self.version != version;
+        let appended_entity = self.edit.as_ref().and_then(|edit| {
+            if !std::ptr::eq(doc?, edit.after.as_ref()) {
+                return None;
+            }
+            let old = self.version.as_ref()?;
+            let new = version.as_ref()?;
+            let entity = edit.after.entity(edit.inserted)?;
+            (base_changed
+                && space == SpaceSelection::Model
+                && self.base.is_some()
+                && old.document == new.document
+                && old.space == new.space
+                && old.fonts == new.fonts
+                && old.font_identity == new.font_identity
+                && old.layers == new.layers
+                && old.images == new.images
+                && old.vendor == new.vendor
+                && old.vendor_identity == new.vendor_identity
+                && self
+                    .model_max_order
+                    .is_none_or(|order| entity.draw_order > order))
+            .then(|| entity.clone())
+        });
         // The visible POINT markers are drawing content: they can only change
         // when the base changes, so derive them once per base revision and reuse
         // the cache for every camera-only overlay rebuild (a full model-space
         // scan per navigation step would be wasted work). The derived positions
         // are injected into the effective inputs so they participate in the
         // overlay fingerprint below.
-        if base_changed {
-            self.point_markers = match doc {
+        let staged_points = if base_changed && appended_entity.is_none() {
+            let positions = match doc {
                 Some(db) => visible_point_marker_positions(db, layers, space),
                 None => Vec::new(),
             };
-            self.point_display_style = match doc {
+            let style = match doc {
                 Some(db) => PointDisplayStyle {
                     mode: db.point_display_mode(),
                     size: db.point_display_size(),
                 },
                 None => PointDisplayStyle::default(),
             };
+            Some((positions, style))
+        } else {
+            None
+        };
+        #[cfg(test)]
+        if std::mem::take(&mut self.fail_after_point_staging) {
+            return Err(cad_domain::CadError::Invariant(
+                "test: failure after POINT staging".into(),
+            ));
         }
-        let injected = (overlays.point_markers != self.point_markers
-            || overlays.point_display_style != self.point_display_style)
+        let (point_markers, point_display_style) = staged_points
+            .as_ref()
+            .map(|(positions, style)| (positions, *style))
+            .unwrap_or((&self.point_markers, self.point_display_style));
+        let injected = (overlays.point_markers != *point_markers
+            || overlays.point_display_style != point_display_style)
             .then(|| OverlayInputs {
-                point_markers: self.point_markers.clone(),
-                point_display_style: self.point_display_style,
+                point_markers: point_markers.clone(),
+                point_display_style,
                 ..overlays.clone()
             });
         let overlays = injected.as_ref().unwrap_or(overlays);
@@ -318,7 +410,38 @@ impl CadSceneController {
         }
         // Stage every CPU result before publishing any version. A visual-overlay
         // edit keeps the base `Arc` (and its GPU revisions) unchanged.
-        let base = if base_changed {
+        let next_append = if appended_entity.is_some() {
+            self.base.as_ref().map(|base| BaseAppend {
+                predecessor: base.clone(),
+                keep_batches: base.added.len(),
+            })
+        } else if base_changed {
+            None
+        } else {
+            self.base_append.clone()
+        };
+        let base = if let Some(entity) = appended_entity.as_ref() {
+            let mut combined = self
+                .base
+                .as_ref()
+                .expect("append predecessor")
+                .as_ref()
+                .clone();
+            let delta = assembly::build_model_entity_scene(
+                doc.expect("append drawing"),
+                entity,
+                stamp.clone(),
+                fonts.clone(),
+                self.images.clone(),
+                layers,
+                self.vendor.as_deref(),
+            )?;
+            combined.stamp = stamp.clone();
+            combined.added.extend(delta.added);
+            combined.images.extend(delta.images);
+            combined.masks.extend(delta.masks);
+            Arc::new(combined)
+        } else if base_changed {
             Arc::new(match doc {
                 Some(db) => build_scene_with_space_and_images_and_vendor(
                     db,
@@ -470,7 +593,30 @@ impl CadSceneController {
             .unwrap_or(cad_domain::Completeness::Complete);
 
         self.revision += 1;
+        if let Some((positions, style)) = staged_points {
+            self.point_markers = positions;
+            self.point_display_style = style;
+        }
         self.base_revision = next_base;
+        if base_changed {
+            self.base_fonts = fonts.clone();
+            self.base_vendor = self.vendor.clone();
+            self.published_drawing = self
+                .shared_document
+                .as_ref()
+                .filter(|(shared, _)| doc.is_some_and(|db| std::ptr::eq(shared.as_ref(), db)))
+                .map(|(shared, _)| shared.clone());
+            self.model_max_order = match appended_entity.as_ref() {
+                Some(entity) => Some(entity.draw_order),
+                None => doc.and_then(|db| {
+                    db.entities()
+                        .filter(|entity| entity.space == cad_domain::SpaceId::Model)
+                        .map(|entity| entity.draw_order)
+                        .max()
+                }),
+            };
+        }
+        self.base_append = next_append.clone();
         self.version = version;
         self.visual_version = Some(visual_version);
         self.flags_version = Some(flags_version);
@@ -488,6 +634,7 @@ impl CadSceneController {
             base_revision: next_base,
             flags_revision: self.flags_revision,
             base,
+            base_append: next_append,
             highlight: visual_delta,
             entity_flags,
             highlight_diagnostics,

@@ -169,15 +169,25 @@ impl DrawingDatabase {
             self.ensure_change_allowed_on_locked_layer(*id, change.as_ref())?;
         }
 
-        // Post-batch entity view: the batch overlay on top of the stored rows.
-        let batch: BTreeMap<EntityId, Option<&DbEntity>> = changes
-            .iter()
-            .map(|(id, change)| (*id, change.as_ref()))
-            .collect();
-        let post_batch = post_batch_entities(self, &batch);
-
         // Phase 1b: the whole block batch (shape, names, membership, deletes).
-        let staged_blocks = validate_block_batch(self, block_changes, &post_batch)?;
+        //
+        // The post-batch entity view exists only for this validation: building it
+        // clones every non-batch row into a `Vec` and sorts the **whole resident
+        // scene** by `draw_order` (plus the batch map allocation). A normal
+        // entity-only edit has no block rows at all, so the view is not built and
+        // the pass is skipped instead of paying a scene-sized `O(N log N)` cost
+        // per commit. Phase 1c (`validate_entity_in`) is unaffected and still runs
+        // for every batch with an empty staged-block set.
+        let staged_blocks = if block_changes.is_empty() {
+            BTreeSet::new()
+        } else {
+            let batch: BTreeMap<EntityId, Option<&DbEntity>> = changes
+                .iter()
+                .map(|(id, change)| (*id, change.as_ref()))
+                .collect();
+            let post_batch = post_batch_entities(self, &batch);
+            validate_block_batch(self, block_changes, &post_batch)?
+        };
 
         // Phase 1c: entity rows, with the same batch's block ids staged as valid
         // references (`SpaceId::Block(new)` and `Insert { block: new }`).

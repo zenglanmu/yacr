@@ -3,6 +3,20 @@ use super::*;
 
 impl HostCore {
     pub(crate) fn sync_render(&self) -> CadResult<()> {
+        self.sync_render_with_edit(None)
+    }
+
+    /// Post-business render sync with an optional admitted edit receipt.
+    ///
+    /// The receipt is only ever the append hint for the drawing transition that
+    /// just committed; it is forwarded atomically with the drawing, never as a
+    /// separate late side effect. Every other caller keeps [`Self::sync_render`]
+    /// (`None`), and the render session itself retains a still-valid receipt
+    /// across later same-`Arc` syncs.
+    pub(crate) fn sync_render_with_edit(
+        &self,
+        edit: Option<&cad_app::render_scene::DrawingEditReceipt>,
+    ) -> CadResult<()> {
         // Install the configured pickbox/aperture policy before anything on the
         // snap path reads it (the snap-hint resolution below does). The same
         // policy feeds the cursor overlay through `pickbox_logical_pixels`, so the
@@ -81,7 +95,7 @@ impl HostCore {
                 view_scale,
             )
         };
-        self.render.sync_drawing(drawing);
+        self.render.sync_drawing_with_edit(drawing, edit);
         self.render.apply_view_snapshot(view)?;
         self.render.set_layers(layers);
         // Build the overlay inputs with the *final* viewport bounds in one shot.

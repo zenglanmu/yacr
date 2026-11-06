@@ -214,6 +214,9 @@ impl HostCore {
             sync_terminal: Rc::new(RefCell::new(None)),
             open_attempt: Rc::new(Cell::new(0)),
             async_report_attempt: Rc::new(Cell::new(None)),
+            pending_edit: Rc::new(RefCell::new(None)),
+            #[cfg(test)]
+            last_edit_receipt_for_test: Rc::new(Cell::new(false)),
             navigation: Rc::new(NavInner::default()),
             hover: Rc::new(HoverState::default()),
             cursor_logical: Rc::new(Cell::new(None)),
@@ -976,25 +979,5 @@ impl HostCore {
             .and_then(|_| self.metrics())
             .and_then(|_| self.sync_view())
             .and_then(|_| self.render.poll_preparation().map(|_| ()))
-    }
-
-    /// Open the configured `--open` drawing at startup (or fit the demo).
-    ///
-    /// Uses the already-owned render session; no UI bridge is required.
-    pub fn open_configured_drawing(&self) -> CadResult<()> {
-        self.metrics()?;
-        if let Some(path) = &self.options.drawing {
-            let target = FileTarget::from_path(&path.to_string_lossy());
-            self.begin_open_attempt();
-            self.open_pending.set(true);
-            if let Err(error) = self.files.begin_open_target(&target) {
-                self.open_pending.set(false);
-                return Err(error);
-            }
-            self.drain_files()?;
-        } else {
-            self.controller.borrow_mut().fit()?;
-        }
-        Ok(())
     }
 }

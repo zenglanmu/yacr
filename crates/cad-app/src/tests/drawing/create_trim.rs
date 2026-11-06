@@ -967,3 +967,31 @@ fn copy_untransformable_entity_is_refused_without_change() {
     assert_eq!(revision(&app), rev);
     assert!(!app.can_undo(&DocumentId(1)));
 }
+
+#[test]
+fn an_invalid_create_writes_no_revision_and_no_undo_entry() {
+    let (mut app, mut session) = drawing_app();
+    let rev = revision(&app);
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateLine,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(f64::NAN, 1.0)]),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("non-finite"),
+        "the database refuses the invalid row by name: {err}"
+    );
+    assert_eq!(revision(&app), rev, "revision unchanged");
+    // The history map is populated lazily on the first committed edit, so a
+    // refused create leaves no entry at all (and certainly no undo depth).
+    assert_eq!(
+        app.history
+            .get(&DocumentId(1))
+            .map_or(0, |history| history.undo_depth()),
+        0,
+        "a refused create records no undo step"
+    );
+    assert!(!app.can_undo(&DocumentId(1)));
+}

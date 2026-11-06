@@ -30,6 +30,10 @@ pub(super) struct PreparationInput {
     pub vendor: Option<Arc<VendorRepresentationStore>>,
     pub layers: LayerOverrideSet,
     pub overlays: OverlayInputs,
+    /// Latest admitted edit receipt. It is never consumed here: the bounded
+    /// latest mailbox may coalesce several overlay submissions, so the receipt
+    /// has to survive until the drawing target itself changes.
+    pub edit: Option<DrawingEditReceipt>,
 }
 
 fn pointer<T>(value: &Option<Arc<T>>) -> usize {
@@ -95,7 +99,7 @@ impl NativePreparation {
                     }
                     fonts_generation = input.fonts_generation;
                     controller.set_vendor_representations(input.vendor.clone());
-                    controller.prepare_shared_with_overlays_and_images(
+                    controller.prepare_shared_with_overlays_and_images_and_edit(
                         input.drawing,
                         input.document,
                         input.fonts,
@@ -103,6 +107,7 @@ impl NativePreparation {
                         input.space,
                         &input.overlays,
                         input.images,
+                        input.edit.as_ref(),
                     )?;
                     Ok(PreparedResult {
                         token,
@@ -172,6 +177,7 @@ mod tests {
             vendor: None,
             layers: LayerOverrideSet::new(),
             overlays: OverlayInputs::default(),
+            edit: None,
         }
     }
 

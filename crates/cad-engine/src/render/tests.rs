@@ -19,6 +19,110 @@ fn session_is_ui_independent_and_identical_view_does_not_dirty() {
 }
 
 #[test]
+fn an_edit_receipt_survives_overlay_syncs_and_clears_only_on_a_new_drawing() {
+    let mut controller = cad_app::host::HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    let before = controller.drawing().unwrap();
+    controller
+        .begin_draw_tool(cad_app::DrawToolKind::Line)
+        .unwrap();
+    controller
+        .capture_tool_point(Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        })
+        .unwrap();
+    controller
+        .capture_tool_point(Point3 {
+            x: 10.0,
+            y: 0.0,
+            z: 0.0,
+        })
+        .unwrap();
+    let (traced, receipt) = controller.confirm_draw_traced_with_edit().unwrap();
+    assert!(traced.result.is_ok(), "the LINE command must succeed");
+    let receipt = receipt.expect("LINE confirm binds a receipt");
+    let after = controller.drawing().unwrap();
+
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    session.sync_drawing(Some(before));
+    session.prepare().unwrap();
+
+    // A new drawing plus its receipt are atomic; then an overlay-only input
+    // supersedes the mailbox without consuming the receipt.
+    session.sync_drawing_with_edit(Some(after.clone()), Some(&receipt));
+    let mut overlays = session.overlays();
+    overlays.visibility.axes = false;
+    assert!(session.set_overlays(overlays));
+    assert!(
+        session.0.borrow().latest_edit.is_some(),
+        "an overlay-superseding preparation must retain the edit receipt"
+    );
+    session.prepare().unwrap();
+    let prepared = session.controller_ready().expect("prepared scene");
+    assert!(
+        prepared.base_append.is_some(),
+        "the receipt turns the new base into an append proof for the runtime"
+    );
+    // A same-Arc sync without a receipt must not erase it either.
+    session.sync_drawing_with_edit(Some(after), None);
+    assert!(
+        session.0.borrow().latest_edit.is_some(),
+        "a same-Arc post-commit sync preserves the receipt"
+    );
+
+    let unrelated = cad_app::host::HostController::with_demo_document([800.0, 600.0])
+        .unwrap()
+        .drawing()
+        .unwrap();
+    session.sync_drawing(Some(unrelated));
+    assert!(
+        session.0.borrow().latest_edit.is_none(),
+        "a new/unrelated drawing clears the receipt"
+    );
+}
+
+#[test]
+fn an_edit_receipt_added_after_a_same_arc_publish_reschedules_preparation() {
+    let mut controller = cad_app::host::HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    controller
+        .begin_draw_tool(cad_app::DrawToolKind::Line)
+        .unwrap();
+    controller
+        .capture_tool_point(Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        })
+        .unwrap();
+    controller
+        .capture_tool_point(Point3 {
+            x: 5.0,
+            y: 0.0,
+            z: 0.0,
+        })
+        .unwrap();
+    let (_, receipt) = controller.confirm_draw_traced_with_edit().unwrap();
+    let receipt = receipt.expect("receipt");
+    let after = controller.drawing().unwrap();
+
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    session.sync_drawing(Some(after.clone()));
+    let content_before = session.0.borrow().content_revision;
+    // Same drawing, receipt arrives late: only the preparation token advances,
+    // so the append hint cannot be silently dropped.
+    session.sync_drawing_with_edit(Some(after), Some(&receipt));
+    let state = session.0.borrow();
+    assert!(
+        state.content_revision > content_before,
+        "a late receipt schedules a preparation"
+    );
+    assert!(state.latest_edit.is_some());
+}
+
+#[test]
 fn overlay_preparation_reuses_base_while_resource_replacement_invalidates_it() {
     let drawing = cad_app::host::HostController::with_demo_document([800.0, 600.0])
         .unwrap()
