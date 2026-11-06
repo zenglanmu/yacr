@@ -260,8 +260,8 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
 /**
  * Selectors the **chrome** answers itself, before the router. They have a real
  * command-line entry (typing the word works) but no reason to reach a router
- * selector: `PROPERTIES` opens the docked inspector, `LAYER` opens the docked
- * layers palette, `FONTS` opens the read-only Font Manager and `RESOURCES` opens
+ * selector: `PROPERTIES` opens the properties window, `LAYER` opens the layers
+ * palette, `FONTS` opens the read-only Font Manager and `RESOURCES` opens
  * the References panel.
  *
  * They are deliberately admitted regardless of the loaded host vocabulary (and

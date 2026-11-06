@@ -227,7 +227,7 @@ export function usePluginNotice(): PluginNotice | null {
   return useSyncExternalStore(subscribe, currentPluginNoticeForTests, currentPluginNoticeForTests);
 }
 
-/** Drop the plugin panel; the dock stays open and shows the default palette. */
+/** Drop the plugin panel; the window stays open and shows the default palette. */
 export function clearPluginPanel(): void {
   setPanel(null);
 }

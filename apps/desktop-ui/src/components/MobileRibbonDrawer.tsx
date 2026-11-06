@@ -183,7 +183,7 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
   // the very same projection (`layoutTabsView`) from the same `cad_status`, so
   // the drawer can never show a different space or a different reason.
   const spaces = layoutTabsView(shell.status);
-  // `false`: the compact layout never renders the docked palettes, so the drawer
+  // `false`: the compact layout never renders the desktop palettes, so the drawer
   // drops their toggles with the panels — the same carrier rule a `dom-canvas`
   // host uses, and the reason no button here can open a surface that is hidden.
   const sections = useMemo(() => mobileRibbonSections(shell.ribbonTab, false), [shell.ribbonTab]);

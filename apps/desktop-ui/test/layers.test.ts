@@ -657,13 +657,15 @@ test('the structural writes are single flight and never send a nameless request'
 
 // --- source / catalog assertions ---------------------------------------
 
-test('the palette is docked next to the other palettes and opened by a shell action', async () => {
+test('the palette floats in the palette layer and is opened by a shell action', async () => {
   const workspace = await readModule('components/Workspace.tsx');
   assert.ok(workspace.includes("import { LayersPalette } from './LayersPalette.tsx';"));
   assert.ok(workspace.includes('const showLayers = palettesAvailable && Boolean(shell.layersOpen);'));
-  assert.ok(workspace.includes('{showLayers ? <LayersPalette /> : null}'));
-  // It contributes to the dock being open, and never paints over the partition.
-  assert.ok(workspace.includes('const leftOpen = showStart || showProperties || showDiagnostics || showLayers || showReferences || showFonts;'));
+  assert.match(workspace, /\{showLayers \? \(\s*<PaletteWindow windowKey="layers"[^>]*>\s*<LayersPalette \/>\s*<\/PaletteWindow>\s*\) : null\}/);
+  // It is no longer part of the left dock: the dock belongs to the start screen
+  // alone, so opening LAYER never changes the partition rect.
+  assert.ok(workspace.includes('const leftOpen = showStart;'));
+  assert.ok(!workspace.includes('const leftOpen = showStart ||'));
 
   const app = await readModule('App.tsx');
   const selectors = await readModule('commands/local-selectors.ts');
@@ -684,7 +686,8 @@ test('the palette is docked next to the other palettes and opened by a shell act
   assert.ok(palette.includes('shell.setLayersOpen(false)'), 'it closes through the same plumbing');
   assert.ok(palette.includes('shell.layersFocus'), 'a repeat LAYER focuses and re-reads it');
   assert.ok(palette.includes('shell.documentLabel'), 'a new document re-reads the table');
-  // No overlay, no backdrop: the CAD partition keeps its pointer input.
+  // No modal and no backdrop: the floating window never gates the drawing, so
+  // the CAD partition keeps its pointer input outside the window.
   assert.equal(palette.includes('position: fixed'), false);
   assert.equal(palette.includes('role="dialog"'), false);
   assert.equal(palette.includes('aria-modal'), false);
@@ -954,8 +957,37 @@ test('the palette styles reuse the chrome tokens and never float over the drawin
   assert.ok(block.includes('.layers__actions'), 'the row actions keep their reserved space');
   assert.ok(block.includes('.layers__confirm'), 'the delete confirm stays inside the row');
   assert.ok(block.includes('var(--danger)'), 'the destructive press uses the chrome danger token');
-  // The dock sits in a translucent overlay: nothing here may switch the pointer
-  // off for a control (the rows rely on the default `auto`).
+  // The shared window owns placement and input; this block may not switch the
+  // pointer off for a control (the rows rely on the default `auto`) or position
+  // itself independently.
   assert.equal(block.includes('pointer-events'), false, 'no control is made pointer-transparent');
-  assert.equal(block.includes('position: fixed'), false, 'docked, never floating over the CAD surface');
+  assert.equal(block.includes('position: fixed'), false, 'placement belongs to PaletteWindow, never to the layers body');
+});
+
+test('the column band labels real columns and promises no sort the list cannot do', async () => {
+  const palette = await readModule('components/LayersPalette.tsx');
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  // Two honest labels, both from the catalog, over the two columns a row actually
+  // has at its edges: the visibility toggle and the name.
+  assert.ok(palette.includes("t('layers.column.visibility')"));
+  assert.ok(palette.includes("t('layers.column.name')"));
+  for (const key of ['layers.column.visibility', 'layers.column.name']) {
+    assert.equal(typeof zh[key], 'string', `zh-CN missing ${key}`);
+    assert.equal(typeof en[key], 'string', `en missing ${key}`);
+    assert.ok(zh[key].trim() && en[key].trim());
+  }
+  // The band is presentation only: every row control keeps its own accessible
+  // name, so there is nothing here for a screen reader to announce twice.
+  assert.ok(palette.includes('className="layers__columns" aria-hidden="true"'));
+  // The list keeps the host's order, filtered by the search field; it is never
+  // sorted, so no caret may claim it is. (The reference screenshot has one; ours
+  // has no sort to point at.)
+  assert.equal(palette.includes('\u25b2'), false, 'no sort caret without a sort');
+  assert.equal(palette.includes('\u25b4'), false, 'no sort caret without a sort');
+  assert.equal(palette.includes('sortLayers'), false, 'no invented sort helper');
+  // The band exists exactly while there are rows to label.
+  const band = palette.indexOf('className="layers__columns"');
+  assert.ok(band > palette.indexOf('{rows.length > 0 ? ('), 'the band sits behind the row guard');
+  assert.ok(band < palette.indexOf('<ul className="layers__list"'), 'the band sits above the list');
 });

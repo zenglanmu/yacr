@@ -351,3 +351,51 @@ test('F9 is the grid-snap accelerator, a distinct switch from F3/F7/F8', () => {
   assert.notEqual(draftingAcceleratorCommand('F9'), draftingAcceleratorCommand('F7'));
   assert.notEqual(draftingAcceleratorCommand('F9'), draftingAcceleratorCommand('F8'));
 });
+
+// The bar's left anchor is the state word followed by the drafting chips; every
+// readout whose text changes width (coordinates, tool chip, parameter strip) sits
+// to their right, where it can only push what is already to its right. Pinned by
+// source position so a re-order cannot quietly put a coordinate back in front of
+// a chip and re-introduce the squeeze.
+test('the state word and the drafting chips stay left of every width-changing readout', async () => {
+  const source = await readModule('components/StatusBar.tsx');
+  const at = (needle) => {
+    const index = source.indexOf(needle);
+    assert.ok(index > 0, `StatusBar.tsx must contain ${needle}`);
+    return index;
+  };
+  const state = at('className="statusbar__state"');
+  const drafting = at('className="statusbar__group" role="group"');
+  const hoverPreview = at("t('status.toggle.hover_preview')");
+  const coords = at('className="statusbar__coords"');
+  const tool = at('className="statusbar__tool"');
+  const params = at("'statusbar__params'");
+  const spacer = at('className="statusbar__spacer"');
+  const end = at('statusbar__group--end');
+  // 1. the state word is the leftmost cell, 2. the drafting group follows it.
+  assert.ok(state < drafting, 'the state word comes before the drafting chips');
+  // 3. the readout follows the last drafting chip, 4./5. the tool chip and the
+  // parameter strip follow the readout.
+  assert.ok(hoverPreview < coords, 'the coordinate readout sits right of the chips');
+  assert.ok(coords < tool, 'the tool chip sits right of the readout');
+  assert.ok(tool < params, 'the parameter strip follows the tool chip');
+  // 6. the spacer and the end utilities stay last.
+  assert.ok(params < spacer && spacer < end, 'the right-hand utilities stay last');
+
+  // The anchor only holds if nothing in it can be squeezed: the group never
+  // shrinks, the state cell reserves a fixed width, the readout keeps tabular
+  // digits in a bounded cell, and the parameter strip yields long before the
+  // state cell does.
+  const css = await readModule('style.css');
+  const rule = (selector) => {
+    const start = css.indexOf(`${selector} {`);
+    assert.ok(start > 0, `${selector} must exist`);
+    return css.slice(start, css.indexOf('}', start));
+  };
+  assert.ok(rule('.statusbar__group').includes('flex: 0 0 auto'), 'the drafting group never shrinks');
+  assert.match(rule('.statusbar__state'), /width:\s*\d+ch/, 'the state cell reserves a fixed width');
+  assert.match(rule('.statusbar__params'), /flex-shrink:\s*\d{2,}/, 'the parameter strip yields first');
+  const readout = rule('.statusbar__coords .mono');
+  assert.match(readout, /min-width:\s*\d+ch/, 'the readout reserves its normal width');
+  assert.ok(readout.includes('font-variant-numeric: tabular-nums'));
+});

@@ -1,6 +1,14 @@
-// Status bar: coordinate readout, drafting-aid toggles (only the ones this build
-// really has — unavailable aids stay visibly off), and the right-side utilities
-// including the real clean-screen / command-line view toggles.
+// Status bar, left to right: the state word, the drafting-aid toggles (only the
+// ones this build really has — unavailable aids stay visibly off), the
+// coordinate readout, the active tool's chip and parameter rows, and the
+// right-side utilities including the real clean-screen / command-line view
+// toggles.
+//
+// The state word and the drafting toggles are the bar's fixed left anchor: they
+// come first, and every readout whose text changes width (coordinates, the tool
+// chip, the parameter strip) sits to their right. That way a longer coordinate
+// can only push what is already to its right — never a toggle chip, whose
+// position and rendered label must not move while the pointer travels.
 import React, { useSyncExternalStore } from 'react';
 import { Icon } from '../icons.tsx';
 import { Button, Toggle } from './primitives.tsx';
@@ -104,56 +112,12 @@ export function StatusBar() {
           : shell.documentVisible ? t('status.ready') : t('plot.no_document');
   return (
     <div className="region region--status statusbar app-region" role="contentinfo">
-      <output
-        className="statusbar__coords"
-        title={t(worldCursor.hintKey)}
-        aria-label={t('status.coordinates')}
-      >
-        <Icon name="snap" size={13} />
-        <span className="mono">{worldCursor.text}</span>
-      </output>
-
+      {/* The bar's left anchor. The state word and the drafting toggles are the
+          only fields whose position must never move, so they render first and the
+          state word keeps a fixed cell (CSS) — a longer label cannot nudge the
+          chips either. Everything that changes width on every frame is rendered
+          to their right. */}
       <span className="statusbar__state" aria-live="polite">{stateLabel}</span>
-
-      {tool && toolNameKey ? (
-        <span
-          className="statusbar__tool"
-          title={`${t('tool.prompt.confirm')} (Enter) \u00b7 ${t('tool.prompt.cancel')} (Esc)`}
-        >
-          <Icon name="snap" size={13} />
-          {t(toolNameKey)}
-          {toolStepKey ? (
-            <span className="statusbar__tool-step">{t(toolStepKey)}</span>
-          ) : null}
-          <span className="mono">
-            {toolOpenEnded ? t('tool.open_ended') : t('tool.points', { count: toolPoints })}
-          </span>
-        </span>
-      ) : null}
-
-      {/* The active tool's parameter rows. Ten HATCH rows do not fit beside the
-          drafting chips and the right-hand utilities on a narrow window, so this
-          is the one part of the bar that scrolls: a bounded `min-width` keeps it
-          from pushing the utilities off the edge, and `overflow-x` reveals the
-          rest instead of clipping it. Each control keeps its own 20px height and
-          its own label, so the strip still reads as one line. */}
-      <div className={toolParameters.length > 0 ? 'statusbar__params' : 'statusbar__params is-empty'}>
-        {toolParameters.map(view => {
-          if (view.kind === 'flag') return <ParameterFlag key={`${tool?.key}:${view.key}`} view={view} onToggle={shell.toggleToolParameter} />;
-          // A named set whose codes are a position (MTEXT's nine attachment
-          // codes) opens the same names as a 3×3 grid from one chip: nine
-          // segments with readable names would not fit the strip.
-          if (view.choiceLayout === 'grid') return <ParameterGridChoices key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
-          // A closed set with catalog names (HATCH's predefined pattern, its gradient
-          // kind) renders the same row as a named chooser instead of a stepper: the
-          // wire value is still the integer code, but the user picks a name.
-          if (view.choices) return <ParameterChoices key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
-          // A colour row (HATCH's two gradient stops) is the same numeric row shown as
-          // a swatch: the integer ACI index still travels the one parameter channel.
-          if (view.swatch) return <ParameterSwatch key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
-          return <ParameterStepper key={`${tool?.key}:${view.key}`} view={view} onStep={shell.stepToolParameter} />;
-        })}
-      </div>
 
       <div className="statusbar__group" role="group" aria-label={t('status.drafting')}>
         {grid ? (
@@ -208,6 +172,60 @@ export function StatusBar() {
         ) : null}
       </div>
 
+      {/* The live readouts start here: the drawing-coordinate readout first, then
+          the active tool's chip and its parameter rows. Everything from this point
+          on may change width (the readout does, every frame), so it can only push
+          items that are already to its right — never the chips above. */}
+      <output
+        className="statusbar__coords"
+        title={t(worldCursor.hintKey)}
+        aria-label={t('status.coordinates')}
+      >
+        <Icon name="snap" size={13} />
+        <span className="mono">{worldCursor.text}</span>
+      </output>
+
+      {tool && toolNameKey ? (
+        <span
+          className="statusbar__tool"
+          title={`${t('tool.prompt.confirm')} (Enter) \u00b7 ${t('tool.prompt.cancel')} (Esc)`}
+        >
+          <Icon name="snap" size={13} />
+          {t(toolNameKey)}
+          {toolStepKey ? (
+            <span className="statusbar__tool-step">{t(toolStepKey)}</span>
+          ) : null}
+          <span className="mono">
+            {toolOpenEnded ? t('tool.open_ended') : t('tool.points', { count: toolPoints })}
+          </span>
+        </span>
+      ) : null}
+
+      {/* The active tool's parameter rows. Ten HATCH rows do not fit beside the
+          drafting chips, the readout, the tool chip and the right-hand utilities
+          on a narrow window, so this is the one part of the bar that scrolls: a
+          bounded `min-width` keeps it from pushing the utilities off the edge, and
+          `overflow-x` reveals the rest instead of clipping it. Each control keeps
+          its own 20px height and its own label, so the strip still reads as one
+          line. */}
+      <div className={toolParameters.length > 0 ? 'statusbar__params' : 'statusbar__params is-empty'}>
+        {toolParameters.map(view => {
+          if (view.kind === 'flag') return <ParameterFlag key={`${tool?.key}:${view.key}`} view={view} onToggle={shell.toggleToolParameter} />;
+          // A named set whose codes are a position (MTEXT's nine attachment
+          // codes) opens the same names as a 3×3 grid from one chip: nine
+          // segments with readable names would not fit the strip.
+          if (view.choiceLayout === 'grid') return <ParameterGridChoices key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
+          // A closed set with catalog names (HATCH's predefined pattern, its gradient
+          // kind) renders the same row as a named chooser instead of a stepper: the
+          // wire value is still the integer code, but the user picks a name.
+          if (view.choices) return <ParameterChoices key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
+          // A colour row (HATCH's two gradient stops) is the same numeric row shown as
+          // a swatch: the integer ACI index still travels the one parameter channel.
+          if (view.swatch) return <ParameterSwatch key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
+          return <ParameterStepper key={`${tool?.key}:${view.key}`} view={view} onStep={shell.stepToolParameter} />;
+        })}
+      </div>
+
       <span className="statusbar__spacer" />
 
       {shell.errorText ? (
@@ -246,7 +264,7 @@ export function StatusBar() {
         {/* A `dom-canvas` carrier has no host-side document state for these two
             palettes to project, so their toggles are not offered at all — an
             absent toggle, never a chip that opens an empty panel. The carrier rule
-            is the shared `palettesOffered` helper (the docked panels behind these
+            is the shared `palettesOffered` helper (the palette windows behind these
             chips ask the same one). Any other carrier (and an older chrome state
             without the flag) keeps them. */}
         {palettesOffered(shell) ? (

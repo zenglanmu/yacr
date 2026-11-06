@@ -1,4 +1,4 @@
-// Editing the selected text entity from the docked properties palette
+// Editing the selected text entity from the properties palette
 // (ADR 0020 addendum B), plus the `text_prefill` hand-off into the command
 // line's text step.
 //

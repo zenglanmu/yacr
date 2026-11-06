@@ -325,9 +325,14 @@ bash scripts/collect-evidence.sh --backend wayland --stacking-regression \
 
 ## 外壳结构（P4 设计）
 
-自上而下：标题/QAT → 功能区（选项卡→面板）→ 图纸标签 → 工作区（左侧停靠面板 | 原生 CAD 分区 |
+自上而下：标题/QAT → 功能区（选项卡→面板）→ 图纸标签 → 工作区（原生 CAD 分区 + 浮动面板层 |
 右侧导航栏）→ 模型/布局标签 → 命令行（含补全与 F2 历史）→ 状态栏。所有用户可见文案来自
 `crates/cad-ui-core/i18n/{zh-CN,en}.json`，组件内不写死文案。
+
+左侧栏只保留开始页；属性/图层/诊断/外部引用/字体五个面板由共享的
+`apps/desktop-ui/src/components/PaletteWindow.tsx` 包成非模态浮窗，默认贴绘图区左缘、可拖动、
+可调宽。浮窗位于 `.native-input` 之后的绝对定位 `.palette-layer` 内，**不占布局空间**，因此
+开关/移动/调宽都不会改变 CAD 分区矩形，也不会触发宿主重排或重绘原生表面。
 
 功能区面板带为**固定高度**（`--ribbon-h`，`apps/desktop-ui/src/style.css`），所有选项卡一致，
 切换选项卡**不改变** chrome 高度（因而不会重报 CAD 分区矩形）；小按钮在固定高度内按列优先网格
@@ -413,8 +418,8 @@ body 内，Escape/点击外部关闭）；DOM-on-top 之后这不再是硬约束
 - **已接线（2026-10-25）**：`GRID`（F7，只切显示栅格）、`SNAP`（F9，会话级栅格捕捉：取点 X/Y 量化到
   `SNAPUNIT` 间距的最近整数倍，`z` 不变；实体拾取步骤不捕捉）、`SNAPUNIT <value>`（正的十进制间距，
   语法与 `ZOOM` 数值部分相同，非法值显式拒绝）、`ORTHO`（F8，把下一点约束到
-  上一点的水平/垂直方向，仅 XY；顺序为对象捕捉 → 栅格捕捉 → 正交）、图层面板（`LAYER` 打开停靠面板：
-  搜索、临时显隐、恢复、设为当前层；走 `cad_layers`/`cad_set_layer_visible`/`cad_restore_layers`/
+  上一点的水平/垂直方向，仅 XY；顺序为对象捕捉 → 栅格捕捉 → 正交）、图层面板（`LAYER` 打开浮动
+  面板窗（默认贴左）：搜索、临时显隐、恢复、设为当前层；走 `cad_layers`/`cad_set_layer_visible`/`cad_restore_layers`/
   `cad_set_active_layer`，IPC ack 只代表**入队**，面板随后回读权威投影）、右键快捷菜单（复制/剪切/粘贴、
   全选/删除/特性、缩放到范围/平移、放弃/重做、重复上一命令；全部走同一 `runCommand` 漏斗）。
 - **只读**：不写回 DWG；未知命令走既有 not supported 路径，不空成功。

@@ -8,11 +8,11 @@
  * hook cannot drift apart.
  *
  * Composition: one top bar (menu + drawing name), the CAD partition filling
- * everything between the bars, and one bottom command bar. The docked palettes,
- * the nav rail, the ribbon band, the drawing/layout tab strips and the status bar
- * are not rendered on mobile; the only two that stay *mounted* (the palettes and
- * the nav rail, both inside `<Workspace />`) are hidden below, which is what lets
- * a live breakpoint crossing keep the CAD session alive.
+ * everything between the bars, and one bottom command bar. The desktop palette
+ * layer, the nav rail, the ribbon band, the drawing/layout tab strips and the
+ * status bar are not rendered on mobile; the chrome inside `<Workspace />` (the
+ * start column, the palette layer and the nav rail) stays *mounted* and is hidden
+ * below, which is what lets a live breakpoint crossing keep the CAD session alive.
  *
  * Safe areas: the two bars pad themselves with `env(safe-area-inset-*)`, so a
  * notched phone does not put a control under the cutout or the gesture bar.
@@ -59,8 +59,11 @@
 
 /* Desktop-only chrome that lives *inside* `<Workspace />`. Hidden, never
    unmounted: `.workspace__canvas` (and the CAD session it carries) must keep its
-   identity across a breakpoint crossing. */
+   identity across a breakpoint crossing. The floating palette layer is part of
+   that desktop chrome: the compact layout keeps its own bottom sheets
+   (`.references-layer` / `.fonts-layer`) instead of these windows. */
 :root[data-layout="mobile"] .workspace__left,
+:root[data-layout="mobile"] .palette-layer,
 :root[data-layout="mobile"] .navrail {
   display: none;
 }
@@ -629,9 +632,9 @@
 }
 
 /* References sheet ------------------------------------------------------- */
-/* The compact layout renders no left dock, so the same `ReferencesPanel` becomes
-   a bottom sheet in this tree. It sits above the drawer layer (which closes
-   before it opens) and below the host-owned popup layer (60). */
+/* The compact layout renders no desktop palette window, so the same
+   `ReferencesPanel` becomes a bottom sheet in this tree. It sits above the drawer
+   layer (which closes before it opens) and below the host-owned popup layer (60). */
 :root[data-layout="mobile"] .references-layer,
 :root[data-layout="mobile"] .fonts-layer {
   position: fixed;
@@ -733,11 +736,11 @@
 }
 
 /* Vendor panel and refusal notice on a phone ------------------------------ */
-/* The dock is not rendered on the compact layout (`.workspace__left` is
-   hidden), so a carrier that offers vendor properties here mounts the same panel
-   as a bottom sheet, exactly like the references/fonts palettes. These rules
-   give it that sheet's surface, touch heights and wrapping; the 300px desktop
-   dock never sees them. */
+/* The desktop palette layer is not rendered on the compact layout
+   (`.palette-layer` is hidden), so a carrier that offers vendor properties here
+   mounts the same panel as a bottom sheet, exactly like the references/fonts
+   palettes. These rules give it that sheet's surface, touch heights and
+   wrapping; the 300px desktop window never sees them. */
 :root[data-layout="mobile"] .plugin-properties {
   width: 100%;
   max-height: min(72dvh, 620px);

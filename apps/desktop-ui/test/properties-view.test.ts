@@ -1,4 +1,4 @@
-// Pure view + write contracts for the docked properties palette.
+// Pure view + write contracts for the floating properties palette.
 //
 // The palette itself is a thin state machine over these two modules, so the
 // checks that matter live here: which section a row lands in, which editor it

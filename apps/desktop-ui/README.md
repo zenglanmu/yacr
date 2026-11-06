@@ -24,7 +24,7 @@ npm run dev     # http://127.0.0.1:1420
 | `src/tools/` | 工具参数、开放步骤、文字输入与文字编辑 |
 | `src/commands/` | 命令目录与准入、命令历史（`command-history.ts` 纯规则：命令/拒绝两类条目的有界日志 + `use-command-history.ts` 状态）、命令窗口合流（`command-window.ts`：把宿主 `commandLog` 的输出挂到对应输入行上，弹窗是唯一记录）、消息行文案（`command-message.ts`，行与历史共用同一句）、右键菜单模型、命令行控制器（`command-line-model.ts` 纯规则 + `use-command-line.ts` 状态） |
 | `src/ribbon/` | 功能区模型与溢出计算 |
-| `src/layout/` | 宽度布局开关（`matchMedia`，断点 1024 CSS px）、移动端抽屉状态与功能区折叠、共享拒绝句（按原因键折叠） |
+| `src/layout/` | 宽度布局开关（`matchMedia`，断点 1024 CSS px）、移动端抽屉状态与功能区折叠、共享拒绝句（按原因键折叠）、浮动面板几何（`palette-window.ts`，纯函数） |
 | `src/layers/` | 图层投影、属性与标签 |
 | `src/properties/` | 实体属性投影、显示模型与标签 |
 | `src/references/` | 外部引用投影（宿主状态码、稳定原因码）与 `RESOURCES` 本地选择器 |
@@ -44,10 +44,15 @@ npm run dev     # http://127.0.0.1:1420
 
 ## 区域栈（自上而下）
 
-`标题/QAT · 功能区 · 图纸标签 · 工作区（停靠面板：图层/属性/外部引用/字体 | CAD 分区 | 导航栏）
-· 模型/布局标签 · 命令行 · 状态栏`
+`标题/QAT · 功能区 · 图纸标签 · 工作区（CAD 分区 + 浮动面板层：属性/图层/诊断/外部引用/字体，
+默认贴左 | 导航栏）· 模型/布局标签 · 命令行 · 状态栏`
 
-`FONTS` 是本地选择器，打开与图层/外部引用同列的只读字体管理器（`FontsPanel.tsx`）：它只展示
+左侧栏只剩开始页。五个面板（属性/图层/诊断/外部引用/字体）都由同一个
+`components/PaletteWindow.tsx` 包成**非模态浮窗**，默认贴在绘图区左缘，可拖动、可调宽；
+它们位于 `.native-input` 之后的绝对定位层里，**不占布局空间**，所以开关/移动/调宽都不会改变
+CAD 分区矩形，也不会触发宿主重排或重绘原生表面。
+
+`FONTS` 是本地选择器，打开与图层/外部引用同一层的只读字体管理器（`FontsPanel.tsx`）：它只展示
 `cad_fonts` 报告的面，不注册、不删除、不重载；`available:false` 显示宿主命名原因，空列表是
 宿主真实回答，两者不混同。
 
@@ -56,8 +61,8 @@ npm run dev     # http://127.0.0.1:1420
 宽度是唯一判据：`src/layout/use-layout-mode.ts` 订阅 `matchMedia('(max-width: 1024px)')`，
 它是 `data-layout` 的**唯一写入者**，把结果写到 `document.documentElement`（即 `<html>`）上；
 `main.shell` 不再携带该属性，所有紧凑样式都用 `:root[data-layout="mobile"]` 守卫。窗口实时改变宽度即切换，
-不重新加载文档，也不重建 `<Workspace />`（它在两种布局里处于同一位置；停靠面板与导航栏在
-`mobile.css` 里隐藏而非卸载，因此 CAD 会话不会被重挂）。
+不重新加载文档，也不重建 `<Workspace />`（它在两种布局里处于同一位置；左侧开始栏、浮动面板层与
+导航栏在 `mobile.css` 里隐藏而非卸载，因此 CAD 会话不会被重挂）。
 
 **为什么是 1024**：布局只按屏幕宽度选（产品决定），而 1024 CSS px 是最后一个“手机/平板”而不是
 “桌面窗口”的宽度——手机竖屏 390、手机横屏（2400×1080 类屏幕约 914）、平板两个方向（≤1024）都拿到
@@ -67,12 +72,12 @@ npm run dev     # http://127.0.0.1:1420
 |---|---|---|
 | 顶部 | 标题/QAT · 功能区 · 图纸标签 | `.mobile-topbar`：菜单按钮（44×44，`aria-expanded`/`aria-controls`）+ 图纸名 |
 | 工具 | 92px 功能区 | 抽屉式覆盖层（同一 React 树）：标签 chip 行（横向滚动，固定不滚走）+ 触摸网格（正文滚动，底部渐隐 + 细滚动条）；高度 ≤ `68dvh` 且始终给图纸留下 ≥132px；关闭方式 = 背景点击 / Escape / 执行后 |
-| 中部 | 停靠面板 | CAD 分区铺满剩余高度（`100dvh` 里减掉两条 bar） |
+| 中部 | 浮动面板层（默认贴左、可拖动/调宽） | CAD 分区铺满剩余高度（`100dvh` 里减掉两条 bar） |
 | 底部 | 命令行 + 状态栏 | `.mobile-commandbar`：输入、发送、消息（含错误）、向上展开的候选/历史 sheet（≤45dvh） |
 
 抽屉与命令栏都不重写规则：抽屉用 `RIBBON_TABS` + `offeredPanels`/`offeredItems` + `runItem`/
 `itemEnabled`/`unavailable`；命令栏用共享控制器 `useCommandLine()` 与 `CommandField`。
-移动端不提供停靠面板开关与“干净屏幕/命令行”折叠开关（没有可折叠的 chrome），
+移动端不提供浮动面板开关与“干净屏幕/命令行”折叠开关（没有可折叠的 chrome），
 这是与 `dom-canvas` 载体同一条“不给死按钮”的规则。桌面布局（>1024 px）不变。
 
 抽屉里的拒绝理由是**按原因键**折叠的（`layout/mobile-ribbon.ts` 的 `sharedRefusal` +
@@ -97,7 +102,8 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 | 功能区 | `Ribbon.tsx`，模型在 `src/ribbon/ribbon-model.ts` |
 | 图纸标签 | `DocTabs.tsx` |
 | 工作区 | `Workspace.tsx` |
-| 开始页 / 诊断 / 外部引用 / 字体管理器 | `StartPanel.tsx`、`DiagnosticsPalette.tsx`、`ReferencesPanel.tsx`、`FontsPanel.tsx` |
+| 浮动面板容器 | `PaletteWindow.tsx`（唯一容器：拖动、调宽、层级与几何存储；几何规则在 `src/layout/palette-window.ts`） |
+| 开始页 / 属性 / 图层 / 诊断 / 外部引用 / 字体管理器 | `StartPanel.tsx`、`PropertiesDock.tsx`、`LayersPalette.tsx`、`DiagnosticsPalette.tsx`、`ReferencesPanel.tsx`、`FontsPanel.tsx` |
 | 导航栏 | `NavRail.tsx` |
 | 模型 / 布局标签 | `LayoutTabs.tsx` |
 | 命令行 | `CommandLine.tsx`（桌面停靠区），控制器在 `src/commands/use-command-line.ts`；历史日志见 `src/commands/command-history.ts` |
@@ -109,7 +115,8 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 
 原生路径为 **DOM/WebView 在上、CAD surface 在下**（ADR 0023）。唯一输入漏斗是
 `.native-input` → `probe_input`；菜单与模态弹窗在同一 React 树内，不另建 Tauri 窗口。
-装饰面板使用 `pointer-events: none`，交互控件使用 `pointer-events: auto`。
+装饰层使用 `pointer-events: none`，交互控件使用 `pointer-events: auto`：`.palette-layer` 是前者，
+每个 `.palette-window` 与其中的控件是后者，所以浮窗之外的图纸仍然可点。
 `dom-canvas` 路径的 canvas 传输在 `src/cad/canvas-host.ts`（只做「加载 / 量尺寸 / 上报状态与首个
 失败」），帧由 `src/cad/frame-loop.ts` 的 rAF 泵按需驱动（输入、被接受的命令、状态内容变化各 kick
 一次；连续两步无 present 即停）。**相机不在这两层**：滚轮/中键拖拽与所有拾取都走上面那条唯一的
@@ -144,8 +151,10 @@ shell-only 报告在有 Tauri 桥时仍回原生宿主。唯一例外是**引导
 `OPEN` 又会被 chrome 拒绝。原生宿主走自己的真实 `canOpen`，不经过该覆盖。
 
 `src/cad/metrics.ts` 负责 CAD 分区矩形、去重与有效性判断；`src/cad/input.ts`
-观察布局变化并上报 CSS 像素矩形与 DPR。面板停靠、功能区折叠、窗口尺寸与命令区变化
-都必须保持分区矩形与宿主度量同步。
+观察布局变化并上报 CSS 像素矩形与 DPR。功能区折叠、窗口尺寸、命令区与开始栏变化都必须保持
+分区矩形与宿主度量同步；浮动面板则相反——它是 `.native-input` 的绝对定位兄弟层，开关/拖动/调宽
+都不改变分区矩形，因此不会触发宿主重排或重绘。`test/metrics.test.ts` 与
+`test/palette-window.test.ts` 共同钉住这条边界。
 
 ## 文案与能力
 

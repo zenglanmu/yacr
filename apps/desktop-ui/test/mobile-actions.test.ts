@@ -6,9 +6,9 @@
 //     mobile it either opens the compact equivalent (the history sheet) or is
 //     not claimed at all, and the properties palette — which the compact layout
 //     never renders — is refused in words;
-//   * a typed `PROPERTIES` / `LAYER` is a docked-palette selector, so the same
-//     rule applies: open the dock on desktop, refuse with the one catalog
-//     sentence on mobile (never flip a flag that paints nothing);
+//   * a typed `PROPERTIES` / `LAYER` is a desktop-palette selector, so the same
+//     rule applies: open the floating palette on desktop, refuse with the one
+//     catalog sentence on mobile (never flip a flag that paints nothing);
 //   * `data-layout` has exactly one writer (the hook, on the document element),
 //     and every compact rule keys on `:root[data-layout="mobile"]`;
 //   * the model/layout strip that the drawer does not inherit from the desktop
@@ -29,7 +29,7 @@ test('the desktop layout keeps all four chrome shortcuts', () => {
 });
 
 test('the compact layout never claims a shortcut whose surface it does not render', () => {
-  // The dock is hidden, so the properties key is refused in words, not ignored.
+  // The palette layer is hidden, so the properties key is refused in words, not ignored.
   assert.equal(shortcutAction('mobile', 'properties'), 'refuse-docked-panel');
   // The two bars are unconditional: there is no clean screen to toggle and no
   // docked command line to hide. The shell claims neither chord (Ctrl+0's WebKit
@@ -42,7 +42,7 @@ test('the compact layout never claims a shortcut whose surface it does not rende
   assert.equal(shortcutAction('mobile', 'history', { textStep: true }), 'none');
 });
 
-test('only the desktop layout renders the docked palettes', () => {
+test('only the desktop layout renders the desktop palettes', () => {
   assert.equal(dockedPaletteOpenable('desktop'), true);
   assert.equal(dockedPaletteOpenable('mobile'), false);
 });
@@ -65,7 +65,7 @@ test('App routes every shortcut through the layout table', async () => {
   }
 });
 
-test('a typed PROPERTIES / LAYER is refused on mobile and opens the dock on desktop', async () => {
+test('a typed PROPERTIES / LAYER is refused on mobile and opens the palette on desktop', async () => {
   const app = await readModule('App.tsx');
   const selectors = await readModule('commands/local-selectors.ts');
   // Both selectors go through the one chrome-local table.
@@ -73,7 +73,7 @@ test('a typed PROPERTIES / LAYER is refused on mobile and opens the dock on desk
   assert.ok(selectors.includes('if (isPropertiesCommand(text))'));
   assert.ok(selectors.includes('if (isLayersCommand(text))'));
   const guardAt = selectors.indexOf('dockedPaletteOpenable(layout)');
-  assert.ok(guardAt > 0, 'the layout check is paired with each docked panel');
+  assert.ok(guardAt > 0, 'the layout check is paired with each desktop palette');
   assert.ok(selectors.includes('LOCAL_SELECTOR_PANEL_KEYS.properties'));
   assert.ok(selectors.includes('LOCAL_SELECTOR_PANEL_KEYS.layers'));
   assert.ok(app.includes('setLayersFocus(value => value + 1)'), 'the desktop LAYER refresh is unchanged');
@@ -122,7 +122,7 @@ test('the drawer keeps the real model/layout strip the desktop band shows', asyn
   assert.ok(drawer.includes('layoutUnsupportedTitle(t, space)'), 'unsupported reasons are the desktop ones');
   assert.ok(drawer.includes('shell.runCommand(command)'), 'a supported tab dispatches the same SPACE line');
   // References and the Font Manager are reachable on the compact layout without
-  // a dock: both are in-DOM sheets in this tree.
+  // the desktop palette layer: both are in-DOM sheets in this tree.
   assert.ok(drawer.includes('shell.setReferencesOpen(true)'), 'the drawer opens the references sheet');
   assert.ok(drawer.includes('shell.setFontsOpen(true)'), 'the drawer opens the Font Manager sheet');
 

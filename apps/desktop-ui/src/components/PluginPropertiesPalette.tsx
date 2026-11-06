@@ -1,10 +1,10 @@
 // Vendor properties palette: the read-only inspector a Tianzheng/plugin
 // provider hands the host for the current single selection (ADR 0030 D4).
 //
-// It is deliberately the *same* docked surface as `PropertiesPalette`: the same
-// `.palette` / `.properties__*` skeleton, the same two-column rows and the same
-// left dock slot, so opening a vendor entity never floats over the CAD
-// partition. The plugin supplies only group/row keys and verbatim values; this
+// It deliberately reuses the *same* surface as `PropertiesPalette`: the same
+// `.palette` / `.properties__*` skeleton and the same two-column rows, so it is
+// wrapped by the same `PaletteWindow` and inherits the one drag/resize/placement
+// behaviour. The plugin supplies only group/row keys and verbatim values; this
 // file owns the layout, the i18n lookup and the fallbacks.
 //
 // Everything here is display-only. There is no input, no label editor and no

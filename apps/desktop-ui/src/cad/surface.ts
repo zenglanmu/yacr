@@ -140,7 +140,7 @@ export function surfaceModeFromShell(shell: unknown): SurfaceModeReading {
 }
 
 /**
- * Whether the docked palettes (layers, properties, diagnostics) exist on the
+ * Whether the desktop palettes (layers, properties, diagnostics) exist on the
  * carrier the shell reported.
  *
  * `hostProfile.palettesAvailable` is the one carrier flag, and it is a

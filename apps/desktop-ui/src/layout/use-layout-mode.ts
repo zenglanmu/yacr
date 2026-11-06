@@ -49,7 +49,8 @@ export function initialLayoutMode(): LayoutMode {
  *
  * `useLayoutEffect`, not `useEffect`: the attribute the stylesheet keys on must
  * be on the document **before the first paint**, or a phone would paint one frame
- * of desktop chrome (the 300px dock, the nav rail) before the mobile rules apply.
+ * of desktop chrome (the 300px palette window, the nav rail) before the mobile
+ * rules apply.
  * There is no server render in this bundle, so the layout effect never warns.
  *
  * `addEventListener('change')` is the standard form; WebKitGTK versions that only

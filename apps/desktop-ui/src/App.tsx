@@ -97,8 +97,8 @@ function Shell() {
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [referencesOpen, setReferencesOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
-  // The layers palette. Closed on the start page (the dock keeps the start panel),
-  // opened by `LAYER` / the ribbon / the toggle. `layersFocus` is bumped by every
+  // The layers palette. Closed on the start page (the left column keeps the start
+  // panel), opened by `LAYER` / the ribbon / the toggle. `layersFocus` is bumped by every
   // `LAYER` submission so an already-open palette still takes the keyboard and
   // re-reads the host — a no-op otherwise.
   const [layersOpen, setLayersOpen] = useState(false);
@@ -134,7 +134,7 @@ function Shell() {
   // document slot the host fills on a `native-below` carrier, and when it is
   // absent, unreadable or label-less the chrome keeps the start state it has today.
   const canvasSession = useMemo(() => canvasSessionFromShell({ status }), [status]);
-  // The docked palettes project the carrier's own document state (selection rows,
+  // The left-column palettes project the carrier's own document state (selection rows,
   // layer table, settings, diagnostics). That is a **capability the carrier
   // reports**, not a property of the carrier's name: since the `dom-canvas` session
   // became the real desktop session it has all of them, and the X11/Web hosts
@@ -491,7 +491,7 @@ function Shell() {
     });
   }, []);
 
-  // The one properties-open path: ask plugin providers, then open the dock.
+  // The one properties-open path: ask plugin providers, then open the palette window.
   const openProperties = useCallback(() => {
     requestProperties(status?.selection ?? null);
     setPropertiesOpen(true);
@@ -772,7 +772,7 @@ function Shell() {
     // `documentOpen` on every `native-below` host; on `dom-canvas` the live session
     // supplies it, and it only drives layout and the status-bar state word.
     documentVisible,
-    // Whether the docked properties/diagnostics palettes exist on this carrier.
+    // Whether the floating properties/diagnostics palettes exist on this carrier.
     // `false` only on a reported `dom-canvas` host, which holds no host-side
     // document state for them to project.
     palettesAvailable,
@@ -846,14 +846,14 @@ function Shell() {
     propertiesOpen,
     setPropertiesOpen,
     // The layers palette: the same open/close plumbing as its two neighbours. The
-    // palette itself reads the host; this side only owns whether it is docked.
+    // palette itself reads the host; this side only owns whether its window is open.
     layersOpen,
     setLayersOpen,
     toggleLayers: () => setLayersOpen(value => !value),
     // Bumped by every `LAYER` (open + focus + re-read); the palette watches it.
     layersFocus,
     // The read-only Font Manager. Its panel reads `cad_fonts`; this side only owns
-    // whether it is docked (desktop) or a floating sheet (compact layout).
+    // whether it is a desktop palette window or a floating sheet (compact layout).
     fontsOpen,
     setFontsOpen,
     commandLineOpen,
@@ -931,9 +931,10 @@ function Shell() {
         <main className={['shell', cleanScreen ? 'is-clean' : ''].filter(Boolean).join(' ')}>
           {/* Compact layout: the top bar (menu + drawing name) and the drawer it
               opens. The drawer is a fixed overlay, so it costs the drawing no
-              height. The start panel, the dock, the nav rail, the tab strips and
-              the status bar are desktop chrome: they stay mounted for the desktop
-              layout only, and `.workspace__left`/`.navrail` are hidden by CSS on
+              height. The start panel, the floating palette layer, the nav rail,
+              the tab strips and the status bar are desktop chrome: they stay
+              mounted for the desktop layout only, and
+              `.workspace__left`/`.palette-layer`/`.navrail` are hidden by CSS on
               mobile rather than unmounted — `<Workspace />` keeps its position in
               this tree, so a live breakpoint crossing never remounts the CAD
               session. */}
@@ -953,9 +954,10 @@ function Shell() {
           {mobile ? <MobileCommandBar /> : commandLineOpen ? <CommandLine /> : null}
           {mobile ? null : <StatusBar />}
         </main>
-        {/* The compact References sheet: the same panel the desktop docks, as an
-            in-DOM overlay because the compact layout renders no left dock. It
-            reads the same `cad_status.references` rows and adds no second state. */}
+        {/* The compact References sheet: the same panel the desktop shows in its
+            palette window, as a bottom sheet because the compact layout hides the
+            palette layer. It reads the same `cad_status.references` rows and adds
+            no second state. */}
         {mobile && referencesOpen ? (
           <div className="references-layer">
             <button type="button" className="references-layer__backdrop" aria-label={t('resources.close')} onClick={() => setReferencesOpen(false)} />
@@ -974,7 +976,7 @@ function Shell() {
             underneath — the CAD partition keeps forwarding every press to the
             host. Running an item uses the same funnel as the ribbon and the
             command line (`runCommand`), which is what also resolves the
-            chrome-local `PROPERTIES` selector to the docked palette. */}
+            chrome-local `PROPERTIES` selector to the floating palette. */}
         {contextMenu ? (
           <ContextMenu
             menu={contextMenu.menu}

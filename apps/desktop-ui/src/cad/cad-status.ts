@@ -191,7 +191,7 @@ export interface CadHostProfile {
   readonly surfaceMode?: unknown;
   /** `native` or `wasm` on the wire; readers narrow it. */
   readonly documentOwner?: unknown;
-  /** Whether this carrier renders the docked palettes (a real boolean). */
+  /** Whether this carrier renders the desktop palettes (a real boolean). */
   readonly palettesAvailable?: unknown;
   /** `null` (undeclared) or the authoritative array of view keys. */
   readonly standardViews?: unknown;

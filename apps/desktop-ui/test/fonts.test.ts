@@ -53,7 +53,7 @@ test('the selector is one local word, case-insensitive', () => {
   assert.equal(isFontsCommand(null), false);
 });
 
-test('FONTS opens the panel on both layouts while the docked pair is refused on mobile', () => {
+test('FONTS opens the panel on both layouts while the desktop palette pair is refused on mobile', () => {
   assert.deepEqual(localSelectorFor('FONTS', 'desktop'), { kind: 'fonts' });
   assert.deepEqual(localSelectorFor('fonts', 'mobile'), { kind: 'fonts' });
   assert.deepEqual(localSelectorFor('RESOURCES', 'mobile'), { kind: 'resources' });
@@ -218,7 +218,7 @@ test('the panel renders the named unavailable reason before the empty state', as
   assert.equal(buttons.length, 1, 'the only control is closing the panel');
 });
 
-test('the panel is accessible in both variants and the dock reuses the references language', async () => {
+test('the panel is accessible in both variants and the window reuses the references language', async () => {
   const panel = await readModule('components/FontsPanel.tsx');
   assert.ok(panel.includes('aria-label={t(\'fonts.title\')}'));
   assert.ok(panel.includes("role={floating ? 'dialog' : undefined}"));

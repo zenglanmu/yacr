@@ -5,7 +5,7 @@
 //
 //  * **It only exists while it is open.** The palette owns that state (the dot, the
 //    chevron and the "more states" chip all open the same line for one row at a
-//    time), so a row that is not open keeps the 28px height the palette always had.
+//    time), so a row that is not open keeps the 24px height every resting row has.
 //    Nothing here reserves space.
 //  * **Its job is narrow: render what the row says, send one write per press.**
 //    Every value comes from the row (`layer-attributes.ts` decides which), every

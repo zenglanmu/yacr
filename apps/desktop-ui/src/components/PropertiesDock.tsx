@@ -30,7 +30,7 @@ export function PropertiesDock() {
   const matches = panel !== null && selectedHandle(selection) === panel.handle.toUpperCase();
 
   // The panel belongs to one request and one handle. When the selection moves
-  // away (or disappears) the dock returns to the default palette and the stale
+  // away (or disappears) the window returns to the default palette and the stale
   // panel is dropped; a new `PROPERTIES` re-asks the providers.
   useEffect(() => {
     if (panel !== null && !matches) clearPluginPanel();

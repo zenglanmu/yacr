@@ -37,7 +37,7 @@ test('the desktop layout drives the four chrome surfaces', () => {
   assert.deepEqual(calls, ['clean:true', 'properties:true', 'commandLine:true', 'history:true']);
 });
 
-test('the compact layout refuses the docked palette in words and claims nothing else', () => {
+test('the compact layout refuses the desktop palette in words and claims nothing else', () => {
   const { calls, messages, targets, t } = harness();
   const run = createShortcutRunner('mobile', false, t, targets);
   assert.equal(run('properties'), true, 'the refusal is a handled action');

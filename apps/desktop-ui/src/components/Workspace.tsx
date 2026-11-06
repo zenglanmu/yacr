@@ -1,9 +1,13 @@
-// Workspace: the central CAD partition plus the DOM chrome docked at its edges.
+// Workspace: the central CAD partition plus the DOM chrome around it.
 //
 // The native CAD surface is composited by the host at exactly the rect this
-// element reports, so `.native-input` holds **no** DOM children and nothing
-// floats across it. Palettes dock to the left (shrinking the partition) and the
-// navigation rail docks to the right.
+// element reports, so `.native-input` holds **no** DOM children; overlays are
+// siblings that paint above it without moving it. The left column only holds the
+// start panel; every palette floats *above* the partition in `.palette-layer`
+// (an absolute overlay that takes no layout space). Opening, closing, dragging
+// or resizing a palette therefore never changes the `.native-input` rect, so the
+// host gets no resize report and never re-presents/re-renders the CAD surface.
+// The navigation rail stays docked at the right edge.
 //
 // A `dom-canvas` host (ADR 0024 D3) carries its pixels inside this tree instead:
 // an empty, input-transparent `<canvas>` fills the same rect and paints under
@@ -12,6 +16,7 @@
 import React from 'react';
 import { NavRail } from './NavRail.tsx';
 import { StartPanel } from './StartPanel.tsx';
+import { PaletteWindow } from './PaletteWindow.tsx';
 import { LayersPalette } from './LayersPalette.tsx';
 import { PropertiesDock } from './PropertiesDock.tsx';
 import { PluginNoticeHost } from './PluginNoticeHost.tsx';
@@ -25,7 +30,7 @@ export function Workspace() {
   const { t } = useI18n();
   const shell = useShell();
   const showStart = !shell.documentVisible;
-  // Whether the docked palettes exist on the reported carrier. A `dom-canvas`
+  // Whether the desktop palettes exist on the reported carrier. A `dom-canvas`
   // host holds no host-side document state, so it has none of the projections they
   // read: they are not rendered at all rather than as empty panels. The carrier
   // rule is `palettesOffered`, the same helper the nav rail and the status bar
@@ -33,22 +38,24 @@ export function Workspace() {
   // chrome state) keeps them, as today.
   const palettesAvailable = palettesOffered(shell);
   // The inspector is only meaningful with a drawing open; on the start screen the
-  // start panel keeps the whole dock. Off by default so the startup partition
+  // start panel owns the left column. Off by default so the startup partition
   // geometry is unchanged until the user opens it.
   const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;
   const showDiagnostics = palettesAvailable && Boolean(shell.diagnosticsOpen);
   // The references panel is a document-wide list like the layers palette: it
-  // reads the host's `cad_status.references` rows and is docked on the desktop.
+  // reads the host's `cad_status.references` rows and floats in the layer.
   const showReferences = palettesAvailable && Boolean(shell.referencesOpen);
   // The Font Manager is a document-wide read-only report like the references
-  // panel, so it is docked in the same column and gated by the same carrier flag.
+  // panel, so it floats in the same layer and is gated by the same carrier flag.
   const showFonts = palettesAvailable && Boolean(shell.fontsOpen);
   // The layers palette is a document-wide list, not a selection projection, so it
   // is offered on the start page too: with no session the host answers the empty
   // list and the panel says "no layers" rather than disappearing after `LAYER`.
   // Closed by default, so the startup partition geometry is unchanged.
   const showLayers = palettesAvailable && Boolean(shell.layersOpen);
-  const leftOpen = showStart || showProperties || showDiagnostics || showLayers || showReferences || showFonts;
+  // The left column is now the start screen's alone. Palettes live in the
+  // floating layer below, so no palette flag may widen the partition.
+  const leftOpen = showStart;
   // The host hides the system cursor over the CAD partition only while it is
   // drawing its own crosshair (a 2D view with a pointer on the surface). A 3D
   // view reports `false`, so the system arrow stays and the pointer is never
@@ -63,11 +70,6 @@ export function Workspace() {
     <div className="region region--workspace workspace app-region">
       <div className={['workspace__left', leftOpen ? 'is-open' : ''].filter(Boolean).join(' ')}>
         {showStart ? <StartPanel /> : null}
-        {showLayers ? <LayersPalette /> : null}
-        {showProperties ? <PropertiesDock /> : null}
-        {showDiagnostics ? <DiagnosticsPalette /> : null}
-        {showReferences ? <ReferencesPanel /> : null}
-        {showFonts ? <FontsPanel /> : null}
       </div>
       <div className="workspace__canvas">
         {/* dom-canvas only: the in-DOM pixel carrier. It fills exactly the rect
@@ -87,6 +89,38 @@ export function Workspace() {
           className={['native-input', crosshair ? 'is-crosshair' : ''].filter(Boolean).join(' ')}
           aria-label={t('a11y.canvas_label')}
         />
+        {/* Floating palettes: an overlay sibling *after* `.native-input`, so it
+            paints above the CAD surface and takes no layout space. The layer
+            itself is pointer-transparent; each window re-enables input. DOM order
+            is the open order below; z-index (owned by `PaletteWindow`) decides
+            stacking after a press, with properties starting on top. */}
+        <div className="palette-layer">
+          {showProperties ? (
+            <PaletteWindow windowKey="properties" initialIndex={0}>
+              <PropertiesDock />
+            </PaletteWindow>
+          ) : null}
+          {showLayers ? (
+            <PaletteWindow windowKey="layers" initialIndex={1}>
+              <LayersPalette />
+            </PaletteWindow>
+          ) : null}
+          {showDiagnostics ? (
+            <PaletteWindow windowKey="diagnostics" initialIndex={2}>
+              <DiagnosticsPalette />
+            </PaletteWindow>
+          ) : null}
+          {showReferences ? (
+            <PaletteWindow windowKey="references" initialIndex={3}>
+              <ReferencesPanel />
+            </PaletteWindow>
+          ) : null}
+          {showFonts ? (
+            <PaletteWindow windowKey="fonts" initialIndex={4}>
+              <FontsPanel />
+            </PaletteWindow>
+          ) : null}
+        </div>
       </div>
       <NavRail />
       <PluginNoticeHost />

@@ -1,10 +1,10 @@
-// Layers palette: the docked layer list (spec F03).
+// Layers palette: the layer list (spec F03).
 //
-// Docked on the left (it shrinks the drawing area) like the properties and
-// diagnostics palettes, because the host composites a native CAD surface in the
-// central partition: nothing here floats across the drawing, and there is no
-// backdrop, so the CAD partition keeps receiving every pointer press that is not
-// on the panel itself.
+// It is wrapped by the shared `PaletteWindow`, so it floats over the drawing area
+// (defaulting to the left edge) like the properties and diagnostics palettes. It
+// is not modal and has no backdrop: the window takes input, while the CAD
+// partition keeps receiving every pointer press outside it. Opening it never
+// changes the partition rect.
 //
 // The rows are the host's own answer ([`layers.ts`] owns the wire contract and
 // the single-flight state machine); this file is layout plus the local search
@@ -40,7 +40,7 @@
 //    `layers.delete_in_use_hint` as the note) because the wire carries no
 //    per-layer entity count: every non-default layer *could* still hold objects,
 //    so the note is unavoidable rather than guessed.
-//  * **Nothing moves when a form opens.** The dock width is fixed and the row grid
+//  * **Nothing moves when a form opens.** The window width is fixed and the row grid
 //    is unchanged: rename replaces the name cell with a field of the same line
 //    height, the row's actions keep their reserved space, and the create form
 //    appears under the search strip. No cell is ever re-measured.
@@ -54,7 +54,7 @@
 //    the color control, the four flags as engaged-state toggles, and the read-only
 //    linetype/lineweight/transparency. That line reuses the existing second-line
 //    slot (the note line's grid column) and exists only while it is open, so a row
-//    keeps the 28px height it always had. Which color, which chips and which
+//    keeps the 24px height the list gives every resting row. Which color, which chips and which
 //    strings come from `layer-attributes.ts` (pure, unit-tested); what a flag
 //    *does* is catalog copy (`layers.<flag>.hint`), never a claim only a comment
 //    makes.
@@ -535,7 +535,7 @@ export function LayersPalette() {
         </div>
 
         {/* Create: one field, its rules, then submit/cancel. Nothing here widens
-            the dock — the field takes the strip's own width. */}
+            the window — the field takes the strip's own width. */}
         {form?.kind === 'create' ? (
           <div className="layers__new">
             <label className="layers__field">
@@ -621,283 +621,297 @@ export function LayersPalette() {
         ) : null}
 
         {rows.length > 0 ? (
-          <ul className="layers__list" aria-busy={controlsBusy || undefined} onKeyDown={onListKeyDown}>
-            {rows.map((layer, index) => {
-              const nameId = `layers-name-${index}`;
-              // The row exists below the drawing's own flag: a hidden layer the
-              // user forced on. Saying so is the difference between "I turned this
-              // on" and "this layer is on in the drawing".
-              const forcedOn = layer.visible && !layer.databaseVisible;
-              const renaming = form?.kind === 'rename' && form.layer === layer.name;
-              const confirming = form?.kind === 'delete' && form.layer === layer.name;
-              const editing = renaming || confirming;
-              const confirmHintId = `layers-delete-hint-${index}`;
-              const colorHintId = `layers-color-hint-${index}`;
-              // The drawing's own color when the host sent a usable one; the muted
-              // name-derived marker otherwise (`layerSwatch` decides, and says which).
-              const swatch = layerSwatch(layer);
-              const detailsOpen = detailsFor === layer.name;
-              // While the details line is open it already shows all four flags as
-              // engaged-state toggles, so the resting marks would only repeat them.
-              const summary = detailsOpen ? EMPTY_MARK_SUMMARY : layerMarkSummary(layer);
-              return (
-                <li
-                  key={layer.name}
-                  className={rowClass(layer, editing)}
-                  aria-current={layer.current ? 'true' : undefined}
-                  onFocus={() => setCursor(index)}
-                  // Escape closes whatever this row has open. The rename field
-                  // stops its own Escape first, so a field never closes twice.
-                  onKeyDown={event => {
-                    if (!editing || event.key !== 'Escape' || event.defaultPrevented) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    cancelForm();
-                  }}
-                  // Blur cancels — a rename is never committed by looking away.
-                  // Focus moving *inside the row* (its own action buttons) is not
-                  // leaving the edit, so the pencil's toggle keeps working.
-                  onBlur={editing
-                    ? event => {
-                      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+          <>
+            {/* The column band labels the two columns a user has to read across a
+                dense list for. It is visual only (`aria-hidden`): every row control
+                already carries its own accessible name, so there is no second,
+                decorative thing to announce. Both labels name a real column —
+                there is no sort caret, because this list is never re-sorted (it
+                keeps the host's order, filtered by the search field). */}
+            <div className="layers__columns" aria-hidden="true">
+              <span className="layers__column layers__column--visibility">
+                {t('layers.column.visibility')}
+              </span>
+              <span className="layers__column layers__column--name">{t('layers.column.name')}</span>
+            </div>
+            <ul className="layers__list" aria-busy={controlsBusy || undefined} onKeyDown={onListKeyDown}>
+              {rows.map((layer, index) => {
+                const nameId = `layers-name-${index}`;
+                // The row exists below the drawing's own flag: a hidden layer the
+                // user forced on. Saying so is the difference between "I turned this
+                // on" and "this layer is on in the drawing".
+                const forcedOn = layer.visible && !layer.databaseVisible;
+                const renaming = form?.kind === 'rename' && form.layer === layer.name;
+                const confirming = form?.kind === 'delete' && form.layer === layer.name;
+                const editing = renaming || confirming;
+                const confirmHintId = `layers-delete-hint-${index}`;
+                const colorHintId = `layers-color-hint-${index}`;
+                // The drawing's own color when the host sent a usable one; the muted
+                // name-derived marker otherwise (`layerSwatch` decides, and says which).
+                const swatch = layerSwatch(layer);
+                const detailsOpen = detailsFor === layer.name;
+                // While the details line is open it already shows all four flags as
+                // engaged-state toggles, so the resting marks would only repeat them.
+                const summary = detailsOpen ? EMPTY_MARK_SUMMARY : layerMarkSummary(layer);
+                return (
+                  <li
+                    key={layer.name}
+                    className={rowClass(layer, editing)}
+                    aria-current={layer.current ? 'true' : undefined}
+                    onFocus={() => setCursor(index)}
+                    // Escape closes whatever this row has open. The rename field
+                    // stops its own Escape first, so a field never closes twice.
+                    onKeyDown={event => {
+                      if (!editing || event.key !== 'Escape' || event.defaultPrevented) return;
+                      event.preventDefault();
+                      event.stopPropagation();
                       cancelForm();
-                    }
-                    : undefined}
-                >
-                  {/* Temporarily unavailable, never `disabled`: a disabled button
-                      drops the keyboard focus it just had, which would break the
-                      roving cursor right after every toggle. */}
-                  <button
-                    type="button"
-                    ref={node => { eyeRefs.current[index] = node; }}
-                    className={['layers__eye', layer.visible ? '' : 'is-off'].filter(Boolean).join(' ')}
-                    aria-label={layer.visible ? t('layers.visibility_off') : t('layers.visibility_on')}
-                    aria-describedby={nameId}
-                    aria-disabled={controlsBusy || undefined}
-                    title={layer.visible ? t('layers.visibility_off') : t('layers.visibility_on')}
-                    onClick={() => toggleVisibility(layer)}
+                    }}
+                    // Blur cancels — a rename is never committed by looking away.
+                    // Focus moving *inside the row* (its own action buttons) is not
+                    // leaving the edit, so the pencil's toggle keeps working.
+                    onBlur={editing
+                      ? event => {
+                        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                        cancelForm();
+                      }
+                      : undefined}
                   >
-                    <Icon name={layer.visible ? 'eye' : 'eyeOff'} size={14} />
-                  </button>
-                  {/* The dot is a control now: it opens the row's details line,
-                      whose first control is the color picker. Its name is the
-                      honest state — the drawing's own color when the host sent
-                      one, "not reported, this is a name marker" otherwise — so a
-                      hash-colored fallback is never announced as the layer color. */}
-                  <button
-                    type="button"
-                    className={['layers__swatch', swatch.fromColor ? '' : 'is-tone'].filter(Boolean).join(' ')}
-                    style={{ backgroundColor: swatch.color }}
-                    aria-label={swatch.fromColor
-                      ? t('layers.color.reported', { color: swatch.color })
-                      : t('layers.color.marker')}
-                    aria-describedby={nameId}
-                    aria-expanded={detailsOpen}
-                    aria-disabled={controlsBusy || undefined}
-                    title={t('layers.color')}
-                    onClick={() => toggleDetails(layer)}
-                  />
-                  {/* The name cell keeps the row's `nameId` whether it shows the
-                      name or the rename field, so every `aria-describedby` that
-                      points at it stays resolvable while the field is open. */}
-                  {renaming ? (
-                    <input
-                      id={nameId}
-                      ref={renameFieldRef}
-                      type="text"
-                      className="layers__rename"
-                      value={draft}
-                      aria-label={t('layers.name_label')}
-                      aria-invalid={draftError ? true : undefined}
-                      autoComplete="off"
-                      spellCheck={false}
-                      onChange={event => { setDraft(event.target.value); setDraftError(null); }}
-                      onKeyDown={event => onFieldKeyDown(event, () => { void submitRename(layer); })}
-                    />
-                  ) : (
-                    <span
-                      className="layers__name"
-                      id={nameId}
-                      title={layer.name}
-                      // The pointer shortcut for the explicit pencil next to it.
-                      onDoubleClick={() => openRename(layer)}
+                    {/* Temporarily unavailable, never `disabled`: a disabled button
+                        drops the keyboard focus it just had, which would break the
+                        roving cursor right after every toggle. */}
+                    <button
+                      type="button"
+                      ref={node => { eyeRefs.current[index] = node; }}
+                      className={['layers__eye', layer.visible ? '' : 'is-off'].filter(Boolean).join(' ')}
+                      aria-label={layer.visible ? t('layers.visibility_off') : t('layers.visibility_on')}
+                      aria-describedby={nameId}
+                      aria-disabled={controlsBusy || undefined}
+                      title={layer.visible ? t('layers.visibility_off') : t('layers.visibility_on')}
+                      onClick={() => toggleVisibility(layer)}
                     >
-                      {layer.name}
-                    </span>
-                  )}
-                  <span className="layers__marks">
-                    {layer.current ? (
-                      <span className="layers__chip is-current">{t('layers.current')}</span>
-                    ) : (
-                      <IconButton
-                        icon="check"
-                        size="xs"
-                        label={t('layers.set_current')}
-                        aria-describedby={nameId}
-                        aria-disabled={controlsBusy || undefined}
-                        onClick={() => makeCurrent(layer)}
-                      />
-                    )}
-                    {layer.overridden ? (
-                      <span className="layers__chip is-temp">{t('layers.overridden_marker')}</span>
-                    ) : null}
-                    {/* The states that are not the default: the chip is the row's own
-                        flag (never a guess) and a press clears exactly that state —
-                        the one direction the mark already promises. The other
-                        direction is a press in the details line below. A row that
-                        holds more states than fit spells out two and counts the rest
-                        (`layerMarkSummary`), so the row stays one line and no state
-                        is dropped silently. */}
-                    {summary.marks.map(mark => (
-                      <button
-                        key={mark.key}
-                        type="button"
-                        className="layers__chip layers__chip--action"
-                        aria-pressed={true}
-                        aria-describedby={nameId}
-                        aria-disabled={controlsBusy || undefined}
-                        title={t(mark.hintKey)}
-                        onClick={() => toggleFlag(layer, mark.key, mark.next)}
-                      >
-                        {t(mark.labelKey)}
-                      </button>
-                    ))}
-                    {summary.hidden > 0 ? (
-                      <button
-                        type="button"
-                        className="layers__chip layers__chip--action"
-                        aria-describedby={nameId}
-                        aria-disabled={controlsBusy || undefined}
-                        title={t('layers.marks_more.hint')}
-                        onClick={() => openDetails(layer)}
-                      >
-                        {t('layers.marks_more', { count: summary.hidden })}
-                      </button>
-                    ) : null}
-                    {/* The details line's own trigger. It is always visible (unlike
-                        the row actions, which are hover/focus-revealed) because the
-                        flags, the color and the read-only attributes are the reason
-                        this palette carries attributes at all. */}
-                    <IconButton
-                      icon={detailsOpen ? 'chevronUp' : 'chevronDown'}
-                      size="xs"
-                      label={t('layers.attributes')}
-                      ref={node => {
-                        if (node) detailsTriggers.current.set(layer.name, node);
-                        else detailsTriggers.current.delete(layer.name);
-                      }}
+                      <Icon name={layer.visible ? 'eye' : 'eyeOff'} size={14} />
+                    </button>
+                    {/* The dot is a control now: it opens the row's details line,
+                        whose first control is the color picker. Its name is the
+                        honest state — the drawing's own color when the host sent
+                        one, "not reported, this is a name marker" otherwise — so a
+                        hash-colored fallback is never announced as the layer color. */}
+                    <button
+                      type="button"
+                      className={['layers__swatch', swatch.fromColor ? '' : 'is-tone'].filter(Boolean).join(' ')}
+                      style={{ backgroundColor: swatch.color }}
+                      aria-label={swatch.fromColor
+                        ? t('layers.color.reported', { color: swatch.color })
+                        : t('layers.color.marker')}
                       aria-describedby={nameId}
                       aria-expanded={detailsOpen}
                       aria-disabled={controlsBusy || undefined}
+                      title={t('layers.color')}
                       onClick={() => toggleDetails(layer)}
                     />
-                    {/* Row actions. The space is reserved at all times, so the row
-                        grid never moves; the buttons themselves are revealed on
-                        hover or on `:focus-within`, which is also how a keyboard
-                        reaches them. While the row is renaming the same two slots
-                        become the commit/cancel pair, so a pointer has a way to
-                        finish an edit without the keyboard (Enter commits, Escape
-                        cancels — both still work). The default layer offers no
-                        delete at all: the host would refuse it. */}
-                    <span className="layers__actions">
-                      {renaming ? (
-                        <>
-                          <IconButton
-                            icon="check"
-                            size="xs"
-                            label={t('layers.rename')}
-                            aria-disabled={controlsBusy || undefined}
-                            onClick={() => { void submitRename(layer); }}
-                          />
-                          <IconButton
-                            icon="close"
-                            size="xs"
-                            label={t('tool.cancel')}
-                            onClick={cancelForm}
-                          />
-                        </>
+                    {/* The name cell keeps the row's `nameId` whether it shows the
+                        name or the rename field, so every `aria-describedby` that
+                        points at it stays resolvable while the field is open. */}
+                    {renaming ? (
+                      <input
+                        id={nameId}
+                        ref={renameFieldRef}
+                        type="text"
+                        className="layers__rename"
+                        value={draft}
+                        aria-label={t('layers.name_label')}
+                        aria-invalid={draftError ? true : undefined}
+                        autoComplete="off"
+                        spellCheck={false}
+                        onChange={event => { setDraft(event.target.value); setDraftError(null); }}
+                        onKeyDown={event => onFieldKeyDown(event, () => { void submitRename(layer); })}
+                      />
+                    ) : (
+                      <span
+                        className="layers__name"
+                        id={nameId}
+                        title={layer.name}
+                        // The pointer shortcut for the explicit pencil next to it.
+                        onDoubleClick={() => openRename(layer)}
+                      >
+                        {layer.name}
+                      </span>
+                    )}
+                    <span className="layers__marks">
+                      {layer.current ? (
+                        <span className="layers__chip is-current">{t('layers.current')}</span>
                       ) : (
-                        <>
-                          <IconButton
-                            icon="pencil"
-                            size="xs"
-                            label={t('layers.rename')}
-                            ref={node => {
-                              if (node) renameTriggers.current.set(layer.name, node);
-                              else renameTriggers.current.delete(layer.name);
-                            }}
-                            aria-describedby={nameId}
-                            aria-disabled={controlsBusy || undefined}
-                            onClick={() => openRename(layer)}
-                          />
-                          {deletableLayer(layer.name) ? (
+                        <IconButton
+                          icon="check"
+                          size="xs"
+                          label={t('layers.set_current')}
+                          aria-describedby={nameId}
+                          aria-disabled={controlsBusy || undefined}
+                          onClick={() => makeCurrent(layer)}
+                        />
+                      )}
+                      {layer.overridden ? (
+                        <span className="layers__chip is-temp">{t('layers.overridden_marker')}</span>
+                      ) : null}
+                      {/* The states that are not the default: the chip is the row's own
+                          flag (never a guess) and a press clears exactly that state —
+                          the one direction the mark already promises. The other
+                          direction is a press in the details line below. A row that
+                          holds more states than fit spells out two and counts the rest
+                          (`layerMarkSummary`), so the row stays one line and no state
+                          is dropped silently. */}
+                      {summary.marks.map(mark => (
+                        <button
+                          key={mark.key}
+                          type="button"
+                          className="layers__chip layers__chip--action"
+                          aria-pressed={true}
+                          aria-describedby={nameId}
+                          aria-disabled={controlsBusy || undefined}
+                          title={t(mark.hintKey)}
+                          onClick={() => toggleFlag(layer, mark.key, mark.next)}
+                        >
+                          {t(mark.labelKey)}
+                        </button>
+                      ))}
+                      {summary.hidden > 0 ? (
+                        <button
+                          type="button"
+                          className="layers__chip layers__chip--action"
+                          aria-describedby={nameId}
+                          aria-disabled={controlsBusy || undefined}
+                          title={t('layers.marks_more.hint')}
+                          onClick={() => openDetails(layer)}
+                        >
+                          {t('layers.marks_more', { count: summary.hidden })}
+                        </button>
+                      ) : null}
+                      {/* The details line's own trigger. It is always visible (unlike
+                          the row actions, which are hover/focus-revealed) because the
+                          flags, the color and the read-only attributes are the reason
+                          this palette carries attributes at all. */}
+                      <IconButton
+                        icon={detailsOpen ? 'chevronUp' : 'chevronDown'}
+                        size="xs"
+                        label={t('layers.attributes')}
+                        ref={node => {
+                          if (node) detailsTriggers.current.set(layer.name, node);
+                          else detailsTriggers.current.delete(layer.name);
+                        }}
+                        aria-describedby={nameId}
+                        aria-expanded={detailsOpen}
+                        aria-disabled={controlsBusy || undefined}
+                        onClick={() => toggleDetails(layer)}
+                      />
+                      {/* Row actions. The space is reserved at all times, so the row
+                          grid never moves; the buttons themselves are revealed on
+                          hover or on `:focus-within`, which is also how a keyboard
+                          reaches them. While the row is renaming the same two slots
+                          become the commit/cancel pair, so a pointer has a way to
+                          finish an edit without the keyboard (Enter commits, Escape
+                          cancels — both still work). The default layer offers no
+                          delete at all: the host would refuse it. */}
+                      <span className="layers__actions">
+                        {renaming ? (
+                          <>
                             <IconButton
-                              icon="trash"
+                              icon="check"
                               size="xs"
-                              label={t('layers.delete')}
+                              label={t('layers.rename')}
+                              aria-disabled={controlsBusy || undefined}
+                              onClick={() => { void submitRename(layer); }}
+                            />
+                            <IconButton
+                              icon="close"
+                              size="xs"
+                              label={t('tool.cancel')}
+                              onClick={cancelForm}
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <IconButton
+                              icon="pencil"
+                              size="xs"
+                              label={t('layers.rename')}
                               ref={node => {
-                                if (node) deleteTriggers.current.set(layer.name, node);
-                                else deleteTriggers.current.delete(layer.name);
+                                if (node) renameTriggers.current.set(layer.name, node);
+                                else renameTriggers.current.delete(layer.name);
                               }}
                               aria-describedby={nameId}
-                              aria-pressed={confirming}
                               aria-disabled={controlsBusy || undefined}
-                              onClick={() => { if (confirming) cancelForm(); else openDelete(layer); }}
+                              onClick={() => openRename(layer)}
                             />
-                          ) : null}
-                        </>
-                      )}
+                            {deletableLayer(layer.name) ? (
+                              <IconButton
+                                icon="trash"
+                                size="xs"
+                                label={t('layers.delete')}
+                                ref={node => {
+                                  if (node) deleteTriggers.current.set(layer.name, node);
+                                  else deleteTriggers.current.delete(layer.name);
+                                }}
+                                aria-describedby={nameId}
+                                aria-pressed={confirming}
+                                aria-disabled={controlsBusy || undefined}
+                                onClick={() => { if (confirming) cancelForm(); else openDelete(layer); }}
+                              />
+                            ) : null}
+                          </>
+                        )}
+                      </span>
                     </span>
-                  </span>
-                  {forcedOn ? (
-                    <span className="layers__note">{t('layers.database_hidden')}</span>
-                  ) : null}
-                  {/* The row's second line, opened from the dot, the chevron or the
-                      "more states" count and rendered only while it is open. The
-                      panel itself is `LayerDetails` (color control, the four flags,
-                      the read-only attributes); it reuses the row's existing
-                      second-line slot, so a row that is not open keeps its 28px
-                      height. */}
-                  {detailsOpen ? (
-                    <LayerDetails
-                      layer={layer}
-                      color={swatch.color}
-                      fromColor={swatch.fromColor}
-                      hintId={colorHintId}
-                      busy={controlsBusy}
-                      onPickColor={value => pickColor(layer, value)}
-                      onToggleFlag={(key, value) => toggleFlag(layer, key, value)}
-                      onClose={closeDetails}
-                    />
-                  ) : null}
-                  {/* The confirm step: one note plus Cancel/Delete. It spans the
-                      row's own grid, so the row keeps its identity (chips
-                      included) and nothing above it moves. */}
-                  {confirming ? (
-                    <div className="layers__confirm">
-                      <p className="layers__confirm-text">{t('layers.delete_confirm', { name: layer.name })}</p>
-                      <p className="layers__note" id={confirmHintId}>{t('layers.delete_in_use_hint')}</p>
-                      <div className="layers__form-actions">
-                        <Button variant="ghost" size="xs" onClick={cancelForm}>{t('tool.cancel')}</Button>
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          icon="trash"
-                          iconSize={13}
-                          className="layers__danger"
-                          aria-describedby={confirmHintId}
-                          aria-disabled={controlsBusy || undefined}
-                          onClick={() => { void confirmDelete(layer, index); }}
-                        >
-                          {t('layers.delete')}
-                        </Button>
+                    {forcedOn ? (
+                      <span className="layers__note">{t('layers.database_hidden')}</span>
+                    ) : null}
+                    {/* The row's second line, opened from the dot, the chevron or the
+                        "more states" count and rendered only while it is open. The
+                        panel itself is `LayerDetails` (color control, the four flags,
+                        the read-only attributes); it reuses the row's existing
+                        second-line slot, so a row that is not open keeps its 24px
+                        height. */}
+                    {detailsOpen ? (
+                      <LayerDetails
+                        layer={layer}
+                        color={swatch.color}
+                        fromColor={swatch.fromColor}
+                        hintId={colorHintId}
+                        busy={controlsBusy}
+                        onPickColor={value => pickColor(layer, value)}
+                        onToggleFlag={(key, value) => toggleFlag(layer, key, value)}
+                        onClose={closeDetails}
+                      />
+                    ) : null}
+                    {/* The confirm step: one note plus Cancel/Delete. It spans the
+                        row's own grid, so the row keeps its identity (chips
+                        included) and nothing above it moves. */}
+                    {confirming ? (
+                      <div className="layers__confirm">
+                        <p className="layers__confirm-text">{t('layers.delete_confirm', { name: layer.name })}</p>
+                        <p className="layers__note" id={confirmHintId}>{t('layers.delete_in_use_hint')}</p>
+                        <div className="layers__form-actions">
+                          <Button variant="ghost" size="xs" onClick={cancelForm}>{t('tool.cancel')}</Button>
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            icon="trash"
+                            iconSize={13}
+                            className="layers__danger"
+                            aria-describedby={confirmHintId}
+                            aria-disabled={controlsBusy || undefined}
+                            onClick={() => { void confirmDelete(layer, index); }}
+                          >
+                            {t('layers.delete')}
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         ) : null}
       </div>
     </section>

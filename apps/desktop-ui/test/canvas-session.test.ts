@@ -285,9 +285,11 @@ test('the palettes are what the carrier reports, not what it is called', async (
   assert.ok(workspace.includes("import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../cad/surface.ts';"));
   assert.ok(workspace.includes('const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;'));
   assert.ok(workspace.includes('const showDiagnostics = palettesAvailable && Boolean(shell.diagnosticsOpen);'));
-  // Both panels render from the gated flags, so no empty panel is possible.
-  assert.ok(workspace.includes('{showProperties ? <PropertiesDock /> : null}'));
-  assert.ok(workspace.includes('{showDiagnostics ? <DiagnosticsPalette /> : null}'));
+  // Both panels render from the gated flags, so no empty panel is possible. They
+  // are floating windows now: the gate wraps a shared `PaletteWindow`, and the
+  // palette itself is never mounted outside that wrapper.
+  assert.match(workspace, /\{showProperties \? \(\s*<PaletteWindow windowKey="properties"[^>]*>\s*<PropertiesDock \/>\s*<\/PaletteWindow>\s*\) : null\}/);
+  assert.match(workspace, /\{showDiagnostics \? \(\s*<PaletteWindow windowKey="diagnostics"[^>]*>\s*<DiagnosticsPalette \/>\s*<\/PaletteWindow>\s*\) : null\}/);
   assert.ok(!workspace.includes('{shell.diagnosticsOpen ?'));
 
   const status = await readModule('components/StatusBar.tsx');

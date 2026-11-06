@@ -259,8 +259,11 @@ test('the mobile stylesheet is guarded by the one layout attribute and fits a ph
     'the command bar honours the host bottom inset',
   );
   assert.ok(css.includes('--yacr-safe-bottom'), 'the host variable is named in the stylesheet');
-  // The docked panels and the nav rail are hidden, not unmounted.
+  // The desktop chrome inside `<Workspace />` is hidden, not unmounted: the start
+  // column, the floating palette layer (the compact layout keeps its own sheets)
+  // and the nav rail.
   assert.ok(css.includes(':root[data-layout="mobile"] .workspace__left'));
+  assert.ok(css.includes(':root[data-layout="mobile"] .palette-layer'));
   assert.ok(css.includes(':root[data-layout="mobile"] .navrail'));
   // 44px touch targets on the menu button and the command bar controls.
   const menu = css.slice(css.indexOf('.mobile-topbar__menu {'), css.indexOf('.mobile-topbar__menu {') + 400);

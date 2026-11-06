@@ -59,7 +59,7 @@ export interface ShellValue {
   readonly documentOpen: boolean;
   /** Whether a drawing is actually on screen (the layout fact). */
   readonly documentVisible: boolean;
-  /** Whether this carrier renders the docked palettes. */
+  /** Whether this carrier renders the desktop palettes. */
   readonly palettesAvailable: boolean;
   /** Whether the host reports a live dialog. */
   readonly popupOpen: boolean;
@@ -116,7 +116,7 @@ export interface ShellValue {
   readonly setCleanScreen: Dispatch<SetStateAction<boolean>>;
   readonly diagnosticsOpen: boolean;
   readonly setDiagnosticsOpen: Dispatch<SetStateAction<boolean>>;
-  /** Whether the external-references panel is open (docked or compact sheet). */
+  /** Whether the external-references panel is open (desktop window or compact sheet). */
   readonly referencesOpen: boolean;
   readonly setReferencesOpen: Dispatch<SetStateAction<boolean>>;
   readonly propertiesOpen: boolean;
@@ -126,7 +126,7 @@ export interface ShellValue {
   readonly toggleLayers: () => void;
   /** Bumped by every `LAYER`: an open palette re-reads and takes the keyboard. */
   readonly layersFocus: number;
-  /** Whether the read-only Font Manager is open (docked or compact sheet). */
+  /** Whether the read-only Font Manager is open (desktop window or compact sheet). */
   readonly fontsOpen: boolean;
   readonly setFontsOpen: Dispatch<SetStateAction<boolean>>;
   readonly commandLineOpen: boolean;

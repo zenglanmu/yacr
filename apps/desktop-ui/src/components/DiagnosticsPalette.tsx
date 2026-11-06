@@ -1,6 +1,6 @@
-// Diagnostics palette: docked (resizes the drawing area) rather than floating,
-// because the host composites a native CAD surface in the central partition.
-// Every value is either real host data or an explicit blank.
+// Diagnostics palette: a floating window in `.palette-layer` (non-modal, so the
+// drawing stays live underneath). Every value is either real host data or an
+// explicit blank.
 import React, { useSyncExternalStore } from 'react';
 import { Icon } from '../icons.tsx';
 import { Button, IconButton } from './primitives.tsx';

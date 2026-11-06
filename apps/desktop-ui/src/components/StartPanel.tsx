@@ -1,4 +1,4 @@
-// Start state: shown in a docked palette when no drawing is open. It offers the
+// Start state: shown in the left column when no drawing is open. It offers the
 // two real creation actions — open an existing drawing and start a blank one —
 // each enabled only by the shared admission rules (host vocabulary plus the
 // `cad_status` capability booleans `canOpen`/`canNew`), and is explicit about

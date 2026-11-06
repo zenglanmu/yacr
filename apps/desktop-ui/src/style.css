@@ -32,6 +32,14 @@
   --hover: #4c5766;
   --pressed: #29313c;
 
+  /* Palette list surfaces, shared by the properties and layers palettes so the
+     two windows have one row rhythm: a zebra row, a row under the pointer, and
+     the inset value well (a filled, bordered cell, lighter than the body). */
+  --stripe: #323b46;          /* every other list row */
+  --row-hover: #3d4755;       /* a list row under the pointer */
+  --well: #38424e;            /* value well / search field fill */
+  --well-hi: #414c5a;         /* the same well under the pointer or focus */
+
   /* Lines */
   --line: #232b36;
   --line-soft: #4b5563;
@@ -351,6 +359,8 @@ button, input, select { font: inherit; color: inherit; }
      Docked palettes and the nav rail keep their own opaque fills below. */
   background: transparent;
 }
+/* The start screen's column only: no palette lives here any more, so this width
+   is unaffected by opening/closing a palette. */
 .workspace__left {
   display: none; flex: 0 0 auto; flex-direction: column;
   width: 0; min-width: 0; overflow: hidden;
@@ -398,6 +408,55 @@ button, input, select { font: inherit; color: inherit; }
 .kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 3px 10px; margin: 0; font-family: var(--font-mono); font-size: 11px; }
 .kv dt { color: var(--text-muted); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
+
+/* Floating palettes ------------------------------------------------------ */
+/* Every left-column palette is a window in this layer (see
+ * `components/PaletteWindow.tsx`). The layer is an absolute sibling *after*
+ * `.native-input` and inside the drawing area, so it paints above the CAD
+ * surface but takes no layout space: mounting, dragging, resizing or closing a
+ * window never changes the partition rect, hence the host is never asked to
+ * resize or re-present the surface. The layer is pointer-transparent so the
+ * drawing stays clickable everywhere outside the windows; each window and its
+ * own controls re-enable input. */
+.palette-layer {
+  position: absolute; inset: 0; z-index: 10;
+  overflow: hidden; pointer-events: none;
+}
+.palette-window {
+  position: absolute;
+  display: flex; flex-direction: column;
+  min-width: 0; min-height: 0;
+  overflow: hidden;
+  /* An opaque chrome surface: it is the only place chrome may cover the
+     drawing, and the drawing must remain visible around it. */
+  background: var(--chrome-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .45);
+  pointer-events: auto;
+  animation: rise var(--t-fast) both;
+}
+/* The palette is the window's only content: fill it and drop the column-era
+   bottom rule so the window owns the outer border. */
+.palette-window > .palette { flex: 1 1 auto; min-height: 0; border-bottom: 0; }
+/* The palette's own header is the title bar: grab it to move the window. */
+.palette-window .palette__head { cursor: grab; touch-action: none; }
+.palette-window .palette__head button { cursor: pointer; }
+.palette-window.is-dragging,
+.palette-window.is-dragging .palette__head { cursor: grabbing; user-select: none; }
+/* The right-edge width grip. It sits above the palette body at the window's own
+   edge and only ever changes width. */
+.palette-window__resize {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 5px;
+  cursor: col-resize; touch-action: none;
+  background: transparent; outline: none;
+}
+.palette-window__resize::after {
+  content: ''; position: absolute; inset: 0;
+  background: transparent; transition: background var(--t-fast);
+}
+.palette-window__resize:hover::after,
+.palette-window__resize:focus-visible::after { background: var(--accent); opacity: .45; }
 
 /* References palette ----------------------------------------------------- */
 /* One card per real reference. The left rule carries the state (loaded = ok,
@@ -488,68 +547,133 @@ button, input, select { font: inherit; color: inherit; }
 .fonts__source { color: var(--text-muted); font-size: 10px; }
 
 /* Properties palette ----------------------------------------------------- */
-/* The inspector is a compact two-column property grid: category heading, then
-   one row per property (label left, editor right). Only the label/value wrap and
-   the multi-selection note need extra rules; the surfaces reuse the shared
-   tokens (`--field`, `--line-soft`, `--hover`, `--focus`). Nothing here changes
-   the dock width or the CAD partition rect. */
-.properties__groups { display: flex; flex-direction: column; }
-.properties__group + .properties__group { margin-top: 2px; }
-.properties__group-title {
-  display: flex; align-items: center; gap: 8px;
-  margin: 12px 0 4px;
-  font-size: 10.5px; font-weight: 600; letter-spacing: .5px;
-  text-transform: uppercase; color: var(--text-muted);
+/* The inspector is a compact two-column table: a full-bleed section band (one
+   step lighter than the palette body) with the disclosure chevron at its end,
+   then 24px rows whose value is a filled, bordered well spanning the value
+   column. The body owns no padding, so every band runs edge to edge and only
+   the cells are inset — the same construction the layers list uses, which is
+   what makes the two palettes read as one product. Surfaces come from the
+   shared tokens (`--chrome-2`, `--well`, `--row-hover`, `--line-soft`,
+   `--focus`); nothing here changes the window width or the CAD partition rect. */
+.properties .palette__head { border-bottom: 1px solid var(--line); }
+.properties__body { padding: 0; }
+/* The no-selection state is one full-width band under the title bar rather than
+   a sentence floating in the body: it takes the same slot a selection's summary
+   does, so the panel does not change shape between the two states. */
+.properties__empty {
+  margin: 0; padding: 5px 10px;
+  background: var(--chrome-2);
+  border-bottom: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: 11.5px;
 }
-.properties__group-title::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--line); }
-.properties__group:first-child .properties__group-title { margin-top: 4px; }
+/* A multi-selection keeps that slot: the count, then the sentence saying one
+   write reaches every selected object. */
+.properties__multi {
+  display: flex; flex-direction: column; gap: 2px;
+  margin: 0; padding: 5px 10px;
+  background: var(--chrome-2);
+  border-bottom: 1px solid var(--line);
+}
+.properties__count { margin: 0; color: var(--text); font-size: 11.5px; font-weight: 600; }
+.properties__groups { display: flex; flex-direction: column; }
+.properties__group { display: flex; flex-direction: column; }
+/* Sections are separated by one hairline, never two: the palette header already
+   draws the line above the first section, and a band's own bottom edge separates
+   it from its rows. */
+.properties__group + .properties__group { border-top: 1px solid var(--line); }
+/* The section band is the disclosure button itself: the whole strip is the hit
+   area and the chevron is its affordance, not a second control. */
+.properties__group-title {
+  margin: 0;
+  background: var(--chrome-2);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px; font-weight: 600; letter-spacing: .2px;
+}
+.properties__group-toggle {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; height: 22px; padding: 0 8px;
+  background: transparent; border: 0;
+  color: var(--text-dim); font: inherit; letter-spacing: inherit; text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.properties__group-toggle:hover { background: var(--hover); color: var(--text); }
+.properties__group-toggle:focus-visible { outline-offset: -2px; }
+.properties__group-label {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.properties__group-chevron { flex: none; color: var(--text-muted); }
+.properties__group-toggle:hover .properties__group-chevron { color: var(--text); }
 .properties__rows { display: flex; flex-direction: column; margin: 0; }
+/* One 24px row per property: a dim label column and the value well. The label
+   never wraps (a wrapped label would break the row rhythm), so it ellipses and
+   keeps the host's machine key in its tooltip. */
 .properties__row {
   display: grid; grid-template-columns: 96px minmax(0, 1fr);
-  align-items: center; gap: 2px 10px;
-  min-height: 26px; padding: 1px 3px; border-radius: var(--radius);
+  align-items: center; gap: 0 10px;
+  min-height: 24px; padding: 1px 8px;
   font-family: var(--font-mono); font-size: 11px;
   transition: background var(--t-fast);
 }
-.properties__row.is-editable:hover { background: var(--hover); }
-.properties__row dt { color: var(--text-muted); overflow-wrap: anywhere; }
+.properties__row.is-editable:hover { background: var(--row-hover); }
+.properties__row dt {
+  min-width: 0; color: var(--text-muted);
+  font-family: var(--font-ui); font-size: 11px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .properties__row dt label { cursor: text; }
 .properties__row dd { display: flex; flex-direction: column; gap: 2px; margin: 0; min-width: 0; }
-.properties__readonly { display: block; overflow-wrap: anywhere; color: var(--text-dim); }
-.properties__readonly.is-mixed { color: var(--text-muted); font-style: italic; }
-.properties__input {
-  width: 100%; min-width: 0; height: 22px; padding: 0 5px;
-  background: transparent; color: var(--text);
-  border: 1px solid transparent; border-radius: var(--radius);
+/* One well per value, whichever editor is inside it: a real field fills it and
+   a read-only row draws the same well around its static text, so the value
+   column reads as one grid instead of a mix of surfaces. */
+.properties__readonly,
+.properties__input,
+.properties__select {
+  width: 100%; min-width: 0; min-height: 20px; padding: 1px 6px;
+  background: var(--well); color: var(--text);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
   font-family: var(--font-mono); font-size: 11px;
-  transition: background var(--t-fast), border-color var(--t-fast);
+  font-variant-numeric: tabular-nums;
+  transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
 }
-.properties__input:hover:not(:disabled) { border-color: var(--line-soft); background: var(--field); }
+.properties__readonly { display: block; color: var(--text-dim); line-height: 16px; overflow-wrap: anywhere; }
+.properties__readonly.is-mixed { color: var(--text-muted); font-style: italic; }
+.properties__input { height: 20px; padding: 0 6px; }
+.properties__input:hover:not(:disabled) { background: var(--well-hi); border-color: var(--text-muted); }
 .properties__input:focus-visible {
-  outline: none; border-color: var(--focus); background: var(--field);
+  outline: none; border-color: var(--focus); background: var(--well-hi);
   box-shadow: 0 0 0 1px var(--focus);
 }
 .properties__input::placeholder { color: var(--text-muted); opacity: 1; font-style: italic; }
-.properties__input:disabled { color: var(--text-disabled); opacity: .65; cursor: progress; }
-.properties__select {
-  width: 100%; min-width: 0; height: 22px; padding-right: 2px;
-  font-family: var(--font-mono); font-size: 11px;
-}
+/* A queued write steps the field down to the neutral field surface and the
+   disabled text token: the value is still the last one typed, but the cell is
+   momentarily inert. */
+.properties__input:disabled { background: var(--field); color: var(--text-disabled); opacity: .65; cursor: progress; }
+.properties__select { height: 20px; padding: 0 2px 0 4px; }
+.properties__select:hover:not(:disabled) { border-color: var(--text-muted); }
 .properties__select:focus-visible {
   outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus);
 }
-.properties__select:disabled { color: var(--text-disabled); opacity: .65; cursor: progress; }
+.properties__select:disabled { background: var(--field); color: var(--text-disabled); opacity: .65; cursor: progress; }
+/* The colour row's chooser swatch matches the well's height, so the cell reads
+   as one control instead of a field with a loose square beside it. */
+.properties .color-field { gap: 4px; }
+.properties .color-field__trigger { width: 20px; height: 20px; }
 .properties__row-error {
   margin: 0; color: var(--danger); font-family: var(--font-ui);
   font-size: 10.5px; line-height: 1.35; overflow-wrap: anywhere;
 }
-.properties__hint { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
-.properties__multi { display: flex; flex-direction: column; gap: 6px; }
-.properties__count { margin: 0; color: var(--text); font-weight: 600; }
+.properties__hint { margin: 0; color: var(--text-muted); font-size: 10.5px; line-height: 1.35; }
 .properties__mixed { margin: 0; color: var(--text-muted); overflow-wrap: anywhere; }
+/* The text-content editor is its own block under the sections. It owns its inner
+   layout inline, so this is only the inset the sections get from their own
+   padding — the body itself stays edge to edge for the bands. */
+.properties__text { padding: 0 8px 8px; }
 
 /* Vendor properties palette --------------------------------------------- */
-/* The Tianzheng/plugin inspector (ADR 0028 D4) is the same docked surface and
+/* The Tianzheng/plugin inspector (ADR 0028 D4) is the same window surface and
    the same row skeleton as the default palette; only the vendor identity and the
    read-only footer are new. The badge is the one accent: it marks the panel as
    plugin-provided so a plain value never reads as a disabled editor. Rows keep
@@ -572,7 +696,7 @@ button, input, select { font: inherit; color: inherit; }
   letter-spacing: .4px; text-transform: uppercase;
 }
 /* Provenance strip: the source handle as one field well with the references
-   cards' left rule. It wraps rather than widening the dock; the handle is
+   cards' left rule. It wraps rather than widening the window; the handle is
    machine text and keeps the mono face. */
 .plugin-properties__source {
   display: flex; flex-direction: column; gap: 3px;
@@ -611,9 +735,9 @@ button, input, select { font: inherit; color: inherit; }
   border-top: 1px solid var(--line);
 }
 .plugin-properties__footer .ui-button { min-width: 0; }
-/* The action that changes what the dock shows keeps the free width; Close is a
+/* The action that changes what the window shows keeps the free width; Close is a
    fixed, short neighbour, so the longer English label is not the first thing
-   truncated in a 300px dock. */
+   truncated in a 300px window. */
 .plugin-properties__footer .ui-button:first-child { flex: 1 1 auto; justify-content: center; }
 .plugin-properties__footer .ui-button:last-child { flex: 0 0 auto; }
 .plugin-properties__footer .ui-button__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -633,23 +757,37 @@ button, input, select { font: inherit; color: inherit; }
 .start-panel__note { font-size: 11px; color: var(--text-muted); }
 
 /* Layers palette --------------------------------------------------------- */
-/* A docked list built for the 300px dock: a search strip, an optional restore
- * strip, then one row per layer. A row is a four-column grid (eye, color dot,
- * name, marks) and grows a second line only when it has something to explain — the
- * drawing's own hidden flag, or the details line the dot/chevron opens. Every
- * surface reuses the shared tokens (`--field`, `--hover`, `--line-soft`,
- * `--focus`, `--accent-*`); the per-row color is the drawing's stored layer color
- * (`row.color.rgb`), or the name-derived muted marker when the host reported none
- * (see `layer-attributes.ts`), which never claims to be the layer's color. */
-.layers__tools { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px 4px; }
+/* A list built for the palette window: a search strip, an optional restore
+ * strip, then a sticky column band over one row per layer. A row is a 24px
+ * four-column grid (eye, color dot, name, marks) and grows a second line only
+ * when it has something to explain — the drawing's own hidden flag, or the
+ * details line the dot/chevron opens. Rows are zebra-striped and run edge to
+ * edge (the body owns no padding), the same construction the properties palette
+ * uses; the column band and the section bands there both come from
+ * `--chrome-2`, so the two windows share one header treatment. Every surface
+ * reuses the shared tokens (`--stripe`, `--row-hover`, `--well`, `--line-soft`,
+ * `--focus`, `--accent-*`); the per-row color is the drawing's stored layer
+ * color (`row.color.rgb`), or the name-derived muted marker when the host
+ * reported none (see `layer-attributes.ts`), which never claims to be the
+ * layer's color. */
+.layers .palette__head { border-bottom: 1px solid var(--line); }
+.layers__tools {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
 .layers__search {
   display: flex; align-items: center; gap: 5px;
   height: 22px; padding: 0 3px 0 6px;
-  background: var(--field); color: var(--text-muted);
+  background: var(--well); color: var(--text-muted);
   border: 1px solid var(--line-soft); border-radius: var(--radius);
-  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
 }
-.layers__search:focus-within { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.layers__search:hover { border-color: var(--text-muted); }
+.layers__search:focus-within {
+  border-color: var(--focus); background: var(--well-hi);
+  box-shadow: 0 0 0 1px var(--focus);
+}
 .layers__search-input {
   flex: 1 1 auto; min-width: 0; height: 100%; padding: 0;
   background: transparent; border: 0; color: var(--text);
@@ -659,14 +797,19 @@ button, input, select { font: inherit; color: inherit; }
 .layers__search-input::placeholder { color: var(--text-muted); opacity: 1; }
 .layers__override { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .layers__override-count { color: var(--text-muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
-.layers__body { padding-top: 2px; }
+/* The body owns no padding: rows and the column band run edge to edge, so the
+   zebra stripes read as one table instead of a column of cards. */
+.layers__body { padding: 0; }
+.layers__body > .palette__empty { margin: 0; padding: 8px 10px; }
 .layers__error {
-  margin: 0 0 6px; padding: 3px 6px;
+  margin: 0; padding: 4px 10px;
+  background: var(--field);
   border-left: 2px solid var(--danger);
+  border-bottom: 1px solid var(--line);
   color: var(--danger); font-family: var(--font-ui); font-size: 10.5px;
   line-height: 1.35; overflow-wrap: anywhere;
 }
-.layers__skeleton { display: flex; flex-direction: column; gap: 9px; padding: 7px 4px; }
+.layers__skeleton { display: flex; flex-direction: column; gap: 9px; padding: 8px 10px; }
 .layers__skeleton span {
   display: block; height: 9px; border-radius: 999px;
   background: var(--field);
@@ -676,17 +819,38 @@ button, input, select { font: inherit; color: inherit; }
 .layers__skeleton span:nth-child(2) { width: 86%; animation-delay: .12s; }
 .layers__skeleton span:nth-child(3) { width: 57%; animation-delay: .24s; }
 @keyframes layers-pulse { 0%, 100% { opacity: .42; } 50% { opacity: .88; } }
-.layers__list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+/* The column band labels the two columns a user scans: the visibility toggle at
+   the left and the name. It is sticky inside the palette body, so the labels
+   stay put while the list scrolls under them, and its grid is the row grid (the
+   marks column is the row's trailing `auto`, which the band does not need). */
+.layers__columns {
+  position: sticky; top: 0; z-index: 1;
+  display: grid; grid-template-columns: 20px 7px minmax(0, 1fr);
+  align-items: center; gap: 6px;
+  height: 22px; padding: 0 4px;
+  background: var(--chrome-2);
+  border-bottom: 1px solid var(--line);
+  color: var(--text-muted);
+  font-family: var(--font-ui); font-size: 10.5px; letter-spacing: .3px;
+  user-select: none;
+}
+.layers__column { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layers__column--visibility { grid-column: 1; text-align: center; }
+.layers__column--name { grid-column: 3; }
+.layers__list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
 .layers__row {
   display: grid;
   grid-template-columns: 20px 7px minmax(0, 1fr) auto;
   align-items: center; gap: 6px;
-  min-height: 28px; padding: 3px 4px 3px 2px;
-  border-left: 2px solid transparent; border-radius: var(--radius);
+  min-height: 24px; padding: 0 4px 0 2px;
+  border-left: 2px solid transparent;
   font-family: var(--font-mono); font-size: 11.5px;
   transition: background var(--t-fast);
 }
-.layers__row:hover { background: var(--hover); }
+/* Zebra stripes: every other row is one step lighter, so a dense list scans
+   without a rule per row. Declared before the state fills below, which win. */
+.layers__row:nth-child(even) { background: var(--stripe); }
+.layers__row:hover { background: var(--row-hover); }
 .layers__row:focus-within { background: var(--pressed); }
 /* The current layer is marked by the accent edge plus the chip in the marks
  * column; no fill of its own, so a hovered current row still reads as hovered. */
@@ -759,10 +923,10 @@ button, input, select { font: inherit; color: inherit; }
 }
 /* The details line ------------------------------------------------------- */
 /* Opened from the dot or the chevron and rendered only while it is open, so a
- * resting row is exactly the 28px row it always was. It spans the row's grid the
+ * resting row is exactly the 24px row it always was. It spans the row's grid the
  * way the delete confirm does (a block of controls under the row's own line), so
  * the four chip toggles, the color control and the three attributes get the full
- * dock width instead of the note line's narrower `3 / -1` column. */
+ * window width instead of the note line's narrower `3 / -1` column. */
 .layers__details {
   grid-column: 1 / -1;
   display: flex; flex-direction: column; gap: 4px;
@@ -775,7 +939,7 @@ button, input, select { font: inherit; color: inherit; }
 .layers__details-head .ui-icon-button { margin-left: auto; }
 /* The colour cell of the details line is the shared `.color-field` trigger (see
  * the chooser block at the end of this file): one control for both palettes, so
- * the dock needs no third colour surface of its own. */
+ * the window needs no third colour surface of its own. */
 .layers__flags { display: flex; flex-wrap: wrap; gap: 3px; }
 /* The read-only secondaries: the mono scale the rows already use, verbatim values
  * (no unit conversion), labels on the UI scale so a value never reads as a name. */
@@ -790,7 +954,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .layers__attr-value { min-width: 0; color: var(--text-dim); overflow-wrap: anywhere; }
 /* Row actions (rename / delete) ----------------------------------------- */
-/* Two more controls per row would make a 300px dock read as a toolbar per line,
+/* Two more controls per row would make a 300px window read as a toolbar per line,
  * so they are revealed by hover and by `:focus-within` — the same two triggers a
  * pointer and the keyboard already use — and their space is reserved at all times
  * (`opacity`, never `display`), so opening the pencil never moves the name. An
@@ -1127,18 +1291,37 @@ button, input, select { font: inherit; color: inherit; }
      is clipped at the bar's edge instead of over the drawing. */
   overflow: hidden;
 }
-.statusbar__coords { display: inline-flex; align-items: center; gap: 6px; min-width: 108px; color: var(--text-dim); }
-/* The active tool's parameter rows. HATCH alone owns ten of them now (four make a
- * gradient), which no longer fits beside the drafting chips and the right-hand
- * utilities on a narrow window. So this group — and only this group — is the
- * status bar's scroller: `min-width: 0` lets it give up width first,
- * `overflow-x: auto` reveals the rest instead of clipping it, and the scrollbar
- * is hidden so a 26px bar keeps its single line. Every row keeps its own 20px chip
- * and its own label, so it still reads as one strip. An empty group collapses, so
- * a tool with no parameters costs no gap. */
+/* The coordinate readout. It sits to the right of the drafting chips (the bar's
+   fixed left anchor), so a longer number can never move or ellipsize a chip. Its
+   text cell is held open at the width of `-1648.4055, 1233.9562` with tabular
+   digits, so the tool chip beside it does not jitter while the pointer moves; a
+   larger coordinate — or the `X, Y, Z` form — widens the cell up to 30ch instead
+   of dropping digits, and only past that does it ellipsize. */
+.statusbar__coords { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; color: var(--text-dim); }
+.statusbar__coords .mono {
+  flex: 0 0 auto;
+  min-width: 22ch;
+  max-width: 30ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* The active tool's parameter rows. HATCH alone owns ten of them now (four make
+ * a gradient), which does not fit beside the drafting chips, the readout, the
+ * tool chip and the right-hand utilities on a narrow window. So this group — and
+ * only this group — is the status bar's scroller: `min-width: 0` lets it give up
+ * width first, `overflow-x: auto` reveals the rest instead of clipping it, and the
+ * scrollbar is hidden so a 26px bar keeps its single line. Its shrink weight is
+ * deliberately huge: the strip must collapse to nothing long before the state
+ * cell gives up a pixel, so a long parameter row can never move the bar's left
+ * anchor. Every row keeps its own 20px chip and its own label, so it still reads
+ * as one strip. An empty group collapses, so a tool with no parameters costs no
+ * gap. */
 .statusbar__params {
   display: flex; align-items: center; gap: 6px;
   min-width: 0;
+  flex-shrink: 100;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
@@ -1147,25 +1330,35 @@ button, input, select { font: inherit; color: inherit; }
 .statusbar__params.is-empty { display: none; }
 .mono { font-family: var(--font-mono); }
 /* Squeeze order on a narrow window (no wrap is possible in a 26px bar):
-   1. the spacer, 2. the tool-parameter strip (its own scroller, `min-width: 0`),
-   3. this state word and the active-tool chip (bounded, then ellipsized),
-   4. the parameter chips' own value slots (`flex: 0 1 auto`). The chip groups are
-   `flex: 0 0 auto`, so a group never shrinks under its own chips — that is what
-   used to let a chip paint *outside* its group and over its neighbour — and the
-   chips themselves never wrap (`nowrap` + ellipsis). A bar that is still
-   over-subscribed clips at its own edge instead of over the drawing. */
+   1. the spacer, 2. the tool-parameter strip (its own scroller, `min-width: 0`,
+   and a far heavier shrink weight than anything else), 3. the optional error line
+   (bounded, then ellipsized) and — only as a genuine last resort, once every other
+   item is at its floor — the state cell's fixed width. The chip groups, the
+   readout, the tool chip and the right-hand utilities are `flex: 0 0 auto` and
+   keep their full width, so no control is ever squeezed into its neighbour,
+   shrunk under its own label, or clipped away while a status word could have
+   shortened instead. A bar that is still over-subscribed clips at its own edge
+   instead of over the drawing.
+   The state word and the drafting group are the bar's *left* anchor: coordinates,
+   state text, the tool chip or the parameter strip changing width can only push
+   the items to their right. The state word is a deliberately fixed cell — it
+   holds the widest catalog label it can show (the import phases: 18ch fits
+   "Resolving block states" in the UI font) and ellipsizes past that — so a longer
+   state never nudges the drafting chips either. */
 .statusbar__state {
+  flex: 0 1 auto;
+  width: 18ch;
   min-width: 0;
-  max-width: 26ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-muted);
 }
 /* Active-tool chip: the tool name, an optional per-step prompt (the named picks
-   of the dimension family) and the captured count. The prompt is guidance, so it
-   is tinted and bounded — a long prompt ellipsizes instead of pushing the
-   right-side status group, and it never changes the fixed status-bar height. */
+   of the dimension family) and the captured count. It is a readout, so it sits
+   to the right of the chips and keeps its own width; the prompt is guidance and
+   is bounded — a long prompt ellipsizes instead of pushing the right-hand
+   utilities off the edge, and it never changes the fixed status-bar height. */
 .statusbar__tool { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; max-width: 40ch; white-space: nowrap; }
 .statusbar__tool-step {
   color: var(--accent-text);
@@ -1382,14 +1575,17 @@ button, input, select { font: inherit; color: inherit; }
 /* A status-bar row cannot wrap (26px), so the parameter chips give up their
    labels before they give up their controls: the chip's accessible name stays on
    the `role="group"`, and the same rule already drops the chooser/swatch labels
-   further down. 1180px is the width at which "Hover preview" + "Command line" +
-   "Clean screen" + a labelled parameter chip stop fitting beside each other with
-   an active tool and a long state word. */
+   further down. 1180px is the width at which the drafting chips + the coordinate
+   readout + the active-tool chip + the right-hand utilities (Options, Command
+   line, Clean screen, Properties, Diagnostics) stop fitting beside each other
+   with an active tool and a full state cell. */
 @media (max-width: 1180px) {
   .status-stepper__label { display: none; }
   .status-choices__label { display: none; }
   .statusbar__tool-step { display: none; }
 }
+/* Narrow windows: only the start column steps down here. Floating palettes are
+   clamped by `layout/palette-window.ts` against the drawing area instead. */
 @media (max-width: 900px) {
   .workspace__left.is-open { width: 240px; }
   .titlebar__brand { display: none; }
@@ -1405,13 +1601,15 @@ button, input, select { font: inherit; color: inherit; }
 @media (max-width: 640px) {
   .field-inline__label { display: none; }
   .workspace__left.is-open { width: 200px; }
+  /* The fixed state cell is the first thing a phone-wide bar drops: the drafting
+     chips (the left anchor) and the readout keep the row. */
   .statusbar__state { display: none; }
   .ribbon-panel { padding: 0 5px; }
   .import-progress__phase { display: none; }
-  /* Give long values room by narrowing the label column on the small dock. */
+  /* Give long values room by narrowing the label column on a narrow palette. */
   .properties__row { grid-template-columns: 76px minmax(0, 1fr); }
-  /* The smallest dock cannot hold a row other than a plain one: the marks wrap
-   * inside a bounded column instead of running past the dock's edge, where the
+  /* The narrowest palette cannot hold a row other than a plain one: the marks wrap
+   * inside a bounded column instead of running past the palette's edge, where the
    * row's own controls would be clipped. Only this width grows a row a line. */
   .layers__marks { max-width: 112px; flex-wrap: wrap; justify-content: flex-end; row-gap: 2px; }
 }
@@ -1522,7 +1720,7 @@ button, input, select { font: inherit; color: inherit; }
 /* The in-DOM chooser both palettes open (`ColorChooser.tsx`): the swatch trigger
    plus the anchored popover. The popover uses the shortcut menu's placement rule
    (`position: fixed`, measured against the trigger's rect), so it paints above the
-   docked palettes and the CAD partition and is never clipped by the palette body's
+   palette windows and the CAD partition and is never clipped by the palette body's
    own scroll. It reuses the same chrome surface tokens as the menu (radius, border,
    shadow, `--chrome-2`), so it reads as part of the shell rather than as a system
    dialog — it replaces the webview's own colour dialog, which could neither show

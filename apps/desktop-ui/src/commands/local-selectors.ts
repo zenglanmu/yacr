@@ -3,7 +3,7 @@
 //
 // These words never reach the router: the shell answers them itself. Keeping the
 // decision here means `App.tsx` owns no per-selector branch and a new selector
-// cannot be added without also answering the layout question (a docked panel on
+// cannot be added without also answering the layout question (a palette window on
 // the compact layout is a refusal in the catalog's own words, never a flag that
 // paints nothing).
 //
@@ -28,7 +28,7 @@ export type LocalSelectorResult =
   | { readonly kind: 'fonts' }
   | { readonly kind: 'refused'; readonly panelKey: string };
 
-/** The panel labels the docked refusal names. */
+/** The panel labels the layout refusal names. */
 export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
   properties: 'properties.panel',
   layers: 'layers.panel',
@@ -39,8 +39,9 @@ export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
  * line belongs to the router.
  *
  * The order mirrors the old inline branch: dialog selectors first, then the
- * docked panels. `PROPERTIES`/`LAYER` are refused where the dock is not rendered;
- * `FONTS`/`RESOURCES` have a compact sheet and are never refused by layout.
+ * desktop palette windows. `PROPERTIES`/`LAYER` are refused where the palette
+ * layer is not rendered; `FONTS`/`RESOURCES` have a compact sheet and are never
+ * refused by layout.
  */
 export function localSelectorFor(text: string, layout: LayoutMode): LocalSelectorResult | null {
   if (isOptionsCommand(text)) return { kind: 'options' };

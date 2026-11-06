@@ -213,7 +213,7 @@ function recordOf(value: unknown): Record<string, unknown> | null {
 }
 
 /**
- * The typed word that opens the docked palette.
+ * The typed word that opens the floating palette window.
  *
  * It is a chrome-local selector, like `PROPERTIES`: the command line intercepts
  * it **before** the router, so no `cad_command` is ever sent for it. The router

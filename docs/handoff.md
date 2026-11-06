@@ -1,3 +1,29 @@
+## 2026-11-06 状态栏左锚点；五个左侧面板改为共享容器的浮动窗（不改变 CAD 分区）
+
+- **状态栏顺序**（`apps/desktop-ui/src/components/StatusBar.tsx`）：`就绪 → 栅格/正交/捕捉/对象捕捉/悬停预览`
+  是左锚点，坐标读数、活动工具 chip、工具参数条全部排在其右。坐标放在固定 `ch` 单元格里
+  （等宽数字 + 上下界），状态词固定 18ch，参数条 `flex-shrink: 100`，因此坐标文本变长不会再挪动或
+  省略任何一个开关文案。契约测试：`test/statusbar.test.ts` 的
+  `the state word and the drafting chips stay left of every width-changing readout`。
+- **共享浮窗容器**（新增 `apps/desktop-ui/src/components/PaletteWindow.tsx` + 纯几何
+  `src/layout/palette-window.ts`）：属性/图层/诊断/外部引用/字体五个面板都由**同一个**容器包成
+  非模态浮窗——标题栏拖动、右缘握把调宽（含 ArrowLeft/Right）、按下置顶、按 key 记住几何（无
+  localStorage）。默认贴绘图区左缘 300px，依次 0/24/48/72/96px 级联。
+- **不改变分区**（`src/components/Workspace.tsx`）：`.workspace__left` 只剩开始页；
+  五个面板移入 `.workspace__canvas` 内、`.native-input` **之后**的绝对定位 `.palette-layer`
+  （`pointer-events: none`，窗口自身 `auto`）。层不占布局空间，所以开关/拖动/调宽都不改变
+  `.native-input` 矩形，`src/cad/input.ts` 的 `ResizeObserver` 不会上报 `resize`，宿主不重排、
+  不重新 present 原生表面。紧凑布局仍用原有 bottom sheet（`mobile.css` 隐藏 `.palette-layer`）。
+- **i18n**：新增 `palette.resize_width`（zh「调整宽度」/ en "Resize width"），两语言键集一致。
+- **验证（已运行）**：`apps/desktop-ui npm test` 1126 passed / 0 failed（含新增
+  `test/palette-window.test.ts` 8 条与重钉的 canvas-session / layers / properties / metrics /
+  mobile-layout 断言）；`npm run build` PASS（仅既有 >500kB chunk 警告）；
+  `check-i18n.py`（1096 keys）、`check-file-size.py` PASS。
+- **NOT RUN**：真实窗口 / GPU / 像素证据，以及 Windows/macOS/Android 上「DOM 浮层压在原生 surface
+  之上」的真机验证——这条按 ADR 0023「DOM 在上、surface 在下」建模，并通过既有的模态弹窗路径
+  复用，但本轮没有跨载体运行证据。`palette-layer` 不改变分区矩形是由**结构**（绝对定位、非布局项）
+  与源码/CSS 契约保证的，**没有**做 headless 的 `getBoundingClientRect` 实测。
+
 ## 2026-11-06 原地更新准入改为「足迹」：GEOMETRY/STYLE 编辑不再整基重建
 
 - **旧规则（已推翻）**：`crates/cad-app/src/render_scene/edit.rs::update_candidate` 要求单个实体

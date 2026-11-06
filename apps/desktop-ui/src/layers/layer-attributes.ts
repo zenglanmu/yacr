@@ -131,7 +131,7 @@ export interface LayerMark {
  *
  * Only the states worth a mark appear: `off`, `frozen` and `locked` while they are
  * set, and `plottable` while it is **not**. That keeps a plain row exactly as
- * compact as it was before attributes arrived (a 300px dock cannot hold four
+ * compact as it was before attributes arrived (a 300px palette window cannot hold four
  * bidirectional chips next to the name) and it keeps the marks column meaning
  * what it already means — "something about this row is not the default". A press
  * on a mark clears that very state, which is the one direction a reader of the
@@ -142,7 +142,7 @@ export interface LayerMark {
  * `layers.plottable` — and it is only marked when the row itself said
  * `plottable: false`, never because the field was absent.
  *
- * [`layerMarkSummary`] then caps what a *resting* row spells out: the dock cannot
+ * [`layerMarkSummary`] then caps what a *resting* row spells out: the window cannot
  * show four chips next to a name, so a row with more than [`RESTING_MARK_LIMIT`]
  * states shows the first two and a count of the rest (which opens the details line).
  */
@@ -169,7 +169,7 @@ export function layerMarks(row: LayerRow | null | undefined): LayerMark[] {
 /**
  * How many state chips a resting row spells out.
  *
- * The 300px dock leaves the marks column room for about two chips once the row's
+ * The 300px window leaves the marks column room for about two chips once the row's
  * own marks and controls (current, override, attributes, rename/delete) are
  * counted, so two is the most a row can say without eliding its name. Most rows
  * carry none.

@@ -30,12 +30,12 @@ export const SHELL_ACTIONS = Object.freeze({
   // with no router command and no host payload; the tab handoff is chrome-local
   // (`options.ts`'s pending-tab slot).
   plugins: 'plugins',
-  // Toggles the docked properties palette. Like OPTIONS it is chrome-local:
+  // Toggles the properties palette window. Like OPTIONS it is chrome-local:
   // `PROPERTIES` has no Rust command, so the ribbon must not send `cad_command`.
   properties: 'properties',
 });
 
-/** The shell actions that toggle a docked palette. */
+/** The shell actions that toggle a desktop palette window. */
 export const PALETTE_ACTIONS: readonly string[] = Object.freeze([
   SHELL_ACTIONS.diagnostics,
   SHELL_ACTIONS.properties,
@@ -74,10 +74,10 @@ export const PALETTE_COMMANDS: readonly string[] = Object.freeze([
   'LAYERP',
   'LAYOFF',
   'LAYON',
-  // `FONTS` opens the read-only Font Manager, which is a docked palette on the
+  // `FONTS` opens the read-only Font Manager, which is a palette window on the
   // desktop (and a floating sheet on the compact layout). A carrier that never
-  // renders the dock has no surface for that report, so the button is dropped
-  // with it instead of opening a panel that is not mounted.
+  // renders the palette layer has no surface for that report, so the button is
+  // dropped with it instead of opening a panel that is not mounted.
   'FONTS',
 ]);
 
@@ -164,7 +164,7 @@ export interface RibbonCell<T> {
 /**
  * The items a panel actually offers on the reported carrier.
  *
- * A docked palette the carrier does not have must not be offered anywhere: the
+ * A desktop palette the carrier does not have must not be offered anywhere: the
  * status-bar chips are hidden, and so are these ribbon entries, because a button
  * that toggles a panel which is never rendered is a dead affordance. Only the
  * palette toggles are filtered; every other item is returned as the very same
@@ -492,7 +492,7 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         id: 'layers',
         titleKey: 'layers.panel',
         // The arrow in this panel's title row opens the same surface the LAYER
-        // button does: the docked layers palette (`LAYER` is chrome-local, so a
+        // button does: the layers palette window (`LAYER` is chrome-local, so a
         // repeat press focuses and re-reads it rather than opening a second one).
         launcher: true,
         launcherCommand: 'LAYER',
@@ -772,7 +772,7 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // The read-only font report sits beside the other annotation palettes.
           // `FONTS` is chrome-local (it opens the panel; the panel reads
           // `cad_fonts`), so it rides the command funnel exactly like LAYER and is
-          // dropped with the docked palettes on a carrier that never renders them
+          // dropped with the desktop palettes on a carrier that never renders them
           // (`PALETTE_COMMANDS`).
           { id: 'FONTS', labelKey: 'resources.fonts', icon: 'font', command: 'FONTS', large: true },
           { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', command: 'SELECTALL' },

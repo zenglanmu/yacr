@@ -1,4 +1,4 @@
-// Pure, localized view of the selection for the docked properties palette.
+// Pure, localized view of the selection for the floating properties palette.
 //
 // The wire block (`cad_status.selection`, validated by `selection-wire.ts`) is
 // the only input: rows arrive with a stable machine `key`, a `group`, an

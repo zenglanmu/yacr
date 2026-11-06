@@ -1,6 +1,6 @@
 // Font Manager: a read-only report of the host's font registry
-// (`cad_fonts`). Docked on the desktop and a floating sheet on the compact
-// layout (same component, same rows).
+// (`cad_fonts`). A floating palette window on the desktop and a bottom sheet on
+// the compact layout (same component, same rows).
 //
 // The host owns the registry. This panel never registers, removes or reloads a
 // face: there is no command for those, so there is no control for them either.
@@ -20,8 +20,8 @@ import { useI18n, useShell } from '../context.ts';
 import { createFontsStore, fontSummary, projectFontRows } from '../fonts/fonts.ts';
 import type { FontRow, FontsStore } from '../fonts/fonts.ts';
 
-/** The panel's `variant`: docked in the left column, or the compact sheet. */
-export type FontsPanelVariant = 'docked' | 'floating';
+/** The panel's `variant`: the desktop window, or the modal compact sheet. */
+export type FontsPanelVariant = 'window' | 'floating';
 
 export interface FontsPanelProps {
   readonly variant?: FontsPanelVariant;
@@ -64,7 +64,7 @@ function FontSection({ title, rows }: { readonly title: string; readonly rows: r
   );
 }
 
-export function FontsPanel({ variant = 'docked' }: FontsPanelProps) {
+export function FontsPanel({ variant = 'window' }: FontsPanelProps) {
   const { t } = useI18n();
   const shell = useShell();
   const storeRef = useRef<FontsStore | null>(null);

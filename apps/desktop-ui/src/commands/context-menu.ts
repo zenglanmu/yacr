@@ -178,7 +178,7 @@ export function buildContextMenu({
           { id: 'selection.all', key: 'menu.selection.all', command: 'SELECTALL', enabled: true },
           { id: 'selection.erase', key: 'menu.selection.erase', command: 'ERASE', enabled: editable },
           // A chrome-local selector, like the command line's own intercept: the
-          // run path resolves it to the docked palette, never to the router.
+          // run path resolves it to the floating palette, never to the router.
           { id: 'selection.properties', key: 'menu.selection.properties', command: 'PROPERTIES', enabled: true },
         ],
       },

@@ -13,7 +13,7 @@ const NAV_ITEMS = ['FIT', 'ZOOMIN', 'ZOOMOUT', 'PAN', 'ORBIT'];
 export function NavRail() {
   const { t } = useI18n();
   const shell = useShell();
-  // Palette toggles exist only where the docked palettes do (a `dom-canvas`
+  // Palette toggles exist only where the desktop palettes do (a `dom-canvas`
   // carrier holds no host-side document state for them to read). One carrier
   // rule — `palettesOffered` — decides for **every** toggle below: the layers
   // pair and the diagnostics pair stand or fall together, so no button here can

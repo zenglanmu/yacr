@@ -20,8 +20,8 @@
 // than a desktop window. Every phone/tablet in landscape reports <= 1024 (a
 // 4:3 tablet in portrait is exactly 1024, and `max-width` is inclusive); the
 // first desktop window width is 1025. Anything narrower gets the compact chrome
-// whatever the platform, anything wider keeps the band, the dock and the status
-// bar it has always had.
+// whatever the platform, anything wider keeps the band, the palette layer and the
+// status bar it has always had.
 
 /**
  * Widest window (CSS px) that still gets the compact mobile layout.

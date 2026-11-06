@@ -528,9 +528,11 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
   const observer = new env.ResizeObserver(scheduleResize);
   observer.observe(element);
   // Chrome regions can shift the CAD origin or shrink the partition without a
-  // pointer event (window resize, ribbon expand/collapse, palette dock, command
-  // history expand, DPR change). Observing every region keeps the host's surface
-  // metrics in sync, which is what anchors wheel zoom at the cursor.
+  // pointer event (window resize, ribbon expand/collapse, start column open/close,
+  // command history expand, DPR change). Observing every region keeps the host's
+  // surface metrics in sync, which is what anchors wheel zoom at the cursor.
+  // Floating palettes are deliberately *not* in this list: they are absolute
+  // overlays and never move the partition rect.
   const layoutRoot = element.closest?.('.shell') ?? element.parentElement;
   for (const region of layoutRoot?.querySelectorAll('.app-region') ?? []) observer.observe(region);
   // Every handler is registered for one DOM event type; the concrete event class

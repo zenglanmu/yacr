@@ -1,8 +1,9 @@
 // Properties palette: an AutoCAD-style inspector for the current selection.
 //
-// Docked (it shrinks the drawing area) rather than floating, because the host
-// composites a native CAD surface in the central partition. The rows come only
-// from `cad_status.selection`; this file is layout plus the edit state machine.
+// A floating window in `.palette-layer` (wrapped by `PaletteWindow`), so it never
+// shrinks the drawing area: the host composites the native CAD surface at the
+// unchanged `.native-input` rect. The rows come only from
+// `cad_status.selection`; this file is layout plus the edit state machine.
 // The view model (`properties-view.ts`) decides the sections, labels, editors
 // and the mixed placeholder; the write contract (`properties.ts`) owns the
 // grammar mirror and the one IPC name.
@@ -19,6 +20,12 @@
 // `selection.text` is a round-trippable string, not a display row, and it has
 // its own `cad_set_selected_text` path. It stays mounted in every state so a
 // parked draft survives a selection change.
+//
+// Presentation (styling only): a section header is a full-width band that is
+// itself a disclosure button — folding a section is local `useState`, never a
+// host fact, and an unmounted editor keeps its draft in `edits` (keyed by row).
+// Every value sits in the same filled well, whichever editor occupies it, so
+// the value column reads as one grid instead of a mix of surfaces.
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons.tsx';
 import { IconButton } from './primitives.tsx';
@@ -229,6 +236,11 @@ export function PropertiesPalette() {
   const selection = shell.status?.selection ?? null;
   const view = propertiesView(selection, t);
   const [edits, setEdits] = useState<Record<string, EditEntry>>({});
+  // Which sections the user folded away, by backend group. Purely local: a
+  // collapsed section is a view preference, not a drawing fact, and nothing in
+  // the host's rows depends on it. Editors that unmount keep their drafts in
+  // `edits` (keyed by row), so folding never loses what was typed.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   // The edit map is also read synchronously by event handlers and the status
   // reconciler, so the ref is the source the state mirrors (never a stale render
   // closure, never a second commit while one is queued).
@@ -377,6 +389,15 @@ export function PropertiesPalette() {
     clear(row.key);
   }
 
+  function toggleSection(group: string) {
+    setCollapsed(current => {
+      const next = { ...current };
+      if (next[group]) delete next[group];
+      else next[group] = true;
+      return next;
+    });
+  }
+
   function rowMessage(row: PropertyRowView) {
     const entry = edits[row.key];
     const code = entry?.error;
@@ -395,8 +416,8 @@ export function PropertiesPalette() {
           onClick={() => shell.setPropertiesOpen(false)}
         />
       </header>
-      <div className="palette__body">
-        {view.kind === 'empty' ? <p className="palette__empty">{t('properties.empty')}</p> : null}
+      <div className="palette__body properties__body">
+        {view.kind === 'empty' ? <p className="properties__empty">{t('properties.empty')}</p> : null}
 
         {view.kind !== 'empty' ? (
           <>
@@ -408,52 +429,73 @@ export function PropertiesPalette() {
             ) : null}
 
             <div className="properties__groups">
-              {view.sections.map(section => (
-                <section
-                  key={section.group}
-                  className="properties__group"
-                  aria-labelledby={`properties-group-${section.group}`}
-                >
-                  <h3 id={`properties-group-${section.group}`} className="properties__group-title">
-                    {section.label}
-                  </h3>
-                  <dl className="properties__rows">
-                    {section.rows.map(row => {
-                      const entry = edits[row.key] ?? EMPTY_ENTRY;
-                      const message = rowMessage(row);
-                      const editable = row.editor !== 'value';
-                      return (
-                        <div
-                          key={row.key}
-                          className={['properties__row', editable ? 'is-editable' : ''].filter(Boolean).join(' ')}
-                        >
-                          <dt title={row.key}>
-                            {editable
-                              ? <label htmlFor={`properties-value-${row.key}`}>{row.label}</label>
-                              : row.label}
-                          </dt>
-                          <dd>
-                            <RowEditor
-                              row={row}
-                              entry={entry}
-                              t={t}
-                              onChange={change}
-                              onCommit={commit}
-                              onCancel={cancel}
-                              onPick={choose}
-                            />
-                            {message ? (
-                              <p className="properties__row-error" role="alert" title={message.code}>
-                                {message.text}
-                              </p>
-                            ) : null}
-                          </dd>
-                        </div>
-                      );
-                    })}
-                  </dl>
-                </section>
-              ))}
+              {view.sections.map(section => {
+                const open = !collapsed[section.group];
+                return (
+                  <section
+                    key={section.group}
+                    className="properties__group"
+                    aria-labelledby={`properties-group-${section.group}`}
+                  >
+                    <h3 id={`properties-group-${section.group}`} className="properties__group-title">
+                      {/* The whole strip is the disclosure: the reference
+                          inspector draws a section as a labelled band, so the
+                          band itself is the button (and the chevron is its
+                          affordance). `aria-expanded` is the state. */}
+                      <button
+                        type="button"
+                        className="properties__group-toggle"
+                        aria-expanded={open}
+                        onClick={() => toggleSection(section.group)}
+                      >
+                        <span className="properties__group-label">{section.label}</span>
+                        <Icon
+                          name={open ? 'chevronDown' : 'chevronRight'}
+                          size={12}
+                          className="properties__group-chevron"
+                        />
+                      </button>
+                    </h3>
+                    {open ? (
+                      <dl className="properties__rows">
+                        {section.rows.map(row => {
+                          const entry = edits[row.key] ?? EMPTY_ENTRY;
+                          const message = rowMessage(row);
+                          const editable = row.editor !== 'value';
+                          return (
+                            <div
+                              key={row.key}
+                              className={['properties__row', editable ? 'is-editable' : ''].filter(Boolean).join(' ')}
+                            >
+                              <dt title={row.key}>
+                                {editable
+                                  ? <label htmlFor={`properties-value-${row.key}`}>{row.label}</label>
+                                  : row.label}
+                              </dt>
+                              <dd>
+                                <RowEditor
+                                  row={row}
+                                  entry={entry}
+                                  t={t}
+                                  onChange={change}
+                                  onCommit={commit}
+                                  onCancel={cancel}
+                                  onPick={choose}
+                                />
+                                {message ? (
+                                  <p className="properties__row-error" role="alert" title={message.code}>
+                                    {message.text}
+                                  </p>
+                                ) : null}
+                              </dd>
+                            </div>
+                          );
+                        })}
+                      </dl>
+                    ) : null}
+                  </section>
+                );
+              })}
             </div>
           </>
         ) : null}

@@ -195,7 +195,7 @@ test('a multi-selection says above the sections that a change applies to all obj
   assert.match(source, /placeholder: \(row\.mixed && entry\.draft === null \? row\.mixedText : null\) \?\? undefined/);
 });
 
-test('the palette styles match the chrome tokens and keep the docked width', async () => {
+test('the palette styles match the chrome tokens and add no positioning of their own', async () => {
   const css = await readCss();
   const block = css.slice(css.indexOf('/* Properties palette'), css.indexOf('.start-panel'));
   for (const token of ['var(--hover)', 'var(--line-soft)', 'var(--focus)', 'var(--field)']) {
@@ -204,7 +204,27 @@ test('the palette styles match the chrome tokens and keep the docked width', asy
   assert.ok(block.includes('.properties__input:focus-visible'));
   assert.ok(block.includes('.properties__select:focus-visible'));
   assert.ok(block.includes('.properties__row'));
-  assert.ok(!block.includes('position: fixed'), 'the inspector stays docked, never floating over the CAD surface');
+  assert.ok(!block.includes('position: fixed'), 'placement belongs to PaletteWindow, never to the inspector body');
+});
+
+test('the section band is a real disclosure, not a decorative chevron', async () => {
+  const source = await readModule('components/PropertiesPalette.tsx');
+  // The band labels itself from the catalog and the state is on the button.
+  assert.ok(source.includes('className="properties__group-toggle"'));
+  assert.ok(source.includes('aria-expanded={open}'));
+  assert.ok(source.includes('{section.label}'));
+  // Pressing it folds the section: local state only, no host round trip.
+  assert.ok(source.includes('onClick={() => toggleSection(section.group)}'));
+  assert.ok(source.includes('const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});'));
+  // One identifier decides what is announced, which way the chevron points, and
+  // whether the rows exist at all — so the glyph can never drift from the state.
+  assert.ok(source.includes('const open = !collapsed[section.group];'));
+  assert.ok(source.includes("name={open ? 'chevronDown' : 'chevronRight'}"));
+  const rows = source.slice(source.indexOf('{open ? ('), source.indexOf('</dl>'));
+  assert.ok(rows.includes('className="properties__rows"'), 'the open branch is the row list');
+  // A folded section keeps its drafts: they live in `edits`, keyed by row, not in
+  // the unmounted editors.
+  assert.ok(source.includes('const [edits, setEdits] = useState<Record<string, EditEntry>>({});'));
 });
 
 // --- entry points ------------------------------------------------------
@@ -265,12 +285,15 @@ test('both ribbon PROPERTIES entries dispatch the shell action, and LAYER stays 
   }
 });
 
-test('the properties palette is docked in the workspace and toggled from the status bar', async () => {
+test('the properties palette floats in the palette layer and is toggled from the status bar', async () => {
   const workspace = await readModule('components/Workspace.tsx');
   const statusbar = await readModule('components/StatusBar.tsx');
   assert.ok(workspace.includes('PropertiesDock'));
+  assert.match(workspace, /<PaletteWindow windowKey="properties"[^>]*>\s*<PropertiesDock \/>\s*<\/PaletteWindow>/);
   assert.ok(workspace.includes('shell.propertiesOpen'));
   assert.ok(statusbar.includes('shell.setPropertiesOpen'));
-  // The native CAD partition stays a childless node whose CSS we do not change.
+  // The native CAD partition stays a childless node whose rect never changes;
+  // the palette is a sibling overlay in `.palette-layer`, not a dock column.
   assert.ok(workspace.includes("'native-input'"));
+  assert.ok(!workspace.includes('const leftOpen = showStart ||'));
 });

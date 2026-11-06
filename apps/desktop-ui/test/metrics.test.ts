@@ -108,6 +108,12 @@ test('the CAD partition paints nothing, holds no DOM children, and its DOM carri
   );
   // `.native-input` stays empty and self-closing, so the canvas cannot be its child.
   assert.match(workspace, /ref=\{shell\.surfaceRef\}[^>]*\/>/);
+  // Floating palettes are a later *sibling* overlay. They are never a child or a
+  // wrapper of `.native-input`, so mounting/moving one cannot change the rect.
+  assert.ok(
+    workspace.indexOf('className="palette-layer"') > workspace.indexOf('ref={shell.surfaceRef}'),
+    'the palette layer paints after the input funnel without enclosing it',
+  );
   const carrier = css.match(/\.cad-canvas\s*\{[^}]*\}/);
   assert.ok(carrier, 'the .cad-canvas rule exists');
   // Both carriers are sized from one measurement: the canvas overlays exactly

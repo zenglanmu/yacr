@@ -115,7 +115,7 @@ test('every launcher target is a chrome-local command, so admission always answe
   assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'FONTS']);
   assert.equal(offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false)
     .some(panel => panel.id === 'layers' || panel.id === 'properties'), false);
-  // The Font Manager is the same kind of docked surface: its Annotate entry is
+  // The Font Manager is the same kind of desktop-only palette surface: its Annotate entry is
   // dropped with the palettes instead of opening a panel the carrier never mounts.
   const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate').panels.find(panel => panel.id === 'annotation');
   assert.equal(annotate.items.some(item => item.id === 'FONTS'), true);

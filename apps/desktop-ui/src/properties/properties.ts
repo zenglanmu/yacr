@@ -72,7 +72,7 @@ export type PropertyWriteResult =
 type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 /**
- * The typed word that opens the docked palette.
+ * The typed word that opens the floating palette window.
  *
  * It is a chrome-local selector, like `OPTIONS`: the command line intercepts it
  * **before** the router, and the ribbon dispatches it as a shell action, so no

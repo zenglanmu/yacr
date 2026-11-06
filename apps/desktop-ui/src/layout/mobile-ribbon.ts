@@ -7,9 +7,9 @@
 //
 // Two deliberate reductions, both of them honesty rules rather than styling:
 //
-//   * **No docked palettes.** The mobile layout never renders the 300px dock
-//     (`Workspace`'s left column and the nav rail are hidden by CSS, and no
-//     mobile surface re-opens them), so the drawer asks `offeredPanels` with
+//   * **No desktop palettes.** The mobile layout never renders the 300px
+//     palette windows (`Workspace`'s palette layer and the nav rail are hidden by
+//     CSS, and no mobile surface re-opens them), so the drawer asks `offeredPanels` with
 //     `palettesAvailable: false`. That is the exact rule a `dom-canvas` carrier
 //     already uses: a toggle for a panel that is never rendered is a dead
 //     affordance, so it is dropped with the panel instead of being shown.
@@ -51,7 +51,8 @@ function mobileItem(item: RibbonItem): boolean {
  *
  * `palettesAvailable` is the same carrier flag the band passes to
  * `offeredPanels`; the drawer passes `false` because the compact layout never
- * renders the 300px dock, whatever the host reports (see the module comment).
+ * renders the desktop palette windows, whatever the host reports (see the module
+ * comment).
  *
  * A panel that loses every item is dropped whole (title included), exactly like
  * `offeredPanels` drops a palette panel on a carrier that has no palette: a

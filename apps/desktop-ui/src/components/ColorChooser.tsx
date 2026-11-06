@@ -3,7 +3,7 @@
 // One overlay inside this same React tree — no second Tauri window (superseded by
 // ADR 0023 for exactly this reason) and no portal. Like the CAD shortcut menu it is
 // `position: fixed`, measured against its trigger's rect and placed by
-// `placeContextMenu`'s flip-then-clamp rule, so it paints above the docked palettes
+// `placeContextMenu`'s flip-then-clamp rule, so it paints above the palette windows
 // and the CAD partition on both carriers. It is opaque chrome with no backdrop: a
 // press outside is not swallowed, it closes the chooser and still does whatever it
 // would have done (a CAD pick, a field, a drag).

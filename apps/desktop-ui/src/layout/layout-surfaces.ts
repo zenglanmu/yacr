@@ -2,10 +2,11 @@
 //
 // The layout is a function of the window width alone (`layout-mode.ts`): the
 // desktop band and the compact chrome are the **same React tree**, and the
-// compact layout simply does not render some of the desktop regions. The docked
-// properties/layers palettes are hidden by `mobile.css`, the mobile top bar and
-// command bar are unconditional (so there is no clean screen and no command-line
-// toggle), and the history list is the mobile command bar's own sheet.
+// compact layout simply does not render some of the desktop regions. The palette
+// windows (their whole `.palette-layer`) are hidden by `mobile.css`, the mobile
+// top bar and command bar are unconditional (so there is no clean screen and no
+// command-line toggle), and the history list is the mobile command bar's own
+// sheet.
 //
 // A global shortcut or a typed selector that names a missing region must not
 // flip a flag that paints nothing. This module is the one place that decides
@@ -25,7 +26,7 @@ export type LayoutShortcut = 'cleanScreen' | 'properties' | 'commandLine' | 'his
 export type ShortcutAction =
   /** Flip the clean-screen state (desktop chrome only). */
   | 'toggle-clean-screen'
-  /** Toggle the docked properties palette. */
+  /** Toggle the properties palette window. */
   | 'toggle-properties'
   /** Toggle the docked command line. */
   | 'toggle-command-line'
@@ -37,7 +38,7 @@ export type ShortcutAction =
   | 'none';
 
 /**
- * The catalog key for a docked palette this layout does not render.
+ * The catalog key for a desktop palette this layout does not render.
  *
  * `{panel}` is the panel's own catalog label (`properties.panel` /
  * `layers.panel`), so one sentence covers both palettes instead of two copies of
@@ -46,11 +47,12 @@ export type ShortcutAction =
 export const DOCKED_PANEL_REFUSAL_KEY = 'mobile.refusal.docked_panel';
 
 /**
- * Whether `layout` renders the docked palettes (`Workspace`'s left column).
+ * Whether `layout` renders the desktop palettes (`Workspace`'s floating layer).
  *
- * Only the desktop band does: the compact layout hides `.workspace__left` and
+ * Only the desktop band does: the compact layout hides `.palette-layer` and
  * never re-opens it, which is also the rule `mobile-ribbon.ts` applies to the
- * drawer's palette toggles.
+ * drawer's palette toggles. The palettes are not part of `.workspace__left` any
+ * more - that column belongs to the start screen alone.
  */
 export function dockedPaletteOpenable(layout: LayoutMode): boolean {
   return layout === 'desktop';

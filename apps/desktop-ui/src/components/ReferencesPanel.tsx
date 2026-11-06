@@ -1,6 +1,6 @@
 // References panel: the external references the host reports in
-// `cad_status.references`. It is docked on the desktop and a floating sheet on
-// the compact layout (same component, same host rows).
+// `cad_status.references`. It is a floating palette window on the desktop and a
+// bottom sheet on the compact layout (same component, same host rows).
 //
 // Every row is the host's: name, stored path, resolved path (only when it really
 // resolved), state, stable reason code and the overlay/depth metadata. There is
@@ -14,8 +14,8 @@ import { useI18n, useShell } from '../context.ts';
 import { referenceRows } from '../references/references.ts';
 import type { ReferenceRow } from '../references/references.ts';
 
-/** The panel's `variant`: docked in the left column, or the compact sheet. */
-export type ReferencesPanelVariant = 'docked' | 'floating';
+/** The panel's `variant`: the desktop window, or the modal compact sheet. */
+export type ReferencesPanelVariant = 'window' | 'floating';
 
 export interface ReferencesPanelProps {
   readonly variant?: ReferencesPanelVariant;
@@ -56,7 +56,7 @@ function ReferenceCard({ row }: { readonly row: ReferenceRow }) {
   );
 }
 
-export function ReferencesPanel({ variant = 'docked' }: ReferencesPanelProps) {
+export function ReferencesPanel({ variant = 'window' }: ReferencesPanelProps) {
   const { t } = useI18n();
   const shell = useShell();
   const rows = referenceRows(shell.status);

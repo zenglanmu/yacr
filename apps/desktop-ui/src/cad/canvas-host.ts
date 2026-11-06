@@ -535,8 +535,9 @@ export interface RectWatchEnv {
  *
  * A `dom-canvas` host has no IPC `resize` report to piggy-back on, so the same
  * triggers the IPC binding watches are watched here: the element itself, every
- * chrome region that can move or shrink it (window resize, ribbon, palette dock,
- * history expand), window resize and a DPR change. Measurement is coalesced to one
+ * chrome region that can move or shrink it (window resize, ribbon, start column,
+ * history expand), window resize and a DPR change. Floating palettes are excluded
+ * because their overlay never moves the rect. Measurement is coalesced to one
  * animation frame; the initial rect is reported synchronously.
  *
  * Returns the unbind function.

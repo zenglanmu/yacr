@@ -503,16 +503,16 @@ test('the swatch, the marks and the details line are the palette\'s own rows', a
     'no hardcoded CJK in the attribute model');
 });
 
-test('the attribute styles reuse the chrome tokens and keep the resting row 28px', async () => {
+test('the attribute styles reuse the chrome tokens and keep the resting row 24px', async () => {
   const css = await readModule('style.css');
   const start = css.indexOf('/* Layers palette');
   const end = css.indexOf('/* Navigation rail');
-  assert.ok(start > 0 && end > start, 'the layers block exists between the docks');
+  assert.ok(start > 0 && end > start, 'the layers block exists between the palette blocks');
   const block = css.slice(start, end);
 
   // The resting row height is untouched; the details line is the only thing that
   // makes a row taller, and it only exists while it is open.
-  assert.ok(block.includes('min-height: 28px'), 'the row keeps its resting height');
+  assert.ok(block.includes('min-height: 24px'), 'the row keeps its resting height');
   assert.ok(block.includes('.layers__details {'));
   assert.ok(block.includes('grid-column: 1 / -1'), 'the details line spans the row grid');
   assert.ok(block.includes('.layers__chip--action'));
@@ -524,11 +524,11 @@ test('the attribute styles reuse the chrome tokens and keep the resting row 28px
   // colour cell, styled once in that component's own block (see below).
   assert.equal(block.includes('.layers__color-input'), false, 'no native colour dialog is left');
   assert.ok(css.includes('.color-field__trigger'), 'the shared colour cell is the one control');
-  // Same tokens as the rest of the chrome; nothing floats, nothing goes
-  // pointer-transparent inside the translucent dock.
+  // Same tokens as the rest of the chrome; the shared window owns the float and
+  // no control goes pointer-transparent inside it.
   for (const token of ['var(--field)', 'var(--line-soft)', 'var(--focus)', 'var(--pressed)', 'var(--text-muted)']) {
     assert.ok(block.includes(token), `the layers block uses ${token}`);
   }
   assert.equal(block.includes('pointer-events'), false, 'no control is made pointer-transparent');
-  assert.equal(block.includes('position: fixed'), false, 'docked, never floating over the CAD surface');
+  assert.equal(block.includes('position: fixed'), false, 'placement belongs to PaletteWindow, never to the layers body');
 });
