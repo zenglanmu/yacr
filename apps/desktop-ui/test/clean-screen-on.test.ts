@@ -2,10 +2,11 @@
 //
 // The typed word **sets** the clean-screen state the File tab's `cleanScreen`
 // toggle already flips: it is not a second state, not a router command and never
-// a toggle. `CLEANSCREENOFF` arrives later, so the result kind already carries a
-// boolean value (`{ kind: 'cleanScreen', value: true }`) and the host exposes one
-// setter (`setCleanScreen(value)`). These are pure-model and source assertions in
-// the style of the other selector suites (no React DOM rendering).
+// a toggle. `CLEANSCREENOFF` is its leaving half (own suite:
+// `test/clean-screen-off.test.ts`), so the result kind carries a boolean value
+// (`{ kind: 'cleanScreen', value: true }`) and the host exposes one setter
+// (`setCleanScreen(value)`). These are pure-model and source assertions in the
+// style of the other selector suites (no React DOM rendering).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -22,9 +23,10 @@ import { readCatalog, readModule } from './helpers.ts';
 
 test('the selector is the bare CLEANSCREENON word, case- and whitespace-insensitive', () => {
   assert.equal(CLEANSCREENON_COMMAND, 'CLEANSCREENON');
-  // Append-only table: ABOUT first, then the new row; the name list is derived.
-  assert.deepEqual([...CHROME_COMMAND_NAMES], ['ABOUT', 'CLEANSCREENON']);
-  assert.equal(CHROME_COMMANDS.length, 2);
+  // Append-only table: ABOUT first, then the ON row, then the OFF row; the name
+  // list is derived.
+  assert.deepEqual([...CHROME_COMMAND_NAMES], ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF']);
+  assert.equal(CHROME_COMMANDS.length, 3);
   for (const text of ['CLEANSCREENON', 'cleanscreenon', '  CleanScreenOn ', 'cLeAnScReEnOn']) {
     assert.equal(isCleanScreenOnCommand(text), true, text);
   }
@@ -42,8 +44,10 @@ test('CLEANSCREENON resolves to the set-true result on every layout', () => {
   // Clean screen is chrome state, not a docked palette: the compact layout never
   // refuses it (unlike PROPERTIES/LAYER).
   assert.deepEqual(localSelectorFor('CLEANSCREENON', 'mobile'), { kind: 'cleanScreen', value: true });
-  // A near miss (the OFF word, still a later commit) stays a router line.
-  assert.equal(localSelectorFor('CLEANSCREENOFF', 'desktop'), null);
+  // A near miss (the OFF word with an argument) stays a router line; the bare
+  // OFF word is its own selector (see `test/clean-screen-off.test.ts`).
+  assert.equal(localSelectorFor('CLEANSCREENOFF 0', 'desktop'), null);
+  assert.equal(localSelectorFor('CLEANSCREEN', 'desktop'), null);
   assert.equal(localSelectorFor('LINE', 'desktop'), null);
 });
 
@@ -67,8 +71,10 @@ test('the catalog exposes CLEANSCREENON exactly once, appended, with its own key
     { ...rows[0] },
     { id: 'CLEANSCREENON', labelKey: 'status.clean_screen_on', icon: 'cleanScreen', group: 'view' },
   );
-  // Append-only: the new row is the last one, so no shipped row moved.
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'CLEANSCREENON');
+  // Append-only: the CLEANSCREENON row still keeps its place directly before the
+  // later-appended OFF row, so no shipped row moved.
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'CLEANSCREENON');
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'CLEANSCREENOFF');
 });
 
 test('the File tab clean item offers a CLEANSCREENON variant and keeps its toggle action', () => {
@@ -80,11 +86,13 @@ test('the File tab clean item offers a CLEANSCREENON variant and keeps its toggl
   assert.equal(clean.labelKey, 'status.clean_screen');
   assert.equal(clean.action, 'cleanScreen');
   assert.equal(clean.command, undefined, 'the main entry is not a router command');
-  // The popover entry is the explicit set-on selector.
-  assert.deepEqual(
-    (clean.variants ?? []).map(variant => ({ ...variant })),
-    [{ id: 'clean-on', labelKey: 'status.clean_screen_on', icon: 'cleanScreen', command: 'CLEANSCREENON' }],
-  );
+  // The popover entry is the explicit set-on selector, and it stays first; the
+  // later `clean-off` variant follows it (asserted in its own suite).
+  const variants = (clean.variants ?? []).map(variant => ({ ...variant }));
+  assert.deepEqual(variants[0], {
+    id: 'clean-on', labelKey: 'status.clean_screen_on', icon: 'cleanScreen', command: 'CLEANSCREENON',
+  });
+  assert.equal(variants.length, 2, 'the toggle now offers the ON and OFF typed-word entries');
 });
 
 test('the local selector host sets the shared clean-screen state, never toggles it', async () => {

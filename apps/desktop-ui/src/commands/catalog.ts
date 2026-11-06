@@ -324,4 +324,9 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // toggles), sending nothing to the router. Appended last so no shipped row
   // moves; it reuses the `cleanScreen` glyph of the toggle it shares state with.
   { id: 'CLEANSCREENON', labelKey: 'status.clean_screen_on', icon: 'cleanScreen', group: 'view' },
+  // CLEANSCREENOFF (AutoCAD 2026) is the leaving half of the same pair: typing it
+  // clears the state CLEANSCREENON set and the File tab's toggle flips (it sets,
+  // never toggles), sending nothing to the router. Appended last so no shipped
+  // row moves; it reuses the `cleanScreen` glyph and the same shared state.
+  { id: 'CLEANSCREENOFF', labelKey: 'status.clean_screen_off', icon: 'cleanScreen', group: 'view' },
 ]);

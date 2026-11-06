@@ -285,6 +285,7 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
             // state: `clean-on` enters clean screen explicitly (`CLEANSCREENON`),
             // never toggling it. `clean-off` follows with `CLEANSCREENOFF`.
             { id: 'clean-on', labelKey: 'status.clean_screen_on', icon: 'cleanScreen', command: 'CLEANSCREENON' },
+            { id: 'clean-off', labelKey: 'status.clean_screen_off', icon: 'cleanScreen', command: 'CLEANSCREENOFF' },
           ] },
           { id: 'cmdline', labelKey: 'status.command_line', icon: 'terminal', action: 'commandLine' },
           // About opens a host-owned dialog window (ADR 0021 D1), so it is an

@@ -8,7 +8,7 @@
 // gates, the gesture-only and document-scoped sets, the selection preconditions
 // and the selectors the chrome answers without the router. Empty or wrong data
 // here can only ever refuse, never silently admit.
-import { ABOUT_COMMAND, CLEANSCREENON_COMMAND } from './chrome-commands.ts';
+import { ABOUT_COMMAND, CLEANSCREENOFF_COMMAND, CLEANSCREENON_COMMAND } from './chrome-commands.ts';
 
 /** The `cad_status` slice the admission rules read (all fields are the host's). */
 export interface CommandStatusView {
@@ -267,6 +267,8 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
  * `requestOpenPopup('about')` path as the File tab's action) and
  * `CLEANSCREENON` sets the chrome's existing clean-screen state (the same state
  * the File tab's `cleanScreen` toggle flips; it sets, never toggles).
+ * `CLEANSCREENOFF` clears that same state and is likewise an explicit set, never
+ * a toggle.
  *
  * They are deliberately admitted regardless of the loaded host vocabulary (and
  * of whether a drawing is open): they touch no CAD state, exactly like the
@@ -281,8 +283,10 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
  * directly; the selector only opens the panel. `ABOUT` sends nothing at all: the
  * host-owned dialog already exists, and the selector only opens it.
  * `CLEANSCREENON` likewise sends nothing: it only sets the chrome's own
- * clean-screen state.
+ * clean-screen state. `CLEANSCREENOFF` sends nothing either: it only clears that
+ * same state.
  */
 export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze([
   'PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES', ABOUT_COMMAND, CLEANSCREENON_COMMAND,
+  CLEANSCREENOFF_COMMAND,
 ]);

@@ -734,6 +734,7 @@
   "status.coordinate_hint_none": "二维视图外的光标没有可靠世界坐标",
   "status.clean_screen": "全屏显示",
   "status.clean_screen_on": "开启全屏显示",
+  "status.clean_screen_off": "关闭全屏显示",
   "status.command_line": "命令行",
   "status.workspace": "工作空间",
   "status.settings": "设置",

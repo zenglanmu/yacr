@@ -10,7 +10,8 @@
 // `FONTS` is deliberately **not** refused on mobile: the compact layout renders
 // the same panel as a floating sheet, exactly like `RESOURCES`. `ABOUT` opens the
 // same dialog the File tab's About action opens, so it needs no layout either.
-// `CLEANSCREENON` sets the existing clean-screen state, so it needs no layout.
+// `CLEANSCREENON` sets the existing clean-screen state, so it needs no layout;
+// `CLEANSCREENOFF` clears that same state and needs no layout either.
 import { useCallback } from 'react';
 import type { Translator } from '../i18n.ts';
 import type { LayoutMode } from '../layout/layout-mode.ts';
@@ -20,7 +21,7 @@ import { isOptionsCommand } from '../options/options.ts';
 import { isPropertiesCommand } from '../properties/properties.ts';
 import { isResourcesCommand } from '../references/references.ts';
 import { isFontsCommand } from '../fonts/fonts.ts';
-import { isAboutCommand, isCleanScreenOnCommand } from './chrome-commands.ts';
+import { isAboutCommand, isCleanScreenOffCommand, isCleanScreenOnCommand } from './chrome-commands.ts';
 
 /** One selector's destination. `refused` names the panel the layout cannot show. */
 export type LocalSelectorResult =
@@ -49,7 +50,8 @@ export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
  * layer is not rendered; `FONTS`/`RESOURCES` have a compact sheet and are never
  * refused by layout. `ABOUT` opens the existing host-owned dialog and is
  * likewise layout-independent. `CLEANSCREENON` only sets the chrome's own
- * clean-screen state, so it too needs no layout.
+ * clean-screen state, so it too needs no layout; `CLEANSCREENOFF` clears that
+ * same state and is resolved directly after it.
  */
 export function localSelectorFor(text: string, layout: LayoutMode): LocalSelectorResult | null {
   if (isOptionsCommand(text)) return { kind: 'options' };
@@ -67,6 +69,7 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
   }
   if (isAboutCommand(text)) return { kind: 'about' };
   if (isCleanScreenOnCommand(text)) return { kind: 'cleanScreen', value: true };
+  if (isCleanScreenOffCommand(text)) return { kind: 'cleanScreen', value: false };
   return null;
 }
 
@@ -84,7 +87,7 @@ export interface LocalSelectorHost {
   readonly openFonts: () => void;
   /** Open the existing host-owned About dialog (`requestOpenPopup('about')`). */
   readonly openAbout: () => void;
-  /** Set the chrome's clean-screen state (`CLEANSCREENON` sets, never toggles). */
+  /** Set the chrome's clean-screen state (`CLEANSCREENON`/`CLEANSCREENOFF` set, never toggle). */
   readonly setCleanScreen: (value: boolean) => void;
   /** Put a refusal sentence on the chrome's one error line. */
   readonly reportError: (message: string) => void;
