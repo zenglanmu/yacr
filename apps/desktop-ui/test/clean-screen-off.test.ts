@@ -22,12 +22,12 @@ import { readCatalog, readModule } from './helpers.ts';
 test('the selector is the bare CLEANSCREENOFF word, case- and whitespace-insensitive', () => {
   assert.equal(CLEANSCREENOFF_COMMAND, 'CLEANSCREENOFF');
   // Append-only table: the OFF row is appended after ABOUT and CLEANSCREENON, and
-  // PROPERTIESCLOSE after it; the name list is derived from the one table.
+  // PROPERTIESCLOSE/LAYERCLOSE after it; the name list is derived from the table.
   assert.deepEqual(
     [...CHROME_COMMAND_NAMES],
-    ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE'],
+    ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE'],
   );
-  assert.equal(CHROME_COMMANDS.length, 4);
+  assert.equal(CHROME_COMMANDS.length, 5);
   for (const text of ['CLEANSCREENOFF', 'cleanscreenoff', '  CleanScreenOff ', 'cLeAnScReEnOfF']) {
     assert.equal(isCleanScreenOffCommand(text), true, text);
   }
@@ -78,11 +78,12 @@ test('the catalog exposes CLEANSCREENOFF exactly once, appended, with its own ke
     { id: 'CLEANSCREENOFF', labelKey: 'status.clean_screen_off', icon: 'cleanScreen', group: 'view' },
   );
   // Append-only: the OFF row keeps its place directly before the later
-  // PROPERTIESCLOSE row, so no shipped row moved.
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'CLEANSCREENOFF');
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'PROPERTIESCLOSE');
+  // PROPERTIESCLOSE row, and LAYERCLOSE is appended after it.
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 3].id, 'CLEANSCREENOFF');
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'PROPERTIESCLOSE');
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'LAYERCLOSE');
   // The ON row keeps its own place directly before it.
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 3].id, 'CLEANSCREENON');
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 4].id, 'CLEANSCREENON');
 });
 
 test('the File tab clean item offers both typed-word variants in append order', () => {

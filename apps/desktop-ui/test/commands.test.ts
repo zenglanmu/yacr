@@ -175,7 +175,7 @@ test('the command catalog lists exactly the router-refused dead affordances, and
   // read-only Font Manager and owns its report (`cad_fonts`), never a router line.
   assert.equal(isLocalChromeCommand('resources'), true, 'the selector is case-insensitive');
   assert.equal(isLocalChromeCommand('fonts'), true, 'the selector is case-insensitive');
-  assert.deepEqual([...LOCAL_CHROME_COMMANDS], ['PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES', 'ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE']);
+  assert.deepEqual([...LOCAL_CHROME_COMMANDS], ['PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES', 'ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE']);
   // `PLINE` is now a real (draw) selector, so it is neither reserved nor dead:
   // `ANGLE` (not an AutoCAD command) stays absent from the catalog and refused.
   assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('ANGLE'), false, 'ANGLE');
@@ -599,9 +599,10 @@ test('every chrome-local selector is admitted without the host vocabulary and ha
   // docked layers palette, FONTS opens the read-only Font Manager, RESOURCES
   // opens the References panel, ABOUT opens the existing About dialog,
   // CLEANSCREENON sets the chrome's clean-screen state, CLEANSCREENOFF clears
-  // that same state and PROPERTIESCLOSE closes the properties window. All eight
-  // are answered by the chrome before the router and none needs a document.
-  assert.deepEqual([...LOCAL_CHROME_COMMANDS].sort(), ['ABOUT', 'CLEANSCREENOFF', 'CLEANSCREENON', 'FONTS', 'LAYER', 'PROPERTIES', 'PROPERTIESCLOSE', 'RESOURCES']);
+  // that same state, PROPERTIESCLOSE closes the properties window and LAYERCLOSE
+  // closes the layers palette. All nine are answered by the chrome before the
+  // router and none needs a document.
+  assert.deepEqual([...LOCAL_CHROME_COMMANDS].sort(), ['ABOUT', 'CLEANSCREENOFF', 'CLEANSCREENON', 'FONTS', 'LAYER', 'LAYERCLOSE', 'PROPERTIES', 'PROPERTIESCLOSE', 'RESOURCES']);
   for (const id of LOCAL_CHROME_COMMANDS) {
     assert.equal(isLocalChromeCommand(id), true, id);
     assert.equal(isLocalChromeCommand(id.toLowerCase()), true, id);
@@ -628,7 +629,7 @@ test('every chrome-local selector is admitted without the host vocabulary and ha
     'the one local-selector interceptor runs in the submit path',
   );
   assert.ok(app.indexOf('runLocalSelector(text') < guard, 'it must run before the in-flight guard');
-  for (const call of ['isOptionsCommand(text)', 'isResourcesCommand(text)', 'isPropertiesCommand(text)', 'isLayersCommand(text)', 'isFontsCommand(text)', 'isAboutCommand(text)', 'isCleanScreenOnCommand(text)', 'isCleanScreenOffCommand(text)', 'isPropertiesCloseCommand(text)']) {
+  for (const call of ['isOptionsCommand(text)', 'isResourcesCommand(text)', 'isPropertiesCommand(text)', 'isLayersCommand(text)', 'isFontsCommand(text)', 'isAboutCommand(text)', 'isCleanScreenOnCommand(text)', 'isCleanScreenOffCommand(text)', 'isPropertiesCloseCommand(text)', 'isLayerCloseCommand(text)']) {
     assert.ok(selectors.includes(call), `${call} must be resolved by the local-selector table`);
   }
 });

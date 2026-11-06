@@ -12,6 +12,7 @@ import {
   ABOUT_COMMAND,
   CLEANSCREENOFF_COMMAND,
   CLEANSCREENON_COMMAND,
+  LAYERCLOSE_COMMAND,
   PROPERTIESCLOSE_COMMAND,
 } from './chrome-commands.ts';
 
@@ -275,6 +276,9 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
  * `CLEANSCREENOFF` clears that same state and is likewise an explicit set, never
  * a toggle. `PROPERTIESCLOSE` closes the properties window (an idempotent
  * success when it is already closed), so it is not gated by layout either.
+ * `LAYERCLOSE` does the same for the layers palette: the palette's own close
+ * control and the typed word close the one window, and a second close is still
+ * a success, so no layout gate applies.
  *
  * They are deliberately admitted regardless of the loaded host vocabulary (and
  * of whether a drawing is open): they touch no CAD state, exactly like the
@@ -291,9 +295,10 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
  * `CLEANSCREENON` likewise sends nothing: it only sets the chrome's own
  * clean-screen state. `CLEANSCREENOFF` sends nothing either: it only clears that
  * same state. `PROPERTIESCLOSE` sends nothing: it only closes the chrome's own
- * properties window.
+ * properties window. `LAYERCLOSE` sends nothing either: it only closes the
+ * chrome's own layers palette.
  */
 export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze([
   'PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES', ABOUT_COMMAND, CLEANSCREENON_COMMAND,
-  CLEANSCREENOFF_COMMAND, PROPERTIESCLOSE_COMMAND,
+  CLEANSCREENOFF_COMMAND, PROPERTIESCLOSE_COMMAND, LAYERCLOSE_COMMAND,
 ]);

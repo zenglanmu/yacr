@@ -15,6 +15,8 @@
 // `PROPERTIESCLOSE` closes the properties window, so it likewise needs no layout:
 // closing a window that is already closed is an idempotent success, not a
 // refusal (unlike `PROPERTIES`, which cannot open on the compact layout).
+// `LAYERCLOSE` closes the layers palette for the same reason, and is resolved
+// right after it: a second close on any layout is still a success.
 import { useCallback } from 'react';
 import type { Translator } from '../i18n.ts';
 import type { LayoutMode } from '../layout/layout-mode.ts';
@@ -28,6 +30,7 @@ import {
   isAboutCommand,
   isCleanScreenOffCommand,
   isCleanScreenOnCommand,
+  isLayerCloseCommand,
   isPropertiesCloseCommand,
 } from './chrome-commands.ts';
 
@@ -43,6 +46,8 @@ export type LocalSelectorResult =
   | { readonly kind: 'cleanScreen'; readonly value: boolean }
   /** Close the properties window; already closed is a success, not a refusal. */
   | { readonly kind: 'propertiesClose' }
+  /** Close the layers palette; already closed is a success, not a refusal. */
+  | { readonly kind: 'layersClose' }
   | { readonly kind: 'refused'; readonly panelKey: string };
 
 /** The panel labels the layout refusal names. */
@@ -63,7 +68,8 @@ export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
  * clean-screen state, so it too needs no layout; `CLEANSCREENOFF` clears that
  * same state and is resolved directly after it. `PROPERTIESCLOSE` closes the
  * properties window and is resolved last: it is layout-independent because
- * closing an already-closed window is a valid no-op on every layout.
+ * closing an already-closed window is a valid no-op on every layout;
+ * `LAYERCLOSE` closes the layers palette right after it for the same reason.
  */
 export function localSelectorFor(text: string, layout: LayoutMode): LocalSelectorResult | null {
   if (isOptionsCommand(text)) return { kind: 'options' };
@@ -83,6 +89,7 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
   if (isCleanScreenOnCommand(text)) return { kind: 'cleanScreen', value: true };
   if (isCleanScreenOffCommand(text)) return { kind: 'cleanScreen', value: false };
   if (isPropertiesCloseCommand(text)) return { kind: 'propertiesClose' };
+  if (isLayerCloseCommand(text)) return { kind: 'layersClose' };
   return null;
 }
 
@@ -104,6 +111,8 @@ export interface LocalSelectorHost {
   readonly setCleanScreen: (value: boolean) => void;
   /** Close the properties window (`PROPERTIESCLOSE`; a no-op when already closed). */
   readonly closeProperties: () => void;
+  /** Close the layers palette (`LAYERCLOSE`; a no-op when already closed). */
+  readonly closeLayers: () => void;
   /** Put a refusal sentence on the chrome's one error line. */
   readonly reportError: (message: string) => void;
 }
@@ -130,6 +139,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     openAbout,
     setCleanScreen,
     closeProperties,
+    closeLayers,
     reportError,
   } = host;
   return useCallback((text: string, fromInput: boolean): boolean => {
@@ -150,6 +160,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'about': openAbout(); break;
       case 'cleanScreen': setCleanScreen(result.value); break;
       case 'propertiesClose': closeProperties(); break;
+      case 'layersClose': closeLayers(); break;
     }
     return true;
   }, [
@@ -165,6 +176,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     openAbout,
     setCleanScreen,
     closeProperties,
+    closeLayers,
     reportError,
   ]);
 }

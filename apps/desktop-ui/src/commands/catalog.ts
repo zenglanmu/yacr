@@ -334,4 +334,9 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // shipped row moves, and it reuses the `close` glyph and the `properties.close`
   // label the window's own close control already uses.
   { id: 'PROPERTIESCLOSE', labelKey: 'properties.close', icon: 'close', group: 'annotate' },
+  // LAYERCLOSE (AutoCAD 2026) is the layers palette's own close word: typing it
+  // closes the same palette the palette's close control closes, sending nothing
+  // to the router. Appended last so no shipped row moves, and it reuses the
+  // `close` glyph and the `layers.close` label that window already uses.
+  { id: 'LAYERCLOSE', labelKey: 'layers.close', icon: 'close', group: 'annotate' },
 ]);

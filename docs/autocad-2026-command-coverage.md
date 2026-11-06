@@ -21,10 +21,10 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **48** |
+| 完整实现 | **49** |
 | 部分实现（有写明的界） | **40** |
-| **已实现合计（完整 + 部分）** | **88** |
-| 未实现 | **893** |
+| **已实现合计（完整 + 部分）** | **89** |
+| 未实现 | **892** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -82,6 +82,7 @@
 | `INSERT` | 已实现 | — |
 | `JOIN` | 部分实现 | 仅共线 LINE 或同心相续 ARC |
 | `LAYER` | 已实现 | chrome 本地选择子：打开图层面板 |
+| `LAYERCLOSE` | 已实现 | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
 | `LAYERP` | 部分实现 | 会话内有界 16 步；不持久化 |
 | `LAYISO` | 已实现 | — |
 | `LAYOFF` | 已实现 | — |
@@ -601,7 +602,7 @@
 | 464 | `LAYDEL` | 未实现 | Deletes all objects on a layer and purges the layer. | — |
 | 465 | `-LAYER` | 未实现 | Manages layers and layer properties. | — |
 | 466 | `LAYER` | 已实现 | Manages layers and layer properties. | chrome 本地选择子：打开图层面板 |
-| 467 | `LAYERCLOSE` | 未实现 | Closes the Layer Properties Manager. | — |
+| 467 | `LAYERCLOSE` | 已实现 | Closes the Layer Properties Manager. | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
 | 468 | `LAYERP` | 部分实现 | Undoes the last change or set of changes made to layer settings. | 会话内有界 16 步；不持久化 |
 | 469 | `LAYERPALETTE` | 未实现 | Opens the modeless Layer Properties Manager. | — |
 | 470 | `LAYERPMODE` | 未实现 | Turns on and off the tracking of changes made to layer settings for use by the LAYERP command. | — |

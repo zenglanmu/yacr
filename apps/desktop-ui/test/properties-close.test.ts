@@ -22,10 +22,13 @@ import { readCatalog, readModule } from './helpers.ts';
 
 test('the selector is the bare PROPERTIESCLOSE word, case- and whitespace-insensitive', () => {
   assert.equal(PROPERTIESCLOSE_COMMAND, 'PROPERTIESCLOSE');
-  // Append-only table: the new row is appended after the clean-screen pair; the
-  // name list is derived from the one table.
-  assert.deepEqual([...CHROME_COMMAND_NAMES], ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE']);
-  assert.equal(CHROME_COMMANDS.length, 4);
+  // Append-only table: the new row is appended after the clean-screen pair and
+  // the later `LAYERCLOSE` row; the name list is derived from the one table.
+  assert.deepEqual(
+    [...CHROME_COMMAND_NAMES],
+    ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE'],
+  );
+  assert.equal(CHROME_COMMANDS.length, 5);
   assert.equal(CHROME_COMMANDS[3].name, 'PROPERTIESCLOSE');
   for (const text of ['PROPERTIESCLOSE', 'propertiesclose', '  PropertiesClose ', 'pRoPeRtIeScLoSe']) {
     assert.equal(isPropertiesCloseCommand(text), true, text);
@@ -81,9 +84,10 @@ test('the catalog exposes PROPERTIESCLOSE exactly once, appended, with propertie
     { ...rows[0] },
     { id: 'PROPERTIESCLOSE', labelKey: 'properties.close', icon: 'close', group: 'annotate' },
   );
-  // Append-only: the new row is the last one, so no shipped row moved.
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'PROPERTIESCLOSE');
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'CLEANSCREENOFF');
+  // Append-only: the new row is still the last one, so no shipped row moved.
+  // (`LAYERCLOSE`, added after it, is the only newer row.)
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'PROPERTIESCLOSE');
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 3].id, 'CLEANSCREENOFF');
 });
 
 test('both properties palette sources close through the one command', async () => {

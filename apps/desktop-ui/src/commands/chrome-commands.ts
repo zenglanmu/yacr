@@ -18,7 +18,9 @@
 // flips — it sets it, never toggles it. `CLEANSCREENOFF` leaves that same state
 // the same way: an explicit set, never a toggle. `PROPERTIESCLOSE` closes the
 // properties window the palette's own close button closes; closing an already
-// closed window is an idempotent success, never a refusal.
+// closed window is an idempotent success, never a refusal. `LAYERCLOSE` is its
+// layers-palette twin: the palette's close control and the typed word close the
+// same window, and a second close is still a success.
 
 /** The typed word that opens the existing About dialog. */
 export const ABOUT_COMMAND = 'ABOUT';
@@ -31,6 +33,9 @@ export const CLEANSCREENOFF_COMMAND = 'CLEANSCREENOFF';
 
 /** The typed word that closes the properties window (a no-op when already closed). */
 export const PROPERTIESCLOSE_COMMAND = 'PROPERTIESCLOSE';
+
+/** The typed word that closes the layers palette (a no-op when already closed). */
+export const LAYERCLOSE_COMMAND = 'LAYERCLOSE';
 
 /** One chrome-local selector: its canonical word and how typed text matches it. */
 export interface ChromeCommandSelector {
@@ -63,6 +68,11 @@ export function isPropertiesCloseCommand(text: unknown): boolean {
   return normalized(text) === PROPERTIESCLOSE_COMMAND;
 }
 
+/** Whether typed text is the bare `LAYERCLOSE` selector (`layerclose` included). */
+export function isLayerCloseCommand(text: unknown): boolean {
+  return normalized(text) === LAYERCLOSE_COMMAND;
+}
+
 /**
  * Every chrome-local selector this module owns, in append order.
  *
@@ -76,6 +86,7 @@ export const CHROME_COMMANDS: readonly ChromeCommandSelector[] = Object.freeze([
   { name: CLEANSCREENON_COMMAND, matches: isCleanScreenOnCommand },
   { name: CLEANSCREENOFF_COMMAND, matches: isCleanScreenOffCommand },
   { name: PROPERTIESCLOSE_COMMAND, matches: isPropertiesCloseCommand },
+  { name: LAYERCLOSE_COMMAND, matches: isLayerCloseCommand },
 ]);
 
 /** The bare names of [`CHROME_COMMANDS`], for exhaustive admission tests. */

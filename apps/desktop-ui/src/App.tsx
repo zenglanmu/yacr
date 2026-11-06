@@ -510,6 +510,7 @@ function Shell() {
     openAbout: () => requestOpenPopup('about'),
     setCleanScreen,
     closeProperties: () => setPropertiesOpen(false),
+    closeLayers: () => setLayersOpen(false),
     reportError: setError,
   });
 
@@ -659,11 +660,7 @@ function Shell() {
         textStep,
         gripDragActive,
       }, canCommand);
-      if (accelerator) {
-        event.preventDefault();
-        void submitCommand(accelerator);
-        return;
-      }
+      if (accelerator) { event.preventDefault(); void submitCommand(accelerator); return; }
       if (event.defaultPrevented || event.metaKey || event.altKey) return;
       // An active tool owns Enter/Escape: Enter confirms, Escape cancels, and
       // that Escape does not also close a panel. An armed grip drag is not a
