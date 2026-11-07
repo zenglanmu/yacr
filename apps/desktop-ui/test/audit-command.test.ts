@@ -58,12 +58,15 @@ test('AUDIT is catalogued exactly once as a payload-free file command', () => {
 test('the File tab utilities panel puts AUDIT directly after Diagnostics', () => {
   const panel = fileUtilitiesPanel();
   const ids = panel.items.map(item => item.id);
+  // The 2026-11-07 panel split added File info as the diagnostics opener; AUDIT
+  // still follows the Diagnostics entry whose report it shares.
+  assert.equal(ids[0], 'fileinfo', 'File info opens the utilities panel');
   const diagnosticsIndex = ids.indexOf('diagnostics');
-  assert.equal(diagnosticsIndex, 0, 'Diagnostics stays the panel opener');
+  assert.equal(diagnosticsIndex, 1, 'Diagnostics stays directly after File info');
   assert.equal(ids[diagnosticsIndex + 1], 'audit', 'AUDIT sits directly after Diagnostics');
   assert.equal(ids.filter(id => id === 'audit').length, 1, 'AUDIT appears once');
   // The existing rows keep their order; nothing was reordered to make room.
-  assert.deepEqual(ids, ['diagnostics', 'audit', 'clean', 'cmdline', 'about', 'options', 'plugins']);
+  assert.deepEqual(ids, ['fileinfo', 'diagnostics', 'audit', 'clean', 'cmdline', 'about', 'options', 'plugins']);
   // It is a real router command, not a shell action like the diagnostics panel.
   const audit = panel.items.find(item => item.id === 'audit');
   assert.deepEqual(
