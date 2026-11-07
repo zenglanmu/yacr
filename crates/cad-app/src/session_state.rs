@@ -596,21 +596,18 @@ impl SessionState {
             DrawToolKind::XLine => CommandId::CreateXLine,
             DrawToolKind::Ray => CommandId::CreateRay,
             DrawToolKind::Circle => CommandId::CreateCircle,
-            // The three CIRCLE construction options are their own commands (the
-            // kind is what carries the construction choice).
+            // The three CIRCLE options are their own commands.
             DrawToolKind::Circle2P => CommandId::CreateCircle2P,
             DrawToolKind::Circle3P => CommandId::CreateCircle3P,
             DrawToolKind::CircleDiameter => CommandId::CreateCircleDiameter,
             DrawToolKind::Arc => CommandId::CreateArc,
             DrawToolKind::Polyline => CommandId::CreatePolyline,
-            // WIPEOUT is its own open-ended polygon capture; the command stores
-            // one `Mask` entity (`AcDbWipeout`) on the active layer.
+            // WIPEOUT stores one `Mask` entity (`AcDbWipeout`).
             DrawToolKind::Wipeout => CommandId::Wipeout,
             DrawToolKind::Rectang => CommandId::CreateRectangle,
             DrawToolKind::Ellipse => CommandId::CreateEllipse,
             DrawToolKind::Polygon => CommandId::CreatePolygon,
-            // POLYGON CIRCUMSCRIBED is the tangent variant: its own command (the
-            // ring construction differs), the same session side count.
+            // POLYGON CIRCUMSCRIBED is the tangent variant.
             DrawToolKind::PolygonCircumscribed => CommandId::CreatePolygonCircumscribed,
             DrawToolKind::Point => CommandId::CreatePoint,
             DrawToolKind::Spline => CommandId::CreateSpline,
@@ -871,19 +868,9 @@ impl SessionState {
         }
     }
 
-    /// Annotate a pure tool preview with the session parameters it needs.
-    ///
-    /// Only the POLYGON preview carries a session sysvar (the side count); the
-    /// field is `None` for every other kind, so the frozen frontend projection
-    /// (`CadTool.params.sides`) can never report a side count for a tool that has
-    /// none.
-    ///
-    /// The live cursor is the **pending point entry**, so the session drafting
-    /// constraints are applied here: the overlay's rubber band reads
-    /// [`DrawPreview::cursor`], and a raw cursor would show a free segment while
-    /// the click commits a grid-snapped and/or ortho-constrained point. A pending
-    /// **entity-pick** step is left raw, because that click never enters through
-    /// `capture_point`.
+    /// Attach the session side count to both POLYGON previews and constrain the
+    /// pending point entry (grid/ortho) so the rubber band matches the committed
+    /// point; a pending entity pick stays raw.
     fn annotate_draw_preview(&self, mut preview: DrawPreview) -> DrawPreview {
         preview.polygon_sides = matches!(
             preview.kind,
