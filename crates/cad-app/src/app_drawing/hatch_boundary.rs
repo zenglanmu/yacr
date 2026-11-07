@@ -253,8 +253,8 @@ pub(super) fn boundary_shapes(sources: &[DbEntity]) -> CadResult<Vec<BoundarySha
                 }
                 if sweep.abs() < std::f64::consts::TAU - 1e-9 {
                     return Err(CadError::InvalidInput(format!(
-                        "HATCH boundary entity {} (ellipse) is an arc, not a closed loop; only a \
-                         full ellipse can be a boundary",
+                        "HATCH boundary entity {} (ellipse) is an arc, not a closed loop; \
+                         hatch.boundary_open (only a full ellipse can be a boundary)",
                         object.0
                     )));
                 }
@@ -281,8 +281,9 @@ pub(super) fn boundary_shapes(sources: &[DbEntity]) -> CadResult<Vec<BoundarySha
             } => {
                 if !*closed {
                     return Err(CadError::InvalidInput(format!(
-                        "HATCH boundary entity {} is an open polyline; only a closed polyline can \
-                         be a boundary (an open polyline is not stitched — only LINE/ARC edges are)",
+                        "HATCH boundary entity {} is an open polyline; hatch.boundary_open (only a \
+                         closed polyline can be a boundary — an open polyline is not stitched, \
+                         only LINE/ARC edges are)",
                         object.0
                     )));
                 }
@@ -403,9 +404,9 @@ pub(super) fn boundary_shapes(sources: &[DbEntity]) -> CadResult<Vec<BoundarySha
             }
             other => {
                 return Err(CadError::InvalidInput(format!(
-                    "HATCH cannot use {} (entity {}) as a boundary; accepted boundaries are a \
-                     circle, a full ellipse, a closed polyline, and LINE/ARC edges stitched into \
-                     closed loops",
+                    "HATCH cannot use {} (entity {}) as a boundary; \
+                     hatch.boundary_unsupported (accepted boundaries are a circle, a full \
+                     ellipse, a closed polyline, and LINE/ARC edges stitched into closed loops)",
                     geometry_kind(other),
                     object.0
                 )));
@@ -558,8 +559,8 @@ pub(super) fn resolve_plane(
 
 fn coplanar_refusal(object: EntityId) -> CadError {
     CadError::InvalidInput(format!(
-        "HATCH boundaries must be coplanar with a single consistent normal; entity {} is off the \
-         boundary plane",
+        "HATCH boundaries must be coplanar with a single consistent normal; \
+         hatch.boundary_plane (entity {} is off the boundary plane)",
         object.0
     ))
 }

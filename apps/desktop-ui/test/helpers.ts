@@ -159,6 +159,13 @@ export const HOST_NAMES = [
   // TEXTTOFRONT (AutoCAD 2026): selection-based draw order; the current selection
   // is the input and only model-space text/leader/dimension rows are eligible.
   'TEXTTOFRONT',
+  // GRADIENT / HATCHEDIT (AutoCAD 2026) are the two hatch-family selectors added
+  // by this batch. GRADIENT is a payload-free router command over the current
+  // selection; HATCHEDIT is one canonical selector whose option is typed
+  // (`HATCHEDIT ANGLE|SCALE|SOLID|GRADIENT`), so only the base name is mirrored
+  // here — the option words live in `ARGUMENT_COMMANDS.HATCHEDIT`. Neither is an
+  // alias of HATCH.
+  'GRADIENT', 'HATCHEDIT',
   // MATCHPROP: the selection-based property painter (`CommandId::MatchProp`,
   // `CommandPayload::None` — the selection's first entity is the source). No
   // dedicated IPC; the bare name is the whole input.

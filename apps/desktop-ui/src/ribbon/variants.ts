@@ -114,6 +114,36 @@ export const PEDIT_ITEM: RibbonCommandItem = Object.freeze({
 });
 
 /**
+ * The `HATCHEDIT` split button: the two one-word fill replacements, plus the
+ * typed angle/scale forms on the command line.
+ *
+ * The parent stays the ordinary `HATCHEDIT` selector; because this build has no
+ * Hatch Edit dialog, pressing it is an explicit `hatchedit.needs_option`
+ * refusal that lists the implemented forms — it never defaults to an option.
+ * The caret offers `HATCHEDIT SOLID` and `HATCHEDIT GRADIENT`, each of which
+ * reads the current selection (exactly one model-space hatch) as its whole
+ * input. `ANGLE`/`SCALE` carry a numeric argument, so they are typed forms
+ * (`ARGUMENT_COMMANDS.HATCHEDIT`) and get no caret row; the button never
+ * fabricates a value.
+ *
+ * Pattern name, Color, Properties, Draw order, Add/Remove boundaries and
+ * associativity are NOT IMPLEMENTED and have no row: a caret entry would
+ * promise them.
+ */
+const HATCHEDIT_VARIANTS: readonly RibbonCommandItem[] = Object.freeze([
+  { id: 'HATCHEDIT SOLID', labelKey: 'draw.kind.hatchedit.solid', icon: 'hatch', command: 'HATCHEDIT SOLID' },
+  { id: 'HATCHEDIT GRADIENT', labelKey: 'draw.kind.hatchedit.gradient', icon: 'hatch', command: 'HATCHEDIT GRADIENT' },
+]);
+
+export const HATCHEDIT_ITEM: RibbonCommandItem = Object.freeze({
+  id: 'HATCHEDIT',
+  labelKey: 'draw.kind.hatchedit',
+  icon: 'hatch',
+  command: 'HATCHEDIT',
+  variants: HATCHEDIT_VARIANTS,
+});
+
+/**
  * The `MEASUREGEOM` split button: AutoCAD's inquiry router over the measurement
  * tools this build already has.
  *

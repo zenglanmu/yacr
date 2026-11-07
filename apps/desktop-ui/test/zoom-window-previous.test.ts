@@ -72,7 +72,7 @@ test('the two zoom forms are grammar on ZOOM, not names the host advertises', ()
   }
   // The argument-taking selectors are unchanged: this feature adds words to the
   // existing `ZOOM` grammar, never a fifth selector row.
-  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE', 'SPACE', 'TORIENT', 'TCASE', 'PEDIT', 'MEASUREGEOM']);
+  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE', 'SPACE', 'TORIENT', 'TCASE', 'PEDIT', 'HATCHEDIT', 'MEASUREGEOM']);
   // The numeric/`ALL`/`EXTENTS` grammar still answers exactly as it did, and a
   // *different* word is still refused (the match is the word, not a prefix).
   for (const admitted of ['2', '0.5', 'ALL', 'EXTENTS', 'WINDOW', 'PREVIOUS']) {

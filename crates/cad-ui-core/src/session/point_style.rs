@@ -22,8 +22,8 @@ use cad_app::{CommandId, CommandPayload};
 
 use super::diagnostics::cad_error_text;
 use super::{
-    CadSession, ARGUMENT_SELECTOR, PDMODE_SELECTOR, PDSIZE_SELECTOR, PEDIT_SELECTOR,
-    SNAPUNIT_SELECTOR, SPACE_SELECTOR, TCASE_SELECTOR, TORIENT_SELECTOR,
+    CadSession, ARGUMENT_SELECTOR, HATCHEDIT_SELECTOR, PDMODE_SELECTOR, PDSIZE_SELECTOR,
+    PEDIT_SELECTOR, SNAPUNIT_SELECTOR, SPACE_SELECTOR, TCASE_SELECTOR, TORIENT_SELECTOR,
 };
 
 impl CadSession {
@@ -57,6 +57,9 @@ impl CadSession {
             // `PEDIT <option>` (2026-11-07): the one selected polyline is the
             // input; the option travels in the payload.
             PEDIT_SELECTOR => self.pedit_argument(argument, text),
+            // `HATCHEDIT <option>` (2026-11-07): the one selected hatch is the
+            // input; the typed option travels in the payload.
+            HATCHEDIT_SELECTOR => self.hatchedit_argument(argument, text),
             // `MEASUREGEOM <option>` routes to the existing measurement tools
             // (`DISTANCE`/`ANGLE`/`AREA`/`POLYLINE`) or the report-only `RADIUS`
             // (and the explicit `VOLUME` refusal). It is not a second engine.

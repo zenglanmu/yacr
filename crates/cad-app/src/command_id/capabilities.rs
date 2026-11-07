@@ -50,6 +50,8 @@ impl CommandId {
                 | Self::Boundary
                 | Self::HatchGenerateBoundary
                 | Self::HatchToBack
+                | Self::Gradient
+                | Self::HatchEdit
                 | Self::MoveEntities
                 | Self::TrimEntity
                 | Self::ExtendEntity

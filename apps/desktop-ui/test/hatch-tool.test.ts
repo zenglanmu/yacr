@@ -124,7 +124,7 @@ test('HATCH closes the draw command group on both draw panels, as a router comma
     // `HATCH` → `HATCHPOINT`.
     assert.deepEqual(
       panel.items.slice(-9).map(item => item.id),
-      ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT', 'BOUNDARY', 'REVCLOUD'],
+      ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'],
       tabId,
     );
     const item = panel.items.find(candidate => candidate.id === 'HATCH');
@@ -687,11 +687,11 @@ test('the hatch glyph is a dedicated boundary-with-fill icon, not a neighbour gl
   }
   assert.equal(COMMAND_CATALOG.find(command => command.id === HATCH.id).icon, HATCH.icon);
   // `hatch` is shared by exactly the hatch family: HATCH, its point-pick entry
-  // HATCHPOINT, and the two 2026 hatch utilities (boundary generation and draw
-  // order). No unrelated command may reuse it.
+  // HATCHPOINT, GRADIENT, the boundary generator HATCHGENERATEBOUNDARY, HATCHEDIT
+  // and the draw-order utility HATCHTOBACK. No unrelated command may reuse it.
   assert.deepEqual(
     COMMAND_CATALOG.filter(command => command.icon === HATCH.icon).map(command => command.id),
-    ['HATCH', 'HATCHPOINT', 'HATCHGENERATEBOUNDARY', 'HATCHTOBACK'],
+    ['HATCH', 'HATCHPOINT', 'HATCHGENERATEBOUNDARY', 'HATCHTOBACK', 'GRADIENT', 'HATCHEDIT'],
   );
   // Every draw-panel glyph is a real name, so no draw button falls back to a dot.
   for (const tabId of ['home', 'draw']) {

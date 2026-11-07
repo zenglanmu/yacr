@@ -491,4 +491,17 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // marks stay owned by the text commands. Paper/block draw order and the
   // all-objects form are NOT IMPLEMENTED.
   { id: 'TEXTTOFRONT', labelKey: 'draw.kind.texttofront', icon: 'properties', group: 'modify' },
+  // GRADIENT (AutoCAD 2026) fills the **current selection** with the session
+  // gradient parameters (two-colour linear default). It is a router command with
+  // no payload and no capture, so its enablement is the one-object selection
+  // rule in `gating.ts`; it is a canonical selector of its own, never an alias of
+  // HATCH. There is no gradient preview, no `-GRADIENT` option prompt and no
+  // .pat handling. Appended last so no shipped row moves.
+  { id: 'GRADIENT', labelKey: 'draw.kind.gradient', icon: 'hatch', group: 'draw' },
+  // HATCHEDIT (AutoCAD 2026) is the typed v1 hatch edit: exactly one selected
+  // model-space hatch plus `HATCHEDIT ANGLE <deg>`, `SCALE <factor>`, `SOLID` or
+  // `GRADIENT`. The bare name is a named `hatchedit.needs_option` refusal, and
+  // pattern name / colour / properties / draw order / boundary add-remove /
+  // associativity are NOT implemented. Router command, selection-gated.
+  { id: 'HATCHEDIT', labelKey: 'draw.kind.hatchedit', icon: 'hatch', group: 'annotate' },
 ]);

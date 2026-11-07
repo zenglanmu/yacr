@@ -328,7 +328,7 @@ test('TEXT is a draw affordance in the ribbon and the catalog, enabled only by r
     assert.equal(item.variants, undefined, 'TEXT has no variant popover');
     // HATCH still closes the draw run, with HATCHPOINT directly after it.
     const items = drawPanel(tabId).items;
-    assert.deepEqual(items.slice(-4).map(item => item.id), ['HATCH', 'HATCHPOINT', 'BOUNDARY', 'REVCLOUD'], `${tabId}/draw ends with the HATCH family and REVCLOUD`);
+    assert.deepEqual(items.slice(-4).map(item => item.id), ['HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'], `${tabId}/draw ends with the HATCH family and REVCLOUD`);
     assert.ok(ribbonCommandIds().includes('TEXT'));
   }
   // Router admission is the single enable gate.
@@ -449,7 +449,7 @@ test('MTEXT sits directly after TEXT in the catalog and both draw panels, with n
     // a variant popover here would offer choices the command does not have.
     assert.equal(item.variants, undefined, 'MTEXT has no variant popover');
     // HATCH still closes the draw run, with HATCHPOINT directly after it.
-    assert.deepEqual(items.slice(-4).map(item => item.id), ['HATCH', 'HATCHPOINT', 'BOUNDARY', 'REVCLOUD'], `${tabId}/draw ends with the HATCH family and REVCLOUD`);
+    assert.deepEqual(items.slice(-4).map(item => item.id), ['HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'], `${tabId}/draw ends with the HATCH family and REVCLOUD`);
     assert.ok(ribbonCommandIds().includes('MTEXT'));
   }
   // Router admission is the single enable gate, exactly like TEXT.

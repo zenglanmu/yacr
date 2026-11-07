@@ -89,7 +89,7 @@ test('both draw panels carry SCALETEXT as one small router button with no popove
     // The HATCH pair still closes the draw group.
     assert.deepEqual(
       items.slice(-4).map(candidate => candidate.id),
-      ['HATCH', 'HATCHPOINT', 'BOUNDARY', 'REVCLOUD'],
+      ['HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'],
       `${tabId}/draw ends with the HATCH pair and REVCLOUD`,
     );
   }

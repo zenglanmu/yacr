@@ -15,7 +15,7 @@ import { STANDARD_VIEWS } from '../cad/view3d.ts';
 import { DRAW_MODIFY_ITEMS, HOME_MODIFY_ITEMS } from './ribbon-modify.ts';
 import { LAYER_PANEL_ITEMS } from './layers-panel.ts';
 import { ANNOTATE_TEXT_COMMAND_ITEMS } from './annotate-text-commands.ts';
-import { CIRCLE_ITEM, MEASUREGEOM_ITEM, POLYGON_ITEM } from './variants.ts';
+import { CIRCLE_ITEM, HATCHEDIT_ITEM, MEASUREGEOM_ITEM, POLYGON_ITEM } from './variants.ts';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({
@@ -412,8 +412,8 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // HATCH is the draw group's select-objects-first command, the way
           // AutoCAD's Draw panel puts Hatch at its end. It is a small button:
           // unlike LINE/CIRCLE it is not a primary creation tool, and it has no
-          // variant popover (the unimplemented pattern-name/gradient forms must not
-          // appear as menu entries).
+          // variant popover (the unimplemented pattern-name forms must not appear
+          // as menu entries).
           { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', command: 'HATCH' },
           // HATCHPOINT is HATCH's point-pick entry and is appended after it, so
           // no shipped row moves: one pick inside a closed boundary, then the host
@@ -442,6 +442,13 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // whose enablement comes from `SELECTION_REQUIREMENTS`; there is no
           // rectangular/polygonal draw mode and no `Arc length` option to offer.
           { id: 'REVCLOUD', labelKey: 'draw.kind.revcloud', icon: 'polyline', command: 'REVCLOUD' },
+          // GRADIENT (AutoCAD 2026) is HATCH's pre-selection sibling: the current
+          // selection is the closed boundary, the fill is forced to the session
+          // gradient (two-colour linear default). It is appended last so no
+          // shipped row moves; a router command, so the one-object precondition
+          // in `SELECTION_REQUIREMENTS` decides when it can run. No preview, no
+          // `-GRADIENT` prompts, no .pat handling.
+          { id: 'GRADIENT', labelKey: 'draw.kind.gradient', icon: 'hatch', command: 'GRADIENT' },
         ],
       },
       {
@@ -585,6 +592,13 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // whose enablement comes from `SELECTION_REQUIREMENTS`; there is no
           // rectangular/polygonal draw mode and no `Arc length` option to offer.
           { id: 'REVCLOUD', labelKey: 'draw.kind.revcloud', icon: 'polyline', command: 'REVCLOUD' },
+          // GRADIENT (AutoCAD 2026) is HATCH's pre-selection sibling: the current
+          // selection is the closed boundary, the fill is forced to the session
+          // gradient (two-colour linear default). It is appended last so no
+          // shipped row moves; a router command, so the one-object precondition
+          // in `SELECTION_REQUIREMENTS` decides when it can run. No preview, no
+          // `-GRADIENT` prompts, no .pat handling.
+          { id: 'GRADIENT', labelKey: 'draw.kind.gradient', icon: 'hatch', command: 'GRADIENT' },
         ],
       },
       {
@@ -721,6 +735,15 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // eraser: this region hides what is behind it); the icon set has no mask
           // mark and `hatch` is contractually the hatch family's own.
           { id: 'WIPEOUT', labelKey: 'draw.kind.wipeout', icon: 'erase', command: 'WIPEOUT' },
+          // HATCHEDIT (AutoCAD 2026) is the typed hatch edit: exactly one
+          // selected model-space hatch plus a typed option. It is appended last
+          // so no shipped row moves; the parent is a split button (shared item
+          // in `variants.ts`) and the caret offers the two one-word fill
+          // replacements, while ANGLE/SCALE stay typed forms.
+          HATCHEDIT_ITEM,
+          // GRADIENT is the current-selection gradient fill, appended with
+          // HATCHEDIT so the hatch family's new commands sit together.
+          { id: 'GRADIENT', labelKey: 'draw.kind.gradient', icon: 'hatch', command: 'GRADIENT' },
         ],
       },
     ],

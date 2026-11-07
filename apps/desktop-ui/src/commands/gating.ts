@@ -77,6 +77,20 @@ function isSignedDecimal(text: string): boolean {
 }
 
 /**
+ * Whether `text` is a finite decimal with an optional sign that is **greater
+ * than zero** (`2`, `0.5`, `+3`; never `0`, `-1`).
+ *
+ * `HATCHEDIT SCALE` needs this shape: the host's grammar is the same plain
+ * decimal plus the strict positivity rule, so a zero/negative factor is refused
+ * locally instead of reaching the router.
+ */
+function isPositiveSignedDecimal(text: string): boolean {
+  if (!/^\+?[0-9]+(\.[0-9]+)?$/.test(text)) return false;
+  const value = Number(text);
+  return Number.isFinite(value) && value > 0;
+}
+
+/**
  * The selectors that take a typed argument, with the **local syntax** predicate
  * for that argument.
  *
@@ -179,6 +193,25 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   PEDIT: Object.freeze({
     parse: (argument: string) => ['CLOSE', 'OPEN', 'REVERSE', 'C', 'O', 'R']
       .includes(argument.trim().toUpperCase()),
+  }),
+  /**
+   * `HATCHEDIT <option>` (AutoCAD 2026) is the typed v1 hatch edit. The four
+   * implemented forms are `ANGLE <degrees>` (one finite signed decimal),
+   * `SCALE <factor>` (one finite decimal > 0), `SOLID` and `GRADIENT`. The bare
+   * `HATCHEDIT` is admitted by the base name and refused by the host with
+   * `hatchedit.needs_option`; every other AutoCAD dialog field (`Pattern`,
+   * `Color`, `Properties`, `Draw order`, boundary add/remove, associativity) is
+   * NOT IMPLEMENTED and is refused locally.
+   */
+  HATCHEDIT: Object.freeze({
+    parse: (argument: string) => {
+      const parts = argument.trim().toUpperCase().split(/\s+/).filter(part => part.length > 0);
+      const [word, ...rest] = parts;
+      if (word === 'SOLID' || word === 'GRADIENT') return rest.length === 0;
+      if (word === 'ANGLE') return rest.length === 1 && isSignedDecimal(rest[0]);
+      if (word === 'SCALE') return rest.length === 1 && isPositiveSignedDecimal(rest[0]);
+      return false;
+    },
   }),
   /**
    * `MEASUREGEOM <option>` (2026-11-07) is the inquiry router. Only the **six
@@ -347,6 +380,15 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // and the sentence is the command's own hint, so the disabled button and the
   // refusal describe the same rule once.
   HATCHGENERATEBOUNDARY: Object.freeze({ count: 1, reasonKey: 'draw.kind.hatchgenerateboundary.hint' }),
+  // GRADIENT (AutoCAD 2026) fills the current selection, so at least one closed
+  // boundary must be selected. The table is a *minimum*: the host refuses a
+  // non-closed/non-+Z boundary by name. The sentence is the command's own hint.
+  GRADIENT: Object.freeze({ count: 1, reasonKey: 'draw.kind.gradient.hint' }),
+  // HATCHEDIT edits exactly one selected hatch; the host refuses other counts,
+  // non-hatches and non-addressable refs by name. The table states the minimum
+  // one and uses the command's own hint, so the disabled button and the refusal
+  // describe the same rule.
+  HATCHEDIT: Object.freeze({ count: 1, reasonKey: 'draw.kind.hatchedit.hint' }),
   // BREAKATPOINT is an **interactive tool** (pick the object, then the break
   // point), not a pre-selection command, so it has no selection precondition.
   // The row exists for the "no drawing is open" answer only.

@@ -83,8 +83,26 @@ use super::*;
 
 use super::hatch_boundary::{boundary_loops, boundary_shapes, resolve_plane, stitch_boundary};
 use super::hatch_parameters::{
-    hatch_creation_refusal, hatch_diagnostic, hatch_parameters, hatch_style,
+    gradient_parameters, hatch_creation_refusal, hatch_diagnostic, hatch_parameters, hatch_style,
+    HatchFillMode,
 };
+
+/// Relabel a shared HATCH refusal for the GRADIENT command: the boundary rules
+/// are the same code, so only the command name in the message changes. HATCH
+/// itself passes its errors through unchanged.
+impl HatchFillMode {
+    fn relabel(self, error: CadError) -> CadError {
+        if self != HatchFillMode::Gradient {
+            return error;
+        }
+        match error {
+            CadError::InvalidInput(message) => {
+                CadError::InvalidInput(message.replace("HATCH", "GRADIENT"))
+            }
+            other => other,
+        }
+    }
+}
 
 impl Application {
     /// HATCH the pre-selected boundary entities into one entity (ADR 0018 D).
@@ -127,7 +145,62 @@ impl Application {
                 "Hatch needs a Hatch { refs } payload".into(),
             ));
         };
-        let parameters = hatch_parameters(session)?;
+        self.create_hatch_from_selection(session, command, refs, HatchFillMode::Session)
+    }
+
+    /// GRADIENT: fill the **currently selected** closed boundary entities with the
+    /// session gradient parameters.
+    ///
+    /// This is the HATCH creation path with the fill forced to
+    /// [`HatchFillMode::Gradient`]: the boundary classifier, stitcher, plane
+    /// resolver and the `HatchGeometry::new` creation validator are the *same*
+    /// functions, so GRADIENT has no second boundary implementation and the same
+    /// HATCH refusal surface (relabelled `GRADIENT …`). The fill comes from the
+    /// existing gradient channel (`hatchGradientKind`, `hatchGradientAngle` in
+    /// degrees, `hatchGradientColorA`/`B`); the default session values are the
+    /// two-colour linear ramp. The stale `hatchPatternType`/index/spacing are not
+    /// consulted. Full contract: [`crate::command_id::gradient`].
+    ///
+    /// Additional v1 refusal: a boundary whose resolved plane normal is not `+Z`
+    /// is `gradient.not_plus_z` (the gradient bake is defined in that plane).
+    /// The command takes no payload (`gradient.payload`) and an empty selection is
+    /// `gradient.selection`; both write nothing.
+    pub(crate) fn create_gradient(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        if !matches!(command.payload, CommandPayload::None) {
+            return Err(CadError::InvalidInput(
+                "gradient.payload: GRADIENT takes no payload; the current selection is the closed \
+                 boundary input"
+                    .into(),
+            ));
+        }
+        let refs = session.selection.refs();
+        if refs.is_empty() {
+            return Err(CadError::InvalidInput(
+                "gradient.selection: GRADIENT needs at least one selected closed boundary entity"
+                    .into(),
+            ));
+        }
+        self.create_hatch_from_selection(session, command, refs, HatchFillMode::Gradient)
+    }
+
+    /// The one boundary-to-hatch path shared by HATCH and GRADIENT.
+    fn create_hatch_from_selection(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        refs: &[SelectionRef],
+        mode: HatchFillMode,
+    ) -> CadResult<CommandOutcome> {
+        let gradient = mode == HatchFillMode::Gradient;
+        let parameters = if gradient {
+            gradient_parameters(session)?
+        } else {
+            hatch_parameters(session)?
+        };
 
         let document_id = command.document;
         let (loops, plane, stitched_edges) = {
@@ -141,26 +214,34 @@ impl Application {
             for reference in refs {
                 if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
                     return Err(CadError::InvalidInput(format!(
-                        "HATCH boundary must be a model-space entity; entity {} is referenced \
+                        "{} boundary must be a model-space entity; entity {} is referenced \
                          through a block instance or a sub-element",
+                        if gradient { "GRADIENT" } else { "HATCH" },
                         reference.entity.0
                     )));
                 }
             }
 
-            let (sources, _diagnostics) = Self::resolve_selection(
-                drawing,
-                document_id,
-                refs,
-                "hatch",
-                "HATCH",
-                "hatch",
-                false,
-            )?;
-            let shapes = boundary_shapes(&sources)?;
-            let stitched = stitch_boundary(&shapes)?;
-            let plane = resolve_plane(&shapes, &stitched)?;
-            let loops = boundary_loops(&shapes, &stitched, &plane)?;
+            let (code, operation, action) = if gradient {
+                ("gradient", "GRADIENT", "gradient")
+            } else {
+                ("hatch", "HATCH", "hatch")
+            };
+            let (sources, _diagnostics) =
+                Self::resolve_selection(drawing, document_id, refs, code, operation, action, false)
+                    .map_err(|error| mode.relabel(error))?;
+            let shapes = boundary_shapes(&sources).map_err(|error| mode.relabel(error))?;
+            let stitched = stitch_boundary(&shapes).map_err(|error| mode.relabel(error))?;
+            let plane = resolve_plane(&shapes, &stitched).map_err(|error| mode.relabel(error))?;
+            if gradient && plane.normal.z < 1.0 - 1e-9 {
+                return Err(CadError::InvalidInput(format!(
+                    "gradient.not_plus_z: GRADIENT needs a boundary in the +Z plane; the resolved \
+                     normal is ({}, {}, {})",
+                    plane.normal.x, plane.normal.y, plane.normal.z
+                )));
+            }
+            let loops =
+                boundary_loops(&shapes, &stitched, &plane).map_err(|error| mode.relabel(error))?;
             let edge_count = stitched.edge_count();
             (loops, plane, edge_count)
         };
@@ -171,10 +252,19 @@ impl Application {
         // The unique creation-path constructor: every boundary defect (A.3) is a
         // whole-command refusal here, before a transaction exists.
         let hatch = HatchGeometry::new(loops, plane, style, fill, Vec::new(), None, pattern_type)
-            .map_err(hatch_creation_refusal)?;
+            .map_err(|error| mode.relabel(hatch_creation_refusal(error)))?;
         let geometry = SemanticGeometry::Hatch(Box::new(hatch));
 
-        let mut outcome = self.commit_new_entity(session, command, geometry, "create hatch")?;
+        let mut outcome = self.commit_new_entity(
+            session,
+            command,
+            geometry,
+            if gradient {
+                "create gradient"
+            } else {
+                "create hatch"
+            },
+        )?;
         if let Some(object) = outcome.objects.first().copied() {
             outcome.diagnostics.push(hatch_diagnostic(
                 object,
