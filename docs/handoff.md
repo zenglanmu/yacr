@@ -1,3 +1,25 @@
+## 2026-11-07 绘制/测量预览补全（`Lines` = `LineList` 配对修复）
+
+- **用户可见 bug**：绘制中的预览缺线——POLYLINE 缺「第 2 点→第 3 点」连线；RECTANG 只画出一条
+  水平边。截图来自用户的实际 GUI 运行（具体载体未确认）；overlay 由 `cad-app` 单一实现产出，
+  `native-below` 与 `dom-canvas` 共用同一份代码，故两种载体同时受影响、同时修复。
+- **根因**：`RenderTopology::Lines` 是 `LineList`（每 2 顶点一段独立线段，
+  `cad-scene/src/batch.rs:13`、`cad-scene/src/cache.rs:306` 用 `windows(2)` 展开），而
+  `cad-app/src/render_scene/overlay/preview.rs` 把预览的**点链**原样提交给 `Lines` batch，导致
+  `LineList` 只配对 `(p0,p1)`、`(p2,p3)`…，`p1->p2` 被静默丢弃。同一 bug 影响测量橡皮筋以及
+  RECTANG/ELLIPSE/POLYGON/SPLINE/CIRCLE/ARC/WIPEOUT 预览（闭合链少一半弦）。
+- **修复**：新增 `chain_batch()`（n 点链 → `2*(n-1)` 个显式顶点对，必要时才拆段），只用于两个
+  链式调用点（`draw_preview_overlay` 几何批、`measurement_preview_overlay`）；跟踪轴网/点样式/
+  夹点/捕捉标记/窗选框等本来就传顶点对的调用点保持不变。`line_batch` 文档改为「显式顶点对」。
+- **契约测试**：新增 `overlay/tests/polyline_preview.rs`（多段线 4 点链精确顶点序列 +
+  RECTANG 4 段）；修正原先编码该 bug 的顶点数断言（矩形 5→8、多边形 `n+1`→`2n`、椭圆/样条上限
+  翻倍、测量链 3→4），并在这些用例加偶数顶点断言。
+- **已运行**：`cargo test -p cad-app --lib render_scene::overlay --locked`（92 passed）；
+  `cargo fmt -p cad-app -- --check`；`cargo clippy -p cad-app --all-targets --locked -D warnings`；
+  `scripts/check-file-size.py`。
+- **NOT RUN / NOT VERIFIED**：真实 GUI/像素复核（未做实际绘制交互截图）；GPU/真机/其它载体
+  运行时；`cargo test --workspace`。像素结论待用户复跑确认。
+
 ## 2026-11-07 覆盖文档合并（单一权威文档）
 
 - `docs/autocad-2026-command-coverage.md` 现在是**唯一**覆盖事实文档：官方 981 条逐条状态

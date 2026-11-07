@@ -30,9 +30,10 @@ fn rectang_preview_draws_the_closed_outline_between_the_two_corners() {
     assert_eq!(batch.topology, RenderTopology::Lines);
     assert_eq!(
         batch.vertices.len(),
-        5,
-        "four corners with the last closing back onto the first"
+        8,
+        "four corners as four explicit segment pairs"
     );
+    assert_eq!(batch.vertices.len() % 2, 0);
     // A degenerate span (the cursor on the corner's vertical line) has no
     // rectangle, so only the rubber-band chain is previewed.
     let degenerate = DrawPreview {

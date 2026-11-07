@@ -460,9 +460,11 @@ fn measurement_preview_produces_n_minus_one_segments_and_markers() {
         true,
         &PreviewOptions::default(),
     );
-    // One polyline batch (3 vertices -> 2 segments) + one marker batch.
+    // One polyline batch (3 chain points -> 2 segments -> 4 vertices) + one
+    // marker batch.
     assert_eq!(overlay.drawn(), 2);
-    assert_eq!(overlay.batches[0].vertices.len(), 3);
+    assert_eq!(overlay.batches[0].vertices.len(), 4);
+    assert_eq!(overlay.batches[0].vertices.len() % 2, 0);
     // 3 points -> 3 crosses -> 6 segments -> 12 vertices.
     assert_eq!(overlay.batches[1].vertices.len(), 12);
     assert_eq!(overlay.batches[0].color, MEASUREMENT_PREVIEW_COLOR);
@@ -964,6 +966,7 @@ mod ellipse_preview;
 mod marker_sizing;
 mod point_styles;
 mod polygon_preview;
+mod polyline_preview;
 mod rectang_preview;
 mod snap_glyphs;
 mod spline_preview;

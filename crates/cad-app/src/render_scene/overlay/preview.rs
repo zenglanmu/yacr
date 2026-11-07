@@ -261,7 +261,7 @@ pub fn draw_preview_overlay(
     };
     if let Some(points) = geometry {
         if let Some(batch) =
-            line_batch(&points, DRAW_PREVIEW_COLOR, document, order, "draw.preview")
+            chain_batch(&points, DRAW_PREVIEW_COLOR, document, order, "draw.preview")
         {
             out.batches.push(batch);
             order += 1;
@@ -808,18 +808,15 @@ fn measurement_preview_overlay(
     let mut order = options.draw_order;
 
     let chain = preview_chain(&preview.points, preview.cursor);
-    if chain.len() >= 2 {
-        let batch = line_batch(
-            &chain,
-            MEASUREMENT_PREVIEW_COLOR,
-            document,
-            order,
-            "measurement.preview",
-        );
-        if let Some(batch) = batch {
-            out.batches.push(batch);
-            order += 1;
-        }
+    if let Some(batch) = chain_batch(
+        &chain,
+        MEASUREMENT_PREVIEW_COLOR,
+        document,
+        order,
+        "measurement.preview",
+    ) {
+        out.batches.push(batch);
+        order += 1;
     }
     if snap_hints {
         let markers = marker_batch(
@@ -837,8 +834,25 @@ fn measurement_preview_overlay(
     out
 }
 
-/// Build one `Lines` batch through `points` (a polyline; consecutive duplicates
-/// are preserved as zero-length segments, exactly as captured).
+/// Build one `Lines` batch for a chain of `points` as explicit segment pairs.
+///
+/// `Lines` is a `LineList` (two vertices per segment), so a raw chain would draw
+/// only every other segment; `n` points expand to `2 * (n - 1)` vertices.
+fn chain_batch(
+    points: &[Point3],
+    color: [f32; 3],
+    document: DocumentId,
+    draw_order: i64,
+    code: &str,
+) -> Option<RenderBatch> {
+    if points.len() < 2 {
+        return None;
+    }
+    let segments: Vec<Point3> = points.windows(2).flatten().copied().collect();
+    line_batch(&segments, color, document, draw_order, code)
+}
+
+/// Build one `Lines` batch from explicit segment pairs (two vertices/segment).
 pub(super) fn line_batch(
     points: &[Point3],
     color: [f32; 3],

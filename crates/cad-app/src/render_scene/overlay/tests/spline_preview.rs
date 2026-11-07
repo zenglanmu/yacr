@@ -31,9 +31,14 @@ fn spline_preview_draws_a_bounded_chord_approximation_of_the_curve() {
     let batch = &overlay.batches[0];
     assert_eq!(batch.topology, RenderTopology::Lines);
     assert!(
-        batch.vertices.len() >= 2 && batch.vertices.len() <= 257,
-        "bounded chord approximation (<= 256 segments), got {}",
+        batch.vertices.len() >= 2 && batch.vertices.len() <= 512,
+        "bounded chord approximation (<= 256 segments -> 512 vertices), got {}",
         batch.vertices.len()
+    );
+    assert_eq!(
+        batch.vertices.len() % 2,
+        0,
+        "each segment is an explicit vertex pair"
     );
     // The curve starts exactly at the first fit point (clamped interpolation), and
     // the batch is expressed relative to that origin.
@@ -55,8 +60,8 @@ fn spline_preview_draws_a_bounded_chord_approximation_of_the_curve() {
     let overlay = draw_preview_overlay(&few, DocumentId(1), false, &PreviewOptions::default());
     assert_eq!(
         overlay.batches[0].vertices.len(),
-        3,
-        "two fit points + cursor chain, never a fabricated curve"
+        4,
+        "two fit points + cursor chain as two segment pairs, never a fabricated curve"
     );
 
     // With no live cursor the captured fit points alone still interpolate.

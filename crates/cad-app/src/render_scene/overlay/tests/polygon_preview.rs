@@ -28,8 +28,9 @@ fn polygon_preview(sides: Option<u32>) -> DrawPreview {
 
 #[test]
 fn polygon_preview_draws_a_closed_outline_with_n_segments() {
-    // The current side count drives the segment count: `n` vertices plus the
-    // closing repeat of the first vertex, i.e. `n` drawn segments.
+    // The current side count drives the segment count: `n` chain vertices plus the
+    // closing repeat of the first vertex, i.e. `n` drawn segments of two vertices
+    // each.
     for sides in [3u32, 4, 6, 12] {
         let preview = polygon_preview(Some(sides));
         let overlay =
@@ -39,8 +40,13 @@ fn polygon_preview_draws_a_closed_outline_with_n_segments() {
         assert_eq!(batch.topology, RenderTopology::Lines);
         assert_eq!(
             batch.vertices.len(),
-            sides as usize + 1,
-            "{sides} sides: {sides} segments, closed back onto the first vertex"
+            sides as usize * 2,
+            "{sides} sides: {sides} segments as explicit vertex pairs, closed back onto the first vertex"
+        );
+        assert_eq!(
+            batch.vertices.len() % 2,
+            0,
+            "{sides} sides: explicit vertex pairs"
         );
         // A closed outline: the last vertex repeats the first.
         let first = batch.vertices.first().unwrap();

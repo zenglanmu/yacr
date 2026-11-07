@@ -32,9 +32,14 @@ fn ellipse_preview_draws_a_closed_bounded_tessellated_curve() {
     let batch = &overlay.batches[0];
     assert_eq!(batch.topology, RenderTopology::Lines);
     assert!(
-        batch.vertices.len() >= 2 && batch.vertices.len() <= 129,
-        "bounded tessellation (<= 128 segments), got {}",
+        batch.vertices.len() >= 2 && batch.vertices.len() <= 256,
+        "bounded tessellation (<= 128 segments -> 256 vertices), got {}",
         batch.vertices.len()
+    );
+    assert_eq!(
+        batch.vertices.len() % 2,
+        0,
+        "each segment is an explicit vertex pair"
     );
     // A closed curve: the last vertex tessellates t = 2π, i.e. the first vertex.
     let first = batch.vertices.first().unwrap();
