@@ -985,4 +985,9 @@ pub enum CommandPayload {
         needle: String,
         replacement: Option<String>,
     },
+    Purge(PurgeTarget),
+    Rename(RenameCommand),
+    SetVar(String),
+    MRedo(u32),
+    Multiple(Option<String>),
 }

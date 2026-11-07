@@ -79,7 +79,7 @@ impl CadSession {
 
     /// Echo the admitted selector (never the typed argument) and dispatch one
     /// payload, recording the real refusal for `cad_status.error`.
-    fn dispatch_typed_argument(
+    pub(super) fn dispatch_typed_argument(
         &self,
         selector: &'static str,
         id: CommandId,

@@ -818,6 +818,36 @@ pub enum CommandId {
     HideObjects,
     IsolateObjects,
     UnisolateObjects,
+    /// `PURGE` / `-PURGE`: remove unused named objects through the database's
+    /// sanctioned delete APIs. Layers are the only kind with a delete API in
+    /// this build; block/linetype/style are explicit named refusals. Work-only;
+    /// layer-table writes are not undoable.
+    Purge,
+    /// `RENAME` / `-RENAME`: rename one named object. Only layers have a rename
+    /// API; the other kinds are explicit named refusals. Work-only; not
+    /// undoable.
+    Rename,
+    /// `SETVAR <name>`: read-only report of one modelled variable. The typed
+    /// write form routes to the existing `PDMODE`/`PDSIZE`/`LTSCALE`/`SNAPUNIT`/
+    /// `GRID`/`SNAP`/`ORTHO` handlers rather than a second write path.
+    SetVar,
+    /// `TIME`: read-only document/revision/entity and clock report. Drawing
+    /// creation/edit timestamps and session uptime are NOT TRACKED.
+    Time,
+    /// `DBLIST`: read-only listing of every top-level entity in the open
+    /// document (id/type/layer/space/draw order). Viewer-legal.
+    DbList,
+    /// `TREESTAT`: read-only spatial-index report. This build retains no
+    /// persistent application spatial index, so the state is explicitly
+    /// NOT TRACKED rather than a fabricated count.
+    TreeStat,
+    /// `MREDO [n]`: apply up to `n` existing redo records (default 1). One
+    /// history move per step; refuses an empty redo stack. Work-only.
+    MRedo,
+    /// `MULTIPLE [command]`: arm the session repeat flag. This host has no
+    /// command repeat loop, so the flag is modelled and the actual repetition is
+    /// reported as `multiple.repeat_not_implemented`, never faked.
+    Multiple,
 }
 
 mod capabilities;

@@ -183,6 +183,21 @@ pub struct SessionState {
     /// database id allocator never reuses an id — so an OOPS restore is a new
     /// copy, not the same row back.
     last_erase: Option<EraseSnapshot>,
+    /// The `MULTIPLE` repeat request, if one is armed.
+    ///
+    /// Session state only. This host has no command repeat loop, so the flag is
+    /// recorded and `MULTIPLE` reports the named boundary; no command is
+    /// repeated and nothing is written to the drawing.
+    multiple: Option<MultipleRepeat>,
+}
+
+/// What a `MULTIPLE` invocation asked to repeat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MultipleRepeat {
+    /// Bare `MULTIPLE`: repeat the next command.
+    NextCommand,
+    /// `MULTIPLE <command>`: repeat that canonical selector.
+    Command(String),
 }
 
 /// CAD backend preference shared by UI, app state and hosts (spec §6).
@@ -222,7 +237,26 @@ impl SessionState {
             clipboard: Vec::new(),
             clipboard_base: None,
             last_erase: None,
+            multiple: None,
         }
+    }
+
+    /// Arm the `MULTIPLE` repeat request (`None` target = the next command).
+    pub fn arm_multiple(&mut self, target: Option<String>) {
+        self.multiple = Some(match target {
+            Some(name) => MultipleRepeat::Command(name),
+            None => MultipleRepeat::NextCommand,
+        });
+    }
+
+    /// The armed `MULTIPLE` request, if any. Session state only.
+    pub fn multiple_target(&self) -> Option<&MultipleRepeat> {
+        self.multiple.as_ref()
+    }
+
+    /// Disarm the `MULTIPLE` request.
+    pub fn clear_multiple(&mut self) {
+        self.multiple = None;
     }
 
     /// The previous captured point of the active capture, for `ORTHO`.

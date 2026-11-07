@@ -42,6 +42,7 @@ pub mod zoom_history;
 
 mod app_audit;
 mod app_reports;
+mod app_utility;
 mod app_zoom;
 mod layer_history;
 mod layer_states;
@@ -110,7 +111,7 @@ pub struct Document {
 
 mod session_state;
 
-pub use session_state::{BackendChoice, ClipboardEntry, SessionState};
+pub use session_state::{BackendChoice, ClipboardEntry, MultipleRepeat, SessionState};
 
 #[cfg(test)]
 mod p2_interaction_tests {
@@ -337,10 +338,10 @@ mod command_payload;
 
 pub use command_payload::{
     AngularDimensionInput, CommandPayload, DimensionChainCommand, GripStretchCommand,
-    HatchEditOption, JustifyTextCommand, LayerStateCommand, MeasureGeomOption, OrdinateAxis,
-    OrdinateDimensionCommand, PeditOption, RadialDimensionCommand, RotatedLinearDimensionCommand,
-    TCircleCommand, TCountCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape,
-    TextCaseMode, TextScaleCommand, TwoLineCommand,
+    HatchEditOption, JustifyTextCommand, LayerStateCommand, MeasureGeomOption, NamedObjectKind,
+    OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget, RadialDimensionCommand,
+    RenameCommand, RotatedLinearDimensionCommand, TCircleCommand, TCountCommand, TextAlignCommand,
+    TextAlignEdge, TextBoundaryShape, TextCaseMode, TextScaleCommand, TwoLineCommand,
 };
 
 pub struct Command {
