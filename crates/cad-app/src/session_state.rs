@@ -9,6 +9,7 @@ use crate::draw_tool::{
     DrawIntent, DrawPreview, DrawTool, DrawToolKind, ToolParameter, ToolParameterStore, ToolValue,
     DEFAULT_POLYGON_SIDES,
 };
+use crate::groups::EntityGroups;
 use crate::layer_history::LayerOverrideHistory;
 use crate::layer_states::LayerStates;
 use crate::layers::LayerOverrideSet;
@@ -62,6 +63,9 @@ pub struct SessionState {
     pub layer_states: LayerStates,
     /// Session-only named views (`VIEW` / `VIEWGO`), at most 32.
     pub view_states: ViewStates,
+    /// Session-only named entity groups (`GROUP` / `UNGROUP` / `GROUPEDIT`),
+    /// at most 64. Never a DWG group object.
+    pub groups: EntityGroups,
     /// Document-wide `REGEN` stamp. REDRAW uses `generation` instead.
     pub regen_generation: u64,
     /// `VPMAX`/`VPMIN` session marker; never drawing data.
@@ -245,6 +249,7 @@ impl SessionState {
             layer_history: LayerOverrideHistory::new(),
             layer_states: LayerStates::new(),
             view_states: ViewStates::new(),
+            groups: EntityGroups::new(),
             regen_generation: 0,
             maximized_viewport: None,
 

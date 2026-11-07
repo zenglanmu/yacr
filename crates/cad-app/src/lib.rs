@@ -16,6 +16,7 @@ pub mod api;
 pub mod camera;
 pub mod draw_tool;
 pub mod grips;
+pub mod groups;
 pub mod host;
 pub mod input;
 pub mod interaction;
@@ -74,6 +75,7 @@ pub use draw_tool::{
     HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE,
     HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER, MAX_TOOL_TEXT_CHARS,
 };
+pub use groups::{EntityGroup, EntityGroups, ENTITY_GROUP_CAP};
 pub use input::{
     apply_canvas_metrics, classify_key, escape_action, CancelReason, CanvasMetrics,
     DiagnosticsDrawer, EscapeAction, InputOutcome, InputPolicy, KeyAction, LoadingState,
@@ -358,13 +360,14 @@ pub use layout_payload::{LayoutPayload, PaperSetup};
 pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 
 pub use command_payload::{
-    AngularDimensionInput, CommandPayload, DimEditCommand, DimJogLineCommand, DimOverrideCommand,
-    DimStyleCommand, DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand,
-    GripStretchCommand, HatchEditOption, JustifyTextCommand, LayerStateCommand, MeasureGeomOption,
-    NamedObjectKind, OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget,
-    RadialDimensionCommand, RenameCommand, RotatedLinearDimensionCommand, TCircleCommand,
-    TCountCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode,
-    TextScaleCommand, TwoLineCommand, VPointInput, ViewCommand,
+    AngularDimensionInput, AnnotationBatchPayload, CommandPayload, DimEditCommand,
+    DimJogLineCommand, DimOverrideCommand, DimStyleCommand, DimTextEditCommand,
+    DimensionBatchPayload, DimensionChainCommand, GripStretchCommand, GroupCommand,
+    GroupEditCommand, HatchEditOption, HatchOriginCommand, JustifyTextCommand, LayerStateCommand,
+    LeaderCommand, MeasureGeomOption, NamedObjectKind, OrdinateAxis, OrdinateDimensionCommand,
+    PeditOption, PurgeTarget, RadialDimensionCommand, RenameCommand, RotatedLinearDimensionCommand,
+    TCircleCommand, TCountCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape,
+    TextCaseMode, TextFitCommand, TextScaleCommand, TwoLineCommand, VPointInput, ViewCommand,
 };
 
 pub struct Command {

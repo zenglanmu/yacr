@@ -103,25 +103,11 @@ pub enum CommandId {
     SwitchBackend,
     Switch2d3d,
     StandardView,
-    /// `PLAN`: display an orthographic view of the XY plane — AutoCAD 2026's
-    /// `PLAN` in its default form.
-    ///
-    /// Payload-free and exactly the **top/plan 2D view**
-    /// ([`crate::StandardView::Top`]): it returns the observation to the 2D plan
-    /// camera, recording one `ZOOM PREVIOUS` step when it leaves a 3D view and
-    /// doing nothing while the viewport is already 2D (the same documented no-op
-    /// as the top standard view). Both paths live in `Application::plan_view` /
-    /// `Application::apply_standard_view`, so `PLAN` is a second *name* for the
-    /// plan observation, never a second view authority.
-    ///
-    /// AutoCAD's `PLAN` also offers **UCS / World / Current** orientation
-    /// choices. This build has **no UCS model at all**, so those options are NOT
-    /// IMPLEMENTED and there is no payload field for them: a caller that supplies
-    /// any payload is refused explicitly (`InvalidInput`), never silently mapped
-    /// onto the world plan.
-    ///
-    /// View/session state only: no database write, no revision bump, no
-    /// `cad-history` entry and no `ChangeSet`, so Viewer mode allows it.
+    /// `PLAN`: display the top/plan 2D view — the same observation as
+    /// [`crate::StandardView::Top`], recording one `ZOOM PREVIOUS` step when it
+    /// leaves a 3D view and doing nothing while already 2D. AutoCAD's
+    /// UCS/World/Current choices are **NOT IMPLEMENTED** (this build has no UCS
+    /// model); any payload is refused. View-only, so Viewer mode allows it.
     PlanView,
     Orbit,
     SwitchProjection,
@@ -961,12 +947,24 @@ pub enum CommandId {
     DimJogLine,
     /// `DIMBREAK`: named capability refusal (no dimension-line break field).
     DimBreak,
+    /// The 2026-11-07 annotation/group batch. Contracts:
+    /// [`crate::command_id::annot_batch`].
+    Group,
+    Ungroup,
+    GroupEdit,
+    QLeader,
+    Leader,
+    TextFit,
+    HatchSetBoundary,
+    HatchSetOrigin,
+    XdList,
 }
 
 mod capabilities;
 mod mode;
 pub use mode::AppMode;
 
+pub mod annot_batch;
 pub mod area_object;
 pub mod block_define;
 pub mod boundary;

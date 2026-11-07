@@ -260,12 +260,19 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "VPSCALE",
             "LAYVPI",
             // The 2026-11-07 dimension-editing batch.
-            // The 2026-11-07 dimension-editing batch.
             "DIMSTYLE",
             "DIMTEDIT",
             "DIMEDIT",
             "DIMOVERRIDE",
-            "DIMJOGLINE"
+            "DIMJOGLINE",
+            // The 2026-11-07 annotation/group batch.
+            "GROUP",
+            "UNGROUP",
+            "GROUPEDIT",
+            "QLEADER",
+            "LEADER",
+            "TEXTFIT",
+            "HATCHSETORIGIN"
         ]
     );
     assert_eq!(

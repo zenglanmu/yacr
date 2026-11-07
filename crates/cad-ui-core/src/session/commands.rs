@@ -1,6 +1,10 @@
 //! The canonical command vocabulary and name normalization.
 use cad_app::{CommandId, MeasurementToolKind};
 
+use super::annot_arguments::{
+    GROUPEDIT_SELECTOR, GROUP_SELECTOR, HATCHSETORIGIN_SELECTOR, LEADER_SELECTOR, QLEADER_SELECTOR,
+    TEXTFIT_SELECTOR, UNGROUP_SELECTOR,
+};
 pub use super::dim_arguments::{
     DIMEDIT_SELECTOR, DIMJOGLINE_SELECTOR, DIMOVERRIDE_SELECTOR, DIMSTYLE_SELECTOR,
     DIMTEDIT_SELECTOR,
@@ -160,12 +164,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // capture. Work-only.
     ("BLOCK", CommandId::DefineBlock),
     ("TEXT", CommandId::CreateText),
-    // MTEXT is the multiline create command **and** a real interactive tool
-    // (2026-10-26): the bare selector starts the two-corner capture — first
-    // corner (insertion point), opposite corner (wrap width), then the terminal
-    // text step. The payload path (`CommandPayload::MText`) stays available for
-    // CLI/host IPC. No `MT` abbreviation is admitted: this table only lists
-    // abbreviations whose behaviour it really implements end to end.
+    // MTEXT: the multiline create command **and** a real two-corner interactive
+    // tool; the payload path stays for CLI/host IPC.
     ("MTEXT", CommandId::CreateMText),
     ("MLEADER", CommandId::MLeader),
     ("TEXTEDIT", CommandId::TextEdit),
@@ -180,9 +180,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("DIMCONTINUE", CommandId::DimContinue),
     ("DIMROTATED", CommandId::DimRotated),
     ("DIMSPACE", CommandId::DimSpace),
-    // The 2026-11-07 dimension-editing batch. `-DIMSTYLE` is an alias (same
-    // CommandId/path), not a second row; QDIM/DIMREGEN/DIMDISASSOCIATE/DIMBREAK
-    // take no argument, so they are not argument selectors.
+    // The 2026-11-07 dimension-editing batch. `-DIMSTYLE` is an alias.
     ("DIMSTYLE", CommandId::DimStyle),
     ("DIMTEDIT", CommandId::DimTextEdit),
     ("DIMEDIT", CommandId::DimEdit),
@@ -192,33 +190,30 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("QDIM", CommandId::QDim),
     ("DIMJOGLINE", CommandId::DimJogLine),
     ("DIMBREAK", CommandId::DimBreak),
+    // The 2026-11-07 annotation/group batch. `-GROUP` is an alias of GROUP.
+    ("GROUP", CommandId::Group),
+    ("UNGROUP", CommandId::Ungroup),
+    ("GROUPEDIT", CommandId::GroupEdit),
+    ("QLEADER", CommandId::QLeader),
+    ("LEADER", CommandId::Leader),
+    ("TEXTFIT", CommandId::TextFit),
+    ("HATCHSETBOUNDARY", CommandId::HatchSetBoundary),
+    ("HATCHSETORIGIN", CommandId::HatchSetOrigin),
+    ("XDLIST", CommandId::XdList),
     ("HATCH", CommandId::Hatch),
-    // HATCHPOINT is the project-specific **internal point** selector (like
-    // SELECTINBOX/GRIPSTRETCH): one picked point, then the command discovers the
-    // smallest visible closed boundary containing it. It is a real selector, not
-    // an alias of HATCH (the input and the discovery are different).
+    // HATCHPOINT: internal-point selector; discovers the smallest visible closed
+    // boundary containing the pick. Not an alias of HATCH (input differs).
     ("HATCHPOINT", CommandId::HatchPoint),
-    // BOUNDARY is the other **internal-point** selector: it reuses HATCHPOINT's
-    // discovery but creates one non-associative closed polyline per loop on the
-    // active layer instead of a hatch. It is a canonical selector of its own, not
-    // an alias of HATCH/HATCHPOINT, and `BO`/`BPOLY` are deliberately **not**
-    // admitted (an alias row would need `docs/shortcuts.md` §2b to change too).
-    // `-BOUNDARY` options (boundary set, island detection off, region output,
-    // object type) are NOT IMPLEMENTED.
+    // BOUNDARY: the same discovery, emitting one closed polyline per loop.
+    // `-BOUNDARY` options are NOT IMPLEMENTED; BO/BPOLY are not admitted.
     ("BOUNDARY", CommandId::Boundary),
     ("HATCHGENERATEBOUNDARY", CommandId::HatchGenerateBoundary),
     ("HATCHTOBACK", CommandId::HatchToBack),
-    // GRADIENT (AutoCAD 2026) fills the **current selection** (no payload) with
-    // the session gradient parameters through the HATCH creation path. It is a
-    // canonical selector of its own, not an alias of HATCH: the fill is forced
-    // to a gradient and the boundary must be in the +Z plane. No preview, no
-    // `-GRADIENT` option prompts, no .pat handling.
+    // GRADIENT fills the **current selection** through the HATCH path (forced
+    // gradient, +Z plane). Not an alias of HATCH; no preview/.pat handling.
     ("GRADIENT", CommandId::Gradient),
-    // HATCHEDIT (AutoCAD 2026) edits **exactly one** selected model-space hatch
-    // with a typed option (`HATCHEDIT ANGLE|SCALE|SOLID|GRADIENT`); the bare
-    // name is a named `hatchedit.needs_option` refusal. Pattern name, Color,
-    // Properties, Draw order, Add/Remove boundaries and associativity are NOT
-    // IMPLEMENTED.
+    // HATCHEDIT edits one selected model-space hatch with a typed option
+    // (`ANGLE|SCALE|SOLID|GRADIENT`); the bare name is a named refusal.
     ("HATCHEDIT", CommandId::HatchEdit),
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
@@ -234,15 +229,10 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("TORIENT", CommandId::Torient),
     ("TCASE", CommandId::TCase),
     ("TXT2MTXT", CommandId::Txt2MText),
-    // TEXTTOFRONT (AutoCAD 2026) reads the **current selection** (declared
-    // divergence from the interactive Select objects prompt) and rewrites the
-    // selected text/leader/dimension draw order above every non-eligible
-    // model-space object. Paper/block draw order and the all-objects form are NOT
-    // IMPLEMENTED.
+    // TEXTTOFRONT reads the current selection and raises the selected
+    // text/leader/dimension draw order above every non-eligible model-space row.
     ("TEXTTOFRONT", CommandId::TextToFront),
-    // The 2026-11-07 2D text batch. `TJUST` is the AutoCAD alias of
-    // `JUSTIFYTEXT` (COMMAND_ALIASES); `MTEDIT`/`-MTEXT` are aliases of the
-    // existing `TEXTEDIT`/`MTEXT` paths below, never second implementations.
+    // 2026-11-07 2D text batch: `TJUST`/`MTEDIT`/`-MTEXT` are aliases.
     ("JUSTIFYTEXT", CommandId::JustifyText),
     ("TSCALE", CommandId::TextScale),
     ("TEXTALIGN", CommandId::TextAlignEdges),
@@ -596,6 +586,14 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     DIMEDIT_SELECTOR,
     DIMOVERRIDE_SELECTOR,
     DIMJOGLINE_SELECTOR,
+    // The 2026-11-07 annotation/group batch argument forms.
+    GROUP_SELECTOR,
+    UNGROUP_SELECTOR,
+    GROUPEDIT_SELECTOR,
+    QLEADER_SELECTOR,
+    LEADER_SELECTOR,
+    TEXTFIT_SELECTOR,
+    HATCHSETORIGIN_SELECTOR,
 ];
 
 /// Split a typed line into an argument-taking selector and its argument.
@@ -872,6 +870,9 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     // `-DIMSTYLE` is AutoCAD's dialog-free spelling of the same command; this
     // build has one selector path, so it normalizes onto `DIMSTYLE`.
     ("-DIMSTYLE", "DIMSTYLE"),
+    // `-GROUP` is AutoCAD's command-line group form; this build has one
+    // session-only group path, so it normalizes onto `GROUP`.
+    ("-GROUP", "GROUP"),
 ];
 
 /// The alias table as `(alias, canonical selector)` pairs, resolved through
