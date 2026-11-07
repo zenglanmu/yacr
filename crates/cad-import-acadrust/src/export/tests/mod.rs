@@ -7,7 +7,7 @@
 use std::io::Cursor;
 use std::sync::Arc;
 
-use acadrust::{CadDocument, DxfReader, DxfWriter, EntityType, Transparency, Vector3};
+use acadrust::{CadDocument, DwgReader, DxfReader, DxfWriter, EntityType, Transparency, Vector3};
 use cad_db::{
     BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder,
     DynamicBlockState, DynamicBlockVisibility, EntityLineType, EntityRenderAttributes,
@@ -21,6 +21,7 @@ use crate::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 mod dimension;
 mod dimension_radial;
+mod dwg;
 mod entities;
 mod hatch;
 mod layers;
@@ -87,11 +88,15 @@ fn db_with(geometries: Vec<SemanticGeometry>) -> DrawingDatabase {
 }
 
 fn export_db(db: &DrawingDatabase) -> (Vec<u8>, ExportReport) {
+    export_db_format(db, ExportFormat::DxfText)
+}
+
+fn export_db_format(db: &DrawingDatabase, format: ExportFormat) -> (Vec<u8>, ExportReport) {
     export(&ExportRequest {
         database: db,
         document_id: DocumentId(1),
         space: ExportSpace::Model,
-        format: ExportFormat::DxfText,
+        format,
         limits: ExportLimits::default(),
         units: None,
     })

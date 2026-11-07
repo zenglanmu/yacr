@@ -1,4 +1,4 @@
-//! Lossy DXF export: reverse-map the domain database to an acadrust document.
+//! Lossy Save As export: reverse-map the domain database to an acadrust document.
 //!
 //! This is a **Save As**, never a round-trip save. The domain database is a
 //! resolved display model — `ByLayer` **linetype and lineweight** are flattened,
@@ -8,6 +8,11 @@
 //! symbolically on import and written back symbolically, so a layer colour
 //! survives the round trip. The caller (host/CLI) owns file I/O; this module only
 //! produces bytes.
+//!
+//! [`ExportFormat::Dwg`] writes the same reverse-mapped document through
+//! upstream `acadrust::DwgWriter` instead of `DxfWriter`. That path is
+//! **experimental and lossy**, and its only evidence is a synthetic acadrust
+//! self-roundtrip — never a claim that AutoCAD or any vendor opens the file.
 
 mod common;
 mod dimension;
@@ -32,9 +37,11 @@ use cad_domain::{CadError, CadResult, Completeness, DocumentId, SpaceId, Transfo
 
 use entity::{emit, EntityContext, ExportAccumulator};
 
-/// A lossy DXF export request.
+/// A lossy Save As export request.
 ///
-/// v1 exports model space only, as ASCII DXF text.
+/// v1 exports model space only. The bytes are ASCII DXF text
+/// ([`ExportFormat::DxfText`]) or experimental binary DWG
+/// ([`ExportFormat::Dwg`]).
 pub struct ExportRequest<'a> {
     pub database: &'a DrawingDatabase,
     pub document_id: DocumentId,
@@ -46,7 +53,7 @@ pub struct ExportRequest<'a> {
     pub units: Option<UnitContext>,
 }
 
-/// Reverse-map `request.database` to ASCII DXF bytes plus an explicit report.
+/// Reverse-map `request.database` to DXF or DWG bytes plus an explicit report.
 pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)> {
     let mut doc = CadDocument::new();
     let mut report = ExportReport {
@@ -56,6 +63,21 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
         notes: Vec::new(),
         completeness: Completeness::Complete,
     };
+
+    if request.format == ExportFormat::Dwg {
+        // A global note, not an entry: this is not a per-geometry loss and must
+        // not turn a clean mapping into `Partial`. It states the evidence
+        // boundary once, in the report the caller shows to the user.
+        report.notes.push(ExportDiagnostic {
+            object: None,
+            code: "export.note.dwg_experimental".into(),
+            message: "DWG output is produced by the upstream acadrust DwgWriter from the same \
+                      lossy reverse-mapped document as the DXF export; the conversion is \
+                      experimental and lossy, and it is NOT verified against AutoCAD or any \
+                      vendor (the only evidence is a synthetic acadrust self-roundtrip)"
+                .into(),
+        });
+    }
 
     write_units(&mut doc, request, &mut report);
     write_point_display_style(&mut doc, request.database);
@@ -169,9 +191,17 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
             .map_err(|error| CadError::InvalidInput(format!("add entity failed: {error}")))?;
     }
 
-    let bytes = acadrust::io::dxf::DxfWriter::new(&doc)
-        .write_to_vec()
-        .map_err(|error| CadError::InvalidInput(format!("DXF write failed: {error}")))?;
+    let bytes = match request.format {
+        ExportFormat::DxfText => acadrust::io::dxf::DxfWriter::new(&doc)
+            .write_to_vec()
+            .map_err(|error| CadError::InvalidInput(format!("DXF write failed: {error}")))?,
+        // Upstream acadrust DWG writer. The same reverse-mapped, already-lossy
+        // document is the input, so DWG inherits every recorded conversion/drop.
+        // Version follows `CadDocument::version` (AC1032 here). Experimental:
+        // no vendor/AutoCAD verification exists for this output.
+        ExportFormat::Dwg => acadrust::DwgWriter::write_to_vec(&doc)
+            .map_err(|error| CadError::InvalidInput(format!("DWG write failed: {error}")))?,
+    };
     report.counts.bytes = bytes.len();
     report.finish_completeness();
     Ok((bytes, report))

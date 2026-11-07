@@ -14,10 +14,19 @@ pub enum ExportSpace {
     Model,
 }
 
-/// The serialisation format. v1 writes ASCII DXF text only.
+/// The serialisation format.
+///
+/// [`ExportFormat::Dwg`] is **experimental**: it is upstream
+/// `acadrust::DwgWriter` output, lossy in exactly the same way as the DXF
+/// export (the reverse-mapped domain model is the input), and it is **not**
+/// verified against AutoCAD or any vendor. The only evidence is a synthetic
+/// acadrust self-roundtrip (`DwgWriter` → `DwgReader`), which is internal
+/// consistency, not compatibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportFormat {
     DxfText,
+    /// Binary DWG (AC1032 by default, decided by `CadDocument::version`).
+    Dwg,
 }
 
 impl ExportFormat {
@@ -25,6 +34,7 @@ impl ExportFormat {
     pub fn extension(self) -> &'static str {
         match self {
             ExportFormat::DxfText => "dxf",
+            ExportFormat::Dwg => "dwg",
         }
     }
 
@@ -32,6 +42,7 @@ impl ExportFormat {
     pub fn as_str(self) -> &'static str {
         match self {
             ExportFormat::DxfText => "dxf-text",
+            ExportFormat::Dwg => "dwg-binary",
         }
     }
 }
