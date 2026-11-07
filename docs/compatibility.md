@@ -425,6 +425,38 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 > 契约覆盖，但**没有** GUI、像素、真实 GPU、真机或 vendor-AutoCAD 证据。前端测试在主仓库合并后
 > 运行通过；worktree 内因缺 `node_modules` 为 NOT RUN。
 
+#### 2026-11-07 实用工具/命名对象批次（10 条）
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `PURGE` / `-PURGE` | 部分实现 | 清理未使用的**图层**（复用 `DELETELAYER` 的引用拒绝），逐行报告删除/拒绝；层表写不可撤销 | `BLOCK`/`STYLE`/`LINETYPE` 没有删除 API，显式 kind 按名拒绝；裸 `PURGE` 只清图层并报告 `purge.kind_unsupported`；无对话框/嵌套清理选项 |
+| `RENAME` / `-RENAME` | 部分实现 | `RENAME <kind> <old> <new>`；LAYER 走既有 `RENAMELAYER`（同一未知/重复/非法名拒绝） | 其它 kind 按名 `rename.<kind>.unsupported`；无对话框；层表写不可撤销 |
+| `SETVAR` | 部分实现 | `SETVAR <name>` 报告；`SETVAR <name> <value>` 写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`，全部复用既有命令/会话写路径 | 未知变量、越界值按名拒绝；不新增系统变量存储；不写 DWG 头的新变量 |
+| `TIME` | 部分实现 | 只读报告：文档 revision/实体数 + UTC 时钟 | 创建/编辑时间、会话 uptime、本地时区格式显式 NOT TRACKED；不发明日期 |
+| `DBLIST` | 部分实现 | 只读列出所有顶层模型/图纸实体（id/type/layer/space/draw order） | 块定义成员只计数并跳过；无分页/过滤对话框 |
+| `TREESTAT` | 部分实现 | 只读；显式 `treestat.not_tracked` | 本构建不保留可查询的持久空间索引，不造假计数 |
+| `MREDO` | 部分实现 | 重做 N 步（默认 1），每步一条既有 `Redo` 历史移动；空栈拒绝；不足时 `mredo.partial` | 不合并历史粒度；不新增 redo 栈 |
+| `MULTIPLE` | 部分实现 | 设置会话 `MultipleRepeat` 标志（下一次命令或指定命令） | 本宿主没有命令重复循环，实际重复按 `multiple.repeat_not_implemented` 具名拒绝，绝不假装已重复 |
+
+#### 2026-11-07 绘制/修改补充批次（10 条）
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心 `Circle`，一条事务/一步撤销 | 无中心点拾取提示（中心必须键入）；`inner=0` 只建外圆并报 `donut.inner_zero`；无宽度/填充环模型 |
+| `SOLID` | 部分实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（type-key `AcDbSolid`），一条事务/一步撤销 | DXF 导出写 polyface mesh，不是 SOLID 记录；无 3D 厚度/挤出 |
+| `HELIX` | 部分实现 | 平面 2D 螺旋 `Polyline`（64 段/圈，上限 4096 顶点），一条事务/一步撤销 | `height>0` 的 3D 弹簧按 `helix.3d_not_implemented` 拒绝；无扭转/半径渐变 |
+| `MLINE` | 部分实现 | 恰好两条平行 `LINE`，围绕基线按当前 MLSTYLE 间距放置，一条事务/一步撤销 | 无 join/cap/元素表/多段基线；不是完整 MLINE 实体 |
+| `MLSTYLE` | 部分实现 | 会话内最多 16 个命名多线样式（`LIST`/`SET`），喂 MLINE | 不写 DWG/不持久化；无对话框、无元素/接头样式 |
+| `TREX` | 部分实现 | `TREX TRIM\|EXTEND`；选择集既是被处理对象又互为边界，复用既有 `plan_trim`/`plan_extend`；一条事务/一步撤销 | 无交互边界提示；TRIM 保留含中点的片段、EXTEND 只长 `u=1` 端 |
+| `EXTRIM` | 部分实现 | 第一个选中为边界、其余为被裁对象；复用 trim 规划；一条事务/一步撤销 | 无边界拾取提示；仅 LINE/CIRCLE/ARC/POLYLINE 边界；其它边界/目标按名拒绝 |
+| `MPEDIT` | 部分实现 | 对每个选中 LWPOLYLINE 应用 `CLOSE\|OPEN\|REVERSE`，一条事务/一步撤销 | 非多段线/无变化逐条具名跳过；无 Join/Width/Fit/Spline/Decurve/Undo |
+| `-OVERKILL` | 部分实现 | `OVERKILL` 的别名（同一 `CommandId`/规划器） | 同 OVERKILL 的 v1 边界：仅完全重复，无部分重叠/共线合并 |
+| `DRAWORDER` | 部分实现 | `FRONT\|BACK\|ABOVE\|BELOW` 重写选中模型空间实体的 `draw_order`，一条事务/一步撤销，保持相对顺序 | ABOVE/BELOW 以第一个选中为参照；图纸空间/块内顺序不重排；无 Draw Order 对话框 |
+
+> **证据边界**：以上 20 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
+> 真机或 vendor-AutoCAD 证据。前端测试在主仓库合并后运行通过；worktree 内因缺 `node_modules`
+> 为 NOT RUN。
+
 **仿射不变规则（`SPLINE`，2026-10-26）**：NURBS 曲线对**仿射**映射不变——把每个控制点过同一个
 仿射映射，而 `degree`、`knots`、`weights` **原样保留**，得到的正是原曲线的**精确仿射像**。因此平移、旋转、
 **均匀与非均匀**缩放、镜像与剪切**全部精确**：无需重拟合、无需重参数化、权重不变。`cad-db` 的

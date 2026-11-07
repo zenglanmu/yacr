@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **103** |
-| **已实现合计（完整 + 部分）** | **153** |
-| 未实现 | **828** |
+| 部分实现（有写明的界） | **123** |
+| **已实现合计（完整 + 部分）** | **173** |
+| 未实现 | **808** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -419,7 +419,7 @@
 | 246 | `DBCDEFINELLT` | 未实现 | Opens the Select a Database Object dialog box. | — |
 | 247 | `DBCDEFINELT` | 未实现 | Opens the Select Data Object Dialog Box (dbConnect Manager) | — |
 | 248 | `DBCONNECT` | 未实现 | Provides an interface to external database tables. | — |
-| 249 | `DBLIST` | 未实现 | Lists database information for each object in the drawing. | — |
+| 249 | `DBLIST` | 部分实现 | Lists database information for each object in the drawing. | 只读列出所有顶层模型/图纸实体（id/type/layer/space/draw order）；块定义成员计数并跳过 |
 | 250 | `DCALIGNED` | 未实现 | Constrains the distance between two points on different objects. | — |
 | 251 | `DCANGULAR` | 未实现 | Constrains the angle between line or polyline segments, the angle swept out by an arc or a polyline arc segment, or the angle between three points on objects. | — |
 | 252 | `DCCONVERT` | 未实现 | Converts associative dimensions to dimensional constraints. | — |
@@ -483,12 +483,12 @@
 | 310 | `DIST` | 已实现 | Measures the distance and angle between two points. | — |
 | 311 | `DISTANTLIGHT` | 未实现 | Creates a distant light. | — |
 | 312 | `DIVIDE` | 部分实现 | Creates evenly spaced point objects or blocks along the length or perimeter of an object. | 仅 LINE/ARC/CIRCLE/直线段 LWPOLYLINE；按等弧长放 POINT |
-| 313 | `DONUT` | 未实现 | Creates a filled circle or a wide ring. | — |
+| 313 | `DONUT` | 部分实现 | Creates a filled circle or a wide ring. | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心圆；`inner=0` 只建外圆并诊断；无中心拾取提示 |
 | 314 | `DOWNLOADMANAGER` | 未实现 | Reports the status of the of the current download. | — |
 | 315 | `DRAGMODE` | 未实现 | Controls the way dragged objects are displayed. | — |
 | 316 | `DRAWINGRECOVERY` | 未实现 | Displays a list of drawing files that can be recovered after a program or system failure. | — |
 | 317 | `DRAWINGRECOVERYHIDE` | 未实现 | Closes the Drawing Recovery Manager. | — |
-| 318 | `DRAWORDER` | 未实现 | Changes the draw order of images and other objects. | — |
+| 318 | `DRAWORDER` | 部分实现 | Changes the draw order of images and other objects. | `FRONT\|BACK\|ABOVE\|BELOW`；ABOVE/BELOW 第一个选中为参照；一条事务，保持相对顺序 |
 | 319 | `DSETTINGS` | 未实现 | Sets grid and snap, polar and object snap tracking, object snap modes, Dynamic Input, and Quick Properties. | — |
 | 320 | `DVIEW` | 未实现 | Defines parallel projection or perspective views by using a camera and target. | — |
 | 321 | `DWFADJUST` | 未实现 | Adjust the fade, contrast, and monochrome settings of a DWF or DWFx underlay. | — |
@@ -529,7 +529,7 @@
 | 356 | `EXTEND` | 部分实现 | Extends objects to meet the edges of other objects. | 目标仅 LINE/ARC；SPLINE/CIRCLE 目标拒绝 |
 | 357 | `EXTERNALREFERENCES` | 未实现 | Opens the External References palette. | — |
 | 358 | `EXTERNALREFERENCESCLOSE` | 未实现 | Closes the External References palette. | — |
-| 359 | `EXTRIM` | 未实现 | Trims all objects at the cutting edge specified by a selected polyline, line, circle, arc, ellipse, text, mtext, or attribute definition. | — |
+| 359 | `EXTRIM` | 部分实现 | Trims all objects at the cutting edge specified by a selected polyline, line, circle, arc, ellipse, text, mtext, or attribute definition. | 第一个选中为边界，其余为被裁对象；复用 trim 规划；不支持边界/目标按名拒绝 |
 | 360 | `EXTRUDE` | 未实现 | Creates a 3D solid from an object that encloses an area, or a 3D surface from an object with open ends. | — |
 | 361 | `FADEMARKUP` | 未实现 | Fade individual markups so they are less visible on a trace. | — |
 | 362 | `FIELD` | 未实现 | Creates a multiline text object with a field that can be updated automatically as the field value changes. | — |
@@ -591,7 +591,7 @@
 | 418 | `HATCHSETBOUNDARY` | 未实现 | Redefines a selected hatch or fill to conform to a different closed boundary. | — |
 | 419 | `HATCHSETORIGIN` | 未实现 | Controls the starting location of hatch pattern generation for a selected hatch. | — |
 | 420 | `HATCHTOBACK` | 部分实现 | Sets the draw order for all hatches in the drawing to be behind all other objects. | 仅模型空间：全部 hatch 连续放到最低非 hatch draw order 之下并保持相对次序；i64 下溢按名拒绝；图纸空间/块内不重排；一次事务可撤销 |
-| 421 | `HELIX` | 未实现 | Creates a 2D spiral or 3D spring. | — |
+| 421 | `HELIX` | 部分实现 | Creates a 2D spiral or 3D spring. | 平面螺旋 `Polyline`；`height>0` 按 `helix.3d_not_implemented` 拒绝 |
 | 422 | `HELP` | 未实现 | Displays the online or offline Help system. | — |
 | 423 | `HIDE` | 未实现 | Displays a 3D model with hidden lines suppressed for the 2D Wireframe visual style. | — |
 | 424 | `HIDEOBJECTS` | 部分实现 | Temporarily suppresses the display of selected objects. | 会话隐藏集；经共享可见性谓词影响拾取/渲染（FLAG_HIDDEN）；无数据库写/撤销；隐藏点标记 overlay 仍可能绘制（声明） |
@@ -732,21 +732,21 @@
 | 559 | `MLEADERSTYLE` | 未实现 | Creates and modifies multileader styles. | — |
 | 560 | `-MLEDIT` | 未实现 | Edits multiline intersections, breaks, and vertices. | — |
 | 561 | `MLEDIT` | 未实现 | Edits multiline intersections, breaks, and vertices. | — |
-| 562 | `MLINE` | 未实现 | Creates multiple parallel lines. | — |
-| 563 | `MLSTYLE` | 未实现 | Creates, modifies, and manages multiline styles. | — |
+| 562 | `MLINE` | 部分实现 | Creates multiple parallel lines. | 恰好两条平行 `LINE`；无 join/cap/多段基线 |
+| 563 | `MLSTYLE` | 部分实现 | Creates, modifies, and manages multiline styles. | 会话内最多 16 个命名样式，喂 MLINE；不持久化 |
 | 564 | `MOCORO` | 未实现 | Moves, copies, rotates, and scales selected objects with a single command. | — |
 | 565 | `MODEL` | 已实现 | Switches from a named layout tab to the Model tab. | payload-free 选择子，复用 SPACE MODEL 的校验 + 自动取景；Model 标签页走同一命令 |
 | 566 | `MOVE` | 已实现 | Moves objects a specified distance in a specified direction. | — |
 | 567 | `MOVEBAK` | 未实现 | Changes the destination folder for drawing backup (BAK) files. | — |
-| 568 | `MPEDIT` | 未实现 | Edits multiple polylines; also converts multiple line and arc objects to polyline objects. | — |
-| 569 | `MREDO` | 未实现 | Reverses the effects of several previous UNDO or U commands. | — |
+| 568 | `MPEDIT` | 部分实现 | Edits multiple polylines; also converts multiple line and arc objects to polyline objects. | 对每个选中 LWPOLYLINE 应用 `CLOSE\|OPEN\|REVERSE`；非多段线逐条跳过；一条事务 |
+| 569 | `MREDO` | 部分实现 | Reverses the effects of several previous UNDO or U commands. | 重做 N 步（默认 1），每步一条历史移动；空栈拒绝；不足时 `mredo.partial` |
 | 570 | `MSLIDE` | 未实现 | Creates a slide file of the current model viewport or the current layout. | — |
 | 571 | `MSPACE` | 未实现 | In a layout, switches from paper space to model space in a layout viewport. | — |
 | 572 | `MSTRETCH` | 未实现 | Stretches objects with multiple crossing windows and crossing polygons. | — |
 | 573 | `MTEDIT` | 部分实现 | Edits multiline text. | `TEXTEDIT` 的别名（同一 `CommandId`/路径）；编辑当前单选的 Text/MText/MULTILEADER 字符串；无第二编辑路径 |
 | 574 | `-MTEXT` | 部分实现 | Creates a multiline text object. | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获）；无第二实现 |
 | 575 | `MTEXT` | 部分实现 | Creates a multiline text object. | 两角宽度模型；无行距/分栏/背景填充 |
-| 576 | `MULTIPLE` | 未实现 | Repeats the next command until canceled. | — |
+| 576 | `MULTIPLE` | 部分实现 | Repeats the next command until canceled. | 设置会话 `MultipleRepeat` 标志；本宿主无重复循环，报告 `multiple.repeat_not_implemented`，不伪造重复 |
 | 577 | `MVIEW` | 未实现 | Creates and controls layout viewports. | — |
 | 578 | `MVSETUP` | 未实现 | Sets up the specifications of a drawing. | — |
 | 579 | `NAVBAR` | 未实现 | Provides access to viewing tools from a unified interface. | — |
@@ -777,7 +777,7 @@
 | 604 | `OPTIONS` | 已实现 | Customizes the program settings. | chrome 本地选择子：打开选项对话框 |
 | 605 | `ORTHO` | 已实现 | Constrains cursor movement to the horizontal or vertical direction. | — |
 | 606 | `OSNAP` | 已实现 | Sets running object snap modes. | — |
-| 607 | `-OVERKILL` | 未实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines partially overlapping or contiguous ones. | — |
+| 607 | `-OVERKILL` | 部分实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines partially overlapping or contiguous ones. | `OVERKILL` 的别名，同一去重实现 |
 | 608 | `OVERKILL` | 部分实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines those that are partially overlapping or contiguous. | v1 仅删除完全相同的重复对象（同空间/图层/几何，1e-9）；无部分重叠、共线合并、圆弧覆盖圆、折线段优化、容差与图层/颜色忽略 |
 | 609 | `-PAGESETUP` | 未实现 | Modifies the current page layout settings for the plotting device, paper size, plot scale, and several other settings in the command line. | — |
 | 610 | `PAGESETUP` | 未实现 | Controls the page layout, plotting device, paper size, and other settings for each new layout. | — |
@@ -853,8 +853,8 @@
 | 680 | `PTYPE` | 未实现 | Specifies the display style and size of point objects. | — |
 | 681 | `-PUBLISH` | 未实现 | Publishes drawings to DWF, DWFx, and PDF files, or to printers or plotters using the command line. | — |
 | 682 | `PUBLISH` | 未实现 | Publishes drawings to DWF, DWFx, and PDF files, or to printers or plotters. | — |
-| 683 | `-PURGE` | 未实现 | Removes unused named objects, such as block definitions and layers, from the current drawing using the command line. | — |
-| 684 | `PURGE` | 未实现 | Removes unused items, such as block definitions and layers, from the drawing. | — |
+| 683 | `-PURGE` | 部分实现 | Removes unused named objects, such as block definitions and layers, from the current drawing using the command line. | `PURGE` 的别名，同一实现 |
+| 684 | `PURGE` | 部分实现 | Removes unused items, such as block definitions and layers, from the drawing. | 只清未使用的**图层**（复用 `DELETELAYER` 的引用拒绝）；BLOCK/STYLE/LINETYPE 无删除 API，按名拒绝；层表写不可撤销 |
 | 685 | `PURGEAECDATA` | 未实现 | Removes the invisible AEC data (AutoCAD Architecture and AutoCAD Civil 3D custom objects) in the drawing at the Command prompt. | — |
 | 686 | `PUSHTODOCSCLOSE` | 未实现 | Closes the Push to Autodesk Docs palette. | — |
 | 687 | `PUSHTODOCSOPEN` | 未实现 | Opens the Push to Autodesk Docs palette where you can select AutoCAD layouts to upload as PDFs to Autodesk Docs. | — |
@@ -898,8 +898,8 @@
 | 725 | `REGENAUTO` | 未实现 | Obsolete. Controls automatic regeneration of a drawing. | — |
 | 726 | `REGION` | 未实现 | Converts objects that enclose an area into a 2D region object. | — |
 | 727 | `REINIT` | 未实现 | Reinitializes the digitizer, digitizer input/output port, and program parameters file. | — |
-| 728 | `-RENAME` | 未实现 | Changes the names assigned to named objects from the Command prompt. | — |
-| 729 | `RENAME` | 未实现 | Changes the names assigned to items such as layers and dimension styles. | — |
+| 728 | `-RENAME` | 部分实现 | Changes the names assigned to named objects from the Command prompt. | `RENAME` 的别名，同一实现 |
+| 729 | `RENAME` | 部分实现 | Changes the names assigned to items such as layers and dimension styles. | `RENAME <kind> <old> <new>`；仅 LAYER 有重命名 API，其余 kind 按名拒绝；不可撤销 |
 | 730 | `-RENDER` | 未实现 | Creates a photorealistic or realistically shaded image of a 3D solid or surface model from the Command prompt. | — |
 | 731 | `RENDER` | 未实现 | Creates a photorealistic or realistically shaded image of a 3D solid or surface model. | — |
 | 732 | `RENDERCROP` | 未实现 | Renders a specified rectangular area, called a crop window, within a viewport. | — |
@@ -955,7 +955,7 @@
 | 782 | `SELECTCOUNT` | 部分实现 | Finds all objects within the current count that match the properties of the selected objects, and then adds them to the selection set. | 只读统计与第一个选中对象五特性相同的模型空间对象数；不改选择/无事务 |
 | 783 | `SELECTSIMILAR` | 部分实现 | Finds all objects within the current drawing that match the properties of selected objects, and then adds them to the selection set. | v1 仅按几何类型匹配并并入当前选择；无 layer/颜色/线型等属性匹配；仅模型空间 |
 | 784 | `SETBYLAYER` | 部分实现 | Changes the property overrides of selected objects to ByLayer. | 预选择输入（不弹 Select objects）；只重置颜色/线型/线宽为随层；不重置透明度与材质，文字/标注/填充/多段线厚度未建模；Include blocks 未实现；锁定图层整命令拒绝；显示写入可撤销 |
-| 785 | `SETVAR` | 未实现 | Lists or changes the values of system variables. | — |
+| 785 | `SETVAR` | 部分实现 | Lists or changes the values of system variables. | 读/写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`；写复用既有命令路径；未知/越界按名拒绝 |
 | 786 | `-SHADEMODE` | 未实现 | Provides simple shading for 3D solids and surfaces. | — |
 | 787 | `SHADEMODE` | 未实现 | Controls the display of 3D objects. | — |
 | 788 | `SHAPE` | 未实现 | Inserts a shape from a shape file (SHX file) that has been loaded using LOAD. | — |
@@ -976,7 +976,7 @@
 | 803 | `SLICE` | 未实现 | Creates new 3D solids and surfaces by slicing, or dividing, existing objects. | — |
 | 804 | `SNAP` | 已实现 | Restricts cursor movement to specified intervals. | — |
 | 805 | `SOLDRAW` | 未实现 | Generates profiles and sections in layout viewports created with SOLVIEW. | — |
-| 806 | `SOLID` | 未实现 | Creates solid-filled triangles and quadrilaterals. | — |
+| 806 | `SOLID` | 部分实现 | Creates solid-filled triangles and quadrilaterals. | 3-4 个 `x,y` 点 → 两三角 `Mesh`（`AcDbSolid`）；DXF 导出写 polyface mesh，不是 SOLID 记录 |
 | 807 | `SOLIDEDIT` | 未实现 | Edits faces and edges of 3D solid objects. | — |
 | 808 | `SOLPROF` | 未实现 | Creates 2D profile images of 3D solids for display in a layout viewport. | — |
 | 809 | `SOLVIEW` | 未实现 | Creates orthographic views, layers, and layout viewports automatically for 3D solids. | — |
@@ -1035,7 +1035,7 @@
 | 862 | `TFRAMES` | 未实现 | Toggles the display of frames for all wipeout and image objects. | — |
 | 863 | `THICKEN` | 未实现 | Converts a surface into a 3D solid with a specified thickness. | — |
 | 864 | `TIFOUT` | 未实现 | Saves selected objects to a file in TIFF file format. | — |
-| 865 | `TIME` | 未实现 | Displays the date and time statistics of a drawing. | — |
+| 865 | `TIME` | 部分实现 | Displays the date and time statistics of a drawing. | 只读：revision/实体数 + UTC 时钟；创建/编辑时间与会话 uptime 显式 NOT TRACKED |
 | 866 | `TINSERT` | 未实现 | Inserts a block in a table cell. | — |
 | 867 | `TJUST` | 部分实现 | Changes the justification point of a text object without moving the text. Works with text, mtext, and attribute definition objects. | `JUSTIFYTEXT` 的别名，同一语法与实现 |
 | 868 | `TOLERANCE` | 未实现 | Creates geometric tolerances contained in a feature control frame. | — |
@@ -1055,8 +1055,8 @@
 | 882 | `TRACEVIEW` | 未实现 | Changes the active trace to view mode so you can edit the parent drawing while the trace is still visible. | — |
 | 883 | `TRANSPARENCY` | 未实现 | Controls whether background pixels in an image are transparent or opaque. | — |
 | 884 | `TRAYSETTINGS` | 未实现 | Controls the display of icons and notifications in the status bar tray. | — |
-| 885 | `TREESTAT` | 未实现 | Displays information about the drawing's current spatial index. | — |
-| 886 | `TREX` | 未实现 | Combines the TRIM and EXTEND commands. | — |
+| 885 | `TREESTAT` | 部分实现 | Displays information about the drawing's current spatial index. | 显式 `treestat.not_tracked`；不造假计数 |
+| 886 | `TREX` | 部分实现 | Combines the TRIM and EXTEND commands. | `TREX TRIM\|EXTEND`；选择集为边界，复用 `plan_trim`/`plan_extend`；无边界提示 |
 | 887 | `TRIM` | 部分实现 | Trims objects to meet the edges of other objects. | 目标 LINE/ARC/CIRCLE/SPLINE；边界含折线/样条采样 |
 | 888 | `TSCALE` | 部分实现 | Scales text, mtext, attributes, and attribute definitions. | `TSCALE <factor>`；复用 SCALETEXT 的唯一 `scaled_text` 规则（height + MText `wrap_width`）；factor=1 为 `tscale.unchanged` 且不开事务 |
 | 889 | `TXT2MTXT` | 部分实现 | Converts or combines single-line or multiline text objects into one or more multiline text objects. | 选择式 v1：仅模型空间 Text/MText；上→下、左→右稳定排序，`\P` 原样拼接为一个 `AcDbMText`；沿用首源样式/位置/字高/旋转/对齐/层/绘制顺序/`wrap_width`；同事务删除源；设置对话框/强制统一行距未实现 |

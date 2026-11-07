@@ -1,3 +1,25 @@
+## 2026-11-07 AutoCAD 2026 2D 实用工具 + 绘制/修改补充批次（20 条，已合并）
+
+- **状态**：`util-batch`（提交 `2cae40de`，merge `84e6f55b`）与 `draw2-batch`（提交 `4497f868`，
+  merge `cb8a6bb9`）已合并到 `main`。官方清单从 **153（50 完整 + 103 部分）/ 828 未实现** 变为
+  **173（50 完整 + 123 部分）/ 808 未实现**。
+- **实用工具（10）**：`PURGE`/`-PURGE`、`RENAME`/`-RENAME`、`SETVAR`、`TIME`、`DBLIST`、
+  `TREESTAT`、`MREDO`、`MULTIPLE`。边界见 `docs/batch-util-2026-11-07.md` 与
+  `docs/compatibility.md` §「2026-11-07 实用工具/命名对象批次」。
+- **绘制/修改（10）**：`DONUT`、`SOLID`、`HELIX`、`MLINE`、`MLSTYLE`、`TREX`、`EXTRIM`、
+  `MPEDIT`、`-OVERKILL`、`DRAWORDER`。边界见 `docs/batch-draw2-2026-11-07.md` 与
+  `docs/compatibility.md` §「2026-11-07 绘制/修改补充批次」。
+- **共同边界**：`PURGE`/`RENAME` 只有图层有删除/重命名 API；`MULTIPLE` 没有重复循环，实际重复
+  具名拒绝；`SOLID` 用两三角 `Mesh`（DXF 写 polyface mesh）；`HELIX` 只做平面螺旋；`MLINE` 只有
+  两条平行线；`TREX`/`EXTRIM`/`MPEDIT`/`DRAWORDER` 以当前选择为输入。
+- **已运行（主仓库合并后）**：`cargo test -p cad-app --locked`（1858 + 集成目标全过）；
+  `cargo test -p cad-ui-core --locked`（421）；前端 `node --test test/*.test.ts`（1269 passed）；
+  `cargo fmt --all -- --check`；`cargo clippy -p cad-app -p cad-ui-core --all-targets -- -D warnings`；
+  `check-file-size.py`；`check-i18n.py`（1302 keys）；`check-command-docs.py`（186/5/2/37 selectors，
+  66 aliases，0 mismatches）；`check-architecture.py`。
+- **NOT RUN / NOT VERIFIED**：真实 GUI/像素/GPU/真机/vendor AutoCAD；Windows/macOS/Android/Web
+  运行时；`cargo test --workspace`；打包/发布。worktree 内前端测试因缺 `node_modules` 为 NOT RUN。
+
 ## 2026-11-07 AutoCAD 2026 2D 图层 + 选择/过滤/可见性批次（20 条，已合并）
 
 - **状态**：`layer-batch`（提交 `66d1911`，merge `1286af4`）与 `select-batch`（提交 `956d6c3`，
