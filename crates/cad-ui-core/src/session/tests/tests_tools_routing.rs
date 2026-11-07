@@ -51,6 +51,9 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("ARRAYPOLAR", "draw.arraypolar"),
     ("DIMLINEAR", "draw.dimlinear"),
     ("DIMALIGNED", "draw.dimaligned"),
+    // DIMROTATED shares the three-pick shape; the angle is the session parameter,
+    // so the capture starts with no point and is not ready.
+    ("DIMROTATED", "draw.dimrotated"),
     ("DIMRADIUS", "draw.dimradius"),
     ("DIMDIAMETER", "draw.dimdiameter"),
     ("DIMCENTER", "draw.dimcenter"),

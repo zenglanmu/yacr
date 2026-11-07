@@ -809,6 +809,12 @@ impl DrawTool {
                 base: self.picks[0].clone(),
                 points: self.points[1..].to_vec(),
             },
+            // DIMROTATED: three free points; the angle is the session parameter.
+            DrawToolKind::DimRotated => DrawIntent::DimRotated {
+                first: a,
+                second: b,
+                location: self.points[2],
+            },
             // HATCH: handled by the early return above (zero captured points). The
             // arm is unreachable here but keeps the match exhaustive over kinds.
             DrawToolKind::Hatch => DrawIntent::Hatch,

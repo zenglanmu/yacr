@@ -348,10 +348,12 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   LAYLCK: Object.freeze({ count: 1, reasonKey: 'draw.kind.laylck.hint' }),
   LAYULK: Object.freeze({ count: 1, reasonKey: 'draw.kind.layulk.hint' }),
   SETBYLAYER: Object.freeze({ count: 1, reasonKey: 'draw.kind.setbylayer.hint' }),
-  // The text run is likewise selection-based (one object minimum).
+  // The text run is selection-based (one object minimum); DIMSPACE needs a base
+  // dimension plus at least one target.
   TORIENT: Object.freeze({ count: 1, reasonKey: 'draw.kind.torient.hint' }),
   TCASE: Object.freeze({ count: 1, reasonKey: 'draw.kind.tcase.hint' }),
   TXT2MTXT: Object.freeze({ count: 1, reasonKey: 'draw.kind.txt2mtxt.hint' }),
+  DIMSPACE: Object.freeze({ count: 2, reasonKey: 'draw.kind.dimspace.hint' }),
 });
 
 /**

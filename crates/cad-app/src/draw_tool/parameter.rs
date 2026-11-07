@@ -260,11 +260,18 @@ pub enum ToolParameter {
     /// and every factor that would leave all targets unchanged are refused by the
     /// command as `scaletext.unchanged` (no transaction), never clamped.
     ScaleTextFactor,
+    /// DIMROTATED dimension-line angle in **degrees** (AutoCAD's prompt unit):
+    /// any **finite** value, with **no implicit wrap** and **no normalisation**,
+    /// so `-30` stays `-30` and `390` is accepted as written. The host converts it
+    /// exactly once with `.to_radians()` when it builds
+    /// [`crate::CommandPayload::RotatedLinearDimension`], because the domain stores
+    /// the rotation in radians. DIMROTATED is the only consumer.
+    DimRotation,
 }
 
 impl ToolParameter {
     /// Every member, in a fixed order (the key round-trip uses it).
-    pub const ALL: [ToolParameter; 29] = [
+    pub const ALL: [ToolParameter; 30] = [
         ToolParameter::PolygonSides,
         ToolParameter::FilletRadius,
         ToolParameter::ChamferDistanceA,
@@ -298,10 +305,13 @@ impl ToolParameter {
         // SCALETEXT's factor is appended after every pre-existing member, so the
         // frozen slots above never move.
         ToolParameter::ScaleTextFactor,
+        // DIMROTATED's angle is appended after every pre-existing member, so the
+        // frozen slots above never move.
+        ToolParameter::DimRotation,
     ];
 
     /// Number of members (the store's fixed width).
-    pub const COUNT: usize = 29;
+    pub const COUNT: usize = 30;
 
     /// The dense index of this member in [`Self::ALL`] (the store's slot).
     pub fn index(self) -> usize {
@@ -336,6 +346,7 @@ impl ToolParameter {
             Self::LengthenMode => 26,
             Self::LengthenValue => 27,
             Self::ScaleTextFactor => 28,
+            Self::DimRotation => 29,
         }
     }
 
@@ -375,6 +386,7 @@ impl ToolParameter {
             Self::LengthenMode => "lengthenMode",
             Self::LengthenValue => "lengthenValue",
             Self::ScaleTextFactor => "scaleTextFactor",
+            Self::DimRotation => "dimRotation",
         }
     }
 
@@ -441,6 +453,9 @@ impl ToolParameter {
     /// * `ScaleTextFactor` **1.0** — the identity factor (a *valid* strictly
     ///   positive value; the command still refuses it as `scaletext.unchanged`
     ///   rather than opening an empty transaction).
+    /// * `DimRotation` **0** degrees — AutoCAD's `<0>` default for the rotated
+    ///   dimension-line angle (a *valid* value, so the default never limps into a
+    ///   forced refusal at commit).
     ///
     /// Note the fill-angle range (ADR 0016 decision A): the legal values are
     /// `0 < |angle| <= 360`, so the full-circle **default 360 is re-settable** (a
@@ -477,6 +492,7 @@ impl ToolParameter {
             Self::LengthenMode => ToolValue::Number(LENGTHEN_MODE_DELTA),
             Self::LengthenValue => ToolValue::Number(1.0),
             Self::ScaleTextFactor => ToolValue::Number(1.0),
+            Self::DimRotation => ToolValue::Number(0.0),
         }
     }
 
@@ -584,6 +600,10 @@ impl ToolParameter {
             (Self::ScaleTextFactor, ToolValue::Number(number)) => {
                 finite_greater_than(self, number, 0.0)
             }
+            // DIMROTATED's angle: any **finite** degrees value, no implicit wrap
+            // and no normalisation (a negative angle is a legal rotation the other
+            // way). NaN/±∞ are refused by name.
+            (Self::DimRotation, ToolValue::Number(number)) => finite(self, number),
             // Any other pairing is a kind mismatch: a `Flag` for a numeric
             // parameter, or a `Number` for a flag parameter.
             _ => Err(CadError::InvalidInput(format!(

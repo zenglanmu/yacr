@@ -435,6 +435,33 @@ impl HostController {
                 crate::CommandId::DimAligned,
                 crate::CommandPayload::Points(vec![first, second, location]),
             ),
+            // DIMROTATED: the same three clicked points travel in the dedicated
+            // payload together with the **radians** value of the session
+            // `dimRotation` parameter (degrees on the channel, converted exactly
+            // once here). Any finite angle is legal; the handler validates it and
+            // every point again before writing.
+            DrawIntent::DimRotated {
+                first,
+                second,
+                location,
+            } => {
+                let degrees = self
+                    .session
+                    .tool_parameter(crate::ToolParameter::DimRotation)
+                    .number()
+                    .unwrap_or(0.0);
+                (
+                    crate::CommandId::DimRotated,
+                    crate::CommandPayload::RotatedLinearDimension(Box::new(
+                        crate::RotatedLinearDimensionCommand {
+                            first,
+                            second,
+                            location,
+                            rotation: degrees.to_radians(),
+                        },
+                    )),
+                )
+            }
             // DIMRADIUS/DIMDIAMETER: the picked ref and the location point travel
             // on the boxed `DimRadial` payload; the handler resolves the entity and
             // builds the dimension. The radius/diameter choice comes from the

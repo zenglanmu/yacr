@@ -264,14 +264,9 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // with Enter — never a fixed three-point capture like the linear pair.
   { id: 'DIMBASELINE', labelKey: 'draw.kind.dimbaseline', icon: 'dimbaseline', group: 'annotate' },
   { id: 'DIMCONTINUE', labelKey: 'draw.kind.dimcontinue', icon: 'dimcontinue', group: 'annotate' },
-  // The three Express-tool text commands (2026-11-07) close the annotation run:
-  // TORIENT resets selected text rotations (Most Readable by default, or one
-  // absolute angle), TCASE changes the case of the selected text, and TXT2MTXT
-  // combines selected Text/MText into one AcDbMText. All three are
-  // **selection-based** (`CommandPayload::None`; the current selection is the
-  // whole input), so they are ordinary router rows, not draw captures. TORIENT
-  // and TCASE also accept one typed argument; the bare forms are Most Readable
-  // and Title respectively.
+  // The text and rotated/spaced dimension commands (2026-11-07) close the run.
+  { id: 'DIMROTATED', labelKey: 'draw.kind.dimrotated', icon: 'dimrotated', group: 'annotate' },
+  { id: 'DIMSPACE', labelKey: 'draw.kind.dimspace', icon: 'dimspace', group: 'annotate' },
   { id: 'TORIENT', labelKey: 'draw.kind.torient', icon: 'rotate', group: 'annotate' },
   { id: 'TCASE', labelKey: 'draw.kind.tcase', icon: 'pencil', group: 'annotate' },
   { id: 'TXT2MTXT', labelKey: 'draw.kind.txt2mtxt', icon: 'copy', group: 'annotate' },

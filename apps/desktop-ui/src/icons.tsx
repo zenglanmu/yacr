@@ -152,6 +152,16 @@ const P = {
   // its outward arrowhead. The collinear row (never stacked like `dimbaseline`)
   // and the three extension lines keep it apart from `dimlinear`'s single span.
   dimcontinue: <><path d="M4 7v10M11 4.5v15M20 7v10" /><path d="M4 12h16" /><path d="M7 9.7 4 12l3 2.3" /><path d="M17 9.7 20 12l-3 2.3" /></>,
+  // Rotated linear dimension: the linear pair's extension-line + dimension-line
+  // vocabulary at 30°, plus a small rotation arc under the left extension line —
+  // the arc is what keeps it apart from `dimaligned` (the same motif at 45° with
+  // no angle cue) and says "the angle is a parameter".
+  dimrotated: <><g transform="rotate(30 12 12)"><path d="M5 5v14M19 5v14" /><path d="M5 12h14" /><path d="M8.5 9.5 5 12l3.5 2.5M15.5 9.5 19 12l-3.5 2.5" /></g><path d="M3.4 20.1a7.4 7.4 0 0 1 2-4.2" /></>,
+  // Space dimensions: two stacked dimension rows sharing their extension lines,
+  // with a vertical double-headed arrow between them for the equal gap. The two
+  // rows keep it off `dimlinear` (one row) and the double arrow keeps it off
+  // `dimbaseline` (rows that are not measured against each other).
+  dimspace: <><path d="M4 4.5v15M16 4.5v15" /><path d="M4 7h12M4 17h12" /><path d="M20 8v8" /><path d="M18.4 9.6 20 8l1.6 1.6M18.4 14.4 20 16l1.6-1.6" /></>,
   polyline: <><path d="M4 18 9 8l5 6 6-10" /><circle cx="4" cy="18" r="1.5" /><circle cx="9" cy="8" r="1.5" /><circle cx="20" cy="4" r="1.5" /></>,
   rectang: <><rect x="4" y="6" width="16" height="12" /><circle cx="4" cy="6" r="1.5" /><circle cx="20" cy="18" r="1.5" /></>,
   ellipse: <><ellipse cx="12" cy="12" rx="9" ry="5.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="3" cy="12" r="1.4" /><circle cx="21" cy="12" r="1.4" /></>,

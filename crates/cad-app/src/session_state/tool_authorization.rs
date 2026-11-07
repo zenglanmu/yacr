@@ -73,5 +73,9 @@ pub(crate) fn authorizing_command(parameter: ToolParameter) -> CommandId {
         // SCALETEXT's factor is authorized against the SCALETEXT command, so a
         // Viewer-mode set is refused exactly like every other Work-only parameter.
         ToolParameter::ScaleTextFactor => CommandId::ScaleText,
+        // DIMROTATED's dimension-line angle is authorized against the
+        // DIMROTATED create command, so a Viewer-mode set is refused exactly
+        // like every other Work-only parameter.
+        ToolParameter::DimRotation => CommandId::DimRotated,
     }
 }

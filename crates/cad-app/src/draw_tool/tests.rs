@@ -25,6 +25,8 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::Scale
             | DrawToolKind::DimLinear
             | DrawToolKind::DimAligned
+            // DIMROTATED is the same three picks as DIMLINEAR.
+            | DrawToolKind::DimRotated
             // CIRCLE 3P is the three-point circumcircle.
             | DrawToolKind::Circle3P
             | DrawToolKind::DimAngular => 3,

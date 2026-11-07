@@ -501,17 +501,14 @@ pub enum CommandId {
     /// **one transaction / one undo step** on the active layer. Non-associative.
     /// Work-only.
     DimBaseline,
-    /// DIMCONTINUE: chain **N** linear dimensions from one picked **linear** base
-    /// dimension (ADR 0017 decision C, P5f).
-    ///
-    /// Payload is `DimChain { base, points }`. Segment 1 is `base.second → P_1`,
-    /// segment `i > 1` is `P_{i−1} → P_i`, and every segment keeps
-    /// `dimension_line = base.location` (a chain does **not** stack). The pick
-    /// order defines the chain direction: a segment whose projection along
-    /// `base`'s direction is `<= 0` is refused by name (no folding back). Every
-    /// other refusal matches [`CommandId::DimBaseline`], and the N segments are
-    /// inserted in one transaction / one undo step. Non-associative. Work-only.
+    /// DIMCONTINUE: see [`crate::command_id::dimension_chain`].
     DimContinue,
+    /// DIMROTATED (Work-only): a linear dimension whose dimension line is rotated
+    /// to the session angle; see [`crate::command_id::dimension_extra`].
+    DimRotated,
+    /// DIMSPACE (Work-only): equal automatic re-spacing of the selected linear
+    /// dimensions; see [`crate::command_id::dimension_extra`].
+    DimSpace,
     /// HATCH (Work-only): fill the **pre-selected** boundary entities with the
     /// session pattern parameters; one `AcDbHatch` entity in one transaction. Full
     /// contract: [`crate::command_id::hatch`].
@@ -986,6 +983,8 @@ pub mod area_object;
 pub mod block_define;
 pub mod break_at_point;
 pub mod construction_line;
+pub mod dimension_chain;
+pub mod dimension_extra;
 pub mod draw_variants;
 pub mod grip_stretch;
 pub mod hatch;

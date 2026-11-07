@@ -273,6 +273,9 @@ pub struct CadToolParams {
     /// channel; default `1.0`), projected only while a SCALETEXT capture is
     /// active.
     pub scale_text_factor: Option<f64>,
+    /// The DIMROTATED dimension-line angle in **degrees** (the domain stores
+    /// radians), projected only while a DIMROTATED capture is active.
+    pub dim_rotation: Option<f64>,
 }
 
 /// The active interactive tool, projected from `cad_app`'s real capture state.
@@ -812,6 +815,12 @@ pub(super) fn cad_tool(
                     ToolParameter::ScaleTextFactor,
                     preview.kind == DrawToolKind::ScaleText,
                 ),
+                // DIMROTATED owns its angle only while the matching three-pick
+                // capture is active (the channel carries degrees).
+                dim_rotation: number(
+                    ToolParameter::DimRotation,
+                    preview.kind == DrawToolKind::DimRotated,
+                ),
             },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
@@ -855,6 +864,7 @@ pub(super) fn cad_tool(
                 lengthen_mode: None,
                 lengthen_value: None,
                 scale_text_factor: None,
+                dim_rotation: None,
             },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,

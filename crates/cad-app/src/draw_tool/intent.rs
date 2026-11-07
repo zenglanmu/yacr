@@ -286,6 +286,21 @@ pub enum DrawIntent {
         second: Point3,
         location: Point3,
     },
+    /// DIMROTATED: insert a **rotated** linear dimension through the two
+    /// extension-line origins `first`/`second` and the dimension-line location
+    /// `location`, with the dimension line at the session parameter
+    /// [`super::ToolParameter::DimRotation`] angle (AutoCAD 2026).
+    ///
+    /// The three points are exactly the three clicks, in order; like
+    /// [`DrawIntent::DimLinear`] the intent carries no derived value. The angle is
+    /// the session typed channel (degrees), read and converted to radians once by
+    /// the caller when it builds the payload, so the capture never invents an
+    /// angle.
+    DimRotated {
+        first: Point3,
+        second: Point3,
+        location: Point3,
+    },
     /// DIMRADIUS: insert a radius dimension for the picked arc/circle `target`,
     /// with the leader/dimension-line direction set by the `location` pick, on the
     /// active layer (ADR 0017 decision C, P5d).

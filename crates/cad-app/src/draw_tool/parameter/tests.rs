@@ -617,8 +617,8 @@ fn text_rotation_and_mtext_attachment_are_appended_after_the_gradient_members() 
             .validate(parameter.default_value())
             .unwrap_or_else(|error| panic!("{key} default refused: {error}"));
     }
-    assert_eq!(ToolParameter::COUNT, 29);
-    assert_eq!(ToolParameter::ALL.len(), 29);
+    assert_eq!(ToolParameter::COUNT, 30);
+    assert_eq!(ToolParameter::ALL.len(), 30);
     assert_eq!(
         ToolParameter::TextRotation.default_value(),
         ToolValue::Number(TEXT_DEFAULT_ROTATION_DEGREES)
@@ -689,5 +689,42 @@ fn mtext_attachment_is_the_closed_integer_set_one_to_nine() {
             .validate(ToolValue::Flag(true))
             .unwrap_err(),
         "mtextAttachment",
+    );
+}
+
+#[test]
+fn dim_rotation_is_any_finite_degrees_value_and_never_wraps() {
+    // DIMROTATED's angle is a session parameter in degrees (AutoCAD's prompt
+    // unit) and is converted to radians exactly once by the host. A negative
+    // angle is a legal rotation the other way; no normalisation is applied.
+    for accepted in [0.0, 30.0, 90.0, 180.0, -30.0, 390.0, 1e6] {
+        ToolParameter::DimRotation
+            .validate(ToolValue::Number(accepted))
+            .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
+    }
+    for refused in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_refusal_names_parameter(
+            ToolParameter::DimRotation
+                .validate(ToolValue::Number(refused))
+                .unwrap_err(),
+            "dimRotation",
+        );
+    }
+    assert_refusal_names_parameter(
+        ToolParameter::DimRotation
+            .validate(ToolValue::Flag(false))
+            .unwrap_err(),
+        "dimRotation",
+    );
+    // The default is AutoCAD's `<0>` and the member is appended after every
+    // pre-existing slot, so no earlier index moved.
+    assert_eq!(
+        ToolParameter::DimRotation.default_value(),
+        ToolValue::Number(0.0)
+    );
+    assert_eq!(ToolParameter::DimRotation.index(), 29);
+    assert_eq!(
+        ToolParameter::from_key("dimRotation"),
+        Some(ToolParameter::DimRotation)
     );
 }

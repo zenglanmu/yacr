@@ -42,6 +42,8 @@ impl CommandId {
                 | Self::DimOrdinate
                 | Self::DimBaseline
                 | Self::DimContinue
+                | Self::DimRotated
+                | Self::DimSpace
                 | Self::Hatch
                 | Self::HatchPoint
                 | Self::HatchGenerateBoundary

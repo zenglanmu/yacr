@@ -212,3 +212,34 @@ fn baseline_and_continue_pick_the_base_then_take_open_ended_points() {
         assert!(bare.intent().is_err(), "{kind:?}");
     }
 }
+
+#[test]
+fn dimrotated_captures_the_same_three_points_as_dimlinear() {
+    let kind = DrawToolKind::DimRotated;
+    assert_eq!(kind.arity(), PointArity::Exact(3));
+    assert!(!kind.requires_selection());
+    assert!(!kind.needs_picked_entities());
+    assert_eq!(kind.picked_step_count(), 0);
+    assert!(!kind.requires_text());
+    assert_eq!(kind.key(), "dimrotated");
+    let mut tool = DrawTool::new(kind, 0);
+    assert_eq!(tool.remaining(), Some(3));
+    tool.push_point(p(0.0, 0.0)).unwrap();
+    tool.push_point(p(10.0, 0.0)).unwrap();
+    assert!(
+        !tool.is_ready(),
+        "the dimension-line location is still needed"
+    );
+    tool.push_point(p(5.0, 4.0)).unwrap();
+    assert!(tool.is_ready());
+    assert_eq!(
+        tool.intent().unwrap(),
+        DrawIntent::DimRotated {
+            first: p(0.0, 0.0),
+            second: p(10.0, 0.0),
+            location: p(5.0, 4.0),
+        }
+    );
+    // A fourth point is refused once the complement is complete.
+    assert!(tool.push_point(p(1.0, 1.0)).is_err());
+}

@@ -269,6 +269,7 @@ impl CadSession {
     /// | `DIMRADIUS` / `DIMDIAMETER` / `DIMCENTER` | `BeginDraw(DimRadius)` / `BeginDraw(DimDiameter)` / `BeginDraw(DimCenter)` |
     /// | `DIMANGULAR` / `DIMORDINATE` | `BeginDraw(DimAngular)` / `BeginDraw(DimOrdinate)` |
     /// | `DIMBASELINE` / `DIMCONTINUE` | `BeginDraw(DimBaseline)` / `BeginDraw(DimContinue)` |
+    /// | `DIMROTATED` | `BeginDraw(DimRotated)` (angle = the `dimRotation` parameter) |
     /// | `ARRAYRECT` / `ARRAYPOLAR` | `BeginDraw(ArrayRect)` / `BeginDraw(ArrayPolar)` |
     /// | `HATCH` | `BeginDraw(Hatch)` (boundary = the current selection) |
     /// | `ALIGN` | `BeginDraw(Align)` |

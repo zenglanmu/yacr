@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 56] = [
+    pub const ALL: [DrawToolKind; 57] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -143,6 +143,8 @@ impl DrawToolKind {
         DrawToolKind::BreakAtPoint,
         DrawToolKind::Wipeout,
         DrawToolKind::PolygonCircumscribed,
+        // DIMROTATED: three free points, angle from the session parameter channel.
+        DrawToolKind::DimRotated,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -173,6 +175,7 @@ impl DrawToolKind {
             Self::Stretch => "stretch",
             Self::DimLinear => "dimlinear",
             Self::DimAligned => "dimaligned",
+            Self::DimRotated => "dimrotated",
             Self::DimRadius => "dimradius",
             Self::DimDiameter => "dimdiameter",
             Self::DimCenter => "dimcenter",
@@ -236,6 +239,7 @@ impl DrawToolKind {
             "stretch" => Some(Self::Stretch),
             "dimlinear" => Some(Self::DimLinear),
             "dimaligned" => Some(Self::DimAligned),
+            "dimrotated" => Some(Self::DimRotated),
             "dimradius" => Some(Self::DimRadius),
             "dimdiameter" => Some(Self::DimDiameter),
             "dimcenter" => Some(Self::DimCenter),
@@ -343,6 +347,8 @@ impl DrawToolKind {
             // substitutes the catalog label for chrome anyway.
             Self::DimLinear => "DIMLINEAR",
             Self::DimAligned => "DIMALIGNED",
+            // DIMROTATED shares the locale-neutral ASCII fallback rule.
+            Self::DimRotated => "DIMROTATED",
             // DIMRADIUS/DIMDIAMETER/DIMCENTER use locale-neutral ASCII fallback
             // labels, exactly like the other post-ADR-0015 kinds: the ADR fence
             // forbids new CJK literals on the Rust side and the shell substitutes
@@ -444,6 +450,9 @@ impl DrawToolKind {
             | Self::Scale
             | Self::DimLinear
             | Self::DimAligned
+            // DIMROTATED: the same three picks, with the angle from the session
+            // parameter channel instead of the location pick.
+            | Self::DimRotated
             // CIRCLE 3P: three points on the circle (the circumcircle is the
             // same construction ARC uses).
             | Self::Circle3P

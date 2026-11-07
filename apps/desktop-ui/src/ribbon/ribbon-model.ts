@@ -663,9 +663,10 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // creating the first one.
           { id: 'DIMBASELINE', labelKey: 'draw.kind.dimbaseline', icon: 'dimbaseline', command: 'DIMBASELINE', large: true },
           { id: 'DIMCONTINUE', labelKey: 'draw.kind.dimcontinue', icon: 'dimcontinue', command: 'DIMCONTINUE', large: true },
-          // The three Express-tool text commands (2026-11-07); see the module.
+          // The 2026-11-07 additions close the run.
+          { id: 'DIMROTATED', labelKey: 'draw.kind.dimrotated', icon: 'dimrotated', command: 'DIMROTATED', large: true },
+          { id: 'DIMSPACE', labelKey: 'draw.kind.dimspace', icon: 'dimspace', command: 'DIMSPACE', large: true },
           ...ANNOTATE_TEXT_COMMAND_ITEMS,
-          // The hatch-context boundary command acts on the selected hatch(es).
           { id: 'HATCHGENERATEBOUNDARY', labelKey: 'draw.kind.hatchgenerateboundary', icon: 'hatch', command: 'HATCHGENERATEBOUNDARY' },
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties', large: true },
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
