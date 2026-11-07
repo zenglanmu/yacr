@@ -513,6 +513,9 @@ pub enum CommandId {
     /// DIMROTATED (Work-only): a linear dimension whose dimension line is rotated
     /// to the session angle; see [`crate::command_id::dimension_extra`].
     DimRotated,
+    /// DIMSPACE (Work-only): equal automatic re-spacing of the selected linear
+    /// dimensions; see [`crate::command_id::dimension_extra`].
+    DimSpace,
     /// HATCH (Work-only): fill the **pre-selected** boundary entities with the
     /// session pattern parameters; one `AcDbHatch` entity in one transaction. Full
     /// contract: [`crate::command_id::hatch`].

@@ -103,7 +103,7 @@ export const HOST_NAMES = [
   // dimension at the session `dimRotation` angle); the Rust lane adds the same
   // name. This mirror stands in for the loaded `cad_commands` vocabulary and
   // never proves the host advertises it.
-  'DIMROTATED', 'MOVE', 'TRIM',
+  'DIMROTATED', 'DIMSPACE', 'MOVE', 'TRIM',
   'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'EXPLODE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   // XLINE / RAY (2026-11-01): the two construction captures. Each is a canonical
   // selector of its own — never an alias of `LINE`, because the capture records a

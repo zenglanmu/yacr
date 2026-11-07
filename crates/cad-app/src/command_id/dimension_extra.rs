@@ -47,3 +47,49 @@
 //! The interactive `Specify angle of dimension line` prompt, the object-selection
 //! variant (pick a line/object to derive the origins), a `Text`/`Mtext` override,
 //! associativity (`DIMASSOC=2`) and 3D/work-plane creation. Work-only.
+//!
+//! # `DIMSPACE` (AutoCAD 2026)
+//!
+//! [`crate::CommandId::DimSpace`] is the **selection-based** re-spacing command. Its
+//! payload is [`crate::CommandPayload::None`]: the current selection is the whole
+//! input, exactly like `MATCHPROP`/`JOIN`, and a supplied payload is refused by name
+//! (`dimspace.payload`).
+//!
+//! ## Declared v1 boundary
+//!
+//! AutoCAD prompts "Select base dimension", "Select dimensions to space", then
+//! "Enter value or [Auto] <Auto>". This build implements neither the object prompts
+//! (they are replaced by the current selection) nor the **value prompt**: spacing is
+//! **always automatic**, i.e. the base dimension's resolved style `DIMDLI`
+//! ([`cad_domain::DimensionStyleValues::dim_line_increment`], AutoCAD's value `0`).
+//! Associative reflow is **NOT IMPLEMENTED** either: no dimension is re-associated
+//! with its measured geometry, and the measured points never move.
+//!
+//! ## Construction
+//!
+//! * the **first** selected linear dimension is the base; every remaining selected
+//!   dimension is a target, in **pick order**;
+//! * all selected objects must be directly addressable **model-space**
+//!   `DIMENSION` entities and every one must be `DimensionKind::Linear` — a
+//!   non-dimension, an aligned/angular/radial/ordinate dimension, a block member, a
+//!   sub-element, another document's ref or another space is refused by name;
+//! * the stacking normal is `±rot90(base.rotation)`, signed **away from the base's
+//!   measured geometry** (`dot(base.location − midpoint(first, second), n̂) > 0`); a
+//!   zero dot product is `dimspace.undecidable_normal`, never a guess;
+//! * target `i` (`i = 1..=N`) keeps its own `first`/`second`/rotation/style snapshot/
+//!   text override and moves only its dimension line to
+//!   `base.location + n̂ · (i · spacing)`; the whole entity is re-synthesized through
+//!   [`cad_domain::DimensionGeometry::synthesized`].
+//!
+//! A non-finite or non-positive base `DIMDLI` is `dimspace.bad_spacing` (it would
+//! stack every target on one line). A target already on its row is not staged, so a
+//! run that changes nothing opens **no** transaction and reports
+//! `dimspace.unchanged`; otherwise every changed target is staged in **one
+//! transaction / one undo step** and the success diagnostic `dimspace.applied`
+//! names the count. Work-only.
+//!
+//! ## NOT IMPLEMENTED
+//!
+//! The interactive base/target prompts, the spacing **value** prompt (`0` = auto or
+//! an explicit distance), angular-dimension spacing against its arc, associative
+//! reflow, a live preview, and non-model spaces.

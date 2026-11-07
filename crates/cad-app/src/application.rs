@@ -474,6 +474,7 @@ impl Application {
             | CommandId::DimLinear
             | CommandId::DimAligned
             | CommandId::DimRotated
+            | CommandId::DimSpace
             | CommandId::DimRadius
             | CommandId::DimDiameter
             | CommandId::DimCenter

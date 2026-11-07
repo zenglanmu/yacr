@@ -32,6 +32,7 @@ impl Application {
             CommandId::DimLinear => self.dim_linear(session, command),
             CommandId::DimAligned => self.dim_aligned(session, command),
             CommandId::DimRotated => self.dim_rotated(session, command),
+            CommandId::DimSpace => self.dim_space(session, command),
             CommandId::DimRadius => self.dim_radius(session, command),
             CommandId::DimDiameter => self.dim_diameter(session, command),
             CommandId::DimCenter => self.dim_center(session, command),

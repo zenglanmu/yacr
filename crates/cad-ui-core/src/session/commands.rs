@@ -129,6 +129,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // an arbitrary angle: the same three picks as DIMLINEAR, with the angle from
     // the session `dimRotation` parameter (degrees) instead of the location pick.
     ("DIMROTATED", CommandId::DimRotated),
+    // DIMSPACE (AutoCAD 2026) is the **selection-based** equal-spacing command:
+    // the current selection is the whole input (no payload, no interactive tool),
+    // the first linear dimension is the base and the rest are spaced automatically
+    // at the base style's `DIMDLI`.
+    ("DIMSPACE", CommandId::DimSpace),
     ("DIMRADIUS", CommandId::DimRadius),
     ("DIMDIAMETER", CommandId::DimDiameter),
     ("DIMCENTER", CommandId::DimCenter),

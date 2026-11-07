@@ -309,6 +309,13 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   LAYLCK: Object.freeze({ count: 1, reasonKey: 'draw.kind.laylck.hint' }),
   LAYULK: Object.freeze({ count: 1, reasonKey: 'draw.kind.layulk.hint' }),
   SETBYLAYER: Object.freeze({ count: 1, reasonKey: 'draw.kind.setbylayer.hint' }),
+  // DIMSPACE (AutoCAD 2026) is selection-based: the first selected linear
+  // dimension is the base and every other one is a target, so fewer than two can
+  // never be a partial success. The host refuses it by name (`dimspace.selection`)
+  // and this row makes the disabled button and the command line say the same
+  // thing. The hint states the declared v1 boundary (linear only, automatic
+  // spacing).
+  DIMSPACE: Object.freeze({ count: 2, reasonKey: 'draw.kind.dimspace.hint' }),
 });
 
 /**

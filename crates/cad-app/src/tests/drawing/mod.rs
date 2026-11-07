@@ -293,6 +293,7 @@ mod dimension_angular_ordinate;
 mod dimension_chain;
 mod dimension_extra;
 mod dimension_radial;
+mod dimension_space;
 mod divide;
 mod ellipse;
 mod explode;

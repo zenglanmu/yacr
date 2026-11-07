@@ -257,6 +257,10 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // dimension line at the session `dimRotation` angle instead of horizontal or
   // vertical. Appended after the shipped dimension rows so no existing entry moves.
   { id: 'DIMROTATED', labelKey: 'draw.kind.dimrotated', icon: 'dimrotated', group: 'annotate' },
+  // DIMSPACE (AutoCAD 2026) is selection-based: the first selected linear
+  // dimension is the base and the rest are spaced automatically. It is a router
+  // command (never a draw capture), appended after the creation rows.
+  { id: 'DIMSPACE', labelKey: 'draw.kind.dimspace', icon: 'dimspace', group: 'annotate' },
   { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', group: 'annotate' },
   // Layer isolate / unisolate (2026-10-26). Unlike `LAYER` they are **router**
   // commands (`LAYISO`/`LAYUNISO`), not chrome-local selectors, so they are

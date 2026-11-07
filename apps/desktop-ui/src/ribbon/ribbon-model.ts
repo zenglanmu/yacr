@@ -695,6 +695,9 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // linear pair, with the dimension-line angle coming from its
           // `dimRotation` parameter chip instead of the location pick.
           { id: 'DIMROTATED', labelKey: 'draw.kind.dimrotated', icon: 'dimrotated', command: 'DIMROTATED', large: true },
+          // DIMSPACE (AutoCAD 2026) closes the run: a selection-based command that
+          // re-spaces the selected linear dimensions at the automatic `DIMDLI`.
+          { id: 'DIMSPACE', labelKey: 'draw.kind.dimspace', icon: 'dimspace', command: 'DIMSPACE', large: true },
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties', large: true },
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
           // The read-only font report sits beside the other annotation palettes.

@@ -41,6 +41,7 @@ mod dimension;
 mod dimension_angular;
 mod dimension_chain;
 mod dimension_ordinate;
+mod dimension_space;
 mod divide;
 mod drawing_create;
 mod drawing_edit;

@@ -1,4 +1,4 @@
-// Dimension extras surface contract (AutoCAD 2026), DIMROTATED.
+// Dimension extras surface contract (AutoCAD 2026): DIMROTATED and DIMSPACE.
 //
 // DIMROTATED uses the linear pair's three-pick capture and adds one typed
 // parameter (`dimRotation`, degrees); DIMSPACE is a selection-based command that
@@ -32,11 +32,15 @@ const en = await readCatalog('en');
 // flag — is what enables their affordances.
 const HOST_NAMES = [
   'DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER', 'DIMANGULAR',
-  'DIMORDINATE', 'DIMBASELINE', 'DIMCONTINUE', 'DIMROTATED',
+  'DIMORDINATE', 'DIMBASELINE', 'DIMCONTINUE', 'DIMROTATED', 'DIMSPACE',
 ];
 setCommandCatalog(HOST_NAMES);
 
 const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
+// DIMSPACE is selection-gated (two objects); the admission contract reads the
+// status selection block, so give it the smallest selection that is not a
+// guaranteed refusal.
+const loadedTwo = { ...loaded, selection: { count: 2 } };
 
 function annotationPanel() {
   const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate');
@@ -46,13 +50,14 @@ function annotationPanel() {
   return panel;
 }
 
-test('DIMROTATED is an annotate affordance appended after the shipped dimension rows', () => {
+test('both commands are annotate affordances appended after the shipped dimension rows', () => {
   const panel = annotationPanel();
   // The nine shipped dimension buttons keep their slots; the two new rows are
   // appended after DIMCONTINUE so no already-shipped button moves.
   const ids = panel.items.map(item => item.id);
   assert.ok(ids.indexOf('DIMROTATED') > ids.indexOf('DIMCONTINUE'));
-  for (const id of ['DIMROTATED']) {
+  assert.ok(ids.indexOf('DIMSPACE') > ids.indexOf('DIMROTATED'));
+  for (const id of ['DIMROTATED', 'DIMSPACE']) {
     const item = panel.items.find(candidate => candidate.id === id);
     assert.ok(item, `annotate/annotation must carry the ${id} affordance`);
     assert.equal(item.command, id);
@@ -78,18 +83,19 @@ test('DIMROTATED is an annotate affordance appended after the shipped dimension 
   }
   const ribbonIds = new Set(ribbonCommandIds());
   assert.ok(ribbonIds.has('DIMROTATED'));
+  assert.ok(ribbonIds.has('DIMSPACE'));
 });
 
-test('DIMROTATED is admitted only through the loaded router vocabulary', async () => {
-  for (const id of ['DIMROTATED']) {
+test('both are admitted only through the loaded router vocabulary', async () => {
+  for (const id of ['DIMROTATED', 'DIMSPACE']) {
     assert.equal(isSupportedCommand(id), true, id);
-    assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
+    assert.equal(admitCommandText(id, { status: loadedTwo }).kind, 'admitted', id);
     const suggestion = filterCommandSuggestions(id).find(candidate => candidate.id === id);
     assert.ok(suggestion, `${id} must be a command-line suggestion`);
     assert.equal(suggestion.supported, true, id);
     setCommandCatalog([]);
     assert.equal(isSupportedCommand(id), false, id);
-    assert.equal(admitCommandText(id, { status: loaded }).kind, 'unsupported', id);
+    assert.equal(admitCommandText(id, { status: loadedTwo }).kind, 'unsupported', id);
     setCommandCatalog(HOST_NAMES);
   }
   const ribbon = await readModule('components/Ribbon.tsx');
@@ -99,14 +105,14 @@ test('DIMROTATED is admitted only through the loaded router vocabulary', async (
   );
 });
 
-test('the DIMROTATED glyph exists, is dedicated, and stays apart from the shipped set', async () => {
+test('the two glyphs exist, are dedicated, and stay apart from the shipped set', async () => {
   const icons = await readModule('icons.tsx');
   const map = icons.match(/const P = \{([\s\S]*?)\n\};/);
   assert.ok(map, 'expected the icon name map in icons.tsx');
   const defined = new Set([...map[1].matchAll(/\n\s*([A-Za-z][A-Za-z0-9]*):/g)].map(match => match[1]));
   const panel = annotationPanel();
   const used = [];
-  for (const id of ['DIMROTATED']) {
+  for (const id of ['DIMROTATED', 'DIMSPACE']) {
     const item = panel.items.find(candidate => candidate.id === id);
     const glyph = id.toLowerCase();
     assert.equal(item.icon, glyph, `${id} must use its dedicated glyph`);
@@ -114,7 +120,7 @@ test('the DIMROTATED glyph exists, is dedicated, and stays apart from the shippe
     assert.equal(COMMAND_CATALOG.find(command => command.id === id).icon, item.icon, id);
     used.push(glyph);
   }
-  assert.equal(new Set(used).size, used.length);
+  assert.equal(new Set(used).size, used.length, 'the two new glyphs must be distinguishable');
   // Neither may reuse a shipped dimension glyph.
   const shipped = [
     'dimlinear', 'dimaligned', 'dimradius', 'dimdiameter', 'dimcenter',
@@ -183,10 +189,30 @@ test('DIMROTATED owns the one dimRotation parameter row, mirrored from the host'
   assert.equal(toolLabelKey('draw.dimrotated'), 'tool.draw.dimrotated');
 });
 
+test('DIMSPACE needs at least two selected objects and has its own hint', () => {
+  assert.deepEqual({ ...SELECTION_REQUIREMENTS.DIMSPACE }, {
+    count: 2,
+    reasonKey: 'draw.kind.dimspace.hint',
+  });
+  // It is a selection-based command, not a draw capture: no tool key exists.
+  assert.equal(TOOL_STEP_PROMPTS['draw.dimspace'], undefined);
+  assert.equal(TOOL_PARAMETERS['draw.dimspace'], undefined);
+  assert.equal(toolStepPromptKey({ key: 'draw.dimspace', points: 0 }), null);
+  // Admission reads the same minimum: one selected object is answered with the
+  // hint, two are admitted.
+  assert.equal(admitCommandText('DIMSPACE', { status: loaded }).kind, 'unavailable');
+  assert.equal(
+    admitCommandText('DIMSPACE', { status: loaded }).reasonKey,
+    'draw.kind.dimspace.hint',
+  );
+  assert.equal(admitCommandText('DIMSPACE', { status: loadedTwo }).kind, 'admitted');
+});
+
 test('every new key resolves in both catalogs and the copy states the boundaries', async () => {
   const keys = [
     'draw.kind.dimrotated', 'tool.draw.dimrotated', 'tool.prompt.dim.location_rotated',
     'status.tool_parameter.dim_rotation', 'status.tool_parameter.dim_rotation.hint',
+    'draw.kind.dimspace', 'draw.kind.dimspace.hint',
   ];
   for (const key of keys) {
     for (const locale of [zh, en]) {
@@ -202,4 +228,11 @@ test('every new key resolves in both catalogs and the copy states the boundaries
   assert.match(zh['tool.prompt.dim.location_rotated'], /角度/);
   assert.match(en['status.tool_parameter.dim_rotation.hint'], /not wrapped|not normalised/i);
   assert.match(zh['status.tool_parameter.dim_rotation.hint'], /不做回绕/);
+  // DIMSPACE's hint names the two-object minimum and its declared boundary: it
+  // only re-spaces linear dimensions and always uses the automatic spacing.
+  assert.match(en['draw.kind.dimspace.hint'], /two/i);
+  assert.match(en['draw.kind.dimspace.hint'], /linear/i);
+  assert.match(en['draw.kind.dimspace.hint'], /automatic/i);
+  assert.match(zh['draw.kind.dimspace.hint'], /两个/);
+  assert.match(zh['draw.kind.dimspace.hint'], /自动/);
 });

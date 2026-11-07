@@ -466,6 +466,8 @@
   "draw.kind.dimbaseline": "基线标注",
   "draw.kind.dimcontinue": "连续标注",
   "draw.kind.dimrotated": "旋转标注",
+  "draw.kind.dimspace": "调整标注间距",
+  "draw.kind.dimspace.hint": "请选择至少两个线性标注：第一个为基准，其余按基准样式的 DIMDLI 自动等距排列。v1 仅支持模型空间线性标注，固定使用自动间距（没有间距值输入），且不做关联重排",
   "draw.kind.hatch": "填充",
   "draw.kind.hatchpoint": "按点填充",
   "draw.kind.revcloud": "修订云线",

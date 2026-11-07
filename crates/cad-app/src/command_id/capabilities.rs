@@ -41,6 +41,7 @@ impl CommandId {
                 | Self::DimBaseline
                 | Self::DimContinue
                 | Self::DimRotated
+                | Self::DimSpace
                 | Self::Hatch
                 | Self::HatchPoint
                 | Self::MoveEntities

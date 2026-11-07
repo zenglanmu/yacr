@@ -466,6 +466,8 @@
   "draw.kind.dimbaseline": "Baseline dimension",
   "draw.kind.dimcontinue": "Continue dimension",
   "draw.kind.dimrotated": "Rotated dimension",
+  "draw.kind.dimspace": "Adjust dimension spacing",
+  "draw.kind.dimspace.hint": "Select at least two linear dimensions: the first is the base and the rest move to equal automatic rows at the base style's DIMDLI. v1 is model-space linear dimensions only, always uses automatic spacing (no value prompt) and does not re-associate dimensions (no associative reflow)",
   "draw.kind.hatch": "Hatch",
   "draw.kind.hatchpoint": "Hatch by point",
   "draw.kind.revcloud": "Revision Cloud",
