@@ -414,6 +414,15 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // shipped row moves; the `mirror` glyph is the closest direction glyph in the
   // icon set.
   { id: 'REVERSE', labelKey: 'draw.kind.reverse', icon: 'mirror', group: 'modify' },
+  // PEDIT (AutoCAD 2026) is the **declared v1 subset** CLOSE / OPEN / REVERSE,
+  // typed as the command's own argument (`PEDIT CLOSE`) because this build has
+  // no in-command option prompt. The one selected model-space LWPOLYLINE is the
+  // whole input; there is no interactive "Select polyline" prompt and no
+  // `Multiple` mode. Join, Width/Halfwidth, Fit, Spline, Decurve, Ltype gen,
+  // Undo, Edit vertex and the PEDITACCEPT conversion prompt are NOT
+  // IMPLEMENTED, so the hint names the three options and nothing more. Appended
+  // last so no shipped row moves; `polyline` is the output-kind glyph.
+  { id: 'PEDIT', labelKey: 'draw.kind.pedit', icon: 'polyline', group: 'modify' },
   // OOPS (AutoCAD 2026) restores the objects removed by the last ERASE. It is
   // selection-free and payload-free, so it is a plain router command with no
   // capture and no selection rule (gating count 0). v1 records ERASE only —

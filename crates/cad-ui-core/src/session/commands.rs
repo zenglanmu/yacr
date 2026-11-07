@@ -1,6 +1,6 @@
 //! The canonical command vocabulary and name normalization.
 
-use cad_app::{CommandId, MeasurementToolKind};
+use cad_app::{CommandId, MeasurementToolKind, PeditOption};
 
 use super::text_commands::{TCASE_SELECTOR, TORIENT_SELECTOR};
 /// The canonical command vocabulary: every [`CommandId`] variant with the stable
@@ -187,6 +187,13 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("REVCLOUD", CommandId::RevisionCloud),
     // REVERSE / OOPS / OVERKILL are selection-based; BREAKATPOINT is a pick tool.
     ("REVERSE", CommandId::Reverse),
+    // PEDIT (AutoCAD 2026) is the **declared v1 subset** CLOSE/OPEN/REVERSE. The
+    // option is typed as the command's argument (`PEDIT CLOSE`), because this
+    // build has no in-command option prompt; the one selected model-space
+    // LWPOLYLINE is the whole input. A bare `PEDIT` normalizes and is refused by
+    // the application with `pedit.needs_option` (listing the implemented
+    // options), never defaulted to an option.
+    ("PEDIT", CommandId::Pedit),
     ("BREAKATPOINT", CommandId::BreakAtPoint),
     ("OOPS", CommandId::Oops),
     ("OVERKILL", CommandId::Overkill),
@@ -360,7 +367,10 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 ///   resolved against the authoritative drawing by the session;
 /// * [`TORIENT_SELECTOR`] (`TORIENT`) / [`TCASE_SELECTOR`] (`TCASE`): one finite
 ///   angle in degrees / one case mode ([`parse_torient_argument`],
-///   [`parse_tcase_argument`]).
+///   [`parse_tcase_argument`]);
+/// * [`PEDIT_SELECTOR`] (`PEDIT`): one declared v1 polyline option, `CLOSE`,
+///   `OPEN` or `REVERSE` ([`parse_pedit_argument`]). The bare selector is a
+///   named `pedit.needs_option` refusal, never a defaulted option.
 pub const ARGUMENT_SELECTORS: &[&str] = &[
     ARGUMENT_SELECTOR,
     SNAPUNIT_SELECTOR,
@@ -369,6 +379,7 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     SPACE_SELECTOR,
     TORIENT_SELECTOR,
     TCASE_SELECTOR,
+    PEDIT_SELECTOR,
 ];
 
 /// AutoCAD's `ZOOM n` / `ZOOM ALL`: the first argument-taking selector.
@@ -401,6 +412,21 @@ pub const PDMODE_SELECTOR: &str = "PDMODE";
 /// percentage of the viewport height. A document write like
 /// [`PDMODE_SELECTOR`], not session state.
 pub const PDSIZE_SELECTOR: &str = "PDSIZE";
+
+/// The `PEDIT <option>` selector: one declared v1 polyline option (AutoCAD
+/// 2026).
+///
+/// AutoCAD's `PEDIT` shows an option prompt after the polyline pick; this build
+/// has no in-command option prompt, so the option is typed on the same command
+/// line. The grammar ([`parse_pedit_argument`]) is `CLOSE`/`C`, `OPEN`/`O` and
+/// `REVERSE`/`R`, case-insensitive. The current selection (exactly one
+/// model-space LWPOLYLINE) is still the whole input, so there is no second IPC.
+/// A bare `PEDIT` is admitted by name and refused by the application with
+/// `pedit.needs_option`; an unknown argument is refused before IPC with
+/// [`invalid_pedit_argument_reason`]. `Join`, `Width`/`Halfwidth`, `Fit`,
+/// `Spline`, `Decurve`, `Ltype gen`, `Undo`, `Multiple`, `Edit vertex` and the
+/// `PEDITACCEPT` conversion prompt are NOT IMPLEMENTED.
+pub const PEDIT_SELECTOR: &str = "PEDIT";
 
 /// The `SPACE <argument>` selector: switch the active drawing space.
 ///
@@ -462,6 +488,29 @@ pub fn parse_zoom_argument(argument: &str) -> Option<ZoomArgument> {
         return Some(ZoomArgument::Previous);
     }
     parse_positive_decimal(key).map(ZoomArgument::Factor)
+}
+
+/// Parse the argument of a `PEDIT` selector: one declared v1 polyline option.
+///
+/// Accepted (case-insensitive): `CLOSE`/`C`, `OPEN`/`O` and `REVERSE`/`R`. No
+/// other word, partial spelling, empty argument, option stack (`PEDIT C O`) or
+/// AutoCAD option beyond this subset (`JOIN`, `WIDTH`, `FIT`, `SPLINE`, …) is
+/// admitted; the caller turns `None` into the stable refusal from
+/// [`invalid_pedit_argument_reason`]. The bare selector never reaches this
+/// parser: it keeps the name-only funnel and the application refuses it with
+/// `pedit.needs_option`.
+pub fn parse_pedit_argument(argument: &str) -> Option<PeditOption> {
+    let key = argument.trim();
+    if key.eq_ignore_ascii_case("CLOSE") || key.eq_ignore_ascii_case("C") {
+        return Some(PeditOption::Close);
+    }
+    if key.eq_ignore_ascii_case("OPEN") || key.eq_ignore_ascii_case("O") {
+        return Some(PeditOption::Open);
+    }
+    if key.eq_ignore_ascii_case("REVERSE") || key.eq_ignore_ascii_case("R") {
+        return Some(PeditOption::Reverse);
+    }
+    None
 }
 
 /// Parse the argument of a `SNAPUNIT` selector: a positive decimal spacing.
@@ -545,6 +594,21 @@ pub fn invalid_zoom_argument_reason(text: &str) -> String {
     format!(
         "unsupported CAD command: {} (ZOOM needs a positive factor, ALL, EXTENTS, WINDOW or \
          PREVIOUS)",
+        text.trim()
+    )
+}
+
+/// The stable rejection reason for a `PEDIT` argument outside the grammar.
+///
+/// The typed line is echoed and the implemented option set (with its single
+/// letters) is named, so a typo or an unimplemented AutoCAD option is refused by
+/// name. The NOT IMPLEMENTED options are listed too, so nobody reads the subset
+/// as a promise that `JOIN`/`WIDTH`/`SPLINE` work.
+pub fn invalid_pedit_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (PEDIT needs CLOSE, OPEN or REVERSE, or C, O, R; Join, \
+         Width, Halfwidth, Fit, Spline, Decurve, Ltype gen, Undo, Multiple and Edit vertex are \
+         NOT implemented)",
         text.trim()
     )
 }

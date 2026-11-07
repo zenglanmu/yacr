@@ -525,6 +525,7 @@ impl Application {
             | CommandId::MatchProp
             | CommandId::GripStretch
             | CommandId::Reverse
+            | CommandId::Pedit
             | CommandId::Oops
             | CommandId::Overkill
             | CommandId::BreakAtPoint

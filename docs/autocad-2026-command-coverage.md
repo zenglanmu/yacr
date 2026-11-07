@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **64** |
-| **已实现合计（完整 + 部分）** | **114** |
-| 未实现 | **867** |
+| 部分实现（有写明的界） | **65** |
+| **已实现合计（完整 + 部分）** | **115** |
+| 未实现 | **866** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -120,6 +120,7 @@
 | `PASTEBLOCK` | 部分实现 | 应用内剪贴板 → 自动命名块；不是 OS 剪贴板 |
 | `PASTECLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
 | `PASTEORIG` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
+| `PEDIT` | 部分实现 | v1 参数式选项子集：仅 `CLOSE`/`OPEN`/`REVERSE`（或 `C`/`O`/`R`），选项作为命令参数传入（无命令内选项提示）；预选择恰好一条可直接寻址的模型空间 LWPOLYLINE（无交互 Select polyline / `Multiple`）；`Join`、`Width`/`Halfwidth`、`Fit`、`Spline`、`Decurve`、`Ltype gen`、`Undo`、`Edit vertex`、非多段线的 `Reverse` 与 `PEDITACCEPT` 转换提示均未实现；无宽度/厚度模型 |
 | `PLAN` | 部分实现 | payload-free 选择子：Top/plan 2D 视图；无 UCS/World/Current 选项（本构建无 UCS 模型） |
 | `PLINE` | 已实现 | — |
 | `PLOT` | 部分实现 | 仅矢量 SVG/PDF；无 CTB/STB、无批量多布局 |
@@ -798,7 +799,7 @@
 | 634 | `PDFLAYERS` | 未实现 | Controls the display of layers in a PDF underlay. | — |
 | 635 | `-PDFSHXTEXT` | 未实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects from the command line. | — |
 | 636 | `PDFSHXTEXT` | 未实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects. | — |
-| 637 | `PEDIT` | 未实现 | Edits polylines, objects to be joined to polylines, and related objects. | — |
+| 637 | `PEDIT` | 部分实现 | Edits polylines, objects to be joined to polylines, and related objects. | v1 参数式选项子集 `CLOSE`/`OPEN`/`REVERSE`（`C`/`O`/`R`）：预选择恰好一条模型空间 LWPOLYLINE，选项随命令行传入；无命令内选项提示、无 Select polyline/`Multiple`；`Join`/`Width`/`Halfwidth`/`Fit`/`Spline`/`Decurve`/`Ltype gen`/`Undo`/`Edit vertex`、非多段线 `Reverse` 与 `PEDITACCEPT` 转换未实现；无宽度/厚度模型 |
 | 638 | `PERFANALYZER` | 未实现 | Opens the Performance Analyzer palette from which you can diagnose operations in AutoCAD that seem slow or unresponsive. | — |
 | 639 | `PERFANALYZERCLOSE` | 未实现 | Closes the Performance Analyzer palette. | — |
 | 640 | `PFACE` | 未实现 | Creates a 3D polyface mesh, vertex by vertex. | — |

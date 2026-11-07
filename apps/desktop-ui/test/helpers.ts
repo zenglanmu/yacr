@@ -224,6 +224,11 @@ export const HOST_NAMES = [
   // REVERSE (AutoCAD 2026) is the selection-based direction flip: at least one
   // LINE/LWPOLYLINE/SPLINE selected, no pick and no options.
   'REVERSE',
+  // PEDIT (AutoCAD 2026) is the selection-based polyline option subset
+  // (`PEDIT CLOSE|OPEN|REVERSE`) — an **argument form** of one canonical
+  // selector, so only the base name is mirrored here; the three option words
+  // live in `ARGUMENT_COMMANDS.PEDIT` and are never a second name list.
+  'PEDIT',
   // OOPS (AutoCAD 2026) restores the last ERASE; selection-free, payload-free.
   'OOPS',
   // OVERKILL (AutoCAD 2026) removes exact duplicate selected entities (v1).

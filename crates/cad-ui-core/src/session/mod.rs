@@ -32,6 +32,7 @@ mod import_progress;
 mod input;
 mod layers;
 mod layout_tabs;
+mod pedit;
 mod performance;
 pub mod plugins;
 mod point_style;
@@ -89,13 +90,14 @@ pub use self::command_log::{
 };
 pub use self::commands::{
     admissible_names, alias_pairs, canonical_command_name, command_name,
-    invalid_pdmode_argument_reason, invalid_pdsize_argument_reason,
+    invalid_pdmode_argument_reason, invalid_pdsize_argument_reason, invalid_pedit_argument_reason,
     invalid_snap_unit_argument_reason, invalid_zoom_argument_reason, measurement_selector_kind,
-    normalize_command, parse_pdmode_argument, parse_pdsize_argument, parse_snap_unit_argument,
-    parse_zoom_argument, typed_command_argument, unsupported_command_reason, zoom_step_factor,
-    ZoomArgument, ARGUMENT_SELECTOR, ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE,
-    MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR, SNAPUNIT_SELECTOR, SPACE_SELECTOR,
-    ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
+    normalize_command, parse_pdmode_argument, parse_pdsize_argument, parse_pedit_argument,
+    parse_snap_unit_argument, parse_zoom_argument, typed_command_argument,
+    unsupported_command_reason, zoom_step_factor, ZoomArgument, ARGUMENT_SELECTOR,
+    ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE, MEASUREMENT_SELECTORS, PDMODE_SELECTOR,
+    PDSIZE_SELECTOR, PEDIT_SELECTOR, SNAPUNIT_SELECTOR, SPACE_SELECTOR, ZOOM_IN_FACTOR,
+    ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
 pub use self::events::{
     cursor_changed, derive_batch, same_status_ignoring_volatile, CadEvent, CadEventKind,
@@ -320,8 +322,8 @@ impl CadSession {
     ///   `ZOOM ALL` (`EXTENTS`) dispatches the ordinary `FIT`;
     /// * `SNAPUNIT <value>`: sets the session grid-snap spacing
     ///   ([`CadSession::snap_unit_argument`]);
-    /// * `PDMODE <n>` / `PDSIZE <n>`: write the drawing's POINT display style —
-    ///   a document write, not session state ([`CadSession::point_style_argument`]).
+    /// * `PDMODE`/`PDSIZE`: the drawing's POINT display style (a document write);
+    /// * `TORIENT`/`TCASE`/`PEDIT`: one typed option of a selection-based command.
     ///
     /// An argument outside a selector's grammar is refused with a stable reason,
     /// recorded for `cad_status.error`, and changes nothing. A selector with

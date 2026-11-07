@@ -106,6 +106,7 @@ command_selector_contract! {
     FilletPolyline => "FILLET POLYLINE",
     RevisionCloud => "REVCLOUD",
     Reverse => "REVERSE",
+    Pedit => "PEDIT",
     Oops => "OOPS",
     Overkill => "OVERKILL",
     BreakAtPoint => "BREAKATPOINT",
@@ -168,7 +169,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 136,
+        EXPECTED_COMMAND_COUNT, 137,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

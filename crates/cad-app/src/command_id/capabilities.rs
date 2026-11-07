@@ -108,6 +108,7 @@ impl CommandId {
                 | Self::CreateXLine
                 | Self::CreateRay
                 | Self::Reverse
+                | Self::Pedit
                 | Self::Oops
                 | Self::Overkill
                 | Self::BreakAtPoint

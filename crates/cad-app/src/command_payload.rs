@@ -94,6 +94,21 @@ pub enum TextCaseMode {
     Toggle,
 }
 
+/// The declared AutoCAD 2026 `PEDIT` v1 option subset.
+///
+/// The command line carries the option (`PEDIT CLOSE|OPEN|REVERSE`) because this
+/// build has no in-command option prompt. Full contract:
+/// [`crate::command_id::pedit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeditOption {
+    /// `CLOSE` / `C`: close the one selected open polyline (at least 3 vertices).
+    Close,
+    /// `OPEN` / `O`: open the one selected closed polyline.
+    Open,
+    /// `REVERSE` / `R`: reverse vertex order and bulges exactly like `REVERSE`.
+    Reverse,
+}
+
 /// The axis a DIMORDINATE measures (ADR 0017 decision C/E, P5e).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrdinateAxis {
@@ -390,6 +405,13 @@ pub enum CommandPayload {
     TCase {
         mode: TextCaseMode,
     },
+    /// `PEDIT` (Work-only): one declared v1 polyline option.
+    ///
+    /// The current selection is the input: exactly one directly addressable
+    /// model-space LWPOLYLINE. A bare `PEDIT` (`CommandPayload::None`) is refused
+    /// with `pedit.needs_option`, because this build has no in-command option
+    /// prompt. Full contract: [`crate::command_id::pedit`].
+    PeditOption(PeditOption),
     /// `BLOCK` (Work-only): define a named block from `refs` at the picked
     /// `base` point.
     ///
