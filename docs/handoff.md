@@ -1,3 +1,46 @@
+## 2026-11-07 实验性 DWG Save As + acadrust 补丁台账（仅合成 self-roundtrip 证据）
+
+- **DWG 导出核心**（`cad-import-acadrust`）：`ExportFormat::Dwg`（`extension() == "dwg"`、
+  `as_str() == "dwg-binary"`）。`export` 仍先把 `cad-db` 反向映射成同一个 `CadDocument`，再按格式
+  分派：`DxfText` → 既有 `DxfWriter`（DXF 字节路径未变，原测试仍钉住），`Dwg` → 上游
+  `acadrust::DwgWriter::write_to_vec`。报告新增全局 note `export.note.dwg_experimental`：上游
+  acadrust 输出、有损、**未**与 AutoCAD/vendor 验证。测试（`export/tests/dwg.rs`）：LINE + CIRCLE +
+  闭合 LWPOLYLINE → 断言 `AC10` 签名并用 `DwgReader` 读回种类/闭合标志；空图纸也产出非空合法
+  DWG；超限导出仍是显式 `InvalidInput`（不 panic）。全部是**合成 acadrust self-roundtrip**，不是
+  vendor/AutoCAD 证据。
+- **应用/宿主保存策略**：`HostController::export_dwg()` 与 `export_dxf()` 共用一个私有
+  `export_as(format)` builder。`cad-platform::SavePurpose` 新增 `SaveDwg`。`Request save` 依据
+  已打开源的扩展名选目的：`.dwg` → `SaveDwg` + 默认 **新文件** `<stem>-export.dwg`
+  （`policy::default_dwg_export_name`，永不与源同名）；`.dxf`/无源 → 既有 `SaveDxf` + `<stem>.dxf`。
+  Linux portal 用独立 i18n 键 `linux.save_title_dwg` / `linux.save_filter_dwg`（`*.dwg` glob）。
+  `export_save` 删除 `DwgDeferred` 拒绝路径：`.dwg` 调 `export_dwg()` + `write_atomic`。两种格式都
+  保留 `files.refuses_source_overwrite(target)`；DWG 另加宿主侧归一化路径/名回退
+  （`policy::same_normalized_target`，覆盖浏览器无 inode、Android 只有 SAF URI 的载体），命中源
+  即 `save.refused_source_path` 且不写。成功状态：`save.dwg_exported_experimental`（report
+  `Complete`）或 `save.dwg_exported_partial`（带 `{converted}`/`{dropped}`），两者都明说“实验性/
+  有损/不完整、写的是新文件、源图纸未修改”。契约测试：`.dwg` 源建议 `plan-export.dwg`；写出的
+  `.dwg` 以 `AC10` 开头且状态带 experimental 键；选源路径（含 `detect_identity=false` 与
+  `/tmp/./plan.dwg` 变体）被拒绝且零写入；`.dxf` 源仍走 DXF 目的/名称。
+- **acadrust 补丁策略（ADR-0031）**：新增 `docs/acadrust-patches.md`（未打补丁；空台账 + 新增流程）
+  与 `docs/adr/0031-acadrust-vendored-patch-policy.md`；AGENTS.md 铁律 1、`docs/architecture.md`、
+  `docs/build.md`、`docs/compatibility.md` 改为“只允许 acadrust、固定版本/revision、必须登记”。
+  `scripts/check-architecture.py` 不再一律拒绝 `[patch]`：仅允许 `[patch.crates-io]` 的唯一键
+  `acadrust`，且台账存在并包含 workspace 解析出的版本字符串；其它 patch/表、缺台账、缺版本均
+  失败。**当前没有实际补丁**，DWG 导出用上游 `DwgWriter`。门禁四分支已用临时 fixture 手工
+  验证（无 patch 通过 / acadrust+台账通过 / 缺台账失败 / 非 acadrust 失败）。
+- **已运行**：`cargo test -p cad-import-acadrust --locked` 356 passed / 1 ignored（另 3 个 harness
+  各 1–3 passed）；`cargo test -p cad-host --locked` 277 passed；`cargo test -p cad-platform
+  --locked` 61 passed（+doc 1）；`cargo check -p app-linux --all-targets --locked`；
+  `cargo check -p app-web --target wasm32-unknown-unknown --locked`；`cargo test -p app-web
+  --locked` 112 passed（含改为“`.dwg` 源 → 新 `<stem>-export.dwg` 下载”的真实 SAVE 路径）；`app-linux` 的
+  `save_labels_come_from_the_i18n_catalogue`；`python3 scripts/check-i18n.py`（1136 keys）；
+  `python3 scripts/check-architecture.py`；`cargo fmt --all -- --check`；clippy
+  `cad-import-acadrust/cad-host/cad-platform/cad-app --all-targets -D warnings`。
+- **NOT RUN / NOT VERIFIED**：真实 GUI 的 SAVE/Save As 运行（本 worktree 无显示/GPU 证据）；
+  AutoCAD/ODA/vendor 打开导出的 DWG；真实 DWG 语料的 DWG→DWG 自洽往返；Windows/macOS/Android/Web
+  的运行（仅 app-linux 编译 + app-web wasm 编译）；`scripts/test-check-architecture.py` 不存在
+  （fixtures 以手工临时目录验证，未新增脚本）。打包/发布未运行。
+
 ## 2026-11-07 pulled 预检用真实常驻量；引擎侧一次性 `gpu.pulled.insufficient-vram` 提示
 
 - **根因**（`crates/cad-render-wgpu/src/renderer_impl/pulled_rebuild.rs`）：容量门禁调用

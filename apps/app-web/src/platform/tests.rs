@@ -257,10 +257,11 @@ fn the_browser_capabilities_advertise_save_and_plot_only() {
 }
 
 #[test]
-fn a_real_save_command_publishes_one_dxf_download() {
-    // The whole browser save path, end to end on the host: SAVE is admitted by
-    // the real session, the export funnel runs inside the command (the
-    // synchronous-target rule), and the finished DXF reaches the download sink.
+fn a_real_save_command_publishes_one_experimental_dwg_download() {
+    // The whole browser save path, end to end on the host: SAVE on a `.dwg`
+    // source is admitted by the real session, the export funnel runs inside the
+    // command (the synchronous-target rule), and the finished experimental DWG
+    // copy reaches the download sink under a NEW name (never the source name).
     let platform = BrowserPlatform::new();
     platform.surface().report([800.0, 600.0], 1.0);
     let session = CadSession::from_bytes(
@@ -284,16 +285,15 @@ fn a_real_save_command_publishes_one_dxf_download() {
         1,
         "exactly one save publishes one download"
     );
-    assert!(
-        downloads[0].name.ends_with(".dxf"),
-        "the download keeps the session's name: {}",
-        downloads[0].name
+    assert_eq!(
+        downloads[0].name, "synthetic-four-lines-export.dwg",
+        "a DWG source is saved as a new experimental DWG file, not the source"
     );
     let published = platform.files().sink().published();
     assert_eq!(published.len(), 1);
     assert!(
-        published[0].1.windows(7).any(|window| window == b"SECTION"),
-        "the download is a real ASCII DXF document"
+        published[0].1.starts_with(b"AC10"),
+        "the download is DWG binary (experimental upstream writer), not DXF text"
     );
 }
 

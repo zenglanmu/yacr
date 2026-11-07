@@ -421,3 +421,190 @@ fn an_open_without_a_real_path_keeps_references_unavailable() {
         ExternalReferenceStatus::BrowserUnavailable
     );
 }
+
+// --- DWG Save As: experimental export, new file, never the source -----------
+
+/// A save platform whose chosen target (when set) is synthesized synchronously,
+/// recording the suggested name/purpose and every write. `detect_identity`
+/// models the platform's own device+inode / SAF-URI guard: the browser has no
+/// such identity, so its save funnel must rely on the host's normalized backstop.
+#[derive(Default)]
+struct RecordingSaveFiles {
+    calls: RefCell<Vec<(SavePurpose, String)>>,
+    events: RefCell<Vec<FileEvent>>,
+    written: RefCell<Vec<(String, Vec<u8>)>>,
+    source: RefCell<Option<FileTarget>>,
+    chosen: RefCell<Option<FileTarget>>,
+    detect_identity: Cell<bool>,
+}
+
+impl RecordingSaveFiles {
+    fn new() -> Self {
+        Self {
+            calls: RefCell::new(Vec::new()),
+            events: RefCell::new(Vec::new()),
+            written: RefCell::new(Vec::new()),
+            source: RefCell::new(None),
+            chosen: RefCell::new(None),
+            detect_identity: Cell::new(true),
+        }
+    }
+}
+
+impl PlatformFiles for RecordingSaveFiles {
+    fn begin_open(&self) -> CadResult<()> {
+        Ok(())
+    }
+    fn begin_open_target(&self, _target: &FileTarget) -> CadResult<()> {
+        Ok(())
+    }
+    fn begin_save(&self, purpose: SavePurpose, default_name: &str) -> CadResult<()> {
+        self.calls
+            .borrow_mut()
+            .push((purpose, default_name.to_string()));
+        if let Some(target) = self.chosen.borrow().clone() {
+            self.events
+                .borrow_mut()
+                .push(FileEvent::SaveTarget { purpose, target });
+        }
+        Ok(())
+    }
+    fn write_atomic(&self, target: &FileTarget, bytes: &[u8]) -> CadResult<()> {
+        self.written
+            .borrow_mut()
+            .push((target.display_name.clone(), bytes.to_vec()));
+        Ok(())
+    }
+    fn refuses_source_overwrite(&self, target: &FileTarget) -> bool {
+        self.detect_identity.get()
+            && self
+                .source
+                .borrow()
+                .as_ref()
+                .is_some_and(|source| source.opaque == target.opaque)
+    }
+    fn set_source(&self, target: Option<&FileTarget>) {
+        *self.source.borrow_mut() = target.cloned();
+    }
+    fn poll(&self) -> Vec<FileEvent> {
+        std::mem::take(&mut *self.events.borrow_mut())
+    }
+}
+
+/// Open `path` from bytes produced by the DWG exporter (synthetic source).
+fn open_dwg_source(core: &HostCore, path: &str) {
+    let (bytes, _report) = core.controller.borrow().export_dwg().unwrap();
+    core.deliver_external_open(FileTarget::from_path(path), Arc::from(bytes))
+        .expect("the synthetic DWG source opens");
+    assert_eq!(
+        core.source_target
+            .borrow()
+            .as_ref()
+            .map(|t| t.opaque.as_str()),
+        Some(path),
+        "the successful open arms the host-side source identity"
+    );
+}
+
+#[test]
+fn save_on_a_dwg_source_suggests_a_new_export_name() {
+    let files = Rc::new(RecordingSaveFiles::new());
+    let core = core_with_caps(files.clone(), capabilities(false));
+    open_dwg_source(&core, "/tmp/plan.dwg");
+
+    core.request_save().unwrap();
+    assert!(
+        core.save_pending.get(),
+        "a desktop picker leaves the save pending"
+    );
+    let calls = files.calls.borrow();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, SavePurpose::SaveDwg);
+    assert_eq!(calls[0].1, "plan-export.dwg");
+    assert_ne!(calls[0].1, "plan.dwg", "the source name is never suggested");
+    let status = core.last_status().unwrap();
+    let (key, _) = catalog(&status);
+    assert_eq!(key, "save.picker_waiting");
+}
+
+#[test]
+fn a_dwg_target_writes_experimental_dwg_bytes_and_warns() {
+    let files = Rc::new(RecordingSaveFiles::new());
+    *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/plan-export.dwg"));
+    let core = core_with_caps(files.clone(), capabilities(false));
+    open_dwg_source(&core, "/tmp/plan.dwg");
+
+    core.request_save().unwrap();
+    assert!(!core.save_pending.get());
+    let written = files.written.borrow();
+    assert_eq!(written.len(), 1, "exactly one new file is written");
+    assert_eq!(written[0].0, "/tmp/plan-export.dwg");
+    assert!(
+        written[0].1.starts_with(b"AC10"),
+        "the written file is DWG binary, not DXF text: {:?}",
+        &written[0].1[..written[0].1.len().min(6)]
+    );
+    let status = core.last_status().expect("the export grades a status");
+    let (key, args) = catalog(&status);
+    assert!(
+        key == "save.dwg_exported_experimental" || key == "save.dwg_exported_partial",
+        "a DWG write always states the experimental boundary: {key}"
+    );
+    assert_eq!(args.get("path"), Some(&"/tmp/plan-export.dwg".to_string()));
+    if key == "save.dwg_exported_partial" {
+        assert!(args.contains_key("converted") && args.contains_key("dropped"));
+    }
+}
+
+#[test]
+fn choosing_the_opened_dwg_source_is_refused_and_writes_nothing() {
+    for detect_identity in [true, false] {
+        let files = Rc::new(RecordingSaveFiles::new());
+        files.detect_identity.set(detect_identity);
+        *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/plan.dwg"));
+        let core = core_with_caps(files.clone(), capabilities(false));
+        open_dwg_source(&core, "/tmp/plan.dwg");
+
+        core.request_save().unwrap();
+        assert!(
+            files.written.borrow().is_empty(),
+            "the opened source is never written (detect_identity={detect_identity})"
+        );
+        let status = core.last_status().unwrap();
+        let (key, _) = catalog(&status);
+        assert_eq!(
+            key, "save.refused_source_path",
+            "the refusal is named (detect_identity={detect_identity})"
+        );
+    }
+}
+
+#[test]
+fn the_normalized_backstop_also_refuses_a_dot_path_spelling_of_the_source() {
+    let files = Rc::new(RecordingSaveFiles::new());
+    files.detect_identity.set(false);
+    *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/./plan.dwg"));
+    let core = core_with_caps(files.clone(), capabilities(false));
+    open_dwg_source(&core, "/tmp/plan.dwg");
+
+    core.request_save().unwrap();
+    assert!(files.written.borrow().is_empty());
+    let status = core.last_status().unwrap();
+    let (key, _) = catalog(&status);
+    assert_eq!(key, "save.refused_source_path");
+}
+
+#[test]
+fn save_on_a_dxf_source_keeps_the_dxf_purpose_and_name() {
+    let files = Rc::new(RecordingSaveFiles::new());
+    let core = core_with_caps(files.clone(), capabilities(false));
+    let (bytes, _report) = core.controller.borrow().export_dxf().unwrap();
+    core.deliver_external_open(FileTarget::from_path("/tmp/plan.dxf"), Arc::from(bytes))
+        .expect("the synthetic DXF source opens");
+
+    core.request_save().unwrap();
+    let calls = files.calls.borrow();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, SavePurpose::SaveDxf);
+    assert_eq!(calls[0].1, "plan.dxf");
+}

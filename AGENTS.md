@@ -18,7 +18,9 @@ ADR 0027。
 
 ## 铁律（违反即返工）
 
-1. 不改 acadrust 源码，不用 Cargo patch（`check-architecture.py` 拒绝）。
+1. 默认不改 acadrust 源码、不加 Cargo patch。确需补丁时**只允许 `acadrust`**，必须固定版本/
+   revision 并在 `docs/acadrust-patches.md` 登记（ADR-0031）；`check-architecture.py` 强制该台账。
+   其它任何 patch 表/键仍拒绝；**当前上游 0.6.8 未修改**（实验性 DWG 导出用上游 `DwgWriter`）。
 2. 未支持/未验证能力必须显式建模（`Unsupported`/`Partial`/诊断/`pending(...)`）；占位与假数据
    不计完成，**禁止**把失败改成空成功。
 3. 业务层只操作数据库/命令/事务；GPU 提交封装在渲染器内。`cad-db` 是唯一权威，UI 与渲染均为派生。
@@ -41,10 +43,12 @@ ADR 0027。
 
 ## 分层与边界（`scripts/check-architecture.py` 强制）
 
-唯一依赖：`cad-render-wgpu` → wgpu；`cad-import-acadrust` → acadrust（0.6.8，未修改）。
+唯一依赖：`cad-render-wgpu` → wgpu；`cad-import-acadrust` → acadrust（0.6.8，当前未修改；如需补丁
+只允许 acadrust 且必须在 `docs/acadrust-patches.md` 登记，见 ADR-0031）。
 架构规则：`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层（脚本强制的是 slint/iced 全局禁用
 与逐 crate 的 ban 列表，不正向断言 tauri 唯一性——不要因此绕过该规则）。平台类型
-（`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`；`Cargo.toml` 根 `[patch]` 被拒绝。
+（`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`；根 `[patch.crates-io]` 只允许单个
+`acadrust` 键且必须在 `docs/acadrust-patches.md` 登记并通过门禁（ADR-0031），其它 patch 一律拒绝。
 
 ```
 cad-domain → cad-db/dependencies/history → geometry/kernel-adapter/representation

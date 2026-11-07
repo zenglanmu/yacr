@@ -207,6 +207,7 @@ impl HostCore {
             save_pending: Rc::new(Cell::new(false)),
             pending_save: Rc::new(RefCell::new(None)),
             drawing_path: Rc::new(RefCell::new(None)),
+            source_target: Rc::new(RefCell::new(None)),
             last_status: Rc::new(RefCell::new(None)),
             last_image_report: Rc::new(RefCell::new(None)),
             last_font_report: Rc::new(RefCell::new(None)),

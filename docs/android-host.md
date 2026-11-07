@@ -51,7 +51,7 @@
 |---|---|---|
 | 打开 | **支持（SAF，设备 NOT RUN）** | `OPEN` → Kotlin `ACTION_OPEN_DOCUMENT`（`CATEGORY_OPENABLE`、`*/*`、读 + persistable 授权）；worker 线程读完整字节，经 `documentSnapshot` 以 `FileEvent::Opened` 交给共享 `PlatformFiles` 漏斗。`canOpen = true`。宽 MIME 是刻意的：`.dwg` 供应方常报 `application/octet-stream`，窄过滤器会把要打开的文件变灰 |
 | 新建 | **不支持** | `canNew = false`；没有 New 漏斗，也不建第二份文档权威 |
-| 保存 | **支持（DXF 导出，设备 NOT RUN）** | `SAVE` → Kotlin `ACTION_CREATE_DOCUMENT`（`application/octet-stream`、`EXTRA_TITLE`）；共享保存路径把 **DXF** 字节经 `write_atomic` → `ContentResolver.openOutputStream(uri, "wt")` 写入（SAF 实现是截断写，没有临时文件 + rename）。`canSave = true`。这是**导出一份副本**，不是原地覆盖：打开来源的同一 URI 被 `refuses_source_overwrite` 拒绝。**DWG 保存仍是共享路径的显式延后拒绝**（`save.dwg_deferred`） |
+| 保存 | **支持（DXF 导出，设备 NOT RUN）** | `SAVE` → Kotlin `ACTION_CREATE_DOCUMENT`（`application/octet-stream`、`EXTRA_TITLE`）；共享保存路径把 **DXF** 字节经 `write_atomic` → `ContentResolver.openOutputStream(uri, "wt")` 写入（SAF 实现是截断写，没有临时文件 + rename）。`canSave = true`。这是**导出一份副本**，不是原地覆盖：打开来源的同一 URI 被 `refuses_source_overwrite` 拒绝。源为 `.dwg` 时经同一共享路径写**实验性 DWG 导出**（上游 `acadrust::DwgWriter`；默认新文件 `<stem>-export.dwg`，SAF URI 守卫拒绝覆盖来源；DWG 仅有合成 self-roundtrip 证据，设备/AutoCAD **NOT VERIFIED**） |
 | 出图 | **不支持** | `canPlot = false`；没有 SVG/PDF 导出 |
 | 文件身份 | **SAF URI，不伪造** | 身份 = `content://` opaque 句柄 + `OpenableColumns.DISPLAY_NAME`（缺列时回退 URI 末段）；没有 `--open` 启动参数。`content://` 目标**没有**文件系统目录，sidecar xref/栅格不可用：`xref_options_for` 对含 `://` 的句柄返回 `None`，引用按不可用报告，不派生假根目录 |
 | 外部「打开方式」 | **已接（设备 NOT RUN）** | `bundle.fileAssociations`（`dwg`；mime 含 `application/octet-stream`）由 tauri-build 在构建期注入 manifest 的 VIEW intent-filter；`MainActivity` 冷启动（`onCreate`）与热启动（`onNewIntent` + `setIntent`，`singleTask`）都投递到同一个读槽 |

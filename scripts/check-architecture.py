@@ -52,6 +52,61 @@ def _workspace_alias_package(alias: str, workspace_dependencies: dict) -> str:
     return alias
 
 
+def _acadrust_version(workspace_dependencies: dict) -> str | None:
+    """The pinned workspace `acadrust` version string, if it is a version dep."""
+    entry = workspace_dependencies.get("acadrust")
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        version = entry.get("version")
+        return version if isinstance(version, str) else None
+    return None
+
+
+def check_patch_policy(
+    root: pathlib.Path, manifest: dict, workspace_dependencies: dict
+) -> None:
+    """Allow only a tracked, pinned `[patch.crates-io] acadrust` entry.
+
+    The relaxed rule (ADR-0031) is one exception, not general vendoring:
+
+    * the only patch table may be `[patch.crates-io]`, and its only key must be
+      `acadrust`;
+    * `docs/acadrust-patches.md` must exist and must name the workspace's
+      resolved acadrust version, so a patch cannot exist without a ledger row.
+
+    No patch at all is the current (and normal) state.
+    """
+    patch = manifest.get("patch")
+    if patch is None:
+        return
+    assert set(patch) == {"crates-io"}, (
+        "Cargo patch is allowed only as [patch.crates-io] for acadrust "
+        f"(found {sorted(patch)})"
+    )
+    entries = patch["crates-io"]
+    assert isinstance(entries, dict) and entries, "[patch.crates-io] must not be empty"
+    other = sorted(set(entries) - {"acadrust"})
+    assert not other, (
+        "Cargo patch is allowed only for acadrust; found "
+        f"{other} in [patch.crates-io]"
+    )
+    ledger = root / "docs" / "acadrust-patches.md"
+    assert ledger.is_file(), (
+        "an acadrust [patch.crates-io] entry requires docs/acadrust-patches.md "
+        "(the tracked patch ledger, ADR-0031)"
+    )
+    version = _acadrust_version(workspace_dependencies)
+    assert version, (
+        "cannot resolve the workspace acadrust version; an acadrust patch needs "
+        "a pinned version string for the ledger"
+    )
+    assert version in ledger.read_text(encoding="utf-8"), (
+        "docs/acadrust-patches.md must record the patched acadrust version "
+        f"{version!r} (ADR-0031)"
+    )
+
+
 def _dependency_names(section: dict, workspace_dependencies: dict) -> set[str]:
     """Package names declared in one dependency table.
 
@@ -110,7 +165,9 @@ def load_packages(root: pathlib.Path) -> dict:
 
 def check(root: pathlib.Path) -> int:
     packages = load_packages(root)
-    workspace_dependencies = load_workspace_dependencies(root)
+    manifest = tomllib.loads((root / "Cargo.toml").read_text())
+    workspace_dependencies = manifest.get("workspace", {}).get("dependencies", {})
+    check_patch_policy(root, manifest, workspace_dependencies)
 
     graph = {
         name: runtime_dependencies(manifest, workspace_dependencies) & packages.keys()
@@ -216,7 +273,8 @@ def check(root: pathlib.Path) -> int:
             assert not graph[name], "domain depends on another CAD package"
         if name == "cad-db":
             assert graph[name] <= {"cad-domain"}, "database depends on a higher layer"
-    assert "patch" not in tomllib.loads((root / "Cargo.toml").read_text()), "Cargo patch forbidden"
+    # Cargo patch policy: only a tracked, pinned acadrust entry may exist.
+    # (The pre-check above has already validated it; no patch is the norm.)
     print(f"Architecture OK: {len(packages)} packages, acyclic and core boundaries intact")
     return 0
 

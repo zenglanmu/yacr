@@ -171,9 +171,10 @@ P5a 让标注成为一级域实体并迁入两分支导入 + 导出；**P5b** �
 
 ## acadrust 依赖能力（0.6.8）
 
-`acadrust` 已由 0.5.5 → 0.6.3 → 0.6.5 → **0.6.8**（features `serde` + `import`，registry `rsproxy`；无
-`[patch]`、未修改上游）。`cad-import-acadrust` 是唯一消费方；`cad-proxy` 不依赖 acadrust，只消费
-原始字节。下表为源码核对后的能力增量，「本项目处理」一列说明 yacr 当前的读取/建模，不改变任何
+`acadrust` 已由 0.5.5 → 0.6.3 → 0.6.5 → **0.6.8**（features `serde` + `import`，registry `rsproxy`；
+上游代码**未修改**、当前没有 `[patch]`；如确需补丁，只允许 `acadrust` 且必须固定版本/revision 并在
+`docs/acadrust-patches.md` 登记，`scripts/check-architecture.py` 强制该台账——见 ADR-0031）。
+`cad-import-acadrust` 是唯一消费方；`cad-proxy` 不依赖 acadrust，只消费原始字节。下表为源码核对后的能力增量，「本项目处理」一列说明 yacr 当前的读取/建模，不改变任何
 Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增量」小节；只有被我们**实际执行**过的
 能力才写"已接入/已验证"，其余明确标注"上游已提供、本项目未消费"。
 
@@ -249,8 +250,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 > 「不实现 DWG 回写、原始实体移动/删除/修改」，完整编辑亦被排除在初期之外。因此 MOVE/COPY/ERASE/
 > TRIM/EXTEND/ROTATE/SCALE/MIRROR/OFFSET/CLIPBOARD/MATCHPROP、各类创建命令、夹点拖拽
 > **全部是项目自选范围**：行为选择标为**我们的选择**，不得表述为「符合规范」。与 DIMENSION 创建行
-> （「创建无 spec 授权」）同一口径。这些命令**只改内存文档**：`SAVE` 仍是有损 **DXF 另存**，
-> **没有任何 DWG 回写**。
+> （「创建无 spec 授权」）同一口径。这些命令**只改内存文档**：`SAVE` 是有损 DXF 另存，源为
+> `.dwg` 时写**实验性新 DWG 文件**（默认 `<stem>-export.dwg`）；**没有任何 DWG 原地回写**。
 
 | 命令 | 能力 | 诚实边界 |
 |---|---|---|
@@ -291,10 +292,15 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   AutoCAD 的**交互式**流程（先选源、再逐个选目标并显示“特性刷”光标）**未实现**——它需要新的
   draw-tool 类型与绘制光标，本项只实现选择式变体。命令无 payload（`CommandPayload::None`），
   选择在应用时从会话读取。
-- **导出**：`SAVE` 为**有损 DXF 另存**（`Partial`，逐条记录转换/丢弃，**非** DWG 往返保存）；
-  `PLOT` 为矢量 SVG/PDF。真实图纸上的导出兼容性**未验证**。逐类：LWPOLYLINE（平面的）/ELLIPSE/POINT
-  为精确映射；**SPLINE 记为 `Converted`**（`DxfSpline`，几何保留，**closed/periodic 标志不携带**）；
-  Shape/Image/Mask/Opaque 被丢弃并逐条记录。
+- **导出**：`SAVE` 默认是**有损 DXF 另存**（`Partial`，逐条记录转换/丢弃，**非** DWG 往返保存）；
+  若打开源是 `.dwg`（或用户选择 `.dwg` 目标），则写入**实验性 DWG 导出**（上游
+  `acadrust::DwgWriter`）：有损、不完整、**不是**原地回写，默认建议新文件名 `<stem>-export.dwg`，
+  且**绝不覆盖被打开的源文件**（平台 device+inode/SAF URI 守卫 + 宿主归一化路径/名回退守卫）；
+  成功状态明确标注 experimental 与“源图纸未修改”。**证据只有合成的 acadrust self-roundtrip
+  （writer→reader），AutoCAD/vendor 兼容性 NOT VERIFIED**。`PLOT` 为矢量 SVG/PDF。真实图纸上的
+  导出兼容性**未验证**。逐类：LWPOLYLINE（平面的）/ELLIPSE/POINT 为精确映射；**SPLINE 记为
+  `Converted`**（`DxfSpline`，几何保留，**closed/periodic 标志不携带**）；Shape/Image/Mask/Opaque
+  被丢弃并逐条记录。
 
 - **2026-10-26 新增命令的运行时证据边界**：`ID` / `JOIN` / `LAYISO` / `LAYUNISO` 的 UI 入口
   （ribbon 按钮、命令目录、工具提示、命令窗口的 `point` 回显行）目前只有**源码结构/纯函数契约 +
@@ -406,8 +412,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | **Linux / X11 / XWayland** | **已实现 `dom-canvas` 载体**（`apps/app-linux`；退出码 4 已是历史合同） | **DOM-canvas**：wasm/WebGL2 CAD 会话画进 WebView 内 `<canvas>`（`surfaceMode: dom-canvas`），**无**原生 CAD 表面 | 有界运行：`surfaceMode=dom-canvas`、canvas 挂载 + backing `626×341`、合成 fixture 出图（Mutter ScreenCast 抓帧）；**用户手动确认**滚轮缩放/拖拽平移（用户报告，**无** agent 像素差证据）；WebGL2 缺失 → `yacr: unsupported-runtime: webgl2` + **退出码 6** | 仅 **XWayland + GNOME/Mutter + `scale=1`**；真 X11 服务器/WM、其它合成器、**硬件归属（NOT VERIFIED）**、DPR/多显示器、性能、vendor/golden 均无结论；agent 侧输入注入不可用 |
 | **Windows** | **已实现**（`apps/app-windows`，bin `yacr-windows`） | **DOM on top**：透明 WebView2（alpha 恰 0）在上，`WS_CHILD|WS_DISABLED` CAD child HWND 在下 | **Tier 0 编译门禁全 rc=0**（msvc clippy/check/build、mingw build、wasm 空壳 check）；**Wine 拒绝合同 smoke 3/3 rc=5** | **视觉/运行时全部 NOT RUN**；spike-1/4/5 **PENDING user real-Windows spike**；Wine 像素结论固定 `NOT VERIFIED (Wine limitation, bug 55432/58921)`；无发布打包 |
 | **macOS** | **已实现**（`apps/app-macos`，bin `yacr-macos`） | **DOM on top**：透明 WKWebView 在上，原生 CAD 子 `NSView`（`addSubview:positioned:relativeTo:` `.below`）在下；wgpu/Metal presenter | 仅 **CI `macos-check` 编译门禁**（`macos-latest`，前端构建后 `cargo check`，不运行） | **窗口/透明合成/层序/Retina/Metal present/对话框/像素/性能全部 NOT VERIFIED**；renderer crash 触发 ④ 未实现；无签名/打包/分发 |
-| **Android** | **原生 `native-below` 宿主**（2026-11-01 起，`apps/app-android`）：Tauri WebView + 共享 React chrome 在上，原生 `CadSession` 持有 `cad-db`，wgpu/Vulkan 呈现到 WebView 之下的 `SurfaceView`；wasm 会话不实例化 | **DOM on top**：`SurfaceView` 在 WebView 之下，WebView 背景清透明 | **编译级 + 开发机契约**：`cargo test -p app-android`（48 passed）、`cargo check --target aarch64-linux-android`、clippy、Kotlin 编译、`javap` 核对 JNI 符号、`test-android-host.py`（SAF/五方法/关联/ProGuard 静态断言）；release APK 已构建并本地签名（R8 `classes.dex` 核对），未安装 | **设备/模拟器运行、Vulkan adapter、像素、旋转/前后台、JNI 运行时链接、SAF 选择器与实际读写、外部「打开方式」全部 NOT VERIFIED**；**打开** = `ACTION_OPEN_DOCUMENT`（`*/*`）→ worker 读 → 共享 `FileEvent::Opened`；**另存** = `ACTION_CREATE_DOCUMENT` 导出 **DXF**（DWG 仍 `save.dwg_deferred`；拒绝覆盖来源 URI，属导出副本）；**New/Plot 不支持**；`content://` 无 sidecar xref/栅格；导入同步在 tick（`importWorker=false`，超大 DWG 停顿未测量）；弹窗接缝已接（in-DOM，Options/About/text-edit 可用，源码/契约级）且偏好持久化到应用 `filesDir`（设备落盘 NOT VERIFIED）；FIT 仍按全窗口取景；2026-10-28 的 `dom-canvas` 模拟器证据属已退役载体，不得复用 |
-| **Web** | **wasm CAD 会话已复活**（`apps/app-web`）；浏览器 bundle 本地可构建 | **DOM-canvas**：同一 wasm 会话画进 `<canvas>`（无第二份文档） | 本地运行（Chromium + WebKitGTK 2.52.6）：合成 fixture 出图与缩放；真实 DWG（4.2 MB）在 wasm 内导入（1.43 GB 堆 / 11.2 s）；Chromium **Worker 隔离**（`isolation=worker`），WebKitGTK 显式 `main-thread (no WebGL2 in worker)`；共享 chrome 由 `scripts/build-web-ui.sh` 构建。**文件访问（2026-11-01）**：`OPEN` = 浏览器上传（隐藏 `<input type=file>` → bytes → wasm `open_bytes`，页面 transport 抬 `canOpen`，会话本身仍报 `canOpen:false`）；`SAVE` = 浏览器下载 **DXF**（`BrowserFiles` 在 `begin_save` 内合成 `download://<name>`，`DomDownload` 用 `Blob`+`<a download>`），`PLOT` = **SVG/PDF** 下载（仅契约测试）。本机 Chromium+SwiftShader：smoke 8/8 (216/216)、端到端 `OPEN`→4 实体、`SAVE`→48,206 B DXF (`0 SECTION…EOF`) | CI `web-build`/`web-smoke`(SwiftShader)/`web-deploy` 已按 tag/dispatch 合同运行（v0.1.4 发布成功，线上 `yacr-examples.pages.dev` **是修复前 bundle**，需新 tag 才带上文件保存）；大图预算未达标（峰值由导入阶段决定）、Firefox/Safari/WebKit/移动端矩阵、GPU、像素、性能均 **NOT VERIFIED**；`PLOT` 无浏览器级证据；旧 Web（Slint）证据不得复用 |
+| **Android** | **原生 `native-below` 宿主**（2026-11-01 起，`apps/app-android`）：Tauri WebView + 共享 React chrome 在上，原生 `CadSession` 持有 `cad-db`，wgpu/Vulkan 呈现到 WebView 之下的 `SurfaceView`；wasm 会话不实例化 | **DOM on top**：`SurfaceView` 在 WebView 之下，WebView 背景清透明 | **编译级 + 开发机契约**：`cargo test -p app-android`（48 passed）、`cargo check --target aarch64-linux-android`、clippy、Kotlin 编译、`javap` 核对 JNI 符号、`test-android-host.py`（SAF/五方法/关联/ProGuard 静态断言）；release APK 已构建并本地签名（R8 `classes.dex` 核对），未安装 | **设备/模拟器运行、Vulkan adapter、像素、旋转/前后台、JNI 运行时链接、SAF 选择器与实际读写、外部「打开方式」全部 NOT VERIFIED**；**打开** = `ACTION_OPEN_DOCUMENT`（`*/*`）→ worker 读 → 共享 `FileEvent::Opened`；**另存** = `ACTION_CREATE_DOCUMENT` 导出 **DXF**；源为 `.dwg` 时导出**实验性 DWG**（上游 `DwgWriter`，默认新文件名 `<stem>-export.dwg`；SAF URI 守卫 + 归一化名回退都拒绝覆盖来源，属导出副本）。**DWG 只有合成 acadrust self-roundtrip 证据，AutoCAD/vendor 兼容性 NOT VERIFIED**；**New/Plot 不支持**；`content://` 无 sidecar xref/栅格；导入同步在 tick（`importWorker=false`，超大 DWG 停顿未测量）；弹窗接缝已接（in-DOM，Options/About/text-edit 可用，源码/契约级）且偏好持久化到应用 `filesDir`（设备落盘 NOT VERIFIED）；FIT 仍按全窗口取景；2026-10-28 的 `dom-canvas` 模拟器证据属已退役载体，不得复用 |
+| **Web** | **wasm CAD 会话已复活**（`apps/app-web`）；浏览器 bundle 本地可构建 | **DOM-canvas**：同一 wasm 会话画进 `<canvas>`（无第二份文档） | 本地运行（Chromium + WebKitGTK 2.52.6）：合成 fixture 出图与缩放；真实 DWG（4.2 MB）在 wasm 内导入（1.43 GB 堆 / 11.2 s）；Chromium **Worker 隔离**（`isolation=worker`），WebKitGTK 显式 `main-thread (no WebGL2 in worker)`；共享 chrome 由 `scripts/build-web-ui.sh` 构建。**文件访问（2026-11-01）**：`OPEN` = 浏览器上传（隐藏 `<input type=file>` → bytes → wasm `open_bytes`，页面 transport 抬 `canOpen`，会话本身仍报 `canOpen:false`）；`SAVE` = 浏览器下载 **DXF**（`BrowserFiles` 在 `begin_save` 内合成 `download://<name>`，`DomDownload` 用 `Blob`+`<a download>`）；源为 `.dwg` 时下载**实验性 DWG**（默认新文件名，浏览器无文件身份 ⇒ 用归一化名回退拒绝与源同名；DWG 仅合成 self-roundtrip 证据，AutoCAD/vendor NOT VERIFIED），`PLOT` = **SVG/PDF** 下载（仅契约测试）。本机 Chromium+SwiftShader：smoke 8/8 (216/216)、端到端 `OPEN`→4 实体、`SAVE`→48,206 B DXF (`0 SECTION…EOF`) | CI `web-build`/`web-smoke`(SwiftShader)/`web-deploy` 已按 tag/dispatch 合同运行（v0.1.4 发布成功，线上 `yacr-examples.pages.dev` **是修复前 bundle**，需新 tag 才带上文件保存）；大图预算未达标（峰值由导入阶段决定）、Firefox/Safari/WebKit/移动端矩阵、GPU、像素、性能均 **NOT VERIFIED**；`PLOT` 无浏览器级证据；旧 Web（Slint）证据不得复用 |
 
 ### 插件管理器载体矩阵（2026-11-05）
 
@@ -558,7 +564,7 @@ AutoCAD 的 0＝关闭拾取框/选择预览未建模，故拒绝 0)
 （`LAYER`）支持搜索 / 临时显隐 / 恢复 / 设为当前层，并新增**图层表结构写**
 （`CREATELAYER` / `RENAMELAYER` / `DELETELAYER`，`NEWLAYER` 是项目同义词别名）：内联新建、
 行内重命名、按行删除确认（默认层 `0` 不提供入口），写经**既有**有界队列 ack 后重读。
-图层写**不可撤销**（历史只有实体 patch），也**不写 DWG**（`SAVE` 仍是 DXF 导出）。
+图层写**不可撤销**（历史只有实体 patch），也**不写回原 DWG**（`SAVE` 是 DXF 或实验性新 DWG 导出，不覆盖源）。
 
 > **授权口径（2026-10-26 补齐，此前缺失）**：F03 只要求图层**临时显隐 / 搜索 / 恢复**，并明确
 > 「不修改 DWG 图层表」。已落地的 `CREATELAYER`/`RENAMELAYER`/`DELETELAYER` 与
@@ -599,7 +605,7 @@ plot-style **名字**无法写出（写入器只发句柄）→ 写缺省并记 
 **2026-10-26 图层属性编辑轮（本轮）**：图层属性现在**可经命令/IPC 编辑**——
 `SETLAYERPROPERTY`（命令）与 `cad_set_layer_property { layer, key, value }`（IPC），
 一行一条属性、一个 revision bump、**不记录撤销**（历史仍只有实体 patch），并**不写 DWG**
-（`SAVE` 仍是 DXF 导出）。键与今天的真实语义（**逐条，勿过度承诺**）：
+（`SAVE` 是 DXF 或实验性新 DWG 导出，不覆盖源）。键与今天的真实语义（**逐条，勿过度承诺**）：
 
 | 键 | 取值语法（`crates/cad-app/src/layer_property.rs` 是唯一语法） | 今天的语义 |
 |---|---|---|

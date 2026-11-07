@@ -22,8 +22,10 @@ use cad_ui_core::i18n::MessageSource;
 use super::{FileChooserOutcome, KEY_PICKER_EMPTY, KEY_PICKER_FAILED, KEY_PICKER_LOCAL};
 
 const KEY_SAVE_TITLE_DXF: &str = "linux.save_title_dxf";
+const KEY_SAVE_TITLE_DWG: &str = "linux.save_title_dwg";
 const KEY_SAVE_TITLE_PLOT: &str = "linux.save_title_plot";
 const KEY_SAVE_FILTER_DXF: &str = "linux.save_filter_dxf";
+const KEY_SAVE_FILTER_DWG: &str = "linux.save_filter_dwg";
 const KEY_SAVE_FILTER_PLOT: &str = "linux.save_filter_plot";
 
 /// The localized labels the native save dialog uses.
@@ -35,8 +37,10 @@ const KEY_SAVE_FILTER_PLOT: &str = "linux.save_filter_plot";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UseSaveDialogLabels {
     pub title_dxf: String,
+    pub title_dwg: String,
     pub title_plot: String,
     pub filter_dxf: String,
+    pub filter_dwg: String,
     pub filter_plot: String,
     pub picker_empty: String,
     pub picker_local: String,
@@ -59,8 +63,10 @@ impl UseSaveDialogLabels {
         };
         Ok(Self {
             title_dxf: get(KEY_SAVE_TITLE_DXF)?,
+            title_dwg: get(KEY_SAVE_TITLE_DWG)?,
             title_plot: get(KEY_SAVE_TITLE_PLOT)?,
             filter_dxf: get(KEY_SAVE_FILTER_DXF)?,
+            filter_dwg: get(KEY_SAVE_FILTER_DWG)?,
             filter_plot: get(KEY_SAVE_FILTER_PLOT)?,
             picker_empty: get(KEY_PICKER_EMPTY)?,
             picker_local: get(KEY_PICKER_LOCAL)?,
@@ -77,6 +83,7 @@ impl UseSaveDialogLabels {
     pub fn title(&self, purpose: SavePurpose) -> &str {
         match purpose {
             SavePurpose::SaveDxf => &self.title_dxf,
+            SavePurpose::SaveDwg => &self.title_dwg,
             SavePurpose::Plot => &self.title_plot,
         }
     }
@@ -85,6 +92,7 @@ impl UseSaveDialogLabels {
     pub fn filter(&self, purpose: SavePurpose) -> &str {
         match purpose {
             SavePurpose::SaveDxf => &self.filter_dxf,
+            SavePurpose::SaveDwg => &self.filter_dwg,
             SavePurpose::Plot => &self.filter_plot,
         }
     }
@@ -97,8 +105,9 @@ pub type SaveChooser =
 
 /// The real native save chooser (XDG desktop portal via `ashpd` `save_file`).
 ///
-/// DWG write is explicitly deferred by the host layer, so there is no `.dwg`
-/// save filter: DXF is the only drawing export and plot is SVG/PDF.
+/// DXF is the lossy drawing Save As, DWG is the **experimental** binary export
+/// (always a new file), and plot is SVG/PDF. Each purpose has its own localized
+/// title/filter and its own extension filter.
 pub fn portal_save(
     purpose: SavePurpose,
     labels: &UseSaveDialogLabels,
@@ -109,6 +118,7 @@ pub fn portal_save(
 
     let filter = match purpose {
         SavePurpose::SaveDxf => FileFilter::new(labels.filter(purpose)).glob("*.[dD][xX][fF]"),
+        SavePurpose::SaveDwg => FileFilter::new(labels.filter(purpose)).glob("*.[dD][wW][gG]"),
         SavePurpose::Plot => FileFilter::new(labels.filter(purpose))
             .glob("*.[sS][vV][gG]")
             .glob("*.[pP][dD][fF]"),

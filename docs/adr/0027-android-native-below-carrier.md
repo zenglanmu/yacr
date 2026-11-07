@@ -174,7 +174,7 @@ Android 的产品路径绑在 **WebView 的 GL 实现**上：
 >
 > **2026-11-02 更新（追加，不改写上面的历史决定）**：表中「打开 / 保存」已由 SAF 实现，不再是不支持：
 > `canOpen`/`canSave` 为 `true`，打开走 `ACTION_OPEN_DOCUMENT`，另存走 `ACTION_CREATE_DOCUMENT` 并导出
-> **DXF**（DWG 保存仍显式延后 `save.dwg_deferred`，且不原地覆盖来源 URI）。**新建 / 出图仍不支持**
+> **DXF**；源为 `.dwg` 时导出**实验性 DWG**（新文件、不原地覆盖来源 URI；DWG 仅合成 self-roundtrip 证据，设备/AutoCAD NOT VERIFIED）。**新建 / 出图仍不支持**
 > （`canNew`/`canPlot` 为 `false`）；「伪造文件身份」与「Vulkan 硬门槛 / 整窗 FIT」两行仍有效。
 > 设备/模拟器上的选择器、读写与外部「打开方式」**NOT RUN**。
 
@@ -234,7 +234,7 @@ Android 的产品路径绑在 **WebView 的 GL 实现**上：
 > `DocumentPicker.kt` / `MainActivity` 五个 `document*` 实例方法实现了打开（`ACTION_OPEN_DOCUMENT`，
 > `*/*`，worker 读后以 `FileEvent::Opened` 交给共享漏斗）与 DXF 另存（`ACTION_CREATE_DOCUMENT`，
 > `ContentResolver.openOutputStream(uri, "wt")`）；`bundle.fileAssociations` 提供外部「打开方式」。
-> `canNew`/`canPlot` 仍为 `false`，DWG 保存仍是 `save.dwg_deferred`。**设备/模拟器上的选择器、
+> `canNew`/`canPlot` 仍为 `false`；DWG 保存是实验性导出（新文件、不覆盖来源）。**设备/模拟器上的选择器、
 > 实际读写、外部 intent 与 JNI 运行时均 NOT RUN**，本轮证据只到开发机契约测试与编译级。
 
 ## 9. 历史保留（不抹、不改写）

@@ -1,4 +1,9 @@
-//! Plot (SVG/PDF) and lossy DXF Save As: the host-owned export funnel.
+//! Plot (SVG/PDF) and lossy Save As: the host-owned export funnel.
+//!
+//! Save As writes DXF, or — when the opened source is a `.dwg` (or the user
+//! chooses a `.dwg` target) — an **experimental** DWG export through upstream
+//! acadrust. A DWG save always writes a **new** file; the opened source is never
+//! overwritten.
 use super::*;
 use crate::policy::{self, PlotFormat, SaveFormat};
 use cad_domain::Completeness;
@@ -11,20 +16,20 @@ struct PlotOutcome {
     dropped: usize,
 }
 
-/// Outcome of a lossy DXF save: the export report's conversion/drop counts and
-/// its completeness verdict (the single authority for the graded status).
+/// Outcome of a lossy save: the export report's conversion/drop counts, its
+/// completeness verdict (the single authority for the graded status) and which
+/// format was actually written (decision = target extension, not dialog purpose).
 struct SaveOutcome {
     converted: usize,
     dropped: usize,
     completeness: Completeness,
+    wrote_dwg: bool,
 }
 
 /// Why a lossy save could not be performed, for a graded status.
 enum SaveFailure {
     /// The chosen target is the opened source file (data-corruption guard).
     RefusedSourcePath,
-    /// `.dwg` output is not verified yet.
-    DwgDeferred,
     /// Any other explicit failure, already localized.
     Reason(String),
 }
@@ -73,7 +78,7 @@ impl HostCore {
         if self.save_pending.get() {
             let waiting = match purpose {
                 SavePurpose::Plot => "plot.picker_waiting",
-                SavePurpose::SaveDxf => "save.picker_waiting",
+                SavePurpose::SaveDxf | SavePurpose::SaveDwg => "save.picker_waiting",
             };
             self.set_catalog_status(waiting, &[])?;
             return Ok(());
@@ -93,10 +98,25 @@ impl HostCore {
             .plot_format
     }
 
-    /// Save the active drawing as a lossy DXF file, host-owned.
+    /// The opened document's source name, when one was successfully opened.
     ///
-    /// `.dxf` uses the lossy export core; `.dwg` is an explicit refusal (DWG
-    /// write is not verified yet).
+    /// The platform target recorded at install time is the truthful identity
+    /// (SAF URI / browser label / filesystem path); the controller's label hint
+    /// is the fallback and also covers the built-in demo document.
+    fn save_source_name(&self) -> Option<String> {
+        self.source_target
+            .borrow()
+            .as_ref()
+            .map(|target| target.display_name.clone())
+    }
+
+    /// Save the active drawing as a lossy drawing file, host-owned.
+    ///
+    /// The source extension selects the default: a `.dwg` source offers an
+    /// **experimental DWG export** under a different name (`<stem>-export.dwg`),
+    /// so a SAVE never overwrites the opened drawing; `.dxf` (or no source)
+    /// keeps the lossy DXF Save As. The chosen target's extension is what is
+    /// actually written.
     pub(crate) fn request_save(&self) -> CadResult<()> {
         if !self.capabilities.save {
             let reason = self.message("command.unsupported", &[("command", "SAVE")]);
@@ -109,14 +129,25 @@ impl HostCore {
             return Err(CadError::Unsupported(busy));
         }
         let hint = self.controller.borrow().document_name_hint.clone();
-        let default_name = policy::default_save_name(&hint, "dxf");
-        if let Err(error) = self.files.begin_save(SavePurpose::SaveDxf, &default_name) {
+        let source_name = self.save_source_name().unwrap_or_else(|| hint.clone());
+        let (purpose, default_name) = if policy::source_is_dwg(&source_name) {
+            (
+                SavePurpose::SaveDwg,
+                policy::default_dwg_export_name(&source_name),
+            )
+        } else {
+            (
+                SavePurpose::SaveDxf,
+                policy::default_save_name(&hint, "dxf"),
+            )
+        };
+        if let Err(error) = self.files.begin_save(purpose, &default_name) {
             self.set_catalog_status("save.export_failed", &[("reason", &error_text(&error))])?;
             return Err(error);
         }
         self.save_pending.set(true);
         self.drain_files()?;
-        self.finish_or_wait_save(SavePurpose::SaveDxf)
+        self.finish_or_wait_save(purpose)
     }
 
     /// Drain a finished save interaction and perform the requested export.
@@ -139,36 +170,59 @@ impl HostCore {
                 .collect(),
         };
         let status = match (purpose, result) {
-            // A closed dialog is a cancel, not a failure.
-            (SavePurpose::SaveDxf, Err(FileAbort::Cancelled)) => catalog("save.cancelled", &[]),
+            // A closed dialog is a cancel, not a failure (both drawing formats).
+            (SavePurpose::SaveDxf | SavePurpose::SaveDwg, Err(FileAbort::Cancelled)) => {
+                catalog("save.cancelled", &[])
+            }
             (SavePurpose::Plot, Err(FileAbort::Cancelled)) => catalog("plot.cancelled", &[]),
             // The platform's reason is already localized: show it verbatim.
-            (SavePurpose::SaveDxf, Err(FileAbort::Failed(reason))) => {
+            (SavePurpose::SaveDxf | SavePurpose::SaveDwg, Err(FileAbort::Failed(reason))) => {
                 catalog("save.export_failed", &[("reason", &reason)])
             }
             (SavePurpose::Plot, Err(FileAbort::Failed(reason))) => {
                 catalog("plot.export_failed", &[("reason", &reason)])
             }
-            (SavePurpose::SaveDxf, Ok(target)) => match self.export_save(&target) {
-                // Clean success only when the export report is Complete; the UI
-                // never re-derives the verdict from the counts.
-                Ok(outcome) if outcome.completeness == Completeness::Complete => {
-                    catalog("save.exported", &[("path", &target.display_name)])
+            (SavePurpose::SaveDxf | SavePurpose::SaveDwg, Ok(target)) => {
+                match self.export_save(&target) {
+                    // A DWG write always says it is experimental and that the
+                    // source was not modified; a clean/partial distinction only
+                    // changes whether conversions are counted.
+                    Ok(outcome) if outcome.wrote_dwg => {
+                        if outcome.completeness == Completeness::Complete {
+                            catalog(
+                                "save.dwg_exported_experimental",
+                                &[("path", &target.display_name)],
+                            )
+                        } else {
+                            catalog(
+                                "save.dwg_exported_partial",
+                                &[
+                                    ("path", &target.display_name),
+                                    ("converted", &outcome.converted.to_string()),
+                                    ("dropped", &outcome.dropped.to_string()),
+                                ],
+                            )
+                        }
+                    }
+                    // Clean success only when the export report is Complete; the
+                    // UI never re-derives the verdict from the counts.
+                    Ok(outcome) if outcome.completeness == Completeness::Complete => {
+                        catalog("save.exported", &[("path", &target.display_name)])
+                    }
+                    Ok(outcome) => catalog(
+                        "save.exported_partial",
+                        &[
+                            ("path", &target.display_name),
+                            ("converted", &outcome.converted.to_string()),
+                            ("dropped", &outcome.dropped.to_string()),
+                        ],
+                    ),
+                    Err(SaveFailure::RefusedSourcePath) => catalog("save.refused_source_path", &[]),
+                    Err(SaveFailure::Reason(reason)) => {
+                        catalog("save.export_failed", &[("reason", &reason)])
+                    }
                 }
-                Ok(outcome) => catalog(
-                    "save.exported_partial",
-                    &[
-                        ("path", &target.display_name),
-                        ("converted", &outcome.converted.to_string()),
-                        ("dropped", &outcome.dropped.to_string()),
-                    ],
-                ),
-                Err(SaveFailure::RefusedSourcePath) => catalog("save.refused_source_path", &[]),
-                Err(SaveFailure::DwgDeferred) => catalog("save.dwg_deferred", &[]),
-                Err(SaveFailure::Reason(reason)) => {
-                    catalog("save.export_failed", &[("reason", &reason)])
-                }
-            },
+            }
             (SavePurpose::Plot, Ok(target)) => match self.export_plot(&target) {
                 // Clean success only when nothing was dropped; a partial export
                 // is reported as such, never as a clean success.
@@ -189,13 +243,16 @@ impl HostCore {
         Ok(())
     }
 
-    /// Write the lossy DXF for `target`'s extension.
+    /// Write the lossy drawing export for `target`'s extension.
     ///
-    /// `.dxf` → the export core; `.dwg` → explicit refusal; any other extension
-    /// fails. Refuses to overwrite the opened source file.
+    /// `.dxf` → the DXF writer; `.dwg` → the experimental upstream DWG writer;
+    /// any other extension fails. The opened source file is never overwritten:
+    /// the platform guard (device+inode / SAF URI) runs for **both** formats,
+    /// plus a normalized path/name backstop for carriers without filesystem
+    /// identity (web label handles, Android SAF URIs).
     fn export_save(&self, target: &FileTarget) -> Result<SaveOutcome, SaveFailure> {
-        match policy::save_format(&policy::extension_of(&target.display_name)) {
-            SaveFormat::Dwg => return Err(SaveFailure::DwgDeferred),
+        let wrote_dwg = match policy::save_format(&policy::extension_of(&target.display_name)) {
+            SaveFormat::Dwg => true,
             SaveFormat::NoExtension => {
                 return Err(SaveFailure::Reason(self.message("save.no_extension", &[])))
             }
@@ -204,16 +261,28 @@ impl HostCore {
                     self.message("save.unknown_format", &[("ext", &ext)]),
                 ))
             }
-            SaveFormat::Dxf => {}
-        }
+            SaveFormat::Dxf => false,
+        };
         if self.files.refuses_source_overwrite(target) {
             return Err(SaveFailure::RefusedSourcePath);
         }
-        let (bytes, report) = self
-            .controller
-            .borrow()
-            .export_dxf()
-            .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
+        if wrote_dwg
+            && self
+                .source_target
+                .borrow()
+                .as_ref()
+                .is_some_and(|source| policy::same_normalized_target(source, target))
+        {
+            // Even without inode identity, reusing the opened source's path/name
+            // must never be written to.
+            return Err(SaveFailure::RefusedSourcePath);
+        }
+        let (bytes, report) = if wrote_dwg {
+            self.controller.borrow().export_dwg()
+        } else {
+            self.controller.borrow().export_dxf()
+        }
+        .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
         self.files
             .write_atomic(target, &bytes)
             .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
@@ -221,6 +290,7 @@ impl HostCore {
             converted: report.counts.converted,
             dropped: report.counts.dropped,
             completeness: report.completeness,
+            wrote_dwg,
         })
     }
 

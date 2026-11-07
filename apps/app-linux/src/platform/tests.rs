@@ -98,7 +98,11 @@ fn save_labels_come_from_the_i18n_catalogue() {
     // Both purposes have their own localized title and filter, and no key fell
     // back to an empty string.
     for labels in [&zh, &en] {
-        for purpose in [SavePurpose::SaveDxf, SavePurpose::Plot] {
+        for purpose in [
+            SavePurpose::SaveDxf,
+            SavePurpose::SaveDwg,
+            SavePurpose::Plot,
+        ] {
             assert!(!labels.title(purpose).is_empty());
             assert!(!labels.filter(purpose).is_empty());
             assert!(!labels.picker_empty.is_empty());
@@ -112,9 +116,19 @@ fn save_labels_come_from_the_i18n_catalogue() {
             labels.filter(SavePurpose::SaveDxf),
             labels.filter(SavePurpose::Plot)
         );
+        // DWG is its own (experimental) dialog: never the DXF title/filter.
+        assert_ne!(
+            labels.title(SavePurpose::SaveDwg),
+            labels.title(SavePurpose::SaveDxf)
+        );
+        assert_ne!(
+            labels.filter(SavePurpose::SaveDwg),
+            labels.filter(SavePurpose::SaveDxf)
+        );
     }
     assert_ne!(zh.title_dxf, en.title_dxf);
     assert_eq!(en.title_dxf, "Save as DXF");
+    assert_eq!(en.title_dwg, "Save as DWG (experimental)");
     assert!(zh.picker_failed("boom").contains("boom"));
 }
 
