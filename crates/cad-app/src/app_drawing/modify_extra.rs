@@ -290,7 +290,7 @@ fn reverse_geometry(geometry: &SemanticGeometry) -> CadResult<SemanticGeometry> 
             }
             let reversed_points: Vec<Point3> = points.iter().rev().copied().collect();
             let mut reversed_bulges = vec![0.0; bulges.len()];
-            for i in 0..segments {
+            for (i, slot) in reversed_bulges.iter_mut().enumerate().take(segments) {
                 // Closed: segment i runs original segment `(n − 2 − i) mod n`
                 // backwards. Open: the `n − 1` real segments simply map
                 // `i → (segments − 1 − i)`.
@@ -299,7 +299,7 @@ fn reverse_geometry(geometry: &SemanticGeometry) -> CadResult<SemanticGeometry> 
                 } else {
                     segments - 1 - i
                 };
-                reversed_bulges[i] = -bulges[source];
+                *slot = -bulges[source];
             }
             if per_vertex && !*closed {
                 // The trailing entry of an open per-vertex array describes no

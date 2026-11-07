@@ -736,7 +736,7 @@ fn polyline_split_at_point(
     let mut best: Option<(usize, f64, f64)> = None;
     for i in 0..n - 1 {
         let (t, dist) = project_on_segment(points[i], points[i + 1], bulge_at(i), point, tol)?;
-        if best.map_or(true, |(_, _, best_dist)| dist < best_dist) {
+        if best.is_none_or(|(_, _, best_dist)| dist < best_dist) {
             best = Some((i, t, dist));
         }
     }

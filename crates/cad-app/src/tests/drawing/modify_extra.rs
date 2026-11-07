@@ -225,7 +225,7 @@ fn reverse_keeps_every_bulged_segment_midpoint_open_and_closed() {
 
         let segments = before_midpoints.len();
         let closed = matches!(&fixture, SemanticGeometry::Polyline { closed: true, .. });
-        for i in 0..segments {
+        for (i, midpoint) in after_midpoints.iter().enumerate() {
             // Closed: segment i is original segment `(n − 2 − i) mod n`; open:
             // segment `segments − 1 − i`.
             let source = if closed {
@@ -234,7 +234,7 @@ fn reverse_keeps_every_bulged_segment_midpoint_open_and_closed() {
                 segments - 1 - i
             };
             assert_point_close(
-                after_midpoints[i],
+                *midpoint,
                 before_midpoints[source],
                 &format!("fixture {id} segment {i}"),
             );
@@ -426,8 +426,7 @@ fn oops_restores_the_last_erased_rectangle_with_a_new_id_and_one_undo_step() {
         .drawing
         .entity_display_state(EntityId(1))
         .attributes
-        .color
-        .clone();
+        .color;
     session.selection = SelectionSet::from_refs(vec![ref_of(1)]);
     app.execute(
         &mut session,

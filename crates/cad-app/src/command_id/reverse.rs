@@ -19,17 +19,19 @@
 //!
 //! ## Supported geometry (exact)
 //!
-//! * `Line { start, end }` — swap the endpoints.
-//! * `Polyline { points, bulges, closed }` — reverse the point order and reverse
-//!   + negate the bulges with the segment mapping
-//!   `bulge'[i] = −bulge[(n − 2 − i) mod n]` (open and closed; both the
-//!   one-bulge-per-vertex and the one-bulge-per-segment storage shapes). The
-//!   unused trailing entry of an open per-vertex bulge array describes no
-//!   segment and is carried through unchanged.
-//! * `Spline { degree, knots, control_points, weights }` — reverse the control
-//!   points and weights; the reversed knot vector is
-//!   `v[i] = u[last] − u[last − i]`, which keeps a clamped/uniform curve's shape
-//!   (`new(t) == old(1 − t)` for normalised parameters).
+//! `Line { start, end }` — swap the endpoints.
+//!
+//! `Polyline { points, bulges, closed }` — reverse the point order and reverse
+//! and negate the bulges with the segment mapping
+//! `bulge'[i] = −bulge[(n − 2 − i) mod n]` (open and closed; both the
+//! one-bulge-per-vertex and the one-bulge-per-segment storage shapes). The
+//! unused trailing entry of an open per-vertex bulge array describes no
+//! segment and is carried through unchanged.
+//!
+//! `Spline { degree, knots, control_points, weights }` — reverse the control
+//! points and weights; the reversed knot vector is
+//! `v[i] = u[last] − u[last − i]`, which keeps a clamped/uniform curve's shape
+//! (`new(t) == old(1 − t)` for normalised parameters).
 //!
 //! Every other geometry kind (`Arc`, `Circle`, `Text`, `Insert`, `Dimension`,
 //! ellipse, hatch, …) is an explicit [`cad_domain::CadError::Unsupported`]

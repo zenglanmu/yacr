@@ -1,5 +1,17 @@
 use super::*;
 
+/// One deleted row plus the display state the delete pruned (the `OOPS` snapshot
+/// entry shape).
+pub(crate) type DeletedEntityState = (DbEntity, cad_db::EntityDisplayState);
+
+/// The `delete_entity_refs_with_state` result: the change set, the diagnostics
+/// and the deleted rows (with display state) captured for `OOPS`.
+pub(crate) type DeleteWithStateResult = (
+    Option<Arc<ChangeSet>>,
+    Vec<Diagnostic>,
+    Vec<DeletedEntityState>,
+);
+
 impl Application {
     /// Translate every selected entity by `delta` in one transaction.
     ///
@@ -199,11 +211,7 @@ impl Application {
         document_id: DocumentId,
         refs: &[SelectionRef],
         operation: &str,
-    ) -> CadResult<(
-        Option<Arc<ChangeSet>>,
-        Vec<Diagnostic>,
-        Vec<(DbEntity, cad_db::EntityDisplayState)>,
-    )> {
+    ) -> CadResult<DeleteWithStateResult> {
         let document = self
             .workspace
             .documents
@@ -237,7 +245,7 @@ impl Application {
             }
             staged.commit()?
         };
-        let deleted: Vec<(DbEntity, cad_db::EntityDisplayState)> = before_states
+        let deleted: Vec<DeletedEntityState> = before_states
             .iter()
             .cloned()
             .zip(display_states.iter().cloned())
