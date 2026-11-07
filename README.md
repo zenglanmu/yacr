@@ -1,19 +1,24 @@
-# yacr — Rust CAD system (in development)
+# yacr — Cross-platform open-source CAD
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-> **Early development; there is no shippable product yet.** yacr is a CAD system written from
-> scratch in Rust that targets DWG/DXF drawings. The desktop UI is a **React + Tauri native host**
-> (Linux first; migrated from Slint on 2026-10-16). The Windows and macOS desktop hosts are **real
-> Tauri hosts but compile-only** (no runtime/visual acceptance); the Web carrier has bounded local
-> evidence, and the Android host is a **native `native-below` carrier with compile-level evidence
-> only** (no device run, no Vulkan adapter, no pixels). Current
-> capabilities are backed by **contract/synthetic tests plus bounded real-GPU host runs on synthetic
-> fixtures**; there is **no** validated DWG compatibility, real-drawing, cross-vendor, golden-image
-> or performance acceptance. Do not treat it as a usable or production CAD application.
->
-> **Scope changes:** user annotations were removed on 2026-10-05 (viewing + measurement only); on
-> 2026-10-16 the desktop UI moved from Slint to React/Tauri and `cad-ui-slint` was deleted.
+yacr is a cross-platform open-source CAD project. A shared Rust core handles DWG/DXF documents,
+geometry, commands and rendering; React + Tauri provides the UI, and wgpu draws the scene. The same
+document and rendering pipeline is intended for Linux (native Wayland or X11/`dom-canvas`), Windows,
+macOS, Android and the web.
+
+The project is still in early development: **there is no shippable product yet.** Linux is the only
+runnable GUI today, with bounded local acceptance on GNOME/Mutter. The Windows and macOS hosts are
+real Tauri hosts but compile-only; Android has compile-level evidence only (no device run, no Vulkan
+adapter, no pixels); the web build is exercised with headless/software rendering. Current
+capabilities are backed by **contract/synthetic tests plus bounded real-GPU host runs on synthetic
+fixtures**; there is **no** validated DWG compatibility, real-drawing, cross-vendor, golden-image
+or performance acceptance. Do not treat it as a usable or production CAD application.
+
+**Author / contact:** zenglanmu@126.com · **License:** AGPL-3.0 (`LICENSE`)
+
+> **Scope changes:** user annotations were removed on 2026-10-05; on 2026-10-16 the desktop UI moved
+> from Slint to React/Tauri and `cad-ui-slint` was deleted.
 
 ## Architecture
 

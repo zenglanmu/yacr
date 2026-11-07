@@ -315,6 +315,8 @@ test('the About dialog renders only body and footer; the overlay owns the header
   assert.equal(source.includes('t(POPUP_KEYS.version)'), false, 'the version template must be filled');
   assert.ok(source.includes('{versionLine}'));
   assert.ok(source.includes('t(POPUP_KEYS.subtitle)'));
+  assert.ok(source.includes('t(POPUP_KEYS.intro)'), 'the About body renders the intro paragraph');
+  assert.ok(source.includes('t(POPUP_KEYS.contact)'), 'the About body renders the author contact');
   assert.ok(source.includes('t(POPUP_KEYS.close)'));
   assert.ok(source.includes("t('app.title')"));
   // One header owner only.
@@ -338,6 +340,8 @@ test('the text editor and Options dialogs also leave the header to the overlay',
 
 test('popup copy comes only from the catalog registry, with no hardcoded CJK', async () => {
   assert.deepEqual(Object.values(POPUP_KEYS).sort(), [
+    'dialog.about.contact',
+    'dialog.about.intro',
     'dialog.about.subtitle',
     'dialog.about.title',
     'dialog.about.version',

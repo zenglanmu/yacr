@@ -229,6 +229,8 @@ pub(super) fn options() -> HostOptions {
         images_dir: None,
         headless: true,
         drawing: None,
+        // tests keep the historical demo document
+        start_blank: false,
         size: [800.0, 600.0],
     }
 }

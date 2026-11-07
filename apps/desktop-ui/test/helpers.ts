@@ -73,12 +73,15 @@ export async function readCatalog(locale) {
 // selectors, interaction-only measurement/zoom selectors, then aliases).
 // NEW/SAVE/PLOT are present because the router accepts them, and so are their
 // aliases — the chrome no longer excludes them: the host's `canNew`/`canSave`/
-// `canPlot` booleans decide. `SNAP` is **present**: it is AutoCAD's grid snap
+// `canPlot` booleans decide. CLOSE is the document-scoped "end this drawing"
+// selector the doc tab, File tab and command line share (the Rust lane adds it
+// to the router table; this mirror never proves the host advertises it). `SNAP`
+// is **present**: it is AutoCAD's grid snap
 // (F9), a real selector of its own (`CommandId::ToggleSnapGrid`) with the
 // `SNAPUNIT` spacing sysvar. It is a different feature from object snap
 // (`OSNAP`), which stays the F3 toggle.
 export const HOST_NAMES = [
-  'OPEN', 'NEW', 'PLOT', 'SAVE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
+  'OPEN', 'NEW', 'PLOT', 'SAVE', 'CLOSE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
   'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'MODEL', 'SELECT', 'SELECTALL', 'SELECTSIMILAR', 'MEASURE', 'CONFIRM',
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS',
   // AUDIT (AutoCAD 2026): detect-only drawing audit, a payload-free canonical

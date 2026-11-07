@@ -157,6 +157,53 @@ fn blank_status_reports_no_document_capabilities() {
 }
 
 #[test]
+fn close_is_admitted_and_projects_the_no_document_block() {
+    // Vocabulary: CLOSE is a canonical, advertised selector like OPEN/NEW.
+    assert_eq!(normalize_command("CLOSE"), Some(CommandId::CloseDrawing));
+    assert_eq!(normalize_command(" close "), Some(CommandId::CloseDrawing));
+    assert_eq!(canonical_command_name("CLOSE"), Some("CLOSE"));
+    assert_eq!(command_name(CommandId::CloseDrawing), Some("CLOSE"));
+    assert!(admissible_names().contains(&"CLOSE"));
+    assert!(
+        !CommandId::CloseDrawing.requires_work_mode(),
+        "closing a drawing is not a database edit"
+    );
+
+    // A session whose host advertises every file command, so the no-document
+    // block comes from the real "has a document" state, not from capabilities.
+    let mut host_platform = platform(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    host_platform.capabilities = advertised_capabilities();
+    let mut opts = options();
+    // `can_open` needs the interactive (non-headless) composition.
+    opts.headless = false;
+    let session = CadSession::new(opts, host_platform, RenderSessionHandle::default())
+        .expect("session builds");
+
+    let before = session.snapshot(None, None, 0);
+    assert!(before.document_label.is_some());
+    assert!(before.can_fit);
+    assert!(before.can_save);
+    assert!(before.can_plot);
+
+    session.command("CLOSE").expect("CLOSE is admitted");
+
+    let after = session.snapshot(None, None, 0);
+    assert_eq!(after.document_label, None);
+    assert_eq!(after.entity_count, None);
+    assert!(!after.can_fit);
+    assert!(!after.can_save, "saving needs an authoritative document");
+    assert!(!after.can_plot, "plotting needs an authoritative document");
+    assert!(after.can_open, "OPEN remains available from the start page");
+    assert!(after.can_new, "NEW needs no source file");
+
+    // A second CLOSE refuses explicitly, never silently.
+    let error = session.command("CLOSE").unwrap_err();
+    assert!(error.contains("document not open"), "{error}");
+}
+
+#[test]
 fn document_status_reports_counts_and_camera() {
     let status = assemble_status(
         true,

@@ -260,6 +260,11 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // selector as the `EXPORT`/`PRINT` aliases, gated by `canPlot`. The
           // entry reuses the `save` glyph (there is no dedicated plot icon).
           { id: 'PLOT', labelKey: 'file.plot', icon: 'save', command: 'PLOT', large: true },
+          // CLOSE ends the open drawing and returns to the start page. It is a
+          // real payload-free router command, disabled by admission with the
+          // catalog's own "no drawing is open" sentence on the start page, so it
+          // never becomes a button that can only fail there.
+          { id: 'CLOSE', labelKey: 'doctabs.close', icon: 'close', command: 'CLOSE' },
         ],
       },
       {

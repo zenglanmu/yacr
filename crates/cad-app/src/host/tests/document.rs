@@ -335,3 +335,64 @@ fn application_refuses_new_drawing_as_host_owned() {
     );
     assert!(matches!(result, Err(CadError::Unsupported(_))));
 }
+
+#[test]
+fn application_refuses_close_drawing_as_host_owned() {
+    let mut app = Application::new();
+    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+    let result = app.execute(
+        &mut session,
+        Command {
+            schema_version: 1,
+            id: crate::CommandId::CloseDrawing,
+            document: DocumentId(1),
+            viewport: ViewportId(1),
+            payload: crate::CommandPayload::None,
+        },
+    );
+    match result {
+        Err(CadError::Unsupported(reason)) => assert!(reason.contains("close drawing"), "{reason}"),
+        other => panic!("CLOSE must be host-owned, got {other:?}"),
+    }
+}
+
+#[test]
+fn close_document_removes_the_document_and_derived_state() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.create_line(p(0.0, 0.0), p(100.0, 0.0)).unwrap();
+    let entity = controller.drawing().unwrap().model_space()[0].to_owned();
+    let document = controller.document_id;
+    controller
+        .session
+        .selection
+        .replace([crate::selection::model_ref(document, entity.id)]);
+    assert!(!controller.session.selection.is_empty());
+    assert!(controller.application.can_undo(&controller.document_id));
+
+    controller.close_document().unwrap();
+
+    // The authoritative document is gone; the status label is `None` because
+    // `drawing()` is `None`.
+    assert!(controller.drawing().is_none());
+    assert_eq!(controller.document_name_hint, "untitled");
+    // Selection, history, query and the active tool are rebuilt for the
+    // no-document state.
+    assert!(controller.session.selection.is_empty());
+    assert!(!controller.application.can_undo(&controller.document_id));
+    assert!(controller.application.query.last_revision().is_none());
+    assert!(matches!(controller.session.tool, crate::ToolState::Idle));
+    assert!(controller.last_import_report.is_none());
+    // The viewport slot survives so the next New/Open reuses it.
+    assert!(controller
+        .application
+        .workspace
+        .viewports
+        .contains_key(&controller.viewport_id));
+
+    // A second close refuses explicitly: never an empty success.
+    let error = controller.close_document().unwrap_err();
+    match error {
+        CadError::InvalidInput(reason) => assert_eq!(reason, "document not open"),
+        other => panic!("expected an explicit InvalidInput, got {other:?}"),
+    }
+}

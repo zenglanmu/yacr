@@ -13,10 +13,9 @@ impl Application {
         }
     }
 
-    /// Install or clear the vendor derived-representation snapshot.
-    ///
-    /// The render session keeps its own `Arc`; measurement/query read this copy.
-    /// A replacement document clears it, so a stale handle can never measure.
+    /// Install or clear the vendor derived-representation snapshot. The render
+    /// session keeps its own `Arc`; measurement/query read this copy, and a
+    /// replacement document clears it so a stale handle can never measure.
     pub fn set_vendor_representations(
         &mut self,
         store: Option<Arc<crate::vendor::VendorRepresentationStore>>,
@@ -315,11 +314,12 @@ impl Application {
             CommandId::Zoom => self.zoom(&command),
             CommandId::OpenDrawing
             | CommandId::NewDrawing
+            | CommandId::CloseDrawing
             | CommandId::PlotDrawing
             | CommandId::SaveDrawingAs
             | CommandId::CancelLoading => Err(CadError::Unsupported(
-                "file open, new drawing, plot export, save-as and cancel are performed by the \
-                 platform host, not the application"
+                "file open, new drawing, close drawing, plot export, save-as and cancel are \
+                 performed by the platform host, not the application"
                     .into(),
             )),
             CommandId::Select => {

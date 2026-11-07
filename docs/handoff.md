@@ -1,3 +1,41 @@
+## 2026-11-08 多选/命令历史复制 + 空白图启动/CLOSE/开始页/About
+
+- **两个先落地并已提交**：
+  - `f20bd542 feat(selection): shift-click adds to the selection`：共享 `plan_input` 的点击路径在
+    `Shift` 按住时发 `SelectionMode::Add`（普通点击仍 `Replace`），所有载体同一条路径；天正
+    vendor-backed opaque 图元可与普通图元一起多选。cad-app 契约测试钉住 `TCH_COLUMN + LINE` 的
+    共有键交集（`id`/`handle`/`type`/`draw_order` mixed，几何专属行与 `vendor_*` 行不出现）。
+  - `277f0028 feat(ui): copy command history to the system clipboard`：桌面历史面板与移动端 sheet
+    增加复制按钮、右键 `Copy entry`/`Copy all`、Ctrl/Cmd+C（仅在历史为阅读面时捕获，不抢
+    `COPYCLIP`）；`navigator.clipboard` → textarea/`execCommand` 回退，两者都失败显示本地化
+    “复制失败”，不静默。前端契约测试 1191 passed（排除缺 submodule 的 11 个 vendor-plugin 套件）。
+- **本轮新改动（提交 `4453a8a5`）**：
+  - 生产宿主默认空白图：`HostOptions::start_blank=true`（Linux/Windows/macOS/Android/Web 生产入口），
+    测试/夹具保持 `false` 以继续使用 demo；`open_configured_drawing` 无 `--open` 且 `start_blank`
+    时不再 `fit()` demo。`crates/cad-app` 为 1000 行门禁把文档生命周期拆到
+    `host/documents.rs`。
+  - `CLOSE` 宿主自有命令：`CommandId::CloseDrawing` + `COMMAND_TABLE` + host 路由；关闭当前唯一
+    文档、取消/丢弃异步导入、清 history/query/session/selection/tool/vendor/source/render，
+    `documentLabel` 变 `null` 后回到开始页；第二次 `CLOSE` 显式拒绝。无未保存提示（没有 dirty 模型）。
+  - 前端：移除标签页 `+`（含 `limits.ts`/`doctabs.new_tab`/`doctabs.one_document`），图纸标签页
+    增加 `CLOSE` 关闭按钮；File ribbon/catalog 增加 `CLOSE`；开始页重做为欢迎页（品牌/简介/
+    打开/新建/最近文件状态/载体诚实说明）；About 改为跨平台开源 CAD 介绍 + `zenglanmu@126.com`；
+    README/README.zh-CN/AppStream metadata 同步（不再写“查看/测量/批注系统”）。
+  - 文档：`docs/autocad-2026-command-coverage.md` 把 `CLOSE` 记为**部分实现**（223 已实现 =
+    50 完整 + 173 部分 / 758 未实现）；`docs/shortcuts.md`、`docs/interaction.md`、`docs/panels.md`、
+    `docs/vendor-plugin.md`、`docs/compatibility.md` 同步。
+- **已运行**：`cargo test -p cad-app --lib host --locked`（153 passed）、`cargo test -p cad-host
+  --locked`（280 passed）、`cargo test -p cad-ui-core --locked`（463 passed）、`cargo test -p app-web
+  --locked`（112 passed）、`cargo check -p app-linux --all-targets --locked`、`cargo fmt`/`clippy`
+  （cad-app/cad-host/cad-ui-core）、前端 `npx tsc --noEmit`、`node --test`（1191 passed，排除 11 个
+  vendor-plugin 套件）、`check-i18n.py`（1381 keys）、`check-file-size.py`、`check-command-docs.py`、
+  `check-architecture.py`、`check-tauri-capabilities.py`。
+- **NOT RUN / NOT VERIFIED**：真实 GUI 运行（空白启动、CLOSE 回开始页、开始页/About 视觉）；真实
+  WebKitGTK clipboard；Windows/macOS/Android 宿主编译与运行时；`npm run build`/`npm test` 因
+  `plugins/tch` submodule 未初始化而失败（环境原因，不是代码通过）。多标签页已由用户取消，不声称支持。
+- **已知边界**：三个 Rust 文件正好 1000 行（`cad-host/src/lib.rs`、`cad-app/src/application.rs`、
+  `cad-ui-core/src/session/commands.rs`），后续改动必须拆分；`CLOSE` 不提示未保存修改。
+
 ## 2026-11-07 绘制/测量预览补全（`Lines` = `LineList` 配对修复）
 
 - **用户可见 bug**：绘制中的预览缺线——POLYLINE 缺「第 2 点→第 3 点」连线；RECTANG 只画出一条

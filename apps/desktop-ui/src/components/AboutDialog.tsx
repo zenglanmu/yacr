@@ -1,7 +1,8 @@
 // About dialog: the application name, the version the host reported in the
-// popup payload, one honest line about this build, and Close. The shared
-// overlay chrome owns the title, the close button and Escape; this file renders
-// only the body and footer of the About dialog (ADR 0021 D1, WP3).
+// popup payload, the product line, one honest intro paragraph, the author
+// contact and Close. The shared overlay chrome owns the title, the close button
+// and Escape; this file renders only the body and footer of the About dialog
+// (ADR 0021 D1, WP3).
 //
 // Styling: `style.css` is not part of this change, so the dialog reuses the
 // existing chrome classes (`.palette__head`, `.mono`, the shared Button
@@ -60,9 +61,17 @@ export function AboutDialog({ view, onClose, failure }: AboutDialogProps) {
               </p>
             </div>
           </div>
-          <p style={{ margin: 0, color: 'var(--text-dim)', lineHeight: 1.5, maxWidth: '38ch' }}>
-            {t(POPUP_KEYS.subtitle)}
-          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: '52ch' }}>
+            <p style={{ margin: 0, color: 'var(--accent-text)', fontSize: 12, fontWeight: 600, letterSpacing: '.2px' }}>
+              {t(POPUP_KEYS.subtitle)}
+            </p>
+            <p style={{ margin: 0, color: 'var(--text-dim)', fontSize: 12, lineHeight: 1.5 }}>
+              {t(POPUP_KEYS.intro)}
+            </p>
+            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 11.5, lineHeight: 1.45 }}>
+              {t(POPUP_KEYS.contact)}
+            </p>
+          </div>
         </div>
       </div>
       <footer style={DIALOG_FOOT}>

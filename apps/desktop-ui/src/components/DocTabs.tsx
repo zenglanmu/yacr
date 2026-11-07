@@ -1,16 +1,17 @@
 // Drawing-tab strip (just below the ribbon). Shows the Start state when no
-// drawing is open and the open drawing otherwise. While a document open is
-// running it also hosts the real import-progress affordance: a determinate bar
-// when the importer exposed an entity total, an indeterminate one otherwise,
-// with the live count/bytes and a cancel control only while cancellation is
-// still possible.
+// drawing is open and the open drawing otherwise. The open drawing carries the
+// real close control (`CLOSE`), so the only way back to the start page is the
+// same command the command line and the File tab run. While a document open is
+// running the strip also hosts the real import-progress affordance: a
+// determinate bar when the importer exposed an entity total, an indeterminate
+// one otherwise, with the live count/bytes and a cancel control only while
+// cancellation is still possible.
 import React from 'react';
 import { Icon } from '../icons.tsx';
 import { IconButton } from './primitives.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { importProgressView } from '../cad/cad-status.ts';
 import type { CadImportProgress } from '../cad/cad-status.ts';
-import { ONE_DOCUMENT_KEY } from '../limits.ts';
 
 export function DocTabs() {
   const { t } = useI18n();
@@ -33,16 +34,23 @@ export function DocTabs() {
           <span>{t('doctabs.start')}</span>
         </button>
         {label ? (
-          <button type="button" role="tab" aria-selected className="doc-tab is-active">
+          <div role="tab" aria-selected tabIndex={0} className="doc-tab doc-tab--document is-active" title={label}>
             <Icon name="drawing" size={14} />
             <span className="doc-tab__label">{label}</span>
-          </button>
+            <IconButton
+              icon="close"
+              size="xs"
+              label={t('doctabs.close')}
+              className="doc-tab__close"
+              onClick={event => {
+                // The close control lives inside the tab surface; the press must
+                // close the drawing, never also read as a press on the tab.
+                event.stopPropagation();
+                shell.runCommand('CLOSE');
+              }}
+            />
+          </div>
         ) : null}
-        {/* One drawing per session is a real limitation, not missing wiring: the
-            `+` keeps the tab-strip convention but says so, instead of leaving a
-            disabled button that explains nothing. Opening another file replaces
-            this session's drawing (it never opens a second tab). */}
-        <IconButton icon="plus" size="xs" label={t('doctabs.new_tab')} disabled title={t(ONE_DOCUMENT_KEY)} />
       </div>
       {progress ? (
         <div className="doctabs__progress">

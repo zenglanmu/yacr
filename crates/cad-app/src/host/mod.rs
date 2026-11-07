@@ -24,6 +24,7 @@ use crate::{
 
 mod databases;
 mod display_switches;
+mod documents;
 mod draw_create;
 mod draw_intent_map;
 mod draw_pick;
@@ -377,21 +378,6 @@ impl HostController {
         self.vendor_records_pending = true;
         self.last_status = format!("已打开 {label}: {}", opened.completeness_label);
         Ok(opened)
-    }
-
-    /// Rebuild session/history/query/overrides after the document content changed.
-    ///
-    /// The document id and viewport id stay stable (hosts cache them), but all
-    /// derived state that referenced the old drawing is dropped: undo/redo can
-    /// no longer reach across documents, and stale selections/overrides/tools
-    /// cannot point at new objects.
-    fn reset_for_new_content(&mut self) {
-        let tool_generation = self.session.tool_generation.saturating_add(1);
-        self.application.history.remove(&self.document_id);
-        self.application.query = cad_query::QueryService::new();
-        self.session = SessionState::new(self.document_id, self.session.mode());
-        self.session.generation = self.session.generation.saturating_add(1);
-        self.session.tool_generation = tool_generation;
     }
 
     /// Replace the active document with a new, empty drawing.

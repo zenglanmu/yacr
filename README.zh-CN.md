@@ -1,16 +1,21 @@
-# yacr — Rust CAD 系统（开发中）
+# yacr — 跨平台开源 CAD
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-> **项目仍处于开发搭建阶段，尚无可交付的产品。** yacr 是一个用 Rust 从零实现的 CAD 系统，
-> 目标是打开 DWG/DXF 图纸。桌面 UI 是 **React + Tauri 原生宿主**（Linux 优先；2026-10-16 从 Slint
-> 迁移）。Windows/macOS 是真实 Tauri 宿主但只有编译/后端合同证据；Android 是原生 `native-below`
-> 宿主（仅编译级证据，设备 NOT VERIFIED）；Web 的 wasm 会话有有界本地 smoke 证据。当前能力以
-> **契约/合成测试 + 合成夹具上的有界真实 GPU 宿主运行**为证据；尚未完成任何已验收的
-> DWG 兼容性、真实图纸、vendor、golden 图像或性能验收。请勿把它当作可用或生产级的 CAD 软件。
->
-> **范围变更**：用户批注（annotation）已于 2026-10-05 整体移除，本项目聚焦**查看 + 测量**；
-> 2026-10-16 桌面 UI 由 Slint 迁移为 React/Tauri，`cad-ui-slint` 已删除。
+yacr 是一个跨平台开源 CAD 项目：共享的 Rust 核心负责 DWG/DXF 文档、几何、命令与渲染，
+React + Tauri 提供界面，wgpu 负责绘制。同一套文档与渲染管线面向 Linux（Wayland 原生或
+X11/`dom-canvas`）、Windows、macOS、Android 与 Web。
+
+项目仍在早期开发，**尚无可交付产品**。Linux 是目前唯一可运行的 GUI，只在 GNOME/Mutter 等有界
+环境做过本地验收；Windows/macOS 是真实 Tauri 宿主但只有编译级证据，Android 只有编译级证据
+（设备、Vulkan 适配器、像素均未验证），Web 只用无头/软件渲染做过 smoke。当前能力以
+**契约/合成测试 + 合成夹具上的有界真实 GPU 宿主运行**为证据；尚未完成任何已验收的
+DWG 兼容性、真实图纸、vendor、golden 图像或性能验收。请勿把它当作可用或生产级的 CAD 软件。
+
+**作者 / 联系：** zenglanmu@126.com · **许可证：** AGPL-3.0（`LICENSE`）
+
+> **范围变更**：用户批注（annotation）已于 2026-10-05 整体移除；2026-10-16 桌面 UI 由 Slint
+> 迁移为 React/Tauri，`cad-ui-slint` 已删除。
 
 ## 项目架构
 

@@ -57,7 +57,11 @@ fn xref_options_for(_target: &FileTarget) -> Option<Arc<XrefOptions>> {
 impl HostCore {
     /// Open the configured `--open` drawing at startup (or fit the demo).
     ///
-    /// Uses the already-owned render session; no UI bridge is required.
+    /// With no configured drawing there is nothing to frame: a blank production
+    /// document (`options.start_blank`) is already installed by
+    /// [`HostCore::new`] and has no extent, so no `fit()` is attempted; the
+    /// historical demo path keeps its framing. Uses the already-owned render
+    /// session; no UI bridge is required.
     pub fn open_configured_drawing(&self) -> CadResult<()> {
         self.metrics()?;
         if let Some(path) = &self.options.drawing {
@@ -69,7 +73,8 @@ impl HostCore {
                 return Err(error);
             }
             self.drain_files()?;
-        } else {
+        } else if !self.options.start_blank {
+            // Historical demo framing only: a blank document has no extent.
             self.controller.borrow_mut().fit()?;
         }
         Ok(())
@@ -356,6 +361,40 @@ impl HostCore {
         // New replaces the authoritative document with a fresh blank one: record
         // the epoch before any fallible post-step and drop any stale synchronous
         // open terminal.
+        self.note_document_replaced();
+        *self.sync_terminal.borrow_mut() = None;
+        self.async_report_attempt.set(None);
+        self.controller.borrow_mut().cancel_tool()?;
+        self.render.sync_drawing(self.controller.borrow().drawing());
+        self.full_dirty.set(true);
+        Ok(())
+    }
+
+    /// Close the current drawing (host-owned CloseDrawing).
+    ///
+    /// Refused while an open/import is in flight, exactly like New: an async
+    /// publish would otherwise race the close and resurrect the document. On
+    /// success the controller drops the document and every derived state, the
+    /// source handle/path are cleared, the render side is told there is no
+    /// drawing, and the host records the replacement (Some→None) so the next
+    /// status projection reports the no-document block and emits the existing
+    /// `DocumentClosed` event.
+    pub(crate) fn request_close(&self) -> CadResult<()> {
+        if self.loading() {
+            return Err(CadError::Unsupported(
+                "document loading is in progress".into(),
+            ));
+        }
+        self.controller.borrow_mut().close_document()?;
+        // A closed document has no source file: the save funnel must not apply
+        // the old document's overwrite backstop, and a later open must not
+        // resolve sibling resources from the stale directory.
+        *self.source_target.borrow_mut() = None;
+        *self.drawing_path.borrow_mut() = None;
+        self.files.set_source(None);
+        // Observes Some→None: bumps the document epoch, clears gestures, the
+        // document font report and the command log, and seeds the interaction
+        // defaults for the fresh session.
         self.note_document_replaced();
         *self.sync_terminal.borrow_mut() = None;
         self.async_report_attempt.set(None);

@@ -31,6 +31,12 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // GUI). It sits after SAVE because it is a file-level output action, and it is
   // gated by `canPlot` like the aliases, not by anything local.
   { id: 'PLOT', labelKey: 'file.plot', icon: 'save', group: 'file' },
+  // CLOSE ends the open drawing and returns the chrome to the start page. It is
+  // listed directly after the other file-level actions because it is one, and it
+  // is document-scoped (`gating.ts`): with no drawing open there is nothing to
+  // close, so the start page disables it with the catalog's own "no drawing is
+  // open" sentence.
+  { id: 'CLOSE', labelKey: 'doctabs.close', icon: 'close', group: 'file' },
   { id: 'UNDO', labelKey: 'toolbar.undo', icon: 'undo', group: 'modify' },
   { id: 'REDO', labelKey: 'toolbar.redo', icon: 'redo', group: 'modify' },
   { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', group: 'draw' },

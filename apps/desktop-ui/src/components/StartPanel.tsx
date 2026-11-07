@@ -1,8 +1,10 @@
-// Start state: shown in the left column when no drawing is open. It offers the
-// two real creation actions — open an existing drawing and start a blank one —
-// each enabled only by the shared admission rules (host vocabulary plus the
-// `cad_status` capability booleans `canOpen`/`canNew`), and is explicit about
-// what this build does not do.
+// Start state: shown in the left column when no drawing is open. It is the
+// product's welcome screen, not a generic empty panel: the mark and product line
+// lead, a short honest intro follows, and the two real creation actions are the
+// only bright elements. Each action is enabled only by the shared admission
+// rules (host vocabulary plus the `cad_status` capability booleans
+// `canOpen`/`canNew`), and the footer states which carriers this build has
+// actually been run on — it never claims product acceptance.
 import React from 'react';
 import { Icon } from '../icons.tsx';
 import { Button } from './primitives.tsx';
@@ -12,6 +14,9 @@ import { useI18n, useShell } from '../context.ts';
 export function StartPanel() {
   const { t } = useI18n();
   const shell = useShell();
+  // `app.title` is `yacr — <tagline>`; the brand is the part before the
+  // separator, exactly as the title bar derives it, so both stay one string.
+  const brand = t('app.title').split(' \u2014 ')[0];
   // One refusal sentence for both actions: the shared admission reason key, so a
   // blocked New reads exactly like the command line's answer (the busy sentence
   // while a load runs, "not supported yet" when the host cannot create a
@@ -28,7 +33,14 @@ export function StartPanel() {
         <h2>{t('start.title')}</h2>
       </header>
       <div className="start-panel__body">
-        <p className="start-panel__hint">{t('start.hint')}</p>
+        <div className="start-panel__hero">
+          <span className="start-panel__mark" aria-hidden="true"><Icon name="app" size={24} /></span>
+          <div className="start-panel__identity">
+            <p className="start-panel__brand">{brand}</p>
+            <p className="start-panel__tagline">{t('start.product')}</p>
+          </div>
+        </div>
+        <p className="start-panel__intro">{t('start.intro')}</p>
         <div className="start-panel__actions">
           <Button
             variant="solid"
@@ -47,10 +59,10 @@ export function StartPanel() {
             iconSize={18}
             size="lg"
             disabled={!canNew}
-            title={canNew ? t('qat.new') : refusal('NEW', 'qat.new')}
+            title={canNew ? t('start.new_drawing') : refusal('NEW', 'start.new_drawing')}
             onClick={() => shell.runCommand('NEW')}
           >
-            {t('qat.new')}
+            {t('start.new_drawing')}
           </Button>
         </div>
         <h3 className="start-panel__section">{t('start.recent')}</h3>
@@ -59,6 +71,10 @@ export function StartPanel() {
           <p>{t('start.recent_empty')}</p>
           <p className="start-panel__note">{t('start.recent_unavailable')}</p>
         </div>
+        <p className="start-panel__status">
+          <span className="start-panel__status-dot" aria-hidden="true" />
+          <span>{t('start.host_status')}</span>
+        </p>
       </div>
     </section>
   );

@@ -99,7 +99,7 @@ hidden 图层对象既不高亮也不可点选；2D 左键拖拽=框选（橡皮
 `F3`/`OSNAP` 切捕捉总开关。
 **仍待做**：`SELECTIONPREVIEWLIMIT` 式上限（当前 hover 恒为单实体）、`PREVIEWFILTER` 的锁定图层/xref
 排除（目前只有隐藏图层过滤）、`COMMANDPREVIEW` 互斥、Secondary 拖拽的右键菜单语义、3D/纸空间框选、
-`PICKADD` 式选择加选策略、框选对 Opaque/超深 INSERT 的显式拒绝面复核。
+`PICKADD` 式**普通单击累加**未实现（当前普通单击仍 Replace；`Shift`+单击已按 `Add` 并入选择，与 `Shift`+框选一致）、框选对 Opaque/超深 INSERT 的显式拒绝面复核。
 
 ## 4. 视口光标与对象捕捉标记（2026-10-19，人工复测后修复）
 

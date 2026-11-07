@@ -8,14 +8,15 @@ import assert from 'node:assert/strict';
 import {
   admitCommandText,
   BUSY_KEY,
+  commandById,
   setCommandCatalog,
   unavailableReasonKey,
 } from '../src/commands/commands.ts';
-import { CAPABILITY_GATES } from '../src/commands/gating.ts';
+import { CAPABILITY_GATES, DOCUMENT_SCOPED_COMMANDS } from '../src/commands/gating.ts';
 
 // The router's vocabulary for these names: the canonical selectors plus their
 // full-word aliases, as `admissible_names()` reports them.
-const HOST_NAMES = ['OPEN', 'NEW', 'SAVE', 'SAVEAS', 'QSAVE', 'PLOT', 'EXPORT', 'PRINT', 'FIT', 'LINE'];
+const HOST_NAMES = ['OPEN', 'NEW', 'SAVE', 'SAVEAS', 'QSAVE', 'PLOT', 'EXPORT', 'PRINT', 'CLOSE', 'FIT', 'LINE'];
 setCommandCatalog(HOST_NAMES);
 
 // The frozen `cad_status` capability shape: the three new booleans always travel
@@ -138,7 +139,10 @@ test('the start panel offers New through the same admission, not a permanent dis
   // The old permanent-disable copy stays in the catalogs (another lane owns
   // them) but is no longer what the button says: its title is the shared reason.
   assert.equal(source.includes('start.new_unavailable'), false);
-  assert.ok(source.includes("refusal('NEW', 'qat.new')"));
+  assert.ok(source.includes("refusal('NEW', 'start.new_drawing')"));
+  // "New blank drawing" is the start screen's own label; the QAT/ribbon keep the
+  // shorter `qat.new`, so neither sentence has to carry the other's context.
+  assert.ok(source.includes("t('start.new_drawing')"));
 });
 
 test('the File tab keeps NEW/SAVE/PLOT as command tokens enabled by admission', async () => {
@@ -169,6 +173,38 @@ test('the File tab keeps NEW/SAVE/PLOT as command tokens enabled by admission', 
   // The ribbon renders a refused command through the shared reason key + state.
   const ribbon = await readModule('components/Ribbon.tsx');
   assert.ok(ribbon.includes(': item.command ? shell.canCommand(item.command)'));
+});
+
+test('CLOSE is a document-scoped file action in the catalog and the File ribbon', async () => {
+  // One row, one label: the command palette, the File tab and the drawing tab's
+  // close control all name the same command.
+  assert.deepEqual({ ...commandById('CLOSE') }, {
+    id: 'CLOSE', labelKey: 'doctabs.close', icon: 'close', group: 'file',
+  });
+  const { RIBBON_TABS, ribbonCommandIds } = await import('../src/ribbon/ribbon-model.ts');
+  const file = RIBBON_TABS.find(tab => tab.id === 'file').panels.find(panel => panel.id === 'file');
+  const close = file.items.find(item => item.id === 'CLOSE');
+  assert.ok(close, 'the File tab carries CLOSE beside OPEN/NEW/SAVE/PLOT');
+  assert.equal(close.command, 'CLOSE');
+  assert.equal(close.labelKey, 'doctabs.close');
+  assert.equal(close.icon, 'close');
+  assert.equal(ribbonCommandIds().includes('CLOSE'), true);
+  // Document-scoped: the start page has nothing to close, so the button reads
+  // disabled with the catalog's own "no drawing is open" sentence.
+  assert.ok(DOCUMENT_SCOPED_COMMANDS.includes('CLOSE'));
+  assert.deepEqual(admitCommandText('CLOSE', { status: empty }), {
+    kind: 'unavailable',
+    command: 'CLOSE',
+    reasonKey: 'plot.no_document',
+  });
+  assert.deepEqual(admitCommandText('close', { status: loaded }), {
+    kind: 'admitted',
+    command: 'CLOSE',
+    reasonKey: null,
+  });
+  // A load or an in-flight command is the temporary busy sentence, not
+  // "unsupported".
+  assert.equal(admitCommandText('CLOSE', { status: loaded, pending: true }).reasonKey, BUSY_KEY);
 });
 
 test('the File tab exposes Plugins as a shell action with catalog copy', async () => {

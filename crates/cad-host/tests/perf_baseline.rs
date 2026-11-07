@@ -126,6 +126,8 @@ fn build_core() -> HostCore {
         images_dir: None,
         headless: false,
         drawing: None,
+        // fixture: the performance baseline keeps the historical demo document
+        start_blank: false,
         size: [1280.0, 800.0],
     };
     HostCore::new(options, platform, RenderSessionHandle::default()).expect("host core")

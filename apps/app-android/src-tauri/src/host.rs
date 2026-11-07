@@ -259,6 +259,8 @@ fn install_cad_env(shared: &Arc<Mutex<Shared>>) {
             images_dir: images_dir.or_else(|| launch.images_dir.clone()),
             headless: false,
             drawing: None,
+            // production starts on a real (empty) document
+            start_blank: true,
             size: launch.size,
         },
     };

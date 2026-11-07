@@ -110,7 +110,7 @@
   - 单选且可解析 → `rows`：`id`/`handle`/`type`/`layer`/`space`/`draw_order`，
     有实例路径时追加 `instance`，有子元素时追加 `sub_element`，再叠加几何专属基础项；
   - 单选但引用已失效/不存在 → 显式 `status = unresolved` 行（不伪造实体）；
-  - 多选 → `rows` 为空、`mixed_keys` 列出取值不同的键，UI 显示"已选 N + 多值键"。
+  - 多选 → `rows` 是各对象键的**交集**：取值相同保留真实值，取值不同标为 mixed 并列入 `mixed_keys`；只在部分对象上存在的键不出现（不造空行）。UI 显示"已选 N + 多值键"。
 - 几何专属基础项（真实计算值，不含臆造）：
   - `Line`：start/end/length（长度由端点欧氏距离计算）；
   - `Circle`：center/normal/radius；`Arc`：center/radius/start_angle/sweep；
