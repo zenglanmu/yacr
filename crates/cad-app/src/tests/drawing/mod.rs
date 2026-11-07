@@ -310,6 +310,7 @@ mod lengthen;
 mod match_prop;
 mod mirror_curves;
 mod mleader_create;
+mod modify_extra;
 mod mtext;
 mod multileader;
 mod offset;

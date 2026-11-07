@@ -367,6 +367,14 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
     'tool.prompt.break.select_entity',
     'tool.prompt.break.second_point',
   ],
+  // BREAKATPOINT is a **two-step** capture with a different first step from
+  // BREAK: the first click only picks the object (it is not a break point), and
+  // the second click is the break point, projected onto the object. Two named
+  // steps, never a preselection entry.
+  'draw.breakatpoint': [
+    'tool.prompt.breakatpoint.select_entity',
+    'tool.prompt.breakatpoint.point',
+  ],
   // ID (2026-10-26) is a **single-point** capture that commits itself: one pick,
   // then the host reports the coordinates. It therefore has exactly one step and
   // never reaches the ready state in practice (the capture is complete the moment
@@ -532,6 +540,10 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // ("Dimension defined; press Enter to confirm") would be false twice over, so
   // this names the one honest state — both ends known, Enter breaks.
   'draw.break': 'tool.prompt.break.ready',
+  // BREAKATPOINT's complement is its two steps; once both are captured the object
+  // is ready to split. The shared dimension copy would be false (nothing is
+  // dimensioned), so this names the one honest state.
+  'draw.breakatpoint': 'tool.prompt.breakatpoint.ready',
   // The circle modes (2026-11-01) are complete once their exact complement is
   // captured, and Enter creates the one circle. The shared dimension ready copy
   // ("Dimension defined; press Enter to confirm") would be false — nothing is

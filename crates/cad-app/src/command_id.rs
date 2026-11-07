@@ -946,36 +946,40 @@ pub enum CommandId {
     /// `RAY` (Work-only): the positive half of an infinite construction line,
     /// stored as a finite clipped segment; see [`crate::command_id::construction_line`].
     CreateRay,
-    /// `LIST` (Viewer and Work): report the stored property data of every
-    /// selected object as diagnostics. Selection-based (this build reads the
-    /// current selection instead of AutoCAD's interactive "Select objects"
-    /// prompt), read-only: no database write, revision bump or undo entry. It
-    /// reports the entity's space and canonical
-    /// colour/linetype/lineweight/transparency; thickness and extrusion are not
-    /// modelled and say so. See `crate::app_drawing::inquiry`.
+    /// `LIST` (Viewer and Work): report the selected objects' stored data; see
+    /// `crate::app_drawing::inquiry`.
     List,
-    /// `STATUS` (Viewer and Work): report drawing statistics, modes and the
-    /// model-space extent. Payload-free and document-scoped; read-only. Drawing
-    /// creation/edit time, memory usage, limits and the base point are explicitly
-    /// not tracked (no drawing-header model). See `crate::app_drawing::inquiry`.
+    /// `STATUS` (Viewer and Work): report drawing statistics, modes and extent;
+    /// see `crate::app_drawing::inquiry`.
     Status,
-    /// `FS` (Viewer and Work): an **Express tool** (command-line only) that adds
-    /// every visible model-space entity directly touching the one selected seed
-    /// to the current selection (a union, never a replacement). This is AutoCAD's
-    /// default `FSMODE=OFF`: no transitive chain (`FSMODE=ON` is NOT
-    /// IMPLEMENTED), and crossing and tangent contacts both count. Read-only
-    /// except for the session selection; block-instance members are not
-    /// enumerated. See `crate::app_drawing::inquiry`.
+    /// `FS` (Viewer and Work): add every visible model-space object directly
+    /// touching the selected seed (Express tool, `FSMODE=OFF` only); see
+    /// `crate::app_drawing::inquiry`.
     Fs,
+    /// `REVERSE` (Work-only): flip selected line/polyline/spline direction; see
+    /// [`crate::command_id::reverse`].
+    Reverse,
+    /// `OOPS` (Work-only): restore the last ERASE; see [`crate::command_id::oops`].
+    Oops,
+    /// `OVERKILL` (Work-only): delete exact duplicates; see
+    /// [`crate::command_id::overkill`].
+    Overkill,
+    /// `BREAKATPOINT` (Work-only): split a line/arc/open polyline at a projected
+    /// point; see [`crate::command_id::break_at_point`].
+    BreakAtPoint,
 }
 
 mod capabilities;
 
 pub mod area_object;
 pub mod block_define;
+pub mod break_at_point;
 pub mod construction_line;
 pub mod grip_stretch;
 pub mod hatch;
 pub mod match_prop;
+pub mod oops;
+pub mod overkill;
 pub mod point_style;
+pub mod reverse;
 pub mod zoom;

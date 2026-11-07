@@ -1,5 +1,17 @@
 use super::*;
 
+/// One deleted row plus the display state the delete pruned (the `OOPS` snapshot
+/// entry shape).
+pub(crate) type DeletedEntityState = (DbEntity, cad_db::EntityDisplayState);
+
+/// The `delete_entity_refs_with_state` result: the change set, the diagnostics
+/// and the deleted rows (with display state) captured for `OOPS`.
+pub(crate) type DeleteWithStateResult = (
+    Option<Arc<ChangeSet>>,
+    Vec<Diagnostic>,
+    Vec<DeletedEntityState>,
+);
+
 impl Application {
     /// Translate every selected entity by `delta` in one transaction.
     ///
@@ -131,7 +143,7 @@ impl Application {
     /// erase is one undo step.
     pub(crate) fn erase_entities(
         &mut self,
-        session: &SessionState,
+        session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
         if !matches!(command.payload, CommandPayload::None) {
@@ -145,7 +157,18 @@ impl Application {
                 "ERASE needs a non-empty selection".into(),
             ));
         }
-        let (changes, diagnostics) = self.delete_entity_refs(command.document, &refs, "ERASE")?;
+        let (changes, diagnostics, states) =
+            self.delete_entity_refs_with_state(command.document, &refs, "ERASE")?;
+        // OOPS state is recorded **only after** the delete transaction committed
+        // (the helper returned successfully) and only by ERASE — the two cut
+        // commands use `delete_entity_refs`, which discards this state.
+        session.set_last_erase(Some(crate::session_state::EraseSnapshot {
+            document: command.document,
+            entries: states
+                .into_iter()
+                .map(|(entity, display)| crate::session_state::EraseEntry { entity, display })
+                .collect(),
+        }));
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes,
@@ -176,6 +199,19 @@ impl Application {
         refs: &[SelectionRef],
         operation: &str,
     ) -> CadResult<(Option<Arc<ChangeSet>>, Vec<Diagnostic>)> {
+        let (changes, diagnostics, _) =
+            self.delete_entity_refs_with_state(document_id, refs, operation)?;
+        Ok((changes, diagnostics))
+    }
+
+    /// The single delete body, additionally returning the exact deleted rows and
+    /// their display state so ERASE can record its `OOPS` snapshot.
+    pub(crate) fn delete_entity_refs_with_state(
+        &mut self,
+        document_id: DocumentId,
+        refs: &[SelectionRef],
+        operation: &str,
+    ) -> CadResult<DeleteWithStateResult> {
         let document = self
             .workspace
             .documents
@@ -209,6 +245,11 @@ impl Application {
             }
             staged.commit()?
         };
+        let deleted: Vec<DeletedEntityState> = before_states
+            .iter()
+            .cloned()
+            .zip(display_states.iter().cloned())
+            .collect();
         let patches: Vec<DrawingPatch> = before_states
             .into_iter()
             .zip(display_states)
@@ -226,7 +267,7 @@ impl Application {
             },
         )?;
 
-        Ok((Some(Arc::new(change_set)), diagnostics))
+        Ok((Some(Arc::new(change_set)), diagnostics, deleted))
     }
 
     /// Reconcile the session selection with the authoritative document after an

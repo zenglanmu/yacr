@@ -369,6 +369,33 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // so no shipped row moves, and it reuses the `polyline` glyph: the output is a
   // polyline.
   { id: 'REVCLOUD', labelKey: 'draw.kind.revcloud', icon: 'polyline', group: 'draw' },
+  // REVERSE (AutoCAD 2026) reverses the vertex/direction order of the selected
+  // LINE / LWPOLYLINE / SPLINE. It is selection-based (`CommandPayload::None`),
+  // so it is a payload-free router command with no capture: the one-or-more
+  // selected objects are the whole input. v1 does not offer AutoCAD's
+  // interactive pick prompt or its helix/3D variants. Appended last so no
+  // shipped row moves; the `mirror` glyph is the closest direction glyph in the
+  // icon set.
+  { id: 'REVERSE', labelKey: 'draw.kind.reverse', icon: 'mirror', group: 'modify' },
+  // OOPS (AutoCAD 2026) restores the objects removed by the last ERASE. It is
+  // selection-free and payload-free, so it is a plain router command with no
+  // capture and no selection rule (gating count 0). v1 records ERASE only —
+  // AutoCAD also restores BLOCK/WBLOCK removals, which this build does not.
+  // Appended last so no shipped row moves; `undo` is the closest restore glyph.
+  { id: 'OOPS', labelKey: 'draw.kind.oops', icon: 'undo', group: 'modify' },
+  // OVERKILL (AutoCAD 2026) v1 deletes **exact duplicate** selected entities.
+  // Selection-based and payload-free; the two-object minimum lives in
+  // `SELECTION_REQUIREMENTS`. Partial overlaps, collinear merges, arc-over-circle
+  // replacement and a tolerance option are NOT IMPLEMENTED, so nothing here may
+  // imply them. Appended last; `erase` is the closest removal glyph.
+  { id: 'OVERKILL', labelKey: 'draw.kind.overkill', icon: 'erase', group: 'modify' },
+  // BREAKATPOINT (AutoCAD 2026) is the **interactive** single-point split: pick
+  // the object, then the break point (projected onto it). It is a tool selector
+  // (`BeginDraw`), not a selection-based instant command, so `gating.ts` gives it
+  // no selection precondition. Only LINE, ARC and open polylines are supported;
+  // CIRCLE/closed polylines and SPLINEs are named refusals. Appended last; the
+  // `trim` glyph matches BREAK's family.
+  { id: 'BREAKATPOINT', labelKey: 'draw.kind.breakatpoint', icon: 'trim', group: 'modify' },
   // AUDIT (AutoCAD 2026) is the detect-only drawing audit: it reports every
   // stored entity that fails the database's own validity check and repairs
   // nothing (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). It is a

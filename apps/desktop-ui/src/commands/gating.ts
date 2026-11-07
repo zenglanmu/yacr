@@ -263,6 +263,22 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // is the command's own hint, so the disabled button and the refusal describe
   // the same rule once.
   REVCLOUD: Object.freeze({ count: 1, reasonKey: 'draw.kind.revcloud.hint' }),
+  // REVERSE (AutoCAD 2026) reverses at least one selected object; the host
+  // refuses an empty selection by name (`reverse.selection`). The table minimum
+  // is one and the sentence is the command's own hint.
+  REVERSE: Object.freeze({ count: 1, reasonKey: 'draw.kind.reverse.hint' }),
+  // OOPS (AutoCAD 2026) restores the last ERASE and never reads the selection,
+  // so it has no selection precondition. The row exists for the "no drawing is
+  // open" answer only, like LAYERP.
+  OOPS: Object.freeze({ count: 0, reasonKey: 'draw.kind.oops.hint' }),
+  // OVERKILL (AutoCAD 2026) can only remove a duplicate when there are at least
+  // two objects to compare, so the local minimum is two. The host refuses an
+  // empty/one-object selection by name (`overkill.selection`).
+  OVERKILL: Object.freeze({ count: 2, reasonKey: 'draw.kind.overkill.hint' }),
+  // BREAKATPOINT is an **interactive tool** (pick the object, then the break
+  // point), not a pre-selection command, so it has no selection precondition.
+  // The row exists for the "no drawing is open" answer only.
+  BREAKATPOINT: Object.freeze({ count: 0, reasonKey: 'draw.kind.breakatpoint.hint' }),
   LAYISO: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
   LAYUNISO: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
   LAYOFF: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),

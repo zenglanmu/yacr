@@ -45,9 +45,10 @@
 //! order and the source's display attributes. One transaction / one undo step;
 //! undo restores the original geometry and removes the inserted piece.
 
-use super::trim_curves::{cut_tolerance, TargetCurve};
+use super::trim_curves::{cut_tolerance, norm_tau, TargetCurve};
 use super::*;
 use cad_db::DbObject;
+use cad_geometry::{arbitrary_axis, bulge_arc_geometry};
 
 /// A plan-level BREAK refusal: `InvalidInput` carrying its stable code.
 fn refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
@@ -376,4 +377,506 @@ fn periodic_pieces(
         .with_span(u2, fraction)
         .map_err(|reason| refusal("break.degenerate_piece", reason))?;
     Ok(vec![geometry])
+}
+
+/// A `BREAKATPOINT` refusal.
+fn at_point_refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
+    CadError::InvalidInput(format!("{code}: {detail}"))
+}
+
+impl Application {
+    /// `BREAKATPOINT`: split one object into two at a single point.
+    ///
+    /// Supported targets are LINE, ARC and an **open** LWPOLYLINE. AutoCAD's
+    /// BREAKATPOINT refuses closed objects, and so does this build: a CIRCLE or a
+    /// closed polyline is `breakatpoint.closed`; a SPLINE is
+    /// `breakatpoint.spline_unsupported`; every other kind is
+    /// `breakatpoint.unsupported`. The break point is **projected** onto the
+    /// target (the host resolved the entity with its pickbox), so a click a few
+    /// pixels off the curve is still valid.
+    ///
+    /// The source entity is retained as the first piece (same id/layer/space/
+    /// draw order/display state); the second piece is a fresh-id entity copying
+    /// the source's display attributes. One transaction / one undo step.
+    pub(crate) fn break_at_point(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let CommandPayload::BreakAtPoint { target, point } = &command.payload else {
+            return Err(at_point_refusal(
+                "breakatpoint.payload",
+                "BREAKATPOINT needs a BreakAtPoint { target, point } payload",
+            ));
+        };
+        if !is_finite_point(*point) {
+            return Err(at_point_refusal(
+                "breakatpoint.invalid_point",
+                "the break point must be finite",
+            ));
+        }
+        if !target.instance.0.is_empty() || target.sub_element.is_some() {
+            return Err(at_point_refusal(
+                "breakatpoint.not_addressable",
+                format!(
+                    "target {} is a block-instance member or sub-element; only directly \
+                     addressable model-space entities can be split",
+                    target.entity.0
+                ),
+            ));
+        }
+        if target.document != command.document {
+            return Err(at_point_refusal(
+                "breakatpoint.target_missing",
+                "the target belongs to another document",
+            ));
+        }
+
+        let document_id = command.document;
+        let tol = cut_tolerance();
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let before = document
+            .drawing
+            .entity(target.entity)
+            .cloned()
+            .ok_or_else(|| {
+                at_point_refusal(
+                    "breakatpoint.target_missing",
+                    format!("target {} does not exist", target.entity.0),
+                )
+            })?;
+        if before.space != SpaceId::Model {
+            return Err(at_point_refusal(
+                "breakatpoint.not_addressable",
+                format!(
+                    "target {} is not a model-space entity; only model space is supported",
+                    before.id.0
+                ),
+            ));
+        }
+
+        let (first, second) = match &before.geometry {
+            SemanticGeometry::Circle { .. } => {
+                return Err(at_point_refusal(
+                    "breakatpoint.closed",
+                    "BREAKATPOINT does not split a closed object such as a CIRCLE",
+                ));
+            }
+            SemanticGeometry::Polyline {
+                points,
+                bulges,
+                closed,
+            } => {
+                if *closed {
+                    return Err(at_point_refusal(
+                        "breakatpoint.closed",
+                        "BREAKATPOINT does not split a closed polyline",
+                    ));
+                }
+                polyline_split_at_point(points, bulges, *point, tol)?
+            }
+            SemanticGeometry::Spline { .. } => {
+                return Err(CadError::Unsupported(
+                    "breakatpoint.spline_unsupported: BREAKATPOINT does not split a SPLINE; \
+                     only LINE, ARC and an open LWPOLYLINE are supported"
+                        .into(),
+                ));
+            }
+            SemanticGeometry::Line { .. } | SemanticGeometry::Arc { .. } => {
+                curve_split_at_point(&before.geometry, *point, tol)?
+            }
+            other => {
+                return Err(CadError::Unsupported(format!(
+                    "breakatpoint.unsupported: {} is not LINE, ARC or an open LWPOLYLINE; \
+                     BREAKATPOINT changes nothing",
+                    class_name(other)
+                )));
+            }
+        };
+
+        let source_id = before.id;
+        let source_display = document.drawing.entity_display_state(source_id);
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
+        let new_id = drawing.allocate_entity_id();
+        let new_display = cad_db::EntityDisplayState {
+            attributes: source_display.attributes.clone(),
+            visibility: Default::default(),
+        };
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged = drawing.begin_drawing_transaction("break at point", transaction)?;
+            let mut after = before.clone();
+            after.geometry = first;
+            after.object.type_key = class_name(&after.geometry).to_string();
+            staged.update_entity(after)?;
+            let entity = DbEntity {
+                object: DbObject {
+                    id: ObjectId(new_id.0),
+                    type_key: class_name(&second).to_string(),
+                    revision: Revision(0),
+                    source_handle: None,
+                },
+                id: new_id,
+                layer: before.layer,
+                space: before.space.clone(),
+                geometry: second,
+                draw_order: before.draw_order,
+            };
+            staged.insert_entity(entity)?;
+            staged.update_entity_display_state(new_id, &new_display)?;
+            staged.commit()?
+        };
+
+        let stored_first = drawing
+            .entity(source_id)
+            .cloned()
+            .ok_or_else(|| CadError::Invariant("split entity vanished after commit".into()))?;
+        let stored_second = drawing.entity(new_id).cloned().ok_or_else(|| {
+            CadError::Invariant("inserted split piece vanished after commit".into())
+        })?;
+        let mut second_patch = drawing_patch(new_id, None, Some(stored_second));
+        second_patch.after_state = Some(new_display);
+        let patches = vec![
+            drawing_patch(source_id, Some(before), Some(stored_first)),
+            second_patch,
+        ];
+        self.publish_candidate(
+            document_id,
+            candidate,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: "break at point".into(),
+                patches,
+                block_patches: Vec::new(),
+                merge_key: None,
+            },
+        )?;
+
+        Ok(CommandOutcome {
+            objects: vec![ObjectId(source_id.0), ObjectId(new_id.0)],
+            changes: Some(Arc::new(change_set)),
+            diagnostics: vec![Diagnostic {
+                object: Some(ObjectId(source_id.0)),
+                code: "breakatpoint.applied".into(),
+                message: format!(
+                    "BREAKATPOINT: split entity {} into two pieces at the projected point",
+                    source_id.0
+                ),
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+}
+
+/// Split a LINE or ARC at the projection of `point` (one parameter on the
+/// target's own span).
+fn curve_split_at_point(
+    geometry: &SemanticGeometry,
+    point: Point3,
+    tol: f64,
+) -> CadResult<(SemanticGeometry, SemanticGeometry)> {
+    let curve = TargetCurve::new(geometry, "BREAKATPOINT", "LINE, ARC or open LWPOLYLINE")?;
+    let Some(u) = curve.project_param(point, tol) else {
+        return Err(at_point_refusal(
+            "breakatpoint.projection_failed",
+            format!("the point has no projection onto the {}", curve.label()),
+        ));
+    };
+    let span = curve.length();
+    if !span.is_finite() || span <= tol {
+        return Err(at_point_refusal(
+            "breakatpoint.projection_failed",
+            format!("the {} is degenerate (zero length)", curve.label()),
+        ));
+    }
+    let param_tol = (tol / span).max(1e-12);
+    if !u.is_finite() || u < -param_tol || u > 1.0 + param_tol {
+        return Err(at_point_refusal(
+            "breakatpoint.point_outside_span",
+            format!(
+                "the point projects outside the {} (parameter {u:.9}, the target spans [0, 1])",
+                curve.label()
+            ),
+        ));
+    }
+    let u = u.clamp(0.0, 1.0);
+    if u <= param_tol || u >= 1.0 - param_tol {
+        return Err(at_point_refusal(
+            "breakatpoint.point_at_endpoint",
+            format!(
+                "the break point coincides with an endpoint of the {}; there is no interior \
+                 split to make",
+                curve.label()
+            ),
+        ));
+    }
+    let first = curve
+        .with_span(0.0, u)
+        .map_err(|reason| at_point_refusal("breakatpoint.degenerate_piece", reason))?;
+    let second = curve
+        .with_span(u, 1.0 - u)
+        .map_err(|reason| at_point_refusal("breakatpoint.degenerate_piece", reason))?;
+    Ok((first, second))
+}
+
+/// The nearest point of one polyline segment and its parameter `t ∈ [0, 1]`.
+///
+/// A straight segment projects in 3D; a bulged one is resolved through
+/// [`bulge_arc_geometry`] on the `+Z` plane and projected radially.
+fn project_on_segment(
+    a: Point3,
+    b: Point3,
+    bulge: f64,
+    point: Point3,
+    tol: f64,
+) -> CadResult<(f64, f64)> {
+    if bulge.abs() <= 1e-9 {
+        let d = cad_geometry::sub(b, a);
+        let len2 = cad_geometry::dot(d, d);
+        if !len2.is_finite() || len2 <= 0.0 {
+            return Ok((0.0, f64::INFINITY));
+        }
+        let t = (cad_geometry::dot(cad_geometry::sub(point, a), d) / len2).clamp(0.0, 1.0);
+        let closest = cad_geometry::add(a, cad_geometry::scale(d, t));
+        return Ok((t, cad_geometry::distance(closest, point)));
+    }
+    let Some(SemanticGeometry::Arc {
+        center,
+        normal,
+        radius,
+        start,
+        sweep,
+    }) = bulge_arc_geometry(
+        a,
+        b,
+        bulge,
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+    )
+    else {
+        return Err(at_point_refusal(
+            "breakatpoint.degenerate_piece",
+            "a bulged polyline segment could not be resolved as a circular arc on the +Z plane",
+        ));
+    };
+    if !radius.is_finite() || radius <= tol || sweep.abs() <= 1e-12 {
+        return Err(at_point_refusal(
+            "breakatpoint.degenerate_piece",
+            "a bulged polyline segment is degenerate",
+        ));
+    }
+    let (ax, ay, _) = arbitrary_axis(normal);
+    let v = cad_geometry::sub(point, center);
+    let (rx, ry) = (cad_geometry::dot(v, ax), cad_geometry::dot(v, ay));
+    if rx.hypot(ry) <= tol {
+        return Err(at_point_refusal(
+            "breakatpoint.projection_failed",
+            "the point lies on the arc's axis and has no radial projection",
+        ));
+    }
+    let angle = ry.atan2(rx);
+    let raw = if sweep >= 0.0 {
+        norm_tau(angle - start)
+    } else {
+        -norm_tau(start - angle)
+    };
+    let t = (raw / sweep).clamp(0.0, 1.0);
+    let closest = cad_geometry::add(
+        center,
+        cad_geometry::add(
+            cad_geometry::scale(ax, radius * (start + sweep * t).cos()),
+            cad_geometry::scale(ay, radius * (start + sweep * t).sin()),
+        ),
+    );
+    Ok((t, cad_geometry::distance(closest, point)))
+}
+
+/// Split an **open** LWPOLYLINE at the projection of `point`, at a vertex or on
+/// a segment (with bulge splitting). Emits two open polylines with one bulge per
+/// vertex (the trailing entry of an open polyline is unused and zero).
+fn polyline_split_at_point(
+    points: &[Point3],
+    bulges: &[f64],
+    point: Point3,
+    tol: f64,
+) -> CadResult<(SemanticGeometry, SemanticGeometry)> {
+    let n = points.len();
+    if n < 2 {
+        return Err(at_point_refusal(
+            "breakatpoint.degenerate_piece",
+            format!("the polyline has {n} vertices; at least two are needed"),
+        ));
+    }
+    if bulges.len() != n && bulges.len() != n.saturating_sub(1) {
+        return Err(at_point_refusal(
+            "breakatpoint.unsupported",
+            format!(
+                "the polyline has {n} vertices but {} bulges; one bulge per vertex (or per \
+                 segment) is required",
+                bulges.len()
+            ),
+        ));
+    }
+    let has_bulge = (0..n - 1).any(|i| bulges.get(i).copied().unwrap_or(0.0).abs() > 1e-9);
+    if has_bulge && !cad_geometry::is_xy_parallel(points) {
+        return Err(CadError::Unsupported(
+            "breakatpoint.unsupported: a bulged polyline must be +Z planar to split its arc \
+             segments"
+                .into(),
+        ));
+    }
+    let bulge_at = |i: usize| bulges.get(i).copied().unwrap_or(0.0);
+
+    // Nearest segment, then decide vertex vs interior by the segment parameter.
+    let mut best: Option<(usize, f64, f64)> = None;
+    for i in 0..n - 1 {
+        let (t, dist) = project_on_segment(points[i], points[i + 1], bulge_at(i), point, tol)?;
+        if best.is_none_or(|(_, _, best_dist)| dist < best_dist) {
+            best = Some((i, t, dist));
+        }
+    }
+    let Some((segment, t, _)) = best else {
+        return Err(at_point_refusal(
+            "breakatpoint.projection_failed",
+            "the point has no projection onto the polyline",
+        ));
+    };
+    let segment_len = cad_geometry::distance(points[segment], points[segment + 1]);
+    if !segment_len.is_finite() || segment_len <= tol {
+        return Err(at_point_refusal(
+            "breakatpoint.degenerate_piece",
+            "the polyline has a zero-length segment at the break point",
+        ));
+    }
+    let param_tol = (tol / segment_len).max(1e-12);
+
+    if t <= param_tol {
+        return split_at_vertex(points, n, segment, &bulge_at);
+    }
+    if t >= 1.0 - param_tol {
+        return split_at_vertex(points, n, segment + 1, &bulge_at);
+    }
+
+    // Interior of the segment: split the (possibly bulged) segment in two.
+    let a = points[segment];
+    let b = points[segment + 1];
+    let bulge = bulge_at(segment);
+    let (break_point, first_bulge, second_bulge) = if bulge.abs() <= 1e-9 {
+        let d = cad_geometry::sub(b, a);
+        (cad_geometry::add(a, cad_geometry::scale(d, t)), 0.0, 0.0)
+    } else {
+        let Some(SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        }) = bulge_arc_geometry(
+            a,
+            b,
+            bulge,
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        )
+        else {
+            return Err(at_point_refusal(
+                "breakatpoint.degenerate_piece",
+                "the bulged segment could not be resolved as a circular arc",
+            ));
+        };
+        let (ax, ay, _) = arbitrary_axis(normal);
+        let angle = start + sweep * t;
+        let at = cad_geometry::add(
+            center,
+            cad_geometry::add(
+                cad_geometry::scale(ax, radius * angle.cos()),
+                cad_geometry::scale(ay, radius * angle.sin()),
+            ),
+        );
+        let theta = 4.0 * bulge.atan();
+        let Some(first) = cad_geometry::arc_sweep_to_bulge(theta * t) else {
+            return Err(at_point_refusal(
+                "breakatpoint.degenerate_piece",
+                "the first arc piece has no representable bulge",
+            ));
+        };
+        let Some(second) = cad_geometry::arc_sweep_to_bulge(theta * (1.0 - t)) else {
+            return Err(at_point_refusal(
+                "breakatpoint.degenerate_piece",
+                "the second arc piece has no representable bulge",
+            ));
+        };
+        (at, first, second)
+    };
+
+    // First piece: original vertices 0..=segment, then the break point.
+    let mut first_points: Vec<Point3> = points[..=segment].to_vec();
+    first_points.push(break_point);
+    let mut first_bulges: Vec<f64> = (0..segment).map(bulge_at).collect();
+    first_bulges.push(first_bulge);
+    first_bulges.push(0.0);
+
+    // Second piece: the break point, then original vertices segment+1..n.
+    let mut second_points: Vec<Point3> = vec![break_point];
+    second_points.extend_from_slice(&points[segment + 1..]);
+    let mut second_bulges: Vec<f64> = vec![second_bulge];
+    second_bulges.extend((segment + 1..n - 1).map(bulge_at));
+    second_bulges.push(0.0);
+
+    Ok((
+        SemanticGeometry::Polyline {
+            points: first_points,
+            bulges: first_bulges,
+            closed: false,
+        },
+        SemanticGeometry::Polyline {
+            points: second_points,
+            bulges: second_bulges,
+            closed: false,
+        },
+    ))
+}
+
+/// Split an open polyline at interior vertex `k`, emitting two open polylines.
+fn split_at_vertex(
+    points: &[Point3],
+    n: usize,
+    k: usize,
+    bulge_at: &impl Fn(usize) -> f64,
+) -> CadResult<(SemanticGeometry, SemanticGeometry)> {
+    if k == 0 || k + 1 >= n {
+        return Err(at_point_refusal(
+            "breakatpoint.point_at_endpoint",
+            "the break point coincides with an endpoint of the polyline; there is no interior \
+             split to make",
+        ));
+    }
+    let first_points: Vec<Point3> = points[..=k].to_vec();
+    let mut first_bulges: Vec<f64> = (0..k).map(bulge_at).collect();
+    first_bulges.push(0.0);
+
+    let second_points: Vec<Point3> = points[k..].to_vec();
+    let mut second_bulges: Vec<f64> = (k..n - 1).map(bulge_at).collect();
+    second_bulges.push(0.0);
+
+    Ok((
+        SemanticGeometry::Polyline {
+            points: first_points,
+            bulges: first_bulges,
+            closed: false,
+        },
+        SemanticGeometry::Polyline {
+            points: second_points,
+            bulges: second_bulges,
+            closed: false,
+        },
+    ))
 }

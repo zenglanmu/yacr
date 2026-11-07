@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 53] = [
+    pub const ALL: [DrawToolKind; 54] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -137,6 +137,10 @@ impl DrawToolKind {
         DrawToolKind::Circle2P,
         DrawToolKind::Circle3P,
         DrawToolKind::CircleDiameter,
+        // BREAKATPOINT is appended for the same index-stability reason: a real
+        // kind started by its command selector (entity pick, then a projected
+        // break point).
+        DrawToolKind::BreakAtPoint,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -184,6 +188,7 @@ impl DrawToolKind {
             Self::PasteClip => "pasteclip",
             Self::HatchPoint => "hatchpoint",
             Self::Break => "break",
+            Self::BreakAtPoint => "breakatpoint",
             Self::Divide => "divide",
             Self::Lengthen => "lengthen",
             Self::InsertBlock => "insertblock",
@@ -244,6 +249,7 @@ impl DrawToolKind {
             "pasteclip" => Some(Self::PasteClip),
             "hatchpoint" => Some(Self::HatchPoint),
             "break" => Some(Self::Break),
+            "breakatpoint" => Some(Self::BreakAtPoint),
             "divide" => Some(Self::Divide),
             "lengthen" => Some(Self::Lengthen),
             "insertblock" => Some(Self::InsertBlock),
@@ -384,6 +390,7 @@ impl DrawToolKind {
             // BREAK shares the same locale-neutral fallback rule (no new CJK on
             // the Rust side; the catalog carries the chrome copy).
             Self::Break => "BREAK",
+            Self::BreakAtPoint => "BREAKATPOINT",
             // DIVIDE/LENGTHEN share the same locale-neutral fallback rule.
             Self::Divide => "DIVIDE",
             Self::Lengthen => "LENGTHEN",
@@ -500,8 +507,10 @@ impl DrawToolKind {
             // the terminal typed step, not a point.
             | Self::MText
             // BREAK: the second break point (the first click is the entity pick
-            // and the first break point in one step).
+            // and the first break point in one step). BREAKATPOINT: the entity
+            // pick and then the break point.
             | Self::Break
+            | Self::BreakAtPoint
             // XLINE/RAY: the base point and the through point (the direction).
             | Self::XLine
             | Self::Ray
@@ -585,8 +594,9 @@ impl DrawToolKind {
             | Self::DimBaseline
             | Self::DimContinue => 1,
             // BREAK's first click is the entity pick **and** the first break
-            // point; the second click is a free point.
-            Self::Break => 1,
+            // point; the second click is a free point. BREAKATPOINT's first click
+            // is only the entity pick; the second is the break point.
+            Self::Break | Self::BreakAtPoint => 1,
             // TEXTEDIT picks the text entity it will edit as its only step.
             Self::TextEdit => 1,
             // DIMANGULAR's two-line form picks both lines; its third step is the

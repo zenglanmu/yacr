@@ -295,6 +295,19 @@ pub enum CommandPayload {
         first: Point3,
         second: Point3,
     },
+    /// `BREAKATPOINT`: split the picked object at one point.
+    ///
+    /// `target` is the ref resolved at pick time and `point` is the second click.
+    /// The point is **projected** onto the target (AutoCAD's own behaviour for a
+    /// click that is not exactly on the curve). LINE, ARC and an open LWPOLYLINE
+    /// are supported; a CIRCLE/closed polyline, a SPLINE and every other kind are
+    /// named refusals. The source stays the first piece and the second piece is a
+    /// fresh id — one transaction / one undo step. Full contract:
+    /// [`crate::command_id::break_at_point`].
+    BreakAtPoint {
+        target: SelectionRef,
+        point: Point3,
+    },
     /// `DIVIDE` the one selected curve into equal arc-length parts, placing POINT
     /// marks at the division parameters (Work-only).
     ///

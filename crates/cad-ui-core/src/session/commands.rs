@@ -166,6 +166,19 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // an alias: there is no interactive rectangular/polygonal draw mode in this
     // build, so the name must not route into a draw capture.
     ("REVCLOUD", CommandId::RevisionCloud),
+    // REVERSE (AutoCAD 2026) reverses the vertices/direction of the selected
+    // LINEs/LWPOLYLINEs/SPLINEs; the selection is the whole input.
+    ("REVERSE", CommandId::Reverse),
+    // BREAKATPOINT is the single-point split tool: pick the object, then the break
+    // point (the point may be off the object and is projected). Its first click is
+    // **not** also a break point, which is why it is not an alias of BREAK.
+    ("BREAKATPOINT", CommandId::BreakAtPoint),
+    // OOPS restores the entities removed by the last ERASE (ERASE-only v1); it is
+    // selection-free and takes no payload.
+    ("OOPS", CommandId::Oops),
+    // OVERKILL removes exact duplicate selected entities (v1: no partial-overlap
+    // or collinear merging); the selection is the whole input.
+    ("OVERKILL", CommandId::Overkill),
     ("ARRAYRECT", CommandId::ArrayRectangular),
     ("ARRAYPOLAR", CommandId::ArrayPolar),
     ("ALIGN", CommandId::AlignEntities),
@@ -947,6 +960,8 @@ pub(super) fn interaction_request_for(
         // BREAK: the first click is the entity pick **and** the first break
         // point, then the second break point.
         CommandId::Break => Some(InteractionRequest::BeginDraw(DrawToolKind::Break)),
+        // BREAKATPOINT: entity pick, then a projected break point.
+        CommandId::BreakAtPoint => Some(InteractionRequest::BeginDraw(DrawToolKind::BreakAtPoint)),
         // DIVIDE/LENGTHEN are the zero-point pre-selection shape: the selected
         // curve is the whole input, so the selector only starts the tool.
         CommandId::Divide => Some(InteractionRequest::BeginDraw(DrawToolKind::Divide)),

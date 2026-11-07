@@ -96,6 +96,10 @@ impl CommandId {
                 // XLINE/RAY write one finite clipped segment each.
                 | Self::CreateXLine
                 | Self::CreateRay
+                | Self::Reverse
+                | Self::Oops
+                | Self::Overkill
+                | Self::BreakAtPoint
         )
     }
 }

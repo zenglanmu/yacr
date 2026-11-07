@@ -76,6 +76,9 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     // point). Both are Work-only and store one finite clipped segment.
     ("XLINE", "draw.xline"),
     ("RAY", "draw.ray"),
+    // BREAKATPOINT is its own capture: entity pick, then a projected break point
+    // (not BREAK's "first click is also the first break point" shape).
+    ("BREAKATPOINT", "draw.breakatpoint"),
 ];
 
 fn fresh_session() -> CadSession {

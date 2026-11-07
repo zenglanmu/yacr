@@ -243,6 +243,13 @@ impl HostController {
                     second,
                 },
             ),
+            // BREAKATPOINT: the ref resolved at the entity pick plus the break
+            // point. The command projects the point, refuses closed objects and
+            // SPLINEs by name and keeps the source as the first piece.
+            DrawIntent::BreakAtPoint { target, point } => (
+                crate::CommandId::BreakAtPoint,
+                crate::CommandPayload::BreakAtPoint { target, point },
+            ),
             DrawIntent::Rotate { base, angle } => (
                 crate::CommandId::RotateEntities,
                 crate::CommandPayload::Rotate {
