@@ -489,6 +489,9 @@ impl Application {
             | CommandId::Divide
             | CommandId::Lengthen
             | CommandId::ScaleText
+            | CommandId::Torient
+            | CommandId::TCase
+            | CommandId::Txt2MText
             | CommandId::ChamferLines
             | CommandId::FilletLines
             | CommandId::ChamferPolyline

@@ -967,6 +967,11 @@ pub enum CommandId {
     Overkill,
     /// `BREAKATPOINT`: see [`crate::command_id::break_at_point`].
     BreakAtPoint,
+    /// `TORIENT` / `TCASE` / `TXT2MTXT`: see
+    /// [`crate::command_id::text_commands`].
+    Torient,
+    TCase,
+    Txt2MText,
 }
 
 mod capabilities;
@@ -982,4 +987,5 @@ pub mod oops;
 pub mod overkill;
 pub mod point_style;
 pub mod reverse;
+pub mod text_commands;
 pub mod zoom;

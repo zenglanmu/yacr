@@ -14,6 +14,7 @@ import { OPTIONS_KEYS } from '../options/options.ts';
 import { STANDARD_VIEWS } from '../cad/view3d.ts';
 import { DRAW_MODIFY_ITEMS, HOME_MODIFY_ITEMS } from './ribbon-modify.ts';
 import { LAYER_PANEL_ITEMS } from './layers-panel.ts';
+import { ANNOTATE_TEXT_COMMAND_ITEMS } from './annotate-text-commands.ts';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({
@@ -690,6 +691,8 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // creating the first one.
           { id: 'DIMBASELINE', labelKey: 'draw.kind.dimbaseline', icon: 'dimbaseline', command: 'DIMBASELINE', large: true },
           { id: 'DIMCONTINUE', labelKey: 'draw.kind.dimcontinue', icon: 'dimcontinue', command: 'DIMCONTINUE', large: true },
+          // The three Express-tool text commands (2026-11-07); see the module.
+          ...ANNOTATE_TEXT_COMMAND_ITEMS,
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties', large: true },
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
           // The read-only font report sits beside the other annotation palettes.

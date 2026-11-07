@@ -74,6 +74,9 @@ mod revision_cloud;
 mod scale_text;
 mod stretch;
 mod text_edit;
+// The three selection-based text commands (TORIENT / TCASE / TXT2MTXT) and
+// their one pure case transformer.
+mod text_commands;
 // The single line-break / stored-type-key authority MTEXT creation and TEXTEDIT
 // share; `pub(crate)` because the TEXT capture channel refuses a newline too.
 pub(crate) mod text_policy;
@@ -100,6 +103,11 @@ pub(crate) use polyline_fillet::{
 // capture time and at apply time (ADR 0017 decision C, P5f).
 pub(crate) use dimension_chain::ensure_chain_base;
 pub(crate) use text_edit::resolve_text_edit_target;
+// The two pure transformers (`most_readable_rotation` / `apply_text_case`) are
+// exposed to the crate's tests only: the command paths below pin them end to
+// end, and the unit tests pin the escape-preserving grammar directly.
+#[cfg(test)]
+pub(crate) use text_commands::{apply_text_case, most_readable_rotation};
 // The explicit ARRAY entity cap (ADR 0016 decision D); re-exported so the
 // command docs (`crate::app_drawing::MAX_ARRAY_ENTITIES`) resolve. It is a doc
 // anchor only — the value is used inside the `array` module.

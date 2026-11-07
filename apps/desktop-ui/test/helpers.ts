@@ -230,6 +230,11 @@ export const HOST_NAMES = [
   // base point and acts on arbitrary geometry) — the two take different inputs
   // and different parameters.
   'SCALETEXT',
+  // TORIENT / TCASE / TXT2MTXT (2026-11-07) are the selection-based Express-tool
+  // text commands. Bare TORIENT is Most Readable and `TORIENT <angle>` is its
+  // typed argument; bare TCASE is Title and `TCASE <mode>` is its argument;
+  // TXT2MTXT is name-only. This mirror never proves the host advertises them.
+  'TORIENT', 'TCASE', 'TXT2MTXT',
   // POINT display style sysvars (2026-10-26): `PDMODE` and `PDSIZE` are typed
   // command-line settings with one numeric argument each (like `SNAPUNIT`), not
   // buttons. This mirror is instructed locally, exactly like `SNAPUNIT` before

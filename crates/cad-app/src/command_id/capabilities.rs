@@ -107,6 +107,9 @@ impl CommandId {
                 | Self::Oops
                 | Self::Overkill
                 | Self::BreakAtPoint
+                | Self::Torient
+                | Self::TCase
+                | Self::Txt2MText
         )
     }
 }
