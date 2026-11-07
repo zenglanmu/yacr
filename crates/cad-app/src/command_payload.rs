@@ -71,6 +71,29 @@ pub enum AngularDimensionInput {
     },
 }
 
+/// The five modes of the `TCASE` text-case command (AutoCAD's `-TCASE`
+/// `Sentence`/`Lower`/`Upper`/`Title`/`toGgle` prompt, 2026-11-07).
+///
+/// This is the machine form of the typed argument grammar parsed by
+/// `cad_ui_core::session::parse_tcase_argument`; the command layer is the only
+/// consumer. The **bare** `TCASE` selector carries no payload at all and the
+/// command applies [`Self::Title`], the documented current default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextCaseMode {
+    /// `UPPER` / `U`: every alphabetic character upper-cased.
+    Upper,
+    /// `LOWER` / `L`: every alphabetic character lower-cased.
+    Lower,
+    /// `TITLE` / `T` (and the bare default): the first alphabetic character of
+    /// each whitespace-separated word upper-cased, the rest lower-cased.
+    Title,
+    /// `SENTENCE` / `S`: the first alphabetic character of the whole string
+    /// upper-cased, the rest lower-cased.
+    Sentence,
+    /// `TOGGLE` / `G`: every alphabetic character's case swapped.
+    Toggle,
+}
+
 /// The axis a DIMORDINATE measures (ADR 0017 decision C/E, P5e).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrdinateAxis {
@@ -328,6 +351,31 @@ pub enum CommandPayload {
     /// one undo step.
     ScaleText {
         refs: Vec<SelectionRef>,
+    },
+    /// `TORIENT` (Work-only): reset the rotation of the selected `Text`/`MText`
+    /// entities (the **selection** is the whole input, `CommandPayload::None`
+    /// for the bare most-readable form).
+    ///
+    /// `angle_degrees` is the typed `TORIENT <angle-degrees>` form: the absolute
+    /// rotation in degrees (finite), stored in radians. `None` means AutoCAD's
+    /// bare command: normalise each rotation into `(-π/2, π/2]` by 180° steps.
+    /// Only `rotation` changes; position, height, alignment, style, font, layer,
+    /// space and draw order are preserved. Non-text selected entities are
+    /// reported as `torient.not_reset` diagnostics and never fail the command.
+    Torient {
+        angle_degrees: Option<f64>,
+    },
+    /// `TCASE` (Work-only): change the case of the selected text.
+    ///
+    /// The selection is read from the session at apply time (bare `TCASE` uses
+    /// `CommandPayload::None` and applies [`TextCaseMode::Title`]); the typed
+    /// argument form carries its mode here. Only visible characters change —
+    /// MTEXT formatting escapes (`\P`, `\f…;`, `\H…;`, `\C…;`, `{}`, `\~`,
+    /// `\\`) are copied verbatim. Non-text selected entities are reported as
+    /// `tcase.not_reset` diagnostics; a MULTILEADER's text is rewritten through
+    /// [`cad_domain::MultiLeaderGeometry::with_text`].
+    TCase {
+        mode: TextCaseMode,
     },
     /// `BLOCK` (Work-only): define a named block from `refs` at the picked
     /// `base` point.

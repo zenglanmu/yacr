@@ -96,6 +96,12 @@ impl CommandId {
                 // XLINE/RAY write one finite clipped segment each.
                 | Self::CreateXLine
                 | Self::CreateRay
+                // The three selection-based text commands (2026-11-07): TORIENT
+                // rewrites rotations, TCASE rewrites text, TXT2MTXT deletes the
+                // sources and inserts one MTEXT.
+                | Self::Torient
+                | Self::TCase
+                | Self::Txt2MText
         )
     }
 }

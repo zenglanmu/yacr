@@ -1,6 +1,8 @@
 //! The canonical command vocabulary and name normalization.
 
 use cad_app::{CommandId, MeasurementToolKind};
+
+use super::text_commands::{TCASE_SELECTOR, TORIENT_SELECTOR};
 /// The canonical command vocabulary: every [`CommandId`] variant with the stable
 /// uppercase selector a frontend uses to name it.
 ///
@@ -149,6 +151,14 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // session typed channel, so the bare selector only starts its capture and no
     // payload is fabricated here. Work-only.
     ("SCALETEXT", CommandId::ScaleText),
+    // TORIENT / TCASE / TXT2MTXT (2026-11-07) are the Express-tool text
+    // commands. All three act on the **current selection** (`CommandPayload::None`
+    // for the bare form), so they are ordinary router selectors with no draw
+    // capture. TORIENT and TCASE additionally accept one typed argument
+    // (`TORIENT <angle>`, `TCASE <mode>`), parsed by the argument table below.
+    ("TORIENT", CommandId::Torient),
+    ("TCASE", CommandId::TCase),
+    ("TXT2MTXT", CommandId::Txt2MText),
     ("CHAMFER", CommandId::ChamferLines),
     ("FILLET", CommandId::FilletLines),
     // The **Polyline mode** of the two corner commands. AutoCAD reaches it
@@ -326,20 +336,21 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 ///
 /// * [`ARGUMENT_SELECTOR`] (`ZOOM`): a positive factor or
 ///   `ALL`/`EXTENTS`/`WINDOW`/`PREVIOUS` ([`parse_zoom_argument`]);
-/// * [`SNAPUNIT_SELECTOR`] (`SNAPUNIT`): a positive decimal spacing
-///   ([`parse_snap_unit_argument`]);
-/// * [`PDMODE_SELECTOR`] (`PDMODE`): one integer in the `i16` range
-///   ([`parse_pdmode_argument`]);
-/// * [`PDSIZE_SELECTOR`] (`PDSIZE`): one finite decimal size
-///   ([`parse_pdsize_argument`]);
+/// * [`SNAPUNIT_SELECTOR`] / [`PDMODE_SELECTOR`] / [`PDSIZE_SELECTOR`]: one
+///   positive spacing / one integer / one signed decimal, in that order;
 /// * [`SPACE_SELECTOR`] (`SPACE`): `MODEL`, `#<u128>` or a layout display name,
-///   resolved against the authoritative drawing by the session.
+///   resolved against the authoritative drawing by the session;
+/// * [`TORIENT_SELECTOR`] (`TORIENT`) / [`TCASE_SELECTOR`] (`TCASE`): one finite
+///   angle in degrees / one case mode ([`parse_torient_argument`],
+///   [`parse_tcase_argument`]).
 pub const ARGUMENT_SELECTORS: &[&str] = &[
     ARGUMENT_SELECTOR,
     SNAPUNIT_SELECTOR,
     PDMODE_SELECTOR,
     PDSIZE_SELECTOR,
     SPACE_SELECTOR,
+    TORIENT_SELECTOR,
+    TCASE_SELECTOR,
 ];
 
 /// AutoCAD's `ZOOM n` / `ZOOM ALL`: the first argument-taking selector.
@@ -575,7 +586,7 @@ fn parse_positive_decimal(text: &str) -> Option<f64> {
 /// `ZOOM`/`SNAPUNIT` accept, widened only by the sign (which `PDSIZE` needs:
 /// a negative size is a percentage of the viewport height). A magnitude that
 /// overflows to a non-finite `f64` is refused rather than stored.
-fn parse_signed_decimal(text: &str) -> Option<f64> {
+pub(super) fn parse_signed_decimal(text: &str) -> Option<f64> {
     let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
     let (whole, fraction) = match digits.split_once('.') {
         Some((whole, fraction)) => (whole, Some(fraction)),

@@ -967,6 +967,20 @@ pub enum CommandId {
     /// except for the session selection; block-instance members are not
     /// enumerated. See `crate::app_drawing::inquiry`.
     Fs,
+    /// `TORIENT` (Work-only): reset the selected text rotations to the most
+    /// readable orientation (bare) or one absolute angle
+    /// (`TORIENT <degrees>`). Only `rotation` changes; see
+    /// [`crate::command_id::text_commands`].
+    Torient,
+    /// `TCASE` (Work-only): change the case of the selected text. Bare applies
+    /// Title (the documented current default); `TCASE <mode>` selects
+    /// Upper/Lower/Title/Sentence/Toggle. See
+    /// [`crate::command_id::text_commands`].
+    TCase,
+    /// `TXT2MTXT` (Work-only): combine the selected Text/MText entities into one
+    /// `AcDbMText`, sorted top-to-bottom then left-to-right. See
+    /// [`crate::command_id::text_commands`].
+    Txt2MText,
 }
 
 mod capabilities;
@@ -978,4 +992,5 @@ pub mod grip_stretch;
 pub mod hatch;
 pub mod match_prop;
 pub mod point_style;
+pub mod text_commands;
 pub mod zoom;

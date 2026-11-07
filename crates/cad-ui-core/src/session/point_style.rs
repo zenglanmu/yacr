@@ -23,7 +23,7 @@ use cad_app::{CommandId, CommandPayload};
 use super::diagnostics::cad_error_text;
 use super::{
     CadSession, ARGUMENT_SELECTOR, PDMODE_SELECTOR, PDSIZE_SELECTOR, SNAPUNIT_SELECTOR,
-    SPACE_SELECTOR,
+    SPACE_SELECTOR, TCASE_SELECTOR, TORIENT_SELECTOR,
 };
 
 impl CadSession {
@@ -49,6 +49,11 @@ impl CadSession {
             // new IPC. Bare `SPACE` never reaches here (it keeps the name-only
             // payload refusal).
             SPACE_SELECTOR => self.space_argument(argument),
+            // `TORIENT <angle>` / `TCASE <mode>` (2026-11-07): the selection is
+            // still the input; only the rotation/mode rides the payload.
+            TORIENT_SELECTOR | TCASE_SELECTOR => {
+                self.text_command_argument(selector, argument, text)
+            }
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

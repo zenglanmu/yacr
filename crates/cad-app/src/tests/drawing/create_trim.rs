@@ -524,6 +524,10 @@ fn drawing_commands_are_work_only_in_the_catalogue() {
         CommandId::PasteOriginalCoordinates,
         CommandId::OffsetEntity,
         CommandId::SetActiveLayer,
+        CommandId::ScaleText,
+        CommandId::Torient,
+        CommandId::TCase,
+        CommandId::Txt2MText,
     ] {
         assert!(id.requires_work_mode(), "{id:?} must be Work-only");
     }

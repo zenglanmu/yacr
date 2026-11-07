@@ -42,6 +42,7 @@ mod settings;
 mod snap_unit;
 mod space;
 mod status;
+mod text_commands;
 pub mod vendor;
 pub mod wire;
 mod zoom;
@@ -117,6 +118,10 @@ pub use self::settings::{
 pub use self::status::{
     unsupported_status, CadActiveSpace, CadCamera, CadImportProgress, CadLayoutTab, CadPopup,
     CadReferenceStatus, CadSelection, CadSelectionRow, CadStatus, CadTool, CadToolParams,
+};
+pub use self::text_commands::{
+    invalid_tcase_argument_reason, invalid_torient_argument_reason, parse_tcase_argument,
+    parse_torient_argument, TCASE_SELECTOR, TORIENT_SELECTOR,
 };
 pub use self::wire::{
     aliases, close_popup, command, commands, create_layer, delete_layer, fonts, layers, open_popup,

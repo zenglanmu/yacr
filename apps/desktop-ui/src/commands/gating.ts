@@ -63,6 +63,20 @@ function isDecimalNumber(text: string): boolean {
 }
 
 /**
+ * Whether `text` is a finite decimal with an optional explicit sign (`45`,
+ * `22.5`, `0`, `-90`, `+30`).
+ *
+ * `TORIENT` accepts an absolute rotation in either direction, so the host's
+ * grammar admits an explicit `+`; this mirrors it for local admission. It is
+ * otherwise the same single plain decimal (no exponent, no bare `.`/`5.`, no
+ * embedded spaces).
+ */
+function isSignedDecimal(text: string): boolean {
+  if (!/^[+-]?[0-9]+(\.[0-9]+)?$/.test(text)) return false;
+  return Number.isFinite(Number(text));
+}
+
+/**
  * The selectors that take a typed argument, with the **local syntax** predicate
  * for that argument.
  *
@@ -132,6 +146,26 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
    */
   SPACE: Object.freeze({
     parse: (argument: string) => argument.trim().length > 0,
+  }),
+  /**
+   * `TORIENT <angle-degrees>` (2026-11-07) sets one **absolute** text rotation.
+   * The bare `TORIENT` is the Most Readable form and carries no argument, so it
+   * is admitted by the base name itself. The host grammar is the same signed
+   * plain decimal as `PDSIZE`: `45`, `22.5`, `0`, `-90`.
+   */
+  TORIENT: Object.freeze({
+    parse: (argument: string) => isSignedDecimal(argument.trim()),
+  }),
+  /**
+   * `TCASE <mode>` (2026-11-07) changes the case of the selected text. The five
+   * full modes and their single letters are accepted case-insensitively; a
+   * bare `TCASE` is Title (the documented current default), so no argument is
+   * needed for it. The host validates the same grammar and refuses anything
+   * else by name (`invalid_tcase_argument_reason`).
+   */
+  TCASE: Object.freeze({
+    parse: (argument: string) => ['UPPER', 'LOWER', 'TITLE', 'SENTENCE', 'TOGGLE', 'U', 'L', 'T', 'S', 'G']
+      .includes(argument.trim().toUpperCase()),
   }),
 });
 
@@ -284,6 +318,14 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   LIST: Object.freeze({ count: 1, reasonKey: 'draw.kind.list.hint' }),
   // FS needs exactly one seed; two or more is refused by the host by name.
   FS: Object.freeze({ count: 1, reasonKey: 'draw.kind.fs.hint' }),
+  // TORIENT / TCASE / TXT2MTXT (2026-11-07) are the Express-tool text commands:
+  // the current selection is the whole input, so zero selected objects can never
+  // produce a result. The table states the minimum of one and words it with each
+  // command's own hint (which also states the v1 boundaries), while the host is
+  // what refuses a selection of the wrong kind by name.
+  TORIENT: Object.freeze({ count: 1, reasonKey: 'draw.kind.torient.hint' }),
+  TCASE: Object.freeze({ count: 1, reasonKey: 'draw.kind.tcase.hint' }),
+  TXT2MTXT: Object.freeze({ count: 1, reasonKey: 'draw.kind.txt2mtxt.hint' }),
 });
 
 /**

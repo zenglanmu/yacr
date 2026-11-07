@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **47** |
-| **已实现合计（完整 + 部分）** | **97** |
-| 未实现 | **884** |
+| 部分实现（有写明的界） | **50** |
+| **已实现合计（完整 + 部分）** | **100** |
+| 未实现 | **881** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -132,9 +132,12 @@
 | `SPLINE` | 已实现 | — |
 | `STATUS` | 部分实现 | 报告图形/数据库 id、修订、实体数（模型/图纸/块）、图层（off/frozen/locked）、块/线型/文字样式/标注样式/多重引线样式/布局数、模型空间范围、当前图层、会话模式与网格/捕捉/正交/对象捕捉状态、缩放历史深度。创建/编辑时间、内存、图形界限与基点**不跟踪**（无图形头模型），以 `status.not_tracked` 显式说明 |
 | `STRETCH` | 部分实现 | 恒交叉窗口；TEXT/MultiLeader 整命令拒绝 |
+| `TCASE` | 部分实现 | Express 工具、选择式：只改 Text/MText 的可见字符大小写；裸命令默认 Title，键入 `TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE`（或 `U/L/T/S/G`）；MTEXT 格式转义逐字保留；属性/标注文字未建模（`tcase.not_reset`）；MULTILEADER 走 `with_text` |
 | `TEXT` | 已实现 | — |
 | `TEXTEDIT` | 部分实现 | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
+| `TORIENT` | 部分实现 | Express 工具、选择式：裸命令按 180° 步进归一到 `(-π/2, π/2]`（Most Readable），`TORIENT <角度>` 设为绝对旋转；只改 rotation，位置/字高/内容不变；非 Text（含 MULTILEADER/INSERT 属性）报告 `torient.not_reset`，不整体失败 |
 | `TRIM` | 部分实现 | 目标 LINE/ARC/CIRCLE/SPLINE；边界含折线/样条采样 |
+| `TXT2MTXT` | 部分实现 | 选择式：至少一个模型空间 Text/MText，按上→下、左→右稳定排序后用 `\P` 原样拼接成一个 `AcDbMText`，沿用首个源的样式/位置/字高/旋转/对齐/层/绘制顺序/`wrap_width`，同一事务删除全部源；设置对话框与强制统一行距未实现 |
 | `U` | 已实现 | — |
 | `UNDO` | 已实现 | — |
 | `XLINE` | 部分实现 | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
@@ -994,7 +997,7 @@
 | 848 | `TABSURF` | 未实现 | Creates a mesh from a line or curve that is swept along a straight path. | — |
 | 849 | `TARGETPOINT` | 未实现 | Creates a target point light. | — |
 | 850 | `TASKBAR` | 未实现 | Controls the Peek/Preview behavior of the application's button in the Windows taskbar when multiple drawings are open. | — |
-| 851 | `TCASE` | 未实现 | Changes the case of selected text, mtext, attributes, and dimension text. | — |
+| 851 | `TCASE` | 部分实现 | Changes the case of selected text, mtext, attributes, and dimension text. | 选择式；只处理 Text/MText（MULTILEADER 走 with_text）；裸命令默认 Title，键入 `TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE` 或 `U/L/T/S/G`；MTEXT 格式转义逐字保留；属性/标注文字未建模（`tcase.not_reset`） |
 | 852 | `TCIRCLE` | 未实现 | Creates a circle, a slot, or a rectangle around each selected text or mtext object. | — |
 | 853 | `TCOUNT` | 未实现 | Adds sequential numbering to text and mtext objects as a prefix, suffix, or replacement text. | — |
 | 854 | `TEXT` | 已实现 | Creates a single-line text object. | — |
@@ -1016,7 +1019,7 @@
 | 870 | `TOOLBAR` | 未实现 | Displays, hides, and customizes toolbars. | — |
 | 871 | `TOOLPALETTES` | 未实现 | Opens the Tool Palettes window. | — |
 | 872 | `TOOLPALETTESCLOSE` | 未实现 | Closes the Tool Palettes window. | — |
-| 873 | `TORIENT` | 未实现 | Rotates text, mtext, attribute definitions, and blocks with attributes for readability. | — |
+| 873 | `TORIENT` | 部分实现 | Rotates text, mtext, attribute definitions, and blocks with attributes for readability. | 选择式；裸命令 Most Readable（归一到 `(-π/2, π/2]`），`TORIENT <角度>` 绝对旋转；只改 rotation；非 Text/属性/块属性报告 `torient.not_reset`；MULTILEADER 文本旋转无 setter |
 | 874 | `TORUS` | 未实现 | Creates a donut-shaped 3D solid. | — |
 | 875 | `TPNAVIGATE` | 未实现 | Displays a specified tool palette or palette group. | — |
 | 876 | `TRACE` | 未实现 | Opens and manages traces from the command prompt. | — |
@@ -1032,7 +1035,7 @@
 | 886 | `TREX` | 未实现 | Combines the TRIM and EXTEND commands. | — |
 | 887 | `TRIM` | 部分实现 | Trims objects to meet the edges of other objects. | 目标 LINE/ARC/CIRCLE/SPLINE；边界含折线/样条采样 |
 | 888 | `TSCALE` | 未实现 | Scales text, mtext, attributes, and attribute definitions. | — |
-| 889 | `TXT2MTXT` | 未实现 | Converts or combines single-line or multiline text objects into one or more multiline text objects. | — |
+| 889 | `TXT2MTXT` | 部分实现 | Converts or combines single-line or multiline text objects into one or more multiline text objects. | 选择式 v1：仅模型空间 Text/MText；上→下、左→右稳定排序，`\P` 原样拼接为一个 `AcDbMText`；沿用首源样式/位置/字高/旋转/对齐/层/绘制顺序/`wrap_width`；同事务删除源；设置对话框/强制统一行距未实现 |
 | 890 | `TXTEXP` | 未实现 | Explodes text or mtext objects into polyline objects. | — |
 | 891 | `U` | 已实现 | Reverses the most recent operation. | — |
 | 892 | `UCS` | 未实现 | Sets the origin and orientation of the current user coordinate system (UCS). | — |
