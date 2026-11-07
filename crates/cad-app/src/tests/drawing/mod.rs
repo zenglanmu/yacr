@@ -304,6 +304,7 @@ mod hatch_gradient;
 mod hatch_internal_point;
 mod hatch_predefined;
 mod hatch_stitch;
+mod hatch_utilities;
 mod insert_block;
 mod join;
 mod lengthen;

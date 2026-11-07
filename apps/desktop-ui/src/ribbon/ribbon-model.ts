@@ -693,6 +693,8 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'DIMCONTINUE', labelKey: 'draw.kind.dimcontinue', icon: 'dimcontinue', command: 'DIMCONTINUE', large: true },
           // The three Express-tool text commands (2026-11-07); see the module.
           ...ANNOTATE_TEXT_COMMAND_ITEMS,
+          // The hatch-context boundary command acts on the selected hatch(es).
+          { id: 'HATCHGENERATEBOUNDARY', labelKey: 'draw.kind.hatchgenerateboundary', icon: 'hatch', command: 'HATCHGENERATEBOUNDARY' },
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties', large: true },
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
           // The read-only font report sits beside the other annotation palettes.

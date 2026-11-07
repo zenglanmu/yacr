@@ -81,6 +81,11 @@ export const HOME_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // BREAKATPOINT starts its own two-step capture (object pick, break point); it
   // is not a preselection command and owns no options popover.
   { id: 'BREAKATPOINT', labelKey: 'draw.kind.breakatpoint', icon: 'trim', command: 'BREAKATPOINT' },
+  // HATCHTOBACK (AutoCAD 2026) lives in AutoCAD's Draw Order drop-down; this
+  // build has no draw-order menu, so it is an ordinary small router button here.
+  // It takes no selection and is document-scoped (an open drawing is the whole
+  // requirement); no options popover exists.
+  { id: 'HATCHTOBACK', labelKey: 'draw.kind.hatchtoback', icon: 'hatch', command: 'HATCHTOBACK' },
 ]);
 
 /** The Draw tab's Modify panel, in display order. */
@@ -134,4 +139,9 @@ export const DRAW_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // BREAKATPOINT starts its own two-step capture (object pick, break point); it
   // is not a preselection command and owns no options popover.
   { id: 'BREAKATPOINT', labelKey: 'draw.kind.breakatpoint', icon: 'trim', command: 'BREAKATPOINT' },
+  // HATCHTOBACK (AutoCAD 2026) lives in AutoCAD's Draw Order drop-down; this
+  // build has no draw-order menu, so it is an ordinary small router button here.
+  // It takes no selection and is document-scoped (an open drawing is the whole
+  // requirement); no options popover exists.
+  { id: 'HATCHTOBACK', labelKey: 'draw.kind.hatchtoback', icon: 'hatch', command: 'HATCHTOBACK' },
 ]);

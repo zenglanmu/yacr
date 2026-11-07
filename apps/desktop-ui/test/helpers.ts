@@ -134,6 +134,13 @@ export const HOST_NAMES = [
   // the two take different input (a pick vs a pre-selection), so admitting one
   // must never admit the other's capture.
   'HATCHPOINT',
+  // HATCHGENERATEBOUNDARY / HATCHTOBACK (AutoCAD 2026) are the hatch utilities:
+  // boundary creation is selection-based, to-back is selection-free and
+  // document-scoped. Both are canonical selectors of their own, never aliases of
+  // HATCH. The Rust lane adds the same names (`CommandId::HatchGenerateBoundary`
+  // / `CommandId::HatchToBack`); this mirror stands in for the loaded
+  // `cad_commands` vocabulary and never proves the host advertises them.
+  'HATCHGENERATEBOUNDARY', 'HATCHTOBACK',
   // MATCHPROP: the selection-based property painter (`CommandId::MatchProp`,
   // `CommandPayload::None` — the selection's first entity is the source). No
   // dedicated IPC; the bare name is the whole input.

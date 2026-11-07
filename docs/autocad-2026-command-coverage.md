@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **61** |
-| **已实现合计（完整 + 部分）** | **111** |
-| 未实现 | **870** |
+| 部分实现（有写明的界） | **63** |
+| **已实现合计（完整 + 部分）** | **113** |
+| 未实现 | **868** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -81,6 +81,8 @@
 | `FS` | 部分实现 | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把**直接**接触（相交或相切都算）的可见模型空间对象并入选择。默认 `FSMODE=OFF`：链式接触（`FSMODE=ON`）未实现；不展开块实例成员 |
 | `GRID` | 已实现 | — |
 | `HATCH` | 部分实现 | 整实体闭合边界 + LINE/ARC 边链；无 .pat/关联性/实时预览 |
+| `HATCHGENERATEBOUNDARY` | 部分实现 | 预选择 hatch；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；无关联/无选项提示 |
+| `HATCHTOBACK` | 部分实现 | 全部模型空间 hatch 置底（仅改写存储 draw order、保持相对次序、可撤销）；图纸空间/块内不重排 |
 | `ID` | 已实现 | — |
 | `INSERT` | 已实现 | — |
 | `JOIN` | 部分实现 | 仅共线 LINE 或同心相续 ARC |
@@ -574,10 +576,10 @@
 | 414 | `HATCH` | 部分实现 | Fills an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | 整实体闭合边界 + LINE/ARC 边链；无 .pat/关联性/实时预览 |
 | 415 | `-HATCHEDIT` | 未实现 | From the Command prompt, modifies existing hatches or fills. | — |
 | 416 | `HATCHEDIT` | 未实现 | Modifies an existing hatch or fill. | — |
-| 417 | `HATCHGENERATEBOUNDARY` | 未实现 | Creates a non-associated polyline around a selected hatch. | — |
+| 417 | `HATCHGENERATEBOUNDARY` | 部分实现 | Creates a non-associated polyline around a selected hatch. | 预选择输入（不弹 Select objects 选项）；每个 hatch loop 生成一条同层同空间的非关联闭合多段线（含内岛、保留 bulge）；源 hatch 保留；无关联性 |
 | 418 | `HATCHSETBOUNDARY` | 未实现 | Redefines a selected hatch or fill to conform to a different closed boundary. | — |
 | 419 | `HATCHSETORIGIN` | 未实现 | Controls the starting location of hatch pattern generation for a selected hatch. | — |
-| 420 | `HATCHTOBACK` | 未实现 | Sets the draw order for all hatches in the drawing to be behind all other objects. | — |
+| 420 | `HATCHTOBACK` | 部分实现 | Sets the draw order for all hatches in the drawing to be behind all other objects. | 仅模型空间：全部 hatch 连续放到最低非 hatch draw order 之下并保持相对次序；i64 下溢按名拒绝；图纸空间/块内不重排；一次事务可撤销 |
 | 421 | `HELIX` | 未实现 | Creates a 2D spiral or 3D spring. | — |
 | 422 | `HELP` | 未实现 | Displays the online or offline Help system. | — |
 | 423 | `HIDE` | 未实现 | Displays a 3D model with hidden lines suppressed for the 2D Wireframe visual style. | — |

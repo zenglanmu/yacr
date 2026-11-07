@@ -134,6 +134,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // smallest visible closed boundary containing it. It is a real selector, not
     // an alias of HATCH (the input and the discovery are different).
     ("HATCHPOINT", CommandId::HatchPoint),
+    ("HATCHGENERATEBOUNDARY", CommandId::HatchGenerateBoundary),
+    ("HATCHTOBACK", CommandId::HatchToBack),
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
     ("EXTEND", CommandId::ExtendEntity),
