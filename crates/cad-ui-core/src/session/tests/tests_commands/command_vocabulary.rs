@@ -135,6 +135,7 @@ command_selector_contract! {
     ToggleOrtho => "ORTHO",
     List => "LIST",
     Status => "STATUS",
+    Fs => "FS",
 }
 
 #[test]
@@ -149,7 +150,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 117,
+        EXPECTED_COMMAND_COUNT, 118,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -820,6 +821,7 @@ fn inquiry_commands_are_read_only_and_viewer_legal() {
     for (selector, id) in [
         ("LIST", CommandId::List),
         ("STATUS", CommandId::Status),
+        ("FS", CommandId::Fs),
     ] {
         assert_eq!(normalize_command(selector), Some(id), "{selector}");
         assert_eq!(canonical_command_name(selector), Some(selector));

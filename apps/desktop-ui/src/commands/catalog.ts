@@ -380,4 +380,6 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'LIST', labelKey: 'draw.kind.list', icon: 'properties', group: 'annotate' },
   // STATUS (inquiry): drawing statistics/modes/extents; document-scoped, read-only.
   { id: 'STATUS', labelKey: 'draw.kind.status', icon: 'diagnostics', group: 'view' },
+  // FS (Express tool): command-line only in AutoCAD; direct-touch selection grower.
+  { id: 'FS', labelKey: 'draw.kind.fs', icon: 'selectAll', group: 'modify' },
 ]);

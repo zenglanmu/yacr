@@ -959,6 +959,14 @@ pub enum CommandId {
     /// creation/edit time, memory usage, limits and the base point are explicitly
     /// not tracked (no drawing-header model). See `crate::app_drawing::inquiry`.
     Status,
+    /// `FS` (Viewer and Work): an **Express tool** (command-line only) that adds
+    /// every visible model-space entity directly touching the one selected seed
+    /// to the current selection (a union, never a replacement). This is AutoCAD's
+    /// default `FSMODE=OFF`: no transitive chain (`FSMODE=ON` is NOT
+    /// IMPLEMENTED), and crossing and tangent contacts both count. Read-only
+    /// except for the session selection; block-instance members are not
+    /// enumerated. See `crate::app_drawing::inquiry`.
+    Fs,
 }
 
 mod capabilities;

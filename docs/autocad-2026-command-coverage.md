@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **46** |
-| **已实现合计（完整 + 部分）** | **96** |
-| 未实现 | **885** |
+| 部分实现（有写明的界） | **47** |
+| **已实现合计（完整 + 部分）** | **97** |
+| 未实现 | **884** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -77,6 +77,7 @@
 | `EXPORT` | 部分实现 | PLOT 别名：仅矢量 SVG/PDF |
 | `EXTEND` | 部分实现 | 目标仅 LINE/ARC；SPLINE/CIRCLE 目标拒绝 |
 | `FILLET` | 部分实现 | 两线形式 + 独立 FILLET POLYLINE 选择子；无 Multiple/Trim |
+| `FS` | 部分实现 | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把**直接**接触（相交或相切都算）的可见模型空间对象并入选择。默认 `FSMODE=OFF`：链式接触（`FSMODE=ON`）未实现；不展开块实例成员 |
 | `GRID` | 已实现 | — |
 | `HATCH` | 部分实现 | 整实体闭合边界 + LINE/ARC 边链；无 .pat/关联性/实时预览 |
 | `ID` | 已实现 | — |
@@ -519,7 +520,7 @@
 | 374 | `FLATTEN` | 未实现 | Converts 3D geometry to a projected 2D representation. | — |
 | 375 | `FREESPOT` | 未实现 | Creates a free spotlight which is a spotlight without a specified target. | — |
 | 376 | `FREEWEB` | 未实现 | Creates a free web light which is a web light without a specified target. | — |
-| 377 | `FS` | 未实现 | Creates a selection set of all objects that touch the selected object. | — |
+| 377 | `FS` | 部分实现 | Creates a selection set of all objects that touch the selected object. | Express 工具、仅命令行；当前唯一选择为种子，并入**直接**接触（相交或相切）的可见模型空间对象（默认 FSMODE=OFF；链式 FSMODE=ON 未实现）；不展开块实例成员 |
 | 378 | `GATTE` | 未实现 | Globally changes attribute values for all instances of a specified block. | — |
 | 379 | `GCCOINCIDENT` | 未实现 | Constrains two points together or a point to a curve (or an extension of a curve). | — |
 | 380 | `GCCOLLINEAR` | 未实现 | Causes two or more line segments to lie along the same line. | — |

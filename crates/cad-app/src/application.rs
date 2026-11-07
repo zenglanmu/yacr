@@ -46,6 +46,7 @@ impl Application {
             // `requires_work_mode`).
             CommandId::List => self.list_objects(session, &command),
             CommandId::Status => self.drawing_status(session, &command),
+            CommandId::Fs => self.selection_touching(session, &command),
             CommandId::FitDrawing => self.fit_drawing(session, &command),
             CommandId::RestoreLayers => {
                 // Drop temporary overrides; the drawing's own layer flags remain

@@ -262,6 +262,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("ORTHO", CommandId::ToggleOrtho),
     ("LIST", CommandId::List),
     ("STATUS", CommandId::Status),
+    ("FS", CommandId::Fs),
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**

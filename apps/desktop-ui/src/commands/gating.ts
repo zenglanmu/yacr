@@ -282,6 +282,8 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   LAYERP: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
   // LIST reports the current selection; zero objects is `list.selection`.
   LIST: Object.freeze({ count: 1, reasonKey: 'draw.kind.list.hint' }),
+  // FS needs exactly one seed; two or more is refused by the host by name.
+  FS: Object.freeze({ count: 1, reasonKey: 'draw.kind.fs.hint' }),
 });
 
 /**

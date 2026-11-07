@@ -17,12 +17,16 @@
 //!   limits or the base point (this build has no drawing-header model), and says
 //!   so with explicit `status.not_tracked` diagnostics;
 //! * `FS` is an Express tool (command-line only, no ribbon button) and implements
-//!   AutoCAD's default `FSMODE=OFF`: it adds only **directly touching** entities,
-//!   never a transitive chain. Chain mode (`FSMODE=ON`) is **NOT IMPLEMENTED**.
+//!   AutoCAD's default `FSMODE=OFF`: it adds only **directly touching** entities
+//!   — a crossing and a tangent contact both count — never a transitive chain.
+//!   Chain mode (`FSMODE=ON`) is **NOT IMPLEMENTED**.
 //!   It enumerates directly addressable model-space entities only — block
 //!   instance members are not expanded, and hidden layers are skipped.
 
-use cad_geometry::distance;
+use crate::picking::ref_visibility;
+use crate::selection::model_ref;
+use cad_domain::TolerancePolicy;
+use cad_geometry::{distance, DefaultGeometryEngine, GeometryEngine};
 
 use super::*;
 
@@ -485,4 +489,157 @@ impl Application {
         })
     }
 
+    /// `FS`: add every visible model-space entity that touches the selected seed.
+    pub(crate) fn selection_touching(
+        &self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        require_none_payload(command, "FS")?;
+        if session.selection.len() != 1 {
+            return Err(CadError::InvalidInput(format!(
+                "fs.selection: FS needs exactly one selected seed object, got {}",
+                session.selection.len()
+            )));
+        }
+        let seed_ref = session.selection.refs()[0].clone();
+        if !seed_ref.instance.0.is_empty() || seed_ref.sub_element.is_some() {
+            return Err(CadError::InvalidInput(
+                "fs.not_addressable: the FS seed must be a directly addressable entity, not a \
+                 block-instance member or sub-element"
+                    .into(),
+            ));
+        }
+        let drawing = document_drawing(self, command)?;
+        let seed = drawing.entity(seed_ref.entity).ok_or_else(|| {
+            CadError::InvalidInput(
+                "fs.seed_missing: the selected seed entity is not present in the drawing".into(),
+            )
+        })?;
+        if seed.space != SpaceId::Model {
+            return Err(CadError::InvalidInput(
+                "fs.seed_not_model_space: the FS seed must be a model-space entity".into(),
+            ));
+        }
+        if !fs_supported(&seed.geometry) {
+            return Err(CadError::Unsupported(format!(
+                "fs.seed_geometry: FS does not intersect {:?} geometry",
+                std::mem::discriminant(&seed.geometry)
+            )));
+        }
+
+        let engine = DefaultGeometryEngine;
+        let policy = TolerancePolicy::default();
+        let seed_endpoints = curve_endpoints(&engine, &seed.geometry, &policy)?;
+        let root = drawing.root_layer_scope();
+        let mut touching = Vec::new();
+        for candidate in drawing.model_space() {
+            if candidate.id == seed.id || !fs_supported(&candidate.geometry) {
+                continue;
+            }
+            let reference = model_ref(command.document, candidate.id);
+            if !ref_visibility(&drawing, &session.layer_overrides, root, &reference)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let mut hit = match engine.intersect_local(&seed.geometry, &candidate.geometry, &policy)
+            {
+                Ok(points) => !points.is_empty(),
+                Err(error) => {
+                    return Err(CadError::Unsupported(format!(
+                        "fs.intersect: entity {} could not be intersected: {error}",
+                        candidate.id.0
+                    )))
+                }
+            };
+            if !hit && !seed_endpoints.is_empty() {
+                let candidate_endpoints = curve_endpoints(&engine, &candidate.geometry, &policy)?;
+                hit = endpoints_touch(&seed_endpoints, &candidate_endpoints, &policy);
+            }
+            if hit {
+                touching.push(reference);
+            }
+        }
+
+        let mut added = 0usize;
+        for reference in touching {
+            if session.selection.insert(reference) {
+                added += 1;
+            }
+        }
+        let total = session.selection.len();
+        let (code, message) = if added == 0 {
+            (
+                "fs.none",
+                format!(
+                    "FS: nothing touches the selected entity {}; the selection is unchanged",
+                    seed.id.0
+                ),
+            )
+        } else {
+            (
+                "fs.applied",
+                format!("FS: added {added} touching object(s) to the selection (total {total})"),
+            )
+        };
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: code.into(),
+                message,
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+}
+
+/// The geometry kinds FS intersects. Other kinds (text, hatch, dimensions,
+/// blocks, images, opaque data, meshes, compounds) are not curve-touch candidates
+/// and are skipped, never silently truncated inside a supported kind.
+fn fs_supported(geometry: &SemanticGeometry) -> bool {
+    matches!(
+        geometry,
+        SemanticGeometry::Line { .. }
+            | SemanticGeometry::Circle { .. }
+            | SemanticGeometry::Arc { .. }
+            | SemanticGeometry::Ellipse { .. }
+            | SemanticGeometry::Polyline { .. }
+            | SemanticGeometry::Spline { .. }
+    )
+}
+
+fn curve_endpoints(
+    engine: &DefaultGeometryEngine,
+    geometry: &SemanticGeometry,
+    policy: &TolerancePolicy,
+) -> CadResult<Vec<Point3>> {
+    match geometry {
+        SemanticGeometry::Line { start, end } => Ok(vec![*start, *end]),
+        SemanticGeometry::Arc { .. }
+        | SemanticGeometry::Polyline { .. }
+        | SemanticGeometry::Spline { .. } => {
+            let points = engine.tessellate_curve(geometry, policy)?;
+            let mut endpoints = Vec::new();
+            if let Some(first) = points.first() {
+                endpoints.push(*first);
+            }
+            if let Some(last) = points.last() {
+                if endpoints.first() != Some(last) {
+                    endpoints.push(*last);
+                }
+            }
+            Ok(endpoints)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn endpoints_touch(a: &[Point3], b: &[Point3], policy: &TolerancePolicy) -> bool {
+    let tolerance = policy.computation_world.max(1e-9);
+    a.iter()
+        .any(|p| b.iter().any(|q| distance(*p, *q) <= tolerance))
 }

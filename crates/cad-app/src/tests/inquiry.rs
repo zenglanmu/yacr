@@ -517,3 +517,186 @@ fn status_is_allowed_in_viewer_mode() {
         )
         .is_ok());
 }
+
+fn fs_fixture() -> (Application, SessionState, DocumentId) {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_layer(Layer {
+            id: LayerId(8),
+            name: "HIDDEN".into(),
+            visible: false,
+        })
+        .unwrap();
+    // seed
+    builder
+        .insert_entity(line(1, point(0.0, 0.0), point(10.0, 10.0)))
+        .unwrap();
+    // crossing
+    builder
+        .insert_entity(line(2, point(0.0, 10.0), point(10.0, 0.0)))
+        .unwrap();
+    // far away
+    builder
+        .insert_entity(line(3, point(100.0, 100.0), point(110.0, 110.0)))
+        .unwrap();
+    // shares the seed's (10, 10) endpoint
+    builder
+        .insert_entity(line(4, point(10.0, 10.0), point(20.0, 10.0)))
+        .unwrap();
+    // crosses the seed at (5, 5) but is on a hidden layer
+    builder
+        .insert_entity(entity(
+            5,
+            SemanticGeometry::Line {
+                start: point(2.0, 8.0),
+                end: point(8.0, 2.0),
+            },
+            LayerId(8),
+            SpaceId::Model,
+            "AcDbLine",
+            None,
+        ))
+        .unwrap();
+    app_from_builder(builder)
+}
+
+#[test]
+fn fs_adds_only_directly_touching_visible_entities() {
+    let (mut app, mut session, document) = fs_fixture();
+    session.selection = SelectionSet::from_refs([model_ref(document, EntityId(1))]);
+    let before = app
+        .workspace
+        .documents
+        .get(&document)
+        .unwrap()
+        .drawing
+        .clone();
+
+    let outcome = app
+        .execute(&mut session, command(CommandId::Fs, CommandPayload::None))
+        .expect("FS is admitted");
+
+    let applied = diagnostic(&outcome, "fs.applied");
+    assert_eq!(applied.len(), 1);
+    assert!(
+        applied[0].contains("added 2 touching object(s)"),
+        "{applied:?}"
+    );
+    assert!(session
+        .selection
+        .contains(&model_ref(document, EntityId(1))));
+    assert!(session
+        .selection
+        .contains(&model_ref(document, EntityId(2))));
+    assert!(session
+        .selection
+        .contains(&model_ref(document, EntityId(4))));
+    assert!(
+        !session
+            .selection
+            .contains(&model_ref(document, EntityId(3))),
+        "the far line is not touched"
+    );
+    assert!(
+        !session
+            .selection
+            .contains(&model_ref(document, EntityId(5))),
+        "an entity on a hidden layer is excluded"
+    );
+    assert_eq!(session.selection.len(), 3, "seed retained, two added");
+
+    let after = app
+        .workspace
+        .documents
+        .get(&document)
+        .unwrap()
+        .drawing
+        .clone();
+    assert_eq!(after.revision(), before.revision());
+    assert!(!app.can_undo(&document));
+}
+
+#[test]
+fn fs_is_a_union_that_retains_the_seed() {
+    let (mut app, mut session, document) = fs_fixture();
+    // FS requires exactly one selected seed (see the refusal test below), so the
+    // only "prior" ref it can retain is the seed itself. The result is still a
+    // union, never a replacement: the seed stays selected and the touching
+    // entities are appended.
+    session.selection = SelectionSet::from_refs([model_ref(document, EntityId(1))]);
+    let before = session.selection.clone();
+
+    let outcome = app
+        .execute(&mut session, command(CommandId::Fs, CommandPayload::None))
+        .expect("FS is admitted");
+    assert!(diagnostic(&outcome, "fs.applied")[0].contains("added 2 touching object(s)"));
+    assert_eq!(session.selection.len(), 3);
+    for prior in before.refs() {
+        assert!(session.selection.contains(prior));
+    }
+}
+
+#[test]
+fn fs_with_nothing_touching_reports_fs_none_and_leaves_the_selection_unchanged() {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(line(1, point(0.0, 0.0), point(1.0, 0.0)))
+        .unwrap();
+    builder
+        .insert_entity(line(2, point(50.0, 50.0), point(51.0, 50.0)))
+        .unwrap();
+    let (mut app, mut session, document) = app_from_builder(builder);
+    session.selection = SelectionSet::from_refs([model_ref(document, EntityId(1))]);
+
+    let outcome = app
+        .execute(&mut session, command(CommandId::Fs, CommandPayload::None))
+        .expect("FS reports no touch as a diagnostic, not an error");
+    assert_eq!(diagnostic(&outcome, "fs.none").len(), 1);
+    assert_eq!(session.selection.len(), 1);
+    assert!(session
+        .selection
+        .contains(&model_ref(document, EntityId(1))));
+}
+
+#[test]
+fn fs_refuses_empty_and_multi_object_selections() {
+    let (mut app, mut session, document) = fs_fixture();
+    let error = app
+        .execute(&mut session, command(CommandId::Fs, CommandPayload::None))
+        .expect_err("no seed is refused");
+    assert!(error.to_string().contains("fs.selection"), "{error}");
+
+    session.selection = SelectionSet::from_refs([
+        model_ref(document, EntityId(1)),
+        model_ref(document, EntityId(2)),
+    ]);
+    let error = app
+        .execute(&mut session, command(CommandId::Fs, CommandPayload::None))
+        .expect_err("more than one seed is refused");
+    assert!(error.to_string().contains("fs.selection"), "{error}");
+}
+
+#[test]
+fn fs_is_allowed_in_viewer_mode() {
+    let (mut app, _session, document) = fs_fixture();
+    let mut viewer = SessionState::new(document, AppMode::Viewer);
+    viewer.selection = SelectionSet::from_refs([model_ref(document, EntityId(1))]);
+    assert!(app
+        .execute(&mut viewer, command(CommandId::Fs, CommandPayload::None))
+        .is_ok());
+    assert_eq!(viewer.selection.len(), 3);
+}
