@@ -121,6 +121,11 @@ test('the per-tool map and the spec table stay consistent', () => {
     command: 'SCALETEXT',
     keys: ['scaleTextFactor'],
   });
+  // DIMROTATED (AutoCAD 2026) owns the one dimension-line angle row.
+  assert.deepEqual(TOOL_PARAMETERS['draw.dimrotated'], {
+    command: 'DIMROTATED',
+    keys: ['dimRotation'],
+  });
   // Every key a tool maps to has a spec, and every spec is reachable through the
   // map — so a later phase only adds a row (the specs already exist).
   const mapped = new Set();
@@ -135,7 +140,7 @@ test('the per-tool map and the spec table stay consistent', () => {
   assert.deepEqual(Object.keys(TOOL_PARAMETER_SPECS).sort(), [
     'alignScale', 'arrayColumnSpacing', 'arrayColumns', 'arrayFillAngle', 'arrayItems',
     'arrayRotateItems', 'arrayRowSpacing', 'arrayRows', 'chamferDistanceA',
-    'chamferDistanceB', 'divideSegments', 'filletRadius', 'hatchAngle', 'hatchDouble',
+    'chamferDistanceB', 'dimRotation', 'divideSegments', 'filletRadius', 'hatchAngle', 'hatchDouble',
     'hatchGradientAngle', 'hatchGradientColorA', 'hatchGradientColorB', 'hatchGradientKind',
     'hatchPattern', 'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'lengthenMode',
     'lengthenValue', 'mtextAttachment', 'polygonSides', 'scaleTextFactor', 'textHeight', 'textRotation',

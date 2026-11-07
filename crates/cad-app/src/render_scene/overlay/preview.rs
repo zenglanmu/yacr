@@ -186,6 +186,9 @@ pub fn draw_preview_overlay(
         // command's, not a preview overlay).
         | DrawToolKind::DimLinear
         | DrawToolKind::DimAligned
+        // DIMROTATED captures the same three free points; the angle is a session
+        // parameter, so the live preview is the existing cursor/chain.
+        | DrawToolKind::DimRotated
         // DIMRADIUS/DIMDIAMETER capture an entity pick plus a location point;
         // DIMCENTER captures one entity pick. Their live preview is the existing
         // cursor/chain (no new overlay channel; the picked entity is shown by the

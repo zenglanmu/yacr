@@ -690,6 +690,11 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // creating the first one.
           { id: 'DIMBASELINE', labelKey: 'draw.kind.dimbaseline', icon: 'dimbaseline', command: 'DIMBASELINE', large: true },
           { id: 'DIMCONTINUE', labelKey: 'draw.kind.dimcontinue', icon: 'dimcontinue', command: 'DIMCONTINUE', large: true },
+          // DIMROTATED (AutoCAD 2026) is appended after the shipped dimension
+          // rows (no existing button moves): the same three-pick capture as the
+          // linear pair, with the dimension-line angle coming from its
+          // `dimRotation` parameter chip instead of the location pick.
+          { id: 'DIMROTATED', labelKey: 'draw.kind.dimrotated', icon: 'dimrotated', command: 'DIMROTATED', large: true },
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties', large: true },
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
           // The read-only font report sits beside the other annotation palettes.

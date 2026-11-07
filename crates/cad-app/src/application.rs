@@ -473,6 +473,7 @@ impl Application {
             | CommandId::CreateSpline
             | CommandId::DimLinear
             | CommandId::DimAligned
+            | CommandId::DimRotated
             | CommandId::DimRadius
             | CommandId::DimDiameter
             | CommandId::DimCenter

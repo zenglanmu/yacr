@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **58** |
-| **已实现合计（完整 + 部分）** | **108** |
-| 未实现 | **873** |
+| 部分实现（有写明的界） | **59** |
+| **已实现合计（完整 + 部分）** | **109** |
+| 未实现 | **872** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -70,6 +70,7 @@
 | `DIMLINEAR` | 已实现 | — |
 | `DIMORDINATE` | 已实现 | — |
 | `DIMRADIUS` | 已实现 | — |
+| `DIMROTATED` | 部分实现 | 三点拾取（两尺寸界线原点 + 尺寸线位置）；尺寸线角度来自会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | `DIST` | 已实现 | — |
 | `DIVIDE` | 部分实现 | 仅 LINE/ARC/CIRCLE/直线段 LWPOLYLINE；按等弧长放 POINT |
 | `ELLIPSE` | 已实现 | — |
@@ -459,7 +460,7 @@
 | 302 | `DIMREASSOC` | 未实现 | Restores the measured value to overridden or modified dimension text. | — |
 | 303 | `DIMREASSOCIATE` | 未实现 | Associates or reassociates selected dimensions to objects or points on objects. | — |
 | 304 | `DIMREGEN` | 未实现 | Updates the locations of all associative dimensions. | — |
-| 305 | `DIMROTATED` | 未实现 | Creates a rotated linear dimension. | — |
+| 305 | `DIMROTATED` | 部分实现 | Creates a rotated linear dimension. | 三点拾取（两尺寸界线原点 + 尺寸线位置）；角度为会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | 306 | `DIMSPACE` | 未实现 | Adjusts the spacing between linear dimensions or angular dimensions. | — |
 | 307 | `-DIMSTYLE` | 未实现 | At the Command prompt, creates and modifies dimension styles. | — |
 | 308 | `DIMSTYLE` | 未实现 | Creates and modifies dimension styles. | — |

@@ -29,6 +29,23 @@ pub struct TwoLineCommand {
     pub pick_second: Point3,
 }
 
+/// The input of a DIMROTATED command (AutoCAD 2026): the two extension-line
+/// origins, the dimension-line location and the **rotation** of the dimension
+/// line in radians (about `+Z`).
+///
+/// Boxed inside [`CommandPayload::RotatedLinearDimension`] so the command enum
+/// stays small. `rotation` is already a radian value: the session parameter
+/// [`crate::draw_tool::ToolParameter::DimRotation`] carries **degrees** and the
+/// host converts it exactly once when it builds this payload. Any finite angle is
+/// legal — a negative angle is a rotation in the other direction, not an error,
+/// and no normalisation is applied.
+pub struct RotatedLinearDimensionCommand {
+    pub first: Point3,
+    pub second: Point3,
+    pub location: Point3,
+    pub rotation: f64,
+}
+
 /// The input of a DIMRADIUS/DIMDIAMETER command (ADR 0017 decision C, P5d): the
 /// picked arc/circle ref and the dimension-line location.
 ///
@@ -510,6 +527,13 @@ pub enum CommandPayload {
     /// active layer. The kind (baseline stacking vs continuous chain) comes from
     /// the [`CommandId`].
     DimChain(Box<DimensionChainCommand>),
+    /// DIMROTATED: the two extension-line origins, the dimension-line location
+    /// and the dimension line's rotation in **radians** (AutoCAD 2026). The
+    /// handler validates the points, builds one `DimensionKind::Linear { rotation }`
+    /// through the shared synthesis and inserts it on the active layer in one
+    /// transaction / one undo step. Any finite rotation is accepted (a negative
+    /// angle is legal and is not normalised).
+    RotatedLinearDimension(Box<RotatedLinearDimensionCommand>),
     /// HATCH the pre-selected boundary entities (ADR 0018 decision D, P6b).
     ///
     /// `refs` is the selection snapshot the tool started with (the tool captures

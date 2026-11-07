@@ -510,6 +510,9 @@ pub enum CommandId {
     /// other refusal matches [`CommandId::DimBaseline`], and the N segments are
     /// inserted in one transaction / one undo step. Non-associative. Work-only.
     DimContinue,
+    /// DIMROTATED (Work-only): a linear dimension whose dimension line is rotated
+    /// to the session angle; see [`crate::command_id::dimension_extra`].
+    DimRotated,
     /// HATCH (Work-only): fill the **pre-selected** boundary entities with the
     /// session pattern parameters; one `AcDbHatch` entity in one transaction. Full
     /// contract: [`crate::command_id::hatch`].
@@ -975,6 +978,7 @@ pub mod area_object;
 pub mod block_define;
 pub mod break_at_point;
 pub mod construction_line;
+pub mod dimension_extra;
 pub mod grip_stretch;
 pub mod hatch;
 pub mod match_prop;

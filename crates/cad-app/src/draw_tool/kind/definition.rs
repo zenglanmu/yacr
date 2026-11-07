@@ -338,6 +338,27 @@ pub enum DrawToolKind {
     /// variant, a text override, associativity (`DIMASSOC=2`), and the
     /// object-selection prompts.
     DimAligned,
+    /// DIMROTATED: a linear dimension whose **dimension line is rotated** to an
+    /// arbitrary angle (`Exact(3)`, AutoCAD 2026).
+    ///
+    /// Same three-pick capture as [`Self::DimLinear`] (the two extension-line
+    /// origins, then the dimension-line location), but the direction is the
+    /// session parameter [`super::ToolParameter::DimRotation`] (degrees, default
+    /// `0`) instead of a horizontal/vertical decision from the location pick. The
+    /// measurement is the projection of the origin separation onto that direction
+    /// (`|cos θ · Δx + sin θ · Δy|`), exactly as AutoCAD's rotated linear
+    /// dimension measures.
+    ///
+    /// The location pick only places the dimension line; it never changes the
+    /// angle. The command layer converts the degrees to radians once, builds the
+    /// definition through the shared synthesis and owns every refusal (non-plan
+    /// triple, coincident origins, zero measurement).
+    ///
+    /// Declared subset (NOT IMPLEMENTED): the interactive "Specify angle of
+    /// dimension line" prompt (the angle is the session parameter chip, not a
+    /// capture step), the object-selection variant, a text override and
+    /// associativity.
+    DimRotated,
     /// DIMRADIUS: a radius dimension whose **only** entry point is an entity
     /// pick of an arc or circle, followed by the dimension-line location
     /// (`Exact(2)`, ADR 0017 decision C, P5d).

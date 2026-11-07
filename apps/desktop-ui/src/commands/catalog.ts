@@ -253,6 +253,10 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // with Enter — never a fixed three-point capture like the linear pair.
   { id: 'DIMBASELINE', labelKey: 'draw.kind.dimbaseline', icon: 'dimbaseline', group: 'annotate' },
   { id: 'DIMCONTINUE', labelKey: 'draw.kind.dimcontinue', icon: 'dimcontinue', group: 'annotate' },
+  // DIMROTATED (AutoCAD 2026): the same three picks as DIMLINEAR, with the
+  // dimension line at the session `dimRotation` angle instead of horizontal or
+  // vertical. Appended after the shipped dimension rows so no existing entry moves.
+  { id: 'DIMROTATED', labelKey: 'draw.kind.dimrotated', icon: 'dimrotated', group: 'annotate' },
   { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', group: 'annotate' },
   // Layer isolate / unisolate (2026-10-26). Unlike `LAYER` they are **router**
   // commands (`LAYISO`/`LAYUNISO`), not chrome-local selectors, so they are

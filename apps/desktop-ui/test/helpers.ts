@@ -98,7 +98,12 @@ export const HOST_NAMES = [
   // in for the loaded `cad_commands` vocabulary and never proves the host
   // advertises it.
   'PLAN',
-  'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER', 'DIMANGULAR', 'DIMORDINATE', 'DIMBASELINE', 'DIMCONTINUE', 'MOVE', 'TRIM',
+  'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER', 'DIMANGULAR', 'DIMORDINATE', 'DIMBASELINE', 'DIMCONTINUE',
+  // DIMROTATED (AutoCAD 2026) is a canonical selector of its own (a linear
+  // dimension at the session `dimRotation` angle); the Rust lane adds the same
+  // name. This mirror stands in for the loaded `cad_commands` vocabulary and
+  // never proves the host advertises it.
+  'DIMROTATED', 'MOVE', 'TRIM',
   'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'EXPLODE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   // XLINE / RAY (2026-11-01): the two construction captures. Each is a canonical
   // selector of its own — never an alias of `LINE`, because the capture records a

@@ -457,6 +457,18 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     labelKey: 'status.tool_parameter.scale_text_factor',
     hintKey: 'status.tool_parameter.scale_text_factor.hint',
   },
+  // DIMROTATED's dimension-line angle, in **degrees** (AutoCAD's prompt unit,
+  // exactly like the HATCH/TEXT angle rows). The host accepts any finite value
+  // and never wraps or normalises it — `-30` stays `-30` — so `offered` is plain
+  // finiteness; the degrees are converted to radians exactly once by the host. It
+  // steps by 15° and is also `typed`, because a rotated dimension is routinely an
+  // angle no fixed increment reaches (`22.5`, `-33.75`).
+  dimRotation: {
+    kind: 'number', statusKey: 'dimRotation', step: 15,
+    offered: finiteAny(), typed: true,
+    labelKey: 'status.tool_parameter.dim_rotation',
+    hintKey: 'status.tool_parameter.dim_rotation.hint',
+  },
   // --- single-curve edits (2026-11-01) --------------------------------------
   // DIVIDE's segment count is the one row the command reads: the host splits the
   // selected curve into N equal parts and places POINTs at the division
@@ -596,4 +608,8 @@ export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   // `scaleTextFactor` row is its only setting, so the command projects exactly
   // that one value while it runs.
   'draw.scaletext': { command: 'SCALETEXT', keys: ['scaleTextFactor'] },
+  // DIMROTATED (AutoCAD 2026) owns the one `dimRotation` row: the three picks are
+  // the geometry and the angle is the only setting the command reads besides the
+  // resolved `Standard` style.
+  'draw.dimrotated': { command: 'DIMROTATED', keys: ['dimRotation'] },
 });

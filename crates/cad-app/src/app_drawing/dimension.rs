@@ -222,6 +222,135 @@ fn midpoint(a: Point3, b: Point3) -> Point3 {
 }
 
 // ---------------------------------------------------------------------------
+// DIMROTATED (AutoCAD 2026): a linear dimension with an arbitrary angle.
+// ---------------------------------------------------------------------------
+
+/// Refuse with a stable `dimrotated.<code>: <detail>` message.
+fn dimrotated_error(code: &str, detail: impl std::fmt::Display) -> CadError {
+    CadError::InvalidInput(format!("dimrotated.{code}: {detail}"))
+}
+
+impl Application {
+    /// DIMROTATED: a **rotated** linear dimension through two extension-line
+    /// origins and a dimension-line location (AutoCAD 2026).
+    ///
+    /// Payload is [`CommandPayload::RotatedLinearDimension`] with `rotation`
+    /// already in radians (the host converts the session `dimRotation` degrees
+    /// exactly once). The definition uses the same `DimensionKind::Linear {
+    /// rotation }` subtype DIMLINEAR uses, so the shared synthesis recomputes the
+    /// measurement as the projection `|cos θ · Δx + sin θ · Δy|`, the formatted
+    /// text and the display. The location pick only places the dimension line; it
+    /// never changes the angle, and the angle is never normalised (a negative
+    /// value rotates the other way and is legal).
+    ///
+    /// Every refusal is named and happens before any write, so it opens no
+    /// transaction and records no history. Work-only; non-associative.
+    pub(crate) fn dim_rotated(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::RotatedLinearDimension(input) = &command.payload else {
+            return Err(dimrotated_error(
+                "payload",
+                "DIMROTATED needs a RotatedLinearDimension { first, second, location, rotation } \
+                 payload",
+            ));
+        };
+        let crate::RotatedLinearDimensionCommand {
+            first,
+            second,
+            location,
+            rotation,
+        } = *input.as_ref();
+        if !rotation.is_finite() {
+            return Err(dimrotated_error(
+                "rotation",
+                format!("the dimension-line angle must be finite, got {rotation} rad"),
+            ));
+        }
+        if !is_finite_point(first) || !is_finite_point(second) || !is_finite_point(location) {
+            return Err(dimrotated_error(
+                "non_finite",
+                "all three points must be finite",
+            ));
+        }
+        // The same flat `+Z` subset as DIMLINEAR (ADR 0017 D.6): an off-plane
+        // triple is refused rather than guessed onto a work plane.
+        let z_tol = 1e-9 * (1.0 + first.z.abs() + second.z.abs() + location.z.abs());
+        if (second.z - first.z).abs() > z_tol || (location.z - first.z).abs() > z_tol {
+            return Err(dimrotated_error(
+                "off_plane",
+                "the points must lie in one +Z plane; off-plane dimension creation is NOT \
+                 IMPLEMENTED",
+            ));
+        }
+        if distance(first, second) <= MIN_DIMENSION_EXTENT {
+            return Err(dimrotated_error(
+                "origins",
+                "the two extension-line origins must be distinct",
+            ));
+        }
+        let definition = DimensionDefinition {
+            kind: DimensionKind::Linear { rotation },
+            points: DimensionPoints::Linear {
+                first,
+                second,
+                dimension_line: location,
+            },
+            // Group 11/53 stay at the zero "derive from the dimension line"
+            // sentinel, so the synthesis places the text itself (ADR 0017 A.3).
+            text_middle: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            text_rotation: 0.0,
+            normal: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        };
+        let document_id = command.document;
+        let style = {
+            let document = self
+                .workspace
+                .documents
+                .get(&document_id)
+                .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+            document
+                .drawing
+                .resolve_dim_style("Standard")
+                .ok_or_else(|| {
+                    CadError::InvalidInput(
+                        "the drawing has no 'Standard' dimension style to create with".into(),
+                    )
+                })?
+        };
+        let dimension =
+            DimensionGeometry::synthesized(definition, "Standard".to_string(), style, None)?;
+        // The chosen angle projects the two distinct origins onto the same point:
+        // refuse rather than store a dimension that measures nothing.
+        if dimension.measurement() <= MIN_DIMENSION_EXTENT {
+            return Err(dimrotated_error(
+                "degenerate",
+                format!(
+                    "the {} degree dimension-line direction measures zero",
+                    rotation.to_degrees()
+                ),
+            ));
+        }
+        self.commit_new_entity(
+            session,
+            command,
+            SemanticGeometry::Dimension(Box::new(dimension)),
+            "create dimrotated",
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // DIMRADIUS / DIMDIAMETER (ADR 0017 decision C, P5d).
 // ---------------------------------------------------------------------------
 

@@ -273,6 +273,15 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
     'tool.prompt.dim.origin_second',
     'tool.prompt.dim.location_linear',
   ],
+  // DIMROTATED (AutoCAD 2026) takes the **same three picks** as DIMLINEAR, but
+  // its direction is the `dimRotation` session parameter, not a horizontal/
+  // vertical decision: the location sentence asks only for the position, so it
+  // never claims the click chooses the angle.
+  'draw.dimrotated': [
+    'tool.prompt.dim.origin_first',
+    'tool.prompt.dim.origin_second',
+    'tool.prompt.dim.location_rotated',
+  ],
   'draw.dimaligned': [
     'tool.prompt.dim.origin_first',
     'tool.prompt.dim.origin_second',
