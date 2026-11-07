@@ -240,6 +240,10 @@ pub enum CommandId {
     /// only (one zero bulge per vertex, `closed == false`); fewer than two
     /// distinct points is an explicit refusal that changes nothing. Work-only.
     CreatePolyline,
+    /// `WIPEOUT` (Work-only): a closed polygon mask stored as
+    /// `SemanticGeometry::Mask { inverted: false }` with the stored type key
+    /// `AcDbWipeout`. Full contract: [`crate::command_id::draw_variants`].
+    Wipeout,
     /// Draw an axis-aligned RECTANG from two opposite corners: a closed
     /// four-vertex LWPOLYLINE (one zero bulge per vertex) on the active layer.
     /// Payload is `Points([corner1, corner2])` in click order; the handler
@@ -974,6 +978,7 @@ mod capabilities;
 pub mod area_object;
 pub mod block_define;
 pub mod construction_line;
+pub mod draw_variants;
 pub mod grip_stretch;
 pub mod hatch;
 pub mod match_prop;

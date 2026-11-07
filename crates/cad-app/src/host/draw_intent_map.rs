@@ -69,6 +69,14 @@ impl HostController {
                 crate::CommandId::CreatePolyline,
                 crate::CommandPayload::Points(points),
             ),
+            // WIPEOUT: every captured boundary vertex travels as `Points` (the
+            // closed implicit ring). The plane/duplicate/area validation and the
+            // `AcDbWipeout` mask construction are the command layer's, so the
+            // payload carries exactly the clicks and nothing derived.
+            DrawIntent::Wipeout { points } => (
+                crate::CommandId::Wipeout,
+                crate::CommandPayload::Points(points),
+            ),
             // RECTANG: the two captured corners travel in click order as `Points`
             // (the payload the create path already reads); the handler canonicalises
             // the winding and builds the closed four-vertex polyline.

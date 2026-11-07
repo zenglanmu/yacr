@@ -207,6 +207,14 @@ export const HOST_NAMES = [
   // base point and acts on arbitrary geometry) — the two take different inputs
   // and different parameters.
   'SCALETEXT',
+  // WIPEOUT (AutoCAD 2026) is the closed polygon mask: an **open-ended** capture
+  // (first point, then every further boundary point, Enter finishes) that commits
+  // one `AcDbWipeout` mask. It is a canonical selector of its own, never an alias
+  // of `PLINE` or `HATCH`: the stored entity, the renderer pass and the documented
+  // v1 limits (no frames, no `Polyline`/`Erase Polyline`, no self-intersection
+  // rejection) are its own. The Rust lane adds the same name
+  // (`CommandId::Wipeout`); this mirror never proves the host advertises it.
+  'WIPEOUT',
   // POINT display style sysvars (2026-10-26): `PDMODE` and `PDSIZE` are typed
   // command-line settings with one numeric argument each (like `SNAPUNIT`), not
   // buttons. This mirror is instructed locally, exactly like `SNAPUNIT` before

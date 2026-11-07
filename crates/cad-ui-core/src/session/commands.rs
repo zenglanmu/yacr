@@ -93,6 +93,12 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CIRCLE D", CommandId::CreateCircleDiameter),
     ("ARC", CommandId::CreateArc),
     ("PLINE", CommandId::CreatePolyline),
+    // WIPEOUT is its own open-ended polygon capture: first point, then every
+    // further boundary point, Enter finishes. It stores one closed
+    // `SemanticGeometry::Mask` (`AcDbWipeout`, `inverted: false`); AutoCAD's
+    // `Frames`/`Polyline`/`Erase Polyline` surface is NOT IMPLEMENTED, so no
+    // argument form is admitted here.
+    ("WIPEOUT", CommandId::Wipeout),
     ("RECTANG", CommandId::CreateRectangle),
     ("ELLIPSE", CommandId::CreateEllipse),
     ("POLYGON", CommandId::CreatePolygon),
@@ -873,6 +879,9 @@ pub(super) fn interaction_request_for(
         }
         CommandId::CreateArc => Some(InteractionRequest::BeginDraw(DrawToolKind::Arc)),
         CommandId::CreatePolyline => Some(InteractionRequest::BeginDraw(DrawToolKind::Polyline)),
+        // WIPEOUT starts the open-ended polygon capture (first point, then every
+        // further boundary point, Enter finishes); the command stores one mask.
+        CommandId::Wipeout => Some(InteractionRequest::BeginDraw(DrawToolKind::Wipeout)),
         CommandId::CreateRectangle => Some(InteractionRequest::BeginDraw(DrawToolKind::Rectang)),
         CommandId::CreateEllipse => Some(InteractionRequest::BeginDraw(DrawToolKind::Ellipse)),
         CommandId::CreatePolygon => Some(InteractionRequest::BeginDraw(DrawToolKind::Polygon)),

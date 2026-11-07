@@ -27,3 +27,4 @@ mod text_edit;
 mod toggles;
 mod tool_parameter;
 mod tools;
+mod wipeout;

@@ -540,6 +540,12 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   'draw.circle2p': 'tool.prompt.circle2p.ready',
   'draw.circle3p': 'tool.prompt.circle3p.ready',
   'draw.circlediameter': 'tool.prompt.circlediameter.ready',
+  // WIPEOUT (2026-11-07) is open-ended: once the three-vertex minimum is captured
+  // Enter creates the mask, and more vertices stay accepted. The shared dimension
+  // ready copy ("Dimension defined") would be false — nothing is dimensioned — so
+  // it names the captured boundary instead. The open-ended branch reads this table
+  // first, so a ready WIPEOUT never falls through to the dimension sentence.
+  'draw.wipeout': 'tool.prompt.wipeout.ready',
 });
 
 /** A pre-selection tool's two prompts: waiting for a selection, and ready. */
@@ -641,7 +647,11 @@ export function toolStepPromptKey(tool: CadTool | null | undefined): string | nu
     if (points === 0) return openEnded.select;
     // Readiness never wins without a measured point: a capture with only the base
     // pick is refused by the command, so claiming "ready" there would be false.
-    if (points > 1 && tool.ready === true) return DEFAULT_READY_PROMPT;
+    // The ready sentence is the tool's own override when it has one (WIPEOUT must
+    // not claim a dimension was defined); otherwise the shared dimension copy.
+    if (points > 1 && tool.ready === true) {
+      return TOOL_READY_PROMPTS[tool.key] ?? DEFAULT_READY_PROMPT;
+    }
     return openEnded.point;
   }
   const steps = TOOL_STEP_PROMPTS[tool.key];

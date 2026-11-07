@@ -369,6 +369,16 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // so no shipped row moves, and it reuses the `polyline` glyph: the output is a
   // polyline.
   { id: 'REVCLOUD', labelKey: 'draw.kind.revcloud', icon: 'polyline', group: 'draw' },
+  // WIPEOUT (AutoCAD 2026) is the closed **polygon mask**: first point, then every
+  // further boundary point, Enter finishes (AutoCAD's default flow). It commits one
+  // `AcDbWipeout` mask on the active layer; the ribbon locator is the Annotate tab,
+  // which is where AutoCAD 2026 exposes it. v1 has no `Frames` model, no
+  // `Polyline`/`Erase Polyline` option, no self-intersection rejection and no
+  // picking of an existing wipeout, so no variant row or option caret may imply
+  // one. Appended last in the draw group so no shipped row moves; it reuses the
+  // `hatch` glyph because both fill a bounded region (the icon set has no mask
+  // mark).
+  { id: 'WIPEOUT', labelKey: 'draw.kind.wipeout', icon: 'hatch', group: 'draw' },
   // AUDIT (AutoCAD 2026) is the detect-only drawing audit: it reports every
   // stored entity that fails the database's own validity check and repairs
   // nothing (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). It is a

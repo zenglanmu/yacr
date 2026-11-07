@@ -898,6 +898,7 @@ fn polygon_intent_carries_the_two_picks_exactly_and_is_ready_at_two() {
 mod array;
 mod clipboard;
 mod dimension;
+mod draw_variants;
 mod hatch;
 mod keys;
 mod mleader;

@@ -22,6 +22,7 @@ impl CommandId {
                 | Self::CreateCircleDiameter
                 | Self::CreateArc
                 | Self::CreatePolyline
+                | Self::Wipeout
                 | Self::CreateRectangle
                 | Self::CreateEllipse
                 | Self::CreatePolygon

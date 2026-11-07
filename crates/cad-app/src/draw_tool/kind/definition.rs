@@ -28,6 +28,28 @@ pub enum DrawToolKind {
     ///   subset, so points carry only the `+Z` the picker produced and are never
     ///   silently reprojected onto another plane.
     Polyline,
+    /// WIPEOUT: a closed polygon **mask**, captured as an open-ended run of
+    /// boundary points (at least three, then Enter).
+    ///
+    /// Capture shape: exactly the PLINE point machine — first point, then every
+    /// further point, Enter finishes — because AutoCAD's default `WIPEOUT` flow is
+    /// "first point → next point… (polygon) until Enter". The `PointArity` model
+    /// expresses that without a new state, so this is a **real polygon capture**,
+    /// not a two-corner rectangle fallback. The ring is implicit: the first point
+    /// is stored once and never repeated by the capture.
+    ///
+    /// The geometry construction and every refusal live in the command layer
+    /// (`create_wipeout`): finite points, ≥ 3 vertices, one `+Z` plane, no
+    /// zero-length edge, a non-zero enclosed area, `inverted: false`, stored type
+    /// key `AcDbWipeout`. The capture never invents a vertex or an inversion.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED, so the honest union stays explicit):
+    /// no `Frames` ON/OFF/`Display-not-plot` (there is no wipeout-frame model at
+    /// all), no `Polyline` / `Erase Polyline` option, no self-intersection
+    /// rejection (a self-crossing ring is stored and filled even-odd), no
+    /// picking/frame selection of an existing wipeout, no `inverted` authoring,
+    /// and no vertex-level undo. Work-only.
+    Wipeout,
     /// RECTANG: two opposite corners of an axis-aligned rectangle.
     ///
     /// The commit is a **closed** four-vertex polyline (`closed = true`, one zero

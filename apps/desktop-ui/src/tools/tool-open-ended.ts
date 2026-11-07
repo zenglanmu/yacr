@@ -31,4 +31,14 @@ export const OPEN_ENDED_PROMPTS: Readonly<Record<string, OpenEndedPrompts>> = Ob
     select: 'tool.prompt.dim.select_base',
     point: 'tool.prompt.dim.continue_point',
   }),
+  // WIPEOUT (2026-11-07) is open-ended **without** a base pick: every point is a
+  // boundary vertex, and Enter finishes the ring. `select` therefore names the
+  // first vertex (it is not a base point) and `point` repeats for the next ones.
+  // The three-vertex minimum is the host's `ready` (`AtLeast(3)`), never a step
+  // count re-derived here; the ready copy is the tool's own override in
+  // `TOOL_READY_PROMPTS`, because the shared dimension sentence would be false.
+  'draw.wipeout': Object.freeze({
+    select: 'tool.prompt.wipeout.first',
+    point: 'tool.prompt.wipeout.next',
+  }),
 });

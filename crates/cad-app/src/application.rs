@@ -455,6 +455,7 @@ impl Application {
             | CommandId::CreateXLine
             | CommandId::CreateRay
             | CommandId::CreatePolyline
+            | CommandId::Wipeout
             | CommandId::CreateRectangle
             | CommandId::CreateEllipse
             | CommandId::CreatePolygon

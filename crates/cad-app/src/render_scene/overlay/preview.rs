@@ -100,6 +100,17 @@ pub fn draw_preview_overlay(
                 (chain.len() >= 2).then_some(chain)
             })
         }
+        // WIPEOUT: the closed boundary ring — the captured vertices plus the live
+        // cursor as the next tentative vertex, closed back to the first. It falls
+        // back to the rubber-band chain until three vertices are known, so a
+        // degenerate ring is never fabricated; the command re-validates the ring
+        // (plane, duplicates, area) at confirm.
+        DrawToolKind::Wipeout => {
+            wipeout_points(&preview.points, preview.cursor).or_else(|| {
+                let chain = preview_chain(&preview.points, preview.cursor);
+                (chain.len() >= 2).then_some(chain)
+            })
+        }
         // SPLINE: a bounded chord approximation of the exact interpolated curve
         // the commit stores, through the captured fit points plus the live cursor.
         // It falls back to the rubber-band chain while fewer than four fit points
@@ -463,6 +474,27 @@ fn polygon_points(
         outline.push(first);
     }
     Some(outline)
+}
+
+/// The live WIPEOUT boundary ring.
+///
+/// The captured vertices plus the live cursor as the next tentative vertex, closed
+/// back to the first. `None` (so the caller falls back to the rubber-band chain)
+/// until three vertices are known, so a degenerate ring is never previewed. The
+/// preview is presentation only: the command re-validates the ring (one `+Z`
+/// plane, no zero-length edge, non-zero area) at confirm.
+fn wipeout_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3>> {
+    let mut ring = points.to_vec();
+    if let Some(cursor) = cursor {
+        if ring.last() != Some(&cursor) {
+            ring.push(cursor);
+        }
+    }
+    if ring.len() < 3 {
+        return None;
+    }
+    ring.push(ring[0]);
+    Some(ring)
 }
 
 /// Bounds on the SPLINE preview chord approximation segment count.

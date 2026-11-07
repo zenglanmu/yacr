@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 53] = [
+    pub const ALL: [DrawToolKind; 54] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -137,6 +137,10 @@ impl DrawToolKind {
         DrawToolKind::Circle2P,
         DrawToolKind::Circle3P,
         DrawToolKind::CircleDiameter,
+        // WIPEOUT is appended last for the same index-stability reason: it is a
+        // real open-ended polygon capture started by its command selector, not
+        // from the draw-tool selector list.
+        DrawToolKind::Wipeout,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -195,6 +199,7 @@ impl DrawToolKind {
             Self::Circle2P => "circle2p",
             Self::Circle3P => "circle3p",
             Self::CircleDiameter => "circlediameter",
+            Self::Wipeout => "wipeout",
         }
     }
 
@@ -255,6 +260,7 @@ impl DrawToolKind {
             "circle2p" => Some(Self::Circle2P),
             "circle3p" => Some(Self::Circle3P),
             "circlediameter" => Some(Self::CircleDiameter),
+            "wipeout" => Some(Self::Wipeout),
             _ => None,
         }
     }
@@ -400,6 +406,8 @@ impl DrawToolKind {
             Self::Circle2P => "CIRCLE 2P",
             Self::Circle3P => "CIRCLE 3P",
             Self::CircleDiameter => "CIRCLE D",
+            // WIPEOUT shares the locale-neutral ASCII fallback rule.
+            Self::Wipeout => "WIPEOUT",
         }
     }
 
@@ -408,9 +416,11 @@ impl DrawToolKind {
         match self {
             // PLINE and SPLINE are the two open-ended captures: at least two
             // vertices (PLINE) / four fit points (SPLINE), more accepted,
-            // finished with Enter.
+            // finished with Enter. WIPEOUT is the same open-ended shape with the
+            // three-vertex minimum a real closed ring needs.
             Self::Polyline => PointArity::AtLeast(2),
             Self::Spline => PointArity::AtLeast(4),
+            Self::Wipeout => PointArity::AtLeast(3),
             // DIMBASELINE/DIMCONTINUE: the base **pick** consumes the first
             // capture step (it is stored as a point too), so the minimum is the
             // pick plus **one measured point** — a base pick alone must never be

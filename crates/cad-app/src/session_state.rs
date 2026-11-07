@@ -570,6 +570,9 @@ impl SessionState {
             DrawToolKind::CircleDiameter => CommandId::CreateCircleDiameter,
             DrawToolKind::Arc => CommandId::CreateArc,
             DrawToolKind::Polyline => CommandId::CreatePolyline,
+            // WIPEOUT is its own open-ended polygon capture; the command stores
+            // one `Mask` entity (`AcDbWipeout`) on the active layer.
+            DrawToolKind::Wipeout => CommandId::Wipeout,
             DrawToolKind::Rectang => CommandId::CreateRectangle,
             DrawToolKind::Ellipse => CommandId::CreateEllipse,
             DrawToolKind::Polygon => CommandId::CreatePolygon,

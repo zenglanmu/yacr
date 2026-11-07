@@ -335,3 +335,4 @@ mod transform;
 mod trim_extend_curves;
 mod trim_spline_boundary;
 mod trim_spline_target;
+mod wipeout;
