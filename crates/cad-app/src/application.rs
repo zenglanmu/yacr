@@ -487,6 +487,7 @@ impl Application {
             | CommandId::DimContinue
             | CommandId::Hatch
             | CommandId::HatchPoint
+            | CommandId::Boundary
             | CommandId::HatchGenerateBoundary
             | CommandId::HatchToBack
             | CommandId::MoveEntities
@@ -499,6 +500,7 @@ impl Application {
             | CommandId::Torient
             | CommandId::TCase
             | CommandId::Txt2MText
+            | CommandId::TextToFront
             | CommandId::ChamferLines
             | CommandId::FilletLines
             | CommandId::ChamferPolyline

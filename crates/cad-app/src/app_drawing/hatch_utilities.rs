@@ -359,6 +359,33 @@ fn boundary_polyline(
     plane: HatchPlane,
     entity: EntityId,
 ) -> CadResult<SemanticGeometry> {
+    let (points, bulges) = loop_world_ring(loop_, plane).map_err(|detail| {
+        refusal(
+            "hatchgenerateboundary.invalid_loop",
+            format!("hatch {} {detail}", entity.0),
+        )
+    })?;
+    Ok(SemanticGeometry::Polyline {
+        points,
+        bulges,
+        closed: true,
+    })
+}
+
+/// Convert one hatch-plane loop into a closed world-space ring.
+///
+/// This is the shared loop-to-polyline conversion used by HATCHGENERATEBOUNDARY
+/// and BOUNDARY (2026-11-07): [`HatchPlane::to_world`] is the single mapping back
+/// (the same arbitrary-axis basis the display uses), a repeated last point is
+/// dropped together with its degenerate closing bulge, and a straight ring gets
+/// one zero bulge per vertex.
+///
+/// The error is a detail sentence (the caller prefixes its own entity/reason
+/// code); it only describes a malformed loop the caller must refuse.
+pub(crate) fn loop_world_ring(
+    loop_: &HatchLoop,
+    plane: HatchPlane,
+) -> Result<(Vec<Point3>, Vec<f64>), String> {
     let mut points = loop_.points.clone();
     let mut bulges = loop_.bulges.clone();
     if points.len() >= 2 && points.first() == points.last() {
@@ -368,23 +395,13 @@ fn boundary_polyline(
         }
     }
     if points.len() < 2 {
-        return Err(refusal(
-            "hatchgenerateboundary.invalid_loop",
-            format!(
-                "hatch {} has a boundary loop with fewer than two vertices",
-                entity.0
-            ),
-        ));
+        return Err("has a boundary loop with fewer than two vertices".into());
     }
     if !bulges.is_empty() && bulges.len() != points.len() {
-        return Err(refusal(
-            "hatchgenerateboundary.invalid_loop",
-            format!(
-                "hatch {} has {} bulge(s) for {} boundary vertices",
-                entity.0,
-                bulges.len(),
-                points.len()
-            ),
+        return Err(format!(
+            "has {} bulge(s) for {} boundary vertices",
+            bulges.len(),
+            points.len()
         ));
     }
     if bulges.is_empty() {
@@ -394,9 +411,5 @@ fn boundary_polyline(
         .into_iter()
         .map(|point| plane.to_world(point))
         .collect();
-    Ok(SemanticGeometry::Polyline {
-        points,
-        bulges,
-        closed: true,
-    })
+    Ok((points, bulges))
 }

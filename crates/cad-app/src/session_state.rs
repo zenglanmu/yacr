@@ -650,6 +650,8 @@ impl SessionState {
             DrawToolKind::DimRotated => CommandId::DimRotated,
             DrawToolKind::Hatch => CommandId::Hatch,
             DrawToolKind::HatchPoint => CommandId::HatchPoint,
+            // BOUNDARY: one internal point, shared discovery, new polylines.
+            DrawToolKind::Boundary => CommandId::Boundary,
             DrawToolKind::Text => CommandId::CreateText,
             // INSERT is point-then-name; the reference is created from existing
             // block metadata, never by writing the block table.

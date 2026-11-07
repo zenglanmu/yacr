@@ -63,6 +63,9 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     // HATCHPOINT captures one internal point (no selection; the boundary is
     // discovered from the point).
     ("HATCHPOINT", "draw.hatchpoint"),
+    // BOUNDARY shares that one-internal-point capture shape but its own machine
+    // key and command: it creates closed polylines, not a hatch.
+    ("BOUNDARY", "draw.boundary"),
     // The clipboard cluster's capture tools (`PASTECLIP` is insertion-point based
     // and `COPYBASE`/`CUTBASE` capture a base point over the selection).
     ("COPYBASE", "draw.copybase"),

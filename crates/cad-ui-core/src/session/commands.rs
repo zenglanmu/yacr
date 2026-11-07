@@ -164,6 +164,14 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // smallest visible closed boundary containing it. It is a real selector, not
     // an alias of HATCH (the input and the discovery are different).
     ("HATCHPOINT", CommandId::HatchPoint),
+    // BOUNDARY is the other **internal-point** selector: it reuses HATCHPOINT's
+    // discovery but creates one non-associative closed polyline per loop on the
+    // active layer instead of a hatch. It is a canonical selector of its own, not
+    // an alias of HATCH/HATCHPOINT, and `BO`/`BPOLY` are deliberately **not**
+    // admitted (an alias row would need `docs/shortcuts.md` §2b to change too).
+    // `-BOUNDARY` options (boundary set, island detection off, region output,
+    // object type) are NOT IMPLEMENTED.
+    ("BOUNDARY", CommandId::Boundary),
     ("HATCHGENERATEBOUNDARY", CommandId::HatchGenerateBoundary),
     ("HATCHTOBACK", CommandId::HatchToBack),
     ("MOVE", CommandId::MoveEntities),
@@ -180,6 +188,12 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("TORIENT", CommandId::Torient),
     ("TCASE", CommandId::TCase),
     ("TXT2MTXT", CommandId::Txt2MText),
+    // TEXTTOFRONT (AutoCAD 2026) reads the **current selection** (declared
+    // divergence from the interactive Select objects prompt) and rewrites the
+    // selected text/leader/dimension draw order above every non-eligible
+    // model-space object. Paper/block draw order and the all-objects form are NOT
+    // IMPLEMENTED.
+    ("TEXTTOFRONT", CommandId::TextToFront),
     ("CHAMFER", CommandId::ChamferLines),
     ("FILLET", CommandId::FilletLines),
     // The **Polyline mode** of the two corner commands. AutoCAD reaches it

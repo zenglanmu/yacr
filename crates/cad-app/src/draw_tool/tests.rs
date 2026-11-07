@@ -46,8 +46,9 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::CutBase
             | DrawToolKind::PasteClip
             | DrawToolKind::PasteBlock
-            // HATCHPOINT captures its one internal point.
+            // HATCHPOINT/BOUNDARY capture their one internal point.
             | DrawToolKind::HatchPoint
+            | DrawToolKind::Boundary
             // INSERT captures its one insertion point; the block name is the
             // terminal typed text. BLOCK captures its one base point; its name is
             // also the terminal typed text.

@@ -670,6 +670,24 @@ pub enum DrawToolKind {
     /// The fill parameters (pattern type/index, spacing, angle, double, style and
     /// the gradient channel) are the **same** session typed channel HATCH reads.
     HatchPoint,
+    /// BOUNDARY: pick **one internal point** and create one closed polyline per
+    /// discovered boundary loop (project-specific selector, like
+    /// [`Self::HatchPoint`]).
+    ///
+    /// The capture is exactly one free point ([`PointArity::Exact`]`(1)`); it
+    /// takes no entity picks ([`Self::picked_step_count`] is `0`) and does not
+    /// require a selection — the current selection is deliberately **not** used,
+    /// because the boundary is discovered from the point. The command layer owns
+    /// the discovery (the shared HATCHPOINT pipeline), the loop conversion and
+    /// every refusal.
+    ///
+    /// Declared v1 limits: only **whole visible** `Circle`, full `Ellipse` and
+    /// closed `Polyline` entities participate (no `LINE`/`ARC` edge chains, no
+    /// block-instance edges), only boundaries in the picked point's `+Z` plane are
+    /// considered, and `-BOUNDARY` options (boundary set, island detection off,
+    /// region output, object type) are **NOT IMPLEMENTED**. The created polylines
+    /// are non-associative and the source entities are retained. Work-only.
+    Boundary,
     /// BREAK: pick one LINE/ARC/CIRCLE/SPLINE (the first click is also the
     /// **first break point**) and then click the second break point.
     ///

@@ -46,6 +46,8 @@ impl CommandId {
                 | Self::DimSpace
                 | Self::Hatch
                 | Self::HatchPoint
+                // BOUNDARY writes new polylines from the discovered loops.
+                | Self::Boundary
                 | Self::HatchGenerateBoundary
                 | Self::HatchToBack
                 | Self::MoveEntities
@@ -117,6 +119,8 @@ impl CommandId {
                 | Self::Torient
                 | Self::TCase
                 | Self::Txt2MText
+                // TEXTTOFRONT rewrites stored model-space draw order.
+                | Self::TextToFront
         )
     }
 }

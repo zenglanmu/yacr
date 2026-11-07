@@ -549,6 +549,13 @@ impl HostController {
                 crate::CommandId::HatchPoint,
                 crate::CommandPayload::HatchPoint { seed },
             ),
+            // BOUNDARY: the one captured internal point travels on the payload;
+            // the shared boundary discovery, the island set and the loop-to-world
+            // conversion are the command layer's, so no selection is sent.
+            DrawIntent::Boundary { seed } => (
+                crate::CommandId::Boundary,
+                crate::CommandPayload::BoundaryPoint { seed },
+            ),
             // DIVIDE/LENGTHEN: the selection snapshot is the whole input (the
             // tool captures no points); the segment count / mode+amount are the
             // session typed channel the command layer reads, so they never ride

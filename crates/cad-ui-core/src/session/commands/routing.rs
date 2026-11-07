@@ -146,6 +146,10 @@ pub(crate) fn interaction_request_for(
         // HATCHPOINT captures one internal point; the command discovers the
         // boundary from it (the selection is not its input).
         CommandId::HatchPoint => Some(InteractionRequest::BeginDraw(DrawToolKind::HatchPoint)),
+        // BOUNDARY captures one internal point; the command discovers the
+        // containing boundary and creates closed polylines (the selection is not
+        // its input, exactly like HATCHPOINT).
+        CommandId::Boundary => Some(InteractionRequest::BeginDraw(DrawToolKind::Boundary)),
         CommandId::AlignEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Align)),
         CommandId::StretchEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Stretch)),
         CommandId::Measure => Some(InteractionRequest::BeginMeasurement(

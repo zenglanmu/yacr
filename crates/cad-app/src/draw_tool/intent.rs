@@ -396,6 +396,16 @@ pub enum DrawIntent {
     /// intent (HATCHPOINT does not use it), and the boundary entities are
     /// retained (no associativity).
     HatchPoint { seed: Point3 },
+    /// BOUNDARY: create one closed polyline per boundary loop discovered from the
+    /// internal point `seed`.
+    ///
+    /// `seed` is the one captured point, exactly as clicked. The boundary
+    /// discovery (the shared HATCHPOINT pipeline: whole visible circle/full
+    /// ellipse/closed polyline in the seed's `+Z` plane), the island set, the
+    /// loop-to-world conversion and every refusal live in the command layer; the
+    /// current selection is **not** part of this intent. The created polylines are
+    /// non-associative and the source entities are retained.
+    Boundary { seed: Point3 },
     /// INSERT: place a reference to the existing named block `name` so its stored
     /// base point lands on `insertion` (point-then-name capture).
     ///
