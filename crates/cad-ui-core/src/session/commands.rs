@@ -1,21 +1,12 @@
 //! The canonical command vocabulary and name normalization.
 
-use cad_app::{CommandId, MeasurementToolKind, PeditOption};
+use cad_app::{CommandId, MeasurementToolKind};
 
 use super::text_batch::{
     JUSTIFYTEXT_SELECTOR, TCIRCLE_SELECTOR, TCOUNT_SELECTOR, TEXTALIGN_SELECTOR, TSCALE_SELECTOR,
 };
 use super::text_commands::{TCASE_SELECTOR, TORIENT_SELECTOR};
 
-// The typed-argument grammar (split out for the code-size gate): the parsers and
-// their stable refusal reasons are re-exported so `session`'s paths are stable.
-mod arguments;
-pub use arguments::{
-    invalid_pdmode_argument_reason, invalid_pdsize_argument_reason, invalid_pedit_argument_reason,
-    invalid_snap_unit_argument_reason, invalid_zoom_argument_reason, parse_pdmode_argument,
-    parse_pdsize_argument, parse_pedit_argument, parse_snap_unit_argument, parse_zoom_argument,
-};
-pub(crate) use arguments::{parse_positive_decimal, parse_signed_decimal};
 /// The canonical command vocabulary: every [`CommandId`] variant with the stable
 /// uppercase selector a frontend uses to name it.
 ///
@@ -320,6 +311,17 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("LAYLCK", CommandId::LayLck),
     ("LAYULK", CommandId::LayUlk),
     ("SETBYLAYER", CommandId::SetByLayer),
+    // The 2026-11-07 layer batch. `LAYMCH`/`LAYMRG`/`LAYDEL` are selection-based
+    // (`CommandPayload::None`); the `-` spellings are aliases, not second
+    // commands. `LAYERSTATE`, `LTSCALE` and `LAYWALK` take a typed argument;
+    // `LAYERPMODE` reports on a bare name and takes ON/OFF as its argument.
+    ("LAYMCH", CommandId::LayMCh),
+    ("LAYMRG", CommandId::LayMrg),
+    ("LAYDEL", CommandId::LayDel),
+    ("LAYERSTATE", CommandId::LayerState),
+    ("LAYERPMODE", CommandId::LayerPmode),
+    ("LTSCALE", CommandId::SetLinetypeScale),
+    ("LAYWALK", CommandId::LayWalk),
     // A payload-requiring edit: the selector normalizes, and the application
     // refuses a bare invocation explicitly (the panel/IPC path supplies the
     // `EntityProperty { key, value }` payload).
@@ -443,6 +445,15 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 /// * [`TEXTALIGN_SELECTOR`] (`TEXTALIGN`): `LEFT|RIGHT|CENTER|TOP|MIDDLE|BOTTOM`.
 /// * [`TCOUNT_SELECTOR`] (`TCOUNT`): `<start> <step> [prefix] [suffix]`.
 /// * [`TCIRCLE_SELECTOR`] (`TCIRCLE`): `CIRCLE|RECTANGLE`.
+/// * [`LAYERSTATE_SELECTOR`] (`LAYERSTATE`): `SAVE <name>`, `RESTORE <name>`,
+///   `LIST` or `DELETE <name>` ([`parse_layerstate_argument`]); a bare selector
+///   is admitted and refused by the application with `layerstate.needs_option`.
+/// * [`LAYWALK_SELECTOR`] (`LAYWALK`): comma-separated layer names
+///   ([`parse_laywalk_argument`]); a bare selector is refused by the application.
+/// * [`LTSCALE_SELECTOR`] (`LTSCALE`): one positive finite decimal
+///   ([`parse_ltscale_argument`]); a bare selector is refused by the application.
+/// * [`LAYERPMODE_SELECTOR`] (`LAYERPMODE`): `ON` or `OFF`
+///   ([`parse_layerpmode_argument`]); a bare selector reports the current setting.
 pub const ARGUMENT_SELECTORS: &[&str] = &[
     ARGUMENT_SELECTOR,
     SNAPUNIT_SELECTOR,
@@ -459,7 +470,34 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     TEXTALIGN_SELECTOR,
     TCOUNT_SELECTOR,
     TCIRCLE_SELECTOR,
+    LAYERSTATE_SELECTOR,
+    LAYWALK_SELECTOR,
+    LTSCALE_SELECTOR,
+    LAYERPMODE_SELECTOR,
 ];
+
+/// Split a typed line into an argument-taking selector and its argument.
+///
+/// `Some((selector, argument))` only when `text` starts with one of
+/// [`ARGUMENT_SELECTORS`] followed by one or more spaces/tabs and a non-empty
+/// argument (`ZOOM 2`, `  snapunit\t0.5 `); a name-only line (`ZOOM`,
+/// `SNAPUNIT`) returns `None` so it keeps the name-only funnel and its existing
+/// payload refusal. The argument keeps its internal text: `ZOOM 2 3` reaches
+/// [`parse_zoom_argument`] as `2 3` and is refused there rather than being split
+/// a second time.
+pub fn typed_command_argument(text: &str) -> Option<(&'static str, &str)> {
+    let trimmed = text.trim();
+    let split = trimmed.find([' ', '\t'])?;
+    let (name, rest) = trimmed.split_at(split);
+    let argument = rest.trim_start_matches([' ', '\t']).trim_end();
+    if argument.is_empty() {
+        return None;
+    }
+    let selector = canonical_command_name(name)?;
+    ARGUMENT_SELECTORS
+        .contains(&selector)
+        .then_some((selector, argument))
+}
 
 /// AutoCAD's `ZOOM n` / `ZOOM ALL`: the first argument-taking selector.
 ///
@@ -539,53 +577,6 @@ pub const MEASUREGEOM_SELECTOR: &str = "MEASUREGEOM";
 /// explicit "needs a space payload" refusal.
 pub const SPACE_SELECTOR: &str = "SPACE";
 
-/// One parsed argument of the `ZOOM` selector.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ZoomArgument {
-    /// A positive finite **scale factor**: `> 1` zooms in, `< 1` zooms out —
-    /// the same convention as `ZOOMIN`/`ZOOMOUT` and
-    /// [`cad_app::CommandPayload::ZoomAt`]. The zoom is anchored at the
-    /// **viewport centre**, exactly like those cursor-less button steps.
-    Factor(f64),
-    /// `ALL` (the written-out spelling) or `EXTENTS`: frame the whole drawing,
-    /// i.e. the [`CommandId::FitDrawing`] path.
-    Fit,
-    /// `WINDOW`: start the **two-corner** capture. The next 2D primary drag
-    /// supplies the rectangle (canvas logical pixels, through the host's
-    /// box-gesture path) and its release dispatches one
-    /// [`cad_app::CommandPayload::ZoomWindow`]. The camera does not move when the
-    /// argument is admitted — only when the rectangle is completed — and a 3D
-    /// view refuses by name (`zoom.window.requires_2d`).
-    Window,
-    /// `PREVIOUS`: restore this viewport's last **discrete** view immediately
-    /// (no capture), i.e. [`cad_app::CommandPayload::ZoomPrevious`]. An empty
-    /// history is a `zoom.previous.empty` diagnostic, not an error.
-    Previous,
-}
-
-/// Split a typed line into an argument-taking selector and its argument.
-///
-/// `Some((selector, argument))` only when `text` starts with one of
-/// [`ARGUMENT_SELECTORS`] followed by one or more spaces/tabs and a non-empty
-/// argument (`ZOOM 2`, `  snapunit\t0.5 `); a name-only line (`ZOOM`,
-/// `SNAPUNIT`) returns `None` so it keeps the name-only funnel and its existing
-/// payload refusal. The argument keeps its internal text: `ZOOM 2 3` reaches
-/// [`parse_zoom_argument`] as `2 3` and is refused there rather than being split
-/// a second time.
-pub fn typed_command_argument(text: &str) -> Option<(&'static str, &str)> {
-    let trimmed = text.trim();
-    let split = trimmed.find([' ', '\t'])?;
-    let (name, rest) = trimmed.split_at(split);
-    let argument = rest.trim_start_matches([' ', '\t']).trim_end();
-    if argument.is_empty() {
-        return None;
-    }
-    let selector = canonical_command_name(name)?;
-    ARGUMENT_SELECTORS
-        .contains(&selector)
-        .then_some((selector, argument))
-}
-
 /// The canonical name in `table` matching the already-uppercased `key`, if any.
 fn table_name<T>(table: &[(&'static str, T)], key: &str) -> Option<&'static str> {
     table
@@ -658,6 +649,12 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     // restore path does here (drop every temporary override). It carries no
     // `CommandId` of its own, like `LAYUNISO`.
     ("LAYON", "RESTORELAYERS"),
+    // The command-line (`-`) spellings of the 2026-11-07 layer batch name the
+    // same commands: this build has no layer dialog, so the dialog-free form is
+    // the whole behaviour and a second `CommandId` would be a second path.
+    ("-LAYMCH", "LAYMCH"),
+    ("-LAYMRG", "LAYMRG"),
+    ("-LAYDEL", "LAYDEL"),
     ("DBA", "DIMBASELINE"),
     ("DCO", "DIMCONTINUE"),
     // `NEWLAYER` is a **project** word synonym for creating a layer, not an
@@ -834,6 +831,12 @@ pub fn admissible_names() -> Vec<&'static str> {
     }
     names
 }
+
+// The typed-argument grammars and their stable refusals (split out for the
+// code-size gate). Re-exported so every `commands::parse_*` path is unchanged.
+mod arguments;
+pub use arguments::*;
+pub(crate) use arguments::{parse_positive_decimal, parse_signed_decimal};
 
 // The selector -> interactive-tool routing table (split out for the code-size
 // gate). Re-exported so `commands::interaction_request_for` still resolves.

@@ -109,7 +109,11 @@ impl crate::SessionState {
     /// Called by the command layer **before** applying a real override change; see
     /// the module docs for the push rule.
     pub(crate) fn push_layer_override_snapshot(&mut self) {
-        self.layer_history.push(self.layer_overrides.clone());
+        // `LAYERPMODE OFF` suppresses the `LAYERP` step without changing which
+        // override is applied (see `crate::layer_states`).
+        if self.layer_states.snapshot_enabled() {
+            self.layer_history.push(self.layer_overrides.clone());
+        }
     }
 
     /// The number of `LAYERP` steps recorded in this session.

@@ -1240,5 +1240,15 @@
   "draw.kind.layulk": "Unlock selected layers",
   "draw.kind.layulk.hint": "Select the objects first; LAYULK unlocks the layer of every selected object.",
   "draw.kind.setbylayer": "Set properties to ByLayer",
-  "draw.kind.setbylayer.hint": "Select the objects first; SETBYLAYER resets colour, linetype and lineweight to ByLayer (transparency, materials and the other listed properties are not reset; Include blocks is not implemented)."
+  "draw.kind.setbylayer.hint": "Select the objects first; SETBYLAYER resets colour, linetype and lineweight to ByLayer (transparency, materials and the other listed properties are not reset; Include blocks is not implemented).",
+  "draw.kind.laymch": "Merge selection to first pick's layer (LAYMCH)",
+  "draw.kind.laymch.hint": "Select at least two objects first; the first pick's layer is the destination and the rest move onto it (one transaction, one undo step).",
+  "draw.kind.laymrg": "Merge layers (LAYMRG)",
+  "draw.kind.laymrg.hint": "Select objects first; their layers merge into the current layer and the source rows are deleted (layer-table edits are not undoable; the current layer and layer 0 cannot be sources).",
+  "draw.kind.laydel": "Delete layers (LAYDEL)",
+  "draw.kind.laydel.hint": "Select objects first; every model-space entity on their layers and the layer rows are deleted (paper-space/block entities are not deleted; the current layer and layer 0 are refused).",
+  "draw.kind.layerstate": "Named layer states (LAYERSTATE)",
+  "draw.kind.layerpmode": "Layer previous mode (LAYERPMODE)",
+  "draw.kind.ltscale": "Global linetype scale (LTSCALE)",
+  "draw.kind.laywalk": "Layer walk (LAYWALK)"
 }

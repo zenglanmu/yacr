@@ -48,10 +48,10 @@ const NO_DOCUMENT = { ...DOC, documentLabel: null, entityCount: null };
 const selected = count => ({ ...DOC, selection: { count } });
 
 /** The run's ids, in the panel's order. */
-const IDS = ['LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER'];
+const IDS = ['LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'LAYMCH', 'LAYMRG', 'LAYDEL', 'LAYERSTATE', 'LAYWALK'];
 
 /** Ids implemented so far in this lane (the file grows one commit at a time). */
-const IMPLEMENTED = ['LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER'];
+const IMPLEMENTED = ['LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'LAYMCH', 'LAYMRG', 'LAYDEL'];
 
 const SELECTION_COUNTS = {
   LAYCUR: 1,
@@ -61,6 +61,9 @@ const SELECTION_COUNTS = {
   LAYLCK: 1,
   LAYULK: 1,
   SETBYLAYER: 1,
+  LAYMCH: 2,
+  LAYMRG: 1,
+  LAYDEL: 1,
 };
 
 function layersPanel() {

@@ -43,6 +43,7 @@ mod app_audit;
 mod app_reports;
 mod app_zoom;
 mod layer_history;
+mod layer_states;
 mod space;
 
 pub use api::{
@@ -74,6 +75,7 @@ pub use input::{
     PointerPhase, PointerUpdate, StatusModel, ToolStatus, ViewMetrics, DRAG_THRESHOLD_LOGICAL_PX,
 };
 pub use layer_history::{LayerOverrideHistory, LAYER_OVERRIDE_HISTORY_CAP};
+pub use layer_states::{LayerStates, NamedLayerState, LAYER_STATE_CAP};
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 pub use ortho::{ortho_constrain, ortho_constrain_point};
 pub use picking::{
@@ -334,10 +336,10 @@ mod command_payload;
 
 pub use command_payload::{
     AngularDimensionInput, CommandPayload, DimensionChainCommand, GripStretchCommand,
-    HatchEditOption, JustifyTextCommand, MeasureGeomOption, OrdinateAxis, OrdinateDimensionCommand,
-    PeditOption, RadialDimensionCommand, RotatedLinearDimensionCommand, TCircleCommand,
-    TCountCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode,
-    TextScaleCommand, TwoLineCommand,
+    HatchEditOption, JustifyTextCommand, LayerStateCommand, MeasureGeomOption, OrdinateAxis,
+    OrdinateDimensionCommand, PeditOption, RadialDimensionCommand, RotatedLinearDimensionCommand,
+    TCircleCommand, TCountCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape,
+    TextCaseMode, TextScaleCommand, TwoLineCommand,
 };
 
 pub struct Command {

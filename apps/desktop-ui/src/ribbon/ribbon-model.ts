@@ -91,6 +91,13 @@ export const PALETTE_COMMANDS: readonly string[] = Object.freeze([
   'LAYLCK',
   'LAYULK',
   'SETBYLAYER',
+  // The 2026-11-07 layer batch lives in the same panel and changes layer state,
+  // so it follows the same carrier rule.
+  'LAYMCH',
+  'LAYMRG',
+  'LAYDEL',
+  'LAYERSTATE',
+  'LAYWALK',
   // `FONTS` opens the read-only Font Manager, which is a palette window on the
   // desktop (and a floating sheet on the compact layout). A carrier that never
   // renders the palette layer has no surface for that report, so the button is

@@ -697,7 +697,7 @@ test('LAYER is not offered as a ribbon affordance on a carrier without palettes'
   // The layer-state commands ride the same carrier filter: a carrier that never
   // renders the layers palette has no surface for the isolation, previous-state or
   // off/on state.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'FONTS']);
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'LAYMCH', 'LAYMRG', 'LAYDEL', 'LAYERSTATE', 'LAYWALK', 'FONTS']);
   const layer = { id: 'LAYER', labelKey: 'layers.panel', command: 'LAYER' };
   const properties = { id: 'PROPERTIES', labelKey: 'properties.panel', action: 'properties' };
   const items = [layer, properties, { id: 'OPEN', command: 'OPEN' }];

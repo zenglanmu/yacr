@@ -278,7 +278,7 @@ test('LAYERP sits beside LAYUNISO in the Layers panel and rides the palette filt
   // moves a shipped button beyond the two the run already ends with.
   assert.deepEqual(
     layers.items.map(item => item.id),
-    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER'],
+    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'LAYMCH', 'LAYMRG', 'LAYDEL', 'LAYERSTATE', 'LAYWALK'],
   );
   const layerp = layers.items.find(item => item.id === 'LAYERP');
   assert.equal(layerp.command, 'LAYERP');
@@ -308,7 +308,7 @@ test('LAYERP sits beside LAYUNISO in the Layers panel and rides the palette filt
 
   // The state it restores is only named in the palette, so the button is dropped
   // with it: no live affordance that changes layer visibility invisibly.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'FONTS']);
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'LAYMCH', 'LAYMRG', 'LAYDEL', 'LAYERSTATE', 'LAYWALK', 'FONTS']);
   assert.deepEqual(offeredItems(layers.items, false), []);
   assert.equal(offeredItems(layers.items, true), layers.items);
   assert.equal(

@@ -10,6 +10,7 @@ mod gradient;
 mod hatchedit;
 mod import_accounting;
 mod input_and_lifecycle;
+mod layer_arguments;
 mod layout_status;
 mod pedit;
 mod point_style;

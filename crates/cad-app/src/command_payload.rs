@@ -13,11 +13,13 @@ use cad_domain::{
     LayerId, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH, TextAlignV,
 };
 
-use crate::grips::GripId;
 use crate::{AppMode, BackendChoice, MeasurementToolKind, SelectionMode, StandardView};
 
 mod text_batch;
 pub use text_batch::*;
+
+mod payload_extra;
+pub use payload_extra::*;
 
 /// The two straight-line picks of a CHAMFER/FILLET command (ADR 0016 decisions
 /// B/C): the two picked refs in pick order and the raw click point that selects
@@ -196,42 +198,6 @@ pub struct OrdinateDimensionCommand {
     pub feature: Point3,
     pub leader: Point3,
     pub axis: Option<OrdinateAxis>,
-}
-
-/// The input of a DIMBASELINE/DIMCONTINUE command (ADR 0017 decision C, P5f):
-/// the picked linear base dimension plus the N picked points, in pick order.
-///
-/// Boxed inside [`CommandPayload::DimChain`] so the command enum stays small (the
-/// same reason [`TwoLineCommand`] is boxed). Which of the two commands it is comes
-/// from the [`CommandId`], so the payload carries no kind field (a second source
-/// of truth).
-///
-/// The base is the ref resolved **at pick time**; the command re-reads it, so a
-/// base that was deleted (or replaced) since the pick is refused by name and
-/// nothing is written. The entity stores **no** base identity and no row index
-/// (the ADR's non-associative boundary): each created dimension is an ordinary,
-/// independent `DIMENSION`.
-pub struct DimensionChainCommand {
-    pub base: SelectionRef,
-    /// The picked points in pick order; the command refuses an empty list.
-    pub points: Vec<Point3>,
-}
-
-/// The input of a `GRIPSTRETCH` command: **one** handle drag on **one** entity.
-///
-/// `id` is the handle resolved at pick time (which entity, which kind of handle,
-/// which one — see [`crate::grips::GripId`]) and `to` the world point the drag
-/// resolved to. Boxed inside [`CommandPayload::GripStretch`] so the payload enum
-/// stays small (the same reason [`TwoLineCommand`] and [`DimensionChainCommand`]
-/// are boxed).
-///
-/// `id` is a caller-held reference into geometry that may have moved or been
-/// deleted since it was read, so the command re-reads the entity and re-validates
-/// the handle against the **current** geometry instead of trusting it.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GripStretchCommand {
-    pub id: GripId,
-    pub to: Point3,
 }
 
 pub enum CommandPayload {
@@ -972,9 +938,8 @@ pub enum CommandPayload {
     /// `grip.unsupported_kind`; this never routes through
     /// [`CommandId::StretchEntities`] (crossing-window stretch).
     GripStretch(Box<GripStretchCommand>),
-    /// The option of a `MEASUREGEOM <option>` line that reaches the command layer
-    /// (only `Radius` and `Volume`; the four tool options are routed by the
-    /// session to their existing `BeginMeasurement` requests).
+    /// The option of a `MEASUREGEOM <option>` line (only `Radius`/`Volume`; the
+    /// four tool options route to their existing `BeginMeasurement` requests).
     MeasureGeom(MeasureGeomOption),
     /// `JUSTIFYTEXT <H> <V>` / `TJUST <H> <V>` (Work-only): set only the
     /// alignment pair of the selected Text/MText. Full contract:
@@ -996,4 +961,15 @@ pub enum CommandPayload {
     /// around each selected text. Full contract:
     /// [`crate::command_id::text_batch::TCircleCommand`].
     TextCircle(TCircleCommand),
+    /// The option of a typed `LAYERSTATE <option>` line.
+    LayerState(LayerStateCommand),
+    /// The target state of `LAYERPMODE ON|OFF` (session-only; gates `LAYERP`
+    /// snapshots). Bare `LAYERPMODE` carries `None` and reports.
+    LayerPmode(bool),
+    /// The value of a typed `LTSCALE <value>` line: finite and strictly positive,
+    /// one header revision bump, no undo entry.
+    LinetypeScale(f64),
+    /// The layer names of a typed `LAYWALK <name>[,<name>...]` line: session
+    /// overrides only (plus the active layer), same atomic path as `LAYISO`.
+    LayerWalk(Vec<String>),
 }

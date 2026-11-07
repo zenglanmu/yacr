@@ -9,6 +9,7 @@ use crate::draw_tool::{
     DEFAULT_POLYGON_SIDES,
 };
 use crate::layer_history::LayerOverrideHistory;
+use crate::layer_states::LayerStates;
 use crate::layers::LayerOverrideSet;
 use crate::measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 use crate::selection::SelectionSet;
@@ -37,6 +38,8 @@ pub struct SessionState {
     /// Bounded history of layer-override snapshots for `LAYERP`
     /// ([`crate::layer_history`]): session view state only, never persisted.
     pub layer_history: LayerOverrideHistory,
+    /// Named layer states (`LAYERSTATE`) plus the `LAYERPMODE` gate.
+    pub layer_states: LayerStates,
     pub tool: ToolState,
     /// Generation incremented whenever an active tool lifecycle is replaced.
     pub tool_generation: u64,
@@ -132,15 +135,12 @@ pub struct SessionState {
     /// milliseconds (default **20**).
     ///
     /// **Explicit deviation from AutoCAD**, not a parity claim: AutoCAD defines
-    /// no dwell for the hover highlight (the highlight is immediate and only
-    /// distance/pickbox-gated — verified against the sysvar set). The product
-    /// owner asked for a deferred highlight so a fast sweep paints nothing; the
-    /// owner then lowered the default from 300 ms to 20 ms, which at a 60 Hz
-    /// frame cadence is roughly one frame: it filters within-frame jitter and
-    /// small sweeps, and no longer suppresses a deliberate fast sweep.
+    /// no dwell (its highlight is immediate and only distance/pickbox-gated).
+    /// The owner asked for a deferred highlight so a fast sweep paints nothing,
+    /// then lowered the default from 300 ms to 20 ms — about one frame at 60 Hz,
+    /// which filters jitter and tiny sweeps without suppressing a fast sweep.
     /// `0` restores the immediate highlight (the documented escape hatch). Read
     /// only when the preview is enabled; object-snap markers are unaffected.
-    /// Session/display state only.
     hover_dwell_ms: u64,
     /// The last structured measurement result produced in this session (F06).
     ///
@@ -194,6 +194,7 @@ impl SessionState {
             selection: SelectionSet::new(),
             layer_overrides: LayerOverrideSet::new(),
             layer_history: LayerOverrideHistory::new(),
+            layer_states: LayerStates::new(),
             tool: ToolState::Idle,
             tool_generation: 0,
             generation: 0,

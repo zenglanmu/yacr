@@ -1240,5 +1240,15 @@
   "draw.kind.layulk": "解锁选中图层",
   "draw.kind.layulk.hint": "请先选择对象；LAYULK 会解锁每个选中对象所在的图层。",
   "draw.kind.setbylayer": "特性设为随层",
-  "draw.kind.setbylayer.hint": "请先选择对象；SETBYLAYER 会把颜色、线型和线宽重置为随层（透明度、材质等不在重置范围；未实现 Include blocks）。"
+  "draw.kind.setbylayer.hint": "请先选择对象；SETBYLAYER 会把颜色、线型和线宽重置为随层（透明度、材质等不在重置范围；未实现 Include blocks）。",
+  "draw.kind.laymch": "并入首选取对象的图层 (LAYMCH)",
+  "draw.kind.laymch.hint": "请先选择至少两个对象；第一个选取对象所在的图层是目标图层，其余对象会移到该图层（一个事务、一步撤销）。",
+  "draw.kind.laymrg": "合并图层 (LAYMRG)",
+  "draw.kind.laymrg.hint": "请先选择对象；所选对象所在图层会合并到当前图层，源图层随后删除（图层表编辑不可撤销；当前层与 0 层不能作为源）。",
+  "draw.kind.laydel": "删除图层 (LAYDEL)",
+  "draw.kind.laydel.hint": "请先选择对象；所选对象所在图层上的模型空间实体与图层本身会被删除（图纸/块内实体不删除；当前层与 0 层不能删除）。",
+  "draw.kind.layerstate": "命名图层状态 (LAYERSTATE)",
+  "draw.kind.layerpmode": "图层回退模式 (LAYERPMODE)",
+  "draw.kind.ltscale": "全局线型比例 (LTSCALE)",
+  "draw.kind.laywalk": "图层漫游 (LAYWALK)"
 }

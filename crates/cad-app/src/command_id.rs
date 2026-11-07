@@ -1,10 +1,4 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppMode {
-    Viewer,
-    Work,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandId {
     OpenDrawing,
     /// Start a new, empty drawing. Host-owned like `OpenDrawing`: the
@@ -32,30 +26,20 @@ pub enum CommandId {
     /// Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,
     RestoreLayers,
-    /// `LAYERP`: restore the **previous layer state** — AutoCAD's "previous layer state" stack.
+    /// `LAYERP`: restore the **previous layer state**.
     ///
     /// Payload is [`crate::CommandPayload::None`]; a caller that supplies one is
     /// refused (`layers.previous.invalid_payload`), never silently ignored. The
-    /// session keeps a **bounded** history of layer-override snapshots
-    /// ([`crate::LAYER_OVERRIDE_HISTORY_CAP`] entries, oldest dropped first); the
-    /// pre-change snapshot is pushed by every override mutation that really changes
-    /// something (`ToggleLayer`, `SetLayerVisibilities`, `IsolateLayers`,
-    /// `LayOff`, `RestoreLayers`), and a mutation that changes nothing pushes
-    /// nothing. `LAYERP` **pops** the newest snapshot and applies it: it never
-    /// pushes, so repeated `LAYERP` walks back through the recorded states and
-    /// cannot ping-pong.
+    /// session keeps a **bounded** history of layer-override snapshots (cap
+    /// [`crate::LAYER_OVERRIDE_HISTORY_CAP`], oldest dropped first), pushed by
+    /// every override mutation that really changes something; `LAYERPMODE OFF`
+    /// suppresses those pushes. `LAYERP` **pops** the newest snapshot and applies
+    /// it: it never pushes, so repeated presses walk back monotonically.
     ///
-    /// An empty history is not an error and changes nothing: it reports the
-    /// `layers.previous.empty` diagnostic — the same shape as `RestoreLayers`,
-    /// which reports "nothing to restore" as a no-op rather than a failure.
-    ///
-    /// No database write, no revision bump, no history (`cad-history`) entry and
-    /// no persisted preference: overrides are session view state. Allowed in
-    /// Viewer and Work (a session view operation, not an edit).
-    ///
-    /// AutoCAD's `LAYERP` walks back one step; `LAYRDO`/`LAYRSTATE` (named layer
-    /// states) are **NOT IMPLEMENTED** — this history is an in-memory stack of
-    /// session override sets, not a saved layer state.
+    /// An empty history is not an error: it reports `layers.previous.empty` and
+    /// changes nothing. No database write, revision bump, history entry or
+    /// preference: overrides are session view state, so Viewer and Work both
+    /// allow it. Named layer states are `LAYERSTATE`, a separate command.
     LayerPrevious,
     /// `LAYISO`: hide every layer the selection is not on (plus the current
     /// layer) using session visibility overrides only. Full contract:
@@ -797,6 +781,20 @@ pub enum CommandId {
     LayLck,
     LayUlk,
     SetByLayer,
+    /// `LAYMCH` / `-LAYMCH`: move the selection to the first pick's layer.
+    LayMCh,
+    /// `LAYMRG` / `-LAYMRG`: merge the selection's layers into the active layer.
+    LayMrg,
+    /// `LAYDEL` / `-LAYDEL`: delete the selection's layers and their model entities.
+    LayDel,
+    /// `LAYERSTATE <option>`: bounded named layer states (`SAVE`/`RESTORE`/`LIST`/`DELETE`).
+    LayerState,
+    /// `LAYERPMODE [ON|OFF]`: gate whether override mutations record `LAYERP` snapshots.
+    LayerPmode,
+    /// `LTSCALE <value>`: write the drawing-global linetype scale (`$LTSCALE`).
+    SetLinetypeScale,
+    /// `LAYWALK <name>[,<name>...]`: keep only the named layers plus the active layer visible.
+    LayWalk,
     /// `PDMODE <n>`: write the drawing-global POINT display mode `$PDMODE`; full
     /// contract in [`crate::command_id::point_style`].
     SetPointDisplayMode,
@@ -951,6 +949,8 @@ pub enum CommandId {
 }
 
 mod capabilities;
+mod mode;
+pub use mode::AppMode;
 
 pub mod area_object;
 pub mod block_define;

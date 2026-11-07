@@ -1,16 +1,50 @@
-//! The typed-argument grammar of the argument-taking selectors.
+//! Typed-argument grammars for the command-line selectors.
 //!
-//! Split out of `commands.rs` (which is at the file-size ceiling) with the
-//! bodies unchanged; `commands` re-exports every public parser and refusal
-//! reason, so the existing `session` paths are unchanged.
+//! Split out of `commands.rs` (which is at the file-size ceiling). Every parser
+//! here is pure: it decides whether the trimmed argument is inside its selector's
+//! founded grammar and, when it is, returns the typed value the session
+//! dispatches. Nothing is clamped, defaulted or silently repaired.
 //!
-//! The numeric grammar is deliberately narrow (`[+-]digits[.digits]`): no
-//! exponent, no bare `.`/`5.`, no embedded spaces. Each parser documents its own
-//! accepted shape and refuses everything else with `None`; the caller turns that
-//! into the stable `invalid_*_argument_reason` sentence. Nothing is clamped and
-//! no default value is invented.
+//! `ARGUMENT_SELECTORS` in the parent module is the admission list; an argument
+//! parser only ever sees text for a selector that list already admitted.
 
-use super::{PeditOption, ZoomArgument};
+use cad_app::PeditOption;
+
+/// AutoCAD's `LAYERSTATE <option>`: the bounded named layer-state store.
+pub const LAYERSTATE_SELECTOR: &str = "LAYERSTATE";
+
+/// AutoCAD's `LAYWALK <names>`: show only the named layers plus the current one.
+pub const LAYWALK_SELECTOR: &str = "LAYWALK";
+
+/// AutoCAD's `LTSCALE <value>`: the drawing-global linetype scale sysvar.
+pub const LTSCALE_SELECTOR: &str = "LTSCALE";
+
+/// AutoCAD's `LAYERPMODE [ON|OFF]`: the `LAYERP` snapshot-recording gate.
+pub const LAYERPMODE_SELECTOR: &str = "LAYERPMODE";
+
+/// One parsed argument of the `ZOOM` selector.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ZoomArgument {
+    /// A positive finite **scale factor**: `> 1` zooms in, `< 1` zooms out —
+    /// the same convention as `ZOOMIN`/`ZOOMOUT` and
+    /// [`cad_app::CommandPayload::ZoomAt`]. The zoom is anchored at the
+    /// **viewport centre**, exactly like those cursor-less button steps.
+    Factor(f64),
+    /// `ALL` (the written-out spelling) or `EXTENTS`: frame the whole drawing,
+    /// i.e. the [`cad_app::CommandId::FitDrawing`] path.
+    Fit,
+    /// `WINDOW`: start the **two-corner** capture. The next 2D primary drag
+    /// supplies the rectangle (canvas logical pixels, through the host's
+    /// box-gesture path) and its release dispatches one
+    /// [`cad_app::CommandPayload::ZoomWindow`]. The camera does not move when the
+    /// argument is admitted — only when the rectangle is completed — and a 3D
+    /// view refuses by name (`zoom.window.requires_2d`).
+    Window,
+    /// `PREVIOUS`: restore this viewport's last **discrete** view immediately
+    /// (no capture), i.e. [`cad_app::CommandPayload::ZoomPrevious`]. An empty
+    /// history is a `zoom.previous.empty` diagnostic, not an error.
+    Previous,
+}
 
 /// Parse the argument of a `ZOOM` selector: a positive decimal factor, or
 /// `ALL` / `EXTENTS` / `WINDOW` / `PREVIOUS` (case-insensitive, surrounding
@@ -113,6 +147,87 @@ pub fn parse_pdsize_argument(argument: &str) -> Option<f64> {
     parse_signed_decimal(argument.trim())
 }
 
+/// One parsed argument of the `LAYERSTATE` selector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LayerStateOption {
+    /// Snapshot the current layers under a name.
+    Save(String),
+    /// Apply a saved snapshot.
+    Restore(String),
+    /// Report every saved name.
+    List,
+    /// Drop one saved snapshot.
+    Delete(String),
+}
+
+/// Parse the argument of a `LAYERSTATE` selector:
+/// `SAVE <name>`, `RESTORE <name>`, `LIST` or `DELETE <name>`.
+///
+/// The keyword is case-insensitive; the name is the trimmed remainder (it may
+/// contain spaces) and must be non-empty. `LIST` takes no name; a name supplied
+/// after `LIST`, a missing name after the other three keywords, and any other
+/// keyword are refused with `None`, which the caller turns into
+/// [`invalid_layerstate_argument_reason`]. Nothing is defaulted.
+pub fn parse_layerstate_argument(argument: &str) -> Option<LayerStateOption> {
+    let text = argument.trim();
+    let (keyword, rest) = match text.find([' ', '\t']) {
+        Some(index) => (&text[..index], text[index..].trim()),
+        None => (text, ""),
+    };
+    match keyword.to_ascii_uppercase().as_str() {
+        "LIST" if rest.is_empty() => Some(LayerStateOption::List),
+        "SAVE" if !rest.is_empty() => Some(LayerStateOption::Save(rest.to_string())),
+        "RESTORE" if !rest.is_empty() => Some(LayerStateOption::Restore(rest.to_string())),
+        "DELETE" if !rest.is_empty() => Some(LayerStateOption::Delete(rest.to_string())),
+        _ => None,
+    }
+}
+
+/// Parse the argument of a `LAYWALK` selector: comma-separated layer names.
+///
+/// Surrounding whitespace is trimmed from every name; an empty list, an empty
+/// entry (`WALLS,,DIMS`), a bare comma and a blank argument are refused with
+/// `None` ([`invalid_laywalk_argument_reason`]). Duplicates are allowed — the
+/// command dedupes by resolved layer id. Nothing is resolved here: the names are
+/// matched against the authoritative drawing by the application.
+pub fn parse_laywalk_argument(argument: &str) -> Option<Vec<String>> {
+    let mut names = Vec::new();
+    for part in argument.split(',') {
+        let name = part.trim();
+        if name.is_empty() {
+            return None;
+        }
+        names.push(name.to_string());
+    }
+    (!names.is_empty()).then_some(names)
+}
+
+/// Parse the argument of a `LTSCALE` selector: one positive finite decimal.
+///
+/// The numeric shape is [`parse_snap_unit_argument`]'s (unsigned plain decimal):
+/// signs, exponents, zero, `NaN`/`inf` and embedded spaces are refused with
+/// `None` ([`invalid_ltscale_argument_reason`]). The database repeats the
+/// positivity/finiteness check, so a value cannot slip past a second caller.
+pub fn parse_ltscale_argument(argument: &str) -> Option<f64> {
+    parse_positive_decimal(argument.trim())
+}
+
+/// Parse the argument of a `LAYERPMODE` selector: `ON` or `OFF`.
+///
+/// Case-insensitive, surrounding whitespace ignored. Nothing else is admitted;
+/// the caller turns `None` into [`invalid_layerpmode_argument_reason`]. The bare
+/// selector is admitted separately and reports the current setting.
+pub fn parse_layerpmode_argument(argument: &str) -> Option<bool> {
+    let key = argument.trim();
+    if key.eq_ignore_ascii_case("ON") {
+        return Some(true);
+    }
+    if key.eq_ignore_ascii_case("OFF") {
+        return Some(false);
+    }
+    None
+}
+
 /// The stable rejection reason for a `ZOOM` argument outside the grammar.
 ///
 /// One wording for one fact: the typed line is echoed verbatim and the accepted
@@ -175,12 +290,48 @@ pub fn invalid_pdsize_argument_reason(text: &str) -> String {
     )
 }
 
+/// The stable rejection reason for a `LAYERSTATE` argument outside the grammar.
+pub fn invalid_layerstate_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (LAYERSTATE needs SAVE <name>, RESTORE <name>, LIST or \
+         DELETE <name>)",
+        text.trim()
+    )
+}
+
+/// The stable rejection reason for a `LAYWALK` argument outside the grammar.
+pub fn invalid_laywalk_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (LAYWALK needs one or more layer names separated by commas, \
+         e.g. `LAYWALK WALLS,DIMS`)",
+        text.trim()
+    )
+}
+
+/// The stable rejection reason for a `LTSCALE` argument outside the grammar.
+pub fn invalid_ltscale_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (LTSCALE needs one positive finite decimal, e.g. `LTSCALE \
+         2.5`)",
+        text.trim()
+    )
+}
+
+/// The stable rejection reason for a `LAYERPMODE` argument outside the grammar.
+pub fn invalid_layerpmode_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (LAYERPMODE needs ON or OFF; a bare LAYERPMODE reports the \
+         current setting)",
+        text.trim()
+    )
+}
+
 /// Whether `text` is a plain positive decimal number (`digits[.digits]`).
 ///
 /// A leading sign is refused here even though
-/// [`parse_signed_decimal`] accepts one: `ZOOM`/`SNAPUNIT` have always refused
-/// `+5`/`-5` (a spacing is written unsigned), and widening their grammar would
-/// change an existing refusal contract.
+/// [`parse_signed_decimal`] accepts one: `ZOOM`/`SNAPUNIT`/`LTSCALE` have always
+/// refused `+5`/`-5` (a spacing/scale is written unsigned), and widening their
+/// grammar would change an existing refusal contract.
 pub(crate) fn parse_positive_decimal(text: &str) -> Option<f64> {
     if text.starts_with(['+', '-']) {
         return None;

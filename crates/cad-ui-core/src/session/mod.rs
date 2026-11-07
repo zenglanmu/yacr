@@ -31,6 +31,7 @@ mod fonts;
 mod hatchedit;
 mod import_progress;
 mod input;
+mod layer_arguments;
 mod layers;
 mod layout_tabs;
 mod measuregeom;
@@ -91,14 +92,18 @@ pub use self::command_log::{
 };
 pub use self::commands::{
     admissible_names, alias_pairs, canonical_command_name, command_name,
+    invalid_layerpmode_argument_reason, invalid_layerstate_argument_reason,
+    invalid_laywalk_argument_reason, invalid_ltscale_argument_reason,
     invalid_pdmode_argument_reason, invalid_pdsize_argument_reason, invalid_pedit_argument_reason,
     invalid_snap_unit_argument_reason, invalid_zoom_argument_reason, measurement_selector_kind,
-    normalize_command, parse_pdmode_argument, parse_pdsize_argument, parse_pedit_argument,
-    parse_snap_unit_argument, parse_zoom_argument, typed_command_argument,
-    unsupported_command_reason, zoom_step_factor, ZoomArgument, ARGUMENT_SELECTOR,
-    ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE, HATCHEDIT_SELECTOR, MEASUREMENT_SELECTORS,
-    PDMODE_SELECTOR, PDSIZE_SELECTOR, PEDIT_SELECTOR, SNAPUNIT_SELECTOR, SPACE_SELECTOR,
-    ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
+    normalize_command, parse_layerpmode_argument, parse_layerstate_argument,
+    parse_laywalk_argument, parse_ltscale_argument, parse_pdmode_argument, parse_pdsize_argument,
+    parse_pedit_argument, parse_snap_unit_argument, parse_zoom_argument, typed_command_argument,
+    unsupported_command_reason, zoom_step_factor, LayerStateOption, ZoomArgument,
+    ARGUMENT_SELECTOR, ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE, HATCHEDIT_SELECTOR,
+    LAYERPMODE_SELECTOR, LAYERSTATE_SELECTOR, LAYWALK_SELECTOR, LTSCALE_SELECTOR,
+    MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR, PEDIT_SELECTOR, SNAPUNIT_SELECTOR,
+    SPACE_SELECTOR, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
 pub use self::events::{
     cursor_changed, derive_batch, same_status_ignoring_volatile, CadEvent, CadEventKind,
@@ -304,29 +309,17 @@ impl CadSession {
     ///
     /// Every other mapped command is dispatched as `core.command(CommandId,
     /// CommandPayload::None)`, exactly as before. A name that maps to no command
-    /// is refused **before** the host is touched, with a stable reason, so an
-    /// unsupported command changes nothing and is never a silent no-op.
+    /// is refused **before** the host is touched, with a stable reason. A variant
+    /// that requires a payload is still dispatched through the same funnel and the
+    /// application/host layer refuses it explicitly rather than fabricating a
+    /// success; selection-requiring tools are **not** pre-rejected here.
     ///
-    /// A command whose variant requires a payload (for example `CreateLine` or
-    /// `StandardView`) is still dispatched through the same funnel; the
-    /// application/host layer then refuses it explicitly rather than fabricating
-    /// a success. Selection-requiring tools are **not** pre-rejected here:
-    /// `cad_app` refuses them at confirm (`DrawTool::is_ready`), the single
-    /// authority for that decision.
-    ///
-    /// The argument forms this funnel understands are the typed selector
-    /// arguments ([`ARGUMENT_SELECTORS`]):
-    ///
-    /// * `ZOOM <argument>`: `ZOOM 2` / `ZOOM 0.5` apply that **scale factor**
-    ///   (`> 1` zooms in, `< 1` zooms out) about the viewport centre through the
-    ///   same [`CadSession::zoom_step`] the `ZOOMIN`/`ZOOMOUT` buttons use, and
-    ///   `ZOOM ALL` (`EXTENTS`) dispatches the ordinary `FIT`;
-    /// * `SNAPUNIT <value>`: sets the session grid-snap spacing;
-    /// * `PDMODE`/`PDSIZE` write the POINT style; `TORIENT`/`TCASE`/`PEDIT`/`MEASUREGEOM` take one option.
-    ///
-    /// An argument outside a selector's grammar is refused with a stable reason,
-    /// recorded for `cad_status.error`, and changes nothing. A selector with
-    /// **no** argument keeps the name-only payload refusal below.
+    /// The typed selector argument forms are listed in [`ARGUMENT_SELECTORS`]
+    /// (`ZOOM`, `SNAPUNIT`, `PDMODE`/`PDSIZE`, `SPACE`, `TORIENT`/`TCASE`, `PEDIT`,
+    /// `HATCHEDIT`, `MEASUREGEOM`, `LAYERSTATE`, `LAYWALK`, `LTSCALE`,
+    /// `LAYERPMODE`). An argument outside a selector's grammar is refused with a
+    /// stable reason, recorded for `cad_status.error`, and changes nothing; a
+    /// selector with **no** argument keeps the name-only payload refusal below.
     pub fn command(&self, text: &str) -> Result<(), String> {
         let Some(name) = canonical_command_name(text) else {
             // A typed **argument** on an argument-taking selector: not a new

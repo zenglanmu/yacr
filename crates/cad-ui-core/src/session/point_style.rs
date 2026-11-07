@@ -69,6 +69,11 @@ impl CadSession {
             // shape ride the payload; the selection is still the input.
             JUSTIFYTEXT_SELECTOR | TSCALE_SELECTOR | TEXTALIGN_SELECTOR | TCOUNT_SELECTOR
             | TCIRCLE_SELECTOR => self.text_batch_argument(selector, argument, text),
+            // The 2026-11-07 layer batch argument forms.
+            super::commands::LAYERSTATE_SELECTOR => self.layer_state_argument(argument, text),
+            super::commands::LAYWALK_SELECTOR => self.layer_walk_argument(argument, text),
+            super::commands::LTSCALE_SELECTOR => self.linetype_scale_argument(argument, text),
+            super::commands::LAYERPMODE_SELECTOR => self.layer_pmode_argument(argument, text),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

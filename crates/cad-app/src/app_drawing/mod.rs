@@ -65,6 +65,7 @@ mod insert_block;
 mod join;
 mod layer_commands;
 mod layer_edit;
+mod layer_extended;
 mod lengthen;
 mod match_prop;
 mod mirror_curves;

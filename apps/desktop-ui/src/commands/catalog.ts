@@ -345,6 +345,17 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'LAYLCK', labelKey: 'draw.kind.laylck', icon: 'layers', group: 'annotate' },
   { id: 'LAYULK', labelKey: 'draw.kind.layulk', icon: 'layers', group: 'annotate' },
   { id: 'SETBYLAYER', labelKey: 'draw.kind.setbylayer', icon: 'layers', group: 'annotate' },
+  // The 2026-11-07 layer batch. LAYMCH/LAYMRG/LAYDEL are pre-selection based;
+  // LAYERSTATE, LTSCALE and LAYWALK take typed arguments, so their catalogue rows
+  // are the command-line affordance (no variant popover). The `-` spellings are
+  // aliases of the same commands and therefore get no row of their own.
+  { id: 'LAYMCH', labelKey: 'draw.kind.laymch', icon: 'layers', group: 'annotate' },
+  { id: 'LAYMRG', labelKey: 'draw.kind.laymrg', icon: 'layers', group: 'annotate' },
+  { id: 'LAYDEL', labelKey: 'draw.kind.laydel', icon: 'erase', group: 'annotate' },
+  { id: 'LAYERSTATE', labelKey: 'draw.kind.layerstate', icon: 'layers', group: 'annotate' },
+  { id: 'LAYERPMODE', labelKey: 'draw.kind.layerpmode', icon: 'layers', group: 'annotate' },
+  { id: 'LTSCALE', labelKey: 'draw.kind.ltscale', icon: 'layers', group: 'annotate' },
+  { id: 'LAYWALK', labelKey: 'draw.kind.laywalk', icon: 'eye', group: 'annotate' },
   // FONTS opens the read-only Font Manager (`cad_fonts`). It is a chrome-local
   // selector like LAYER/PROPERTIES, so the command line and the ribbon open the
   // panel without the router ever seeing the word. It closes the annotation run
