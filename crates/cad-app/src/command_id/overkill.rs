@@ -45,4 +45,3 @@
 //! Success is `overkill.applied` with the deleted count; a selection with no
 //! duplicates creates **no** transaction and reports `overkill.unchanged`.
 //! Work-only.
-

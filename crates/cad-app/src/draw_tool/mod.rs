@@ -757,9 +757,7 @@ impl DrawTool {
                 first: a,
                 second: b,
             },
-            // BREAKATPOINT: the first click only resolved the target; the second
-            // click is the break point (projected onto the object by the command
-            // layer). Unlike BREAK the first click is not reused as a point.
+            // BREAKATPOINT: first click = target, second = projected break point.
             DrawToolKind::BreakAtPoint => DrawIntent::BreakAtPoint {
                 target: self.picks[0].clone(),
                 point: b,
@@ -954,11 +952,9 @@ impl DrawTool {
         })
     }
 }
-
 /// Minimum XY extent for a gesture that defines a direction (rotate) or an axis
 /// (mirror): a shorter span has no well-defined angle or line and is refused.
 const MIN_DIRECTION_EXTENT: f64 = 1e-12;
-
 /// Hard cap on an open-ended capture (PLINE), in points.
 ///
 /// An interactive polyline is digitised a handful of vertices at a time; 1024 is
@@ -967,7 +963,6 @@ const MIN_DIRECTION_EXTENT: f64 = 1e-12;
 /// click loop from growing the capture without limit. Reaching it is an explicit
 /// refusal, never a silent drop of the extra click.
 pub const MAX_OPEN_CAPTURE_POINTS: usize = 1024;
-
 /// Hard cap on one submitted tool text, in **characters** (ADR 0019 decision
 /// A.1: "长度上限 1024 字符（有限且声明）").
 ///
@@ -976,7 +971,6 @@ pub const MAX_OPEN_CAPTURE_POINTS: usize = 1024;
 /// Exceeding it is an explicit `tool.text_too_long` refusal, never a silent
 /// truncation.
 pub const MAX_TOOL_TEXT_CHARS: usize = 1024;
-
 /// Euclidean distance between two points.
 fn distance(a: Point3, b: Point3) -> f64 {
     (a.x - b.x).hypot(a.y - b.y).hypot(a.z - b.z)

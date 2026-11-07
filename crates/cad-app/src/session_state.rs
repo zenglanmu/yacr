@@ -1,10 +1,8 @@
 //! Per-document CAD session state and its recorded backend preference.
-//!
 //! Split out of the crate root (which keeps `lib.rs` within the size limit).
 
 use cad_db::MeasurementRecord;
 use cad_domain::*;
-
 mod erase_snapshot;
 use crate::draw_tool::{
     DrawIntent, DrawPreview, DrawTool, DrawToolKind, ToolParameter, ToolParameterStore, ToolValue,
