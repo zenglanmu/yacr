@@ -6,7 +6,8 @@
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
 > [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。
 >
-> **证据上限**：本文的命令名/别名有 §5b（`docs/autocad-command-coverage.md`）的机器自检；**行为语义与
+> **证据上限**：本文的命令名/别名有 `scripts/check-command-docs.py`（对照
+> `docs/autocad-2026-command-coverage.md`）的机器自检；**行为语义与
 > 键位仍只有源码/契约证据**，没有真实窗口、真实按键或像素验收。
 
 本文件是本程序（命令行 + 固定键位 + 绘制/编辑工具）的**单一诚实参考**。证据以**源码契约 + 单测**
@@ -56,7 +57,7 @@
 ## 2. 命令表（只列**有行为注解**的选择子）
 
 > **完整清单不在这里**：穷尽的 **195 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
-> `docs/autocad-command-coverage.md` §2；本节只保留**有行为注解**的行。
+> `docs/autocad-2026-command-coverage.md` 的「词表总量」；本节只保留**有行为注解**的行。
 > 选择子与别名的**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs`
 > （`COMMAND_TABLE` **195** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
 > `ARGUMENT_SELECTORS` **44** / `COMMAND_ALIASES` **67**）。
@@ -370,7 +371,7 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
 
 ## 4. 明确未支持的 AutoCAD 快捷键/命令（诚实）
 
-> 逐条审计（词表总量 / 实现·部分·未实现三档 / 缺口规模）见 `docs/autocad-command-coverage.md`；
+> 逐条审计（词表总量 / 实现·部分·未实现三档 / 缺口规模）见 `docs/autocad-2026-command-coverage.md`；
 > 本节的「未实现」清单与它一致。
 
 - **功能键**：`F1`、`F4`、`F5`、`F6`、`F10`、`F11`、`F12` 未接线。（`F2`/`F3`/`F7`/`F8`/`F9`

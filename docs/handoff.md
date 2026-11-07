@@ -1,3 +1,18 @@
+## 2026-11-07 覆盖文档合并（单一权威文档）
+
+- `docs/autocad-2026-command-coverage.md` 现在是**唯一**覆盖事实文档：官方 981 条逐条状态
+  （**222 已实现 / 759 未实现**，其中 `TRACE`/`MEASURE` 同名不同义不计）+ 下一批 100 条计划与进度
+  （99/100 计入）+ 项目词表审计（229 选择子 / 5 测量 / 2 缩放 / 65 参数选择器 / 73 别名 /
+  309 可输入拼写）+ 旧审计的命令边界、缺口规模、复跑方法与“不主张”清单。
+- 已删除 `docs/autocad-2026-next-100-plan.md` 与 `docs/autocad-command-coverage.md`，内容全部并入；
+  历史条目里的旧路径引用已改为新路径。
+- 名字门禁改为解析新文档的「测量选择子」一节：`scripts/check-command-docs.py`、
+  `scripts/test-check-command-docs.py`、`scripts/check-workflows.py`、`.github/workflows/core.yml`、
+  `docs/ci.md`、`docs/shortcuts.md`、`docs/compatibility.md` 的路径/章节引用已同步。
+- 已运行：`check-command-docs.py`（0 mismatches）、`test-check-command-docs.py`（7 tests OK）、
+  `check-workflows.py`、`check-i18n.py`、`check-file-size.py`、`check-architecture.py`。
+  无 Rust/前端代码变更，未重跑测试。
+
 ## 2026-11-07 AutoCAD 2026 2D 绘制/视图补充批次（10 条，已合并；`TRACE` 同名不同义不计入）
 
 - **状态**：`extras-batch`（提交 `92ec319e`）已合并到 `main`。官方清单从
@@ -1951,7 +1966,7 @@ YACR_PROBE_CAD_LOG=1 bash scripts/run-react-linux.sh --open fixtures/debug-defau
   `session/{mod,status}.rs`；`apps/desktop-ui/src/components/{LayoutTabs,ReferencesPanel}.tsx`、
   `src/layout/layout-tabs.ts`、`src/references/references.ts`；移动抽屉复用同一投影。
 - 文档：新增 `docs/xref.md`；更新 `docs/layouts.md`、`docs/compatibility.md`、
-  `docs/autocad-command-coverage.md`、`docs/architecture.md`。
+  `docs/autocad-2026-command-coverage.md`、`docs/architecture.md`。
 
 ### 验证（lane 日志实际运行，非产品验收）
 
@@ -2356,7 +2371,7 @@ DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`�
   `session/commands.rs`、`command_vocabulary.rs`、`tests_tools_routing.rs`。
 - React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`（CIRCLE_VARIANTS）、`cad/cad.ts` 与两本 i18n；
   新 `apps/desktop-ui/test/circle-options.test.ts`，并同步 `commands`/`helpers`/`i18n` 的精确列表。
-- 文档：`docs/compatibility.md`（创建表）、`docs/autocad-command-coverage.md`（110/174/117、§3.1 CIRCLE 行、
+- 文档：`docs/compatibility.md`（创建表）、`docs/autocad-2026-command-coverage.md`（110/174/117、§3.1 CIRCLE 行、
   §5/§5b）、`docs/shortcuts.md`（四行 CIRCLE、计数）、`docs/architecture.md`（174/57）、本文件。
 
 ### 验证（本轮实际运行，合并树）
@@ -2409,7 +2424,7 @@ DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`�
   `cad-ui-core` 的 `session/commands.rs`、`command_vocabulary.rs`、`tests/{mod,tests_tools,tests_tools_routing}.rs`。
 - React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`、`cad/cad.ts`、`icons.tsx` 与两本 i18n；
   新 `apps/desktop-ui/test/construction-line.test.ts`，并同步 `commands`/`helpers`/`i18n` 的精确列表。
-- 文档：`docs/compatibility.md`（XLINE/RAY 读取行 + 绘制表）、`docs/autocad-command-coverage.md`
+- 文档：`docs/compatibility.md`（XLINE/RAY 读取行 + 绘制表）、`docs/autocad-2026-command-coverage.md`
   （107/171/114、§3.1 XLINE 行、§4 XLINE 命令关闭/无限几何仍 L、§5/§5b）、`docs/shortcuts.md`
   （XLINE/RAY 行、`XL`、计数）、`docs/architecture.md`（171/57）、本文件。
 
@@ -2464,7 +2479,7 @@ DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`�
 - React：`commands/{catalog,accelerators,context-menu}.ts`、`ribbon/ribbon-model.ts`、`cad/cad.ts` 与两本 i18n；
   新 `apps/desktop-ui/test/paste-block.test.ts`，并同步 `accelerators`/`clipboard-paste-tools`/`commands`/
   `context-menu`/`i18n`/`helpers` 的精确列表。
-- 文档：`docs/compatibility.md`（剪贴板行 + INSERT 行）、`docs/autocad-command-coverage.md`
+- 文档：`docs/compatibility.md`（剪贴板行 + INSERT 行）、`docs/autocad-2026-command-coverage.md`
   （105/168/112、§3.6 剪贴板、§4 PASTEBLOCK 关闭/WBLOCK 剩余、§5/§5b）、`docs/shortcuts.md`
   （PASTEBLOCK 行、`Ctrl+Shift+V`、计数）、`docs/architecture.md`（168/56）、本文件。
 
@@ -2525,7 +2540,7 @@ DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`�
   `session/commands.rs`、`command_vocabulary.rs`、`tests_tools.rs`。
 - Lane D：`apps/desktop-ui/src/{commands/catalog,ribbon/ribbon-model,tools/text,cad/cad}.ts` 与两本 i18n；
   新 `apps/desktop-ui/test/block-define.test.ts`，并同步 `commands`/`helpers`/`i18n`/`insert-block` 的精确列表。
-- 文档：`docs/compatibility.md`、`docs/autocad-command-coverage.md`（104/167/111、§3.4 BLOCK、§4 WBLOCK/PASTEBLOCK）、
+- 文档：`docs/compatibility.md`、`docs/autocad-2026-command-coverage.md`（104/167/111、§3.4 BLOCK、§4 WBLOCK/PASTEBLOCK）、
   `docs/shortcuts.md`、`docs/architecture.md`、本文件。
 
 ### 验证（本轮实际运行，合并树）
@@ -2576,7 +2591,7 @@ DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`�
 - React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`、`cad/cad.ts`、`tools/tool-parameter-specs.ts` 与两本 i18n；
   新 `apps/desktop-ui/test/scale-text.test.ts`，并同步 `tool-parameters`/`text-parameters`/`i18n`/`helpers`/
   `hatch-tool`/`mleader-tool` 的精确列表。
-- 文档：`docs/compatibility.md`（绘制/编辑表）、`docs/autocad-command-coverage.md`（103/165/110、§3.3 行、
+- 文档：`docs/compatibility.md`（绘制/编辑表）、`docs/autocad-2026-command-coverage.md`（103/165/110、§3.3 行、
   §5/§5b）、`docs/shortcuts.md`（§2 行、计数）、`docs/architecture.md`（165/55）、本文件。
 
 ### 验证（本轮实际运行，合并树）
@@ -2630,7 +2645,7 @@ DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`�
   测试追加在既有 `tests/drawing/hatch_stitch.rs` 与 `hatch_internal_point.rs`（不新增模块）。
 - React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`、`tools/text.ts`、`cad/cad.ts` 与两本 i18n；
   新 `apps/desktop-ui/test/insert-block.test.ts`。
-- 文档：`docs/compatibility.md`（HATCH 行 + INSERT 行）、`docs/autocad-command-coverage.md`
+- 文档：`docs/compatibility.md`（HATCH 行 + INSERT 行）、`docs/autocad-2026-command-coverage.md`
   （102/164/109、§3.4 INSERT、§3.1/§4 HATCH 边链、§5/§5b）、`docs/shortcuts.md`（INSERT 行、别名 `I`、计数）、
   `docs/architecture.md`（164/55）、本文件。
 
@@ -2681,7 +2696,7 @@ DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`�
 - React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`、`cad/cad.ts`、`tools/tool-parameter-specs.ts` 与两本 i18n；
   测试新增 `apps/desktop-ui/test/curve-edit-tools.test.ts`，并同步 `tool-parameters`/`i18n`/`commands`/`helpers`/
   `command-aliases`/`text-parameters` 的精确列表。
-- 文档：`docs/compatibility.md`（绘制/编辑命令表）、`docs/autocad-command-coverage.md`（101/162/108、§3.3 三行、
+- 文档：`docs/compatibility.md`（绘制/编辑命令表）、`docs/autocad-2026-command-coverage.md`（101/162/108、§3.3 三行、
   §5/§5b 期望）、`docs/shortcuts.md`（§2 三行、§2b 别名、计数）、`docs/architecture.md`（162/54）、本文件。
 
 ### 验证（本轮实际运行）
@@ -2708,7 +2723,7 @@ DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`�
 
 ### 结论
 
-- **关闭文档里标记为 M 的「HATCH 内部点求边界」缺口**（`docs/autocad-command-coverage.md` §4）。新增
+- **关闭文档里标记为 M 的「HATCH 内部点求边界」缺口**（`docs/autocad-2026-command-coverage.md` §4）。新增
   **Work-only 选择子 `HATCHPOINT`**（本项目选择子，AutoCAD 的 `HATCH` 在内部点提示里做同一件事；入口独立，
   **不**改写 `HATCH` 的预选形态）。`DrawToolKind::HatchPoint` 是 **1 点 arity**、`requires_selection = false`、
   不取实体 pick；填充分配参数与 `HATCH` **完全相同**（同一 `ToolParameter` 通道，没有第二套参数）。
@@ -2738,7 +2753,7 @@ DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`�
 - React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`、`cad/cad.ts`、`tools/tool-parameter-specs.ts` 与
   `crates/cad-ui-core/i18n/{en,zh-CN}.json`；测试新增 `apps/desktop-ui/test/hatch-point.test.ts`，并同步
   `hatch-tool`/`mleader-tool`/`text-tool`/`i18n`/`helpers` 的精确列表。
-- 文档：`docs/compatibility.md`（HATCH（创建）行）、`docs/autocad-command-coverage.md`（词表 98/156、HATCH 行、缺口行、
+- 文档：`docs/compatibility.md`（HATCH（创建）行）、`docs/autocad-2026-command-coverage.md`（词表 98/156、HATCH 行、缺口行、
   §5/§5b 期望输出）、`docs/shortcuts.md`（§2 行与计数、§4 剩余缺口）、`docs/dxf-entity-coverage.md`、
   `docs/adr/0018-hatch-family.md`（文末 2026-11-01 补注，不改写历史）、本文件。
 
@@ -3680,7 +3695,7 @@ v1 的形状是**一条开放、全直线段、`+Z` 平面的 LWPOLYLINE**，每
 - 导出：`AcDbXline`/`AcDbRay` 标记的 `Line` 仍写成 DXF `LINE`（不伪造 XLINE 载荷），但映射结果从
   `Exact` 改为 **`Converted`**（`export.converted.line`，消息点名「实体类型改变、不再是无限线」）。
 - 文档随之改：`docs/compatibility.md` 新增 RAY/XLINE 行、`docs/dxf-entity-coverage.md` 两处 ✅ 降为
-  ⚠️ Partial、`docs/autocad-command-coverage.md` §3.1/§4 给出 **M（命令）/ L（真无限几何）** 的拆分。
+  ⚠️ Partial、`docs/autocad-2026-command-coverage.md` §3.1/§4 给出 **M（命令）/ L（真无限几何）** 的拆分。
 
 **C. 几何助手**
 
@@ -3690,7 +3705,7 @@ v1 的形状是**一条开放、全直线段、`+Z` 平面的 LWPOLYLINE**，每
 
 **D. 文档门禁脚本化**
 
-- `docs/autocad-command-coverage.md` §5b 里那段没人执行的 heredoc 变成仓库脚本
+- `docs/autocad-2026-command-coverage.md` §5b 里那段没人执行的 heredoc 变成仓库脚本
   `scripts/check-command-docs.py`（自测 `scripts/test-check-command-docs.py`），CI `core-quality` 每次
   都跑两者；文档只留「怎么跑 + 实测输出 + 它会红」的说明，规则判据不再复制。
 
@@ -3819,7 +3834,7 @@ v1 的形状是**一条开放、全直线段、`+Z` 平面的 LWPOLYLINE**，每
    —— 这不是「再加一个 match 臂」，而是把「拾取点意味着什么」在两个同心几何之间钉成同一条规则。
 2. **HATCH 预定义图案在 UI 上改成按名选**（`ANSI31`/`ANSI32`/`ANSI37` 三段 chip），**线上传的值没变**
    （仍是 1 基索引）。这条只有**源码结构/纯函数契约**证据，**没有像素/运行时/真窗口证据**。
-3. 另交付一份**命令覆盖审计** `docs/autocad-command-coverage.md`：明确说明仓库里**没有**可枚举的
+3. 另交付一份**命令覆盖审计** `docs/autocad-2026-command-coverage.md`：明确说明仓库里**没有**可枚举的
    「AutoCAD 命令全集」，因此不给任何「覆盖率百分比」。
 
 ### 做了什么
@@ -3863,7 +3878,7 @@ v1 的形状是**一条开放、全直线段、`+Z` 平面的 LWPOLYLINE**，每
   不改写上面的历史记录。
 - `docs/adr/0018-hatch-family.md`（决策 G 的 §未实现项第 6 条）：把「预定义图案名」划掉并指向 P6c 补注
   （2026-10-26 表已兑现；2026-10-27 起状态栏按名 chip）——同样**不改写历史行**。
-- 新增 `docs/autocad-command-coverage.md`：词表总量（92/5/2/4/51，`admissible_names()` 150 个拼写）、
+- 新增 `docs/autocad-2026-command-coverage.md`：词表总量（92/5/2/4/51，`admissible_names()` 150 个拼写）、
   AutoCAD 命名命令的三档状态表、缺口清单与规模（S/M/L）、复跑命令、以及「不主张什么」。
 
 ### 证据（本机，2026-10-27）
@@ -3898,7 +3913,7 @@ v1 的形状是**一条开放、全直线段、`+Z` 平面的 LWPOLYLINE**，每
 3. **平台 NOT RUN**：wasm / Windows / Android / macOS 目标**均未编译或运行**；Linux 侧**没有**新窗口运行。
 4. **OFFSET 的剩余边界**：含**弧段折线**（`offset.bulge_segment`）与 **`ELLIPSE`**（按名拒绝）仍不支持；
    **无全局自交修剪**（只在顶点处检测局部塌缩）；只有一个实体可偏移。
-5. **剩余 AutoCAD 缺口**（规模分类与理由见 `docs/autocad-command-coverage.md` §4）：
+5. **剩余 AutoCAD 缺口**（规模分类与理由见 `docs/autocad-2026-command-coverage.md` §4）：
    `POLYLINE`（旧式 heavy 2D 折线实体；**不**别名到 `PLINE`）、`XLINE`、
    `BLOCK`/`WBLOCK`/`INSERT`-**创建**侧、`XREF`、`IMPORT`、`PUBLISH`、`DIMSTYLE` **编辑**、
    HATCH 的**内部点求边界 / `76=2` 与 `.pat` / 渐变创建 / 关联性**、OFFSET 的**含弧折线段 / 椭圆**。
@@ -3932,7 +3947,7 @@ v1 的形状是**一条开放、全直线段、`+Z` 平面的 LWPOLYLINE**，每
 
 **改法（只动文档）**
 
-- §2 重写：表头说明「完整 92 选择子清单在 `docs/autocad-command-coverage.md`，本表只留有行为注解的行」；
+- §2 重写：表头说明「完整 92 选择子清单在 `docs/autocad-2026-command-coverage.md`，本表只留有行为注解的行」；
   canonical 列只放准入名，别名列只放真实别名行，`<…>` 参数形式移进注解；行为注解全部保留在真名上。
 - 新增 **§2a「不是命令行选择子（键位 / 面板 / IPC）」**：标准视图 IPC、清除选择（Esc/SELECTALL）、
   chrome 本地 `LAYER`/`PROPERTIES`/`OPTIONS`、测量多词写法、键位≠别名。
@@ -3955,7 +3970,7 @@ v1 的形状是**一条开放、全直线段、`+Z` 平面的 LWPOLYLINE**，每
 
 **守门人（已落地）**
 
-`docs/autocad-command-coverage.md` §5b 新增**会非零退出**的自检：解析四张表 + `COMMAND_ALIASES`，
+`docs/autocad-2026-command-coverage.md` §5b 新增**会非零退出**的自检：解析四张表 + `COMMAND_ALIASES`，
 再解析 `docs/shortcuts.md` §2 的 canonical 列/别名单元与 §2b 整张表，任何不一致即 `exit 1`。
 实测（本机 2026-10-27）：
 
@@ -4005,7 +4020,7 @@ OK: 0 mismatches
 - `npm run build` → **exit 0**（vite 构建成功，仅 chunk >500 kB 警告）。
 - `python3 scripts/check-i18n.py` → **exit 0**：**847 keys / 2 目录**。
 - `python3 scripts/check-file-size.py` → **exit 0**：**1051** 个代码文件 ≤1000 行。
-- `docs/autocad-command-coverage.md` §5b 名字自检 → `OK: 0 mismatches`（`§2 rows: 54, §2b aliases: 51,
+- `docs/autocad-2026-command-coverage.md` §5b 名字自检 → `OK: 0 mismatches`（`§2 rows: 54, §2b aliases: 51,
   §3.7 rows: 6`）。
 
 **仍未成立 / 边界（必须原样保留）**
@@ -4020,7 +4035,7 @@ OK: 0 mismatches
 
 **本轮据此改的文档**：`docs/shortcuts.md` §3（11 个加速器进「真的接线了」表 + 拒答顺序/派发规则/
 Viewer 边界；「没有全局键」收缩到 `Ctrl+Shift+C/X/V`/`Ctrl+Shift+Home`/其余未列出 chord）、§4
-（把已接线的 chord 从「未实现」列表移除，`Ctrl+P` 的旧说法改正）；`docs/autocad-command-coverage.md`
+（把已接线的 chord 从「未实现」列表移除，`Ctrl+P` 的旧说法改正）；`docs/autocad-2026-command-coverage.md`
 §3.6（剪贴板行 + `Ctrl+C/X/V` 已接线 / `Ctrl+Shift+C/V` 未实现未接线）、§3.7（**删掉虚构的
 `DI`/`AA`/`ANGLE` 别名与 `MEASURE DISTANCE`/`MEASURE AREA` 写法**）、§5b（`99` 改标为 canonical 选择子数，
 自检扩到 §3.7 第一列与「别名」提法）。

@@ -232,7 +232,7 @@ python3 scripts/check-fixture-manifest.py
 python3 scripts/check-workflows.py
 python3 scripts/check-i18n.py
 python3 scripts/check-file-size.py   # 代码文件 ≤1000 行；文档不计入；自测 scripts/test-check-file-size.py
-python3 scripts/check-command-docs.py     # docs/shortcuts.md §2/§2b + autocad-command-coverage.md §3.7
+python3 scripts/check-command-docs.py     # docs/shortcuts.md §2/§2b + autocad-2026-command-coverage.md 的「测量选择子」一节
 python3 scripts/test-check-command-docs.py  # 自测：注入伪造 canonical + 伪造别名，必须退出 1
 cargo check --workspace --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked
@@ -290,7 +290,7 @@ Linux Flatpak 的本地运行方式见 `docs/flatpak.md`；Windows/macOS 打包�
 `check-command-docs.py` 每次运行都从 `crates/cad-ui-core/src/session/commands.rs` 重新解析
 `COMMAND_TABLE` / `MEASUREMENT_SELECTORS` / `ZOOM_STEP_SELECTORS` / `COMMAND_ALIASES`，然后检查
 `docs/shortcuts.md` §2（canonical 列必须是准入名、别名单元必须是真实别名行且映射回本行）、§2b
-（整张别名表必须与 `COMMAND_ALIASES` **完全一致**）、`docs/autocad-command-coverage.md` §3.7（第一列
+（整张别名表必须与 `COMMAND_ALIASES` **完全一致**）、`docs/autocad-2026-command-coverage.md` 的「测量选择子」一节（第一列
 必须是准入名），以及两篇文档里每一处 ``别名 `x` `` 提法（先剥离围栏代码块）。退出码 **0** = 一致
 （`OK: 0 mismatches`）、**1** = 有 mismatch（逐条打印）、**2** = 文档/源码形状读不出来（缺章节或
 缺常量表，**不会**当成通过）。**守门范围只有名字**：§1/§3/§4/§5 与 §3 的语义边界仍是人工核对。

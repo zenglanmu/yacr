@@ -14,7 +14,7 @@ the places where humans transcribe them by hand:
   ``别名 | canonical`` pairs and the ``a`/`b`->`target` `` sentence) must equal
   ``COMMAND_ALIASES`` **exactly**: no missing alias, no extra alias, same
   mapping.
-* **§3.7** (``docs/autocad-command-coverage.md``) -- the first column must be an
+* **测量选择子** (``docs/autocad-2026-command-coverage.md``) -- the first column must be an
   admitted selector.
 * **both docs** -- any token the prose declares with ``别名 `x` `` (fenced code
   blocks are stripped first, so the gate never reports on its own source) must
@@ -34,7 +34,7 @@ from ``__file__``, *not* the current directory) and can be overridden with
 ``--doc`` / ``--coverage`` / ``--commands``.
 
 Behaviour is ported from the audit snippet that used to live in
-``docs/autocad-command-coverage.md`` §5b (2026-10-27). That snippet was a
+``docs/autocad-2026-command-coverage.md`` §5b (2026-10-27). That snippet was a
 pasted heredoc that nothing executed; this script is its single runnable copy.
 """
 from __future__ import annotations
@@ -47,7 +47,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_COMMANDS = ROOT / "crates" / "cad-ui-core" / "src" / "session" / "commands.rs"
 DEFAULT_DOC = ROOT / "docs" / "shortcuts.md"
-DEFAULT_COVERAGE = ROOT / "docs" / "autocad-command-coverage.md"
+DEFAULT_COVERAGE = ROOT / "docs" / "autocad-2026-command-coverage.md"
 
 COMMAND_TABLE_RE = r'pub const COMMAND_TABLE: &\[\(&str, CommandId\)\] = &\[(.*?)\n\];'
 MEASUREMENT_RE = (
@@ -62,7 +62,7 @@ SEC2_HEADING = r'\n## 2\.'
 SEC2_STOP = r'\n## 2b\.'
 SEC2B_HEADING = r'\n## 2b\.'
 SEC2B_STOP = r'\n## 3\.'
-SEC37_HEADING = r'\n### 3\.7'
+SEC37_HEADING = r'\n### 测量选择子'
 SEC37_STOP = r'\n---'
 
 FENCE = '```'
@@ -159,7 +159,7 @@ def check(commands_text: str, doc_text: str, coverage_text: str,
     # "§2 has no end". The checks themselves then run in audit order below.
     sec2b = section(doc_text, SEC2B_HEADING, SEC2B_STOP, doc_path, '§2b')
     sec2 = section(doc_text, SEC2_HEADING, SEC2_STOP, doc_path, '§2')
-    sec37 = section(coverage_text, SEC37_HEADING, SEC37_STOP, coverage_path, '§3.7')
+    sec37 = section(coverage_text, SEC37_HEADING, SEC37_STOP, coverage_path, '测量选择子')
 
     # --- §2: canonical column + alias cells ---------------------------------
     for line in sec2.splitlines():
@@ -207,7 +207,7 @@ def check(commands_text: str, doc_text: str, coverage_text: str,
         if alias[a] != documented[a]:
             bad.append('§2b %s: %r != %r' % (a, documented[a], alias[a]))
 
-    # --- §3.7 (the audit doc): its first column must be admitted names ------
+    # --- 测量选择子 (the audit doc): its first column must be admitted names -
     for line in sec37.splitlines():
         if not line.startswith('| ') or line.startswith('|---'):
             continue
@@ -217,7 +217,7 @@ def check(commands_text: str, doc_text: str, coverage_text: str,
         report.section37_rows += 1
         name = cells[0].strip('` ')
         if name not in admitted:
-            bad.append('§3.7 not admitted: %r' % name)
+            bad.append('测量选择子 not admitted: %r' % name)
 
     # --- every token the docs call an alias must be a real alias row --------
     # Fenced blocks are stripped first: the prose quote of this gate's own
@@ -241,7 +241,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument('--doc', type=Path, default=DEFAULT_DOC,
                         help='shortcuts doc to check (default: %(default)s)')
     parser.add_argument('--coverage', type=Path, default=DEFAULT_COVERAGE,
-                        help='audit doc holding §3.7 (default: %(default)s)')
+                        help='audit doc holding the 测量选择子 section (default: %(default)s)')
     return parser.parse_args(argv)
 
 
@@ -263,7 +263,7 @@ def main(argv: list[str]) -> int:
     print('tables: %d/%d/%d/%d selectors, %d aliases, %d canonical selectors (aliases excluded)'
           % (report.table, report.measurement, report.zoom, report.arguments,
              report.aliases, report.admitted))
-    print('§2 rows: %d, §2b aliases: %d, §3.7 rows: %d, alias mentions: %d'
+    print('§2 rows: %d, §2b aliases: %d, 测量选择子 rows: %d, alias mentions: %d'
           % (report.section2_rows, report.section2b_aliases, report.section37_rows,
              report.alias_mentions))
 

@@ -2,7 +2,12 @@
 
 > **这是清单审计，不是验收。** 「已实现」只表示**命令路径存在**并有契约/单测覆盖；不表示与
 > AutoCAD 行为等价，也不表示在真实窗口/真实 GPU/真实图纸上验证过。逐条能力边界以
-> `docs/compatibility.md` 为权威；更早的、手工维护的缺口审计见 `docs/autocad-command-coverage.md`。
+> `docs/compatibility.md` 为权威。
+>
+> **本文是覆盖事实的唯一文档**：官方 981 条逐条状态 + 下一批 100 条的计划与进度 +
+> 项目词表/命令边界/缺口规模审计。原 `docs/autocad-command-coverage.md` 与
+> `docs/autocad-2026-next-100-plan.md` 已于 2026-11-07 合并进本文并删除；旧文档里的路径与
+> 章节引用均指本文对应内容。
 >
 > **证据边界**：本清单的状态来自**源码表 + 既有契约测试 + 本文件的静态映射**；
 > 没有 GUI/像素/运行时证据。Windows/macOS/Android/Web 结论均为 **NOT VERIFIED**。
@@ -35,10 +40,62 @@
 - **已实现**：可键入的命令路径存在，行为落库/落会话状态；未支持选项显式拒绝。
 - **部分实现**：命令可用，但有下表写明的界；界之外显式拒绝。
 - **未实现**：键入该名得到 `command.unsupported`（或 chrome 不承认该名字）。
-- **同名不同义**：`MEASURE` 在 AutoCAD 是沿对象放置点/块，本项目是测量入口，
-  因此**不计**为已覆盖（表中状态仍是「未实现」并注明）。
+- **同名不同义**：`MEASURE`（AutoCAD 沿对象放点/块；本项目是测量入口）与 `TRACE`
+  （AutoCAD 2026 是协作追踪；本项目同名命令是旧式宽线带）都**不计**为已覆盖，
+  表中状态写成「未实现（同名不同义）」并注明。
+
+## 下一批 100 条命令实施计划与进度（2026-11-07）
+
+> **这是排期与范围记录，不是验收。** 每条命令落地时必须在本文与 `docs/compatibility.md`
+> 写明真实边界；“已实现/部分实现”只表示命令路径存在且有契约测试，不表示与 AutoCAD 行为等价，
+> 也没有 GUI/GPU/像素/真机/vendor 证据。
+
+> **进度（2026-11-07）**：**99/100 计入官方覆盖** + **1 条同名不同义不计入**。
+> 官方清单从 123 提升到 **222 已实现（50 完整 + 172 部分）/ 759 未实现**。
+> 100 个名字中 `TRACE` 是 AutoCAD 2026 的协作追踪，本构建同名命令是旧式宽线带，
+> 按“同名不同义”排除（与 `MEASURE` 同一口径）。
+
+### 纪律
+
+- 2D 优先；3D/实体/约束/表格/外部参照/点云/渲染/发布类命令不在本 100 条内。
+- 每条命令：Rust 命令路径 + `COMMAND_TABLE` + dispatch + 能力门 + React 目录/gating/i18n
+  + 契约测试；未支持选项一律具名拒绝。
+- 每 wave 独立 worktree/分支，隔离 `CARGO_TARGET_DIR`；合并后由 orchestrator 统一更新本文、
+  `docs/compatibility.md`、`docs/handoff.md`。
+- 共享单表（`CommandId`、`COMMAND_TABLE`、dispatch、UI catalog、i18n）冲突由 orchestrator
+  按显式路径合并；合并后重跑 cad-app/cad-ui-core/前端全量/门禁。
+- 本轮所有结论仅 Linux 本机编译/契约；Windows/macOS/Android/Web 运行时 NOT VERIFIED。
+
+### 已交付（按批次，100 个名字）
+
+| 批次 | 数量 | 名字 |
+|---|---:|---|
+| 文字 | 10 | `JUSTIFYTEXT`/`TJUST`、`TSCALE`、`TEXTALIGN`、`TCOUNT`、`TCIRCLE`、`TEXTMASK`、`TEXTUNMASK`、`MTEDIT`、`-MTEXT` |
+| 图层 | 10 | `LAYMCH`/`-LAYMCH`、`LAYMRG`/`-LAYMRG`、`LAYDEL`/`-LAYDEL`、`LAYERSTATE`、`LAYERPMODE`、`LTSCALE`、`LAYWALK` |
+| 选择 | 10 | `QSELECT`、`FILTER`、`GETSEL`、`SSX`、`SELECTCOUNT`、`-FIND`、`FIND`、`HIDEOBJECTS`、`ISOLATEOBJECTS`、`UNISOLATEOBJECTS` |
+| 视图 | 10 | `REDRAW`、`REDRAWALL`、`REGEN`、`REGENALL`、`VIEW`、`-VIEW`、`VIEWGO`、`VIEWBACK`、`VIEWFORWARD`、`VPOINT` |
+| 实用工具 | 10 | `PURGE`/`-PURGE`、`RENAME`/`-RENAME`、`SETVAR`、`TIME`、`DBLIST`、`TREESTAT`、`MREDO`、`MULTIPLE` |
+| 绘制/修改 | 10 | `DONUT`、`SOLID`、`HELIX`、`MLINE`、`MLSTYLE`、`TREX`、`EXTRIM`、`MPEDIT`、`-OVERKILL`、`DRAWORDER` |
+| 布局/视口 | 10 | `LAYOUT`、`LAYOUTMERGE`、`LAYOUTWIZARD`、`VPORTS`、`-VPORTS`、`VPMAX`、`VPMIN`、`VPCLIP`、`VPSCALE`、`LAYVPI` |
+| 标注 | 10 | `DIMSTYLE`、`-DIMSTYLE`、`DIMTEDIT`、`DIMEDIT`、`DIMOVERRIDE`、`DIMREGEN`、`DIMDISASSOCIATE`、`QDIM`、`DIMJOGLINE`、`DIMBREAK` |
+| 组/注释 | 10 | `GROUP`、`-GROUP`、`UNGROUP`、`GROUPEDIT`、`QLEADER`、`LEADER`、`TEXTFIT`、`HATCHSETBOUNDARY`、`HATCHSETORIGIN`、`XDLIST` |
+| 绘制/视图补充 | 10（计 9） | `SKETCH`、`MOCORO`、`MSTRETCH`、`-PAN`、`VIEWRES`、`VSCURRENT`、`REGEN3`、`LINETYPE`、`-LINETYPE`；`TRACE` 同名不同义，不计入 |
+
+### 计划中被替换/未交付的名字
+
+初版 wave 中的 `DIMARC`、`DIMJOGGED`、`DIMREASSOCIATE`、`WHOHAS`、`-BLOCK`、`BMAKE`、
+`WBLOCK`、`-WBLOCK`、`-INSERT`、`MINSERT`、`ATTDEF`、`ATTEDIT`、`-ATTEDIT`、`ATTSYNC`、
+`-HATCH`、`-HATCHEDIT`、`TOLERANCE`、`FIELD`、`RTEXT`、`RTEDIT`、`DIMINSPECT`、
+`-DIMINSPECT`、`DIMEX`、`DIMIM`、`SPACETRANS`、`MVIEW`、`MVSETUP`、`SAVEALL`、`QNEW`、
+`REVERT`、`SCRIPT`、`RESUME`、`RSCRIPT`、`DELAY`、`LOGFILEON`、`LOGFILEOFF`、`TXTEXP`
+**未实施**；由同域的已交付名字替换。**未实现不等于永远不做**，它们仍在官方清单里保持
+「未实现」，缺口规模见 §5。
 
 ## 已实现 / 部分实现命令索引（按字母序）
+
+> 本索引覆盖官方清单里所有当前为「已实现」或「部分实现」的名字（含 `-` 别名）；
+> 状态与说明与下方全量清单逐条一致，边界细节以 `docs/compatibility.md` 为权威。
+> 另列一个**项目自己的多词选择子** `POLYGON CIRCUMSCRIBED`（不属于官方 981 条，不计入总计）。
 
 | Command | 状态 | 说明 |
 | --- | --- | --- |
@@ -62,59 +119,111 @@
 | `COPYCLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
 | `CUTBASE` | 部分实现 | 应用内剪贴板 + 基点；不是 OS 剪贴板，不跨应用 |
 | `CUTCLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
+| `DBLIST` | 部分实现 | 只读列出所有顶层模型/图纸实体（id/type/layer/space/draw order）；块定义成员计数并跳过 |
 | `DIMALIGNED` | 已实现 | — |
 | `DIMANGULAR` | 部分实现 | 仅两线形式可交互；三点形式只到载荷层 |
 | `DIMBASELINE` | 已实现 | — |
+| `DIMBREAK` | 部分实现 | 按 `dimbreak.unsupported` 拒绝（无标注线打断记录）；绝不删除/裁剪标注本身 |
 | `DIMCENTER` | 已实现 | — |
 | `DIMCONTINUE` | 已实现 | — |
 | `DIMDIAMETER` | 已实现 | — |
+| `DIMDISASSOCIATE` | 部分实现 | payload-free；无关联模型，`dimdisassociate.already_non_associative` 且不改变任何状态 |
+| `DIMEDIT` | 部分实现 | 对所有选中标注 `TEXT <override>`（组 1，`<>` 占位，≤1024）或 `RESET`；一条事务/一步撤销；延伸线编辑未实现 |
+| `DIMJOGLINE` | 部分实现 | `ADD`/`REMOVE` 解析后按 `dimjogline.unsupported` 拒绝（域无 jog 字段/存储） |
 | `DIMLINEAR` | 已实现 | — |
 | `DIMORDINATE` | 已实现 | — |
+| `DIMOVERRIDE` | 部分实现 | 闭集的实体快照变量；未知变量/仅表变量/坏值/未实现值分别具名拒绝；一条事务/一步撤销；不改样式表 |
 | `DIMRADIUS` | 已实现 | — |
+| `DIMREGEN` | 部分实现 | payload-free；本构建非关联，`dimregen.non_associative` 且不改变任何状态 |
 | `DIMROTATED` | 部分实现 | 三点拾取（两尺寸界线原点 + 尺寸线位置）；尺寸线角度来自会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | `DIMSPACE` | 部分实现 | 选择驱动：首个选中的线性标注为基准，其余按拾取顺序以基准样式 `DIMDLI` 自动等距；无交互间距值提示、无关联重排、仅模型空间线性标注 |
+| `-DIMSTYLE` | 部分实现 | `DIMSTYLE` 的别名，同一实现 |
+| `DIMSTYLE` | 部分实现 | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 按 `dimstyle.set_unavailable` 拒绝（无 post-import 样式表写 API）；未知名称拒绝 |
+| `DIMTEDIT` | 部分实现 | 恰好一个选中标注；`MOVE <x> <y>` 写组 11、`ROTATE <deg>` 写组 53、`RESET` 复位；一条事务/一步撤销；无变化 `dimtedit.unchanged` |
 | `DIST` | 已实现 | — |
 | `DIVIDE` | 部分实现 | 仅 LINE/ARC/CIRCLE/直线段 LWPOLYLINE；按等弧长放 POINT |
+| `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心圆；`inner=0` 只建外圆并诊断；无中心拾取提示 |
+| `DRAWORDER` | 部分实现 | `FRONT\ |
 | `ELLIPSE` | 已实现 | — |
 | `ERASE` | 已实现 | — |
 | `EXPLODE` | 部分实现 | 一次一层；拒绝 Dimension/MULTILEADER/非均匀 INSERT |
 | `EXPORT` | 部分实现 | PLOT 别名：仅矢量 SVG/PDF |
 | `EXTEND` | 部分实现 | 目标仅 LINE/ARC；SPLINE/CIRCLE 目标拒绝 |
+| `EXTRIM` | 部分实现 | 第一个选中为边界，其余为被裁对象；复用 trim 规划；不支持边界/目标按名拒绝 |
 | `FILLET` | 部分实现 | 两线形式 + 独立 FILLET POLYLINE 选择子；无 Multiple/Trim |
+| `FILTER` | 部分实现 | 同 QSELECT 语法但并入现有选择；仅顶层模型空间 |
+| `-FIND` | 部分实现 | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告；不写库 |
+| `FIND` | 部分实现 | `FIND <needle> [=> <replacement>]`；替换形式一条事务/一步撤销；不解析 MTEXT 格式 run；TEXT 单行拒绝换行 |
 | `FS` | 部分实现 | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把**直接**接触（相交或相切都算）的可见模型空间对象并入选择。默认 `FSMODE=OFF`：链式接触（`FSMODE=ON`）未实现；不展开块实例成员 |
+| `GETSEL` | 部分实现 | `GETSEL LAYER\ |
 | `GRADIENT` | 部分实现 | 预选择闭合边界（Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链）且必须位于 +Z 平面；复用 HATCH 创建路径，强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5），一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 |
 | `GRID` | 已实现 | — |
+| `-GROUP` | 部分实现 | `GROUP` 的别名（同一 `CommandId`/会话组表路径）；无 DWG group 对象/修订/历史 |
+| `GROUP` | 部分实现 | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
+| `GROUPEDIT` | 部分实现 | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；单次会话变更；不写实体/数据库 |
 | `HATCH` | 部分实现 | 整实体闭合边界 + LINE/ARC 边链；无 .pat/关联性/实时预览 |
 | `HATCHEDIT` | 部分实现 | 恰好一个可寻址模型空间 hatch；键入 `ANGLE <度>`/`SCALE <比例>`（仅 Pattern 填充）或 `SOLID`/`GRADIENT`，经域构造器重建显示并保留 id/层/空间/次序/type_key；一条事务/一步撤销，无变化为 `hatchedit.unchanged` |
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 预选择 hatch；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；无关联/无选项提示 |
+| `HATCHSETBOUNDARY` | 部分实现 | 恰好一个 hatch + 一条闭合 Polyline/Circle/完整 Ellipse，共面性校验；用 `HatchGeometry::new` 重建、丢弃旧种子；失败 `hatchsetboundary.rebuild_failed` |
+| `HATCHSETORIGIN` | 部分实现 | 恒按 `hatchsetorigin.missing_field` 拒绝（`HatchGeometry` 无图案原点字段）；不写入 |
 | `HATCHTOBACK` | 部分实现 | 全部模型空间 hatch 置底（仅改写存储 draw order、保持相对次序、可撤销）；图纸空间/块内不重排 |
+| `HELIX` | 部分实现 | 平面螺旋 `Polyline`；`height>0` 按 `helix.3d_not_implemented` 拒绝 |
+| `HIDEOBJECTS` | 部分实现 | 会话隐藏集；经共享可见性谓词影响拾取/渲染（FLAG_HIDDEN）；无数据库写/撤销；隐藏点标记 overlay 仍可能绘制（声明） |
 | `ID` | 已实现 | — |
 | `INSERT` | 已实现 | — |
+| `ISOLATEOBJECTS` | 部分实现 | 会话隐藏集：隐藏除当前选择外的模型空间对象；无数据库写/撤销 |
 | `JOIN` | 部分实现 | 仅共线 LINE 或同心相续 ARC |
+| `JUSTIFYTEXT` | 部分实现 | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
 | `LAYCUR` | 部分实现 | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
+| `-LAYDEL` | 部分实现 | `LAYDEL` 的别名，同一实现 |
+| `LAYDEL` | 部分实现 | 选择式：删除选中对象所在层的模型空间实体 + 层行（层表删除不可撤销）；当前层/0 层/仍有图纸或块内实体的层拒绝 |
 | `LAYER` | 已实现 | chrome 本地选择子：打开图层面板 |
 | `LAYERCLOSE` | 已实现 | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
-| `LAYFRZ` | 部分实现 | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入不可撤销 |
 | `LAYERP` | 部分实现 | 会话内有界 16 步；不持久化 |
+| `LAYERPMODE` | 部分实现 | `ON\ |
+| `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE\ |
+| `LAYFRZ` | 部分实现 | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入不可撤销 |
 | `LAYISO` | 已实现 | — |
 | `LAYLCK` | 部分实现 | 预选择输入（不弹 Select objects）；锁定选中对象所在的不同图层（含当前层）；图层表写入不可撤销 |
+| `-LAYMCH` | 部分实现 | `LAYMCH` 的别名，同一实现 |
+| `LAYMCH` | 部分实现 | 选择式：第一个选中对象的图层为目标，其余移入（一条事务/一步撤销）；空选择/<2 目标/非模型空间/块实例按名拒绝；无交互 Select objects |
 | `LAYMCUR` | 部分实现 | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
+| `-LAYMRG` | 部分实现 | `LAYMRG` 的别名，同一实现 |
+| `LAYMRG` | 部分实现 | 选择式：选中对象的层合并到当前层（重写实体 + 删除源层；层表删除不可撤销）；当前层/0 层不能作源 |
 | `LAYOFF` | 已实现 | — |
 | `LAYON` | 已实现 | — |
+| `LAYOUT` | 部分实现 | `LIST`/`SET` 真实（读布局表 + 会话空间切换）；`NEW/RENAME/DELETE` 名称校验后按 `layout.write_unsupported` 拒绝（无 post-import 布局写 API）；不写库 |
+| `LAYOUTMERGE` | 部分实现 | 名称校验后 `layoutmerge.write_unsupported`（无布局/实体移动/删除 API） |
+| `LAYOUTWIZARD` | 部分实现 | 名称/页面设置校验后 `layoutwizard.write_unsupported`（无布局/页面设置写 API） |
 | `LAYTHW` | 部分实现 | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入不可撤销 |
 | `LAYULK` | 部分实现 | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入不可撤销 |
 | `LAYUNISO` | 已实现 | — |
+| `LAYVPI` | 部分实现 | 层名校验后 `layvpi.viewport_layer_state_unsupported`；永不全局冻结 |
+| `LAYWALK` | 部分实现 | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
+| `LEADER` | 部分实现 | 创建单个 MULTILEADER（旧实体映射为 MULTILEADER）；一次事务/一步撤销；无引线样式/注释类型选项 |
 | `LENGTHEN` | 部分实现 | 仅 LINE/ARC，只改末端 |
 | `LINE` | 已实现 | — |
+| `-LINETYPE` | 部分实现 | `LINETYPE` 的别名（同一 `CommandId`/路径）；`LIST` 只读、`SET` 复用 `SETENTITYPROPERTY` |
+| `LINETYPE` | 部分实现 | `LIST` 只读（Viewer 合法）；`SET <name>` 复用 `SETENTITYPROPERTY`、重新授权工作模式、一条事务/一步撤销；未知名 `property.unknown_linetype`；无线型表加载/新建/删除/改名 |
 | `LIST` | 部分实现 | 读取**当前选择**而非 AutoCAD 的交互式 “Select objects”；逐对象报告 id/handle/type/layer/space/draw order、标准颜色/线型/线宽/透明度与几何摘要。不建模厚度/拉伸方向；不可寻址引用逐条报告后继续 |
+| `LTSCALE` | 部分实现 | 一个正有限小数；写内存 `$LTSCALE`（一次 revision，无撤销）；当前导出器不写该变量，SAVE→OPEN 不往返 |
 | `MASSPROP` | 部分实现 | 只读；仅选定闭合共面圆/完整椭圆/闭合多段线；面积/周长/包围盒/形心。椭圆周长近似；无惯性矩/主轴/体积/密度/`.mpr` |
 | `MATCHPROP` | 部分实现 | 只转移 layer/color/linetype/lineweight/transparency |
 | `MEASUREGEOM` | 部分实现 | 选项路由：DISTANCE/ANGLE/AREA/POLYLINE 复用既有工具，RADIUS 只读报告；VOLUME 显式未实现（无 3D 体积模型） |
 | `MIRROR` | 部分实现 | 保留原件；拒绝 Text/MultiLeader |
 | `MLEADER` | 部分实现 | 单簇/2 顶点/仅直线；无 Options |
+| `MLINE` | 部分实现 | 恰好两条平行 `LINE`；无 join/cap/多段基线 |
+| `MLSTYLE` | 部分实现 | 会话内最多 16 个命名样式，喂 MLINE；不持久化 |
+| `MOCORO` | 部分实现 | `MOVE |
 | `MODEL` | 已实现 | payload-free 选择子，复用 SPACE MODEL 的校验 + 自动取景；Model 标签页走同一命令 |
 | `MOVE` | 已实现 | — |
+| `MPEDIT` | 部分实现 | 对每个选中 LWPOLYLINE 应用 `CLOSE\ |
+| `MREDO` | 部分实现 | 重做 N 步（默认 1），每步一条历史移动；空栈拒绝；不足时 `mredo.partial` |
+| `MSTRETCH` | 部分实现 | 仅 payload 多窗口列表（无命令行语法）；复用 STRETCH planner 的窗口并集；一条事务/一步撤销；无多边形窗口 |
+| `MTEDIT` | 部分实现 | `TEXTEDIT` 的别名（同一 `CommandId`/路径）；编辑当前单选的 Text/MText/MULTILEADER 字符串；无第二编辑路径 |
+| `-MTEXT` | 部分实现 | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获）；无第二实现 |
 | `MTEXT` | 部分实现 | 两角宽度模型；无行距/分栏/背景填充 |
+| `MULTIPLE` | 部分实现 | 设置会话 `MultipleRepeat` 标志；本宿主无重复循环，报告 `multiple.repeat_not_implemented`，不伪造重复 |
 | `NEW` | 已实现 | — |
 | `OFFSET` | 部分实现 | LINE/CIRCLE/ARC/LWPOLYLINE；ELLIPSE 拒绝；无全局自交修剪 |
 | `OOPS` | 部分实现 | v1 只恢复最近一次 ERASE（不覆盖 AutoCAD 的 BLOCK/WBLOCK 删除）；恢复实体用新 id；撤销恢复副本但不恢复快照 |
@@ -122,7 +231,9 @@
 | `OPTIONS` | 已实现 | chrome 本地选择子：打开选项对话框 |
 | `ORTHO` | 已实现 | — |
 | `OSNAP` | 已实现 | — |
+| `-OVERKILL` | 部分实现 | `OVERKILL` 的别名，同一去重实现 |
 | `OVERKILL` | 部分实现 | v1 仅删除完全相同的重复对象（同空间/图层/几何，1e-9）；无部分重叠、共线合并、圆弧覆盖圆、折线段优化、容差与图层/颜色忽略 |
+| `-PAN` | 部分实现 | `PAN` 的别名；`dx dy` 或两点，走既有相机路径；只改视图（不写库/不 bump 修订/不入历史） |
 | `PAN` | 已实现 | — |
 | `PASTEBLOCK` | 部分实现 | 应用内剪贴板 → 自动命名块；不是 OS 剪贴板 |
 | `PASTECLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
@@ -136,10 +247,22 @@
 | `POLYGON CIRCUMSCRIBED` | 已实现 | **本项目多词选择子**（不属于官方 981 条，不计入上方总计）：`POLYGON` 的 `Circumscribed about circle`（`C`）构造；第二点落在**内切（相切）圆**上，拾取方向为第一条边中点，`R = r / cos(π/n)`；共享会话 `POLYSIDES`；无 Edge/数字半径定向 |
 | `PROPERTIES` | 已实现 | chrome 本地选择子：打开特性面板 |
 | `PROPERTIESCLOSE` | 已实现 | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
+| `-PURGE` | 部分实现 | `PURGE` 的别名，同一实现 |
+| `PURGE` | 部分实现 | 只清未使用的**图层**（复用 `DELETELAYER` 的引用拒绝）；BLOCK/STYLE/LINETYPE 无删除 API，按名拒绝；层表写不可撤销 |
+| `QDIM` | 部分实现 | v1 仅直线 `LINE`：每条线创建一个 `DimensionKind::Aligned`（端点距离，尺寸线按 `DIMDLI` 偏移），一条事务/一步撤销；圆/弧/点等按名拒绝 |
+| `QLEADER` | 部分实现 | 创建单个 MULTILEADER；无 QLEADER 设置对话框/引线样式/注释类型选项 |
 | `QSAVE` | 部分实现 | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
+| `QSELECT` | 部分实现 | `QSELECT <PROPERTY> <VALUE>`（TYPE/LAYER/COLOR/LINETYPE，ASCII 不区分大小写）；替换选择；仅顶层模型空间；零匹配=空选择+诊断 |
 | `RAY` | 部分实现 | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | `RECTANG` | 已实现 | — |
 | `REDO` | 已实现 | — |
+| `REDRAW` | 部分实现 | 当前视口刷新（session generation）；不改相机、不写库、不进 `ZOOM PREVIOUS` |
+| `REDRAWALL` | 部分实现 | 所有视口刷新；同 REDRAW 的只读边界 |
+| `REGEN` | 部分实现 | 推进当前视口 regeneration stamp，重建派生显示缓存；不写库 |
+| `REGEN3` | 部分实现 | `REGEN` 的别名（同一 `CommandId`/路径），无第二套实现；不修复 3D 实体显示异常 |
+| `REGENALL` | 部分实现 | 所有视口 regeneration；不写库 |
+| `-RENAME` | 部分实现 | `RENAME` 的别名，同一实现 |
+| `RENAME` | 部分实现 | `RENAME <kind> <old> <new>`；仅 LAYER 有重命名 API，其余 kind 按名拒绝；不可撤销 |
 | `REVCLOUD` | 部分实现 | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
 | `REVERSE` | 部分实现 | 仅 LINE/LWPOLYLINE/SPLINE，当前选择为全部输入；无交互拾取提示，无螺旋/3D 变体 |
 | `ROTATE` | 已实现 | — |
@@ -148,22 +271,55 @@
 | `SCALE` | 已实现 | — |
 | `SCALETEXT` | 已实现 | — |
 | `SELECT` | 部分实现 | 以选择载荷设置会话选择；不是 AutoCAD 的交互式 SELECT |
+| `SELECTCOUNT` | 部分实现 | 只读统计与第一个选中对象五特性相同的模型空间对象数；不改选择/无事务 |
 | `SELECTSIMILAR` | 部分实现 | v1 仅按几何类型匹配并并入当前选择；无 layer/颜色/线型等属性匹配；仅模型空间 |
 | `SETBYLAYER` | 部分实现 | 预选择输入（不弹 Select objects）；只重置颜色/线型/线宽为随层；不重置透明度与材质，文字/标注/填充/多段线厚度未建模；Include blocks 未实现；锁定图层整命令拒绝；显示写入可撤销 |
+| `SETVAR` | 部分实现 | 读/写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`；写复用既有命令路径；未知/越界按名拒绝 |
+| `SKETCH` | 部分实现 | 仅 `CommandPayload::Points`：一条活动层开放 LWPOLYLINE；两点以上且有限；一条事务/一步撤销；交互式定时采样 NOT IMPLEMENTED |
 | `SNAP` | 已实现 | — |
+| `SOLID` | 部分实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（`AcDbSolid`）；DXF 导出写 polyface mesh，不是 SOLID 记录 |
 | `SPLINE` | 已实现 | — |
+| `SSX` | 部分实现 | 以第一个选中对象的五特性（类型/层/颜色/线型/空间）为模板，并入匹配的模型空间对象；空选择/不可寻址模板拒绝 |
 | `STATUS` | 部分实现 | 报告图形/数据库 id、修订、实体数（模型/图纸/块）、图层（off/frozen/locked）、块/线型/文字样式/标注样式/多重引线样式/布局数、模型空间范围、当前图层、会话模式与网格/捕捉/正交/对象捕捉状态、缩放历史深度。创建/编辑时间、内存、图形界限与基点**不跟踪**（无图形头模型），以 `status.not_tracked` 显式说明 |
 | `STRETCH` | 部分实现 | 恒交叉窗口；TEXT/MultiLeader 整命令拒绝 |
 | `TCASE` | 部分实现 | Express 工具、选择式：只改 Text/MText 的可见字符大小写；裸命令默认 Title，键入 `TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE`（或 `U/L/T/S/G`）；MTEXT 格式转义逐字保留；属性/标注文字未建模（`tcase.not_reset`）；MULTILEADER 走 `with_text` |
+| `TCIRCLE` | 部分实现 | `TCIRCLE CIRCLE\ |
+| `TCOUNT` | 部分实现 | `TCOUNT <start> <step> [prefix] [suffix]`；按上→下/左→右顺序把每个选中 Text/MText 替换为 `prefix+编号+suffix`；`step` 必须 >0；AutoCAD 的逐项前缀/后缀对话框模式未实现 |
 | `TEXT` | 已实现 | — |
+| `TEXTALIGN` | 部分实现 | `TEXTALIGN LEFT\ |
 | `TEXTEDIT` | 部分实现 | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
+| `TEXTFIT` | 部分实现 | 仅按 `height = target / char_count` 调整字高；真实宽度拉伸 NOT IMPLEMENTED；坏宽度/空选择/非文字/空文本具名拒绝 |
+| `TEXTMASK` | 部分实现 | 为每个选中 Text/MText 用**估算**外框创建独立 `Mask`（type-key `AcDbWipeout`，`draw_order = 文字 − 1`）；无关联模型，遮罩是独立实体 |
 | `TEXTTOFRONT` | 部分实现 | 选择式；仅模型空间 Text/MultiLeader/Dimension 上移到所有非合格对象之前；其它选中对象逐条诊断跳过；图纸空间/块内不重排；“全图文字”形式与 Draw Order 对话框未实现 |
+| `TEXTUNMASK` | 部分实现 | 只删除**选中**的、落在选中文字估算外框内的 `Mask`；启发式无法证明来源；未选中的 Mask 不扫描 |
+| `TIME` | 部分实现 | 只读：revision/实体数 + UTC 时钟；创建/编辑时间与会话 uptime 显式 NOT TRACKED |
+| `TJUST` | 部分实现 | `JUSTIFYTEXT` 的别名，同一语法与实现 |
 | `TORIENT` | 部分实现 | Express 工具、选择式：裸命令按 180° 步进归一到 `(-π/2, π/2]`（Most Readable），`TORIENT <角度>` 设为绝对旋转；只改 rotation，位置/字高/内容不变；非 Text（含 MULTILEADER/INSERT 属性）报告 `torient.not_reset`，不整体失败 |
+| `TREESTAT` | 部分实现 | 显式 `treestat.not_tracked`；不造假计数 |
+| `TREX` | 部分实现 | `TREX TRIM\ |
 | `TRIM` | 部分实现 | 目标 LINE/ARC/CIRCLE/SPLINE；边界含折线/样条采样 |
+| `TSCALE` | 部分实现 | `TSCALE <factor>`；复用 SCALETEXT 的唯一 `scaled_text` 规则（height + MText `wrap_width`）；factor=1 为 `tscale.unchanged` 且不开事务 |
 | `TXT2MTXT` | 部分实现 | 选择式：至少一个模型空间 Text/MText，按上→下、左→右稳定排序后用 `\P` 原样拼接成一个 `AcDbMText`，沿用首个源的样式/位置/字高/旋转/对齐/层/绘制顺序/`wrap_width`，同一事务删除全部源；设置对话框与强制统一行距未实现 |
 | `U` | 已实现 | — |
 | `UNDO` | 已实现 | — |
+| `UNGROUP` | 部分实现 | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
+| `UNISOLATEOBJECTS` | 部分实现 | 清空会话隐藏集；无数据库写/撤销 |
+| `-VIEW` | 部分实现 | `VIEW` 的别名，同一实现 |
+| `VIEW` | 部分实现 | `SAVE/RESTORE/LIST/DELETE <name>`；会话内最多 32 个命名视图（相机+视图模式+工作平面+活动空间）；不持久化 DWG |
+| `VIEWBACK` | 部分实现 | 复用每视口 `ZOOM PREVIOUS` 栈；空栈为 `view.back.empty` no-op |
+| `VIEWFORWARD` | 部分实现 | 新的每视口前进栈（上限 16）；空栈 no-op；文档化偏离 |
+| `VIEWGO` | 部分实现 | 同 `VIEW RESTORE`；未知名称按名拒绝 |
+| `VIEWRES` | 部分实现 | 整数 `1..=1000` 仅存会话 token；越界 `viewres.out_of_range`；渲染器消费/像素效果 NOT IMPLEMENTED / NOT VERIFIED |
+| `VPCLIP` | 部分实现 | `RECT` 校验；非矩形 `vpclip.polygonal_not_implemented`；合法矩形后 `vpclip.viewport_selection_unsupported`（无选中视口/裁剪写 API） |
+| `VPMAX` | 部分实现 | 会话标记（活动图纸布局的第一个视口）；不写库 |
+| `VPMIN` | 部分实现 | 恢复会话标记；空状态 `vpmin.nothing_to_restore` |
+| `VPOINT` | 部分实现 | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；零/非有限向量拒绝；不改模型；向量形式进入 3D 透视 |
+| `-VPORTS` | 部分实现 | `VPORTS` 的别名，同一实现 |
+| `VPORTS` | 部分实现 | 网格校验 + 图纸空间检查后 `vports.write_unsupported`（无视口创建 API） |
+| `VPSCALE` | 部分实现 | 零/非有限/未知拒绝；解析比例后 `vpscale.write_unsupported`（无视口比例写 API） |
+| `VSCURRENT` | 部分实现 | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented`；无渲染器切换、NOT pixel-verified |
 | `WIPEOUT` | 部分实现 | v1 多边形遮罩：拾取边界点（≥3，回车结束）→ 一个 `Mask`（type-key `AcDbWipeout`，`inverted: false`，环不重复首点）。无边框模型（Frames ON/OFF/不打印）、无 `Polyline`/`Erase Polyline` 选项、不检查自交、不能拾取已有遮罩 |
+| `XDLIST` | 部分实现 | 只读；每个选中实体报告 `xdlist.not_retained`；不伪造 xdata |
 | `XLINE` | 部分实现 | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | `ZOOM` | 部分实现 | 无 OBJECT/DYNAMIC/图纸空间 nXP；WINDOW/PREVIOUS 已实现 |
 
@@ -701,7 +857,7 @@
 | 528 | `MATERIALMAP` | 未实现 | Adjusts how a texture is mapped to a face or an object. | — |
 | 529 | `MATERIALS` | 未实现 | Opens the Materials Browser. | — |
 | 530 | `MATERIALSCLOSE` | 未实现 | Closes the Materials Browser. | — |
-| 531 | `MEASURE` | 未实现 | Creates point objects or blocks at measured intervals along the length or perimeter of an object. | 本项目 MEASURE 是测量入口（默认 DIST），不是沿对象放置点/块 |
+| 531 | `MEASURE` | 未实现（同名不同义） | Creates point objects or blocks at measured intervals along the length or perimeter of an object. | 本项目 MEASURE 是测量入口（默认 DIST），不是沿对象放置点/块；**不计入覆盖** |
 | 532 | `MEASUREGEOM` | 部分实现 | Measures the distance, radius, angle, area, and volume of selected objects, a sequence of points, or dynamically. | **v1（2026-11-07）选项路由**：`MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 复用既有 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE` 工具（同一交互请求，无第二测量引擎）；`RADIUS` 只读报告所选单个 `ARC`/`CIRCLE` 的圆心/半径/直径/圆周长（圆弧另报弧长）。裸名 `measuregeom.needs_option`，未知选项按名拒绝。**未实现**：`VOLUME`（本构建无 3D 实体/体积模型，显式 `measuregeom.volume_unsupported`，不编造数值）；AutoCAD 的其它选项/动态测量未接线。 |
 | 533 | `MENU` | 未实现 | Obsolete. Loads a customization file. | — |
 | 534 | `MESH` | 未实现 | Creates a 3D mesh primitive object such as a box, cone, cylinder, pyramid, sphere, wedge, or torus. | — |
@@ -1150,14 +1306,241 @@
 | 977 | `XOPEN` | 未实现 | Opens a selected drawing reference (xref) in a new window. | — |
 | 978 | `XPLODE` | 未实现 | Breaks a compound object into its component objects, with specified properties for the resulting objects. | — |
 | 979 | `-XREF` | 未实现 | From the Command prompt, manages drawings inserted as external references (xrefs). | — |
-| 980 | `XREF` | 未实现 | Starts the EXTERNALREFERENCES command. | — |
+| 980 | `XREF` | 未实现 | Starts the EXTERNALREFERENCES command. | 无 `XREF`/`-XREF` 命令（无附着/卸载/重载/绑定）；打开图纸时只读导入期合并被参照图纸（v1，见 `docs/xref.md`），浏览器显式 `browser-unavailable`，DXF 另存拒绝摊平 |
 | 981 | `ZOOM` | 部分实现 | Increases or decreases the magnification of the view in the current viewport. | 无 OBJECT/DYNAMIC/图纸空间 nXP；WINDOW/PREVIOUS 已实现 |
 
-## 复跑
+## 项目词表审计（合并自 `docs/autocad-command-coverage.md`）
+
+> 本节是原「AutoCAD 命令覆盖审计」的内容，已并入本文；**状态以本文件上方总表为准**，
+> 逐条能力边界以 `docs/compatibility.md` 为权威。原文件的 115 选择子 / 179 拼写是旧快照，
+> 下列数字已更新到当前源码表（复核 2026-11-07）。
+
+### 1. 「total」是什么，不是什么
+
+仓库里**没有**任何**权威、可枚举的「AutoCAD 命令全集」**：没有 `acad.pgp` 解析器，没有
+命令清单数据文件，也没有从 Autodesk 文档导入的表。本文把「total」拆成两个**可辩护**的量：
+
+1. **我们的词表**（可精确计数，源码是唯一权威）：选择子表、测量选择子表、缩放步进表、
+   带参数表、别名表。这些数**可以**说「全部通过契约测试」。
+2. **官方 AutoCAD 2026 命令索引**（981 条，见上方全量清单）：这是本文的覆盖基准；
+   状态逐条写入，但**不是**行为等价或验收。
+
+> **禁止的读法**：不得把 `229`、`309` 或本文任何数字读成「已实现 AutoCAD 的 X%」。
+> AutoCAD 的命令总数取决于版本、产品（完整版/LT/工具集）、是否含扩展与第三方；任何
+> `222/981` 形式的百分比都只是**本清单的逐条计数**，不是兼容率。多少条名字有命令路径
+> 与这些路径是否与 AutoCAD 等价，是两个问题。
+
+### 2. 词表总量（每项都有 source of truth）
+
+| 表 | 数量 | 源码位置 | 断言 / 说明 |
+|---|---:|---|---|
+| `COMMAND_TABLE` | **229** 个选择子 | `crates/cad-ui-core/src/session/commands.rs` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 229` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs`（并断言每变体在表中**恰好一次**、表长相等） |
+| `MEASUREMENT_SELECTORS` | **5** | 同文件 | `DIST`/`MEASUREPOLYLINE`/`MEASUREANGLE`/`AREA`/`ID`；交互专用，没有自己的 `CommandId` |
+| `ZOOM_STEP_SELECTORS` | **2** | 同文件 | `ZOOMIN`/`ZOOMOUT`（固定步进因子 `1.25` 与倒数） |
+| `ARGUMENT_SELECTORS` | **65**（含通用 `ARGUMENT_SELECTOR`） | 同文件 | 接受命令行参数的基选择子；`ARGUMENT_SELECTOR` 是通用分发入口，其余按批分组 |
+| `COMMAND_ALIASES` | **73** 行 | 同文件 | 别名 + 全词同义词；只收录**目标选择子真实存在**的拼写 |
+| `admissible_names()` | **309** 个可输入拼写 | 同文件 | 229 + 5 + 2 + 73 = 309（无重名）。这是**拼写**数，**不是**命令数 |
+
+> 这些数字是**当前源码表的长度**（复核 **2026-11-07**）。命令的**行为**数上限是
+> `CommandId` 变体数（= 229），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
+> 表一变，本文的 `总计` 与本节都要跟着改；**权威是源码表与 `check-command-docs.py` 的实跑输出**，
+> 不是手抄值。
+
+**为什么不把 309 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
+不改变行为；`ZOOMIN`/`ZOOMOUT` 与各测量选择子不携带 `CommandId`。
+
+### 3. 本项目自己的名字 / 同名不同义
+
+**本项目自己的名字**（AutoCAD 无同名，或同名不同义），不计入 AutoCAD 覆盖：
+`RESETVIEW`、`SWITCHBACKEND`、`SWITCH2D3D`、`STANDARDVIEW`（AutoCAD 的 `VIEW` 是命名的视图管理）、
+`MODE`（Viewer/Work）、`RESOURCES`、`DIAGNOSTICS`、`SPACE`（模型/图纸空间切换）、
+`SELECTINBOX`、`SELECTSIMILAR`（v1 仅按几何类型）、`CONFIRM`/`CANCELMEASURE`、`GRIPSTRETCH`、
+`HOVERPREVIEW`、`HATCHPOINT`（AutoCAD 的 `HATCH` 走内部点提示；本仓库把它拆成独立选择子）、
+`TOGGLELAYER`/`SETLAYERS`/`RESTORELAYERS`/`SETACTIVELAYER`/`CREATELAYER`/`RENAMELAYER`/
+`DELETELAYER`/`SETLAYERPROPERTY`（AutoCAD 的对应物是 `-LAYER`/`LAYER` 子选项，语义不同）、
+`SETENTITYPROPERTY`、`MEASUREPOLYLINE`/`MEASUREANGLE`（AutoCAD 的 `PLINE` 现在是绘制命令，
+`ANGLE` 不是 AutoCAD 命令）、`AREA OBJECT`（AutoCAD 的 `AREA`→`Object` 提示的**选择式**变体）、
+`POLYGON CIRCUMSCRIBED`（`POLYGON` 的外切构造，独立多词选择子）。
+
+**同名不同义**（不计覆盖）：
+- `MEASURE`：AutoCAD 沿对象按间距放置点/块；本仓库是**测量工具入口**（默认距离），不产生任何实体。
+- `TRACE`：AutoCAD 2026 是**协作追踪**（打开/管理 trace）；本仓库同名命令是**旧式宽线带**。
+
+### 4. 命令边界审计（旧表迁移）
+
+> 下表保留旧审计的逐条边界，状态已按当前主表更新；新增批次的完整边界见上方索引与
+> `docs/compatibility.md`。
+
+#### 4.1 绘制
+
+| AutoCAD 名 | 状态 | 界 |
+|---|---|---|
+| `LINE` | 实现 | 两点；退化/共线/非有限拒绝 |
+| `CIRCLE` | 实现 | 圆心 + 半径点；**`2P`/`3P`/`D` 已实现（2026-11-01，多词 canonical）**：`CIRCLE 2P` 直径两端点、`CIRCLE 3P` 三点外接圆（复用 `arc_parameters`）、`CIRCLE D` 圆心 + **直径距离**（半径 = 距离/2）；三者都产一个 `Circle`，活动图层/模型空间，一条事务/一步撤销 |
+| `ARC` | 实现 | **三点弧**；无 起点-圆心-端点 / 起点-圆心-角 / 连续弧 |
+| `PLINE` | 实现 | 只产**开放 LWPOLYLINE**、**每段 bulge=0**；无弧段/`Close`/`Width`/`Length`/`Undo` |
+| `RECTANG` | 实现 | 两对角点 → 闭合 4 顶点 LWPOLYLINE；无 `Chamfer`/`Fillet`/`Width`/`Elevation`/`Rotation`/`Area` |
+| `POLYGON` | 实现 | **内接于圆**、边数 3–1024；无 `Edge` 分支、**无外切模式** |
+| `ELLIPSE` | 实现 | 轴端点法**整椭圆**；无 `Arc`/`Center` 法/`Rotation`/`Isocircle` |
+| `POINT` | 实现 | **单次放置**；显示走 `$PDMODE`/`$PDSIZE`（基础 `0`–`4`，周边 `32` 圆/`64` 方/`96` 两者，线段近似）；无 `Multiple` 重复放置 |
+| `SPLINE` | 实现 | fit 点法（≥4 点）→ 三次/clamped/chord 插值 NURBS；无 `CV`/`Knots`/`Degree`/`Close`/`Tangency`/`Object` |
+| `POLYLINE` | **未实现** | 旧式 heavy 2D 折线实体（`AcDb2dPolyline` + 顶点子实体）。我们**只创建 LWPOLYLINE**；别名到 `PLINE` 会**凭空发明语义**，故不做；不在官方 981 索引，故不影响总计 |
+| `XLINE`（含 `RAY`） | **实现（有界创建，2026-11-01；导入有有界降级）** | **命令**：两点（base/through）经 `clip_segment_to_xy_rect` 裁到模型包围盒（外扩 5%、至少 1.0）或默认 1000 单位盒，生成一条有限 `Line`、type-key `AcDbXline`/`AcDbRay`，一条事务/一步撤销；**不是无限几何**，导出写 DXF `LINE`（`Converted`）。库里**没有无限直线几何**：导入期把 XLINE/RAY 压成**有限 `SemanticGeometry::Line`**，裁到**运行中的模型包围盒**（盒每边外扩对角线 5%、至少 1.0）⇒ 裁多长**取决于导入顺序**（先出现什么几何，盒就是什么）；还没有任何几何时用**默认 1000 单位盒**。判定：方向退化 → `Opaque` + `Partial`；裁不到盒内 → `Opaque` + `Partial`；否则 `Line` + **`Partial`**（原因是具名常量 `support::XLINE_SEGMENT_REASON` / `XLINE_DEFAULT_BOX_REASON`，并额外记一次 `import.construct_line`）。**导出**只能写 DXF `LINE`，报 `Converted`（`export.converted.line`，点名「不再是无限线」），**不是**精确往返。没有创建命令、没有无限表示。**规模**：命令 **M**（建在既有有界切片上）；真正的无限几何 **L / ADR 级**（见 §5） |
+| `HATCH` | 部分 | **两个入口（2026-11-01）**：`HATCH` **先选闭合边界实体**；`HATCHPOINT` **按内部点**（本项目选择子；在可见的**整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` **以及可见 `LINE`/`ARC` 边链**中取**最小包含边界**，嵌套环作岛屿；`LINE`/`ARC` 用平面半边面行走、弧存**精确 bulge**；不用当前选择、只认 `+Z` 同标高、仅模型空间；种子存 `seeds`/组 98）。填充类型 `0` 实体 / `1` 用户自定义 / `2` 预定义 / **`3` 渐变（2026-10-27）**；预定义图案**恰好** `ANSI31`/`ANSI32`/`ANSI37`（状态栏**按名**选，线上传 1 基索引）。**渐变创建**：双色两站（`stop 0.0` = `hatchGradientColorA`、`stop 1.0` = B），kind 只有 `LINEAR`/`SPHERICAL`（**从不**写 `CYLINDER`），角度**通道给度、实体存弧度**（一次 `.to_radians()`），颜色是 **ACI 整数 `1..=255`**（`0` 是 ByBlock 占位、无 sRGB，按名拒绝），默认 1 红 / 5 蓝；实体写 `HatchGradient::TwoColor { reserved: 0, shift: 0.0 }` + `pattern_type = Predefined`（`76=1`，**未查证的 vendor 约定**）。**界**：`SPHERICAL` 在矩形/圆这类「边界顶点同半径」的形状上**烘焙成平色/椭圆感、不是径向**（按三角化顶点取值）；只有 ACI 调色板（无真彩、无名/色簿）；stop 颜色下游还会被实体/图层 tint 乘；**无单色/tint 变体、无逐站命名**。内部点求边界已实现（`HATCHPOINT` v1，见上）；无 `76=2`/`.pat`、无关联性、无实时预览 |
+| `MLEADER` | 部分 | 单簇/单线/2 顶点/**仅直线**；无 `Options`（引线类型/内容类型/最多点数/角度约束）；狗腿/箭头/字高取 `Standard` 样式表（常量为债务） |
+| `TEXT` | 实现 | **单行**、1024 字符上限、**拒绝换行**；不解释 MTEXT 控制码（逐字存储）；**旋转取会话参数 `textRotation`**（通道**度**、任意有限、**不 wrap**、默认 `0`，创建时**一次** `.to_radians()` 存弧度；载荷本身没有旋转字段） |
+| `MTEXT` | 部分 | **两角宽度模型** + 终端文本；**旋转取 `textRotation`**（同上，度→弧度一次）、**附着取 `mtextAttachment`**（闭集 `1..=9` 的 3×3 网格：`1..=3` top / `4..=6` middle / `7..=9` bottom，每行左/中/右——`h = (code−1) % 3`、`row = (code−1)/3`，**永不产出 `TextAlignV::Baseline`**；默认 `1` 左上），越界 code 与非有限旋转**按名拒绝**、不钳制；**仍未实现**：行距、分栏、背景填充、绘制方向、绘制流程内 MTEXT 对话框 |
+| `TEXTEDIT` | 部分 | 拾取一个文本 → **预填当前串** → 整串替换；无光标级编辑、不解析 MTEXT 标记（MLEADER 三条入口已接） |
+
+| `REVCLOUD` | 部分 | **对象模式 v1（2026-11-07）**：恰好 1 条选中的**闭合、全直线段** LWPOLYLINE；每条边换成一段**向外**弧（bulge 幅度 `0.5`，sweep ≈ 106.26°；CCW 环取 `+0.5`、CW 取 `-0.5`，符号由 `cad_geometry` 的 bulge 约定决定），实体**原地重写**、一条事务/一步撤销。**按名拒绝**：开放折线、已有 bulge、非折线、`+Z` 外/非有限/零面积、多选或空选。**未实现**：矩形/多边形交互绘制、`Arc length` 参数、对象拾取模式、AutoCAD 的弧长/弦长样式选项 |
+
+| `TRACE` | **同名不同义（不计入）** | AutoCAD 2026 的 `TRACE` 是**协作追踪**（打开/管理 trace）；本构建同名命令是**旧式宽线带**（闭合 4 顶点 LWPOLYLINE），语义不同，**不计入覆盖** |
+
+#### 4.2 标注
+
+| AutoCAD 名 | 状态 | 界 |
+|---|---|---|
+| `DIMLINEAR` / `DIMALIGNED` | 实现 | **三点流程**（两原点 + 尺寸线位置）；**非关联**；无文字覆盖；当前样式恒为 `Standard` |
+| `DIMRADIUS` / `DIMDIAMETER` | 实现 | **实体拾取圆弧/圆** + 位置；组 40 写 `0.0`（引线延长未建模）；弧的引线点落在**整圆**上、不钳到扫掠范围 |
+| `DIMANGULAR` | 部分 | **仅两线形式可交互**；三点形式只到命令/载荷层；拾取范围**仅 `Line`** |
+| `DIMORDINATE` | 实现 | 特征点 + 引线端点；自动 X/Y 规则为**我们的规则**（`\|Δy\| > \|Δx\|` ⇒ X） |
+| `DIMCENTER` | 实现 | 产出**普通 `LINE` 几何**，**不是** DIMENSION 实体；`DIMCEN = 0` ⇒ 0 实体 + 具名诊断 |
+| `DIMBASELINE` / `DIMCONTINUE` | 实现 | **显式拾取基准线性标注**（零跨命令状态）、N 点 + Enter、**一条事务/一步撤销**、`DIMDLI` 行距；**仅线性基准**、**不写 `DIMCONTINUEMODE`**、非关联、无文字覆盖 |
+| `DIMSTYLE` | **部分** | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 在名称校验后按 `dimstyle.set_unavailable` **具名拒绝**（无 post-import 样式表写 API）。实体存**已解析快照**，编辑样式**不追溯** |
+| `DIMEDIT` / `DIMTEDIT` / `DIMOVERRIDE` / `DIMBREAK` / `QDIM` / `DIMSPACE` | **部分** | `DIMEDIT` 文字覆盖/复位、`DIMTEDIT` 文字移动/旋转/复位、`DIMOVERRIDE` 实体快照变量、`QDIM` 直线 v1、`DIMSPACE` 等距重排是真实写路径（一条事务/一步撤销）；`DIMBREAK` 无打断记录，按 `dimbreak.unsupported` 拒绝。逐条见上方索引 |
+| `DIMJOGLINE` | **部分** | `ADD`/`REMOVE` 语法校验后按 `dimjogline.unsupported` 拒绝（域无 jog 字段/存储） |
+| `DIMARC` / `DIMJOGGED` / `DIMREASSOCIATE` | **未实现** | 无弧长/折弯标注字段与关联模型 |
+| 关联性（`DIMASSOC=2`） | **未实现** | 创建与迁移的标注都是非关联单实体；导出不写 `ACAD_DIMASSOC` |
+
+#### 4.3 修改
+
+| AutoCAD 名 | 状态 | 界 |
+|---|---|---|
+| `MOVE` | 实现 | 平移选择；不可变换几何（`Shape`/`Opaque`/`Compound`…）整条拒绝；`SPLINE` 可平移（NURBS 仿射不变） |
+| `COPY` | 实现 | 按位移复制、新 id；样式覆盖无法复制时记 `drawing.copy.style` |
+| `ROTATE` | 实现 | 绕基点旋转（相似变换）；选择含 `MultiLeader` 时**仍可旋转**（缩放则整命令失败，见 `SCALE`） |
+| `SCALE` | 实现 | **均匀**缩放；非均匀拒绝；`MultiLeader`/`TEXT` 等按类拒绝 |
+| `MIRROR` | 部分 | 镜像并**新增副本**（保留原件）；含 `Arc`/`Ellipse`（含椭圆弧）；**拒绝 `Text`**（平面文字无法表达真反射）与 `MultiLeader` |
+| `TRIM` | 部分 | 目标 `LINE`/`ARC`/`CIRCLE`/`SPLINE`；边界含 `LINE`/`ARC`/`CIRCLE`/`ELLIPSE`/`LWPOLYLINE`（含 bulge）/`SPLINE`（**采样**，附诊断）；拒绝 `INSERT`/`Opaque`/`Mesh` 目标、无交点/投影出域 |
+| `EXTEND` | 部分 | 目标 **`LINE` 或 `ARC`**（弧延伸上限半圈）；**`SPLINE` 目标显式拒绝**（NURBS 端点移动会改参数化，无外推策略）；`CIRCLE` 目标拒绝 |
+| `BREAK` | 部分 | 两点打断：**第一次拾取实体同时是第一断点**，第二点确定移除区间；`LINE`/`ARC`/`CIRCLE`/`SPLINE` 走同一 `TargetCurve` 精确子曲线；`CIRCLE` 变 `ARC`（补集），源实体保留为第一段、第二段新 id，一条事务/一步撤销。**按名拒绝**：`LWPOLYLINE`/其它种类、两点同参数（`break.zero_span`）、整条曲线（`break.whole_curve`）、拾取投影出界（`break.pick_outside_span`）、块成员/子元素、非模型空间。**无 `F` 第一点覆盖、无多段打断** |
+| `DIVIDE` | 部分 | **选择式**：恰好 1 条 `LINE`/`ARC`/`CIRCLE`/**直线段** `LWPOLYLINE`，按**等弧长**放置 `POINT`；开放曲线 `N−1` 个、闭合曲线 `N` 个（含起始参数）；`divideSegments` 2–1024；源保留、一条事务/一步撤销。**按名拒绝**：`SPLINE`/椭圆/含 bulge 折线（`divide.bulged_segment`）/非有限或零长/选择数≠1 |
+| `LENGTHEN` | 部分 | **选择式**：恰好 1 条 `LINE`/`ARC`；`lengthenMode` `0` Delta / `1` Percent / `2` Total + `lengthenValue`，改**末端**长度（`LINE` 的 end、`ARC` 的 sweep），实体 id/图层/空间/draw order/`type_key` 保留；一条事务/一步撤销。**按名拒绝**：`CIRCLE`/`LWPOLYLINE`/`SPLINE`/其它、非正新长度、ARC 超过一整圈、选择数≠1。**只改末端、无逐端拾取**（声明的 v1 偏离） |
+| `SCALETEXT` | 实现 | **选择式**：一个或多个 `TEXT`/`MTEXT`；`scaleTextFactor` 有限 **> 0**，字高乘该值，MTEXT 的 `wrap_width: Some(w)` 同步乘；位置/旋转/对齐/样式逐位保留；混合/非文本整命令拒绝；`1.0` 为具名 no-op；一条事务/一步撤销 |
+| `OFFSET` | 部分 | `LINE` / `CIRCLE` / `ARC` / `LWPOLYLINE`（直线段**与含弧段**，后者 2026-10-28）；`ARC` 与 `CIRCLE` 共用 `\|p−c\|` 半径模型。**弧段同心**（`R' = R − s·sign(sweep)`；`R' <= tol` ⇒ `offset.arc_collapsed`，不删除不混合）；接点 = miter（line/line）/ 最近解析交点（line-circle、circle-circle；0 或两个等距 ⇒ `offset.join_failed`），相切闭式；弧 start/sweep 由接点重导并过 `bulge_arc_geometry`（`offset.arc_mismatch`）；闭合环含 wrap 角、开口弧端不封口。**按名拒绝**：`arc_collapsed`/`join_failed`/`ambiguous_plane`/`arc_mismatch`/`bulge_segment`（只剩非有限或不可构造）/`collapsed`/`non_planar` 与 `ELLIPSE`；**不做**弧段删除与邻居混合；**无全局自交修剪**；弧增长上限 `\|new\| <= \|old\| + π` |
+| `ARRAYRECT` / `ARRAYPOLAR` | 部分 | **独立副本**（非关联，有意偏离）；无 `Path`/`Levels`/`Total`/角度间隔输入/关联编辑；极坐标角度步长 `i·fill/items` 是**我们的规则**（与 AutoCAD 的 `fill/(items−1)` 不同，已测试） |
+| `STRETCH` | 部分 | 恒**交叉窗口**；逐顶点（折线）/控制点（样条）；`TEXT` 与 `MultiLeader` **整命令拒绝**；`HATCH` 部分包围不动 + 诊断；块参照只**刚性平移插入点**、不逐成员拉伸 |
+| `ALIGN` | 部分 | **两对点**（平移 + 旋转 + 可选均匀缩放）；无 3 对点 3D 对齐、无非均匀缩放、无「1 对点移动」 |
+| `EXPLODE` | 部分 | **一次一层**；`LWPOLYLINE`→线段+`ARC`、`INSERT`→直接成员（嵌套保持引用）、`Hatch`→子项；**拒绝** `Dimension`/`MULTILEADER`/非均匀 `INSERT`；`TEXT` 按子项 `child_refusal`；`SPLINE`/`SHAPE`/`OPAQUE`/镜像 `Arc`·`Ellipse` **整命令失败**；无 `EXPLMODE` |
+| `JOIN` | 部分 | **仅**共线首尾相接 `LINE` 或同心相续 `ARC`；折线/样条/圆、需桥接空隙、跨图层/空间 ⇒ 按名拒绝 |
+| `ERASE` | 实现 | 空选择拒绝；撤销恢复渲染属性与动态可见性 |
+| `CHAMFER` | 部分 | **两线形式**：两条独立直线、两距离按拾取顺序施加；无 `Angle` 方法/`Multiple`/`Trim` 开关。**Polyline 模式是独立选择子** `CHAMFER POLYLINE`（2026-10-28，选择式、恰好 1 条开放直线段 `+Z` LWPOLYLINE；`chamferDistanceA` 沿**入边**、`B` 沿**出边**——**我们的规则**） |
+| `FILLET` | 部分 | **两线形式**：两条独立直线 + 半径（`R=0` 只修角点）；平行线**显式拒绝**（不自动调半径）；无 `Multiple`/`Trim` 开关。**Polyline 模式是独立选择子** `FILLET POLYLINE`（2026-10-28，选择式、同上形状；半径取 `filletRadius`、每个内顶点加圆弧；`R ≤ 0` 按名拒绝、**不做** AutoCAD 的自动缩半径） |
+| `MATCHPROP` | 部分 | **选择式**（AutoCAD 特性刷的文档化变体：首个选中为源）；只转移 `layer`/`color`/`linetype`/`lineweight`/`transparency` 五项；**无 Settings 子集**；文字样式/标注样式/填充图案一律**不**转移 |
+
+| `SELECTSIMILAR` | 部分 | **v1 仅按几何类型（2026-11-07）**：把可见模型空间中与当前选择**同 `SemanticGeometry` 变体**的拾取项**并入**现有选择（保留顺序，不替换）；复用 `SELECTALL` 的可见目录与预检。**未实现**：layer/颜色/线型/线宽/透明度等属性匹配、图纸空间/块内选择、`SELECTSIMILAR` 的 Settings 子集 |
+
+#### 4.4 块 / 外部参照 / 发布
+
+| AutoCAD 名 | 状态 | 界 |
+|---|---|---|
+| `INSERT`（**读取**侧） | 实现 | 块定义与实例分离、实例展开几何（嵌套有界，保留 instance path）、可拾取、插入点夹点可拖（仅 `native-below` 宿主） |
+| `INSERT`（**创建**侧） | **实现（v1，2026-11-01）** | **点-后-名**：先拾取插入点，再输入**本图已有块**的名称（终端文本通道）；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`，活动图层/模型空间，一条事务/一步撤销。**无块表写入**（只读块定义 + 名称/基点元数据）；**无**块选择器/palette、比例/旋转/属性值/动态块参数；未知名称/缺元数据/空名/换行/非有限点按名拒绝。`BLOCK`/`PASTEBLOCK` 已实现 v1；`WBLOCK` 仍缺 |
+| `BLOCK` | **实现（v1，2026-11-01）** | **选择 → 基点 → 名称**（终端文本）：选中模型空间顶层实体写入新块定义并移入 `SpaceId::Block`，几何**逐位保留**、只改空间；元数据存基点；参照为 identity `T(基点)·T(−基点)`，后续 `INSERT` 仍按 `T(I)·T(−基点)`；**一条事务/一步撤销**，块级 undo 补丁；参照 draw_order = 成员最大 draw_order、参照在活动图层。**v1 上限**：无 ATTDEF/ATTRIB、动态块参数、retain/delete 选择、块选择器；重名（精确/ASCII 大小写不敏感）拒绝；实例路径/子元素/图纸空间/块成员拒绝；名称非法字符/空/换行拒绝 |
+| `WBLOCK` | **未实现** | 无「写块到文件」 |
+| `XREF` | **未实现（命令面）；只读导入期合并 v1** | **无 `XREF` 命令**：无附着/卸载/重载（RELOAD）/绑定（BIND）/编辑/xref 编写。打开图纸时按路径策略读取并合并被参照图纸的模型空间到宿主 xref 块，图层 `xref\|layer`、块 `xref$0$name` 命名空间，状态见 `docs/xref.md`。浏览器无文件系统 ⇒ 显式 `browser-unavailable` 提示，**不 fetch/不猜**；DXF 另存拒绝摊平 xref 内容（`export.xref_content_dropped`），无 xref 记录/路径往返 |
+| `IMPORT` | **未实现** | 打开 DWG/DXF 是**打开管线**，不是 `IMPORT` 命令（无 `IMPORT` 选择子） |
+| `PUBLISH` | **未实现** | 无多布局批量出图 |
+
+#### 4.5 图层 / 显示 / 开关
+
+| AutoCAD 名 | 状态 | 界 |
+|---|---|---|
+| `LAYISO` | 实现 | 会话级显隐覆盖；keep = **所选实体图层 ∪ 当前层**（**我们的规则**）；**不写 DWG、不升 revision、不进历史** |
+| `LAYOFF` | 实现 | 关闭选择所在图层，当前层除外；同样只是会话覆盖 |
+| `LAYON` | 实现 | `RESTORELAYERS` 的**别名**（清空全部会话覆盖），不新增 `CommandId` |
+| `LAYERP` | 部分 | 会话内**有界 16 步**快照环（仅真实改动前压栈）；**不持久化**，无 `LAYRSTATE`/`LAYRDO` |
+| `GRID` | 实现 | **仅显示栅格**开关（另需 `view.overlays.grid` 偏好为真才绘制）；不移动任何点 |
+| `SNAP` | 实现 | 会话级**栅格捕捉**（F9，二维：X/Y 量化，`z` 原样）；默认间距 **10.0 图形单位**是**我们的选择** |
+| `OSNAP` | 实现 | 对象捕捉开关；候选生成/最佳候选规则见 `crates/cad-host`（不在本文范围） |
+| `ORTHO` | 实现 | 仅 XY 约束；约束顺序 **OSNAP → 栅格捕捉 → 正交**，与 AutoCAD 内部顺序不同（已记录的刻意偏差） |
+| `PDMODE` | 部分 | `0`/`1`/`2`/`3`/`4` 已画；`32`/`64`/`96` 周边圆/方**已实现（2026-10-28）**：圆 = 16 段弦环、方 = 4 段，半径 = 标记半幅（比例是我们的选择，**未经 AutoCAD 核对**）；写图纸头、**不可撤销** |
+| `PDSIZE` | 实现 | `>0` 绝对尺寸 / `0` 视口比例 / `<0` 视口高度百分比；非有限/超限回退 `0` 行为 + 诊断 |
+
+| `MODEL` | 实现 | **payload-free（2026-11-07）**：等价于 `SPACE MODEL`，复用同一校验 + 自动取景；会话状态 only，无数据库写/历史/revision。Model 标签页现在直接派发 `MODEL`（图纸标签仍派发 `SPACE #<id>`） |
+| `PLAN` | 部分 | **Top/plan 2D 视图（2026-11-07）**：payload-free，等价于 `StandardView::Top`；已在 2D 时是具名 no-op，不记 `ZOOM PREVIOUS`。**未实现**：UCS/World/Current 选项（本构建无 UCS 模型） |
+
+#### 4.6 剪贴板 / 视图 / 文件
+
+| AutoCAD 名 | 状态 | 界 |
+|---|---|---|
+| `COPYCLIP` / `CUTCLIP` / `COPYBASE` / `CUTBASE` / `PASTECLIP` / `PASTEORIG` / `PASTEBLOCK` | 实现（**集群已实现**，`PASTEBLOCK` v1 于 2026-11-01 增补；仍非 OS 剪贴板） | **应用内**剪贴板：**不是** OS 剪贴板、不跨应用、替换文档即清空。**两个捕获形状**：`COPYCLIP`/`CUTCLIP`（`Ctrl+C`/`Ctrl+X`，**不记基点**；`COPYCLIP` 只读、Viewer 可用；`CUTCLIP` work-only）与 `COPYBASE`/`CUTBASE`（`Ctrl+Shift+C`/`Ctrl+Shift+X`，在预选择之上**再抓一个基点**存进剪贴板元数据；`COPYBASE` 只读、Viewer 可用；`CUTBASE` work-only，**先删除成功再提交剪贴板（含基点）**，失败的剪切不毁旧剪贴板）。**两个粘贴形状**：`PASTECLIP`（`Ctrl+V`，**单点插入点工具**，平移 `插入点 − 基点`，`base = clipboard_base.unwrap_or(世界原点)`，复用 COPY 的同一个 `cad_db` 变换——**不再是原坐标粘贴**）与 `PASTEORIG`（原坐标，忽略基点，等价改动前的 `PASTECLIP`）。所有权重走 `commands/accelerators.ts` → `admitCommandText` 的同一准入。**`PASTEBLOCK` 已实现 v1**（2026-11-01，`Ctrl+Shift+V`）：应用内剪贴板 → 自动命名 `PasteBlockN` 块 + 插入点参照；沿用剪贴板基点/世界原点；一条事务/一步撤销；块成员/图纸空间条目按名拒绝。`WBLOCK` 仍缺。 |
+| `ZOOM` | 部分 | `ZOOM <factor>`（正十进制，锚定视口中心）、`ZOOM ALL`/`EXTENTS`（⇒ `FIT`）、`ZOOMIN`/`ZOOMOUT`、**`ZOOM WINDOW`（2026-10-28）**、**`ZOOM PREVIOUS`（2026-10-28）**；**无** `OBJECT`/`DYNAMIC`，也**无**图纸空间比例 `nXP`。**`WINDOW`**：两角框选经宿主 box-gesture 路径（逻辑像素、实心带、点击不选择），矩形退化/非有限**不派发**；**仅 2D 正交**（3D 按名拒绝 `zoom.window.requires_2d`），另有 `zoom.window.capture_busy`（其它捕获/模态 pan 占着指针）；拟合用 **margin `1.0`**（FIT 是 `1.05`，**我们的选择**）、同一条「较紧轴」规则，`view_mode` 保持 2D，**不进历史、不 bump `session.generation`**。**`PREVIOUS`**：**每视口**一条上限 **16** 的快照栈（最旧丢弃），在每个**离散**视图变化**之前**记录（FIT/`ALL`/`EXTENTS`（真的取景时）、`ZOOM <factor>`/`ZOOMIN`/`ZOOMOUT`/旧 `Points` 载荷缩放、`ZOOM WINDOW`、`STANDARDVIEW`（2D 下的 plan 视图是 no-op、不记）、`SWITCH2D3D`、`PROJECTION`、`RESETVIEW`）；**pan/滚轮缩放/orbit 拖动不记录**（**声明的偏离**）；空栈 ⇒ 非错误诊断 `zoom.previous.empty`。快照 = camera + view_mode + work_plane。语法只认**全词**（`ZOOM W`/`ZOOM PREV` 拒绝），拒绝文案点名 「positive factor, ALL, EXTENTS, WINDOW or PREVIOUS」 |
+| `PAN` | 实现 | 视图平移（实时） |
+| `VIEW` | 部分 | 命名视图 `SAVE/RESTORE/LIST/DELETE <name>`：会话内上限 32（相机 + 视图模式 + 工作平面 + 活动空间），**不持久化 DWG**；预设标准视图（top/bottom/front/back/left/right/isometric）经 IPC 恢复；无视图对话框/缩略图 |
+| `ORBIT` | 部分 | `{yaw, pitch}` 载荷，**仅三维视图**；无连续/受约束 orbit 交互 |
+| `PROJECTION` | 实现 | 透视/正交切换 |
+| `OPEN` | 实现 | 打开 DWG/DXF（宿主提供能力时） |
+| `NEW` | 实现 | 新建空图纸；宿主缺能力时显式 `command.unsupported` |
+| `SAVE` | 部分 | **有损 DXF 另存**（逐条记录转换/丢弃）；源为 `.dwg` 时可**实验性导出 DWG**（上游 `acadrust::DwgWriter`，新文件、默认 `<stem>-export.dwg`、绝不覆盖源）；DWG 导出有损/不完整，仅合成 self-roundtrip 证据，vendor/AutoCAD **NOT VERIFIED** |
+| `PLOT` | 部分 | `PLOT` 是**矢量 SVG/PDF 导出**；无 CTB/STB 打印样式、无批量、无多布局发布；实体能力表里另记的「光栅 PNG（host readback）」是**既有出图通道**，不在本命令的默认路径里 |
+
+| `AUDIT` | 部分 | **只检测（2026-11-07）**：逐实体调用 `cad_db::validate_entity`，输出 `audit.clean` 或 `audit.summary` + 每个 `audit.invalid_entity`；只读，无事务/历史/revision。**未实现**：AutoCAD 的「corrects some errors」修复半部；不修复、不删除、不改写任何实体 |
+
+### 测量选择子（5 个 + `MEASURE` 同名不同义）
+
+| 选择子 | 状态 | 界 |
+|---|---|---|
+| `DIST` | 实现 | 2 点：距离 + 角度 + Δx/Δy/Δz；单点不足即拒绝。**没有** `DI` 别名，也不是 `MEASURE DISTANCE` 这种多词名字（那个名字不存在） |
+| `AREA` | 实现 | **用户选点**闭合多边形面积；自交/非共面/少于 3 点拒绝；**无** `Add`/`Subtract`。**没有** `AA` 别名，也不是 `MEASURE AREA` |
+| `ID` | 实现 | 单点拾取 → X/Y/Z + 空间 + 捕捉来源 + 精度；**故意跳过**栅格捕捉与 `ORTHO`（**我们的规则**）；不写库、无撤销步 |
+| `MEASUREPOLYLINE` | 实现（**本项目选择器**） | N 点开放链长度，需 `CONFIRM` 收尾 |
+| `MEASUREANGLE` | 实现（**本项目选择器**） | 3 点顶点角；纸空间 `ANGLE` 显式拒绝（`ANGLE` 只是**拒绝文案里提到的 AutoCAD 名**，不是本仓库的选择子，也不是别名） |
+| `MEASURE` | **同名不同义** | 本仓库是**测量入口**（默认 `DIST`＝距离），不沿对象放置点/块；不构成 AutoCAD `MEASURE` 的覆盖。它是**独立选择子**（`CommandId::Measure`），与上表五个交互选择子不是别名关系 |
+
+> **这张表没有 `（别名 …）` 单元是有意的**：`COMMAND_ALIASES` 里没有任何指向这五个交互选择子或
+> `MEASURE` 的别名——`DI`/`AA`/`ANGLE` 都不存在。`scripts/check-command-docs.py` 的自检做两件事：① 本表第一列必须是准入名字；
+> ② 全文里每一个被写成别名的反引号 token 都必须真在 `COMMAND_ALIASES` 里。两条都只防「再造名字」，
+> 其余语义仍是**人工核对**。
+
+---
+
+### 5. 缺口清单与规模
+
+规模口径（**粗估，不含验证成本**）：**S** ≈ 一个有界补丁（单模块、无新契约面）；
+**M** ≈ 一个模块（新命令 + 载荷 + 测试 + i18n + 文档）；**L** ≈ 子系统 / 需要 ADR 决策。
+
+| 缺口 | 规模 | 说明 |
+|---|---|---|
+| 协作 `TRACE`（trace/标记/评审模型） | **L** | 2026 的 `TRACE` 是协作追踪；本构建同名命令是旧式宽线带，**不计覆盖**，无 trace 模型 |
+| `POLYLINE`（旧式 heavy 2D 折线实体）创建 | **M** | 需要写 `AcDb2dPolyline` + 顶点子实体；**不得**把 `POLYLINE` 别名到 `PLINE`（不在官方 981 索引） |
+| `XLINE`/`RAY` 真正的无限几何 | **L** | 命令已实现（有界线段）；真正无限表示要新增几何变体，影响 validate/bounds/transform/渲染/选择/导出等约 14 处强制点 + 约 12 处兜底 |
+| `WBLOCK` | **L** | `BLOCK`/`PASTEBLOCK` 已有运行时块写入口；缺单文件写出、块定义导出与 `SavePurpose::WBlock` |
+| `XREF` 命令面 | **L** | 只读导入期合并 v1 已落地；缺附着/卸载/重载/绑定、xref 记录与路径往返、`XCLIP`/完整 `VISRETAIN` |
+| `IMPORT` | **L** | 依赖 acadrust 格式能力与迁移策略；打开 DWG/DXF 走 `OPEN`，不是 `IMPORT` |
+| `PUBLISH` | **L** | 多布局/多图幅批量出图 + 设备/图幅/打印样式；`PLOT` 只到矢量单页 |
+| `DIMSTYLE` 样式表写入与追溯语义 | **M** | `LIST`/`CURRENT` 只读、`SET` 具名拒绝；缺 post-import 样式表写 API 与“改样式是否回写实体”的产品决策（ADR-0017 定为不追溯） |
+| 标注 jog / break / 弧长 / 折弯 / 关联 | **M–L** | `DIMJOGLINE`/`DIMBREAK` 无域字段（具名拒绝）；`DIMARC`/`DIMJOGGED`/`DIMREASSOCIATE` 与 `DIMASSOC=2` 未实现 |
+| HATCH 自定义 `76=2` / `.pat` 加载 | **M** | 需要 `.pat` 解析器 + 名称解析 + 缺失图案的显式拒绝；当前只有三项内置图案 |
+| HATCH 关联性 | **L** | 需要边界→填充持久引用并定义边界编辑后的重生成/失效规则；与现有非关联边界冲突，需 ADR |
+| OFFSET `ELLIPSE` | **L** | 等距偏移曲线不是椭圆，需要新偏移曲线类型或显式折线近似 |
+| 布局/视口 post-import 写 API | **L** | `LAYOUT` 写形式、`VPORTS`/`VPCLIP`/`VPSCALE`/`LAYVPI` 目前是稳定具名拒绝；`VPMAX`/`VPMIN` 只是会话标记 |
+| xdata 模型 | **L** | `XDLIST` 只读并报告 `xdlist.not_retained`；域不保留 xdata |
+| DWG group 对象持久化 | **M** | `GROUP` 系列是会话内组表，不写 DWG group、不过撤销栈、不跨文档保留 |
+| 命名视图持久化 | **M** | `VIEW` 会话内上限 32，不持久化 DWG |
+| 系统剪贴板 | **L** | 现为应用内剪贴板；不跨应用、替换文档即清空 |
+| DWG 精确往返 | **L** | `SAVE` 的实验性 DWG 导出有损/不完整（上游 `DwgWriter`），仅合成 self-roundtrip 证据 |
+| `VIEWRES`/`VSCURRENT` 渲染器接线 | **S** | 目前只写会话 token；tessellation/visual-style 效果 NOT IMPLEMENTED / NOT pixel-verified |
+| `SKETCH` 定时采样、`MSTRETCH` 多边形窗口、`MOCORO` 交互 gizmo | **S** | 当前只有 payload/窗口并集/单次变换路径 |
+
+> 其它已知缺口：`MATCHPROP` Settings 子集、`ARRAY` 的 Path/关联编辑、`STRETCH` 的 HATCH
+> 部分拉伸、非均匀缩放与镜像的文字/`MULTILEADER`（域限制，非命令层缺失）。
+> 3D/实体/约束/表格/点云/渲染/发布类命令整体不在本清单的 2D 优先范围内。
+
+### 6. 如何复跑这次审计
 
 ```bash
-# 官方清单的抓取是本次一次性研究（见上方 URL 与日期）；仓库内不保存 981 行原始 JSON。
-# 本项目词表（源码是唯一权威）：
+# 本项目词表 / 拼写 / 别名的真实数量（源码是唯一权威）
 python3 - <<'PY'
 import re
 src = open('crates/cad-ui-core/src/session/commands.rs').read()
@@ -1167,11 +1550,36 @@ def rows(pat):
 table = rows(r'pub const COMMAND_TABLE: &\[\(&str, CommandId\)\] = &\[(.*?)\n\];')
 meas  = rows(r'pub const MEASUREMENT_SELECTORS: &\[\(&str, MeasurementToolKind\)\] = &\[(.*?)\n\];')
 zoom  = rows(r'pub const ZOOM_STEP_SELECTORS: &\[\(&str, f64\)\] =\s*&\[(.*?)\];')
-aliases = [a for a, _ in re.findall(
-    r'\("([^"]+)",\s*"([^"]+)"\)',
-    re.search(r'pub const COMMAND_ALIASES: &\[\(&str, &str\)\] = &\[(.*?)\n\];', src, re.S).group(1))]
-print(len(table), len(meas), len(zoom), len(aliases))
+args  = re.findall(r'^\s{4}([A-Z_]+_SELECTOR),$',
+                   re.search(r'pub const ARGUMENT_SELECTORS: &\[&str\] = &\[(.*?)\n\];', src, re.S).group(1), re.M)
+aliases = [a for a, _ in re.findall(r'\("([^"]+)",\s*"([^"]+)"\)',
+           re.search(r'pub const COMMAND_ALIASES: &\[\(&str, &str\)\] = &\[(.*?)\n\];', src, re.S).group(1))]
+names = list(dict.fromkeys(table + meas + zoom + aliases))
+print(len(table), len(meas), len(zoom), len(args), len(aliases), "admissible:", len(names))
 PY
+# 期望：229 5 2 65 73 admissible: 309
+
+# 钉住选择子数量的契约
+cargo test -p cad-ui-core --locked command_normalization_covers_every_variant
+cargo test -p cad-ui-core --locked admissible_names_cover_the_vocabulary_exactly_once
+
+# 名字门禁：本文「测量选择子」一节 + docs/shortcuts.md §2/§2b
+python3 scripts/check-command-docs.py        # 一致 → 0 / mismatch → 1 / 读不出结构 → 2
+python3 scripts/test-check-command-docs.py   # 自测：注入伪造 canonical/别名必须退出 1
 ```
 
-> 数量一变，本文件的 `总计` 与映射必须同步；**权威是源码表**，不是这里的手抄值。
+复跑时**必须**同时读 `docs/compatibility.md` 的「绘制/编辑命令」「创建命令」「编辑命令」
+「DIMENSION 族」四节：本节的边界表只是索引，不重述全部拒绝码。
+
+**守门范围**：`check-command-docs.py` 只守**名字**（`shortcuts.md` §2/§2b 与本文测量选择子
+一节的准入名/别名提法）。本文边界表的语义（部分/实现的界）仍是**人工按源码核对**，没有机器守卫。
+
+### 7. 本审计**不**主张的事
+
+1. **不**主张任何「AutoCAD 兼容率」或百分比（见 §1）。
+2. **不**主张同名命令行为等价：多处已标「我们的规则」「未查证」「有意偏离」
+   （极坐标阵列角度步长、`MIRROR` 保留原件、`ARRAYPOLAR` 独立副本、`DIMORDINATE` 自动 X/Y、
+   HATCH 预定义图案值为**我们的转录**）。
+3. **不**主张真实图纸/真实窗口/真实 GPU 验证；除个别历史有界运行（见各 ADR 的实施补充）外，
+   证据是**契约测试与源码结构**。
+4. **不**把「未实现」读成「永远不做」：缺口规模只是工作量分类，不是排期承诺。

@@ -84,9 +84,9 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         # Both Web bundles stage the same committed package and the JS preload
         # runs before the wasm session starts.
         "python3 scripts/test-web-font-package.py",
-        # The command/alias docs gate: §2/§2b (docs/shortcuts.md) and §3.7
-        # (docs/autocad-command-coverage.md) are re-checked against the
-        # cad-ui-core tables, and its self-test proves the check can fail.
+        # The command/alias docs gate: §2/§2b (docs/shortcuts.md) and the
+        # 测量选择子 section (docs/autocad-2026-command-coverage.md) are re-checked
+        # against the cad-ui-core tables, and its self-test proves the check can fail.
         "python3 scripts/check-command-docs.py",
         "python3 scripts/test-check-command-docs.py",
         "cargo check --workspace --all-targets --locked",

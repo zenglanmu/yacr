@@ -4,12 +4,12 @@
 The gate is exercised against **temporary copies** of the two documents, passed
 with ``--doc`` / ``--coverage``; the Rust authority table is read from the real
 repository because it is not what these tests mutate. The real
-``docs/shortcuts.md`` and ``docs/autocad-command-coverage.md`` are never written
+``docs/shortcuts.md`` and ``docs/autocad-2026-command-coverage.md`` are never written
 (one test asserts that by hashing them before and after the suite).
 
 Covered: the real corpus passes; one fabricated canonical name **and** one
 fabricated alias are both reported (exit 1); a dropped §2b row is reported as a
-missing alias; §2b rejects an extra alias; §3.7 rejects a non-admitted first
+missing alias; §2b rejects an extra alias; the 测量选择子 section rejects a non-admitted first
 column and an invented ``别名 `x` `` mention; a truncated document is a clear
 shape failure (exit 2, no traceback) instead of a pass. Stdlib only.
 """
@@ -25,7 +25,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CHECK = ROOT / "scripts" / "check-command-docs.py"
 DOC = ROOT / "docs" / "shortcuts.md"
-COVERAGE = ROOT / "docs" / "autocad-command-coverage.md"
+COVERAGE = ROOT / "docs" / "autocad-2026-command-coverage.md"
 
 # Tokens that cannot collide with a real selector or alias row.
 FAKE_CANONICAL = "ZZSELFTEST COMMAND"
@@ -61,7 +61,7 @@ class CommandDocsGateContracts(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = pathlib.Path(self._tmp.name)
         self.doc = self.root / "shortcuts.md"
-        self.coverage = self.root / "autocad-command-coverage.md"
+        self.coverage = self.root / "autocad-2026-command-coverage.md"
         self.doc.write_text(DOC.read_text(encoding="utf-8"), encoding="utf-8")
         self.coverage.write_text(COVERAGE.read_text(encoding="utf-8"), encoding="utf-8")
 
@@ -157,7 +157,7 @@ class CommandDocsGateContracts(unittest.TestCase):
 
     def test_section_3_7_column_and_alias_mention_are_reported(self) -> None:
         text = self.coverage.read_text(encoding="utf-8")
-        start, end = section_bounds(text, "\n### 3.7", "\n---")
+        start, end = section_bounds(text, "\n### 测量选择子", "\n---")
         section = text[start:end]
         self.assertIn("| `DIST` |", section)
         section = section.replace("| `DIST` |", f"| `{FAKE_CANONICAL}` |", 1)
@@ -174,7 +174,7 @@ class CommandDocsGateContracts(unittest.TestCase):
         result = self.run_check()
 
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn(f"§3.7 not admitted: '{FAKE_CANONICAL}'", result.stdout)
+        self.assertIn(f"测量选择子 not admitted: '{FAKE_CANONICAL}'", result.stdout)
         self.assertIn(
             f"alias mention '{FAKE_ALIAS}' is not in COMMAND_ALIASES", result.stdout
         )
