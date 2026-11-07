@@ -555,4 +555,18 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'HIDEOBJECTS', labelKey: 'draw.kind.hideobjects', icon: 'clearSelection', group: 'modify' },
   { id: 'ISOLATEOBJECTS', labelKey: 'draw.kind.isolateobjects', icon: 'layers', group: 'modify' },
   { id: 'UNISOLATEOBJECTS', labelKey: 'draw.kind.unisolateobjects', icon: 'layers', group: 'modify' },
+  // The 2026-11-07 utility/named-object batch. PURGE/RENAME/SETVAR/TIME/
+  // DBLIST/TREESTAT/MREDO/MULTIPLE are real router selectors; the `-` spellings
+  // of PURGE/RENAME are aliases and therefore have no catalog row of their own.
+  // The typed forms carry their argument on the command line, so a button only
+  // starts the (argument-less) selector and the host refuses a missing argument
+  // by name rather than inventing one.
+  { id: 'PURGE', labelKey: 'draw.kind.purge', icon: 'erase', group: 'file' },
+  { id: 'RENAME', labelKey: 'draw.kind.rename', icon: 'properties', group: 'modify' },
+  { id: 'SETVAR', labelKey: 'draw.kind.setvar', icon: 'properties', group: 'view' },
+  { id: 'TIME', labelKey: 'draw.kind.time', icon: 'diagnostics', group: 'view' },
+  { id: 'DBLIST', labelKey: 'draw.kind.dblist', icon: 'properties', group: 'annotate' },
+  { id: 'TREESTAT', labelKey: 'draw.kind.treestat', icon: 'diagnostics', group: 'view' },
+  { id: 'MREDO', labelKey: 'draw.kind.mredo', icon: 'redo', group: 'modify' },
+  { id: 'MULTIPLE', labelKey: 'draw.kind.multiple', icon: 'copy', group: 'modify' },
 ]);

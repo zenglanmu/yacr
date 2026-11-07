@@ -45,6 +45,14 @@ impl Application {
             CommandId::List => self.list_objects(session, &command),
             CommandId::Status => self.drawing_status(session, &command),
             CommandId::Fs => self.selection_touching(session, &command),
+            // The 2026-11-07 utility batch: PURGE/RENAME/MREDO/MULTIPLE mutate or
+            // arm session state; SETVAR/TIME/DBLIST/TREESTAT are read-only.
+            CommandId::Purge | CommandId::Rename | CommandId::MRedo | CommandId::Multiple => {
+                self.utility_command(session, &command)
+            }
+            CommandId::SetVar | CommandId::Time | CommandId::DbList | CommandId::TreeStat => {
+                self.utility_report(session, &command)
+            }
             // MASSPROP / MEASUREGEOM RADIUS are report-only (Viewer-legal).
             CommandId::MassProp => self.mass_prop(session, &command),
             CommandId::MeasureGeom => self.measure_geom(session, &command),

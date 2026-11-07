@@ -49,6 +49,7 @@ mod space;
 mod status;
 mod text_batch;
 mod text_commands;
+mod util_arguments;
 pub mod vendor;
 pub mod wire;
 mod zoom;

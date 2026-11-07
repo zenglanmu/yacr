@@ -232,7 +232,12 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "FILTER",
             "GETSEL",
             "FIND",
-            "-FIND"
+            "-FIND",
+            "PURGE",
+            "RENAME",
+            "SETVAR",
+            "MREDO",
+            "MULTIPLE"
         ]
     );
     assert_eq!(

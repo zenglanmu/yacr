@@ -356,6 +356,31 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   '-FIND': Object.freeze({
     parse: (argument: string) => isFindArgument(argument) && !argument.includes('=>'),
   }),
+  /**
+   * The 2026-11-07 utility/named-object batch. The host is still the authority
+   * for semantics; these local predicates only prevent an obviously malformed
+   * line from reaching the router. `PURGE` and `RENAME` accept the four named
+   * kinds (the host refuses the kinds without a DB API by name), `SETVAR` needs
+   * one variable token (the host owns the closed set), `MREDO` needs a positive
+   * integer and `MULTIPLE` needs one non-empty command name.
+   */
+  PURGE: Object.freeze({
+    parse: (argument: string) => ['LAYER', 'BLOCK', 'STYLE', 'LINETYPE']
+      .includes(argument.trim().toUpperCase()),
+  }),
+  RENAME: Object.freeze({
+    parse: isRenameArgument,
+  }),
+  SETVAR: Object.freeze({
+    parse: (argument: string) => /^[A-Za-z][A-Za-z0-9_]*(?:[ \t]+.+)?$/.test(argument.trim()),
+  }),
+  MREDO: Object.freeze({
+    parse: (argument: string) => /^[0-9]+$/.test(argument.trim())
+      && Number.parseInt(argument.trim(), 10) > 0,
+  }),
+  MULTIPLE: Object.freeze({
+    parse: (argument: string) => argument.trim().length > 0,
+  }),
 });
 
 
@@ -386,6 +411,49 @@ function isFindArgument(argument: string): boolean {
   if (!trimmed) return false;
   const marker = trimmed.indexOf('=>');
   return marker === -1 ? true : trimmed.slice(0, marker).trim().length > 0;
+}
+
+/**
+ * `RENAME <kind> <old> <new>` with quote-aware tokens.
+ *
+ * The kind is one of the four named-object words; names containing spaces must be
+ * double-quoted so the old/new boundary is unambiguous. This mirrors the host
+ * parser; the host still owns the actual name grammar.
+ */
+function isRenameArgument(argument: string): boolean {
+  const tokens = splitQuotedTokens(argument);
+  if (tokens === null || tokens.length !== 3) return false;
+  if (!['LAYER', 'BLOCK', 'STYLE', 'LINETYPE'].includes(tokens[0].toUpperCase())) return false;
+  return tokens[1].length > 0 && tokens[2].length > 0;
+}
+
+/**
+ * Split whitespace-separated tokens while keeping double-quoted runs together.
+ * Returns `null` for an unbalanced quote. Unquoted empty runs are ignored.
+ */
+function splitQuotedTokens(text: string): string[] | null {
+  const tokens: string[] = [];
+  let current = '';
+  let quoted = false;
+  let started = false;
+  for (const ch of text.trim()) {
+    if (ch === '"') {
+      quoted = !quoted;
+      started = true;
+    } else if (/\s/.test(ch) && !quoted) {
+      if (started || current.length > 0) {
+        tokens.push(current);
+        current = '';
+        started = false;
+      }
+    } else {
+      current += ch;
+      started = true;
+    }
+  }
+  if (quoted) return null;
+  if (started || current.length > 0) tokens.push(current);
+  return tokens;
 }
 
 /**
@@ -443,6 +511,10 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   // catalog's own "no drawing is open" sentence.
   'QSELECT', 'FILTER', 'GETSEL', 'SSX', 'SELECTCOUNT', '-FIND', 'FIND',
   'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS',
+  // The 2026-11-07 utility batch reports or edits the open document (or its
+  // history), so the start page disables all eight with the catalog's own
+  // "no drawing is open" sentence.
+  'PURGE', 'RENAME', 'SETVAR', 'TIME', 'DBLIST', 'TREESTAT', 'MREDO', 'MULTIPLE',
 ]);
 
 /** One command's precondition on the **current selection**. */

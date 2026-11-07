@@ -41,6 +41,47 @@ pub struct GripStretchCommand {
     pub to: Point3,
 }
 
+/// The named-object kind a `PURGE`/`RENAME` line targets.
+///
+/// The database exposes delete/rename APIs for **layers only**; the other kinds
+/// are modelled so an explicit request can be refused by name instead of being
+/// silently ignored or treated as a layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NamedObjectKind {
+    Layer,
+    Block,
+    Style,
+    Linetype,
+}
+
+/// The target of a `PURGE` line.
+///
+/// `All` is the bare `PURGE` form: every kind the build can safely purge is
+/// attempted and the kinds without a delete API are reported by name. An
+/// explicit `Layer`/`Block`/`Style`/`Linetype` narrows the attempt to that kind;
+/// a kind with no delete API is an explicit `Unsupported` refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PurgeTarget {
+    All,
+    Layer,
+    Block,
+    Style,
+    Linetype,
+}
+
+/// The input of a typed `RENAME <kind> <old> <new>` line.
+///
+/// Names are passed through verbatim: the database trims and validates them, so
+/// an empty, illegal or duplicate name is refused there rather than repaired
+/// here. A name containing whitespace must be quoted on the command line; the
+/// `cad-ui-core` parser owns that tokenisation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameCommand {
+    pub kind: NamedObjectKind,
+    pub old: String,
+    pub new: String,
+}
+
 /// The option of a typed `LAYERSTATE <option>` line: `SAVE <name>`,
 /// `RESTORE <name>`, `LIST` or `DELETE <name>` (grammar in `cad-ui-core`).
 #[derive(Debug, Clone, PartialEq, Eq)]

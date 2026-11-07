@@ -377,6 +377,17 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("LIST", CommandId::List),
     ("STATUS", CommandId::Status),
     ("FS", CommandId::Fs),
+    // The 2026-11-07 utility/named-object batch. PURGE/RENAME/SETVAR/MREDO/
+    // MULTIPLE take typed arguments; `-PURGE`/`-RENAME` are aliases below, not
+    // second commands. TIME/DBLIST/TREESTAT are read-only name-only selectors.
+    ("PURGE", CommandId::Purge),
+    ("RENAME", CommandId::Rename),
+    ("SETVAR", CommandId::SetVar),
+    ("TIME", CommandId::Time),
+    ("DBLIST", CommandId::DbList),
+    ("TREESTAT", CommandId::TreeStat),
+    ("MREDO", CommandId::MRedo),
+    ("MULTIPLE", CommandId::Multiple),
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**
@@ -494,6 +505,12 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     GETSEL_SELECTOR,
     FIND_SELECTOR,
     FIND_REPORT_SELECTOR,
+    // The 2026-11-07 utility batch argument forms.
+    PURGE_SELECTOR,
+    RENAME_SELECTOR,
+    SETVAR_SELECTOR,
+    MREDO_SELECTOR,
+    MULTIPLE_SELECTOR,
 ];
 
 /// Split a typed line into an argument-taking selector and its argument.
@@ -751,6 +768,11 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("TJUST", "JUSTIFYTEXT"),
     ("MTEDIT", "TEXTEDIT"),
     ("-MTEXT", "MTEXT"),
+    // The command-line (`-`) spellings of PURGE/RENAME name the same commands:
+    // this build has no dialog form, so the dialog-free selector is the whole
+    // behaviour and a second `CommandId` would be a second path.
+    ("-PURGE", "PURGE"),
+    ("-RENAME", "RENAME"),
 ];
 
 /// The alias table as `(alias, canonical selector)` pairs, resolved through

@@ -8,7 +8,7 @@
 //! `ARGUMENT_SELECTORS` in the parent module is the admission list; an argument
 //! parser only ever sees text for a selector that list already admitted.
 
-use cad_app::PeditOption;
+use cad_app::{NamedObjectKind, PeditOption, PurgeTarget, RenameCommand};
 
 /// AutoCAD's `LAYERSTATE <option>`: the bounded named layer-state store.
 pub const LAYERSTATE_SELECTOR: &str = "LAYERSTATE";
@@ -363,4 +363,185 @@ pub(crate) fn parse_signed_decimal(text: &str) -> Option<f64> {
     }
     let value: f64 = text.parse().ok()?;
     value.is_finite().then_some(value)
+}
+
+// ---------------------------------------------------------------------------
+// The 2026-11-07 utility/named-object batch
+// ---------------------------------------------------------------------------
+
+/// `PURGE [LAYER|BLOCK|STYLE|LINETYPE]`: remove unused named objects.
+pub const PURGE_SELECTOR: &str = "PURGE";
+
+/// `RENAME <kind> <old> <new>`: rename one named object.
+pub const RENAME_SELECTOR: &str = "RENAME";
+
+/// `SETVAR <name> [<value>]`: report or write one modelled variable.
+pub const SETVAR_SELECTOR: &str = "SETVAR";
+
+/// `MREDO [n]`: apply up to `n` existing redo records.
+pub const MREDO_SELECTOR: &str = "MREDO";
+
+/// `MULTIPLE [command]`: arm the session repeat flag.
+pub const MULTIPLE_SELECTOR: &str = "MULTIPLE";
+
+/// Parse the argument of a `PURGE` selector: one full kind word, or none.
+///
+/// `LAYER` is the only kind with a database delete API in this build; `BLOCK`,
+/// `STYLE` and `LINETYPE` are admitted so the application can refuse them **by
+/// name** (never as an unknown word). A partial spelling is refused.
+pub fn parse_purge_argument(argument: &str) -> Option<PurgeTarget> {
+    match argument.trim().to_ascii_uppercase().as_str() {
+        "LAYER" => Some(PurgeTarget::Layer),
+        "BLOCK" => Some(PurgeTarget::Block),
+        "STYLE" => Some(PurgeTarget::Style),
+        "LINETYPE" => Some(PurgeTarget::Linetype),
+        _ => None,
+    }
+}
+
+/// The stable refusal for a `PURGE` argument outside the kind grammar.
+pub fn invalid_purge_argument_reason(text: &str) -> String {
+    format!("invalid PURGE argument: '{text}' (expected LAYER, BLOCK, STYLE or LINETYPE)")
+}
+
+/// Parse the argument of a `RENAME` selector: `<kind> <old> <new>`.
+///
+/// Exactly three tokens after quote-aware splitting. A name containing
+/// whitespace must be double-quoted (`RENAME LAYER "Old Walls" "New Walls"`);
+/// an unquoted extra token is refused rather than guessed, because the old/new
+/// boundary would be ambiguous.
+pub fn parse_rename_argument(argument: &str) -> Option<RenameCommand> {
+    let tokens = split_quoted_tokens(argument)?;
+    if tokens.len() != 3 {
+        return None;
+    }
+    let kind = match tokens[0].to_ascii_uppercase().as_str() {
+        "LAYER" => NamedObjectKind::Layer,
+        "BLOCK" => NamedObjectKind::Block,
+        "STYLE" => NamedObjectKind::Style,
+        "LINETYPE" => NamedObjectKind::Linetype,
+        _ => return None,
+    };
+    if tokens[1].is_empty() || tokens[2].is_empty() {
+        return None;
+    }
+    Some(RenameCommand {
+        kind,
+        old: tokens[1].clone(),
+        new: tokens[2].clone(),
+    })
+}
+
+/// The stable refusal for a `RENAME` argument outside its grammar.
+pub fn invalid_rename_argument_reason(text: &str) -> String {
+    format!(
+        "invalid RENAME argument: '{text}' (expected <kind> <old> <new> with LAYER, BLOCK, STYLE \
+         or LINETYPE; quote names that contain spaces)"
+    )
+}
+
+/// Parse the argument of a `SETVAR` selector: `<name>` or `<name> <value>`.
+///
+/// The name is one token; the value is the trimmed remainder (a boolean word or
+/// a number, so embedded spaces are refused later by the value grammar). An
+/// empty name is refused. The variable-name set and value grammar belong to the
+/// caller: this parser only splits the two halves.
+pub fn parse_setvar_argument(argument: &str) -> Option<(String, Option<String>)> {
+    let text = argument.trim();
+    let split = text.find([' ', '\t']);
+    let (name, value) = match split {
+        Some(index) => (&text[..index], text[index..].trim()),
+        None => (text, ""),
+    };
+    if name.is_empty() {
+        return None;
+    }
+    Some((
+        name.to_string(),
+        (!value.is_empty()).then(|| value.to_string()),
+    ))
+}
+
+/// Parse the argument of a `MREDO` selector: one positive integer.
+///
+/// ASCII digits only; zero, a sign, a fraction, an exponent and anything outside
+/// `u32` are refused rather than clamped.
+pub fn parse_mredo_argument(argument: &str) -> Option<u32> {
+    let text = argument.trim();
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    text.parse::<u32>().ok().filter(|count| *count > 0)
+}
+
+/// The stable refusal for a `MREDO` argument outside its grammar.
+pub fn invalid_mredo_argument_reason(text: &str) -> String {
+    format!("invalid MREDO argument: '{text}' (expected one positive integer)")
+}
+
+/// Parse the argument of a `MULTIPLE` selector: one non-empty command name.
+///
+/// The name is returned verbatim; the caller resolves it against the command
+/// vocabulary so an unknown name is a named refusal, not a stored phantom.
+pub fn parse_multiple_argument(argument: &str) -> Option<String> {
+    let text = argument.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// The stable refusal for a `MULTIPLE` argument outside its grammar.
+pub fn invalid_multiple_argument_reason(text: &str) -> String {
+    format!("invalid MULTIPLE argument: '{text}' (expected one command name)")
+}
+
+/// Parse a boolean sysvar value used by `SETVAR GRID|SNAP|ORTHO`: `ON`/`OFF`,
+/// `1`/`0` (case-insensitive).
+pub fn parse_sysvar_toggle(argument: &str) -> Option<bool> {
+    match argument.trim().to_ascii_uppercase().as_str() {
+        "ON" | "1" => Some(true),
+        "OFF" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+/// The stable refusal for a `SETVAR` value outside its variable's grammar.
+pub fn invalid_setvar_value_reason(name: &str, value: &str, expected: &str) -> String {
+    format!("invalid SETVAR {name} value '{value}' (expected {expected})")
+}
+
+/// Split `text` into whitespace-separated tokens, removing double quotes and
+/// keeping quoted whitespace inside one token.
+///
+/// An unbalanced quote is refused (`None`). Empty unquoted runs are ignored; an
+/// explicitly quoted empty token (`""`) is preserved as an empty string so the
+/// caller can refuse it by name.
+fn split_quoted_tokens(text: &str) -> Option<Vec<String>> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut token_started = false;
+    for ch in text.chars() {
+        match ch {
+            '"' => {
+                quoted = !quoted;
+                token_started = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if token_started || !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                    token_started = false;
+                }
+            }
+            c => {
+                current.push(c);
+                token_started = true;
+            }
+        }
+    }
+    if quoted {
+        return None;
+    }
+    if token_started || !current.is_empty() {
+        tokens.push(current);
+    }
+    Some(tokens)
 }

@@ -1266,6 +1266,14 @@
   "draw.kind.isolateobjects": "隔离对象",
   "draw.kind.isolateobjects.hint": "请先选择要保留的对象；ISOLATEOBJECTS 会在本次会话中隐藏其余所有模型空间对象。",
   "draw.kind.unisolateobjects": "取消对象隔离",
-  "draw.kind.unisolateobjects.hint": "UNISOLATEOBJECTS 恢复所有被隐藏的对象；不需要选择。"
+  "draw.kind.unisolateobjects.hint": "UNISOLATEOBJECTS 恢复所有被隐藏的对象；不需要选择。",
+  "draw.kind.purge": "清理未使用命名对象 (PURGE)",
+  "draw.kind.rename": "重命名命名对象 (RENAME)",
+  "draw.kind.setvar": "系统变量 (SETVAR)",
+  "draw.kind.time": "图纸时间 (TIME)",
+  "draw.kind.dblist": "列出全部对象 (DBLIST)",
+  "draw.kind.treestat": "空间索引状态 (TREESTAT)",
+  "draw.kind.mredo": "多步重做 (MREDO)",
+  "draw.kind.multiple": "重复下一个命令 (MULTIPLE)"
 
 }

@@ -21,7 +21,8 @@
 use cad_app::{CommandId, CommandPayload};
 
 use super::commands::{
-    FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, QSELECT_SELECTOR,
+    FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, MREDO_SELECTOR,
+    MULTIPLE_SELECTOR, PURGE_SELECTOR, QSELECT_SELECTOR, RENAME_SELECTOR, SETVAR_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::{
@@ -83,6 +84,9 @@ impl CadSession {
                 self.select_filter_argument(selector, argument, text)
             }
             FIND_SELECTOR | FIND_REPORT_SELECTOR => self.find_argument(selector, argument, text),
+            // The 2026-11-07 utility/named-object batch.
+            PURGE_SELECTOR | RENAME_SELECTOR | SETVAR_SELECTOR | MREDO_SELECTOR
+            | MULTIPLE_SELECTOR => self.utility_argument(selector, argument, text),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

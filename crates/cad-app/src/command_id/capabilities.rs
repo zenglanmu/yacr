@@ -144,6 +144,12 @@ impl CommandId {
                 // `-FIND` selector. The selection/filter and hide-objects batch
                 // is session state only, so it is absent too.
                 | Self::FindReplace
+                // The utility batch: PURGE/RENAME write named-object tables and
+                // MREDO moves history; SETVAR/TIME/DBLIST/TREESTAT/MULTIPLE are
+                // read-only or session-only and stay Viewer-legal.
+                | Self::Purge
+                | Self::Rename
+                | Self::MRedo
         )
     }
 }

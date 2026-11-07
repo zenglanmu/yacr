@@ -1266,6 +1266,14 @@
   "draw.kind.isolateobjects": "Isolate Objects",
   "draw.kind.isolateobjects.hint": "Select the objects to keep; ISOLATEOBJECTS hides every other model-space object for this session.",
   "draw.kind.unisolateobjects": "Unhide All Objects",
-  "draw.kind.unisolateobjects.hint": "UNISOLATEOBJECTS restores every hidden object; it needs no selection."
+  "draw.kind.unisolateobjects.hint": "UNISOLATEOBJECTS restores every hidden object; it needs no selection.",
+  "draw.kind.purge": "Purge Unused Named Objects (PURGE)",
+  "draw.kind.rename": "Rename Named Object (RENAME)",
+  "draw.kind.setvar": "System Variable (SETVAR)",
+  "draw.kind.time": "Drawing Time (TIME)",
+  "draw.kind.dblist": "List All Objects (DBLIST)",
+  "draw.kind.treestat": "Spatial Index State (TREESTAT)",
+  "draw.kind.mredo": "Redo Multiple Steps (MREDO)",
+  "draw.kind.multiple": "Repeat Next Command (MULTIPLE)"
 
 }
