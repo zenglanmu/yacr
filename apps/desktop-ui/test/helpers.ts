@@ -180,6 +180,7 @@ export const HOST_NAMES = [
   // pre-selection is the whole input. This mirror stands in for the loaded
   // `cad_commands` vocabulary and never proves the host advertises them.
   'LAYCUR',
+  'LAYMCUR',
   // CHAMFER POLYLINE / FILLET POLYLINE (2026-10-27): the Polyline modes of the
   // two corner commands, canonical **multi-word** selectors of their own (like
   // `AREA OBJECT`, the space is part of one name and is never split into a typed

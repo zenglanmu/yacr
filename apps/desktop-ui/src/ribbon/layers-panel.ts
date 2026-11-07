@@ -43,4 +43,5 @@ export const LAYER_PANEL_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // because the icon set has no lock mark. Small buttons, no popover: none has
   // an options sub-prompt.
   { id: 'LAYCUR', labelKey: 'draw.kind.laycur', icon: 'layers', command: 'LAYCUR' },
+  { id: 'LAYMCUR', labelKey: 'draw.kind.laymcur', icon: 'layers', command: 'LAYMCUR' },
 ]);

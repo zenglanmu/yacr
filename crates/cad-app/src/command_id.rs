@@ -847,6 +847,10 @@ pub enum CommandId {
     /// layer. Selection-based (no interactive "Select objects" prompt); see
     /// [`crate::app_drawing::layer_commands`].
     LayCur,
+    /// `LAYM C U R` (Work-only): make the first selected entity's stored layer
+    /// the session's current layer. Session-only (no drawing write); see
+    /// [`crate::app_drawing::layer_commands`].
+    LayMCur,
     /// `PDMODE <n>`: write the drawing header's `$PDMODE`; see
     /// [`crate::command_id::point_style`].
     SetPointDisplayMode,

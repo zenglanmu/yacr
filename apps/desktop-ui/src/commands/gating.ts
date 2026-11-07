@@ -286,6 +286,7 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // thing. LAYTHW takes no selection at all (it thaws every frozen layer), so
   // its row exists for the no-drawing answer only.
   LAYCUR: Object.freeze({ count: 1, reasonKey: 'draw.kind.laycur.hint' }),
+  LAYMCUR: Object.freeze({ count: 1, reasonKey: 'draw.kind.laymcur.hint' }),
 })
 
 /**

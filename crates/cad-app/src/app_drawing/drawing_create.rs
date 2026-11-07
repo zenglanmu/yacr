@@ -172,7 +172,11 @@ impl Application {
     /// A document that is not open has no layer table to consult, so nothing is
     /// refused here; the panel session refuses that case with
     /// `layer.no_document` before it dispatches.
-    fn ensure_layer_can_be_current(&self, document: DocumentId, layer: LayerId) -> CadResult<()> {
+    pub(super) fn ensure_layer_can_be_current(
+        &self,
+        document: DocumentId,
+        layer: LayerId,
+    ) -> CadResult<()> {
         let Some(document) = self.workspace.documents.get(&document) else {
             return Ok(());
         };

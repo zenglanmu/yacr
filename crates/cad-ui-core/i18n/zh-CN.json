@@ -1133,5 +1133,7 @@
   "gpu.pulled.insufficient_vram.short": "显存不足，已回退渲染",
   "gpu.pulled.insufficient_vram.dismiss": "知道了",
   "draw.kind.laycur": "更改为当前图层",
-  "draw.kind.laycur.hint": "请先选择对象；LAYCUR 会把每个选中对象移动到当前图层。"
+  "draw.kind.laycur.hint": "请先选择对象；LAYCUR 会把每个选中对象移动到当前图层。",
+  "draw.kind.laymcur": "从对象设置当前图层",
+  "draw.kind.laymcur.hint": "请先选择对象；LAYMCUR 会把第一个选中对象所在的图层设为当前图层。"
 }

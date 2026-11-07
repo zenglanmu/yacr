@@ -53,6 +53,18 @@
 //! already on it are not staged; when the whole batch is already there the
 //! command opens no transaction and reports `laycur.unchanged`. Success is
 //! `laycur.applied` with the layer name and the entity count. Work-only.
+//!
+//! ## `LAYM C U R`
+//!
+//! "Sets the current layer to that of a selected object." Uses the **first**
+//! selected entity's stored layer (`laymcur.first_pick` names the extra picks
+//! when more than one object is selected) and resolves the row
+//! (`laymcur.unknown_layer` when it is absent). It then reuses the one
+//! current-layer rule, [`Application::ensure_layer_can_be_current`], so a
+//! locked/frozen/off layer is refused with the existing
+//! `layer.current_locked` / `layer.current_frozen` / `layer.current_off` codes
+//! before the session is touched. Session-only: no database write, no revision
+//! bump, no history. Success is `laymcur.applied` with the layer name. Work-only.
 
 use super::*;
 
@@ -158,10 +170,81 @@ impl Application {
     ) -> CadResult<CommandOutcome> {
         match command.id {
             CommandId::LayCur => self.laycur(session, command),
+            CommandId::LayMCur => self.laymcur(session, command),
             _ => Err(CadError::InvalidInput(
                 "not a layer selection command".to_string(),
             )),
         }
+    }
+
+    /// `LAYM C U R`: make the first selected entity's layer the current layer.
+    fn laymcur(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        ensure_no_payload(command, "laymcur", "LAYMCUR")?;
+        let references = selection_snapshot(session, "laymcur", "LAYMCUR")?;
+        let document_id = command.document;
+        let drawing = self
+            .workspace
+            .documents
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing
+            .clone();
+
+        for reference in &references {
+            ensure_model_space_addressable(drawing.as_ref(), command, reference, "laymcur")?;
+        }
+
+        let first = &references[0];
+        let layer = drawing
+            .entity(first.entity)
+            .expect("preflight verified the entity resolves")
+            .layer;
+        let layer_name = drawing
+            .layer(layer)
+            .map(|row| row.name.clone())
+            .ok_or_else(|| {
+                invalid(
+                    "laymcur",
+                    "unknown_layer",
+                    format!(
+                        "the first selected entity's layer ({}) does not exist in this drawing",
+                        layer.0
+                    ),
+                )
+            })?;
+
+        // The one current-layer rule: locked / frozen / off are refused with the
+        // existing `layer.current_*` codes before the session is touched.
+        self.ensure_layer_can_be_current(document_id, layer)?;
+        session.active_layer = layer;
+
+        let mut diagnostics = vec![Diagnostic {
+            object: None,
+            code: "laymcur.applied".into(),
+            message: format!("LAYMCUR: the current layer is now '{layer_name}'"),
+        }];
+        if references.len() > 1 {
+            diagnostics.push(Diagnostic {
+                object: None,
+                code: "laymcur.first_pick".into(),
+                message: format!(
+                    "LAYMCUR: {} objects were selected; the current layer follows the first \
+                     selected object",
+                    references.len()
+                ),
+            });
+        }
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics,
+            measurement: None,
+            point_report: None,
+        })
     }
 
     /// `LAYCUR`: move every selected entity to the session's current layer.

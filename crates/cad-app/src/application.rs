@@ -138,6 +138,7 @@ impl Application {
             // of the entity-edit funnel so `drawing_command`'s match stays one
             // edit funnel. See `crate::app_drawing::layer_commands`.
             CommandId::LayCur => self.layer_selection_command(session, &command),
+            CommandId::LayMCur => self.layer_selection_command(session, &command),
             // The two drawing-header POINT display style writes (`PDMODE <n>` /
             // `PDSIZE <n>`): real database writes in one revision bump each (the
             // display refresh signal), never undoable because `cad-history` has

@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **45** |
-| **已实现合计（完整 + 部分）** | **95** |
-| 未实现 | **886** |
+| 部分实现（有写明的界） | **46** |
+| **已实现合计（完整 + 部分）** | **96** |
+| 未实现 | **885** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -87,6 +87,7 @@
 | `LAYERCLOSE` | 已实现 | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
 | `LAYERP` | 部分实现 | 会话内有界 16 步；不持久化 |
 | `LAYISO` | 已实现 | — |
+| `LAYMCUR` | 部分实现 | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
 | `LAYOFF` | 已实现 | — |
 | `LAYON` | 已实现 | — |
 | `LAYUNISO` | 已实现 | — |
@@ -619,7 +620,7 @@
 | 475 | `LAYLCK` | 未实现 | Locks the layer of a selected object. | — |
 | 476 | `-LAYMCH` | 未实现 | Changes the layer of a selected object to match the layer of a selected object. | — |
 | 477 | `LAYMCH` | 未实现 | Changes the layer of a selected object to match the destination layer. | — |
-| 478 | `LAYMCUR` | 未实现 | Sets the current layer to that of a selected object. | — |
+| 478 | `LAYMCUR` | 部分实现 | Sets the current layer to that of a selected object. | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
 | 479 | `-LAYMRG` | 未实现 | At the Command prompt, merges selected layers into a target layer. | — |
 | 480 | `LAYMRG` | 未实现 | Merges selected layers into a target layer, removing them from the drawing. | — |
 | 481 | `LAYOFF` | 已实现 | Turns off the layer of a selected object. | — |

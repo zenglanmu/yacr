@@ -81,6 +81,7 @@ impl CommandId {
                 | Self::DeleteLayer
                 | Self::SetLayerProperty
                 | Self::LayCur
+                | Self::LayMCur
                 | Self::SetPointDisplayMode
                 | Self::SetPointDisplaySize
                 | Self::SetEntityProperty
