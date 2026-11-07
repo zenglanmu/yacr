@@ -136,7 +136,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `MODEL` | 空间（payload-free 切到模型空间；复用 `SPACE MODEL` 的校验 + 自动取景，Model 标签页走同一命令） | 否 | — |
 | `PLAN` | 观察（**Top/plan 2D 视图**；无 UCS/World/Current 选项——本构建无 UCS 模型） | 否 | — |
 | `MODE` | 模式（**需 `Mode` 载荷**：Viewer/Work；裸调用按名拒绝） | 否 | — |
-| `DIAGNOSTICS` | UI（诊断抽屉） | 否 | — |
+| `DIAGNOSTICS` | UI（诊断 / 性能面板；文件信息是另一个面板） | 否 | — |
 | `AUDIT` | 诊断（逐实体跑 `cad-db` 校验并报告诊断；**只检测、不修复**；只读） | 否 | — |
 | `GRID` | 显示（**仅**栅格叠加开关，2026-10-25 起真实选择器） | 否 | `GR` |
 | `SNAP` | 显示（**栅格捕捉**开关 F9；会话状态，不写库，经 `interaction.gridSnapEnabled` 持久化） | 否 | — |

@@ -55,6 +55,7 @@ mod init;
 mod layers;
 mod locale;
 mod options;
+mod performance;
 mod plugins;
 mod popup;
 mod postload;

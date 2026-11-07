@@ -114,6 +114,9 @@ export interface ShellValue {
   readonly setRibbonCollapsed: Dispatch<SetStateAction<boolean>>;
   readonly cleanScreen: boolean;
   readonly setCleanScreen: Dispatch<SetStateAction<boolean>>;
+  /** Whether the static File info palette is open. */
+  readonly fileInfoOpen: boolean;
+  readonly setFileInfoOpen: Dispatch<SetStateAction<boolean>>;
   readonly diagnosticsOpen: boolean;
   readonly setDiagnosticsOpen: Dispatch<SetStateAction<boolean>>;
   /** Whether the external-references panel is open (desktop window or compact sheet). */

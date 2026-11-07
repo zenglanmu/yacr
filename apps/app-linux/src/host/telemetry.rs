@@ -166,6 +166,23 @@ pub(super) fn gpu_memory_line(report: &GpuMemoryReport) -> String {
     )
 }
 
+/// Map the renderer's own GPU-memory report onto the shell's plain-value stats.
+///
+/// Only the renderer-accounted totals cross into the shell (`total_bytes` and
+/// `peak_bytes`), plus the driver reserved bytes and the advertised VRAM proxy.
+/// `vram_bytes` is the **advertised device-local** proxy (largest heap), not
+/// free memory, and stays `None` when the backend cannot answer.
+pub(super) fn gpu_memory_stats(
+    report: &GpuMemoryReport,
+) -> cad_desktop_shell::performance::GpuMemoryStats {
+    cad_desktop_shell::performance::GpuMemoryStats {
+        used_bytes: report.total_bytes,
+        peak_bytes: report.peak_bytes,
+        reserved_bytes: report.reserved_bytes,
+        vram_total_bytes: report.vram_bytes,
+    }
+}
+
 /// Emit the bounded GPU-memory status line when it is due (≤1 Hz).
 ///
 /// `report` is only called once the line is due, so a per-frame tick never hits

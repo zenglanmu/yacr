@@ -190,6 +190,12 @@ pub struct Shared {
     /// The decoder enabled when this process launched. Mutations persist the
     /// policy but never change this; the status compares the two.
     pub plugins_session_active: Option<String>,
+    /// The owner-tick performance sampler behind `cad_status.performance`.
+    ///
+    /// Sampled at most once per second on the owner tick; the concrete host
+    /// fills the GPU half through [`crate::performance::PerformanceState::record_gpu`].
+    /// A carrier that never calls it leaves those fields `None`.
+    pub performance: crate::performance::PerformanceState,
 }
 
 impl Shared {
@@ -223,6 +229,7 @@ impl Shared {
             plugin_store: None,
             plugins_supported: false,
             plugins_session_active: None,
+            performance: Default::default(),
         }
     }
 

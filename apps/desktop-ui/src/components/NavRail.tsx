@@ -15,10 +15,10 @@ export function NavRail() {
   const shell = useShell();
   // Palette toggles exist only where the desktop palettes do (a `dom-canvas`
   // carrier holds no host-side document state for them to read). One carrier
-  // rule — `palettesOffered` — decides for **every** toggle below: the layers
-  // pair and the diagnostics pair stand or fall together, so no button here can
-  // toggle a panel that is never rendered. The command buttons above are live on
-  // every carrier and are unaffected.
+  // rule — `palettesOffered` — decides for **every** toggle below: the layers,
+  // file-info and diagnostics toggles stand or fall together, so no button here
+  // can toggle a panel that is never rendered. The command buttons above are
+  // live on every carrier and are unaffected.
   const palettes = palettesOffered(shell);
   return (
     <div className="region region--navrail navrail app-region" role="toolbar" aria-label={t('shell.nav')}>
@@ -51,6 +51,16 @@ export function NavRail() {
             onClick={() => shell.toggleLayers()}
           >
             <Icon name="layers" size={18} />
+          </button>
+          <button
+            type="button"
+            className={['navrail__button', shell.fileInfoOpen ? 'is-on' : ''].filter(Boolean).join(' ')}
+            aria-pressed={Boolean(shell.fileInfoOpen)}
+            title={t('fileinfo.title')}
+            aria-label={t('fileinfo.title')}
+            onClick={() => shell.setFileInfoOpen(!shell.fileInfoOpen)}
+          >
+            <Icon name="info" size={18} />
           </button>
           <button
             type="button"

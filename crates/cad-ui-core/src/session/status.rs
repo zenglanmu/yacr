@@ -11,6 +11,7 @@ use cad_app::ToolSnapshot;
 pub use super::layout_tabs::{CadActiveSpace, CadLayoutTab};
 
 use super::command_log::CadCommandLogEntry;
+use super::performance::CadPerformance;
 
 pub use super::import_progress::CadImportProgress;
 pub use super::reference_status::CadReferenceStatus;
@@ -544,6 +545,13 @@ pub struct CadStatus {
     /// behaving exactly as before. `dom-canvas` carriers never arm a grip drag
     /// and therefore always report `false` (ADR 0024: no grip path there).
     pub grip_drag: bool,
+    /// The host's performance metrics (see [`CadPerformance`]), or `null`.
+    ///
+    /// Additive optional block: every other key is unchanged. `None` means the
+    /// host published no metrics — an older host, or a carrier without a
+    /// sampler — and is **never** a fabricated zero. The consumer renders an em
+    /// dash for each absent metric instead of inventing a measurement.
+    pub performance: Option<CadPerformance>,
 }
 
 /// A `cad_status` snapshot that advertises no CAD capability (probe mode or a
@@ -602,6 +610,9 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         popup: None,
         // No session means no pointer and therefore no grip drag to cancel.
         grip_drag: false,
+        // No host sampler produced metrics for a probe/unsupported snapshot:
+        // explicit `None`, never an invented zero.
+        performance: None,
     }
 }
 
@@ -969,5 +980,8 @@ pub(super) fn assemble_status(
         // Carried verbatim from the host's own gesture state; this assembler
         // never derives a drag from the tool/pointer fields.
         grip_drag,
+        // The session owns no sampler: the host projects its live metrics onto
+        // this field on the snapshot it returns (never inferred here).
+        performance: None,
     }
 }

@@ -25,9 +25,10 @@ import type { RibbonItem, RibbonTab } from '../ribbon/ribbon-model.ts';
  * Shell actions that the mobile layout does not offer.
  *
  * Both are chrome-collapse switches with nothing to collapse on a phone (see the
- * module comment). Every other shell action (`about`, `options`, `diagnostics`,
- * `properties`, `language`) stays in the drawer and keeps its desktop meaning —
- * `diagnostics`/`properties` are removed by the palette rule above, not here.
+ * module comment). Every other shell action (`about`, `options`, `fileinfo`,
+ * `diagnostics`, `properties`, `language`) stays in the drawer and keeps its
+ * desktop meaning — `fileinfo`/`diagnostics`/`properties` are removed by the
+ * palette rule above, not here.
  */
 export const MOBILE_HIDDEN_ACTIONS: readonly string[] = Object.freeze([
   SHELL_ACTIONS.cleanScreen,

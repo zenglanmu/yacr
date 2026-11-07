@@ -284,12 +284,15 @@ test('the palettes are what the carrier reports, not what it is called', async (
   assert.ok(workspace.includes('const palettesAvailable = palettesOffered(shell);'));
   assert.ok(workspace.includes("import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../cad/surface.ts';"));
   assert.ok(workspace.includes('const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;'));
+  assert.ok(workspace.includes('const showFileInfo = palettesAvailable && Boolean(shell.fileInfoOpen);'));
   assert.ok(workspace.includes('const showDiagnostics = palettesAvailable && Boolean(shell.diagnosticsOpen);'));
   // Both panels render from the gated flags, so no empty panel is possible. They
   // are floating windows now: the gate wraps a shared `PaletteWindow`, and the
   // palette itself is never mounted outside that wrapper.
   assert.match(workspace, /\{showProperties \? \(\s*<PaletteWindow windowKey="properties"[^>]*>\s*<PropertiesDock \/>\s*<\/PaletteWindow>\s*\) : null\}/);
+  assert.match(workspace, /\{showFileInfo \? \(\s*<PaletteWindow windowKey="fileinfo"[^>]*>\s*<FileInfoPalette \/>\s*<\/PaletteWindow>\s*\) : null\}/);
   assert.match(workspace, /\{showDiagnostics \? \(\s*<PaletteWindow windowKey="diagnostics"[^>]*>\s*<DiagnosticsPalette \/>\s*<\/PaletteWindow>\s*\) : null\}/);
+  assert.ok(!workspace.includes('{shell.fileInfoOpen ?'));
   assert.ok(!workspace.includes('{shell.diagnosticsOpen ?'));
 
   const status = await readModule('components/StatusBar.tsx');
@@ -298,6 +301,7 @@ test('the palettes are what the carrier reports, not what it is called', async (
   assert.ok(!status.includes('shell.palettesAvailable !== false'), 'the rule is not re-spelled inline');
   const block = status.slice(gate, status.indexOf(') : null}', gate));
   assert.ok(block.includes("t('properties.panel')"), 'the properties toggle lives behind the gate');
+  assert.ok(block.includes("t('fileinfo.title')"), 'the file info toggle lives behind the gate');
   assert.ok(block.includes("t('diagnostics.title')"), 'the diagnostics toggle lives behind the gate');
   // The clean-screen / command-line toggles stay available on every carrier.
   assert.ok(status.slice(0, gate).includes("t('status.command_line')"));
@@ -313,12 +317,13 @@ test('the ribbon does not offer a palette toggle either', () => {
   // A ribbon button that toggles a panel which is never rendered is a dead
   // affordance, so the same carrier flag drops those items there too.
   const items = [
+    { id: 'fileinfo', action: 'fileinfo' },
     { id: 'diagnostics', action: 'diagnostics' },
     { id: 'PROPERTIES', action: 'properties' },
     { id: 'clean', action: 'cleanScreen' },
     { id: 'OPEN', command: 'OPEN' },
   ];
-  assert.deepEqual(PALETTE_ACTIONS, ['diagnostics', 'properties']);
+  assert.deepEqual(PALETTE_ACTIONS, ['fileinfo', 'diagnostics', 'properties']);
   // Without the carrier flag the very same array comes back: no re-render churn,
   // no changed order, nothing filtered.
   assert.equal(offeredItems(items, true), items);

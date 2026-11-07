@@ -32,6 +32,7 @@ mod import_progress;
 mod input;
 mod layers;
 mod layout_tabs;
+mod performance;
 pub mod plugins;
 mod point_style;
 mod profile;
@@ -101,6 +102,7 @@ pub use self::events::{
 };
 pub use self::fonts::{CadFont, CadFonts};
 pub use self::layers::{CadLayer, CadLayerColor, CadLayerWrite, CadLayers};
+pub use self::performance::CadPerformance;
 pub use self::profile::{
     wire_status_json, DocumentOwner, HostProfile, HostSurfaceMode, WireStatus,
 };
