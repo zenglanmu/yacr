@@ -42,20 +42,21 @@ impl Application {
             id if crate::app_drawing::annot_batch::batch(id) => {
                 self.annot_batch(session, id, &command)
             }
-            // Read-only inquiry commands: no transaction/revision/undo, and all
-            // stay out of `requires_work_mode` (FS mutates only the selection).
+            id if crate::app_extras::is_extras(id) => {
+                self.extras_command(session, id, &command)
+            }
+            // Read-only inquiry: no transaction/revision/undo; FS mutates selection.
             CommandId::List => self.list_objects(session, &command),
             CommandId::Status => self.drawing_status(session, &command),
             CommandId::Fs => self.selection_touching(session, &command),
-            // The 2026-11-07 utility batch: PURGE/RENAME/MREDO/MULTIPLE mutate or
-            // arm session state; SETVAR/TIME/DBLIST/TREESTAT are read-only.
+            // The 2026-11-07 utility batch (writes vs read-only reports).
             CommandId::Purge | CommandId::Rename | CommandId::MRedo | CommandId::Multiple => {
                 self.utility_command(session, &command)
             }
             CommandId::SetVar | CommandId::Time | CommandId::DbList | CommandId::TreeStat => {
                 self.utility_report(session, &command)
             }
-            // 2026-11-07 dimension batch: reports and explicit no-ops.
+            // 2026-11-07 dimension batch: read-only reports and explicit no-ops.
             CommandId::DimStyle => self.dimstyle_command(&command),
             CommandId::DimRegen => self.dim_regen(&command),
             CommandId::DimDisassociate => self.dim_disassociate(&command),
@@ -65,8 +66,7 @@ impl Application {
             CommandId::FitDrawing => self.fit_drawing(session, &command),
             CommandId::RestoreLayers => {
                 // Drop temporary overrides; the drawing's layer flags remain the
-                // authority (F03). A real change is one recorded `LAYERP` step,
-                // pushed before the clear; a restore with nothing pushes nothing.
+                // authority (F03). A change is one `LAYERP` step pushed before the clear.
                 if !session.layer_overrides.is_empty() {
                     session.push_layer_override_snapshot();
                     session.layer_overrides.clear();

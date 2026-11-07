@@ -382,9 +382,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("LIST", CommandId::List),
     ("STATUS", CommandId::Status),
     ("FS", CommandId::Fs),
-    // The 2026-11-07 utility/named-object batch. PURGE/RENAME/SETVAR/MREDO/
-    // MULTIPLE take typed arguments; `-PURGE`/`-RENAME` are aliases below, not
-    // second commands. TIME/DBLIST/TREESTAT are read-only name-only selectors.
+    // The 2026-11-07 utility/named-object batch (`-PURGE`/`-RENAME` aliases).
     ("PURGE", CommandId::Purge),
     ("RENAME", CommandId::Rename),
     ("SETVAR", CommandId::SetVar),
@@ -393,10 +391,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("TREESTAT", CommandId::TreeStat),
     ("MREDO", CommandId::MRedo),
     ("MULTIPLE", CommandId::Multiple),
-    // The 2026-11-07 draw/modify batch. Every name is a canonical selector of
-    // its own; `-OVERKILL` is the command-line spelling of the existing
-    // `OVERKILL` path (same `CommandId`, same planner — never a second
-    // implementation), which is why it is a table row rather than a new engine.
+    // The 2026-11-07 draw/modify batch (`-OVERKILL` aliases the same path).
     ("DONUT", CommandId::Donut),
     ("SOLID", CommandId::Solid),
     ("HELIX", CommandId::Helix),
@@ -407,11 +402,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MPEDIT", CommandId::Mpedit),
     ("DRAWORDER", CommandId::DrawOrder),
 
-    // The 2026-11-07 view batch. REDRAW/REGEN (and their ALL forms) are
-    // payload-free refresh/regeneration stamps; VIEW is the named-view store
-    // (`-VIEW` is an alias), VIEWGO restores one name, VIEWBACK/VIEWFORWARD walk
-    // the per-viewport view stack, and VPOINT takes a direction or a standard
-    // word. All are session view state only and Viewer-legal.
+    // The 2026-11-07 view batch: session view state only (Viewer-legal).
     ("REDRAW", CommandId::Redraw),
     ("REDRAWALL", CommandId::RedrawAll),
     ("REGEN", CommandId::Regen),
@@ -422,11 +413,17 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("VIEWFORWARD", CommandId::ViewForward),
     ("VPOINT", CommandId::VPoint),
 
-    // The 2026-11-07 layout/viewport batch. `LAYOUT` is one canonical selector
-    // whose option is a typed argument; `VPMAX`/`VPMIN` are payload-free
-    // session state. `-VPORTS` is an alias of `VPORTS` (below), not a second
-    // command. Every write form is refused by name; see
-    // `cad_app::command_id::layout`.
+    // The 2026-11-07 extras batch. `REGEN3`, `-PAN` and `-LINETYPE` are aliases
+    // below (same CommandId/path), never a second implementation.
+    ("SKETCH", CommandId::Sketch),
+    ("TRACE", CommandId::Trace),
+    ("MOCORO", CommandId::Mocoro),
+    ("MSTRETCH", CommandId::MStretch),
+    ("VIEWRES", CommandId::ViewRes),
+    ("VSCURRENT", CommandId::VisualStyle),
+    ("LINETYPE", CommandId::Linetype),
+
+    // The 2026-11-07 layout batch; every write form is a named refusal.
     ("LAYOUT", CommandId::Layout),
     ("LAYOUTMERGE", CommandId::LayoutMerge),
     ("LAYOUTWIZARD", CommandId::LayoutWizard),
@@ -507,28 +504,13 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 /// * [`TORIENT_SELECTOR`] (`TORIENT`) / [`TCASE_SELECTOR`] (`TCASE`): one finite
 ///   angle in degrees / one case mode ([`parse_torient_argument`],
 ///   [`parse_tcase_argument`]);
-/// * [`PEDIT_SELECTOR`] (`PEDIT`): one declared v1 polyline option, `CLOSE`,
-///   `OPEN` or `REVERSE` ([`parse_pedit_argument`]). The bare selector is a
-///   named `pedit.needs_option` refusal, never a defaulted option.
-/// * [`HATCHEDIT_SELECTOR`] (`HATCHEDIT`): `ANGLE <deg>`, `SCALE <factor>`,
-///   `SOLID` or `GRADIENT`; a bare selector is refused, never defaulted.
-/// * [`MEASUREGEOM_SELECTOR`] (`MEASUREGEOM`): one of the six full option words
-///   ([`super::measuregeom::parse_measuregeom_argument`]).
-/// * [`JUSTIFYTEXT_SELECTOR`] (`JUSTIFYTEXT`) and its alias `TJUST`: `<H> <V>`
-///   with `H ∈ LEFT|CENTER|RIGHT` and `V ∈ BASELINE|BOTTOM|MIDDLE|TOP`.
-/// * [`TSCALE_SELECTOR`] (`TSCALE`): one positive decimal factor.
-/// * [`TEXTALIGN_SELECTOR`] (`TEXTALIGN`): `LEFT|RIGHT|CENTER|TOP|MIDDLE|BOTTOM`.
-/// * [`TCOUNT_SELECTOR`] (`TCOUNT`): `<start> <step> [prefix] [suffix]`.
-/// * [`TCIRCLE_SELECTOR`] (`TCIRCLE`): `CIRCLE|RECTANGLE`.
-/// * [`LAYERSTATE_SELECTOR`] (`LAYERSTATE`): `SAVE <name>`, `RESTORE <name>`,
-///   `LIST` or `DELETE <name>` ([`parse_layerstate_argument`]); a bare selector
-///   is admitted and refused by the application with `layerstate.needs_option`.
-/// * [`LAYWALK_SELECTOR`] (`LAYWALK`): comma-separated layer names
-///   ([`parse_laywalk_argument`]); a bare selector is refused by the application.
-/// * [`LTSCALE_SELECTOR`] (`LTSCALE`): one positive finite decimal
-///   ([`parse_ltscale_argument`]); a bare selector is refused by the application.
-/// * [`LAYERPMODE_SELECTOR`] (`LAYERPMODE`): `ON` or `OFF`
-///   ([`parse_layerpmode_argument`]); a bare selector reports the current setting.
+///
+/// PEDIT/HATCHEDIT/MEASUREGEOM take one declared option; the text batch takes
+/// `<H> <V>`, a factor, an edge word, a numbering run or a shape; the layer
+/// batch takes the layer-state/laywalk/ltscale/layerpmode grammars. PEDIT,
+/// HATCHEDIT, LAYERSTATE and the layer-batch forms refuse a bare selector by
+/// name (never default an option); see the parsers re-exported from
+/// `super::commands`.
 pub const ARGUMENT_SELECTORS: &[&str] = &[
     ARGUMENT_SELECTOR,
     SNAPUNIT_SELECTOR,
@@ -594,6 +576,14 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     LEADER_SELECTOR,
     TEXTFIT_SELECTOR,
     HATCHSETORIGIN_SELECTOR,
+    // The 2026-11-07 extras batch typed forms. `SKETCH`/`MSTRETCH` have payload
+    // paths only; `REGEN3` takes no argument.
+    PAN_SELECTOR,
+    TRACE_SELECTOR,
+    MOCORO_SELECTOR,
+    VIEWRES_SELECTOR,
+    VSCURRENT_SELECTOR,
+    LINETYPE_SELECTOR,
 ];
 
 /// Split a typed line into an argument-taking selector and its argument.
@@ -873,6 +863,11 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     // `-GROUP` is AutoCAD's command-line group form; this build has one
     // session-only group path, so it normalizes onto `GROUP`.
     ("-GROUP", "GROUP"),
+    // The 2026-11-07 extras aliases: `REGEN3` is the 3D spelling of `REGEN`, and
+    // `-PAN`/`-LINETYPE` are the command-line spellings of the same paths.
+    ("REGEN3", "REGEN"),
+    ("-PAN", "PAN"),
+    ("-LINETYPE", "LINETYPE"),
 ];
 
 /// The alias table as `(alias, canonical selector)` pairs, resolved through
@@ -992,6 +987,10 @@ pub use draw2::*;
 // The 2026-11-07 layout/viewport grammars (`LAYOUT` … `LAYVPI`).
 mod layout;
 pub use layout::*;
+
+// The 2026-11-07 extras grammars (`-PAN`, `TRACE` … `LINETYPE`).
+mod extras;
+pub use extras::*;
 
 // The selector -> interactive-tool routing table (split out for the code-size
 // gate). Re-exported so `commands::interaction_request_for` still resolves.

@@ -25,10 +25,13 @@ use super::annot_arguments::{
     TEXTFIT_SELECTOR, UNGROUP_SELECTOR,
 };
 use super::commands::{
-    DONUT_SELECTOR, DRAWORDER_SELECTOR, FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR,
-    GETSEL_SELECTOR, HELIX_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MPEDIT_SELECTOR,
-    MREDO_SELECTOR, MULTIPLE_SELECTOR, PURGE_SELECTOR, QSELECT_SELECTOR, RENAME_SELECTOR,
-    SETVAR_SELECTOR, SOLID_SELECTOR, TREX_SELECTOR,
+    parse_linetype_argument, parse_mocoro_argument, parse_pan_argument, parse_trace_argument,
+    parse_viewres_argument, parse_vscurrent_argument, DONUT_SELECTOR, DRAWORDER_SELECTOR,
+    FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, HELIX_SELECTOR,
+    LINETYPE_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR,
+    MREDO_SELECTOR, MULTIPLE_SELECTOR, PAN_SELECTOR, PURGE_SELECTOR, QSELECT_SELECTOR,
+    RENAME_SELECTOR, SETVAR_SELECTOR, SOLID_SELECTOR, TRACE_SELECTOR, TREX_SELECTOR,
+    VIEWRES_SELECTOR, VSCURRENT_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::dim_arguments::{
@@ -129,6 +132,12 @@ impl CadSession {
             | LEADER_SELECTOR
             | TEXTFIT_SELECTOR
             | HATCHSETORIGIN_SELECTOR => self.annot_argument(selector, argument, text),
+            // The 2026-11-07 extras batch typed forms (`-PAN` normalizes to
+            // `PAN` before this dispatch, `-LINETYPE` to `LINETYPE`).
+            PAN_SELECTOR | TRACE_SELECTOR | MOCORO_SELECTOR | VIEWRES_SELECTOR
+            | VSCURRENT_SELECTOR | LINETYPE_SELECTOR => {
+                self.extras_argument(selector, argument, text)
+            }
 
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
@@ -186,6 +195,54 @@ impl CadSession {
         }
     }
 
+    /// Apply one typed line of the 2026-11-07 extras batch.
+    ///
+    /// The parser is the authority for syntax and range; the application layer
+    /// re-validates every payload it receives. A refusal is recorded in
+    /// [`CadSession`]'s error and changes nothing.
+    fn extras_argument(
+        &self,
+        selector: &'static str,
+        argument: &str,
+        text: &str,
+    ) -> Result<(), String> {
+        let (id, payload) = match selector {
+            PAN_SELECTOR => (
+                CommandId::Pan,
+                parse_pan_argument(argument)
+                    .ok_or_else(|| invalid_extras_argument_reason(selector, text)),
+            ),
+            TRACE_SELECTOR => (
+                CommandId::Trace,
+                parse_trace_argument(argument)
+                    .ok_or_else(|| invalid_extras_argument_reason(selector, text)),
+            ),
+            MOCORO_SELECTOR => (CommandId::Mocoro, parse_mocoro_argument(argument)),
+            VIEWRES_SELECTOR => (CommandId::ViewRes, parse_viewres_argument(argument)),
+            VSCURRENT_SELECTOR => (CommandId::VisualStyle, parse_vscurrent_argument(argument)),
+            _ => {
+                debug_assert_eq!(selector, LINETYPE_SELECTOR);
+                (CommandId::Linetype, parse_linetype_argument(argument))
+            }
+        };
+        let payload = match payload {
+            Ok(payload) => payload,
+            Err(reason) => return self.refuse_argument(reason),
+        };
+        self.core.record_command(selector);
+        match self.core.command(id, payload) {
+            Ok(()) => {
+                *self.error.borrow_mut() = None;
+                Ok(())
+            }
+            Err(error) => {
+                let text = cad_error_text(&error);
+                *self.error.borrow_mut() = Some(text.clone());
+                Err(text)
+            }
+        }
+    }
+
     /// Record a stable argument refusal and return it (nothing changes).
     ///
     /// Shared by every typed-argument selector module (`point_style`, `space`).
@@ -193,4 +250,13 @@ impl CadSession {
         *self.error.borrow_mut() = Some(reason.clone());
         Err(reason)
     }
+}
+
+/// The stable refusal for an argument outside an extras selector's grammar.
+fn invalid_extras_argument_reason(selector: &str, text: &str) -> String {
+    format!(
+        "unsupported or malformed {selector} argument in `{}`: the typed form is documented in \
+         the command contract; nothing was changed",
+        text.trim()
+    )
 }

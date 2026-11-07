@@ -315,6 +315,11 @@ export const HOST_NAMES = [
   // host alias spelling.
   'GROUP', '-GROUP', 'UNGROUP', 'GROUPEDIT', 'QLEADER', 'LEADER', 'TEXTFIT',
   'HATCHSETBOUNDARY', 'HATCHSETORIGIN', 'XDLIST',
+  // The 2026-11-07 extras batch: SKETCH/TRACE/MOCORO/MSTRETCH/VIEWRES/VSCURRENT/
+  // LINETYPE are canonical selectors; `REGEN3`/`-PAN`/`-LINETYPE` are the host
+  // alias spellings (the `-` forms normalize onto PAN/LINETYPE).
+  'SKETCH', 'TRACE', 'MOCORO', 'MSTRETCH', 'VIEWRES', 'VSCURRENT', 'LINETYPE',
+  'REGEN3', '-PAN', '-LINETYPE',
   // WIPEOUT is the open-ended polygon mask; POLYGON CIRCUMSCRIBED is the
   // tangent-ring variant of POLYGON (its own multi-word selector).
   'WIPEOUT', 'POLYGON CIRCUMSCRIBED',

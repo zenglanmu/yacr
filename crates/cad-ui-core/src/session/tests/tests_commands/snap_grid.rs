@@ -272,7 +272,14 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "QLEADER",
             "LEADER",
             "TEXTFIT",
-            "HATCHSETORIGIN"
+            "HATCHSETORIGIN",
+            // The 2026-11-07 extras batch.
+            "PAN",
+            "TRACE",
+            "MOCORO",
+            "VIEWRES",
+            "VSCURRENT",
+            "LINETYPE"
         ]
     );
     assert_eq!(

@@ -707,17 +707,9 @@ pub enum CommandPayload {
     /// A fully formed semantic geometry, used by `CreateLine` as the
     /// programmatic alternative to a point list.
     Geometry(Box<SemanticGeometry>),
-    /// `XLINE`: an infinite construction line through `base` and `through`,
-    /// stored as the finite segment clipped to the drawing's XY bounds (or the
-    /// default 1000-unit box around `base` when the drawing is empty).
-    ///
-    /// `cad-db` has no infinite-line geometry, so the stored
-    /// `SemanticGeometry::Line` is an approximation whose length follows the clip
-    /// box; the entity's `type_key` stays `AcDbXline` and export writes a LINE.
-    /// Both points must be finite and distinct (`xline.invalid_point` /
-    /// `xline.degenerate_direction`); a clip that misses the box is
-    /// `xline.outside_bounds`. Every refusal happens before the transaction.
-    /// See [`crate::command_id::construction_line`]. Work-only.
+    /// `XLINE`: an infinite construction line reduced to the finite segment
+    /// clipped to the drawing's XY bounds; `type_key` stays `AcDbXline` but export
+    /// writes a LINE. Full contract: [`crate::command_id::construction_line`].
     XLine {
         base: Point3,
         through: Point3,
@@ -982,4 +974,25 @@ pub enum CommandPayload {
     /// `QLEADER`/`LEADER`/`TEXTFIT`/`HATCHSETORIGIN`). Grouped in
     /// [`crate::AnnotationBatchPayload`]; contract in `command_id::annot_batch`.
     Annotation(Box<crate::AnnotationBatchPayload>),
+    /// `TRACE`: a closed 4-vertex band from `start` to `end` with `width`.
+    /// Stored as one closed `Polyline`; no TRACE entity type exists.
+    Trace {
+        start: Point3,
+        end: Point3,
+        width: f64,
+    },
+    /// `MOCORO`: one complete typed transform of the current selection.
+    Mocoro(crate::MocoroCommand),
+    /// `MSTRETCH`: the STRETCH planner over several logical crossing windows.
+    MStretch {
+        rects_logical: Vec<[[f64; 2]; 2]>,
+        base: Point3,
+        delta: Point3,
+    },
+    /// `VIEWRES`: the session circle-tessellation percentage (`1..=1000`).
+    ViewRes(u32),
+    /// `VSCURRENT`: the session visual-style token (`WIREFRAME` only).
+    VisualStyle(String),
+    /// `LINETYPE`: `LIST` or `SET <name>`.
+    Linetype(crate::LinetypeCommand),
 }

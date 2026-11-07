@@ -1,17 +1,11 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandId {
     OpenDrawing,
-    /// Start a new, empty drawing. Host-owned like `OpenDrawing`: the
-    /// application layer has no document factory, so it returns `Unsupported`
-    /// and a platform host performs the replacement.
+    /// Host-owned (no document factory): a platform host performs the work.
     NewDrawing,
-    /// Export the active drawing to a vector file (SVG/PDF). Host-owned like
-    /// `OpenDrawing`: the application layer has no file chooser, so it returns
-    /// `Unsupported` and a platform host performs the export.
+    /// Host-owned (no file chooser): a platform host exports SVG/PDF.
     PlotDrawing,
-    /// Save the active drawing as a lossy DXF file. Host-owned like
-    /// `OpenDrawing`: the application layer has no file chooser, so it returns
-    /// `Unsupported` and a platform host performs the save.
+    /// Host-owned (no file chooser): a platform host saves the lossy DXF.
     SaveDrawingAs,
     CancelLoading,
     Pan,
@@ -26,20 +20,9 @@ pub enum CommandId {
     /// Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,
     RestoreLayers,
-    /// `LAYERP`: restore the **previous layer state**.
-    ///
-    /// Payload is [`crate::CommandPayload::None`]; a caller that supplies one is
-    /// refused (`layers.previous.invalid_payload`), never silently ignored. The
-    /// session keeps a **bounded** history of layer-override snapshots (cap
-    /// [`crate::LAYER_OVERRIDE_HISTORY_CAP`], oldest dropped first), pushed by
-    /// every override mutation that really changes something; `LAYERPMODE OFF`
-    /// suppresses those pushes. `LAYERP` **pops** the newest snapshot and applies
-    /// it: it never pushes, so repeated presses walk back monotonically.
-    ///
-    /// An empty history is not an error: it reports `layers.previous.empty` and
-    /// changes nothing. No database write, revision bump, history entry or
-    /// preference: overrides are session view state, so Viewer and Work both
-    /// allow it. Named layer states are `LAYERSTATE`, a separate command.
+    /// `LAYERP`: pop the bounded layer-override snapshot (payload `None`).
+    /// An empty history is the named `layers.previous.empty` no-op. Session
+    /// state only (Viewer-legal). Full contract: [`crate::layer_history`].
     LayerPrevious,
     /// `LAYISO`: hide every layer the selection is not on (plus the current
     /// layer) using session visibility overrides only. Full contract:
@@ -50,14 +33,7 @@ pub enum CommandId {
     /// [`crate::command_id::layers::LayOffCommand`].
     LayOff,
     SwitchSpace,
-    /// `MODEL`: switch the active drawing space to model space.
-    ///
-    /// Payload-free and equivalent to the typed `SPACE MODEL` line: both reach
-    /// the same session-state switch, which validates the target against the
-    /// open drawing and then auto-fits the camera. A caller that supplies a
-    /// payload is refused explicitly. No database write, no `cad-history` entry,
-    /// no revision bump and no `ChangeSet`, so Viewer mode allows it. The real UI
-    /// affordance is the drawing-space strip's Model tab.
+    /// `MODEL`: payload-free spelling of `SPACE MODEL` (session state only).
     ModelSpace,
     Select,
     /// Select visible model-space pick items without editing the drawing.
@@ -958,6 +934,22 @@ pub enum CommandId {
     HatchSetBoundary,
     HatchSetOrigin,
     XdList,
+    /// `SKETCH` (Work-only): one open polyline from a `Points` sequence. The
+    /// interactive sampler is the host's job; no timer sampling exists here.
+    Sketch,
+    /// `TRACE` (Work-only): a closed 4-vertex wide-band polyline; no TRACE type.
+    Trace,
+    /// `MOCORO` (Work-only): one typed transform over the current selection.
+    Mocoro,
+    /// `MSTRETCH` (Work-only): the STRETCH planner over several crossing windows.
+    MStretch,
+    /// `VIEWRES` (Viewer-legal): store the session circle-tessellation percentage.
+    ViewRes,
+    /// `VSCURRENT` (Viewer-legal): store the 2D wireframe visual-style token.
+    VisualStyle,
+    /// `LINETYPE` (Viewer-legal for `LIST`; `SET` re-authorizes work mode):
+    /// list the drawing's linetypes or set one on the selection.
+    Linetype,
 }
 
 mod capabilities;
@@ -975,6 +967,7 @@ pub mod dimension_edit;
 pub mod dimension_extra;
 pub mod draw2;
 pub mod draw_variants;
+pub mod extras;
 pub mod gradient;
 pub mod grip_stretch;
 pub mod hatch;

@@ -185,6 +185,14 @@ impl CommandId {
                 | Self::VpClip
                 | Self::VpScale
                 | Self::LayVpi
+                // The 2026-11-07 extras batch: SKETCH/TRACE create one polyline,
+                // MOCORO/MSTRETCH write entity rows. VIEWRES/VSCURRENT are session
+                // tokens (Viewer-legal); LINETYPE is Viewer-legal for LIST and its
+                // SET half re-authorizes the work-only property write itself.
+                | Self::Sketch
+                | Self::Trace
+                | Self::Mocoro
+                | Self::MStretch
         )
     }
 }

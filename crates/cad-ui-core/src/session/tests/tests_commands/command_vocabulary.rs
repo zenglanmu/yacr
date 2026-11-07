@@ -229,6 +229,8 @@ command_selector_contract! {
     HatchSetBoundary => "HATCHSETBOUNDARY", HatchSetOrigin => "HATCHSETORIGIN",
     XdList => "XDLIST",
 
+    Sketch => "SKETCH", Trace => "TRACE", Mocoro => "MOCORO", MStretch => "MSTRETCH",
+    ViewRes => "VIEWRES", VisualStyle => "VSCURRENT", Linetype => "LINETYPE",
 }
 
 #[test]
@@ -243,7 +245,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 222,
+        EXPECTED_COMMAND_COUNT, 229,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
