@@ -9,7 +9,7 @@
     增加复制按钮、右键 `Copy entry`/`Copy all`、Ctrl/Cmd+C（仅在历史为阅读面时捕获，不抢
     `COPYCLIP`）；`navigator.clipboard` → textarea/`execCommand` 回退，两者都失败显示本地化
     “复制失败”，不静默。前端契约测试 1191 passed（排除缺 submodule 的 11 个 vendor-plugin 套件）。
-- **本轮新改动（提交 `4453a8a5`）**：
+- **本轮新改动（提交 `3352c759`）**：
   - 生产宿主默认空白图：`HostOptions::start_blank=true`（Linux/Windows/macOS/Android/Web 生产入口），
     测试/夹具保持 `false` 以继续使用 demo；`open_configured_drawing` 无 `--open` 且 `start_blank`
     时不再 `fit()` demo。`crates/cad-app` 为 1000 行门禁把文档生命周期拆到
