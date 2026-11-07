@@ -370,6 +370,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `POLYGON CIRCUMSCRIBED` | 部分实现 | 独立选择子：中心 + 切圆上一点，用 `R=r/cos(π/n)`、顶点在 `θ±π/n` 生成闭合外切正多边形 | `POLYGON` 的 `Edge` 分支、数值半径的捕捉旋转规则仍未实现 |
 | `DIMROTATED` | 部分实现 | 三次拾取（两原点 + 尺寸线位置）+ 会话 `dimRotation` 角度，复用 `DimensionKind::Linear{rotation}` 合成一个非关联尺寸 | 无 AutoCAD 的选项子提示；非 `+Z` 平面/退化输入按名拒绝 |
 | `DIMSPACE` | 部分实现 | 选择式：第一个线性尺寸为基准，其余按 `DIMDLI` 自动等距重排（一条事务/一步撤销） | 无交互 value 提示（恒为 0/自动），无关联重排，非线性尺寸按名拒绝 |
+| `PEDIT` | 部分实现 | 恰好一条可寻址模型空间 LWPOLYLINE；`PEDIT CLOSE/OPEN/REVERSE` 改闭合标志或反转顶点+bulge，一条事务/一步撤销；无变化时显式 no-op | 无 `Join`/`Width`/`Fit`/`Spline`/`Decurve`/`Ltype gen`/`Undo`/`Multiple`/`Edit vertex`，无交互选项提示、无 line/arc 转换；裸 `PEDIT` 或未知参数按名拒绝 |
 
 **仿射不变规则（`SPLINE`，2026-10-26）**：NURBS 曲线对**仿射**映射不变——把每个控制点过同一个
 仿射映射，而 `degree`、`knots`、`weights` **原样保留**，得到的正是原曲线的**精确仿射像**。因此平移、旋转、
