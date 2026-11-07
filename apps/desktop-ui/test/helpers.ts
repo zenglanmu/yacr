@@ -86,6 +86,8 @@ export const HOST_NAMES = [
   // `COMMAND_TABLE`; this mirror stands in for the loaded `cad_commands`
   // vocabulary and never proves the host advertises the name.
   'AUDIT',
+  // Inquiry commands: read-only/Viewer-legal; FS is the Express direct-touch grower.
+  'LIST',
   'SWITCHBACKEND', 'SWITCH2D3D',
   // PLAN (AutoCAD 2026): the payload-free "orthographic view of the XY plane"
   // selector. v1 is the top/plan 2D view only (this build has no UCS model, so

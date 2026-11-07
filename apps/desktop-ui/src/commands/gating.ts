@@ -280,6 +280,8 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // reason it cannot run. Like LAYON/LAYUNISO its entry exists for the "no drawing
   // is open" answer only.
   LAYERP: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
+  // LIST reports the current selection; zero objects is `list.selection`.
+  LIST: Object.freeze({ count: 1, reasonKey: 'draw.kind.list.hint' }),
 });
 
 /**

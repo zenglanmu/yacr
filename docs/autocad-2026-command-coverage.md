@@ -91,6 +91,7 @@
 | `LAYUNISO` | 已实现 | — |
 | `LENGTHEN` | 部分实现 | 仅 LINE/ARC，只改末端 |
 | `LINE` | 已实现 | — |
+| `LIST` | 部分实现 | 读取**当前选择**而非 AutoCAD 的交互式 “Select objects”；逐对象报告 id/handle/type/layer/space/draw order、标准颜色/线型/线宽/透明度与几何摘要。不建模厚度/拉伸方向；不可寻址引用逐条报告后继续 |
 | `MATCHPROP` | 部分实现 | 只转移 layer/color/linetype/lineweight/transparency |
 | `MIRROR` | 部分实现 | 保留原件；拒绝 Text/MultiLeader |
 | `MLEADER` | 部分实现 | 单簇/2 顶点/仅直线；无 Options |
@@ -641,7 +642,7 @@
 | 498 | `LINE` | 已实现 | Create a series of contiguous line segments. Each segment is a line object that can be edited separately. | — |
 | 499 | `-LINETYPE` | 未实现 | At the Command prompt, loads, sets, and modifies linetypes. | — |
 | 500 | `LINETYPE` | 未实现 | Loads, sets, and modifies linetypes. | — |
-| 501 | `LIST` | 未实现 | Displays property data for selected objects. | — |
+| 501 | `LIST` | 部分实现 | Displays property data for selected objects. | 选择驱动（非交互式选取）；逐对象报告空间、图层、标准显示属性与几何摘要；厚度/拉伸方向不建模，显式说明 |
 | 502 | `LIVESECTION` | 未实现 | Turns on live sectioning for a selected section object. | — |
 | 503 | `LOAD` | 未实现 | Makes the symbols in compiled shape (SHX) files available for use by the SHAPE command. | — |
 | 504 | `LOFT` | 未实现 | Creates a 3D solid or surface in the space between several cross sections. | — |

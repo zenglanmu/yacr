@@ -469,6 +469,8 @@
   "draw.kind.break": "打断",
   "draw.kind.divide": "定数等分",
   "draw.kind.lengthen": "拉长",
+  "draw.kind.list": "对象列表",
+  "draw.kind.list.hint": "请先选择至少一个对象；LIST 会在命令行报告所选对象的空间、图层、显示特性与几何参数（本构建不建模厚度/拉伸方向）。",
   "draw.kind.layoff": "关闭图层",
   "draw.kind.layon": "全开图层",
   "draw.status.idle": "选择 直线 / 圆 / 圆弧 / 移动 / 修剪 / 复制 / 延伸 / 旋转 / 缩放 / 镜像 / 偏移 开始绘制或编辑",

@@ -946,6 +946,14 @@ pub enum CommandId {
     /// `RAY` (Work-only): the positive half of an infinite construction line,
     /// stored as a finite clipped segment; see [`crate::command_id::construction_line`].
     CreateRay,
+    /// `LIST` (Viewer and Work): report the stored property data of every
+    /// selected object as diagnostics. Selection-based (this build reads the
+    /// current selection instead of AutoCAD's interactive "Select objects"
+    /// prompt), read-only: no database write, revision bump or undo entry. It
+    /// reports the entity's space and canonical
+    /// colour/linetype/lineweight/transparency; thickness and extrusion are not
+    /// modelled and say so. See `crate::app_drawing::inquiry`.
+    List,
 }
 
 mod capabilities;

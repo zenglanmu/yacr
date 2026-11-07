@@ -469,6 +469,8 @@
   "draw.kind.break": "Break",
   "draw.kind.divide": "Divide",
   "draw.kind.lengthen": "Lengthen",
+  "draw.kind.list": "List",
+  "draw.kind.list.hint": "Select at least one object; LIST reports each selected object's space, layer, display properties and geometry parameters on the command line (this build does not model thickness or extrusion).",
   "draw.kind.layoff": "Turn layer off",
   "draw.kind.layon": "Turn all layers on",
   "draw.status.idle": "Pick Line / Circle / Arc / Move / Trim / Copy / Extend / Rotate / Scale / Mirror / Offset to start drawing or editing",

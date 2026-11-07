@@ -563,6 +563,7 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         launcherCommand: 'PROPERTIES',
         items: [
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties', large: true },
+          { id: 'LIST', labelKey: 'draw.kind.list', icon: 'properties', command: 'LIST', hintKey: 'draw.kind.list.hint' },
         ],
       },
       {
