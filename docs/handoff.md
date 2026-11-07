@@ -1,3 +1,21 @@
+## 2026-11-07 AutoCAD 2026 2D 标注编辑批次（10 条，已合并，部分写路径为具名拒绝）
+
+- **状态**：`dim-batch`（提交 `84983aaf`，merge `af8cdc9d`）已合并到 `main`。官方清单从
+  **193（50 完整 + 143 部分）/ 788 未实现** 变为 **203（50 完整 + 153 部分）/ 778 未实现**。
+- **新增（10）**：`DIMSTYLE`、`-DIMSTYLE`、`DIMTEDIT`、`DIMEDIT`、`DIMOVERRIDE`、`DIMREGEN`、
+  `DIMDISASSOCIATE`、`QDIM`、`DIMJOGLINE`、`DIMBREAK`。
+- **诚实边界**：`DIMSTYLE SET` 无 post-import 样式表写 API；`DIMJOGLINE`/`DIMBREAK` 无域字段/存储，
+  因此这三条是“语法校验 + 稳定具名拒绝”。`DIMTEDIT`/`DIMEDIT`/`DIMOVERRIDE` 是真实编辑
+  （一条事务/一步撤销）；`DIMREGEN`/`DIMDISASSOCIATE` 是非关联模型的显式 no-op；`QDIM` v1 仅直线。
+  逐条见 `docs/batch-dim-2026-11-07.md` 与 `docs/compatibility.md` §「2026-11-07 标注编辑批次」。
+- **已运行（主仓库合并后）**：`cargo test -p cad-app --locked`（1889 + 集成目标全过）；
+  `cargo test -p cad-ui-core --locked`（444）；前端 `node --test test/*.test.ts`（1275 passed）；
+  `cargo fmt --all -- --check`；`cargo clippy -p cad-app -p cad-ui-core --all-targets -- -D warnings`；
+  `check-file-size.py`；`check-i18n.py`（1346 keys）；`check-command-docs.py`（213/5/2/52 selectors，
+  69 aliases，0 mismatches）；`check-architecture.py`。
+- **NOT RUN / NOT VERIFIED**：真实 GUI/像素/GPU/真机/vendor AutoCAD；Windows/macOS/Android/Web
+  运行时；`cargo test --workspace`；打包/发布。worktree 内前端测试因缺 `node_modules` 为 NOT RUN。
+
 ## 2026-11-07 AutoCAD 2026 2D 布局/视口批次（10 条，已合并，写路径多为具名拒绝）
 
 - **状态**：`layout-batch`（提交 `c792befa`，merge `51548a1c`）已合并到 `main`。官方清单从

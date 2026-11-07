@@ -498,6 +498,28 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 > 真机或 vendor-AutoCAD 证据。layout-batch 的前端测试在主仓库合并后运行通过；worktree 内因缺
 > `node_modules` 为 NOT RUN。
 
+#### 2026-11-07 标注编辑批次（10 条）
+
+> **重要**：`DIMJOGLINE`/`DIMBREAK` 与 `DIMSTYLE SET` 在域/数据库中没有可写字段或 post-import
+> 写 API，因此只有参数校验 + 稳定具名拒绝；其余命令是真实读写路径。
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `DIMSTYLE` | 部分实现 | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles` | `SET <name>` 按 `dimstyle.set_unavailable` 拒绝（只有 builder 写 API）；未知名称 `dimstyle.unknown`；裸命令 `dimstyle.needs_option` |
+| `-DIMSTYLE` | 部分实现 | `DIMSTYLE` 的别名（同一 `CommandId`/路径） | 同上 |
+| `DIMTEDIT` | 部分实现 | 恰好一个选中标注；`MOVE <x> <y>` 写组 11、`ROTATE <degrees>` 写组 53（不归一化，0 = 派生）、`RESET` 复位；一条事务/一步撤销；无变化 `dimtedit.unchanged` | 对齐/倾斜编辑 NOT IMPLEMENTED；无交互文字拖动 |
+| `DIMEDIT` | 部分实现 | 所有选中标注；`TEXT <override>` 逐字存组 1（`<>` 占位，≤1024），`RESET` 删除；一条事务/一步撤销 | 延伸线编辑 NOT IMPLEMENTED；无对话框/逐项确认 |
+| `DIMOVERRIDE` | 部分实现 | 闭集的实体快照变量（`DIMTXT`…`DIMLUNIT`）；一条事务/一步撤销；样式表不改 | 未知变量、仅表变量、坏值、未实现值分别具名拒绝；无对话框 |
+| `DIMREGEN` | 部分实现 | payload-free；本构建非关联，返回 `dimregen.non_associative` 且不改变任何状态 | 不是 AutoCAD 的关联标注重算；无 revision/历史 |
+| `DIMDISASSOCIATE` | 部分实现 | payload-free；无关联模型，返回 `dimdisassociate.already_non_associative` 且不改变任何状态 | 不删除/重建标注 |
+| `QDIM` | 部分实现 | v1 仅直线 `LINE`：每条线创建一个 `DimensionKind::Aligned`（端点距离，尺寸线按 `DIMDLI` 偏移），一条事务/一步撤销 | 圆/弧/点/多段线等按名拒绝；无径向/坐标 QDIM、无位置提示/点输入 |
+| `DIMJOGLINE` | 部分实现 | `ADD`/`REMOVE` 语法校验后按 `dimjogline.unsupported` 拒绝 | 域无 jog 字段/存储；不伪造折线 |
+| `DIMBREAK` | 部分实现 | 按 `dimbreak.unsupported` 拒绝 | 无标注线打断记录；绝不删除/裁剪标注本身 |
+
+> **证据边界**：以上 10 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
+> 真机或 vendor-AutoCAD 证据。dim-batch 的前端测试在主仓库合并后运行通过；worktree 内因缺
+> `node_modules` 为 NOT RUN。
+
 **仿射不变规则（`SPLINE`，2026-10-26）**：NURBS 曲线对**仿射**映射不变——把每个控制点过同一个
 仿射映射，而 `degree`、`knots`、`weights` **原样保留**，得到的正是原曲线的**精确仿射像**。因此平移、旋转、
 **均匀与非均匀**缩放、镜像与剪切**全部精确**：无需重拟合、无需重参数化、权重不变。`cad-db` 的

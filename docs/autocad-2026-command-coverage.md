@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **143** |
-| **已实现合计（完整 + 部分）** | **193** |
-| 未实现 | **788** |
+| 部分实现（有写明的界） | **153** |
+| **已实现合计（完整 + 部分）** | **203** |
+| 未实现 | **778** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -455,31 +455,31 @@
 | 282 | `DIMANGULAR` | 部分实现 | Creates an angular dimension. | 仅两线形式可交互；三点形式只到载荷层 |
 | 283 | `DIMARC` | 未实现 | Creates an arc length dimension. | — |
 | 284 | `DIMBASELINE` | 已实现 | Creates a linear, angular, or ordinate dimension from the baseline of the previous or selected dimension. | — |
-| 285 | `DIMBREAK` | 未实现 | Breaks or restores dimension and extension lines where they cross other objects. | — |
+| 285 | `DIMBREAK` | 部分实现 | Breaks or restores dimension and extension lines where they cross other objects. | 按 `dimbreak.unsupported` 拒绝（无标注线打断记录）；绝不删除/裁剪标注本身 |
 | 286 | `DIMCENTER` | 已实现 | Creates the non-associative center mark or the centerlines of circles and arcs. | — |
 | 287 | `DIMCONSTRAINT` | 未实现 | Applies dimensional constraints to selected objects or points on objects, or converts associative dimensions to dimensional constraints. | — |
 | 288 | `DIMCONTINUE` | 已实现 | Creates a dimension that starts from an extension line of the previous or selected dimension. | — |
 | 289 | `DIMDIAMETER` | 已实现 | Creates a diameter dimension for a circle or an arc. | — |
-| 290 | `DIMDISASSOCIATE` | 未实现 | Removes associativity from selected dimensions. | — |
-| 291 | `DIMEDIT` | 未实现 | Edits dimension text and extension lines. | — |
+| 290 | `DIMDISASSOCIATE` | 部分实现 | Removes associativity from selected dimensions. | payload-free；无关联模型，`dimdisassociate.already_non_associative` 且不改变任何状态 |
+| 291 | `DIMEDIT` | 部分实现 | Edits dimension text and extension lines. | 对所有选中标注 `TEXT <override>`（组 1，`<>` 占位，≤1024）或 `RESET`；一条事务/一步撤销；延伸线编辑未实现 |
 | 292 | `DIMEX` | 未实现 | Exports named dimension styles and their settings to an external file. | — |
 | 293 | `DIMIM` | 未实现 | Imports named dimension styles and their settings from an external file. | — |
 | 294 | `-DIMINSPECT` | 未实现 | From the Command prompt, adds or removes inspection information from a selected dimension. | — |
 | 295 | `DIMINSPECT` | 未实现 | Adds or removes inspection information for a selected dimension. | — |
 | 296 | `DIMJOGGED` | 未实现 | Creates jogged dimensions for circles and arcs. | — |
-| 297 | `DIMJOGLINE` | 未实现 | Adds or removes a jog line on a linear or aligned dimension. | — |
+| 297 | `DIMJOGLINE` | 部分实现 | Adds or removes a jog line on a linear or aligned dimension. | `ADD`/`REMOVE` 解析后按 `dimjogline.unsupported` 拒绝（域无 jog 字段/存储） |
 | 298 | `DIMLINEAR` | 已实现 | Creates a linear dimension. | — |
 | 299 | `DIMORDINATE` | 已实现 | Creates ordinate dimensions. | — |
-| 300 | `DIMOVERRIDE` | 未实现 | Controls overrides of system variables used in selected dimensions. | — |
+| 300 | `DIMOVERRIDE` | 部分实现 | Controls overrides of system variables used in selected dimensions. | 闭集的实体快照变量；未知变量/仅表变量/坏值/未实现值分别具名拒绝；一条事务/一步撤销；不改样式表 |
 | 301 | `DIMRADIUS` | 已实现 | Creates a radius dimension for a circle or an arc. | — |
 | 302 | `DIMREASSOC` | 未实现 | Restores the measured value to overridden or modified dimension text. | — |
 | 303 | `DIMREASSOCIATE` | 未实现 | Associates or reassociates selected dimensions to objects or points on objects. | — |
-| 304 | `DIMREGEN` | 未实现 | Updates the locations of all associative dimensions. | — |
+| 304 | `DIMREGEN` | 部分实现 | Updates the locations of all associative dimensions. | payload-free；本构建非关联，`dimregen.non_associative` 且不改变任何状态 |
 | 305 | `DIMROTATED` | 部分实现 | Creates a rotated linear dimension. | 三点拾取（两尺寸界线原点 + 尺寸线位置）；角度为会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | 306 | `DIMSPACE` | 部分实现 | Adjusts the spacing between linear dimensions or angular dimensions. | 选择驱动 v1：首个线性标注为基准，其余按拾取顺序以基准样式 `DIMDLI` 自动等距；无交互间距值提示、无关联重排、仅模型空间线性标注 |
-| 307 | `-DIMSTYLE` | 未实现 | At the Command prompt, creates and modifies dimension styles. | — |
-| 308 | `DIMSTYLE` | 未实现 | Creates and modifies dimension styles. | — |
-| 309 | `DIMTEDIT` | 未实现 | Moves and rotates dimension text and relocates the dimension line. | — |
+| 307 | `-DIMSTYLE` | 部分实现 | At the Command prompt, creates and modifies dimension styles. | `DIMSTYLE` 的别名，同一实现 |
+| 308 | `DIMSTYLE` | 部分实现 | Creates and modifies dimension styles. | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 按 `dimstyle.set_unavailable` 拒绝（无 post-import 样式表写 API）；未知名称拒绝 |
+| 309 | `DIMTEDIT` | 部分实现 | Moves and rotates dimension text and relocates the dimension line. | 恰好一个选中标注；`MOVE <x> <y>` 写组 11、`ROTATE <deg>` 写组 53、`RESET` 复位；一条事务/一步撤销；无变化 `dimtedit.unchanged` |
 | 310 | `DIST` | 已实现 | Measures the distance and angle between two points. | — |
 | 311 | `DISTANTLIGHT` | 未实现 | Creates a distant light. | — |
 | 312 | `DIVIDE` | 部分实现 | Creates evenly spaced point objects or blocks along the length or perimeter of an object. | 仅 LINE/ARC/CIRCLE/直线段 LWPOLYLINE；按等弧长放 POINT |
@@ -860,7 +860,7 @@
 | 687 | `PUSHTODOCSOPEN` | 未实现 | Opens the Push to Autodesk Docs palette where you can select AutoCAD layouts to upload as PDFs to Autodesk Docs. | — |
 | 688 | `PYRAMID` | 未实现 | Creates a 3D solid pyramid. | — |
 | 689 | `QCCLOSE` | 未实现 | Closes the QuickCalc calculator. | — |
-| 690 | `QDIM` | 未实现 | Creates a series of dimensions quickly from selected objects. | — |
+| 690 | `QDIM` | 部分实现 | Creates a series of dimensions quickly from selected objects. | v1 仅直线 `LINE`：每条线创建一个 `DimensionKind::Aligned`（端点距离，尺寸线按 `DIMDLI` 偏移），一条事务/一步撤销；圆/弧/点等按名拒绝 |
 | 691 | `QLATTACH` | 未实现 | Attaches a leader line to an mtext, tolerance, or block reference object. | — |
 | 692 | `QLATTACHSET` | 未实现 | Globally attaches leader lines to mtext, tolerance, or block reference objects. | — |
 | 693 | `QLDETACHSET` | 未实现 | Detaches a leader line from an mtext, tolerance, or block reference object. | — |
