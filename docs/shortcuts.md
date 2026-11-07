@@ -267,9 +267,9 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 `LAYUNISO`/`LAYON`→`RESTORELAYERS`、`NEWLAYER`→`CREATELAYER`、`LEN`→`LENGTHEN`、`I`→`INSERT`、`B`→`BLOCK`、
 `XL`→`XLINE`（项目同义词，非 `acad.pgp`）、`TJUST`→`JUSTIFYTEXT`、`MTEDIT`→`TEXTEDIT`、
 `-MTEXT`→`MTEXT`、`-LAYMCH`→`LAYMCH`、`-LAYMRG`→`LAYMRG`、`-LAYDEL`→`LAYDEL`、
-`-PURGE`→`PURGE`、`-RENAME`→`RENAME`、`-OVERKILL`→`OVERKILL`
+`-PURGE`→`PURGE`、`-RENAME`→`RENAME`、`-OVERKILL`→`OVERKILL`、`-DIMSTYLE`→`DIMSTYLE`
 （2026-11-07 文字/图层/工具/绘制批次：别名只归一化到同一 `CommandId`/同一条写路径，不是第二套实现）。
-本页缩写表 **42** 个 + 本句 **24** 个 = **66** 个，与 `COMMAND_ALIASES` 的长度一致。
+本页缩写表 **42** 个 + 本句 **25** 个 = **67** 个，与 `COMMAND_ALIASES` 的长度一致。
 
 诚实边界：这张表是**面向已实现命令的 AutoCAD `acad.pgp` 子集**，不是 `acad.pgp` 解析器，
 也**不支持用户自定义别名**；目标命令不存在的缩写一律不收录，绝不用别名凭空造出命令。

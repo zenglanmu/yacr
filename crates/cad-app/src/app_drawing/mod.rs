@@ -41,6 +41,7 @@ mod construction_line;
 mod dimension;
 mod dimension_angular;
 mod dimension_chain;
+mod dimension_edit;
 mod dimension_ordinate;
 mod dimension_space;
 mod divide;

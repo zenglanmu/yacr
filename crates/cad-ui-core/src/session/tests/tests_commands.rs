@@ -7,6 +7,7 @@
 mod alias_table;
 mod command_vocabulary;
 mod command_vocabulary_clipboard;
+mod dimension_arguments;
 mod draw2_arguments;
 mod gradient;
 mod hatchedit;

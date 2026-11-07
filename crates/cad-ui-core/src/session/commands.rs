@@ -2,6 +2,10 @@
 
 use cad_app::{CommandId, MeasurementToolKind};
 
+pub use super::dim_arguments::{
+    DIMEDIT_SELECTOR, DIMJOGLINE_SELECTOR, DIMOVERRIDE_SELECTOR, DIMSTYLE_SELECTOR,
+    DIMTEDIT_SELECTOR,
+};
 use super::text_batch::{
     JUSTIFYTEXT_SELECTOR, TCIRCLE_SELECTOR, TCOUNT_SELECTOR, TEXTALIGN_SELECTOR, TSCALE_SELECTOR,
 };
@@ -177,6 +181,18 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("DIMCONTINUE", CommandId::DimContinue),
     ("DIMROTATED", CommandId::DimRotated),
     ("DIMSPACE", CommandId::DimSpace),
+    // The 2026-11-07 dimension-editing batch. `-DIMSTYLE` is an alias (same
+    // CommandId/path), not a second row; QDIM/DIMREGEN/DIMDISASSOCIATE/DIMBREAK
+    // take no argument, so they are not argument selectors.
+    ("DIMSTYLE", CommandId::DimStyle),
+    ("DIMTEDIT", CommandId::DimTextEdit),
+    ("DIMEDIT", CommandId::DimEdit),
+    ("DIMOVERRIDE", CommandId::DimOverride),
+    ("DIMREGEN", CommandId::DimRegen),
+    ("DIMDISASSOCIATE", CommandId::DimDisassociate),
+    ("QDIM", CommandId::QDim),
+    ("DIMJOGLINE", CommandId::DimJogLine),
+    ("DIMBREAK", CommandId::DimBreak),
     ("HATCH", CommandId::Hatch),
     // HATCHPOINT is the project-specific **internal point** selector (like
     // SELECTINBOX/GRIPSTRETCH): one picked point, then the command discovers the
@@ -534,6 +550,12 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     TREX_SELECTOR,
     MPEDIT_SELECTOR,
     DRAWORDER_SELECTOR,
+    // The 2026-11-07 dimension-editing batch argument forms.
+    DIMSTYLE_SELECTOR,
+    DIMTEDIT_SELECTOR,
+    DIMEDIT_SELECTOR,
+    DIMOVERRIDE_SELECTOR,
+    DIMJOGLINE_SELECTOR,
 ];
 
 /// Split a typed line into an argument-taking selector and its argument.
@@ -799,6 +821,9 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     // behaviour and a second `CommandId` would be a second path.
     ("-PURGE", "PURGE"),
     ("-RENAME", "RENAME"),
+    // `-DIMSTYLE` is AutoCAD's dialog-free spelling of the same command; this
+    // build has one selector path, so it normalizes onto `DIMSTYLE`.
+    ("-DIMSTYLE", "DIMSTYLE"),
 ];
 
 /// The alias table as `(alias, canonical selector)` pairs, resolved through

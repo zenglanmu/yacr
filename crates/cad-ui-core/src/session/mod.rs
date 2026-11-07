@@ -26,6 +26,7 @@ mod bytes;
 mod command_log;
 mod commands;
 mod diagnostics;
+mod dim_arguments;
 mod draw2_arguments;
 pub mod events;
 mod fonts;

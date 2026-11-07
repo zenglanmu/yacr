@@ -292,6 +292,7 @@ mod create_trim_undo;
 mod dimension;
 mod dimension_angular_ordinate;
 mod dimension_chain;
+mod dimension_edit;
 mod dimension_extra;
 mod dimension_radial;
 mod dimension_space;

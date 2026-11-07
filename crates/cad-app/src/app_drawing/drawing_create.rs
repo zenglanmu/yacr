@@ -37,6 +37,13 @@ impl Application {
             CommandId::DimAligned => self.dim_aligned(session, command),
             CommandId::DimRotated => self.dim_rotated(session, command),
             CommandId::DimSpace => self.dim_space(session, command),
+            // The 2026-11-07 dimension-editing batch.
+            CommandId::DimTextEdit => self.dim_text_edit(session, command),
+            CommandId::DimEdit => self.dim_edit(session, command),
+            CommandId::DimOverride => self.dim_override(session, command),
+            CommandId::QDim => self.qdim(session, command),
+            CommandId::DimJogLine => self.dim_jogline(command),
+            CommandId::DimBreak => self.dim_break(command),
             CommandId::DimRadius => self.dim_radius(session, command),
             CommandId::DimDiameter => self.dim_diameter(session, command),
             CommandId::DimCenter => self.dim_center(session, command),

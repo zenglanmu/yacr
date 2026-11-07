@@ -1302,7 +1302,21 @@
   "draw.kind.draworder.front": "Draw order: Front",
   "draw.kind.draworder.back": "Draw order: Back",
   "draw.kind.draworder.above": "Draw order: Above",
-  "draw.kind.draworder.below": "Draw order: Below"
-
-
+  "draw.kind.draworder.below": "Draw order: Below",
+  "draw.kind.dimstyle": "Dimension style (DIMSTYLE)",
+  "draw.kind.dimstyle_alias": "Dimension style (command line)",
+  "draw.kind.dimtedit": "Edit dimension text",
+  "draw.kind.dimtedit.hint": "Select exactly one dimension: MOVE <x> <y> sets the text position, ROTATE <degrees> its rotation, RESET restores the derived placement",
+  "draw.kind.dimedit": "Edit dimension text override",
+  "draw.kind.dimedit.hint": "Select at least one dimension: TEXT <override> stores the measurement text template (<> is the measurement), RESET drops it",
+  "draw.kind.dimoverride": "Dimension variable override",
+  "draw.kind.dimoverride.hint": "Select at least one dimension: DIMOVERRIDE <variable> <value> writes the entity style snapshot for the admitted variables only",
+  "draw.kind.dimregen": "Regenerate dimensions",
+  "draw.kind.dimdisassociate": "Disassociate dimensions",
+  "draw.kind.qdim": "Quick dimension",
+  "draw.kind.qdim.hint": "Select at least one straight LINE: v1 creates one aligned dimension per line at the Standard DIMDLI offset in model space",
+  "draw.kind.dimjogline": "Add/remove dimension jog line",
+  "draw.kind.dimjogline.hint": "Not available: the dimension domain stores no jog field, so this command refuses by name",
+  "draw.kind.dimbreak": "Break dimension line",
+  "draw.kind.dimbreak.hint": "Not available: the dimension domain stores no dimension-line break, so this command refuses without trimming the dimension"
 }

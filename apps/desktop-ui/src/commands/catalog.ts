@@ -281,6 +281,22 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // The text and rotated/spaced dimension commands (2026-11-07) close the run.
   { id: 'DIMROTATED', labelKey: 'draw.kind.dimrotated', icon: 'dimrotated', group: 'annotate' },
   { id: 'DIMSPACE', labelKey: 'draw.kind.dimspace', icon: 'dimspace', group: 'annotate' },
+  // The 2026-11-07 dimension-editing batch. These are command-line forms first
+  // (the host owns the grammar and every refusal): DIMSTYLE/-DIMSTYLE report the
+  // style table, DIMTEDIT/DIMEDIT/DIMOVERRIDE edit selected dimensions, and
+  // DIMREGEN/DIMDISASSOCIATE are explicit non-associative no-op reports.
+  // QDIM is selection-based; DIMJOGLINE/DIMBREAK are catalogued capability
+  // refusals so a typed or clicked attempt names the missing domain field.
+  { id: 'DIMSTYLE', labelKey: 'draw.kind.dimstyle', icon: 'properties', group: 'annotate' },
+  { id: '-DIMSTYLE', labelKey: 'draw.kind.dimstyle_alias', icon: 'terminal', group: 'annotate' },
+  { id: 'DIMTEDIT', labelKey: 'draw.kind.dimtedit', icon: 'pencil', group: 'annotate' },
+  { id: 'DIMEDIT', labelKey: 'draw.kind.dimedit', icon: 'pencil', group: 'annotate' },
+  { id: 'DIMOVERRIDE', labelKey: 'draw.kind.dimoverride', icon: 'properties', group: 'annotate' },
+  { id: 'DIMREGEN', labelKey: 'draw.kind.dimregen', icon: 'rotate', group: 'annotate' },
+  { id: 'DIMDISASSOCIATE', labelKey: 'draw.kind.dimdisassociate', icon: 'reference', group: 'annotate' },
+  { id: 'QDIM', labelKey: 'draw.kind.qdim', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DIMJOGLINE', labelKey: 'draw.kind.dimjogline', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DIMBREAK', labelKey: 'draw.kind.dimbreak', icon: 'trim', group: 'annotate' },
   { id: 'TORIENT', labelKey: 'draw.kind.torient', icon: 'rotate', group: 'annotate' },
   { id: 'TCASE', labelKey: 'draw.kind.tcase', icon: 'pencil', group: 'annotate' },
   { id: 'TXT2MTXT', labelKey: 'draw.kind.txt2mtxt', icon: 'copy', group: 'annotate' },

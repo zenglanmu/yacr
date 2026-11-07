@@ -875,6 +875,32 @@ pub enum CommandId {
     /// `DRAWORDER` (Work-only): rewrite model-space draw order. Contract:
     /// [`crate::command_id::draw2::DrawOrderCommand`].
     DrawOrder,
+    /// `DIMSTYLE` / `-DIMSTYLE`: list/query the stored DIMSTYLE table; the
+    /// creation style is fixed to `Standard`. `SET` is a named refusal (no
+    /// post-import style-table write API). Full contract:
+    /// [`crate::command_id::dimension_edit`].
+    DimStyle,
+    /// `DIMTEDIT` (Work-only): move/rotate/reset the text of one selected
+    /// dimension. Contract: [`crate::command_id::dimension_edit`].
+    DimTextEdit,
+    /// `DIMEDIT` (Work-only): set/reset the selected dimensions' text override.
+    /// Contract: [`crate::command_id::dimension_edit`].
+    DimEdit,
+    /// `DIMOVERRIDE` (Work-only): apply a closed variable set to the selected
+    /// dimensions' style snapshots. Contract:
+    /// [`crate::command_id::dimension_edit`].
+    DimOverride,
+    /// `DIMREGEN`: non-associative no-op report (nothing is regenerated).
+    DimRegen,
+    /// `DIMDISASSOCIATE`: no-op report (dimensions are already non-associative).
+    DimDisassociate,
+    /// `QDIM` (Work-only): aligned dimensions from the selected LINEs. Contract:
+    /// [`crate::command_id::dimension_edit`].
+    QDim,
+    /// `DIMJOGLINE`: named capability refusal (no jog field in the domain).
+    DimJogLine,
+    /// `DIMBREAK`: named capability refusal (no dimension-line break field).
+    DimBreak,
 }
 
 mod capabilities;
@@ -887,6 +913,7 @@ pub mod boundary;
 pub mod break_at_point;
 pub mod construction_line;
 pub mod dimension_chain;
+pub mod dimension_edit;
 pub mod dimension_extra;
 pub mod draw2;
 pub mod draw_variants;

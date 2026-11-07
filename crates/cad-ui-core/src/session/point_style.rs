@@ -27,6 +27,10 @@ use super::commands::{
     SETVAR_SELECTOR, SOLID_SELECTOR, TREX_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
+use super::dim_arguments::{
+    DIMEDIT_SELECTOR, DIMJOGLINE_SELECTOR, DIMOVERRIDE_SELECTOR, DIMSTYLE_SELECTOR,
+    DIMTEDIT_SELECTOR,
+};
 use super::{
     CadSession, ARGUMENT_SELECTOR, HATCHEDIT_SELECTOR, JUSTIFYTEXT_SELECTOR, PDMODE_SELECTOR,
     PDSIZE_SELECTOR, PEDIT_SELECTOR, SNAPUNIT_SELECTOR, SPACE_SELECTOR, TCASE_SELECTOR,
@@ -94,6 +98,9 @@ impl CadSession {
             | MLSTYLE_SELECTOR | TREX_SELECTOR | MPEDIT_SELECTOR | DRAWORDER_SELECTOR => {
                 self.draw2_argument(selector, argument, text)
             }
+            // The 2026-11-07 dimension-editing batch typed forms.
+            DIMSTYLE_SELECTOR | DIMTEDIT_SELECTOR | DIMEDIT_SELECTOR | DIMOVERRIDE_SELECTOR
+            | DIMJOGLINE_SELECTOR => self.dim_argument(selector, argument, text),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

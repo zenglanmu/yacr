@@ -342,11 +342,13 @@ pub use draw2_payload::{Draw2Payload, DrawOrderMode, MlStyleCommand, TrexMode};
 pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 
 pub use command_payload::{
-    AngularDimensionInput, CommandPayload, DimensionChainCommand, GripStretchCommand,
-    HatchEditOption, JustifyTextCommand, LayerStateCommand, MeasureGeomOption, NamedObjectKind,
-    OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget, RadialDimensionCommand,
-    RenameCommand, RotatedLinearDimensionCommand, TCircleCommand, TCountCommand, TextAlignCommand,
-    TextAlignEdge, TextBoundaryShape, TextCaseMode, TextScaleCommand, TwoLineCommand,
+    AngularDimensionInput, CommandPayload, DimEditCommand, DimJogLineCommand, DimOverrideCommand,
+    DimStyleCommand, DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand,
+    GripStretchCommand, HatchEditOption, JustifyTextCommand, LayerStateCommand, MeasureGeomOption,
+    NamedObjectKind, OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget,
+    RadialDimensionCommand, RenameCommand, RotatedLinearDimensionCommand, TCircleCommand,
+    TCountCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode,
+    TextScaleCommand, TwoLineCommand,
 };
 
 pub struct Command {

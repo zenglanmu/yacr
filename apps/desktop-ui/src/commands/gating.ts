@@ -436,7 +436,70 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     parse: (argument: string) => ['FRONT', 'BACK', 'ABOVE', 'BELOW']
       .includes(argument.trim().toUpperCase()),
   }),
+  /**
+   * The 2026-11-07 dimension-editing batch. `DIMSTYLE`/`-DIMSTYLE` share one
+   * grammar (the alias normalizes onto the canonical selector); the host owns
+   * the style-name lookup and the `SET` capability refusal. `DIMTEDIT`/
+   * `DIMEDIT`/`DIMOVERRIDE`/`DIMJOGLINE` mirror the host token grammars; the
+   * host remains the authority for the closed `DIMOVERRIDE` variable set and
+   * every semantic refusal.
+   */
+  DIMSTYLE: Object.freeze({
+    parse: isDimStyleArgument,
+  }),
+  '-DIMSTYLE': Object.freeze({
+    parse: isDimStyleArgument,
+  }),
+  DIMTEDIT: Object.freeze({
+    parse: isDimTextEditArgument,
+  }),
+  DIMEDIT: Object.freeze({
+    parse: isDimEditArgument,
+  }),
+  DIMOVERRIDE: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return parts.length >= 2 && /^[A-Za-z][A-Za-z0-9_]*$/.test(parts[0]);
+    },
+  }),
+  DIMJOGLINE: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      const word = (parts[0] ?? '').toUpperCase();
+      if (word === 'REMOVE') return parts.length === 1;
+      return word === 'ADD' && parts.length === 3
+        && isSignedDecimal(parts[1]) && isSignedDecimal(parts[2]);
+    },
+  }),
 });
+
+/** `DIMSTYLE`/`-DIMSTYLE`: `LIST`, `CURRENT` or `SET <name>` (name may have spaces). */
+function isDimStyleArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  const word = (parts[0] ?? '').toUpperCase();
+  if (word === 'LIST' || word === 'CURRENT') return parts.length === 1;
+  return word === 'SET' && parts.length >= 2;
+}
+
+/** `DIMTEDIT`: `MOVE <x> <y>`, `ROTATE <degrees>` or `RESET`. */
+function isDimTextEditArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  const word = (parts[0] ?? '').toUpperCase();
+  if (word === 'RESET') return parts.length === 1;
+  if (word === 'MOVE') {
+    return parts.length === 3 && isSignedDecimal(parts[1]) && isSignedDecimal(parts[2]);
+  }
+  if (word === 'ROTATE') return parts.length === 2 && isSignedDecimal(parts[1]);
+  return false;
+}
+
+/** `DIMEDIT`: `TEXT <override>` (non-empty remainder) or `RESET`. */
+function isDimEditArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  const word = (parts[0] ?? '').toUpperCase();
+  if (word === 'RESET') return parts.length === 1;
+  return word === 'TEXT' && parts.length >= 2;
+}
 
 /** Split a typed argument into whitespace-separated tokens. */
 function tokens(argument: string): readonly string[] {
@@ -581,6 +644,11 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   // history), so the start page disables all eight with the catalog's own
   // "no drawing is open" sentence.
   'PURGE', 'RENAME', 'SETVAR', 'TIME', 'DBLIST', 'TREESTAT', 'MREDO', 'MULTIPLE',
+  // The 2026-11-07 dimension batch: the style reports and the two no-op reports
+  // read the open drawing, so the start page disables them with the same
+  // "no drawing is open" sentence. The edit commands are selection-gated and
+  // answer the no-document case through their own hint row.
+  'DIMSTYLE', '-DIMSTYLE', 'DIMREGEN', 'DIMDISASSOCIATE',
 ]);
 
 /** One command's precondition on the **current selection**. */
@@ -792,6 +860,16 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   EXTRIM: Object.freeze({ count: 2, reasonKey: 'draw.kind.extrim.hint' }),
   MPEDIT: Object.freeze({ count: 1, reasonKey: 'draw.kind.mpedit.hint' }),
   DRAWORDER: Object.freeze({ count: 1, reasonKey: 'draw.kind.draworder.hint' }),
+  // The 2026-11-07 dimension-editing batch. DIMTEDIT needs **exactly** one
+  // dimension (the host refuses anything else); the rest need at least one.
+  // DIMBREAK's declared input is one dimension plus crossing objects, so its
+  // local minimum is two even though the host refuses the capability by name.
+  DIMTEDIT: Object.freeze({ count: 1, reasonKey: 'draw.kind.dimtedit.hint' }),
+  DIMEDIT: Object.freeze({ count: 1, reasonKey: 'draw.kind.dimedit.hint' }),
+  DIMOVERRIDE: Object.freeze({ count: 1, reasonKey: 'draw.kind.dimoverride.hint' }),
+  QDIM: Object.freeze({ count: 1, reasonKey: 'draw.kind.qdim.hint' }),
+  DIMJOGLINE: Object.freeze({ count: 1, reasonKey: 'draw.kind.dimjogline.hint' }),
+  DIMBREAK: Object.freeze({ count: 2, reasonKey: 'draw.kind.dimbreak.hint' }),
 });
 
 /**
