@@ -1,10 +1,10 @@
-## 2026-11-07 AutoCAD 2026 2D 命令批次（25 条官方命令 + 1 个项目选择子）+ 实验性 DWG 另存
+## 2026-11-07 AutoCAD 2026 2D 命令批次（29 条官方命令 + 1 个项目选择子）+ 实验性 DWG 另存
 
 - **范围**：按 `docs/autocad-2026-command-coverage.md` 继续实现**未完成的 2D 命令**，全部同时接线
   Rust 命令/工具路径、React 目录/ribbon/gating/i18n 与契约测试；官方清单从
   **94 已实现（50 完整 + 44 部分）/ 887 未实现** 变为
-  **119 已实现（50 完整 + 69 部分）/ 862 未实现**。
-- **新增官方命令（25）**：
+  **123 已实现（50 完整 + 73 部分）/ 858 未实现**。
+- **新增官方命令（29）**：
   * 图层：`LAYCUR`、`LAYMCUR`、`LAYFRZ`、`LAYTHW`、`LAYLCK`、`LAYULK`、`SETBYLAYER`（选择式；
     层表写不可撤销；SETBYLAYER 只重置 color/linetype/lineweight，透明/materials/Include blocks 未实现）；
   * 修改：`REVERSE`、`OOPS`（仅最近一次 ERASE、新 id）、`OVERKILL`（v1 仅完全重复）、
@@ -18,6 +18,7 @@
     面积/周长/包围盒/形心；惯性/主轴/体积/`.mpr` 未实现；椭周长 Ramanujan 近似已明示）、
     `MEASUREGEOM`（DISTANCE/ANGLE/AREA/POLYLINE 复用既有测量工具，RADIUS 只读报告，
     VOLUME 显式 `Unsupported`）。
+  * 补充：`BOUNDARY`（内部点→闭合非关联多段线；无 region/边界集选项）、`TEXTTOFRONT`（选中文字/引线/标注置前，模型空间）、`GRADIENT`（预选边界+会话渐变参数）、`HATCHEDIT`（选择式 `ANGLE/SCALE/SOLID/GRADIENT` v1）。
   * 另有**项目多词选择子** `POLYGON CIRCUMSCRIBED`（不属于官方 981 条、不计入总计；外切正多边形，
     与 `POLYGON` 内接共享边数）。
 - **共同边界（均为有意声明，不是验收）**：除 `BREAKATPOINT`/`WIPEOUT`/`DIMROTATED` 等工具外，命令

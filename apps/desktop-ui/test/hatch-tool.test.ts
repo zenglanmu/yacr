@@ -123,7 +123,7 @@ test('HATCH closes the draw command group on both draw panels, as a router comma
     // objects it edits: `OFFSET` → `TEXT` → `MTEXT` → `SCALETEXT` → `MLEADER` →
     // `HATCH` → `HATCHPOINT`.
     assert.deepEqual(
-      panel.items.slice(-9).map(item => item.id),
+      panel.items.slice(-10).map(item => item.id),
       ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'],
       tabId,
     );

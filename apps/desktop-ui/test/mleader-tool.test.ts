@@ -103,7 +103,7 @@ test('MLEADER sits between TEXT and HATCH on both draw panels, with no variant p
     assert.equal(ids[at - 2], 'MTEXT', `${tabId}: SCALETEXT follows MTEXT`);
     assert.equal(ids[at - 3], 'TEXT', `${tabId}: MTEXT follows TEXT`);
     assert.deepEqual(
-      ids.slice(-9),
+      ids.slice(-10),
       ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'],
       `${tabId}: fixed tail order`,
     );

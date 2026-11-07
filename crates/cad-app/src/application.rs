@@ -44,17 +44,14 @@ impl Application {
             CommandId::List => self.list_objects(session, &command),
             CommandId::Status => self.drawing_status(session, &command),
             CommandId::Fs => self.selection_touching(session, &command),
-            // MASSPROP and MEASUREGEOM RADIUS are report-only inquiries: no
-            // transaction, no history, no revision bump (Viewer-legal).
+            // MASSPROP / MEASUREGEOM RADIUS are report-only (Viewer-legal).
             CommandId::MassProp => self.mass_prop(session, &command),
             CommandId::MeasureGeom => self.measure_geom(session, &command),
             CommandId::FitDrawing => self.fit_drawing(session, &command),
             CommandId::RestoreLayers => {
-                // Drop temporary overrides; the drawing's own layer flags remain
-                // the authority and the database revision is untouched (F03).
-                // A real change is one `LAYERP` step, recorded **before** the
-                // clear so `LAYERP` can bring the cleared state back; a restore
-                // with nothing to restore pushes nothing.
+                // Drop temporary overrides; the drawing's layer flags remain the
+                // authority (F03). A real change is one recorded `LAYERP` step,
+                // pushed before the clear; a restore with nothing pushes nothing.
                 if !session.layer_overrides.is_empty() {
                     session.push_layer_override_snapshot();
                     session.layer_overrides.clear();
