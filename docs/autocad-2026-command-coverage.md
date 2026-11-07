@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **47** |
-| **已实现合计（完整 + 部分）** | **97** |
-| 未实现 | **884** |
+| 部分实现（有写明的界） | **48** |
+| **已实现合计（完整 + 部分）** | **98** |
+| 未实现 | **883** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -91,6 +91,7 @@
 | `LAYMCUR` | 部分实现 | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
 | `LAYOFF` | 已实现 | — |
 | `LAYON` | 已实现 | — |
+| `LAYTHW` | 部分实现 | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入不可撤销 |
 | `LAYUNISO` | 已实现 | — |
 | `LENGTHEN` | 部分实现 | 仅 LINE/ARC，只改末端 |
 | `LINE` | 已实现 | — |
@@ -629,7 +630,7 @@
 | 483 | `LAYOUT` | 未实现 | Creates and modifies drawing layouts. | — |
 | 484 | `LAYOUTMERGE` | 未实现 | Combines specified layouts into a single layout. | — |
 | 485 | `LAYOUTWIZARD` | 未实现 | Creates a new layout tab and specifies page and plot settings. | — |
-| 486 | `LAYTHW` | 未实现 | Thaws all layers in the drawing. | — |
+| 486 | `LAYTHW` | 部分实现 | Thaws all layers in the drawing. | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入不可撤销 |
 | 487 | `LAYTRANS` | 未实现 | Translates the layers in the current drawing to specified layer standards. | — |
 | 488 | `LAYULK` | 未实现 | Unlocks the layer of a selected object. | — |
 | 489 | `LAYUNISO` | 已实现 | Restores all layers that were hidden or locked with the LAYISO command. | — |

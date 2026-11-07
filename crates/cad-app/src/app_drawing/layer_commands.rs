@@ -78,6 +78,16 @@
 //! One `set_layer_attributes` call per changed layer means one revision bump per
 //! layer; the write is **not undoable**. Success is `layfrz.applied` with the
 //! changed-layer count; an all-frozen selection is `layfrz.unchanged`. Work-only.
+//!
+//! ## `LAYTHW`
+//!
+//! "Thaws all layers." Takes **no selection** (a payload is refused with
+//! `laythw.payload`); every layer whose `frozen` flag is set is thawed in one
+//! layer-table pass, and an all-thawed drawing is `laythw.unchanged` with no
+//! write. This build has no viewport model, so **viewport-level frozen layers
+//! are not thawed** and `frozen_in_new_viewport` is left untouched; the same
+//! one-revision-bump-per-changed-layer and not-undoable rules apply. Success is
+//! `laythw.applied` with the changed-layer count. Work-only.
 
 use super::*;
 use cad_db::LayerAttributes;
@@ -208,6 +218,7 @@ impl Application {
             CommandId::LayCur => self.laycur(session, command),
             CommandId::LayMCur => self.laymcur(session, command),
             CommandId::LayFrz => self.layfrz(session, command),
+            CommandId::LayThw => self.laythw(session, command),
             _ => Err(CadError::InvalidInput(
                 "not a layer selection command".to_string(),
             )),
@@ -357,6 +368,69 @@ impl Application {
                 message: format!(
                     "LAYFRZ: froze {count} layer(s) in all viewports (layer-table edit; not \
                      undoable; Settings/Viewports/Block options are not implemented)"
+                ),
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+
+    /// `LAYTHW`: thaw every frozen layer.
+    fn laythw(
+        &mut self,
+        _session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        if !matches!(command.payload, CommandPayload::None) {
+            return Err(invalid(
+                "laythw",
+                "payload",
+                "LAYTHW takes no payload; it thaws every frozen layer and reads no selection",
+            ));
+        }
+        let document_id = command.document;
+        let drawing = self
+            .workspace
+            .documents
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing
+            .clone();
+        let layers: Vec<LayerId> = drawing.layers().map(|layer| layer.id).collect();
+
+        let (changes, count) =
+            self.write_layer_flags(document_id, &layers, "laythw", |attributes| {
+                if attributes.frozen {
+                    attributes.frozen = false;
+                    // `frozen_in_new_viewport` is the per-viewport flag this
+                    // build has no model for; thawing the layer leaves it alone.
+                    true
+                } else {
+                    false
+                }
+            })?;
+        if count == 0 {
+            return Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: "laythw.unchanged".into(),
+                    message: "LAYTHW: no layer is frozen; nothing changed".into(),
+                }],
+                measurement: None,
+                point_report: None,
+            });
+        }
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "laythw.applied".into(),
+                message: format!(
+                    "LAYTHW: thawed {count} layer(s) (viewport-level frozen layers are not \
+                     thawed; layer-table edit, not undoable, one revision bump per changed layer)"
                 ),
             }],
             measurement: None,

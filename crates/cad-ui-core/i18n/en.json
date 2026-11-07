@@ -1137,5 +1137,7 @@
   "draw.kind.laymcur": "Set current layer from object",
   "draw.kind.laymcur.hint": "Select the object first; LAYMCUR makes the first selected object's layer the current layer.",
   "draw.kind.layfrz": "Freeze selected layers",
-  "draw.kind.layfrz.hint": "Select the objects first; LAYFRZ freezes the layer of every selected object in all viewports (freezing the current layer is refused)."
+  "draw.kind.layfrz.hint": "Select the objects first; LAYFRZ freezes the layer of every selected object in all viewports (freezing the current layer is refused).",
+  "draw.kind.laythw": "Thaw all layers",
+  "draw.kind.laythw.hint": "No selection is needed; LAYTHW thaws every frozen layer (viewport-level frozen layers and the new-viewport flag are not changed)."
 }

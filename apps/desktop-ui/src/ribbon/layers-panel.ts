@@ -45,4 +45,5 @@ export const LAYER_PANEL_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   { id: 'LAYCUR', labelKey: 'draw.kind.laycur', icon: 'layers', command: 'LAYCUR' },
   { id: 'LAYMCUR', labelKey: 'draw.kind.laymcur', icon: 'layers', command: 'LAYMCUR' },
   { id: 'LAYFRZ', labelKey: 'draw.kind.layfrz', icon: 'eyeOff', command: 'LAYFRZ' },
+  { id: 'LAYTHW', labelKey: 'draw.kind.laythw', icon: 'eye', command: 'LAYTHW' },
 ]);

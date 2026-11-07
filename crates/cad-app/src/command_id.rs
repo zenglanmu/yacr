@@ -855,6 +855,11 @@ pub enum CommandId {
     /// current layer is refused). Layer-table edit; not undoable; see
     /// [`crate::app_drawing::layer_commands`].
     LayFrz,
+    /// `LAYTHW` (Work-only): thaw every frozen layer (no selection input). No
+    /// viewport model, so viewport-level frozen layers are not thawed;
+    /// layer-table edit, not undoable; see
+    /// [`crate::app_drawing::layer_commands`].
+    LayThw,
     /// `PDMODE <n>`: write the drawing header's `$PDMODE`; see
     /// [`crate::command_id::point_style`].
     SetPointDisplayMode,
