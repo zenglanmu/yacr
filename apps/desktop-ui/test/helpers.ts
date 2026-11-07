@@ -285,6 +285,11 @@ export const HOST_NAMES = [
   // loaded `cad_commands` vocabulary and never proves the host advertises them.
   'JUSTIFYTEXT', 'TJUST', 'TSCALE', 'TEXTALIGN', 'TCOUNT', 'TCIRCLE',
   'TEXTMASK', 'TEXTUNMASK', 'MTEDIT', '-MTEXT',
+  // The 2026-11-07 utility batch: PURGE/RENAME/SETVAR/MREDO/MULTIPLE are typed
+  // argument selectors; TIME/DBLIST/TREESTAT are payload-free reports. The two
+  // `-` spellings are host aliases of PURGE/RENAME.
+  'PURGE', '-PURGE', 'RENAME', '-RENAME', 'SETVAR', 'TIME', 'DBLIST', 'TREESTAT',
+  'MREDO', 'MULTIPLE',
   // WIPEOUT is the open-ended polygon mask; POLYGON CIRCUMSCRIBED is the
   // tangent-ring variant of POLYGON (its own multi-word selector).
   'WIPEOUT', 'POLYGON CIRCUMSCRIBED',
