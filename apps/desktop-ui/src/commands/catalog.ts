@@ -632,4 +632,17 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'VIEWFORWARD', labelKey: 'draw.kind.viewforward', icon: 'view', group: 'view' },
   { id: 'VPOINT', labelKey: 'draw.kind.vpoint', icon: 'axes', group: 'view' },
 
+  // The 2026-11-07 extras batch. `-PAN`, `REGEN3` and `-LINETYPE` are aliases
+  // of PAN/REGEN/LINETYPE (no rows of their own); SKETCH/MSTRETCH take their
+  // complete input from a host/IPC payload, so the command line only advertises
+  // them. TRACE/MOCORO/VIEWRES/VSCURRENT/LINETYPE have typed grammars in
+  // `gating.ts`.
+  { id: 'SKETCH', labelKey: 'draw.kind.sketch', icon: 'spline', group: 'draw' },
+  { id: 'TRACE', labelKey: 'draw.kind.trace', icon: 'line', group: 'draw' },
+  { id: 'MOCORO', labelKey: 'draw.kind.mocoro', icon: 'copy', group: 'modify' },
+  { id: 'MSTRETCH', labelKey: 'draw.kind.mstretch', icon: 'stretch', group: 'modify' },
+  { id: 'VIEWRES', labelKey: 'draw.kind.viewres', icon: 'view', group: 'view' },
+  { id: 'VSCURRENT', labelKey: 'draw.kind.vscurrent', icon: 'viewTop', group: 'view' },
+  { id: 'LINETYPE', labelKey: 'draw.kind.linetype', icon: 'properties', group: 'properties' },
+
 ]);

@@ -39,21 +39,21 @@ impl Application {
             CommandId::SelectSimilar => self.select_similar(session, &command),
             CommandId::SelectInBox => self.select_in_box(session, &command),
             id if crate::select_filter::batch(id) => self.dispatch_batch(session, id, &command),
-            // Read-only inquiry commands: no transaction/revision/undo, and all
-            // stay out of `requires_work_mode` (FS mutates only the selection).
+            id if crate::app_extras::is_extras(id) => {
+                self.extras_command(session, id, &command)
+            }
+            // Read-only inquiry: no transaction/revision/undo entry.
             CommandId::List => self.list_objects(session, &command),
             CommandId::Status => self.drawing_status(session, &command),
             CommandId::Fs => self.selection_touching(session, &command),
-            // The 2026-11-07 utility batch: PURGE/RENAME/MREDO/MULTIPLE mutate or
-            // arm session state; SETVAR/TIME/DBLIST/TREESTAT are read-only.
+            // The 2026-11-07 utility batch (writes vs read-only reports).
             CommandId::Purge | CommandId::Rename | CommandId::MRedo | CommandId::Multiple => {
                 self.utility_command(session, &command)
             }
             CommandId::SetVar | CommandId::Time | CommandId::DbList | CommandId::TreeStat => {
                 self.utility_report(session, &command)
             }
-            // The 2026-11-07 dimension batch: DIMSTYLE reports are read-only, and
-            // DIMREGEN/DIMDISASSOCIATE are explicit non-associative no-ops.
+            // DIMSTYLE reports are read-only; DIMREGEN/DIMDISASSOCIATE are no-ops.
             CommandId::DimStyle => self.dimstyle_command(&command),
             CommandId::DimRegen => self.dim_regen(&command),
             CommandId::DimDisassociate => self.dim_disassociate(&command),

@@ -16,18 +16,11 @@
 //!   `LINE` (start/end), `POLYLINE`/`LWPOLYLINE` (every stored vertex, bulges
 //!   preserved) and `SPLINE` (every stored **control point**); an `ARC` is
 //!   stretchable per endpoint under the declared rule below;
-//! * `CIRCLE`/`ELLIPSE` cannot be stretched: fully enclosed ⇒ move, partially
-//!   enclosed ⇒ unchanged plus an explicit diagnostic; `INSERT` follows the
-//!   declared insertion-point rule below (it is no longer in the move-only list);
-//! * `TEXT` fails the **whole** command. This is a deliberate, tested choice
-//!   that is **unchanged** by ADR 0019 decision B: text now accepts a
-//!   similarity transform, but STRETCH's per-vertex semantics have no meaning for
-//!   a text run (Autodesk does not document its behaviour), so the command still
-//!   refuses it rather than silently resolving it into a translation. The reason
-//!   is the restricted similarity-only transform surface, **not** "text cannot be
-//!   transformed";
-//! * an entity that crosses the window with no vertex inside is unchanged plus
-//!   an explicit diagnostic (never silent).
+//! * `CIRCLE`/`ELLIPSE` cannot be stretched: fully enclosed ⇒ move, partial ⇒
+//!   unchanged plus a diagnostic; `INSERT` follows the insertion-point rule;
+//! * `TEXT` fails the **whole** command: per-vertex stretch has no meaning for a
+//!   text run (Autodesk does not document it), so it is not guessed into a move;
+//! * a crossing entity with no vertex inside is unchanged plus a diagnostic.
 //!
 //! **SPLINE partial stretch.** A spline's addressable vertices are its stored
 //! **control points** (`SemanticGeometry::Spline::control_points`), and a control
@@ -103,23 +96,12 @@
 //! its insertion point). A fully enclosed INSERT keeps the ordinary whole-move path,
 //! and a reference outside the window is not touched at all (no staging, no write).
 //!
-//! Honest limits of that rule (all deliberate; none of them is "block support"):
-//!
-//! * block **members are not stretched individually** — an instance path into a
-//!   block definition is not addressable through this path (the plan only ever
-//!   writes top-level model-space owners, and there is no per-member vertex edit);
-//! * a **rotated/scaled/mirrored** reference moves **rigidly** by the displacement
-//!   and is **not** re-fitted to the window: the reference keeps its rotation and
-//!   scale exactly, so "the part of the block inside the window stretches" does not
-//!   happen;
-//! * this is **not** AutoCAD's full block-reference STRETCH semantics. Autodesk's
-//!   block-specific handling (definition-level edits, nested member stretching,
-//!   attribute reflow) is **not modelled here and not claimed**; the rule above is
-//!   our own, chosen so that a partial enclosure is never silent and never guesses.
-//!
-//! The insertion point of a non-finite placement is not special-cased: a
-//! non-finite point is simply not inside any window, so such a reference reports
-//! `insert_outside` and is left untouched.
+//! Honest limits (all deliberate; none of them is "block support"): block
+//! members are not stretched individually; a rotated/scaled/mirrored reference
+//! moves rigidly and is never re-fitted; and this is **not** AutoCAD's full
+//! block-reference STRETCH semantics (definition edits, nested members and
+//! attribute reflow are NOT MODELLED). A non-finite placement simply reports
+//! `insert_outside` and is untouched.
 //!
 //! The per-vertex edits are built here as new geometry and staged as
 
@@ -275,6 +257,24 @@ impl Application {
             ));
         }
 
+        self.stretch_windows(session, command, vec![rect], translation)
+    }
+
+    /// The shared STRETCH planner over one or more crossing windows.
+    ///
+    /// `stretch_entities` calls it with one window; `MSTRETCH` calls it with the
+    /// typed list. An entity is fully enclosed when one window encloses it, is
+    /// partial when any window hits it, and its vertices/endpoints move when they
+    /// lie inside **any** window. The geometry edit itself is the existing
+    /// [`stretched_geometry`] / [`moved_geometry`] planner, never a second copy.
+    pub(super) fn stretch_windows(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        rects: Vec<Rect>,
+        translation: Point3,
+    ) -> CadResult<CommandOutcome> {
+        let document_id = command.document;
         let document = self
             .workspace
             .documents
@@ -330,7 +330,7 @@ impl Application {
                 .ok_or(CadError::StaleResult)?;
             let owner_items: Vec<&crate::PickItem> =
                 indices.iter().map(|index| &items[*index]).collect();
-            let enclosure = classify_enclosure(&owner_entity.geometry, &owner_items, rect);
+            let enclosure = classify_enclosure(&owner_entity.geometry, &owner_items, &rects);
             if enclosure == Enclosure::Outside {
                 continue;
             }
@@ -391,7 +391,10 @@ impl Application {
                     // placement is preserved bit for bit) and the diagnostic is an
                     // ordinary per-entity "unchanged" report, so nothing is staged.
                     SemanticGeometry::Insert { transform, .. } => {
-                        if rect.contains_point(insertion_point(transform)) {
+                        if rects
+                            .iter()
+                            .any(|rect| rect.contains_point(insertion_point(transform)))
+                        {
                             plan.push((owner, StretchAction::Move));
                         } else {
                             diagnostics.push(stretch_unchanged_diagnostic(owner, "insert_outside"));
@@ -451,7 +454,7 @@ impl Application {
                     updates.push(after);
                 }
                 StretchAction::Stretch => {
-                    match stretched_geometry(&before.geometry, rect, translation) {
+                    match stretched_geometry(&before.geometry, &rects, translation) {
                         Ok(geometry) => {
                             let mut after = before.clone();
                             after.geometry = geometry;
@@ -575,21 +578,25 @@ fn insertion_point(transform: &Transform3) -> Point3 {
 fn classify_enclosure(
     geometry: &SemanticGeometry,
     items: &[&crate::PickItem],
-    rect: Rect,
+    rects: &[Rect],
 ) -> Enclosure {
+    // "Fully enclosed" must be one **single** window: two disjoint windows each
+    // holding one endpoint do not enclose the segment between them.
     let full = match geometry {
-        SemanticGeometry::Line { start, end } => {
-            rect.contains_point(*start) && rect.contains_point(*end)
-        }
+        SemanticGeometry::Line { start, end } => rects
+            .iter()
+            .any(|rect| rect.contains_point(*start) && rect.contains_point(*end)),
         SemanticGeometry::Polyline { points, bulges, .. }
             if !points.is_empty() && bulges.iter().all(|bulge| bulge.abs() <= 1e-12) =>
         {
-            points.iter().all(|point| rect.contains_point(*point))
+            rects
+                .iter()
+                .any(|rect| points.iter().all(|point| rect.contains_point(*point)))
         }
         // CIRCLE/ELLIPSE/INSERT, bulge polylines and every other kind use the
-        // conservative bounds fully-inside path.
+        // conservative bounds fully-inside **one** window path.
         _ => match union_bounds(items) {
-            Some((min, max)) => rect.contains_aabb(min, max),
+            Some((min, max)) => rects.iter().any(|rect| rect.contains_aabb(min, max)),
             // No computable box: never fabricate an inclusion.
             None => return Enclosure::Outside,
         },
@@ -597,9 +604,11 @@ fn classify_enclosure(
     if full {
         return Enclosure::Full;
     }
-    let hits = items
-        .iter()
-        .any(|item| geometry_hits_rect(&item.geometry, &item.transform, rect));
+    let hits = rects.iter().any(|rect| {
+        items
+            .iter()
+            .any(|item| geometry_hits_rect(&item.geometry, &item.transform, *rect))
+    });
     if hits {
         Enclosure::Partial
     } else {
@@ -684,9 +693,10 @@ fn moved_geometry(geometry: &SemanticGeometry, translation: Point3) -> CadResult
 /// cannot disagree about which sweeps are unstorable.
 fn stretched_geometry(
     geometry: &SemanticGeometry,
-    rect: Rect,
+    rects: &[Rect],
     delta: Point3,
 ) -> Result<SemanticGeometry, &'static str> {
+    let inside = |point: Point3| rects.iter().any(|rect| rect.contains_point(point));
     let shift = |point: Point3| Point3 {
         x: point.x + delta.x,
         y: point.y + delta.y,
@@ -694,16 +704,12 @@ fn stretched_geometry(
     };
     match geometry {
         SemanticGeometry::Line { start, end } => {
-            let new_start = if rect.contains_point(*start) {
+            let new_start = if inside(*start) {
                 shift(*start)
             } else {
                 *start
             };
-            let new_end = if rect.contains_point(*end) {
-                shift(*end)
-            } else {
-                *end
-            };
+            let new_end = if inside(*end) { shift(*end) } else { *end };
             if new_start == *start && new_end == *end {
                 return Err("no_vertex");
             }
@@ -720,7 +726,7 @@ fn stretched_geometry(
             let new_points: Vec<Point3> = points
                 .iter()
                 .map(|point| {
-                    if rect.contains_point(*point) {
+                    if inside(*point) {
                         shift(*point)
                     } else {
                         *point
@@ -758,7 +764,7 @@ fn stretched_geometry(
             let new_points: Vec<Point3> = control_points
                 .iter()
                 .map(|point| {
-                    if rect.contains_point(*point) {
+                    if inside(*point) {
                         shift(*point)
                     } else {
                         *point
@@ -789,8 +795,8 @@ fn stretched_geometry(
             let end_angle = start + sweep;
             let start_point = arc_point(*center, *radius, axes, *start);
             let end_point = arc_point(*center, *radius, axes, end_angle);
-            let start_inside = rect.contains_point(start_point);
-            let end_inside = rect.contains_point(end_point);
+            let start_inside = inside(start_point);
+            let end_inside = inside(end_point);
             if !start_inside && !end_inside {
                 return Err("no_vertex");
             }
@@ -979,7 +985,7 @@ fn stretch_tree_refusal(error: CadError) -> CadError {
 
 /// The world tolerance shared by the STRETCH degeneracy checks (window area and
 /// displacement magnitude).
-fn stretch_tolerance() -> f64 {
+pub(super) fn stretch_tolerance() -> f64 {
     let policy = TolerancePolicy::default();
     policy
         .computation_world

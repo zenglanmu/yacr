@@ -55,7 +55,9 @@ mod draw2_batch;
 mod draw2_edit;
 mod drawing_edit;
 mod drawing_transform;
+// The 2026-11-07 extras batch write paths (SKETCH/TRACE/MOCORO/LINETYPE).
 mod explode;
+mod extras_batch;
 mod find_text;
 mod grip;
 mod hatch;
@@ -76,7 +78,9 @@ mod lengthen;
 mod match_prop;
 mod mirror_curves;
 mod mleader;
+// `MSTRETCH`: the one STRETCH planner over several crossing windows.
 mod modify_extra;
+mod mstretch;
 mod mtext_create;
 mod offset_polyline;
 mod offset_polyline_bulge;

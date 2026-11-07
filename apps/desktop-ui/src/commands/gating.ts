@@ -369,6 +369,73 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     },
   }),
 
+  // The 2026-11-07 extras batch. `-PAN` and `-LINETYPE` share their canonical
+  // grammar so a typed dash form is not refused locally.
+  PAN: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return (parts.length === 2 || parts.length === 4) && parts.every(isSignedDecimal);
+    },
+  }),
+  '-PAN': Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return (parts.length === 2 || parts.length === 4) && parts.every(isSignedDecimal);
+    },
+  }),
+  TRACE: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return parts.length === 5 && parts.every(isSignedDecimal) && isPositiveDecimal(parts[4]);
+    },
+  }),
+  MOCORO: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      const word = (parts[0] ?? '').toUpperCase();
+      if (word === 'MOVE' || word === 'COPY') {
+        return parts.length === 3 && isSignedDecimal(parts[1]) && isSignedDecimal(parts[2]);
+      }
+      if (word === 'ROTATE') {
+        return parts.length === 4
+          && isSignedDecimal(parts[1]) && isSignedDecimal(parts[2])
+          && isSignedDecimal(parts[3]);
+      }
+      return word === 'SCALE' && parts.length === 4
+        && isSignedDecimal(parts[1]) && isSignedDecimal(parts[2])
+        && isPositiveSignedDecimal(parts[3]);
+    },
+  }),
+  VIEWRES: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      if (parts.length !== 1 || !/^[0-9]+$/.test(parts[0])) return false;
+      const percent = Number(parts[0]);
+      return percent >= 1 && percent <= 1000;
+    },
+  }),
+  VSCURRENT: Object.freeze({
+    // The host names every unsupported style, so the local gate admits the
+    // shape (one word) and lets that refusal speak.
+    parse: (argument: string) => tokens(argument).length === 1,
+  }),
+  LINETYPE: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      const word = (parts[0] ?? '').toUpperCase();
+      if (word === 'LIST') return parts.length === 1;
+      return word === 'SET' && parts.length >= 2;
+    },
+  }),
+  '-LINETYPE': Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      const word = (parts[0] ?? '').toUpperCase();
+      if (word === 'LIST') return parts.length === 1;
+      return word === 'SET' && parts.length >= 2;
+    },
+  }),
+
   LAYOUT: Object.freeze({
     parse: (argument: string) => {
       const parts = tokens(argument);
@@ -647,6 +714,11 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   // answer the no-document case through their own hint row.
   'DIMSTYLE', '-DIMSTYLE', 'DIMREGEN', 'DIMDISASSOCIATE',
 
+  // The 2026-11-07 extras batch reads or writes the open drawing / its session
+  // view tokens. `REGEN3`, `-PAN` and `-LINETYPE` are alias spellings.
+  'SKETCH', 'TRACE', 'MOCORO', 'MSTRETCH', 'VIEWRES', 'VSCURRENT', 'LINETYPE',
+  '-LINETYPE', '-PAN', 'REGEN3',
+
 ]);
 
 /** One command's precondition on the **current selection**. */
@@ -868,6 +940,11 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   QDIM: Object.freeze({ count: 1, reasonKey: 'draw.kind.qdim.hint' }),
   DIMJOGLINE: Object.freeze({ count: 1, reasonKey: 'draw.kind.dimjogline.hint' }),
   DIMBREAK: Object.freeze({ count: 2, reasonKey: 'draw.kind.dimbreak.hint' }),
+  // MOCORO transforms the current selection in every mode; the host refuses an
+  // empty one by name (`mocoro.selection_required`), and this row reuses the
+  // shared "Select objects first" sentence. LINETYPE's `LIST` needs no
+  // selection, so it is deliberately absent (its `SET` half is host-refused).
+  MOCORO: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
 });
 
 /**

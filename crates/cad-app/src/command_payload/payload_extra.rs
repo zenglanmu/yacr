@@ -216,3 +216,30 @@ pub enum DimJogLineCommand {
     Add { x: f64, y: f64 },
     Remove,
 }
+
+/// The typed operation of one `MOCORO` line over the current selection.
+///
+/// This is the complete, non-interactive operation: there is no in-command
+/// option loop or gizmo. `Copy` keeps the sources and inserts translated clones;
+/// the other three transform the selection in place. All reuse the existing
+/// `COPY`/`MOVE`/`ROTATE`/`SCALE` write paths and therefore their refusal rules.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MocoroCommand {
+    /// `MOCORO MOVE <dx> <dy>`: translate in place.
+    Move { delta: Point3 },
+    /// `MOCORO COPY <dx> <dy>`: translated clones, sources retained.
+    Copy { delta: Point3 },
+    /// `MOCORO ROTATE <basex> <basey> <degrees>`: rotate in place.
+    Rotate { base: Point3, degrees: f64 },
+    /// `MOCORO SCALE <basex> <basey> <factor>`: scale in place.
+    Scale { base: Point3, factor: f64 },
+}
+
+/// The typed option of one `LINETYPE` line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinetypeCommand {
+    /// `LINETYPE LIST`: read-only report of the drawing's linetype table.
+    List,
+    /// `LINETYPE SET <name>`: write that linetype to every selected entity.
+    Set(String),
+}

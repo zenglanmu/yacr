@@ -41,10 +41,13 @@ pub mod viewer_config;
 pub mod zoom_history;
 
 mod app_audit;
+// The 2026-11-07 extras batch dispatcher and its view-only commands.
+mod app_extras;
 mod app_layout;
 mod app_reports;
 mod app_utility;
 mod app_view;
+mod app_view_extras;
 mod app_zoom;
 mod layer_history;
 mod layer_states;
@@ -116,7 +119,8 @@ pub struct Document {
 mod session_state;
 
 pub use session_state::{
-    BackendChoice, ClipboardEntry, LayoutViewportRef, MultipleRepeat, SessionState,
+    BackendChoice, ClipboardEntry, LayoutViewportRef, MultipleRepeat, SessionState, ViewExtras,
+    VisualStyleToken,
 };
 
 #[cfg(test)]
@@ -360,11 +364,11 @@ pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 pub use command_payload::{
     AngularDimensionInput, CommandPayload, DimEditCommand, DimJogLineCommand, DimOverrideCommand,
     DimStyleCommand, DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand,
-    GripStretchCommand, HatchEditOption, JustifyTextCommand, LayerStateCommand, MeasureGeomOption,
-    NamedObjectKind, OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget,
-    RadialDimensionCommand, RenameCommand, RotatedLinearDimensionCommand, TCircleCommand,
-    TCountCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode,
-    TextScaleCommand, TwoLineCommand, VPointInput, ViewCommand,
+    GripStretchCommand, HatchEditOption, JustifyTextCommand, LayerStateCommand, LinetypeCommand,
+    MeasureGeomOption, MocoroCommand, NamedObjectKind, OrdinateAxis, OrdinateDimensionCommand,
+    PeditOption, PurgeTarget, RadialDimensionCommand, RenameCommand, RotatedLinearDimensionCommand,
+    TCircleCommand, TCountCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape,
+    TextCaseMode, TextScaleCommand, TwoLineCommand, VPointInput, ViewCommand,
 };
 
 pub struct Command {

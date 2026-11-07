@@ -11,6 +11,7 @@ mod command_vocabulary_inquiry;
 mod dimension_arguments;
 
 mod draw2_arguments;
+mod extras_arguments;
 mod gradient;
 mod hatchedit;
 mod import_accounting;

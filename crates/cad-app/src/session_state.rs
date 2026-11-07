@@ -5,6 +5,7 @@ use cad_db::MeasurementRecord;
 use cad_domain::*;
 mod erase_snapshot;
 mod toggles;
+mod view_extras;
 use crate::draw_tool::{
     DrawIntent, DrawPreview, DrawTool, DrawToolKind, ToolParameter, ToolParameterStore, ToolValue,
     DEFAULT_POLYGON_SIDES,
@@ -18,6 +19,7 @@ use crate::tool_state::{DrawCapture, ToolSnapshot, ToolState};
 use crate::view_states::ViewStates;
 use crate::{AppMode, CommandId};
 pub use erase_snapshot::{EraseEntry, EraseSnapshot};
+pub use view_extras::{ViewExtras, VisualStyleToken};
 
 /// One entity captured into the in-process clipboard.
 ///
@@ -66,6 +68,8 @@ pub struct SessionState {
     pub regen_generation: u64,
     /// `VPMAX`/`VPMIN` session marker; never drawing data.
     maximized_viewport: Option<LayoutViewportRef>,
+    /// Session-only `VIEWRES` percentage and `VSCURRENT` style token.
+    pub view_extras: ViewExtras,
 
     pub tool: ToolState,
     /// Generation incremented whenever an active tool lifecycle is replaced.
@@ -247,6 +251,7 @@ impl SessionState {
             view_states: ViewStates::new(),
             regen_generation: 0,
             maximized_viewport: None,
+            view_extras: ViewExtras::default(),
 
             tool: ToolState::Idle,
             tool_generation: 0,
