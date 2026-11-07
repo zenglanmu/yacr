@@ -262,8 +262,7 @@ pub enum CommandId {
     /// The handler builds the closed `n`-vertex LWPOLYLINE and refuses a
     /// non-finite, zero-radius, non-coplanar or out-of-range input. Work-only.
     CreatePolygon,
-    /// `POLYGON CIRCUMSCRIBED`: tangent ring; see
-    /// [`crate::command_id::draw_variants`].
+    /// `POLYGON CIRCUMSCRIBED`: see [`crate::command_id::draw_variants`].
     CreatePolygonCircumscribed,
     /// Place a single POINT at the payload position. Payload is
     /// `Points([position])` in click order; the handler stores
