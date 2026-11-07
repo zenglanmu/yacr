@@ -113,8 +113,14 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
     }
   }
 
-  // The Home tab keeps its tool panels and drops the two palette-only ones.
-  assert.deepEqual(mobileRibbonSections('home').map(section => section.id), ['clipboard', 'draw', 'modify', 'navigate']);
+  // The Home tab keeps its tool panels and drops the two palette-only ones. The
+  // `properties` panel survives because it also carries the selection-based
+  // `LIST` report (a router command, not a palette action), which the compact
+  // layout can run; its `PROPERTIES` palette action is filtered out per item.
+  assert.deepEqual(
+    mobileRibbonSections('home').map(section => section.id),
+    ['clipboard', 'draw', 'modify', 'properties', 'navigate'],
+  );
   // The File tab keeps both panels: the utilities cluster still offers Audit,
   // About, Options and the direct Plugins page after its palette and chrome
   // switches are gone. Plugins is a dialog entry, so the compact layout keeps it too.
@@ -123,10 +129,22 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
     mobileRibbonSections('file').at(-1).items.map(item => item.id),
     ['audit', 'about', 'options', 'plugins'],
   );
-  // The View tab loses its `palettes` panel whole (both items were dropped).
-  assert.deepEqual(mobileRibbonSections('view').map(section => section.id), ['view3d', 'standard', 'navigate', 'display']);
+  // The View tab keeps its `palettes` section because `STATUS` (inquiry lane,
+  // 2026-11-06) is a router command: the two palette actions and the clean-screen
+  // switch are filtered out per item, leaving the status report.
+  assert.deepEqual(
+    mobileRibbonSections('view').map(section => section.id),
+    ['view3d', 'standard', 'navigate', 'display', 'palettes'],
+  );
+  assert.deepEqual(
+    mobileRibbonSections('view').at(-1).items.map(item => item.id),
+    ['STATUS'],
+  );
   // An unknown tab id resolves like `ribbonTab` (Home), never to an empty drawer.
-  assert.deepEqual(mobileRibbonSections('nope').map(section => section.id), ['clipboard', 'draw', 'modify', 'navigate']);
+  assert.deepEqual(
+    mobileRibbonSections('nope').map(section => section.id),
+    ['clipboard', 'draw', 'modify', 'properties', 'navigate'],
+  );
 });
 
 test('drawer DOM ids survive multi-word ribbon ids', () => {

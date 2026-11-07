@@ -80,7 +80,10 @@ test('the Layers arrow runs LAYER and the Properties arrow runs PROPERTIES', () 
     ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON'],
     'the Layers panel holds its palette toggle and the layer-state commands',
   );
-  assert.deepEqual(propertyItems, ['PROPERTIES']);
+  // The panel holds its palette toggle **plus** the selection-based `LIST`
+  // property report (inquiry lane, 2026-11-06): `LIST` is a router command that
+  // reads the current selection, which is the same surface this panel describes.
+  assert.deepEqual(propertyItems, ['PROPERTIES', 'LIST']);
 });
 
 test('the panels with no dialog behind them stay disabled instead of launching anything', () => {
@@ -113,8 +116,18 @@ test('every launcher target is a chrome-local command, so admission always answe
   // pair): the layers palette is the only surface that shows what they did, so
   // those buttons are not offered where it never renders.
   assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'FONTS']);
-  assert.equal(offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false)
-    .some(panel => panel.id === 'layers' || panel.id === 'properties'), false);
+  // The **layers** panel holds only palette-gated items, so it is dropped whole.
+  // The `properties` panel survives: it also carries the `LIST` router command
+  // (inquiry lane, 2026-11-06), which is not palette-gated — its `PROPERTIES`
+  // action is filtered out per item while `LIST` stays runnable.
+  const offeredHome = offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false);
+  assert.equal(offeredHome.some(panel => panel.id === 'layers'), false);
+  const offeredProperties = offeredHome.find(panel => panel.id === 'properties');
+  assert.ok(offeredProperties, 'the properties panel keeps LIST on a palette-less carrier');
+  assert.deepEqual(
+    offeredItems(offeredProperties.items, false).map(item => item.id),
+    ['LIST'],
+  );
   // The Font Manager is the same kind of desktop-only palette surface: its Annotate entry is
   // dropped with the palettes instead of opening a panel the carrier never mounts.
   const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate').panels.find(panel => panel.id === 'annotation');
