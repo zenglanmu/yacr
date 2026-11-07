@@ -120,8 +120,10 @@ fn host_applies_a_display_attribute_to_every_selected_entity() {
     assert_eq!(controller.selection().len(), 2);
 }
 
-#[test]
-fn selection_properties_report_vendor_derived_rows() {
+/// A document with one vendor-backed opaque TCH column and one ordinary line,
+/// both on layer `0` in model space, plus the settled vendor snapshot for the
+/// column. The line makes the "mixed selection" contract testable.
+fn controller_with_vendor_column_and_line() -> HostController {
     let mut controller = demo();
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
     builder
@@ -148,6 +150,24 @@ fn selection_properties_report_vendor_derived_rows() {
                 payload: Vec::new(),
             },
             draw_order: 0,
+        })
+        .unwrap();
+    builder
+        .insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(2),
+                type_key: "AcDbLine".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(2),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Line {
+                start: p(0.0, 0.0),
+                end: p(10.0, 0.0),
+            },
+            draw_order: 1,
         })
         .unwrap();
     controller
@@ -179,6 +199,12 @@ fn selection_properties_report_vendor_derived_rows() {
                 }],
             ),
         )));
+    controller
+}
+
+#[test]
+fn selection_properties_report_vendor_derived_rows() {
+    let mut controller = controller_with_vendor_column_and_line();
 
     controller
         .set_selection(vec![ref_for(&controller, 1)])
@@ -194,4 +220,68 @@ fn selection_properties_report_vendor_derived_rows() {
     assert_eq!(value("vendor_derived").as_deref(), Some("true"));
     assert_eq!(value("vendor_primitives").as_deref(), Some("1"));
     assert_eq!(value("vendor_revision").as_deref(), Some("5"));
+}
+
+#[test]
+fn selection_properties_of_a_vendor_entity_and_a_line_are_the_shared_intersection() {
+    let mut controller = controller_with_vendor_column_and_line();
+
+    controller
+        .set_selection(vec![ref_for(&controller, 1), ref_for(&controller, 2)])
+        .expect("select the vendor entity and the ordinary line together");
+    let properties = controller.selection_properties().expect("properties");
+
+    assert_eq!(properties.count, 2);
+    let row = |key: &str| {
+        properties
+            .rows
+            .iter()
+            .find(|row| row.key == key)
+            .unwrap_or_else(|| panic!("missing common row {key}: {:?}", properties.rows))
+    };
+
+    // Shared values survive as real values, not as mixed or blank rows.
+    for (key, expected) in [
+        ("layer", "0 (0)"),
+        ("space", "model"),
+        ("color", "ByLayer"),
+        ("linetype", "ByLayer"),
+        ("lineweight", "ByLayer"),
+        ("transparency", "ByLayer"),
+    ] {
+        let row = row(key);
+        assert_eq!(row.value.as_deref(), Some(expected), "row {key}");
+        assert!(!row.mixed, "row {key} must not be mixed");
+    }
+
+    // Per-entity identity/type differs, including the handle TCH carries and
+    // the line does not ("none", never a fabricated number).
+    for key in ["id", "handle", "type", "draw_order"] {
+        let row = row(key);
+        assert_eq!(row.value, None, "row {key} must be mixed");
+        assert!(row.mixed, "row {key} must be mixed");
+    }
+    assert_eq!(
+        properties.mixed_keys,
+        vec!["id", "handle", "type", "draw_order"],
+        "mixed keys are exactly the mixed rows, in row order"
+    );
+
+    // Line-only geometry is not on the vendor entity: the intersection omits
+    // it instead of inventing a blank row.
+    for key in ["start", "end", "length"] {
+        assert!(
+            properties.rows.iter().all(|row| row.key != key),
+            "line-only row {key} must not appear for the mixed selection"
+        );
+    }
+
+    // Multi-select deliberately falls back to the shared intersection instead
+    // of fabricating vendor rows (see `vendor_properties.rs`).
+    for key in ["vendor_derived", "vendor_primitives", "vendor_revision"] {
+        assert!(
+            properties.rows.iter().all(|row| row.key != key),
+            "vendor-only row {key} must not appear for a multi-selection"
+        );
+    }
 }

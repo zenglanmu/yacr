@@ -6,6 +6,7 @@ use super::super::input::{
 use super::super::*;
 use super::test_support::*;
 use crate::protocol::ProbeDevice;
+use cad_app::interaction::Modifiers;
 
 #[test]
 fn cancel_target_keeps_the_host_cancel_out_of_an_active_capture() {
@@ -75,9 +76,54 @@ fn plan_input_classifies_a_click_and_tags_it_with_the_current_revision() {
 }
 
 #[test]
+fn plan_input_shift_click_adds_to_the_selection() {
+    // Shift+click is additive, the same meaning Shift+box drag already has: a
+    // vendor-backed opaque entity and an ordinary entity must be selectable
+    // together through the one shared click path.
+    let press = primary_press([10.0, 20.0]);
+    let mut up = pointer_at(InputKind::PointerUp, 2, [10.75, 20.0], None);
+    up.shift = Some(true);
+    let (requests, next) = plan_input(Some(press), &up, 7, false).unwrap();
+    assert!(next.is_none(), "a release ends the press");
+    assert_eq!(requests.len(), 2, "release then select: {requests:?}");
+    assert!(matches!(
+        requests[0],
+        InteractionRequest::Pointer {
+            phase: PointerPhase::Up,
+            modifiers: Modifiers { shift: true, .. },
+            ..
+        }
+    ));
+    match &requests[1] {
+        InteractionRequest::SelectAt {
+            point: PointInput::CanvasLocal {
+                logical_position, ..
+            },
+            mode: SelectionMode::Add,
+        } => assert_eq!(*logical_position, [10.75, 20.0]),
+        other => panic!("expected an additive SelectAt: {other:?}"),
+    }
+
+    // Only a **held** Shift is additive: absent and explicitly-false still
+    // replace, so nothing about the plain click changed.
+    for shift in [None, Some(false)] {
+        let mut up = pointer_at(InputKind::PointerUp, 2, [10.0, 20.0], None);
+        up.shift = shift;
+        let (requests, _) = plan_input(Some(primary_press([10.0, 20.0])), &up, 7, false).unwrap();
+        match &requests[1] {
+            InteractionRequest::SelectAt {
+                mode: SelectionMode::Replace,
+                ..
+            } => {}
+            other => panic!("shift {shift:?} must still replace: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn plan_input_carries_the_shift_modifier_and_defaults_to_not_held() {
-    // The wire's optional shift is decoded into the typed pointer request; the
-    // first UI version sends Replace and Shift sends Add (ADR 0014 B.4).
+    // The wire's optional shift is decoded into the typed pointer request; a
+    // plain click sends Replace and a Shift click sends Add (ADR 0014 B.4).
     let mut down = pointer_at(InputKind::PointerDown, 1, [1.0, 2.0], None);
     down.shift = Some(true);
     let (requests, _) = plan_input(None, &down, 0, false).unwrap();

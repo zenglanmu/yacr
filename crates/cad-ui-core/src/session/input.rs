@@ -90,11 +90,12 @@ fn logical_distance(a: [f64; 2], b: [f64; 2]) -> f64 {
 
 /// The decoded modifiers of one pointer input.
 ///
-/// Only `shift` travels on the wire this round (ADR 0014 B.4): the first UI
-/// version sends `Replace` and Shift sends `Add`. An omitted `shift` (or an
-/// explicit `null`) means "not held", so every other modifier stays at its
-/// default rather than being inferred from the event stream, and a
-/// `pointer_move` never re-reports a modifier change.
+/// Only `shift` travels on the wire this round (ADR 0014 B.4): a plain click
+/// selects with `Replace` while a Shift click adds with `Add`, the same rule
+/// Shift+box drag already uses. An omitted `shift` (or an explicit `null`)
+/// means "not held", so every other modifier stays at its default rather than
+/// being inferred from the event stream, and a `pointer_move` never re-reports
+/// a modifier change.
 fn modifiers(input: &ProbeInput) -> Modifiers {
     Modifiers {
         shift: input.shift.unwrap_or(false),
@@ -174,7 +175,8 @@ pub(super) fn cancel_target(capturing: bool) -> CancelTarget {
 ///   click: it emits the ordinary release **and** a typed point at the release
 ///   position — [`InteractionRequest::CapturePoint`] while a draw/measurement
 ///   capture owns the pointer (`capturing`), otherwise
-///   [`InteractionRequest::SelectAt`] replace-selection. Never both;
+///   [`InteractionRequest::SelectAt`]; its mode is `Add` when the release
+///   carries Shift and `Replace` otherwise. Never both;
 /// * a drag or a non-primary button never captures a point and never selects;
 /// * `pointer_cancel`/`blur` end any press without capturing or selecting;
 /// * every pointer phase carries the device kind from the optional wire
@@ -262,16 +264,22 @@ pub(super) fn plan_input(
             )?];
             if click {
                 // The click is either a point capture (a tool owns the pointer)
-                // or a replace-selection, never both. Both carry the **current**
-                // metrics revision: a revision the host no longer has is its
-                // explicit refusal, never a fabricated pass.
+                // or a selection, never both. Shift+click adds to the current
+                // selection (like Shift+box drag); a plain click replaces it.
+                // Both carry the **current** metrics revision: a revision the
+                // host no longer has is its explicit refusal, never a
+                // fabricated pass.
                 let point = canvas_point(input, revision, true)?;
                 if capturing {
                     requests.push(InteractionRequest::CapturePoint(point));
                 } else {
                     requests.push(InteractionRequest::SelectAt {
                         point,
-                        mode: SelectionMode::Replace,
+                        mode: if input.shift.unwrap_or(false) {
+                            SelectionMode::Add
+                        } else {
+                            SelectionMode::Replace
+                        },
                     });
                 }
             }

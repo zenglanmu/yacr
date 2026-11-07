@@ -18,6 +18,8 @@ impl HostController {
         drawing: &DrawingDatabase,
         properties: &mut crate::SelectionProperties,
     ) {
+        // Multi-select deliberately falls back to the shared intersection: a
+        // vendor row would be a per-entity detail the other refs do not share.
         if properties.count != 1 {
             return;
         }
