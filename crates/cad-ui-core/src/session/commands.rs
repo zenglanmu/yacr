@@ -60,6 +60,16 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // The bare `AREA` selector stays the interactive point measurement below, so
     // the two are distinct names, not aliases.
     ("AREA OBJECT", CommandId::AreaObject),
+    // MASSPROP (AutoCAD 2026): read-only mass properties of the **current
+    // selection** (our declared divergence from AutoCAD's `Select objects`
+    // prompt), limited to closed planar CIRCLE / full ELLIPSE / closed POLYLINE
+    // on one common plane. Payload `None`; Viewer-legal.
+    ("MASSPROP", CommandId::MassProp),
+    // MEASUREGEOM (AutoCAD 2026): the inquiry **router**. The bare name is the
+    // named `measuregeom.needs_option` refusal; the typed `MEASUREGEOM <option>`
+    // line routes to the existing measurement tools (or the read-only RADIUS
+    // report). It is not a second measurement engine.
+    ("MEASUREGEOM", CommandId::MeasureGeom),
     ("CONFIRM", CommandId::ConfirmMeasurement),
     ("CANCELMEASURE", CommandId::CancelMeasurement),
     ("UNDO", CommandId::Undo),
@@ -360,7 +370,9 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 ///   resolved against the authoritative drawing by the session;
 /// * [`TORIENT_SELECTOR`] (`TORIENT`) / [`TCASE_SELECTOR`] (`TCASE`): one finite
 ///   angle in degrees / one case mode ([`parse_torient_argument`],
-///   [`parse_tcase_argument`]).
+///   [`parse_tcase_argument`]);
+/// * [`MEASUREGEOM_SELECTOR`] (`MEASUREGEOM`): one of the six full option words
+///   ([`super::measuregeom::parse_measuregeom_argument`]).
 pub const ARGUMENT_SELECTORS: &[&str] = &[
     ARGUMENT_SELECTOR,
     SNAPUNIT_SELECTOR,
@@ -369,6 +381,7 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     SPACE_SELECTOR,
     TORIENT_SELECTOR,
     TCASE_SELECTOR,
+    MEASUREGEOM_SELECTOR,
 ];
 
 /// AutoCAD's `ZOOM n` / `ZOOM ALL`: the first argument-taking selector.
@@ -401,6 +414,15 @@ pub const PDMODE_SELECTOR: &str = "PDMODE";
 /// percentage of the viewport height. A document write like
 /// [`PDMODE_SELECTOR`], not session state.
 pub const PDSIZE_SELECTOR: &str = "PDSIZE";
+
+/// AutoCAD's `MEASUREGEOM <option>`: the inquiry router's typed argument form.
+///
+/// This is an **argument form of the canonical `MEASUREGEOM` selector**, not a
+/// new command: `DISTANCE`/`ANGLE`/`AREA`/`POLYLINE` start the existing
+/// measurement tools, `RADIUS` dispatches the read-only report and `VOLUME` is
+/// an explicit not-implemented refusal. Full contract:
+/// [`cad_app::command_id::measuregeom`].
+pub const MEASUREGEOM_SELECTOR: &str = "MEASUREGEOM";
 
 /// The `SPACE <argument>` selector: switch the active drawing space.
 ///

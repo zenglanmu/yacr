@@ -32,6 +32,7 @@ mod import_progress;
 mod input;
 mod layers;
 mod layout_tabs;
+mod measuregeom;
 mod performance;
 pub mod plugins;
 mod point_style;

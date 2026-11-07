@@ -194,6 +194,7 @@ mod layers_isolate;
 mod layers_off;
 mod layers_previous;
 mod locked_layers;
+mod measure_extra;
 mod model_space;
 mod plan_view;
 mod point_display_style;

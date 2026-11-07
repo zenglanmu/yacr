@@ -47,6 +47,10 @@ impl Application {
             CommandId::List => self.list_objects(session, &command),
             CommandId::Status => self.drawing_status(session, &command),
             CommandId::Fs => self.selection_touching(session, &command),
+            // MASSPROP and MEASUREGEOM RADIUS are report-only inquiries: no
+            // transaction, no history, no revision bump (Viewer-legal).
+            CommandId::MassProp => self.mass_prop(session, &command),
+            CommandId::MeasureGeom => self.measure_geom(session, &command),
             CommandId::FitDrawing => self.fit_drawing(session, &command),
             CommandId::RestoreLayers => {
                 // Drop temporary overrides; the drawing's own layer flags remain

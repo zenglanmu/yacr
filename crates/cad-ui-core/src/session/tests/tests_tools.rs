@@ -921,3 +921,63 @@ fn cad_tool_params_project_fillet_and_chamfer_values_only_for_their_tools() {
     assert_eq!(tool.params.chamfer_distance_b, None);
     assert_eq!(tool.params.sides, None);
 }
+
+#[test]
+fn measuregeom_options_route_to_the_same_tool_as_their_base_selector() {
+    // `MEASUREGEOM <option>` is a **router**: the four tool options must start
+    // exactly the tool their base selector starts. Pinning the `tool.key` makes a
+    // second measurement engine (or an option silently collapsing onto Distance)
+    // a test failure instead of a UI surprise.
+    for (option, base, key) in [
+        ("DISTANCE", "DIST", "measure.distance"),
+        ("ANGLE", "MEASUREANGLE", "measure.angle"),
+        ("AREA", "AREA", "measure.area"),
+        ("POLYLINE", "MEASUREPOLYLINE", "measure.polyline"),
+    ] {
+        let routed = fresh_session();
+        routed
+            .command(&format!("MEASUREGEOM {option}"))
+            .unwrap_or_else(|error| panic!("MEASUREGEOM {option} refused: {error}"));
+        let routed_tool = routed
+            .snapshot(None, None, 0)
+            .tool
+            .expect("the router starts a tool");
+        assert_eq!(routed_tool.key, key, "MEASUREGEOM {option}");
+
+        let base_session = fresh_session();
+        base_session
+            .command(base)
+            .unwrap_or_else(|error| panic!("{base} refused: {error}"));
+        let base_tool = base_session
+            .snapshot(None, None, 0)
+            .tool
+            .expect("the base selector starts a tool");
+        assert_eq!(
+            base_tool.key, routed_tool.key,
+            "{option} must route to {base}"
+        );
+        assert_eq!(base_tool.points, routed_tool.points);
+        assert_eq!(base_tool.ready, routed_tool.ready);
+    }
+    // Both selectors are advertised and the option syntax is admitted locally.
+    assert!(admissible_names().contains(&"MEASUREGEOM"));
+    assert_eq!(
+        typed_command_argument("MEASUREGEOM DISTANCE"),
+        Some(("MEASUREGEOM", "DISTANCE"))
+    );
+    assert_eq!(
+        typed_command_argument(" measuregeom\tradius "),
+        Some(("MEASUREGEOM", "radius"))
+    );
+    // An unknown option is refused by name, not mapped onto Distance.
+    let session = fresh_session();
+    let error = session.command("MEASUREGEOM RAD").unwrap_err();
+    assert!(error.contains("MEASUREGEOM RAD"), "{error}");
+    assert!(error.contains("DISTANCE"), "{error}");
+    assert_eq!(session.snapshot(None, None, 0).tool, None);
+    // A bare MEASUREGEOM reaches the command layer's named needs-option refusal.
+    let bare = fresh_session();
+    let error = bare.command("MEASUREGEOM").unwrap_err();
+    assert!(error.contains("measuregeom.needs_option"), "{error}");
+    assert_eq!(bare.snapshot(None, None, 0).tool, None);
+}

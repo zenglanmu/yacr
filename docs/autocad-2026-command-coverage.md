@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **64** |
-| **已实现合计（完整 + 部分）** | **114** |
-| 未实现 | **867** |
+| 部分实现（有写明的界） | **66** |
+| **已实现合计（完整 + 部分）** | **116** |
+| 未实现 | **865** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -102,7 +102,9 @@
 | `LENGTHEN` | 部分实现 | 仅 LINE/ARC，只改末端 |
 | `LINE` | 已实现 | — |
 | `LIST` | 部分实现 | 读取**当前选择**而非 AutoCAD 的交互式 “Select objects”；逐对象报告 id/handle/type/layer/space/draw order、标准颜色/线型/线宽/透明度与几何摘要。不建模厚度/拉伸方向；不可寻址引用逐条报告后继续 |
+| `MASSPROP` | 部分实现 | 只读；仅选定闭合共面圆/完整椭圆/闭合多段线；面积/周长/包围盒/形心。椭圆周长近似；无惯性矩/主轴/体积/密度/`.mpr` |
 | `MATCHPROP` | 部分实现 | 只转移 layer/color/linetype/lineweight/transparency |
+| `MEASUREGEOM` | 部分实现 | 选项路由：DISTANCE/ANGLE/AREA/POLYLINE 复用既有工具，RADIUS 只读报告；VOLUME 显式未实现（无 3D 体积模型） |
 | `MIRROR` | 部分实现 | 保留原件；拒绝 Text/MultiLeader |
 | `MLEADER` | 部分实现 | 单簇/2 顶点/仅直线；无 Options |
 | `MODEL` | 已实现 | payload-free 选择子，复用 SPACE MODEL 的校验 + 自动取景；Model 标签页走同一命令 |
@@ -680,7 +682,7 @@
 | 516 | `MARKUPCLOSE` | 未实现 | Closes the Markup Set Manager. | — |
 | 517 | `-MARKUPIMPORT` | 未实现 | At the command prompt, imports a marked up drawing (image/pdf) in-place into your DWG as a new trace. | — |
 | 518 | `MARKUPIMPORT` | 未实现 | Imports a marked up drawing (image/pdf) in-place into your DWG as a new trace. | — |
-| 519 | `MASSPROP` | 未实现 | Calculates the mass properties of selected 2D regions or 3D solids. | — |
+| 519 | `MASSPROP` | 部分实现 | Calculates the mass properties of selected 2D regions or 3D solids. | **v1（2026-11-07）只读**：当前选择中的闭合共面 `CIRCLE` / 完整 `ELLIPSE` / 闭合 `POLYLINE`（含任意 bulge，同一平面）；逐对象 + 汇总报告**面积/周长/精确包围盒/形心**。椭圆周长是 Ramanujan 第二近似（`massprop.approx_ellipse_perimeter`），不是精确椭圆积分。**未实现**：惯性矩/惯性积、回转半径、主惯性矩/主轴、质量/体积/3D 实体、密度、`Add`/`Subtract` 组合、写 `.mpr` 文件；非共面/开放折线/圆弧/样条/文字/块参照/填充/标注等按名拒绝。 |
 | 520 | `MATBROWSERCLOSE` | 未实现 | Closes the Materials Browser. | — |
 | 521 | `MATBROWSEROPEN` | 未实现 | Opens the Materials Browser. | — |
 | 522 | `MATCHCELL` | 未实现 | Applies the properties of a selected table cell to other table cells. | — |
@@ -693,7 +695,7 @@
 | 529 | `MATERIALS` | 未实现 | Opens the Materials Browser. | — |
 | 530 | `MATERIALSCLOSE` | 未实现 | Closes the Materials Browser. | — |
 | 531 | `MEASURE` | 未实现 | Creates point objects or blocks at measured intervals along the length or perimeter of an object. | 本项目 MEASURE 是测量入口（默认 DIST），不是沿对象放置点/块 |
-| 532 | `MEASUREGEOM` | 未实现 | Measures the distance, radius, angle, area, and volume of selected objects, a sequence of points, or dynamically. | — |
+| 532 | `MEASUREGEOM` | 部分实现 | Measures the distance, radius, angle, area, and volume of selected objects, a sequence of points, or dynamically. | **v1（2026-11-07）选项路由**：`MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 复用既有 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE` 工具（同一交互请求，无第二测量引擎）；`RADIUS` 只读报告所选单个 `ARC`/`CIRCLE` 的圆心/半径/直径/圆周长（圆弧另报弧长）。裸名 `measuregeom.needs_option`，未知选项按名拒绝。**未实现**：`VOLUME`（本构建无 3D 实体/体积模型，显式 `measuregeom.volume_unsupported`，不编造数值）；AutoCAD 的其它选项/动态测量未接线。 |
 | 533 | `MENU` | 未实现 | Obsolete. Loads a customization file. | — |
 | 534 | `MESH` | 未实现 | Creates a 3D mesh primitive object such as a box, cone, cylinder, pyramid, sphere, wedge, or torus. | — |
 | 535 | `MESHCAP` | 未实现 | Creates a mesh face that connects open edges. | — |
