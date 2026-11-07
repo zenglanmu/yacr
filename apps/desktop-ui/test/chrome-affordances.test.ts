@@ -80,7 +80,7 @@ test('the Layers arrow runs LAYER and the Properties arrow runs PROPERTIES', () 
     ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER'],
     'the Layers panel holds its palette toggle and the layer-state commands',
   );
-  assert.deepEqual(propertyItems, ['PROPERTIES']);
+  assert.deepEqual(propertyItems, ['PROPERTIES', 'LIST']);
 });
 
 test('the panels with no dialog behind them stay disabled instead of launching anything', () => {
@@ -113,8 +113,14 @@ test('every launcher target is a chrome-local command, so admission always answe
   // pair): the layers palette is the only surface that shows what they did, so
   // those buttons are not offered where it never renders.
   assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'FONTS']);
-  assert.equal(offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false)
-    .some(panel => panel.id === 'layers' || panel.id === 'properties'), false);
+  // The Layers panel is all palette state, so it drops whole. The Properties
+  // panel now also holds the router command LIST, so it survives with that one
+  // button while the PROPERTIES palette toggle is filtered out.
+  const offered = offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false);
+  assert.equal(offered.some(panel => panel.id === 'layers'), false);
+  const properties = offered.find(panel => panel.id === 'properties');
+  assert.ok(properties, 'the Properties panel keeps its non-palette command');
+  assert.deepEqual(offeredItems(properties.items, false).map(item => item.id), ['LIST']);
   // The Font Manager is the same kind of desktop-only palette surface: its Annotate entry is
   // dropped with the palettes instead of opening a panel the carrier never mounts.
   const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate').panels.find(panel => panel.id === 'annotation');

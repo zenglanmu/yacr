@@ -102,12 +102,12 @@ test('an alias stays a suggestion: admission still routes through the host vocab
 
 test('suggestions merge alias rows between canonical prefix and mid-string matches', () => {
   loadAliases();
-  // The default 8-slot window is exactly filled by the canonical names that start
-  // with `l` (the layer run, LINE and, since 2026-11-01, LENGTHEN), so this
-  // ordering test asks for a list long enough to reach the shorthand as well. The
-  // limit itself — a full canonical list hides the alias rows — is pinned by the
+  // The canonical names that start with `l` now fill 16 slots (the layer run,
+  // LINE, LENGTHEN, LIST and the two palette selectors), so this ordering test
+  // asks for a window long enough to reach the shorthand as well. The limit
+  // itself — a full canonical list hides the alias rows — is pinned by the
   // isolation test below, not by widening this one silently.
-  const rows = filterCommandSuggestions('l', { limit: 16 });
+  const rows = filterCommandSuggestions('l', { limit: 24 });
   const aliasRow = rows.find(row => row.id === 'L');
   assert.ok(aliasRow, 'L must be suggested once the alias table is loaded');
   assert.equal(aliasRow.target, 'LINE', 'the alias entry carries its canonical target');

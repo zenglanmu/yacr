@@ -84,8 +84,14 @@ test('SELECTSIMILAR is a modify-group catalogue row appended after the shipped r
 test('both modify panels carry SELECTSIMILAR as one small selection-gated button', () => {
   for (const tabId of ['home', 'draw']) {
     const items = modifyPanel(tabId).items;
-    const item = items.at(-1);
-    assert.equal(item.id, ID, `${tabId}: SELECTSIMILAR closes the modify panel`);
+    const item = items.find(candidate => candidate.id === ID);
+    assert.ok(item, `${tabId}: SELECTSIMILAR is present`);
+    // The 2026-11-07 modify commands are appended after the shipped tail.
+    assert.deepEqual(
+      items.slice(items.findIndex(candidate => candidate.id === ID) + 1).map(candidate => candidate.id),
+      ['REVERSE', 'OOPS', 'OVERKILL', 'BREAKATPOINT'],
+      `${tabId}: only the documented additions follow SELECTSIMILAR`,
+    );
     assert.equal(item.command, ID, 'the dispatch token is the router name');
     assert.equal(item.labelKey, LABEL_KEY);
     assert.equal(item.icon, 'selectAll');
