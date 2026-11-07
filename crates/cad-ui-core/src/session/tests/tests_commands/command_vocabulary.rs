@@ -187,6 +187,15 @@ command_selector_contract! {
     HideObjects => "HIDEOBJECTS",
     IsolateObjects => "ISOLATEOBJECTS",
     UnisolateObjects => "UNISOLATEOBJECTS",
+    Redraw => "REDRAW",
+    RedrawAll => "REDRAWALL",
+    Regen => "REGEN",
+    RegenAll => "REGENALL",
+    View => "VIEW",
+    ViewGo => "VIEWGO",
+    ViewBack => "VIEWBACK",
+    ViewForward => "VIEWFORWARD",
+    VPoint => "VPOINT",
 }
 
 #[test]
@@ -201,7 +210,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 169,
+        EXPECTED_COMMAND_COUNT, 178,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

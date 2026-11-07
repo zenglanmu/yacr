@@ -162,6 +162,12 @@ export const HOST_NAMES = [
   // 2026-11-07 selection/filter/find/visibility batch (canonical selectors).
   'QSELECT', 'FILTER', 'GETSEL', 'SSX', 'SELECTCOUNT', '-FIND', 'FIND',
   'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS',
+  // The 2026-11-07 view batch: canonical selectors of their own. REDRAW/REGEN and
+  // their ALL forms are payload-free; VIEW/VIEWGO/VPOINT take typed arguments, so
+  // only the base names are mirrored here (the grammars live in
+  // `ARGUMENT_COMMANDS`). VIEWBACK/VIEWFORWARD walk the view stack.
+  'REDRAW', 'REDRAWALL', 'REGEN', 'REGENALL', 'VIEW', 'VIEWGO', 'VIEWBACK', 'VIEWFORWARD',
+  'VPOINT',
   // GRADIENT / HATCHEDIT (AutoCAD 2026) are the two hatch-family selectors added
   // by this batch. GRADIENT is a payload-free router command over the current
   // selection; HATCHEDIT is one canonical selector whose option is typed

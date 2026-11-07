@@ -377,6 +377,20 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("LIST", CommandId::List),
     ("STATUS", CommandId::Status),
     ("FS", CommandId::Fs),
+    // The 2026-11-07 view batch. REDRAW/REGEN (and their ALL forms) are
+    // payload-free refresh/regeneration stamps; VIEW is the named-view store
+    // (`-VIEW` is an alias), VIEWGO restores one name, VIEWBACK/VIEWFORWARD walk
+    // the per-viewport view stack, and VPOINT takes a direction or a standard
+    // word. All are session view state only and Viewer-legal.
+    ("REDRAW", CommandId::Redraw),
+    ("REDRAWALL", CommandId::RedrawAll),
+    ("REGEN", CommandId::Regen),
+    ("REGENALL", CommandId::RegenAll),
+    ("VIEW", CommandId::View),
+    ("VIEWGO", CommandId::ViewGo),
+    ("VIEWBACK", CommandId::ViewBack),
+    ("VIEWFORWARD", CommandId::ViewForward),
+    ("VPOINT", CommandId::VPoint),
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**
@@ -494,6 +508,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     GETSEL_SELECTOR,
     FIND_SELECTOR,
     FIND_REPORT_SELECTOR,
+    VIEW_SELECTOR,
+    VIEWGO_SELECTOR,
+    VPOINT_SELECTOR,
 ];
 
 /// Split a typed line into an argument-taking selector and its argument.
@@ -751,6 +768,10 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("TJUST", "JUSTIFYTEXT"),
     ("MTEDIT", "TEXTEDIT"),
     ("-MTEXT", "MTEXT"),
+    // `-VIEW` is AutoCAD's command-line form of `VIEW`. This build has no view
+    // dialog, so the dialog-free typed form is the whole behaviour and the alias
+    // maps onto the same `CommandId`/path — never a second gallery.
+    ("-VIEW", "VIEW"),
 ];
 
 /// The alias table as `(alias, canonical selector)` pairs, resolved through

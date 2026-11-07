@@ -15,6 +15,7 @@ use crate::layers::LayerOverrideSet;
 use crate::measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 use crate::selection::SelectionSet;
 use crate::tool_state::{DrawCapture, ToolSnapshot, ToolState};
+use crate::view_states::ViewStates;
 use crate::{AppMode, CommandId};
 pub use erase_snapshot::{EraseEntry, EraseSnapshot};
 
@@ -48,6 +49,10 @@ pub struct SessionState {
     pub layer_history: LayerOverrideHistory,
     /// Named layer states (`LAYERSTATE`) plus the `LAYERPMODE` gate.
     pub layer_states: LayerStates,
+    /// Session-only named views (`VIEW` / `VIEWGO`), at most 32.
+    pub view_states: ViewStates,
+    /// Document-wide `REGEN` stamp. REDRAW uses `generation` instead.
+    pub regen_generation: u64,
     pub tool: ToolState,
     /// Generation incremented whenever an active tool lifecycle is replaced.
     pub tool_generation: u64,
@@ -204,6 +209,8 @@ impl SessionState {
             hidden_entities: SelectionSet::new(),
             layer_history: LayerOverrideHistory::new(),
             layer_states: LayerStates::new(),
+            view_states: ViewStates::new(),
+            regen_generation: 0,
             tool: ToolState::Idle,
             tool_generation: 0,
             generation: 0,

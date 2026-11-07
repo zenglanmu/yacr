@@ -421,6 +421,7 @@ impl Application {
     /// `cad-history` entry.
     pub(crate) fn zoom_previous(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let viewport = self.viewport_mut(command)?;
+        let current = crate::zoom_history::ViewSnapshot::capture(viewport);
         let Some(snapshot) = viewport.zoom_history.pop() else {
             return Ok(CommandOutcome {
                 objects: Vec::new(),
@@ -436,6 +437,10 @@ impl Application {
                 point_report: None,
             });
         };
+        // A back step is redo-able: `VIEWFORWARD` returns the view we are
+        // leaving. This is the one place a forward step is recorded besides
+        // `VIEWBACK` itself.
+        viewport.zoom_history.push_forward(current);
         snapshot.restore(viewport);
         Ok(CommandOutcome {
             objects: Vec::new(),

@@ -83,6 +83,12 @@ impl CadSession {
                 self.select_filter_argument(selector, argument, text)
             }
             FIND_SELECTOR | FIND_REPORT_SELECTOR => self.find_argument(selector, argument, text),
+            // The 2026-11-07 view batch: named views and the camera direction.
+            // `-VIEW` normalises to `VIEW` before this dispatch, so it lands on
+            // the same arm.
+            super::commands::VIEW_SELECTOR => self.view_state_argument(argument, text),
+            super::commands::VIEWGO_SELECTOR => self.view_go_argument(argument, text),
+            super::commands::VPOINT_SELECTOR => self.vpoint_argument(argument, text),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

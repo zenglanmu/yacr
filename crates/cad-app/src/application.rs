@@ -262,6 +262,18 @@ impl Application {
                 }
                 self.plan_view(session, &command)
             }
+            // The 2026-11-07 view/space batch: every arm is session view state
+            // only (no database write, revision bump or undo entry), so Viewer
+            // mode admits all of them. `VPOINT` moves the camera, never the model.
+            CommandId::Redraw => self.redraw(session, &command, false),
+            CommandId::RedrawAll => self.redraw(session, &command, true),
+            CommandId::Regen => self.regen(session, &command, false),
+            CommandId::RegenAll => self.regen(session, &command, true),
+            CommandId::View => self.view_command(session, &command),
+            CommandId::ViewGo => self.view_go(session, &command),
+            CommandId::ViewBack => self.view_back(session, &command),
+            CommandId::ViewForward => self.view_forward(session, &command),
+            CommandId::VPoint => self.vpoint(session, &command),
             CommandId::ResetView => {
                 let viewport = self.viewport_mut(&command)?;
                 let camera = Camera::top_view_2d();
@@ -690,7 +702,7 @@ impl Application {
     ///
     /// This is the same bounds source [`Self::fit_viewport`] frames in 2D; the
     /// 3D fit uses it for the eye distance and target, `z` included.
-    fn document_bounds(&self, document: DocumentId) -> Option<(Point3, Point3)> {
+    pub(crate) fn document_bounds(&self, document: DocumentId) -> Option<(Point3, Point3)> {
         self.workspace
             .documents
             .get(&document)

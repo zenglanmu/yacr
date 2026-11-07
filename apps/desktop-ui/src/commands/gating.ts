@@ -356,6 +356,47 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   '-FIND': Object.freeze({
     parse: (argument: string) => isFindArgument(argument) && !argument.includes('=>'),
   }),
+  /**
+   * `VIEW SAVE <name>` / `RESTORE <name>` / `LIST` / `DELETE <name>` (2026-11-07)
+   * is the session-only named-view store. `-VIEW` is an alias of the same host
+   * selector, so it shares this grammar. The bare name is admitted by the base
+   * selector and refused by the host with its own missing-option sentence.
+   */
+  VIEW: Object.freeze({
+    parse: (argument: string) => {
+      const parts = argument.trim().split(/\s+/).filter(part => part.length > 0);
+      const [word, ...rest] = parts;
+      const keyword = (word ?? '').toUpperCase();
+      if (keyword === 'LIST') return rest.length === 0;
+      if (keyword === 'SAVE' || keyword === 'RESTORE' || keyword === 'DELETE') {
+        return rest.length > 0;
+      }
+      return false;
+    },
+  }),
+  /**
+   * `VIEWGO <name>` (2026-11-07) restores one saved name; the name is the whole
+   * trimmed remainder and may contain spaces.
+   */
+  VIEWGO: Object.freeze({
+    parse: (argument: string) => argument.trim().length > 0,
+  }),
+  /**
+   * `VPOINT <x> <y> <z>` or one of the six standard-view words (2026-11-07).
+   * Only the full words are admitted; the vector must be three signed plain
+   * decimals. A zero vector is admitted locally and refused by the host by name
+   * (`vpoint.invalid_vector`), so the button/line reports the real reason.
+   */
+  VPOINT: Object.freeze({
+    parse: (argument: string) => {
+      const parts = argument.trim().split(/\s+/).filter(part => part.length > 0);
+      if (parts.length === 1) {
+        return ['TOP', 'BOTTOM', 'FRONT', 'BACK', 'LEFT', 'RIGHT']
+          .includes(parts[0].toUpperCase());
+      }
+      return parts.length === 3 && parts.every(part => isSignedDecimal(part));
+    },
+  }),
 });
 
 
@@ -443,6 +484,11 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   // catalog's own "no drawing is open" sentence.
   'QSELECT', 'FILTER', 'GETSEL', 'SSX', 'SELECTCOUNT', '-FIND', 'FIND',
   'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS',
+  // The 2026-11-07 view batch refreshes, regenerates or restores a view of the
+  // open drawing, so the start page disables all of it with the catalog's own
+  // "no drawing is open" sentence.
+  'REDRAW', 'REDRAWALL', 'REGEN', 'REGENALL', 'VIEW', 'VIEWGO', 'VIEWBACK', 'VIEWFORWARD',
+  'VPOINT',
 ]);
 
 /** One command's precondition on the **current selection**. */

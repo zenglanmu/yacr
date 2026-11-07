@@ -985,4 +985,10 @@ pub enum CommandPayload {
         needle: String,
         replacement: Option<String>,
     },
+    /// The option of a typed `VIEW` / `-VIEW` line (session-only named views).
+    View(ViewCommand),
+    /// The name of a typed `VIEWGO <name>` line.
+    ViewGo(String),
+    /// The camera direction of a typed `VPOINT` line.
+    VPoint(VPointInput),
 }

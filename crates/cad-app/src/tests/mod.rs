@@ -203,6 +203,7 @@ mod revision_cloud;
 mod select_filter;
 mod select_similar;
 mod text_commands;
+mod view_batch;
 mod view_camera;
 mod zoom_previous;
 mod zoom_window;

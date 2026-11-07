@@ -54,3 +54,33 @@ pub enum LayerStateCommand {
     /// Drop one saved snapshot.
     Delete(String),
 }
+
+/// The option of a typed `VIEW <option>` / `-VIEW <option>` line:
+/// `SAVE <name>`, `RESTORE <name>`, `LIST` or `DELETE <name>`.
+///
+/// The store is session only (bounded to 32 case-insensitively unique names);
+/// nothing here is written to the DWG. The grammar lives in `cad-ui-core`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewCommand {
+    /// Capture the current camera, 2D/3D mode, work plane and active space.
+    Save(String),
+    /// Apply a saved view (the same path as `VIEWGO`).
+    Restore(String),
+    /// Report the saved names; writes nothing.
+    List,
+    /// Drop one saved view.
+    Delete(String),
+}
+
+/// The camera target of a typed `VPOINT` line.
+///
+/// The six plain words reuse the existing standard-view path (`TOP` is the 2D
+/// plan); the vector form names a viewing direction in world coordinates and
+/// always produces a 3D observation. A zero or non-finite vector is refused.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VPointInput {
+    /// `TOP|BOTTOM|FRONT|BACK|LEFT|RIGHT`.
+    Standard(crate::StandardView),
+    /// `<x> <y> <z>`, the eye direction from the target.
+    Vector(Point3),
+}

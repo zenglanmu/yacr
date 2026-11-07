@@ -21,6 +21,7 @@ mod space_argument;
 mod standard_view;
 mod status_projection;
 mod text_batch;
+mod view_arguments;
 mod xref_status;
 mod zoom_argument;
 mod zoom_window_previous;
