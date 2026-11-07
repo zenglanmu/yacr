@@ -288,6 +288,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // the layer-property reset it is, not as a general Modify button.
   { id: 'LAYCUR', labelKey: 'draw.kind.laycur', icon: 'layers', group: 'annotate' },
   { id: 'LAYMCUR', labelKey: 'draw.kind.laymcur', icon: 'layers', group: 'annotate' },
+  { id: 'LAYFRZ', labelKey: 'draw.kind.layfrz', icon: 'eyeOff', group: 'annotate' },
   // FONTS opens the read-only Font Manager (`cad_fonts`). It is a chrome-local
   // selector like LAYER/PROPERTIES, so the command line and the ribbon open the
   // panel without the router ever seeing the word. It closes the annotation run

@@ -222,6 +222,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("SETLAYERPROPERTY", CommandId::SetLayerProperty),
     ("LAYCUR", CommandId::LayCur),
     ("LAYMCUR", CommandId::LayMCur),
+    ("LAYFRZ", CommandId::LayFrz),
     // A payload-requiring edit: the selector normalizes, and the application
     // refuses a bare invocation explicitly (the panel/IPC path supplies the
     // `EntityProperty { key, value }` payload).

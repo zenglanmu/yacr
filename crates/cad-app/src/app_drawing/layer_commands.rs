@@ -65,8 +65,22 @@
 //! `layer.current_locked` / `layer.current_frozen` / `layer.current_off` codes
 //! before the session is touched. Session-only: no database write, no revision
 //! bump, no history. Success is `laymcur.applied` with the layer name. Work-only.
+//!
+//! ## `LAYFRZ`
+//!
+//! "Freezes the layer of selected objects." Applies to **every distinct layer**
+//! in the selection. The current layer can never be frozen, so when the
+//! selection contains it the whole command is refused (`layfrz.current_layer`)
+//! rather than partially applied. v1 handles **Entity** selection only: there
+//! are no Settings / Viewports / Block options, and it freezes the layer in
+//! **all viewports** (this build has no per-viewport freeze model); the
+//! `frozen_in_new_viewport` flag and every other attribute are left untouched.
+//! One `set_layer_attributes` call per changed layer means one revision bump per
+//! layer; the write is **not undoable**. Success is `layfrz.applied` with the
+//! changed-layer count; an all-frozen selection is `layfrz.unchanged`. Work-only.
 
 use super::*;
+use cad_db::LayerAttributes;
 
 /// A named, non-capability refusal (`<command>.<code>: <detail>`).
 fn invalid(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
@@ -161,6 +175,28 @@ fn selection_snapshot(
     Ok(references)
 }
 
+/// Preflight the selection and collect each distinct entity layer (first-seen
+/// order, so the diagnostic and the write order follow the user's pick order).
+fn selected_distinct_layers(
+    drawing: &DrawingDatabase,
+    command: &Command,
+    references: &[SelectionRef],
+    prefix: &str,
+) -> CadResult<Vec<LayerId>> {
+    let mut layers = Vec::new();
+    for reference in references {
+        ensure_model_space_addressable(drawing, command, reference, prefix)?;
+        let layer = drawing
+            .entity(reference.entity)
+            .expect("preflight verified the entity resolves")
+            .layer;
+        if !layers.contains(&layer) {
+            layers.push(layer);
+        }
+    }
+    Ok(layers)
+}
+
 impl Application {
     /// Dispatch a layer **selection** command.
     pub(crate) fn layer_selection_command(
@@ -171,10 +207,161 @@ impl Application {
         match command.id {
             CommandId::LayCur => self.laycur(session, command),
             CommandId::LayMCur => self.laymcur(session, command),
+            CommandId::LayFrz => self.layfrz(session, command),
             _ => Err(CadError::InvalidInput(
                 "not a layer selection command".to_string(),
             )),
         }
+    }
+
+    /// Publish an already-validated layer-table candidate. **No history**: layer
+    /// edits are not undoable (cad-history has no layer patch kind).
+    fn publish_layer_table(
+        &mut self,
+        document_id: DocumentId,
+        candidate: DrawingDatabase,
+    ) -> CadResult<()> {
+        self.workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::Invariant("document disappeared while publishing".into()))?
+            .drawing = Arc::new(candidate);
+        Ok(())
+    }
+
+    /// Apply one boolean layer-attribute change to every layer in `layers`.
+    ///
+    /// Each changed row is one [`DrawingDatabase::set_layer_attributes`] call, so
+    /// a multi-layer command raises the revision once per changed layer (a
+    /// documented limitation). `mutate` returns whether the row actually changed;
+    /// unchanged rows are not staged, so the revision does not move for them.
+    /// Nothing is published when no row changes. A successful write reports one
+    /// combined revision span and the changed-row count.
+    fn write_layer_flags(
+        &mut self,
+        document_id: DocumentId,
+        layers: &[LayerId],
+        reason: &str,
+        mutate: impl Fn(&mut LayerAttributes) -> bool,
+    ) -> CadResult<(Option<Arc<ChangeSet>>, usize)> {
+        let drawing = self
+            .workspace
+            .documents
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing
+            .clone();
+        let mut candidate = drawing.as_ref().clone();
+        let before = candidate.revision();
+        let transaction = next_transaction_id();
+        let mut changed = 0;
+        for id in layers {
+            let mut attributes = candidate.layer_attributes(*id);
+            if mutate(&mut attributes) {
+                candidate.set_layer_attributes(*id, attributes, transaction, reason)?;
+                changed += 1;
+            }
+        }
+        if changed == 0 {
+            return Ok((None, 0));
+        }
+        let changeset = ChangeSet {
+            database: candidate.id(),
+            before,
+            after: candidate.revision(),
+            transaction,
+            reason: reason.to_string(),
+            changes: Vec::new(),
+        };
+        self.publish_layer_table(document_id, candidate)?;
+        Ok((Some(Arc::new(changeset)), changed))
+    }
+
+    /// `LAYFRZ`: freeze every distinct layer in the selection except the current
+    /// one. Freezing the current layer is never a partial operation: the whole
+    /// command is refused (`layfrz.current_layer`).
+    fn layfrz(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        ensure_no_payload(command, "layfrz", "LAYFRZ")?;
+        let references = selection_snapshot(session, "layfrz", "LAYFRZ")?;
+        let document_id = command.document;
+        let drawing = self
+            .workspace
+            .documents
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing
+            .clone();
+        let layers = selected_distinct_layers(drawing.as_ref(), command, &references, "layfrz")?;
+
+        // AutoCAD cannot freeze the current layer. This build refuses the whole
+        // command rather than freezing the other layers and skipping it.
+        if layers.contains(&session.active_layer) {
+            let name = drawing
+                .layer(session.active_layer)
+                .map(|row| row.name.as_str())
+                .unwrap_or("<unknown>");
+            return Err(invalid(
+                "layfrz",
+                "current_layer",
+                format!(
+                    "layer '{name}' is the current layer and cannot be frozen; switch the \
+                     current layer first"
+                ),
+            ));
+        }
+        for layer in &layers {
+            if drawing.layer(*layer).is_none() {
+                return Err(invalid(
+                    "layfrz",
+                    "unknown_layer",
+                    format!("layer {} does not exist in this drawing", layer.0),
+                ));
+            }
+        }
+
+        let (changes, count) =
+            self.write_layer_flags(document_id, &layers, "layfrz", |attributes| {
+                if attributes.frozen {
+                    false
+                } else {
+                    // v1 freezes the layer in every viewport; the
+                    // `frozen_in_new_viewport` flag (the per-viewport model this
+                    // build does not have) is deliberately left untouched.
+                    attributes.frozen = true;
+                    true
+                }
+            })?;
+        if count == 0 {
+            return Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: "layfrz.unchanged".into(),
+                    message: "LAYFRZ: every selected layer is already frozen".into(),
+                }],
+                measurement: None,
+                point_report: None,
+            });
+        }
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "layfrz.applied".into(),
+                message: format!(
+                    "LAYFRZ: froze {count} layer(s) in all viewports (layer-table edit; not \
+                     undoable; Settings/Viewports/Block options are not implemented)"
+                ),
+            }],
+            measurement: None,
+            point_report: None,
+        })
     }
 
     /// `LAYM C U R`: make the first selected entity's layer the current layer.

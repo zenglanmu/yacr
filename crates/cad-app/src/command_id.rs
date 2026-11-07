@@ -851,6 +851,10 @@ pub enum CommandId {
     /// the session's current layer. Session-only (no drawing write); see
     /// [`crate::app_drawing::layer_commands`].
     LayMCur,
+    /// `LAYFRZ` (Work-only): freeze every distinct selected layer (all the
+    /// current layer is refused). Layer-table edit; not undoable; see
+    /// [`crate::app_drawing::layer_commands`].
+    LayFrz,
     /// `PDMODE <n>`: write the drawing header's `$PDMODE`; see
     /// [`crate::command_id::point_style`].
     SetPointDisplayMode,

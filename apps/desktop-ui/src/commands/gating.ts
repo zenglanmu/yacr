@@ -287,6 +287,7 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // its row exists for the no-drawing answer only.
   LAYCUR: Object.freeze({ count: 1, reasonKey: 'draw.kind.laycur.hint' }),
   LAYMCUR: Object.freeze({ count: 1, reasonKey: 'draw.kind.laymcur.hint' }),
+  LAYFRZ: Object.freeze({ count: 1, reasonKey: 'draw.kind.layfrz.hint' }),
 })
 
 /**

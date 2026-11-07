@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **46** |
-| **已实现合计（完整 + 部分）** | **96** |
-| 未实现 | **885** |
+| 部分实现（有写明的界） | **47** |
+| **已实现合计（完整 + 部分）** | **97** |
+| 未实现 | **884** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -85,6 +85,7 @@
 | `LAYCUR` | 部分实现 | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
 | `LAYER` | 已实现 | chrome 本地选择子：打开图层面板 |
 | `LAYERCLOSE` | 已实现 | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
+| `LAYFRZ` | 部分实现 | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入不可撤销 |
 | `LAYERP` | 部分实现 | 会话内有界 16 步；不持久化 |
 | `LAYISO` | 已实现 | — |
 | `LAYMCUR` | 部分实现 | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
@@ -615,7 +616,7 @@
 | 470 | `LAYERPMODE` | 未实现 | Turns on and off the tracking of changes made to layer settings for use by the LAYERP command. | — |
 | 471 | `LAYERSTATE` | 未实现 | Saves, restores, and manages sets of layer settings that are called layer states. | — |
 | 472 | `LAYERSTATESAVE` | 未实现 | Displays the New Layer State to Save dialog box, where you can provide a name and a description for a new layer state. | — |
-| 473 | `LAYFRZ` | 未实现 | Freezes the layer of selected objects. | — |
+| 473 | `LAYFRZ` | 部分实现 | Freezes the layer of selected objects. | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入不可撤销 |
 | 474 | `LAYISO` | 已实现 | Hides or locks all layers except those of the selected objects. | — |
 | 475 | `LAYLCK` | 未实现 | Locks the layer of a selected object. | — |
 | 476 | `-LAYMCH` | 未实现 | Changes the layer of a selected object to match the layer of a selected object. | — |

@@ -1135,5 +1135,7 @@
   "draw.kind.laycur": "Change to current layer",
   "draw.kind.laycur.hint": "Select the objects first; LAYCUR moves every selected object to the current layer.",
   "draw.kind.laymcur": "Set current layer from object",
-  "draw.kind.laymcur.hint": "Select the object first; LAYMCUR makes the first selected object's layer the current layer."
+  "draw.kind.laymcur.hint": "Select the object first; LAYMCUR makes the first selected object's layer the current layer.",
+  "draw.kind.layfrz": "Freeze selected layers",
+  "draw.kind.layfrz.hint": "Select the objects first; LAYFRZ freezes the layer of every selected object in all viewports (freezing the current layer is refused)."
 }
