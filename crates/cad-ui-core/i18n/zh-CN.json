@@ -1131,5 +1131,7 @@
   "gpu.pulled.insufficient_vram.title": "显存不足，已回退渲染",
   "gpu.pulled.insufficient_vram.body": "图形的加速显卡副本需要的内存超过当前可用显存，因此已改用通用渲染路径。大图形在平移和缩放时可能会变慢。",
   "gpu.pulled.insufficient_vram.short": "显存不足，已回退渲染",
-  "gpu.pulled.insufficient_vram.dismiss": "知道了"
+  "gpu.pulled.insufficient_vram.dismiss": "知道了",
+  "draw.kind.laycur": "更改为当前图层",
+  "draw.kind.laycur.hint": "请先选择对象；LAYCUR 会把每个选中对象移动到当前图层。"
 }

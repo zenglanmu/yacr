@@ -843,6 +843,10 @@ pub enum CommandId {
     /// `visible == !(off || frozen)` rule; `locked` / `plottable` / the colour /
     /// the linetype / the lineweight / the transparency are stored only. Work-only.
     SetLayerProperty,
+    /// `LAYCUR` (Work-only): move every selected entity to the session's current
+    /// layer. Selection-based (no interactive "Select objects" prompt); see
+    /// [`crate::app_drawing::layer_commands`].
+    LayCur,
     /// `PDMODE <n>`: write the drawing header's `$PDMODE`; see
     /// [`crate::command_id::point_style`].
     SetPointDisplayMode,

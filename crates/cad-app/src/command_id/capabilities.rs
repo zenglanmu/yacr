@@ -80,6 +80,7 @@ impl CommandId {
                 | Self::RenameLayer
                 | Self::DeleteLayer
                 | Self::SetLayerProperty
+                | Self::LayCur
                 | Self::SetPointDisplayMode
                 | Self::SetPointDisplaySize
                 | Self::SetEntityProperty

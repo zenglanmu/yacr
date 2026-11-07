@@ -278,6 +278,15 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // and `LAYON` keep meaning "clear every override"; this one does not, which is
   // why it never borrows `layers.restore` or `draw.kind.layon` as its label.
   { id: 'LAYERP', labelKey: 'layers.previous', icon: 'eye', group: 'annotate' },
+  // The AutoCAD 2026 layer-selection run (LAYCUR/LAYMCUR/LAYFRZ/LAYTHW/
+  // LAYLCK/LAYULK/SETBYLAYER) is **pre-selection based** in this build: the
+  // fixed capture machine cannot ask "Select objects", so the current session
+  // selection is the input, exactly like MATCHPROP/LAYISO. All are Work-only
+  // router commands in the layers palette's run; their effects are layer state,
+  // so they reuse the layer glyphs and are dropped with the palette on a
+  // palette-less carrier (`PALETTE_COMMANDS`). `SETBYLAYER` is included here as
+  // the layer-property reset it is, not as a general Modify button.
+  { id: 'LAYCUR', labelKey: 'draw.kind.laycur', icon: 'layers', group: 'annotate' },
   // FONTS opens the read-only Font Manager (`cad_fonts`). It is a chrome-local
   // selector like LAYER/PROPERTIES, so the command line and the ribbon open the
   // panel without the router ever seeing the word. It closes the annotation run

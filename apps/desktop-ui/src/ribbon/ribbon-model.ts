@@ -77,6 +77,17 @@ export const PALETTE_COMMANDS: readonly string[] = Object.freeze([
   'LAYERP',
   'LAYOFF',
   'LAYON',
+  // The AutoCAD 2026 layer-selection run (`LAYCUR`, `LAYMCUR`, `LAYFRZ`,
+  // `LAYTHW`, `LAYLCK`, `LAYULK`, `SETBYLAYER`) lives in the Layers panel and
+  // changes layer state that only the palette names or reverses, so the whole
+  // run follows the same carrier rule as the rest of the panel.
+  'LAYCUR',
+  'LAYMCUR',
+  'LAYFRZ',
+  'LAYTHW',
+  'LAYLCK',
+  'LAYULK',
+  'SETBYLAYER',
   // `FONTS` opens the read-only Font Manager, which is a palette window on the
   // desktop (and a floating sheet on the compact layout). A carrier that never
   // renders the palette layer has no surface for that report, so the button is

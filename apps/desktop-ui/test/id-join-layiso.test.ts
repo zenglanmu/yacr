@@ -241,7 +241,7 @@ test('LAYISO and LAYUNISO sit beside LAYER and ride the palette carrier filter',
   // A carrier that never renders the layers palette has no surface for the
   // isolation state, so the whole panel (toggle + isolate pair + the off/on pair) is
   // dropped — never left behind as live buttons that hide geometry invisibly.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'FONTS']);
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'FONTS']);
   assert.deepEqual(offeredItems(layers.items, false), []);
   assert.equal(offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false)
     .some(each => each.id === 'layers'), false);

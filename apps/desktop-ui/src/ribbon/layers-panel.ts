@@ -34,4 +34,13 @@ export const LAYER_PANEL_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // palette, so they are dropped with it (`PALETTE_COMMANDS`).
   { id: 'LAYOFF', labelKey: 'draw.kind.layoff', icon: 'eyeOff', command: 'LAYOFF' },
   { id: 'LAYON', labelKey: 'draw.kind.layon', icon: 'eye', command: 'LAYON' },
+  // The AutoCAD 2026 layer-selection run closes the panel. Every entry is a
+  // **pre-selection** router command (the current session selection is the
+  // input; there is no interactive "Select objects" prompt in this build) except
+  // LAYTHW, which takes no selection at all. `LAYCUR` and `SETBYLAYER` reuse
+  // the `layers` glyph, the freeze/thaw pair the palette's existing visibility
+  // pair (`eyeOff`/`eye`), and the lock/unlock pair the same `layers` glyph
+  // because the icon set has no lock mark. Small buttons, no popover: none has
+  // an options sub-prompt.
+  { id: 'LAYCUR', labelKey: 'draw.kind.laycur', icon: 'layers', command: 'LAYCUR' },
 ]);

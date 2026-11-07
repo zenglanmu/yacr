@@ -220,6 +220,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // explicitly by the application layer; the panel/IPC path
     // (`cad_set_layer_property`) supplies the typed payload.
     ("SETLAYERPROPERTY", CommandId::SetLayerProperty),
+    ("LAYCUR", CommandId::LayCur),
     // A payload-requiring edit: the selector normalizes, and the application
     // refuses a bare invocation explicitly (the panel/IPC path supplies the
     // `EntityProperty { key, value }` payload).

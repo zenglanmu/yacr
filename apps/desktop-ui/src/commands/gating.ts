@@ -280,7 +280,13 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // reason it cannot run. Like LAYON/LAYUNISO its entry exists for the "no drawing
   // is open" answer only.
   LAYERP: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
-});
+  // The AutoCAD 2026 layer-selection run is pre-selection based: the current
+  // selection is the whole input. Each command's own hint words that rule and
+  // its boundary, so the disabled button and the host refusal say the same
+  // thing. LAYTHW takes no selection at all (it thaws every frozen layer), so
+  // its row exists for the no-drawing answer only.
+  LAYCUR: Object.freeze({ count: 1, reasonKey: 'draw.kind.laycur.hint' }),
+})
 
 /**
  * Selectors the **chrome** answers itself, before the router. They have a real

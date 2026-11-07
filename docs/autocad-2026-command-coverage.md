@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **44** |
-| **已实现合计（完整 + 部分）** | **94** |
-| 未实现 | **887** |
+| 部分实现（有写明的界） | **45** |
+| **已实现合计（完整 + 部分）** | **95** |
+| 未实现 | **886** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -82,6 +82,7 @@
 | `ID` | 已实现 | — |
 | `INSERT` | 已实现 | — |
 | `JOIN` | 部分实现 | 仅共线 LINE 或同心相续 ARC |
+| `LAYCUR` | 部分实现 | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
 | `LAYER` | 已实现 | chrome 本地选择子：打开图层面板 |
 | `LAYERCLOSE` | 已实现 | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
 | `LAYERP` | 部分实现 | 会话内有界 16 步；不持久化 |
@@ -602,7 +603,7 @@
 | 459 | `JPGOUT` | 未实现 | Saves selected objects to a file in JPEG file format. | — |
 | 460 | `JULIAN` | 未实现 | Contains the DATE tool and several AutoCAD Julian date and calendar date conversion routines. | — |
 | 461 | `JUSTIFYTEXT` | 未实现 | Changes the justification point of selected text objects without changing their locations. | — |
-| 462 | `LAYCUR` | 未实现 | Changes the layer property of selected objects to the current layer. | — |
+| 462 | `LAYCUR` | 部分实现 | Changes the layer property of selected objects to the current layer. | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
 | 463 | `-LAYDEL` | 未实现 | At the Command prompt, deletes all objects on a layer and purges the layer. | — |
 | 464 | `LAYDEL` | 未实现 | Deletes all objects on a layer and purges the layer. | — |
 | 465 | `-LAYER` | 未实现 | Manages layers and layer properties. | — |
