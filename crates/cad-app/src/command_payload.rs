@@ -16,6 +16,9 @@ use cad_domain::{
 use crate::grips::GripId;
 use crate::{AppMode, BackendChoice, MeasurementToolKind, SelectionMode, StandardView};
 
+mod text_batch;
+pub use text_batch::*;
+
 /// The two straight-line picks of a CHAMFER/FILLET command (ADR 0016 decisions
 /// B/C): the two picked refs in pick order and the raw click point that selects
 /// each pick side.
@@ -973,4 +976,24 @@ pub enum CommandPayload {
     /// (only `Radius` and `Volume`; the four tool options are routed by the
     /// session to their existing `BeginMeasurement` requests).
     MeasureGeom(MeasureGeomOption),
+    /// `JUSTIFYTEXT <H> <V>` / `TJUST <H> <V>` (Work-only): set only the
+    /// alignment pair of the selected Text/MText. Full contract:
+    /// [`crate::command_id::text_batch::JustifyTextCommand`].
+    JustifyText(JustifyTextCommand),
+    /// `TSCALE <factor>` (Work-only): scale the selected text glyph height / wrap
+    /// width with the shared `SCALETEXT` rule. Full contract:
+    /// [`crate::command_id::text_batch::TextScaleCommand`].
+    TextScale(TextScaleCommand),
+    /// `TEXTALIGN <edge>` (Work-only): move the selected text to one common
+    /// edge/centre using estimated extents. Full contract:
+    /// [`crate::command_id::text_batch::TextAlignCommand`].
+    TextAlignEdges(TextAlignCommand),
+    /// `TCOUNT <start> <step> [prefix] [suffix]` (Work-only): number the selected
+    /// text in reading order. Full contract:
+    /// [`crate::command_id::text_batch::TCountCommand`].
+    TextCount(TCountCommand),
+    /// `TCIRCLE CIRCLE|RECTANGLE` (Work-only): draw an estimated-bounds boundary
+    /// around each selected text. Full contract:
+    /// [`crate::command_id::text_batch::TCircleCommand`].
+    TextCircle(TCircleCommand),
 }

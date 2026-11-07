@@ -121,6 +121,14 @@ impl CommandId {
                 | Self::Torient
                 | Self::TCase
                 | Self::Txt2MText
+                // The 2026-11-07 2D text batch: every one writes the drawing.
+                | Self::JustifyText
+                | Self::TextScale
+                | Self::TextAlignEdges
+                | Self::TextCount
+                | Self::TextCircle
+                | Self::TextMask
+                | Self::TextUnmask
                 // TEXTTOFRONT rewrites stored model-space draw order.
                 | Self::TextToFront
         )

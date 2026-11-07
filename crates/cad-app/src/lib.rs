@@ -40,6 +40,7 @@ pub mod viewer_config;
 pub mod zoom_history;
 
 mod app_audit;
+mod app_reports;
 mod app_zoom;
 mod layer_history;
 mod space;
@@ -333,8 +334,10 @@ mod command_payload;
 
 pub use command_payload::{
     AngularDimensionInput, CommandPayload, DimensionChainCommand, GripStretchCommand,
-    HatchEditOption, MeasureGeomOption, OrdinateAxis, OrdinateDimensionCommand, PeditOption,
-    RadialDimensionCommand, RotatedLinearDimensionCommand, TextCaseMode, TwoLineCommand,
+    HatchEditOption, JustifyTextCommand, MeasureGeomOption, OrdinateAxis, OrdinateDimensionCommand,
+    PeditOption, RadialDimensionCommand, RotatedLinearDimensionCommand, TCircleCommand,
+    TCountCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode,
+    TextScaleCommand, TwoLineCommand,
 };
 
 pub struct Command {

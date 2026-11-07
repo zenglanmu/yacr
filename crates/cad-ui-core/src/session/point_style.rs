@@ -22,8 +22,9 @@ use cad_app::{CommandId, CommandPayload};
 
 use super::diagnostics::cad_error_text;
 use super::{
-    CadSession, ARGUMENT_SELECTOR, HATCHEDIT_SELECTOR, PDMODE_SELECTOR, PDSIZE_SELECTOR,
-    PEDIT_SELECTOR, SNAPUNIT_SELECTOR, SPACE_SELECTOR, TCASE_SELECTOR, TORIENT_SELECTOR,
+    CadSession, ARGUMENT_SELECTOR, HATCHEDIT_SELECTOR, JUSTIFYTEXT_SELECTOR, PDMODE_SELECTOR,
+    PDSIZE_SELECTOR, PEDIT_SELECTOR, SNAPUNIT_SELECTOR, SPACE_SELECTOR, TCASE_SELECTOR,
+    TCIRCLE_SELECTOR, TCOUNT_SELECTOR, TEXTALIGN_SELECTOR, TORIENT_SELECTOR, TSCALE_SELECTOR,
 };
 
 impl CadSession {
@@ -64,6 +65,10 @@ impl CadSession {
             // (`DISTANCE`/`ANGLE`/`AREA`/`POLYLINE`) or the report-only `RADIUS`
             // (and the explicit `VOLUME` refusal). It is not a second engine.
             super::commands::MEASUREGEOM_SELECTOR => self.measuregeom_argument(argument, text),
+            // The 2026-11-07 2D text batch: `<H> <V>` / factor / edge / run /
+            // shape ride the payload; the selection is still the input.
+            JUSTIFYTEXT_SELECTOR | TSCALE_SELECTOR | TEXTALIGN_SELECTOR | TCOUNT_SELECTOR
+            | TCIRCLE_SELECTOR => self.text_batch_argument(selector, argument, text),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

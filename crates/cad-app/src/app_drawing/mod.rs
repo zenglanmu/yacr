@@ -81,6 +81,9 @@ mod properties;
 mod revision_cloud;
 mod scale_text;
 mod stretch;
+// The 2026-11-07 2D text batch (JUSTIFYTEXT/TJUST/TSCALE/TEXTALIGN/TCOUNT/
+// TCIRCLE/TEXTMASK/TEXTUNMASK); one estimate and one write discipline.
+pub(crate) mod text_batch;
 mod text_edit;
 // TEXTTOFRONT (2026-11-07): rewrite the selected text/leader/dimension draw order.
 mod text_front;

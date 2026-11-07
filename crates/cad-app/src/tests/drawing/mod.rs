@@ -338,6 +338,7 @@ mod stretch;
 mod stretch_curves;
 mod stretch_insert;
 mod text;
+mod text_batch;
 mod text_edit;
 mod text_front;
 mod transform;

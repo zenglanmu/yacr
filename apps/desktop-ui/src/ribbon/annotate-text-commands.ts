@@ -23,4 +23,10 @@ export const ANNOTATE_TEXT_COMMAND_ITEMS: readonly RibbonCommandItem[] = Object.
     ],
   },
   { id: 'TXT2MTXT', labelKey: 'draw.kind.txt2mtxt', icon: 'copy', command: 'TXT2MTXT' },
+  // TEXTMASK/TEXTUNMASK (2026-11-07) are bare, selection-based commands (no
+  // argument), so a plain button is a real affordance. The mask is an
+  // independent `AcDbWipeout` entity behind the estimated text extents and the
+  // unmask heuristic only ever deletes **selected** masks.
+  { id: 'TEXTMASK', labelKey: 'draw.kind.textmask', icon: 'hatch', command: 'TEXTMASK' },
+  { id: 'TEXTUNMASK', labelKey: 'draw.kind.textunmask', icon: 'hatch', command: 'TEXTUNMASK' },
 ]);
