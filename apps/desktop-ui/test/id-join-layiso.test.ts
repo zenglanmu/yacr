@@ -206,7 +206,7 @@ test('JOIN needs at least two selected objects, and says so before the host refu
 test('LAYISO and LAYUNISO sit beside LAYER and ride the palette carrier filter', async () => {
   const layers = panel('home', 'layers');
   // LAYOFF/LAYON (2026-10-26) close the same run; they have their own test below.
-  assert.deepEqual(layers.items.map(item => item.id), ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON']);
+  assert.deepEqual(layers.items.map(item => item.id), ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER']);
   const [layer, isolate, unisolate] = layers.items;
   assert.equal(layer.large, true, 'the palette opener keeps the large slot');
   for (const item of [isolate, unisolate]) {
@@ -320,8 +320,10 @@ test('LAYOFF and LAYON close the Layers panel and ride the same carrier filter',
   const layers = panel('home', 'layers');
   // Directly after the isolate pair, so the run reads palette opener → isolate →
   // restore → off → on. Appending keeps every shipped button where it was.
-  assert.deepEqual(layers.items.map(item => item.id), ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON']);
-  const [off, on] = layers.items.slice(-2);
+  assert.deepEqual(layers.items.map(item => item.id), ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER']);
+  const off = layers.items.find(item => item.id === 'LAYOFF');
+  const on = layers.items.find(item => item.id === 'LAYON');
+  assert.ok(off && on, 'the off/on pair stays in the panel');
   assert.equal(off.id, 'LAYOFF');
   assert.equal(on.id, 'LAYON');
   for (const item of [off, on]) {

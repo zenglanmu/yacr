@@ -278,7 +278,7 @@ test('LAYERP sits beside LAYUNISO in the Layers panel and rides the palette filt
   // moves a shipped button beyond the two the run already ends with.
   assert.deepEqual(
     layers.items.map(item => item.id),
-    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON'],
+    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER'],
   );
   const layerp = layers.items.find(item => item.id === 'LAYERP');
   assert.equal(layerp.command, 'LAYERP');

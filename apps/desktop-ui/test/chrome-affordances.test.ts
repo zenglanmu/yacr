@@ -77,7 +77,7 @@ test('the Layers arrow runs LAYER and the Properties arrow runs PROPERTIES', () 
   // are visible, which is the one state this palette is the surface for.
   assert.deepEqual(
     layerItems,
-    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON'],
+    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER'],
     'the Layers panel holds its palette toggle and the layer-state commands',
   );
   assert.deepEqual(propertyItems, ['PROPERTIES']);
