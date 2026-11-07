@@ -332,8 +332,9 @@ pub struct Workspace {
 mod command_payload;
 
 pub use command_payload::{
-    AngularDimensionInput, CommandPayload, DimensionChainCommand, GripStretchCommand, OrdinateAxis,
-    OrdinateDimensionCommand, PeditOption, RadialDimensionCommand, RotatedLinearDimensionCommand,
+    AngularDimensionInput, CommandPayload, DimensionChainCommand, GripStretchCommand,
+    MeasureGeomOption, OrdinateAxis, OrdinateDimensionCommand, PeditOption,
+    RadialDimensionCommand, RotatedLinearDimensionCommand,
     TextCaseMode, TwoLineCommand,
 };
 
@@ -431,6 +432,7 @@ pub trait Tool {
 
 mod app_drawing;
 mod app_history;
+mod app_massprop;
 mod app_measure;
 mod app_measure_object;
 mod app_measure_vendor;

@@ -358,7 +358,7 @@ fn degenerate(entity: &cad_db::DbEntity, reason: &str) -> CadError {
 /// The input's finiteness is checked before the call, so a remaining
 /// [`AreaError::Degenerate`] is the zero-area case; it is reported as
 /// `area.object.zero_area` rather than as a generic failure.
-fn polyline_refusal(entity: &cad_db::DbEntity, error: AreaError) -> CadError {
+pub(crate) fn polyline_refusal(entity: &cad_db::DbEntity, error: AreaError) -> CadError {
     let id = entity.id.0;
     match error {
         AreaError::Degenerate => {
@@ -386,7 +386,7 @@ fn polyline_refusal(entity: &cad_db::DbEntity, error: AreaError) -> CadError {
 }
 
 /// The display name of one geometry kind, for the unsupported-kind refusal.
-fn geometry_kind(geometry: &SemanticGeometry) -> &'static str {
+pub(crate) fn geometry_kind(geometry: &SemanticGeometry) -> &'static str {
     match geometry {
         SemanticGeometry::Line { .. } => "a LINE",
         SemanticGeometry::Polyline { .. } => "a POLYLINE",

@@ -112,3 +112,45 @@ export const PEDIT_ITEM: RibbonCommandItem = Object.freeze({
   command: 'PEDIT',
   variants: PEDIT_VARIANTS,
 });
+
+/**
+ * The `MEASUREGEOM` split button: AutoCAD's inquiry router over the measurement
+ * tools this build already has.
+ *
+ * Every row sends the **full typed line** (`MEASUREGEOM DISTANCE`, …), never the
+ * bare name: the bare selector is the host's `measuregeom.needs_option` refusal,
+ * and the router maps each option onto the existing tool (or the read-only
+ * `RADIUS` report). The parent repeats `DISTANCE` so the button is the ordinary
+ * one-click distance measurement while the caret names the other options.
+ *
+ * `VOLUME` is listed because AutoCAD has it and the host must answer with its
+ * named `measuregeom.volume_unsupported` code — but it is **not** a working
+ * measurement: this build has no 3D solid/volume model. The label/hint say so
+ * and no number is ever fabricated. The two new labels are `measure.kind.radius`
+ * and `measure.kind.volume`; the four tool rows reuse the existing measurement
+ * labels so the menu reads exactly like the Measure panel.
+ */
+const MEASUREGEOM_VARIANTS: readonly RibbonCommandItem[] = Object.freeze([
+  { id: 'MEASUREGEOM DISTANCE', labelKey: 'measure.kind.distance', icon: 'distance', command: 'MEASUREGEOM DISTANCE' },
+  { id: 'MEASUREGEOM ANGLE', labelKey: 'measure.kind.angle', icon: 'angle', command: 'MEASUREGEOM ANGLE' },
+  { id: 'MEASUREGEOM AREA', labelKey: 'measure.kind.area', icon: 'area', command: 'MEASUREGEOM AREA' },
+  { id: 'MEASUREGEOM POLYLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', command: 'MEASUREGEOM POLYLINE' },
+  { id: 'MEASUREGEOM RADIUS', labelKey: 'measure.kind.radius', icon: 'dimradius', command: 'MEASUREGEOM RADIUS' },
+  {
+    id: 'MEASUREGEOM VOLUME',
+    labelKey: 'measure.kind.volume',
+    icon: 'area',
+    command: 'MEASUREGEOM VOLUME',
+    hintKey: 'measure.kind.measuregeom_volume.hint',
+  },
+]);
+
+export const MEASUREGEOM_ITEM: RibbonCommandItem = Object.freeze({
+  id: 'MEASUREGEOM',
+  labelKey: 'measure.kind.measuregeom',
+  icon: 'distance',
+  command: 'MEASUREGEOM DISTANCE',
+  large: true,
+  hintKey: 'measure.kind.measuregeom.hint',
+  variants: MEASUREGEOM_VARIANTS,
+});

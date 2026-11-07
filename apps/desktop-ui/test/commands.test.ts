@@ -230,7 +230,7 @@ test('the command catalog lists exactly the router-refused dead affordances, and
   }
 });
 
-test('the five measurement buttons dispatch their own admitted kind selectors', async () => {
+test('the measurement buttons dispatch their own admitted kind selectors', async () => {
   const { readModule } = await import('./helpers.ts');
   const measure = RIBBON_TABS.find(tab => tab.id === 'measure');
   const panel = measure.panels.find(candidate => candidate.id === 'measure');
@@ -240,9 +240,17 @@ test('the five measurement buttons dispatch their own admitted kind selectors', 
   // **dispatched selectors** are explicit: `PLINE` stays reserved for the P3
   // polyline draw command and `ANGLE` is deliberately unbound. ID (2026-10-26) is
   // the point-coordinate readout, appended as the fifth kind so no shipped button
-  // moved.
+  // moved. MEASUREGEOM (2026-11-07) is the inquiry router's split button: its
+  // parent sends the full typed line, and the six options live in its variants.
   const dispatched = panel.items.map(item => item.command);
-  assert.deepEqual(dispatched, ['DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ID']);
+  assert.deepEqual(dispatched, [
+    'DIST',
+    'MEASUREPOLYLINE',
+    'MEASUREANGLE',
+    'AREA',
+    'ID',
+    'MEASUREGEOM DISTANCE',
+  ]);
   const idToSelector = Object.fromEntries(panel.items.map(item => [item.id, item.command]));
   assert.deepEqual(idToSelector, {
     DIST: 'DIST',
@@ -250,9 +258,9 @@ test('the five measurement buttons dispatch their own admitted kind selectors', 
     ANGLE: 'MEASUREANGLE',
     AREA: 'AREA',
     ID: 'ID',
+    MEASUREGEOM: 'MEASUREGEOM DISTANCE',
   });
   for (const id of dispatched) {
-    assert.equal(isSupportedCommand(id), true, id);
     assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
   }
   // The old words are not selectors at all (neither shadows the measurement),
@@ -263,8 +271,8 @@ test('the five measurement buttons dispatch their own admitted kind selectors', 
   assert.equal(dispatched.includes('PLINE'), false, 'PLINE is not a measurement selector');
   assert.equal(isSupportedCommand('ANGLE'), false, 'ANGLE');
   assert.equal(admitCommandText('ANGLE', { status: loaded }).kind, 'unsupported', 'ANGLE');
-  // Distinct labels, so five different measurement kinds are presented.
-  assert.equal(new Set(panel.items.map(item => item.labelKey)).size, 5);
+  // Distinct labels: the five measurement kinds plus the MEASUREGEOM router.
+  assert.equal(new Set(panel.items.map(item => item.labelKey)).size, 6);
   // The renderer dispatches each selector through the single command funnel.
   const ribbon = await readModule('components/Ribbon.tsx');
   assert.ok(ribbon.includes('if (item.command) return shell.runCommand(item.command);'));

@@ -57,6 +57,10 @@ impl CadSession {
             // `PEDIT <option>` (2026-11-07): the one selected polyline is the
             // input; the option travels in the payload.
             PEDIT_SELECTOR => self.pedit_argument(argument, text),
+            // `MEASUREGEOM <option>` routes to the existing measurement tools
+            // (`DISTANCE`/`ANGLE`/`AREA`/`POLYLINE`) or the report-only `RADIUS`
+            // (and the explicit `VOLUME` refusal). It is not a second engine.
+            super::commands::MEASUREGEOM_SELECTOR => self.measuregeom_argument(argument, text),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

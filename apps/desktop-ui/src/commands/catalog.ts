@@ -246,6 +246,12 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // with a one-off exception). It is listed beside `AREA` because it is the same
   // measurement kind, and no shipped row moves.
   { id: 'AREA OBJECT', labelKey: 'measure.kind.area_object', icon: 'area', group: 'measure' },
+  // MEASUREGEOM (AutoCAD 2026) is the inquiry **router** over the measurement
+  // tools already listed above. The bare name needs an option (`DISTANCE`,
+  // `ANGLE`, `AREA`, `POLYLINE`, `RADIUS`, `VOLUME`), which the ribbon sends as
+  // the full `MEASUREGEOM <OPTION>` line; `VOLUME` is an explicit refusal (no 3D
+  // solid/volume model) and must never be presented as a working measurement.
+  { id: 'MEASUREGEOM', labelKey: 'measure.kind.measuregeom', icon: 'distance', group: 'measure' },
   // ID (2026-10-26) is the point-coordinate readout: one point pick, reported as
   // X/Y/Z plus the object snap that produced it. It is the fifth measurement kind
   // and is listed last there so no shipped entry moves. It reuses the `point`
@@ -447,6 +453,11 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'AUDIT', labelKey: 'audit.title', icon: 'diagnostics', group: 'file' },
   // LIST (inquiry): selection-based property report; read-only and Viewer-legal.
   { id: 'LIST', labelKey: 'draw.kind.list', icon: 'properties', group: 'annotate' },
+  // MASSPROP (AutoCAD 2026) is the read-only mass-properties report of the
+  // current selection (closed planar CIRCLE / full ELLIPSE / closed POLYLINE on
+  // one plane). Moments of inertia, principal axes, volume/density and `.mpr`
+  // output are NOT implemented; the hint and the host refusal say so.
+  { id: 'MASSPROP', labelKey: 'draw.kind.massprop', icon: 'properties', group: 'annotate' },
   // STATUS (inquiry): drawing statistics/modes/extents; document-scoped, read-only.
   { id: 'STATUS', labelKey: 'draw.kind.status', icon: 'diagnostics', group: 'view' },
   // FS (Express tool): command-line only in AutoCAD; direct-touch selection grower.

@@ -837,8 +837,7 @@ pub enum CommandId {
     /// `visible == !(off || frozen)` rule; `locked` / `plottable` / the colour /
     /// the linetype / the lineweight / the transparency are stored only. Work-only.
     SetLayerProperty,
-    /// The layer-selection run (`LAYCUR`…`SETBYLAYER`); see
-    /// [`crate::app_drawing::layer_commands`].
+    /// The layer-selection run (`LAYCUR`…`SETBYLAYER`); see [`crate::app_drawing::layer_commands`].
     LayCur,
     LayMCur,
     LayFrz,
@@ -846,45 +845,37 @@ pub enum CommandId {
     LayLck,
     LayUlk,
     SetByLayer,
-    /// `PDMODE <n>`: write the drawing header's `$PDMODE` (the drawing-global
-    /// POINT display mode) from the command line. Full contract:
-    /// [`crate::command_id::point_style`].
+    /// `PDMODE <n>`: write the drawing-global POINT display mode `$PDMODE`; full
+    /// contract in [`crate::command_id::point_style`].
     SetPointDisplayMode,
-    /// `PDSIZE <n>`: write the drawing header's `$PDSIZE` (the drawing-global
-    /// POINT display size) from the command line. Full contract:
-    /// [`crate::command_id::point_style`].
+    /// `PDSIZE <n>`: write the drawing-global POINT display size `$PDSIZE`; full
+    /// contract in [`crate::command_id::point_style`].
     SetPointDisplaySize,
-    /// Flip the idle hover entity preview for this session. Session/display
-    /// state only (no database write, no history, no ChangeSet), so it is
-    /// allowed in Viewer and Work. It defaults to on (AutoCAD's
-    /// `SELECTIONPREVIEW` initial `3`); see
-    /// [`crate::SessionState::hover_preview`].
+    /// Flip the idle hover entity preview for this session. Session / display state
+    /// only (no database write/history/`ChangeSet`), allowed in Viewer and Work;
+    /// defaults on (`SELECTIONPREVIEW` 3). See [`crate::SessionState::hover_preview`].
     ToggleHoverPreview,
-    /// Flip object snapping for this session (ADR 0014 A.4). Session/display
-    /// state only (no database write, no history, no ChangeSet), so it is
-    /// allowed in Viewer and Work. It defaults to on; independent of the
-    /// persisted `view.overlays.snapHints` preference, which only gates the hint
-    /// overlay. See [`crate::SessionState::snap_enabled`].
+    /// Flip object snapping for this session (ADR 0014 A.4). Session / display
+    /// state only (no database write, no history, no `ChangeSet`), so Viewer and
+    /// Work both allow it. Defaults on; independent of the persisted
+    /// `view.overlays.snapHints` preference, which only gates the hint overlay.
+    /// See [`crate::SessionState::snap_enabled`].
     ToggleSnap,
-    /// Flip the display grid overlay for this session (`GRID`, F7).
-    ///
-    /// Session/display state only (no database write, no history, no ChangeSet),
-    /// so it is allowed in Viewer and Work. It defaults to on; the host draws the
-    /// grid only when this switch **and** the persisted `view.overlays.grid`
-    /// preference are both on. This is the **display** grid only — grid snap has
-    /// its own switch ([`CommandId::ToggleSnapGrid`]). See
-    /// [`crate::SessionState::grid_enabled`].
+    /// Flip the display grid overlay for this session (`GRID`, F7). Session /
+    /// display state only (no database write, no history, no `ChangeSet`), so
+    /// Viewer and Work both allow it. Defaults on; the host draws the grid only
+    /// when this switch **and** the persisted `view.overlays.grid` preference are
+    /// both on. This is the **display** grid only — grid snap has its own switch
+    /// ([`CommandId::ToggleSnapGrid`]). See [`crate::SessionState::grid_enabled`].
     ToggleGrid,
-    /// Flip the **grid snap** switch for this session (`SNAP`, F9).
-    ///
-    /// Session/display state only (no database write, no history, no ChangeSet),
-    /// so it is allowed in Viewer and Work. It defaults to **off**, matching
-    /// AutoCAD's initial `SNAP` state. While on, a captured point is quantised to
-    /// the nearest multiple of the session snap spacing in X and Y (see
-    /// [`crate::snap`]); the spacing itself is the session sysvar set by the typed
-    /// `SNAPUNIT <value>` line ([`CommandId::SetSnapSpacing`]). This is neither
-    /// object snap ([`CommandId::ToggleSnap`]) nor the display grid
-    /// ([`CommandId::ToggleGrid`]), and it is never another selector's alias. See
+    /// Flip the **grid snap** switch for this session (`SNAP`, F9). Session /
+    /// display state only (no database write, no history, no `ChangeSet`), so
+    /// Viewer and Work both allow it. Defaults **off** (AutoCAD's initial state).
+    /// While on, a captured point is quantised to the nearest multiple of the
+    /// session snap spacing in X and Y ([`crate::snap`]); the spacing is the
+    /// `SNAPUNIT <value>` sysvar ([`CommandId::SetSnapSpacing`]). Neither object
+    /// snap ([`CommandId::ToggleSnap`]) nor the display grid
+    /// ([`CommandId::ToggleGrid`]), and never another selector's alias. See
     /// [`crate::SessionState::snap_grid_enabled`].
     ToggleSnapGrid,
     /// Set the session grid-snap spacing (`SNAPUNIT <value>`).
@@ -953,6 +944,12 @@ pub enum CommandId {
     List,
     Status,
     Fs,
+    /// `MASSPROP`: read-only mass properties; full contract in
+    /// [`crate::command_id::massprop`].
+    MassProp,
+    /// `MEASUREGEOM`: the inquiry router; full contract in
+    /// [`crate::command_id::measuregeom`].
+    MeasureGeom,
     /// `REVERSE`: see [`crate::command_id::reverse`].
     Reverse,
     /// `PEDIT` (Work-only): one declared v1 polyline option; see
@@ -984,7 +981,9 @@ pub mod grip_stretch;
 pub mod hatch;
 pub mod hatch_generate_boundary;
 pub mod hatch_to_back;
+pub mod massprop;
 pub mod match_prop;
+pub mod measuregeom;
 pub mod oops;
 pub mod overkill;
 pub mod pedit;

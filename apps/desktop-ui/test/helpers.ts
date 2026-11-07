@@ -90,6 +90,12 @@ export const HOST_NAMES = [
   'LIST',
   'STATUS',
   'FS',
+  // MASSPROP (AutoCAD 2026): read-only mass properties of the current selection.
+  // MEASUREGEOM (AutoCAD 2026): the inquiry router; the bare name is refused by
+  // the host (`measuregeom.needs_option`) and its typed option lines are the
+  // only admitted form. Both are canonical selectors, never aliases.
+  'MASSPROP',
+  'MEASUREGEOM',
   'SWITCHBACKEND', 'SWITCH2D3D',
   // PLAN (AutoCAD 2026): the payload-free "orthographic view of the XY plane"
   // selector. v1 is the top/plan 2D view only (this build has no UCS model, so

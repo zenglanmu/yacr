@@ -41,6 +41,8 @@ command_selector_contract! {
     SelectInBox => "SELECTINBOX",
     Measure => "MEASURE",
     AreaObject => "AREA OBJECT",
+    MassProp => "MASSPROP",
+    MeasureGeom => "MEASUREGEOM",
     ConfirmMeasurement => "CONFIRM",
     CancelMeasurement => "CANCELMEASURE",
     Undo => "UNDO",
@@ -171,7 +173,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 139,
+        EXPECTED_COMMAND_COUNT, 141,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -843,6 +845,11 @@ fn inquiry_commands_are_read_only_and_viewer_legal() {
         ("LIST", CommandId::List),
         ("STATUS", CommandId::Status),
         ("FS", CommandId::Fs),
+        // MASSPROP (AutoCAD 2026) reports selected closed planar regions.
+        ("MASSPROP", CommandId::MassProp),
+        // MEASUREGEOM's RADIUS/report paths are read-only; the tool options start
+        // the existing measurement requests and write nothing either.
+        ("MEASUREGEOM", CommandId::MeasureGeom),
     ] {
         assert_eq!(normalize_command(selector), Some(id), "{selector}");
         assert_eq!(canonical_command_name(selector), Some(selector));

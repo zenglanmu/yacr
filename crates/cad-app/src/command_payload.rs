@@ -124,6 +124,30 @@ pub enum PeditOption {
     Open,
     /// `REVERSE` / `R`: reverse vertex order and bulges exactly like `REVERSE`.
     Reverse,
+/// The option of the AutoCAD 2026 `MEASUREGEOM` inquiry router.
+///
+/// The typed grammar (`cad_ui_core::session::parse_measuregeom_argument`)
+/// admits the full words only; this enum is the machine form. Four options route
+/// to the existing measurement tools and never reach the command layer with this
+/// payload; `Radius` is the read-only report and `Volume` is the explicit
+/// not-implemented refusal. Full contract:
+/// [`crate::command_id::measuregeom`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeasureGeomOption {
+    /// `MEASUREGEOM DISTANCE` → the `DIST` tool.
+    Distance,
+    /// `MEASUREGEOM ANGLE` → the `MEASUREANGLE` tool.
+    Angle,
+    /// `MEASUREGEOM AREA` → the `AREA` tool.
+    Area,
+    /// `MEASUREGEOM POLYLINE` → the `MEASUREPOLYLINE` tool.
+    Polyline,
+    /// `MEASUREGEOM RADIUS`: read-only radius/diameter/circumference report of
+    /// exactly one selected `ARC`/`CIRCLE`.
+    Radius,
+    /// `MEASUREGEOM VOLUME`: **not implemented** (no 3D-solid/volume model), a
+    /// named `Unsupported`, never a fabricated number.
+    Volume,
 }
 
 /// The axis a DIMORDINATE measures (ADR 0017 decision C/E, P5e).
@@ -895,4 +919,8 @@ pub enum CommandPayload {
     /// `grip.unsupported_kind`; this never routes through
     /// [`CommandId::StretchEntities`] (crossing-window stretch).
     GripStretch(Box<GripStretchCommand>),
+    /// The option of a `MEASUREGEOM <option>` line that reaches the command layer
+    /// (only `Radius` and `Volume`; the four tool options are routed by the
+    /// session to their existing `BeginMeasurement` requests).
+    MeasureGeom(MeasureGeomOption),
 }

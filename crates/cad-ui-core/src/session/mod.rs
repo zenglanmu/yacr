@@ -33,6 +33,7 @@ mod input;
 mod layers;
 mod layout_tabs;
 mod pedit;
+mod measuregeom;
 mod performance;
 pub mod plugins;
 mod point_style;
@@ -321,9 +322,8 @@ impl CadSession {
     ///   (`> 1` zooms in, `< 1` zooms out) about the viewport centre through the
     ///   same [`CadSession::zoom_step`] the `ZOOMIN`/`ZOOMOUT` buttons use, and
     ///   `ZOOM ALL` (`EXTENTS`) dispatches the ordinary `FIT`;
-    /// * `SNAPUNIT <value>`: sets the session grid-snap spacing
-    ///   ([`CadSession::snap_unit_argument`]);
-    /// * `PDMODE`/`PDSIZE` write the POINT style; `TORIENT`/`TCASE`/`PEDIT` take one option.
+    /// * `SNAPUNIT <value>`: sets the session grid-snap spacing;
+    /// * `PDMODE`/`PDSIZE` write the POINT style; `TORIENT`/`TCASE`/`PEDIT`/`MEASUREGEOM` take one option.
     ///
     /// An argument outside a selector's grammar is refused with a stable reason,
     /// recorded for `cad_status.error`, and changes nothing. A selector with
