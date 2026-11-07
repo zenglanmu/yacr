@@ -275,6 +275,12 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // two objects to compare, so the local minimum is two. The host refuses an
   // empty/one-object selection by name (`overkill.selection`).
   OVERKILL: Object.freeze({ count: 2, reasonKey: 'draw.kind.overkill.hint' }),
+  // HATCHGENERATEBOUNDARY (AutoCAD 2026) needs at least one selected hatch; the
+  // host refuses an empty selection and any non-hatch by name
+  // (`hatchgenerateboundary.selection` / `.not_hatch`). The table minimum is one
+  // and the sentence is the command's own hint, so the disabled button and the
+  // refusal describe the same rule once.
+  HATCHGENERATEBOUNDARY: Object.freeze({ count: 1, reasonKey: 'draw.kind.hatchgenerateboundary.hint' }),
   // BREAKATPOINT is an **interactive tool** (pick the object, then the break
   // point), not a pre-selection command, so it has no selection precondition.
   // The row exists for the "no drawing is open" answer only.

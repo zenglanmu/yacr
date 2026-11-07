@@ -482,6 +482,7 @@ impl Application {
             | CommandId::DimContinue
             | CommandId::Hatch
             | CommandId::HatchPoint
+            | CommandId::HatchGenerateBoundary
             | CommandId::MoveEntities
             | CommandId::TrimEntity
             | CommandId::ExtendEntity

@@ -42,6 +42,7 @@ impl CommandId {
                 | Self::DimContinue
                 | Self::Hatch
                 | Self::HatchPoint
+                | Self::HatchGenerateBoundary
                 | Self::MoveEntities
                 | Self::TrimEntity
                 | Self::ExtendEntity

@@ -134,6 +134,12 @@ export const HOST_NAMES = [
   // the two take different input (a pick vs a pre-selection), so admitting one
   // must never admit the other's capture.
   'HATCHPOINT',
+  // HATCHGENERATEBOUNDARY (AutoCAD 2026) is the selection-based hatch boundary
+  // utility: a canonical selector of its own, never an alias of HATCH. The Rust
+  // lane adds the same name (`CommandId::HatchGenerateBoundary`); this mirror
+  // stands in for the loaded `cad_commands` vocabulary and never proves the host
+  // advertises it.
+  'HATCHGENERATEBOUNDARY',
   // MATCHPROP: the selection-based property painter (`CommandId::MatchProp`,
   // `CommandPayload::None` — the selection's first entity is the source). No
   // dedicated IPC; the bare name is the whole input.

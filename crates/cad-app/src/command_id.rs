@@ -542,6 +542,10 @@ pub enum CommandId {
     ///
     /// Work-only (Viewer mode refuses it at the command layer).
     HatchPoint,
+    /// HATCHGENERATEBOUNDARY (Work-only): one non-associative closed polyline per
+    /// loop of every selected hatch, on the hatch's layer/space, in one
+    /// transaction. Full contract: [`crate::command_id::hatch_generate_boundary`].
+    HatchGenerateBoundary,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,
@@ -977,6 +981,7 @@ pub mod break_at_point;
 pub mod construction_line;
 pub mod grip_stretch;
 pub mod hatch;
+pub mod hatch_generate_boundary;
 pub mod match_prop;
 pub mod oops;
 pub mod overkill;

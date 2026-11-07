@@ -424,4 +424,11 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'STATUS', labelKey: 'draw.kind.status', icon: 'diagnostics', group: 'view' },
   // FS (Express tool): command-line only in AutoCAD; direct-touch selection grower.
   { id: 'FS', labelKey: 'draw.kind.fs', icon: 'selectAll', group: 'modify' },
+  // HATCHGENERATEBOUNDARY (AutoCAD 2026) creates one non-associative closed
+  // polyline per loop of the selected hatch(es), on each hatch's own layer. The
+  // selection rule is one hatch (`SELECTION_REQUIREMENTS`); there is no pick
+  // prompt and no option prompt. Appended last so no shipped row moves, and it
+  // reuses the `hatch` glyph because it belongs to the hatch family. It lives in
+  // the Annotate tab, the way AutoCAD exposes it from the Hatch context.
+  { id: 'HATCHGENERATEBOUNDARY', labelKey: 'draw.kind.hatchgenerateboundary', icon: 'hatch', group: 'annotate' },
 ]);
