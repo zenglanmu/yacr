@@ -15,7 +15,7 @@ import { STANDARD_VIEWS } from '../cad/view3d.ts';
 import { DRAW_MODIFY_ITEMS, HOME_MODIFY_ITEMS } from './ribbon-modify.ts';
 import { LAYER_PANEL_ITEMS } from './layers-panel.ts';
 import { ANNOTATE_TEXT_COMMAND_ITEMS } from './annotate-text-commands.ts';
-import { CIRCLE_ITEM, POLYGON_ITEM } from './variants.ts';
+import { CIRCLE_ITEM, MEASUREGEOM_ITEM, POLYGON_ITEM } from './variants.ts';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({
@@ -458,6 +458,10 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         items: [
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties', large: true },
           { id: 'LIST', labelKey: 'draw.kind.list', icon: 'properties', command: 'LIST', hintKey: 'draw.kind.list.hint' },
+          // MASSPROP (2026-11-07): the read-only selection mass-properties report.
+          // It shares the Properties panel's inquiry slot; its hint names the
+          // v1 boundary (closed planar regions only; no inertia/volume/.mpr).
+          { id: 'MASSPROP', labelKey: 'draw.kind.massprop', icon: 'properties', command: 'MASSPROP', hintKey: 'draw.kind.massprop.hint' },
         ],
       },
       {
@@ -607,6 +611,11 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // (this panel has no small-entry row) and carries no variant popover:
           // there is no options sub-prompt. Its tool chip is `tool.measure.id`.
           { id: 'ID', labelKey: 'measure.kind.id', icon: 'point', command: 'ID', large: true },
+          // MEASUREGEOM (2026-11-07) is the inquiry router: its caret sends the
+          // full `MEASUREGEOM <OPTION>` line to the existing measurement tool (or
+          // the read-only RADIUS report). VOLUME is a named not-implemented
+          // refusal, never a fabricated number; see `variants.ts`.
+          MEASUREGEOM_ITEM,
         ],
       },
     ],

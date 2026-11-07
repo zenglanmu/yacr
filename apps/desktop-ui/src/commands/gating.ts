@@ -167,6 +167,19 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     parse: (argument: string) => ['UPPER', 'LOWER', 'TITLE', 'SENTENCE', 'TOGGLE', 'U', 'L', 'T', 'S', 'G']
       .includes(argument.trim().toUpperCase()),
   }),
+  /**
+   * `MEASUREGEOM <option>` (2026-11-07) is the inquiry router. Only the **six
+   * full option words** are admitted, case-insensitively; there is no
+   * single-letter abbreviation because the host grammar does not guess one. The
+   * four tool options reuse the existing measurement captures, `RADIUS` is a
+   * read-only report, and `VOLUME` is an explicit not-implemented refusal — the
+   * local parser admits the word so the host can answer with its named
+   * `measuregeom.volume_unsupported` code rather than a generic "unsupported".
+   */
+  MEASUREGEOM: Object.freeze({
+    parse: (argument: string) => ['DISTANCE', 'ANGLE', 'AREA', 'POLYLINE', 'RADIUS', 'VOLUME']
+      .includes(argument.trim().toUpperCase()),
+  }),
 });
 
 /**
@@ -338,6 +351,15 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   LAYERP: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
   // LIST reports the current selection; zero objects is `list.selection`.
   LIST: Object.freeze({ count: 1, reasonKey: 'draw.kind.list.hint' }),
+  // MASSPROP (2026-11-07) measures the selected closed planar regions, so at
+  // least one object is required. The table is a *minimum* (two objects are let
+  // through locally and the host decides coplanarity/kind by name); the sentence
+  // is the command's own hint, so the disabled button and the refusal agree.
+  MASSPROP: Object.freeze({ count: 1, reasonKey: 'draw.kind.massprop.hint' }),
+  // MEASUREGEOM itself takes no selection up front: its tool options capture
+  // their own points and only RADIUS reads the selection, so pre-gating the
+  // command would disable the tool entries with an unrelated sentence. The host
+  // answers the RADIUS case by name (`measuregeom.radius.selection_empty`).
   // FS needs exactly one seed; two or more is refused by the host by name.
   FS: Object.freeze({ count: 1, reasonKey: 'draw.kind.fs.hint' }),
   // The layer-selection run is pre-selection based; LAYTHW needs no selection.
