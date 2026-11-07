@@ -126,6 +126,26 @@ pub enum PeditOption {
     Reverse,
 }
 
+/// The typed option of the AutoCAD 2026 `HATCHEDIT` command (v1).
+///
+/// The command line carries the option (`HATCHEDIT ANGLE 45`,
+/// `HATCHEDIT SCALE 2`, `HATCHEDIT SOLID`, `HATCHEDIT GRADIENT`) because this
+/// build has no in-command dialog. The selection (exactly one directly
+/// addressable model-space hatch) is the rest of the input. Full contract:
+/// [`crate::command_id::hatchedit`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HatchEditOption {
+    /// `ANGLE <degrees>`: set the stored pattern angle (only a `Pattern` fill).
+    Angle(f64),
+    /// `SCALE <factor>`: set the stored pattern scale (> 0, only a `Pattern`
+    /// fill).
+    Scale(f64),
+    /// `SOLID`: replace the fill with the solid variant.
+    Solid,
+    /// `GRADIENT`: replace the fill with the default two-colour linear ramp.
+    Gradient,
+}
+
 /// The option of the AutoCAD 2026 `MEASUREGEOM` inquiry router.
 ///
 /// The typed grammar (`cad_ui_core::session::parse_measuregeom_argument`)
@@ -455,6 +475,15 @@ pub enum CommandPayload {
     /// with `pedit.needs_option`, because this build has no in-command option
     /// prompt. Full contract: [`crate::command_id::pedit`].
     PeditOption(PeditOption),
+    /// `HATCHEDIT` (Work-only): one typed option applied to the one selected
+    /// model-space hatch.
+    ///
+    /// The current selection is the input (exactly one directly addressable
+    /// model-space `AcDbHatch`). A bare `HATCHEDIT` (`CommandPayload::None`) is
+    /// refused with `hatchedit.needs_option`, because this build has no
+    /// in-command Hatch Edit dialog. Full contract:
+    /// [`crate::command_id::hatchedit`].
+    HatchEdit(HatchEditOption),
     /// `BLOCK` (Work-only): define a named block from `refs` at the picked
     /// `base` point.
     ///

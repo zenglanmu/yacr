@@ -333,8 +333,8 @@ mod command_payload;
 
 pub use command_payload::{
     AngularDimensionInput, CommandPayload, DimensionChainCommand, GripStretchCommand,
-    MeasureGeomOption, OrdinateAxis, OrdinateDimensionCommand, PeditOption, RadialDimensionCommand,
-    RotatedLinearDimensionCommand, TextCaseMode, TwoLineCommand,
+    HatchEditOption, MeasureGeomOption, OrdinateAxis, OrdinateDimensionCommand, PeditOption,
+    RadialDimensionCommand, RotatedLinearDimensionCommand, TextCaseMode, TwoLineCommand,
 };
 
 pub struct Command {

@@ -17,7 +17,8 @@ use cad_domain::hatch::{
 };
 
 use crate::draw_tool::{
-    ToolParameter, HATCH_GRADIENT_LINEAR, HATCH_GRADIENT_SPHERICAL, HATCH_PATTERN_TYPE_GRADIENT,
+    ToolParameter, HATCH_GRADIENT_DEFAULT_ACI_A, HATCH_GRADIENT_DEFAULT_ACI_B,
+    HATCH_GRADIENT_LINEAR, HATCH_GRADIENT_SPHERICAL, HATCH_PATTERN_TYPE_GRADIENT,
     HATCH_PATTERN_TYPE_PREDEFINED, HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED,
     HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
 };
@@ -43,8 +44,23 @@ const GRADIENT_SHIFT: f64 = 0.0;
 /// are the authoritative data.
 const USER_DEFINED_PATTERN_NAME: &str = "USER";
 
+/// Which fill the command must produce.
+///
+/// `Session` is the ordinary HATCH path: the fill kind comes from the session
+/// `hatchPatternType`. `Gradient` is the GRADIENT path: it forces the gradient
+/// fill and ignores the session pattern type/index/spacing, while still reading
+/// the gradient channel (kind, angle, stops).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HatchFillMode {
+    Session,
+    Gradient,
+}
+
 /// The HATCH parameters read from the session typed channel.
 pub(super) struct HatchParameters {
+    /// Whether this command forces the gradient fill (GRADIENT) or honours the
+    /// session pattern type (HATCH).
+    force_gradient: bool,
     pub(super) pattern_type: f64,
     /// The **1-based** index into the implemented predefined pattern table
     /// (`hatchPattern`); only read for `HATCH_PATTERN_TYPE_PREDEFINED`.
@@ -81,6 +97,19 @@ pub(super) struct HatchParameters {
 /// generic range refusal would hide which pattern set the command actually
 /// implements).
 pub(super) fn hatch_parameters(session: &SessionState) -> CadResult<HatchParameters> {
+    hatch_parameters_for(session, false)
+}
+
+/// Read the parameters for the GRADIENT command: the same channel, with the
+/// gradient fill forced regardless of the session pattern type.
+pub(super) fn gradient_parameters(session: &SessionState) -> CadResult<HatchParameters> {
+    hatch_parameters_for(session, true)
+}
+
+fn hatch_parameters_for(
+    session: &SessionState,
+    force_gradient: bool,
+) -> CadResult<HatchParameters> {
     let validate = |parameter: ToolParameter| -> CadResult<()> {
         parameter
             .validate(session.tool_parameter(parameter))
@@ -106,6 +135,7 @@ pub(super) fn hatch_parameters(session: &SessionState) -> CadResult<HatchParamet
             .unwrap_or(f64::NAN)
     };
     let parameters = HatchParameters {
+        force_gradient,
         pattern_type: number(ToolParameter::HatchPatternType),
         pattern_index: number(ToolParameter::HatchPattern),
         spacing: number(ToolParameter::HatchSpacing),
@@ -137,9 +167,9 @@ pub(super) fn hatch_parameters(session: &SessionState) -> CadResult<HatchParamet
 }
 
 impl HatchParameters {
-    /// Whether the fill selector names a gradient.
+    /// Whether the fill selector names a gradient (or this command forces one).
     fn is_gradient(&self) -> bool {
-        self.pattern_type == HATCH_PATTERN_TYPE_GRADIENT
+        self.force_gradient || self.pattern_type == HATCH_PATTERN_TYPE_GRADIENT
     }
 
     /// The gradient kind name actually written, or `None` when the stored code is
@@ -263,14 +293,14 @@ impl HatchParameters {
     /// has no line family, so a stale non-positive spacing must not refuse it and
     /// spacing/double/style must not affect it.
     pub(super) fn fill(&self) -> CadResult<(HatchFill, HatchPatternType)> {
-        if self.pattern_type == HATCH_PATTERN_TYPE_SOLID {
-            return Ok((HatchFill::Solid, HatchPatternType::Predefined));
-        }
         if self.is_gradient() {
             return Ok((
                 HatchFill::Gradient(self.gradient()?),
                 HatchPatternType::Predefined,
             ));
+        }
+        if self.pattern_type == HATCH_PATTERN_TYPE_SOLID {
+            return Ok((HatchFill::Solid, HatchPatternType::Predefined));
         }
         if self.pattern_type == HATCH_PATTERN_TYPE_PREDEFINED {
             self.scale_and_angle()?;
@@ -311,6 +341,30 @@ impl HatchParameters {
             lines: vec![synthesized_user_defined_line()],
         };
         Ok((HatchFill::Pattern(pattern), HatchPatternType::UserDefined))
+    }
+}
+
+/// The default two-colour linear gradient HATCHEDIT GRADIENT writes.
+///
+/// It is the same ramp the session channel's defaults describe (Linear, 0°,
+/// ACI 1 red → ACI 5 blue, no shift), built without reading the session: an
+/// edit replaces the fill with a deterministic default rather than borrowing
+/// whatever fill settings the HATCH tool happens to hold. The ACI indices are
+/// constants with canonical palette triples, so the stops are always usable.
+pub(super) fn default_gradient() -> HatchGradient {
+    let stop = |value: f64, aci: f64, fallback: [u8; 3]| GradientStop {
+        value,
+        rgb: crate::property_value::rgb_for_aci(aci as u16).unwrap_or(fallback),
+    };
+    HatchGradient::TwoColor {
+        name: GRADIENT_NAME_LINEAR.to_string(),
+        reserved: GRADIENT_RESERVED,
+        angle_raw: 0.0,
+        shift: GRADIENT_SHIFT,
+        stops: vec![
+            stop(0.0, HATCH_GRADIENT_DEFAULT_ACI_A, [255, 0, 0]),
+            stop(1.0, HATCH_GRADIENT_DEFAULT_ACI_B, [0, 0, 255]),
+        ],
     }
 }
 
@@ -391,9 +445,7 @@ pub(super) fn hatch_diagnostic(
     style: HatchStyle,
     parameters: &HatchParameters,
 ) -> Diagnostic {
-    let fill = if parameters.pattern_type == HATCH_PATTERN_TYPE_SOLID {
-        "solid".to_string()
-    } else if parameters.is_gradient() {
+    let fill = if parameters.is_gradient() {
         // The command already validated the gradient in `fill()`; the name and
         // colours are echoed so the summary says which ramp was written instead
         // of naming a pattern that does not exist.
@@ -404,6 +456,8 @@ pub(super) fn hatch_diagnostic(
             parameters.gradient_color_a,
             parameters.gradient_color_b
         )
+    } else if parameters.pattern_type == HATCH_PATTERN_TYPE_SOLID {
+        "solid".to_string()
     } else if parameters.pattern_type == HATCH_PATTERN_TYPE_PREDEFINED {
         // The command already resolved the index successfully in `fill()`; the
         // name is repeated here so the echo names the pattern instead of
@@ -426,8 +480,13 @@ pub(super) fn hatch_diagnostic(
         object: Some(object),
         code: "drawing.hatch".into(),
         message: format!(
-            "HATCH: one entity with {loop_count} boundary loop(s) inserted (style {style:?}, \
+            "{}: one entity with {loop_count} boundary loop(s) inserted (style {style:?}, \
              {fill}; {}associative hatch NOT IMPLEMENTED)",
+            if parameters.force_gradient {
+                "GRADIENT"
+            } else {
+                "HATCH"
+            },
             stitching_summary(stitched_edges)
         ),
     }

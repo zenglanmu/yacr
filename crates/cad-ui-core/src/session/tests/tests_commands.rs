@@ -6,6 +6,8 @@
 
 mod alias_table;
 mod command_vocabulary;
+mod gradient;
+mod hatchedit;
 mod import_accounting;
 mod input_and_lifecycle;
 mod layout_status;

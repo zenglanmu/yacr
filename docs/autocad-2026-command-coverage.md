@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **69** |
-| **已实现合计（完整 + 部分）** | **119** |
-| 未实现 | **862** |
+| 部分实现（有写明的界） | **71** |
+| **已实现合计（完整 + 部分）** | **121** |
+| 未实现 | **860** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -81,8 +81,10 @@
 | `EXTEND` | 部分实现 | 目标仅 LINE/ARC；SPLINE/CIRCLE 目标拒绝 |
 | `FILLET` | 部分实现 | 两线形式 + 独立 FILLET POLYLINE 选择子；无 Multiple/Trim |
 | `FS` | 部分实现 | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把**直接**接触（相交或相切都算）的可见模型空间对象并入选择。默认 `FSMODE=OFF`：链式接触（`FSMODE=ON`）未实现；不展开块实例成员 |
+| `GRADIENT` | 部分实现 | 预选择闭合边界（Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链）且必须位于 +Z 平面；复用 HATCH 创建路径，强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5），一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 |
 | `GRID` | 已实现 | — |
 | `HATCH` | 部分实现 | 整实体闭合边界 + LINE/ARC 边链；无 .pat/关联性/实时预览 |
+| `HATCHEDIT` | 部分实现 | 恰好一个可寻址模型空间 hatch；键入 `ANGLE <度>`/`SCALE <比例>`（仅 Pattern 填充）或 `SOLID`/`GRADIENT`，经域构造器重建显示并保留 id/层/空间/次序/type_key；一条事务/一步撤销，无变化为 `hatchedit.unchanged` |
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 预选择 hatch；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；无关联/无选项提示 |
 | `HATCHTOBACK` | 部分实现 | 全部模型空间 hatch 置底（仅改写存储 draw order、保持相对次序、可撤销）；图纸空间/块内不重排 |
 | `ID` | 已实现 | — |
@@ -571,7 +573,7 @@
 | 402 | `GETSEL` | 未实现 | Creates a selection set of objects based on layer and object type filters. | — |
 | 403 | `GOTOSTART` | 未实现 | Switches from the current drawing to the Start tab. | — |
 | 404 | `GOTOURL` | 未实现 | Opens the file or web page associated with the hyperlink attached to an object. | — |
-| 405 | `GRADIENT` | 未实现 | Fills an enclosed area or selected objects with a gradient fill. | — |
+| 405 | `GRADIENT` | 部分实现 | Fills an enclosed area or selected objects with a gradient fill. | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5）；边界必须在 +Z 平面（否则 `gradient.not_plus_z`）；一个 `AcDbHatch`、一条事务/一步撤销；无预览、无 `-GRADIENT` 选项提示、无 .pat/关联性 |
 | 406 | `-GRAPHICSCONFIG` | 未实现 | Sets hardware acceleration on or off and provides access to display performance options on the command line. | — |
 | 407 | `GRAPHICSCONFIG` | 未实现 | Sets hardware acceleration on or off and provides access to display performance options. | — |
 | 408 | `GRAPHSCR` | 未实现 | Causes the text window to display behind the application window. | — |
@@ -582,7 +584,7 @@
 | 413 | `-HATCH` | 未实现 | Uses command prompts to fill an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | — |
 | 414 | `HATCH` | 部分实现 | Fills an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | 整实体闭合边界 + LINE/ARC 边链；无 .pat/关联性/实时预览 |
 | 415 | `-HATCHEDIT` | 未实现 | From the Command prompt, modifies existing hatches or fills. | — |
-| 416 | `HATCHEDIT` | 未实现 | Modifies an existing hatch or fill. | — |
+| 416 | `HATCHEDIT` | 部分实现 | Modifies an existing hatch or fill. | 选择式 v1：恰好一个直接可寻址的模型空间 HATCH；键入 `HATCHEDIT ANGLE <度>`/`SCALE <比例>`（仅 `HatchFill::Pattern`）或 `SOLID`/`GRADIENT`。ANGLE/SCALE 保留 loops/plane/style/seeds/pixel_size/pattern_type 并改 pattern，SOLID/GRADIENT 改填充（默认双色线性渐变）；显示由 `HatchGeometry::from_import` 重建，保留实体 id/层/空间/draw order/`AcDbHatch`，一条事务/一步撤销；相同值为 `hatchedit.unchanged`（无事务）。无交互对话框；`Pattern`/`Color`/`Properties`/`Draw order`/`Add`/`Remove` 边界/关联性未实现 |
 | 417 | `HATCHGENERATEBOUNDARY` | 部分实现 | Creates a non-associated polyline around a selected hatch. | 预选择输入（不弹 Select objects 选项）；每个 hatch loop 生成一条同层同空间的非关联闭合多段线（含内岛、保留 bulge）；源 hatch 保留；无关联性 |
 | 418 | `HATCHSETBOUNDARY` | 未实现 | Redefines a selected hatch or fill to conform to a different closed boundary. | — |
 | 419 | `HATCHSETORIGIN` | 未实现 | Controls the starting location of hatch pattern generation for a selected hatch. | — |

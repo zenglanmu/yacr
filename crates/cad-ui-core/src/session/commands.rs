@@ -166,6 +166,18 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("HATCHPOINT", CommandId::HatchPoint),
     ("HATCHGENERATEBOUNDARY", CommandId::HatchGenerateBoundary),
     ("HATCHTOBACK", CommandId::HatchToBack),
+    // GRADIENT (AutoCAD 2026) fills the **current selection** (no payload) with
+    // the session gradient parameters through the HATCH creation path. It is a
+    // canonical selector of its own, not an alias of HATCH: the fill is forced
+    // to a gradient and the boundary must be in the +Z plane. No preview, no
+    // `-GRADIENT` option prompts, no .pat handling.
+    ("GRADIENT", CommandId::Gradient),
+    // HATCHEDIT (AutoCAD 2026) edits **exactly one** selected model-space hatch
+    // with a typed option (`HATCHEDIT ANGLE|SCALE|SOLID|GRADIENT`); the bare
+    // name is a named `hatchedit.needs_option` refusal. Pattern name, Color,
+    // Properties, Draw order, Add/Remove boundaries and associativity are NOT
+    // IMPLEMENTED.
+    ("HATCHEDIT", CommandId::HatchEdit),
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
     ("EXTEND", CommandId::ExtendEntity),
@@ -383,6 +395,10 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 /// * [`PEDIT_SELECTOR`] (`PEDIT`): one declared v1 polyline option, `CLOSE`,
 ///   `OPEN` or `REVERSE` ([`parse_pedit_argument`]). The bare selector is a
 ///   named `pedit.needs_option` refusal, never a defaulted option.
+/// * [`HATCHEDIT_SELECTOR`] (`HATCHEDIT`): `ANGLE <degrees>`, `SCALE <factor>`,
+///   `SOLID` or `GRADIENT` ([`super::parse_hatchedit_argument`]). The bare
+///   selector is a named `hatchedit.needs_option` refusal, never a defaulted
+///   option.
 /// * [`MEASUREGEOM_SELECTOR`] (`MEASUREGEOM`): one of the six full option words
 ///   ([`super::measuregeom::parse_measuregeom_argument`]).
 pub const ARGUMENT_SELECTORS: &[&str] = &[
@@ -394,6 +410,7 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     TORIENT_SELECTOR,
     TCASE_SELECTOR,
     PEDIT_SELECTOR,
+    HATCHEDIT_SELECTOR,
     MEASUREGEOM_SELECTOR,
 ];
 
@@ -442,6 +459,20 @@ pub const PDSIZE_SELECTOR: &str = "PDSIZE";
 /// `Spline`, `Decurve`, `Ltype gen`, `Undo`, `Multiple`, `Edit vertex` and the
 /// `PEDITACCEPT` conversion prompt are NOT IMPLEMENTED.
 pub const PEDIT_SELECTOR: &str = "PEDIT";
+/// The `HATCHEDIT <option>` selector: the typed v1 hatch-edit surface (AutoCAD
+/// 2026).
+///
+/// AutoCAD's `HATCHEDIT` opens a dialog; this build has no in-command dialog, so
+/// the option is typed on the command line. The grammar
+/// ([`super::parse_hatchedit_argument`]) is `ANGLE <degrees>`, `SCALE <factor>`,
+/// `SOLID` and `GRADIENT`, case-insensitive. The current selection (exactly one
+/// model-space hatch) is still the whole input, so there is no second IPC. A
+/// bare `HATCHEDIT` is admitted by name and refused by the application with
+/// `hatchedit.needs_option`; an unknown argument is refused before IPC with
+/// [`super::invalid_hatchedit_argument_reason`]. `Pattern`, `Color`,
+/// `Properties`, `Draw order`, `Add`/`Remove` boundaries and associativity are
+/// NOT IMPLEMENTED.
+pub const HATCHEDIT_SELECTOR: &str = "HATCHEDIT";
 /// AutoCAD's `MEASUREGEOM <option>`: the inquiry router's typed argument form.
 ///
 /// This is an **argument form of the canonical `MEASUREGEOM` selector**, not a

@@ -365,6 +365,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `TCASE` | 部分实现 | 裸命令按 Title，`TCASE U/L/T/S/G` 分别大写/小写/标题/句首/切换；保留 MTEXT 转义序列 | 属性定义/标注文字未建模；MULTILEADER 只在可实现时改写 |
 | `TXT2MTXT` | 部分实现 | 选中 Text/MText 按上→下、左→右排序并以 `\P` 合并为一个 `AcDbMText`，同时删除来源（一条事务/一步撤销） | Settings 对话框、统一行距、分栏等未实现；保留原字符串转义 |
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 每个选中 HATCH 的每个 loop 生成一条同层/同空间、非关联的闭合 LWPOLYLINE（保留 bulge） | 无关联性；无选项提示 |
+| `GRADIENT` | 部分实现 | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5）；边界必须在 +Z 平面；一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 | 无渐变预览、无 `-GRADIENT` 选项提示、无 .pat/关联性；非 `+Z` 平面/非闭合/退化边界按名拒绝；证据只有 `cad-app`/`cad-ui-core`/前端契约测试 |
+| `HATCHEDIT` | 部分实现 | 恰好一个直接可寻址的模型空间 HATCH；键入 `ANGLE <度>`/`SCALE <比例>`（仅 Pattern 填充，>0）或 `SOLID`/`GRADIENT`；经 `HatchGeometry::from_import` 重建显示，保留实体 id/层/空间/draw order/`AcDbHatch`，一条事务/一步撤销；相同值为 `hatchedit.unchanged`（无事务） | 无交互对话框；`Pattern`/`Color`/`Properties`/`Draw order`/`Add`/`Remove` 边界/关联性未实现；裸命令按名拒绝并列出四个已实现形式；证据只有契约测试 |
 | `HATCHTOBACK` | 部分实现 | 把所有模型空间 HATCH 的 draw order 排到所有非 HATCH 对象之后，保留相对顺序；一条事务/一步撤销 | 图纸空间/块空间不重排；无 Draw Order 对话框 |
 | `WIPEOUT` | 部分实现 | 开放多边形捕获（≥3 点、`+Z` 平面）生成一个 `AcDbWipeout`（`Mask{inverted:false}`） | 无 Frames/ON/OFF/display-not-plot、无 Polyline/Erase Polyline 选项、无自交拒绝、无既有 wipeout 拾取 |
 | `POLYGON CIRCUMSCRIBED` | 部分实现 | 独立选择子：中心 + 切圆上一点，用 `R=r/cos(π/n)`、顶点在 `θ±π/n` 生成闭合外切正多边形 | `POLYGON` 的 `Edge` 分支、数值半径的捕捉旋转规则仍未实现 |

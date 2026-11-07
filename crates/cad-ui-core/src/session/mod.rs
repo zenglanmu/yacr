@@ -28,6 +28,7 @@ mod commands;
 mod diagnostics;
 pub mod events;
 mod fonts;
+mod hatchedit;
 mod import_progress;
 mod input;
 mod layers;
@@ -48,18 +49,16 @@ mod text_commands;
 pub mod vendor;
 pub mod wire;
 mod zoom;
-use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
-
-use cad_app::input::CanvasMetrics;
-use cad_app::{CommandPayload, StandardView, ToolParameter, ToolSnapshot, ToolValue};
+use crate::protocol::ProbeInput;
+use cad_app::{
+    input::CanvasMetrics, CommandPayload, StandardView, ToolParameter, ToolSnapshot, ToolValue,
+};
 use cad_domain::{CadResult, DocumentIdentity};
 use cad_engine::protocol::{EngineClient, EngineRequest, RequestError, RequestId, StatusMessage};
 use cad_engine::render::RenderSessionHandle;
 use cad_host::{HostCore, HostOptions, HostPlatform};
-
-use crate::protocol::ProbeInput;
-
+use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 // Names referenced only by intra-doc links in this module.
 #[allow(unused_imports)]
 use cad_app::input::DRAG_THRESHOLD_LOGICAL_PX;
@@ -96,15 +95,16 @@ pub use self::commands::{
     normalize_command, parse_pdmode_argument, parse_pdsize_argument, parse_pedit_argument,
     parse_snap_unit_argument, parse_zoom_argument, typed_command_argument,
     unsupported_command_reason, zoom_step_factor, ZoomArgument, ARGUMENT_SELECTOR,
-    ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE, MEASUREMENT_SELECTORS, PDMODE_SELECTOR,
-    PDSIZE_SELECTOR, PEDIT_SELECTOR, SNAPUNIT_SELECTOR, SPACE_SELECTOR, ZOOM_IN_FACTOR,
-    ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
+    ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE, HATCHEDIT_SELECTOR, MEASUREMENT_SELECTORS,
+    PDMODE_SELECTOR, PDSIZE_SELECTOR, PEDIT_SELECTOR, SNAPUNIT_SELECTOR, SPACE_SELECTOR,
+    ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
 pub use self::events::{
     cursor_changed, derive_batch, same_status_ignoring_volatile, CadEvent, CadEventKind,
     CanvasJson, EventBus, EventSink, StatusFrame, EVENT_RING_CAPACITY,
 };
 pub use self::fonts::{CadFont, CadFonts};
+pub use self::hatchedit::{invalid_hatchedit_argument_reason, parse_hatchedit_argument};
 pub use self::layers::{CadLayer, CadLayerColor, CadLayerWrite, CadLayers};
 pub use self::performance::CadPerformance;
 pub use self::profile::{

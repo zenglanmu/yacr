@@ -536,6 +536,10 @@ pub enum CommandId {
     HatchGenerateBoundary,
     /// HATCHTOBACK: see [`crate::command_id::hatch_to_back`].
     HatchToBack,
+    /// GRADIENT: see [`crate::command_id::gradient`].
+    Gradient,
+    /// HATCHEDIT: see [`crate::command_id::hatchedit`].
+    HatchEdit,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,
@@ -977,10 +981,12 @@ pub mod construction_line;
 pub mod dimension_chain;
 pub mod dimension_extra;
 pub mod draw_variants;
+pub mod gradient;
 pub mod grip_stretch;
 pub mod hatch;
 pub mod hatch_generate_boundary;
 pub mod hatch_to_back;
+pub mod hatchedit;
 pub mod massprop;
 pub mod match_prop;
 pub mod measuregeom;
