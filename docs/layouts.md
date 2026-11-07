@@ -158,6 +158,11 @@ paper = (model - view_center) * paper_per_model + paper_center
   三角化，并在新顶点上**线性插值 z、法线与逐顶点 sRGB 颜色**（渐变填充 HATCH 的
   颜色带因此正确，不会被拉伸）；完全在内的三角形原样复用，完全在外的消失。
   完全在窗口外的网格返回 `None`（精确省略）。
+- **圆锥曲线**：`clip_conic_to_rect(conic, center, half)` 对
+  `center + major*cos t + minor*sin t`（圆/圆弧/椭圆）按参数区间精确求交：把
+  x、y 两个坐标约束各自解成 `[0, 2π)` 上的区间，与圆弧自身的参数域求交，输出若干
+  同方向、非 `full` 的 `ConicSegment`。圆仍然是圆（不离散），完全在内时原样返回，
+  完全在外时精确省略。
 - **图像**：`clip_image_quad_to_rect(transform, center, half)` 裁剪单位正方形经
   `transform` 映射后的四边形，并在新顶点上**线性插值纹理坐标 UV**，返回
   `ImageVertex { position, uv }`；`DisplayPrimitive::Image` 增加可选 `clip` 多边形
@@ -205,9 +210,13 @@ paper = (model - view_center) * paper_per_model + paper_center
    无 bulge、世界 Z 且去重后正好是四个轴对齐矩形角的 `LWPOLYLINE` 才被接受，并使用该边界
    矩形作为 `clip`（可能小于/偏移于视口矩形，这是 VPCLIP 的真实语义）。曲线、开放折线、
    旋转/多角、倾斜 OCS、其他实体类型或悬空句柄仍按 §3 置 `Partial`，绝不强行摆正。
-2. **真实纸面→模型变换**：`model = (paper - paper_center) * model_per_paper + view_target`，
+2. **真实纸面→模型变换**：`model = (paper - paper_center) * model_per_paper + anchor`，
    其中 `model_per_paper = view_height / height`（acadrust 的 `view_height`、`height`、
-   `center`、`view_target`）。本层由它恢复视图中心（`stored(paper_center)`）。
+   `center`），`anchor` 是纸面视口中心显示的模型点。它取自 **DXF 组码 12/22 的二维
+   视图中心**（`Viewport.view_center`）；组码 17/27/37 的 `view_target` 只在
+   `view_center` 恰为 `(0,0)` 且 target 非零时作为兼容回退。QCAD 等写入方把真实中心
+   放在 12/22 而把 17/27/37 留为原点，若按 `view_target` 锚定，所有视口都会退化成
+   「模型原点在视口中心」。本层由存储变换恢复视图中心（`stored(paper_center)`）。
 3. 因此 `viewport_transform` 直接返回 `Supported`，四角、比例方向与视图中心都正确
    （见 §2.2 与 `paper_per_model_from_view`）。审计 B22 的两处方向/形状问题均已闭环。
 
@@ -276,12 +285,14 @@ world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_sc
 ## 4. 明确未完成（不是已支持）
 
 - **视口裁剪的剩余边界**：线/填充几何按段精确裁剪；`Mesh` 逐三角精确裁剪（位置、
-  z、法线、逐顶点颜色插值）；`Image` 四边形精确裁剪（纹理 UV 插值），且当图像**同时**
+  z、法线、逐顶点颜色插值）；`Conic`（圆/圆弧/椭圆）按参数区间精确裁剪，圆保持解析
+  不解散；`Image` 四边形精确裁剪（纹理 UV 插值），且当图像**同时**
   带实体级裁剪与视口裁剪时，两者**精确求交**（Sutherland–Hodgman，UV 插值；见
   `docs/dxf-entity-coverage.md`）；带字体名、被 `FontEngine` 成功 shape 的 Text 其轮廓
   就是 `Lines`，走线裁剪（精确）。仍 **无法精确裁剪** 的情形保留未裁剪几何并降为
   `Partial`，附稳定 `clip_reason` 码与 `representation.viewport_clip_partial` 诊断
   （绝不静默丢弃、绝不声称已裁剪）：
+  - `viewport.clip_conic_unclippable`：圆锥曲线参数非有限（退化/溢出的防御性输入）；
   - `viewport.clip_text_font_dependent`：未 shape 的 `Text` 占位（无字体时 glyph
     几何依赖字体，本层无从裁剪）；
   - `viewport.clip_mesh_unclippable`：网格索引越界、顶点非有限或超出 32 位顶点寻址；

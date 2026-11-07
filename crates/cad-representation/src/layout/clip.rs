@@ -1,8 +1,20 @@
+use std::cmp::Ordering;
+
 use cad_domain::*;
+
+use crate::ConicSegment;
 
 use super::clip_reason;
 use super::selection::ClipRefusal;
 use super::view::finite_point;
+
+/// Full turn in radians.
+const TAU: f64 = std::f64::consts::TAU;
+/// Angular tolerance for merging/clamping clipped parameter intervals.
+const ANGLE_EPS: f64 = 1e-12;
+
+/// A set of parameter intervals inside `[0, TAU)`.
+type Intervals = Vec<(f64, f64)>;
 
 /// Clip one transformed polyline to a paper rectangle.
 ///
@@ -47,6 +59,225 @@ pub fn clip_polyline_to_rect(
         runs.push(current);
     }
     runs
+}
+
+/// Clip an analytic conic to an axis-aligned paper rectangle
+/// `[center - half, center + half]`.
+///
+/// The conic is `center + major*cos(t) + minor*sin(t)` for `t` in
+/// `[start, start+sweep]` (the whole circle when `full`). The result is the
+/// exact set of parameter slices that lie inside the rectangle, emitted as
+/// [`ConicSegment`]s with the original traversal direction. Circles and
+/// ellipses therefore stay analytic (they are not tessellated), and a curve
+/// that misses the window is dropped entirely.
+///
+/// Returns [`ClipRefusal`] only for non-finite geometry; the caller keeps the
+/// original primitive and reports the degradation rather than guessing.
+pub fn clip_conic_to_rect(
+    conic: &ConicSegment,
+    center: [f64; 2],
+    half: [f64; 2],
+) -> Result<Vec<ConicSegment>, ClipRefusal> {
+    let finite = |p: &Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !finite(&conic.center)
+        || !finite(&conic.major)
+        || !finite(&conic.minor)
+        || !conic.start.is_finite()
+        || !conic.sweep.is_finite()
+    {
+        return Err(ClipRefusal::new(
+            clip_reason::CONIC_UNCLIPPABLE,
+            "conic parameters are not finite and cannot be clipped exactly",
+        ));
+    }
+
+    let min = [center[0] - half[0], center[1] - half[1]];
+    let max = [center[0] + half[0], center[1] + half[1]];
+    let by_x = axis_intervals(conic.center.x, conic.major.x, conic.minor.x, min[0], max[0]);
+    let by_y = axis_intervals(conic.center.y, conic.major.y, conic.minor.y, min[1], max[1]);
+    let mut inside = intersect_intervals(&by_x, &by_y);
+    if inside.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let domain = arc_domain(conic);
+    let domain_len = total_length(&domain);
+    inside = intersect_intervals(&inside, &domain);
+    if inside.is_empty() {
+        return Ok(Vec::new());
+    }
+    // The whole visible arc survives: keep the original conic untouched so a
+    // full circle stays a full circle (SDF-friendly) and dash phase is stable.
+    if (total_length(&inside) - domain_len).abs() <= ANGLE_EPS {
+        return Ok(vec![*conic]);
+    }
+
+    // Emit slices in traversal order. A negative sweep keeps its direction so
+    // downstream dash/cap semantics see the same parameter flow as the source.
+    let forward = conic.sweep >= 0.0;
+    let distance = |t: f64| -> f64 {
+        if forward {
+            (t - conic.start).rem_euclid(TAU)
+        } else {
+            (conic.start - t).rem_euclid(TAU)
+        }
+    };
+    inside.sort_by(|a, b| {
+        let start_a = if forward { a.0 } else { a.1 };
+        let start_b = if forward { b.0 } else { b.1 };
+        distance(start_a)
+            .partial_cmp(&distance(start_b))
+            .unwrap_or(Ordering::Equal)
+    });
+
+    let mut pieces = Vec::with_capacity(inside.len());
+    for (lo, hi) in inside {
+        if hi - lo <= ANGLE_EPS {
+            continue;
+        }
+        pieces.push(ConicSegment {
+            center: conic.center,
+            major: conic.major,
+            minor: conic.minor,
+            start: if forward { lo } else { hi },
+            sweep: if forward { hi - lo } else { lo - hi },
+            full: false,
+        });
+    }
+    Ok(pieces)
+}
+
+/// Parameter intervals of one axis constraint `lo <= c + a*cos t + b*sin t <= hi`.
+fn axis_intervals(c: f64, a: f64, b: f64, lo: f64, hi: f64) -> Intervals {
+    let radius = a.hypot(b);
+    if radius == 0.0 {
+        // A constant coordinate: either always inside or never.
+        return if c >= lo && c <= hi {
+            vec![(0.0, TAU)]
+        } else {
+            Vec::new()
+        };
+    }
+    let phase = b.atan2(a);
+    let allowed = cosine_interval_set((lo - c) / radius, (hi - c) / radius);
+    shift_intervals(allowed, phase)
+}
+
+/// `theta` in `[0, TAU)` where `lo <= cos(theta) <= hi`.
+fn cosine_interval_set(lo: f64, hi: f64) -> Intervals {
+    if lo.is_nan() || hi.is_nan() || lo > hi {
+        return Vec::new();
+    }
+    let below = if hi >= 1.0 {
+        vec![(0.0, TAU)]
+    } else if hi <= -1.0 {
+        Vec::new()
+    } else {
+        let edge = hi.acos();
+        vec![(edge, TAU - edge)]
+    };
+    let above = if lo <= -1.0 {
+        vec![(0.0, TAU)]
+    } else if lo >= 1.0 {
+        Vec::new()
+    } else {
+        let edge = lo.acos();
+        vec![(0.0, edge), (TAU - edge, TAU)]
+    };
+    intersect_intervals(&below, &above)
+}
+
+/// Rotate every interval by `phase` on the parameter circle.
+fn shift_intervals(intervals: Intervals, phase: f64) -> Intervals {
+    let mut shifted = Vec::with_capacity(intervals.len());
+    for (lo, hi) in intervals {
+        let length = hi - lo;
+        if length >= TAU - ANGLE_EPS {
+            shifted.push((0.0, TAU));
+            continue;
+        }
+        let start = (lo + phase).rem_euclid(TAU);
+        let end = (hi + phase).rem_euclid(TAU);
+        if (end - start).rem_euclid(TAU) <= ANGLE_EPS {
+            continue;
+        }
+        if start < end {
+            shifted.push((start, end));
+        } else {
+            shifted.push((start, TAU));
+            shifted.push((0.0, end));
+        }
+    }
+    normalize_intervals(shifted)
+}
+
+/// The parameter set actually drawn by the conic, on `[0, TAU)`.
+fn arc_domain(conic: &ConicSegment) -> Intervals {
+    if conic.full || conic.sweep.abs() >= TAU - ANGLE_EPS {
+        return vec![(0.0, TAU)];
+    }
+    if conic.sweep == 0.0 {
+        return Vec::new();
+    }
+    let start = conic.start.rem_euclid(TAU);
+    let end = (conic.start + conic.sweep).rem_euclid(TAU);
+    if conic.sweep > 0.0 {
+        if start < end {
+            vec![(start, end)]
+        } else {
+            vec![(start, TAU), (0.0, end)]
+        }
+    } else if end < start {
+        vec![(end, start)]
+    } else {
+        vec![(0.0, start), (end, TAU)]
+    }
+}
+
+/// Intersection of two interval sets, merged and clamped to `[0, TAU)`.
+fn intersect_intervals(left: &[(f64, f64)], right: &[(f64, f64)]) -> Intervals {
+    let mut out = Vec::new();
+    let (mut i, mut j) = (0usize, 0usize);
+    while i < left.len() && j < right.len() {
+        let lo = left[i].0.max(right[j].0);
+        let hi = left[i].1.min(right[j].1);
+        if hi - lo > ANGLE_EPS {
+            out.push((lo, hi));
+        }
+        if left[i].1 < right[j].1 {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    normalize_intervals(out)
+}
+
+/// Sort, clamp and merge overlapping/touching intervals.
+fn normalize_intervals(mut intervals: Intervals) -> Intervals {
+    intervals.retain(|(lo, hi)| hi - lo > ANGLE_EPS);
+    intervals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
+    let mut out: Intervals = Vec::with_capacity(intervals.len());
+    for (lo, hi) in intervals {
+        let lo = lo.max(0.0);
+        let hi = hi.min(TAU);
+        if hi - lo <= ANGLE_EPS {
+            continue;
+        }
+        match out.last_mut() {
+            Some(last) if lo <= last.1 + ANGLE_EPS => {
+                if hi > last.1 {
+                    last.1 = hi;
+                }
+            }
+            _ => out.push((lo, hi)),
+        }
+    }
+    out
+}
+
+fn total_length(intervals: &[(f64, f64)]) -> f64 {
+    intervals.iter().map(|(lo, hi)| hi - lo).sum()
 }
 
 /// Liang–Barsky clip of one segment to an axis-aligned rectangle.

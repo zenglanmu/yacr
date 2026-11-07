@@ -126,10 +126,20 @@ fn rectangular_clip_rectangle(p: &acadrust::entities::LwPolyline) -> Option<[Poi
 /// boundary entity is resolved and used when it is provably a closed,
 /// bulge-free, axis-aligned rectangle (VPCLIP's own geometry). `model_to_paper`
 /// is the real paper→model map
-/// `model = (paper - paper_center) * model_per_paper + view_target`,
-/// so the representation layer recovers the view centre from the stored
-/// transform (audit B22) even when the clip rectangle differs from the
-/// viewport rectangle.
+/// `model = (paper - paper_center) * model_per_paper + anchor`,
+/// where `anchor` is the model point shown at the viewport centre, so the
+/// representation layer recovers the view centre from the stored transform
+/// (audit B22) even when the clip rectangle differs from the viewport
+/// rectangle.
+///
+/// The anchor comes from the DXF *view centre* (group 12/22, DCS), not the
+/// 3D `view_target` (group 17/27/37, WCS): QCAD and other writers put the real
+/// 2D centre in 12/22 and leave 17/27/37 at `(0, 0, 0)`, so anchoring on
+/// `view_target` degenerates every such viewport to "model origin at the
+/// viewport centre". Only the anchor's z stays on `view_target.z`. Files that
+/// populate just group 17 are kept working by a compatibility fallback: when
+/// the view centre is exactly `(0, 0)` and the target's x/y is not, the
+/// target's x/y become the anchor.
 ///
 /// Exact only for a top/plan view: a tilted view direction, a view twist, a
 /// perspective projection or a clip that cannot be proven rectangular is
@@ -176,8 +186,28 @@ pub(crate) fn paper_viewport(
         0.0
     };
     let paper_center = p3(v.center);
+    let view_center = p3(v.view_center);
     let view_target = p3(v.view_target);
-    let finite = [paper_center, view_target]
+    // DXF group 12/22 carries the 2D view centre (DCS); group 17/27/37 the 3D
+    // WCS target. QCAD leaves the target at the origin, so anchor on the view
+    // centre and only fall back to the target for files that populate just 17.
+    let anchor = if view_center.x == 0.0
+        && view_center.y == 0.0
+        && (view_target.x != 0.0 || view_target.y != 0.0)
+    {
+        Point3 {
+            x: view_target.x,
+            y: view_target.y,
+            z: view_target.z,
+        }
+    } else {
+        Point3 {
+            x: view_center.x,
+            y: view_center.y,
+            z: view_target.z,
+        }
+    };
+    let finite = [paper_center, view_center, view_target]
         .iter()
         .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
         && v.width.is_finite()
@@ -215,9 +245,9 @@ pub(crate) fn paper_viewport(
     let mut matrix = Transform3::identity().matrix;
     matrix[0][0] = model_per_paper;
     matrix[1][1] = model_per_paper;
-    matrix[0][3] = view_target.x - model_per_paper * paper_center.x;
-    matrix[1][3] = view_target.y - model_per_paper * paper_center.y;
-    matrix[2][3] = view_target.z;
+    matrix[0][3] = anchor.x - model_per_paper * paper_center.x;
+    matrix[1][3] = anchor.y - model_per_paper * paper_center.y;
+    matrix[2][3] = anchor.z;
     let completeness = if reasons.is_empty() {
         Completeness::Complete
     } else {

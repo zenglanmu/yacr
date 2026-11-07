@@ -2,7 +2,7 @@ use super::*;
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer, PaperViewport};
 use std::sync::Arc;
 
-use crate::{ConicStats, DisplayPrimitive, ImageVertex, ProviderRegistry};
+use crate::{ConicSegment, ConicStats, DisplayPrimitive, ImageVertex, ProviderRegistry};
 
 // ---- paper build -------------------------------------------------------
 
@@ -576,4 +576,169 @@ fn paper_build_dedups_repeated_clip_diagnostics() {
         .filter(|f| matches!(f.primitive, DisplayPrimitive::Text { .. }))
         .count();
     assert_eq!(texts, 2, "both viewports keep their unclipped text");
+}
+
+// ---- analytic conic clipping -------------------------------------------
+
+fn unit_circle(sweep: f64) -> ConicSegment {
+    ConicSegment {
+        center: p(0.0, 0.0),
+        major: p(4.5, 0.0),
+        minor: p(0.0, 4.5),
+        start: 0.0,
+        sweep,
+        full: sweep.abs() >= std::f64::consts::TAU - 1e-9,
+    }
+}
+
+fn conic_point(piece: &ConicSegment, t: f64) -> (f64, f64) {
+    (
+        piece.center.x + piece.major.x * t.cos() + piece.minor.x * t.sin(),
+        piece.center.y + piece.major.y * t.cos() + piece.minor.y * t.sin(),
+    )
+}
+
+#[test]
+fn conic_clip_keeps_only_the_arc_inside_the_paper_window() {
+    let conic = unit_circle(std::f64::consts::TAU);
+    let pieces = clip_conic_to_rect(&conic, [0.0, 0.0], [4.0, 3.0]).expect("finite conic");
+    assert!(!pieces.is_empty(), "a crossing circle yields arcs");
+    assert!(
+        pieces.len() <= 4,
+        "a rectangle cuts a conic into at most 4 arcs"
+    );
+
+    let mut max_x: f64 = f64::NEG_INFINITY;
+    let mut max_y: f64 = f64::NEG_INFINITY;
+    for piece in &pieces {
+        assert!(!piece.full);
+        for step in 0..=64 {
+            let t = piece.start + piece.sweep * (step as f64 / 64.0);
+            let (x, y) = conic_point(piece, t);
+            assert!(
+                (-4.0 - 1e-9..=4.0 + 1e-9).contains(&x),
+                "x {x} outside window"
+            );
+            assert!(
+                (-3.0 - 1e-9..=3.0 + 1e-9).contains(&y),
+                "y {y} outside window"
+            );
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+    }
+    assert!(
+        (max_x - 4.0).abs() < 1e-9,
+        "right window edge is visible: {max_x}"
+    );
+    assert!(
+        (max_y - 3.0).abs() < 1e-9,
+        "top window edge is visible: {max_y}"
+    );
+
+    // A clockwise conic keeps its direction in every clipped slice.
+    let clockwise = unit_circle(-std::f64::consts::TAU);
+    let pieces = clip_conic_to_rect(&clockwise, [0.0, 0.0], [4.0, 3.0]).expect("finite conic");
+    assert!(!pieces.is_empty());
+    assert!(
+        pieces.iter().all(|piece| piece.sweep < 0.0),
+        "negative sweep is preserved"
+    );
+}
+
+#[test]
+fn conic_fully_inside_the_window_is_returned_unchanged() {
+    let conic = unit_circle(std::f64::consts::TAU);
+    let pieces = clip_conic_to_rect(&conic, [0.0, 0.0], [20.0, 20.0]).expect("finite conic");
+    assert_eq!(pieces, vec![conic]);
+}
+
+#[test]
+fn conic_arc_span_is_preserved_when_fully_inside() {
+    let mut arc = unit_circle(std::f64::consts::FRAC_PI_2);
+    arc.start = std::f64::consts::FRAC_PI_4;
+    arc.full = false;
+    let pieces = clip_conic_to_rect(&arc, [0.0, 0.0], [20.0, 20.0]).expect("finite conic");
+    assert_eq!(
+        pieces,
+        vec![arc],
+        "a visible arc is not widened to a full circle"
+    );
+}
+
+#[test]
+fn non_finite_conic_is_refused_with_the_stable_code() {
+    let mut conic = unit_circle(std::f64::consts::TAU);
+    conic.major.x = f64::INFINITY;
+    let refusal = clip_conic_to_rect(&conic, [0.0, 0.0], [4.0, 3.0])
+        .expect_err("non-finite conic cannot be clipped");
+    assert_eq!(refusal.reason, clip_reason::CONIC_UNCLIPPABLE);
+}
+
+#[test]
+fn conic_fully_outside_the_window_is_dropped() {
+    let mut conic = unit_circle(std::f64::consts::TAU);
+    conic.center = p(100.0, 100.0);
+    let pieces = clip_conic_to_rect(&conic, [0.0, 0.0], [2.0, 2.0]).expect("finite conic");
+    assert!(pieces.is_empty());
+}
+
+#[test]
+fn paper_build_clips_circle_geometry_to_the_viewport() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    // A large model circle: at 1:100 its paper radius is 55 around paper
+    // centre (50,25). That is wider than the 100×50 window's half-width and
+    // half-height but smaller than its half-diagonal (55.9), so it crosses all
+    // four edges instead of enclosing the window.
+    b.insert_entity(model_entity(
+        1,
+        SemanticGeometry::Circle {
+            center: p(10.0, 20.0),
+            normal: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            radius: 5500.0,
+        },
+        0,
+    ))
+    .unwrap();
+    b.insert_layout(cad_db::Layout {
+        id: LayoutId(1),
+        name: "L1".into(),
+        viewports: vec![four_corner_viewport()],
+    })
+    .unwrap();
+    let db = b.finish().unwrap();
+
+    let registry = ProviderRegistry::with_default_provider();
+    let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
+
+    // Exact clipping is not a degradation.
+    assert_eq!(rep.completeness, Completeness::Complete);
+    let conics: Vec<_> = rep
+        .fragments
+        .iter()
+        .filter_map(|f| match &f.primitive {
+            DisplayPrimitive::Conic(conic) => Some(conic),
+            _ => None,
+        })
+        .collect();
+    assert!(!conics.is_empty(), "the visible arcs survive");
+    for conic in conics {
+        assert!(!conic.full, "no whole circle may leak out of the window");
+        for step in 0..=64 {
+            let t = conic.start + conic.sweep * (step as f64 / 64.0);
+            let (x, y) = conic_point(conic, t);
+            assert!((-1e-9..=100.0 + 1e-9).contains(&x), "x {x} leaked out");
+            assert!((-1e-9..=50.0 + 1e-9).contains(&y), "y {y} leaked out");
+        }
+    }
 }

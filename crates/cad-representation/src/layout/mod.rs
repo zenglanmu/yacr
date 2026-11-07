@@ -49,9 +49,11 @@
 //!
 //! and its four paper corners are clipped exactly with Liang–Barsky. Line
 //! geometry clips per segment, mesh geometry clips per triangle
-//! (Sutherland–Hodgman, with colour/normal interpolation) and an image quad
-//! clips with its texture coordinates interpolated — see
-//! [`clip_mesh_to_rect`] and [`clip_image_quad_to_rect`]. A view transform that
+//! (Sutherland–Hodgman, with colour/normal interpolation), an image quad
+//! clips with its texture coordinates interpolated, and an analytic conic
+//! (circle/arc/ellipse) clips to exact parameter intervals — see
+//! [`clip_mesh_to_rect`], [`clip_image_quad_to_rect`] and
+//! [`clip_conic_to_rect`]. A view transform that
 //! is twisted (rotation), sheared, mirrored, non-uniform, off the paper plane or
 //! singular is unsupported here and reported, never applied as an approximation.
 //!
@@ -66,7 +68,9 @@ mod selection;
 mod view;
 
 pub use build::build_paper_space;
-pub use clip::{clip_mesh_to_rect, clip_polygon_to_rect, clip_polyline_to_rect};
+pub use clip::{
+    clip_conic_to_rect, clip_mesh_to_rect, clip_polygon_to_rect, clip_polyline_to_rect,
+};
 pub use image::clip_image_quad_to_rect;
 pub use selection::{
     enumerate_layouts, ClipRefusal, LayoutDescriptor, SpaceSelection, ViewportState,
@@ -125,6 +129,8 @@ pub mod clip_reason {
     pub const IMAGE_INTERSECTION_UNSUPPORTED: &str = "viewport.clip_image_intersection_unsupported";
     /// A primitive with no clip representation reached the viewport (instance).
     pub const UNSUPPORTED_PRIMITIVE: &str = "viewport.clip_unsupported_primitive";
+    /// An analytic conic has non-finite parameters and cannot be clipped.
+    pub const CONIC_UNCLIPPABLE: &str = "viewport.clip_conic_unclippable";
 }
 
 #[cfg(test)]

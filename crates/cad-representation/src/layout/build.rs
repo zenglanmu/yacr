@@ -8,7 +8,7 @@ use crate::{
     RepresentationContext,
 };
 
-use super::clip::{clip_mesh_to_rect, clip_polyline_to_rect};
+use super::clip::{clip_conic_to_rect, clip_mesh_to_rect, clip_polyline_to_rect};
 use super::clip_reason;
 use super::image::{
     clip_image_polygon_to_rect, clip_image_quad_to_rect, image_polygon_is_convex, image_quad_inside,
@@ -417,6 +417,31 @@ pub fn build_paper_space(
                             ));
                         }
                     },
+                    DisplayPrimitive::Conic(conic) => {
+                        match clip_conic_to_rect(&conic, center, half) {
+                            Ok(pieces) => {
+                                for piece in pieces {
+                                    out.fragments.push(fragment_like(
+                                        fragment,
+                                        DisplayPrimitive::Conic(std::sync::Arc::new(piece)),
+                                    ));
+                                }
+                            }
+                            Err(refusal) => {
+                                // Non-finite geometry: keep it whole and report,
+                                // exactly like the other unclippable classes.
+                                report_clip_degradation(
+                                    &mut out,
+                                    &mut clip_seen,
+                                    &refusal,
+                                    layout_id,
+                                    index,
+                                );
+                                out.fragments
+                                    .push(fragment_like(fragment, DisplayPrimitive::Conic(conic)));
+                            }
+                        }
+                    }
                     other => {
                         // An unexpanded instance has no geometry to clip; keep
                         // it and report rather than fake a windowed version.

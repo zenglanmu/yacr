@@ -39,9 +39,9 @@ pub fn build_vector_document(
                     collect_lines(&mut document, object, pair, fragment, &vector_page);
                 }
             }
-            // This slice keeps the chord draw: expand the conic through the same
-            // tessellation the pre-conic path used. A normal paper-space build
-            // has already expanded conics, so this is a safety net.
+            // Vector output carries polylines only: expand the (possibly
+            // viewport-clipped) analytic conic through the same chord
+            // tessellation the pre-conic path used.
             DisplayPrimitive::Conic(conic) => {
                 let points = conic.chord_points();
                 collect_lines(&mut document, object, &points, fragment, &vector_page);

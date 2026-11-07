@@ -3,7 +3,11 @@
 use super::*;
 
 /// Build a top/plan VIEWPORT entity with the given paper rectangle, scale,
-/// and model view target.
+/// and model view centre.
+///
+/// Both the DXF view centre (group 12/22) and the 3D view target (group
+/// 17/27/37) are set to the same model point, so the fixture does not depend on
+/// which field the importer anchors on.
 fn top_viewport(
     center: (f64, f64),
     w: f64,
@@ -18,6 +22,7 @@ fn top_viewport(
     v.height = h;
     v.view_height = view_height;
     v.view_direction = acadrust::types::Vector3::UNIT_Z;
+    v.view_center = acadrust::types::Vector3::new(view_target.0, view_target.1, 0.0);
     v.view_target = acadrust::types::Vector3::new(view_target.0, view_target.1, 0.0);
     v
 }
@@ -93,6 +98,47 @@ fn one_to_one_hundred_viewport_has_four_corners_and_the_real_transform() {
         z: 0.0,
     });
     assert!((right.x - 110.0).abs() < 1e-9, "{right:?}");
+}
+
+#[test]
+fn view_center_is_used_when_view_target_is_zero() {
+    // QCAD-style VIEWPORT: the real 2D centre lives in group 12/22 and group
+    // 17/27/37 is left at the origin. The importer must anchor on the view
+    // centre, not collapse the viewport to "model origin at viewport centre".
+    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (0.0, 0.0));
+    vp.view_center = acadrust::types::Vector3::new(10.0, 20.0, 0.0);
+    let doc = acadrust::CadDocument::new();
+    let pv = paper_viewport(&vp, &doc).expect("id 2 is a content viewport");
+    assert_eq!(pv.completeness, Completeness::Complete);
+    assert_eq!(pv.clip, rectangle(0.0, 0.0, 100.0, 50.0));
+    let m = &pv.model_to_paper.matrix;
+    assert!((m[0][0] - 100.0).abs() < 1e-9, "{m:?}");
+    assert!((m[1][1] - 100.0).abs() < 1e-9, "{m:?}");
+    let model_centre = pv.model_to_paper.apply_point(Point3 {
+        x: 50.0,
+        y: 25.0,
+        z: 0.0,
+    });
+    assert!((model_centre.x - 10.0).abs() < 1e-9, "{model_centre:?}");
+    assert!((model_centre.y - 20.0).abs() < 1e-9, "{model_centre:?}");
+}
+
+#[test]
+fn view_target_is_the_fallback_anchor_when_view_center_is_zero() {
+    // Files that populate only group 17/27 must keep working: a zero view
+    // centre falls back to the 3D target's x/y as the model anchor.
+    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
+    vp.view_center = acadrust::types::Vector3::ZERO;
+    let doc = acadrust::CadDocument::new();
+    let pv = paper_viewport(&vp, &doc).expect("id 2 is a content viewport");
+    assert_eq!(pv.completeness, Completeness::Complete);
+    let model_centre = pv.model_to_paper.apply_point(Point3 {
+        x: 50.0,
+        y: 25.0,
+        z: 0.0,
+    });
+    assert!((model_centre.x - 10.0).abs() < 1e-9, "{model_centre:?}");
+    assert!((model_centre.y - 20.0).abs() < 1e-9, "{model_centre:?}");
 }
 
 #[test]
