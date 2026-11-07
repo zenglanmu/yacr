@@ -12,7 +12,7 @@
 import { POPUP_KEYS } from '../popup/popup.ts';
 import { OPTIONS_KEYS } from '../options/options.ts';
 import { STANDARD_VIEWS } from '../cad/view3d.ts';
-import { CIRCLE_ITEM } from './variants.ts';
+import { CIRCLE_ITEM, POLYGON_ITEM } from './variants.ts';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({
@@ -340,7 +340,11 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'PLINE', labelKey: 'draw.kind.polyline', icon: 'polyline', command: 'PLINE' },
           { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', command: 'RECTANG' },
           { id: 'ELLIPSE', labelKey: 'draw.kind.ellipse', icon: 'ellipse', command: 'ELLIPSE' },
-          { id: 'POLYGON', labelKey: 'draw.kind.polygon', icon: 'polygon', command: 'POLYGON' },
+          // The Polygon split button: the plain inscribed POLYGON stays the parent
+          // (unchanged behaviour) and the caret offers the circumscribed
+          // construction as its own selector (see `POLYGON_ITEM` above for why the
+          // two are different commands and why there is no `Edge` row).
+          POLYGON_ITEM,
           { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', command: 'POINT' },
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
           // INSERT (2026-11-01) is the point-then-name block reference: the pick
@@ -586,7 +590,11 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'PLINE', labelKey: 'draw.kind.polyline', icon: 'polyline', command: 'PLINE' },
           { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', command: 'RECTANG' },
           { id: 'ELLIPSE', labelKey: 'draw.kind.ellipse', icon: 'ellipse', command: 'ELLIPSE' },
-          { id: 'POLYGON', labelKey: 'draw.kind.polygon', icon: 'polygon', command: 'POLYGON' },
+          // The Polygon split button: the plain inscribed POLYGON stays the parent
+          // (unchanged behaviour) and the caret offers the circumscribed
+          // construction as its own selector (see `POLYGON_ITEM` above for why the
+          // two are different commands and why there is no `Edge` row).
+          POLYGON_ITEM,
           { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', command: 'POINT' },
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
           // Same slot as on the Home panel: INSERT sits at the tail of the
@@ -782,9 +790,10 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // further boundary point, Enter finishes. Small button with **no variant
           // popover**: v1 has no `Frames` model, no `Polyline`/`Erase Polyline`
           // option and no self-intersection rejection, so a caret would imply
-          // choices the command does not have. It reuses the `hatch` glyph: both
-          // fill a bounded region, and the icon set has no mask mark.
-          { id: 'WIPEOUT', labelKey: 'draw.kind.wipeout', icon: 'hatch', command: 'WIPEOUT' },
+          // choices the command does not have. It reuses the `erase` glyph (an
+          // eraser: this region hides what is behind it); the icon set has no mask
+          // mark and `hatch` is contractually the hatch family's own.
+          { id: 'WIPEOUT', labelKey: 'draw.kind.wipeout', icon: 'erase', command: 'WIPEOUT' },
         ],
       },
     ],

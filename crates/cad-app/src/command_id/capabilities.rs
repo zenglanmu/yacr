@@ -26,6 +26,7 @@ impl CommandId {
                 | Self::CreateRectangle
                 | Self::CreateEllipse
                 | Self::CreatePolygon
+                | Self::CreatePolygonCircumscribed
                 | Self::CreatePoint
                 | Self::CreateSpline
                 | Self::CreateText

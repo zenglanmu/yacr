@@ -50,3 +50,57 @@
 ///
 /// Work-only: Viewer mode refuses it at the command layer.
 pub struct WipeoutCommand;
+
+/// `POLYGON CIRCUMSCRIBED` — AutoCAD's `POLYGON` → `Circumscribed about circle`
+/// (`C`) construction, as a **canonical selector of its own**.
+///
+/// # Why not an alias
+///
+/// `POLYGON` is the inscribed construction: the second pick is a **vertex**, so it
+/// lies on the polygon. This command's second pick lies on the **inscribed
+/// (tangent) circle** — the circle every edge touches — and is the midpoint of the
+/// first edge. The same two clicks therefore produce different rings, so the names
+/// are two distinct capture paths, never one alias of the other.
+///
+/// # What is implemented
+///
+/// Payload is [`crate::CommandPayload::Points`] `[center, tangent_point]`, exactly
+/// the two clicks. The side count is the session sysvar
+/// [`crate::SessionState::polygon_sides`] (`MIN_POLYGON_SIDES..=MAX_POLYGON_SIDES`,
+/// i.e. `3..=1024`, AutoCAD's `POLYSIDES` range), never a payload field.
+///
+/// Construction ([`crate::draw_tool::circumscribed_polygon_vertices`]):
+///
+/// * `r = |tangent_point − center|` is the tangent-circle (apothem) radius;
+/// * the vertex radius is `R = r / cos(π/n)`;
+/// * `θ = atan2(tangent_point − center)` is the **midpoint of the first edge**, so
+///   the vertices sit at `θ − π/n + i·2π/n` (`i = 0..n`), stepping
+///   counter-clockwise about `+Z`;
+/// * every edge midpoint is exactly `r` from the centre, the ring is **closed**
+///   with one zero bulge per vertex (`AcDbPolyline`, the same LWPOLYLINE the
+///   inscribed variant stores), and the first vertex is not repeated.
+///
+/// One entity, one transaction, one undo step on the active layer, through the
+/// shared create funnel.
+///
+/// Refusals (all before any write, all with a stable machine prefix):
+///
+/// * `polygoncircumscribed.invalid_point` — a non-finite pick;
+/// * `polygoncircumscribed.sides` — a stored side count outside `3..=1024` (the
+///   defensive guard against a corrupted sysvar; the session setter already
+///   refuses such a value);
+/// * `polygoncircumscribed.not_planar` — the tangent point is off the centre's
+///   `+Z` plane (the flat work-plane subset);
+/// * `polygoncircumscribed.zero_radius` — the picks coincide (no tangent circle).
+///
+/// # NOT IMPLEMENTED (named, not implied)
+///
+/// * the `Edge` construction — there is no first-edge-endpoint capture;
+/// * a **numeric radius** orientation — AutoCAD rotates the first edge to the snap
+///   rotation angle when a number is typed; the pointer direction is the only
+///   rotation control here;
+/// * a persisted side count (`POLYSIDES` is session state, reset on a session
+///   rebuild) and 3D/OCS input.
+///
+/// Work-only: Viewer mode refuses it at the command layer.
+pub struct PolygonCircumscribedCommand;

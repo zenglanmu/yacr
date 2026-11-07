@@ -161,3 +161,80 @@ fn polygon_capture_confirms_one_entity_and_maps_the_exact_two_points() {
     }
     assert!(matches!(controller.session.tool, crate::ToolState::Idle));
 }
+
+#[test]
+fn polygon_circumscribed_capture_maps_the_tangent_point_and_commits_the_tangent_ring() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    controller.session.set_polygon_sides(4).unwrap();
+    controller
+        .begin_draw_tool(DrawToolKind::PolygonCircumscribed)
+        .unwrap();
+    let center = p(10.0, 10.0);
+    let tangent_point = p(20.0, 10.0);
+
+    controller.capture_tool_point(center).unwrap();
+    let preview = controller.session.draw_preview().unwrap();
+    assert!(!preview.can_confirm(), "one pick is not a polygon");
+    assert_eq!(preview.remaining_points(), Some(1));
+    assert_eq!(
+        preview.polygon_sides,
+        Some(4),
+        "the live preview carries the current side count"
+    );
+    assert!(controller.confirm_draw().is_err());
+
+    controller.capture_tool_point(tangent_point).unwrap();
+    assert!(controller.session.draw_preview().unwrap().can_confirm());
+
+    // The intent carries the two picks in click order; the side count rides the
+    // session, never the payload.
+    let intent = controller.session.draw_intent().unwrap();
+    assert_eq!(
+        intent,
+        crate::DrawIntent::PolygonCircumscribed {
+            center,
+            radius_point: tangent_point,
+        }
+    );
+    let selection = controller
+        .session
+        .draw_selection_snapshot()
+        .unwrap()
+        .to_vec();
+    let command = controller
+        .command_for_draw_intent(intent, &selection)
+        .unwrap();
+    assert_eq!(command.id, crate::CommandId::CreatePolygonCircumscribed);
+    match command.payload {
+        crate::CommandPayload::Points(points) => {
+            assert_eq!(points, vec![center, tangent_point])
+        }
+        _ => panic!("expected a Points payload"),
+    }
+
+    let outcome = controller.confirm_draw().unwrap();
+    assert_eq!(outcome.objects.len(), 1);
+    let after = controller.drawing().unwrap();
+    let model = after.model_space();
+    let entity = model.last().unwrap();
+    let SemanticGeometry::Polyline {
+        points,
+        bulges,
+        closed,
+    } = &entity.geometry
+    else {
+        panic!("expected a polyline, got {:?}", entity.geometry);
+    };
+    assert!(*closed);
+    assert_eq!(points.len(), 4);
+    assert_eq!(bulges, &vec![0.0; 4]);
+    // r = 10 about (10, 10): the tangent circle is touched by every edge midpoint.
+    for index in 0..4 {
+        let a = points[index];
+        let b = points[(index + 1) % 4];
+        let mid = p((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+        assert!(((mid.x - center.x).hypot(mid.y - center.y) - 10.0).abs() <= 1e-9);
+    }
+    assert!(matches!(controller.session.tool, crate::ToolState::Idle));
+}

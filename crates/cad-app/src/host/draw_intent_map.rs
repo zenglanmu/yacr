@@ -101,6 +101,18 @@ impl HostController {
                 crate::CommandId::CreatePolygon,
                 crate::CommandPayload::Points(vec![center, radius_point]),
             ),
+            // POLYGON CIRCUMSCRIBED: the centre and the **tangent-circle** point
+            // travel as `Points` (the construction input the create path reads);
+            // the side count is the session sysvar the handler reads, so it never
+            // rides the payload. The vertex radius and the half-step rotation are
+            // derived by the command layer.
+            DrawIntent::PolygonCircumscribed {
+                center,
+                radius_point,
+            } => (
+                crate::CommandId::CreatePolygonCircumscribed,
+                crate::CommandPayload::Points(vec![center, radius_point]),
+            ),
             // POINT: the single captured position travels as `Points`.
             DrawIntent::Point { position } => (
                 crate::CommandId::CreatePoint,

@@ -115,6 +115,29 @@ pub enum DrawToolKind {
     ///   subset, so a radius point off the centre's `+Z` plane is an explicit
     ///   refusal rather than a silent projection.
     Polygon,
+    /// `POLYGON CIRCUMSCRIBED`: the side count (a session sysvar) plus the centre
+    /// and a point on the **inscribed (tangent) circle**, committed as one
+    /// **closed** LWPOLYLINE whose `n` edges are tangent to that circle.
+    ///
+    /// The two captured points are the centre (pick 1) and the tangent-circle
+    /// point (pick 2); the picked direction is the **midpoint of the first edge**,
+    /// so the vertices start at `θ ± π/n` and the ring runs counter-clockwise. The
+    /// geometry-side construction
+    /// ([`crate::draw_tool::circumscribed_polygon_vertices`]) and every refusal
+    /// live in the pure helper/command layer, so the tool never invents a vertex,
+    /// a radius or a rotation.
+    ///
+    /// This is a **canonical selector of its own** (`POLYGON CIRCUMSCRIBED`), not
+    /// an alias of [`Self::Polygon`]: the two captures mean different things (a
+    /// point on the polygon vs a point on the tangent circle) and they commit
+    /// different rings, so no alias may route one into the other.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED, so the honest union stays explicit):
+    /// no `Edge` branch, no numeric-radius orientation (a typed radius would
+    /// rotate the first edge to the snap rotation angle), no persisted side count,
+    /// and no 3D/OCS input (a tangent point off the centre's `+Z` plane is an
+    /// explicit refusal rather than a silent projection).
+    PolygonCircumscribed,
     /// POINT: a single placement of one point at the clicked position.
     ///
     /// Deliberate subset (NOT IMPLEMENTED for now): the `PDMODE`/`PDSIZE` point

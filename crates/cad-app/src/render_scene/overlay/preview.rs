@@ -111,6 +111,22 @@ pub fn draw_preview_overlay(
                 (chain.len() >= 2).then_some(chain)
             })
         }
+        // POLYGON CIRCUMSCRIBED: the closed `n`-vertex outline of the **tangent**
+        // variant — the same `circumscribed_polygon_vertices` the commit uses,
+        // with the preview's session side count and the live cursor as the
+        // tangent-circle point. Falls back to the chain while the picks are
+        // incomplete or the construction refuses.
+        DrawToolKind::PolygonCircumscribed => {
+            circumscribed_polygon_points(
+                &preview.points,
+                preview.cursor,
+                preview.polygon_sides,
+            )
+            .or_else(|| {
+                let chain = preview_chain(&preview.points, preview.cursor);
+                (chain.len() >= 2).then_some(chain)
+            })
+        }
         // SPLINE: a bounded chord approximation of the exact interpolated curve
         // the commit stores, through the captured fit points plus the live cursor.
         // It falls back to the rubber-band chain while fewer than four fit points
@@ -470,6 +486,31 @@ fn polygon_points(
     let center = *points.first()?;
     let radius_point = points.get(1).copied().or(cursor)?;
     let mut outline = crate::draw_tool::polygon_vertices(center, radius_point, sides?).ok()?;
+    if let Some(first) = outline.first().copied() {
+        outline.push(first);
+    }
+    Some(outline)
+}
+
+/// The live POLYGON CIRCUMSCRIBED outline.
+///
+/// The captured centre plus the live cursor (or a captured second pick) as the
+/// tangent-circle point, run through the **same**
+/// [`crate::draw_tool::circumscribed_polygon_vertices`] the commit uses — so the
+/// preview ring and the stored polygon cannot disagree — and closed back to the
+/// first vertex. `None` (so the caller falls back to the rubber-band chain) while
+/// fewer than two picks are known, the side count is unknown, or the construction
+/// refuses (non-finite, zero radius, non-coplanar, out-of-range count), never a
+/// fabricated ring.
+fn circumscribed_polygon_points(
+    points: &[Point3],
+    cursor: Option<Point3>,
+    sides: Option<u32>,
+) -> Option<Vec<Point3>> {
+    let center = *points.first()?;
+    let tangent_point = points.get(1).copied().or(cursor)?;
+    let mut outline =
+        crate::draw_tool::circumscribed_polygon_vertices(center, tangent_point, sides?).ok()?;
     if let Some(first) = outline.first().copied() {
         outline.push(first);
     }

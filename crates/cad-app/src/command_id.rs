@@ -266,6 +266,10 @@ pub enum CommandId {
     /// `SemanticGeometry::Polyline` (one zero bulge per vertex) and refuses a
     /// non-finite, zero-radius, non-coplanar or out-of-range input. Work-only.
     CreatePolygon,
+    /// `POLYGON CIRCUMSCRIBED` (Work-only): AutoCAD's `POLYGON` → `Circumscribed
+    /// about circle` (`C`) construction. Full contract:
+    /// [`crate::command_id::draw_variants`].
+    CreatePolygonCircumscribed,
     /// Place a single POINT at the payload position. Payload is
     /// `Points([position])` in click order; the handler stores
     /// `SemanticGeometry::Point` and refuses a non-finite position, a

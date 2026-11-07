@@ -459,6 +459,7 @@ impl Application {
             | CommandId::CreateRectangle
             | CommandId::CreateEllipse
             | CommandId::CreatePolygon
+            | CommandId::CreatePolygonCircumscribed
             | CommandId::CreatePoint
             | CommandId::CreateSpline
             | CommandId::DimLinear

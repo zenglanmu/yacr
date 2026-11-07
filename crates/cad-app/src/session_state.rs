@@ -576,6 +576,9 @@ impl SessionState {
             DrawToolKind::Rectang => CommandId::CreateRectangle,
             DrawToolKind::Ellipse => CommandId::CreateEllipse,
             DrawToolKind::Polygon => CommandId::CreatePolygon,
+            // POLYGON CIRCUMSCRIBED is the tangent variant: its own command (the
+            // ring construction differs), the same session side count.
+            DrawToolKind::PolygonCircumscribed => CommandId::CreatePolygonCircumscribed,
             DrawToolKind::Point => CommandId::CreatePoint,
             DrawToolKind::Spline => CommandId::CreateSpline,
             DrawToolKind::Move => CommandId::MoveEntities,
@@ -847,8 +850,11 @@ impl SessionState {
     /// **entity-pick** step is left raw, because that click never enters through
     /// `capture_point`.
     fn annotate_draw_preview(&self, mut preview: DrawPreview) -> DrawPreview {
-        preview.polygon_sides =
-            (preview.kind == DrawToolKind::Polygon).then_some(self.polygon_sides());
+        preview.polygon_sides = matches!(
+            preview.kind,
+            DrawToolKind::Polygon | DrawToolKind::PolygonCircumscribed
+        )
+        .then_some(self.polygon_sides());
         let pending_pick = preview.points.len() < preview.kind.picked_step_count();
         if !pending_pick {
             preview.cursor =

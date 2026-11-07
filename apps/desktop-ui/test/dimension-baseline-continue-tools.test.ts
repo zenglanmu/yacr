@@ -250,7 +250,14 @@ test('the fixed-arity prompt table cannot express these tools and does not prete
     assert.equal(entry.select, BASE, toolKey);
     assert.equal(Object.keys(entry).sort().join(','), 'point,select', `${toolKey} names both states only`);
   }
-  assert.deepEqual(Object.keys(OPEN_ENDED_PROMPTS).sort(), ['draw.dimbaseline', 'draw.dimcontinue']);
+  // WIPEOUT joined the open-ended table (2026-11-07) for the same structural
+  // reason (an unbounded point run finished with Enter), but it is **not** a
+  // dimension tool: its ready copy is its own, so it is listed here only as a
+  // real member of the shared table.
+  assert.deepEqual(
+    Object.keys(OPEN_ENDED_PROMPTS).sort(),
+    ['draw.dimbaseline', 'draw.dimcontinue', 'draw.wipeout'],
+  );
   // The ready copy really does claim a dimension — that is why it is shared and
   // why neither tool may inherit the centre-mark (plain geometry) copy.
   assert.match(en[READY], /dimension/i);
@@ -292,7 +299,13 @@ test('every new key resolves in both catalogs and the copy names the base pick a
   const referenced = new Set([...table.matchAll(/'(tool\.prompt\.[a-z0-9_.]+)'/g)].map(match => match[1]));
   assert.deepEqual(
     [...referenced].sort(),
-    [BASE, 'tool.prompt.dim.baseline_point', 'tool.prompt.dim.continue_point'].sort(),
+    [
+      BASE,
+      'tool.prompt.dim.baseline_point',
+      'tool.prompt.dim.continue_point',
+      'tool.prompt.wipeout.first',
+      'tool.prompt.wipeout.next',
+    ].sort(),
   );
   // Every one of them resolves in both locales, and the fall-through ready copy
   // is the one the family already ships (never a new duplicate).

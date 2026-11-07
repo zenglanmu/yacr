@@ -215,6 +215,14 @@ export const HOST_NAMES = [
   // rejection) are its own. The Rust lane adds the same name
   // (`CommandId::Wipeout`); this mirror never proves the host advertises it.
   'WIPEOUT',
+  // POLYGON CIRCUMSCRIBED (2026-11-07) is AutoCAD's `POLYGON` →
+  // `Circumscribed about circle` (`C`) construction as a canonical **multi-word**
+  // selector of its own. It is never an alias of `POLYGON`: the second pick is a
+  // point on the tangent circle (the midpoint of the first edge), so admitting one
+  // must not admit the other's capture. The Rust lane adds the same name
+  // (`CommandId::CreatePolygonCircumscribed`); this mirror never proves the host
+  // advertises it.
+  'POLYGON CIRCUMSCRIBED',
   // POINT display style sysvars (2026-10-26): `PDMODE` and `PDSIZE` are typed
   // command-line settings with one numeric argument each (like `SNAPUNIT`), not
   // buttons. This mirror is instructed locally, exactly like `SNAPUNIT` before

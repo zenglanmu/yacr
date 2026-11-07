@@ -532,6 +532,14 @@ impl DrawTool {
                 center: a,
                 radius_point: b,
             },
+            // POLYGON CIRCUMSCRIBED: the centre and the tangent-circle point
+            // exactly as clicked. The vertex radius `R = r / cos(π/n)`, the
+            // half-step rotation and every refusal live in the command layer, so
+            // the capture never invents a vertex or a radius.
+            DrawToolKind::PolygonCircumscribed => DrawIntent::PolygonCircumscribed {
+                center: a,
+                radius_point: b,
+            },
             // POINT: the single captured click. A single point has no coplanarity
             // constraint, so the intent carries no plane.
             DrawToolKind::Point => DrawIntent::Point { position: a },
@@ -863,8 +871,9 @@ pub use parameter::{
 // `cad_app::circle_radius` (via `lib.rs`) stay valid for the callers that used the
 // pre-split module layout.
 pub use geometry::{
-    arc_parameters, circle_radius, ellipse_parameters, polygon_vertices, spline_control_points,
-    ArcParameters, EllipseParameters, DEFAULT_POLYGON_SIDES, MAX_POLYGON_SIDES, MIN_POLYGON_SIDES,
+    arc_parameters, circle_radius, circumscribed_polygon_vertices, ellipse_parameters,
+    polygon_vertices, spline_control_points, ArcParameters, EllipseParameters,
+    DEFAULT_POLYGON_SIDES, MAX_POLYGON_SIDES, MIN_POLYGON_SIDES,
 };
 pub(crate) use geometry::{mirror_transform, rotation_transform, scale_transform};
 

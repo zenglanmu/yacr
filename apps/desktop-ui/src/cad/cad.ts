@@ -436,6 +436,16 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
     'tool.prompt.circlediameter.center',
     'tool.prompt.circlediameter.diameter',
   ],
+  // POLYGON CIRCUMSCRIBED (2026-11-07) is a two-point capture like POLYGON, but
+  // the second pick is not a vertex: it lies on the **inscribed (tangent) circle**
+  // and becomes the midpoint of the first edge. The second sentence states that
+  // outright, so no reader can expect a vertex there. The side count is the
+  // session `POLYSIDES` sysvar, never a prompt step, and the command has no
+  // `Edge`/numeric-radius option to name.
+  'draw.polygoncircumscribed': [
+    'tool.prompt.polygon_circumscribed.center',
+    'tool.prompt.polygon_circumscribed.tangent',
+  ],
 });
 
 /**
@@ -546,6 +556,10 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // it names the captured boundary instead. The open-ended branch reads this table
   // first, so a ready WIPEOUT never falls through to the dimension sentence.
   'draw.wipeout': 'tool.prompt.wipeout.ready',
+  // POLYGON CIRCUMSCRIBED is complete once both picks land, and Enter creates the
+  // tangent ring. The shared dimension sentence would be false (nothing is
+  // dimensioned), so the tool names its own captured construction.
+  'draw.polygoncircumscribed': 'tool.prompt.polygon_circumscribed.ready',
 });
 
 /** A pre-selection tool's two prompts: waiting for a selection, and ready. */

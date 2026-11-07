@@ -100,6 +100,20 @@ pub enum DrawIntent {
         center: Point3,
         radius_point: Point3,
     },
+    /// `POLYGON CIRCUMSCRIBED`: insert the closed regular polygon whose edges are
+    /// **tangent** to the circle through `center` (pick 1) and `radius_point`
+    /// (pick 2, a point on the inscribed/tangent circle).
+    ///
+    /// The side count is the session sysvar, not a field of this intent. The
+    /// picked direction is the midpoint of the first edge; the command layer
+    /// derives the vertex radius `R = r / cos(π/n)` and every refusal
+    /// (`crate::draw_tool::circumscribed_polygon_vertices`), so the capture never
+    /// invents a vertex, a radius or a rotation. Always `closed == true` with one
+    /// zero bulge per vertex.
+    PolygonCircumscribed {
+        center: Point3,
+        radius_point: Point3,
+    },
     /// Place a single POINT at `position` on the active layer.
     ///
     /// `position` is the one click, exactly as captured; the command layer stores

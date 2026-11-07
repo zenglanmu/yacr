@@ -45,3 +45,39 @@ export const CIRCLE_ITEM: RibbonCommandItem = Object.freeze({
   large: true,
   variants: CIRCLE_VARIANTS,
 });
+
+/**
+ * The Polygon split button: the plain **inscribed** `POLYGON` plus AutoCAD's
+ * `Circumscribed about circle` (`C`) variant.
+ *
+ * The parent keeps the unchanged inscribed row (centre, then a vertex on the
+ * polygon) and its small-button slot on both draw panels; the caret offers the
+ * circumscribed construction as its own canonical **multi-word** selector
+ * (`POLYGON CIRCUMSCRIBED`), never an alias of `POLYGON`: the second pick means
+ * different things (a polygon vertex vs a point on the **tangent** circle) and
+ * the committed rings differ.
+ *
+ * Both rows are router commands with no parameter — the picks are the whole input
+ * and the side count is the session `POLYSIDES` sysvar — and both reuse the
+ * `polygon` glyph, because the output is the same LWPOLYLINE kind and the icon set
+ * has no per-variant badge; the label states the construction instead. There is
+ * no `Edge` row: that construction is NOT IMPLEMENTED and a caret entry would
+ * promise it.
+ */
+const POLYGON_VARIANTS: readonly RibbonCommandItem[] = Object.freeze([
+  { id: 'POLYGON', labelKey: 'draw.kind.polygon', icon: 'polygon', command: 'POLYGON' },
+  {
+    id: 'POLYGON CIRCUMSCRIBED',
+    labelKey: 'draw.kind.polygon_circumscribed',
+    icon: 'polygon',
+    command: 'POLYGON CIRCUMSCRIBED',
+  },
+]);
+
+export const POLYGON_ITEM: RibbonCommandItem = Object.freeze({
+  id: 'POLYGON',
+  labelKey: 'draw.kind.polygon',
+  icon: 'polygon',
+  command: 'POLYGON',
+  variants: POLYGON_VARIANTS,
+});

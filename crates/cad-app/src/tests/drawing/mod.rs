@@ -319,6 +319,7 @@ mod offset_polyline_bulge;
 mod paste_block;
 mod point;
 mod polygon;
+mod polygon_circumscribed;
 mod polyline_fillet;
 mod properties;
 mod rectangle;

@@ -29,6 +29,9 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("RECTANG", "draw.rectang"),
     ("ELLIPSE", "draw.ellipse"),
     ("POLYGON", "draw.polygon"),
+    // POLYGON CIRCUMSCRIBED is the tangent variant: its own two-point capture and
+    // its own machine key, never an alias row for POLYGON.
+    ("POLYGON CIRCUMSCRIBED", "draw.polygoncircumscribed"),
     ("POINT", "draw.point"),
     ("SPLINE", "draw.spline"),
     ("TEXT", "draw.text"),

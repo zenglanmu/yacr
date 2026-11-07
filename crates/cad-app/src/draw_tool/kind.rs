@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 54] = [
+    pub const ALL: [DrawToolKind; 55] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -141,6 +141,10 @@ impl DrawToolKind {
         // real open-ended polygon capture started by its command selector, not
         // from the draw-tool selector list.
         DrawToolKind::Wipeout,
+        // POLYGON CIRCUMSCRIBED is appended last for the same index-stability
+        // reason: it is a real two-point capture started by its own command
+        // selector, and its ring is the tangent variant of POLYGON's.
+        DrawToolKind::PolygonCircumscribed,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -200,6 +204,7 @@ impl DrawToolKind {
             Self::Circle3P => "circle3p",
             Self::CircleDiameter => "circlediameter",
             Self::Wipeout => "wipeout",
+            Self::PolygonCircumscribed => "polygoncircumscribed",
         }
     }
 
@@ -261,6 +266,7 @@ impl DrawToolKind {
             "circle3p" => Some(Self::Circle3P),
             "circlediameter" => Some(Self::CircleDiameter),
             "wipeout" => Some(Self::Wipeout),
+            "polygoncircumscribed" => Some(Self::PolygonCircumscribed),
             _ => None,
         }
     }
@@ -408,6 +414,9 @@ impl DrawToolKind {
             Self::CircleDiameter => "CIRCLE D",
             // WIPEOUT shares the locale-neutral ASCII fallback rule.
             Self::Wipeout => "WIPEOUT",
+            // POLYGON CIRCUMSCRIBED: the canonical multi-word selector is also the
+            // locale-neutral fallback label.
+            Self::PolygonCircumscribed => "POLYGON CIRCUMSCRIBED",
         }
     }
 
@@ -489,6 +498,7 @@ impl DrawToolKind {
             | Self::Circle
             | Self::Rectang
             | Self::Polygon
+            | Self::PolygonCircumscribed
             | Self::Move
             | Self::Trim
             | Self::Copy

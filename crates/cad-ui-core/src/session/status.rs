@@ -666,7 +666,10 @@ pub(super) fn cad_tool(
                 // The side count is present **only** for a POLYGON capture; every
                 // other draw tool reports `null`, and the session already clears
                 // the field for a non-POLYGON kind.
-                sides: if preview.kind == DrawToolKind::Polygon {
+                sides: if matches!(
+                    preview.kind,
+                    DrawToolKind::Polygon | DrawToolKind::PolygonCircumscribed
+                ) {
                     preview.polygon_sides
                 } else {
                     None

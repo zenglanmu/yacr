@@ -80,6 +80,17 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', group: 'draw' },
   { id: 'ELLIPSE', labelKey: 'draw.kind.ellipse', icon: 'ellipse', group: 'draw' },
   { id: 'POLYGON', labelKey: 'draw.kind.polygon', icon: 'polygon', group: 'draw' },
+  // POLYGON CIRCUMSCRIBED (2026-11-07) is AutoCAD's `POLYGON` →
+  // `Circumscribed about circle` (`C`) construction, listed directly after the
+  // `POLYGON` it belongs to. It is a **canonical selector of its own**, never an
+  // alias: the second pick is a point on the **tangent** circle (not a vertex), the
+  // picked direction is the midpoint of the first edge, and the ring is
+  // `R = r / cos(π/n)` instead of `r`. The side count is the same session
+  // `POLYSIDES` sysvar, so there is no parameter row and no `Edge` variant (that
+  // construction is NOT IMPLEMENTED). The id is multi-word exactly like
+  // `POLYGON CIRCUMSCRIBED`'s `CIRCLE 2P`/`CHAMFER POLYLINE` neighbours; the glyph
+  // is the parent's own (same LWPOLYLINE output, different construction).
+  { id: 'POLYGON CIRCUMSCRIBED', labelKey: 'draw.kind.polygon_circumscribed', icon: 'polygon', group: 'draw' },
   { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', group: 'draw' },
   { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', group: 'draw' },
   // INSERT (2026-11-01) places a reference to a block that **already exists** in
@@ -376,9 +387,10 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // `Polyline`/`Erase Polyline` option, no self-intersection rejection and no
   // picking of an existing wipeout, so no variant row or option caret may imply
   // one. Appended last in the draw group so no shipped row moves; it reuses the
-  // `hatch` glyph because both fill a bounded region (the icon set has no mask
-  // mark).
-  { id: 'WIPEOUT', labelKey: 'draw.kind.wipeout', icon: 'hatch', group: 'draw' },
+  // `erase` glyph (an eraser: this region hides what is behind it). The `hatch`
+  // glyph is contractually the hatch family's own, and the icon set has no mask
+  // mark.
+  { id: 'WIPEOUT', labelKey: 'draw.kind.wipeout', icon: 'erase', group: 'draw' },
   // AUDIT (AutoCAD 2026) is the detect-only drawing audit: it reports every
   // stored entity that fails the database's own validity check and repairs
   // nothing (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). It is a
