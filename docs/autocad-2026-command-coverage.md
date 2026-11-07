@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **63** |
-| **已实现合计（完整 + 部分）** | **113** |
-| 未实现 | **868** |
+| 部分实现（有写明的界） | **64** |
+| **已实现合计（完整 + 部分）** | **114** |
+| 未实现 | **867** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -124,7 +124,8 @@
 | `PLINE` | 已实现 | — |
 | `PLOT` | 部分实现 | 仅矢量 SVG/PDF；无 CTB/STB、无批量多布局 |
 | `POINT` | 已实现 | — |
-| `POLYGON` | 已实现 | — |
+| `POLYGON` | 已实现 | 默认内接（顶点在拾取点上）；外切变体是独立的多词选择子（见下一行） |
+| `POLYGON CIRCUMSCRIBED` | 已实现 | **本项目多词选择子**（不属于官方 981 条，不计入上方总计）：`POLYGON` 的 `Circumscribed about circle`（`C`）构造；第二点落在**内切（相切）圆**上，拾取方向为第一条边中点，`R = r / cos(π/n)`；共享会话 `POLYSIDES`；无 Edge/数字半径定向 |
 | `PROPERTIES` | 已实现 | chrome 本地选择子：打开特性面板 |
 | `PROPERTIESCLOSE` | 已实现 | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
 | `QSAVE` | 部分实现 | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
@@ -153,6 +154,7 @@
 | `TXT2MTXT` | 部分实现 | 选择式：至少一个模型空间 Text/MText，按上→下、左→右稳定排序后用 `\P` 原样拼接成一个 `AcDbMText`，沿用首个源的样式/位置/字高/旋转/对齐/层/绘制顺序/`wrap_width`，同一事务删除全部源；设置对话框与强制统一行距未实现 |
 | `U` | 已实现 | — |
 | `UNDO` | 已实现 | — |
+| `WIPEOUT` | 部分实现 | v1 多边形遮罩：拾取边界点（≥3，回车结束）→ 一个 `Mask`（type-key `AcDbWipeout`，`inverted: false`，环不重复首点）。无边框模型（Frames ON/OFF/不打印）、无 `Polyline`/`Erase Polyline` 选项、不检查自交、不能拾取已有遮罩 |
 | `XLINE` | 部分实现 | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | `ZOOM` | 部分实现 | 无 OBJECT/DYNAMIC/图纸空间 nXP；WINDOW/PREVIOUS 已实现 |
 
@@ -825,7 +827,7 @@
 | 663 | `POINTCLOUDSTYLIZE` | 未实现 | Controls the coloration of point clouds. | — |
 | 664 | `POINTCLOUDUNCROP` | 未实现 | Removes all cropped areas from selected point clouds. | — |
 | 665 | `POINTLIGHT` | 未实现 | Creates a point light that radiates light in all directions from its location. | — |
-| 666 | `POLYGON` | 已实现 | Creates an equilateral closed polyline. | — |
+| 666 | `POLYGON` | 已实现 | Creates an equilateral closed polyline. | 默认内接；外切变体是独立多词选择子 `POLYGON CIRCUMSCRIBED`（不是别名，见 §已实现索引） |
 | 667 | `POLYSOLID` | 未实现 | Creates 3D solid in the shape of a wall or series of walls. | — |
 | 668 | `PRESSPULL` | 未实现 | Dynamically modifies objects by extrusion and offset. | — |
 | 669 | `PREVIEW` | 未实现 | Displays the drawing as it will be plotted. | — |
@@ -1116,7 +1118,7 @@
 | 954 | `WEBLOAD` | 未实现 | Loads a JavaScript file from a URL, and then executes the JavaScript code contained in the file. | — |
 | 955 | `WEDGE` | 未实现 | Creates a 3D solid wedge. | — |
 | 956 | `WHOHAS` | 未实现 | Displays information about an open drawing file. | — |
-| 957 | `WIPEOUT` | 未实现 | Creates a wipeout object, and controls whether wipeout frames are displayed in the drawing. | — |
+| 957 | `WIPEOUT` | 部分实现 | Creates a wipeout object, and controls whether wipeout frames are displayed in the drawing. | v1 多边形遮罩：拾取边界点（≥3，回车结束）→ 一个 `Mask`（type-key `AcDbWipeout`，`inverted: false`）。**无**边框模型（Frames ON/OFF/不打印）、**无** `Polyline`/`Erase Polyline` 选项、**不检查**自交、不能拾取已有遮罩 |
 | 958 | `WMFIN` | 未实现 | Imports a Windows metafile. | — |
 | 959 | `WMFOPTS` | 未实现 | Sets options for WMFIN. | — |
 | 960 | `WMFOUT` | 未实现 | Saves objects to a Windows metafile. | — |

@@ -18,9 +18,13 @@ impl Application {
             CommandId::CreateCircleDiameter => self.create_circle_diameter(session, command),
             CommandId::CreateArc => self.create_arc(session, command),
             CommandId::CreatePolyline => self.create_polyline(session, command),
+            CommandId::Wipeout => self.create_wipeout(session, command),
             CommandId::CreateRectangle => self.create_rectangle(session, command),
             CommandId::CreateEllipse => self.create_ellipse(session, command),
             CommandId::CreatePolygon => self.create_polygon(session, command),
+            CommandId::CreatePolygonCircumscribed => {
+                self.create_polygon_circumscribed(session, command)
+            }
             CommandId::CreatePoint => self.create_point(session, command),
             CommandId::CreateSpline => self.create_spline(session, command),
             CommandId::CreateText => self.create_text(session, command),

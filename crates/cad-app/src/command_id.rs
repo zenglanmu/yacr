@@ -240,6 +240,8 @@ pub enum CommandId {
     /// only (one zero bulge per vertex, `closed == false`); fewer than two
     /// distinct points is an explicit refusal that changes nothing. Work-only.
     CreatePolyline,
+    /// `WIPEOUT`: closed polygon mask; see [`crate::command_id::draw_variants`].
+    Wipeout,
     /// Draw an axis-aligned RECTANG from two opposite corners: a closed
     /// four-vertex LWPOLYLINE (one zero bulge per vertex) on the active layer.
     /// Payload is `Points([corner1, corner2])` in click order; the handler
@@ -255,13 +257,14 @@ pub enum CommandId {
     /// triple. The centre method is not implemented. Work-only.
     CreateEllipse,
     /// Draw a closed regular POLYGON **inscribed** in the circle through a centre
-    /// pick and a radius point. Payload is `Points([center, radius_point])` in
-    /// click order; the side count is the session sysvar
-    /// ([`crate::SessionState::polygon_sides`], default 4, range 3..=1024), not a
-    /// payload field. The handler builds the closed `n`-vertex
-    /// `SemanticGeometry::Polyline` (one zero bulge per vertex) and refuses a
+    /// pick and a radius point; the side count is the session sysvar
+    /// ([`crate::SessionState::polygon_sides`], 3..=1024), not a payload field.
+    /// The handler builds the closed `n`-vertex LWPOLYLINE and refuses a
     /// non-finite, zero-radius, non-coplanar or out-of-range input. Work-only.
     CreatePolygon,
+    /// `POLYGON CIRCUMSCRIBED`: tangent ring; see
+    /// [`crate::command_id::draw_variants`].
+    CreatePolygonCircumscribed,
     /// Place a single POINT at the payload position. Payload is
     /// `Points([position])` in click order; the handler stores
     /// `SemanticGeometry::Point` and refuses a non-finite position, a
@@ -984,6 +987,7 @@ pub mod area_object;
 pub mod block_define;
 pub mod break_at_point;
 pub mod construction_line;
+pub mod draw_variants;
 pub mod grip_stretch;
 pub mod hatch;
 pub mod hatch_generate_boundary;

@@ -28,6 +28,28 @@ pub enum DrawToolKind {
     ///   subset, so points carry only the `+Z` the picker produced and are never
     ///   silently reprojected onto another plane.
     Polyline,
+    /// WIPEOUT: a closed polygon **mask**, captured as an open-ended run of
+    /// boundary points (at least three, then Enter).
+    ///
+    /// Capture shape: exactly the PLINE point machine — first point, then every
+    /// further point, Enter finishes — because AutoCAD's default `WIPEOUT` flow is
+    /// "first point → next point… (polygon) until Enter". The `PointArity` model
+    /// expresses that without a new state, so this is a **real polygon capture**,
+    /// not a two-corner rectangle fallback. The ring is implicit: the first point
+    /// is stored once and never repeated by the capture.
+    ///
+    /// The geometry construction and every refusal live in the command layer
+    /// (`create_wipeout`): finite points, ≥ 3 vertices, one `+Z` plane, no
+    /// zero-length edge, a non-zero enclosed area, `inverted: false`, stored type
+    /// key `AcDbWipeout`. The capture never invents a vertex or an inversion.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED, so the honest union stays explicit):
+    /// no `Frames` ON/OFF/`Display-not-plot` (there is no wipeout-frame model at
+    /// all), no `Polyline` / `Erase Polyline` option, no self-intersection
+    /// rejection (a self-crossing ring is stored and filled even-odd), no
+    /// picking/frame selection of an existing wipeout, no `inverted` authoring,
+    /// and no vertex-level undo. Work-only.
+    Wipeout,
     /// RECTANG: two opposite corners of an axis-aligned rectangle.
     ///
     /// The commit is a **closed** four-vertex polyline (`closed = true`, one zero
@@ -93,6 +115,29 @@ pub enum DrawToolKind {
     ///   subset, so a radius point off the centre's `+Z` plane is an explicit
     ///   refusal rather than a silent projection.
     Polygon,
+    /// `POLYGON CIRCUMSCRIBED`: the side count (a session sysvar) plus the centre
+    /// and a point on the **inscribed (tangent) circle**, committed as one
+    /// **closed** LWPOLYLINE whose `n` edges are tangent to that circle.
+    ///
+    /// The two captured points are the centre (pick 1) and the tangent-circle
+    /// point (pick 2); the picked direction is the **midpoint of the first edge**,
+    /// so the vertices start at `θ ± π/n` and the ring runs counter-clockwise. The
+    /// geometry-side construction
+    /// ([`crate::draw_tool::circumscribed_polygon_vertices`]) and every refusal
+    /// live in the pure helper/command layer, so the tool never invents a vertex,
+    /// a radius or a rotation.
+    ///
+    /// This is a **canonical selector of its own** (`POLYGON CIRCUMSCRIBED`), not
+    /// an alias of [`Self::Polygon`]: the two captures mean different things (a
+    /// point on the polygon vs a point on the tangent circle) and they commit
+    /// different rings, so no alias may route one into the other.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED, so the honest union stays explicit):
+    /// no `Edge` branch, no numeric-radius orientation (a typed radius would
+    /// rotate the first edge to the snap rotation angle), no persisted side count,
+    /// and no 3D/OCS input (a tangent point off the centre's `+Z` plane is an
+    /// explicit refusal rather than a silent projection).
+    PolygonCircumscribed,
     /// POINT: a single placement of one point at the clicked position.
     ///
     /// Deliberate subset (NOT IMPLEMENTED for now): the `PDMODE`/`PDSIZE` point

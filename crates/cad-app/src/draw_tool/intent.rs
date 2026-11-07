@@ -60,6 +60,17 @@ pub enum DrawIntent {
     /// layer. Always `closed == false`, one zero bulge per vertex (straight
     /// segments only); see [`DrawToolKind::Polyline`] for the honest subset.
     Polyline { points: Vec<Point3> },
+    /// `WIPEOUT`: insert a closed polygon mask whose **implicit ring** is
+    /// `points` (at least three, in capture order).
+    ///
+    /// The first point is stored once (never repeated), and the mask is always
+    /// `inverted: false`. The geometry construction, the plane/duplicate/area
+    /// refusals and the stored `AcDbWipeout` type key live in the command layer,
+    /// so the capture never invents or deduplicates a vertex. See
+    /// [`crate::command_id::draw_variants::WipeoutCommand`] for the full contract
+    /// and the named NOT-IMPLEMENTED surface (frames, `Polyline`/`Erase Polyline`,
+    /// self-intersection rejection, picking).
+    Wipeout { points: Vec<Point3> },
     /// Insert a closed four-vertex rectangle whose opposite corners are
     /// `corner1` and `corner2`, on the active layer.
     ///
@@ -86,6 +97,20 @@ pub enum DrawIntent {
     /// ([`polygon_vertices`]) and every degeneracy refusal live in the command
     /// layer. Always `closed == true` with one zero bulge per vertex.
     Polygon {
+        center: Point3,
+        radius_point: Point3,
+    },
+    /// `POLYGON CIRCUMSCRIBED`: insert the closed regular polygon whose edges are
+    /// **tangent** to the circle through `center` (pick 1) and `radius_point`
+    /// (pick 2, a point on the inscribed/tangent circle).
+    ///
+    /// The side count is the session sysvar, not a field of this intent. The
+    /// picked direction is the midpoint of the first edge; the command layer
+    /// derives the vertex radius `R = r / cos(π/n)` and every refusal
+    /// (`crate::draw_tool::circumscribed_polygon_vertices`), so the capture never
+    /// invents a vertex, a radius or a rotation. Always `closed == true` with one
+    /// zero bulge per vertex.
+    PolygonCircumscribed {
         center: Point3,
         radius_point: Point3,
     },

@@ -15,6 +15,7 @@ import { STANDARD_VIEWS } from '../cad/view3d.ts';
 import { DRAW_MODIFY_ITEMS, HOME_MODIFY_ITEMS } from './ribbon-modify.ts';
 import { LAYER_PANEL_ITEMS } from './layers-panel.ts';
 import { ANNOTATE_TEXT_COMMAND_ITEMS } from './annotate-text-commands.ts';
+import { CIRCLE_ITEM, POLYGON_ITEM } from './variants.ts';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({
@@ -235,43 +236,6 @@ export function panelLauncherCommand(panel: RibbonPanel | null | undefined): str
   return typeof command === 'string' && command.length > 0 ? command : null;
 }
 
-/**
- * The Circle split button: the plain `CIRCLE` plus its three definition modes.
- *
- * The parent stays the ordinary CIRCLE button (centre, then radius) and keeps its
- * `large` tile on both draw panels; the caret offers the three further modes the
- * host advertises as **separate selectors** (`CIRCLE 2P`, `CIRCLE 3P`,
- * `CIRCLE D`). The structure copies the `FIT` and `AREA` popovers: the first row
- * repeats the parent's own selector so the menu is also a "what the button does"
- * list.
- *
- * Every row is a router command with no parameter — the picks are the whole input
- * — and every row reuses the `circle` glyph, because all four produce the same
- * entity and the icon set has no per-mode badge; the label states the definition
- * method instead. `CIRCLE D`'s second pick is a **distance from the centre that
- * is the diameter**, so its label must say "diameter" and never imply a radius
- * pick (the step prompt spells the halving out).
- *
- * One frozen value used by both draw panels: the two tabs must offer the same
- * four modes, and a shared (frozen) object is the cheapest way to keep them
- * identical.
- */
-const CIRCLE_VARIANTS: readonly RibbonCommandItem[] = Object.freeze([
-  { id: 'CIRCLE', labelKey: 'draw.kind.circle', icon: 'circle', command: 'CIRCLE' },
-  { id: 'CIRCLE 2P', labelKey: 'draw.kind.circle2p', icon: 'circle', command: 'CIRCLE 2P' },
-  { id: 'CIRCLE 3P', labelKey: 'draw.kind.circle3p', icon: 'circle', command: 'CIRCLE 3P' },
-  { id: 'CIRCLE D', labelKey: 'draw.kind.circlediameter', icon: 'circle', command: 'CIRCLE D' },
-]);
-
-const CIRCLE_ITEM: RibbonCommandItem = Object.freeze({
-  id: 'CIRCLE',
-  labelKey: 'draw.kind.circle',
-  icon: 'circle',
-  command: 'CIRCLE',
-  large: true,
-  variants: CIRCLE_VARIANTS,
-});
-
 export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
   {
     id: 'file',
@@ -390,7 +354,11 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'PLINE', labelKey: 'draw.kind.polyline', icon: 'polyline', command: 'PLINE' },
           { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', command: 'RECTANG' },
           { id: 'ELLIPSE', labelKey: 'draw.kind.ellipse', icon: 'ellipse', command: 'ELLIPSE' },
-          { id: 'POLYGON', labelKey: 'draw.kind.polygon', icon: 'polygon', command: 'POLYGON' },
+          // The Polygon split button: the plain inscribed POLYGON stays the parent
+          // (unchanged behaviour) and the caret offers the circumscribed
+          // construction as its own selector (see `POLYGON_ITEM` above for why the
+          // two are different commands and why there is no `Edge` row).
+          POLYGON_ITEM,
           { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', command: 'POINT' },
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
           // INSERT (2026-11-01) is the point-then-name block reference: the pick
@@ -548,7 +516,11 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'PLINE', labelKey: 'draw.kind.polyline', icon: 'polyline', command: 'PLINE' },
           { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', command: 'RECTANG' },
           { id: 'ELLIPSE', labelKey: 'draw.kind.ellipse', icon: 'ellipse', command: 'ELLIPSE' },
-          { id: 'POLYGON', labelKey: 'draw.kind.polygon', icon: 'polygon', command: 'POLYGON' },
+          // The Polygon split button: the plain inscribed POLYGON stays the parent
+          // (unchanged behaviour) and the caret offers the circumscribed
+          // construction as its own selector (see `POLYGON_ITEM` above for why the
+          // two are different commands and why there is no `Edge` row).
+          POLYGON_ITEM,
           { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', command: 'POINT' },
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
           // Same slot as on the Home panel: INSERT sits at the tail of the
@@ -704,6 +676,15 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // (`PALETTE_COMMANDS`).
           { id: 'FONTS', labelKey: 'resources.fonts', icon: 'font', command: 'FONTS', large: true },
           { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', command: 'SELECTALL' },
+          // WIPEOUT (AutoCAD 2026) lives on the Annotate tab, which is where
+          // AutoCAD exposes it: a closed polygon mask — first point, then every
+          // further boundary point, Enter finishes. Small button with **no variant
+          // popover**: v1 has no `Frames` model, no `Polyline`/`Erase Polyline`
+          // option and no self-intersection rejection, so a caret would imply
+          // choices the command does not have. It reuses the `erase` glyph (an
+          // eraser: this region hides what is behind it); the icon set has no mask
+          // mark and `hatch` is contractually the hatch family's own.
+          { id: 'WIPEOUT', labelKey: 'draw.kind.wipeout', icon: 'erase', command: 'WIPEOUT' },
         ],
       },
     ],

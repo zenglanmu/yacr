@@ -22,9 +22,16 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("CIRCLE D", "draw.circlediameter"),
     ("ARC", "draw.arc"),
     ("PLINE", "draw.polyline"),
+    // WIPEOUT is its own open-ended polygon capture (first point, then every
+    // further boundary point, Enter finishes); it starts with no captured point
+    // and is never ready before three vertices exist.
+    ("WIPEOUT", "draw.wipeout"),
     ("RECTANG", "draw.rectang"),
     ("ELLIPSE", "draw.ellipse"),
     ("POLYGON", "draw.polygon"),
+    // POLYGON CIRCUMSCRIBED is the tangent variant: its own two-point capture and
+    // its own machine key, never an alias row for POLYGON.
+    ("POLYGON CIRCUMSCRIBED", "draw.polygoncircumscribed"),
     ("POINT", "draw.point"),
     ("SPLINE", "draw.spline"),
     ("TEXT", "draw.text"),

@@ -466,9 +466,11 @@ impl Application {
             | CommandId::CreateXLine
             | CommandId::CreateRay
             | CommandId::CreatePolyline
+            | CommandId::Wipeout
             | CommandId::CreateRectangle
             | CommandId::CreateEllipse
             | CommandId::CreatePolygon
+            | CommandId::CreatePolygonCircumscribed
             | CommandId::CreatePoint
             | CommandId::CreateSpline
             | CommandId::DimLinear

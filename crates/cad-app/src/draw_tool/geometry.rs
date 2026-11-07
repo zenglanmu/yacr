@@ -416,6 +416,81 @@ fn finite(p: Point3) -> bool {
     p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
 }
 
+/// The `n` vertices of a regular polygon **circumscribed about a circle**, in
+/// order.
+///
+/// This is AutoCAD's `POLYGON` → `Circumscribed about circle` (`C`) construction:
+/// the first pick is the centre and the second is a point **on the inscribed
+/// (tangent) circle**, i.e. the circle the polygon's edges touch. Its radius is
+/// `r = |tangent_point − center|`; the polygon's own vertex radius is
+/// `R = r / cos(π/n)`, and the picked direction is the **midpoint of the first
+/// edge**. The vertices therefore sit at `θ ± π/n, θ ± π/n + 2π/n, …`, stepping
+/// counter-clockwise about `+Z`, and every edge's midpoint lies exactly on the
+/// tangent circle at distance `r` from the centre.
+///
+/// The returned list does **not** repeat the first vertex: the caller stores it as
+/// a `closed` polyline with one zero bulge per vertex (straight edges only).
+///
+/// Explicit refusals (never a fabricated ring, all named): a non-finite pick
+/// (`polygoncircumscribed.invalid_point`); an out-of-range side count
+/// (`polygoncircumscribed.sides`, the defensive guard against a corrupted stored
+/// sysvar — the range is the same `MIN_POLYGON_SIDES..=MAX_POLYGON_SIDES`
+/// AutoCAD's `POLYSIDES` uses); a non-coplanar `+Z` pick
+/// (`polygoncircumscribed.not_planar`, the flat work-plane subset); and a zero
+/// tangent radius (`polygoncircumscribed.zero_radius`).
+pub fn circumscribed_polygon_vertices(
+    center: Point3,
+    tangent_point: Point3,
+    sides: u32,
+) -> CadResult<Vec<Point3>> {
+    if !finite(center) || !finite(tangent_point) {
+        return Err(CadError::InvalidInput(
+            "polygoncircumscribed.invalid_point: circumscribed polygon picks must be finite".into(),
+        ));
+    }
+    if !(MIN_POLYGON_SIDES..=MAX_POLYGON_SIDES).contains(&sides) {
+        return Err(CadError::InvalidInput(format!(
+            "polygoncircumscribed.sides: circumscribed polygon side count must be between \
+             {MIN_POLYGON_SIDES} and {MAX_POLYGON_SIDES}, got {sides}"
+        )));
+    }
+    let z_tol = 1e-9 * (1.0 + center.z.abs() + tangent_point.z.abs());
+    if (tangent_point.z - center.z).abs() > z_tol {
+        return Err(CadError::InvalidInput(
+            "polygoncircumscribed.not_planar: circumscribed polygon picks must lie in one +Z \
+             plane"
+                .into(),
+        ));
+    }
+    let dx = tangent_point.x - center.x;
+    let dy = tangent_point.y - center.y;
+    let radius = dx.hypot(dy);
+    if !radius.is_finite() || radius <= MIN_POLYGON_RADIUS {
+        return Err(CadError::InvalidInput(
+            "polygoncircumscribed.zero_radius: the tangent-circle radius must be positive".into(),
+        ));
+    }
+    // The vertex radius: `cos(π/n)` is the ratio between the apothem (the tangent
+    // circle) and the circumscribed vertex radius. `n >= 3` keeps it well below 1.
+    let vertex_radius = radius / (std::f64::consts::PI / f64::from(sides)).cos();
+    // The picked direction is the **first edge's midpoint**, so the first vertex
+    // is one half-step clockwise of it; stepping `+2π/n` is counter-clockwise.
+    let edge_midpoint_angle = dy.atan2(dx);
+    let half_step = std::f64::consts::PI / f64::from(sides);
+    let step = std::f64::consts::TAU / f64::from(sides);
+    let mut points = Vec::with_capacity(sides as usize);
+    for i in 0..sides {
+        let angle = edge_midpoint_angle - half_step + step * f64::from(i);
+        let (sin, cos) = angle.sin_cos();
+        points.push(Point3 {
+            x: center.x + vertex_radius * cos,
+            y: center.y + vertex_radius * sin,
+            z: center.z,
+        });
+    }
+    Ok(points)
+}
+
 /// The clamped chord knot vector and control points of a fit-point SPLINE.
 ///
 /// The single construction/validation point shared by the SPLINE command and its

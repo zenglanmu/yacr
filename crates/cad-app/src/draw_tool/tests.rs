@@ -51,6 +51,9 @@ fn required_points_and_selection_are_explicit_per_kind() {
             // also the terminal typed text.
             | DrawToolKind::InsertBlock
             | DrawToolKind::BlockDefine => 1,
+            // WIPEOUT is the open-ended polygon capture: three vertices are the
+            // minimum a closed ring needs.
+            DrawToolKind::Wipeout => 3,
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot. HATCH has the same
             // pre-selection shape: the selected entities are the boundary and the
@@ -66,11 +69,13 @@ fn required_points_and_selection_are_explicit_per_kind() {
         };
         assert_eq!(kind.required_points(), expected, "{kind:?}");
     }
-    // The arity model: PLINE/SPLINE and the baseline/continue pair are open-ended.
+    // The arity model: PLINE/SPLINE, the baseline/continue pair and WIPEOUT are
+    // open-ended.
     assert_eq!(DrawToolKind::Polyline.arity(), PointArity::AtLeast(2));
     assert_eq!(DrawToolKind::Spline.arity(), PointArity::AtLeast(4));
     assert_eq!(DrawToolKind::DimBaseline.arity(), PointArity::AtLeast(2));
     assert_eq!(DrawToolKind::DimContinue.arity(), PointArity::AtLeast(2));
+    assert_eq!(DrawToolKind::Wipeout.arity(), PointArity::AtLeast(3));
     assert_eq!(DrawToolKind::Point.arity(), PointArity::Exact(1));
     for kind in DrawToolKind::ALL {
         if kind.arity().is_open_ended() {
@@ -898,6 +903,7 @@ fn polygon_intent_carries_the_two_picks_exactly_and_is_ready_at_two() {
 mod array;
 mod clipboard;
 mod dimension;
+mod draw_variants;
 mod hatch;
 mod keys;
 mod mleader;
