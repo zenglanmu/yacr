@@ -498,6 +498,7 @@ impl Application {
             | CommandId::SetEntityProperty
             | CommandId::MatchProp
             | CommandId::GripStretch
+            | CommandId::Reverse
             | CommandId::CreateText
             | CommandId::CreateMText
             | CommandId::MLeader

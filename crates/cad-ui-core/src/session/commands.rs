@@ -166,6 +166,9 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // an alias: there is no interactive rectangular/polygonal draw mode in this
     // build, so the name must not route into a draw capture.
     ("REVCLOUD", CommandId::RevisionCloud),
+    // REVERSE (AutoCAD 2026) reverses the vertices/direction of the selected
+    // LINEs/LWPOLYLINEs/SPLINEs; the selection is the whole input.
+    ("REVERSE", CommandId::Reverse),
     ("ARRAYRECT", CommandId::ArrayRectangular),
     ("ARRAYPOLAR", CommandId::ArrayPolar),
     ("ALIGN", CommandId::AlignEntities),

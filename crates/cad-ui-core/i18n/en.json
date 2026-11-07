@@ -431,6 +431,8 @@
   "draw.kind.pasteblock": "Paste as block",
   "draw.kind.extend": "Extend",
   "draw.kind.rotate": "Rotate",
+  "draw.kind.reverse": "Reverse",
+  "draw.kind.reverse.hint": "Select at least one LINE, polyline or spline; REVERSE flips its vertex/direction order in one step.",
   "draw.kind.scale": "Scale",
   "draw.kind.mirror": "Mirror",
   "draw.kind.offset": "Offset",

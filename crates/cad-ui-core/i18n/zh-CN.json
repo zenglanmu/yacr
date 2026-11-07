@@ -431,6 +431,8 @@
   "draw.kind.pasteblock": "粘贴为块",
   "draw.kind.extend": "延伸",
   "draw.kind.rotate": "旋转",
+  "draw.kind.reverse": "反转",
+  "draw.kind.reverse.hint": "请选择至少一个直线、多段线或样条曲线；REVERSE 会一步反转其顶点/方向顺序。",
   "draw.kind.scale": "缩放",
   "draw.kind.mirror": "镜像",
   "draw.kind.offset": "偏移",

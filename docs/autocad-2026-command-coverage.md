@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **44** |
-| **已实现合计（完整 + 部分）** | **94** |
-| 未实现 | **887** |
+| 部分实现（有写明的界） | **48** |
+| **已实现合计（完整 + 部分）** | **98** |
+| 未实现 | **883** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -51,6 +51,7 @@
 | `AUDIT` | 部分实现 | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
 | `BLOCK` | 已实现 | — |
 | `BREAK` | 部分实现 | 两点打断；无 F 第一点覆盖、无多段打断；LWPOLYLINE 按名拒绝 |
+| `BREAKATPOINT` | 部分实现 | 交互工具：先拾取对象再指定断点（断点可投影到对象上）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
 | `CHAMFER` | 部分实现 | 两线形式 + 独立 CHAMFER POLYLINE 选择子；无 Angle/Multiple/Trim |
 | `CIRCLE` | 已实现 | — |
 | `CLEANSCREENOFF` | 部分实现 | chrome 本地选择子：显式退出 clean-screen；只恢复 chrome 可见性，不重开各面板 |
@@ -99,10 +100,12 @@
 | `MTEXT` | 部分实现 | 两角宽度模型；无行距/分栏/背景填充 |
 | `NEW` | 已实现 | — |
 | `OFFSET` | 部分实现 | LINE/CIRCLE/ARC/LWPOLYLINE；ELLIPSE 拒绝；无全局自交修剪 |
+| `OOPS` | 部分实现 | v1 只恢复最近一次 ERASE（不覆盖 AutoCAD 的 BLOCK/WBLOCK 删除）；恢复实体用新 id；撤销恢复副本但不恢复快照 |
 | `OPEN` | 已实现 | — |
 | `OPTIONS` | 已实现 | chrome 本地选择子：打开选项对话框 |
 | `ORTHO` | 已实现 | — |
 | `OSNAP` | 已实现 | — |
+| `OVERKILL` | 部分实现 | v1 仅删除完全相同的重复对象（同空间/图层/几何，1e-9）；无部分重叠、共线合并、圆弧覆盖圆、折线段优化、容差与图层/颜色忽略 |
 | `PAN` | 已实现 | — |
 | `PASTEBLOCK` | 部分实现 | 应用内剪贴板 → 自动命名块；不是 OS 剪贴板 |
 | `PASTECLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
@@ -119,6 +122,7 @@
 | `RECTANG` | 已实现 | — |
 | `REDO` | 已实现 | — |
 | `REVCLOUD` | 部分实现 | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
+| `REVERSE` | 部分实现 | 仅 LINE/LWPOLYLINE/SPLINE，当前选择为全部输入；无交互拾取提示，无螺旋/3D 变体 |
 | `ROTATE` | 已实现 | — |
 | `SAVE` | 部分实现 | 有损 DXF 另存；无 DWG 回写 |
 | `SAVEAS` | 部分实现 | SAVE 别名：有损 DXF 另存，无 DWG 回写 |
@@ -274,7 +278,7 @@
 | 131 | `BOX` | 未实现 | Creates a 3D solid box. | — |
 | 132 | `BPARAMETER` | 未实现 | Adds a parameter with grips to a dynamic block definition. | — |
 | 133 | `BREAK` | 部分实现 | Breaks the selected object between two points. | 两点打断；无 F 第一点覆盖、无多段打断；LWPOLYLINE 按名拒绝 |
-| 134 | `BREAKATPOINT` | 未实现 | Breaks the selected object into two objects at a specified point. | — |
+| 134 | `BREAKATPOINT` | 部分实现 | Breaks the selected object into two objects at a specified point. | 交互工具：先拾取对象再指定断点（断点可投影）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
 | 135 | `BREAKLINE` | 未实现 | Creates a breakline, a polyline that includes the breakline symbol. | — |
 | 136 | `BREP` | 未实现 | Removes the history from 3D solids and composite solids, and associativity from surfaces. | — |
 | 137 | `-BREPLACE` | 未实现 | At the Command prompt, replaces specified block references with a different block. | — |
@@ -739,7 +743,7 @@
 | 596 | `OLEOPEN` | 未实现 | Opens the selected OLE object in its source application. | — |
 | 597 | `OLERESET` | 未实现 | Restores the selected OLE object to its original size and shape. | — |
 | 598 | `OLESCALE` | 未实现 | Controls the size, scale, and other properties of a selected OLE object. | — |
-| 599 | `OOPS` | 未实现 | Restores erased objects. | — |
+| 599 | `OOPS` | 部分实现 | Restores erased objects. | v1 只恢复最近一次 ERASE（不覆盖 BLOCK/WBLOCK 删除）；恢复实体用新 id；撤销恢复副本但不恢复快照 |
 | 600 | `OPEN` | 已实现 | Opens an existing drawing file. | — |
 | 601 | `OPENDWFMARKUP` | 未实现 | Opens a DWF or DWFx file that contains markups. | — |
 | 602 | `OPENFROMWEBMOBILE` | 未实现 | Opens a drawing file from your online Autodesk Account. | — |
@@ -748,7 +752,7 @@
 | 605 | `ORTHO` | 已实现 | Constrains cursor movement to the horizontal or vertical direction. | — |
 | 606 | `OSNAP` | 已实现 | Sets running object snap modes. | — |
 | 607 | `-OVERKILL` | 未实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines partially overlapping or contiguous ones. | — |
-| 608 | `OVERKILL` | 未实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines those that are partially overlapping or contiguous. | — |
+| 608 | `OVERKILL` | 部分实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines those that are partially overlapping or contiguous. | v1 仅删除完全相同的重复对象（同空间/图层/几何，1e-9）；无部分重叠、共线合并、圆弧覆盖圆、折线段优化、容差与图层/颜色忽略 |
 | 609 | `-PAGESETUP` | 未实现 | Modifies the current page layout settings for the plotting device, paper size, plot scale, and several other settings in the command line. | — |
 | 610 | `PAGESETUP` | 未实现 | Controls the page layout, plotting device, paper size, and other settings for each new layout. | — |
 | 611 | `-PAN` | 未实现 | Shifts the view by specifying up to two points to determine a distance and direction. | — |
@@ -888,7 +892,7 @@
 | 745 | `RESUME` | 未实现 | Continues an interrupted script. | — |
 | 746 | `REVCLOUD` | 部分实现 | Creates or modifies a revision cloud. | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
 | 747 | `REVCLOUDPROPERTIES` | 未实现 | Controls the approximate chord length for the arcs in a selected revision cloud. | — |
-| 748 | `REVERSE` | 未实现 | Reverses the vertices of selected lines, polylines, splines, and helixes, which is useful for linetypes with included text, or wide polylines with differing beginning and ending widths. | — |
+| 748 | `REVERSE` | 部分实现 | Reverses the vertices of selected lines, polylines, splines, and helixes, which is useful for linetypes with included text, or wide polylines with differing beginning and ending widths. | 仅 LINE/LWPOLYLINE/SPLINE，当前选择为全部输入；无交互拾取提示，无螺旋/3D 变体 |
 | 749 | `REVERT` | 未实现 | Closes and then reopens the current drawing. | — |
 | 750 | `REVOLVE` | 未实现 | Creates a 3D solid or surface by sweeping an object around an axis. | — |
 | 751 | `REVSURF` | 未实现 | Creates a mesh by revolving a profile about an axis. | — |

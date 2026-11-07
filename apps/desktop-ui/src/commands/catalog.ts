@@ -369,6 +369,14 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // so no shipped row moves, and it reuses the `polyline` glyph: the output is a
   // polyline.
   { id: 'REVCLOUD', labelKey: 'draw.kind.revcloud', icon: 'polyline', group: 'draw' },
+  // REVERSE (AutoCAD 2026) reverses the vertex/direction order of the selected
+  // LINE / LWPOLYLINE / SPLINE. It is selection-based (`CommandPayload::None`),
+  // so it is a payload-free router command with no capture: the one-or-more
+  // selected objects are the whole input. v1 does not offer AutoCAD's
+  // interactive pick prompt or its helix/3D variants. Appended last so no
+  // shipped row moves; the `mirror` glyph is the closest direction glyph in the
+  // icon set.
+  { id: 'REVERSE', labelKey: 'draw.kind.reverse', icon: 'mirror', group: 'modify' },
   // AUDIT (AutoCAD 2026) is the detect-only drawing audit: it reports every
   // stored entity that fails the database's own validity check and repairs
   // nothing (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). It is a

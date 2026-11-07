@@ -60,6 +60,7 @@ mod lengthen;
 mod match_prop;
 mod mirror_curves;
 mod mleader;
+mod modify_extra;
 mod mtext_create;
 mod offset_polyline;
 mod offset_polyline_bulge;

@@ -949,6 +949,13 @@ pub enum CommandId {
     /// `RAY` (Work-only): the positive half of an infinite construction line,
     /// stored as a finite clipped segment; see [`crate::command_id::construction_line`].
     CreateRay,
+    /// `REVERSE` (Work-only): reverse the vertices/direction of the selected
+    /// LINEs, LWPOLYLINEs and SPLINEs in one transaction / one undo step.
+    ///
+    /// Payload is [`crate::CommandPayload::None`] — the current selection is the
+    /// whole input (the declared divergence from AutoCAD's interactive pick
+    /// prompt). Full contract: [`crate::command_id::reverse`].
+    Reverse,
 }
 
 mod capabilities;
@@ -960,4 +967,5 @@ pub mod grip_stretch;
 pub mod hatch;
 pub mod match_prop;
 pub mod point_style;
+pub mod reverse;
 pub mod zoom;

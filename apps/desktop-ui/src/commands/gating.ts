@@ -263,6 +263,10 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // is the command's own hint, so the disabled button and the refusal describe
   // the same rule once.
   REVCLOUD: Object.freeze({ count: 1, reasonKey: 'draw.kind.revcloud.hint' }),
+  // REVERSE (AutoCAD 2026) reverses at least one selected object; the host
+  // refuses an empty selection by name (`reverse.selection`). The table minimum
+  // is one and the sentence is the command's own hint.
+  REVERSE: Object.freeze({ count: 1, reasonKey: 'draw.kind.reverse.hint' }),
   LAYISO: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
   LAYUNISO: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
   LAYOFF: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),

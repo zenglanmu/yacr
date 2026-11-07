@@ -52,6 +52,7 @@ impl Application {
             CommandId::ChamferPolyline => self.chamfer_polyline(session, command),
             CommandId::FilletPolyline => self.fillet_polyline(session, command),
             CommandId::RevisionCloud => self.revision_cloud(session, command),
+            CommandId::Reverse => self.reverse_entities(session, command),
             CommandId::ArrayRectangular => self.array_rect(session, command),
             CommandId::ArrayPolar => self.array_polar(session, command),
             CommandId::AlignEntities => self.align_entities(session, command),
