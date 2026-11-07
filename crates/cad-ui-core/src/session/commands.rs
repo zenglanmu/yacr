@@ -133,6 +133,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // an alias of HATCH (the input and the discovery are different).
     ("HATCHPOINT", CommandId::HatchPoint),
     ("HATCHGENERATEBOUNDARY", CommandId::HatchGenerateBoundary),
+    ("HATCHTOBACK", CommandId::HatchToBack),
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
     ("EXTEND", CommandId::ExtendEntity),

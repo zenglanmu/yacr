@@ -466,6 +466,8 @@
   "draw.kind.hatch": "Hatch",
   "draw.kind.hatchgenerateboundary": "Generate hatch boundary",
   "draw.kind.hatchgenerateboundary.hint": "Select at least one hatch; HATCHGENERATEBOUNDARY creates one non-associative closed polyline per hatch loop (including inner islands) on the hatch's own layer and space.",
+  "draw.kind.hatchtoback": "Send hatches to back",
+  "draw.kind.hatchtoback.hint": "HATCHTOBACK sends every model-space hatch behind all other objects in one undo step; paper-space and block hatches are not reordered.",
   "draw.kind.hatchpoint": "Hatch by point",
   "draw.kind.revcloud": "Revision Cloud",
   "draw.kind.revcloud.hint": "Select one closed straight-segment polyline; REVCLOUD replaces each edge with one outward arc (Object mode v1).",

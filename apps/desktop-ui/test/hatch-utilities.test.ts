@@ -1,9 +1,9 @@
-// HATCHGENERATEBOUNDARY (AutoCAD 2026 hatch boundary utility): catalogue row,
-// ribbon placement, selection gating, command-line typing and both i18n
-// catalogues.
+// HATCHGENERATEBOUNDARY / HATCHTOBACK (AutoCAD 2026 hatch utilities):
+// catalogue rows, ribbon placement, selection/document gating, command-line
+// typing and both i18n catalogues.
 //
-// The backend semantics (loop→polyline geometry, bulges, undo, refusals) live in
-// `crates/cad-app/src/tests/drawing/hatch_utilities.rs`.
+// The backend semantics (loop→polyline geometry, draw-order renumbering, undo,
+// refusals) live in `crates/cad-app/src/tests/drawing/hatch_utilities.rs`.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -14,6 +14,7 @@ import {
   selectionRequirement,
   setCommandCatalog,
 } from '../src/commands/commands.ts';
+import { DOCUMENT_SCOPED_COMMANDS, SELECTION_REQUIREMENTS } from '../src/commands/gating.ts';
 import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 import { HOST_NAMES, readCatalog } from './helpers.ts';
@@ -129,4 +130,42 @@ test('HATCHGENERATEBOUNDARY needs at least one selected hatch', () => {
     admitCommandText(GENERATE_BOUNDARY.id, { status: NO_DOCUMENT }).reasonKey,
     'plot.no_document',
   );
+});
+
+// --- HATCHTOBACK: all model-space hatches to the back ------------------------
+
+const TO_BACK = Object.freeze({
+  id: 'HATCHTOBACK',
+  labelKey: 'draw.kind.hatchtoback',
+  hintKey: 'draw.kind.hatchtoback.hint',
+  icon: 'hatch',
+});
+
+test('HATCHTOBACK is catalogued and typed as its own selector', () => {
+  assertCatalogued({ ...TO_BACK, group: 'modify' });
+  assert.notEqual(TO_BACK.id, 'HATCH');
+  assert.equal(typeof en[TO_BACK.hintKey], 'string');
+  assert.equal(typeof zh[TO_BACK.hintKey], 'string');
+});
+
+test('both Modify panels carry HATCHTOBACK as a small router button', () => {
+  for (const tabId of ['home', 'draw']) {
+    const item = assertRibbonCommand(tabId, 'modify', TO_BACK);
+    assert.equal(item.large, undefined, `${tabId}: it is a secondary modify action`);
+  }
+});
+
+test('HATCHTOBACK is document-scoped and needs no selection', () => {
+  assert.ok(DOCUMENT_SCOPED_COMMANDS.includes(TO_BACK.id));
+  assert.equal(SELECTION_REQUIREMENTS[TO_BACK.id], undefined, 'the selection is not its input');
+  // No drawing: the catalog's own "no drawing is open" sentence.
+  assert.deepEqual(admitCommandText(TO_BACK.id, { status: NO_DOCUMENT }), {
+    kind: 'unavailable',
+    command: TO_BACK.id,
+    reasonKey: 'plot.no_document',
+  });
+  // With a drawing, any selection count (including none) is admitted.
+  for (const status of [DOCUMENT, selected(0), selected(5)]) {
+    assert.equal(admitCommandText(TO_BACK.id, { status }).kind, 'admitted');
+  }
 });

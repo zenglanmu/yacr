@@ -431,4 +431,9 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // reuses the `hatch` glyph because it belongs to the hatch family. It lives in
   // the Annotate tab, the way AutoCAD exposes it from the Hatch context.
   { id: 'HATCHGENERATEBOUNDARY', labelKey: 'draw.kind.hatchgenerateboundary', icon: 'hatch', group: 'annotate' },
+  // HATCHTOBACK (AutoCAD 2026) sends every model-space hatch behind every other
+  // object by rewriting the stored draw order. It takes no selection and needs an
+  // open drawing (`DOCUMENT_SCOPED_COMMANDS`); paper-space/block hatches are not
+  // reordered. Appended last; it reuses the `hatch` glyph.
+  { id: 'HATCHTOBACK', labelKey: 'draw.kind.hatchtoback', icon: 'hatch', group: 'modify' },
 ]);

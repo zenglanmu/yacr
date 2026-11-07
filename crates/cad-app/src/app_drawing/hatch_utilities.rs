@@ -1,14 +1,20 @@
-//! `HATCHGENERATEBOUNDARY` (AutoCAD 2026 hatch boundary utility).
+//! `HATCHGENERATEBOUNDARY` and `HATCHTOBACK` (AutoCAD 2026 hatch utilities).
 //!
-//! One Work-only command that acts on stored hatch entities without changing the
-//! hatches' geometry: [`crate::CommandId::HatchGenerateBoundary`] creates one
-//! **non-associative** closed polyline per hatch loop around the selected
-//! hatches, on each hatch's own layer and space, in one transaction / one undo
-//! step. The source hatches are retained.
+//! Two Work-only commands that act on stored hatch entities without changing the
+//! hatches' geometry:
 //!
-//! The handler validates its whole input before staging anything, so a refusal
+//! * [`crate::CommandId::HatchGenerateBoundary`] — create one **non-associative**
+//!   closed polyline per hatch loop around the selected hatches, on each hatch's
+//!   own layer and space, in one transaction / one undo step. The source hatches
+//!   are retained.
+//! * [`crate::CommandId::HatchToBack`] — move every **model-space** hatch behind
+//!   every non-hatch object by rewriting only the stored `draw_order`, in one
+//!   transaction / one undo step.
+//!
+//! Both handlers validate their whole input before staging anything, so a refusal
 //! leaves the database revision, the history depth and the ID allocator untouched.
-//! The long-form contract lives in `crate::command_id::hatch_generate_boundary`.
+//! The long-form contracts live in `crate::command_id::hatch_generate_boundary`
+//! and `crate::command_id::hatch_to_back`.
 
 use super::*;
 
@@ -176,6 +182,133 @@ impl Application {
             point_report: None,
         })
     }
+
+    /// `HATCHTOBACK`: put every model-space hatch behind all other model-space
+    /// objects by rewriting their stored `draw_order` in one transaction.
+    ///
+    /// No payload and no selection. With no hatches (`hatchtoback.none`) or with
+    /// every hatch already strictly below the lowest non-hatch order
+    /// (`hatchtoback.unchanged`) nothing is staged. Otherwise the hatches keep
+    /// their relative order and receive the contiguous block
+    /// `min_order - n ..= min_order - 1`; the arithmetic is checked, so an
+    /// `i64` underflow is the explicit `hatchtoback.order_exhausted` refusal.
+    ///
+    /// Only model-space rows are considered: this build has no paper-space draw
+    /// order model, so layout hatches are left alone (declared, not silent).
+    pub(crate) fn hatch_to_back(
+        &mut self,
+        _session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        if !matches!(command.payload, CommandPayload::None) {
+            return Err(refusal(
+                "hatchtoback.payload",
+                "HATCHTOBACK takes no payload and no selection",
+            ));
+        }
+        let document_id = command.document;
+        let document = self
+            .workspace
+            .documents
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
+
+        let model: Vec<DbEntity> = drawing
+            .entities()
+            .filter(|entity| entity.space == SpaceId::Model)
+            .cloned()
+            .collect();
+        let hatches: Vec<DbEntity> = model
+            .iter()
+            .filter(|entity| matches!(entity.geometry, SemanticGeometry::Hatch(_)))
+            .cloned()
+            .collect();
+        if hatches.is_empty() {
+            return Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: "hatchtoback.none".into(),
+                    message: "HATCHTOBACK: no hatches in model space".into(),
+                }],
+                measurement: None,
+                point_report: None,
+            });
+        }
+        let min_order = model
+            .iter()
+            .filter(|entity| !matches!(entity.geometry, SemanticGeometry::Hatch(_)))
+            .map(|entity| entity.draw_order)
+            .min();
+        let Some(min_order) = min_order else {
+            // Nothing but hatches: each hatch is already behind every non-hatch.
+            return Ok(unchanged_outcome());
+        };
+        if hatches.iter().all(|entity| entity.draw_order < min_order) {
+            return Ok(unchanged_outcome());
+        }
+
+        let count = i64::try_from(hatches.len()).map_err(|_| order_exhausted())?;
+        let first = min_order.checked_sub(count).ok_or_else(order_exhausted)?;
+        // `first` is the lowest target and `first + (n-1) = min_order - 1` is the
+        // highest; both are representable once `min_order - n` is.
+        let mut ordered = hatches;
+        ordered.sort_by_key(|entity| (entity.draw_order, entity.id.0));
+        let mut planned: Vec<(DbEntity, DbEntity)> = Vec::with_capacity(ordered.len());
+        for (index, before) in ordered.into_iter().enumerate() {
+            let target = first + index as i64;
+            if before.draw_order == target {
+                continue;
+            }
+            let mut after = before.clone();
+            after.draw_order = target;
+            planned.push((before, after));
+        }
+
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged = drawing.begin_drawing_transaction("hatch to back", transaction)?;
+            for (_, after) in &planned {
+                staged.update_entity(after.clone())?;
+            }
+            staged.commit()?
+        };
+        let ids: Vec<ObjectId> = planned
+            .iter()
+            .map(|(before, _)| ObjectId(before.id.0))
+            .collect();
+        let moved = ids.len();
+        let patches: Vec<DrawingPatch> = planned
+            .into_iter()
+            .map(|(before, after)| drawing_patch(before.id, Some(before), Some(after)))
+            .collect();
+        self.publish_candidate(
+            document_id,
+            candidate,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: "hatch to back".into(),
+                patches,
+                block_patches: Vec::new(),
+                merge_key: None,
+            },
+        )?;
+
+        Ok(CommandOutcome {
+            objects: ids,
+            changes: Some(Arc::new(change_set)),
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "hatchtoback.applied".into(),
+                message: format!("HATCHTOBACK: moved {moved} hatch(es) behind every other object"),
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
 }
 
 /// A command refusal carrying its stable reason code.
@@ -191,6 +324,27 @@ fn not_addressable(entity: EntityId, detail: &str) -> CadError {
             entity.0
         ),
     )
+}
+
+fn order_exhausted() -> CadError {
+    refusal(
+        "hatchtoback.order_exhausted",
+        "the target draw orders would underflow i64",
+    )
+}
+
+fn unchanged_outcome() -> CommandOutcome {
+    CommandOutcome {
+        objects: Vec::new(),
+        changes: None,
+        diagnostics: vec![Diagnostic {
+            object: None,
+            code: "hatchtoback.unchanged".into(),
+            message: "HATCHTOBACK: every hatch is already behind every other object".into(),
+        }],
+        measurement: None,
+        point_report: None,
+    }
 }
 
 /// One hatch loop as a **closed** world-space polyline.

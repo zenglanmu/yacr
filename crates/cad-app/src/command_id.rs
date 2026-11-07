@@ -546,6 +546,10 @@ pub enum CommandId {
     /// loop of every selected hatch, on the hatch's layer/space, in one
     /// transaction. Full contract: [`crate::command_id::hatch_generate_boundary`].
     HatchGenerateBoundary,
+    /// HATCHTOBACK (Work-only): send every model-space hatch behind all other
+    /// objects by rewriting the stored draw order, in one transaction. Full
+    /// contract: [`crate::command_id::hatch_to_back`].
+    HatchToBack,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,
@@ -982,6 +986,7 @@ pub mod construction_line;
 pub mod grip_stretch;
 pub mod hatch;
 pub mod hatch_generate_boundary;
+pub mod hatch_to_back;
 pub mod match_prop;
 pub mod oops;
 pub mod overkill;

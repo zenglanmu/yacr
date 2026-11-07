@@ -41,6 +41,7 @@ impl Application {
             CommandId::Hatch => self.create_hatch(session, command),
             CommandId::HatchPoint => self.create_hatch_point(session, command),
             CommandId::HatchGenerateBoundary => self.hatch_generate_boundary(session, command),
+            CommandId::HatchToBack => self.hatch_to_back(session, command),
             CommandId::MoveEntities => self.move_entities(command),
             CommandId::TrimEntity => self.trim_entity(command),
             CommandId::ExtendEntity => self.extend_entity(command),

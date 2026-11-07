@@ -182,7 +182,7 @@ export const GESTURE_ONLY_COMMANDS: readonly string[] = Object.freeze(['ORBIT'])
  * "a drawing is the whole requirement" (see `SELECTION_REQUIREMENTS`, which
  * answers the no-document case for selection-gated commands itself).
  */
-export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW']);
+export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK']);
 
 /** One command's precondition on the **current selection**. */
 export interface SelectionRequirement {

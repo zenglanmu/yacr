@@ -1,4 +1,4 @@
-//! `HATCHGENERATEBOUNDARY` contract tests (AutoCAD 2026).
+//! `HATCHGENERATEBOUNDARY` and `HATCHTOBACK` contract tests (AutoCAD 2026).
 //!
 //! Pins the two hatch utilities end to end:
 //!
@@ -7,6 +7,9 @@
 //!   one transaction / one undo step; the source hatch is retained;
 //! * every refusal (empty selection, non-hatch, non-addressable, Viewer mode)
 //!   writes nothing, bumps no revision and records no undo entry;
+//! * HATCHTOBACK's contiguous backward draw-order block with relative order
+//!   preserved, its exact undo restoration, its no-op cases and the checked
+//!   `i64` underflow refusal.
 
 use super::*;
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
@@ -395,3 +398,185 @@ fn hatch_generate_boundary_is_refused_in_viewer_mode() {
 }
 
 // ---------------------------------------------------------------------------
+// HATCHTOBACK
+// ---------------------------------------------------------------------------
+
+fn line(id: u128, order: i64) -> DbEntity {
+    entity(
+        id,
+        LayerId(0),
+        SpaceId::Model,
+        SemanticGeometry::Line {
+            start: p3(0.0, 0.0, 0.0),
+            end: p3(1.0, 0.0, 0.0),
+        },
+        order,
+    )
+}
+
+fn hatch(id: u128, order: i64) -> DbEntity {
+    entity(
+        id,
+        LayerId(5),
+        SpaceId::Model,
+        hatch_geometry(
+            vec![straight_ring(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])],
+            0.0,
+        ),
+        order,
+    )
+}
+
+#[test]
+fn hatch_to_back_stages_every_hatch_below_the_lowest_non_hatch_in_relative_order() {
+    let (mut app, mut session) = build(
+        vec![
+            line(1, 10),
+            hatch(2, 30),
+            line(3, 15),
+            hatch(4, 20),
+            hatch(5, 7),
+        ],
+        AppMode::Work,
+    );
+    let before_revision = revision(&app);
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchToBack,
+        CommandPayload::None,
+    )
+    .expect("HATCHTOBACK must succeed");
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "hatchtoback.applied"));
+    // Entity 5 is already at its target (7); only 4 and 2 change.
+    assert_eq!(outcome.objects.len(), 2);
+    assert_eq!(revision(&app), Revision(before_revision.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+
+    // min_order = 10, three hatches -> 7..=9, preserving 5 < 4 < 2.
+    assert_eq!(drawing_entity(&app, 1).draw_order, 10);
+    assert_eq!(drawing_entity(&app, 3).draw_order, 15);
+    assert_eq!(drawing_entity(&app, 5).draw_order, 7);
+    assert_eq!(drawing_entity(&app, 4).draw_order, 8);
+    assert_eq!(drawing_entity(&app, 2).draw_order, 9);
+
+    // Geometry is untouched: only the stored draw order changed.
+    let hatches: Vec<DbEntity> = [2u128, 4, 5]
+        .iter()
+        .map(|id| drawing_entity(&app, *id))
+        .collect();
+    assert!(hatches
+        .iter()
+        .all(|row| matches!(row.geometry, SemanticGeometry::Hatch(_))));
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo restores the draw orders");
+    assert_eq!(undo_depth(&app), 0);
+    assert_eq!(drawing_entity(&app, 1).draw_order, 10);
+    assert_eq!(drawing_entity(&app, 3).draw_order, 15);
+    assert_eq!(drawing_entity(&app, 2).draw_order, 30);
+    assert_eq!(drawing_entity(&app, 4).draw_order, 20);
+    assert_eq!(drawing_entity(&app, 5).draw_order, 7);
+}
+
+#[test]
+fn hatch_to_back_is_a_no_op_without_hatches_or_when_every_hatch_is_already_behind() {
+    // No hatch at all.
+    let (mut app, mut session) = build(vec![line(1, 10)], AppMode::Work);
+    let before_revision = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchToBack,
+        CommandPayload::None,
+    )
+    .expect("no hatch is a named no-op, not an error");
+    assert!(outcome.changes.is_none());
+    assert_eq!(outcome.diagnostics[0].code, "hatchtoback.none");
+    assert_eq!(revision(&app), before_revision);
+    assert_eq!(undo_depth(&app), 0);
+
+    // Every hatch already strictly below min_order.
+    let (mut app, mut session) = build(vec![line(1, 10), hatch(2, 3)], AppMode::Work);
+    let before_revision = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchToBack,
+        CommandPayload::None,
+    )
+    .expect("already-behind is a named no-op");
+    assert!(outcome.changes.is_none());
+    assert_eq!(outcome.diagnostics[0].code, "hatchtoback.unchanged");
+    assert_eq!(drawing_entity(&app, 2).draw_order, 3);
+    assert_eq!(revision(&app), before_revision);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn hatch_to_back_leaves_paper_space_hatches_alone() {
+    let paper = entity(
+        2,
+        LayerId(5),
+        SpaceId::Paper(LayoutId(1)),
+        hatch_geometry(
+            vec![straight_ring(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])],
+            0.0,
+        ),
+        99,
+    );
+    let (mut app, mut session) = build(vec![line(1, 10), paper], AppMode::Work);
+    let before = drawing_entity(&app, 2);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchToBack,
+        CommandPayload::None,
+    )
+    .expect("paper-space hatches are outside this command's scope");
+    assert_eq!(outcome.diagnostics[0].code, "hatchtoback.none");
+    let after = drawing_entity(&app, 2);
+    assert_eq!(before.draw_order, after.draw_order);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn hatch_to_back_refuses_an_i64_underflow_without_writing() {
+    let (mut app, mut session) = build(vec![line(1, i64::MIN), hatch(2, i64::MAX)], AppMode::Work);
+    let before_revision = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchToBack,
+        CommandPayload::None,
+    )
+    .expect_err("the target range underflows i64");
+    assert!(error.to_string().contains("hatchtoback.order_exhausted"));
+    assert_eq!(drawing_entity(&app, 2).draw_order, i64::MAX);
+    assert_eq!(revision(&app), before_revision);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn hatch_to_back_is_refused_in_viewer_mode() {
+    let (mut app, mut session) = build(vec![line(1, 10), hatch(2, 20)], AppMode::Viewer);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchToBack,
+        CommandPayload::None,
+    )
+    .expect_err("Viewer mode refuses a write");
+    assert!(matches!(error, CadError::PermissionDenied));
+    assert_eq!(drawing_entity(&app, 2).draw_order, 20);
+    assert_eq!(undo_depth(&app), 0);
+}
