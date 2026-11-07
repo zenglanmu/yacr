@@ -87,7 +87,7 @@ test('LIST needs one selected object and a document; STATUS is document-scoped; 
 test('ribbon: LIST sits with Properties, STATUS with the View info panel, FS has no button', () => {
   const home = RIBBON_TABS.find(tab => tab.id === 'home');
   const properties = home.panels.find(panel => panel.id === 'properties');
-  assert.deepEqual(properties.items.map(item => item.id), ['PROPERTIES', 'LIST']);
+  assert.deepEqual(properties.items.map(item => item.id), ['PROPERTIES', 'LIST', 'MASSPROP']);
   assert.equal(properties.items.find(item => item.id === 'LIST').command, 'LIST');
 
   const view = RIBBON_TABS.find(tab => tab.id === 'view');

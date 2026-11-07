@@ -80,7 +80,7 @@ test('the Layers arrow runs LAYER and the Properties arrow runs PROPERTIES', () 
     ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER'],
     'the Layers panel holds its palette toggle and the layer-state commands',
   );
-  assert.deepEqual(propertyItems, ['PROPERTIES', 'LIST']);
+  assert.deepEqual(propertyItems, ['PROPERTIES', 'LIST', 'MASSPROP']);
 });
 
 test('the panels with no dialog behind them stay disabled instead of launching anything', () => {
@@ -120,7 +120,7 @@ test('every launcher target is a chrome-local command, so admission always answe
   assert.equal(offered.some(panel => panel.id === 'layers'), false);
   const properties = offered.find(panel => panel.id === 'properties');
   assert.ok(properties, 'the Properties panel keeps its non-palette command');
-  assert.deepEqual(offeredItems(properties.items, false).map(item => item.id), ['LIST']);
+  assert.deepEqual(offeredItems(properties.items, false).map(item => item.id), ['LIST', 'MASSPROP']);
   // The Font Manager is the same kind of desktop-only palette surface: its Annotate entry is
   // dropped with the palettes instead of opening a panel the carrier never mounts.
   const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate').panels.find(panel => panel.id === 'annotation');

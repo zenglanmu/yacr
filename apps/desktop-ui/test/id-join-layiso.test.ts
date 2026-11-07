@@ -95,8 +95,8 @@ test('ID is the fifth Measure button, a router command, and a catalogue row', as
   const measure = panel('measure', 'measure');
   // Appended after the four shipped kinds, so no existing button moved, and it
   // keeps their conventions: a large entry with no variant popover.
-  assert.deepEqual(measure.items.map(item => item.id), ['DIST', 'PLINE', 'ANGLE', 'AREA', 'ID']);
-  const id = measure.items.at(-1);
+  assert.deepEqual(measure.items.map(item => item.id), ['DIST', 'PLINE', 'ANGLE', 'AREA', 'ID', 'MEASUREGEOM']);
+  const id = measure.items.find(item => item.id === 'ID');
   assert.equal(id.command, 'ID');
   assert.equal(id.labelKey, 'measure.kind.id');
   assert.equal(id.icon, 'point');

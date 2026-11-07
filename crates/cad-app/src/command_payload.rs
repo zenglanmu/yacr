@@ -124,6 +124,8 @@ pub enum PeditOption {
     Open,
     /// `REVERSE` / `R`: reverse vertex order and bulges exactly like `REVERSE`.
     Reverse,
+}
+
 /// The option of the AutoCAD 2026 `MEASUREGEOM` inquiry router.
 ///
 /// The typed grammar (`cad_ui_core::session::parse_measuregeom_argument`)
