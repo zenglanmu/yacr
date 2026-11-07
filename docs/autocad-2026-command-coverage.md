@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **48** |
-| **已实现合计（完整 + 部分）** | **98** |
-| 未实现 | **883** |
+| 部分实现（有写明的界） | **49** |
+| **已实现合计（完整 + 部分）** | **99** |
+| 未实现 | **882** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -88,6 +88,7 @@
 | `LAYFRZ` | 部分实现 | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入不可撤销 |
 | `LAYERP` | 部分实现 | 会话内有界 16 步；不持久化 |
 | `LAYISO` | 已实现 | — |
+| `LAYLCK` | 部分实现 | 预选择输入（不弹 Select objects）；锁定选中对象所在的不同图层（含当前层）；图层表写入不可撤销 |
 | `LAYMCUR` | 部分实现 | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
 | `LAYOFF` | 已实现 | — |
 | `LAYON` | 已实现 | — |
@@ -619,7 +620,7 @@
 | 472 | `LAYERSTATESAVE` | 未实现 | Displays the New Layer State to Save dialog box, where you can provide a name and a description for a new layer state. | — |
 | 473 | `LAYFRZ` | 部分实现 | Freezes the layer of selected objects. | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入不可撤销 |
 | 474 | `LAYISO` | 已实现 | Hides or locks all layers except those of the selected objects. | — |
-| 475 | `LAYLCK` | 未实现 | Locks the layer of a selected object. | — |
+| 475 | `LAYLCK` | 部分实现 | Locks the layer of a selected object. | 预选择输入（不弹 Select objects）；锁定选中对象所在的不同图层（含当前层）；图层表写入不可撤销 |
 | 476 | `-LAYMCH` | 未实现 | Changes the layer of a selected object to match the layer of a selected object. | — |
 | 477 | `LAYMCH` | 未实现 | Changes the layer of a selected object to match the destination layer. | — |
 | 478 | `LAYMCUR` | 部分实现 | Sets the current layer to that of a selected object. | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |

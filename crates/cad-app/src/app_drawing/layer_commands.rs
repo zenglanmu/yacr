@@ -88,6 +88,18 @@
 //! are not thawed** and `frozen_in_new_viewport` is left untouched; the same
 //! one-revision-bump-per-changed-layer and not-undoable rules apply. Success is
 //! `laythw.applied` with the changed-layer count. Work-only.
+//!
+//! ## `LAYLCK`
+//!
+//! "Locks the layer of a selected object." Applies to every distinct layer in
+//! the selection, **including the current layer** (locking is a write
+//! permission, not visibility; creating on a locked current layer is then
+//! refused by `cad-db`'s own `layer.locked` rule). Only `locked` changes; every
+//! other attribute is preserved. Already-locked rows are not staged, and an
+//! all-locked selection reports `laylck.unchanged` without a write. Unknown
+//! layer rows are refused by name. One revision bump per changed layer; **not
+//! undoable**. Success is `laylck.applied` with the changed-layer count.
+//! Work-only.
 
 use super::*;
 use cad_db::LayerAttributes;
@@ -219,6 +231,7 @@ impl Application {
             CommandId::LayMCur => self.laymcur(session, command),
             CommandId::LayFrz => self.layfrz(session, command),
             CommandId::LayThw => self.laythw(session, command),
+            CommandId::LayLck => self.laylck(session, command),
             _ => Err(CadError::InvalidInput(
                 "not a layer selection command".to_string(),
             )),
@@ -436,6 +449,88 @@ impl Application {
             measurement: None,
             point_report: None,
         })
+    }
+
+    /// `LAYLCK`: set the `locked` flag on every distinct selected layer (the
+    /// current layer included).
+    fn set_selected_layers_locked(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+        prefix: &str,
+        label: &str,
+        locked: bool,
+    ) -> CadResult<CommandOutcome> {
+        ensure_no_payload(command, prefix, label)?;
+        let references = selection_snapshot(session, prefix, label)?;
+        let document_id = command.document;
+        let drawing = self
+            .workspace
+            .documents
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing
+            .clone();
+        let layers = selected_distinct_layers(drawing.as_ref(), command, &references, prefix)?;
+        for layer in &layers {
+            if drawing.layer(*layer).is_none() {
+                return Err(invalid(
+                    prefix,
+                    "unknown_layer",
+                    format!("layer {} does not exist in this drawing", layer.0),
+                ));
+            }
+        }
+
+        let (changes, count) =
+            self.write_layer_flags(document_id, &layers, prefix, |attributes| {
+                if attributes.locked == locked {
+                    false
+                } else {
+                    attributes.locked = locked;
+                    true
+                }
+            })?;
+        if count == 0 {
+            return Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: format!("{prefix}.unchanged"),
+                    message: format!(
+                        "{label}: every selected layer is already {}",
+                        if locked { "locked" } else { "unlocked" }
+                    ),
+                }],
+                measurement: None,
+                point_report: None,
+            });
+        }
+        let action = if locked { "locked" } else { "unlocked" };
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: format!("{prefix}.applied"),
+                message: format!(
+                    "{label}: {action} {count} layer(s) (layer-table edit; not undoable; one \
+                     revision bump per changed layer)"
+                ),
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+
+    /// `LAYLCK`: lock every distinct selected layer.
+    fn laylck(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        self.set_selected_layers_locked(session, command, "laylck", "LAYLCK", true)
     }
 
     /// `LAYM C U R`: make the first selected entity's layer the current layer.

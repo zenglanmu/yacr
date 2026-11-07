@@ -1139,5 +1139,7 @@
   "draw.kind.layfrz": "冻结选中图层",
   "draw.kind.layfrz.hint": "请先选择对象；LAYFRZ 会冻结每个选中对象所在的图层（所有视口；冻结当前图层会被拒绝）。",
   "draw.kind.laythw": "解冻所有图层",
-  "draw.kind.laythw.hint": "无需选择对象；LAYTHW 会解冻所有已冻结图层（不改视口级冻结标记与新视口标志）。"
+  "draw.kind.laythw.hint": "无需选择对象；LAYTHW 会解冻所有已冻结图层（不改视口级冻结标记与新视口标志）。",
+  "draw.kind.laylck": "锁定选中图层",
+  "draw.kind.laylck.hint": "请先选择对象；LAYLCK 会锁定每个选中对象所在的图层（当前图层也可以被锁定）。"
 }

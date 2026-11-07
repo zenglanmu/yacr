@@ -51,7 +51,7 @@ const selected = count => ({ ...DOC, selection: { count } });
 const IDS = ['LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER'];
 
 /** Ids implemented so far in this lane (the file grows one commit at a time). */
-const IMPLEMENTED = ['LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW'];
+const IMPLEMENTED = ['LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK'];
 
 const SELECTION_COUNTS = {
   LAYCUR: 1,

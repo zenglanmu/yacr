@@ -289,6 +289,7 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   LAYMCUR: Object.freeze({ count: 1, reasonKey: 'draw.kind.laymcur.hint' }),
   LAYFRZ: Object.freeze({ count: 1, reasonKey: 'draw.kind.layfrz.hint' }),
   LAYTHW: Object.freeze({ count: 0, reasonKey: 'draw.kind.laythw.hint' }),
+  LAYLCK: Object.freeze({ count: 1, reasonKey: 'draw.kind.laylck.hint' }),
 })
 
 /**

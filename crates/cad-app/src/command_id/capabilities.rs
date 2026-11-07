@@ -84,6 +84,7 @@ impl CommandId {
                 | Self::LayMCur
                 | Self::LayFrz
                 | Self::LayThw
+                | Self::LayLck
                 | Self::SetPointDisplayMode
                 | Self::SetPointDisplaySize
                 | Self::SetEntityProperty
