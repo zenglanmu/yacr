@@ -12,6 +12,7 @@ use cad_app::interaction::{
     SelectionMode,
 };
 
+use super::diagnostics::cad_error_text;
 #[allow(unused_imports)]
 use super::CadSession;
 use crate::protocol::{
@@ -411,4 +412,55 @@ fn canvas_point(input: &ProbeInput, revision: u64, required: bool) -> Result<Poi
 /// once (matching the web host's `normalized_scroll_delta`).
 pub(super) fn scroll_delta(dx: f64, dy: f64) -> [f64; 2] {
     [dx, -dy]
+}
+
+impl CadSession {
+    /// Apply one input, publishing the derived render state before returning.
+    ///
+    /// This is the per-input body; [`CadSession::handle_input`] keeps the
+    /// one-publication-per-input behaviour, while [`CadSession::handle_inputs`]
+    /// brackets a whole tick's inputs and publishes once.
+    pub(super) fn handle_input_impl(&self, input: &ProbeInput) -> Result<(), String> {
+        let capturing = self.capturing();
+        let (requests, next_press) = plan_input(
+            self.press.borrow().as_ref().copied(),
+            input,
+            self.metrics_revision(),
+            capturing,
+        )?;
+        self.submit_interactions(requests)?;
+        *self.press.borrow_mut() = next_press;
+        Ok(())
+    }
+
+    /// Apply an ordered tick's worth of inputs under one render publication.
+    ///
+    /// Every input is still admitted and executed in order (wheel deltas are
+    /// never summed here, no pointer phase is dropped and no command ordering
+    /// changes); only the derived render publication is deferred, so N inputs in
+    /// one tick produce one `sync_render`/`request_preparation` instead of N.
+    ///
+    /// The first refusal is returned after the batch is closed, so a rejected
+    /// input never leaves the batch depth set. If every input was admitted but
+    /// the single flush failed, that flush error is returned instead (the next
+    /// tick's `sync_view` retries the publication).
+    pub fn handle_inputs(&self, inputs: &[ProbeInput]) -> Result<(), String> {
+        self.core.begin_render_batch();
+        let mut first_error = None;
+        for input in inputs {
+            if let Err(error) = self.handle_input_impl(input) {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+        let flush = self
+            .core
+            .end_render_batch()
+            .map_err(|error| cad_error_text(&error));
+        match first_error {
+            Some(error) => Err(error),
+            None => flush,
+        }
+    }
 }

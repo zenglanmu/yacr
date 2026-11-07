@@ -198,6 +198,65 @@ fn settle(renderer: &mut Renderer, target: &RenderTarget) -> RgbaImage {
 }
 
 // ---------------------------------------------------------------------------
+// Navigation pause: a retained page is composited, never advanced
+// ---------------------------------------------------------------------------
+
+/// While a camera gesture is active the engine asks for a frame that keeps the
+/// retained base page and only recomposites the transient overlay. A camera
+/// change still restarts and draws page 1; only same-camera (cursor-only)
+/// invalidations reuse the page.
+#[test]
+fn retained_overlay_keeps_the_base_page_and_a_camera_change_still_redraws() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let (mut renderer, target) = paged_renderer(gpu);
+
+    renderer.render(camera_2d(), &target).expect("page 1");
+    assert_eq!(renderer.frame_progress(), Some((1, BATCH_COUNT)));
+    let page_one = renderer.read_target_rgba().expect("read page 1");
+
+    let stats = renderer
+        .render_retained_overlay(camera_2d(), &target)
+        .expect("retained overlay");
+    assert_eq!(
+        stats.progressive_restarts, 0,
+        "a same-camera frame must not restart the walk"
+    );
+    assert_eq!(
+        renderer.frame_progress(),
+        Some((1, BATCH_COUNT)),
+        "the paused walk must not advance to page 2"
+    );
+    assert_eq!(
+        renderer
+            .read_target_rgba()
+            .expect("read retained frame")
+            .pixels,
+        page_one.pixels,
+        "the retained base plus the unchanged overlay must be pixel-identical"
+    );
+
+    let mut moved = camera_2d();
+    moved.center.x = 0.1;
+    let stats = renderer
+        .render_retained_overlay(moved, &target)
+        .expect("camera change while paused");
+    assert_eq!(
+        stats.progressive_restarts, 1,
+        "a camera change must restart the walk instead of reusing a stale page"
+    );
+    assert_eq!(
+        renderer.frame_progress(),
+        Some((1, BATCH_COUNT)),
+        "the restarted walk draws page 1 under the new camera"
+    );
+
+    renderer.render(moved, &target).expect("page 2");
+    assert_eq!(renderer.frame_progress(), Some((2, BATCH_COUNT)));
+}
+
+// ---------------------------------------------------------------------------
 // Probe
 // ---------------------------------------------------------------------------
 

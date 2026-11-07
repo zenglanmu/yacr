@@ -54,7 +54,7 @@ impl Renderer {
         self.gpu_time = None;
         self.gpu_time_state = gpu_time::GpuTimeState::Disabled;
         self.device_lost = true;
-        self.draw_plan = None;
+        self.drop_derived_base_state();
         self.instance_streams.clear();
         self.arc_streams.clear();
         self.mesh_chunks.clear();
@@ -146,7 +146,7 @@ impl Renderer {
         self.lineweight_not_drawn.clear();
         self.active_backend = None;
         self.device_lost = true;
-        self.draw_plan = None;
+        self.drop_derived_base_state();
         self.instance_streams.clear();
         self.arc_streams.clear();
         self.mesh_chunks.clear();

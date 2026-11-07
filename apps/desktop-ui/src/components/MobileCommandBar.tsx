@@ -30,6 +30,7 @@ import { mobileHistoryRows } from '../commands/command-line-model.ts';
 import { unavailableReasonKey } from '../commands/commands.ts';
 import { releaseFocusOnOutsidePress } from '../focus-release.ts';
 import type { FocusReleaseRoot } from '../focus-release.ts';
+import { statusBannerText } from '../host/notice.ts';
 
 export function MobileCommandBar() {
   const { t } = useI18n();
@@ -58,6 +59,9 @@ export function MobileCommandBar() {
   // slot. A command-line refusal is not its business — that lives in the history
   // sheet, so the hint is not suppressed by one.
   const showHint = !shell.documentVisible && !shell.loading && !shell.displayedError;
+  // Same banner mapping as the desktop status bar: the known GPU-fallback token
+  // reads as one short sentence, and the raw host string stays in `title`.
+  const bannerText = shell.displayedError ? statusBannerText(shell.displayedError, t) : '';
 
   return (
     <div ref={rootRef} className="mobile-commandbar app-region">
@@ -159,7 +163,7 @@ export function MobileCommandBar() {
       </div>
       {shell.displayedError ? (
         <p className="mobile-commandbar__message error" role="alert" title={shell.displayedError}>
-          {shell.displayedError}
+          {bannerText}
         </p>
       ) : null}
     </div>

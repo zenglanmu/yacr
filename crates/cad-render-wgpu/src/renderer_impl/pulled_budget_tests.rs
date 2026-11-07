@@ -42,6 +42,60 @@ fn capacity_gate_rejects_only_requirements_above_the_budget() {
 }
 
 #[test]
+fn measured_resident_plus_pulled_refusal_is_a_pre_flight_skip() {
+    // The measured `fixtures/test-tangent-1.dwg` numbers: ~2.058 GB resident, a
+    // 2.699 GB pulled copy, a 3.865 GB cap. `resident + required` is over the cap,
+    // so `GpuMemoryLedger::admit` refuses. The gate must honour that refusal
+    // instead of comparing `required <= cap` (which passed and OOM'd).
+    const RESIDENT: u64 = 2_058_206_528;
+    const REQUIRED: u64 = 2_699_194_780;
+    const LIMIT: u64 = 3_865_470_566;
+    const DEVICE_BUDGET: u64 = 4_294_967_296;
+    const {
+        assert!(RESIDENT + REQUIRED > LIMIT);
+    }
+
+    let refused = pulled_capacity_verdict(REQUIRED, DEVICE_BUDGET, Some(LIMIT), RESIDENT, 0);
+    assert!(!refused.fits, "resident + required over the cap must skip");
+    assert_eq!(
+        refused.budget_bytes,
+        LIMIT - RESIDENT,
+        "the refusal reports the available budget, not the raw cap"
+    );
+    assert!(REQUIRED > refused.budget_bytes);
+
+    // A requirement the ledger admitted (`used + required <= limit`) passes.
+    const ADMITTED_RESIDENT: u64 = 1_000_000_000;
+    const {
+        assert!(ADMITTED_RESIDENT + REQUIRED <= LIMIT);
+    }
+    let admitted = pulled_capacity_verdict(REQUIRED, DEVICE_BUDGET, None, ADMITTED_RESIDENT, 0);
+    assert!(admitted.fits);
+    assert_eq!(admitted.budget_bytes, DEVICE_BUDGET);
+
+    // The device `max_buffer_size` ceiling is independent: even when the ledger
+    // refused (its available budget is large enough after netting the replaced
+    // pulled copy), the device check still rejects a requirement over the ceiling.
+    let replaced = 1_000_000_000;
+    let netted = pulled_capacity_verdict(REQUIRED, REQUIRED - 1, Some(LIMIT), RESIDENT, replaced);
+    assert!(
+        LIMIT - (RESIDENT - replaced) >= REQUIRED,
+        "the replaced pulled copy is netted out of the available budget"
+    );
+    assert!(!netted.fits, "the device ceiling still applies");
+    assert_eq!(netted.budget_bytes, LIMIT - (RESIDENT - replaced));
+
+    // An admitted ledger never overrides a failing device ceiling either.
+    let admitted_over_device = pulled_capacity_verdict(REQUIRED, REQUIRED - 1, None, 0, 0);
+    assert!(!admitted_over_device.fits);
+    assert_eq!(admitted_over_device.budget_bytes, REQUIRED - 1);
+
+    // Saturating: a replaced copy larger than the resident total cannot wrap.
+    let clamped = pulled_capacity_verdict(REQUIRED, DEVICE_BUDGET, Some(LIMIT), 10, u64::MAX);
+    assert_eq!(clamped.budget_bytes, LIMIT);
+}
+
+#[test]
 fn budget_is_the_device_single_allocation_limit() {
     // Derived from `Limits` only, with no machine or scene constant.
     for limits in [

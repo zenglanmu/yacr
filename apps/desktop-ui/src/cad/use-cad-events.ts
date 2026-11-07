@@ -41,6 +41,7 @@ import { sameStatusIgnoringVolatile } from './status-cadence.ts';
 import { runVendorPass } from '../vendor/vendor-pass.ts';
 import { dispatchCadStatus, ensurePluginRegistered } from '../plugins/host.ts';
 import { recordVendorSettled } from '../plugins/plugin-manager.ts';
+import { observeStatusError } from '../host/notice.ts';
 import type { InvokeRoute } from '../host/invoke.ts';
 import type { CadSubscription, CadEventFrame } from './cad-events.ts';
 import type { CadStatus } from './cad-status.ts';
@@ -98,6 +99,11 @@ export function useCadEvents(handlers: CadEventHandlers): void {
 
     const setStatus = (next: CadStatus): void => {
       live.current.setPollError('');
+      // The renderer's pulled-copy fallback rides the ordinary `status.error`
+      // string. Observe every semantic snapshot here (the one place they arrive)
+      // so a token present on the first status or after a gap recovery reaches
+      // the one-shot notice latch; the latch itself keeps this from re-opening.
+      observeStatusError(next.error);
       // The two per-frame fields go to their leaf readers every status frame.
       publishVolatile(
         next.cursorWorld,

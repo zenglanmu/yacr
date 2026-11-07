@@ -245,6 +245,13 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 - **相关契约/栅栏**：表示层 LOD 决策须可复现（纯函数 + 单测）；视觉 fence 覆盖阈值上下两侧
   与例外集合；渲染器侧 `merged-vs-legacy` fence 需在 LOD 生效后仍成立。
 - **优先级**：P2（收益大但需产品决策与视觉验收，排在 P1 之后）。
+- **已落地子集（2026-11-07，用户签核）——导航期隐藏文字 glyph，不是阈值退化**：相机移动期间
+  （120 ms 导航暂停）隐藏全部 text-glyph mesh，settle 后丢弃渐进帧并重绘完整文字；选中/悬停文字
+  同样隐藏，但**拾取/测量语义不变**（pick 仍用 `all_visible`）。类别由表示层的
+  `MeshWithoutEdgeOverlay` 唯一来源派生（`RenderBatch::is_text_glyph`），渲染器只消费
+  `GpuBatch.text_glyph` + `ChunkCull.hide_text`。这不是本条“亚像素/矩形退化”的完成；阈值退化、
+  例外集合与像素验收仍未做。见 `docs/handoff.md` 2026-11-07 LOD 条目与
+  `docs/validation-nav-settle-2026-11-07.md`。
 
 ### P3 — 帧缓冲复用 / blit+scissor 局部重绘（bandwidth+fragment 优化，**非** GPU compute）
 
@@ -476,7 +483,51 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     稳定帧仍付**重启清扫**（每次相机移动 O(166,346)）。**更正（2026-10-17，N1e 后续落地后）**：此条原写稳定帧
     另付 `uniform_ms`（~6 ms）/`encode_ms`（~5.2 ms）/`submit_ms`（~5 ms）——`submit_ms` 的 **~5 ms 估算
     是错的**（settled 页实测 **0.206 ms**，提交从来不是因素），`uniform_ms`/`encode_ms` 已由后续修复（见下）；
-    **重启清扫**仍未修。
+    **重启清扫**仍未修（见下条 2026-11-07 后续）。
+  - **N1e 后续（2026-11-07）—— 重启清扫 + settle 后缀 fallback + 空闲页预算 + 导航暂停：已落地**。逐条证据见
+    `docs/validation-nav-settle-2026-11-07.md`（fixture `fixtures/test-tangent-1.dwg`，170,757 实体 /
+    167,125 base 批 / 34.0M 三角，P620 上 pulled 2.699 GB OOM → universal fallback）。
+    - **相机重启清扫**：`FrameKey` 变化且 `DrawOrderCache::transparent()` 为空时，
+      `restart_progressive_frame` 复用 `ordered` / `opaque_count` / `invisible` /
+      `OrderedPageIndex`，只把 cursor 归零；`progressive_frame` 与 `draw_plan`/`batch_facts` 同源失效
+      （base change、device rebuild/loss、initialize）。新增计数 `progressive_order_reuses/rebuilds`。
+      实测 8 s pan：**396 reuse / 2 rebuild**，in-gesture `plan_ms` 中位 **1.87 → 0.53 ms**。
+    - **run-free settle 后缀**：pulled 状态因 OOM 回退到 universal 时，`try_skip_pulled_rebuild`
+      现在也接受 `line_fallback_built`（per-stream fallback 已完整建立）。run-free 后缀不改任何
+      stream/chunk/arc，重跑只会重建同一 fallback（实测 **2.0–2.2 s/次**）；settle 后缀 commit 的
+      `pulled` 为 **0 µs**、总 commit **~1.6 ms**。
+    - **空闲页预算**：相机 settle 时 `CadRenderRuntime::boost_page_budget()` 把自适应 scale 提到
+      ≥1.0（保留 cost EMA / seeded / target），剩余渐进页用满预算完成；控制器仍按 13 ms 目标重新收缩。
+      用户停止后的完成帧数 161 → **36**（同 fixture，单机单次）。
+    - **pacing 信号**：`accepted_with_work` 改用 `EncodeEmitMask::participates`，不再对每个 accepted
+      批解引用 ~200 B `GpuBatch`（深缩放页接受整张有序表、只画少量 run）。
+    - **wheel zoom settle**：`set_overlays` 中相机派生的 `view_scale` 不再在同一次 `sync_render` 里
+      `advance_content` 取消刚 arm 的 settle；没有 pending 的独立 bounds-only 更新仍走立即路径。
+    - **120 ms 导航暂停**：相机变化 arm `navigation_pause_pending`，非相机输入 / 内容推进清除；
+      暂停期间每个相机变化最多画一页并 `dirty.complete()`；同相机 cursor-only 帧走
+      `Renderer::render_retained_overlay`（cursor 不动，只重合成 overlay）。120 ms 静默后
+      `settle_navigation_if_due` 清除并续走；wasm 关闭，`ZERO` 是 kill-switch。实测两次 8 s 手势
+      `nav_pause=true` **216/217、200/201**，in-gesture `prog` cursor 中位 **4428 / 2879 of 167,125**
+      （约一页），settle tail **24 / 47** 帧。
+    - **边界**：初始 base commit 仍是一次性 **~2.7–3.0 s**（2.699 GB pulled 在 2 GB P620 上 OOM +
+      fallback）；这是开图成本，不是每次 settle 的回退。交互帧最大 55 ms。仅单机单适配器、合成 DOM
+      拖拽、无 GPU timestamp。文本 glyph 导航 LOD 已落地（2026-11-07，用户签核：移动时隐藏、
+      settle 恢复；见 `docs/handoff.md`）；阈值退化与像素验收仍未做。
+  - **N1e 后续（2026-11-07）—— pulled 预检用真实常驻判定 + 一次性提示：已落地**。证据见
+    `docs/validation-gpu-memory-2026-10-24.md` §9、`docs/handoff.md` 同日首条。
+    - **根因**：`pulled_rebuild.rs` 丢弃 `gpu_memory.admit` 的 `Err`，改比 `required ≤ cap`。
+      `fixtures/test-tangent-1.dwg`：常驻 1.94 GB + pulled 2.696 GB > cap 3.865 GB，`admit` 拒绝却放行
+      → 分配 OOM → fallback（~1.5–2.2 s/次）。
+    - **判定**：`admit` 为准；拒绝时 `available = limit − (resident − replaced_pulled)`，
+      `required > available` 即预检跳过。`SkippedInsufficientVram.budget_bytes` 改为 **available**；
+      设备 `max_buffer_size` 独立判定。
+    - **提示**：`cad-engine` 在 `PulledState` 转换时锁存一次性
+      `gpu.pulled.insufficient-vram: required=… available=…`（`SkippedInsufficientVram`/
+      `SkippedOutOfMemory`/`SkippedAllocationFailed`；恢复/不适用时清除），经
+      `RenderDiagnostics.result_status` / `RenderSessionHandle::view_diagnostic`（最低优先级）到达
+      `cad_status.error`，React `host/notice.ts` 用 `startsWith` 打开一次性 modal。
+    - **实测**（P620，`--gpu high`）：`pulled=skipped-insufficient-vram(required_bytes=2696286128,budget_bytes=1923170670)`；
+      单机单适配器，无像素/性能结论。
   - **N1e 后续 —— 每帧 uniform/encode 成本：超集安全的编码跳过 + slot 压缩：已落地（2026-10-17）**。
     这是 N1e 落地后 CPU 侧的**下一个残余项**（`uniform_ms`/`encode_ms` 两个每帧循环与重启清扫是**同一种病**）。
     逐条证据见 `docs/validation-uniform-encode-skip-2026-10-17.md`（实现 commit `1058af2`）。

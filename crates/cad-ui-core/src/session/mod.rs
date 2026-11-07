@@ -68,6 +68,9 @@ use self::diagnostics::{
     cad_error_text, camera_status, request_error_text, resource_diagnostic_text,
     resource_keys_error, status_error,
 };
+// `plan_input` is re-exported for the intra-doc link below and the sibling
+// test modules; the session itself reaches it through `session::input`.
+#[allow(unused_imports)]
 use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
 use self::status::{assemble_status, cad_tool, document_capabilities};
 
@@ -559,16 +562,7 @@ impl CadSession {
     /// The actual completion outcome is reflected in [`CadStatus::error`] from
     /// the next [`CadSession::snapshot`].
     pub fn handle_input(&self, input: &ProbeInput) -> Result<(), String> {
-        let capturing = self.capturing();
-        let (requests, next_press) = plan_input(
-            self.press.borrow().as_ref().copied(),
-            input,
-            self.metrics_revision(),
-            capturing,
-        )?;
-        self.submit_interactions(requests)?;
-        *self.press.borrow_mut() = next_press;
-        Ok(())
+        self.handle_input_impl(input)
     }
 
     /// Admit a batch of typed interactions through the single engine path.

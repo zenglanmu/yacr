@@ -1,3 +1,154 @@
+## 2026-11-07 pulled 预检用真实常驻量；引擎侧一次性 `gpu.pulled.insufficient-vram` 提示
+
+- **根因**（`crates/cad-render-wgpu/src/renderer_impl/pulled_rebuild.rs`）：容量门禁调用
+  `gpu_memory.admit(&[(Stream, required)])`（`used + required ≤ limit`）却**丢弃 Err**，改用
+  `pulled_capacity_fits(required, limit)`（`required ≤ limit`）。`fixtures/test-tangent-1.dwg` 上
+  常驻 ~1.94 GB + pulled 2.696 GB 在 3.865 GB cap 下被 admit 拒绝、却被裸 cap 比较放行 → 分配 OOM，
+  然后重建 fallback（每次 ~1.5–2.2 s）。
+- **改动**：
+  - `cad-render-wgpu`：`admit` 成为唯一权威；拒绝时
+    `available = limit − (resident − replaced_pulled)`（`retained_pulled_bytes` 汇总现有 pulled 段/表），
+    `required > available` 即走原预检跳过路径；`SkippedInsufficientVram.budget_bytes` 现为
+    **available**（`limit − resident`），`required > budget` 就是拒绝原因。设备 `max_buffer_size`
+    上限独立判定。新增纯 `pulled_capacity_verdict`。
+  - `cad-engine`：`CadRenderRuntime` 增 sticky `gpu_warning` + `last_pulled_state`；只在
+    `PulledState` **转换**时改变（→ `SkippedInsufficientVram`/`SkippedOutOfMemory`/
+    `SkippedAllocationFailed` 置位，→ `Active`/`Unavailable`/`SkippedNoConvertedGeometry`/
+    `SkippedUnsegmentable` 清除），消息前缀固定 `gpu.pulled.insufficient-vram`，
+    形如 `…: required=<n> available=<n>`；`detach` 清除。`CadRenderRuntime::diagnostic()` 真实诊断优先、
+    warning 次之；`RuntimeDiagnostics.gpu_warning`、`RenderDiagnostics.result_status` 与
+    `RenderSessionHandle::view_diagnostic`（最低优先级）都带出 token，React 的
+    `src/host/notice.ts` 用 `startsWith` 打开一次性提示（已有，未改）。
+  - `apps/app-linux`：`pan-wait` 诊断追加 `gpu_warning={:?}`。
+- **实测**（release / Vulkan / P620 / 驱动 580.178.04 / `--gpu high`，exit 0）：
+  `pulled=skipped-insufficient-vram(required_bytes=2696286128,budget_bytes=1923170670)`；
+  `gpu-memory: total=2022808436 … budget=3865470566 cap=3865470566`（门禁时刻常驻
+  1,942,299,896 + 2,696,286,128 > cap）。`pulled=` 来自一次性临时 eprintln（已移除）；
+  CLI 正式 JSON 无 pulled 字段。逐条见 `docs/validation-gpu-memory-2026-10-24.md` §9。
+- **最终集成宿主运行**（release，2×8 s，`test-tangent-1.dwg`）：初始 base commit **2.7–3.0 s → 1.04 s**
+  （不再尝试必然失败的 pulled 分配）；`pulled=skipped-insufficient-vram(required=2699194780,
+  available=1913456682)`；`gpu_warning` 与 `cad_status.error` 均带
+  `gpu.pulled.insufficient-vram: required=… available=…`。**证据驱动修复**：
+  `postload_pan_import_ready` 现在把该已知非致命告警视为可开始（`postload.rs` + 测试），
+  否则 post-load pan 会永远卡在 `WaitingReady`。
+- **已运行**：`cad-render-wgpu --lib -- --test-threads=1` 321 passed / 4 ignored（含新增纯契约与
+  `pulled_budget_gpu_tests` 6 passed，其中 1 条验证 cap 对 replaced pulled 的扣减）、`cad-engine --lib` 121 passed / 15 ignored（含 2 条 warning
+  转换契约）、clippy `cad-render-wgpu/cad-engine/app-linux -D warnings` 0、`fmt --check`、
+  `check-file-size` 0。
+- **NOT RUN**：全量 workspace / CI；GUI 真机（本 shell 无 Wayland/X11 display，只有 headless CLI）；
+  Windows/macOS/Android/Web；像素、性能、其它 GPU。`SkippedOutOfMemory`/`SkippedAllocationFailed`
+  的 token 只有单测，未在真实驱动 OOM 上现场触发。
+
+## 2026-11-07 导航期文字 glyph LOD（移动时隐藏，停止后恢复）
+
+- **类别来源**：文字字形是 `DisplayPrimitive::MeshWithoutEdgeOverlay` 的唯一构造者；场景层用
+  `RenderBatch::is_text_glyph()`（`Mesh` + 非空 index + 空 edges）派生，不需要给 ~40 个
+  `RenderBatch` 字面量加字段。表示层文档明确该 variant 就是 text-glyph 显示类。
+- **渲染**：`GpuBatch.text_glyph` → `BatchFacts` 位集；`ChunkCull.hide_text`（仅显示策略，pick 的
+  `all_visible` 恒 false）让 glyph 批在页面计划中顶/三角计费为 0，`EncodeEmitMask` 清除其 draw，
+  `use_pulled` 在 LOD 期间禁用（pulled 重画整个 chunk）。文字仍可拾取、参与测量，语义未变。
+- **模式切换**：`Renderer::set_navigation_lod` 变化时丢弃 `progressive_frame` + 禁止
+  preserve-colour；引擎 `arm_navigation_pause` 隐藏、`clear_navigation_pause`/settle 恢复全文字并
+  invalidate。120 ms 导航暂停因此同时是文字 LOD 的开关。新增
+  `RuntimeDiagnostics.navigation_lod` 与 `pan-wait hide_text=`。
+- **契约**：scene `is_text_glyph` 三例；planner 零计费/页面 gap/差分；encode-mask 在无剔除时仍排除
+  glyph；GPU `navigation_lod::text_glyphs_hide_during_navigation_and_return_when_settled`
+  （真实 P620：移动期 glyph 像素消失、非文字保留；settle 后恢复）。
+- **最终集成宿主运行**（release，2×8 s）：`hide_text=true` 覆盖 **219/225、214/215** 个 in-gesture
+  采样；移动页 `tris` 中位 **179k / 215k**（glyph 33.95M 三角被零计费），部分被剔除视角可整表
+  `complete`；settle 后 `hide_text=false`，**22/22** 帧重绘完整文字（scale 0.78/1.00）。没有
+  真实窗口文字消失/恢复截图，LOD 像素证据是 GPU `navigation_lod` fence。
+- **已运行**：`cad-scene --lib` 61；`cad-render-wgpu --lib --test-threads=1` 321（含 LOD/VRAM）；
+  `headless_render navigation_lod` 1；`merged_meshes` 16；`pick_id` 32；
+  `images_and_culling` 12；`progressive_restart_flash` 4；`cad-engine --lib` 121；
+  clippy/fmt/file-size/architecture/i18n 0。
+- **NOT RUN**：真实鼠标/触控板的视觉验收、性能结论、Windows/macOS/Android/Web；LOD 期间选中/悬停
+  文字同样隐藏（显示策略；拾取仍可），未做像素截图判定。
+
+## 2026-11-07：每 tick 输入批量发布（一次 `sync_render`/`request_preparation`）
+
+**目标与边界**：一次 tick 的 N 个输入仍逐个按序受理/执行（不合并滚轮增量、不丢指针阶段、不改
+命令顺序），只把派生渲染发布推迟到 tick 末尾一次。不涉及 `cad-render-wgpu`/`cad-engine` 渲染逻辑
+变更。
+
+- **`cad-host`**：`HostCore` 新增 `render_batch: Cell<u32>`（计数深度）与
+  `deferred_edit: RefCell<Option<DrawingEditReceipt>>`；`begin_render_batch` / `end_render_batch`
+  公开。`sync_render_with_edit` 仍先 `seed_interaction_tolerance`（输入策略不推迟），批内只暂存
+  `Some(edit)`（`None` 不会覆盖已暂存 receipt）并返回 `Ok(())`；深度 0 的 `end_render_batch`
+  无条件递减并取出 receipt 调一次 `sync_render_with_edit`，返回真实错误。`take_updates` 经
+  `sync_render` 在批内自然 no-op。
+- **`cad-ui-core`**：`CadSession::handle_input` 保持每次调用发布（既有测试/调用方即时读
+  `render.overlays()`）；新增 `CadSession::handle_inputs(&[ProbeInput])`：begin → 逐个
+  `handle_input_impl`（保留首个错误、继续按序执行）→ 始终 end → 返回首个错误或 flush 错误。
+  方法体放在 `session/input.rs`，`mod.rs` 仍在 1000 行内。
+- **载体接线**：`app-linux`、`app-windows`、`app-macos`、`app-android`（先做 partition→canvas
+  平移再批量）、`app-web` `feed` 全部改为 `handle_inputs`；Android 契约测试改为断言
+  `session.handle_inputs(` 仍在 `crate::input::canvas_position(` 之后。
+- **契约测试**：`cad-host` `tests/render_batch.rs`（批内不发布、嵌套只在外层发布、pending edit
+  receipt 不被 `None` 覆盖且只在 flush 消费一次）；`cad-ui-core` `session/tests/tests_batch.rs`
+  （N 次单发 vs 一次批量：最终相机/`OverlayInputs` 相同；批量 `view_revision` 只 +1，而逐个移动
+  每个 +1；content token 只一次 flush 的量而非 N；拒绝不遗留 batch 深度、后续 tick 可发布；
+  `handle_input` 仍逐次发布）。
+- **真实宿主**：合成拖拽的 pointer move 已被前端 rAF 合并成 `queued=1`/tick，因此这次运行没有
+  wheel burst 可测；批量化是“每 tick 一次发布”的结构性收敛。`input_us` 中位 ~6.8 ms 在
+  未批量化的旧运行里同样存在（snap/prepare 预存成本），**不是** 批量化回归。
+- **已运行**：`cargo fmt --all -- --check`；`cargo test -p cad-ui-core --lib`（387 passed）；
+  `cargo test -p cad-host --lib`（270 passed）；`cargo test -p app-android --lib`（48 passed）；
+  `cargo check -p app-linux --all-targets`；`cargo check -p app-web`（host）；
+  `cargo check -p app-web --target wasm32-unknown-unknown`；
+  `cargo check -p app-android --target aarch64-linux-android --all-targets`；
+  `cargo clippy -p cad-host -p cad-ui-core -p app-linux -p app-web --all-targets`；
+  `check-file-size.py` 全部 PASS。
+- **NOT RUN**：`app-windows`（`x86_64-pc-windows-msvc` 检查因缺 `llvm-rc` 失败，工具链问题，
+  不是代码错误）与 `app-macos`（`aarch64-apple-darwin` 检查因宿主 `cc` 不支持 `-arch` 失败）
+  的真实目标编译/运行；Linux GUI 像素/性能证据未测。批量化只减少派生发布会话调用，**不是**
+  GPU/性能结论。
+
+## 2026-11-07 平移/缩放粘滞：settle 后缀不再重建 fallback；相机重启复用页序；空闲用满页预算；120 ms 导航暂停
+
+- **症状**（`fixtures/test-tangent-1.dwg`，170,757 实体 / 167,125 base 批 / 34.0M 三角）：滚轮或平移时先
+  出现几十~几百 ms 的部分画面，随后卡住直到完整。真实宿主日志定位到两类成本：
+  1. 每次 deferred grid settle 的 **run-free 后缀 commit** 在 2 GB P620 上（pulled 需 2.699 GB，OOM →
+     universal fallback）重跑 `build_line_fallback`，`commit[pulled=2.0–2.2 s]`；一次手势出现 4 个
+     2.3–2.7 s 帧。
+  2. 相机移动把自适应页缩放压到 `0.05–0.1`；settle 后 `8 帧 ×1.08` 的慢回升无法在本次加载内恢复，
+     161 帧才走完。
+- **改动**：
+  - `cad-render-wgpu`：`try_skip_pulled_rebuild` 在 `line_fallback_built` 时也允许 run-free 后缀跳过
+    `rebuild_pulled`；`restart_progressive_frame` 在 `transparent().is_empty()` 时复用
+    `ordered`/`opaque_count`/`invisible`/`OrderedPageIndex`，只把 cursor 归零；`progressive_frame` 与
+    `draw_plan`/`batch_facts` 同源失效（base change / device rebuild / loss / init）；
+    `accepted_with_work` 改用 `EncodeEmitMask`；新增 `progressive_order_reuses/rebuilds`、
+    `Renderer::boost_pacing_scale` 与纯 `pacing::boost_scale`。
+  - `cad-render-wgpu`：新增 `render_retained_overlay`/`render_navigation`：暂停期间同相机的
+    cursor-only 帧不推进 base 走页，只把 overlay 重新合成到 retained base；相机变化仍重启并画第 1 页。
+  - `cad-engine`：相机 settle 到期时 `boost_page_budget()`（scale → ≥1.0，保留 EMA/seeded/target）；
+    `set_overlays` 的 bounds-only `view_scale` 不再取消刚 arm 的 settle。新增 **120 ms 导航暂停**
+    （`navigation_pause_pending`）：相机变化 arm，非相机输入 / 内容推进清除；暂停期间每个相机变化
+    最多画一页并 `dirty.complete()`；120 ms 静默后 settle 续走。wasm 关闭，`ZERO` 是 kill-switch。
+  - `apps/app-linux`：`pan-wait` 诊断增加 `order_reuses/order_rebuilds` 与 `nav_pause`。
+- **实测**（release / Wayland / P620 / 合成 DOM 左拖 = pan；**不是**性能验收）：
+  - 交互中 4 个 2.3–2.7 s 帧 → **0** 个 2 s 帧；唯一 2.697 s 帧是开图初始 base commit（一次性）。
+    settle 后缀 `commit[pulled]` 2.0–2.2 s → **0**，commit 总 **~1.6 ms**。
+  - 8 s 手势实际渲染 92（~11.5/s）→ 206/196（~25/s）；in-gesture `plan_ms` 中位 1.87 → 0.53 ms；
+    `wait_ms` max 339.5 → 15.2/31.0 ms；`order_reuses=396 / order_rebuilds=2`。
+  - settle 后 `budget_scale=1.000`（8M verts / 2M tris），随后按 13 ms 目标收缩；完成帧 161 → 36。
+  - **120 ms 导航暂停**（最终 release，两次 8 s 手势）：`nav_pause=true` **216/217、200/201**；
+    in-gesture `prog` cursor 中位 **4428 / 2879 of 167,125**（约一页，不在事件间继续吞页）；
+    settle tail **24 / 47** 帧。唯一 >1 s 帧仍是开图初始 base commit（2.98 s）；交互帧最大 55 ms。
+    `order_reuses=413 / rebuilds=2`，`pulled_suffix_skips=4`。
+  - 逐条证据与契约清单：`docs/validation-nav-settle-2026-11-07.md`；backlog §N1e 已同步。
+- **已运行**：`cad-render-wgpu --lib run_free_suffix` 4 passed（含 GPU OOM-fallback 契约）、`pacing` 14
+  passed、`progressive_restart_flash` 4 passed（含 retained-overlay GPU 契约）、
+  `headless_render paced_budget...` 1 passed（含 reuse 计数）、`cad-engine --lib` 119 passed / 15 ignored
+  （含 3 个 navigation-pause 契约）、`cad-host --lib` 267 passed；clippy
+  `cad-render-wgpu/cad-engine/cad-host/app-linux -D warnings` 0；`fmt --check`、`check-file-size`、
+  `check-architecture`、`check-i18n` 0。
+- **NOT RUN**：全量 workspace 测试 / CI；真实鼠标 / 触控板、像素截图判定、Windows/macOS/Android/Web、
+  GPU timestamp。2 GB P620 上 `pulled=skipped-out-of-memory` 与开图 ~2.7–3.0 s 仍是显式状态 /
+  一次性成本，未改变。文本 glyph 导航 LOD 已由后续条目实现（移动时隐藏，settle 恢复）；仍需真实
+  鼠标 / 性能 / 跨平台验证。
+
 ## 2026-11-06 状态栏左锚点；五个左侧面板改为共享容器的浮动窗（不改变 CAD 分区）
 
 - **状态栏顺序**（`apps/desktop-ui/src/components/StatusBar.tsx`）：`就绪 → 栅格/正交/捕捉/对象捕捉/悬停预览`

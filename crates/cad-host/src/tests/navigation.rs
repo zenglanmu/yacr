@@ -378,6 +378,53 @@ fn host_tick_preserves_the_deferred_camera_grid_refresh_across_a_pan_gesture() {
     );
 }
 
+/// The real-app zoom shape: with a live cursor inside the viewport the host
+/// includes the camera-derived `view_scale` in `set_overlays` alongside the new
+/// bounds. That derived field must not cancel the settle the snapshot just
+/// armed, or wheel zoom re-prepares on every notch while pan defers.
+#[test]
+fn host_wheel_zoom_with_a_live_cursor_keeps_the_deferred_camera_refresh_pending() {
+    let core = core();
+    core.render
+        .set_grid_settle_timeout(std::time::Duration::from_secs(3600));
+    // Put a live cursor inside the 2D viewport.
+    EngineClient::dispatch(&core, move_cursor_world(0.0, 0.0)).unwrap();
+    core.sync_render().unwrap();
+    let idle = core.render.diagnostics();
+    assert!(
+        core.cursor_world().is_some(),
+        "fixture: the live cursor must be inside the 2D viewport"
+    );
+
+    // One wheel-zoom step through the real host sequence (`sync_render` applies
+    // the snapshot and then the host-built overlays, exactly like production).
+    {
+        let mut c = core.controller.borrow_mut();
+        let id = c.viewport_id;
+        let viewport = c
+            .application
+            .workspace
+            .viewports
+            .get_mut(&id)
+            .expect("the host always has an active viewport");
+        let cad_app::Projection::Orthographic { scale } = viewport.camera.projection else {
+            panic!("the 2D fixture must use an orthographic camera");
+        };
+        viewport.camera.projection = cad_app::Projection::Orthographic { scale: scale * 1.3 };
+    }
+    core.sync_render().unwrap();
+
+    assert!(
+        core.render.grid_refresh_pending(),
+        "a wheel zoom with a live cursor must keep the deferred refresh pending"
+    );
+    assert_eq!(
+        core.render.diagnostics().requested_token,
+        idle.requested_token,
+        "the deferred zoom must not schedule a worker preparation"
+    );
+}
+
 // --- device-aware gesture arbitration (input-modality contract) -------------
 
 /// A single-contact touch phase with the session's primary-button report.

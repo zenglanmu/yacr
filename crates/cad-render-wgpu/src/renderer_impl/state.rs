@@ -1,6 +1,19 @@
 use super::*;
 
 impl Renderer {
+    /// Drop every piece of state derived from the resident base batch set: the
+    /// draw-order cache, the progressive order/page index, the restart-colour
+    /// exception and the known-valid universal line fallback. Called when the
+    /// base set is replaced or the device generation changes, so none of them can
+    /// outlive the data it was derived from (and an opaque-only camera restart may
+    /// then safely reuse the retained order/page index).
+    pub(super) fn drop_derived_base_state(&mut self) {
+        self.draw_plan = None;
+        self.progressive_frame = None;
+        self.preserve_color_on_restart = false;
+        self.line_fallback_built = false;
+    }
+
     /// Poll the device and classify the frame's outcome.
     ///
     /// A `Timeout` means the device made no progress in the bound (1 s): on

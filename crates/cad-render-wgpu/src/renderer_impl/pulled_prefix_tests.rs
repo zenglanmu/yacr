@@ -465,4 +465,56 @@ fn run_free_suffix_skips_the_pulled_rebuild_only_when_coherent() {
     assert!(!universal.try_skip_pulled_rebuild(true));
     assert_eq!(universal.pulled_suffix_skips(), 0);
     assert!(universal.pulled_prefix_checkpoint.is_some());
+
+    // The pure admission matrix: coherence alone is not the only valid retained
+    // organisation. A resident line class whose pulled build failed keeps the
+    // explicit universal per-stream fallback (`line_fallback_built`), which is a
+    // pure function of the same unchanged streams, so a run-free suffix is exactly
+    // as safe as the coherent case.
+    assert!(Renderer::pulled_suffix_skip_decision(
+        true, true, true, false
+    ));
+    assert!(Renderer::pulled_suffix_skip_decision(
+        true, true, false, true
+    ));
+    // Without either valid organisation nothing may be skipped.
+    assert!(!Renderer::pulled_suffix_skip_decision(
+        true, true, false, false
+    ));
+    // A suffix that stages converted runs always rebuilds, fallback or not.
+    assert!(!Renderer::pulled_suffix_skip_decision(
+        false, true, true, true
+    ));
+    assert!(!Renderer::pulled_suffix_skip_decision(
+        false, true, false, true
+    ));
+    // A universal/teardown tier never takes the skip off the fallback flag.
+    assert!(!Renderer::pulled_suffix_skip_decision(
+        true, false, false, true
+    ));
+
+    // Renderer-level accounting for the post-fallback state. The pure fixture has
+    // no resident streams (they need a device), so the real `pulled_lines == None`
+    // + non-empty-stream condition is covered by the GPU contract in
+    // `pulled_budget_gpu_tests`; here the flag alone must drive the skip and the
+    // counters, and must not claim a reuse or a rebuild.
+    let mut fallback = Renderer {
+        render_tier: RenderTier::Accelerated,
+        line_fallback_built: true,
+        ..Renderer::default()
+    };
+    assert!(fallback.try_skip_pulled_rebuild(true));
+    assert_eq!(fallback.pulled_suffix_skips(), 1);
+    assert_eq!(fallback.pulled_prefix_reuses(), 0);
+    assert_eq!(fallback.pulled_prefix_rebuilds(), 0);
+    // A converted suffix still does not skip.
+    assert!(!fallback.try_skip_pulled_rebuild(false));
+    assert_eq!(fallback.pulled_suffix_skips(), 1);
+    // The flag is not a licence to skip without a run-free suffix.
+    let mut fallback_universal = Renderer {
+        line_fallback_built: true,
+        ..Renderer::default()
+    };
+    assert!(!fallback_universal.try_skip_pulled_rebuild(true));
+    assert_eq!(fallback_universal.pulled_suffix_skips(), 0);
 }

@@ -3,7 +3,9 @@ use super::controller::PreparedScene;
 use super::*;
 use cad_app::render_scene::{BaseAppend, ResidentScene, SceneDelta};
 use cad_domain::SelectionRef;
-use cad_render_wgpu::{wgpu, BackendCapabilities, RenderError, RenderTarget, Renderer};
+use cad_render_wgpu::{
+    wgpu, BackendCapabilities, PulledState, RenderError, RenderTarget, Renderer,
+};
 use std::sync::Arc;
 
 /// The physical size of the CAD render target for a logical (CSS) content size
@@ -225,10 +227,19 @@ pub struct RuntimeDiagnostics {
     /// Cumulative commits that skipped the stream/mesh/arc GC scan because the
     /// commit was a run-free suffix, `0` when no renderer is attached.
     pub gc_skipped_commits: u64,
+    /// Cumulative camera/attachment-only progressive restarts that reused the
+    /// retained base order/page index, `0` when no renderer is attached.
+    pub progressive_order_reuses: u64,
+    /// Cumulative progressive restarts that rebuilt the base order/page index,
+    /// `0` when no renderer is attached.
+    pub progressive_order_rebuilds: u64,
     /// Cumulative base-only draw-order cache / batch-facts rebuilds, `0` when no
     /// renderer is attached. A run-free suffix commit keeps the base plan, so this
     /// does not move for it.
     pub draw_plan_rebuilds: u64,
+    /// Whether navigation-time text hiding is active on the attached renderer
+    /// (`false` when no renderer is attached).
+    pub navigation_lod: bool,
     /// Cumulative frames the renderer actually produced (`frames_rendered`).
     pub frames_rendered: u64,
     /// Uploads started from scratch (no prior pending upload).
@@ -241,6 +252,11 @@ pub struct RuntimeDiagnostics {
     pub last_upload_reset: Option<&'static str>,
     /// Last real failure/diagnostic string (never a converted success).
     pub diagnostic: Option<String>,
+    /// Sticky one-time warning for a skipped accelerated pulled copy
+    /// (`gpu.pulled.insufficient-vram: required=… available=…`), `None` when the
+    /// pulled organisation is active or not applicable. Never a replacement for
+    /// [`Self::diagnostic`]: a real failure always wins.
+    pub gpu_warning: Option<String>,
 }
 
 /// What `apply_ready_updates` should do with the pending upload for a ready scene.
@@ -463,6 +479,17 @@ pub struct CadRenderRuntime {
     target_size: Option<(u32, u32)>,
     pub dirty: FrameInvalidation,
     pub diagnostic: Option<String>,
+    /// Sticky one-time warning for a skipped accelerated pulled copy.
+    ///
+    /// Set on a **transition** into a pulled VRAM/OOM/allocation skip and cleared
+    /// on a transition back to a usable decision (see
+    /// [`gpu_warning_transition`]). Diagnostics-only: it never changes rendering
+    /// and never overwrites [`Self::diagnostic`] — [`CadRenderRuntime::diagnostic`]
+    /// returns the real failure first.
+    gpu_warning: Option<String>,
+    /// The pulled-state decision observed on the last actual render, used to
+    /// detect transitions for [`Self::gpu_warning`] (never written per frame).
+    last_pulled_state: Option<PulledState>,
     pub frames_rendered: u64,
     pending_upload: Option<PendingUpload>,
     pub presented_revision: Option<u64>,
@@ -537,6 +564,8 @@ impl Default for CadRenderRuntime {
             target_size: None,
             dirty: FrameInvalidation::default(),
             diagnostic: None,
+            gpu_warning: None,
+            last_pulled_state: None,
             frames_rendered: 0,
             pending_upload: None,
             presented_revision: None,
@@ -618,6 +647,79 @@ fn merge_diagnostics(image: Option<&str>, flags: Option<&str>) -> Option<String>
     }
 }
 
+/// The stable prefix of the one-time host notice for a skipped pulled copy.
+///
+/// The React host matches `cad_status.error.startsWith(...)` on exactly this
+/// token (`apps/desktop-ui/src/host/notice.ts`), so it must not change.
+pub(crate) const GPU_PULLED_VRAM_WARNING: &str = "gpu.pulled.insufficient-vram";
+
+/// What one pulled-state observation should do to the sticky GPU warning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GpuWarningDecision {
+    /// The decision is unchanged: keep the latch exactly as it is (no churn).
+    Unchanged,
+    /// The pulled copy was skipped: latch this one-time message.
+    Warn(String),
+    /// The accelerated organisation is usable again or does not apply here:
+    /// clear the latch.
+    Clear,
+}
+
+/// Detect a pulled-state **transition** for the one-time GPU warning.
+///
+/// The latch changes only when the decision changes (`PulledState` equality), so
+/// a lasting fallback keeps one message instead of rewriting it every frame. A
+/// different skip (changed byte numbers) is a new decision and re-latches with the
+/// new numbers. Pure so the transition contract is testable without a GPU.
+pub(crate) fn gpu_warning_transition(
+    previous: Option<&PulledState>,
+    next: &PulledState,
+) -> GpuWarningDecision {
+    if previous == Some(next) {
+        return GpuWarningDecision::Unchanged;
+    }
+    match next {
+        PulledState::SkippedInsufficientVram {
+            required_bytes,
+            budget_bytes,
+        }
+        | PulledState::SkippedOutOfMemory {
+            required_bytes,
+            budget_bytes,
+            ..
+        }
+        | PulledState::SkippedAllocationFailed {
+            required_bytes,
+            budget_bytes,
+            ..
+        } => GpuWarningDecision::Warn(format!(
+            "{GPU_PULLED_VRAM_WARNING}: required={required_bytes} available={budget_bytes}"
+        )),
+        // `Active`/`Unavailable`/`SkippedNoConvertedGeometry`/`SkippedUnsegmentable`
+        // (and any future state) clear the warning.
+        _ => GpuWarningDecision::Clear,
+    }
+}
+
+impl CadRenderRuntime {
+    /// The effective diagnostic: the real failure first, then the sticky GPU
+    /// warning. The warning never overwrites a real render/controller diagnostic.
+    pub fn diagnostic(&self) -> Option<String> {
+        self.diagnostic.clone().or_else(|| self.gpu_warning.clone())
+    }
+
+    /// The sticky GPU warning alone (see [`Self::gpu_warning`]).
+    ///
+    /// Kept separate from [`Self::diagnostic`] so a status reader can report the
+    /// real failure and the warning with the right priorities. `None` when the
+    /// pulled organisation is usable or no renderer has reported yet.
+    pub fn gpu_warning(&self) -> Option<String> {
+        self.gpu_warning.clone()
+    }
+}
+
+mod navigation;
 mod session;
+mod staging;
 #[cfg(test)]
 mod tests;

@@ -133,8 +133,111 @@ fn diagnostics_snapshot_reports_the_default_detached_state_without_side_effects(
     assert_eq!(diagnostics.ready_none_clears, 0);
     assert_eq!(diagnostics.last_upload_reset, None);
     assert_eq!(diagnostics.diagnostic, None);
+    assert_eq!(diagnostics.gpu_warning, None);
     // Reading twice is stable (pure projection).
     assert_eq!(runtime.diagnostics(), diagnostics);
+}
+
+#[test]
+fn gpu_warning_latches_on_a_vram_skip_and_clears_on_recovery() {
+    use cad_render_wgpu::PulledState;
+
+    let skip = PulledState::SkippedInsufficientVram {
+        required_bytes: 2_699_194_780,
+        budget_bytes: 1_807_264_038,
+    };
+    // First observation of a skip latches the host-visible token once.
+    match gpu_warning_transition(None, &skip) {
+        GpuWarningDecision::Warn(message) => {
+            assert!(
+                message.starts_with("gpu.pulled.insufficient-vram"),
+                "the React notice matches this prefix ({message})"
+            );
+            assert_eq!(
+                message,
+                "gpu.pulled.insufficient-vram: required=2699194780 available=1807264038"
+            );
+        }
+        other => panic!("a VRAM skip must latch a warning, got {other:?}"),
+    }
+    // The same skip repeating is not a transition: no churn.
+    assert_eq!(
+        gpu_warning_transition(Some(&skip), &skip),
+        GpuWarningDecision::Unchanged
+    );
+    // A different skip (new numbers) is a new decision.
+    let smaller = PulledState::SkippedInsufficientVram {
+        required_bytes: 100,
+        budget_bytes: 50,
+    };
+    assert_eq!(
+        gpu_warning_transition(Some(&skip), &smaller),
+        GpuWarningDecision::Warn(
+            "gpu.pulled.insufficient-vram: required=100 available=50".to_string()
+        )
+    );
+    // Recovery clears the latch.
+    assert_eq!(
+        gpu_warning_transition(Some(&skip), &PulledState::Active),
+        GpuWarningDecision::Clear
+    );
+    // The non-VRAM pulled states also mean the warning is no longer true.
+    for recovered in [
+        PulledState::Unavailable,
+        PulledState::SkippedNoConvertedGeometry,
+        PulledState::SkippedUnsegmentable {
+            largest_class_bytes: 10,
+            binding_limit_bytes: 8,
+        },
+    ] {
+        assert_eq!(
+            gpu_warning_transition(Some(&skip), &recovered),
+            GpuWarningDecision::Clear,
+            "{recovered:?} must clear the VRAM warning"
+        );
+    }
+    // A captured OOM / allocation failure is the same host-facing warning.
+    for skipped in [
+        PulledState::SkippedOutOfMemory {
+            required_bytes: 1_000,
+            budget_bytes: 2_000,
+            message: "out of memory".to_string(),
+        },
+        PulledState::SkippedAllocationFailed {
+            required_bytes: 1_000,
+            budget_bytes: 2_000,
+            message: "invalid buffer".to_string(),
+        },
+    ] {
+        assert!(matches!(
+            gpu_warning_transition(None, &skipped),
+            GpuWarningDecision::Warn(_)
+        ));
+    }
+}
+
+#[test]
+fn gpu_warning_never_overwrites_a_real_render_diagnostic() {
+    let mut runtime = CadRenderRuntime {
+        gpu_warning: Some("gpu.pulled.insufficient-vram: required=2 available=1".to_string()),
+        ..CadRenderRuntime::default()
+    };
+    assert_eq!(
+        runtime.diagnostic().as_deref(),
+        Some("gpu.pulled.insufficient-vram: required=2 available=1"),
+        "with no real failure the warning is the effective diagnostic"
+    );
+    runtime.diagnostic = Some("frame: the device rejected the frame".to_string());
+    assert_eq!(
+        runtime.diagnostic().as_deref(),
+        Some("frame: the device rejected the frame"),
+        "a real diagnostic always wins"
+    );
+    assert_eq!(
+        runtime.gpu_warning().as_deref(),
+        Some("gpu.pulled.insufficient-vram: required=2 available=1"),
+        "the warning stays available separately"
+    );
 }
 
 fn sample_observation(render_seq: u64) -> RenderStatsObservation {

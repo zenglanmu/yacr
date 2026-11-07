@@ -38,6 +38,40 @@ fn filled_mesh_can_disable_its_edge_overlay_without_changing_triangle_topology()
 }
 
 #[test]
+fn text_glyph_class_is_an_indexed_mesh_without_edge_overlay() {
+    // The glyph primitive (no per-edge overlay) is the text display class.
+    let mut glyph_rep = mesh_representation(3, quad());
+    glyph_rep.fragments[0].primitive = DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(quad()));
+    let glyph_delta = SceneCache::default().build(&glyph_rep, stamp()).unwrap();
+    let glyph = &glyph_delta.added[0];
+    assert!(
+        glyph.is_text_glyph(),
+        "indexed mesh with no edges is a glyph"
+    );
+
+    // A normal mesh carries the wireframe overlay: not text.
+    let normal_delta = SceneCache::default()
+        .build(&mesh_representation(4, quad()), stamp())
+        .unwrap();
+    let normal = &normal_delta.added[0];
+    assert!(!normal.edges.is_empty());
+    assert!(
+        !normal.is_text_glyph(),
+        "a mesh with edge overlay is not text"
+    );
+
+    // A zero-triangle mesh has no indices (and no edges): not text.
+    let mut empty_mesh = quad();
+    empty_mesh.triangles.clear();
+    let empty_delta = SceneCache::default()
+        .build(&mesh_representation(5, empty_mesh), stamp())
+        .unwrap();
+    let empty = &empty_delta.added[0];
+    assert!(empty.indices.is_empty());
+    assert!(!empty.is_text_glyph(), "a zero-triangle mesh is not text");
+}
+
+#[test]
 fn lines_batch_has_no_triangles_or_normals() {
     let mut cache = SceneCache::default();
     let rep = line_representation(

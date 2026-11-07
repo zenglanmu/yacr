@@ -125,3 +125,40 @@ gpu-memory: total=2107964952 buffer=2100592152 texture=7372800 peak=2107964952
   （`vram=4294967296`、`cap=3865470566`、`budget_source=vram-percent`，exit 0）。
 - 边界：`budget_source=unprobed` 的**运行时**证据为 **NOT RUN**（本机后端可探测），只有单测；
   D3D12/GL/Metal 的未探测路径同样只有单测。
+
+## 9. pulled 预检改为「常驻 + 需求 ≤ cap」（2026-11-07）
+
+**根因**（实测 `fixtures/test-tangent-1.dwg`，170,757 实体 / 167,064 base 批 / 34.0M 三角）：
+`renderer_impl/pulled_rebuild.rs` 的容量预检调用
+`GpuMemoryLedger::admit(&[(Stream, required)])`（判定 `used + required ≤ limit`），却**丢弃 `Err`**，
+改用 `pulled_capacity_fits(required, limit)`（即 `required ≤ limit`）。于是 ~1.94 GB 常驻 + 2.70 GB
+pulled 在 3.865 GB cap 下被 `admit` 拒绝、却被裸 cap 比较放行；分配随即 OOM，再重建 fallback
+（实测每次 ~1.5–2.2 s）。
+
+**改动**：以 `admit` 为准。拒绝时 `available = limit − (resident − replaced_pulled)`
+（`replaced_pulled` = 现有 pulled 线段/网格缓冲 + 两张 chunk table 的字节），
+`required > available` 即预检跳过；`PulledState::SkippedInsufficientVram.budget_bytes` 现在表示
+**available**（`limit − resident`），不再是裸 cap。设备 `max_buffer_size` 上限仍独立判定。
+
+**实测**（release / Vulkan / Quadro P620 / NVIDIA 580.178.04 / `--gpu high`，exit 0）：
+
+```text
+pulled=skipped-insufficient-vram(required_bytes=2696286128,budget_bytes=1923170670)
+gpu-memory: total=2022808436 buffer=2008062836 texture=14745600 peak=2022808436
+            budget=3865470566 cap=3865470566 vram=4294967296 percent=90
+            budget_source=vram-percent source=accounted
+```
+
+即门禁时刻常驻 = `3,865,470,566 − 1,923,170,670 = 1,942,299,896`；
+`1,942,299,896 + 2,696,286,128 > 3,865,470,566` → `admit` 拒绝，`available < required` → 预检跳过。
+改动前同一场景会放行并 OOM。`pulled=` 一行来自一次性临时 eprintln（**未保留**在仓库）；
+CLI 的正式 JSON 没有 pulled 字段。
+
+**契约（已运行）**：
+`renderer_impl::pulled_budget_tests::measured_resident_plus_pulled_refusal_is_a_pre_flight_skip`
+（2,058,206,528 / 2,699,194,780 / 3,865,470,566 三个数）、`pulled_budget_gpu_tests` 6 passed
+（含 `over_budget_requirement_is_rejected_and_reported_exactly`、
+`application_cap_nets_out_the_replaced_pulled_copy`、
+`run_free_suffix_skips_the_rebuild_after_the_oom_fallback`）。
+
+**边界**：单机、单适配器、一次运行；没有像素/性能/其它 GPU/真机结论。

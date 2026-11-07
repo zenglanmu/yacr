@@ -9,6 +9,7 @@ mod test_support;
 mod tests_admission;
 mod tests_align;
 mod tests_array;
+mod tests_batch;
 mod tests_command_log;
 mod tests_commands;
 mod tests_explode;

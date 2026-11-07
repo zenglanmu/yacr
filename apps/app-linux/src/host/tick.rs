@@ -520,10 +520,11 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                             eprintln!("[probe] cad tool parameter rejected: {error}");
                         }
                     }
-                    for input in &inputs {
-                        if let Err(error) = session.handle_input(input) {
-                            eprintln!("[probe] cad input rejected: {error}");
-                        }
+                    // One render publication for the whole tick: every input is
+                    // still admitted/executed in order, but the derived render
+                    // state syncs once instead of once per event.
+                    if let Err(error) = session.handle_inputs(&inputs) {
+                        eprintln!("[probe] cad input rejected: {error}");
                     }
                     // Terminal tool texts (ADR 0019 decision A.1): applied after
                     // this batch's inputs, because the last point of a text tool

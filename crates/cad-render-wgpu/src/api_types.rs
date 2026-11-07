@@ -113,15 +113,19 @@ pub enum PulledState {
     /// (whole-scene line segments and/or merged-mesh segments).
     Active,
     /// The rebuild was **skipped before allocating**: the exact bytes the pulled
-    /// organisation needs exceed the renderer's memory budget for it, derived
-    /// from the device's own limits (see `Renderer::pulled_budget_bytes`). The
-    /// universal per-run path is used instead; pixels are unchanged.
+    /// organisation needs do not fit the budget available to it. The available
+    /// budget is the application ledger's limit minus the bytes already resident
+    /// (net of the pulled copy being replaced), and never more than the device
+    /// ceiling derived from its own limits (see `Renderer::pulled_budget_bytes`).
+    /// `required_bytes > budget_bytes` is the refusal reason; the universal per-run
+    /// path is used instead and pixels are unchanged.
     SkippedInsufficientVram {
         /// Exact bytes one rebuilt pulled organisation would allocate (line +
         /// mesh storage payloads and both chunk tables; see
         /// `pulled_payload_bytes`).
         required_bytes: u64,
-        /// The budget those bytes were compared against.
+        /// The **available** budget for the pulled copy (`limit - resident`), not
+        /// the raw cap the requirement was compared against.
         budget_bytes: u64,
     },
     /// The rebuild was skipped because an out-of-memory error was **captured**

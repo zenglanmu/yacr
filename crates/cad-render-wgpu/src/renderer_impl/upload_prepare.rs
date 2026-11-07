@@ -620,6 +620,7 @@ impl Renderer {
                 normals: normal_buffer,
                 colors: color_buffer,
                 topology: batch.topology,
+                text_glyph: batch.is_text_glyph(),
                 indices: index_buffer,
                 index_count: triangle_index_count,
                 line_quads: line_quad_buffer,

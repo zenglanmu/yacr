@@ -167,6 +167,19 @@ impl RenderBatch {
         }
     }
 
+    /// Whether this is the display class of a shaped text glyph: a triangle mesh
+    /// with an explicit index list and **no** edge overlay.
+    ///
+    /// The renderer uses this to hide text during camera motion (navigation
+    /// LOD). The representation primitive owns the decision: only
+    /// [`cad_representation::DisplayPrimitive::MeshWithoutEdgeOverlay`] (standard
+    /// and vendor text shaping) produces this shape, so the renderer can derive
+    /// the class without a second marker field that every `RenderBatch` literal
+    /// would have to set.
+    pub fn is_text_glyph(&self) -> bool {
+        self.topology == RenderTopology::Mesh && !self.indices.is_empty() && self.edges.is_empty()
+    }
+
     pub fn approx_bytes(&self) -> usize {
         (self.vertices.len() + self.normals.len() + self.edges.len() + self.colors.len()) * 12
             + self.indices.len() * 12

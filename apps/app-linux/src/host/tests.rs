@@ -254,6 +254,15 @@ fn postload_pan_import_gate_rejects_demo_loading_and_wrong_document() {
         1,
         "complex-test.dwg"
     ));
+    // The non-fatal GPU fallback warning is informational: the gesture must still
+    // start (it is surfaced through the UI notice, not as a load failure).
+    assert!(postload_pan_import_ready(
+        false,
+        Some("gpu.pulled.insufficient-vram: required=2699194780 available=1913456714"),
+        Some("/home/u/fixtures/complex-test.dwg"),
+        1,
+        "complex-test.dwg"
+    ));
     assert_eq!(label_file_name("/a/b/c.dwg"), "c.dwg");
     assert_eq!(label_file_name("c.dwg"), "c.dwg");
 }

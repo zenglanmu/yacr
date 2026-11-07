@@ -8,6 +8,7 @@ impl Renderer {
         camera_position: [f32; 3],
         light: [f32; 4],
         target: &RenderTarget,
+        retain_progressive_page: bool,
     ) -> Result<FrameStats, RenderError> {
         if self.device_lost {
             return Err(RenderError::DeviceLost(
@@ -80,6 +81,13 @@ impl Renderer {
             // Base-only, exactly like the cache: overlay batches are run-free
             // (enforced at commit), so they contribute nothing.
             self.batch_facts = plan::BatchFacts::build(base_batches);
+            // `progressive_frame` (its `ordered`/`page_index`) and `batch_facts`
+            // are derived from the same base batch set as `draw_plan`; they can
+            // never outlive it. A base change already drops the frame, but this
+            // coupling also covers the device/init paths that reset `draw_plan`
+            // alone, so an opaque-only restart can never reuse a stale order.
+            self.progressive_frame = None;
+            self.preserve_color_on_restart = false;
             self.draw_plan_rebuilds += 1;
         }
         let frame_key = FrameKey {
@@ -200,7 +208,7 @@ impl Renderer {
         // computation). The mask is threaded into the planners (so culled runs
         // are charged zero) and the encode sites (so culled runs are skipped). A
         // test disables culling to render the unculled reference frame.
-        let cull = {
+        let mut cull = {
             let wpp_arc = projection.world_per_px();
             // The line class may use the overridden ramp width (test hook); the
             // SDF conic class always uses the projection's real value.
@@ -220,6 +228,7 @@ impl Renderer {
                 built
             }
         };
+        cull.hide_text = self.navigation_lod;
         // The frame's encode-participation set, from the batch facts and the cull
         // just built. Derived from the same facts/restart invalidation, not a
         // second truth.
@@ -291,7 +300,17 @@ impl Renderer {
             draw_images.sort_by_key(|&i| self.images[i].draw_order);
         }
 
-        let (mut budget_plan, invisible_batches) = if let Some(frame) = &self.progressive_frame {
+        // A paused navigation frame draws no base page when one is retained; a
+        // camera change restarted the walk above (`cursor == 0`) and still draws
+        // page 1. See `Renderer::retained_page_plan`.
+        let retained = if retain_progressive_page {
+            self.retained_page_plan()
+        } else {
+            None
+        };
+        let (mut budget_plan, invisible_batches) = if let Some(retained) = retained {
+            retained
+        } else if let Some(frame) = &self.progressive_frame {
             let mut plan = plan::plan_ordered_page(
                 &self.batches,
                 &frame.ordered,
@@ -455,7 +474,8 @@ impl Renderer {
             // geometry the cull removed. Pulled-subset draws are not implemented
             // (that is backlog §N1d), so culling forces the universal per-run
             // organization instead.
-            && !cull.any_culled();
+            && !cull.any_culled()
+            && !cull.hide_text;
         let use_pulled = pulled_ready
             && opaque
                 .iter()
@@ -895,11 +915,10 @@ impl Renderer {
         // batches with a **surviving** run (a culled chunk's batch is not work),
         // so a page whose accepted batches were all culled is not a cost
         // observation.
-        let accepted_with_work = budget_plan
-            .accepted
-            .iter()
-            .filter(|&&i| batch_has_visible_work(&self.batches[i], &cull))
-            .count();
+        // Same predicate as `batch_has_visible_work`, but the compact per-frame
+        // encode mask avoids a scattered ~200 B `GpuBatch` read per accepted
+        // batch (a deep-zoom page accepts the whole ordered set).
+        let accepted_with_work = self.accepted_with_work(&budget_plan.accepted);
         if pacing_mode == pacing::PacingMode::Active && accepted_with_work > 0 {
             let sample = pacing::Sample {
                 cpu_ms,

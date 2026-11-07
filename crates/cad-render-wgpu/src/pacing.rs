@@ -211,6 +211,21 @@ pub fn canonical_budget(scale: f64) -> FrameBudget {
     )
 }
 
+/// Raise the adaptive scale to the un-paced ceiling for the settling walk.
+///
+/// This is a **policy** step, not cost knowledge: `cost_ema_ms`, `seeded` and
+/// `target_ms` are retained; only the multiplier moves (and the streaks clear).
+/// Camera motion may have driven the scale down for responsiveness; once the
+/// camera is idle the remaining pages should use the full ceiling so the final
+/// image completes quickly. The controller re-shrinks on two consecutive
+/// over-target frames if a boosted page is genuinely too heavy.
+pub fn boost_scale(mut state: PacingState) -> PacingState {
+    state.scale = state.scale.max(1.0);
+    state.over_streak = 0;
+    state.under_streak = 0;
+    state
+}
+
 /// Fold one observed frame into the controller and return the next state plus
 /// the canonical product budget for its scale.
 ///
@@ -380,6 +395,42 @@ mod tests {
         assert_eq!(state.scale, 1.0);
         assert_eq!(state.over_streak, 0);
         assert_eq!(state.under_streak, 0);
+    }
+
+    #[test]
+    fn settle_boost_raises_the_scale_and_keeps_the_cost_model() {
+        let shrunken = PacingState {
+            scale: 0.05,
+            cost_ema_ms: 7.0,
+            target_ms: 13.0,
+            over_streak: 2,
+            under_streak: 3,
+            seeded: true,
+        };
+        let boosted = boost_scale(shrunken);
+        assert_eq!(boosted.scale, 1.0, "a shrunk settle uses the ceiling");
+        assert_eq!(boosted.cost_ema_ms, 7.0, "cost knowledge is retained");
+        assert!(boosted.seeded, "the EMA stays seeded");
+        assert_eq!(boosted.target_ms, 13.0);
+        assert_eq!(boosted.over_streak, 0, "stale streaks must not carry over");
+        assert_eq!(boosted.under_streak, 0);
+        // An already-larger scale is never lowered by the boost.
+        assert_eq!(
+            boost_scale(PacingState {
+                scale: 1.5,
+                ..shrunken
+            })
+            .scale,
+            1.5
+        );
+        assert_eq!(
+            boost_scale(PacingState {
+                scale: 4.0,
+                ..shrunken
+            })
+            .scale,
+            4.0
+        );
     }
 
     #[test]

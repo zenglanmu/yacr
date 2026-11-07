@@ -9,6 +9,29 @@ impl Renderer {
         self.preserve_color_on_restart = false;
     }
 
+    /// Navigation-time display LOD: hide text-glyph geometry while the camera is
+    /// moving. Returns whether the mode changed.
+    ///
+    /// A mode change drops the retained progressive plan and forbids a
+    /// preserve-colour restart, so the settled frame cannot keep the text-free
+    /// colour: the next frame clears and redraws with the new mode. Display only:
+    /// the pick path plans with the identity (`all_visible`) cull whose
+    /// `hide_text` is false, so hidden text remains pickable.
+    pub fn set_navigation_lod(&mut self, hide_text: bool) -> bool {
+        if self.navigation_lod == hide_text {
+            return false;
+        }
+        self.navigation_lod = hide_text;
+        self.progressive_frame = None;
+        self.preserve_color_on_restart = false;
+        true
+    }
+
+    /// Whether navigation-time text hiding is active.
+    pub fn navigation_lod(&self) -> bool {
+        self.navigation_lod
+    }
+
     /// Override the adaptive page-budget target (`cpu_ms + wait_ms`, default
     /// [`pacing::DEFAULT_TARGET_MS`]).
     ///
@@ -30,6 +53,40 @@ impl Renderer {
     /// Current adaptive scale (`1.0` until the controller has adapted).
     pub fn pacing_scale(&self) -> f64 {
         self.pacing.scale
+    }
+
+    /// Raise the adaptive page scale to the un-paced ceiling for the settling
+    /// walk (camera idle), keeping the measured cost knowledge (`cost_ema_ms` /
+    /// `seeded` / `target_ms`). Camera motion shrinks the scale for
+    /// responsiveness; once the user stops, the remaining pages should use the
+    /// full ceiling so the final image completes quickly. The controller still
+    /// shrinks again if a boosted page is over target (two consecutive
+    /// over-budget observations).
+    pub fn boost_pacing_scale(&mut self) {
+        self.pacing = pacing::boost_scale(self.pacing);
+    }
+
+    /// Count the accepted batches that actually issue work this frame, using the
+    /// encode-participation bitset. Equivalent to `batch_has_visible_work` for
+    /// the accepted base prefix, without a scattered ~200 B `GpuBatch` read per
+    /// accepted batch (a deep-zoom page accepts the whole ordered set and draws
+    /// only a few runs).
+    pub(super) fn accepted_with_work(&self, accepted: &[usize]) -> usize {
+        accepted
+            .iter()
+            .filter(|&&i| self.encode_emit_mask.participates(i))
+            .count()
+    }
+
+    /// Diagnostics: camera/attachment-only progressive restarts that reused the
+    /// retained base order/page index (no transparent batch to re-sort).
+    pub fn progressive_order_reuses(&self) -> u64 {
+        self.progressive_order_reuses
+    }
+
+    /// Diagnostics: progressive restarts that rebuilt the base order/page index.
+    pub fn progressive_order_rebuilds(&self) -> u64 {
+        self.progressive_order_rebuilds
     }
 
     /// Current cost EWMA in milliseconds (`0.0` before the first observation).

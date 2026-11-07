@@ -35,6 +35,7 @@ mod p4_trace;
 mod point_style;
 mod properties;
 mod queue;
+mod render_batch;
 mod select;
 mod settings;
 mod settings_backend;

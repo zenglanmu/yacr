@@ -69,6 +69,12 @@ pub(crate) fn draw_passes(
 /// `usize::MAX` in the product and models upload residency, not draw work, so
 /// culling does not reduce it.
 pub(crate) fn batch_budget_vertices(batch: &GpuBatch, cull: &ChunkCull) -> usize {
+    // Navigation LOD: a hidden text-glyph batch emits no draw, so it must not
+    // charge work (including its legacy mesh vertex buffer). Byte charging is
+    // unchanged and remains batch-granular.
+    if cull.hide_text && batch.text_glyph {
+        return 0;
+    }
     let line_quads = batch
         .instanced
         .iter()
@@ -99,6 +105,10 @@ pub(crate) fn batch_budget_vertices(batch: &GpuBatch, cull: &ChunkCull) -> usize
 /// anti-aliased line quad, `2` per SDF conic instance, the mesh triangle count,
 /// else `0`. Culled runs are charged zero (see [`batch_budget_vertices`]).
 pub(crate) fn batch_budget_triangles(batch: &GpuBatch, cull: &ChunkCull) -> usize {
+    // Navigation LOD: see [`batch_budget_vertices`].
+    if cull.hide_text && batch.text_glyph {
+        return 0;
+    }
     let line_quads = batch
         .instanced
         .iter()
@@ -134,7 +144,12 @@ pub(super) fn mesh_batch_visible(batch: &GpuBatch, cull: &ChunkCull) -> bool {
 
 /// Whether an accepted batch actually issues at least one draw under `cull`: a
 /// converted batch needs a surviving run; a legacy per-batch draw always runs.
-/// Used to decide whether a page is a real pacing cost observation.
+///
+/// The frame path's pacing sample now uses the equivalent
+/// [`EncodeEmitMask::participates`] bitset (a scattered `GpuBatch` read per
+/// accepted batch was measurable on deep-zoom pages). This remains the
+/// documented reference predicate used by the planner contracts.
+#[allow(dead_code)]
 pub(crate) fn batch_has_visible_work(batch: &GpuBatch, cull: &ChunkCull) -> bool {
     if batch.instanced.is_empty() && batch.mesh_runs.is_empty() && batch.arc_runs.is_empty() {
         return true;

@@ -10,6 +10,45 @@ impl Renderer {
         camera: Camera2d,
         target: &RenderTarget,
     ) -> Result<FrameStats, RenderError> {
+        self.render_with_camera(camera, target, false)
+    }
+
+    /// Composite the transient overlay over the retained base without advancing
+    /// the progressive page walk when a page is already retained.
+    ///
+    /// The engine uses this for cursor-only invalidation while navigation is
+    /// active. A camera/target change still restarts the walk and draws page 1
+    /// (the renderer decides from `cursor == 0`), so this can never show a stale
+    /// camera.
+    pub fn render_retained_overlay(
+        &mut self,
+        camera: Camera2d,
+        target: &RenderTarget,
+    ) -> Result<FrameStats, RenderError> {
+        self.render_with_camera(camera, target, true)
+    }
+
+    /// Dispatch a navigation frame: a paused gesture uses the retained-base
+    /// variant; a normal frame advances the progressive walk.
+    pub fn render_navigation(
+        &mut self,
+        camera: Camera2d,
+        target: &RenderTarget,
+        retain_progressive_page: bool,
+    ) -> Result<FrameStats, RenderError> {
+        if retain_progressive_page {
+            self.render_retained_overlay(camera, target)
+        } else {
+            self.render(camera, target)
+        }
+    }
+
+    fn render_with_camera(
+        &mut self,
+        camera: Camera2d,
+        target: &RenderTarget,
+        retain_progressive_page: bool,
+    ) -> Result<FrameStats, RenderError> {
         let w = target.width.max(1) as f64;
         let h = target.height.max(1) as f64;
         let sx = 2.0 / (w * camera.world_per_px);
@@ -64,6 +103,7 @@ impl Renderer {
             // 2D keeps its world-Z headlight, so the diffuse term stays `n.z`.
             [0.0, 0.0, 1.0, 0.0],
             target,
+            retain_progressive_page,
         )
     }
 
@@ -91,6 +131,38 @@ impl Renderer {
         &mut self,
         camera: Camera3d,
         target: &RenderTarget,
+    ) -> Result<FrameStats, RenderError> {
+        self.render_3d_with_camera(camera, target, false)
+    }
+
+    /// 3D counterpart of [`Renderer::render_retained_overlay`].
+    pub fn render_3d_retained_overlay(
+        &mut self,
+        camera: Camera3d,
+        target: &RenderTarget,
+    ) -> Result<FrameStats, RenderError> {
+        self.render_3d_with_camera(camera, target, true)
+    }
+
+    /// 3D counterpart of [`Renderer::render_navigation`].
+    pub fn render_3d_navigation(
+        &mut self,
+        camera: Camera3d,
+        target: &RenderTarget,
+        retain_progressive_page: bool,
+    ) -> Result<FrameStats, RenderError> {
+        if retain_progressive_page {
+            self.render_3d_retained_overlay(camera, target)
+        } else {
+            self.render_3d(camera, target)
+        }
+    }
+
+    fn render_3d_with_camera(
+        &mut self,
+        camera: Camera3d,
+        target: &RenderTarget,
+        retain_progressive_page: bool,
     ) -> Result<FrameStats, RenderError> {
         let aspect = target.width.max(1) as f64 / target.height.max(1) as f64;
         let Some(vp) = camera.view_projection(aspect) else {
@@ -130,6 +202,7 @@ impl Renderer {
             eye,
             light,
             target,
+            retain_progressive_page,
         )
     }
 }

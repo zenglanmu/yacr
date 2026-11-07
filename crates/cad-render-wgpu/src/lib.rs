@@ -140,6 +140,8 @@ struct GpuBatch {
     /// `@location(2)` attribute is always provided.
     colors: Option<wgpu::Buffer>,
     topology: RenderTopology,
+    /// `true` for the text-glyph display class (indexed mesh, no edge overlay).
+    text_glyph: bool,
     /// Triangle index buffer (mesh topology only).
     indices: Option<wgpu::Buffer>,
     index_count: u32,
@@ -670,6 +672,9 @@ pub struct Renderer {
     /// Observable state of the accelerated pulled organisation (see
     /// [`PulledState`]), updated by every `rebuild_pulled`.
     pulled_state: PulledState,
+    /// Whether the universal per-stream line fallback is currently resident and
+    /// valid (built by [`Renderer::build_line_fallback`]).
+    line_fallback_built: bool,
     /// Test hook: override the anti-aliased line SDF ramp width (world units per
     /// pixel) for the line class only. `None` uses the projection's real value.
     /// Used by the visual-acceptance test to render the **pre-unification**
@@ -775,7 +780,14 @@ pub struct Renderer {
     batch_overwrites: u64,
     draw_calls: u64,
     progressive: bool,
+    /// Display LOD: hide text-glyph geometry while the camera is moving.
+    navigation_lod: bool,
     progressive_frame: Option<ProgressiveFrame>,
+    /// Diagnostics: camera/attachment-only restarts that reused the retained
+    /// base `ordered`/page index because no transparent batch needed re-sorting.
+    progressive_order_reuses: u64,
+    /// Diagnostics: restarts that rebuilt the base `ordered`/page index.
+    progressive_order_rebuilds: u64,
     /// Set by a flag-row/tint update that restarts the progressive walk at
     /// cursor 0 without invalidating the retained colour target: the restart
     /// loads colour (clears only depth) so already-drawn pages never vanish.

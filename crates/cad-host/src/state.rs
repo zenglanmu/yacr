@@ -22,7 +22,22 @@ impl HostCore {
         // policy feeds the cursor overlay through `pickbox_logical_pixels`, so the
         // drawn box, the click predicate and the snap aperture all come from one
         // effective config.
+        //
+        // This runs even inside a render batch: the tolerance is input policy,
+        // not render publication, and every input in the batch must read the
+        // same policy.
         self.seed_interaction_tolerance();
+        if self.render_batch.get() > 0 {
+            // Defer the derived render publication to the batch's single flush.
+            // A supplied receipt is the incremental append hint for the drawing
+            // that just committed, so it is stashed (never dropped). A `None`
+            // sync must not overwrite a receipt already stashed by an earlier
+            // input in the same batch.
+            if edit.is_some() {
+                *self.deferred_edit.borrow_mut() = edit.cloned();
+            }
+            return Ok(());
+        }
         let (
             drawing,
             view,

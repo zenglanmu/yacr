@@ -140,12 +140,12 @@ fn the_file_poll_only_drains_the_platform_queue() {
 fn the_tick_moves_partition_local_input_into_canvas_space_before_the_session() {
     // The native surface is the full window while the chrome reports positions
     // relative to its `.native-input` rect, so the origin must be added *before*
-    // `handle_input` — a pick/hover anchor is otherwise offset by the partition.
+    // `handle_inputs` — a pick/hover anchor is otherwise offset by the partition.
     let translate = TICK
         .find("crate::input::canvas_position(")
         .expect("the tick must translate partition-local input into canvas space");
     let handle = TICK
-        .find("session.handle_input(")
+        .find("session.handle_inputs(")
         .expect("the tick must feed the session");
     assert!(
         translate < handle,

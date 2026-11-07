@@ -2,6 +2,10 @@ use super::*;
 
 impl Renderer {
     pub(super) fn rebuild_pulled(&mut self, fast: PulledFastPath) {
+        // Bytes the currently resident pulled classes hold. Measured **before**
+        // they are taken below, because the ledger keeps charging them until the
+        // old handles drop and the gate nets them out of the available budget.
+        let replaced_pulled_bytes = self.retained_pulled_bytes();
         // Take the previous pulled state so an admitted reuse can retain its base
         // segments; both classes are replaced below either way.
         let previous_lines = self.pulled_lines.take();
@@ -52,14 +56,33 @@ impl Renderer {
         // exactly like a device-capacity skip does — the universal per-run path
         // draws the same pixels, and the refusal is recorded (and reported through
         // `pulled_state`/`gpu_budget_refusal`) instead of failing a frame.
-        let budget_bytes = match self
+        //
+        // `admit` is the authority: it checks `resident + required <= limit` and
+        // records the refusal. Ignoring that refusal (the earlier code compared the
+        // requirement against the bare limit) admitted a 2 699 194 780-byte copy
+        // into a 2 058 206 528-byte-resident session under a 3 865 470 566-byte
+        // cap, and the allocation then OOM'd before falling back — the measured
+        // `fixtures/test-tangent-1.dwg` failure.
+        //
+        // The ledger total still includes the **previous** pulled charges, which
+        // this rebuild replaces: `retained_pulled_bytes` sums them so the available
+        // budget nets out the copy being dropped or reused. A full rebuild does
+        // transiently hold both copies while it builds, so this is the optimistic
+        // bound of a net replacement; the pre-flight skip is still always correct.
+        let admission = self
             .gpu_memory
-            .admit(&[(GpuMemoryCategory::Stream, required_bytes)])
-        {
-            Ok(()) => device_budget_bytes,
-            Err(refusal) => refusal.limit_bytes.unwrap_or(device_budget_bytes),
-        };
-        if !pulled_capacity_fits(required_bytes, budget_bytes) {
+            .admit(&[(GpuMemoryCategory::Stream, required_bytes)]);
+        let verdict = pulled_capacity_verdict(
+            required_bytes,
+            device_budget_bytes,
+            admission
+                .err()
+                .map(|refusal| refusal.limit_bytes.unwrap_or(device_budget_bytes)),
+            self.gpu_memory.used_bytes(),
+            replaced_pulled_bytes,
+        );
+        let budget_bytes = verdict.budget_bytes;
+        if !verdict.fits {
             // Drop the resident pulled classes (their buffers survive through the
             // streams' handles until the fallback replaces them, so nothing is
             // left dangling) and give every stream real per-run geometry.
@@ -85,6 +108,11 @@ impl Renderer {
             };
             return;
         }
+        // The gate admitted the copy. An application-cap refusal recorded by
+        // `admit` must not outlive a verdict that nets out the replaced pulled
+        // copy and proceeds to build: `gpu_budget_refusal` would otherwise report
+        // a downgrade that did not happen.
+        self.clear_gpu_memory_refusal();
 
         // Resolve the reuse plan: the retained base segments, the resource
         // boundaries, and whether a checkpoint should be (re)established.
@@ -614,6 +642,9 @@ impl Renderer {
             // than panicked: a device that cannot allocate the fallback either is
             // part of the same explicit verdict, never an empty success.
             if let Err(fallback) = self.build_line_fallback(&device, &queue) {
+                // A half-built fallback is not a known-valid fallback: never let a
+                // later run-free suffix skip on it.
+                self.line_fallback_built = false;
                 error = error.with_note(&format!(
                     "the universal per-run fallback also failed: {}",
                     fallback.message()
@@ -623,6 +654,12 @@ impl Renderer {
             return;
         }
         self.uploaded_bytes += table_bytes_uploaded;
+
+        // A successful pulled line build repoints every stream at its segment
+        // storage, so the per-stream fallback is no longer what draws the class.
+        if self.pulled_lines.is_some() {
+            self.line_fallback_built = false;
+        }
 
         // (Re)establish or invalidate the retained-prefix checkpoint.
         // Final completion proof: the resource counts can match while a class
@@ -671,6 +708,33 @@ impl Renderer {
         } else {
             PulledState::Active
         };
+    }
+
+    /// Bytes the currently resident pulled classes hold (their geometry/tables).
+    ///
+    /// The next rebuild replaces these charges, so the application budget may net
+    /// them out when asking how much the pulled copy can still claim: the account
+    /// in `rebuild_pulled` subtracts this from the ledger's resident total before
+    /// comparing against the cap. Both classes are counted from the real buffers,
+    /// so a reused base segment and a rebuilt one are treated identically.
+    fn retained_pulled_bytes(&self) -> u64 {
+        let lines = self.pulled_lines.as_ref().map_or(0, |pulled| {
+            pulled
+                .segments
+                .iter()
+                .map(|segment| segment.geometry_buffer.size())
+                .sum::<u64>()
+                + pulled.chunk_table.size()
+        });
+        let mesh = self.pulled_mesh.as_ref().map_or(0, |pulled| {
+            pulled
+                .segments
+                .iter()
+                .map(|segment| segment.vertex_buffer.size() + segment.index_buffer.size())
+                .sum::<u64>()
+                + pulled.chunk_table.size()
+        });
+        lines.saturating_add(mesh)
     }
 
     /// Exact bytes one pulled rebuild would allocate for the resident scene.

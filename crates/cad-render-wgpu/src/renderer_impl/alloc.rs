@@ -157,6 +157,60 @@ pub(crate) fn pulled_capacity_fits(required_bytes: u64, budget_bytes: u64) -> bo
     required_bytes <= budget_bytes
 }
 
+/// The pre-flight capacity verdict for one pulled rebuild.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PulledCapacityVerdict {
+    /// Whether the rebuild may allocate.
+    pub fits: bool,
+    /// The reported budget when [`Self::fits`] is false: the **available** pulled
+    /// budget (`limit - resident`) for an application-cap refusal, otherwise the
+    /// device ceiling.
+    pub budget_bytes: u64,
+}
+
+/// Combine the device ceiling with the application ledger's admission verdict.
+///
+/// `refusal_limit` is `Some(limit)` when the ledger refused the request
+/// (`GpuMemoryRefusal::limit_bytes`), `None` when it admitted it. A refused
+/// request is a **pre-flight skip**: the old code compared the requirement
+/// against the bare cap and ignored the refusal, so a 2 699 194 780-byte copy
+/// was admitted into a 2 058 206 528-byte-resident session under a
+/// 3 865 470 566-byte cap (`resident + required > cap`), and the allocation then
+/// failed. The available budget nets out the **replaced** pulled copy, because
+/// the next rebuild drops/reuses those buffers rather than keeping them in
+/// addition to the new ones:
+///
+/// ```text
+/// available = limit - (resident - replaced_pulled)
+/// ```
+///
+/// The device `max_buffer_size`-derived budget is an independent ceiling: the
+/// requirement must fit both. Pure so the measured numbers below are a unit
+/// contract, not a GPU test.
+pub(crate) fn pulled_capacity_verdict(
+    required_bytes: u64,
+    device_budget_bytes: u64,
+    refusal_limit: Option<u64>,
+    resident_bytes: u64,
+    replaced_pulled_bytes: u64,
+) -> PulledCapacityVerdict {
+    match refusal_limit {
+        None => PulledCapacityVerdict {
+            fits: pulled_capacity_fits(required_bytes, device_budget_bytes),
+            budget_bytes: device_budget_bytes,
+        },
+        Some(limit) => {
+            let available =
+                limit.saturating_sub(resident_bytes.saturating_sub(replaced_pulled_bytes));
+            PulledCapacityVerdict {
+                fits: pulled_capacity_fits(required_bytes, available)
+                    && pulled_capacity_fits(required_bytes, device_budget_bytes),
+                budget_bytes: available,
+            }
+        }
+    }
+}
+
 /// Budget for **all** whole-scene pulled allocations of one rebuild.
 ///
 /// Derived from the device's own limits, not from a scene or machine constant:

@@ -22,6 +22,7 @@ fn gpu_batch(pick_key: u32, sources: Vec<SelectionRef>) -> GpuBatch {
         normals: None,
         colors: None,
         topology: cad_scene::RenderTopology::Lines,
+        text_glyph: false,
         indices: None,
         index_count: 0,
         line_quads: None,

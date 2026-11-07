@@ -68,6 +68,7 @@ fn gpu_batch(
         normals: None,
         colors: None,
         topology,
+        text_glyph: false,
         indices: None,
         index_count,
         line_quads: None,
@@ -791,5 +792,183 @@ fn skipped_uniform_slots_leave_surviving_bytes_bit_identical() {
                 );
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Navigation-time text LOD
+// ---------------------------------------------------------------------------
+
+fn glyph_batch(mesh_run: MeshRun, upload_bytes: usize) -> GpuBatch {
+    let mut batch = gpu_batch(
+        RenderTopology::Mesh,
+        4,
+        6,
+        0,
+        Vec::new(),
+        vec![mesh_run],
+        Vec::new(),
+        upload_bytes,
+    );
+    batch.text_glyph = true;
+    batch
+}
+
+/// A hidden text glyph is a zero-charge gap: it neither charges vertices or
+/// triangles nor terminates a page whose budget is already exhausted.
+#[test]
+fn hidden_text_glyphs_charge_no_work_and_do_not_stop_a_page() {
+    let glyph = glyph_batch(mesh_run(0, 6, 4), 128);
+    let batches = vec![glyph];
+    let mut cull = ChunkCull::from_visibility(Vec::new(), vec![true], Vec::new());
+    cull.hide_text = true;
+    assert_eq!(batch_budget_vertices(&batches[0], &cull), 0);
+    assert_eq!(batch_budget_triangles(&batches[0], &cull), 0);
+
+    // Zero available geometry budget: the glyph still fits (0/0) and is accepted.
+    let budget = FrameBudget {
+        max_vertices: 0,
+        max_triangles: 0,
+        max_bytes: usize::MAX,
+    };
+    let plan = plan_from_gpu(&batches, &budget, cad_scene::FrameUsage::default(), &cull);
+    assert_eq!(plan.accepted, vec![0]);
+    assert!(plan.over_budget.is_none());
+
+    // The page planner also treats the hidden glyph as a gap: a zero-budget page
+    // reaches every batch instead of stopping on it.
+    let ordered = vec![0usize];
+    let facts = BatchFacts::build(&batches);
+    let index = OrderedPageIndex::build(&batches, &ordered);
+    let page = plan_ordered_page(
+        &batches,
+        &ordered,
+        0,
+        &budget,
+        Default::default(),
+        &cull,
+        &facts,
+        &index,
+    );
+    assert_eq!(page.accepted, vec![0]);
+    assert!(page.over_budget.is_none());
+
+    // Control: the same batch with the LOD off charges and is rejected.
+    let mut visible = cull;
+    visible.hide_text = false;
+    assert_eq!(batch_budget_vertices(&batches[0], &visible), 4);
+    assert_eq!(batch_budget_triangles(&batches[0], &visible), 2);
+    let rejected = plan_from_gpu(
+        &batches,
+        &budget,
+        cad_scene::FrameUsage::default(),
+        &visible,
+    );
+    assert!(rejected.accepted.is_empty());
+    assert!(rejected.over_budget.is_some());
+}
+
+/// The encode mask must exclude hidden glyphs even when the cull removed
+/// nothing (the `all` fast path is fenced off by `hide_text`).
+#[test]
+fn encode_mask_excludes_hidden_glyphs_without_any_chunk_cull() {
+    let glyph = glyph_batch(mesh_run(0, 6, 4), 128);
+    let normal = gpu_batch(
+        RenderTopology::Lines,
+        0,
+        0,
+        0,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        8,
+    );
+    let batches = vec![glyph, normal];
+    let facts = BatchFacts::build(&batches);
+    assert!(facts.is_text_glyph(0));
+    assert!(!facts.is_text_glyph(1));
+
+    let mut cull = ChunkCull::all_visible();
+    cull.hide_text = true;
+    assert!(!cull.any_culled(), "fixture: nothing is view-culled");
+    let mut mask = EncodeEmitMask::default();
+    mask.rebuild(&facts, &cull);
+    assert!(
+        !mask.participates(0),
+        "hidden text must not emit a draw on an unculled frame"
+    );
+    assert!(mask.participates(1), "non-text work still participates");
+
+    // With the LOD off every batch participates again.
+    let mut visible = cull;
+    visible.hide_text = false;
+    mask.rebuild(&facts, &visible);
+    assert!(mask.participates(0));
+    assert!(mask.participates(1));
+}
+
+/// The segmented planner remains byte-exact against the linear reference when
+/// hidden text glyphs are present (they are accepted zero-charge gaps).
+#[test]
+fn segmented_planner_matches_the_reference_with_hidden_text_glyphs() {
+    let mut rng = Rng::new(0x7E47);
+    for case in 0..2000 {
+        let streams = 1 + rng.below(4);
+        let chunks = 1 + rng.below(4);
+        let n = 1 + rng.below(40);
+        let mut batches: Vec<GpuBatch> = (0..n)
+            .map(|_| random_batch(&mut rng, streams, chunks))
+            .collect();
+        for batch in &mut batches {
+            batch.text_glyph = rng.below(3) == 0;
+        }
+        let mut ordered: Vec<usize> = (0..n).collect();
+        for i in (1..n).rev() {
+            let j = rng.below(i + 1);
+            ordered.swap(i, j);
+        }
+        if rng.below(4) == 0 && !ordered.is_empty() {
+            ordered.remove(rng.below(ordered.len()));
+        }
+        let cursor = rng.below(ordered.len() + 1);
+
+        let mut instance: Vec<bool> = (0..streams).map(|_| rng.below(4) != 0).collect();
+        let mesh: Vec<bool> = (0..chunks).map(|_| rng.below(4) != 0).collect();
+        let arc: Vec<bool> = (0..streams).map(|_| rng.below(4) != 0).collect();
+        instance[0] = false;
+        let mut cull = ChunkCull::from_visibility(instance, mesh, arc);
+        cull.hide_text = true;
+        assert!(cull.any_culled());
+
+        let budget = FrameBudget {
+            max_vertices: match rng.below(4) {
+                0 => usize::MAX,
+                1 => 0,
+                _ => rng.below(600),
+            },
+            max_triangles: match rng.below(4) {
+                0 => usize::MAX,
+                1 => 0,
+                _ => rng.below(400),
+            },
+            max_bytes: match rng.below(4) {
+                0 => usize::MAX,
+                1 => 0,
+                _ => rng.below(4000),
+            },
+        };
+        let initial = cad_scene::FrameUsage {
+            vertices: rng.below(30),
+            triangles: rng.below(30),
+            bytes: rng.below(120),
+        };
+        let facts = BatchFacts::build(&batches);
+        let index = OrderedPageIndex::build(&batches, &ordered);
+        let reference =
+            plan_ordered_page_reference(&batches, &ordered, cursor, &budget, initial, &cull);
+        let got = plan_ordered_page(
+            &batches, &ordered, cursor, &budget, initial, &cull, &facts, &index,
+        );
+        assert_same_plan(case, &got, &reference, &batches, &ordered, cursor);
     }
 }

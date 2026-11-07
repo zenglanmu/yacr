@@ -22,6 +22,9 @@ impl Renderer {
         // The ledger is shared (`Arc`), so it can be used while the streams are
         // borrowed mutably.
         let ledger = Arc::clone(&self.gpu_memory);
+        // Not valid until every stream below has its own real buffer: a failure
+        // half-way leaves a mixed set and must not admit a skip.
+        self.line_fallback_built = false;
         for stream in &mut self.instance_streams {
             let records = build_pulled_lines(&[stream.pulled_instances.as_slice()], 0);
             let bytes = pulled_line_bytes(&records);
@@ -32,6 +35,7 @@ impl Renderer {
             stream.buffer = buffer;
             stream.base = 0;
         }
+        self.line_fallback_built = true;
         Ok(())
     }
 
@@ -72,6 +76,7 @@ impl Renderer {
         self.mesh_chunks.clear();
         self.pulled_lines = None;
         self.pulled_mesh = None;
+        self.line_fallback_built = false;
         self.invalidate_pulled_prefix();
         self.pulled_state = if self.render_tier == RenderTier::Accelerated {
             PulledState::SkippedNoConvertedGeometry

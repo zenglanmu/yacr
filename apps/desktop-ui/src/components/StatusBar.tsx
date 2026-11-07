@@ -22,6 +22,7 @@ import { OPTIONS_KEYS } from '../options/options.ts';
 import { volatileStatusStore } from '../cad/status-cadence.ts';
 import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, gridSnapToggle, gridToggle, hoverPreviewToggle, objectSnapToggle, orthoToggle, snapKindLabelKey, toolStepPromptKey } from '../cad/cad.ts';
 import { importProgressView } from '../cad/cad-status.ts';
+import { statusBannerText } from '../host/notice.ts';
 import { toolParameterViews } from '../tools/tool-parameters.ts';
 
 // The drafting aids this build has: GRID (display grid, F7), SNAP (grid snap,
@@ -51,6 +52,10 @@ export function StatusBar() {
     volatileStatusStore.getCursor,
   );
   const progress = importProgressView(shell.importProgress as CadImportProgress | null, t);
+  // A known host token gets its short translated label; every other sentence is
+  // shown verbatim. The raw technical string stays the banner's `title`, so the
+  // byte counts remain available on hover without filling the bar.
+  const bannerText = shell.errorText ? statusBannerText(shell.errorText, t) : '';
   // The interactive tool the host reports as active (`status.tool`:
   // `{key, points, ready} | null`). A missing/null block means no tool, so
   // nothing extra is rendered — never a placeholder chip.
@@ -231,7 +236,7 @@ export function StatusBar() {
       {shell.errorText ? (
         <span className="statusbar__error" role="alert" title={shell.errorText}>
           <Icon name="alert" size={13} />
-          {shell.errorText}
+          {bannerText}
         </span>
       ) : null}
 

@@ -18,6 +18,7 @@ fn overlay_batch(draw_order: i64) -> GpuBatch {
         normals: None,
         colors: None,
         topology: RenderTopology::Lines,
+        text_glyph: false,
         indices: None,
         index_count: 0,
         line_quads: None,

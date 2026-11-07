@@ -215,6 +215,8 @@ impl HostCore {
             open_attempt: Rc::new(Cell::new(0)),
             async_report_attempt: Rc::new(Cell::new(None)),
             pending_edit: Rc::new(RefCell::new(None)),
+            render_batch: Rc::new(Cell::new(0)),
+            deferred_edit: Rc::new(RefCell::new(None)),
             #[cfg(test)]
             last_edit_receipt_for_test: Rc::new(Cell::new(false)),
             navigation: Rc::new(NavInner::default()),

@@ -76,6 +76,7 @@ impl Renderer {
             #[cfg(test)]
             pulled_oom_injection: None,
             pulled_state: PulledState::Unavailable,
+            line_fallback_built: false,
             line_ramp_override: None,
             cull_disabled: false,
             pulled_camera_layout: None,
@@ -115,7 +116,10 @@ impl Renderer {
             batch_overwrites: 0,
             draw_calls: 0,
             progressive: false,
+            navigation_lod: false,
             progressive_frame: None,
+            progressive_order_reuses: 0,
+            progressive_order_rebuilds: 0,
             preserve_color_on_restart: false,
             draw_plan: None,
             batch_facts: plan::BatchFacts::default(),
@@ -177,7 +181,6 @@ impl Renderer {
             pulled_camera_charge: None,
         }
     }
-
     /// Initialize from a host-provided shared device/queue.
     ///
     /// The host owns the `Device`/`Queue` (from its windowing/UI runtime or a
@@ -656,7 +659,8 @@ impl Renderer {
         self.overlay_depth_view = None;
         self.base_end = 0;
         self.target_size = (0, 0);
-        self.draw_plan = None;
+        // A fresh device generation has no resident base: drop derived state.
+        self.drop_derived_base_state();
         self.device = Some(device);
         self.queue = Some(queue);
         // A fresh device generation re-probes VRAM exactly once, so the budget is a

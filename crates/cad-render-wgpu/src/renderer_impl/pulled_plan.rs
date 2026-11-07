@@ -106,17 +106,23 @@ impl Renderer {
         self.pulled_prefix_checkpoint = None;
     }
 
-    /// Whether a run-free suffix commit may skip [`Renderer::rebuild_pulled`].
+    /// Whether the retained pulled state is coherent enough to skip
+    /// [`Renderer::rebuild_pulled`] on a run-free suffix commit.
     ///
     /// The pulled buffers/segments/chunk table/bind groups are a pure function of
     /// the resident streams/chunks. A run-free suffix appends no stream/chunk,
     /// drops only run-free batches and renumbers nothing (the base prefix is
     /// untouched), so the retained pulled organisation stays exactly valid.
     ///
-    /// Falls through (returns `false`) whenever the retained state is not provably
-    /// coherent — a post-fallback, post-device-rebuild or universal-tier state —
-    /// so the caller takes the existing Full/Reuse path. This is a perf-only
-    /// admission: a `false` costs a rebuild, never correctness.
+    /// This checks only the coherent pulled organisation; the full skip admission
+    /// ([`Renderer::try_skip_pulled_rebuild`]) also accepts the explicit universal
+    /// per-stream line fallback (`line_fallback_built`) that replaced an
+    /// unbuildable pulled line class. It falls through (returns `false`)
+    /// whenever the retained state is not provably coherent — a post-fallback,
+    /// post-device-rebuild or universal-tier state — and the caller then either
+    /// takes the existing Full/Reuse path or, for the post-fallback case, admits
+    /// the skip on that explicit fallback. This is a perf-only admission: a
+    /// `false` costs a rebuild, never correctness.
     pub(super) fn pulled_suffix_skip_admits(&self) -> bool {
         Self::pulled_state_coherent(
             self.render_tier == RenderTier::Accelerated,
@@ -140,16 +146,46 @@ impl Renderer {
         accelerated && pulled_lines == has_line_class && pulled_mesh == has_mesh_class
     }
 
+    /// Pure admission matrix for [`Renderer::try_skip_pulled_rebuild`]: a
+    /// run-free suffix may skip while the retained line organisation is provably
+    /// valid — either the coherent pulled state, or the explicit universal
+    /// per-stream fallback built when the pulled line class could not be.
+    ///
+    /// Never admits a suffix that stages converted runs, and never admits on a
+    /// tier that has no accelerated line organisation (a universal/teardown state
+    /// must still take the ordinary rebuild path, which reports it).
+    pub(super) fn pulled_suffix_skip_decision(
+        run_free_suffix: bool,
+        accelerated: bool,
+        coherent: bool,
+        line_fallback_built: bool,
+    ) -> bool {
+        run_free_suffix && accelerated && (coherent || line_fallback_built)
+    }
+
     /// Apply the pulled-skip decision for a commit: when admitted, count the skip
     /// and report `true` so the caller must not call [`Renderer::rebuild_pulled`].
     /// Never touches the retained pulled state or the checkpoint.
+    ///
+    /// A run-free suffix changes **no** resident stream/chunk/arc (the prefix is
+    /// unchanged and the prepared suffix carries no runs), so the retained pulled
+    /// organisation — or its explicit universal fallback — is still exactly valid.
+    /// Re-running a pulled rebuild that already failed the capacity gate or an
+    /// allocation would only rebuild the identical fallback (measured ~2.1 s on
+    /// the 170 757-entity fixture) and cannot change a pixel. `run_free_suffix ==
+    /// false` always rebuilds, and so does a state whose fallback is not
+    /// known-valid.
     pub(super) fn try_skip_pulled_rebuild(&mut self, run_free_suffix: bool) -> bool {
-        if run_free_suffix && self.pulled_suffix_skip_admits() {
+        let skip = Self::pulled_suffix_skip_decision(
+            run_free_suffix,
+            self.render_tier == RenderTier::Accelerated,
+            self.pulled_suffix_skip_admits(),
+            self.line_fallback_built,
+        );
+        if skip {
             self.pulled_suffix_skips += 1;
-            true
-        } else {
-            false
         }
+        skip
     }
 
     /// First-encounter renumbering of a resource-index sequence: `Some(count)`

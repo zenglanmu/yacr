@@ -74,6 +74,14 @@ pub(crate) struct ChunkCull {
     arc: Vec<bool>,
     /// Total chunks culled this frame (across all three classes).
     culled: usize,
+    /// Display-LOD policy: hide text-glyph batches this frame (camera motion).
+    ///
+    /// This is **not** a cull decision and never affects the pick path: the
+    /// identity mask [`ChunkCull::all_visible`] keeps it `false`, and picking
+    /// plans with that mask, so hidden text stays pickable. The planners read it
+    /// only to charge zero work for glyph batches; [`EncodeEmitMask`] drops their
+    /// draws.
+    pub(crate) hide_text: bool,
 }
 
 impl ChunkCull {
@@ -85,6 +93,7 @@ impl ChunkCull {
             mesh: Vec::new(),
             arc: Vec::new(),
             culled: 0,
+            hide_text: false,
         }
     }
 
@@ -124,6 +133,7 @@ impl ChunkCull {
             mesh,
             arc,
             culled,
+            hide_text: false,
         }
     }
 
@@ -218,6 +228,7 @@ pub(crate) fn build(
         mesh: mesh_visible,
         arc: arc_visible,
         culled,
+        hide_text: false,
     }
 }
 

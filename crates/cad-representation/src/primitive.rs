@@ -166,8 +166,15 @@ pub enum DisplayPrimitive {
     Conic(Arc<ConicSegment>),
     Mesh(Arc<Mesh>),
     /// Filled mesh that deliberately omits the per-triangle-edge overlay.
-    /// Used for triangulated font glyphs, where the overlay would expose
-    /// internal tessellation edges.
+    ///
+    /// **This variant is the text-glyph display class.** Only standard and vendor
+    /// text shaping emit it (a triangulated font glyph), and the overlay is omitted
+    /// because it would expose internal tessellation edges. In the render batch that
+    /// becomes `RenderTopology::Mesh` with a non-empty index list and empty
+    /// `edges`, which is exactly the predicate the renderer uses for its
+    /// navigation-time text LOD (`RenderBatch::is_text_glyph`). Do not use it for
+    /// general "mesh without a wireframe" work: that would silently classify the
+    /// geometry as text.
     MeshWithoutEdgeOverlay(Arc<Mesh>),
     Text {
         text: String,

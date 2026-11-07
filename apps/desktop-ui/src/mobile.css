@@ -760,9 +760,11 @@
 /* Both panel actions and the notice's one action are the sheet's only controls,
    so they get a finger-sized height instead of the 20-24px desktop one. */
 :root[data-layout="mobile"] .plugin-properties__footer .ui-button,
-:root[data-layout="mobile"] .plugin-notice__footer .ui-button { height: 44px; }
+:root[data-layout="mobile"] .plugin-notice__footer .ui-button,
+:root[data-layout="mobile"] .host-notice__footer .ui-button { height: 44px; }
 :root[data-layout="mobile"] .plugin-properties__footer .ui-button { font-size: 13px; }
-:root[data-layout="mobile"] .plugin-notice__message { font-size: 13px; }
+:root[data-layout="mobile"] .plugin-notice__message,
+:root[data-layout="mobile"] .host-notice__message { font-size: 13px; }
 /* The shortcut menu is measured and clamped by `placeContextMenu`, so it only
    needs to fit the viewport and to offer a finger-sized row. */
 :root[data-layout="mobile"] .context-menu {

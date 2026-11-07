@@ -87,10 +87,26 @@ fn progressive_pages_match_full_scene_without_raising_per_frame_budget() {
     );
     let mut camera = camera_2d();
     camera.center.x = 0.1;
+    let reuses_before = renderer.progressive_order_reuses();
+    let rebuilds_before = renderer.progressive_order_rebuilds();
     renderer.render(camera, &target).unwrap();
     assert!(
         renderer.frame_pending(),
         "navigation must restart accumulation, not retain stale pixels"
+    );
+    // This fixture includes a transparent batch, so its back-to-front order is
+    // camera-dependent: the restart must rebuild rather than reuse. (The
+    // opaque-only reuse path is covered by the dedicated navigation_lod /
+    // retained-overlay fixtures.)
+    assert_eq!(
+        renderer.progressive_order_reuses(),
+        reuses_before,
+        "a transparent batch makes the order camera-dependent"
+    );
+    assert_eq!(
+        renderer.progressive_order_rebuilds(),
+        rebuilds_before + 1,
+        "a transparent camera change must rebuild the retained order/page index"
     );
     renderer.clear_batches();
     assert!(!renderer.frame_pending());

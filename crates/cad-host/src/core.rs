@@ -337,6 +337,20 @@ pub struct HostCore {
     /// by the next post-commit sync. `None` when the last confirm created no
     /// incremental transition (or it was already published).
     pub(crate) pending_edit: Rc<RefCell<Option<cad_app::render_scene::DrawingEditReceipt>>>,
+    /// Render-publication batch depth (`0` = publishing normally).
+    ///
+    /// A caller that applies N inputs in one tick brackets them with
+    /// [`Self::begin_render_batch`] / [`Self::end_render_batch`], so every
+    /// business step still runs in order but the derived render publication
+    /// (overlay clones/fingerprints/content advances/worker submissions) runs
+    /// once for the whole batch.
+    pub(crate) render_batch: Rc<Cell<u32>>,
+    /// Edit receipt stashed while a render batch is open.
+    ///
+    /// A post-commit sync inside the batch cannot publish immediately, but the
+    /// incremental append hint must not be lost: it is retained here and handed
+    /// to the single flush at depth 0. `None` after every flush.
+    pub(crate) deferred_edit: Rc<RefCell<Option<cad_app::render_scene::DrawingEditReceipt>>>,
     /// Whether the last confirmation supplied an admitted edit receipt to the
     /// render sync. Contract-test observation only; never read by behaviour.
     #[cfg(test)]
@@ -430,6 +444,39 @@ impl Drop for ActiveGuard<'_> {
 }
 
 impl HostCore {
+    /// Open a render-publication batch.
+    ///
+    /// While a batch is open, [`Self::sync_render_with_edit`] still installs the
+    /// interaction tolerance (so every input reads the same pickbox/snap policy)
+    /// but defers the actual render publication. Every open must be closed with
+    /// [`Self::end_render_batch`]; the depth is counted, so nested brackets are
+    /// safe.
+    pub fn begin_render_batch(&self) {
+        self.render_batch
+            .set(self.render_batch.get().saturating_add(1));
+    }
+
+    /// Close a render-publication batch and flush at depth 0.
+    ///
+    /// Unconditional: the depth is always decremented and the outermost close
+    /// always publishes (with any stashed edit receipt). The real flush error is
+    /// returned rather than hidden, and the stashed receipt is consumed either
+    /// way so a later batch cannot replay it.
+    pub fn end_render_batch(&self) -> CadResult<()> {
+        let depth = self.render_batch.get().saturating_sub(1);
+        self.render_batch.set(depth);
+        if depth > 0 {
+            return Ok(());
+        }
+        let edit = self.deferred_edit.borrow_mut().take();
+        self.sync_render_with_edit(edit.as_ref())
+    }
+
+    /// The current render-publication batch depth (`0` outside a batch).
+    pub fn render_batch_depth(&self) -> u32 {
+        self.render_batch.get()
+    }
+
     /// Take the vendor records copied by the last successful import.
     ///
     /// The owner tick is the only caller: it stages them into the WebView pass.

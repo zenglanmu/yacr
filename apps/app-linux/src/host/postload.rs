@@ -139,6 +139,17 @@ pub(super) fn label_file_name(label: &str) -> &str {
     label.rsplit(['/', '\\']).next().unwrap_or(label)
 }
 
+/// The stable status token for the non-fatal GPU pulled-copy fallback warning
+/// (shared contract with the engine and the React notice).
+const GPU_PULLED_VRAM_WARNING: &str = "gpu.pulled.insufficient-vram";
+
+/// Whether a status error is the informational GPU fallback warning rather than
+/// a load/import failure. The warning is surfaced to the user separately; it
+/// must not keep the post-load gesture driver in `WaitingReady`.
+fn is_nonfatal_gpu_warning(error: &str) -> bool {
+    error.starts_with(GPU_PULLED_VRAM_WARNING)
+}
+
 /// Admission for starting the gesture: the **requested** drawing — not the
 /// `yacr-demo` placeholder — has been imported (a verified import transition with
 /// no pending load and no error, and its document label matches the requested
@@ -151,7 +162,7 @@ pub(super) fn postload_pan_import_ready(
     import_count: u64,
     requested_file_name: &str,
 ) -> bool {
-    if loading || error.is_some() || import_count == 0 {
+    if loading || error.is_some_and(|error| !is_nonfatal_gpu_warning(error)) || import_count == 0 {
         return false;
     }
     document_label.is_some_and(|label| label_file_name(label) == requested_file_name)

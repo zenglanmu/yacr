@@ -11,12 +11,14 @@
 //
 // The host translates the message and passes it in; this file never invents a
 // refusal. Escape and the single button both dismiss, focus starts (and stays)
-// on the button, and a composing IME keeps its own keys.
-import React, { useEffect, useId, useRef } from 'react';
+// on the button, and a composing IME keeps its own keys (the trap itself is the
+// shared `notice-focus.ts`).
+import React, { useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '../icons.tsx';
 import { Button } from './primitives.tsx';
 import { useI18n } from '../context.ts';
+import { useNoticeFocus } from './notice-focus.ts';
 import {
   DIALOG_BODY,
   DIALOG_FOOT,
@@ -31,63 +33,13 @@ export interface PluginNoticeProps {
   readonly onDismiss: () => void;
 }
 
-const FOCUSABLE = [
-  'button:not([disabled])',
-  '[href]',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(', ');
-
 export function PluginNotice({ message, onDismiss }: PluginNoticeProps) {
   const { t } = useI18n();
   const titleId = useId();
   const messageId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const dismissRef = useRef<HTMLButtonElement>(null);
-
-  // The notice owns the keyboard while it is open: focus starts on the only
-  // action, Tab cannot leave the card, and Escape dismisses exactly once. The
-  // shell's global handler is expected to stand down for the host's modal gate;
-  // `preventDefault` keeps the key from also reaching a focused field.
-  useEffect(() => {
-    dismissRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    const node = dialogRef.current;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.keyCode === 229) return;
-      if (event.key === 'Escape') {
-        if (event.defaultPrevented) return;
-        event.preventDefault();
-        onDismiss();
-        return;
-      }
-      if (event.key !== 'Tab' || !node) return;
-      const focusable = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE))
-        .filter(element => element.getClientRects().length > 0);
-      if (focusable.length === 0) {
-        event.preventDefault();
-        node.focus();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      const inside = active !== null && node.contains(active);
-      if (event.shiftKey && (!inside || active === first)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (!inside || active === last)) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onDismiss]);
+  useNoticeFocus({ dialog: dialogRef, dismiss: dismissRef }, onDismiss);
 
   const content = (
     <div className="popup-overlay plugin-notice-overlay">

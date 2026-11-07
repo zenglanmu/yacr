@@ -119,6 +119,13 @@ impl RenderSessionHandle {
             && state.view.canvas_size == view.canvas_size
             && state.view.camera != view.camera;
         state.view = view;
+        if camera_only && state.navigation_settle_enabled() {
+            // The progressive walk pauses after this change's first page; the
+            // settle pump resumes it once the camera stops. A camera change that
+            // does not move the world bounds still changes the frame key, so it
+            // is armed too.
+            state.arm_navigation_pause(Instant::now());
+        }
         state.view_revision = state
             .view_revision
             .checked_add(1)
@@ -247,8 +254,27 @@ impl RenderSessionHandle {
         state.overlays = overlays;
         state.overlay_revision += 1;
         if bounds_only {
-            // Reference grid only: content revision, never the scene identity.
-            state.advance_content();
+            // A camera-only snapshot in this same sync has already armed the
+            // deferred grid refresh. The host's overlay update carries the
+            // camera-derived `view_scale`, which `apply_view_snapshot` does not
+            // write (it scopes only the bounds); without this guard a wheel zoom
+            // would turn the deferred step into an immediate content advance and
+            // clear the settle it had just armed. Keep/refresh the deferral
+            // instead. A standalone bounds-only overlay change with no armed
+            // camera settle keeps the immediate path.
+            if state.camera_settle_enabled()
+                && (state.grid_refresh_pending || state.navigation_pause_pending)
+            {
+                let now = Instant::now();
+                state.arm_camera_settle(now);
+                // Keep the navigation pause armed for the same camera change.
+                if state.navigation_pause_pending {
+                    state.arm_navigation_pause(now);
+                }
+            } else {
+                // Reference grid only: content revision, never the scene identity.
+                state.advance_content();
+            }
         } else if visual_changed {
             // Real overlay batches changed (sub-element highlight, previews,
             // snap hints, visibility): today's full immediate path. The pointer
@@ -321,7 +347,9 @@ impl RenderSessionHandle {
         #[cfg(not(target_arch = "wasm32"))]
         {
             state.observe_drawing();
-            state.settle_camera_if_due(Instant::now());
+            let now = Instant::now();
+            state.settle_camera_if_due(now);
+            state.settle_navigation_if_due(now);
             let input = preparation_input(&state);
             match state.preparation.update(input) {
                 Ok(Some((token, controller))) => {
@@ -348,7 +376,9 @@ impl RenderSessionHandle {
                 return Ok(false);
             }
             state.observe_drawing();
-            state.settle_camera_if_due(Instant::now());
+            let now = Instant::now();
+            state.settle_camera_if_due(now);
+            state.settle_navigation_if_due(now);
             let input = preparation_input(&state);
             match state.preparation.update(input) {
                 Ok(Some((token, controller))) => {
@@ -394,6 +424,10 @@ impl RenderSessionHandle {
                     .as_ref()
                     .and_then(|s| s.highlight_diagnostics.first().map(|d| d.message.clone()))
             })
+            // Lowest priority: the sticky pulled-copy warning, so `cad_status.error`
+            // can carry the `gpu.pulled.insufficient-vram` token (the React notice)
+            // when no real failure exists. It never masks a real diagnostic.
+            .or_else(|| state.runtime.gpu_warning())
     }
     pub fn scene_error(&self) -> Option<String> {
         let state = self.0.borrow();
@@ -487,6 +521,21 @@ impl RenderSessionHandle {
     /// the next pump.
     pub fn set_grid_settle_timeout(&self, timeout: Duration) {
         self.0.borrow_mut().settle_timeout = timeout;
+    }
+    /// Whether the progressive walk is paused for an active camera gesture.
+    /// Honest: it is `true` only between a camera change and the navigation
+    /// settle; a non-camera input or the settle clears it.
+    pub fn navigation_pause_pending(&self) -> bool {
+        self.0.borrow().navigation_pause_pending
+    }
+    /// The navigation-pause timeout currently in force.
+    pub fn navigation_settle_timeout(&self) -> Duration {
+        self.0.borrow().navigation_settle_timeout
+    }
+    /// Test hook: set the navigation-pause timeout. `Duration::ZERO` disables the
+    /// pause (immediate continuation) and is the kill-switch.
+    pub fn set_navigation_settle_timeout(&self, timeout: Duration) {
+        self.0.borrow_mut().navigation_settle_timeout = timeout;
     }
     /// Cumulative overlay-suffix commits (uploads or truncations) the runtime has
     /// performed. A camera-only navigation step must not advance this: it is the
@@ -788,6 +837,10 @@ impl RenderSessionHandle {
         state.observe_drawing();
         let view = state.view.clone();
         let view_revision = state.view_revision;
+        // An active camera gesture pauses the progressive walk after one page;
+        // a cursor-only frame then composites over the retained base instead of
+        // advancing it. The settle pump clears the flag and invalidates the frame.
+        let pause_after_page = state.navigation_pause_pending;
         if Self::preparation_current_state(&state) {
             // The CPU scene is current. Only render it as `CurrentScene` once the
             // GPU has actually committed that scene revision and its base; a
@@ -807,6 +860,7 @@ impl RenderSessionHandle {
                     scale,
                     view_revision,
                     FrameCompleteness::CurrentScene,
+                    pause_after_page,
                 );
             }
         }
@@ -826,6 +880,7 @@ impl RenderSessionHandle {
                 scale,
                 view_revision,
                 FrameCompleteness::PendingOverlayInputs,
+                pause_after_page,
             );
         }
         Ok(None)
@@ -835,7 +890,7 @@ impl RenderSessionHandle {
         self.0.borrow().runtime.lifecycle.clone()
     }
     pub fn diagnostic(&self) -> Option<String> {
-        self.0.borrow().runtime.diagnostic.clone()
+        self.0.borrow().runtime.diagnostic()
     }
     /// Take the observation of the most recent **actual** renderer invocation.
     ///

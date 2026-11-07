@@ -183,6 +183,11 @@ impl BaseInputIdentity {
 /// Default camera-settle timeout for the deferred reference-grid refresh
 /// (camera-only pan/zoom/rotate). See [`State::grid_refresh_pending`].
 const CAMERA_SETTLE_TIMEOUT: Duration = Duration::from_millis(250);
+/// Default navigation-pause timeout: while camera changes keep arriving, the
+/// progressive walk draws at most the first page per change and pauses; after
+/// this much quiet it resumes to completion. Kept separate from the 250 ms grid
+/// settle so the final image starts filling before the grid refresh commits.
+const NAVIGATION_SETTLE_TIMEOUT: Duration = Duration::from_millis(120);
 
 struct State {
     incoming: IncomingDocument,
@@ -268,6 +273,13 @@ struct State {
     /// Camera-settle timeout. `Duration::ZERO` disables the deferral entirely
     /// (today's immediate behaviour); it is also the test kill-switch.
     settle_timeout: Duration,
+    /// A camera-only navigation gesture is active: the progressive walk is
+    /// paused after the first page of each camera change and resumes once the
+    /// view has been quiet for `navigation_settle_timeout`.
+    navigation_pause_pending: bool,
+    /// Navigation-pause timeout. `Duration::ZERO` disables the pause (immediate
+    /// continuation) and is the test kill-switch.
+    navigation_settle_timeout: Duration,
     #[cfg(not(target_arch = "wasm32"))]
     preparation: NativePreparation,
 }
@@ -305,6 +317,8 @@ impl Default for State {
             grid_refresh_pending: false,
             last_camera_change: None,
             settle_timeout: CAMERA_SETTLE_TIMEOUT,
+            navigation_pause_pending: false,
+            navigation_settle_timeout: NAVIGATION_SETTLE_TIMEOUT,
             #[cfg(not(target_arch = "wasm32"))]
             preparation: NativePreparation::default(),
         }
@@ -333,6 +347,8 @@ impl State {
             .checked_add(1)
             .expect("render content revision exhausted");
         self.clear_camera_settle();
+        // A content advance is a real input/publication, not an idle pause.
+        self.clear_navigation_pause();
     }
 
     /// Publish a flags-only change: re-resolve the staged flags from the current
@@ -401,7 +417,56 @@ impl State {
             None => true,
         };
         if due {
+            // The camera has stopped: use the full page budget for the remaining
+            // progressive pages so the final image completes quickly. The
+            // measured cost model (EMA/seeded) is retained; only the scale is
+            // raised, and the controller shrinks it again if a boosted page is
+            // genuinely over target.
+            self.runtime.boost_page_budget();
             self.advance_content();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Arm/refresh the navigation pause (camera-only pan/zoom/rotate).
+    fn arm_navigation_pause(&mut self, now: Instant) {
+        self.navigation_pause_pending = true;
+        self.last_camera_change = Some(now);
+        // Hide text glyphs while the camera is moving; a no-op once already on.
+        self.runtime.set_navigation_lod(true);
+    }
+
+    /// Clear the pause because a non-camera input or a settle already covers it.
+    /// This also restores full text (the LOD change invalidates the frame).
+    fn clear_navigation_pause(&mut self) {
+        self.navigation_pause_pending = false;
+        self.runtime.set_navigation_lod(false);
+    }
+
+    fn navigation_settle_enabled(&self) -> bool {
+        cfg!(not(target_arch = "wasm32")) && !self.navigation_settle_timeout.is_zero()
+    }
+
+    /// Resume the paused progressive walk once the view has been quiet for the
+    /// navigation timeout. Returns whether the pause was cleared.
+    fn settle_navigation_if_due(&mut self, now: Instant) -> bool {
+        if !self.navigation_pause_pending {
+            return false;
+        }
+        let due = match self.last_camera_change {
+            Some(last) => now.saturating_duration_since(last) >= self.navigation_settle_timeout,
+            None => true,
+        };
+        if due {
+            self.clear_navigation_pause();
+            // Only a paused walk has more pages to draw; never invalidate a
+            // completed scene just because a gesture ended. (`clear_navigation_pause`
+            // already invalidated when it turned the text LOD off.)
+            if self.runtime.drawing_pages() {
+                self.runtime.dirty.invalidate();
+            }
             true
         } else {
             false

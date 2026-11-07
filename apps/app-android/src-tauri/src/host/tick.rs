@@ -248,8 +248,8 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
     // render viewport are the surface's logical size — the only choice that keeps
     // pixels and camera consistent. Input does **not** follow for free: the chrome
     // reports positions relative to its `.native-input` rect, so the input drain
-    // below adds that rect's origin before `session.handle_input` (see
-    // `crate::input`). The React layout rect is still reported (`probe_input`) and
+    // below adds that rect's origin before the batched `session.handle_inputs`
+    // (see `crate::input`). The React layout rect is still reported (`probe_input`) and
     // compared here: a size disagreement is logged, never silently rescaled.
     let metrics = cad_platform::SurfaceMetrics {
         logical: [f64::from(width) / scale, f64::from(height) / scale],
@@ -463,27 +463,35 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                             log::warn!("[probe] cad tool parameter rejected: {error}");
                         }
                     }
-                    for input in &inputs {
-                        // Partition-local -> canvas space: the native surface is the
-                        // full window, while the chrome reports positions relative to
-                        // its `.native-input` rect. Pointer and wheel positions get
-                        // that rect's origin added; `resize` (which carries the rect
-                        // itself) and the coordinate-free kinds pass through
-                        // untouched. No rescale, no `safe_insets`.
-                        let (x, y) = crate::input::canvas_position(
-                            input.kind.as_str(),
-                            partition_origin,
-                            input.x,
-                            input.y,
-                        );
-                        let translated = ProbeInput {
-                            x,
-                            y,
-                            ..input.clone()
-                        };
-                        if let Err(error) = session.handle_input(&translated) {
-                            log::warn!("[probe] cad input rejected: {error}");
-                        }
+                    // Partition-local -> canvas space: the native surface is the
+                    // full window, while the chrome reports positions relative to
+                    // its `.native-input` rect. Pointer and wheel positions get
+                    // that rect's origin added; `resize` (which carries the rect
+                    // itself) and the coordinate-free kinds pass through
+                    // untouched. No rescale, no `safe_insets`.
+                    //
+                    // The translation happens before the session sees the batch.
+                    // One render publication serves the whole tick: every input
+                    // is still admitted/executed in order, but the derived render
+                    // state syncs once instead of once per event.
+                    let translated: Vec<ProbeInput> = inputs
+                        .iter()
+                        .map(|input| {
+                            let (x, y) = crate::input::canvas_position(
+                                input.kind.as_str(),
+                                partition_origin,
+                                input.x,
+                                input.y,
+                            );
+                            ProbeInput {
+                                x,
+                                y,
+                                ..input.clone()
+                            }
+                        })
+                        .collect();
+                    if let Err(error) = session.handle_inputs(&translated) {
+                        log::warn!("[probe] cad input rejected: {error}");
                     }
                     // Terminal tool texts apply after this batch's inputs (the last
                     // point of a text tool may arrive in the same tick).

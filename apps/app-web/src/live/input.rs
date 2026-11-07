@@ -238,12 +238,13 @@ impl Live {
     }
 
     /// Feed several inputs, keeping the first failure.
+    ///
+    /// The batch is applied in order and published once: every input is still
+    /// admitted (no phase dropped, no wheel delta summed), but the derived render
+    /// state syncs once for the whole group.
     pub(super) fn feed(&mut self, inputs: Vec<ProbeInput>) -> Result<(), Failure> {
-        for input in inputs {
-            self.session
-                .handle_input(&input)
-                .map_err(|message| Failure::new(STEP_INPUT, message))?;
-        }
-        Ok(())
+        self.session
+            .handle_inputs(&inputs)
+            .map_err(|message| Failure::new(STEP_INPUT, message))
     }
 }

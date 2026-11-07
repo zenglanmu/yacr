@@ -53,6 +53,10 @@ pub(crate) struct BatchFacts {
     /// run-free participants in the encode loop; kept as a list so a frame can
     /// enumerate them without scanning every resident batch.
     pub(crate) legacy_batches: Vec<u32>,
+    /// Compact bitset of the text-glyph display class ([`GpuBatch::text_glyph`]),
+    /// indexed by batch index. Filled once when the batch set changes; read by
+    /// the encode mask (to drop hidden text draws) and by tests.
+    pub(crate) text_glyph: Vec<u64>,
 }
 
 /// Batch owns instanced line runs.
@@ -99,14 +103,19 @@ impl BatchFacts {
             upload_bytes: Vec::new(),
             class: Vec::new(),
             legacy_batches: Vec::new(),
+            text_glyph: Vec::new(),
         };
         facts.upload_bytes = batches
             .iter()
             .map(|batch| batch.upload_size_bytes())
             .collect();
         facts.class = Vec::with_capacity(batches.len());
+        facts.text_glyph = vec![0u64; batches.len().div_ceil(64)];
         for (i, batch) in batches.iter().enumerate() {
             let batch_index = i as u32;
+            if batch.text_glyph {
+                set_bit(&mut facts.text_glyph, batch_index);
+            }
             let mut class = 0u8;
             if !batch.instanced.is_empty() {
                 class |= CLASS_INSTANCED;
@@ -146,6 +155,19 @@ impl BatchFacts {
             }
         }
         facts
+    }
+
+    /// Whether batch `index` belongs to the text-glyph display class. An index
+    /// past the batch-set table (an overlay batch) is not text.
+    ///
+    /// Production clears the bitset word-wise in [`EncodeEmitMask::rebuild`];
+    /// this per-batch accessor is the contract used by tests.
+    #[allow(dead_code)]
+    pub(crate) fn is_text_glyph(&self, index: usize) -> bool {
+        match self.text_glyph.get(index / 64) {
+            Some(word) => (word >> (index % 64)) & 1 == 1,
+            None => false,
+        }
     }
 }
 
@@ -194,7 +216,7 @@ impl EncodeEmitMask {
         // The mask describes exactly the base-only facts; any larger index is an
         // overlay batch and is admitted by `participates`.
         self.len = facts.class.len();
-        if !cull.any_culled() {
+        if !cull.any_culled() && !cull.hide_text {
             // Nothing was removed, so every run survives and every batch
             // participates: skip building the mask entirely.
             self.all = true;
@@ -233,6 +255,15 @@ impl EncodeEmitMask {
                 for &b in &facts.chunk_batches[2][c] {
                     set_bit(&mut self.bits, b);
                 }
+            }
+        }
+        if cull.hide_text {
+            // Navigation LOD: the glyph batches were admitted by the class/legacy
+            // rules above, but this frame must not emit their draws. Clearing the
+            // bits also drops them from `accepted_with_work`. The bitset and the
+            // glyph table have the same word count (both `len.div_ceil(64)`).
+            for (word, glyphs) in self.bits.iter_mut().zip(&facts.text_glyph) {
+                *word &= !glyphs;
             }
         }
     }

@@ -99,6 +99,10 @@ pub struct RenderDiagnostics {
     pub grid_refresh_pending: bool,
     /// Human-readable companion for [`Self::grid_refresh_pending`].
     pub grid_refresh: &'static str,
+    /// Whether an active camera gesture has paused the progressive walk after
+    /// its first page. It clears on the navigation settle or any non-camera
+    /// input; it is never a claim that the scene is complete.
+    pub navigation_pause_pending: bool,
     /// Runtime upload/render bookkeeping.
     pub runtime: RuntimeDiagnostics,
 }
@@ -148,9 +152,10 @@ impl RenderSessionHandle {
                 .controller
                 .diagnostic
                 .clone()
-                .or_else(|| state.runtime.diagnostic.clone()),
+                .or_else(|| state.runtime.diagnostic()),
             grid_refresh_pending: state.grid_refresh_pending,
             grid_refresh: grid_refresh_label(state.grid_refresh_pending),
+            navigation_pause_pending: state.navigation_pause_pending,
             runtime,
         }
     }

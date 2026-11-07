@@ -45,6 +45,7 @@ fn gpu_batch(
         normals: None,
         colors: None,
         topology,
+        text_glyph: false,
         indices: None,
         index_count: 0,
         line_quads: None,

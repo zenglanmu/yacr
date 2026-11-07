@@ -1,38 +1,10 @@
+use super::staging::stage_piece;
 use super::*;
 
 // `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not
 // implemented on this platform"); `web-time` re-exports std elsewhere, so this
 // is a no-op off wasm.
 use web_time::Instant;
-
-/// Stage one bounded batch slice and append it to the piece being built.
-///
-/// Group 0 (the persistent base) converts to the stream/chunk/arc classes; group
-/// 1 (the transient overlay) is staged **legacy**. The base range is
-/// materialised from [`cad_app::render_scene::ResidentScene::materialized`],
-/// which clones the contents of exactly this bounded piece (at most 256 batches /
-/// 262,144 vertices). That copy is O(piece), never O(scene): appending a piece is
-/// one entity and this path never runs per frame, while a full re-stage (device
-/// loss, declined append, refused overwrite) is already the slow path.
-fn stage_piece(
-    group: usize,
-    renderer: &mut Renderer,
-    batches: &[cad_scene::RenderBatch],
-    prepared: &mut Option<cad_render_wgpu::PreparedUpload>,
-) -> CadResult<()> {
-    let piece = if group == 0 {
-        renderer.prepare_upload_batches(batches)?
-    } else {
-        renderer.prepare_upload_batches_legacy(batches)?
-    };
-    match prepared {
-        Some(existing) => existing.append(piece),
-        None => {
-            *prepared = Some(piece);
-            Ok(())
-        }
-    }
-}
 
 impl CadRenderRuntime {
     /// Attach a host device and initialize the renderer.
@@ -94,6 +66,10 @@ impl CadRenderRuntime {
         self.base_batches = 0;
         self.lifecycle = RenderLifecycle::Detached;
         self.diagnostic = None;
+        // A device change starts a fresh pulled organisation: a warning latched
+        // against the old device must not outlive it.
+        self.gpu_warning = None;
+        self.last_pulled_state = None;
         self.overlay_suffix_commits = 0;
         self.applied_highlight = None;
         self.image_diagnostic = None;
@@ -591,6 +567,14 @@ impl CadRenderRuntime {
         self.renderer.as_ref().and_then(Renderer::frame_progress)
     }
 
+    /// Raise the page budget to the ceiling for the settling walk; the cost model
+    /// is retained. No-op without a renderer.
+    pub fn boost_page_budget(&mut self) {
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.boost_pacing_scale();
+        }
+    }
+
     /// Cumulative overlay-suffix commits (suffix-only uploads). Camera-only
     /// navigation must leave this flat.
     pub fn overlay_suffix_commits(&self) -> u64 {
@@ -654,6 +638,20 @@ impl CadRenderRuntime {
         self.epoch
     }
 
+    /// Update the sticky GPU warning for one pulled-state observation.
+    ///
+    /// Only a **transition** changes the latch (see [`gpu_warning_transition`]);
+    /// the message is never rewritten on every frame, so a lasting fallback keeps
+    /// one stable string for the host's own de-duplication.
+    fn note_pulled_state(&mut self, state: &cad_render_wgpu::PulledState) {
+        match gpu_warning_transition(self.last_pulled_state.as_ref(), state) {
+            GpuWarningDecision::Unchanged => {}
+            GpuWarningDecision::Warn(message) => self.gpu_warning = Some(message),
+            GpuWarningDecision::Clear => self.gpu_warning = None,
+        }
+        self.last_pulled_state = Some(state.clone());
+    }
+
     /// Record the observation of one actual renderer invocation.
     fn record_render_observation(
         &mut self,
@@ -662,6 +660,9 @@ impl CadRenderRuntime {
         progressive: Option<(usize, usize)>,
         progressive_complete: bool,
     ) {
+        // Latch/clear the one-time GPU warning on a pulled-state transition before
+        // moving the state into the observation.
+        self.note_pulled_state(&stats.pulled_state);
         self.render_seq += 1;
         let (cursor, total) = match progressive {
             Some((cursor, total)) => (Some(cursor), Some(total)),
@@ -788,16 +789,26 @@ impl CadRenderRuntime {
                 .renderer
                 .as_ref()
                 .map_or(0, |renderer| renderer.gc_skipped_commits()),
+            progressive_order_reuses: self
+                .renderer
+                .as_ref()
+                .map_or(0, |renderer| renderer.progressive_order_reuses()),
+            progressive_order_rebuilds: self
+                .renderer
+                .as_ref()
+                .map_or(0, |renderer| renderer.progressive_order_rebuilds()),
             draw_plan_rebuilds: self
                 .renderer
                 .as_ref()
                 .map_or(0, |renderer| renderer.draw_plan_rebuilds()),
+            navigation_lod: self.renderer.as_ref().is_some_and(Renderer::navigation_lod),
             frames_rendered: self.frames_rendered,
             uploads_started: self.uploads_started,
             upload_revision_resets: self.upload_revision_resets,
             ready_none_clears: self.ready_none_clears,
             last_upload_reset: self.last_upload_reset,
             diagnostic: self.diagnostic.clone(),
+            gpu_warning: self.gpu_warning.clone(),
         }
     }
 
@@ -870,8 +881,16 @@ impl CadRenderRuntime {
         scale: f64,
         view_revision: u64,
         completeness: FrameCompleteness,
+        pause_after_page: bool,
     ) -> Result<Option<PresentedFrame>, RenderError> {
-        self.render_frame(view, logical, scale, view_revision, completeness)
+        self.render_frame(
+            view,
+            logical,
+            scale,
+            view_revision,
+            completeness,
+            pause_after_page,
+        )
     }
 
     fn render_frame(
@@ -881,6 +900,7 @@ impl CadRenderRuntime {
         scale: f64,
         view_revision: u64,
         completeness: FrameCompleteness,
+        pause_after_page: bool,
     ) -> Result<Option<PresentedFrame>, RenderError> {
         if !matches!(self.lifecycle, RenderLifecycle::Ready { .. }) {
             return Ok(None);
@@ -913,23 +933,27 @@ impl CadRenderRuntime {
                         .map_err(|e| RenderError::Frame(e.to_string()))?;
                     let mut camera = camera2d_from_params(params);
                     camera.world_per_px /= scale;
-                    // A changed camera makes `render` rebuild the progressive
-                    // frame (transforms/camera differ), so no earlier page
-                    // continues under the new camera.
-                    renderer.render(camera, &target)?
+                    // A changed camera restarts the walk; a paused frame uses
+                    // the retained-base variant (cursor-only overlay).
+                    renderer.render_navigation(camera, &target, pause_after_page)?
                 }
                 ProjectionKind::ThreeD => {
                     let params = view
                         .camera
                         .camera3d_params()
                         .map_err(|e| RenderError::Frame(e.to_string()))?;
-                    renderer.render_3d(camera3d_from_params(params), &target)?
+                    renderer.render_3d_navigation(
+                        camera3d_from_params(params),
+                        &target,
+                        pause_after_page,
+                    )?
                 }
             };
             self.target_size = Some(size);
             let progressive_complete = !renderer.frame_pending();
             let progressive = renderer.frame_progress();
-            if progressive_complete {
+            // One page per gesture change; `presented_revision` stays honest.
+            if progressive_complete || pause_after_page {
                 self.dirty.complete();
             }
             self.frames_rendered += 1;

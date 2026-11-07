@@ -117,6 +117,50 @@ fn zero_settle_timeout_is_the_kill_switch_for_the_immediate_path() {
     );
 }
 
+/// A wheel zoom changes the camera-derived `view_scale` as well as the bounds.
+/// The host sends both through `set_overlays` in the same `sync_render`; that
+/// derived field must not preempt the settle the camera snapshot just armed.
+#[test]
+fn zoom_view_scale_overlay_update_keeps_the_deferred_camera_refresh_pending() {
+    let session = session_with_published_base();
+    session.set_grid_settle_timeout(NO_SETTLE);
+    let before = session.diagnostics();
+
+    zoom_step(&session, 1.3);
+    assert!(session.grid_refresh_pending(), "the zoom arms the settle");
+
+    let mut overlays = session.overlays();
+    overlays.view_scale = Some(overlays.view_scale.unwrap_or(1.0) * 1.3);
+    assert!(session.set_overlays(overlays), "the overlay update applies");
+    assert!(
+        session.grid_refresh_pending(),
+        "a zoom's view_scale update must keep the deferred refresh pending"
+    );
+    assert_eq!(
+        session.diagnostics().requested_token,
+        before.requested_token,
+        "the deferred zoom must not schedule a worker preparation"
+    );
+}
+
+/// Without an armed camera settle, a standalone bounds-only overlay change still
+/// takes today's immediate content path (the deferral must not swallow it).
+#[test]
+fn standalone_bounds_only_overlay_change_keeps_the_immediate_path() {
+    let session = session_with_published_base();
+    let before = session.diagnostics();
+    assert!(!session.grid_refresh_pending());
+
+    let mut overlays = session.overlays();
+    overlays.view_scale = Some(overlays.view_scale.unwrap_or(1.0) * 1.3);
+    assert!(session.set_overlays(overlays), "the overlay update applies");
+    assert_eq!(
+        session.diagnostics().requested_token,
+        before.requested_token + 1,
+        "no armed camera settle => the immediate content advance"
+    );
+}
+
 #[test]
 fn resize_takes_the_immediate_path_and_clears_the_pending_refresh() {
     let session = session_with_published_base();
@@ -147,6 +191,78 @@ fn resize_takes_the_immediate_path_and_clears_the_pending_refresh() {
         session.diagnostics().ready_base_revision,
         armed.ready_base_revision,
         "the published base is untouched by a resize"
+    );
+}
+
+/// The navigation pause is armed by a camera-only step, survives the host's
+/// same-sync `view_scale` overlay update, and schedules no preparation itself.
+#[test]
+fn navigation_pause_survives_the_zoom_view_scale_update() {
+    let session = session_with_published_base();
+    session.set_navigation_settle_timeout(NO_SETTLE);
+    let before = session.diagnostics();
+    assert!(!session.navigation_pause_pending());
+
+    zoom_step(&session, 1.3);
+    assert!(session.navigation_pause_pending(), "a zoom arms the pause");
+
+    let mut overlays = session.overlays();
+    overlays.view_scale = Some(overlays.view_scale.unwrap_or(1.0) * 1.3);
+    assert!(session.set_overlays(overlays));
+    assert!(
+        session.navigation_pause_pending(),
+        "the derived view_scale update must not clear the pause"
+    );
+    assert_eq!(
+        session.diagnostics().requested_token,
+        before.requested_token,
+        "the pause itself schedules no preparation"
+    );
+}
+
+/// A quiet camera resumes the paused walk after the navigation timeout; zero is
+/// the kill-switch.
+#[test]
+fn navigation_pause_settles_after_the_timeout_and_zero_disables_it() {
+    let session = session_with_published_base();
+    let timeout = Duration::from_millis(20);
+    session.set_navigation_settle_timeout(timeout);
+    assert_eq!(session.navigation_settle_timeout(), timeout);
+    pan_step(&session, 25.0);
+    assert!(session.navigation_pause_pending());
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while session.navigation_pause_pending() {
+        assert!(
+            Instant::now() < deadline,
+            "a quiet camera must resume the paused progressive walk"
+        );
+        session.poll_preparation().unwrap();
+        std::thread::yield_now();
+    }
+    assert!(!session.navigation_pause_pending());
+
+    session.set_navigation_settle_timeout(Duration::ZERO);
+    pan_step(&session, 25.0);
+    assert!(
+        !session.navigation_pause_pending(),
+        "the zero timeout is the immediate-continuation kill-switch"
+    );
+}
+
+#[test]
+fn non_camera_inputs_clear_the_navigation_pause_immediately() {
+    let session = session_with_published_base();
+    session.set_navigation_settle_timeout(NO_SETTLE);
+    pan_step(&session, 10.0);
+    assert!(session.navigation_pause_pending());
+
+    let mut resized = session.view_snapshot();
+    resized.canvas_size = [resized.canvas_size[0] * 0.5, resized.canvas_size[1] * 0.5];
+    session.apply_view_snapshot(resized).unwrap();
+    assert!(
+        !session.navigation_pause_pending(),
+        "a resize must clear the paused walk, never freeze it"
     );
 }
 

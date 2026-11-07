@@ -13,8 +13,9 @@
 //!    for small scenes.
 //! 2. An **over-budget** requirement is rejected by the pre-flight gate: the
 //!    reported `required_bytes` equals the exact payload the resident classes
-//!    need (recomputed from the real types), the budget is the injected value,
-//!    the pulled classes are absent, and the frame draws through the universal
+//!    need (recomputed from the real types), `budget_bytes` is the **available**
+//!    budget the requirement had to fit (the injected pulled budget here), the
+//!    pulled classes are absent, and the frame draws through the universal
 //!    per-run path with **byte-identical pixels**. An exact fit is accepted.
 //! 3. A **captured out-of-memory error** discards the pulled state instead of
 //!    panicking, falls back to the universal path, and is reported as
@@ -240,6 +241,29 @@ fn resident_required_bytes(renderer: &Renderer) -> u64 {
     pulled_payload_bytes(&line_instances, &mesh_vertices, &mesh_indices)
 }
 
+/// Bytes the resident pulled classes currently hold (geometry + chunk tables),
+/// recomputed from the real buffers so the netting in the gate is checked
+/// independently of the production helper.
+fn resident_pulled_bytes(renderer: &Renderer) -> u64 {
+    let lines = renderer.pulled_lines.as_ref().map_or(0, |pulled| {
+        pulled
+            .segments
+            .iter()
+            .map(|segment| segment.geometry_buffer.size())
+            .sum::<u64>()
+            + pulled.chunk_table.size()
+    });
+    let mesh = renderer.pulled_mesh.as_ref().map_or(0, |pulled| {
+        pulled
+            .segments
+            .iter()
+            .map(|segment| segment.vertex_buffer.size() + segment.index_buffer.size())
+            .sum::<u64>()
+            + pulled.chunk_table.size()
+    });
+    lines + mesh
+}
+
 #[test]
 fn under_budget_scene_still_uses_the_pulled_path() {
     let what = "under-budget";
@@ -301,14 +325,26 @@ fn over_budget_requirement_is_rejected_and_reported_exactly() {
     let budget = required - 1;
     renderer.set_pulled_memory_budget_override(Some(budget));
     commit(&mut renderer, &scene());
-    assert_eq!(
-        renderer.pulled_state(),
+    match renderer.pulled_state() {
         PulledState::SkippedInsufficientVram {
-            required_bytes: required,
-            budget_bytes: budget,
-        },
-        "{what}: the reported requirement must be the exact payload"
-    );
+            required_bytes,
+            budget_bytes,
+        } => {
+            assert_eq!(
+                required_bytes, required,
+                "{what}: the reported requirement must be the exact payload"
+            );
+            assert_eq!(
+                budget_bytes, budget,
+                "{what}: the budget is what the pulled copy could claim"
+            );
+            assert!(
+                required_bytes > budget_bytes,
+                "{what}: the skip reason is required > available"
+            );
+        }
+        other => panic!("{what}: expected a pre-flight VRAM skip, got {other:?}"),
+    }
     assert!(
         renderer.pulled_lines.is_none() && renderer.pulled_mesh.is_none(),
         "{what}: a skipped rebuild must leave no pulled class resident"
@@ -352,6 +388,92 @@ fn over_budget_requirement_is_rejected_and_reported_exactly() {
     assert_eq!(
         refit_px, universal_px,
         "{what}: the pulled frame must be byte-identical to the universal tier"
+    );
+}
+
+#[test]
+fn application_cap_nets_out_the_replaced_pulled_copy() {
+    let what = "cap-nets-replaced";
+    let Some(gpu) = gpu_or_skip(what) else {
+        return;
+    };
+    if !accelerated_supported(&gpu, what) {
+        return;
+    }
+    let mut renderer = init_accelerated(&gpu, what);
+    commit(&mut renderer, &scene());
+    assert_eq!(renderer.pulled_state(), PulledState::Active);
+
+    // The cap is applied **after** staging (staging admissions ran against the
+    // uncapped policy) so only the pulled gate sees it at commit.
+    //
+    // `used_before` is the resident total before the transient stage copy; the
+    // commit drops the replaced counterpart of those staged charges before the
+    // gate, so `used_before + slack` bounds the gate-time total (`slack` is what
+    // staging added, an upper bound on what survives into the gate). `margin`
+    // absorbs that bounded difference while staying well below `replaced`, so the
+    // two cases are unambiguous:
+    //   * netted (correct): available = required + margin - slack >= required;
+    //   * not netted (replaced measured as 0): available < required - replaced/2.
+    let prepare = |renderer: &mut Renderer| {
+        renderer
+            .prepare_upload_batches(&scene())
+            .expect("stage under the uncapped policy")
+    };
+    let measure = |renderer: &Renderer| {
+        (
+            renderer.gpu_memory_report().total_bytes,
+            resident_required_bytes(renderer),
+            resident_pulled_bytes(renderer),
+        )
+    };
+    let (used_before, required, replaced) = measure(&renderer);
+    assert!(
+        replaced > 64,
+        "{what}: the fixture must have a non-trivial resident pulled copy ({replaced})"
+    );
+    let staged = prepare(&mut renderer);
+    let staged_upper = renderer.gpu_memory_report().total_bytes - used_before;
+    let margin = staged_upper.min(replaced / 4).max(1);
+    let netted_limit = used_before - replaced + required + margin;
+    renderer.set_gpu_budget(crate::GpuBudget::uncapped().with_cap(Some(netted_limit)));
+    renderer
+        .commit_upload(staged, 0)
+        .expect("commit at the netted cap");
+    assert_eq!(
+        renderer.pulled_state(),
+        PulledState::Active,
+        "{what}: the replaced pulled copy must not be double-charged"
+    );
+
+    // One byte below the netted budget at the gate: refuse and report the
+    // **available** budget, not the raw cap.
+    renderer.set_gpu_budget(crate::GpuBudget::uncapped());
+    let (used_before, required, replaced) = measure(&renderer);
+    let staged = prepare(&mut renderer);
+    let netted_limit = used_before - replaced + required - 1;
+    renderer.set_gpu_budget(crate::GpuBudget::uncapped().with_cap(Some(netted_limit)));
+    renderer
+        .commit_upload(staged, 0)
+        .expect("commit below the netted cap");
+    match renderer.pulled_state() {
+        PulledState::SkippedInsufficientVram {
+            required_bytes,
+            budget_bytes,
+        } => {
+            assert_eq!(required_bytes, required, "{what}: the exact payload");
+            assert!(
+                budget_bytes < required_bytes,
+                "{what}: the refusal reason is required > available ({budget_bytes})"
+            );
+        }
+        other => panic!("{what}: expected a pre-flight VRAM skip, got {other:?}"),
+    }
+    // The gate admitted nothing, so the pulled classes are gone and the universal
+    // per-run fallback owns the geometry.
+    assert!(
+        renderer.pulled_lines.is_none() && renderer.pulled_mesh.is_none(),
+        "{what}: a skip must leave no pulled class resident"
     );
 }
 
@@ -418,6 +540,148 @@ fn captured_out_of_memory_falls_back_instead_of_panicking() {
     assert_eq!(
         fallback_px, universal_px,
         "{what}: the fallback frame must be byte-identical to the universal tier"
+    );
+}
+
+#[test]
+fn run_free_suffix_skips_the_rebuild_after_the_oom_fallback() {
+    let what = "fallback-suffix-skip";
+    let Some(gpu) = gpu_or_skip(what) else {
+        return;
+    };
+    if !accelerated_supported(&gpu, what) {
+        return;
+    }
+    let target = RenderTarget::new(64, 64);
+    let mut renderer = init_accelerated(&gpu, what);
+    let base = scene();
+    let base_len = base.len();
+    commit(&mut renderer, &base);
+    assert_eq!(renderer.pulled_state(), PulledState::Active);
+
+    // Force the captured-OOM path: the pulled classes are discarded and the
+    // explicit universal per-stream line fallback becomes the resident line
+    // geometry. Coherence is false (resident classes, no pulled storage).
+    renderer.set_pulled_oom_injection(Some("injected test out-of-memory"));
+    commit(&mut renderer, &base);
+    assert!(
+        matches!(
+            renderer.pulled_state(),
+            PulledState::SkippedOutOfMemory { .. }
+        ),
+        "{what}: the injected capture must take the fallback verdict, got {:?}",
+        renderer.pulled_state()
+    );
+    assert!(
+        renderer.pulled_lines.is_none() && renderer.pulled_mesh.is_none(),
+        "{what}: the fallback state owns no pulled class"
+    );
+    assert!(
+        !renderer.instance_streams.is_empty(),
+        "{what}: the fallback scene must still have resident line streams"
+    );
+    assert!(
+        renderer.line_fallback_built,
+        "{what}: the universal line fallback must be recorded as resident/valid"
+    );
+
+    let skips_before = renderer.pulled_suffix_skips();
+    let reuses_before = renderer.pulled_prefix_reuses();
+    let rebuilds_before = renderer.pulled_prefix_rebuilds();
+    let state_before = renderer.pulled_state();
+    let buffers_before: Vec<wgpu::Buffer> = renderer
+        .instance_streams
+        .iter()
+        .map(|stream| stream.buffer.clone())
+        .collect();
+    let bases_before: Vec<u32> = renderer
+        .instance_streams
+        .iter()
+        .map(|stream| stream.base)
+        .collect();
+
+    // The deferred grid-settle shape: `keep_prefix == base_end == old base_end`
+    // with a run-free (legacy) overlay. Without the fallback admission this would
+    // re-run the pulled rebuild, fail the capacity gate and rebuild the identical
+    // fallback (~2.1 s measured on the 170 757-entity fixture).
+    let overlay = vec![lines_batch(10, 0.75)];
+    let staged = renderer
+        .prepare_upload_batches_legacy(&overlay)
+        .expect("stage a run-free overlay");
+    renderer
+        .commit_upload_with_base(staged, base_len, base_len)
+        .expect("commit the run-free suffix");
+
+    assert_eq!(
+        renderer.pulled_suffix_skips(),
+        skips_before + 1,
+        "{what}: the run-free suffix must skip the pulled rebuild on the fallback state"
+    );
+    assert_eq!(
+        renderer.pulled_prefix_reuses(),
+        reuses_before,
+        "{what}: a skip is not a reuse"
+    );
+    assert_eq!(
+        renderer.pulled_prefix_rebuilds(),
+        rebuilds_before,
+        "{what}: a skip is not a rebuild"
+    );
+    assert_eq!(
+        renderer.pulled_state(),
+        state_before,
+        "{what}: a skip must leave the reported pulled verdict untouched"
+    );
+    let buffers_after: Vec<wgpu::Buffer> = renderer
+        .instance_streams
+        .iter()
+        .map(|stream| stream.buffer.clone())
+        .collect();
+    let bases_after: Vec<u32> = renderer
+        .instance_streams
+        .iter()
+        .map(|stream| stream.base)
+        .collect();
+    assert_eq!(
+        buffers_after, buffers_before,
+        "{what}: the fallback geometry must be the same resident buffers"
+    );
+    assert_eq!(
+        bases_after, bases_before,
+        "{what}: the fallback geometry offsets must be untouched"
+    );
+    let (pixels, stats) = render_and_read(&mut renderer, &target);
+    assert!(
+        pixels
+            .chunks_exact(4)
+            .any(|px| px[0] > 8 || px[1] > 8 || px[2] > 8),
+        "{what}: the skipped suffix must still draw the fallback geometry"
+    );
+    assert!(
+        !stats.accelerated,
+        "{what}: the fallback state is universal"
+    );
+
+    // A suffix that stages converted runs is not run-free: it must take the
+    // ordinary rebuild path and never count a skip.
+    renderer.set_pulled_oom_injection(None);
+    let skips_before_converted = renderer.pulled_suffix_skips();
+    let converted = vec![lines_batch(11, 0.1)];
+    let staged = renderer
+        .prepare_upload_batches(&converted)
+        .expect("stage a converted suffix");
+    renderer
+        .commit_upload_with_base(staged, base_len, base_len + 1)
+        .expect("commit the converted suffix");
+    assert_eq!(
+        renderer.pulled_suffix_skips(),
+        skips_before_converted,
+        "{what}: a converted suffix must never skip the pulled rebuild"
+    );
+    assert_eq!(
+        renderer.pulled_state(),
+        PulledState::Active,
+        "{what}: the converted suffix must rebuild the pulled classes"
     );
 }
 

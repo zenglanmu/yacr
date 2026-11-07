@@ -46,7 +46,7 @@ mod pulled_prefix_tests;
 #[allow(unused_imports)]
 pub(crate) use alloc::{
     allocation_guard, allocation_verdict, pop_captured_error, pulled_budget_for,
-    pulled_capacity_fits, pulled_payload_bytes, pulled_skip_state, PulledAllocationError,
-    PulledAllocationVerdict,
+    pulled_capacity_fits, pulled_capacity_verdict, pulled_payload_bytes, pulled_skip_state,
+    PulledAllocationError, PulledAllocationVerdict,
 };
 pub(crate) use types::{prefix_outcome, CheckpointFacts, IncomingResources, PrefixOutcome};
