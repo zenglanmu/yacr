@@ -779,11 +779,13 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             });
             lock_telemetry(telemetry).last_pulled_state = Some(actual.pulled_state.clone());
         }
-        let snapshot = CAD.with(|cell| {
+        let mut snapshot = CAD.with(|cell| {
             cell.borrow()
                 .as_ref()
                 .map(|session| session.snapshot(backend, adapter, 0))
         });
+        // Attach the ≤1 Hz performance block (GPU report only when due).
+        super::performance::attach(&mut snapshot, shared);
         // Same mirroring discipline as the status: the settings snapshot is
         // derived on the owner thread and cloned for the worker-thread IPC read.
         let settings = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.settings()));

@@ -198,6 +198,35 @@ export interface CadHostProfile {
 }
 
 /**
+ * Host-reported performance metrics for the performance/diagnostics panel.
+ *
+ * Every field is `null` when the host or its backend cannot measure it — an
+ * absent number is never rendered as `0`. The GPU numbers are the **renderer's
+ * own accounting**, not device-wide usage; `vramTotalBytes` is the advertised
+ * device-local VRAM proxy (Vulkan only), not free memory.
+ */
+export interface CadPerformance {
+  /** Process CPU over the last sample window, percent of one core. */
+  readonly cpuPercent: number | null;
+  /** Resident set size of this process in bytes. */
+  readonly processRssBytes: number | null;
+  /** Virtual address space of this process in bytes. */
+  readonly processVirtualBytes: number | null;
+  /** Total physical memory of the machine in bytes. */
+  readonly systemTotalBytes: number | null;
+  /** Currently available physical memory in bytes. */
+  readonly systemAvailableBytes: number | null;
+  /** Bytes this renderer currently charges against the GPU device. */
+  readonly gpuMemoryUsedBytes: number | null;
+  /** Peak of that accounting since the renderer started. */
+  readonly gpuMemoryPeakBytes: number | null;
+  /** Driver-reserved bytes from the wgpu allocator (whole Device), if any. */
+  readonly gpuMemoryReservedBytes: number | null;
+  /** Advertised device-local VRAM proxy (largest heap; Vulkan only). */
+  readonly vramTotalBytes: number | null;
+}
+
+/**
  * The `cad_status` snapshot consumed by the chrome.
  *
  * Every field the validator below enforces is required; the additive blocks an
@@ -260,6 +289,12 @@ export interface CadStatus {
   readonly activeSpace?: CadActiveSpace;
   /** External references of the open drawing; absent means `[]`. */
   readonly references?: readonly CadReferenceStatus[];
+  /**
+   * Host-reported performance metrics, or `null`/absent when the host does not
+   * publish them. Absence is an explicit "not measured", never a fabricated
+   * zero: the panel renders an em dash for each missing value.
+   */
+  readonly performance?: CadPerformance | null;
 }
 
 /** The open drawing's layout tabs; an older host's omission is an empty list. */
@@ -347,6 +382,42 @@ function isReferenceStatus(value: unknown): boolean {
     && (reference.reason === null || typeof reference.reason === 'string')
     && typeof reference.overlay === 'boolean'
     && nonNegativeInteger(reference.depth);
+}
+
+/** The keys a `cad_status.performance` block must carry when it is present. */
+const PERFORMANCE_FIELDS = [
+  'cpuPercent',
+  'processRssBytes',
+  'processVirtualBytes',
+  'systemTotalBytes',
+  'systemAvailableBytes',
+  'gpuMemoryUsedBytes',
+  'gpuMemoryPeakBytes',
+  'gpuMemoryReservedBytes',
+  'vramTotalBytes',
+] as const;
+
+/** A metric that is either a real non-negative finite number or `null`. */
+function isOptionalMetric(value: unknown): boolean {
+  return value === null
+    || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+}
+
+/**
+ * Validate a present `performance` block.
+ *
+ * All keys are required when the block exists (the Rust wire always serializes
+ * them); a missing key is a contract violation, never a guessed `null`. `null`
+ * itself is the host's explicit "no metrics on this carrier".
+ */
+function parsePerformance(value: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  const record = value as Record<string, unknown>;
+  if (!PERFORMANCE_FIELDS.every(field => field in record && isOptionalMetric(record[field]))) {
+    throw Error('CAD_STATUS_INVALID');
+  }
 }
 
 export function parseCadStatus(value: unknown): CadStatus {
@@ -463,6 +534,12 @@ export function parseCadStatus(value: unknown): CadStatus {
   if (status.references !== undefined
     && (!Array.isArray(status.references) || !status.references.every(isReferenceStatus))) {
     throw Error('CAD_STATUS_INVALID');
+  }
+  // Performance metrics are optional (an older host, or a carrier that publishes
+  // none), but a present block must be well-formed: a malformed number is never
+  // rendered as a measured value.
+  if (status.performance !== undefined && status.performance !== null) {
+    parsePerformance(status.performance);
   }
   // The cursor's world coordinate is required: `null` (no reliable 2D cursor) or
   // exactly three finite numbers. Anything else is rejected outright — a

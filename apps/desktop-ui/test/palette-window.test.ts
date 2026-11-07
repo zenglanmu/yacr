@@ -5,7 +5,7 @@
 //     predicate) without any DOM, and
 //   * the source/CSS structure that is what actually keeps the CAD partition
 //     rect untouched: one `.palette-layer` overlay *after* `.native-input`, the
-//     five palettes inside it, and no palette left in `.workspace__left`.
+//     six palettes inside it, and no palette left in `.workspace__left`.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readCss, readModule } from './helpers.ts';
@@ -44,8 +44,8 @@ test('a palette defaults to the left edge and cascades down by a fixed step', ()
   assert.equal(PALETTE_CASCADE_STEP, 24);
   assert.deepEqual(defaultPaletteGeometry(), { left: 0, top: 0, width: 300 });
   assert.deepEqual(defaultPaletteGeometry(2), { left: 0, top: 48, width: 300 });
-  // The five palettes open at 0/24/48/72/96, so no two headers coincide.
-  assert.deepEqual([0, 1, 2, 3, 4].map(cascadeOffset), [0, 24, 48, 72, 96]);
+  // The six palettes open at 0/24/48/72/96/120, so no two headers coincide.
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map(cascadeOffset), [0, 24, 48, 72, 96, 120]);
   // A missing/negative/non-finite slot never invents a position.
   assert.equal(cascadeOffset(-3), 0);
   assert.equal(cascadeOffset(Number.NaN), 0);
@@ -127,13 +127,13 @@ test('the shared container owns drag, resize, keyboard and geometry state', asyn
   assert.ok(source.includes('tabIndex={0}'));
   assert.ok(source.includes("event.key !== 'ArrowLeft'"));
   assert.ok(source.includes("event.key !== 'ArrowRight'"));
-  // No palette-specific branch: one container serves all five windows.
-  for (const name of ['PropertiesPalette', 'LayersPalette', 'DiagnosticsPalette', 'ReferencesPanel', 'FontsPanel']) {
+  // No palette-specific branch: one container serves all six windows.
+  for (const name of ['PropertiesPalette', 'LayersPalette', 'FileInfoPalette', 'DiagnosticsPalette', 'ReferencesPanel', 'FontsPanel']) {
     assert.equal(source.includes(`import { ${name} }`), false, `${name} must stay out of the shared container`);
   }
 });
 
-test('Workspace floats the five palettes in one layer after the native input', async () => {
+test('Workspace floats the six palettes in one layer after the native input', async () => {
   const workspace = await readModule('components/Workspace.tsx');
   assert.ok(workspace.includes("import { PaletteWindow } from './PaletteWindow.tsx';"));
 
@@ -144,7 +144,7 @@ test('Workspace floats the five palettes in one layer after the native input', a
     workspace.indexOf('"workspace__left"'),
     workspace.indexOf('"workspace__canvas"'),
   );
-  for (const palette of ['PropertiesDock', 'LayersPalette', 'DiagnosticsPalette', 'ReferencesPanel', 'FontsPanel']) {
+  for (const palette of ['PropertiesDock', 'LayersPalette', 'FileInfoPalette', 'DiagnosticsPalette', 'ReferencesPanel', 'FontsPanel']) {
     assert.equal(leftColumn.includes(palette), false, `${palette} must not live in .workspace__left`);
   }
 
@@ -153,13 +153,14 @@ test('Workspace floats the five palettes in one layer after the native input', a
   assert.ok(workspace.indexOf('"workspace__canvas"') < workspace.indexOf('className="palette-layer"'));
   assert.ok(workspace.indexOf('ref={shell.surfaceRef}') < workspace.indexOf('className="palette-layer"'));
 
-  // All five palettes are wrapped by the shared container, in a fixed order.
+  // All six palettes are wrapped by the shared container, in a fixed order.
   const expected = [
     ['properties', 'PropertiesDock', 0],
     ['layers', 'LayersPalette', 1],
-    ['diagnostics', 'DiagnosticsPalette', 2],
-    ['references', 'ReferencesPanel', 3],
-    ['fonts', 'FontsPanel', 4],
+    ['fileinfo', 'FileInfoPalette', 2],
+    ['diagnostics', 'DiagnosticsPalette', 3],
+    ['references', 'ReferencesPanel', 4],
+    ['fonts', 'FontsPanel', 5],
   ];
   let previous = workspace.indexOf('className="palette-layer"');
   for (const [key, component, index] of expected) {

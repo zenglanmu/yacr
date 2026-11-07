@@ -1,3 +1,46 @@
+## 2026-11-07 面板拆分：文件信息（静态）+ 诊断（动态性能）
+
+- **文件信息**（`apps/desktop-ui/src/components/FileInfoPalette.tsx`，`windowKey="fileinfo"`、
+  `fileInfoOpen`）：保留原诊断抽屉的**静态**内容——渲染器（backend/adapter）、图纸
+  （documentLabel/entityCount/importCount/camera）、状态（loading/canOpen/canFit/accepted）。
+  FPS 等动态读数移出。用户可见标题 `fileinfo.title`（文件信息 / File info），字段标签
+  改为 `fileinfo.row.*` 双语键。
+- **诊断**（`apps/desktop-ui/src/components/DiagnosticsPalette.tsx`，`windowKey="diagnostics"`、
+  `diagnosticsOpen`）：改为动态性能面板——FPS（沿用 `volatileStatusStore` 2 s rolling）、
+  `status.backend`（wgpu 后端）、`status.adapter`（显示设备）、进程 CPU、进程 RSS、
+  系统内存、本渲染器 GPU 记账占用/峰值、探测到的 device-local VRAM 总量。
+  缺失值一律 `—`，无读数时显示 `diagnostics.perf.unavailable`。
+- **入口**：导航栏 / 功能区 Utilities 与 Palettes / 状态栏各有**两个独立开关**；
+  `ribbon-model` 新增 `fileinfo` action（`info` 图标），`diagnostics` 保留原图标。
+  `Workspace` 六个浮窗顺序：properties 0、layers 1、fileinfo 2、diagnostics 3、references 4、
+  fonts 5。Escape 同时关闭两个面板。
+- **数据契约**：`cad_status.performance`（新增 `CadPerformance`，9 个 `Option` 字段，
+  camelCase，始终序列化、未知为 `null`）。TS 侧 `parseCadStatus` 对存在的块做严格校验
+  （每键必在、有限非负或 `null`）。详见 `docs/file-info-panel.md`。
+- **采样**：`cad-desktop-shell::performance::PerformanceState` 在 owner tick 上 ≤1 Hz 读
+  Linux/Android `/proc`（CPU tick 差、VmRSS/VmSize、MemTotal/MemAvailable）；GPU 数字来自
+  `RenderSessionHandle::gpu_memory_report()`，仅在 `gpu_sample_due()` 时读取，绝不逐帧查询
+  allocator。`record_gpu(None)` 清空而不是保留陈旧值。当前只有 Linux `app-linux` 接线；
+  Windows/macOS/Android/Web 的 `performance` 为 `null`（显式未提供，不是 0）。
+- **文档/i18n**：新增 `docs/file-info-panel.md`；更新 `docs/diagnostics.md`、`docs/shortcuts.md`、
+  `apps/desktop-ui/README.md`。i18n 键集 1120 条，中英一致。
+- **验证（已运行）**：
+  - `cargo test -p cad-ui-core --locked` → 384 passed / 0 failed / 1 ignored。
+  - `cargo test -p cad-desktop-shell --locked` → unit（含 10 个 sampler 测试）+ 集成 + wire
+    goldens 4/4 全过。
+  - `cargo check -p app-linux --all-targets --locked` → 0。
+  - `cargo clippy -p cad-ui-core -p cad-desktop-shell -p app-linux --all-targets --locked
+    -- -D warnings` → 0。
+  - `cargo fmt --all -- --check` → 0；`check-architecture.py`、`check-file-size.py`、
+    `check-i18n.py`（1120 keys）均 0。
+  - `apps/desktop-ui`：`npx tsc --noEmit` 0；本轮相关 55/55；全量 `npm test`
+    1137 passed / 2 failed。两条失败在 `test/vendor-plugin-properties.test.ts`
+    （`TCH_WALL` width/angle 为 `undefined`），仅 import `plugins/tch/src/index.ts`，与本轮
+    UI/Rust 改动无关；原因是 submodule gitlink 记录 `0ce4dbb…` 在当前远端已不可获取，
+    worktree 实际 checkout 为 `7ecb6d8…`。**未修改** submodule，也未把该状态计入本轮改动。
+- **NOT RUN**：真实窗口/GPU/像素/性能验收；Windows/macOS/Android 编译或运行；
+  `dom-canvas`（X11/Web）上的进程/GPU 指标。以上按“显式未提供/未验证”处理，不构成真机结论。
+
 ## 2026-11-06 状态栏左锚点；五个左侧面板改为共享容器的浮动窗（不改变 CAD 分区）
 
 - **状态栏顺序**（`apps/desktop-ui/src/components/StatusBar.tsx`）：`就绪 → 栅格/正交/捕捉/对象捕捉/悬停预览`

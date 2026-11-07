@@ -103,7 +103,7 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 | 图纸标签 | `DocTabs.tsx` |
 | 工作区 | `Workspace.tsx` |
 | 浮动面板容器 | `PaletteWindow.tsx`（唯一容器：拖动、调宽、层级与几何存储；几何规则在 `src/layout/palette-window.ts`） |
-| 开始页 / 属性 / 图层 / 诊断 / 外部引用 / 字体管理器 | `StartPanel.tsx`、`PropertiesDock.tsx`、`LayersPalette.tsx`、`DiagnosticsPalette.tsx`、`ReferencesPanel.tsx`、`FontsPanel.tsx` |
+| 开始页 / 属性 / 图层 / 文件信息 / 诊断（性能）/ 外部引用 / 字体管理器 | `StartPanel.tsx`、`PropertiesDock.tsx`、`LayersPalette.tsx`、`FileInfoPalette.tsx`（静态文件信息）、`DiagnosticsPalette.tsx`（动态性能诊断；两者数据契约见 `docs/file-info-panel.md`）、`ReferencesPanel.tsx`、`FontsPanel.tsx` |
 | 导航栏 | `NavRail.tsx` |
 | 模型 / 布局标签 | `LayoutTabs.tsx` |
 | 命令行 | `CommandLine.tsx`（桌面停靠区），控制器在 `src/commands/use-command-line.ts`；历史日志见 `src/commands/command-history.ts` |

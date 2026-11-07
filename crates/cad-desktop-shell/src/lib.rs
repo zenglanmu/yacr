@@ -49,6 +49,13 @@ pub mod events;
     target_os = "macos",
     target_os = "android"
 ))]
+pub mod performance;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
 pub mod plugins;
 #[cfg(any(
     target_os = "linux",

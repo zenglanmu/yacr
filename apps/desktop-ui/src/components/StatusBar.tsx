@@ -276,6 +276,12 @@ export function StatusBar() {
               onClick={() => shell.setPropertiesOpen(!shell.propertiesOpen)}
             />
             <Toggle
+              label={t('fileinfo.title')}
+              on={shell.fileInfoOpen}
+              title={t('fileinfo.title')}
+              onClick={() => shell.setFileInfoOpen(!shell.fileInfoOpen)}
+            />
+            <Toggle
               label={t('diagnostics.title')}
               on={shell.diagnosticsOpen}
               title={t('diagnostics.title')}

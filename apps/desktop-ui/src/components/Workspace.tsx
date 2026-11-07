@@ -20,6 +20,7 @@ import { PaletteWindow } from './PaletteWindow.tsx';
 import { LayersPalette } from './LayersPalette.tsx';
 import { PropertiesDock } from './PropertiesDock.tsx';
 import { PluginNoticeHost } from './PluginNoticeHost.tsx';
+import { FileInfoPalette } from './FileInfoPalette.tsx';
 import { DiagnosticsPalette } from './DiagnosticsPalette.tsx';
 import { ReferencesPanel } from './ReferencesPanel.tsx';
 import { FontsPanel } from './FontsPanel.tsx';
@@ -41,6 +42,9 @@ export function Workspace() {
   // start panel owns the left column. Off by default so the startup partition
   // geometry is unchanged until the user opens it.
   const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;
+  // The static File info panel and the live diagnostics panel are independent
+  // windows behind the same carrier flag; either can be open without the other.
+  const showFileInfo = palettesAvailable && Boolean(shell.fileInfoOpen);
   const showDiagnostics = palettesAvailable && Boolean(shell.diagnosticsOpen);
   // The references panel is a document-wide list like the layers palette: it
   // reads the host's `cad_status.references` rows and floats in the layer.
@@ -105,18 +109,23 @@ export function Workspace() {
               <LayersPalette />
             </PaletteWindow>
           ) : null}
+          {showFileInfo ? (
+            <PaletteWindow windowKey="fileinfo" initialIndex={2}>
+              <FileInfoPalette />
+            </PaletteWindow>
+          ) : null}
           {showDiagnostics ? (
-            <PaletteWindow windowKey="diagnostics" initialIndex={2}>
+            <PaletteWindow windowKey="diagnostics" initialIndex={3}>
               <DiagnosticsPalette />
             </PaletteWindow>
           ) : null}
           {showReferences ? (
-            <PaletteWindow windowKey="references" initialIndex={3}>
+            <PaletteWindow windowKey="references" initialIndex={4}>
               <ReferencesPanel />
             </PaletteWindow>
           ) : null}
           {showFonts ? (
-            <PaletteWindow windowKey="fonts" initialIndex={4}>
+            <PaletteWindow windowKey="fonts" initialIndex={5}>
               <FontsPanel />
             </PaletteWindow>
           ) : null}

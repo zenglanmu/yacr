@@ -132,7 +132,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `SWITCH2D3D` | 观察（2D 俯视 ↔ 3D 透视切换；切回 2D 恢复保存的相机） | 否 | — |
 | `PROJECTION` | 观察（透视/正交切换） | 否 | — |
 | `MODE` | 模式（**需 `Mode` 载荷**：Viewer/Work；裸调用按名拒绝） | 否 | — |
-| `DIAGNOSTICS` | UI（诊断抽屉） | 否 | — |
+| `DIAGNOSTICS` | UI（诊断 / 性能面板；文件信息是另一个面板） | 否 | — |
 | `GRID` | 显示（**仅**栅格叠加开关，2026-10-25 起真实选择器） | 否 | `GR` |
 | `SNAP` | 显示（**栅格捕捉**开关 F9；会话状态，不写库，经 `interaction.gridSnapEnabled` 持久化） | 否 | — |
 | `SNAPUNIT` | 显示（参数形式 `SNAPUNIT <value>`：栅格捕捉间距 sysvar，正十进制数，经 `interaction.snapSpacing` 持久化） | 否 | — |

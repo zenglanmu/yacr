@@ -189,8 +189,10 @@ test('one carrier helper decides for every nav-rail palette toggle', async () =>
   assert.ok(gate > 0, 'both palette toggles sit behind the same gate');
   const gated = rail.slice(gate, rail.indexOf(') : null}', gate));
   assert.ok(gated.includes("t('layers.panel')"), 'the layers toggle is gated');
+  assert.ok(gated.includes("t('fileinfo.title')"), 'the file info toggle is gated too');
   assert.ok(gated.includes("t('diagnostics.title')"), 'the diagnostics toggle is gated too');
   assert.ok(gated.includes('shell.toggleLayers()'));
+  assert.ok(gated.includes('shell.setFileInfoOpen(!shell.fileInfoOpen)'));
   assert.ok(gated.includes('shell.setDiagnosticsOpen(!shell.diagnosticsOpen)'));
   // The navigation commands are carrier-independent and stay outside the gate.
   assert.ok(rail.slice(0, gate).includes("'FIT', 'ZOOMIN', 'ZOOMOUT', 'PAN', 'ORBIT'"));

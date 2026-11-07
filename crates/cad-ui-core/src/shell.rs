@@ -449,6 +449,7 @@ mod tests {
             command_log: Vec::new(),
             popup: None,
             grip_drag: false,
+            performance: None,
         }
     }
 

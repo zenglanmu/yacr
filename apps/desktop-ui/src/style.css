@@ -1831,3 +1831,36 @@ button, input, select { font: inherit; color: inherit; }
   outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus);
 }
 .color-chooser__hint { margin: 0; color: var(--text-muted); font-size: 10px; line-height: 1.35; }
+
+/* File info + diagnostics palettes ---------------------------------------- */
+/* Two panels share one read-out rhythm. File info is the static state of the
+   open drawing; diagnostics is the live process/GPU accounting. The label
+   column is a little wider than the generic `.kv` so the longer device/memory
+   labels wrap to a readable shape, and a thin meter under a measured ratio
+   shows pressure without turning the panel into a dashboard. Values stay
+   monospace (`.kv`), and every missing reading is an em dash. */
+.fileinfo .palette__section:first-child,
+.diagnostics .palette__section:first-child { margin-top: 0; }
+.fileinfo .kv,
+.diagnostics .kv { grid-template-columns: 108px minmax(0, 1fr); gap: 4px 10px; }
+.diagnostics .kv dd { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.diagnostics__value { min-width: 0; overflow-wrap: anywhere; }
+.diagnostics__meter {
+  display: block; width: 100%; height: 3px;
+  background: var(--field); border-radius: 999px; overflow: hidden;
+}
+.diagnostics__meter > span {
+  display: block; height: 100%;
+  background: var(--accent); opacity: .55;
+  border-radius: inherit;
+  transition: width var(--t-med);
+}
+.diagnostics__meter.is-high > span { background: var(--danger); opacity: .8; }
+.diagnostics__note {
+  margin: 8px 0 0; padding: 5px 8px;
+  background: var(--field); border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--line-soft); border-radius: var(--radius);
+  color: var(--text-muted); font-size: 10.5px; line-height: 1.4;
+}
+.fileinfo__close,
+.diagnostics__close { margin-top: 8px; }

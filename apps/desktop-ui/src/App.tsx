@@ -94,6 +94,7 @@ function Shell() {
   const [ribbonTab, setRibbonTab] = useState('home');
   const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
   const [cleanScreen, setCleanScreen] = useState(false);
+  const [fileInfoOpen, setFileInfoOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [referencesOpen, setReferencesOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
@@ -118,7 +119,6 @@ function Shell() {
   // | null`): the steps the host has queued but not yet echoed. It composes rapid
   // clicks without ever touching the displayed number.
   const [toolParameterPending, setToolParameterPending] = useState<ToolParameterPending | null>(null);
-
   // The host's live dialog (`cad_status.popup`, ADR 0021 D1/D2): non-null while
   // one exists. The host applies the modal input gate; the chrome mirrors it as
   // one of the pointer lane's suspension reasons plus the pressed About button.
@@ -699,7 +699,7 @@ function Shell() {
         setHistoryOpen(false);
         if (isTyping(event.target)) event.target.blur();
         else {
-          setDiagnosticsOpen(false);
+          setFileInfoOpen(false); setDiagnosticsOpen(false);
           setReferencesOpen(false);
           setFontsOpen(false);
         }
@@ -839,8 +839,7 @@ function Shell() {
     setRibbonCollapsed,
     cleanScreen,
     setCleanScreen,
-    diagnosticsOpen,
-    setDiagnosticsOpen,
+    fileInfoOpen, setFileInfoOpen, diagnosticsOpen, setDiagnosticsOpen,
     referencesOpen,
     setReferencesOpen,
     propertiesOpen,
@@ -903,7 +902,8 @@ function Shell() {
       });
     },
     runAction: action => {
-      if (action === 'diagnostics') setDiagnosticsOpen(value => !value);
+      if (action === 'fileinfo') setFileInfoOpen(value => !value);
+      else if (action === 'diagnostics') setDiagnosticsOpen(value => !value);
       else if (action === 'cleanScreen') setCleanScreen(value => !value);
       else if (action === 'commandLine') setCommandLineOpen(value => !value);
       else if (action === 'properties') openProperties();

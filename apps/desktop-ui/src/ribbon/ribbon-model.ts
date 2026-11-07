@@ -15,6 +15,7 @@ import { STANDARD_VIEWS } from '../cad/view3d.ts';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({
+  fileinfo: 'fileinfo',
   diagnostics: 'diagnostics',
   cleanScreen: 'cleanScreen',
   commandLine: 'commandLine',
@@ -37,6 +38,7 @@ export const SHELL_ACTIONS = Object.freeze({
 
 /** The shell actions that toggle a desktop palette window. */
 export const PALETTE_ACTIONS: readonly string[] = Object.freeze([
+  SHELL_ACTIONS.fileinfo,
   SHELL_ACTIONS.diagnostics,
   SHELL_ACTIONS.properties,
 ]);
@@ -279,6 +281,7 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         id: 'utilities',
         titleKey: 'ribbon.panel.utilities',
         items: [
+          { id: 'fileinfo', labelKey: 'fileinfo.title', icon: 'info', action: 'fileinfo' },
           { id: 'diagnostics', labelKey: 'diagnostics.title', icon: 'diagnostics', action: 'diagnostics' },
           { id: 'clean', labelKey: 'status.clean_screen', icon: 'cleanScreen', action: 'cleanScreen' },
           { id: 'cmdline', labelKey: 'status.command_line', icon: 'terminal', action: 'commandLine' },
@@ -883,6 +886,7 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         id: 'palettes',
         titleKey: 'ribbon.panel.utilities',
         items: [
+          { id: 'fileinfo', labelKey: 'fileinfo.title', icon: 'info', action: 'fileinfo', large: true },
           { id: 'diagnostics', labelKey: 'diagnostics.title', icon: 'diagnostics', action: 'diagnostics', large: true },
           { id: 'clean', labelKey: 'status.clean_screen', icon: 'cleanScreen', action: 'cleanScreen' },
         ],
