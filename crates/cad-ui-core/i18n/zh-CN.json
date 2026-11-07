@@ -1329,8 +1329,22 @@
   "draw.kind.vpmin": "恢复视口（VPMIN）",
   "draw.kind.vpclip": "裁剪视口（VPCLIP）",
   "draw.kind.vpscale": "视口比例（VPSCALE）",
-  "draw.kind.layvpi": "视口图层冻结（LAYVPI）"
-
-
+  "draw.kind.layvpi": "视口图层冻结（LAYVPI）",
+  "draw.kind.dimstyle": "标注样式（DIMSTYLE）",
+  "draw.kind.dimstyle_alias": "标注样式（命令行）",
+  "draw.kind.dimtedit": "编辑标注文字",
+  "draw.kind.dimtedit.hint": "请选择一个标注：MOVE <x> <y> 设置文字位置，ROTATE <角度> 设置旋转，RESET 恢复推导位置",
+  "draw.kind.dimedit": "编辑标注文字替代",
+  "draw.kind.dimedit.hint": "请选择至少一个标注：TEXT <替代文字> 设置测量文字模板（<> 表示测量值），RESET 清除",
+  "draw.kind.dimoverride": "标注变量替代",
+  "draw.kind.dimoverride.hint": "请选择至少一个标注：DIMOVERRIDE <变量> <值> 仅对已建模变量写入实体样式快照",
+  "draw.kind.dimregen": "重生成标注",
+  "draw.kind.dimdisassociate": "解除标注关联",
+  "draw.kind.qdim": "快速标注",
+  "draw.kind.qdim.hint": "请选择至少一条直线：v1 在模型空间按 Standard 样式的 DIMDLI 偏移为每条直线创建一个对齐标注",
+  "draw.kind.dimjogline": "添加/删除标注折弯线",
+  "draw.kind.dimjogline.hint": "不可用：标注领域没有折弯字段，本命令会具名拒绝",
+  "draw.kind.dimbreak": "打断标注线",
+  "draw.kind.dimbreak.hint": "不可用：标注领域没有标注线打断记录，本命令只具名拒绝，绝不裁剪标注"
 
 }

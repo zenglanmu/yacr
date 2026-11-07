@@ -8,6 +8,8 @@ mod alias_table;
 mod command_vocabulary;
 mod command_vocabulary_clipboard;
 mod command_vocabulary_inquiry;
+mod dimension_arguments;
+
 mod draw2_arguments;
 mod gradient;
 mod hatchedit;

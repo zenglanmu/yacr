@@ -125,3 +125,94 @@ pub enum VPointInput {
     /// `<x> <y> <z>`, the eye direction from the target.
     Vector(Point3),
 }
+
+/// The axis a DIMORDINATE measures (ADR 0017 decision C/E, P5e).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrdinateAxis {
+    /// X ordinate: group 70 bit `0x40` set.
+    X,
+    /// Y ordinate: group 70 bit `0x40` clear.
+    Y,
+}
+
+/// The input of a DIMORDINATE command (ADR 0017 decision C, P5e): the feature
+/// point, the leader endpoint and an optional explicit axis.
+///
+/// `axis = None` is the interactive form and applies the documented auto rule —
+/// "if the Y difference is greater, measure the X ordinate" — comparing the
+/// feature and leader points. Autodesk does not state the equal case; our
+/// declared reading is **Y** (the documented rule's "otherwise" branch).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrdinateDimensionCommand {
+    pub feature: Point3,
+    pub leader: Point3,
+    pub axis: Option<OrdinateAxis>,
+}
+
+/// The 2026-11-07 dimension-editing batch. Grouped into one
+/// [`crate::CommandPayload::Dimension`] variant so the payload enum stays inside
+/// the file-size budget; every contract lives in
+/// [`crate::command_id::dimension_edit`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum DimensionBatchPayload {
+    /// `DIMSTYLE LIST|CURRENT|SET <name>`.
+    Style(DimStyleCommand),
+    /// `DIMTEDIT MOVE|ROTATE|RESET`.
+    TextEdit(DimTextEditCommand),
+    /// `DIMEDIT TEXT <override>|RESET`.
+    Edit(DimEditCommand),
+    /// `DIMOVERRIDE <variable> <value>`.
+    Override(DimOverrideCommand),
+    /// `DIMJOGLINE ADD <x> <y>|REMOVE`.
+    JogLine(DimJogLineCommand),
+}
+
+/// The typed option of a `DIMSTYLE` line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DimStyleCommand {
+    /// Report every stored dimension style (read-only).
+    List,
+    /// Report the style dimension creation resolves (read-only).
+    Current,
+    /// Request the creation style; this build has no post-import style-table
+    /// write API, so the application refuses it by name.
+    Set(String),
+}
+
+/// The typed option of a `DIMTEDIT` line.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DimTextEditCommand {
+    /// Move the measurement text to this drawing-plane X/Y (Z stays on the
+    /// dimension's own plane).
+    Move { x: f64, y: f64 },
+    /// Set the text rotation to these degrees (no normalisation; `0` returns to
+    /// the derived rotation).
+    Rotate { degrees: f64 },
+    /// Restore the derived text placement/rotation (the group 11/53 sentinels).
+    Reset,
+}
+
+/// The typed option of a `DIMEDIT` line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DimEditCommand {
+    /// Store a dimension text override (group 1); `<>` is the measurement
+    /// placeholder.
+    Text(String),
+    /// Drop the text override and render the measurement again.
+    Reset,
+}
+
+/// The input of a `DIMOVERRIDE <variable> <value>` line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DimOverrideCommand {
+    pub variable: String,
+    /// The trimmed remainder of the line, verbatim (no quote processing).
+    pub value: String,
+}
+
+/// The typed option of a `DIMJOGLINE` line.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DimJogLineCommand {
+    Add { x: f64, y: f64 },
+    Remove,
+}

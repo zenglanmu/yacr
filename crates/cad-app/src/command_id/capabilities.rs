@@ -44,6 +44,14 @@ impl CommandId {
                 | Self::DimContinue
                 | Self::DimRotated
                 | Self::DimSpace
+                // The 2026-11-07 dimension-edit batch: these four write entity
+                // rows. DIMSTYLE's reports, DIMREGEN/DIMDISASSOCIATE no-ops and
+                // the DIMJOGLINE/DIMBREAK capability refusals never write, so
+                // they stay Viewer-legal.
+                | Self::DimTextEdit
+                | Self::DimEdit
+                | Self::DimOverride
+                | Self::QDim
                 | Self::Hatch
                 | Self::HatchPoint
                 // BOUNDARY writes new polylines from the discovered loops.

@@ -358,12 +358,13 @@ pub use layout_payload::{LayoutPayload, PaperSetup};
 pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 
 pub use command_payload::{
-    AngularDimensionInput, CommandPayload, DimensionChainCommand, GripStretchCommand,
-    HatchEditOption, JustifyTextCommand, LayerStateCommand, MeasureGeomOption, NamedObjectKind,
-    OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget, RadialDimensionCommand,
-    RenameCommand, RotatedLinearDimensionCommand, TCircleCommand, TCountCommand, TextAlignCommand,
-    TextAlignEdge, TextBoundaryShape, TextCaseMode, TextScaleCommand, TwoLineCommand, VPointInput,
-    ViewCommand,
+    AngularDimensionInput, CommandPayload, DimEditCommand, DimJogLineCommand, DimOverrideCommand,
+    DimStyleCommand, DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand,
+    GripStretchCommand, HatchEditOption, JustifyTextCommand, LayerStateCommand, MeasureGeomOption,
+    NamedObjectKind, OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget,
+    RadialDimensionCommand, RenameCommand, RotatedLinearDimensionCommand, TCircleCommand,
+    TCountCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode,
+    TextScaleCommand, TwoLineCommand, VPointInput, ViewCommand,
 };
 
 pub struct Command {

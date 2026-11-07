@@ -177,29 +177,6 @@ pub enum MeasureGeomOption {
     Volume,
 }
 
-/// The axis a DIMORDINATE measures (ADR 0017 decision C/E, P5e).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OrdinateAxis {
-    /// X ordinate: group 70 bit `0x40` set.
-    X,
-    /// Y ordinate: group 70 bit `0x40` clear.
-    Y,
-}
-
-/// The input of a DIMORDINATE command (ADR 0017 decision C, P5e): the feature
-/// point, the leader endpoint and an optional explicit axis.
-///
-/// `axis = None` is the interactive form and applies the documented auto rule —
-/// "if the Y difference is greater, measure the X ordinate" — comparing the
-/// feature and leader points. Autodesk does not state the equal case; our
-/// declared reading is **Y** (the documented rule's "otherwise" branch).
-#[derive(Debug, Clone, PartialEq)]
-pub struct OrdinateDimensionCommand {
-    pub feature: Point3,
-    pub leader: Point3,
-    pub axis: Option<OrdinateAxis>,
-}
-
 pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
@@ -996,4 +973,9 @@ pub enum CommandPayload {
     /// The 2026-11-07 layout/viewport batch; contract:
     /// [`crate::command_id::layout`].
     Layout(Box<crate::LayoutPayload>),
+    /// The 2026-11-07 dimension-editing batch (`DIMSTYLE`/`DIMTEDIT`/`DIMEDIT`/
+    /// `DIMOVERRIDE`/`DIMJOGLINE`). Grouped in
+    /// [`crate::DimensionBatchPayload`]; contract in
+    /// `command_id::dimension_edit`.
+    Dimension(Box<crate::DimensionBatchPayload>),
 }

@@ -258,7 +258,14 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "VPORTS",
             "VPCLIP",
             "VPSCALE",
-            "LAYVPI"
+            "LAYVPI",
+            // The 2026-11-07 dimension-editing batch.
+            // The 2026-11-07 dimension-editing batch.
+            "DIMSTYLE",
+            "DIMTEDIT",
+            "DIMEDIT",
+            "DIMOVERRIDE",
+            "DIMJOGLINE"
         ]
     );
     assert_eq!(

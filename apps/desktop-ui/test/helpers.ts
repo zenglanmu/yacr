@@ -305,6 +305,10 @@ export const HOST_NAMES = [
   // `-OVERKILL` spelling is a host alias of OVERKILL.
   'DONUT', 'SOLID', 'HELIX', 'MLINE', 'MLSTYLE', 'TREX', 'EXTRIM', 'MPEDIT',
   'DRAWORDER', '-OVERKILL',
+  // The 2026-11-07 dimension-editing batch: DIMSTYLE/-DIMSTYLE and the four
+  // typed edit forms; DIMREGEN/DIMDISASSOCIATE/QDIM/DIMBREAK are canonical too.
+  'DIMSTYLE', '-DIMSTYLE', 'DIMTEDIT', 'DIMEDIT', 'DIMOVERRIDE', 'DIMREGEN',
+  'DIMDISASSOCIATE', 'QDIM', 'DIMJOGLINE', 'DIMBREAK',
   // WIPEOUT is the open-ended polygon mask; POLYGON CIRCUMSCRIBED is the
   // tangent-ring variant of POLYGON (its own multi-word selector).
   'WIPEOUT', 'POLYGON CIRCUMSCRIBED',

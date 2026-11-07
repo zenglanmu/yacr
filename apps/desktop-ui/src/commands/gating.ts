@@ -161,22 +161,9 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   SPACE: Object.freeze({
     parse: (argument: string) => argument.trim().length > 0,
   }),
-  /**
-   * `TORIENT <angle-degrees>` (2026-11-07) sets one **absolute** text rotation.
-   * The bare `TORIENT` is the Most Readable form and carries no argument, so it
-   * is admitted by the base name itself. The host grammar is the same signed
-   * plain decimal as `PDSIZE`: `45`, `22.5`, `0`, `-90`.
-   */
   TORIENT: Object.freeze({
     parse: (argument: string) => isSignedDecimal(argument.trim()),
   }),
-  /**
-   * `TCASE <mode>` (2026-11-07) changes the case of the selected text. The five
-   * full modes and their single letters are accepted case-insensitively; a
-   * bare `TCASE` is Title (the documented current default), so no argument is
-   * needed for it. The host validates the same grammar and refuses anything
-   * else by name (`invalid_tcase_argument_reason`).
-   */
   TCASE: Object.freeze({
     parse: (argument: string) => ['UPPER', 'LOWER', 'TITLE', 'SENTENCE', 'TOGGLE', 'U', 'L', 'T', 'S', 'G']
       .includes(argument.trim().toUpperCase()),
@@ -213,26 +200,10 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return false;
     },
   }),
-  /**
-   * `MEASUREGEOM <option>` (2026-11-07) is the inquiry router. Only the **six
-   * full option words** are admitted, case-insensitively; there is no
-   * single-letter abbreviation because the host grammar does not guess one. The
-   * four tool options reuse the existing measurement captures, `RADIUS` is a
-   * read-only report, and `VOLUME` is an explicit not-implemented refusal — the
-   * local parser admits the word so the host can answer with its named
-   * `measuregeom.volume_unsupported` code rather than a generic "unsupported".
-   */
   MEASUREGEOM: Object.freeze({
     parse: (argument: string) => ['DISTANCE', 'ANGLE', 'AREA', 'POLYLINE', 'RADIUS', 'VOLUME']
       .includes(argument.trim().toUpperCase()),
   }),
-  /**
-   * `JUSTIFYTEXT <H> <V>` / `TJUST <H> <V>` (2026-11-07) set only the alignment
-   * pair. Exactly two words: H ∈ `LEFT|CENTER|RIGHT`, V ∈
-   * `BASELINE|BOTTOM|MIDDLE|TOP`. The bare selector is admitted by the base name
-   * and refused by the host (`justifytext.needs_argument`) — never defaulted.
-   * `TJUST` is the AutoCAD alias and shares this grammar exactly.
-   */
   JUSTIFYTEXT: Object.freeze({
     parse: (argument: string) => {
       const parts = argument.trim().toUpperCase().split(/\s+/).filter(part => part.length > 0);
@@ -249,28 +220,13 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
         && ['BASELINE', 'BOTTOM', 'MIDDLE', 'TOP'].includes(parts[1]);
     },
   }),
-  /**
-   * `TSCALE <factor>` (2026-11-07) scales the selected text with the shared
-   * `SCALETEXT` rule; the host grammar is one positive decimal.
-   */
   TSCALE: Object.freeze({
     parse: isPositiveDecimal,
   }),
-  /**
-   * `TEXTALIGN <edge>` (2026-11-07) moves the selected text to one common
-   * edge/centre. Only the six full words are admitted: the host does not accept
-   * an abbreviation.
-   */
   TEXTALIGN: Object.freeze({
     parse: (argument: string) => ['LEFT', 'RIGHT', 'CENTER', 'TOP', 'MIDDLE', 'BOTTOM']
       .includes(argument.trim().toUpperCase()),
   }),
-  /**
-   * `TCOUNT <start> <step> [prefix] [suffix]` (2026-11-07) numbers the selected
-   * text. Two to four tokens: the first two are whole numbers (`start` signed,
-   * `step` strictly positive, matching `tcount.invalid_step`); tokens 3/4 are the
-   * uniform prefix/suffix. The host is still the authority for the numbering.
-   */
   TCOUNT: Object.freeze({
     parse: (argument: string) => {
       const parts = argument.trim().split(/\s+/).filter(part => part.length > 0);
@@ -279,36 +235,16 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return Number.parseInt(parts[1], 10) > 0;
     },
   }),
-  /**
-   * `TCIRCLE CIRCLE|RECTANGLE` (2026-11-07) draws an estimated-bounds boundary
-   * around the selected text. Only the two full words are admitted.
-   */
   TCIRCLE: Object.freeze({
     parse: (argument: string) => ['CIRCLE', 'RECTANGLE']
       .includes(argument.trim().toUpperCase()),
   }),
-  /**
-   * `LTSCALE <value>` (2026-11-07) writes the drawing-global linetype scale.
-   * The host grammar is the same positive plain decimal as `SNAPUNIT`: the
-   * database rejects zero, negatives, non-finite values and exponents.
-   */
   LTSCALE: Object.freeze({
     parse: isPositiveDecimal,
   }),
-  /**
-   * `LAYERPMODE [ON|OFF]` (2026-11-07) gates whether layer-override mutations
-   * record `LAYERP` snapshots. Only the two full words are admitted; a bare
-   * `LAYERPMODE` is admitted by the base name and reports the current setting.
-   */
   LAYERPMODE: Object.freeze({
     parse: (argument: string) => ['ON', 'OFF'].includes(argument.trim().toUpperCase()),
   }),
-  /**
-   * `LAYERSTATE <option>` (2026-11-07): `SAVE <name>`, `RESTORE <name>`, `LIST`
-   * or `DELETE <name>`. The name is the trimmed remainder (spaces allowed) and
-   * the keyword is case-insensitive. The bare name is admitted and refused by
-   * the host with `layerstate.needs_option`, because no option is defaulted.
-   */
   LAYERSTATE: Object.freeze({
     parse: (argument: string) => {
       const parts = argument.trim().split(/\s+/).filter(part => part.length > 0);
@@ -321,24 +257,12 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return false;
     },
   }),
-  /**
-   * `LAYWALK <names>` (2026-11-07) takes comma-separated layer names. The host
-   * resolves them against the drawing and refuses an unknown name; the chrome
-   * only requires at least one non-empty entry so an empty list never reaches
-   * the router.
-   */
   LAYWALK: Object.freeze({
     parse: (argument: string) => {
       const names = argument.split(',').map(name => name.trim());
       return names.length > 0 && names.every(name => name.length > 0);
     },
   }),
-  /**
-   * The 2026-11-07 selection/filter batch. These are **argument forms of
-   * canonical selectors**, not new names: the line still travels as one
-   * `cad_command` and the host re-parses/refuses it. `QSELECT`/`FILTER` accept
-   * the four properties; `GETSEL` is AutoCAD's narrower `LAYER`/`TYPE` form.
-   */
   QSELECT: Object.freeze({
     parse: (argument: string) => isPropertyFilter(argument),
   }),
@@ -356,14 +280,6 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   '-FIND': Object.freeze({
     parse: (argument: string) => isFindArgument(argument) && !argument.includes('=>'),
   }),
-  /**
-   * The 2026-11-07 utility/named-object batch. The host is still the authority
-   * for semantics; these local predicates only prevent an obviously malformed
-   * line from reaching the router. `PURGE` and `RENAME` accept the four named
-   * kinds (the host refuses the kinds without a DB API by name), `SETVAR` needs
-   * one variable token (the host owns the closed set), `MREDO` needs a positive
-   * integer and `MULTIPLE` needs one non-empty command name.
-   */
   PURGE: Object.freeze({
     parse: (argument: string) => ['LAYER', 'BLOCK', 'STYLE', 'LINETYPE']
       .includes(argument.trim().toUpperCase()),
@@ -381,15 +297,6 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   MULTIPLE: Object.freeze({
     parse: (argument: string) => argument.trim().length > 0,
   }),
-  /**
-   * The 2026-11-07 draw/modify batch. These mirror the host grammars exactly;
-   * the host remains the authority for the semantic checks (radius order,
-   * point count, style capacity) and refuses a bad value by name.
-   *
-   * `DONUT`/`HELIX`/`MLINE` take typed coordinates because this build has no
-   * centre/point pick prompt for them; `SOLID` takes 3-4 `x,y` pairs.
-   * `MLSTYLE`, `TREX`, `MPEDIT` and `DRAWORDER` are word grammars.
-   */
   DONUT: Object.freeze({
     parse: (argument: string) => {
       const parts = tokens(argument);
@@ -436,12 +343,6 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     parse: (argument: string) => ['FRONT', 'BACK', 'ABOVE', 'BELOW']
       .includes(argument.trim().toUpperCase()),
   }),
-  /**
-   * `VIEW SAVE <name>` / `RESTORE <name>` / `LIST` / `DELETE <name>` (2026-11-07)
-   * is the session-only named-view store. `-VIEW` is an alias of the same host
-   * selector, so it shares this grammar. The bare name is admitted by the base
-   * selector and refused by the host with its own missing-option sentence.
-   */
   VIEW: Object.freeze({
     parse: (argument: string) => {
       const parts = argument.trim().split(/\s+/).filter(part => part.length > 0);
@@ -454,19 +355,9 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return false;
     },
   }),
-  /**
-   * `VIEWGO <name>` (2026-11-07) restores one saved name; the name is the whole
-   * trimmed remainder and may contain spaces.
-   */
   VIEWGO: Object.freeze({
     parse: (argument: string) => argument.trim().length > 0,
   }),
-  /**
-   * `VPOINT <x> <y> <z>` or one of the six standard-view words (2026-11-07).
-   * Only the full words are admitted; the vector must be three signed plain
-   * decimals. A zero vector is admitted locally and refused by the host by name
-   * (`vpoint.invalid_vector`), so the button/line reports the real reason.
-   */
   VPOINT: Object.freeze({
     parse: (argument: string) => {
       const parts = argument.trim().split(/\s+/).filter(part => part.length > 0);
@@ -478,16 +369,6 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     },
   }),
 
-  /**
-   * The 2026-11-07 layout/viewport batch. These mirror the host grammars; the
-   * host remains the authority for layout-name validation, duplicate/unknown
-   * resolution and the named write refusals.
-   *
-   * `LAYOUT` takes a five-option grammar; `LAYOUTMERGE` and `LAYOUTWIZARD` take
-   * two-name / optional-paper forms; `VPORTS` takes two positive integers;
-   * `VPCLIP` takes only the RECT form; `VPSCALE` takes one name/ratio token; and
-   * `LAYVPI` takes a non-empty comma-separated layer list.
-   */
   LAYOUT: Object.freeze({
     parse: (argument: string) => {
       const parts = tokens(argument);
@@ -541,7 +422,63 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     parse: parseVportsGrid,
   }),
 
+  DIMSTYLE: Object.freeze({
+    parse: isDimStyleArgument,
+  }),
+  '-DIMSTYLE': Object.freeze({
+    parse: isDimStyleArgument,
+  }),
+  DIMTEDIT: Object.freeze({
+    parse: isDimTextEditArgument,
+  }),
+  DIMEDIT: Object.freeze({
+    parse: isDimEditArgument,
+  }),
+  DIMOVERRIDE: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return parts.length >= 2 && /^[A-Za-z][A-Za-z0-9_]*$/.test(parts[0]);
+    },
+  }),
+  DIMJOGLINE: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      const word = (parts[0] ?? '').toUpperCase();
+      if (word === 'REMOVE') return parts.length === 1;
+      return word === 'ADD' && parts.length === 3
+        && isSignedDecimal(parts[1]) && isSignedDecimal(parts[2]);
+    },
+  }),
+
 });
+
+/** `DIMSTYLE`/`-DIMSTYLE`: `LIST`, `CURRENT` or `SET <name>` (name may have spaces). */
+function isDimStyleArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  const word = (parts[0] ?? '').toUpperCase();
+  if (word === 'LIST' || word === 'CURRENT') return parts.length === 1;
+  return word === 'SET' && parts.length >= 2;
+}
+
+/** `DIMTEDIT`: `MOVE <x> <y>`, `ROTATE <degrees>` or `RESET`. */
+function isDimTextEditArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  const word = (parts[0] ?? '').toUpperCase();
+  if (word === 'RESET') return parts.length === 1;
+  if (word === 'MOVE') {
+    return parts.length === 3 && isSignedDecimal(parts[1]) && isSignedDecimal(parts[2]);
+  }
+  if (word === 'ROTATE') return parts.length === 2 && isSignedDecimal(parts[1]);
+  return false;
+}
+
+/** `DIMEDIT`: `TEXT <override>` (non-empty remainder) or `RESET`. */
+function isDimEditArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  const word = (parts[0] ?? '').toUpperCase();
+  if (word === 'RESET') return parts.length === 1;
+  return word === 'TEXT' && parts.length >= 2;
+}
 
 /** Split a typed argument into whitespace-separated tokens. */
 function tokens(argument: string): readonly string[] {
@@ -703,6 +640,12 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   // layout table / session space, so the start page disables all nine.
   'LAYOUT', 'LAYOUTMERGE', 'LAYOUTWIZARD', 'VPORTS', 'VPMAX', 'VPMIN', 'VPCLIP',
   'VPSCALE', 'LAYVPI',
+
+  // The 2026-11-07 dimension batch: the style reports and the two no-op reports
+  // read the open drawing, so the start page disables them with the same
+  // "no drawing is open" sentence. The edit commands are selection-gated and
+  // answer the no-document case through their own hint row.
+  'DIMSTYLE', '-DIMSTYLE', 'DIMREGEN', 'DIMDISASSOCIATE',
 
 ]);
 
@@ -915,6 +858,16 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   EXTRIM: Object.freeze({ count: 2, reasonKey: 'draw.kind.extrim.hint' }),
   MPEDIT: Object.freeze({ count: 1, reasonKey: 'draw.kind.mpedit.hint' }),
   DRAWORDER: Object.freeze({ count: 1, reasonKey: 'draw.kind.draworder.hint' }),
+  // The 2026-11-07 dimension-editing batch. DIMTEDIT needs **exactly** one
+  // dimension (the host refuses anything else); the rest need at least one.
+  // DIMBREAK's declared input is one dimension plus crossing objects, so its
+  // local minimum is two even though the host refuses the capability by name.
+  DIMTEDIT: Object.freeze({ count: 1, reasonKey: 'draw.kind.dimtedit.hint' }),
+  DIMEDIT: Object.freeze({ count: 1, reasonKey: 'draw.kind.dimedit.hint' }),
+  DIMOVERRIDE: Object.freeze({ count: 1, reasonKey: 'draw.kind.dimoverride.hint' }),
+  QDIM: Object.freeze({ count: 1, reasonKey: 'draw.kind.qdim.hint' }),
+  DIMJOGLINE: Object.freeze({ count: 1, reasonKey: 'draw.kind.dimjogline.hint' }),
+  DIMBREAK: Object.freeze({ count: 2, reasonKey: 'draw.kind.dimbreak.hint' }),
 });
 
 /**

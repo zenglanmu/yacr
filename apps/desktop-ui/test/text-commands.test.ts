@@ -58,7 +58,7 @@ test('the three text commands are annotate-group catalogue rows', () => {
     );
   }
   const order = COMMAND_CATALOG.map(command => command.id);
-  assert.equal(order.indexOf('TORIENT'), order.indexOf('DIMCONTINUE') + 3);
+  assert.ok(order.indexOf('TORIENT') > order.indexOf('DIMSPACE'), 'the text run follows the dimension run');
   assert.equal(order.indexOf('TCASE'), order.indexOf('TORIENT') + 1);
   assert.equal(order.indexOf('TXT2MTXT'), order.indexOf('TCASE') + 1);
 });

@@ -1,6 +1,5 @@
 //! Command dispatch and view/camera commands for [`Application`].
 use super::*;
-
 use crate::app_zoom::FitResult;
 
 impl Application {
@@ -53,6 +52,11 @@ impl Application {
             CommandId::SetVar | CommandId::Time | CommandId::DbList | CommandId::TreeStat => {
                 self.utility_report(session, &command)
             }
+            // The 2026-11-07 dimension batch: DIMSTYLE reports are read-only, and
+            // DIMREGEN/DIMDISASSOCIATE are explicit non-associative no-ops.
+            CommandId::DimStyle => self.dimstyle_command(&command),
+            CommandId::DimRegen => self.dim_regen(&command),
+            CommandId::DimDisassociate => self.dim_disassociate(&command),
             // MASSPROP / MEASUREGEOM RADIUS are report-only (Viewer-legal).
             CommandId::MassProp => self.mass_prop(session, &command),
             CommandId::MeasureGeom => self.measure_geom(session, &command),
@@ -509,6 +513,12 @@ impl Application {
             | CommandId::DimAligned
             | CommandId::DimRotated
             | CommandId::DimSpace
+            | CommandId::DimTextEdit
+            | CommandId::DimEdit
+            | CommandId::DimOverride
+            | CommandId::QDim
+            | CommandId::DimJogLine
+            | CommandId::DimBreak
             | CommandId::DimRadius
             | CommandId::DimDiameter
             | CommandId::DimCenter
