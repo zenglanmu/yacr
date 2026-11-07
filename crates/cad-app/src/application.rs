@@ -39,6 +39,14 @@ impl Application {
             CommandId::SelectAll => self.select_all(session, &command),
             CommandId::SelectSimilar => self.select_similar(session, &command),
             CommandId::SelectInBox => self.select_in_box(session, &command),
+            // Read-only inquiry commands: LIST and STATUS mutate nothing at all;
+            // FS mutates only the session selection. None of them opens a
+            // transaction, bumps a revision or records undo, so they are
+            // dispatched ahead of the entity-edit funnel (and stay out of
+            // `requires_work_mode`).
+            CommandId::List => self.list_objects(session, &command),
+            CommandId::Status => self.drawing_status(session, &command),
+            CommandId::Fs => self.selection_touching(session, &command),
             CommandId::FitDrawing => self.fit_drawing(session, &command),
             CommandId::RestoreLayers => {
                 // Drop temporary overrides; the drawing's own layer flags remain

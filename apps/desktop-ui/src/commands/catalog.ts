@@ -376,4 +376,10 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // last — no shipped row moves — and reuses the `diagnostics` glyph, the same
   // report the File tab's Diagnostics entry opens.
   { id: 'AUDIT', labelKey: 'audit.title', icon: 'diagnostics', group: 'file' },
+  // LIST (inquiry): selection-based property report; read-only and Viewer-legal.
+  { id: 'LIST', labelKey: 'draw.kind.list', icon: 'properties', group: 'annotate' },
+  // STATUS (inquiry): drawing statistics/modes/extents; document-scoped, read-only.
+  { id: 'STATUS', labelKey: 'draw.kind.status', icon: 'diagnostics', group: 'view' },
+  // FS (Express tool): command-line only in AutoCAD; direct-touch selection grower.
+  { id: 'FS', labelKey: 'draw.kind.fs', icon: 'selectAll', group: 'modify' },
 ]);

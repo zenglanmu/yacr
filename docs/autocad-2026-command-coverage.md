@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **44** |
-| **已实现合计（完整 + 部分）** | **94** |
-| 未实现 | **887** |
+| 部分实现（有写明的界） | **47** |
+| **已实现合计（完整 + 部分）** | **97** |
+| 未实现 | **884** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -77,6 +77,7 @@
 | `EXPORT` | 部分实现 | PLOT 别名：仅矢量 SVG/PDF |
 | `EXTEND` | 部分实现 | 目标仅 LINE/ARC；SPLINE/CIRCLE 目标拒绝 |
 | `FILLET` | 部分实现 | 两线形式 + 独立 FILLET POLYLINE 选择子；无 Multiple/Trim |
+| `FS` | 部分实现 | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把**直接**接触（相交或相切都算）的可见模型空间对象并入选择。默认 `FSMODE=OFF`：链式接触（`FSMODE=ON`）未实现；不展开块实例成员 |
 | `GRID` | 已实现 | — |
 | `HATCH` | 部分实现 | 整实体闭合边界 + LINE/ARC 边链；无 .pat/关联性/实时预览 |
 | `ID` | 已实现 | — |
@@ -91,6 +92,7 @@
 | `LAYUNISO` | 已实现 | — |
 | `LENGTHEN` | 部分实现 | 仅 LINE/ARC，只改末端 |
 | `LINE` | 已实现 | — |
+| `LIST` | 部分实现 | 读取**当前选择**而非 AutoCAD 的交互式 “Select objects”；逐对象报告 id/handle/type/layer/space/draw order、标准颜色/线型/线宽/透明度与几何摘要。不建模厚度/拉伸方向；不可寻址引用逐条报告后继续 |
 | `MATCHPROP` | 部分实现 | 只转移 layer/color/linetype/lineweight/transparency |
 | `MIRROR` | 部分实现 | 保留原件；拒绝 Text/MultiLeader |
 | `MLEADER` | 部分实现 | 单簇/2 顶点/仅直线；无 Options |
@@ -128,6 +130,7 @@
 | `SELECTSIMILAR` | 部分实现 | v1 仅按几何类型匹配并并入当前选择；无 layer/颜色/线型等属性匹配；仅模型空间 |
 | `SNAP` | 已实现 | — |
 | `SPLINE` | 已实现 | — |
+| `STATUS` | 部分实现 | 报告图形/数据库 id、修订、实体数（模型/图纸/块）、图层（off/frozen/locked）、块/线型/文字样式/标注样式/多重引线样式/布局数、模型空间范围、当前图层、会话模式与网格/捕捉/正交/对象捕捉状态、缩放历史深度。创建/编辑时间、内存、图形界限与基点**不跟踪**（无图形头模型），以 `status.not_tracked` 显式说明 |
 | `STRETCH` | 部分实现 | 恒交叉窗口；TEXT/MultiLeader 整命令拒绝 |
 | `TEXT` | 已实现 | — |
 | `TEXTEDIT` | 部分实现 | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
@@ -517,7 +520,7 @@
 | 374 | `FLATTEN` | 未实现 | Converts 3D geometry to a projected 2D representation. | — |
 | 375 | `FREESPOT` | 未实现 | Creates a free spotlight which is a spotlight without a specified target. | — |
 | 376 | `FREEWEB` | 未实现 | Creates a free web light which is a web light without a specified target. | — |
-| 377 | `FS` | 未实现 | Creates a selection set of all objects that touch the selected object. | — |
+| 377 | `FS` | 部分实现 | Creates a selection set of all objects that touch the selected object. | Express 工具、仅命令行；当前唯一选择为种子，并入**直接**接触（相交或相切）的可见模型空间对象（默认 FSMODE=OFF；链式 FSMODE=ON 未实现）；不展开块实例成员 |
 | 378 | `GATTE` | 未实现 | Globally changes attribute values for all instances of a specified block. | — |
 | 379 | `GCCOINCIDENT` | 未实现 | Constrains two points together or a point to a curve (or an extension of a curve). | — |
 | 380 | `GCCOLLINEAR` | 未实现 | Causes two or more line segments to lie along the same line. | — |
@@ -641,7 +644,7 @@
 | 498 | `LINE` | 已实现 | Create a series of contiguous line segments. Each segment is a line object that can be edited separately. | — |
 | 499 | `-LINETYPE` | 未实现 | At the Command prompt, loads, sets, and modifies linetypes. | — |
 | 500 | `LINETYPE` | 未实现 | Loads, sets, and modifies linetypes. | — |
-| 501 | `LIST` | 未实现 | Displays property data for selected objects. | — |
+| 501 | `LIST` | 部分实现 | Displays property data for selected objects. | 选择驱动（非交互式选取）；逐对象报告空间、图层、标准显示属性与几何摘要；厚度/拉伸方向不建模，显式说明 |
 | 502 | `LIVESECTION` | 未实现 | Turns on live sectioning for a selected section object. | — |
 | 503 | `LOAD` | 未实现 | Makes the symbols in compiled shape (SHX) files available for use by the SHAPE command. | — |
 | 504 | `LOFT` | 未实现 | Creates a 3D solid or surface in the space between several cross sections. | — |
@@ -958,7 +961,7 @@
 | 815 | `SPOTLIGHT` | 未实现 | Creates a spotlight that emits a directional cone of light. | — |
 | 816 | `SSX` | 未实现 | Creates a selection set based on a selected object. | — |
 | 817 | `STANDARDS` | 未实现 | Manages the association of standards files with drawings. | — |
-| 818 | `STATUS` | 未实现 | Displays drawing statistics, modes, and extents. | — |
+| 818 | `STATUS` | 部分实现 | Displays drawing statistics, modes, and extents. | 报告统计/模式/模型空间范围；创建/编辑时间、内存、图形界限与基点显式 `status.not_tracked`（无图形头模型） |
 | 819 | `STLOUT` | 未实现 | Stores 3D solids and watertight meshes in a format that can be used with stereolithography apparatus. | — |
 | 820 | `STRETCH` | 部分实现 | Stretches objects crossed by a selection window or polygon. | 恒交叉窗口；TEXT/MultiLeader 整命令拒绝 |
 | 821 | `-STYLE` | 未实现 | Creates, modifies, or specifies text styles. | — |

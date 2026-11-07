@@ -563,6 +563,7 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         launcherCommand: 'PROPERTIES',
         items: [
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties', large: true },
+          { id: 'LIST', labelKey: 'draw.kind.list', icon: 'properties', command: 'LIST', hintKey: 'draw.kind.list.hint' },
         ],
       },
       {
@@ -933,6 +934,7 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         items: [
           { id: 'fileinfo', labelKey: 'fileinfo.title', icon: 'info', action: 'fileinfo', large: true },
           { id: 'diagnostics', labelKey: 'diagnostics.title', icon: 'diagnostics', action: 'diagnostics', large: true },
+          { id: 'STATUS', labelKey: 'draw.kind.status', icon: 'diagnostics', command: 'STATUS', hintKey: 'draw.kind.status.hint' },
           { id: 'clean', labelKey: 'status.clean_screen', icon: 'cleanScreen', action: 'cleanScreen' },
         ],
       },

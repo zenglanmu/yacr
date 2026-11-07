@@ -844,53 +844,12 @@ pub enum CommandId {
     /// the linetype / the lineweight / the transparency are stored only. Work-only.
     SetLayerProperty,
     /// `PDMODE <n>`: write the drawing header's `$PDMODE` (the drawing-global
-    /// POINT display mode) from the command line.
-    ///
-    /// Payload is [`crate::CommandPayload::PointDisplayMode`] `i16` and is stored
-    /// **raw** in [`cad_db::DrawingDatabase`]: `0` dot, `1` none, `2` plus,
-    /// `3` cross, `4` vertical tick, plus the `32`/`64`/`96` surrounding-shape
-    /// bits and any value this build cannot express. Interpretation (including the
-    /// `overlay.point-mode-*` diagnostics) stays in the overlay; the database never
-    /// invents a marker shape and never rewrites the header.
-    ///
-    /// One real write is **one revision bump** and no entity change (published as
-    /// a `ChangeSet` through the ordinary "replace the document's
-    /// `Arc<DrawingDatabase>`" path), which is exactly what refreshes the display:
-    /// the render scene caches the POINT display style per base revision. Writing
-    /// the already stored value is an authoritative no-op (`before == after`, no
-    /// bump, a `(already stored, no change)` diagnostic).
-    ///
-    /// **No undo entry** — there is no header-variable patch kind in
-    /// `cad-history`, so this command deliberately records no history step rather
-    /// than fabricating an entity patch. That is a documented exception to
-    /// "one command = one undo step": UNDO cannot restore the previous mode.
-    ///
-    /// **Not a round-trip claim**: the DXF exporter does write `$PDMODE` (see
-    /// [`crate::app_drawing`]), so a SAVE→OPEN cycle keeps the value through our
-    /// own writer + reader — internal consistency only, never a vendor
-    /// compatibility claim. A source drawing's value is still overwritten by this
-    /// write, exactly as AutoCAD's `PDMODE` does.
-    ///
-    /// Work-only: it writes the document, so Viewer mode refuses it through
-    /// [`CommandId::requires_work_mode`] + [`crate::SessionState::authorize`]
-    /// (`CadError::PermissionDenied`). A bare `PDMODE` (no argument) is refused by
-    /// name — a missing payload is an explicit `InvalidInput`, never a fabricated
-    /// default. See [`crate::app_drawing`]'s `point_style` module.
+    /// POINT display mode) from the command line. Full contract:
+    /// [`crate::command_id::point_style`].
     SetPointDisplayMode,
     /// `PDSIZE <n>`: write the drawing header's `$PDSIZE` (the drawing-global
-    /// POINT display size) from the command line. Payload is
-    /// [`crate::CommandPayload::PointDisplaySize`] `f64`, stored **raw**: `> 0` an
-    /// absolute drawing-unit size, `0` the viewport-relative DWG default, `< 0` a
-    /// percentage of the viewport height. A non-finite value is refused as
-    /// `InvalidInput` by both this command and the database write.
-    ///
-    /// One real write is one revision bump with no entity change (the display
-    /// refresh signal, see [`CommandId::SetPointDisplayMode`]); the stored value is
-    /// a no-op, and **no undo entry** is recorded (no header patch kind). The DXF
-    /// exporter writes `$PDSIZE`, so a SAVE→OPEN cycle keeps it.
-    ///
-    /// Work-only (a document mutation; Viewer is `PermissionDenied`). A bare
-    /// `PDSIZE` is refused by name.
+    /// POINT display size) from the command line. Full contract:
+    /// [`crate::command_id::point_style`].
     SetPointDisplaySize,
     /// Flip the idle hover entity preview for this session. Session/display
     /// state only (no database write, no history, no ChangeSet), so it is
@@ -987,6 +946,27 @@ pub enum CommandId {
     /// `RAY` (Work-only): the positive half of an infinite construction line,
     /// stored as a finite clipped segment; see [`crate::command_id::construction_line`].
     CreateRay,
+    /// `LIST` (Viewer and Work): report the stored property data of every
+    /// selected object as diagnostics. Selection-based (this build reads the
+    /// current selection instead of AutoCAD's interactive "Select objects"
+    /// prompt), read-only: no database write, revision bump or undo entry. It
+    /// reports the entity's space and canonical
+    /// colour/linetype/lineweight/transparency; thickness and extrusion are not
+    /// modelled and say so. See `crate::app_drawing::inquiry`.
+    List,
+    /// `STATUS` (Viewer and Work): report drawing statistics, modes and the
+    /// model-space extent. Payload-free and document-scoped; read-only. Drawing
+    /// creation/edit time, memory usage, limits and the base point are explicitly
+    /// not tracked (no drawing-header model). See `crate::app_drawing::inquiry`.
+    Status,
+    /// `FS` (Viewer and Work): an **Express tool** (command-line only) that adds
+    /// every visible model-space entity directly touching the one selected seed
+    /// to the current selection (a union, never a replacement). This is AutoCAD's
+    /// default `FSMODE=OFF`: no transitive chain (`FSMODE=ON` is NOT
+    /// IMPLEMENTED), and crossing and tangent contacts both count. Read-only
+    /// except for the session selection; block-instance members are not
+    /// enumerated. See `crate::app_drawing::inquiry`.
+    Fs,
 }
 
 mod capabilities;
@@ -997,4 +977,5 @@ pub mod construction_line;
 pub mod grip_stretch;
 pub mod hatch;
 pub mod match_prop;
+pub mod point_style;
 pub mod zoom;

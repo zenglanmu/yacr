@@ -182,7 +182,7 @@ export const GESTURE_ONLY_COMMANDS: readonly string[] = Object.freeze(['ORBIT'])
  * "a drawing is the whole requirement" (see `SELECTION_REQUIREMENTS`, which
  * answers the no-document case for selection-gated commands itself).
  */
-export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT']);
+export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS']);
 
 /** One command's precondition on the **current selection**. */
 export interface SelectionRequirement {
@@ -280,6 +280,10 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // reason it cannot run. Like LAYON/LAYUNISO its entry exists for the "no drawing
   // is open" answer only.
   LAYERP: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
+  // LIST reports the current selection; zero objects is `list.selection`.
+  LIST: Object.freeze({ count: 1, reasonKey: 'draw.kind.list.hint' }),
+  // FS needs exactly one seed; two or more is refused by the host by name.
+  FS: Object.freeze({ count: 1, reasonKey: 'draw.kind.fs.hint' }),
 });
 
 /**
