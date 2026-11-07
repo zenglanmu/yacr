@@ -114,14 +114,14 @@
 | `POLYGON` | 已实现 | — |
 | `PROPERTIES` | 已实现 | chrome 本地选择子：打开特性面板 |
 | `PROPERTIESCLOSE` | 已实现 | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
-| `QSAVE` | 部分实现 | SAVE 别名：有损 DXF 另存，无 DWG 回写 |
+| `QSAVE` | 部分实现 | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
 | `RAY` | 部分实现 | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | `RECTANG` | 已实现 | — |
 | `REDO` | 已实现 | — |
 | `REVCLOUD` | 部分实现 | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
 | `ROTATE` | 已实现 | — |
-| `SAVE` | 部分实现 | 有损 DXF 另存；无 DWG 回写 |
-| `SAVEAS` | 部分实现 | SAVE 别名：有损 DXF 另存，无 DWG 回写 |
+| `SAVE` | 部分实现 | 有损 DXF 另存；源为 `.dwg` 时可**实验性导出 DWG**（上游 `acadrust::DwgWriter`，新文件、默认 `<stem>-export.dwg`、绝不覆盖源）；DWG 导出有损/不完整，仅合成 self-roundtrip 证据，vendor/AutoCAD **NOT VERIFIED** |
+| `SAVEAS` | 部分实现 | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
 | `SCALE` | 已实现 | — |
 | `SCALETEXT` | 已实现 | — |
 | `SELECT` | 部分实现 | 以选择载荷设置会话选择；不是 AutoCAD 的交互式 SELECT |
@@ -837,7 +837,7 @@
 | 694 | `QLEADER` | 未实现 | Creates a leader and leader annotation. | — |
 | 695 | `QNEW` | 未实现 | Starts a new drawing from a specified drawing template file. | — |
 | 696 | `QQUIT` | 未实现 | Closes all open drawings and exit. | — |
-| 697 | `QSAVE` | 部分实现 | Saves the current drawing using the specified default file format. | SAVE 别名：有损 DXF 另存，无 DWG 回写 |
+| 697 | `QSAVE` | 部分实现 | Saves the current drawing using the specified default file format. | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
 | 698 | `QSELECT` | 未实现 | Creates a selection set based on filtering criteria. | — |
 | 699 | `QTEXT` | 未实现 | Controls the display and plotting of text and attribute objects. | — |
 | 700 | `QUICKCALC` | 未实现 | Opens the QuickCalc calculator. | — |
@@ -905,7 +905,7 @@
 | 762 | `RULESURF` | 未实现 | Creates a mesh that represents the surface between two lines or curves. | — |
 | 763 | `SAVE` | 部分实现 | Saves the current drawing under a different file name or location without changing which drawing file is the current one. | 有损 DXF 另存；无 DWG 回写 |
 | 764 | `SAVEALL` | 未实现 | Save all open drawings. | — |
-| 765 | `SAVEAS` | 部分实现 | Saves a copy of the current drawing under a new file name or location. | SAVE 别名：有损 DXF 另存，无 DWG 回写 |
+| 765 | `SAVEAS` | 部分实现 | Saves a copy of the current drawing under a new file name or location. | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
 | 766 | `SAVEIMG` | 未实现 | Saves a rendered image to a file. | — |
 | 767 | `SAVETOWEBMOBILE` | 未实现 | Saves a copy of the current drawing to your Autodesk Account. | — |
 | 768 | `SCALE` | 已实现 | Enlarges or reduces selected objects, keeping the proportions of the object the same after scaling. | — |

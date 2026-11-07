@@ -17,10 +17,13 @@ Document capabilities are advertised from `src-tauri/src/policy.rs`
   funnel. The wildcard MIME is deliberate: `.dwg` providers often report
   `application/octet-stream`.
 - **Save** — SAF `ACTION_CREATE_DOCUMENT` (`application/octet-stream`,
-  `EXTRA_TITLE`) followed by a **DXF export copy** through
-  `ContentResolver.openOutputStream(uri, "wt")`. DWG save stays an explicit
-  deferred refusal (`save.dwg_deferred`), and overwriting the opened source URI
-  is refused. New and Plot remain unsupported.
+  `EXTRA_TITLE`) followed by an **export copy** through
+  `ContentResolver.openOutputStream(uri, "wt")`: DXF by default, or the
+  **experimental DWG** export when the opened source is `.dwg` (default new name
+  `<stem>-export.dwg`). Overwriting the opened source URI is refused (SAF URI
+  guard plus the host's normalized-name backstop). DWG output has synthetic
+  acadrust self-roundtrip evidence only; device/AutoCAD are **NOT VERIFIED**.
+  New and Plot remain unsupported.
 - **External "Open with"** — `.dwg` VIEW filters come from
   `bundle.fileAssociations` (tauri-build injects them into the committed
   manifest); `MainActivity` handles cold (`onCreate`) and warm (`onNewIntent`)

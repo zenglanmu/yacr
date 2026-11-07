@@ -282,7 +282,9 @@ bundle**，必须显式 `--directory <bundle-dir>`，且目录须含 `index.html
 ## 平台无关摘要
 
 - **renderer-only wgpu**：只有 `cad-render-wgpu` 依赖 wgpu。
-- **importer-only acadrust**：只有 `cad-import-acadrust` 依赖 acadrust；**禁止 Cargo patch**。
+- **importer-only acadrust**：只有 `cad-import-acadrust` 依赖 acadrust；根 `[patch.crates-io]` 只允许
+  单个 `acadrust` 键，必须固定版本/revision 并在 `docs/acadrust-patches.md` 登记（ADR-0031），其它
+  patch 一律拒绝；当前 `0.6.8` 未修改。
 - **UI 工具包中立**：`cad-host` 不依赖任何 UI 工具包；平台无关 UI 逻辑在 `cad-ui-core`。
   `check-architecture.py` 会拒绝任何 workspace 直接 `slint`/`slint-build`/`iced` 依赖。
 - `cad-db` 是唯一权威数据源；UI 与渲染均为派生。

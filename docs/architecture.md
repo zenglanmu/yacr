@@ -176,7 +176,9 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   `PlatformFiles`/`ConfigStore`/`SurfaceSource` 契约（事件式、无 futures、无 `Send`），
   宿主特有的路径/对话框/表面度量只存在于 `app-*`。Slint 桌面退役后 `cad-host` 不再依赖任何 UI crate。
 - **renderer-only wgpu**：`cad-render-wgpu` 是唯一依赖 wgpu 的 crate。**importer-only acadrust**：
-  `cad-import-acadrust` 是唯一依赖 acadrust 的 crate；**禁止 Cargo patch**。
+  `cad-import-acadrust` 是唯一依赖 acadrust 的 crate；根 `[patch.crates-io]` 只允许单个 `acadrust`
+  键、必须固定版本/revision 并在 `docs/acadrust-patches.md` 登记（ADR-0031），其它 patch 一律拒绝；
+  当前上游未修改。
 - ChangeSet revision 不连续时重建快照；元数据不默认引发曲线重新离散。
 - 测量结果锚点由原始 handle + instance path + subelement + 坐标回退构成；GPU 索引不是身份。
 - TaskStamp 不匹配拒绝发布；取消不可中断库调用时至少阻止结果进入当前会话。
