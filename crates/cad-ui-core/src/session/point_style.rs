@@ -100,6 +100,15 @@ impl CadSession {
             super::commands::VIEW_SELECTOR => self.view_state_argument(argument, text),
             super::commands::VIEWGO_SELECTOR => self.view_go_argument(argument, text),
             super::commands::VPOINT_SELECTOR => self.vpoint_argument(argument, text),
+            // The 2026-11-07 layout/viewport batch typed forms.
+            super::commands::LAYOUT_SELECTOR
+            | super::commands::LAYOUTMERGE_SELECTOR
+            | super::commands::LAYOUTWIZARD_SELECTOR
+            | super::commands::VPORTS_SELECTOR
+            | super::commands::VPCLIP_SELECTOR
+            | super::commands::VPSCALE_SELECTOR
+            | super::commands::LAYVPI_SELECTOR => self.layout_argument(selector, argument, text),
+
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

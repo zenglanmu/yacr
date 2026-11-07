@@ -826,13 +826,10 @@ pub enum CommandPayload {
     ///   codes; `1` = Left/Top, `5` = Center/Middle, `9` = Right/Bottom), so
     ///   `TextAlignV::Baseline` is never produced by the interactive path.
     ///
-    /// **Not carried, because not modelled** — the same four facets the importer
-    /// marks `Partial` under `MTEXT_UNMODELLED`: line-spacing style
-    /// (`text.line_spacing_style_unsupported`), columns
-    /// (`text.columns_unsupported`), background fill
-    /// (`text.background_unsupported`) and drawing direction
-    /// (`text.drawing_direction_unsupported`). There is deliberately no field for
-    /// any of them, so no caller can believe one is honoured.
+    /// **Not carried, because not modelled**: line-spacing style, columns,
+    /// background fill and drawing direction (the importer's `MTEXT_UNMODELLED`
+    /// facets). No field exists for any of them, so none can be believed to be
+    /// honoured.
     ///
     /// The style/font resolution is the one `Text` creation uses, and the stored
     /// `type_key` is `AcDbMText` (not `Text`'s `AcDbText`), so this command can
@@ -996,4 +993,7 @@ pub enum CommandPayload {
     View(ViewCommand),
     ViewGo(String),
     VPoint(VPointInput),
+    /// The 2026-11-07 layout/viewport batch; contract:
+    /// [`crate::command_id::layout`].
+    Layout(Box<crate::LayoutPayload>),
 }

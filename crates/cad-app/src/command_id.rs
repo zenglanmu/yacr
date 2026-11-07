@@ -903,6 +903,38 @@ pub enum CommandId {
     /// camera viewing direction. A zero or non-finite vector is refused; the
     /// command never changes the model.
     VPoint,
+    /// `LAYOUT LIST|NEW|RENAME|DELETE|SET`: read/list the layout table and
+    /// switch the active space. Creation/rename/delete are named refusals
+    /// because `cad-db` has no post-import layout write API. Contract:
+    /// [`crate::command_id::layout`].
+    Layout,
+    /// `LAYOUTMERGE <source> <target>`: named refusal (no layout/entity move
+    /// API). Contract: [`crate::command_id::layout`].
+    LayoutMerge,
+    /// `LAYOUTWIZARD <name> [<paper> <width> <height>]`: named refusal (no page
+    /// setup/layout creation API). Contract: [`crate::command_id::layout`].
+    LayoutWizard,
+    /// `VPORTS <rows> <cols>` (`-VPORTS` alias): named refusal (no viewport
+    /// creation API). Contract: [`crate::command_id::layout`].
+    Vports,
+    /// `VPMAX`: maximize the active paper layout's first viewport in session
+    /// state only. Contract: [`crate::command_id::layout`].
+    VpMax,
+    /// `VPMIN`: restore the maximized viewport; empty state is a named no-op.
+    /// Contract: [`crate::command_id::layout`].
+    VpMin,
+    /// `VPCLIP RECT <minx> <miny> <maxx> <maxy>`: named refusal for the
+    /// viewport clip write; polygonal clips are NOT IMPLEMENTED. Contract:
+    /// [`crate::command_id::layout`].
+    VpClip,
+    /// `VPSCALE <scale>`: named refusal for the viewport scale write; the
+    /// drawing's scale table is the authority. Contract:
+    /// [`crate::command_id::layout`].
+    VpScale,
+    /// `LAYVPI <layer>[,<layer>...]`: named refusal — this build has no
+    /// per-viewport layer state, so it never freezes layers globally. Contract:
+    /// [`crate::command_id::layout`].
+    LayVpi,
 }
 
 mod capabilities;
@@ -925,6 +957,7 @@ pub mod hatch_generate_boundary;
 pub mod hatch_to_back;
 pub mod hatchedit;
 pub mod layers;
+pub mod layout;
 pub mod massprop;
 pub mod match_prop;
 pub mod measuregeom;

@@ -32,7 +32,7 @@ import { readCatalog, readModule } from './helpers.ts';
 // Only the names this suite exercises. `ORBIT` is here because the router does
 // know it — the chrome still refuses a click, which is the point of the gesture
 // list, not a missing vocabulary entry.
-setCommandCatalog(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK', 'LAYERSTATE', 'LTSCALE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'SSX', 'SELECTCOUNT', '-FIND', 'FIND', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS', 'PURGE', 'RENAME', 'SETVAR', 'TIME', 'DBLIST', 'TREESTAT', 'MREDO', 'MULTIPLE', 'REDRAW', 'REDRAWALL', 'REGEN', 'REGENALL', 'VIEW', 'VIEWGO', 'VIEWBACK', 'VIEWFORWARD', 'VPOINT', 'ORBIT', 'FIT', 'PAN', 'ZOOMIN', 'ZOOMOUT']);
+setCommandCatalog(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK', 'LAYERSTATE', 'LTSCALE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'SSX', 'SELECTCOUNT', '-FIND', 'FIND', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS', 'PURGE', 'RENAME', 'SETVAR', 'TIME', 'DBLIST', 'TREESTAT', 'MREDO', 'MULTIPLE', 'REDRAW', 'REDRAWALL', 'REGEN', 'REGENALL', 'VIEW', 'VIEWGO', 'VIEWBACK', 'VIEWFORWARD', 'VPOINT', 'LAYOUT', 'LAYOUTMERGE', 'LAYOUTWIZARD', 'VPORTS', 'VPMAX', 'VPMIN', 'VPCLIP', 'VPSCALE', 'LAYVPI', 'ORBIT', 'FIT', 'PAN', 'ZOOMIN', 'ZOOMOUT']);
 
 
 const zh = await readCatalog('zh-CN');
@@ -190,7 +190,8 @@ test('standard views and the 3D toggles need an open drawing, with a real reason
   // The toggles that are payload-free router commands are gated on a document
   // the same way (disabled, not "unsupported", on the start page). `PLAN` is the
   // 2D-plan selector in the same group.
-  assert.deepEqual([...DOCUMENT_SCOPED_COMMANDS], ['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK', 'LAYERSTATE', 'LTSCALE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'SSX', 'SELECTCOUNT', '-FIND', 'FIND', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS', 'PURGE', 'RENAME', 'SETVAR', 'TIME', 'DBLIST', 'TREESTAT', 'MREDO', 'MULTIPLE', 'REDRAW', 'REDRAWALL', 'REGEN', 'REGENALL', 'VIEW', 'VIEWGO', 'VIEWBACK', 'VIEWFORWARD', 'VPOINT']);
+  assert.deepEqual([...DOCUMENT_SCOPED_COMMANDS], ['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK', 'LAYERSTATE', 'LTSCALE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'SSX', 'SELECTCOUNT', '-FIND', 'FIND', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS', 'PURGE', 'RENAME', 'SETVAR', 'TIME', 'DBLIST', 'TREESTAT', 'MREDO', 'MULTIPLE', 'REDRAW', 'REDRAWALL', 'REGEN', 'REGENALL', 'VIEW', 'VIEWGO', 'VIEWBACK', 'VIEWFORWARD', 'VPOINT', 'LAYOUT', 'LAYOUTMERGE', 'LAYOUTWIZARD', 'VPORTS', 'VPMAX', 'VPMIN', 'VPCLIP', 'VPSCALE', 'LAYVPI']);
+
 
   for (const id of DOCUMENT_SCOPED_COMMANDS) {
     // A document-scoped command with a selection precondition is admitted only

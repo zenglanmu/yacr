@@ -1320,6 +1320,17 @@
   "draw.kind.viewforward.hint": "Returns to a view you stepped back from; an empty forward history changes nothing.",
   "draw.kind.vpoint": "Viewpoint",
   "draw.kind.vpoint.hint": "VPOINT <x> <y> <z> or TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT. The vector form is a 3D observation; a zero vector is refused.",
-  "ribbon.panel.viewstate": "View state"
+  "ribbon.panel.viewstate": "View state",
+  "draw.kind.layout": "Layout (LAYOUT)",
+  "draw.kind.layoutmerge": "Merge layouts (LAYOUTMERGE)",
+  "draw.kind.layoutwizard": "Layout wizard (LAYOUTWIZARD)",
+  "draw.kind.vports": "Viewport grid (VPORTS)",
+  "draw.kind.vpmax": "Maximize viewport (VPMAX)",
+  "draw.kind.vpmin": "Restore viewport (VPMIN)",
+  "draw.kind.vpclip": "Clip viewport (VPCLIP)",
+  "draw.kind.vpscale": "Viewport scale (VPSCALE)",
+  "draw.kind.layvpi": "Viewport layer freeze (LAYVPI)"
+
+
 
 }

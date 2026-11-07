@@ -62,7 +62,8 @@ test('the local grammar mirrors the host: a positive decimal, ALL or EXTENTS', (
   // is a positive decimal spacing only — `ALL`/`EXTENTS` mean nothing there; the
   // sysvars take one plain decimal, zero/negative included, and are covered in
   // `point-display-sysvar.test.ts`).
-  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE', 'SPACE', 'TORIENT', 'TCASE', 'PEDIT', 'HATCHEDIT', 'MEASUREGEOM', 'JUSTIFYTEXT', 'TJUST', 'TSCALE', 'TEXTALIGN', 'TCOUNT', 'TCIRCLE', 'LTSCALE', 'LAYERPMODE', 'LAYERSTATE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'FIND', '-FIND', 'PURGE', 'RENAME', 'SETVAR', 'MREDO', 'MULTIPLE', 'DONUT', 'SOLID', 'HELIX', 'MLINE', 'MLSTYLE', 'TREX', 'MPEDIT', 'DRAWORDER', 'VIEW', 'VIEWGO', 'VPOINT']);
+  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE', 'SPACE', 'TORIENT', 'TCASE', 'PEDIT', 'HATCHEDIT', 'MEASUREGEOM', 'JUSTIFYTEXT', 'TJUST', 'TSCALE', 'TEXTALIGN', 'TCOUNT', 'TCIRCLE', 'LTSCALE', 'LAYERPMODE', 'LAYERSTATE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'FIND', '-FIND', 'PURGE', 'RENAME', 'SETVAR', 'MREDO', 'MULTIPLE', 'DONUT', 'SOLID', 'HELIX', 'MLINE', 'MLSTYLE', 'TREX', 'MPEDIT', 'DRAWORDER', 'VIEW', 'VIEWGO', 'VPOINT', 'LAYOUT', 'LAYOUTMERGE', 'LAYOUTWIZARD', 'VPORTS', 'VPCLIP', 'VPSCALE', 'LAYVPI', '-VPORTS']);
+
 
   const snapUnit = ARGUMENT_COMMANDS.SNAPUNIT.parse;
   for (const admitted of ['25', '0.5', '2.5', '10.0']) {

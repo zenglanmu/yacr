@@ -478,11 +478,82 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     },
   }),
 
+  /**
+   * The 2026-11-07 layout/viewport batch. These mirror the host grammars; the
+   * host remains the authority for layout-name validation, duplicate/unknown
+   * resolution and the named write refusals.
+   *
+   * `LAYOUT` takes a five-option grammar; `LAYOUTMERGE` and `LAYOUTWIZARD` take
+   * two-name / optional-paper forms; `VPORTS` takes two positive integers;
+   * `VPCLIP` takes only the RECT form; `VPSCALE` takes one name/ratio token; and
+   * `LAYVPI` takes a non-empty comma-separated layer list.
+   */
+  LAYOUT: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      const [option, ...rest] = parts;
+      if (option === undefined) return false;
+      const upper = option.toUpperCase();
+      if (upper === 'LIST') return rest.length === 0;
+      if (upper === 'NEW' || upper === 'DELETE' || upper === 'SET') return rest.length > 0;
+      return upper === 'RENAME' && rest.length >= 2;
+    },
+  }),
+  LAYOUTMERGE: Object.freeze({
+    parse: (argument: string) => tokens(argument).length >= 2,
+  }),
+  LAYOUTWIZARD: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      if (parts.length === 1) return true;
+      return parts.length === 4 && isPositiveDecimal(parts[2]) && isPositiveDecimal(parts[3]);
+    },
+  }),
+  VPORTS: Object.freeze({
+    parse: parseVportsGrid,
+  }),
+  VPCLIP: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      // The host names a non-RECT boundary (`vpclip.polygonal_not_implemented`),
+      // so the chrome admits the shape and lets that refusal speak.
+      return parts.length === 5 && parts.slice(1).every(isSignedDecimal);
+    },
+  }),
+  VPSCALE: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      if (parts.length !== 1) return false;
+      if (!parts[0].includes(':')) return true;
+      const ratio = parts[0].split(':');
+      return ratio.length === 2 && ratio.every(isSignedDecimal);
+    },
+  }),
+  LAYVPI: Object.freeze({
+    parse: (argument: string) => {
+      const parts = argument.split(',').map(part => part.trim());
+      return parts.length > 0 && parts.every(part => part.length > 0);
+    },
+  }),
+  // `-VPORTS` is an alias spelling; it shares the canonical grid grammar so a
+  // typed `-VPORTS 2 3` is not refused locally before the host can normalize it.
+  '-VPORTS': Object.freeze({
+    parse: parseVportsGrid,
+  }),
+
 });
 
 /** Split a typed argument into whitespace-separated tokens. */
 function tokens(argument: string): readonly string[] {
   return argument.trim().split(/\s+/).filter(part => part.length > 0);
+}
+
+/** `VPORTS <rows> <cols>` / `-VPORTS`: two positive whole numbers. */
+function parseVportsGrid(argument: string): boolean {
+  const parts = tokens(argument);
+  return parts.length === 2
+    && /^[0-9]+$/.test(parts[0]) && /^[0-9]+$/.test(parts[1])
+    && Number(parts[0]) >= 1 && Number(parts[1]) >= 1;
 }
 
 /** Whether `text` is one `x,y` pair of finite signed decimals. */
@@ -628,6 +699,11 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   // "no drawing is open" sentence.
   'REDRAW', 'REDRAWALL', 'REGEN', 'REGENALL', 'VIEW', 'VIEWGO', 'VIEWBACK', 'VIEWFORWARD',
   'VPOINT',
+  // The 2026-11-07 layout/viewport batch reads or writes the open drawing's
+  // layout table / session space, so the start page disables all nine.
+  'LAYOUT', 'LAYOUTMERGE', 'LAYOUTWIZARD', 'VPORTS', 'VPMAX', 'VPMIN', 'VPCLIP',
+  'VPSCALE', 'LAYVPI',
+
 ]);
 
 /** One command's precondition on the **current selection**. */

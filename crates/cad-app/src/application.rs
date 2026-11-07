@@ -184,6 +184,19 @@ impl Application {
                 }
                 self.switch_space_command(session, &command, SpaceId::Model)
             }
+            // The 2026-11-07 layout/viewport batch. Read/list and the space
+            // switch are real; every write is a named refusal because cad-db has
+            // no post-import layout/viewport write API.
+            CommandId::Layout
+            | CommandId::LayoutMerge
+            | CommandId::LayoutWizard
+            | CommandId::Vports
+            | CommandId::VpClip
+            | CommandId::VpScale
+            | CommandId::LayVpi => self.layout_command(session, &command),
+            // `VPMAX`/`VPMIN` are session display state only (no drawing write).
+            CommandId::VpMax => self.vp_max(session, &command),
+            CommandId::VpMin => self.vp_min(session, &command),
             CommandId::Measure => self.measure(session, &command),
             // `AREA OBJECT`: the exact area of one **selected** closed entity,
             // computed from its stored geometry (never from picked points). A

@@ -160,6 +160,15 @@ impl CommandId {
                 | Self::Extrim
                 | Self::Mpedit
                 | Self::DrawOrder
+                // The 2026-11-07 layout batch. `Layout` stays Viewer-legal for
+                // LIST/SET; its write forms refuse by name without writing.
+                // VPMAX/VPMIN are session-only and also stay Viewer-legal.
+                | Self::LayoutMerge
+                | Self::LayoutWizard
+                | Self::Vports
+                | Self::VpClip
+                | Self::VpScale
+                | Self::LayVpi
         )
     }
 }

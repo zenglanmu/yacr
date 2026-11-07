@@ -104,6 +104,10 @@ export const HOST_NAMES = [
   // in for the loaded `cad_commands` vocabulary and never proves the host
   // advertises it.
   'PLAN',
+  // The 2026-11-07 layout/viewport batch (canonical selectors plus the
+  // `-VPORTS` alias, which `isSupportedCommand` sees only through this mirror).
+  'LAYOUT', 'LAYOUTMERGE', 'LAYOUTWIZARD', 'VPORTS', '-VPORTS', 'VPMAX', 'VPMIN', 'VPCLIP',
+  'VPSCALE', 'LAYVPI',
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER', 'DIMANGULAR', 'DIMORDINATE', 'DIMBASELINE', 'DIMCONTINUE',
   // DIMROTATED (AutoCAD 2026) is a canonical selector of its own (a linear
   // dimension at the session `dimRotation` angle); the Rust lane adds the same
