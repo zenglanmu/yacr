@@ -823,6 +823,9 @@ impl DrawTool {
             DrawToolKind::HatchPoint => DrawIntent::HatchPoint {
                 seed: self.points[0],
             },
+            // BOUNDARY: the one captured internal point; discovery and loop
+            // conversion belong to the command layer.
+            DrawToolKind::Boundary => DrawIntent::Boundary { seed: a },
             // DIVIDE/LENGTHEN: handled by the early returns above (zero captured
             // points). The arms are unreachable here but keep the match exhaustive.
             DrawToolKind::Divide => DrawIntent::Divide,

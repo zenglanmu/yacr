@@ -123,8 +123,8 @@ test('HATCH closes the draw command group on both draw panels, as a router comma
     // objects it edits: `OFFSET` → `TEXT` → `MTEXT` → `SCALETEXT` → `MLEADER` →
     // `HATCH` → `HATCHPOINT`.
     assert.deepEqual(
-      panel.items.slice(-8).map(item => item.id),
-      ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT', 'REVCLOUD'],
+      panel.items.slice(-9).map(item => item.id),
+      ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT', 'BOUNDARY', 'REVCLOUD'],
       tabId,
     );
     const item = panel.items.find(candidate => candidate.id === 'HATCH');

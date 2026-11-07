@@ -201,6 +201,10 @@ pub fn draw_preview_overlay(
         // cursor/chain. The boundary is discovered from the database at commit, so
         // no candidate ring is fabricated here.
         | DrawToolKind::HatchPoint
+        // BOUNDARY has the same one-internal-point shape: the live preview is the
+        // existing cursor/chain; the discovered loops are built at commit, so no
+        // candidate polyline is fabricated here.
+        | DrawToolKind::Boundary
         // ALIGN captures four free points (two source/destination pairs); STRETCH
         // captures four free points (two window corners plus a base and a
         // displacement point). Both use the existing cursor/chain preview (no new

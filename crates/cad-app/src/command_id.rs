@@ -514,24 +514,17 @@ pub enum CommandId {
     /// ([`crate::draw_tool::ToolParameter::HatchPatternType`] … `HatchStyle`) the
     /// pre-selection HATCH reads.
     ///
-    /// Declared v1 limits (the code does not claim more):
-    ///
-    /// * only **whole visible** `Circle`, full `Ellipse` and closed `Polyline`
-    ///   entities are candidates; `LINE`/`ARC` edge chains are **not**
-    ///   auto-discovered and the current selection is **not** used;
-    /// * only boundaries in the picked point's `+Z` plane (same elevation) are
-    ///   considered — other planes, hidden layers and unresolved refs are
-    ///   skipped, never projected or invented;
-    /// * the seed must be clearly inside or outside: on-edge, no-boundary and
-    ///   equal-area-ambiguous picks are explicit refusals (`hatch.boundary_on_edge`,
-    ///   `hatch.boundary_not_found`, `hatch.boundary_ambiguous`), never guesses;
-    /// * one transaction / one undo step on the active layer, boundary entities
-    ///   retained; **no associativity**;
-    /// * the existing `HatchGeometry::new` chord/bulge validation blind spot still
-    ///   applies to bulged loops.
-    ///
-    /// Work-only (Viewer mode refuses it at the command layer).
+    /// The shared internal-point discovery and every declared v1 limit (whole
+    /// visible `Circle`/full `Ellipse`/closed `Polyline` only, `+Z` plane only,
+    /// on-edge/no-boundary/ambiguous refusals, one transaction, no associativity)
+    /// are documented once in [`crate::command_id::boundary`]. Work-only (Viewer
+    /// mode refuses it at the command layer).
     HatchPoint,
+    /// BOUNDARY (Work-only): one closed, non-associative polyline per boundary
+    /// loop discovered from one internal point, on the active layer, in one
+    /// transaction. Source entities are retained; `-BOUNDARY` options are NOT
+    /// IMPLEMENTED. Full contract: [`crate::command_id::boundary`].
+    Boundary,
     /// HATCHGENERATEBOUNDARY: see [`crate::command_id::hatch_generate_boundary`].
     HatchGenerateBoundary,
     /// HATCHTOBACK: see [`crate::command_id::hatch_to_back`].
@@ -966,12 +959,18 @@ pub enum CommandId {
     Torient,
     TCase,
     Txt2MText,
+    /// `TEXTTOFRONT` (Work-only): rewrite the selected text/leader/dimension
+    /// draw order above every non-eligible model-space object. Payload `None`;
+    /// the current selection is the input. Full contract:
+    /// [`crate::command_id::texttofront`].
+    TextToFront,
 }
 
 mod capabilities;
 
 pub mod area_object;
 pub mod block_define;
+pub mod boundary;
 pub mod break_at_point;
 pub mod construction_line;
 pub mod dimension_chain;
@@ -990,4 +989,5 @@ pub mod pedit;
 pub mod point_style;
 pub mod reverse;
 pub mod text_commands;
+pub mod texttofront;
 pub mod zoom;

@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 57] = [
+    pub const ALL: [DrawToolKind; 58] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -145,6 +145,9 @@ impl DrawToolKind {
         DrawToolKind::PolygonCircumscribed,
         // DIMROTATED: three free points, angle from the session parameter channel.
         DrawToolKind::DimRotated,
+        // BOUNDARY is appended for the same index-stability reason: it is a real
+        // one-internal-point capture started by its command selector.
+        DrawToolKind::Boundary,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -207,6 +210,7 @@ impl DrawToolKind {
             Self::CircleDiameter => "circlediameter",
             Self::Wipeout => "wipeout",
             Self::PolygonCircumscribed => "polygoncircumscribed",
+            Self::Boundary => "boundary",
         }
     }
 
@@ -271,6 +275,7 @@ impl DrawToolKind {
             "circlediameter" => Some(Self::CircleDiameter),
             "wipeout" => Some(Self::Wipeout),
             "polygoncircumscribed" => Some(Self::PolygonCircumscribed),
+            "boundary" => Some(Self::Boundary),
             _ => None,
         }
     }
@@ -424,6 +429,8 @@ impl DrawToolKind {
             // POLYGON CIRCUMSCRIBED: the canonical multi-word selector is also the
             // locale-neutral fallback label.
             Self::PolygonCircumscribed => "POLYGON CIRCUMSCRIBED",
+            // BOUNDARY shares the locale-neutral ASCII fallback rule.
+            Self::Boundary => "BOUNDARY",
         }
     }
 
@@ -479,9 +486,10 @@ impl DrawToolKind {
             | Self::CutBase
             | Self::PasteClip
             | Self::PasteBlock
-            // HATCHPOINT captures the one internal point the boundary is
+            // HATCHPOINT/BOUNDARY capture the one internal point the boundary is
             // discovered from.
             | Self::HatchPoint
+            | Self::Boundary
             // INSERT captures its one insertion point; the block name is the
             // terminal typed text, not a point. BLOCK captures its one base
             // point; the block name is the terminal typed text.

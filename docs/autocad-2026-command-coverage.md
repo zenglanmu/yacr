@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **69** |
-| **已实现合计（完整 + 部分）** | **119** |
-| 未实现 | **862** |
+| 部分实现（有写明的界） | **71** |
+| **已实现合计（完整 + 部分）** | **121** |
+| 未实现 | **860** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -50,6 +50,7 @@
 | `ARRAYRECT` | 部分实现 | 独立副本、非关联；无 Path/Levels/关联编辑 |
 | `AUDIT` | 部分实现 | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
 | `BLOCK` | 已实现 | — |
+| `BOUNDARY` | 部分实现 | 一个内部点 → 每个发现的闭合环（含嵌套岛）一条闭合非关联多段线；仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 选项（边界集/关闭岛检测/面域输出/对象类型）未实现；无 `BO`/`BPOLY` 别名 |
 | `BREAK` | 部分实现 | 两点打断；无 F 第一点覆盖、无多段打断；LWPOLYLINE 按名拒绝 |
 | `BREAKATPOINT` | 部分实现 | 交互工具：先拾取对象再指定断点（断点可投影到对象上）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
 | `CHAMFER` | 部分实现 | 两线形式 + 独立 CHAMFER POLYLINE 选择子；无 Angle/Multiple/Trim |
@@ -154,6 +155,7 @@
 | `TCASE` | 部分实现 | Express 工具、选择式：只改 Text/MText 的可见字符大小写；裸命令默认 Title，键入 `TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE`（或 `U/L/T/S/G`）；MTEXT 格式转义逐字保留；属性/标注文字未建模（`tcase.not_reset`）；MULTILEADER 走 `with_text` |
 | `TEXT` | 已实现 | — |
 | `TEXTEDIT` | 部分实现 | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
+| `TEXTTOFRONT` | 部分实现 | 选择式；仅模型空间 Text/MultiLeader/Dimension 上移到所有非合格对象之前；其它选中对象逐条诊断跳过；图纸空间/块内不重排；“全图文字”形式与 Draw Order 对话框未实现 |
 | `TORIENT` | 部分实现 | Express 工具、选择式：裸命令按 180° 步进归一到 `(-π/2, π/2]`（Most Readable），`TORIENT <角度>` 设为绝对旋转；只改 rotation，位置/字高/内容不变；非 Text（含 MULTILEADER/INSERT 属性）报告 `torient.not_reset`，不整体失败 |
 | `TRIM` | 部分实现 | 目标 LINE/ARC/CIRCLE/SPLINE；边界含折线/样条采样 |
 | `TXT2MTXT` | 部分实现 | 选择式：至少一个模型空间 Text/MText，按上→下、左→右稳定排序后用 `\P` 原样拼接成一个 `AcDbMText`，沿用首个源的样式/位置/字高/旋转/对齐/层/绘制顺序/`wrap_width`，同一事务删除全部源；设置对话框与强制统一行距未实现 |
@@ -295,8 +297,8 @@
 | 126 | `BLOCKTOXREF` | 未实现 | Replaces all instances of a specified block with an xref. | — |
 | 127 | `BLOOKUPTABLE` | 未实现 | Displays or creates a lookup table for a dynamic block definition. | — |
 | 128 | `BMPOUT` | 未实现 | Saves selected objects to a file in device-independent bitmap format. | — |
-| 129 | `-BOUNDARY` | 未实现 | At the Command prompt, creates regions or polylines from enclosed areas. | — |
-| 130 | `BOUNDARY` | 未实现 | Creates regions or a polylines from enclosed areas. | — |
+| 129 | `-BOUNDARY` | 未实现 | At the Command prompt, creates regions or polylines from enclosed areas. | 选项形式（边界集、关闭岛检测、面域输出、对象类型）未实现；仅交互 `BOUNDARY` 的拾取式多边形 v1 |
+| 130 | `BOUNDARY` | 部分实现 | Creates regions or a polylines from enclosed areas. | 一个内部点 → 复用 HATCHPOINT 发现（最小可见闭合边界 + 嵌套岛）；每个环在当前层创建一条闭合、非关联 `AcDbPolyline`（保留 bulge、丢重复末点、世界 `+Z`）；源对象保留；仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 的边界集/关闭岛检测/面域输出/对象类型未实现；不承认 `BO`/`BPOLY` 别名 |
 | 131 | `BOX` | 未实现 | Creates a 3D solid box. | — |
 | 132 | `BPARAMETER` | 未实现 | Adds a parameter with grips to a dynamic block definition. | — |
 | 133 | `BREAK` | 部分实现 | Breaks the selected object between two points. | 两点打断；无 F 第一点覆盖、无多段打断；LWPOLYLINE 按名拒绝 |
@@ -1026,7 +1028,7 @@
 | 857 | `TEXTFIT` | 未实现 | Expands or compresses the width of text objects based on new starting and ending points. | — |
 | 858 | `TEXTMASK` | 未实现 | Creates a blank area behind selected text or mtext objects. | — |
 | 859 | `TEXTSCR` | 未实现 | Opens a text window that displays a history of prompts and command line entries for the current session. | — |
-| 860 | `TEXTTOFRONT` | 未实现 | Brings text, leaders, and dimensions in front of all other objects in the drawing. | — |
+| 860 | `TEXTTOFRONT` | 部分实现 | Brings text, leaders, and dimensions in front of all other objects in the drawing. | 以**当前选择**为输入（偏离 AutoCAD 的 Select objects 提示）；仅可寻址模型空间 Text/MultiLeader/Dimension 参与，其它选中对象逐条 `texttofront.skipped` 跳过；以所有非合格模型空间对象的最大 draw order 为基线，按相对顺序连续上移（一条事务/一步撤销）；已在前方时 `texttofront.unchanged` 不建事务；图纸空间/块内 draw order 不重排；AutoCAD 的“全图文字”形式与 Draw Order 对话框未实现 |
 | 861 | `TEXTUNMASK` | 未实现 | Removes the mask from selected text or mtext that were masked with TEXTMASK. | — |
 | 862 | `TFRAMES` | 未实现 | Toggles the display of frames for all wipeout and image objects. | — |
 | 863 | `THICKEN` | 未实现 | Converts a surface into a 3D solid with a specified thickness. | — |

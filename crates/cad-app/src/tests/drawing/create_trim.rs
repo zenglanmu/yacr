@@ -533,6 +533,8 @@ fn drawing_commands_are_work_only_in_the_catalogue() {
         CommandId::Torient,
         CommandId::TCase,
         CommandId::Txt2MText,
+        CommandId::Boundary,
+        CommandId::TextToFront,
     ] {
         assert!(id.requires_work_mode(), "{id:?} must be Work-only");
     }

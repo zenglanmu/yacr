@@ -657,6 +657,25 @@ pub enum CommandPayload {
     HatchPoint {
         seed: Point3,
     },
+    /// BOUNDARY: create one closed polyline per discovered boundary loop from
+    /// **one internal point** (project-specific selector, like HATCHPOINT).
+    ///
+    /// `seed` is the picked internal point (finite; model space only in v1). The
+    /// command discovers the smallest visible closed boundary containing it plus
+    /// every nested closed boundary, and creates one **non-associative** closed
+    /// `AcDbPolyline` per loop on the active layer, in one transaction / one undo
+    /// step. The source boundary entities are retained. The current selection is
+    /// **not** the input.
+    ///
+    /// Source-entity limits are HATCHPOINT's: only whole visible `Circle`, full
+    /// `Ellipse` and closed `Polyline` entities participate; `LINE`/`ARC` edge
+    /// chains, block-instance edges and off-plane geometry are skipped. `-BOUNDARY`
+    /// (boundary set, island detection off, region output, object type) is **NOT
+    /// IMPLEMENTED** and has no payload field. Full contract:
+    /// [`crate::command_id::boundary`].
+    BoundaryPoint {
+        seed: Point3,
+    },
     /// `COPYBASE`: capture the refs into the in-process clipboard together with
     /// the picked base point (a read-only capture: no transaction, no history).
     ///

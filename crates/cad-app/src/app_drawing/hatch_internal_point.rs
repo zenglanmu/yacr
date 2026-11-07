@@ -77,15 +77,58 @@ const AREA_TIE_TOLERANCE: f64 = 1e-9;
 const UPWARD_NORMAL_TOLERANCE: f64 = 1e-9;
 
 /// One discovered boundary, in the seed plane's OCS 2D frame.
-struct CandidateBoundary {
+///
+/// Shared with [`super::boundary::Application::create_boundary`] (BOUNDARY,
+/// 2026-11-07): both commands consume the same discovery pipeline, the same
+/// `boundary_on_edge` / `boundary_not_found` / `boundary_ambiguous` rules and the
+/// same loop frame. HATCHPOINT uses both whole-entity loops and stitched
+/// `LINE`/`ARC` faces; BOUNDARY only the whole-entity half.
+pub(crate) struct CandidateBoundary {
     /// The boundary loop itself (bulges kept exact).
-    loop_: HatchLoop,
+    pub(crate) loop_: HatchLoop,
     /// The loop's bulge-sampled ring, used for containment and area only.
-    ring: Vec<[f64; 2]>,
+    pub(crate) ring: Vec<[f64; 2]>,
     /// The absolute shoelace area of the sampled ring (world units squared).
-    area: f64,
+    pub(crate) area: f64,
     /// Boundary edges the loop consumes (`0` for a whole closed entity).
-    edge_count: usize,
+    pub(crate) edge_count: usize,
+}
+
+/// Why the shared boundary pick could not resolve a loop set.
+///
+/// The two callers map this onto their own stable reason-code prefixes:
+/// `hatch.boundary_*` for HATCHPOINT and `boundary.boundary_*` for BOUNDARY.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BoundaryPickError {
+    /// The seed lies on a candidate loop.
+    OnEdge,
+    /// No visible closed candidate contains the seed.
+    NotFound,
+    /// Two containing candidates have the same area.
+    Ambiguous,
+}
+
+impl BoundaryPickError {
+    /// The stable suffix shared by both commands (`on_edge`, `not_found`,
+    /// `ambiguous`).
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::OnEdge => "on_edge",
+            Self::NotFound => "not_found",
+            Self::Ambiguous => "ambiguous",
+        }
+    }
+
+    /// The human-readable detail, identical for both callers.
+    pub(crate) fn detail(self) -> &'static str {
+        match self {
+            Self::OnEdge => {
+                "the internal point lies on a candidate boundary; pick clearly inside or outside"
+            }
+            Self::NotFound => "no visible closed boundary contains the picked point",
+            Self::Ambiguous => "two boundaries contain the point with the same area",
+        }
+    }
 }
 
 impl Application {
@@ -145,7 +188,8 @@ impl Application {
             let database = document.drawing.as_ref();
             let scope = database.root_layer_scope();
             let candidates = discover_candidates(database, session, document_id, scope, seed)?;
-            let (outer, islands) = choose_boundary(&candidates, seed_2d)?;
+            let (outer, islands) =
+                choose_boundary(&candidates, seed_2d).map_err(hatch_pick_refusal)?;
             let outer_area = outer.area;
             let island_count = islands.len();
             let edge_count = std::iter::once(outer)
@@ -208,6 +252,30 @@ fn discover_candidates(
     scope: cad_db::LayerScope,
     seed: Point3,
 ) -> CadResult<Vec<CandidateBoundary>> {
+    let mut candidates = discover_closed_candidates(database, session, document_id, scope, seed);
+    candidates.extend(discover_edge_faces(
+        database,
+        session,
+        document_id,
+        scope,
+        seed,
+    )?);
+    Ok(candidates)
+}
+
+/// The **whole visible closed entity** candidates only.
+///
+/// This is the half BOUNDARY (2026-11-07) shares: it deliberately excludes the
+/// `LINE`/`ARC` edge faces `discover_candidates` adds for HATCHPOINT, because
+/// BOUNDARY v1 documents the same whole-entity source set as HATCHPOINT's
+/// declared limits (`Circle`, full `Ellipse`, closed `Polyline`).
+pub(crate) fn discover_closed_candidates(
+    database: &DrawingDatabase,
+    session: &SessionState,
+    document_id: DocumentId,
+    scope: cad_db::LayerScope,
+    seed: Point3,
+) -> Vec<CandidateBoundary> {
     let plane = seed_plane(seed);
     let mut candidates = Vec::new();
     for entity in database.model_space() {
@@ -222,14 +290,7 @@ fn discover_candidates(
             candidates.push(candidate);
         }
     }
-    candidates.extend(discover_edge_faces(
-        database,
-        session,
-        document_id,
-        scope,
-        seed,
-    )?);
-    Ok(candidates)
+    candidates
 }
 
 fn selection_ref(document_id: DocumentId, entity: EntityId) -> SelectionRef {
@@ -487,17 +548,13 @@ fn edge_from_geometry(geometry: &SemanticGeometry, seed: Point3) -> Option<Plana
 /// area choice with the equal-area ambiguity check, then every other candidate
 /// whose ring lies inside the chosen outer ring (all nesting depths — the existing
 /// even-odd fill/style rules decide holes).
-fn choose_boundary(
+pub(crate) fn choose_boundary(
     candidates: &[CandidateBoundary],
     seed_2d: [f64; 2],
-) -> CadResult<(&CandidateBoundary, Vec<&CandidateBoundary>)> {
+) -> Result<(&CandidateBoundary, Vec<&CandidateBoundary>), BoundaryPickError> {
     for candidate in candidates {
         if loop_distance(seed_2d, &candidate.loop_) <= SEED_EDGE_TOLERANCE {
-            return Err(CadError::InvalidInput(
-                "hatch.boundary_on_edge: the internal point lies on a candidate boundary; pick \
-                 clearly inside or outside"
-                    .into(),
-            ));
+            return Err(BoundaryPickError::OnEdge);
         }
     }
 
@@ -506,18 +563,13 @@ fn choose_boundary(
         .filter(|candidate| cad_domain::hatch::point_in_ring(seed_2d, &candidate.ring))
         .collect();
     if containing.is_empty() {
-        return Err(CadError::InvalidInput(
-            "hatch.boundary_not_found: no visible closed boundary contains the picked point".into(),
-        ));
+        return Err(BoundaryPickError::NotFound);
     }
     containing.sort_by(|a, b| a.area.partial_cmp(&b.area).unwrap_or(Ordering::Equal));
     if let [first, second, ..] = containing.as_slice() {
         let largest = first.area.abs().max(second.area.abs());
         if (second.area - first.area).abs() <= AREA_TIE_TOLERANCE * largest {
-            return Err(CadError::InvalidInput(
-                "hatch.boundary_ambiguous: two boundaries contain the point with the same area"
-                    .into(),
-            ));
+            return Err(BoundaryPickError::Ambiguous);
         }
     }
     let outer = containing[0];
@@ -531,13 +583,22 @@ fn choose_boundary(
     Ok((outer, islands))
 }
 
+/// Map the shared pick error onto HATCHPOINT's stable `hatch.boundary_*` codes.
+fn hatch_pick_refusal(error: BoundaryPickError) -> CadError {
+    CadError::InvalidInput(format!(
+        "hatch.boundary_{}: {}",
+        error.code(),
+        error.detail()
+    ))
+}
+
 /// The seed's own `+Z` hatch plane.
 ///
 /// Every discovered candidate is already constrained to an upward normal at the
 /// seed elevation within [`plane_tolerance`]; using the seed plane for the loop
 /// frame keeps entity loops and `LINE`/`ARC` faces in one frame (for a `+Z` normal
 /// the projection is simply `(x, y)`, so this is the frame the pipeline used).
-fn seed_plane(seed: Point3) -> HatchPlane {
+pub(crate) fn seed_plane(seed: Point3) -> HatchPlane {
     HatchPlane::new(
         Point3 {
             x: 0.0,

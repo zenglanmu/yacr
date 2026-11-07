@@ -69,8 +69,8 @@ test('INSERT is one small draw-panel button on both tabs, with no variant popove
     assert.equal(ids[at + 1], 'BLOCK', `${tabId}: INSERT precedes BLOCK`);
     assert.equal(ids[at + 2], 'OFFSET', `${tabId}: BLOCK precedes OFFSET`);
     assert.deepEqual(
-      ids.slice(-3),
-      ['HATCH', 'HATCHPOINT', 'REVCLOUD'],
+      ids.slice(-4),
+      ['HATCH', 'HATCHPOINT', 'BOUNDARY', 'REVCLOUD'],
       `${tabId}: the HATCH pair and REVCLOUD close the draw group`,
     );
     assert.equal(items.filter(item => item.id === INSERT.id).length, 1, `${tabId}: one INSERT button`);

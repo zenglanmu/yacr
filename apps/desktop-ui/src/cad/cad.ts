@@ -364,6 +364,12 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
   'draw.hatchpoint': [
     'tool.prompt.hatchpoint.pick_internal',
   ],
+  // BOUNDARY shares HATCHPOINT's one-internal-point shape but its own copy: the
+  // result is one closed polyline per discovered loop, never a hatch. Only the
+  // point belongs here (the discovery happens at commit).
+  'draw.boundary': [
+    'tool.prompt.boundary.pick_internal',
+  ],
   // BREAK (2026-11-01) captures **two points** and the first one is also the
   // entity pick: the host selects the curve under the first click and treats that
   // click as the first end of the span to remove, so the tool reports one point
@@ -534,6 +540,10 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // — point captured, Enter hatches — and is not positional, so it lives here
   // rather than in the step list.
   'draw.hatchpoint': 'tool.prompt.hatchpoint.ready',
+  // BOUNDARY's complement is its single internal point: the capture is complete,
+  // but no boundary has been searched for yet, so the copy must not claim one was
+  // found.
+  'draw.boundary': 'tool.prompt.boundary.ready',
   // ID's capture is complete after its single pick, so it commits itself and the
   // shared dimension ready copy ("Dimension defined; press Enter to confirm")
   // would be false twice over — nothing is dimensioned and there is nothing left

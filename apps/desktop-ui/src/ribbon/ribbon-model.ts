@@ -423,6 +423,19 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // and it is deliberately not a pre-selection tool, so the button takes a
           // pick while HATCH stays the select-objects-first command.
           { id: 'HATCHPOINT', labelKey: 'draw.kind.hatchpoint', icon: 'hatch', command: 'HATCHPOINT' },
+          // BOUNDARY (AutoCAD 2026) is the other one-internal-point capture: it
+          // reuses HATCHPOINT's discovery but creates closed polylines instead of
+          // a hatch. Small button with no variant popover — the `-BOUNDARY`
+          // options (boundary set, island detection off, region output, object
+          // type) are NOT IMPLEMENTED, so a caret would imply choices that do not
+          // exist. Glyph `polyline` (the result is a polyline).
+          {
+            id: 'BOUNDARY',
+            labelKey: 'draw.kind.boundary',
+            icon: 'polyline',
+            command: 'BOUNDARY',
+            hintKey: 'draw.kind.boundary.hint',
+          },
           // REVCLOUD (AutoCAD 2026) Object mode v1: selection-gated, no pick
           // capture. It acts on the one preselected closed straight-segment
           // polyline (`CommandPayload::None`), so it is an ordinary router button
@@ -553,6 +566,19 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // the Home/draw comment for the one-pick shape, the shared fill
           // parameters and why it is a small button with no popover).
           { id: 'HATCHPOINT', labelKey: 'draw.kind.hatchpoint', icon: 'hatch', command: 'HATCHPOINT' },
+          // BOUNDARY (AutoCAD 2026) is the other one-internal-point capture: it
+          // reuses HATCHPOINT's discovery but creates closed polylines instead of
+          // a hatch. Small button with no variant popover — the `-BOUNDARY`
+          // options (boundary set, island detection off, region output, object
+          // type) are NOT IMPLEMENTED, so a caret would imply choices that do not
+          // exist. Glyph `polyline` (the result is a polyline).
+          {
+            id: 'BOUNDARY',
+            labelKey: 'draw.kind.boundary',
+            icon: 'polyline',
+            command: 'BOUNDARY',
+            hintKey: 'draw.kind.boundary.hint',
+          },
           // REVCLOUD (AutoCAD 2026) Object mode v1: selection-gated, no pick
           // capture. It acts on the one preselected closed straight-segment
           // polyline (`CommandPayload::None`), so it is an ordinary router button

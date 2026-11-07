@@ -32,6 +32,7 @@ use cad_history::{drawing_patch, drawing_patch_deleted, DrawingPatch, DrawingUnd
 mod align;
 mod array;
 mod block_define;
+mod boundary;
 mod break_curve;
 mod chamfer_fillet;
 mod circle_options;
@@ -80,6 +81,8 @@ mod revision_cloud;
 mod scale_text;
 mod stretch;
 mod text_edit;
+// TEXTTOFRONT (2026-11-07): rewrite the selected text/leader/dimension draw order.
+mod text_front;
 // The three selection-based text commands (TORIENT / TCASE / TXT2MTXT) and
 // their one pure case transformer.
 mod text_commands;
