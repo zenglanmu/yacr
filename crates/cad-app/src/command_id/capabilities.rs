@@ -98,6 +98,7 @@ impl CommandId {
                 | Self::CreateRay
                 | Self::Reverse
                 | Self::Oops
+                | Self::Overkill
         )
     }
 }

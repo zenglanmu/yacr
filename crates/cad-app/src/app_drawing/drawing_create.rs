@@ -54,6 +54,7 @@ impl Application {
             CommandId::RevisionCloud => self.revision_cloud(session, command),
             CommandId::Reverse => self.reverse_entities(session, command),
             CommandId::Oops => self.oops_restore(session, command),
+            CommandId::Overkill => self.overkill(session, command),
             CommandId::ArrayRectangular => self.array_rect(session, command),
             CommandId::ArrayPolar => self.array_polar(session, command),
             CommandId::AlignEntities => self.align_entities(session, command),

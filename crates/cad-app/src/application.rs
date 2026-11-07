@@ -500,6 +500,7 @@ impl Application {
             | CommandId::GripStretch
             | CommandId::Reverse
             | CommandId::Oops
+            | CommandId::Overkill
             | CommandId::CreateText
             | CommandId::CreateMText
             | CommandId::MLeader

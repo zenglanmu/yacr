@@ -1,6 +1,6 @@
 // The AutoCAD 2026 2D modify commands added 2026-11-07: REVERSE (selection
 // based, direction flip). Sibling commands are appended to this suite as they
-// land (OOPS/OVERKILL/BREAKATPOINT).
+// land (OOPS/OVERKILL).
 //
 // What this pins: the catalogue row, both Modify-panel buttons, the selection
 // requirement and its hint key, admission from the loaded host vocabulary, and
@@ -129,5 +129,29 @@ test('OOPS has no selection precondition', () => {
   assertSelectionRule({ ...OOPS, count: 0 });
   assert.equal(selectionRequirementMet(OOPS.id, { ...DOC, documentLabel: null }), false,
     'OOPS still needs an open drawing');
+});
+
+// --- OVERKILL: exact duplicates only -----------------------------------------
+
+const OVERKILL = Object.freeze({
+  id: 'OVERKILL',
+  labelKey: 'draw.kind.overkill',
+  hintKey: 'draw.kind.overkill.hint',
+  icon: 'erase',
+});
+
+test('OVERKILL is catalogued as a selection-based modify selector', () => {
+  assertCatalogued({ ...OVERKILL, group: 'modify' });
+  // Canonical, never an alias of ERASE: ERASE deletes the whole selection, while
+  // OVERKILL only removes the duplicates it can prove.
+  assert.notEqual(OVERKILL.id, 'ERASE');
+});
+
+test('both Modify panels carry the small OVERKILL router button', () => {
+  assertRibbonButton(OVERKILL);
+});
+
+test('OVERKILL needs at least two objects to compare', () => {
+  assertSelectionRule({ ...OVERKILL, count: 2 });
 });
 

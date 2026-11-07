@@ -202,6 +202,8 @@ export const HOST_NAMES = [
   'REVERSE',
   // OOPS (AutoCAD 2026) restores the last ERASE; selection-free, payload-free.
   'OOPS',
+  // OVERKILL (AutoCAD 2026) removes exact duplicate selected entities (v1).
+  'OVERKILL',
   // SCALETEXT (2026-11-01) is the selection-based text scaler: one or more
   // Text/MTEXT objects plus one positive factor (`scaleTextFactor`), no picks. It
   // is a canonical selector of its own, never an alias of `SCALE` (which picks a

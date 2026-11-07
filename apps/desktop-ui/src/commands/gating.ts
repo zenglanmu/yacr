@@ -271,6 +271,10 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // so it has no selection precondition. The row exists for the "no drawing is
   // open" answer only, like LAYERP.
   OOPS: Object.freeze({ count: 0, reasonKey: 'draw.kind.oops.hint' }),
+  // OVERKILL (AutoCAD 2026) can only remove a duplicate when there are at least
+  // two objects to compare, so the local minimum is two. The host refuses an
+  // empty/one-object selection by name (`overkill.selection`).
+  OVERKILL: Object.freeze({ count: 2, reasonKey: 'draw.kind.overkill.hint' }),
   LAYISO: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
   LAYUNISO: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
   LAYOFF: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),

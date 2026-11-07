@@ -963,6 +963,14 @@ pub enum CommandId {
     /// Full contract, including the ERASE-only v1 boundary and the undo/identity
     /// rules: [`crate::command_id::oops`].
     Oops,
+    /// `OVERKILL` (Work-only): delete **exact duplicate** selected entities in
+    /// one transaction / one undo step, keeping the lowest draw order of each
+    /// group.
+    ///
+    /// Payload is [`crate::CommandPayload::None`] — the current selection is the
+    /// whole input. Full contract, including the exact comparison table and
+    /// every NOT IMPLEMENTED option: [`crate::command_id::overkill`].
+    Overkill,
 }
 
 mod capabilities;
@@ -974,6 +982,7 @@ pub mod grip_stretch;
 pub mod hatch;
 pub mod match_prop;
 pub mod oops;
+pub mod overkill;
 pub mod point_style;
 pub mod reverse;
 pub mod zoom;

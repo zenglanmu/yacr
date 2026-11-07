@@ -383,6 +383,12 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // AutoCAD also restores BLOCK/WBLOCK removals, which this build does not.
   // Appended last so no shipped row moves; `undo` is the closest restore glyph.
   { id: 'OOPS', labelKey: 'draw.kind.oops', icon: 'undo', group: 'modify' },
+  // OVERKILL (AutoCAD 2026) v1 deletes **exact duplicate** selected entities.
+  // Selection-based and payload-free; the two-object minimum lives in
+  // `SELECTION_REQUIREMENTS`. Partial overlaps, collinear merges, arc-over-circle
+  // replacement and a tolerance option are NOT IMPLEMENTED, so nothing here may
+  // imply them. Appended last; `erase` is the closest removal glyph.
+  { id: 'OVERKILL', labelKey: 'draw.kind.overkill', icon: 'erase', group: 'modify' },
   // AUDIT (AutoCAD 2026) is the detect-only drawing audit: it reports every
   // stored entity that fails the database's own validity check and repairs
   // nothing (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). It is a

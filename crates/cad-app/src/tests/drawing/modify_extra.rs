@@ -536,3 +536,183 @@ fn oops_is_refused_in_viewer_mode() {
     assert_eq!(undo_depth(&app), 0);
 }
 
+// --- OVERKILL ----------------------------------------------------------------
+
+fn ent_on(id: u128, layer: LayerId, geometry: SemanticGeometry, order: i64) -> DbEntity {
+    let mut entity = ent(id, geometry, order);
+    entity.layer = layer;
+    entity
+}
+
+fn build_layered(entities: Vec<DbEntity>) -> (Application, SessionState) {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [(LayerId(0), "0"), (LayerId(7), "WALLS")] {
+        builder
+            .insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible: true,
+            })
+            .unwrap();
+    }
+    for entity in entities {
+        builder.insert_entity(entity).unwrap();
+    }
+    let drawing = builder.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([9u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
+fn line(x0: f64, y0: f64, x1: f64, y1: f64) -> SemanticGeometry {
+    SemanticGeometry::Line {
+        start: p3(x0, y0, 0.0),
+        end: p3(x1, y1, 0.0),
+    }
+}
+
+fn entity_count(app: &Application) -> usize {
+    app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity_count()
+}
+
+#[test]
+fn overkill_deletes_exact_duplicates_and_keeps_the_lowest_draw_order() {
+    let a = line(0.0, 0.0, 10.0, 0.0);
+    let mut reversed = line(0.0, 0.0, 10.0, 0.0);
+    if let SemanticGeometry::Line { start, end } = &mut reversed {
+        std::mem::swap(start, end);
+    }
+    let (mut app, mut session) = build_layered(vec![
+        ent_on(1, LayerId(0), a.clone(), 5),
+        ent_on(2, LayerId(0), a.clone(), 1),
+        // Same unordered endpoint pair: a duplicate under the v1 rule.
+        ent_on(3, LayerId(0), reversed, 9),
+        // Same geometry on another layer: never merged or deleted.
+        ent_on(5, LayerId(7), a, 0),
+        // A different line stays.
+        ent_on(4, LayerId(0), line(0.0, 0.0, 10.0, 5.0), 2),
+    ]);
+    session.selection = SelectionSet::from_refs(
+        [1u128, 2, 3, 4, 5]
+            .into_iter()
+            .map(ref_of)
+            .collect::<Vec<_>>(),
+    );
+    let rev = revision(&app);
+    let outcome = app
+        .execute(&mut session, command(CommandId::Overkill, CommandPayload::None))
+        .expect("OVERKILL must succeed");
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "overkill.applied"));
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "overkill.v1_exact_duplicates_only"));
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(drawing.entity(EntityId(1)).is_none(), "higher draw_order deleted");
+    assert!(drawing.entity(EntityId(2)).is_some(), "keeper stays");
+    assert!(drawing.entity(EntityId(3)).is_none(), "reversed duplicate deleted");
+    assert!(drawing.entity(EntityId(4)).is_some(), "different line stays");
+    assert!(
+        drawing.entity(EntityId(5)).is_some(),
+        "same geometry on another layer is not a duplicate"
+    );
+    assert_ne!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 1);
+
+    // One undo restores both deleted rows.
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .unwrap();
+    assert_eq!(entity_count(&app), 5);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn overkill_without_duplicates_records_no_transaction() {
+    let (mut app, mut session) = build_layered(vec![
+        ent_on(1, LayerId(0), line(0.0, 0.0, 10.0, 0.0), 0),
+        // Collinear but partially overlapping: v1 never merges it.
+        ent_on(2, LayerId(0), line(5.0, 0.0, 20.0, 0.0), 1),
+    ]);
+    session.selection = SelectionSet::from_refs(vec![ref_of(1), ref_of(2)]);
+    let rev = revision(&app);
+    let outcome = app
+        .execute(&mut session, command(CommandId::Overkill, CommandPayload::None))
+        .unwrap();
+    assert!(outcome.changes.is_none());
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "overkill.unchanged"));
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "overkill.v1_exact_duplicates_only"));
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 0);
+    assert_eq!(entity_count(&app), 2);
+}
+
+#[test]
+fn overkill_refuses_non_addressable_and_empty_selections() {
+    let (mut app, mut session) = build_layered(vec![ent_on(
+        1,
+        LayerId(0),
+        line(0.0, 0.0, 10.0, 0.0),
+        0,
+    )]);
+    let rev = revision(&app);
+    let err = app
+        .execute(&mut session, command(CommandId::Overkill, CommandPayload::None))
+        .unwrap_err();
+    assert!(matches!(err, CadError::InvalidInput(ref reason) if reason.starts_with("overkill.selection")));
+
+    let mut reference = ref_of(1);
+    reference.instance = InstancePath(vec![EntityId(9)]);
+    session.selection = SelectionSet::from_refs(vec![reference]);
+    let err = app
+        .execute(&mut session, command(CommandId::Overkill, CommandPayload::None))
+        .unwrap_err();
+    assert!(matches!(err, CadError::InvalidInput(ref reason) if reason.starts_with("overkill.not_addressable")));
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn overkill_is_refused_in_viewer_mode() {
+    let (mut app, mut session) = build_layered(vec![
+        ent_on(1, LayerId(0), line(0.0, 0.0, 10.0, 0.0), 0),
+        ent_on(2, LayerId(0), line(0.0, 0.0, 10.0, 0.0), 1),
+    ]);
+    let mut session_viewer = SessionState::new(DocumentId(1), AppMode::Viewer);
+    session_viewer.selection = SelectionSet::from_refs(vec![ref_of(1), ref_of(2)]);
+    let rev = revision(&app);
+    let err = app
+        .execute(
+            &mut session_viewer,
+            command(CommandId::Overkill, CommandPayload::None),
+        )
+        .unwrap_err();
+    assert_eq!(err, CadError::PermissionDenied);
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 0);
+    let _ = &mut session;
+}
+

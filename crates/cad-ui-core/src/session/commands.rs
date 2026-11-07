@@ -172,6 +172,9 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // OOPS restores the entities removed by the last ERASE (ERASE-only v1); it is
     // selection-free and takes no payload.
     ("OOPS", CommandId::Oops),
+    // OVERKILL removes exact duplicate selected entities (v1: no partial-overlap
+    // or collinear merging); the selection is the whole input.
+    ("OVERKILL", CommandId::Overkill),
     ("ARRAYRECT", CommandId::ArrayRectangular),
     ("ARRAYPOLAR", CommandId::ArrayPolar),
     ("ALIGN", CommandId::AlignEntities),

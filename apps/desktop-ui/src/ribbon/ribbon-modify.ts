@@ -76,6 +76,8 @@ export const HOME_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   { id: 'REVERSE', labelKey: 'draw.kind.reverse', icon: 'mirror', command: 'REVERSE' },
   // OOPS restores the last ERASE: no capture, no selection, `undo` glyph.
   { id: 'OOPS', labelKey: 'draw.kind.oops', icon: 'undo', command: 'OOPS' },
+  // OVERKILL v1: exact duplicates only, two-object selection minimum.
+  { id: 'OVERKILL', labelKey: 'draw.kind.overkill', icon: 'erase', command: 'OVERKILL' },
 ]);
 
 /** The Draw tab's Modify panel, in display order. */
@@ -124,4 +126,6 @@ export const DRAW_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // carries no pick prompt and no popover.
   { id: 'REVERSE', labelKey: 'draw.kind.reverse', icon: 'mirror', command: 'REVERSE' },
   { id: 'OOPS', labelKey: 'draw.kind.oops', icon: 'undo', command: 'OOPS' },
+  // OVERKILL v1: exact duplicates only, two-object selection minimum.
+  { id: 'OVERKILL', labelKey: 'draw.kind.overkill', icon: 'erase', command: 'OVERKILL' },
 ]);
