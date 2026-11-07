@@ -222,6 +222,11 @@ export const HOST_NAMES = [
   'LAYLCK',
   'LAYULK',
   'SETBYLAYER',
+  // The 2026-11-07 layer batch: canonical selectors of their own. LAYMCH/LAYMRG/
+  // LAYDEL are selection-based; LAYERSTATE/LTSCALE/LAYWALK take typed arguments;
+  // LAYERPMODE reports on a bare name. The `-` spellings are host aliases and are
+  // deliberately not listed in this canonical mirror.
+  'LAYMCH', 'LAYMRG', 'LAYDEL', 'LAYERSTATE', 'LAYERPMODE', 'LTSCALE', 'LAYWALK',
   // CHAMFER POLYLINE / FILLET POLYLINE (2026-10-27): the Polyline modes of the
   // two corner commands, canonical **multi-word** selectors of their own (like
   // `AREA OBJECT`, the space is part of one name and is never split into a typed

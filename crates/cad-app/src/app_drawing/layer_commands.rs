@@ -125,18 +125,18 @@ use cad_db::{
 };
 
 /// A named, non-capability refusal (`<command>.<code>: <detail>`).
-fn invalid(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
+pub(super) fn invalid(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::InvalidInput(format!("{prefix}.{code}: {detail}"))
 }
 
 /// A named capability-gap refusal (`<command>.<code>: <detail>`).
-fn unsupported(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
+pub(super) fn unsupported(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::Unsupported(format!("{prefix}.{code}: {detail}"))
 }
 
 /// These commands read the selection, so a payload is refused rather than
 /// silently ignored.
-fn ensure_no_payload(command: &Command, prefix: &str, label: &str) -> CadResult<()> {
+pub(super) fn ensure_no_payload(command: &Command, prefix: &str, label: &str) -> CadResult<()> {
     if matches!(command.payload, CommandPayload::None) {
         Ok(())
     } else {
@@ -149,7 +149,7 @@ fn ensure_no_payload(command: &Command, prefix: &str, label: &str) -> CadResult<
 }
 
 /// Refuse a selected ref that is not a directly addressable model-space entity.
-fn ensure_model_space_addressable(
+pub(super) fn ensure_model_space_addressable(
     drawing: &DrawingDatabase,
     command: &Command,
     reference: &SelectionRef,
@@ -201,7 +201,7 @@ fn ensure_model_space_addressable(
 }
 
 /// Take the selection snapshot and refuse an empty one.
-fn selection_snapshot(
+pub(super) fn selection_snapshot(
     session: &SessionState,
     prefix: &str,
     label: &str,
@@ -219,7 +219,7 @@ fn selection_snapshot(
 
 /// Preflight the selection and collect each distinct entity layer (first-seen
 /// order, so the diagnostic and the write order follow the user's pick order).
-fn selected_distinct_layers(
+pub(super) fn selected_distinct_layers(
     drawing: &DrawingDatabase,
     command: &Command,
     references: &[SelectionRef],
@@ -275,7 +275,7 @@ impl Application {
 
     /// Publish an already-validated layer-table candidate. **No history**: layer
     /// edits are not undoable (cad-history has no layer patch kind).
-    fn publish_layer_table(
+    pub(super) fn publish_layer_table(
         &mut self,
         document_id: DocumentId,
         candidate: DrawingDatabase,

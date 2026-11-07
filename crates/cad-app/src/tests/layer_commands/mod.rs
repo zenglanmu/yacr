@@ -166,8 +166,15 @@ fn diagnostic_codes(outcome: &CommandOutcome) -> Vec<&str> {
 }
 
 mod laycur;
+mod laydel;
+mod layerpmode;
+mod layerstate;
 mod layfrz;
 mod laylck;
+mod laymch;
 mod laymcur;
+mod laymrg;
 mod laythw;
+mod laywalk;
+mod ltscale;
 mod setbylayer;

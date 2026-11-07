@@ -49,4 +49,13 @@ export const LAYER_PANEL_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   { id: 'LAYLCK', labelKey: 'draw.kind.laylck', icon: 'layers', command: 'LAYLCK' },
   { id: 'LAYULK', labelKey: 'draw.kind.layulk', icon: 'layers', command: 'LAYULK' },
   { id: 'SETBYLAYER', labelKey: 'draw.kind.setbylayer', icon: 'layers', command: 'SETBYLAYER' },
+  // The 2026-11-07 layer batch closes the panel: the merge/delete trio is
+  // pre-selection based, LAYERSTATE and LAYWALK are typed commands. They share
+  // the panel's carrier rule (their effects are layer state), so they are added
+  // to `PALETTE_COMMANDS` in `ribbon-model.ts` as well.
+  { id: 'LAYMCH', labelKey: 'draw.kind.laymch', icon: 'layers', command: 'LAYMCH' },
+  { id: 'LAYMRG', labelKey: 'draw.kind.laymrg', icon: 'layers', command: 'LAYMRG' },
+  { id: 'LAYDEL', labelKey: 'draw.kind.laydel', icon: 'erase', command: 'LAYDEL' },
+  { id: 'LAYERSTATE', labelKey: 'draw.kind.layerstate', icon: 'layers', command: 'LAYERSTATE' },
+  { id: 'LAYWALK', labelKey: 'draw.kind.laywalk', icon: 'eye', command: 'LAYWALK' },
 ]);

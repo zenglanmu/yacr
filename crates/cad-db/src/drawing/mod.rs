@@ -24,6 +24,7 @@ mod bounds;
 mod edit;
 mod layer_edit;
 mod layer_inherit;
+mod linetype_scale;
 mod lock;
 mod point_style;
 mod transaction;

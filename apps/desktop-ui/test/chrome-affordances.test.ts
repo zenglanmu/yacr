@@ -77,7 +77,7 @@ test('the Layers arrow runs LAYER and the Properties arrow runs PROPERTIES', () 
   // are visible, which is the one state this palette is the surface for.
   assert.deepEqual(
     layerItems,
-    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER'],
+    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'LAYMCH', 'LAYMRG', 'LAYDEL', 'LAYERSTATE', 'LAYWALK'],
     'the Layers panel holds its palette toggle and the layer-state commands',
   );
   assert.deepEqual(propertyItems, ['PROPERTIES', 'LIST', 'MASSPROP']);
@@ -112,7 +112,7 @@ test('every launcher target is a chrome-local command, so admission always answe
   // commands ride the same filter (`2026-10-26`: the isolate pair, then the off/on
   // pair): the layers palette is the only surface that shows what they did, so
   // those buttons are not offered where it never renders.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'FONTS']);
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'LAYMCH', 'LAYMRG', 'LAYDEL', 'LAYERSTATE', 'LAYWALK', 'FONTS']);
   // The Layers panel is all palette state, so it drops whole. The Properties
   // panel now also holds the router command LIST, so it survives with that one
   // button while the PROPERTIES palette toggle is filtered out.

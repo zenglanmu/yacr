@@ -231,6 +231,20 @@ pub struct GripStretchCommand {
     pub to: Point3,
 }
 
+/// The option of a typed `LAYERSTATE <option>` line: `SAVE <name>`,
+/// `RESTORE <name>`, `LIST` or `DELETE <name>` (grammar in `cad-ui-core`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LayerStateCommand {
+    /// Snapshot the layer attributes, active layer and overrides.
+    Save(String),
+    /// Apply a saved snapshot (layer-table write; not undoable).
+    Restore(String),
+    /// Report the saved names; writes nothing.
+    List,
+    /// Drop one saved snapshot.
+    Delete(String),
+}
+
 pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
@@ -969,8 +983,18 @@ pub enum CommandPayload {
     /// `grip.unsupported_kind`; this never routes through
     /// [`CommandId::StretchEntities`] (crossing-window stretch).
     GripStretch(Box<GripStretchCommand>),
-    /// The option of a `MEASUREGEOM <option>` line that reaches the command layer
-    /// (only `Radius` and `Volume`; the four tool options are routed by the
-    /// session to their existing `BeginMeasurement` requests).
+    /// The option of a `MEASUREGEOM <option>` line (only `Radius`/`Volume`; the
+    /// four tool options route to their existing `BeginMeasurement` requests).
     MeasureGeom(MeasureGeomOption),
+    /// The option of a typed `LAYERSTATE <option>` line.
+    LayerState(LayerStateCommand),
+    /// The target state of `LAYERPMODE ON|OFF` (session-only; gates `LAYERP`
+    /// snapshots). Bare `LAYERPMODE` carries `None` and reports.
+    LayerPmode(bool),
+    /// The value of a typed `LTSCALE <value>` line: finite and strictly positive,
+    /// one header revision bump, no undo entry.
+    LinetypeScale(f64),
+    /// The layer names of a typed `LAYWALK <name>[,<name>...]` line: session
+    /// overrides only (plus the active layer), same atomic path as `LAYISO`.
+    LayerWalk(Vec<String>),
 }

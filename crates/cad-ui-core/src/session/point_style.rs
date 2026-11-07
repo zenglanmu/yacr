@@ -64,6 +64,11 @@ impl CadSession {
             // (`DISTANCE`/`ANGLE`/`AREA`/`POLYLINE`) or the report-only `RADIUS`
             // (and the explicit `VOLUME` refusal). It is not a second engine.
             super::commands::MEASUREGEOM_SELECTOR => self.measuregeom_argument(argument, text),
+            // The 2026-11-07 layer batch argument forms.
+            super::commands::LAYERSTATE_SELECTOR => self.layer_state_argument(argument, text),
+            super::commands::LAYWALK_SELECTOR => self.layer_walk_argument(argument, text),
+            super::commands::LTSCALE_SELECTOR => self.linetype_scale_argument(argument, text),
+            super::commands::LAYERPMODE_SELECTOR => self.layer_pmode_argument(argument, text),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

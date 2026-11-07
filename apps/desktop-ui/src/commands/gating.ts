@@ -226,6 +226,52 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     parse: (argument: string) => ['DISTANCE', 'ANGLE', 'AREA', 'POLYLINE', 'RADIUS', 'VOLUME']
       .includes(argument.trim().toUpperCase()),
   }),
+  /**
+   * `LTSCALE <value>` (2026-11-07) writes the drawing-global linetype scale.
+   * The host grammar is the same positive plain decimal as `SNAPUNIT`: the
+   * database rejects zero, negatives, non-finite values and exponents.
+   */
+  LTSCALE: Object.freeze({
+    parse: isPositiveDecimal,
+  }),
+  /**
+   * `LAYERPMODE [ON|OFF]` (2026-11-07) gates whether layer-override mutations
+   * record `LAYERP` snapshots. Only the two full words are admitted; a bare
+   * `LAYERPMODE` is admitted by the base name and reports the current setting.
+   */
+  LAYERPMODE: Object.freeze({
+    parse: (argument: string) => ['ON', 'OFF'].includes(argument.trim().toUpperCase()),
+  }),
+  /**
+   * `LAYERSTATE <option>` (2026-11-07): `SAVE <name>`, `RESTORE <name>`, `LIST`
+   * or `DELETE <name>`. The name is the trimmed remainder (spaces allowed) and
+   * the keyword is case-insensitive. The bare name is admitted and refused by
+   * the host with `layerstate.needs_option`, because no option is defaulted.
+   */
+  LAYERSTATE: Object.freeze({
+    parse: (argument: string) => {
+      const parts = argument.trim().split(/\s+/).filter(part => part.length > 0);
+      const [word, ...rest] = parts;
+      const keyword = (word ?? '').toUpperCase();
+      if (keyword === 'LIST') return rest.length === 0;
+      if (keyword === 'SAVE' || keyword === 'RESTORE' || keyword === 'DELETE') {
+        return rest.length > 0;
+      }
+      return false;
+    },
+  }),
+  /**
+   * `LAYWALK <names>` (2026-11-07) takes comma-separated layer names. The host
+   * resolves them against the drawing and refuses an unknown name; the chrome
+   * only requires at least one non-empty entry so an empty list never reaches
+   * the router.
+   */
+  LAYWALK: Object.freeze({
+    parse: (argument: string) => {
+      const names = argument.split(',').map(name => name.trim());
+      return names.length > 0 && names.every(name => name.length > 0);
+    },
+  }),
 });
 
 /**
@@ -275,7 +321,7 @@ export const GESTURE_ONLY_COMMANDS: readonly string[] = Object.freeze(['ORBIT'])
  * "a drawing is the whole requirement" (see `SELECTION_REQUIREMENTS`, which
  * answers the no-document case for selection-gated commands itself).
  */
-export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK']);
+export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK', 'LAYERSTATE', 'LTSCALE', 'LAYWALK']);
 
 /** One command's precondition on the **current selection**. */
 export interface SelectionRequirement {
@@ -431,6 +477,12 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   LAYLCK: Object.freeze({ count: 1, reasonKey: 'draw.kind.laylck.hint' }),
   LAYULK: Object.freeze({ count: 1, reasonKey: 'draw.kind.layulk.hint' }),
   SETBYLAYER: Object.freeze({ count: 1, reasonKey: 'draw.kind.setbylayer.hint' }),
+  // The 2026-11-07 merge/delete run is pre-selection based like the rest of the
+  // layer run. LAYMCH needs a destination pick plus at least one object to move,
+  // so its minimum is two; LAYMRG/LAYDEL need one object to name the source.
+  LAYMCH: Object.freeze({ count: 2, reasonKey: 'draw.kind.laymch.hint' }),
+  LAYMRG: Object.freeze({ count: 1, reasonKey: 'draw.kind.laymrg.hint' }),
+  LAYDEL: Object.freeze({ count: 1, reasonKey: 'draw.kind.laydel.hint' }),
   // The text run is selection-based (one object minimum); DIMSPACE needs a base
   // dimension plus at least one target.
   TORIENT: Object.freeze({ count: 1, reasonKey: 'draw.kind.torient.hint' }),

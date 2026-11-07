@@ -296,7 +296,7 @@ fn ensure_current_layer_stays_visible(
 /// stable reason codes: the panel shows a name match and the command resolves it
 /// with the same rule, so the two can never disagree. Unknown and ambiguous names
 /// are distinct explicit refusals and neither changes any state.
-fn resolve_layer(database: &DrawingDatabase, name: &str) -> CadResult<LayerId> {
+pub(super) fn resolve_layer(database: &DrawingDatabase, name: &str) -> CadResult<LayerId> {
     let mut exact = database.layers().filter(|layer| layer.name == name);
     if let Some(layer) = exact.next() {
         if exact.next().is_none() {

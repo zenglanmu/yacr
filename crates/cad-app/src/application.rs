@@ -139,10 +139,7 @@ impl Application {
             | CommandId::RenameLayer
             | CommandId::DeleteLayer
             | CommandId::SetLayerProperty => self.layer_command(session, &command),
-            // Layer **selection** commands read the current selection and write
-            // either the entity rows (LAYCUR) or the layer table; dispatched ahead
-            // of the entity-edit funnel so `drawing_command`'s match stays one
-            // edit funnel. See `crate::app_drawing::layer_commands`.
+            // Layer **selection** commands (see `app_drawing::layer_commands`).
             CommandId::LayCur => self.layer_selection_command(session, &command),
             CommandId::LayMCur => self.layer_selection_command(session, &command),
             CommandId::LayFrz => self.layer_selection_command(session, &command),
@@ -150,14 +147,18 @@ impl Application {
             CommandId::LayLck => self.layer_selection_command(session, &command),
             CommandId::LayUlk => self.layer_selection_command(session, &command),
             CommandId::SetByLayer => self.layer_selection_command(session, &command),
-            // The two drawing-header POINT display style writes (`PDMODE <n>` /
-            // `PDSIZE <n>`): real database writes in one revision bump each (the
-            // display refresh signal), never undoable because `cad-history` has
-            // no header patch kind, and no entity change — so they also stay out
-            // of the entity-edit funnel.
+            // POINT display style writes (`PDMODE`/`PDSIZE`): never undoable.
             CommandId::SetPointDisplayMode | CommandId::SetPointDisplaySize => {
                 self.point_display_command(&command)
             }
+            // The 2026-11-07 layer batch (`app_drawing::layer_extended`).
+            CommandId::LayMCh
+            | CommandId::LayMrg
+            | CommandId::LayDel
+            | CommandId::LayerState
+            | CommandId::LayerPmode
+            | CommandId::SetLinetypeScale
+            | CommandId::LayWalk => self.layer_extended_command(session, &command),
             CommandId::SwitchSpace => {
                 if let CommandPayload::Space(space) = &command.payload {
                     self.switch_space_command(session, &command, space.clone())

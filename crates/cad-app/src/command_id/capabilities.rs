@@ -97,6 +97,14 @@ impl CommandId {
                 | Self::LayLck
                 | Self::LayUlk
                 | Self::SetByLayer
+                // The 2026-11-07 layer batch: these write entity rows or the
+                // layer table. LAYERPMODE is session-only and LAYWALK is a
+                // session view operation, so neither is work-only.
+                | Self::LayMCh
+                | Self::LayMrg
+                | Self::LayDel
+                | Self::LayerState
+                | Self::SetLinetypeScale
                 | Self::SetPointDisplayMode
                 | Self::SetPointDisplaySize
                 | Self::SetEntityProperty

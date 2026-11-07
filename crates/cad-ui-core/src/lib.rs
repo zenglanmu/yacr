@@ -38,14 +38,18 @@ pub use protocol::{
     BUTTON_SECONDARY,
 };
 pub use session::{
-    canonical_command_name, command_name, invalid_tcase_argument_reason,
+    canonical_command_name, command_name, invalid_layerpmode_argument_reason,
+    invalid_layerstate_argument_reason, invalid_laywalk_argument_reason,
+    invalid_ltscale_argument_reason, invalid_tcase_argument_reason,
     invalid_torient_argument_reason, invalid_zoom_argument_reason, normalize_command,
-    parse_tcase_argument, parse_torient_argument, parse_zoom_argument, typed_command_argument,
-    unsupported_command_reason, unsupported_status, BytesDocument, CadActiveSpace, CadCamera,
-    CadCommandLogEntry, CadCommandLogKind, CadLayer, CadLayers, CadLayoutTab, CadMeasurementEcho,
-    CadReferenceStatus, CadSelection, CadSelectionRow, CadSession, CadSettingKey, CadSettingValue,
-    CadSettings, CadStatus, ZoomArgument, ARGUMENT_SELECTOR, COMMAND_ALIASES, COMMAND_TABLE,
-    SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
+    parse_layerpmode_argument, parse_layerstate_argument, parse_laywalk_argument,
+    parse_ltscale_argument, parse_tcase_argument, parse_torient_argument, parse_zoom_argument,
+    typed_command_argument, unsupported_command_reason, unsupported_status, BytesDocument,
+    CadActiveSpace, CadCamera, CadCommandLogEntry, CadCommandLogKind, CadLayer, CadLayers,
+    CadLayoutTab, CadMeasurementEcho, CadReferenceStatus, CadSelection, CadSelectionRow,
+    CadSession, CadSettingKey, CadSettingValue, CadSettings, CadStatus, LayerStateOption,
+    ZoomArgument, ARGUMENT_SELECTOR, COMMAND_ALIASES, COMMAND_TABLE, SETTINGS_INVALID_PLOT_FORMAT,
+    SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 pub use shell::{
     admit_command, bind_allowed, clear_host_error, note_host_error, projected_status,
