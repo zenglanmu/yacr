@@ -142,6 +142,7 @@ impl Application {
             CommandId::LayFrz => self.layer_selection_command(session, &command),
             CommandId::LayThw => self.layer_selection_command(session, &command),
             CommandId::LayLck => self.layer_selection_command(session, &command),
+            CommandId::LayUlk => self.layer_selection_command(session, &command),
             // The two drawing-header POINT display style writes (`PDMODE <n>` /
             // `PDSIZE <n>`): real database writes in one revision bump each (the
             // display refresh signal), never undoable because `cad-history` has

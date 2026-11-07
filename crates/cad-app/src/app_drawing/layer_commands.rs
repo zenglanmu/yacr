@@ -89,17 +89,17 @@
 //! one-revision-bump-per-changed-layer and not-undoable rules apply. Success is
 //! `laythw.applied` with the changed-layer count. Work-only.
 //!
-//! ## `LAYLCK`
+//! ## `LAYLCK` / `LAYULK`
 //!
-//! "Locks the layer of a selected object." Applies to every distinct layer in
-//! the selection, **including the current layer** (locking is a write
+//! "Locks/unlocks the layer of a selected object." Applies to every distinct
+//! layer in the selection, **including the current layer** (locking is a write
 //! permission, not visibility; creating on a locked current layer is then
 //! refused by `cad-db`'s own `layer.locked` rule). Only `locked` changes; every
-//! other attribute is preserved. Already-locked rows are not staged, and an
-//! all-locked selection reports `laylck.unchanged` without a write. Unknown
-//! layer rows are refused by name. One revision bump per changed layer; **not
-//! undoable**. Success is `laylck.applied` with the changed-layer count.
-//! Work-only.
+//! other attribute is preserved. Already-locked (or already-unlocked) rows are
+//! not staged, and an all-unchanged selection reports `laylck.unchanged` /
+//! `layulk.unchanged` without a write. Unknown layer rows are refused by name.
+//! One revision bump per changed layer; **not undoable**. Success is
+//! `laylck.applied` / `layulk.applied` with the changed-layer count. Work-only.
 
 use super::*;
 use cad_db::LayerAttributes;
@@ -232,6 +232,7 @@ impl Application {
             CommandId::LayFrz => self.layfrz(session, command),
             CommandId::LayThw => self.laythw(session, command),
             CommandId::LayLck => self.laylck(session, command),
+            CommandId::LayUlk => self.layulk(session, command),
             _ => Err(CadError::InvalidInput(
                 "not a layer selection command".to_string(),
             )),
@@ -451,8 +452,8 @@ impl Application {
         })
     }
 
-    /// `LAYLCK`: set the `locked` flag on every distinct selected layer (the
-    /// current layer included).
+    /// `LAYLCK` / `LAYULK`: set the `locked` flag on every distinct selected
+    /// layer (the current layer included).
     fn set_selected_layers_locked(
         &mut self,
         session: &mut SessionState,
@@ -531,6 +532,15 @@ impl Application {
         command: &Command,
     ) -> CadResult<CommandOutcome> {
         self.set_selected_layers_locked(session, command, "laylck", "LAYLCK", true)
+    }
+
+    /// `LAYULK`: unlock every distinct selected layer.
+    fn layulk(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        self.set_selected_layers_locked(session, command, "layulk", "LAYULK", false)
     }
 
     /// `LAYM C U R`: make the first selected entity's layer the current layer.

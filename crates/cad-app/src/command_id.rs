@@ -864,6 +864,9 @@ pub enum CommandId {
     /// layer included). Layer-table edit; not undoable; see
     /// [`crate::app_drawing::layer_commands`].
     LayLck,
+    /// `LAYULK` (Work-only): unlock every distinct selected layer. Layer-table
+    /// edit; not undoable; see [`crate::app_drawing::layer_commands`].
+    LayUlk,
     /// `PDMODE <n>`: write the drawing header's `$PDMODE`; see
     /// [`crate::command_id::point_style`].
     SetPointDisplayMode,

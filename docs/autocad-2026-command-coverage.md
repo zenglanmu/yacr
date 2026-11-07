@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **49** |
-| **已实现合计（完整 + 部分）** | **99** |
-| 未实现 | **882** |
+| 部分实现（有写明的界） | **50** |
+| **已实现合计（完整 + 部分）** | **100** |
+| 未实现 | **881** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -93,6 +93,7 @@
 | `LAYOFF` | 已实现 | — |
 | `LAYON` | 已实现 | — |
 | `LAYTHW` | 部分实现 | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入不可撤销 |
+| `LAYULK` | 部分实现 | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入不可撤销 |
 | `LAYUNISO` | 已实现 | — |
 | `LENGTHEN` | 部分实现 | 仅 LINE/ARC，只改末端 |
 | `LINE` | 已实现 | — |
@@ -633,7 +634,7 @@
 | 485 | `LAYOUTWIZARD` | 未实现 | Creates a new layout tab and specifies page and plot settings. | — |
 | 486 | `LAYTHW` | 部分实现 | Thaws all layers in the drawing. | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入不可撤销 |
 | 487 | `LAYTRANS` | 未实现 | Translates the layers in the current drawing to specified layer standards. | — |
-| 488 | `LAYULK` | 未实现 | Unlocks the layer of a selected object. | — |
+| 488 | `LAYULK` | 部分实现 | Unlocks the layer of a selected object. | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入不可撤销 |
 | 489 | `LAYUNISO` | 已实现 | Restores all layers that were hidden or locked with the LAYISO command. | — |
 | 490 | `LAYVPI` | 未实现 | Freezes selected layers in all layout viewports except the current viewport. | — |
 | 491 | `LAYWALK` | 未实现 | Displays objects on selected layers and hides objects on all other layers. | — |

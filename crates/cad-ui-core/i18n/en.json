@@ -1141,5 +1141,7 @@
   "draw.kind.laythw": "Thaw all layers",
   "draw.kind.laythw.hint": "No selection is needed; LAYTHW thaws every frozen layer (viewport-level frozen layers and the new-viewport flag are not changed).",
   "draw.kind.laylck": "Lock selected layers",
-  "draw.kind.laylck.hint": "Select the objects first; LAYLCK locks the layer of every selected object (the current layer may be locked too)."
+  "draw.kind.laylck.hint": "Select the objects first; LAYLCK locks the layer of every selected object (the current layer may be locked too).",
+  "draw.kind.layulk": "Unlock selected layers",
+  "draw.kind.layulk.hint": "Select the objects first; LAYULK unlocks the layer of every selected object."
 }
