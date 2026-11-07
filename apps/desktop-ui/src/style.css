@@ -1165,15 +1165,28 @@ button, input, select { font: inherit; color: inherit; }
   overflow: hidden;
   animation: rise var(--t-fast) both;
 }
-/* The head is a label, not a toolbar: the host's command log has no clear call, so
-   a clear button here would empty the typed rows and leave the host's own echoed
-   rows on screen — a control that lies. Do not add one. */
+/* The head is a label plus one **read-only** action: copying the record cannot
+   contradict it. A clear button still must not be added — the host's command log
+   has no clear call, so clearing here would leave the host's own echoed rows on
+   screen while emptying the typed ones: a control that lies. */
 .history-panel__head {
   flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
   padding: 4px 8px;
   border-bottom: 1px solid var(--line);
   color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px;
 }
+/* The title takes the slack so the copy button sits at the head's far end. */
+.history-panel__head-title {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The transient copy outcome (`role="status"`). It is not uppercase: it reads as
+   a sentence answer, not as a second section label. */
+.history-panel__status {
+  flex: none; color: var(--text-muted); font-size: 10px; letter-spacing: 0; text-transform: none; white-space: nowrap;
+}
+.history-panel__status.is-copied { color: var(--ok); }
+.history-panel__status.is-failed { color: var(--danger); }
 /* Nothing recorded yet. The pane keeps its frame (the height is fixed) and says so
    at the top of the list, where the first row would be — not centred like a
    splash, because the next command will start exactly there. */
@@ -1197,6 +1210,10 @@ button, input, select { font: inherit; color: inherit; }
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line-soft) transparent;
+  /* The list is a reading surface: its text can be selected and copied, which is
+     what the panel's copy chord reads when a selection is present. */
+  user-select: text;
+  -webkit-user-select: text;
 }
 /* "There is more under the fold". The thin scrollbar above is the same one the
    mobile sheet's scroller declares, but an overlay scrollbar paints nothing at
@@ -1227,6 +1244,10 @@ button, input, select { font: inherit; color: inherit; }
   background: transparent; color: var(--text-dim); text-align: left; cursor: pointer;
   font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
   overflow-wrap: anywhere;
+  /* A row is a recall control, but its text is still readable copy: dragging
+     across it selects instead of turning the pane into an unselectable button. */
+  user-select: text;
+  -webkit-user-select: text;
 }
 /* The catalog's own `Command:` prefix is quiet; the line itself is the row's
    subject but still one step below a measured value, because the value is what the

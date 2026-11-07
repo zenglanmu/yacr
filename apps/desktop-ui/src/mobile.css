@@ -575,8 +575,18 @@
 }
 .mobile-sheet__head > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-sheet__actions { display: flex; align-items: center; gap: 2px; flex: none; }
-/* 44px, not the 36px the head used to give them: these are the sheet's only two
-   touch controls (clear history, close) and a finger does not aim at 36px. */
+/* The transient copy outcome, the same live region the docked panel carries. It
+   sits inside the actions so the title's ellipsis rule never treats it as a second
+   title. */
+.mobile-sheet__status {
+  flex: none; max-width: 96px;
+  color: var(--text-muted); font-size: 10.5px; letter-spacing: 0; text-transform: none; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.mobile-sheet__status.is-copied { color: var(--ok); }
+.mobile-sheet__status.is-failed { color: var(--danger); }
+/* 44px, not the 36px the head used to give them: these are the sheet's only touch
+   controls (copy history, clear history, close) and a finger does not aim at 36px. */
 .mobile-sheet__actions .ui-icon-button { width: 44px; height: 44px; }
 .mobile-sheet__rows {
   flex: 1 1 auto;
@@ -585,7 +595,7 @@
   overscroll-behavior: contain;
   padding: 4px;
 }
-.mobile-sheet__list { margin: 0; list-style: none; }
+.mobile-sheet__list { margin: 0; list-style: none; user-select: text; -webkit-user-select: text; }
 .mobile-sheet__row {
   display: flex;
   align-items: center;
@@ -601,6 +611,8 @@
   text-align: left;
   overflow-wrap: anywhere;
   cursor: pointer;
+  user-select: text;
+  -webkit-user-select: text;
 }
 .mobile-sheet__row:hover { background: var(--hover); color: var(--text); }
 /* A refusal row of the same list: red, wrapping, and not tappable (no hover, no
