@@ -376,6 +376,24 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `BOUNDARY` | 部分实现 | 一个内部点 → 复用 HATCHPOINT 发现（最小可见闭合边界 + 嵌套岛）；每个环在当前层创建一条闭合、非关联 `AcDbPolyline`（保留 bulge、丢重复末点、世界 `+Z`），一条事务/一步撤销；源对象保留 | 仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 的边界集/关闭岛检测/面域输出/对象类型未实现；无 `BO`/`BPOLY` 别名；不关联 |
 | `TEXTTOFRONT` | 部分实现 | 选择式：仅可寻址模型空间 Text/MultiLeader/Dimension，按相对顺序连续排到所有非合格模型空间对象的最大 draw order 之上；其它选中对象逐条 `texttofront.skipped`；一条事务/一步撤销；已在前方时 `texttofront.unchanged` 不建事务 | 图纸空间/块内 draw order 不重排；选中非文字对象不移动；AutoCAD 的“全图文字”形式与 Draw Order 对话框未实现 |
 
+#### 2026-11-07 文字编辑批次（10 条）
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `JUSTIFYTEXT` / `TJUST` | 部分实现 | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，`position` 不动；一条事务/一步撤销；`TJUST` 是同一 `CommandId` 的别名 | 非文字/不可寻址目标逐条 `justifytext.not_text` 跳过（TORIENT 策略）；空选择拒绝；无对话框 |
+| `TSCALE` | 部分实现 | `TSCALE <factor>`；复用 SCALETEXT 的唯一 `scaled_text` 规则（`height` + MText `wrap_width`）；factor=1 为 `tscale.unchanged` 且不开事务 | factor 必须有限且 >0；非文字目标整命令拒绝；无 AutoCAD 的“按参照缩放”交互 |
+| `TEXTALIGN` | 部分实现 | `TEXTALIGN LEFT/RIGHT/CENTER/TOP/MIDDLE/BOTTOM`；把选中 Text/MText 的 `position` 对齐到共同边/中心；一条事务/一步撤销 | 宽/高是**估算**（宽 = `height × 字符数`，高 = `height`，忽略旋转；cad-app 无字形外框 API）；<2 个目标拒绝；无垂直/倾斜的对齐对话框 |
+| `TCOUNT` | 部分实现 | `TCOUNT <start> <step> [prefix] [suffix]`；按上→下/左→右顺序把每个选中 Text/MText 替换为 `prefix+编号+suffix`；一条事务/一步撤销 | `step` 必须 >0；AutoCAD 的逐项前缀/后缀对话框、Find & Replace 模式未实现；替换整串、不解析格式 run |
+| `TCIRCLE` | 部分实现 | `TCIRCLE CIRCLE/RECTANGLE`；用估算文字外框在文字所在图层建真实 `Circle`（中心=外框中心，半径=半对角线）或闭合 4 顶点 `Polyline`；保留文字；一条事务/一步撤销 | 无 SLOT；无关联性；外框是估算值；无“按对象/按文字”选项 |
+| `TEXTMASK` | 部分实现 | 为每个选中 Text/MText 用估算外框创建独立 `SemanticGeometry::Mask`（type-key `AcDbWipeout`），`draw_order = 文字 − 1`；一条事务/一步撤销 | 无关联模型（遮罩是独立实体）；无“掩膜偏移/边框”选项；外框估算 |
+| `TEXTUNMASK` | 部分实现 | 只删除**选中**的、落在选中文字估算外框内的 `Mask`；没有选中文字时删除选中的 Mask；一条事务/一步撤销 | 启发式无法证明 Mask 由 TEXTMASK 创建；未选中的 Mask 永不扫描；无关联性 |
+| `MTEDIT` | 部分实现 | `TEXTEDIT` 的别名（同一 `CommandId`/路径）：编辑当前单选的 Text/MText/MULTILEADER 字符串 | 无第二编辑路径；无 AutoCAD 的 MText 就地编辑器/格式工具栏 |
+| `-MTEXT` | 部分实现 | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获），无第二实现 | 命令行变体的选项提示（高度/对正/行距/旋转）未实现；见 MTEXT 行 |
+
+> **证据边界**：以上 10 条只有 Rust 契约测试（`cad-app` 1788 + `cad-ui-core` 401）与前端纯函数/
+> 结构测试（1269）；**没有** GUI、像素、真实 GPU、真机或 vendor-AutoCAD 证据。前端测试在合并后
+> 于主仓库运行通过；worktree 内因缺 `node_modules` 为 NOT RUN。
+
 **仿射不变规则（`SPLINE`，2026-10-26）**：NURBS 曲线对**仿射**映射不变——把每个控制点过同一个
 仿射映射，而 `degree`、`knots`、`weights` **原样保留**，得到的正是原曲线的**精确仿射像**。因此平移、旋转、
 **均匀与非均匀**缩放、镜像与剪切**全部精确**：无需重拟合、无需重参数化、权重不变。`cad-db` 的

@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **73** |
-| **已实现合计（完整 + 部分）** | **123** |
-| 未实现 | **858** |
+| 部分实现（有写明的界） | **83** |
+| **已实现合计（完整 + 部分）** | **133** |
+| 未实现 | **848** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -631,7 +631,7 @@
 | 458 | `JOIN` | 部分实现 | Joins the endpoints of linear and curved objects to create a single object. | 仅共线 LINE 或同心相续 ARC |
 | 459 | `JPGOUT` | 未实现 | Saves selected objects to a file in JPEG file format. | — |
 | 460 | `JULIAN` | 未实现 | Contains the DATE tool and several AutoCAD Julian date and calendar date conversion routines. | — |
-| 461 | `JUSTIFYTEXT` | 未实现 | Changes the justification point of selected text objects without changing their locations. | — |
+| 461 | `JUSTIFYTEXT` | 部分实现 | Changes the justification point of selected text objects without changing their locations. | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
 | 462 | `LAYCUR` | 部分实现 | Changes the layer property of selected objects to the current layer. | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
 | 463 | `-LAYDEL` | 未实现 | At the Command prompt, deletes all objects on a layer and purges the layer. | — |
 | 464 | `LAYDEL` | 未实现 | Deletes all objects on a layer and purges the layer. | — |
@@ -743,8 +743,8 @@
 | 570 | `MSLIDE` | 未实现 | Creates a slide file of the current model viewport or the current layout. | — |
 | 571 | `MSPACE` | 未实现 | In a layout, switches from paper space to model space in a layout viewport. | — |
 | 572 | `MSTRETCH` | 未实现 | Stretches objects with multiple crossing windows and crossing polygons. | — |
-| 573 | `MTEDIT` | 未实现 | Edits multiline text. | — |
-| 574 | `-MTEXT` | 未实现 | Creates a multiline text object. | — |
+| 573 | `MTEDIT` | 部分实现 | Edits multiline text. | `TEXTEDIT` 的别名（同一 `CommandId`/路径）；编辑当前单选的 Text/MText/MULTILEADER 字符串；无第二编辑路径 |
+| 574 | `-MTEXT` | 部分实现 | Creates a multiline text object. | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获）；无第二实现 |
 | 575 | `MTEXT` | 部分实现 | Creates a multiline text object. | 两角宽度模型；无行距/分栏/背景填充 |
 | 576 | `MULTIPLE` | 未实现 | Repeats the next command until canceled. | — |
 | 577 | `MVIEW` | 未实现 | Creates and controls layout viewports. | — |
@@ -1022,22 +1022,22 @@
 | 849 | `TARGETPOINT` | 未实现 | Creates a target point light. | — |
 | 850 | `TASKBAR` | 未实现 | Controls the Peek/Preview behavior of the application's button in the Windows taskbar when multiple drawings are open. | — |
 | 851 | `TCASE` | 部分实现 | Changes the case of selected text, mtext, attributes, and dimension text. | 选择式；只处理 Text/MText（MULTILEADER 走 with_text）；裸命令默认 Title，键入 `TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE` 或 `U/L/T/S/G`；MTEXT 格式转义逐字保留；属性/标注文字未建模（`tcase.not_reset`） |
-| 852 | `TCIRCLE` | 未实现 | Creates a circle, a slot, or a rectangle around each selected text or mtext object. | — |
-| 853 | `TCOUNT` | 未实现 | Adds sequential numbering to text and mtext objects as a prefix, suffix, or replacement text. | — |
+| 852 | `TCIRCLE` | 部分实现 | Creates a circle, a slot, or a rectangle around each selected text or mtext object. | `TCIRCLE CIRCLE\|RECTANGLE`；用**估算**文字外框（宽 = `height × 字符数`、高 = `height`、忽略旋转）在文字所在图层建 `Circle` 或闭合 `Polyline`；保留文字；无关联性 |
+| 853 | `TCOUNT` | 部分实现 | Adds sequential numbering to text and mtext objects as a prefix, suffix, or replacement text. | `TCOUNT <start> <step> [prefix] [suffix]`；按上→下/左→右顺序把每个选中 Text/MText 替换为 `prefix+编号+suffix`；`step` 必须 >0；AutoCAD 的逐项前缀/后缀对话框模式未实现 |
 | 854 | `TEXT` | 已实现 | Creates a single-line text object. | — |
-| 855 | `TEXTALIGN` | 未实现 | Aligns multiple text objects vertically, horizontally, or obliquely. | — |
+| 855 | `TEXTALIGN` | 部分实现 | Aligns multiple text objects vertically, horizontally, or obliquely. | `TEXTALIGN LEFT\|RIGHT\|CENTER\|TOP\|MIDDLE\|BOTTOM`；把选中文字 `position` 对齐到共同边/中心；宽/高为**估算**值（无字形外框 API）；<2 个目标拒绝 |
 | 856 | `TEXTEDIT` | 部分实现 | Edits a selected multiline or single-line text object, or the text in a dimension object. | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
 | 857 | `TEXTFIT` | 未实现 | Expands or compresses the width of text objects based on new starting and ending points. | — |
-| 858 | `TEXTMASK` | 未实现 | Creates a blank area behind selected text or mtext objects. | — |
+| 858 | `TEXTMASK` | 部分实现 | Creates a blank area behind selected text or mtext objects. | 为每个选中 Text/MText 用**估算**外框创建独立 `Mask`（type-key `AcDbWipeout`，`draw_order = 文字 − 1`）；无关联模型，遮罩是独立实体 |
 | 859 | `TEXTSCR` | 未实现 | Opens a text window that displays a history of prompts and command line entries for the current session. | — |
 | 860 | `TEXTTOFRONT` | 部分实现 | Brings text, leaders, and dimensions in front of all other objects in the drawing. | 以**当前选择**为输入（偏离 AutoCAD 的 Select objects 提示）；仅可寻址模型空间 Text/MultiLeader/Dimension 参与，其它选中对象逐条 `texttofront.skipped` 跳过；以所有非合格模型空间对象的最大 draw order 为基线，按相对顺序连续上移（一条事务/一步撤销）；已在前方时 `texttofront.unchanged` 不建事务；图纸空间/块内 draw order 不重排；AutoCAD 的“全图文字”形式与 Draw Order 对话框未实现 |
-| 861 | `TEXTUNMASK` | 未实现 | Removes the mask from selected text or mtext that were masked with TEXTMASK. | — |
+| 861 | `TEXTUNMASK` | 部分实现 | Removes the mask from selected text or mtext that were masked with TEXTMASK. | 只删除**选中**的、落在选中文字估算外框内的 `Mask`；启发式无法证明来源；未选中的 Mask 不扫描 |
 | 862 | `TFRAMES` | 未实现 | Toggles the display of frames for all wipeout and image objects. | — |
 | 863 | `THICKEN` | 未实现 | Converts a surface into a 3D solid with a specified thickness. | — |
 | 864 | `TIFOUT` | 未实现 | Saves selected objects to a file in TIFF file format. | — |
 | 865 | `TIME` | 未实现 | Displays the date and time statistics of a drawing. | — |
 | 866 | `TINSERT` | 未实现 | Inserts a block in a table cell. | — |
-| 867 | `TJUST` | 未实现 | Changes the justification point of a text object without moving the text. Works with text, mtext, and attribute definition objects. | — |
+| 867 | `TJUST` | 部分实现 | Changes the justification point of a text object without moving the text. Works with text, mtext, and attribute definition objects. | `JUSTIFYTEXT` 的别名，同一语法与实现 |
 | 868 | `TOLERANCE` | 未实现 | Creates geometric tolerances contained in a feature control frame. | — |
 | 869 | `-TOOLBAR` | 未实现 | Displays, hides, and customizes toolbars from the Command prompt. | — |
 | 870 | `TOOLBAR` | 未实现 | Displays, hides, and customizes toolbars. | — |
@@ -1058,7 +1058,7 @@
 | 885 | `TREESTAT` | 未实现 | Displays information about the drawing's current spatial index. | — |
 | 886 | `TREX` | 未实现 | Combines the TRIM and EXTEND commands. | — |
 | 887 | `TRIM` | 部分实现 | Trims objects to meet the edges of other objects. | 目标 LINE/ARC/CIRCLE/SPLINE；边界含折线/样条采样 |
-| 888 | `TSCALE` | 未实现 | Scales text, mtext, attributes, and attribute definitions. | — |
+| 888 | `TSCALE` | 部分实现 | Scales text, mtext, attributes, and attribute definitions. | `TSCALE <factor>`；复用 SCALETEXT 的唯一 `scaled_text` 规则（height + MText `wrap_width`）；factor=1 为 `tscale.unchanged` 且不开事务 |
 | 889 | `TXT2MTXT` | 部分实现 | Converts or combines single-line or multiline text objects into one or more multiline text objects. | 选择式 v1：仅模型空间 Text/MText；上→下、左→右稳定排序，`\P` 原样拼接为一个 `AcDbMText`；沿用首源样式/位置/字高/旋转/对齐/层/绘制顺序/`wrap_width`；同事务删除源；设置对话框/强制统一行距未实现 |
 | 890 | `TXTEXP` | 未实现 | Explodes text or mtext objects into polyline objects. | — |
 | 891 | `U` | 已实现 | Reverses the most recent operation. | — |

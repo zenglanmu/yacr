@@ -1,3 +1,20 @@
+## 2026-11-07 AutoCAD 2026 2D 文字编辑批次（10 条，进行中）
+
+- **状态**：`text-batch` lane 已合并到 `main`（提交 `579fd5c`，merge `8a4806a`，前端期望修正
+  `7820b44`）。官方清单从 **123（50 完整 + 73 部分）/ 858 未实现** 变为
+  **133（50 完整 + 83 部分）/ 848 未实现**。
+- **新增**：`JUSTIFYTEXT`/`TJUST`、`TSCALE`、`TEXTALIGN`、`TCOUNT`、`TCIRCLE`、`TEXTMASK`、
+  `TEXTUNMASK`、`MTEDIT`、`-MTEXT`。逐条边界见 `docs/batch-text-2026-11-07.md` 与
+  `docs/compatibility.md` §「2026-11-07 文字编辑批次（10 条）」。
+- **共同边界**：外框均为估算（宽 = `height × 字符数`、高 = `height`，忽略旋转；cad-app 没有字形
+  外框 API）；遮罩/边界无关联性；`MTEDIT`/`-MTEXT` 是既有路径的别名；非文字目标/空选择按名拒绝。
+- **已运行（主仓库合并后）**：`cargo test -p cad-app --locked`（1788 passed + 集成目标全过）；
+  `cargo test -p cad-ui-core --locked`（401）；前端 `node --test test/*.test.ts`（1269 passed）；
+  `cargo fmt --all -- --check`；`check-file-size.py`（1484 files）；`check-i18n.py`（1242 keys）；
+  `check-command-docs.py`（152/5/2/15 selectors，60 aliases，0 mismatches）。
+- **NOT RUN / NOT VERIFIED**：真实 GUI/像素/GPU/真机/vendor AutoCAD；Windows/macOS/Android/Web
+  运行时；worktree 内前端测试（缺 `node_modules`）。本批仅命令路径 + 契约测试。
+
 ## 2026-11-07 AutoCAD 2026 2D 命令批次（29 条官方命令 + 1 个项目选择子）+ 实验性 DWG 另存
 
 - **范围**：按 `docs/autocad-2026-command-coverage.md` 继续实现**未完成的 2D 命令**，全部同时接线
