@@ -142,6 +142,14 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // has no separate point mark, and the fill output is the same entity — and it
   // sits directly after HATCH so no shipped row moves.
   { id: 'HATCHPOINT', labelKey: 'draw.kind.hatchpoint', icon: 'hatch', group: 'draw' },
+  // BOUNDARY (AutoCAD 2026) is the other internal-point selector: it reuses
+  // HATCHPOINT's discovery but creates one closed, non-associative polyline per
+  // loop on the active layer. It is a canonical selector of its own (never an
+  // alias of HATCH/HATCHPOINT; `BO`/`BPOLY` are deliberately not admitted) and it
+  // is a capture, not a pre-selection tool. It reuses the `polyline` glyph — the
+  // output is a polyline — and sits directly after HATCHPOINT so the HATCH family
+  // stays contiguous. `-BOUNDARY` options are NOT IMPLEMENTED; the hint says so.
+  { id: 'BOUNDARY', labelKey: 'draw.kind.boundary', icon: 'polyline', group: 'draw' },
   { id: 'MOVE', labelKey: 'draw.kind.move', icon: 'move', group: 'modify' },
   { id: 'COPY', labelKey: 'draw.kind.copy', icon: 'copy', group: 'modify' },
   // Clipboard selectors with a base point (2026-10-27), placed directly after the
@@ -472,6 +480,15 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // HATCHTOBACK (AutoCAD 2026) sends every model-space hatch behind every other
   // object by rewriting the stored draw order. It takes no selection and needs an
   // open drawing (`DOCUMENT_SCOPED_COMMANDS`); paper-space/block hatches are not
-  // reordered. Appended last; it reuses the `hatch` glyph.
+  // reordered. Appended after the shipped rows; it reuses the `hatch` glyph.
   { id: 'HATCHTOBACK', labelKey: 'draw.kind.hatchtoback', icon: 'hatch', group: 'modify' },
+  // TEXTTOFRONT (AutoCAD 2026) is the selection-based draw-order command: it
+  // moves the selected text/leaders/dimensions above every other model-space
+  // object. It reads the **current selection** (a declared divergence from the
+  // interactive Select objects prompt), so it is an ordinary router button gated
+  // by `SELECTION_REQUIREMENTS`, never a capture. It uses the generic `properties`
+  // glyph (the icon set has no draw-order mark); the dedicated `text`/`mtext`
+  // marks stay owned by the text commands. Paper/block draw order and the
+  // all-objects form are NOT IMPLEMENTED.
+  { id: 'TEXTTOFRONT', labelKey: 'draw.kind.texttofront', icon: 'properties', group: 'modify' },
 ]);

@@ -371,6 +371,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `DIMROTATED` | 部分实现 | 三次拾取（两原点 + 尺寸线位置）+ 会话 `dimRotation` 角度，复用 `DimensionKind::Linear{rotation}` 合成一个非关联尺寸 | 无 AutoCAD 的选项子提示；非 `+Z` 平面/退化输入按名拒绝 |
 | `DIMSPACE` | 部分实现 | 选择式：第一个线性尺寸为基准，其余按 `DIMDLI` 自动等距重排（一条事务/一步撤销） | 无交互 value 提示（恒为 0/自动），无关联重排，非线性尺寸按名拒绝 |
 | `PEDIT` | 部分实现 | 恰好一条可寻址模型空间 LWPOLYLINE；`PEDIT CLOSE/OPEN/REVERSE` 改闭合标志或反转顶点+bulge，一条事务/一步撤销；无变化时显式 no-op | 无 `Join`/`Width`/`Fit`/`Spline`/`Decurve`/`Ltype gen`/`Undo`/`Multiple`/`Edit vertex`，无交互选项提示、无 line/arc 转换；裸 `PEDIT` 或未知参数按名拒绝 |
+| `BOUNDARY` | 部分实现 | 一个内部点 → 复用 HATCHPOINT 发现（最小可见闭合边界 + 嵌套岛）；每个环在当前层创建一条闭合、非关联 `AcDbPolyline`（保留 bulge、丢重复末点、世界 `+Z`），一条事务/一步撤销；源对象保留 | 仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 的边界集/关闭岛检测/面域输出/对象类型未实现；无 `BO`/`BPOLY` 别名；不关联 |
+| `TEXTTOFRONT` | 部分实现 | 选择式：仅可寻址模型空间 Text/MultiLeader/Dimension，按相对顺序连续排到所有非合格模型空间对象的最大 draw order 之上；其它选中对象逐条 `texttofront.skipped`；一条事务/一步撤销；已在前方时 `texttofront.unchanged` 不建事务 | 图纸空间/块内 draw order 不重排；选中非文字对象不移动；AutoCAD 的“全图文字”形式与 Draw Order 对话框未实现 |
 
 **仿射不变规则（`SPLINE`，2026-10-26）**：NURBS 曲线对**仿射**映射不变——把每个控制点过同一个
 仿射映射，而 `degree`、`knots`、`weights` **原样保留**，得到的正是原曲线的**精确仿射像**。因此平移、旋转、

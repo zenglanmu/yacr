@@ -94,6 +94,12 @@ export const HOME_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // It takes no selection and is document-scoped (an open drawing is the whole
   // requirement); no options popover exists.
   { id: 'HATCHTOBACK', labelKey: 'draw.kind.hatchtoback', icon: 'hatch', command: 'HATCHTOBACK' },
+  // TEXTTOFRONT (AutoCAD 2026) is the selection-based draw-order command: it
+  // brings the selected text/leaders/dimensions in front of every other
+  // model-space object. It is a small router button (no capture, no options
+  // popover), enabled by the shared one-object selection requirement. Paper/block
+  // draw order and the all-objects form are NOT IMPLEMENTED; the hint says so.
+  { id: 'TEXTTOFRONT', labelKey: 'draw.kind.texttofront', icon: 'properties', command: 'TEXTTOFRONT', hintKey: 'draw.kind.texttofront.hint' },
 ]);
 
 /** The Draw tab's Modify panel, in display order. */
@@ -156,4 +162,10 @@ export const DRAW_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // It takes no selection and is document-scoped (an open drawing is the whole
   // requirement); no options popover exists.
   { id: 'HATCHTOBACK', labelKey: 'draw.kind.hatchtoback', icon: 'hatch', command: 'HATCHTOBACK' },
+  // TEXTTOFRONT (AutoCAD 2026) is the selection-based draw-order command: it
+  // brings the selected text/leaders/dimensions in front of every other
+  // model-space object. It is a small router button (no capture, no options
+  // popover), enabled by the shared one-object selection requirement. Paper/block
+  // draw order and the all-objects form are NOT IMPLEMENTED; the hint says so.
+  { id: 'TEXTTOFRONT', labelKey: 'draw.kind.texttofront', icon: 'properties', command: 'TEXTTOFRONT', hintKey: 'draw.kind.texttofront.hint' },
 ]);

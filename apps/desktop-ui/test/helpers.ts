@@ -145,6 +145,10 @@ export const HOST_NAMES = [
   // the two take different input (a pick vs a pre-selection), so admitting one
   // must never admit the other's capture.
   'HATCHPOINT',
+  // BOUNDARY: the other internal-point selector (one pick, then one closed
+  // non-associative polyline per discovered loop). Its own canonical name, never
+  // an alias of HATCH/HATCHPOINT; `BO`/`BPOLY` are deliberately not admitted.
+  'BOUNDARY',
   // HATCHGENERATEBOUNDARY / HATCHTOBACK (AutoCAD 2026) are the hatch utilities:
   // boundary creation is selection-based, to-back is selection-free and
   // document-scoped. Both are canonical selectors of their own, never aliases of
@@ -152,6 +156,9 @@ export const HOST_NAMES = [
   // / `CommandId::HatchToBack`); this mirror stands in for the loaded
   // `cad_commands` vocabulary and never proves the host advertises them.
   'HATCHGENERATEBOUNDARY', 'HATCHTOBACK',
+  // TEXTTOFRONT (AutoCAD 2026): selection-based draw order; the current selection
+  // is the input and only model-space text/leader/dimension rows are eligible.
+  'TEXTTOFRONT',
   // MATCHPROP: the selection-based property painter (`CommandId::MatchProp`,
   // `CommandPayload::None` — the selection's first entity is the source). No
   // dedicated IPC; the bare name is the whole input.

@@ -395,6 +395,13 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   TCASE: Object.freeze({ count: 1, reasonKey: 'draw.kind.tcase.hint' }),
   TXT2MTXT: Object.freeze({ count: 1, reasonKey: 'draw.kind.txt2mtxt.hint' }),
   DIMSPACE: Object.freeze({ count: 2, reasonKey: 'draw.kind.dimspace.hint' }),
+  // TEXTTOFRONT (AutoCAD 2026) reads the **current selection** (a declared
+  // divergence from AutoCAD's Select objects prompt). With nothing selected the
+  // host refuses it by name (`texttofront.selection`), so the table disables the
+  // button/line with its own hint: one object is the minimum that can produce a
+  // real result. The host independently skips non-text selections with
+  // per-entity diagnostics, so the local rule is only a minimum.
+  TEXTTOFRONT: Object.freeze({ count: 1, reasonKey: 'draw.kind.texttofront.hint' }),
 });
 
 /**
