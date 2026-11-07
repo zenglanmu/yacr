@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **133** |
-| **已实现合计（完整 + 部分）** | **183** |
-| 未实现 | **798** |
+| 部分实现（有写明的界） | **143** |
+| **已实现合计（完整 + 部分）** | **193** |
+| 未实现 | **788** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -653,14 +653,14 @@
 | 480 | `LAYMRG` | 部分实现 | Merges selected layers into a target layer, removing them from the drawing. | 选择式：选中对象的层合并到当前层（重写实体 + 删除源层；层表删除不可撤销）；当前层/0 层不能作源 |
 | 481 | `LAYOFF` | 已实现 | Turns off the layer of a selected object. | — |
 | 482 | `LAYON` | 已实现 | Turns on all layers in the drawing. | — |
-| 483 | `LAYOUT` | 未实现 | Creates and modifies drawing layouts. | — |
-| 484 | `LAYOUTMERGE` | 未实现 | Combines specified layouts into a single layout. | — |
-| 485 | `LAYOUTWIZARD` | 未实现 | Creates a new layout tab and specifies page and plot settings. | — |
+| 483 | `LAYOUT` | 部分实现 | Creates and modifies drawing layouts. | `LIST`/`SET` 真实（读布局表 + 会话空间切换）；`NEW/RENAME/DELETE` 名称校验后按 `layout.write_unsupported` 拒绝（无 post-import 布局写 API）；不写库 |
+| 484 | `LAYOUTMERGE` | 部分实现 | Combines specified layouts into a single layout. | 名称校验后 `layoutmerge.write_unsupported`（无布局/实体移动/删除 API） |
+| 485 | `LAYOUTWIZARD` | 部分实现 | Creates a new layout tab and specifies page and plot settings. | 名称/页面设置校验后 `layoutwizard.write_unsupported`（无布局/页面设置写 API） |
 | 486 | `LAYTHW` | 部分实现 | Thaws all layers in the drawing. | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入不可撤销 |
 | 487 | `LAYTRANS` | 未实现 | Translates the layers in the current drawing to specified layer standards. | — |
 | 488 | `LAYULK` | 部分实现 | Unlocks the layer of a selected object. | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入不可撤销 |
 | 489 | `LAYUNISO` | 已实现 | Restores all layers that were hidden or locked with the LAYISO command. | — |
-| 490 | `LAYVPI` | 未实现 | Freezes selected layers in all layout viewports except the current viewport. | — |
+| 490 | `LAYVPI` | 部分实现 | Freezes selected layers in all layout viewports except the current viewport. | 层名校验后 `layvpi.viewport_layer_state_unsupported`；永不全局冻结 |
 | 491 | `LAYWALK` | 部分实现 | Displays objects on selected layers and hides objects on all other layers. | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
 | 492 | `LEADER` | 未实现 | Creates a line that connects annotation to a feature. | — |
 | 493 | `LENGTHEN` | 部分实现 | Changes the length of objects and the included angle of arcs. | 仅 LINE/ARC，只改末端 |
@@ -1107,14 +1107,14 @@
 | 934 | `VISUALSTYLES` | 未实现 | Creates and modifies visual styles and applies a visual style to a viewport. | — |
 | 935 | `VISUALSTYLESCLOSE` | 未实现 | Closes the Visual Styles Manager. | — |
 | 936 | `VLISP` | 未实现 | Displays the AutoLISP development environment. | — |
-| 937 | `VPCLIP` | 未实现 | Redefines a layout viewport object while retaining its properties. | — |
+| 937 | `VPCLIP` | 部分实现 | Redefines a layout viewport object while retaining its properties. | `RECT` 校验；非矩形 `vpclip.polygonal_not_implemented`；合法矩形后 `vpclip.viewport_selection_unsupported`（无选中视口/裁剪写 API） |
 | 938 | `VPLAYER` | 未实现 | Sets layer visibility within viewports. | — |
-| 939 | `VPMAX` | 未实现 | Expands the current layout viewport for editing. | — |
-| 940 | `VPMIN` | 未实现 | Restores the current layout viewport. | — |
+| 939 | `VPMAX` | 部分实现 | Expands the current layout viewport for editing. | 会话标记（活动图纸布局的第一个视口）；不写库 |
+| 940 | `VPMIN` | 部分实现 | Restores the current layout viewport. | 恢复会话标记；空状态 `vpmin.nothing_to_restore` |
 | 941 | `VPOINT` | 部分实现 | Sets the viewing direction for a 3D visualization of the drawing. | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；零/非有限向量拒绝；不改模型；向量形式进入 3D 透视 |
-| 942 | `-VPORTS` | 未实现 | Creates multiple viewports in model space or paper space. | — |
-| 943 | `VPORTS` | 未实现 | Creates multiple viewports in model space or in a layout (paper space). | — |
-| 944 | `VPSCALE` | 未实现 | On a layout, displays the scale of the current viewport or of a selected layout viewport. | — |
+| 942 | `-VPORTS` | 部分实现 | Creates multiple viewports in model space or paper space. | `VPORTS` 的别名，同一实现 |
+| 943 | `VPORTS` | 部分实现 | Creates multiple viewports in model space or in a layout (paper space). | 网格校验 + 图纸空间检查后 `vports.write_unsupported`（无视口创建 API） |
+| 944 | `VPSCALE` | 部分实现 | On a layout, displays the scale of the current viewport or of a selected layout viewport. | 零/非有限/未知拒绝；解析比例后 `vpscale.write_unsupported`（无视口比例写 API） |
 | 945 | `VPSYNC` | 未实现 | Aligns the views in one or more adjacent layout viewports with a master layout viewport. | — |
 | 946 | `VSCURRENT` | 未实现 | Sets the visual style in the current viewport. | — |
 | 947 | `VSLIDE` | 未实现 | Displays an image slide file in the current viewport. | — |

@@ -476,6 +476,28 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 > 真机或 vendor-AutoCAD 证据。view-batch 的前端测试在主仓库合并后运行通过；worktree 内因缺
 > `node_modules` 为 NOT RUN。
 
+#### 2026-11-07 布局/视口批次（10 条）
+
+> **重要**：`cad-db` 没有 post-import 的布局/`PaperViewport` 写 API（只有 builder 写）。因此本批
+> 只有 **`LAYOUT LIST`/`LAYOUT SET`/`VPMAX`/`VPMIN`** 是可用的真实路径；其余写形式在完成名称/参数
+> 校验后以稳定具名原因**拒绝**，不会克隆后静默发布，也不会伪造成功。
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `LAYOUT` | 部分实现 | `LAYOUT LIST` 读布局表；`LAYOUT SET <name>` 切换活动空间（会话状态）；无数据库写/撤销 | `NEW`/`RENAME`/`DELETE` 校验名称/重复/末页后按 `layout.write_unsupported` 拒绝（无布局写 API）；无对话框/缩略图 |
+| `LAYOUTMERGE` | 部分实现 | 校验 source/target（缺失/同名）后按 `layoutmerge.write_unsupported` 拒绝 | 无布局/实体移动或布局删除 API；不移动任何实体 |
+| `LAYOUTWIZARD` | 部分实现 | 校验名称/可选纸张参数后按 `layoutwizard.write_unsupported` 拒绝 | 无布局/页面设置写 API；纸张尺寸不应用 |
+| `VPORTS` / `-VPORTS` | 部分实现 | 校验 `rows`/`cols` 正整数与图纸空间后按 `vports.write_unsupported` 拒绝 | 无 `PaperViewport` 创建 API；`-VPORTS` 是同一实现 |
+| `VPMAX` | 部分实现 | 会话标记活动图纸布局的第一个视口（无每视口选择模型）；不写库 | 不改变视口几何；真实最大化显示由宿主消费（未验证） |
+| `VPMIN` | 部分实现 | 恢复会话标记；空状态为 `vpmin.nothing_to_restore` | 同上；不写库 |
+| `VPCLIP` | 部分实现 | 校验 `RECT <minx> <miny> <maxx> <maxy>`；非矩形按 `vpclip.polygonal_not_implemented` 拒绝；合法矩形后按 `vpclip.viewport_selection_unsupported` 拒绝 | 无选中视口/裁剪写 API；多边形裁剪未实现 |
+| `VPSCALE` | 部分实现 | 校验零/非有限/未知比例；解析后按 `vpscale.write_unsupported` 拒绝 | 无视口比例写 API；不修改视口 |
+| `LAYVPI` | 部分实现 | 校验层名后按 `layvpi.viewport_layer_state_unsupported` 拒绝 | 无 per-viewport 层状态；**绝不**全局冻结 |
+
+> **证据边界**：以上 10 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
+> 真机或 vendor-AutoCAD 证据。layout-batch 的前端测试在主仓库合并后运行通过；worktree 内因缺
+> `node_modules` 为 NOT RUN。
+
 **仿射不变规则（`SPLINE`，2026-10-26）**：NURBS 曲线对**仿射**映射不变——把每个控制点过同一个
 仿射映射，而 `degree`、`knots`、`weights` **原样保留**，得到的正是原曲线的**精确仿射像**。因此平移、旋转、
 **均匀与非均匀**缩放、镜像与剪切**全部精确**：无需重拟合、无需重参数化、权重不变。`cad-db` 的

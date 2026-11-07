@@ -1,3 +1,23 @@
+## 2026-11-07 AutoCAD 2026 2D 布局/视口批次（10 条，已合并，写路径多为具名拒绝）
+
+- **状态**：`layout-batch`（提交 `c792befa`，merge `51548a1c`）已合并到 `main`。官方清单从
+  **183（50 完整 + 133 部分）/ 798 未实现** 变为 **193（50 完整 + 143 部分）/ 788 未实现**。
+- **新增（10）**：`LAYOUT`、`LAYOUTMERGE`、`LAYOUTWIZARD`、`VPORTS`、`-VPORTS`、`VPMAX`、
+  `VPMIN`、`VPCLIP`、`VPSCALE`、`LAYVPI`。
+- **诚实边界（重要）**：`cad-db` 只有 builder 期的布局/`PaperViewport` 写 API；本批只有
+  `LAYOUT LIST`/`LAYOUT SET`/`VPMAX`/`VPMIN` 是真实可用路径。其余写形式在名称/参数校验后以
+  `layout.write_unsupported` / `layoutmerge.write_unsupported` / `layoutwizard.write_unsupported` /
+  `vports.write_unsupported` / `vpclip.*_unsupported` / `vpscale.write_unsupported` /
+  `layvpi.viewport_layer_state_unsupported` **具名拒绝**，不克隆后静默发布，也不伪造成功。
+  逐条见 `docs/batch-layout-2026-11-07.md` 与 `docs/compatibility.md` §「2026-11-07 布局/视口批次」。
+- **已运行（主仓库合并后）**：`cargo test -p cad-app --locked`（1879 + 集成目标全过）；
+  `cargo test -p cad-ui-core --locked`（435）；前端 `node --test test/*.test.ts`（1275 passed）；
+  `cargo fmt --all -- --check`；`cargo clippy -p cad-app -p cad-ui-core --all-targets -- -D warnings`；
+  `check-file-size.py`；`check-i18n.py`（1330 keys）；`check-command-docs.py`（204/5/2/47 selectors，
+  68 aliases，0 mismatches）；`check-architecture.py`。
+- **NOT RUN / NOT VERIFIED**：真实 GUI/像素/GPU/真机/vendor AutoCAD；Windows/macOS/Android/Web
+  运行时；`cargo test --workspace`；打包/发布。worktree 内前端测试因缺 `node_modules` 为 NOT RUN。
+
 ## 2026-11-07 AutoCAD 2026 2D 视图/空间批次（10 条，已合并）
 
 - **状态**：`view-batch`（提交 `c2f9ee38`，merge `e70063c4`）已合并到 `main`。官方清单从
