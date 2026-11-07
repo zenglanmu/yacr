@@ -686,12 +686,12 @@ test('the hatch glyph is a dedicated boundary-with-fill icon, not a neighbour gl
     assert.equal(item.icon, HATCH.icon, tabId);
   }
   assert.equal(COMMAND_CATALOG.find(command => command.id === HATCH.id).icon, HATCH.icon);
-  // `hatch` is shared by exactly the hatch family: HATCH and its point-pick
-  // entry HATCHPOINT. No unrelated command may reuse it (the comment above locks
-  // the glyph's shape, so a second meaning would still read as a lie).
+  // `hatch` is shared by exactly the hatch family: HATCH, its point-pick entry
+  // HATCHPOINT, and the two 2026 hatch utilities (boundary generation and draw
+  // order). No unrelated command may reuse it.
   assert.deepEqual(
     COMMAND_CATALOG.filter(command => command.icon === HATCH.icon).map(command => command.id),
-    ['HATCH', 'HATCHPOINT'],
+    ['HATCH', 'HATCHPOINT', 'HATCHGENERATEBOUNDARY', 'HATCHTOBACK'],
   );
   // Every draw-panel glyph is a real name, so no draw button falls back to a dot.
   for (const tabId of ['home', 'draw']) {
