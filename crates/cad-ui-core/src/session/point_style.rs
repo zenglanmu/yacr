@@ -20,6 +20,10 @@
 
 use cad_app::{CommandId, CommandPayload};
 
+use super::annot_arguments::{
+    GROUPEDIT_SELECTOR, GROUP_SELECTOR, HATCHSETORIGIN_SELECTOR, LEADER_SELECTOR, QLEADER_SELECTOR,
+    TEXTFIT_SELECTOR, UNGROUP_SELECTOR,
+};
 use super::commands::{
     DONUT_SELECTOR, DRAWORDER_SELECTOR, FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR,
     GETSEL_SELECTOR, HELIX_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MPEDIT_SELECTOR,
@@ -116,6 +120,15 @@ impl CadSession {
             // The 2026-11-07 dimension-editing batch typed forms.
             DIMSTYLE_SELECTOR | DIMTEDIT_SELECTOR | DIMEDIT_SELECTOR | DIMOVERRIDE_SELECTOR
             | DIMJOGLINE_SELECTOR => self.dim_argument(selector, argument, text),
+
+            // The 2026-11-07 annotation/group batch typed forms.
+            GROUP_SELECTOR
+            | UNGROUP_SELECTOR
+            | GROUPEDIT_SELECTOR
+            | QLEADER_SELECTOR
+            | LEADER_SELECTOR
+            | TEXTFIT_SELECTOR
+            | HATCHSETORIGIN_SELECTOR => self.annot_argument(selector, argument, text),
 
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);

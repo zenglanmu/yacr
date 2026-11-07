@@ -309,6 +309,12 @@ export const HOST_NAMES = [
   // typed edit forms; DIMREGEN/DIMDISASSOCIATE/QDIM/DIMBREAK are canonical too.
   'DIMSTYLE', '-DIMSTYLE', 'DIMTEDIT', 'DIMEDIT', 'DIMOVERRIDE', 'DIMREGEN',
   'DIMDISASSOCIATE', 'QDIM', 'DIMJOGLINE', 'DIMBREAK',
+  // The 2026-11-07 annotation/group batch. GROUP/UNGROUP/GROUPEDIT are
+  // session-only command-line forms; QLEADER/LEADER create a MULTILEADER;
+  // TEXTFIT and the hatch/xdata commands read the selection. `-GROUP` is the
+  // host alias spelling.
+  'GROUP', '-GROUP', 'UNGROUP', 'GROUPEDIT', 'QLEADER', 'LEADER', 'TEXTFIT',
+  'HATCHSETBOUNDARY', 'HATCHSETORIGIN', 'XDLIST',
   // WIPEOUT is the open-ended polygon mask; POLYGON CIRCUMSCRIBED is the
   // tangent-ring variant of POLYGON (its own multi-word selector).
   'WIPEOUT', 'POLYGON CIRCUMSCRIBED',

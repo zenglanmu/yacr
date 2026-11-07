@@ -17,11 +17,11 @@
 //! and call into this module.
 //!
 //! The composed [`HostPlatform`] must already report a surface
-//! ([`cad_platform::SurfaceSource::surface`]) when the session is built: the
-//! host's open funnel validates canvas metrics against it, and an unmapped
-//! surface is an explicit `Cancelled`, never a fabricated canvas.
+//! ([`cad_platform::SurfaceSource::surface`]) when the session is built: an
+//! unmapped surface is an explicit `Cancelled`, never a fabricated canvas.
 
 mod admission;
+mod annot_arguments;
 mod bytes;
 mod command_log;
 mod commands;
@@ -77,8 +77,7 @@ use self::diagnostics::{
     cad_error_text, camera_status, request_error_text, resource_diagnostic_text,
     resource_keys_error, status_error,
 };
-// `plan_input` is re-exported for the intra-doc link below and the sibling
-// test modules; the session itself reaches it through `session::input`.
+// `plan_input` is re-exported for the intra-doc link and sibling tests.
 #[allow(unused_imports)]
 use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
 use self::status::{assemble_status, cad_tool, document_capabilities};
@@ -90,6 +89,7 @@ pub use self::admission::{
     parse_tool_parameter, CAD_LAYER_WRITE_CAP, CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP,
     CAD_SETTING_CAP, CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
 };
+pub use self::annot_arguments::*;
 pub use self::bytes::BytesDocument;
 pub use self::command_log::{
     CadCommandLogEntry, CadCommandLogKind, CadCommandLogPoint, CadMeasurementEcho,

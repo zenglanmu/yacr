@@ -216,3 +216,71 @@ pub enum DimJogLineCommand {
     Add { x: f64, y: f64 },
     Remove,
 }
+
+/// The 2026-11-07 annotation/group batch. Grouped into one
+/// [`crate::CommandPayload::Annotation`] variant so the payload enum stays inside
+/// the file-size budget; every contract lives in
+/// [`crate::command_id::annot_batch`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnnotationBatchPayload {
+    /// `GROUP CREATE|LIST|DELETE <name>`; bare `GROUP` is `None` and lists.
+    Group(GroupCommand),
+    /// `UNGROUP <name>`.
+    Ungroup(String),
+    /// `GROUPEDIT <name> ADD|REMOVE|RENAME <arg>`.
+    GroupEdit(GroupEditCommand),
+    /// `QLEADER` / `LEADER` typed geometry and text.
+    Leader(LeaderCommand),
+    /// `TEXTFIT <target width>`.
+    TextFit(TextFitCommand),
+    /// `HATCHSETORIGIN <x> <y>`.
+    HatchSetOrigin(HatchOriginCommand),
+}
+
+/// The typed option of a `GROUP` line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupCommand {
+    /// Capture the current selection under a new session-only name.
+    Create(String),
+    /// Report every stored name (read-only).
+    List,
+    /// Remove one named group; the entities are retained.
+    Delete(String),
+}
+
+/// The typed option of a `GROUPEDIT` line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupEditCommand {
+    /// Add the current selection, or these typed model entity ids when the
+    /// selection is empty.
+    Add { name: String, entities: Vec<u128> },
+    /// Remove the current selection, or these typed model entity ids.
+    Remove { name: String, entities: Vec<u128> },
+    /// Rename the group; membership is unchanged.
+    Rename { name: String, new_name: String },
+}
+
+/// The input of a `QLEADER` / `LEADER` line (both map to one `MULTILEADER`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LeaderCommand {
+    /// The arrowhead point.
+    pub arrow: Point3,
+    /// The landing point (where the leader line ends and the text begins).
+    pub landing: Point3,
+    /// The non-empty, bounded text content.
+    pub text: String,
+}
+
+/// The input of a `TEXTFIT <target width>` line.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextFitCommand {
+    /// The requested estimated width in drawing units.
+    pub target_width: f64,
+}
+
+/// The input of a `HATCHSETORIGIN <x> <y>` line.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HatchOriginCommand {
+    pub x: f64,
+    pub y: f64,
+}

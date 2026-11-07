@@ -30,6 +30,7 @@ use cad_db::{transform_geometry, DbEntity};
 use cad_history::{drawing_patch, drawing_patch_deleted, DrawingPatch, DrawingUndoRecord};
 
 mod align;
+pub(crate) mod annot_batch;
 mod array;
 mod block_define;
 mod boundary;

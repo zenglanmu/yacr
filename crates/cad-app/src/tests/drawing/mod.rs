@@ -275,6 +275,7 @@ fn line_and_opaque_app() -> Application {
 }
 
 mod align;
+mod annot_batch;
 mod arc_extend;
 mod array;
 mod block_define;

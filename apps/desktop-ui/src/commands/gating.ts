@@ -449,6 +449,20 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
         && isSignedDecimal(parts[1]) && isSignedDecimal(parts[2]);
     },
   }),
+  // The 2026-11-07 annotation/group batch typed forms.
+  GROUP: Object.freeze({ parse: isGroupArgument }),
+  '-GROUP': Object.freeze({ parse: isGroupArgument }),
+  UNGROUP: Object.freeze({ parse: isOneName }),
+  GROUPEDIT: Object.freeze({ parse: isGroupEditArgument }),
+  QLEADER: Object.freeze({ parse: isLeaderArgument }),
+  LEADER: Object.freeze({ parse: isLeaderArgument }),
+  TEXTFIT: Object.freeze({ parse: (argument: string) => isSignedDecimal(argument.trim()) }),
+  HATCHSETORIGIN: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return parts.length === 2 && parts.every(isSignedDecimal);
+    },
+  }),
 
 });
 
@@ -478,6 +492,36 @@ function isDimEditArgument(argument: string): boolean {
   const word = (parts[0] ?? '').toUpperCase();
   if (word === 'RESET') return parts.length === 1;
   return word === 'TEXT' && parts.length >= 2;
+}
+
+/** `GROUP`: bare `CREATE <name>`, `LIST`, `DELETE <name>`; names are one token. */
+function isGroupArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  const word = (parts[0] ?? '').toUpperCase();
+  if (word === 'LIST') return parts.length === 1;
+  return (word === 'CREATE' || word === 'DELETE') && parts.length === 2;
+}
+
+/** `UNGROUP`: one non-empty, whitespace-free group name. */
+function isOneName(argument: string): boolean {
+  return tokens(argument).length === 1;
+}
+
+/** `GROUPEDIT <name> ADD|REMOVE [ids]|RENAME <name>`. */
+function isGroupEditArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  if (parts.length < 2) return false;
+  const verb = parts[1].toUpperCase();
+  if (verb === 'RENAME') return parts.length === 3;
+  if (verb !== 'ADD' && verb !== 'REMOVE') return false;
+  return parts.slice(2).every(part => /^\d+(,\d+)*$/.test(part));
+}
+
+/** `QLEADER`/`LEADER`: `<arrow x,y> <landing x,y> <text...>`. */
+function isLeaderArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  return parts.length >= 3
+    && isCoordinatePair(parts[0]) && isCoordinatePair(parts[1]);
 }
 
 /** Split a typed argument into whitespace-separated tokens. */
@@ -646,6 +690,12 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   // "no drawing is open" sentence. The edit commands are selection-gated and
   // answer the no-document case through their own hint row.
   'DIMSTYLE', '-DIMSTYLE', 'DIMREGEN', 'DIMDISASSOCIATE',
+
+  // The 2026-11-07 annotation/group batch reads or writes the open drawing (the
+  // group commands read its entity refs; the rest act on entities), so the start
+  // page disables all of them with the same "no drawing is open" sentence.
+  'GROUP', '-GROUP', 'UNGROUP', 'GROUPEDIT', 'QLEADER', 'LEADER', 'TEXTFIT',
+  'HATCHSETBOUNDARY', 'HATCHSETORIGIN', 'XDLIST',
 
 ]);
 
@@ -868,6 +918,14 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   QDIM: Object.freeze({ count: 1, reasonKey: 'draw.kind.qdim.hint' }),
   DIMJOGLINE: Object.freeze({ count: 1, reasonKey: 'draw.kind.dimjogline.hint' }),
   DIMBREAK: Object.freeze({ count: 2, reasonKey: 'draw.kind.dimbreak.hint' }),
+  // The 2026-11-07 annotation/group batch. GROUP's bare form is a read-only
+  // list, so it has no selection row; UNGROUP/GROUPEDIT/QLEADER/LEADER take
+  // names/points instead of a selection. The three selection-based commands are
+  // minimums (the host refuses the exact counts by name).
+  TEXTFIT: Object.freeze({ count: 1, reasonKey: 'draw.kind.textfit.hint' }),
+  HATCHSETBOUNDARY: Object.freeze({ count: 2, reasonKey: 'draw.kind.hatchsetboundary.hint' }),
+  HATCHSETORIGIN: Object.freeze({ count: 1, reasonKey: 'draw.kind.hatchsetorigin.hint' }),
+  XDLIST: Object.freeze({ count: 1, reasonKey: 'draw.kind.xdlist.hint' }),
 });
 
 /**

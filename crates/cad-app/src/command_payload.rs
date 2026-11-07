@@ -978,4 +978,8 @@ pub enum CommandPayload {
     /// [`crate::DimensionBatchPayload`]; contract in
     /// `command_id::dimension_edit`.
     Dimension(Box<crate::DimensionBatchPayload>),
+    /// The 2026-11-07 annotation/group batch (`GROUP`/`UNGROUP`/`GROUPEDIT`/
+    /// `QLEADER`/`LEADER`/`TEXTFIT`/`HATCHSETORIGIN`). Grouped in
+    /// [`crate::AnnotationBatchPayload`]; contract in `command_id::annot_batch`.
+    Annotation(Box<crate::AnnotationBatchPayload>),
 }

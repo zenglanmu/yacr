@@ -1345,6 +1345,25 @@
   "draw.kind.dimjogline": "Add/remove dimension jog line",
   "draw.kind.dimjogline.hint": "Not available: the dimension domain stores no jog field, so this command refuses by name",
   "draw.kind.dimbreak": "Break dimension line",
-  "draw.kind.dimbreak.hint": "Not available: the dimension domain stores no dimension-line break, so this command refuses without trimming the dimension"
+  "draw.kind.dimbreak.hint": "Not available: the dimension domain stores no dimension-line break, so this command refuses without trimming the dimension",
+  "draw.kind.group": "Group (GROUP)",
+  "draw.kind.group.hint": "GROUP CREATE <name> captures the current selection into a session-only group; GROUP LIST reports the names and GROUP DELETE <name> removes one. No DWG group object is created.",
+  "draw.kind.group_alias": "Group (command line)",
+  "draw.kind.ungroup": "Ungroup",
+  "draw.kind.ungroup.hint": "UNGROUP <name> removes the named session-only group; every entity is retained and the drawing is not written.",
+  "draw.kind.groupedit": "Edit group",
+  "draw.kind.groupedit.hint": "GROUPEDIT <name> ADD|REMOVE|RENAME <arg> edits the session-only member list; no entity or database is written.",
+  "draw.kind.qleader": "Quick leader (QLEADER)",
+  "draw.kind.qleader.hint": "QLEADER <arrow x,y> <landing x,y> <text> creates one MULTILEADER; the legacy LEADER/QLEADER entity is mapped to MULTILEADER.",
+  "draw.kind.leader": "Leader (LEADER)",
+  "draw.kind.leader.hint": "LEADER <arrow x,y> <landing x,y> <text> creates one MULTILEADER; the legacy LEADER entity is mapped to MULTILEADER.",
+  "draw.kind.textfit": "Fit text width",
+  "draw.kind.textfit.hint": "TEXTFIT <target width> adjusts only the glyph height using the estimate height x character count; true width stretch is not implemented.",
+  "draw.kind.hatchsetboundary": "Set hatch boundary",
+  "draw.kind.hatchsetboundary.hint": "Select exactly one hatch plus closed Polyline/Circle/full Ellipse boundaries; one transaction rebuilds the hatch loops and keeps the source entities.",
+  "draw.kind.hatchsetorigin": "Set hatch origin",
+  "draw.kind.hatchsetorigin.hint": "HATCHSETORIGIN <x> <y> is a named refusal: the hatch domain stores no pattern-origin field, so nothing is written.",
+  "draw.kind.xdlist": "List extended data",
+  "draw.kind.xdlist.hint": "XDLIST reports the selection's retained extended data; this build retains none and reports xdlist.not_retained."
 
 }

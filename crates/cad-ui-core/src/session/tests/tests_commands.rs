@@ -5,6 +5,7 @@
 //! the shared fixtures through `super::super::test_support::*`.
 
 mod alias_table;
+mod annot_arguments;
 mod command_vocabulary;
 mod command_vocabulary_clipboard;
 mod command_vocabulary_inquiry;

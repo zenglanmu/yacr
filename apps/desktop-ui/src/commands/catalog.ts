@@ -297,6 +297,19 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'QDIM', labelKey: 'draw.kind.qdim', icon: 'dimlinear', group: 'annotate' },
   { id: 'DIMJOGLINE', labelKey: 'draw.kind.dimjogline', icon: 'dimlinear', group: 'annotate' },
   { id: 'DIMBREAK', labelKey: 'draw.kind.dimbreak', icon: 'trim', group: 'annotate' },
+  // The 2026-11-07 annotation/group batch. The group commands are session-only
+  // command-line forms; QLEADER/LEADER create a MULTILEADER; TEXTFIT and the
+  // hatch/xdata commands read the selection. `-GROUP` is the host alias spelling.
+  { id: 'GROUP', labelKey: 'draw.kind.group', icon: 'properties', group: 'annotate' },
+  { id: '-GROUP', labelKey: 'draw.kind.group_alias', icon: 'terminal', group: 'annotate' },
+  { id: 'UNGROUP', labelKey: 'draw.kind.ungroup', icon: 'explode', group: 'annotate' },
+  { id: 'GROUPEDIT', labelKey: 'draw.kind.groupedit', icon: 'pencil', group: 'annotate' },
+  { id: 'QLEADER', labelKey: 'draw.kind.qleader', icon: 'pencil', group: 'annotate' },
+  { id: 'LEADER', labelKey: 'draw.kind.leader', icon: 'reference', group: 'annotate' },
+  { id: 'TEXTFIT', labelKey: 'draw.kind.textfit', icon: 'pencil', group: 'annotate' },
+  { id: 'HATCHSETBOUNDARY', labelKey: 'draw.kind.hatchsetboundary', icon: 'properties', group: 'annotate' },
+  { id: 'HATCHSETORIGIN', labelKey: 'draw.kind.hatchsetorigin', icon: 'reference', group: 'annotate' },
+  { id: 'XDLIST', labelKey: 'draw.kind.xdlist', icon: 'properties', group: 'annotate' },
   { id: 'TORIENT', labelKey: 'draw.kind.torient', icon: 'rotate', group: 'annotate' },
   { id: 'TCASE', labelKey: 'draw.kind.tcase', icon: 'pencil', group: 'annotate' },
   { id: 'TXT2MTXT', labelKey: 'draw.kind.txt2mtxt', icon: 'copy', group: 'annotate' },

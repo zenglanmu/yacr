@@ -1345,6 +1345,25 @@
   "draw.kind.dimjogline": "添加/删除标注折弯线",
   "draw.kind.dimjogline.hint": "不可用：标注领域没有折弯字段，本命令会具名拒绝",
   "draw.kind.dimbreak": "打断标注线",
-  "draw.kind.dimbreak.hint": "不可用：标注领域没有标注线打断记录，本命令只具名拒绝，绝不裁剪标注"
+  "draw.kind.dimbreak.hint": "不可用：标注领域没有标注线打断记录，本命令只具名拒绝，绝不裁剪标注",
+  "draw.kind.group": "编组（GROUP）",
+  "draw.kind.group.hint": "GROUP CREATE <名称> 把当前选择捕获为仅存在于会话的编组；GROUP LIST 列出名称，GROUP DELETE <名称> 删除一个编组。不会创建 DWG 编组对象。",
+  "draw.kind.group_alias": "编组（命令行）",
+  "draw.kind.ungroup": "解除编组",
+  "draw.kind.ungroup.hint": "UNGROUP <名称> 删除指定的会话编组；所有实体保留，不写入图形。",
+  "draw.kind.groupedit": "编辑编组",
+  "draw.kind.groupedit.hint": "GROUPEDIT <名称> ADD|REMOVE|RENAME <参数> 修改仅存在于会话的成员列表；不写入任何实体或数据库。",
+  "draw.kind.qleader": "快速引线（QLEADER）",
+  "draw.kind.qleader.hint": "QLEADER <箭头 x,y> <落点 x,y> <文字> 创建一个 MULTILEADER；旧的 LEADER/QLEADER 实体映射为 MULTILEADER。",
+  "draw.kind.leader": "引线（LEADER）",
+  "draw.kind.leader.hint": "LEADER <箭头 x,y> <落点 x,y> <文字> 创建一个 MULTILEADER；旧的 LEADER 实体映射为 MULTILEADER。",
+  "draw.kind.textfit": "文字宽度适配",
+  "draw.kind.textfit.hint": "TEXTFIT <目标宽度> 只按估算宽度（字高 x 字符数）调整字高；真正的宽度拉伸尚未实现。",
+  "draw.kind.hatchsetboundary": "设置填充边界",
+  "draw.kind.hatchsetboundary.hint": "请选择一个填充以及若干闭合多段线/圆/完整椭圆边界；一次事务重建填充环并保留源实体。",
+  "draw.kind.hatchsetorigin": "设置填充原点",
+  "draw.kind.hatchsetorigin.hint": "HATCHSETORIGIN <x> <y> 是具名拒绝：填充领域没有图案原点字段，因此不写入任何内容。",
+  "draw.kind.xdlist": "列出扩展数据",
+  "draw.kind.xdlist.hint": "XDLIST 报告选择对象保留的扩展数据；本构建不保留任何扩展数据，并报告 xdlist.not_retained。"
 
 }
