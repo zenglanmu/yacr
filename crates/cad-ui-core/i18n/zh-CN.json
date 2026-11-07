@@ -1225,5 +1225,20 @@
   "draw.kind.layulk": "解锁选中图层",
   "draw.kind.layulk.hint": "请先选择对象；LAYULK 会解锁每个选中对象所在的图层。",
   "draw.kind.setbylayer": "特性设为随层",
-  "draw.kind.setbylayer.hint": "请先选择对象；SETBYLAYER 会把颜色、线型和线宽重置为随层（透明度、材质等不在重置范围；未实现 Include blocks）。"
+  "draw.kind.setbylayer.hint": "请先选择对象；SETBYLAYER 会把颜色、线型和线宽重置为随层（透明度、材质等不在重置范围；未实现 Include blocks）。",
+  "draw.kind.qselect": "快速选择",
+  "draw.kind.filter": "过滤选择（并入）",
+  "draw.kind.getsel": "按特性获取选择",
+  "draw.kind.ssx": "按特性选择（SSX）",
+  "draw.kind.ssx.hint": "请先选择一个对象；SSX 会把模型空间中类型、图层、颜色、线型和空间都相同的对象加入选择。",
+  "draw.kind.selectcount": "统计相同特性对象",
+  "draw.kind.selectcount.hint": "请先选择一个对象；SELECTCOUNT 会报告模型空间中与它类型、图层、颜色、线型和空间都相同的对象数量，不改动选择。",
+  "draw.kind.findreport": "查找文字（仅报告）",
+  "draw.kind.find": "查找和替换文字",
+  "draw.kind.hideobjects": "隐藏对象",
+  "draw.kind.hideobjects.hint": "请先选择至少一个对象；HIDEOBJECTS 只在本次会话中隐藏它们，不写入图纸。",
+  "draw.kind.isolateobjects": "隔离对象",
+  "draw.kind.isolateobjects.hint": "请先选择要保留的对象；ISOLATEOBJECTS 会在本次会话中隐藏其余所有模型空间对象。",
+  "draw.kind.unisolateobjects": "取消对象隔离",
+  "draw.kind.unisolateobjects.hint": "UNISOLATEOBJECTS 恢复所有被隐藏的对象；不需要选择。"
 }

@@ -300,6 +300,7 @@ impl Application {
             let visible = crate::picking::ref_visibility(
                 drawing,
                 &session.layer_overrides,
+                &session.hidden_entities,
                 scope,
                 &item.source,
             )

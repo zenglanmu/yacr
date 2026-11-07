@@ -186,6 +186,9 @@ impl HostCore {
                 &policy,
                 cad_app::BackFacePolicy::Cull,
                 &c.session.layer_overrides,
+                // The hidden set is part of the one visibility predicate, so a
+                // HIDEOBJECTS/ISOLATEOBJECTS ref never hovers.
+                &c.session.hidden_entities,
                 // Hover shares the click catalogue, so a vendor-backed opaque
                 // entity highlights exactly as it selects (ADR-0028 D2).
                 c.application.vendor_representations.as_deref(),

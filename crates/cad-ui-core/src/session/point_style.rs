@@ -20,6 +20,9 @@
 
 use cad_app::{CommandId, CommandPayload};
 
+use super::commands::{
+    FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, QSELECT_SELECTOR,
+};
 use super::diagnostics::cad_error_text;
 use super::{
     CadSession, ARGUMENT_SELECTOR, HATCHEDIT_SELECTOR, PDMODE_SELECTOR, PDSIZE_SELECTOR,
@@ -64,6 +67,12 @@ impl CadSession {
             // (`DISTANCE`/`ANGLE`/`AREA`/`POLYLINE`) or the report-only `RADIUS`
             // (and the explicit `VOLUME` refusal). It is not a second engine.
             super::commands::MEASUREGEOM_SELECTOR => self.measuregeom_argument(argument, text),
+            // The 2026-11-07 selection/filter batch: all five are typed argument
+            // forms of canonical selectors, never new commands.
+            QSELECT_SELECTOR | FILTER_SELECTOR | GETSEL_SELECTOR => {
+                self.select_filter_argument(selector, argument, text)
+            }
+            FIND_SELECTOR | FIND_REPORT_SELECTOR => self.find_argument(selector, argument, text),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

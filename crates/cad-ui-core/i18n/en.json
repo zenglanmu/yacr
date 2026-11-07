@@ -1225,5 +1225,20 @@
   "draw.kind.layulk": "Unlock selected layers",
   "draw.kind.layulk.hint": "Select the objects first; LAYULK unlocks the layer of every selected object.",
   "draw.kind.setbylayer": "Set properties to ByLayer",
-  "draw.kind.setbylayer.hint": "Select the objects first; SETBYLAYER resets colour, linetype and lineweight to ByLayer (transparency, materials and the other listed properties are not reset; Include blocks is not implemented)."
+  "draw.kind.setbylayer.hint": "Select the objects first; SETBYLAYER resets colour, linetype and lineweight to ByLayer (transparency, materials and the other listed properties are not reset; Include blocks is not implemented).",
+  "draw.kind.qselect": "Quick Select",
+  "draw.kind.filter": "Filter (add to selection)",
+  "draw.kind.getsel": "Get Selection by Property",
+  "draw.kind.ssx": "Select by Properties (SSX)",
+  "draw.kind.ssx.hint": "Select one object first; SSX adds every model-space object with the same type, layer, colour, linetype and space.",
+  "draw.kind.selectcount": "Count Matching Objects",
+  "draw.kind.selectcount.hint": "Select one object first; SELECTCOUNT reports how many model-space objects share its type, layer, colour, linetype and space, without changing the selection.",
+  "draw.kind.findreport": "Find Text (report only)",
+  "draw.kind.find": "Find and Replace Text",
+  "draw.kind.hideobjects": "Hide Objects",
+  "draw.kind.hideobjects.hint": "Select at least one object; HIDEOBJECTS hides it for this session only and writes no drawing data.",
+  "draw.kind.isolateobjects": "Isolate Objects",
+  "draw.kind.isolateobjects.hint": "Select the objects to keep; ISOLATEOBJECTS hides every other model-space object for this session.",
+  "draw.kind.unisolateobjects": "Unhide All Objects",
+  "draw.kind.unisolateobjects.hint": "UNISOLATEOBJECTS restores every hidden object; it needs no selection."
 }

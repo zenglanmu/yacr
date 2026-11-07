@@ -13,6 +13,7 @@ mod input_and_lifecycle;
 mod layout_status;
 mod pedit;
 mod point_style;
+mod select_filter;
 mod snap_grid;
 mod space_argument;
 mod standard_view;

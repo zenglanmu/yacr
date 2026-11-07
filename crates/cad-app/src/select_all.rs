@@ -58,8 +58,14 @@ impl Application {
         }
         let mut selection = SelectionSet::new();
         for item in drawing_pick_items_with_vendor(database, command.document, vendor) {
-            let visible = ref_visibility(database, &session.layer_overrides, scope, &item.source)
-                .ok_or(CadError::StaleResult)?;
+            let visible = ref_visibility(
+                database,
+                &session.layer_overrides,
+                &session.hidden_entities,
+                scope,
+                &item.source,
+            )
+            .ok_or(CadError::StaleResult)?;
             if visible {
                 selection.insert(item.source);
             }

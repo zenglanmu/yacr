@@ -235,10 +235,17 @@ fn a_hidden_layer_entity_is_not_pickable_and_returns_when_shown_again() {
 
     // No override: the visible set is unchanged and the pick still hits.
     let shown = LayerOverrideSet::new();
-    let hit = pick_ray_with_visibility(&db, DocumentId(1), &ray, &options, &shown)
-        .unwrap()
-        .hit
-        .expect("the visible path still hits");
+    let hit = pick_ray_with_visibility(
+        &db,
+        DocumentId(1),
+        &ray,
+        &options,
+        &shown,
+        &crate::SelectionSet::new(),
+    )
+    .unwrap()
+    .hit
+    .expect("the visible path still hits");
     assert_eq!(hit.source.instance, InstancePath(vec![EntityId(10)]));
 
     // Layer 0 temporarily hidden: every entity on it leaves the candidate set,
@@ -246,7 +253,15 @@ fn a_hidden_layer_entity_is_not_pickable_and_returns_when_shown_again() {
     // (which is what would otherwise surface as `flags.unresolved`).
     let mut hidden = LayerOverrideSet::new();
     hidden.set(LayerId(0), false);
-    let report = pick_ray_with_visibility(&db, DocumentId(1), &ray, &options, &hidden).unwrap();
+    let report = pick_ray_with_visibility(
+        &db,
+        DocumentId(1),
+        &ray,
+        &options,
+        &hidden,
+        &crate::SelectionSet::new(),
+    )
+    .unwrap();
     assert!(
         report.hit.is_none(),
         "an entity on a hidden layer must not be pickable"
@@ -260,10 +275,17 @@ fn a_hidden_layer_entity_is_not_pickable_and_returns_when_shown_again() {
     let mut reshown = LayerOverrideSet::new();
     reshown.set(LayerId(0), true);
     assert!(
-        pick_ray_with_visibility(&db, DocumentId(1), &ray, &options, &reshown)
-            .unwrap()
-            .hit
-            .is_some(),
+        pick_ray_with_visibility(
+            &db,
+            DocumentId(1),
+            &ray,
+            &options,
+            &reshown,
+            &crate::SelectionSet::new(),
+        )
+        .unwrap()
+        .hit
+        .is_some(),
         "the same entity is pickable once the override is cleared"
     );
 }
@@ -293,6 +315,7 @@ fn the_screen_pick_honours_layer_visibility() {
         &TolerancePolicy::default(),
         BackFacePolicy::Cull,
         &visible,
+        &crate::SelectionSet::new(),
     )
     .unwrap();
     assert_eq!(
@@ -315,6 +338,7 @@ fn the_screen_pick_honours_layer_visibility() {
         &TolerancePolicy::default(),
         BackFacePolicy::Cull,
         &hidden,
+        &crate::SelectionSet::new(),
     )
     .unwrap();
     assert!(

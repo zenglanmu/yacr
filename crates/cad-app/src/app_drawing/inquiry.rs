@@ -538,8 +538,14 @@ impl Application {
                 continue;
             }
             let reference = model_ref(command.document, candidate.id);
-            if !ref_visibility(&drawing, &session.layer_overrides, root, &reference)
-                .unwrap_or(false)
+            if !ref_visibility(
+                &drawing,
+                &session.layer_overrides,
+                &session.hidden_entities,
+                root,
+                &reference,
+            )
+            .unwrap_or(false)
             {
                 continue;
             }

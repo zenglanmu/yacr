@@ -159,6 +159,9 @@ export const HOST_NAMES = [
   // TEXTTOFRONT (AutoCAD 2026): selection-based draw order; the current selection
   // is the input and only model-space text/leader/dimension rows are eligible.
   'TEXTTOFRONT',
+  // 2026-11-07 selection/filter/find/visibility batch (canonical selectors).
+  'QSELECT', 'FILTER', 'GETSEL', 'SSX', 'SELECTCOUNT', '-FIND', 'FIND',
+  'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS',
   // GRADIENT / HATCHEDIT (AutoCAD 2026) are the two hatch-family selectors added
   // by this batch. GRADIENT is a payload-free router command over the current
   // selection; HATCHEDIT is one canonical selector whose option is typed

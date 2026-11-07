@@ -200,6 +200,7 @@ mod pedit;
 mod plan_view;
 mod point_display_style;
 mod revision_cloud;
+mod select_filter;
 mod select_similar;
 mod text_commands;
 mod view_camera;

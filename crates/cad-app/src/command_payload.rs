@@ -973,4 +973,27 @@ pub enum CommandPayload {
     /// (only `Radius` and `Volume`; the four tool options are routed by the
     /// session to their existing `BeginMeasurement` requests).
     MeasureGeom(MeasureGeomOption),
+    /// One declarative property filter (`QSELECT` / `FILTER` / `GETSEL`).
+    ///
+    /// `property` is `TYPE`/`LAYER`/`COLOR`/`LINETYPE` (ASCII case-insensitive)
+    /// and `value` the trimmed, non-empty remainder. The command layer re-parses
+    /// both and refuses unknown properties/empty values by name. `mode` is
+    /// `Replace` for `QSELECT`/`GETSEL` and `Add` for `FILTER`; `Toggle` is
+    /// refused (a filter is a set query). Read-only: the selection is the only
+    /// state touched, never the drawing.
+    SelectFilter {
+        property: String,
+        value: String,
+        mode: SelectionMode,
+    },
+    /// `-FIND <needle>` / `FIND <needle> [=> <replacement>]`.
+    ///
+    /// `needle` is a non-empty ASCII case-insensitive substring. `replacement`
+    /// is `None` for a report and `Some` for the replacing form; `-FIND` refuses
+    /// a `Some` payload (report-only). Targets: model-space `AcDbText`,
+    /// `AcDbMText` and text-bearing `AcDbMultiLeader` entities.
+    TextFind {
+        needle: String,
+        replacement: Option<String>,
+    },
 }

@@ -163,6 +163,16 @@ command_selector_contract! {
     List => "LIST",
     Status => "STATUS",
     Fs => "FS",
+    QSelect => "QSELECT",
+    FilterSelect => "FILTER",
+    GetSelection => "GETSEL",
+    SelectMatchingProperties => "SSX",
+    SelectCount => "SELECTCOUNT",
+    FindReport => "-FIND",
+    FindReplace => "FIND",
+    HideObjects => "HIDEOBJECTS",
+    IsolateObjects => "ISOLATEOBJECTS",
+    UnisolateObjects => "UNISOLATEOBJECTS",
 }
 
 #[test]
@@ -177,7 +187,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 145,
+        EXPECTED_COMMAND_COUNT, 155,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

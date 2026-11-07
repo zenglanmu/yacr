@@ -123,6 +123,11 @@ impl CommandId {
                 | Self::Txt2MText
                 // TEXTTOFRONT rewrites stored model-space draw order.
                 | Self::TextToFront
+                // FIND can replace text in one transaction, so the whole
+                // selector is Work-only; the Viewer-legal report is the separate
+                // `-FIND` selector. The selection/filter and hide-objects batch
+                // is session state only, so it is absent too.
+                | Self::FindReplace
         )
     }
 }

@@ -504,4 +504,23 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // pattern name / colour / properties / draw order / boundary add-remove /
   // associativity are NOT implemented. Router command, selection-gated.
   { id: 'HATCHEDIT', labelKey: 'draw.kind.hatchedit', icon: 'hatch', group: 'annotate' },
+  // The 2026-11-07 selection/filter/find/visibility batch. QSELECT/FILTER/
+  // GETSEL/-FIND/FIND take a typed argument and have no ribbon button (a button
+  // would have to invent the filter or the search text); SSX/SELECTCOUNT and
+  // the hide-isolate trio are payload-free and appear in the Modify panels.
+  // QSELECT/FILTER/GETSEL replace or grow the selection from a **data** query
+  // (model space, layer state does not filter). SSX/SELECTCOUNT compare the
+  // first selection's five properties. The find pair searches TEXT/MTEXT/
+  // MULTILEADER text; FIND can replace in one transaction. HIDEOBJECTS/
+  // ISOLATEOBJECTS/UNISOLATEOBJECTS are session-only visibility state.
+  { id: 'QSELECT', labelKey: 'draw.kind.qselect', icon: 'selectAll', group: 'modify' },
+  { id: 'FILTER', labelKey: 'draw.kind.filter', icon: 'selectAll', group: 'modify' },
+  { id: 'GETSEL', labelKey: 'draw.kind.getsel', icon: 'selectAll', group: 'modify' },
+  { id: 'SSX', labelKey: 'draw.kind.ssx', icon: 'selectAll', group: 'modify' },
+  { id: 'SELECTCOUNT', labelKey: 'draw.kind.selectcount', icon: 'properties', group: 'modify' },
+  { id: '-FIND', labelKey: 'draw.kind.findreport', icon: 'search', group: 'annotate' },
+  { id: 'FIND', labelKey: 'draw.kind.find', icon: 'search', group: 'annotate' },
+  { id: 'HIDEOBJECTS', labelKey: 'draw.kind.hideobjects', icon: 'clearSelection', group: 'modify' },
+  { id: 'ISOLATEOBJECTS', labelKey: 'draw.kind.isolateobjects', icon: 'layers', group: 'modify' },
+  { id: 'UNISOLATEOBJECTS', labelKey: 'draw.kind.unisolateobjects', icon: 'layers', group: 'modify' },
 ]);
