@@ -36,7 +36,7 @@
   `cargo test -p cad-ui-core --locked`（392）；`cargo test -p cad-host --locked`；
   `cargo test -p app-web --locked`；`cargo check -p app-web --target wasm32-unknown-unknown --locked`；
   `cargo check -p app-linux --all-targets --locked`；`cargo test -p app-linux --lib --locked`；
-  前端全量 `node --test test/*.test.ts`（1256 passed）；`cargo fmt --all -- --check`；
+  前端全量 `node --test test/*.test.ts`（1269 passed）；`cargo fmt --all -- --check`；
   `cargo clippy -p cad-app -p cad-ui-core -p cad-host -p cad-import-acadrust --all-targets --locked
   -- -D warnings`；`python3 scripts/check-i18n.py`（1212 keys）、`check-file-size.py`（1453 files）、
   `check-command-docs.py`（141 selectors）、`check-architecture.py`（28 packages）。
