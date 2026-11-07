@@ -1,3 +1,48 @@
+## 2026-11-07 AutoCAD 2026 2D 命令批次（25 条官方命令 + 1 个项目选择子）+ 实验性 DWG 另存
+
+- **范围**：按 `docs/autocad-2026-command-coverage.md` 继续实现**未完成的 2D 命令**，全部同时接线
+  Rust 命令/工具路径、React 目录/ribbon/gating/i18n 与契约测试；官方清单从
+  **94 已实现（50 完整 + 44 部分）/ 887 未实现** 变为
+  **119 已实现（50 完整 + 69 部分）/ 862 未实现**。
+- **新增官方命令（25）**：
+  * 图层：`LAYCUR`、`LAYMCUR`、`LAYFRZ`、`LAYTHW`、`LAYLCK`、`LAYULK`、`SETBYLAYER`（选择式；
+    层表写不可撤销；SETBYLAYER 只重置 color/linetype/lineweight，透明/materials/Include blocks 未实现）；
+  * 修改：`REVERSE`、`OOPS`（仅最近一次 ERASE、新 id）、`OVERKILL`（v1 仅完全重复）、
+    `BREAKATPOINT`（仅 LINE/ARC/开放 LWPOLYLINE；闭合对象/SPLINE 按名拒绝）；
+  * 查询：`LIST`、`STATUS`、`FS`（Express 直接触、`FSMODE=OFF` 无传递链）；
+  * 文字：`TORIENT`、`TCASE`（保留 MTEXT 转义）、`TXT2MTXT`（上→下/左→右，`\P` 合并，删源）；
+  * 填充：`HATCHGENERATEBOUNDARY`、`HATCHTOBACK`；
+  * 绘制：`WIPEOUT`（开放多边形 `AcDbWipeout`；无 Frames/Polyline 选项/自交拒绝）、
+    `DIMROTATED`（`dimRotation` 会话参数）、`DIMSPACE`（选择式自动 `DIMDLI`）、
+    `PEDIT`（仅 `CLOSE|OPEN|REVERSE`）、`MASSPROP`（闭合共面 Circle/整 Ellipse/闭合 Polyline 的
+    面积/周长/包围盒/形心；惯性/主轴/体积/`.mpr` 未实现；椭周长 Ramanujan 近似已明示）、
+    `MEASUREGEOM`（DISTANCE/ANGLE/AREA/POLYLINE 复用既有测量工具，RADIUS 只读报告，
+    VOLUME 显式 `Unsupported`）。
+  * 另有**项目多词选择子** `POLYGON CIRCUMSCRIBED`（不属于官方 981 条、不计入总计；外切正多边形，
+    与 `POLYGON` 内接共享边数）。
+- **共同边界（均为有意声明，不是验收）**：除 `BREAKATPOINT`/`WIPEOUT`/`DIMROTATED` 等工具外，命令
+  以**当前选择**为输入，不是 AutoCAD 的交互 `Select objects`；所有“层表写/OOPS/TXT2MTXT”等不可撤销
+  或特殊的撤销粒度都在命令文档、`docs/compatibility.md` 的
+  `### 2026-11-07 2D 命令批次` 与 `### 2026-11-07 度量/查询补充` 两张表逐条写明。未支持选项一律
+  具名拒绝，绝不静默近似。
+- **DWG 另存（实验性）**：`acadrust::DwgWriter` 复用同一有损 `CadDocument`；打开源为 `.dwg` 时默认
+  **新文件** `<stem>-export.dwg`，宿主归一化路径/名回退 + 平台 inode/SAF 守卫保证**绝不覆盖源文件**；
+  成功状态明确 experimental/lossy，DWG 只有合成 self-roundtrip 证据，AutoCAD/vendor **NOT VERIFIED**。
+- **acadrust 补丁策略**：`docs/acadrust-patches.md` + ADR-0031；`check-architecture.py` 仅允许
+  `[patch.crates-io]` 的唯一键 `acadrust` 且必须登记版本；当前无实际补丁。
+- **已运行（本机、Linux）**：
+  `cargo test -p cad-app --locked`（1720+ lib 契约 + 集成目标全过）；
+  `cargo test -p cad-ui-core --locked`（392）；`cargo test -p cad-host --locked`；
+  `cargo test -p app-web --locked`；`cargo check -p app-web --target wasm32-unknown-unknown --locked`；
+  `cargo check -p app-linux --all-targets --locked`；`cargo test -p app-linux --lib --locked`；
+  前端全量 `node --test test/*.test.ts`（1256 passed）；`cargo fmt --all -- --check`；
+  `cargo clippy -p cad-app -p cad-ui-core -p cad-host -p cad-import-acadrust --all-targets --locked
+  -- -D warnings`；`python3 scripts/check-i18n.py`（1212 keys）、`check-file-size.py`（1453 files）、
+  `check-command-docs.py`（141 selectors）、`check-architecture.py`（28 packages）。
+- **NOT RUN / NOT VERIFIED**：真实 GUI 点击/窗口/像素、真实 GPU、真实图纸与 vendor AutoCAD 行为、
+  性能；Windows/macOS/Android 运行时（仅既有编译/契约边界）；全 workspace `cargo test --workspace`
+  与打包/发布。所有“已实现”只表示命令/工具路径存在且契约测试覆盖，不表示与 AutoCAD 行为等价。
+
 ## 2026-11-07 实验性 DWG Save As + acadrust 补丁台账（仅合成 self-roundtrip 证据）
 
 - **DWG 导出核心**（`cad-import-acadrust`）：`ExportFormat::Dwg`（`extension() == "dwg"`、
