@@ -378,4 +378,6 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'AUDIT', labelKey: 'audit.title', icon: 'diagnostics', group: 'file' },
   // LIST (inquiry): selection-based property report; read-only and Viewer-legal.
   { id: 'LIST', labelKey: 'draw.kind.list', icon: 'properties', group: 'annotate' },
+  // STATUS (inquiry): drawing statistics/modes/extents; document-scoped, read-only.
+  { id: 'STATUS', labelKey: 'draw.kind.status', icon: 'diagnostics', group: 'view' },
 ]);

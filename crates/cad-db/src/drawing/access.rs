@@ -422,6 +422,11 @@ impl DrawingDatabase {
         self.styles.get(&id)
     }
 
+    /// Named text-style table entries.
+    pub fn styles(&self) -> impl Iterator<Item = &Style> {
+        self.styles.values()
+    }
+
     /// Named linetype table entries.
     pub fn linetypes(&self) -> impl Iterator<Item = &LineType> {
         self.linetypes.values()

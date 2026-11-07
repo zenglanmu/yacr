@@ -7,7 +7,10 @@
 
 use super::*;
 use crate::selection::model_ref;
-use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
+use cad_db::{
+    BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer, LayerAttributes, Layout,
+    LineType, LinetypePattern, Style,
+};
 
 fn entity(
     id: u128,
@@ -302,4 +305,215 @@ fn list_is_allowed_in_viewer_mode() {
         .is_ok());
     // The fixture's Work session is untouched by the assertion above.
     assert_eq!(session.mode(), AppMode::Work);
+}
+
+fn status_fixture() -> (Application, SessionState, DocumentId) {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name, visible) in [
+        (LayerId(0), "0", true),
+        (LayerId(3), "WALLS", true),
+        (LayerId(4), "OFF", false),
+        (LayerId(5), "FROZEN", false),
+        (LayerId(6), "LOCKED", true),
+    ] {
+        builder
+            .insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible,
+            })
+            .unwrap();
+    }
+    builder
+        .set_layer_attributes(
+            LayerId(4),
+            LayerAttributes {
+                off: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    builder
+        .set_layer_attributes(
+            LayerId(5),
+            LayerAttributes {
+                frozen: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    builder
+        .set_layer_attributes(
+            LayerId(6),
+            LayerAttributes {
+                locked: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    builder
+        .insert_layout(Layout {
+            id: LayoutId(7),
+            name: "Layout1".into(),
+            viewports: Vec::new(),
+        })
+        .unwrap();
+    builder
+        .insert_style(Style {
+            id: StyleId(1),
+            name: "Standard".into(),
+            resource_keys: Vec::new(),
+        })
+        .unwrap();
+    builder
+        .insert_linetype(LineType {
+            id: LinetypeId(1),
+            name: "DASHED".into(),
+            pattern: LinetypePattern::continuous(),
+            complex: false,
+        })
+        .unwrap();
+
+    builder
+        .insert_entity(line(1, point(0.0, 0.0), point(10.0, 10.0)))
+        .unwrap();
+    builder
+        .insert_entity(line(2, point(10.0, 0.0), point(0.0, 10.0)))
+        .unwrap();
+    builder
+        .insert_entity(entity(
+            3,
+            SemanticGeometry::Line {
+                start: point(0.0, 0.0),
+                end: point(1.0, 0.0),
+            },
+            LayerId(0),
+            SpaceId::Paper(LayoutId(7)),
+            "AcDbLine",
+            None,
+        ))
+        .unwrap();
+    builder
+        .insert_block(BlockDefinition {
+            id: BlockId(2),
+            entities: vec![EntityId(4)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+    builder
+        .insert_entity(entity(
+            4,
+            SemanticGeometry::Point(point(0.0, 0.0)),
+            LayerId(0),
+            SpaceId::Block(BlockId(2)),
+            "AcDbPoint",
+            None,
+        ))
+        .unwrap();
+    let (app, mut session, document) = app_from_builder(builder);
+    session.active_layer = LayerId(3);
+    (app, session, document)
+}
+
+#[test]
+fn status_reports_fixture_counts_and_honest_not_tracked_lines() {
+    let (mut app, mut session, document) = status_fixture();
+    let before = app
+        .workspace
+        .documents
+        .get(&document)
+        .unwrap()
+        .drawing
+        .clone();
+
+    let outcome = app
+        .execute(
+            &mut session,
+            command(CommandId::Status, CommandPayload::None),
+        )
+        .expect("STATUS is admitted");
+
+    assert_eq!(outcome.diagnostics[0].code, "status.summary");
+    let summary = diagnostic(&outcome, "status.summary")[0];
+    assert!(
+        summary.contains("entities=4 (model=2 paper=1 block=1)"),
+        "{summary}"
+    );
+    assert!(summary.contains(&format!("revision={}", before.revision().0)));
+
+    let layers = diagnostic(&outcome, "status.layers")[0];
+    assert!(layers.contains("layers=5"), "{layers}");
+    assert!(layers.contains("off=1"), "{layers}");
+    assert!(layers.contains("frozen=1"), "{layers}");
+    assert!(layers.contains("locked=1"), "{layers}");
+
+    let tables = diagnostic(&outcome, "status.tables")[0];
+    assert!(tables.contains("blocks=1"), "{tables}");
+    assert!(tables.contains("linetypes=1"), "{tables}");
+    assert!(tables.contains("text_styles=1"), "{tables}");
+    assert!(tables.contains("dimstyles=1"), "{tables}");
+    assert!(tables.contains("mleader_styles=1"), "{tables}");
+    assert!(tables.contains("layouts=1"), "{tables}");
+
+    assert!(diagnostic(&outcome, "status.bounds")[0].contains("min="));
+    assert!(diagnostic(&outcome, "status.active_layer")[0].contains("WALLS"));
+    let session_line = diagnostic(&outcome, "status.session")[0];
+    assert!(session_line.contains("mode=Work"), "{session_line}");
+    assert!(session_line.contains("grid=true"), "{session_line}");
+    assert!(session_line.contains("snap=false"), "{session_line}");
+    assert!(session_line.contains("snap_grid=false"), "{session_line}");
+    assert!(session_line.contains("ortho=false"), "{session_line}");
+    assert!(session_line.contains("object_snap=true"), "{session_line}");
+    assert!(diagnostic(&outcome, "status.zoom_history")[0].contains("zoom-history depth"));
+
+    let not_tracked = diagnostic(&outcome, "status.not_tracked").join("\n");
+    assert!(not_tracked.contains("creation/edit time"), "{not_tracked}");
+    assert!(
+        not_tracked.contains("limits and base point"),
+        "{not_tracked}"
+    );
+    assert!(not_tracked.contains("memory usage"), "{not_tracked}");
+
+    let after = app
+        .workspace
+        .documents
+        .get(&document)
+        .unwrap()
+        .drawing
+        .clone();
+    assert_eq!(after.revision(), before.revision());
+    assert!(!app.can_undo(&document));
+}
+
+#[test]
+fn status_reports_empty_bounds_for_an_empty_drawing() {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    let (mut app, mut session, _document) = app_from_builder(builder);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(CommandId::Status, CommandPayload::None),
+        )
+        .expect("STATUS reports an empty drawing");
+    assert!(diagnostic(&outcome, "status.summary")[0].contains("entities=0"));
+    assert!(diagnostic(&outcome, "status.bounds")[0].contains("empty"));
+}
+
+#[test]
+fn status_is_allowed_in_viewer_mode() {
+    let (mut app, _session, document) = status_fixture();
+    let mut viewer = SessionState::new(document, AppMode::Viewer);
+    assert!(app
+        .execute(
+            &mut viewer,
+            command(CommandId::Status, CommandPayload::None)
+        )
+        .is_ok());
 }

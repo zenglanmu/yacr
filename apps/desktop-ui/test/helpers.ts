@@ -88,6 +88,7 @@ export const HOST_NAMES = [
   'AUDIT',
   // Inquiry commands: read-only/Viewer-legal; FS is the Express direct-touch grower.
   'LIST',
+  'STATUS',
   'SWITCHBACKEND', 'SWITCH2D3D',
   // PLAN (AutoCAD 2026): the payload-free "orthographic view of the XY plane"
   // selector. v1 is the top/plan 2D view only (this build has no UCS model, so

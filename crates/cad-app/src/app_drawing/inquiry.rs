@@ -345,4 +345,144 @@ impl Application {
         })
     }
 
+    /// `STATUS`: report drawing statistics, modes and extents.
+    pub(crate) fn drawing_status(
+        &self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        require_none_payload(command, "STATUS")?;
+        let drawing = document_drawing(self, command)?;
+
+        let mut model = 0usize;
+        let mut paper = 0usize;
+        let mut block = 0usize;
+        for entity in drawing.entities() {
+            match entity.space {
+                SpaceId::Model => model += 1,
+                SpaceId::Paper(_) => paper += 1,
+                SpaceId::Block(_) => block += 1,
+            }
+        }
+        let total = drawing.entity_count();
+
+        let mut layers = 0usize;
+        let mut off = 0usize;
+        let mut frozen = 0usize;
+        let mut locked = 0usize;
+        for layer in drawing.layers() {
+            layers += 1;
+            let attributes = drawing.layer_attributes(layer.id);
+            off += usize::from(attributes.off);
+            frozen += usize::from(attributes.frozen);
+            locked += usize::from(attributes.locked);
+        }
+
+        let bounds = match drawing.bounds() {
+            Some((min, max)) => format!("min={} max={}", fmt_point(min), fmt_point(max)),
+            None => "empty".to_string(),
+        };
+        let active_layer = layer_label(&drawing, session.active_layer);
+        let zoom_history = self
+            .workspace
+            .viewports
+            .get(&command.viewport)
+            .map(|viewport| viewport.zoom_history_len().to_string())
+            .unwrap_or_else(|| "unavailable".to_string());
+
+        let diagnostics = vec![
+            Diagnostic {
+                object: None,
+                code: "status.summary".into(),
+                message: format!(
+                    "STATUS drawing={} database={} revision={} entities={total} (model={model} \
+                     paper={paper} block={block})",
+                    command.document.0,
+                    drawing.id().0,
+                    drawing.revision().0
+                ),
+            },
+            Diagnostic {
+                object: None,
+                code: "status.layers".into(),
+                message: format!(
+                    "STATUS layers={layers} off={off} frozen={frozen} locked={locked}"
+                ),
+            },
+            Diagnostic {
+                object: None,
+                code: "status.tables".into(),
+                message: format!(
+                    "STATUS blocks={} linetypes={} text_styles={} dimstyles={} \
+                     mleader_styles={} layouts={}",
+                    drawing.blocks().count(),
+                    drawing.linetypes().count(),
+                    drawing.styles().count(),
+                    drawing.dim_styles().count(),
+                    drawing.mleader_styles().count(),
+                    drawing.layouts().count()
+                ),
+            },
+            Diagnostic {
+                object: None,
+                code: "status.bounds".into(),
+                message: format!("STATUS model-space bounds: {bounds}"),
+            },
+            Diagnostic {
+                object: None,
+                code: "status.active_layer".into(),
+                message: format!("STATUS current layer={active_layer}"),
+            },
+            Diagnostic {
+                object: None,
+                code: "status.session".into(),
+                message: format!(
+                    "STATUS session mode={:?} grid={} snap={} snap_grid={} ortho={} \
+                     object_snap={}",
+                    session.mode(),
+                    session.grid_enabled(),
+                    // AutoCAD `SNAP` (F9) is this build's grid snap; object snap
+                    // is the separate `OSNAP` (F3) switch.
+                    session.snap_grid_enabled(),
+                    session.snap_grid_enabled(),
+                    session.ortho_enabled(),
+                    session.snap_enabled()
+                ),
+            },
+            Diagnostic {
+                object: None,
+                code: "status.zoom_history".into(),
+                message: format!(
+                    "STATUS zoom-history depth (current viewport)={zoom_history} \
+                     layer_overrides={}",
+                    session.layer_overrides.len()
+                ),
+            },
+            Diagnostic {
+                object: None,
+                code: "status.not_tracked".into(),
+                message: "STATUS drawing creation/edit time: not tracked by this build".into(),
+            },
+            Diagnostic {
+                object: None,
+                code: "status.not_tracked".into(),
+                message: "STATUS drawing limits and base point: not tracked by this build (there \
+                          is no drawing-header model)"
+                    .into(),
+            },
+            Diagnostic {
+                object: None,
+                code: "status.not_tracked".into(),
+                message: "STATUS memory usage: not tracked by this build".into(),
+            },
+        ];
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics,
+            measurement: None,
+            point_report: None,
+        })
+    }
+
 }

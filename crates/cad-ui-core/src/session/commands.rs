@@ -261,6 +261,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // applied after object snap and grid snap so it still decides the final axis.
     ("ORTHO", CommandId::ToggleOrtho),
     ("LIST", CommandId::List),
+    ("STATUS", CommandId::Status),
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**

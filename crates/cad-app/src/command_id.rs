@@ -954,6 +954,11 @@ pub enum CommandId {
     /// colour/linetype/lineweight/transparency; thickness and extrusion are not
     /// modelled and say so. See `crate::app_drawing::inquiry`.
     List,
+    /// `STATUS` (Viewer and Work): report drawing statistics, modes and the
+    /// model-space extent. Payload-free and document-scoped; read-only. Drawing
+    /// creation/edit time, memory usage, limits and the base point are explicitly
+    /// not tracked (no drawing-header model). See `crate::app_drawing::inquiry`.
+    Status,
 }
 
 mod capabilities;

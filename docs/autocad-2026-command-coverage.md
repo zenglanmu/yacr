@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **44** |
-| **已实现合计（完整 + 部分）** | **94** |
-| 未实现 | **887** |
+| 部分实现（有写明的界） | **46** |
+| **已实现合计（完整 + 部分）** | **96** |
+| 未实现 | **885** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -129,6 +129,7 @@
 | `SELECTSIMILAR` | 部分实现 | v1 仅按几何类型匹配并并入当前选择；无 layer/颜色/线型等属性匹配；仅模型空间 |
 | `SNAP` | 已实现 | — |
 | `SPLINE` | 已实现 | — |
+| `STATUS` | 部分实现 | 报告图形/数据库 id、修订、实体数（模型/图纸/块）、图层（off/frozen/locked）、块/线型/文字样式/标注样式/多重引线样式/布局数、模型空间范围、当前图层、会话模式与网格/捕捉/正交/对象捕捉状态、缩放历史深度。创建/编辑时间、内存、图形界限与基点**不跟踪**（无图形头模型），以 `status.not_tracked` 显式说明 |
 | `STRETCH` | 部分实现 | 恒交叉窗口；TEXT/MultiLeader 整命令拒绝 |
 | `TEXT` | 已实现 | — |
 | `TEXTEDIT` | 部分实现 | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
@@ -959,7 +960,7 @@
 | 815 | `SPOTLIGHT` | 未实现 | Creates a spotlight that emits a directional cone of light. | — |
 | 816 | `SSX` | 未实现 | Creates a selection set based on a selected object. | — |
 | 817 | `STANDARDS` | 未实现 | Manages the association of standards files with drawings. | — |
-| 818 | `STATUS` | 未实现 | Displays drawing statistics, modes, and extents. | — |
+| 818 | `STATUS` | 部分实现 | Displays drawing statistics, modes, and extents. | 报告统计/模式/模型空间范围；创建/编辑时间、内存、图形界限与基点显式 `status.not_tracked`（无图形头模型） |
 | 819 | `STLOUT` | 未实现 | Stores 3D solids and watertight meshes in a format that can be used with stereolithography apparatus. | — |
 | 820 | `STRETCH` | 部分实现 | Stretches objects crossed by a selection window or polygon. | 恒交叉窗口；TEXT/MultiLeader 整命令拒绝 |
 | 821 | `-STYLE` | 未实现 | Creates, modifies, or specifies text styles. | — |
