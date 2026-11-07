@@ -818,6 +818,33 @@ pub enum CommandId {
     HideObjects,
     IsolateObjects,
     UnisolateObjects,
+    /// `DONUT` (Work-only): two concentric circles. Contract:
+    /// [`crate::command_id::draw2::DonutCommand`].
+    Donut,
+    /// `SOLID` (Work-only): one filled triangle/quad face as a two-triangle
+    /// `Mesh`. Contract: [`crate::command_id::draw2::SolidCommand`].
+    Solid,
+    /// `HELIX` (Work-only): a flat 2D spiral polyline. Contract:
+    /// [`crate::command_id::draw2::HelixCommand`].
+    Helix,
+    /// `MLINE` (Work-only): the two-line partial multiline. Contract:
+    /// [`crate::command_id::draw2::MlineCommand`].
+    Mline,
+    /// `MLSTYLE` (session-only): the bounded multiline style store. Contract:
+    /// [`crate::command_id::draw2::MlStyleContract`].
+    MlStyle,
+    /// `TREX` (Work-only): TRIM/EXTEND the selection against itself. Contract:
+    /// [`crate::command_id::draw2::TrexCommand`].
+    Trex,
+    /// `EXTRIM` (Work-only): trim crossing objects at one boundary. Contract:
+    /// [`crate::command_id::draw2::ExtrimCommand`].
+    Extrim,
+    /// `MPEDIT` (Work-only): apply one PEDIT option to every selected polyline.
+    /// Contract: [`crate::command_id::draw2::MpeditCommand`].
+    Mpedit,
+    /// `DRAWORDER` (Work-only): rewrite model-space draw order. Contract:
+    /// [`crate::command_id::draw2::DrawOrderCommand`].
+    DrawOrder,
 }
 
 mod capabilities;
@@ -831,6 +858,7 @@ pub mod break_at_point;
 pub mod construction_line;
 pub mod dimension_chain;
 pub mod dimension_extra;
+pub mod draw2;
 pub mod draw_variants;
 pub mod gradient;
 pub mod grip_stretch;

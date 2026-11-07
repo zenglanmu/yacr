@@ -546,7 +546,17 @@ impl Application {
             | CommandId::MLeader
             | CommandId::TextEdit
             | CommandId::InsertBlock
-            | CommandId::DefineBlock => {
+            | CommandId::DefineBlock
+            // The 2026-11-07 draw/modify batch.
+            | CommandId::Donut
+            | CommandId::Solid
+            | CommandId::Helix
+            | CommandId::Mline
+            | CommandId::MlStyle
+            | CommandId::Trex
+            | CommandId::Extrim
+            | CommandId::Mpedit
+            | CommandId::DrawOrder => {
                 // Every edit runs through one funnel so the session selection is
                 // reconciled against the authoritative drawing afterwards: an
                 // edit that removed entities (ERASE, a deleting TRIM, CUT) leaves

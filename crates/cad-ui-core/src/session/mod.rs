@@ -26,6 +26,7 @@ mod bytes;
 mod command_log;
 mod commands;
 mod diagnostics;
+mod draw2_arguments;
 pub mod events;
 mod fonts;
 mod hatchedit;
@@ -104,6 +105,7 @@ pub use self::commands::{
     MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR, PEDIT_SELECTOR, SNAPUNIT_SELECTOR,
     SPACE_SELECTOR, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
+pub use self::draw2_arguments::invalid_draw2_argument_reason;
 pub use self::events::{
     cursor_changed, derive_batch, same_status_ignoring_volatile, CadEvent, CadEventKind,
     CanvasJson, EventBus, EventSink, StatusFrame, EVENT_RING_CAPACITY,

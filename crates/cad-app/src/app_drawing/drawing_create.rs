@@ -101,6 +101,16 @@ impl Application {
             }
             CommandId::PasteBlock => self.paste_block(session, command),
             CommandId::OffsetEntity => self.offset_entity(command),
+            // The 2026-11-07 draw/modify batch.
+            CommandId::Donut => self.donut(session, command),
+            CommandId::Solid => self.solid(session, command),
+            CommandId::Helix => self.helix(session, command),
+            CommandId::Mline => self.mline(session, command),
+            CommandId::MlStyle => self.mlstyle(session, command),
+            CommandId::Trex => self.trex(session, command),
+            CommandId::Extrim => self.extrim(session, command),
+            CommandId::Mpedit => self.mpedit(session, command),
+            CommandId::DrawOrder => self.draw_order(session, command),
             CommandId::SetActiveLayer => self.set_active_layer(session, command),
             CommandId::SetEntityProperty => self.set_entity_property(session, command),
             CommandId::MatchProp => self.match_prop(session, command),

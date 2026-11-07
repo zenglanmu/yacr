@@ -21,7 +21,9 @@
 use cad_app::{CommandId, CommandPayload};
 
 use super::commands::{
-    FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, QSELECT_SELECTOR,
+    DONUT_SELECTOR, DRAWORDER_SELECTOR, FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR,
+    GETSEL_SELECTOR, HELIX_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MPEDIT_SELECTOR,
+    QSELECT_SELECTOR, SOLID_SELECTOR, TREX_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::{
@@ -83,6 +85,11 @@ impl CadSession {
                 self.select_filter_argument(selector, argument, text)
             }
             FIND_SELECTOR | FIND_REPORT_SELECTOR => self.find_argument(selector, argument, text),
+            // The 2026-11-07 draw/modify batch typed forms.
+            DONUT_SELECTOR | SOLID_SELECTOR | HELIX_SELECTOR | MLINE_SELECTOR
+            | MLSTYLE_SELECTOR | TREX_SELECTOR | MPEDIT_SELECTOR | DRAWORDER_SELECTOR => {
+                self.draw2_argument(selector, argument, text)
+            }
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

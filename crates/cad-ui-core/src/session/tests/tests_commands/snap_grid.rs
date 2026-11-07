@@ -232,7 +232,16 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "FILTER",
             "GETSEL",
             "FIND",
-            "-FIND"
+            "-FIND",
+            // The 2026-11-07 draw/modify batch.
+            "DONUT",
+            "SOLID",
+            "HELIX",
+            "MLINE",
+            "MLSTYLE",
+            "TREX",
+            "MPEDIT",
+            "DRAWORDER"
         ]
     );
     assert_eq!(

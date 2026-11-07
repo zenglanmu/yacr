@@ -144,6 +144,16 @@ impl CommandId {
                 // `-FIND` selector. The selection/filter and hide-objects batch
                 // is session state only, so it is absent too.
                 | Self::FindReplace
+                // The 2026-11-07 draw/modify batch. Every one writes drawing
+                // entities except MLSTYLE, whose store is session state only.
+                | Self::Donut
+                | Self::Solid
+                | Self::Helix
+                | Self::Mline
+                | Self::Trex
+                | Self::Extrim
+                | Self::Mpedit
+                | Self::DrawOrder
         )
     }
 }

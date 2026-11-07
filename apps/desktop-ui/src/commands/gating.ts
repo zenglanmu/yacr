@@ -356,7 +356,73 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   '-FIND': Object.freeze({
     parse: (argument: string) => isFindArgument(argument) && !argument.includes('=>'),
   }),
+  /**
+   * The 2026-11-07 draw/modify batch. These mirror the host grammars exactly;
+   * the host remains the authority for the semantic checks (radius order,
+   * point count, style capacity) and refuses a bad value by name.
+   *
+   * `DONUT`/`HELIX`/`MLINE` take typed coordinates because this build has no
+   * centre/point pick prompt for them; `SOLID` takes 3-4 `x,y` pairs.
+   * `MLSTYLE`, `TREX`, `MPEDIT` and `DRAWORDER` are word grammars.
+   */
+  DONUT: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return parts.length === 4 && parts.every(isSignedDecimal);
+    },
+  }),
+  SOLID: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return (parts.length === 3 || parts.length === 4) && parts.every(isCoordinatePair);
+    },
+  }),
+  HELIX: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return parts.length === 5 && parts.every(isSignedDecimal);
+    },
+  }),
+  MLINE: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return parts.length === 4 && isPositiveDecimal(parts[0])
+        && isSignedDecimal(parts[1]) && isCoordinatePair(parts[2])
+        && isCoordinatePair(parts[3]);
+    },
+  }),
+  MLSTYLE: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      const [word, ...rest] = parts;
+      if (word.toUpperCase() === 'LIST') return rest.length === 0;
+      return word.toUpperCase() === 'SET' && rest.length === 2
+        && isPositiveDecimal(rest[1]);
+    },
+  }),
+  TREX: Object.freeze({
+    parse: (argument: string) => ['TRIM', 'EXTEND'].includes(argument.trim().toUpperCase()),
+  }),
+  MPEDIT: Object.freeze({
+    parse: (argument: string) => ['CLOSE', 'OPEN', 'REVERSE', 'C', 'O', 'R']
+      .includes(argument.trim().toUpperCase()),
+  }),
+  DRAWORDER: Object.freeze({
+    parse: (argument: string) => ['FRONT', 'BACK', 'ABOVE', 'BELOW']
+      .includes(argument.trim().toUpperCase()),
+  }),
 });
+
+/** Split a typed argument into whitespace-separated tokens. */
+function tokens(argument: string): readonly string[] {
+  return argument.trim().split(/\s+/).filter(part => part.length > 0);
+}
+
+/** Whether `text` is one `x,y` pair of finite signed decimals. */
+function isCoordinatePair(text: string): boolean {
+  const parts = text.split(',');
+  return parts.length === 2 && parts.every(isSignedDecimal);
+}
 
 
 /** The four property words `QSELECT`/`FILTER` accept. */
@@ -644,6 +710,16 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   HIDEOBJECTS: Object.freeze({ count: 1, reasonKey: 'draw.kind.hideobjects.hint' }),
   ISOLATEOBJECTS: Object.freeze({ count: 1, reasonKey: 'draw.kind.isolateobjects.hint' }),
   UNISOLATEOBJECTS: Object.freeze({ count: 0, reasonKey: 'draw.kind.unisolateobjects.hint' }),
+  // The 2026-11-07 selection batch. TREX needs a target **and** a boundary, so
+  // two objects is the minimum; EXTRIM needs a boundary plus a target; MPEDIT
+  // edits one or more polylines; DRAWORDER FRONT/BACK needs one, while
+  // ABOVE/BELOW additionally require a reference object (the host refuses the
+  // one-object form with `draworder.reference_required`, so the local minimum
+  // stays one and the sentence names the rule).
+  TREX: Object.freeze({ count: 2, reasonKey: 'draw.kind.trex.hint' }),
+  EXTRIM: Object.freeze({ count: 2, reasonKey: 'draw.kind.extrim.hint' }),
+  MPEDIT: Object.freeze({ count: 1, reasonKey: 'draw.kind.mpedit.hint' }),
+  DRAWORDER: Object.freeze({ count: 1, reasonKey: 'draw.kind.draworder.hint' }),
 });
 
 /**
