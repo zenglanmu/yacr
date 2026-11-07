@@ -388,6 +388,20 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("TREESTAT", CommandId::TreeStat),
     ("MREDO", CommandId::MRedo),
     ("MULTIPLE", CommandId::Multiple),
+    // The 2026-11-07 draw/modify batch. Every name is a canonical selector of
+    // its own; `-OVERKILL` is the command-line spelling of the existing
+    // `OVERKILL` path (same `CommandId`, same planner — never a second
+    // implementation), which is why it is a table row rather than a new engine.
+    ("DONUT", CommandId::Donut),
+    ("SOLID", CommandId::Solid),
+    ("HELIX", CommandId::Helix),
+    ("MLINE", CommandId::Mline),
+    ("MLSTYLE", CommandId::MlStyle),
+    ("TREX", CommandId::Trex),
+    ("EXTRIM", CommandId::Extrim),
+    ("MPEDIT", CommandId::Mpedit),
+    ("DRAWORDER", CommandId::DrawOrder),
+
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**
@@ -511,6 +525,15 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     SETVAR_SELECTOR,
     MREDO_SELECTOR,
     MULTIPLE_SELECTOR,
+    // The 2026-11-07 draw/modify batch argument forms.
+    DONUT_SELECTOR,
+    SOLID_SELECTOR,
+    HELIX_SELECTOR,
+    MLINE_SELECTOR,
+    MLSTYLE_SELECTOR,
+    TREX_SELECTOR,
+    MPEDIT_SELECTOR,
+    DRAWORDER_SELECTOR,
 ];
 
 /// Split a typed line into an argument-taking selector and its argument.
@@ -692,6 +715,9 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("-LAYMCH", "LAYMCH"),
     ("-LAYMRG", "LAYMRG"),
     ("-LAYDEL", "LAYDEL"),
+    // `-OVERKILL` is AutoCAD's dialog-free spelling of the same command; this
+    // build has one selection-based path, so the alias adds no second engine.
+    ("-OVERKILL", "OVERKILL"),
     ("DBA", "DIMBASELINE"),
     ("DCO", "DIMCONTINUE"),
     // `NEWLAYER` is a **project** word synonym for creating a layer, not an
@@ -884,6 +910,10 @@ pub(crate) use arguments::{parse_positive_decimal, parse_signed_decimal};
 // and `-FIND`/`FIND`. Re-exported so `commands::parse_*` paths resolve.
 mod filters;
 pub use filters::*;
+
+// The 2026-11-07 draw/modify batch grammars (`DONUT` … `DRAWORDER`).
+mod draw2;
+pub use draw2::*;
 
 // The selector -> interactive-tool routing table (split out for the code-size
 // gate). Re-exported so `commands::interaction_request_for` still resolves.

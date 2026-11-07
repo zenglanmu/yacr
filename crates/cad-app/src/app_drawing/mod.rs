@@ -48,6 +48,10 @@ mod drawing_create;
 // The 2026-11-07 draw variants (WIPEOUT, POLYGON CIRCUMSCRIBED): split out of
 // `drawing_create` so both files stay inside the code-size limit.
 mod draw_variants;
+// The 2026-11-07 draw/modify batch: DONUT/SOLID/HELIX/MLINE/MLSTYLE create
+// entities and one session store; TREX/EXTRIM/MPEDIT/DRAWORDER edit them.
+mod draw2_batch;
+mod draw2_edit;
 mod drawing_edit;
 mod drawing_transform;
 mod explode;

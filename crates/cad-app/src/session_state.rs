@@ -183,6 +183,12 @@ pub struct SessionState {
     /// database id allocator never reuses an id — so an OOPS restore is a new
     /// copy, not the same row back.
     last_erase: Option<EraseSnapshot>,
+    /// The bounded, session-only multiline style store (`MLSTYLE`).
+    ///
+    /// Session/display state only: it feeds `MLINE`'s spacing and is never
+    /// persisted to the drawing, history or preferences. See
+    /// [`crate::ml_style`] for the cap and the exact refusals.
+    pub ml_styles: crate::MultilineStyleStore,
     /// The `MULTIPLE` repeat request, if one is armed.
     ///
     /// Session state only. This host has no command repeat loop, so the flag is
@@ -238,6 +244,7 @@ impl SessionState {
             clipboard_base: None,
             last_erase: None,
             multiple: None,
+            ml_styles: crate::MultilineStyleStore::default(),
         }
     }
 

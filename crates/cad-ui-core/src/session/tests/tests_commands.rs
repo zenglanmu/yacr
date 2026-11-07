@@ -7,6 +7,7 @@
 mod alias_table;
 mod command_vocabulary;
 mod command_vocabulary_clipboard;
+mod draw2_arguments;
 mod gradient;
 mod hatchedit;
 mod import_accounting;

@@ -569,4 +569,21 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'TREESTAT', labelKey: 'draw.kind.treestat', icon: 'diagnostics', group: 'view' },
   { id: 'MREDO', labelKey: 'draw.kind.mredo', icon: 'redo', group: 'modify' },
   { id: 'MULTIPLE', labelKey: 'draw.kind.multiple', icon: 'copy', group: 'modify' },
+  // The 2026-11-07 draw/modify batch. DONUT/SOLID/HELIX/MLINE/MLSTYLE are typed
+  // creation forms (a bare name is refused by the host, never defaulted);
+  // TREX/EXTRIM/MPEDIT/DRAWORDER read the current selection. They are listed in
+  // the command catalog so the command line can complete them, and the four
+  // selection commands also get ribbon buttons (see `ribbon/ribbon-modify.ts`).
+  // `-OVERKILL` is deliberately absent: it is an alias of `OVERKILL`, not a
+  // second command row.
+  { id: 'DONUT', labelKey: 'draw.kind.donut', icon: 'circle', group: 'draw' },
+  { id: 'SOLID', labelKey: 'draw.kind.solid', icon: 'rectang', group: 'draw' },
+  { id: 'HELIX', labelKey: 'draw.kind.helix', icon: 'spline', group: 'draw' },
+  { id: 'MLINE', labelKey: 'draw.kind.mline', icon: 'line', group: 'draw' },
+  { id: 'MLSTYLE', labelKey: 'draw.kind.mlstyle', icon: 'properties', group: 'draw' },
+  { id: 'TREX', labelKey: 'draw.kind.trex', icon: 'trim', group: 'modify' },
+  { id: 'EXTRIM', labelKey: 'draw.kind.extrim', icon: 'trim', group: 'modify' },
+  { id: 'MPEDIT', labelKey: 'draw.kind.mpedit', icon: 'polyline', group: 'modify' },
+  { id: 'DRAWORDER', labelKey: 'draw.kind.draworder', icon: 'properties', group: 'modify' },
+
 ]);

@@ -990,4 +990,9 @@ pub enum CommandPayload {
     SetVar(String),
     MRedo(u32),
     Multiple(Option<String>),
+    /// The 2026-11-07 2D draw/modify batch
+    /// (`DONUT`/`SOLID`/`HELIX`/`MLINE`/`MLSTYLE`/`TREX`/`EXTRIM`/`MPEDIT`/
+    /// `DRAWORDER`). Grouped in [`crate::Draw2Payload`] so this enum stays inside
+    /// the file-size budget; every contract lives in `command_id::draw2`.
+    Draw2(Box<crate::Draw2Payload>),
 }

@@ -290,6 +290,11 @@ export const HOST_NAMES = [
   // `-` spellings are host aliases of PURGE/RENAME.
   'PURGE', '-PURGE', 'RENAME', '-RENAME', 'SETVAR', 'TIME', 'DBLIST', 'TREESTAT',
   'MREDO', 'MULTIPLE',
+  // The 2026-11-07 draw/modify batch: DONUT/SOLID/HELIX/MLINE/MLSTYLE are typed
+  // creation selectors; TREX/EXTRIM/MPEDIT/DRAWORDER read the selection. The
+  // `-OVERKILL` spelling is a host alias of OVERKILL.
+  'DONUT', 'SOLID', 'HELIX', 'MLINE', 'MLSTYLE', 'TREX', 'EXTRIM', 'MPEDIT',
+  'DRAWORDER', '-OVERKILL',
   // WIPEOUT is the open-ended polygon mask; POLYGON CIRCUMSCRIBED is the
   // tangent-ring variant of POLYGON (its own multi-word selector).
   'WIPEOUT', 'POLYGON CIRCUMSCRIBED',

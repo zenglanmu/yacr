@@ -8,6 +8,61 @@
 import type { RibbonCommandItem } from './ribbon-model.ts';
 import { PEDIT_ITEM } from './variants.ts';
 
+/**
+ * `TREX` split button: the two operations of the selection-based trim/extend.
+ *
+ * The parent `TREX` selector deliberately refuses a bare invocation (there is no
+ * in-command operation prompt); the caret rows each carry the operation word and
+ * are admitted by `ARGUMENT_COMMANDS.TREX`. Both read the current selection and
+ * use every other selected object as a boundary.
+ */
+const TREX_VARIANTS: readonly RibbonCommandItem[] = Object.freeze([
+  { id: 'TREX TRIM', labelKey: 'draw.kind.trex.trim', icon: 'trim', command: 'TREX TRIM' },
+  { id: 'TREX EXTEND', labelKey: 'draw.kind.trex.extend', icon: 'extend', command: 'TREX EXTEND' },
+]);
+
+const TREX_ITEM: RibbonCommandItem = Object.freeze({
+  id: 'TREX',
+  labelKey: 'draw.kind.trex',
+  icon: 'trim',
+  command: 'TREX',
+  hintKey: 'draw.kind.trex.hint',
+  variants: TREX_VARIANTS,
+});
+
+/** `MPEDIT` split button: the three PEDIT options over the whole selection. */
+const MPEDIT_VARIANTS: readonly RibbonCommandItem[] = Object.freeze([
+  { id: 'MPEDIT CLOSE', labelKey: 'draw.kind.mpedit.close', icon: 'polyline', command: 'MPEDIT CLOSE' },
+  { id: 'MPEDIT OPEN', labelKey: 'draw.kind.mpedit.open', icon: 'polyline', command: 'MPEDIT OPEN' },
+  { id: 'MPEDIT REVERSE', labelKey: 'draw.kind.mpedit.reverse', icon: 'mirror', command: 'MPEDIT REVERSE' },
+]);
+
+const MPEDIT_ITEM: RibbonCommandItem = Object.freeze({
+  id: 'MPEDIT',
+  labelKey: 'draw.kind.mpedit',
+  icon: 'polyline',
+  command: 'MPEDIT',
+  hintKey: 'draw.kind.mpedit.hint',
+  variants: MPEDIT_VARIANTS,
+});
+
+/** `DRAWORDER` split button: FRONT/BACK/ABOVE/BELOW over the selection. */
+const DRAWORDER_VARIANTS: readonly RibbonCommandItem[] = Object.freeze([
+  { id: 'DRAWORDER FRONT', labelKey: 'draw.kind.draworder.front', icon: 'properties', command: 'DRAWORDER FRONT' },
+  { id: 'DRAWORDER BACK', labelKey: 'draw.kind.draworder.back', icon: 'properties', command: 'DRAWORDER BACK' },
+  { id: 'DRAWORDER ABOVE', labelKey: 'draw.kind.draworder.above', icon: 'properties', command: 'DRAWORDER ABOVE' },
+  { id: 'DRAWORDER BELOW', labelKey: 'draw.kind.draworder.below', icon: 'properties', command: 'DRAWORDER BELOW' },
+]);
+
+const DRAWORDER_ITEM: RibbonCommandItem = Object.freeze({
+  id: 'DRAWORDER',
+  labelKey: 'draw.kind.draworder',
+  icon: 'properties',
+  command: 'DRAWORDER',
+  hintKey: 'draw.kind.draworder.hint',
+  variants: DRAWORDER_VARIANTS,
+});
+
 /** The Home tab's Modify panel, in display order. */
 export const HOME_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   { id: 'TRIM', labelKey: 'draw.kind.trim', icon: 'trim', command: 'TRIM', large: true },
@@ -111,6 +166,13 @@ export const HOME_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   { id: 'HIDEOBJECTS', labelKey: 'draw.kind.hideobjects', icon: 'clearSelection', command: 'HIDEOBJECTS' },
   { id: 'ISOLATEOBJECTS', labelKey: 'draw.kind.isolateobjects', icon: 'layers', command: 'ISOLATEOBJECTS' },
   { id: 'UNISOLATEOBJECTS', labelKey: 'draw.kind.unisolateobjects', icon: 'layers', command: 'UNISOLATEOBJECTS' },
+  // The 2026-11-07 selection batch. TREX/MPEDIT/DRAWORDER are split buttons (the
+  // operation word is the command's argument); EXTRIM is a plain button whose
+  // selection form uses the first selected object as the boundary.
+  TREX_ITEM,
+  { id: 'EXTRIM', labelKey: 'draw.kind.extrim', icon: 'trim', command: 'EXTRIM', hintKey: 'draw.kind.extrim.hint' },
+  MPEDIT_ITEM,
+  DRAWORDER_ITEM,
 ]);
 
 /** The Draw tab's Modify panel, in display order. */
@@ -190,4 +252,9 @@ export const DRAW_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   { id: 'HIDEOBJECTS', labelKey: 'draw.kind.hideobjects', icon: 'clearSelection', command: 'HIDEOBJECTS' },
   { id: 'ISOLATEOBJECTS', labelKey: 'draw.kind.isolateobjects', icon: 'layers', command: 'ISOLATEOBJECTS' },
   { id: 'UNISOLATEOBJECTS', labelKey: 'draw.kind.unisolateobjects', icon: 'layers', command: 'UNISOLATEOBJECTS' },
+  // The 2026-11-07 draw/modify batch: the same tail as the Home tab.
+  TREX_ITEM,
+  { id: 'EXTRIM', labelKey: 'draw.kind.extrim', icon: 'trim', command: 'EXTRIM', hintKey: 'draw.kind.extrim.hint' },
+  MPEDIT_ITEM,
+  DRAWORDER_ITEM,
 ]);

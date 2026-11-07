@@ -296,6 +296,7 @@ mod dimension_extra;
 mod dimension_radial;
 mod dimension_space;
 mod divide;
+mod draw2_batch;
 mod ellipse;
 mod explode;
 mod explode_insert;
