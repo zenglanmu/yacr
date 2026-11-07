@@ -297,7 +297,10 @@ fn scale_text_factor(session: &SessionState) -> CadResult<f64> {
 }
 
 /// The scaled copy of one Text/MTEXT entity, preserving every other field.
-fn scaled_text(before: &DbEntity, factor: f64) -> CadResult<DbEntity> {
+///
+/// The **single** scale rule: `TSCALE` (typed factor) and `SCALETEXT` (session
+/// tool parameter) both call this, so the two can never diverge.
+pub(super) fn scaled_text(before: &DbEntity, factor: f64) -> CadResult<DbEntity> {
     let SemanticGeometry::Text {
         height, wrap_width, ..
     } = &before.geometry

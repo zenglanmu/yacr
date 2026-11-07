@@ -226,6 +226,67 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     parse: (argument: string) => ['DISTANCE', 'ANGLE', 'AREA', 'POLYLINE', 'RADIUS', 'VOLUME']
       .includes(argument.trim().toUpperCase()),
   }),
+  /**
+   * `JUSTIFYTEXT <H> <V>` / `TJUST <H> <V>` (2026-11-07) set only the alignment
+   * pair. Exactly two words: H ∈ `LEFT|CENTER|RIGHT`, V ∈
+   * `BASELINE|BOTTOM|MIDDLE|TOP`. The bare selector is admitted by the base name
+   * and refused by the host (`justifytext.needs_argument`) — never defaulted.
+   * `TJUST` is the AutoCAD alias and shares this grammar exactly.
+   */
+  JUSTIFYTEXT: Object.freeze({
+    parse: (argument: string) => {
+      const parts = argument.trim().toUpperCase().split(/\s+/).filter(part => part.length > 0);
+      return parts.length === 2
+        && ['LEFT', 'CENTER', 'RIGHT'].includes(parts[0])
+        && ['BASELINE', 'BOTTOM', 'MIDDLE', 'TOP'].includes(parts[1]);
+    },
+  }),
+  TJUST: Object.freeze({
+    parse: (argument: string) => {
+      const parts = argument.trim().toUpperCase().split(/\s+/).filter(part => part.length > 0);
+      return parts.length === 2
+        && ['LEFT', 'CENTER', 'RIGHT'].includes(parts[0])
+        && ['BASELINE', 'BOTTOM', 'MIDDLE', 'TOP'].includes(parts[1]);
+    },
+  }),
+  /**
+   * `TSCALE <factor>` (2026-11-07) scales the selected text with the shared
+   * `SCALETEXT` rule; the host grammar is one positive decimal.
+   */
+  TSCALE: Object.freeze({
+    parse: isPositiveDecimal,
+  }),
+  /**
+   * `TEXTALIGN <edge>` (2026-11-07) moves the selected text to one common
+   * edge/centre. Only the six full words are admitted: the host does not accept
+   * an abbreviation.
+   */
+  TEXTALIGN: Object.freeze({
+    parse: (argument: string) => ['LEFT', 'RIGHT', 'CENTER', 'TOP', 'MIDDLE', 'BOTTOM']
+      .includes(argument.trim().toUpperCase()),
+  }),
+  /**
+   * `TCOUNT <start> <step> [prefix] [suffix]` (2026-11-07) numbers the selected
+   * text. Two to four tokens: the first two are whole numbers (`start` signed,
+   * `step` strictly positive, matching `tcount.invalid_step`); tokens 3/4 are the
+   * uniform prefix/suffix. The host is still the authority for the numbering.
+   */
+  TCOUNT: Object.freeze({
+    parse: (argument: string) => {
+      const parts = argument.trim().split(/\s+/).filter(part => part.length > 0);
+      if (parts.length < 2 || parts.length > 4) return false;
+      if (!/^[+-]?\d+$/.test(parts[0]) || !/^[+-]?\d+$/.test(parts[1])) return false;
+      return Number.parseInt(parts[1], 10) > 0;
+    },
+  }),
+  /**
+   * `TCIRCLE CIRCLE|RECTANGLE` (2026-11-07) draws an estimated-bounds boundary
+   * around the selected text. Only the two full words are admitted.
+   */
+  TCIRCLE: Object.freeze({
+    parse: (argument: string) => ['CIRCLE', 'RECTANGLE']
+      .includes(argument.trim().toUpperCase()),
+  }),
 });
 
 /**
@@ -444,6 +505,20 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // real result. The host independently skips non-text selections with
   // per-entity diagnostics, so the local rule is only a minimum.
   TEXTTOFRONT: Object.freeze({ count: 1, reasonKey: 'draw.kind.texttofront.hint' }),
+  // The 2026-11-07 2D text batch. Every one reads the current selection; the
+  // host independently refuses a non-text target (whole command or per-entity,
+  // as documented) and the empty-selection case by name, so these rows are
+  // minimums. TEXTALIGN needs **two** objects: aligning one to itself can never
+  // produce a real result. TJUST shares JUSTIFYTEXT's rule (it is the same
+  // `CommandId`).
+  JUSTIFYTEXT: Object.freeze({ count: 1, reasonKey: 'draw.kind.justifytext.hint' }),
+  TJUST: Object.freeze({ count: 1, reasonKey: 'draw.kind.justifytext.hint' }),
+  TSCALE: Object.freeze({ count: 1, reasonKey: 'draw.kind.tscale.hint' }),
+  TEXTALIGN: Object.freeze({ count: 2, reasonKey: 'draw.kind.textalign.hint' }),
+  TCOUNT: Object.freeze({ count: 1, reasonKey: 'draw.kind.tcount.hint' }),
+  TCIRCLE: Object.freeze({ count: 1, reasonKey: 'draw.kind.tcircle.hint' }),
+  TEXTMASK: Object.freeze({ count: 1, reasonKey: 'draw.kind.textmask.hint' }),
+  TEXTUNMASK: Object.freeze({ count: 1, reasonKey: 'draw.kind.textunmask.hint' }),
 });
 
 /**
