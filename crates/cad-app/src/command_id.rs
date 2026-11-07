@@ -843,6 +843,15 @@ pub enum CommandId {
     /// `visible == !(off || frozen)` rule; `locked` / `plottable` / the colour /
     /// the linetype / the lineweight / the transparency are stored only. Work-only.
     SetLayerProperty,
+    /// The layer-selection run (`LAYCUR`…`SETBYLAYER`); see
+    /// [`crate::app_drawing::layer_commands`].
+    LayCur,
+    LayMCur,
+    LayFrz,
+    LayThw,
+    LayLck,
+    LayUlk,
+    SetByLayer,
     /// `PDMODE <n>`: write the drawing header's `$PDMODE` (the drawing-global
     /// POINT display mode) from the command line. Full contract:
     /// [`crate::command_id::point_style`].
@@ -946,26 +955,17 @@ pub enum CommandId {
     /// `RAY` (Work-only): the positive half of an infinite construction line,
     /// stored as a finite clipped segment; see [`crate::command_id::construction_line`].
     CreateRay,
-    /// `LIST` (Viewer and Work): report the selected objects' stored data; see
-    /// `crate::app_drawing::inquiry`.
+    /// `LIST` / `STATUS` / `FS`: read-only inquiry; see `crate::app_drawing::inquiry`.
     List,
-    /// `STATUS` (Viewer and Work): report drawing statistics, modes and extent;
-    /// see `crate::app_drawing::inquiry`.
     Status,
-    /// `FS` (Viewer and Work): add every visible model-space object directly
-    /// touching the selected seed (Express tool, `FSMODE=OFF` only); see
-    /// `crate::app_drawing::inquiry`.
     Fs,
-    /// `REVERSE` (Work-only): flip selected line/polyline/spline direction; see
-    /// [`crate::command_id::reverse`].
+    /// `REVERSE`: see [`crate::command_id::reverse`].
     Reverse,
-    /// `OOPS` (Work-only): restore the last ERASE; see [`crate::command_id::oops`].
+    /// `OOPS`: see [`crate::command_id::oops`].
     Oops,
-    /// `OVERKILL` (Work-only): delete exact duplicates; see
-    /// [`crate::command_id::overkill`].
+    /// `OVERKILL`: see [`crate::command_id::overkill`].
     Overkill,
-    /// `BREAKATPOINT` (Work-only): split a line/arc/open polyline at a projected
-    /// point; see [`crate::command_id::break_at_point`].
+    /// `BREAKATPOINT`: see [`crate::command_id::break_at_point`].
     BreakAtPoint,
 }
 

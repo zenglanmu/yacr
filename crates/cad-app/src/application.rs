@@ -141,6 +141,17 @@ impl Application {
             | CommandId::RenameLayer
             | CommandId::DeleteLayer
             | CommandId::SetLayerProperty => self.layer_command(session, &command),
+            // Layer **selection** commands read the current selection and write
+            // either the entity rows (LAYCUR) or the layer table; dispatched ahead
+            // of the entity-edit funnel so `drawing_command`'s match stays one
+            // edit funnel. See `crate::app_drawing::layer_commands`.
+            CommandId::LayCur => self.layer_selection_command(session, &command),
+            CommandId::LayMCur => self.layer_selection_command(session, &command),
+            CommandId::LayFrz => self.layer_selection_command(session, &command),
+            CommandId::LayThw => self.layer_selection_command(session, &command),
+            CommandId::LayLck => self.layer_selection_command(session, &command),
+            CommandId::LayUlk => self.layer_selection_command(session, &command),
+            CommandId::SetByLayer => self.layer_selection_command(session, &command),
             // The two drawing-header POINT display style writes (`PDMODE <n>` /
             // `PDSIZE <n>`): real database writes in one revision bump each (the
             // display refresh signal), never undoable because `cad-history` has

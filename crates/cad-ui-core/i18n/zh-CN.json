@@ -1152,5 +1152,19 @@
   "gpu.pulled.insufficient_vram.title": "显存不足，已回退渲染",
   "gpu.pulled.insufficient_vram.body": "图形的加速显卡副本需要的内存超过当前可用显存，因此已改用通用渲染路径。大图形在平移和缩放时可能会变慢。",
   "gpu.pulled.insufficient_vram.short": "显存不足，已回退渲染",
-  "gpu.pulled.insufficient_vram.dismiss": "知道了"
+  "gpu.pulled.insufficient_vram.dismiss": "知道了",
+  "draw.kind.laycur": "更改为当前图层",
+  "draw.kind.laycur.hint": "请先选择对象；LAYCUR 会把每个选中对象移动到当前图层。",
+  "draw.kind.laymcur": "从对象设置当前图层",
+  "draw.kind.laymcur.hint": "请先选择对象；LAYMCUR 会把第一个选中对象所在的图层设为当前图层。",
+  "draw.kind.layfrz": "冻结选中图层",
+  "draw.kind.layfrz.hint": "请先选择对象；LAYFRZ 会冻结每个选中对象所在的图层（所有视口；冻结当前图层会被拒绝）。",
+  "draw.kind.laythw": "解冻所有图层",
+  "draw.kind.laythw.hint": "无需选择对象；LAYTHW 会解冻所有已冻结图层（不改视口级冻结标记与新视口标志）。",
+  "draw.kind.laylck": "锁定选中图层",
+  "draw.kind.laylck.hint": "请先选择对象；LAYLCK 会锁定每个选中对象所在的图层（当前图层也可以被锁定）。",
+  "draw.kind.layulk": "解锁选中图层",
+  "draw.kind.layulk.hint": "请先选择对象；LAYULK 会解锁每个选中对象所在的图层。",
+  "draw.kind.setbylayer": "特性设为随层",
+  "draw.kind.setbylayer.hint": "请先选择对象；SETBYLAYER 会把颜色、线型和线宽重置为随层（透明度、材质等不在重置范围；未实现 Include blocks）。"
 }

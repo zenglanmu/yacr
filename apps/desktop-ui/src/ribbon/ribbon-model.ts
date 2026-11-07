@@ -13,6 +13,7 @@ import { POPUP_KEYS } from '../popup/popup.ts';
 import { OPTIONS_KEYS } from '../options/options.ts';
 import { STANDARD_VIEWS } from '../cad/view3d.ts';
 import { DRAW_MODIFY_ITEMS, HOME_MODIFY_ITEMS } from './ribbon-modify.ts';
+import { LAYER_PANEL_ITEMS } from './layers-panel.ts';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({
@@ -77,6 +78,17 @@ export const PALETTE_COMMANDS: readonly string[] = Object.freeze([
   'LAYERP',
   'LAYOFF',
   'LAYON',
+  // The AutoCAD 2026 layer-selection run (`LAYCUR`, `LAYMCUR`, `LAYFRZ`,
+  // `LAYTHW`, `LAYLCK`, `LAYULK`, `SETBYLAYER`) lives in the Layers panel and
+  // changes layer state that only the palette names or reverses, so the whole
+  // run follows the same carrier rule as the rest of the panel.
+  'LAYCUR',
+  'LAYMCUR',
+  'LAYFRZ',
+  'LAYTHW',
+  'LAYLCK',
+  'LAYULK',
+  'SETBYLAYER',
   // `FONTS` opens the read-only Font Manager, which is a palette window on the
   // desktop (and a floating sheet on the compact layout). A carrier that never
   // renders the palette layer has no surface for that report, so the button is
@@ -463,34 +475,7 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         // repeat press focuses and re-reads it rather than opening a second one).
         launcher: true,
         launcherCommand: 'LAYER',
-        items: [
-          { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
-          // Layer isolate / unisolate (2026-10-26) sit beside the palette opener
-          // they operate on: both are payload-free router commands acting on the
-          // **current selection** (LAYISO needs at least one object, LAYUNISO
-          // none), so they are small buttons with the shared admission and no
-          // popover. They are dropped with the palette on a carrier that never
-          // renders it (`PALETTE_COMMANDS`), because the isolation state is only
-          // visible there.
-          { id: 'LAYISO', labelKey: 'layers.isolate', icon: 'eyeOff', command: 'LAYISO' },
-          { id: 'LAYUNISO', labelKey: 'layers.unisolate', icon: 'eye', command: 'LAYUNISO' },
-          // LAYERP (2026-10-27) restores the previous layer-override state, so it
-          // sits directly beside LAYUNISO — the two are the layer run's two
-          // "bring back what was there" commands, and the pair reads in the order
-          // the reader reaches for them (unisolate everything, or go back one
-          // step). It is a payload-free router command with no popover, and the
-          // carrier rule is the panel's: the state it restores is only visible in
-          // the palette, so it is dropped with it (`PALETTE_COMMANDS`).
-          { id: 'LAYERP', labelKey: 'layers.previous', icon: 'eye', command: 'LAYERP' },
-          // Layer off / on (2026-10-26) close the panel: LAYOFF turns off every
-          // layer the selection sits on (needs one object), LAYON turns every
-          // layer back on (needs none). Same conventions as the isolate pair —
-          // small, payload-free router commands, no popover — and the same
-          // carrier rule: the resulting layer state is only visible in the
-          // palette, so they are dropped with it (`PALETTE_COMMANDS`).
-          { id: 'LAYOFF', labelKey: 'draw.kind.layoff', icon: 'eyeOff', command: 'LAYOFF' },
-          { id: 'LAYON', labelKey: 'draw.kind.layon', icon: 'eye', command: 'LAYON' },
-        ],
+        items: LAYER_PANEL_ITEMS,
       },
       {
         // Properties sits in its own panel, the way AutoCAD's Home tab keeps

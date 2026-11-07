@@ -182,7 +182,7 @@ export const GESTURE_ONLY_COMMANDS: readonly string[] = Object.freeze(['ORBIT'])
  * "a drawing is the whole requirement" (see `SELECTION_REQUIREMENTS`, which
  * answers the no-document case for selection-gated commands itself).
  */
-export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS']);
+export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW']);
 
 /** One command's precondition on the **current selection**. */
 export interface SelectionRequirement {
@@ -300,6 +300,15 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   LIST: Object.freeze({ count: 1, reasonKey: 'draw.kind.list.hint' }),
   // FS needs exactly one seed; two or more is refused by the host by name.
   FS: Object.freeze({ count: 1, reasonKey: 'draw.kind.fs.hint' }),
+  // The AutoCAD 2026 layer-selection run is pre-selection based. LAYTHW takes no
+  // selection at all, so its row is the no-drawing answer only.
+  LAYCUR: Object.freeze({ count: 1, reasonKey: 'draw.kind.laycur.hint' }),
+  LAYMCUR: Object.freeze({ count: 1, reasonKey: 'draw.kind.laymcur.hint' }),
+  LAYFRZ: Object.freeze({ count: 1, reasonKey: 'draw.kind.layfrz.hint' }),
+  LAYTHW: Object.freeze({ count: 0, reasonKey: 'draw.kind.laythw.hint' }),
+  LAYLCK: Object.freeze({ count: 1, reasonKey: 'draw.kind.laylck.hint' }),
+  LAYULK: Object.freeze({ count: 1, reasonKey: 'draw.kind.layulk.hint' }),
+  SETBYLAYER: Object.freeze({ count: 1, reasonKey: 'draw.kind.setbylayer.hint' }),
 });
 
 /**

@@ -186,6 +186,7 @@ mod grips_spline;
 mod grips_text;
 mod id_report;
 mod inquiry;
+mod layer_commands;
 mod layer_current_visibility;
 mod layer_property;
 mod layers;

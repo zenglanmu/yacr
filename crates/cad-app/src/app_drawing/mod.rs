@@ -56,6 +56,7 @@ mod helpers;
 mod inquiry;
 mod insert_block;
 mod join;
+mod layer_commands;
 mod layer_edit;
 mod lengthen;
 mod match_prop;

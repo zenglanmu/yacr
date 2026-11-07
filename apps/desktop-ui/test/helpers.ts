@@ -177,6 +177,19 @@ export const HOST_NAMES = [
   // writes no alias row for it (the alias table is the host's, and this mirror
   // lists it in the canonical run).
   'JOIN', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON', 'LAYERP',
+  // The AutoCAD 2026 layer-selection run (LAYCUR/LAYMCUR/LAYFRZ/LAYTHW/
+  // LAYLCK/LAYULK/SETBYLAYER). Each is a canonical, payload-free router
+  // selector that reads the **current selection** (LAYTHW reads none) rather
+  // than a draw capture; the fixed machine cannot ask "Select objects", so the
+  // pre-selection is the whole input. This mirror stands in for the loaded
+  // `cad_commands` vocabulary and never proves the host advertises them.
+  'LAYCUR',
+  'LAYMCUR',
+  'LAYFRZ',
+  'LAYTHW',
+  'LAYLCK',
+  'LAYULK',
+  'SETBYLAYER',
   // CHAMFER POLYLINE / FILLET POLYLINE (2026-10-27): the Polyline modes of the
   // two corner commands, canonical **multi-word** selectors of their own (like
   // `AREA OBJECT`, the space is part of one name and is never split into a typed

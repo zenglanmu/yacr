@@ -77,7 +77,7 @@ test('the Layers arrow runs LAYER and the Properties arrow runs PROPERTIES', () 
   // are visible, which is the one state this palette is the surface for.
   assert.deepEqual(
     layerItems,
-    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON'],
+    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER'],
     'the Layers panel holds its palette toggle and the layer-state commands',
   );
   assert.deepEqual(propertyItems, ['PROPERTIES']);
@@ -112,7 +112,7 @@ test('every launcher target is a chrome-local command, so admission always answe
   // commands ride the same filter (`2026-10-26`: the isolate pair, then the off/on
   // pair): the layers palette is the only surface that shows what they did, so
   // those buttons are not offered where it never renders.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'FONTS']);
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'LAYCUR', 'LAYMCUR', 'LAYFRZ', 'LAYTHW', 'LAYLCK', 'LAYULK', 'SETBYLAYER', 'FONTS']);
   assert.equal(offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false)
     .some(panel => panel.id === 'layers' || panel.id === 'properties'), false);
   // The Font Manager is the same kind of desktop-only palette surface: its Annotate entry is

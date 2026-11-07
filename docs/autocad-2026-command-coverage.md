@@ -84,12 +84,18 @@
 | `ID` | 已实现 | — |
 | `INSERT` | 已实现 | — |
 | `JOIN` | 部分实现 | 仅共线 LINE 或同心相续 ARC |
+| `LAYCUR` | 部分实现 | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
 | `LAYER` | 已实现 | chrome 本地选择子：打开图层面板 |
 | `LAYERCLOSE` | 已实现 | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
+| `LAYFRZ` | 部分实现 | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入不可撤销 |
 | `LAYERP` | 部分实现 | 会话内有界 16 步；不持久化 |
 | `LAYISO` | 已实现 | — |
+| `LAYLCK` | 部分实现 | 预选择输入（不弹 Select objects）；锁定选中对象所在的不同图层（含当前层）；图层表写入不可撤销 |
+| `LAYMCUR` | 部分实现 | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
 | `LAYOFF` | 已实现 | — |
 | `LAYON` | 已实现 | — |
+| `LAYTHW` | 部分实现 | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入不可撤销 |
+| `LAYULK` | 部分实现 | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入不可撤销 |
 | `LAYUNISO` | 已实现 | — |
 | `LENGTHEN` | 部分实现 | 仅 LINE/ARC，只改末端 |
 | `LINE` | 已实现 | — |
@@ -132,6 +138,7 @@
 | `SCALETEXT` | 已实现 | — |
 | `SELECT` | 部分实现 | 以选择载荷设置会话选择；不是 AutoCAD 的交互式 SELECT |
 | `SELECTSIMILAR` | 部分实现 | v1 仅按几何类型匹配并并入当前选择；无 layer/颜色/线型等属性匹配；仅模型空间 |
+| `SETBYLAYER` | 部分实现 | 预选择输入（不弹 Select objects）；只重置颜色/线型/线宽为随层；不重置透明度与材质，文字/标注/填充/多段线厚度未建模；Include blocks 未实现；锁定图层整命令拒绝；显示写入可撤销 |
 | `SNAP` | 已实现 | — |
 | `SPLINE` | 已实现 | — |
 | `STATUS` | 部分实现 | 报告图形/数据库 id、修订、实体数（模型/图纸/块）、图层（off/frozen/locked）、块/线型/文字样式/标注样式/多重引线样式/布局数、模型空间范围、当前图层、会话模式与网格/捕捉/正交/对象捕捉状态、缩放历史深度。创建/编辑时间、内存、图形界限与基点**不跟踪**（无图形头模型），以 `status.not_tracked` 显式说明 |
@@ -609,7 +616,7 @@
 | 459 | `JPGOUT` | 未实现 | Saves selected objects to a file in JPEG file format. | — |
 | 460 | `JULIAN` | 未实现 | Contains the DATE tool and several AutoCAD Julian date and calendar date conversion routines. | — |
 | 461 | `JUSTIFYTEXT` | 未实现 | Changes the justification point of selected text objects without changing their locations. | — |
-| 462 | `LAYCUR` | 未实现 | Changes the layer property of selected objects to the current layer. | — |
+| 462 | `LAYCUR` | 部分实现 | Changes the layer property of selected objects to the current layer. | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
 | 463 | `-LAYDEL` | 未实现 | At the Command prompt, deletes all objects on a layer and purges the layer. | — |
 | 464 | `LAYDEL` | 未实现 | Deletes all objects on a layer and purges the layer. | — |
 | 465 | `-LAYER` | 未实现 | Manages layers and layer properties. | — |
@@ -620,12 +627,12 @@
 | 470 | `LAYERPMODE` | 未实现 | Turns on and off the tracking of changes made to layer settings for use by the LAYERP command. | — |
 | 471 | `LAYERSTATE` | 未实现 | Saves, restores, and manages sets of layer settings that are called layer states. | — |
 | 472 | `LAYERSTATESAVE` | 未实现 | Displays the New Layer State to Save dialog box, where you can provide a name and a description for a new layer state. | — |
-| 473 | `LAYFRZ` | 未实现 | Freezes the layer of selected objects. | — |
+| 473 | `LAYFRZ` | 部分实现 | Freezes the layer of selected objects. | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入不可撤销 |
 | 474 | `LAYISO` | 已实现 | Hides or locks all layers except those of the selected objects. | — |
-| 475 | `LAYLCK` | 未实现 | Locks the layer of a selected object. | — |
+| 475 | `LAYLCK` | 部分实现 | Locks the layer of a selected object. | 预选择输入（不弹 Select objects）；锁定选中对象所在的不同图层（含当前层）；图层表写入不可撤销 |
 | 476 | `-LAYMCH` | 未实现 | Changes the layer of a selected object to match the layer of a selected object. | — |
 | 477 | `LAYMCH` | 未实现 | Changes the layer of a selected object to match the destination layer. | — |
-| 478 | `LAYMCUR` | 未实现 | Sets the current layer to that of a selected object. | — |
+| 478 | `LAYMCUR` | 部分实现 | Sets the current layer to that of a selected object. | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
 | 479 | `-LAYMRG` | 未实现 | At the Command prompt, merges selected layers into a target layer. | — |
 | 480 | `LAYMRG` | 未实现 | Merges selected layers into a target layer, removing them from the drawing. | — |
 | 481 | `LAYOFF` | 已实现 | Turns off the layer of a selected object. | — |
@@ -633,9 +640,9 @@
 | 483 | `LAYOUT` | 未实现 | Creates and modifies drawing layouts. | — |
 | 484 | `LAYOUTMERGE` | 未实现 | Combines specified layouts into a single layout. | — |
 | 485 | `LAYOUTWIZARD` | 未实现 | Creates a new layout tab and specifies page and plot settings. | — |
-| 486 | `LAYTHW` | 未实现 | Thaws all layers in the drawing. | — |
+| 486 | `LAYTHW` | 部分实现 | Thaws all layers in the drawing. | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入不可撤销 |
 | 487 | `LAYTRANS` | 未实现 | Translates the layers in the current drawing to specified layer standards. | — |
-| 488 | `LAYULK` | 未实现 | Unlocks the layer of a selected object. | — |
+| 488 | `LAYULK` | 部分实现 | Unlocks the layer of a selected object. | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入不可撤销 |
 | 489 | `LAYUNISO` | 已实现 | Restores all layers that were hidden or locked with the LAYISO command. | — |
 | 490 | `LAYVPI` | 未实现 | Freezes selected layers in all layout viewports except the current viewport. | — |
 | 491 | `LAYWALK` | 未实现 | Displays objects on selected layers and hides objects on all other layers. | — |
@@ -931,7 +938,7 @@
 | 781 | `SELECT` | 部分实现 | Places selected objects in the Previous selection set. | 以选择载荷设置会话选择；不是 AutoCAD 的交互式 SELECT |
 | 782 | `SELECTCOUNT` | 未实现 | Finds all objects within the current count that match the properties of the selected objects, and then adds them to the selection set. | — |
 | 783 | `SELECTSIMILAR` | 部分实现 | Finds all objects within the current drawing that match the properties of selected objects, and then adds them to the selection set. | v1 仅按几何类型匹配并并入当前选择；无 layer/颜色/线型等属性匹配；仅模型空间 |
-| 784 | `SETBYLAYER` | 未实现 | Changes the property overrides of selected objects to ByLayer. | — |
+| 784 | `SETBYLAYER` | 部分实现 | Changes the property overrides of selected objects to ByLayer. | 预选择输入（不弹 Select objects）；只重置颜色/线型/线宽为随层；不重置透明度与材质，文字/标注/填充/多段线厚度未建模；Include blocks 未实现；锁定图层整命令拒绝；显示写入可撤销 |
 | 785 | `SETVAR` | 未实现 | Lists or changes the values of system variables. | — |
 | 786 | `-SHADEMODE` | 未实现 | Provides simple shading for 3D solids and surfaces. | — |
 | 787 | `SHADEMODE` | 未实现 | Controls the display of 3D objects. | — |

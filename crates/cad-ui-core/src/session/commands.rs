@@ -166,18 +166,10 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // an alias: there is no interactive rectangular/polygonal draw mode in this
     // build, so the name must not route into a draw capture.
     ("REVCLOUD", CommandId::RevisionCloud),
-    // REVERSE (AutoCAD 2026) reverses the vertices/direction of the selected
-    // LINEs/LWPOLYLINEs/SPLINEs; the selection is the whole input.
+    // REVERSE / OOPS / OVERKILL are selection-based; BREAKATPOINT is a pick tool.
     ("REVERSE", CommandId::Reverse),
-    // BREAKATPOINT is the single-point split tool: pick the object, then the break
-    // point (the point may be off the object and is projected). Its first click is
-    // **not** also a break point, which is why it is not an alias of BREAK.
     ("BREAKATPOINT", CommandId::BreakAtPoint),
-    // OOPS restores the entities removed by the last ERASE (ERASE-only v1); it is
-    // selection-free and takes no payload.
     ("OOPS", CommandId::Oops),
-    // OVERKILL removes exact duplicate selected entities (v1: no partial-overlap
-    // or collinear merging); the selection is the whole input.
     ("OVERKILL", CommandId::Overkill),
     ("ARRAYRECT", CommandId::ArrayRectangular),
     ("ARRAYPOLAR", CommandId::ArrayPolar),
@@ -233,6 +225,13 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // explicitly by the application layer; the panel/IPC path
     // (`cad_set_layer_property`) supplies the typed payload.
     ("SETLAYERPROPERTY", CommandId::SetLayerProperty),
+    ("LAYCUR", CommandId::LayCur),
+    ("LAYMCUR", CommandId::LayMCur),
+    ("LAYFRZ", CommandId::LayFrz),
+    ("LAYTHW", CommandId::LayThw),
+    ("LAYLCK", CommandId::LayLck),
+    ("LAYULK", CommandId::LayUlk),
+    ("SETBYLAYER", CommandId::SetByLayer),
     // A payload-requiring edit: the selector normalizes, and the application
     // refuses a bare invocation explicitly (the panel/IPC path supplies the
     // `EntityProperty { key, value }` payload).
@@ -263,11 +262,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // The typed spacing sysvar: `SNAPUNIT <value>`. The bare name carries no
     // value, so the application refuses it explicitly (no fabricated default).
     ("SNAPUNIT", CommandId::SetSnapSpacing),
-    // The two typed POINT display style sysvars (`PDMODE <n>` / `PDSIZE <n>`).
-    // Each writes one **drawing header** value (not session state): the bare name
-    // carries no value, so the application refuses it explicitly (no fabricated
-    // default). There is no `SETVAR` indirection and no `SETVAR` selector: the
-    // two names are the command-line form of the two system variables.
+    // The typed POINT display sysvars write one drawing-header value each; the
+    // bare names are refused (no fabricated default, no SETVAR indirection).
     ("PDMODE", CommandId::SetPointDisplayMode),
     ("PDSIZE", CommandId::SetPointDisplaySize),
     // The orthographic drafting constraint (F8). Session/display state only;

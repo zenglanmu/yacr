@@ -1152,5 +1152,19 @@
   "gpu.pulled.insufficient_vram.title": "Low video memory: renderer fell back",
   "gpu.pulled.insufficient_vram.body": "The drawing's accelerated GPU copy needs more memory than is currently available, so it is drawn with the universal rendering path. Panning and zooming a large drawing may be slower.",
   "gpu.pulled.insufficient_vram.short": "Low video memory: using the fallback renderer",
-  "gpu.pulled.insufficient_vram.dismiss": "Dismiss"
+  "gpu.pulled.insufficient_vram.dismiss": "Dismiss",
+  "draw.kind.laycur": "Change to current layer",
+  "draw.kind.laycur.hint": "Select the objects first; LAYCUR moves every selected object to the current layer.",
+  "draw.kind.laymcur": "Set current layer from object",
+  "draw.kind.laymcur.hint": "Select the object first; LAYMCUR makes the first selected object's layer the current layer.",
+  "draw.kind.layfrz": "Freeze selected layers",
+  "draw.kind.layfrz.hint": "Select the objects first; LAYFRZ freezes the layer of every selected object in all viewports (freezing the current layer is refused).",
+  "draw.kind.laythw": "Thaw all layers",
+  "draw.kind.laythw.hint": "No selection is needed; LAYTHW thaws every frozen layer (viewport-level frozen layers and the new-viewport flag are not changed).",
+  "draw.kind.laylck": "Lock selected layers",
+  "draw.kind.laylck.hint": "Select the objects first; LAYLCK locks the layer of every selected object (the current layer may be locked too).",
+  "draw.kind.layulk": "Unlock selected layers",
+  "draw.kind.layulk.hint": "Select the objects first; LAYULK unlocks the layer of every selected object.",
+  "draw.kind.setbylayer": "Set properties to ByLayer",
+  "draw.kind.setbylayer.hint": "Select the objects first; SETBYLAYER resets colour, linetype and lineweight to ByLayer (transparency, materials and the other listed properties are not reset; Include blocks is not implemented)."
 }
