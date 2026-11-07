@@ -520,6 +520,27 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 > 真机或 vendor-AutoCAD 证据。dim-batch 的前端测试在主仓库合并后运行通过；worktree 内因缺
 > `node_modules` 为 NOT RUN。
 
+#### 2026-11-07 组/注释批次（10 条）
+
+> **重要**：`cad-db` 没有 DWG group 对象/组表，`HatchGeometry` 没有图案原点字段，本构建也不保留
+> xdata。因此组系列是**会话内**组表（不写库、不过撤销栈）、`HATCHSETORIGIN`/`XDLIST` 是稳定具名
+> 拒绝/只读报告；其余是真实写入路径。
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `GROUP` / `-GROUP` | 部分实现 | 会话内 `EntityGroups`（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；`-GROUP` 是同一 `CommandId`/路径的别名 | 不写 DWG group 对象/修订/`ChangeSet`/历史；不跨会话/文档替换保留；导入 DWG 的组只贡献普通实体 |
+| `UNGROUP` | 部分实现 | `UNGROUP <name>` 仅移除组名，保留全部实体；未知组名拒绝 | 不写实体/数据库 |
+| `GROUPEDIT` | 部分实现 | `<name> ADD|REMOVE|RENAME <arg>`；成员来自当前选择集或键入实体 id；`RENAME` 允许仅改大小写；单次会话变更 | 不写实体/数据库；无组选择对话框 |
+| `QLEADER` / `LEADER` | 部分实现 | `<arrow x,y> <landing x,y> <文本>` 创建**一个** `MULTILEADER`（旧实体映射为 MULTILEADER）；一条事务/一步撤销 | 无 QLEADER 设置对话框、引线样式、注释类型、多引线段/附着选项 |
+| `TEXTFIT` | 部分实现 | `<目标宽度>` 仅按 `height = target / char_count` 改字形高度 | 真实宽度拉伸/压缩 NOT IMPLEMENTED；坏宽度、空选择、非文字、空文本具名拒绝 |
+| `HATCHSETBOUNDARY` | 部分实现 | 恰好一个 hatch + 一条闭合 Polyline/整圆/完整 Ellipse；共面性校验；用 `HatchGeometry::new` 重建并丢弃旧种子；一条事务/一步撤销 | 失败为 `hatchsetboundary.rebuild_failed`；无交互边界选择、无关联边界、无样条/椭圆弧/块内边界 |
+| `HATCHSETORIGIN` | 部分实现 | `<x> <y>` 参数校验后按 `hatchsetorigin.missing_field` 拒绝 | `HatchGeometry` 无图案原点字段；不写入、不伪造 |
+| `XDLIST` | 部分实现 | 只读；每个选中实体报告 `xdlist.not_retained` | 本构建不保留 xdata；不伪造条目 |
+
+> **证据边界**：以上 10 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
+> 真机或 vendor-AutoCAD 证据。annot-batch 的前端测试在主仓库合并后运行通过；worktree 内因缺
+> `node_modules` 为 NOT RUN。
+
 **仿射不变规则（`SPLINE`，2026-10-26）**：NURBS 曲线对**仿射**映射不变——把每个控制点过同一个
 仿射映射，而 `degree`、`knots`、`weights` **原样保留**，得到的正是原曲线的**精确仿射像**。因此平移、旋转、
 **均匀与非均匀**缩放、镜像与剪切**全部精确**：无需重拟合、无需重参数化、权重不变。`cad-db` 的

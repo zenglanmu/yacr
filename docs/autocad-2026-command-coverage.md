@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **153** |
-| **已实现合计（完整 + 部分）** | **203** |
-| 未实现 | **778** |
+| 部分实现（有写明的界） | **163** |
+| **已实现合计（完整 + 部分）** | **213** |
+| 未实现 | **768** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -580,16 +580,16 @@
 | 407 | `GRAPHICSCONFIG` | 未实现 | Sets hardware acceleration on or off and provides access to display performance options. | — |
 | 408 | `GRAPHSCR` | 未实现 | Causes the text window to display behind the application window. | — |
 | 409 | `GRID` | 已实现 | Displays a grid pattern in the current viewport. | — |
-| 410 | `-GROUP` | 未实现 | Creates and manages saved sets of objects called groups. | — |
-| 411 | `GROUP` | 未实现 | Creates and manages saved sets of objects called groups. | — |
-| 412 | `GROUPEDIT` | 未实现 | Adds and removes objects from the selected group, or renames a selected group. | — |
+| 410 | `-GROUP` | 部分实现 | Creates and manages saved sets of objects called groups. | `GROUP` 的别名（同一 `CommandId`/会话组表路径）；无 DWG group 对象/修订/历史 |
+| 411 | `GROUP` | 部分实现 | Creates and manages saved sets of objects called groups. | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
+| 412 | `GROUPEDIT` | 部分实现 | Adds and removes objects from the selected group, or renames a selected group. | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；单次会话变更；不写实体/数据库 |
 | 413 | `-HATCH` | 未实现 | Uses command prompts to fill an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | — |
 | 414 | `HATCH` | 部分实现 | Fills an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | 整实体闭合边界 + LINE/ARC 边链；无 .pat/关联性/实时预览 |
 | 415 | `-HATCHEDIT` | 未实现 | From the Command prompt, modifies existing hatches or fills. | — |
 | 416 | `HATCHEDIT` | 部分实现 | Modifies an existing hatch or fill. | 选择式 v1：恰好一个直接可寻址的模型空间 HATCH；键入 `HATCHEDIT ANGLE <度>`/`SCALE <比例>`（仅 `HatchFill::Pattern`）或 `SOLID`/`GRADIENT`。ANGLE/SCALE 保留 loops/plane/style/seeds/pixel_size/pattern_type 并改 pattern，SOLID/GRADIENT 改填充（默认双色线性渐变）；显示由 `HatchGeometry::from_import` 重建，保留实体 id/层/空间/draw order/`AcDbHatch`，一条事务/一步撤销；相同值为 `hatchedit.unchanged`（无事务）。无交互对话框；`Pattern`/`Color`/`Properties`/`Draw order`/`Add`/`Remove` 边界/关联性未实现 |
 | 417 | `HATCHGENERATEBOUNDARY` | 部分实现 | Creates a non-associated polyline around a selected hatch. | 预选择输入（不弹 Select objects 选项）；每个 hatch loop 生成一条同层同空间的非关联闭合多段线（含内岛、保留 bulge）；源 hatch 保留；无关联性 |
-| 418 | `HATCHSETBOUNDARY` | 未实现 | Redefines a selected hatch or fill to conform to a different closed boundary. | — |
-| 419 | `HATCHSETORIGIN` | 未实现 | Controls the starting location of hatch pattern generation for a selected hatch. | — |
+| 418 | `HATCHSETBOUNDARY` | 部分实现 | Redefines a selected hatch or fill to conform to a different closed boundary. | 恰好一个 hatch + 一条闭合 Polyline/Circle/完整 Ellipse，共面性校验；用 `HatchGeometry::new` 重建、丢弃旧种子；失败 `hatchsetboundary.rebuild_failed` |
+| 419 | `HATCHSETORIGIN` | 部分实现 | Controls the starting location of hatch pattern generation for a selected hatch. | 恒按 `hatchsetorigin.missing_field` 拒绝（`HatchGeometry` 无图案原点字段）；不写入 |
 | 420 | `HATCHTOBACK` | 部分实现 | Sets the draw order for all hatches in the drawing to be behind all other objects. | 仅模型空间：全部 hatch 连续放到最低非 hatch draw order 之下并保持相对次序；i64 下溢按名拒绝；图纸空间/块内不重排；一次事务可撤销 |
 | 421 | `HELIX` | 部分实现 | Creates a 2D spiral or 3D spring. | 平面螺旋 `Polyline`；`height>0` 按 `helix.3d_not_implemented` 拒绝 |
 | 422 | `HELP` | 未实现 | Displays the online or offline Help system. | — |
@@ -662,7 +662,7 @@
 | 489 | `LAYUNISO` | 已实现 | Restores all layers that were hidden or locked with the LAYISO command. | — |
 | 490 | `LAYVPI` | 部分实现 | Freezes selected layers in all layout viewports except the current viewport. | 层名校验后 `layvpi.viewport_layer_state_unsupported`；永不全局冻结 |
 | 491 | `LAYWALK` | 部分实现 | Displays objects on selected layers and hides objects on all other layers. | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
-| 492 | `LEADER` | 未实现 | Creates a line that connects annotation to a feature. | — |
+| 492 | `LEADER` | 部分实现 | Creates a line that connects annotation to a feature. | 创建单个 MULTILEADER（旧实体映射为 MULTILEADER）；一次事务/一步撤销；无引线样式/注释类型选项 |
 | 493 | `LENGTHEN` | 部分实现 | Changes the length of objects and the included angle of arcs. | 仅 LINE/ARC，只改末端 |
 | 494 | `LIGHT` | 未实现 | Creates a light. | — |
 | 495 | `LIGHTLIST` | 未实现 | Displays the Lights in Model palette that lists all lights in the model. | — |
@@ -864,7 +864,7 @@
 | 691 | `QLATTACH` | 未实现 | Attaches a leader line to an mtext, tolerance, or block reference object. | — |
 | 692 | `QLATTACHSET` | 未实现 | Globally attaches leader lines to mtext, tolerance, or block reference objects. | — |
 | 693 | `QLDETACHSET` | 未实现 | Detaches a leader line from an mtext, tolerance, or block reference object. | — |
-| 694 | `QLEADER` | 未实现 | Creates a leader and leader annotation. | — |
+| 694 | `QLEADER` | 部分实现 | Creates a leader and leader annotation. | 创建单个 MULTILEADER；无 QLEADER 设置对话框/引线样式/注释类型选项 |
 | 695 | `QNEW` | 未实现 | Starts a new drawing from a specified drawing template file. | — |
 | 696 | `QQUIT` | 未实现 | Closes all open drawings and exit. | — |
 | 697 | `QSAVE` | 部分实现 | Saves the current drawing using the specified default file format. | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
@@ -1027,7 +1027,7 @@
 | 854 | `TEXT` | 已实现 | Creates a single-line text object. | — |
 | 855 | `TEXTALIGN` | 部分实现 | Aligns multiple text objects vertically, horizontally, or obliquely. | `TEXTALIGN LEFT\|RIGHT\|CENTER\|TOP\|MIDDLE\|BOTTOM`；把选中文字 `position` 对齐到共同边/中心；宽/高为**估算**值（无字形外框 API）；<2 个目标拒绝 |
 | 856 | `TEXTEDIT` | 部分实现 | Edits a selected multiline or single-line text object, or the text in a dimension object. | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
-| 857 | `TEXTFIT` | 未实现 | Expands or compresses the width of text objects based on new starting and ending points. | — |
+| 857 | `TEXTFIT` | 部分实现 | Expands or compresses the width of text objects based on new starting and ending points. | 仅按 `height = target / char_count` 调整字高；真实宽度拉伸 NOT IMPLEMENTED；坏宽度/空选择/非文字/空文本具名拒绝 |
 | 858 | `TEXTMASK` | 部分实现 | Creates a blank area behind selected text or mtext objects. | 为每个选中 Text/MText 用**估算**外框创建独立 `Mask`（type-key `AcDbWipeout`，`draw_order = 文字 − 1`）；无关联模型，遮罩是独立实体 |
 | 859 | `TEXTSCR` | 未实现 | Opens a text window that displays a history of prompts and command line entries for the current session. | — |
 | 860 | `TEXTTOFRONT` | 部分实现 | Brings text, leaders, and dimensions in front of all other objects in the drawing. | 以**当前选择**为输入（偏离 AutoCAD 的 Select objects 提示）；仅可寻址模型空间 Text/MultiLeader/Dimension 参与，其它选中对象逐条 `texttofront.skipped` 跳过；以所有非合格模型空间对象的最大 draw order 为基线，按相对顺序连续上移（一条事务/一步撤销）；已在前方时 `texttofront.unchanged` 不建事务；图纸空间/块内 draw order 不重排；AutoCAD 的“全图文字”形式与 Draw Order 对话框未实现 |
@@ -1068,7 +1068,7 @@
 | 895 | `ULAYERS` | 未实现 | Controls the display of layers in a DWF, DWFx, PDF, or DGN underlay. | — |
 | 896 | `UNDEFINE` | 未实现 | Allows an application-defined command to override an internal command. | — |
 | 897 | `UNDO` | 已实现 | Reverses the effect of commands. | — |
-| 898 | `UNGROUP` | 未实现 | Disassociates the objects from a group. | — |
+| 898 | `UNGROUP` | 部分实现 | Disassociates the objects from a group. | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
 | 899 | `UNION` | 未实现 | Combines two or more 3D solids, surfaces, or 2D regions into a single, composite 3D solid, surface, or region. | — |
 | 900 | `UNISOLATEOBJECTS` | 部分实现 | Displays objects previously hidden with the ISOLATEOBJECTS or HIDEOBJECTS command. | 清空会话隐藏集；无数据库写/撤销 |
 | 901 | `-UNITS` | 未实现 | Controls the precision and display formats for coordinates, distances, and angles. | — |
@@ -1143,7 +1143,7 @@
 | 970 | `XCOMPARERCNEXT` | 未实现 | Zooms to the next change set of the xref comparison result. | — |
 | 971 | `XCOMPARERCPREV` | 未实现 | Zooms to the previous change set of the xref comparison result. | — |
 | 972 | `XDATA` | 未实现 | Attaches extended object data (xdata) to a selected object. | — |
-| 973 | `XDLIST` | 未实现 | Lists the xdata attached to an object. | — |
+| 973 | `XDLIST` | 部分实现 | Lists the xdata attached to an object. | 只读；每个选中实体报告 `xdlist.not_retained`；不伪造 xdata |
 | 974 | `XEDGES` | 未实现 | Creates wireframe geometry from the edges of a 3D solid, surface, mesh, region, or subobject. | — |
 | 975 | `XLINE` | 部分实现 | Creates a construction line of infinite length. | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | 976 | `XLIST` | 未实现 | Lists the type, block name, layer name, color and linetype of a nested object in a block or an xref. | — |

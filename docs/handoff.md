@@ -1,3 +1,23 @@
+## 2026-11-07 AutoCAD 2026 2D 组/注释批次（10 条，已合并，组为会话内、原点/xdata 为具名拒绝）
+
+- **状态**：`annot-batch`（提交 `5f68e16e`）已合并到 `main`。官方清单从
+  **203（50 完整 + 153 部分）/ 778 未实现** 变为 **213（50 完整 + 163 部分）/ 768 未实现**。
+- **新增（10）**：`GROUP`、`-GROUP`、`UNGROUP`、`GROUPEDIT`、`QLEADER`、`LEADER`、`TEXTFIT`、
+  `HATCHSETBOUNDARY`、`HATCHSETORIGIN`、`XDLIST`。
+- **诚实边界**：组系列是**会话内**组表（`cad-app::EntityGroups`，上限 64、不写库/不过撤销栈/
+  不跨文档保留）；`QLEADER`/`LEADER` 创建单个 MULTILEADER；`TEXTFIT` 只改字高、真实宽度拉伸
+  NOT IMPLEMENTED；`HATCHSETORIGIN` 因 `HatchGeometry` 无图案原点字段恒按
+  `hatchsetorigin.missing_field` 拒绝；`XDLIST` 只读并报告 `xdlist.not_retained`。
+  逐条见 `docs/batch-annot-2026-11-07.md` 与 `docs/compatibility.md` §「2026-11-07 组/注释批次」。
+- **已运行（主仓库合并后）**：`cargo test -p cad-app --locked`（1902 + 集成目标全过）；
+  `cargo test -p cad-ui-core --locked`（454）；前端 `node --test test/*.test.ts`（1275 passed，
+  合并时补了 `zoom-window-previous.test.ts` 的 `ARGUMENT_COMMANDS` 精确列表）；`npx tsc --noEmit`；
+  `cargo fmt --all -- --check`；`cargo clippy -p cad-app -p cad-ui-core --all-targets -- -D warnings`；
+  `check-file-size.py`；`check-i18n.py`（1365 keys）；`check-command-docs.py`（88/70/6 selectors，
+  70 aliases，0 mismatches）；`check-architecture.py`。
+- **NOT RUN / NOT VERIFIED**：真实 GUI/像素/GPU/真机/vendor AutoCAD；Windows/macOS/Android/Web
+  运行时；`cargo test --workspace`；打包/发布。worktree 内前端测试因缺 `node_modules` 为 NOT RUN。
+
 ## 2026-11-07 AutoCAD 2026 2D 标注编辑批次（10 条，已合并，部分写路径为具名拒绝）
 
 - **状态**：`dim-batch`（提交 `84983aaf`，merge `af8cdc9d`）已合并到 `main`。官方清单从
