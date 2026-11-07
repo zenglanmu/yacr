@@ -301,12 +301,23 @@ impl HostController {
 
     /// Reverse-map the active document to lossy DXF bytes plus the export report.
     ///
-    /// Host-owned like [`HostController::open_bytes`]: the platform host chooses
-    /// the path and writes the bytes. This is a **Save As**, never a round-trip
-    /// save — the report records every conversion and drop. The database has no
-    /// document in the slot only before the first open; that is an explicit
-    /// `InvalidInput`, never an empty success.
+    /// Host-owned: the platform chooses the path and writes the bytes. This is a
+    /// **Save As** whose report records every conversion/drop; a missing document
+    /// is an explicit `InvalidInput`, never an empty success.
     pub fn export_dxf(&self) -> CadResult<(Vec<u8>, ExportReport)> {
+        self.export_as(ExportFormat::DxfText)
+    }
+
+    /// Reverse-map the active document to **experimental** binary DWG bytes.
+    ///
+    /// Same document/report as [`Self::export_dxf`], written by upstream
+    /// `acadrust::DwgWriter`: lossy and NOT verified against AutoCAD/vendor.
+    pub fn export_dwg(&self) -> CadResult<(Vec<u8>, ExportReport)> {
+        self.export_as(ExportFormat::Dwg)
+    }
+
+    /// The one request builder shared by both formats, so they cannot drift.
+    fn export_as(&self, format: ExportFormat) -> CadResult<(Vec<u8>, ExportReport)> {
         let document = self
             .application
             .workspace
@@ -317,7 +328,7 @@ impl HostController {
             database: document.drawing.as_ref(),
             document_id: self.document_id,
             space: ExportSpace::Model,
-            format: ExportFormat::DxfText,
+            format,
             limits: ExportLimits::default(),
             units: Some(document.units.clone()),
         };

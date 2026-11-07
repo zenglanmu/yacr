@@ -304,6 +304,14 @@ pub struct HostCore {
     /// Path of the drawing being opened (or already open), used to resolve its
     /// sibling raster images. Armed only on a **successful** open.
     pub(crate) drawing_path: Rc<RefCell<Option<PathBuf>>>,
+    /// The platform target of the **successfully opened** source drawing.
+    ///
+    /// Mirrors [`cad_platform::PlatformFiles::set_source`] on the host side so
+    /// the save funnel can apply a platform-independent, normalized
+    /// path/name equality backstop (the web has no filesystem identity and
+    /// Android has only a SAF URI). Cleared by New; replaced only on a
+    /// successful open.
+    pub(crate) source_target: Rc<RefCell<Option<FileTarget>>>,
     /// Last semantic status update.
     pub(crate) last_status: Rc<RefCell<Option<StatusMessage>>>,
     /// Last raster-image loading outcome, surfaced by the diagnostics drawer.

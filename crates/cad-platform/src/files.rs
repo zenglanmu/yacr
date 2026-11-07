@@ -25,6 +25,8 @@ use cad_domain::CadResult;
 pub enum SavePurpose {
     /// Lossy DXF Save As.
     SaveDxf,
+    /// Experimental DWG Save As: always a **new** file, never the opened source.
+    SaveDwg,
     /// Vector plot/export (SVG/PDF).
     Plot,
 }

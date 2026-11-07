@@ -221,6 +221,7 @@ impl HostCore {
         // `install_images` reads the directory for sibling raster resources.
         self.files.set_source(Some(&target));
         *self.drawing_path.borrow_mut() = Some(PathBuf::from(&target.opaque));
+        *self.source_target.borrow_mut() = Some(target.clone());
         self.controller.borrow_mut().fit()?;
         self.controller.borrow_mut().cancel_tool()?;
         // Resource installation is NON-FATAL for presentation (mirroring the
@@ -349,6 +350,9 @@ impl HostCore {
             ));
         }
         self.controller.borrow_mut().new_blank_document()?;
+        // A blank document has no source file: the save funnel must fall back to
+        // the DXF path and must not apply the old document's overwrite backstop.
+        *self.source_target.borrow_mut() = None;
         // New replaces the authoritative document with a fresh blank one: record
         // the epoch before any fallible post-step and drop any stale synchronous
         // open terminal.
@@ -406,6 +410,7 @@ impl HostCore {
             if let Some(target) = self.open_target.borrow_mut().take() {
                 self.files.set_source(Some(&target));
                 *self.drawing_path.borrow_mut() = Some(PathBuf::from(&target.opaque));
+                *self.source_target.borrow_mut() = Some(target);
             }
             if let Err(error) = self.install_fonts() {
                 resource_error = Some(error_text(&error));
