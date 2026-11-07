@@ -211,112 +211,15 @@ pub enum CommandId {
     /// payload, a missing active layer, and every degenerate-chord / numerically
     /// singular input the geometry core raises. Work-only.
     CreateSpline,
-    /// TEXT: insert one single-line `SemanticGeometry::Text` at the payload
-    /// position with the payload's text and height (ADR 0019 F.1, P7a).
-    ///
-    /// Payload is `Text { position, text, height }`. The interactive tool captures
-    /// one insertion point and then the **typed text** through the dedicated
-    /// `cad_set_tool_text` channel (text is terminal: submitting it completes the
-    /// command, no second Confirm). The height comes from the session typed
-    /// parameter ([`crate::draw_tool::ToolParameter::TextHeight`], default
-    /// [`crate::draw_tool::TEXT_DEFAULT_HEIGHT`] = 2.5 because the drawing's
-    /// `Style` table carries no height), so the capture never invents one; the
-    /// rotation comes from [`crate::draw_tool::ToolParameter::TextRotation`]
-    /// (degrees, default `0`) and is stored in radians.
-    ///
-    /// The style is the drawing's `Standard` text style (the `StyleId(0)` entry as
-    /// the documented fallback, with its first resource key as the font) and the
-    /// alignment is the style default (left/baseline). One entity
-    /// (`type_key`/`class_name` = `AcDbText`) is inserted through the shared create
-    /// funnel in one transaction / one undo step on the active layer, and the
-    /// command refuses an empty/whitespace-only text, an over-1024-character text,
-    /// a non-finite position or height, a non-positive height and a missing active
-    /// layer. A single-line text has no width factor, oblique angle, character
-    /// spacing or background, and MTEXT's columns/background/line-spacing
-    /// style/drawing direction are **not** modelled (decision H). Work-only.
+    /// `TEXT`: one point + terminal text; rotation from `textRotation`; single
+    /// line only. Full contract: `crate::app_drawing::drawing_create`.
     CreateText,
-    /// MTEXT: insert one multiline `Text` geometry stored as an `AcDbMText`
-    /// entity (the command core; the interactive two-corner tool maps onto it).
-    ///
-    /// Payload is
-    /// `MText { position, width, text, height, rotation, h_align, v_align }`.
-    /// Everything the payload carries is used verbatim:
-    ///
-    /// * `text` — the draft; `\r\n`/`\r`/`\n` are stored as `\P` by the **one**
-    ///   policy MTEXT creation and `TEXTEDIT` share, which is exactly why the
-    ///   entity is stamped `AcDbMText` (see below);
-    /// * `position` — the insertion point (finite);
-    /// * `width` — the automatic wrap boundary, the DXF group-41
-    ///   `rectangle_width` equivalent ([`cad_domain::wrap_width_from_dxf`] is the
-    ///   single sanitization rule). `None` means "no wrap" and stays `None`; a
-    ///   present value must be finite and `> 0` and is otherwise **refused** —
-    ///   never clamped, never turned into `None`. This is the **two-corner width
-    ///   model**: the caller derives the width from the second corner, the
-    ///   command does no capture;
-    /// * `height` — glyph height in world units (finite, `> 0`, same bound as
-    ///   `TEXT`);
-    /// * `rotation` — radians (finite);
-    /// * `h_align` / `v_align` — the attachment of the run relative to
-    ///   `position`.
-    ///
-    /// **NOT modelled** (no payload field, refused rather than implied; the four
-    /// stable reasons the importer already names under `MTEXT_UNMODELLED`):
-    /// line-spacing style (`text.line_spacing_style_unsupported`), columns
-    /// (`text.columns_unsupported`), background fill
-    /// (`text.background_unsupported`) and drawing direction
-    /// (`text.drawing_direction_unsupported`).
-    ///
-    /// The style is the drawing's `Standard` text style (`StyleId(0)` fallback,
-    /// first resource key as the font) — the **same** resolution `TEXT` uses. The
-    /// stored `type_key` is **`AcDbMText`**, produced by the create funnel's type
-    /// key override, so the newline policy, export and `TEXTEDIT` all agree;
-    /// MTEXT is never silently downgraded to `AcDbText`. One entity, one
-    /// transaction, one undo step on the active layer. Refusals: a wrong payload,
-    /// a non-finite position/rotation, empty or whitespace-only text,
-    /// over-1024-character text, a non-finite or non-positive height, an
-    /// unusable `width`, a missing active layer and Viewer mode. Work-only.
-    ///
-    /// There is a `DrawToolKind` for MTEXT (2026-10-26): the interactive
-    /// two-corner tool captures the first corner (this `position`) and the
-    /// opposite corner (which supplies `width`), then the typed text, and maps
-    /// onto exactly this payload. The bare `MTEXT` selector therefore **starts
-    /// that tool**; a dispatch that carries no payload is still refused by name.
-    /// The interactive capture fills the rotation from
-    /// [`crate::draw_tool::ToolParameter::TextRotation`] (degrees → radians) and
-    /// the attachment from [`crate::draw_tool::ToolParameter::MTextAttachment`] (AutoCAD's `1..=9`
-    /// codes), whose defaults reproduce the previously fixed `0.0` / top-left.
-    /// Line spacing, columns, background fill, drawing direction and an
-    /// in-command editing dialog remain NOT IMPLEMENTED.
+    /// `MTEXT`: two-corner multiline text creation; width `None` = no wrap,
+    /// `Some(w)` must be finite and `> 0`; one transaction/one undo. Full
+    /// contract: `docs/compatibility.md` and `crate::app_drawing::mtext_create`.
     CreateMText,
-    /// MLEADER: insert one straight-line multileader with text content from a
-    /// two-point capture — the arrow position, then the landing point — followed
-    /// by the terminal text step (ADR 0019 decision F.2, P7c).
-    ///
-    /// Payload is `MLeader { arrow, landing, text }`. The dogleg length, landing
-    /// gap, arrowhead size, text height, text style, vertical text attachment,
-    /// path type and content kind are **resolved from the drawing's
-    /// `MLeaderStyle` table** (`Standard`), never from the payload or a session
-    /// parameter: the created entity stores that resolution as its one snapshot
-    /// (P7b-1's resolved effective values), so there is no second source.
-    ///
-    /// The result is **one** `AcDbMultiLeader` — one root, one line, two
-    /// vertices, straight, MText content — inserted through the shared create
-    /// funnel in one transaction / one undo step on the active layer. The
-    /// interactive tool captures the two points and then the typed text through
-    /// `cad_set_tool_text` (terminal: submitting it completes the command; no
-    /// second Confirm).
-    ///
-    /// There is **no `Options` sub-prompt** (leader type, content type, maximum
-    /// points, angular constraint) and therefore no payload field for any of
-    /// them. Text is **required**: there is no path to a content-less
-    /// MULTILEADER — content-less leaders are import/display/export only.
-    ///
-    /// Refusals (nothing written, no transaction): empty/whitespace-only or
-    /// over-1024-character text, a non-finite or non-`+Z`-coplanar point pair, a
-    /// landing point no farther than the resolved dogleg length, a resolved style
-    /// whose path type is not straight (spline/invisible), whose content kind is
-    /// block/tolerance, or whose sizes are unusable, a missing `Standard` style,
-    /// a missing active layer, and Viewer mode. Work-only.
+    /// `MLEADER`: arrow -> landing -> text; single cluster/line; text required.
+    /// Full contract: `crate::app_drawing::mleader` and `docs/compatibility.md`.
     MLeader,
     /// TEXTEDIT: replace the text string of an **existing text-bearing entity**
     /// (TEXT / MTEXT / MULTILEADER text; ADR 0020 amendment options A+B, ADR-0021
@@ -589,33 +492,8 @@ pub enum CommandId {
     /// Delete every entity in the current selection in one transaction. An
     /// empty selection is an explicit refusal. Work-only.
     EraseEntities,
-    /// `JOIN`: merge the current selection into **one** entity (this build's honest subset of AutoCAD's `JOIN`).
-    ///
-    /// Payload is [`crate::CommandPayload::None`]; the selection is the whole
-    /// input. Two shapes are implemented, and nothing else:
-    ///
-    /// * **all LINE** — every pick must be collinear with the longest one
-    ///   (`join.not_collinear`), on one layer (`join.layer_mismatch`) in one space
-    ///   (`join.space_mismatch`), with spans that touch or overlap along the common
-    ///   direction (`join.not_contiguous`). The result is one LINE spanning
-    ///   `min → max` with a **fresh entity id**.
-    /// * **all ARC** — every pick must share the reference arc's centre, normal
-    ///   direction and radius, its layer and its space, and its sweeps must be
-    ///   contiguous in one rotational direction. The result is one ARC with the
-    ///   **summed** sweep; a total above one full turn is `join.sweep_overflow`
-    ///   (never wrapped) and exactly one turn stays an ARC of `2π` (this build does
-    ///   not silently produce a `Circle`).
-    ///
-    /// Refusals (all before any write): `join.needs_two` (fewer than two distinct
-    /// picks), `join.mixed_kinds`, `join.degenerate` (zero-length LINE / zero-sweep
-    /// ARC), the four codes above, and [`CadError::Unsupported`] for any other
-    /// geometry kind (a capability gap, never a silent partial merge). On success
-    /// the sources are deleted and the merged entity inserted in **one transaction
-    /// / one undo step**, so an undo restores every source and removes the weld.
-    /// The merged entity keeps the lowest draw order of its sources, and its layer,
-    /// space and type key come from the sources. Associativity, a polyline/spline
-    /// merge, closing a gap, joining across spaces/layers and joining
-    /// non-concentric arcs are **NOT IMPLEMENTED**. Work-only.
+    /// `JOIN`: weld the current selection into one polyline; full contract:
+    /// `crate::app_drawing::join`.
     Join,
     /// EXPLODE the current selection one level at a time (ADR 0016 decision G): a LWPOLYLINE
     /// becomes straight segments plus ARCs (bulge segments through `bulge_arc_geometry`), a
@@ -750,28 +628,8 @@ pub enum CommandId {
     /// back to layer `0` and reports it in the diagnostics. Not undoable; one
     /// revision bump. Work-only.
     DeleteLayer,
-    /// `SETLAYERPROPERTY`: write one attribute of one layer table row.
-    ///
-    /// Payload is [`crate::CommandPayload::SetLayerProperty`]
-    /// `{ layer, key, value }`: the row addressed **by name** (the same
-    /// exact-then-unique-case-insensitive rule as [`CommandId::RenameLayer`]),
-    /// a key from [`crate::layer_property::SUPPORTED_KEYS`] and that key's
-    /// documented value grammar. The one grammar is
-    /// [`crate::layer_property`] (a layer records the table's own units:
-    /// `lineweight` is 1/100 mm, `transparency` is percent transparent), and
-    /// `plotstyle` is a known key that is refused as not implemented.
-    ///
-    /// A refusal (`layer.unknown`, `layer.ambiguous_name`,
-    /// `layer.property.unsupported`, `layer.property.value`,
-    /// `layer.linetype_missing`) happens before anything is published, so it
-    /// changes no attribute, no revision and no undo entry. A successful write is
-    /// one revision bump of the same shape as a create/rename/delete (no entity
-    /// change), and **no** undo entry: layer edits are not undoable (history has
-    /// no layer patch kind).
-    ///
-    /// Only `off` / `frozen` change behaviour, through the database's own
-    /// `visible == !(off || frozen)` rule; `locked` / `plottable` / the colour /
-    /// the linetype / the lineweight / the transparency are stored only. Work-only.
+    /// `SETLAYERPROPERTY`: write one validated layer-table property; layer
+    /// writes are not undoable. Full contract: `crate::command_id::layers`.
     SetLayerProperty,
     /// The layer-selection run (`LAYCUR`…`SETBYLAYER`); see [`crate::app_drawing::layer_commands`].
     LayCur,
