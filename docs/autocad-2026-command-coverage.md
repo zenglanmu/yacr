@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **123** |
-| **已实现合计（完整 + 部分）** | **173** |
-| 未实现 | **808** |
+| 部分实现（有写明的界） | **133** |
+| **已实现合计（完整 + 部分）** | **183** |
+| 未实现 | **798** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -886,15 +886,15 @@
 | 713 | `REDIR` | 未实现 | Redefines hard-coded paths in xrefs, images, shapes, styles, and rtext. | — |
 | 714 | `REDIRMODE` | 未实现 | Sets options for the REDIR Express Tool by specifying which object types are included. | — |
 | 715 | `REDO` | 已实现 | Reverses the effects of previous UNDO or U command. | — |
-| 716 | `REDRAW` | 未实现 | Refreshes the display in the current viewport. | — |
-| 717 | `REDRAWALL` | 未实现 | Refreshes the display in all viewports. | — |
+| 716 | `REDRAW` | 部分实现 | Refreshes the display in the current viewport. | 当前视口刷新（session generation）；不改相机、不写库、不进 `ZOOM PREVIOUS` |
+| 717 | `REDRAWALL` | 部分实现 | Refreshes the display in all viewports. | 所有视口刷新；同 REDRAW 的只读边界 |
 | 718 | `REFCLOSE` | 未实现 | Saves back or discards changes made during in-place editing of a reference, either an xref or a block definition. | — |
 | 719 | `-REFEDIT` | 未实现 | Edits an xref or a block definition directly within the current drawing. | — |
 | 720 | `REFEDIT` | 未实现 | Edits an xref or a block definition directly within the current drawing. | — |
 | 721 | `REFSET` | 未实现 | Adds or removes objects from a working set during in-place editing of a reference, either an xref or a block definition. | — |
-| 722 | `REGEN` | 未实现 | Regenerates the drawing from within the current viewport. | — |
+| 722 | `REGEN` | 部分实现 | Regenerates the drawing from within the current viewport. | 推进当前视口 regeneration stamp，重建派生显示缓存；不写库 |
 | 723 | `REGEN3` | 未实现 | Regenerates the views in a drawing to repair anomalies in the display of 3D solids and surfaces. | — |
-| 724 | `REGENALL` | 未实现 | Regenerates the entire drawing and refreshes all viewports. | — |
+| 724 | `REGENALL` | 部分实现 | Regenerates the entire drawing and refreshes all viewports. | 所有视口 regeneration；不写库 |
 | 725 | `REGENAUTO` | 未实现 | Obsolete. Controls automatic regeneration of a drawing. | — |
 | 726 | `REGION` | 未实现 | Converts objects that enclose an area into a 2D region object. | — |
 | 727 | `REINIT` | 未实现 | Reinitializes the digitizer, digitizer input/output port, and program parameters file. | — |
@@ -1082,16 +1082,16 @@
 | 909 | `VBARUN` | 未实现 | Runs a VBA macro. | — |
 | 910 | `VBASTMT` | 未实现 | Executes a VBA statement at the AutoCAD Command prompt. | — |
 | 911 | `VBAUNLOAD` | 未实现 | Unloads a global VBA project. | — |
-| 912 | `-VIEW` | 未实现 | Saves and restores named model space views, layout views, and preset views from the Command prompt. | — |
-| 913 | `VIEW` | 未实现 | Saves and restores named model space views, layout views, and preset views. | — |
-| 914 | `VIEWBACK` | 未实现 | Restores sequential views backward after changing the view. | — |
+| 912 | `-VIEW` | 部分实现 | Saves and restores named model space views, layout views, and preset views from the Command prompt. | `VIEW` 的别名，同一实现 |
+| 913 | `VIEW` | 部分实现 | Saves and restores named model space views, layout views, and preset views. | `SAVE/RESTORE/LIST/DELETE <name>`；会话内最多 32 个命名视图（相机+视图模式+工作平面+活动空间）；不持久化 DWG |
+| 914 | `VIEWBACK` | 部分实现 | Restores sequential views backward after changing the view. | 复用每视口 `ZOOM PREVIOUS` 栈；空栈为 `view.back.empty` no-op |
 | 915 | `VIEWBASE` | 未实现 | Creates a base view from model space or Autodesk Inventor models. | — |
 | 916 | `VIEWCOMPONENT` | 未实现 | Selects components from a model documentation drawing view for editing. | — |
 | 917 | `VIEWDETAIL` | 未实现 | Creates a detail view of a portion of a model documentation drawing view. | — |
 | 918 | `VIEWDETAILSTYLE` | 未实现 | Creates and modifies detail view styles. | — |
 | 919 | `VIEWEDIT` | 未实现 | Edits an existing model documentation drawing view. | — |
-| 920 | `VIEWFORWARD` | 未实现 | Restores sequential views forward after displaying a previous view with VIEWBACK or Zoom Previous. | — |
-| 921 | `VIEWGO` | 未实现 | Restores a named view. | — |
+| 920 | `VIEWFORWARD` | 部分实现 | Restores sequential views forward after displaying a previous view with VIEWBACK or Zoom Previous. | 新的每视口前进栈（上限 16）；空栈 no-op；文档化偏离 |
+| 921 | `VIEWGO` | 部分实现 | Restores a named view. | 同 `VIEW RESTORE`；未知名称按名拒绝 |
 | 922 | `VIEWPLAY` | 未实现 | Plays the animation associated to a named view. | — |
 | 923 | `VIEWPLOTDETAILS` | 未实现 | Displays information about completed plot and publish jobs. | — |
 | 924 | `VIEWPROJ` | 未实现 | Creates one or more projected views from an existing model documentation drawing view. | — |
@@ -1111,7 +1111,7 @@
 | 938 | `VPLAYER` | 未实现 | Sets layer visibility within viewports. | — |
 | 939 | `VPMAX` | 未实现 | Expands the current layout viewport for editing. | — |
 | 940 | `VPMIN` | 未实现 | Restores the current layout viewport. | — |
-| 941 | `VPOINT` | 未实现 | Sets the viewing direction for a 3D visualization of the drawing. | — |
+| 941 | `VPOINT` | 部分实现 | Sets the viewing direction for a 3D visualization of the drawing. | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；零/非有限向量拒绝；不改模型；向量形式进入 3D 透视 |
 | 942 | `-VPORTS` | 未实现 | Creates multiple viewports in model space or paper space. | — |
 | 943 | `VPORTS` | 未实现 | Creates multiple viewports in model space or in a layout (paper space). | — |
 | 944 | `VPSCALE` | 未实现 | On a layout, displays the scale of the current viewport or of a selected layout viewport. | — |

@@ -457,6 +457,25 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 > 真机或 vendor-AutoCAD 证据。前端测试在主仓库合并后运行通过；worktree 内因缺 `node_modules`
 > 为 NOT RUN。
 
+#### 2026-11-07 视图/空间批次（10 条）
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `REDRAW` | 部分实现 | payload-free；推进当前视口刷新代次（session generation），不改相机、不写库、不进 `ZOOM PREVIOUS` | 不是 GPU 级重绘命令；只改会话代次，真实呈现由宿主消费 |
+| `REDRAWALL` | 部分实现 | 同 REDRAW，对文档的所有视口 | 同上 |
+| `REGEN` | 部分实现 | payload-free；推进当前视口 regeneration stamp，使派生显示缓存重建 | 不重解析底图、不写库；真实 GPU 重建未验证 |
+| `REGENALL` | 部分实现 | 同 REGEN，对文档的所有视口 | 同上 |
+| `VIEW` | 部分实现 | `SAVE/RESTORE/LIST/DELETE <name>`；会话内最多 32 个命名视图（相机+视图模式+工作平面+活动空间），名称不区分大小写 | 不写 DWG/不持久化；无 View 对话框/缩略图/布局视图分类 |
+| `-VIEW` | 部分实现 | `VIEW` 的别名（同一 `CommandId`/路径） | 无命令行选项提示差异 |
+| `VIEWGO` | 部分实现 | `VIEWGO <name>`；走与 `VIEW RESTORE` 相同的恢复路径，未知名 `view.unknown` | 无自动补全/对话框 |
+| `VIEWBACK` | 部分实现 | 从每视口既有 `ZOOM PREVIOUS` 栈弹出；空栈为 `view.back.empty` no-op；记录前进项 | 不是 AutoCAD 的完整 ViewBack 顺序；pan/滚轮/orbit 不入栈（既有声明） |
+| `VIEWFORWARD` | 部分实现 | 从新的每视口前进栈（上限 16）弹出并回记后退项；空栈为 `view.forward.empty` | **声明式偏离**：AutoCAD 的 VIEWFORWARD 与 ZOOM PREVIOUS 共用历史；本实现另建有界前进栈 |
+| `VPOINT` | 部分实现 | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；标准词复用标准视图路径，向量进入 3D 透视方向；零/非有限向量按 `vpoint.invalid_vector` 拒绝；不改模型 | 无 `Rotate`/`Set UCS` 等子选项；向量形式的相机距离/目标沿用现有 3D 进入规则 |
+
+> **证据边界**：以上 10 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
+> 真机或 vendor-AutoCAD 证据。view-batch 的前端测试在主仓库合并后运行通过；worktree 内因缺
+> `node_modules` 为 NOT RUN。
+
 **仿射不变规则（`SPLINE`，2026-10-26）**：NURBS 曲线对**仿射**映射不变——把每个控制点过同一个
 仿射映射，而 `degree`、`knots`、`weights` **原样保留**，得到的正是原曲线的**精确仿射像**。因此平移、旋转、
 **均匀与非均匀**缩放、镜像与剪切**全部精确**：无需重拟合、无需重参数化、权重不变。`cad-db` 的

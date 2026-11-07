@@ -1,3 +1,21 @@
+## 2026-11-07 AutoCAD 2026 2D 视图/空间批次（10 条，已合并）
+
+- **状态**：`view-batch`（提交 `c2f9ee38`，merge `e70063c4`）已合并到 `main`。官方清单从
+  **173（50 完整 + 123 部分）/ 808 未实现** 变为 **183（50 完整 + 133 部分）/ 798 未实现**。
+- **新增（10）**：`REDRAW`、`REDRAWALL`、`REGEN`、`REGENALL`、`VIEW`、`-VIEW`、`VIEWGO`、
+  `VIEWBACK`、`VIEWFORWARD`、`VPOINT`。逐条边界见 `docs/batch-view-2026-11-07.md` 与
+  `docs/compatibility.md` §「2026-11-07 视图/空间批次」。
+- **共同边界**：全部是会话视图状态；不写数据库、不 bump 图纸 revision、不建撤销历史。`VIEW`/`-VIEW`
+  是会话内最多 32 个命名视图，不持久化 DWG；`VIEWFORWARD` 使用新的有界前进栈（声明式偏离）；
+  `VPOINT` 标准词复用既有标准视图路径，向量进入 3D 透视且不改模型。
+- **已运行（主仓库合并后）**：`cargo test -p cad-app --locked`（1867 + 集成目标全过）；
+  `cargo test -p cad-ui-core --locked`（427）；前端 `node --test test/*.test.ts`（1272 passed）；
+  `cargo fmt --all -- --check`；`cargo clippy -p cad-app -p cad-ui-core --all-targets -- -D warnings`；
+  `check-file-size.py`；`check-i18n.py`（1321 keys）；`check-command-docs.py`（195/5/2/40 selectors，
+  67 aliases，0 mismatches）；`check-architecture.py`。
+- **NOT RUN / NOT VERIFIED**：真实 GUI/像素/GPU/真机/vendor AutoCAD；Windows/macOS/Android/Web
+  运行时；`cargo test --workspace`；打包/发布。worktree 内前端测试因缺 `node_modules` 为 NOT RUN。
+
 ## 2026-11-07 AutoCAD 2026 2D 实用工具 + 绘制/修改补充批次（20 条，已合并）
 
 - **状态**：`util-batch`（提交 `2cae40de`，merge `84e6f55b`）与 `draw2-batch`（提交 `4497f868`，
