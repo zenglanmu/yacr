@@ -27,6 +27,6 @@ export const ANNOTATE_TEXT_COMMAND_ITEMS: readonly RibbonCommandItem[] = Object.
   // argument), so a plain button is a real affordance. The mask is an
   // independent `AcDbWipeout` entity behind the estimated text extents and the
   // unmask heuristic only ever deletes **selected** masks.
-  { id: 'TEXTMASK', labelKey: 'draw.kind.textmask', icon: 'hatch', command: 'TEXTMASK' },
-  { id: 'TEXTUNMASK', labelKey: 'draw.kind.textunmask', icon: 'hatch', command: 'TEXTUNMASK' },
+  { id: 'TEXTMASK', labelKey: 'draw.kind.textmask', icon: 'eyeOff', command: 'TEXTMASK' },
+  { id: 'TEXTUNMASK', labelKey: 'draw.kind.textunmask', icon: 'eye', command: 'TEXTUNMASK' },
 ]);

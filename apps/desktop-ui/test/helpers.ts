@@ -270,6 +270,13 @@ export const HOST_NAMES = [
   // The text run: bare TORIENT is Most Readable, `TORIENT <angle>` its argument;
   // bare TCASE is Title, `TCASE <mode>` its argument; TXT2MTXT is name-only.
   'TORIENT', 'TCASE', 'TXT2MTXT',
+  // The 2026-11-07 2D text batch: five argument-taking selectors and the two
+  // selection-based mask commands. `TJUST`, `MTEDIT` and `-MTEXT` are the host's
+  // aliases of `JUSTIFYTEXT`/`TEXTEDIT`/`MTEXT` (`COMMAND_ALIASES`), so the
+  // mirrored `admissible_names()` includes them too. This list stands in for the
+  // loaded `cad_commands` vocabulary and never proves the host advertises them.
+  'JUSTIFYTEXT', 'TJUST', 'TSCALE', 'TEXTALIGN', 'TCOUNT', 'TCIRCLE',
+  'TEXTMASK', 'TEXTUNMASK', 'MTEDIT', '-MTEXT',
   // WIPEOUT is the open-ended polygon mask; POLYGON CIRCUMSCRIBED is the
   // tangent-ring variant of POLYGON (its own multi-word selector).
   'WIPEOUT', 'POLYGON CIRCUMSCRIBED',

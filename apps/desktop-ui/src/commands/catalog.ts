@@ -291,16 +291,20 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // name. TEXTMASK/TEXTUNMASK take no argument and are selection-based.
   { id: 'JUSTIFYTEXT', labelKey: 'draw.kind.justifytext', icon: 'pencil', group: 'annotate' },
   { id: 'TSCALE', labelKey: 'draw.kind.tscale', icon: 'scale', group: 'annotate' },
-  { id: 'TEXTALIGN', labelKey: 'draw.kind.textalign', icon: 'text', group: 'annotate' },
-  { id: 'TCOUNT', labelKey: 'draw.kind.tcount', icon: 'text', group: 'annotate' },
+  // The new entries must not reuse the dedicated `text`/`mtext`/`hatch` glyphs:
+  // those names belong to exactly one catalogued command each (the chrome glyph
+  // contracts assert it). `align` reads as the shared edge, `pencil` as an edit,
+  // `eyeOff`/`eye` as mask/unmask.
+  { id: 'TEXTALIGN', labelKey: 'draw.kind.textalign', icon: 'align', group: 'annotate' },
+  { id: 'TCOUNT', labelKey: 'draw.kind.tcount', icon: 'pencil', group: 'annotate' },
   { id: 'TCIRCLE', labelKey: 'draw.kind.tcircle', icon: 'circle', group: 'annotate' },
-  { id: 'TEXTMASK', labelKey: 'draw.kind.textmask', icon: 'hatch', group: 'annotate' },
-  { id: 'TEXTUNMASK', labelKey: 'draw.kind.textunmask', icon: 'hatch', group: 'annotate' },
+  { id: 'TEXTMASK', labelKey: 'draw.kind.textmask', icon: 'eyeOff', group: 'annotate' },
+  { id: 'TEXTUNMASK', labelKey: 'draw.kind.textunmask', icon: 'eye', group: 'annotate' },
   // The two aliases are real advertised names (host `COMMAND_ALIASES`), not
   // second commands: MTEDIT starts the existing TEXTEDIT pick tool and `-MTEXT`
   // starts the existing two-corner MTEXT tool.
   { id: 'MTEDIT', labelKey: 'draw.kind.mtedit', icon: 'pencil', group: 'annotate' },
-  { id: '-MTEXT', labelKey: 'draw.kind.mtext', icon: 'mtext', group: 'annotate' },
+  { id: '-MTEXT', labelKey: 'draw.kind.mtext', icon: 'copy', group: 'annotate' },
   { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', group: 'annotate' },
   // Layer isolate / unisolate (2026-10-26). Unlike `LAYER` they are **router**
   // commands (`LAYISO`/`LAYUNISO`), not chrome-local selectors, so they are
