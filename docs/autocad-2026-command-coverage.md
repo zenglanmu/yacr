@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **163** |
-| **已实现合计（完整 + 部分）** | **213** |
-| 未实现 | **768** |
+| 部分实现（有写明的界） | **172** |
+| **已实现合计（完整 + 部分）** | **222** |
+| 未实现 | **759** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -669,8 +669,8 @@
 | 496 | `LIGHTLISTCLOSE` | 未实现 | Closes the Lights in Model palette. | — |
 | 497 | `LIMITS` | 未实现 | Sets an invisible rectangular boundary in the drawing area that can limit the grid display and limit clicking or entering point locations. | — |
 | 498 | `LINE` | 已实现 | Create a series of contiguous line segments. Each segment is a line object that can be edited separately. | — |
-| 499 | `-LINETYPE` | 未实现 | At the Command prompt, loads, sets, and modifies linetypes. | — |
-| 500 | `LINETYPE` | 未实现 | Loads, sets, and modifies linetypes. | — |
+| 499 | `-LINETYPE` | 部分实现 | At the Command prompt, loads, sets, and modifies linetypes. | `LINETYPE` 的别名（同一 `CommandId`/路径）；`LIST` 只读、`SET` 复用 `SETENTITYPROPERTY` |
+| 500 | `LINETYPE` | 部分实现 | Loads, sets, and modifies linetypes. | `LIST` 只读（Viewer 合法）；`SET <name>` 复用 `SETENTITYPROPERTY`、重新授权工作模式、一条事务/一步撤销；未知名 `property.unknown_linetype`；无线型表加载/新建/删除/改名 |
 | 501 | `LIST` | 部分实现 | Displays property data for selected objects. | 选择驱动（非交互式选取）；逐对象报告空间、图层、标准显示属性与几何摘要；厚度/拉伸方向不建模，显式说明 |
 | 502 | `LIVESECTION` | 未实现 | Turns on live sectioning for a selected section object. | — |
 | 503 | `LOAD` | 未实现 | Makes the symbols in compiled shape (SHX) files available for use by the SHAPE command. | — |
@@ -734,7 +734,7 @@
 | 561 | `MLEDIT` | 未实现 | Edits multiline intersections, breaks, and vertices. | — |
 | 562 | `MLINE` | 部分实现 | Creates multiple parallel lines. | 恰好两条平行 `LINE`；无 join/cap/多段基线 |
 | 563 | `MLSTYLE` | 部分实现 | Creates, modifies, and manages multiline styles. | 会话内最多 16 个命名样式，喂 MLINE；不持久化 |
-| 564 | `MOCORO` | 未实现 | Moves, copies, rotates, and scales selected objects with a single command. | — |
+| 564 | `MOCORO` | 部分实现 | Moves, copies, rotates, and scales selected objects with a single command. | `MOVE|COPY dx dy`、`ROTATE bx by degrees`、`SCALE bx by factor` 作用于当前选择；委托既有 MOVE/COPY/ROTATE/SCALE 路径；COPY 一条事务/一步撤销，其余原地变换；无交互 gizmo |
 | 565 | `MODEL` | 已实现 | Switches from a named layout tab to the Model tab. | payload-free 选择子，复用 SPACE MODEL 的校验 + 自动取景；Model 标签页走同一命令 |
 | 566 | `MOVE` | 已实现 | Moves objects a specified distance in a specified direction. | — |
 | 567 | `MOVEBAK` | 未实现 | Changes the destination folder for drawing backup (BAK) files. | — |
@@ -742,7 +742,7 @@
 | 569 | `MREDO` | 部分实现 | Reverses the effects of several previous UNDO or U commands. | 重做 N 步（默认 1），每步一条历史移动；空栈拒绝；不足时 `mredo.partial` |
 | 570 | `MSLIDE` | 未实现 | Creates a slide file of the current model viewport or the current layout. | — |
 | 571 | `MSPACE` | 未实现 | In a layout, switches from paper space to model space in a layout viewport. | — |
-| 572 | `MSTRETCH` | 未实现 | Stretches objects with multiple crossing windows and crossing polygons. | — |
+| 572 | `MSTRETCH` | 部分实现 | Stretches objects with multiple crossing windows and crossing polygons. | 仅 payload 多窗口列表（无命令行语法）；复用 STRETCH planner 的窗口并集；一条事务/一步撤销；无多边形窗口 |
 | 573 | `MTEDIT` | 部分实现 | Edits multiline text. | `TEXTEDIT` 的别名（同一 `CommandId`/路径）；编辑当前单选的 Text/MText/MULTILEADER 字符串；无第二编辑路径 |
 | 574 | `-MTEXT` | 部分实现 | Creates a multiline text object. | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获）；无第二实现 |
 | 575 | `MTEXT` | 部分实现 | Creates a multiline text object. | 两角宽度模型；无行距/分栏/背景填充 |
@@ -781,7 +781,7 @@
 | 608 | `OVERKILL` | 部分实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines those that are partially overlapping or contiguous. | v1 仅删除完全相同的重复对象（同空间/图层/几何，1e-9）；无部分重叠、共线合并、圆弧覆盖圆、折线段优化、容差与图层/颜色忽略 |
 | 609 | `-PAGESETUP` | 未实现 | Modifies the current page layout settings for the plotting device, paper size, plot scale, and several other settings in the command line. | — |
 | 610 | `PAGESETUP` | 未实现 | Controls the page layout, plotting device, paper size, and other settings for each new layout. | — |
-| 611 | `-PAN` | 未实现 | Shifts the view by specifying up to two points to determine a distance and direction. | — |
+| 611 | `-PAN` | 部分实现 | Shifts the view by specifying up to two points to determine a distance and direction. | `PAN` 的别名；`dx dy` 或两点，走既有相机路径；只改视图（不写库/不 bump 修订/不入历史） |
 | 612 | `PAN` | 已实现 | Shifts the view without changing the viewing direction or magnification. | — |
 | 613 | `-PARAMETERS` | 未实现 | Opens the Parameters Manager palette that includes all dimensional constraint parameters, reference parameters, and user variables in the current drawing. | — |
 | 614 | `PARAMETERS` | 未实现 | Opens the Parameters Manager palette that includes all dimensional constraint parameters, reference parameters, and user variables in the current drawing. | — |
@@ -893,7 +893,7 @@
 | 720 | `REFEDIT` | 未实现 | Edits an xref or a block definition directly within the current drawing. | — |
 | 721 | `REFSET` | 未实现 | Adds or removes objects from a working set during in-place editing of a reference, either an xref or a block definition. | — |
 | 722 | `REGEN` | 部分实现 | Regenerates the drawing from within the current viewport. | 推进当前视口 regeneration stamp，重建派生显示缓存；不写库 |
-| 723 | `REGEN3` | 未实现 | Regenerates the views in a drawing to repair anomalies in the display of 3D solids and surfaces. | — |
+| 723 | `REGEN3` | 部分实现 | Regenerates the views in a drawing to repair anomalies in the display of 3D solids and surfaces. | `REGEN` 的别名（同一 `CommandId`/路径），无第二套实现；不修复 3D 实体显示异常 |
 | 724 | `REGENALL` | 部分实现 | Regenerates the entire drawing and refreshes all viewports. | 所有视口 regeneration；不写库 |
 | 725 | `REGENAUTO` | 未实现 | Obsolete. Controls automatic regeneration of a drawing. | — |
 | 726 | `REGION` | 未实现 | Converts objects that enclose an area into a 2D region object. | — |
@@ -972,7 +972,7 @@
 | 799 | `SHOWURLS` | 未实现 | Displays all attached URLs contained in a drawing, and allows them to edited. | — |
 | 800 | `SHP2BLK` | 未实现 | Converts all instances of a selected shape object with an equivalent block. | — |
 | 801 | `SIGVALIDATE` | 未实现 | Displays information about the digital signature attached to a drawing file. | — |
-| 802 | `SKETCH` | 未实现 | Creates a series of freehand line segments. | — |
+| 802 | `SKETCH` | 部分实现 | Creates a series of freehand line segments. | 仅 `CommandPayload::Points`：一条活动层开放 LWPOLYLINE；两点以上且有限；一条事务/一步撤销；交互式定时采样 NOT IMPLEMENTED |
 | 803 | `SLICE` | 未实现 | Creates new 3D solids and surfaces by slicing, or dividing, existing objects. | — |
 | 804 | `SNAP` | 已实现 | Restricts cursor movement to specified intervals. | — |
 | 805 | `SOLDRAW` | 未实现 | Generates profiles and sections in layout viewports created with SOLVIEW. | — |
@@ -1046,7 +1046,7 @@
 | 873 | `TORIENT` | 部分实现 | Rotates text, mtext, attribute definitions, and blocks with attributes for readability. | 选择式；裸命令 Most Readable（归一到 `(-π/2, π/2]`），`TORIENT <角度>` 绝对旋转；只改 rotation；非 Text/属性/块属性报告 `torient.not_reset`；MULTILEADER 文本旋转无 setter |
 | 874 | `TORUS` | 未实现 | Creates a donut-shaped 3D solid. | — |
 | 875 | `TPNAVIGATE` | 未实现 | Displays a specified tool palette or palette group. | — |
-| 876 | `TRACE` | 未实现 | Opens and manages traces from the command prompt. | — |
+| 876 | `TRACE` | 未实现（同名不同义） | Opens and manages traces from the command prompt. | AutoCAD 2026 的 `TRACE` 是协作追踪；本构建同名命令是**旧式宽线带**（闭合 4 顶点 LWPOLYLINE），语义不同，**不计入覆盖** |
 | 877 | `TRACEBACK` | 未实现 | Changes the active trace to view mode so you can edit the parent drawing while the trace is still visible. | — |
 | 878 | `TRACEEDIT` | 未实现 | Changes the active trace to edit mode so you can contribute to the trace. | — |
 | 879 | `TRACEFRONT` | 未实现 | Changes the active trace to edit mode so you can contribute to the trace. | — |
@@ -1095,7 +1095,7 @@
 | 922 | `VIEWPLAY` | 未实现 | Plays the animation associated to a named view. | — |
 | 923 | `VIEWPLOTDETAILS` | 未实现 | Displays information about completed plot and publish jobs. | — |
 | 924 | `VIEWPROJ` | 未实现 | Creates one or more projected views from an existing model documentation drawing view. | — |
-| 925 | `VIEWRES` | 未实现 | Sets the tessellation for objects in the current viewport when WHIPARC is turned off. | — |
+| 925 | `VIEWRES` | 部分实现 | Sets the tessellation for objects in the current viewport when WHIPARC is turned off. | 整数 `1..=1000` 仅存会话 token；越界 `viewres.out_of_range`；渲染器消费/像素效果 NOT IMPLEMENTED / NOT VERIFIED |
 | 926 | `VIEWSECTION` | 未实现 | Creates a section view of a 3D model that was created in AutoCAD or in Autodesk Inventor. | — |
 | 927 | `VIEWSECTIONSTYLE` | 未实现 | Creates and modifies section view styles. | — |
 | 928 | `VIEWSETPROJ` | 未实现 | Specifies the active project file for drawings containing model documentation drawing views from Inventor models. | — |
@@ -1116,7 +1116,7 @@
 | 943 | `VPORTS` | 部分实现 | Creates multiple viewports in model space or in a layout (paper space). | 网格校验 + 图纸空间检查后 `vports.write_unsupported`（无视口创建 API） |
 | 944 | `VPSCALE` | 部分实现 | On a layout, displays the scale of the current viewport or of a selected layout viewport. | 零/非有限/未知拒绝；解析比例后 `vpscale.write_unsupported`（无视口比例写 API） |
 | 945 | `VPSYNC` | 未实现 | Aligns the views in one or more adjacent layout viewports with a master layout viewport. | — |
-| 946 | `VSCURRENT` | 未实现 | Sets the visual style in the current viewport. | — |
+| 946 | `VSCURRENT` | 部分实现 | Sets the visual style in the current viewport. | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented`；无渲染器切换、NOT pixel-verified |
 | 947 | `VSLIDE` | 未实现 | Displays an image slide file in the current viewport. | — |
 | 948 | `VSSAVE` | 未实现 | Saves the current visual style under a new name. | — |
 | 949 | `VTOPTIONS` | 未实现 | Displays a change in view as a smooth transition. | — |

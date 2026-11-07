@@ -541,6 +541,29 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 > 真机或 vendor-AutoCAD 证据。annot-batch 的前端测试在主仓库合并后运行通过；worktree 内因缺
 > `node_modules` 为 NOT RUN。
 
+#### 2026-11-07 绘制/视图补充批次（10 条，其中 `TRACE` 同名不同义不计入覆盖）
+
+> **重要**：`TRACE` 在 AutoCAD 2026 是**协作追踪**（打开/管理 trace），本构建的同名命令是
+> **旧式宽线带**（闭合 4 顶点 LWPOLYLINE）。二者语义不同，因此该条按“同名不同义”处理，
+> **不计入覆盖**（与 `MEASURE` 同一口径）；其余 9 条按下列边界计入。
+> `VIEWRES`/`VSCURRENT` 只存会话 token，渲染器不消费，像素/GPU 效果 NOT VERIFIED。
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `SKETCH` | 部分实现 | 仅 `CommandPayload::Points`：一条活动层开放 LWPOLYLINE；少于两点或非有限点拒绝；一条事务/一步撤销 | 交互式定时采样 NOT IMPLEMENTED（采样由宿主负责） |
+| `TRACE` | 同名不同义（不计入） | 旧式宽线带：`TRACE x1 y1 x2 y2 width` 生成闭合 4 顶点 LWPOLYLINE；一条事务/一步撤销 | 不是 AutoCAD 2026 的协作 `TRACE`；无 trace/标记/评审模型 |
+| `MOCORO` | 部分实现 | `MOVE|COPY dx dy`、`ROTATE bx by degrees`、`SCALE bx by factor` 作用于当前选择，委托既有 MOVE/COPY/ROTATE/SCALE 路径；COPY 一条事务/一步撤销 | 无交互 gizmo/选项循环；空选择 `mocoro.selection_required` |
+| `MSTRETCH` | 部分实现 | 仅 payload 多窗口列表（**无命令行语法**）；复用 STRETCH planner 的窗口并集；一条事务/一步撤销 | 无多边形交叉窗口；命令行不可达 |
+| `-PAN` / `PAN` | 部分实现 | `-PAN` 是 `PAN` 别名；`dx dy` 或两点，走既有相机路径 | 只改视图：不写库、不 bump 修订、不入历史 |
+| `VIEWRES` | 部分实现 | 整数 `1..=1000` 仅存会话 token；越界 `viewres.out_of_range` | 渲染器消费/圆 tessellation 效果 NOT IMPLEMENTED；NOT pixel-verified |
+| `VSCURRENT` | 部分实现 | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented` | 无渲染器切换（当前渲染器本就是 2D wireframe）；NOT pixel-verified |
+| `REGEN3` | 部分实现 | `REGEN` 的别名（同一 `CommandId`/路径） | 不修复 3D 实体/曲面显示异常（无该能力） |
+| `LINETYPE` / `-LINETYPE` | 部分实现 | `LIST` 只读（Viewer 合法）；`SET <name>` 复用 `SETENTITYPROPERTY`、重新授权工作模式、一条事务/一步撤销 | 未知名 `property.unknown_linetype`；无线型表加载/新建/删除/改名 |
+
+> **证据边界**：以上 9 条（`TRACE` 除外）只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、
+> 像素、真实 GPU、真机或 vendor-AutoCAD 证据。extras-batch 的前端测试在主仓库合并后运行通过；
+> worktree 内因缺 `node_modules` 为 NOT RUN。
+
 **仿射不变规则（`SPLINE`，2026-10-26）**：NURBS 曲线对**仿射**映射不变——把每个控制点过同一个
 仿射映射，而 `degree`、`knots`、`weights` **原样保留**，得到的正是原曲线的**精确仿射像**。因此平移、旋转、
 **均匀与非均匀**缩放、镜像与剪切**全部精确**：无需重拟合、无需重参数化、权重不变。`cad-db` 的

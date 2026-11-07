@@ -1,3 +1,26 @@
+## 2026-11-07 AutoCAD 2026 2D 绘制/视图补充批次（10 条，已合并；`TRACE` 同名不同义不计入）
+
+- **状态**：`extras-batch`（提交 `92ec319e`）已合并到 `main`。官方清单从
+  **213（50 完整 + 163 部分）/ 768 未实现** 变为 **222（50 完整 + 172 部分）/ 759 未实现**。
+- **新增（10 个名字，计 9 条）**：`SKETCH`、`TRACE`、`MOCORO`、`MSTRETCH`、`-PAN`、`VIEWRES`、
+  `VSCURRENT`、`REGEN3`、`LINETYPE`、`-LINETYPE`。
+- **诚实边界（重要）**：AutoCAD 2026 的 `TRACE` 是**协作追踪**，本构建同名命令是**旧式宽线带**，
+  语义不同，按“同名不同义”**不计入覆盖**（同 `MEASURE` 口径）。`VIEWRES`/`VSCURRENT` 只写会话
+  token，渲染器不消费，像素/GPU 效果 NOT VERIFIED。`MSTRETCH` 仅 payload 路径、无命令行语法；
+  `SKETCH` 无定时采样；`LINETYPE SET` 复用 `SETENTITYPROPERTY`（无表写）；`-PAN`/`REGEN3` 是别名。
+  逐条见 `docs/batch-extras-2026-11-07.md` 与 `docs/compatibility.md` §「2026-11-07 绘制/视图补充批次」。
+- **合并整理**：`gating.ts` 因本批 + 组/注释批超出 1000 行，`ARGUMENT_COMMANDS` 与其谓词原样
+  移到新模块 `apps/desktop-ui/src/commands/argument-commands.ts` 并由 `gating.ts` 重新导出；
+  `application.rs` 注释压缩 3 行。前端精确列表（`ARGUMENT_COMMANDS`、`DOCUMENT_SCOPED_COMMANDS`、
+  `HOST_NAMES`）已按合并后的真实顺序更新。
+- **已运行（主仓库合并后）**：`cargo test -p cad-app --locked`（1911 + 集成目标全过）；
+  `cargo test -p cad-ui-core --locked`（461）；`cargo check -p cad-app -p cad-ui-core --all-targets`；
+  前端 `node --test test/*.test.ts`（1275 passed）；`npx tsc --noEmit`；`check-file-size.py`；
+  `check-i18n.py`（1372 keys）；`check-command-docs.py`（88/73/6 selectors，73 aliases，0 mismatches）；
+  `check-architecture.py`；`check-tauri-capabilities.py`。
+- **NOT RUN / NOT VERIFIED**：真实 GUI/像素/GPU/真机/vendor AutoCAD；Windows/macOS/Android/Web
+  运行时；`cargo test --workspace`；打包/发布。
+
 ## 2026-11-07 AutoCAD 2026 2D 组/注释批次（10 条，已合并，组为会话内、原点/xdata 为具名拒绝）
 
 - **状态**：`annot-batch`（提交 `5f68e16e`）已合并到 `main`。官方清单从
