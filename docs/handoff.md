@@ -1,3 +1,24 @@
+## 2026-11-07 AutoCAD 2026 2D 图层 + 选择/过滤/可见性批次（20 条，已合并）
+
+- **状态**：`layer-batch`（提交 `66d1911`，merge `1286af4`）与 `select-batch`（提交 `956d6c3`，
+  merge `9ef556e`）已合并到 `main`；合并冲突按 text/layer/select 三套拆分取并集解决。官方清单从
+  **133（50 完整 + 83 部分）/ 848 未实现** 变为 **153（50 完整 + 103 部分）/ 828 未实现**。
+- **图层（10）**：`LAYMCH`/`-LAYMCH`、`LAYMRG`/`-LAYMRG`、`LAYDEL`/`-LAYDEL`、`LAYERSTATE`、
+  `LAYERPMODE`、`LTSCALE`、`LAYWALK`。逐条边界见 `docs/batch-layer-2026-11-07.md` 与
+  `docs/compatibility.md` §「2026-11-07 图层管理批次」。
+- **选择（10）**：`QSELECT`、`FILTER`、`GETSEL`、`SSX`、`SELECTCOUNT`、`-FIND`、`FIND`、
+  `HIDEOBJECTS`、`ISOLATEOBJECTS`、`UNISOLATEOBJECTS`。逐条边界见
+  `docs/batch-select-2026-11-07.md` 与 `docs/compatibility.md` §「2026-11-07 选择/过滤/查找/可见性批次」。
+- **共同边界**：选择式命令以当前选择为输入（无交互 `Select objects`）；层表删除不可撤销；
+  `LTSCALE` 不写导出；隐藏是会话状态（`FLAG_HIDDEN`），无数据库写/撤销；查找只做 ASCII 子串。
+- **已运行（主仓库合并后）**：`cargo test -p cad-app --locked`（1829 + 集成目标全过）；
+  `cargo test -p cad-ui-core --locked`（410）；前端 `node --test test/*.test.ts`（1269 passed）；
+  `cargo fmt --all -- --check`；`cargo clippy -p cad-app -p cad-ui-core --all-targets -- -D warnings`；
+  `check-file-size.py`；`check-i18n.py`（1267 keys）；`check-command-docs.py`（169/5/2/24 selectors，
+  63 aliases，0 mismatches）；`check-architecture.py`。
+- **NOT RUN / NOT VERIFIED**：真实 GUI/像素/GPU/真机/vendor AutoCAD；Windows/macOS/Android/Web
+  运行时；`cargo test --workspace`；打包/发布。worktree 内前端测试因缺 `node_modules` 为 NOT RUN。
+
 ## 2026-11-07 AutoCAD 2026 2D 文字编辑批次（10 条，进行中）
 
 - **状态**：`text-batch` lane 已合并到 `main`（提交 `579fd5c`，merge `8a4806a`，前端期望修正

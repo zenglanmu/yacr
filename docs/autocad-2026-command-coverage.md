@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **83** |
-| **已实现合计（完整 + 部分）** | **133** |
-| 未实现 | **848** |
+| 部分实现（有写明的界） | **103** |
+| **已实现合计（完整 + 部分）** | **153** |
+| 未实现 | **828** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -538,9 +538,9 @@
 | 365 | `FILL` | 未实现 | Controls the display of filled objects such as hatches, 2D solids, and wide polylines. | — |
 | 366 | `FILLET` | 部分实现 | Rounds or fillets the edges of two 2D objects or the adjacent faces of a 3D solid. | 两线形式 + 独立 FILLET POLYLINE 选择子；无 Multiple/Trim |
 | 367 | `FILLETEDGE` | 未实现 | Rounds and fillets the edges of solid objects. | — |
-| 368 | `FILTER` | 未实现 | Creates a list of requirements that an object must meet to be included in a selection set. | — |
-| 369 | `-FIND` | 未实现 | Searches for the text that you specify in the entire drawing, the current space or layout, or selected objects. | — |
-| 370 | `FIND` | 未实现 | Finds the text that you specify, and can optionally replace it with other text. | — |
+| 368 | `FILTER` | 部分实现 | Creates a list of requirements that an object must meet to be included in a selection set. | 同 QSELECT 语法但并入现有选择；仅顶层模型空间 |
+| 369 | `-FIND` | 部分实现 | Searches for the text that you specify in the entire drawing, the current space or layout, or selected objects. | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告；不写库 |
+| 370 | `FIND` | 部分实现 | Finds the text that you specify, and can optionally replace it with other text. | `FIND <needle> [=> <replacement>]`；替换形式一条事务/一步撤销；不解析 MTEXT 格式 run；TEXT 单行拒绝换行 |
 | 371 | `FINDINCLUDE` | 未实现 | Controls the types of text objects included in a search when using the -FIND command. | — |
 | 372 | `FINDMATCH` | 未实现 | Controls how the entered text string is compared with text in objects when using the -FIND command. | — |
 | 373 | `FLATSHOT` | 未实现 | Creates a 2D representation of all 3D objects based on the current view. | — |
@@ -572,7 +572,7 @@
 | 399 | `GEOMCONSTRAINT` | 未实现 | Applies or persists geometric relationships between objects or points on objects. | — |
 | 400 | `GEOREMOVE` | 未实现 | Removes all geographic location information from the drawing file. | — |
 | 401 | `GEOREORIENTMARKER` | 未实现 | Changes the north direction and position of the geographic marker in model space, without changing its latitude and longitude. | — |
-| 402 | `GETSEL` | 未实现 | Creates a selection set of objects based on layer and object type filters. | — |
+| 402 | `GETSEL` | 部分实现 | Creates a selection set of objects based on layer and object type filters. | `GETSEL LAYER\|TYPE <name>`；替换选择 |
 | 403 | `GOTOSTART` | 未实现 | Switches from the current drawing to the Start tab. | — |
 | 404 | `GOTOURL` | 未实现 | Opens the file or web page associated with the hyperlink attached to an object. | — |
 | 405 | `GRADIENT` | 部分实现 | Fills an enclosed area or selected objects with a gradient fill. | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5）；边界必须在 +Z 平面（否则 `gradient.not_plus_z`）；一个 `AcDbHatch`、一条事务/一步撤销；无预览、无 `-GRADIENT` 选项提示、无 .pat/关联性 |
@@ -594,7 +594,7 @@
 | 421 | `HELIX` | 未实现 | Creates a 2D spiral or 3D spring. | — |
 | 422 | `HELP` | 未实现 | Displays the online or offline Help system. | — |
 | 423 | `HIDE` | 未实现 | Displays a 3D model with hidden lines suppressed for the 2D Wireframe visual style. | — |
-| 424 | `HIDEOBJECTS` | 未实现 | Temporarily suppresses the display of selected objects. | — |
+| 424 | `HIDEOBJECTS` | 部分实现 | Temporarily suppresses the display of selected objects. | 会话隐藏集；经共享可见性谓词影响拾取/渲染（FLAG_HIDDEN）；无数据库写/撤销；隐藏点标记 overlay 仍可能绘制（声明） |
 | 425 | `HIDEPALETTES` | 未实现 | Hides all displayed palettes, along with the ribbon and the drawing tabs. | — |
 | 426 | `HIGHLIGHTNEW` | 未实现 | Controls whether new and changed features in product updates are highlighted in the user interface with an orange dot. | — |
 | 427 | `HLSETTINGS` | 未实现 | Sets the display of such properties as hidden lines. | — |
@@ -626,31 +626,31 @@
 | 453 | `INTERFERE` | 未实现 | Creates a temporary 3D solid from the interferences between two sets of selected 3D solids. | — |
 | 454 | `INTERSECT` | 未实现 | Creates a 3D solid, surface, or 2D region from overlapping solids, surfaces, or regions. | — |
 | 455 | `ISODRAFT` | 未实现 | Turns isometric drafting settings on or off, and specifies the current 2D isometric drafting plane. | — |
-| 456 | `ISOLATEOBJECTS` | 未实现 | Temporarily suppresses the display of all objects except those you select. | — |
+| 456 | `ISOLATEOBJECTS` | 部分实现 | Temporarily suppresses the display of all objects except those you select. | 会话隐藏集：隐藏除当前选择外的模型空间对象；无数据库写/撤销 |
 | 457 | `ISOPLANE` | 未实现 | Specifies the current plane for 2D isometric drawing. | — |
 | 458 | `JOIN` | 部分实现 | Joins the endpoints of linear and curved objects to create a single object. | 仅共线 LINE 或同心相续 ARC |
 | 459 | `JPGOUT` | 未实现 | Saves selected objects to a file in JPEG file format. | — |
 | 460 | `JULIAN` | 未实现 | Contains the DATE tool and several AutoCAD Julian date and calendar date conversion routines. | — |
 | 461 | `JUSTIFYTEXT` | 部分实现 | Changes the justification point of selected text objects without changing their locations. | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
 | 462 | `LAYCUR` | 部分实现 | Changes the layer property of selected objects to the current layer. | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
-| 463 | `-LAYDEL` | 未实现 | At the Command prompt, deletes all objects on a layer and purges the layer. | — |
-| 464 | `LAYDEL` | 未实现 | Deletes all objects on a layer and purges the layer. | — |
+| 463 | `-LAYDEL` | 部分实现 | At the Command prompt, deletes all objects on a layer and purges the layer. | `LAYDEL` 的别名，同一实现 |
+| 464 | `LAYDEL` | 部分实现 | Deletes all objects on a layer and purges the layer. | 选择式：删除选中对象所在层的模型空间实体 + 层行（层表删除不可撤销）；当前层/0 层/仍有图纸或块内实体的层拒绝 |
 | 465 | `-LAYER` | 未实现 | Manages layers and layer properties. | — |
 | 466 | `LAYER` | 已实现 | Manages layers and layer properties. | chrome 本地选择子：打开图层面板 |
 | 467 | `LAYERCLOSE` | 已实现 | Closes the Layer Properties Manager. | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
 | 468 | `LAYERP` | 部分实现 | Undoes the last change or set of changes made to layer settings. | 会话内有界 16 步；不持久化 |
 | 469 | `LAYERPALETTE` | 未实现 | Opens the modeless Layer Properties Manager. | — |
-| 470 | `LAYERPMODE` | 未实现 | Turns on and off the tracking of changes made to layer settings for use by the LAYERP command. | — |
-| 471 | `LAYERSTATE` | 未实现 | Saves, restores, and manages sets of layer settings that are called layer states. | — |
+| 470 | `LAYERPMODE` | 部分实现 | Turns on and off the tracking of changes made to layer settings for use by the LAYERP command. | `ON\|OFF`；会话标志，关闭后 `LAYERP` 不记录快照；默认 ON；裸命令报告当前值 |
+| 471 | `LAYERSTATE` | 部分实现 | Saves, restores, and manages sets of layer settings that are called layer states. | `LAYERSTATE SAVE\|RESTORE\|LIST\|DELETE <name>`；会话内最多 32 个命名快照（层属性+当前层+覆盖）；无 DWG 持久化；恢复层表写不可撤销 |
 | 472 | `LAYERSTATESAVE` | 未实现 | Displays the New Layer State to Save dialog box, where you can provide a name and a description for a new layer state. | — |
 | 473 | `LAYFRZ` | 部分实现 | Freezes the layer of selected objects. | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入不可撤销 |
 | 474 | `LAYISO` | 已实现 | Hides or locks all layers except those of the selected objects. | — |
 | 475 | `LAYLCK` | 部分实现 | Locks the layer of a selected object. | 预选择输入（不弹 Select objects）；锁定选中对象所在的不同图层（含当前层）；图层表写入不可撤销 |
-| 476 | `-LAYMCH` | 未实现 | Changes the layer of a selected object to match the layer of a selected object. | — |
-| 477 | `LAYMCH` | 未实现 | Changes the layer of a selected object to match the destination layer. | — |
+| 476 | `-LAYMCH` | 部分实现 | Changes the layer of a selected object to match the layer of a selected object. | `LAYMCH` 的别名，同一实现 |
+| 477 | `LAYMCH` | 部分实现 | Changes the layer of a selected object to match the destination layer. | 选择式：第一个选中对象的图层为目标，其余移入（一条事务/一步撤销）；空选择/<2 目标/非模型空间/块实例按名拒绝；无交互 Select objects |
 | 478 | `LAYMCUR` | 部分实现 | Sets the current layer to that of a selected object. | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
-| 479 | `-LAYMRG` | 未实现 | At the Command prompt, merges selected layers into a target layer. | — |
-| 480 | `LAYMRG` | 未实现 | Merges selected layers into a target layer, removing them from the drawing. | — |
+| 479 | `-LAYMRG` | 部分实现 | At the Command prompt, merges selected layers into a target layer. | `LAYMRG` 的别名，同一实现 |
+| 480 | `LAYMRG` | 部分实现 | Merges selected layers into a target layer, removing them from the drawing. | 选择式：选中对象的层合并到当前层（重写实体 + 删除源层；层表删除不可撤销）；当前层/0 层不能作源 |
 | 481 | `LAYOFF` | 已实现 | Turns off the layer of a selected object. | — |
 | 482 | `LAYON` | 已实现 | Turns on all layers in the drawing. | — |
 | 483 | `LAYOUT` | 未实现 | Creates and modifies drawing layouts. | — |
@@ -661,7 +661,7 @@
 | 488 | `LAYULK` | 部分实现 | Unlocks the layer of a selected object. | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入不可撤销 |
 | 489 | `LAYUNISO` | 已实现 | Restores all layers that were hidden or locked with the LAYISO command. | — |
 | 490 | `LAYVPI` | 未实现 | Freezes selected layers in all layout viewports except the current viewport. | — |
-| 491 | `LAYWALK` | 未实现 | Displays objects on selected layers and hides objects on all other layers. | — |
+| 491 | `LAYWALK` | 部分实现 | Displays objects on selected layers and hides objects on all other layers. | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
 | 492 | `LEADER` | 未实现 | Creates a line that connects annotation to a feature. | — |
 | 493 | `LENGTHEN` | 部分实现 | Changes the length of objects and the included angle of arcs. | 仅 LINE/ARC，只改末端 |
 | 494 | `LIGHT` | 未实现 | Creates a light. | — |
@@ -679,7 +679,7 @@
 | 506 | `LOGFILEON` | 未实现 | Writes the contents of the command history to a file. | — |
 | 507 | `LSP` | 未实现 | Displays a list of all available AutoLISP commands, functions, and variables. | — |
 | 508 | `LSPSURF` | 未实现 | Displays the contents of an AutoLISP file by individual functions. | — |
-| 509 | `LTSCALE` | 未实现 | Sets the global linetype scale factor. | — |
+| 509 | `LTSCALE` | 部分实现 | Sets the global linetype scale factor. | 一个正有限小数；写内存 `$LTSCALE`（一次 revision，无撤销）；当前导出器不写该变量，SAVE→OPEN 不往返 |
 | 510 | `-LWEIGHT` | 未实现 | Sets the current lineweight, lineweight display options, and lineweight units. | — |
 | 511 | `LWEIGHT` | 未实现 | Sets the current lineweight, lineweight display options, and lineweight units. | — |
 | 512 | `MAKELISPAPP` | 未实现 | Compiles one or more AutoLISP (LSP) source files into an application (VLX) file that can be distributed to users and protect your code. | — |
@@ -868,7 +868,7 @@
 | 695 | `QNEW` | 未实现 | Starts a new drawing from a specified drawing template file. | — |
 | 696 | `QQUIT` | 未实现 | Closes all open drawings and exit. | — |
 | 697 | `QSAVE` | 部分实现 | Saves the current drawing using the specified default file format. | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
-| 698 | `QSELECT` | 未实现 | Creates a selection set based on filtering criteria. | — |
+| 698 | `QSELECT` | 部分实现 | Creates a selection set based on filtering criteria. | `QSELECT <PROPERTY> <VALUE>`（TYPE/LAYER/COLOR/LINETYPE，ASCII 不区分大小写）；替换选择；仅顶层模型空间；零匹配=空选择+诊断 |
 | 699 | `QTEXT` | 未实现 | Controls the display and plotting of text and attribute objects. | — |
 | 700 | `QUICKCALC` | 未实现 | Opens the QuickCalc calculator. | — |
 | 701 | `QUICKCUI` | 未实现 | Displays the Customize User Interface Editor in a collapsed state. | — |
@@ -952,7 +952,7 @@
 | 779 | `SECTIONSPINNERS` | 未实现 | Displays the dialog box to set the increment value for the Section Object Offset and Slice Thickness controls in the Section Plane ribbon contextual tab. | — |
 | 780 | `SECURITYOPTIONS` | 未实现 | Controls the security restrictions for running executable files in the product. | — |
 | 781 | `SELECT` | 部分实现 | Places selected objects in the Previous selection set. | 以选择载荷设置会话选择；不是 AutoCAD 的交互式 SELECT |
-| 782 | `SELECTCOUNT` | 未实现 | Finds all objects within the current count that match the properties of the selected objects, and then adds them to the selection set. | — |
+| 782 | `SELECTCOUNT` | 部分实现 | Finds all objects within the current count that match the properties of the selected objects, and then adds them to the selection set. | 只读统计与第一个选中对象五特性相同的模型空间对象数；不改选择/无事务 |
 | 783 | `SELECTSIMILAR` | 部分实现 | Finds all objects within the current drawing that match the properties of selected objects, and then adds them to the selection set. | v1 仅按几何类型匹配并并入当前选择；无 layer/颜色/线型等属性匹配；仅模型空间 |
 | 784 | `SETBYLAYER` | 部分实现 | Changes the property overrides of selected objects to ByLayer. | 预选择输入（不弹 Select objects）；只重置颜色/线型/线宽为随层；不重置透明度与材质，文字/标注/填充/多段线厚度未建模；Include blocks 未实现；锁定图层整命令拒绝；显示写入可撤销 |
 | 785 | `SETVAR` | 未实现 | Lists or changes the values of system variables. | — |
@@ -986,7 +986,7 @@
 | 813 | `SPLINE` | 已实现 | Creates a smooth curve that passes through or near a set of fit points, or that is defined by the vertices in a control frame. | — |
 | 814 | `SPLINEDIT` | 未实现 | Modifies the parameters of a spline or converts a spline-fit polyline to a spline. | — |
 | 815 | `SPOTLIGHT` | 未实现 | Creates a spotlight that emits a directional cone of light. | — |
-| 816 | `SSX` | 未实现 | Creates a selection set based on a selected object. | — |
+| 816 | `SSX` | 部分实现 | Creates a selection set based on a selected object. | 以第一个选中对象的五特性（类型/层/颜色/线型/空间）为模板，并入匹配的模型空间对象；空选择/不可寻址模板拒绝 |
 | 817 | `STANDARDS` | 未实现 | Manages the association of standards files with drawings. | — |
 | 818 | `STATUS` | 部分实现 | Displays drawing statistics, modes, and extents. | 报告统计/模式/模型空间范围；创建/编辑时间、内存、图形界限与基点显式 `status.not_tracked`（无图形头模型） |
 | 819 | `STLOUT` | 未实现 | Stores 3D solids and watertight meshes in a format that can be used with stereolithography apparatus. | — |
@@ -1070,7 +1070,7 @@
 | 897 | `UNDO` | 已实现 | Reverses the effect of commands. | — |
 | 898 | `UNGROUP` | 未实现 | Disassociates the objects from a group. | — |
 | 899 | `UNION` | 未实现 | Combines two or more 3D solids, surfaces, or 2D regions into a single, composite 3D solid, surface, or region. | — |
-| 900 | `UNISOLATEOBJECTS` | 未实现 | Displays objects previously hidden with the ISOLATEOBJECTS or HIDEOBJECTS command. | — |
+| 900 | `UNISOLATEOBJECTS` | 部分实现 | Displays objects previously hidden with the ISOLATEOBJECTS or HIDEOBJECTS command. | 清空会话隐藏集；无数据库写/撤销 |
 | 901 | `-UNITS` | 未实现 | Controls the precision and display formats for coordinates, distances, and angles. | — |
 | 902 | `UNITS` | 未实现 | Controls the precision and display formats for coordinates, distances, and angles. | — |
 | 903 | `UPDATEFIELD` | 未实现 | Updates fields in selected objects. | — |

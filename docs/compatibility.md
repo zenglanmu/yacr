@@ -394,6 +394,37 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 > 结构测试（1269）；**没有** GUI、像素、真实 GPU、真机或 vendor-AutoCAD 证据。前端测试在合并后
 > 于主仓库运行通过；worktree 内因缺 `node_modules` 为 NOT RUN。
 
+#### 2026-11-07 图层管理批次（10 条）
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `LAYMCH` / `-LAYMCH` | 部分实现 | 选择式：第一个选中对象的图层为目标，其余对象移入该层（一条事务/一步撤销）；目标层锁定由 `cad-db` 拒绝 | 无 AutoCAD 的交互 `Select objects`；空选择、<2 个对象、非模型空间/块实例/子图元、任何 payload 按名拒绝 |
+| `LAYMRG` / `-LAYMRG` | 部分实现 | 选择式：把选中对象所在层上的所有实体（模型/图纸/块内）重写到当前层（一条事务/一步撤销），再删除每个源层行 | **声明式偏离**：源层来自选择、目标是当前层，无交互 source/target 提示；当前层与 `0` 层不能作源；层行删除不可撤销（撤销只恢复实体） |
+| `LAYDEL` / `-LAYDEL` | 部分实现 | 选择式：删除选中对象所在层的**模型空间**实体（一条事务/一步撤销），再删除层行 | 图纸空间/块内实体不删除，因此仍有成员的层按 `laydel.layer_in_use` 拒绝；当前层/`0` 层拒绝；层行删除不可撤销 |
+| `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE/RESTORE/LIST/DELETE <name>`；会话内最多 32 个命名快照（逐层属性 + 当前层 + 覆盖），恢复通过 `set_layer_attributes` | 无 DWG 持久化、无 `.las` 文件、无图层状态管理器对话框；恢复是多行 revision 提升且**不可撤销**；未知/悬挂层与保存时隐藏的当前层拒绝 |
+| `LAYERPMODE` | 部分实现 | `LAYERPMODE ON\|OFF`；会话标志，`OFF` 时覆盖变更不推 `LAYERP` 快照；裸命令报告当前值 | 无 `LAYERPMODE` 持久化；不改变已应用的覆盖 |
+| `LTSCALE` | 部分实现 | 一个正有限小数；写内存 `$LTSCALE`（一次 revision、无撤销/历史） | 当前导出器不写 `$LTSCALE`，SAVE→OPEN 不往返；无 `CELTSCALE`/`PSLTSCALE`/`MSLTSCALE` 联动 |
+| `LAYWALK` | 部分实现 | 逗号分隔层名；只显示命名层 + 当前层，走与 `LAYISO` 相同的会话覆盖原子路径 | 仅覆盖、不写库；未知/空列表拒绝；由 `LAYUNISO`/`RESTORELAYERS` 清除，计一次 `LAYERP` 快照 |
+
+#### 2026-11-07 选择/过滤/查找/可见性批次（10 条）
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `QSELECT` | 部分实现 | `QSELECT <PROPERTY> <VALUE>`（TYPE/LAYER/COLOR/LINETYPE，ASCII 不区分大小写）；替换选择；零匹配 = 空选择 + 诊断 | 无 Quick Select 对话框、无 `Append`/`Exclude` 模式、无用户自定义对象类型/特性列表；只枚举顶层模型空间（不展开块成员）；层 off/frozen 不参与过滤 |
+| `FILTER` | 部分实现 | 同 QSELECT 语法，但**并入**现有选择（空选择也可并入） | 无命名过滤器列表/对话框/逻辑组合；只枚举顶层模型空间 |
+| `GETSEL` | 部分实现 | `GETSEL LAYER\|TYPE <name>`；替换选择 | 仅 `LAYER`/`TYPE` 两种特性；无对话框；只枚举顶层模型空间 |
+| `SSX` | 部分实现 | 以**第一个选中对象**的五特性（类型/层/颜色/线型/空间）为模板，把匹配的模型空间对象并入选择 | 只枚举顶层模型空间；空选择/不可寻址模板拒绝；无交互选择提示 |
+| `SELECTCOUNT` | 部分实现 | 只读：统计与第一个选中对象五特性相同的模型空间对象数并报告 | 不修改选择、不写库、无事务；不展开块成员 |
+| `-FIND` | 部分实现 | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告计数/ids | 只读；不解析 MTEXT 格式 run；不搜索属性定义/表格/标注文字 |
+| `FIND` | 部分实现 | `FIND <needle> [=> <replacement>]`；报告或替换全部命中（替换一条事务/一步撤销；MULTILEADER 经 `with_text` 重建） | 不解析 MTEXT 格式 run；TEXT 单行遇换行按 `text.single_line_newline` 拒绝；无 Find 对话框/逐项确认/缩放高亮 |
+| `HIDEOBJECTS` | 部分实现 | 会话隐藏集：隐藏当前选择；共享可见性谓词影响拾取与渲染（`FLAG_HIDDEN`） | 无数据库写/撤销；隐藏对象仍留在常驻场景，仅 fragment 丢弃；屏幕空间 POINT 标记 overlay 仍可能绘制（声明） |
+| `ISOLATEOBJECTS` | 部分实现 | 会话隐藏集：隐藏除当前选择外的顶层模型空间对象 | 只按顶层身份隔离（只选中块成员时不会保留该成员所在的整个块）；无数据库写/撤销 |
+| `UNISOLATEOBJECTS` | 部分实现 | 清空会话隐藏集，恢复所有隐藏对象 | 无数据库写/撤销；不恢复已被删除的对象 |
+
+> **证据边界**：以上 20 条只有 Rust 契约测试与前端纯函数/结构测试；`cad-host` 的隐藏标志有宿主
+> 契约覆盖，但**没有** GUI、像素、真实 GPU、真机或 vendor-AutoCAD 证据。前端测试在主仓库合并后
+> 运行通过；worktree 内因缺 `node_modules` 为 NOT RUN。
+
 **仿射不变规则（`SPLINE`，2026-10-26）**：NURBS 曲线对**仿射**映射不变——把每个控制点过同一个
 仿射映射，而 `degree`、`knots`、`weights` **原样保留**，得到的正是原曲线的**精确仿射像**。因此平移、旋转、
 **均匀与非均匀**缩放、镜像与剪切**全部精确**：无需重拟合、无需重参数化、权重不变。`cad-db` 的
