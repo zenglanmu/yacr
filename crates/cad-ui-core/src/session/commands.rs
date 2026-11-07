@@ -401,7 +401,20 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("EXTRIM", CommandId::Extrim),
     ("MPEDIT", CommandId::Mpedit),
     ("DRAWORDER", CommandId::DrawOrder),
-
+    // The 2026-11-07 layout/viewport batch. `LAYOUT` is one canonical selector
+    // whose option is a typed argument; `VPMAX`/`VPMIN` are payload-free
+    // session state. `-VPORTS` is an alias of `VPORTS` (below), not a second
+    // command. Every write form is refused by name; see
+    // `cad_app::command_id::layout`.
+    ("LAYOUT", CommandId::Layout),
+    ("LAYOUTMERGE", CommandId::LayoutMerge),
+    ("LAYOUTWIZARD", CommandId::LayoutWizard),
+    ("VPORTS", CommandId::Vports),
+    ("VPMAX", CommandId::VpMax),
+    ("VPMIN", CommandId::VpMin),
+    ("VPCLIP", CommandId::VpClip),
+    ("VPSCALE", CommandId::VpScale),
+    ("LAYVPI", CommandId::LayVpi),
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**
@@ -534,6 +547,14 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     TREX_SELECTOR,
     MPEDIT_SELECTOR,
     DRAWORDER_SELECTOR,
+    // The 2026-11-07 layout/viewport batch argument forms.
+    LAYOUT_SELECTOR,
+    LAYOUTMERGE_SELECTOR,
+    LAYOUTWIZARD_SELECTOR,
+    VPORTS_SELECTOR,
+    VPCLIP_SELECTOR,
+    VPSCALE_SELECTOR,
+    LAYVPI_SELECTOR,
 ];
 
 /// Split a typed line into an argument-taking selector and its argument.
@@ -799,6 +820,10 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     // behaviour and a second `CommandId` would be a second path.
     ("-PURGE", "PURGE"),
     ("-RENAME", "RENAME"),
+    // `-VPORTS` is AutoCAD's command-line spelling of VPORTS; this build has no
+    // viewport dialog, so the alias only normalizes the name onto the one
+    // selector and its one named refusal.
+    ("-VPORTS", "VPORTS"),
 ];
 
 /// The alias table as `(alias, canonical selector)` pairs, resolved through
@@ -914,6 +939,10 @@ pub use filters::*;
 // The 2026-11-07 draw/modify batch grammars (`DONUT` … `DRAWORDER`).
 mod draw2;
 pub use draw2::*;
+
+// The 2026-11-07 layout/viewport grammars (`LAYOUT` … `LAYVPI`).
+mod layout;
+pub use layout::*;
 
 // The selector -> interactive-tool routing table (split out for the code-size
 // gate). Re-exported so `commands::interaction_request_for` still resolves.

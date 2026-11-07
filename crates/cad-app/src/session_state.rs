@@ -29,6 +29,17 @@ pub struct ClipboardEntry {
     pub display: cad_db::EntityDisplayState,
 }
 
+/// The session-only "maximized layout viewport" marker (`VPMAX` / `VPMIN`).
+///
+/// `index` is the zero-based viewport index inside the layout. The command layer
+/// uses index `0` because this build has no per-viewport selection model; the
+/// marker is a display hint for a host, never drawing data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayoutViewportRef {
+    pub layout: LayoutId,
+    pub index: usize,
+}
+
 pub struct SessionState {
     pub document: DocumentId,
     mode: AppMode,
@@ -48,6 +59,8 @@ pub struct SessionState {
     pub layer_history: LayerOverrideHistory,
     /// Named layer states (`LAYERSTATE`) plus the `LAYERPMODE` gate.
     pub layer_states: LayerStates,
+    /// `VPMAX`/`VPMIN` session marker; never drawing data.
+    maximized_viewport: Option<LayoutViewportRef>,
     pub tool: ToolState,
     /// Generation incremented whenever an active tool lifecycle is replaced.
     pub tool_generation: u64,
@@ -225,6 +238,7 @@ impl SessionState {
             hidden_entities: SelectionSet::new(),
             layer_history: LayerOverrideHistory::new(),
             layer_states: LayerStates::new(),
+            maximized_viewport: None,
             tool: ToolState::Idle,
             tool_generation: 0,
             generation: 0,
@@ -264,6 +278,21 @@ impl SessionState {
     /// Disarm the `MULTIPLE` request.
     pub fn clear_multiple(&mut self) {
         self.multiple = None;
+    }
+
+    /// The session-only maximized layout viewport (`VPMAX`), if any.
+    pub fn maximized_viewport(&self) -> Option<LayoutViewportRef> {
+        self.maximized_viewport
+    }
+
+    /// Set the maximized viewport marker. Session state only.
+    pub fn set_maximized_viewport(&mut self, viewport: LayoutViewportRef) {
+        self.maximized_viewport = Some(viewport);
+    }
+
+    /// Clear the maximized viewport marker (`VPMIN`). Session state only.
+    pub fn clear_maximized_viewport(&mut self) {
+        self.maximized_viewport = None;
     }
 
     /// The previous captured point of the active capture, for `ORTHO`.

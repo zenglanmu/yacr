@@ -1302,7 +1302,16 @@
   "draw.kind.draworder.front": "绘图顺序：最前",
   "draw.kind.draworder.back": "绘图顺序：最后",
   "draw.kind.draworder.above": "绘图顺序：之上",
-  "draw.kind.draworder.below": "绘图顺序：之下"
+  "draw.kind.draworder.below": "绘图顺序：之下",
+  "draw.kind.layout": "布局（LAYOUT）",
+  "draw.kind.layoutmerge": "合并布局（LAYOUTMERGE）",
+  "draw.kind.layoutwizard": "布局向导（LAYOUTWIZARD）",
+  "draw.kind.vports": "视口网格（VPORTS）",
+  "draw.kind.vpmax": "最大化视口（VPMAX）",
+  "draw.kind.vpmin": "恢复视口（VPMIN）",
+  "draw.kind.vpclip": "裁剪视口（VPCLIP）",
+  "draw.kind.vpscale": "视口比例（VPSCALE）",
+  "draw.kind.layvpi": "视口图层冻结（LAYVPI）"
 
 
 }

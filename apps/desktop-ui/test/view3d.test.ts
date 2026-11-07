@@ -189,7 +189,7 @@ test('standard views and the 3D toggles need an open drawing, with a real reason
   // The toggles that are payload-free router commands are gated on a document
   // the same way (disabled, not "unsupported", on the start page). `PLAN` is the
   // 2D-plan selector in the same group.
-  assert.deepEqual([...DOCUMENT_SCOPED_COMMANDS], ['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK', 'LAYERSTATE', 'LTSCALE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'SSX', 'SELECTCOUNT', '-FIND', 'FIND', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS', 'PURGE', 'RENAME', 'SETVAR', 'TIME', 'DBLIST', 'TREESTAT', 'MREDO', 'MULTIPLE']);
+  assert.deepEqual([...DOCUMENT_SCOPED_COMMANDS], ['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK', 'LAYERSTATE', 'LTSCALE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'SSX', 'SELECTCOUNT', '-FIND', 'FIND', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS', 'PURGE', 'RENAME', 'SETVAR', 'TIME', 'DBLIST', 'TREESTAT', 'MREDO', 'MULTIPLE', 'LAYOUT', 'LAYOUTMERGE', 'LAYOUTWIZARD', 'VPORTS', 'VPMAX', 'VPMIN', 'VPCLIP', 'VPSCALE', 'LAYVPI']);
   for (const id of DOCUMENT_SCOPED_COMMANDS) {
     // A document-scoped command with a selection precondition is admitted only
     // once a document **and** enough objects are selected; `loaded` has no

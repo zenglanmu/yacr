@@ -55,11 +55,11 @@
 
 ## 2. 命令表（只列**有行为注解**的选择子）
 
-> **完整清单不在这里**：穷尽的 **120 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
+> **完整清单不在这里**：穷尽的 **195 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
 > `docs/autocad-command-coverage.md` §2；本节只保留**有行为注解**的行。
 > 选择子与别名的**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs`
-> （`COMMAND_TABLE` **120** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
-> `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **57**）。
+> （`COMMAND_TABLE` **195** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
+> `ARGUMENT_SELECTORS` **44** / `COMMAND_ALIASES` **67**）。
 > 本表的 **canonical 列**只出现**被准入的名字**，**别名列**只出现 `COMMAND_ALIASES` 里的真实行；
 > 键位、面板与 IPC 能力见 §2a，**不混进命令表**。
 
@@ -146,6 +146,15 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `OSNAP` | 显示（对象捕捉开关） | 否 | `OS` |
 | `ORTHO` | 显示（正交约束开关；会话状态，不写库，经 `interaction.orthoEnabled` 持久化） | 否 | `OR` |
 | `HOVERPREVIEW` | 显示（悬停预览开关） | 否 | — |
+| `LAYOUT` | 布局（参数形式：`LIST`/`NEW <name>`/`RENAME <old> <new>`/`DELETE <name>`/`SET <name>`；**LIST 与 SET 真实可用**，SET 走同一条 `SPACE` 会话切换；NEW/RENAME/DELETE 因 `cad-db` 无导入后布局写 API 而**按名拒绝**） | 否（写形式无论如何拒绝） | — |
+| `LAYOUTMERGE` | 布局（`<source> <target>`；缺失/相同按名拒绝；实体移动与布局删除因无写 API 而**按名拒绝**） | 是 | — |
+| `LAYOUTWIZARD` | 布局（`<name> [<paper> <width> <height>]`；名称/纸张数值校验后因无布局/页面设置写 API 而**按名拒绝**） | 是 | — |
+| `VPORTS` | 视口（`<rows> <cols>`，均为 ≥1 整数；非纸空间按名拒绝；有效的矩形网格因无 `PaperViewport` 写 API 而**按名拒绝**） | 是 | `-VPORTS` |
+| `VPMAX` | 视口（无载荷；仅在活动纸布局中把**首个**视口标记为最大化——纯会话显示状态，无图纸写入） | 否 | — |
+| `VPMIN` | 视口（无载荷；清除 `VPMAX` 标记；空状态是**具名 no-op**，不是错误） | 否 | — |
+| `VPCLIP` | 视口（仅 `RECT <minx> <miny> <maxx> <maxy>`；退化矩形按名拒绝；多边形/对象裁剪 **NOT IMPLEMENTED**；因无选中视口/裁剪写 API 而按名拒绝） | 是 | — |
+| `VPSCALE` | 视口（`<scale>`：标准比例名或有限比例；零/非有限/未知按名拒绝；解析成功仍因无视口比例写 API 而按名拒绝） | 是 | — |
+| `LAYVPI` | 视口图层（`<layer>[,<layer>...]`；本构建**没有**逐视口图层状态，按名拒绝；**绝不**退化为全局冻结） | 是 | — |
 
 说明：
 - `ZOOM <factor>` 是 AutoCAD 的**比例因子**缩放（2026-10-25 起可用）：`factor > 1` 放大，`factor < 1`
@@ -204,7 +213,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 - `COPYCLIP` 是**只读**捕获，Viewer 亦可用；`CUTCLIP`/`PASTECLIP` 为 work-only。
 - `OPEN`/`NEW`/`SAVE`/`PLOT` 为**宿主自有**：宿主未提供能力时命令层返回显式 `Unsupported`
   （不会静默 no-op）。
-- 别名：**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES`（**57** 行），
+- 别名：**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES`（**67** 行），
   本页 §2b 是它的转写。旧文档引用的 `cad-ui-slint` 别名/同义词/未实现命令三张表**已随 Slint 退役删除**，
   不要再去仓库里找它们。
 
@@ -267,9 +276,9 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 `LAYUNISO`/`LAYON`→`RESTORELAYERS`、`NEWLAYER`→`CREATELAYER`、`LEN`→`LENGTHEN`、`I`→`INSERT`、`B`→`BLOCK`、
 `XL`→`XLINE`（项目同义词，非 `acad.pgp`）、`TJUST`→`JUSTIFYTEXT`、`MTEDIT`→`TEXTEDIT`、
 `-MTEXT`→`MTEXT`、`-LAYMCH`→`LAYMCH`、`-LAYMRG`→`LAYMRG`、`-LAYDEL`→`LAYDEL`、
-`-PURGE`→`PURGE`、`-RENAME`→`RENAME`、`-OVERKILL`→`OVERKILL`
-（2026-11-07 文字/图层/工具/绘制批次：别名只归一化到同一 `CommandId`/同一条写路径，不是第二套实现）。
-本页缩写表 **42** 个 + 本句 **24** 个 = **66** 个，与 `COMMAND_ALIASES` 的长度一致。
+`-PURGE`→`PURGE`、`-RENAME`→`RENAME`、`-OVERKILL`→`OVERKILL`、`-VPORTS`→`VPORTS`
+（2026-11-07 文字/图层/工具/绘制/布局批次：别名只归一化到同一 `CommandId`/同一条写路径，不是第二套实现）。
+本页缩写表 **42** 个 + 本句 **25** 个 = **67** 个，与 `COMMAND_ALIASES` 的长度一致。
 
 诚实边界：这张表是**面向已实现命令的 AutoCAD `acad.pgp` 子集**，不是 `acad.pgp` 解析器，
 也**不支持用户自定义别名**；目标命令不存在的缩写一律不收录，绝不用别名凭空造出命令。

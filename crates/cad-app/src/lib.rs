@@ -41,6 +41,7 @@ pub mod viewer_config;
 pub mod zoom_history;
 
 mod app_audit;
+mod app_layout;
 mod app_reports;
 mod app_utility;
 mod app_zoom;
@@ -111,7 +112,9 @@ pub struct Document {
 
 mod session_state;
 
-pub use session_state::{BackendChoice, ClipboardEntry, MultipleRepeat, SessionState};
+pub use session_state::{
+    BackendChoice, ClipboardEntry, LayoutViewportRef, MultipleRepeat, SessionState,
+};
 
 #[cfg(test)]
 mod p2_interaction_tests {
@@ -336,9 +339,11 @@ pub struct Workspace {
 
 mod command_payload;
 mod draw2_payload;
+mod layout_payload;
 pub mod ml_style;
 
 pub use draw2_payload::{Draw2Payload, DrawOrderMode, MlStyleCommand, TrexMode};
+pub use layout_payload::{LayoutPayload, PaperSetup};
 pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 
 pub use command_payload::{

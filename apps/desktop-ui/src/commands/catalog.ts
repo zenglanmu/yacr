@@ -585,5 +585,20 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'EXTRIM', labelKey: 'draw.kind.extrim', icon: 'trim', group: 'modify' },
   { id: 'MPEDIT', labelKey: 'draw.kind.mpedit', icon: 'polyline', group: 'modify' },
   { id: 'DRAWORDER', labelKey: 'draw.kind.draworder', icon: 'properties', group: 'modify' },
+  // The 2026-11-07 layout/viewport batch. `LAYOUT` takes a typed option
+  // (LIST/NEW/RENAME/DELETE/SET); `VPORTS`/`VPCLIP`/`VPSCALE` take their typed
+  // argument on the command line. `VPMAX`/`VPMIN` are payload-free session
+  // commands. All layout/viewport **writes** are named refusals in this build
+  // (cad-db has no post-import write API), so these rows advertise the names the
+  // router admits, not a promise that a write will land.
+  { id: 'LAYOUT', labelKey: 'draw.kind.layout', icon: 'drawing', group: 'view' },
+  { id: 'LAYOUTMERGE', labelKey: 'draw.kind.layoutmerge', icon: 'copy', group: 'view' },
+  { id: 'LAYOUTWIZARD', labelKey: 'draw.kind.layoutwizard', icon: 'properties', group: 'view' },
+  { id: 'VPORTS', labelKey: 'draw.kind.vports', icon: 'rectang', group: 'view' },
+  { id: 'VPMAX', labelKey: 'draw.kind.vpmax', icon: 'view', group: 'view' },
+  { id: 'VPMIN', labelKey: 'draw.kind.vpmin', icon: 'view', group: 'view' },
+  { id: 'VPCLIP', labelKey: 'draw.kind.vpclip', icon: 'rectang', group: 'view' },
+  { id: 'VPSCALE', labelKey: 'draw.kind.vpscale', icon: 'properties', group: 'view' },
+  { id: 'LAYVPI', labelKey: 'draw.kind.layvpi', icon: 'layers', group: 'annotate' },
 
 ]);

@@ -1302,7 +1302,16 @@
   "draw.kind.draworder.front": "Draw order: Front",
   "draw.kind.draworder.back": "Draw order: Back",
   "draw.kind.draworder.above": "Draw order: Above",
-  "draw.kind.draworder.below": "Draw order: Below"
+  "draw.kind.draworder.below": "Draw order: Below",
+  "draw.kind.layout": "Layout (LAYOUT)",
+  "draw.kind.layoutmerge": "Merge layouts (LAYOUTMERGE)",
+  "draw.kind.layoutwizard": "Layout wizard (LAYOUTWIZARD)",
+  "draw.kind.vports": "Viewport grid (VPORTS)",
+  "draw.kind.vpmax": "Maximize viewport (VPMAX)",
+  "draw.kind.vpmin": "Restore viewport (VPMIN)",
+  "draw.kind.vpclip": "Clip viewport (VPCLIP)",
+  "draw.kind.vpscale": "Viewport scale (VPSCALE)",
+  "draw.kind.layvpi": "Viewport layer freeze (LAYVPI)"
 
 
 }
