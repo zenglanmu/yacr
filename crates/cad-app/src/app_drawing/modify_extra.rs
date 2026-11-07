@@ -266,7 +266,10 @@ impl Application {
 /// the reversed ring runs the original segment `(n − 2 − i) mod n` backwards, so
 /// its signed sweep — and therefore its bulge — flips. This holds for closed
 /// rings (`n` segments) and for the `n − 1` real segments of an open polyline.
-fn reverse_geometry(geometry: &SemanticGeometry) -> CadResult<SemanticGeometry> {
+///
+/// `pub(crate)` because [`crate::CommandId::Pedit`]'s `REVERSE` option reuses
+/// this exact rule instead of keeping a second, drifting copy.
+pub(crate) fn reverse_geometry(geometry: &SemanticGeometry) -> CadResult<SemanticGeometry> {
     match geometry {
         SemanticGeometry::Line { start, end } => Ok(SemanticGeometry::Line {
             start: *end,

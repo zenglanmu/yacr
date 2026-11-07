@@ -63,6 +63,7 @@ impl Application {
             CommandId::ChamferPolyline => self.chamfer_polyline(session, command),
             CommandId::FilletPolyline => self.fillet_polyline(session, command),
             CommandId::RevisionCloud => self.revision_cloud(session, command),
+            CommandId::Pedit => self.pedit(session, command),
             CommandId::Reverse => self.reverse_entities(session, command),
             CommandId::Oops => self.oops_restore(session, command),
             CommandId::Overkill => self.overkill(session, command),

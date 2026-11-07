@@ -167,6 +167,19 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     parse: (argument: string) => ['UPPER', 'LOWER', 'TITLE', 'SENTENCE', 'TOGGLE', 'U', 'L', 'T', 'S', 'G']
       .includes(argument.trim().toUpperCase()),
   }),
+  /**
+   * `PEDIT <option>` (AutoCAD 2026) is the declared v1 option subset: `CLOSE`,
+   * `OPEN` and `REVERSE`, plus their single letters `C`, `O`, `R`. The bare
+   * `PEDIT` is admitted by the base name and refused by the host with
+   * `pedit.needs_option`, because this build has no in-command option prompt —
+   * so a missing argument is never read as a default option. The host validates
+   * the same grammar and refuses every other AutoCAD option (`JOIN`, `WIDTH`,
+   * `FIT`, `SPLINE`, …) by name.
+   */
+  PEDIT: Object.freeze({
+    parse: (argument: string) => ['CLOSE', 'OPEN', 'REVERSE', 'C', 'O', 'R']
+      .includes(argument.trim().toUpperCase()),
+  }),
 });
 
 /**
@@ -301,6 +314,12 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // refuses an empty selection by name (`reverse.selection`). The table minimum
   // is one and the sentence is the command's own hint.
   REVERSE: Object.freeze({ count: 1, reasonKey: 'draw.kind.reverse.hint' }),
+  // PEDIT (AutoCAD 2026) v1 edits **exactly one** preselected model-space
+  // polyline (CLOSE / OPEN / REVERSE; no Select polyline prompt, no Multiple).
+  // The table states a minimum of one — the host is what refuses a selection of
+  // two or a non-polyline by name — and the sentence is the command's own hint,
+  // so the disabled button/popover row and the refusal describe the same rule.
+  PEDIT: Object.freeze({ count: 1, reasonKey: 'draw.kind.pedit.hint' }),
   // OOPS (AutoCAD 2026) restores the last ERASE and never reads the selection,
   // so it has no selection precondition. The row exists for the "no drawing is
   // open" answer only, like LAYERP.

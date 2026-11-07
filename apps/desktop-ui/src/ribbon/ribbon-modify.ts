@@ -6,6 +6,7 @@
 // commented selection rule is enforced by `commands/gating.ts`; nothing here
 // decides enablement.
 import type { RibbonCommandItem } from './ribbon-model.ts';
+import { PEDIT_ITEM } from './variants.ts';
 
 /** The Home tab's Modify panel, in display order. */
 export const HOME_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
@@ -74,6 +75,13 @@ export const HOME_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // button with no popover; enablement is the shared admission plus its
   // own one-object selection requirement.
   { id: 'REVERSE', labelKey: 'draw.kind.reverse', icon: 'mirror', command: 'REVERSE' },
+  // PEDIT (AutoCAD 2026) is the polyline option subset: the one selected
+  // model-space polyline is the whole input and the option is typed
+  // (`PEDIT CLOSE|OPEN|REVERSE`), because this build has no in-command option
+  // prompt. It is a split button (the shared item lives in `variants.ts`); each
+  // row is an argument form of the base selector, gated by
+  // `ARGUMENT_COMMANDS.PEDIT` plus the one-object selection rule.
+  PEDIT_ITEM,
   // OOPS restores the last ERASE: no capture, no selection, `undo` glyph.
   { id: 'OOPS', labelKey: 'draw.kind.oops', icon: 'undo', command: 'OOPS' },
   // OVERKILL v1: exact duplicates only, two-object selection minimum.
@@ -133,6 +141,10 @@ export const DRAW_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // Same tail slot as the Home tab: REVERSE is selection-based, so it
   // carries no pick prompt and no popover.
   { id: 'REVERSE', labelKey: 'draw.kind.reverse', icon: 'mirror', command: 'REVERSE' },
+  // Same tail slot as the Home tab: PEDIT is the polyline option subset, a
+  // split button whose rows are `PEDIT CLOSE|OPEN|REVERSE` (the shared item
+  // lives in `variants.ts`). Bare `PEDIT` is a named needs-option refusal.
+  PEDIT_ITEM,
   { id: 'OOPS', labelKey: 'draw.kind.oops', icon: 'undo', command: 'OOPS' },
   // OVERKILL v1: exact duplicates only, two-object selection minimum.
   { id: 'OVERKILL', labelKey: 'draw.kind.overkill', icon: 'erase', command: 'OVERKILL' },

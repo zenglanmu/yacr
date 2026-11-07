@@ -21,18 +21,9 @@ pub enum CommandId {
     SaveDrawingAs,
     CancelLoading,
     Pan,
-    /// Change the viewpoint without moving the model.
-    ///
-    /// The payload selects the form — `ZoomAt` (factor + cursor), the legacy
-    /// `Points` (factor at the viewport centre), `ZoomWindow` (`ZOOM WINDOW`,
-    /// exact two-corner fit, 2D orthographic only) and `ZoomPrevious`
-    /// (`ZOOM PREVIOUS`, the per-viewport discrete-view stack). The two new
-    /// forms deliberately ride **this** command with their own payload, so the
-    /// command vocabulary is unchanged.
-    ///
-    /// Every form is view-only: no database write, no revision bump, no
-    /// `cad-history` entry and no `session.generation` bump, so Viewer mode
-    /// allows them. Full contract: [`crate::command_id::zoom`].
+    /// Change the viewpoint without moving the model; the payload selects the
+    /// form. View-only, so Viewer mode allows it. Full contract:
+    /// [`crate::command_id::zoom`].
     Zoom,
     FitDrawing,
     ResetView,
@@ -964,6 +955,9 @@ pub enum CommandId {
     Fs,
     /// `REVERSE`: see [`crate::command_id::reverse`].
     Reverse,
+    /// `PEDIT` (Work-only): one declared v1 polyline option; see
+    /// [`crate::command_id::pedit`].
+    Pedit,
     /// `OOPS`: see [`crate::command_id::oops`].
     Oops,
     /// `OVERKILL`: see [`crate::command_id::overkill`].
@@ -993,6 +987,7 @@ pub mod hatch_to_back;
 pub mod match_prop;
 pub mod oops;
 pub mod overkill;
+pub mod pedit;
 pub mod point_style;
 pub mod reverse;
 pub mod text_commands;

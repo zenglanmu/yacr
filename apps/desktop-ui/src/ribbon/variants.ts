@@ -81,3 +81,34 @@ export const POLYGON_ITEM: RibbonCommandItem = Object.freeze({
   command: 'POLYGON',
   variants: POLYGON_VARIANTS,
 });
+
+/**
+ * The `PEDIT` split button: the declared v1 option subset, one row per option.
+ *
+ * The parent stays the ordinary `PEDIT` selector; because this build has no
+ * in-command option prompt, pressing it is an explicit `pedit.needs_option`
+ * refusal that lists the three implemented options — it never defaults to
+ * `CLOSE`. The caret offers the typed argument forms as separate rows
+ * (`PEDIT CLOSE`, `PEDIT OPEN`, `PEDIT REVERSE`), each of which still reads the
+ * current selection (exactly one model-space LWPOLYLINE) as its whole input.
+ *
+ * Every row is a router command; `PEDIT <option>` is an argument form of the
+ * base selector, not a published command name, so admission goes through
+ * `ARGUMENT_COMMANDS.PEDIT` (see `commands/gating.ts`). Join, Width/Halfwidth,
+ * Fit, Spline, Decurve, Ltype gen, Undo, Multiple, Edit vertex and the
+ * PEDITACCEPT conversion prompt are NOT IMPLEMENTED and have no row: a caret
+ * entry would promise them.
+ */
+const PEDIT_VARIANTS: readonly RibbonCommandItem[] = Object.freeze([
+  { id: 'PEDIT CLOSE', labelKey: 'draw.kind.pedit.close', icon: 'polyline', command: 'PEDIT CLOSE' },
+  { id: 'PEDIT OPEN', labelKey: 'draw.kind.pedit.open', icon: 'polyline', command: 'PEDIT OPEN' },
+  { id: 'PEDIT REVERSE', labelKey: 'draw.kind.pedit.reverse', icon: 'polyline', command: 'PEDIT REVERSE' },
+]);
+
+export const PEDIT_ITEM: RibbonCommandItem = Object.freeze({
+  id: 'PEDIT',
+  labelKey: 'draw.kind.pedit',
+  icon: 'polyline',
+  command: 'PEDIT',
+  variants: PEDIT_VARIANTS,
+});

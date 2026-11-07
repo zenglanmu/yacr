@@ -9,6 +9,7 @@ mod command_vocabulary;
 mod import_accounting;
 mod input_and_lifecycle;
 mod layout_status;
+mod pedit;
 mod point_style;
 mod snap_grid;
 mod space_argument;

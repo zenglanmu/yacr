@@ -22,8 +22,8 @@ use cad_app::{CommandId, CommandPayload};
 
 use super::diagnostics::cad_error_text;
 use super::{
-    CadSession, ARGUMENT_SELECTOR, PDMODE_SELECTOR, PDSIZE_SELECTOR, SNAPUNIT_SELECTOR,
-    SPACE_SELECTOR, TCASE_SELECTOR, TORIENT_SELECTOR,
+    CadSession, ARGUMENT_SELECTOR, PDMODE_SELECTOR, PDSIZE_SELECTOR, PEDIT_SELECTOR,
+    SNAPUNIT_SELECTOR, SPACE_SELECTOR, TCASE_SELECTOR, TORIENT_SELECTOR,
 };
 
 impl CadSession {
@@ -54,6 +54,9 @@ impl CadSession {
             TORIENT_SELECTOR | TCASE_SELECTOR => {
                 self.text_command_argument(selector, argument, text)
             }
+            // `PEDIT <option>` (2026-11-07): the one selected polyline is the
+            // input; the option travels in the payload.
+            PEDIT_SELECTOR => self.pedit_argument(argument, text),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)
