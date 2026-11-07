@@ -89,7 +89,8 @@ test('both modify panels carry SELECTSIMILAR as one small selection-gated button
     // The 2026-11-07 modify commands are appended after the shipped tail.
     assert.deepEqual(
       items.slice(items.findIndex(candidate => candidate.id === ID) + 1).map(candidate => candidate.id),
-      ['REVERSE', 'PEDIT', 'OOPS', 'OVERKILL', 'BREAKATPOINT', 'HATCHTOBACK', 'TEXTTOFRONT'],
+      ['REVERSE', 'PEDIT', 'OOPS', 'OVERKILL', 'BREAKATPOINT', 'HATCHTOBACK', 'TEXTTOFRONT',
+        'SSX', 'SELECTCOUNT', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS'],
       `${tabId}: only the documented additions follow SELECTSIMILAR`,
     );
     assert.equal(item.command, ID, 'the dispatch token is the router name');

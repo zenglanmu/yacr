@@ -58,6 +58,21 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // and does not edit the drawing.
     ("SELECTSIMILAR", CommandId::SelectSimilar),
     ("SELECTINBOX", CommandId::SelectInBox),
+    // The 2026-11-07 selection/filter batch. QSELECT/FILTER/GETSEL take a typed
+    // `PROPERTY VALUE` argument (the grammar lives in `commands::filters`), SSX
+    // and SELECTCOUNT take none, and the find pair is `-FIND <needle>` (report)
+    // vs `FIND <needle> [=> replacement]` (report or replace). All names are
+    // canonical selectors; none is an alias of another.
+    ("QSELECT", CommandId::QSelect),
+    ("FILTER", CommandId::FilterSelect),
+    ("GETSEL", CommandId::GetSelection),
+    ("SSX", CommandId::SelectMatchingProperties),
+    ("SELECTCOUNT", CommandId::SelectCount),
+    ("-FIND", CommandId::FindReport),
+    ("FIND", CommandId::FindReplace),
+    ("HIDEOBJECTS", CommandId::HideObjects),
+    ("ISOLATEOBJECTS", CommandId::IsolateObjects),
+    ("UNISOLATEOBJECTS", CommandId::UnisolateObjects),
     ("MEASURE", CommandId::Measure),
     // `AREA OBJECT` is our **selection-based** exact area of one closed object
     // (AutoCAD's `AREA` → `Object` pick prompt, read from the selection instead).
@@ -474,6 +489,11 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     LAYWALK_SELECTOR,
     LTSCALE_SELECTOR,
     LAYERPMODE_SELECTOR,
+    QSELECT_SELECTOR,
+    FILTER_SELECTOR,
+    GETSEL_SELECTOR,
+    FIND_SELECTOR,
+    FIND_REPORT_SELECTOR,
 ];
 
 /// Split a typed line into an argument-taking selector and its argument.
@@ -837,6 +857,11 @@ pub fn admissible_names() -> Vec<&'static str> {
 mod arguments;
 pub use arguments::*;
 pub(crate) use arguments::{parse_positive_decimal, parse_signed_decimal};
+
+// The selection/filter batch grammars (2026-11-07): `QSELECT`/`FILTER`/`GETSEL`
+// and `-FIND`/`FIND`. Re-exported so `commands::parse_*` paths resolve.
+mod filters;
+pub use filters::*;
 
 // The selector -> interactive-tool routing table (split out for the code-size
 // gate). Re-exported so `commands::interaction_request_for` still resolves.

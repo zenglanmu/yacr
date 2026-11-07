@@ -946,6 +946,20 @@ pub enum CommandId {
     /// `TEXTUNMASK` (Work-only): delete selected masks covered by selected text.
     /// Full contract: [`crate::command_id::text_batch::TextUnmaskCommand`].
     TextUnmask,
+    /// The 2026-11-07 selection/filter batch (`QSELECT`, `FILTER`, `GETSEL`,
+    /// `SSX`, `SELECTCOUNT`, `-FIND`, `FIND`, `HIDEOBJECTS`,
+    /// `ISOLATEOBJECTS`, `UNISOLATEOBJECTS`). Full contracts:
+    /// [`crate::command_id::select_filter`].
+    QSelect,
+    FilterSelect,
+    GetSelection,
+    SelectMatchingProperties,
+    SelectCount,
+    FindReport,
+    FindReplace,
+    HideObjects,
+    IsolateObjects,
+    UnisolateObjects,
 }
 
 mod capabilities;
@@ -975,6 +989,7 @@ pub mod overkill;
 pub mod pedit;
 pub mod point_style;
 pub mod reverse;
+pub mod select_filter;
 pub mod text_batch;
 pub mod text_commands;
 pub mod texttofront;

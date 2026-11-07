@@ -333,7 +333,60 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return names.length > 0 && names.every(name => name.length > 0);
     },
   }),
+  /**
+   * The 2026-11-07 selection/filter batch. These are **argument forms of
+   * canonical selectors**, not new names: the line still travels as one
+   * `cad_command` and the host re-parses/refuses it. `QSELECT`/`FILTER` accept
+   * the four properties; `GETSEL` is AutoCAD's narrower `LAYER`/`TYPE` form.
+   */
+  QSELECT: Object.freeze({
+    parse: (argument: string) => isPropertyFilter(argument),
+  }),
+  FILTER: Object.freeze({
+    parse: (argument: string) => isPropertyFilter(argument),
+  }),
+  GETSEL: Object.freeze({
+    parse: (argument: string) => isPropertyFilter(argument, ['LAYER', 'TYPE']),
+  }),
+  FIND: Object.freeze({
+    parse: isFindArgument,
+  }),
+  // `-FIND` is the report-only selector: a `=>` replacement is refused locally
+  // as well as by the host, so the button/line never promises a write.
+  '-FIND': Object.freeze({
+    parse: (argument: string) => isFindArgument(argument) && !argument.includes('=>'),
+  }),
 });
+
+
+/** The four property words `QSELECT`/`FILTER` accept. */
+const FILTER_PROPERTIES: readonly string[] = Object.freeze(['TYPE', 'LAYER', 'COLOR', 'LINETYPE']);
+
+/**
+ * `<PROPERTY> <value>` with a non-empty trimmed value (spaces allowed).
+ *
+ * Mirrors the host grammar: the property word is one of `FILTER_PROPERTIES` and
+ * the value is the whole remainder, so a layer/linetype name with a space is not
+ * rejected locally. `allowed` narrows the set for `GETSEL` (`LAYER`/`TYPE`).
+ */
+function isPropertyFilter(argument: string, allowed: readonly string[] = FILTER_PROPERTIES): boolean {
+  const match = /^([^ \t]+)[ \t]+(.+)$/.exec(argument.trim());
+  return match !== null && allowed.includes(match[1].toUpperCase()) && match[2].trim().length > 0;
+}
+
+/**
+ * `<needle>` or `<needle> => <replacement>` with a non-empty needle.
+ *
+ * `-FIND` is report-only, so its spec below additionally refuses the arrow. The
+ * replacement may be empty (an explicit delete) — the marker is what makes it
+ * intentional.
+ */
+function isFindArgument(argument: string): boolean {
+  const trimmed = argument.trim();
+  if (!trimmed) return false;
+  const marker = trimmed.indexOf('=>');
+  return marker === -1 ? true : trimmed.slice(0, marker).trim().length > 0;
+}
 
 /**
  * Host capability gates for the file-level selectors.
@@ -382,7 +435,15 @@ export const GESTURE_ONLY_COMMANDS: readonly string[] = Object.freeze(['ORBIT'])
  * "a drawing is the whole requirement" (see `SELECTION_REQUIREMENTS`, which
  * answers the no-document case for selection-gated commands itself).
  */
-export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK', 'LAYERSTATE', 'LTSCALE', 'LAYWALK']);
+export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
+  'SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK',
+  'LAYERSTATE', 'LTSCALE', 'LAYWALK',
+  // The 2026-11-07 selection/filter/find/visibility batch queries or hides the
+  // open drawing's entities, so the start page disables all ten with the
+  // catalog's own "no drawing is open" sentence.
+  'QSELECT', 'FILTER', 'GETSEL', 'SSX', 'SELECTCOUNT', '-FIND', 'FIND',
+  'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS',
+]);
 
 /** One command's precondition on the **current selection**. */
 export interface SelectionRequirement {
@@ -571,6 +632,18 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   TCIRCLE: Object.freeze({ count: 1, reasonKey: 'draw.kind.tcircle.hint' }),
   TEXTMASK: Object.freeze({ count: 1, reasonKey: 'draw.kind.textmask.hint' }),
   TEXTUNMASK: Object.freeze({ count: 1, reasonKey: 'draw.kind.textunmask.hint' }),
+  // SSX reads the **first selected object** as the template and SELECTCOUNT does
+  // the same, so both need one selected object; the host refuses the empty case
+  // by name (`ssx.selection_required` / `selectcount.selection_required`).
+  SSX: Object.freeze({ count: 1, reasonKey: 'draw.kind.ssx.hint' }),
+  SELECTCOUNT: Object.freeze({ count: 1, reasonKey: 'draw.kind.selectcount.hint' }),
+  // HIDEOBJECTS hides the selection; ISOLATEOBJECTS keeps it and hides the rest.
+  // Both refuse an empty selection, so the row disables the button with its own
+  // sentence. UNISOLATEOBJECTS takes no selection (it only clears the hidden
+  // set), so its `count: 0` row exists for the no-drawing answer only.
+  HIDEOBJECTS: Object.freeze({ count: 1, reasonKey: 'draw.kind.hideobjects.hint' }),
+  ISOLATEOBJECTS: Object.freeze({ count: 1, reasonKey: 'draw.kind.isolateobjects.hint' }),
+  UNISOLATEOBJECTS: Object.freeze({ count: 0, reasonKey: 'draw.kind.unisolateobjects.hint' }),
 });
 
 /**

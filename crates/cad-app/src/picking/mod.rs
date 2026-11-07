@@ -158,9 +158,16 @@ pub fn pick_tolerance(
 pub fn ref_is_visible(
     database: &DrawingDatabase,
     overrides: &LayerOverrideSet,
+    hidden: &crate::SelectionSet,
     reference: &SelectionRef,
 ) -> bool {
-    ref_visibility(database, overrides, database.root_layer_scope(), reference) == Some(true)
+    ref_visibility(
+        database,
+        overrides,
+        hidden,
+        database.root_layer_scope(),
+        reference,
+    ) == Some(true)
 }
 
 /// The shared visibility walk over one selection ref's chain.
@@ -174,15 +181,21 @@ pub fn ref_is_visible(
 /// resolution the display expansion uses for `ByLayer` styles, so a hidden
 /// layer cannot hide an entity in one place and colour it in another.
 ///
-/// `Some(false)` means "a step is on a hidden layer"; `None` means a step's
-/// entity does not exist, which the caller reports rather than treating as
-/// either answer.
+/// `Some(false)` means "a step is on a hidden layer **or** the ref is in the
+/// session hidden set"; `None` means a step's entity does not exist, which the
+/// caller reports rather than treating as either answer. HIDEOBJECTS /
+/// ISOLATEOBJECTS therefore suppress picking through the same walk that decides
+/// layer visibility, never through a second predicate.
 pub fn ref_visibility(
     database: &DrawingDatabase,
     overrides: &LayerOverrideSet,
+    hidden: &crate::SelectionSet,
     root: LayerScope,
     reference: &SelectionRef,
 ) -> Option<bool> {
+    if crate::select_filter::ref_hidden(hidden, reference) {
+        return Some(false);
+    }
     let mut visible = true;
     walk_ref_chain(database, root, reference, |layer| {
         visible &= overrides.is_layer_visible(database, layer);
@@ -556,7 +569,7 @@ pub fn pick_ray(
     ray: &Ray3,
     options: &PickOptions,
 ) -> CadResult<PickReport> {
-    pick_ray_filtered(database, document, ray, options, None, None)
+    pick_ray_filtered(database, document, ray, options, None, None, None)
 }
 
 /// The vendor-aware counterpart of [`pick_ray`].
@@ -571,7 +584,7 @@ pub fn pick_ray_with_vendor(
     options: &PickOptions,
     vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<PickReport> {
-    pick_ray_filtered(database, document, ray, options, None, vendor)
+    pick_ray_filtered(database, document, ray, options, None, None, vendor)
 }
 
 /// The layer-visibility-aware counterpart of [`pick_ray`].
@@ -589,8 +602,17 @@ pub fn pick_ray_with_visibility(
     ray: &Ray3,
     options: &PickOptions,
     overrides: &LayerOverrideSet,
+    hidden: &crate::SelectionSet,
 ) -> CadResult<PickReport> {
-    pick_ray_filtered(database, document, ray, options, Some(overrides), None)
+    pick_ray_filtered(
+        database,
+        document,
+        ray,
+        options,
+        Some(overrides),
+        Some(hidden),
+        None,
+    )
 }
 
 fn pick_ray_filtered(
@@ -599,6 +621,7 @@ fn pick_ray_filtered(
     ray: &Ray3,
     options: &PickOptions,
     overrides: Option<&LayerOverrideSet>,
+    hidden: Option<&crate::SelectionSet>,
     vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<PickReport> {
     let index = cached_pick_index(database, document, vendor);
@@ -609,6 +632,7 @@ fn pick_ray_filtered(
         options,
         index.as_deref(),
         overrides,
+        hidden,
         vendor,
     )
 }
@@ -624,7 +648,7 @@ pub fn pick_ray_exhaustive(
     ray: &Ray3,
     options: &PickOptions,
 ) -> CadResult<PickReport> {
-    pick_ray_exhaustive_filtered(database, document, ray, options, None, None)
+    pick_ray_exhaustive_filtered(database, document, ray, options, None, None, None)
 }
 
 fn pick_ray_exhaustive_filtered(
@@ -633,6 +657,7 @@ fn pick_ray_exhaustive_filtered(
     ray: &Ray3,
     options: &PickOptions,
     overrides: Option<&LayerOverrideSet>,
+    hidden: Option<&crate::SelectionSet>,
     vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<PickReport> {
     let profile = pick_profile_enabled();
@@ -640,19 +665,24 @@ fn pick_ray_exhaustive_filtered(
     let items = vendor::borrowed_pick_items(database, document, vendor);
     // Drop the hidden candidates before the precise stage (the same predicate
     // the indexed path applies), so the exhaustive fallback and the index agree
-    // on the visible set. Without overrides the list is untouched.
-    let items: Vec<_> = match overrides {
-        Some(overrides) => {
+    // on the visible set. Without overrides or a hidden set the list is
+    // untouched.
+    let items: Vec<_> = match (overrides, hidden) {
+        (None, None) => items,
+        (overrides, hidden) => {
             // One layer-table scan for the whole candidate list.
             let scope = database.root_layer_scope();
+            let empty = crate::SelectionSet::new();
+            let empty_overrides = LayerOverrideSet::new();
+            let overrides = overrides.unwrap_or(&empty_overrides);
+            let hidden = hidden.unwrap_or(&empty);
             items
                 .into_iter()
                 .filter(|item| {
-                    ref_visibility(database, overrides, scope, &item.source) == Some(true)
+                    ref_visibility(database, overrides, hidden, scope, &item.source) == Some(true)
                 })
                 .collect()
         }
-        None => items,
     };
     let item_count = items.len();
     if let Some(started) = started {
@@ -727,9 +757,10 @@ pub fn pick_ray_with_index(
     options: &PickOptions,
     index: Option<&PickIndex>,
 ) -> CadResult<PickReport> {
-    pick_ray_with_index_filtered(database, document, ray, options, index, None, None)
+    pick_ray_with_index_filtered(database, document, ray, options, index, None, None, None)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pick_ray_with_index_filtered(
     database: &DrawingDatabase,
     document: DocumentId,
@@ -737,10 +768,13 @@ fn pick_ray_with_index_filtered(
     options: &PickOptions,
     index: Option<&PickIndex>,
     overrides: Option<&LayerOverrideSet>,
+    hidden: Option<&crate::SelectionSet>,
     vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<PickReport> {
     let Some(index) = index else {
-        return pick_ray_exhaustive_filtered(database, document, ray, options, overrides, vendor);
+        return pick_ray_exhaustive_filtered(
+            database, document, ray, options, overrides, hidden, vendor,
+        );
     };
     let profile = pick_profile_enabled();
     let started = profile.then(Instant::now);
@@ -748,10 +782,15 @@ fn pick_ray_with_index_filtered(
     // The index is a conservative AABB broad phase and is keyed by scene
     // identity, which a session-only layer override does not change; the
     // visibility rule therefore has to be applied here, at query time.
-    if let Some(overrides) = overrides {
+    if overrides.is_some() || hidden.is_some() {
         let scope = database.root_layer_scope();
-        candidates
-            .retain(|source| ref_visibility(database, overrides, scope, source) == Some(true));
+        let empty_overrides = LayerOverrideSet::new();
+        let overrides = overrides.unwrap_or(&empty_overrides);
+        let empty = crate::SelectionSet::new();
+        let hidden = hidden.unwrap_or(&empty);
+        candidates.retain(|source| {
+            ref_visibility(database, overrides, hidden, scope, source) == Some(true)
+        });
     }
     let candidate_count = candidates.len();
     if let Some(started) = started {
@@ -828,6 +867,7 @@ pub fn pick_at_screen(
         back_faces,
         None,
         None,
+        None,
     )
 }
 
@@ -847,6 +887,7 @@ pub fn pick_at_screen_with_visibility(
     policy: &TolerancePolicy,
     back_faces: BackFacePolicy,
     overrides: &LayerOverrideSet,
+    hidden: &crate::SelectionSet,
 ) -> CadResult<PickReport> {
     pick_at_screen_filtered(
         database,
@@ -857,6 +898,7 @@ pub fn pick_at_screen_with_visibility(
         policy,
         back_faces,
         Some(overrides),
+        Some(hidden),
         None,
     )
 }
@@ -878,6 +920,7 @@ pub fn pick_at_screen_with_visibility_and_vendor(
     policy: &TolerancePolicy,
     back_faces: BackFacePolicy,
     overrides: &LayerOverrideSet,
+    hidden: &crate::SelectionSet,
     vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<PickReport> {
     pick_at_screen_filtered(
@@ -889,6 +932,7 @@ pub fn pick_at_screen_with_visibility_and_vendor(
         policy,
         back_faces,
         Some(overrides),
+        Some(hidden),
         vendor,
     )
 }
@@ -903,6 +947,7 @@ fn pick_at_screen_filtered(
     policy: &TolerancePolicy,
     back_faces: BackFacePolicy,
     overrides: Option<&LayerOverrideSet>,
+    hidden: Option<&crate::SelectionSet>,
     vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<PickReport> {
     let profile = pick_profile_enabled();
@@ -919,7 +964,9 @@ fn pick_at_screen_filtered(
             started.elapsed().as_secs_f64() * 1000.0
         );
     }
-    let result = pick_ray_filtered(database, document, &ray, &options, overrides, vendor);
+    let result = pick_ray_filtered(
+        database, document, &ray, &options, overrides, hidden, vendor,
+    );
     if let Some(started) = total_started {
         eprintln!(
             "YACR_PROFILE_PICK pick_at_screen_total elapsed_ms={:.3}",

@@ -532,7 +532,13 @@ mod tests {
         let root = db.root_layer_scope();
         let member = block_member_ref(2, 30);
         assert_eq!(
-            crate::picking::ref_visibility(&db, &LayerOverrideSet::new(), root, &member),
+            crate::picking::ref_visibility(
+                &db,
+                &LayerOverrideSet::new(),
+                &crate::SelectionSet::new(),
+                root,
+                &member
+            ),
             Some(true),
             "BLUE (the INSERT's layer) and layer 0 are both on"
         );
@@ -545,7 +551,13 @@ mod tests {
         let mut hide_insert_layer = LayerOverrideSet::new();
         hide_insert_layer.set(LayerId(2), false);
         assert_eq!(
-            crate::picking::ref_visibility(&db, &hide_insert_layer, root, &member),
+            crate::picking::ref_visibility(
+                &db,
+                &hide_insert_layer,
+                &crate::SelectionSet::new(),
+                root,
+                &member
+            ),
             Some(false),
             "hiding the INSERT's layer hides its layer-0 member"
         );
@@ -561,6 +573,7 @@ mod tests {
             crate::picking::ref_visibility(
                 &db,
                 &LayerOverrideSet::new(),
+                &crate::SelectionSet::new(),
                 root,
                 &block_member_ref(2, 31)
             ),
@@ -579,7 +592,13 @@ mod tests {
         let member = block_member_ref(2, 30);
         assert!(!hide_zero.is_entity_visible(&db, db.entity(EntityId(30)).unwrap()));
         assert_eq!(
-            crate::picking::ref_visibility(&db, &hide_zero, root, &member),
+            crate::picking::ref_visibility(
+                &db,
+                &hide_zero,
+                &crate::SelectionSet::new(),
+                root,
+                &member
+            ),
             Some(true),
             "the layer-0 row being off must not hide a member drawn on BLUE"
         );
@@ -588,7 +607,13 @@ mod tests {
         let mut solo = block_member_ref(2, 30);
         solo.instance = InstancePath::default();
         assert_eq!(
-            crate::picking::ref_visibility(&db, &hide_zero, root, &solo),
+            crate::picking::ref_visibility(
+                &db,
+                &hide_zero,
+                &crate::SelectionSet::new(),
+                root,
+                &solo
+            ),
             Some(false),
             "no containing INSERT means no inheritance"
         );
@@ -608,6 +633,7 @@ mod tests {
             crate::picking::ref_visibility(
                 &db,
                 &LayerOverrideSet::new(),
+                &crate::SelectionSet::new(),
                 db.root_layer_scope(),
                 &reference
             ),
@@ -616,6 +642,7 @@ mod tests {
         assert!(!crate::picking::ref_is_visible(
             &db,
             &LayerOverrideSet::new(),
+            &crate::SelectionSet::new(),
             &reference
         ));
     }

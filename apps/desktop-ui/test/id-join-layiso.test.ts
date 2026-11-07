@@ -165,7 +165,8 @@ test('JOIN sits at the end of the shipped Modify run and is a router command', a
     assert.equal(ids[joinIndex + 1], 'SELECTSIMILAR', `${tabId}: SELECTSIMILAR follows JOIN`);
     assert.deepEqual(
       ids.slice(joinIndex + 2),
-      ['REVERSE', 'PEDIT', 'OOPS', 'OVERKILL', 'BREAKATPOINT', 'HATCHTOBACK', 'TEXTTOFRONT'],
+      ['REVERSE', 'PEDIT', 'OOPS', 'OVERKILL', 'BREAKATPOINT', 'HATCHTOBACK', 'TEXTTOFRONT',
+        'SSX', 'SELECTCOUNT', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS'],
       `${tabId}: only the documented 2026-11-07 additions follow SELECTSIMILAR`,
     );
     const join = modify.items[joinIndex];

@@ -280,7 +280,14 @@ pub(crate) fn discover_closed_candidates(
     let mut candidates = Vec::new();
     for entity in database.model_space() {
         let reference = selection_ref(document_id, entity.id);
-        if ref_visibility(database, &session.layer_overrides, scope, &reference) != Some(true) {
+        if ref_visibility(
+            database,
+            &session.layer_overrides,
+            &session.hidden_entities,
+            scope,
+            &reference,
+        ) != Some(true)
+        {
             continue;
         }
         let Some(loop_) = closed_entity_loop(entity, &plane, seed) else {
@@ -393,7 +400,14 @@ fn discover_edge_faces(
     let mut edges = Vec::new();
     for entity in database.model_space() {
         let reference = selection_ref(document_id, entity.id);
-        if ref_visibility(database, &session.layer_overrides, scope, &reference) != Some(true) {
+        if ref_visibility(
+            database,
+            &session.layer_overrides,
+            &session.hidden_entities,
+            scope,
+            &reference,
+        ) != Some(true)
+        {
             continue;
         }
         if let Some(edge) = edge_from_geometry(&entity.geometry, seed) {

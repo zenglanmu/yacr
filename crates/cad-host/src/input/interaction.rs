@@ -516,6 +516,8 @@ impl HostCore {
             &policy,
             cad_app::BackFacePolicy::Cull,
             &c.session.layer_overrides,
+            // HIDEOBJECTS/ISOLATEOBJECTS refs are not clickable.
+            &c.session.hidden_entities,
             // Vendor-backed opaque entities are part of the clickable catalogue
             // (ADR-0028 D2); `None` is the exact pre-plugin behaviour.
             c.application.vendor_representations.as_deref(),

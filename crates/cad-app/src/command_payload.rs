@@ -972,4 +972,17 @@ pub enum CommandPayload {
     /// The layer names of a typed `LAYWALK <name>[,<name>...]` line: session
     /// overrides only (plus the active layer), same atomic path as `LAYISO`.
     LayerWalk(Vec<String>),
+    /// `QSELECT`/`FILTER`/`GETSEL`; full contract in
+    /// [`crate::command_id::select_filter`]. Read-only: only the selection moves.
+    SelectFilter {
+        property: String,
+        value: String,
+        mode: SelectionMode,
+    },
+    /// `-FIND`/`FIND`; full contract in [`crate::command_id::select_filter`].
+    /// `replacement = None` is the report-only form; `-FIND` refuses `Some`.
+    TextFind {
+        needle: String,
+        replacement: Option<String>,
+    },
 }

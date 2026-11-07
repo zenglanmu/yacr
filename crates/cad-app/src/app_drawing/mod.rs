@@ -51,6 +51,7 @@ mod draw_variants;
 mod drawing_edit;
 mod drawing_transform;
 mod explode;
+mod find_text;
 mod grip;
 mod hatch;
 mod hatch_boundary;

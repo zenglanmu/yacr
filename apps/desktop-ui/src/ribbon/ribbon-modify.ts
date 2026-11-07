@@ -100,6 +100,17 @@ export const HOME_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // popover), enabled by the shared one-object selection requirement. Paper/block
   // draw order and the all-objects form are NOT IMPLEMENTED; the hint says so.
   { id: 'TEXTTOFRONT', labelKey: 'draw.kind.texttofront', icon: 'properties', command: 'TEXTTOFRONT', hintKey: 'draw.kind.texttofront.hint' },
+  // The 2026-11-07 payload-free selection batch. SSX/SELECTCOUNT compare the
+  // first selection's five properties; the hide/isolate trio is session-only
+  // visibility state. All five are plain router buttons (no capture, no options
+  // popover); selection-gated rows live in `commands/gating.ts`. The typed
+  // QSELECT/FILTER/GETSEL/-FIND/FIND forms deliberately have no button: a button
+  // would have to invent the filter or the search text.
+  { id: 'SSX', labelKey: 'draw.kind.ssx', icon: 'selectAll', command: 'SSX' },
+  { id: 'SELECTCOUNT', labelKey: 'draw.kind.selectcount', icon: 'properties', command: 'SELECTCOUNT' },
+  { id: 'HIDEOBJECTS', labelKey: 'draw.kind.hideobjects', icon: 'clearSelection', command: 'HIDEOBJECTS' },
+  { id: 'ISOLATEOBJECTS', labelKey: 'draw.kind.isolateobjects', icon: 'layers', command: 'ISOLATEOBJECTS' },
+  { id: 'UNISOLATEOBJECTS', labelKey: 'draw.kind.unisolateobjects', icon: 'layers', command: 'UNISOLATEOBJECTS' },
 ]);
 
 /** The Draw tab's Modify panel, in display order. */
@@ -168,4 +179,15 @@ export const DRAW_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // popover), enabled by the shared one-object selection requirement. Paper/block
   // draw order and the all-objects form are NOT IMPLEMENTED; the hint says so.
   { id: 'TEXTTOFRONT', labelKey: 'draw.kind.texttofront', icon: 'properties', command: 'TEXTTOFRONT', hintKey: 'draw.kind.texttofront.hint' },
+  // The 2026-11-07 payload-free selection batch. SSX/SELECTCOUNT compare the
+  // first selection's five properties; the hide/isolate trio is session-only
+  // visibility state. All five are plain router buttons (no capture, no options
+  // popover); selection-gated rows live in `commands/gating.ts`. The typed
+  // QSELECT/FILTER/GETSEL/-FIND/FIND forms deliberately have no button: a button
+  // would have to invent the filter or the search text.
+  { id: 'SSX', labelKey: 'draw.kind.ssx', icon: 'selectAll', command: 'SSX' },
+  { id: 'SELECTCOUNT', labelKey: 'draw.kind.selectcount', icon: 'properties', command: 'SELECTCOUNT' },
+  { id: 'HIDEOBJECTS', labelKey: 'draw.kind.hideobjects', icon: 'clearSelection', command: 'HIDEOBJECTS' },
+  { id: 'ISOLATEOBJECTS', labelKey: 'draw.kind.isolateobjects', icon: 'layers', command: 'ISOLATEOBJECTS' },
+  { id: 'UNISOLATEOBJECTS', labelKey: 'draw.kind.unisolateobjects', icon: 'layers', command: 'UNISOLATEOBJECTS' },
 ]);

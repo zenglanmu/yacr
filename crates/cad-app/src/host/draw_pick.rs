@@ -57,6 +57,7 @@ impl HostController {
             &TolerancePolicy::default(),
             BackFacePolicy::Cull,
             &self.session.layer_overrides,
+            &self.session.hidden_entities,
         )?;
         Ok(report.hit.map(|hit| hit.source))
     }

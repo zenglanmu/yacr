@@ -20,6 +20,9 @@
 
 use cad_app::{CommandId, CommandPayload};
 
+use super::commands::{
+    FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, QSELECT_SELECTOR,
+};
 use super::diagnostics::cad_error_text;
 use super::{
     CadSession, ARGUMENT_SELECTOR, HATCHEDIT_SELECTOR, JUSTIFYTEXT_SELECTOR, PDMODE_SELECTOR,
@@ -74,6 +77,12 @@ impl CadSession {
             super::commands::LAYWALK_SELECTOR => self.layer_walk_argument(argument, text),
             super::commands::LTSCALE_SELECTOR => self.linetype_scale_argument(argument, text),
             super::commands::LAYERPMODE_SELECTOR => self.layer_pmode_argument(argument, text),
+            // The 2026-11-07 selection/filter batch: all five are typed argument
+            // forms of canonical selectors, never new commands.
+            QSELECT_SELECTOR | FILTER_SELECTOR | GETSEL_SELECTOR => {
+                self.select_filter_argument(selector, argument, text)
+            }
+            FIND_SELECTOR | FIND_REPORT_SELECTOR => self.find_argument(selector, argument, text),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

@@ -39,6 +39,7 @@ impl Application {
             CommandId::SelectAll => self.select_all(session, &command),
             CommandId::SelectSimilar => self.select_similar(session, &command),
             CommandId::SelectInBox => self.select_in_box(session, &command),
+            id if crate::select_filter::batch(id) => self.dispatch_batch(session, id, &command),
             // Read-only inquiry commands: no transaction/revision/undo, and all
             // stay out of `requires_work_mode` (FS mutates only the selection).
             CommandId::List => self.list_objects(session, &command),
@@ -61,8 +62,7 @@ impl Application {
             // `LAYERP`: pop the newest layer-override snapshot and apply it. It
             // never pushes (see `crate::layer_history`), so repeated presses walk
             // back monotonically. An empty history is a no-op with a named
-            // diagnostic, not an error — the same shape `RestoreLayers` uses for
-            // "nothing to restore".
+            // diagnostic, not an error — the same shape `RestoreLayers` uses.
             CommandId::LayerPrevious => {
                 // `LAYERP` takes no input at all: a caller that supplies one is
                 // refused rather than silently ignored (the selection is not its
@@ -556,6 +556,7 @@ impl Application {
                 self.reconcile_selection(session);
                 Ok(outcome)
             }
+            other => Err(CadError::Invariant(format!("unhandled command {other:?}"))),
         }
     }
 

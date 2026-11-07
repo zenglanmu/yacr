@@ -403,6 +403,7 @@ impl HostCore {
                     && cad_app::picking::ref_is_visible(
                         &drawing,
                         &c.session.layer_overrides,
+                        &c.session.hidden_entities,
                         reference,
                     )
             })

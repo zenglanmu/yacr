@@ -6,6 +6,7 @@
 
 mod alias_table;
 mod command_vocabulary;
+mod command_vocabulary_clipboard;
 mod gradient;
 mod hatchedit;
 mod import_accounting;
@@ -14,6 +15,7 @@ mod layer_arguments;
 mod layout_status;
 mod pedit;
 mod point_style;
+mod select_filter;
 mod snap_grid;
 mod space_argument;
 mod standard_view;

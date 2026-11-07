@@ -177,7 +177,11 @@ impl HostCore {
         let overlays = OverlayInputs {
             selection,
             hovered,
-            hidden: cad_app::SelectionSet::new(),
+            // HIDEOBJECTS / ISOLATEOBJECTS: session-only hidden refs are
+            // published as `FLAG_HIDDEN`, which discards the entity fragments
+            // in-shader. The hidden set is never removed from the resident base
+            // scene (declare that boundary in `docs/batch-select-2026-11-07.md`).
+            hidden: self.controller.borrow().session.hidden_entities.clone(),
             measurement,
             draw_preview: preview,
             // The live box-selection rubber band (ADR 0014 B.9): a transient

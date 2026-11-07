@@ -42,6 +42,7 @@ mod point_style;
 mod profile;
 mod reference_status;
 pub mod registry;
+mod select_filter;
 mod settings;
 mod snap_unit;
 mod space;
@@ -62,8 +63,6 @@ use cad_host::{HostCore, HostOptions, HostPlatform};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 // Names referenced only by intra-doc links in this module.
-#[allow(unused_imports)]
-use cad_app::input::DRAG_THRESHOLD_LOGICAL_PX;
 #[allow(unused_imports)]
 use cad_app::interaction::{InteractionRequest, SelectionMode};
 #[allow(unused_imports)]
@@ -539,7 +538,7 @@ impl CadSession {
     /// [`InteractionRequest::CapturePoint`] instead. Both are tagged with the
     /// **current** canvas metrics revision and both follow the ordinary release
     /// [`InteractionRequest::Pointer`] so the host's gesture life is closed. Any
-    /// drag beyond [`DRAG_THRESHOLD_LOGICAL_PX`] (or a release of a different
+    /// drag beyond [`cad_app::input::DRAG_THRESHOLD_LOGICAL_PX`] (or a release of a different
     /// button) keeps the plain pointer mapping: this layer emits no `SelectAt` /
     /// `CapturePoint` for a drag, and the host arbitrates from its own
     /// press/move/release state. Outside a capture, a 2D primary drag is a box
