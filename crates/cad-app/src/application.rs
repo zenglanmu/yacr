@@ -499,6 +499,7 @@ impl Application {
             | CommandId::MatchProp
             | CommandId::GripStretch
             | CommandId::Reverse
+            | CommandId::Oops
             | CommandId::CreateText
             | CommandId::CreateMText
             | CommandId::MLeader

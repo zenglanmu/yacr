@@ -1,13 +1,11 @@
 //! Per-document CAD session state and its recorded backend preference.
 //!
-//! Split out of the crate root to keep `lib.rs` inside the code-size limit.
-//! Every item here is re-exported at the crate root under its original name, so
-//! `cad_app::SessionState`, `cad_app::BackendChoice` and
-//! `cad_app::ClipboardEntry` are unchanged for every caller.
+//! Split out of the crate root (which keeps `lib.rs` within the size limit).
 
 use cad_db::MeasurementRecord;
 use cad_domain::*;
 
+mod erase_snapshot;
 use crate::draw_tool::{
     DrawIntent, DrawPreview, DrawTool, DrawToolKind, ToolParameter, ToolParameterStore, ToolValue,
     DEFAULT_POLYGON_SIDES,
@@ -18,6 +16,7 @@ use crate::measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKi
 use crate::selection::SelectionSet;
 use crate::tool_state::{DrawCapture, ToolSnapshot, ToolState};
 use crate::{AppMode, CommandId};
+pub use erase_snapshot::{EraseEntry, EraseSnapshot};
 
 /// One entity captured into the in-process clipboard.
 ///
@@ -171,6 +170,13 @@ pub struct SessionState {
     /// with no base pastes relative to the world origin, exactly like the two
     /// commands' documented behaviour; `PASTEORIG` ignores it entirely.
     pub(crate) clipboard_base: Option<Point3>,
+    /// The entities removed by the last ERASE, for `OOPS`.
+    ///
+    /// `None` until an ERASE commits a delete; a second ERASE replaces it, and
+    /// the first OOPS consumes it. Restored entities get **fresh ids** — the
+    /// database id allocator never reuses an id — so an OOPS restore is a new
+    /// copy, not the same row back.
+    last_erase: Option<EraseSnapshot>,
 }
 
 /// CAD backend preference shared by UI, app state and hosts (spec §6).
@@ -207,6 +213,7 @@ impl SessionState {
             selected_measurement_kind: MeasurementToolKind::Distance,
             clipboard: Vec::new(),
             clipboard_base: None,
+            last_erase: None,
         }
     }
 
@@ -444,6 +451,34 @@ impl SessionState {
         parameter.validate(value)?;
         self.tool_parameters.set(parameter, value);
         Ok(())
+    }
+
+    /// **Test-only**: store a parameter value without validation.
+    ///
+    /// This exists so a contract test can reach a command's own defensive
+    /// re-validation of a value the typed channel would already have refused
+    /// (today: a HATCH predefined pattern index past the implemented table).
+    /// It is `#[cfg(test)]`, so no wire request, host or UI path can inject an
+    /// unvalidated value.
+    /// **Test-only**: store a parameter value without validation.
+    ///
+    /// This exists so a contract test can reach a command's own defensive
+    /// re-validation of a value the typed channel would already have refused
+    /// (today: a HATCH predefined pattern index past the implemented table).
+    /// It is `#[cfg(test)]`, so no wire request, host or UI path can inject an
+    /// unvalidated value.
+    /// The last ERASE snapshot, if any (`OOPS`'s whole input).
+    pub(crate) fn last_erase(&self) -> Option<&EraseSnapshot> {
+        self.last_erase.as_ref()
+    }
+
+    /// Replace (or clear) the last ERASE snapshot.
+    ///
+    /// A snapshot whose document is not this session's document is dropped
+    /// instead of stored, so the invariant "the snapshot belongs to the open
+    /// document" cannot be broken by a caller.
+    pub(crate) fn set_last_erase(&mut self, snapshot: Option<EraseSnapshot>) {
+        self.last_erase = snapshot.filter(|snapshot| snapshot.document == self.document);
     }
 
     /// **Test-only**: store a parameter value without validation.

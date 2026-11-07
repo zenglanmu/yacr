@@ -103,3 +103,31 @@ test('both Modify panels carry the small REVERSE router button', () => {
 test('REVERSE requires at least one selected object', () => {
   assertSelectionRule({ ...REVERSE, count: 1 });
 });
+
+// --- OOPS: restore the last ERASE --------------------------------------------
+
+const OOPS = Object.freeze({
+  id: 'OOPS',
+  labelKey: 'draw.kind.oops',
+  hintKey: 'draw.kind.oops.hint',
+  icon: 'undo',
+});
+
+test('OOPS is catalogued as a selection-free modify selector', () => {
+  assertCatalogued({ ...OOPS, group: 'modify' });
+  // Canonical, like REVERSE: never an alias of UNDO (the history command) or
+  // U (its AutoCAD abbreviation) — OOPS restores one erase, not a history step.
+  assert.notEqual(OOPS.id, 'UNDO');
+  assert.notEqual(OOPS.id, 'U');
+});
+
+test('both Modify panels carry the small OOPS router button', () => {
+  assertRibbonButton(OOPS);
+});
+
+test('OOPS has no selection precondition', () => {
+  assertSelectionRule({ ...OOPS, count: 0 });
+  assert.equal(selectionRequirementMet(OOPS.id, { ...DOC, documentLabel: null }), false,
+    'OOPS still needs an open drawing');
+});
+

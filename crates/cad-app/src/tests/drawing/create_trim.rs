@@ -525,6 +525,7 @@ fn drawing_commands_are_work_only_in_the_catalogue() {
         CommandId::OffsetEntity,
         CommandId::SetActiveLayer,
         CommandId::Reverse,
+        CommandId::Oops,
     ] {
         assert!(id.requires_work_mode(), "{id:?} must be Work-only");
     }

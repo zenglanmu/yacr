@@ -200,6 +200,8 @@ export const HOST_NAMES = [
   // REVERSE (AutoCAD 2026) is the selection-based direction flip: at least one
   // LINE/LWPOLYLINE/SPLINE selected, no pick and no options.
   'REVERSE',
+  // OOPS (AutoCAD 2026) restores the last ERASE; selection-free, payload-free.
+  'OOPS',
   // SCALETEXT (2026-11-01) is the selection-based text scaler: one or more
   // Text/MTEXT objects plus one positive factor (`scaleTextFactor`), no picks. It
   // is a canonical selector of its own, never an alias of `SCALE` (which picks a

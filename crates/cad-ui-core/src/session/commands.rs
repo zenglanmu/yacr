@@ -169,6 +169,9 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // REVERSE (AutoCAD 2026) reverses the vertices/direction of the selected
     // LINEs/LWPOLYLINEs/SPLINEs; the selection is the whole input.
     ("REVERSE", CommandId::Reverse),
+    // OOPS restores the entities removed by the last ERASE (ERASE-only v1); it is
+    // selection-free and takes no payload.
+    ("OOPS", CommandId::Oops),
     ("ARRAYRECT", CommandId::ArrayRectangular),
     ("ARRAYPOLAR", CommandId::ArrayPolar),
     ("ALIGN", CommandId::AlignEntities),

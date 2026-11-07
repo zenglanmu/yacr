@@ -1,12 +1,10 @@
-//! `REVERSE`, `OVERKILL` and `OOPS` (AutoCAD 2026 2D modify commands).
+//! `REVERSE` and `OOPS` (AutoCAD 2026 2D modify commands).
 //!
-//! This module is the honest home of the three selection/database modify
-//! commands that are not tied to the draw-capture state machine:
+//! This module is the honest home of the selection/database modify commands
+//! that are not tied to the draw-capture state machine:
 //!
 //! * [`crate::CommandId::Reverse`] — reverse the vertices/direction of selected
 //!   LINEs, LWPOLYLINEs and SPLINEs (selection-based, one transaction);
-//! * [`crate::CommandId::Overkill`] — remove **exact duplicate** selected
-//!   entities (v1, one transaction; see [`Application::overkill`]);
 //! * [`crate::CommandId::Oops`] — reinsert the entities removed by the last
 //!   ERASE (selection-free, one transaction with fresh ids).
 //!
@@ -126,6 +124,133 @@ impl Application {
                 object: None,
                 code: "reverse.applied".into(),
                 message: format!("REVERSE: reversed {count} entity/entities"),
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+
+    /// `OOPS`: reinsert the entities removed by the **last ERASE** in one
+    /// transaction / one undo step, with fresh entity ids.
+    ///
+    /// The snapshot is session state ([`crate::session_state::EraseSnapshot`])
+    /// written by ERASE **after** its delete committed. It belongs to one
+    /// document and is consumed by the first OOPS, so a second OOPS reports
+    /// `oops.nothing` and writes nothing. Undo of OOPS removes the restored
+    /// copies but does **not** recreate the snapshot (the user would have to use
+    /// REDO to get the copies back).
+    ///
+    /// AutoCAD also restores objects removed by BLOCK/WBLOCK; this build records
+    /// **ERASE only** (the declared v1 boundary), and the docs say so.
+    pub(crate) fn oops_restore(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        if !matches!(command.payload, CommandPayload::None) {
+            return Err(CadError::InvalidInput(
+                "oops.payload: OOPS takes no payload".into(),
+            ));
+        }
+        let Some(snapshot) = session.last_erase().cloned() else {
+            return Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: "oops.nothing".into(),
+                    message: "OOPS: no ERASE to restore".into(),
+                }],
+                measurement: None,
+                point_report: None,
+            });
+        };
+        if snapshot.document != command.document {
+            return Err(CadError::InvalidInput(format!(
+                "oops.document: the last ERASE belongs to document {}, not {}",
+                snapshot.document.0, command.document.0
+            )));
+        }
+        if snapshot.entries.is_empty() {
+            return Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: "oops.nothing".into(),
+                    message: "OOPS: the last ERASE recorded no entities".into(),
+                }],
+                measurement: None,
+                point_report: None,
+            });
+        }
+
+        let document_id = command.document;
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
+
+        // Allocate every fresh id before the transaction opens. The row keeps the
+        // erased layer/space/draw order/type key; only its identity is new and the
+        // import-only source handle is cleared (it described the erased row).
+        let mut planned = Vec::with_capacity(snapshot.entries.len());
+        for entry in snapshot.entries {
+            let new_id = drawing.allocate_entity_id();
+            let mut entity = entry.entity;
+            entity.object.id = ObjectId(new_id.0);
+            entity.object.source_handle = None;
+            entity.id = new_id;
+            planned.push((new_id, entity, entry.display));
+        }
+
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged = drawing.begin_drawing_transaction("oops restore", transaction)?;
+            for (id, entity, display) in &planned {
+                staged.insert_entity(entity.clone())?;
+                staged.update_entity_display_state(*id, display)?;
+            }
+            staged.commit()?
+        };
+
+        let mut patches = Vec::with_capacity(planned.len());
+        let mut objects = Vec::with_capacity(planned.len());
+        for (id, _, display) in &planned {
+            let stored = drawing.entity(*id).cloned().ok_or_else(|| {
+                CadError::Invariant(format!("OOPS: restored entity {} vanished", id.0))
+            })?;
+            let mut patch = drawing_patch(*id, None, Some(stored));
+            patch.after_state = Some(display.clone());
+            patches.push(patch);
+            objects.push(ObjectId(id.0));
+        }
+        let count = patches.len();
+        self.publish_candidate(
+            document_id,
+            candidate,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: "oops restore".into(),
+                patches,
+                block_patches: Vec::new(),
+                merge_key: None,
+            },
+        )?;
+        // Consumed only after the restore committed: a refused OOPS must leave the
+        // snapshot intact for the next attempt.
+        session.set_last_erase(None);
+
+        Ok(CommandOutcome {
+            objects,
+            changes: Some(Arc::new(change_set)),
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "oops.applied".into(),
+                message: format!("OOPS: restored {count} entity/entities from the last ERASE"),
             }],
             measurement: None,
             point_report: None,

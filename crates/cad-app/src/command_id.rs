@@ -956,6 +956,13 @@ pub enum CommandId {
     /// whole input (the declared divergence from AutoCAD's interactive pick
     /// prompt). Full contract: [`crate::command_id::reverse`].
     Reverse,
+    /// `OOPS` (Work-only): restore the entities removed by the **last ERASE** in
+    /// one transaction / one undo step, with fresh entity ids.
+    ///
+    /// Payload is [`crate::CommandPayload::None`] (OOPS is selection-free).
+    /// Full contract, including the ERASE-only v1 boundary and the undo/identity
+    /// rules: [`crate::command_id::oops`].
+    Oops,
 }
 
 mod capabilities;
@@ -966,6 +973,7 @@ pub mod construction_line;
 pub mod grip_stretch;
 pub mod hatch;
 pub mod match_prop;
+pub mod oops;
 pub mod point_style;
 pub mod reverse;
 pub mod zoom;

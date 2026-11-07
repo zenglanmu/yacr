@@ -97,6 +97,7 @@ impl CommandId {
                 | Self::CreateXLine
                 | Self::CreateRay
                 | Self::Reverse
+                | Self::Oops
         )
     }
 }

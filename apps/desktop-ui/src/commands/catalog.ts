@@ -377,6 +377,12 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // shipped row moves; the `mirror` glyph is the closest direction glyph in the
   // icon set.
   { id: 'REVERSE', labelKey: 'draw.kind.reverse', icon: 'mirror', group: 'modify' },
+  // OOPS (AutoCAD 2026) restores the objects removed by the last ERASE. It is
+  // selection-free and payload-free, so it is a plain router command with no
+  // capture and no selection rule (gating count 0). v1 records ERASE only —
+  // AutoCAD also restores BLOCK/WBLOCK removals, which this build does not.
+  // Appended last so no shipped row moves; `undo` is the closest restore glyph.
+  { id: 'OOPS', labelKey: 'draw.kind.oops', icon: 'undo', group: 'modify' },
   // AUDIT (AutoCAD 2026) is the detect-only drawing audit: it reports every
   // stored entity that fails the database's own validity check and repairs
   // nothing (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). It is a

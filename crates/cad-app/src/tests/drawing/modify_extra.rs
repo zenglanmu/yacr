@@ -363,3 +363,176 @@ fn reverse_is_refused_in_viewer_mode() {
     assert_eq!(revision(&app), before);
     assert_eq!(undo_depth(&app), 0);
 }
+
+// --- OOPS --------------------------------------------------------------------
+
+fn closed_rectangle() -> SemanticGeometry {
+    SemanticGeometry::Polyline {
+        points: vec![
+            p3(0.0, 0.0, 0.0),
+            p3(6.0, 0.0, 0.0),
+            p3(6.0, 3.0, 0.0),
+            p3(0.0, 3.0, 0.0),
+        ],
+        bulges: vec![0.0; 4],
+        closed: true,
+    }
+}
+
+fn build_rectangle_with_color() -> (Application, SessionState) {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(ent(1, closed_rectangle(), 0))
+        .unwrap();
+    builder
+        .set_entity_render_attributes(
+            EntityId(1),
+            cad_db::EntityRenderAttributes {
+                color: cad_db::EntityColor::Explicit([12, 34, 56]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let drawing = builder.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([8u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
+#[test]
+fn oops_restores_the_last_erased_rectangle_with_a_new_id_and_one_undo_step() {
+    let (mut app, mut session) = build_rectangle_with_color();
+    let erased_color = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity_display_state(EntityId(1))
+        .attributes
+        .color
+        .clone();
+    session.selection = SelectionSet::from_refs(vec![ref_of(1)]);
+    app.execute(
+        &mut session,
+        command(CommandId::EraseEntities, CommandPayload::None),
+    )
+    .unwrap();
+    assert!(app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(1))
+        .is_none());
+    assert_eq!(undo_depth(&app), 1);
+
+    let outcome = app
+        .execute(&mut session, command(CommandId::Oops, CommandPayload::None))
+        .expect("OOPS must restore");
+    assert_eq!(outcome.diagnostics[0].code, "oops.applied");
+    assert_eq!(undo_depth(&app), 2);
+
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    let restored: Vec<_> = drawing.entities().collect();
+    assert_eq!(restored.len(), 1);
+    let restored = restored[0];
+    assert_ne!(restored.id, EntityId(1), "a restore gets a fresh id");
+    assert_eq!(restored.geometry, closed_rectangle());
+    assert_eq!(restored.layer, LayerId(0));
+    assert_eq!(restored.space, SpaceId::Model);
+    assert_eq!(
+        drawing.entity_display_state(restored.id).attributes.color,
+        erased_color,
+        "the render attributes are restored"
+    );
+
+    // The snapshot is consumed: a second OOPS is a no-op that writes nothing.
+    let rev = revision(&app);
+    let outcome = app
+        .execute(&mut session, command(CommandId::Oops, CommandPayload::None))
+        .unwrap();
+    assert_eq!(outcome.diagnostics[0].code, "oops.nothing");
+    assert!(outcome.changes.is_none());
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 2);
+
+    // Undo of OOPS removes the restored copy but does not recreate the snapshot.
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .unwrap();
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity_count(),
+        0
+    );
+    let outcome = app
+        .execute(&mut session, command(CommandId::Oops, CommandPayload::None))
+        .unwrap();
+    assert_eq!(outcome.diagnostics[0].code, "oops.nothing");
+}
+
+#[test]
+fn oops_without_an_erase_is_a_named_no_op() {
+    let (mut app, mut session) = build(vec![ent(1, closed_rectangle(), 0)], AppMode::Work);
+    let rev = revision(&app);
+    let outcome = app
+        .execute(&mut session, command(CommandId::Oops, CommandPayload::None))
+        .unwrap();
+    assert_eq!(outcome.diagnostics[0].code, "oops.nothing");
+    assert!(outcome.changes.is_none());
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn oops_refuses_a_payload_and_never_stores_a_foreign_document_snapshot() {
+    let (mut app, mut session) = build(vec![ent(1, closed_rectangle(), 0)], AppMode::Work);
+    let err = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Oops,
+                CommandPayload::Points(vec![p3(0.0, 0.0, 0.0)]),
+            ),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(err, CadError::InvalidInput(ref reason) if reason.starts_with("oops.payload"))
+    );
+
+    // A snapshot for another document is dropped by the session setter, so the
+    // foreign-document restore path is unreachable through the public API.
+    session.set_last_erase(Some(crate::session_state::EraseSnapshot {
+        document: DocumentId(2),
+        entries: Vec::new(),
+    }));
+    assert!(session.last_erase().is_none());
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn oops_is_refused_in_viewer_mode() {
+    let (mut app, mut session) = build(vec![ent(1, closed_rectangle(), 0)], AppMode::Viewer);
+    let rev = revision(&app);
+    let err = app
+        .execute(&mut session, command(CommandId::Oops, CommandPayload::None))
+        .unwrap_err();
+    assert_eq!(err, CadError::PermissionDenied);
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 0);
+}
+

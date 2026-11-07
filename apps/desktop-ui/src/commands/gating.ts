@@ -267,6 +267,10 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // refuses an empty selection by name (`reverse.selection`). The table minimum
   // is one and the sentence is the command's own hint.
   REVERSE: Object.freeze({ count: 1, reasonKey: 'draw.kind.reverse.hint' }),
+  // OOPS (AutoCAD 2026) restores the last ERASE and never reads the selection,
+  // so it has no selection precondition. The row exists for the "no drawing is
+  // open" answer only, like LAYERP.
+  OOPS: Object.freeze({ count: 0, reasonKey: 'draw.kind.oops.hint' }),
   LAYISO: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
   LAYUNISO: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
   LAYOFF: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),

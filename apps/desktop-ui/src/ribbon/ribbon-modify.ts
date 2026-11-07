@@ -74,7 +74,11 @@ export const HOME_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // button with no popover; enablement is the shared admission plus its
   // own one-object selection requirement.
   { id: 'REVERSE', labelKey: 'draw.kind.reverse', icon: 'mirror', command: 'REVERSE' },
+  // OOPS restores the last ERASE: no capture, no selection, `undo` glyph.
+  { id: 'OOPS', labelKey: 'draw.kind.oops', icon: 'undo', command: 'OOPS' },
 ]);
+
+/** The Draw tab's Modify panel, in display order. */
 
 /** The Draw tab's Modify panel, in display order. */
 export const DRAW_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
@@ -119,4 +123,5 @@ export const DRAW_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   // Same tail slot as the Home tab: REVERSE is selection-based, so it
   // carries no pick prompt and no popover.
   { id: 'REVERSE', labelKey: 'draw.kind.reverse', icon: 'mirror', command: 'REVERSE' },
+  { id: 'OOPS', labelKey: 'draw.kind.oops', icon: 'undo', command: 'OOPS' },
 ]);
