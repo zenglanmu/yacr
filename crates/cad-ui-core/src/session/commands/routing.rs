@@ -90,6 +90,7 @@ pub(crate) fn interaction_request_for(
         CommandId::DimOrdinate => Some(InteractionRequest::BeginDraw(DrawToolKind::DimOrdinate)),
         CommandId::DimBaseline => Some(InteractionRequest::BeginDraw(DrawToolKind::DimBaseline)),
         CommandId::DimContinue => Some(InteractionRequest::BeginDraw(DrawToolKind::DimContinue)),
+        CommandId::DimRotated => Some(InteractionRequest::BeginDraw(DrawToolKind::DimRotated)),
         CommandId::MoveEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Move)),
         CommandId::CopyEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Copy)),
         CommandId::RotateEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Rotate)),

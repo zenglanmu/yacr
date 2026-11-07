@@ -315,7 +315,7 @@ test('no control is invented for the MTEXT features that are not implemented', (
   // fourth row (spacing, columns, background, direction) into the map.
   assert.deepEqual(TOOL_PARAMETERS['draw.mtext'].keys, ['textHeight', 'textRotation', 'mtextAttachment']);
   assert.deepEqual(TOOL_PARAMETERS['draw.text'].keys, ['textHeight', 'textRotation']);
-  assert.equal(Object.keys(TOOL_PARAMETER_SPECS).length, 29);
+  assert.equal(Object.keys(TOOL_PARAMETER_SPECS).length, 30);
   // No spec names an unimplemented MTEXT feature.
   for (const key of Object.keys(TOOL_PARAMETER_SPECS)) {
     assert.doesNotMatch(

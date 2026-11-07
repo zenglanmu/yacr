@@ -146,6 +146,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("DIMORDINATE", CommandId::DimOrdinate),
     ("DIMBASELINE", CommandId::DimBaseline),
     ("DIMCONTINUE", CommandId::DimContinue),
+    ("DIMROTATED", CommandId::DimRotated),
+    ("DIMSPACE", CommandId::DimSpace),
     ("HATCH", CommandId::Hatch),
     // HATCHPOINT is the project-specific **internal point** selector (like
     // SELECTINBOX/GRIPSTRETCH): one picked point, then the command discovers the

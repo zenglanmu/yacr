@@ -58,7 +58,7 @@ test('the three text commands are annotate-group catalogue rows', () => {
     );
   }
   const order = COMMAND_CATALOG.map(command => command.id);
-  assert.equal(order.indexOf('TORIENT'), order.indexOf('DIMCONTINUE') + 1);
+  assert.equal(order.indexOf('TORIENT'), order.indexOf('DIMCONTINUE') + 3);
   assert.equal(order.indexOf('TCASE'), order.indexOf('TORIENT') + 1);
   assert.equal(order.indexOf('TXT2MTXT'), order.indexOf('TCASE') + 1);
 });
@@ -68,7 +68,7 @@ test('the three text commands are annotate-group catalogue rows', () => {
 test('the annotate panel carries the three buttons and TCASE five mode rows', () => {
   const items = annotationPanel().items;
   const ids = items.map(item => item.id);
-  assert.equal(ids.indexOf('TORIENT'), ids.indexOf('DIMCONTINUE') + 1);
+  assert.equal(ids.indexOf('TORIENT'), ids.indexOf('DIMCONTINUE') + 3);
 
   const torient = items.find(item => item.id === 'TORIENT');
   assert.equal(torient.command, 'TORIENT');
