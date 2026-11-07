@@ -30,6 +30,7 @@ pub mod recovery;
 pub mod render_scene;
 mod select_all;
 mod select_box;
+mod select_similar;
 pub mod selection;
 pub mod snap;
 pub mod tasks;
@@ -38,6 +39,7 @@ pub mod vendor;
 pub mod viewer_config;
 pub mod zoom_history;
 
+mod app_audit;
 mod app_zoom;
 mod layer_history;
 mod space;

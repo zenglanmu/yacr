@@ -36,7 +36,7 @@
 - **补全候选**（`apps/desktop-ui/src/components/CommandLine.tsx` + `commands.ts::filterCommandSuggestions`；
   旧文档指向的 `command-bar.slint` 已随 Slint 删除）：
   - 候选来源是 **`COMMAND_CATALOG`（显示目录）+ 宿主别名表**（`cad_command_aliases`），
-    **不是**全部 110 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
+    **不是**全部 115 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
     字母序（**不去重**，也**不是**纯字典序）。
   - 输入变化即时计算候选；候选只**填充**文本，**从不执行**命令。
   - `Tab`：**仅当有高亮行**时把命令行替换成该名字（**没有**“无高亮则第一项”的回退）。
@@ -55,10 +55,10 @@
 
 ## 2. 命令表（只列**有行为注解**的选择子）
 
-> **完整清单不在这里**：穷尽的 **110 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
+> **完整清单不在这里**：穷尽的 **115 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
 > `docs/autocad-command-coverage.md` §2；本节只保留**有行为注解**的行。
 > 选择子与别名的**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs`
-> （`COMMAND_TABLE` **110** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
+> （`COMMAND_TABLE` **115** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
 > `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **57**）。
 > 本表的 **canonical 列**只出现**被准入的名字**，**别名列**只出现 `COMMAND_ALIASES` 里的真实行；
 > 键位、面板与 IPC 能力见 §2a，**不混进命令表**。
@@ -95,6 +95,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `FILLET POLYLINE` | 编辑（AutoCAD 的 **Polyline 模式**，独立选择子：**恰好 1 个**选中实体，每个**内顶点**用会话参数 `filletRadius` 换成两切点 + 一段圆弧；实体**原地重写**、一条事务/一步撤销；两线 `FILLET` 不变） | 是 | — |
 | `CHAMFER POLYLINE` | 编辑（同上选择式：`chamferDistanceA` 量在**入边**、`chamferDistanceB` 量在**出边**——**我们的规则**，不是 AutoCAD 提示顺序的复刻） | 是 | — |
 | `HATCHPOINT` | 绘制（**本项目选择子**：按内部点填充。在可见的**整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` **以及 `LINE`/`ARC` 边链**中取**最小包含边界**，嵌套环作岛屿；`LINE`/`ARC` 用平面半边面行走、弧存**精确 bulge**；**不**使用当前选择、只认 `+Z` 同标高、只支持模型空间；填充参数与 `HATCH` 完全相同） | 是 | — |
+| `REVCLOUD` | 绘制（**对象模式 v1**：恰好 1 条选中的**闭合直线段** LWPOLYLINE，把每条边换成一段向外弧（bulge 幅度 0.5）；无矩形/多边形绘制、无 Arc length、无拾取；实体原地重写、一条事务/一步撤销） | 是 | — |
 | `SCALETEXT` | 编辑（选择式：一个或多个 `TEXT`/`MTEXT`，按 `scaleTextFactor`（有限 **> 0**）缩放字高；MTEXT 的 `wrap_width` 同步缩放；`1.0` 为 no-op 并按名拒绝；一条事务/一步撤销，位置/旋转/对齐/样式保留） | 是 | — |
 | `LAYOFF` | 图层（关闭选择所在图层，当前层除外；会话覆盖，不写 DWG、不升 revision） | 否 | — |
 | `LAYERP` | 图层（恢复**上一次**覆盖状态；有界 16 步快照环，仅真实改动前压栈；会话内，不持久化） | 否 | — |
@@ -120,6 +121,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `CONFIRM` | 交互（工具进行中时 `Enter` → 确认；`ENTER` 是**真实别名**） | 是 | `ENTER` |
 | `CANCEL` | 交互（取消最高优先级交互；`Esc` 是**键**，不是别名） | 否 | — |
 | `SELECTALL` | 选择（全选可见模型空间对象） | 否 | — |
+| `SELECTSIMILAR` | 选择（**v1 仅按几何类型**：把可见模型空间中与当前选择同类型的对象**并入**选择；无 layer/颜色/线型等属性匹配；仅模型空间） | 否 | — |
 | `PAN` | 导航 | 否 | `P` |
 | `FIT` | 导航（缩放到范围；`ZOOM EXTENTS` 是**真实别名**） | 否 | `ZOOM EXTENTS` |
 | `ZOOM` | 导航（参数形式 `ZOOM <factor>` / `ALL` / `EXTENTS` / **`WINDOW`** / **`PREVIOUS`**；裸 `ZOOM` 显式拒绝） | 否 | `Z` |
@@ -131,8 +133,11 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `PLOT` | 宿主（矢量导出 SVG/PDF） | 否 | `EXPORT`、`PRINT` |
 | `SWITCH2D3D` | 观察（2D 俯视 ↔ 3D 透视切换；切回 2D 恢复保存的相机） | 否 | — |
 | `PROJECTION` | 观察（透视/正交切换） | 否 | — |
+| `MODEL` | 空间（payload-free 切到模型空间；复用 `SPACE MODEL` 的校验 + 自动取景，Model 标签页走同一命令） | 否 | — |
+| `PLAN` | 观察（**Top/plan 2D 视图**；无 UCS/World/Current 选项——本构建无 UCS 模型） | 否 | — |
 | `MODE` | 模式（**需 `Mode` 载荷**：Viewer/Work；裸调用按名拒绝） | 否 | — |
 | `DIAGNOSTICS` | UI（诊断抽屉） | 否 | — |
+| `AUDIT` | 诊断（逐实体跑 `cad-db` 校验并报告诊断；**只检测、不修复**；只读） | 否 | — |
 | `GRID` | 显示（**仅**栅格叠加开关，2026-10-25 起真实选择器） | 否 | `GR` |
 | `SNAP` | 显示（**栅格捕捉**开关 F9；会话状态，不写库，经 `interaction.gridSnapEnabled` 持久化） | 否 | — |
 | `SNAPUNIT` | 显示（参数形式 `SNAPUNIT <value>`：栅格捕捉间距 sysvar，正十进制数，经 `interaction.snapSpacing` 持久化） | 否 | — |
@@ -380,7 +385,7 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**110 个选择子**，与 `CommandId` 变体一一对应；
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**115 个选择子**，与 `CommandId` 变体一一对应；
   P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`/
   `PDMODE`/`PDSIZE`，2026-10-27 再加 `LAYERP`/`AREA OBJECT`，**2026-10-28 再加 `COPYBASE`/`CUTBASE`/
   `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`/`BREAK`/`DIVIDE`/`LENGTHEN`/`INSERT`/`SCALETEXT`/`BLOCK`/`PASTEBLOCK`/`XLINE`/`RAY`/`CIRCLE 2P`/`CIRCLE 3P`/`CIRCLE D`**——`ID` 是测量选择子、

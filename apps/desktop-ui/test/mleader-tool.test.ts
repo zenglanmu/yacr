@@ -103,11 +103,11 @@ test('MLEADER sits between TEXT and HATCH on both draw panels, with no variant p
     assert.equal(ids[at - 2], 'MTEXT', `${tabId}: SCALETEXT follows MTEXT`);
     assert.equal(ids[at - 3], 'TEXT', `${tabId}: MTEXT follows TEXT`);
     assert.deepEqual(
-      ids.slice(-7),
-      ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT'],
+      ids.slice(-8),
+      ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT', 'REVCLOUD'],
       `${tabId}: fixed tail order`,
     );
-    assert.equal(items.at(-1).id, 'HATCHPOINT', `${tabId}/draw still ends with HATCHPOINT`);
+    assert.equal(items.at(-1).id, 'REVCLOUD', `${tabId}/draw ends with the REVCLOUD row`);
     assert.equal(items.filter(item => item.id === MLEADER.id).length, 1, `${tabId}: one MLEADER button`);
 
     const item = items[at];

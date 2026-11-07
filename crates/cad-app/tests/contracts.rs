@@ -26,6 +26,8 @@ fn viewer_rejects_every_mutating_work_entry() {
         CommandId::LayOff,
         CommandId::RestoreLayers,
         CommandId::SwitchSpace,
+        // MODEL is the payload-free path to the same session-state switch.
+        CommandId::ModelSpace,
         CommandId::SetMode,
     ] {
         assert_eq!(session.authorize(command), Ok(()));

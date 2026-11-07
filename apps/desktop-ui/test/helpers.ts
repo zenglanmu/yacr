@@ -79,8 +79,21 @@ export async function readCatalog(locale) {
 // (`OSNAP`), which stays the F3 toggle.
 export const HOST_NAMES = [
   'OPEN', 'NEW', 'PLOT', 'SAVE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
-  'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'SELECT', 'SELECTALL', 'MEASURE', 'CONFIRM',
-  'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
+  'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'MODEL', 'SELECT', 'SELECTALL', 'SELECTSIMILAR', 'MEASURE', 'CONFIRM',
+  'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS',
+  // AUDIT (AutoCAD 2026): detect-only drawing audit, a payload-free canonical
+  // selector of its own. The Rust lane adds `CommandId::AuditDrawing` to
+  // `COMMAND_TABLE`; this mirror stands in for the loaded `cad_commands`
+  // vocabulary and never proves the host advertises the name.
+  'AUDIT',
+  'SWITCHBACKEND', 'SWITCH2D3D',
+  // PLAN (AutoCAD 2026): the payload-free "orthographic view of the XY plane"
+  // selector. v1 is the top/plan 2D view only (this build has no UCS model, so
+  // PLAN's UCS/World/Current options are NOT IMPLEMENTED and take no argument).
+  // The Rust lane adds the same name (`CommandId::PlanView`); this mirror stands
+  // in for the loaded `cad_commands` vocabulary and never proves the host
+  // advertises it.
+  'PLAN',
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER', 'DIMANGULAR', 'DIMORDINATE', 'DIMBASELINE', 'DIMCONTINUE', 'MOVE', 'TRIM',
   'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'EXPLODE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   // XLINE / RAY (2026-11-01): the two construction captures. Each is a canonical
@@ -169,6 +182,13 @@ export const HOST_NAMES = [
   // them in the canonical run, exactly as `cad_ui_core::session::COMMAND_TABLE`
   // now does.
   'CHAMFER POLYLINE', 'FILLET POLYLINE',
+  // REVCLOUD (AutoCAD 2026) is the **selection-based Object mode**: the one
+  // preselected closed straight-segment polyline is the whole input
+  // (`CommandPayload::None`), so it is an ordinary canonical selector, not a
+  // draw capture. There is no interactive rectangular/polygonal draw mode and no
+  // `Arc length` option in v1. The Rust lane adds the same name
+  // (`CommandId::RevisionCloud`); this mirror never proves the host advertises it.
+  'REVCLOUD',
   // The three single-curve edits (2026-11-01). `BREAK` is a **two-pick** capture
   // (the first pick is the curve *and* the first break point); `DIVIDE` and
   // `LENGTHEN` take no pick at all and act on the current selection, which is why

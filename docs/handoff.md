@@ -149,6 +149,40 @@
   一次性成本，未改变。文本 glyph 导航 LOD 已由后续条目实现（移动时隐藏，settle 恢复）；仍需真实
   鼠标 / 性能 / 跨平台验证。
 
+## 2026-11-07 AutoCAD 2026 官方命令清单 + 10 个命令落地（逐命令一次提交）
+
+- **官方清单**：新增 `docs/autocad-2026-command-coverage.md`，数据来自 Autodesk AutoCAD 2026
+  ENU 命令索引（`?page=commands`）的 27 个字母页 + 83 个 `-VARIANT` 页，检索日 **2026-11-06（UTC）**，
+  共 **981** 条（815 标准 + 83 Express Tools + 83 `-` 变体）。按官方字母序逐条标注：
+  **完整实现 50 / 部分实现 44 / 已实现合计 94 / 未实现 887**。计数只是逐条计数，不是兼容率。
+- **本轮实现（每命令一次提交，未推送）**：
+  - chrome 本地（React，命令行 + 现有 UI 同路径）：`ABOUT`、`CLEANSCREENON`、`CLEANSCREENOFF`、
+    `PROPERTIESCLOSE`、`LAYERCLOSE`。`CLEANSCREENON/OFF` 只切 chrome 可见性，不记录/恢复各面板独立开关；
+    两个 CLOSE 是幂等关闭，面板关闭按钮改走同一命令。
+  - 真实命令：`MODEL`（复用 `SPACE MODEL` 的校验 + 自动取景；Model 标签页改派发 `MODEL`）、
+    `PLAN`（payload-free `StandardView::Top`，无 UCS 选项）、`SELECTSIMILAR`（v1 仅按几何类型并入
+    可见模型空间同类型对象）、`REVCLOUD`（对象模式 v1：选中一条闭合直线段 LWPOLYLINE，每条边换成
+    一段向外弧，bulge 幅度 0.5）、`AUDIT`（只检测：逐实体 `cad_db::validate_entity`，不修复）。
+- **词表**：`COMMAND_TABLE` **110 → 115**；`admissible_names()` **174 → 179**；`CommandId` 变体
+  = 115；`docs/shortcuts.md` §2 同步新增 5 行；`docs/compatibility.md` 新增 5 行。
+- **验证（已运行）**：
+  - `cargo test -p cad-app --lib --locked` → 1596 passed / 0 failed / 3 ignored。
+  - `cargo test -p cad-ui-core --lib --locked` → 384 passed / 0 failed / 1 ignored。
+  - `cargo clippy -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings` → 通过。
+  - `cargo fmt --all -- --check` → 通过。
+  - `cargo check -p app-linux --all-targets --locked` → 通过；
+    `cargo check -p app-web --target wasm32-unknown-unknown --locked` → 通过（仅既有 dead-code 警告）。
+  - `python3 scripts/check-architecture.py`、`check-file-size.py`（1371 files）、`check-i18n.py`
+    （1107 keys）、`check-command-docs.py`（0 mismatches）、`test-check-command-docs.py`（7 tests）、
+    `check-tauri-capabilities.py`、`check-fixture-manifest.py` → 全部通过。
+  - 前端：`npx tsc --noEmit` 通过；本轮 10 个命令的专门测试 + `commands`/`ribbon`/`context-menu`/
+    `i18n`/`layout-tabs`/`view3d` 套件通过（逐命令提交内记录）。
+- **NOT RUN / 环境阻塞**：`apps/desktop-ui && npm test` 在 `tsc -p ../../plugins/tch/tsconfig.json`
+  处失败；`git submodule update --init` 因远端不提供钉住的 `0ce4dbb…` 提交而失败
+  （`upload-pack: not our ref`），因此 `plugins/tch` 未初始化，11 个 `vendor-plugin-*` 套件
+  `ERR_MODULE_NOT_FOUND`。这是**环境/子模块**问题，不是本轮改动。全工作区 `cargo test` / 全工作区
+  clippy、GUI/真实 GPU/像素/真实 DWG、Windows/macOS/Android/Web 运行证据均 **NOT RUN**。
+
 ## 2026-11-06 状态栏左锚点；五个左侧面板改为共享容器的浮动窗（不改变 CAD 分区）
 
 - **状态栏顺序**（`apps/desktop-ui/src/components/StatusBar.tsx`）：`就绪 → 栅格/正交/捕捉/对象捕捉/悬停预览`

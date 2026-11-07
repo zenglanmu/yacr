@@ -84,9 +84,11 @@ test('the standard views stack each semantic pair in one column', () => {
   assert.ok(panel, 'the View tab must carry the standard-view panel');
   // The layout contract lives on the model, so a reader sees it in the code too.
   assert.equal(panel.rows, 2, 'the standard panel must flow column-major over two rows');
-  assert.equal(panel.items.length, STANDARD_VIEWS.length);
+  // The seven standard views plus the appended payload-free `PLAN` row.
+  assert.equal(panel.items.length, STANDARD_VIEWS.length + 1);
+  const standardViewItems = panel.items.filter(item => item.standardView !== undefined);
   assert.deepEqual(
-    panel.items.map(item => item.standardView),
+    standardViewItems.map(item => item.standardView),
     STANDARD_VIEWS.map(item => item.standardView),
     'the reflow must not reorder the views',
   );
@@ -112,8 +114,12 @@ test('isometric is the odd one out in its own column', () => {
   const columns = new Map();
   for (const cell of cells) columns.set(cell.column, [...(columns.get(cell.column) ?? []), cell]);
   const last = columns.get(Math.max(...columns.keys()));
-  assert.equal(last.length, 1, 'the last column holds the single odd view');
+  // The last column holds the odd isometric view first, then the appended
+  // payload-free `PLAN` command row — PLAN is not a standard view, so it never
+  // reorders the seven.
+  assert.equal(last.length, 2, 'the last column holds isometric plus the PLAN row');
   assert.equal(last[0].item.standardView, 'isometric');
+  assert.equal(last[1].item.command, 'PLAN');
   for (const [column, entries] of columns) {
     if (column === Math.max(...columns.keys())) continue;
     assert.equal(entries.length, 2, `column ${column} must hold one pair`);

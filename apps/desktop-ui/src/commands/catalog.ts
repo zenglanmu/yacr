@@ -314,4 +314,66 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // may imply undo or that the exporter writes the values.
   { id: 'PDMODE', labelKey: 'point.display.mode', icon: 'point', group: 'view' },
   { id: 'PDSIZE', labelKey: 'point.display.size', icon: 'point', group: 'view' },
+  // ABOUT (AutoCAD 2026) is a chrome-local selector, not a router command: typing
+  // it opens the same host-owned About dialog the File tab's About action opens.
+  // It is appended at the very end so no shipped row moves; the `app` glyph is
+  // the ribbon entry's own mark for the same dialog.
+  { id: 'ABOUT', labelKey: 'file.about', icon: 'app', group: 'file' },
+  // CLEANSCREENON (AutoCAD 2026) is a chrome-local selector too: typing it sets
+  // the same clean-screen state the File tab's toggle flips (it sets, never
+  // toggles), sending nothing to the router. Appended last so no shipped row
+  // moves; it reuses the `cleanScreen` glyph of the toggle it shares state with.
+  { id: 'CLEANSCREENON', labelKey: 'status.clean_screen_on', icon: 'cleanScreen', group: 'view' },
+  // CLEANSCREENOFF (AutoCAD 2026) is the leaving half of the same pair: typing it
+  // clears the state CLEANSCREENON set and the File tab's toggle flips (it sets,
+  // never toggles), sending nothing to the router. Appended last so no shipped
+  // row moves; it reuses the `cleanScreen` glyph and the same shared state.
+  { id: 'CLEANSCREENOFF', labelKey: 'status.clean_screen_off', icon: 'cleanScreen', group: 'view' },
+  // PROPERTIESCLOSE (AutoCAD 2026) closes the properties window the palette's own
+  // close button closes, sending nothing to the router. It is appended last so no
+  // shipped row moves, and it reuses the `close` glyph and the `properties.close`
+  // label the window's own close control already uses.
+  { id: 'PROPERTIESCLOSE', labelKey: 'properties.close', icon: 'close', group: 'annotate' },
+  // LAYERCLOSE (AutoCAD 2026) is the layers palette's own close word: typing it
+  // closes the same palette the palette's close control closes, sending nothing
+  // to the router. Appended last so no shipped row moves, and it reuses the
+  // `close` glyph and the `layers.close` label that window already uses.
+  { id: 'LAYERCLOSE', labelKey: 'layers.close', icon: 'close', group: 'annotate' },
+  // MODEL (AutoCAD 2026) is the payload-free "switch to the Model tab" selector.
+  // The real affordance is the drawing-space strip's existing Model tab, so this
+  // is the catalog/command-line row only — no duplicate ribbon button. It is
+  // appended last so no shipped row moves, and it reuses the `drawing` glyph.
+  { id: 'MODEL', labelKey: 'layout.tab.model', icon: 'drawing', group: 'view' },
+  // PLAN (AutoCAD 2026) is the typed "orthographic view of the XY plane". v1 is
+  // the top/plan 2D view only: this build has no UCS model, so AutoCAD's
+  // UCS/World/Current orientation options are NOT IMPLEMENTED and the command
+  // takes no argument. It is the payload-free `CommandId::PlanView` router
+  // selector (`cad_command`), not the payload-carrying `STANDARDVIEW` lane, so
+  // it is a real name the command line admits. Appended last so no shipped row
+  // moves, and it reuses the `view` glyph the other view rows use.
+  { id: 'PLAN', labelKey: 'view.plan', icon: 'view', group: 'view' },
+  // SELECTSIMILAR (AutoCAD 2026) is the **type-based** sibling of SELECTALL: it
+  // takes no payload, needs a non-empty current selection, and adds every
+  // visible model-space object of the same geometry kind to that selection.
+  // v1 does NOT match attributes (layer/colour/linetype/lineweight/
+  // transparency), so nothing here may imply a property filter. Appended last so
+  // no shipped row moves, and it reuses the `selectAll` glyph because it is the
+  // same "grow the selection" gesture.
+  { id: 'SELECTSIMILAR', labelKey: 'draw.kind.selectsimilar', icon: 'selectAll', group: 'modify' },
+  // REVCLOUD (AutoCAD 2026) is the **selection-based Object mode** v1: the one
+  // selected closed straight-segment polyline is the whole input, and every edge
+  // becomes one outward arc bulge. It is a router command (`CommandPayload::None`),
+  // so nothing is picked interactively; the one-object rule lives in
+  // `SELECTION_REQUIREMENTS`. There is no rectangular/polygonal draw mode and no
+  // `Arc length` option in v1, so nothing here may imply a capture. Appended last
+  // so no shipped row moves, and it reuses the `polyline` glyph: the output is a
+  // polyline.
+  { id: 'REVCLOUD', labelKey: 'draw.kind.revcloud', icon: 'polyline', group: 'draw' },
+  // AUDIT (AutoCAD 2026) is the detect-only drawing audit: it reports every
+  // stored entity that fails the database's own validity check and repairs
+  // nothing (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). It is a
+  // payload-free router command that needs an open drawing, so it is appended
+  // last — no shipped row moves — and reuses the `diagnostics` glyph, the same
+  // report the File tab's Diagnostics entry opens.
+  { id: 'AUDIT', labelKey: 'audit.title', icon: 'diagnostics', group: 'file' },
 ]);

@@ -42,7 +42,7 @@ export function PropertiesDock() {
         panel={panel}
         onClose={() => {
           clearPluginPanel();
-          shell.setPropertiesOpen(false);
+          shell.runCommand('PROPERTIESCLOSE');
         }}
         onShowDefault={() => { clearPluginPanel(); }}
       />

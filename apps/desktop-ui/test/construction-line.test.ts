@@ -112,8 +112,9 @@ test('both draw panels carry one small XLINE / RAY button directly after ARC', (
     // The pair reads ARC -> XLINE -> RAY, in that order, on both panels.
     const arc = items.findIndex(item => item.id === 'ARC');
     assert.deepEqual(items.slice(arc, arc + 3).map(item => item.id), ['ARC', 'XLINE', 'RAY'], tabId);
-    // The draw tail that other suites pin is untouched.
-    assert.deepEqual(items.slice(-2).map(item => item.id), ['HATCH', 'HATCHPOINT'], tabId);
+    // The draw tail that other suites pin: HATCH/HATCHPOINT plus the appended
+    // REVCLOUD object-mode row.
+    assert.deepEqual(items.slice(-3).map(item => item.id), ['HATCH', 'HATCHPOINT', 'REVCLOUD'], tabId);
   }
   // No other panel dispatches either selector.
   for (const tab of RIBBON_TABS) {

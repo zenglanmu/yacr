@@ -36,8 +36,16 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // layer is never turned off), again as session visibility overrides only.
     ("LAYOFF", CommandId::LayOff),
     ("SPACE", CommandId::SwitchSpace),
+    // `MODEL` (AutoCAD 2026) is the payload-free "switch to the Model tab"
+    // selector. It is the same validated session-state switch as `SPACE MODEL`,
+    // never a second space path, and takes no argument.
+    ("MODEL", CommandId::ModelSpace),
     ("SELECT", CommandId::Select),
     ("SELECTALL", CommandId::SelectAll),
+    // SELECTSIMILAR (AutoCAD 2026) is the type-based sibling of SELECTALL: it
+    // takes no payload and no argument, requires a non-empty current selection,
+    // and does not edit the drawing.
+    ("SELECTSIMILAR", CommandId::SelectSimilar),
     ("SELECTINBOX", CommandId::SelectInBox),
     ("MEASURE", CommandId::Measure),
     // `AREA OBJECT` is our **selection-based** exact area of one closed object
@@ -51,9 +59,19 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("REDO", CommandId::Redo),
     ("RESOURCES", CommandId::Resources),
     ("DIAGNOSTICS", CommandId::Diagnostics),
+    // AUDIT (AutoCAD 2026) is the **detect-only** drawing audit: it reports every
+    // stored entity that fails `cad_db::validate_entity` and repairs nothing
+    // (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). Read-only, so
+    // Viewer mode admits it.
+    ("AUDIT", CommandId::AuditDrawing),
     ("SWITCHBACKEND", CommandId::SwitchBackend),
     ("SWITCH2D3D", CommandId::Switch2d3d),
     ("STANDARDVIEW", CommandId::StandardView),
+    // `PLAN` (AutoCAD 2026) is the payload-free "orthographic view of the XY
+    // plane" selector: v1 is the top/plan 2D view only, the same observation as
+    // `STANDARDVIEW` → `Top`. This build has no UCS model, so PLAN's UCS/World/
+    // Current orientation options are NOT IMPLEMENTED and take no argument.
+    ("PLAN", CommandId::PlanView),
     ("ORBIT", CommandId::Orbit),
     ("PROJECTION", CommandId::SwitchProjection),
     ("MODE", CommandId::SetMode),
@@ -142,6 +160,12 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // capture, and an alias would silently route a polyline edit into it.
     ("CHAMFER POLYLINE", CommandId::ChamferPolyline),
     ("FILLET POLYLINE", CommandId::FilletPolyline),
+    // REVCLOUD (AutoCAD 2026) is the selection-based **Object mode** v1: the one
+    // selected closed straight-segment polyline is the whole input, every edge
+    // becomes one outward arc bulge. It is a canonical selector of its own, not
+    // an alias: there is no interactive rectangular/polygonal draw mode in this
+    // build, so the name must not route into a draw capture.
+    ("REVCLOUD", CommandId::RevisionCloud),
     ("ARRAYRECT", CommandId::ArrayRectangular),
     ("ARRAYPOLAR", CommandId::ArrayPolar),
     ("ALIGN", CommandId::AlignEntities),

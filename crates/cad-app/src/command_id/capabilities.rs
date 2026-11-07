@@ -53,6 +53,7 @@ impl CommandId {
                 | Self::FilletLines
                 | Self::ChamferPolyline
                 | Self::FilletPolyline
+                | Self::RevisionCloud
                 | Self::ArrayRectangular
                 | Self::ArrayPolar
                 | Self::AlignEntities

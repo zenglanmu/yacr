@@ -171,6 +171,7 @@ fn application_with_layouts() -> (Application, SessionState) {
 }
 
 mod area_object;
+mod audit;
 mod cjk_baseline;
 mod commands;
 mod drawing;
@@ -191,7 +192,11 @@ mod layers_isolate;
 mod layers_off;
 mod layers_previous;
 mod locked_layers;
+mod model_space;
+mod plan_view;
 mod point_display_style;
+mod revision_cloud;
+mod select_similar;
 mod view_camera;
 mod zoom_previous;
 mod zoom_window;

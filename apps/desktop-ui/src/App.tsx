@@ -501,13 +501,16 @@ function Shell() {
   const runLocalSelector = useLocalSelectors({
     layout,
     translate: t,
-    clearResult: () => setCommandResult(null),
-    clearDraft: () => setCommand(''),
+    clearResult: () => setCommandResult(null), clearDraft: () => setCommand(''),
     requestOptions: () => openOptionsDialog(requestOpenPopup),
     openResources: () => setReferencesOpen(true),
     openProperties,
     openLayers: () => { setLayersOpen(true); setLayersFocus(value => value + 1); },
     openFonts: () => setFontsOpen(true),
+    openAbout: () => requestOpenPopup('about'),
+    setCleanScreen,
+    closeProperties: () => setPropertiesOpen(false),
+    closeLayers: () => setLayersOpen(false),
     reportError: setError,
   });
 
@@ -657,11 +660,7 @@ function Shell() {
         textStep,
         gripDragActive,
       }, canCommand);
-      if (accelerator) {
-        event.preventDefault();
-        void submitCommand(accelerator);
-        return;
-      }
+      if (accelerator) { event.preventDefault(); void submitCommand(accelerator); return; }
       if (event.defaultPrevented || event.metaKey || event.altKey) return;
       // An active tool owns Enter/Escape: Enter confirms, Escape cancels, and
       // that Escape does not also close a panel. An armed grip drag is not a
@@ -911,9 +910,7 @@ function Shell() {
       // Dialogs are in-DOM overlays (ADR 0021 D1/D2). The host still owns the
       // modal gate and admission; `existing: true` means the same dialog is
       // already open, so there is nothing to do here and it is never a failure.
-      else if (action === 'about') {
-        requestOpenPopup('about');
-      }
+      else if (action === 'about') requestOpenPopup('about');
       // File > Plugins is the same dialog with one page selected.
       else if (action === 'options') openOptionsDialog(requestOpenPopup);
       else if (action === 'plugins') openOptionsDialog(requestOpenPopup, 'plugins');

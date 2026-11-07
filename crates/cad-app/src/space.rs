@@ -1,5 +1,66 @@
 use super::*;
 
+use crate::app_zoom::FitResult;
+
+impl Application {
+    /// The one space-switch path shared by `SwitchSpace` (`SPACE ...`) and
+    /// `MODEL`.
+    ///
+    /// Validate the target against the *current* drawing before recording the
+    /// switch: an unknown or undrawable layout is an explicit refusal, never an
+    /// empty "success" that later renders a blank sheet (audit F04/U03).
+    ///
+    /// A space switch is session state only: no database write, no `cad-history`
+    /// entry and no `ChangeSet`. The camera is moved to the target space so a
+    /// sheet is not shown at the model's off-sheet coordinates. The automatic fit
+    /// records no `ZOOM PREVIOUS` step: switching tabs is the user action, not a
+    /// discrete zoom.
+    pub(crate) fn switch_space_command(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+        space: SpaceId,
+    ) -> CadResult<CommandOutcome> {
+        let drawing = &self
+            .workspace
+            .documents
+            .get(&command.document)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing;
+        validate_space_id(drawing, &space)?;
+        let previous = session.active_space.clone();
+        session.active_space = space;
+        let fit = match self.fit_active_space(session, &command.viewport, false) {
+            Ok(fit) => fit,
+            Err(error) => {
+                // A fit that cannot even reach the viewport leaves the switch
+                // failed: keep the space the user was in.
+                session.active_space = previous;
+                return Err(error);
+            }
+        };
+        let diagnostics = match fit {
+            FitResult::EmptyLayout(layout) => vec![Diagnostic {
+                object: None,
+                code: "layout.fit_empty".into(),
+                message: format!(
+                    "layout {} has no drawable paper geometry and no usable paper \
+                     size; the camera is unchanged",
+                    layout.0
+                ),
+            }],
+            FitResult::Framed | FitResult::EmptyModel => Vec::new(),
+        };
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics,
+            measurement: None,
+            point_report: None,
+        })
+    }
+}
+
 /// Validate that model space or a named paper layout can be drawn.
 ///
 /// `SpaceSelection::Model` is always valid. A paper selection must name a layout

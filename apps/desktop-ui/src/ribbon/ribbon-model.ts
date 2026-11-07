@@ -280,7 +280,18 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         titleKey: 'ribbon.panel.utilities',
         items: [
           { id: 'diagnostics', labelKey: 'diagnostics.title', icon: 'diagnostics', action: 'diagnostics' },
-          { id: 'clean', labelKey: 'status.clean_screen', icon: 'cleanScreen', action: 'cleanScreen' },
+          // AUDIT (AutoCAD 2026) is the detect-only drawing audit, directly after
+          // the Diagnostics panel entry it reads: it reports invalid stored
+          // entities and repairs nothing, so its own label says "Audit" and the
+          // report text (from Rust) states that no repair was performed.
+          { id: 'audit', labelKey: 'audit.title', icon: 'diagnostics', command: 'AUDIT' },
+          { id: 'clean', labelKey: 'status.clean_screen', icon: 'cleanScreen', action: 'cleanScreen', variants: [
+            // The typed-word selectors live beside the toggle that shares their
+            // state: `clean-on` enters clean screen explicitly (`CLEANSCREENON`),
+            // never toggling it. `clean-off` follows with `CLEANSCREENOFF`.
+            { id: 'clean-on', labelKey: 'status.clean_screen_on', icon: 'cleanScreen', command: 'CLEANSCREENON' },
+            { id: 'clean-off', labelKey: 'status.clean_screen_off', icon: 'cleanScreen', command: 'CLEANSCREENOFF' },
+          ] },
           { id: 'cmdline', labelKey: 'status.command_line', icon: 'terminal', action: 'commandLine' },
           // About opens a host-owned dialog window (ADR 0021 D1), so it is an
           // `action` token, not a router command: nothing about it goes through
@@ -427,6 +438,12 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // and it is deliberately not a pre-selection tool, so the button takes a
           // pick while HATCH stays the select-objects-first command.
           { id: 'HATCHPOINT', labelKey: 'draw.kind.hatchpoint', icon: 'hatch', command: 'HATCHPOINT' },
+          // REVCLOUD (AutoCAD 2026) Object mode v1: selection-gated, no pick
+          // capture. It acts on the one preselected closed straight-segment
+          // polyline (`CommandPayload::None`), so it is an ordinary router button
+          // whose enablement comes from `SELECTION_REQUIREMENTS`; there is no
+          // rectangular/polygonal draw mode and no `Arc length` option to offer.
+          { id: 'REVCLOUD', labelKey: 'draw.kind.revcloud', icon: 'polyline', command: 'REVCLOUD' },
         ],
       },
       {
@@ -486,6 +503,13 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // shared admission **plus** its own two-object selection requirement, so
           // with fewer objects it reads disabled with the rule's sentence.
           { id: 'JOIN', labelKey: 'draw.kind.join', icon: 'polyline', command: 'JOIN' },
+          // SELECTSIMILAR (AutoCAD 2026) closes the Modify panel after JOIN: a
+          // type-only v1 that grows the current selection by geometry kind. It is
+          // a small button with no variant popover (there is no attribute match
+          // to configure in v1), and it is selection-gated by
+          // `SELECTION_REQUIREMENTS` — with nothing selected it reads disabled
+          // with its own hint.
+          { id: 'SELECTSIMILAR', labelKey: 'draw.kind.selectsimilar', icon: 'selectAll', command: 'SELECTSIMILAR' },
         ],
       },
       {
@@ -623,6 +647,12 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // the Home/draw comment for the one-pick shape, the shared fill
           // parameters and why it is a small button with no popover).
           { id: 'HATCHPOINT', labelKey: 'draw.kind.hatchpoint', icon: 'hatch', command: 'HATCHPOINT' },
+          // REVCLOUD (AutoCAD 2026) Object mode v1: selection-gated, no pick
+          // capture. It acts on the one preselected closed straight-segment
+          // polyline (`CommandPayload::None`), so it is an ordinary router button
+          // whose enablement comes from `SELECTION_REQUIREMENTS`; there is no
+          // rectangular/polygonal draw mode and no `Arc length` option to offer.
+          { id: 'REVCLOUD', labelKey: 'draw.kind.revcloud', icon: 'polyline', command: 'REVCLOUD' },
         ],
       },
       {
@@ -665,6 +695,9 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // Same slot as on the Home tab: JOIN closes the Modify panel (AutoCAD's
           // own order puts Join last), small, no popover, selection-gated.
           { id: 'JOIN', labelKey: 'draw.kind.join', icon: 'polyline', command: 'JOIN' },
+          // SELECTSIMILAR (AutoCAD 2026) is the type-only v1 selection grower; it
+          // sits in the same tail slot on both tabs and stays selection-gated.
+          { id: 'SELECTSIMILAR', labelKey: 'draw.kind.selectsimilar', icon: 'selectAll', command: 'SELECTSIMILAR' },
         ],
       },
     ],
@@ -826,7 +859,19 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         id: 'standard',
         titleKey: 'view.standard_label',
         rows: 2,
-        items: STANDARD_VIEWS.map(entry => ({ ...entry })),
+        items: [
+          ...STANDARD_VIEWS.map(entry => ({ ...entry })),
+          // `PLAN` (AutoCAD 2026) is the typed, **payload-free** "orthographic
+          // view of the XY plane": v1 is the top/plan 2D view only. This build
+          // has no UCS model, so AutoCAD's UCS/World/Current orientation options
+          // are NOT IMPLEMENTED and the command takes no argument. It is appended
+          // after the seven standard views (they are never reordered): the
+          // existing Top button keeps dispatching `cad_standard_view`
+          // (`standardView: 'top'`), while this row is the ordinary
+          // `cad_command` name `PLAN` — the same observation through the
+          // name-only funnel.
+          { id: 'PLAN', labelKey: 'view.plan', icon: 'view', command: 'PLAN' },
+        ],
       },
       {
         id: 'navigate',

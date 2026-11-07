@@ -8,6 +8,13 @@
 // gates, the gesture-only and document-scoped sets, the selection preconditions
 // and the selectors the chrome answers without the router. Empty or wrong data
 // here can only ever refuse, never silently admit.
+import {
+  ABOUT_COMMAND,
+  CLEANSCREENOFF_COMMAND,
+  CLEANSCREENON_COMMAND,
+  LAYERCLOSE_COMMAND,
+  PROPERTIESCLOSE_COMMAND,
+} from './chrome-commands.ts';
 
 /** The `cad_status` slice the admission rules read (all fields are the host's). */
 export interface CommandStatusView {
@@ -163,15 +170,19 @@ export const GESTURE_ONLY_COMMANDS: readonly string[] = Object.freeze(['ORBIT'])
  * Router-admitted selectors that only mean something with a drawing open:
  * `SWITCH2D3D` frames the document's 3D bounds and `PROJECTION` flips the
  * projection of that same camera, so on the start page there is nothing to
- * frame. They are disabled there with the catalog's own "no drawing is open"
- * sentence instead of a misleading "not supported yet".
+ * frame. `MODEL` returns to the Model tab of the open drawing, and `PLAN` returns
+ * the open drawing's view to the 2D plan (there is nothing to view without one).
+ * `AUDIT` validates the open drawing's stored entities; with no drawing there is
+ * nothing to check.
+ * They are disabled there with the catalog's own "no drawing is open" sentence
+ * instead of a misleading "not supported yet".
  *
  * `MATCHPROP` needs a drawing *and* a selection; it is deliberately **not** in
  * this list — a document is not its only precondition, and the set means exactly
  * "a drawing is the whole requirement" (see `SELECTION_REQUIREMENTS`, which
  * answers the no-document case for selection-gated commands itself).
  */
-export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION']);
+export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT']);
 
 /** One command's precondition on the **current selection**. */
 export interface SelectionRequirement {
@@ -228,6 +239,13 @@ export interface SelectionRequirement {
 export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequirement>> = Object.freeze({
   MATCHPROP: Object.freeze({ count: 2, reasonKey: 'draw.kind.matchprop.hint' }),
   JOIN: Object.freeze({ count: 2, reasonKey: 'draw.kind.join.hint' }),
+  // SELECTSIMILAR (AutoCAD 2026) grows the selection from its **geometry kind**,
+  // so there must already be one object to call the source. The host refuses an
+  // empty selection by name (`selectsimilar.selection_required`); this row makes
+  // the disabled button and the command line say the same thing, and it is also
+  // the "no drawing is open" answer. Attribute matching is NOT implemented in
+  // v1, so the hint must not promise one.
+  SELECTSIMILAR: Object.freeze({ count: 1, reasonKey: 'draw.kind.selectsimilar.hint' }),
   // CHAMFER POLYLINE / FILLET POLYLINE (2026-10-27) are the Polyline modes of the
   // two corner commands: each rewrites **exactly one** preselected open polyline
   // in place (`CommandPayload::None`, so nothing is picked interactively). The
@@ -238,6 +256,13 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // the row exists instead of leaving the host to answer at run time.
   'CHAMFER POLYLINE': Object.freeze({ count: 1, reasonKey: 'draw.kind.chamfer_polyline.hint' }),
   'FILLET POLYLINE': Object.freeze({ count: 1, reasonKey: 'draw.kind.fillet_polyline.hint' }),
+  // REVCLOUD (AutoCAD 2026) Object mode v1 rewrites **exactly one** preselected
+  // closed straight-segment polyline in place (`CommandPayload::None`, so nothing
+  // is picked interactively). The table states a minimum of one — the host is
+  // what refuses a selection of two or a non-polyline by name — and the sentence
+  // is the command's own hint, so the disabled button and the refusal describe
+  // the same rule once.
+  REVCLOUD: Object.freeze({ count: 1, reasonKey: 'draw.kind.revcloud.hint' }),
   LAYISO: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
   LAYUNISO: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
   LAYOFF: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
@@ -261,8 +286,17 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
  * Selectors the **chrome** answers itself, before the router. They have a real
  * command-line entry (typing the word works) but no reason to reach a router
  * selector: `PROPERTIES` opens the properties window, `LAYER` opens the layers
- * palette, `FONTS` opens the read-only Font Manager and `RESOURCES` opens
- * the References panel.
+ * palette, `FONTS` opens the read-only Font Manager, `RESOURCES` opens
+ * the References panel, `ABOUT` opens the existing About dialog (the same
+ * `requestOpenPopup('about')` path as the File tab's action) and
+ * `CLEANSCREENON` sets the chrome's existing clean-screen state (the same state
+ * the File tab's `cleanScreen` toggle flips; it sets, never toggles).
+ * `CLEANSCREENOFF` clears that same state and is likewise an explicit set, never
+ * a toggle. `PROPERTIESCLOSE` closes the properties window (an idempotent
+ * success when it is already closed), so it is not gated by layout either.
+ * `LAYERCLOSE` does the same for the layers palette: the palette's own close
+ * control and the typed word close the one window, and a second close is still
+ * a success, so no layout gate applies.
  *
  * They are deliberately admitted regardless of the loaded host vocabulary (and
  * of whether a drawing is open): they touch no CAD state, exactly like the
@@ -274,6 +308,15 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
  * panel reads the references the status already carries, so the UI selector
  * opens that panel and sends nothing: no second source and no fabricated load.
  * `FONTS` owns its own report command (`cad_fonts`), which the panel reads
- * directly; the selector only opens the panel.
+ * directly; the selector only opens the panel. `ABOUT` sends nothing at all: the
+ * host-owned dialog already exists, and the selector only opens it.
+ * `CLEANSCREENON` likewise sends nothing: it only sets the chrome's own
+ * clean-screen state. `CLEANSCREENOFF` sends nothing either: it only clears that
+ * same state. `PROPERTIESCLOSE` sends nothing: it only closes the chrome's own
+ * properties window. `LAYERCLOSE` sends nothing either: it only closes the
+ * chrome's own layers palette.
  */
-export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze(['PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES']);
+export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze([
+  'PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES', ABOUT_COMMAND, CLEANSCREENON_COMMAND,
+  CLEANSCREENOFF_COMMAND, PROPERTIESCLOSE_COMMAND, LAYERCLOSE_COMMAND,
+]);

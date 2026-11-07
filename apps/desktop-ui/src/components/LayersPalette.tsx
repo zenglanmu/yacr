@@ -503,7 +503,7 @@ export function LayersPalette() {
             icon="close"
             size="xs"
             label={t('layers.close')}
-            onClick={() => shell.setLayersOpen(false)}
+            onClick={() => shell.runCommand('LAYERCLOSE')}
           />
         </span>
       </header>

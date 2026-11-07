@@ -1,6 +1,6 @@
 // Contract tests for the drawing-space strip: the `cad_status.layouts` /
-// `activeSpace` wire projection, the exact `SPACE` command, and the strict
-// rejection of malformed additive payloads.
+// `activeSpace` wire projection, the exact space-switch commands (`MODEL` /
+// `SPACE #<id>`), and the strict rejection of malformed additive payloads.
 //
 // These are model tests, not screenshots: the tab list comes from
 // `layout/layout-tabs.ts`, and the component source is checked for wiring the
@@ -111,10 +111,10 @@ test('an unsupported layout stays visible, disabled and carries only the stable 
   assert.equal(layoutReasonCode(null), null);
 });
 
-test('the tab click emits exactly one SPACE line through the shared funnel', async () => {
+test('the tab click emits exactly one space-switch line through the shared funnel', async () => {
   assert.equal(layoutSpaceCommand(0), 'SPACE #0');
   assert.equal(layoutSpaceCommand(12), 'SPACE #12');
-  assert.equal(MODEL_SPACE_COMMAND, 'SPACE MODEL');
+  assert.equal(MODEL_SPACE_COMMAND, 'MODEL');
 
   // The admitted line is the same text the component dispatches. Admission is
   // still the chrome's grammar; the host remains the authority for the id.
@@ -124,6 +124,9 @@ test('the tab click emits exactly one SPACE line through the shared funnel', asy
   assert.equal(admitted.kind, 'admitted');
   assert.equal(admitted.command, 'SPACE #12');
   assert.equal(admitCommandText('SPACE MODEL', { status: loaded }).kind, 'admitted');
+  // The Model tab now dispatches the official payload-free `MODEL` selector
+  // (AutoCAD 2026); the `SPACE MODEL` argument form above stays admitted.
+  assert.equal(admitCommandText('MODEL', { status: loaded }).kind, 'admitted');
   // A display name is real host grammar (`SPACE Sheet One`), so the local
   // argument table must not reject it; the host names an unknown layout.
   assert.equal(admitCommandText('SPACE Sheet One', { status: loaded }).kind, 'admitted');

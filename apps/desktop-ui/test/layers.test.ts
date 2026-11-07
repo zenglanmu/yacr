@@ -683,7 +683,7 @@ test('the palette floats in the palette layer and is opened by a shell action', 
 
   const palette = await readModule('components/LayersPalette.tsx');
   assert.ok(palette.includes('useSyncExternalStore'), 'the panel subscribes to the store, not to polls');
-  assert.ok(palette.includes('shell.setLayersOpen(false)'), 'it closes through the same plumbing');
+  assert.ok(palette.includes("shell.runCommand('LAYERCLOSE')"), 'it closes through the LAYERCLOSE command');
   assert.ok(palette.includes('shell.layersFocus'), 'a repeat LAYER focuses and re-reads it');
   assert.ok(palette.includes('shell.documentLabel'), 'a new document re-reads the table');
   // No modal and no backdrop: the floating window never gates the drawing, so

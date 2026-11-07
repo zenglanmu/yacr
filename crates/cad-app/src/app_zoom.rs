@@ -301,6 +301,34 @@ impl Application {
         Ok(self.fit_active_space(session, viewport_id, true)?.framed())
     }
 
+    /// `PLAN`: display the orthographic view of the XY plane.
+    ///
+    /// v1 is the **top/plan 2D view and nothing else**. This build has no UCS
+    /// model at all, so AutoCAD's `PLAN` orientation options (UCS / World /
+    /// Current) are **NOT IMPLEMENTED** and the command carries no payload field
+    /// for them. It is deliberately the same observation as
+    /// [`crate::StandardView::Top`] — [`Application::apply_standard_view`] is the
+    /// one implementation — so `PLAN` can never drift from the Top
+    /// standard-view button.
+    ///
+    /// A `PLAN` **from a 3D view** is a discrete view change, so the pre-view
+    /// state is recorded first (one `ZOOM PREVIOUS` step, exactly like the
+    /// standard-view path). While the viewport is already in the 2D plan the
+    /// plan camera is the camera on screen: that is the documented no-op and
+    /// records no step. No database write, no revision bump, no `cad-history`
+    /// entry and no `ChangeSet`, so Viewer mode allows it.
+    pub(crate) fn plan_view(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        if !self.view_state_is_2d(&command.viewport) {
+            self.push_view_snapshot(&command.viewport)?;
+        }
+        self.apply_standard_view(session, command, StandardView::Top)?;
+        Ok(CommandOutcome::none())
+    }
+
     /// `ZOOM WINDOW`: frame the picked two-corner rectangle **exactly**.
     ///
     /// Two-corner capture semantics: the payload carries the two opposite

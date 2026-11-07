@@ -151,13 +151,14 @@ test('the ID tool chip names its one pick and never claims a dimension', () => {
   }
 });
 
-test('JOIN closes the Modify panel on both tabs and is a router command', async () => {
+test('JOIN sits at the end of the shipped Modify run and is a router command', async () => {
   for (const tabId of ['home', 'draw']) {
     const modify = panel(tabId, 'modify');
     // AutoCAD's Modify panel ends with Join; appending keeps every shipped button
     // where it was.
-    const join = modify.items.at(-1);
+    const join = modify.items.at(-2);
     assert.equal(join.id, 'JOIN', tabId);
+    assert.equal(modify.items.at(-1).id, 'SELECTSIMILAR', `${tabId}: SELECTSIMILAR is appended after JOIN`);
     assert.equal(join.command, 'JOIN');
     assert.equal(join.labelKey, 'draw.kind.join');
     assert.equal(join.icon, 'polyline');

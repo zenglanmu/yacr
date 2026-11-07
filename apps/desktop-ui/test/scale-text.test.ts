@@ -88,9 +88,9 @@ test('both draw panels carry SCALETEXT as one small router button with no popove
     assert.equal(items.filter(candidate => candidate.id === ID).length, 1, `${tabId}: one SCALETEXT`);
     // The HATCH pair still closes the draw group.
     assert.deepEqual(
-      items.slice(-2).map(candidate => candidate.id),
-      ['HATCH', 'HATCHPOINT'],
-      `${tabId}/draw still ends with the HATCH pair`,
+      items.slice(-3).map(candidate => candidate.id),
+      ['HATCH', 'HATCHPOINT', 'REVCLOUD'],
+      `${tabId}/draw ends with the HATCH pair and REVCLOUD`,
     );
   }
   // No other panel smuggles the command in.

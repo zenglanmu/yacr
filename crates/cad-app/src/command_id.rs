@@ -41,8 +41,7 @@ pub enum CommandId {
     /// Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,
     RestoreLayers,
-    /// `LAYERP`: restore the **previous layer state** — AutoCAD's "previous layer
-    /// state" stack.
+    /// `LAYERP`: restore the **previous layer state** — AutoCAD's "previous layer state" stack.
     ///
     /// Payload is [`crate::CommandPayload::None`]; a caller that supplies one is
     /// refused (`layers.previous.invalid_payload`), never silently ignored. The
@@ -121,10 +120,33 @@ pub enum CommandId {
     /// ([`CommandId::LayerPrevious`]), never an alias of this restore.
     LayOff,
     SwitchSpace,
+    /// `MODEL`: switch the active drawing space to model space.
+    ///
+    /// Payload-free and equivalent to the typed `SPACE MODEL` line: both reach
+    /// the same session-state switch, which validates the target against the
+    /// open drawing and then auto-fits the camera. A caller that supplies a
+    /// payload is refused explicitly. No database write, no `cad-history` entry,
+    /// no revision bump and no `ChangeSet`, so Viewer mode allows it. The real UI
+    /// affordance is the drawing-space strip's Model tab.
+    ModelSpace,
     Select,
     /// Select visible model-space pick items without editing the drawing.
     /// Requires `CommandPayload::None`; incomplete picking is explicitly refused.
     SelectAll,
+    /// `SELECTSIMILAR`: add every visible model-space pick item whose **geometry
+    /// kind** matches a currently selected item to the existing selection.
+    ///
+    /// Payload is [`crate::CommandPayload::None`]; a non-empty current selection
+    /// is required (`selectsimilar.selection_required`) and paper/block active
+    /// space is an explicit `Unsupported` refusal. v1 is **type-based only**: the
+    /// match is the `SemanticGeometry` discriminant, and attribute similarity
+    /// (layer/colour/linetype/lineweight/transparency) is NOT IMPLEMENTED. The
+    /// command is a union, never a replacement, and writes nothing: no database
+    /// write, revision bump, `cad-history` entry or `ChangeSet`, so Viewer and
+    /// Work both allow it. Enumeration reuses the SELECTALL preflight and
+    /// visibility filter (cycles/depth/dynamic visibility/opaque geometry are
+    /// explicit refusals, never silent truncation).
+    SelectSimilar,
     /// Select model-space items in a window/crossing rectangle without editing
     /// the drawing (ADR 0014 B). Allowed in Viewer and Work; requires
     /// `CommandPayload::BoxSelect`.
@@ -146,9 +168,31 @@ pub enum CommandId {
     Redo,
     Resources,
     Diagnostics,
+    /// `AUDIT`: detect-only drawing audit (no repair, read-only; see `app_audit`).
+    AuditDrawing,
     SwitchBackend,
     Switch2d3d,
     StandardView,
+    /// `PLAN`: display an orthographic view of the XY plane — AutoCAD 2026's
+    /// `PLAN` in its default form.
+    ///
+    /// Payload-free and exactly the **top/plan 2D view**
+    /// ([`crate::StandardView::Top`]): it returns the observation to the 2D plan
+    /// camera, recording one `ZOOM PREVIOUS` step when it leaves a 3D view and
+    /// doing nothing while the viewport is already 2D (the same documented no-op
+    /// as the top standard view). Both paths live in `Application::plan_view` /
+    /// `Application::apply_standard_view`, so `PLAN` is a second *name* for the
+    /// plan observation, never a second view authority.
+    ///
+    /// AutoCAD's `PLAN` also offers **UCS / World / Current** orientation
+    /// choices. This build has **no UCS model at all**, so those options are NOT
+    /// IMPLEMENTED and there is no payload field for them: a caller that supplies
+    /// any payload is refused explicitly (`InvalidInput`), never silently mapped
+    /// onto the world plan.
+    ///
+    /// View/session state only: no database write, no revision bump, no
+    /// `cad-history` entry and no `ChangeSet`, so Viewer mode allows it.
+    PlanView,
     Orbit,
     SwitchProjection,
     /// Switch the session between Viewer and Work mode (audit U02).
@@ -307,8 +351,7 @@ pub enum CommandId {
     /// that tool**; a dispatch that carries no payload is still refused by name.
     /// The interactive capture fills the rotation from
     /// [`crate::draw_tool::ToolParameter::TextRotation`] (degrees → radians) and
-    /// the attachment from
-    /// [`crate::draw_tool::ToolParameter::MTextAttachment`] (AutoCAD's `1..=9`
+    /// the attachment from [`crate::draw_tool::ToolParameter::MTextAttachment`] (AutoCAD's `1..=9`
     /// codes), whose defaults reproduce the previously fixed `0.0` / top-left.
     /// Line spacing, columns, background fill, drawing direction and an
     /// in-command editing dialog remain NOT IMPLEMENTED.
@@ -569,6 +612,8 @@ pub enum CommandId {
     /// polyline equivalent. AutoCAD's radius auto-reduction is **not**
     /// reproduced — a radius that does not fit is a refusal. Work-only.
     FilletPolyline,
+    /// `REVCLOUD` (Work-only): selection-based Object mode v1 (`app_drawing::revision_cloud`).
+    RevisionCloud,
     /// ARRAYRECT: insert **independent** copies of the current selection on a
     /// rectangular grid, growing up and to the right (ADR 0016 decision D).
     /// Payload is `ArrayRect { refs }`; the row/column counts and spacings are the
@@ -614,8 +659,7 @@ pub enum CommandId {
     /// Delete every entity in the current selection in one transaction. An
     /// empty selection is an explicit refusal. Work-only.
     EraseEntities,
-    /// `JOIN`: merge the current selection into **one** entity (this build's
-    /// honest subset of AutoCAD's `JOIN`).
+    /// `JOIN`: merge the current selection into **one** entity (this build's honest subset of AutoCAD's `JOIN`).
     ///
     /// Payload is [`crate::CommandPayload::None`]; the selection is the whole
     /// input. Two shapes are implemented, and nothing else:
@@ -643,9 +687,9 @@ pub enum CommandId {
     /// merge, closing a gap, joining across spaces/layers and joining
     /// non-concentric arcs are **NOT IMPLEMENTED**. Work-only.
     Join,
-    /// EXPLODE the current selection one level at a time (ADR 0016 decision G):    /// a LWPOLYLINE becomes straight segments plus ARCs (bulge segments through
-    /// `bulge_arc_geometry`), a uniformly scaled INSERT becomes its block members
-    /// with the placement baked in (nested inserts expanded under a cycle stack
+    /// EXPLODE the current selection one level at a time (ADR 0016 decision G): a LWPOLYLINE
+    /// becomes straight segments plus ARCs (bulge segments through `bulge_arc_geometry`), a
+    /// uniformly scaled INSERT becomes its block members with the placement baked in (nested inserts expanded under a cycle stack
     /// and a depth cap of 32), and a Compound becomes **all** of its children (a
     /// MINSERT yields its Insert instances). Members keep their own
     /// block-definition layers. Refusals (nothing written): a selection with
@@ -941,8 +985,7 @@ pub enum CommandId {
     /// [`crate::command_id::construction_line`].
     CreateXLine,
     /// `RAY` (Work-only): the positive half of an infinite construction line,
-    /// stored as a finite clipped segment; see
-    /// [`crate::command_id::construction_line`].
+    /// stored as a finite clipped segment; see [`crate::command_id::construction_line`].
     CreateRay,
 }
 

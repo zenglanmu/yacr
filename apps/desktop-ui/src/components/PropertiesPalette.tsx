@@ -413,7 +413,7 @@ export function PropertiesPalette() {
           icon="close"
           size="xs"
           label={t('properties.close')}
-          onClick={() => shell.setPropertiesOpen(false)}
+          onClick={() => shell.runCommand('PROPERTIESCLOSE')}
         />
       </header>
       <div className="palette__body properties__body">
