@@ -135,6 +135,13 @@ pub enum DrawIntent {
         first: Point3,
         second: Point3,
     },
+    /// `BREAKATPOINT` `target` at `point`.
+    ///
+    /// `target` is the ref resolved at the first click (the entity pick); `point`
+    /// is the second click and may lie off the object. The command layer projects
+    /// it, refuses closed objects/SPLINEs by name and keeps the source as the
+    /// first piece.
+    BreakAtPoint { target: SelectionRef, point: Point3 },
     /// Rotate the current selection about `base` by `angle` radians (about +Z).
     Rotate { base: Point3, angle: f64 },
     /// Scale the current selection about `base` by the positive `factor`.

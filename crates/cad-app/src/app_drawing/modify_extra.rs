@@ -365,12 +365,8 @@ fn points_equal(a: Point3, b: Point3) -> bool {
 fn same_duplicate_geometry(a: &SemanticGeometry, b: &SemanticGeometry) -> bool {
     match (a, b) {
         (
-            SemanticGeometry::Line {
-                start: a0, end: a1,
-            },
-            SemanticGeometry::Line {
-                start: b0, end: b1,
-            },
+            SemanticGeometry::Line { start: a0, end: a1 },
+            SemanticGeometry::Line { start: b0, end: b1 },
         ) => {
             (points_equal(*a0, *b0) && points_equal(*a1, *b1))
                 || (points_equal(*a0, *b1) && points_equal(*a1, *b0))
@@ -612,8 +608,7 @@ impl Application {
                     Diagnostic {
                         object: None,
                         code: "overkill.unchanged".into(),
-                        message: "OVERKILL: no exact duplicates among the selected entities"
-                            .into(),
+                        message: "OVERKILL: no exact duplicates among the selected entities".into(),
                     },
                 ],
                 measurement: None,
@@ -631,8 +626,7 @@ impl Application {
                 sub_element: None,
             })
             .collect();
-        let (changes, mut diagnostics) =
-            self.delete_entity_refs(document_id, &refs, "OVERKILL")?;
+        let (changes, mut diagnostics) = self.delete_entity_refs(document_id, &refs, "OVERKILL")?;
         diagnostics.insert(0, informational);
         diagnostics.push(Diagnostic {
             object: None,

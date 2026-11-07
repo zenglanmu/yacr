@@ -623,6 +623,20 @@ pub enum DrawToolKind {
     /// first-point override and multiple-break mode are **NOT IMPLEMENTED**.
     /// Work-only.
     Break,
+    /// BREAKATPOINT: split one object into two at a single **projected** point.
+    ///
+    /// The first click is the entity pick (it is *not* also a break point — that
+    /// is the difference from [`Self::Break`]); the second click is the break
+    /// point and may lie off the object, because it is projected onto it.
+    /// Supported targets: LINE, ARC and an **open** LWPOLYLINE. A CIRCLE or a
+    /// closed polyline is `breakatpoint.closed`; a SPLINE is
+    /// `breakatpoint.spline_unsupported`; every other kind is
+    /// `breakatpoint.unsupported` — all named refusals that change nothing.
+    ///
+    /// The source entity is retained as the first piece and one fresh-id entity
+    /// is inserted as the second piece, in one transaction / one undo step.
+    /// Work-only.
+    BreakAtPoint,
     /// DIVIDE: place POINT marks at equal arc-length divisions of the **one**
     /// pre-selected curve (2026-11-01).
     ///

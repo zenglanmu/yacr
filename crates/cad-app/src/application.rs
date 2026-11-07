@@ -501,6 +501,7 @@ impl Application {
             | CommandId::Reverse
             | CommandId::Oops
             | CommandId::Overkill
+            | CommandId::BreakAtPoint
             | CommandId::CreateText
             | CommandId::CreateMText
             | CommandId::MLeader

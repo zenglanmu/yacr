@@ -99,6 +99,7 @@ impl CommandId {
                 | Self::Reverse
                 | Self::Oops
                 | Self::Overkill
+                | Self::BreakAtPoint
         )
     }
 }

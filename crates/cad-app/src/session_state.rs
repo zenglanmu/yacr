@@ -615,6 +615,8 @@ impl SessionState {
             DrawToolKind::Copy => CommandId::CopyEntities,
             DrawToolKind::Extend => CommandId::ExtendEntity,
             DrawToolKind::Break => CommandId::Break,
+            // BREAKATPOINT: entity pick, then a projected break point.
+            DrawToolKind::BreakAtPoint => CommandId::BreakAtPoint,
             // The zero-point single-curve edit pair: the selection is the input and
             // the settings are the typed parameter channel.
             DrawToolKind::Divide => CommandId::Divide,

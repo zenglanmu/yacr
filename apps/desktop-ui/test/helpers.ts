@@ -204,6 +204,9 @@ export const HOST_NAMES = [
   'OOPS',
   // OVERKILL (AutoCAD 2026) removes exact duplicate selected entities (v1).
   'OVERKILL',
+  // BREAKATPOINT (AutoCAD 2026) is the interactive single-point split; its first
+  // click is only the object pick (unlike BREAK).
+  'BREAKATPOINT',
   // SCALETEXT (2026-11-01) is the selection-based text scaler: one or more
   // Text/MTEXT objects plus one positive factor (`scaleTextFactor`), no picks. It
   // is a canonical selector of its own, never an alias of `SCALE` (which picks a

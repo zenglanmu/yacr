@@ -78,6 +78,9 @@ export const HOME_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   { id: 'OOPS', labelKey: 'draw.kind.oops', icon: 'undo', command: 'OOPS' },
   // OVERKILL v1: exact duplicates only, two-object selection minimum.
   { id: 'OVERKILL', labelKey: 'draw.kind.overkill', icon: 'erase', command: 'OVERKILL' },
+  // BREAKATPOINT starts its own two-step capture (object pick, break point); it
+  // is not a preselection command and owns no options popover.
+  { id: 'BREAKATPOINT', labelKey: 'draw.kind.breakatpoint', icon: 'trim', command: 'BREAKATPOINT' },
 ]);
 
 /** The Draw tab's Modify panel, in display order. */
@@ -128,4 +131,7 @@ export const DRAW_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   { id: 'OOPS', labelKey: 'draw.kind.oops', icon: 'undo', command: 'OOPS' },
   // OVERKILL v1: exact duplicates only, two-object selection minimum.
   { id: 'OVERKILL', labelKey: 'draw.kind.overkill', icon: 'erase', command: 'OVERKILL' },
+  // BREAKATPOINT starts its own two-step capture (object pick, break point); it
+  // is not a preselection command and owns no options popover.
+  { id: 'BREAKATPOINT', labelKey: 'draw.kind.breakatpoint', icon: 'trim', command: 'BREAKATPOINT' },
 ]);

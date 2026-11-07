@@ -1,6 +1,6 @@
 // The AutoCAD 2026 2D modify commands added 2026-11-07: REVERSE (selection
 // based, direction flip). Sibling commands are appended to this suite as they
-// land (OOPS/OVERKILL).
+// land (OOPS/OVERKILL/BREAKATPOINT).
 //
 // What this pins: the catalogue row, both Modify-panel buttons, the selection
 // requirement and its hint key, admission from the loaded host vocabulary, and
@@ -17,6 +17,12 @@ import {
 } from '../src/commands/commands.ts';
 import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
+import {
+  PRESELECT_PROMPTS,
+  TOOL_READY_PROMPTS,
+  TOOL_STEP_PROMPTS,
+  toolStepPromptKey,
+} from '../src/cad/cad.ts';
 import { HOST_NAMES, readCatalog } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');
@@ -155,3 +161,53 @@ test('OVERKILL needs at least two objects to compare', () => {
   assertSelectionRule({ ...OVERKILL, count: 2 });
 });
 
+// --- BREAKATPOINT: interactive two-step split --------------------------------
+
+const BREAKATPOINT = Object.freeze({
+  id: 'BREAKATPOINT',
+  labelKey: 'draw.kind.breakatpoint',
+  hintKey: 'draw.kind.breakatpoint.hint',
+  icon: 'trim',
+  toolKey: 'draw.breakatpoint',
+  selectEntity: 'tool.prompt.breakatpoint.select_entity',
+  point: 'tool.prompt.breakatpoint.point',
+  ready: 'tool.prompt.breakatpoint.ready',
+});
+
+test('BREAKATPOINT is catalogued and admitted as its own selector', () => {
+  assertCatalogued({ ...BREAKATPOINT, group: 'modify' });
+  // Never an alias of BREAK: BREAK's first click is also the first break point,
+  // BREAKATPOINT's first click is only the object pick.
+  assert.notEqual(BREAKATPOINT.id, 'BREAK');
+  assert.ok(en[`tool.draw.breakatpoint`], 'the tool chip label must exist in en');
+  assert.ok(zh[`tool.draw.breakatpoint`], 'the tool chip label must exist in zh-CN');
+});
+
+test('both Modify panels carry the BREAKATPOINT tool button', () => {
+  assertRibbonButton(BREAKATPOINT);
+  // It is a capture, so it is not a pre-selection tool and has no parameter row.
+  assert.equal(PRESELECT_PROMPTS[BREAKATPOINT.toolKey], undefined);
+});
+
+test('BREAKATPOINT has no selection precondition because it is a tool', () => {
+  assertSelectionRule({ ...BREAKATPOINT, count: 0 });
+});
+
+test('BREAKATPOINT names its two steps: object pick, then break point', () => {
+  assert.deepEqual(TOOL_STEP_PROMPTS[BREAKATPOINT.toolKey], [
+    BREAKATPOINT.selectEntity,
+    BREAKATPOINT.point,
+  ]);
+  assert.equal(TOOL_STEP_PROMPTS[BREAKATPOINT.toolKey].length, 2);
+  assert.notEqual(BREAKATPOINT.selectEntity, BREAKATPOINT.point);
+  assert.equal(TOOL_READY_PROMPTS[BREAKATPOINT.toolKey], BREAKATPOINT.ready);
+  const tool = (points, ready = false) => ({ key: BREAKATPOINT.toolKey, points, ready });
+  assert.equal(toolStepPromptKey(tool(0)), BREAKATPOINT.selectEntity);
+  assert.equal(toolStepPromptKey(tool(1)), BREAKATPOINT.point);
+  assert.equal(toolStepPromptKey(tool(2)), BREAKATPOINT.ready);
+  assert.equal(toolStepPromptKey(tool(2, true)), BREAKATPOINT.ready);
+  for (const key of [BREAKATPOINT.selectEntity, BREAKATPOINT.point, BREAKATPOINT.ready]) {
+    assert.ok(en[key], `${key} must exist in en`);
+    assert.ok(zh[key], `${key} must exist in zh-CN`);
+  }
+});

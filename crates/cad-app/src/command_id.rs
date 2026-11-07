@@ -971,12 +971,22 @@ pub enum CommandId {
     /// whole input. Full contract, including the exact comparison table and
     /// every NOT IMPLEMENTED option: [`crate::command_id::overkill`].
     Overkill,
+    /// `BREAKATPOINT` (Work-only): split one picked LINE, ARC or open LWPOLYLINE
+    /// into two pieces at a projected point.
+    ///
+    /// Payload is [`crate::CommandPayload::BreakAtPoint`] `{ target, point }`;
+    /// the bare selector starts the interactive tool
+    /// ([`crate::draw_tool::DrawToolKind::BreakAtPoint`]). Full contract, the
+    /// supported/refused kinds and every refusal code:
+    /// [`crate::command_id::break_at_point`].
+    BreakAtPoint,
 }
 
 mod capabilities;
 
 pub mod area_object;
 pub mod block_define;
+pub mod break_at_point;
 pub mod construction_line;
 pub mod grip_stretch;
 pub mod hatch;

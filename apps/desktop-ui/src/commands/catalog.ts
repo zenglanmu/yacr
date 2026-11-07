@@ -389,6 +389,13 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // replacement and a tolerance option are NOT IMPLEMENTED, so nothing here may
   // imply them. Appended last; `erase` is the closest removal glyph.
   { id: 'OVERKILL', labelKey: 'draw.kind.overkill', icon: 'erase', group: 'modify' },
+  // BREAKATPOINT (AutoCAD 2026) is the **interactive** single-point split: pick
+  // the object, then the break point (projected onto it). It is a tool selector
+  // (`BeginDraw`), not a selection-based instant command, so `gating.ts` gives it
+  // no selection precondition. Only LINE, ARC and open polylines are supported;
+  // CIRCLE/closed polylines and SPLINEs are named refusals. Appended last; the
+  // `trim` glyph matches BREAK's family.
+  { id: 'BREAKATPOINT', labelKey: 'draw.kind.breakatpoint', icon: 'trim', group: 'modify' },
   // AUDIT (AutoCAD 2026) is the detect-only drawing audit: it reports every
   // stored entity that fails the database's own validity check and repairs
   // nothing (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). It is a

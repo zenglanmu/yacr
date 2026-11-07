@@ -615,7 +615,10 @@ fn overkill_deletes_exact_duplicates_and_keeps_the_lowest_draw_order() {
     );
     let rev = revision(&app);
     let outcome = app
-        .execute(&mut session, command(CommandId::Overkill, CommandPayload::None))
+        .execute(
+            &mut session,
+            command(CommandId::Overkill, CommandPayload::None),
+        )
         .expect("OVERKILL must succeed");
     assert!(outcome
         .diagnostics
@@ -626,10 +629,19 @@ fn overkill_deletes_exact_duplicates_and_keeps_the_lowest_draw_order() {
         .iter()
         .any(|d| d.code == "overkill.v1_exact_duplicates_only"));
     let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
-    assert!(drawing.entity(EntityId(1)).is_none(), "higher draw_order deleted");
+    assert!(
+        drawing.entity(EntityId(1)).is_none(),
+        "higher draw_order deleted"
+    );
     assert!(drawing.entity(EntityId(2)).is_some(), "keeper stays");
-    assert!(drawing.entity(EntityId(3)).is_none(), "reversed duplicate deleted");
-    assert!(drawing.entity(EntityId(4)).is_some(), "different line stays");
+    assert!(
+        drawing.entity(EntityId(3)).is_none(),
+        "reversed duplicate deleted"
+    );
+    assert!(
+        drawing.entity(EntityId(4)).is_some(),
+        "different line stays"
+    );
     assert!(
         drawing.entity(EntityId(5)).is_some(),
         "same geometry on another layer is not a duplicate"
@@ -654,7 +666,10 @@ fn overkill_without_duplicates_records_no_transaction() {
     session.selection = SelectionSet::from_refs(vec![ref_of(1), ref_of(2)]);
     let rev = revision(&app);
     let outcome = app
-        .execute(&mut session, command(CommandId::Overkill, CommandPayload::None))
+        .execute(
+            &mut session,
+            command(CommandId::Overkill, CommandPayload::None),
+        )
         .unwrap();
     assert!(outcome.changes.is_none());
     assert!(outcome
@@ -672,25 +687,31 @@ fn overkill_without_duplicates_records_no_transaction() {
 
 #[test]
 fn overkill_refuses_non_addressable_and_empty_selections() {
-    let (mut app, mut session) = build_layered(vec![ent_on(
-        1,
-        LayerId(0),
-        line(0.0, 0.0, 10.0, 0.0),
-        0,
-    )]);
+    let (mut app, mut session) =
+        build_layered(vec![ent_on(1, LayerId(0), line(0.0, 0.0, 10.0, 0.0), 0)]);
     let rev = revision(&app);
     let err = app
-        .execute(&mut session, command(CommandId::Overkill, CommandPayload::None))
+        .execute(
+            &mut session,
+            command(CommandId::Overkill, CommandPayload::None),
+        )
         .unwrap_err();
-    assert!(matches!(err, CadError::InvalidInput(ref reason) if reason.starts_with("overkill.selection")));
+    assert!(
+        matches!(err, CadError::InvalidInput(ref reason) if reason.starts_with("overkill.selection"))
+    );
 
     let mut reference = ref_of(1);
     reference.instance = InstancePath(vec![EntityId(9)]);
     session.selection = SelectionSet::from_refs(vec![reference]);
     let err = app
-        .execute(&mut session, command(CommandId::Overkill, CommandPayload::None))
+        .execute(
+            &mut session,
+            command(CommandId::Overkill, CommandPayload::None),
+        )
         .unwrap_err();
-    assert!(matches!(err, CadError::InvalidInput(ref reason) if reason.starts_with("overkill.not_addressable")));
+    assert!(
+        matches!(err, CadError::InvalidInput(ref reason) if reason.starts_with("overkill.not_addressable"))
+    );
     assert_eq!(revision(&app), rev);
     assert_eq!(undo_depth(&app), 0);
 }
@@ -716,3 +737,252 @@ fn overkill_is_refused_in_viewer_mode() {
     let _ = &mut session;
 }
 
+// --- BREAKATPOINT ------------------------------------------------------------
+
+fn break_at_point(
+    app: &mut Application,
+    session: &mut SessionState,
+    target: u128,
+    point: Point3,
+) -> CadResult<CommandOutcome> {
+    app.execute(
+        session,
+        command(
+            CommandId::BreakAtPoint,
+            CommandPayload::BreakAtPoint {
+                target: ref_of(target),
+                point,
+            },
+        ),
+    )
+}
+
+#[test]
+fn breakatpoint_splits_a_line_at_a_projected_off_object_point() {
+    let original = line(0.0, 0.0, 10.0, 0.0);
+    let (mut app, mut session) = build(vec![ent(1, original.clone(), 0)], AppMode::Work);
+    // The point is 2 units off the line; the command projects it to x = 5.
+    let outcome = break_at_point(&mut app, &mut session, 1, p3(5.0, 2.0, 0.0)).unwrap();
+    assert_eq!(outcome.diagnostics[0].code, "breakatpoint.applied");
+    assert_eq!(undo_depth(&app), 1);
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(drawing.entity_count(), 2);
+    let SemanticGeometry::Line { start, end } = geometry(&app, 1) else {
+        panic!("the source stays the first LINE piece");
+    };
+    assert_point_close(start, p3(0.0, 0.0, 0.0), "first piece start");
+    assert_point_close(end, p3(5.0, 0.0, 0.0), "first piece end");
+    let new_id = drawing
+        .entities()
+        .find(|entity| entity.id != EntityId(1))
+        .expect("a second piece")
+        .id;
+    let SemanticGeometry::Line { start, end } = geometry(&app, new_id.0) else {
+        panic!("the second piece is a LINE");
+    };
+    assert_point_close(start, p3(5.0, 0.0, 0.0), "second piece start");
+    assert_point_close(end, p3(10.0, 0.0, 0.0), "second piece end");
+
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .unwrap();
+    assert_eq!(entity_count(&app), 1);
+    assert_eq!(geometry(&app, 1), original);
+}
+
+#[test]
+fn breakatpoint_splits_an_arc_into_two_arcs_with_the_original_sweep() {
+    let arc = SemanticGeometry::Arc {
+        center: p3(0.0, 0.0, 0.0),
+        normal: p3(0.0, 0.0, 1.0),
+        radius: 5.0,
+        start: 0.0,
+        sweep: std::f64::consts::PI,
+    };
+    let (mut app, mut session) = build(vec![ent(1, arc, 0)], AppMode::Work);
+    // The mid-arc point (0, 5) projects to u = 0.5.
+    break_at_point(&mut app, &mut session, 1, p3(0.0, 5.0, 0.0)).unwrap();
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    let new_id = drawing
+        .entities()
+        .find(|entity| entity.id != EntityId(1))
+        .expect("a second piece")
+        .id;
+    let SemanticGeometry::Arc { sweep: first, .. } = geometry(&app, 1) else {
+        panic!("first piece is an ARC");
+    };
+    let SemanticGeometry::Arc { sweep: second, .. } = geometry(&app, new_id.0) else {
+        panic!("second piece is an ARC");
+    };
+    assert!(
+        (first - std::f64::consts::FRAC_PI_2).abs() <= 1e-9,
+        "first sweep {first}"
+    );
+    assert!(
+        (second - std::f64::consts::FRAC_PI_2).abs() <= 1e-9,
+        "second sweep {second}"
+    );
+    assert!(
+        ((first + second) - std::f64::consts::PI).abs() <= 1e-9,
+        "the two sweeps sum to the source sweep"
+    );
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn breakatpoint_splits_an_open_bulged_polyline_on_a_segment() {
+    let arc_part = SemanticGeometry::Polyline {
+        points: vec![p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), p3(4.0, 4.0, 0.0)],
+        bulges: vec![0.5, 0.0, 0.0],
+        closed: false,
+    };
+    let (mut app, mut session) = build(vec![ent(1, arc_part, 0)], AppMode::Work);
+    // Resolve the first segment's arc midpoint exactly as the split does.
+    let SemanticGeometry::Arc {
+        center,
+        normal,
+        radius,
+        start,
+        sweep,
+    } = bulge_arc_geometry(p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), 0.5, p3(0.0, 0.0, 1.0))
+        .expect("bulged segment")
+    else {
+        panic!("expected an arc");
+    };
+    let (ax, ay, _) = arbitrary_axis(normal);
+    let angle = start + sweep * 0.5;
+    let midpoint = Point3 {
+        x: center.x + ax.x * radius * angle.cos() + ay.x * radius * angle.sin(),
+        y: center.y + ax.y * radius * angle.cos() + ay.y * radius * angle.sin(),
+        z: center.z + ax.z * radius * angle.cos() + ay.z * radius * angle.sin(),
+    };
+    break_at_point(&mut app, &mut session, 1, midpoint).unwrap();
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(drawing.entity_count(), 2);
+    let new_id = drawing
+        .entities()
+        .find(|entity| entity.id != EntityId(1))
+        .expect("a second piece")
+        .id;
+    let SemanticGeometry::Polyline {
+        points: first_points,
+        bulges: first_bulges,
+        closed: false,
+    } = geometry(&app, 1)
+    else {
+        panic!("first piece is an open polyline");
+    };
+    let SemanticGeometry::Polyline {
+        points: second_points,
+        bulges: second_bulges,
+        closed: false,
+    } = geometry(&app, new_id.0)
+    else {
+        panic!("second piece is an open polyline");
+    };
+    assert_eq!(
+        first_points.len(),
+        2,
+        "first piece: original start + break point"
+    );
+    assert_eq!(
+        second_points.len(),
+        3,
+        "second piece: break point + two vertices"
+    );
+    assert_point_close(first_points[1], midpoint, "first piece end");
+    assert_point_close(second_points[0], midpoint, "second piece start");
+    // The split bulges are the two halves of the original arc (t = 0.5 each).
+    assert!((first_bulges[0] - second_bulges[0]).abs() <= 1e-9);
+    let half = (4.0 * 0.5_f64.atan() * 0.5 / 4.0).tan();
+    assert!(
+        (first_bulges[0] - half).abs() <= 1e-9,
+        "split bulge {}",
+        first_bulges[0]
+    );
+}
+
+#[test]
+fn breakatpoint_refuses_closed_objects_splines_and_endpoints_without_writing() {
+    let cases: Vec<(SemanticGeometry, &str)> = vec![
+        (
+            SemanticGeometry::Circle {
+                center: p3(0.0, 0.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                radius: 5.0,
+            },
+            "breakatpoint.closed",
+        ),
+        (closed_rectangle(), "breakatpoint.closed"),
+        (spline(), "breakatpoint.spline_unsupported"),
+    ];
+    for (geometry, expected) in cases {
+        let (mut app, mut session) = build(vec![ent(1, geometry, 0)], AppMode::Work);
+        let rev = revision(&app);
+        let err = break_at_point(&mut app, &mut session, 1, p3(1.0, 0.0, 0.0)).unwrap_err();
+        match err {
+            CadError::InvalidInput(reason) => {
+                assert!(reason.starts_with(expected), "{expected}: {reason}")
+            }
+            CadError::Unsupported(reason) => {
+                assert!(reason.starts_with(expected), "{expected}: {reason}")
+            }
+            other => panic!("unexpected refusal {other:?}"),
+        }
+        assert_eq!(revision(&app), rev);
+        assert_eq!(undo_depth(&app), 0);
+        assert_eq!(entity_count(&app), 1);
+    }
+
+    // A break point at a LINE endpoint is refused too.
+    let (mut app, mut session) = build(vec![ent(1, line(0.0, 0.0, 10.0, 0.0), 0)], AppMode::Work);
+    let rev = revision(&app);
+    let err = break_at_point(&mut app, &mut session, 1, p3(0.0, 0.0, 0.0)).unwrap_err();
+    assert!(
+        matches!(err, CadError::InvalidInput(ref reason) if reason.starts_with("breakatpoint.point_at_endpoint"))
+    );
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn breakatpoint_refuses_a_point_outside_an_open_span_and_non_addressable_refs() {
+    let (mut app, mut session) = build(vec![ent(1, line(0.0, 0.0, 10.0, 0.0), 0)], AppMode::Work);
+    let rev = revision(&app);
+    let err = break_at_point(&mut app, &mut session, 1, p3(20.0, 0.0, 0.0)).unwrap_err();
+    assert!(
+        matches!(err, CadError::InvalidInput(ref reason) if reason.starts_with("breakatpoint.point_outside_span"))
+    );
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 0);
+    assert_eq!(entity_count(&app), 1);
+
+    let mut reference = ref_of(1);
+    reference.instance = InstancePath(vec![EntityId(9)]);
+    let err = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::BreakAtPoint,
+                CommandPayload::BreakAtPoint {
+                    target: reference,
+                    point: p3(5.0, 0.0, 0.0),
+                },
+            ),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(err, CadError::InvalidInput(ref reason) if reason.starts_with("breakatpoint.not_addressable"))
+    );
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn breakatpoint_is_refused_in_viewer_mode() {
+    let (mut app, mut session) = build(vec![ent(1, line(0.0, 0.0, 10.0, 0.0), 0)], AppMode::Viewer);
+    let rev = revision(&app);
+    let err = break_at_point(&mut app, &mut session, 1, p3(5.0, 0.0, 0.0)).unwrap_err();
+    assert_eq!(err, CadError::PermissionDenied);
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 0);
+}

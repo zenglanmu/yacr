@@ -881,7 +881,7 @@ fn line_probe(
 }
 
 /// Angle normalised into `[0, TAU)`.
-fn norm_tau(angle: f64) -> f64 {
+pub(super) fn norm_tau(angle: f64) -> f64 {
     let value = angle % TAU;
     if value < 0.0 {
         value + TAU

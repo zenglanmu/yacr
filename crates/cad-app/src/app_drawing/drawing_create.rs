@@ -55,6 +55,7 @@ impl Application {
             CommandId::Reverse => self.reverse_entities(session, command),
             CommandId::Oops => self.oops_restore(session, command),
             CommandId::Overkill => self.overkill(session, command),
+            CommandId::BreakAtPoint => self.break_at_point(command),
             CommandId::ArrayRectangular => self.array_rect(session, command),
             CommandId::ArrayPolar => self.array_polar(session, command),
             CommandId::AlignEntities => self.align_entities(session, command),

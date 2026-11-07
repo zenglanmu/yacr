@@ -757,6 +757,13 @@ impl DrawTool {
                 first: a,
                 second: b,
             },
+            // BREAKATPOINT: the first click only resolved the target; the second
+            // click is the break point (projected onto the object by the command
+            // layer). Unlike BREAK the first click is not reused as a point.
+            DrawToolKind::BreakAtPoint => DrawIntent::BreakAtPoint {
+                target: self.picks[0].clone(),
+                point: b,
+            },
             // ROTATE: the absolute direction angle from `base` to the second
             // point, measured about +Z from the +X axis. A zero-length direction
             // (or one differing only in Z) has no defined angle, so it is refused

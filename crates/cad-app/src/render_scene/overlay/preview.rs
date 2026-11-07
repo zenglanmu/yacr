@@ -141,6 +141,8 @@ pub fn draw_preview_overlay(
         // the live preview is the existing cursor/chain rubber band (no new
         // overlay channel).
         | DrawToolKind::Break
+        // BREAKATPOINT: the entity pick then a free break point — same rubber band.
+        | DrawToolKind::BreakAtPoint
         | DrawToolKind::Copy
         | DrawToolKind::Extend
         | DrawToolKind::Rotate
