@@ -104,7 +104,8 @@ test('both labels and both range hints exist in both catalogs', async () => {
 });
 
 test('the argument table keeps one numeric grammar per selector', () => {
-  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE', 'SPACE', 'TORIENT', 'TCASE', 'PEDIT', 'HATCHEDIT', 'MEASUREGEOM', 'JUSTIFYTEXT', 'TJUST', 'TSCALE', 'TEXTALIGN', 'TCOUNT', 'TCIRCLE', 'LTSCALE', 'LAYERPMODE', 'LAYERSTATE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'FIND', '-FIND', 'PURGE', 'RENAME', 'SETVAR', 'MREDO', 'MULTIPLE', 'DONUT', 'SOLID', 'HELIX', 'MLINE', 'MLSTYLE', 'TREX', 'MPEDIT', 'DRAWORDER']);
+  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE', 'SPACE', 'TORIENT', 'TCASE', 'PEDIT', 'HATCHEDIT', 'MEASUREGEOM', 'JUSTIFYTEXT', 'TJUST', 'TSCALE', 'TEXTALIGN', 'TCOUNT', 'TCIRCLE', 'LTSCALE', 'LAYERPMODE', 'LAYERSTATE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'FIND', '-FIND', 'PURGE', 'RENAME', 'SETVAR', 'MREDO', 'MULTIPLE', 'DONUT', 'SOLID', 'HELIX', 'MLINE', 'MLSTYLE', 'TREX', 'MPEDIT', 'DRAWORDER', 'VIEW', 'VIEWGO', 'VPOINT']);
+
   for (const { id, accepted } of SYNVARS) {
     const { parse } = ARGUMENT_COMMANDS[id];
     for (const admitted of accepted) assert.equal(parse(admitted), true, `${id} ${admitted}`);

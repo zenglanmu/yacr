@@ -875,6 +875,34 @@ pub enum CommandId {
     /// `DRAWORDER` (Work-only): rewrite model-space draw order. Contract:
     /// [`crate::command_id::draw2::DrawOrderCommand`].
     DrawOrder,
+    /// `REDRAW`: refresh the current viewport's display without moving the
+    /// camera. View-only: no database write, revision bump, undo entry or
+    /// `ZOOM PREVIOUS` step. Payload-free; a caller payload is refused.
+    Redraw,
+    /// `REDRAWALL`: the same refresh for every viewport of the open document.
+    RedrawAll,
+    /// `REGEN`: regenerate the current viewport's derived representation by
+    /// advancing its regeneration stamp. View-only (no database write).
+    Regen,
+    /// `REGENALL`: the same regeneration for every viewport of the document.
+    RegenAll,
+    /// `VIEW`: the session-only named-view store. Typed
+    /// `SAVE <name>` / `RESTORE <name>` / `LIST` / `DELETE <name>`, bounded to
+    /// 32 case-insensitively unique names. `-VIEW` is an alias of the same path.
+    View,
+    /// `VIEWGO <name>`: restore a named view (the same restore path as
+    /// `VIEW RESTORE`, never a second view authority).
+    ViewGo,
+    /// `VIEWBACK`: restore the previous discrete view from the per-viewport
+    /// `ZOOM PREVIOUS` history; an empty history is a named no-op diagnostic.
+    ViewBack,
+    /// `VIEWFORWARD`: move forward through the bounded forward stack recorded
+    /// when a back step pops; an empty forward stack is a named no-op.
+    ViewForward,
+    /// `VPOINT <x> <y> <z>` or `TOP|BOTTOM|FRONT|BACK|LEFT|RIGHT`: set the
+    /// camera viewing direction. A zero or non-finite vector is refused; the
+    /// command never changes the model.
+    VPoint,
 }
 
 mod capabilities;

@@ -857,6 +857,24 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'RESETVIEW', labelKey: 'view.reset', icon: 'view', command: 'RESETVIEW' },
         ],
       },
+      // The 2026-11-07 view-state panel: the explicit refresh/regeneration and
+      // the back/forward walk. REDRAW/REGEN (and their ALL forms) are
+      // payload-free; VIEWBACK/VIEWFORWARD read the same per-viewport stack
+      // `ZOOM PREVIOUS` uses. `VIEW`/`VIEWGO`/`VPOINT` take a typed argument, so
+      // they deliberately have no button here — a click would have to invent the
+      // name or the direction.
+      {
+        id: 'viewstate',
+        titleKey: 'ribbon.panel.viewstate',
+        items: [
+          { id: 'REDRAW', labelKey: 'draw.kind.redraw', icon: 'view', command: 'REDRAW', hintKey: 'draw.kind.redraw.hint' },
+          { id: 'REDRAWALL', labelKey: 'draw.kind.redrawall', icon: 'view', command: 'REDRAWALL', hintKey: 'draw.kind.redrawall.hint' },
+          { id: 'REGEN', labelKey: 'draw.kind.regen', icon: 'view', command: 'REGEN', hintKey: 'draw.kind.regen.hint' },
+          { id: 'REGENALL', labelKey: 'draw.kind.regenall', icon: 'view', command: 'REGENALL', hintKey: 'draw.kind.regenall.hint' },
+          { id: 'VIEWBACK', labelKey: 'draw.kind.viewback', icon: 'zoomPrevious', command: 'VIEWBACK', hintKey: 'draw.kind.viewback.hint' },
+          { id: 'VIEWFORWARD', labelKey: 'draw.kind.viewforward', icon: 'view', command: 'VIEWFORWARD', hintKey: 'draw.kind.viewforward.hint' },
+        ],
+      },
       {
         id: 'display',
         titleKey: 'ribbon.panel.display',

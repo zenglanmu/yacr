@@ -125,7 +125,7 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
   );
   // The View tab keeps its `palettes` panel only because STATUS is a router
   // command; the palette toggles and the chrome-collapse switch are dropped.
-  assert.deepEqual(mobileRibbonSections('view').map(section => section.id), ['view3d', 'standard', 'navigate', 'display', 'palettes']);
+  assert.deepEqual(mobileRibbonSections('view').map(section => section.id), ['view3d', 'standard', 'navigate', 'viewstate', 'display', 'palettes']);
   assert.deepEqual(
     mobileRibbonSections('view').at(-1).items.map(item => item.id),
     ['STATUS'],

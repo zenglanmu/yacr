@@ -204,6 +204,8 @@ mod select_filter;
 mod select_similar;
 mod text_commands;
 mod utility;
+mod view_batch;
+
 mod view_camera;
 mod zoom_previous;
 mod zoom_window;

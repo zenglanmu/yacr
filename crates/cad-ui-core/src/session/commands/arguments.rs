@@ -8,7 +8,7 @@
 //! `ARGUMENT_SELECTORS` in the parent module is the admission list; an argument
 //! parser only ever sees text for a selector that list already admitted.
 
-use cad_app::{NamedObjectKind, PeditOption, PurgeTarget, RenameCommand};
+use cad_app::{NamedObjectKind, PeditOption, PurgeTarget, RenameCommand, StandardView};
 
 /// AutoCAD's `LAYERSTATE <option>`: the bounded named layer-state store.
 pub const LAYERSTATE_SELECTOR: &str = "LAYERSTATE";
@@ -21,6 +21,96 @@ pub const LTSCALE_SELECTOR: &str = "LTSCALE";
 
 /// AutoCAD's `LAYERPMODE [ON|OFF]`: the `LAYERP` snapshot-recording gate.
 pub const LAYERPMODE_SELECTOR: &str = "LAYERPMODE";
+
+/// AutoCAD's `VIEW <option>`: the session-only named-view store.
+pub const VIEW_SELECTOR: &str = "VIEW";
+
+/// AutoCAD's `VIEWGO <name>`: restore one saved named view.
+pub const VIEWGO_SELECTOR: &str = "VIEWGO";
+
+/// AutoCAD's `VPOINT <x> <y> <z>` or `TOP|BOTTOM|FRONT|BACK|LEFT|RIGHT`.
+pub const VPOINT_SELECTOR: &str = "VPOINT";
+
+/// One parsed argument of the `VIEW` selector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewOption {
+    /// Capture the current view under a name.
+    Save(String),
+    /// Apply a saved view.
+    Restore(String),
+    /// Report every saved name.
+    List,
+    /// Drop one saved view.
+    Delete(String),
+}
+
+/// Parse `VIEW SAVE <name>` / `RESTORE <name>` / `LIST` / `DELETE <name>`.
+///
+/// The keyword is case-insensitive and the name is the trimmed remainder (it
+/// may contain spaces) and must be non-empty. `LIST` takes no name. Nothing else
+/// is admitted (`view.needs_option` for a bare selector, the invalid-argument
+/// refusal for anything outside this grammar).
+pub fn parse_view_argument(argument: &str) -> Option<ViewOption> {
+    let text = argument.trim();
+    let (keyword, rest) = match text.find([' ', '\t']) {
+        Some(index) => (&text[..index], text[index..].trim()),
+        None => (text, ""),
+    };
+    match keyword.to_ascii_uppercase().as_str() {
+        "LIST" if rest.is_empty() => Some(ViewOption::List),
+        "SAVE" if !rest.is_empty() => Some(ViewOption::Save(rest.to_string())),
+        "RESTORE" if !rest.is_empty() => Some(ViewOption::Restore(rest.to_string())),
+        "DELETE" if !rest.is_empty() => Some(ViewOption::Delete(rest.to_string())),
+        _ => None,
+    }
+}
+
+/// Parse `VIEWGO <name>`: one trimmed non-empty name.
+pub fn parse_viewgo_argument(argument: &str) -> Option<String> {
+    let name = argument.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Parse `VPOINT <x> <y> <z>` or one of the six full standard-view words.
+///
+/// The words are case-insensitive and map onto the existing
+/// [`cad_app::StandardView`] path (`TOP` is the 2D plan). A vector is three
+/// finite plain decimals (sign allowed, no exponent) separated by whitespace;
+/// zero length is **not** rejected here because it is a valid numeric triple —
+/// the command refuses it by name (`vpoint.invalid_vector`) so direct payload
+/// callers get the same refusal as the typed line.
+pub fn parse_vpoint_argument(argument: &str) -> Option<Point3Input> {
+    let text = argument.trim();
+    let parts: Vec<&str> = text.split_whitespace().collect();
+    if parts.len() == 1 {
+        let view = match parts[0].to_ascii_uppercase().as_str() {
+            "TOP" => StandardView::Top,
+            "BOTTOM" => StandardView::Bottom,
+            "FRONT" => StandardView::Front,
+            "BACK" => StandardView::Back,
+            "LEFT" => StandardView::Left,
+            "RIGHT" => StandardView::Right,
+            _ => return None,
+        };
+        return Some(Point3Input::Standard(view));
+    }
+    if parts.len() != 3 {
+        return None;
+    }
+    let x = parse_signed_decimal(parts[0])?;
+    let y = parse_signed_decimal(parts[1])?;
+    let z = parse_signed_decimal(parts[2])?;
+    Some(Point3Input::Vector([x, y, z]))
+}
+
+/// The machine form of a parsed `VPOINT` argument.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Point3Input {
+    /// One of the six standard views.
+    Standard(StandardView),
+    /// An eye direction in world coordinates.
+    Vector([f64; 3]),
+}
 
 /// One parsed argument of the `ZOOM` selector.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -322,6 +412,32 @@ pub fn invalid_layerpmode_argument_reason(text: &str) -> String {
     format!(
         "unsupported CAD command: {} (LAYERPMODE needs ON or OFF; a bare LAYERPMODE reports the \
          current setting)",
+        text.trim()
+    )
+}
+
+/// The stable rejection reason for a `VIEW` argument outside the grammar.
+pub fn invalid_view_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (VIEW needs SAVE <name>, RESTORE <name>, LIST or DELETE \
+         <name>)",
+        text.trim()
+    )
+}
+
+/// The stable rejection reason for a `VIEWGO` argument outside the grammar.
+pub fn invalid_viewgo_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (VIEWGO needs one saved view name)",
+        text.trim()
+    )
+}
+
+/// The stable rejection reason for a `VPOINT` argument outside the grammar.
+pub fn invalid_vpoint_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (VPOINT needs <x> <y> <z> or TOP, BOTTOM, FRONT, BACK, LEFT, \
+         RIGHT)",
         text.trim()
     )
 }

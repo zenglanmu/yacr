@@ -43,10 +43,12 @@ pub mod zoom_history;
 mod app_audit;
 mod app_reports;
 mod app_utility;
+mod app_view;
 mod app_zoom;
 mod layer_history;
 mod layer_states;
 mod space;
+pub mod view_states;
 
 pub use api::{
     ApiOutcome, ApiRequest, ApiTarget, EntityEdit, NewEntity, RawCommandTrace, TracedCommandOutcome,
@@ -97,6 +99,7 @@ pub use tasks::{
     ImportTerminal,
 };
 pub use tool_state::{DrawCapture, ToolSnapshot, ToolState};
+pub use view_states::{NamedView, ViewStates, VIEW_STATE_CAP};
 pub use zoom_history::{ViewSnapshot, ZoomHistory, ZOOM_HISTORY_CAP};
 
 use interaction::SelectionMode;
@@ -218,6 +221,12 @@ pub struct Viewport {
     /// ([`crate::zoom_history`]): per viewport, session state only, never
     /// persisted.
     pub zoom_history: ZoomHistory,
+    /// `REDRAW` refresh stamp: advanced without touching the camera, the
+    /// drawing or the `ZOOM PREVIOUS` history.
+    pub refresh_generation: u64,
+    /// `REGEN` regeneration stamp: the host may invalidate its derived scene
+    /// cache when this advances. No database write or revision bump.
+    pub regen_generation: u64,
 }
 
 /// Whether the viewport observes the drawing in 2D (plan) or 3D.
@@ -265,6 +274,8 @@ impl Viewport {
             clip: None,
             style: DisplayStyle::Wireframe,
             zoom_history: ZoomHistory::new(),
+            refresh_generation: 0,
+            regen_generation: 0,
         }
     }
 
@@ -346,7 +357,8 @@ pub use command_payload::{
     HatchEditOption, JustifyTextCommand, LayerStateCommand, MeasureGeomOption, NamedObjectKind,
     OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget, RadialDimensionCommand,
     RenameCommand, RotatedLinearDimensionCommand, TCircleCommand, TCountCommand, TextAlignCommand,
-    TextAlignEdge, TextBoundaryShape, TextCaseMode, TextScaleCommand, TwoLineCommand,
+    TextAlignEdge, TextBoundaryShape, TextCaseMode, TextScaleCommand, TwoLineCommand, VPointInput,
+    ViewCommand,
 };
 
 pub struct Command {

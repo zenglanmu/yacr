@@ -7,6 +7,7 @@
 mod alias_table;
 mod command_vocabulary;
 mod command_vocabulary_clipboard;
+mod command_vocabulary_inquiry;
 mod draw2_arguments;
 mod gradient;
 mod hatchedit;
@@ -23,6 +24,7 @@ mod standard_view;
 mod status_projection;
 mod text_batch;
 mod utility_arguments;
+mod view_arguments;
 mod xref_status;
 mod zoom_argument;
 mod zoom_window_previous;

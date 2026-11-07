@@ -1250,8 +1250,7 @@
   "draw.kind.layerstate": "Named layer states (LAYERSTATE)",
   "draw.kind.layerpmode": "Layer previous mode (LAYERPMODE)",
   "draw.kind.ltscale": "Global linetype scale (LTSCALE)",
-  "draw.kind.laywalk": "Layer walk (LAYWALK)"
-,
+  "draw.kind.laywalk": "Layer walk (LAYWALK)",
   "draw.kind.qselect": "Quick Select",
   "draw.kind.filter": "Filter (add to selection)",
   "draw.kind.getsel": "Get Selection by Property",
@@ -1302,7 +1301,25 @@
   "draw.kind.draworder.front": "Draw order: Front",
   "draw.kind.draworder.back": "Draw order: Back",
   "draw.kind.draworder.above": "Draw order: Above",
-  "draw.kind.draworder.below": "Draw order: Below"
-
+  "draw.kind.draworder.below": "Draw order: Below",
+  "draw.kind.redraw": "Redraw",
+  "draw.kind.redraw.hint": "Redraw refreshes the current viewport's display without moving the camera or changing the drawing.",
+  "draw.kind.redrawall": "Redraw all",
+  "draw.kind.redrawall.hint": "Refreshes every viewport of the open drawing; the camera and the drawing are unchanged.",
+  "draw.kind.regen": "Regenerate",
+  "draw.kind.regen.hint": "Advances the current viewport's regeneration stamp so derived display caches can rebuild; the drawing is not written.",
+  "draw.kind.regenall": "Regenerate all",
+  "draw.kind.regenall.hint": "Regenerates every viewport of the open drawing; the drawing is not written.",
+  "draw.kind.view": "Named views",
+  "draw.kind.view.hint": "Saves, restores, lists or deletes session-only named views (at most 32, case-insensitive names). Nothing is written to the DWG; use VIEW SAVE <name>.",
+  "draw.kind.viewgo": "Go to view",
+  "draw.kind.viewgo.hint": "Restores a saved named view; an unknown name is refused by name.",
+  "draw.kind.viewback": "Previous view",
+  "draw.kind.viewback.hint": "Restores the previous discrete view. Pans, wheel zooms and orbit drags are not recorded; an empty history changes nothing.",
+  "draw.kind.viewforward": "Next view",
+  "draw.kind.viewforward.hint": "Returns to a view you stepped back from; an empty forward history changes nothing.",
+  "draw.kind.vpoint": "Viewpoint",
+  "draw.kind.vpoint.hint": "VPOINT <x> <y> <z> or TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT. The vector form is a 3D observation; a zero vector is refused.",
+  "ribbon.panel.viewstate": "View state"
 
 }

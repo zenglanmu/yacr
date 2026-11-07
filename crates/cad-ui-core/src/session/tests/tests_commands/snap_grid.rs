@@ -246,7 +246,11 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "MLSTYLE",
             "TREX",
             "MPEDIT",
-            "DRAWORDER"
+            "DRAWORDER",
+            // The 2026-11-07 view batch.
+            "VIEW",
+            "VIEWGO",
+            "VPOINT"
         ]
     );
     assert_eq!(

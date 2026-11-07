@@ -96,6 +96,9 @@ impl ViewSnapshot {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ZoomHistory {
     snapshots: VecDeque<ViewSnapshot>,
+    /// Views popped by a back step, newest last. A new discrete view change
+    /// clears it (a new branch), exactly like a browser's forward history.
+    forward: VecDeque<ViewSnapshot>,
 }
 
 impl ZoomHistory {
@@ -128,12 +131,46 @@ impl ZoomHistory {
             self.snapshots.pop_front();
         }
         self.snapshots.push_back(snapshot);
+        // A new discrete view supersedes whatever was redo-able.
+        self.forward.clear();
+    }
+
+    /// Record one view on the back stack **without** clearing the forward
+    /// stack. Used only by `VIEWFORWARD`, whose restore must stay redo-able.
+    pub(crate) fn push_back_preserving_forward(&mut self, snapshot: ViewSnapshot) {
+        if self.snapshots.len() >= ZOOM_HISTORY_CAP {
+            self.snapshots.pop_front();
+        }
+        self.snapshots.push_back(snapshot);
     }
 
     /// Remove and return the **newest** snapshot, or `None` when the history is
     /// empty (a `ZOOM PREVIOUS` with nothing to restore).
     pub fn pop(&mut self) -> Option<ViewSnapshot> {
         self.snapshots.pop_back()
+    }
+
+    /// Record one view on the forward stack, dropping the oldest when full.
+    pub fn push_forward(&mut self, snapshot: ViewSnapshot) {
+        if self.forward.len() >= ZOOM_HISTORY_CAP {
+            self.forward.pop_front();
+        }
+        self.forward.push_back(snapshot);
+    }
+
+    /// Remove and return the **newest** forward snapshot.
+    pub fn pop_forward(&mut self) -> Option<ViewSnapshot> {
+        self.forward.pop_back()
+    }
+
+    /// How many forward views are retained.
+    pub fn forward_len(&self) -> usize {
+        self.forward.len()
+    }
+
+    /// Whether there is no forward view to restore.
+    pub fn is_forward_empty(&self) -> bool {
+        self.forward.is_empty()
     }
 
     /// The retained snapshots, oldest first (read-only; for contracts).

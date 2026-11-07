@@ -52,6 +52,7 @@ mod text_batch;
 mod text_commands;
 mod util_arguments;
 pub mod vendor;
+mod view_arguments;
 pub mod wire;
 mod zoom;
 use crate::protocol::ProbeInput;
@@ -96,15 +97,18 @@ pub use self::commands::{
     invalid_layerpmode_argument_reason, invalid_layerstate_argument_reason,
     invalid_laywalk_argument_reason, invalid_ltscale_argument_reason,
     invalid_pdmode_argument_reason, invalid_pdsize_argument_reason, invalid_pedit_argument_reason,
-    invalid_snap_unit_argument_reason, invalid_zoom_argument_reason, measurement_selector_kind,
-    normalize_command, parse_layerpmode_argument, parse_layerstate_argument,
-    parse_laywalk_argument, parse_ltscale_argument, parse_pdmode_argument, parse_pdsize_argument,
-    parse_pedit_argument, parse_snap_unit_argument, parse_zoom_argument, typed_command_argument,
-    unsupported_command_reason, zoom_step_factor, LayerStateOption, ZoomArgument,
-    ARGUMENT_SELECTOR, ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE, HATCHEDIT_SELECTOR,
-    LAYERPMODE_SELECTOR, LAYERSTATE_SELECTOR, LAYWALK_SELECTOR, LTSCALE_SELECTOR,
-    MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR, PEDIT_SELECTOR, SNAPUNIT_SELECTOR,
-    SPACE_SELECTOR, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
+    invalid_snap_unit_argument_reason, invalid_view_argument_reason,
+    invalid_viewgo_argument_reason, invalid_vpoint_argument_reason, invalid_zoom_argument_reason,
+    measurement_selector_kind, normalize_command, parse_layerpmode_argument,
+    parse_layerstate_argument, parse_laywalk_argument, parse_ltscale_argument,
+    parse_pdmode_argument, parse_pdsize_argument, parse_pedit_argument, parse_snap_unit_argument,
+    parse_view_argument, parse_viewgo_argument, parse_vpoint_argument, parse_zoom_argument,
+    typed_command_argument, unsupported_command_reason, zoom_step_factor, LayerStateOption,
+    Point3Input, ViewOption, ZoomArgument, ARGUMENT_SELECTOR, ARGUMENT_SELECTORS, COMMAND_ALIASES,
+    COMMAND_TABLE, HATCHEDIT_SELECTOR, LAYERPMODE_SELECTOR, LAYERSTATE_SELECTOR, LAYWALK_SELECTOR,
+    LTSCALE_SELECTOR, MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR, PEDIT_SELECTOR,
+    SNAPUNIT_SELECTOR, SPACE_SELECTOR, VIEWGO_SELECTOR, VIEW_SELECTOR, VPOINT_SELECTOR,
+    ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
 pub use self::draw2_arguments::invalid_draw2_argument_reason;
 pub use self::events::{

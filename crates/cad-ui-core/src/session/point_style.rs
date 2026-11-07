@@ -94,6 +94,12 @@ impl CadSession {
             | MLSTYLE_SELECTOR | TREX_SELECTOR | MPEDIT_SELECTOR | DRAWORDER_SELECTOR => {
                 self.draw2_argument(selector, argument, text)
             }
+            // The 2026-11-07 view batch: named views and the camera direction.
+            // `-VIEW` normalises to `VIEW` before this dispatch, so it lands on
+            // the same arm.
+            super::commands::VIEW_SELECTOR => self.view_state_argument(argument, text),
+            super::commands::VIEWGO_SELECTOR => self.view_go_argument(argument, text),
+            super::commands::VPOINT_SELECTOR => self.vpoint_argument(argument, text),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)

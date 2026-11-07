@@ -586,4 +586,19 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'MPEDIT', labelKey: 'draw.kind.mpedit', icon: 'polyline', group: 'modify' },
   { id: 'DRAWORDER', labelKey: 'draw.kind.draworder', icon: 'properties', group: 'modify' },
 
+  // The 2026-11-07 view batch. REDRAW/REGEN and their ALL forms are payload-free
+  // refresh/regeneration stamps; VIEWBACK/VIEWFORWARD walk the per-viewport view
+  // stack. VIEW/VIEWGO/VPOINT are typed-argument selectors: a button cannot
+  // invent the name or the direction, so their command-line grammar lives in
+  // `gating.ts` and the catalog row only makes them discoverable.
+  { id: 'REDRAW', labelKey: 'draw.kind.redraw', icon: 'view', group: 'view' },
+  { id: 'REDRAWALL', labelKey: 'draw.kind.redrawall', icon: 'view', group: 'view' },
+  { id: 'REGEN', labelKey: 'draw.kind.regen', icon: 'view', group: 'view' },
+  { id: 'REGENALL', labelKey: 'draw.kind.regenall', icon: 'view', group: 'view' },
+  { id: 'VIEW', labelKey: 'draw.kind.view', icon: 'view', group: 'view' },
+  { id: 'VIEWGO', labelKey: 'draw.kind.viewgo', icon: 'viewTop', group: 'view' },
+  { id: 'VIEWBACK', labelKey: 'draw.kind.viewback', icon: 'zoomPrevious', group: 'view' },
+  { id: 'VIEWFORWARD', labelKey: 'draw.kind.viewforward', icon: 'view', group: 'view' },
+  { id: 'VPOINT', labelKey: 'draw.kind.vpoint', icon: 'axes', group: 'view' },
+
 ]);

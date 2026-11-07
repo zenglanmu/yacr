@@ -1250,8 +1250,7 @@
   "draw.kind.layerstate": "命名图层状态 (LAYERSTATE)",
   "draw.kind.layerpmode": "图层回退模式 (LAYERPMODE)",
   "draw.kind.ltscale": "全局线型比例 (LTSCALE)",
-  "draw.kind.laywalk": "图层漫游 (LAYWALK)"
-,
+  "draw.kind.laywalk": "图层漫游 (LAYWALK)",
   "draw.kind.qselect": "快速选择",
   "draw.kind.filter": "过滤选择（并入）",
   "draw.kind.getsel": "按特性获取选择",
@@ -1302,7 +1301,25 @@
   "draw.kind.draworder.front": "绘图顺序：最前",
   "draw.kind.draworder.back": "绘图顺序：最后",
   "draw.kind.draworder.above": "绘图顺序：之上",
-  "draw.kind.draworder.below": "绘图顺序：之下"
-
+  "draw.kind.draworder.below": "绘图顺序：之下",
+  "draw.kind.redraw": "重画",
+  "draw.kind.redraw.hint": "重画刷新当前视口的显示，不移动相机、不改动图形。",
+  "draw.kind.redrawall": "全部重画",
+  "draw.kind.redrawall.hint": "刷新当前图形所有视口的显示；相机和图形保持不变。",
+  "draw.kind.regen": "重生成",
+  "draw.kind.regen.hint": "推进当前视口的重生成标记，使派生的显示缓存可以重建；不写入图形。",
+  "draw.kind.regenall": "全部重生成",
+  "draw.kind.regenall.hint": "重生成当前图形的所有视口；不写入图形。",
+  "draw.kind.view": "命名视图",
+  "draw.kind.view.hint": "保存、恢复、列出或删除仅存在于会话的命名视图（最多 32 个，名称不区分大小写）。不写入 DWG；请用 VIEW SAVE <名称>。",
+  "draw.kind.viewgo": "转到视图",
+  "draw.kind.viewgo.hint": "恢复已保存的命名视图；未知名称会被明确拒绝。",
+  "draw.kind.viewback": "上一视图",
+  "draw.kind.viewback.hint": "恢复上一个离散视图。平移、滚轮缩放和轨道旋转不会记录；历史为空时不改变任何内容。",
+  "draw.kind.viewforward": "下一视图",
+  "draw.kind.viewforward.hint": "返回到后退前的视图；前进历史为空时不改变任何内容。",
+  "draw.kind.vpoint": "视点",
+  "draw.kind.vpoint.hint": "VPOINT <x> <y> <z> 或 TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT。向量形式产生三维观察；零向量会被拒绝。",
+  "ribbon.panel.viewstate": "视图状态"
 
 }
