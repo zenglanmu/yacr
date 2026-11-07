@@ -1,0 +1,8 @@
+#!/bin/sh
+# Publish submodule commits recorded by outgoing superproject refs before the
+# push lands; otherwise CI dies in actions/checkout with
+# "upload-pack: not our ref <sha>". Installed via `git config core.hooksPath
+# .githooks` (see docs/ci.md). Fail-closed: non-zero exit aborts the push.
+set -eu
+exec python3 "$(git rev-parse --show-toplevel)/scripts/pre-push-submodules.py" \
+  --remote "${1:-origin}" --url "${2:-}"

@@ -210,6 +210,11 @@ tag 的 Release）；`web-deploy` 也只在该事件下把 `apps/app-web/dist-ui
 `git status --porcelain` 逐项核对都属于本轮改动；②按**显式路径**暂存；③门禁命令显式检查退出码。
 已发生：`git add -A` 扫入他人半成品；`clippy | tail -1` 把失败吞成“通过”。
 
+推送前必须确保 `plugins/tch` 的 gitlink commit 已在 `tangent-ts` 远端发布，否则 CI 全部 job 在
+`actions/checkout` 失败（`upload-pack: not our ref`）。一次性安装本地钩子
+`git config core.hooksPath .githooks`（`scripts/pre-push-submodules.py`，fail-closed），细节见
+`docs/ci.md` §子模块推送契约。
+
 ## 文档索引（按需读）
 
 `docs/architecture.md`（边界/不变量）、`docs/core-invariants.md`、`docs/handoff.md`（逐轮交接，

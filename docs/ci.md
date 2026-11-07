@@ -147,6 +147,39 @@ runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh
 的 `=0.2.129` 钉住**完全一致**，不一致即硬失败；`check-workflows.py` 断言该 pin 检查与
 `cargo build -p app-web --target wasm32-unknown-unknown --release --locked` 不被删除。
 
+## 子模块推送契约（pre-push hook）
+
+`plugins/tch` 是 git submodule，superproject 的 gitlink 必须指向 `tangent-ts` 远端**已发布**的
+commit。若只在本地提交插件改动而没推子模块，superproject 推送后**每个** job 都会在
+`actions/checkout` 直接失败（不是门禁失败）：
+
+```
+Submodule 'plugins/tch' registered for path 'plugins/tch'
+fatal: remote error: upload-pack: not our ref <sha>
+fatal: Fetched in submodule path 'plugins/tch', but it did not contain <sha>
+```
+
+2026-11-07 的 `42338811245` / `42338811233` 就是这一原因（gitlink `0ce4dbb`，远端仍在 `7ecb6d8`）。
+
+本地保护（一次性安装，`core.hooksPath` 是仓库本地配置，不随提交分发）：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`.githooks/pre-push` → `scripts/pre-push-submodules.py`：读取 pre-push 协议的所有出站 ref，用
+`git ls-tree -r <pushed-sha>` 取出 gitlink，对每个 `(submodule, sha)` 执行 fetch 后检查该 commit 是否
+已被 `refs/remotes/<remote>/` 包含；未被包含时把**包含它的本地分支**推到其 upstream（缺 upstream 则推到
+`refs/heads/<branch>`），推完再校验一次可达性。
+
+- **fail-closed**：子模块未初始化、commit 本地不存在、commit 不在任何本地分支（detached/unreferenced）、
+  子模块 push 被拒，都会以非零码**阻断** superproject 推送并打印 `pre-push: BLOCKED ...`。
+- 只校验**被推送 ref 的 tip commit**（CI checkout 构建的就是 tip）；中间历史里的旧 gitlink 不追溯。
+- 只处理**直接**子模块，不递归推送嵌套子模块；若子模块自身带子模块，需手工先推。
+- `--dry-run` 只报告 `would push`，`--no-push` 只校验并阻断；`SKIP_SUBMODULE_PUSH_CHECK=1` 是逃生口，
+  会打印警告且不校验（此时 CI 失败风险由使用者承担）。
+- 契约测试：`python3 scripts/test-pre-push-submodules.py`（临时仓库夹具，7 个用例，无网络）。
+
 ## 本层 NOT RUN（明确未运行）
 
 - `core-quality` / `wasm-check` / `i18n-contracts` / `shader-validation` / `linux-app` /
