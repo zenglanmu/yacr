@@ -86,6 +86,7 @@ impl CommandId {
                 | Self::LayThw
                 | Self::LayLck
                 | Self::LayUlk
+                | Self::SetByLayer
                 | Self::SetPointDisplayMode
                 | Self::SetPointDisplaySize
                 | Self::SetEntityProperty

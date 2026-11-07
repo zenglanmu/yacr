@@ -1143,5 +1143,7 @@
   "draw.kind.laylck": "锁定选中图层",
   "draw.kind.laylck.hint": "请先选择对象；LAYLCK 会锁定每个选中对象所在的图层（当前图层也可以被锁定）。",
   "draw.kind.layulk": "解锁选中图层",
-  "draw.kind.layulk.hint": "请先选择对象；LAYULK 会解锁每个选中对象所在的图层。"
+  "draw.kind.layulk.hint": "请先选择对象；LAYULK 会解锁每个选中对象所在的图层。",
+  "draw.kind.setbylayer": "特性设为随层",
+  "draw.kind.setbylayer.hint": "请先选择对象；SETBYLAYER 会把颜色、线型和线宽重置为随层（透明度、材质等不在重置范围；未实现 Include blocks）。"
 }

@@ -292,6 +292,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'LAYTHW', labelKey: 'draw.kind.laythw', icon: 'eye', group: 'annotate' },
   { id: 'LAYLCK', labelKey: 'draw.kind.laylck', icon: 'layers', group: 'annotate' },
   { id: 'LAYULK', labelKey: 'draw.kind.layulk', icon: 'layers', group: 'annotate' },
+  { id: 'SETBYLAYER', labelKey: 'draw.kind.setbylayer', icon: 'layers', group: 'annotate' },
   // FONTS opens the read-only Font Manager (`cad_fonts`). It is a chrome-local
   // selector like LAYER/PROPERTIES, so the command line and the ribbon open the
   // panel without the router ever seeing the word. It closes the annotation run

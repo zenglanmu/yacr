@@ -1143,5 +1143,7 @@
   "draw.kind.laylck": "Lock selected layers",
   "draw.kind.laylck.hint": "Select the objects first; LAYLCK locks the layer of every selected object (the current layer may be locked too).",
   "draw.kind.layulk": "Unlock selected layers",
-  "draw.kind.layulk.hint": "Select the objects first; LAYULK unlocks the layer of every selected object."
+  "draw.kind.layulk.hint": "Select the objects first; LAYULK unlocks the layer of every selected object.",
+  "draw.kind.setbylayer": "Set properties to ByLayer",
+  "draw.kind.setbylayer.hint": "Select the objects first; SETBYLAYER resets colour, linetype and lineweight to ByLayer (transparency, materials and the other listed properties are not reset; Include blocks is not implemented)."
 }

@@ -100,9 +100,29 @@
 //! `layulk.unchanged` without a write. Unknown layer rows are refused by name.
 //! One revision bump per changed layer; **not undoable**. Success is
 //! `laylck.applied` / `layulk.applied` with the changed-layer count. Work-only.
+//!
+//! ## `SETBYLAYER`
+//!
+//! "Changes the property overrides of selected objects to ByLayer." Resets
+//! exactly **colour, linetype and lineweight** to their symbolic `ByLayer`
+//! forms through `update_entity_display` in one transaction / one undo step
+//! (display writes are undoable through display-state patches). Transparency is
+//! deliberately **not** reset in this build, and materials are not modelled;
+//! text style/height, dimension style, hatch colour/pattern and polyline
+//! thickness are not modelled either, so `setbylayer.properties_not_reset`
+//! names them (including transparency and materials) in every run. AutoCAD's
+//! **Include blocks** option is **NOT IMPLEMENTED**. `linetype_scale`, layer,
+//! space, geometry and every other field are preserved. If any selected entity
+//! is on a locked layer the whole command is refused (`setbylayer.locked`):
+//! AutoCAD does not modify objects on locked layers, and the display-write path
+//! would otherwise bypass the lock. An all-ByLayer selection opens no
+//! transaction and reports `setbylayer.unchanged`; success is
+//! `setbylayer.applied` with the entity count. Work-only.
 
 use super::*;
-use cad_db::LayerAttributes;
+use cad_db::{
+    EntityColor, EntityLineType, EntityLineWeight, EntityRenderAttributes, LayerAttributes,
+};
 
 /// A named, non-capability refusal (`<command>.<code>: <detail>`).
 fn invalid(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
@@ -219,6 +239,19 @@ fn selected_distinct_layers(
     Ok(layers)
 }
 
+/// The `SETBYLAYER` informational diagnostic: what AutoCAD's command also resets
+/// but this build deliberately does not.
+fn properties_not_reset() -> Diagnostic {
+    Diagnostic {
+        object: None,
+        code: "setbylayer.properties_not_reset".into(),
+        message: "SETBYLAYER: transparency and materials are not reset, and text style/height, \
+                  dimension style, hatch colour/pattern and polyline thickness are not modelled; \
+                  the Include blocks option is not implemented"
+            .into(),
+    }
+}
+
 impl Application {
     /// Dispatch a layer **selection** command.
     pub(crate) fn layer_selection_command(
@@ -233,6 +266,7 @@ impl Application {
             CommandId::LayThw => self.laythw(session, command),
             CommandId::LayLck => self.laylck(session, command),
             CommandId::LayUlk => self.layulk(session, command),
+            CommandId::SetByLayer => self.setbylayer(session, command),
             _ => Err(CadError::InvalidInput(
                 "not a layer selection command".to_string(),
             )),
@@ -541,6 +575,147 @@ impl Application {
         command: &Command,
     ) -> CadResult<CommandOutcome> {
         self.set_selected_layers_locked(session, command, "layulk", "LAYULK", false)
+    }
+
+    /// `SETBYLAYER`: reset the three modelled display overrides to ByLayer.
+    fn setbylayer(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        ensure_no_payload(command, "setbylayer", "SETBYLAYER")?;
+        let references = selection_snapshot(session, "setbylayer", "SETBYLAYER")?;
+        let document_id = command.document;
+        let drawing = self
+            .workspace
+            .documents
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing
+            .clone();
+
+        for reference in &references {
+            ensure_model_space_addressable(drawing.as_ref(), command, reference, "setbylayer")?;
+        }
+
+        // AutoCAD does not modify objects on locked layers. The display-write
+        // path deliberately bypasses the lock (it is a representation rebuild),
+        // so this command owns the refusal for the whole batch.
+        for reference in &references {
+            let entity = drawing
+                .entity(reference.entity)
+                .expect("preflight verified the entity resolves");
+            if drawing.layer_locked(entity.layer) {
+                let name = drawing
+                    .layer(entity.layer)
+                    .map(|row| row.name.as_str())
+                    .unwrap_or("<unknown>");
+                return Err(invalid(
+                    "setbylayer",
+                    "locked",
+                    format!(
+                        "entity {} is on locked layer '{name}'; AutoCAD does not modify objects \
+                         on locked layers, so the whole command is refused",
+                        entity.id.0
+                    ),
+                ));
+            }
+        }
+
+        // Only the three modelled overrides change. Transparency, materials,
+        // text/dimension/hatch/polyline properties are outside this reset (see
+        // `properties_not_reset`), and `linetype_scale` is preserved because the
+        // symbolic `ByLayer` variant carries no scale of its own.
+        let mut changes: Vec<(EntityId, DbEntity, EntityRenderAttributes)> = Vec::new();
+        for reference in &references {
+            let before = drawing
+                .entity(reference.entity)
+                .expect("preflight verified the entity resolves")
+                .clone();
+            let mut attributes = drawing.entity_render_attributes(before.id);
+            if attributes.color == EntityColor::ByLayer
+                && attributes.linetype == EntityLineType::ByLayer
+                && attributes.lineweight == EntityLineWeight::ByLayer
+            {
+                continue;
+            }
+            attributes.color = EntityColor::ByLayer;
+            attributes.linetype = EntityLineType::ByLayer;
+            attributes.lineweight = EntityLineWeight::ByLayer;
+            changes.push((before.id, before, attributes));
+        }
+
+        if changes.is_empty() {
+            return Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![
+                    Diagnostic {
+                        object: None,
+                        code: "setbylayer.unchanged".into(),
+                        message: "SETBYLAYER: colour, linetype and lineweight are already ByLayer \
+                                  on every selected entity"
+                            .into(),
+                    },
+                    properties_not_reset(),
+                ],
+                measurement: None,
+                point_report: None,
+            });
+        }
+
+        let transaction = next_transaction_id();
+        let mut candidate = drawing.as_ref().clone();
+        let change_set = {
+            let mut staged = candidate.begin_drawing_transaction("setbylayer", transaction)?;
+            for (id, _, attributes) in &changes {
+                staged.update_entity_display(*id, attributes.clone())?;
+            }
+            staged.commit()?
+        };
+
+        let mut patches = Vec::with_capacity(changes.len());
+        let mut objects = Vec::with_capacity(changes.len());
+        for (id, before, _) in &changes {
+            patches.push(DrawingPatch {
+                id: *id,
+                before: Some(before.clone()),
+                after: Some(before.clone()),
+                before_state: Some(drawing.entity_display_state(*id)),
+                after_state: Some(candidate.entity_display_state(*id)),
+            });
+            objects.push(ObjectId(id.0));
+        }
+        let count = changes.len();
+        self.publish_candidate(
+            document_id,
+            candidate,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: "setbylayer".to_string(),
+                patches,
+                block_patches: Vec::new(),
+                merge_key: None,
+            },
+        )?;
+
+        Ok(CommandOutcome {
+            objects,
+            changes: Some(Arc::new(change_set)),
+            diagnostics: vec![
+                Diagnostic {
+                    object: None,
+                    code: "setbylayer.applied".into(),
+                    message: format!(
+                        "SETBYLAYER: reset colour, linetype and lineweight to ByLayer on {count} \
+                         entities (one transaction / one undo step)"
+                    ),
+                },
+                properties_not_reset(),
+            ],
+            measurement: None,
+            point_report: None,
+        })
     }
 
     /// `LAYM C U R`: make the first selected entity's layer the current layer.

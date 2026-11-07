@@ -867,6 +867,11 @@ pub enum CommandId {
     /// `LAYULK` (Work-only): unlock every distinct selected layer. Layer-table
     /// edit; not undoable; see [`crate::app_drawing::layer_commands`].
     LayUlk,
+    /// `SETBYLAYER` (Work-only): reset colour, linetype and lineweight to
+    /// `ByLayer` on the selection (display write, undoable). Transparency and
+    /// materials are not reset; Include blocks is not implemented; see
+    /// [`crate::app_drawing::layer_commands`].
+    SetByLayer,
     /// `PDMODE <n>`: write the drawing header's `$PDMODE`; see
     /// [`crate::command_id::point_style`].
     SetPointDisplayMode,
