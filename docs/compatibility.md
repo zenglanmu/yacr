@@ -343,6 +343,34 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 指针停在夹点自身光圈内 ⇒ 目标是夹点原位 ⇒ 模型的零位移 no-op；拖拽**不**发布 OSNAP 提示标记
 （移动的夹点 marker 仍是唯一预览）。松开提交**一次**命令；落在夹点上的点击被一次性闩锁吞掉（**不**重复选中）。**`dom-canvas` 载体（X11/XWayland、web）没有任何夹点标记或拖拽**（wasm 侧无此路径，按铁律 8 显式不存在，**不是**静默回退）。**Escape 取消已接线（仅合成契约，无运行时证据）**：`cad_status` 新增布尔字段 `gripDrag`（`CadStatus::grip_drag`，取自 `HostCore::grip_drag_active()`；拖拽期间 `tool` 仍为 `null`），桌面 UI 的 Escape 门（`toolCommandForKey`）因此在**拖拽中**也发 `CANCEL`（`Enter`/`CONFIRM` 仍只认活动工具）；宿主 `InteractionRequest::Cancel` → `reset_grip_gesture()` 纯状态丢弃拖拽。该链路只有合成证据（`cad-ui-core` 状态投影契约 + `apps/desktop-ui` 的 `tsc`/纯函数/源码结构契约），**没有**真窗口、真实按键或像素证据。插入点夹点**已实现但仅限 `TEXT`/`MTEXT` 的存储插入点**（`GripKind::Insertion` `0`；旋转 / 高度 / 对齐 attachment / 宽度夹点仍**未实现**，模型层不建「永远为空」的 `GripKind` 变体）；`SPLINE` 控制点由模型提供（`GripKind::ControlPoint`），宿主对夹点种类**无分支**，故其标记/拖拽走同一通用路径（**未做**宿主运行/像素验证）；多夹点与多实体拉伸、拖拽期间的 OSNAP 捕捉、3D 夹点编辑、夹点右键菜单与 `GRIPMULTIFUNCTIONAL` 均**不存在**；证据上限：`cargo test -p cad-app -p cad-host` 契约 + 门禁，**无 GUI/像素/真窗口/真实鼠标证据**，Windows 侧更只有 Tier 0 编译 |
 | `EXPLODE` | **实现** | **一次一层**：LWPOLYLINE→线段+ARC（bulge 还原）；INSERT→直接成员（placement 烘焙，**嵌套块引用保持为引用**，二次 EXPLODE 才展开）；`Compound`/`Hatch`→**全部子项**（`Hatch` 分解为**边界折线 + 填充网格 + 图案线**；P6a 保持既有行为，块内填充仍按 insert-child 拒绝）；MINSERT（`Compound(Insert…)`）→先得 Insert 实例 | 多级一次到底（导出层的"摊平到叶子"是**另一条路径**，不在本命令内）、`EXPLMODE`、颜色/线型变化、Dimension（按 `type_key` 显式拒绝）、关联阵列（我们不存）、属性语义；`IMAGE`/`MASK` 按**策略**拒绝（其**可变换**，不得假称被变换拒绝）；`TEXT`（**按 `child_refusal` 显式拒绝**——P7a 起变换面**接受** `Text`，故**不得**假称被变换拒绝）/`SPLINE`/`SHAPE`/`OPAQUE` 与镜像 Arc/Ellipse **整命令失败**；`MULTILEADER` **显式按 `type_key` 拒绝**（顶层与块内）；非均匀 INSERT 拒绝 |
+### 2026-11-07 2D 命令批次（AutoCAD 2026）
+
+> 本批次以**当前选择为输入**（或独立捕获工具），不是 AutoCAD 的交互 `Select objects` 提示；除特别
+> 说明外，证据只有 `cad-app`/`cad-ui-core`/`cad-host` 与前端纯函数契约测试，**没有** GUI、像素、
+> 真实 GPU、真机或 vendor-AutoCAD 证据。逐条官方清单状态见 `docs/autocad-2026-command-coverage.md`。
+
+| 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
+|---|---|---|---|
+| `LAYCUR` / `LAYM C U R` | 部分实现 | LAYCUR 把每个选中模型空间实体移到会话当前层（一条事务/一步撤销）；LAYMCUR 以**第一个**选中实体的层为当前层（仅会话状态，复用既有的 locked/frozen/off 拒绝） | 无交互 Select objects；块实例成员/图纸空间/子图元按名拒绝；多选时 LAYMCUR 只用第一个（`laymcur.first_pick` 诊断） |
+| `LAYFRZ` / `LAYTHW` / `LAYLCK` / `LAYULK` | 部分实现 | 按选中实体所在层改 `LayerAttributes.frozen/locked`；LAYTHW 解冻所有冻结层。层表写**不可撤销**（每次改动一次 revision 提升，无 history patch） | 无 Settings/Viewports/Block Selection 选项；LAYFRZ 对所有视口生效且拒绝当前层；LAYTHW **不**解冻视口级冻结；无 per-layer 撤销 |
+| `SETBYLAYER` | 部分实现 | 选中的可寻址实体把 colour/linetype/lineweight 重置为 `ByLayer`（display 写，一条事务/一步撤销）；遇任一锁定层整命令拒绝 | 不重置 transparency、materials、文字/标注/填充样式；`Include blocks` 未实现；无交互 ByBlock 询问 |
+| `REVERSE` | 部分实现 | 反转选中 LINE / LWPOLYLINE（含 bulge 与闭合映射）/ SPLINE（控制点+节点镜像）方向，一条事务/一步撤销 | 仅当前选择；无 helix/3D；其它种类按名拒绝 |
+| `OOPS` | 部分实现 | 恢复**最近一次 ERASE** 删除的实体（新 id；一条事务/一步撤销；第二次 OOPS 为空操作） | 只记录 ERASE，不覆盖 AutoCAD 的 BLOCK/WBLOCK 删除；撤销 OOPS 不恢复快照 |
+| `OVERKILL` | 部分实现 | 删除同空间/同图层/同几何（1e-9）的**完全重复**选中对象，保留最低 draw order；一条事务/一步撤销 | 无部分重叠、共线合并、圆弧覆盖圆、折线段优化、容差选项、忽略图层/颜色选项 |
+| `BREAKATPOINT` | 部分实现 | 交互工具：拾取对象后指定断点（可投影到对象），把 LINE/ARC/开放 LWPOLYLINE 拆成两段 | 圆/闭合多段线/SPLINE 按名拒绝（闭合对象不在单点拆分）；无选项 |
+| `LIST` | 部分实现 | 读取当前选择，逐对象报告 id/handle/type/layer/space/draw order、标准显示属性与几何摘要；只读 | 不是交互 Select objects；厚度/拉伸方向未建模；不可寻址引用逐条报告后继续 |
+| `STATUS` | 部分实现 | 报告数据库/修订/实体与表计数、模型空间范围、当前层、会话模式与绘图开关 | 图形界限、基点、创建/编辑时间、内存均不跟踪（`status.not_tracked`） |
+| `FS` | 部分实现 | Express 工具：把与唯一选中种子**直接接触**的可见模型空间对象并入选择（`FSMODE=OFF`） | 无传递链（`FSMODE=ON`）；不展开块成员；命令行入口，无 ribbon |
+| `TORIENT` | 部分实现 | 裸命令把选中 Text 的旋转归一到 `(-π/2, π/2]`；`TORIENT <角度>` 设绝对角；只改旋转 | 非 Text 目标跳过并诊断；无 Insert 属性/块旋转 |
+| `TCASE` | 部分实现 | 裸命令按 Title，`TCASE U/L/T/S/G` 分别大写/小写/标题/句首/切换；保留 MTEXT 转义序列 | 属性定义/标注文字未建模；MULTILEADER 只在可实现时改写 |
+| `TXT2MTXT` | 部分实现 | 选中 Text/MText 按上→下、左→右排序并以 `\P` 合并为一个 `AcDbMText`，同时删除来源（一条事务/一步撤销） | Settings 对话框、统一行距、分栏等未实现；保留原字符串转义 |
+| `HATCHGENERATEBOUNDARY` | 部分实现 | 每个选中 HATCH 的每个 loop 生成一条同层/同空间、非关联的闭合 LWPOLYLINE（保留 bulge） | 无关联性；无选项提示 |
+| `HATCHTOBACK` | 部分实现 | 把所有模型空间 HATCH 的 draw order 排到所有非 HATCH 对象之后，保留相对顺序；一条事务/一步撤销 | 图纸空间/块空间不重排；无 Draw Order 对话框 |
+| `WIPEOUT` | 部分实现 | 开放多边形捕获（≥3 点、`+Z` 平面）生成一个 `AcDbWipeout`（`Mask{inverted:false}`） | 无 Frames/ON/OFF/display-not-plot、无 Polyline/Erase Polyline 选项、无自交拒绝、无既有 wipeout 拾取 |
+| `POLYGON CIRCUMSCRIBED` | 部分实现 | 独立选择子：中心 + 切圆上一点，用 `R=r/cos(π/n)`、顶点在 `θ±π/n` 生成闭合外切正多边形 | `POLYGON` 的 `Edge` 分支、数值半径的捕捉旋转规则仍未实现 |
+| `DIMROTATED` | 部分实现 | 三次拾取（两原点 + 尺寸线位置）+ 会话 `dimRotation` 角度，复用 `DimensionKind::Linear{rotation}` 合成一个非关联尺寸 | 无 AutoCAD 的选项子提示；非 `+Z` 平面/退化输入按名拒绝 |
+| `DIMSPACE` | 部分实现 | 选择式：第一个线性尺寸为基准，其余按 `DIMDLI` 自动等距重排（一条事务/一步撤销） | 无交互 value 提示（恒为 0/自动），无关联重排，非线性尺寸按名拒绝 |
+
 **仿射不变规则（`SPLINE`，2026-10-26）**：NURBS 曲线对**仿射**映射不变——把每个控制点过同一个
 仿射映射，而 `degree`、`knots`、`weights` **原样保留**，得到的正是原曲线的**精确仿射像**。因此平移、旋转、
 **均匀与非均匀**缩放、镜像与剪切**全部精确**：无需重拟合、无需重参数化、权重不变。`cad-db` 的
