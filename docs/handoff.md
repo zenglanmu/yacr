@@ -1,4 +1,24 @@
 AD
+## 2026-11-08 两个工作树并入 `main`
+
+- **并入内容**：`batch/two-works`（`f20bd542`/`277f0028`/`3352c759`/`87825ba3`，shift 多选、命令历史复制、
+  空白图启动 + `CLOSE` + 开始页/About）与 `batch/ui-menubar`（`ca49c66d`，功能区收起态菜单栏）。
+  `ui-opt` 工作树当时**只有未提交改动**，先在其内部建 `batch/ui-menubar` 提交再合并，避免 `git
+  worktree remove` 丢工作。合并提交 `dd69a6dc`、`916d3e2e`。
+- **冲突**：仅 `docs/handoff.md`（两侧各自在最前面新增当日小节），按“两节都保留”解决；`style.css`、
+  两份 i18n、`vendor-plugin.md`、`react-linux-app.md` 均自动合并。
+- **合并暴露的语义冲突（已修）**：`test/ribbon-menubar.test.ts` 的“caption 被抑制时行仍全部渲染”用例
+  硬编码 `File` 面板 4 行，而 two-works 给该面板加了 `CLOSE`（第 5 行）。改为按 `RIBBON_TABS` 的
+  `offeredItems` 逐个比对行 id，不再写死数量——这正是互不相干的两轮改动叠在一起才会暴露的假设。
+  该文件是本次唯一的测试改动。
+- **已运行（合并后树上重跑）**：`npm test`（1315 passed，0 failed，含两个 `tsc --noEmit`）；
+  `npm run build`；`cargo check -p cad-host -p cad-app -p cad-ui-core -p app-web --all-targets --locked`；
+  `cargo test -p cad-host -p cad-ui-core --locked`（280 / 463 passed，0 failed）；
+  `check-i18n.py`（1382 keys）、`check-file-size.py`、`check-architecture.py`。
+- **NOT RUN / NOT VERIFIED**：真实 GUI/像素（菜单栏与空白启动的合并效果未在真宿主里看过）；GPU/真机；
+  Windows/macOS/Android 宿主编译与运行时；`cargo test --workspace` 全量；`cargo clippy` 全量。
+  两个原工作树尚未删除。
+
 ## 2026-11-08 动态块：烘焙 `invisible` 成员不再被绘制
 
 - **用户可见 bug**：`fixtures/test-tangent-real.dwg` 在坐标约 `x=1029235 y=-1215729` 附近出现
@@ -128,7 +148,7 @@ AD
   `test/ribbon-menubar.test.ts`（26 项契约）；改 `Ribbon.tsx`（收起分支）、`style.css`、
   `commands/context-menu.ts`（导航谓词放宽为结构化 `MenuNavigable`）、两份 i18n（`ribbon.menubar_label`）、
   `docs/react-linux-app.md`、`apps/desktop-ui/README.md`。
-- **已运行**：`npm test`（1301 passed，含两个 tsc 项目）；`npm run build`；`check-i18n.py`；
+- **已运行（合并前分支内）**：`npm test`（1301 passed，含两个 tsc 项目）；`npm run build`；`check-i18n.py`；
   `check-file-size.py`；`check-architecture.py`。布局证据：Chromium headless + SwiftShader 打开
   web 包（`dom-canvas`）1440×900 / 1440×700，收起态、文件/常用/视图菜单、绘图子菜单、短窗口滚动
   均逐像素核对（无控制台错误）。

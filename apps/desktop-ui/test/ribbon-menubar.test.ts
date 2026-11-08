@@ -141,7 +141,14 @@ test('a section caption that repeats the menu title is suppressed', async () => 
   assert.ok(fileEntry, 'the File panel is the first section');
   assert.equal(fileEntry.titleKey, fileTab.labelKey, 'the panel repeats the trigger words');
   assert.equal(fileEntry.caption, false, 'File > File must not print a header');
-  assert.equal(fileEntry.rows.length, 4, 'the rows render without the caption');
+  // Only the caption goes: every offered item still renders. Counted from the
+  // model, not spelled out, so a command added to the File panel (CLOSE,
+  // currently) cannot be silently swallowed by a suppressed caption.
+  const filePanel = fileTab.panels.find(panel => panel.id === 'file');
+  assert.ok(filePanel, 'the File tab must carry the File panel');
+  assert.equal(fileEntry.rows.map(row => row.id).join(','),
+    offeredItems(filePanel.items, true).map(item => item.id).join(','),
+    'the rows render without the caption, one per offered item');
 
   // A distinct panel title keeps its caption (and a big panel is never a caption).
   const home = RIBBON_TABS.find(tab => tab.id === 'home');
