@@ -411,7 +411,7 @@ observation: `docs/view-3d.md`; draw order: `docs/render-order.md`; render backe
 ## Credits and references
 
 yacr is an independent implementation. These open-source projects informed it or supply tested
-inputs; none of them endorses yacr.
+inputs.
 
 - **acadrust** — <https://github.com/hakanaktt/acadrust>: pure-Rust DWG/DXF reading, writing and
   inspection. Pinned at `0.6.8`, used unmodified and only through `cad-import-acadrust`.

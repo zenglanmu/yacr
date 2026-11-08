@@ -342,7 +342,7 @@ Linux Flatpak（本地 bundle，未发布）：`docs/flatpak.md`；决策记录�
 
 ## 参考项目与致谢
 
-yacr 是独立实现。下列开源项目为 yacr 提供了参考或测试输入；它们都不为 yacr 背书。
+yacr 是独立实现。下列开源项目为 yacr 提供了参考或测试输入。
 
 - **acadrust** — <https://github.com/hakanaktt/acadrust>：纯 Rust 的 DWG/DXF 读写与检查库。固定
   `0.6.8`，上游未修改，仅通过 `cad-import-acadrust` 使用。
