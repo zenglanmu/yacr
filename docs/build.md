@@ -93,7 +93,7 @@ cap=… source=<accounted｜allocator-report｜estimate> allocator_total=… res
 建好之后的运行时能力缺失。`dom-canvas` 上任何「画布画不出来」都按 6 显式拒绝（**禁止**空白
 canvas、**禁止**回落到已退役的 X11 native-child、**禁止**退出码 0）。
 
-## Linux 桌面宿主（当前唯一可运行 GUI）
+## Linux 桌面宿主（主开发目标）
 
 应用 `apps/app-linux`（二进制 `yacr`；Tauri 标识 `io.github.zenglanmu.yacr`）。
 

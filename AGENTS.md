@@ -136,7 +136,7 @@ web-smoke/web-deploy + 5 个 event-gated release job）。`check-workflows.py` �
 
 ## 运行与证据
 
-- Linux 唯一可运行 GUI：`bash scripts/run-react-linux.sh --open <dwg>`（不强制 `GDK_BACKEND`）。
+- Linux 主开发宿主（Wayland 支持最完整）：`bash scripts/run-react-linux.sh --open <dwg>`（不强制 `GDK_BACKEND`）。
   直跑先构建前端，再
   `cargo run --release --locked -p app-linux --bin yacr --features tauri/custom-protocol -- --open <dwg>`。
 - 后端在 GTK 启动前由 `apps/app-linux/src/backend.rs` 决议，**无静默回退**：Wayland =
@@ -191,10 +191,10 @@ web-smoke/web-deploy + 5 个 event-gated release job）。`check-workflows.py` �
 
 | 载体 / 平台 | 实现与证据边界 |
 |---|---|
-| Linux `app-linux`（`yacr`） | **唯一可运行 GUI**。原生 Wayland = `native-below` 生产路径；X11/XWayland = `dom-canvas`。只有 GNOME/Mutter + P620 + `scale=1` 的有界运行证据 |
-| Windows `app-windows`（`yacr-windows`） | 真实 Tauri/WebView2 + Win32 child HWND，`native-below`；**仅**编译门禁 + Wine 拒绝合同（缺 WebView2 → 退出码 5）；视觉/运行时/真 Windows **NOT VERIFIED**（PENDING user real-Windows spike） |
-| macOS `app-macos`（`yacr-macos`） | 真实 Tauri/WKWebView + CAD 子 `NSView`（Metal），`native-below`；**仅** CI 编译；窗口/Metal/层序/DPI/对话框/像素一律 **NOT VERIFIED** |
-| Android `app-android` | 真实 Tauri WebView + 原生 `CadSession` + Vulkan `SurfaceView`，`native-below`，wasm 会话**不实例化**。SAF 打开 + DXF 导出保存已接线（DWG 保存显式延后），但设备/真实 GPU **NOT VERIFIED**；仅编译/契约级证据 |
+| Linux `app-linux`（`yacr`） | **主开发目标 / 运行证据最完整**。原生 Wayland = `native-below` 生产路径；X11/XWayland = `dom-canvas`。只有 GNOME/Mutter + P620 + `scale=1` 的有界运行证据 |
+| Windows `app-windows`（`yacr-windows`） | 真实 Tauri/WebView2 + Win32 child HWND，`native-below`；真实宿主已实现，预期可运行；**当前证据**为编译门禁 + Wine 拒绝合同（缺 WebView2 → 退出码 5）；视觉/运行时/真 Windows **NOT VERIFIED**（PENDING user real-Windows spike） |
+| macOS `app-macos`（`yacr-macos`） | 真实 Tauri/WKWebView + CAD 子 `NSView`（Metal），`native-below`；真实宿主已实现，预期可运行；**当前证据**仅 CI 编译；窗口/Metal/层序/DPI/对话框/像素一律 **NOT VERIFIED** |
+| Android `app-android` | 真实 Tauri WebView + 原生 `CadSession` + Vulkan `SurfaceView`，`native-below`，wasm 会话**不实例化**。SAF 打开 + DXF 导出保存已接线（DWG 保存显式延后），维护者已侧载 APK 并运行成功（2026-11-08，非 CI 验收）；设备/真实 GPU/像素的正式验收仍 **NOT VERIFIED** |
 | Web `app-web` | wasm `CadSession` + DOM canvas（`dom-canvas`）。OPEN 走页面上传，SAVE/PLOT 走浏览器下载（DXF/SVG/PDF；**不回写 DWG**）；CI `web-smoke` 是 SwiftShader 冒烟，非 GPU/像素；native host target 是显式 NOT IMPLEMENTED 空壳 |
 | CLI `cad-cli-tools` | 保留，headless 开图/出图（PNG/SVG/PDF） |
 

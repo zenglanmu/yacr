@@ -7,10 +7,13 @@ geometry, commands and rendering; React + Tauri provides the UI, and wgpu draws 
 document and rendering pipeline is intended for Linux (native Wayland or X11/`dom-canvas`), Windows,
 macOS, Android and the web.
 
-The project is still in early development: **there is no shippable product yet.** Linux is the only
-runnable GUI today, with bounded local acceptance on GNOME/Mutter. The Windows and macOS hosts are
-real Tauri hosts but compile-only; Android has compile-level evidence only (no device run, no Vulkan
-adapter, no pixels); the web build is exercised with headless/software rendering. Current
+**Website:** <https://yacr.pages.dev/> · **Web app:** <https://yacr-examples.pages.dev/>
+
+The project is still in early development: **there is no shippable product yet.** Linux/Wayland is
+the primary development target and has the strongest runtime evidence, with bounded local acceptance
+on GNOME/Mutter. The Android APK has been sideloaded and run by the maintainer (not a CI acceptance);
+the Windows and macOS hosts are real Tauri hosts whose runtime/visual acceptance is still pending;
+the web build is exercised with headless/software rendering. Current
 capabilities are backed by **contract/synthetic tests plus bounded real-GPU host runs on synthetic
 fixtures**; there is **no** validated DWG compatibility, real-drawing, cross-vendor, golden-image
 or performance acceptance. Do not treat it as a usable or production CAD application.
@@ -140,7 +143,7 @@ fallback**. See ADR 0010 and ADR 0011.
 Toolchain **1.99.0** (`rust-toolchain.toml`) with a pinned `Cargo.lock`; if `cargo` is not on your
 `PATH`, add `$HOME/.cargo/bin`.
 
-### Linux desktop host (primary, the only runnable GUI)
+### Linux desktop host (primary development target)
 
 System prerequisites (the scripts do not install them):
 
@@ -263,7 +266,7 @@ again. **A produced package is not runtime, GPU, device or pixel acceptance.**
 | Android (APK) | `bash scripts/build-android.sh --release --target aarch64` | `apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk` |
 | Web (bundle) | `bash scripts/build-web.sh` / `bash scripts/build-web-ui.sh` | `apps/app-web/dist/` / `apps/app-web/dist-ui/` |
 
-Linux is the only runnable GUI; the Flatpak commands, install and run steps are in
+Linux/Wayland is the primary development target; the Flatpak commands, install and run steps are in
 [Local Flatpak bundle (Linux)](#local-flatpak-bundle-linux) above.
 
 **Windows zip.** Runs on Windows with plain `cargo` (native MSVC, static CRT), and locally on Linux

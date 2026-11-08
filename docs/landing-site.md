@@ -27,8 +27,10 @@ token 只在脚本内部使用，脚本不会打印 token。缺少任一 secret 
 python3 scripts/serve-web.py --directory apps/landing --port 8091
 ```
 
-`downloads.json` 在仓库里的默认形态是 `cdnBase: null`，页面回退到 `githubBase`（GitHub
-Release 下载链接）。本地预览无需 Cloudflare 凭据。
+`downloads.json` 现在提交了当前 `v0.1.5` 的 R2 清单（`cdnBase` 指向 `yacr-downloads` 的
+r2.dev 公共域名），页面主按钮直接走 R2，GitHub 作为次链接与校验来源。`upload-r2-downloads.sh`
+会在每次发布后原子重写它；若 R2 未配置或被删除，把 `cdnBase` 设为 `null` 即回退 GitHub。
+本地预览无需 Cloudflare 凭据。
 
 ## 本地/手动镜像与部署
 
@@ -65,7 +67,8 @@ Pages 项目并 `wrangler pages deploy`。它不管理自定义域名。
 - inputs：
   - `release_tag`（默认 `v0.1.5`）：要镜像到 R2 的 release tag；
   - `upload_downloads`（默认 `true`）：关闭时跳过 R2，直接部署仓库里已提交的
-    `downloads.json` 回退清单（适合只改文案/布局）。
+    `downloads.json`（当前是 v0.1.5 的 R2 清单；适合只改文案/布局，避免重复上传 396 MB）。
+    如需 GitHub 回退，把 `cdnBase` 设为 `null` 再部署。
 - 步骤顺序：先 R2（会重写 `downloads.json`），再 Pages（上传重写后的清单）。
 - `concurrency: landing-production`、`cancel-in-progress: false`、`timeout-minutes: 45`；
   任何一步失败即 job 失败，没有 `continue-on-error`。
@@ -75,7 +78,8 @@ Pages 项目并 `wrangler pages deploy`。它不管理自定义域名。
 
 - **r2.dev 是测试/低成本镜像**：有速率限制，不承诺生产 SLA，也不适合当作唯一 CDN。国内访问
   r2.dev 与 `pages.dev` 均可能不稳定；需要稳定分发时应另接自有域名/CDN（本仓库不自动化域名绑定）。
-- `downloads.json` 的 `cdnBase: null` 是合法默认值：页面走 GitHub 回退链接；此时
+- `downloads.json` 的 `cdnBase` 可以是 `null`（GitHub 回退）或已启用的 r2.dev URL；当前提交的
+  v0.1.5 清单带 R2 base。若把 `cdnBase` 设为 `null`，页面回退 GitHub，
   `deploy-landing-pages.sh` 会打印 warning 但允许部署。
 - 上传/部署成功不等于安装包在真机、真实 GPU 上运行通过；Windows/macOS/Android 的运行时证据边界
   仍以 `AGENTS.md` 平台表与 `docs/handoff.md` 为准。

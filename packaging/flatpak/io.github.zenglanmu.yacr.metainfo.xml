@@ -16,13 +16,15 @@
       Yacr is a cross-platform open-source CAD project. A shared Rust core
       handles DWG/DXF documents, geometry and rendering; React + Tauri provides
       the desktop UI. It opens local DWG/DXF drawings and shows model space and
-      supported layouts. Linux is the only runnable GUI today; the other hosts
-      are still in development.
+      supported layouts. Linux/Wayland is the primary development target with
+      the strongest support; the Android APK has been sideloaded by the
+      maintainer, and the Windows/macOS hosts are real but their runtime
+      acceptance is still pending.
     </p>
     <p xml:lang="zh-CN">
       Yacr 是一个跨平台开源 CAD 项目：共享的 Rust 核心负责 DWG/DXF 文档、几何与渲染，
       React + Tauri 提供桌面界面。它可打开本地 DWG/DXF 图纸，查看模型空间与受支持的布局。
-      Linux 是目前唯一可运行的 GUI，其他宿主仍在开发中。
+      Linux/Wayland 是主开发目标，支持最完整；Android APK 已由维护者侧载运行；Windows/macOS 是真实宿主，运行时验收仍待补。
     </p>
   </description>
   <launchable type="desktop-id">io.github.zenglanmu.yacr.desktop</launchable>

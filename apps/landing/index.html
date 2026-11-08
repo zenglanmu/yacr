@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>yacr — Yet Another CAD in Rust · 用 Rust 写的开源 CAD</title>
-  <meta name="description" content="yacr 是一个用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。一个核心，多种载体。早期预览：尚无可交付产品，Linux 是当前唯一可运行的 GUI。">
+  <meta name="description" content="yacr 是一个用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。一个核心，多种载体。早期预览：尚无可交付产品；Linux/Wayland 是主开发目标，Android APK 已由维护者侧载运行。">
   <link rel="canonical" href="https://yacr.pages.dev/">
   <meta name="theme-color" content="#08151D">
   <meta name="robots" content="index, follow">
@@ -24,7 +24,7 @@
   <meta property="og:locale:alternate" content="en_US">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="yacr — Yet Another CAD in Rust">
-  <meta name="twitter:description" content="Open-source CAD with a Rust core and a React + Tauri interface. Early preview; Linux is the only runnable GUI.">
+  <meta name="twitter:description" content="Open-source CAD with a Rust core and a React + Tauri interface. Early preview; Linux/Wayland is the primary development target, and the Android APK has been sideloaded by the maintainer.">
   <meta name="twitter:image" content="https://yacr.pages.dev/assets/yacr-1024.png">
 
   <link rel="icon" href="assets/yacr-icon.svg" type="image/svg+xml">
@@ -115,8 +115,8 @@
             <div class="hero-notice" role="note">
               <span class="notice-label">EARLY<br>PREVIEW</span>
               <p>
-                <span class="lang--zh">项目仍在早期开发，<strong>尚无可交付产品</strong>；<strong>Linux 是当前唯一可运行的 GUI</strong>。其余载体的状态见下方平台卡片。</span>
-                <span class="lang--en" lang="en">The project is still in early development and <strong>there is no shippable product yet</strong>. <strong>Linux is currently the only runnable GUI</strong>; see the platform cards below for the other surfaces.</span>
+                <span class="lang--zh">项目仍在早期开发，<strong>尚无可交付产品</strong>。<strong>Linux/Wayland 是当前主开发目标，支持最完整；Android APK 已由维护者侧载运行</strong>。其他载体的运行时证据边界见下方平台卡片。</span>
+                <span class="lang--en" lang="en">The project is still in early development and <strong>there is no shippable product yet</strong>. <strong>Linux/Wayland is the primary development target with the strongest support; the Android APK has been sideloaded and run by the maintainer</strong>. Runtime evidence boundaries for the other surfaces are in the platform cards below.</span>
               </p>
             </div>
 
@@ -289,7 +289,7 @@
                 <span class="lang--zh">核心与渲染</span><span class="lang--en" lang="en">core and renderer</span>
               </p>
               <p class="stat-note">
-                <span class="lang--zh">cad-db 是唯一权威</span><span class="lang--en" lang="en">cad-db is the single authority</span>
+                <span class="lang--zh">现代 GPU 特性 · 面向几十万图元</span><span class="lang--en" lang="en">modern GPU features · 100K+ entity target</span>
               </p>
             </div>
             <div class="stat">
@@ -451,12 +451,12 @@
               <span class="feature-num">03</span>
               <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="m16 4 10 6v12l-10 6-10-6V10z"/><path d="m6 10 10 6 10-6M16 16v12"/></svg>
             </div>
-            <h3><span class="lang--zh">wgpu 渲染</span><span class="lang--en" lang="en">wgpu rendering</span></h3>
+            <h3><span class="lang--zh">wgpu 渲染，面向大图纸</span><span class="lang--en" lang="en">wgpu rendering for large drawings</span></h3>
             <p>
-              <span class="lang--zh">2D/3D 视图、平移缩放、FIT、轨道与标准视图、选择高亮、图层显隐。渲染是派生，不反向成为数据源。</span>
-              <span class="lang--en" lang="en">2D/3D views, pan and zoom, FIT, orbit and standard views, selection highlighting, and layer visibility. Rendering is derived and never becomes the data source.</span>
+              <span class="lang--zh">Rust + wgpu 使用现代 GPU 特性；批处理、导航 LOD、VRAM 预检，目标是几十万图元级别图纸仍能流畅缩放。性能验收未完成，这里描述的是实现路径，不是已验收的帧率指标。渲染是派生，不反向成为数据源。</span>
+              <span class="lang--en" lang="en">Rust + wgpu uses modern GPU features: batching, navigation LOD, and VRAM preflight. The target is smooth zoom/pan on drawings with hundreds of thousands of entities. Performance acceptance is not complete; this describes the implementation path, not a certified frame-rate metric. Rendering is derived and never becomes the data source.</span>
             </p>
-            <div class="chips" aria-hidden="true"><span>2D / 3D</span><span>FIT</span><span>LAYERS</span></div>
+            <div class="chips" aria-hidden="true"><span>2D / 3D</span><span>100K+ ENTITIES</span><span>LOD / VRAM</span></div>
           </article>
 
           <article class="feature-card feature-card--narrow reveal">
@@ -514,6 +514,40 @@
             <div class="tree-visual" aria-hidden="true">
               <span class="tree-root">React</span>
               <span class="tree-leaf">DESKTOP</span><span class="tree-leaf">TABLET</span><span class="tree-leaf">MOBILE</span>
+            </div>
+          </article>
+
+          <article class="feature-card feature-card--full reveal">
+            <div class="feature-main">
+              <div class="feature-top">
+                <span class="feature-num">07</span>
+                <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M12 4h8v5a3 3 0 1 0 0 6v5h-5a3 3 0 1 1-6 0H4v-8h5a3 3 0 1 1 6 0V4z"/></svg>
+              </div>
+              <h3>
+                <span class="lang--zh">天正图元，用 TypeScript 插件显示</span>
+                <span class="lang--en" lang="en">Tianzheng entities via a TypeScript plugin</span>
+              </h3>
+              <p>
+                <span class="lang--zh"><code>plugins/tch</code>（<code>tangent-ts</code>）作为 git submodule 接入，负责天正/TCH 图元与 proxy graphics 显示；插件 bundle 进入所有载体产物。插件管理器状态持久化，vendor 实体可被选择并显示属性行。</span>
+                <span class="lang--en" lang="en"><code>plugins/tch</code> (<code>tangent-ts</code>) is wired as a git submodule and handles Tianzheng/TCH entities and proxy-graphics display. The plugin bundle ships in every carrier. Plugin-manager state persists, and vendor entities can be selected with property rows.</span>
+              </p>
+              <p class="feature-caveat">
+                <span class="lang--zh">无 proxy graphics 缓存时不显示；这不是 AutoCAD 兼容性声明。</span>
+                <span class="lang--en" lang="en">No cached proxy graphics means no display; this is not an AutoCAD compatibility claim.</span>
+              </p>
+              <div class="chips" aria-hidden="true"><span>TCH</span><span>TYPESCRIPT</span><span>PROXY GRAPHICS</span><span>22 CLASSES</span></div>
+            </div>
+            <div class="vendor-visual" aria-hidden="true">
+              <div class="vendor-flow">
+                <div class="vendor-node">DWG / DXF</div>
+                <div class="vendor-arrow"></div>
+                <div class="vendor-node">proxy graphics</div>
+                <div class="vendor-arrow"></div>
+                <div class="vendor-node">plugins/tch · tangent-ts</div>
+                <div class="vendor-arrow"></div>
+                <div class="vendor-node">TCH entity + properties</div>
+              </div>
+              <p class="vendor-tag">TypeScript · 22 TCH classes</p>
             </div>
           </article>
         </div>
@@ -584,8 +618,8 @@
             <span class="lang--en" lang="en">One core. Five surfaces.</span>
           </h2>
           <p class="lead">
-            <span class="lang--zh">状态按仓库当前证据边界标注，不等于产品验收。只有 Linux 有可运行 GUI 的有界运行证据。</span>
-            <span class="lang--en" lang="en">Status reflects the evidence currently in the repository; it is not product acceptance. Only Linux has bounded runtime evidence for a runnable GUI.</span>
+            <span class="lang--zh">状态按仓库当前证据边界标注，不等于产品验收。Linux/Wayland 是主开发目标；Android APK 已由维护者侧载运行；Windows/macOS 是真实宿主，运行时仍待验收。</span>
+            <span class="lang--en" lang="en">Status reflects the evidence currently in the repository; it is not product acceptance. Linux/Wayland is the primary development target; the Android APK has been sideloaded by the maintainer; Windows/macOS are real hosts whose runtime still needs acceptance.</span>
           </p>
         </header>
 
@@ -593,13 +627,13 @@
           <article class="platform platform--wide platform--linux reveal">
             <div class="platform-top">
               <span class="platform-code">LNX</span>
-              <span class="status status--live"><span class="lang--zh">可运行</span><span class="lang--en" lang="en">Runnable</span></span>
+              <span class="status status--live"><span class="lang--zh">主开发</span><span class="lang--en" lang="en">Primary dev</span></span>
             </div>
             <h3>Linux</h3>
             <p class="platform-mode">native-below · Wayland / dom-canvas · X11</p>
             <p class="platform-desc">
-              <span class="lang--zh">原生 Wayland 走 native-below，X11/XWayland 走 dom-canvas。Flatpak 分发；当前唯一可运行的 GUI。</span>
-              <span class="lang--en" lang="en">Native Wayland uses native-below; X11/XWayland uses dom-canvas. Distributed as Flatpak — the only runnable GUI today.</span>
+              <span class="lang--zh">原生 Wayland 走 native-below，X11/XWayland 走 dom-canvas。Flatpak 分发；当前主开发目标，Wayland 支持最完整。</span>
+              <span class="lang--en" lang="en">Native Wayland uses native-below; X11/XWayland uses dom-canvas. Distributed as Flatpak — the primary development target, with the strongest Wayland support.</span>
             </p>
             <ul class="platform-evidence">
               <li><span class="ev-label"><span class="lang--zh">证据</span><span class="lang--en" lang="en">Evidence</span></span><span class="lang--zh">有界证据：GNOME/Mutter + P620 + <code>scale=1</code></span><span class="lang--en" lang="en">Bounded evidence: GNOME/Mutter + P620 + <code>scale=1</code></span></li>
@@ -636,7 +670,7 @@
               <span class="lang--en" lang="en">Real Tauri/WebView2 with a Win32 child HWND. Refuses with exit code 5 when WebView2 is missing.</span>
             </p>
             <ul class="platform-evidence">
-              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">仅编译门禁 + Wine 拒绝合同；运行时、视觉、真 Windows NOT VERIFIED。</span><span class="lang--en" lang="en">Build gate + Wine refusal contract only; runtime, visuals, and real Windows are NOT VERIFIED.</span></li>
+              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">真实宿主已实现，预期可运行；当前证据为编译门禁 + Wine 拒绝合同，运行时/视觉/真 Windows 仍待验收。</span><span class="lang--en" lang="en">The real host is implemented and expected to run; current evidence is a build gate + Wine refusal contract. Runtime, visuals, and real Windows still need acceptance.</span></li>
             </ul>
           </article>
 
@@ -652,23 +686,23 @@
               <span class="lang--en" lang="en">Real Tauri/WKWebView with a CAD child <code>NSView</code> (Metal).</span>
             </p>
             <ul class="platform-evidence">
-              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">仅 CI 编译；窗口、Metal、层序、DPI、像素 NOT VERIFIED。</span><span class="lang--en" lang="en">CI compile only; window, Metal, layer order, DPI, and pixels are NOT VERIFIED.</span></li>
+              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">真实宿主已实现，预期可运行；当前证据仅 CI 编译，窗口/Metal/层序/DPI/像素仍待验收。</span><span class="lang--en" lang="en">The real host is implemented and expected to run; current evidence is CI compile only. Window, Metal, layer order, DPI, and pixels still need acceptance.</span></li>
             </ul>
           </article>
 
           <article class="platform reveal reveal--d2">
             <div class="platform-top">
               <span class="platform-code">AND</span>
-              <span class="status status--build"><span class="lang--zh">编译 / 契约级</span><span class="lang--en" lang="en">Build / contract</span></span>
+              <span class="status status--build"><span class="lang--zh">维护者侧载</span><span class="lang--en" lang="en">Maintainer sideload</span></span>
             </div>
             <h3>Android</h3>
             <p class="platform-mode">native-below · Vulkan SurfaceView</p>
             <p class="platform-desc">
-              <span class="lang--zh">Tauri WebView + 原生 <code>CadSession</code> + Vulkan <code>SurfaceView</code>；wasm 会话不实例化。SAF 打开与 DXF 导出已接线，DWG 保存显式延后。</span>
-              <span class="lang--en" lang="en">Tauri WebView + native <code>CadSession</code> + Vulkan <code>SurfaceView</code>; the wasm session is not instantiated. SAF open and DXF export are wired; DWG save is explicitly deferred.</span>
+              <span class="lang--zh">Tauri WebView + 原生 <code>CadSession</code> + Vulkan <code>SurfaceView</code>；wasm 会话不实例化。SAF 打开与 DXF 导出已接线，DWG 保存显式延后。维护者已侧载 APK 并运行成功。</span>
+              <span class="lang--en" lang="en">Tauri WebView + native <code>CadSession</code> + Vulkan <code>SurfaceView</code>; the wasm session is not instantiated. SAF open and DXF export are wired; DWG save is explicitly deferred. The maintainer has sideloaded the APK and run it successfully.</span>
             </p>
             <ul class="platform-evidence">
-              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">编译/契约级；设备与真实 GPU NOT VERIFIED。</span><span class="lang--en" lang="en">Build/contract level; devices and real GPUs are NOT VERIFIED.</span></li>
+              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">维护者侧载运行成功（非 CI 验收）；设备/真实 GPU/像素的正式验收仍待补。</span><span class="lang--en" lang="en">The maintainer sideloaded and ran it successfully (not a CI acceptance); formal device, real-GPU, and pixel acceptance is still pending.</span></li>
             </ul>
           </article>
         </div>
@@ -872,8 +906,8 @@
               </summary>
               <div class="faq-a">
                 <p>
-                  <span class="lang--zh">不能。项目仍在早期开发，尚无可交付产品；Linux 是当前唯一可运行的 GUI。Windows、macOS、Android、Web 的证据边界见上方平台卡片，均不等于验收。</span>
-                  <span class="lang--en" lang="en">No. The project is still in early development and there is no shippable product. Linux is the only runnable GUI today. The evidence boundaries for Windows, macOS, Android, and Web are listed in the platform cards above; none of them equals acceptance.</span>
+                  <span class="lang--zh">不能。项目仍在早期开发，尚无可交付产品。Linux/Wayland 是主开发目标，Android APK 已由维护者侧载运行；Windows、macOS、Web 的运行时证据边界见上方平台卡片，均不等于验收。</span>
+                  <span class="lang--en" lang="en">No. The project is still in early development and there is no shippable product. Linux/Wayland is the primary development target and the Android APK has been sideloaded by the maintainer. The runtime evidence boundaries for Windows, macOS, and the Web are listed in the platform cards above; none of them equals acceptance.</span>
                 </p>
               </div>
             </details>

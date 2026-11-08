@@ -13,7 +13,9 @@ name: Landing site
 # Order matters: R2 first (it rewrites `apps/landing/downloads.json` with the
 # real CDN base/hashes), Pages second (it uploads the rewritten manifest).
 # `upload_downloads: false` skips the mirror and deploys the committed
-# `downloads.json` fallback (GitHub links only) — useful for copy/layout fixes.
+# `downloads.json` as-is (currently the v0.1.5 R2 manifest) — useful for
+# copy/layout fixes without re-uploading 396 MB. Set cdnBase to null in that
+# file if you want the GitHub fallback instead.
 #
 # Required repository secrets:
 #   CLOUDFLARE_API_TOKEN   Account-level "Cloudflare Pages: Edit" +

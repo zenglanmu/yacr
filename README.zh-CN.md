@@ -6,9 +6,11 @@ yacr 是一个跨平台开源 CAD 项目：共享的 Rust 核心负责 DWG/DXF �
 React + Tauri 提供界面，wgpu 负责绘制。同一套文档与渲染管线面向 Linux（Wayland 原生或
 X11/`dom-canvas`）、Windows、macOS、Android 与 Web。
 
-项目仍在早期开发，**尚无可交付产品**。Linux 是目前唯一可运行的 GUI，只在 GNOME/Mutter 等有界
-环境做过本地验收；Windows/macOS 是真实 Tauri 宿主但只有编译级证据，Android 只有编译级证据
-（设备、Vulkan 适配器、像素均未验证），Web 只用无头/软件渲染做过 smoke。当前能力以
+**宣传页：** <https://yacr.pages.dev/> · **Web 版：** <https://yacr-examples.pages.dev/>
+
+项目仍在早期开发，**尚无可交付产品**。Linux/Wayland 是主开发目标、运行证据最完整，只在 GNOME/Mutter 等有界
+环境做过本地验收；Android APK 已由维护者侧载运行成功（不是 CI 验收），设备/真实 GPU/像素的正式验收仍待补；
+Windows/macOS 是真实 Tauri 宿主，运行时/视觉验收仍待补；Web 只用无头/软件渲染做过 smoke。当前能力以
 **契约/合成测试 + 合成夹具上的有界真实 GPU 宿主运行**为证据；尚未完成任何已验收的
 DWG 兼容性、真实图纸、vendor、golden 图像或性能验收。请勿把它当作可用或生产级的 CAD 软件。
 
@@ -106,7 +108,7 @@ Wayland**（宿主自建 app-owned `wl_surface` + `wl_subsurface`，经 `apps/ap
 
 工具链 **1.99.0**（`rust-toolchain.toml`），`Cargo.lock` 已锁定；若 `PATH` 无 cargo，加上 `$HOME/.cargo/bin`。
 
-### Linux 桌面宿主（首选，唯一可运行 GUI）
+### Linux 桌面宿主（主开发目标）
 
 系统前置（脚本不自动安装）：
 
@@ -218,7 +220,7 @@ cargo test --workspace --locked -- --test-threads=1   # GPU/CLI 用例串行跑
 | Android（APK） | `bash scripts/build-android.sh --release --target aarch64` | `apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk` |
 | Web（bundle） | `bash scripts/build-web.sh` / `bash scripts/build-web-ui.sh` | `apps/app-web/dist/` / `apps/app-web/dist-ui/` |
 
-Linux 是唯一可运行 GUI；Flatpak 的打包、安装与运行命令见上文
+Linux/Wayland 是主开发目标；Flatpak 的打包、安装与运行命令见上文
 [本地 Flatpak bundle（Linux）](#本地-flatpak-bundlelinux)。
 
 **Windows zip。** 在 Windows 上用原生 MSVC + 普通 `cargo`（静态 CRT）；在本机 Linux 上可经

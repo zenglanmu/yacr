@@ -10,12 +10,12 @@
     'zh-CN': {
       title: 'yacr — Yet Another CAD in Rust · 用 Rust 写的开源 CAD',
       description:
-        'yacr 是一个用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。一个核心，多种载体。早期预览：尚无可交付产品，Linux 是当前唯一可运行的 GUI。',
+        'yacr 是一个用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。一个核心，多种载体。早期预览：尚无可交付产品；Linux/Wayland 是主开发目标，Android APK 已由维护者侧载运行。',
       ogTitle: 'yacr — Yet Another CAD in Rust',
       ogDescription:
         'Rust 核心负责文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。早期预览，尚无可交付产品。',
       twitterDescription:
-        '用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。早期预览；Linux 是当前唯一可运行的 GUI。',
+        '用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。早期预览；Linux/Wayland 是主开发目标，Android APK 已由维护者侧载运行。',
       navOpen: '打开导航菜单',
       navClose: '关闭导航菜单',
       copied: '命令已复制',
@@ -24,12 +24,12 @@
     en: {
       title: 'yacr — Yet Another CAD in Rust · Open-source CAD',
       description:
-        'yacr is an open-source CAD viewer and measurement system with a Rust core, React + Tauri interface, and one core across five surfaces. Early preview: no shippable product yet; Linux is the only runnable GUI.',
+        'yacr is an open-source CAD viewer and measurement system with a Rust core, React + Tauri interface, and one core across five surfaces. Early preview: no shippable product yet; Linux/Wayland is the primary development target and the Android APK has been sideloaded by the maintainer.',
       ogTitle: 'yacr — Yet Another CAD in Rust',
       ogDescription:
         'A Rust core for documents, geometry, commands, and wgpu rendering. A React + Tauri interface. One core, many surfaces. Early preview; no shippable product yet.',
       twitterDescription:
-        'Open-source CAD with a Rust core and a React + Tauri interface. Early preview; Linux is the only runnable GUI.',
+        'Open-source CAD with a Rust core and a React + Tauri interface. Early preview; Linux/Wayland is the primary development target, and the Android APK has been sideloaded by the maintainer.',
       navOpen: 'Open navigation menu',
       navClose: 'Close navigation menu',
       copied: 'Command copied',

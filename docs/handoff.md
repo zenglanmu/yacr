@@ -1,4 +1,12 @@
 AD
+
+## 2026-11-08 状态措辞修正：Linux/Wayland 为主开发目标；Android 侧载验证
+
+- 维护者侧载 Android release APK 并运行成功（非 CI 验收；设备/真实 GPU/像素的正式验收仍 NOT VERIFIED）。
+- Linux/Wayland 是主开发目标、支持最完整；Windows/macOS 是真实宿主，预期可运行，但运行时/视觉验收仍待补。
+- 宣传页/README/AGENTS/i18n/Flatpak metainfo 不再写“Linux 是唯一可运行 GUI”。
+- 宣传页新增 wgpu 大图纸目标（几十万图元级，性能验收未完成）与天正 TypeScript 插件（TCH/proxy graphics）说明。
+
 ## 2026-11-08 发布 v0.1.5（首次 bump 包内版本）
 
 - **版本**：`Cargo.toml` workspace 版本、四个 `tauri.conf.json`、Flatpak metainfo 全部 `0.1.2` →
