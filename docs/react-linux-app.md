@@ -340,6 +340,18 @@ bash scripts/collect-evidence.sh --backend wayland --stacking-regression \
 body 内，Escape/点击外部关闭）；DOM-on-top 之后这不再是硬约束，但也没有迁移理由。契约测试见
 `apps/desktop-ui/test/ribbon.test.ts`。
 
+功能区**收起后**不再留下一条指向空白的选项卡条：同一行（`--ribbon-bar-h`，26px，与选项卡条共用
+一个 token）退化为 AutoCAD 简洁模式式的**菜单栏**——选项卡名成为顶层菜单，每个下拉由该选项卡
+自己的 `RIBBON_TABS` 面板经 `src/ribbon/ribbon-menu.ts` 的 `ribbonMenuEntriesFor` 投影而来
+（面板 item 数 ≥ `RIBBON_MENU_SUBMENU_MIN` = 7 时折叠为子菜单项，带 `variants` 的 item 再开一级
+子菜单），派发/启用/拒绝文案仍只走 `runItem`/`itemEnabled`/`unavailable`。行高不变，所以收起与
+展开的分区矩形相同；下拉是 `position: fixed` 的 DOM 覆盖层（`src/ribbon/ribbon-menu.ts` 的
+`placeRibbonMenuLevel` 复用 `placeContextMenu` 的翻转与夹取，子菜单放不下时翻到父行的**左缘之外**
+而不是盖在父菜单上；`ribbonMenuMaxHeight` 把每层高度裁到锚点下方，因此只会向下展开；指针在
+子菜单父行停留 `RIBBON_MENU_HOVER_OPEN_MS`（220ms）后自动展开该子菜单，悬停其他行则收起不属于
+它的子菜单），不参与布局高度，菜单打开期间 `.ribbon` 临时提升层级以盖住图纸标签与工作区。契约
+测试见 `apps/desktop-ui/test/ribbon-menubar.test.ts`。
+
 ## 响应式 / 移动端
 
 `apps/desktop-ui` 仍是**一套 React 树**；桌面与移动只是**同一批组件的两种呈现**，**只按屏幕宽度**

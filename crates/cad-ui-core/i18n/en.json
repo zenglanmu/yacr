@@ -783,6 +783,7 @@
   "ribbon.scroll_left": "Scroll ribbon left",
   "ribbon.scroll_right": "Scroll ribbon right",
   "ribbon.tabs_label": "Ribbon tabs",
+  "ribbon.menubar_label": "Ribbon menu bar",
   "ribbon.variants": "{name} options",
   "doctabs.label": "Open drawings",
   "doctabs.close": "Close drawing",

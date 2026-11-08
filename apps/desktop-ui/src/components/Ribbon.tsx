@@ -17,10 +17,17 @@
 // pages the strip (see `ribbon-overflow.ts` and `.ribbon__overflow`). The cues
 // are overlays: they never take width from the panels, so the band measures the
 // same whether or not they are shown.
+//
+// Collapsed, this component renders no band and no tab strip: the same 26px row
+// becomes `RibbonMenuBar` (AutoCAD-classic menus built from the same model), so
+// the collapsed row is a real menu bar instead of a tab strip pointing at empty
+// space. The row height is one shared token (`--ribbon-bar-h`), which is what
+// keeps the host's CAD partition rect identical in both states.
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
 import { IconButton, RibbonButton } from './primitives.tsx';
+import { RibbonMenuBar } from './RibbonMenuBar.tsx';
 import { useI18n, useShell } from '../context.ts';
 import type { ShellValue } from '../context.ts';
 import type { RibbonItem, RibbonPanel } from '../ribbon/ribbon-model.ts';
@@ -361,6 +368,11 @@ export function Ribbon() {
   const { t, locale } = useI18n();
   const shell = useShell();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  // Whether the collapsed menu bar has a dropdown open. The ribbon lifts its own
+  // stacking order for as long as one is open, so the overlay paints above the
+  // document tabs and the workspace (which are later siblings in the column)
+  // without any `:has()` on the region.
+  const [menubarOpen, setMenubarOpen] = useState(false);
   const panelsRef = useRef<HTMLDivElement | null>(null);
   const tab = ribbonTab(shell.ribbonTab);
   // A tab switch or a language switch renders different panel widths, so both
@@ -388,29 +400,37 @@ export function Ribbon() {
     };
   }, [openMenu]);
   return (
-    <div className={['region', 'region--ribbon', 'ribbon', 'app-region', shell.ribbonCollapsed ? 'is-collapsed' : ''].filter(Boolean).join(' ')}>
-      <div className="ribbon__tabs" role="tablist" aria-label={t('ribbon.tabs_label')}>
-        {RIBBON_TABS.map(entry => (
-          <button
-            key={entry.id}
-            type="button"
-            role="tab"
-            aria-selected={entry.id === shell.ribbonTab}
-            className={['ribbon-tab', entry.accent ? 'is-accent' : '', entry.id === shell.ribbonTab ? 'is-active' : ''].filter(Boolean).join(' ')}
-            onClick={() => { setOpenMenu(null); shell.setRibbonTab(entry.id); }}
-          >
-            {t(entry.labelKey)}
-          </button>
-        ))}
-        <div className="ribbon__tabs-spacer" />
-        <IconButton
-          icon={shell.ribbonCollapsed ? 'chevronDown' : 'chevronUp'}
-          size="sm"
-          label={shell.ribbonCollapsed ? t('ribbon.expand') : t('ribbon.collapse')}
-          pressed={shell.ribbonCollapsed}
-          onClick={() => { setOpenMenu(null); shell.setRibbonCollapsed(!shell.ribbonCollapsed); }}
-        />
-      </div>
+    <div className={[
+      'region', 'region--ribbon', 'ribbon', 'app-region',
+      shell.ribbonCollapsed ? 'is-collapsed' : '',
+      menubarOpen ? 'is-menu-open' : '',
+    ].filter(Boolean).join(' ')}>
+      {shell.ribbonCollapsed ? (
+        <RibbonMenuBar onMenuOpenChange={setMenubarOpen} />
+      ) : (
+        <div className="ribbon__tabs" role="tablist" aria-label={t('ribbon.tabs_label')}>
+          {RIBBON_TABS.map(entry => (
+            <button
+              key={entry.id}
+              type="button"
+              role="tab"
+              aria-selected={entry.id === shell.ribbonTab}
+              className={['ribbon-tab', entry.accent ? 'is-accent' : '', entry.id === shell.ribbonTab ? 'is-active' : ''].filter(Boolean).join(' ')}
+              onClick={() => { setOpenMenu(null); shell.setRibbonTab(entry.id); }}
+            >
+              {t(entry.labelKey)}
+            </button>
+          ))}
+          <div className="ribbon__tabs-spacer" />
+          <IconButton
+            icon="chevronUp"
+            size="sm"
+            label={t('ribbon.collapse')}
+            pressed={false}
+            onClick={() => { setOpenMenu(null); shell.setRibbonCollapsed(true); }}
+          />
+        </div>
+      )}
       {shell.ribbonCollapsed ? null : (
         <div
           className="ribbon__band"

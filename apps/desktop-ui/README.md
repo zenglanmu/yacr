@@ -99,7 +99,7 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 | 区域 | 文件（相对 `src/components/`） |
 |---|---|
 | 标题 / 快速访问工具栏 / 语言 | `TitleBar.tsx` |
-| 功能区 | `Ribbon.tsx`，模型在 `src/ribbon/ribbon-model.ts` |
+| 功能区 | `Ribbon.tsx`，模型在 `src/ribbon/ribbon-model.ts`；收起后同一行由 `RibbonMenuBar.tsx` 渲染多级菜单栏，投影在 `src/ribbon/ribbon-menu.ts` |
 | 图纸标签 | `DocTabs.tsx` |
 | 工作区 | `Workspace.tsx` |
 | 浮动面板容器 | `PaletteWindow.tsx`（唯一容器：拖动、调宽、层级与几何存储；几何规则在 `src/layout/palette-window.ts`） |

@@ -211,6 +211,17 @@ export function menuItems(menu: ContextMenuModel | null | undefined): ContextMen
 }
 
 /**
+ * The one thing the navigation helpers read from a row.
+ *
+ * Declared structurally (not as `ContextMenuItem`) so every vertical menu in the
+ * shell — the shortcut menu and the collapsed ribbon's menu bar — shares one
+ * "move over enabled rows" rule instead of re-implementing it.
+ */
+export interface MenuNavigable {
+  readonly enabled: boolean;
+}
+
+/**
  * The next **enabled** item in `direction` (+1/-1), wrapping at both ends.
  *
  * `from < 0` means "nothing active yet": Down starts at the first enabled item
@@ -219,7 +230,7 @@ export function menuItems(menu: ContextMenuModel | null | undefined): ContextMen
  * enabled item exists at all.
  */
 export function nextEnabledIndex(
-  items: readonly ContextMenuItem[] | null | undefined,
+  items: readonly MenuNavigable[] | null | undefined,
   from: number,
   direction: number,
 ): number {
@@ -239,7 +250,7 @@ export function nextEnabledIndex(
 
 /** Home/End: the first (`'first'`) or last (`'last'`) enabled item, or `-1`. */
 export function edgeEnabledIndex(
-  items: readonly ContextMenuItem[] | null | undefined,
+  items: readonly MenuNavigable[] | null | undefined,
   edge: 'first' | 'last',
 ): number {
   return nextEnabledIndex(items, -1, edge === 'last' ? -1 : 1);
