@@ -70,6 +70,11 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> Result<serde_json::Value
     let mut batches: u64 = 0;
     let mut vertices: u64 = 0;
     for entity in document.drawing.model_space() {
+        // A top-level entity the source baked `invisible` is not display output:
+        // the GUI scene path skips it, so the headless render must too.
+        if document.drawing.entity_hidden(entity.id) {
+            continue;
+        }
         let representation = registry.build_expanded(&document.drawing, entity, &context)?;
         // `build_compact` merges adjacent same-style opaque line fragments
         // (capped at 65,536 vertices / 8,192 world units), the fix that took a
@@ -275,7 +280,9 @@ fn run_plot_vector(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
     let plan_ms = plan_started.elapsed().as_secs_f64() * 1000.0;
 
     let representation =
-        cad_representation::build_paper_space(&registry, &database, layout, &context, &|_| true)?;
+        cad_representation::build_paper_space(&registry, &database, layout, &context, &|entity| {
+            !database.entity_hidden(entity.id)
+        })?;
     let document = cad_representation::build_vector_document(&representation, &page)?;
     let path_count = document.paths.len();
 
@@ -406,9 +413,13 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> Result<serde_json::Val
     let page = cad_representation::plan_plot_for_record(&record, target)?;
     let plan_ms = plan_started.elapsed().as_secs_f64() * 1000.0;
 
-    // Paper-space representation, already mapped through every viewport.
+    // Paper-space representation, already mapped through every viewport. The
+    // source-baked `invisible` flag is honoured exactly like the GUI scene; layer
+    // visibility stays out of the plot decision, as before.
     let representation =
-        cad_representation::build_paper_space(&registry, &database, layout, &context, &|_| true)?;
+        cad_representation::build_paper_space(&registry, &database, layout, &context, &|entity| {
+            !database.entity_hidden(entity.id)
+        })?;
 
     // Map paper millimetres onto the renderer's y-up pixel space: the planner's
     // affine is y-down (image convention), so flip y about the canvas height.

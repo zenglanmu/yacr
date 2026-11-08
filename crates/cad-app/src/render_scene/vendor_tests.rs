@@ -2,10 +2,12 @@
 
 use super::*;
 use crate::render_scene::build_scene_stats_with_vendor;
-use crate::vendor::{VendorEntityPrimitives, VendorPrimitive, VendorRepresentationStore};
+use crate::vendor::{
+    VendorEntityPrimitives, VendorPrimitive, VendorRepresentationStore, VendorText,
+};
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
 use cad_domain::{
-    DatabaseId, EntityId, LayerId, ObjectId, Point3, Revision, SemanticGeometry, SpaceId,
+    DatabaseId, EntityId, LayerId, LayoutId, ObjectId, Point3, Revision, SemanticGeometry, SpaceId,
 };
 
 fn db_with_vendor_entity() -> DrawingDatabase {
@@ -700,4 +702,218 @@ fn a_real_block_containing_tch_entities_expands_them() {
         .sources
         .iter()
         .any(|source| { source.entity == member_id && source.instance.0 == vec![insert_id] })));
+}
+
+// ---- Source-baked `invisible` entities are not assembled ----
+
+fn line(id: u128, space: SpaceId, y: f64, draw_order: i64) -> DbEntity {
+    DbEntity {
+        object: DbObject {
+            id: ObjectId(id),
+            type_key: "AcDbLine".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(id),
+        layer: LayerId(0),
+        space,
+        geometry: SemanticGeometry::Line {
+            start: Point3 { x: 0.0, y, z: 0.0 },
+            end: Point3 { x: 10.0, y, z: 0.0 },
+        },
+        draw_order,
+    }
+}
+
+/// Layer 0 only, with model lines 1 (visible) and 2 (source-baked hidden).
+fn db_with_baked_hidden_model_entity() -> DrawingDatabase {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(9));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(line(1, SpaceId::Model, 0.0, 1))
+        .unwrap();
+    builder
+        .insert_entity(line(2, SpaceId::Model, 5.0, 2))
+        .unwrap();
+    builder.set_hidden_entities([EntityId(2)]).unwrap();
+    builder.finish().unwrap()
+}
+
+#[test]
+fn baked_hidden_model_entity_emits_no_batch() {
+    let db = db_with_baked_hidden_model_entity();
+    let (delta, stats) = build_scene_stats_with_vendor(
+        &db,
+        TaskStamp::new(DocumentId(73), 0),
+        None,
+        None,
+        &LayerOverrideSet::new(),
+        SpaceSelection::Model,
+        None,
+    )
+    .unwrap();
+    assert_eq!(stats.fragments_in, 1, "only the visible line is assembled");
+    assert!(delta.added.iter().all(|batch| batch
+        .sources
+        .iter()
+        .all(|source| source.entity != EntityId(2))));
+}
+
+#[test]
+fn baked_hidden_paper_entity_emits_no_batch() {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(9));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_layout(cad_db::Layout {
+            id: LayoutId(1),
+            name: "Sheet".into(),
+            viewports: Vec::new(),
+        })
+        .unwrap();
+    builder
+        .insert_entity(line(1, SpaceId::Paper(LayoutId(1)), 0.0, 1))
+        .unwrap();
+    builder
+        .insert_entity(line(2, SpaceId::Paper(LayoutId(1)), 5.0, 2))
+        .unwrap();
+    builder.set_hidden_entities([EntityId(2)]).unwrap();
+    let db = builder.finish().unwrap();
+
+    let (delta, stats) = build_scene_stats_with_vendor(
+        &db,
+        TaskStamp::new(DocumentId(73), 0),
+        None,
+        None,
+        &LayerOverrideSet::new(),
+        SpaceSelection::Paper(LayoutId(1)),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        stats.fragments_in, 1,
+        "only the visible sheet line is assembled"
+    );
+    assert!(delta.added.iter().all(|batch| batch
+        .sources
+        .iter()
+        .all(|source| source.entity != EntityId(2))));
+}
+
+// ---- TCH `wrapWidth` is decoded but not applied as an auto-wrap width ----
+
+/// The real font the text tests register (`fonts/osifont.ttf`), with the same
+/// fallback chain the host uses.
+fn vendor_text_engine() -> cad_representation::FontEngine {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("fonts")
+        .join("osifont.ttf");
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|error| panic!("read {} for vendor text tests: {error}", path.display()));
+    let mut fonts = cad_representation::FontEngine::new();
+    fonts
+        .register("osifont", std::sync::Arc::from(bytes))
+        .unwrap_or_else(|error| panic!("register osifont.ttf: {error:?}"));
+    fonts.set_fallback(vec!["osifont".to_string()]);
+    fonts
+}
+
+/// Assemble one vendor `Text` primitive onto the shared opaque source entity.
+fn assemble_vendor_text(text: &str, height: f64, wrap_width: Option<f64>) -> SceneDelta {
+    let db = db_with_vendor_entity();
+    let store = VendorRepresentationStore::new(
+        11,
+        vec![VendorEntityPrimitives {
+            handle: 0x2C,
+            primitives: vec![VendorPrimitive::Text(VendorText {
+                origin: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                height,
+                rotation: 0.0,
+                wrap_width,
+                attachment: 7,
+                text: text.to_string(),
+            })],
+        }],
+    );
+    let (delta, _stats) = build_scene_stats_with_vendor(
+        &db,
+        TaskStamp::new(DocumentId(73), 0),
+        Some(std::sync::Arc::new(vendor_text_engine())),
+        None,
+        &LayerOverrideSet::new(),
+        SpaceSelection::Model,
+        Some(&store),
+    )
+    .expect("assemble vendor text");
+    delta
+}
+
+/// World-space y extent of the batches owned by source entity 1.
+fn vendor_text_y_span(delta: &SceneDelta) -> f64 {
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    let mut vertices = 0usize;
+    for batch in &delta.added {
+        if !batch
+            .sources
+            .iter()
+            .any(|source| source.entity == EntityId(1))
+        {
+            continue;
+        }
+        for vertex in &batch.vertices {
+            let y = batch.local_origin.y + vertex[1] as f64;
+            min = min.min(y);
+            max = max.max(y);
+            vertices += 1;
+        }
+    }
+    assert!(
+        vertices > 0,
+        "the vendor text produced no vertices ({} batch(es) in the delta)",
+        delta.added.len()
+    );
+    max - min
+}
+
+#[test]
+fn tch_wrap_width_does_not_split_a_single_line() {
+    // `16.500` at height 100 is wider than the 120 wrap width, so honouring the
+    // hint would break it into several lines. Tianzheng's `wrapWidth` is an
+    // unverified layout hint; the label must stay one line.
+    let delta = assemble_vendor_text("16.500", 100.0, Some(120.0));
+    let span = vendor_text_y_span(&delta);
+    assert!(
+        span < 1.5 * 100.0,
+        "wrapWidth must not wrap a single-line label: y span {span} for height 100"
+    );
+}
+
+#[test]
+fn tch_explicit_newline_still_splits_lines() {
+    // Explicit `\n` is the real layout mechanism: two lines stay two lines even
+    // when a wrap width is present.
+    let delta = assemble_vendor_text("A\nB", 100.0, Some(120.0));
+    let span = vendor_text_y_span(&delta);
+    assert!(
+        span >= 1.5 * 100.0,
+        "an explicit newline must advance to a second line: y span {span} for height 100"
+    );
 }

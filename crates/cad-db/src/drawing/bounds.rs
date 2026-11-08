@@ -239,12 +239,15 @@ impl DrawingDatabase {
     ///
     /// Model-space entities are read directly rather than through
     /// [`Self::model_space`]: bounds accumulation is order-independent, so that
-    /// accessor's allocate-and-sort would be wasted work on a hot path.
+    /// accessor's allocate-and-sort would be wasted work on a hot path. Entities
+    /// the source file baked hidden are skipped (they are not drawn either), so
+    /// a hidden far-away row cannot stretch the view to fit invisible geometry.
     fn compute_bounds(&self) -> Option<(Point3, Point3)> {
         self.bounds_of_entities(
             self.entities
                 .values()
-                .filter(|entity| matches!(entity.space, SpaceId::Model)),
+                .filter(|entity| matches!(entity.space, SpaceId::Model))
+                .filter(|entity| !self.entity_hidden(entity.id)),
         )
     }
 
@@ -368,16 +371,6 @@ impl DrawingDatabase {
                 self.accumulate_bounds(acc, entity, transform, member_depth, stack, context);
             }
         }
-    }
-
-    /// Whether a block member is visible under the block's active visibility
-    /// state (an unresolved/absent state leaves every member visible).
-    fn block_member_visible(&self, block: BlockId, member: EntityId) -> bool {
-        self.blocks
-            .get(&block)
-            .and_then(|definition| definition.dynamic_visibility.as_ref())
-            .map(|visibility| visibility.is_visible(member))
-            .unwrap_or(true)
     }
 
     /// Bounds of `block` in its own local frame, memoized for this computation.

@@ -255,7 +255,9 @@ pub(super) fn build_scene_stats_with_vendor_indexed(
             }
         }
         SpaceSelection::Paper(layout) => {
-            let visible = |entity: &cad_db::DbEntity| overrides.is_entity_visible(database, entity);
+            let visible = |entity: &cad_db::DbEntity| {
+                !database.entity_hidden(entity.id) && overrides.is_entity_visible(database, entity)
+            };
             let representation =
                 build_paper_space(&registry, database, layout, &context, &visible)?;
             stats.fragments_in += representation.fragments.len();
@@ -327,7 +329,7 @@ pub(super) fn build_model_entity_scene(
     vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<SceneDelta> {
     let mut cache = SceneCache::new(SceneBudget::default());
-    if !overrides.is_entity_visible(database, entity) {
+    if !overrides.is_entity_visible(database, entity) || database.entity_hidden(entity.id) {
         return Ok(SceneDelta {
             stamp,
             added: vec![],
@@ -432,6 +434,14 @@ fn append_vendor_fragments(
                 continue;
             };
             let (h_align, v_align) = text_align(text.attachment);
+            // `VendorText::wrap_width` is the TCH `wrapWidth` field, decoded by
+            // the plugin but of **unverified** semantics. On the real fixture it
+            // is far narrower than the content (height 455 / wrap 766 comes out
+            // at ~5.9 ideographs and splits the single-line `(结构)` label; a
+            // height 525 / wrap 1503 record is ~2.86 characters wide; a 350-high
+            // paragraph with explicit `\n` would be re-broken). Tianzheng lays
+            // text out with explicit newlines, so applying this hint fabricates
+            // wraps. Only explicit `\n` (handled by `parse_mtext`) wraps.
             let shaped = engine.shape_unstyled(
                 &text.text,
                 text.origin,
@@ -439,7 +449,7 @@ fn append_vendor_fragments(
                 text.rotation,
                 h_align,
                 v_align,
-                text.wrap_width,
+                None,
             );
             match shaped {
                 Ok(shaped) => {

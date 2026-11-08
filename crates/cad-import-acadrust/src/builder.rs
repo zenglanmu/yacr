@@ -745,6 +745,10 @@ impl<'a> ImporterBuilder<'a> {
         // is). Cancellation is polled at each batch boundary.
         let batch = ENTITY_PROGRESS_BATCH;
         let mut since_report = 0usize;
+        // Every imported entity the source flagged `invisible`, across block
+        // members and top-level model/paper-space rows. Written to the database
+        // once, after all rows exist, so the builder can validate the whole set.
+        let mut hidden_entities: Vec<EntityId> = Vec::new();
 
         // Block definitions first, so model-space INSERTs can resolve the
         // display status of the block they reference (audit B15/B20).
@@ -787,6 +791,18 @@ impl<'a> ImporterBuilder<'a> {
                 entities: entity_ids,
                 dynamic_visibility: None,
             })?;
+            // The source file's `invisible` flag is the baked display state: it
+            // is what a resolved active visibility state was derived from, and
+            // the only honest answer when no state could be resolved (evaluated
+            // anonymous blocks keep every state's geometry, flagging the unused
+            // ones invisible). Collect the hidden member ids; the database write
+            // happens once after every space has been walked.
+            hidden_entities.extend(
+                member_visible
+                    .iter()
+                    .filter(|(_, visible)| !**visible)
+                    .filter_map(|(handle, _)| member_ids.get(handle).copied()),
+            );
             // A parameter owned directly by this definition (no evaluated
             // representation object) resolves against this block's members.
             self.record_dynamic_visibility(block.handle, id, &member_ids, &member_visible);
@@ -800,7 +816,14 @@ impl<'a> ImporterBuilder<'a> {
             if let EntityType::Insert(insert) = entity {
                 self.record_insert_dynamic_visibility(insert);
             }
-            self.push_entity(entity, SpaceId::Model, model_space);
+            // The top-level `invisible` flag is baked display state too: a hidden
+            // model-space entity must not be drawn, bounded or plotted.
+            let invisible = entity.common().invisible;
+            if let Some(id) = self.push_entity(entity, SpaceId::Model, model_space) {
+                if invisible {
+                    hidden_entities.push(id);
+                }
+            }
             since_report += 1;
             if since_report >= batch {
                 since_report = 0;
@@ -814,7 +837,12 @@ impl<'a> ImporterBuilder<'a> {
                 if let EntityType::Insert(insert) = entity {
                     self.record_insert_dynamic_visibility(insert);
                 }
-                self.push_entity(entity, SpaceId::Paper(layout), layout);
+                let invisible = entity.common().invisible;
+                if let Some(id) = self.push_entity(entity, SpaceId::Paper(layout), layout) {
+                    if invisible {
+                        hidden_entities.push(id);
+                    }
+                }
                 since_report += 1;
                 if since_report >= batch {
                     since_report = 0;
@@ -823,6 +851,9 @@ impl<'a> ImporterBuilder<'a> {
                 }
             }
         }
+        // One whole-set write now that every entity row exists; `finish()` then
+        // validates that no collected id dangles.
+        self.builder.set_hidden_entities(hidden_entities)?;
         // Final tick for the tail of the last batch (never a zero-work tick when
         // the drawing was empty: that boundary was already reported by `run`).
         if since_report > 0 {

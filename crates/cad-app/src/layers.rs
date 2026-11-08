@@ -202,6 +202,11 @@ pub fn filter_layer_rows(rows: &[LayerRow], needle: &str) -> Vec<LayerRow> {
 /// `cad-app` means the filtering rule is covered by `cargo test -p cad-app`
 /// without the UI host's graphics/font toolchain (fontconfig/GTK). Order
 /// follows [`DrawingDatabase::model_space`] (draw order).
+///
+/// Two independent reasons exclude an entity: its effective layer is hidden
+/// under `overrides`, or the source file baked it `invisible`
+/// ([`DrawingDatabase::entity_hidden`]). Picking/selection is a separate path and
+/// deliberately keeps such entities selectable.
 pub fn visible_model_entities<'a>(
     database: &'a DrawingDatabase,
     overrides: &LayerOverrideSet,
@@ -209,7 +214,9 @@ pub fn visible_model_entities<'a>(
     database
         .model_space()
         .into_iter()
-        .filter(|entity| overrides.is_entity_visible(database, entity))
+        .filter(|entity| {
+            !database.entity_hidden(entity.id) && overrides.is_entity_visible(database, entity)
+        })
         .collect()
 }
 
@@ -427,6 +434,61 @@ mod tests {
         let mut hidden = LayerOverrideSet::new();
         hidden.set(LayerId(0), false);
         assert!(visible_model_entities(&db, &hidden).is_empty());
+    }
+
+    #[test]
+    fn visible_model_entities_excludes_baked_hidden_entities() {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        for (id, name, visible) in [(LayerId(0), "0", true), (LayerId(1), "HIDDEN_LAYER", false)] {
+            b.insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible,
+            })
+            .unwrap();
+        }
+        // Entity 1 is on a visible layer but baked hidden by the source.
+        let mut baked_hidden = line_on(1, SpaceId::Model, LayerId(0));
+        baked_hidden.geometry = SemanticGeometry::Point(Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        });
+        b.insert_entity(baked_hidden).unwrap();
+        // Entity 2 is visible; entity 3 is only on the hidden layer.
+        b.insert_entity(line_on(2, SpaceId::Model, LayerId(0)))
+            .unwrap();
+        b.insert_entity(line_on(3, SpaceId::Model, LayerId(1)))
+            .unwrap();
+        b.set_hidden_entities([EntityId(1)]).unwrap();
+        let db = b.finish().unwrap();
+
+        let none = LayerOverrideSet::new();
+        let visible: Vec<EntityId> = visible_model_entities(&db, &none)
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        assert_eq!(
+            visible,
+            vec![EntityId(2)],
+            "entity 1 is baked hidden, entity 3 is on a hidden layer"
+        );
+        assert!(db.entity_hidden(EntityId(1)));
+
+        // Showing the hidden layer cannot revive a baked-hidden entity.
+        let mut show_layer = LayerOverrideSet::new();
+        show_layer.set(LayerId(1), true);
+        let visible: Vec<EntityId> = visible_model_entities(&db, &show_layer)
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        assert_eq!(visible, vec![EntityId(2), EntityId(3)]);
+
+        // Hiding every layer still hides the baked-hidden entity (both reasons).
+        let mut all_hidden = LayerOverrideSet::new();
+        all_hidden.set(LayerId(0), false);
+        all_hidden.set(LayerId(1), false);
+        assert!(visible_model_entities(&db, &all_hidden).is_empty());
     }
 
     #[test]

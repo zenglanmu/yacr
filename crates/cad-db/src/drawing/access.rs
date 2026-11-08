@@ -243,19 +243,70 @@ impl DrawingDatabase {
         self.blocks.get(&id)?.dynamic_visibility.as_ref()
     }
 
+    /// Whether an entity was baked hidden by the source file
+    /// (`EntityCommon::invisible`).
+    ///
+    /// This is the authoritative imported display state for top-level
+    /// model/paper-space entities; display and plot callers must skip such an
+    /// entity. Block members are judged by [`Self::block_member_visible`]
+    /// instead, because a resolved visibility state may override the baked flag.
+    ///
+    /// Picking/selection deliberately does **not** consult this: a hidden
+    /// entity keeps the pre-existing trade-off of remaining selectable.
+    pub fn entity_hidden(&self, id: EntityId) -> bool {
+        self.hidden_entities.contains(&id)
+    }
+
+    /// Whether `member` of `block` is visible in the block's display state.
+    ///
+    /// Two authorities, in priority order:
+    ///
+    /// 1. A **resolved** dynamic-visibility active state: the state's entity set
+    ///    decides for governed members, so switching states keeps working (a
+    ///    member hidden in the file but visible in the new state becomes visible).
+    ///    A member outside the governed `member_entities` set follows rule 2.
+    /// 2. The source file's baked `invisible` flags (`hidden_entities`). This is
+    ///    real file data, not a guess: evaluated anonymous dynamic blocks keep the
+    ///    unused states' geometry and flag it invisible, so drawing it stacks
+    ///    hidden members on the visible ones. With no descriptor, or a descriptor
+    ///    whose active state could not be resolved, the baked flags are the only
+    ///    honest answer.
+    pub(crate) fn block_member_visible(&self, block: BlockId, member: EntityId) -> bool {
+        let hidden = self.entity_hidden(member);
+        match self
+            .blocks
+            .get(&block)
+            .and_then(|definition| definition.dynamic_visibility.as_ref())
+        {
+            Some(visibility) => match visibility.active_entities() {
+                Some(state) => {
+                    if visibility.member_entities.contains(&member) {
+                        state.contains(&member)
+                    } else {
+                        !hidden
+                    }
+                }
+                None => !hidden,
+            },
+            None => !hidden,
+        }
+    }
+
     /// Member entities the block's active visibility state makes visible.
     ///
     /// `None` when the block carries no visibility descriptor. When a
-    /// descriptor exists but its active state is unknown, this returns the full
-    /// governed set so an unresolved state never silently hides geometry.
+    /// descriptor exists but its active state is unknown, the source file's
+    /// baked `invisible` flags decide instead (see
+    /// [`Self::block_member_visible`]); a block without such flags still returns
+    /// every member, so an unresolved state never hides geometry on a guess.
     pub fn block_visible_entities(&self, id: BlockId) -> Option<Vec<EntityId>> {
         let block = self.blocks.get(&id)?;
-        let visibility = block.dynamic_visibility.as_ref()?;
+        block.dynamic_visibility.as_ref()?;
         let visible: Vec<EntityId> = block
             .entities
             .iter()
             .copied()
-            .filter(|e| visibility.is_visible(*e))
+            .filter(|e| self.block_member_visible(id, *e))
             .collect();
         Some(visible)
     }
@@ -630,10 +681,12 @@ impl DrawingDatabase {
     /// Entities of a block definition, in draw order.
     ///
     /// For a dynamic block with a resolved active visibility state, only the
-    /// entities that state makes visible are returned (spec §3.2); ungoverned
-    /// entities always remain. Without a descriptor (or with an unresolved
-    /// active state) every member is returned, so a guess can never hide
-    /// geometry.
+    /// entities that state makes visible are returned (spec §3.2). When no state
+    /// could be resolved (or the block has no descriptor), the source file's
+    /// baked `invisible` flags decide: hidden members are skipped instead of
+    /// stacking under the visible ones. A block with neither signal returns
+    /// every member, so a guess can never hide geometry. See
+    /// [`Self::block_member_visible`] for the priority rule.
     pub fn block_entities(&self, id: BlockId) -> Vec<&DbEntity> {
         let Some(block) = self.blocks.get(&id) else {
             return Vec::new();
@@ -641,13 +694,7 @@ impl DrawingDatabase {
         let mut v: Vec<&DbEntity> = block
             .entities
             .iter()
-            .filter(|e| {
-                block
-                    .dynamic_visibility
-                    .as_ref()
-                    .map(|vis| vis.is_visible(**e))
-                    .unwrap_or(true)
-            })
+            .filter(|e| self.block_member_visible(id, **e))
             .filter_map(|e| self.entities.get(e))
             .collect();
         v.sort_by_key(|e| e.draw_order);

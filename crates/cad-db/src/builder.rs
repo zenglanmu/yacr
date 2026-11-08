@@ -1,6 +1,6 @@
 //! The sanctioned construction path for a [`DrawingDatabase`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use cad_domain::*;
@@ -48,6 +48,7 @@ impl DrawingDatabaseBuilder {
                 block_metadata: BTreeMap::new(),
                 block_name_order: Vec::new(),
                 block_source_handles: BTreeMap::new(),
+                hidden_entities: BTreeSet::new(),
                 layouts: BTreeMap::new(),
                 styles: BTreeMap::new(),
                 linetypes: BTreeMap::new(),
@@ -248,6 +249,26 @@ impl DrawingDatabaseBuilder {
             )));
         };
         block.dynamic_visibility = Some(visibility);
+        Ok(())
+    }
+
+    /// Replace the set of entities the source file baked as hidden
+    /// (`EntityCommon::invisible`).
+    ///
+    /// This is a **display** side table, not a re-evaluation: it covers
+    /// top-level model/paper-space entities and block members alike. It is a
+    /// whole-set replacement (not an accumulation), so a re-registration never
+    /// leaves a stale hidden row; duplicates collapse and an empty iterator
+    /// clears the set.
+    ///
+    /// Ids are not checked here because the importer calls this once after all
+    /// entity rows are pushed; [`Self::finish`] rejects an id that no entity row
+    /// exists for. A dangling id would be an unreachable hidden row.
+    pub fn set_hidden_entities(
+        &mut self,
+        entities: impl IntoIterator<Item = EntityId>,
+    ) -> CadResult<()> {
+        self.database.hidden_entities = entities.into_iter().collect();
         Ok(())
     }
 
@@ -566,6 +587,15 @@ impl DrawingDatabaseBuilder {
                         ));
                     }
                 }
+            }
+        }
+        // Every baked-hidden id must name an existing entity row: a dangling row
+        // could never hide anything and would silently go stale.
+        for id in &self.database.hidden_entities {
+            if !self.database.entities.contains_key(id) {
+                self.errors.push(format!(
+                    "baked-hidden entity {id:?} does not exist in the drawing"
+                ));
             }
         }
         // Block metadata must resolve to a real block and keep a finite base

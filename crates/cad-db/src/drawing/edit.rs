@@ -205,10 +205,13 @@ impl DrawingDatabase {
     /// §1.6): the entity row, its render attributes (keyed by id) and its
     /// membership in any block member list are all removed. Dynamic-visibility
     /// state/member lists are pruned too, since they are keyed by entity id;
-    /// leaving them would let a later switch name a nonexistent entity.
+    /// leaving them would let a later switch name a nonexistent entity. The
+    /// source-baked hidden flag is dropped as well, so a deleted id cannot be
+    /// hidden if it is ever re-inserted (for example by OOPS).
     pub(super) fn remove_entity(&mut self, id: EntityId) {
         self.entities.remove(&id);
         self.render_attributes.remove(&id);
+        self.hidden_entities.remove(&id);
         self.detach_block_membership(id);
     }
 

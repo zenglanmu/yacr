@@ -89,6 +89,12 @@ fn paper_layout_bounds(
     let layout = database.layout(layout_id)?;
     let mut acc = BoundsAccumulator::new();
     for entity in database.layout_entities(layout_id) {
+        // A sheet entity the source baked `invisible` is not drawn, so it must
+        // not stretch the paper-space extents either (model space already skips
+        // them inside `bounds()`).
+        if database.entity_hidden(entity.id) {
+            continue;
+        }
         acc.add_geometry(&entity.geometry);
     }
     for viewport in &layout.viewports {

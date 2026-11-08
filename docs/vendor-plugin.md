@@ -257,6 +257,10 @@ handle；API/编辑/COPY 创建并提交的实体有 `EntityId` 但 `source_hand
    `TCH_MTEXTNEW` 显式不支持；TCH 文字的 `_TCH` 宽度因子/中西文分段/上标规则未复刻，
    只按宿主字体引擎的 MTEXT 排版成形。宿主没有可用 fallback 字体时，文字 primitive
    不产生可绘制片段（不会伪造字形）。
+    - `TCH_TEXT`/`TCH_MTEXT` 的 `wrapWidth` 目前**只解码、不消费**：该字段的自动换行语义
+      未查证。真实样本中出现 height 455 / wrap 766（约 5.9 个表意字宽，会把单行 `(结构)`
+      拆行）、height 525 / wrap 1503（仅约 2.86 个字符宽）；源文件实际用显式换行排版。宿主
+      只保留显式 `\n`，不按该字段自动换行。
 2. **派生表示范围**：`VendorRepresentationStore` 按 `source_handle` 索引，在模型空间顶层
    实体的 `build_expanded` 之后追加片段；**块定义内的 TCH 成员**由
    `append_block_vendor_fragments` 沿 INSERT/Compound 递归合并（组合变换

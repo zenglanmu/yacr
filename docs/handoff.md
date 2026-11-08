@@ -1,3 +1,78 @@
+## 2026-11-08 动态块：烘焙 `invisible` 成员不再被绘制
+
+- **用户可见 bug**：`fixtures/test-tangent-real.dwg` 在坐标约 `x=1029235 y=-1215729` 附近出现
+  大量隐藏块成员叠画（化学中央操作台1 等求值匿名块）。
+- **根因**：求值匿名块 `*U231`（1048 成员，1047 个 `invisible=true`）、`*U247`（166 成员，165
+  不可见）等把**所有状态**的几何放在同一匿名块里，用 `EntityCommon::invisible` 烘焙非激活状态。
+  它们的 `active_state` 解析失败（`dynamic_block_member_unresolved` +
+  `dynamic_block_active_state_unknown`），而 `block_entities`/`bounds` 只在有解析状态时过滤，
+  于是全部成员进入显示表示。`*U526`（1845/1752 不可见）甚至没有
+  `AcDbBlockVisibilityParameter`。
+- **修复**：源文件 `invisible` 标志是**烘焙显示状态**，不是猜测。
+  1. `cad-db` 新增全局旁表 `DrawingDatabase::hidden_entities: BTreeSet<EntityId>`
+     （顶层实体与块成员共用）与 `DrawingDatabaseBuilder::set_hidden_entities`
+     （整体替换、去重、空集清空、`finish()` 拒绝不存在的 id）。`BlockDefinition` 与
+     `DbEntity` 字面量不变。
+  2. 唯一判定 `DrawingDatabase::block_member_visible`：解析出激活状态 → 状态集合优先（受管辖
+     成员的烘焙 hidden 不阻止状态重新显示，切换仍可用）；无描述符或 `active_state=None` →
+     按烘焙 `invisible` 回退隐藏。`block_entities`、`block_visible_entities`（`None` 语义不变）、
+     `bounds` 全部改用它（删除 `bounds.rs` 的私有副本）。顶层实体由
+     `DrawingDatabase::entity_hidden` 查询。
+  3. `cad-import-acadrust::read_entities` 在块循环收集 `member_visible == false` 的成员 id，
+     在模型/图纸空间循环收集 `EntityCommon::invisible` 且真正 `push_entity` 成功的 id，
+     三个循环结束后**一次** `set_hidden_entities`；`record_dynamic_visibility` 行为不变。
+  4. **顶层 `invisible` 同样纳入隐藏集合**：`cad-app::layers::visible_model_entities`、
+     `assembly.rs` 的模型/图纸空间装配与 `build_model_entity_scene`、点标记 overlay、
+     `bounds()`、图纸空间 `ZOOM EXTENTS`（`app_zoom::paper_layout_bounds`），以及 CLI
+     `render`/`plot`（PNG + SVG/PDF 的 `build_paper_space`）都跳过隐藏实体。
+     删除实体时同步从集合移除（`remove_entity`），避免删除后残留。
+- **回归测试**：`cad-db/src/tests/visibility.rs` 覆盖无描述符烘焙隐藏（绘制与包围盒）、解析状态
+  优先且切换 `ChangeSet` 正确、顶层 `Model` 烘焙隐藏不进包围盒、`set_hidden_entities` 整体替换/
+  空集/不存在 id 拒绝、删除隐藏实体后 `entity_hidden` 归假。`cad-app` 新增
+  `visible_model_entities` 叠加隐藏图层与烘焙隐藏、模型/图纸空间装配都不为隐藏实体产生批次。
+  `cad-import-acadrust/src/tests/visibility.rs` 合成文档加入模型空间 invisible 实体并断言
+  `entity_hidden`；真实夹具 `real_fixture_baked_invisible_members_are_hidden` 断言
+  `*U231`/`*U247` 各只画 1 个成员，并把导入的隐藏集合与源 `*Model_Space` 全部 invisible 实体
+  （按源 handle）精确比较。文档 `docs/dynamic-blocks.md` §2/§4/§5/§6 同步。
+- **既有权衡（不得写成已支持）**：拾取/选择与 DXF 导出**不**消费 `hidden_entities`，顶层隐藏实体
+  仍可被选中/导出，导出也不写 `invisible` 标志；若将来要“隐藏实体不可选”或“导出保留隐藏标志”，
+  必须新增独立通道。`OOPS` 的 ERASE 快照（`EntityDisplayState`）不含烘焙隐藏标志，因此删除
+  baked-hidden 实体再 OOPS 恢复时，该实体按可见恢复（已记录，非本轮修复目标）。
+- **已运行（PASS）**：`cargo test -p cad-db --locked`（196 + 13 + 5，0 failed）；
+  `cargo test -p cad-import-acadrust --locked`（366 passed, 0 failed）；
+  `cargo test -p cad-representation --locked`（241 passed）；
+  `cargo test -p cad-app --lib --locked`（1916 passed, 3 ignored）；
+  `cargo test -p cad-cli-tools --locked`（53 passed, 2 ignored）；
+  `cargo fmt --all -- --check`（pass）；
+  `cargo clippy -p cad-db -p cad-import-acadrust -p cad-app -p cad-cli-tools --all-targets
+  --locked -D warnings`（pass）；`python3 scripts/check-file-size.py`（1562 files, OK）；
+  真实夹具 `YACR_TEST_DWG=$PWD/fixtures/test-tangent-real.dwg cargo test -p cad-import-acadrust
+  --locked -- --nocapture real_fixture`（1 passed；`*U231`=1、`*U247`=1 在用例内断言）。
+- **NOT RUN / NOT VERIFIED**：真实 GUI/像素复核（未重跑 `run-react-linux.sh` 看窗口）；GPU/
+  真机/厂商文件；Windows/macOS/Android/Web 运行时；`cargo test --workspace`。
+  `cargo test ... -- --ignored` 的全量变体会触发**既有** `src/xref.rs` 文档测试编译失败
+  （与本次改动无关，正常非 `--ignored` 运行下该 doctest 被忽略）；相关真实夹具用例已单独运行。
+- **残余风险**：`block_visible_entities` 在“有描述符但状态未解析”时现在会排除烘焙 hidden 成员，
+  因而 DXF/导出 `explode` 路径（`cad-import-acadrust/src/export/entity.rs`）与
+  `cad-app::explode` 不再导出/炸开这些隐藏成员；对匿名求值块这是与显示一致的行为，但若将来
+  需要“导出全部状态”必须新增显式通道，不能依赖该访问器。
+
+- **追加修复（TCH 文本 `wrapWidth` 不参与自动换行）**：天正 `TCH_TEXT`/`TCH_MTEXT` 的
+  `wrapWidth` 被插件解码后曾直接传给宿主 `FontEngine::shape_unstyled`，导致单行标注被按表意字
+  拆行。真实夹具证据：`(结构)` height=455 / wrap=766.03（≈5.9 字宽）被拆成 `(结` / `构)`；
+  `(结构顶板)` 重复 14 次 height=525 / wrap=1503.2（≈2.86 字宽）；height=350、每行约 44 字符
+  且已带显式 `\n` 的长说明会被二次拆行。结论：该字段是**未查证的布局提示**，TCH 实际用显式
+  换行排版。修复：宿主对 vendor Text 传 `wrap_width = None`；`VendorPrimitive::Text.wrap_width`
+  字段与插件解码保留（ABI 不变），显式 `\n` 仍由 `parse_mtext` 处理。测试（`cad-app`）：
+  `"16.500"` height=100 / wrap=120 装配后顶点 y 跨度 < 1.5×height（单行）；`"A\nB"` 同样条件
+  y 跨度 ≥ 1.5×height（两行）。`docs/vendor-plugin.md` 记录“`wrapWidth` 只解码、不消费”。
+  已运行：`cargo test -p cad-app --lib --locked`（1918 passed, 3 ignored）、
+  `cargo test -p cad-representation --locked`（241 passed）、`cargo fmt --all -- --check`、
+  `cargo clippy -p cad-app --all-targets --locked -- -D warnings`、`check-file-size.py`（1562 files）。
+  NOT RUN / NOT VERIFIED：真实 GUI/像素复核、GPU/真机、Windows/macOS/Android/Web、workspace 全量。
+  残余风险：若某条 TCH 文本真的依赖该 `wrapWidth` 自动换行，现在会变成单行长文本；按现有真实
+  样本（显式 `\n` 排版）这是正确取舍，但没有覆盖所有 TCH 产图方式。
+
 ## 2026-11-07 绘制/测量预览补全（`Lines` = `LineList` 配对修复）
 
 - **用户可见 bug**：绘制中的预览缺线——POLYLINE 缺「第 2 点→第 3 点」连线；RECTANG 只画出一条

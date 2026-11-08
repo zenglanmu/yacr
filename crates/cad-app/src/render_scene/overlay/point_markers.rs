@@ -278,8 +278,9 @@ pub const POINT_MARKER_LIMIT: usize = 4000;
 ///
 /// Reads the drawing being displayed and applies the same layer-visibility
 /// filtering the rest of the overlay uses ([`LayerOverrideSet::is_entity_visible`]),
-/// so a hidden layer's points are excluded exactly like every other entity. This
-/// covers imported POINTs, not just newly created ones.
+/// so a hidden layer's points are excluded exactly like every other entity; an
+/// entity the source baked hidden ([`DrawingDatabase::entity_hidden`]) is
+/// excluded too. This covers imported POINTs, not just newly created ones.
 ///
 /// **Scope limitation (by design):** the scan walks top-level model/layout
 /// entities only, so a POINT nested inside a block definition is **not** marked.
@@ -300,7 +301,9 @@ pub fn visible_point_marker_positions(
     };
     entities
         .into_iter()
-        .filter(|entity| overrides.is_entity_visible(database, entity))
+        .filter(|entity| {
+            !database.entity_hidden(entity.id) && overrides.is_entity_visible(database, entity)
+        })
         .filter_map(|entity| match &entity.geometry {
             SemanticGeometry::Point(point) => Some(*point),
             _ => None,

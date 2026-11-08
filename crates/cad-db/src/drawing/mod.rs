@@ -4,7 +4,7 @@
 //! moved item is re-exported here under its original name, so the module path
 //! `crate::drawing::…` (and therefore the crate's public surface) is unchanged.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 
 use cad_domain::*;
@@ -77,6 +77,26 @@ pub struct DrawingDatabase {
     /// is the only bridge from a vendor primitive back to a `BlockId`.
     /// Hand-built databases leave it empty; no zero handle is ever invented.
     pub(crate) block_source_handles: BTreeMap<u64, BlockId>,
+    /// Entities the **source file itself** baked as hidden
+    /// (`EntityCommon::invisible`), across top-level model/paper space entities
+    /// **and** block members.
+    ///
+    /// This is the authoritative imported display state, not a guess. It is the
+    /// only honest answer for a top-level entity flagged invisible, and for an
+    /// evaluated/anonymous dynamic block whose visibility parameter could not be
+    /// resolved (the unused states' geometry is really present and really flagged
+    /// invisible, so drawing it stacks hidden geometry on the visible members).
+    ///
+    /// [`DrawingDatabase::block_member_visible`] applies the one priority rule:
+    /// a block member governed by a **resolved** dynamic-visibility active state
+    /// follows that state set (so state switching keeps working); every other
+    /// case is hidden here. [`DrawingDatabase::entity_hidden`] exposes the
+    /// top-level answer to display/plot callers.
+    ///
+    /// Kept beside [`Self::entities`] rather than inside `DbEntity` so the row
+    /// stays the imported entity and switching never rewrites geometry. Empty for
+    /// hand-built databases.
+    pub(crate) hidden_entities: BTreeSet<EntityId>,
     pub(crate) layouts: BTreeMap<LayoutId, Layout>,
     pub(crate) styles: BTreeMap<StyleId, Style>,
     /// Named linetype table entries (spec §3.2). Empty for hand-built

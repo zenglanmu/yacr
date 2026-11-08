@@ -370,3 +370,137 @@ fn importer_resolves_visibility_through_an_insert_reference() {
     // still finds it because the INSERT references that block record.
     assert!(doc.block_visibility_param_for_def(block_handle).is_some());
 }
+
+// ---- Baked `invisible` member flags (evaluated anonymous blocks) ----
+
+/// A synthetic document with one user block "BAKED" owning three lines, one of
+/// them flagged `invisible`, and **no** visibility parameter at all.
+///
+/// This is the shape the real fixture shows for an evaluated anonymous dynamic
+/// block whose parameter could not be resolved: the unused states' geometry is
+/// present and flagged invisible.
+fn synthetic_baked_invisible_document() -> acadrust::CadDocument {
+    let mut doc = acadrust::CadDocument::new();
+    let block_handle = doc.allocate_handle();
+    let mut record = acadrust::tables::BlockRecord::new("BAKED");
+    record.handle = block_handle;
+    doc.block_records.add(record).expect("add block record");
+    for i in 0..3u64 {
+        let mut line = acadrust::entities::Line::new();
+        line.start = acadrust::types::Vector3::new(i as f64, 0.0, 0.0);
+        line.end = acadrust::types::Vector3::new(i as f64, 1.0, 0.0);
+        line.common.invisible = i == 2;
+        line.common.owner_handle = block_handle;
+        doc.add_entity(EntityType::Line(line))
+            .expect("add block member");
+    }
+    // One top-level model-space line flagged invisible: the source-baked flag
+    // must reach the database for top-level entities too, not just block members.
+    let mut model_line = acadrust::entities::Line::new();
+    model_line.start = acadrust::types::Vector3::new(50.0, 0.0, 0.0);
+    model_line.end = acadrust::types::Vector3::new(51.0, 0.0, 0.0);
+    model_line.common.invisible = true;
+    model_line.common.owner_handle = doc.header.model_space_block_handle;
+    doc.add_entity(EntityType::Line(model_line))
+        .expect("add model-space line");
+    doc
+}
+
+#[test]
+fn importer_hides_baked_invisible_members_without_a_visibility_parameter() {
+    let doc = synthetic_baked_invisible_document();
+    let req = request(Vec::new());
+    let stats = ReadStats::default();
+    let importer = ImporterBuilder::new(&req, &doc, stats, compute_identity(&[]));
+    let drawing = importer.run().expect("import the synthetic document");
+    let db = &drawing.database;
+
+    let block = db.block_by_name("BAKED").expect("block is imported");
+    let drawn: Vec<EntityId> = db.block_entities(block.id).iter().map(|e| e.id).collect();
+    assert_eq!(
+        drawn.len(),
+        2,
+        "the baked-hidden member is not drawn: {drawn:?}"
+    );
+    // The block has no descriptor, so the `Option` contract stays `None`; the
+    // baked flag is not invented into a fake visibility parameter.
+    assert!(db.block_visible_entities(block.id).is_none());
+
+    // The top-level model-space line is baked invisible and must be flagged.
+    let model = db.model_space();
+    assert_eq!(model.len(), 1, "the model-space line is imported");
+    assert!(
+        db.entity_hidden(model[0].id),
+        "a top-level `invisible` entity is part of the hidden set"
+    );
+}
+
+#[test]
+fn real_fixture_baked_invisible_members_are_hidden() {
+    // Skipped unless a real drawing is supplied, exactly like the other
+    // `YACR_TEST_DWG` tests: a skip is not evidence.
+    let Ok(path) = std::env::var("YACR_TEST_DWG") else {
+        return;
+    };
+    let bytes = std::fs::read(path).expect("read YACR_TEST_DWG");
+    // Read the source once more through acadrust, so the expected top-level
+    // hidden set comes from the file itself rather than a hardcoded count.
+    let mut reader =
+        acadrust::io::dwg::dwg_reader::DwgReader::from_stream(std::io::Cursor::new(bytes.clone()));
+    let source = reader
+        .read_with_stats()
+        .expect("read YACR_TEST_DWG")
+        .document;
+    let drawing = AcadrustImporter::new()
+        .import(&request(bytes), &|| false)
+        .expect("import YACR_TEST_DWG");
+    let db = &drawing.database;
+    // Evaluated anonymous blocks whose visibility parameter does not resolve:
+    // 1048/166 members, all but one/none baked `invisible`.
+    for (name, expected) in [("*U231", 1usize), ("*U247", 1)] {
+        let Some(block) = db.block_by_name(name) else {
+            return;
+        };
+        let drawn: Vec<EntityId> = db.block_entities(block.id).iter().map(|e| e.id).collect();
+        assert_eq!(
+            drawn.len(),
+            expected,
+            "block {name} must draw only its baked-visible members, drew {drawn:?}"
+        );
+    }
+
+    // Every top-level model-space entity the source flags `invisible` must be in
+    // the imported hidden set. Handles are the bridge (the db stores them as
+    // uppercase hex), so the comparison is exact and the count is the file's.
+    let model_handle = source.header.model_space_block_handle;
+    let Some(model_record) = source
+        .block_records
+        .iter()
+        .find(|record| record.handle == model_handle)
+    else {
+        return;
+    };
+    let mut expected: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for handle in &model_record.entity_handles {
+        if source
+            .get_entity(*handle)
+            .is_some_and(|entity| entity.common().invisible)
+        {
+            expected.insert(format!("{:X}", handle.value()));
+        }
+    }
+    let actual: std::collections::BTreeSet<String> = db
+        .model_space()
+        .iter()
+        .filter(|entity| db.entity_hidden(entity.id))
+        .filter_map(|entity| entity.object.source_handle.clone())
+        .collect();
+    assert!(
+        !expected.is_empty(),
+        "the fixture's model space must carry the invisible rows this test guards"
+    );
+    assert_eq!(
+        actual, expected,
+        "the imported hidden set must cover every invisible model-space entity"
+    );
+}
