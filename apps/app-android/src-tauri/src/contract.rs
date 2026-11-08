@@ -65,14 +65,49 @@ fn the_tick_creates_the_session_only_after_the_accepted_layout_rect() {
     // the tick can never invent a canvas, a document or a frame.
     assert!(
         TICK.contains(
-            "if cad_mode && dom_rect.is_some() && CAD.with(|cell| cell.borrow().is_none())"
+            "if cad_mode && metrics.is_some() && CAD.with(|cell| cell.borrow().is_none())"
         ),
-        "session creation must be gated on the accepted layout rect and a missing session"
+        "session creation must be gated on a valid accepted layout rect and a missing session"
     );
     // The surface metrics are installed both before `CadSession::new` and per tick.
     assert!(
-        TICK.contains("env.surface.set_metrics(metrics);"),
+        TICK.contains("env.surface.set_metrics(metrics?);"),
         "the tick must report the surface metrics before the session is created"
+    );
+}
+
+#[test]
+fn the_visible_cad_rect_is_reported_with_its_origin() {
+    // The shared layout helper validates the rect against the window and keeps the
+    // rect origin; the tick must not go back to "the canvas is the whole surface".
+    assert!(
+        TICK.contains("cad_ui_core::layout::window_surface_metrics(&rect, window_logical, scale)"),
+        "the tick must derive SurfaceMetrics from the accepted rect, not the full window"
+    );
+    assert!(
+        TICK.contains("env.surface.set_metrics(metrics)"),
+        "the accepted rect metrics must reach the platform surface source"
+    );
+    assert!(
+        !TICK.contains("logical: [f64::from(width) / scale, f64::from(height) / scale]"),
+        "the tick must not report the full surface as the CAD content size"
+    );
+}
+
+#[test]
+fn the_render_target_stays_the_full_surface() {
+    // The swapchain extent is the native window; the camera placement happens in
+    // the engine. `surface.rs` must keep sizing the target from the presenter.
+    let render_call = SURFACE
+        .find("session.render(logical, scale)")
+        .expect("the presenter must call session.render(logical, scale)");
+    let logical = &SURFACE[..render_call];
+    let assignment = logical
+        .rfind("let logical = [f64::from(width) / scale, f64::from(height) / scale];")
+        .expect("surface.rs must derive the render target logical size from the surface");
+    assert!(
+        render_call > assignment,
+        "the full-surface size must feed the render call"
     );
 }
 

@@ -182,6 +182,9 @@ pub struct RenderTelemetry {
     /// The last logged DOM-rect / platform-surface geometry pair, so a steady
     /// disagreement does not flood `logcat`.
     last_geometry_notice: Option<((u32, u32), (u32, u32))>,
+    /// The last refused layout reason code, so a steady invalid rect does not
+    /// flood `logcat`.
+    last_layout_refusal: Option<u8>,
 }
 
 impl RenderTelemetry {
@@ -195,6 +198,7 @@ impl RenderTelemetry {
             last_pulled_state: None,
             last_surface_generation: None,
             last_geometry_notice: None,
+            last_layout_refusal: None,
         }
     }
 }

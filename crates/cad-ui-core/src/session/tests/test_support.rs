@@ -130,6 +130,7 @@ impl SurfaceSource for FakeSurface {
     fn surface(&self) -> Option<SurfaceMetrics> {
         Some(SurfaceMetrics {
             logical: [800.0, 600.0],
+            origin: [0.0, 0.0],
             scale: 1.0,
             safe_insets: [0.0; 4],
         })

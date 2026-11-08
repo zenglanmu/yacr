@@ -178,6 +178,15 @@ impl ConfigStore for NonPersistentConfigStore {
 pub struct SurfaceMetrics {
     /// Logical size of the CAD content rectangle.
     pub logical: [f64; 2],
+    /// Top-left of the CAD content rectangle in logical pixels from the
+    /// **native surface** (window) top-left.
+    ///
+    /// A host whose CAD child surface *is* the content rectangle reports
+    /// `[0, 0]`. A host that renders into a full-window surface with chrome
+    /// layered over it (Android's `native-below` fragment) reports the accepted
+    /// React `.native-input` rect offset, so fit/zoom land inside the visible
+    /// area instead of the whole window.
+    pub origin: [f64; 2],
     /// Window/display scale factor.
     pub scale: f64,
     /// Safe-area insets `[top, right, bottom, left]` in logical pixels.

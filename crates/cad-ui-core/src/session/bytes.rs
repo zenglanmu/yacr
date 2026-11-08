@@ -255,6 +255,7 @@ mod tests {
         fn surface(&self) -> Option<cad_platform::SurfaceMetrics> {
             Some(cad_platform::SurfaceMetrics {
                 logical: [800.0, 600.0],
+                origin: [0.0, 0.0],
                 scale: 1.0,
                 safe_insets: [0.0; 4],
             })

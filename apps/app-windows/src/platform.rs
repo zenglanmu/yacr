@@ -788,6 +788,7 @@ mod tests {
         assert_eq!(surface.surface(), None);
         let metrics = SurfaceMetrics {
             logical: [960.0, 439.0],
+            origin: [0.0, 0.0],
             scale: 1.0,
             safe_insets: [0.0; 4],
         };

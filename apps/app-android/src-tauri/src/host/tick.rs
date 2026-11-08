@@ -41,31 +41,32 @@
 //! * **No probe marker path.** `YACR_PROBE_ONLY` disables CAD entirely (the same
 //!   "CAD is disabled" status as the desktop hosts) and presents nothing; the
 //!   desktop grid marker is not a product path and is not ported.
-//! * **Pixels are the `SurfaceView`'s.** The Kotlin lane inserts a `MATCH_PARENT`
-//!   `SurfaceView` behind the WebView, so the platform surface is the full window
-//!   and its extent is the only size an Android Vulkan swapchain may take (the
-//!   spec requires `imageExtent == currentExtent`). The session's canvas metrics
-//!   and the render viewport are therefore the **surface's** logical size
-//!   (`physical / scale`), which keeps the camera and the presented pixels mutually
-//!   consistent; the renderer refuses to stretch a mismatched texture, so the image
-//!   is never distorted. The React `.native-input` rect still drives the layout
-//!   diagnostic: when its physical size disagrees with the surface, `[probe]
-//!   geometry` says so instead of silently rescaling (a SurfaceView sized to the
-//!   partition, or a partition covering the surface, makes the two equal).
-//! * **Input is partition-local and must be moved.** The chrome reports pointer and
-//!   wheel positions relative to the `.native-input` rect, while the canvas is the
-//!   full window, so those positions differ by exactly that rect's origin. The input
-//!   drain adds it before the session sees the event ([`crate::input`]); a pick,
-//!   hover, crosshair or wheel-zoom anchor is otherwise off by the partition
-//!   origin. `resize` (the rect itself) and the coordinate-free kinds are passed
-//!   through unchanged — never rescaled, and never "fixed" with `safe_insets`,
-//!   which is a surface reservation and would add a scale error.
-//! * **Known limitation (tracked follow-up, engine/viewport scope).**
-//!   `fit_camera` frames the canvas the session was given — the **full window** —
-//!   so a fitted drawing can sit partly **under the chrome** (ribbon/panels). The
-//!   fix is a viewport/inset concept in `cad-engine` (canvas = surface minus the
-//!   chrome, plus the matching projection), not a platform-side transform; it is
-//!   tracked outside this lane. Input mapping is exact meanwhile.
+//! * **Pixels are the `SurfaceView`'s; the CAD rect lives inside it.** The Kotlin
+//!   lane inserts a `MATCH_PARENT` `SurfaceView` behind the WebView, so the native
+//!   surface is the full window and its extent is the only size an Android Vulkan
+//!   swapchain may take (the spec requires `imageExtent == currentExtent`). The
+//!   render target therefore stays `surface / scale`; the **visible CAD rect**
+//!   comes from the accepted React `.native-input` rect and crosses the contract
+//!   as `SurfaceMetrics { origin, logical }`. Fit/zoom use the rect, and the
+//!   engine places the orthographic camera centre on the rect centre
+//!   (`crates/cad-engine/src/render/camera.rs::place_canvas_camera2d`), so a
+//!   fitted drawing no longer sits under the chrome and text keeps the desktop
+//!   size. The layout diagnostic still logs a DOM/surface size disagreement;
+//!   converting a disagreement into a stretch is never an option (the renderer
+//!   refuses a mismatched texture, and a stretch would distort the image).
+//! * **Input is partition-local and must be moved exactly once.** The chrome
+//!   reports pointer and wheel positions relative to the `.native-input` rect,
+//!   while the canvas rect keeps its origin in the canvas metrics. The input drain
+//!   adds the rect origin before the session sees the event ([`crate::input`]),
+//!   and `ViewMetrics` subtracts it again when mapping to world
+//!   (`CanvasMetrics.origin`). A pick, hover, crosshair or wheel-zoom anchor
+//!   therefore lands under the drawn geometry. `resize` (the rect itself) and the
+//!   coordinate-free kinds pass through unchanged — never rescaled, and never
+//!   "fixed" with `safe_insets` (the rect origin is not a safe-area inset).
+//! * **3D placement remains partial.** Perspective renders are not translated
+//!   here: off-axis projection or a renderer viewport would be required. 2D is
+//!   exact; a 3D view on this carrier is an explicit, documented gap rather than a
+//!   silently offset camera (see `docs/compatibility.md`).
 //!
 //! # Pause / resume
 //!
@@ -242,32 +243,42 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
 
     // ---- surface source: the platform surface is the pixel authority ----
     //
-    // A DOM-rect-sized texture cannot be presented to a full-window Android
-    // surface (Vulkan requires the swapchain extent to equal the native window), and
-    // the renderer refuses to stretch one. So the session's canvas metrics and the
-    // render viewport are the surface's logical size — the only choice that keeps
-    // pixels and camera consistent. Input does **not** follow for free: the chrome
-    // reports positions relative to its `.native-input` rect, so the input drain
-    // below adds that rect's origin before the batched `session.handle_inputs`
-    // (see `crate::input`). The React layout rect is still reported (`probe_input`) and
-    // compared here: a size disagreement is logged, never silently rescaled.
-    let metrics = cad_platform::SurfaceMetrics {
-        logical: [f64::from(width) / scale, f64::from(height) / scale],
-        scale,
-        safe_insets: [0.0; 4],
-    };
-    CAD_ENV.with(|cell| {
-        if let Some(env) = cell.borrow().as_ref() {
-            env.surface.set_metrics(metrics);
-        }
-    });
+    // The Vulkan swapchain extent must equal the native window, so the render
+    // target stays the whole surface. The **visible** CAD area, however, is the
+    // React `.native-input` rect: the chrome (app bar, command bar) is layered
+    // over the surface. The surface contract therefore reports the rect's
+    // logical size **and its origin**, so fit/zoom frame the visible region and
+    // the renderer centres the camera there instead of under the chrome. Input
+    // does not follow for free: the chrome reports positions relative to its
+    // rect, so the input drain below adds that rect's origin before the batched
+    // `session.handle_inputs` (see `crate::input`); the canvas origin then
+    // subtracts exactly once in `ViewMetrics`.
+    //
+    // A rect that does not fit the current surface is refused here (no silent
+    // rescue): the previous metrics stay in force and no session is created
+    // from an invalid layout.
+    let window_logical = [f64::from(width) / scale, f64::from(height) / scale];
     let dom_rect = lock(shared).shell.input.last_rect();
-    if let Some(rect) = dom_rect {
+    let metrics = dom_rect.and_then(|rect| {
         let physical = cad_ui_core::layout::physical_content_size(&rect, scale);
         if physical != (width, height) {
             // One line per geometry change, deduplicated: never per tick.
             log_dom_surface_disagreement(telemetry, physical, (width, height));
         }
+        match cad_ui_core::layout::window_surface_metrics(&rect, window_logical, scale) {
+            Ok(metrics) => Some(metrics),
+            Err(error) => {
+                log_layout_refusal(telemetry, error);
+                None
+            }
+        }
+    });
+    if let Some(metrics) = metrics {
+        CAD_ENV.with(|cell| {
+            if let Some(env) = cell.borrow().as_ref() {
+                env.surface.set_metrics(metrics);
+            }
+        });
     }
 
     // ---- refresh the announced assets while no session exists yet ----
@@ -289,13 +300,13 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
 
     // ---- CAD session: lazy creation (the owner thread owns the document) ----
     let cad_mode = lock(shared).shell.cad_mode;
-    if cad_mode && dom_rect.is_some() && CAD.with(|cell| cell.borrow().is_none()) {
+    if cad_mode && metrics.is_some() && CAD.with(|cell| cell.borrow().is_none()) {
         let created = CAD_ENV.with(|cell| {
             let env = cell.borrow();
             let env = env.as_ref()?;
             // The surface must report before `CadSession::new`: the open funnel
             // validates canvas metrics against it.
-            env.surface.set_metrics(metrics);
+            env.surface.set_metrics(metrics?);
             let platform = HostPlatform {
                 files: env.files.clone(),
                 config_store: env.config.clone(),
@@ -681,6 +692,26 @@ fn log_status_line(state: &Shared, timings: Option<cad_render_wgpu::ProbeStageTi
 }
 
 /// Log a DOM-rect / platform-surface disagreement once per distinct geometry.
+/// One line per distinct invalid-layout reason. The previous surface metrics
+/// stay in force; a session is never created from a rejected rect.
+fn log_layout_refusal(
+    telemetry: &Arc<Mutex<RenderTelemetry>>,
+    error: cad_ui_core::layout::LayoutError,
+) {
+    let code = error as u8;
+    {
+        let mut telemetry = lock_telemetry(telemetry);
+        if telemetry.last_layout_refusal == Some(code) {
+            return;
+        }
+        telemetry.last_layout_refusal = Some(code);
+    }
+    log::warn!(
+        "[probe] layout refused: {error:?}; keeping the previous canvas metrics \
+         (no session is created from an invalid rect)"
+    );
+}
+
 fn log_dom_surface_disagreement(
     telemetry: &Arc<Mutex<RenderTelemetry>>,
     dom_physical: (u32, u32),

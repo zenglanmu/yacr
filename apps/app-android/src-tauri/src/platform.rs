@@ -697,6 +697,7 @@ mod tests {
         assert!(SurfaceSource::surface(&surface).is_none());
         surface.set_metrics(SurfaceMetrics {
             logical: [640.0, 480.0],
+            origin: [0.0, 0.0],
             scale: 2.5,
             safe_insets: [0.0; 4],
         });

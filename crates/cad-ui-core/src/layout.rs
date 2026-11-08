@@ -148,9 +148,42 @@ pub fn physical_content_size(rect: &CadMetrics, scale: f64) -> (u32, u32) {
 pub fn surface_metrics(rect: &CadMetrics, scale: f64) -> SurfaceMetrics {
     SurfaceMetrics {
         logical: [f64::from(rect.width), f64::from(rect.height)],
+        origin: [0.0; 2],
         scale: scale.max(0.1),
         safe_insets: [0.0; 4],
     }
+}
+
+/// Surface metrics for a host that renders into a **full-window** native surface
+/// while the React chrome lays the CAD content rect inside it (Android's
+/// `native-below` fragment, and any other WebView-over-surface carrier).
+///
+/// The origin is the CAD rect's top-left in logical pixels from the native
+/// surface top-left; the logical size is the CAD rect itself. Fit/zoom and
+/// picking therefore use the **visible** region instead of the whole window,
+/// while the render target stays the full surface. The rect is validated
+/// against `window_logical` (same tolerance as [`validate_metrics`]).
+pub fn window_surface_metrics(
+    rect: &CadMetrics,
+    window_logical: [f64; 2],
+    scale: f64,
+) -> Result<SurfaceMetrics, LayoutError> {
+    let window_w = window_logical[0] as f32;
+    let window_h = window_logical[1] as f32;
+    let probe = CadMetrics {
+        dpr: scale.max(0.1) as f32,
+        ..*rect
+    };
+    validate_metrics(&probe, window_w, window_h)?;
+    if window_logical.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+        return Err(LayoutError::OutOfBounds);
+    }
+    Ok(SurfaceMetrics {
+        logical: [f64::from(rect.width), f64::from(rect.height)],
+        origin: [f64::from(rect.x), f64::from(rect.y)],
+        scale: scale.max(0.1),
+        safe_insets: [0.0; 4],
+    })
 }
 
 /// Tracks the accepted layout across GPU generations.
@@ -299,8 +332,40 @@ mod tests {
         assert_eq!(metrics.logical, [800.0, 600.0]);
         assert_eq!(metrics.scale, 2.0);
         assert_eq!(metrics.safe_insets, [0.0; 4]);
+        // A native child surface is positioned by the toolkit at the rect: the
+        // origin is zero and must never be interpreted as a full-window offset.
+        assert_eq!(metrics.origin, [0.0, 0.0]);
         // A degenerate scale factor is clamped, never accepted as-is.
         assert_eq!(surface_metrics(&rect, 0.0).scale, 0.1);
+    }
+
+    #[test]
+    fn a_full_window_host_reports_the_rect_origin_and_size() {
+        // Emulator shape: 1080x2400 at dpr 2.625, CAD rect y=244..1837 physical.
+        let rect = m(0.0, 92.952_38, 411.428_57, 606.857_1, 2.625, 3);
+        let metrics = window_surface_metrics(&rect, [411.428_57, 914.285_7], 2.625)
+            .expect("the accepted rect is inside the window");
+        // f32 rect inputs keep ~7 significant digits; compare at that scale.
+        assert!(metrics.origin[0].abs() < 1e-3);
+        assert!((metrics.origin[1] - 92.952_38).abs() < 1e-3);
+        assert!((metrics.logical[0] - 411.428_57).abs() < 1e-3);
+        assert!((metrics.logical[1] - 606.857_1).abs() < 1e-3);
+        assert_eq!(metrics.scale, 2.625);
+        assert_eq!(metrics.safe_insets, [0.0; 4]);
+    }
+
+    #[test]
+    fn a_full_window_rect_outside_the_window_is_rejected() {
+        let rect = m(0.0, 92.0, 411.0, 700.0, 2.625, 3);
+        assert_eq!(
+            window_surface_metrics(&rect, [411.0, 700.0], 2.625),
+            Err(LayoutError::OutOfBounds)
+        );
+        let negative = m(-40.0, 0.0, 411.0, 700.0, 1.0, 3);
+        assert_eq!(
+            window_surface_metrics(&negative, [800.0, 700.0], 1.0),
+            Err(LayoutError::OutOfBounds)
+        );
     }
 
     #[test]

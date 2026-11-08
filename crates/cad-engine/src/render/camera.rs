@@ -53,6 +53,55 @@ pub fn camera2d_from_params(params: cad_app::Camera2dParams) -> Camera2d {
     }
 }
 
+/// Translate an orthographic camera so its canvas rect lands at
+/// `canvas_origin_logical` inside a larger render target.
+///
+/// The renderer maps the camera centre to the **target** centre
+/// (`renderer_impl/render_camera.rs`). When the host draws a sub-rect of a
+/// full-window surface (Android native-below under the WebView chrome), the
+/// camera centre must be shifted by the rect-centre/target-centre delta in
+/// world units; `world_per_px` is unchanged, so the zoom fitted to the rect is
+/// preserved.
+///
+/// `target_logical`, `canvas_origin_logical` and `canvas_size_logical` are
+/// logical (CSS) pixels; y grows **down** on screen while the camera/world y
+/// grows up, so the vertical term is negated. Returns `None` for a degenerate
+/// rectangle (non-finite or non-positive sizes) instead of repairing it.
+pub fn place_canvas_camera2d(
+    camera: Camera2d,
+    target_logical: [f64; 2],
+    canvas_origin_logical: [f64; 2],
+    canvas_size_logical: [f64; 2],
+) -> Option<Camera2d> {
+    let finite = |v: &f64| v.is_finite();
+    if !target_logical.iter().all(finite)
+        || !canvas_origin_logical.iter().all(finite)
+        || canvas_origin_logical.iter().any(|v| *v < 0.0)
+        || !canvas_size_logical.iter().all(finite)
+        || target_logical.iter().any(|v| *v <= 0.0)
+        || canvas_size_logical.iter().any(|v| *v <= 0.0)
+        || !camera.world_per_px.is_finite()
+        || camera.world_per_px <= 0.0
+        || !camera.center.x.is_finite()
+        || !camera.center.y.is_finite()
+    {
+        return None;
+    }
+    let offset_x =
+        target_logical[0] * 0.5 - (canvas_origin_logical[0] + canvas_size_logical[0] * 0.5);
+    let offset_y =
+        target_logical[1] * 0.5 - (canvas_origin_logical[1] + canvas_size_logical[1] * 0.5);
+    Some(Camera2d {
+        center: Point3 {
+            x: camera.center.x + offset_x * camera.world_per_px,
+            y: camera.center.y - offset_y * camera.world_per_px,
+            z: camera.center.z,
+        },
+        world_per_px: camera.world_per_px,
+        z_plane: camera.z_plane,
+    })
+}
+
 pub fn camera3d_from_params(params: Camera3dParams) -> Camera3d {
     Camera3d {
         eye: params.eye,

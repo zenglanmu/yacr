@@ -376,6 +376,9 @@ impl CanvasMetrics {
     /// world points (audit B17).
     pub fn is_valid(&self) -> bool {
         finite2(self.origin_logical)
+            // The origin is measured from the native surface's top-left; a
+            // negative origin would place the canvas outside the target.
+            && self.origin_logical.iter().all(|v| *v >= 0.0)
             && finite2(self.size_logical)
             && self.size_logical[0] > 0.0
             && self.size_logical[1] > 0.0

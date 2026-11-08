@@ -32,7 +32,9 @@ mod preparation;
 use preparation::{NativePreparation, PreparationInput};
 mod camera;
 mod runtime;
-pub use camera::{camera2d_from_params, camera3d_from_params, fit_camera, BridgeCamera};
+pub use camera::{
+    camera2d_from_params, camera3d_from_params, fit_camera, place_canvas_camera2d, BridgeCamera,
+};
 use runtime::CadRenderRuntime;
 pub use runtime::{
     render_target_size, FrameBinding, FrameCompleteness, PresentedFrame, RenderLifecycle,
@@ -85,6 +87,17 @@ pub struct ViewSnapshot {
     pub camera: Camera,
     pub mode: ProjectionKind,
     pub canvas_size: [f64; 2],
+    /// Placement of the camera canvas inside the render target, in logical px
+    /// from the target's top-left.
+    ///
+    /// `None` means "the canvas is the target" (legacy/direct renderer callers
+    /// and every host whose native child surface is exactly the CAD rect).
+    /// `Some(origin)` means `canvas_size` is a visible sub-rect of a larger
+    /// target (Android's full-window surface under the WebView chrome); the
+    /// orthographic camera centre is translated so the rect, not the target,
+    /// is framed centred. A `Some` origin of `[0,0]` with equal sizes is
+    /// accepted and is a no-op.
+    pub canvas_origin: Option<[f64; 2]>,
     /// The colour this view's frames clear the canvas to, as linear channel
     /// values (the renderer's own colour space). It is a display preference the
     /// host resolves per active space — a plain value, not a configuration
@@ -99,6 +112,7 @@ impl Default for ViewSnapshot {
             camera: Camera::top_view_2d(),
             mode: ProjectionKind::TwoD,
             canvas_size: [1280.0, 800.0],
+            canvas_origin: None,
             clear_color: [0.0, 0.0, 0.0, 1.0],
         }
     }

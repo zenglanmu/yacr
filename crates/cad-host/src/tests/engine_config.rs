@@ -31,10 +31,27 @@ fn config_mutations_go_through_the_one_authority_store() {
 fn invalid_canvas_metrics_are_rejected_without_advancing_revision() {
     let core = core();
     let before = core.request_context().metrics_revision;
-    assert!(core
-        .set_canvas_metrics(CanvasMetrics::new([5.0, 0.0], [800.0, 600.0], 1.0))
-        .is_err());
+    for origin in [[f64::NAN, 0.0], [-1.0, 0.0], [0.0, f64::INFINITY]] {
+        assert!(core
+            .set_canvas_metrics(CanvasMetrics::new(origin, [800.0, 600.0], 1.0))
+            .is_err());
+    }
     assert_eq!(core.request_context().metrics_revision, before);
+}
+
+#[test]
+fn an_inset_canvas_origin_is_accepted_and_advances_the_revision() {
+    let core = core();
+    let before = core.request_context().metrics_revision;
+    core.set_canvas_metrics(CanvasMetrics::new([0.0, 92.95], [411.43, 606.86], 2.625))
+        .expect("a full-window host's visible rect is valid canvas metrics");
+    assert_eq!(
+        core.request_context().metrics_revision,
+        Some(before.unwrap() + 1)
+    );
+    let view = core.render.view_snapshot();
+    assert_eq!(view.canvas_origin, Some([0.0, 92.95]));
+    assert_eq!(view.canvas_size, [411.43, 606.86]);
 }
 
 #[test]

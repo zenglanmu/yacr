@@ -133,6 +133,7 @@ fn tick_tracks_the_live_surface_rect_so_later_inputs_anchor_correctly() {
     let surface = MutableSurface::new();
     surface.set_metrics(SurfaceMetrics {
         logical: [640.0, 480.0],
+        origin: [0.0, 0.0],
         scale: 1.0,
         safe_insets: [0.0; 4],
     });
@@ -148,6 +149,7 @@ fn tick_tracks_the_live_surface_rect_so_later_inputs_anchor_correctly() {
     // stale state that made an off-center wheel zoom anchor off the cursor.
     surface.set_metrics(SurfaceMetrics {
         logical: [1024.0, 768.0],
+        origin: [0.0, 0.0],
         scale: 1.0,
         safe_insets: [0.0; 4],
     });

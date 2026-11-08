@@ -89,6 +89,18 @@ impl RenderSessionHandle {
         if view.mode == ProjectionKind::TwoD {
             view.camera.camera2d_params()?;
         }
+        // A declared canvas placement must be a real rect: finite, non-negative
+        // origin and a finite positive size. Never repaired silently.
+        if let Some(origin) = view.canvas_origin {
+            if !origin.iter().all(|v| v.is_finite() && *v >= 0.0)
+                || !view.canvas_size.iter().all(|v| v.is_finite() && *v > 0.0)
+            {
+                return Err(CadError::InvalidInput(
+                    "canvas placement must be a finite non-negative origin and a positive size"
+                        .into(),
+                ));
+            }
+        }
         if let Some(doc) = self.0.borrow().incoming.borrow().as_ref() {
             cad_app::validate_space(doc, view.space)?;
         }
@@ -117,6 +129,7 @@ impl RenderSessionHandle {
             && state.view.space == view.space
             && state.view.mode == view.mode
             && state.view.canvas_size == view.canvas_size
+            && state.view.canvas_origin == view.canvas_origin
             && state.view.camera != view.camera;
         state.view = view;
         if camera_only && state.navigation_settle_enabled() {

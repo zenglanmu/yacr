@@ -134,20 +134,15 @@ pub(crate) fn error_text(error: &CadError) -> String {
     }
 }
 
-/// Select valid platform surface metrics for the host canvas.
+/// Select valid platform surface metrics for the host canvas (rect + origin).
 fn select_canvas_metrics(surface: SurfaceMetrics) -> CadResult<CanvasMetrics> {
-    let metrics = cad_app::input::inset_canvas_metrics(
-        [0.0; 2],
+    cad_app::input::inset_canvas_metrics(
+        surface.origin,
         surface.logical,
         surface.safe_insets,
         surface.scale,
     )
-    .ok_or_else(|| CadError::InvalidInput("canvas metrics are degenerate".into()))?;
-    Ok(CanvasMetrics::new(
-        [0.0; 2],
-        metrics.size_logical,
-        metrics.dpi_scale,
-    ))
+    .ok_or_else(|| CadError::InvalidInput("canvas metrics are degenerate".into()))
 }
 
 impl HostCore {
@@ -475,9 +470,11 @@ impl HostCore {
     }
 
     pub fn set_canvas_metrics(&self, canvas: CanvasMetrics) -> CadResult<()> {
-        if !canvas.is_valid() || canvas.origin_logical != [0.0; 2] {
+        // The origin is the canvas rect's offset inside the native surface:
+        // finite and non-negative, validated by `CanvasMetrics::is_valid`.
+        if !canvas.is_valid() {
             return Err(CadError::InvalidInput(
-                "canvas metrics must be valid and canvas-local".into(),
+                "canvas metrics must be valid (finite, non-negative origin)".into(),
             ));
         }
         if self.canvas_metrics.get() == canvas {

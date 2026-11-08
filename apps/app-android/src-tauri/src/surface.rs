@@ -476,10 +476,13 @@ pub fn bind_session(session: &RenderSessionHandle) -> Result<u64, String> {
 ///
 /// Tick thread only (the presenter and the session both live there).
 ///
-/// The drawable is the `SurfaceView`, so the viewport is its **own** logical size
-/// (`physical / scale`), never a DOM-derived guess: the platform surface is the
-/// pixel authority and the renderer refuses to stretch a mismatched texture. The
-/// camera is therefore 1:1 with the pixels that are actually on screen.
+/// The drawable is the `SurfaceView`, so the **render target** is its own logical
+/// size (`physical / scale`), never a DOM-derived guess: the platform surface is
+/// the pixel authority and the renderer refuses to stretch a mismatched texture.
+/// The **camera viewport** is the visible CAD rect (published by the tick through
+/// `SurfaceMetrics.origin/logical` and `ViewSnapshot.canvas_origin`), so fit and
+/// picking use the area the chrome does not cover while the presented pixels stay
+/// 1:1 with the swapchain.
 pub fn frame(scale: f64) -> FrameOutcome {
     let scale = scale.max(0.1);
     LIVE.with(|cell| {

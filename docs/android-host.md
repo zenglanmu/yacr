@@ -61,7 +61,7 @@
 | 持久配置/偏好 | **持久化到应用私有 `filesDir`**（`/data/user/0/io.github.zenglanmu.yacr/files`） | `AndroidConfigStore`：`config.json` / `preference.json`，读 `Absent`/`Text`/`Unreadable` 与桌面一致，写为「建目录 + 临时文件 + `sync_all` + rename」。路径来自 `nativeAssetsReady`（`filesDir` = 公告 `fontsDir` 的父目录）；握手前保持非持久（读 `Absent`、写 `Unsupported`），不发明路径。设备侧落盘 **NOT VERIFIED** |
 | 插件管理器（2026-11-05） | **契约支持（`native-below`），设备 NOT VERIFIED** | Options → Plugins 的五个 `cad_plugin_*` 命令由共享 `cad-desktop-shell` 注册。策略/插件位于应用私有 `filesDir`：`filesDir/plugins.json` 与 `filesDir/plugins/<id>/{plugin.js,manifest.json}`；`AndroidPluginStore` 每次调用惰性解析 `filesDir`，`nativeAssetsReady` 握手前返回 `unsupported-runtime: plugin-store-unavailable`，不缓存启动时的空路径。安装/启用/禁用/卸载立即持久化、**下次启动才生效**（无热重载/热卸载）；卸载真删目录。外部解码器经 Blob URL 导入，故 CSP 含 `blob:`。设备/模拟器运行、目录落盘、插件执行与像素 **NOT VERIFIED** |
 | 渲染后端 | **Vulkan 硬件 only** | 软件 Vulkan → `yacr: unsupported-gpu: software-vulkan`；**无** GLES/CPU 回退 |
-| FIT / 视口 | **整窗取景** | `SurfaceView` 覆盖整个窗口；`fit_camera` 仍按全窗口取景，分区子矩形是 follow-up |
+| FIT / 视口 | **按可见 CAD 矩形取景（2D）** | 渲染目标仍是整窗 `SurfaceView`（Vulkan swapchain 必须等于窗口），但 `SurfaceMetrics { origin, logical }` 来自已接受的 `.native-input` 矩形：fit/zoom 用可见矩形，`place_canvas_camera2d` 把正交相机中心移到矩形中心。修复了“打开图纸文字比 Linux 大约 1.5×”的整窗取景缺陷。3D 透视相机未做离轴投影，属显式 **Partial**（见 `docs/compatibility.md`） |
 | 指针 | **分区原点平移** | tick 内把 DOM 分区局部坐标按 origin 换算成 presented-canvas 坐标；不是第二条输入通道。鼠标/触摸/笔按每事件 `device` 在共享 `cad-host` 仲裁（touch：单指平移、tap 选择、双指 pinch 缩放；mouse/pen：中键平移、2D 主键框选、滚轮缩放） |
 
 UI 侧对能力布尔为 `false` 的项（New / Plot，以及共享路径判定为延后的 DWG 保存）必须**显式禁用/拒绝**
@@ -153,7 +153,14 @@ React chrome），`setZOrderMediaOverlay(false)` 一并固定。
   （Options → Drafting「左键拖动平移」）等偏好写入 `filesDir` 的 `preference.json`（`config.json` 为完整
   viewer config），下次启动经同一 store 读回。**设备侧点击/落盘/重启后读回 NOT RUN**（§8）；源码与开发机
   契约测试只证明接线与文件语义。
-- 指针/滚轮坐标由 tick 按 DOM 分区原点平移后交给共享输入管线；纯函数在开发机有单测。
+- **可见矩形与整窗渲染的契约**：`crates/cad-ui-core/src/layout.rs::window_surface_metrics` 把已接受矩形
+  映射成 `SurfaceMetrics { origin, logical }`（origin = 矩形左上角 logical px，logical = 矩形尺寸）。
+  `cad-host` 保留 origin 到 `CanvasMetrics`，`ViewSnapshot.canvas_origin` 把它交给引擎；
+  `place_canvas_camera2d` 只平移正交相机中心，`world_per_px` 不变，所以 fit 到矩形后的缩放不被破坏。
+  渲染目标仍由 `surface.rs` 用整窗 `physical / scale` 决定（swapchain 约束）。矩形越界/非有限 ⇒
+  宿主**拒绝**并保留上一份 metrics（`[probe] layout refused: ...`），不会用整窗静默兜底。
+- 指针/滚轮坐标由 tick 按 DOM 分区原点平移后交给共享输入管线（`CanvasMetrics.origin` 再减一次，
+  恰好一次）；纯函数在开发机有单测。
 - `invoke.ts` 的 `adapterOwnsData = carrier === 'dom-canvas' || !tauriPresent()`：Android 上 Tauri 存在
   且 carrier 为 `native-below`，所有 CAD 命令走 Tauri；wasm 适配器不接管数据。`android` 构建从
   carrier `unknown` 起步，第一份 `cad_status` 到达后定为 `native-below`。

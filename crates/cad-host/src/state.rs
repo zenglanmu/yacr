@@ -89,6 +89,12 @@ impl HostCore {
                 mode: viewport.view_mode.kind(),
                 space,
                 canvas_size: viewport.logical_size,
+                // A full-window carrier (Android native-below) declares where the
+                // visible CAD rect sits inside the surface; the renderer places
+                // the camera there. On a child-surface host the origin is zero
+                // and the canvas equals the target, so the placement is an exact
+                // no-op.
+                canvas_origin: Some(self.canvas_metrics.get().origin_logical),
                 clear_color,
             };
             // The pointer-cursor geometry: the cursor's world point on the work

@@ -740,6 +740,7 @@ impl cad_platform::SurfaceSource for MutableSurface {
         let size = self.0.get();
         Some(SurfaceMetrics {
             logical: size,
+            origin: [0.0, 0.0],
             scale: 1.0,
             safe_insets: [0.0; 4],
         })

@@ -932,6 +932,12 @@ impl CadRenderRuntime {
                         .camera2d_params()
                         .map_err(|e| RenderError::Frame(e.to_string()))?;
                     let mut camera = camera2d_from_params(params);
+                    // Full-window hosts place the camera on the visible rect.
+                    if let Some(origin) = view.canvas_origin {
+                        let target = [f64::from(size.0) / scale, f64::from(size.1) / scale];
+                        camera = place_canvas_camera2d(camera, target, origin, view.canvas_size)
+                            .ok_or_else(|| RenderError::Frame("placement invalid".into()))?;
+                    }
                     camera.world_per_px /= scale;
                     // A changed camera restarts the walk; a paused frame uses
                     // the retained-base variant (cursor-only overlay).

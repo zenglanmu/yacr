@@ -225,15 +225,25 @@ impl ShxFont {
     }
 
     fn read_bigfont_metrics(&mut self, info: &[u8]) {
-        // Bigfont info blocks are UTF-8-ish text followed by metrics; use the
-        // declared height when present, otherwise the ASCII-cell default.
-        if let Some(idx) = info.iter().position(|&b| b == 0) {
-            let rest = &info[idx + 1..];
-            if rest.len() >= 4 {
-                let base_up = rest[0] as f64;
-                let base_down = rest[1] as f64;
-                self.height = (base_up + base_down).max(1.0);
-            }
+        // `parse_bigfont` already ran `strip_name`, so `info` is the post-name
+        // block: `above, below` in the glyphs' own units, then the mode word.
+        // Some files carry a second NUL after the name (a padding byte), so
+        // skip leading zeros. Reading from the start is required: the previous
+        // implementation searched for another NUL and then demanded four bytes
+        // after it, which failed for every real bigfont and left `height` at
+        // the 10-unit default — CJK glyphs (a ~100-127 unit cell) were then
+        // emitted ~10x too large.
+        let mut i = 0;
+        while i < info.len() && info[i] == 0 {
+            i += 1;
+        }
+        let Some(above) = info.get(i).copied() else {
+            return;
+        };
+        let below = info.get(i + 1).copied().unwrap_or(0);
+        let height = f64::from(above) + f64::from(below);
+        if height >= 1.0 {
+            self.height = height;
         }
     }
 
@@ -886,6 +896,70 @@ mod tests {
             (ymax - 12.0).abs() < 1e-9,
             "legacy font must not render at 168 world units: {ymax}"
         );
+    }
+
+    #[test]
+    fn bigfont_metrics_normalize_cjk_glyphs_to_the_requested_height() {
+        // An original synthetic BIGFONT (no third-party bytes): the info block
+        // is `Big\0` + above/below; the glyph is one 120-unit vertical stroke
+        // for `中` (U+4E2D, GBK 0xD6D0). The requested height must scale that
+        // stroke to ~the requested size, not 10x it via the default cell.
+        let info = b"Big\0\x7f\x00\x02\0";
+        let glyph = b"G\0\x01\x08\0\x78\0";
+        let table_len = 6 + 2 * 8;
+        let mut bytes = b"AutoCAD-86 bigfont 1.0\r\n\x1a".to_vec();
+        let info_offset = bytes.len() + table_len;
+        let glyph_offset = info_offset + info.len();
+        bytes.extend(0u16.to_le_bytes());
+        bytes.extend(2u16.to_le_bytes());
+        bytes.extend(0u16.to_le_bytes());
+        bytes.extend(0u16.to_le_bytes());
+        bytes.extend((info.len() as u16).to_le_bytes());
+        bytes.extend((info_offset as u32).to_le_bytes());
+        bytes.extend(0xD6D0u16.to_le_bytes());
+        bytes.extend((glyph.len() as u16).to_le_bytes());
+        bytes.extend((glyph_offset as u32).to_le_bytes());
+        bytes.extend(info);
+        bytes.extend(glyph);
+
+        let font = ShxFont::parse(&bytes, Some("gbk")).unwrap();
+        assert_eq!(font.height, 127.0);
+        let g = font.glyph('中', 100.0).unwrap();
+        let ymax = g
+            .polylines
+            .iter()
+            .flatten()
+            .map(|p| p[1])
+            .fold(0.0, f64::max);
+        assert!(
+            (ymax - 94.49).abs() < 0.01,
+            "a 120-unit glyph in a 127-unit cell must render near the requested \
+             height, not ~10x it: {ymax}"
+        );
+    }
+
+    #[test]
+    fn a_padded_bigfont_info_block_still_reads_its_metrics() {
+        // `gcbig`-style block: the name is followed by a padding NUL.
+        let info = b"Pad\0\0\x40\x02\0";
+        let glyph = b"G\0\x01\x08\0\x78\0";
+        let table_len = 6 + 2 * 8;
+        let mut bytes = b"AutoCAD-86 bigfont 1.0\r\n\x1a".to_vec();
+        let info_offset = bytes.len() + table_len;
+        let glyph_offset = info_offset + info.len();
+        bytes.extend(0u16.to_le_bytes());
+        bytes.extend(2u16.to_le_bytes());
+        bytes.extend(0u16.to_le_bytes());
+        bytes.extend(0u16.to_le_bytes());
+        bytes.extend((info.len() as u16).to_le_bytes());
+        bytes.extend((info_offset as u32).to_le_bytes());
+        bytes.extend(0xD6D0u16.to_le_bytes());
+        bytes.extend((glyph.len() as u16).to_le_bytes());
+        bytes.extend((glyph_offset as u32).to_le_bytes());
+        bytes.extend(info);
+        bytes.extend(glyph);
+        let font = ShxFont::parse(&bytes, Some("gbk")).unwrap();
+        assert_eq!(font.height, 66.0);
     }
 
     #[test]

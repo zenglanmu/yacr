@@ -185,6 +185,7 @@ impl ReportedSurface {
     pub fn report_with_insets(&self, logical: [f64; 2], scale: f64, safe_insets: [f64; 4]) {
         self.metrics.set(Some(SurfaceMetrics {
             logical,
+            origin: [0.0, 0.0],
             scale,
             safe_insets,
         }));

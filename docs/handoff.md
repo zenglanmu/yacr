@@ -1,5 +1,46 @@
 AD
 
+## 2026-11-09 SHX 大字体（CJK bigfont）字高解析修复：不再回落到 10 单位默认值
+
+- **缺陷**：`crates/cad-representation/src/shx.rs::read_bigfont_metrics` 在 `strip_name` 已经去掉
+  name 之后又找 NUL，并要求其后 ≥4 字节；真实 `gbcbig/hztxt/tssdchn/…` 的 info 块只有
+  `above,below,mode` 三/四个字节，于是全部失败，`height` 保持默认 **10**。这些字体的字形坐标在
+  ~100–127 单位 cell 中，`factor = size/height` 因此把 CJK 放大 **~10×**（`hztxt` 实测 12.2×、
+  `gbcbig` 9.1×）。只在字体包提供这些 bigfont 且 CJK 回退落到它时可见；无字体包的 dev 运行
+  （回退 Noto）不受影响。
+- **修复**：从 stripped info 的**开头**读 `above,below`（跳过 name 后可能的填充 NUL），
+  `height = above + below`。新增两个合成 bigfont 回归测试（127 cell → 120 单位笔画在请求 100 时
+  约 94.5；带填充 NUL 的 `gcbig` 风格块读出 66），不嵌入第三方字节。
+- **验证**：`cargo test -p cad-representation --lib`（243）、`cad-host` 字体契约、`cad-app`
+  字体契约通过。**未做**真实字体/AutoCAD 对照 golden；`gbcbig` 的字形仍比其声明 cell 高约 1.38×，
+  记为 **Partial**（其 bytecode 归一化需单独核对）。
+- **注意**：本文件（`test-fonts.dwg`，GB2312）的 CJK 实际回退到 Noto（修复前后整图渲染像素计数
+  完全一致），所以此修复不改变该文件的 CJK 大小；它修的是 bigfont 真正被选中时的 10× 放大。
+- **emulator 崩溃（非产品结论）**：连续快速 `ZOOMIN` 时 x86_64 模拟器在
+  `vulkan.ranchu.so vk_common_SetDebugUtilsObjectNameEXT` → `wgpu Surface::get_current_texture`
+  SIGSEGV；属模拟器 Vulkan 驱动路径，真机/真实驱动 **NOT VERIFIED**，未作为产品缺陷计。
+
+## 2026-11-08 Android 打开 DWG 文字过大：整窗取景缺陷（可见矩形 + 相机放置）
+
+- **现象**：Android release/CI APK 打开 `test-fonts.dwg` 时 CAD 文字/标注比 Linux 桌面大约 **1.5×**。
+- **本地复现**：emulator `yacr-mobile`（1080×2400、density 420 ⇒ dpr 2.625、`-gpu host`、真实
+  NVIDIA P620 Vulkan），v0.1.5 release APK（sha256 `eff94b9d…`，含完整字体包）经 SAF 打开
+  `test-fonts.dwg`；`.native-input` 矩形 `[0,244][1080,~1837]` physical。
+- **根因**：渲染目标必须是整窗 `SurfaceView`，但 tick 把 **整窗** 同时当成了 canvas metrics 与
+  `session.render(logical)` 的取景尺寸；fit 用 `[411,914]` 而不是可见矩形 `[411,607]`，图高
+  ≈2284px 画进 2400px 表面、可见区只有约 1590px ⇒ 文字相对可见区放大 1.5×。Linux 一直传可见
+  容器尺寸，所以正常。
+- **修复（共享契约）**：`SurfaceMetrics.origin`（新增）+ `window_surface_metrics`
+  （`cad-ui-core/src/layout.rs`）→ `cad-host` 保留 origin（`select_canvas_metrics` /
+  `set_canvas_metrics`）→ `ViewSnapshot.canvas_origin` → `place_canvas_camera2d`
+  （`cad-engine/src/render/camera.rs`）只平移正交相机中心；渲染目标仍为整窗。`origin = None`
+  的旧调用/GPU 契约保持逐位不变；3D 透视相机未做离轴投影 ⇒ 文档标 **Partial**。
+- **测试**：`cad-ui-core` layout 映射/越界；`cad-engine` 放置数学、零偏移逐位相等、rect-local
+  screen→world 对拍、快照校验；`cad-host::tests::inset_canvas` 证明 fit 用可见矩形、输入
+  surface 坐标经 origin 恰好减一次、origin-only 变化不移动相机。均为 host-target，无 GPU/像素。
+- **证据边界**：上述为 emulator + 真实 Vulkan 的**布局/契约**证据；真机、真实 GPU、像素与性能
+  **NOT VERIFIED**。修复后的 APK 模拟器截图仅证明取景/比例，不是产品验收。
+
 ## 2026-11-08 宣传页新增实机截图与大图纸指标
 
 - **页面**：`apps/landing/index.html` 在 hero 之后新增编号 `A` 的 `#showcase`（`styles.css` +224 行、

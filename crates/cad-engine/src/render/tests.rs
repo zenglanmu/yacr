@@ -471,3 +471,123 @@ fn render_session_time_source_is_wasm_safe() {
         "render/runtime/session.rs must import the wasm-safe monotonic clock"
     );
 }
+
+// --- visible-canvas placement (full-window surfaces with chrome over the CAD) --
+use cad_render_wgpu::Camera2d;
+
+fn camera2d(center: [f64; 2], world_per_px: f64) -> Camera2d {
+    Camera2d {
+        center: Point3 {
+            x: center[0],
+            y: center[1],
+            z: 0.0,
+        },
+        world_per_px,
+        z_plane: 0.0,
+    }
+}
+
+#[test]
+fn canvas_placement_moves_only_the_camera_centre() {
+    let placed = place_canvas_camera2d(
+        camera2d([10.0, 20.0], 2.0),
+        [1000.0, 800.0],
+        [50.0, 120.0],
+        [800.0, 500.0],
+    )
+    .expect("a valid rect places");
+    // x: target half 500 - rect centre (50+400) = +50 -> camera centre moves +100
+    assert!((placed.center.x - 110.0).abs() < 1e-12);
+    // y (screen-down -> world-up): target half 400 - rect centre (120+250) = +30
+    // -> the camera centre moves DOWN in world terms by 60.
+    assert!((placed.center.y - (-40.0)).abs() < 1e-12);
+    assert_eq!(placed.world_per_px, 2.0);
+    assert_eq!(placed.center.z, 0.0);
+}
+
+#[test]
+fn zero_offset_placement_is_bit_identical() {
+    let camera = camera2d([123.25, -45.5], 0.75);
+    let placed = place_canvas_camera2d(camera, [640.0, 480.0], [0.0, 0.0], [640.0, 480.0])
+        .expect("the canvas is the target");
+    assert_eq!(placed, camera);
+}
+
+#[test]
+fn canvas_placement_matches_rect_local_screen_to_world() {
+    // A fitted camera for an 800x500 canvas at 2.5 world/logical px.
+    let camera = camera2d([1000.0, 2000.0], 2.5);
+    let origin = [37.0, 92.95];
+    let canvas = [411.43, 606.86];
+    let target = [411.43, 914.29];
+    let placed = place_canvas_camera2d(camera, target, origin, canvas).unwrap();
+    for local in [
+        [0.0, 0.0],
+        [canvas[0] * 0.5, canvas[1] * 0.5],
+        [canvas[0], canvas[1]],
+        [canvas[0] * 0.25, canvas[1] * 0.8],
+    ] {
+        // Rect-local logical point under the viewport camera...
+        let local_world = [
+            camera.center.x + (local[0] - canvas[0] * 0.5) * camera.world_per_px,
+            camera.center.y - (local[1] - canvas[1] * 0.5) * camera.world_per_px,
+        ];
+        // ...must equal the placed camera's world point at the surface position.
+        let surface = [origin[0] + local[0], origin[1] + local[1]];
+        let placed_world = [
+            placed.center.x + (surface[0] - target[0] * 0.5) * placed.world_per_px,
+            placed.center.y - (surface[1] - target[1] * 0.5) * placed.world_per_px,
+        ];
+        assert!(
+            (local_world[0] - placed_world[0]).abs() < 1e-9,
+            "x {local:?}"
+        );
+        assert!(
+            (local_world[1] - placed_world[1]).abs() < 1e-9,
+            "y {local:?}"
+        );
+    }
+}
+
+#[test]
+fn canvas_placement_refuses_degenerate_rects() {
+    let camera = camera2d([0.0, 0.0], 1.0);
+    for (target, origin, canvas) in [
+        ([0.0, 800.0], [0.0, 0.0], [800.0, 500.0]),
+        ([1000.0, f64::NAN], [0.0, 0.0], [800.0, 500.0]),
+        ([1000.0, 800.0], [-1.0, 0.0], [800.0, 500.0]),
+        ([1000.0, 800.0], [0.0, 0.0], [0.0, 500.0]),
+        ([1000.0, 800.0], [0.0, 0.0], [800.0, f64::INFINITY]),
+    ] {
+        assert!(place_canvas_camera2d(camera, target, origin, canvas).is_none());
+    }
+}
+
+#[test]
+fn a_canvas_placement_change_is_a_real_view_change() {
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    let view = ViewSnapshot {
+        canvas_origin: Some([0.0, 0.0]),
+        ..ViewSnapshot::default()
+    };
+    assert!(session.apply_view_snapshot(view.clone()).unwrap());
+    let moved = ViewSnapshot {
+        canvas_origin: Some([0.0, 92.95]),
+        ..view
+    };
+    assert!(session.apply_view_snapshot(moved.clone()).unwrap());
+    assert_eq!(session.view_snapshot().canvas_origin, Some([0.0, 92.95]));
+
+    let mut invalid = moved;
+    invalid.canvas_origin = Some([f64::NAN, 0.0]);
+    assert!(session.apply_view_snapshot(invalid).is_err());
+}
+
+#[test]
+fn an_origin_less_snapshot_stays_accepted() {
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    session
+        .apply_view_snapshot(ViewSnapshot::default())
+        .expect("the legacy origin-less snapshot stays accepted");
+    assert_eq!(session.view_snapshot().canvas_origin, None);
+}
