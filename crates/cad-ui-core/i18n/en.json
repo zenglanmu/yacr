@@ -1283,8 +1283,7 @@
   "draw.kind.dblist": "List All Objects (DBLIST)",
   "draw.kind.treestat": "Spatial Index State (TREESTAT)",
   "draw.kind.mredo": "Redo Multiple Steps (MREDO)",
-  "draw.kind.multiple": "Repeat Next Command (MULTIPLE)"
-,
+  "draw.kind.multiple": "Repeat Next Command (MULTIPLE)",
   "draw.kind.donut": "Donut",
   "draw.kind.donut.hint": "Type DONUT <cx> <cy> <inner> <outer>: two concentric circles on the active layer in one undo step. The centre is typed because this build has no centre pick prompt; inner 0 stores the outer circle only (reported).",
   "draw.kind.solid": "Solid (filled face)",
@@ -1381,6 +1380,25 @@
   "draw.kind.hatchsetorigin": "Set hatch origin",
   "draw.kind.hatchsetorigin.hint": "HATCHSETORIGIN <x> <y> is a named refusal: the hatch domain stores no pattern-origin field, so nothing is written.",
   "draw.kind.xdlist": "List extended data",
-  "draw.kind.xdlist.hint": "XDLIST reports the selection's retained extended data; this build retains none and reports xdlist.not_retained."
-
+  "draw.kind.xdlist.hint": "XDLIST reports the selection's retained extended data; this build retains none and reports xdlist.not_retained.",
+  "draw.kind.qtext": "Quick text (QTEXT)",
+  "draw.kind.qtext.hint": "QTEXT only toggles a session command token; it has no renderer effect: this build still draws text as geometry and shows no placeholder boxes.",
+  "draw.kind.fill": "Fill display (FILL)",
+  "draw.kind.fill.hint": "FILL only toggles a session command token; it has no renderer effect: this build does not switch solid-fill display.",
+  "draw.kind.tframes": "Frame display (TFRAMES)",
+  "draw.kind.tframes.hint": "TFRAMES only toggles a session command token; it has no renderer effect: this build does not change image or external-reference frame visibility.",
+  "draw.kind.regenauto": "Automatic regeneration (REGENAUTO)",
+  "draw.kind.regenauto.hint": "REGENAUTO only toggles a session command token; it has no renderer effect: this build has no automatic-regeneration switch, so run REGEN explicitly when needed.",
+  "draw.kind.isodraft": "Isometric drafting (ISODRAFT)",
+  "draw.kind.isodraft.hint": "ISODRAFT only toggles a session command token; it has no renderer effect: this build does not switch the isometric plane or cursor.",
+  "draw.kind.bcount": "Block count (BCOUNT)",
+  "draw.kind.bcount.hint": "BCOUNT is a read-only report: it lists block-reference counts and does not modify the drawing.",
+  "draw.kind.count": "Object count (COUNT)",
+  "draw.kind.count.hint": "COUNT is a read-only report: it counts objects and does not modify the drawing.",
+  "draw.kind.edittime": "Editing time (EDITTIME)",
+  "draw.kind.edittime.hint": "EDITTIME is a read-only report: it shows the current UTC time and drawing revision; creation/edit timestamps and session uptime are not tracked.",
+  "draw.kind.julian": "Julian date (JULIAN)",
+  "draw.kind.julian.hint": "JULIAN is a read-only report: it shows the current Julian date and does not modify the drawing.",
+  "draw.kind.xlist": "List objects (XLIST)",
+  "draw.kind.xlist.hint": "XLIST is a read-only report: it lists block definitions and their member counts; entity XDATA is not retained."
 }

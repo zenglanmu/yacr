@@ -334,6 +334,13 @@ export const HOST_NAMES = [
   // that the value is persisted. Admission tests read this list, never a Rust
   // import.
   'PDMODE', 'PDSIZE',
+  // The 2026-11-09 pilot batch: five session-only display tokens with no renderer
+  // effect (QTEXT/FILL/TFRAMES/REGENAUTO/ISODRAFT) and five read-only reports
+  // (BCOUNT/COUNT/EDITTIME/JULIAN/XLIST). All are payload-free canonical
+  // selectors, never aliases. This mirror stands in for the loaded
+  // `cad_commands` vocabulary and never proves the host advertises them.
+  'QTEXT', 'FILL', 'TFRAMES', 'REGENAUTO', 'ISODRAFT',
+  'BCOUNT', 'COUNT', 'EDITTIME', 'JULIAN', 'XLIST',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented

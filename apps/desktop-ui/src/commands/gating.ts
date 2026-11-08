@@ -124,6 +124,14 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'SKETCH', 'TRACE', 'MOCORO', 'MSTRETCH', 'VIEWRES', 'VSCURRENT', 'LINETYPE',
   '-LINETYPE', '-PAN', 'REGEN3',
 
+  // The 2026-11-09 pilot batch: the five session-only display tokens
+  // (QTEXT/FILL/TFRAMES/REGENAUTO/ISODRAFT) and the five read-only reports
+  // (BCOUNT/COUNT/EDITTIME/JULIAN/XLIST) all read or depend on the open drawing,
+  // so the start page disables them with the catalog's own "no drawing is open"
+  // sentence. None takes a capability gate: no file I/O is involved.
+  'QTEXT', 'FILL', 'TFRAMES', 'REGENAUTO', 'ISODRAFT',
+  'BCOUNT', 'COUNT', 'EDITTIME', 'JULIAN', 'XLIST',
+
 ]);
 
 /** One command's precondition on the **current selection**. */

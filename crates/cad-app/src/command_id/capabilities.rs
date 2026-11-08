@@ -8,6 +8,12 @@ use super::CommandId;
 
 impl CommandId {
     pub fn requires_work_mode(self) -> bool {
+        // The extended wrapper batch is session-only / read-only, but it owns
+        // its own authorization so a future write-capable variant cannot ride
+        // the `matches!` list below by accident.
+        if let Self::Extended(ext) = self {
+            return ext.requires_work_mode();
+        }
         matches!(
             self,
             Self::Measure

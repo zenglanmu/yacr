@@ -1283,8 +1283,7 @@
   "draw.kind.dblist": "列出全部对象 (DBLIST)",
   "draw.kind.treestat": "空间索引状态 (TREESTAT)",
   "draw.kind.mredo": "多步重做 (MREDO)",
-  "draw.kind.multiple": "重复下一个命令 (MULTIPLE)"
-,
+  "draw.kind.multiple": "重复下一个命令 (MULTIPLE)",
   "draw.kind.donut": "圆环（DONUT）",
   "draw.kind.donut.hint": "输入 DONUT <中心 x> <中心 y> <内半径> <外半径>：在当前图层创建两个同心圆，一次撤销即可还原。本构建没有圆心拾取提示，因此圆心需输入；内半径为 0 时只保存外圆并给出诊断。",
   "draw.kind.solid": "实心面（SOLID）",
@@ -1381,6 +1380,25 @@
   "draw.kind.hatchsetorigin": "设置填充原点",
   "draw.kind.hatchsetorigin.hint": "HATCHSETORIGIN <x> <y> 是具名拒绝：填充领域没有图案原点字段，因此不写入任何内容。",
   "draw.kind.xdlist": "列出扩展数据",
-  "draw.kind.xdlist.hint": "XDLIST 报告选择对象保留的扩展数据；本构建不保留任何扩展数据，并报告 xdlist.not_retained。"
-
+  "draw.kind.xdlist.hint": "XDLIST 报告选择对象保留的扩展数据；本构建不保留任何扩展数据，并报告 xdlist.not_retained。",
+  "draw.kind.qtext": "快速文字（QTEXT）",
+  "draw.kind.qtext.hint": "QTEXT 仅切换会话命令令牌，不影响渲染：本构建仍按几何绘制文字，不显示占位框。",
+  "draw.kind.fill": "填充显示（FILL）",
+  "draw.kind.fill.hint": "FILL 仅切换会话命令令牌，不影响渲染：本构建不会按该设置切换填充显示。",
+  "draw.kind.tframes": "边框显示（TFRAMES）",
+  "draw.kind.tframes.hint": "TFRAMES 仅切换会话命令令牌，不影响渲染：本构建不会改变图像或外部参照边框的可见性。",
+  "draw.kind.regenauto": "自动重生成（REGENAUTO）",
+  "draw.kind.regenauto.hint": "REGENAUTO 仅切换会话命令令牌，不影响渲染：本构建没有自动重生成开关，需要时请显式执行 REGEN。",
+  "draw.kind.isodraft": "等轴测草图（ISODRAFT）",
+  "draw.kind.isodraft.hint": "ISODRAFT 仅切换会话命令令牌，不影响渲染：本构建不切换等轴测平面或光标。",
+  "draw.kind.bcount": "块计数（BCOUNT）",
+  "draw.kind.bcount.hint": "BCOUNT 是只读报告：列出块引用计数，不修改图形。",
+  "draw.kind.count": "对象计数（COUNT）",
+  "draw.kind.count.hint": "COUNT 是只读报告：统计对象数量，不修改图形。",
+  "draw.kind.edittime": "编辑时间（EDITTIME）",
+  "draw.kind.edittime.hint": "EDITTIME 是只读报告：显示当前 UTC 时间与图形修订；创建/修改时间和会话用时不被跟踪。",
+  "draw.kind.julian": "儒略日期（JULIAN）",
+  "draw.kind.julian.hint": "JULIAN 是只读报告：显示当前儒略日期，不修改图形。",
+  "draw.kind.xlist": "列出对象（XLIST）",
+  "draw.kind.xlist.hint": "XLIST 是只读报告：列出块定义及其成员数量；实体 XDATA 不被保留。"
 }

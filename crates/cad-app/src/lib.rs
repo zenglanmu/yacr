@@ -42,11 +42,16 @@ pub mod viewer_config;
 pub mod zoom_history;
 
 mod app_audit;
+// The extended-command wrapper: dispatch, session toggles and reports.
+mod app_dispatch;
+mod app_drafting;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;
 mod app_reports;
+mod app_reports_ext;
 mod app_utility;
+mod app_vendor_snapshot;
 mod app_view;
 mod app_view_extras;
 mod app_zoom;
@@ -69,7 +74,7 @@ pub use camera::{
     ProjectionKind, StandardView, ViewBasis,
 };
 pub mod command_id;
-pub use command_id::{AppMode, CommandId};
+pub use command_id::{AppMode, CommandId, ExtendedCommandId};
 pub use draw_tool::{
     circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity, ToolParameter,
     ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES,

@@ -664,4 +664,23 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'VSCURRENT', labelKey: 'draw.kind.vscurrent', icon: 'viewTop', group: 'view' },
   { id: 'LINETYPE', labelKey: 'draw.kind.linetype', icon: 'properties', group: 'properties' },
 
+  // The 2026-11-09 pilot batch of payload-free command-line names. QTEXT/FILL/
+  // TFRAMES/REGENAUTO/ISODRAFT are session-only tokens with no renderer effect:
+  // the host records the word but this build applies no display change, so no row
+  // here may promise one. BCOUNT/COUNT/EDITTIME/JULIAN/XLIST are read-only
+  // reports over the open drawing. None takes a parameter or a capability gate;
+  // all need a drawing open (`gating.ts`). Appended last so no shipped row moves,
+  // and the report rows reuse the existing `properties`/`diagnostics` marks while
+  // the display toggles reuse `eye`/`reference`/`view`/`axes`.
+  { id: 'QTEXT', labelKey: 'draw.kind.qtext', icon: 'terminal', group: 'view' },
+  { id: 'FILL', labelKey: 'draw.kind.fill', icon: 'eye', group: 'view' },
+  { id: 'TFRAMES', labelKey: 'draw.kind.tframes', icon: 'reference', group: 'view' },
+  { id: 'REGENAUTO', labelKey: 'draw.kind.regenauto', icon: 'view', group: 'view' },
+  { id: 'ISODRAFT', labelKey: 'draw.kind.isodraft', icon: 'axes', group: 'view' },
+  { id: 'BCOUNT', labelKey: 'draw.kind.bcount', icon: 'properties', group: 'annotate' },
+  { id: 'COUNT', labelKey: 'draw.kind.count', icon: 'selectAll', group: 'modify' },
+  { id: 'EDITTIME', labelKey: 'draw.kind.edittime', icon: 'diagnostics', group: 'view' },
+  { id: 'JULIAN', labelKey: 'draw.kind.julian', icon: 'diagnostics', group: 'view' },
+  { id: 'XLIST', labelKey: 'draw.kind.xlist', icon: 'properties', group: 'annotate' },
+
 ]);

@@ -953,10 +953,15 @@ pub enum CommandId {
     /// `LINETYPE` (Viewer-legal for `LIST`; `SET` re-authorizes work mode):
     /// list the drawing's linetypes or set one on the selection.
     Linetype,
+    /// The sustained extended-command wrapper batch (payload-free 2D/session/
+    /// report commands). Contract: [`crate::command_id::extended`].
+    Extended(ExtendedCommandId),
 }
 
 mod capabilities;
+mod extended;
 mod mode;
+pub use extended::ExtendedCommandId;
 pub use mode::AppMode;
 
 pub mod annot_batch;

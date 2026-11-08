@@ -174,9 +174,11 @@ mod area_object;
 mod audit;
 mod cjk_baseline;
 mod commands;
+mod drafting_toggles;
 mod drawing;
 mod drawing_space;
 // The 2026-11-07 extras batch contract tests.
+mod extra_reports;
 mod extras;
 mod grips;
 mod grips_curves;

@@ -3,15 +3,18 @@
 
 use super::super::super::*;
 use super::super::test_support::*;
-
+use cad_app::ExtendedCommandId;
 macro_rules! command_selector_contract {
         ($($variant:ident => $selector:literal),+ $(,)?) => {
             const EXPECTED_COMMAND_COUNT: usize = [$(stringify!($variant)),+].len();
             const ALL_COMMAND_IDS: &[CommandId] = &[$(CommandId::$variant),+];
+            const EXPECTED_LEN: usize =
+                EXPECTED_COMMAND_COUNT + ExtendedCommandId::ALL.len();
 
             fn canonical_selector(id: CommandId) -> &'static str {
                 match id {
                     $(CommandId::$variant => $selector,)+
+                    CommandId::Extended(ext) => ext.selector(),
                 }
             }
         };
@@ -263,7 +266,7 @@ fn command_normalization_covers_every_variant() {
             "{name} ({id:?}) must appear exactly once in COMMAND_TABLE"
         );
     }
-    assert_eq!(COMMAND_TABLE.len(), EXPECTED_COMMAND_COUNT);
+    assert_eq!(COMMAND_TABLE.len(), EXPECTED_LEN);
     // Every canonical selector maps to its command and is stable.
     for (name, id) in COMMAND_TABLE {
         assert_eq!(normalize_command(name), Some(*id), "{name}");

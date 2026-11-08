@@ -1,5 +1,5 @@
 //! The canonical command vocabulary and name normalization.
-use cad_app::{CommandId, MeasurementToolKind};
+use cad_app::{CommandId, ExtendedCommandId, MeasurementToolKind};
 
 use super::annot_arguments::{
     GROUPEDIT_SELECTOR, GROUP_SELECTOR, HATCHSETORIGIN_SELECTOR, LEADER_SELECTOR, QLEADER_SELECTOR,
@@ -41,37 +41,21 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("TOGGLELAYER", CommandId::ToggleLayer),
     ("SETLAYERS", CommandId::SetLayerVisibilities),
     ("RESTORELAYERS", CommandId::RestoreLayers),
-    // LAYERP is the **previous layer state** (AutoCAD's one-step layer stack), a
-    // real command of its own — never an alias of the restore. It pops the newest
-    // session layer-override snapshot; an empty history is a named
-    // `layers.previous.empty` no-op, not an error.
+    // LAYERP is the **previous layer state** (AutoCAD's one-step layer stack), a real command of its own — never an alias of the restore. It pops the newest session layer-override snapshot; an empty history is a named `layers.previous.empty` no-op, not an error.
     ("LAYERP", CommandId::LayerPrevious),
-    // LAYISO hides every layer the selection is not on (plus the current layer),
-    // as session visibility overrides only — no payload, no database write. The
-    // restore half is the existing `RESTORELAYERS` path: `LAYUNISO`/`LAYON` are
-    // aliases of it below, so there is exactly one "clear the overrides" path and
-    // one "previous state" path (`LAYERP`).
+    // LAYISO hides every layer the selection is not on (plus the current layer), as session visibility overrides only — no payload, no database write. The restore half is the existing `RESTORELAYERS` path: `LAYUNISO`/`LAYON` are aliases of it below, so there is exactly one "clear the overrides" path and one "previous state" path (`LAYERP`).
     ("LAYISO", CommandId::IsolateLayers),
-    // LAYOFF is its sibling: hide exactly the selection's layers (the current
-    // layer is never turned off), again as session visibility overrides only.
+    // LAYOFF is its sibling: hide exactly the selection's layers (the current layer is never turned off), again as session visibility overrides only.
     ("LAYOFF", CommandId::LayOff),
     ("SPACE", CommandId::SwitchSpace),
-    // `MODEL` (AutoCAD 2026) is the payload-free "switch to the Model tab"
-    // selector. It is the same validated session-state switch as `SPACE MODEL`,
-    // never a second space path, and takes no argument.
+    // `MODEL` (AutoCAD 2026) is the payload-free "switch to the Model tab" selector. It is the same validated session-state switch as `SPACE MODEL`, never a second space path, and takes no argument.
     ("MODEL", CommandId::ModelSpace),
     ("SELECT", CommandId::Select),
     ("SELECTALL", CommandId::SelectAll),
-    // SELECTSIMILAR (AutoCAD 2026) is the type-based sibling of SELECTALL: it
-    // takes no payload and no argument, requires a non-empty current selection,
-    // and does not edit the drawing.
+    // SELECTSIMILAR (AutoCAD 2026) is the type-based sibling of SELECTALL: it takes no payload and no argument, requires a non-empty current selection, and does not edit the drawing.
     ("SELECTSIMILAR", CommandId::SelectSimilar),
     ("SELECTINBOX", CommandId::SelectInBox),
-    // The 2026-11-07 selection/filter batch. QSELECT/FILTER/GETSEL take a typed
-    // `PROPERTY VALUE` argument (the grammar lives in `commands::filters`), SSX
-    // and SELECTCOUNT take none, and the find pair is `-FIND <needle>` (report)
-    // vs `FIND <needle> [=> replacement]` (report or replace). All names are
-    // canonical selectors; none is an alias of another.
+    // The 2026-11-07 selection/filter batch. QSELECT/FILTER/GETSEL take a typed `PROPERTY VALUE` argument (the grammar lives in `commands::filters`), SSX and SELECTCOUNT take none, and the find pair is `-FIND <needle>` (report) vs `FIND <needle> [=> replacement]` (report or replace). All names are canonical selectors; none is an alias of another.
     ("QSELECT", CommandId::QSelect),
     ("FILTER", CommandId::FilterSelect),
     ("GETSEL", CommandId::GetSelection),
@@ -83,20 +67,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("ISOLATEOBJECTS", CommandId::IsolateObjects),
     ("UNISOLATEOBJECTS", CommandId::UnisolateObjects),
     ("MEASURE", CommandId::Measure),
-    // `AREA OBJECT` is our **selection-based** exact area of one closed object
-    // (AutoCAD's `AREA` → `Object` pick prompt, read from the selection instead).
-    // The bare `AREA` selector stays the interactive point measurement below, so
-    // the two are distinct names, not aliases.
+    // `AREA OBJECT` is our **selection-based** exact area of one closed object (AutoCAD's `AREA` → `Object` pick prompt, read from the selection instead). The bare `AREA` selector stays the interactive point measurement below, so the two are distinct names, not aliases.
     ("AREA OBJECT", CommandId::AreaObject),
-    // MASSPROP (AutoCAD 2026): read-only mass properties of the **current
-    // selection** (our declared divergence from AutoCAD's `Select objects`
-    // prompt), limited to closed planar CIRCLE / full ELLIPSE / closed POLYLINE
-    // on one common plane. Payload `None`; Viewer-legal.
+    // MASSPROP (AutoCAD 2026): read-only mass properties of the **current selection** (our declared divergence from AutoCAD's `Select objects` prompt), limited to closed planar CIRCLE / full ELLIPSE / closed POLYLINE on one common plane. Payload `None`; Viewer-legal.
     ("MASSPROP", CommandId::MassProp),
-    // MEASUREGEOM (AutoCAD 2026): the inquiry **router**. The bare name is the
-    // named `measuregeom.needs_option` refusal; the typed `MEASUREGEOM <option>`
-    // line routes to the existing measurement tools (or the read-only RADIUS
-    // report). It is not a second measurement engine.
+    // MEASUREGEOM (AutoCAD 2026): the inquiry **router**. The bare name is the named `measuregeom.needs_option` refusal; the typed `MEASUREGEOM <option>` line routes to the existing measurement tools (or the read-only RADIUS report). It is not a second measurement engine.
     ("MEASUREGEOM", CommandId::MeasureGeom),
     ("CONFIRM", CommandId::ConfirmMeasurement),
     ("CANCELMEASURE", CommandId::CancelMeasurement),
@@ -104,70 +79,42 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("REDO", CommandId::Redo),
     ("RESOURCES", CommandId::Resources),
     ("DIAGNOSTICS", CommandId::Diagnostics),
-    // AUDIT (AutoCAD 2026) is the **detect-only** drawing audit: it reports every
-    // stored entity that fails `cad_db::validate_entity` and repairs nothing
-    // (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). Read-only, so
-    // Viewer mode admits it.
+    // AUDIT (AutoCAD 2026) is the **detect-only** drawing audit: it reports every stored entity that fails `cad_db::validate_entity` and repairs nothing (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). Read-only, so Viewer mode admits it.
     ("AUDIT", CommandId::AuditDrawing),
     ("SWITCHBACKEND", CommandId::SwitchBackend),
     ("SWITCH2D3D", CommandId::Switch2d3d),
     ("STANDARDVIEW", CommandId::StandardView),
-    // `PLAN` (AutoCAD 2026) is the payload-free "orthographic view of the XY
-    // plane" selector: v1 is the top/plan 2D view only, the same observation as
-    // `STANDARDVIEW` → `Top`. This build has no UCS model, so PLAN's UCS/World/
-    // Current orientation options are NOT IMPLEMENTED and take no argument.
+    // `PLAN` (AutoCAD 2026) is the payload-free "orthographic view of the XY plane" selector: v1 is the top/plan 2D view only, the same observation as `STANDARDVIEW` → `Top`. This build has no UCS model, so PLAN's UCS/World/ Current orientation options are NOT IMPLEMENTED and take no argument.
     ("PLAN", CommandId::PlanView),
     ("ORBIT", CommandId::Orbit),
     ("PROJECTION", CommandId::SwitchProjection),
     ("MODE", CommandId::SetMode),
     ("LINE", CommandId::CreateLine),
-    // XLINE/RAY are the construction-line pair: two free points (base, through),
-    // stored as one finite segment clipped to the model bounds because `cad-db`
-    // has no infinite-line geometry. The bare selectors start their capture.
+    // XLINE/RAY are the construction-line pair: two free points (base, through), stored as one finite segment clipped to the model bounds because `cad-db` has no infinite-line geometry. The bare selectors start their capture.
     ("XLINE", CommandId::CreateXLine),
     ("RAY", CommandId::CreateRay),
     ("CIRCLE", CommandId::CreateCircle),
-    // The three CIRCLE construction options are canonical **multi-word**
-    // selectors, not aliases of `CIRCLE`: each names a different construction
-    // (two diameter endpoints, three points on the circle, a centre plus a
-    // diameter point), so they start their own capture and build one Circle
-    // through the same create funnel. The bare `C` abbreviation stays the
-    // centre+radius `CIRCLE`.
+    // The three CIRCLE construction options are canonical **multi-word** selectors, not aliases of `CIRCLE`: each names a different construction (two diameter endpoints, three points on the circle, a centre plus a diameter point), so they start their own capture and build one Circle through the same create funnel. The bare `C` abbreviation stays the centre+radius `CIRCLE`.
     ("CIRCLE 2P", CommandId::CreateCircle2P),
     ("CIRCLE 3P", CommandId::CreateCircle3P),
     ("CIRCLE D", CommandId::CreateCircleDiameter),
     ("ARC", CommandId::CreateArc),
     ("PLINE", CommandId::CreatePolyline),
-    // WIPEOUT is its own open-ended polygon capture: first point, then every
-    // further boundary point, Enter finishes. It stores one closed
-    // `SemanticGeometry::Mask` (`AcDbWipeout`, `inverted: false`); AutoCAD's
-    // `Frames`/`Polyline`/`Erase Polyline` surface is NOT IMPLEMENTED, so no
-    // argument form is admitted here.
+    // WIPEOUT is its own open-ended polygon capture: first point, then every further boundary point, Enter finishes. It stores one closed `SemanticGeometry::Mask` (`AcDbWipeout`, `inverted: false`); AutoCAD's `Frames`/`Polyline`/`Erase Polyline` surface is NOT IMPLEMENTED, so no argument form is admitted here.
     ("WIPEOUT", CommandId::Wipeout),
     ("RECTANG", CommandId::CreateRectangle),
     ("ELLIPSE", CommandId::CreateEllipse),
     ("POLYGON", CommandId::CreatePolygon),
-    // POLYGON CIRCUMSCRIBED is AutoCAD's `POLYGON` -> `Circumscribed about circle`
-    // (`C`) construction as a canonical **multi-word** selector of its own -- not
-    // an alias: the second pick is a point on the **tangent** circle and the ring
-    // is `n` tangent edges (`R = r / cos(pi/n)`, first edge midpoint on the picked
-    // direction), where `POLYGON` is the inscribed ring through the picked point.
-    // Both read the session `POLYSIDES` count; neither has an argument form.
+    // POLYGON CIRCUMSCRIBED is AutoCAD's `POLYGON` -> `Circumscribed about circle` (`C`) construction as a canonical **multi-word** selector of its own -- not an alias: the second pick is a point on the **tangent** circle and the ring is `n` tangent edges (`R = r / cos(pi/n)`, first edge midpoint on the picked direction), where `POLYGON` is the inscribed ring through the picked point. Both read the session `POLYSIDES` count; neither has an argument form.
     ("POLYGON CIRCUMSCRIBED", CommandId::CreatePolygonCircumscribed),
     ("POINT", CommandId::CreatePoint),
     ("SPLINE", CommandId::CreateSpline),
-    // INSERT places a reference to an **existing** named block at one picked
-    // insertion point; the bare selector starts the point-then-name capture (the
-    // name arrives through the same terminal text channel TEXT uses). `BLOCK`
-    // below writes the definition (`WBLOCK` is still not implemented).
+    // INSERT places a reference to an **existing** named block at one picked insertion point; the bare selector starts the point-then-name capture (the name arrives through the same terminal text channel TEXT uses). `BLOCK` below writes the definition (`WBLOCK` is still not implemented).
     ("INSERT", CommandId::InsertBlock),
-    // BLOCK defines a named block from the current selection at one picked base
-    // point; the bare selector starts the selection-then-point-then-name
-    // capture. Work-only.
+    // BLOCK defines a named block from the current selection at one picked base point; the bare selector starts the selection-then-point-then-name capture. Work-only.
     ("BLOCK", CommandId::DefineBlock),
     ("TEXT", CommandId::CreateText),
-    // MTEXT: the multiline create command **and** a real two-corner interactive
-    // tool; the payload path stays for CLI/host IPC.
+    // MTEXT: the multiline create command **and** a real two-corner interactive tool; the payload path stays for CLI/host IPC.
     ("MTEXT", CommandId::CreateMText),
     ("MLEADER", CommandId::MLeader),
     ("TEXTEDIT", CommandId::TextEdit),
@@ -203,19 +150,15 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("HATCHSETORIGIN", CommandId::HatchSetOrigin),
     ("XDLIST", CommandId::XdList),
     ("HATCH", CommandId::Hatch),
-    // HATCHPOINT: internal-point selector; discovers the smallest visible closed
-    // boundary containing the pick. Not an alias of HATCH (input differs).
+    // HATCHPOINT: internal-point selector; discovers the smallest visible closed boundary containing the pick. Not an alias of HATCH (input differs).
     ("HATCHPOINT", CommandId::HatchPoint),
-    // BOUNDARY: the same discovery, emitting one closed polyline per loop.
-    // `-BOUNDARY` options are NOT IMPLEMENTED; BO/BPOLY are not admitted.
+    // BOUNDARY: the same discovery, emitting one closed polyline per loop. `-BOUNDARY` options are NOT IMPLEMENTED; BO/BPOLY are not admitted.
     ("BOUNDARY", CommandId::Boundary),
     ("HATCHGENERATEBOUNDARY", CommandId::HatchGenerateBoundary),
     ("HATCHTOBACK", CommandId::HatchToBack),
-    // GRADIENT fills the **current selection** through the HATCH path (forced
-    // gradient, +Z plane). Not an alias of HATCH; no preview/.pat handling.
+    // GRADIENT fills the **current selection** through the HATCH path (forced gradient, +Z plane). Not an alias of HATCH; no preview/.pat handling.
     ("GRADIENT", CommandId::Gradient),
-    // HATCHEDIT edits one selected model-space hatch with a typed option
-    // (`ANGLE|SCALE|SOLID|GRADIENT`); the bare name is a named refusal.
+    // HATCHEDIT edits one selected model-space hatch with a typed option (`ANGLE|SCALE|SOLID|GRADIENT`); the bare name is a named refusal.
     ("HATCHEDIT", CommandId::HatchEdit),
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
@@ -231,8 +174,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("TORIENT", CommandId::Torient),
     ("TCASE", CommandId::TCase),
     ("TXT2MTXT", CommandId::Txt2MText),
-    // TEXTTOFRONT reads the current selection and raises the selected
-    // text/leader/dimension draw order above every non-eligible model-space row.
+    // TEXTTOFRONT reads the current selection and raises the selected text/leader/dimension draw order above every non-eligible model-space row.
     ("TEXTTOFRONT", CommandId::TextToFront),
     // 2026-11-07 2D text batch: `TJUST`/`MTEDIT`/`-MTEXT` are aliases.
     ("JUSTIFYTEXT", CommandId::JustifyText),
@@ -245,29 +187,14 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("TEXTUNMASK", CommandId::TextUnmask),
     ("CHAMFER", CommandId::ChamferLines),
     ("FILLET", CommandId::FilletLines),
-    // The **Polyline mode** of the two corner commands. AutoCAD reaches it
-    // through the `Polyline` sub-option of the object prompt; the fixed-step
-    // capture cannot express "pick the first object *or* the Polyline option",
-    // so each mode is a selection-based selector of its own with
-    // `CommandPayload::None` (the one selected polyline is the whole input).
-    // They are **not** aliases of `CHAMFER`/`FILLET`: those keep their two-pick
-    // capture, and an alias would silently route a polyline edit into it.
+    // The **Polyline mode** of the two corner commands. AutoCAD reaches it through the `Polyline` sub-option of the object prompt; the fixed-step capture cannot express "pick the first object *or* the Polyline option", so each mode is a selection-based selector of its own with `CommandPayload::None` (the one selected polyline is the whole input). They are **not** aliases of `CHAMFER`/`FILLET`: those keep their two-pick capture, and an alias would silently route a polyline edit into it.
     ("CHAMFER POLYLINE", CommandId::ChamferPolyline),
     ("FILLET POLYLINE", CommandId::FilletPolyline),
-    // REVCLOUD (AutoCAD 2026) is the selection-based **Object mode** v1: the one
-    // selected closed straight-segment polyline is the whole input, every edge
-    // becomes one outward arc bulge. It is a canonical selector of its own, not
-    // an alias: there is no interactive rectangular/polygonal draw mode in this
-    // build, so the name must not route into a draw capture.
+    // REVCLOUD (AutoCAD 2026) is the selection-based **Object mode** v1: the one selected closed straight-segment polyline is the whole input, every edge becomes one outward arc bulge. It is a canonical selector of its own, not an alias: there is no interactive rectangular/polygonal draw mode in this build, so the name must not route into a draw capture.
     ("REVCLOUD", CommandId::RevisionCloud),
     // REVERSE / OOPS / OVERKILL are selection-based; BREAKATPOINT is a pick tool.
     ("REVERSE", CommandId::Reverse),
-    // PEDIT (AutoCAD 2026) is the **declared v1 subset** CLOSE/OPEN/REVERSE. The
-    // option is typed as the command's argument (`PEDIT CLOSE`), because this
-    // build has no in-command option prompt; the one selected model-space
-    // LWPOLYLINE is the whole input. A bare `PEDIT` normalizes and is refused by
-    // the application with `pedit.needs_option` (listing the implemented
-    // options), never defaulted to an option.
+    // PEDIT (AutoCAD 2026) is the **declared v1 subset** CLOSE/OPEN/REVERSE. The option is typed as the command's argument (`PEDIT CLOSE`), because this build has no in-command option prompt; the one selected model-space LWPOLYLINE is the whole input. A bare `PEDIT` normalizes and is refused by the application with `pedit.needs_option` (listing the implemented options), never defaulted to an option.
     ("PEDIT", CommandId::Pedit),
     ("BREAKATPOINT", CommandId::BreakAtPoint),
     ("OOPS", CommandId::Oops),
@@ -277,9 +204,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("ALIGN", CommandId::AlignEntities),
     ("STRETCH", CommandId::StretchEntities),
     ("ERASE", CommandId::EraseEntities),
-    // JOIN merges the **selection** into one entity (collinear LINEs / concentric
-    // ARCs in this build); the bare selector is its whole input, so no payload and
-    // no IPC. The application refuses a shorter selection by name at apply time.
+    // JOIN merges the **selection** into one entity (collinear LINEs / concentric ARCs in this build); the bare selector is its whole input, so no payload and no IPC. The application refuses a shorter selection by name at apply time.
     ("JOIN", CommandId::Join),
     ("EXPLODE", CommandId::ExplodeEntities),
     ("COPY", CommandId::CopyEntities),
@@ -288,43 +213,21 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MIRROR", CommandId::MirrorEntities),
     ("COPYCLIP", CommandId::CopyToClipboard),
     ("CUTCLIP", CommandId::CutToClipboard),
-    // `PASTECLIP` is the **insertion-point** paste: it starts the one-point
-    // `PasteClip` capture (the clipboard is the input, so a selection is not
-    // required) and translates every clipboard entry by `insertion − base`.
-    // `PASTEORIG` is the other half of the AutoCAD pair: it takes no point and
-    // inserts at the original coordinates, ignoring the base.
+    // `PASTECLIP` is the **insertion-point** paste: it starts the one-point `PasteClip` capture (the clipboard is the input, so a selection is not required) and translates every clipboard entry by `insertion − base`. `PASTEORIG` is the other half of the AutoCAD pair: it takes no point and inserts at the original coordinates, ignoring the base.
     ("PASTECLIP", CommandId::PasteFromClipboard),
     ("PASTEORIG", CommandId::PasteOriginalCoordinates),
-    // `PASTEBLOCK` turns the clipboard into a new auto-named block definition and
-    // inserts one reference at a picked point. It is **not** an alias of
-    // `PASTECLIP`: the paste shape (a block plus one reference) differs, so it
-    // starts the one-point `PasteBlock` capture instead.
+    // `PASTEBLOCK` turns the clipboard into a new auto-named block definition and inserts one reference at a picked point. It is **not** an alias of `PASTECLIP`: the paste shape (a block plus one reference) differs, so it starts the one-point `PasteBlock` capture instead.
     ("PASTEBLOCK", CommandId::PasteBlock),
-    // `COPYBASE`/`CUTBASE` are the base-point captures (`COPYCLIP`/`CUTCLIP`
-    // record no base). Both start the same one-point capture over the current
-    // selection: `COPYBASE` only captures (read-only, Viewer-legal), `CUTBASE`
-    // captures **and** deletes in one undo step (work-only). The second kind
-    // (`CutBase`) exists only because the typed `BeginDraw` request carries the
-    // kind and no `CommandId`; the session records the command so the host maps
-    // the payload by it, never by guessing.
+    // `COPYBASE`/`CUTBASE` are the base-point captures (`COPYCLIP`/`CUTCLIP` record no base). Both start the same one-point capture over the current selection: `COPYBASE` only captures (read-only, Viewer-legal), `CUTBASE` captures **and** deletes in one undo step (work-only). The second kind (`CutBase`) exists only because the typed `BeginDraw` request carries the kind and no `CommandId`; the session records the command so the host maps the payload by it, never by guessing.
     ("COPYBASE", CommandId::CopyToClipboardBase),
     ("CUTBASE", CommandId::CutToClipboardBase),
     ("OFFSET", CommandId::OffsetEntity),
     ("SETACTIVELAYER", CommandId::SetActiveLayer),
-    // Layer **table** writes (create/rename/delete). Each needs a payload — the
-    // new name (create), `{ layer, name }` (rename) or `{ layer }` (delete) — so
-    // the bare selector normalizes and is then refused explicitly by the
-    // application layer; the panel/IPC path supplies the typed payload. The
-    // layer selector inside the payload is a **name**, resolved against the
-    // drawing's own table (exact match first, then a unique case-insensitive one).
+    // Layer **table** writes (create/rename/delete). Each needs a payload — the new name (create), `{ layer, name }` (rename) or `{ layer }` (delete) — so the bare selector normalizes and is then refused explicitly by the application layer; the panel/IPC path supplies the typed payload. The layer selector inside the payload is a **name**, resolved against the drawing's own table (exact match first, then a unique case-insensitive one).
     ("CREATELAYER", CommandId::CreateLayer),
     ("RENAMELAYER", CommandId::RenameLayer),
     ("DELETELAYER", CommandId::DeleteLayer),
-    // The layer **attribute** write (`off`/`frozen`/`locked`/`plottable`/`color`/
-    // `linetype`/`lineweight`/`transparency`) is also payload-requiring:
-    // `{ layer, key, value }`. The bare selector normalizes and is refused
-    // explicitly by the application layer; the panel/IPC path
-    // (`cad_set_layer_property`) supplies the typed payload.
+    // The layer **attribute** write (`off`/`frozen`/`locked`/`plottable`/`color`/ `linetype`/`lineweight`/`transparency`) is also payload-requiring: `{ layer, key, value }`. The bare selector normalizes and is refused explicitly by the application layer; the panel/IPC path (`cad_set_layer_property`) supplies the typed payload.
     ("SETLAYERPROPERTY", CommandId::SetLayerProperty),
     ("LAYCUR", CommandId::LayCur),
     ("LAYMCUR", CommandId::LayMCur),
@@ -333,10 +236,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("LAYLCK", CommandId::LayLck),
     ("LAYULK", CommandId::LayUlk),
     ("SETBYLAYER", CommandId::SetByLayer),
-    // The 2026-11-07 layer batch. `LAYMCH`/`LAYMRG`/`LAYDEL` are selection-based
-    // (`CommandPayload::None`); the `-` spellings are aliases, not second
-    // commands. `LAYERSTATE`, `LTSCALE` and `LAYWALK` take a typed argument;
-    // `LAYERPMODE` reports on a bare name and takes ON/OFF as its argument.
+    // The 2026-11-07 layer batch. `LAYMCH`/`LAYMRG`/`LAYDEL` are selection-based (`CommandPayload::None`); the `-` spellings are aliases, not second commands. `LAYERSTATE`, `LTSCALE` and `LAYWALK` take a typed argument; `LAYERPMODE` reports on a bare name and takes ON/OFF as its argument.
     ("LAYMCH", CommandId::LayMCh),
     ("LAYMRG", CommandId::LayMrg),
     ("LAYDEL", CommandId::LayDel),
@@ -344,42 +244,24 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("LAYERPMODE", CommandId::LayerPmode),
     ("LTSCALE", CommandId::SetLinetypeScale),
     ("LAYWALK", CommandId::LayWalk),
-    // A payload-requiring edit: the selector normalizes, and the application
-    // refuses a bare invocation explicitly (the panel/IPC path supplies the
-    // `EntityProperty { key, value }` payload).
+    // A payload-requiring edit: the selector normalizes, and the application refuses a bare invocation explicitly (the panel/IPC path supplies the `EntityProperty { key, value }` payload).
     ("SETENTITYPROPERTY", CommandId::SetEntityProperty),
-    // MATCHPROP is the **selection-based** property painter: the bare selector is
-    // the whole input (`CommandPayload::None`), because the current selection's
-    // first entity is the source and the rest are destinations. No IPC of its own.
+    // MATCHPROP is the **selection-based** property painter: the bare selector is the whole input (`CommandPayload::None`), because the current selection's first entity is the source and the rest are destinations. No IPC of its own.
     ("MATCHPROP", CommandId::MatchProp),
-    // GRIPSTRETCH is the **payload path of a pointer gesture**: `GripStretch
-    // { id, to }` carries the resolved handle id plus the world point the drag
-    // resolved to. That payload comes from the host's own pointer routing on the
-    // release of an armed grip drag (`cad_host`), never from this table: this
-    // layer only maps the selector, and the typed command line carries no handle,
-    // so the bare selector normalizes and is then refused explicitly by the
-    // application layer — it must never be routed to `BeginDraw` or turned into a
-    // fabricated drag.
+    // GRIPSTRETCH is the **payload path of a pointer gesture**: `GripStretch { id, to }` carries the resolved handle id plus the world point the drag resolved to. That payload comes from the host's own pointer routing on the release of an armed grip drag (`cad_host`), never from this table: this layer only maps the selector, and the typed command line carries no handle, so the bare selector normalizes and is then refused explicitly by the application layer — it must never be routed to `BeginDraw` or turned into a fabricated drag.
     ("GRIPSTRETCH", CommandId::GripStretch),
     ("HOVERPREVIEW", CommandId::ToggleHoverPreview),
-    // The display grid switch (F7). Grid **snap** is the separate `SNAP`
-    // selector below; the two are independent session switches and never alias
-    // each other.
+    // The display grid switch (F7). Grid **snap** is the separate `SNAP` selector below; the two are independent session switches and never alias each other.
     ("GRID", CommandId::ToggleGrid),
-    // Grid snap (F9): quantise a captured point to the session `SNAPUNIT`
-    // spacing. Independent of object snap (`OSNAP`) and of the display grid
-    // (`GRID`); no alias maps onto any of the three.
+    // Grid snap (F9): quantise a captured point to the session `SNAPUNIT` spacing. Independent of object snap (`OSNAP`) and of the display grid (`GRID`); no alias maps onto any of the three.
     ("SNAP", CommandId::ToggleSnapGrid),
     ("OSNAP", CommandId::ToggleSnap),
-    // The typed spacing sysvar: `SNAPUNIT <value>`. The bare name carries no
-    // value, so the application refuses it explicitly (no fabricated default).
+    // The typed spacing sysvar: `SNAPUNIT <value>`. The bare name carries no value, so the application refuses it explicitly (no fabricated default).
     ("SNAPUNIT", CommandId::SetSnapSpacing),
-    // The typed POINT display sysvars write one drawing-header value each; the
-    // bare names are refused (no fabricated default, no SETVAR indirection).
+    // The typed POINT display sysvars write one drawing-header value each; the bare names are refused (no fabricated default, no SETVAR indirection).
     ("PDMODE", CommandId::SetPointDisplayMode),
     ("PDSIZE", CommandId::SetPointDisplaySize),
-    // The orthographic drafting constraint (F8). Session/display state only;
-    // applied after object snap and grid snap so it still decides the final axis.
+    // The orthographic drafting constraint (F8). Session/display state only; applied after object snap and grid snap so it still decides the final axis.
     ("ORTHO", CommandId::ToggleOrtho),
     ("LIST", CommandId::List),
     ("STATUS", CommandId::Status),
@@ -415,8 +297,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("VIEWFORWARD", CommandId::ViewForward),
     ("VPOINT", CommandId::VPoint),
 
-    // The 2026-11-07 extras batch. `REGEN3`, `-PAN` and `-LINETYPE` are aliases
-    // below (same CommandId/path), never a second implementation.
+    // The 2026-11-07 extras batch. `REGEN3`, `-PAN` and `-LINETYPE` are aliases below (same CommandId/path), never a second implementation.
     ("SKETCH", CommandId::Sketch),
     ("TRACE", CommandId::Trace),
     ("MOCORO", CommandId::Mocoro),
@@ -435,6 +316,19 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("VPCLIP", CommandId::VpClip),
     ("VPSCALE", CommandId::VpScale),
     ("LAYVPI", CommandId::LayVpi),
+
+    // The sustained extended-command batch: payload-free session toggles and
+    // read-only reports. All ten ride the single `CommandId::Extended` wrapper.
+    ("QTEXT", CommandId::Extended(ExtendedCommandId::QText)),
+    ("FILL", CommandId::Extended(ExtendedCommandId::Fill)),
+    ("TFRAMES", CommandId::Extended(ExtendedCommandId::TFrames)),
+    ("REGENAUTO", CommandId::Extended(ExtendedCommandId::RegenAuto)),
+    ("ISODRAFT", CommandId::Extended(ExtendedCommandId::IsoDraft)),
+    ("BCOUNT", CommandId::Extended(ExtendedCommandId::BlockCount)),
+    ("COUNT", CommandId::Extended(ExtendedCommandId::CountObjects)),
+    ("EDITTIME", CommandId::Extended(ExtendedCommandId::EditTime)),
+    ("JULIAN", CommandId::Extended(ExtendedCommandId::JulianDate)),
+    ("XLIST", CommandId::Extended(ExtendedCommandId::XList)),
 
 ];
 
@@ -587,135 +481,6 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     VSCURRENT_SELECTOR,
     LINETYPE_SELECTOR,
 ];
-
-/// Split a typed line into an argument-taking selector and its argument.
-///
-/// `Some((selector, argument))` only when `text` starts with one of
-/// [`ARGUMENT_SELECTORS`] followed by one or more spaces/tabs and a non-empty
-/// argument (`ZOOM 2`, `  snapunit\t0.5 `); a name-only line (`ZOOM`,
-/// `SNAPUNIT`) returns `None` so it keeps the name-only funnel and its existing
-/// payload refusal. The argument keeps its internal text: `ZOOM 2 3` reaches
-/// [`parse_zoom_argument`] as `2 3` and is refused there rather than being split
-/// a second time.
-pub fn typed_command_argument(text: &str) -> Option<(&'static str, &str)> {
-    let trimmed = text.trim();
-    let split = trimmed.find([' ', '\t'])?;
-    let (name, rest) = trimmed.split_at(split);
-    let argument = rest.trim_start_matches([' ', '\t']).trim_end();
-    if argument.is_empty() {
-        return None;
-    }
-    let selector = canonical_command_name(name)?;
-    ARGUMENT_SELECTORS
-        .contains(&selector)
-        .then_some((selector, argument))
-}
-
-/// AutoCAD's `ZOOM n` / `ZOOM ALL`: the first argument-taking selector.
-///
-/// A positive factor reuses the `ZOOMIN`/`ZOOMOUT` step path (anchored at the
-/// viewport centre); `ALL`/`EXTENTS` dispatches the ordinary `FIT`; `WINDOW`
-/// starts the two-corner capture and `PREVIOUS` restores the last discrete view
-/// (see [`ZoomArgument`]). The last two still carry **no** `CommandId` of their
-/// own: they ride [`CommandId::Zoom`] with their own payloads.
-pub const ARGUMENT_SELECTOR: &str = "ZOOM";
-
-/// AutoCAD's `SNAPUNIT <value>`: the session grid-snap spacing sysvar.
-///
-/// The value is a positive decimal in drawing units and is stored as session
-/// state only (no database, history or preference write). It is the spacing the
-/// `SNAP` (F9) quantiser uses.
-pub const SNAPUNIT_SELECTOR: &str = "SNAPUNIT";
-
-/// AutoCAD's `PDMODE <n>`: the drawing-global POINT display **mode** sysvar.
-///
-/// The value is an integer stored **raw** in the drawing header (`$PDMODE`), so
-/// it is a document write (one revision bump, no undo entry), not session state.
-/// The display layer interprets the bits.
-pub const PDMODE_SELECTOR: &str = "PDMODE";
-
-/// AutoCAD's `PDSIZE <n>`: the drawing-global POINT display **size** sysvar.
-///
-/// The value is a finite decimal stored **raw** in the drawing header
-/// (`$PDSIZE`): `> 0` absolute drawing units, `0` viewport-relative, `< 0` a
-/// percentage of the viewport height. A document write like
-/// [`PDMODE_SELECTOR`], not session state.
-pub const PDSIZE_SELECTOR: &str = "PDSIZE";
-
-/// The `PEDIT <option>` selector: one declared v1 polyline option (AutoCAD
-/// 2026).
-///
-/// AutoCAD's `PEDIT` shows an option prompt after the polyline pick; this build
-/// has no in-command option prompt, so the option is typed on the same command
-/// line. The grammar ([`parse_pedit_argument`]) is `CLOSE`/`C`, `OPEN`/`O` and
-/// `REVERSE`/`R`, case-insensitive. The current selection (exactly one
-/// model-space LWPOLYLINE) is still the whole input, so there is no second IPC.
-/// A bare `PEDIT` is admitted by name and refused by the application with
-/// `pedit.needs_option`; an unknown argument is refused before IPC with
-/// [`invalid_pedit_argument_reason`]. `Join`, `Width`/`Halfwidth`, `Fit`,
-/// `Spline`, `Decurve`, `Ltype gen`, `Undo`, `Multiple`, `Edit vertex` and the
-/// `PEDITACCEPT` conversion prompt are NOT IMPLEMENTED.
-pub const PEDIT_SELECTOR: &str = "PEDIT";
-/// The `HATCHEDIT <option>` selector: the typed v1 hatch-edit surface (AutoCAD
-/// 2026).
-///
-/// AutoCAD's `HATCHEDIT` opens a dialog; this build has no in-command dialog, so
-/// the option is typed on the command line. The grammar
-/// ([`super::parse_hatchedit_argument`]) is `ANGLE <degrees>`, `SCALE <factor>`,
-/// `SOLID` and `GRADIENT`, case-insensitive. The current selection (exactly one
-/// model-space hatch) is still the whole input, so there is no second IPC. A
-/// bare `HATCHEDIT` is admitted by name and refused by the application with
-/// `hatchedit.needs_option`; an unknown argument is refused before IPC with
-/// [`super::invalid_hatchedit_argument_reason`]. `Pattern`, `Color`,
-/// `Properties`, `Draw order`, `Add`/`Remove` boundaries and associativity are
-/// NOT IMPLEMENTED.
-pub const HATCHEDIT_SELECTOR: &str = "HATCHEDIT";
-/// AutoCAD's `MEASUREGEOM <option>`: the inquiry router's typed argument form.
-///
-/// This is an **argument form of the canonical `MEASUREGEOM` selector**, not a
-/// new command: `DISTANCE`/`ANGLE`/`AREA`/`POLYLINE` start the existing
-/// measurement tools, `RADIUS` dispatches the read-only report and `VOLUME` is
-/// an explicit not-implemented refusal. Full contract:
-/// [`cad_app::command_id::measuregeom`].
-pub const MEASUREGEOM_SELECTOR: &str = "MEASUREGEOM";
-
-/// The `SPACE <argument>` selector: switch the active drawing space.
-///
-/// This is the same [`CommandId::SwitchSpace`] command the IPC/panel path uses;
-/// the typed argument only saves a second IPC for a layout-tab click. `MODEL`
-/// selects model space, `#<u128>` names a `LayoutId` directly, and any other
-/// whole argument is resolved as a layout **display name** (exact match first,
-/// then a unique case-insensitive one). A bare `SPACE` keeps the existing
-/// explicit "needs a space payload" refusal.
-pub const SPACE_SELECTOR: &str = "SPACE";
-
-/// The canonical name in `table` matching the already-uppercased `key`, if any.
-fn table_name<T>(table: &[(&'static str, T)], key: &str) -> Option<&'static str> {
-    table
-        .iter()
-        .find(|(name, _)| *name == key)
-        .map(|(name, _)| *name)
-}
-
-/// The measurement kind an interaction-only selector names, if any.
-///
-/// The selector must already be canonical (as returned by
-/// [`canonical_command_name`]); an alias never reaches here because aliases map
-/// onto a canonical selector first.
-pub fn measurement_selector_kind(name: &str) -> Option<MeasurementToolKind> {
-    MEASUREMENT_SELECTORS
-        .iter()
-        .find(|(selector, _)| *selector == name)
-        .map(|(_, kind)| *kind)
-}
-
-/// The fixed zoom factor a zoom-step selector names, if any.
-pub fn zoom_step_factor(name: &str) -> Option<f64> {
-    ZOOM_STEP_SELECTORS
-        .iter()
-        .find(|(selector, _)| *selector == name)
-        .map(|(_, factor)| *factor)
-}
 
 /// Full-word synonyms and AutoCAD-style abbreviations, always accepted, that map
 /// onto a canonical [`COMMAND_TABLE`] selector.
@@ -872,104 +637,9 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("-LINETYPE", "LINETYPE"),
 ];
 
-/// The alias table as `(alias, canonical selector)` pairs, resolved through
-/// [`canonical_command_name`].
-///
-/// This is what a host publishes to a frontend (the `cad_command_aliases` IPC):
-/// the frontend may offer aliases in its suggestion list without keeping a
-/// hand-written mirror of the table. An alias whose target does not resolve is
-/// skipped rather than guessed; the alias invariants are contract-tested, so no
-/// such row exists.
-pub fn alias_pairs() -> Vec<(&'static str, &'static str)> {
-    COMMAND_ALIASES
-        .iter()
-        .filter_map(|(alias, target)| canonical_command_name(target).map(|name| (*alias, name)))
-        .collect()
-}
-
-/// The canonical, stable uppercase selector a command name resolves to, or
-/// `None` when the name maps to no admitted command.
-///
-/// Covers [`COMMAND_TABLE`], the interaction-only [`MEASUREMENT_SELECTORS`] /
-/// [`ZOOM_STEP_SELECTORS`] and [`COMMAND_ALIASES`]. Names are matched
-/// case-insensitively after trimming surrounding whitespace; internal whitespace
-/// is significant (multi-word selectors keep one space).
-pub fn canonical_command_name(text: &str) -> Option<&'static str> {
-    let key = text.trim().to_ascii_uppercase();
-    if let Some(name) = table_name(COMMAND_TABLE, &key) {
-        return Some(name);
-    }
-    if let Some(name) = table_name(MEASUREMENT_SELECTORS, &key) {
-        return Some(name);
-    }
-    if let Some(name) = table_name(ZOOM_STEP_SELECTORS, &key) {
-        return Some(name);
-    }
-    COMMAND_ALIASES
-        .iter()
-        .find(|(alias, _)| *alias == key)
-        .and_then(|(_, canonical)| canonical_command_name(canonical))
-}
-
-/// The canonical selector a [`CommandId`] is named by, if it has one.
-///
-/// This is the reverse of [`COMMAND_TABLE`] and exists for typed entry points
-/// that dispatch a `CommandId` directly without going through a text selector,
-/// so the command echo still records the same stable machine key the router
-/// would. Interaction-only selectors (`DIST`, `ZOOMIN`, …) carry no
-/// `CommandId` and are recorded by the selector path itself.
-pub fn command_name(id: CommandId) -> Option<&'static str> {
-    COMMAND_TABLE
-        .iter()
-        .find(|(_, candidate)| *candidate == id)
-        .map(|(name, _)| *name)
-}
-
-/// The `CommandId` a command name names, if any.
-///
-/// Covers the full [`COMMAND_TABLE`] vocabulary (plus [`COMMAND_ALIASES`]); an
-/// unmapped name — including the interaction-only [`MEASUREMENT_SELECTORS`] /
-/// [`ZOOM_STEP_SELECTORS`], which carry no `CommandId` — returns `None` so the
-/// caller can dispatch or refuse it explicitly.
-pub fn normalize_command(text: &str) -> Option<CommandId> {
-    let name = canonical_command_name(text)?;
-    COMMAND_TABLE
-        .iter()
-        .find(|(candidate, _)| *candidate == name)
-        .map(|(_, id)| *id)
-}
-
-/// The stable rejection reason for a name that maps to no command.
-pub fn unsupported_command_reason(text: &str) -> String {
-    format!("unsupported CAD command: {}", text.trim())
-}
-
-/// Every name the host admits, for a frontend that must disable what cannot run
-/// instead of keeping a hand-written mirror that drifts.
-///
-/// Canonical [`COMMAND_TABLE`] selectors come first, then the interaction-only
-/// selectors ([`MEASUREMENT_SELECTORS`], [`ZOOM_STEP_SELECTORS`]), then every
-/// alias that is not already canonical. Order is stable, so a frontend may sort
-/// it for display without losing the canonical-first grouping.
-pub fn admissible_names() -> Vec<&'static str> {
-    let mut names: Vec<&'static str> = COMMAND_TABLE.iter().map(|(name, _)| *name).collect();
-    for (name, _) in MEASUREMENT_SELECTORS {
-        if !names.contains(name) {
-            names.push(name);
-        }
-    }
-    for (name, _) in ZOOM_STEP_SELECTORS {
-        if !names.contains(name) {
-            names.push(name);
-        }
-    }
-    for (alias, _) in COMMAND_ALIASES {
-        if !names.contains(alias) {
-            names.push(alias);
-        }
-    }
-    names
-}
+// Command-name resolution, selector constants and the admitted set.
+mod helpers;
+pub use helpers::*;
 
 // The typed-argument grammars and their stable refusals (split out for the
 // code-size gate). Re-exported so every `commands::parse_*` path is unchanged.

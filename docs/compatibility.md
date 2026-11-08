@@ -283,6 +283,16 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | AUDIT | **只检测（2026-11-07）**：逐实体调用 `cad_db::validate_entity`，输出 `audit.clean` 或 `audit.summary` + 每个 `audit.invalid_entity`；只读，无事务/历史/revision | **不修复**（AutoCAD 的「corrects some errors」未实现）；不删除、不改写任何实体；只覆盖实体级校验，不是完整 DWG 修复器 |
 | JOIN | 合并当前选择为**一个**实体：共线且首尾相接/重叠的 `LINE` → 一条 `LINE`；同圆心/法向/半径且扫掠相续的 `ARC` → 一条 `ARC` | 一条事务、**一步撤销**，全有或全无（先全部校验，再删除 N + 插入 1）。**仅 LINE 与 ARC**：折线/样条/圆、需要桥接空隙、跨图层/跨空间、非同心弧、块内成员 ⇒ 显式拒绝（`join.needs_two`/`join.mixed_kinds`/`join.not_collinear`/`join.not_contiguous`/`join.layer_mismatch`/`join.space_mismatch`/`join.sweep_overflow`/`join.degenerate`）。合并 `LINE` 的端点按 `(x,y,z)` 升序归一（同一批拾取总得同一几何）；`draw_order` 取源最小值（原位替换，不跳到最上层）；扫掠和恰为一整圈时**保留 `2π` ARC**，不静默转成 `CIRCLE`；反向法向的弧按「不相续」拒绝而非重新推导 |
 
+| QTEXT | **会话令牌 v1（2026-11-09）**：`QTEXT` payload-free，翻转 `SessionState::drafting_extras.qtext`；会话状态 only，无事务/修订/历史，Viewer-legal | 渲染器**不消费**该标志：文字仍按几何绘制、无占位框、不切换绘图输出；`qtext.toggled` 明说「NOT IMPLEMENTED / 无视觉效果」 | 近似实现：仅命令路径/状态 |
+| FILL | **会话令牌 v1（2026-11-09）**：翻转 `fill`（默认 ON）；会话状态 only，Viewer-legal | 渲染器不按该标志切换填充/宽线显示；无视觉变化 | 近似实现：仅命令路径/状态 |
+| TFRAMES | **会话令牌 v1（2026-11-09）**：翻转 `tframes`；会话状态 only，Viewer-legal | 不改变图像/外部参照/文字边框可见性 | 近似实现：仅命令路径/状态 |
+| REGENAUTO | **会话令牌 v1（2026-11-09）**：翻转 `regenauto`；会话状态 only，Viewer-legal | 本构建无自动重生成开关；需显式 `REGEN` | 近似实现：仅命令路径/状态 |
+| ISODRAFT | **会话令牌 v1（2026-11-09）**：翻转 `isodraft`；会话状态 only，Viewer-legal | 不切换等轴测平面或光标、不改变捕捉/正交行为 | 近似实现：仅命令路径/状态 |
+| BCOUNT | **只读报告 v1（2026-11-09）**：统计整个模型空间的 `SemanticGeometry::Insert` 实例，按块名分组，输出 `bcount.block` + `bcount.summary`；无事务/修订/历史，Viewer-legal | 无 AutoCAD 的 `Select objects` 提示（声明为整模型空间）；不展开块成员、不统计图纸空间；不修改图形 | 只读，无写 |
+| COUNT | **只读报告 v1（2026-11-09）**：当前选择非空时按选择统计，否则统计全部模型空间顶层实体；按 `type_key` 分组，输出 `count.type`/`count.summary`；块成员/子元素/失效引用另报 `count.unresolved`；不改选择、无事务/修订/历史，Viewer-legal | 不实现 AutoCAD 的计数高亮/导航面板；不统计块内成员 | 只读，无写 |
+| EDITTIME | **只读报告 v1（2026-11-09）**：当前 UTC 时钟 + 文档 id/修订/实体数（`edittime.report`）；创建/修改时间与会话用时恒 `edittime.not_tracked`；Viewer-legal | 数据库不存时间戳，会话不跟踪 uptime；不伪造日期 | 只读，无写 |
+| JULIAN | **只读报告 v1（2026-11-09）**：当前 UTC 时刻的儒略日（整数日 + 小数，`julian.value`）；Viewer-legal | 不解析日期参数、不做 DATE/CAL 转换；只报"现在" | 只读，无写 |
+| XLIST | **只读报告 v1（2026-11-09）**：列出 `drawing.blocks()` 的每个块定义与成员数（`xlist.block` + `xlist.summary`）；`xlist.xdata_not_retained` 明说 XDATA 不保留；Viewer-legal | 不是 AutoCAD 的“列出嵌套对象类型/块名/图层/颜色/线型”全格式；不列出 xref 嵌套、不读 XDATA | 只读，无写 |
 - 变换/偏移的**不支持几何**（`Spline`/`Shape`/`Opaque`/`Compound`；**以及 `MultiLeader`——拒绝一切缩放**）返回显式
   （**更正**：`Text` 自 P7a 起**可**平移/旋转/均匀缩放，**不在**此列表；仅镜像与非均匀缩放拒绝。
   **2026-10-26 起 `MIRROR` 的 `Arc`/`Ellipse` 不再被拒**，见上表 MIRROR 行。）

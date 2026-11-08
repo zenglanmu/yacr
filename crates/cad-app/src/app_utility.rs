@@ -558,7 +558,7 @@ fn with_payload(command: &Command, id: CommandId, payload: CommandPayload) -> Co
     }
 }
 
-fn document_drawing(
+pub(crate) fn document_drawing(
     app: &Application,
     command: &Command,
 ) -> CadResult<Arc<cad_db::DrawingDatabase>> {
@@ -573,7 +573,7 @@ fn document_drawing(
     Ok(document.drawing.clone())
 }
 
-fn require_none_payload(command: &Command, name: &str) -> CadResult<()> {
+pub(crate) fn require_none_payload(command: &Command, name: &str) -> CadResult<()> {
     if matches!(command.payload, CommandPayload::None) {
         Ok(())
     } else {
@@ -606,7 +606,7 @@ fn layer_label(database: &cad_db::DrawingDatabase, layer: LayerId) -> String {
 
 /// Format Unix seconds as `YYYY-MM-DDTHH:MM:SSZ` (UTC), without a calendar
 /// dependency. Uses Howard Hinnant's civil-from-days algorithm.
-fn format_utc(seconds: u64) -> String {
+pub(crate) fn format_utc(seconds: u64) -> String {
     let days = (seconds / 86_400) as i64;
     let rem = seconds % 86_400;
     let (year, month, day) = civil_from_days(days);

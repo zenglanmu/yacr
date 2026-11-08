@@ -1,0 +1,71 @@
+// The 2026-11-09 pilot batch of payload-free command-line names.
+//
+// Ten names are wired into the chrome so the command line can complete them:
+// five session-only display tokens with **no renderer effect** (QTEXT/FILL/
+// TFRAMES/REGENAUTO/ISODRAFT) and five **read-only reports** (BCOUNT/COUNT/
+// EDITTIME/JULIAN/XLIST). The Rust lane is the behaviour authority; this suite
+// pins only the user-facing surface: one catalog row each, real label and hint
+// keys in both catalogs, membership in the host vocabulary mirror, and the
+// "needs an open drawing" rule with no capability gate.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
+import {
+  admitCommandText, isSupportedCommand, setCommandCatalog,
+} from '../src/commands/commands.ts';
+import { CAPABILITY_GATES, DOCUMENT_SCOPED_COMMANDS } from '../src/commands/gating.ts';
+import { HOST_NAMES, readCatalog, readModule } from './helpers.ts';
+
+const BATCH = [
+  'QTEXT', 'FILL', 'TFRAMES', 'REGENAUTO', 'ISODRAFT',
+  'BCOUNT', 'COUNT', 'EDITTIME', 'JULIAN', 'XLIST',
+];
+
+const DOC = { documentLabel: 'drawing.dwg', loading: false };
+const NO_DOC = { documentLabel: null, loading: false };
+
+setCommandCatalog(HOST_NAMES);
+
+async function iconNames() {
+  const map = (await readModule('icons.tsx')).match(/const P = \{([\s\S]*?)\n\};/);
+  assert.ok(map, 'expected the icon name map in icons.tsx');
+  return new Set([...map[1].matchAll(/\n\s*([A-Za-z][A-Za-z0-9]*):/g)].map(match => match[1]));
+}
+
+test('every pilot command is catalogued exactly once with real label and hint keys', async () => {
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  const glyphs = await iconNames();
+  for (const id of BATCH) {
+    const rows = COMMAND_CATALOG.filter(command => command.id === id);
+    assert.equal(rows.length, 1, `${id} must appear exactly once`);
+    const [row] = rows;
+    assert.equal(row.labelKey, `draw.kind.${id.toLowerCase()}`, `${id} names its own label key`);
+    // An unknown icon name would silently render the `dot` fallback.
+    assert.ok(glyphs.has(row.icon), `icons.tsx must define '${row.icon}' for ${id}`);
+    for (const [locale, catalog] of [['zh-CN', zh], ['en', en]]) {
+      assert.equal(typeof catalog[row.labelKey], 'string', `${locale} missing ${row.labelKey}`);
+      assert.equal(typeof catalog[`${row.labelKey}.hint`], 'string', `${locale} missing ${row.labelKey}.hint`);
+    }
+    assert.equal(HOST_NAMES.includes(id), true, `${id} must be in the vocabulary mirror`);
+    assert.equal(DOCUMENT_SCOPED_COMMANDS.includes(id), true, `${id} needs an open drawing`);
+    // No file I/O is involved, so no capability boolean may gate these names.
+    assert.equal(CAPABILITY_GATES[id], undefined, `${id} must not carry a capability gate`);
+  }
+});
+
+test('the pilot names are advertised by the host vocabulary and admitted with a drawing', () => {
+  for (const id of BATCH) {
+    assert.equal(isSupportedCommand(id), true, `${id} must be in the loaded vocabulary`);
+    const admission = admitCommandText(id, { status: DOC });
+    assert.deepEqual(admission, { kind: 'admitted', command: id, reasonKey: null }, id);
+  }
+});
+
+test('the pilot names are disabled on the start page with the no-document sentence', () => {
+  for (const id of BATCH) {
+    const admission = admitCommandText(id, { status: NO_DOC });
+    assert.equal(admission.kind, 'unavailable', id);
+    assert.equal(admission.reasonKey, 'plot.no_document', `${id} says a drawing must be open`);
+  }
+});
