@@ -781,6 +781,8 @@ AutoCAD 的 0＝关闭拾取框/选择预览未建模，故拒绝 0)
 极轴/动态 UCS（AutoCAD Options 中存在但本仓库**无行为可接**，因此不显示）。（**颜色色板选择器已于
 2026-10-26 补上**，见下方「颜色选择器」条。）
 
+**2026-11-08 补齐**：生产宿主默认启动**空白 `untitled` 图纸**（`HostOptions::start_blank=true`；不再加载 demo 几何），`--open`/位置参数仍优先；`CLOSE` 成为宿主自有命令，关闭当前唯一文档并回到开始页（无未保存提示——项目没有 dirty 模型；多文档/`CLOSEALL` 仍不支持）。开始页与 About 改为跨平台开源 CAD 介绍，取消标签页 `+`（多标签未实现）。
+
 **2026-10-25 补齐（React 宿主，源码/单测证据；真机像素 NOT RUN）**：`NEW`/`SAVE`/`PLOT` 及其别名
 经宿主能力布尔（`canNew`/`canSave`/`canPlot`）真实准入，Linux 保存目标走 XDG portal `save_file`；
 `GRID`（F7，仅显示栅格）、`SNAP`（F9，会话级栅格捕捉，间距由 `SNAPUNIT <value>` 设置）与

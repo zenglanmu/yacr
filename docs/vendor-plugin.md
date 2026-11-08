@@ -230,7 +230,9 @@ handle；API/编辑/COPY 创建并提交的实体有 `EntityId` 但 `source_hand
   chrome 显示模态说明并**不发送** `cad_command`。普通图元编辑、未选中天正实体、普通绘制命令不受影响。
 - **多选限制**：`cad_status.selection` 是多选**交集行**，没有逐实体列表；插件只对
   `count == 1` 且 `handle` 行非 mixed 的选择可靠接管。多选一律 pass-through；如需多选接管，必须先
-  扩展 wire，不在当前范围。
+  扩展 wire，不在当前范围。天正图元可以和其他图元一起多选（`Shift`+单击加选；框选/`SELECTALL`
+  对有 vendor 派生表示的 opaque 实体同样有效）；此时属性 dock 回退到通用 `PropertiesPalette`，
+  显示各对象共有键的交集与 mixed 值，`vendor_*` 逐实体行不出现。
 - 插件仍是同权 module script（§6.3）；命令拦截只发生在 chrome 漏斗，**不是**安全边界；Rust 命令仍可被
   其他入口直接调用。
 

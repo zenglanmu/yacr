@@ -178,6 +178,8 @@ pub fn init(
                         images_dir: launch.images_dir.clone(),
                         headless: false,
                         drawing: launch.drawing.clone(),
+                        // production starts on a real (empty) document
+                        start_blank: true,
                         size: launch.size,
                     },
                 };

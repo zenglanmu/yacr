@@ -52,6 +52,8 @@ fn options() -> HostOptions {
         headless: false,
         // The document is the bytes; naming a path here would be a second source.
         drawing: None,
+        // test fixture: the synthetic bytes are opened explicitly afterwards
+        start_blank: false,
         size: [800.0, 600.0],
     }
 }

@@ -341,7 +341,13 @@ button, input, select { font: inherit; color: inherit; }
 .doc-tab:hover:not([aria-disabled="true"]) { background: var(--hover); color: var(--text); }
 .doc-tab.is-active { background: var(--chrome); color: var(--text); border-color: var(--line-soft); border-bottom-color: transparent; }
 .doc-tab.is-muted { color: var(--text-muted); cursor: default; }
-.doc-tab__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The open drawing is one document, not a tab that switches anywhere: it keeps
+   the tab surface (so the single-drawing session reads in the strip) and hosts
+   the real close control, which returns the chrome to the start page. */
+.doc-tab--document { cursor: default; padding-right: 3px; }
+.doc-tab.doc-tab--document:hover { background: var(--chrome); }
+.doc-tab__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.doc-tab__close { flex: 0 0 auto; }
 .doctabs__progress { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 11px; white-space: nowrap; }
 .import-progress__phase { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
 .import-progress__bar { position: relative; flex: 0 0 auto; width: 96px; height: 5px; border-radius: 999px; background: var(--field); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
@@ -743,10 +749,23 @@ button, input, select { font: inherit; color: inherit; }
 .plugin-properties__footer .ui-button__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 .start-panel { animation: fade var(--t-med) both; }
-.start-panel__body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; }
-.start-panel__hint { margin: 0 0 14px; color: var(--text-dim); }
+.start-panel__body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 12px 12px; }
+/* The welcome block: one token-coloured mark, the product name and its line.
+   It is the only place the start screen raises its voice; everything below is
+   quiet supporting copy. */
+.start-panel__hero { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.start-panel__mark {
+  display: grid; place-items: center;
+  width: 38px; height: 38px; flex: 0 0 auto;
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  background: var(--field); color: var(--accent-text);
+}
+.start-panel__identity { min-width: 0; }
+.start-panel__brand { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: .3px; color: var(--text); }
+.start-panel__tagline { margin: 2px 0 0; font-size: 11px; color: var(--accent-text); }
+.start-panel__intro { margin: 0 0 14px; color: var(--text-dim); line-height: 1.5; }
 .start-panel__actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
-.start-panel__actions .ui-button { justify-content: flex-start; }
+.start-panel__actions .ui-button { justify-content: flex-start; width: 100%; }
 .start-panel__section { margin: 20px 0 8px; font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted); }
 .start-panel__empty {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
@@ -755,6 +774,18 @@ button, input, select { font: inherit; color: inherit; }
 }
 .start-panel__empty p { margin: 0; }
 .start-panel__note { font-size: 11px; color: var(--text-muted); }
+/* Carrier honesty, not a product badge: the line names the one host this build
+   has actually run on and keeps the others at their evidence level. */
+.start-panel__status {
+  display: flex; align-items: flex-start; gap: 6px;
+  margin: 16px 0 0; padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 11px; line-height: 1.45; color: var(--text-muted);
+}
+.start-panel__status-dot {
+  flex: 0 0 auto; width: 6px; height: 6px; margin-top: 5px;
+  border-radius: 999px; background: var(--ok);
+}
 
 /* Layers palette --------------------------------------------------------- */
 /* A list built for the palette window: a search strip, an optional restore
@@ -1165,15 +1196,28 @@ button, input, select { font: inherit; color: inherit; }
   overflow: hidden;
   animation: rise var(--t-fast) both;
 }
-/* The head is a label, not a toolbar: the host's command log has no clear call, so
-   a clear button here would empty the typed rows and leave the host's own echoed
-   rows on screen — a control that lies. Do not add one. */
+/* The head is a label plus one **read-only** action: copying the record cannot
+   contradict it. A clear button still must not be added — the host's command log
+   has no clear call, so clearing here would leave the host's own echoed rows on
+   screen while emptying the typed ones: a control that lies. */
 .history-panel__head {
   flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
   padding: 4px 8px;
   border-bottom: 1px solid var(--line);
   color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px;
 }
+/* The title takes the slack so the copy button sits at the head's far end. */
+.history-panel__head-title {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The transient copy outcome (`role="status"`). It is not uppercase: it reads as
+   a sentence answer, not as a second section label. */
+.history-panel__status {
+  flex: none; color: var(--text-muted); font-size: 10px; letter-spacing: 0; text-transform: none; white-space: nowrap;
+}
+.history-panel__status.is-copied { color: var(--ok); }
+.history-panel__status.is-failed { color: var(--danger); }
 /* Nothing recorded yet. The pane keeps its frame (the height is fixed) and says so
    at the top of the list, where the first row would be — not centred like a
    splash, because the next command will start exactly there. */
@@ -1197,6 +1241,10 @@ button, input, select { font: inherit; color: inherit; }
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line-soft) transparent;
+  /* The list is a reading surface: its text can be selected and copied, which is
+     what the panel's copy chord reads when a selection is present. */
+  user-select: text;
+  -webkit-user-select: text;
 }
 /* "There is more under the fold". The thin scrollbar above is the same one the
    mobile sheet's scroller declares, but an overlay scrollbar paints nothing at
@@ -1227,6 +1275,10 @@ button, input, select { font: inherit; color: inherit; }
   background: transparent; color: var(--text-dim); text-align: left; cursor: pointer;
   font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
   overflow-wrap: anywhere;
+  /* A row is a recall control, but its text is still readable copy: dragging
+     across it selects instead of turning the pane into an unselectable button. */
+  user-select: text;
+  -webkit-user-select: text;
 }
 /* The catalog's own `Command:` prefix is quiet; the line itself is the row's
    subject but still one step below a measured value, because the value is what the

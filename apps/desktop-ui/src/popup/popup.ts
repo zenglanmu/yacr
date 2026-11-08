@@ -60,6 +60,8 @@ export const POPUP_KINDS: readonly PopupKind[] = Object.freeze<PopupKind[]>([
 export const POPUP_KEYS = Object.freeze({
   title: 'dialog.about.title',
   subtitle: 'dialog.about.subtitle',
+  intro: 'dialog.about.intro',
+  contact: 'dialog.about.contact',
   version: 'dialog.about.version',
   close: 'dialog.popup.close',
   bodyFailed: 'dialog.popup.body_failed',

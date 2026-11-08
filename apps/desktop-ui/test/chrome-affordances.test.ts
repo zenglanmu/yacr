@@ -10,9 +10,9 @@
 //   * one carrier helper (`palettesOffered`) decides for **every** nav-rail palette
 //     toggle, so a `dom-canvas` carrier cannot show a toggle for a panel that is
 //     never rendered;
-//   * the doc-tab `+` is disabled for a stated limitation, not with
-//     "unsupported" or "not wired", while the layout strip renders the host's
-//     real tabs and dispatches `SPACE` instead of a one-space placeholder;
+//   * the doc-tab strip has no `+` (tabs were cancelled) and its open-drawing
+//     tab carries the real `CLOSE` control, while the layout strip renders the
+//     host's real tabs and dispatches `SPACE` instead of a one-space placeholder;
 //   * the catalog keys those sentences need are declared in one place, so the gap
 //     is reportable instead of being filled with invented copy.
 import test from 'node:test';
@@ -24,7 +24,7 @@ import {
 import { admitCommandText } from '../src/commands/commands.ts';
 import { LOCAL_CHROME_COMMANDS } from '../src/commands/gating.ts';
 import {
-  ONE_DOCUMENT_KEY, PANEL_DIALOG_MISSING_KEY, PENDING_CATALOG_KEYS,
+  PANEL_DIALOG_MISSING_KEY, PENDING_CATALOG_KEYS,
 } from '../src/limits.ts';
 import { palettesOffered } from '../src/cad/surface.ts';
 
@@ -225,13 +225,20 @@ test('no component re-spells the carrier comparison inline', async () => {
   assert.equal(surface.match(/palettesAvailable !== false/g).length, 1, 'exactly one reading of the flag');
 });
 
-test('the doc-tab "+" states the one-drawing limit instead of nothing', async () => {
+test('the doc-tab strip has no new-tab control and closes the open drawing', async () => {
   const tabs = await readModule('components/DocTabs.tsx');
-  assert.ok(tabs.includes("import { ONE_DOCUMENT_KEY } from '../limits.ts';"));
-  assert.ok(tabs.includes('title={t(ONE_DOCUMENT_KEY)}'));
-  // The `+` keeps its label and stays disabled: the limit is real, the wiring is not
-  // missing, so the title must not borrow the generic unsupported sentence.
-  assert.ok(tabs.includes("label={t('doctabs.new_tab')} disabled title={t(ONE_DOCUMENT_KEY)}"));
+  // One drawing per session, and tabs were cancelled: a `+` here would promise a
+  // second tab the product does not have. It is gone with its limitation copy.
+  assert.equal(tabs.includes('icon="plus"'), false);
+  assert.equal(tabs.includes('doctabs.new_tab'), false);
+  assert.equal(tabs.includes('ONE_DOCUMENT_KEY'), false);
+  // The open drawing carries the real close control instead: the command that
+  // returns the chrome to the start page.
+  assert.ok(tabs.includes('icon="close"'));
+  assert.ok(tabs.includes("label={t('doctabs.close')}"));
+  assert.ok(tabs.includes("shell.runCommand('CLOSE')"));
+  // The press belongs to the close control, never to the tab surface around it.
+  assert.ok(tabs.includes('event.stopPropagation()'));
   assert.equal(tabs.includes('ribbon.command_unsupported'), false);
 });
 
@@ -252,7 +259,6 @@ test('the layout strip renders real tabs instead of a one-space placeholder', as
 
 test('the copy keys these disabled affordances need are declared in one place', async () => {
   assert.deepEqual([...PENDING_CATALOG_KEYS].sort(), [
-    'doctabs.one_document',
     'ribbon.panel_dialog_missing',
   ]);
   // They are referenced as constants (never as inline literals), which is what lets
@@ -281,7 +287,7 @@ test('the pending keys are named by the module that owns the limits', async () =
     `export const ${name}(?:: string)? = '${key.replaceAll('.', '\\.')}';`,
   ).test(limits);
   // One place to read what the chrome still needs from the catalog.
-  assert.ok(declares('ONE_DOCUMENT_KEY', 'doctabs.one_document'));
+  assert.equal(declares('ONE_DOCUMENT_KEY', 'doctabs.one_document'), false);
   assert.ok(declares('PANEL_DIALOG_MISSING_KEY', 'ribbon.panel_dialog_missing'));
   assert.ok(limits.includes('export const PENDING_CATALOG_KEYS'));
 });

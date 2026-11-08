@@ -3,6 +3,9 @@ pub enum CommandId {
     OpenDrawing,
     /// Host-owned (no document factory): a platform host performs the work.
     NewDrawing,
+    /// Host-owned: closes the current drawing. The platform host drops the
+    /// document and shows its start page once nothing is open.
+    CloseDrawing,
     /// Host-owned (no file chooser): a platform host exports SVG/PDF.
     PlotDrawing,
     /// Host-owned (no file chooser): a platform host saves the lossy DXF.

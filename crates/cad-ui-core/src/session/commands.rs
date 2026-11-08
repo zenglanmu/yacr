@@ -29,6 +29,8 @@ use super::text_commands::{TCASE_SELECTOR, TORIENT_SELECTOR};
 pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("OPEN", CommandId::OpenDrawing),
     ("NEW", CommandId::NewDrawing),
+    // CLOSE closes the current drawing (host-owned like OPEN/NEW); with nothing open the host shows its start page.
+    ("CLOSE", CommandId::CloseDrawing),
     ("PLOT", CommandId::PlotDrawing),
     ("SAVE", CommandId::SaveDrawingAs),
     ("CANCEL", CommandId::CancelLoading),

@@ -30,13 +30,26 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../icons.tsx';
 import { IconButton } from './primitives.tsx';
 import { CommandField } from './CommandField.tsx';
+import { ContextMenu } from './ContextMenu.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { useCommandLine } from '../commands/use-command-line.ts';
 import { commandWindowRows } from '../commands/command-window.ts';
 import { unavailableReasonKey } from '../commands/commands.ts';
+import { commandWindowText, entryText, isHistoryCopyChord } from '../commands/history-copy.ts';
+import { useHistoryCopy } from '../commands/use-history-copy.ts';
+import { historySurfaceReading } from '../history-copy-surface.ts';
+import { isTextEntryTarget } from '../defaults.ts';
+import type { ContextMenuItem, ContextMenuModel } from '../commands/context-menu.ts';
 import type { IconName } from '../icons.tsx';
 import { releaseFocusOnOutsidePress } from '../focus-release.ts';
 import type { FocusReleaseRoot } from '../focus-release.ts';
+
+/** The open right-click menu of the panel: where it sits, and the row it hit. */
+interface HistoryMenuState {
+  readonly x: number;
+  readonly y: number;
+  readonly key: string | null;
+}
 
 export function CommandLine() {
   const { t } = useI18n();
@@ -72,6 +85,98 @@ export function CommandLine() {
   const rowsSignature = windowRows.length > 0
     ? `${windowRows.length}:${windowRows[windowRows.length - 1]?.key}`
     : '';
+
+  // Copying the record. `copy` owns the transient "Copied"/"Copy failed" status
+  // and its timer (`clipboard.ts` owns the write itself); the string it receives
+  // is always one of the serializers in `commands/history-copy.ts`, so the
+  // pasted text is the panel's own visible record — output included.
+  const copy = useHistoryCopy();
+  const copyText = copy.copy;
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const copyButtonRef = useRef<HTMLButtonElement | null>(null);
+  // Hover is this component's own fact: the panel is the reading surface while
+  // the pointer is over it, focus is inside it, or a selection starts in it.
+  // Enter/leave keep the keydown handler (installed on `window`) from having to
+  // ask the layout on every press.
+  const hovered = useRef(false);
+  const [copyMenu, setCopyMenu] = useState<HistoryMenuState | null>(null);
+  // The row the open menu was pressed on, resolved through the same key the
+  // `<li>` carries; `null` when the press hit the panel's padding or head.
+  const menuKey = copyMenu?.key ?? null;
+  const menuRow = useMemo(
+    () => (menuKey !== null ? windowRows.find(row => row.key === menuKey) ?? null : null),
+    [menuKey, windowRows],
+  );
+
+  function copyAll() {
+    copyText(commandWindowText(windowRows, t));
+  }
+
+  function runCopyMenu(item: ContextMenuItem) {
+    setCopyMenu(null);
+    if (item.id === 'history.copy_entry') {
+      if (menuRow !== null) copyText(entryText(menuRow, t));
+      return;
+    }
+    copyAll();
+  }
+
+  function openCopyMenu(event: React.MouseEvent<HTMLDivElement>) {
+    // `bindBrowserDefaults` already suppresses the webview's own menu for a
+    // non-text target; preventing here keeps that true even if the guards change.
+    event.preventDefault();
+    const target = event.target as Element | null;
+    const holder = target !== null && typeof target.closest === 'function'
+      ? target.closest('[data-history-key]')
+      : null;
+    const key = holder !== null ? holder.getAttribute('data-history-key') : null;
+    setCopyMenu({ x: event.clientX, y: event.clientY, key });
+  }
+
+  // Ctrl+C / Cmd+C while the history is the reading surface. Capture phase: the
+  // shell's window handler maps Ctrl+C to COPYCLIP, and only a press this handler
+  // actually took is prevented and stopped — a press with the pointer elsewhere
+  // (or a focused text field) reaches COPYCLIP exactly as before. A non-collapsed
+  // selection inside the panel copies just that text; otherwise the whole visible
+  // record is copied.
+  useEffect(() => {
+    if (!shell.historyOpen) {
+      // A pane that is no longer on screen is not a reading surface, and a menu
+      // opened on it must not outlive it.
+      hovered.current = false;
+      setCopyMenu(null);
+      return undefined;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isHistoryCopyChord(event)) return;
+      // Native field copy wins: the command field and every popup field keep
+      // their own Ctrl+C, exactly as `accelerators.ts` leaves them alone.
+      if (isTextEntryTarget(event.target) || isTextEntryTarget(document.activeElement)) return;
+      const reading = historySurfaceReading(panelRef.current);
+      // An open copy menu is part of the same reading surface (it was opened on
+      // this pane and may cover the pointer), so its Ctrl+C is a copy too — never
+      // COPYCLIP.
+      const menuOpen = copyMenu !== null;
+      if (!menuOpen && !hovered.current && !reading.focused && !reading.selectionInside) return;
+      event.preventDefault();
+      event.stopPropagation();
+      copyText(reading.selectedText !== '' ? reading.selectedText : commandWindowText(windowRows, t));
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [shell.historyOpen, copyMenu, copyText, windowRows, t]);
+
+  // The two copy menu items always exist; an unavailable one is disabled, never
+  // dropped (the same rule as the CAD shortcut menu).
+  const menuModel = useMemo<ContextMenuModel>(() => ({
+    sections: [{
+      id: 'history-copy',
+      items: [
+        { id: 'history.copy_entry', key: 'command.history.copy_entry', command: null, enabled: menuRow !== null },
+        { id: 'history.copy_all', key: 'command.history.copy_all', command: null, enabled: windowRows.length > 0 },
+      ],
+    }],
+  }), [menuRow, windowRows.length]);
 
   // A click that returns focus must also act. The browser changes focus as the
   // press's *default action*, after the event has been dispatched — too late for
@@ -203,9 +308,41 @@ export function CommandLine() {
         // window and never moves its own top edge as commands arrive.
         // `data-more-below` turns on the bottom fade when the scroller has rows
         // under the fold.
-        <div className="history-panel" aria-label={t('command.history')} data-more-below={moreBelow ? 'true' : undefined}>
+        <div
+          className="history-panel"
+          ref={panelRef}
+          aria-label={t('command.history')}
+          data-more-below={moreBelow ? 'true' : undefined}
+          onPointerEnter={() => { hovered.current = true; }}
+          onPointerLeave={() => { hovered.current = false; }}
+          onContextMenu={openCopyMenu}
+        >
           <div className="history-panel__head">
-            <span>{t('command.history')}</span>
+            <span className="history-panel__head-title">{t('command.history')}</span>
+            {/* One live region for the outcome of any copy (button, menu, chord).
+                It stays mounted and empty between copies, so a failure is spoken
+                only when it happens. */}
+            <span
+              className={[
+                'history-panel__status',
+                copy.status === 'failed' ? 'is-failed' : '',
+                copy.status === 'copied' ? 'is-copied' : '',
+              ].filter(Boolean).join(' ')}
+              role="status"
+            >
+              {copy.status === null
+                ? ''
+                : t(copy.status === 'failed' ? 'command.history.copy_failed' : 'command.history.copied')}
+            </span>
+            <IconButton
+              ref={copyButtonRef}
+              icon="copy"
+              size="sm"
+              label={t('command.history.copy')}
+              title={`${t('command.history.copy')} (Ctrl+C)`}
+              disabled={windowRows.length === 0}
+              onClick={copyAll}
+            />
           </div>
           {windowRows.length === 0 ? (
             <div className="history-panel__empty">{t('command.history_empty')}</div>
@@ -222,7 +359,7 @@ export function CommandLine() {
                 // field; a refusal has nothing to re-run, so it stays plain output.
                 const recall = row.recall;
                 return (
-                  <li key={row.key} className="history-panel__row">
+                  <li key={row.key} className="history-panel__row" data-history-key={row.key}>
                     {row.kind === 'command' ? (
                       <button
                         type="button"
@@ -262,6 +399,23 @@ export function CommandLine() {
             </ol>
           )}
         </div>
+      ) : null}
+      {copyMenu !== null ? (
+        // The same overlay the CAD shortcut menu uses: fixed at the press,
+        // keyboard-driven (arrows/Home/End/Enter, Escape/Tab close), dismissed by
+        // a press outside, blur, resize or scroll. It has no backdrop, so the
+        // press that dismisses it still reaches the row underneath.
+        <ContextMenu
+          menu={menuModel}
+          anchor={{ x: copyMenu.x, y: copyMenu.y }}
+          onRun={runCopyMenu}
+          onDismiss={({ restoreFocus }) => {
+            setCopyMenu(null);
+            // Escape/Tab came from the keyboard; hand focus back to the panel's
+            // own control instead of dropping it on the document body.
+            if (restoreFocus) copyButtonRef.current?.focus();
+          }}
+        />
       ) : null}
     </div>
   );

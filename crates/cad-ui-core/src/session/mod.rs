@@ -541,8 +541,8 @@ impl CadSession {
     /// host's wheel-up-zooms-in convention.
     ///
     /// A press/release without an intervening drag is a **click**: outside a
-    /// capture it emits the typed [`InteractionRequest::SelectAt`] (mode
-    /// [`SelectionMode::Replace`]) at the release position; inside a draw or
+    /// capture it emits the typed [`InteractionRequest::SelectAt`] at the
+    /// release position (Replace normally, Add while Shift is held); inside a draw or
     /// measurement capture the same click is a typed
     /// [`InteractionRequest::CapturePoint`] instead. Both are tagged with the
     /// **current** canvas metrics revision and both follow the ordinary release

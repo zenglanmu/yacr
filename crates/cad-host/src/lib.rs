@@ -151,15 +151,18 @@ fn select_canvas_metrics(surface: SurfaceMetrics) -> CadResult<CanvasMetrics> {
 }
 
 impl HostCore {
-    /// Build the core over a demo document and the platform contracts.
+    /// Build the core over the configured initial document and the platform contracts.
+    ///
+    /// `options.start_blank` selects a real empty `untitled` drawing; otherwise
+    /// the historical synthetic demo is installed (tests/headless fixtures). A
+    /// configured `--open` drawing replaces either one in
+    /// [`Self::open_configured_drawing`].
     pub fn new(
         options: HostOptions,
         platform: HostPlatform,
         render: RenderSessionHandle,
     ) -> CadResult<Self> {
-        let controller = Rc::new(RefCell::new(HostController::with_demo_document(
-            options.size,
-        )?));
+        let controller = Rc::new(RefCell::new(core::initial_controller(&options)?));
         let initial_metrics = CanvasMetrics::new([0.0; 2], options.size, 1.0);
         let mut viewer_config = ViewerConfigStore::default();
         viewer_config
@@ -627,6 +630,16 @@ impl HostCore {
                 }
             },
             CommandId::NewDrawing => match self.request_new() {
+                Ok(()) => {
+                    self.record_raw_trace(command_id, Ok(none));
+                    Ok(None)
+                }
+                Err(error) => {
+                    self.record_raw_trace(command_id, Err(error.clone()));
+                    Err(error)
+                }
+            },
+            CommandId::CloseDrawing => match self.request_close() {
                 Ok(()) => {
                     self.record_raw_trace(command_id, Ok(none));
                     Ok(None)

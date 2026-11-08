@@ -85,6 +85,8 @@ fn session() -> CadSession {
         images_dir: None,
         headless: false,
         drawing: None,
+        // test fixture: the synthetic bytes are opened explicitly afterwards
+        start_blank: false,
         size: [800.0, 600.0],
     };
     // The carrier's surface must be reported before the session is built: the open

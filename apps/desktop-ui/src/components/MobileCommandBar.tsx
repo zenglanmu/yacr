@@ -19,18 +19,31 @@
 // sentence. The host's own error banner below is a different thing and stays: it
 // reports host failures (a failed canvas module, a failed poll), not a refusal
 // the command line produced.
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
 import { IconButton } from './primitives.tsx';
 import { CommandField } from './CommandField.tsx';
+import { ContextMenu } from './ContextMenu.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { useCommandLine } from '../commands/use-command-line.ts';
 import { mobileHistoryRows } from '../commands/command-line-model.ts';
 import { unavailableReasonKey } from '../commands/commands.ts';
+import { commandHistoryText, isHistoryCopyChord } from '../commands/history-copy.ts';
+import { useHistoryCopy } from '../commands/use-history-copy.ts';
+import { historySurfaceReading } from '../history-copy-surface.ts';
+import { isTextEntryTarget } from '../defaults.ts';
+import type { ContextMenuItem, ContextMenuModel } from '../commands/context-menu.ts';
 import { releaseFocusOnOutsidePress } from '../focus-release.ts';
 import type { FocusReleaseRoot } from '../focus-release.ts';
 import { statusBannerText } from '../host/notice.ts';
+
+/** The open history sheet's right-click menu: where it sits, and the row it hit. */
+interface HistoryMenuState {
+  readonly x: number;
+  readonly y: number;
+  readonly index: number | null;
+}
 
 export function MobileCommandBar() {
   const { t } = useI18n();
@@ -40,8 +53,85 @@ export function MobileCommandBar() {
   // Read once: the hand-off effect depends on the boolean, not on the controller
   // object it is rebuilt into on every render.
   const focused = line.focused;
-  const historyRows = mobileHistoryRows(shell.historyEntries);
+  // Memoized on the log's identity: the effect below depends on this array, and
+  // `mobileHistoryRows` returns a new list on every call.
+  const historyRows = useMemo(() => mobileHistoryRows(shell.historyEntries), [shell.historyEntries]);
   const showHistory = shell.historyOpen && !line.textMode;
+
+  // Copy state shared with the docked panel. The serialized text is the sheet's
+  // own visible order — newest first — never the array's storage order.
+  const copy = useHistoryCopy();
+  const copyText = copy.copy;
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  const copyButtonRef = useRef<HTMLButtonElement | null>(null);
+  const hovered = useRef(false);
+  const [copyMenu, setCopyMenu] = useState<HistoryMenuState | null>(null);
+  const menuIndex = copyMenu?.index ?? null;
+  const menuEntry = menuIndex !== null ? historyRows[menuIndex] ?? null : null;
+
+  function copyAll() {
+    copyText(commandHistoryText(historyRows));
+  }
+
+  function runCopyMenu(item: ContextMenuItem) {
+    setCopyMenu(null);
+    if (item.id === 'history.copy_entry') {
+      // The sheet renders entries only (no attached output), so the entry's own
+      // text is the whole per-row copy.
+      if (menuEntry !== null) copyText(commandHistoryText([menuEntry]));
+      return;
+    }
+    copyAll();
+  }
+
+  function openCopyMenu(event: React.MouseEvent<HTMLDivElement>) {
+    if (!showHistory) return;
+    event.preventDefault();
+    const target = event.target as Element | null;
+    const holder = target !== null && typeof target.closest === 'function'
+      ? target.closest('[data-history-index]')
+      : null;
+    const raw = holder !== null ? holder.getAttribute('data-history-index') : null;
+    const index = raw !== null && /^\d+$/.test(raw) ? Number(raw) : null;
+    setCopyMenu({ x: event.clientX, y: event.clientY, index });
+  }
+
+  // Ctrl+C / Cmd+C on a hardware keyboard while the sheet is the reading surface
+  // (focus or a selection inside it). The same non-interception rule as the
+  // desktop panel: a focused text field keeps native copy, and a press the sheet
+  // does not own reaches the shell's COPYCLIP path untouched.
+  useEffect(() => {
+    if (!showHistory) {
+      // A closed sheet is not a reading surface, and its menu must close with it.
+      hovered.current = false;
+      setCopyMenu(null);
+      return undefined;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isHistoryCopyChord(event)) return;
+      if (isTextEntryTarget(event.target) || isTextEntryTarget(document.activeElement)) return;
+      const reading = historySurfaceReading(sheetRef.current);
+      // The open menu belongs to this sheet, so Ctrl+C there is still a history
+      // copy rather than COPYCLIP.
+      const menuOpen = copyMenu !== null;
+      if (!menuOpen && !hovered.current && !reading.focused && !reading.selectionInside) return;
+      event.preventDefault();
+      event.stopPropagation();
+      copyText(reading.selectedText !== '' ? reading.selectedText : commandHistoryText(historyRows));
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [showHistory, copyMenu, copyText, historyRows]);
+
+  const menuModel = useMemo<ContextMenuModel>(() => ({
+    sections: [{
+      id: 'history-copy',
+      items: [
+        { id: 'history.copy_entry', key: 'command.history.copy_entry', command: null, enabled: menuEntry !== null },
+        { id: 'history.copy_all', key: 'command.history.copy_all', command: null, enabled: historyRows.length > 0 },
+      ],
+    }],
+  }), [menuEntry, historyRows.length]);
 
   // The same outside-press hand-off the docked field installs: a press on the
   // drawing must blur the field **before** it reaches `.native-input`, or the
@@ -66,18 +156,49 @@ export function MobileCommandBar() {
   return (
     <div ref={rootRef} className="mobile-commandbar app-region">
       {line.listOpen || showHistory ? (
-        <div className="mobile-sheet">
+        <div
+          className="mobile-sheet"
+          ref={sheetRef}
+          onPointerEnter={() => { hovered.current = true; }}
+          onPointerLeave={() => { hovered.current = false; }}
+          onContextMenu={openCopyMenu}
+        >
           <div className="mobile-sheet__head">
             <span>{showHistory ? t('command.history') : t('command.category.commands')}</span>
             <div className="mobile-sheet__actions">
               {showHistory ? (
-                <IconButton
-                  icon="clearSelection"
-                  size="sm"
-                  label={t('command.clear_history')}
-                  disabled={shell.historyEntries.length === 0}
-                  onClick={shell.clearHistory}
-                />
+                <>
+                  {/* The same live region as the docked panel: the outcome of a
+                      copy by button, long-press menu or hardware chord. */}
+                  <span
+                    className={[
+                      'mobile-sheet__status',
+                      copy.status === 'failed' ? 'is-failed' : '',
+                      copy.status === 'copied' ? 'is-copied' : '',
+                    ].filter(Boolean).join(' ')}
+                    role="status"
+                  >
+                    {copy.status === null
+                      ? ''
+                      : t(copy.status === 'failed' ? 'command.history.copy_failed' : 'command.history.copied')}
+                  </span>
+                  <IconButton
+                    ref={copyButtonRef}
+                    icon="copy"
+                    size="sm"
+                    label={t('command.history.copy')}
+                    title={`${t('command.history.copy')} (Ctrl+C)`}
+                    disabled={historyRows.length === 0}
+                    onClick={copyAll}
+                  />
+                  <IconButton
+                    icon="clearSelection"
+                    size="sm"
+                    label={t('command.clear_history')}
+                    disabled={shell.historyEntries.length === 0}
+                    onClick={shell.clearHistory}
+                  />
+                </>
               ) : null}
               <IconButton
                 icon="close"
@@ -96,7 +217,7 @@ export function MobileCommandBar() {
               // not a control (`.is-error`, styled in `mobile.css`).
               <ol className="mobile-sheet__rows mobile-sheet__list" aria-label={t('command.history')}>
                 {historyRows.map((entry, index) => (
-                  <li key={`${entry.kind}-${index}`}>
+                  <li key={`${entry.kind}-${index}`} data-history-index={index}>
                     {entry.kind === 'command' ? (
                       <button
                         type="button"
@@ -165,6 +286,19 @@ export function MobileCommandBar() {
         <p className="mobile-commandbar__message error" role="alert" title={shell.displayedError}>
           {bannerText}
         </p>
+      ) : null}
+      {copyMenu !== null ? (
+        // Reuses the shortcut-menu overlay: fixed at the press, keyboard-driven,
+        // dismissed by Escape/Tab, an outside press, blur, resize or scroll.
+        <ContextMenu
+          menu={menuModel}
+          anchor={{ x: copyMenu.x, y: copyMenu.y }}
+          onRun={runCopyMenu}
+          onDismiss={({ restoreFocus }) => {
+            setCopyMenu(null);
+            if (restoreFocus) copyButtonRef.current?.focus();
+          }}
+        />
       ) : null}
     </div>
   );

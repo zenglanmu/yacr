@@ -59,7 +59,7 @@
 > **完整清单不在这里**：穷尽的 **195 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
 > `docs/autocad-2026-command-coverage.md` 的「词表总量」；本节只保留**有行为注解**的行。
 > 选择子与别名的**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs`
-> （`COMMAND_TABLE` **195** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
+> （`COMMAND_TABLE` **196** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
 > `ARGUMENT_SELECTORS` **44** / `COMMAND_ALIASES` **67**）。
 > 本表的 **canonical 列**只出现**被准入的名字**，**别名列**只出现 `COMMAND_ALIASES` 里的真实行；
 > 键位、面板与 IPC 能力见 §2a，**不混进命令表**。
@@ -132,6 +132,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `ZOOMOUT` | 导航（固定步进缩小，步进为放大的倒数） | 否 | — |
 | `OPEN` | 宿主 | 否 | — |
 | `NEW` | 宿主 | 否 | — |
+| `CLOSE` | 宿主（关闭当前图纸并回到开始页；无未保存提示/多文档） | 否 | — |
 | `SAVE` | 宿主（有损 DXF 另存） | 否 | `QSAVE`、`SAVEAS` |
 | `PLOT` | 宿主（矢量导出 SVG/PDF） | 否 | `EXPORT`、`PRINT` |
 | `SWITCH2D3D` | 观察（2D 俯视 ↔ 3D 透视切换；切回 2D 恢复保存的相机） | 否 | — |
@@ -212,7 +213,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
   `interaction.orthoEnabled`），启动与每次权威换图后重新施加；
   未设置时保持会话默认（**关**）。与 `SNAP` 一样，设置写入只在活值不同时派发切换命令。
 - `COPYCLIP` 是**只读**捕获，Viewer 亦可用；`CUTCLIP`/`PASTECLIP` 为 work-only。
-- `OPEN`/`NEW`/`SAVE`/`PLOT` 为**宿主自有**：宿主未提供能力时命令层返回显式 `Unsupported`
+- `OPEN`/`NEW`/`CLOSE`/`SAVE`/`PLOT` 为**宿主自有**：宿主未提供能力时命令层返回显式 `Unsupported`
   （不会静默 no-op）。
 - 别名：**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES`（**67** 行），
   本页 §2b 是它的转写。旧文档引用的 `cad-ui-slint` 别名/同义词/未实现命令三张表**已随 Slint 退役删除**，
@@ -226,6 +227,8 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
   与等轴测（`top`/`bottom`/`front`/`back`/`left`/`right`/`isometric`，`StandardView::ALL` 共 **7** 个键）
   由宿主 IPC **`cad_standard_view`** 投递（`crates/cad-desktop-shell/src/commands.rs`）。
   **`VIEW TOP`、`VIEW BOTTOM`、`VIEW MODE` 之类的“命令行名”不存在。**
+- **选择加选**：普通单击替换当前选择；`Shift`+单击在共享输入路径里以 `SelectionMode::Add` 并入当前选择
+  （与 `Shift`+框选一致）。没有 `Ctrl`/`Meta` 加选，也没有 `PICKADD` 系统变量。
 - **清除选择**：**没有** `CLEAR SELECTION` / `DESELECT` 这个选择子或别名。`SELECTALL` 是全选；
   `CANCEL` 取消进行中的交互；`Esc` 是**键**（见 §3），**不是**命令名、也不是 `DESELECT` 的别名。
 - **chrome 本地选择子**：`LAYER`、`PROPERTIES` 由 chrome 自己消费

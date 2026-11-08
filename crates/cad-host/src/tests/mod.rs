@@ -17,6 +17,7 @@ mod box_select;
 mod box_select_edge_cases;
 mod capture_candidate;
 mod compat;
+mod document_lifecycle;
 mod edit_receipt;
 mod engine_config;
 mod file_open_save;
@@ -171,6 +172,8 @@ fn options() -> HostOptions {
         images_dir: None,
         headless: false,
         drawing: None,
+        // tests keep the historical demo document
+        start_blank: false,
         size: [800.0, 600.0],
     }
 }

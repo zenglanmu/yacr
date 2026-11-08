@@ -86,7 +86,8 @@ export const GESTURE_ONLY_COMMANDS: readonly string[] = Object.freeze(['ORBIT'])
  * answers the no-document case for selection-gated commands itself).
  */
 export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
-  'SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK',
+  // CLOSE ends the open drawing; the start page has nothing to close.
+  'CLOSE', 'SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT', 'STATUS', 'LAYTHW', 'HATCHTOBACK',
   'LAYERSTATE', 'LTSCALE', 'LAYWALK',
   // The 2026-11-07 selection/filter/find/visibility batch queries or hides the
   // open drawing's entities, so the start page disables all ten with the

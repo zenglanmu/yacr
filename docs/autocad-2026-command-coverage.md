@@ -27,9 +27,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **172** |
-| **已实现合计（完整 + 部分）** | **222** |
-| 未实现 | **759** |
+| 部分实现（有写明的界） | **173** |
+| **已实现合计（完整 + 部分）** | **223** |
+| 未实现 | **758** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -54,6 +54,9 @@
 > 官方清单从 123 提升到 **222 已实现（50 完整 + 172 部分）/ 759 未实现**。
 > 100 个名字中 `TRACE` 是 AutoCAD 2026 的协作追踪，本构建同名命令是旧式宽线带，
 > 按“同名不同义”排除（与 `MEASURE` 同一口径）。
+
+> **2026-11-08 增补**：`CLOSE` 以“关闭当前唯一文档”的部分实现计入
+> **223 已实现（50 完整 + 173 部分）/ 758 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -114,6 +117,7 @@
 | `CIRCLE` | 已实现 | — |
 | `CLEANSCREENOFF` | 部分实现 | chrome 本地选择子：显式退出 clean-screen；只恢复 chrome 可见性，不重开各面板 |
 | `CLEANSCREENON` | 部分实现 | chrome 本地选择子：显式进入 clean-screen；只隐藏 chrome，不记录各面板的独立开关 |
+| `CLOSE` | 部分实现 | 关闭当前文档并回到开始页；无未保存修改提示（没有 dirty 模型），无多文档。 |
 | `COPY` | 已实现 | — |
 | `COPYBASE` | 部分实现 | 应用内剪贴板 + 基点；不是 OS 剪贴板，不跨应用 |
 | `COPYCLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
@@ -503,7 +507,7 @@
 | 174 | `CLEANSCREENON` | 部分实现 | Clears the screen of toolbars and dockable windows, excluding the command window. | chrome 本地选择子：显式进入 clean-screen；只隐藏 chrome，不记录各面板的独立开关 |
 | 175 | `CLIP` | 未实现 | Crops selected objects such as blocks, external references, images, viewports, and underlays to a specified boundary. | — |
 | 176 | `CLIPIT` | 未实现 | Clips xrefs or images with lines and curves. | — |
-| 177 | `CLOSE` | 未实现 | Closes the current drawing. | — |
+| 177 | `CLOSE` | 部分实现 | Closes the current drawing. | 只关闭当前唯一文档并回到开始页；无未保存修改提示/保存确认（项目没有 dirty 模型），无多文档/CLOSEALL。 |
 | 178 | `CLOSEALL` | 未实现 | Closes all currently open drawings. | — |
 | 179 | `CLOSEALLOTHER` | 未实现 | Closes all other open drawings, except the current drawing. | — |
 | 180 | `-COLOR` | 未实现 | Sets the color for new objects from the Command prompt. | — |

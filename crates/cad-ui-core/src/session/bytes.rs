@@ -195,6 +195,8 @@ mod tests {
                 images_dir: None,
                 headless: false,
                 drawing: None,
+                // historical demo-document fixture (not a production host)
+                start_blank: false,
                 size: [800.0, 600.0],
             },
             platform,

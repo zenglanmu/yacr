@@ -638,6 +638,10 @@ fn options(metrics: Metrics) -> HostOptions {
         images_dir: None,
         headless: false,
         drawing: None,
+        // The browser carrier is a production host: start on the empty
+        // `untitled` drawing. Opening the synthetic fixture afterwards is a
+        // separate, explicit open — not the default document.
+        start_blank: true,
         size: metrics.css,
     }
 }

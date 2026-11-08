@@ -20,6 +20,14 @@ pub struct HostOptions {
     pub headless: bool,
     /// A drawing to open at startup (`--open`) or the headless input.
     pub drawing: Option<PathBuf>,
+    /// Start on an empty `untitled` drawing instead of the synthetic demo.
+    ///
+    /// Production hosts set this to `true`: a new session must begin on a real
+    /// (empty) document, not the built-in demo geometry. Omitting/false keeps
+    /// the historical demo-document behaviour used by tests and headless
+    /// fixtures, so their expectations do not move. A configured `drawing`
+    /// replaces the initial document either way.
+    pub start_blank: bool,
     pub size: [f64; 2],
 }
 
@@ -508,5 +516,17 @@ impl HostCore {
             .application
             .set_vendor_representations(store.clone());
         self.render.set_vendor_representations(store);
+    }
+}
+
+/// The initial controller selected by [`HostOptions::start_blank`].
+///
+/// Production hosts start on a real empty `untitled` drawing; tests and
+/// headless fixtures keep the historical synthetic demo.
+pub(crate) fn initial_controller(options: &HostOptions) -> CadResult<HostController> {
+    if options.start_blank {
+        HostController::with_blank_document(options.size)
+    } else {
+        HostController::with_demo_document(options.size)
     }
 }
