@@ -1,4 +1,25 @@
 AD
+## 2026-11-08 发布 v0.1.5（首次 bump 包内版本）
+
+- **版本**：`Cargo.toml` workspace 版本、四个 `tauri.conf.json`、Flatpak metainfo 全部 `0.1.2` →
+  `0.1.5`；`Cargo.lock` 只有 28 处 workspace 成员 `version` 行变化（无依赖/checksum 漂移）。
+  `v0.1.3`/`v0.1.4` “只打 tag 不 bump”的历史到此结束，产物文件名与包内版本现在与 tag 一致。
+- **tag / run**：`v0.1.5` → `CI build layers` run
+  [`42457923268`](https://github.com/zenglanmu/yacr/actions/runs/42457923268) **全部 job 绿**
+  （linux/windows/macos/android 四个 release + web-build/web-smoke/web-deploy + 三个 check）；
+  `CI` run [`42457923271`](https://github.com/zenglanmu/yacr/actions/runs/42457923271) 绿
+  （`android-check` 按 event 条件 skipped，不是失败）。
+- **artifact（文件名/签名已从 job 日志核对）**：`yacr-0.1.5-linux-x86_64.flatpak` + `.sha256`
+  + `.flatpak.gpg`（仓库 GPG key `4524FCCB…754`，OSTree commit 已签名）；`yacr-0.1.5-windows-x86_64.zip`
+  + `.sha256`（**unsigned**：未配置自签名 PFX secret）；`yacr-0.1.5-macos-universal.tar.gz`
+  （ad-hoc 签名、未公证）；`app-universal-release.apk` + `SIGNING.txt`
+  （仓库自签 keystore，`apksigner verify` v2/v3 = true，`CN=Yacr Release Signing`）。
+- **本地已运行**：`cargo metadata --locked --offline`、`python3 scripts/test-package-linux-release.py`
+  （14 tests OK）、四个 tauri.conf JSON 解析 + 版本断言、`git diff Cargo.lock` 逐行核对。
+- **NOT RUN / NOT VERIFIED**：真机、真实 GPU、窗口/像素/性能；Windows/macOS 运行时；Android
+  未安装运行；DWG 兼容矩阵。CI 只证明**编译 / 打包 / 签名 / 上传**。
+- 文档：`docs/release-notes/v0.1.5.md`（资产清单 + 诚实范围）。
+
 ## 2026-11-08 退出期 `corrupted double-linked list` 定位：WebKitWebProcess/Mesa atexit，非 yacr
 
 - **报告**：启动 → 打开 DWG → 关窗，终端在 `run event: Exit` 之后打印 `corrupted double-linked list`。
