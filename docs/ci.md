@@ -296,3 +296,10 @@ Linux Flatpak 的本地运行方式见 `docs/flatpak.md`；Windows/macOS 打包�
 缺常量表，**不会**当成通过）。**守门范围只有名字**：§1/§3/§4/§5 与 §3 的语义边界仍是人工核对。
 本条目的证据是**本地**退出码（`scripts/test-check-command-docs.py` 注入伪造 canonical 与伪造别名
 并断言退出 1），**不是** GitHub runner 上的 job 结果（本环境 NOT RUN）。
+
+## 宣传页部署（Landing site）
+
+静态宣传页 `apps/landing/` 部署到 Cloudflare Pages（`https://yacr.pages.dev/`），安装包镜像到
+R2 桶 `yacr-downloads`。`.github/workflows/site.yml` 是**手动 dispatch**（发布完成后再跑），
+先 R2 后 Pages；契约测试 `python3 scripts/test-landing-site.py` 已接入 `core-quality`。
+入口/凭据/诚实边界见 [`docs/landing-site.md`](landing-site.md)。

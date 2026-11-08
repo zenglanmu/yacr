@@ -116,6 +116,7 @@ jobs:
           python3 scripts/test-macos-host.py
           python3 scripts/test-ui-migration-guards.py
           python3 scripts/test-release-workflows.py
+          python3 scripts/test-landing-site.py
       - name: Retained platform-neutral node contracts (no web shell)
         # scripts/test-web-pixels.mjs is the one web-era test kept because it is a
         # pure node zlib PNG decoder with no web-shell/wasm/browser dependency.

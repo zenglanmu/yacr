@@ -103,6 +103,8 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "python3 scripts/test-android-host.py",
         "test-ui-migration-guards.py",
         "test-release-workflows.py",
+        # The static landing page + manual R2/Pages deployment contract.
+        "python3 scripts/test-landing-site.py",
     ),
     "windows-check": (
         "cargo check -p app-windows --all-targets --locked",

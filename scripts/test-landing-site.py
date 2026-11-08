@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Contract test for the static yacr landing page and its deployment path.
+
+Standard library only. It deliberately does not run any network call, browser or
+Cloudflare command: it checks the committed page/manifest shape and the
+fail-closed fragments of the two deployment scripts and the manual workflow.
+
+Run: python3 scripts/test-landing-site.py
+"""
+from __future__ import annotations
+
+import json
+import pathlib
+import re
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+LANDING = ROOT / "apps" / "landing"
+DEPLOY = ROOT / "scripts" / "deploy-landing-pages.sh"
+UPLOAD = ROOT / "scripts" / "upload-r2-downloads.sh"
+WORKFLOW = ROOT / ".github" / "workflows" / "site.yml"
+
+RELEASE = "v0.1.5"
+GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.5/"
+KNOWN_ASSETS = {
+    "linux": ("yacr-0.1.5-linux-x86_64.flatpak", 105454832),
+    "windows": ("yacr-0.1.5-windows-x86_64.zip", 84979826),
+    "macos": ("yacr-0.1.5-macos-universal.tar.gz", 114179356),
+    "android": ("app-universal-release.apk", 91887073),
+}
+
+
+def fail(message: str, errors: list[str]) -> None:
+    errors.append(message)
+
+
+def non_empty(path: pathlib.Path, errors: list[str]) -> str | None:
+    if not path.is_file():
+        fail(f"missing file: {path.relative_to(ROOT)}", errors)
+        return None
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        fail(f"empty file: {path.relative_to(ROOT)}", errors)
+        return None
+    return text
+
+
+def check_manifest(text: str, errors: list[str]) -> None:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        fail(f"downloads.json is not valid JSON: {exc}", errors)
+        return
+    if not isinstance(data, dict):
+        fail("downloads.json must be a JSON object", errors)
+        return
+
+    if data.get("release") != RELEASE:
+        fail(f"downloads.json release must be {RELEASE!r}", errors)
+    if data.get("githubBase") != GITHUB_BASE:
+        fail(f"downloads.json githubBase must be {GITHUB_BASE!r}", errors)
+
+    cdn_base = data.get("cdnBase")
+    if cdn_base is not None and not (
+        isinstance(cdn_base, str) and cdn_base.startswith("https://")
+    ):
+        fail("downloads.json cdnBase must be null or an https:// URL", errors)
+
+    assets = data.get("assets")
+    if not isinstance(assets, dict):
+        fail("downloads.json assets must be an object", errors)
+        return
+    for label, (filename, size) in KNOWN_ASSETS.items():
+        entry = assets.get(label)
+        if not isinstance(entry, dict):
+            fail(f"downloads.json assets.{label} is missing", errors)
+            continue
+        if entry.get("file") != filename:
+            fail(
+                f"downloads.json assets.{label}.file must be {filename!r}",
+                errors,
+            )
+        if entry.get("size") != size:
+            fail(f"downloads.json assets.{label}.size must be {size}", errors)
+        sha256 = entry.get("sha256")
+        # The committed fallback manifest may omit hashes; when the R2 mirror
+        # rewrites it (`upload-r2-downloads.sh`) every asset carries one.
+        if sha256 is not None and (
+            not isinstance(sha256, str)
+            or re.fullmatch(r"[0-9a-fA-F]{64}", sha256) is None
+        ):
+            fail(f"downloads.json assets.{label}.sha256 is not a SHA-256 digest", errors)
+
+
+def check_index(text: str, errors: list[str]) -> None:
+    for fragment in (
+        "yacr.pages.dev",
+        "yacr-examples.pages.dev",
+        "223",
+        "981",
+        "Rust",
+        "React",
+        "Tauri",
+        "AGPL",
+        "Cloudflare",
+    ):
+        if fragment not in text:
+            fail(f"apps/landing/index.html is missing {fragment!r}", errors)
+
+
+def check_main_js(text: str, errors: list[str]) -> None:
+    for fragment in ("downloads.json", "cdnBase"):
+        if fragment not in text:
+            fail(f"apps/landing/main.js is missing {fragment!r}", errors)
+    if "catch" not in text and "githubBase" not in text:
+        fail(
+            "apps/landing/main.js has no fallback path when the manifest fetch fails "
+            "(expected `catch` or `githubBase`)",
+            errors,
+        )
+
+
+def check_scripts(errors: list[str]) -> None:
+    deploy = non_empty(DEPLOY, errors)
+    if deploy is not None:
+        for fragment in (
+            "set -euo pipefail",
+            "wrangler",
+            "pages deploy",
+            "yacr",
+            "CLOUDFLARE_API_TOKEN",
+            "CLOUDFLARE_ACCOUNT_ID",
+            "node --check",
+            "downloads.json",
+        ):
+            if fragment not in deploy:
+                fail(f"scripts/deploy-landing-pages.sh is missing {fragment!r}", errors)
+
+    upload = non_empty(UPLOAD, errors)
+    if upload is not None:
+        for fragment in (
+            "set -euo pipefail",
+            "domains/managed",
+            "result.domain",
+            "--remote",
+            "sha256sum -c",
+            "releases/",
+            "downloads.json",
+            "app-universal-release.apk",
+        ):
+            if fragment not in upload:
+                fail(f"scripts/upload-r2-downloads.sh is missing {fragment!r}", errors)
+
+
+def check_workflow(errors: list[str]) -> None:
+    text = non_empty(WORKFLOW, errors)
+    if text is None:
+        return
+    for fragment in (
+        "workflow_dispatch",
+        "upload_downloads",
+        "scripts/upload-r2-downloads.sh",
+        "scripts/deploy-landing-pages.sh",
+        "CLOUDFLARE_API_TOKEN",
+        "secrets.CLOUDFLARE_ACCOUNT_ID",
+        "concurrency",
+        "timeout-minutes",
+    ):
+        if fragment not in text:
+            fail(f".github/workflows/site.yml is missing {fragment!r}", errors)
+
+    # Manual-only: a tag push can race `publish-release.yml` before the release
+    # assets exist, so this workflow must not gain a `v*` tag trigger.
+    if "refs/tags/v" in text:
+        fail(
+            ".github/workflows/site.yml must stay workflow_dispatch-only; a tag "
+            "trigger can race publish-release.yml before assets exist",
+            errors,
+        )
+    if re.search(r"continue-on-error\s*:\s*true\b", text, re.IGNORECASE):
+        fail(".github/workflows/site.yml must not use continue-on-error: true", errors)
+    if "gh release" in text:
+        fail(
+            ".github/workflows/site.yml must not publish a GitHub Release "
+            "(publish-release.yml is the only entry point)",
+            errors,
+        )
+
+
+def main() -> int:
+    errors: list[str] = []
+    texts: dict[str, str] = {}
+    for name in ("index.html", "styles.css", "main.js", "downloads.json"):
+        text = non_empty(LANDING / name, errors)
+        if text is not None:
+            texts[name] = text
+    if "downloads.json" in texts:
+        check_manifest(texts["downloads.json"], errors)
+    if "index.html" in texts:
+        check_index(texts["index.html"], errors)
+    if "main.js" in texts:
+        check_main_js(texts["main.js"], errors)
+    check_scripts(errors)
+    check_workflow(errors)
+
+    if errors:
+        print(f"FAIL: {len(errors)} landing-site contract problem(s):", file=sys.stderr)
+        for error in errors:
+            print(f"  - {error}", file=sys.stderr)
+        return 1
+    print("OK: landing page, download manifest and deployment entry points satisfy the contract")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

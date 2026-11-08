@@ -1,0 +1,985 @@
+<!doctype html>
+<html lang="zh-CN" data-lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>yacr — Yet Another CAD in Rust · 用 Rust 写的开源 CAD</title>
+  <meta name="description" content="yacr 是一个用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。一个核心，多种载体。早期预览：尚无可交付产品，Linux 是当前唯一可运行的 GUI。">
+  <link rel="canonical" href="https://yacr.pages.dev/">
+  <meta name="theme-color" content="#08151D">
+  <meta name="robots" content="index, follow">
+  <meta name="author" content="zenglanmu">
+  <meta name="color-scheme" content="light">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="yacr">
+  <meta property="og:title" content="yacr — Yet Another CAD in Rust">
+  <meta property="og:description" content="Rust 核心负责文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。早期预览，尚无可交付产品。">
+  <meta property="og:url" content="https://yacr.pages.dev/">
+  <meta property="og:image" content="https://yacr.pages.dev/assets/yacr-1024.png">
+  <meta property="og:image:width" content="1024">
+  <meta property="og:image:height" content="1024">
+  <meta property="og:image:alt" content="yacr — cyan Y blueprint icon">
+  <meta property="og:locale" content="zh_CN">
+  <meta property="og:locale:alternate" content="en_US">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="yacr — Yet Another CAD in Rust">
+  <meta name="twitter:description" content="Open-source CAD with a Rust core and a React + Tauri interface. Early preview; Linux is the only runnable GUI.">
+  <meta name="twitter:image" content="https://yacr.pages.dev/assets/yacr-1024.png">
+
+  <link rel="icon" href="assets/yacr-icon.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/yacr-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="assets/yacr-16.png" sizes="16x16" type="image/png">
+  <link rel="apple-touch-icon" href="assets/yacr-1024.png">
+  <link rel="stylesheet" href="styles.css">
+  <script src="main.js" defer></script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "yacr",
+    "alternateName": "Yet Another CAD in Rust",
+    "applicationCategory": "DesignApplication",
+    "operatingSystem": "Linux, Windows, macOS, Android, Web",
+    "url": "https://yacr.pages.dev/",
+    "downloadUrl": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.5",
+    "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+    "isAccessibleForFree": true,
+    "description": "Open-source CAD viewing and measurement system with a Rust core and a React + Tauri interface. Early preview; no shippable product yet."
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">
+    <span class="lang--zh">跳到主要内容</span><span class="lang--en" lang="en">Skip to content</span>
+  </a>
+
+  <header class="site-header">
+    <div class="nav-shell">
+      <a class="brand" href="#hero" data-aria-zh="yacr 首页" data-aria-en="yacr home">
+        <img src="assets/yacr-icon.svg" width="40" height="40" alt="" decoding="async">
+        <span class="brand-lockup">
+          <span class="brand-word">yacr</span>
+          <span class="brand-meta">CAD / 01</span>
+        </span>
+      </a>
+
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" data-aria-zh="打开导航菜单" data-aria-en="Open navigation menu">
+        <span class="nav-toggle-box" aria-hidden="true"><span></span><span></span></span>
+        <span class="sr-only"><span class="lang--zh">菜单</span><span class="lang--en" lang="en">Menu</span></span>
+      </button>
+
+      <nav class="site-nav" id="site-nav" data-aria-zh="主导航" data-aria-en="Primary navigation">
+        <a class="nav-link" href="#features" data-nav="features"><span class="lang--zh">功能</span><span class="lang--en" lang="en">Features</span></a>
+        <a class="nav-link" href="#architecture" data-nav="architecture"><span class="lang--zh">架构</span><span class="lang--en" lang="en">Architecture</span></a>
+        <a class="nav-link" href="#platforms" data-nav="platforms"><span class="lang--zh">平台</span><span class="lang--en" lang="en">Platforms</span></a>
+        <a class="nav-link" href="#download" data-nav="download"><span class="lang--zh">下载</span><span class="lang--en" lang="en">Download</span></a>
+        <a class="nav-link nav-link--ext" href="https://github.com/zenglanmu/yacr" target="_blank" rel="noopener">GitHub<span class="ext" aria-hidden="true">↗</span></a>
+
+        <div class="lang-switch" role="group" data-aria-zh="语言" data-aria-en="Language">
+          <button type="button" data-lang-set="zh-CN" aria-pressed="true" lang="zh-CN">中</button>
+          <span class="lang-sep" aria-hidden="true">/</span>
+          <button type="button" data-lang-set="en" aria-pressed="false" lang="en">EN</button>
+        </div>
+
+        <a class="btn btn--nav" href="https://yacr-examples.pages.dev/" target="_blank" rel="noopener">
+          <span class="lang--zh">在线试用</span><span class="lang--en" lang="en">Try the web app</span>
+          <span class="ext" aria-hidden="true">↗</span>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <section class="hero" id="hero" aria-labelledby="hero-title">
+      <div class="hero-grid-bg" aria-hidden="true"></div>
+      <div class="wrap">
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <p class="hero-eyebrow">
+              <span class="pulse-dot" aria-hidden="true"></span>
+              <span class="lang--zh">Open-source CAD · 早期预览</span>
+              <span class="lang--en" lang="en">Open-source CAD · Early preview</span>
+            </p>
+            <h1 id="hero-title" lang="en">Yet another CAD,<br><span class="accent">written in Rust.</span></h1>
+            <p class="hero-cn">
+              <span class="lang--zh">一个核心，多种载体。</span>
+              <span class="lang--en" lang="en">One core. Every surface.</span>
+            </p>
+            <p class="hero-lead">
+              <span class="lang--zh">Rust 核心负责 DWG/DXF 文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。</span>
+              <span class="lang--en" lang="en">The Rust core owns DWG/DXF documents, geometry, commands, and wgpu rendering. React and Tauri handle the interface. One core, many surfaces.</span>
+            </p>
+
+            <div class="hero-notice" role="note">
+              <span class="notice-label">EARLY<br>PREVIEW</span>
+              <p>
+                <span class="lang--zh">项目仍在早期开发，<strong>尚无可交付产品</strong>；<strong>Linux 是当前唯一可运行的 GUI</strong>。其余载体的状态见下方平台卡片。</span>
+                <span class="lang--en" lang="en">The project is still in early development and <strong>there is no shippable product yet</strong>. <strong>Linux is currently the only runnable GUI</strong>; see the platform cards below for the other surfaces.</span>
+              </p>
+            </div>
+
+            <div class="hero-actions">
+              <a class="btn btn--primary" href="https://yacr-examples.pages.dev/" target="_blank" rel="noopener">
+                <span class="lang--zh">在线试用 Web 版</span><span class="lang--en" lang="en">Try the web app</span>
+                <span class="ext" aria-hidden="true">↗</span>
+              </a>
+              <a class="btn btn--ghost" href="#download">
+                <span class="lang--zh">下载 v0.1.5</span><span class="lang--en" lang="en">Download v0.1.5</span>
+                <span class="ext" aria-hidden="true">↓</span>
+              </a>
+              <a class="btn btn--text" href="https://github.com/zenglanmu/yacr" target="_blank" rel="noopener">
+                GitHub <span class="ext" aria-hidden="true">↗</span>
+              </a>
+            </div>
+          </div>
+
+          <figure class="hero-figure">
+            <div class="figure-plate">
+              <svg class="blueprint" viewBox="0 0 640 680" role="img" aria-labelledby="bp-title bp-desc" data-aria-zh="yacr 工程示意图：带尺寸标注与剖面线的 Y 形零件蓝图。这是插画，不是产品截图。" data-aria-en="yacr engineering illustration: a Y-shaped part blueprint with dimensions and hatching. This is an illustration, not a product screenshot.">
+                <title id="bp-title">YACR Y-shaped part blueprint</title>
+                <desc id="bp-desc">A technical line drawing of a Y-shaped part with a central hub, hatching, centre lines, and orange dimension arrows. Illustration only; not a product screenshot.</desc>
+                <defs>
+                  <pattern id="bp-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+                    <path d="M32 0H0V32" fill="none" stroke="#86DEF1" stroke-opacity=".075" stroke-width="1"/>
+                  </pattern>
+                  <pattern id="bp-hatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <line x1="0" y1="0" x2="0" y2="9" stroke="#64B6CE" stroke-opacity=".5" stroke-width="1.1"/>
+                  </pattern>
+                  <clipPath id="bp-arm-r">
+                    <rect x="281" y="145" width="68" height="180" rx="6" transform="rotate(120 315 325)"/>
+                  </clipPath>
+                  <clipPath id="bp-frame">
+                    <rect x="18" y="18" width="604" height="644"/>
+                  </clipPath>
+                </defs>
+
+                <g clip-path="url(#bp-frame)">
+                  <rect x="18" y="18" width="604" height="644" fill="#08151D"/>
+                  <rect x="18" y="18" width="604" height="644" fill="url(#bp-grid)"/>
+                  <g fill="none" stroke="#86DEF1">
+                    <circle cx="315" cy="325" r="252" stroke-opacity=".055"/>
+                    <circle cx="315" cy="325" r="196" stroke-opacity=".08" stroke-dasharray="2 8"/>
+                    <circle cx="315" cy="325" r="132" stroke-opacity=".055"/>
+                    <path d="M18 325H622M315 18V662" stroke-opacity=".1" stroke-dasharray="1 7"/>
+                  </g>
+
+                  <g stroke="#86DEF1" stroke-opacity=".45" stroke-width="1.2" fill="none">
+                    <path d="M18 40V18H40M600 18h22v22M622 640v22h-22M40 662H18v-22"/>
+                  </g>
+                  <g fill="#86DEF1" fill-opacity=".34" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="8" letter-spacing="1">
+                    <text x="100" y="30">1</text>
+                    <text x="315" y="30" text-anchor="middle">2</text>
+                    <text x="520" y="30">3</text>
+                    <text x="31" y="185">A</text>
+                    <text x="31" y="435">B</text>
+                    <text x="31" y="632">C</text>
+                  </g>
+
+                  <g transform="translate(-18 22)" fill="#06121A" stroke="#1C4B5C" stroke-width="2" stroke-linejoin="round">
+                    <rect x="281" y="145" width="68" height="180" rx="6"/>
+                    <rect x="281" y="145" width="68" height="180" rx="6" transform="rotate(120 315 325)"/>
+                    <rect x="281" y="145" width="68" height="180" rx="6" transform="rotate(240 315 325)"/>
+                    <circle cx="315" cy="325" r="54"/>
+                  </g>
+
+                  <g class="y-front" stroke="#86DEF1" stroke-width="2.2" stroke-linejoin="round">
+                    <rect x="281" y="145" width="68" height="180" rx="6" fill="#64B6CE" fill-opacity=".1"/>
+                    <rect x="281" y="145" width="68" height="180" rx="6" fill="#64B6CE" fill-opacity=".1" transform="rotate(120 315 325)"/>
+                    <rect x="281" y="145" width="68" height="180" rx="6" fill="#64B6CE" fill-opacity=".1" transform="rotate(240 315 325)"/>
+                  </g>
+                  <rect x="90" y="90" width="480" height="460" fill="url(#bp-hatch)" clip-path="url(#bp-arm-r)"/>
+
+                  <g stroke="#FF9B58" stroke-opacity=".6" stroke-dasharray="6 5" stroke-width="1.2">
+                    <path d="M315 325V150M315 325 471 415M315 325 159 415"/>
+                  </g>
+
+                  <g fill="#0B202B" stroke="#86DEF1" stroke-width="2.2">
+                    <circle cx="315" cy="325" r="54"/>
+                  </g>
+                  <circle cx="315" cy="325" r="18" fill="none" stroke="#86DEF1" stroke-width="1.6"/>
+                  <g fill="none" stroke="#86DEF1" stroke-opacity=".6">
+                    <circle cx="315" cy="325" r="54" stroke-dasharray="2 5"/>
+                    <circle cx="315" cy="325" r="5" stroke="#FF9B58" stroke-opacity="1"/>
+                  </g>
+
+                  <g stroke="#FF9B58" stroke-width="1.2" fill="none">
+                    <path d="M281 145V112M349 145V112M281 118H349"/>
+                    <path d="M349 145H553M488 444H553M545 145V444"/>
+                    <path d="M142 444V522M488 444V522M142 514H488"/>
+                    <path d="M315 325H389" stroke-opacity=".8"/>
+                    <path d="M315 175A150 150 0 0 1 445 400" stroke-opacity=".85" stroke-dasharray="3 4"/>
+                  </g>
+                  <g fill="#FF9B58">
+                    <path d="M281 118 288 114V122Z"/>
+                    <path d="M349 118 342 114V122Z"/>
+                    <path d="M545 145 541 152H549Z"/>
+                    <path d="M545 444 541 437H549Z"/>
+                    <path d="M142 514 149 510V518Z"/>
+                    <path d="M488 514 481 510V518Z"/>
+                  </g>
+                  <g fill="#FF9B58" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="8.5" letter-spacing=".6">
+                    <text x="315" y="104" text-anchor="middle">68.00</text>
+                    <text x="560" y="299" text-anchor="middle" transform="rotate(-90 560 299)">299.40 REF</text>
+                    <text x="315" y="508" text-anchor="middle">345.80 REF</text>
+                    <text x="452" y="286">120°</text>
+                  </g>
+                  <g fill="#86DEF1" fill-opacity=".62" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="7.5" letter-spacing=".7">
+                    <text x="396" y="310">⌀ 108.00</text>
+                    <text x="46" y="72" fill="#FF9B58" fill-opacity=".9" font-size="8" letter-spacing="1.4">DETAIL / Y-01</text>
+                    <text x="46" y="86">PROFILE · REV A</text>
+                    <text x="46" y="542">UNITS: MM</text>
+                  </g>
+
+                  <g stroke="#86DEF1" stroke-opacity=".32" fill="none">
+                    <rect x="402" y="548" width="212" height="96"/>
+                    <path d="M402 572H614M402 596H614M402 620H614M522 548V644"/>
+                  </g>
+                  <g fill="#F3F0E8" fill-opacity=".72" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="7.5" letter-spacing=".5">
+                    <text x="410" y="565">YACR / Y-01</text>
+                    <text x="530" y="565">A3</text>
+                    <text x="410" y="589">PROFILE — Y</text>
+                    <text x="530" y="589">1:1</text>
+                    <text x="410" y="613">SCALE 1:1 · MM</text>
+                    <text x="530" y="613">SHEET 1/1</text>
+                    <text x="410" y="637">REV A · 2026</text>
+                    <text x="530" y="637" fill="#FF9B58" fill-opacity=".95">ILLUSTRATION</text>
+                  </g>
+                </g>
+
+                <rect x="18" y="18" width="604" height="644" fill="none" stroke="#86DEF1" stroke-opacity=".35" stroke-width="1.2"/>
+              </svg>
+              <span class="figure-stamp" aria-hidden="true">NOT A<br>SCREENSHOT</span>
+            </div>
+            <figcaption>
+              <span class="lang--zh">工程示意图，不是产品截图。</span>
+              <span class="lang--en" lang="en">Engineering illustration, not a screenshot.</span>
+              <span class="fig-meta">Y-01 · PLAN / 2026</span>
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="stat-band">
+        <div class="wrap">
+          <div class="stat-grid">
+            <div class="stat">
+              <p class="stat-value"><span>223</span><span class="stat-slash">/</span><span>981</span></p>
+              <p class="stat-label">
+                <span class="lang--zh">条命令有实现路径</span><span class="lang--en" lang="en">commands with an implementation path</span>
+              </p>
+              <p class="stat-note">
+                <span class="lang--zh">50 完整 + 173 部分 · 清单计数，不是兼容率</span>
+                <span class="lang--en" lang="en">50 complete + 173 partial · list count, not a compatibility rate</span>
+              </p>
+            </div>
+            <div class="stat">
+              <p class="stat-value">DWG<span class="stat-plus">+</span>DXF</p>
+              <p class="stat-label">
+                <span class="lang--zh">读取 / 解析</span><span class="lang--en" lang="en">read / parse</span>
+              </p>
+              <p class="stat-note">
+                <span class="lang--zh">DWG 兼容性未验收</span><span class="lang--en" lang="en">DWG compatibility is not verified</span>
+              </p>
+            </div>
+            <div class="stat">
+              <p class="stat-value">Rust<span class="stat-plus">+</span>wgpu</p>
+              <p class="stat-label">
+                <span class="lang--zh">核心与渲染</span><span class="lang--en" lang="en">core and renderer</span>
+              </p>
+              <p class="stat-note">
+                <span class="lang--zh">cad-db 是唯一权威</span><span class="lang--en" lang="en">cad-db is the single authority</span>
+              </p>
+            </div>
+            <div class="stat">
+              <p class="stat-value">5</p>
+              <p class="stat-label">
+                <span class="lang--zh">种载体</span><span class="lang--en" lang="en">surfaces</span>
+              </p>
+              <p class="stat-note">Linux / Windows / macOS / Android / Web</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--arch" id="architecture" aria-labelledby="arch-title">
+      <div class="wrap">
+        <header class="section-head reveal">
+          <p class="section-index"><span class="idx">01</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">架构</span><span class="lang--en" lang="en">Architecture</span></p>
+          <h2 class="display" id="arch-title">
+            <span class="lang--zh">Rust 是核心，<br>但不是全部。</span>
+            <span class="lang--en" lang="en">Rust at the core.<br>Not the whole story.</span>
+          </h2>
+          <p class="lead">
+            <span class="lang--zh">yacr 的文档、几何、命令和渲染核心是 Rust；界面是 React + TypeScript，运行在 Tauri WebView 中。不是 100% pure Rust，这是为了“一棵 React 树，多种载体”的有意取舍。</span>
+            <span class="lang--en" lang="en">yacr’s document, geometry, command, and rendering core is Rust. The interface is React + TypeScript running inside a Tauri WebView. It is not 100% pure Rust — a deliberate trade-off for one React tree across many surfaces.</span>
+          </p>
+        </header>
+
+        <div class="arch-diagram reveal">
+          <ol class="arch-strip" data-aria-zh="架构条：Rust 核心到 cad-host 与 cad-ui-core，再到 React + Tauri，最后到五种载体" data-aria-en="Architecture strip: Rust core to cad-host and cad-ui-core, then React + Tauri, then five surfaces">
+            <li class="arch-node arch-node--core">
+              <span class="node-tag">01 / DATA &amp; RENDER</span>
+              <span class="node-title">Rust core</span>
+              <span class="node-items">
+                <code>cad-db</code><code>geometry</code><code>commands</code><code>wgpu</code>
+              </span>
+            </li>
+            <li class="arch-node">
+              <span class="node-tag">02 / BOUNDARY</span>
+              <span class="node-title">Host contract</span>
+              <span class="node-items">
+                <code>cad-host</code><code>cad-ui-core</code>
+              </span>
+            </li>
+            <li class="arch-node">
+              <span class="node-tag">03 / INTERFACE</span>
+              <span class="node-title">React + Tauri</span>
+              <span class="node-items">
+                <code>React</code><code>TypeScript</code><code>WebView</code>
+              </span>
+            </li>
+            <li class="arch-node arch-node--surface">
+              <span class="node-tag">04 / SURFACES</span>
+              <span class="node-title">
+                <span class="lang--zh">一棵树，五种载体</span><span class="lang--en" lang="en">One tree, five surfaces</span>
+              </span>
+              <span class="node-items">
+                <code>Linux</code><code>Windows</code><code>macOS</code><code>Android</code><code>Web</code>
+              </span>
+            </li>
+          </ol>
+        </div>
+
+        <div class="micro-grid reveal">
+          <article class="micro-card">
+            <p class="micro-num">01</p>
+            <h3>Rust core</h3>
+            <p>
+              <span class="lang--zh">文档、几何、命令、渲染的唯一权威。UI 和渲染都是派生。</span>
+              <span class="lang--en" lang="en">The single authority for documents, geometry, commands, and rendering. UI and rendering are derived.</span>
+            </p>
+          </article>
+          <article class="micro-card">
+            <p class="micro-num">02</p>
+            <h3>React chrome</h3>
+            <p>
+              <span class="lang--zh">同一棵 React 树覆盖桌面与移动，按宽度切换，不按构建目标分叉。</span>
+              <span class="lang--en" lang="en">One React tree covers desktop and mobile, switching by width rather than by build target.</span>
+            </p>
+          </article>
+          <article class="micro-card">
+            <p class="micro-num">03</p>
+            <h3>Native surface</h3>
+            <p>
+              <span class="lang--zh">native-below 用原生会话，dom-canvas 用 wasm 会话；两条路径各自持有文档。</span>
+              <span class="lang--en" lang="en">Native sessions for native-below; wasm sessions for dom-canvas. Each path owns its document.</span>
+            </p>
+          </article>
+        </div>
+
+        <div class="ownership reveal">
+          <div class="ownership-cell">
+            <span class="tag">native-below</span>
+            <p class="ownership-mode">Linux Wayland · Windows · macOS · Android</p>
+            <p class="ownership-text">
+              <span class="lang--zh">native 会话持有 <code>cad-db</code>。透明 WebView 在上，原生 CAD surface 在下。</span>
+              <span class="lang--en" lang="en">The native session owns <code>cad-db</code>. A transparent WebView sits above the native CAD surface.</span>
+            </p>
+          </div>
+          <div class="ownership-cell">
+            <span class="tag tag--cyan">dom-canvas</span>
+            <p class="ownership-mode">X11 / XWayland · Web</p>
+            <p class="ownership-text">
+              <span class="lang--zh">wasm 会话持有 <code>cad-db</code>，CAD 画在 DOM <code>&lt;canvas&gt;</code> 上。</span>
+              <span class="lang--en" lang="en">The wasm session owns <code>cad-db</code>; CAD is drawn on a DOM <code>&lt;canvas&gt;</code>.</span>
+            </p>
+          </div>
+          <p class="ownership-note">
+            <span class="lang--zh"><strong>不是同一份文档状态在两边共享。</strong>共享的是契约与 UI，不是数据；另一侧不得实例化第二份文档状态。</span>
+            <span class="lang--en" lang="en"><strong>The same document state is not shared across both.</strong> Contracts and UI are shared; data is not. Neither side may instantiate a second document state.</span>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--features" id="features" aria-labelledby="features-title">
+      <div class="wrap">
+        <header class="section-head reveal">
+          <p class="section-index"><span class="idx">02</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">功能</span><span class="lang--en" lang="en">Capabilities</span></p>
+          <h2 class="display" id="features-title">
+            <span class="lang--zh">先把看图和测量做对。</span>
+            <span class="lang--en" lang="en">Get viewing and measuring right first.</span>
+          </h2>
+          <p class="lead">
+            <span class="lang--zh">从导入、数据库、渲染到测量与命令覆盖，每张卡片都写明能力边界。</span>
+            <span class="lang--en" lang="en">From import and the database to rendering, measurement, and command coverage — every card states its boundary.</span>
+          </p>
+        </header>
+
+        <div class="feature-grid">
+          <article class="feature-card reveal">
+            <div class="feature-top">
+              <span class="feature-num">01</span>
+              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M8 4h10l6 6v18H8z"/><path d="M18 4v6h6M12 20h8M16 16v8"/></svg>
+            </div>
+            <h3><span class="lang--zh">打开 DWG / DXF</span><span class="lang--en" lang="en">Open DWG / DXF</span></h3>
+            <p>
+              <span class="lang--zh"><code>acadrust</code> 0.6.8（未修改）。DWG 与 DXF ASCII/二进制导入，异步导入、进度与取消。这里不宣称已验证的兼容矩阵。</span>
+              <span class="lang--en" lang="en"><code>acadrust</code> 0.6.8, unmodified. DWG and DXF ASCII/binary import with asynchronous loading, progress, and cancel. No verified compatibility matrix is claimed.</span>
+            </p>
+            <div class="chips" aria-hidden="true"><span>DWG</span><span>DXF ASCII</span><span>DXF BINARY</span></div>
+          </article>
+
+          <article class="feature-card reveal reveal--d1">
+            <div class="feature-top">
+              <span class="feature-num">02</span>
+              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><ellipse cx="16" cy="7" rx="9" ry="4"/><path d="M7 7v9c0 2.2 4 4 9 4s9-1.8 9-4V7M7 16v9c0 2.2 4 4 9 4s9-1.8 9-4v-9"/></svg>
+            </div>
+            <h3><span class="lang--zh">数据库是唯一权威</span><span class="lang--en" lang="en">The database is the authority</span></h3>
+            <p>
+              <span class="lang--zh"><code>cad-db</code> 持有文档；写入走事务与 <code>ChangeSet</code>，依赖失效后只重建受影响的显示表示。不重解析底图。</span>
+              <span class="lang--en" lang="en"><code>cad-db</code> owns the document. Writes go through transactions and <code>ChangeSet</code>; dependency invalidation rebuilds only the affected display representations. The source drawing is not re-parsed.</span>
+            </p>
+            <div class="chips" aria-hidden="true"><span>TRANSACTION</span><span>CHANGESET</span><span>INVALIDATION</span></div>
+          </article>
+
+          <article class="feature-card reveal reveal--d2">
+            <div class="feature-top">
+              <span class="feature-num">03</span>
+              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="m16 4 10 6v12l-10 6-10-6V10z"/><path d="m6 10 10 6 10-6M16 16v12"/></svg>
+            </div>
+            <h3><span class="lang--zh">wgpu 渲染</span><span class="lang--en" lang="en">wgpu rendering</span></h3>
+            <p>
+              <span class="lang--zh">2D/3D 视图、平移缩放、FIT、轨道与标准视图、选择高亮、图层显隐。渲染是派生，不反向成为数据源。</span>
+              <span class="lang--en" lang="en">2D/3D views, pan and zoom, FIT, orbit and standard views, selection highlighting, and layer visibility. Rendering is derived and never becomes the data source.</span>
+            </p>
+            <div class="chips" aria-hidden="true"><span>2D / 3D</span><span>FIT</span><span>LAYERS</span></div>
+          </article>
+
+          <article class="feature-card feature-card--narrow reveal">
+            <div class="feature-top">
+              <span class="feature-num">04</span>
+              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M5 27 27 5M5 27h8M5 27v-8M20 7h5v5"/><path d="m13 19 3 3M19 13l3 3"/></svg>
+            </div>
+            <h3><span class="lang--zh">测量</span><span class="lang--en" lang="en">Measurement</span></h3>
+            <p>
+              <span class="lang--zh">距离、折线长度、角度、面积；单位、精度与几何来源可追溯。</span>
+              <span class="lang--en" lang="en">Distance, polyline length, angle, and area — with traceable units, precision, and geometry provenance.</span>
+            </p>
+            <div class="chips" aria-hidden="true"><span>DISTANCE</span><span>AREA</span><span>ANGLE</span></div>
+          </article>
+
+          <article class="feature-card feature-card--wide reveal reveal--d1">
+            <div class="feature-top">
+              <span class="feature-num">05</span>
+              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 6h24v20H4z"/><path d="m8 11 4 3-4 3M15 17h6"/></svg>
+            </div>
+            <h3><span class="lang--zh">命令覆盖</span><span class="lang--en" lang="en">Command coverage</span></h3>
+            <p>
+              <span class="lang--zh">223 条有实现路径（50 完整 + 173 部分），758 条未实现。未支持的选项按名拒绝，不静默成功。</span>
+              <span class="lang--en" lang="en">223 commands have an implementation path (50 complete + 173 partial); 758 are not implemented. Unsupported options are rejected by name, never silently accepted.</span>
+            </p>
+            <div class="coverage">
+              <div class="coverage-top">
+                <span class="coverage-big">223</span>
+                <span class="coverage-of">/ 981</span>
+                <span class="coverage-scale">
+                  <span class="lang--zh">清单计数 · 非兼容率</span><span class="lang--en" lang="en">list count · not compatibility</span>
+                </span>
+              </div>
+              <div class="coverage-bar" role="img" data-aria-zh="981 条命令：50 条完整、173 条部分、758 条未实现" data-aria-en="981 commands: 50 complete, 173 partial, 758 not implemented">
+                <span class="seg seg--full"></span><span class="seg seg--partial"></span><span class="seg seg--none"></span>
+              </div>
+              <ul class="coverage-legend">
+                <li><span class="swatch swatch--full" aria-hidden="true"></span><strong>50</strong><span class="lang--zh">完整</span><span class="lang--en" lang="en">complete</span></li>
+                <li><span class="swatch swatch--partial" aria-hidden="true"></span><strong>173</strong><span class="lang--zh">部分</span><span class="lang--en" lang="en">partial</span></li>
+                <li><span class="swatch swatch--none" aria-hidden="true"></span><strong>758</strong><span class="lang--zh">未实现</span><span class="lang--en" lang="en">not implemented</span></li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="feature-card feature-card--narrow reveal reveal--d2">
+            <div class="feature-top">
+              <span class="feature-num">06</span>
+              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="5" width="10" height="8"/><rect x="18" y="5" width="10" height="8"/><rect x="11" y="20" width="10" height="8"/><path d="M9 13v3h14v-3M16 16v4"/></svg>
+            </div>
+            <h3><span class="lang--zh">一棵 React 树，多种载体</span><span class="lang--en" lang="en">One React tree, many surfaces</span></h3>
+            <p>
+              <span class="lang--zh">桌面与移动共用同一 UI，按宽度切换。Android 也是 <code>native-below</code>，不按构建目标把 CAD 命令送到 wasm。</span>
+              <span class="lang--en" lang="en">Desktop and mobile share one UI, switching by width. Android is also <code>native-below</code>; CAD commands are not routed to wasm by build target.</span>
+            </p>
+            <div class="tree-visual" aria-hidden="true">
+              <span class="tree-root">React</span>
+              <span class="tree-leaf">DESKTOP</span><span class="tree-leaf">TABLET</span><span class="tree-leaf">MOBILE</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--flow" id="workflow" aria-labelledby="workflow-title">
+      <div class="wrap">
+        <header class="section-head reveal">
+          <p class="section-index"><span class="idx">03</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">工作流</span><span class="lang--en" lang="en">Workflow</span></p>
+          <h2 class="display" id="workflow-title">
+            <span class="lang--zh">从打开到出图，四步。</span>
+            <span class="lang--en" lang="en">From open to output, in four moves.</span>
+          </h2>
+          <p class="lead">
+            <span class="lang--zh">查看与测量是主线；保存与出图各有明确的格式边界。</span>
+            <span class="lang--en" lang="en">Viewing and measuring are the main line. Saving and output each have explicit format boundaries.</span>
+          </p>
+        </header>
+
+        <ol class="flow">
+          <li class="flow-step reveal">
+            <span class="flow-num" aria-hidden="true">01</span>
+            <h3><span class="lang--zh">打开</span><span class="lang--en" lang="en">Open</span></h3>
+            <p>
+              <span class="lang--zh">本地打开 DWG/DXF，或在 Web 版直接上传文件。</span>
+              <span class="lang--en" lang="en">Open DWG/DXF locally, or upload a file directly in the web app.</span>
+            </p>
+            <span class="flow-tag">DWG · DXF · UPLOAD</span>
+          </li>
+          <li class="flow-step reveal reveal--d1">
+            <span class="flow-num" aria-hidden="true">02</span>
+            <h3><span class="lang--zh">查看</span><span class="lang--en" lang="en">Inspect</span></h3>
+            <p>
+              <span class="lang--zh">平移、缩放、FIT、图层、选择与属性查看。</span>
+              <span class="lang--en" lang="en">Pan, zoom, FIT, layers, selection, and properties.</span>
+            </p>
+            <span class="flow-tag">PAN · ZOOM · FIT · LAYERS</span>
+          </li>
+          <li class="flow-step reveal reveal--d2">
+            <span class="flow-num" aria-hidden="true">03</span>
+            <h3><span class="lang--zh">命令</span><span class="lang--en" lang="en">Command</span></h3>
+            <p>
+              <span class="lang--zh">Ribbon 或经典菜单栏、命令历史，以及五个可浮动面板。</span>
+              <span class="lang--en" lang="en">Ribbon or classic menu bar, command history, and five floatable panels.</span>
+            </p>
+            <span class="flow-tag">RIBBON · HISTORY · PANELS</span>
+          </li>
+          <li class="flow-step reveal reveal--d3">
+            <span class="flow-num" aria-hidden="true">04</span>
+            <h3><span class="lang--zh">保存 / 出图</span><span class="lang--en" lang="en">Save / Output</span></h3>
+            <p>
+              <span class="lang--zh">DXF 另存（有损）、实验性新 DWG 导出、PNG/SVG/PDF（CLI/Web）。</span>
+              <span class="lang--en" lang="en">Lossy DXF Save As, experimental new-DWG export, and PNG/SVG/PDF (CLI/web).</span>
+            </p>
+            <span class="flow-warning"><span class="lang--zh">没有 DWG 原地回写</span><span class="lang--en" lang="en">No in-place DWG writeback</span></span>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section section--platforms" id="platforms" aria-labelledby="platforms-title">
+      <div class="wrap">
+        <header class="section-head reveal">
+          <p class="section-index"><span class="idx">04</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">平台</span><span class="lang--en" lang="en">Platforms</span></p>
+          <h2 class="display" id="platforms-title">
+            <span class="lang--zh">一个核心，五种载体。</span>
+            <span class="lang--en" lang="en">One core. Five surfaces.</span>
+          </h2>
+          <p class="lead">
+            <span class="lang--zh">状态按仓库当前证据边界标注，不等于产品验收。只有 Linux 有可运行 GUI 的有界运行证据。</span>
+            <span class="lang--en" lang="en">Status reflects the evidence currently in the repository; it is not product acceptance. Only Linux has bounded runtime evidence for a runnable GUI.</span>
+          </p>
+        </header>
+
+        <div class="platform-grid">
+          <article class="platform platform--wide platform--linux reveal">
+            <div class="platform-top">
+              <span class="platform-code">LNX</span>
+              <span class="status status--live"><span class="lang--zh">可运行</span><span class="lang--en" lang="en">Runnable</span></span>
+            </div>
+            <h3>Linux</h3>
+            <p class="platform-mode">native-below · Wayland / dom-canvas · X11</p>
+            <p class="platform-desc">
+              <span class="lang--zh">原生 Wayland 走 native-below，X11/XWayland 走 dom-canvas。Flatpak 分发；当前唯一可运行的 GUI。</span>
+              <span class="lang--en" lang="en">Native Wayland uses native-below; X11/XWayland uses dom-canvas. Distributed as Flatpak — the only runnable GUI today.</span>
+            </p>
+            <ul class="platform-evidence">
+              <li><span class="ev-label"><span class="lang--zh">证据</span><span class="lang--en" lang="en">Evidence</span></span><span class="lang--zh">有界证据：GNOME/Mutter + P620 + <code>scale=1</code></span><span class="lang--en" lang="en">Bounded evidence: GNOME/Mutter + P620 + <code>scale=1</code></span></li>
+              <li><span class="ev-label">Flatpak</span><span>io.github.zenglanmu.yacr</span></li>
+            </ul>
+          </article>
+
+          <article class="platform platform--wide platform--web reveal reveal--d1">
+            <div class="platform-top">
+              <span class="platform-code">WEB</span>
+              <span class="status status--preview"><span class="lang--zh">在线预览</span><span class="lang--en" lang="en">Live preview</span></span>
+            </div>
+            <h3>Web</h3>
+            <p class="platform-mode">dom-canvas · wasm CadSession</p>
+            <p class="platform-desc">
+              <span class="lang--zh">wasm <code>CadSession</code> + DOM canvas。OPEN 走页面上传；SAVE/PLOT 走浏览器下载（DXF/SVG/PDF），不回写 DWG。</span>
+              <span class="lang--en" lang="en">wasm <code>CadSession</code> + DOM canvas. OPEN uses an in-page upload; SAVE/PLOT uses browser downloads (DXF/SVG/PDF) and never writes DWG back.</span>
+            </p>
+            <ul class="platform-evidence">
+              <li><span class="ev-label"><span class="lang--zh">入口</span><span class="lang--en" lang="en">Entry</span></span><a href="https://yacr-examples.pages.dev/" target="_blank" rel="noopener">yacr-examples.pages.dev <span class="ext" aria-hidden="true">↗</span></a></li>
+              <li><span class="ev-label"><span class="lang--zh">证据</span><span class="lang--en" lang="en">Evidence</span></span><span class="lang--zh">CI smoke 使用 SwiftShader 软件渲染，不是 GPU 或像素结论。</span><span class="lang--en" lang="en">CI smoke uses SwiftShader software rendering — not a GPU or pixel conclusion.</span></li>
+            </ul>
+          </article>
+
+          <article class="platform reveal">
+            <div class="platform-top">
+              <span class="platform-code">WIN</span>
+              <span class="status status--build"><span class="lang--zh">编译级</span><span class="lang--en" lang="en">Build-level</span></span>
+            </div>
+            <h3>Windows</h3>
+            <p class="platform-mode">native-below · Win32 child HWND</p>
+            <p class="platform-desc">
+              <span class="lang--zh">真实 Tauri/WebView2 加 Win32 child HWND。缺少 WebView2 时以退出码 5 拒绝。</span>
+              <span class="lang--en" lang="en">Real Tauri/WebView2 with a Win32 child HWND. Refuses with exit code 5 when WebView2 is missing.</span>
+            </p>
+            <ul class="platform-evidence">
+              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">仅编译门禁 + Wine 拒绝合同；运行时、视觉、真 Windows NOT VERIFIED。</span><span class="lang--en" lang="en">Build gate + Wine refusal contract only; runtime, visuals, and real Windows are NOT VERIFIED.</span></li>
+            </ul>
+          </article>
+
+          <article class="platform reveal reveal--d1">
+            <div class="platform-top">
+              <span class="platform-code">MAC</span>
+              <span class="status status--build"><span class="lang--zh">编译级</span><span class="lang--en" lang="en">Build-level</span></span>
+            </div>
+            <h3>macOS</h3>
+            <p class="platform-mode">native-below · WKWebView + NSView</p>
+            <p class="platform-desc">
+              <span class="lang--zh">真实 Tauri/WKWebView 加 CAD 子 <code>NSView</code>（Metal）。</span>
+              <span class="lang--en" lang="en">Real Tauri/WKWebView with a CAD child <code>NSView</code> (Metal).</span>
+            </p>
+            <ul class="platform-evidence">
+              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">仅 CI 编译；窗口、Metal、层序、DPI、像素 NOT VERIFIED。</span><span class="lang--en" lang="en">CI compile only; window, Metal, layer order, DPI, and pixels are NOT VERIFIED.</span></li>
+            </ul>
+          </article>
+
+          <article class="platform reveal reveal--d2">
+            <div class="platform-top">
+              <span class="platform-code">AND</span>
+              <span class="status status--build"><span class="lang--zh">编译 / 契约级</span><span class="lang--en" lang="en">Build / contract</span></span>
+            </div>
+            <h3>Android</h3>
+            <p class="platform-mode">native-below · Vulkan SurfaceView</p>
+            <p class="platform-desc">
+              <span class="lang--zh">Tauri WebView + 原生 <code>CadSession</code> + Vulkan <code>SurfaceView</code>；wasm 会话不实例化。SAF 打开与 DXF 导出已接线，DWG 保存显式延后。</span>
+              <span class="lang--en" lang="en">Tauri WebView + native <code>CadSession</code> + Vulkan <code>SurfaceView</code>; the wasm session is not instantiated. SAF open and DXF export are wired; DWG save is explicitly deferred.</span>
+            </p>
+            <ul class="platform-evidence">
+              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">编译/契约级；设备与真实 GPU NOT VERIFIED。</span><span class="lang--en" lang="en">Build/contract level; devices and real GPUs are NOT VERIFIED.</span></li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--download" id="download" aria-labelledby="download-title">
+      <div class="wrap">
+        <header class="section-head section-head--download reveal">
+          <p class="section-index"><span class="idx">05</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">下载</span><span class="lang--en" lang="en">Download</span></p>
+          <h2 class="display" id="download-title">
+            <span class="lang--zh">下载 v0.1.5</span>
+            <span class="lang--en" lang="en">Download v0.1.5</span>
+          </h2>
+          <p class="lead">
+            <span class="lang--zh">主按钮走 Cloudflare R2 国内镜像；GitHub Release 作为上游与校验来源。若 CDN 未配置，自动回退 GitHub。</span>
+            <span class="lang--en" lang="en">Primary buttons use the Cloudflare R2 mirror for mainland China. GitHub Releases remain the upstream source and checksum reference. If the CDN is not configured, links fall back to GitHub automatically.</span>
+          </p>
+        </header>
+
+        <div class="download-note reveal">
+          <span class="note-rule" aria-hidden="true"></span>
+          <p>
+            <span class="lang--zh">GitHub 在国内可能无法访问，优先使用 Cloudflare 镜像；镜像文件与上游 Release 同名，可用 SHA-256 校验。</span>
+            <span class="lang--en" lang="en">GitHub may be unreachable from mainland China, so prefer the Cloudflare mirror. Mirror files keep the upstream Release filenames and can be verified with SHA-256.</span>
+          </p>
+        </div>
+
+        <div class="release-meta reveal">
+          <span>RELEASE / v0.1.5</span><span>4 ASSETS</span><span>SHA-256</span><span>SIGNING.txt</span>
+        </div>
+
+        <div class="download-grid">
+          <article class="dl-card reveal" data-platform="linux">
+            <div class="dl-head">
+              <h3>Linux</h3>
+              <span class="dl-format">FLATPAK</span>
+            </div>
+            <p class="dl-file"><code>yacr-0.1.5-linux-x86_64.flatpak</code></p>
+            <p class="dl-size"><strong>105,454,832</strong> <span>bytes · ≈ 100.6 MiB</span></p>
+            <ul class="dl-notes">
+              <li><span class="lang--zh">Flatpak；需要 <code>org.gnome.Platform//51</code></span><span class="lang--en" lang="en">Flatpak; requires <code>org.gnome.Platform//51</code></span></li>
+              <li><span class="lang--zh">app id <code>io.github.zenglanmu.yacr</code></span><span class="lang--en" lang="en">app id <code>io.github.zenglanmu.yacr</code></span></li>
+              <li><span class="lang--zh">提供 <code>.sha256</code> 与 <code>.flatpak.gpg</code></span><span class="lang--en" lang="en">Ships with <code>.sha256</code> and <code>.flatpak.gpg</code></span></li>
+            </ul>
+            <div class="dl-actions">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/yacr-0.1.5-linux-x86_64.flatpak" target="_blank" rel="noopener" data-download="linux">
+                <span class="lang--zh">下载 Flatpak</span><span class="lang--en" lang="en">Download Flatpak</span>
+                <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
+              </a>
+              <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/yacr-0.1.5-linux-x86_64.flatpak" target="_blank" rel="noopener" data-github="linux">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+              <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/yacr-0.1.5-linux-x86_64.flatpak.sha256" target="_blank" rel="noopener" data-sha="linux">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+            </div>
+            <div class="cmd-stack">
+              <div class="cmd">
+                <code>flatpak install --user yacr-0.1.5-linux-x86_64.flatpak</code>
+                <button class="copy-btn" type="button" data-copy="flatpak install --user yacr-0.1.5-linux-x86_64.flatpak" data-aria-zh="复制 Flatpak 安装命令" data-aria-en="Copy the Flatpak install command" data-copied-zh="已复制" data-copied-en="Copied">
+                  <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
+                </button>
+              </div>
+              <div class="cmd">
+                <code>flatpak run io.github.zenglanmu.yacr</code>
+                <button class="copy-btn" type="button" data-copy="flatpak run io.github.zenglanmu.yacr" data-aria-zh="复制运行命令" data-aria-en="Copy the run command" data-copied-zh="已复制" data-copied-en="Copied">
+                  <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <article class="dl-card reveal reveal--d1" data-platform="windows">
+            <div class="dl-head">
+              <h3>Windows</h3>
+              <span class="dl-format">ZIP</span>
+            </div>
+            <p class="dl-file"><code>yacr-0.1.5-windows-x86_64.zip</code></p>
+            <p class="dl-size"><strong>84,979,826</strong> <span>bytes · ≈ 81.0 MiB</span></p>
+            <ul class="dl-notes">
+              <li><span class="lang--zh">解压后运行 <code>bin/yacr-windows.exe</code></span><span class="lang--en" lang="en">Unzip and run <code>bin/yacr-windows.exe</code></span></li>
+              <li><span class="lang--zh">本次 release <strong>未签名</strong></span><span class="lang--en" lang="en">This release is <strong>unsigned</strong></span></li>
+              <li><span class="lang--zh">需要 WebView2；缺失时退出码 5</span><span class="lang--en" lang="en">Requires WebView2; missing means exit code 5</span></li>
+            </ul>
+            <div class="dl-actions">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/yacr-0.1.5-windows-x86_64.zip" target="_blank" rel="noopener" data-download="windows">
+                <span class="lang--zh">下载 ZIP</span><span class="lang--en" lang="en">Download ZIP</span>
+                <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
+              </a>
+              <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/yacr-0.1.5-windows-x86_64.zip" target="_blank" rel="noopener" data-github="windows">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+              <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/yacr-0.1.5-windows-x86_64.zip.sha256" target="_blank" rel="noopener" data-sha="windows">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+            </div>
+            <div class="cmd"><code>bin\yacr-windows.exe</code></div>
+          </article>
+
+          <article class="dl-card reveal" data-platform="macos">
+            <div class="dl-head">
+              <h3>macOS</h3>
+              <span class="dl-format">TAR.GZ</span>
+            </div>
+            <p class="dl-file"><code>yacr-0.1.5-macos-universal.tar.gz</code></p>
+            <p class="dl-size"><strong>114,179,356</strong> <span>bytes · ≈ 108.9 MiB</span></p>
+            <ul class="dl-notes">
+              <li><span class="lang--zh">ad-hoc 签名、<strong>未公证</strong></span><span class="lang--en" lang="en">Ad-hoc signed, <strong>not notarized</strong></span></li>
+              <li><span class="lang--zh">首次打开需右键 Open，或执行下方命令</span><span class="lang--en" lang="en">On first launch, right-click Open or run the command below</span></li>
+            </ul>
+            <div class="dl-actions">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/yacr-0.1.5-macos-universal.tar.gz" target="_blank" rel="noopener" data-download="macos">
+                <span class="lang--zh">下载 TAR.GZ</span><span class="lang--en" lang="en">Download TAR.GZ</span>
+                <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
+              </a>
+              <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/yacr-0.1.5-macos-universal.tar.gz" target="_blank" rel="noopener" data-github="macos">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+              <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/yacr-0.1.5-macos-universal.tar.gz.sha256" target="_blank" rel="noopener" data-sha="macos">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+            </div>
+            <div class="cmd">
+              <code>xattr -dr com.apple.quarantine Yacr.app</code>
+              <button class="copy-btn" type="button" data-copy="xattr -dr com.apple.quarantine Yacr.app" data-aria-zh="复制 macOS 隔离属性清除命令" data-aria-en="Copy the macOS quarantine removal command" data-copied-zh="已复制" data-copied-en="Copied">
+                <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
+              </button>
+            </div>
+          </article>
+
+          <article class="dl-card reveal reveal--d1" data-platform="android">
+            <div class="dl-head">
+              <h3>Android</h3>
+              <span class="dl-format">APK</span>
+            </div>
+            <p class="dl-file"><code>app-universal-release.apk</code></p>
+            <p class="dl-size"><strong>91,887,073</strong> <span>bytes · ≈ 87.6 MiB</span></p>
+            <ul class="dl-notes">
+              <li><span class="lang--zh">仓库自签名 keystore；未上架商店</span><span class="lang--en" lang="en">Repository self-signed keystore; not in any app store</span></li>
+              <li><span class="lang--zh">通过 adb 侧载安装</span><span class="lang--en" lang="en">Sideload with adb</span></li>
+            </ul>
+            <div class="dl-actions">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/app-universal-release.apk" target="_blank" rel="noopener" data-download="android">
+                <span class="lang--zh">下载 APK</span><span class="lang--en" lang="en">Download APK</span>
+                <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
+              </a>
+              <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/app-universal-release.apk" target="_blank" rel="noopener" data-github="android">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+              <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/app-universal-release.apk.sha256" target="_blank" rel="noopener" data-sha="android">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+            </div>
+            <div class="cmd">
+              <code>adb install -r app-universal-release.apk</code>
+              <button class="copy-btn" type="button" data-copy="adb install -r app-universal-release.apk" data-aria-zh="复制 adb 安装命令" data-aria-en="Copy the adb install command" data-copied-zh="已复制" data-copied-en="Copied">
+                <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
+              </button>
+            </div>
+          </article>
+        </div>
+
+        <div class="dl-extra reveal">
+          <p>
+            <span class="lang--zh">校验与签名说明：</span>
+            <span class="lang--en" lang="en">Checksums and signing notes:</span>
+          </p>
+          <a href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/SIGNING.txt" target="_blank" rel="noopener">SIGNING.txt <span class="ext" aria-hidden="true">↗</span></a>
+          <a href="https://github.com/zenglanmu/yacr/releases/download/v0.1.5/yacr-0.1.5-linux-x86_64.flatpak.gpg" target="_blank" rel="noopener">.flatpak.gpg <span class="ext" aria-hidden="true">↗</span></a>
+          <a href="https://github.com/zenglanmu/yacr/releases/tag/v0.1.5" target="_blank" rel="noopener">GitHub Release <span class="ext" aria-hidden="true">↗</span></a>
+          <span class="dl-extra-note">
+            <span class="lang--zh">所有 SHA-256 均指向上游 GitHub。</span>
+            <span class="lang--en" lang="en">All SHA-256 links point to upstream GitHub.</span>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--faq" id="faq" aria-labelledby="faq-title">
+      <div class="wrap">
+        <div class="faq-layout">
+          <header class="faq-head reveal">
+            <p class="section-index"><span class="idx">06</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">常见问题</span><span class="lang--en" lang="en">FAQ</span></p>
+            <h2 class="display" id="faq-title">
+              <span class="lang--zh">几个直接的问题。</span>
+              <span class="lang--en" lang="en">Straight answers.</span>
+            </h2>
+            <p class="lead">
+              <span class="lang--zh">关于许可、成熟度、技术取舍与下载的边界，都在这里。</span>
+              <span class="lang--en" lang="en">Licensing, maturity, technical trade-offs, and download boundaries — answered without hedging.</span>
+            </p>
+            <a class="text-link" href="https://github.com/zenglanmu/yacr/issues" target="_blank" rel="noopener">
+              <span class="lang--zh">还有问题？去 GitHub Issues</span><span class="lang--en" lang="en">Still curious? Open a GitHub issue</span>
+              <span class="ext" aria-hidden="true">↗</span>
+            </a>
+          </header>
+
+          <div class="faq-list reveal">
+            <details>
+              <summary>
+                <span class="faq-q"><span class="lang--zh">yacr 免费吗？</span><span class="lang--en" lang="en">Is yacr free?</span></span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                <p>
+                  <span class="lang--zh">是。yacr 以 AGPL-3.0 发布，源码公开在 GitHub。没有付费版本，也没有被锁住的导出功能。</span>
+                  <span class="lang--en" lang="en">Yes. yacr is released under AGPL-3.0 and the source is public on GitHub. There is no paid tier and no locked export feature.</span>
+                </p>
+              </div>
+            </details>
+
+            <details>
+              <summary>
+                <span class="faq-q"><span class="lang--zh">现在能当生产 CAD 用吗？</span><span class="lang--en" lang="en">Can I use it as a production CAD tool today?</span></span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                <p>
+                  <span class="lang--zh">不能。项目仍在早期开发，尚无可交付产品；Linux 是当前唯一可运行的 GUI。Windows、macOS、Android、Web 的证据边界见上方平台卡片，均不等于验收。</span>
+                  <span class="lang--en" lang="en">No. The project is still in early development and there is no shippable product. Linux is the only runnable GUI today. The evidence boundaries for Windows, macOS, Android, and Web are listed in the platform cards above; none of them equals acceptance.</span>
+                </p>
+              </div>
+            </details>
+
+            <details>
+              <summary>
+                <span class="faq-q"><span class="lang--zh">为什么 UI 用 Web 技术而不是纯 Rust？</span><span class="lang--en" lang="en">Why use web tech for the UI instead of pure Rust?</span></span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                <p>
+                  <span class="lang--zh">因为界面要覆盖桌面、移动与 Web。一棵 React 树可以由同一套组件和布局规则驱动，Rust 核心继续作为唯一数据源。代价是它不是 100% pure Rust；这是有意的取舍，不是遗漏。</span>
+                  <span class="lang--en" lang="en">Because the interface has to cover desktop, mobile, and the web. One React tree can be driven by the same components and layout rules while the Rust core remains the single data source. The cost is that this is not 100% pure Rust — a deliberate trade-off, not an oversight.</span>
+                </p>
+              </div>
+            </details>
+
+            <details>
+              <summary>
+                <span class="faq-q"><span class="lang--zh">支持 DWG 保存吗？</span><span class="lang--en" lang="en">Does it support saving DWG?</span></span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                <p>
+                  <span class="lang--zh">没有 DWG 原地回写。<code>SAVE</code> 目前是有损 DXF 另存；源文件是 DWG 时，会写出一个实验性的新 DWG 文件，而不是覆盖原文件。</span>
+                  <span class="lang--en" lang="en">There is no in-place DWG writeback. <code>SAVE</code> is a lossy DXF Save As today; when the source is DWG, it writes an experimental new DWG file instead of overwriting the original.</span>
+                </p>
+              </div>
+            </details>
+
+            <details>
+              <summary>
+                <span class="faq-q"><span class="lang--zh">命令覆盖 223/981 是什么？</span><span class="lang--en" lang="en">What does 223/981 command coverage mean?</span></span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                <p>
+                  <span class="lang--zh">它是命令清单的计数：981 条命令中 223 条有实现路径（50 完整 + 173 部分），758 条未实现。它不是 AutoCAD 兼容率；未支持的选项会按名称拒绝，不会静默成功。</span>
+                  <span class="lang--en" lang="en">It is a count of the command list: of 981 commands, 223 have an implementation path (50 complete + 173 partial) and 758 are not implemented. It is not an AutoCAD compatibility rate. Unsupported options are rejected by name, never silently accepted.</span>
+                </p>
+              </div>
+            </details>
+
+            <details>
+              <summary>
+                <span class="faq-q"><span class="lang--zh">国内怎么下载？</span><span class="lang--en" lang="en">How do I download from mainland China?</span></span>
+                <span class="faq-icon" aria-hidden="true"></span>
+              </summary>
+              <div class="faq-a">
+                <p>
+                  <span class="lang--zh">优先使用 Cloudflare R2 镜像；GitHub Release 是上游与校验来源。镜像文件与上游同名，下载后用 <code>.sha256</code> 校验即可。若 CDN 未配置，下载按钮会自动回退到 GitHub。</span>
+                  <span class="lang--en" lang="en">Prefer the Cloudflare R2 mirror; GitHub Releases are the upstream and checksum source. Mirror files keep the upstream filenames — verify them with the <code>.sha256</code> file after downloading. If the CDN is not configured, buttons fall back to GitHub automatically.</span>
+                </p>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a class="brand brand--footer" href="#hero">
+            <img src="assets/yacr-icon.svg" width="36" height="36" alt="" loading="lazy" decoding="async">
+            <span class="brand-lockup"><span class="brand-word">yacr</span><span class="brand-meta">CAD / 01</span></span>
+          </a>
+          <p class="footer-tagline">Yet Another CAD in Rust</p>
+          <p class="footer-license">AGPL-3.0 · <a href="mailto:zenglanmu@126.com">zenglanmu@126.com</a></p>
+        </div>
+
+        <nav class="footer-col" data-aria-zh="页脚导航" data-aria-en="Footer navigation">
+          <h2 class="footer-heading"><span class="lang--zh">链接</span><span class="lang--en" lang="en">Links</span></h2>
+          <ul>
+            <li><a href="https://github.com/zenglanmu/yacr" target="_blank" rel="noopener">GitHub <span class="ext" aria-hidden="true">↗</span></a></li>
+            <li><a href="https://yacr-examples.pages.dev/" target="_blank" rel="noopener"><span class="lang--zh">Web 版</span><span class="lang--en" lang="en">Web app</span> <span class="ext" aria-hidden="true">↗</span></a></li>
+            <li><a href="https://github.com/zenglanmu/yacr/tree/main/docs" target="_blank" rel="noopener"><span class="lang--zh">文档</span><span class="lang--en" lang="en">Docs</span> <span class="ext" aria-hidden="true">↗</span></a></li>
+            <li><a href="#download"><span class="lang--zh">下载</span><span class="lang--en" lang="en">Download</span></a></li>
+          </ul>
+        </nav>
+
+        <div class="footer-col">
+          <h2 class="footer-heading"><span class="lang--zh">状态</span><span class="lang--en" lang="en">Status</span></h2>
+          <ul>
+            <li><span class="footer-status"><span class="status-dot" aria-hidden="true"></span><span class="lang--zh">早期预览 · 无可交付产品</span><span class="lang--en" lang="en">Early preview · no shippable product</span></span></li>
+            <li><a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">AGPL-3.0 <span class="ext" aria-hidden="true">↗</span></a></li>
+            <li><a href="#hero"><span class="lang--zh">回到顶部 ↑</span><span class="lang--en" lang="en">Back to top ↑</span></a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-honest">
+        <p>
+          <span class="lang--zh"><strong>诚实声明：</strong>本页是项目宣传页，不是产品验收；平台状态以仓库 <code>docs/handoff.md</code>、<code>docs/compatibility.md</code> 和实际代码为准。</span>
+          <span class="lang--en" lang="en"><strong>Honest disclosure:</strong> this page is a project landing page, not acceptance evidence. Platform status follows <code>docs/handoff.md</code>, <code>docs/compatibility.md</code>, and the actual code in the repository.</span>
+        </p>
+        <p class="footer-meta">
+          <span class="lang--zh">© 2026 yacr · 页面与插画为项目自制，不是产品截图。</span>
+          <span class="lang--en" lang="en">© 2026 yacr · Page and illustration are project-made; not product screenshots.</span>
+        </p>
+      </div>
+    </div>
+  </footer>
+
+  <p class="sr-only" id="live-region" role="status" aria-live="polite"></p>
+</body>
+</html>

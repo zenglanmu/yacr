@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 1280 1280" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">YACR Y blueprint icon</title>
+  <desc id="desc">An extruded cyan Y on a dark rounded blueprint tile, with engineering construction lines and orange dimension arrows.</desc>
+  <defs>
+    <radialGradient id="bg" cx=".4" cy=".28" r=".85">
+      <stop stop-color="#253F4C"/><stop offset="1" stop-color="#08151D"/>
+    </radialGradient>
+    <linearGradient id="face" x1="170" y1="263" x2="788" y2="1046" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#326275" stop-opacity=".65"/><stop offset="1" stop-color="#13323F" stop-opacity=".8"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="140" y1="20" x2="1000" y2="1230" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5F7F90"/><stop offset=".5" stop-color="#1F3743"/><stop offset="1" stop-color="#0A1720"/>
+    </linearGradient>
+    <pattern id="grid" width="68" height="68" patternUnits="userSpaceOnUse">
+      <path d="M68 0H0V68" stroke="#4A9EB6" stroke-opacity=".15" stroke-width="2"/>
+    </pattern>
+    <clipPath id="tile"><rect x="12" y="12" width="1256" height="1256" rx="320"/></clipPath>
+    <clipPath id="hatch"><path d="M627 533 858 263H1085L788 719Z"/></clipPath>
+    <pattern id="diagonal" width="27" height="27" patternUnits="userSpaceOnUse" patternTransform="rotate(43)">
+      <path d="M0 0V27" stroke="#86DEF1" stroke-width="5" stroke-opacity=".8"/>
+    </pattern>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect x="12" y="12" width="1256" height="1256" rx="320" fill="url(#bg)"/>
+    <path d="M112 208H1138V1108H112Z" fill="url(#grid)"/>
+    <g stroke="#64B6CE" stroke-opacity=".26" stroke-width="2">
+      <path d="M112 208H1138M112 446H1138M112 658H1138M112 936H1138M112 1046H1138M167 135V1105M1088 135V1110"/>
+    </g>
+    <!-- Rear extrusion edge -->
+    <path d="M170 263V394L476 734V1046H788V719L1085 394V263" fill="#0C2530" stroke="#98EFF7" stroke-width="9" stroke-linejoin="round"/>
+    <!-- Front Y silhouette -->
+    <path d="M170 263H397L627 533 858 263H1085L788 590 724 664V999H529V664Z" fill="url(#face)"/>
+    <!-- CAD section hatching on the right branch -->
+    <path d="M680 592 908 344V584L788 719Z" fill="url(#diagonal)" clip-path="url(#hatch)"/>
+    <!-- Internal front edges and depth connectors -->
+    <g stroke="#7BDCED" stroke-width="2.5" stroke-linejoin="round" opacity=".82">
+      <path d="M346 263 616 592M858 263 908 321M529 999H724M724 664V999L788 1046M529 999 476 1046M529 938 476 980"/>
+    </g>
+    <path d="M170 263H397L627 533 858 263H1085L788 590" stroke="#9AF2FB" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M170 263 529 664V999L476 1046M627 533 788 719V1046" stroke="#9AF2FB" stroke-width="9" stroke-linejoin="round"/>
+    <!-- Construction centerlines -->
+    <g stroke="#8DEBF4" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="20 12">
+      <path d="M627 72V1162M115 344H1165M287 224V578M346 112V263M908 112V587M529 938H1164"/>
+      <path d="M303 541Q432 593 512 475"/>
+    </g>
+    <g stroke="#9CF3F9" stroke-width="3">
+      <circle cx="287" cy="344" r="37"/><circle cx="908" cy="344" r="22"/><circle cx="627" cy="938" r="28"/>
+      <path d="M243 344H331M287 300V388M880 344H936M908 316V372M590 938H664M627 901V975M346 112V186M908 112V202M1085 344H1165M1085 938H1165"/>
+    </g>
+    <!-- Orange dimension arrows -->
+    <g fill="#FF9B58" stroke="#FF9B58" stroke-width="4">
+      <path d="M375 162H879M1129 375V909"/>
+      <path d="M350 162 378 153V171Z M905 162 877 153V171Z M1129 350 1120 376H1138Z M1129 934 1120 908H1138Z" stroke="none"/>
+    </g>
+  </g>
+  <rect x="12" y="12" width="1256" height="1256" rx="320" stroke="url(#rim)" stroke-width="9"/>
+</svg>

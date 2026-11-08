@@ -1,0 +1,11 @@
+{
+  "release": "v0.1.5",
+  "cdnBase": null,
+  "githubBase": "https://github.com/zenglanmu/yacr/releases/download/v0.1.5/",
+  "assets": {
+    "linux": { "file": "yacr-0.1.5-linux-x86_64.flatpak", "size": 105454832 },
+    "windows": { "file": "yacr-0.1.5-windows-x86_64.zip", "size": 84979826 },
+    "macos": { "file": "yacr-0.1.5-macos-universal.tar.gz", "size": 114179356 },
+    "android": { "file": "app-universal-release.apk", "size": 91887073 }
+  }
+}

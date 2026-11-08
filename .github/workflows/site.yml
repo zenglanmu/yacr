@@ -1,0 +1,79 @@
+name: Landing site
+
+# Builds nothing: the landing page is plain static files under `apps/landing/`.
+# This workflow mirrors a published GitHub release to Cloudflare R2 and then
+# publishes the page to Cloudflare Pages (`https://yacr.pages.dev/`).
+#
+# Manual only, by design. `publish-release.yml` is the single GitHub Release
+# entry point and is itself manual, so a `v*` tag push can happen before the
+# release assets exist. The operator therefore runs this workflow **after** the
+# release has been published and its assets are downloadable. A tag-triggered
+# run would race the manual release and either fail or publish a stale page.
+#
+# Order matters: R2 first (it rewrites `apps/landing/downloads.json` with the
+# real CDN base/hashes), Pages second (it uploads the rewritten manifest).
+# `upload_downloads: false` skips the mirror and deploys the committed
+# `downloads.json` fallback (GitHub links only) — useful for copy/layout fixes.
+#
+# Required repository secrets:
+#   CLOUDFLARE_API_TOKEN   Account-level "Cloudflare Pages: Edit" +
+#                          "Workers R2 Storage Write".
+#   CLOUDFLARE_ACCOUNT_ID  account id.
+#
+# Honesty: r2.dev is a test / low-cost mirror with rate limits and no production
+# SLA. A successful upload or deploy is distribution evidence only — it is not
+# runtime, GPU, device or pixel acceptance.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to mirror to R2"
+        required: true
+        default: "v0.1.5"
+        type: string
+      upload_downloads:
+        description: "Mirror release assets to R2 and rewrite downloads.json"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: landing-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy (R2 mirror then Cloudflare Pages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The gate requires every checkout to fetch the Tianzheng plugin
+          # submodule; this static page does not consume it, but an empty
+          # submodule directory in CI is treated as a broken checkout.
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.1"
+      - name: Mirror release assets to Cloudflare R2
+        if: ${{ inputs.upload_downloads }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_BUCKET: yacr-downloads
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          LANDING_DIR: ${{ github.workspace }}/apps/landing
+        run: bash scripts/upload-r2-downloads.sh
+      - name: Deploy the static landing page to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_PAGES_PROJECT: yacr
+          CF_PAGES_BRANCH: main
+          DIST: ${{ github.workspace }}/apps/landing
+        run: bash scripts/deploy-landing-pages.sh
