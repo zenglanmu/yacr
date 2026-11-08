@@ -1,7 +1,9 @@
 # 第三方来源与许可
 
 - acadrust：正式 0.6.8，唯一依赖入口 cad-import-acadrust；未修改上游，未使用 Cargo patch。
-  当前导入仍占位；采用 API 与对外分发前审计锁定包许可及其传递依赖。
+  上游 <https://github.com/hakanaktt/acadrust>。DWG/DXF 导入与实验性 DWG 导出都经该适配层；
+  采用 API 与对外分发前审计锁定包许可及其传递依赖。
+- MiniCAD：轻量开源 2D/3D CAD，仅作为功能与实现参考；未复制其源码，也不是构建或运行时依赖。
 - wgpu / Tauri / GTK：桌面 UI 与渲染技术方向。wgpu 仅由 `cad-render-wgpu` 依赖；桌面宿主使用
   Tauri 2（WebView）+ GTK3/WebKitGTK 4.1 + 原生 GTK/wgpu CAD 分区。Slint 依赖已随桌面 UI 迁移
   退役（见 `docs/adr/0010-react-linux-host-replaces-slint.md`）。具体版本与传递依赖见 Cargo.lock；

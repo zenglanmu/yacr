@@ -9,14 +9,16 @@ macOS, Android and the web.
 
 **Website:** <https://yacr.pages.dev/> · **Web app:** <https://yacr-examples.pages.dev/>
 
-The project is still in early development: **there is no shippable product yet.** Linux/Wayland is
-the primary development target and has the strongest runtime evidence, with bounded local acceptance
-on GNOME/Mutter. The Android APK has been sideloaded and run by the maintainer (not a CI acceptance);
-the Windows and macOS hosts are real Tauri hosts whose runtime/visual acceptance is still pending;
-the web build is exercised with headless/software rendering. Current
-capabilities are backed by **contract/synthetic tests plus bounded real-GPU host runs on synthetic
-fixtures**; there is **no** validated DWG compatibility, real-drawing, cross-vendor, golden-image
-or performance acceptance. Do not treat it as a usable or production CAD application.
+yacr is under active development, and **preview builds are available now** — Linux Flatpak, Windows
+zip, macOS tarball, Android APK, and a browser build. It opens DWG/DXF, views 2D/3D drawings with
+wgpu, measures, and has an implementation path for 223 of 981 commands (50 complete, 173 partial);
+unsupported options are rejected by name instead of silently succeeding. Linux/Wayland is the primary
+development target with the strongest runtime evidence (bounded local acceptance on GNOME/Mutter).
+The Android APK has been sideloaded and run by the maintainer; the Windows and macOS hosts are real
+Tauri hosts whose runtime/visual acceptance is still pending; the browser build runs the wasm
+session and is exercised with headless/software rendering. It is **not yet a production CAD
+system**: DWG compatibility, real-drawing, cross-vendor, golden-image and performance acceptance are
+not complete, so keep your own copy of anything you open.
 
 **Author / contact:** zenglanmu@126.com · **License:** AGPL-3.0 (`LICENSE`)
 
@@ -101,10 +103,10 @@ fallback**. See ADR 0010 and ADR 0011.
   (key sets must match); CJK literals are rejected in code.
 - **Desktop host with real native rendering.** React chrome over a native GTK/wgpu CAD partition on
   both X11/XWayland and native Wayland, with an explicit, non-fallback backend decision.
-- **Capability set** (the shared core / headless-CLI set, covered by contract/synthetic tests — the
-  current React/Tauri GUI wires only OPEN, FIT and native navigation). **Fidelity varies**: many
-  entities are only approximate or still have gaps; per-item status is in `docs/compatibility.md`
-  and `docs/dxf-entity-coverage.md`.
+- **Capability set** (shared by the core, the desktop GUI and the headless CLI; coverage differs per
+  surface and is backed by contract/synthetic tests). **Fidelity varies**: many entities are only
+  approximate or still have gaps; per-item status is in `docs/compatibility.md` and
+  `docs/dxf-entity-coverage.md`.
   - **Open & parse** local DWG / DXF (ASCII and binary) through one semantic/database conversion,
     with asynchronous import, progress and cancellation.
   - **View**: model space and supported layout switching; layer hide/show, search and restore;
@@ -345,10 +347,10 @@ evidence in `docs/validation*.md` does **not** transfer to the React/Tauri host)
 
 | Platform | Host | Actual status |
 |---|---|---|
-| **Linux desktop (primary, current)** | `apps/app-linux` (`yacr`) | React/Tauri chrome + native GTK/wgpu CAD partition. **Only OPEN and FIT plus native navigation are wired**; every other control is explicitly disabled with a reason. Bounded local acceptance has run: React-migration P6 gate **ACCEPT-WITH-FIXES** (hardware-Vulkan real-window smoke on a synthetic fixture), and native-Wayland W3 **ACCEPT-WITH-LIMITATIONS** (GNOME/Mutter + Quadro P620, `scale=1`) — see `docs/validation-react-linux-migration-2026-10-16.md` and `docs/validation-native-wayland-2026-10-16.md`. **Bounded local-Linux acceptance only** — not a full CAD product / cross-platform / vendor / golden / performance approval. |
+| **Linux desktop (primary, current)** | `apps/app-linux` (`yacr`) | React/Tauri chrome + native GTK/wgpu CAD partition. The command surface covers open/close, navigation, selection, layers, measurement and a 223/981-command implementation path; per-item gaps are in `docs/compatibility.md`. Bounded local acceptance has run: React-migration P6 gate **ACCEPT-WITH-FIXES** (hardware-Vulkan real-window smoke on a synthetic fixture) and native-Wayland W3 **ACCEPT-WITH-LIMITATIONS** (GNOME/Mutter + Quadro P620, `scale=1`) — see `docs/validation-react-linux-migration-2026-10-16.md`, `docs/validation-native-wayland-2026-10-16.md` and the real screenshot on the website. **Bounded local-Linux acceptance only** — not a full CAD product / cross-platform / vendor / golden / performance approval. |
 | **Windows desktop** | `apps/app-windows` (`yacr-windows`) | **Real Tauri/WebView2 host, `native-below`**: transparent WebView over a Win32 child HWND. CI compiles it (`windows-check`) and packages a release zip (`windows-release`, event-gated; self-signed Authenticode or `-unsigned`). Visual/runtime/real-Windows acceptance is **NOT VERIFIED** (Wine only covers the missing-WebView2 refusal contract, exit 5); packaging is not runtime evidence. |
 | **macOS desktop** | `apps/app-macos` (`yacr-macos`) | **Real Tauri 2 host, compile-only**: transparent WKWebView above a native CAD child `NSView` presented by wgpu/Metal. CI compiles it (`macos-check`) and packages an ad-hoc signed, non-notarized universal tarball (`macos-release`, event-gated). Window/Metal/z-order/DPI/dialog/pixel behaviour is **NOT VERIFIED**; packaging is not runtime evidence. |
-| **Android** | `apps/app-android` | **Native `native-below` carrier**: Tauri WebView runs the shared React chrome, a native Rust `CadSession` owns `cad-db`, and wgpu (Vulkan) presents to a `SurfaceView` below the WebView. **Compile-level evidence only** — no device/emulator run, no Vulkan adapter, no pixels, no rotation/lifecycle, no JNI runtime link (all NOT VERIFIED). v1 has no file open/save, no popup host and no durable config; it starts from the built-in demo drawing. See `docs/android-host.md`. |
+| **Android** | `apps/app-android` | **Native `native-below` carrier**: Tauri WebView runs the shared React chrome, a native Rust `CadSession` owns `cad-db`, and wgpu (Vulkan) presents to a `SurfaceView` below the WebView. SAF open and DXF export (SAVE) are wired; DWG save is explicitly deferred. The maintainer has sideloaded and run the release APK (2026-11-08, not a CI acceptance); device/real-GPU/pixel acceptance is still **NOT VERIFIED**. See `docs/android-host.md`. |
 | **Web** | `apps/app-web` | **Browser carrier (`dom-canvas`)**: wasm `CadSession` + DOM canvas; OPEN is a page upload, SAVE/PLOT are browser downloads (DXF/SVG/PDF, no DWG write-back). Both bundles stage the full font package into `fonts/` by default (`WITH_FONTS=0`/`FONTS_DIR` offline); after a document opens, the page still fetches only the needed faces from that same-origin `fonts/`; `cad_fonts`/`FONTS` reports the real load. Only bounded local evidence (headless Chromium, **software rendering**) — no real-GPU, pixel or device acceptance. |
 | **Headless CLI** | `cad-cli-tools` | Kept: opens and plots headless through the shared application path. |
 
@@ -408,6 +410,21 @@ observation: `docs/view-3d.md`; draw order: `docs/render-order.md`; render backe
 `docs/annotative-scaling.md`; command line & keymap: `docs/shortcuts.md`; drawing/editing subset:
 `docs/drawing-edit.md`; performance and budgets: `docs/performance.md`; DWG test flow:
 `docs/testing-dwg.md`.
+
+## Credits and references
+
+yacr is an independent implementation. These open-source projects informed it or supply tested
+inputs; none of them endorses yacr.
+
+- **acadrust** — <https://github.com/hakanaktt/acadrust>: pure-Rust DWG/DXF reading, writing and
+  inspection. Pinned at `0.6.8`, used unmodified and only through `cad-import-acadrust`.
+- **QCAD** — <https://qcad.org>: mature open-source 2D CAD. Its open-source `flange` example is used
+  as an import/render fixture (see `fixtures/dxf/qcad-flange/SOURCE.md` and
+  `THIRD_PARTY_NOTICES.md`).
+- **OpenCADStudio** — <https://www.opencadstudio.com/>: reference for user-visible feature scope and
+  UI interaction. Feature-spec reference only; no source code was taken from it.
+- **MiniCAD** — lightweight open-source 2D/3D CAD used as a feature and implementation reference;
+  no source code was copied from it.
 
 ## License and third parties
 

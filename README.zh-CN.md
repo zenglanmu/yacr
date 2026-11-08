@@ -8,11 +8,12 @@ X11/`dom-canvas`）、Windows、macOS、Android 与 Web。
 
 **宣传页：** <https://yacr.pages.dev/> · **Web 版：** <https://yacr-examples.pages.dev/>
 
-项目仍在早期开发，**尚无可交付产品**。Linux/Wayland 是主开发目标、运行证据最完整，只在 GNOME/Mutter 等有界
-环境做过本地验收；Android APK 已由维护者侧载运行成功（不是 CI 验收），设备/真实 GPU/像素的正式验收仍待补；
-Windows/macOS 是真实 Tauri 宿主，运行时/视觉验收仍待补；Web 只用无头/软件渲染做过 smoke。当前能力以
-**契约/合成测试 + 合成夹具上的有界真实 GPU 宿主运行**为证据；尚未完成任何已验收的
-DWG 兼容性、真实图纸、vendor、golden 图像或性能验收。请勿把它当作可用或生产级的 CAD 软件。
+yacr 处于活跃开发中，**预览版现在即可下载**：Linux Flatpak、Windows zip、macOS tarball、Android APK
+与浏览器版本。它可以打开 DWG/DXF、用 wgpu 查看 2D/3D 图纸、做测量，命令清单 981 条中有 223 条有实现
+路径（50 完整 + 173 部分）；未支持的选项按名拒绝，不静默成功。Linux/Wayland 是主开发目标、运行证据
+最完整（GNOME/Mutter 上的有界本地验收）；Android APK 已由维护者侧载运行；Windows/macOS 是真实 Tauri
+宿主，运行时/视觉验收仍待补；浏览器版本跑 wasm 会话，只有无头/软件渲染 smoke。它**还不是生产级 CAD**：
+DWG 兼容性、真实图纸、跨 vendor、golden 图像与性能验收均未完成，打开文件请自留副本。
 
 **作者 / 联系：** zenglanmu@126.com · **许可证：** AGPL-3.0（`LICENSE`）
 
@@ -85,8 +86,8 @@ Wayland**（宿主自建 app-owned `wl_surface` + `wl_subsurface`，经 `apps/ap
   代码里硬编码 CJK 会被拒绝。
 - **桌面宿主做真实原生渲染**：React chrome 合成在原生 GTK/wgpu CAD 分区之上，同时支持 X11/XWayland 与
   原生 Wayland，后端决议显式、无回退。
-- **能力集**（共享核心 / 无头 CLI 的能力集，有契约/合成测试覆盖——当前 React/Tauri GUI 只接线
-  OPEN、FIT 与原生导航）。**保真度不一**：不少图元只是近似表示或仍有缺口，逐项状态以
+- **能力集**（核心、桌面 GUI 与无头 CLI 共享；各载体覆盖度不同，均有契约/合成测试支撑）。
+  **保真度不一**：不少图元只是近似表示或仍有缺口，逐项状态以
   `docs/compatibility.md`、`docs/dxf-entity-coverage.md` 为准：
   - **打开与解析**：本地 DWG / DXF（ASCII 与二进制），共用同一语义/数据库转换；异步导入带进度与取消。
   - **查看**：模型空间与受支持布局切换；图层显隐、搜索、恢复；图元选择、高亮与基本属性。
@@ -292,10 +293,10 @@ Web 的 wasm 会话真实、浏览器 smoke 为 SwiftShader 冒烟。发布/打�
 
 | 平台 | 宿主 | 当前实际状态 |
 |---|---|---|
-| **Linux 桌面（首选，当前）** | `apps/app-linux`（`yacr`） | React/Tauri chrome + 原生 GTK/wgpu CAD 分区。**仅 OPEN 与 FIT + 原生导航接线**，其余控件一律显式禁用并标注原因。已做有界本地验收：React 迁移 P6 gate **ACCEPT-WITH-FIXES**（合成夹具上的硬件 Vulkan 真实窗口 smoke）、原生 Wayland W3 **ACCEPT-WITH-LIMITATIONS**（GNOME/Mutter + Quadro P620、`scale=1`）——见 `docs/validation-react-linux-migration-2026-10-16.md` 与 `docs/validation-native-wayland-2026-10-16.md`。**仅有界本地 Linux 验收**，**不是**完整 CAD 产品/跨平台/vendor/golden/性能验收。 |
+| **Linux 桌面（主开发目标）** | `apps/app-linux`（`yacr`） | React/Tauri chrome + 原生 GTK/wgpu CAD 分区。命令面覆盖打开/关闭、导航、选择、图层、测量，以及 981 条命令中 223 条的实现路径；逐项缺口见 `docs/compatibility.md`。已做有界本地验收：React 迁移 P6 gate **ACCEPT-WITH-FIXES**（合成夹具上的硬件 Vulkan 真实窗口 smoke）、原生 Wayland W3 **ACCEPT-WITH-LIMITATIONS**（GNOME/Mutter + Quadro P620、`scale=1`）——见 `docs/validation-react-linux-migration-2026-10-16.md`、`docs/validation-native-wayland-2026-10-16.md` 与宣传页实机截图。**仅有界本地 Linux 验收**，**不是**完整 CAD 产品/跨平台/vendor/golden/性能验收。 |
 | **Windows 桌面** | `apps/app-windows`（`yacr-windows`） | **真实 Tauri/WebView2 `native-below` 宿主**：透明 WebView 覆盖在 Win32 子 HWND 之上。CI 编译（`windows-check`）并打包 release zip（`windows-release`，event-gated；自签 Authenticode 或 `-unsigned`）。视觉/运行时/真 Windows **NOT VERIFIED**（Wine 只覆盖缺 WebView2 的拒绝合同，退出码 5）；打包不等于运行验收。 |
 | **macOS 桌面** | `apps/app-macos`（`yacr-macos`） | **真实 Tauri 2 宿主，仅编译**：透明 WKWebView 在上、原生 CAD 子 `NSView`（wgpu/Metal）在下。CI 编译（`macos-check`）并打包 ad-hoc 签名、未公证的 universal tarball（`macos-release`，event-gated）。窗口/Metal/层序/DPI/对话框/像素一律 **NOT VERIFIED**；打包不等于运行验收。 |
-| **Android** | `apps/app-android` | **原生 `native-below` 载体**：Tauri WebView 跑共享 React chrome，原生 Rust `CadSession` 拥有 `cad-db`，wgpu(Vulkan) 呈现到 WebView 下方的 `SurfaceView`。**仅编译级证据**——无设备/模拟器运行、无 Vulkan adapter、无像素/旋转/生命周期、无 JNI 运行时链接（全部 NOT VERIFIED）。v1 无开图/保存、无 popup host、无持久配置，从内置 demo 图纸启动。见 `docs/android-host.md`。 |
+| **Android** | `apps/app-android` | **原生 `native-below` 载体**：Tauri WebView 跑共享 React chrome，原生 Rust `CadSession` 拥有 `cad-db`，wgpu(Vulkan) 呈现到 WebView 下方的 `SurfaceView`。SAF 打开与 DXF 导出（SAVE）已接线，DWG 保存显式延后。维护者已侧载并运行 release APK（2026-11-08，非 CI 验收）；设备/真实 GPU/像素的正式验收仍 **NOT VERIFIED**。见 `docs/android-host.md`。 |
 | **Web** | `apps/app-web` | **浏览器载体（`dom-canvas`）**：wasm `CadSession` + DOM canvas；OPEN 走页面上传，SAVE/PLOT 走浏览器下载（DXF/SVG/PDF，不回写 DWG）。两份 bundle 默认把全量字体包 staged 到 `fonts/`（`WITH_FONTS=0`/`FONTS_DIR` 离线）；打开图纸后仍只从同源 `fonts/` 懒加载需要的面；`cad_fonts`/`FONTS` 报告真实加载。仅有界本地证据（无头 Chromium，**软件渲染**）——无真实 GPU/像素/设备验收。 |
 | **无头 CLI** | `cad-cli-tools` | 保留：经共享应用路径无头打开/出图。 |
 
@@ -341,6 +342,18 @@ Linux Flatpak（本地 bundle，未发布）：`docs/flatpak.md`；决策记录�
 `docs/layouts.md`；出图：`docs/plot.md`；动态块：`docs/dynamic-blocks.md`；注释性缩放：
 `docs/annotative-scaling.md`；命令行与键位：`docs/shortcuts.md`；绘图/编辑子集：`docs/drawing-edit.md`；
 性能与预算：`docs/performance.md`；DWG 测试流程：`docs/testing-dwg.md`。
+
+## 参考项目与致谢
+
+yacr 是独立实现。下列开源项目为 yacr 提供了参考或测试输入；它们都不为 yacr 背书。
+
+- **acadrust** — <https://github.com/hakanaktt/acadrust>：纯 Rust 的 DWG/DXF 读写与检查库。固定
+  `0.6.8`，上游未修改，仅通过 `cad-import-acadrust` 使用。
+- **QCAD** — <https://qcad.org>：成熟的开源二维 CAD。其开源 `flange` 示例被用作导入/渲染夹具
+  （见 `fixtures/dxf/qcad-flange/SOURCE.md` 与 `THIRD_PARTY_NOTICES.md`）。
+- **OpenCADStudio** — <https://www.opencadstudio.com/>：用户可见功能范围与 UI 交互的参考。
+  **仅功能规格参考，未采用其源码**。
+- **MiniCAD** — 轻量开源 2D/3D CAD，作为功能与实现参考；未复制其源码。
 
 ## 许可与第三方
 

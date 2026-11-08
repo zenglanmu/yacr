@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>yacr — Yet Another CAD in Rust · 用 Rust 写的开源 CAD</title>
-  <meta name="description" content="yacr 是一个用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。一个核心，多种载体。早期预览：尚无可交付产品；Linux/Wayland 是主开发目标，Android APK 已由维护者侧载运行。">
+  <meta name="description" content="yacr 是一个用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。一个核心，多种载体。预览版可直接下载：Linux、Windows、macOS、Android 与 Web 均有构建；Linux/Wayland 是主开发目标。它不是生产级 CAD。">
   <link rel="canonical" href="https://yacr.pages.dev/">
   <meta name="theme-color" content="#08151D">
   <meta name="robots" content="index, follow">
@@ -14,7 +14,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="yacr">
   <meta property="og:title" content="yacr — Yet Another CAD in Rust">
-  <meta property="og:description" content="Rust 核心负责文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。早期预览，尚无可交付产品。">
+  <meta property="og:description" content="Rust 核心负责文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。预览版已可直接下载，但 DWG 兼容性、真实图纸与性能验收尚未完成。">
   <meta property="og:url" content="https://yacr.pages.dev/">
   <meta property="og:image" content="https://yacr.pages.dev/assets/yacr-1024.png">
   <meta property="og:image:width" content="1024">
@@ -24,7 +24,7 @@
   <meta property="og:locale:alternate" content="en_US">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="yacr — Yet Another CAD in Rust">
-  <meta name="twitter:description" content="Open-source CAD with a Rust core and a React + Tauri interface. Early preview; Linux/Wayland is the primary development target, and the Android APK has been sideloaded by the maintainer.">
+  <meta name="twitter:description" content="Open-source CAD with a Rust core and a React + Tauri interface. Preview builds are downloadable for Linux, Windows, macOS, Android, and the Web; Linux/Wayland is the primary development target.">
   <meta name="twitter:image" content="https://yacr.pages.dev/assets/yacr-1024.png">
 
   <link rel="icon" href="assets/yacr-icon.svg" type="image/svg+xml">
@@ -46,7 +46,7 @@
     "downloadUrl": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.5",
     "license": "https://www.gnu.org/licenses/agpl-3.0.html",
     "isAccessibleForFree": true,
-    "description": "Open-source CAD viewing and measurement system with a Rust core and a React + Tauri interface. Early preview; no shippable product yet."
+    "description": "Open-source CAD viewing and measurement system with a Rust core and a React + Tauri interface. Preview builds are downloadable across Linux, Windows, macOS, Android, and the Web; not yet production-grade."
   }
   </script>
 </head>
@@ -99,8 +99,8 @@
           <div class="hero-copy">
             <p class="hero-eyebrow">
               <span class="pulse-dot" aria-hidden="true"></span>
-              <span class="lang--zh">Open-source CAD · 早期预览</span>
-              <span class="lang--en" lang="en">Open-source CAD · Early preview</span>
+              <span class="lang--zh">Open-source CAD · 预览版 · 可直接下载</span>
+              <span class="lang--en" lang="en">Open-source CAD · preview builds · downloadable</span>
             </p>
             <h1 id="hero-title" lang="en">Yet another CAD,<br><span class="accent">written in Rust.</span></h1>
             <p class="hero-cn">
@@ -113,10 +113,10 @@
             </p>
 
             <div class="hero-notice" role="note">
-              <span class="notice-label">EARLY<br>PREVIEW</span>
+              <span class="notice-label">PREVIEW <br>BUILDS</span>
               <p>
-                <span class="lang--zh">项目仍在早期开发，<strong>尚无可交付产品</strong>。<strong>Linux/Wayland 是当前主开发目标，支持最完整；Android APK 已由维护者侧载运行</strong>。其他载体的运行时证据边界见下方平台卡片。</span>
-                <span class="lang--en" lang="en">The project is still in early development and <strong>there is no shippable product yet</strong>. <strong>Linux/Wayland is the primary development target with the strongest support; the Android APK has been sideloaded and run by the maintainer</strong>. Runtime evidence boundaries for the other surfaces are in the platform cards below.</span>
+                <span class="lang--zh">yacr 已进入可用的预览阶段：<strong>Linux、Windows、macOS、Android 与 Web 都有可下载 / 可打开的预览构建</strong>。Linux/Wayland 是主开发目标、支持最完整；Android APK 已由维护者侧载运行；Windows/macOS 的运行时与视觉验收仍待补。<strong>它不是生产级 CAD：DWG 兼容性、真实图纸与性能验收尚未完成。</strong></span>
+                <span class="lang--en" lang="en">yacr has reached a usable preview stage: <strong>Linux, Windows, macOS, Android, and the Web all have downloadable preview builds</strong>. Linux/Wayland is the primary development target with the strongest support; the Android APK has been sideloaded and run by the maintainer; runtime and visual acceptance for Windows/macOS is still pending. <strong>It is not a production-grade CAD tool: DWG compatibility, real drawings, and performance acceptance are not finished.</strong></span>
               </p>
             </div>
 
@@ -1001,8 +1001,8 @@
               </summary>
               <div class="faq-a">
                 <p>
-                  <span class="lang--zh">不能。项目仍在早期开发，尚无可交付产品。Linux/Wayland 是主开发目标，Android APK 已由维护者侧载运行；Windows、macOS、Web 的运行时证据边界见上方平台卡片，均不等于验收。</span>
-                  <span class="lang--en" lang="en">No. The project is still in early development and there is no shippable product. Linux/Wayland is the primary development target and the Android APK has been sideloaded by the maintainer. The runtime evidence boundaries for Windows, macOS, and the Web are listed in the platform cards above; none of them equals acceptance.</span>
+                  <span class="lang--zh">还不能当生产 CAD。项目处于活跃开发的预览阶段：可以打开 DWG/DXF、查看 2D/3D、测量，但 DWG 兼容性、真实图纸、vendor 与性能验收都未完成；请自留副本。平台运行时边界见上方平台卡片。</span>
+                  <span class="lang--en" lang="en">Not yet. The project is in an active-development preview stage: it can open DWG/DXF, view 2D/3D, and measure, but DWG compatibility, real drawings, vendor entities, and performance acceptance are all unfinished — keep your own copies. Platform runtime boundaries are in the platform cards above.</span>
                 </p>
               </div>
             </details>
@@ -1089,12 +1089,68 @@
         <div class="footer-col">
           <h2 class="footer-heading"><span class="lang--zh">状态</span><span class="lang--en" lang="en">Status</span></h2>
           <ul>
-            <li><span class="footer-status"><span class="status-dot" aria-hidden="true"></span><span class="lang--zh">早期预览 · 无可交付产品</span><span class="lang--en" lang="en">Early preview · no shippable product</span></span></li>
+            <li><span class="footer-status"><span class="status-dot" aria-hidden="true"></span><span class="lang--zh">预览版 · 可直接下载</span><span class="lang--en" lang="en">Preview builds · downloadable</span></span></li>
             <li><a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">AGPL-3.0 <span class="ext" aria-hidden="true">↗</span></a></li>
             <li><a href="#hero"><span class="lang--zh">回到顶部 ↑</span><span class="lang--en" lang="en">Back to top ↑</span></a></li>
           </ul>
         </div>
       </div>
+
+      <section class="footer-refs" aria-labelledby="footer-refs-title">
+        <div class="refs-head">
+          <h2 class="footer-heading" id="footer-refs-title"><span class="lang--zh">参考项目</span><span class="lang--en" lang="en">Reference projects</span></h2>
+          <p class="refs-note">
+            <span class="lang--zh">独立参考，不是合作、背书或兼容性声明。</span>
+            <span class="lang--en" lang="en">Independent references — not partnerships, endorsements, or compatibility claims.</span>
+          </p>
+        </div>
+
+        <ul class="refs-list">
+          <li class="ref">
+            <p class="ref-name">
+              <span class="ref-index" aria-hidden="true">01</span>
+              <a href="https://github.com/hakanaktt/acadrust" target="_blank" rel="noopener">acadrust<span class="ext" aria-hidden="true">↗</span></a>
+            </p>
+            <p class="ref-desc">
+              <span class="lang--zh">纯 Rust 的 DWG/DXF 读写库；固定 0.6.8、上游未修改，仅经 <code>cad-import-acadrust</code> 使用。</span>
+              <span class="lang--en" lang="en">Pure-Rust DWG/DXF read/write library, pinned at 0.6.8 with an unmodified upstream; used only through <code>cad-import-acadrust</code>.</span>
+            </p>
+          </li>
+
+          <li class="ref">
+            <p class="ref-name">
+              <span class="ref-index" aria-hidden="true">02</span>
+              <a href="https://qcad.org" target="_blank" rel="noopener">QCAD<span class="ext" aria-hidden="true">↗</span></a>
+            </p>
+            <p class="ref-desc">
+              <span class="lang--zh">开源二维 CAD；其开源 <code>flange</code> 示例被用作导入与渲染夹具。</span>
+              <span class="lang--en" lang="en">Open-source 2D CAD; its open-source <code>flange</code> example is used as an import and rendering fixture.</span>
+            </p>
+          </li>
+
+          <li class="ref">
+            <p class="ref-name">
+              <span class="ref-index" aria-hidden="true">03</span>
+              <a href="https://www.opencadstudio.com/" target="_blank" rel="noopener">OpenCADStudio<span class="ext" aria-hidden="true">↗</span></a>
+            </p>
+            <p class="ref-desc">
+              <span class="lang--zh">功能范围与 UI 交互的参考；只对照功能规格，未采用其源码。</span>
+              <span class="lang--en" lang="en">Reference for feature scope and UI interaction; a functional-spec reference only — no source code was used.</span>
+            </p>
+          </li>
+
+          <li class="ref">
+            <p class="ref-name">
+              <span class="ref-index" aria-hidden="true">04</span>
+              <span>MiniCAD</span>
+            </p>
+            <p class="ref-desc">
+              <span class="lang--zh">轻量开源 2D/3D CAD，作为功能与实现参考。</span>
+              <span class="lang--en" lang="en">Lightweight open-source 2D/3D CAD, used as a feature and implementation reference.</span>
+            </p>
+          </li>
+        </ul>
+      </section>
 
       <div class="footer-honest">
         <p>
