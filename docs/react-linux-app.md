@@ -523,6 +523,23 @@ fixture 几何直接透出生产 DOM 视口、无蒙层；About in-DOM 覆盖层
   边界见 `docs/validation-native-wayland-2026-10-16.md`。**历史证据**：此项的 X11 运行回归属
   CAD-on-top 时期；此后 X11 在 2026-10-22–24 被显式拒绝（exit 4），2026-10-24 起改走 `dom-canvas`。
   旧结论不得当作当前 X11 证据。
+- **退出期 `corrupted double-linked list`：WebKitWebProcess/Mesa，不是 yacr（2026-11-08 定位）**：
+  关窗后终端可能在 `run event: Exit` 之后打印该消息。`YACR_PROBE_LIFECYCLE=close`（真实
+  `window.close()` 路径）的有界关窗运行 **18 次复现 2 次**，**主进程退出码始终 `0`**，消息总在主进程
+  退出后出现 ⇒ 来自 WebView 子进程，而不是 yacr 的 presenter/释放路径。本机
+  `/var/crash/_usr_lib_x86_64-linux-gnu_webkit2gtk-4.1_WebKitWebProcess.1000.crash`
+  （`Signal: 6 SIGABRT`；该 core 早于本轮复现，仅作同类佐证）的栈为
+  `malloc_printerr("corrupted double-linked list") → _int_free_chunk → libgallium-26.0.8 →
+  gbm/dri_gbm.so → libwebkit2gtk-4.1 → __run_exit_handlers → exit`：**WebKitWebProcess 在 `exit()` 的
+  atexit 里拆除 EGL/GBM(DRM) 时踩坏 Mesa 堆**。上游对应 WebKit 305909 / 315577
+  （`PlatformDisplay::terminateEGLDisplay`、`DRMDeviceManager` atexit 竞态），2026-09-24 修复、**2.54.1+**
+  才有；本机 `libwebkit2gtk-4.1-0 2.52.6-0ubuntu0.26.04.1` 在受影响范围内。WebKit 2.45.4 起不再对辅助
+  进程使用 `--die-with-parent`，子进程因此能活到 atexit，这条消息才可见。
+  **未证实规避**：`WEBKIT_DISABLE_DMABUF_RENDERER=1` 的关窗 A/B 为 **0/10 vs 基线 0/10**，不足以证明
+  有效，宿主**不**内置该开关，也**不**用 SIGKILL 辅助进程掩盖；上游修复只有升级 WebKitGTK 到 2.54.1+。
+  yacr 侧的 presenter → child `wl_surface` → GTK parent 释放顺序未变（见 ADR 0011）。边界：仅本机
+  GNOME/Mutter + P620 + `scale=1` 的 18 次有界运行，**无** ASAN/valgrind 全量退出审计；该子进程 abort
+  不改变 yacr 退出状态，但上游同类报告出现过运行期 SIGSEGV，**不得**写成“无害”。
 - **仍未运行 / 未支持**：**DPR>1/分数缩放**（只测 `scale=1`）、GTK **toplevel**
   替换、GPU 设备丢失、vendor 广度、几何/像素精度、性能/60fps、跨平台、打包、vendor/golden。
   **不得**据此宣称“完整原生 Wayland CAD 支持”。

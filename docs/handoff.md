@@ -1,4 +1,25 @@
 AD
+## 2026-11-08 退出期 `corrupted double-linked list` 定位：WebKitWebProcess/Mesa atexit，非 yacr
+
+- **报告**：启动 → 打开 DWG → 关窗，终端在 `run event: Exit` 之后打印 `corrupted double-linked list`。
+- **归属（本轮实测）**：`YACR_PROBE_LIFECYCLE=close`（真实 `window.close()` 路径）的有界关窗运行
+  **18 次复现 2 次**；**主进程退出码始终 `0`**，消息总在主进程退出后出现 ⇒ 来自 WebView 子进程。
+- **栈（core）**：本机 `/var/crash/_usr_lib_x86_64-linux-gnu_webkit2gtk-4.1_WebKitWebProcess.1000.crash`
+  （`Signal: 6 SIGABRT`；该 core 早于本轮复现，仅作同类佐证）解出的帧为
+  `malloc_printerr → _int_free_chunk → libgallium-26.0.8 → gbm/dri_gbm.so → libwebkit2gtk-4.1 →
+  __run_exit_handlers → exit`：WebKitWebProcess 在 atexit 里拆除 EGL/GBM(DRM) 时踩坏 Mesa 堆。
+- **上游**：WebKit 305909 / 315577（`PlatformDisplay::terminateEGLDisplay`、`DRMDeviceManager` atexit
+  竞态），2026-09-24 修复、**2.54.1+** 才有；本机 `libwebkit2gtk-4.1-0 2.52.6-0ubuntu0.26.04.1`
+  在受影响范围。WebKit 2.45.4 起辅助进程不再 `--die-with-parent`，所以能活到 atexit。
+- **未改代码**：`WEBKIT_DISABLE_DMABUF_RENDERER=1` 的 A/B 为 **0/10 vs 基线 0/10**，不足以支持内置规避；
+  也**不**用 SIGKILL 辅助进程掩盖。yacr 的 presenter → child `wl_surface` → GTK parent 释放顺序未变
+  （ADR 0011），`Exit` 日志里重复的 `render session detached` 是幂等释放，不是根因。
+- **已运行**：`YACR_PROBE_LIFECYCLE=close` 关窗循环（8 + 10 次）、gdb core 栈判读、WebKit/Mesa 版本核对。
+- **NOT RUN / NOT VERIFIED**：ASAN/valgrind 全量退出审计；WebKitGTK 2.54.1+ 升级复测（本机 archive 仅
+  2.52.x）；其它 GPU/合成器；该子进程 abort 对运行期稳定性的长期影响（上游另有运行期 SIGSEGV 报告，
+  **不得**写成“无害”）。
+- 文档：`docs/react-linux-app.md` §验证状态与限制 新增同一条目。
+
 ## 2026-11-08 两个工作树并入 `main`
 
 - **并入内容**：`batch/two-works`（`f20bd542`/`277f0028`/`3352c759`/`87825ba3`，shift 多选、命令历史复制、
