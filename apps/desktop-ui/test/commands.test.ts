@@ -392,7 +392,10 @@ test('autocomplete prefers prefix matches, then usage, then alphabetical', () =>
   const all = filterCommandSuggestions('');
   assert.ok(all.length > 0);
   const prefix = filterCommandSuggestions('co');
-  assert.equal(prefix[0].id, 'COPY');
+  // CONSTRAINTBAR is a prefix match too and sorts before COPY alphabetically;
+  // COPY must still be present in the same suggestion list.
+  assert.equal(prefix[0].id, 'CONSTRAINTBAR');
+  assert.ok(prefix.some(suggestion => suggestion.id === 'COPY'));
   // Mid-string search still finds commands that do not start with the needle.
   assert.ok(filterCommandSuggestions('ine').some(suggestion => suggestion.id === 'LINE'));
   const used = filterCommandSuggestions('c', { query: 'c', history: ['CIRCLE', 'CIRCLE'] });

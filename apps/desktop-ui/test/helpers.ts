@@ -352,6 +352,17 @@ export const HOST_NAMES = [
   'HYPERLINKOPTIONS', 'INPUTSEARCHOPTIONS', '-INPUTSEARCHOPTIONS', 'SIGVALIDATE',
   'BASE', 'LIMITS', 'VIEWPLOTDETAILS', 'VPLAYER', 'MVIEW', 'PSBSCALE', 'PSTSCALE',
   'MVSETUP',
+  // The 2026-11-09 Wave 3 batch: thirty payload-free canonical selectors — eight
+  // reports/session commands (two space switches, four table reports, two
+  // non-associative no-ops) and twenty-two named refusals. `-STYLE`, `-BEDIT`,
+  // `-DIMINSPECT` and `-OBJECTSCALE` are their own canonical selectors here,
+  // not aliases.
+  'MSPACE', 'PSPACE', 'STYLE', '-STYLE', 'MLEADERSTYLE', 'BLOCK?',
+  'DIMREASSOC', 'DIMREASSOCIATE', 'DIMJOGGED', 'DIMINSPECT', '-DIMINSPECT',
+  'ANNORESET', 'ANNOUPDATE', 'OBJECTSCALE', '-OBJECTSCALE', 'QLATTACH',
+  'QLATTACHSET', 'QLDETACHSET', 'ARRAYCLOSE', 'ARRAYEDIT', 'BEDIT', '-BEDIT',
+  'BCLOSE', 'BCYCLEORDER', 'BGRIPSET', 'BESETTINGS', 'BTESTBLOCK',
+  'LAYERPALETTE', 'CONSTRAINTBAR', 'CONSTRAINTSETTINGS',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented

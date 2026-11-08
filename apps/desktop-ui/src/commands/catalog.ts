@@ -719,4 +719,42 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'PSTSCALE', labelKey: 'draw.kind.pstscale', icon: 'scale', group: 'view' },
   { id: 'MVSETUP', labelKey: 'draw.kind.mvsetup', icon: 'drawing', group: 'view' },
 
+  // The 2026-11-09 Wave 3 batch: eight reports/session commands and twenty-two
+  // named refusals. MSPACE/PSPACE reuse the existing MODEL/SPACE session path;
+  // STYLE/-STYLE, MLEADERSTYLE and BLOCK? are read-only table reports;
+  // DIMREASSOC/DIMREASSOCIATE are non-associative no-ops. The rest answer with a
+  // stable `Unsupported` reason and must never be presented as working features.
+  // Appended last so no shipped row moves. BLOCK?'s label slug is
+  // `block_list` because `?` is not a legal i18n key character.
+  { id: 'MSPACE', labelKey: 'draw.kind.mspace', icon: 'view', group: 'view' },
+  { id: 'PSPACE', labelKey: 'draw.kind.pspace', icon: 'drawing', group: 'view' },
+  { id: 'STYLE', labelKey: 'draw.kind.style', icon: 'font', group: 'properties' },
+  { id: '-STYLE', labelKey: 'draw.kind.dashstyle', icon: 'font', group: 'properties' },
+  { id: 'MLEADERSTYLE', labelKey: 'draw.kind.mleaderstyle', icon: 'properties', group: 'annotate' },
+  { id: 'BLOCK?', labelKey: 'draw.kind.block_list', icon: 'properties', group: 'properties' },
+  { id: 'DIMREASSOC', labelKey: 'draw.kind.dimreassoc', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DIMREASSOCIATE', labelKey: 'draw.kind.dimreassociate', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DIMJOGGED', labelKey: 'draw.kind.dimjogged', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DIMINSPECT', labelKey: 'draw.kind.diminspect', icon: 'dimlinear', group: 'annotate' },
+  { id: '-DIMINSPECT', labelKey: 'draw.kind.dashdiminspect', icon: 'dimlinear', group: 'annotate' },
+  { id: 'ANNORESET', labelKey: 'draw.kind.annoreset', icon: 'font', group: 'annotate' },
+  { id: 'ANNOUPDATE', labelKey: 'draw.kind.annoupdate', icon: 'font', group: 'annotate' },
+  { id: 'OBJECTSCALE', labelKey: 'draw.kind.objectscale', icon: 'scale', group: 'properties' },
+  { id: '-OBJECTSCALE', labelKey: 'draw.kind.dashobjectscale', icon: 'scale', group: 'properties' },
+  { id: 'QLATTACH', labelKey: 'draw.kind.qlattach', icon: 'properties', group: 'annotate' },
+  { id: 'QLATTACHSET', labelKey: 'draw.kind.qlattachset', icon: 'properties', group: 'annotate' },
+  { id: 'QLDETACHSET', labelKey: 'draw.kind.qldetachset', icon: 'properties', group: 'annotate' },
+  { id: 'ARRAYCLOSE', labelKey: 'draw.kind.arrayclose', icon: 'arrayrect', group: 'modify' },
+  { id: 'ARRAYEDIT', labelKey: 'draw.kind.arrayedit', icon: 'arrayrect', group: 'modify' },
+  { id: 'BEDIT', labelKey: 'draw.kind.bedit', icon: 'drawing', group: 'properties' },
+  { id: '-BEDIT', labelKey: 'draw.kind.dashbedit', icon: 'drawing', group: 'properties' },
+  { id: 'BCLOSE', labelKey: 'draw.kind.bclose', icon: 'drawing', group: 'properties' },
+  { id: 'BCYCLEORDER', labelKey: 'draw.kind.bcycleorder', icon: 'drawing', group: 'properties' },
+  { id: 'BGRIPSET', labelKey: 'draw.kind.bgripset', icon: 'drawing', group: 'properties' },
+  { id: 'BESETTINGS', labelKey: 'draw.kind.besettings', icon: 'settings', group: 'properties' },
+  { id: 'BTESTBLOCK', labelKey: 'draw.kind.btestblock', icon: 'drawing', group: 'properties' },
+  { id: 'LAYERPALETTE', labelKey: 'draw.kind.layerpalette', icon: 'layers', group: 'view' },
+  { id: 'CONSTRAINTBAR', labelKey: 'draw.kind.constraintbar', icon: 'alert', group: 'view' },
+  { id: 'CONSTRAINTSETTINGS', labelKey: 'draw.kind.constraintsettings', icon: 'settings', group: 'view' },
+
 ]);

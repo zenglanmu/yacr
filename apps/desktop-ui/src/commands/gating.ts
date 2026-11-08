@@ -146,6 +146,20 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'BASE', 'LIMITS', 'VIEWPLOTDETAILS', 'VPLAYER', 'MVIEW', 'PSBSCALE', 'PSTSCALE',
   'MVSETUP',
 
+  // The 2026-11-09 Wave 3 batch: eight reports/session commands and twenty-two
+  // named refusals. All thirty need the open drawing (the space switches and
+  // reports read its tables; the refusals answer from the build's model, which
+  // is only meaningful with a document open), so the start page disables them
+  // with the catalog's own "no drawing is open" sentence. None takes a
+  // capability gate: no file I/O is involved.
+  'MSPACE', 'PSPACE', 'STYLE', '-STYLE', 'MLEADERSTYLE', 'BLOCK?',
+  'DIMREASSOC', 'DIMREASSOCIATE',
+  'DIMJOGGED', 'DIMINSPECT', '-DIMINSPECT', 'ANNORESET', 'ANNOUPDATE',
+  'OBJECTSCALE', '-OBJECTSCALE', 'QLATTACH', 'QLATTACHSET', 'QLDETACHSET',
+  'ARRAYCLOSE', 'ARRAYEDIT', 'BEDIT', '-BEDIT', 'BCLOSE', 'BCYCLEORDER',
+  'BGRIPSET', 'BESETTINGS', 'BTESTBLOCK', 'LAYERPALETTE', 'CONSTRAINTBAR',
+  'CONSTRAINTSETTINGS',
+
 ]);
 
 /** One command's precondition on the **current selection**. */

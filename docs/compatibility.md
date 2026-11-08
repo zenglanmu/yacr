@@ -323,6 +323,36 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | PSBSCALE | **具名拒绝 v1（2026-11-09）**：`psbscale.write_unsupported: no viewport scale write API`；Viewer-legal | 无视口比例写入 API | 拒绝，无写 |
 | PSTSCALE | **具名拒绝 v1（2026-11-09）**：`pstscale.write_unsupported: no viewport scale write API`；Viewer-legal | 无视口比例写入 API | 拒绝，无写 |
 | MVSETUP | **具名拒绝 v1（2026-11-09）**：`mvsetup.unsupported: no viewport-group model`；Viewer-legal | 无视口组模型 | 拒绝，无写 |
+| MSPACE | **会话切换 v1（2026-11-09）**：payload-free，复用 `MODEL`/`SPACE` 的 `switch_space_command` 切到模型空间，`mspace.switched`；已在模型空间为 `mspace.noop`；会话状态 only，无数据库写/修订/历史，Viewer-legal | 不是第二套空间权威；不创建或移动视口，不改变图纸空间内容 | 会话状态，无写 |
+| PSPACE | **会话切换 v1（2026-11-09）**：切到第一个图纸布局（`drawing.layouts()` 第一个），`pspace.switched`；无图纸布局为 `pspace.no_layout`；Viewer-legal | 只取第一个布局；若原有 `SPACE` 路径校验/取景失败则显式拒绝，不静默回退 | 会话状态，无写 |
+| STYLE | **只读报告 v1（2026-11-09）**：列出 `drawing.styles()` 每个文字样式（名称/id/资源键数，`style.entry` + `style.summary`）；Viewer-legal | 创建或修改文字样式 NOT IMPLEMENTED；不解析字体文件内容 | 只读，无写 |
+| -STYLE | **只读报告 v1（2026-11-09）**：与 `STYLE` 同一列表，使用 `-style.entry` + `-style.summary`；本构建的**独立选择子**（不是别名）；Viewer-legal | 编辑文字样式 NOT IMPLEMENTED | 只读，无写 |
+| MLEADERSTYLE | **只读报告 v1（2026-11-09）**：列出 `drawing.mleader_styles()`（名称/content type/字高/箭头/文字样式，`mleaderstyle.entry` + `mleaderstyle.summary`）；Viewer-legal | 创建、修改或设当前样式 NOT IMPLEMENTED；没有样式对话框 | 只读，无写 |
+| BLOCK? | **只读报告 v1（2026-11-09）**：列出 `drawing.blocks()` 每个块定义的名称与成员数（`block.entry` + `block.summary`）；Viewer-legal | 只读列表，不是块编辑器；不列嵌套/xref/XDATA | 只读，无写 |
+| DIMREASSOC | **非关联 no-op v1（2026-11-09）**：`dimreassoc.non_associative` 明说本构建标注非关联，无可恢复的关联；不写库/不升修订/不入历史，Viewer-legal | 无关联模型：不能恢复被覆盖/修改的标注测量值 | no-op，无写 |
+| DIMREASSOCIATE | **非关联 no-op v1（2026-11-09）**：`dimreassociate.non_associative` 明说本构建标注非关联；不写库/不升修订/不入历史，Viewer-legal | 无关联模型：不能把标注关联到对象或点 | no-op，无写 |
+| DIMJOGGED | **具名拒绝 v1（2026-11-09）**：`dimjogged.unsupported: the dimension domain stores no jog field`；Viewer-legal | 标注域不存储折弯字段：不创建折弯标注 | 拒绝，无写 |
+| DIMINSPECT | **具名拒绝 v1（2026-11-09）**：`diminspect.unsupported: the dimension domain stores no inspection data`；Viewer-legal | 标注域不存储检验数据 | 拒绝，无写 |
+| -DIMINSPECT | **具名拒绝 v1（2026-11-09）**：`-diminspect.unsupported: the dimension domain stores no inspection data`；Viewer-legal | 同一拒绝的命令行拼写；不存储检验数据 | 拒绝，无写 |
+| ANNORESET | **具名拒绝 v1（2026-11-09）**：`annoreset.unsupported: this build has no annotative-object model`；Viewer-legal | 无注释性对象模型：不能重置替代比例表示的位置 | 拒绝，无写 |
+| ANNOUPDATE | **具名拒绝 v1（2026-11-09）**：`annoupdate.unsupported: this build has no annotative-object model`；Viewer-legal | 无注释性对象模型：不能按样式更新注释性对象 | 拒绝，无写 |
+| OBJECTSCALE | **具名拒绝 v1（2026-11-09）**：`objectscale.unsupported: this build has no annotative-object model`；Viewer-legal | 无注释性对象模型：不能增删支持比例 | 拒绝，无写 |
+| -OBJECTSCALE | **具名拒绝 v1（2026-11-09）**：`-objectscale.unsupported: this build has no annotative-object model`；Viewer-legal | 同一拒绝的命令行拼写；无注释性对象模型 | 拒绝，无写 |
+| QLATTACH | **具名拒绝 v1（2026-11-09）**：`qlattach.unsupported: this build has no QLEADER annotation-attachment model`；Viewer-legal | 无 QLEADER 注释附着模型：不能把引线附到 MText/公差/块参照 | 拒绝，无写 |
+| QLATTACHSET | **具名拒绝 v1（2026-11-09）**：`qlattachset.unsupported: this build has no QLEADER annotation-attachment model`；Viewer-legal | 无 QLEADER 注释附着模型：不能全局附着引线 | 拒绝，无写 |
+| QLDETACHSET | **具名拒绝 v1（2026-11-09）**：`qldetchset.unsupported: this build has no QLEADER annotation-attachment model`；Viewer-legal | 无 QLEADER 注释附着模型：不能全局分离引线 | 拒绝，无写 |
+| ARRAYCLOSE | **具名拒绝 v1（2026-11-09）**：`arrayclose.unsupported: this build has no associative-array edit state`；Viewer-legal | 无关联阵列编辑状态：不能保存/放弃阵列源对象修改 | 拒绝，无写 |
+| ARRAYEDIT | **具名拒绝 v1（2026-11-09）**：`arrayedit.unsupported: this build has no associative-array edit state`；Viewer-legal | 无关联阵列编辑状态：不能编辑阵列源对象 | 拒绝，无写 |
+| BEDIT | **具名拒绝 v1（2026-11-09）**：`bedit.unsupported: this build has no block editor`；Viewer-legal | 无块编辑器：不能打开块定义进行编辑 | 拒绝，无写 |
+| -BEDIT | **具名拒绝 v1（2026-11-09）**：`-bedit.unsupported: this build has no block editor`；Viewer-legal | 同一拒绝的命令行拼写；无块编辑器 | 拒绝，无写 |
+| BCLOSE | **具名拒绝 v1（2026-11-09）**：`bclose.unsupported: this build has no block editor`；Viewer-legal | 无块编辑器可关闭 | 拒绝，无写 |
+| BCYCLEORDER | **具名拒绝 v1（2026-11-09）**：`bcycleorder.unsupported: this build has no dynamic-block grip model`；Viewer-legal | 无动态块夹点模型：不能改变夹点循环顺序 | 拒绝，无写 |
+| BGRIPSET | **具名拒绝 v1（2026-11-09）**：`bgripset.unsupported: this build has no dynamic-block parameter model`；Viewer-legal | 无动态块参数模型：不能创建/删除/重置参数夹点 | 拒绝，无写 |
+| BESETTINGS | **具名拒绝 v1（2026-11-09）**：`besettings.unsupported: this build has no block editor`；Viewer-legal | 无块编辑器设置对话框 | 拒绝，无写 |
+| BTESTBLOCK | **具名拒绝 v1（2026-11-09）**：`btestblock.unsupported: this build has no block editor`；Viewer-legal | 无块编辑器：不能测试动态块 | 拒绝，无写 |
+| LAYERPALETTE | **具名拒绝 v1（2026-11-09）**：`layerpalette.unsupported: there is no separate layer palette; use LAYER`；Viewer-legal | 本构建没有独立图层调色板；请使用现有 `LAYER` | 拒绝，无写 |
+| CONSTRAINTBAR | **具名拒绝 v1（2026-11-09）**：`constraintbar.unsupported: this build has no constraint model`；Viewer-legal | 无约束模型：不能显示/隐藏几何约束栏 | 拒绝，无写 |
+| CONSTRAINTSETTINGS | **具名拒绝 v1（2026-11-09）**：`constraintsettings.unsupported: this build has no constraint model`；Viewer-legal | 无约束模型：不能控制约束栏显示 | 拒绝，无写 |
 - 变换/偏移的**不支持几何**（`Spline`/`Shape`/`Opaque`/`Compound`；**以及 `MultiLeader`——拒绝一切缩放**）返回显式
   （**更正**：`Text` 自 P7a 起**可**平移/旋转/均匀缩放，**不在**此列表；仅镜像与非均匀缩放拒绝。
   **2026-10-26 起 `MIRROR` 的 `Arc`/`Ellipse` 不再被拒**，见上表 MIRROR 行。）

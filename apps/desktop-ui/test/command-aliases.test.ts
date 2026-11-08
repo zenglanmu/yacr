@@ -126,10 +126,13 @@ test('suggestions merge alias rows between canonical prefix and mid-string match
   // Typing the alias exactly highlights its own row (Enter submits `L`, which the
   // host canonicalises), and the row still shows the meaning.
   assert.equal(rows[defaultSuggestionIndex(rows, 'L')].id, 'L');
-  // Canonical prefix matches still win: `co` starts with a canonical name.
+  // Canonical prefix matches still win: `co` starts with canonical names.
+  // CONSTRAINTBAR is now alphabetically first among them; COPY keeps its row.
   const co = filterCommandSuggestions('co');
-  assert.equal(co[0].id, 'COPY');
-  assert.ok(co.findIndex(row => row.id === 'CO') > co.findIndex(row => row.id === 'COPY'));
+  assert.equal(co[0].id, 'CONSTRAINTBAR');
+  const copyAt = co.findIndex(row => row.id === 'COPY');
+  assert.ok(copyAt >= 0);
+  assert.ok(co.findIndex(row => row.id === 'CO') > copyAt);
   assert.equal(co.find(row => row.id === 'CO').target, 'COPY');
   setCommandAliases([]);
 });

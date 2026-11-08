@@ -27,9 +27,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **213** |
-| **已实现合计（完整 + 部分）** | **263** |
-| 未实现 | **718** |
+| 部分实现（有写明的界） | **243** |
+| **已实现合计（完整 + 部分）** | **293** |
+| 未实现 | **688** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -60,7 +60,9 @@
 > **2026-11-09 增补（pilot）**：`QTEXT`/`FILL`/`TFRAMES`/`REGENAUTO`/`ISODRAFT` 五个会话令牌（无渲染器效果，如实标为部分）与 `BCOUNT`/`COUNT`/`EDITTIME`/`JULIAN`/`XLIST` 五个只读报告计入 **233 已实现（50 完整 + 183 部分）/ 748 未实现**；全部 Viewer-legal、无事务/修订/历史。
 
 > **2026-11-09 增补（Wave 2）**：`DRAGMODE`/`APERTURE`/`ISOPLANE`/`HIGHLIGHTNEW`/`TRAYSETTINGS`/`TEXTSCR`/`GRAPHSCR`/`FINDINCLUDE`/`FINDMATCH`/`REVCLOUDPROPERTIES` 十个会话令牌（无渲染器消费，两个只读形式明说设置器未实现）、`SYSVARMONITOR`/`SYSVDLG`/`VTOPTIONS`/`ALIASEDIT`/`WHOHAS`/`ACADINFO`/`PTYPE`/`SCALELISTEDIT` 八个只读报告，以及 `HYPERLINKOPTIONS`…`MVSETUP` 十二个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **263 已实现（50 完整 + 213 部分）/ 718 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
-> **223 已实现（50 完整 + 173 部分）/ 758 未实现**；无未保存修改提示，无多文档。
+
+> **2026-11-09 增补（Wave 3）**：`MSPACE`/`PSPACE` 两个会话空间切换（复用现有 `MODEL`/`SPACE` 路径，无第二套空间权威；`PSPACE` 无图纸布局时 `pspace.no_layout`）、`STYLE`/`-STYLE` 文字样式只读列表、`MLEADERSTYLE` 多重引线样式只读列表、`BLOCK?` 块定义只读列表（复用 `XLIST` 的 `drawing.blocks()`），以及 `DIMREASSOC`/`DIMREASSOCIATE` 两个非关联 no-op 报告；另加 `DIMJOGGED`…`CONSTRAINTSETTINGS` 二十二个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **293 已实现（50 完整 + 243 部分）/ 688 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
+> **293 已实现（50 完整 + 243 部分）/ 688 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -110,27 +112,44 @@
 
 | Command | 状态 | 说明 |
 | --- | --- | --- |
+| `-BEDIT` | 部分实现 | 具名拒绝（`-bedit.unsupported`）：本构建无块编辑器；命令行拼写。 |
+| `-DIMINSPECT` | 部分实现 | 具名拒绝（`-diminspect.unsupported`）：同一具名拒绝的命令行拼写。 |
+| `-OBJECTSCALE` | 部分实现 | 具名拒绝（`-objectscale.unsupported`）：同一具名拒绝的命令行拼写。 |
+| `-STYLE` | 部分实现 | 与 `STYLE` 相同的只读文字样式列表，使用 `-style.*` 诊断码；编辑未实现。 |
 | `ABOUT` | 已实现 | chrome 本地选择子：打开 About 对话框（与 File > About 同一路径） |
 | `ACADINFO` | 部分实现 | 只读：产品版本/构建配置 + 文档修订/实体数；许可证/硬件/模块数据不收集。 |
 | `ALIASEDIT` | 部分实现 | 只读：逐行列出规范 `COMMAND_ALIASES`；创建/修改/删除别名未实现。 |
 | `ALIGN` | 部分实现 | 仅两对点（平移 + 旋转 + 可选均匀缩放）；无 3 对点 3D、无非均匀缩放 |
+| `ANNORESET` | 部分实现 | 具名拒绝（`annoreset.unsupported`）：本构建无注释性对象模型。 |
+| `ANNOUPDATE` | 部分实现 | 具名拒绝（`annoupdate.unsupported`）：本构建无注释性对象模型。 |
 | `APERTURE` | 部分实现 | 只读报告会话靶框令牌（默认 10）；`APERTURE <n>` 设置形式未实现，不绘制捕捉靶框。 |
 | `ARC` | 已实现 | — |
 | `AREA` | 已实现 | — |
+| `ARRAYCLOSE` | 部分实现 | 具名拒绝（`arrayclose.unsupported`）：本构建无关联阵列编辑状态。 |
+| `ARRAYEDIT` | 部分实现 | 具名拒绝（`arrayedit.unsupported`）：本构建无关联阵列编辑状态。 |
 | `ARRAYPOLAR` | 部分实现 | 独立副本、非关联；角度步长为我们的规则 |
 | `ARRAYRECT` | 部分实现 | 独立副本、非关联；无 Path/Levels/关联编辑 |
 | `AUDIT` | 部分实现 | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
 | `BASE` | 部分实现 | 具名拒绝（`base.unsupported`）：图形不保存插入基点。 |
+| `BCLOSE` | 部分实现 | 具名拒绝（`bclose.unsupported`）：本构建无块编辑器。 |
 | `BCOUNT` | 部分实现 | 只读：统计整个模型空间的块参照实例数（按块名分组）；无 AutoCAD 的 Select objects 提示、不展开块成员、不统计图纸空间。 |
+| `BCYCLEORDER` | 部分实现 | 具名拒绝（`bcycleorder.unsupported`）：本构建无动态块夹点模型。 |
+| `BEDIT` | 部分实现 | 具名拒绝（`bedit.unsupported`）：本构建无块编辑器。 |
+| `BESETTINGS` | 部分实现 | 具名拒绝（`besettings.unsupported`）：本构建无块编辑器。 |
+| `BGRIPSET` | 部分实现 | 具名拒绝（`bgripset.unsupported`）：本构建无动态块参数模型。 |
 | `BLOCK` | 已实现 | — |
+| `BLOCK?` | 部分实现 | 只读列出块定义与成员数（复用 `XLIST` 的 `drawing.blocks()`）；不是块编辑器。 |
 | `BOUNDARY` | 部分实现 | 一个内部点 → 每个发现的闭合环（含嵌套岛）一条闭合非关联多段线；仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 选项（边界集/关闭岛检测/面域输出/对象类型）未实现；无 `BO`/`BPOLY` 别名 |
 | `BREAK` | 部分实现 | 两点打断；无 F 第一点覆盖、无多段打断；LWPOLYLINE 按名拒绝 |
 | `BREAKATPOINT` | 部分实现 | 交互工具：先拾取对象再指定断点（断点可投影到对象上）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
+| `BTESTBLOCK` | 部分实现 | 具名拒绝（`btestblock.unsupported`）：本构建无块编辑器。 |
 | `CHAMFER` | 部分实现 | 两线形式 + 独立 CHAMFER POLYLINE 选择子；无 Angle/Multiple/Trim |
 | `CIRCLE` | 已实现 | — |
 | `CLEANSCREENOFF` | 部分实现 | chrome 本地选择子：显式退出 clean-screen；只恢复 chrome 可见性，不重开各面板 |
 | `CLEANSCREENON` | 部分实现 | chrome 本地选择子：显式进入 clean-screen；只隐藏 chrome，不记录各面板的独立开关 |
 | `CLOSE` | 部分实现 | 关闭当前文档并回到开始页；无未保存修改提示（没有 dirty 模型），无多文档。 |
+| `CONSTRAINTBAR` | 部分实现 | 具名拒绝（`constraintbar.unsupported`）：本构建无约束模型。 |
+| `CONSTRAINTSETTINGS` | 部分实现 | 具名拒绝（`constraintsettings.unsupported`）：本构建无约束模型。 |
 | `COPY` | 已实现 | — |
 | `COPYBASE` | 部分实现 | 应用内剪贴板 + 基点；不是 OS 剪贴板，不跨应用 |
 | `COPYCLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
@@ -147,11 +166,15 @@
 | `DIMDIAMETER` | 已实现 | — |
 | `DIMDISASSOCIATE` | 部分实现 | payload-free；无关联模型，`dimdisassociate.already_non_associative` 且不改变任何状态 |
 | `DIMEDIT` | 部分实现 | 对所有选中标注 `TEXT <override>`（组 1，`<>` 占位，≤1024）或 `RESET`；一条事务/一步撤销；延伸线编辑未实现 |
+| `DIMINSPECT` | 部分实现 | 具名拒绝（`diminspect.unsupported`）：标注域不存储检验数据。 |
+| `DIMJOGGED` | 部分实现 | 具名拒绝（`dimjogged.unsupported`）：标注域不存储折弯字段。 |
 | `DIMJOGLINE` | 部分实现 | `ADD`/`REMOVE` 解析后按 `dimjogline.unsupported` 拒绝（域无 jog 字段/存储） |
 | `DIMLINEAR` | 已实现 | — |
 | `DIMORDINATE` | 已实现 | — |
 | `DIMOVERRIDE` | 部分实现 | 闭集的实体快照变量；未知变量/仅表变量/坏值/未实现值分别具名拒绝；一条事务/一步撤销；不改样式表 |
 | `DIMRADIUS` | 已实现 | — |
+| `DIMREASSOC` | 部分实现 | 非关联标注的具名 no-op（`dimreassoc.non_associative`）；不改变任何状态。 |
+| `DIMREASSOCIATE` | 部分实现 | 非关联标注的具名 no-op（`dimreassociate.non_associative`）；不改变任何状态。 |
 | `DIMREGEN` | 部分实现 | payload-free；本构建非关联，`dimregen.non_associative` 且不改变任何状态 |
 | `DIMROTATED` | 部分实现 | 三点拾取（两尺寸界线原点 + 尺寸线位置）；尺寸线角度来自会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | `DIMSPACE` | 部分实现 | 选择驱动：首个选中的线性标注为基准，其余按拾取顺序以基准样式 `DIMDLI` 自动等距；无交互间距值提示、无关联重排、仅模型空间线性标注 |
@@ -211,6 +234,7 @@
 | `LAYER` | 已实现 | chrome 本地选择子：打开图层面板 |
 | `LAYERCLOSE` | 已实现 | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
 | `LAYERP` | 部分实现 | 会话内有界 16 步；不持久化 |
+| `LAYERPALETTE` | 部分实现 | 具名拒绝（`layerpalette.unsupported`）：无独立图层调色板，请用 `LAYER`。 |
 | `LAYERPMODE` | 部分实现 | `ON\ |
 | `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE\ |
 | `LAYFRZ` | 部分实现 | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入不可撤销 |
@@ -244,6 +268,7 @@
 | `MEASUREGEOM` | 部分实现 | 选项路由：DISTANCE/ANGLE/AREA/POLYLINE 复用既有工具，RADIUS 只读报告；VOLUME 显式未实现（无 3D 体积模型） |
 | `MIRROR` | 部分实现 | 保留原件；拒绝 Text/MultiLeader |
 | `MLEADER` | 部分实现 | 单簇/2 顶点/仅直线；无 Options |
+| `MLEADERSTYLE` | 部分实现 | 只读列出多重引线样式；创建/修改/设当前样式未实现。 |
 | `MLINE` | 部分实现 | 恰好两条平行 `LINE`；无 join/cap/多段基线 |
 | `MLSTYLE` | 部分实现 | 会话内最多 16 个命名样式，喂 MLINE；不持久化 |
 | `MOCORO` | 部分实现 | `MOVE |
@@ -251,6 +276,7 @@
 | `MOVE` | 已实现 | — |
 | `MPEDIT` | 部分实现 | 对每个选中 LWPOLYLINE 应用 `CLOSE\ |
 | `MREDO` | 部分实现 | 重做 N 步（默认 1），每步一条历史移动；空栈拒绝；不足时 `mredo.partial` |
+| `MSPACE` | 部分实现 | 会话切换到模型空间，复用现有 `MODEL` 路径（仅会话状态）；已在模型空间时为具名 no-op。 |
 | `MSTRETCH` | 部分实现 | 仅 payload 多窗口列表（无命令行语法）；复用 STRETCH planner 的窗口并集；一条事务/一步撤销；无多边形窗口 |
 | `MTEDIT` | 部分实现 | `TEXTEDIT` 的别名（同一 `CommandId`/路径）；编辑当前单选的 Text/MText/MULTILEADER 字符串；无第二编辑路径 |
 | `-MTEXT` | 部分实现 | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获）；无第二实现 |
@@ -259,6 +285,7 @@
 | `MVIEW` | 部分实现 | 具名拒绝（`mview.viewport_creation_unsupported`）：无创建视口 API。 |
 | `MVSETUP` | 部分实现 | 具名拒绝（`mvsetup.unsupported`）：无视口组模型。 |
 | `NEW` | 已实现 | — |
+| `OBJECTSCALE` | 部分实现 | 具名拒绝（`objectscale.unsupported`）：本构建无注释性对象模型。 |
 | `OFFSET` | 部分实现 | LINE/CIRCLE/ARC/LWPOLYLINE；ELLIPSE 拒绝；无全局自交修剪 |
 | `OOPS` | 部分实现 | v1 只恢复最近一次 ERASE（不覆盖 AutoCAD 的 BLOCK/WBLOCK 删除）；恢复实体用新 id；撤销恢复副本但不恢复快照 |
 | `OPEN` | 已实现 | — |
@@ -279,11 +306,16 @@
 | `POINT` | 已实现 | — |
 | `POLYGON` | 已实现 | 默认内接（顶点在拾取点上）；外切变体是独立的多词选择子（见下一行） |
 | `PSBSCALE` | 部分实现 | 具名拒绝（`psbscale.write_unsupported`）：无视口比例写入 API。 |
+| `PSPACE` | 部分实现 | 会话切换到第一个图纸布局，复用现有 `SPACE` 路径；无图纸布局时报 `pspace.no_layout`。 |
 | `PSTSCALE` | 部分实现 | 具名拒绝（`pstscale.write_unsupported`）：无视口比例写入 API。 |
 | `PTYPE` | 部分实现 | 只读：`$PDMODE`/`$PDSIZE`；写入仍走 PDMODE/PDSIZE，无 PTYPE 对话框。 |
+| `QLATTACH` | 部分实现 | 具名拒绝（`qlattach.unsupported`）：本构建无 QLEADER 注释附着模型。 |
+| `QLATTACHSET` | 部分实现 | 具名拒绝（`qlattachset.unsupported`）：本构建无 QLEADER 注释附着模型。 |
+| `QLDETACHSET` | 部分实现 | 具名拒绝（`qldetchset.unsupported`）：本构建无 QLEADER 注释附着模型。 |
 | `REVCLOUDPROPERTIES` | 部分实现 | 只读报告会话弧长令牌（默认 15）；设置形式未实现，REVCLOUD 不读取该令牌。 |
 | `SCALELISTEDIT` | 部分实现 | 只读：第一个图纸布局的页面 + `scalelistedit.write_unsupported`；无比例列表存储。 |
 | `SIGVALIDATE` | 部分实现 | 具名拒绝（`sigvalidate.unsupported`）：无数字签名模型。 |
+| `STYLE` | 部分实现 | 只读列出图形的文字样式；创建/修改文字样式未实现。 |
 | `SYSVARMONITOR` | 部分实现 | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | `SYSVDLG` | 部分实现 | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
 | `TEXTSCR` | 部分实现 | 置会话 `text_screen`=true；无文本屏幕窗口、不显示提示历史。 |
@@ -433,8 +465,8 @@
 | 52 | `ANALYSISOPTIONS` | 未实现 | Sets the display options for zebra, curvature, and draft analysis. | — |
 | 53 | `ANALYSISZEBRA` | 未实现 | Projects stripes onto a 3D model to analyze surface continuity. | — |
 | 54 | `ANIPATH` | 未实现 | Saves an animation of a camera moving or panning in a 3D model. | — |
-| 55 | `ANNORESET` | 未实现 | Resets the locations of all alternate scale representations of the selected annotative objects. | — |
-| 56 | `ANNOUPDATE` | 未实现 | Updates existing annotative objects to match the current properties of their styles. | — |
+| 55 | `ANNORESET` | 部分实现 | Resets the locations of all alternate scale representations of the selected annotative objects. | 具名拒绝（`annoreset.unsupported`）：无注释性对象模型。 |
+| 56 | `ANNOUPDATE` | 部分实现 | Updates existing annotative objects to match the current properties of their styles. | 具名拒绝（`annoupdate.unsupported`）：无注释性对象模型。 |
 | 57 | `APERTURE` | 部分实现 | Controls the size of the object snap target box. | 只读报告会话靶框令牌（默认 10）；`APERTURE <n>` 设置形式未实现，不绘制捕捉靶框。 |
 | 58 | `APPAUTOLOADER` | 未实现 | Lists or reloads all plug-ins in the application plug-in folder. | — |
 | 59 | `APPLOAD` | 未实现 | Loads and unloads applications and defines which applications to load at startup. | — |
@@ -447,8 +479,8 @@
 | 66 | `-ARRAY` | 未实现 | From the command line, creates copies of objects arranged in a pattern. | — |
 | 67 | `ARRAY` | 未实现 | Creates copies of objects arranged in a pattern. | — |
 | 68 | `ARRAYCLASSIC` | 未实现 | Creates arrays using the legacy dialog box. | — |
-| 69 | `ARRAYCLOSE` | 未实现 | Saves or discards changes made to an array's source objects and exits the array editing state. | — |
-| 70 | `ARRAYEDIT` | 未实现 | Edits associative array objects and their source objects. | — |
+| 69 | `ARRAYCLOSE` | 部分实现 | Saves or discards changes made to an array's source objects and exits the array editing state. | 具名拒绝（`arrayclose.unsupported`）：无关联阵列编辑状态。 |
+| 70 | `ARRAYEDIT` | 部分实现 | Edits associative array objects and their source objects. | 具名拒绝（`arrayedit.unsupported`）：无关联阵列编辑状态。 |
 | 71 | `ARRAYPATH` | 未实现 | Evenly distributes object copies along a path or a portion of a path. | — |
 | 72 | `ARRAYPOLAR` | 部分实现 | Evenly distributes object copies in a circular pattern around a center point or axis of rotation. | 独立副本、非关联；角度步长为我们的规则 |
 | 73 | `ARRAYRECT` | 部分实现 | Distributes object copies into any combination of rows, columns, and levels. | 独立副本、非关联；无 Path/Levels/关联编辑 |
@@ -483,22 +515,22 @@
 | 102 | `BATTORDER` | 未实现 | Specifies the order of attributes for a block. | — |
 | 103 | `BAUTHORPALETTE` | 未实现 | Opens the Block Authoring Palettes window in the Block Editor. | — |
 | 104 | `BAUTHORPALETTECLOSE` | 未实现 | Closes the Block Authoring Palettes window in the Block Editor. | — |
-| 105 | `BCLOSE` | 未实现 | Closes the Block Editor. | — |
+| 105 | `BCLOSE` | 部分实现 | Closes the Block Editor. | 具名拒绝（`bclose.unsupported`）：无块编辑器。 |
 | 106 | `BCONSTRUCTION` | 未实现 | Converts block geometry into construction geometry, which may be hidden or displayed. | — |
 | 107 | `BCOUNT` | 部分实现 | Creates a report of the number of instances of each block in a selection set or in the entire drawing. | 只读：统计整个模型空间的块参照实例数（按块名分组）；无 AutoCAD 的 Select objects 提示、不展开块成员、不统计图纸空间。 |
 | 108 | `-BCPARAMETER` | 未实现 | Applies constraint parameters to selected objects, or converts dimensional constraints to parameter constraints. | — |
 | 109 | `BCPARAMETER` | 未实现 | Applies constraint parameters to selected objects, or converts dimensional constraints to parameter constraints. | — |
-| 110 | `BCYCLEORDER` | 未实现 | Changes the cycling order of grips for a dynamic block reference. | — |
+| 110 | `BCYCLEORDER` | 部分实现 | Changes the cycling order of grips for a dynamic block reference. | 具名拒绝（`bcycleorder.unsupported`）：无动态块夹点模型。 |
 | 111 | `BDETECT` | 未实现 | Displays the Detect palette where you can start object detection and manage the objects that are eligible for conversion. | — |
-| 112 | `-BEDIT` | 未实现 | Opens the block definition in the Block Editor from the Command prompt. | — |
-| 113 | `BEDIT` | 未实现 | Opens the block definition in the Block Editor. | — |
-| 114 | `BESETTINGS` | 未实现 | Displays the Block Editor Settings dialog box. | — |
+| 112 | `-BEDIT` | 部分实现 | Opens the block definition in the Block Editor from the Command prompt. | 具名拒绝（`-bedit.unsupported`）：同一拒绝的命令行拼写。 |
+| 113 | `BEDIT` | 部分实现 | Opens the block definition in the Block Editor. | 具名拒绝（`bedit.unsupported`）：无块编辑器。 |
+| 114 | `BESETTINGS` | 部分实现 | Displays the Block Editor Settings dialog box. | 具名拒绝（`besettings.unsupported`）：无块编辑器。 |
 | 115 | `BEXTEND` | 未实现 | Extends objects to blocks. | — |
-| 116 | `BGRIPSET` | 未实现 | Creates, deletes, or resets grips associated with a parameter. | — |
+| 116 | `BGRIPSET` | 部分实现 | Creates, deletes, or resets grips associated with a parameter. | 具名拒绝（`bgripset.unsupported`）：无动态块参数模型。 |
 | 117 | `BLEND` | 未实现 | Creates a spline in the gap between two selected lines or curves. | — |
 | 118 | `-BLOCK` | 未实现 | At the Command prompt, creates a block definition from selected objects. | — |
 | 119 | `BLOCK` | 已实现 | Creates a block definition from selected objects. | — |
-| 120 | `BLOCK?` | 未实现 | Lists the objects in a block definition. | — |
+| 120 | `BLOCK?` | 部分实现 | Lists the objects in a block definition. | 只读列出块定义与成员数（`block.entry`/`block.summary`），复用 `drawing.blocks()`；不是块编辑器。 |
 | 121 | `BLOCKICON` | 未实现 | Generates preview images for blocks displayed in DesignCenter. | — |
 | 122 | `BLOCKREPLACE` | 未实现 | Replaces all instances of a specified block with a different block. | — |
 | 123 | `BLOCKSDATAOPTION` | 未实现 | Displays the data collection consent dialog box. | — |
@@ -523,7 +555,7 @@
 | 142 | `BSCALE` | 未实现 | Scales a block reference relative to its insertion point. | — |
 | 143 | `BSEARCH` | 未实现 | Displays the Convert dialog box, which provides options to convert selected entities and identical instances into blocks. | — |
 | 144 | `BTABLE` | 未实现 | Stores variations of a block in the Block Properties Table. | — |
-| 145 | `BTESTBLOCK` | 未实现 | Displays a window within the Block Editor to test a dynamic block. | — |
+| 145 | `BTESTBLOCK` | 部分实现 | Displays a window within the Block Editor to test a dynamic block. | 具名拒绝（`btestblock.unsupported`）：无块编辑器。 |
 | 146 | `BTRIM` | 未实现 | Trim objects to blocks. | — |
 | 147 | `BURST` | 未实现 | Explodes selected blocks, preserving the block layer and converting attribute values to text objects. | — |
 | 148 | `BVHIDE` | 未实现 | Makes objects invisible in the current visibility state or all visibility states in a dynamic block definition. | — |
@@ -572,8 +604,8 @@
 | 191 | `COMPAREINFO` | 未实现 | Provides a way to insert or copy the property information about the two compared drawing files. | — |
 | 192 | `COMPILE` | 未实现 | Compiles shape files and PostScript font files into SHX files. | — |
 | 193 | `CONE` | 未实现 | Creates a 3D solid cone. | — |
-| 194 | `CONSTRAINTBAR` | 未实现 | Displays or hides the geometric constraints on an object. | — |
-| 195 | `CONSTRAINTSETTINGS` | 未实现 | Controls the display of geometric constraints on constraint bars. | — |
+| 194 | `CONSTRAINTBAR` | 部分实现 | Displays or hides the geometric constraints on an object. | 具名拒绝（`constraintbar.unsupported`）：无约束模型。 |
+| 195 | `CONSTRAINTSETTINGS` | 部分实现 | Controls the display of geometric constraints on constraint bars. | 具名拒绝（`constraintsettings.unsupported`）：无约束模型。 |
 | 196 | `CONVERT` | 未实现 | Converts "legacy" 2D polylines and hatches for use with later product releases. | — |
 | 197 | `CONVERTCTB` | 未实现 | Converts a color-dependent plot style table (CTB) to a named plot style table (STB). | — |
 | 198 | `CONVERTOLDLIGHTS` | 未实现 | Converts lights created in previous drawing file formats to the current format. | — |
@@ -672,16 +704,16 @@
 | 291 | `DIMEDIT` | 部分实现 | Edits dimension text and extension lines. | 对所有选中标注 `TEXT <override>`（组 1，`<>` 占位，≤1024）或 `RESET`；一条事务/一步撤销；延伸线编辑未实现 |
 | 292 | `DIMEX` | 未实现 | Exports named dimension styles and their settings to an external file. | — |
 | 293 | `DIMIM` | 未实现 | Imports named dimension styles and their settings from an external file. | — |
-| 294 | `-DIMINSPECT` | 未实现 | From the Command prompt, adds or removes inspection information from a selected dimension. | — |
-| 295 | `DIMINSPECT` | 未实现 | Adds or removes inspection information for a selected dimension. | — |
-| 296 | `DIMJOGGED` | 未实现 | Creates jogged dimensions for circles and arcs. | — |
+| 294 | `-DIMINSPECT` | 部分实现 | From the Command prompt, adds or removes inspection information from a selected dimension. | 具名拒绝（`-diminspect.unsupported`）：同一拒绝的命令行拼写。 |
+| 295 | `DIMINSPECT` | 部分实现 | Adds or removes inspection information for a selected dimension. | 具名拒绝（`diminspect.unsupported`）：标注域无检验数据。 |
+| 296 | `DIMJOGGED` | 部分实现 | Creates jogged dimensions for circles and arcs. | 具名拒绝（`dimjogged.unsupported`）：标注域无折弯字段。 |
 | 297 | `DIMJOGLINE` | 部分实现 | Adds or removes a jog line on a linear or aligned dimension. | `ADD`/`REMOVE` 解析后按 `dimjogline.unsupported` 拒绝（域无 jog 字段/存储） |
 | 298 | `DIMLINEAR` | 已实现 | Creates a linear dimension. | — |
 | 299 | `DIMORDINATE` | 已实现 | Creates ordinate dimensions. | — |
 | 300 | `DIMOVERRIDE` | 部分实现 | Controls overrides of system variables used in selected dimensions. | 闭集的实体快照变量；未知变量/仅表变量/坏值/未实现值分别具名拒绝；一条事务/一步撤销；不改样式表 |
 | 301 | `DIMRADIUS` | 已实现 | Creates a radius dimension for a circle or an arc. | — |
-| 302 | `DIMREASSOC` | 未实现 | Restores the measured value to overridden or modified dimension text. | — |
-| 303 | `DIMREASSOCIATE` | 未实现 | Associates or reassociates selected dimensions to objects or points on objects. | — |
+| 302 | `DIMREASSOC` | 部分实现 | Restores the measured value to overridden or modified dimension text. | 非关联标注 no-op（`dimreassoc.non_associative`）；无状态变化。 |
+| 303 | `DIMREASSOCIATE` | 部分实现 | Associates or reassociates selected dimensions to objects or points on objects. | 非关联标注 no-op（`dimreassociate.non_associative`）；无状态变化。 |
 | 304 | `DIMREGEN` | 部分实现 | Updates the locations of all associative dimensions. | payload-free；本构建非关联，`dimregen.non_associative` 且不改变任何状态 |
 | 305 | `DIMROTATED` | 部分实现 | Creates a rotated linear dimension. | 三点拾取（两尺寸界线原点 + 尺寸线位置）；角度为会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | 306 | `DIMSPACE` | 部分实现 | Adjusts the spacing between linear dimensions or angular dimensions. | 选择驱动 v1：首个线性标注为基准，其余按拾取顺序以基准样式 `DIMDLI` 自动等距；无交互间距值提示、无关联重排、仅模型空间线性标注 |
@@ -847,7 +879,7 @@
 | 466 | `LAYER` | 已实现 | Manages layers and layer properties. | chrome 本地选择子：打开图层面板 |
 | 467 | `LAYERCLOSE` | 已实现 | Closes the Layer Properties Manager. | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
 | 468 | `LAYERP` | 部分实现 | Undoes the last change or set of changes made to layer settings. | 会话内有界 16 步；不持久化 |
-| 469 | `LAYERPALETTE` | 未实现 | Opens the modeless Layer Properties Manager. | — |
+| 469 | `LAYERPALETTE` | 部分实现 | Opens the modeless Layer Properties Manager. | 具名拒绝（`layerpalette.unsupported`）：无独立图层调色板，请用 `LAYER`。 |
 | 470 | `LAYERPMODE` | 部分实现 | Turns on and off the tracking of changes made to layer settings for use by the LAYERP command. | `ON\|OFF`；会话标志，关闭后 `LAYERP` 不记录快照；默认 ON；裸命令报告当前值 |
 | 471 | `LAYERSTATE` | 部分实现 | Saves, restores, and manages sets of layer settings that are called layer states. | `LAYERSTATE SAVE\|RESTORE\|LIST\|DELETE <name>`；会话内最多 32 个命名快照（层属性+当前层+覆盖）；无 DWG 持久化；恢复层表写不可撤销 |
 | 472 | `LAYERSTATESAVE` | 未实现 | Displays the New Layer State to Save dialog box, where you can provide a name and a description for a new layer state. | — |
@@ -937,7 +969,7 @@
 | 556 | `MLEADERALIGN` | 未实现 | Aligns and spaces selected multileader objects. | — |
 | 557 | `MLEADERCOLLECT` | 未实现 | Organizes selected multileaders that contain blocks into rows or columns, and displays the result with a single leader. | — |
 | 558 | `MLEADEREDIT` | 未实现 | Adds leader lines to, or removes leader lines from, a multileader object. | — |
-| 559 | `MLEADERSTYLE` | 未实现 | Creates and modifies multileader styles. | — |
+| 559 | `MLEADERSTYLE` | 部分实现 | Creates and modifies multileader styles. | 只读列出多重引线样式（`mleaderstyle.entry`/`mleaderstyle.summary`）；编辑未实现。 |
 | 560 | `-MLEDIT` | 未实现 | Edits multiline intersections, breaks, and vertices. | — |
 | 561 | `MLEDIT` | 未实现 | Edits multiline intersections, breaks, and vertices. | — |
 | 562 | `MLINE` | 部分实现 | Creates multiple parallel lines. | 恰好两条平行 `LINE`；无 join/cap/多段基线 |
@@ -949,7 +981,7 @@
 | 568 | `MPEDIT` | 部分实现 | Edits multiple polylines; also converts multiple line and arc objects to polyline objects. | 对每个选中 LWPOLYLINE 应用 `CLOSE\|OPEN\|REVERSE`；非多段线逐条跳过；一条事务 |
 | 569 | `MREDO` | 部分实现 | Reverses the effects of several previous UNDO or U commands. | 重做 N 步（默认 1），每步一条历史移动；空栈拒绝；不足时 `mredo.partial` |
 | 570 | `MSLIDE` | 未实现 | Creates a slide file of the current model viewport or the current layout. | — |
-| 571 | `MSPACE` | 未实现 | In a layout, switches from paper space to model space in a layout viewport. | — |
+| 571 | `MSPACE` | 部分实现 | In a layout, switches from paper space to model space in a layout viewport. | 复用 `MODEL`/`SPACE` 会话路径切到模型空间；仅会话状态，已在该空间为 `mspace.noop`，不写库。 |
 | 572 | `MSTRETCH` | 部分实现 | Stretches objects with multiple crossing windows and crossing polygons. | 仅 payload 多窗口列表（无命令行语法）；复用 STRETCH planner 的窗口并集；一条事务/一步撤销；无多边形窗口 |
 | 573 | `MTEDIT` | 部分实现 | Edits multiline text. | `TEXTEDIT` 的别名（同一 `CommandId`/路径）；编辑当前单选的 Text/MText/MULTILEADER 字符串；无第二编辑路径 |
 | 574 | `-MTEXT` | 部分实现 | Creates a multiline text object. | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获）；无第二实现 |
@@ -968,8 +1000,8 @@
 | 587 | `NEWSHEETSET` | 未实现 | Creates a new sheet set data file that manages drawing layouts, file paths, and project data. | — |
 | 588 | `NEWSHOT` | 未实现 | Creates a named view with motion that is played back when viewed with ShowMotion. | — |
 | 589 | `NEWVIEW` | 未实现 | Saves a new, named view from the display in the current viewport, or by defining a rectangular window. | — |
-| 590 | `-OBJECTSCALE` | 未实现 | From the Command prompt, adds or deletes supported scales for annotative objects. | — |
-| 591 | `OBJECTSCALE` | 未实现 | Adds or deletes supported scales for annotative objects. | — |
+| 590 | `-OBJECTSCALE` | 部分实现 | From the Command prompt, adds or deletes supported scales for annotative objects. | 具名拒绝（`-objectscale.unsupported`）：同一拒绝的命令行拼写。 |
+| 591 | `OBJECTSCALE` | 部分实现 | Adds or deletes supported scales for annotative objects. | 具名拒绝（`objectscale.unsupported`）：无注释性对象模型。 |
 | 592 | `OFFSET` | 部分实现 | Creates concentric circles, parallel lines, and parallel curves. | LINE/CIRCLE/ARC/LWPOLYLINE；ELLIPSE 拒绝；无全局自交修剪 |
 | 593 | `OFFSETEDGE` | 未实现 | Creates a closed polyline or spline object that is offset at a specified distance from the edges of a selected planar face on a 3D solid or surface. | — |
 | 594 | `OLECONVERT` | 未实现 | Specifies a different source application for an embedded OLE object, and controls whether the OLE object is represented by an icon. | — |
@@ -1056,7 +1088,7 @@
 | 675 | `-PSETUPIN` | 未实现 | Imports a user-defined page setup into a new drawing layout using the command line. | — |
 | 676 | `PSETUPIN` | 未实现 | Imports a user-defined page setup into a new drawing layout. | — |
 | 677 | `PSOUT` | 未实现 | Creates a PostScript file from DWG file. | — |
-| 678 | `PSPACE` | 未实现 | In a layout, switches from model space in a layout viewport to paper space. | — |
+| 678 | `PSPACE` | 部分实现 | In a layout, switches from model space in a layout viewport to paper space. | 复用 `SPACE` 会话路径切到第一个图纸布局；无图纸布局为 `pspace.no_layout`，不写库。 |
 | 679 | `PSTSCALE` | 部分实现 | Specifies or updates the scale of text objects relative to paper space. | 具名拒绝（`pstscale.write_unsupported`）：无视口比例写入 API。 |
 | 680 | `PTYPE` | 部分实现 | Specifies the display style and size of point objects. | 只读：`$PDMODE`/`$PDSIZE`；写入仍走 PDMODE/PDSIZE，无 PTYPE 对话框。 |
 | 681 | `-PUBLISH` | 未实现 | Publishes drawings to DWF, DWFx, and PDF files, or to printers or plotters using the command line. | — |
@@ -1069,9 +1101,9 @@
 | 688 | `PYRAMID` | 未实现 | Creates a 3D solid pyramid. | — |
 | 689 | `QCCLOSE` | 未实现 | Closes the QuickCalc calculator. | — |
 | 690 | `QDIM` | 部分实现 | Creates a series of dimensions quickly from selected objects. | v1 仅直线 `LINE`：每条线创建一个 `DimensionKind::Aligned`（端点距离，尺寸线按 `DIMDLI` 偏移），一条事务/一步撤销；圆/弧/点等按名拒绝 |
-| 691 | `QLATTACH` | 未实现 | Attaches a leader line to an mtext, tolerance, or block reference object. | — |
-| 692 | `QLATTACHSET` | 未实现 | Globally attaches leader lines to mtext, tolerance, or block reference objects. | — |
-| 693 | `QLDETACHSET` | 未实现 | Detaches a leader line from an mtext, tolerance, or block reference object. | — |
+| 691 | `QLATTACH` | 部分实现 | Attaches a leader line to an mtext, tolerance, or block reference object. | 具名拒绝（`qlattach.unsupported`）：无 QLEADER 注释附着模型。 |
+| 692 | `QLATTACHSET` | 部分实现 | Globally attaches leader lines to mtext, tolerance, or block reference objects. | 具名拒绝（`qlattachset.unsupported`）：无 QLEADER 注释附着模型。 |
+| 693 | `QLDETACHSET` | 部分实现 | Detaches a leader line from an mtext, tolerance, or block reference object. | 具名拒绝（`qldetchset.unsupported`）：无 QLEADER 注释附着模型。 |
 | 694 | `QLEADER` | 部分实现 | Creates a leader and leader annotation. | 创建单个 MULTILEADER；无 QLEADER 设置对话框/引线样式/注释类型选项 |
 | 695 | `QNEW` | 未实现 | Starts a new drawing from a specified drawing template file. | — |
 | 696 | `QQUIT` | 未实现 | Closes all open drawings and exit. | — |
@@ -1199,8 +1231,8 @@
 | 818 | `STATUS` | 部分实现 | Displays drawing statistics, modes, and extents. | 报告统计/模式/模型空间范围；创建/编辑时间、内存、图形界限与基点显式 `status.not_tracked`（无图形头模型） |
 | 819 | `STLOUT` | 未实现 | Stores 3D solids and watertight meshes in a format that can be used with stereolithography apparatus. | — |
 | 820 | `STRETCH` | 部分实现 | Stretches objects crossed by a selection window or polygon. | 恒交叉窗口；TEXT/MultiLeader 整命令拒绝 |
-| 821 | `-STYLE` | 未实现 | Creates, modifies, or specifies text styles. | — |
-| 822 | `STYLE` | 未实现 | Creates, modifies, or specifies text styles. | — |
+| 821 | `-STYLE` | 部分实现 | Creates, modifies, or specifies text styles. | 同一只读文字样式列表，使用 `-style.entry`/`-style.summary`；独立选择子，非别名。 |
+| 822 | `STYLE` | 部分实现 | Creates, modifies, or specifies text styles. | 只读列出文字样式表（`style.entry`/`style.summary`）；创建或修改未实现。 |
 | 823 | `STYLESMANAGER` | 未实现 | Displays the Plot Style Manager, where you can revise plot style tables. | — |
 | 824 | `SUBTRACT` | 未实现 | Creates as a new object by subtracting one overlapping region or 3D solid from another. | — |
 | 825 | `SUNPROPERTIES` | 未实现 | Displays the Sun Properties palette. | — |

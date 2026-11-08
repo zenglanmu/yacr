@@ -2,11 +2,12 @@
 //!
 //! `crate::CommandId::Extended` is one enum arm; this module routes it to the
 //! module that owns the authority: the pilot session toggles in `app_drafting`,
-//! the pilot read-only reports in `app_reports_ext`, and the Wave 2 handlers in
+//! the pilot read-only reports in `app_reports_ext`, the Wave 2 handlers in
 //! `app_extended_session2` (tokens), `app_extended_reports2` (reports) and
-//! `app_extended_refusals` (named refusals). Keeping the routing here means
-//! `application.rs` stays a one-line interception rather than growing forty more
-//! arms.
+//! `app_extended_refusals` (named refusals), and the Wave 3 handlers in
+//! `app_extended_reports3` (reports/session) and `app_extended_refusals3`
+//! (named refusals). Keeping the routing here means `application.rs` stays a
+//! one-line interception rather than growing seventy more arms.
 
 use super::*;
 
@@ -69,6 +70,38 @@ impl Application {
             | ExtendedCommandId::PsbScale
             | ExtendedCommandId::PstScale
             | ExtendedCommandId::MvSetup => self.extended_refusal(command, ext)?,
+            // Wave 3 reports/session: two space switches plus read-only reports.
+            ExtendedCommandId::Mspace
+            | ExtendedCommandId::Pspace
+            | ExtendedCommandId::TextStyle
+            | ExtendedCommandId::DashStyle
+            | ExtendedCommandId::MLeaderStyleList
+            | ExtendedCommandId::BlockList
+            | ExtendedCommandId::DimReassoc
+            | ExtendedCommandId::DimReassociate => self.extended_report3(session, command, ext)?,
+            // Wave 3 named refusals: a stable `Unsupported` reason per name.
+            ExtendedCommandId::DimJogged
+            | ExtendedCommandId::DimInspect
+            | ExtendedCommandId::DashDimInspect
+            | ExtendedCommandId::AnnoReset
+            | ExtendedCommandId::AnnoUpdate
+            | ExtendedCommandId::ObjectScale
+            | ExtendedCommandId::DashObjectScale
+            | ExtendedCommandId::QlAttach
+            | ExtendedCommandId::QlAttachSet
+            | ExtendedCommandId::QlDetachSet
+            | ExtendedCommandId::ArrayClose
+            | ExtendedCommandId::ArrayEdit
+            | ExtendedCommandId::BlockEditor
+            | ExtendedCommandId::DashBlockEditor
+            | ExtendedCommandId::BlockEditorClose
+            | ExtendedCommandId::BCycleOrder
+            | ExtendedCommandId::BGripSet
+            | ExtendedCommandId::BEditorSettings
+            | ExtendedCommandId::BTestBlock
+            | ExtendedCommandId::LayerPalette
+            | ExtendedCommandId::ConstraintBar
+            | ExtendedCommandId::ConstraintSettings => self.extended_refusal3(command, ext)?,
         };
         Ok(Some(outcome))
     }

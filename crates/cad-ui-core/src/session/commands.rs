@@ -384,6 +384,43 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("PSTSCALE", CommandId::Extended(ExtendedCommandId::PstScale)),
     ("MVSETUP", CommandId::Extended(ExtendedCommandId::MvSetup)),
 
+    // Wave 3 (2026-11-09): thirty more payload-free names. The first eight are
+    // reports/session commands (two space switches reusing the existing
+    // MODEL/SPACE path, four read-only table reports, two non-associative
+    // no-op reports); the last twenty-two are stable named refusals. All 70
+    // extended names ride the single `CommandId::Extended` wrapper and are
+    // Viewer-legal.
+    ("MSPACE", CommandId::Extended(ExtendedCommandId::Mspace)),
+    ("PSPACE", CommandId::Extended(ExtendedCommandId::Pspace)),
+    ("STYLE", CommandId::Extended(ExtendedCommandId::TextStyle)),
+    ("-STYLE", CommandId::Extended(ExtendedCommandId::DashStyle)),
+    ("MLEADERSTYLE", CommandId::Extended(ExtendedCommandId::MLeaderStyleList)),
+    ("BLOCK?", CommandId::Extended(ExtendedCommandId::BlockList)),
+    ("DIMREASSOC", CommandId::Extended(ExtendedCommandId::DimReassoc)),
+    ("DIMREASSOCIATE", CommandId::Extended(ExtendedCommandId::DimReassociate)),
+    ("DIMJOGGED", CommandId::Extended(ExtendedCommandId::DimJogged)),
+    ("DIMINSPECT", CommandId::Extended(ExtendedCommandId::DimInspect)),
+    ("-DIMINSPECT", CommandId::Extended(ExtendedCommandId::DashDimInspect)),
+    ("ANNORESET", CommandId::Extended(ExtendedCommandId::AnnoReset)),
+    ("ANNOUPDATE", CommandId::Extended(ExtendedCommandId::AnnoUpdate)),
+    ("OBJECTSCALE", CommandId::Extended(ExtendedCommandId::ObjectScale)),
+    ("-OBJECTSCALE", CommandId::Extended(ExtendedCommandId::DashObjectScale)),
+    ("QLATTACH", CommandId::Extended(ExtendedCommandId::QlAttach)),
+    ("QLATTACHSET", CommandId::Extended(ExtendedCommandId::QlAttachSet)),
+    ("QLDETACHSET", CommandId::Extended(ExtendedCommandId::QlDetachSet)),
+    ("ARRAYCLOSE", CommandId::Extended(ExtendedCommandId::ArrayClose)),
+    ("ARRAYEDIT", CommandId::Extended(ExtendedCommandId::ArrayEdit)),
+    ("BEDIT", CommandId::Extended(ExtendedCommandId::BlockEditor)),
+    ("-BEDIT", CommandId::Extended(ExtendedCommandId::DashBlockEditor)),
+    ("BCLOSE", CommandId::Extended(ExtendedCommandId::BlockEditorClose)),
+    ("BCYCLEORDER", CommandId::Extended(ExtendedCommandId::BCycleOrder)),
+    ("BGRIPSET", CommandId::Extended(ExtendedCommandId::BGripSet)),
+    ("BESETTINGS", CommandId::Extended(ExtendedCommandId::BEditorSettings)),
+    ("BTESTBLOCK", CommandId::Extended(ExtendedCommandId::BTestBlock)),
+    ("LAYERPALETTE", CommandId::Extended(ExtendedCommandId::LayerPalette)),
+    ("CONSTRAINTBAR", CommandId::Extended(ExtendedCommandId::ConstraintBar)),
+    ("CONSTRAINTSETTINGS", CommandId::Extended(ExtendedCommandId::ConstraintSettings)),
+
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**

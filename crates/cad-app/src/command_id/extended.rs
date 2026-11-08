@@ -36,7 +36,22 @@
 //!   the feature has no storage model or no API in this build. A refusal writes
 //!   nothing, bumps no revision and records no history.
 //!
-//! Every variant here stays Viewer-legal.
+//! # Wave 3 (2026-11-09)
+//!
+//! Thirty more payload-free names, again grouped by dispatch:
+//!
+//! * **Reports / session** (`MSPACE`, `PSPACE`, `STYLE`, `-STYLE`,
+//!   `MLEADERSTYLE`, `BLOCK?`, `DIMREASSOC`, `DIMREASSOCIATE`): two space
+//!   switches that reuse the existing `MODEL`/`SPACE` session path (never a
+//!   second space authority), read-only style/block reports over the tables this
+//!   build really stores, and two non-associative no-op reports mirroring
+//!   `DIMREGEN`.
+//! * **Named refusals** (`DIMJOGGED` through `CONSTRAINTSETTINGS`): features
+//!   with no storage model or API in this build, refused with a stable
+//!   `CadError::Unsupported` reason.
+//!
+//! Every variant here stays Viewer-legal: no database write, no revision bump,
+//! no `cad-history` entry.
 
 /// One payload-free command in the extended wrapper batches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +143,71 @@ pub enum ExtendedCommandId {
     PstScale,
     /// `MVSETUP`: no viewport-group model.
     MvSetup,
+
+    // -- Wave 3: reports / session (app_extended_reports3) -------------------
+    /// `MSPACE`: switch to model space through the existing `MODEL` path.
+    Mspace,
+    /// `PSPACE`: switch to the first paper layout through the existing `SPACE`
+    /// path; a drawing with no paper layout is a named no-op.
+    Pspace,
+    /// `STYLE`: read-only list of the drawing's text styles.
+    TextStyle,
+    /// `-STYLE`: the same text-style list under its own diagnostic codes.
+    DashStyle,
+    /// `MLEADERSTYLE`: read-only list of the drawing's multileader styles.
+    MLeaderStyleList,
+    /// `BLOCK?`: read-only list of block definitions and their member counts.
+    BlockList,
+    /// `DIMREASSOC`: non-associative no-op report.
+    DimReassoc,
+    /// `DIMREASSOCIATE`: the same no-op report under its own code.
+    DimReassociate,
+
+    // -- Wave 3: named refusals (app_extended_refusals3) ---------------------
+    /// `DIMJOGGED`: the dimension domain stores no jog field.
+    DimJogged,
+    /// `DIMINSPECT`: the dimension domain stores no inspection data.
+    DimInspect,
+    /// `-DIMINSPECT`: the command-line spelling of the same refusal.
+    DashDimInspect,
+    /// `ANNORESET`: no annotative-object model.
+    AnnoReset,
+    /// `ANNOUPDATE`: no annotative-object model.
+    AnnoUpdate,
+    /// `OBJECTSCALE`: no annotative-object model.
+    ObjectScale,
+    /// `-OBJECTSCALE`: the command-line spelling of the same refusal.
+    DashObjectScale,
+    /// `QLATTACH`: no QLEADER annotation-attachment model.
+    QlAttach,
+    /// `QLATTACHSET`: no QLEADER annotation-attachment model.
+    QlAttachSet,
+    /// `QLDETACHSET`: no QLEADER annotation-attachment model.
+    QlDetachSet,
+    /// `ARRAYCLOSE`: no associative-array edit state.
+    ArrayClose,
+    /// `ARRAYEDIT`: no associative-array edit state.
+    ArrayEdit,
+    /// `BEDIT`: no block editor.
+    BlockEditor,
+    /// `-BEDIT`: the command-line spelling of the same refusal.
+    DashBlockEditor,
+    /// `BCLOSE`: no block editor.
+    BlockEditorClose,
+    /// `BCYCLEORDER`: no dynamic-block grip model.
+    BCycleOrder,
+    /// `BGRIPSET`: no dynamic-block parameter model.
+    BGripSet,
+    /// `BESETTINGS`: no block editor.
+    BEditorSettings,
+    /// `BTESTBLOCK`: no block editor.
+    BTestBlock,
+    /// `LAYERPALETTE`: no separate layer palette (use `LAYER`).
+    LayerPalette,
+    /// `CONSTRAINTBAR`: no constraint model.
+    ConstraintBar,
+    /// `CONSTRAINTSETTINGS`: no constraint model.
+    ConstraintSettings,
 }
 
 impl ExtendedCommandId {
@@ -175,6 +255,36 @@ impl ExtendedCommandId {
             Self::PsbScale => "PSBSCALE",
             Self::PstScale => "PSTSCALE",
             Self::MvSetup => "MVSETUP",
+            Self::Mspace => "MSPACE",
+            Self::Pspace => "PSPACE",
+            Self::TextStyle => "STYLE",
+            Self::DashStyle => "-STYLE",
+            Self::MLeaderStyleList => "MLEADERSTYLE",
+            Self::BlockList => "BLOCK?",
+            Self::DimReassoc => "DIMREASSOC",
+            Self::DimReassociate => "DIMREASSOCIATE",
+            Self::DimJogged => "DIMJOGGED",
+            Self::DimInspect => "DIMINSPECT",
+            Self::DashDimInspect => "-DIMINSPECT",
+            Self::AnnoReset => "ANNORESET",
+            Self::AnnoUpdate => "ANNOUPDATE",
+            Self::ObjectScale => "OBJECTSCALE",
+            Self::DashObjectScale => "-OBJECTSCALE",
+            Self::QlAttach => "QLATTACH",
+            Self::QlAttachSet => "QLATTACHSET",
+            Self::QlDetachSet => "QLDETACHSET",
+            Self::ArrayClose => "ARRAYCLOSE",
+            Self::ArrayEdit => "ARRAYEDIT",
+            Self::BlockEditor => "BEDIT",
+            Self::DashBlockEditor => "-BEDIT",
+            Self::BlockEditorClose => "BCLOSE",
+            Self::BCycleOrder => "BCYCLEORDER",
+            Self::BGripSet => "BGRIPSET",
+            Self::BEditorSettings => "BESETTINGS",
+            Self::BTestBlock => "BTESTBLOCK",
+            Self::LayerPalette => "LAYERPALETTE",
+            Self::ConstraintBar => "CONSTRAINTBAR",
+            Self::ConstraintSettings => "CONSTRAINTSETTINGS",
         }
     }
 
@@ -231,5 +341,35 @@ impl ExtendedCommandId {
         Self::PsbScale,
         Self::PstScale,
         Self::MvSetup,
+        Self::Mspace,
+        Self::Pspace,
+        Self::TextStyle,
+        Self::DashStyle,
+        Self::MLeaderStyleList,
+        Self::BlockList,
+        Self::DimReassoc,
+        Self::DimReassociate,
+        Self::DimJogged,
+        Self::DimInspect,
+        Self::DashDimInspect,
+        Self::AnnoReset,
+        Self::AnnoUpdate,
+        Self::ObjectScale,
+        Self::DashObjectScale,
+        Self::QlAttach,
+        Self::QlAttachSet,
+        Self::QlDetachSet,
+        Self::ArrayClose,
+        Self::ArrayEdit,
+        Self::BlockEditor,
+        Self::DashBlockEditor,
+        Self::BlockEditorClose,
+        Self::BCycleOrder,
+        Self::BGripSet,
+        Self::BEditorSettings,
+        Self::BTestBlock,
+        Self::LayerPalette,
+        Self::ConstraintBar,
+        Self::ConstraintSettings,
     ];
 }

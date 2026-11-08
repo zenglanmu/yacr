@@ -49,6 +49,9 @@ mod app_drafting;
 mod app_extended_refusals;
 mod app_extended_reports2;
 mod app_extended_session2;
+// The Wave 3 extended-command handlers (reports/session and refusals).
+mod app_extended_refusals3;
+mod app_extended_reports3;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;
