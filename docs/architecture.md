@@ -1,20 +1,20 @@
 # 架构与公共契约
 
 需求权威：`CAD_IMPLEMENTATION_SPEC.md` v2.0（含 §21 桌面宿主增补）。
-当前桌面 UI 决策见 [`docs/adr/0010-react-linux-host-replaces-slint.md`](adr/0010-react-linux-host-replaces-slint.md)；
+当前桌面 UI 决策见 [`docs/adr/0010-react-linux-host.md`](adr/0010-react-linux-host.md)；
 原生 Wayland 后端见 [`docs/adr/0011-native-wayland-subsurface.md`](adr/0011-native-wayland-subsurface.md)；
 跨宿主合成模型（DOM-on-top、共享层、弹窗层）见
 [`docs/adr/0023-dom-on-top-cross-host-composition.md`](adr/0023-dom-on-top-cross-host-composition.md)。
 
-> **迁移状态（2026-10-16，2026-10-23 增补）**：桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
-> （`apps/app-linux`，二进制 `yacr`）；`cad-ui-slint` 与 Slint 依赖已删除。2026-10-23 起合成方向为
+> **迁移状态（2026-10-16，2026-10-23 增补）**：桌面 UI 已迁移为 **React + Tauri 原生宿主**
+> （`apps/app-linux`，二进制 `yacr`）；旧 UI crate 与该 UI 工具包依赖已删除。2026-10-23 起合成方向为
 > **DOM/WebView 在上、CAD 原生子表面在下**（ADR 0023），React UI 归并到唯一包 `apps/desktop-ui`，
 > Tauri 薄壳下沉到新共享层 `cad-desktop-shell`；**X11/XWayland 自 2026-10-24 起走 DOM-canvas**
 > （wasm/WebGL2 CAD 会话画进 DOM `<canvas>`，ADR 0024；仅当 WebGL2 不可用才输出
 > `yacr: unsupported-runtime: webgl2` + 退出码 6，旧「`unsupported-backend: x11` + 退出码 4」为历史合同）。
 > **2026-11-01 起 Android 退出 `dom-canvas` 集合**：`apps/app-android` 是原生 `native-below` 载体
 > （原生 `CadSession` 持有 `cad-db`，wgpu/Vulkan 呈现到 WebView 之下的 `SurfaceView`，wasm 会话不实例化；
-> ADR 0027）。Windows 宿主已实现但视觉未验证。本文只描述**当前树中真实存在**的 crate 与契约。旧 Slint 合成
+> ADR 0027）。Windows 宿主已实现但视觉未验证。本文只描述**当前树中真实存在**的 crate 与契约。旧 UI 合成
 > （ADR 0002/0003）与实验宿主（ADR 0006）保留为历史记录，见各 ADR 顶部横幅；旧宿主验证证据见
 > `docs/validation*.md`（历史，含 NOT RUN 边界）。
 
@@ -42,7 +42,7 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   Linux 宿主仍显式 `Unsupported`。payload 缺失、Viewer 模式、未支持几何一律**显式拒绝**，绝不空成功。
 
 > 2026-10-05 变更：用户批注子系统整体移除（提交 `0120d09`），`cad-annotations` crate
-> 不再存在，F07/F08/F09 退出产品范围。2026-10-16 变更：Slint 桌面 UI 退役，见 ADR 0010。
+> 不再存在，F07/F08/F09 退出产品范围。2026-10-16 变更：桌面 UI 迁移为 React/Tauri，见 ADR 0010。
 
 | 层 | 包与关键契约 |
 |---|---|
@@ -58,8 +58,8 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 | 应用 | cad-app：Document/SessionState/Viewport/Workspace、CommandHandler/Tool |
 | 查询 | cad-query：分页查询/Mixed/Unset |
 | 共享 UI 层 | **cad-ui-core：平台无关的 wire protocol、逻辑布局（layout）、CAD 会话（session，`CadSession`/`CadStatus`/44-command 表）、宿主 admission/error 状态（shell，`ShellState`）、**弹窗纯状态机（popup，`PopupKind`/`PopupAck`/`CadPopup`/allowlist/四触发）**、launch options、i18n 目录；UI 框架与 GPU 无关 |
-| 桌面壳共享层 | **cad-desktop-shell：唯一允许依赖 `tauri` 的共享层**——`#[tauri::command]` 薄壳与注册、主窗口/子 webview 构建（init scripts、`start_maximized`）、popup 命令到 `cad-ui-core::popup` 的接线、工具包无关 `threading`、通用证据驱动骨架、参数化平台实现（`ReactFiles`/`ReactSurface`/`ReactConfigStore`）；**禁止** gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/cad-engine/slint/iced/acadrust |
-| 宿主编排 | cad-host：HostCore（命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink）；**不依赖任何 UI 工具包，也不依赖 slint/wgpu/web-sys/Android 类型** |
+| 桌面壳共享层 | **cad-desktop-shell：唯一允许依赖 `tauri` 的共享层**——`#[tauri::command]` 薄壳与注册、主窗口/子 webview 构建（init scripts、`start_maximized`）、popup 命令到 `cad-ui-core::popup` 的接线、工具包无关 `threading`、通用证据驱动骨架、参数化平台实现（`ReactFiles`/`ReactSurface`/`ReactConfigStore`）；**禁止** gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/cad-engine/iced/acadrust |
+| 宿主编排 | cad-host：HostCore（命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink）；**不依赖任何 UI 工具包，也不依赖 wgpu/web-sys/Android 类型** |
 | 宿主平台契约 | cad-platform：PlatformFiles/ConfigStore/SurfaceSource/FontLoader/Persistence/TaskExecutor/Clipboard/HostLifecycle/RenderHost/**PluginStore** |
 | 宿主组合根 | apps：app-linux（GTK/Wayland 平台缝 + 真实 Linux GUI）、app-windows（Win32/WebView2 平台缝，已实现、视觉未验证）、app-macos（AppKit/WKWebView + 原生 CAD 子 NSView + wgpu/Metal，已实现、仅 CI 编译门禁）、app-android（Tauri WebView + 原生 `native-below` CAD 会话，仅编译级证据）、app-web（Tauri/浏览器载体，wasm `dom-canvas` 会话）；**唯一桌面 React UI：`apps/desktop-ui`** |
 | 自动化 | cad-diagnostics：统计/脱敏报告；cad-cli-tools：共用 Application 命令路径 |
@@ -125,7 +125,7 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   `cad-render-wgpu` 与 `cad-representation`；不依赖 `cad-ui-core`/`cad-host`/任何 UI 工具包，
   也不直接依赖 wgpu；wgpu 类型仅由 renderer 通过其 API/re-export 提供。`cad-app` 不依赖 `cad-engine`。
 - `cad-ui-core` 位于 UI 无关的应用/宿主契约**之上**（它依赖 `cad-host`，会话包装 `HostCore`）、
-  具体宿主**之下**；必须保持 UI 工具包与 GPU 无关（无 slint/wgpu/tauri/gtk/portal/平台类型），
+  具体宿主**之下**；必须保持 UI 工具包与 GPU 无关（无 wgpu/tauri/gtk/portal/平台类型），
   由 `scripts/check-architecture.py` 强制。它同时是**命令语义的唯一权威**：
   `session::wire` 一条命令一个函数（参数解析 → 共享门（`session::admission` /
   `shell::check_command`）→ 交给宿主的 sink），`AdmissionTarget`/`ControlReads`/`PopupTarget`
@@ -134,7 +134,7 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   都只在 `cad-ui-core`（宿主实现里没有策略）。
 - **`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层**，位于 `cad-ui-core` 之上、`app-*` 之下；
   非 Linux/Windows 目标编译为空壳（保住 wasm 门禁）。它不依赖 gtk/gdk/gdkx11/ashpd/wgpu/
-  cad-render-wgpu/cad-engine/slint/iced/acadrust（脚本强制）。
+  cad-render-wgpu/cad-engine/iced/acadrust（脚本强制）。
 - **`apps/desktop-ui` 是唯一桌面 React UI 包**：单 React 树、`.native-input` 单一输入漏斗、
   in-DOM 弹窗/菜单；两个宿主的 `tauri.conf.json` 都指向 `../desktop-ui/dist`，**不得**再复制第二套 UI。
 - **移动端是同一棵 chrome 的呈现，不是第二套 UI**：桌面/移动**只按屏幕宽度**切换
@@ -172,9 +172,9 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   **可移植逻辑不得住在 `app-*`**——payload 组装、`\P` 映射、gate 逻辑、threading 协议都在共享层。
 - **锁序不变量**：两个 `Arc<Mutex<…>>`（`Shared` + `RenderTelemetry`）固定获取顺序
   **Shared → RenderTelemetry**，严禁反向；`ShellTelemetry` 实现永不触碰 `Shared`。
-- `cad-host` 不直接依赖 `slint`/`wgpu`/`web-sys`/Android 类型；平台 I/O 一律经 `cad-platform` 的
+- `cad-host` 不直接依赖 `wgpu`/`web-sys`/Android 类型；平台 I/O 一律经 `cad-platform` 的
   `PlatformFiles`/`ConfigStore`/`SurfaceSource` 契约（事件式、无 futures、无 `Send`），
-  宿主特有的路径/对话框/表面度量只存在于 `app-*`。Slint 桌面退役后 `cad-host` 不再依赖任何 UI crate。
+  宿主特有的路径/对话框/表面度量只存在于 `app-*`。
 - **renderer-only wgpu**：`cad-render-wgpu` 是唯一依赖 wgpu 的 crate。**importer-only acadrust**：
   `cad-import-acadrust` 是唯一依赖 acadrust 的 crate；根 `[patch.crates-io]` 只允许单个 `acadrust`
   键、必须固定版本/revision 并在 `docs/acadrust-patches.md` 登记（ADR-0031），其它 patch 一律拒绝；
@@ -185,8 +185,8 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 - DB revision、渲染设备 generation、任务 generation 分开处理。
 - 注册冲突须明确排序/拒绝；当前注册表并未实现扩展分发。
 
-`scripts/check-architecture.py` 校验当前依赖图、循环和核心隔离（含全 workspace 禁止
-`slint`/`slint-build`/`iced`，覆盖 build/dev 与 target 表、workspace 继承别名）。
+`scripts/check-architecture.py` 校验当前依赖图、循环和核心隔离（含全 workspace 禁止 `iced`
+等旧 UI 工具包依赖，覆盖 build/dev 与 target 表、workspace 继承别名）。
 traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代表已稳定公共 API。
 
 ## 桌面宿主：React/Tauri + DOM-on-top 合成
@@ -241,8 +241,8 @@ traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代�
 
 ## 历史（已退役 / 被取代）
 
-- ADR 0002（Slint/wgpu 合成）、ADR 0003（浏览器 Slint/wgpu）描述**旧的 Slint 基线**；
+- ADR 0002（旧 UI/wgpu 合成）、ADR 0003（浏览器旧 UI/wgpu）描述**旧 UI 基线**；
   桌面部分被 ADR 0010 取代，Web/Android UI 已退役（见 ADR 0010 与 `docs/handoff.md`）。
 - ADR 0006（React + Tauri 实验）是本次迁移的**前身实验**，其“实验/未删旧代码”描述已过时。
-- `docs/code-structure.md` 中描述 Slint 渲染桥文件职责的段落属历史；当前宿主结构见本文与
+- `docs/code-structure.md` 中描述旧 UI 渲染桥文件职责的段落属历史；当前宿主结构见本文与
   `docs/react-linux-app.md`。

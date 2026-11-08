@@ -1,15 +1,15 @@
 # DWG 打开与渲染测试指南
 
 > **2026-10-16 迁移更新（2026-10-23/24 增补）**：桌面宿主已改为 **React/Tauri + 原生 Wayland 子表面**
-> （`apps/app-linux`，bin `yacr`，`scripts/run-react-linux.sh`）；Slint 桌面与其测试脚本已退役，
-> Web/Android UI 为 NOT IMPLEMENTED 占位。下文提到真实 winit + Slint、浏览器 Playwright、
+> （`apps/app-linux`，bin `yacr`，`scripts/run-react-linux.sh`）；早期桌面 UI 与其测试脚本已退役，
+> Web/Android UI 为 NOT IMPLEMENTED 占位。下文提到真实 winit + 早期桌面 UI、浏览器 Playwright、
 > `check-web-*.mjs`/`verify-ui.sh` 等**已退役**；当前真实 GPU 路线见 `docs/react-linux-app.md`
 > 「证据机制」与 `scripts/collect-evidence.sh`。**2026-10-24 起（ADR 0024 阶段 ④）**：X11/XWayland
 > **正常启动**，走 `surfaceMode=dom-canvas`（wasm CAD 会话画进 DOM `<canvas>`）；两种载体都用同 UID
 > Mutter `ScreenCast` 抓帧（`ffmpeg -f x11grab` 与 `gnome-screenshot` 的 X11 回退在本会话**全黑**）。
 > **历史**：2026-10-22–24 X11 曾在 GTK 初始化前被拒绝（`yacr: unsupported-backend: x11` + exit 4）；
 > **当前**的运行期拒绝是 WebGL2 缺失（`yacr: unsupported-runtime: webgl2` + exit 6）。
-> Windows 宿主已实现但视觉 **PENDING user real-Windows spike**。旧 Slint 阶段的运行证据不得复用。
+> Windows 宿主已实现但视觉 **PENDING user real-Windows spike**。旧桌面 UI 阶段的运行证据不得复用。
 
 ## 1. 测试顺序与结论
 
@@ -32,7 +32,7 @@ WASM + Playwright 做第二层集成测试；浏览器 UI 已退役。软件渲�
 ### 真机回归批量入口（`scripts/run-real-gpu-e2e.sh`）
 
 > **2026-10-23：本节已退役，勿当可用流程。** 该脚本与 `app-linux::host::validation` 的
-> `#[ignore]` 用例已随 Slint 宿主退役，**不再存在于当前树**。现行入口是
+> `#[ignore]` 用例已随旧桌面 UI 宿主退役，**不再存在于当前树**。现行入口是
 > `scripts/collect-evidence.sh`（构建 → 真实 `yacr --open` → 同 UID Mutter `ScreenCast` 截图 →
 > `results.tsv`）。以下文字仅作历史记录。
 
@@ -46,7 +46,7 @@ bash scripts/run-real-gpu-e2e.sh --list   # 只列出用例与所需环境变量
 ```
 
 - 必须为每个用例单独起一个 `cargo test ... --ignored --test-threads=1` 进程：其中两个用例
-  打开真实 winit 窗口，而 winit/Slint **每个进程只允许一个事件循环**；若在同一进程里批量
+  打开真实 winit 窗口，而 winit **每个进程只允许一个事件循环**；若在同一进程里批量
   执行，第二个窗口用例会以 `Error initializing winit event loop: EventLoop can't be
   recreated` 失败。该失败是运行方式问题，不是产品缺陷。
 - 每轮证据目录必须全新：脚本生成 UTC 时间戳根目录
@@ -203,7 +203,7 @@ cargo test -p cad-render-wgpu --locked -- --test-threads=1
 
 ## 4. 第二层：WASM + 浏览器（`dom-canvas`）
 
-> **2026-10-24 的历史注记**：本节曾记录旧 Slint web 宿主与已删除的 `DIST=`/`WITH_FONTS=`
+> **2026-10-24 的历史注记**：本节曾记录旧 web 宿主与已删除的 `DIST=`/`WITH_FONTS=`
 > 流程。当前 Web 载体见 ADR 0024、[build.md](build.md)「浏览器 bundle」与 `AGENTS.md`；
 > CI 的 `web-smoke` 是 SwiftShader 冒烟，`web-deploy` 是发布 job；两者都不是 GPU/像素验收。
 

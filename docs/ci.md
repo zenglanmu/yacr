@@ -13,8 +13,8 @@
 `crates/cad-ui-core/src/session/commands.rs`）与它的自测
 `scripts/test-check-command-docs.py`（注入伪造名字/别名，断言检查器必然非零退出）。
 
-> **2026-10-16 迁移状态（2026-10-23 增补）**：桌面已迁移到 React/Tauri（`apps/app-linux`、`yacr`），
-> Slint 退役。编译门禁已加入 Tauri/GTK 前置（`libwebkit2gtk-4.1-dev`）与 React 前端构建
+> **2026-10-16 迁移状态（2026-10-23 增补）**：桌面已迁移到 React/Tauri（`apps/app-linux`、`yacr`）。
+> 编译门禁已加入 Tauri/GTK 前置（`libwebkit2gtk-4.1-dev`）与 React 前端构建
 > （`apps/desktop-ui`、`npm test`、`npm run build`）。**2026-10-23 起**：`windows-check` 编译的是
 > **真实 Windows 宿主**（不再是 NOT IMPLEMENTED 桩），但**仍只是编译门禁**；X11/XWayland 在
 > Linux 宿主中被显式拒绝（退出码 4），CI 不运行 GUI。**2026-11-01 起** 4 个发布 job

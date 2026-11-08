@@ -4,7 +4,7 @@
   编译门禁**；Windows/macOS/Android 运行、Android 设备、真实 GUI/浏览器、GPU/像素全部
   **NOT VERIFIED / NOT RUN**（见第 6 节）。本文**不**宣称任何平台已完成产品验收。
 - 日期：2026-11-05。
-- 相关 ADR：[ADR-0010](0010-react-linux-host-replaces-slint.md)（React/Tauri 宿主）、
+- 相关 ADR：[ADR-0010](0010-react-linux-host.md)（React/Tauri 宿主）、
   [ADR-0023](0023-dom-on-top-cross-host-composition.md)（跨宿主合成；本文不改其合成/输入/单
   presenter 不变量）、[ADR-0024](0024-dom-canvas-wasm-cad-path.md)（`dom-canvas` 载体；本文新增的
   插件管理器**不在**该载体提供）、[ADR-0027](0027-android-native-below-carrier.md)（Android

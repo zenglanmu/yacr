@@ -8,7 +8,7 @@
   Android 上的适用，**不**改其对 X11/XWayland 与浏览器的结论）、
   [ADR-0023](0023-dom-on-top-cross-host-composition.md)（跨宿主合成权威；本文取代其 §5 的
   「Android 不在本轮 / NOT IMPLEMENTED 占位」一句，**不**改 D1 的输入漏斗、弹窗围栏与单 presenter
-  不变量）、[ADR-0010](0010-react-linux-host-replaces-slint.md)（React/Tauri 宿主）。
+  不变量）、[ADR-0010](0010-react-linux-host.md)（React/Tauri 宿主）。
 - 影响：Android 的 `cad-db` 权威位置（wasm → native）、像素承载（WebView/WebGL2 → Vulkan/`SurfaceView`）、
   命令注册（两个专属命令 → 共享 registry + 两个 shell 报表）、事件模型（adopt 共享 push 通道）。
   **不**改变：单一 React 树、`.native-input` 单一输入漏斗、renderer-only wgpu、importer-only acadrust、

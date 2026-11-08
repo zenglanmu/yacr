@@ -1,9 +1,9 @@
 # 异步可取消导入（F01 / §4.10 / §8.3）
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的桌面/web 宿主；
+> 其中旧 UI crate、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 导入 DWG 是查看器最长的单次操作，**不得**在 UI 线程同步执行。本轮把导入拆成
 「进度事件 + 后台 worker + 过期结果丢弃」三条不变式，并保持核心可无宿主测试。
@@ -43,14 +43,14 @@
   后才显示“已打开”；不把 import 的 `Opened` 终态冒充显示就绪。详情与桌面证据见
   `docs/linux-dwg-ui-freeze.md` 最新一轮。
 
-## UI 可轮询快照与 Slint 面板（本轮新增）
+## UI 可轮询快照与面板（本轮新增）
 
 `cad-app` 新增纯投影，供 UI 读取，**不重实现** manager 逻辑：
 
 - `ImportProgressSnapshot { running, phase: Option<ImportPhase>, entities_done,
   entities_total: Option<usize>, bytes: Option<u64>, cancellable, terminal:
   Option<ImportTerminal> }`，`phase_key()` 给出与目录键对应的稳定机器键
-  （`reading`/`parsing`/…），使 `cad-ui-slint` 无需依赖 `cad-import-acadrust`。
+  （`reading`/`parsing`/…），使旧 UI crate 无需依赖 `cad-import-acadrust`。
 - `ImportTerminal::{Opened{entities}, Cancelled, Failed{error}}`。
 - `ImportProgressSnapshot::from_poll(&AsyncOpenPoll, previous)` 是 manager 轮询 →
   UI 快照的**唯一**映射；`Running` 无新 tick 时保留上一次真实阶段/计数，终态被保留
@@ -61,7 +61,7 @@
 - `CommandId::CancelLoading` 在 `HostController::execute` 被拦截并转调
   `cancel_async_open`，因此 UI 的取消按钮走普通命令路径，应用层契约不变。
 
-`cad-ui-slint` 新增 `ImportProgressUiState::from_snapshot(snapshot, messages)`：
+旧 UI crate 新增 `ImportProgressUiState::from_snapshot(snapshot, messages)`：
 - `percent` **仅**在 `entities_total` 为 `Some(>0)` 时给出，否则为空 → 外壳
   `import-indeterminate` 渲染不确定进度条，绝不显示假百分比；
 - `bytes` 仅在真实可测时拼入 `import-progress-text`，未知时**不**显示「0 字节」；
@@ -125,7 +125,7 @@
   当前文档/未保存批注保留（复用既有 `resolve_leave` 决策流）。
 - JS 心跳：`web/host/renderer.js` 每轮调用 `async_open_poll_json`（`async-open.js`
   的纯解析），running 时把轮询收紧到 250ms；`window.yacrAsyncOpen` 暴露真实状态供
-  诊断/测试。面板文案仍由 Slint 目录渲染。
+  诊断/测试。面板文案仍由 UI 目录渲染。
 
 ## Android 宿主接线（已实现，未设备复测）
 
@@ -139,7 +139,7 @@
   `state_push::push_import_state` → `UiHandle::set_import_state` 推入外壳；发布由核心的
   `TaskStamp` 守卫完成，宿主只镜像结果（`apply_opened`），**不重复导入**。第二次轮询
   为 `Idle`（已发布一次）。
-- **轮询定时器**：`ensure_polling` 在 UI 线程用 `slint::Timer`（100 ms，`Repeated`）
+- **轮询定时器**：`ensure_polling` 在 UI 线程用 UI 定时器（100 ms，`Repeated`）
   驱动 `poll_tick`；终态即 `stop_polling`，不空转。Android 目标有 `std::thread`，因此
   这是真实 worker；无 worker 的目标（`wasm32`）保留同步 `open_bytes` 回退
   （`worker_available()` 判断，回退不重复执行 leave 流程、不双重导入）。
@@ -161,7 +161,6 @@
 ```bash
 export CARGO_TARGET_DIR=/home/zenglanmu/.cache/yacr-async-target
 cargo test -p cad-app --locked               # 后台 worker / 过期丢弃 / 快照投影
-cargo check -p cad-ui-slint --lib --tests --target wasm32-unknown-unknown --locked
 cargo check -p app-web --tests --target wasm32-unknown-unknown --locked  # 宿主接线编译门
 node --test scripts/test-web-host.mjs        # JS 心跳/解析契约
 python3 scripts/check-i18n.py                 # 目录键/占位符/硬编码一致
@@ -169,7 +168,7 @@ python3 scripts/check-i18n.py                 # 目录键/占位符/硬编码一
 cargo check --target aarch64-linux-android -p app-android --tests --locked
 ```
 
-`cad-ui-slint` 的原生测试在本机无法构建（宿主缺 fontconfig），其进度映射逻辑保持
+旧 UI crate 的原生测试在本机无法构建（宿主缺 fontconfig），其进度映射逻辑保持
 纯函数并由 wasm 目标类型检查覆盖；`cargo check ... --target wasm32-unknown-unknown`
 是该 crate 的编译门。`app-web` 的 `browser::async_open` 仅在 `target_arch = "wasm32"`
 编译（含其纯 JSON 编码测试），因此本机只能做 wasm **编译检查**，不能原生执行；JS

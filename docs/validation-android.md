@@ -1,9 +1,9 @@
 # Android 模拟器安装与运行验证（x86_64）
 
-> **历史执行证据（Slint 桌面已退役，2026-10-16）**：本文记录的是**迁移前** Slint 宿主/模拟器/浏览器
-> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；Slint→React 迁移后的
+> **历史执行证据（早期桌面 UI 已退役，2026-10-16）**：本文记录的是**迁移前**的早期桌面 UI（已移除）宿主/模拟器/浏览器
+> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；早期桌面 UI→React 迁移后的
 > 最终验证 **NOT RUN**（P6）。当前架构见 `docs/architecture.md` 与
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
+> [ADR 0010](adr/0010-react-linux-host.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
 
 本文件记录 **实际执行过** 的 Android 构建、安装、启动与交互验证。所有结论均来自本机
 模拟器的 logcat、截图与像素 diff；未观察到的能力一律标注 **NOT RUN** 或
@@ -44,7 +44,7 @@
   `tap/swipe/motionevent`，不支持多指 pointer；中途设备自动休眠，唤醒后到锁屏，未绕过锁屏继续输入。
   用户另报“无双指缩放、拖动/缩放明显卡顿”，记为待复现实机问题，不是本轮量化结论。
 - 性能数据边界：`dumpsys gfxinfo dev.yacr.app framestats` 显示 `Total frames rendered: 0`、
-  `Pipeline=Skia (OpenGL)`，统计对象是 Java/HWUI；不覆盖 Slint NativeActivity 内的 wgpu Vulkan
+  `Pipeline=Skia (OpenGL)`，统计对象是 Java/HWUI；不覆盖早期桌面 UI（已移除）NativeActivity 内的 wgpu Vulkan
   canvas，不能用它的 `Janky frames: 0` 声称画布流畅。当前 fixture manifest 给出 4 条线，实际 app
   entity/import-report 数量未取得。只读定位 lane 报告 `view.rs` 当前 move contacts=1 / canvas
   `TouchArea` 无第二指数据；这解释了双指能力缺口的代码现状，但本条仍是 lane 报告，不是设备 pinch 测试。
@@ -58,7 +58,7 @@
 ## 17. pinch/navigation 修订版 arm64 release 部署（2026-10-12；等待解锁后交互验收）
 
 - 构建前记录 dirty source：HEAD `96d631fe8dcaf6658ebee850008ad2f55034d39f`；production-source
-  diff（Android view、cad-host/UI 实现与 Slint UI，排除测试）的 SHA-256 为
+  diff（Android view、cad-host/UI 实现与早期桌面 UI（已移除），排除测试）的 SHA-256 为
   `fd78297af07d00f64d6ff9aee3df2d9ace3608e6ef257c196eae4cba3a061ef3`，构建后相同；无 untracked
   production source。构建前后完整 tracked diff 和 untracked 指纹也未变化。因此本次构建期间没有
   production/test/docs 源码漂移；不是仅以 HEAD 指代 dirty source。
@@ -85,7 +85,7 @@
   物理双指 pinch in/out。不要打开其他文件；操作期间保持 app 前台。ADB `input swipe` 是单指，不能声称
   覆盖 pinch；若无受支持的多点输入硬件/工具，改请用户在真机屏上操作并记录其动作。
 - `dumpsys gfxinfo dev.yacr.app framestats` 为 `Total frames rendered: 0`，`Pipeline=Skia (OpenGL)`；
-  是 Java/HWUI 统计，不覆盖 Slint NativeActivity 的 wgpu Vulkan canvas，0 帧/0 jank 不能证明流畅。
+  是 Java/HWUI 统计，不覆盖早期桌面 UI（已移除）NativeActivity 的 wgpu Vulkan canvas，0 帧/0 jank 不能证明流畅。
   本次没取得适用 canvas 的帧时间/性能 trace；性能与主观卡顿均待现场观察。设备 PID log、启动截图、
   fixture hash 和 APK 检查均在上述证据目录。
 
@@ -104,7 +104,7 @@
   与 `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` 通过。
 - **契约测试**：`cargo test -p cad-host --locked`：22 passed，含 live zoom anchor metrics 与 desktop wheel
   anchor/sign tests。`cargo test -p app-android --lib --locked`：25 passed / 1 failed；唯一失败的
-  `adapter_suppression_cancels_android_tail_and_restores_next_tap_and_tool_path` 是 Slint offscreen 检查，
+  `adapter_suppression_cancels_android_tail_and_restores_next_tap_and_tool_path` 是早期桌面 UI（已移除）offscreen 检查，
   明确拒绝真实 NVIDIA Quadro P620 adapter（要求 software Vulkan）。依仓库真实 GPU 规则未切换软件渲染重跑，
   也不把该结果当真实设备失败。隔离相关用例通过：Android pinch 4/4、pan 1/1、scroll zoom 1/1；字体 APK
   校验器契约测试 8/8。未重复 UI 软件渲染/GPU lane。
@@ -151,7 +151,7 @@
   `cargo test -p cad-host --locked` 22/22 通过（含 zoom-anchor metrics 与 desktop wheel anchor）。
   `check-architecture.py`、`check-fixture-manifest.py`、`check-workflows.py`、`check-i18n.py` 均通过，字体包契约
   8/8 通过。上一轮 native/wasm `cargo check` 结果复用：此次仅为 Rustfmt 与 test module relocation。
-- Android 全 suite 上一轮为 25/26：唯一失败的 Slint offscreen 用例因本机真实 Quadro P620 adapter 而拒绝运行，
+- Android 全 suite 上一轮为 25/26：唯一失败的早期桌面 UI（已移除）offscreen 用例因本机真实 Quadro P620 adapter 而拒绝运行，
   测试要求软件 Vulkan。没有把它记成通过，也未设置软件 ICD 重跑；上一轮 Android pinch/pan/scroll focused tests
   分别 4/4、1/1、1/1 通过。未重复该 UI/GPU lane。
 - 当前 dirty production-source diff fingerprint 为
@@ -169,9 +169,9 @@
 
 - 根因：上轮唯一 Android lib suite 失败用例
   `tests::adapter_suppression_cancels_android_tail_and_restores_next_tap_and_tool_path` 调用
-  `cad_ui_slint::offscreen::install()`；offscreen helper 原本强制要求 `device_type == "cpu"`，因此在真实
+  旧 UI crate（已删除）的 offscreen `install()`；offscreen helper 原本强制要求 `device_type == "cpu"`，因此在真实
   Quadro P620/Vulkan 上拒绝初始化。它错误地把 offscreen validation 限定为 software Vulkan。
-- 限定修改 `crates/cad-ui-slint/src/offscreen.rs`：先用 `GpuSelection::HighPerformance` 选择 Vulkan
+- 限定修改旧 UI crate（已删除）的 `src/offscreen.rs`：先用 `GpuSelection::HighPerformance` 选择 Vulkan
   discrete GPU；若结果不是 hardware 类，再探测 `LowPower`，优先 integrated GPU；只有两次选择都没有可用
   hardware 类型时接受 CPU adapter 作为 software fallback。仍强制 backend 为 Vulkan，继续创建实际的
   `FemtoVGWGPURenderer`；不以 adapter 缺失/错误折成空成功。初始化日志真实记录 `class/name/device_type/backend`；
@@ -181,7 +181,7 @@
   `cargo test -p app-android --lib adapter_suppression_cancels_android_tail_and_restores_next_tap_and_tool_path --locked -- --nocapture --test-threads=1`：1/1 passed。
 - 随后未设置 `VK_ICD_FILENAMES`，串行运行
   `cargo test -p app-android --lib --locked -- --test-threads=1 --nocapture`：**26/26 passed**，该用例再次记录同一硬件
-  adapter。该 headless test 证明 Vulkan adapter/Slint renderer 初始化及 adapter callback 契约，不是有窗口的桌面、
+  adapter。该 headless test 证明 Vulkan adapter/早期桌面 UI（已移除）renderer 初始化及 adapter callback 契约，不是有窗口的桌面、
   Android 真机 GPU、真实帧视觉验收或性能流畅度结论。
 - `cargo fmt --all -- --check` 与 workspace Clippy `-D warnings` 通过；无 allow 抑制、无新依赖。
   未构建 APK、未使用 adb/模拟器、未安装或打断用户设备。前述旧 APK / 字体事实不变。
@@ -191,7 +191,7 @@
 
 - 为核实新增的 ignored real-window 测试 `host::validation::tests::real_gpu_host_navigation_push_updates_bridge_and_preserves_full_push_semantics`，在本机 Wayland/X11 桌面及 NVIDIA Quadro P620 上以独立测试进程运行；未设置 `VK_*`/`WGPU_*` GPU 选择覆盖。命令：
   `YACR_NAVIGATION_OUTPUT=/tmp/opencode/yacr-git-push-20261012-091936/navigation cargo test -p app-linux --lib real_gpu_host_navigation_push_updates_bridge_and_preserves_full_push_semantics --locked -- --ignored --test-threads=1 --nocapture`，外层 150 秒 timeout；1/1 passed，运行 15.70 秒。
-- `renderer.txt` 记录 `backend=Some(Native)`、`api=Some("vulkan")`、`frames_rendered=1`、`nvidia_device_fd=true`；`host-navigation.txt` 记录测试断言的 navigation push、selection/measurement/snap hints 与 full push 保持语义。Slint timer 每 50ms 检查 renderer readiness 并于 90 秒 deadline 失败或成功时退出；另有外层 timeout。证据：`/tmp/opencode/yacr-git-push-20261012-091936/`。
+- `renderer.txt` 记录 `backend=Some(Native)`、`api=Some("vulkan")`、`frames_rendered=1`、`nvidia_device_fd=true`；`host-navigation.txt` 记录测试断言的 navigation push、selection/measurement/snap hints 与 full push 保持语义。早期桌面 UI（已移除）timer 每 50ms 检查 renderer readiness 并于 90 秒 deadline 失败或成功时退出；另有外层 timeout。证据：`/tmp/opencode/yacr-git-push-20261012-091936/`。
 - 这是 Linux 真窗口下 HostCore/bridge 及活动 renderer 的测试证据，不是 CAD 视觉正确性、桌面流畅度、Android 真机渲染或性能结论。未构建 APK、adb 或操作手机。
 
 ## 15. arm64 release 真机构建与安装尝试（2026-10-12；等待设备授权）
@@ -329,7 +329,7 @@ I app_android: yacr android host starting
 D vulkan  : searching for layers in '.../lib/x86_64'
 W wgpu_core::instance: Missing downlevel flags: DownlevelFlags(SURFACE_VIEW_FORMATS)
 W wgpu_core::instance:     shader_model: Sm5,
-I cad_ui_slint::bridge: CAD renderer initialized: preference=WebGpu actual=WebGpu \
+I …::bridge: CAD renderer initialized: preference=WebGpu actual=WebGpu \
     compute=true storage_buffers=true indirect_draw=true max_texture_dimension=8192
 I MESA    : exportSyncFdForQSRILocked: call for image ...
 ```
@@ -339,7 +339,7 @@ I MESA    : exportSyncFdForQSRILocked: call for image ...
   不是底层图形 API 名。
 - 底层实际路径：wgpu 通过 Android Vulkan loader 初始化（`vulkan` + `wgpu_core` +
   `MESA`/SwiftShader 日志）。模拟器为 `-gpu swiftshader`，系统 GLES 亦为 SwiftShader。
-- Slint 合成器：Skia（`D skia: [SkFontMgr Android Parser] ...`），位于 wgpu 之上。
+- 早期桌面 UI（已移除）合成器：Skia（`D skia: [SkFontMgr Android Parser] ...`），位于 wgpu 之上。
 - 结论：**模拟器 SwiftShader 上的 Vulkan（wgpu）/ Skia 合成**。未观察到 fallback 到
   其他后端；不声明真机 GPU 行为。
 
@@ -391,7 +391,6 @@ I MESA    : exportSyncFdForQSRILocked: call for image ...
 | `02_after_pan.png` | 同上，执行画布拖动后（几何位移） |
 | `03_after_fit.png` | 再次点「适应」后，与 `01` 逐像素一致 |
 | `unfixed_before_swipe.png` / `unfixed_after_swipe.png` | 未修复版：拖动前后完全一致（0 像素变化） |
-| `logcat-backend.txt` | 启动与后端初始化 logcat（本次运行） |
 | `png_analyze.py` / `png_diff.py` | 纯 stdlib PNG 解码/区域统计与逐像素 diff 脚本 |
 
 会话内原始文件亦在 `/tmp/opencode/android-runtime/`。
@@ -418,7 +417,7 @@ I MESA    : exportSyncFdForQSRILocked: call for image ...
 2. **状态栏误导** — shell 初始状态 `status.scaffold`（“框架占位：尚未接入 CAD 画布”）
    在 `install_cad_bridge` 之后仍然显示。现改为：无恢复快照时显示
    `就绪（内置演示几何，非兼容性声明）`。
-3. **后端不可观测** — 在 `crates/cad-ui-slint/src/bridge.rs` 的 `RenderingSetup`
+3. **后端不可观测** — 在旧 UI crate（已删除）的 `src/bridge.rs` 的 `RenderingSetup`
    分支新增一行 `log::info!`（仅新增日志，不改逻辑），在设备日志中如实上报真实
    初始化结果；`BeforeRendering`/`install` 逻辑不变。此为本 workstream 之外 crate 的
    最小附加改动，已在报告中标注。
@@ -505,14 +504,14 @@ fontconfig 无法原生运行，标注 NOT RUN）**：`state_push` 派生（图�
 ## 9. 必跑检查结果（全部通过）
 
 ```bash
-cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked
+cargo test --workspace --exclude app-android --exclude app-web --locked
 #   EXIT 0；53 个 test result: ok，无 FAILED
 cargo fmt --all --check                       # FMT_OK
-cargo clippy --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --all-targets --locked
+cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked
 #   EXIT 0，无 warning
 python3 scripts/check-architecture.py         # Architecture OK: 23 packages
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # EXIT 0
-cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked   # EXIT 0
+cargo check --target aarch64-linux-android -p app-android --locked   # EXIT 0
 # 附加：类型检查 Android 目标下的新增测试
 cargo check --target aarch64-linux-android -p app-android --tests --locked   # EXIT 0
 ```

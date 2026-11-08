@@ -1,9 +1,9 @@
 # 应用图标（App icon）
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的桌面/web 宿主；
+> 其中旧 UI crate、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 单一来源：**`assets/yacr-icon.svg`**（仓库根 `assets/`，用户提供的 YACR “Y” 蓝图图标，
 自包含，无外部引用）。所有平台派生资产都由它生成，不得各自维护副本。
@@ -23,11 +23,10 @@
 
 ## 各端接入
 
-- **桌面（Linux / Windows / macOS）**：`crates/cad-ui-slint/ui/app.slint` 的
-  `YacrWindow` 设置 `icon: @image-url("../../../assets/yacr-icon.svg")`。图标在编译期嵌入，
+- **桌面（Linux / Windows / macOS）**：早期桌面 UI（已移除）的窗口定义曾设置
+  `icon: @image-url("../../../assets/yacr-icon.svg")`，图标在编译期嵌入，
   运行时二进制自包含；winit 后端据此设置窗口与任务栏图标（X11 生效；Wayland 通常改从
-  `.desktop`/app_id 取图标，见下）。契约测试
-  `crates/cad-ui-slint/tests/app_icon_contract.rs`。
+  `.desktop`/app_id 取图标，见下）。该 UI 的 app-icon 契约测试已随其删除。
 - **macOS 包**：`scripts/package-macos-release.sh` 复制
   `Contents/Resources/Yacr.icns` 并在 `Info.plist` 写 `CFBundleIconFile=Yacr`。
 - **Linux 包**：`scripts/package-linux-release.sh` 舞台化
@@ -51,8 +50,7 @@
 
 ## 验证状态（诚实记录）
 
-- **已运行（合成/本地）**：`cargo check -p cad-ui-slint`；`cargo test -p cad-ui-slint
-  --test app_icon_contract`（2 passed）；`node --test scripts/test-web-icon.mjs`；
+- **已运行（合成/本地）**：`node --test scripts/test-web-icon.mjs`；
   `python3 scripts/test-android-host.py`（Android 宿主图标路径 + `bundle.icon` 断言）；
   三个 `test-package-*-release.py`；`python3 scripts/generate-icons.py --check`。
 - **未运行**：真实 GPU/窗口管理器图标显示、Android 真机启动图标外观、macOS `.app`

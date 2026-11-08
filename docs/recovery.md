@@ -1,11 +1,11 @@
 # 恢复、后端选择与未保存决策（F12 / B07 / U09）
 
-本文记录 **应用层与 Slint 桥接层** 的后端选择、未保存决策与设备丢失重建契约。
-它只描述本工作stream（`cad-app` / `cad-ui-slint`）实现的纯逻辑；真实 GPU 设备初始化、
-Slint 渲染与浏览器后端探测**未在本环境运行**，见文末“仍未验证”。
+本文记录 **应用层与 UI 桥接层** 的后端选择、未保存决策与设备丢失重建契约。
+它只描述本工作stream（`cad-app` / 旧 UI crate）实现的纯逻辑；真实 GPU 设备初始化、
+UI 渲染与浏览器后端探测**未在本环境运行**，见文末“仍未验证”。
 
-> **2026-10-28 更正**：`cad-ui-slint`（含 `src/bridge.rs`、`src/web.rs`）**已随 2026-10-16 的 Slint
-> 退役删除**，文中这些路径**没有当前对应物**（`cad-app::recovery` 的纯逻辑仍在）；当前桌面宿主
+> **2026-10-28 更正**：旧 UI crate（含 `src/bridge.rs`、`src/web.rs`）**已随 2026-10-16 的桌面 UI 迁移
+> 删除**，文中这些路径**没有当前对应物**（`cad-app::recovery` 的纯逻辑仍在）；当前桌面宿主
 > 见 `docs/react-linux-app.md`。下文保留为历史记录。
 
 ## 1. 后端选择与回退（F12）
@@ -33,12 +33,12 @@ pub enum BackendFailure {
   `Some`；失败时 `actual()` 为 `None`，并携带具体 `BackendFailure`。
 - **标签跟随真实设备，不跟随愿望**：`BackendOutcome::label()` 用 `actual` 生成标签。
   强制 WebGL2 但实际拿到 WebGPU 设备时，标签是 `webgpu`，绝不是 `webgl2`
-  （审计 F12“GL 桥仍标 WebGPU”）。Slint 桥在 `RenderingSetup` 时用
+  （审计 F12“GL 桥仍标 WebGPU”）。UI 桥在 `RenderingSetup` 时用
   `BackendCapabilities::actual` 构造 `Initialized`，因此 GL 与 WebGPU 被如实标注。
 - **失败给出可恢复动作**：`BackendFailure::recovery_hint()` 为每类失败给出 UI 应展示的
   具体动作（回退 Auto / 切换后端 / 重试），不是一句“错误”。
 
-桥（`cad-ui-slint/src/bridge.rs`）不再保存 `Option<String> error`，而是保存
+桥（旧 UI crate 的 `src/bridge.rs`）不再保存 `Option<String> error`，而是保存
 `Option<BackendOutcome>`。`CadView` 暴露：
 
 | 方法 | 含义 |
@@ -49,7 +49,7 @@ pub enum BackendFailure {
 | `last_error()` | 仅失败时给出具体原因，成功时为 `None` |
 | `preference_choice()` | 请求的偏好（app 层枚举） |
 
-Web 侧的探测与偏好持久化仍在 `cad-ui-slint/src/web.rs`（真实 adapter 请求、WebGL2 上下文
+Web 侧的探测与偏好持久化仍在旧 UI crate 的 `src/web.rs`（真实 adapter 请求、WebGL2 上下文
 探测、recovery 快照先写后 reload）。桥接层只负责把“实际初始化结果”结构化。
 
 ## 2. 未保存决策模型（U09 / B07）
@@ -126,7 +126,7 @@ pub enum UnsavedOutcome { Proceed, SaveFailed, RecoveryFailed, Cancelled }
   损坏输入拒绝）。
 - `cad-app::host`：保存失败不替换文档且仍 dirty；恢复写失败不替换文档；恢复快照经宿主
   捕获→编码→解码→恢复后批注完整（含 id/text）。
-- `cad-ui-slint::bridge`：`ActiveBackend → ActiveBackendKind` 与
+- 旧 UI crate 的 `bridge`：`ActiveBackend → ActiveBackendKind` 与
   `BackendPreference → BackendChoice` 映射如实；`UI_DEFINITION` 结构断言。
 
 ## 5. 仍未验证（禁止当作已完成）
@@ -134,7 +134,7 @@ pub enum UnsavedOutcome { Proceed, SaveFailed, RecoveryFailed, Cancelled }
 - **真实 GPU 设备初始化未运行**：本环境无适配器/共享设备，`RenderingSetup`、
   `initialize_with_device`、`BackendCapabilities` 运行时核对、GL 与 WebGPU 的真实标签都
   尚未在真实设备上执行。桥接逻辑只做了静态编译（wasm32）。
-- **Slint 渲染未运行**：`cad-ui-slint` 宿主测试因缺少 fontconfig 开发头无法在本环境构建，
+- **UI 渲染未运行**：旧 UI crate 宿主测试因缺少 fontconfig 开发头无法在本环境构建，
   桥接与 UI 结构断言只通过 wasm32 `cargo check` 与源码断言。
 - **浏览器 Auto 回退未实测**：`web.rs` 的真实 adapter 请求与 WebGL2 上下文探测未在浏览器
   运行；“Auto 探测失败后的真实回退”仍需真实浏览器验收。

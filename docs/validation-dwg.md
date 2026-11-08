@@ -1,9 +1,9 @@
 # 真实 DWG 打开与渲染回归（2026-10-03）
 
-> **历史执行证据（Slint 桌面已退役，2026-10-16）**：本文记录的是**迁移前** Slint 宿主/模拟器/浏览器
-> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；Slint→React 迁移后的
+> **历史执行证据（早期桌面 UI 已退役，2026-10-16）**：本文记录的是**迁移前**的早期桌面 UI（已移除）宿主/模拟器/浏览器
+> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；早期桌面 UI→React 迁移后的
 > 最终验证 **NOT RUN**（P6）。当前架构见 `docs/architecture.md` 与
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
+> [ADR 0010](adr/0010-react-linux-host.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
 
 通用测试步骤、环境准备与通过判据见 [testing-dwg.md](testing-dwg.md)；本文仅记录本轮证据。
 
@@ -24,7 +24,7 @@
 release CLI，真实 wgpu/Vulkan，强制
 `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`。
 实际适配器：CPU / llvmpipe，Mesa 26.0.8，LLVM 21.1.8。
-无 X11/Wayland、无 Slint、无浏览器。
+无 X11/Wayland、无早期桌面 UI（已移除）、无浏览器。
 
 | 项目 | 实测 |
 |---|---|
@@ -50,9 +50,9 @@ GOST 原字体不在目录，采用显式回退，**不是原字体排版验收*
    透明合成、渐变、三角形测试均继续执行。
 2. CLI `render` / `plot` 没有使用 `--font`，只传 `None`，导致文字不入 GPU。
    两入口现在加载并注入 FontEngine；坏字体验证发生在 GPU 工作前。
-3. `CadView::request_redraw` 仅安排 Slint 零时长 timer；浏览器 File API/字体
+3. `CadView::request_redraw` 仅安排早期桌面 UI（已移除）零时长 timer；浏览器 File API/字体
    回调发生在空闲事件循环外时，timer 本身不唤醒 winit。通过
-   `slint::invoke_from_event_loop` 发布唤醒事件，CPU 准备仍在 timer、GPU 仍在
+   该工具包的 `invoke_from_event_loop` 发布唤醒事件，CPU 准备仍在 timer、GPU 仍在
    renderer 内。四线段浏览器回归无鼠标移动就从 CAD 帧 1 更新为 3，并实际显示
    四线段（`browser-small-final/`）。单纯额外 window.request_redraw 的尝试未解决，
    其失败证据仍保留在 `browser-small-wake.log`。

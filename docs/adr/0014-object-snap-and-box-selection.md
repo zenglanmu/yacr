@@ -22,7 +22,7 @@
    “draw tool is not yet wired” 已过期。LINE/CIRCLE/ARC 是捕捉的主要用户，必须一并修。
 3. **没有窗口/交叉框选。** 选择只有单点 `SelectAt` 与 `SELECTALL`。
 4. **F3 在当前 React 宿主完全未绑定**（`App.jsx` 仅 Ctrl+0/Ctrl+9/F2/Escape）。`docs/shortcuts.md` 的
-   F3 行属于**已退役 Slint 宿主的历史**，不得当作现状引用。`StatusBar.jsx:10` 已有四个**显式禁用**的
+   F3 行属于**已退役宿主的历史**，不得当作现状引用。`StatusBar.jsx:10` 已有四个**显式禁用**的
    drafting 开关（`GRID`/`SNAP`/`ORTHO`/`OSNAP`，`status.toggle_unsupported`）；i18n
    `status.toggle.osnap` 已存在。⇒ F3 是**新绑定**，不是行为变更。
 5. **CAD 画面是 GTK 最上层子窗口**（`apps/app-linux/src/gtk_bridge/native.rs:38-43`），webview 覆盖不到，

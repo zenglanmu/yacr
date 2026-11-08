@@ -148,5 +148,5 @@ NSWindow (Tauri, transparent)
 - notarization、Developer ID、Gatekeeper 放行（ad-hoc 签名已接线但未验证）。
 - 本机 macOS 交叉检查的**真实 C 编译/链接**（ObjC helper 用假 `cc` 跳过，见上）。
 
-以上均不得推广为 macOS 兼容性、视觉正确性或性能结论。历史 Slint 时期（`app-linux` 共享入口、
-`rfd`、`--headless` 强制 Vulkan）的实现与证据**已随 Slint 退役**，不得与当前 React/Tauri 宿主混用。
+以上均不得推广为 macOS 兼容性、视觉正确性或性能结论。历史桌面 UI 时期（`app-linux` 共享入口、
+`rfd`、`--headless` 强制 Vulkan）的实现与证据**已随桌面 UI 迁移退役**，不得与当前 React/Tauri 宿主混用。

@@ -1,9 +1,9 @@
 # QCAD `flange` DXF 离屏渲染验证（2026-10-03）
 
-> **历史执行证据（Slint 桌面已退役，2026-10-16）**：本文记录的是**迁移前** Slint 宿主/模拟器/浏览器
-> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；Slint→React 迁移后的
+> **历史执行证据（早期桌面 UI 已退役，2026-10-16）**：本文记录的是**迁移前**的早期桌面 UI（已移除）宿主/模拟器/浏览器
+> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；早期桌面 UI→React 迁移后的
 > 最终验证 **NOT RUN**（P6）。当前架构见 `docs/architecture.md` 与
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
+> [ADR 0010](adr/0010-react-linux-host.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
 
 本轮按用户要求把 QCAD 的 `flange.dxf` / `flange.png` / `flange.pdf` 作为渲染回归
 样本提交进仓库，记录来源，补测试代码并跑 Linux 原生离屏渲染；随后实现无匿名块的
@@ -55,7 +55,7 @@ verified for:”，因为无块标注现在**有**显示几何，剩余未验证
 
 环境：`target/release/cad-cli-tools`；`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`；
 真实 wgpu/Vulkan，适配器 **CPU / llvmpipe**，Mesa `26.0.8-1ubuntu0.3`（LLVM `21.1.8`）。
-无 X11/Wayland、无 Slint、无浏览器。
+无 X11/Wayland、无早期桌面 UI（已移除）、无浏览器。
 
 ```bash
 cargo build -p cad-cli-tools --release --locked

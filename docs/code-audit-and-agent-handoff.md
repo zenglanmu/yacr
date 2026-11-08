@@ -1,9 +1,9 @@
 # 代码审计与下游 Coding Agent 交接
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的早期桌面 UI（已移除）/web 宿主；
+> 其中旧 UI crate（已删除）、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 审计日期：2026-10-01。基线 commit：`c260d8bfc44a108bdcc99b6114ac069b451284ec`。
 需求权威：`CAD_IMPLEMENTATION_SPEC.md` v2.0；本报告是审计结果及用户新增需求，不取代原规范。
@@ -20,10 +20,10 @@
 当前是有真实核心算法、事务和部分宿主接线的原型，不是全部空框架，也不是可验收产品。
 不能仅按 `pending()` 数量判断完成度：大量缺口表现为忽略字段、未消费输出、缺少宿主接线或错误的成功状态。
 
-- 已有：只读底图 Builder、绘图事务、撤销重做、部分几何/测量算法、代理有界 framing、基础表示提供器、CPU 索引、查询、Slint/wgpu 同设备纹理桥、Web 文件入口和静态构建脚本、基础 CLI。
+- 已有：只读底图 Builder、绘图事务、撤销重做、部分几何/测量算法、代理有界 framing、基础表示提供器、CPU 索引、查询、早期桌面 UI（已移除）/wgpu 同设备纹理桥、Web 文件入口和静态构建脚本、基础 CLI。
 - 未闭环：手机交互、真实文件打开与取消、图层/布局显示、拾取高亮、恢复保护、字体/外参、完整 3D、ACIS、跨后端初始化与恢复、大图性能。（六类批注工具/显示/持久化随子系统移除，已不在范围。）
 - 高风险：新图纸可能仍显示旧图；打开/重载的状态保护；JSON 往返丢失语义；能力表与实际绘制不一致。
-- UI 审查基于 Slint/Rust/JS/CSS 源码，本轮未运行浏览器、模拟器或真机；布局溢出属于待截图验证风险，不能冒充视觉实测。
+- UI 审查基于早期桌面 UI（已移除）/Rust/JS/CSS 源码，本轮未运行浏览器、模拟器或真机；布局溢出属于待截图验证风险，不能冒充视觉实测。
 - `fixtures/manifest` 的 fixtures 为空，不能声明真实 DWG、天正/探索者、字体或黄金图验收通过。
 
 ### 1.1 本轮实际执行
@@ -33,9 +33,9 @@
 | 检查 | 结果 |
 |---|---|
 | `python3 scripts/check-architecture.py` | 通过：23 packages，依赖无环，核心边界完整 |
-| 核心 `cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked --no-fail-fast` | 失败：两个测试目标失败，见 B01/B02；其余执行目标通过 |
+| 核心 `cargo test --workspace --exclude app-android --exclude app-web --locked --no-fail-fast` | 失败：两个测试目标失败，见 B01/B02；其余执行目标通过 |
 | `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` | 失败：app-android 两处编译错误，见 B03 |
-| Android target 检查 | 初次缺 SDK 环境；按 docs/build.md 配置 SDK/JDK 后，确认同样两处代码编译错误，见 B03；cad-ui-slint 检查通过 |
+| Android target 检查 | 初次缺 SDK 环境；按 docs/build.md 配置 SDK/JDK 后，确认同样两处代码编译错误，见 B03；旧 UI crate 检查通过 |
 | APK 重打包、浏览器、真机、黄金图、性能 | 本轮未运行 |
 
 本地日志（不是可随仓库交付的永久附件）：`/tmp/opencode/yacr-audit-tests.log`、`/tmp/opencode/yacr-audit-wasm.log`、`/tmp/opencode/yacr-audit-android.log`。
@@ -80,18 +80,18 @@
 
 | 编号 | 问题 / 证据 | 设计修正与验收 |
 |---|---|---|
-| U01 | `ui/app.slint:32–67` 所有按钮+后端选择器单行排列；compact 配置未消费 | 宽屏查看：大画布+少量浮动导航；宽屏工作：分组工具+可折叠侧栏；手机：底部分组+抽屉。窄屏溢出需截图确认；建议触控目标 ≥48 逻辑像素，不直接压缩桌面栏 |
+| U01 | `ui/app`（32–67 行）所有按钮+后端选择器单行排列；compact 配置未消费 | 宽屏查看：大画布+少量浮动导航；宽屏工作：分组工具+可折叠侧栏；手机：底部分组+抽屉。窄屏溢出需截图确认；建议触控目标 ≥48 逻辑像素，不直接压缩桌面栏 |
 | U02 | 两宿主 with_demo_document 默认 Work；work-mode 仅开关 enabled，无模式切换入口，mode-label 不显示 | 显式查看/工作切换，共用会话；切换取消未确认预览；UI 与命令权限一致；不把 set_work_mode 当业务授权 |
 | U03 | 无图层/属性/布局/资源/3D 面板；只有开、适应、历史、测量、导入导出、诊断 | 以 F01–F15 为准补入口，提供分页/搜索/空状态；设置页区分 CAD 后端与 UI renderer，不为每实体创建控件（批注列表入口随子系统移除） |
 | U04 | 无当前工具提示/选点步骤/确认/取消/返回导航；Measure 按钮发送 None | 建真正 Tool 状态机与 PreviewState；选择测量算法；按钮启动工具而不是提交缺参命令（CreateAnnotation 随批注子系统移除） |
 | U05 | TouchArea 无多触点身份，Web 总是左键平移；Android 无 ViewInput 接线 | 统一共享输入策略：单指绘制、双指导航、拖动阈值、pointer cancel/capture。Esc/Android 返回先取消工具，再处理退出 |
 | U06 | 没有键盘焦点/IME 接线；InputEvent 类型存在但未使用 | 文本框/弹窗获得焦点时暂停画布快捷键；中文组合输入、Esc、软键盘、浏览器缩放测试；不能把拼音组合串当命令 |
 | U07 | safe_insets/dpi 配置未接；frame 用全窗口尺寸而 Image 只占工具栏之间区域 | 统一真实画布矩形→逻辑像素→物理像素→世界坐标映射；横竖屏、DPR=1/2/3、安全区、键盘弹出、resize 后绘制与拾取一致 |
-| U08 | 单行状态栏只显示首条诊断；HTML host-state 覆盖底部且轮询原始 report。**已部分关闭**：Slint 状态栏改用 `cad-app` 的 `StatusModel`（固定摘要，不含诊断正文，`status_summary_never_embeds_a_diagnostic_message`），诊断抽屉保留全部对象/原因；Web `#host-state` 改为加载/失败专用，`renderer-ready` 后 CSS 隐藏，失败经 `:has(#retry-renderer...)` 重新显示。见 `docs/diagnostics-ui.md`、`docs/ui.md` §5 | 状态栏只显示简要加载/工具/单位/未保存状态；诊断抽屉展示完整对象级原因、实际后端及恢复操作；技术报告不常驻压住提示 |
+| U08 | 单行状态栏只显示首条诊断；HTML host-state 覆盖底部且轮询原始 report。**已部分关闭**：早期桌面 UI（已移除）状态栏改用 `cad-app` 的 `StatusModel`（固定摘要，不含诊断正文，`status_summary_never_embeds_a_diagnostic_message`），诊断抽屉保留全部对象/原因；Web `#host-state` 改为加载/失败专用，`renderer-ready` 后 CSS 隐藏，失败经 `:has(#retry-renderer...)` 重新显示。见 `docs/diagnostics-ui.md`、`docs/ui.md` §5 | 状态栏只显示简要加载/工具/单位/未保存状态；诊断抽屉展示完整对象级原因、实际后端及恢复操作；技术报告不常驻压住提示 |
 | U09 | 无加载进度/取消、指纹不匹配映射弹窗、未保存决策、后端强制失败恢复 UI | 建一致 Save/PreserveRecovery/Discard/Cancel 流程；取消不丢文档；失败保留原值并说明具体可恢复动作 |
-| U10 | Slint/Rust/JS/HTML 中文硬编码；locale 无效；英译会放大布局压力 | 按 N01 外置双语；英语长文、中文字体与工具提示覆盖测试；固定 96px 后端框、28px 状态栏不要作为所有控件默认尺寸 |
-| U11 | Undo/Redo 都绑定 can-undo（`app.slint:38–46`） | 独立 can_undo/can_redo 派生状态，撤销到空后仍能 redo；UI 刷新不能触发重复命令 |
-| U12 | Canvas 无原生 HTML 语义，未展示替代可访问入口。**已部分关闭**：`#canvas-host` 标 `role="application"`+目录 `aria-label`+`tabindex="0"`，`#a11y-status` 视觉隐藏 `role="status" aria-live="polite"` 承接播报，`#host-state` 改 `aria-live="off"` 避免重复；`scripts/test-web-a11y.mjs` 断言 DOM/CSS 契约。见 `docs/ui.md` §5 | 标注无障碍边界，测试焦点顺序/键盘可达/对比度/缩放；DOM aria-live 与 Slint 状态避免重复播报，不宣称 Canvas 等价原生语义 |
+| U10 | 早期桌面 UI（已移除）/Rust/JS/HTML 中文硬编码；locale 无效；英译会放大布局压力 | 按 N01 外置双语；英语长文、中文字体与工具提示覆盖测试；固定 96px 后端框、28px 状态栏不要作为所有控件默认尺寸 |
+| U11 | Undo/Redo 都绑定 can-undo（`ui/app` 38–46 行） | 独立 can_undo/can_redo 派生状态，撤销到空后仍能 redo；UI 刷新不能触发重复命令 |
+| U12 | Canvas 无原生 HTML 语义，未展示替代可访问入口。**已部分关闭**：`#canvas-host` 标 `role="application"`+目录 `aria-label`+`tabindex="0"`，`#a11y-status` 视觉隐藏 `role="status" aria-live="polite"` 承接播报，`#host-state` 改 `aria-live="off"` 避免重复；`scripts/test-web-a11y.mjs` 断言 DOM/CSS 契约。见 `docs/ui.md` §5 | 标注无障碍边界，测试焦点顺序/键盘可达/对比度/缩放；DOM aria-live 与早期桌面 UI（已移除）状态避免重复播报，不宣称 Canvas 等价原生语义 |
 
 建议交互验收视口：360×800、横屏 800×360、平板 800×1280、桌面 1280×800；这是新增测试建议，不是已有通过结果。
 
@@ -122,7 +122,7 @@
 
 ### B04 · P0 · 源码确认：新图纸沿用 ID，桥接器跳过场景替换
 
-- 位置：`cad-app/src/host.rs:158–181` 固定 DatabaseId(1)；`cad-ui-slint/src/bridge.rs:188–198` 只比较 db.id()；demo 也为 1。
+- 位置：`cad-app/src/host.rs:158–181` 固定 DatabaseId(1)；旧 UI crate（已删除）的 `src/bridge.rs:188–198` 只比较 db.id()；demo 也为 1。
 - 影响：demo→真实图纸或 A→B 时，incoming 更新但已有 GPU batches 不重建，可仍显示旧图。
 - 修复：场景身份包括 DocumentId/内容身份/generation/revision；每次成功 open 发布新快照，不靠裸 DatabaseId 判断。
 - 回归：不同范围的两份合成 DB 同 ID 连续打开，断言来源/顶点/像素均更新；旧任务不得覆盖新图。
@@ -136,7 +136,7 @@
 
 ### B06 · P0 · 源码确认：Web 切换后端直接 reload，未保存保护失效
 
-- 位置：`apps/app-web/src/lib.rs:220–228`、`cad-ui-slint/src/web.rs:58–65`；启动只重建 demo。
+- 位置：`apps/app-web/src/lib.rs:220–228`、旧 UI crate（已删除）的 `src/web.rs:58–65`；启动只重建 demo。
 - 修复：先保存/验证恢复快照（文档身份、批注、相机、会话），获得用户决策后重载；失败不 reload；清理唯一恢复副本必须明确丢弃。
 - 回归：dirty 批注下切后端/刷新，取消不重载，保留恢复后可恢复全部内容；文件授权失效给重选提示。
 
@@ -211,7 +211,7 @@
 
 ### B17 · P1 · 源码确认：画布坐标/DPI/Y 方向不统一
 
-- 位置：`bridge.rs:201–204` 使用全窗口 physical_size，而 Camera 比例是 logical pixel；Slint Image 用 contain；`cad-render-wgpu:385–386` sy 为负；Web 输入又反转屏幕 y。
+- 位置：`bridge.rs:201–204` 使用全窗口 physical_size，而 Camera 比例是 logical pixel；早期桌面 UI（已移除）Image 用 contain；`cad-render-wgpu:385–386` sy 为负；Web 输入又反转屏幕 y。
 - 影响：DPR、工具栏高度、contain 留白导致绘制/拾取/fit 比例不一致；Y 轴约定有倒置/拖动方向风险，需非对称图和实际平台验证。
 - 修复：只用实际 CAD 内容矩形与明确 world→clip→image→pointer 约定，按 DPI 换算；相机 viewport 尺寸随 resize 更新。
 - 回归：非对称 L 形+坐标标记；DPR=1/2/3，旋转/resize；指针世界点、显示像素、平移方向相符。
@@ -320,7 +320,7 @@
 
 ### 5.1 当前状态
 
-- 仅 `crates/cad-ui-slint/i18n/zh-CN.json`；ZH_CN_MESSAGES 只是 include_str，未作为翻译源。
+- 仅旧 UI crate（已删除）的 `i18n/zh-CN.json`；ZH_CN_MESSAGES 只是 include_str，未作为翻译源。
 - `UiConfiguration.locale` 没有实际应用；UI/Rust host/app/importer/JS/HTML 文案混合硬编码。
 - 无英文资源、语言设置、偏好持久化、缺 key 检测、语言切换或双语布局测试。
 
@@ -329,8 +329,8 @@
 1. 支持稳定 locale：`zh-CN`、`en`（可接受 en-US 输入并规范化）；默认简体中文。未支持 locale 回退中文并有可诊断策略，不显示空 key。
 2. 设置页提供“简体中文 / English”，运行时切换可见 UI；偏好由宿主保存并在重启恢复。切换不得丢文档、相机、工具预览、选择或撤销栈；不修改 DWG 文本。
 3. 文案全部外置：按钮、工具步骤、单位、对话框、错误、加载、缺资源/代理提示、后端状态、HTML 启动失败和 JS 文件提示。技术稳定标识 CommandId/diagnostic.code/schema 字段不翻译。
-4. 先确认 Slint 1.18.1 的真实翻译 API；选择 Slint 官方机制或统一资源 catalog 写 ADR。不得假造第三方接口。若继续 JSON，增加 `en.json`，两语言使用相同 keys 与占位符，不能只是新建文件却不接线。
-5. 领域/核心返回结构化诊断 code+参数，表现层本地化；不要在 cad-domain 引入 Slint 或平台 API。原始技术错误可附于详情，但主用户提示需双语。
+4. 先确认早期桌面 UI（已移除）1.18.1 的真实翻译 API；选择该工具包官方机制或统一资源 catalog 写 ADR。不得假造第三方接口。若继续 JSON，增加 `en.json`，两语言使用相同 keys 与占位符，不能只是新建文件却不接线。
+5. 领域/核心返回结构化诊断 code+参数，表现层本地化；不要在 cad-domain 引入早期桌面 UI（已移除）或平台 API。原始技术错误可附于详情，但主用户提示需双语。
 6. HTML lang、title、noscript/启动状态与当前语言同步；Rust UI 和 JS 不维护两份易失配的翻译真相，可由构建生成共享 catalog。
 7. 数值格式化依据 UnitContext/decimal_places 与语言；未知单位中文“图纸单位”、英文“Drawing units”，不能默认为 mm。角度、长度、面积显示区分，机器 JSON 数值保持 locale 无关。
 8. 保证中文可用字体/IME，英文长文案不截掉操作；缺 CAD 字体的诊断与 UI 字体处理分开，资源许可单独核验。
@@ -431,7 +431,7 @@ Android emulator 与 GPU/WebGPU/真机黄金图可作为分开的集成 jobs。�
 
 ### 7.2 约束与待确认项
 
-- 保留 Rust + Slint + wgpu + acadrust，不修改 acadrust 源码/不用 Cargo patch；cad-db 唯一权威，业务不调用 GPU draw。
+- 保留 Rust + 早期桌面 UI（已移除） + wgpu + acadrust，不修改 acadrust 源码/不用 Cargo patch；cad-db 唯一权威，业务不调用 GPU draw。
 - 不新增原图编辑、云上传、账号、生产后端、任意插件脚本执行等非目标。
 - 有框架/依赖版本阻碍时写 ADR，给证据与替代方案，不能删需求或无限“待验证”。
 - 需用户/维护者提供：授权 DWG/字体/黄金图与设备矩阵；是否自托管 GPU/真机 runner（及标签/权限）；是否启用发布/部署及正式签名。
@@ -441,11 +441,11 @@ Android emulator 与 GPU/WebGPU/真机黄金图可作为分开的集成 jobs。�
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
-cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked --no-fail-fast
+cargo test --workspace --exclude app-android --exclude app-web --locked --no-fail-fast
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 python3 scripts/check-architecture.py
 # Android SDK/JDK/NDK 环境按 docs/build.md 配置后：
-cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked
+cargo check --target aarch64-linux-android -p app-android --locked
 scripts/build-android.sh --release
 scripts/build-web.sh
 # 安装并锁定 Playwright，另开静态服务后：

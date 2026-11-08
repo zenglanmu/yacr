@@ -1,9 +1,9 @@
 # 渲染后端契约
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的桌面/web 宿主；
+> 其中旧 UI crate、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 ## 2026-10-03 共享设备诊断修正
 
@@ -12,9 +12,9 @@
 分别显示 `vulkan`/`metal`/`dx12`/`opengl`；浏览器分别为 `webgpu`/`webgl2`，未知为
 `unknown`。请求 WebGPU 不意味着原生 wgpu 实际使用浏览器 WebGPU。
 
-Slint setup/teardown 回调只更新内部 GPU 状态与绑定标记，不写 UI 图片属性，不在窗口内部
+UI 工具包 setup/teardown 回调只更新内部 GPU 状态与绑定标记，不写 UI 图片属性，不在窗口内部
 借用期间触发重绘。`BeforeRendering` 按设备 epoch/纹理 revision 绑定当前图片。
-本轮软件 Vulkan Slint 集成已核对原生类别及 `vulkan` 标签；用户 Wayland 关闭窗口/真实 GPU
+本轮软件 Vulkan UI 集成已核对原生类别及 `vulkan` 标签；用户 Wayland 关闭窗口/真实 GPU
 未运行。最新宿主证据见 `docs/linux-app.md`、`docs/validation-web.md`；下文早期无宿主状态
 是历史设计记录，不能覆盖这些分平台限定证据。
 
@@ -35,7 +35,7 @@ WebGL2 基础路径不依赖 compute/storage buffer/indirect draw；增强路径
   `PowerPreference::HighPerformance`，`low` 为 `LowPower`）。
 - **CLI render/plot**：`cad-cli-tools render x.dwg --gpu auto|high|low`（无头路径
   `create_headless_gpu_with`，在所选后端内按 `device_type` 优选，缺类型时回退首个适配器）。
-- **环境变量**：Slint 自动路径原生支持 `WGPU_ADAPTER_NAME`（按名字子串匹配，
+- **环境变量**：UI 自动路径原生支持 `WGPU_ADAPTER_NAME`（按名字子串匹配，
   wgpu `initialize_adapter_from_env`）与 `WGPU_POWER_PREF=low|high|none`；
   无头 CLI 路径不读取 `WGPU_ADAPTER_NAME`（见 `docs/headless-render.md` §2）。
 
@@ -43,13 +43,13 @@ WebGL2 基础路径不依赖 compute/storage buffer/indirect draw；增强路径
 适配器；表面不兼容（如虚拟化/无显示输出的独显）时 wgpu 仍可能选到可呈现的适配器。
 能力诊断仍来自共享设备的真实 `adapter_info().backend`，不来自偏好。
 
-共享设备候选：Slint 作为唯一呈现协调者，CAD 同 Device/Queue 离屏纹理合成。
+共享设备候选：UI 宿主作为唯一呈现协调者，CAD 同 Device/Queue 离屏纹理合成。
 Web 受阻可验证双 Canvas 分区；不得每帧 GPU→CPU→GPU 整幅回读。
 必须核查纹理 format/usage、MSAA resolve、alpha 预乘、sRGB、队列顺序、resize、device lost。
 
-当前没有 Slint 宿主、纹理桥或 Android/浏览器平台验证。渲染器本身的管线创建、shader
+当前没有 UI 宿主、纹理桥或 Android/浏览器平台验证。渲染器本身的管线创建、shader
 编译与真实提交已在**原生无头软件适配器**（Mesa lavapipe，Vulkan）上执行，见
-`docs/headless-render.md` 与 `docs/validation.md`；这**不**等于 Slint 共享设备、WebGL2
+`docs/headless-render.md` 与 `docs/validation.md`；这**不**等于 UI 共享设备、WebGL2
 或真机 GPU 的验证。Cargo 中未使用的候选版本不是兼容性证据；接入前用 ADR 锁定真实
 可编译组合。切换后重建所有 GPU 派生资源，保持文档、相机与批注；失败重试有界，先走
 未保存保护。
@@ -78,7 +78,7 @@ WGSL 以 `include_str!` 从 `crates/cad-render-wgpu/shaders/{line,mesh}.wgsl` �
 - `Frame`：单帧校验/参数错误，设备与批次仍有效；
 - `NotInitialized`：未初始化或缺少派生资源。
 
-宿主（Slint）观察到 `DeviceLostReason` 时调用 `Renderer::note_device_lost(...)`；
+宿主观察到 `DeviceLostReason` 时调用 `Renderer::note_device_lost(...)`；
 `Renderer::rebuild_device` 只拆除并置位，绝不带着丢失的批次静默重建。
 
 ## 仍缺失（未验证，禁止当作已完成）

@@ -105,8 +105,8 @@
 1. **能力表的 importer 侧错误**（F11/B20）：`note_capability` 的 `read` 恒为
    `Verified`、render/pick 复制 semantic、`model_render` 未汇总实体完整性。
    位于 `crates/cad-import-acadrust`，本轮不可改 → OPEN。
-2. **UI 只取首条诊断**（U08）：该条原写「状态栏/诊断抽屉接线在 `cad-ui-slint`/`apps/**`」——
-   `cad-ui-slint` **已随 Slint 退役删除**；当前旧抽屉内容已拆成**文件信息面板**
+2. **UI 只取首条诊断**（U08）：该条原写「状态栏/诊断抽屉接线在旧 UI crate/`apps/**`」——
+   该 crate **已随桌面 UI 迁移删除**；当前旧抽屉内容已拆成**文件信息面板**
    （`FileInfoPalette.tsx`，静态），新的**诊断面板**（`DiagnosticsPalette.tsx`）展示动态性能，
    不再展示导入诊断全量列表，因此“React 侧对象级诊断全量展示”**仍未闭环** → OPEN。
    两个面板的数据契约见 `docs/file-info-panel.md`。本 crate 已提供可消费的全量聚合模型。

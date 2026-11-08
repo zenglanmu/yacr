@@ -1,6 +1,6 @@
 # Flatpak Linux 打包重启验证（2026-10-17）
 
-**目的**：记录 2026-10-16 Slint 退役后被删除的 Flatpak 打包流水线在本轮的**重新启用**、其**
+**目的**：记录 2026-10-16 早期桌面 UI 退役后被删除的 Flatpak 打包流水线在本轮的**重新启用**、其**
 前置条件**与**本机实际执行**结果。对应交付：
 `packaging/flatpak/dev.yacr.app.{yml,desktop,metainfo.xml}` 与重写的
 `scripts/package-linux-release.sh`；说明见 `docs/flatpak.md`。
@@ -43,7 +43,7 @@ GNOME 50 运行时为 glibc **2.42**（低于该需求）。**算术推论**—�
 | sha256 | `cd453e230aac16f64583c25f34552c561ce0761f7338a9c4d31fbde484661e90` |
 | 版本来源 | `apps/app-linux/tauri.conf.json` 的 `version` = 0.1.2 |
 | 嵌入前端 | `dist/assets/index-Cu0GkZB-.css`、`dist/assets/index-2p1kGFsX.js`（构建日志 “embedded assets verified: 2 file(s)”） |
-| 安装 | `flatpak install --user …` 成功；`flatpak info dev.yacr.app` → 0.1.2 / AGPL-3.0 / runtime `org.gnome.Platform//51` / branch `master`（同 app-id/branch 覆盖旧 **0.1.1 Slint** 包） |
+| 安装 | `flatpak install --user …` 成功；`flatpak info dev.yacr.app` → 0.1.2 / AGPL-3.0 / runtime `org.gnome.Platform//51` / branch `master`（同 app-id/branch 覆盖旧 **0.1.1（早期桌面 UI 时代）** 包） |
 | MIME | `xdg-mime query default image/vnd.dwg` → `dev.yacr.app.desktop` |
 
 **嵌入校验的修正（本轮）**：第一版守卫 grep `http://localhost:1420` 判“是否嵌入前端”，是**假阳性**
@@ -90,6 +90,6 @@ flatpak run --file-forwarding dev.yacr.app @@ /tmp/opencode/fwd-outside.dwg @@
   Flatpak on 非 x86_64；GNOME 50 运行时的加载失败（推论）。
 - 运行时未能覆盖的仍由宿主提供：glibc/内核、窗口系统、Vulkan 驱动、`xdg-desktop-portal`、
   `fc-match`；bundle **未签名**。
-- 口径提醒：本文件**不**复用旧 Slint 包（`yacr-0.1.1-linux-x86_64.flatpak`，15,368,080 B）的任何
+- 口径提醒：本文件**不**复用旧宿主（早期桌面 UI）包（`yacr-0.1.1-linux-x86_64.flatpak`，15,368,080 B）的任何
   结论；那是另一条流水线、另一个宿主。旧流水线事实见 `docs/linux-app.md` 历史小节与
   `docs/validation.md`。

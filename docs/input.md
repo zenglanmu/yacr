@@ -7,7 +7,7 @@
 （U05/U06/U07/U08）。
 
 这些是**纯策略**：不做平台事件接线、不创建 GPU/窗口资源、不发命令。宿主
-（Slint/Android/Web）把平台事件翻译成这里的输入类型，再把 `InputOutcome`
+（桌面/Android/Web）把平台事件翻译成这里的输入类型，再把 `InputOutcome`
 翻译成 `Command`。策略在这里集中，是为了让每个宿主不会各自发明一套略有
 偏差的答案。
 
@@ -168,7 +168,7 @@ Idle ──1 触点按下──▶ Pending ──移动 ≥ 阈值──▶ Drag
 
 ## 5. 尚未完成（诚实边界）
 
-- **平台事件接线**：`cad-ui-slint`（已随 Slint 退役，不再是宿主）/ Android `ViewInput` /
+- **平台事件接线**：旧 UI crate（已随桌面 UI 迁移退役，不再是宿主）/ Android `ViewInput` /
   Web 指针与键盘事件尚未调用本策略；多触点身份、pointer capture、长按语义需各宿主接入并补集成
   测试。
 - **真实 IME/DPI 运行**：中文组合、软键盘高度变化、浏览器缩放、横竖屏切换、

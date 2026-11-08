@@ -1,20 +1,20 @@
-# Slint 外壳接线状态（U03 / U04 / U11）
+# 早期外壳接线状态（历史）（U03 / U04 / U11）
 
-> **已退役（2026-10-16）**：本文件描述的 `cad-ui-slint` 外壳接线已随 Slint 删除。当前桌面 UI 是
+> **已退役（2026-10-16）**：本文件记录的是早期桌面 UI（已移除）的外壳接线。当前桌面 UI 是
 > React/Tauri chrome + 原生 GTK/wgpu 分区，共享逻辑在 `cad-ui-core`；见 `docs/react-linux-app.md`、
-> `docs/architecture.md`、[ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史事实。
+> `docs/architecture.md`、[ADR 0010](adr/0010-react-linux-host.md)。下文保留为历史事实。
 
-本文件记录 `crates/cad-ui-slint` 与 `crates/cad-app` 之间已接线的 UI 契约，以及
+本文件记录旧 UI crate（已删除）与 `crates/cad-app` 之间已接线的 UI 契约，以及
 **刻意未接线**的部分与原因。规范权威是 `CAD_IMPLEMENTATION_SPEC.md` v2.0；交互
 状态机细节见 `docs/interaction.md`，需求追踪见 `docs/requirements.md` 与
 `docs/code-audit-and-agent-handoff.md`（F05/F06/U03/U04/U11）。
 
-本文件只描述展示层边界：`cad-ui-slint` 负责把应用状态推入 Slint 组件，并把
-Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
+本文件只描述展示层边界：旧 UI crate（已删除）负责把应用状态推入早期桌面 UI（已移除）组件，
+并把该工具包的回调翻译成 `Command`；它不重实现测量/历史算法。
 
 ## 1. 撤销/重做（U11）
 
-- 外壳 `ui/app.slint` 有**两个独立**属性：`can-undo` 与 `can-redo`。
+- 外壳定义文件有**两个独立**属性：`can-undo` 与 `can-redo`。
   - 撤销按钮绑定 `can-undo`，重做按钮绑定 `can-redo`（不再共用 `can-undo`）。
 - `UiHandle::set_can_undo` / `set_can_redo` 分别设置；`UiHandle::set_history_availability`
   接收一个 `cad_app::HistoryAvailability` 快照，一次写入两个标志。
@@ -112,7 +112,7 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   用最近一次模式重发正确的标签，不再回落到「增强」。
 - 单测：`cad-app` 的 `set_mode_cancels_an_unconfirmed_tool_and_gates_work_commands`
   覆盖「切换取消工具 + Viewer 拒绝 Work-only + 切回恢复」；
-  `cad-ui-slint` 的 `mode_ui_state_reflects_the_authoritative_mode` 覆盖标签/标志
+  旧 UI crate（已删除）的 `mode_ui_state_reflects_the_authoritative_mode` 覆盖标签/标志
   （该 crate 原生测试受本机 fontconfig 限制，见 §5）。
 
 ## 2.5 异步打开进度（F01）
@@ -123,7 +123,7 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   是纯 getter。字段 `running` / `phase: Option<_>` / `entities_done` /
   `entities_total: Option<usize>` / `bytes: Option<u64>` / `cancellable` /
   `terminal: Option<ImportTerminal>` 全部来自 manager 的真实轮询，绝不猜测。
-  `phase_key()` 输出稳定机器键（`reading`…），因此 `cad-ui-slint` 不依赖导入器 crate。
+  `phase_key()` 输出稳定机器键（`reading`…），因此旧 UI crate（已删除）不依赖导入器 crate。
 - `ImportProgressSnapshot::from_poll(&AsyncOpenPoll, previous)` 是 manager→UI 的
   唯一映射；`Running` 无新 tick 时保留上一次真实阶段/计数，终态被保留。
 - `begin_async_open` 写入「无 tick 的运行态」（`phase=None`）；`cancel_async_open`
@@ -156,7 +156,7 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
   `window.yacrAsyncOpen` 暴露真实状态。
 - **Android**：`apps/app-android` 的 `open_drawing` 走
   `resolve_open_leave` → `begin_async_open`，`apps/app-android/src/poll.rs` 用
-  `slint::Timer` 轮询 `poll_async_open` 并经 `push_import_state`（共享漏斗，见
+  定时器轮询 `poll_async_open` 并经 `push_import_state`（共享漏斗，见
   `state_push::push_panel_state`）调用 `UiHandle::set_import_state`；取消走
   `CancelLoading` 命令路径。发布由核心 stamp 守卫完成，宿主只镜像，不重复导入；无
   worker 的编译目标保留同步回退。**未在设备复测**。
@@ -175,7 +175,7 @@ Slint 回调翻译成 `Command`；它不重实现测量/历史算法。
 
 ## 3. 宿主连接器（本轮范围外）
 
-`cad-ui-slint` 只负责把状态推入外壳、把回调翻成命令；「应用状态 → 外壳」的
+旧 UI crate（已删除）只负责把状态推入外壳、把回调翻成命令；「应用状态 → 外壳」的
 最后一段由宿主调用。**本轮两个宿主都已接线**（见 §3.1/§3.2 与 §2.5）；下列连接器
 均已由 `apps/app-web` 与 `apps/app-android` 调用：
 
@@ -250,7 +250,7 @@ overlay（映射逻辑在 `crates/cad-host/src/state.rs`）。
   `CadView::set_annotation_preview(snapshot.annotation_preview)`：来自
   `HostController::measurement_preview()` / `annotation_preview()`；无工具时传
   `None`，取消预览叠加层（命令确认/取消后同样回到 `None`）。
-- 这些字段与面板一起放在纯 `PanelSnapshot` 中，因此宿主接线逻辑可在不打开 Slint
+- 这些字段与面板一起放在纯 `PanelSnapshot` 中，因此宿主接线逻辑可在不打开早期桌面 UI（已移除）
   窗口的情况下单测（`android_snapshot_*` 系列）。
 
 **布局（图纸空间）切换走默认命令路径，未安装 `LayoutSwitchSink`**：适配器
@@ -267,7 +267,7 @@ Android **刻意不安装** `LayoutSwitchSink`：一旦安装，适配器会改�
 
 **异步打开进度（F01，本 workstream 新增）**：`apps/app-android/src/host.rs`
 的 `open_drawing` 先 `resolve_open_leave`（未保存决策/宿主写），再
-`begin_async_open`；`apps/app-android/src/poll.rs` 用 `slint::Timer`（100 ms，UI 线程）
+`begin_async_open`；`apps/app-android/src/poll.rs` 用定时器（100 ms，UI 线程）
 轮询 `poll_async_open`，每次经共享漏斗 `push_import_state`
 （由 `push_panel_state` 与轮询共同调用）→ `UiHandle::set_import_state` 推送进度面板；
 发布由核心 `TaskStamp` 守卫完成，宿主只镜像一次（`apply_opened`），不重复导入。取消走
@@ -310,7 +310,7 @@ token，不丢文档/批注。无 `std::thread` 的目标保留同步回退（`w
 
 ## 5. 无障碍边界与键盘可达（U12 / U08）
 
-DOM 宿主对 Slint 画布**不宣称等价原生语义**。画布是一个不透明的
+DOM 宿主对早期桌面 UI（已移除）画布**不宣称等价原生语义**。画布是一个不透明的
 `<canvas>`，没有可按实体建模的 ARIA 结构；本轮只提供**明确的替代入口**，不实现
 完整 ARIA canvas 模型（无逐实体 role、无网格导航）。
 
@@ -327,12 +327,12 @@ DOM 宿主对 Slint 画布**不宣称等价原生语义**。画布是一个不�
 - **避免重复播报**：`#host-state` 改为 `aria-live="off"`，只保留 `role="status"`
   语义；真正的播报只发生在 `#a11y-status`。失败时 live region 使用
   `a11y.status_failed`（不含 `adapter=…`/`error=Some(…)` 技术转储）。
-- **U08 宿主状态条不再常驻压住 Slint 状态**：`#host-state` 是加载/失败专用行；
+- **U08 宿主状态条不再常驻压住早期桌面 UI（已移除）状态**：`#host-state` 是加载/失败专用行；
   轮询判定就绪时给 `<body>` 加 `renderer-ready`，CSS 规则
   `body.renderer-ready:not(:has(#retry-renderer:not([hidden]))) #host-state` 将其
   隐藏。失败时重试按钮显示，`:has` 守卫重新显示该行，错误不会被静默吞掉。
 - **诚实边界（未做）**：未做真实屏幕阅读器测试（VoiceOver/NVDA），未做逐实体
-  可访问导航、对比度实测或缩放实测；选择/工具的完整语义仍在 Slint 侧，DOM 只镜像
+  可访问导航、对比度实测或缩放实测；选择/工具的完整语义仍在早期桌面 UI（已移除）侧，DOM 只镜像
   **状态**（加载/就绪/失败与宿主人文状态），不镜像实体级选择或工具步骤。上述均为
   源码/契约证据，不构成无障碍验收。
 
@@ -351,7 +351,7 @@ DOM 宿主对 Slint 画布**不宣称等价原生语义**。画布是一个不�
   `save_measurement_as_annotation_is_work_only`、
   `set_mode_cancels_an_unconfirmed_tool_and_gates_work_commands`、
   `set_mode_requires_a_mode_payload`，以及 `tests/contracts.rs` 的 Work-only /
-  允许列表更新。`cad-ui-slint` 新增
+  允许列表更新。旧 UI crate（已删除）新增
   `measurement_save_affordance_requires_a_confirmed_record`、
   `mode_ui_state_reflects_the_authoritative_mode`、
   `shell_exposes_the_save_and_mode_switch_affordances`、
@@ -362,17 +362,17 @@ DOM 宿主对 Slint 画布**不宣称等价原生语义**。画布是一个不�
   `controller_snapshot_tracks_a_real_async_open_to_its_terminal`、
   `cancelling_via_the_command_path_flips_cancellable_and_reports_cancelled`、
   `failed_open_retains_an_explicit_terminal_snapshot`（覆盖不确定 vs 确定、
-  终态、CancelLoading→cancel）。`cad-ui-slint` 新增
+  终态、CancelLoading→cancel）。旧 UI crate（已删除）新增
   `shell_exposes_the_async_open_progress_panel_and_cancel`、
   `import_ui_state_is_hidden_when_idle_or_opened`、
   `import_ui_state_never_fabricates_a_percent_or_a_byte_count`、
   `import_ui_state_reports_cancelled_and_failed_terminals_explicitly`、
   `import_phase_keys_all_resolve_in_both_catalogs`。
-- `cad-ui-slint` 中 `MeasurementUiState` 与外壳定义字符串的测试位于该 crate 的
-  `#[cfg(test)]`，但**本机无法构建 `cad-ui-slint` 测试**（宿主缺 fontconfig），
+- 旧 UI crate（已删除）中 `MeasurementUiState` 与外壳定义字符串的测试位于该 crate 的
+  `#[cfg(test)]`，但**本机无法构建旧 UI crate（已删除）测试**（宿主缺 fontconfig），
   因此这些测试本轮未执行；`cargo check --workspace --lib --target
-  wasm32-unknown-unknown` 是 `cad-ui-slint` 的编译门，且已通过。
-- Slint 渲染、窗口事件循环、真实指针映射、GPU 合成**本轮均未运行**；上述仅为
+  wasm32-unknown-unknown` 是旧 UI crate（已删除）的编译门，且已通过。
+- 早期桌面 UI（已移除）渲染、窗口事件循环、真实指针映射、GPU 合成**本轮均未运行**；上述仅为
   源码接线与编译证据，不构成视觉/真机验收。
 - DOM 无障碍契约（U12/U08）由 `node --test scripts/test-web-a11y.mjs` 覆盖：
   断言 `#a11y-status` 存在且 `aria-live="polite"`、`#host-state` 非 polite、画布

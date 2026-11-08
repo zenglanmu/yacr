@@ -2533,7 +2533,7 @@ DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`�
   `linux-release`（Flatpak）、`windows-release`（MSVC zip）、`macos-release`（universal
   `Yacr.app` tarball）、`android-apk`（debug APK）、`android-release`（**unsigned** release APK）。
   它们只上传 workflow artifact，**不签名、不公证、不发布、不接触商店凭据**。
-- 打包脚本按**当前 React/Tauri 宿主**重写，不复用 Slint 时代行为：
+- 打包脚本按**当前 React/Tauri 宿主**重写，不复用旧桌面 UI 时代行为：
   - `scripts/package-windows-release.sh`：先 `npm ci && npm run build`（`tauri::generate_context!`
     内嵌 `apps/desktop-ui/dist`），再 `cargo build -p app-windows --features tauri/custom-protocol`
     （MSVC 静态 CRT），产物 `bin/yacr-windows.exe` + CLI + fonts + 未签名 zip/sha256；PE 机器类型、
@@ -3627,7 +3627,7 @@ framebuffer 读回全 `(0,0,0,0)`，即 present blit 在该 WebView GL 路径上
 
 **文档同步债务（本轮未改，读时注意）**：`docs/validation-android.md`、`docs/ui.md`、
 `docs/code-structure.md`、`docs/shortcuts.md`、`docs/validation-web.md`、`docs/code-audit-and-agent-handoff.md`
-里关于 Android 的段落描述的是**已删除的 cargo-apk/Slint/SAF 宿主**，属历史记录。当前契约以
+里关于 Android 的段落描述的是**已删除的 cargo-apk/旧桌面 UI/SAF 宿主**，属历史记录。当前契约以
 `docs/android-host.md` 为准。
 
 ## 2026-10-28 第 16 轮：`ZOOM WINDOW` / `ZOOM PREVIOUS`（都是 `ZOOM` 的参数写法）
@@ -4199,9 +4199,9 @@ v1 的形状是**一条开放、全直线段、`+Z` 平面的 LWPOLYLINE**，每
   canonical 列只放准入名，别名列只放真实别名行，`<…>` 参数形式移进注解；行为注解全部保留在真名上。
 - 新增 **§2a「不是命令行选择子（键位 / 面板 / IPC）」**：标准视图 IPC、清除选择（Esc/SELECTALL）、
   chrome 本地 `LAYER`/`PROPERTIES`/`OPTIONS`、测量多词写法、键位≠别名。
-- §3 重写：把 `ui/app.slint`（已删除）换成 `apps/desktop-ui/src/App.tsx` 的 `onKeyDown` +
+- §3 重写：把 `ui/legacy-ui.ui`（已删除）换成 `apps/desktop-ui/src/App.tsx` 的 `onKeyDown` +
   `commands.ts::toolCommandForKey` + `cad.ts::DRAFTING_ACCELERATORS` + `defaults.ts`；**区分「现行 React
-  宿主真的接线了的键」与「Slint 时期历史契约」**——`Ctrl+O/N/S/Shift+S/P`、`Ctrl+A/C/X/V/Z/Y`、
+  宿主真的接线了的键」与「旧桌面 UI 时期历史契约」**——`Ctrl+O/N/S/Shift+S/P`、`Ctrl+A/C/X/V/Z/Y`、
   `Ctrl+Home` 在 React 源码里**没有**全局处理（剪贴板/撤销/缩放走 ribbon、右键菜单、选择子）；
   `Esc` **不清除选择**。
 - §4：`F9` 从「未接线」移除（它已接到 `SNAP`）；并更正**报告机制**——`shortcut.unsupported` 只剩在
@@ -4213,7 +4213,7 @@ v1 的形状是**一条开放、全直线段、`+Z` 平面的 LWPOLYLINE**，每
   不回退）；**`command.unknown` 没有任何消费方**（未知名字在 chrome 侧就是 `command.unsupported`）；
   **补全候选不是全部选择子**（`COMMAND_CATALOG` + 宿主别名表，上限 8，排序含历史频次）；`Tab` **没有**
   “无高亮则第一项”的回退；`Space` **没有**填充行为；**别名没有 `keyboardShortcuts` 门控**
-  （该键只剩在 `cad-app` 的测试夹具里）；`command-bar.slint` 指针换成 `CommandLine.tsx`。
+  （该键只剩在 `cad-app` 的测试夹具里）；`legacy-command-bar.ui` 指针换成 `CommandLine.tsx`。
   另：chrome 本地词除 `LAYER`/`PROPERTIES` 还有 `OPTIONS`（`App.tsx::submitCommand` 本地拦截）。
 
 **守门人（已落地）**
@@ -7444,7 +7444,7 @@ NewEntityInsert { layer, space, display, type_key, label })`。此前 `commit_ne
   `status.toggle.grid`、`layers.close`、`layers.read_failed`、12 条 `menu.*`。目录 725 → 749 键，
   两语言键集/占位符一致（`check-i18n.py` OK）。
 - **文档**：`docs/react-linux-app.md`（支持范围重写）、`docs/panels.md`（顶部标注 React 现状，
-  Slint 段落转为历史）、`docs/compatibility.md`（补齐说明）、`docs/shortcuts.md`（GRID/ORTHO/F7/F8 +
+ 旧桌面 UI 段落转为历史）、`docs/compatibility.md`（补齐说明）、`docs/shortcuts.md`（GRID/ORTHO/F7/F8 +
   别名表）。**无渲染器改动**。
 
 ### 已运行证据（本机，2026-10-25）
@@ -9007,7 +9007,7 @@ bulge 环仍**歧义**（好在此刻显示/拾取/捕捉/填充**彼此一致**
   改为**最多 8 点均匀探测 + 确定性回退**（残余仅"探测均分时回退首顶点"），但 **`fill.rs` 的 `ring_depths`
   仍只探 `ring[0]`** 且驱动**奇偶配平** ⇒ **导入路径相切环仍可能被填错**（**待办**；创建路径拒绝相切）；
   **无图形级图案保真判据**。
-- **文档更正（本轮一并）**：`docs/shortcuts.md` 的"未实现命令"整条此前引用**已删除的 `cad-ui-slint`**，
+- **文档更正（本轮一并）**：`docs/shortcuts.md` 的"未实现命令"整条此前引用**已删除的 `cad-ui-legacy`**，
   且 `DIM` 族多已实现 ⇒ **据实重写**；`docs/compatibility.md` 的 HATCH 行拆**读取/显示**与**创建（NOT IMPLEMENTED）**、
   渐变行补 `460` 未查证与不可写损失、`EXPLODE` 行补 `Hatch`；`docs/dxf-entity-coverage.md` 补 P6a 条目。
 - **门禁（编排者复跑）**：受影响 crate **1927 通过 / 0 失败**；workspace check(all-targets)、clippy(`-D warnings`)、
@@ -9037,15 +9037,16 @@ bulge 环仍**歧义**（好在此刻显示/拾取/捕捉/填充**彼此一致**
 
 > **当前状态横幅（2026-10-16）**
 >
-> 本文是**逐轮历史日志**（最新在顶部）。桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
-> （`apps/app-linux`，二进制 `yacr`），`cad-ui-slint` 与 Slint 依赖已删除；Windows/macOS/Android/Web
+> 本文中已退役的旧桌面 UI crate 与界面文件以 `cad-ui-legacy`、`legacy-ui.ui` 等代称记录，原名称不再出现。
+> 本文是**逐轮历史日志**（最新在顶部）。桌面 UI 已迁移为 **React + Tauri 原生宿主**
+> （`apps/app-linux`，二进制 `yacr`），`cad-ui-legacy` 与旧桌面 UI 依赖已删除；Windows/macOS/Android/Web
 > 当前是**显式 NOT IMPLEMENTED 占位**。要了解**当前**架构与构建，先读：
-> `docs/architecture.md`、`docs/adr/0010-react-linux-host-replaces-slint.md`、
+> `docs/architecture.md`、`docs/adr/0010-react-linux-host.md`、
 > `docs/adr/0011-native-wayland-subsurface.md`、`docs/adr/0012-scene-spatial-index-and-interaction.md`、
 > `docs/react-linux-app.md`、
-> `docs/build.md`、`docs/ci.md`、`AGENTS.md`。下列各轮小节中的 Slint/`app-linux`(旧)/`yacr-linux`/
+> `docs/build.md`、`docs/ci.md`、`AGENTS.md`。下列各轮小节中的旧桌面 UI/`app-linux`(旧)/`yacr-linux`/
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
-> `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
+> `docs/validation*.md`，不得把旧桌面 UI 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
 ## acadrust 0.6.3 → 0.6.5 升级与标注结论复核（2026-10-20）
 
@@ -10442,7 +10443,7 @@ Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.s
 - **构建/安装（实测）**：`scripts/package-linux-release.sh` → exit 0；产出
   `target/release/dist/yacr-0.1.2-linux-x86_64.flatpak`，**6,724,496 B**，sha256
   `cd453e230aac16f64583c25f34552c561ce0761f7338a9c4d31fbde484661e90`；`flatpak install --user`
-  用同 app-id/branch 覆盖旧 0.1.1 Slint 包；`flatpak info dev.yacr.app` 显示 0.1.2 / AGPL-3.0 /
+  用同 app-id/branch 覆盖旧 0.1.1 包；`flatpak info dev.yacr.app` 显示 0.1.2 / AGPL-3.0 /
   runtime `org.gnome.Platform//51`；`xdg-mime query default image/vnd.dwg` → `dev.yacr.app.desktop`。
 - **沙箱运行（同 UID，无 root/sudo，无屏录，Wayland 会话；实测）**：
   `debug-default-fonts.dwg` → `tauri://localhost` Finished、Vulkan `Quadro P620`、
@@ -10455,7 +10456,7 @@ Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.s
 - **B 的未测**：沙箱内 X11（`--socket=fallback-x11`）；本机之外的宿主；沙箱内 portal 文件选择器；
   沙箱窗口的视觉/截图像素判定；Wayland 子表面的视觉判读；其它 GPU/vendor；非 x86_64 Flatpak。
 - **历史说明**：`packaging/flatpak/**` 曾在 `7d83572` 被删除，2026-10-17 是**重新引入**；旧删除是历史，
-  不是本轮回滚的“事故”。旧 Slint 流水线事实见 `docs/linux-app.md` 历史小节。
+  不是本轮回滚的“事故”。旧桌面 UI 流水线事实见 `docs/linux-app.md` 历史小节。
 - 详情与逐条结果：`docs/flatpak.md`、`docs/validation-flatpak-linux-2026-10-17.md`；
   `docs/compatibility.md` 的 limits 行与 `docs/render-optimization-backlog.md` 的 P0/N3 已同步。
 
@@ -10759,22 +10760,22 @@ Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.s
 - **边界不变**：`cad-host`/`cad-ui-core` 工具包与 GPU 无关；renderer-only wgpu、importer-only
   acadrust 不变；C shim 与 GDK Wayland 访问只存在于 `app-linux`。非 Linux 占位与退役脚本未变。
 
-## Slint → React/Tauri 桌面迁移（2026-10-16，源码级；ADR-0010）
+## 旧桌面 UI → React/Tauri 桌面迁移（2026-10-16，源码级；ADR-0010）
 
-- **决策**：桌面 UI 正式由 Slint 迁移为 **React（Vite）chrome in Tauri 2 WebView + 原生 GTK/wgpu
-  CAD 分区**；见 `docs/adr/0010-react-linux-host-replaces-slint.md`（取代 ADR 0006 的实验定位，
-  使 ADR 0002/0003 的 Slint 桌面基线作废）。本文件以下历史小节**不改写**。
+- **决策**：桌面 UI 正式迁移为 **React（Vite）chrome in Tauri 2 WebView + 原生 GTK/wgpu
+  CAD 分区**；见 `docs/adr/0010-react-linux-host.md`（取代 ADR 0006 的实验定位，
+  使 ADR 0002/0003 的旧桌面 UI 基线作废）。本文件以下历史小节**不改写**。
 - **宿主**：`apps/app-linux`（Linux 优先真实 GUI，bin `yacr`，Tauri id `dev.yacr.app`）；非 Linux
   目标编译为空库、二进制返回显式 NOT IMPLEMENTED。配置目录 `~/.config/yacr/`（由 `yacr-react`
   迁移，**不自动迁移**）。
 - **共享层**：新增 `cad-ui-core`（protocol/layout/session/shell/i18n），位于 UI 无关的
   `cad-app`/`cad-host`/`cad-engine`/`cad-platform` 契约之上；宿主显式 `state.shell.*` + 直接 `use
   cad_ui_core::…`，无过渡 re-export。
-- **退役**：删除 `cad-ui-slint`（含重复 i18n 副本）+ workspace 的 `slint`/`slint-build`；
-  `Cargo.lock` 按可达性剪枝 845 → 622 包；旧 Slint 验证/离屏/真实 GPU 测试与 web shell/Flatpak 退役；
+- **退役**：删除 `cad-ui-legacy`（含重复 i18n 副本）+ workspace 的 `legacy-ui`/`legacy-ui-build`；
+  `Cargo.lock` 按可达性剪枝 845 → 622 包；旧桌面 UI 验证/离屏/真实 GPU 测试与 web shell/Flatpak 退役；
   6 个公共构建/打包/部署脚本改为非零 NOT IMPLEMENTED；8 个 CI job `if: false` 硬禁用；**Linux release
   暂时不可用，等待替代打包验收**。
-- **守卫**：`check-architecture.py` 全 workspace 禁 `slint`/`slint-build`/`iced`（含 build/dev/target
+- **守卫**：`check-architecture.py` 全 workspace 禁 `legacy-ui`/`legacy-ui-build`/`iced`（含 build/dev/target
   表与 workspace 继承别名）；`check-i18n.py` 权威目录改为 `cad-ui-core/i18n` 并新增 React CJK 扫描；
   新契约 `scripts/test-ui-migration-guards.py`（18 项负向/正向控制，已接入 CI 契约步骤）。
 - **支持范围（诚实）**：仅 **OPEN / FIT** 接线；其余控件显式禁用并标注原因；**不新增投机 IPC**；
@@ -10785,13 +10786,12 @@ Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.s
   19 ignored）/桩 lib 测试，以及真实硬件 GPU（Quadro P620/Vulkan，真实 GTK XWayland）的 open+渲染 smoke、
   原生分区生命周期（forced unrealize→新 XID+generation 2、自然 exit 0）、外部 WM minimize→restore 与真实
   resize；完整命令/退出码/日志/限制见 `docs/validation-react-linux-migration-2026-10-16.md`（及
-  `.slim/deepwork/replace-slint-ui/p6-*.md`）。解析器一度被手工锁阻断，已按**批准的最小离线同步**修复
+  `迁移报告目录/p6-*.md`）。解析器一度被手工锁阻断，已按**批准的最小离线同步**修复
   （仅 `Cargo.lock` 622→595，纯删 27 孤儿，无版本变动）。**Gate P6 attempt2：ACCEPT-WITH-FIXES（文档限定
   已应用）**；observer 终判所观察截图**无重大视觉缺陷**；**有界本地 Linux 迁移验收通过**，**不是**完整 CAD
   产品/跨平台/vendor/golden/性能验收。应用侧 `unminimize()`+强制 unrealize 序列**未解决**。
   **早期阶段在其当时分支/代码树上另有有界执行**：P1 lib 契约（59+27→86）与 check/fmt；P2a host/wasm/
-  aarch64 编译检查；P4 前端构建 + 43/43 测试。**P2b/P3b/P5 为纯源码实施/评审**。旧 `#[ignore]` Slint
-  真实 GPU 套件与其 runner 已退役，其结论不得复用。
+  aarch64 编译检查；P4 前端构建 + 43/43 测试。**P2b/P3b/P5 为纯源码实施/评审**。旧 `#[ignore]` 真实 GPU 套件与其 runner 已退役，其结论不得复用。
 
 ## 线/弧抗锯齿统一轮（2026-10-15，`309e1a2` / ADR-0009）
 
@@ -10938,7 +10938,7 @@ Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.s
 - Oracle P3、P4 App/engine/Host/Web codegate 均 accept。最终 sweep `sh_137d0698a001J14BRMEOwCRSk6` exit 0：workspace all-targets/tests，App343/engine73/Host83/Android30/Web23/UI132+37 integration/Linux12 passed + 9 ignored，workspace WASM lib、Android aarch64 UI/app local-Skia、Clippy（既有 exclusions）、7 packages fmt、architecture/fixture/workflow/i18n306 与 diff check。
 - 后续 Host 专项新增 3 tests 到 86、Host clippy 通过；Linux 新 ignored test 的 Arc 解构机械修复后 clippy/fmt 通过。最终差异门禁 `sh_137df9c5b00120goh09biLHuUM` exit 0：workspace all-targets check、Linux lib 12 passed/10 ignored、7 packages fmt、architecture/fixture/workflow/i18n306、diff check。该末次 shell 复验了生产源码不变情况下的当前差异；不要把整个 dirty workspace 归属本轮。
 - P3 六用例+async cursor 与 P4 新 API 窗口用例的最终硬件报告为 `.slim/deepwork/cad-engine-decoupling/p4-real-gpu.md`，artifacts `/tmp/opencode/yacr-p4-final-20261014-004223/`（实际 report 时间标记 20261014-004223）：六用例脚本 6/6、async cursor 1/1、新 API/events 用例 1/1，共 8 terminal PASS；Wayland/winit + P620 Vulkan，CPU load stage 无 GPU context。新用例覆盖 controlled Commit、selection/highlight、sequence/origin/request ID/transaction/共享 `Arc<ChangeSet>`、Undo/Redo、idle；不覆盖 vendor/golden/browser/Android。
-- P4 App `cad-app` 原子 Commit/selection validation/traced command/shared `Arc<ChangeSet>` Oracle accept，343 tests/clippy；engine protocol/queue/events Oracle accept，focused 70 tests + clippy，最终 sweep engine73。UI shell `sh_137adcff0001KP0ImwLEq3shNv` UI132 lib +37 integration/clippy；Host post-commit render failure/Undo、external failure real completion ID、reentry Busy 的新增 3 tests 后 Host86/clippy。Host/Web codegate accepted；Android wrapper included in final sweep/tests. 无自动订阅或插件 UI，`.slint`/catalog 未改。P4 不宣称 plugin loader、React、双 surface、跨平台产品完整交付。
+- P4 App `cad-app` 原子 Commit/selection validation/traced command/shared `Arc<ChangeSet>` Oracle accept，343 tests/clippy；engine protocol/queue/events Oracle accept，focused 70 tests + clippy，最终 sweep engine73。UI shell `sh_137adcff0001KP0ImwLEq3shNv` UI132 lib +37 integration/clippy；Host post-commit render failure/Undo、external failure real completion ID、reentry Busy 的新增 3 tests 后 Host86/clippy。Host/Web codegate accepted；Android wrapper included in final sweep/tests. 无自动订阅或插件 UI，`.ui`/catalog 未改。P4 不宣称 plugin loader、React、双 surface、跨平台产品完整交付。
 - P4 最终差异门禁已 exit 0；实际范围见 shell 上述记录。仍未验收 browser RAF/Reflect/GC/WebGPU、Android device、vendor DWG、视觉 golden；queue pressure/lag/reserve/coalesce/32 subscribers 是合成合同，browser ring 不跨页面持久化。P2 paper-only/grid 初轮失败和 P4 reject 修复历史均保留。全仓陌生 `debug_fixture.rs`/`debug-block.dwg` 未碰；本任务仅文档，未 commit。
 
 ## cad-engine P2 真实 GPU 分轮证据 / P3 接续（2026-10-14，已更新）
@@ -10955,7 +10955,7 @@ Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.s
 
 ## cad-engine P2-B 当前状态与复核入口（2026-10-13）
 
-- Host/Slint/apps 的 P2 source remediations 已齐，核心已去 UI 依赖，维持单 session、单 dispatch、config authority。
+- Host/旧桌面 UI/apps 的 P2 source remediations 已齐，核心已去 UI 依赖，维持单 session、单 dispatch、config authority。
   Oracle attempt 4 接受 P2 架构/源码 codegate；最终串行 compile/check/test sweep 也全部 exit 0。attempt 1/2 findings
   已闭环；attempt 3 的正交 3D primary-drag mode 与 UI summary 对象计数已修复。此结论不包含场景运行或 E2E。
 - 此处为 2026-10-13 历史快照：当时 P3 queue writer 尚未编译/集成；后续状态见本文顶部 2026-10-14 更新。源码 lane 未改依赖/catalog/fixture/
@@ -10998,15 +10998,15 @@ Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.s
 - 全仓 fmt 仍被基线未跟踪文件 `crates/cad-import-acadrust/examples/debug_fixture.rs` 格式问题阻塞，
   不要修改该文件。真实 GPU 验收和 Android native check 未运行；虽有显示硬件，本轮没有 render 验收。
 - 续做入口：P2-B 移除 HostCore→UI 依赖，实现 EngineClient + 语义 updates/config 单 authority；接入
-  Slint EngineAdapter 与已有 session bridge 安装入口；apps 持有 UI handle/adapter 并迁移 HostResources。
-  旧 Slint draw 路径仍持有 `DrawTool`、尚未切换，禁止让旧路径与新 app 状态双驱动。随后再做 P3 有界队列
+ 旧桌面 UI EngineAdapter 与已有 session bridge 安装入口；apps 持有 UI handle/adapter 并迁移 HostResources。
+ 旧桌面 UI draw 路径仍持有 `DrawTool`、尚未切换，禁止让旧路径与新 app 状态双驱动。随后再做 P3 有界队列
   与 event-driven 唤醒。不得据此宣称整个架构已完成。
 
 ## cad-engine 解耦 P1 检查点（2026-10-13，P1 审查通过；整体实施中）
 
 - `cad-engine` 当前 manifest 直接依赖 `cad-app`、`cad-db`、`cad-domain`、`cad-render-wgpu`、
   `cad-representation`；均为应用/数据/领域/renderer/显示表示核心契约，不是 UI 依赖。runtime/render
-  提交仍封装在 renderer；Slint 仍是单 surface 协调者与 presenter，P1 host 暂保留 UI 过渡依赖。
+  提交仍封装在 renderer；旧桌面 UI 仍是单 surface 协调者与 presenter，P1 host 暂保留 UI 过渡依赖。
 - Oracle gate 1 attempt 3 接受，先前会话一致性阻塞已闭环。P1 focused engine + UI all-targets、engine
   29 项 synthetic tests、app interaction 4 项 synthetic tests、post-fix workspace all-targets、WASM lib
   check 与 4 项静态门禁已通过；均非 GPU/真机运行验收。整体仍实施中：P2 host/tool 与 P3 queue 尚未实现。
@@ -11083,7 +11083,7 @@ Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.s
 
 ## Offscreen Android UI suite 已在真实 hardware Vulkan 上通过（2026-10-12）
 
-- 修正 `cad-ui-slint::offscreen` 的测试 adapter 策略：先 high-performance，再在非硬件 adapter 时探测 low-power，
+- 修正 `cad-ui-legacy::offscreen` 的测试 adapter 策略：先 high-performance，再在非硬件 adapter 时探测 low-power，
   仅 hardware 类均不可用时才接受并明确标记 CPU software fallback；仍要求 Vulkan 并创建 FemtoVG wgpu renderer。
   未改业务生产逻辑，未强制 ICD。主机 `nvidia-smi` 可见 Quadro P620，测试内真实 adapter 日志为
   `name=Quadro P620, device_type=discrete_gpu, backend=vulkan`。
@@ -11135,7 +11135,7 @@ Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.s
 - 解锁后的步骤：在 app 用 SAF 只打开此 fixture，切到 Model/模型空间，先确认图形可见；单指拖动画布并点 zoom
   in/out controls。双指 pinch in/out 请用户在真机屏幕上实际操作；若接有实体鼠标/触控板，再在画布上滚动 wheel。
   不打开用户文件，不用 `adb input swipe` 冒充 pinch/wheel；反馈每个动作是否到达、方向/画面变化及主观响应。
-- `gfxinfo` 的 0 frame/Skia-HWUI 数据不覆盖 Slint wgpu canvas；性能流畅性未量化。用户卡顿目前只是减少重复 work，
+- `gfxinfo` 的 0 frame/Skia-HWUI 数据不覆盖旧桌面 UI wgpu canvas；性能流畅性未量化。用户卡顿目前只是减少重复 work，
   不能报告已解决。没有有效图像帧时也不下字体运行时加载/可视性的结论。
 - 当前证据：`/tmp/opencode/yacr-android-final-20261012-081219/`。无提交。
 
@@ -11260,7 +11260,7 @@ Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.s
   指定，`has_code=true`），子类同样能收 `onActivityResult`，且无需触碰编译后的 manifest。
   JNI 侧与设计一致（见下）。
 - Rust JNI：`apps/app-android/src/saf.rs`（Android-only）。经 `JavaVM` + **activity 指针**
-  （`app.vm_as_ptr()`/`app.activity_as_ptr()`，在 `android_main` 里于 `slint::android::init`
+  （`app.vm_as_ptr()`/`app.activity_as_ptr()`，在 `android_main` 里于 `legacy_ui::android::init`
   之前捕获；注意 `ndk_context::android_context().context()` 是 **Application** 而非 Activity，
   无法 `startActivityForResult`）驱动 Java 静态方法；类经 **activity 的 ClassLoader** 解析
   （`FindClass` 在无 Java 帧的原生线程上取不到应用类），缓存为 `GlobalRef`。字节读写走
@@ -11293,8 +11293,8 @@ Flatpak 打包重启（`packaging/flatpak/**` + `scripts/package-linux-release.s
   （306 键）；`check-fixture-manifest.py`；`check-workflows.py`。
 - `cargo check --workspace --exclude app-android --all-targets --locked`；
   `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`；
-  `cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --all-targets --locked`；
-  `cargo check --target x86_64-linux-android -p cad-ui-slint -p app-android --all-targets --locked`。
+  `cargo check --target aarch64-linux-android -p cad-ui-legacy -p app-android --all-targets --locked`；
+  `cargo check --target x86_64-linux-android -p cad-ui-legacy -p app-android --all-targets --locked`。
 - `cargo test -p app-android -p cad-host --locked`：app-android **18 通过**、cad-host **14 通过**，0 失败。
 - 构建：`TARGET=x86_64-linux-android bash scripts/build-android.sh --release` 产出含
   `classes.dex` 的 APK（`hasCode=true`，`launchable-activity=dev.yacr.app.YacrNativeActivity`）。
@@ -11448,12 +11448,12 @@ i18n-law 债务（Android 硬编码中文状态文案迁入 i18n 键，两份 ca
 - 删除的重复编排：`src/host.rs`（`HostSink`）、`src/state_push.rs` 的 `push_panel_state`/`snapshot`/
   `view_state`/`import_diagnostics`/`AndroidCanvasPickMapper`/`apply_surface_size`（并入/复用
   `cad-host`）；`view.rs`/`draw.rs` 缩减为薄适配（保留 `InputPolicy` 状态机与 Trim/Extend 解析）。
-  保留 `android_fonts.rs`（asset 加载）、`poll.rs`（Slint 定时器 + 表面入口）、`set_surface_*`。
+  保留 `android_fonts.rs`（asset 加载）、`poll.rs`（旧桌面 UI 定时器 + 表面入口）、`set_surface_*`。
 - i18n：Android 自身状态文案迁入 11 个新键（两份 catalog 键集一致）：`android.ready`/
   `android.no_sample`/`android.read_failed`/`android.save_unavailable`/`android.no_config_store`/
   `android.pick_viewport_missing`/`android.pick_no_document`/`android.pick_failed`/`android.selected`/
   `android.pick_miss`/`android.fonts.summary`；`fonts.failed` 等复用既有键。
-- 行为保持点：`android_main`/`slint::android::init`/`ensure_polling` Slint 定时器/公开
+- 行为保持点：`android_main`/`legacy_ui::android::init`/`ensure_polling`旧桌面 UI 定时器/公开
   `set_surface_size`/`set_surface_insets` 不变；真实后台导入 worker（`import_worker=true`）与 100ms
   轮询不变；能力位不变；打开仍探测 `/sdcard/Download/yacr-sample.dwg` 等。**命令与打开状态文案改由
   共享目录给出**（`linux.opened`/`linux.failed`/`linux.picker_waiting`/`command.completed`/
@@ -11467,8 +11467,8 @@ i18n-law 债务（Android 硬编码中文状态文案迁入 i18n 键，两份 ca
   `check-fixture-manifest.py`（22 fixture）；`check-workflows.py`。
 - `cargo check --workspace --exclude app-android --all-targets --locked`；
   `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`；
-  `cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --all-targets --locked`；
-  `cargo check --target x86_64-linux-android -p cad-ui-slint -p app-android --all-targets --locked`。
+  `cargo check --target aarch64-linux-android -p cad-ui-legacy -p app-android --all-targets --locked`；
+  `cargo check --target x86_64-linux-android -p cad-ui-legacy -p app-android --all-targets --locked`。
 - `cargo test -p app-android --locked`：**17 通过 / 0 失败**（宿主目标；2 个
   `cfg(target_os="android")` 异步打开用例仅为 Android 目标编译、本机不运行）。
   `cargo test -p cad-host --locked`：**10 通过**；`cargo test -p app-linux --locked`（lavapipe）：
@@ -11590,7 +11590,7 @@ i18n-law 债务（Android 硬编码中文状态文案迁入 i18n 键，两份 ca
 阶段（本轮不动 `app-web`/`app-android` 行为）。
 
 - 新增 `crates/cad-host`（依赖 cad-domain/cad-db/cad-app/cad-platform/cad-representation/
-  cad-diagnostics/cad-resources/cad-ui-slint，**不依赖 `slint`**）。`HostCore`（`Clone` 句柄）
+  cad-diagnostics/cad-resources/cad-ui-legacy，**不依赖 `legacy-ui`**）。`HostCore`（`Clone` 句柄）
   实现 `UiCommandSink`/`LayoutSwitchSink`/`ViewInput`/`CanvasPickMapper`/`DrawCommandSink`/
   `DrawPreviewSink`；文件布局：`lib.rs`/`open.rs`/`save.rs`/`state.rs`/`input.rs`/`fonts.rs`/
   `policy.rs`。
@@ -11678,25 +11678,25 @@ i18n-law 债务（Android 硬编码中文状态文案迁入 i18n 键，两份 ca
 - 更新 `README.md` 文档索引，加入 `docs/shortcuts.md`。
 - 扩展 `apps/app-linux/tests/verify_ui.rs` 离屏场景：向命令行输入前缀 `CI` → 断言补全候选包含
   `CIRCLE` → `Enter`（`command-submitted`）解析并启动真实 CIRCLE 捕获 → `Esc` 结束 → 关闭补全后
-  候选清空。纯 Slint 状态，不依赖 GPU 读取，稳健于 lavapipe 环境。
-- **产品行为变更**：`crates/cad-ui-slint/ui/app.slint` 的 CAPTURE 键处理器新增显式
+  候选清空。纯旧桌面 UI 状态，不依赖 GPU 读取，稳健于 lavapipe 环境。
+- **产品行为变更**：`crates/cad-ui-legacy/ui/legacy-ui.ui` 的 CAPTURE 键处理器新增显式
   `shortcut.unsupported` 分支，覆盖未实现的面板/绘图/对象类 Ctrl 组合键（`Ctrl+2/3/4/6/7/8`、
   `Ctrl+B/D/E/F/G/H/I/J/K/L/M/Q/R/T/U/W`、`Ctrl+Shift+A/C/H/I/L/P/V/W/X`），并为能力门控的
   `Ctrl+O` 增加 `can-open=false` 时的显式 unsupported 分支；这些组合键不再是静默 no-op。
-- 相应更新源码契约测试 `crates/cad-ui-slint/tests/shortcut_map_contract.rs`（切片断言新增
+- 相应更新源码契约测试 `crates/cad-ui-legacy/tests/shortcut_map_contract.rs`（切片断言新增
   `root.shortcut-unsupported(...)` 分支存在、且 Ctrl+A 选中仍留在 bubbling 处理器）与
-  `crates/cad-ui-slint/tests/keyboard_shortcuts.rs`（实际按键，断言本地化
+  `crates/cad-ui-legacy/tests/keyboard_shortcuts.rs`（实际按键，断言本地化
   `shortcut.unsupported` 文案序列、状态栏与“无 CAD 回调”）。
 
 验证（本机，离屏软件 Vulkan lavapipe）：`cargo fmt --all` / `--check`；
 `cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`；
-`cargo clippy -p cad-ui-slint --all-targets --locked -- -D warnings`；
+`cargo clippy -p cad-ui-legacy --all-targets --locked -- -D warnings`；
 `check-i18n.py`（284 键）、`check-architecture.py`（25 包）、`check-workflows.py`；
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-slint --locked`（171 通过 / 0 失败）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-legacy --locked`（171 通过 / 0 失败）；
 `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略；
 新增命令行补全断言在 `verify_ui_fixed_scenario_replay` 内，未新增测试函数）。
-新增场景为**合成/离屏**证据，不代表真实 GPU、窗口或真机。产品代码变更即上述 `app.slint` 键处理分支。
+新增场景为**合成/离屏**证据，不代表真实 GPU、窗口或真机。产品代码变更即上述 `legacy-ui.ui` 键处理分支。
 
 ## 偏移命令：OFFSET（LINE / CIRCLE 子集）（2026-10-11）
 
@@ -11731,7 +11731,7 @@ i18n-law 债务（Android 硬编码中文状态文案迁入 i18n 键，两份 ca
 `check-i18n.py`（284 键）、`check-architecture.py`（25 包）；
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
 `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web lib）；
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`（**515 通过 / 0 失败**）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-legacy --locked`（**515 通过 / 0 失败**）；
 `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
 新增合成契约：LINE 偏移（上/下两侧垂距正确、源不变）、点在线上拒绝、空/多选拒绝、Viewer 拒绝、一步
 撤销移除 + 重做恢复；CIRCLE 外扩/内缩、过圆心/在圆上拒绝；不支持几何（Arc/Insert）显式 `Unsupported`
@@ -11757,10 +11757,10 @@ i18n-law 债务（Android 硬编码中文状态文案迁入 i18n 键，两份 ca
     空剪贴板 → 显式 `InvalidInput` 拒绝。整批粘贴经事务原子校验，任一非法内容则整批拒绝（绝不部分插入）。
   - 剪贴板在文档被替换（New/成功 Open，`HostController::reset_for_new_content` 重建 session）时清空，
     因此粘贴**不可能跨文档**。
-- 接线：`app.slint` 新增 `copy-requested`/`cut-requested`/`paste-requested` 回调；在 **bubbling**
+- 接线：`legacy-ui.ui` 新增 `copy-requested`/`cut-requested`/`paste-requested` 回调；在 **bubbling**
   `key-pressed` 处理器内把 Ctrl+C/X/V 从 `shortcut-unsupported` 换成真实回调（聚焦文本编辑器仍获得
   首拒绝权），保留 `keyboard-shortcuts-enabled` 门控，capture 处理器不消费这些组合键。`adapter.rs`
-  将三个回调映射到三个 CommandId（错误经 `draw_error_text` 显式显示）。这些在 cad-ui-slint 集中接线，
+  将三个回调映射到三个 CommandId（错误经 `draw_error_text` 显式显示）。这些在 cad-ui-legacy 集中接线，
   全部宿主共享。
 - 命令行：`SELECTORS` += `COPYCLIP`（work-only=false）/`CUTCLIP`（true）/`PASTECLIP`（true），分发到
   对应回调；Ctrl+C/X/V 是按键，不额外加键入别名。
@@ -11773,12 +11773,12 @@ i18n-law 债务（Android 硬编码中文状态文案迁入 i18n 键，两份 ca
 `check-i18n.py`（283 键）、`check-architecture.py`（25 包）；
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
 `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web lib）；
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`（**506 通过 / 0 失败**）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-legacy --locked`（**506 通过 / 0 失败**）；
 `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
 新增合成契约：COPY 只读填充剪贴板（revision/撤销不变）、空选择拒绝、Viewer 允许 COPY；CUT 一步撤销
 删除并填充、撤销恢复几何与渲染属性、空选择拒绝、Viewer 拒绝 CUT/PASTE；PASTE 新 id 原坐标克隆、一步
 撤销移除全部、空剪贴板拒绝、Viewer 拒绝；`new_blank_document` 清空剪贴板（同一 reset 路径用于 open）；
-app.slint/键盘 Ctrl+C/X/V 真实回调 + 文本编辑器首拒绝 + 门控源码契约；命令行 COPYCLIP/CUTCLIP/PASTECLIP
+legacy-ui.ui/键盘 Ctrl+C/X/V 真实回调 + 文本编辑器首拒绝 + 门控源码契约；命令行 COPYCLIP/CUTCLIP/PASTECLIP
 分发与 work-only 目录、Viewer 拒绝 CUT/PASTE。均为合成/离屏证据，未做真实窗口、真实 GPU、真机或
 交互手势验收；Android 本机缺 Android 平台，app-android 编译未运行。**未使用 OS 剪贴板**。
 
@@ -11791,8 +11791,8 @@ app.slint/键盘 Ctrl+C/X/V 真实回调 + 文本编辑器首拒绝 + 门控源�
 剪贴板。**F5** 只读捕获对实例 ref 使用“已按整实体捕获（只读，不影响实例）”，不再谎称“影响所有实例”
 （`resolve_selection` 增 `read_only_capture` 标志）。**F6** 删除无生产调用者的 `SessionState::clear_clipboard`
 （`reset_for_new_content` 经 `SessionState::new` 已清空）。**F4** 新增测试：命令编辑器聚焦时 Ctrl+C/X/V
-不触发 CAD 回调且文本保留（真实 Slint LineEdit 首拒绝）；N=2 粘贴为一步撤销且两 id 均被撤销移除；
-粘贴副本保留源渲染属性且 undo+redo 保持。补强后 cad-app+cad-ui-slint **506 通过 / 0 失败**。
+不触发 CAD 回调且文本保留（真实旧桌面 UI LineEdit 首拒绝）；N=2 粘贴为一步撤销且两 id 均被撤销移除；
+粘贴副本保留源渲染属性且 undo+redo 保持。补强后 cad-app+cad-ui-legacy **506 通过 / 0 失败**。
 
 ## 三个选择变换命令：ROTATE / SCALE / MIRROR（2026-10-11）
 
@@ -11833,8 +11833,8 @@ app.slint/键盘 Ctrl+C/X/V 真实回调 + 文本编辑器首拒绝 + 门控源�
 `check-i18n.py`（282 键）、`check-architecture.py`（25 包）；
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
 `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web lib）；
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`（**494 通过 / 0 失败**；
-cad-app 292 + 集成 32；cad-ui-slint 137 + 集成 33）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-legacy --locked`（**494 通过 / 0 失败**；
+cad-app 292 + 集成 32；cad-ui-legacy 137 + 集成 33）；
 `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
 新增合成契约：ROTATE（绕 base 90° 就地旋转端点正确、一步撤销恢复、空选择拒绝、Viewer 拒绝）；
 SCALE（factor 2 使距离翻倍、一步撤销恢复、非正/非有限 factor 拒绝、reference==base 在工具层拒绝、
@@ -11888,7 +11888,7 @@ COPY 的 “COPY cannot transform …” 风格对齐（`ROTATE/SCALE cannot tra
 `check-i18n.py`（279 键）、`check-architecture.py`（25 包）；
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
 `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web lib）；
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`（**465 通过 / 0 失败**）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-legacy --locked`（**465 通过 / 0 失败**）；
 `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
 新增合成契约：ARC（三点得到外接圆中心/半径/sweep；共线显式拒绝且无实体；一步撤销移除；Viewer
 拒绝）；EXTEND（目标延伸到最近边界、一步撤销恢复原线并保留渲染属性；已接触、非 LINE 目标、
@@ -11925,7 +11925,7 @@ DXF ARC 是无向点集，现按 `sweep<0` 交换首末角（`start_angle=(start
 `check-i18n.py`（279 键）、`check-architecture.py`（25 包）；
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
 `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`；
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint -p cad-import-acadrust --locked`
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-legacy -p cad-import-acadrust --locked`
 （**652 通过 / 0 失败 / 1 忽略**）；`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`
 （16 通过 / 0 失败 / 4 忽略）。
 
@@ -11945,7 +11945,7 @@ DXF ARC 是无向点集，现按 `sweep<0` 交换首末角（`start_angle=(start
   绝不静默丢弃），随后为每个实体分配**新 id**、按 delta 平移几何、保留 layer/space 与类型，
   在一次事务内插入全部副本并记**一条**撤销补丁。按对象颜色/线型/线宽覆盖无法经现有写入路径
   复制时记显式诊断（副本继承图层样式），不静默改变。
-- UI/命令入口：`app.slint` 新增 `callback erase-requested();`；adapter 将 `erase-requested` 映射到
+- UI/命令入口：`legacy-ui.ui` 新增 `callback erase-requested();`；adapter 将 `erase-requested` 映射到
   `CommandId::EraseEntities`（错误经 `draw_error_text` 显式显示）。命令行新增 canonical `ERASE`
   （work-only）与 `COPY`（work-only）、别名 `E`/`CO`/`CP`；从 `UNSUPPORTED_COMMANDS` 移除
   `ERASE`/`COPY`；`ERASE` 分发到 `erase-requested`，`COPY` 分发到 `begin_draw_tool("copy")`。
@@ -11957,11 +11957,11 @@ DXF ARC 是无向点集，现按 `sweep<0` 交换首末角（`start_angle=(start
 `check-i18n.py`（276 键）、`check-architecture.py`（25 包）；
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
 `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web/android lib）；
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`
-（cad-app 247 通过；cad-ui-slint 171 通过 / 0 失败）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-legacy --locked`
+（cad-app 247 通过；cad-ui-legacy 171 通过 / 0 失败）；
 `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
 新增合成契约：cad-app ERASE（删除恰为选中项且一步撤销恢复；空选择显式拒绝）与 COPY（副本数量与
-平移几何正确、一步撤销移除全部；空选择拒绝；Viewer 拒绝；不可变换几何显式拒绝且不改）；cad-ui-slint
+平移几何正确、一步撤销移除全部；空选择拒绝；Viewer 拒绝；不可变换几何显式拒绝且不改）；cad-ui-legacy
 命令行 `ERASE`/`E` 回调与 `COPY`/`CO`/`CP` 启动 copy 工具、源码契约。均为合成/离屏证据，未做真实
 窗口、真实 GPU、真机或交互手势验收。
 
@@ -11983,7 +11983,7 @@ COPY 子图元/实例 ref 诊断；ERASE Viewer 拒绝与错误 payload 拒绝�
 `check-i18n.py`（276 键）、`check-architecture.py`（25 包）；
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
 `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`；
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint -p cad-history -p cad-db --locked`
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-legacy -p cad-history -p cad-db --locked`
 （**536 通过 / 0 失败**）；`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`
 （16 通过 / 0 失败 / 4 忽略）。
 
@@ -11995,7 +11995,7 @@ COPY 子图元/实例 ref 诊断；ERASE Viewer 拒绝与错误 payload 拒绝�
 
 - 命令层：新增 `CommandId::SaveDrawingAs`（`requires_work_mode = false`），与 `OpenDrawing`/
   `PlotDrawing` 一样属**宿主自有**（`Application::execute` 返回 `Unsupported`）。
-- UI/命令入口：`app.slint` 新增 `in property <bool> can-save: false;` 与 `callback save-requested();`；
+- UI/命令入口：`legacy-ui.ui` 新增 `in property <bool> can-save: false;` 与 `callback save-requested();`；
   Ctrl+S / Ctrl+Shift+S 在 `can-save` 时发 `save-requested()`，否则 `shortcut-unsupported`。命令行
   `SAVE` 加入 `SELECTORS`（work-mode false），`QSAVE`/`SAVEAS` 作为 `SYNONYMS` 解析到 `SAVE`；三者
   从 `UNSUPPORTED_COMMANDS` 移除；分发时 `!can-save` → 显式 `command.unsupported`。adapter 将
@@ -12030,12 +12030,12 @@ COPY 子图元/实例 ref 诊断；ERASE Viewer 拒绝与错误 payload 拒绝�
 `check-i18n.py`（275 键）、`check-architecture.py`（25 包）；
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
 `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web/android lib）；
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-slint --locked`（171 通过 / 0 失败）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-legacy --locked`（171 通过 / 0 失败）；
 `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（16 通过 / 0 失败 / 4 忽略）。
 新增合成契约：app-linux `save_export`（打开已提交 fixture 的副本后另存 `.dxf`，断言非空且含
 `SECTION`/`ENTITIES`、状态按报告为 exact 或 partial；`.dwg` 显式拒绝且不落盘；无扩展名/未知扩展名
 显式失败且不落盘；另存到源文件路径被拒绝且源文件字节不变；取消 → 目录清单不变且 `save.cancelled`
-非失败）、`save_source_guard`（失败打开不移动源路径守卫）；cad-ui-slint 命令行
+非失败）、`save_source_guard`（失败打开不移动源路径守卫）；cad-ui-legacy 命令行
 `SAVE`/`QSAVE`/`SAVEAS` 的 `can-save` 门控、Ctrl+S/Ctrl+Shift+S 门控与源码契约。均为合成/离屏
 证据，未做真实窗口、真实 GPU、真实保存对话框、浏览器或真机验收。
 
@@ -12099,7 +12099,7 @@ warnings`；`cargo test -p cad-import-acadrust --locked`（**175 通过 / 0 失�
 
 - 命令层：新增 `CommandId::PlotDrawing`（`requires_work_mode = false`）。与 `OpenDrawing`/
   `NewDrawing` 一样属**宿主自有**：`Application::execute` 返回 `Unsupported`，由平台宿主接管。
-- UI/命令入口：`app.slint` 新增 `in property <bool> can-plot: false;` 与 `callback plot-requested();`；
+- UI/命令入口：`legacy-ui.ui` 新增 `in property <bool> can-plot: false;` 与 `callback plot-requested();`；
   Ctrl+P 在 `can-plot` 时发 `plot-requested()`，否则 `shortcut-unsupported("Ctrl+P")`。命令行
   `PLOT` 加入 `SELECTORS`（work-mode false），`EXPORT`/`PRINT` 作为 `SYNONYMS` 解析到 `PLOT`；
   三者从 `UNSUPPORTED_COMMANDS` 移除。分发时 `!can-plot` → 显式 `command.unsupported`，否则
@@ -12134,11 +12134,11 @@ warnings`；`cargo test -p cad-import-acadrust --locked`（**175 通过 / 0 失�
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
 `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web/android lib）；
 `check-i18n.py`（266 键）、`check-architecture.py`；
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-slint --locked`（171 通过 / 0 失败）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-legacy --locked`（171 通过 / 0 失败）；
 `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（14 通过 / 0 失败 / 4 忽略）。
 新增合成契约：app-linux `plot_export`（注入保存路径，打开合成 plot fixture `fixtures/plot/a4-layout.dwg`
 后导出 SVG/PDF，断言 SVG 含真实描边几何、PDF 含 `stream`/`xref`；`.txt` 未知扩展名显式拒绝且不落盘；
-取消返回 `Cancelled` 时无文件、状态为 `plot.cancelled` 而非失败）；cad-ui-slint 命令行
+取消返回 `Cancelled` 时无文件、状态为 `plot.cancelled` 而非失败）；cad-ui-legacy 命令行
 `PLOT`/`EXPORT`/`PRINT` 的 `can-plot` 门控与 Ctrl+P 门控、源码契约更新。均为合成/离屏证据，
 未做真实窗口、真实 GPU、真实保存对话框、浏览器或真机验收。
 
@@ -12158,7 +12158,7 @@ web/android 必须仍可编译且**显式不支持**，不得静默无操作。
 - 宿主接线：`app-linux` 在 `execute` 拦截 `NewDrawing` → `request_new()`（替换文档 + 取消
   UI 绘制捕获），并随 `push()` 推 `set_new_available(!loading)`；web/android 不设置，
   `can-new` 保持默认 `false`。
-- UI/命令入口：`app.slint` 新增 `in property <bool> can-new: false;` 与 `callback new-requested();`；
+- UI/命令入口：`legacy-ui.ui` 新增 `in property <bool> can-new: false;` 与 `callback new-requested();`；
   Ctrl+N 在 `can-new` 时发 `new-requested()`，否则 `shortcut-unsupported("Ctrl+N")`。
   命令行 `NEW` 从 `UNSUPPORTED_COMMANDS` 移入 `SELECTORS`（work-mode false），分发时
   `!can-new` → 显式 `command.unsupported`，否则 `invoke_new_requested()`；adapter 将
@@ -12180,10 +12180,10 @@ web/android 必须仍可编译且**显式不支持**，不得静默无操作。
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`；
 `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（含 web/android lib）；
 `check-i18n.py`（252 键）、`check-architecture.py`；
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-slint --locked`（444 通过 / 0 失败）；
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-app -p cad-ui-legacy --locked`（444 通过 / 0 失败）；
 `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p app-linux --locked`（13 通过 / 0 失败 / 4 忽略，
 忽略者为既有真实 GPU `--ignored` 用例）。
-新增合成契约：cad-app 空白文档/身份/相机重置/取代打开/fit 诊断/应用层拒绝；cad-ui-slint
+新增合成契约：cad-app 空白文档/身份/相机重置/取代打开/fit 诊断/应用层拒绝；cad-ui-legacy
 命令行 `NEW` 与 Ctrl+N 门控；app-linux `new_drawing`（打开真实合成 fixture、建立选择与绘制
 捕获后 New 为空且有效，并断言空图纸 FIT 的本地化提示）。均为合成/离屏证据，未做真实窗口、
 真实 GPU、浏览器或真机验收。
@@ -12193,7 +12193,7 @@ web/android 必须仍可编译且**显式不支持**，不得静默无操作。
 用户要求：接入一套固定（不可重绑定）的 AutoCAD 默认键位到**已存在**命令/开关，并对尚无
 后端能力的按键显式“不支持”，不得静默。
 
-- 键位表放在 `crates/cad-ui-slint/ui/app.slint`（键字符串为 Slint 私有）；Rust 只负责分发。
+- 键位表放在 `crates/cad-ui-legacy/ui/legacy-ui.ui`（键字符串为旧桌面 UI 私有）；Rust 只负责分发。
   新增 `shortcut-unsupported(string)` 回调 + 双语 `shortcut.unsupported`，在 `adapter.rs`
   写入状态栏并展开命令行。
 - 视图/UI 开关：F7 网格、F3 捕捉提示标记叠加、F2/Ctrl+9 命令行展开、Ctrl+1 侧栏、Ctrl+0
@@ -12205,8 +12205,8 @@ web/android 必须仍可编译且**显式不支持**，不得静默无操作。
   （由 `shortcut_map_wiring.rs` 固定，不宣称可见反馈）。
 - 门控：整表仍受 `application-ui && keyboardShortcuts` 约束，不吞 Alt/Meta；文本编辑器保留
   Ctrl+Z/Y/A/C/X/V 与 Ctrl+Home 的优先处理。
-- 验证（本机）：`cargo fmt --all`；`cargo clippy -p cad-ui-slint --all-targets --locked -- -D warnings`；
-  `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-slint --locked`（171 通过 / 0 失败）；
+- 验证（本机）：`cargo fmt --all`；`cargo clippy -p cad-ui-legacy --all-targets --locked -- -D warnings`；
+  `VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-legacy --locked`（171 通过 / 0 失败）；
   `check-i18n.py`、`check-workflows.py` 通过。均为合成/离屏证据，未做真实窗口/GPU/真机验收。
 
 ## 端到端巡检：清理失效的导出/导入控件（2026-10-10）
@@ -12226,7 +12226,7 @@ web/android 必须仍可编译且**显式不支持**，不得静默无操作。
 
 **发现的缺陷与修复**
 
-- **导出/导入是“启用但无处理函数”的死按钮**：`app.slint`（顶栏）与 `ribbon.slint`（“文件”页签）
+- **导出/导入是“启用但无处理函数”的死按钮**：`legacy-ui.ui`（顶栏）与 `ribbon.旧桌面 UI`（“文件”页签）
   仍保留导出（⇧）/导入（⇩）按钮，`can-export`/`can-import` 默认 `true`，但全仓库**没有任何**
   `on_export_requested`/`on_import_requested` 处理函数——点击静默无响应；其标签属性
   `export-label`/`import-label` 也从未被赋值（空文本）。批注导入/导出早已随标注能力从产品移除
@@ -12234,14 +12234,14 @@ web/android 必须仍可编译且**显式不支持**，不得静默无操作。
   **修复**：删除 `export-requested`/`import-requested` 回调、顶栏与 ribbon 文件页签的按钮、
   `cmd-export-visible`/`cmd-import-visible`/`can-export`/`can-import` 属性及其向 `CadRibbon`
   的透传，以及不再可达的 `action(10)`/`action(11)` 分支；`labels` 数组删除两项，
-  ribbon 中诊断按钮由 `labels[11]` 改为 `labels[9]`。新增 `cad-ui-slint` 单元测试
+  ribbon 中诊断按钮由 `labels[11]` 改为 `labels[9]`。新增 `cad-ui-legacy` 单元测试
   `shell_has_no_dead_export_import_controls` 防回归。
 
 **覆盖补强（无缺陷，锁定行为）**
 
 - `apps/app-linux/tests/overlay_grid_toggle.rs` 由“仅网格”扩为在**单进程内**同时校验网格与
   **坐标轴**两个状态栏叠加开关真正到达渲染器（开启/关闭双向、仅画布矩形的像素比对）。
-  离屏 Slint 平台的 rendering notifier 是进程级单例（同进程第二个 `LinuxApp::show()` 会
+  离屏旧桌面 UI 平台的 rendering notifier 是进程级单例（同进程第二个 `LinuxApp::show()` 会
   `set_rendering_notifier failed`），故两个开关合并为一个测试、共享一个 `LinuxApp`。
   结果：坐标轴开关与网格同类，均可达渲染器。
 
@@ -12274,7 +12274,7 @@ lib）均通过。
    配置变更后没有 `push()`，网格批次从未重建。修复：宿主安装 `on_config_changed` 观察者，在真实
    配置变更时把 `config.view.overlays` 镜像到 `view.set_overlay_visibility`（观察者拿到配置本身，
    不在 `publish` 期间回借存储）。Web/Android 本就在各自 state-push 漏斗里同步，桌面此处遗漏。
-2. **滚轮方向相反**（`apps/app-linux/src/host/input.rs`）：桌面滚轮经 Slint 的 winit 后端到达，
+2. **滚轮方向相反**（`apps/app-linux/src/host/input.rs`）：桌面滚轮经旧桌面 UI 的 winit 后端到达，
    winit 文档「正值=内容下移/露出上方」即**正 `delta_y`=上滚**；原式 `1 - dy*0.0015` 使上滚=缩小。
    改为 `1 + dy*0.0015`（上滚=放大）。Web（浏览器 `deltaY` 向下为正）与 Android 保留各自公式，未改。
 3. **坐标轴十字左边短**（`crates/cad-app/src/render_scene/overlay.rs`）：`axes_overlay` 原按单侧
@@ -12286,7 +12286,7 @@ lib）均通过。
 
 - 新增 `apps/app-linux/tests/overlay_grid_toggle.rs`：生产 `LinuxApp`（offscreen）里状态栏切网格，
   断言**仅 CAD 画布矩形**像素变化、关闭后逐字节还原（避免状态栏按钮高亮造成假通过）。
-- 新增 in-crate `host::input::tests::desktop_wheel_up_zooms_in`：真实 Slint 组件派发
+- 新增 in-crate `host::input::tests::desktop_wheel_up_zooms_in`：真实旧桌面 UI 组件派发
   `PointerScrolled delta_y=+120`，断言 `world_per_px` 变小（上滚放大）。
 - 更新 `axes_overlay_draws_a_symmetric_origin_cross_below_the_highlight`。
 - 新增 in-crate `host::validation::tests::real_gpu_grid_zoom_axes_acceptance`（`#[ignore]`，
@@ -12352,7 +12352,7 @@ entity 的显示**，并把进度与实在实现不了的项记入本文。经�
    - `cad-platform`：`requested_images` + 安全图像加载器（相对图纸目录/`--images-dir`、
      拒绝绝对路径与 `..` 逃逸、缺失/失败上报，不插入占位）；`cad-app` 新增
      `build_scene_with_space_and_images`；CLI render/plot 上传并输出 `images` JSON；
-     桌面 `cad-ui-slint`（`CadView::set_images`→`PreparationInput`→controller→
+     桌面 `cad-ui-legacy`（`CadView::set_images`→`PreparationInput`→controller→
      `PreparedScene`→runtime→`upload_images`）与 `app-linux`（`install_images`）接线。
 2. **图元保真补全（`cad-import-acadrust`）**
    - **TABLE**：按 `CellStyle`/`CellBorder` 逐边绘制（`invisible` 跳过、`double_spacing`
@@ -12386,7 +12386,7 @@ entity 的显示**，并把进度与实在实现不了的项记入本文。经�
 - **测试（lavapipe 串行）**：`cad-import-acadrust` **150**、`cad-representation` **164**、
   `cad-resources` **34**、`cad-scene` **54**、`cad-render-wgpu` **72**（含 4 个新 GPU 用例：
   两色朝向、裁剪多边形、同键纹理去重、渐进分页只画一次）、`cad-app` **265**、
-  `cad-ui-slint` **159**、`cad-platform` **23**、`cad-cli-tools` 等；除下述既有失败外全绿。
+  `cad-ui-legacy` **159**、`cad-platform` **23**、`cad-cli-tools` 等；除下述既有失败外全绿。
 - **光栅图像渲染证据为 lavapipe（软件 Vulkan）**，不是真实 GPU；见 `docs/validation.md`
   本轮小节。
 
@@ -12443,7 +12443,7 @@ entity 的显示**，并把进度与实在实现不了的项记入本文。经�
 1. **单一来源 + 派生资产**：`assets/yacr-icon.svg` 为唯一来源；`scripts/generate-icons.py`
    用 `rsvg-convert`+Pillow 生成 `assets/yacr-icon.{ico,icns}`、`assets/icons/yacr-*.png`
    与 `apps/app-android/res/`（传统 + 自适应启动图标），`--check` 逐字节防漂移（已通过）。
-2. **桌面**：`cad-ui-slint` 的 `YacrWindow` 设 `icon: @image-url("../../../assets/yacr-icon.svg")`
+2. **桌面**：`cad-ui-legacy` 的 `YacrWindow` 设 `icon: @image-url("../../../assets/yacr-icon.svg")`
    （编译期嵌入；winit 后端设置窗口/任务栏图标）。新增 `tests/app_icon_contract.rs`。
 3. **macOS 包**：`package-macos-release.sh` 复制 `Yacr.icns` 并写 `CFBundleIconFile`。
 4. **Linux 包**：staging `share/icons/hicolor/{scalable,256x256}/apps/yacr.{svg,png}` 与
@@ -12461,7 +12461,7 @@ entity 的显示**，并把进度与实在实现不了的项记入本文。经�
    `scripts/test-android-icon.py`（接入 `core.yml` workflow-contracts）；三个
    `test-package-*-release.py` 增加图标保证。
 
-**验证**：已运行 `cargo check -p cad-ui-slint`、`app_icon_contract`（2 passed）、
+**验证**：已运行 `cargo check -p cad-ui-legacy`、`app_icon_contract`（2 passed）、
 `node --test scripts/test-web-icon.mjs`、`test-android-icon.py`、三个包契约、
 `generate-icons.py --check`、`check-workflows.py`；Windows 图标另经
 `cargo build -p app-windows --target x86_64-pc-windows-gnu` +
@@ -12482,7 +12482,7 @@ Android APK 构建与真机、macOS `.app`（MSVC `.exe` 由 CI windows-release 
    （`DisplayPrimitive::Image` 新增可选 `clip`）；未成形 Text/坏 mesh/退化图像等
    不可裁剪情形**保留几何 + `Partial` + 稳定原因码**（`viewport.clip_*`）。
    15 项新契约；`docs/layouts.md` §2.4/§4/§5 同步。
-2. **UI 抽屉与布局比例**（`cad-ui-slint`）：资源抽屉（字体/导入/代理/引用/图像真实
+2. **UI 抽屉与布局比例**（`cad-ui-legacy`）：资源抽屉（字体/导入/代理/引用/图像真实
    分区，无数据显式空态，图像未建模显式说明）、3D 观察抽屉（复用既有
    `Switch2d3d`/`SwitchProjection`/`StandardView` 命令；环绕=手势说明；3D fit 显式
    禁用）、布局比例**显示级**（`LAYOUT_SCALE_CONTROL_WIRED=false`，命令面不存在
@@ -12514,12 +12514,12 @@ Android APK 构建与真机、macOS `.app`（MSVC `.exe` 由 CI windows-release 
 architecture、fixture-manifest、workflows、i18n(248) 全绿；workspace all-targets
 check、wasm32 全 workspace lib check、app-web wasm check 全绿；node 六套契约全绿；
 `cargo test`：cad-app 263、cad-representation 157、cad-import-acadrust 111/0/1 ignored、
-cad-ui-slint 131+全部集成（含 offscreen 外壳渲染）、app-linux 全部（含 verify_ui/
+cad-ui-legacy 131+全部集成（含 offscreen 外壳渲染）、app-linux 全部（含 verify_ui/
 verify_ui_drawing）、app-web 全部、app-android **19/0**（修复后）。
 **Android 门（本轮补装 SDK 后实跑）**：本机原缺 Android SDK/NDK；已按 `docs/build.md`
 布局安装（`~/android-sdk`，build-tools 34.0.0 / platforms 34+30 / NDK 27.0.12077973，
 `~/jdk17`，env 写入 `~/.bashrc`），随后
-`cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --all-targets`
+`cargo check --target aarch64-linux-android -p cad-ui-legacy -p app-android --all-targets`
 与同目标严格 clippy（`-D warnings`）**通过**（顺带清掉两处 app-android 遗留问题：
 `poll_import_once`/`ImportPollOutcome` 再导出的 cfg 限定为 android+test，
 `lib.rs` 两处 `clone_on_copy`）。
@@ -12611,16 +12611,16 @@ workflows、i18n、workspace all-targets check、wasm32 lib check 全绿；
 - 改走 Playwright：`playwright-core 1.64.0` + 自带 Chromium 156.0.8078.4（headful 真实 GPU）。
   调试脚本在仓库外 `/tmp/opencode/webtest/{debug-web,webgpu-probe,webgpu-pref}.mjs`。
 - **定位并修复**：`--enable-unsafe-webgpu` 下 `navigator.gpu` 给的是 SwiftShader 软适配器，
-  JS 预探测选 `webgpu`，但 Rust 侧 Slint/wgpu 渲染 setup 永不完成 →
+  JS 预探测选 `webgpu`，但 Rust 侧旧桌面 UI/wgpu 渲染 setup 永不完成 →
   `chosen=WebGpu adapter=None lifecycle=Detached cad_frames=0`，**无错误无回退的静默空白**。
-  修复：`cad-ui-slint::web::select_backend` 强制 `WebGpu` 经真实 `webgpu_available()` 门；
+  修复：`cad-ui-legacy::web::select_backend` 强制 `WebGpu` 经真实 `webgpu_available()` 门；
   `webgpu_available()` 拒绝 `wgpu::DeviceType::Cpu` 软适配器并 `console_log` 探测结果，
   失败由 `app-web::start_with_preference` 既有分支回退 `WebGL2`。
 - 重构建 + Playwright 复验：`--enable-unsafe-webgpu` 下显示探测 `device_type=Cpu`、
   `GpuFailure(...)`、最终 `chosen=WebGl2 … cad_frames=1 lifecycle=Ready`；默认路径不变；
   `check-web-ui.mjs` 通过。
 - 新增 `scripts/test-web-backend-fallback.py`（静态+变异）并接入 `core.yml`
-  workflow-contracts；本机通过 fmt、`cargo check -p cad-ui-slint -p app-web --target
+  workflow-contracts；本机通过 fmt、`cargo check -p cad-ui-legacy -p app-web --target
   wasm32-unknown-unknown --locked`、`check-workflows.py`。
 
 **未运行/限制**：真 WebGPU 硬件适配器仍未验证（本机只有 SwiftShader 软适配器，修复刻意不用它）；
@@ -12666,7 +12666,7 @@ UTF-8 编码与「缺字体即失败」）；`test-package-macos-release.py` 与
 
 **改动**
 
-1. `build.yml` 新增 `linux-release`（`ubuntu-latest`）：安装 Slint 依赖 →
+1. `build.yml` 新增 `linux-release`（`ubuntu-latest`）：安装旧桌面 UI 依赖 →
    `cargo fetch --locked` 预热（`package-linux-release.sh` 以 `--offline` 构建）→
    `WITH_FONTS=1 scripts/package-linux-release.sh` → 上传 `yacr-linux-release`
    （tar.gz + sha256）。脚本在打包内实际跑 CLI `--help` 与 GUI `--headless` 解析错误，
@@ -12745,7 +12745,7 @@ CI `macos-latest` 出包 + 文档），产物形式为 **tar.gz：含 `Yacr.app`
   `cargo check -p app-macos --all-targets --target aarch64-apple-darwin --locked` 与
   `cargo clippy -p app-macos -p app-linux --all-targets --target aarch64-apple-darwin
   --locked -- -D warnings` 均通过（过程中修掉 `validation.rs`/`entry.rs` 对
-  `cad_ui_slint::offscreen` 的无条件引用）。只类型检查，**不**链接、不产出 Mach-O、不运行。
+  `cad_ui_旧桌面 UI::offscreen` 的无条件引用）。只类型检查，**不**链接、不产出 Mach-O、不运行。
 
 **未运行/限制**：CI 的 `macos-check`/`macos-release` job **未在本环境运行**（无 macOS
 runner）；Linux 主机**无法**产出 Mach-O，也没有 Apple SDK，不能本地复现；真实 Mac 的窗口、
@@ -12766,7 +12766,7 @@ Retina/DPI、Metal GPU 渲染与像素验收、原生文件对话框、配置目
    （`fc-match` / `%WINDIR%\Fonts`，`cad-platform::fonts::local`）。新增
    `app_linux::entry::run()` 供两个桌面二进制共用，避免解析/后端选择漂移。
 2. **Windows 宿主**：新增 `apps/app-windows`（二进制 `yacr.exe`），薄封装共享入口；
-   `cad-ui-slint::offscreen` 的 cfg 同步放宽到 Linux+Windows。
+   `cad-ui-legacy::offscreen` 的 cfg 同步放宽到 Linux+Windows。
 3. **打包（工具链无关）**：`scripts/package-windows-release.sh` 自动识别宿主 target：
    Windows 原生 MSVC 默认并自动 `+crt-static`（无需 VC++ redistributable）；Linux 可
    MinGW GNU 交叉或 `CARGO_XWIN=1` 走 MSVC。字体走 `fetch-fonts.sh`（该脚本也改为
@@ -12893,10 +12893,10 @@ CDN 字库应随客户端输出内置（与 Web 一致）。`package-linux-relea
 - **用了 GPU 加速，但排查时默认走 Intel 核显**：GUI（`yacr-linux`）与 CLI 在修复前
   默认都选中第一个 Vulkan 适配器 = Intel UHD Graphics（ANV）。DRM fdinfo 证据：进程在
   `renderD129`（Intel）上有 `drm-engine-render` 时间，`renderD128`（NVIDIA）为 0；
-  `nvidia-smi` 看不到本应用。Slint 强制要求 GPU-backed 适配器
-  （llvmpipe 需 `SLINT_WGPU_CPU=1`），能启动就意味着真在用 GPU。
+  `nvidia-smi` 看不到本应用。旧桌面 UI 强制要求 GPU-backed 适配器
+  （llvmpipe 需 CPU 兜底开关），能启动就意味着真在用 GPU。
 - **空闲 CPU ~40%（单核）且与图纸无关**：启动无图纸（demo）也恒定 ~40%，
-  原因是有 50 ms `Timer` 每 tick 无条件写 Slint 属性 + `CadView::request_redraw`，
+  原因是有 50 ms `Timer` 每 tick 无条件写旧桌面 UI 属性 + `CadView::request_redraw`，
   等价以 ~20fps 重绘。
 - **大图 OOM 根因**：`complex-test.dwg` 只有 44,591 实体，但 1,081 个块定义嵌套
   展开成 **20,856,815 个 primitive / 46,064,001 顶点**；CLI `render` 之前
@@ -12905,19 +12905,19 @@ CDN 字库应随客户端输出内置（与 Web 一致）。`package-linux-relea
 
 **改动**
 
-1. **空闲重绘（`crates/cad-ui-slint/src/bridge/view.rs`、`apps/app-linux/src/host.rs`）**：
+1. **空闲重绘（`crates/cad-ui-legacy/src/bridge/view.rs`、`apps/app-linux/src/host.rs`）**：
    `apply_view_snapshot` 对相同快照直接返回（不再 `set_view_state`+`request_redraw`）；
    `Runtime::metrics` 缓存 `(物理尺寸, config revision)`，未变化不调
    `refresh_window_layout`（不再每 tick 序列化有效配置 JSON）；`BridgeState` 新增
    `redraw_requests` 计数供测试/宿主观测。实测 release 空闲 CPU **~40% → ~0–2%**。
-2. **显式 GPU 选择 + 双显卡默认独显（`cad-render-wgpu`/`cad-ui-slint`/`app-linux`/`cad-cli-tools`）**：
+2. **显式 GPU 选择 + 双显卡默认独显（`cad-render-wgpu`/`cad-ui-legacy`/`app-linux`/`cad-cli-tools`）**：
    新增稳定枚举 `GpuSelection`（`auto`/`high`/`low`）与
    `create_headless_gpu_with(preference, gpu)`（后端内按 `device_type` 优选，
    缺类型回退首个适配器，不跨后端）；`select_wgpu_backend_with` 映射到 wgpu
    `PowerPreference`；Linux App `--gpu`、CLI `render/plot --gpu`。**`auto` 与 `high`
    同义、在双显卡上默认优先独显**（用户要求），`low` 优先核显。实测修复后默认
    （`--gpu auto`）即选中 Quadro P620，`nvidia-smi` 显示进程 40–56 MiB / 1–4%。
-   Slint 自动路径原生支持 `WGPU_ADAPTER_NAME`/`WGPU_POWER_PREF`（CLI 无头路径不读
+  旧桌面 UI 自动路径原生支持 `WGPU_ADAPTER_NAME`/`WGPU_POWER_PREF`（CLI 无头路径不读
    前者，文档已注明）。
 3. **大图内存保护（`cad-cli-tools`）**：`render` 改用与桌面一致的打包虚线 +
    `SceneCache::build_compact`（97k 批次级合批），并新增 CLI 硬上限
@@ -12928,7 +12928,7 @@ CDN 字库应随客户端输出内置（与 Web 一致）。`package-linux-relea
    `plot` 路径同样套用预算守卫。
 
 **测试与门禁（实际执行通过）**：`cargo test -p cad-render-wgpu`（40+12+13+3）、
-`cad-ui-slint`（148，含新增 `tests/idle_redraw.rs`）、`app-linux`（8 passed /
+`cad-ui-legacy`（148，含新增 `tests/idle_redraw.rs`）、`app-linux`（8 passed /
 3 ignored）、`cad-cli-tools` lib（20，含 `scene_budget_fails_explicitly_instead_of_oom`、
 `gpu_selection_stable_names...`）与 `cli_contracts`（14，含 `--gpu`/`--max-batches`
 解析契约）；fmt、严格 clippy（`-D warnings`）、architecture/fixture/workflow/i18n、
@@ -12955,17 +12955,17 @@ GUI 空闲 CPU 数字来自本机 Wayland 桌面单次采样。
   升级，不是提高最低支持版本。
 - **本机工具链**：`rustup toolchain install 1.99.0 --component rustfmt --component clippy
   --target wasm32-unknown-unknown`。
-- **环境补装**：默认门禁包含 `cad-ui-slint`/`app-linux`，本机此前缺 fontconfig/freetype
+- **环境补装**：默认门禁包含 `cad-ui-legacy`/`app-linux`，本机此前缺 fontconfig/freetype
   开发头，`yeslogic-fontconfig-sys` 构建脚本失败。经用户授权
   `sudo apt-get install pkgconf libfontconfig1-dev libfreetype6-dev` 后通过；此前
-  `docs/validation-web.md` 记录的原生 Slint 构建阻塞在本机解除（该文档为历史证据，
+  `docs/validation-web.md` 记录的原生旧桌面 UI 构建阻塞在本机解除（该文档为历史证据，
   未回改）。
 
 **实际执行并通过**（本机 1.99.0）：
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --exclude app-android --exclude app-web --all-targets
-  --locked -- -D warnings`（含 `cad-ui-slint`、`app-linux`，0 警告）
+  --locked -- -D warnings`（含 `cad-ui-legacy`、`app-linux`，0 警告）
 - `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`
 - `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`（完整
   workspace，含 UI/Host）
@@ -12995,8 +12995,8 @@ GUI 空闲 CPU 数字来自本机 Wayland 桌面单次采样。
 - **绘制预览保留**：绘制/编辑工具的实时预览原先复用标注预览覆盖层，现改为
   `cad-app::render_scene::overlay::draw_preview_overlay`（`OverlayInputs.draw_preview`），
   行为等价（LINE/MOVE/TRIM 橡皮筋、CIRCLE 圆），不依赖已删除类型。
-- **UI/宿主**：`cad-ui-slint` 删除标注面板/搜索/工具按钮/命令/预览桥接，`panels.slint`/
-  `app.slint`/`ribbon.slint` 移除标注控件（ribbon 页签重编号为 文件/视图/测量/工具）；
+- **UI/宿主**：`cad-ui-legacy` 删除标注面板/搜索/工具按钮/命令/预览桥接，`panels.旧桌面 UI`/
+  `legacy-ui.ui`/`ribbon.旧桌面 UI` 移除标注控件（ribbon 页签重编号为 文件/视图/测量/工具）；
   i18n 中英文各删除 19 个标注键（221→202，键集仍一致）；`app-linux`/`app-web`/`app-android`
   删除标注状态推送、sidecar 导入导出、恢复快照与未保存决策；Web JS/HTML 删除
   `annotation-input`、`export_annotations`、恢复快照入口；CLI 删除 `import-notes`/
@@ -13026,7 +13026,7 @@ GUI 空闲 CPU 数字来自本机 Wayland 桌面单次采样。
    请以当前源码和最新构建证据确认状态，不覆盖陌生变更。
 2. 运行 README 的 check/test/architecture 命令；不要删除陌生的已有实现。
 3. 用 `rg 'pending\(' crates apps` 查找显式占位；文件路径与字符串标识对应实施单元。
-4. Android 的 Slint + wgpu 组合已验证到打包层（ADR 0002、docs/validation.md）；
+4. Android 的旧桌面 UI + wgpu 组合已验证到打包层（ADR 0002、docs/validation.md）；
    本轮进一步在无头模拟器（KVM + SwiftShader，x86_64）实际安装、启动、渲染并验证
    画布平移/适应（docs/validation-android.md）。**真机仍未运行**。Web 已可运行：
    wasm 静态产物在无头 Chromium 以 WebGL2 通过加载/导航/双语（docs/validation-web.md）；
@@ -13071,7 +13071,7 @@ GUI 空闲 CPU 数字来自本机 Wayland 桌面单次采样。
 新增 6 项合成契约和 1 项默认忽略的真实桌面回归；representation **139/139**、scene
 **66/66** 通过。最终 debug/release 桌面回归分别实际通过：20 事件回调、3 CAD frames、
 滚轮相机与 CAD 像素变化。首帧仍需约 **25–27 秒**，CPU 准备/GPU 上传仍同步，不能宣称
-加载期间持续响应、流畅交互或整图视觉正确；Slint 默认选中设备的 vendor 未单独记录。
+加载期间持续响应、流畅交互或整图视觉正确；旧桌面 UI 默认选中设备的 vendor 未单独记录。
 
 主机/wasm debug 编译、定向严格 clippy、fmt、架构/fixture/workflow/i18n 及最终 Linux
 debug/release 二进制构建通过。全树严格 clippy 在未修改的 `cad-app/tests/select_all.rs`
@@ -13104,7 +13104,7 @@ UI 需求总目录与实施追踪：从 `docs/ui-requirements/`（该目录已�
 - diagnostics（主控）：分类与总预算计数改为检查加法，最大上限仍拒绝溢出且保持计费原子性。
 
 新增 **19 项合成 Rust 契约**（query 9、annotations 4、history 4、diagnostics 2）。
-本轮最终统一代码树主机 debug 全目标编译（含 Linux App/Slint 与测试代码）、严格 clippy、
+本轮最终统一代码树主机 debug 全目标编译（含 Linux App/旧桌面 UI 与测试代码）、严格 clippy、
 wasm 全 workspace lib 检查、fmt、架构/fixture/workflow/i18n 和 diff 空白检查均实际通过。
 **NOT RUN**：Rust 契约未执行；完整测试、Linux 离屏、release 构建、真实 DWG/真实 GPU/
 桌面窗口/浏览器/真机与远程 CI 未运行。详见 `docs/review-query-updates.md`、
@@ -13131,7 +13131,7 @@ wasm 全 workspace lib 检查、fmt、架构/fixture/workflow/i18n 和 diff 空�
 
 新增 **17 项合成 Rust 契约**（db 5、domain 9、resources 3）。主控在最终统一代码树
 实际完成：主机 debug `cargo check --workspace --exclude app-android --exclude app-web
---all-targets --locked`（含 Linux App/Slint 与测试代码）、严格 clippy、wasm 全 workspace
+--all-targets --locked`（含 Linux App/旧桌面 UI 与测试代码）、严格 clippy、wasm 全 workspace
 lib 检查、fmt、架构/fixture/workflow/i18n 及 diff 空白检查，均通过。
 
 **NOT RUN**：所有 Rust 契约仅编译、未执行；无完整测试、Linux 离屏、release 构建、
@@ -13159,7 +13159,7 @@ lib 检查、fmt、架构/fixture/workflow/i18n 及 diff 空白检查，均通�
 `docs/review-geometry-robustness.md`、`docs/review-scene-consistency.md`、
 `docs/review-query-contracts.md`、`docs/review-db-shape-bounds.md`。
 
-统一最终代码树 debug 主机全目标检查（含 Linux App/Slint 与测试代码）、严格 clippy、
+统一最终代码树 debug 主机全目标检查（含 Linux App/旧桌面 UI 与测试代码）、严格 clippy、
 wasm 全 workspace lib 检查、fmt、架构/fixture/workflow/i18n 和 diff 空白检查已通过。
 Python workflow 合成契约 Linux **5/5**、Web deploy **4/4** 通过；无远程 CI 执行证据。
 
@@ -13182,7 +13182,7 @@ Python workflow 合成契约 Linux **5/5**、Web deploy **4/4** 通过；无远�
 新增 31 项合成测试；主控 worktree 单 crate 测试通过：history 23、dependencies 20、
 annotations 24+15、resources 21；i18n、稳定代码双语描述、Node 六套契约 53/53 通过。
 统一代码树最终 fmt、严格主机 clippy、架构/fixture/workflow/i18n、wasm 全 workspace
-lib 检查均通过；完整主机测试（Linux App + Slint，lavapipe 串行）
+lib 检查均通过；完整主机测试（Linux App +旧桌面 UI，lavapipe 串行）
 **1229 passed / 0 failed / 1 ignored**。Linux release 实际离屏 smoke 通过，证据
 `/tmp/opencode/yacr-linux-20261004-020914-462863`（合成图纸/软件 GPU，2 CAD frames，
 导航相机与像素变化，无渲染错误；不是参考图视觉验收）。
@@ -13254,7 +13254,7 @@ Android aarch64 check、Linux release 离屏 smoke 全通过。仍为软件 Vulk
   （draw order 1_500_000），`OverlayInputs.snap_hints_input` + `CadView::set_snap_hints`
   接线，`view.overlays.snapHints` 门控；`snapHints` 关闭时该层不绘制。宿主适配留待后续轮。
 
-主控修复合并后一处 `app.slint` 注释/换行错位，并补齐 `overlay.*` 目录键与状态栏开关标签接线。
+主控修复合并后一处 `legacy-ui.ui` 注释/换行错位，并补齐 `overlay.*` 目录键与状态栏开关标签接线。
 验证：fmt、严格 clippy（含 app-web）、架构/i18n/fixture/workflows、node 六套契约、
 `cargo test --workspace --exclude app-android`（含 app-web）、wasm 全 workspace lib check、
 Android aarch64 check、Linux release 离屏 smoke 全通过。仍为软件 Vulkan/合成。
@@ -13263,7 +13263,7 @@ Android aarch64 check、Linux release 离屏 smoke 全通过。仍为软件 Vulk
 
 - **Ribbon 显示模式与溢出（`ws-ribbon-modes`）**：`RibbonGroup.display`
   (`iconAndLabel`|`iconOnly`|`labelOnly`，默认 iconAndLabel) 经 `ResolvedRibbonCommand.display`
-  进入 Slint 模型（int 0/1/2），按项图标/文字；组内命令超过 6 个时渲染真实内联溢出列表，
+  进入旧桌面 UI 模型（int 0/1/2），按项图标/文字；组内命令超过 6 个时渲染真实内联溢出列表，
   全部命令仍可派发（不静默丢弃）。**未做浮动锚定弹层**（诚实标注为内联）。
 - **minimal 预设显式语义（`ws-minimal-preset`）**：新增私有 `PresetComponents` 真值表，
   `resolve` 改为查表；新增「minimal 组件语义」与「CanvasOnly ≤ Minimal ≤ Full 单调性」
@@ -13287,7 +13287,7 @@ Android aarch64 check、Linux release 离屏 smoke 全通过。仍为软件 Vulk
 - **响应式视口契约（`ws/panels-mobile`）**：新增 wasm-free `scripts/test-web-responsive.mjs`
   （9 项）覆盖 360×800/800×360/800×1280/1280×800 × DPR1/2/3 × 安全区，并含对
   `viewer_config.rs` 阈值（720/1200/540）的漂移守卫；已加入 CI `web-host-contracts`。
-  顺带澄清 `cad-ui-slint::responsive` 的 600/1024 为历史帮助函数、非 live 权威（live 为
+  顺带澄清 `cad-ui-legacy::responsive` 的 600/1024 为历史帮助函数、非 live 权威（live 为
   `cad_app::viewer_config`）。
 - **能力钳制修复（主控）**：`ui.commandOverrides.<id>.visible` 加入 `is_clamped_path`，
   用户偏好不得重新启用被预设/能力禁用的命令；修复 `apply_preference` 新建 override 键
@@ -13303,7 +13303,7 @@ web 触控门控与契约），主控统一合并/编译/门禁。
 
 - **数据驱动 Ribbon（`ws/ribbon-groups`）**：`ui.components.ribbon.tabs[].groups[].commands[]`
   经 `cad_app::resolve_ribbon` 解析为纯模型并按 `commandVisibility` 过滤，`chrome.rs` 映射为
-  新 Slint `[RibbonTabModel]`（`ribbon-model.slint`），`ribbon.slint` 在
+  新旧桌面 UI `[RibbonTabModel]`（`ribbon-model.旧桌面 UI`），`ribbon.旧桌面 UI` 在
   `ribbon-config-driven` 为真时渲染配置选项卡/分组/命令按钮，`on_ribbon_command` 映射到真实
   命令（未支持的合法命令显式 `ribbon.command_unsupported`）。无自定义 tabs 时内置面板不变。
   新增 10 个 i18n 键（中英同键集，197 keys）。
@@ -13331,7 +13331,7 @@ smoke 通过。仍为软件 Vulkan/合成，未做真实 GPU/真机验收。
 - **interaction 门控（`ws/interaction-gating`）**：共享 `UiAdapter` 提升配置文件存储后，
   在事件时按 `interaction.pointer` 早退指针/滚轮/画布拾取；命令别名仅在
   `keyboardShortcuts` 为真时展开（完整命令名仍可用）；Web 触控 wasm 入口按
-  `interaction.touch` 空操作。新增 `crates/cad-ui-slint/tests/interaction_gating.rs`。
+  `interaction.touch` 空操作。新增 `crates/cad-ui-legacy/tests/interaction_gating.rs`。
 - **原生偏好持久化（`ws/native-prefs`）**：`apps/app-linux/src/host/config_file.rs` 从
   `$XDG_CONFIG_HOME/yacr/`（回退 `$HOME/.config/yacr/`）读取 `config.json`（完整
   `ViewerConfig`）与 `preferences.json`（`allowedPaths` 投影），新增
@@ -13339,7 +13339,7 @@ smoke 通过。仍为软件 Vulkan/合成，未做真实 GPU/真机验收。
   投影。无 XDG/HOME 时显式不持久化；解析失败保留默认并报告。
 
 主控验证：`cargo fmt --check`、严格 clippy（工作区，排除 android/web）、架构/i18n/fixture/
-workflows 全通过；`cad-app` 275、`cad-ui-slint` 82+1 离屏+1 门控、`app-linux`
+workflows 全通过；`cad-app` 275、`cad-ui-legacy` 82+1 离屏+1 门控、`app-linux`
 `host_contracts` 4 + `host_config_disk` 1 + `verify_ui` 1 + `verify_ui_drawing` 1
 （lavapipe 离屏）通过。仍为软件 Vulkan/合成，未做真实 GPU/真机验收。详见
 `docs/ui-redesign.md`「仍未闭环」与 `docs/linux-app.md`。
@@ -13355,7 +13355,7 @@ workflows 全通过；`cad-app` 275、`cad-ui-slint` 82+1 离屏+1 门控、`app
 命令输入区：`CANCEL`/`ESC` 此前只取消绘制捕获，现在按活动状态依次取消测量/批注/绘制并
 退出平移；`CONFIRM` 也按活动状态作用于测量/批注/绘制，而不是只确认绘制。新增
 `command_line_confirms_or_cancels_whatever_tool_is_active` 源码接线契约，并在
-`verify_ui.rs` 场景加入“开启测量/批注/平移后 ESC 必须结束”的断言。`cad-ui-slint` 单元
+`verify_ui.rs` 场景加入“开启测量/批注/平移后 ESC 必须结束”的断言。`cad-ui-legacy` 单元
 80 passed、`verify_ui` 场景通过。
 
 
@@ -13373,7 +13373,7 @@ workflows 全通过；`cad-app` 275、`cad-ui-slint` 82+1 离屏+1 门控、`app
 
 
 **verify-ui 循环轮 A：AutoCAD 深色外观 + 命令面操作（本轮）**：按用户要求把循环焦点从
-批注转到“UI 匹配 AutoCAD 风格 + 其它操作”。外观：`ui/theme.slint` 改为 AutoCAD 深色
+批注转到“UI 匹配 AutoCAD 风格 + 其它操作”。外观：`ui/theme.旧桌面 UI` 改为 AutoCAD 深色
 （深灰 chrome/panel、浅色文字、蓝色选中、近黑模型空间），`ribbon`/`button`/`canvas`/
 浮动工具栏的硬编码浅色同步；`YacrWindow` 设 `Palette.color-scheme = dark`，使
 std-widgets 的命令栏输入、下拉、确认按钮、进度条也变深（此前为浅色，与深色 chrome 冲突）。
@@ -13381,13 +13381,13 @@ std-widgets 的命令栏输入、下拉、确认按钮、进度条也变深（�
 标题/Ribbon/侧栏/画布**平均亮度深色检查**，以及命令输入区真实操作（`TOOLS`/`PANELS`
 开关、`LINE`+`ESC`、`CIRCLE` 未取点 `CONFIRM` 显式报“参数无效”且保留捕获、`MOVE` 无选择
 显式报“移动需要先选择对象”、未知命令显式报错、`FIT`）。迭代修复：`ColorScheme` 是内建
-枚举不能从 `std-widgets.slint` 导入（首次编译失败已记录并改正）；场景初版把不完整
+枚举不能从 `std-widgets.旧桌面 UI` 导入（首次编译失败已记录并改正）；场景初版把不完整
 `CIRCLE` 的拒绝文案猜成“点”，实际为 `draw.error.invalid`（“参数无效”），按真实目录修正。
 证据见 `docs/verify-ui.md`、`docs/ui-redesign.md` 顶部说明；仍为软件 Vulkan/合成图纸。
 
 
 **verify-ui 无头 UI 循环（本轮）**：新增轻量入口 `scripts/verify-ui.sh` +
-`scripts/verify-ui-summary.py`，对应测试计划第二层：用 Slint 官方 offscreen 平台
+`scripts/verify-ui-summary.py`，对应测试计划第二层：用旧桌面 UI 官方 offscreen 平台
 （`Platform`/`WindowAdapter` + FemtoVGWGPURenderer）+ Mesa lavapipe 软件 Vulkan，实际
 运行真实 `LinuxApp`、自动操作控件、逐层超时、截图、panic 扫描、结构化证据包
 （`verify-ui.json`/`environment.json`/`logs`/`screenshots`）。**不安装 X11/Wayland**，
@@ -13438,7 +13438,7 @@ acadrust）。仍剩外部内容加载、光栅像素纹理、纸空间视口合
 
 **Linux 文件选择/关闭崩溃/后端诊断修复（release 门禁进行中）**：桌面打开经 ashpd 调用系统
 `xdg-desktop-portal` 文件选择器（独立线程等待，取消/失败区分，脏状态选择前后检查）；
-`--open` 为启动路径，无窗口模式仍不调用选择器。Slint setup/teardown 不再写图片属性，
+`--open` 为启动路径，无窗口模式仍不调用选择器。旧桌面 UI setup/teardown 不再写图片属性，
 避免用户 Wayland 关闭回溯中的 RefCell 重入。共享设备实际 API 决定能力/诊断，软件
 Vulkan/原生 Vulkan 不再误标 webgpu。契约与执行范围见 `docs/linux-app.md`；本轮未做
 真实桌面 portal/Wayland/真实 GPU 验收，不沿用历史门禁作本轮证据。主机本轮合成回归
@@ -13478,7 +13478,7 @@ API 确认成功，`https://yacr-examples.pages.dev/` 实际浏览器合成 DXF 
   数组整体替换、显式 false 生效、失败原子保留旧值与 revision；`ViewerConfigStore` 提供
   revision + 数据驱动 observer + 有效配置查询。Web 暴露
   `window.yacr.setConfig/updateConfig/applyUserPreference/clear/config` 与
-  `yacr-config-changed` 事件，localStorage 仅投影 allowedPaths；Slint 按新的
+  `yacr-config-changed` 事件，localStorage 仅投影 allowedPaths；旧桌面 UI 按新的
   `UiPresentationModel` 分面板/overlays/features 门控。详见 `docs/ui-redesign.md`。
 
 主控集成：合并三支后修复 3 处子代理遗漏（app-web 格式、`web.rs` 构造 CustomEvent、
@@ -13486,22 +13486,22 @@ API 确认成功，`https://yacr-examples.pages.dev/` 实际浏览器合成 DXF 
 门禁与运行证据见下方“三工作流集成轮”。
 
 **Linux App 主验收（本轮完成）**：`apps/app-linux` 提供桌面与无窗口共用 LinuxApp，
-真实 HostController 命令与数据库/共享 Slint/wgpu 桥，release smoke 入口
+真实 HostController 命令与数据库/共享旧桌面 UI/wgpu 桥，release smoke 入口
 `bash scripts/check-linux-app.sh`。规范 §11.0、AGENTS/build/ci 已改为 Linux 主验收，
-GitHub `linux-app` 默认启用；原生质量层包含 Slint/Linux App 串行测试。执行证据与未接线
+GitHub `linux-app` 默认启用；原生质量层包含旧桌面 UI/Linux App 串行测试。执行证据与未接线
 范围见 `docs/linux-app.md`；未运行远程 workflow/桌面窗口不计通过。
 最终主机合成测试 1048 passed / 0 failed / 1 ignored，fmt/clippy/Python/WASM 门禁通过。
 release 实际运行证据 `/tmp/opencode/yacr-linux-app-final-retry/`：软件 Vulkan，2 CAD 帧、
 4553 画布像素导航变化；已抽查合成截图，无真实 DWG/桌面窗口/真实 GPU 验收结论。
 
 **Concept UI 重设计进行中**：设计依据 `docs/ui-spec/`，配置/布局纯契约已新增到
-`cad-app::viewer_config`（3 项合成测试已执行通过）。用户授权解除原生 Slint 编译限制，
-后续使用 Linux Slint/wgpu/lavapipe 离屏主测试，不跑 Android 模拟器，最后 WASM 浏览器抽查。
+`cad-app::viewer_config`（3 项合成测试已执行通过）。用户授权解除原生旧桌面 UI 编译限制，
+后续使用 Linux旧桌面 UI/wgpu/lavapipe 离屏主测试，不跑 Android 模拟器，最后 WASM 浏览器抽查。
 完整范围与配置未闭环项见 `docs/ui-redesign.md`。
-Slint 已改为浅银/蓝选中 concept：桌面左侧面板+布局/状态；手机标题+底部四组和工具/图层抽屉。
+旧桌面 UI 已改为浅银/蓝选中 concept：桌面左侧面板+布局/状态；手机标题+底部四组和工具/图层抽屉。
 新增 Linux 官方 FemtoVG/wgpu 离屏平台；原生 UI 合成单元 76 项、真实离屏集成 1 项通过。
 截图 `/tmp/opencode/yacr-concept-round4/`。浮动控件的浏览器触控排除命中已补契约。
-本轮三个里程碑已完成限定范围：配置布局子集、共享 Slint concept 重排、原生主回归及
+本轮三个里程碑已完成限定范围：配置布局子集、共享旧桌面 UI concept 重排、原生主回归及
 桌面 WASM 第二层抽查。最终 Linux 合成 1045 passed / 0 failed / 1 ignored，严格 clippy
 （含 UI 和 Web wasm）及全部门禁通过。原生截图 `/tmp/opencode/yacr-concept-final-native/`；
 浏览器 `/tmp/opencode/yacr-concept-final-web/integration.png` 人工抽查确认初始合成图不再裁切，
@@ -13538,7 +13538,7 @@ UI 工具及 Web/Android sink 合并结果，完成核心与无头 Web 验证；
   发布当前数据库快照，创建/编辑/撤销/重做可见；导航与叠加保持原 Arc，不重导入。
 - 修复绘制主指针同时进入宿主导航/选择：MOVE 取空白锚点不再清空选择，取消不残留
   意外选择高亮。绘制 sink 返回真实命令错误，失败保留捕获参数，不冒充提交成功。
-- 新增 `scripts/check-web-drawing.mjs`：真实 Slint 命令栏取点/确认，经宿主与事务到
+- 新增 `scripts/check-web-drawing.mjs`：真实旧桌面 UI 命令栏取点/确认，经宿主与事务到
   WebGL2；LINE/CIRCLE/MOVE/TRIM 四场景均改变底图像素，撤销恢复相同 CAD 像素哈希；
   LINE/CIRCLE 确认前与取消不新增实体，重做恢复实体计数。每种工具独立进程串行运行。
 - 核心串行 **963 passed / 0 failed / 1 ignored**；JS **27 passed**；fmt、核心与 app-web
@@ -13605,34 +13605,34 @@ DPR2 通过，并直接对 **Cloudflare Pages 生产 URL 重跑通过**。截图
 WebGPU/真实 GPU、Android Activity resize/SAF、INSERT 根选择高亮（仅叶子高亮）。
 详见 `docs/ribbon-ui.md`、`docs/ui.md`、`docs/panels.md`。
 
-**Ribbon UI 布局轮**：保留 Slint/shared-wgpu，界面拆成 app/ribbon/button/command-bar/
+**Ribbon UI 布局轮**：保留旧桌面 UI/shared-wgpu，界面拆成 app/ribbon/button/command-bar/
 canvas/panels，桌面 Ribbon 与命令栏可收展；手机默认仅底部命令栏，TOOLS 打开工具。
-手机 48px 按钮，真实 Slint 文件选择器导入 DWG、双指缩放与拖动已接应用命令。
-未接绘制/编辑菜单禁用且显式标注，交接详见 `docs/ribbon-ui.md`。独立无 Slint CAD
+手机 48px 按钮，真实旧桌面 UI 文件选择器导入 DWG、双指缩放与拖动已接应用命令。
+未接绘制/编辑菜单禁用且显式标注，交接详见 `docs/ribbon-ui.md`。独立无旧桌面 UI CAD
 显示 wasm 尚未提取，当前 app-web.wasm 不算独立引擎，由下一阶段实施。
 
-**渲染桥职责重构**：继续采用 Slint/shared Device/Queue。CPU controller 移至
-`cad-app/render_scene`，GPU runtime 与 Slint presenter 分离；字体 revision、
+**渲染桥职责重构**：继续采用旧桌面 UI/shared Device/Queue。CPU controller 移至
+`cad-app/render_scene`，GPU runtime 与旧桌面 UI presenter 分离；字体 revision、
 上传成功后发布、底图/批注组更新、画面脏标记、纹理身份和设备生命周期已接线。
 `IncomingDocument=None` 明确表示关闭文档。详见 `docs/bridge-runtime.md`。
 最终核心串行测试 875 passed / 0 failed / 1 ignored；新增 GPU 契约实际运行。
 桌面及 320/390px 高 DPI 无头 WebGL2 回归通过，UI-only 语言切换不增加 CAD 绘制数。
-原生 Slint 测试仍受环境阻塞；wasm 测试仅编译。后台 CPU 准备、分批上传预算和真实
+原生旧桌面 UI 测试仍受环境阻塞；wasm 测试仅编译。后台 CPU 准备、分批上传预算和真实
 设备丢失恢复尚未验收。并行核心 GPU 测试一次驱动 SIGSEGV，串行重跑通过，不能隐去。
 
 **宿主结构拆分**：Web Rust 宿主拆为 documents/annotations/fonts/input/persistence，
-JS 宿主拆为 i18n/files/renderer/runtime；Slint 桥分离 scene/camera/tests，既有接口和
+JS 宿主拆为 i18n/files/renderer/runtime；旧桌面 UI 桥分离 scene/camera/tests，既有接口和
 13 项桥测试保留。核心 870 passed、新增 JS 契约 5 passed、Web release 与两次本地
 Playwright 通过（含模块 HTTP 200、批注下载/空 sidecar 回导与状态保留）。CI 与部署
 检查包含所有 JS 模块。结构与环境阻塞见 `docs/code-structure.md`、
-`docs/validation-web.md` §6；原生 Slint 测试未执行完成，不能当作通过。
+`docs/validation-web.md` §6；原生旧桌面 UI 测试未执行完成，不能当作通过。
 
 四个并行 workstream 已合入 main 并验证：
 
 - **Android 运行闭环**：x86_64 release APK 在无头模拟器安装/启动/渲染；修复画布输入
   未接线（现在单指拖动平移、滚轮/捏合缩放）、初始状态文案、后端日志；像素 diff 证明
   平移生效。证据 `docs/validation-android.md`（含截图/日志）。
-- **Web 运行闭环**：修复桥固定 WebGPU、Slint 缺 `renderer-femtovg-wgpu`、wasm 轮询
+- **Web 运行闭环**：修复桥固定 WebGPU、旧桌面 UI 缺 `renderer-femtovg-wgpu`、wasm 轮询
   误判设备丢失、WebGL2 MSAA present 失败；`web-dist/` 在无头 Chromium 以 WebGL2 通过
   加载/导航/双语，语言偏好持久化；B29 冒烟脚本修复。证据 `docs/validation-web.md`。
 - **3D / 纸空间宿主接线**：bridge 按 `SpaceSelection` 与视图模式分派 `render`/`render_3d`，
@@ -13695,9 +13695,9 @@ flange 样本，但仅 `Partial`，不构成兼容性或黄金图验收）；Mul
 
 | # | 项目 | 状态 | 证据 / 位置 |
 |---|---|---|---|
-| 1 | Ribbon 自定义分组渲染 | **已实现** | `ui.components.ribbon.tabs[].groups[].commands[]` 真正渲染并按 `commandVisibility` 过滤、`display` 模式与内联溢出；未声明自定义 tabs 时内置面板不变。`crates/cad-ui-slint/ui/ribbon.slint:98–156,205` |
+| 1 | Ribbon 自定义分组渲染 | **已实现** | `ui.components.ribbon.tabs[].groups[].commands[]` 真正渲染并按 `commandVisibility` 过滤、`display` 模式与内联溢出；未声明自定义 tabs 时内置面板不变。`crates/cad-ui-legacy/ui/ribbon.旧桌面 UI:98–156,205` |
 | 2 | overlay 开关驱动合成层 | **已实现** | `view.overlays.{axes,grid,selectionHighlight,snapHints}` 端到端门控绘制（axes/grid 真实世界参考几何，捕捉标记按 `SnapKind`；`annotations` 开关随批注子系统移除）。`crates/cad-app/src/render_scene/mod.rs:213–265` |
-| 3 | interaction 门控 | **已实现** | `interaction.{pointer,touch,keyboardShortcuts}` 在共享 Slint 适配器逐项门控输入（指针/滚轮/拾取/别名展开）。`crates/cad-ui-slint/src/adapter.rs:160–167`、`tests/interaction_gating.rs` |
+| 3 | interaction 门控 | **已实现** | `interaction.{pointer,touch,keyboardShortcuts}` 在共享旧桌面 UI 适配器逐项门控输入（指针/滚轮/拾取/别名展开）。`crates/cad-ui-legacy/src/adapter.rs:160–167`、`tests/interaction_gating.rs` |
 | 4 | 精简预设语义 | **已实现** | `minimal` 有显式组件真值表与命令白/黑名单（`canvasOnly ⊆ minimal ⊆ full`）。`crates/cad-app/src/viewer_config.rs:202–311` |
 | 5 | 面板细节（布局面板；资源/3D/诊断抽屉；`responsive-ui.md` §6 缺口；软键盘/安全区） | **已完成（本轮，边界显式）** | 诊断抽屉 + 资源/3D 抽屉 + 布局比例（显示级）已接线（`docs/panels.md` §3.4）；纸空间 mesh/图像逐三角裁剪闭环（`docs/layouts.md` §4）；`safe_insets` 已折入 `CanvasMetrics`（`docs/input.md` §5）。显式缺失：3D fit、视口比例命令面、图像实体建模、Android OS inset 回调转发 |
 | 6 | 原生宿主偏好持久化 | **已实现** | 原生宿主读取 `$XDG_CONFIG_HOME/yacr/config.json` 与 `preferences.json`，支持 `--config`/`--preferences` 覆盖，无 XDG/HOME 时显式不持久化。`apps/app-linux/src/host/config_file.rs:103–175` |
@@ -13762,7 +13762,7 @@ revision 不连续重建；GPU 重建不改数据库；设备失败和退出保�
 
 ## 2026-10-14 React + Tauri 原生 Linux 探针实验（进行中，未验收）
 
-用户批准以 Tauri2 + React 替换 Linux 桌面 Slint UI，并新增 X11/XWayland-only GPU 合成探针；
+用户批准以 Tauri2 + React 替换 Linux 桌面旧桌面 UI UI，并新增 X11/XWayland-only GPU 合成探针；
 **不允许 WASM、不允许逐帧 readback**。决策见 `docs/adr/0006-react-native-linux-experiment.md`。
 
 本轮交付（scope：`apps/app-react-linux/**`（除 `ui/**` 归 designer）、根 `Cargo.toml`、
@@ -13865,7 +13865,7 @@ native Wayland / DWG / 真实鼠标 / 正式 CAD 仍 **NOT RUN**；不继续代�
 写入 spec 与 ADR，供未来 Windows/macOS 实现参照；Linux 探针代码修复由**另 lane** 进行，不在本 lane。
 
 - `CAD_IMPLEMENTATION_SPEC.md`：新增 §21「实验范围增补：React/Tauri 原生桌面宿主」——授权
-  React 替代 Slint（桌面实验）、Tauri 壳、native Rust CAD、renderer-only wgpu、no WASM、no 逐帧
+  React 替代旧桌面 UI（桌面实验）、Tauri 壳、native Rust CAD、renderer-only wgpu、no WASM、no 逐帧
   readback；覆盖 §4.11/ADR 0005 的“React 不在本轮”历史限制（**仅限桌面实验路线**），保留 db 唯一
   权威、单 presenter、增量语义、显式 Unsupported 等核心不变量。§2.1.3、§4.11 就地加最小指针，
   未改 P1–P4 历史。
@@ -13876,7 +13876,7 @@ native Wayland / DWG / 真实鼠标 / 正式 CAD 仍 **NOT RUN**；不继续代�
 
 本轮状态（如实记录，不得外推）：
 
-- 用户授权：React 替代 Slint 目标、Tauri 桌面壳、native Rust CAD、renderer-only wgpu / noWASM /
+- 用户授权：React 替代旧桌面 UI 目标、Tauri 桌面壳、native Rust CAD、renderer-only wgpu / noWASM /
   no readback；本轮 **X11/XWayland 获批**。
 - Linux：顶层 Vulkan 覆盖 React **合成 FAIL**（full compositor 像素已取得，无法区分“被覆盖”与
   “未加载”）；**独立 GTK nativechild 桥未验**。
@@ -13887,7 +13887,7 @@ native Wayland / DWG / 真实鼠标 / 正式 CAD 仍 **NOT RUN**；不继续代�
 
 ## 2026-10-14 React 原生 Linux 宿主 closeout（bounded prototype accepted，含限制）
 
-用户目标：React 替代 Slint + Tauri 桌面壳 + native Vulkan；基本 UI 已 implemented 并 validated 为
+用户目标：React 替代旧桌面 UI + Tauri 桌面壳 + native Vulkan；基本 UI 已 implemented 并 validated 为
 **bounded prototype**（**非完整 CAD 产品**）。**旧「顶层透明 alpha 全屏叠加」FAIL 保留为历史**；
 本轮实际方案为 **Linux GTK 中央 native 分区（nativechild）在 React UI 上**，React DOM（ribbon、
 底部命令条）与中央 native CAD **co-visible**。契约见 ADR 0006 第四轮节与规范 §21；使用说明见
@@ -13936,7 +13936,7 @@ renderer 64、WGSL 4；check/clippy/fmt PASS。**71 为契约合成计数，与�
 隐私/锁状态）。旧 `apps/app-react-linux/scripts/run-probe.sh` **未改**。
 
 Win/macOS 仍 **NOT IMPLEMENTED / NOT RUN**；macOS 候选 **Metal**（非 Vulkan）；GPU **无 CPU
-readback**；React 宿主**无 Slint presenter**，**旧 Slint 代码未删除**。清理：截图临时权限恢复
+readback**；React 宿主**无旧桌面 UI presenter**，**旧桌面 UI 代码未删除**。清理：截图临时权限恢复
 baseline；**保留 unknown/desktop 原锁状态**（最近启动为 unlocked → 保持 unlocked，**不得声称
 always locked**）；全屏截图**仅本地未上传**；外部 `debug_fixture.rs`/`debug-block.dwg` **未索引/未用**。
 

@@ -8,7 +8,7 @@ frontend before the Rust host compiles (``tauri::generate_context!`` needs
 ``ui/dist``). It must still never render, run Rust tests or build a release.
 ``core-quality`` must also run the React tests, the retained platform-neutral
 node PNG contract and the UI-migration guards. ``android-check`` must compile the
-retired ``app-android`` placeholder without the deleted Slint crate.
+``app-android`` placeholder without any retired desktop-UI crate.
 """
 import importlib.util
 import pathlib
@@ -125,16 +125,15 @@ class LinuxWorkflowContracts(unittest.TestCase):
         self.assertNotEqual(mutated, text)
         self.assertTrue(self.check_text(mutated))
 
-    def test_android_compile_gate_drops_the_retired_slint_crate(self):
+    def test_android_compile_gate_uses_the_current_package_set(self):
         text = (ROOT / ".github/workflows/core.yml").read_text()
         block = workflow.job_block(text, "android-check")
         self.assertIsNotNone(block)
         self.assertIn("cargo check --target aarch64-linux-android -p app-android --locked", block)
-        self.assertNotIn("cad-ui-slint", block)
-        # Re-introducing the deleted crate into the compile gate must be caught.
+        # Re-introducing a retired crate into the compile gate must be caught.
         mutated = text.replace(
             "cargo check --target aarch64-linux-android -p app-android --locked",
-            "cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked",
+            "cargo check --target aarch64-linux-android -p cad-retired-ui -p app-android --locked",
         )
         self.assertTrue(self.check_text(mutated))
 

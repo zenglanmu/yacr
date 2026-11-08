@@ -5,8 +5,8 @@
   采用 API 与对外分发前审计锁定包许可及其传递依赖。
 - MiniCAD：轻量开源 2D/3D CAD，仅作为功能与实现参考；未复制其源码，也不是构建或运行时依赖。
 - wgpu / Tauri / GTK：桌面 UI 与渲染技术方向。wgpu 仅由 `cad-render-wgpu` 依赖；桌面宿主使用
-  Tauri 2（WebView）+ GTK3/WebKitGTK 4.1 + 原生 GTK/wgpu CAD 分区。Slint 依赖已随桌面 UI 迁移
-  退役（见 `docs/adr/0010-react-linux-host-replaces-slint.md`）。具体版本与传递依赖见 Cargo.lock；
+  Tauri 2（WebView）+ GTK3/WebKitGTK 4.1 + 原生 GTK/wgpu CAD 分区。
+  具体版本与传递依赖见 Cargo.lock；
   依赖许可证需建立分发审计。
 - OpenCADStudio：历史上曾作为功能规格与 UI 交互参考；该参考练习已于 2026-10-15 结束，本地参考目录 `docs/ui-requirements/` 已移除。其不作为源码采用来源，未复制其代码；此前调查记录保留在 `docs/migration-map.md`，其中记录未复制代码；不构成新的源码/资源复制授权。
 - glam/serde/serde_json/thiserror 等实际依赖见 Cargo.lock；依赖许可证需建立分发审计。

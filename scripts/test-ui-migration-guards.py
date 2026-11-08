@@ -4,14 +4,14 @@
 Entrypoint:  python3 scripts/test-ui-migration-guards.py
 
 These are **negative + positive controls** for the two guards that enforce the
-Slint→React migration invariants. Each control builds a throwaway fixture
+UI migration invariants. Each control builds a throwaway fixture
 workspace under a temporary directory and runs the guard as a subprocess with an
 explicit root, so the real repository is never modified:
 
-* `scripts/check-architecture.py` — the Slint/toolkit ban must catch a
-  `slint`/`slint-build`/`iced` dependency no matter which table declares it
+* `scripts/check-architecture.py` — the toolkit ban must catch an `iced`
+  dependency no matter which table declares it
   (runtime, `build-dependencies`, `dev-dependencies`, target-specific), including
-  Cargo dependency renames (`x = { package = "slint-build" }`) and
+  Cargo dependency renames (`x = { package = "iced" }`) and
   workspace-inherited aliases (`x.workspace = true` resolving through the root
   `[workspace.dependencies]`), while still accepting a legitimate non-toolkit
   build dependency and a benign inherited alias.
@@ -108,7 +108,7 @@ ARCH_MEMBERS: dict[str, str] = {
 
 
 class ArchitectureGuardContract(unittest.TestCase):
-    """The toolkit ban rejects Slint in every dependency table (incl. renames)."""
+    """The toolkit ban rejects `iced` in every dependency table (incl. renames)."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -150,46 +150,46 @@ class ArchitectureGuardContract(unittest.TestCase):
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
-    def test_slint_build_in_build_dependencies_is_rejected(self) -> None:
+    def test_iced_in_build_dependencies_is_rejected(self) -> None:
         self.append_to(
-            "crates/cad-app", '\n[build-dependencies]\nslint-build = "=1.18.1"\n'
+            "crates/cad-app", '\n[build-dependencies]\niced = "0.13"\n'
         )
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assert_rejected(completed)
-        self.assertIn("slint-build", completed.stderr)
+        self.assertIn("iced", completed.stderr)
 
-    def test_slint_build_in_target_build_dependencies_is_rejected(self) -> None:
+    def test_iced_in_target_build_dependencies_is_rejected(self) -> None:
         self.append_to(
             "crates/cad-app",
             '\n[target.\'cfg(target_os = "linux")\'.build-dependencies]\n'
-            'slint-build = "=1.18.1"\n',
+            'iced = "0.13"\n',
         )
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assert_rejected(completed)
 
-    def test_slint_in_dev_dependencies_is_rejected(self) -> None:
-        self.append_to("crates/cad-app", '\n[dev-dependencies]\nslint = "=1.18.1"\n')
+    def test_iced_in_dev_dependencies_is_rejected(self) -> None:
+        self.append_to("crates/cad-app", '\n[dev-dependencies]\niced = "0.13"\n')
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assert_rejected(completed)
 
-    def test_slint_build_in_target_dev_dependencies_is_rejected(self) -> None:
+    def test_iced_in_target_dev_dependencies_is_rejected(self) -> None:
         self.append_to(
             "crates/cad-app",
             '\n[target.\'cfg(target_os = "linux")\'.dev-dependencies]\n'
-            'slint-build = "=1.18.1"\n',
+            'iced = "0.13"\n',
         )
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assert_rejected(completed)
 
-    def test_renamed_slint_build_dependency_is_rejected(self) -> None:
+    def test_renamed_iced_dependency_is_rejected(self) -> None:
         self.append_to(
             "crates/cad-app",
             '\n[build-dependencies]\n'
-            'ui_toolkit = { package = "slint-build", version = "=1.18.1" }\n',
+            'ui_toolkit = { package = "iced", version = "0.13" }\n',
         )
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assert_rejected(completed)
-        self.assertIn("slint-build", completed.stderr)
+        self.assertIn("iced", completed.stderr)
 
     def test_iced_dependency_is_rejected(self) -> None:
         self.append_to(
@@ -198,11 +198,11 @@ class ArchitectureGuardContract(unittest.TestCase):
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assert_rejected(completed)
 
-    def test_inherited_slint_build_alias_in_build_dependencies_is_rejected(self) -> None:
+    def test_inherited_iced_alias_in_build_dependencies_is_rejected(self) -> None:
         # `ui_toolkit.workspace = true` inherits the alias from the selected root;
-        # the real package is `slint-build`, so the toolkit ban must resolve it.
+        # the real package is `iced`, so the toolkit ban must resolve it.
         self.write_root(
-            'ui_toolkit = { package = "slint-build", version = "=1.18.1" }\n'
+            'ui_toolkit = { package = "iced", version = "0.13" }\n'
         )
         self.append_to(
             "crates/cad-app",
@@ -210,11 +210,11 @@ class ArchitectureGuardContract(unittest.TestCase):
         )
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assert_rejected(completed)
-        self.assertIn("slint-build", completed.stderr)
+        self.assertIn("iced", completed.stderr)
 
-    def test_inherited_slint_build_alias_in_target_dev_dependencies_is_rejected(self) -> None:
+    def test_inherited_iced_alias_in_target_dev_dependencies_is_rejected(self) -> None:
         self.write_root(
-            'ui_toolkit = { package = "slint-build", version = "=1.18.1" }\n'
+            'ui_toolkit = { package = "iced", version = "0.13" }\n'
         )
         self.append_to(
             "crates/cad-app",
@@ -223,7 +223,7 @@ class ArchitectureGuardContract(unittest.TestCase):
         )
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assert_rejected(completed)
-        self.assertIn("slint-build", completed.stderr)
+        self.assertIn("iced", completed.stderr)
 
     def test_inherited_benign_alias_is_accepted(self) -> None:
         # An inherited alias that is not a toolkit must not be over-rejected: with

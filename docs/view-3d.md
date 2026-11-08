@@ -25,7 +25,7 @@ All conventions are fixed by `camera.rs` and asserted by its unit tests.
   pointing from the eye toward the target. `(right, up, -forward)` is
   right-handed: `right × up = -forward`. `ViewBasis::is_orthonormal` checks this.
 - **Units**: world coordinates are in drawing units; screen coordinates are
-  logical pixels with `y` growing **downwards** (pointer/Slint convention), so
+  logical pixels with `y` growing **downwards** (pointer/UI convention), so
   `world_to_screen` flips the sign.
 - **Angles**: radians unless a name says otherwise. A perspective field of view
   is the full **vertical** angle.

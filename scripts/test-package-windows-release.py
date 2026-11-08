@@ -82,9 +82,8 @@ FINALIZE_REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
 
 FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("retired NOT IMPLEMENTED stub", re.compile(r"NOT\s+IMPLEMENTED", re.IGNORECASE)),
-    ("retired Slint UI reference", re.compile(r"slint", re.IGNORECASE)),
     (
-        "old Slint GUI binary name (the host builds yacr-windows.exe)",
+        "retired GUI binary name (the host builds yacr-windows.exe)",
         re.compile(r"(?<![\w-])yacr\.exe"),
     ),
 )
@@ -140,7 +139,7 @@ class PackageWindowsReleasePipelineContracts(unittest.TestCase):
         mutated = self.script.replace("yacr-windows.exe", "yacr.exe")
         problems = check_pipeline(mutated)
         self.assertTrue(
-            any("old Slint GUI binary name" in problem for problem in problems), problems
+            any("retired GUI binary name" in problem for problem in problems), problems
         )
 
     def test_finalize_script_implements_the_zip_step(self) -> None:

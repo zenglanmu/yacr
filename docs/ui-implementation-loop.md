@@ -1,8 +1,8 @@
 # UI 功能实现迭代（2026-10-04）
 
-> **2026-10-28 提示**：本文是逐轮实现日志（最早 2026-10-04）。文中 `cad-ui-slint`（含
-> `crates/cad-ui-slint/ui/app.slint`）、`shortcut.unsupported` 通道与 `cargo test -p cad-ui-slint`
-> 一律**已随 2026-10-16 的 Slint 退役删除**；当前键位以 `docs/shortcuts.md` 为准，下文命令仅作历史证据。
+> **2026-10-28 提示**：本文是逐轮实现日志（最早 2026-10-04）。文中旧 UI crate（已删除）及其
+> `ui/app` 外壳定义、`shortcut.unsupported` 通道与该 crate 的 `cargo test --locked`
+> 一律**已随 2026-10-16 的早期桌面 UI 退役删除**；当前键位以 `docs/shortcuts.md` 为准，下文命令仅作历史证据。
 
 ## 当前默认编译门禁
 
@@ -16,7 +16,7 @@
 对尚无后端能力的按键给出显式“不支持”反馈，不得静默无操作；保留
 `interaction.keyboardShortcuts` 门控；不引入重绑定编辑器。
 
-键字符串为 Slint 私有，故键位表放在 `crates/cad-ui-slint/ui/app.slint` 现有捕获/冒泡
+键字符串为早期桌面 UI（已移除）私有，故键位表放在其 `ui/app` 外壳定义现有捕获/冒泡
 处理器内，Rust 只把动作分发到既有回调。新增 `shortcut-unsupported(string)` 回调与双语键
 `shortcut.unsupported`，在 `adapter.rs` 把稳定标签（如 `F4`、`Ctrl+S`）渲染到状态栏并展开
 命令行。
@@ -40,8 +40,8 @@ Ctrl+Z/Y/A/C/X/V 与 Ctrl+Home 留在冒泡处理器，其余（F 键、Ctrl+O�
 可见反馈；本轮不新增画布内 toast。
 
 证据边界：本轮实际运行（本机 Wayland + Quadro P620；离屏用软件 Vulkan lavapipe）：
-`cargo fmt --all`、`cargo clippy -p cad-ui-slint --all-targets --locked -- -D warnings`、
-`VK_ICD_FILENAMES=…/lvp_icd.json cargo test -p cad-ui-slint --locked`（171 通过 / 0 失败，
+`cargo fmt --all`、该 crate 的 `cargo clippy --all-targets --locked -- -D warnings`、
+`VK_ICD_FILENAMES=…/lvp_icd.json cargo test --locked`（该 crate，171 通过 / 0 失败，
 含 137 lib + 34 集成）、`python3 scripts/check-i18n.py`、`python3 scripts/check-workflows.py`。
 新增/强化合成契约：`shortcut_map_contract.rs`（源码结构契约：捕获/冒泡分别绑定、唯一缩进
 声明、chrome 门控计数）与 `shortcut_map_wiring.rs`（adapter 运行时：F7 翻转配置网格叠加、
@@ -74,15 +74,15 @@ Ctrl+9/Ctrl+0、净屏下 Ctrl+S 的本地化文案与 chrome 隐藏）。这些
 新增 27 项合成契约：SelectAll 17、批注面板源码 6、搜索匹配 1、UI 接线 1、
 补全导航新增 2；同时强化既有补全及历史源码契约。全部仅编译，未执行。
 首次 debug 编译拒绝跨条件组件访问滚动控件 ID；主控改用共享偏移属性绑定并重编译。
-最终统一代码树实际执行 `cargo fmt -p cad-app -p cad-ui-slint` 和
+最终统一代码树实际执行 `cargo fmt -p cad-app`（含旧 UI crate）和
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`，
-检查通过（49.80 秒），包含 Linux App、Slint 与新增测试代码。
+检查通过（49.80 秒），包含 Linux App、早期桌面 UI（已移除）与新增测试代码。
 本轮未运行测试、静态门禁、clippy、wasm/Android 编译、Linux 离屏、release 构建、
 真实图纸/GPU/窗口/浏览器/真机或远程 CI；首次失败记录不改写成通过。
 
 ## 第三轮：命令补全与批量图层显隐
 
-三个独立分支分别实现纯 Rust 补全、Slint 建议控件、应用层批量显隐命令；
+三个独立分支分别实现纯 Rust 补全、早期桌面 UI（已移除）建议控件、应用层批量显隐命令；
 子代理仅写代码，主控审查、提交、合并、接线并统一 debug 编译，不执行测试。
 
 - 参考 15：按当前已支持的完整命令选择器前缀给出建议，规范化大小写和 Unicode
@@ -105,15 +105,15 @@ Ctrl+9/Ctrl+0、净屏下 Ctrl+S 的本地化文案与 chrome 隐藏）。这些
 
 新增 22 项合成契约：补全逻辑 7、补全控件源码 3、批量显隐应用集成 11、
 补全/批量回调接线 1。主控审查时修正一项补全断言：完整 `ZOOM IN` 不应再建议自身。
-最终统一代码树已实际执行 `cargo fmt -p cad-app -p cad-ui-slint` 和
+最终统一代码树已实际执行 `cargo fmt -p cad-app`（含旧 UI crate）和
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`，
-debug 检查通过（50.61 秒），包含 Linux App、Slint 与新增测试代码。
+debug 检查通过（50.61 秒），包含 Linux App、早期桌面 UI（已移除）与新增测试代码。
 第三轮未运行测试、静态门禁、clippy、wasm/Android 编译、Linux 离屏、release 构建、
 真实图纸/GPU/窗口/浏览器/真机或远程 CI；不沿用前轮运行证据。
 
 ## 第二轮：命令召回与只读详情
 
-三个独立分支分别实现纯 Rust 命令历史、Slint 历史控件、属性/诊断详情。
+三个独立分支分别实现纯 Rust 命令历史、早期桌面 UI（已移除）历史控件、属性/诊断详情。
 子代理仅写代码，主控审查后提交、合并并补齐配置/双语/模型接线；不执行测试。
 
 - 参考 10/15：保存已提交命令的原始大小写与内容，连续重复去重，提供上下键召回、
@@ -138,9 +138,9 @@ CAD 属性编辑功能。未运行键盘、剪贴板、辅助技术或移动端�
 adapter 历史/语言接线 1。源码契约不能证明焦点、复制、只读控件或布局运行正确。
 主控首次 debug 编译发现命令输入同时指定 width/min-width；移除矛盾声明后重编译。
 
-主控合并后的最终代码树实际执行 `cargo fmt -p cad-ui-slint` 和
+主控合并后的最终代码树实际执行 `cargo fmt`（该 crate）和
 `cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked`。
-最终检查通过（47.37 秒），包含 Linux App、Slint 和新增测试代码；不将首次编译失败
+最终检查通过（47.37 秒），包含 Linux App、早期桌面 UI（已移除）和新增测试代码；不将首次编译失败
 记录改写成通过。第二轮未运行契约测试、静态门禁、clippy、wasm/Android 编译、
 Linux 离屏、release 构建、真实图纸/GPU/窗口/浏览器/真机或远程 CI。
 
@@ -180,11 +180,11 @@ Linux 离屏、release 构建、真实图纸/GPU/窗口/浏览器/真机或远�
 主控合并三个分支并完成接线后，实际运行：
 
 ```bash
-cargo fmt -p cad-ui-slint
+cargo fmt
 cargo check --workspace --exclude app-android --exclude app-web --all-targets --locked
 ```
 
-最终 debug 检查通过（14.33 秒），包含 Linux App、Slint 与新增测试代码。
+最终 debug 检查通过（14.33 秒），包含 Linux App、早期桌面 UI（已移除）与新增测试代码。
 本轮没有运行静态门禁、clippy、wasm/Android 编译或远程 CI。
 
 本轮只做 debug 编译验证；新增契约仅编译，不宣称已执行通过。

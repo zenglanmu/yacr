@@ -1,7 +1,7 @@
 name: CI build layers
 
 # Layered CI mirroring the repository's real gate. After the UI replacement the
-# desktop host is React/Tauri, the Slint crate is gone and the Android/Windows/
+# desktop host is React/Tauri, the retired UI crate is gone and the Android/Windows/
 # macOS UIs are explicit NOT IMPLEMENTED placeholders.
 #
 # Real (genuine) jobs:
@@ -37,7 +37,7 @@ name: CI build layers
 #
 # Release packaging jobs (re-enabled 2026-11-01) — event-gated to a `v*` tag or a
 # manual `workflow_dispatch`, never a routine push/PR. They build real artifacts
-# for the current React/Tauri hosts (no Slint anywhere) and upload them as
+# for the current React/Tauri hosts (no retired UI toolkit anywhere) and upload them as
 # workflow artifacts. When the matching repository credentials exist they also
 # **sign with LOCAL, SELF-SIGNED material** (switched 2026-11-05):
 #   * Windows: a repository self-signed PFX (GitHub secret) imported on the

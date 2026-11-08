@@ -4,8 +4,8 @@
   **一行实现代码都没改**。分阶段状态见第 7 节（① 已在本轮完成，②–⑧ 全部「未实现」）。
 - 日期：2026-10-23。
 - 相关 ADR：[ADR-0003](0003-web-composition.md)（浏览器宿主历史组合；其 `:24-25` 的「wgpu 30 在 wasm
-  上启用 `webgl` feature 时提供 `Backends::GL`（WebGL2）路径」仍是现行技术事实，Slint 部分已退役）、
-  [ADR-0010](0010-react-linux-host-replaces-slint.md)（React/Tauri 宿主；其 `:22-28` 的「CAD 由原生
+  上启用 `webgl` feature 时提供 `Backends::GL`（WebGL2）路径」仍是现行技术事实，旧桌面 UI 部分已退役）、
+  [ADR-0010](0010-react-linux-host.md)（React/Tauri 宿主；其 `:22-28` 的「CAD 由原生
   Rust 绘制在 child surface 上」对 Wayland 仍成立，对 X11 的目标态被本文修订）、
   [ADR-0023](0023-dom-on-top-cross-host-composition.md)（**现行合成权威**；本文修订其 D1 的「单一合成
   方向」表述与 §5 的「X11 web+canvas 显式延后」，**不**改其输入漏斗、弹窗围栏与单 presenter 不变量）。

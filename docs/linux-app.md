@@ -1,8 +1,8 @@
 # Linux App：主验收宿主
 
-> **已退役（2026-10-16）**：本文件的 Slint `yacr-linux` 宿主与其脚本（`check-linux-app.sh` 等）已随
-> Slint 删除。当前 Linux 桌面宿主见 `docs/react-linux-app.md`（`apps/app-linux`，bin `yacr`）与
-> `docs/build.md`；决策见 [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史事实。
+> **已退役（2026-10-16）**：本文件的早期桌面 UI（已移除）`yacr-linux` 宿主与其脚本（`check-linux-app.sh` 等）已随
+> 该工具包删除。当前 Linux 桌面宿主见 `docs/react-linux-app.md`（`apps/app-linux`，bin `yacr`）与
+> `docs/build.md`；决策见 [ADR 0010](adr/0010-react-linux-host.md)。下文保留为历史事实。
 >
 > **下方命令块里的运行器在仓库中已不存在**（`scripts/verify-ui.sh`、`scripts/check-linux-app.sh`，
 > 以及 `yacr-linux` 二进制），**不要照抄执行**。现行入口是 `scripts/run-react-linux.sh`
@@ -27,7 +27,7 @@ bash scripts/check-linux-app.sh                   # 无窗口，release App（�
 bash scripts/verify-ui.sh                         # 无头 UI 调试循环（第二层，见 docs/verify-ui.md）
 ```
 
-`--headless --output <新目录>` 运行同一个 LinuxApp/controller/Slint/共享设备 CAD 桥，只改变
+`--headless --output <新目录>` 运行同一个 LinuxApp/controller/早期桌面 UI（已移除）/共享设备 CAD 桥，只改变
 平台适配器。`--size WIDTHxHEIGHT` 限制 320–4096；`--locale zh-CN|en`；`--gpu auto|high|low`
 设置桌面 wgpu 适配器偏好（`auto`/`high` 优先独显、`low` 优先核显，等价 wgpu
 `PowerPreference`；还可直接用 `WGPU_ADAPTER_NAME`/`WGPU_POWER_PREF`）。
@@ -41,8 +41,8 @@ bash scripts/verify-ui.sh                         # 无头 UI 调试循环（第
 
 混合显卡说明：桌面**默认（`--gpu auto`）即优先独显**（双显卡默认选独立 GPU），
 此时 `nvidia-smi` 应能看到本应用进程；`--gpu low` 才切到核显。偏好只是尽力而为：
-无可达独显时回退到所选后端的首个适配器。Slint 会拒绝纯 CPU 适配器（llvmpipe 需
-`SLINT_WGPU_CPU=1` 才会启用），所以能启动就意味着在用真实 GPU 适配器。
+无可达独显时回退到所选后端的首个适配器。早期桌面 UI（已移除）会拒绝纯 CPU 适配器（llvmpipe 需
+专用环境变量才会启用），所以能启动就意味着在用真实 GPU 适配器。
 
 PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须新建，失败保留，禁止覆盖。
 报告中出图 smoke、导航命令+像素变化是自动检查，`visualAcceptance` 始终等待独立人工审查，
@@ -50,10 +50,10 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
 
 ## 发布包（Flatpak：历史与当前指向）
 
-> **本节原描述的是 Slint 时代的当前分发路径，已过时（2026-10-16 退役）**。旧流水线把 Slint 宿主
+> **本节原描述的是早期桌面 UI 时代的当前分发路径，已过时（2026-10-16 退役）**。旧流水线把该工具包宿主
 > `yacr-linux` + `cad-cli-tools` 打进 app-id `dev.yacr.app`，运行时为 `org.freedesktop.Platform//26.08`，
 > 那次实测产物是 `yacr-0.1.1-linux-x86_64.flatpak`（**15,368,080 B**，**历史**，非当前）。
-> `scripts/package-linux-release.sh` 与 `packaging/flatpak/**` 曾随 Slint 删除。
+> `scripts/package-linux-release.sh` 与 `packaging/flatpak/**` 曾随该工具包删除。
 >
 > **当前（2026-10-17）**：该打包流水线已为 **React + Tauri** 宿主（`apps/app-linux`，bin `yacr`）
 > **重新启用**，manifest 改用 `org.gnome.Platform//51`，bundle 内只有 GUI 宿主 + 字体（**不含** CLI），
@@ -68,13 +68,13 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
 显示派生；鼠标平移/滚轮缩放/选择/测量取点、直线/圆/移动、撤销重做使用真实应用路径。
 启动 fit 使用 CAD 内容区域；运行时 50ms 定时器只在**窗口尺寸/配置 revision/相机
 快照真正变化**时才刷新布局与请求重绘（2026-10-08 修复：此前定时器每帧无条件写
-Slint 属性并触发 `request_redraw`，空闲视图以 ~20fps 重绘、单核 CPU 占用 ~40%）。
+早期桌面 UI（已移除）属性并触发 `request_redraw`，空闲视图以 ~20fps 重绘、单核 CPU 占用 ~40%）。
 `CadView::apply_view_snapshot` 对相同快照直接跳过 `set_view_state`/`request_redraw`；
 `Runtime::metrics` 缓存 `(物理尺寸, config revision)`，未变化不重新应用布局或序列化配置。
 异步打开仍由 `poll_open` 每 tick 检查，不会被跳过。
 
 - 桌面打开按钮调用 `xdg-desktop-portal` 的系统文件选择器，筛选 DWG/DXF（含大小写扩展名）；
-  在独立线程等待选择，Slint 事件循环继续运行。需要桌面 session D-Bus、`xdg-desktop-portal`
+  在独立线程等待选择，早期桌面 UI（已移除）事件循环继续运行。需要桌面 session D-Bus、`xdg-desktop-portal`
   及桌面对应的 portal backend（如 KDE/GNOME/GTK）；不在无窗口开发环境安装桌面。
   取消保留当前图纸，服务失败显式提示并保留当前图纸，不伪装为取消或成功。
   `--open PATH` 仍为启动入口；后续桌面打开重新选择文件，不反复打开启动路径。
@@ -85,8 +85,8 @@ Slint 属性并触发 `request_redraw`，空闲视图以 ~20fps 重绘、单核 
 - 未保存批注时打开/关闭被阻止，无隐式 discard。尚无保存/恢复/丢弃决策对话框及恢复缓存。
 - Trim 点选显式 Unsupported 且按钮禁用；CAD 字体由同级 `fonts/` 目录自动加载（缺字体时
   回退到系统默认轮廓面，`--font` 仍是最高优先级显式指定）；原生多触控仍未闭环。
-- `scripts/package-linux-release.sh` 的**Slint 时代**行为（把 `yacr-linux` 打进包并把
-  fontconfig/freetype 复制到包内 `lib/`）已随 Slint 退役；2026-10-17 重启后的脚本只打包预构建的
+- `scripts/package-linux-release.sh` 的**早期桌面 UI 时代**行为（把 `yacr-linux` 打进包并把
+  fontconfig/freetype 复制到包内 `lib/`）已随该工具包退役；2026-10-17 重启后的脚本只打包预构建的
   React 宿主 `bin/yacr` + `fonts/`，不打包宿主共享库，见 `docs/flatpak.md`。glibc/内核、窗口系统、
   Vulkan 驱动与 `xdg-desktop-portal` 仍由运行时/宿主提供，故**不是**静态独立发行包。
 
@@ -111,14 +111,14 @@ Slint 属性并触发 `request_redraw`，空闲视图以 ~20fps 重绘、单核 
 
 - 用户 Wayland 桌面回溯表明关闭窗口在 `RenderingTeardown` 内调用 `set_cad_frame`，
   图片属性变更触发 `request_redraw`，与 winit 窗口的内部可变借用冲突。
-  setup/teardown 现在只更新渲染器和绑定标记，不修改 Slint 图片属性；旧纹理由 Slint
-  图片引用保活，下一次 `BeforeRendering` 按设备 epoch 重新绑定。未修改上游 Slint。
+  setup/teardown 现在只更新渲染器和绑定标记，不修改早期桌面 UI（已移除）图片属性；旧纹理由该工具包
+  图片引用保活，下一次 `BeforeRendering` 按设备 epoch 重新绑定。未修改上游该工具包。
 - 后端能力与诊断从共享 `wgpu::Device::adapter_info().backend` 获取，不再从请求的
   WebGPU 偏好推断。Linux Vulkan 实际显示 `vulkan`，原生 OpenGL 显示 `opengl`；
   不强行把所有 Linux 设备称为 Vulkan。定时状态同步刷新初始化后的诊断标签。
 - 新增无需窗口的生命周期绑定失效契约，真实软件 Vulkan UI 断言，以及注入选择器的
   Linux 宿主 DXF 选择/取消/文件失败契约。注入选择器不是实际桌面 portal 验收。
-- 本轮 Linux/Slint 针对性合成契约 **83 passed / 0 failed**（Linux 单元 1 + 宿主契约 2 +
+- 本轮 Linux/早期桌面 UI（已移除）针对性合成契约 **83 passed / 0 failed**（Linux 单元 1 + 宿主契约 2 +
   UI 单元 79 + 软件 Vulkan UI 集成 1），日志 `/tmp/opencode/yacr-linux-picker-tests.log`；
   fmt、严格 workspace clippy 与四项 Python 门禁通过（i18n 187 keys）。
   主机全量合成回归 **1103 passed / 0 failed / 1 ignored**，日志
@@ -135,10 +135,10 @@ Slint 属性并触发 `request_redraw`，空闲视图以 ~20fps 重绘、单核 
 真实 UI 回调完成直线事务/撤销重做、测量与保存为批注、侧车导出回导，缺失路径不会空成功。
 全 workspace WASM lib 隔离检查通过。首次测试编译发现回调名称不匹配；第一次全量回归
 发现成功后残留旧错误状态，修正后重跑，失败记录未改为通过。
-最终主机门禁（包含 Slint/Linux App）**1048 passed / 0 failed / 1 ignored**；fmt、严格
+最终主机门禁（包含早期桌面 UI（已移除）/Linux App）**1048 passed / 0 failed / 1 ignored**；fmt、严格
 clippy、四项 Python 门禁、3 项工作流变异契约与全 workspace WASM lib 检查通过。
 日志：`/tmp/opencode/yacr-linux-final-tests.log`。增加 resize 契约后首次读取尚未布局的矩形
-失败，补充实际 snapshot 让 Slint 完成布局后重跑通过；不是删掉尺寸断言。
+失败，补充实际 snapshot 让早期桌面 UI（已移除）完成布局后重跑通过；不是删掉尺寸断言。
 
 release 主验收：`YACR_LINUX_OUTPUT=/tmp/opencode/yacr-linux-app-final-retry bash scripts/check-linux-app.sh`
 实际通过，软件 Vulkan llvmpipe / Mesa 26.0.8 / LLVM 21.1.8；1280×800，CAD 矩形

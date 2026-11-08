@@ -40,7 +40,7 @@ LAYOUT 对象的 `name` 作为显示名，绝不使用内部块名 `*Paper_Space
 桥接层导出：
 
 ```rust
-// cad-ui-slint（已随 2026-10-16 退役删除；下列导出面仅为历史记录）
+// 旧 UI crate（已随 2026-10-16 退役删除；下列导出面仅为历史记录）
 pub fn layout_descriptors(db: &DrawingDatabase) -> Vec<LayoutDescriptor>;
 pub fn build_scene_with_space(
     db: &DrawingDatabase,
@@ -307,7 +307,7 @@ world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_sc
 - **打印输出**：无 plot/打印路径。布局绘制是屏幕显示，不是可交付的图纸输出。
 - **倾斜/扭转/透视视口、非矩形裁剪、非均匀视口、注释性缩放、动态块**：导入时置
   `Partial` 并给出原因，本层以稳定原因码显式 `Unsupported`，按样本标记，不假装支持。
-- **布局切换 UI/传输已接线（2026-11-02）**：`LayoutPanelState`（`cad-ui-slint`）已随 Slint 退役
+- **布局切换 UI/传输已接线（2026-11-02）**：`LayoutPanelState`（旧 UI crate）已随桌面 UI 迁移
   删除；当前桌面用 `apps/desktop-ui/src/components/LayoutTabs.tsx`，移动抽屉复用同一
   `layout/layout-tabs.ts` 投影，数据来自 `cad_status.layouts` / `activeSpace`，点击发
   `SPACE MODEL|#<id>`（见 §1.1）。`cad-app` 仍提供并测试校验与切换命令（`SwitchSpace` 校验
@@ -363,7 +363,7 @@ INSERT 基点相减、正值逆时针旋转、OCS normal 提升、数组单元�
 `layout-tabs.test.ts` 覆盖页签渲染顺序、活动态、点击只发一条 `SPACE`、不支持页签可见但禁用
 且只带稳定原因码、缺少/畸形 status 块被拒绝而不篡改。
 
-`cad-ui-slint` 的桥接测试与 `LayoutPanelState` 测试**已随 Slint 退役删除**（该 runner 在仓库中
+旧 UI crate 的桥接测试与 `LayoutPanelState` 测试**已随桌面 UI 迁移删除**（该 runner 在仓库中
 不存在）；对应能力现在由 `LayoutTabs`/`layout-tabs.ts` 与上述 `cad-ui-core` 测试承接。本节有效
 验证是 `cargo test -p cad-representation`、`-p cad-app`、`-p cad-import-acadrust`、
 `-p cad-ui-core` 与 `apps/desktop-ui` 的 `npm test`。

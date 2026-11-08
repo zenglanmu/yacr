@@ -1,9 +1,9 @@
 # 验证与运行证据
 
-> **历史执行证据（Slint 桌面已退役，2026-10-16）**：本文记录的是**迁移前** Slint 宿主/模拟器/浏览器
-> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；Slint→React 迁移后的
+> **历史执行证据（早期桌面 UI 已退役，2026-10-16）**：本文记录的是**迁移前**的早期桌面 UI（已移除）宿主/模拟器/浏览器
+> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；早期桌面 UI→React 迁移后的
 > 最终验证 **NOT RUN**（P6）。当前架构见 `docs/architecture.md` 与
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
+> [ADR 0010](adr/0010-react-linux-host.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
 
 本文件记录**实际执行过**的测试与构建。没有样本、没有真机的项目在此显式标注为未执行。
 
@@ -16,7 +16,7 @@
 - JDK 17（Temurin），Android SDK build-tools 34.0.0 与 30.0.3，
   platform android-34 / android-30，NDK 27.0.12077973。
 - cargo-apk 0.10.0。
-- 锁定依赖：acadrust 0.5.5、slint 1.18.1、wgpu 30.0.1（见 Cargo.lock）。
+- 锁定依赖：acadrust 0.5.5、wgpu 30.0.1（见 Cargo.lock）。
 - 软件 Vulkan：Mesa **lavapipe**（ICD `/usr/share/vulkan/icd.d/lvp_icd.json`，
   adapter `llvmpipe`，`deviceType=CPU`，Mesa 26.0.8-1ubuntu0.3 / LLVM 21.1.8，
   Vulkan instance 1.4.341）。无头渲染证据在 `VK_ICD_FILENAMES=.../lvp_icd.json`
@@ -65,7 +65,7 @@ GPU、非真机、非浏览器。**
 `cargo check -p app-web --target wasm32-unknown-unknown`。
 
 **测试（实跑，lavapipe 串行）**：`cad-import-acadrust` 150、`cad-representation` 168、
-`cad-resources` 34、`cad-scene` 54、`cad-render-wgpu` 78、`cad-app` 265、`cad-ui-slint` 159、
+`cad-resources` 34、`cad-scene` 54、`cad-render-wgpu` 78、`cad-app` 265、旧 UI crate（已删除）159、
 `cad-platform` 23、`cad-cli-tools`（lib 22、cli_contracts 14 等）。**唯二失败**为下述既有项。
 
 **光栅图像渲染证据（lavapipe 实测像素）**：`cad-render-wgpu`
@@ -115,7 +115,7 @@ release 构建、Web/Android 图像加载器接线。
   `renderD129`（Intel `0000:00:02.0`，`drm-engine-render` 有累计时间），NVIDIA
   `renderD128` 为 0；`nvidia-smi` 依赖此解释。**修复后默认（`--gpu auto`）优先独显**：
   GUI 与 CLI 均实测选中 Quadro P620，`nvidia-smi` 显示 40–56 MiB、1–4%。
-  Slint 拒绝纯 CPU 适配器（报 `no GPU-backed WGPU adapter ... set SLINT_WGPU_CPU=1`）。
+  早期桌面 UI（已移除）拒绝纯 CPU 适配器（报 `no GPU-backed WGPU adapter ...` 并要求专用环境变量）。
 - **空闲重绘修复前后**（release、demo 与 `entities.dxf` 都是）：单核 CPU
   **~40%（恒定）→ ~0–2%**；同快照不再触发 `request_redraw`。
 - **显式 GPU 选择**：CLI `render --gpu high` → adapter `Quadro P620 / discrete_gpu`；
@@ -127,7 +127,7 @@ release 构建、Web/Android 图像加载器接线。
   （与桌面合批一致；帧按帧预算绘制部分批次）。`build-representation` 仍报告
   20,856,815 primitives / 46,064,001 vertices（未打包计数语义不变）。
 
-新增/更新契约测试：`cad-ui-slint/tests/idle_redraw.rs`（相同快照不新增重绘、
+新增/更新契约测试：旧 UI crate（已删除）的 `tests/idle_redraw.rs`（相同快照不新增重绘、
 相机变化重绘）、`cad-render-wgpu` `adapter_selection_tests`（6 项：
 auto/high/low 选择与回退）、`cad-cli-tools` `scene_budget_fails_explicitly_instead_of_oom`
 与 `gpu_selection_stable_names...`、`cli_contracts` `--gpu`/`--max-batches` 用法契约、
@@ -154,15 +154,12 @@ auto/high/low 选择与回退）、`cad-cli-tools` `scene_budget_fails_explicitl
 - cad-resources / cad-dependencies / cad-history：路径策略、依赖传播、元数据不触发
   重绘、撤销合并与预算、恢复日志。
 
-`cad-ui-slint` 不在主机运行测试（Linux 宿主缺 fontconfig/freetype 开发头与
-pkg-config，本环境无 sudo）；其 Slint 编译由 Android target 检查覆盖。
+旧 UI crate（已删除）不在主机运行测试（Linux 宿主缺 fontconfig/freetype 开发头与
+pkg-config，本环境无 sudo）；其外壳编译由 Android target 检查覆盖。
 
 ## 已执行的构建
 
-- `cargo check --target aarch64-linux-android -p cad-ui-slint`：通过。
 - `cargo check --target aarch64-linux-android -p app-android`：通过。
-- 探针 APK（Slint Android 后端 + `unstable-wgpu-30`）：`cargo apk build` 产出
-  `slintprobe.apk`（arm64-v8a，debug 258 MB），证明 Slint+Android 打包路径。
 - 本仓库发布 APK：`cargo apk build -p app-android --target aarch64-linux-android
   --lib --release` 产出 `target/release/apk/yacr.apk`（11.6 MB，arm64-v8a，
   使用本地 gitignored 开发密钥签名；manifest package=dev.yacr.app，
@@ -407,7 +404,7 @@ PNG 解码逐字节往返。无适配器时测试显式跳过并打印，不假�
 - `lib/` 迁入 8 个非基础库：`libfontconfig.so.1`、`libfreetype.so.6`、`libexpat.so.1`、
   `libz.so.1`、`libbz2.so.1.0`、`libpng16.so.16`、`libbrotlidec.so.1`、`libbrotlicommon.so.1`；
   `ldd bin/yacr-linux` 中这些均解析到 `bin/../lib/`，glibc/`libgcc_s` 仍来自宿主。
-- 包内 GUI 离屏 smoke 通过：`Slint offscreen adapter ... llvmpipe ... Mesa 26.0.8`,
+- 包内 GUI 离屏 smoke 通过：`早期桌面 UI（已移除）offscreen adapter ... llvmpipe ... Mesa 26.0.8`,
   `backend=vulkan`，`cadFrames=2`，`cadRect=[240,180,1040,500]`，`changedCadPixels=5548`，
   `navigationCameraChanged/navigationPixelsChanged=true`，`renderError=null`，
   `source=synthetic`，`visualAcceptance=manual-review-required`；`initial.png`/`navigation.png`
@@ -488,7 +485,7 @@ CI 模式实现，产物为 tar.gz（含 `Yacr.app` + fonts/docs）。宿主实�
   `cargo check -p app-macos --all-targets --target aarch64-apple-darwin --locked` 与
   `cargo clippy -p app-macos -p app-linux --all-targets --target aarch64-apple-darwin
   --locked -- -D warnings` 均通过（期间修掉 `apps/app-linux/src/host/validation.rs` 与
-  `src/entry.rs` 对 `cad_ui_slint::offscreen` 的无条件引用）。这只做类型检查，**不链接、
+  `src/entry.rs` 对旧 UI crate 的 offscreen 模块的无条件引用）。这只做类型检查，**不链接、
   不产出 Mach-O、不运行**。
 
 **边界（NOT RUN）**：`macos-check`/`macos-release` job、真实 Mac 的窗口/Retina-DPI、
@@ -537,14 +534,14 @@ GPU、窗口/文件对话框、安装运行或像素/视觉验收；Android APK 
 
 ### 合入验证（在 main 的集成树上执行）
 
-- 核心测试 `cargo test --workspace --exclude cad-ui-slint --exclude app-android
+- 核心测试 `cargo test --workspace --exclude app-android
   --exclude app-web --locked`：**573 passed / 0 failed**（33 个测试目标）。
 - `VK_ICD_FILENAMES=.../lvp_icd.json cargo test -p cad-render-wgpu --locked`：
   **47 passed / 0 failed**（含新增透明合成测试，真实提交到 lavapipe）。
 - `cargo fmt --all --check`、`cargo clippy ... --all-targets --locked`（0 warning）、
   `python3 scripts/check-architecture.py`（23 packages）、
   `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`、
-  `cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked`、
+  `cargo check --target aarch64-linux-android -p app-android --locked`、
   `python3 scripts/check-i18n.py`（116 keys）、`check-workflows.py`、
   `check-fixture-manifest.py`：全部通过。
 
@@ -570,7 +567,7 @@ GPU、窗口/文件对话框、安装运行或像素/视觉验收；Android APK 
 - `check-web-ui.mjs` 在 Chrome for Testing 153 下通过（集成重建的 `web-dist` 再次运行
   通过）：`chosen=WebGl2 adapter=Some(WebGl2)`，CAD 区域非空，导航后画面变化，语言
   `zh-CN→en` 切换保留文档并持久化，`consoleErrors=0`、`pageErrors=0`。
-- 修复：桥固定 WebGPU、Slint 缺 `renderer-femtovg-wgpu`、wasm 轮询误判设备丢失、
+- 修复：桥固定 WebGPU、早期桌面 UI（已移除）缺 `renderer-femtovg-wgpu`、wasm 轮询误判设备丢失、
   WebGL2 多重采样 present 失败；B29 冒烟脚本改为裁剪 CAD 区域、导航后必须变化、
   隐藏页停止轮询、意外错误失败。
 - 局限：WebGPU（本机无 `navigator.gpu`）、真实 GPU、移动/桌面浏览器矩阵 **NOT RUN**；
@@ -578,7 +575,7 @@ GPU、窗口/文件对话框、安装运行或像素/视觉验收；Android APK 
 
 ### 3D / 纸空间宿主接线与透明
 
-- `cad-ui-slint` 桥现在按 `SpaceSelection` 与 2D/3D 模式分派 `render`/`render_3d`，
+- 旧 UI crate（已删除）桥现在按 `SpaceSelection` 与 2D/3D 模式分派 `render`/`render_3d`，
   UI 暴露 2D/3D、投影、标准视图、拖动轨道与布局选择；退化相机/不支持布局显式诊断。
   宿主编排者补齐 `CadView::sync_session`（空间+相机+模式）。GPU 上的真实 3D 出图
   未在真机观察。
@@ -591,7 +588,7 @@ GPU、窗口/文件对话框、安装运行或像素/视觉验收；Android APK 
 四个核心 workstream 合入 `main`；仅构建/测试 Linux 核心目标（按委托要求），
 未构建 wasm/Android（合入前后各做一次 wasm `--lib` 检查）。
 
-- 核心测试 `cargo test --workspace --exclude cad-ui-slint --exclude app-android
+- 核心测试 `cargo test --workspace --exclude app-android
   --exclude app-web --locked`：**667 passed / 0 failed**；fmt、clippy（0 warning）、
   架构（23 包）、i18n、`check-fixture-manifest.py` 全通过。
 - **曲线（B23）**：`cad-geometry` 新增真实 NURBS（源 degree/knot/weight，

@@ -1,9 +1,9 @@
 # Web 宿主验证（wasm 构建 + 浏览器冒烟 + i18n 宿主同步）
 
-> **历史执行证据（Slint 桌面已退役，2026-10-16）**：本文记录的是**迁移前** Slint 宿主/模拟器/浏览器
-> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；Slint→React 迁移后的
+> **历史执行证据（早期桌面 UI 已退役，2026-10-16）**：本文记录的是**迁移前**的早期桌面 UI（已移除）宿主/模拟器/浏览器
+> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；早期桌面 UI→React 迁移后的
 > 最终验证 **NOT RUN**（P6）。当前架构见 `docs/architecture.md` 与
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
+> [ADR 0010](adr/0010-react-linux-host.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
 > **部署入口（2026-11-01 起）**：唯一入口是 `https://yacr-examples.pages.dev`；文中出现的
 > `yacr-examples.snakeheartgo.top` 只是当时的历史记录，不再作为部署/验收入口。
 
@@ -17,7 +17,7 @@ Chromium 153.0.8010.12 / 无头 SwiftShader WebGL2 执行 `scripts/check-web-ui.
 最终 wasm 15,985,060 bytes；SHA-256
 `2d60a7d5aa6e99af205d1e3ee063391f660debc49d58457435818e86c7f83dee`。
 这是桌面合成集成抽查，非真实 DWG、第三方字体、移动浏览器或真实 GPU 兼容验收。
-本轮主验证为原生 Slint/wgpu/lavapipe，详见 `docs/ui-redesign.md`。
+本轮主验证为原生早期桌面 UI（已移除）/wgpu/lavapipe，详见 `docs/ui-redesign.md`。
 
 本文记录 web 工作流在 **本机 LXC（无 3D GPU，SwiftShader）** 上真实执行的构建与浏览器
 验证。它与 `docs/validation.md`（总表）分开，后者由协调者汇总。命令、产物、sha256、
@@ -37,7 +37,7 @@ PROFILE=release bash scripts/build-web.sh
 1. `cargo build -p app-web --target wasm32-unknown-unknown --profile release --locked`；
 2. `wasm-bindgen --target web --no-typescript --out-name yacr --out-dir web-dist/pkg`；
 3. 复制 `web/index.html`、`main.js`、`style.css`；
-4. 复制 `crates/cad-ui-slint/i18n/{zh-CN,en}.json` 到 `web-dist/i18n/`（JS 与 Rust 共用
+4. 复制旧 UI crate（已删除）的 `i18n/{zh-CN,en}.json` 到 `web-dist/i18n/`（JS 与 Rust 共用
    同一份 catalog，见 `docs/i18n.md` §6）。
 
 结果（2026-10-02）：
@@ -115,7 +115,7 @@ console 仅有一条预期告警：`No available adapters.`（`Auto` 探测 WebG
 1. **CAD 桥固定 WebGPU**：`app-web` 先按偏好选后端，却调用固定的
    `install_cad_bridge`（内部 `BackendPreference::WebGpu`），在无 WebGPU 的浏览器上
    `adapter=None`。改为 `install_with_preference(.., chosen)`，报告与渲染器使用同一后端。
-2. **Slint winit 后端未编译 wgpu 渲染器**：`cad-ui-slint` 的非 Android `slint` 依赖
+2. **早期桌面 UI 的 winit 后端未编译 wgpu 渲染器**：旧 UI crate（已删除）的非 Android 依赖
    只有 OpenGL femtovg，`require_wgpu_30` 被无声回退，`GraphicsAPI::WebGL` 无法提供
    wgpu 设备。补 `renderer-femtovg-wgpu` feature；`bridge.rs` 增加一条“非 WGPU30 的
    RenderingSetup”显式 console error，避免再次静默空白。
@@ -125,13 +125,13 @@ console 仅有一条预期告警：`No available adapters.`（`Auto` 探测 WebG
    不把超时当丢失。
 4. **WebGL2 画布 MSAA 呈现失败**：`wgpu-hal` 的 GL present 在非 sRGB surface 上
    用 `glBlitFramebuffer`；默认 `antialias:true` 的画布是多重采样默认帧缓冲，该 blit
-   在 WebGL2 非法（`INVALID_OPERATION`），画布保持空白。`main.js` 在 Slint 创建上下文
+   在 WebGL2 非法（`INVALID_OPERATION`），画布保持空白。`main.js` 在早期桌面 UI（已移除）创建上下文
    前强制 `antialias:false`（CAD 帧是纹理合成，只损失画布级 MSAA）。
 5. **wasm 时钟 panic（2026-10-02 回归修复）**：perf 提交
    （`feat(perf): wire real memory/timing measurement`）在
    `cad-render-wgpu::Renderer::upload` 与 `cad-import-acadrust` 引入了
    `std::time::Instant::now()`。该函数在 `wasm32-unknown-unknown` 上直接 panic
-   （`time not implemented on this platform`）：首帧 `upload` 在 Slint
+   （`time not implemented on this platform`）：首帧 `upload` 在早期桌面 UI（已移除）
    `BeforeRendering` 通知内 panic，通知持有的 `BridgeState` 可变借用未被释放，
    随后 `main.js` 的 `renderer_state_report()` 轮询也以
    `already mutably borrowed` panic，页面停留在“正在初始化渲染器”。改用
@@ -142,14 +142,14 @@ console 仅有一条预期告警：`No available adapters.`（`Auto` 探测 WebG
 ### 3.2 i18n 宿主同步
 
 - `index.html` 增加“简体中文 / English”选择器（`#language`）；选择器位于 HTML 宿主
-  chrome（右下角），不是 Slint 设置抽屉内的控件。
-- `main.js` 从 `web-dist/i18n/<tag>.json`（构建复制自唯一真相 `crates/cad-ui-slint/i18n`）
+  chrome（右下角），不是早期桌面 UI（已移除）设置抽屉内的控件。
+- `main.js` 从 `web-dist/i18n/<tag>.json`（构建复制自唯一真相旧 UI crate（已删除）的 `i18n`）
   本地化启动/文件/导出/导入/恢复/错误提示、`lang`、`title`、`noscript`；缺 key 显示
   `⟦key⟧`。
 - 切换调用 wasm 导出 `web_set_locale(tag)` → `UiHandle::set_locale`（只重建 chrome，
   不动文档/相机/批注/撤销栈），并写 `localStorage["yacr.cad.locale"]`；启动时
-  `cad_ui_slint::web::stored_locale()` 恢复。
-- 未完成项（见 `docs/i18n.md` §6.2）：Slint 抽屉内选择器、Rust 宿主动态状态/诊断
+  旧 UI crate（已删除）的 `web::stored_locale()` 恢复。
+- 未完成项（见 `docs/i18n.md` §6.2）：早期桌面 UI（已移除）抽屉内选择器、Rust 宿主动态状态/诊断
   文案、数值/单位本地化、`check-i18n.py` 未扫描 web 宿主字面量。
 
 ### 3.3 复验（wasm 时钟修复后，2026-10-02）
@@ -173,9 +173,9 @@ Cargo patch 修改）。
 ## 4. 必跑检查（全部通过）
 
 ```bash
-cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked   # ok
+cargo test --workspace --exclude app-android --exclude app-web --locked   # ok
 cargo fmt --all --check                                                                          # ok
-cargo clippy --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --all-targets --locked  # ok
+cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked  # ok
 python3 scripts/check-architecture.py                                                            # ok: 23 packages
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked                           # ok
 python3 scripts/check-i18n.py                                                                    # ok: 103 keys, 2 catalogs
@@ -187,8 +187,8 @@ python3 scripts/check-i18n.py                                                   
   `navigator.gpu`（探测为 `gpu:false`），只验证了 WebGL2 基础路径。
 - **真实 GPU / 真机**：全部为 SwiftShader 软件渲染，未在真实 GPU、Android 或桌面
   GL 上核对 `Depth32Float`、纹理桥、sRGB/预乘、resize 时序。
-- **Slint 渲染文案语言**：只断言了 `lang`/`title`/`current_locale` 与 Slint 后端的
-  结构化状态，未对 Slint 画布内文案做 OCR 级核对。
+- **早期桌面 UI（已移除）渲染文案语言**：只断言了 `lang`/`title`/`current_locale` 与该工具包后端的
+  结构化状态，未对其画布内文案做 OCR 级核对。
 - **CAD 文本字体 CDN 取字节**：演示图未引用 CAD 文本字体，`load_fonts()` 走的是
   “未引用”分支；真实 `fetch` jsDelivr 与跨域注册仍未运行（见
   `docs/font-host-loading.md`）。
@@ -205,7 +205,7 @@ python3 scripts/check-i18n.py                                                   
 - 核心测试：**870 passed / 0 failed / 1 ignored**。
 - 新增 JS 宿主模块契约：**5 passed / 0 failed**，使用 Node `22.22.1` 内置测试。
 - `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`：通过。
-- `cargo check -p cad-ui-slint --tests --target wasm32-unknown-unknown --locked`：通过，
+- 旧 UI crate（已删除）的 `cargo check --tests --target wasm32-unknown-unknown --locked`：通过，
   只编译测试，**不表示执行测试**。
 - 核心 clippy `-D warnings`、`app-web --no-deps` wasm clippy `-D warnings`：通过。
 - fmt、架构（23 packages）、i18n（116 keys）、fixtures（9）、workflow 与 shell
@@ -246,7 +246,7 @@ python3 scripts/check-i18n.py                                                   
 
 ### 环境阻塞与未验证项
 
-- Linux 原生 `cad-ui-slint` 测试因缺 `pkg-config`/fontconfig 构建依赖失败；尝试
+- Linux 原生旧 UI crate（已删除）测试因缺 `pkg-config`/fontconfig 构建依赖失败；尝试
   `RUST_FONTCONFIG_DLOPEN=1` 后上游 `fontique` 符号导入不兼容，未绕过或修改上游。
   因此迁移后的 Rust 桥契约仅完成 wasm 编译检查，原生运行未完成。
 - 额外尝试 UI wasm 严格 clippy 时，`adapter.rs` 的既有 `clone_on_copy` 与
@@ -279,7 +279,7 @@ python3 scripts/check-i18n.py                                                   
 以上为源码接线与单元测试；**本机未重跑 wasm 构建、未跑浏览器脚本**。注意
 `browser` 模块仅在 `target_arch = "wasm32"` 编译，故新增纯测试
 （`derive_overlay_push` 的空/非空与预览、`preview_cursor_for` 的分类）**只能编译**，
-执行需要 wasm 测试运行器或浏览器；本机缺原生 `cad-ui-slint` 构建依赖，无法原生执行。
+执行需要 wasm 测试运行器或浏览器；本机缺原生旧 UI crate（已删除）构建依赖，无法原生执行。
 后续无头验证至少应断言：`window.yacr.diagnostics_report()` 在未导入时返回空模型 JSON、
 导入后出现 `objects`/`document` 行；点击画布后 `renderer_state_report()` 的选择面板计数
 变化；启动测量工具后移动指针，`overlay_revision` 随预览变化递增而底图不重解析；
@@ -316,7 +316,7 @@ python3 scripts/check-i18n.py                                                   
 | `cargo fmt --all` | 通过 |
 
 `browser::async_open` 仅在 `target_arch = "wasm32"` 编译，且本机缺原生
-`cad-ui-slint` 构建依赖，故其 Rust 单元测试本机无法执行；JS 侧由 Node 真实执行。
+旧 UI crate（已删除）构建依赖，故其 Rust 单元测试本机无法执行；JS 侧由 Node 真实执行。
 
 ### NOT RUN（明确未验证，勿当作通过）
 
@@ -335,7 +335,7 @@ python3 scripts/check-i18n.py                                                   
 
 - 核心串行：**963 passed / 0 failed / 1 ignored**；日志
   `/tmp/opencode/yacr-draw-core.log`。JS 契约 **27 passed**（含 PNG 像素解码契约），
-  `/tmp/opencode/yacr-draw-js.log`。新增 Slint Rust 快照测试仅跨平台编译，未原生执行。
+  `/tmp/opencode/yacr-draw-js.log`。新增早期桌面 UI（已移除）Rust 快照测试仅跨平台编译，未原生执行。
 - fmt、核心/app-web 严格 clippy、架构、i18n（159 keys）、fixtures（9）与 workflows
   通过；workspace wasm lib、UI/Web wasm tests、UI/Android aarch64 tests 编译通过。
 - 最终 release 测试 bundle：`/tmp/opencode/yacr-draw-web-dist/`，`WITH_FONTS=0`，
@@ -513,7 +513,7 @@ shim 是仓库外文件（不提交），复现需按同样思路重建；仓库
 - **非用户日常会话**：使用了独立调试 profile（`--user-data-dir=/tmp/yacr-chrome-debug`）
   与 `--remote-debugging-port`，不等同于普通用户启动路径。
 - 仅 `check-web-ui.mjs` 一个脚本、单次通过；`check-web-drawing*.mjs`、`check-web-mobile.mjs`
-  等未在本轮真实 GPU 上重跑；未做 Slint 画布内文案 OCR 级核对。
+  等未在本轮真实 GPU 上重跑；未做早期桌面 UI（已移除）画布内文案 OCR 级核对。
 - 未提交原图/截图；上述证据目录为一次性本机产物。
 
 ## 13. WebGPU 软件适配器静默挂起：Playwright 定位与修复（2026-10-09，本轮）
@@ -539,10 +539,10 @@ Playwright 驱动真实 GPU 复现并修复了一个**静默空白**缺陷（违
 
 1. `apps/app-web/web/host/startup.js::chooseBackend` 用**原始** `navigator.gpu` 探测，软适配器
    也算“可用”。
-2. `crates/cad-ui-slint/src/web.rs::select_backend` 对**强制** `WebGpu` 只检查
+2. 旧 UI crate（已删除）的 `src/web.rs::select_backend` 对**强制** `WebGpu` 只检查
    `webgpu_api_present()`（`navigator.gpu` 是否存在）。即便改为真实 `webgpu_available()`
    探测，wgpu 的 `BROWSER_WEBGPU` 仍能拿到这个 **CPU 适配器**从而返回“可用”。
-3. Slint 的 wgpu 后端选择因此返回 `Ok`，但渲染 setup 从未完成，`install_with_preference`
+3. 早期桌面 UI（已移除）的 wgpu 后端选择因此返回 `Ok`，但渲染 setup 从未完成，`install_with_preference`
    的 `attach`/`fail` 都没触发 → 无 error、无回退、无画面。
 
 ### 修复
@@ -572,7 +572,7 @@ Playwright 驱动真实 GPU 复现并修复了一个**静默空白**缺陷（违
 - 新增 `scripts/test-web-backend-fallback.py`（静态 + 变异）：守卫「强制 WebGPU 用真实
   `webgpu_available()` 探测」「拒绝软件适配器」「非 Auto 失败回退 WebGL2」，并拒绝把预修复的
   `webgpu_api_present()` 单一判据改回来。已接入 `core.yml` 的 workflow-contracts 步骤。
-- 本机实际通过：`cargo fmt --all -- --check`、`cargo check -p cad-ui-slint -p app-web
+- 本机实际通过：`cargo fmt --all -- --check`、`cargo check -p app-web
   --target wasm32-unknown-unknown --locked`、`python3 scripts/check-workflows.py`、
   `python3 scripts/test-web-backend-fallback.py`，以及上面 Playwright 复验。
 

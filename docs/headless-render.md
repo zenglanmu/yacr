@@ -1,9 +1,9 @@
 # 无头渲染与软件适配器（headless wgpu）
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的桌面/web 宿主；
+> 其中旧 UI crate、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 规范 §5.2 / §6 / §8 / §11 / §19；审计 F11（离线 `render` 不空成功）与 F12（设备丢失分类）。
 
@@ -37,7 +37,7 @@ Vulkan loader 选择真实设备（见上方适用边界）。渲染后端契约
 
 ### 1.2 设备/宿主所有权规则
 
-- **正常宿主路径不变**：Slint（Android / Web / 桌面预留）是唯一 Surface/呈现协调者，通过
+- **正常宿主路径不变**：UI 宿主（Android / Web / 桌面预留）是唯一 Surface/呈现协调者，通过
   `Renderer::initialize_with_device(device, queue)` 交出共享 Device/Queue；CAD 只创建派生
   资源（管线、buffer、离屏纹理），**不**创建第二套事件循环、不争抢 present、不做整幅回读
   （`docs/adr/0002-gpu-ui-composition.md`）。
@@ -72,7 +72,7 @@ Vulkan loader 选择真实设备（见上方适用边界）。渲染后端契约
 | `enumerate_adapters(preference)` | 枚举适配器并返回 `AdapterInfo`（如实可为空） |
 | `create_headless_gpu(preference)` | 按偏好创建可用无头设备（等价 `create_headless_gpu_with(preference, Auto)`）；失败返回显式错误（§3.4） |
 | `create_headless_gpu_with(preference, gpu)` | 按 `GpuSelection` 偏好设备类型：`auto`/`high` = 优先独显、`low` = 优先核显；该类型缺失时回退到所选后端的**首个适配器**，绝不跨后端 |
-| `GpuSelection` | 稳定名 `auto` \| `high` \| `low`；`auto`/`high` 为离散优先（双显卡默认），`low` 为核显优先；`parse` / `as_str` 稳定往返（CLI `--gpu`、UI `--gpu`、Slint power preference 共用） |
+| `GpuSelection` | 稳定名 `auto` \| `high` \| `low`；`auto`/`high` 为离散优先（双显卡默认），`low` 为核显优先；`parse` / `as_str` 稳定往返（CLI `--gpu`、UI `--gpu`、宿主 power preference 共用） |
 | `RgbaImage` | 紧凑 RGBA8 图像：`width`、`height`、`pixels`（`width*height*4` 字节） |
 | `RgbaImage::pixel(x, y)` | 取单个像素 `[u8; 4]`（越界返回透明黑，不 panic） |
 | `RgbaImage::count_differing_from(background, tolerance)` | 统计与给定背景色任一通道差异超过容差的像素数 |

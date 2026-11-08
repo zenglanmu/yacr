@@ -4,8 +4,8 @@
 //! truth** for user-facing text. A requested locale is resolved to one of the
 //! stable locales ([`Locale::ZhCn`], [`Locale::En`]) and a [`MessageCatalog`] is
 //! selected from it; the UI never embeds a second copy of the strings. This is
-//! the shared, UI-framework-free half of the N01 contract (the Slint crate used
-//! to own it; the catalogs now live here).
+//! the shared, UI-framework-free half of the N01 contract (the earlier
+//! desktop-UI crate used to own it; the catalogs now live here).
 //!
 //! Doctrine for N01 is documented in `docs/i18n.md`. In short:
 //!

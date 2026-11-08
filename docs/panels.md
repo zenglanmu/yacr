@@ -1,7 +1,7 @@
 # 图层与属性面板接线（F03 / F05 / U03）
 
-> **2026-10-25 现状（React 宿主）**：本文 §3 及之后的 “Slint 通道” 属**历史记录**
-> （Slint 宿主已于 2026-10-16 删除）。当前 React 宿主的真实接线是：
+> **2026-10-25 现状（React 宿主）**：本文 §3 及之后的 “早期桌面 UI 通道” 属**历史记录**
+> （早期桌面 UI 宿主已于 2026-10-16 删除）。当前 React 宿主的真实接线是：
 > - **图层面板**：`apps/desktop-ui/src/layers/layers.ts` + `components/LayersPalette.tsx`，
 >   经 `cad_layers` 读取、经 `cad_set_layer_visible` / `cad_restore_layers` /
 >   `cad_set_active_layer` 写入；ack 只表示**入队**，面板随后回读权威投影（`LAYER` 是
@@ -29,13 +29,13 @@
 > - 面板停靠、伸缩与打开状态见 `docs/react-linux-app.md` 的「外壳结构」。
 > 下文保留为历史设计记录与仍未闭环的缺口清单（如 3D fit、视口比例命令面）。
 
-本文件记录 `cad-app` 与 `cad-ui-slint` 之间**图层列表（F03）**与**选择/只读属性
+本文件记录 `cad-app` 与旧 UI crate（已删除）之间**图层列表（F03）**与**选择/只读属性
 （F05）**的接线状态，以及**刻意未接线**的部分与精确的剩余接线缺口。规范权威是
 `CAD_IMPLEMENTATION_SPEC.md` v2.0；需求追踪见 `docs/requirements.md`（F03/F05）与
 `docs/code-audit-and-agent-handoff.md`（F03/F05/U03）；交互状态机与测量面板见
 `docs/interaction.md`、`docs/ui.md`。
 
-本文件只描述展示层与应用层的边界：面板把应用状态推入 Slint 组件，并把 Slint
+本文件只描述展示层与应用层的边界：面板把应用状态推入早期桌面 UI（已移除）组件，并把该工具包
 回调翻译成 `Command`；不重实现数据库、拾取或渲染算法。
 
 ## 1. 图层（F03）
@@ -76,7 +76,7 @@
 
 ### 1.3 渲染/场景请求路径（已消费）
 
-- `cad-ui-slint::bridge::build_scene_with_overrides(database, stamp, fonts, &overrides)`
+- 旧 UI crate（已删除）的 `bridge::build_scene_with_overrides(database, stamp, fonts, &overrides)`
   在遍历 `cad_app::layers::visible_model_entities(database, overrides)` 时跳过不可见
   图层的实体，再走既有 `cad-representation` → `cad-scene` 管线。**底图未重解析**，
   数据库 revision 不变；只重建受影响的显示批次。
@@ -84,7 +84,7 @@
   `BridgeState` 用 `overrides_fingerprint` 决定是否重建批次，覆盖未变时不重建。
 - `build_scene` / `build_scene_with_fonts` 保持原签名（等价于空覆盖），未破坏既有调用方。
 - 由于 `cad-representation`/`cad-scene` 无图层字段（本任务不可改），过滤放在
-  `cad-app`（可测）并由 `cad-ui-slint` 调用——这是本轮的完整接线点，**不是**待办缺口。
+  `cad-app`（可测）并由旧 UI crate（已删除）调用——这是本轮的完整接线点，**不是**待办缺口。
 
 ## 2. 选择与属性（F05）
 
@@ -122,11 +122,11 @@
 - 曲线长度等需要离散精度的量**不在此臆造**；需要精确长度请走测量引擎（F06）。
 - `handle` 缺失时显式 `none`，不合成编号。
 
-## 3. UI 通道（Slint）
+## 3. UI 通道（早期桌面 UI，已移除）
 
 ### 3.1 已接线
 
-- `ui/app.slint` 新增两个结构体：`LayerRow { id, name, visible, overridden }`、
+- 外壳定义文件新增两个结构体：`LayerRow { id, name, visible, overridden }`、
   `PropertyRow { key, value }`，以及紧凑的"图层 + 属性"面板（`Rectangle` 高 132px）。
 - 图层面板：
   - `in property <[LayerRow]> layer-rows`、`layer-override-count`、`layer-empty-label`；
@@ -138,7 +138,7 @@
     `property-empty-label`、`selection-count`；
   - `clear-selection-requested` 派发 `Select` + 空 `Selection`；空状态显示
     `property-empty-label`（不显示假行）。
-- 适配器（`cad-ui-slint/src/lib.rs`）：
+- 适配器（旧 UI crate（已删除）的 `src/lib.rs`）：
   - `on_layer_visibility_toggled` 用 `index` 回查 `UiHandle` 推送时保存的
     `Vec<LayerId>`，**不做 u128→i32 有损转换**，再派发 `ToggleLayer`；
   - `on_restore_layers_requested` → `RestoreLayers`；`on_clear_selection_requested`
@@ -190,8 +190,8 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
 - **批注列表面板（F09）——已移除**：用户批注子系统于 2026-10-05 整体移除
   （`CAD_IMPLEMENTATION_SPEC.md` 顶部变更记录，提交 `0120d09`），F07/F08/F09 不再是
   产品范围，该面板清单项随之作废。
-- **诊断抽屉（U08）——已接线**：`ui/app.slint` 用 `diagnostics-open` 门控 `CadPanels`
-  抽屉（`app.slint:160–166` 的属性、395–422 与 454–479 的宿主），展示对象级诊断行与
+- **诊断抽屉（U08）——已接线**：外壳定义用 `diagnostics-open` 门控 `CadPanels`
+  抽屉（属性见 160–166 行、宿主接线见 395–422 与 454–479 行），展示对象级诊断行与
   实际后端，`diagnostics-closed` 回推宿主；不再属于缺口。
 - **资源 / 3D 抽屉（F10/F13）——UI 通道已接线**：真实数据分区抽屉见 §3.4；
   宿主数据推送（`set_resources_sections`/`set_view3d_state`）未到达时为**显式空态**，
@@ -218,7 +218,7 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
 2026-10-09/10 UI 抽屉轮新增，全部**真实数据驱动**，无数据即显式空态（沿用
 `diagnostics.empty` 的"未被宿主推送"语义），不显示假行。
 
-- **资源抽屉**（`ResourcesPanelState` / `ResourceSections`，`cad-ui-slint/src/state.rs`）：
+- **资源抽屉**（`ResourcesPanelState` / `ResourceSections`，旧 UI crate（已删除）的 `src/state.rs`）：
   分区为字体（目录条目/请求/计划/注册/失败/缺失名/回退面）、导入（文档/版本/
   完整性/诊断数/解析耗时）、代理记录（已解码/未解码，类型+原因+字节）、外部引用、
   图像。桌面/CLI 已建模图像实体（`images_modeled=true`，按相对路径解析+PNG/JPEG 解码
@@ -257,12 +257,12 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
   与工具预览的纯测试：`render_scene::overlay::tests` 与
   `render_scene::tests::selection_change_rebuilds_only_the_highlight_overlay` /
   `preview_change_rebuilds_only_the_highlight_overlay_and_cancel_clears_it`。
-- `cad-ui-slint` 的新测试位于该 crate 的 `#[cfg(test)]`：`LayerPanelState`/
+- 旧 UI crate（已删除）的新测试位于该 crate 的 `#[cfg(test)]`：`LayerPanelState`/
   `PropertyPanelState` 的映射，以及外壳定义字符串断言（`layer-rows`、
   `layer-visibility-toggled`、`restore-layers-requested`、`property-rows`、
   `clear-selection-requested`）。**2026-10-08 起本机已具备 fontconfig/freetype 开发头，
   该 crate 测试可执行**：2026-10-09/10 UI 抽屉轮实际运行
-  `cargo test -p cad-ui-slint --locked --lib` **131 passed / 0 failed**，并新增
+  该 crate 的 `cargo test --locked --lib` **131 passed / 0 failed**，并新增
   `layout_panel_state_surfaces_scale_only_when_the_host_pushes_it`、
   `resources_panel_state_is_empty_until_a_host_pushes_a_section`、
   `resources_panel_state_projects_real_sources_and_names_the_image_limit`、
@@ -270,6 +270,6 @@ cad_view.set_layer_overrides(controller.session.layer_overrides.clone());
   `shell_exposes_the_layout_scale_and_resource_and_3d_drawers`、
   `new_drawer_keys_resolve_in_both_catalogs` 等契约；lavapipe 串行集成
   （含外壳离屏渲染）通过。`cargo check --workspace --lib --target
-  wasm32-unknown-unknown` 是 `cad-ui-slint` 的 wasm 编译门，已通过。
-- Slint 渲染、窗口事件循环、真实指针→世界映射、GPU 合成与覆盖后的画面**本轮均未
+  wasm32-unknown-unknown` 是旧 UI crate（已删除）的 wasm 编译门，已通过。
+- 早期桌面 UI（已移除）渲染、窗口事件循环、真实指针→世界映射、GPU 合成与覆盖后的画面**本轮均未
   运行**；上述仅为源码接线与编译证据，不构成视觉/真机验收。

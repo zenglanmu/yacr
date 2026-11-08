@@ -1,9 +1,9 @@
 # 性能与资源预算（测量方法，非成绩）
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的桌面/web 宿主；
+> 其中旧 UI crate、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 本文只描述**如何测量**、**测量了什么**、**没有测量什么**。仓库当前没有任何
 “手机预算”“FPS 成绩”或峰值内存数字，本文也不声称任何一项。
@@ -53,7 +53,7 @@ GPU 侧另有 `Renderer::last_upload_ms()`：最近一次 `upload` 的真实墙�
 
 ### 桌面空闲重绘（2026-10-08 修复）
 
-Linux App 的 50 ms 定时器此前每 tick 无条件写 Slint 属性并 `request_redraw`，
+Linux App 的 50 ms 定时器此前每 tick 无条件写 UI 属性并 `request_redraw`，
 空闲视图以 ~20fps 重绘、单核 CPU 占用 ~40%（与图纸大小无关）。现在
 `CadView::apply_view_snapshot` 对相同快照跳过重绘，`Runtime::metrics` 只在
 窗口尺寸/配置 revision 变化时刷新布局。空闲 CPU 应随之显著下降；本机前后对比
@@ -125,8 +125,8 @@ cargo run -p cad-cli-tools -- benchmark <sample.dwg> --out bench.json
 ## 4. 复现步骤（原生）
 
 ```bash
-# 纯核心（宿主无 fontconfig 开发头，故排除 Slint/宿主 crate）
-cargo test --workspace --exclude cad-ui-slint --exclude app-android \
+# 纯核心（宿主无 fontconfig 开发头，故排除 UI/宿主 crate）
+cargo test --workspace --exclude app-android \
   --exclude app-web --locked
 
 # 真实预算/字节/队列测试

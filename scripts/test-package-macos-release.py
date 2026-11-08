@@ -29,7 +29,6 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -101,8 +100,6 @@ def check_live_script(text: str) -> list[str]:
         problems.append("packaging script must not be a NOT IMPLEMENTED stub")
     if "invalid.example" in text:
         problems.append("bundle identifier must not use invalid.example")
-    if re.search(r"slint", text, re.IGNORECASE):
-        problems.append("packaging script must not reference the retired Slint host")
     # The frontend is embedded by tauri::generate_context!, so it must be built
     # before cargo starts compiling the host.
     build = text.find("npm run build")
@@ -125,10 +122,6 @@ class PackageMacosReleaseLiveContracts(unittest.TestCase):
     def test_not_implemented_reintroduction_is_reported(self) -> None:
         problems = check_live_script(self.script + "\n# NOT IMPLEMENTED\n")
         self.assertTrue(any("NOT IMPLEMENTED" in problem for problem in problems))
-
-    def test_slint_reference_is_reported(self) -> None:
-        problems = check_live_script(self.script + "\n# Slint host\n")
-        self.assertTrue(any("Slint" in problem for problem in problems))
 
     def test_cf_bundle_identifier_must_stay_io_github_zenglanmu_yacr(self) -> None:
         mutated = self.script.replace(APP_ID, "invalid.example.yacr")

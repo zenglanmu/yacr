@@ -17,9 +17,6 @@ DWG 兼容性、真实图纸、跨 vendor、golden 图像与性能验收均未�
 
 **作者 / 联系：** zenglanmu@126.com · **许可证：** AGPL-3.0（`LICENSE`）
 
-> **范围变更**：用户批注（annotation）已于 2026-10-05 整体移除；2026-10-16 桌面 UI 由 Slint
-> 迁移为 React/Tauri，`cad-ui-slint` 已删除。
-
 ## 项目架构
 
 数据流（UI 与 CLI 共用）：
@@ -288,7 +285,7 @@ Web 的 wasm 会话真实、浏览器 smoke 为 SwiftShader 冒烟。发布/打�
 
 ## 现有进度
 
-**编译通过不等于运行验收。** 各端实际运行到什么程度如下（`docs/validation*.md` 中已退役 Slint 宿主的
+**编译通过不等于运行验收。** 各端实际运行到什么程度如下（`docs/validation*.md` 中已退役宿主的
 证据**不**迁移为 React/Tauri 宿主的结论）：
 
 | 平台 | 宿主 | 当前实际状态 |
@@ -330,8 +327,8 @@ Web 的 wasm 会话真实、浏览器 smoke 为 SwiftShader 冒烟。发布/打�
 验证与运行证据：`docs/validation.md`、`docs/validation-dwg.md`。
 
 **构建与平台**——各平台构建：`docs/build.md`；Linux 桌面宿主（当前）：`docs/react-linux-app.md`；
-Linux Flatpak（本地 bundle，未发布）：`docs/flatpak.md`；决策记录：`docs/adr/`（ADR 0010 = React 宿主
-取代 Slint、ADR 0011 = 原生 Wayland 子表面、ADR 0012 = 场景空间索引与交互）；无头渲染：
+Linux Flatpak（本地 bundle，未发布）：`docs/flatpak.md`；决策记录：`docs/adr/`（ADR 0010 = React/Tauri
+桌面宿主、ADR 0011 = 原生 Wayland 子表面、ADR 0012 = 场景空间索引与交互）；无头渲染：
 `docs/headless-render.md`；CI 分层：`docs/ci.md`；CLI：`docs/cli.md`；字体：`docs/fonts.md`；
 应用图标：`docs/app-icon.md`。已退役（历史，含横幅）：`docs/linux-app.md`、`docs/windows-app.md`、
 `docs/macos-app.md`、`docs/verify-ui.md`。

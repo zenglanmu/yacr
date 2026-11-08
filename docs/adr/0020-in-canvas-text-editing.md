@@ -7,9 +7,9 @@
   **"画布内就地编辑"与"原生 GTK 就地编辑器"仍不交付**（ADR-0021 D5 保留为未来选项）。
 - 范围：宿主 UI 的文本录入形态；**不**改变文本通道本身（`cad_set_tool_text` / `awaiting_text` 仍按
   [ADR-0019](0019-multileader-family.md) 决策 A 实施，用于**停靠式**命令行文本输入）。
-- 取代/澄清：[ADR-0010](0010-react-linux-host-replaces-slint.md) `:26-27` 的"不允许跨 CAD 分区的 DOM 浮层"
+- 取代/澄清：[ADR-0010](0010-react-linux-host.md) `:26-27` 的"不允许跨 CAD 分区的 DOM 浮层"
   **继续有效**，且本文给出其**几何依据**；[ADR-0002](0002-gpu-ui-composition.md) 与该问题**无关**
-  （它已被 ADR-0010 取代，是旧的 Slint/Android 合成决策；此前 ADR-0017/0018/0019 与 handoff 曾**误引**它，
+  （它已被 ADR-0010 取代，是旧的桌面 UI/Android 合成决策；此前 ADR-0017/0018/0019 与 handoff 曾**误引**它，
   已于 `c2db182` 更正）。
 
   > **2026-10-23 取代**：上句“ADR-0010 `:26-27` 继续有效”**已失效**——该产品选择被

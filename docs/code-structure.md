@@ -1,9 +1,9 @@
 # 宿主代码拆分
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的桌面/web 宿主；
+> 其中旧 UI crate、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 本文件记录宿主层（桌面 / Web / Android）的代码拆分。P1 轮（2026-10-11）把 `apps/app-web`
 迁移到共享 `cad_host::HostCore`；P2 轮（2026-10-11）把 `apps/app-android` 迁移到同一核心。
@@ -13,7 +13,7 @@
 ## Web Rust 宿主
 
 `apps/app-web/src/browser.rs` 是组合根：选择后端、用 Web 平台实现组装
-`cad_host::HostCore`、安装 Slint 适配器与渲染桥，持有唯一运行时。命令路由、状态推送
+`cad_host::HostCore`、安装 UI 适配器与渲染桥，持有唯一运行时。命令路由、状态推送
 （`push`/`sync_view`）、打开/出图/另存管线、画布拾取映射与绘制预览 sink 都在 `cad-host`；
 `browser/` 只保留**浏览器特有**的适配与平台实现：
 
@@ -51,7 +51,7 @@
 ## Android 宿主
 
 `apps/app-android`（P2 轮，2026-10-11）与 Web 一样退化为薄封装：`src/lib.rs` 是组合根，用
-`src/platform.rs` 的 Android 平台实现构造 `cad_host::HostCore`，安装 Slint 适配器与渲染桥，
+`src/platform.rs` 的 Android 平台实现构造 `cad_host::HostCore`，安装 UI 适配器与渲染桥，
 持有唯一运行时。命令路由、状态推送（`push`/`sync_view`）、打开/出图/另存管线、画布拾取映射
 与绘制预览 sink 都在 `cad-host`；`src/` 只保留 **Android 特有**的适配与平台实现：
 
@@ -62,7 +62,7 @@
 | `view.rs` | `AndroidViewInput`：保留共享 `InputPolicy` 轻触/拖拽状态机（一指点按选中、拖动平移），命令经共享 `HostCore::execute` 漏斗 |
 | `draw.rs` | `AndroidDrawSink`：把 Trim/Extend 的世界点解析为 `SelectionRef`（桌面核心显式拒绝），空选择显式报错；预览 sink 复用共享核心 |
 | `state_push.rs` | 共享 `push` 之上的 Android 叠加：异步打开进度面板 + 资源抽屉字体摘要（`images_modeled: false`）+ 目录文案 |
-| `poll.rs` | Slint 定时器驱动 `core.tick()`（`import_worker=true` 的真实后台导入；打开与异步 SAF 另存选择器在途时保持轮询）与公开的 `set_surface_size`/`set_surface_insets` 入口 |
+| `poll.rs` | 宿主定时器驱动 `core.tick()`（`import_worker=true` 的真实后台导入；打开与异步 SAF 另存选择器在途时保持轮询）与公开的 `set_surface_size`/`set_surface_insets` 入口 |
 | `android_fonts.rs` | APK `assets/fonts/` 的 `FontLoader` 实现（`AndroidResources` 复用） |
 
 能力位为 `open=true`、`new=true`、`save=true`、`plot=false`（P4 起 SAF 打开/另存 + 空白新建）。
@@ -70,7 +70,7 @@ Android 上打开/另存由 Java 垫片（`android/io/github/zenglanmu/yacr/Yacr
 `ACTION_OPEN_DOCUMENT`/`ACTION_CREATE_DOCUMENT`：该垫片是 `android.app.NativeActivity` 子类，
 同时是 manifest 声明的启动 Activity，因此无需改写编译后的二进制 manifest。`scripts/build-android.sh`
 在 `cargo apk build` 后 `javac`→`d8`→注入 `classes.dex`→`zipalign`→重签。
-`android_main`/`slint::android::init`/Slint 定时器/两个表面入口不变。
+`android_main`/UI 初始化/宿主定时器/两个表面入口不变。
 
 `HostCore` 新增 `HostResources` 策略（`HostPlatform.resources`），使打开漏斗在不导入平台类型
 的前提下装载平台资源：桌面为 `DesktopResources`（原 `cad-host` 字体/图像逻辑原样迁移），Web 为
@@ -80,7 +80,7 @@ Android 上打开/另存由 Java 垫片（`android/io/github/zenglanmu/yacr/Yacr
 ## 桌面宿主与宿主编排层（cad-host）
 
 平台无关的宿主编排抽取为 `crates/cad-host`，一个 `HostCore`（`Clone` 句柄）实现
-`cad-ui-slint` 的 sink trait（`UiCommandSink`/`LayoutSwitchSink`/`ViewInput`/
+旧 UI crate 的 sink trait（`UiCommandSink`/`LayoutSwitchSink`/`ViewInput`/
 `CanvasPickMapper`/`DrawCommandSink`/`DrawPreviewSink`），并按职责拆分：
 
 | 文件 | 职责 |
@@ -91,7 +91,7 @@ Android 上打开/另存由 Java 垫片（`android/io/github/zenglanmu/yacr/Yacr
 | `state.rs` | `push`/`sync_view` 状态漏斗 |
 | `input.rs` | 鼠标导航、画布拾取映射、绘制命令/预览 sink |
 | `fonts.rs` | 原生字体/图像装载与出图字体引擎（wasm 为显式 `Unsupported`） |
-| `policy.rs` | 纯策略：状态归属、扩展名分级、默认文件名（可无 Slint 单测） |
+| `policy.rs` | 纯策略：状态归属、扩展名分级、默认文件名（可无 UI 单测） |
 
 平台 I/O 通过 `cad-platform` 契约表达（`PlatformFiles` 事件式、无 futures/`Send`；
 `ConfigStore`；`SurfaceSource`；`HostCapabilities`）。`apps/app-linux` 退化为薄封装：
@@ -105,15 +105,6 @@ WKWebView 在上、CAD 子 `NSView` 在下），两者都只复用共享的 `cad
 `WebSurface`，组合根用它们构造 `HostCore`（能力位 `open=true`、`new/save/plot=false`、
 `import_worker=false`），命令路由 / 状态推送 / 拾取映射 / 绘制预览由共享核心承担。Web 无
 Rust 定时器：JS 心跳经 `async_open_poll_json` 驱动打开进度；核心的 `tick()` 不用于 Web。
-
-## Slint 渲染桥
-
-`crates/cad-ui-slint/src/bridge.rs` 仅装配 Slint 回调；`bridge/view.rs` 接收完整视图
-快照并合并准备请求，`bridge/runtime.rs` 管理 GPU 生命周期、成功发布和按需绘制，
-`bridge/presenter.rs` 管理纹理导入，`bridge/camera.rs` 负责相机适应与参数映射。
-CPU 场景构建与版本控制位于 `cad-app/src/render_scene/`，不依赖 Slint 或 wgpu；
-原场景辅助函数仍由 `bridge` re-export。分散相机/空间 setter 收敛为
-`apply_view_snapshot` / `sync_session`。契约与剩余限制见 `bridge-runtime.md`。
 
 ## 回归入口
 

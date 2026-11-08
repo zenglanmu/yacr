@@ -8,8 +8,8 @@
 //! catalogs. A concrete UI host (the React/Tauri desktop host, …) composes this
 //! crate instead of re-implementing the same state machines.
 //!
-//! Boundary (enforced by `scripts/check-architecture.py`): no `slint`, no `wgpu`,
-//! no `tauri`/`gtk`/`gdk`/`ashpd`, no platform bindings (`web-sys`,
+//! Boundary (enforced by `scripts/check-architecture.py`): no UI toolkit, no
+//! `wgpu`, no `tauri`/`gtk`/`gdk`/`ashpd`, no platform bindings (`web-sys`,
 //! `android-activity`, `jni`, `ndk`). The whole crate is UI-framework-free.
 
 pub mod i18n;

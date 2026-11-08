@@ -1,7 +1,7 @@
 # React 原生 Linux 宿主（当前桌面宿主）
 
-状态：**当前桌面 UI 实现**（2026-10-16；2026-10-23 合成方向已反转为 DOM-on-top）。取代 Slint 桌面路线，见
-[`docs/adr/0010-react-linux-host-replaces-slint.md`](adr/0010-react-linux-host-replaces-slint.md)；
+状态：**当前桌面 UI 实现**（2026-10-16；2026-10-23 合成方向已反转为 DOM-on-top）。取代早期桌面 UI 路线，见
+[`docs/adr/0010-react-linux-host.md`](adr/0010-react-linux-host.md)；
 原生 Wayland 后端见
 [`docs/adr/0011-native-wayland-subsurface.md`](adr/0011-native-wayland-subsurface.md)；
 跨宿主合成模型见 [`docs/adr/0023-dom-on-top-cross-host-composition.md`](adr/0023-dom-on-top-cross-host-composition.md)。
@@ -574,8 +574,8 @@ fixture 几何直接透出生产 DOM 视口、无蒙层；About in-DOM 覆盖层
   attempt2 **ACCEPT-WITH-FIXES**（文档限定已应用）；observer 终判所观察截图**无重大视觉缺陷**；
   **有界本地 Linux 迁移验收通过**，**不是**完整 CAD 产品/跨平台/vendor/golden/性能验收。应用侧
   `unminimize()`+强制 unrealize 序列**未解决**。
-  旧 Slint 阶段的视觉/性能数字属历史证据，不能移植为 React 宿主结论。
-- 旧 Slint 真实 GPU 测试套件与其多进程 runner 已退役，**无 cargo-test 等价替代**；P6 的真实 GPU 程序
+  旧桌面 UI 阶段的视觉/性能数字属历史证据，不能移植为 React 宿主结论。
+- 旧桌面 UI 真实 GPU 测试套件与其多进程 runner 已退役，**无 cargo-test 等价替代**；P6 的真实 GPU 程序
   由 env-gated 证据驱动 + 硬件 Vulkan 完成，**不得**用软件后端或旧结论冒充，也不等同于旧 7 用例套件。
 - 不承诺跨语言稳定 IPC；不扩张系统权限。
 

@@ -1,8 +1,8 @@
 # verify-ui：无头环境中的 UI 调试循环
 
-> **已退役（2026-10-16）**：本在线/离屏 UI 调试循环依赖 `cad-ui-slint` 与 `scripts/verify-ui.sh`，
-> 二者已随 Slint 删除。当前桌面宿主见 `docs/react-linux-app.md`；决策见
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史记录。
+> **已退役（2026-10-16）**：本在线/离屏 UI 调试循环依赖旧 UI crate（已删除）与 `scripts/verify-ui.sh`，
+> 二者已随早期桌面 UI 删除。当前桌面宿主见 `docs/react-linux-app.md`；决策见
+> [ADR 0010](adr/0010-react-linux-host.md)。下文保留为历史记录。
 
 2026-10-03 新增。对应测试计划的**第二层**：在无窗口环境里实际运行应用、自动操作控件、
 截图、收集 panic 与超时，让界面与功能迭代不依赖真机。入口
@@ -17,20 +17,20 @@
 
 | 能力 | 本环境提供者 | 本入口结论 |
 |---|---|---|
-| 窗口运行环境 | Slint 官方 offscreen `Platform`/`WindowAdapter` | 已运行 |
+| 窗口运行环境 | 早期桌面 UI（已移除）官方 offscreen `Platform`/`WindowAdapter` | 已运行 |
 | GPU/绘制能力 | 真实硬件 GPU（默认，不设 `VK_ICD_FILENAMES`）；软件 Mesa lavapipe 须显式 `YACR_SOFTWARE_GPU=1` | 已运行；软件模式为 `device_type=cpu` |
-| 控件自动化与截图 | Slint 回调 + `WindowEvent` + `window().take_snapshot()` | 已运行 |
+| 控件自动化与截图 | 早期桌面 UI（已移除）回调 + `WindowEvent` + `window().take_snapshot()` | 已运行 |
 | 真实窗口系统 / 真机设备 | 无 | **not-run** |
 
 **为什么这里不用 Xvfb**：本仓库既定约束是不安装桌面/X11/Wayland、不改系统配置。
-Slint 的 offscreen 平台已经同时提供“窗口运行环境 + 真实 Slint 组件 + 共享
+早期桌面 UI（已移除）的 offscreen 平台已经同时提供“窗口运行环境 + 真实外壳组件 + 共享
 Device/Queue 的 CAD 纹理合成”，并且是 `--headless` 主验收同一条渲染路径；Xvfb 只
 增加窗口系统，并不会让软件适配器变成真实 GPU。环境探测会如实记录 `xvfbAvailable`，
 但自动化路径不依赖它。若日后提供带真实 GPU 的 X11/Wayland，可在本入口之外再加一层
 真机/窗口验收，而不是把软件 Vulkan 结论改写成窗口结论。
 
-渲染路径是**正式的** Slint → 共享 Device/Queue → CAD 纹理 → Slint `Image`，由
-`crates/cad-ui-slint/src/offscreen.rs` 的 `FemtoVGWGPURenderer` 在 wgpu 上合成；
+渲染路径是**正式的** 早期桌面 UI（已移除） → 共享 Device/Queue → CAD 纹理 → 该工具包 `Image`，由
+旧 UI crate（已删除）的 `src/offscreen.rs` 的 `FemtoVGWGPURenderer` 在 wgpu 上合成；
 没有用静态图片替代 CAD 渲染，因此 bridge/纹理生命周期类问题仍能被测到。
 
 ## 运行
@@ -53,8 +53,8 @@ YACR_TEST_DWG=/abs/sample.dxf bash scripts/verify-ui.sh
 
 ## 层与覆盖
 
-1. `ui-unit`：`cargo test -p cad-ui-slint --lib`。目录/状态模型纯契约，无 GPU。
-2. `ui-offscreen`：`concept_offscreen`。真实 Slint 组件（默认真实 GPU；软件 lavapipe 须
+1. `ui-unit`：旧 UI crate（已删除）的 `cargo test --lib`。目录/状态模型纯契约，无 GPU。
+2. `ui-offscreen`：`concept_offscreen`。真实早期桌面 UI（已移除）组件（默认真实 GPU；软件 lavapipe 须
    `YACR_SOFTWARE_GPU=1`），桌面/紧凑/移动/窄屏
    布局矩阵、canvas-only 预设、移动工具/图层面板、点击命中、`shell_geometry` 断言与截图。
 3. `scenario`：`apps/app-linux/tests/verify_ui.rs`。真实 `LinuxApp` 固定场景：
@@ -97,12 +97,12 @@ YACR_TEST_DWG=/abs/sample.dxf bash scripts/verify-ui.sh
 ```
 OUTPUT/
   verify-ui.json        每层状态、缺失/失败层、panic、截图计数、真实设备=not-run
-  environment.json      Slint offscreen、实际适配器与图形模式（software|hardware|unknown）、显示服务器探测、工具链版本、app report 摘要
+  environment.json      早期桌面 UI offscreen、实际适配器与图形模式（software|hardware|unknown）、显示服务器探测、工具链版本、app report 摘要
   panic.txt             仅当检测到 panic 时生成
   .layers.tsv           机器可读的层状态（供汇总脚本）
   logs/<layer>.log      每层完整输出（含 `timeout` 判定依据）
-  screenshots/          合并后的截图（slint-* 与 scenario-* 前缀）
-  slint/*.png           concept_offscreen 原始截图
+  screenshots/          合并后的截图（外壳与 scenario-* 前缀）
+  offscreen/*.png       concept_offscreen 原始截图
   scenario/*.png        verify_ui 场景截图
   app/{report.json,initial.png,navigation.png}
   app-dwg/...           真实图纸证据（如启用）
@@ -122,7 +122,7 @@ OUTPUT/
 
 - 软件模式（`YACR_SOFTWARE_GPU=1`，lavapipe）不等同真实 GPU 驱动、性能与设备丢失恢复。
 - 合成 demo 图纸不等于真实 DWG；字体/代理/纸空间保真仍需 `docs/testing-dwg.md`。
-- 真实鼠标/键盘/触屏事件由 Slint `WindowEvent` 合成，不覆盖 X11/Wayland 输入栈与真机触摸。
+- 真实鼠标/键盘/触屏事件由早期桌面 UI（已移除）`WindowEvent` 合成，不覆盖 X11/Wayland 输入栈与真机触摸。
 - 目前没有独立的真实窗口（Xvfb/Wayland）层；若提供带 GPU 的显示服务器，应新增一层而不是
   修改本入口的结论。
 - 菜单遍历以已接线的回调/模型为准；未接线的禁用项不会发送命令。

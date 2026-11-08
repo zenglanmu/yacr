@@ -1,6 +1,6 @@
 //! Tauri build helper for the React/Tauri native Linux host (`apps/app-linux`).
 //!
-//! See `docs/adr/0010-react-linux-host-replaces-slint.md` (the current host
+//! See `docs/adr/0010-react-linux-host.md` (the current host
 //! decision) and `docs/adr/0006-react-native-linux-experiment.md` (its origin).
 //!
 //! This script does two things, both gated to a **Linux target**:

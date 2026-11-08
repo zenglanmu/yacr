@@ -234,5 +234,5 @@ base 提供：
 - 性能、内存与包体积影响未做基准；默认面是 Noto，只有真需要默认面/命名字体的图纸才取字节，
   但“不需要时零成本”只有代码路径依据，没有测量结论。
 
-历史材料（旧 Slint 宿主、2026-10 的 CLI/CJK 专项）保留在 `docs/handoff.md` 与历史 validation
+历史材料（旧宿主、2026-10 的 CLI/CJK 专项）保留在 `docs/handoff.md` 与历史 validation
 文档中，不作为本轮 React/Tauri/wasm 载体的证据。

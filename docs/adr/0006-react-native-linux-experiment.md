@@ -1,22 +1,22 @@
 # ADR 0006：React + Tauri 原生 Linux 宿主实验（X11/XWayland-only 探针）
 
 > **已被取代 / 定位更新（2026-10-16）**：本次**实验已被采用为正式桌面实现**，见
-> [ADR 0010](0010-react-linux-host-replaces-slint.md)。下文“实验/未删旧 Slint 代码/Web 仍以 Slint
-> 为基线”等描述已过时（Slint 已删除）；宿主使用说明见 `docs/react-linux-app.md`。
+> [ADR 0010](0010-react-linux-host.md)。下文“实验/未删旧桌面 UI 代码/Web 仍以早期桌面 UI
+> 为基线”等描述已过时（早期桌面 UI 已删除）；宿主使用说明见 `docs/react-linux-app.md`。
 > 下文保留为实验过程记录。
 
 状态：实验（用户批准替代目标；**bounded prototype 已达**，仍**非完整 CAD 产品验收**）。
 最新（2026-10-14 第四轮）：Linux **GTK 中央 native 分区（nativechild）** 与 React UI **co-visible**，
 实际 CAD（native Rust + P620/Vulkan）达到**有界原型**验收（见末节）；顶层透明 alpha full overlay
 仍为历史 FAIL。Win/macOS 仍 **NOT IMPLEMENTED / NOT RUN**。
-范围：用户批准将 Linux 桌面 UI 目标由 Slint 替换为 Tauri2 + React，并新增
+范围：用户批准将 Linux 桌面 UI 目标由早期桌面 UI（已移除）替换为 Tauri2 + React，并新增
 **X11/XWayland-only** 的 GPU 合成探针；明确**不允许 WASM**、**不允许逐帧 readback**。
 同时保留 `crates/cad-render-wgpu::SurfaceProbePresenter` 作为唯一 GPU surface 探针。
 
 ## 问题
 
 需要证明「React/Tauri 原生 Linux 窗口 + 真实硬件 GPU 的 Vulkan 呈现 + GTK/WebKit 平台合成」
-这条替代路线在真机 XWayland 上**可编译、可驱动**，作为替换 Slint 的可行性探针。
+这条替代路线在真机 XWayland 上**可编译、可驱动**，作为替换早期桌面 UI（已移除）的可行性探针。
 要求最小、独立、可销毁重建的探针，而**不是**正式 CAD presenter：不得以假数据或占位冒充
 CAD 能力，失败必须显式状态。
 
@@ -43,13 +43,13 @@ CAD 能力，失败必须显式状态。
 
 - Linux 桌面 UI 目标改为 **Tauri 2.11.6 + React**；前端代码归 designer，
   scope `apps/app-react-linux/ui/**`，本轮不动。
-- **本轮保留旧 Slint 代码**（`crates/cad-ui-slint`、`apps/app-linux` 等不删不改）；
-  新探针**不使用旧 Slint presenter**，二者互不依赖。
+- **本轮保留旧桌面 UI 代码**（旧 UI crate（已删除）、`apps/app-linux` 等在本轮不删不改）；
+  新探针**不使用旧 UI presenter**，二者互不依赖。
 - 探针在**顶层 Tauri 窗口**的 X11 surface 上经 `cad-render-wgpu::SurfaceProbePresenter`
   呈现（Vulkan-only、拒绝 CPU adapter、偏好 `P620` 但不硬编码、无 readback、绘制识别网格 +
   移动色块 + 角标）；GTK/WebKit 子 Webview 作为**平台合成桥**叠加。
 - **不声称同 device**：GTK/WebKit 与 wgpu Vulkan **不是**同一 device/queue 的所有者；
-  CAD 内容与 UI 的合成为**平台（GTK/X11）合成**，不同于 ADR 0002 的 Slint 共享 Device 合成。
+  CAD 内容与 UI 的合成为**平台（GTK/X11）合成**，不同于 ADR 0002 的早期桌面 UI（已移除）共享 Device 合成。
   本实验不主张共享 Device、也不主张单一渲染协调者。
 - 强制 **`GDK_BACKEND=x11`**：已设置 `x11` 通过；未设置则宿主显式置为 `x11`；设置为其它值
   直接报错退出（不做静默回退），见 `apps/app-react-linux/src/backend.rs`。
@@ -109,7 +109,7 @@ CAD 能力，失败必须显式状态。
 ## 回退
 
 - 若 GTK/WebKit 与 Vulkan surface 的平台合成不可行：可保留顶层 surface 探针作为最小真实 GPU
-  证据，或回退到 Slint 共享 device 合成（ADR 0002）。**不删除**旧 Slint 代码。
+  证据，或回退到早期桌面 UI（已移除）共享 device 合成（ADR 0002）。**不删除**旧桌面 UI 代码。
 
 ## 真实窗口验收证据（2026-10-14，Gate 1 **未通过**）
 
@@ -261,14 +261,14 @@ resize/minimize-restore 仍依赖 WM（`set_size` 无效、`unminimize` 不恢�
 
 ## React 原生桌面宿主跨平台路线契约（2026-10-14 增补）
 
-**范围与状态**：用户批准以 **React 替代 Slint** 作为桌面 UI 目标、**Tauri** 作为桌面壳、
+**范围与状态**：用户批准以 **React 替代早期桌面 UI（已移除）** 作为桌面 UI 目标、**Tauri** 作为桌面壳、
 **native Rust CAD + renderer-only wgpu**；本轮仅在 **Linux X11/XWayland** 上获批并实测，
 **Win32 与 macOS 为未来实现参照，NOT IMPLEMENTED / NOT RUN**。本节是给两端未来实现的契约参照，
 **不得**作为任一端已实现或已验收的证据。规范侧条款见 `CAD_IMPLEMENTATION_SPEC.md` §21。
 
 ### 用户已确认目标（本轮授权）
 
-- 桌面 UI 由 **React DOM** 承担以替代 Slint；**Tauri** 提供桌面窗口/WebView 壳。
+- 桌面 UI 由 **React DOM** 承担以替代早期桌面 UI（已移除）；**Tauri** 提供桌面窗口/WebView 壳。
 - CAD 核心保持 **native Rust**（既有 `cad-*` / `cad-engine` / `cad-host`），不改写为 JS。
 - **renderer-only wgpu**：wgpu 仍仅由 `cad-render-wgpu` 依赖并经其 API/re-export 提供；平台层不直接依赖 wgpu。
 - **不允许 WASM**（限本桌面 React 路线；Web 应用仍按规范 §2.1.5/§6 的 WebGL2/WebGPU+Wasm 要求，不受本节影响）。
@@ -327,7 +327,7 @@ React DOM UI + input
 - GPU 生命周期：attach / detach / resize / minimize-restore / **lost** 全部显式处理；失败上报，不伪造成功帧。
 - **每个 native handle 销毁前，CAD surface 必须完全 drop**；owner 在**主线程**，**不得 `unsafe` Send GTK 对象跨线程**。
 - fonts / resources / failed-open **保守处理**：缺失即诊断，**不空成功**。
-- 双入口（有限命令与 UI 按钮）走**同一命令路径**；文案来自现有 `cad-ui-slint/i18n/*.json` 键集，
+- 双入口（有限命令与 UI 按钮）走**同一命令路径**；文案来自旧 UI crate（已删除）的 `i18n/*.json` 键集，
   不在 UI 硬编码中文。
 
 ### 明确不承诺
@@ -362,13 +362,13 @@ React DOM UI + input
 | 硬件 backend | Vulkan（P620）实测，无软件后端 | 候选 native Vulkan，NOT RUN | 候选 Metal，NOT RUN |
 | React 覆盖合成 | 中央 native 分区 **co-visible accepted（bounded）**；透明 alpha full overlay 历史 FAIL | NOT RUN | NOT RUN |
 | 独立 nativechild 桥 | **已实现（GTK 中央分区）** | N/A（WebView2 叠层） | N/A（WKWebView 叠层） |
-| app 是否用 Slint presenter | **否**（React 宿主无 Slint presenter）；旧 Slint 代码**未删除** | N/A | N/A |
+| app 是否用早期桌面 UI presenter | **否**（React 宿主无早期桌面 UI presenter）；旧桌面 UI 代码**未删除** | N/A | N/A |
 | 输入/resize/DPR/恢复/shutdown | pan/wheel/Fit/typed PASS；resize remap **Drop-before-native** + close/Exit PASS；minimize→restore 仅 **WM 激活** PASS（Tauri `unminimize()` API 限制） | NOT RUN | NOT RUN |
 | full compositor 像素 | co-visible 截图取得；flange 视觉 **PARTIAL** | NOT RUN | NOT RUN |
 
 ## 第四轮：GTK 中央 native 分区 + 实际 CAD 有界验收（2026-10-14，latest accepted limit）
 
-**目标与方案变化**：用户目标为 **React 替代 Slint + Tauri 桌面壳 + native Vulkan**；基本 UI 已
+**目标与方案变化**：用户目标为 **React 替代早期桌面 UI（已移除） + Tauri 桌面壳 + native Vulkan**；基本 UI 已
 implemented 并 validated 为 **bounded prototype**。第三轮「顶层透明 alpha 全屏叠加」composite
 FAIL 的历史**保留**（见「Compositor 截图取证」节，不抹掉）；本轮改为 **Linux GTK 中央 native 分区
 （nativechild）在 React UI 上**：CAD native surface 作为 **GTK 中央分区**与 React DOM（ribbon、
@@ -426,7 +426,7 @@ FAIL 的历史**保留**（见「Compositor 截图取证」节，不抹掉）；
 **未索引 / 未使用**。
 
 **Win/macOS**：仍 **NOT IMPLEMENTED / NOT RUN**；macOS 候选为 **Metal**（非 Vulkan）；
-GPU **无 CPU readback**；React 宿主**无 Slint presenter**，**旧 Slint 代码未删除**。
+GPU **无 CPU readback**；React 宿主**无早期桌面 UI presenter**，**旧桌面 UI 代码未删除**。
 
 ## 第五轮：窄 2D 导航 fastpath + 实测性能基线（2026-10-14，latest accepted）
 

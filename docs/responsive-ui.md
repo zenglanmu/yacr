@@ -1,8 +1,8 @@
 # 响应式外壳布局与紧凑配置（U01 / U03 / U10）
 
-> **已退役（2026-10-28 加注）**：本文描述的响应式编排实现在 `crates/cad-ui-slint/**`（`src/responsive.rs`、
-> `ui/app.slint`），该 crate **已随 2026-10-16 的 Slint 退役删除**，因此文中「范围」「编译门」
-> （`cargo check -p cad-ui-slint …`）与测试名**都没有当前对应物**，仅作历史记录；当前桌面外壳见
+> **已退役（2026-10-28 加注）**：本文描述的响应式编排实现在旧 UI crate（`src/responsive.rs`、
+> 其视图文件），该 crate **已随 2026-10-16 的桌面 UI 迁移删除**，因此文中「范围」「编译门」
+> （对该 crate 的 `cargo check`）与测试名**都没有当前对应物**，仅作历史记录；当前桌面外壳见
 > `docs/react-linux-app.md`。
 
 本文件记录本轮（工作流 `ws/uxpolish`）为审计项 **U01**（单行工具栏 + compact 配置
@@ -10,7 +10,7 @@
 规范权威是 `CAD_IMPLEMENTATION_SPEC.md` v2.0；面板接线细节见 `docs/panels.md`、
 `docs/ui.md`、`docs/diagnostics-ui.md`，国际化契约见 `docs/i18n.md`。
 
-范围：仅 `crates/cad-ui-slint/**` 与本文档。未改 `cad-app`/`cad-db`/宿主 `apps/**`。
+范围：仅旧 UI crate 与本文档。未改 `cad-app`/`cad-db`/宿主 `apps/**`。
 
 ## 1. 断点（纯几何，可单测）
 
@@ -23,7 +23,7 @@
 | `>= 1024` | `Desktop` | 1280×800 桌面 |
 
 `ResponsiveMetrics::derive(logical_size, compact_config)` 由宽度与配置派生全部尺寸，
-避免在 `.slint` 里逐控件写死像素：
+避免在视图定义里逐控件写死像素：
 
 | 字段 | Phone | 非 Phone |
 |---|---|---|
@@ -47,7 +47,7 @@
 
 ## 2. 三种编排（同一组件，按宽度分支）
 
-全部在 `ui/app.slint` 的 `YacrWindow` 内，由 `phone-shell` / `compact-shell` /
+全部在旧 UI 视图的 `YacrWindow` 内，由 `phone-shell` / `compact-shell` /
 `side-panel-width` / `show-floating-nav` 属性选择分支：
 
 - **宽屏 · 查看（Desktop）**：大画布 + 左下浮动导航条（`show-floating-nav`），只含
@@ -97,11 +97,10 @@
   `degenerate_viewport_is_a_phone_not_a_panic`）。
 - 外壳定义/面板可达性：`src/lib.rs` 新增 `shell_is_responsive_and_consumes_compact_config`、
   `shell_reaches_every_merged_panel_and_layout_list`、`layout_rows_and_active_index_are_pushed_faithfully`。
-- **本机无法原生构建 `cad-ui-slint`**（无 fontconfig / pkg-config），因此该 crate 的
+- **本机无法原生构建旧 UI crate**（无 fontconfig / pkg-config），因此该 crate 的
   Rust 单测**在此主机未执行**。编译门为：
-  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`，
-  以及 `cargo check -p cad-ui-slint --tests --target wasm32-unknown-unknown --locked`
-  （验证测试代码可编译）。Slint 渲染未运行。
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`。
+  UI 渲染未运行。
 - 顺带修复 `src/status.rs` 一处**既有**测试编译错误：引用了不存在的常量
   `codes::RESOURCE_FONT_UNRESOLVED`，改为真实常量 `codes::FONT_UNRESOLVED`（否则
   测试目标无法编译，上述测试也无法作为证据）。

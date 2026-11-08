@@ -30,8 +30,8 @@ Checks, all of which must pass:
 
 The catalogs are the **single canonical source**: `crates/cad-ui-core/i18n/`
 (read by `cad_ui_core::i18n` via `include_str!` and by the React UI through the
-Vite `@i18n` alias). The Slint crate (and its duplicated catalog copy) was
-deleted in P3b, so the transitional byte-parity guard is gone; this script
+Vite `@i18n` alias). The earlier desktop-UI crate (and its duplicated catalog
+copy) was removed, so the transitional byte-parity guard is gone; this script
 validates the one surviving copy directly.
 
 Coverage limitations (honest):

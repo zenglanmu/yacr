@@ -8,8 +8,8 @@ submodule；克隆后先 `git submodule update --init --recursive`。缺少插�
 `scripts/build-vendor-plugin.sh` 与各打包脚本会显式失败，不会产出不含 `plugins/tch.js` 的
 bundle。
 
-> **2026-10-16 迁移状态（2026-10-23 增补）**：桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
-> （`apps/app-linux`，二进制 `yacr`）。`cad-ui-slint` 与所有 Slint 依赖已删除；迁移时 macOS/Android/Web
+> **2026-10-16 迁移状态（2026-10-23 增补）**：桌面 UI 已迁移为 **React + Tauri 原生宿主**
+> （`apps/app-linux`，二进制 `yacr`）。旧 UI crate 与所有旧 UI 工具包依赖已删除；迁移时 macOS/Android/Web
 > 是**显式 NOT IMPLEMENTED 占位**，此后 Web 的 wasm 会话于 2026-10-24 复活、Android 于 2026-11-01
 > 改为原生 `native-below` 载体（见下），二者都**不是**已验收的可运行 GUI。**2026-11-01 起**
 > 平台打包脚本与 CI release job 已按 React/Tauri 宿主重新启用（event-gated，只出 artifact，
@@ -36,7 +36,7 @@ bundle。
 fmt/clippy）。全量门禁与全量测试只在两种情形运行：① 用户明确要求；② 发版/发布验收前。
 证据诚实规则不变：未运行必须标注 NOT RUN，不得以旧证据冒充。
 
-**注意**：这只是日常提效策略，**不是永久免测**。本次 Slint→React 迁移的最终验证
+**注意**：这只是日常提效策略，**不是永久免测**。本次 React 桌面 UI 迁移的最终验证
 （编译、全量测试、门禁、真实 GPU）**尚未运行**，由编排者在 **P6** 统一执行并记录。
 
 ## 核心门禁（CI 同款；用户要求/发版前本地运行）
@@ -166,8 +166,8 @@ Linux** 时原生 Wayland 路径**不支持**（`build.rs` 会显式 `cargo:warn
 同步债务**（脚本不在本轮改动范围）：`collect-evidence.sh`/`test-collect-evidence.py` 仍把 X11 行
 分类为 `UNSUPPORTED_BACKEND`（码 4）——该合同自 2026-10-24 起不再产生，X11 行现在是一次
 `dom-canvas` 运行，webgl2 缺失时才是 `yacr: unsupported-runtime: webgl2`（码 6）；且
-`YACR_PROBE_STACKING` 是 native-below 夹具，在 `dom-canvas` 上被显式拒绝（码 1）。**旧 Slint
-离屏/无头 `--headless` 路径已随 Slint 退役**，不再存在。
+`YACR_PROBE_STACKING` 是 native-below 夹具，在 `dom-canvas` 上被显式拒绝（码 1）。**旧离屏/无头
+`--headless` 路径已随早期桌面 UI 退役**，不再存在。
 
 ## 无头 CLI（仍可用）
 
@@ -220,7 +220,7 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
 
 ## 平台打包入口（2026-11-01 重新启用）
 
-以下入口都面向**当前 React/Tauri 宿主**（不是 Slint），并由 `.github/workflows/build.yml` 的
+以下入口都面向**当前 React/Tauri 宿主**（不是早期桌面 UI），并由 `.github/workflows/build.yml` 的
 release job 在 `v*` tag / 手工 `workflow_dispatch` 时调用；产物只上传为 workflow artifact，
 **不发布、不公证、不接触商店凭据**。Windows/Android 用仓库自持密钥自签名、macOS 做 ad-hoc
 `codesign`、Flatpak 在 GPG 凭据存在时签 OSTree commit；凭据缺失时显式产出 `unsigned`
@@ -286,7 +286,7 @@ bundle**，必须显式 `--directory <bundle-dir>`，且目录须含 `index.html
   单个 `acadrust` 键，必须固定版本/revision 并在 `docs/acadrust-patches.md` 登记（ADR-0031），其它
   patch 一律拒绝；当前 `0.6.8` 未修改。
 - **UI 工具包中立**：`cad-host` 不依赖任何 UI 工具包；平台无关 UI 逻辑在 `cad-ui-core`。
-  `check-architecture.py` 会拒绝任何 workspace 直接 `slint`/`slint-build`/`iced` 依赖。
+  `check-architecture.py` 会拒绝任何 workspace 直接依赖 `iced` 等旧 UI 工具包。
 - `cad-db` 是唯一权威数据源；UI 与渲染均为派生。
 
 ## 桌面 / iOS

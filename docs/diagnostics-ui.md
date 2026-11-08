@@ -1,9 +1,9 @@
 # 诊断抽屉与双语 chrome（N01/U08/N02）
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的桌面/web 宿主；
+> 其中旧 UI crate、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 本轮把 **UI chrome 的双语化** 落到真实目录，并把诊断抽屉接到结构化诊断模型；
 同时新增 `i18n-contracts` CI job。渲染未在本机运行（见“未完成”）。
@@ -11,7 +11,7 @@
 ## 已实现
 
 ### N01 — 双语 catalog 覆盖真实 chrome
-- `crates/cad-ui-slint/i18n/zh-CN.json` 与 `en.json`：各 **136** 个 key，键与占位符
+- 旧 UI crate 的 `i18n/zh-CN.json` 与 `en.json`：各 **136** 个 key，键与占位符
   **完全一致**；默认 `zh-CN`，`en` 可接受 `en-US` 等并归一化。
 - 按钮/标签/空态/后端名/工具提示等**不再硬编码**，统一经 `MessageSource` 取文案；
   测量/批注类型标签、后端标签、诊断文案均由 catalog 生成，避免第二份易失配的真相。
@@ -26,7 +26,7 @@
   - 状态栏摘要（加载/工具/单位/未保存）不嵌入诊断正文，避免压住提示。
 - 抽屉为**真实数据**驱动；空模型是显式空态，不造行。
 - **HTML `#host-state` 不再常驻**（U08）：它是加载/失败专用技术行，轮询判定就绪后
-  `<body>` 加 `renderer-ready`，CSS 隐藏该行，使 Slint 底部状态可见；失败时重试
+  `<body>` 加 `renderer-ready`，CSS 隐藏该行，使 UI 底部状态可见；失败时重试
   按钮出现并经 `:has` 守卫重新显示该行。面向屏幕阅读器的播报改由视觉隐藏的
   `#a11y-status`（U12）承担，`#host-state` 为 `aria-live="off"`，两者不重复播报。
   新增目录键 `a11y.canvas_label`、`a11y.status_failed`。
@@ -39,7 +39,7 @@
 
 ## 未完成（显式）
 
-- **Slint 渲染未运行**：本机缺 fontconfig，`cad-ui-slint` 不能原生构建；其 Rust 单测
+- **UI 渲染未运行**：本机缺 fontconfig，旧 UI crate 不能原生构建；其 Rust 单测
   不在本机执行，仅由 wasm32 `cargo check` 保证可编译。无视觉/真机/浏览器验收。
 - **HTML/JS 启动文案同步**：`apps/app-web` 的 `html lang`/title/noscript 与 JS 提示
   尚未与当前 locale 同步。

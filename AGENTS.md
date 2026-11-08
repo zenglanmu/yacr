@@ -2,11 +2,11 @@
 
 Rust CAD **查看/测量**系统，**开发中，无可交付产品**。需求唯一权威是
 `CAD_IMPLEMENTATION_SPEC.md`（v2.0）；逐轮交接入口 `docs/handoff.md`；桌面 UI 决策见
-`docs/adr/0010-react-linux-host-replaces-slint.md`，合成方向见 ADR 0023/0024，Android 载体见
+`docs/adr/0010-react-linux-host.md`，合成方向见 ADR 0023/0024，Android 载体见
 ADR 0027。
 
 > 当前形态：**一棵 React 树，多种载体**。`apps/desktop-ui` 是唯一 React UI 包，Tauri 薄壳在
-> `cad-desktop-shell`。Slint 已完全删除。
+> `cad-desktop-shell`。
 >
 > - **`native-below`（native 会话持有 `cad-db`）**：Linux 原生 Wayland（`apps/app-linux`，`yacr`）、
 >   Windows（`yacr-windows`）、macOS（`yacr-macos`）、Android（`apps/app-android`）。透明 WebView
@@ -27,7 +27,7 @@ ADR 0027。
 4. 增量更新：ChangeSet → 依赖失效 → 显示表示重建，不重解析底图。
 5. 每项改动同步补契约测试与文档。
 6. 证据诚实：未运行就写 NOT RUN；合成测试、模拟器、软件渲染、无头浏览器结论不得推广为真机/
-   真实 GPU/vendor/golden/性能结论；历史 Slint 证据不得冒充 React 宿主结论。
+   真实 GPU/vendor/golden/性能结论；历史宿主的证据不得冒充 React 宿主结论。
 7. 不覆盖/删除陌生变更（并发实现常见）；先读源码与最新构建证据。
 8. **载体权威不可混淆**：`dom-canvas`（X11/XWayland、Web）只有 wasm 侧 CAD 会话持有 `cad-db`；
    `native-below`（Wayland、Windows、macOS、Android）只有 native 会话持有。另一侧**不得**实例化
@@ -45,7 +45,7 @@ ADR 0027。
 
 唯一依赖：`cad-render-wgpu` → wgpu；`cad-import-acadrust` → acadrust（0.6.8，当前未修改；如需补丁
 只允许 acadrust 且必须在 `docs/acadrust-patches.md` 登记，见 ADR-0031）。
-架构规则：`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层（脚本强制的是 slint/iced 全局禁用
+架构规则：`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层（脚本强制的是 iced 全局禁用
 与逐 crate 的 ban 列表，不正向断言 tauri 唯一性——不要因此绕过该规则）。平台类型
 （`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`；根 `[patch.crates-io]` 只允许单个
 `acadrust` 键且必须在 `docs/acadrust-patches.md` 登记并通过门禁（ADR-0031），其它 patch 一律拒绝。
@@ -225,4 +225,4 @@ tag 的 Release）；`web-deploy` 也只在该事件下把 `apps/app-web/dist-ui
 最新事实优先）、`docs/compatibility.md`（能力表）、`docs/testing-dwg.md`、`docs/react-linux-app.md`、
 `docs/android-host.md`、`docs/windows-app.md`、`docs/macos-app.md`、`docs/xref.md`、`docs/ci.md`
 （部分历史条目已过期，以 workflow 与实际代码为准）、`docs/adr/`（0010、0017–0027）。
-`docs/linux-app.md`、`docs/verify-ui.md` 与旧 Slint 验证记录是历史材料，不得作为当前证据。
+`docs/linux-app.md`、`docs/verify-ui.md` 与旧宿主验证记录是历史材料，不得作为当前证据。

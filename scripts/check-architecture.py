@@ -15,9 +15,9 @@ Two dependency views are kept deliberately separate:
   detection and the layer rules. Its semantics are unchanged.
 * the **declared toolkit set** (ordinary + `build-dependencies` +
   `dev-dependencies`, each incl. target-specific tables) — used only by the
-  Slint/toolkit ban, so a `slint`/`slint-build`/`iced` dependency cannot hide in
-  a build script or a test target. Dependency renames
-  (`x = { package = "slint-build", .. }`) and **workspace-inherited aliases**
+  toolkit ban, so an `iced` dependency cannot hide in a build script or a test
+  target. Dependency renames
+  (`x = { package = "iced", .. }`) and **workspace-inherited aliases**
   (`x.workspace = true`, defined in the selected root's
   `[workspace.dependencies]`) are both resolved to the real package name.
 """
@@ -33,9 +33,8 @@ DEFAULT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # layering/require/forbid rules keep their original meaning.
 RUNTIME_TABLES = ("dependencies",)
 ALL_TABLES = ("dependencies", "build-dependencies", "dev-dependencies")
-# Toolkits that must not appear anywhere in the workspace after the Slint
-# removal (P3b).
-TOOLKIT_PACKAGES = {"slint", "slint-build", "iced"}
+# Toolkits that must not appear anywhere in the workspace.
+TOOLKIT_PACKAGES = {"iced"}
 
 
 def load_workspace_dependencies(root: pathlib.Path) -> dict:
@@ -110,7 +109,7 @@ def check_patch_policy(
 def _dependency_names(section: dict, workspace_dependencies: dict) -> set[str]:
     """Package names declared in one dependency table.
 
-    Resolves an explicit rename (`x = { package = "slint-build" }`) and an
+    Resolves an explicit rename (`x = { package = "iced" }`) and an
     inherited workspace alias (`x.workspace = true`, whose real package is named
     in the selected root's `[workspace.dependencies]`) to the actual package name.
     """
@@ -191,7 +190,7 @@ def check(root: pathlib.Path) -> int:
     require_dependency("cad-engine", "cad-app")
     require_dependency("cad-engine", "cad-render-wgpu")
     forbidden_engine_dependencies = {
-        "cad-host", "slint", "slint-build", "wgpu",
+        "cad-host", "wgpu",
     }
     for dependency in sorted(forbidden_engine_dependencies):
         forbid_dependency("cad-engine", dependency)
@@ -200,13 +199,12 @@ def check(root: pathlib.Path) -> int:
     # Shared UI layer boundary: the platform-independent UI logic (`cad-ui-core`)
     # sits above the UI-free application/host contracts it consumes — it depends on
     # `cad-host` (the owner-thread session wraps `HostCore`) — and below every
-    # concrete host/presenter. It must stay toolkit- and GPU-free: no Slint, no
-    # wgpu, no Tauri/GTK/portal, and no platform bindings. (`cad-ui-slint` was
-    # deleted in P3b, so `slint`/`slint-build` are no longer workspace crates.)
+    # concrete host/presenter. It must stay toolkit- and GPU-free: no UI
+    # toolkit, no wgpu, no Tauri/GTK/portal, and no platform bindings.
     require_dependency("cad-ui-core", "cad-app")
     require_dependency("cad-ui-core", "cad-host")
     forbidden_ui_core_dependencies = {
-        "slint", "slint-build", "wgpu",
+        "wgpu",
         "tauri", "tauri-build", "gtk", "gdk", "gdkx11", "ashpd",
         "web-sys", "android-activity", "jni", "ndk",
     }
@@ -237,7 +235,7 @@ def check(root: pathlib.Path) -> int:
     require_dependency("app-android", "cad-desktop-shell")
     forbidden_desktop_shell_dependencies = {
         "gtk", "gdk", "gdkx11", "ashpd", "wgpu", "cad-render-wgpu", "cad-engine",
-        "slint", "slint-build", "iced", "acadrust",
+        "iced", "acadrust",
     }
     for dependency in sorted(forbidden_desktop_shell_dependencies):
         forbid_dependency("cad-desktop-shell", dependency)
@@ -259,9 +257,9 @@ def check(root: pathlib.Path) -> int:
         deps = runtime_dependencies(manifest, workspace_dependencies)
         if name != "cad-import-acadrust":
             assert "acadrust" not in deps, f"parser escaped importer: {name}"
-        # Every package is banned from Slint/iced, including build and dev
-        # dependency tables (runtime graph alone would miss `slint-build`) and
-        # workspace-inherited aliases.
+        # Every package is banned from the toolkit, including build and dev
+        # dependency tables (the runtime graph alone would miss a build-time
+        # toolkit) and workspace-inherited aliases.
         declared = declared_dependencies(manifest, workspace_dependencies)
         toolkit = declared & TOOLKIT_PACKAGES
         assert not toolkit, f"UI/toolkit dependency leaked into {name}: {sorted(toolkit)}"

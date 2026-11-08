@@ -1,23 +1,23 @@
 # Ribbon 与命令栏布局（2026-10-02）
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的早期桌面 UI（已移除）/web 宿主；
+> 其中旧 UI crate（已删除）、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
-继续使用 Slint UI + 同设备 wgpu 离屏合成，不迁移到 DOM 工具界面。
+继续使用早期桌面 UI（已移除） + 同设备 wgpu 离屏合成，不迁移到 DOM 工具界面。
 Web 的 DOM 仅提供文件选择、语言/启动恢复与原生多点触控适配。
 
 ## 文件边界
 
-- `ui/app.slint`：组合根、保持现有 adapter 属性/回调协议。
-- `ui/ribbon.slint`：常用 / 视图 / 管理分组与展开状态。
-- `ui/button.slint`：深色按钮，大触控目标，不压缩桌面工具来适应手机。
-- `ui/command-bar.slint`：持续可见的命令行、可展开状态/操作行。
-- `ui/canvas.slint`：Image 与 Slint 单指针/滚轮事件。
-- `ui/panels.slint`：真实图层、布局、属性、批注和诊断数据的滚动面板。
+- `ui/app`：组合根、保持现有 adapter 属性/回调协议。
+- `ui/ribbon`：常用 / 视图 / 管理分组与展开状态。
+- `ui/button`：深色按钮，大触控目标，不压缩桌面工具来适应手机。
+- `ui/command-bar`：持续可见的命令行、可展开状态/操作行。
+- `ui/canvas`：Image 与早期桌面 UI（已移除）单指针/滚轮事件。
+- `ui/panels`：真实图层、布局、属性、批注和诊断数据的滚动面板。
 - `src/command_line.rs`：小型命令词路由；不重复实现 CAD 业务逻辑。
-- `web/host/touch.js`：CAD 区域内双指/拖动识别，控件输入仍属于 Slint。
+- `web/host/touch.js`：CAD 区域内双指/拖动识别，控件输入仍属于早期桌面 UI（已移除）。
 - `browser/shell.rs`：CSS 像素手势转换成应用 Pan/Zoom 命令，不直接更改渲染相机。
 
 ## 行为
@@ -78,10 +78,10 @@ iOS/Android 手势仍待验收。本轮为 `web/host/touch.js` 的手指数契�
 
 ## 独立 CAD 引擎：下一阶段，不冒充已完成
 
-领域/数据库/表示/场景/渲染仍独立于 Slint。CPU controller 已在 `cad-app/render_scene`，
-UI 只派生命令与视图；参见 `bridge-runtime.md`。当前 `app-web.wasm` 仍包含 Slint，
-**不是**对外独立 CAD 显示 wasm。下一阶段应增加无 Slint 依赖的 wasm facade，明确
-文档句柄、导入/释放、资源、设备提供、视图、错误与异步任务协议，并由 Slint 宿主
+领域/数据库/表示/场景/渲染仍独立于早期桌面 UI（已移除）。CPU controller 已在 `cad-app/render_scene`，
+UI 只派生命令与视图；参见 `bridge-runtime.md`。当前 `app-web.wasm` 仍包含早期桌面 UI（已移除），
+**不是**对外独立 CAD 显示 wasm。下一阶段应增加无早期桌面 UI（已移除）依赖的 wasm facade，明确
+文档句柄、导入/释放、资源、设备提供、视图、错误与异步任务协议，并由早期桌面 UI（已移除）宿主
 复用它；不得把宿主导出改名当作核心提取完成。这一阶段由后续助手实施。
 
 ## 验收
@@ -89,7 +89,7 @@ UI 只派生命令与视图；参见 `bridge-runtime.md`。当前 `app-web.wasm`
 `node --test scripts/test-web-touch.mjs` 覆盖手势计算、输入边界、取消、tap/drag/pinch
 冲突与手指数转换：包含第二个手指落下不发出质心跳变增量、手指数变化后移动相对新基线、
 第三个手指（采样上限后手指数不变）不移动基线，以及轻触选取/拖动不选取。`scripts/check-web-ribbon.mjs` 在真实无头 Chromium 的桌面、
-390px DPR3、320px DPR2 验证初始布局、两条栏展开/收起、Slint Open 文件选择器、
+390px DPR3、320px DPR2 验证初始布局、两条栏展开/收起、早期桌面 UI（已移除）Open 文件选择器、
 4 实体 DWG 导入及 CDP 双指/拖动导致真实应用相机/帧变化。
 截图路径与报告：`/tmp/opencode/yacr-ribbon-validation/`。
 SwiftShader 在连续动态截图时出现 compositor capture 停滞；布局动作以状态契约

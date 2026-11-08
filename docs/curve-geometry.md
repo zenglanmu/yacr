@@ -98,7 +98,7 @@ OCS 顶点/中心：
 ```bash
 cargo test -p cad-geometry --locked
 cargo test -p cad-import-acadrust --locked
-cargo test --workspace --exclude cad-ui-slint --exclude app-android --exclude app-web --locked
+cargo test --workspace --exclude app-android --exclude app-web --locked
 ```
 
 参考实现（仅行为，独立重写，未逐字拷贝，GPL-3.0）：

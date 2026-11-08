@@ -1,9 +1,9 @@
 # 独立分支并行审查（2026-10-04）
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的早期桌面 UI（已移除）/web 宿主；
+> 其中旧 UI crate（已删除）、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 本轮由用户要求增至 4 个子代理，在主控已验证并推送的 `2d6b9ec` 基线上
 分别使用独立分支/worktree。子代理只写代码与回归测试，不编译、格式化、测试或推送；
@@ -53,7 +53,7 @@ annotations **24 单元 + 15 codec 契约 passed / 0 failed**。
 
 - fmt、严格主机 workspace clippy（排除 Android/Web）、架构、fixture manifest、
   workflow 和 i18n（203 keys）检查。
-- 主机 workspace 串行测试（包含 Linux App/Slint、排除 Android/Web）：
+- 主机 workspace 串行测试（包含 Linux App/早期桌面 UI（已移除）、排除 Android/Web）：
   **1229 passed / 0 failed / 1 ignored**；输出
   `/home/zenglanmu/.local/share/opencode/shell/da739b3910d63162f4687d9e8c13d613a0959f68/sh_104a41cfd001LZx2Hz8Om3OJT2.out`。
 - wasm32 全 workspace lib 编译检查（包含 Android/Web 宿主）。

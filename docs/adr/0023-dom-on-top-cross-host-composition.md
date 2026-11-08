@@ -3,7 +3,7 @@
 - 状态：**Accepted（2026-10-23）**。实施已落地（WP1–WP4 已提交），本文是这批工作的架构决策与
   失效条款权威；证据边界见第 11 节。
 - 日期：2026-10-23。
-- 相关 ADR：[ADR-0010](0010-react-linux-host-replaces-slint.md)（React/Tauri 宿主；其 `:22-28`
+- 相关 ADR：[ADR-0010](0010-react-linux-host.md)（React/Tauri 宿主；其 `:22-28`
   的“禁止跨 CAD 分区的 DOM 浮层”被本文取代）、[ADR-0011](0011-native-wayland-subsurface.md)
   （app-owned Wayland 子表面；本文把 `place_below` 转为无条件生产语义）、
   [ADR-0021](0021-popup-layer.md)（弹窗层；其第二窗口机制被本文退役，模态围栏保留）、
@@ -142,7 +142,7 @@ chrome/CAD 边界的弹窗（Observer 判读 PASS）；同一探针在 XWayland 
   主窗口/子 webview 构建（init scripts、`start_maximized` 策略、label 常量）、popup 命令到
   `cad-ui-core::popup` 状态机的接线、与工具包无关的 `threading`（主线程 run-and-wait）、通用证据驱动
   骨架、参数化平台实现（`ReactFiles`/`ReactSurface`/`ReactConfigStore`，chooser 由 app 注入）。
-  **禁止** gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/cad-engine/slint/iced/acadrust（脚本强制）；
+  **禁止** gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/cad-engine/iced/acadrust（脚本强制）；
   位于 `cad-ui-core` 之上、`app-*` 之下；非 Linux/Windows 目标编译为空壳（保 wasm 门禁）。
 - **`apps/desktop-ui` 是唯一桌面 React UI 包**：单 React 树、`.native-input` 单漏斗、in-DOM 弹窗/
   菜单；两个宿主的 `tauri.conf.json` 都指向 `../desktop-ui/dist`。

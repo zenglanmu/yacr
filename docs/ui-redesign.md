@@ -1,11 +1,11 @@
 # Concept 界面重设计（2026-10-03）
 
-> **已退役（2026-10-16）**：本次是 Slint 时代的界面概念重设计，已随 Slint 删除。当前桌面 UI 设计
+> **已退役（2026-10-16）**：本次是早期桌面 UI（已移除）时代的界面概念重设计，已随该工具包删除。当前桌面 UI 设计
 > 以 AutoCAD 桌面惯例重做（React/Tauri），见 `docs/react-linux-app.md` 与
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文保留为历史记录。
 
 > 后续轮（2026-10-03）：按用户要求把外观从“浅银色 concept”改为 **AutoCAD 风格深色**
-> （`ui/theme.slint`：深灰 chrome/panel、浅色文字、蓝色选中、近黑模型空间；并设
+> （主题定义文件：深灰 chrome/panel、浅色文字、蓝色选中、近黑模型空间；并设
 > `Palette.color-scheme = dark` 让 std-widgets 的命令栏/下拉/按钮/进度条也变深）。
 > 布局结构与规格描述（Ribbon、图层/属性面板、浮动工具栏、命令输入区、模型/布局标签、
 > 状态栏）不变。`concept_offscreen` 的“chrome 是浅色”断言相应改为“chrome 为深色”。
@@ -17,7 +17,7 @@
 
 1. 配置与纯布局契约：`cad-app::viewer_config`，逻辑像素 720/1200 断点，短屏紧凑布局、
    安全区扣除、48px 触控、原子配置更新、纯画布强制隐藏、恢复组件偏好。
-2. Slint 外观与组合：浅银色 chrome、蓝色选中、深色 CAD 画布；桌面侧栏与底部布局/状态，
+2. 早期桌面 UI（已移除）外观与组合：浅银色 chrome、蓝色选中、深色 CAD 画布；桌面侧栏与底部布局/状态，
    移动标题/底部工具入口与抽屉，紧凑布局收起 Ribbon。
 3. Linux lavapipe 核心/离屏主回归；最后一次 WASM + Playwright 第二层集成。
 
@@ -26,7 +26,7 @@
 本轮闭环：`ViewerConfig` 完整协议类型（`ui`/`features`/`view`/`interaction`）、
 稳定 `CommandId` 白名单、ribbon 分组/排序、placement、`initiallyOpen`、命令覆盖、
 宿主允许的用户偏好合并（clamp 而非报错）、配置变更事件与 revision、有效配置查询、
-Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不携带任何脚本/回调。
+早期桌面 UI（已移除）分开的图层/属性显隐与命令可见性。数据驱动：配置不携带任何脚本/回调。
 
 仍未闭环（不宣称完整验收）：
 - `minimal` 预设已具备显式组件真值表与命令白/黑名单（`canvasOnly ⊆ minimal ⊆ full`，
@@ -52,10 +52,10 @@ Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不�
   状态栏另有 axes/grid/snapHints 实时开关（经配置存储重推）。捕捉标记的宿主喂入
   （`CadView::set_snap_hints`）已接线，并由 Linux/Web 状态漏斗从真实 `drawing_pick_items`
   候选喂入（`snap_candidates_near`；无光标时清空，实例变换烘焙、不可精确变换者显式跳过）。
-- `interaction.pointer/touch/keyboardShortcuts` 已逐项门控输入：共享 Slint 适配器在
+- `interaction.pointer/touch/keyboardShortcuts` 已逐项门控输入：共享早期桌面 UI（已移除）适配器在
   事件时早退指针/滚轮/画布拾取与拾取映射；命令别名仅在 `keyboardShortcuts` 为真时
   展开（完整命令名仍可用）；Web 触控 wasm 入口在 `touch` 为假时空操作。门控在 Rust
-  侧，尚未把三个标志作为 Slint 属性推送（UI 外观不因门控而变）。已知边界：画布拾取
+  侧，尚未把三个标志作为早期桌面 UI（已移除）属性推送（UI 外观不因门控而变）。已知边界：画布拾取
   回调为指针与触控共用，若 `pointer=false` 而 `touch=true`，触控拾取也会被关闭；分离
   需要独立的触控拾取回调，尚未实现。
 - 原生宿主已从磁盘读取 `$XDG_CONFIG_HOME/yacr/config.json`（完整 `ViewerConfig`）与
@@ -69,7 +69,7 @@ Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不�
 
 ## 验证原则
 
-用户本轮明确解除原生 Slint 编译限制并授权 sudo apt 安装开发依赖，使用 Slint
+用户本轮明确解除原生早期桌面 UI（已移除）编译限制并授权 sudo apt 安装开发依赖，使用该工具包
 官方 `FemtoVGWGPURenderer` 自定义离屏平台，Linux wgpu/lavapipe 作为 UI 主反馈路径。
 不运行 Android 模拟器、不安装窗口系统；WASM headless 只做最后集成抽查。
 软件 GPU 不代表真实 GPU/真机。
@@ -80,10 +80,10 @@ Slint 分开的图层/属性显隐与命令可见性。数据驱动：配置不�
 wasm 全 workspace lib 检查通过；核心串行 968 passed / 0 failed / 1 ignored（合成，lavapipe）。
 未设置真实 DWG 环境变量，按样本跳过的用例不计真实图纸执行证据。
 
-## 里程碑 2：真实 Slint 原生离屏
+## 里程碑 2：真实早期桌面 UI（已移除）原生离屏
 
-新增 `cad-ui-slint::offscreen` 与 `scripts/check-ui-native.sh`：官方 FemtoVG/wgpu 自定义
-无窗口平台，官方 snapshot 纹理读回；不使用重画的 HTML/图片替代 Slint。
+新增旧 UI crate（已删除）的 `offscreen` 模块与 `scripts/check-ui-native.sh`：官方 FemtoVG/wgpu 自定义
+无窗口平台，官方 snapshot 纹理读回；不使用重画的 HTML/图片替代早期桌面 UI（已移除）。
 共享 CAD 桥在相同设备提交，真实适应后的合成数据库进入画布。新图标为本项目绘制 SVG。
 
 截图已抽查：`/tmp/opencode/yacr-concept-round4/` 的 desktop、mobile、mobile-tools、

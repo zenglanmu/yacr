@@ -1,21 +1,21 @@
-# ADR 0010：桌面 UI 以 React/Tauri 原生宿主替代 Slint
+# ADR 0010：桌面 UI 采用 React/Tauri 原生宿主
 
 - 状态：**已接受（Accepted，2026-10-16）**——取代 ADR 0006 的“实验”定位，并使 ADR 0002/0003
-  中“Slint 为桌面合成基线”的部分作废。
+  中“旧桌面 UI 为桌面合成基线”的部分作废。
 - 相关：`CAD_IMPLEMENTATION_SPEC.md` §21；`docs/architecture.md`；`docs/react-linux-app.md`；
-  `docs/handoff.md`；报告 `.slim/deepwork/replace-slint-ui/`。
+  `docs/handoff.md`。
 
 ## 背景
 
-原桌面路线（ADR 0002/0003）以 **Slint 作为唯一 UI 合成器**：Slint 拥有 surface/事件循环，
-CAD 通过 `cad-ui-slint/src/bridge.rs` 与 wgpu 合成。2026-10-14 用户授权以 **React + Tauri** 作为
-桌面替代实验（ADR 0006）。该实验随后被判定成熟到足以取代 Slint 桌面路线：P1（`cad-ui-core`
-抽取）、P2（宿主合并）、P3（Slint 删除与脚本/CI 退役）、P4（AutoCAD 风格外壳重设计）已完成
+原桌面路线（ADR 0002/0003）以**早期桌面 UI 工具包作为唯一 UI 合成器**：该工具包拥有 surface/事件
+循环，CAD 通过旧 UI crate 的 bridge 与 wgpu 合成。2026-10-14 用户授权以 **React + Tauri** 作为
+桌面替代实验（ADR 0006）。该实验随后被判定成熟到足以取代旧桌面路线：P1（`cad-ui-core`
+抽取）、P2（宿主合并）、P3（旧 UI crate 删除与脚本/CI 退役）、P4（AutoCAD 风格外壳重设计）已完成
 源码级实施，P3b Oracle 源码评审 **ACCEPT**（仅源码，未运行）。
 
 ## 决策
 
-**桌面（Linux 优先）UI 路线正式改为 React + Tauri 原生宿主；`cad-ui-slint` 与全部 Slint 依赖删除。**
+**桌面（Linux 优先）UI 路线正式改为 React + Tauri 原生宿主；旧 UI crate 与工具包依赖已删除。**
 
 关键点：
 
@@ -54,13 +54,13 @@ CAD 通过 `cad-ui-slint/src/bridge.rs` 与 wgpu 合成。2026-10-14 用户授�
 
 ## 退役与后果
 
-- 删除 `crates/cad-ui-slint`（含其重复 i18n 副本与 Slint 字体）与 workspace 的 `slint`/`slint-build`
-  声明；`Cargo.lock` 按成员可达性剪枝（845 → 622 包）。
-- `check-architecture.py` 现在**全 workspace** 禁止 `slint`/`slint-build`/`iced`（含 build/dev 与
-  target 表、workspace 继承别名），保留 acadrust/wgpu 唯一依赖与分层规则。
+- 删除旧 UI crate（含其重复 i18n 副本与工具包字体）与 workspace 的旧 UI 工具包依赖声明；
+  `Cargo.lock` 按成员可达性剪枝（845 → 622 包）。
+- `check-architecture.py` 现在**全 workspace** 禁止 `iced`（含 build/dev 与 target 表、workspace
+  继承别名），保留 acadrust/wgpu 唯一依赖与分层规则。
 - `check-i18n.py` 的**唯一权威目录**改为 `crates/cad-ui-core/i18n/{zh-CN,en}.json`，并新增对 React
   JSX/JS 的受限 CJK 硬编码扫描。
-- 旧 Slint 验证/离屏/真实 GPU 测试套件、web shell、Flatpak 打包随之退役；六个公共
+- 旧 UI 工具包的验证/离屏/真实 GPU 测试套件、web shell、Flatpak 打包随之退役；六个公共
   构建/打包/部署脚本改为显式 NOT IMPLEMENTED（非零退出），8 个 CI job 以 `if: false` 硬禁用；
   **Linux release 暂时不可用，等待替代打包方案验收**。
 - `docs/adr/0002`、`0003`、`0006` 与 `docs/validation*.md`、`docs/linux-app.md`、`docs/verify-ui.md`
@@ -71,7 +71,7 @@ CAD 通过 `cad-ui-slint/src/bridge.rs` 与 wgpu 合成。2026-10-14 用户授�
 - 优点：桌面 chrome 用 Web 技术迭代更快；GTK child surface 明确解决“顶层透明叠加”历史 FAIL；
   `cad-ui-core` 让 UI 逻辑与工具包解耦，便于未来第二宿主。
 - 代价：Tauri/GTK/WebKitGTK 系统依赖；Windows/macOS 需另行实现（本轮 NOT IMPLEMENTED）；
-  旧 Slint 特性证据（选择/编辑/历史、文字渲染、API/事件等）不自动由 React 宿主持有，需在 P6
+  旧 UI 特性证据（选择/编辑/历史、文字渲染、API/事件等）不自动由 React 宿主持有，需在 P6
   用替代证据重新评估。
 
 ## 验证状态

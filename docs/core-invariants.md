@@ -1,9 +1,9 @@
 # Core invariants (B23–B31 focus)
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的桌面/web 宿主；
+> 其中旧 UI crate、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 This document records which audit items the core crates
 (`cad-domain`, `cad-geometry`, `cad-db`) close with pure value-level
@@ -16,7 +16,7 @@ and passes after.
 
 Scope of this change: `crates/cad-domain/**`, `crates/cad-geometry/**`,
 `crates/cad-db/**`, `crates/cad-import-acadrust/**` and their `tests/**`.
-`cad-representation`, `cad-app`, `cad-ui-slint`, `cad-measure`, `cad-scene`,
+`cad-representation`, `cad-app`, the old UI crate (deleted), `cad-measure`, `cad-scene`,
 `cad-query`, `cad-history`, `cad-cli-tools` were **not** modified, so any item whose fix
 must land in those crates stays open here. `cad-annotations` existed at the time of
 this change but was removed on 2026-10-05 (commit `0120d09`); the annotation rows

@@ -1,10 +1,10 @@
 # Linux Flatpak 打包（React/Tauri 宿主）
 
 > **状态（2026-10-17）：打包流水线已重启，产物仅本地**。`packaging/flatpak/**` 与
-> `scripts/package-linux-release.sh` 曾于 2026-10-16 随 Slint 退役删除（commit `7d83572`），
+> `scripts/package-linux-release.sh` 曾于 2026-10-16 随早期桌面 UI 退役删除（commit `7d83572`），
 > 本轮为 **React + Tauri** 宿主 `apps/app-linux`（bin `yacr`）**重新引入**。产出的 Flatpak bundle
 > **不提交 Flathub、不发布**；没有 Flathub 提交、审核或 CI 发布流水线。逐条运行证据见
-> `docs/validation-flatpak-linux-2026-10-17.md`；旧 Slint 流水线的历史事实见 `docs/linux-app.md`
+> `docs/validation-flatpak-linux-2026-10-17.md`；早期桌面 UI 流水线的历史事实见 `docs/linux-app.md`
 > （历史小节，**不是**当前分发路径）。
 
 本文记录 manifest、打包流程、前置条件与**本机实际执行**结果。所有数字均为**实测**，除显式标注者。
@@ -29,7 +29,7 @@
   验证嵌入；**不**用 `http://localhost:1420` 当判据（嵌入的 `tauri.conf.json` 在 dev 与 release 都带
   `build.devUrl`，该串恒存在，第一版守卫是**假阳性**，本轮修正）。
 - **bundle 内只有 GUI 宿主**：`/app/bin/yacr` + `/app/fonts/` + 桌面项/AppStream/图标。
-  旧 Slint 包里的 `cad-cli-tools` **不再**随包分发。
+  旧 UI 包里的 `cad-cli-tools` **不再**随包分发。
 - **不打包宿主共享库**：运行时提供 glibc、GTK3、WebKitGTK 4.1、fontconfig/freetype、GL/Vulkan 加载器
   与 Wayland/X11 客户端库；把宿主库塞进 `/app/lib` 会与运行时代际耦合。
 - **finish-args**：`--share=ipc`、`--socket=wayland`、`--socket=fallback-x11`、`--device=dri`、
@@ -123,7 +123,7 @@ bundle 是未签名的，CI summary 会明确写 `UNSIGNED`。
 | 产物 | `target/release/dist/yacr-0.1.2-linux-x86_64.flatpak`，**6,724,496 B** |
 | sha256 | `cd453e230aac16f64583c25f34552c561ce0761f7338a9c4d31fbde484661e90` |
 | `flatpak info dev.yacr.app` | 0.1.2 / AGPL-3.0 / runtime `org.gnome.Platform//51` / branch `master` |
-| 安装 | `flatpak install --user` 成功，同 app-id/branch **覆盖**旧 0.1.1 Slint 包 |
+| 安装 | `flatpak install --user` 成功，同 app-id/branch **覆盖**旧 0.1.1 版本的包 |
 | MIME 关联 | `xdg-mime query default image/vnd.dwg` → `dev.yacr.app.desktop` |
 
 沙箱内运行（同 UID、无 root/sudo、无屏录、Wayland 会话；命令形状如下，路径参数以日志里的

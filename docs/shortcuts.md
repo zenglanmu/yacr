@@ -1,10 +1,10 @@
 # 命令行与快捷键参考
 
-> **范围说明（2026-10-27 更正，取代原「历史文档」横幅）**：`cad-ui-slint` 与 `yacr-linux` 已随
-> Slint 退役删除（部分旧脚本改为非零 NOT IMPLEMENTED）。本文 §1–§5 **描述当前 React/Tauri 宿主**；
-> 唯一保留的 Slint 内容都已**就地标注为「Slint 时期（已退役）」**（§3 的键位历史段），不得当作现状。
+> **范围说明（2026-10-27 更正，取代原「历史文档」横幅）**：旧 UI crate 与 `yacr-linux` 已随
+> 早期桌面 UI 退役删除（部分旧脚本改为非零 NOT IMPLEMENTED）。本文 §1–§5 **描述当前 React/Tauri 宿主**；
+> 唯一保留的旧宿主内容都已**就地标注为「旧宿主时期（已退役）」**（§3 的键位历史段），不得当作现状。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。
+> [ADR 0010](adr/0010-react-linux-host.md)。
 >
 > **证据上限**：本文的命令名/别名有 `scripts/check-command-docs.py`（对照
 > `docs/autocad-2026-command-coverage.md`）的机器自检；**行为语义与
@@ -18,7 +18,7 @@
 `COMMAND_TABLE`（每个都对应一个 `CommandId`）**加上**交互专用的测量/缩放步进选择子
 （`DIST`/`MEASUREPOLYLINE`/`MEASUREANGLE`/`AREA`/`ID`、`ZOOMIN`/`ZOOMOUT`——它们**没有** `CommandId`）；
 **别名**只来自同一文件的 `COMMAND_ALIASES`，作用仅是把输入**归一化**，不改变行为。命令行解析/补全/分发
-在 `cad-ui-core`，所有宿主共享。（旧版本此处指向已删除的 `crates/cad-ui-slint/src/command_completion.rs::SELECTORS`。）
+在 `cad-ui-core`，所有宿主共享。（旧版本此处指向已删除的旧 UI crate `command_completion.rs::SELECTORS`。）
 
 ---
 
@@ -29,13 +29,13 @@
   - **唯一前缀** → Enter 执行该命令。
   - **歧义前缀**（匹配多个）→ 命令行**保持打开**并给出候选（不猜测、不执行）。
   - **空 Enter**：**不执行任何命令**（`admitCommandText('')` 返回 `empty`，chrome 不回退到“重复上一条”）；
-    要重跑旧命令请用 `↑` 从历史取回整行。（旧文档的“重复上一条成功分发的命令”是 **Slint 时期**行为。）
+    要重跑旧命令请用 `↑` 从历史取回整行。（旧文档的“重复上一条成功分发的命令”是 **旧宿主时期**行为。）
   - **无法识别的名字**：chrome 侧就按 `command.unsupported` 拒绝（`isSupportedCommand` 为假，
     不转发给路由器）；若名字绕过 chrome 直达路由器，返回稳定字符串 `unsupported CAD command: <name>`。
     **`command.unknown` 这个 i18n 键没有消费方**（只剩在目录里）——旧文档“未知 → `command.unknown`、
     已识别未实现 → `command.unsupported`”的两分法**不是现状**。
 - **补全候选**（`apps/desktop-ui/src/components/CommandLine.tsx` + `commands.ts::filterCommandSuggestions`；
-  旧文档指向的 `command-bar.slint` 已随 Slint 删除）：
+  旧文档指向的命令栏组件已随早期桌面 UI 删除）：
   - 候选来源是 **`COMMAND_CATALOG`（显示目录）+ 宿主别名表**（`cad_command_aliases`），
     **不是**全部 120 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
     字母序（**不去重**，也**不是**纯字典序）。
@@ -49,7 +49,7 @@
 - **门控（2026-10-27 更正）**：当前**没有**门控。短别名（`L`、`C`、`M`、`CO`…）**始终可用**：
   `canonical_command_name` 无条件解析 `COMMAND_ALIASES`，没有任何生产代码读取
   `interaction.keyboardShortcuts`（该键只剩在 `crates/cad-app/src/viewer_config/tests.rs` 的测试夹具里）。
-  旧文档「关闭时短别名保持未知」是 **Slint 时期**的配置语义，不是现状。
+  旧文档「关闭时短别名保持未知」是 **旧宿主时期**的配置语义，不是现状。
 - 命令行**不是** payload 解析器：坐标、路径、CAD 脚本、payload 一律不从这里转发给文档命令。
 
 ---
@@ -216,7 +216,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 - `OPEN`/`NEW`/`CLOSE`/`SAVE`/`PLOT` 为**宿主自有**：宿主未提供能力时命令层返回显式 `Unsupported`
   （不会静默 no-op）。
 - 别名：**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES`（**67** 行），
-  本页 §2b 是它的转写。旧文档引用的 `cad-ui-slint` 别名/同义词/未实现命令三张表**已随 Slint 退役删除**，
+  本页 §2b 是它的转写。旧文档引用的旧 UI crate 别名/同义词/未实现命令三张表**已随早期桌面 UI 退役删除**，
   不要再去仓库里找它们。
 
 ### 2a. 不是命令行选择子（键位 / 面板 / IPC）
@@ -247,7 +247,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 ## 2b. 现行 AutoCAD 风格命令别名（React 宿主，2026-10-25 起）
 
 > 本节描述**当前** `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES` 的真实内容
-> （Slint 时期的别名表已随之删除）。命令行候选列表由宿主 IPC `cad_command_aliases` 提供，
+> （旧宿主时期的别名表已随之删除）。命令行候选列表由宿主 IPC `cad_command_aliases` 提供，
 > 前端不再维护第二份表；别名只是**候选/便捷输入**，准入与分发仍走 `cad_command` → 路由器
 > 归一化（`normalize_command`/`canonical_command_name`），别名不会改变任何命令行为。
 
@@ -293,7 +293,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 
 ---
 
-## 3. 固定键位（当前 React 宿主；Slint 时期契约另附）
+## 3. 固定键位（当前 React 宿主；旧宿主时期契约另附）
 
 > 指针/手势导航（mouse/touch/pen、pinch、`interaction.leftDragPans`）见
 > [`docs/input-modality.md`](input-modality.md)。
@@ -303,7 +303,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 `apps/desktop-ui/src/commands/accelerators.ts`（`acceleratorCommand` / `acceleratorDispatch`）；
 工具键在 `apps/desktop-ui/src/commands/commands.ts::toolCommandForKey`；制图功能键映射在
 `apps/desktop-ui/src/cad/cad.ts::DRAFTING_ACCELERATORS`；浏览器默认键的抑制在
-`apps/desktop-ui/src/defaults.ts`。旧页头引用的 `ui/app.slint` **已随 Slint 退役删除**。
+`apps/desktop-ui/src/defaults.ts`。旧页头引用的旧 UI 视图文件 **已随早期桌面 UI 退役删除**。
 
 **当前源码里真的接线了的全局键**（`Alt`/`Meta` 一律放行给系统）：
 
@@ -362,9 +362,9 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 抑制为无动作。`Ctrl+P` **不**属于这一类：它归 `PLOT`，`defaults.ts` 的打印抑制只在 `PLOT` 未被
 准入（无文档/无 `canPlot`）时才会落到键上。
 
-**Slint 时期（已退役）的键位契约——历史记录，勿当作当前行为**：旧宿主用 capture/bubbling 两层处理器
-（`ui/app.slint`，文件已删除），并通过 `shortcut.unsupported` 报告未实现的 chord。该实现与报告通道
-**都已随 Slint 退役**：`shortcut.unsupported` 现在只存在于两个 i18n 目录里，**没有任何代码消费**。
+**旧宿主时期（已退役）的键位契约——历史记录，勿当作当前行为**：旧宿主用 capture/bubbling 两层处理器
+（旧 UI 视图文件，已删除），并通过 `shortcut.unsupported` 报告未实现的 chord。该实现与报告通道
+**都已随早期桌面 UI 退役**：`shortcut.unsupported` 现在只存在于两个 i18n 目录里，**没有任何代码消费**。
 
 **绘制/编辑工具键**：工具本身**没有**专用快捷键，经命令行选择器（如 `L`/`C`/`M`/`CO`/`TR`/`E`/`A`/
 `EX`/`RO`/`SC`/`MI`/`O`）或 ribbon 按钮启动；命令行对 MOVE/COPY/ROTATE/SCALE/MIRROR/OFFSET 与
@@ -381,7 +381,7 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   已接线，见 §3；`F5` 另被 `defaults.ts` 抑制为无动作。）**未接线的键不会“报告”**：当前 React 宿主
   **没有** `shortcut.unsupported` 的消费路径（该键只存在于两个 i18n 目录，无代码引用），所以按下是
   **静默无动作**（少数浏览器默认被 `defaults.ts` 抑制）。这是**已知的诚实缺口**，旧文档的
-  “通过 `shortcut.unsupported` 报告、不会静默 no-op”是 **Slint 时期**的行为，**不是现状**。
+  “通过 `shortcut.unsupported` 报告、不会静默 no-op”是 **旧宿主时期**的行为，**不是现状**。
 - **Ctrl 组合键**：§3 表里的 **13 个命令 / 15 个键写法**
   （`Ctrl+A/C/X/V/Z/Y/Shift+Z/Home/O/N/S/Shift+S/P` 加上 `Ctrl+Shift+C`/`Ctrl+Shift+X`；其中 `Ctrl+Y` 与
   `Ctrl+Shift+Z` 都是 `REDO`、`Ctrl+S` 与 `Ctrl+Shift+S` 都是 `SAVE`）已接线。
@@ -402,8 +402,8 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     （无文档 / 无 `canPlot`）加速器不派发，键才落到 `defaults.ts` 的打印抑制上。
   - 未列出的 `Ctrl+<其他字母/数字>` 与所有 `Alt+` 组合**未映射**：`Alt`/`Meta` 一律放行给系统，
     其余未映射组合不拦截。
-- **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
-  的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
+- **命令名的处理（2026-10-20 更正）**：此前本节引用旧 UI crate 的 `command_line.rs`
+  的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随桌面 UI 迁移删除**，此处据实改写。现行机制：命令名对照
   `crates/cad-ui-core/src/session/commands.rs` 的命令表（**120 个选择子**，与 `CommandId` 变体一一对应；
   P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`/
   `PDMODE`/`PDSIZE`，2026-10-27 再加 `LAYERP`/`AREA OBJECT`，**2026-10-28 再加 `COPYBASE`/`CUTBASE`/

@@ -4,7 +4,7 @@
   因此没有任何补丁运行证据。Windows/macOS/Android/Web 与真实 DWG/AutoCAD 兼容性均
   **NOT VERIFIED**。
 - 日期：2026-11-07。
-- 相关：[ADR-0010](0010-react-linux-host-replaces-slint.md)（宿主分层）、`docs/acadrust-patches.md`
+- 相关：[ADR-0010](0010-react-linux-host.md)（宿主分层）、`docs/acadrust-patches.md`
   （补丁台账）、`scripts/check-architecture.py`（门禁）、`docs/compatibility.md`（能力表）。
 - 影响：根 `Cargo.toml` 的 `[patch]` 规则、架构门禁、文档。**不**改变：`acadrust` 只能被
   `cad-import-acadrust` 依赖；`cad-db` 是唯一权威；未支持能力必须显式建模。

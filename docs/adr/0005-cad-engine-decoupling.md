@@ -5,7 +5,7 @@
 ## 当前暂停检查点
 
 P2-A 已加入应用侧 `Drawing` capture、selection snapshot、tool generation 与 Select/SelectAll 版本；app
-all-targets check 和 331 项 synthetic tests 通过。P2-B 的 Host/Slint/apps 源码已有去 UI 核心、单 session/
+all-targets check 和 331 项 synthetic tests 通过。P2-B 的 Host/旧桌面 UI/apps 源码已有去 UI 核心、单 session/
 dispatch/config authority 改动。Oracle attempt 3 的两项 findings 已修补，attempt 4 接受架构/源码 codegate。
 最终串行 shell `sh_135e64476001QjMcVRgdJvRBJB` 全部 exit 0：workspace all-targets、host/UI synthetic suites、
 WASM lib、local-Skia Android aarch64 UI/app check、Clippy。编译/测试通过不代表真实场景或平台运行验收。最小
@@ -17,7 +17,7 @@ P3 bounded queue 已通过 codegate、测试及所列真实窗口用例；不据
 ## 背景与现状
 
 当前 `cad-render-wgpu` 封装 wgpu 渲染器，但渲染会话协调仍分散在渲染桥和 UI/宿主周边。
-`cad-host` 当前依赖 `cad-ui-slint` 并实现其 sink；`cad-ui-slint` 当前直接使用渲染相关 API。
+`cad-host` 当前依赖 `cad-ui-legacy` 并实现其 sink；`cad-ui-legacy` 当前直接使用渲染相关 API。
 因此本次抽取须允许可编译过渡：P1 建立 `cad-engine` 会话边界，不把尚未完成的 host/UI
 拆分写成既成事实。依赖方向及门禁由 Cargo manifest 的架构检查明确锁定。
 
@@ -25,7 +25,7 @@ P3 bounded queue 已通过 codegate、测试及所列真实窗口用例；不据
 `cad-render-wgpu`、`cad-representation`：分别提供应用会话/工具契约、权威数据库、领域类型、
 renderer 与显示表示，均为 UI 无关的核心契约而非 UI/宿主实现。依赖边为
 `cad-engine → cad-app/cad-db/cad-domain/cad-render-wgpu/cad-representation`；`cad-app` 不依赖 engine；
-engine 不依赖 `cad-ui-slint`、`cad-host`、Slint 或
+engine 不依赖 `cad-ui-legacy`、`cad-host`、旧桌面 UI 或
 直接依赖 wgpu；UI 不依赖 host。acadrust 仍仅由
 `cad-import-acadrust` 依赖，wgpu 仍仅由 `cad-render-wgpu` 依赖，不扩宽现有唯一依赖边界。
 
@@ -40,10 +40,10 @@ engine 不依赖 `cad-ui-slint`、`cad-host`、Slint 或
   未约定的跨语言序列化作为稳定接口。渲染帧绑定与纹理通过 API 交给呈现适配层。
 - Device/Queue 等 GPU 类型由 `cad-render-wgpu` 的 renderer API/re-export 暴露；engine
   只消费 renderer 边界，不直接依赖 wgpu。GPU 提交和资源操作继续封装在 renderer 内。
-- Slint 继续作为单 surface 协调者和 presenter：拥有 surface/事件循环，提供共享 GPU
+- 旧桌面 UI 继续作为单 surface 协调者和 presenter：拥有 surface/事件循环，提供共享 GPU
   Device/Queue，并呈现 engine/renderer 提供的 FrameBinding 与 Texture。CAD 不建立第二套
   surface 或事件循环，不争抢 present，也不做整幅 GPU→CPU 回读。
-- P1 期间 `cad-host` 暂保留对 `cad-ui-slint` 的依赖，以维持现有可编译过渡；不得添加
+- P1 期间 `cad-host` 暂保留对 `cad-ui-legacy` 的依赖，以维持现有可编译过渡；不得添加
   host 无 UI 依赖断言，亦不得声称 host 已完成去 UI 化。
 
 ### P2：SessionState 与 host/UI 分离
@@ -52,8 +52,8 @@ engine 不依赖 `cad-ui-slint`、`cad-host`、Slint 或
   `DrawTool` 与开始时的 `SelectionRef` 快照。确认成功后清除捕获；失败保留；取消不写事务；
   模式/文档切换清理状态。测量沿用现有实现。
 - `cad-host` 保持 HostCore，消费 RenderSessionHandle、配置/度量及语义更新；移除
-  `UiHandle`、`CadView`、`MessageSource`、UI 专属 trait 实现和对 `cad-ui-slint` 的依赖。
-  平台适配器由 apps 持有，Slint 本地化继续留在 Slint。借用 RefCell 期间不回调拉取
+  `UiHandle`、`CadView`、`MessageSource`、UI 专属 trait 实现和对 `cad-ui-legacy` 的依赖。
+  平台适配器由 apps 持有，本地化继续留在旧桌面 UI。借用 RefCell 期间不回调拉取
   HostUpdates。
 
 ### P3：有界语义队列与唤醒

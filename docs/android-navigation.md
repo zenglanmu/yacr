@@ -12,9 +12,9 @@
 
 ## 合成测试证据边界
 
-已有 cad-host 合成测试继续覆盖资格矩阵、controller 状态不变量和无效命令错误；不再保留之前必然失败的 hardware stub。真实 HostCore→Slint bridge 验证放在 `apps/app-linux/src/host/validation.rs` 的 ignored 测试 `real_gpu_host_navigation_push_updates_bridge_and_preserves_full_push_semantics`，以复用 LinuxApp 的真实 handle/view 和 Slint timer/event-loop 生命周期。
+已有 cad-host 合成测试继续覆盖资格矩阵、controller 状态不变量和无效命令错误；不再保留之前必然失败的 hardware stub。真实 HostCore→UI bridge 验证放在 `apps/app-linux/src/host/validation.rs` 的 ignored 测试 `real_gpu_host_navigation_push_updates_bridge_and_preserves_full_push_semantics`，以复用 LinuxApp 的真实 handle/view 和宿主 timer/event-loop 生命周期。
 
-该测试实际调用 HostCore Pan/Zoom，验证完整相机快照、selection/measurement/history/drawing 不变量、生产 snap getter 的 threshold 候选变化、非导航 Select 全量面板更新及错误/status 传播。随后以 50ms Slint timer 等待 Native Vulkan renderer live 且至少一帧；90 秒 deadline 内没有 ready/frame 会显式 panic，成功则自动 `quit_event_loop`，不需要人工关窗。最后验证 NVIDIA device fd 并写入 `renderer.txt`。没有强制 software ICD 或 adapter fallback。
+该测试实际调用 HostCore Pan/Zoom，验证完整相机快照、selection/measurement/history/drawing 不变量、生产 snap getter 的 threshold 候选变化、非导航 Select 全量面板更新及错误/status 传播。随后以 50ms 宿主 timer 等待 Native Vulkan renderer live 且至少一帧；90 秒 deadline 内没有 ready/frame 会显式 panic，成功则自动 `quit_event_loop`，不需要人工关窗。最后验证 NVIDIA device fd 并写入 `renderer.txt`。没有强制 software ICD 或 adapter fallback。
 
 Linux 真窗口入口（串行、每次必须使用全新证据目录）：
 

@@ -3,7 +3,7 @@ name: CI
 # Layered CI mirroring the repository's real gate (AGENTS.md "构建").
 #
 # After the UI replacement the desktop host is React/Tauri (`apps/app-linux`,
-# bin `yacr`); the Slint crate is gone and the Android/Web/Windows/macOS UIs are
+# bin `yacr`); the retired UI crate is gone and the Android/Web/Windows/macOS UIs are
 # explicit NOT IMPLEMENTED placeholders. This workflow keeps the genuine
 # compile/check gates:
 #   core-quality  : fmt, clippy (incl. the Tauri app-linux host), React (Vite)

@@ -25,5 +25,5 @@ phone chrome/inset 的 metrics，验证 live CAD logical 尺寸和渲染 physica
 偏离中心的 canvas-local 点执行 ZoomAt，验证其下方世界点前后不变。另有 headless inset fallback、
 无效 CAD 尺寸拒绝及 live CAD 路径中的平台 surface 零/NaN 尺寸和无效 scale 拒绝检查。
 
-这些测试不创建真实 Slint UI、不依赖 GPU，也不是 Android 真机或设备 pinch 验收。它们证明
+这些测试不创建真实 UI、不依赖 GPU，也不是 Android 真机或设备 pinch 验收。它们证明
 HostCore metrics 选择契约和相机锚点的合成行为；真机尺寸/触控事件及 GPU 渲染仍需独立验收。

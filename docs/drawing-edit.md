@@ -1,9 +1,9 @@
 # Drawing 写事务与绘制/编辑命令（设计契约，F-EDIT）
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的桌面/web 宿主；
+> 其中旧 UI crate、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 规范 v2.0 §4.3/§4.6/§4.7：底图导入后只读；**未来底图编辑**必须经同一验证与变更追踪
 路径，不得为预留而暴露 unrestricted mutable access。本文件固定本轮实现的接口，供并行
@@ -163,7 +163,7 @@ impl<'a> DrawingTransaction<'a> {
    错误不会结束捕获或伪造成功。
 
 `scripts/check-web-drawing.mjs` 在真实 Chromium 153、SwiftShader/WebGL2 下分别验收
-LINE、CIRCLE、MOVE、TRIM（直线交直线）。全部操作来自 Slint 命令输入与画布取点，
+LINE、CIRCLE、MOVE、TRIM（直线交直线）。全部操作来自命令输入与画布取点，
 不是直接调用测试 API。确认后工具行关闭，底图 CAD 区域像素改变；撤销后的解码像素
 SHA-256 与各场景基线完全相同。MOVE 锚点为空白区域，验证选择不丢失；LINE/CIRCLE
 确认前及取消保持实体计数，重做恢复计数；TRIM 圆目标拒绝后捕获保留、实体计数不变，

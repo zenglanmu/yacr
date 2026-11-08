@@ -1,9 +1,9 @@
 # UI、DXF 与文字尺寸修复（2026-10-03）
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的早期桌面 UI（已移除）/web 宿主；
+> 其中旧 UI crate（已删除）、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 本轮用户要求按 `docs/ui-spec/` 补齐图标/禁用状态/视图操作，支持 DXF，使用网络 DWG
 对比文字；**明确不跑完整测试，只要求 Linux/Web 构建**，最后提交推送并发布 Cloudflare Pages。
@@ -11,7 +11,7 @@
 
 ## 实现范围
 
-- 共享 Slint 浮动导航增加 Fit / Pan / Zoom in / Zoom out；缩放通过统一 `Zoom` 命令，
+- 共享早期桌面 UI（已移除）浮动导航增加 Fit / Pan / Zoom in / Zoom out；缩放通过统一 `Zoom` 命令，
   平移模式取消未提交绘制/测量/批注，再把主键拖动路由为宿主中键导航；进入取点工具退出平移。
   触控画布命中排除整个四按钮区域，纯画布显隐仍由配置总开关控制。
 - 文件、测量、批注、绘图编辑及导航使用项目绘制的 SVG 图标；编辑入口不再只显示文字。
@@ -60,7 +60,7 @@ Linux release 与 Web release 含字体 bundle 已构建通过。Linux 实际合
 冒充修复后的 UI 验收。
 
 另尝试实际 Linux App 打开网络 canteen 并加载 TIMES 字体（`linux-network-dwg/`），
-**240 秒超时，没有出图通过证据**。已有原生 CLI 对比图有效，但不能推广为大图 Slint 宿主
+**240 秒超时，没有出图通过证据**。已有原生 CLI 对比图有效，但不能推广为大图早期桌面 UI（已移除）宿主
 性能通过。本轮不为了绕过超时改成空成功；大图大量 outline/batch 的性能仍待处理。
 最终 `linux-confirm/initial.png` 已抽查：Fit/Pan/+/− 四图标分行、不再重叠，Linux 未接线
 打开/侧车按钮灰显。实际浏览器四按钮点击与 Pan 拖动验证通过，缩放改变 world-per-pixel、

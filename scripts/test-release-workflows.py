@@ -2,8 +2,8 @@
 """Contract tests for the re-enabled release packaging jobs.
 
 The four platform release jobs (``linux-release``, ``windows-release``,
-``macos-release``, ``android-release``) were hard-disabled
-during the Slint removal. They are re-enabled (2026-11-01) for the current
+``macos-release``, ``android-release``) were hard-disabled during the earlier
+desktop-UI replacement. They are re-enabled (2026-11-01) for the current
 React/Tauri hosts as **event-gated artifact builders**: a ``v*`` tag or a manual
 ``workflow_dispatch`` may run them; a routine push/PR may not. They upload
 workflow artifacts and never publish, notarize or touch a store. With

@@ -8,7 +8,7 @@
   `docs/validation-native-wayland-2026-10-16.md`；`docs/handoff.md`；
   `.slim/deepwork/native-wayland/`（含 `design-inputs.md`、`gate-w1.md`、`gate-w2-attempt*.md`、
   `w2a-remediation.md`、`w2b-remediation.md`、`w2-native-probe.md`）。
-- 前身：ADR 0010（React/Tauri 宿主取代 Slint）。ADR 0006/0010 描述的是**当时**的 X11/XWayland
+- 前身：ADR 0010（React/Tauri 宿主）。ADR 0006/0010 描述的是**当时**的 X11/XWayland
   范围，作为历史保留，**不**被追溯改写为原生 Wayland 结论。
 
 ## 背景

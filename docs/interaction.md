@@ -41,8 +41,8 @@ units/source/precision），而不是只给格式化字符串。
 
 ### 仍未接线（诚实开放项）
 
-- ~~Slint 外壳 `crates/cad-ui-slint/ui/app.slint` 的「测量」按钮~~：该外壳与 `app.slint`
-  **已随 2026-10-16 的 Slint 退役删除，无同名替代**。当前桌面测量入口是 `cad-ui-core` 的选择子
+- ~~旧 UI 外壳的「测量」按钮~~：该外壳与其视图文件
+  **已随 2026-10-16 的桌面 UI 迁移删除，无同名替代**。当前桌面测量入口是 `cad-ui-core` 的选择子
   （`DIST`/`MEASUREPOLYLINE`/`MEASUREANGLE`/`AREA`/`ID`，经 ribbon 与命令行），见
   `apps/desktop-ui/src/ribbon/ribbon-model.ts`；本条不再作为当前 UI 缺口追踪。
 - 宿主（Web/Android）尚未把画布指针映射为测量点或预览几何；`PreviewState`
@@ -57,7 +57,7 @@ units/source/precision），而不是只给格式化字符串。
   与 `HostController::history_availability()` 是**纯 getter**，用于刷新按钮
   状态，绝不派发命令，避免程序化刷新触发重复命令。
 - UI 约定：撤销按钮绑定 `can_undo`，重做按钮绑定 `can_redo`，不得共用
-  `can-undo`（`app.slint` 的 `can-redo` 属性与 `UiHandle::set_can_redo`
+  `can-undo`（`can-redo` 属性与 `UiHandle::set_can_redo`
   由 UI crate 侧完成，见交接说明）。
 
 ## 3. 鼠标语义基线（AutoCAD 对照，2026-10-18 外部查证）

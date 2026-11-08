@@ -1,15 +1,15 @@
 # cad-engine 解耦阶段验证记录
 
-> **历史执行证据（Slint 桌面已退役，2026-10-16）**：本文记录的是**迁移前** Slint 宿主/模拟器/浏览器
-> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；Slint→React 迁移后的
+> **历史执行证据（早期桌面 UI 已退役，2026-10-16）**：本文记录的是**迁移前**的早期桌面 UI（已移除）宿主/模拟器/浏览器
+> 的运行与验收证据，**不代表**当前 React/Tauri 宿主的编译、测试或真实 GPU 结论；早期桌面 UI→React 迁移后的
 > 最终验证 **NOT RUN**（P6）。当前架构见 `docs/architecture.md` 与
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
+> [ADR 0010](adr/0010-react-linux-host.md)。下列事实仅作历史记录，不得据此宣称当前平台可用。
 
 ## 当前结论
 
 Oracle P2/P3/P4 App/engine/Host/Web codegate 均 accept；P3/P4 指定硬件用例与最新差异门禁已通过。P4 最终 workspace/WASM/Android 编译/测试 sweep 及后续差异门禁证据按 shell 分轮记录；不等于 browser、Android 设备、vendor DWG 或视觉验收。event subscription 是 in-process bounded foundation，不是外部插件兼容验收。未知设备/浏览器能力不外推。
 
-代码维持 renderer-only wgpu、单 session/dispatch/config authority 与 Slint 单 presenter。P2/P3/P4 指定 codegate 与证据已闭环；P4 的 bounded in-process events/API 不等于外部插件兼容。运行、视觉和跨平台结论严格限于各节明确的实际证据。
+代码维持 renderer-only wgpu、单 session/dispatch/config authority 与早期桌面 UI（已移除）单 presenter。P2/P3/P4 指定 codegate 与证据已闭环；P4 的 bounded in-process events/API 不等于外部插件兼容。运行、视觉和跨平台结论严格限于各节明确的实际证据。
 
 ## Oracle 检查状态
 
@@ -31,13 +31,13 @@ Oracle P2/P3/P4 App/engine/Host/Web codegate 均 accept；P3/P4 指定硬件用�
 | `cargo test -p cad-engine --lib --locked` | 36 passed | 合成单测 |
 | `cargo test -p cad-host --lib --locked` | 33 passed | 合成单测；不等于实际 host 场景运行 |
 | `cargo test -p app-web --lib --locked` | 5 passed | 纯逻辑测试，不是浏览器 E2E |
-| `cargo test -p cad-ui-slint --lib --locked` | 129 passed | UI 库合成测试 |
-| `cargo test -p cad-ui-slint --tests --locked` | 36 integration tests passed，包含 `concept_offscreen` | 测试名不证明硬件 GPU；不是真实窗口或真实 DWG |
+| 旧 UI crate（已删除）的 `cargo test --lib --locked` | 129 passed | UI 库合成测试 |
+| 旧 UI crate（已删除）的 `cargo test --tests --locked` | 36 integration tests passed，包含 `concept_offscreen` | 测试名不证明硬件 GPU；不是真实窗口或真实 DWG |
 | `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` | 通过 | WASM 编译，不是浏览器运行 |
 | `cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings` | 通过；此前 single-character lint 首次失败后已修复 | Android/Web clippy 不在此命令覆盖范围 |
-| `cargo fmt -p cad-host -p cad-engine -p cad-ui-slint -p app-linux -p app-android -p app-web --check` | 通过 | 仅所列 package |
+| `cargo fmt -p cad-host -p cad-engine -p app-linux -p app-android -p app-web --check` | 通过 | 仅所列 package |
 | `git diff --check` | 通过 | whitespace/diff 检查 |
-| `SKIA_BINARIES_URL=file:///tmp/opencode/yacr-skia-cache/skia-binaries-b7f043e0b1e2a850e702-aarch64-linux-android-ganesh-gl-jpegd-jpege-pdf-vulkan.tar.gz cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked` | 通过，18.46 s | Android aarch64 UI/app 编译检查；不代表设备安装/运行 |
+| `SKIA_BINARIES_URL=file:///tmp/opencode/yacr-skia-cache/skia-binaries-b7f043e0b1e2a850e702-aarch64-linux-android-ganesh-gl-jpegd-jpege-pdf-vulkan.tar.gz cargo check --target aarch64-linux-android -p app-android --locked` | 通过，18.46 s | Android aarch64 UI/app 编译检查；不代表设备安装/运行 |
 
 Architecture、fixture manifest、workflow、i18n 四静态门禁此前均通过；后续源码补丁未修改依赖、catalog、fixture 或 workflow，但仍须由主协调器 final rescan。完整 `cargo fmt --all -- --check` 仍被陌生未跟踪 `crates/cad-import-acadrust/examples/debug_fixture.rs` 的基线格式问题阻塞；不得修改该文件。当前 package-scope fmt 和 diff check 已通过。
 
@@ -88,7 +88,7 @@ P2/P3/P4 codegate 与 focused tests/clippy 不替代未覆盖的运行验收。P
 - Host、Web 合成测试：`cargo test -p cad-host --lib --locked` 69 passed；`cargo test -p app-web --lib --locked` 15 passed。
 - Engine 50、Android 29、UI 131 + 37 integration、Linux 12 passed / 8 ignored 是此前仍有效的独立记录，不声称来自 shell `sh_1365feb790017xIWEfljOrAD2G`；均为编译/合成测试证据，不是设备或浏览器运行。
 - `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`：通过。
-- `SKIA_BINARIES_URL=file:///tmp/opencode/yacr-skia-cache/skia-binaries-b7f043e0b1e2a850e702-aarch64-linux-android-ganesh-gl-jpegd-jpege-pdf-vulkan.tar.gz cargo check --target aarch64-linux-android -p cad-ui-slint -p app-android --locked`：通过（本地 Skia）；只是 Android 原生目标编译检查。
+- `SKIA_BINARIES_URL=file:///tmp/opencode/yacr-skia-cache/skia-binaries-b7f043e0b1e2a850e702-aarch64-linux-android-ganesh-gl-jpegd-jpege-pdf-vulkan.tar.gz cargo check --target aarch64-linux-android -p app-android --locked`：通过（本地 Skia）；只是 Android 原生目标编译检查。
 - `cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`：通过。六个变更 package 的 scoped fmt 与 `git diff --check` 通过。完整 `cargo fmt --all -- --check` 仍被陌生的 `crates/cad-import-acadrust/examples/debug_fixture.rs` baseline 格式问题阻塞，未修改该文件。
 - architecture/fixture/workflow 静态门禁此前通过；i18n 306 项在 test-cfg 修订后通过。除上述记录外不推断它们属于最新串行 shell；主协调器负责最终状态核对。
 
@@ -112,7 +112,7 @@ P2/P3/P4 codegate 与 focused tests/clippy 不替代未覆盖的运行验收。P
 
 **Engine（仅 protocol/queue/events）：** Oracle engine codegate accept；bounded EventRing/permit 与批发布行为已实现。此前初始 phantom 16 reservation、reserve exhausted 误杀旧 permit、非原子 batch publish、最后一批 unread events 被 `Exhausted` 吞掉、last-batch drop 等拒绝项均已修复并有 contracts。最新两包 shell `sh_137a3f0b3001RSKc4gOjTAnA8x`：engine 70 tests 与两包 clippy 通过。既有 permit 可兑现、unread last batch 先交付；这些是代码/合成合同证据，不是平台运行验收。
 
-**UI compatibility：** shell `sh_137adcff0001KP0ImwLEq3shNv` 的 UI 132 lib + 37 integration 与 clippy 通过。UI 仅作 `Arc<CommandOutcome>`/`RequestResult::Api` 机械兼容，API 误路由显式报 invariant；mock 明确返回 Busy/Unsupported。没有自动 event subscription、插件 UI、`.slint` 或 catalog 改动。这不等于 UI 已可消费事件产品流。
+**UI compatibility：** shell `sh_137adcff0001KP0ImwLEq3shNv` 的 UI 132 lib + 37 integration 与 clippy 通过。UI 仅作 `Arc<CommandOutcome>`/`RequestResult::Api` 机械兼容，API 误路由显式报 invariant；mock 明确返回 Busy/Unsupported。没有自动 event subscription、插件 UI、外壳定义文件或 catalog 改动。这不等于 UI 已可消费事件产品流。
 
 **分层验证边界：** P4 final shell 与后续 Host/Linux focused、真实硬件证据见下节。历史拒绝/失败记录保留；下列终态只针对明确列出的源码、合同、平台与门禁范围。
 
@@ -133,7 +133,7 @@ P2/P3/P4 codegate 与 focused tests/clippy 不替代未覆盖的运行验收。P
 **根因判定：旧源码契约未迁移，不是真实 panel 漏线。** 该 test 固定的是 P2 之前的结构：`crates/cad-host/src/state.rs` 内直接调 `set_layer_state`/`set_property_state`/`set_layout_state`/`set_diagnostics_state`/`set_selection_highlight`/`set_measurement_preview`，用 `set_overlay_visibility(handle.effective_config()...)` 做 overlay gate，且各平台 overlay 必须含 `core.push()`。P2/P4 后共享腿已迁移为：
 
 - `cad-host/state.rs`：派生 typed `HostState`/`NavigationState`，render overlay 经 `OverlayInputs` + `OverlayVisibility::from(self.viewer_config...effective().view.overlays...)`（config gate 仍在，只是表达式/位置变了）；`take_updates`/`HostUpdates` 在 `cad-host/input.rs`。
-- `cad-ui-slint`：`EngineAdapter::apply_updates` → `UiHandle::apply_host_state`/`apply_config_snapshot`/`apply_backend_state` + `view.set_snap_hints`/`set_view_state`/`set_status_message` 才是 shell setter 的唯一写入点。
+- 旧 UI crate（已删除）：`EngineAdapter::apply_updates` → `UiHandle::apply_host_state`/`apply_config_snapshot`/`apply_backend_state` + `view.set_snap_hints`/`set_view_state`/`set_status_message` 才是 shell setter 的唯一写入点。
 - 平台 overlay：web `browser.rs`/`state_push.rs`、android `poll.rs`/`state_push.rs` 在 `binding.flush_updates()` **之后** 只重推 host-specific 的 `push_import_state`/`push_resource_sections`。
 
 逐通道核对（layer/property/layout/diagnostics/import/resources、selection/measurement/overlay-visibility、units/backend/diagnostics/counts）均在上述真实 owner 存在，未发现真实漏线。

@@ -22,9 +22,6 @@ not complete, so keep your own copy of anything you open.
 
 **Author / contact:** zenglanmu@126.com · **License:** AGPL-3.0 (`LICENSE`)
 
-> **Scope changes:** user annotations were removed on 2026-10-05; on 2026-10-16 the desktop UI moved
-> from Slint to React/Tauri and `cad-ui-slint` was deleted.
-
 ## Architecture
 
 Data flow (UI and CLI share it):
@@ -342,8 +339,8 @@ runtime/GPU acceptance.
 
 ## Current progress
 
-**Compiling is not run acceptance.** How far each target has actually run (historical Slint-host
-evidence in `docs/validation*.md` does **not** transfer to the React/Tauri host):
+**Compiling is not run acceptance.** How far each target has actually run (historical evidence in
+`docs/validation*.md` does **not** transfer to the current React/Tauri host):
 
 | Platform | Host | Actual status |
 |---|---|---|
@@ -395,7 +392,7 @@ compatibility matrix: `docs/compatibility.md`; validation evidence: `docs/valida
 
 **Build & platforms** — per-platform build: `docs/build.md`; Linux desktop host:
 `docs/react-linux-app.md`; Linux Flatpak (local bundle, not published): `docs/flatpak.md`;
-decisions: `docs/adr/` (ADR 0010 = React host replaces Slint, ADR 0011 = native Wayland subsurface,
+decisions: `docs/adr/` (ADR 0010 = React/Tauri desktop host, ADR 0011 = native Wayland subsurface,
 ADR 0012 = scene spatial index and interaction); headless rendering: `docs/headless-render.md`; CI
 layers: `docs/ci.md`; CLI: `docs/cli.md`; fonts: `docs/fonts.md` and
 `docs/font-host-loading.md`; app icon: `docs/app-icon.md`.

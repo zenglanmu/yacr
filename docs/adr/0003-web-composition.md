@@ -1,8 +1,8 @@
-# ADR 0003：浏览器宿主的 Slint / wgpu 组合
+# ADR 0003：浏览器宿主的早期桌面 UI（已移除） / wgpu 组合
 
 > **已退役（2026-10-16）**：浏览器 UI 已退役为 NOT IMPLEMENTED 占位，`build-web.sh`/
 > `deploy-cloudflare-pages.sh` 非零退出。当前桌面 UI 见
-> [ADR 0010](0010-react-linux-host-replaces-slint.md) 与 `docs/architecture.md`。
+> [ADR 0010](0010-react-linux-host.md) 与 `docs/architecture.md`。
 > 下文保留为历史事实。
 
 状态：采用（历史）。范围：规范 §5.3 Web 平台组合、§6 多后端、§9.2 Web 发布。
@@ -11,20 +11,20 @@
 
 需要在浏览器中交付可运行产物，并满足：单一呈现协调者、CAD 用 wgpu 绘制、
 可选 WebGPU / WebGL2、不逐帧 GPU→CPU 回读、UI 与 CAD 业务与 Android 共享。
-Slint 官方 Web 路径是 winit + 渲染器，wgpu 后端在 wasm 上可使用 WebGPU 或
+早期桌面 UI（已移除）官方 Web 路径是 winit + 渲染器，wgpu 后端在 wasm 上可使用 WebGPU 或
 WebGL2。需要决定后端选择、事件循环移交与文件/持久化宿主形态。
 
 ## 证据
 
-- `i-slint-backend-winit` 在 wasm32 上从 `document.getElementById("canvas")`
+- 早期桌面 UI（已移除）的 winit 后端在 wasm32 上从 `document.getElementById("canvas")`
   取画布（`winitwindowadapter.rs`），因此宿主只需提供 `<canvas id="canvas">`。
-- Slint 1.18.1 的 `WGPUSettings`（`slint::wgpu_30`）公开 `backends` 字段；
+- 早期桌面 UI（已移除）1.18.1 的 `WGPUSettings`（该工具包的 `wgpu_30` 模块）公开 `backends` 字段；
   `BackendSelector::require_wgpu_30(WGPUConfiguration::Automatic(settings))`
   可在创建任何窗口前限定 wgpu 后端。
 - wgpu 30 在 wasm 上启用 `webgl` feature 时提供 `Backends::GL`（WebGL2）路径；
   `BROWSER_WEBGPU` 仅在 `navigator.gpu` 可用且能真实返回 adapter 时成立。
 - `set_rendering_notifier` 在 winit + wgpu 渲染器下提供同一 Device/Queue；
-  `i-slint-renderer-femtovg` 支持 `ImageInner::WGPUTexture::WGPU30Texture`
+  其 femtovg 渲染器支持 `ImageInner::WGPUTexture::WGPU30Texture`
   （`images.rs`），因此现有 `bridge.rs` 在浏览器复用。
 - winit 在 wasm 的事件循环以抛出的异常移交控制权
   （`platform_impl/web/event_loop/mod.rs`，文案含 "Using exceptions for
@@ -32,7 +32,7 @@ WebGL2。需要决定后端选择、事件循环移交与文件/持久化宿主�
 
 ## 选择
 
-- **同一画布、同一设备**：与 Android 相同的 `cad-ui-slint` 壳与 `bridge.rs`。
+- **同一画布、同一设备**：与 Android 相同的旧 UI crate（已删除）壳与 `bridge.rs`。
   宿主只增加后端选择与 JS 入口；两个平台不复制 CAD 业务。
 - **后端策略**：`Auto` 先真实请求 WebGPU adapter，失败回退 WebGL2；
   强制 WebGPU / WebGL2 通过 `WGPUSettings::backends` 固定。选择写入

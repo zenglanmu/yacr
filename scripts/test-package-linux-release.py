@@ -2,7 +2,7 @@
 """Static contracts for the re-enabled Linux (Flatpak) release packaging.
 
 The Linux host is the React/Tauri app at ``apps/app-linux`` (binary ``yacr``).
-The packaging path was retired during the Slint removal and is now re-enabled
+The packaging path was retired during the earlier desktop-UI replacement and is now re-enabled
 with a *prebuilt payload* manifest, so these tests pin the properties that make
 the path coherent:
 

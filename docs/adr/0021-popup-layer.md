@@ -2,7 +2,7 @@
 
 - 状态：**Accepted**（2026-10-20：D1/D2 已实施并经真实显示验证；**D3 右键菜单**用户决定"后面再考虑实现形式"，钩子保留、形式待定）。
 - 日期：2026-10-20。
-- 相关：[ADR-0010](0010-react-linux-host-replaces-slint.md)（DOM chrome + 原生 CAD 分区的组合方式，`:26-27`）、
+- 相关：[ADR-0010](0010-react-linux-host.md)（DOM chrome + 原生 CAD 分区的组合方式，`:26-27`）、
   [ADR-0011](0011-native-wayland-subsurface.md)（原生 Wayland 子表面）、
   [ADR-0019](0019-multileader-family.md)、[ADR-0020](0020-in-canvas-text-editing.md)（文本编辑入口）。
 - 影响：宿主 UI（`apps/app-linux`）、输入漏斗、i18n 读取路径；**不**影响 `cad-*` 业务层。

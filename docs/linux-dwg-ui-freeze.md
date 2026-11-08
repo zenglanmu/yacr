@@ -1,9 +1,9 @@
 # Linux 真实 DWG 打开后无响应排查（2026-10-04）
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
+> **历史文档（早期桌面 UI 已退役，2026-10-16）**：本文描述的是**迁移前**的早期桌面 UI（已移除）/web 宿主；
+> 其中旧 UI crate（已删除）、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
 > 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> [ADR 0010](adr/0010-react-linux-host.md)。下文仅作历史记录。
 
 ## 最新一轮：加载响应与预算截断处理（2026-10-04）
 
@@ -42,7 +42,7 @@
 
 ### 本轮实际证据（不是旧截图重用）
 
-同一仓库外 DWG、真实 Wayland 桌面/default Slint GPU，窗口启动后经注入文件选择结果打开。
+同一仓库外 DWG、真实 Wayland 桌面/default 早期桌面 UI（已移除）GPU，窗口启动后经注入文件选择结果打开。
 计时期间没有并行编译/其他 GPU 回归。测试不是实际 portal 文件选择，也不是长期手工验收。
 
 | 桌面回归 | 当前场景全页完成 | 加载阶段最大事件间隔 | 点击 | 全程最大间隔 |
@@ -56,7 +56,7 @@
 **未取得参考 CAD 截图逐项对照**，不能称全图视觉、所有原始图元/字体/比例验收通过。
 
 证据留在 `/tmp/opencode/yacr-responsive-visual-{debug,release}-final/` 与同名前缀 `.log`，
-含用户图纸截图/坐标，**不得提交仓库**。Slint 选中 vendor 未单独记录，桌面结论不推广
+含用户图纸截图/坐标，**不得提交仓库**。早期桌面 UI（已移除）选中 vendor 未单独记录，桌面结论不推广
 为厂商兼容；另两个小型 renderer GPU 合成契约实际报告 NVIDIA RTX 3070 Laptop/Vulkan
 并通过：有限预算的多页像素与完整单帧一致（含透明 mesh），以及超大批次显式失败。
 
@@ -111,7 +111,7 @@ prepared→presented freshness、GPU 上传背压设计；现有 ImportJob Drop 
   通过；另跑 cad-app picking 定向契约。新增测试覆盖 packed 可见段/角点/重复点/无连接线、
   无效参数和展开上限、来源/样式、vector export、borrowed nearest tie 与 Unsupported。
   这是合成契约，不是完整视觉、真机或 vendor 验收。
-- 主机 workspace all-targets debug check（含 Linux/Slint）、完整 workspace wasm lib check、
+- 主机 workspace all-targets debug check（含 Linux/早期桌面 UI（已移除））、完整 workspace wasm lib check、
   定向严格 clippy、fmt、架构/fixture/workflow/i18n 与 diff 检查通过。
 - 全 workspace 严格 clippy 仍被未修改的 `crates/cad-app/tests/select_all.rs:152`
   `err_expect` 拦截；没有修改无关测试或降低 warning 门禁。完整 workspace 测试、
@@ -122,8 +122,8 @@ prepared→presented freshness、GPU 上传背压设计；现有 ImportJob Drop 
 
 本轮环境为 **Wayland 桌面窗口**，不是无头平台；`DISPLAY=:0`、
 `WAYLAND_DISPLAY=wayland-0`。`vulkaninfo --summary` 检测到 NVIDIA GeForce RTX 3070
-Laptop GPU（驱动 580.178.04）与软件 llvmpipe。本轮桌面回归使用 Slint 默认设备选择，
-不设置 lavapipe ICD，也不安装或修改桌面、驱动与系统配置；未单独采集 Slint 选中设备的
+Laptop GPU（驱动 580.178.04）与软件 llvmpipe。本轮桌面回归使用早期桌面 UI（已移除）默认设备选择，
+不设置 lavapipe ICD，也不安装或修改桌面、驱动与系统配置；未单独采集该工具包选中设备的
 vendor 标识，因此不将本轮结果推广为 NVIDIA 驱动兼容性结论。
 
 输入为用户提供的仓库外 DWG，SHA-256：
@@ -131,7 +131,7 @@ vendor 标识，因此不将本轮结果推广为 NVIDIA 驱动兼容性结论�
 不提交原图、截图、完整路径或文本内容；这不是可再分发 fixture。
 
 **已建立的证据**：debug/release 桌面宿主打开该图后出图，出图后的事件循环持续运行；通过
-Slint 窗口事件派发滚轮后，相机和 CAD 区域像素改变。
+早期桌面 UI（已移除）窗口事件派发滚轮后，相机和 CAD 区域像素改变。
 **尚未建立的证据**：加载过程中持续响应、整图视觉正确、所有图元都已出图、长期交互
 稳定性、其他图纸/平台/vendor 兼容性。首次 CPU 准备和 GPU 上传仍同步占用事件循环，
 不能将本次修复称为无卡顿异步加载。
@@ -179,7 +179,7 @@ cargo test -p app-linux --lib desktop_dwg_event_loop_and_navigation_remain_respo
   --release --locked -- --ignored --nocapture
 ```
 
-该测试运行生产 `LinuxApp` 与真实 Slint 桌面事件循环，不安装 offscreen 平台。首个 CAD
+该测试运行生产 `LinuxApp` 与真实早期桌面 UI（已移除）桌面事件循环，不安装 offscreen 平台。首个 CAD
 帧之后记录 20 个定时回调，间隔须低于 2 秒；第 10 个回调截图并派发滚轮，第 20 个回调
 验证相机、CAD 帧数和 CAD 区域像素。截图读回耗时从事件延迟检查中排除，但滚轮同步
 处理和随后的 CAD 重绘不排除。像素仅保留在测试内存中。
@@ -201,7 +201,7 @@ fmt、架构、fixture manifest、workflow、i18n 已实际通过。全主机严
 `crates/cad-app/tests/select_all.rs:152` 的 `.err().expect(...)` 被 `err_expect` 拒绝；
 本轮未修改该文件，未将失败门禁记为通过。
 定向严格 clippy（representation/scene/app-linux 全目标）、主机全 workspace 全目标
-debug 编译（排除 Android/Web App，含 Linux/Slint）、wasm 全 workspace lib 编译和最终
+debug 编译（排除 Android/Web App，含 Linux/早期桌面 UI（已移除））、wasm 全 workspace lib 编译和最终
 `yacr-linux` debug/release 二进制构建均实际通过。首次 release 构建在 120 秒编译时限
 中止，取消时限后重跑成功；中止不计为构建通过。全树严格 clippy 的上述失败仍保留。
 

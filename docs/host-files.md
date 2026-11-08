@@ -25,7 +25,7 @@
 ## Android（`apps/app-android`）
 
 > **2026-10-28 起该宿主是 Tauri 2 WebView 载体**（wasm `dom-canvas` 会话为唯一 CAD 权威），
-> 旧的 SAF/JNI 文件桥、字体资产加载与 Slint 宿主已删除；本节其余描述属**历史**（当时的
+> 旧的 SAF/JNI 文件桥、字体资产加载与旧桌面 UI 宿主已删除；本节其余描述属**历史**（当时的
 > native-activity 宿主）。文件/保存能力现在来自 wasm 会话与 WebView（浏览器下载），原生侧不实现
 > `FileAccess`。当前契约与证据见 `docs/android-host.md`。
 

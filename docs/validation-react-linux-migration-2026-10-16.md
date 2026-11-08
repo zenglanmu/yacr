@@ -1,4 +1,4 @@
-# 验证：Slint → React/Tauri 桌面迁移（2026-10-16）
+# 验证：早期桌面 UI → React/Tauri 桌面迁移（2026-10-16）
 
 状态：**已执行（有界、分区）**；**Gate P6 attempt2：ACCEPT-WITH-FIXES（仅文档限定，已应用）**，observer
 对已观察截图终判**无重大视觉缺陷**。**有界本地 Linux 迁移验收通过**；**不是**完整 CAD 产品/跨平台/
@@ -87,7 +87,7 @@ manifests 不同步（仓库锁 622 包 vs cargo 正确 resolve 595 包）。
 
 ## 4. 真实 GPU / 真实窗口（Quadro P620，硬件 Vulkan）
 
-详见 `.slim/deepwork/replace-slint-ui/p6-real-gpu.md` 与 `p6-targeted-gpu.md`；产物 `gpu/`、`gpu-targeted/`。
+详见迁移工作目录下的 `p6-real-gpu.md` 与 `p6-targeted-gpu.md`；产物 `gpu/`、`gpu-targeted/`。
 
 - **环境证明**：`nvidia-smi` → `Quadro P620, 580.178.04, 4096 MiB`；`/proc/<pid>/fd` →
   `/dev/nvidia0`、`/dev/nvidiactl`、`/dev/nvidia-modeset`、`/dev/dri/renderD128,D129`；
@@ -131,7 +131,7 @@ manifests 不同步（仓库锁 622 包 vs cargo 正确 resolve 595 包）。
   vendor DWG 兼容证据。
 - **未运行/未声称**：真实鼠标精确光标锚定像素验收（仅合成 DOM 输入/间接）；真实 portal picker（需交互）；
   golden/精确视觉；性能预算；设备丢失/重建压力；Windows/macOS/Android/Web 运行；保存/编辑/多平台产品能力。
-- **不等于**已退役的 Slint 7 用例真实 GPU 套件结果；旧 Slint 证据不继承。
+- **不等于**已退役的早期桌面 UI（已移除）7 用例真实 GPU 套件结果；旧宿主证据不继承。
 - 本次 GPU 验收**未回填** CI（本环境无 GitHub runner）。
 - **验收范围**：Gate P6 attempt2 **ACCEPT-WITH-FIXES**（文档限定已应用）；**有界本地 Linux 迁移验收通过**，
   但**不**构成完整 CAD 产品/跨平台/vendor/golden/性能验收。应用侧 `unminimize()`+强制 unrealize 序列**未解决**；
