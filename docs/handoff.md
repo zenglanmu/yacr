@@ -1,3 +1,4 @@
+AD
 ## 2026-11-08 动态块：烘焙 `invisible` 成员不再被绘制
 
 - **用户可见 bug**：`fixtures/test-tangent-real.dwg` 在坐标约 `x=1029235 y=-1215729` 附近出现
@@ -110,6 +111,29 @@
   `plugins/tch` submodule 未初始化而失败（环境原因，不是代码通过）。多标签页已由用户取消，不声称支持。
 - **已知边界**：三个 Rust 文件正好 1000 行（`cad-host/src/lib.rs`、`cad-app/src/application.rs`、
   `cad-ui-core/src/session/commands.rs`），后续改动必须拆分；`CLOSE` 不提示未保存修改。
+
+## 2026-11-08 功能区收起态退化为 AutoCAD 简洁模式多级菜单栏
+
+- **用户可见变更**：收起功能区后不再保留一条指向空白的选项卡条。同一 26px 行（`--ribbon-bar-h`，
+  与展开态 `.ribbon__tabs` 共用 token，因而分区矩形不变）改为菜单栏：文件/常用/绘图/测量/批注/视图
+  成为顶层菜单，下拉由该选项卡自己的 `RIBBON_TABS` 面板投影；面板 item 数 ≥ 7 折叠为子菜单项，
+  带 `variants` 的 item 再开一级；行内右侧显示命令名（如 `LINE`）。派发/启用/拒绝文案仍只走
+  `runItem`/`itemEnabled`/`unavailable`，`offeredPanels`/`offeredItems` 的载体裁剪保留。
+- **交互**：点击/↓ 打开，菜单间 ←/→ 切换、悬停其它顶层菜单直接换菜单；子菜单支持点击、→、Enter
+  与父行悬停 220ms（`RIBBON_MENU_HOVER_OPEN_MS`）展开；Esc 逐层关闭并回到触发按钮，Tab 全关；
+  行键盘移动会把活动行滚入视野。下拉为与右键菜单同源的 `position: fixed` 覆盖层（无 portal、
+  无 backdrop），`placeRibbonMenuLevel` 复用 `placeContextMenu` 翻转/夹取，子菜单放不下时翻到父
+  菜单左缘之外；`ribbonMenuMaxHeight` 只向下展开并在溢出时给出边缘阴影/细滚动条。
+- **实现**：新增 `apps/desktop-ui/src/components/RibbonMenuBar.tsx`、`src/ribbon/ribbon-menu.ts`、
+  `test/ribbon-menubar.test.ts`（26 项契约）；改 `Ribbon.tsx`（收起分支）、`style.css`、
+  `commands/context-menu.ts`（导航谓词放宽为结构化 `MenuNavigable`）、两份 i18n（`ribbon.menubar_label`）、
+  `docs/react-linux-app.md`、`apps/desktop-ui/README.md`。
+- **已运行**：`npm test`（1301 passed，含两个 tsc 项目）；`npm run build`；`check-i18n.py`；
+  `check-file-size.py`；`check-architecture.py`。布局证据：Chromium headless + SwiftShader 打开
+  web 包（`dom-canvas`）1440×900 / 1440×700，收起态、文件/常用/视图菜单、绘图子菜单、短窗口滚动
+  均逐像素核对（无控制台错误）。
+- **NOT VERIFIED / NOT RUN**：WebKitGTK/Tauri 真宿主、真实 GPU、像素级验收；子菜单**左翻**分支只有
+  纯函数/契约证据；Rust/workspace 门禁未跑（本次无 Rust 改动）。上述截图仅软件渲染布局/DOM/颜色证据。
 
 ## 2026-11-07 绘制/测量预览补全（`Lines` = `LineList` 配对修复）
 
