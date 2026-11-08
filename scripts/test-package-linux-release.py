@@ -174,7 +174,7 @@ def check_metainfo(text: str) -> list[str]:
         "<mediatype>image/vnd.dxf</mediatype>",
         "<project_license>AGPL-3.0</project_license>",
         "<metadata_license>CC0-1.0</metadata_license>",
-        '<release version="0.1.2"',
+        '<release version="0.1.5"',
         "<name>Yacr</name>",
         "<summary>",
         "<description>",
