@@ -20,7 +20,7 @@ use crate::selection::SelectionSet;
 use crate::tool_state::{DrawCapture, ToolSnapshot, ToolState};
 use crate::view_states::ViewStates;
 use crate::{AppMode, CommandId};
-pub use drafting_extras::DraftingExtras;
+pub use drafting_extras::{DraftingExtras, IsoPlane};
 pub use erase_snapshot::{EraseEntry, EraseSnapshot};
 pub use view_extras::{ViewExtras, VisualStyleToken};
 

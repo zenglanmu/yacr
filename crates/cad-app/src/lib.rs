@@ -45,6 +45,10 @@ mod app_audit;
 // The extended-command wrapper: dispatch, session toggles and reports.
 mod app_dispatch;
 mod app_drafting;
+// The Wave 2 extended-command handlers (session tokens, reports, refusals).
+mod app_extended_refusals;
+mod app_extended_reports2;
+mod app_extended_session2;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;
@@ -73,6 +77,7 @@ pub use camera::{
     orthonormal_work_plane, xy_work_plane, Camera, Camera2dParams, Camera3dParams, Projection,
     ProjectionKind, StandardView, ViewBasis,
 };
+pub mod command_aliases;
 pub mod command_id;
 pub use command_id::{AppMode, CommandId, ExtendedCommandId};
 pub use draw_tool::{
@@ -126,8 +131,8 @@ pub struct Document {
 mod session_state;
 
 pub use session_state::{
-    BackendChoice, ClipboardEntry, LayoutViewportRef, MultipleRepeat, SessionState, ViewExtras,
-    VisualStyleToken,
+    BackendChoice, ClipboardEntry, IsoPlane, LayoutViewportRef, MultipleRepeat, SessionState,
+    ViewExtras, VisualStyleToken,
 };
 
 #[cfg(test)]

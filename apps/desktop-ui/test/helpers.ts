@@ -341,6 +341,17 @@ export const HOST_NAMES = [
   // `cad_commands` vocabulary and never proves the host advertises them.
   'QTEXT', 'FILL', 'TFRAMES', 'REGENAUTO', 'ISODRAFT',
   'BCOUNT', 'COUNT', 'EDITTIME', 'JULIAN', 'XLIST',
+  // The 2026-11-09 Wave 2 batch: thirty payload-free canonical selectors — ten
+  // session tokens (no renderer effect), eight read-only reports and twelve
+  // named refusals. `-INPUTSEARCHOPTIONS` is its own canonical selector here,
+  // not an alias spelling.
+  'DRAGMODE', 'APERTURE', 'ISOPLANE', 'HIGHLIGHTNEW', 'TRAYSETTINGS', 'TEXTSCR',
+  'GRAPHSCR', 'FINDINCLUDE', 'FINDMATCH', 'REVCLOUDPROPERTIES',
+  'SYSVARMONITOR', 'SYSVDLG', 'VTOPTIONS', 'ALIASEDIT', 'WHOHAS', 'ACADINFO',
+  'PTYPE', 'SCALELISTEDIT',
+  'HYPERLINKOPTIONS', 'INPUTSEARCHOPTIONS', '-INPUTSEARCHOPTIONS', 'SIGVALIDATE',
+  'BASE', 'LIMITS', 'VIEWPLOTDETAILS', 'VPLAYER', 'MVIEW', 'PSBSCALE', 'PSTSCALE',
+  'MVSETUP',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented

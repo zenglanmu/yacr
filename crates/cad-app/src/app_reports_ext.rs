@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::*;
 use crate::app_utility::{document_drawing, format_utc, require_none_payload};
 
-fn report_outcome(diagnostics: Vec<Diagnostic>) -> CommandOutcome {
+pub(crate) fn report_outcome(diagnostics: Vec<Diagnostic>) -> CommandOutcome {
     CommandOutcome {
         objects: Vec::new(),
         changes: None,
@@ -21,7 +21,7 @@ fn report_outcome(diagnostics: Vec<Diagnostic>) -> CommandOutcome {
     }
 }
 
-fn diagnostic(code: &str, message: String) -> Diagnostic {
+pub(crate) fn diagnostic(code: &str, message: String) -> Diagnostic {
     Diagnostic {
         object: None,
         code: code.into(),

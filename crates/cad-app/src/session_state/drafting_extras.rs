@@ -1,30 +1,90 @@
-//! Session-only drafting flags for the extended command batch.
+//! Session-only drafting flags and tokens for the extended command batches.
 //!
-//! `QTEXT`, `FILL`, `TFRAMES`, `REGENAUTO` and `ISODRAFT` each toggle one flag
-//! here. This is **session state only**: no database write, revision bump,
-//! `cad-history` entry or `ChangeSet`. This lane wires no renderer/behaviour
-//! consumer, so the command handler reports that the effect is not implemented
-//! rather than pretending the drawing changed.
+//! `QTEXT`, `FILL`, `TFRAMES`, `REGENAUTO` and `ISODRAFT` (pilot) plus the Wave 2
+//! names `DRAGMODE`, `HIGHLIGHTNEW`, `TRAYSETTINGS`, `TEXTSCR`/`GRAPHSCR`,
+//! `FINDINCLUDE`, `FINDMATCH`, `ISOPLANE` and `APERTURE`/`REVCLOUDPROPERTIES`
+//! each own one flag or token here. This is **session state only**: no database
+//! write, revision bump, `cad-history` entry or `ChangeSet`. This lane wires no
+//! renderer/behaviour consumer, so the command handler reports that the effect is
+//! not implemented rather than pretending the drawing changed.
 
-/// The five drafting display flags the extended batch can toggle.
+/// The current 2D isometric drafting plane token (`ISOPLANE`).
+///
+/// The token cycles `Left → Top → Right → Left`, exactly the AutoCAD order. This
+/// build has no isometric cursor or snap geometry, so the token has no effect
+/// beyond the report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsoPlane {
+    /// Left plane (AutoCAD's `Left`).
+    Left,
+    /// Top plane (AutoCAD's `Top`).
+    Top,
+    /// Right plane (AutoCAD's `Right`).
+    Right,
+}
+
+impl IsoPlane {
+    /// The stable uppercase token label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Left => "LEFT",
+            Self::Top => "TOP",
+            Self::Right => "RIGHT",
+        }
+    }
+
+    /// The next plane in AutoCAD's `LEFT → TOP → RIGHT → LEFT` cycle.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Left => Self::Top,
+            Self::Top => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
+}
+
+/// The drafting display flags and session tokens the extended batches own.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DraftingExtras {
     qtext: bool,
     fill: bool,
     tframes: bool,
     regenauto: bool,
     isodraft: bool,
+    dragmode: bool,
+    aperture: u32,
+    isoplane: IsoPlane,
+    highlightnew: bool,
+    traysettings: bool,
+    text_screen: bool,
+    find_include: bool,
+    find_match_case: bool,
+    revcloud_arc_length: f64,
 }
 
 impl Default for DraftingExtras {
     fn default() -> Self {
-        // AutoCAD's `FILL` starts ON; the rest start OFF in this build.
+        // AutoCAD's defaults where they are documented: `FILL`, `DRAGMODE`,
+        // `HIGHLIGHTNEW`, `TRAYSETTINGS` and `FINDINCLUDE` start ON, the aperture
+        // is 10, the isometric plane is Left and the revision-cloud arc length is
+        // 15. `QTEXT`/`TFRAMES`/`REGENAUTO`/`ISODRAFT`, the text screen and
+        // case-insensitive find start OFF. These are session defaults only —
+        // nothing here is read from or written to the drawing.
         Self {
             qtext: false,
             fill: true,
             tframes: false,
             regenauto: false,
             isodraft: false,
+            dragmode: true,
+            aperture: 10,
+            isoplane: IsoPlane::Left,
+            highlightnew: true,
+            traysettings: true,
+            text_screen: false,
+            find_include: true,
+            find_match_case: false,
+            revcloud_arc_length: 15.0,
         }
     }
 }
@@ -50,6 +110,51 @@ impl DraftingExtras {
         self.isodraft
     }
 
+    /// The session `DRAGMODE` flag (default ON).
+    pub fn dragmode(&self) -> bool {
+        self.dragmode
+    }
+
+    /// The session object-snap aperture token (default 10).
+    pub fn aperture(&self) -> u32 {
+        self.aperture
+    }
+
+    /// The session isometric-plane token (default `Left`).
+    pub fn isoplane(&self) -> IsoPlane {
+        self.isoplane
+    }
+
+    /// The session `HIGHLIGHTNEW` flag (default ON).
+    pub fn highlightnew(&self) -> bool {
+        self.highlightnew
+    }
+
+    /// The session `TRAYSETTINGS` flag (default ON).
+    pub fn traysettings(&self) -> bool {
+        self.traysettings
+    }
+
+    /// Whether the session text screen token is set (`TEXTSCR`/`GRAPHSCR`).
+    pub fn text_screen(&self) -> bool {
+        self.text_screen
+    }
+
+    /// Whether a find includes block/xref text (`FINDINCLUDE`).
+    pub fn find_include(&self) -> bool {
+        self.find_include
+    }
+
+    /// Whether a find compares case-sensitively (`FINDMATCH`).
+    pub fn find_match_case(&self) -> bool {
+        self.find_match_case
+    }
+
+    /// The session revision-cloud arc-length token (default 15).
+    pub fn revcloud_arc_length(&self) -> f64 {
+        self.revcloud_arc_length
+    }
+
     pub fn set_qtext(&mut self, value: bool) {
         self.qtext = value;
     }
@@ -68,6 +173,53 @@ impl DraftingExtras {
 
     pub fn set_isodraft(&mut self, value: bool) {
         self.isodraft = value;
+    }
+
+    /// Set the session `DRAGMODE` flag.
+    pub fn set_dragmode(&mut self, value: bool) {
+        self.dragmode = value;
+    }
+
+    /// Set the session aperture token (only the report path uses this today; the
+    /// typed `APERTURE <n>` setter is NOT IMPLEMENTED).
+    pub fn set_aperture(&mut self, value: u32) {
+        self.aperture = value;
+    }
+
+    /// Set the session isometric-plane token.
+    pub fn set_isoplane(&mut self, value: IsoPlane) {
+        self.isoplane = value;
+    }
+
+    /// Set the session `HIGHLIGHTNEW` flag.
+    pub fn set_highlightnew(&mut self, value: bool) {
+        self.highlightnew = value;
+    }
+
+    /// Set the session `TRAYSETTINGS` flag.
+    pub fn set_traysettings(&mut self, value: bool) {
+        self.traysettings = value;
+    }
+
+    /// Set the session text-screen token (`TEXTSCR` = true, `GRAPHSCR` = false).
+    pub fn set_text_screen(&mut self, value: bool) {
+        self.text_screen = value;
+    }
+
+    /// Set the session `FINDINCLUDE` flag.
+    pub fn set_find_include(&mut self, value: bool) {
+        self.find_include = value;
+    }
+
+    /// Set the session `FINDMATCH` case-sensitivity flag.
+    pub fn set_find_match_case(&mut self, value: bool) {
+        self.find_match_case = value;
+    }
+
+    /// Set the session revision-cloud arc-length token (the typed setter is NOT
+    /// IMPLEMENTED).
+    pub fn set_revcloud_arc_length(&mut self, value: f64) {
+        self.revcloud_arc_length = value;
     }
 
     /// Flip `QTEXT` and return the new state.
@@ -98,5 +250,41 @@ impl DraftingExtras {
     pub fn toggle_isodraft(&mut self) -> bool {
         self.isodraft = !self.isodraft;
         self.isodraft
+    }
+
+    /// Flip `DRAGMODE` and return the new state.
+    pub fn toggle_dragmode(&mut self) -> bool {
+        self.dragmode = !self.dragmode;
+        self.dragmode
+    }
+
+    /// Flip `HIGHLIGHTNEW` and return the new state.
+    pub fn toggle_highlightnew(&mut self) -> bool {
+        self.highlightnew = !self.highlightnew;
+        self.highlightnew
+    }
+
+    /// Flip `TRAYSETTINGS` and return the new state.
+    pub fn toggle_traysettings(&mut self) -> bool {
+        self.traysettings = !self.traysettings;
+        self.traysettings
+    }
+
+    /// Flip `FINDINCLUDE` and return the new state.
+    pub fn toggle_find_include(&mut self) -> bool {
+        self.find_include = !self.find_include;
+        self.find_include
+    }
+
+    /// Flip `FINDMATCH` and return the new state.
+    pub fn toggle_find_match_case(&mut self) -> bool {
+        self.find_match_case = !self.find_match_case;
+        self.find_match_case
+    }
+
+    /// Advance the isometric plane token and return the new plane.
+    pub fn cycle_isoplane(&mut self) -> IsoPlane {
+        self.isoplane = self.isoplane.next();
+        self.isoplane
     }
 }

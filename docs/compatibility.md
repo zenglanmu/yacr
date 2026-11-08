@@ -293,6 +293,36 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | EDITTIME | **只读报告 v1（2026-11-09）**：当前 UTC 时钟 + 文档 id/修订/实体数（`edittime.report`）；创建/修改时间与会话用时恒 `edittime.not_tracked`；Viewer-legal | 数据库不存时间戳，会话不跟踪 uptime；不伪造日期 | 只读，无写 |
 | JULIAN | **只读报告 v1（2026-11-09）**：当前 UTC 时刻的儒略日（整数日 + 小数，`julian.value`）；Viewer-legal | 不解析日期参数、不做 DATE/CAL 转换；只报"现在" | 只读，无写 |
 | XLIST | **只读报告 v1（2026-11-09）**：列出 `drawing.blocks()` 的每个块定义与成员数（`xlist.block` + `xlist.summary`）；`xlist.xdata_not_retained` 明说 XDATA 不保留；Viewer-legal | 不是 AutoCAD 的“列出嵌套对象类型/块名/图层/颜色/线型”全格式；不列出 xref 嵌套、不读 XDATA | 只读，无写 |
+| DRAGMODE | **会话令牌 v1（2026-11-09）**：payload-free，翻转 `drafting_extras.dragmode`（默认 ON），`dragmode.toggled`；会话状态 only，无事务/修订/历史，Viewer-legal | 渲染器不消费该标志：本构建无拖动预览，不显示拖动中的图像 | 近似实现：仅命令路径/状态 |
+| APERTURE | **只读报告 v1（2026-11-09）**：报告会话靶框令牌（默认 10），`aperture.value`；Viewer-legal | `APERTURE <n>` 设置形式 **NOT IMPLEMENTED**；不绘制捕捉靶框，也不改变捕捉判定 | 只读，无写 |
+| ISOPLANE | **会话令牌 v1（2026-11-09）**：循环 `LEFT→TOP→RIGHT`，`isoplane.toggled`；会话状态 only，Viewer-legal | 无等轴测光标、无捕捉/正交变化，绘图平面不真正切换 | 近似实现：仅命令路径/状态 |
+| HIGHLIGHTNEW | **会话令牌 v1（2026-11-09）**：翻转 `highlightnew`（默认 ON），`highlightnew.toggled`；Viewer-legal | 不渲染新功能高亮（无橙点） | 近似实现：仅命令路径/状态 |
+| TRAYSETTINGS | **会话令牌 v1（2026-11-09）**：翻转 `traysettings`（默认 ON），`traysettings.toggled`；Viewer-legal | 本构建无状态栏托盘 UI，图标/通知不变化 | 近似实现：仅命令路径/状态 |
+| TEXTSCR | **会话令牌 v1（2026-11-09）**：置 `text_screen = true`，`textscr.toggled`；会话状态 only，Viewer-legal | 无文本屏幕窗口、不显示提示历史 | 近似实现：仅命令路径/状态 |
+| GRAPHSCR | **会话令牌 v1（2026-11-09）**：置 `text_screen = false`，`graphscr.toggled`；会话状态 only，Viewer-legal | 无文本屏幕窗口可隐藏 | 近似实现：仅命令路径/状态 |
+| FINDINCLUDE | **会话令牌 v1（2026-11-09）**：翻转 `find_include`（默认 ON），`findinclude.toggled`；Viewer-legal | 跨块/外部参照文字搜索 **NOT IMPLEMENTED**；`-FIND`/`FIND` 仍只搜顶层模型空间，该标志不改变其范围 | 近似实现：仅命令路径/状态 |
+| FINDMATCH | **会话令牌 v1（2026-11-09）**：翻转 `find_match_case`（默认 OFF），`findmatch.toggled`；Viewer-legal | 已实现的 `-FIND`/`FIND` 恒按 ASCII 不区分大小写比较，该标志不改变匹配 | 近似实现：仅命令路径/状态 |
+| REVCLOUDPROPERTIES | **只读报告 v1（2026-11-09）**：报告会话弧长令牌（默认 15），`revcloud.properties`；Viewer-legal | `REVCLOUDPROPERTIES <length>` 设置形式 **NOT IMPLEMENTED**；`REVCLOUD` 不读取该令牌 | 只读，无写 |
+| SYSVARMONITOR | **只读报告 v1（2026-11-09）**：逐条报告 `SETVAR` 闭集 8 个变量（PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE）的当前值，`sysvarmonitor.value` + `sysvarmonitor.summary`；Viewer-legal | 不监视任何变化、不发通知；闭集之外的变量不建模也不杜撰 | 只读，无写 |
+| SYSVDLG | **只读报告 v1（2026-11-09）**：同一 8 个变量，`sysvdlg.value` + `sysvdlg.summary` + `sysvdlg.dialog_not_implemented`；Viewer-legal | 本构建无系统变量对话框：不能编辑/保存/恢复，单值读取请用 `SETVAR <name>` | 只读，无写 |
+| VTOPTIONS | **只读报告 v1（2026-11-09）**：`vtoptions.not_tracked` 明说视图过渡设置未建模（代码串按 Wave 2 契约原样保留）；Viewer-legal | 不报告也不杜撰平滑/时长/缩放平移过渡选项 | 只读，无写 |
+| ALIASEDIT | **只读报告 v1（2026-11-09）**：逐行列出规范 `COMMAND_ALIASES`（`aliasedit.alias`）+ `aliasedit.summary`；表本身在 `cad-app::command_aliases`，`cad-ui-core` 重导出同一份；Viewer-legal | 创建/修改/删除别名 **NOT IMPLEMENTED**（无 `acad.pgp` 解析、无用户别名存储） | 只读，无写 |
+| WHOHAS | **只读报告 v1（2026-11-09）**：`whohas.single_document`；Viewer-legal | 单文档构建：无网络查询，无法列出其他用户、其他打开文档或文件锁 | 只读，无写 |
+| ACADINFO | **只读报告 v1（2026-11-09）**：产品版本（`CARGO_PKG_VERSION`）+ debug/release 构建配置 + 文档修订/实体数（`acadinfo.report`）；`acadinfo.not_collected` 明说许可证/硬件/模块数据不收集；Viewer-legal | 不写文件、不导出安装信息；没有的数据一律不杜撰 | 只读，无写 |
+| PTYPE | **只读报告 v1（2026-11-09）**：报告 `$PDMODE`/`$PDSIZE`（`ptype.report`）；Viewer-legal | 写入仍只走现有 `PDMODE`/`PDSIZE`；PTYPE 对话框形式 **NOT IMPLEMENTED** | 只读，无写 |
+| SCALELISTEDIT | **只读报告 v1（2026-11-09）**：报告第一个图纸布局的页面（纸张/比例，`scalelistedit.summary`）+ `scalelistedit.write_unsupported`；Viewer-legal | 编辑比例列表 **NOT IMPLEMENTED**：无比例列表存储，不增删/重置任何比例 | 只读，无写 |
+| HYPERLINKOPTIONS | **具名拒绝 v1（2026-11-09）**：`CadError::Unsupported` / `hyperlinkoptions.unsupported: this build has no hyperlink storage model`；不写库/不升修订/不入历史，Viewer-legal | 无超链接存储模型：不保存、不显示任何超链接 | 拒绝，无写 |
+| INPUTSEARCHOPTIONS | **具名拒绝 v1（2026-11-09）**：`inputsearchoptions.unsupported: input-search settings are not modeled`；Viewer-legal | 输入搜索设置未建模（对话框形式） | 拒绝，无写 |
+| -INPUTSEARCHOPTIONS | **具名拒绝 v1（2026-11-09）**：`-inputsearchoptions.unsupported: input-search settings are not modeled`；本构建的**独立选择子**（不是别名）；Viewer-legal | 同上，命令行拼写 | 拒绝，无写 |
+| SIGVALIDATE | **具名拒绝 v1（2026-11-09）**：`sigvalidate.unsupported: this build has no digital-signature model`；Viewer-legal | 无数字签名模型：不读取、不校验签名 | 拒绝，无写 |
+| BASE | **具名拒绝 v1（2026-11-09）**：`base.unsupported: the drawing stores no insertion base point`；Viewer-legal | 图形不保存插入基点：既不设置也不报告 | 拒绝，无写 |
+| LIMITS | **具名拒绝 v1（2026-11-09）**：`limits.unsupported: this build has no drawing-limits model`；Viewer-legal | 无图形界限模型：不设置、不限制拾取/栅格 | 拒绝，无写 |
+| VIEWPLOTDETAILS | **具名拒绝 v1（2026-11-09）**：`viewplotdetails.unsupported: no plot-details model`；Viewer-legal | 无打印详细信息模型：不列出已完成打印/发布任务 | 拒绝，无写 |
+| VPLAYER | **具名拒绝 v1（2026-11-09）**：`vplayer.viewport_layer_state_unsupported: no per-viewport layer state`；Viewer-legal | 无逐视口图层状态 | 拒绝，无写 |
+| MVIEW | **具名拒绝 v1（2026-11-09）**：`mview.viewport_creation_unsupported: no viewport creation API`；Viewer-legal | 无创建视口 API（现有 `VPORTS` 等路径不创建视口） | 拒绝，无写 |
+| PSBSCALE | **具名拒绝 v1（2026-11-09）**：`psbscale.write_unsupported: no viewport scale write API`；Viewer-legal | 无视口比例写入 API | 拒绝，无写 |
+| PSTSCALE | **具名拒绝 v1（2026-11-09）**：`pstscale.write_unsupported: no viewport scale write API`；Viewer-legal | 无视口比例写入 API | 拒绝，无写 |
+| MVSETUP | **具名拒绝 v1（2026-11-09）**：`mvsetup.unsupported: no viewport-group model`；Viewer-legal | 无视口组模型 | 拒绝，无写 |
 - 变换/偏移的**不支持几何**（`Spline`/`Shape`/`Opaque`/`Compound`；**以及 `MultiLeader`——拒绝一切缩放**）返回显式
   （**更正**：`Text` 自 P7a 起**可**平移/旋转/均匀缩放，**不在**此列表；仅镜像与非均匀缩放拒绝。
   **2026-10-26 起 `MIRROR` 的 `Arc`/`Ellipse` 不再被拒**，见上表 MIRROR 行。）

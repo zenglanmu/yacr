@@ -9,7 +9,7 @@
 use super::*;
 use crate::app_utility::require_none_payload;
 
-fn toggle_outcome(code: &str, message: String) -> CommandOutcome {
+pub(crate) fn toggle_outcome(code: &str, message: String) -> CommandOutcome {
     CommandOutcome {
         objects: Vec::new(),
         changes: None,

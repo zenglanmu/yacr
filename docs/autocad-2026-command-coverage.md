@@ -27,9 +27,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **183** |
-| **已实现合计（完整 + 部分）** | **233** |
-| 未实现 | **748** |
+| 部分实现（有写明的界） | **213** |
+| **已实现合计（完整 + 部分）** | **263** |
+| 未实现 | **718** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -58,6 +58,8 @@
 > **2026-11-08 增补**：`CLOSE` 以“关闭当前唯一文档”的部分实现计入
 
 > **2026-11-09 增补（pilot）**：`QTEXT`/`FILL`/`TFRAMES`/`REGENAUTO`/`ISODRAFT` 五个会话令牌（无渲染器效果，如实标为部分）与 `BCOUNT`/`COUNT`/`EDITTIME`/`JULIAN`/`XLIST` 五个只读报告计入 **233 已实现（50 完整 + 183 部分）/ 748 未实现**；全部 Viewer-legal、无事务/修订/历史。
+
+> **2026-11-09 增补（Wave 2）**：`DRAGMODE`/`APERTURE`/`ISOPLANE`/`HIGHLIGHTNEW`/`TRAYSETTINGS`/`TEXTSCR`/`GRAPHSCR`/`FINDINCLUDE`/`FINDMATCH`/`REVCLOUDPROPERTIES` 十个会话令牌（无渲染器消费，两个只读形式明说设置器未实现）、`SYSVARMONITOR`/`SYSVDLG`/`VTOPTIONS`/`ALIASEDIT`/`WHOHAS`/`ACADINFO`/`PTYPE`/`SCALELISTEDIT` 八个只读报告，以及 `HYPERLINKOPTIONS`…`MVSETUP` 十二个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **263 已实现（50 完整 + 213 部分）/ 718 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **223 已实现（50 完整 + 173 部分）/ 758 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
@@ -96,6 +98,10 @@
 **未实施**；由同域的已交付名字替换。**未实现不等于永远不做**，它们仍在官方清单里保持
 「未实现」，缺口规模见 §5。
 
+> **2026-11-09 更正（Wave 2）**：上段列出的 `WHOHAS`、`MVIEW`、`MVSETUP` 已在 Wave 2 以
+> **部分实现**计入：`WHOHAS` 是单文档只读报告，`MVIEW`/`MVSETUP` 是具名拒绝（`Unsupported` +
+> 稳定原因串）。「部分实现」只表示命令路径存在并如实回答，不等于功能可用。
+
 ## 已实现 / 部分实现命令索引（按字母序）
 
 > 本索引覆盖官方清单里所有当前为「已实现」或「部分实现」的名字（含 `-` 别名）；
@@ -105,12 +111,16 @@
 | Command | 状态 | 说明 |
 | --- | --- | --- |
 | `ABOUT` | 已实现 | chrome 本地选择子：打开 About 对话框（与 File > About 同一路径） |
+| `ACADINFO` | 部分实现 | 只读：产品版本/构建配置 + 文档修订/实体数；许可证/硬件/模块数据不收集。 |
+| `ALIASEDIT` | 部分实现 | 只读：逐行列出规范 `COMMAND_ALIASES`；创建/修改/删除别名未实现。 |
 | `ALIGN` | 部分实现 | 仅两对点（平移 + 旋转 + 可选均匀缩放）；无 3 对点 3D、无非均匀缩放 |
+| `APERTURE` | 部分实现 | 只读报告会话靶框令牌（默认 10）；`APERTURE <n>` 设置形式未实现，不绘制捕捉靶框。 |
 | `ARC` | 已实现 | — |
 | `AREA` | 已实现 | — |
 | `ARRAYPOLAR` | 部分实现 | 独立副本、非关联；角度步长为我们的规则 |
 | `ARRAYRECT` | 部分实现 | 独立副本、非关联；无 Path/Levels/关联编辑 |
 | `AUDIT` | 部分实现 | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
+| `BASE` | 部分实现 | 具名拒绝（`base.unsupported`）：图形不保存插入基点。 |
 | `BCOUNT` | 部分实现 | 只读：统计整个模型空间的块参照实例数（按块名分组）；无 AutoCAD 的 Select objects 提示、不展开块成员、不统计图纸空间。 |
 | `BLOCK` | 已实现 | — |
 | `BOUNDARY` | 部分实现 | 一个内部点 → 每个发现的闭合环（含嵌套岛）一条闭合非关联多段线；仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 选项（边界集/关闭岛检测/面域输出/对象类型）未实现；无 `BO`/`BPOLY` 别名 |
@@ -151,6 +161,7 @@
 | `DIST` | 已实现 | — |
 | `DIVIDE` | 部分实现 | 仅 LINE/ARC/CIRCLE/直线段 LWPOLYLINE；按等弧长放 POINT |
 | `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心圆；`inner=0` 只建外圆并诊断；无中心拾取提示 |
+| `DRAGMODE` | 部分实现 | 会话令牌 `dragmode`（默认 ON）；渲染器不消费，无拖动预览。 |
 | `DRAWORDER` | 部分实现 | `FRONT\ |
 | `EDITTIME` | 部分实现 | 只读：当前 UTC 时钟 + 文档修订/实体数；创建/修改时间与会话用时 NOT TRACKED。 |
 | `ELLIPSE` | 已实现 | — |
@@ -164,9 +175,12 @@
 | `FILTER` | 部分实现 | 同 QSELECT 语法但并入现有选择；仅顶层模型空间 |
 | `-FIND` | 部分实现 | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告；不写库 |
 | `FIND` | 部分实现 | `FIND <needle> [=> <replacement>]`；替换形式一条事务/一步撤销；不解析 MTEXT 格式 run；TEXT 单行拒绝换行 |
+| `FINDINCLUDE` | 部分实现 | 会话令牌（默认 ON）；跨块/外部参照文字搜索未实现。 |
+| `FINDMATCH` | 部分实现 | 会话令牌（默认 OFF）；已实现的 -FIND/FIND 恒按 ASCII 不区分大小写比较。 |
 | `FS` | 部分实现 | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把**直接**接触（相交或相切都算）的可见模型空间对象并入选择。默认 `FSMODE=OFF`：链式接触（`FSMODE=ON`）未实现；不展开块实例成员 |
 | `GETSEL` | 部分实现 | `GETSEL LAYER\ |
 | `GRADIENT` | 部分实现 | 预选择闭合边界（Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链）且必须位于 +Z 平面；复用 HATCH 创建路径，强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5），一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 |
+| `GRAPHSCR` | 部分实现 | 置会话 `text_screen`=false；无文本屏幕窗口可隐藏。 |
 | `GRID` | 已实现 | — |
 | `-GROUP` | 部分实现 | `GROUP` 的别名（同一 `CommandId`/会话组表路径）；无 DWG group 对象/修订/历史 |
 | `GROUP` | 部分实现 | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
@@ -179,10 +193,15 @@
 | `HATCHTOBACK` | 部分实现 | 全部模型空间 hatch 置底（仅改写存储 draw order、保持相对次序、可撤销）；图纸空间/块内不重排 |
 | `HELIX` | 部分实现 | 平面螺旋 `Polyline`；`height>0` 按 `helix.3d_not_implemented` 拒绝 |
 | `HIDEOBJECTS` | 部分实现 | 会话隐藏集；经共享可见性谓词影响拾取/渲染（FLAG_HIDDEN）；无数据库写/撤销；隐藏点标记 overlay 仍可能绘制（声明） |
+| `HIGHLIGHTNEW` | 部分实现 | 会话令牌（默认 ON）；不渲染新功能高亮。 |
+| `HYPERLINKOPTIONS` | 部分实现 | 具名拒绝（`hyperlinkoptions.unsupported`）：无超链接存储模型。 |
 | `ID` | 已实现 | — |
+| `-INPUTSEARCHOPTIONS` | 部分实现 | 具名拒绝（`-inputsearchoptions.unsupported`）：同一具名拒绝的命令行拼写。 |
+| `INPUTSEARCHOPTIONS` | 部分实现 | 具名拒绝（`inputsearchoptions.unsupported`）：输入搜索设置未建模。 |
 | `INSERT` | 已实现 | — |
 | `ISODRAFT` | 部分实现 | 会话令牌 `isodraft`；不切换等轴测平面/光标，无视觉变化。 |
 | `ISOLATEOBJECTS` | 部分实现 | 会话隐藏集：隐藏除当前选择外的模型空间对象；无数据库写/撤销 |
+| `ISOPLANE` | 部分实现 | 循环会话令牌 LEFT→TOP→RIGHT；无等轴测光标/捕捉变化。 |
 | `JOIN` | 部分实现 | 仅共线 LINE 或同心相续 ARC |
 | `JULIAN` | 部分实现 | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；不解析日期参数。 |
 | `JUSTIFYTEXT` | 部分实现 | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
@@ -214,6 +233,7 @@
 | `LAYWALK` | 部分实现 | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
 | `LEADER` | 部分实现 | 创建单个 MULTILEADER（旧实体映射为 MULTILEADER）；一次事务/一步撤销；无引线样式/注释类型选项 |
 | `LENGTHEN` | 部分实现 | 仅 LINE/ARC，只改末端 |
+| `LIMITS` | 部分实现 | 具名拒绝（`limits.unsupported`）：无图形界限模型。 |
 | `LINE` | 已实现 | — |
 | `-LINETYPE` | 部分实现 | `LINETYPE` 的别名（同一 `CommandId`/路径）；`LIST` 只读、`SET` 复用 `SETENTITYPROPERTY` |
 | `LINETYPE` | 部分实现 | `LIST` 只读（Viewer 合法）；`SET <name>` 复用 `SETENTITYPROPERTY`、重新授权工作模式、一条事务/一步撤销；未知名 `property.unknown_linetype`；无线型表加载/新建/删除/改名 |
@@ -236,6 +256,8 @@
 | `-MTEXT` | 部分实现 | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获）；无第二实现 |
 | `MTEXT` | 部分实现 | 两角宽度模型；无行距/分栏/背景填充 |
 | `MULTIPLE` | 部分实现 | 设置会话 `MultipleRepeat` 标志；本宿主无重复循环，报告 `multiple.repeat_not_implemented`，不伪造重复 |
+| `MVIEW` | 部分实现 | 具名拒绝（`mview.viewport_creation_unsupported`）：无创建视口 API。 |
+| `MVSETUP` | 部分实现 | 具名拒绝（`mvsetup.unsupported`）：无视口组模型。 |
 | `NEW` | 已实现 | — |
 | `OFFSET` | 部分实现 | LINE/CIRCLE/ARC/LWPOLYLINE；ELLIPSE 拒绝；无全局自交修剪 |
 | `OOPS` | 部分实现 | v1 只恢复最近一次 ERASE（不覆盖 AutoCAD 的 BLOCK/WBLOCK 删除）；恢复实体用新 id；撤销恢复副本但不恢复快照 |
@@ -256,6 +278,20 @@
 | `PLOT` | 部分实现 | 仅矢量 SVG/PDF；无 CTB/STB、无批量多布局 |
 | `POINT` | 已实现 | — |
 | `POLYGON` | 已实现 | 默认内接（顶点在拾取点上）；外切变体是独立的多词选择子（见下一行） |
+| `PSBSCALE` | 部分实现 | 具名拒绝（`psbscale.write_unsupported`）：无视口比例写入 API。 |
+| `PSTSCALE` | 部分实现 | 具名拒绝（`pstscale.write_unsupported`）：无视口比例写入 API。 |
+| `PTYPE` | 部分实现 | 只读：`$PDMODE`/`$PDSIZE`；写入仍走 PDMODE/PDSIZE，无 PTYPE 对话框。 |
+| `REVCLOUDPROPERTIES` | 部分实现 | 只读报告会话弧长令牌（默认 15）；设置形式未实现，REVCLOUD 不读取该令牌。 |
+| `SCALELISTEDIT` | 部分实现 | 只读：第一个图纸布局的页面 + `scalelistedit.write_unsupported`；无比例列表存储。 |
+| `SIGVALIDATE` | 部分实现 | 具名拒绝（`sigvalidate.unsupported`）：无数字签名模型。 |
+| `SYSVARMONITOR` | 部分实现 | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
+| `SYSVDLG` | 部分实现 | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
+| `TEXTSCR` | 部分实现 | 置会话 `text_screen`=true；无文本屏幕窗口、不显示提示历史。 |
+| `TRAYSETTINGS` | 部分实现 | 会话令牌（默认 ON）；无状态栏托盘 UI。 |
+| `VIEWPLOTDETAILS` | 部分实现 | 具名拒绝（`viewplotdetails.unsupported`）：无打印详细信息模型。 |
+| `VPLAYER` | 部分实现 | 具名拒绝（`vplayer.viewport_layer_state_unsupported`）：无逐视口图层状态。 |
+| `VTOPTIONS` | 部分实现 | 只读：视图过渡设置未建模（`vtoptions.not_tracked`），不杜撰平滑/时长数值。 |
+| `WHOHAS` | 部分实现 | 只读：单文档构建，无网络查询，不列其他用户或文件锁。 |
 | `POLYGON CIRCUMSCRIBED` | 已实现 | **本项目多词选择子**（不属于官方 981 条，不计入上方总计）：`POLYGON` 的 `Circumscribed about circle`（`C`）构造；第二点落在**内切（相切）圆**上，拾取方向为第一条边中点，`R = r / cos(π/n)`；共享会话 `POLYSIDES`；无 Edge/数字半径定向 |
 | `PROPERTIES` | 已实现 | chrome 本地选择子：打开特性面板 |
 | `PROPERTIESCLOSE` | 已实现 | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
@@ -370,7 +406,7 @@
 | 25 | `3DWALK` | 未实现 | Changes the 3D view in a drawing interactively to create the appearance of walking through the model. | — |
 | 26 | `3DZOOM` | 未实现 | Zooms in and out in a perspective view. | — |
 | 27 | `ABOUT` | 已实现 | Displays information about your product. | chrome 本地选择子：打开 About 对话框（与 File > About 同一路径） |
-| 28 | `ACADINFO` | 未实现 | Creates a file that stores information about your AutoCAD installation and current setup. | — |
+| 28 | `ACADINFO` | 部分实现 | Creates a file that stores information about your AutoCAD installation and current setup. | 只读：产品版本/构建配置 + 文档修订/实体数；许可证/硬件/模块数据不收集。 |
 | 29 | `ACISIN` | 未实现 | Imports an ACIS (SAT) file and creates 3D solid, body, or region objects. | — |
 | 30 | `ACISOUT` | 未实现 | Exports 3D solid, region, or body objects to an ACIS file. | — |
 | 31 | `ACTBASEPOINT` | 未实现 | Inserts a base point or base point prompt in an action macro. | — |
@@ -388,7 +424,7 @@
 | 43 | `ADCNAVIGATE` | 未实现 | Loads a specified drawing file, folder, or network path in the DesignCenter Folders tab. | — |
 | 44 | `ADDSELECTED` | 未实现 | Creates a new object of the same type and general properties as a selected object, but with different geometric values. | — |
 | 45 | `ADJUST` | 未实现 | Adjusts the fade, contrast and monochrome settings of the selected underlay (DWF, DWFx, PDF, or DGN), or image. | — |
-| 46 | `ALIASEDIT` | 未实现 | Creates, modifies, and deletes AutoCAD command aliases. | — |
+| 46 | `ALIASEDIT` | 部分实现 | Creates, modifies, and deletes AutoCAD command aliases. | 只读：逐行列出规范 `COMMAND_ALIASES`；创建/修改/删除别名未实现。 |
 | 47 | `ALIGN` | 部分实现 | Aligns objects with other objects in 2D and 3D. | 仅两对点（平移 + 旋转 + 可选均匀缩放）；无 3 对点 3D、无非均匀缩放 |
 | 48 | `ALIGNSPACE` | 未实现 | Adjusts the pan and zoom factor of a view in a layout viewport based on the alignment points specified in model space and paper space. | — |
 | 49 | `AMECONVERT` | 未实现 | Converts AME solid models to AutoCAD solid objects. | — |
@@ -399,7 +435,7 @@
 | 54 | `ANIPATH` | 未实现 | Saves an animation of a camera moving or panning in a 3D model. | — |
 | 55 | `ANNORESET` | 未实现 | Resets the locations of all alternate scale representations of the selected annotative objects. | — |
 | 56 | `ANNOUPDATE` | 未实现 | Updates existing annotative objects to match the current properties of their styles. | — |
-| 57 | `APERTURE` | 未实现 | Controls the size of the object snap target box. | — |
+| 57 | `APERTURE` | 部分实现 | Controls the size of the object snap target box. | 只读报告会话靶框令牌（默认 10）；`APERTURE <n>` 设置形式未实现，不绘制捕捉靶框。 |
 | 58 | `APPAUTOLOADER` | 未实现 | Lists or reloads all plug-ins in the application plug-in folder. | — |
 | 59 | `APPLOAD` | 未实现 | Loads and unloads applications and defines which applications to load at startup. | — |
 | 60 | `APPSTORE` | 未实现 | Opens the Autodesk App Store website. | — |
@@ -441,7 +477,7 @@
 | 96 | `BACTIONBAR` | 未实现 | Displays or hides action bars for a selection set of parameter objects. | — |
 | 97 | `BACTIONSET` | 未实现 | Specifies the selection set of objects associated with an action in a dynamic block definition. | — |
 | 98 | `BACTIONTOOL` | 未实现 | Adds an action to a dynamic block definition. | — |
-| 99 | `BASE` | 未实现 | Sets the insertion base point for the current drawing. | — |
+| 99 | `BASE` | 部分实现 | Sets the insertion base point for the current drawing. | 具名拒绝（`base.unsupported`）：图形不保存插入基点。 |
 | 100 | `BASSOCIATE` | 未实现 | Associates an action with a parameter in a dynamic block definition. | — |
 | 101 | `BATTMAN` | 未实现 | Manages the attributes for a selected block definition. | — |
 | 102 | `BATTORDER` | 未实现 | Specifies the order of attributes for a block. | — |
@@ -657,7 +693,7 @@
 | 312 | `DIVIDE` | 部分实现 | Creates evenly spaced point objects or blocks along the length or perimeter of an object. | 仅 LINE/ARC/CIRCLE/直线段 LWPOLYLINE；按等弧长放 POINT |
 | 313 | `DONUT` | 部分实现 | Creates a filled circle or a wide ring. | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心圆；`inner=0` 只建外圆并诊断；无中心拾取提示 |
 | 314 | `DOWNLOADMANAGER` | 未实现 | Reports the status of the of the current download. | — |
-| 315 | `DRAGMODE` | 未实现 | Controls the way dragged objects are displayed. | — |
+| 315 | `DRAGMODE` | 部分实现 | Controls the way dragged objects are displayed. | 会话令牌 `dragmode`（默认 ON）；渲染器不消费，无拖动预览。 |
 | 316 | `DRAWINGRECOVERY` | 未实现 | Displays a list of drawing files that can be recovered after a program or system failure. | — |
 | 317 | `DRAWINGRECOVERYHIDE` | 未实现 | Closes the Drawing Recovery Manager. | — |
 | 318 | `DRAWORDER` | 部分实现 | Changes the draw order of images and other objects. | `FRONT\|BACK\|ABOVE\|BELOW`；ABOVE/BELOW 第一个选中为参照；一条事务，保持相对顺序 |
@@ -713,8 +749,8 @@
 | 368 | `FILTER` | 部分实现 | Creates a list of requirements that an object must meet to be included in a selection set. | 同 QSELECT 语法但并入现有选择；仅顶层模型空间 |
 | 369 | `-FIND` | 部分实现 | Searches for the text that you specify in the entire drawing, the current space or layout, or selected objects. | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告；不写库 |
 | 370 | `FIND` | 部分实现 | Finds the text that you specify, and can optionally replace it with other text. | `FIND <needle> [=> <replacement>]`；替换形式一条事务/一步撤销；不解析 MTEXT 格式 run；TEXT 单行拒绝换行 |
-| 371 | `FINDINCLUDE` | 未实现 | Controls the types of text objects included in a search when using the -FIND command. | — |
-| 372 | `FINDMATCH` | 未实现 | Controls how the entered text string is compared with text in objects when using the -FIND command. | — |
+| 371 | `FINDINCLUDE` | 部分实现 | Controls the types of text objects included in a search when using the -FIND command. | 会话令牌（默认 ON）；跨块/外部参照文字搜索未实现。 |
+| 372 | `FINDMATCH` | 部分实现 | Controls how the entered text string is compared with text in objects when using the -FIND command. | 会话令牌（默认 OFF）；已实现的 -FIND/FIND 恒按 ASCII 不区分大小写比较。 |
 | 373 | `FLATSHOT` | 未实现 | Creates a 2D representation of all 3D objects based on the current view. | — |
 | 374 | `FLATTEN` | 未实现 | Converts 3D geometry to a projected 2D representation. | — |
 | 375 | `FREESPOT` | 未实现 | Creates a free spotlight which is a spotlight without a specified target. | — |
@@ -750,7 +786,7 @@
 | 405 | `GRADIENT` | 部分实现 | Fills an enclosed area or selected objects with a gradient fill. | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5）；边界必须在 +Z 平面（否则 `gradient.not_plus_z`）；一个 `AcDbHatch`、一条事务/一步撤销；无预览、无 `-GRADIENT` 选项提示、无 .pat/关联性 |
 | 406 | `-GRAPHICSCONFIG` | 未实现 | Sets hardware acceleration on or off and provides access to display performance options on the command line. | — |
 | 407 | `GRAPHICSCONFIG` | 未实现 | Sets hardware acceleration on or off and provides access to display performance options. | — |
-| 408 | `GRAPHSCR` | 未实现 | Causes the text window to display behind the application window. | — |
+| 408 | `GRAPHSCR` | 部分实现 | Causes the text window to display behind the application window. | 置会话 `text_screen`=false；无文本屏幕窗口可隐藏。 |
 | 409 | `GRID` | 已实现 | Displays a grid pattern in the current viewport. | — |
 | 410 | `-GROUP` | 部分实现 | Creates and manages saved sets of objects called groups. | `GROUP` 的别名（同一 `CommandId`/会话组表路径）；无 DWG group 对象/修订/历史 |
 | 411 | `GROUP` | 部分实现 | Creates and manages saved sets of objects called groups. | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
@@ -768,11 +804,11 @@
 | 423 | `HIDE` | 未实现 | Displays a 3D model with hidden lines suppressed for the 2D Wireframe visual style. | — |
 | 424 | `HIDEOBJECTS` | 部分实现 | Temporarily suppresses the display of selected objects. | 会话隐藏集；经共享可见性谓词影响拾取/渲染（FLAG_HIDDEN）；无数据库写/撤销；隐藏点标记 overlay 仍可能绘制（声明） |
 | 425 | `HIDEPALETTES` | 未实现 | Hides all displayed palettes, along with the ribbon and the drawing tabs. | — |
-| 426 | `HIGHLIGHTNEW` | 未实现 | Controls whether new and changed features in product updates are highlighted in the user interface with an orange dot. | — |
+| 426 | `HIGHLIGHTNEW` | 部分实现 | Controls whether new and changed features in product updates are highlighted in the user interface with an orange dot. | 会话令牌（默认 ON）；不渲染新功能高亮。 |
 | 427 | `HLSETTINGS` | 未实现 | Sets the display of such properties as hidden lines. | — |
 | 428 | `-HYPERLINK` | 未实现 | From the Command prompt, inserts and removes hyperlinks from areas or to selected objects. | — |
 | 429 | `HYPERLINK` | 未实现 | Attaches a hyperlink to an object or modifies an existing hyperlink. | — |
-| 430 | `HYPERLINKOPTIONS` | 未实现 | Controls the display of the hyperlink cursor, tooltips, and shortcut menu. | — |
+| 430 | `HYPERLINKOPTIONS` | 部分实现 | Controls the display of the hyperlink cursor, tooltips, and shortcut menu. | 具名拒绝（`hyperlinkoptions.unsupported`）：无超链接存储模型。 |
 | 431 | `ID` | 已实现 | Displays the UCS coordinate values of a specified location. | — |
 | 432 | `IGESEXPORT` | 未实现 | Saves selected objects in the current drawing to a new IGES (*.igs, *.iges) file. | — |
 | 433 | `IGESIMPORT` | 未实现 | Imports data from an IGES (*.igs or *.iges) file into the current drawing. | — |
@@ -788,8 +824,8 @@
 | 443 | `IMAGEQUALITY` | 未实现 | Controls the display quality of images. | — |
 | 444 | `IMPORT` | 未实现 | Imports files of different formats into the current drawing. | — |
 | 445 | `IMPRINT` | 未实现 | Imprints 2D geometry on a 3D solid or surface, creating additional edges on planar faces. | — |
-| 446 | `-INPUTSEARCHOPTIONS` | 未实现 | From the command line, controls settings for display of the command line suggestion list for commands, system variables, and named objects. | — |
-| 447 | `INPUTSEARCHOPTIONS` | 未实现 | Opens a dialog box that controls settings for display of the command line suggestion list for commands, system variables, and named objects. | — |
+| 446 | `-INPUTSEARCHOPTIONS` | 部分实现 | From the command line, controls settings for display of the command line suggestion list for commands, system variables, and named objects. | 具名拒绝（`-inputsearchoptions.unsupported`）：同一具名拒绝的命令行拼写。 |
+| 447 | `INPUTSEARCHOPTIONS` | 部分实现 | Opens a dialog box that controls settings for display of the command line suggestion list for commands, system variables, and named objects. | 具名拒绝（`inputsearchoptions.unsupported`）：输入搜索设置未建模。 |
 | 448 | `-INSERT` | 未实现 | Inserts a block or drawing into the current drawing. | — |
 | 449 | `INSERT` | 已实现 | Displays the Blocks palette, which you can use to insert blocks and drawings into the current drawing. | — |
 | 450 | `-INSERTCONTENT` | 未实现 | Inserts a drawing or block into the current drawing. | — |
@@ -799,7 +835,7 @@
 | 454 | `INTERSECT` | 未实现 | Creates a 3D solid, surface, or 2D region from overlapping solids, surfaces, or regions. | — |
 | 455 | `ISODRAFT` | 部分实现 | Turns isometric drafting settings on or off, and specifies the current 2D isometric drafting plane. | 会话令牌 `isodraft`；不切换等轴测平面/光标，无视觉变化。 |
 | 456 | `ISOLATEOBJECTS` | 部分实现 | Temporarily suppresses the display of all objects except those you select. | 会话隐藏集：隐藏除当前选择外的模型空间对象；无数据库写/撤销 |
-| 457 | `ISOPLANE` | 未实现 | Specifies the current plane for 2D isometric drawing. | — |
+| 457 | `ISOPLANE` | 部分实现 | Specifies the current plane for 2D isometric drawing. | 循环会话令牌 LEFT→TOP→RIGHT；无等轴测光标/捕捉变化。 |
 | 458 | `JOIN` | 部分实现 | Joins the endpoints of linear and curved objects to create a single object. | 仅共线 LINE 或同心相续 ARC |
 | 459 | `JPGOUT` | 未实现 | Saves selected objects to a file in JPEG file format. | — |
 | 460 | `JULIAN` | 部分实现 | Contains the DATE tool and several AutoCAD Julian date and calendar date conversion routines. | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；不解析日期参数。 |
@@ -839,7 +875,7 @@
 | 494 | `LIGHT` | 未实现 | Creates a light. | — |
 | 495 | `LIGHTLIST` | 未实现 | Displays the Lights in Model palette that lists all lights in the model. | — |
 | 496 | `LIGHTLISTCLOSE` | 未实现 | Closes the Lights in Model palette. | — |
-| 497 | `LIMITS` | 未实现 | Sets an invisible rectangular boundary in the drawing area that can limit the grid display and limit clicking or entering point locations. | — |
+| 497 | `LIMITS` | 部分实现 | Sets an invisible rectangular boundary in the drawing area that can limit the grid display and limit clicking or entering point locations. | 具名拒绝（`limits.unsupported`）：无图形界限模型。 |
 | 498 | `LINE` | 已实现 | Create a series of contiguous line segments. Each segment is a line object that can be edited separately. | — |
 | 499 | `-LINETYPE` | 部分实现 | At the Command prompt, loads, sets, and modifies linetypes. | `LINETYPE` 的别名（同一 `CommandId`/路径）；`LIST` 只读、`SET` 复用 `SETENTITYPROPERTY` |
 | 500 | `LINETYPE` | 部分实现 | Loads, sets, and modifies linetypes. | `LIST` 只读（Viewer 合法）；`SET <name>` 复用 `SETENTITYPROPERTY`、重新授权工作模式、一条事务/一步撤销；未知名 `property.unknown_linetype`；无线型表加载/新建/删除/改名 |
@@ -919,8 +955,8 @@
 | 574 | `-MTEXT` | 部分实现 | Creates a multiline text object. | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获）；无第二实现 |
 | 575 | `MTEXT` | 部分实现 | Creates a multiline text object. | 两角宽度模型；无行距/分栏/背景填充 |
 | 576 | `MULTIPLE` | 部分实现 | Repeats the next command until canceled. | 设置会话 `MultipleRepeat` 标志；本宿主无重复循环，报告 `multiple.repeat_not_implemented`，不伪造重复 |
-| 577 | `MVIEW` | 未实现 | Creates and controls layout viewports. | — |
-| 578 | `MVSETUP` | 未实现 | Sets up the specifications of a drawing. | — |
+| 577 | `MVIEW` | 部分实现 | Creates and controls layout viewports. | 具名拒绝（`mview.viewport_creation_unsupported`）：无创建视口 API。 |
+| 578 | `MVSETUP` | 部分实现 | Sets up the specifications of a drawing. | 具名拒绝（`mvsetup.unsupported`）：无视口组模型。 |
 | 579 | `NAVBAR` | 未实现 | Provides access to viewing tools from a unified interface. | — |
 | 580 | `NAVSMOTION` | 未实现 | Provides an on-screen display for creating and playing back cinematic camera animations for design review, presentation, and bookmark-style navigation. | — |
 | 581 | `NAVSMOTIONCLOSE` | 未实现 | Closes the ShowMotion interface where you can navigate within a drawing by selecting a named view. | — |
@@ -1016,13 +1052,13 @@
 | 671 | `PROPERTIES` | 已实现 | Controls properties of existing objects. | chrome 本地选择子：打开特性面板 |
 | 672 | `PROPERTIESCLOSE` | 已实现 | Closes the Properties palette. | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
 | 673 | `PROPULATE` | 未实现 | Update, list, or clear Drawing Properties data. | — |
-| 674 | `PSBSCALE` | 未实现 | Specifies or updates the scale of block objects relative to paper space. | — |
+| 674 | `PSBSCALE` | 部分实现 | Specifies or updates the scale of block objects relative to paper space. | 具名拒绝（`psbscale.write_unsupported`）：无视口比例写入 API。 |
 | 675 | `-PSETUPIN` | 未实现 | Imports a user-defined page setup into a new drawing layout using the command line. | — |
 | 676 | `PSETUPIN` | 未实现 | Imports a user-defined page setup into a new drawing layout. | — |
 | 677 | `PSOUT` | 未实现 | Creates a PostScript file from DWG file. | — |
 | 678 | `PSPACE` | 未实现 | In a layout, switches from model space in a layout viewport to paper space. | — |
-| 679 | `PSTSCALE` | 未实现 | Specifies or updates the scale of text objects relative to paper space. | — |
-| 680 | `PTYPE` | 未实现 | Specifies the display style and size of point objects. | — |
+| 679 | `PSTSCALE` | 部分实现 | Specifies or updates the scale of text objects relative to paper space. | 具名拒绝（`pstscale.write_unsupported`）：无视口比例写入 API。 |
+| 680 | `PTYPE` | 部分实现 | Specifies the display style and size of point objects. | 只读：`$PDMODE`/`$PDSIZE`；写入仍走 PDMODE/PDSIZE，无 PTYPE 对话框。 |
 | 681 | `-PUBLISH` | 未实现 | Publishes drawings to DWF, DWFx, and PDF files, or to printers or plotters using the command line. | — |
 | 682 | `PUBLISH` | 未实现 | Publishes drawings to DWF, DWFx, and PDF files, or to printers or plotters. | — |
 | 683 | `-PURGE` | 部分实现 | Removes unused named objects, such as block definitions and layers, from the current drawing using the command line. | `PURGE` 的别名，同一实现 |
@@ -1089,7 +1125,7 @@
 | 744 | `RESETBLOCK` | 未实现 | Resets one or more dynamic block references to the default values of the block definition. | — |
 | 745 | `RESUME` | 未实现 | Continues an interrupted script. | — |
 | 746 | `REVCLOUD` | 部分实现 | Creates or modifies a revision cloud. | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
-| 747 | `REVCLOUDPROPERTIES` | 未实现 | Controls the approximate chord length for the arcs in a selected revision cloud. | — |
+| 747 | `REVCLOUDPROPERTIES` | 部分实现 | Controls the approximate chord length for the arcs in a selected revision cloud. | 只读报告会话弧长令牌（默认 15）；设置形式未实现，REVCLOUD 不读取该令牌。 |
 | 748 | `REVERSE` | 部分实现 | Reverses the vertices of selected lines, polylines, splines, and helixes, which is useful for linetypes with included text, or wide polylines with differing beginning and ending widths. | 仅 LINE/LWPOLYLINE/SPLINE，当前选择为全部输入；无交互拾取提示，无螺旋/3D 变体 |
 | 749 | `REVERT` | 未实现 | Closes and then reopens the current drawing. | — |
 | 750 | `REVOLVE` | 未实现 | Creates a 3D solid or surface by sweeping an object around an axis. | — |
@@ -1112,7 +1148,7 @@
 | 767 | `SAVETOWEBMOBILE` | 未实现 | Saves a copy of the current drawing to your Autodesk Account. | — |
 | 768 | `SCALE` | 已实现 | Enlarges or reduces selected objects, keeping the proportions of the object the same after scaling. | — |
 | 769 | `-SCALELISTEDIT` | 未实现 | Controls the list of scales available for layout viewports, page layouts, and plotting. | — |
-| 770 | `SCALELISTEDIT` | 未实现 | Controls the list of scales available for layout viewports, page layouts, and plotting. | — |
+| 770 | `SCALELISTEDIT` | 部分实现 | Controls the list of scales available for layout viewports, page layouts, and plotting. | 只读：第一个图纸布局的页面 + `scalelistedit.write_unsupported`；无比例列表存储。 |
 | 771 | `SCALETEXT` | 已实现 | Enlarges or reduces selected text objects without changing their locations. | — |
 | 772 | `SCRIPT` | 未实现 | Executes a sequence of commands from a script file. | — |
 | 773 | `SCRIPTCALL` | 未实现 | Executes a sequence of commands and nested scripts from a script file. | — |
@@ -1143,7 +1179,7 @@
 | 798 | `SHOWRENDERGALLERY` | 未实现 | Displays the images that were rendered and stored in your Autodesk account. | — |
 | 799 | `SHOWURLS` | 未实现 | Displays all attached URLs contained in a drawing, and allows them to edited. | — |
 | 800 | `SHP2BLK` | 未实现 | Converts all instances of a selected shape object with an equivalent block. | — |
-| 801 | `SIGVALIDATE` | 未实现 | Displays information about the digital signature attached to a drawing file. | — |
+| 801 | `SIGVALIDATE` | 部分实现 | Displays information about the digital signature attached to a drawing file. | 具名拒绝（`sigvalidate.unsupported`）：无数字签名模型。 |
 | 802 | `SKETCH` | 部分实现 | Creates a series of freehand line segments. | 仅 `CommandPayload::Points`：一条活动层开放 LWPOLYLINE；两点以上且有限；一条事务/一步撤销；交互式定时采样 NOT IMPLEMENTED |
 | 803 | `SLICE` | 未实现 | Creates new 3D solids and surfaces by slicing, or dividing, existing objects. | — |
 | 804 | `SNAP` | 已实现 | Restricts cursor movement to specified intervals. | — |
@@ -1181,8 +1217,8 @@
 | 836 | `SURFTRIM` | 未实现 | Trims portions of a surface where it meets another surface or type of geometry. | — |
 | 837 | `SURFUNTRIM` | 未实现 | Replaces surface areas removed by the SURFTRIM command. | — |
 | 838 | `SWEEP` | 未实现 | Creates a 3D solid or 3D surface by sweeping a 2D object or subobject along an open or closed path. | — |
-| 839 | `SYSVARMONITOR` | 未实现 | Monitors a list of system variables and sends notifications when there are changes to any one in the list. | — |
-| 840 | `SYSVDLG` | 未实现 | Allows you to view, edit, save, and restore system variable settings. | — |
+| 839 | `SYSVARMONITOR` | 部分实现 | Monitors a list of system variables and sends notifications when there are changes to any one in the list. | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
+| 840 | `SYSVDLG` | 部分实现 | Allows you to view, edit, save, and restore system variable settings. | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
 | 841 | `SYSWINDOWS` | 未实现 | Arranges windows and icons when the application window is shared with external applications. | — |
 | 842 | `-TABLE` | 未实现 | Creates an empty table object. | — |
 | 843 | `TABLE` | 未实现 | Creates an empty table object. | — |
@@ -1201,7 +1237,7 @@
 | 856 | `TEXTEDIT` | 部分实现 | Edits a selected multiline or single-line text object, or the text in a dimension object. | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
 | 857 | `TEXTFIT` | 部分实现 | Expands or compresses the width of text objects based on new starting and ending points. | 仅按 `height = target / char_count` 调整字高；真实宽度拉伸 NOT IMPLEMENTED；坏宽度/空选择/非文字/空文本具名拒绝 |
 | 858 | `TEXTMASK` | 部分实现 | Creates a blank area behind selected text or mtext objects. | 为每个选中 Text/MText 用**估算**外框创建独立 `Mask`（type-key `AcDbWipeout`，`draw_order = 文字 − 1`）；无关联模型，遮罩是独立实体 |
-| 859 | `TEXTSCR` | 未实现 | Opens a text window that displays a history of prompts and command line entries for the current session. | — |
+| 859 | `TEXTSCR` | 部分实现 | Opens a text window that displays a history of prompts and command line entries for the current session. | 置会话 `text_screen`=true；无文本屏幕窗口、不显示提示历史。 |
 | 860 | `TEXTTOFRONT` | 部分实现 | Brings text, leaders, and dimensions in front of all other objects in the drawing. | 以**当前选择**为输入（偏离 AutoCAD 的 Select objects 提示）；仅可寻址模型空间 Text/MultiLeader/Dimension 参与，其它选中对象逐条 `texttofront.skipped` 跳过；以所有非合格模型空间对象的最大 draw order 为基线，按相对顺序连续上移（一条事务/一步撤销）；已在前方时 `texttofront.unchanged` 不建事务；图纸空间/块内 draw order 不重排；AutoCAD 的“全图文字”形式与 Draw Order 对话框未实现 |
 | 861 | `TEXTUNMASK` | 部分实现 | Removes the mask from selected text or mtext that were masked with TEXTMASK. | 只删除**选中**的、落在选中文字估算外框内的 `Mask`；启发式无法证明来源；未选中的 Mask 不扫描 |
 | 862 | `TFRAMES` | 部分实现 | Toggles the display of frames for all wipeout and image objects. | 会话令牌 `tframes`；不改变图像/外部参照边框可见性。 |
@@ -1226,7 +1262,7 @@
 | 881 | `TRACEPALETTEOPEN` | 未实现 | Opens the Trace palette where you can view and manage traces in the current drawing. | — |
 | 882 | `TRACEVIEW` | 未实现 | Changes the active trace to view mode so you can edit the parent drawing while the trace is still visible. | — |
 | 883 | `TRANSPARENCY` | 未实现 | Controls whether background pixels in an image are transparent or opaque. | — |
-| 884 | `TRAYSETTINGS` | 未实现 | Controls the display of icons and notifications in the status bar tray. | — |
+| 884 | `TRAYSETTINGS` | 部分实现 | Controls the display of icons and notifications in the status bar tray. | 会话令牌（默认 ON）；无状态栏托盘 UI。 |
 | 885 | `TREESTAT` | 部分实现 | Displays information about the drawing's current spatial index. | 显式 `treestat.not_tracked`；不造假计数 |
 | 886 | `TREX` | 部分实现 | Combines the TRIM and EXTEND commands. | `TREX TRIM\|EXTEND`；选择集为边界，复用 `plan_trim`/`plan_extend`；无边界提示 |
 | 887 | `TRIM` | 部分实现 | Trims objects to meet the edges of other objects. | 目标 LINE/ARC/CIRCLE/SPLINE；边界含折线/样条采样 |
@@ -1265,7 +1301,7 @@
 | 920 | `VIEWFORWARD` | 部分实现 | Restores sequential views forward after displaying a previous view with VIEWBACK or Zoom Previous. | 新的每视口前进栈（上限 16）；空栈 no-op；文档化偏离 |
 | 921 | `VIEWGO` | 部分实现 | Restores a named view. | 同 `VIEW RESTORE`；未知名称按名拒绝 |
 | 922 | `VIEWPLAY` | 未实现 | Plays the animation associated to a named view. | — |
-| 923 | `VIEWPLOTDETAILS` | 未实现 | Displays information about completed plot and publish jobs. | — |
+| 923 | `VIEWPLOTDETAILS` | 部分实现 | Displays information about completed plot and publish jobs. | 具名拒绝（`viewplotdetails.unsupported`）：无打印详细信息模型。 |
 | 924 | `VIEWPROJ` | 未实现 | Creates one or more projected views from an existing model documentation drawing view. | — |
 | 925 | `VIEWRES` | 部分实现 | Sets the tessellation for objects in the current viewport when WHIPARC is turned off. | 整数 `1..=1000` 仅存会话 token；越界 `viewres.out_of_range`；渲染器消费/像素效果 NOT IMPLEMENTED / NOT VERIFIED |
 | 926 | `VIEWSECTION` | 未实现 | Creates a section view of a 3D model that was created in AutoCAD or in Autodesk Inventor. | — |
@@ -1280,7 +1316,7 @@
 | 935 | `VISUALSTYLESCLOSE` | 未实现 | Closes the Visual Styles Manager. | — |
 | 936 | `VLISP` | 未实现 | Displays the AutoLISP development environment. | — |
 | 937 | `VPCLIP` | 部分实现 | Redefines a layout viewport object while retaining its properties. | `RECT` 校验；非矩形 `vpclip.polygonal_not_implemented`；合法矩形后 `vpclip.viewport_selection_unsupported`（无选中视口/裁剪写 API） |
-| 938 | `VPLAYER` | 未实现 | Sets layer visibility within viewports. | — |
+| 938 | `VPLAYER` | 部分实现 | Sets layer visibility within viewports. | 具名拒绝（`vplayer.viewport_layer_state_unsupported`）：无逐视口图层状态。 |
 | 939 | `VPMAX` | 部分实现 | Expands the current layout viewport for editing. | 会话标记（活动图纸布局的第一个视口）；不写库 |
 | 940 | `VPMIN` | 部分实现 | Restores the current layout viewport. | 恢复会话标记；空状态 `vpmin.nothing_to_restore` |
 | 941 | `VPOINT` | 部分实现 | Sets the viewing direction for a 3D visualization of the drawing. | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；零/非有限向量拒绝；不改模型；向量形式进入 3D 透视 |
@@ -1291,14 +1327,14 @@
 | 946 | `VSCURRENT` | 部分实现 | Sets the visual style in the current viewport. | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented`；无渲染器切换、NOT pixel-verified |
 | 947 | `VSLIDE` | 未实现 | Displays an image slide file in the current viewport. | — |
 | 948 | `VSSAVE` | 未实现 | Saves the current visual style under a new name. | — |
-| 949 | `VTOPTIONS` | 未实现 | Displays a change in view as a smooth transition. | — |
+| 949 | `VTOPTIONS` | 部分实现 | Displays a change in view as a smooth transition. | 只读：视图过渡设置未建模（`vtoptions.not_tracked`），不杜撰平滑/时长数值。 |
 | 950 | `WALKFLYSETTINGS` | 未实现 | Controls the walk and fly navigation settings. | — |
 | 951 | `-WBLOCK` | 未实现 | Saves selected objects or converts a block to a specified drawing file. | — |
 | 952 | `WBLOCK` | 未实现 | Saves selected objects or converts a block to a specified drawing file. | — |
 | 953 | `WEBLIGHT` | 未实现 | Creates a precise 3D representation of the light intensity distribution of a light source. | — |
 | 954 | `WEBLOAD` | 未实现 | Loads a JavaScript file from a URL, and then executes the JavaScript code contained in the file. | — |
 | 955 | `WEDGE` | 未实现 | Creates a 3D solid wedge. | — |
-| 956 | `WHOHAS` | 未实现 | Displays information about an open drawing file. | — |
+| 956 | `WHOHAS` | 部分实现 | Displays information about an open drawing file. | 只读：单文档构建，无网络查询，不列其他用户或文件锁。 |
 | 957 | `WIPEOUT` | 部分实现 | Creates a wipeout object, and controls whether wipeout frames are displayed in the drawing. | v1 多边形遮罩：拾取边界点（≥3，回车结束）→ 一个 `Mask`（type-key `AcDbWipeout`，`inverted: false`）。**无**边框模型（Frames ON/OFF/不打印）、**无** `Polyline`/`Erase Polyline` 选项、**不检查**自交、不能拾取已有遮罩 |
 | 958 | `WMFIN` | 未实现 | Imports a Windows metafile. | — |
 | 959 | `WMFOPTS` | 未实现 | Sets options for WMFIN. | — |

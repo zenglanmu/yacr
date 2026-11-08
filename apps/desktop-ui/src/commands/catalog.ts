@@ -683,4 +683,40 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'JULIAN', labelKey: 'draw.kind.julian', icon: 'diagnostics', group: 'view' },
   { id: 'XLIST', labelKey: 'draw.kind.xlist', icon: 'properties', group: 'annotate' },
 
+  // The 2026-11-09 Wave 2 batch: ten session tokens, eight read-only reports and
+  // twelve named refusals. Tokens flip session state only and change no renderer
+  // output; reports read data this build really has and name anything absent;
+  // refusals answer with a stable `Unsupported` reason and must never be
+  // presented as working features. Appended last so no shipped row moves.
+  { id: 'DRAGMODE', labelKey: 'draw.kind.dragmode', icon: 'move', group: 'view' },
+  { id: 'APERTURE', labelKey: 'draw.kind.aperture', icon: 'snap', group: 'view' },
+  { id: 'ISOPLANE', labelKey: 'draw.kind.isoplane', icon: 'axes', group: 'view' },
+  { id: 'HIGHLIGHTNEW', labelKey: 'draw.kind.highlightnew', icon: 'alert', group: 'view' },
+  { id: 'TRAYSETTINGS', labelKey: 'draw.kind.traysettings', icon: 'settings', group: 'view' },
+  { id: 'TEXTSCR', labelKey: 'draw.kind.textscr', icon: 'terminal', group: 'view' },
+  { id: 'GRAPHSCR', labelKey: 'draw.kind.graphscr', icon: 'drawing', group: 'view' },
+  { id: 'FINDINCLUDE', labelKey: 'draw.kind.findinclude', icon: 'search', group: 'modify' },
+  { id: 'FINDMATCH', labelKey: 'draw.kind.findmatch', icon: 'search', group: 'modify' },
+  { id: 'REVCLOUDPROPERTIES', labelKey: 'draw.kind.revcloudproperties', icon: 'properties', group: 'draw' },
+  { id: 'SYSVARMONITOR', labelKey: 'draw.kind.sysvarmonitor', icon: 'settings', group: 'properties' },
+  { id: 'SYSVDLG', labelKey: 'draw.kind.sysvdlg', icon: 'settings', group: 'properties' },
+  { id: 'VTOPTIONS', labelKey: 'draw.kind.vtoptions', icon: 'view', group: 'view' },
+  { id: 'ALIASEDIT', labelKey: 'draw.kind.aliasedit', icon: 'terminal', group: 'properties' },
+  { id: 'WHOHAS', labelKey: 'draw.kind.whohas', icon: 'info', group: 'view' },
+  { id: 'ACADINFO', labelKey: 'draw.kind.acadinfo', icon: 'info', group: 'view' },
+  { id: 'PTYPE', labelKey: 'draw.kind.ptype', icon: 'point', group: 'properties' },
+  { id: 'SCALELISTEDIT', labelKey: 'draw.kind.scalelistedit', icon: 'scale', group: 'properties' },
+  { id: 'HYPERLINKOPTIONS', labelKey: 'draw.kind.hyperlinkoptions', icon: 'alert', group: 'view' },
+  { id: 'INPUTSEARCHOPTIONS', labelKey: 'draw.kind.inputsearchoptions', icon: 'search', group: 'view' },
+  { id: '-INPUTSEARCHOPTIONS', labelKey: 'draw.kind.dashinputsearchoptions', icon: 'search', group: 'view' },
+  { id: 'SIGVALIDATE', labelKey: 'draw.kind.sigvalidate', icon: 'check', group: 'view' },
+  { id: 'BASE', labelKey: 'draw.kind.base', icon: 'point', group: 'draw' },
+  { id: 'LIMITS', labelKey: 'draw.kind.limits', icon: 'grid', group: 'view' },
+  { id: 'VIEWPLOTDETAILS', labelKey: 'draw.kind.viewplotdetails', icon: 'printer', group: 'view' },
+  { id: 'VPLAYER', labelKey: 'draw.kind.vplayer', icon: 'layers', group: 'view' },
+  { id: 'MVIEW', labelKey: 'draw.kind.mview', icon: 'view', group: 'view' },
+  { id: 'PSBSCALE', labelKey: 'draw.kind.psbscale', icon: 'scale', group: 'view' },
+  { id: 'PSTSCALE', labelKey: 'draw.kind.pstscale', icon: 'scale', group: 'view' },
+  { id: 'MVSETUP', labelKey: 'draw.kind.mvsetup', icon: 'drawing', group: 'view' },
+
 ]);

@@ -330,6 +330,60 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("JULIAN", CommandId::Extended(ExtendedCommandId::JulianDate)),
     ("XLIST", CommandId::Extended(ExtendedCommandId::XList)),
 
+    // Wave 2 (2026-11-09): thirty more payload-free names. The first ten are
+    // session tokens (each reads or flips one `SessionState::drafting_extras`
+    // token; no renderer consumer exists), the next eight are read-only reports,
+    // and the last twelve are stable named refusals. All 40 extended names ride
+    // the single `CommandId::Extended` wrapper and are Viewer-legal.
+    ("DRAGMODE", CommandId::Extended(ExtendedCommandId::DragMode)),
+    ("APERTURE", CommandId::Extended(ExtendedCommandId::Aperture)),
+    ("ISOPLANE", CommandId::Extended(ExtendedCommandId::IsoPlane)),
+    ("HIGHLIGHTNEW", CommandId::Extended(ExtendedCommandId::HighlightNew)),
+    ("TRAYSETTINGS", CommandId::Extended(ExtendedCommandId::TraySettings)),
+    ("TEXTSCR", CommandId::Extended(ExtendedCommandId::TextScreen)),
+    ("GRAPHSCR", CommandId::Extended(ExtendedCommandId::GraphScreen)),
+    ("FINDINCLUDE", CommandId::Extended(ExtendedCommandId::FindInclude)),
+    ("FINDMATCH", CommandId::Extended(ExtendedCommandId::FindMatch)),
+    (
+        "REVCLOUDPROPERTIES",
+        CommandId::Extended(ExtendedCommandId::RevCloudProperties),
+    ),
+    ("SYSVARMONITOR", CommandId::Extended(ExtendedCommandId::SysVarMonitor)),
+    ("SYSVDLG", CommandId::Extended(ExtendedCommandId::SysVarDialog)),
+    (
+        "VTOPTIONS",
+        CommandId::Extended(ExtendedCommandId::ViewTransitionOptions),
+    ),
+    ("ALIASEDIT", CommandId::Extended(ExtendedCommandId::AliasEdit)),
+    ("WHOHAS", CommandId::Extended(ExtendedCommandId::WhoHas)),
+    ("ACADINFO", CommandId::Extended(ExtendedCommandId::AcadInfo)),
+    ("PTYPE", CommandId::Extended(ExtendedCommandId::PointType)),
+    ("SCALELISTEDIT", CommandId::Extended(ExtendedCommandId::ScaleListEdit)),
+    (
+        "HYPERLINKOPTIONS",
+        CommandId::Extended(ExtendedCommandId::HyperlinkOptions),
+    ),
+    (
+        "INPUTSEARCHOPTIONS",
+        CommandId::Extended(ExtendedCommandId::InputSearchOptions),
+    ),
+    (
+        "-INPUTSEARCHOPTIONS",
+        CommandId::Extended(ExtendedCommandId::DashInputSearchOptions),
+    ),
+    ("SIGVALIDATE", CommandId::Extended(ExtendedCommandId::SigValidate)),
+    ("BASE", CommandId::Extended(ExtendedCommandId::BasePoint)),
+    ("LIMITS", CommandId::Extended(ExtendedCommandId::DrawingLimits)),
+    (
+        "VIEWPLOTDETAILS",
+        CommandId::Extended(ExtendedCommandId::ViewPlotDetails),
+    ),
+    ("VPLAYER", CommandId::Extended(ExtendedCommandId::VPlayer)),
+    ("MVIEW", CommandId::Extended(ExtendedCommandId::MView)),
+    ("PSBSCALE", CommandId::Extended(ExtendedCommandId::PsbScale)),
+    ("PSTSCALE", CommandId::Extended(ExtendedCommandId::PstScale)),
+    ("MVSETUP", CommandId::Extended(ExtendedCommandId::MvSetup)),
+
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**
@@ -482,160 +536,11 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     LINETYPE_SELECTOR,
 ];
 
-/// Full-word synonyms and AutoCAD-style abbreviations, always accepted, that map
-/// onto a canonical [`COMMAND_TABLE`] selector.
-///
-/// The single/double-letter rows mirror AutoCAD's default `acad.pgp` command
-/// abbreviations **for the commands this build already implements only**: an
-/// alias is admitted only when its target is a real selector, so `MA`
-/// (`MATCHPROP`) is present now that MATCHPROP exists (and was absent while the
-/// command itself was absent). There is no `acad.pgp` file parsing and no
-/// user-defined alias support; this table is the whole (curated) subset, and
-/// every row is contract-tested to canonicalise onto a [`COMMAND_TABLE`] name,
-/// to be unique, and to collide with no canonical name.
-///
-/// There is no `SNAP` alias row. AutoCAD's `SNAP` is **grid snap** (F9), a real
-/// selector of its own ([`CommandId::ToggleSnapGrid`], with the `SNAPUNIT`
-/// spacing sysvar); it is a different feature from object snap (`OSNAP`) and
-/// from the display grid (`GRID`). Aliasing it onto `ToggleSnap` would silently
-/// turn a request for grid snap into an object-snap toggle, and aliasing it onto
-/// `ToggleGrid` would silently turn it into a display toggle — neither is grid
-/// snap, so no alias exists and the canonical name is the only spelling.
-pub const COMMAND_ALIASES: &[(&str, &str)] = &[
-    ("EXPORT", "PLOT"),
-    ("PRINT", "PLOT"),
-    ("SAVEAS", "SAVE"),
-    ("QSAVE", "SAVE"),
-    ("ZOOM EXTENTS", "FIT"),
-    ("ENTER", "CONFIRM"),
-    // `DBA`/`DCO` are the conventional AutoCAD abbreviations of the baseline and
-    // continue dimension pair. Admitting them is our declared convenience (the
-    // AutoCAD command reference documents the full names, not these shorthand
-    // forms), and an alias never changes behaviour: it only normalizes a typed
-    // name onto the canonical selector (ADR 0017 decision C, P5f).
-    // `LAYUNISO` is AutoCAD's "turn layer isolation off", which is exactly what
-    // `RESTORELAYERS` does here (drop the session's temporary overrides).
-    // `LAYON` ("turn all layers on") is the same restore reached by its own name.
-    //
-    // `LAYERP` is deliberately **not** in this table any more (2026-10-27): it is a
-    // canonical selector of its own ([`CommandId::LayerPrevious`]) that restores
-    // the *previous* layer state from the session's bounded override history. An
-    // alias onto `RESTORELAYERS` would silently clear every override instead.
-    ("LAYUNISO", "RESTORELAYERS"),
-    // `LAYON` is AutoCAD's "turn all layers on", which is exactly what the one
-    // restore path does here (drop every temporary override). It carries no
-    // `CommandId` of its own, like `LAYUNISO`.
-    ("LAYON", "RESTORELAYERS"),
-    // The command-line (`-`) spellings of the 2026-11-07 layer batch name the
-    // same commands: this build has no layer dialog, so the dialog-free form is
-    // the whole behaviour and a second `CommandId` would be a second path.
-    ("-LAYMCH", "LAYMCH"),
-    ("-LAYMRG", "LAYMRG"),
-    ("-LAYDEL", "LAYDEL"),
-    // `-OVERKILL` is AutoCAD's dialog-free spelling of the same command; this
-    // build has one selection-based path, so the alias adds no second engine.
-    ("-OVERKILL", "OVERKILL"),
-    ("DBA", "DIMBASELINE"),
-    ("DCO", "DIMCONTINUE"),
-    // `NEWLAYER` is a **project** word synonym for creating a layer, not an
-    // AutoCAD command (AutoCAD reaches layer creation through `LAYER` /
-    // `-LAYER`); it is admitted only because `CREATELAYER` itself exists, the
-    // same rule every other alias row follows. It is the only non-`acad.pgp`
-    // spelling in this table, and it changes nothing but the normalized name.
-    ("NEWLAYER", "CREATELAYER"),
-    // AutoCAD's default `acad.pgp` single/double-letter abbreviations, listed
-    // alphabetically (draw, modify, view, annotate, drafting switches). Only the
-    // subset whose target selector exists here: `MA` (MATCHPROP) joined the table
-    // when MATCHPROP itself was implemented, and inventing an abbreviation for an
-    // absent command is exactly what this table must never do.
-    ("A", "ARC"),
-    ("AL", "ALIGN"),
-    // AutoCAD's `AR` is ARRAY; `ARRAYRECT` is the array command this build
-    // implements, so the abbreviation points at the implemented selector.
-    ("AR", "ARRAYRECT"),
-    // AutoCAD's `BR` is BREAK, this build's two-point break.
-    ("BR", "BREAK"),
-    ("C", "CIRCLE"),
-    ("CHA", "CHAMFER"),
-    ("CO", "COPY"),
-    ("CP", "COPY"),
-    ("DAL", "DIMALIGNED"),
-    ("DAN", "DIMANGULAR"),
-    ("DCE", "DIMCENTER"),
-    ("DDI", "DIMDIAMETER"),
-    // `DIV` / `LEN` are AutoCAD's abbreviations of the two zero-point single-curve
-    // edits implemented here (DIVIDE and LENGTHEN).
-    ("DIV", "DIVIDE"),
-    ("DLI", "DIMLINEAR"),
-    ("DRA", "DIMRADIUS"),
-    ("E", "ERASE"),
-    ("EL", "ELLIPSE"),
-    ("EX", "EXTEND"),
-    ("F", "FILLET"),
-    ("GR", "GRID"),
-    ("H", "HATCH"),
-    // AutoCAD's default abbreviation for INSERT (an existing block reference).
-    ("I", "INSERT"),
-    // AutoCAD's default abbreviation for BLOCK (define a named block).
-    ("B", "BLOCK"),
-    ("L", "LINE"),
-    ("LEN", "LENGTHEN"),
-    ("M", "MOVE"),
-    ("MA", "MATCHPROP"),
-    ("MI", "MIRROR"),
-    ("O", "OFFSET"),
-    ("OR", "ORTHO"),
-    ("OS", "OSNAP"),
-    ("P", "PAN"),
-    ("PL", "PLINE"),
-    ("PO", "POINT"),
-    ("POL", "POLYGON"),
-    ("REC", "RECTANG"),
-    ("RO", "ROTATE"),
-    ("S", "STRETCH"),
-    ("SC", "SCALE"),
-    ("SPL", "SPLINE"),
-    ("T", "TEXT"),
-    ("TR", "TRIM"),
-    ("U", "UNDO"),
-    ("X", "EXPLODE"),
-    // AutoCAD's default abbreviation for XLINE. `RAY` deliberately has no alias:
-    // AutoCAD's `acad.pgp` defines none, and this table never invents spellings.
-    ("XL", "XLINE"),
-    ("Z", "ZOOM"),
-    // The 2026-11-07 text batch aliases. `TJUST` is AutoCAD's `JUSTIFYTEXT`
-    // alias (same `CommandId`, same typed `<H> <V>` grammar); `MTEDIT` is
-    // AutoCAD's name for editing the selected text and maps onto the existing
-    // `TEXTEDIT` pick tool; `-MTEXT` is AutoCAD's command-line MTEXT form,
-    // mapping onto the existing two-corner `MTEXT` tool. None is a second path.
-    ("TJUST", "JUSTIFYTEXT"),
-    ("MTEDIT", "TEXTEDIT"),
-    ("-MTEXT", "MTEXT"),
-    // The command-line (`-`) spellings of PURGE/RENAME name the same commands:
-    // this build has no dialog form, so the dialog-free selector is the whole
-    // behaviour and a second `CommandId` would be a second path.
-    ("-PURGE", "PURGE"),
-    ("-RENAME", "RENAME"),
-    // `-VIEW` is AutoCAD's command-line form of `VIEW`. This build has no view
-    // dialog, so the dialog-free typed form is the whole behaviour and the alias
-    // maps onto the same `CommandId`/path — never a second gallery.
-    ("-VIEW", "VIEW"),
-    // `-VPORTS` is AutoCAD's command-line spelling of VPORTS; this build has no
-    // viewport dialog, so the alias only normalizes the name onto the one
-    // selector and its one named refusal.
-    ("-VPORTS", "VPORTS"),
-    // `-DIMSTYLE` is AutoCAD's dialog-free spelling of the same command; this
-    // build has one selector path, so it normalizes onto `DIMSTYLE`.
-    ("-DIMSTYLE", "DIMSTYLE"),
-    // `-GROUP` is AutoCAD's command-line group form; this build has one
-    // session-only group path, so it normalizes onto `GROUP`.
-    ("-GROUP", "GROUP"),
-    // The 2026-11-07 extras aliases: `REGEN3` is the 3D spelling of `REGEN`, and
-    // `-PAN`/`-LINETYPE` are the command-line spellings of the same paths.
-    ("REGEN3", "REGEN"),
-    ("-PAN", "PAN"),
-    ("-LINETYPE", "LINETYPE"),
-];
+// The alias table lives in `cad-app`: the `ALIASEDIT` read-only report runs
+// there and cannot depend on this UI crate. Re-exported here so
+// `commands::COMMAND_ALIASES`, `alias_pairs()` and every existing import path
+// are unchanged, and there is still exactly one copy of the rows.
+pub use cad_app::command_aliases::COMMAND_ALIASES;
 
 // Command-name resolution, selector constants and the admitted set.
 mod helpers;
