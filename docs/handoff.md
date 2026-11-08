@@ -21,8 +21,10 @@ AD
   `yacr-0.1.6-macos-universal.tar.gz` 114,185,643 B（+ `.sha256`，ad-hoc 签名、未公证）；
   `app-universal-release.apk` 91,895,265 B（仓库自签名 keystore）+ `SIGNING.txt` + `.sha256`。
 - **落地页**：`apps/landing` 更新到 v0.1.6（文件名、真实大小/校验和、R2 base、JSON-LD 与下载
-  链接），`scripts/test-landing-site.py` 常量与 `site.yml` 默认 `release_tag` 同步；部署走
-  `Landing site` workflow（R2 镜像 + Cloudflare Pages）。
+  链接），`scripts/test-landing-site.py` 常量与 `site.yml` 默认 `release_tag` 同步。`Landing site`
+  run [`42503821615`](https://github.com/zenglanmu/yacr/actions/runs/42503821615) 绿：R2 镜像 +
+  Cloudflare Pages 部署完成；复核 <https://yacr.pages.dev/> 与线上 `downloads.json` 均为 v0.1.6，
+  4 个 R2 主包 URL HEAD 返回 200。分发证据，不是运行时/GPU/真机验收。
 - **证据边界**：以上是编译/打包/签名/上传与分发证据；真机、真实 GPU、视觉/像素与性能验收
   一律 **NOT VERIFIED**（与 v0.1.5 相同）。
 
