@@ -86,6 +86,13 @@
     navToggle.setAttribute('aria-label', open ? strings().navClose : strings().navOpen);
   }
 
+  function setAltText(lang) {
+    doc.querySelectorAll('[data-alt-zh]').forEach((element) => {
+      const value = lang === 'en' ? element.dataset.altEn : element.dataset.altZh;
+      if (value) element.setAttribute('alt', value);
+    });
+  }
+
   function applyLanguage(lang, persist) {
     const normalized = lang === 'en' ? 'en' : 'zh-CN';
     const copy = STRINGS[normalized];
@@ -106,6 +113,7 @@
     });
 
     setAriaLabels(normalized);
+    setAltText(normalized);
     setNavToggleLabel();
 
     if (persist) storeLanguage(normalized);

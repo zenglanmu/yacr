@@ -1,5 +1,24 @@
 AD
 
+## 2026-11-08 宣传页新增实机截图与大图纸指标
+
+- **页面**：`apps/landing/index.html` 在 hero 之后新增编号 `A` 的 `#showcase`（`styles.css` +224 行、
+  `main.js` 的 `setAltText`），hero 的工程示意图与 “NOT A SCREENSHOT” 标记保持不变；页脚
+  “页面与插画不是产品截图”改为“工程示意图不是截图，实机截图见上方”。
+- **截图来源（真实运行，非渲染图）**：`bash scripts/collect-evidence.sh --no-build --backend wayland
+  --dwg fixtures/dxf/qcad-flange/flange.dxf --capture-at 12`，真实 `app-linux`（native Wayland、
+  NVIDIA Quadro P620 / Vulkan / wgpu、2026-11-08）；Mutter ScreenCast 整屏合成帧**只做窗口裁剪**
+  → `apps/landing/assets/screenshots/desktop-flange-2026-11-08.png`（1206×834）。
+- **“725K 图元”口径**：`fixtures/complex-test.dwg` 展开约 72 万图元（`docs/handoff.md` 725k 实体 /
+  145,776 batches）；当日同宿主复跑读到 `resident_batches=166,686`、`verts≈1.20M`、
+  `draw_calls≈1.3–1.9k`；`cad-cli-tools scan` 读到 44,591 顶层实体 / 1,081 块定义——页面用“展开后”
+  表述，并保留“性能验收仍未完成”。
+- **门禁**：`python3 scripts/test-landing-site.py`（新增截图资产存在性 / PNG 头 / 1206×834 尺寸与
+  路径契约）、`node --check apps/landing/main.js`、Playwright 1440 / 820 / 390 px 渲染无横向溢出、
+  `pageerror/console error = none`；`git diff --check` 通过。
+- **NOT RUN / NOT VERIFIED**：真实浏览器 GPU/像素与真机；`prefers-reduced-motion` 只在 CSS 规则层
+  复核。CI `web-smoke` 的软件渲染结论不作为本页截图证据。
+
 ## 2026-11-08 状态措辞修正：Linux/Wayland 为主开发目标；Android 侧载验证
 
 - 维护者侧载 Android release APK 并运行成功（非 CI 验收；设备/真实 GPU/像素的正式验收仍 NOT VERIFIED）。

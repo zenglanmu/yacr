@@ -87,8 +87,26 @@ Pages 项目并 `wrangler pages deploy`。它不管理自定义域名。
   或创建直接失败。此时需改 `CF_PAGES_PROJECT`（以及 `site.yml` 里的值）并同步页面的
   canonical/OG URL，不要静默复用别人的项目。
 
+## 实机截图（Real screenshot）
+
+- 资产：`apps/landing/assets/screenshots/desktop-flange-2026-11-08.png`（1206 × 834）。
+- 来源：2026-11-08 本机 Linux 原生 Wayland（`native-below`）上的 `app-linux` 真实运行
+  （NVIDIA Quadro P620 / Vulkan / wgpu），打开 `fixtures/dxf/qcad-flange/flange.dxf`。
+  由同 UID Mutter ScreenCast 抓整屏合成帧后**只做窗口裁剪**（去掉桌面与其它窗口），未修图；
+  它是产品截图，不是渲染图或插画。
+- 复跑采集：`bash scripts/collect-evidence.sh --backend wayland --dwg
+  fixtures/dxf/qcad-flange/flange.dxf --no-build --capture-at 12 --out <dir>`；整屏原始帧在
+  `<dir>/wayland/wayland-frame.png`，裁剪框与页面资产一致（1206 × 834 于 1920 × 1080 帧）。
+- 页面上的“725K 图元（复杂测试图纸展开）”来自 `docs/handoff.md` 对 `fixtures/complex-test.dwg`
+  的场景实测（725k 实体 / 145,776 batches）；2026-11-08 在同一宿主复跑读到 `resident_batches`
+  166,686、`verts` 约 120 万。`cad-cli-tools scan` 对该文件读到 44,591 顶层实体 / 1,081 块定义
+  （图元数是展开后的显示量级，不是文件顶层实体数）。性能/帧率仍未验收。
+- 换图时必须保持 `width`/`height` 与真实像素比例，并同步 `scripts/test-landing-site.py` 的
+  期望尺寸与路径；`alt` 必须写明这是真实截图。
+
 ## 门禁
 
 `python3 scripts/test-landing-site.py` 是纯标准库契约测试，校验页面文件/下载清单 schema、两个
-部署脚本的 fail-closed 片段，以及 `site.yml` 保持手动触发、不发布 GitHub Release。它已接入
-`core-quality`（`scripts/check-workflows.py` 同步固定该命令），页面缺失或清单漂移会让门禁失败。
+部署脚本的 fail-closed 片段、实机截图资产（存在性、PNG 头、尺寸）以及 `site.yml` 保持手动触发、
+不发布 GitHub Release。它已接入 `core-quality`（`scripts/check-workflows.py` 同步固定该命令），
+页面缺失或清单漂移会让门禁失败。

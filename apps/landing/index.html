@@ -289,7 +289,7 @@
                 <span class="lang--zh">核心与渲染</span><span class="lang--en" lang="en">core and renderer</span>
               </p>
               <p class="stat-note">
-                <span class="lang--zh">现代 GPU 特性 · 面向几十万图元</span><span class="lang--en" lang="en">modern GPU features · 100K+ entity target</span>
+                <span class="lang--zh">现代 GPU 特性 · 72 万图元测试图纸</span><span class="lang--en" lang="en">modern GPU features · 725K-entity test drawing</span>
               </p>
             </div>
             <div class="stat">
@@ -301,6 +301,101 @@
             </div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section class="section section--showcase" id="showcase" aria-labelledby="showcase-title">
+      <div class="wrap">
+        <div class="showcase-head">
+          <div class="showcase-head-main reveal">
+            <p class="section-index">
+              <span class="idx" aria-hidden="true">A</span>
+              <span class="rule" aria-hidden="true"></span>
+              <span class="lang--zh">实机截图</span><span class="lang--en" lang="en">Real screenshot</span>
+            </p>
+            <h2 class="showcase-title" id="showcase-title">
+              <span class="lang--zh">实际运行时的一帧。</span>
+              <span class="lang--en" lang="en">One frame from the running app.</span>
+            </h2>
+            <p class="showcase-lead">
+              <span class="lang--zh">下面这张是 yacr 桌面程序在 Linux 原生 Wayland 会话里的真实截图：上方是 React + Tauri 界面，中间由 Rust 核心和 wgpu 绘制，底部是文件标签、命令行与状态栏。</span>
+              <span class="lang--en" lang="en">A real screenshot of the yacr desktop app in a native Wayland session on Linux: React + Tauri chrome on top, drawing driven by the Rust core and wgpu, with the file tab, command line, and status bar below.</span>
+            </p>
+          </div>
+
+          <dl class="showcase-spec reveal reveal--d1">
+            <div>
+              <dt><span class="lang--zh">宿主</span><span class="lang--en" lang="en">Host</span></dt>
+              <dd>Linux · native Wayland</dd>
+            </div>
+            <div>
+              <dt><span class="lang--zh">显卡</span><span class="lang--en" lang="en">GPU</span></dt>
+              <dd>NVIDIA Quadro P620 · Vulkan</dd>
+            </div>
+            <div>
+              <dt><span class="lang--zh">渲染</span><span class="lang--en" lang="en">Renderer</span></dt>
+              <dd>wgpu</dd>
+            </div>
+            <div>
+              <dt><span class="lang--zh">截图</span><span class="lang--en" lang="en">Captured</span></dt>
+              <dd>2026-11-08</dd>
+            </div>
+            <div>
+              <dt><span class="lang--zh">图纸</span><span class="lang--en" lang="en">Drawing</span></dt>
+              <dd><code>qcad-flange/flange.dxf</code></dd>
+            </div>
+          </dl>
+        </div>
+
+        <figure class="showcase-figure reveal">
+          <div class="showcase-frame">
+            <div class="showcase-plate">
+              <p class="plate-rail" aria-hidden="true">
+                <span class="rail-capture"><span class="rail-dot"></span>REAL SCREENSHOT</span>
+                <span class="rail-mid">LINUX · NATIVE WAYLAND</span>
+                <span class="rail-end">1206 × 834</span>
+              </p>
+              <img
+                src="assets/screenshots/desktop-flange-2026-11-08.png"
+                width="1206" height="834"
+                loading="lazy" decoding="async"
+                alt="yacr 的真实截图：Linux 主机上的桌面窗口，React/Tauri 界面打开了 qcad-flange 法兰图纸；黑色画布上是白色与红色的二维线框，顶部是功能区，底部是命令行与状态栏。"
+                data-alt-zh="yacr 的真实截图：Linux 主机上的桌面窗口，React/Tauri 界面打开了 qcad-flange 法兰图纸；黑色画布上是白色与红色的二维线框，顶部是功能区，底部是命令行与状态栏。"
+                data-alt-en="A real screenshot of yacr on a Linux host: the desktop window with the React/Tauri interface showing the qcad-flange drawing. White and red 2D linework sits on the black canvas, with the ribbon above and the command line and status bar below.">
+            </div>
+          </div>
+          <figcaption class="showcase-caption">
+            <span class="fig-mark" aria-hidden="true">FIG. A</span>
+            <p class="showcase-caption-text">
+              <span class="lang--zh">真实截图：Linux 原生 Wayland 会话中的 yacr，通过 React / Tauri 界面打开 <code>fixtures/dxf/qcad-flange/flange.dxf</code>。黑色画布上是法兰的二维视图，顶部是功能区与文件标签，底部是命令行与状态栏。</span>
+              <span class="lang--en" lang="en">A real screenshot: yacr in a native Wayland session on Linux, with <code>fixtures/dxf/qcad-flange/flange.dxf</code> open in the React / Tauri interface. The flange’s 2D views sit on the black canvas, below the ribbon and file tab and above the command line and status bar.</span>
+            </p>
+            <p class="showcase-caption-meta">
+              <span>2026-11-08</span>
+              <span>1206 × 834</span>
+              <span><span class="lang--zh">窗口截图</span><span class="lang--en" lang="en">window capture</span></span>
+            </p>
+          </figcaption>
+        </figure>
+
+        <ul class="showcase-metrics reveal">
+          <li class="shot-metric">
+            <p class="shot-metric-value"><span>223</span><span class="metric-sep">/</span><span>981</span></p>
+            <p class="shot-metric-label"><span class="lang--zh">条命令有实现路径</span><span class="lang--en" lang="en">commands with an implementation path</span></p>
+          </li>
+          <li class="shot-metric">
+            <p class="shot-metric-value">DWG<span class="metric-sep">·</span>DXF</p>
+            <p class="shot-metric-label"><span class="lang--zh">导入</span><span class="lang--en" lang="en">import</span></p>
+          </li>
+          <li class="shot-metric">
+            <p class="shot-metric-value">wgpu<span class="metric-sep">·</span>Vulkan</p>
+            <p class="shot-metric-label"><span class="lang--zh">渲染器</span><span class="lang--en" lang="en">renderer</span></p>
+          </li>
+          <li class="shot-metric" id="metric-large-drawing" data-metric="large-drawing">
+            <p class="shot-metric-value">725K</p>
+            <p class="shot-metric-label"><span class="lang--zh">图元（复杂测试图纸展开）</span><span class="lang--en" lang="en">entities (expanded large test drawing)</span></p>
+          </li>
+        </ul>
       </div>
     </section>
 
@@ -453,10 +548,10 @@
             </div>
             <h3><span class="lang--zh">wgpu 渲染，面向大图纸</span><span class="lang--en" lang="en">wgpu rendering for large drawings</span></h3>
             <p>
-              <span class="lang--zh">Rust + wgpu 使用现代 GPU 特性；批处理、导航 LOD、VRAM 预检，目标是几十万图元级别图纸仍能流畅缩放。性能验收未完成，这里描述的是实现路径，不是已验收的帧率指标。渲染是派生，不反向成为数据源。</span>
-              <span class="lang--en" lang="en">Rust + wgpu uses modern GPU features: batching, navigation LOD, and VRAM preflight. The target is smooth zoom/pan on drawings with hundreds of thousands of entities. Performance acceptance is not complete; this describes the implementation path, not a certified frame-rate metric. Rendering is derived and never becomes the data source.</span>
+              <span class="lang--zh">Rust + wgpu 使用现代 GPU 特性；批处理、导航 LOD、VRAM 预检。测试图纸展开后约 72 万图元，已在真实 GPU 宿主上打开并渲染；性能验收仍未完成。渲染是派生，不反向成为数据源。</span>
+              <span class="lang--en" lang="en">Rust + wgpu uses modern GPU features: batching, navigation LOD, and VRAM preflight. Test drawings expand to roughly 725K entities and open and render on a real GPU host; performance acceptance is still pending. Rendering is derived and never becomes the data source.</span>
             </p>
-            <div class="chips" aria-hidden="true"><span>2D / 3D</span><span>100K+ ENTITIES</span><span>LOD / VRAM</span></div>
+            <div class="chips" aria-hidden="true"><span>2D / 3D</span><span>725K ENTITIES</span><span>LOD / VRAM</span></div>
           </article>
 
           <article class="feature-card feature-card--narrow reveal">
@@ -1007,8 +1102,8 @@
           <span class="lang--en" lang="en"><strong>Honest disclosure:</strong> this page is a project landing page, not acceptance evidence. Platform status follows <code>docs/handoff.md</code>, <code>docs/compatibility.md</code>, and the actual code in the repository.</span>
         </p>
         <p class="footer-meta">
-          <span class="lang--zh">© 2026 yacr · 页面与插画为项目自制，不是产品截图。</span>
-          <span class="lang--en" lang="en">© 2026 yacr · Page and illustration are project-made; not product screenshots.</span>
+          <span class="lang--zh">© 2026 yacr · 页面与插画为项目自制；工程示意图不是产品截图，实机截图见上方。</span>
+          <span class="lang--en" lang="en">© 2026 yacr · Page and illustration are project-made; the engineering illustration is not a screenshot — the real capture is shown above.</span>
         </p>
       </div>
     </div>
