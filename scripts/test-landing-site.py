@@ -20,13 +20,13 @@ DEPLOY = ROOT / "scripts" / "deploy-landing-pages.sh"
 UPLOAD = ROOT / "scripts" / "upload-r2-downloads.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "site.yml"
 
-RELEASE = "v0.1.5"
-GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.5/"
+RELEASE = "v0.1.6"
+GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.6/"
 KNOWN_ASSETS = {
-    "linux": ("yacr-0.1.5-linux-x86_64.flatpak", 105454832),
-    "windows": ("yacr-0.1.5-windows-x86_64.zip", 84979826),
-    "macos": ("yacr-0.1.5-macos-universal.tar.gz", 114179356),
-    "android": ("app-universal-release.apk", 91887073),
+    "linux": ("yacr-0.1.6-linux-x86_64.flatpak", 106080944),
+    "windows": ("yacr-0.1.6-windows-x86_64.zip", 84980956),
+    "macos": ("yacr-0.1.6-macos-universal.tar.gz", 114185643),
+    "android": ("app-universal-release.apk", 91895265),
 }
 
 # The page shows one genuine product screenshot; the asset must exist, be a PNG

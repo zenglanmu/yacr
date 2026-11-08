@@ -1,5 +1,31 @@
 AD
 
+## 2026-11-09 发布 v0.1.6
+
+- **版本**：`Cargo.toml` workspace 版本、四个 `tauri.conf.json`、Flatpak metainfo 全部
+  `0.1.5` → `0.1.6`；`Cargo.lock` 只有 28 处 workspace 成员 `version` 行变化（无依赖/checksum 漂移）。
+  发布说明：`docs/release-notes/v0.1.6.md`。
+- **tag / run**：`v0.1.6` → `CI build layers` run
+  [`42502080264`](https://github.com/zenglanmu/yacr/actions/runs/42502080264) **11/11 job 绿**
+  （linux/windows/macos/android 四个 release + linux/windows/macos check + shader + web-build/
+  web-smoke/web-deploy）；同 tag 的 `CI` run
+  [`42502080308`](https://github.com/zenglanmu/yacr/actions/runs/42502080308) 绿；
+  `main` push run `42502057872` / `42502057771` 绿。
+- **发布**：`publish-release.yml` run
+  [`42503609290`](https://github.com/zenglanmu/yacr/actions/runs/42503609290) 绿 → Release
+  <https://github.com/zenglanmu/yacr/releases/tag/v0.1.6>。
+- **artifact（大小/文件名已从 Release API 核对）**：
+  `yacr-0.1.6-linux-x86_64.flatpak` 106,080,944 B（+ `.sha256` + `.flatpak.gpg`）；
+  `yacr-0.1.6-windows-x86_64.zip` 84,980,956 B（+ `.sha256`；**unsigned**：未配置自签名 PFX
+  secret，run 内 artifact 名为 `yacr-windows-release-unsigned`）；
+  `yacr-0.1.6-macos-universal.tar.gz` 114,185,643 B（+ `.sha256`，ad-hoc 签名、未公证）；
+  `app-universal-release.apk` 91,895,265 B（仓库自签名 keystore）+ `SIGNING.txt` + `.sha256`。
+- **落地页**：`apps/landing` 更新到 v0.1.6（文件名、真实大小/校验和、R2 base、JSON-LD 与下载
+  链接），`scripts/test-landing-site.py` 常量与 `site.yml` 默认 `release_tag` 同步；部署走
+  `Landing site` workflow（R2 镜像 + Cloudflare Pages）。
+- **证据边界**：以上是编译/打包/签名/上传与分发证据；真机、真实 GPU、视觉/像素与性能验收
+  一律 **NOT VERIFIED**（与 v0.1.5 相同）。
+
 ## 2026-11-09 SHX 大字体（CJK bigfont）字高解析修复：不再回落到 10 单位默认值
 
 - **缺陷**：`crates/cad-representation/src/shx.rs::read_bigfont_metrics` 在 `strip_name` 已经去掉
