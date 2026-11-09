@@ -817,10 +817,9 @@ impl ExtendedCommandId {
 impl ExtendedCommandId {
     /// Whether the command needs Work mode.
     ///
-    /// Every variant in these batches is session-only, a read-only report or a
-    /// named refusal, so it is Viewer-legal. This stays a method (rather than a
-    /// constant) so a later write-capable extended command can declare its own
-    /// authorization here.
+    /// Session-only commands, read-only reports and named refusals are
+    /// Viewer-legal; every command that writes the drawing (`MVIEW`, the typed
+    /// `PAGESETUP`/`PSETUPIN` forms and the existing edits) declares itself here.
     pub fn requires_work_mode(self) -> bool {
         matches!(
             self,
@@ -848,6 +847,11 @@ impl ExtendedCommandId {
                 | Self::DashHatchEdit
                 | Self::ExOffset
                 | Self::LayerStateSave
+                | Self::MView
+                | Self::PageSetup
+                | Self::DashPageSetup
+                | Self::PageSetupIn
+                | Self::DashPageSetupIn
         )
     }
 }

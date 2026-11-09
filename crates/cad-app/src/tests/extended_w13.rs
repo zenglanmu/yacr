@@ -1,8 +1,9 @@
 //! Wave 13 contracts: page-setup/conversion reports and named refusals.
 //!
-//! `PAGESETUP`/`-PAGESETUP` report stored `PLOTSETTINGS` records and
+//! Bare `PAGESETUP`/`-PAGESETUP` report stored `PLOTSETTINGS` records and
 //! `CONVERTPOLY` reports the single polyline representation; both write nothing.
-//! The rest are stable named refusals.
+//! `PSETUPIN`/`-PSETUPIN` and the typed `PAGESETUP` form are writes covered by
+//! `layout_page_setup`. The rest are stable named refusals.
 
 use super::*;
 
@@ -51,15 +52,7 @@ fn convertpoly_reports_the_single_representation() {
         .any(|row| row.code == "convertpoly.single_representation"));
 }
 
-const REFUSALS: [(ExtendedCommandId, &str); 22] = [
-    (
-        ExtendedCommandId::PageSetupIn,
-        "psetupin.unsupported: importing a page setup from another drawing is not implemented",
-    ),
-    (
-        ExtendedCommandId::DashPageSetupIn,
-        "-psetupin.unsupported: importing a page setup from another drawing is not implemented",
-    ),
+const REFUSALS: [(ExtendedCommandId, &str); 20] = [
     (
         ExtendedCommandId::PlotStyleList,
         "plotstyle.unsupported: named plot styles are not implemented (no CTB/STB table)",
@@ -159,16 +152,11 @@ fn every_wave13_refusal_answers_with_its_exact_stable_reason() {
 }
 
 #[test]
-fn wave13_reports_are_viewer_legal() {
-    for ext in [
-        ExtendedCommandId::PageSetup,
-        ExtendedCommandId::DashPageSetup,
-        ExtendedCommandId::ConvertPoly,
-    ] {
-        let (mut app, mut session) = application_with_document();
-        session
-            .switch_mode(AppMode::Viewer)
-            .expect("Viewer is legal");
-        execute(&mut app, &mut session, ext).unwrap_or_else(|error| panic!("{ext:?}: {error:?}"));
-    }
+fn wave13_conversion_report_is_viewer_legal() {
+    let ext = ExtendedCommandId::ConvertPoly;
+    let (mut app, mut session) = application_with_document();
+    session
+        .switch_mode(AppMode::Viewer)
+        .expect("Viewer is legal");
+    execute(&mut app, &mut session, ext).unwrap_or_else(|error| panic!("{ext:?}: {error:?}"));
 }

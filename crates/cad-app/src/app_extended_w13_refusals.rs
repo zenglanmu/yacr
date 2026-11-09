@@ -1,10 +1,13 @@
-//! Wave 13 **named refusals** over page-setup import, plot styles, tables,
+//! Wave 13 **named refusals** over plot styles, tables,
 //! fields, remote text, spelling, super-hatching, viewport alignment and layer
 //! translation.
 //!
-//! Each name is refused with `CadError::Unsupported` carrying a stable reason; a
-//! refusal writes nothing, bumps no revision and records no history. All are
-//! Viewer-legal.
+//! `PSETUPIN`/`-PSETUPIN` are no longer refusals: they are page-setup writes in
+//! the sibling report module and are therefore Work-only.
+//!
+//! Each name here is refused with `CadError::Unsupported` carrying a stable
+//! reason; a refusal writes nothing, bumps no revision and records no history.
+//! All are Viewer-legal.
 
 use super::*;
 use crate::app_utility::require_none_payload;
@@ -24,12 +27,6 @@ impl Application {
 
 fn reason(ext: ExtendedCommandId) -> String {
     let text = match ext {
-        ExtendedCommandId::PageSetupIn => {
-            "psetupin.unsupported: importing a page setup from another drawing is not implemented"
-        }
-        ExtendedCommandId::DashPageSetupIn => {
-            "-psetupin.unsupported: importing a page setup from another drawing is not implemented"
-        }
         ExtendedCommandId::PlotStyleList => {
             "plotstyle.unsupported: named plot styles are not implemented (no CTB/STB table)"
         }

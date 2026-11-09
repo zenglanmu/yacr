@@ -1,20 +1,24 @@
-//! Wave 13 **read-only page-setup and conversion reports**.
+//! Wave 13 **page-setup writes plus read-only conversion reports**.
 //!
-//! `PAGESETUP` / `-PAGESETUP` report each layout's stored `PLOTSETTINGS`
-//! record through `DrawingDatabase::plot_settings` (paper name/size, rotation,
-//! custom scale, plot type, paper units and provenance). `CONVERTPOLY` reports
-//! that this build stores one `LWPOLYLINE` representation, so there is nothing
-//! to convert.
+//! `PAGESETUP` / `-PAGESETUP` with no payload report each layout's stored
+//! `PLOTSETTINGS` record through `DrawingDatabase::plot_settings` (paper
+//! name/size, rotation, custom scale, plot type, paper units and provenance).
+//! With a `CommandPayload::Layout(PageSetup | PageSetupIn)` they are real
+//! writes: one revision and one undo step through
+//! `Application::page_setup_write` (`cad-db`'s `set_plot_settings`).
+//! `PSETUPIN` / `-PSETUPIN` always take the write path and require that payload.
+//! `CONVERTPOLY` reports that this build stores one `LWPOLYLINE`
+//! representation, so there is nothing to convert.
 //!
-//! None opens a transaction, bumps the revision or records history; all are
-//! Viewer-legal. Every mutation form is a named refusal in the sibling module.
+//! The report form opens no transaction, bumps no revision and records no
+//! history; the write form is Work-only.
 
 use super::*;
 use crate::app_reports_ext::{diagnostic, report_outcome};
 use crate::app_utility::require_none_payload;
 
 impl Application {
-    /// Dispatch one Wave 13 report.
+    /// Dispatch one Wave 13 report/write.
     pub(crate) fn extended_w13_reports(
         &mut self,
         _session: &mut SessionState,
@@ -23,8 +27,22 @@ impl Application {
     ) -> CadResult<CommandOutcome> {
         match ext {
             ExtendedCommandId::PageSetup | ExtendedCommandId::DashPageSetup => {
-                self.page_setup_report(command, ext.selector())
+                match &command.payload {
+                    CommandPayload::Layout(payload) => {
+                        self.page_setup_write(command, payload.as_ref())
+                    }
+                    _ => self.page_setup_report(command, ext.selector()),
+                }
             }
+            ExtendedCommandId::PageSetupIn | ExtendedCommandId::DashPageSetupIn => match &command
+                .payload
+            {
+                CommandPayload::Layout(payload) => self.page_setup_write(command, payload.as_ref()),
+                _ => Err(CadError::InvalidInput(format!(
+                    "{} needs a Layout(PageSetupIn) payload",
+                    ext.selector()
+                ))),
+            },
             ExtendedCommandId::ConvertPoly => self.convert_poly_report(command),
             other => Err(CadError::Invariant(format!(
                 "not a Wave 13 report: {}",
@@ -70,8 +88,8 @@ impl Application {
         rows.push(diagnostic(
             "pagesetup.report_only",
             format!(
-                "{name}: read-only report; changing the plot device, paper size, scale or \
-                 rotation is NOT IMPLEMENTED (no post-import PLOTSETTINGS write API)"
+                "{name}: read-only report; use the typed PAGESETUP <layout> <paper> <width> \
+                 <height> [<num>:<den>] [0|90|180|270] form to write a page setup"
             ),
         ));
         Ok(report_outcome(rows))

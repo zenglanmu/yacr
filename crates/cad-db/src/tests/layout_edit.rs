@@ -484,3 +484,123 @@ fn apply_layout_changes_may_update_but_never_creates_layout_zero() {
         .expect("updating the existing synthetic model row is allowed");
     assert_eq!(with_model.revision(), Revision(model_start.0 + 1));
 }
+
+#[test]
+fn set_plot_settings_upserts_one_revision_and_round_trips_through_layout_changes() {
+    let mut db = layout_db();
+    let start = db.revision();
+    let mut record = plot_record(2, "  ISO_A3  ");
+    record.provenance = PlotProvenance::Authored;
+    record.rotation = PlotRotation::Degrees90;
+
+    let changes = db
+        .set_plot_settings(LayoutId(2), record.clone(), TransactionId(9), "pagesetup")
+        .expect("a valid authored page setup is stored");
+    assert_eq!(db.revision(), Revision(start.0 + 1), "one revision bump");
+    assert_eq!(changes.before, start);
+    assert_eq!(changes.after, db.revision());
+    assert!(
+        changes.changes.is_empty(),
+        "a layout edit changes no entities"
+    );
+    let stored = db
+        .plot_settings(LayoutId(2))
+        .expect("layout 2 now has a stored page setup")
+        .clone();
+    assert_eq!(
+        stored.paper_size_name, "ISO_A3",
+        "the name is stored trimmed"
+    );
+    assert_eq!(stored.provenance, PlotProvenance::Authored);
+    assert_eq!(stored.rotation, PlotRotation::Degrees90);
+
+    // The authored row round-trips through the undo/redo apply entry: removing
+    // it restores "no stored page setup", re-adding it restores the same record.
+    let with_plot = row_of(&db, LayoutId(2));
+    db.apply_layout_changes(
+        "undo pagesetup",
+        TransactionId(10),
+        &[(LayoutId(2), Some(row(2, "Layout2", None)))],
+    )
+    .expect("removing the plot row is a legal layout batch");
+    assert!(db.plot_settings(LayoutId(2)).is_none());
+    db.apply_layout_changes(
+        "redo pagesetup",
+        TransactionId(11),
+        &[(LayoutId(2), Some(with_plot))],
+    )
+    .expect("restoring the authored plot row is a legal layout batch");
+    assert_eq!(db.plot_settings(LayoutId(2)), Some(&stored));
+}
+
+#[test]
+fn set_plot_settings_refuses_unknown_layout_bad_paper_and_bad_scale() {
+    let mut db = layout_db();
+    let start = db.revision();
+
+    let unknown = db
+        .set_plot_settings(
+            LayoutId(99),
+            plot_record(99, "A4"),
+            TransactionId(1),
+            "pagesetup",
+        )
+        .expect_err("an unknown layout is refused");
+    assert!(
+        unknown.to_string().contains("layout.unknown_id"),
+        "{unknown}"
+    );
+
+    let mismatched = db
+        .set_plot_settings(
+            LayoutId(2),
+            plot_record(1, "A4"),
+            TransactionId(1),
+            "pagesetup",
+        )
+        .expect_err("the record key must match the layout");
+    assert!(
+        mismatched.to_string().contains("layout.plot_mismatch"),
+        "{mismatched}"
+    );
+
+    let empty_paper = db
+        .set_plot_settings(
+            LayoutId(2),
+            plot_record(2, "   "),
+            TransactionId(1),
+            "pagesetup",
+        )
+        .expect_err("a blank paper name is refused");
+    assert!(
+        empty_paper.to_string().contains("layout.invalid_paper"),
+        "{empty_paper}"
+    );
+
+    let mut zero_width = plot_record(2, "A4");
+    zero_width.paper_width = 0.0;
+    let zero_width = db
+        .set_plot_settings(LayoutId(2), zero_width, TransactionId(1), "pagesetup")
+        .expect_err("zero paper width is refused");
+    assert!(
+        zero_width.to_string().contains("layout.invalid_paper"),
+        "{zero_width}"
+    );
+
+    let mut zero_scale = plot_record(2, "A4");
+    zero_scale.scale_denominator = 0.0;
+    let zero_scale = db
+        .set_plot_settings(LayoutId(2), zero_scale, TransactionId(1), "pagesetup")
+        .expect_err("a zero scale denominator is refused");
+    assert!(
+        zero_scale.to_string().contains("layout.invalid_scale"),
+        "{zero_scale}"
+    );
+
+    assert_eq!(
+        db.revision(),
+        start,
+        "every refusal leaves the revision alone"
+    );
+    assert!(db.plot_settings(LayoutId(2)).is_none());
+}

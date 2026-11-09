@@ -473,6 +473,10 @@ impl PlotMargins {
 pub enum PlotProvenance {
     /// Read from a PLOTSETTINGS object or the layout's embedded plot data.
     Imported,
+    /// Authored at runtime by this build (`PAGESETUP`, `PSETUPIN`,
+    /// `LAYOUTWIZARD`): the values were written deliberately, not read from the
+    /// file and not a fallback.
+    Authored,
     /// No plot settings were present; the page is an explicit fallback.
     DefaultPage {
         /// Machine-stable reason the fallback was used.

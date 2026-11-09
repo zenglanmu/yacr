@@ -246,6 +246,72 @@ impl DrawingDatabase {
         Ok(self.publish_layout_change(transaction, reason))
     }
 
+    /// Store one validated page setup for an existing layout.
+    ///
+    /// This is the post-import `PAGESETUP`/`PSETUPIN`/`LAYOUTWIZARD` write path:
+    /// the record replaces (or creates) the layout's plot settings row exactly as
+    /// given and raises the revision once with an empty [`ChangeSet`], matching
+    /// [`Self::set_layout_viewports`] and [`Self::publish_layout_change`].
+    ///
+    /// Validation (nothing mutates until all of it passes): the layout exists;
+    /// `record.layout` is that layout; the paper name is non-empty after
+    /// trimming (it is stored trimmed); paper width/height are finite and
+    /// strictly positive; the custom-scale numerator/denominator are finite and
+    /// strictly positive. Rotation, plot type and paper units are already typed
+    /// enums, so they need no extra check.
+    pub fn set_plot_settings(
+        &mut self,
+        id: LayoutId,
+        record: PlotSettingsRecord,
+        transaction: TransactionId,
+        reason: &str,
+    ) -> CadResult<ChangeSet> {
+        // Phase 1: validate.
+        if !self.layouts.contains_key(&id) {
+            return Err(unknown_layout(id));
+        }
+        if record.layout != id {
+            return Err(CadError::Invariant(format!(
+                "layout.plot_mismatch: plot settings for layout {:?} are keyed to layout {:?}",
+                id, record.layout
+            )));
+        }
+        let paper_name = record.paper_size_name.trim().to_string();
+        if paper_name.is_empty() {
+            return Err(CadError::InvalidInput(format!(
+                "layout.invalid_paper: layout {} needs a non-empty paper-size name",
+                id.0
+            )));
+        }
+        if !record.paper_width.is_finite()
+            || !record.paper_height.is_finite()
+            || record.paper_width <= 0.0
+            || record.paper_height <= 0.0
+        {
+            return Err(CadError::InvalidInput(format!(
+                "layout.invalid_paper: paper width and height of layout {} must be finite and > 0",
+                id.0
+            )));
+        }
+        if !record.scale_numerator.is_finite()
+            || !record.scale_denominator.is_finite()
+            || record.scale_numerator <= 0.0
+            || record.scale_denominator <= 0.0
+        {
+            return Err(CadError::InvalidInput(format!(
+                "layout.invalid_scale: the scale of layout {} must be finite and > 0",
+                id.0
+            )));
+        }
+
+        // Phase 2: mutate. The name is stored trimmed, exactly like a layout
+        // name in `create_layout`/`install_layout_row`.
+        let mut record = record;
+        record.paper_size_name = paper_name;
+        self.plot_settings.insert(id, record);
+        Ok(self.publish_layout_change(transaction, reason))
+    }
+
     /// Apply a layout-only batch as **one** revision and **one** [`ChangeSet`].
     ///
     /// This is the undo/redo apply entry: `changes` maps a layout id to its new

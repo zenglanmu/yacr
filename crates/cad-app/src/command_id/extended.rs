@@ -31,10 +31,11 @@
 //!   `write_unsupported` diagnostic, never an invented value.
 //! * **Named refusals** (`HYPERLINKOPTIONS`, `INPUTSEARCHOPTIONS`,
 //!   `-INPUTSEARCHOPTIONS`, `SIGVALIDATE`, `BASE`, `LIMITS`,
-//!   `VIEWPLOTDETAILS`, `VPLAYER`, `MVIEW`, `PSBSCALE`, `PSTSCALE`,
+//!   `VIEWPLOTDETAILS`, `VPLAYER`, `PSBSCALE`, `PSTSCALE`,
 //!   `MVSETUP`): `CadError::Unsupported` with a stable reason string, because
 //!   the feature has no storage model or no API in this build. A refusal writes
-//!   nothing, bumps no revision and records no history.
+//!   nothing, bumps no revision and records no history. (`MVIEW` graduated to a
+//!   real Wave 13 viewport write and is no longer a refusal.)
 //!
 //! # Wave 3 (2026-11-09)
 //!
@@ -214,7 +215,8 @@ pub enum ExtendedCommandId {
     ViewPlotDetails,
     /// `VPLAYER`: no per-viewport layer state.
     VPlayer,
-    /// `MVIEW`: no viewport creation API.
+    /// `MVIEW`: append one rectangular paper viewport to the active layout from
+    /// a two-corner `Points` payload (Work-only write).
     MView,
     /// `PSBSCALE`: no viewport scale write API.
     PsbScale,
@@ -757,13 +759,17 @@ pub enum ExtendedCommandId {
     Script,
 
     // Wave 13: 2D/annotation/table/page-setup surfaces.
-    /// `PAGESETUP`: read-only report of each layout's stored plot settings; the page-setup dialog is NOT IMPLEMENTED.
+    /// `PAGESETUP`: with no payload, report each layout's stored plot settings;
+    /// with a typed `Layout(PageSetup)` payload, write one authored page setup
+    /// (Work-only).
     PageSetup,
-    /// `-PAGESETUP`: the command-line spelling of the same plot-settings report.
+    /// `-PAGESETUP`: the command-line spelling of the same report/write.
     DashPageSetup,
-    /// `PSETUPIN`: importing a page setup from another drawing is NOT IMPLEMENTED.
+    /// `PSETUPIN`: with a typed `Layout(PageSetupIn)` payload, copy a stored page
+    /// setup between layouts of this drawing (Work-only); there is no
+    /// cross-drawing transfer in this build.
     PageSetupIn,
-    /// `-PSETUPIN`: the command-line spelling of the unsupported page-setup import.
+    /// `-PSETUPIN`: the command-line spelling of the same page-setup copy.
     DashPageSetupIn,
     /// `PLOTSTYLE`: named plot styles are NOT IMPLEMENTED (no CTB/STB table).
     PlotStyleList,

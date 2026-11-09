@@ -814,7 +814,7 @@ fn vpscale_refuses_invalid_scales_before_writing() {
 }
 
 #[test]
-fn layoutwizard_creates_the_layout_and_reports_the_unapplied_paper_setup() {
+fn layoutwizard_creates_the_layout_and_applies_the_paper_setup() {
     let (mut app, mut session) = standard_fixture();
     let before = revision(&app);
     let outcome = app
@@ -835,15 +835,18 @@ fn layoutwizard_creates_the_layout_and_reports_the_unapplied_paper_setup() {
         .expect("LAYOUTWIZARD creates the layout");
     assert_eq!(
         codes(&outcome),
-        vec!["layout.created", "layoutwizard.paper_not_applied"]
+        vec!["layout.created", "layoutwizard.paper_applied"]
     );
     assert!(outcome.diagnostics[1].message.contains("A4"));
     assert_eq!(revision(&app), Revision(before.0 + 1), "one undo step");
     assert!(drawing(&app).layout(LayoutId(3)).is_some());
-    assert!(
-        drawing(&app).plot_settings(LayoutId(3)).is_none(),
-        "page setup is still not modeled"
-    );
+    let stored = drawing(&app)
+        .plot_settings(LayoutId(3))
+        .expect("the wizard wrote the authored page setup");
+    assert_eq!(stored.layout, LayoutId(3));
+    assert_eq!(stored.paper_size_name, "A4");
+    assert_eq!((stored.paper_width, stored.paper_height), (210.0, 297.0));
+    assert_eq!(stored.provenance, cad_db::PlotProvenance::Authored);
 
     undo(&mut app, &mut session);
     assert!(drawing(&app).layout(LayoutId(3)).is_none());

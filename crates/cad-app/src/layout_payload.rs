@@ -6,6 +6,7 @@
 //! switches space, or performs the one-transaction layout/viewport write
 //! documented in [`crate::command_id::layout`].
 
+use cad_db::PlotRotation;
 use cad_domain::Point3;
 
 /// One typed layout / viewport command input.
@@ -29,12 +30,35 @@ pub enum LayoutPayload {
     /// target and delete the source layout in one combined revision/undo step.
     Merge { source: String, target: String },
     /// `LAYOUTWIZARD <name> [<paper> <width> <height>]`: validate the name and
-    /// paper numbers, create the layout, and report that the page setup was not
-    /// applied (page setup is still not modeled).
+    /// paper numbers, create the layout, and (when a paper setup is supplied)
+    /// write one authored `PLOTSETTINGS` row in the same revision and undo step.
     Wizard {
         name: String,
         paper: Option<PaperSetup>,
     },
+    /// `PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]`:
+    /// write one authored page setup for an existing layout as one revision and
+    /// one undo step.
+    ///
+    /// Grammar boundary: `<layout>` is the whole first token (so a layout name
+    /// with a space is not addressable through this typed form); `<paper>` is
+    /// one token; the width/height are millimetres. `scale` is `None` for the
+    /// default `1:1`; rotation is one of the four typed quarter turns.
+    PageSetup {
+        layout: String,
+        paper: PaperSetup,
+        scale: Option<(f64, f64)>,
+        rotation: PlotRotation,
+    },
+    /// `PSETUPIN <source-layout> <target-layout>`: copy a **stored** page setup
+    /// from one layout of this drawing to another (same-drawing import; there is
+    /// no cross-drawing transfer in this build).
+    ///
+    /// The source must carry a stored `PLOTSETTINGS` row: the A4 fallback is
+    /// never synthesized into a real record (`psetupin.no_source`). The copied
+    /// record is re-keyed to the target and marked
+    /// [`cad_db::PlotProvenance::Authored`].
+    PageSetupIn { source: String, target: String },
     /// `VPORTS <rows> <cols>`: build a real `rows * cols` viewport grid in the
     /// active paper layout as one reversible write.
     Viewports { rows: u32, cols: u32 },
@@ -50,13 +74,13 @@ pub enum LayoutPayload {
     FreezeViewportLayers { layers: Vec<String> },
 }
 
-/// The optional page setup of `LAYOUTWIZARD <name> <paper> <width> <height>`.
+/// The page setup of `PAGESETUP` / `LAYOUTWIZARD`.
 ///
 /// `name` is the paper-size name the caller typed (for example `A4`); the
-/// numeric fields are **positive finite** paper dimensions. This build can
-/// **read** the imported [`cad_db::PlotSettingsRecord`] but has no page-setup
-/// write API, so the parsed setup is validated and then reported as not applied
-/// (`layoutwizard.paper_not_applied`) instead of being written.
+/// numeric fields are **positive finite** paper dimensions in millimetres. The
+/// parsed setup is written to the drawing as an authored
+/// [`cad_db::PlotSettingsRecord`] ([`cad_db::PlotProvenance::Authored`]), never
+/// as an imported or fallback record.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaperSetup {
     pub name: String,

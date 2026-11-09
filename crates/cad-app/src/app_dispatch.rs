@@ -75,7 +75,6 @@ impl Application {
             | ExtendedCommandId::DrawingLimits
             | ExtendedCommandId::ViewPlotDetails
             | ExtendedCommandId::VPlayer
-            | ExtendedCommandId::MView
             | ExtendedCommandId::PsbScale
             | ExtendedCommandId::PstScale
             | ExtendedCommandId::MvSetup => self.extended_refusal(command, ext)?,
@@ -365,13 +364,15 @@ impl Application {
             | ExtendedCommandId::VbaRun
             | ExtendedCommandId::VbaUnload
             | ExtendedCommandId::Script => self.extended_w12_refusals(command, ext)?,
-            // Wave 13: 2D/annotation/table/page-setup reports and refusals.
+            // Wave 13: page-setup writes/reports, the MVIEW viewport write, and
+            // read-only conversion reports.
+            ExtendedCommandId::MView => self.mview(session, command)?,
             ExtendedCommandId::PageSetup
             | ExtendedCommandId::DashPageSetup
-            | ExtendedCommandId::ConvertPoly => self.extended_w13_reports(session, command, ext)?,
-            ExtendedCommandId::PageSetupIn
+            | ExtendedCommandId::PageSetupIn
             | ExtendedCommandId::DashPageSetupIn
-            | ExtendedCommandId::PlotStyleList
+            | ExtendedCommandId::ConvertPoly => self.extended_w13_reports(session, command, ext)?,
+            ExtendedCommandId::PlotStyleList
             | ExtendedCommandId::DashPlotStyleList
             | ExtendedCommandId::ConvertPlotStyles
             | ExtendedCommandId::ConvertCtb

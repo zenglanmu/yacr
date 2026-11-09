@@ -3,20 +3,23 @@
 //! The **read** commands (`LAYOUT LIST`, `LAYOUT SET`, `VPMAX`, `VPMIN`) are
 //! real, and so are the table/viewport **writes** promoted now that `cad-db`
 //! owns the sanctioned post-import layout write paths: `LAYOUT NEW|RENAME|DELETE`,
-//! `LAYOUTMERGE`, `LAYOUTWIZARD`, `VPORTS`/`-VPORTS`, `VPCLIP RECT` and
-//! `VPSCALE` each publish exactly one revision and one undo step. `LAYVPI` stays
-//! a named refusal because this build still has no per-viewport layer state; the
-//! full boundary is in [`crate::command_id::layout`].
+//! `LAYOUTMERGE`, `LAYOUTWIZARD` (including its optional authored page setup),
+//! `MVIEW`, `VPORTS`/`-VPORTS`, `VPCLIP RECT` and `VPSCALE` each publish exactly
+//! one revision and one undo step. The typed `PAGESETUP`/`PSETUPIN` writes live
+//! here too (`page_setup_write`). `LAYVPI` stays a named refusal because this
+//! build still has no per-viewport layer state; the full boundary is in
+//! [`crate::command_id::layout`].
 
 use super::*;
 
-use cad_db::{DrawingDatabase, PaperViewport};
+use cad_db::{DrawingDatabase, PaperViewport, PlotRotation};
 use cad_history::{drawing_patch, layout_patch, DrawingUndoRecord};
 
 use crate::app_drawing::{layout_row, next_transaction_id};
-
-/// One paper layout row the commands resolve against.
-type LayoutSummary = (LayoutId, String, usize);
+use crate::app_layout_geometry::{clip_center, grid_viewports, resolve_viewport_scale};
+use crate::app_layout_names::{
+    find_layout_named, resolve_layer_name, resolve_layout_name, validate_layout_name, LayoutSummary,
+};
 
 impl Application {
     /// Dispatch one `CommandPayload::Layout` input.
@@ -271,26 +274,75 @@ impl Application {
             }
             LayoutPayload::Wizard { name, paper } => {
                 let name = validate_layout_name(name)?;
-                if let Some(paper) = paper {
-                    validate_paper_setup(paper)?;
+                let document_id = command.document;
+                let drawing = self.drawing(document_id)?.clone();
+                if find_layout_named(&drawing, &name, None).is_some() {
+                    return Err(CadError::InvalidInput(format!(
+                        "layout.duplicate_name: a layout named {:?} already exists",
+                        name
+                    )));
                 }
-                let outcome =
-                    self.create_layout_with_name(command, &name, "layoutwizard", "layout.created")?;
-                let Some(paper) = paper else {
-                    return Ok(outcome);
+                let transaction = next_transaction_id();
+                let mut candidate = drawing;
+                // Allocate the same monotonic id `create_layout` would, then
+                // install the row and its optional authored page setup in a
+                // **single** revision through the validated batch entry, so a
+                // wizard run with a paper setup is still one undo step.
+                let id = LayoutId(candidate.next_layout_id().0.max(1));
+                let plot = match &paper {
+                    Some(paper) => Some(authored_plot_record(
+                        id,
+                        paper,
+                        None,
+                        PlotRotation::None,
+                        "layoutwizard",
+                    )?),
+                    None => None,
                 };
-                let mut outcome = outcome;
-                outcome.diagnostics.push(Diagnostic {
+                let row = cad_db::LayoutRow {
+                    layout: cad_db::Layout {
+                        id,
+                        name: name.clone(),
+                        viewports: Vec::new(),
+                    },
+                    plot,
+                };
+                let change_set = candidate.apply_layout_changes(
+                    "layoutwizard",
+                    transaction,
+                    &[(id, Some(row))],
+                )?;
+                let after = layout_row(&candidate, id);
+                self.publish_layout_record(
+                    document_id,
+                    candidate,
+                    transaction,
+                    "layoutwizard",
+                    vec![layout_patch(id, None, after)],
+                )?;
+                let mut diagnostics = vec![Diagnostic {
                     object: None,
-                    code: "layoutwizard.paper_not_applied".into(),
-                    message: format!(
-                        "LAYOUTWIZARD: created layout {:?} but did not apply page setup {} \
-                         ({} x {}); page setup is still not modeled, so no plot settings were \
-                         written",
-                        name, paper.name, paper.width, paper.height
-                    ),
-                });
-                Ok(outcome)
+                    code: "layout.created".into(),
+                    message: format!("LAYOUT: created layout {} ({:?})", id.0, name),
+                }];
+                if let Some(paper) = &paper {
+                    diagnostics.push(Diagnostic {
+                        object: None,
+                        code: "layoutwizard.paper_applied".into(),
+                        message: format!(
+                            "LAYOUTWIZARD: applied authored page setup {} ({} x {} mm, scale \
+                             1:1, rotation 0) to layout {}",
+                            paper.name, paper.width, paper.height, id.0
+                        ),
+                    });
+                }
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: Some(Arc::new(change_set)),
+                    diagnostics,
+                    measurement: None,
+                    point_report: None,
+                })
             }
             LayoutPayload::Viewports { rows, cols } => {
                 if *rows < 1 || *cols < 1 {
@@ -517,13 +569,19 @@ impl Application {
                         .into(),
                 ))
             }
+            // Page setup has its own handler (`page_setup_write`), routed by the
+            // extended dispatch; these arms keep the enum match exhaustive
+            // without inventing a second behaviour here.
+            LayoutPayload::PageSetup { .. } | LayoutPayload::PageSetupIn { .. } => {
+                self.page_setup_write(command, payload.as_ref())
+            }
         }
     }
 
     /// Create one layout row and record it as one undo step.
     ///
-    /// Shared by `LAYOUT NEW` and `LAYOUTWIZARD` so both name grammar checks,
-    /// the duplicate check, the revision and the recorded patch shape exist once.
+    /// The `LAYOUT NEW` create path (the wizard uses its own combined
+    /// create-plus-page-setup batch so both land in one revision).
     fn create_layout_with_name(
         &mut self,
         command: &Command,
@@ -558,6 +616,234 @@ impl Application {
                 code: diagnostic_code.into(),
                 message: format!("LAYOUT: created layout {} ({:?})", id.0, name),
             }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+
+    /// Apply one typed `PAGESETUP`/`PSETUPIN` write.
+    ///
+    /// Both forms store the result through
+    /// [`cad_db::DrawingDatabase::set_plot_settings`] (one revision) and record
+    /// exactly one [`cad_db::LayoutPatch`], so the previous plot row is restored
+    /// exactly by UNDO and re-applied by REDO.
+    pub(crate) fn page_setup_write(
+        &mut self,
+        command: &Command,
+        payload: &LayoutPayload,
+    ) -> CadResult<CommandOutcome> {
+        match payload {
+            LayoutPayload::PageSetup {
+                layout,
+                paper,
+                scale,
+                rotation,
+            } => {
+                let document_id = command.document;
+                let drawing = self.drawing(document_id)?.clone();
+                let (id, resolved, _) = resolve_layout_name(&drawing, layout)?;
+                let record = authored_plot_record(id, paper, *scale, *rotation, "pagesetup")?;
+                let before = layout_row(&drawing, id);
+                let transaction = next_transaction_id();
+                let mut candidate = drawing;
+                let change_set =
+                    candidate.set_plot_settings(id, record.clone(), transaction, "pagesetup")?;
+                let after = layout_row(&candidate, id);
+                self.publish_layout_record(
+                    document_id,
+                    candidate,
+                    transaction,
+                    "pagesetup",
+                    vec![layout_patch(id, before, after)],
+                )?;
+                let (width, height) = record.rotated_size();
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: Some(Arc::new(change_set)),
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "pagesetup.applied".into(),
+                        message: format!(
+                            "PAGESETUP: applied authored page setup '{}' ({} x {} {:?} after \
+                             rotation) scale {}:{} rotation {}° to layout {} ({:?})",
+                            record.paper_size_name,
+                            width,
+                            height,
+                            record.paper_units,
+                            record.scale_numerator,
+                            record.scale_denominator,
+                            record.rotation.to_degrees(),
+                            id.0,
+                            resolved
+                        ),
+                    }],
+                    measurement: None,
+                    point_report: None,
+                })
+            }
+            LayoutPayload::PageSetupIn { source, target } => {
+                let document_id = command.document;
+                let drawing = self.drawing(document_id)?.clone();
+                let (source_id, source_name, _) = resolve_layout_name(&drawing, source)?;
+                let (target_id, target_name, _) = resolve_layout_name(&drawing, target)?;
+                // Only a stored record is importable. The A4 fallback is a
+                // documented convenience for readers and is never promoted to a
+                // real page setup.
+                let mut record = drawing.plot_settings(source_id).cloned().ok_or_else(|| {
+                    CadError::InvalidInput(format!(
+                        "psetupin.no_source: layout {} ({:?}) stores no PLOTSETTINGS record to \
+                         import; the default page is not synthesized",
+                        source_id.0, source_name
+                    ))
+                })?;
+                record.layout = target_id;
+                record.provenance = cad_db::PlotProvenance::Authored;
+                let before = layout_row(&drawing, target_id);
+                let transaction = next_transaction_id();
+                let mut candidate = drawing;
+                let change_set =
+                    candidate.set_plot_settings(target_id, record, transaction, "psetupin")?;
+                let after = layout_row(&candidate, target_id);
+                self.publish_layout_record(
+                    document_id,
+                    candidate,
+                    transaction,
+                    "psetupin",
+                    vec![layout_patch(target_id, before, after)],
+                )?;
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: Some(Arc::new(change_set)),
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "psetupin.applied".into(),
+                        message: format!(
+                            "PSETUPIN: copied the stored page setup of layout {} ({:?}) to \
+                             layout {} ({:?}) as an authored record",
+                            source_id.0, source_name, target_id.0, target_name
+                        ),
+                    }],
+                    measurement: None,
+                    point_report: None,
+                })
+            }
+            _ => Err(CadError::InvalidInput(
+                "pagesetup.invalid_payload: PAGESETUP/PSETUPIN need a \
+                 Layout(PageSetup|PageSetupIn) payload"
+                    .into(),
+            )),
+        }
+    }
+
+    /// Create one paper viewport from a typed two-corner rectangle.
+    ///
+    /// The rectangle is a paper-space axis-aligned `min`/`max` pair (not
+    /// canonicalised: the caller must give `minx < maxx` and `miny < maxy`). The
+    /// new viewport is appended to the active layout's existing viewports with a
+    /// four-corner clip, `Completeness::Complete`, unit scale and the same
+    /// `anchor - paper_center` translation convention as `VPORTS`.
+    pub(crate) fn mview(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let layout_id = require_paper_space(session, "mview")?;
+        let CommandPayload::Points(points) = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "mview.invalid_rect: MVIEW needs exactly two corner points".into(),
+            ));
+        };
+        let [min, max] = points.as_slice() else {
+            return Err(CadError::InvalidInput(
+                "mview.invalid_rect: MVIEW needs exactly two corner points".into(),
+            ));
+        };
+        if !min.x.is_finite()
+            || !min.y.is_finite()
+            || !max.x.is_finite()
+            || !max.y.is_finite()
+            || min.x >= max.x
+            || min.y >= max.y
+        {
+            return Err(CadError::InvalidInput(
+                "mview.invalid_rect: MVIEW needs finite minx < maxx and miny < maxy".into(),
+            ));
+        }
+        let document_id = command.document;
+        let drawing = self.drawing(document_id)?.clone();
+        let mut viewports = layout_viewports(&drawing, layout_id)?;
+        let paper_center = Point3 {
+            x: (min.x + max.x) * 0.5,
+            y: (min.y + max.y) * 0.5,
+            z: 0.0,
+        };
+        let mut matrix = Transform3::identity().matrix;
+        matrix[0][0] = 1.0;
+        matrix[1][1] = 1.0;
+        matrix[0][3] = -paper_center.x;
+        matrix[1][3] = -paper_center.y;
+        let clip = vec![
+            Point3 {
+                x: min.x,
+                y: min.y,
+                z: 0.0,
+            },
+            Point3 {
+                x: max.x,
+                y: min.y,
+                z: 0.0,
+            },
+            Point3 {
+                x: max.x,
+                y: max.y,
+                z: 0.0,
+            },
+            Point3 {
+                x: min.x,
+                y: max.y,
+                z: 0.0,
+            },
+        ];
+        viewports.push(PaperViewport {
+            clip,
+            model_to_paper: Transform3 { matrix },
+            completeness: Completeness::Complete,
+        });
+        let index = viewports.len() - 1;
+        let before = layout_row(&drawing, layout_id);
+        let transaction = next_transaction_id();
+        let mut candidate = drawing;
+        let change_set =
+            candidate.set_layout_viewports(layout_id, viewports, transaction, "mview")?;
+        let after = layout_row(&candidate, layout_id);
+        self.publish_layout_record(
+            document_id,
+            candidate,
+            transaction,
+            "mview",
+            vec![layout_patch(layout_id, before, after)],
+        )?;
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: Some(Arc::new(change_set)),
+            diagnostics: vec![
+                Diagnostic {
+                    object: None,
+                    code: "mview.created".into(),
+                    message: format!(
+                        "MVIEW: appended viewport {index} to layout {} with the paper rectangle \
+                         ({}, {})-({}, {})",
+                        layout_id.0, min.x, min.y, max.x, max.y
+                    ),
+                },
+                Diagnostic {
+                    object: None,
+                    code: "mview.no_holes".into(),
+                    message: "MVIEW: the created viewport is one four-corner rectangle with no \
+                              holes; polygonal clips and viewport holes are NOT IMPLEMENTED"
+                        .into(),
+                },
+            ],
             measurement: None,
             point_report: None,
         })
@@ -608,283 +894,57 @@ fn layout_viewports(
         })
 }
 
-/// The centre of a viewport clip's axis-aligned paper rectangle.
-fn clip_center(clip: &[Point3]) -> Option<Point3> {
-    let mut min_x = f64::INFINITY;
-    let mut min_y = f64::INFINITY;
-    let mut max_x = f64::NEG_INFINITY;
-    let mut max_y = f64::NEG_INFINITY;
-    for point in clip {
-        if !point.x.is_finite() || !point.y.is_finite() {
-            return None;
-        }
-        min_x = min_x.min(point.x);
-        min_y = min_y.min(point.y);
-        max_x = max_x.max(point.x);
-        max_y = max_y.max(point.y);
+/// Build the authored `PLOTSETTINGS` row the page-setup writes store.
+///
+/// `prefix` is the stable diagnostic namespace of the caller (`pagesetup` or
+/// `layoutwizard`). Every field not carried by the grammar uses the documented
+/// authored default: zero margins, `PlotType::Layout`, millimetre paper units and
+/// `PlotProvenance::Authored` (never `Imported`/`DefaultPage`).
+fn authored_plot_record(
+    layout: LayoutId,
+    paper: &PaperSetup,
+    scale: Option<(f64, f64)>,
+    rotation: PlotRotation,
+    prefix: &str,
+) -> CadResult<cad_db::PlotSettingsRecord> {
+    validate_paper_setup(paper, prefix)?;
+    let (numerator, denominator) = scale.unwrap_or((1.0, 1.0));
+    if !numerator.is_finite() || !denominator.is_finite() || numerator <= 0.0 || denominator <= 0.0
+    {
+        return Err(CadError::InvalidInput(format!(
+            "{prefix}.invalid_scale: the page-setup scale must be finite and > 0"
+        )));
     }
-    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
-        return None;
-    }
-    Some(Point3 {
-        x: (min_x + max_x) * 0.5,
-        y: (min_y + max_y) * 0.5,
-        z: 0.0,
+    Ok(cad_db::PlotSettingsRecord {
+        layout,
+        paper_size_name: paper.name.trim().to_string(),
+        paper_width: paper.width,
+        paper_height: paper.height,
+        margins: cad_db::PlotMargins::default(),
+        rotation,
+        scale_numerator: numerator,
+        scale_denominator: denominator,
+        plot_type: cad_db::PlotType::Layout,
+        paper_units: cad_db::PlotPaperUnits::Millimeters,
+        provenance: cad_db::PlotProvenance::Authored,
     })
 }
 
-/// Build a `rows x cols` grid of axis-aligned viewports covering the sheet.
-///
-/// The cells are equal, cover the sheet from its own origin, and each clip is the
-/// four paper corners `(minx,miny)`, `(maxx,miny)`, `(maxx,maxy)`, `(minx,maxy)`.
-/// The stored transform follows the importer's paper→model convention with
-/// `model_per_paper = 1.0` and translation `anchor - paper_center`: the model
-/// **origin** is the anchor, so `model_to_paper` maps model origin to each cell
-/// centre. This is a declared simple layout, not an AutoCAD Standard
-/// configuration.
-fn grid_viewports(
-    drawing: &DrawingDatabase,
-    layout_id: LayoutId,
-    rows: u32,
-    cols: u32,
-    total: u32,
-) -> Vec<PaperViewport> {
-    let (width, height) = {
-        let (width, height) = drawing.plot_settings_for(layout_id).rotated_size();
-        if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
-            (width, height)
-        } else {
-            (210.0, 297.0)
-        }
-    };
-    let mut viewports = Vec::with_capacity(total as usize);
-    for row in 0..rows {
-        for col in 0..cols {
-            let min_x = width * f64::from(col) / f64::from(cols);
-            let max_x = width * f64::from(col + 1) / f64::from(cols);
-            let min_y = height * f64::from(row) / f64::from(rows);
-            let max_y = height * f64::from(row + 1) / f64::from(rows);
-            let paper_center = Point3 {
-                x: (min_x + max_x) * 0.5,
-                y: (min_y + max_y) * 0.5,
-                z: 0.0,
-            };
-            // The view centre is the model origin; the stored paper→model
-            // translation is `anchor - paper_center` with a unit scale.
-            let mut matrix = Transform3::identity().matrix;
-            matrix[0][0] = 1.0;
-            matrix[1][1] = 1.0;
-            matrix[0][3] = -paper_center.x;
-            matrix[1][3] = -paper_center.y;
-            viewports.push(PaperViewport {
-                clip: vec![
-                    Point3 {
-                        x: min_x,
-                        y: min_y,
-                        z: 0.0,
-                    },
-                    Point3 {
-                        x: max_x,
-                        y: min_y,
-                        z: 0.0,
-                    },
-                    Point3 {
-                        x: max_x,
-                        y: max_y,
-                        z: 0.0,
-                    },
-                    Point3 {
-                        x: min_x,
-                        y: max_y,
-                        z: 0.0,
-                    },
-                ],
-                model_to_paper: Transform3 { matrix },
-                completeness: Completeness::Complete,
-            });
-        }
-    }
-    viewports
-}
-
-/// Validate a layout name and return the trimmed form.
-fn validate_layout_name(name: &str) -> CadResult<String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(CadError::InvalidInput(
-            "layout.invalid_name: a layout name must not be empty".into(),
-        ));
-    }
-    if name.contains('\r') || name.contains('\n') {
-        return Err(CadError::InvalidInput(
-            "layout.invalid_name: a layout name must be a single line".into(),
-        ));
-    }
-    if name.chars().count() > 255 {
-        return Err(CadError::InvalidInput(
-            "layout.invalid_name: a layout name is limited to 255 characters".into(),
-        ));
-    }
-    if name.chars().any(|ch| "<>/\\\":;?*|=`".contains(ch)) {
-        return Err(CadError::InvalidInput(format!(
-            "layout.invalid_name: layout name {:?} contains an AutoCAD-illegal character",
-            name
-        )));
-    }
-    Ok(name.to_string())
-}
-
-/// Find a layout by name (case-insensitive), excluding `exclude` when renaming.
-fn find_layout_named(
-    drawing: &DrawingDatabase,
-    name: &str,
-    exclude: Option<LayoutId>,
-) -> Option<LayoutId> {
-    drawing
-        .layouts()
-        .filter(|layout| Some(layout.id) != exclude)
-        .find(|layout| layout.name.eq_ignore_ascii_case(name))
-        .map(|layout| layout.id)
-}
-
-/// Resolve a layout name: exact first, then a unique case-insensitive match.
-fn resolve_layout_name(drawing: &DrawingDatabase, name: &str) -> CadResult<LayoutSummary> {
-    let rows: Vec<LayoutSummary> = drawing
-        .layouts()
-        .map(|layout| (layout.id, layout.name.clone(), layout.viewports.len()))
-        .collect();
-    let wanted = name.trim();
-    if let Some(row) = rows
-        .iter()
-        .find(|(_, layout_name, _)| layout_name == wanted)
-    {
-        return Ok((*row).clone());
-    }
-    let matching: Vec<&LayoutSummary> = rows
-        .iter()
-        .filter(|(_, layout_name, _)| layout_name.eq_ignore_ascii_case(wanted))
-        .collect();
-    match matching.as_slice() {
-        [row] => Ok((**row).clone()),
-        [] => Err(CadError::InvalidInput(format!(
-            "layout.unknown: no paper layout named {:?}",
-            wanted
-        ))),
-        _ => Err(CadError::InvalidInput(format!(
-            "layout.ambiguous: more than one layout matches {:?} case-insensitively",
-            wanted
-        ))),
-    }
-}
-
-/// Validate optional `LAYOUTWIZARD` page-setup numbers.
-fn validate_paper_setup(paper: &PaperSetup) -> CadResult<()> {
+/// Validate page-setup name/numbers for one command namespace.
+fn validate_paper_setup(paper: &PaperSetup, prefix: &str) -> CadResult<()> {
     if paper.name.trim().is_empty() {
-        return Err(CadError::InvalidInput(
-            "layoutwizard.invalid_paper: the paper name must not be empty".into(),
-        ));
+        return Err(CadError::InvalidInput(format!(
+            "{prefix}.invalid_paper: the paper name must not be empty"
+        )));
     }
     if !paper.width.is_finite()
         || !paper.height.is_finite()
         || paper.width <= 0.0
         || paper.height <= 0.0
     {
-        return Err(CadError::InvalidInput(
-            "layoutwizard.invalid_paper: paper width and height must be finite and > 0".into(),
-        ));
+        return Err(CadError::InvalidInput(format!(
+            "{prefix}.invalid_paper: paper width and height must be finite and > 0"
+        )));
     }
     Ok(())
-}
-
-/// Resolve a `VPSCALE` argument against the drawing's scale table.
-///
-/// A ratio (`a:b`, both finite, non-zero) is accepted even when the drawing does
-/// not list it; a bare word must resolve through the scale table. Zero and
-/// non-finite values are refused before the table is consulted.
-fn resolve_viewport_scale(drawing: &DrawingDatabase, name: &str) -> CadResult<(String, f64)> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(CadError::InvalidInput(
-            "vpscale.invalid_scale: VPSCALE needs a scale name or ratio".into(),
-        ));
-    }
-    if let Some((paper, drawing_units)) = name.split_once(':') {
-        let paper = paper.trim().parse::<f64>().map_err(|_| {
-            CadError::InvalidInput(format!("vpscale.invalid_scale: {:?} is not a ratio", name))
-        })?;
-        let drawing_units = drawing_units.trim().parse::<f64>().map_err(|_| {
-            CadError::InvalidInput(format!("vpscale.invalid_scale: {:?} is not a ratio", name))
-        })?;
-        if !paper.is_finite() || !drawing_units.is_finite() {
-            return Err(CadError::InvalidInput(
-                "vpscale.non_finite_scale: VPSCALE needs finite ratio components".into(),
-            ));
-        }
-        if paper == 0.0 || drawing_units == 0.0 {
-            return Err(CadError::InvalidInput(
-                "vpscale.zero_scale: VPSCALE ratio components must be non-zero".into(),
-            ));
-        }
-        if paper < 0.0 || drawing_units < 0.0 {
-            return Err(CadError::InvalidInput(
-                "vpscale.invalid_scale: VPSCALE ratio components must be positive".into(),
-            ));
-        }
-        // Prefer the table's named factor when the drawing lists the same scale;
-        // otherwise the parsed ratio is the standard scale the caller asked for.
-        if let Some(scale) = drawing.scale_by_name(name) {
-            return Ok((scale.name.clone(), scale.factor()));
-        }
-        return Ok((name.to_string(), paper / drawing_units));
-    }
-    if let Ok(value) = name.parse::<f64>() {
-        if !value.is_finite() {
-            return Err(CadError::InvalidInput(
-                "vpscale.non_finite_scale: VPSCALE needs a finite scale".into(),
-            ));
-        }
-        if value == 0.0 {
-            return Err(CadError::InvalidInput(
-                "vpscale.zero_scale: VPSCALE needs a non-zero scale".into(),
-            ));
-        }
-        if value < 0.0 {
-            return Err(CadError::InvalidInput(
-                "vpscale.invalid_scale: VPSCALE needs a positive scale".into(),
-            ));
-        }
-    }
-    drawing
-        .scale_by_name(name)
-        .map(|scale| (scale.name.clone(), scale.factor()))
-        .ok_or_else(|| {
-            CadError::InvalidInput(format!(
-                "vpscale.unknown_scale: {:?} is not in the drawing's scale table and is not a \
-                 finite ratio",
-                name
-            ))
-        })
-}
-
-/// Resolve a layer name exactly, then by a unique case-insensitive match.
-fn resolve_layer_name(drawing: &DrawingDatabase, name: &str) -> CadResult<LayerId> {
-    if let Some(id) = drawing.layer_id_by_name(name) {
-        return Ok(id);
-    }
-    let matches: Vec<_> = drawing
-        .layers()
-        .filter(|layer| layer.name.eq_ignore_ascii_case(name))
-        .map(|layer| layer.id)
-        .collect();
-    match matches.as_slice() {
-        [id] => Ok(*id),
-        [] => Err(CadError::InvalidInput(format!(
-            "layvpi.unknown_layer: no layer named {:?}",
-            name
-        ))),
-        _ => Err(CadError::InvalidInput(format!(
-            "layvpi.ambiguous_layer: more than one layer matches {:?} case-insensitively",
-            name
-        ))),
-    }
 }

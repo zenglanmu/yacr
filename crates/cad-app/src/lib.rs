@@ -92,6 +92,8 @@ mod app_extended_w16_refusals;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;
+mod app_layout_geometry;
+mod app_layout_names;
 mod app_layout_session;
 mod app_reports;
 mod app_reports_ext;

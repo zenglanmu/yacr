@@ -15,8 +15,10 @@
 //!   delete also cascades the plot settings and leaves the session on a valid
 //!   space when the deleted layout was active.
 //! * `LAYOUTMERGE` moves every source paper entity and deletes the source row in
-//!   one combined revision. `LAYOUTWIZARD` creates the layout but still does
-//!   **not** model page setup (`layoutwizard.paper_not_applied`).
+//!   one combined revision. `LAYOUTWIZARD` creates the layout and, when the
+//!   optional paper setup is supplied, writes it as one authored
+//!   `PLOTSETTINGS` row in the same revision and undo step
+//!   (`layoutwizard.paper_applied`).
 //! * `VPORTS` creates a declared simple `rows * cols` grid; `VPCLIP RECT` and
 //!   `VPSCALE` edit the **first** viewport because this build has no
 //!   per-viewport selection model. That is a declared narrowing, not a
@@ -28,8 +30,10 @@
 //!
 //! `LAYVPI` stays a named `Unsupported` refusal: this build has no per-viewport
 //! layer state (`layvpi.viewport_layer_state_unsupported`), and it never freezes
-//! the layers globally. Polygonal `VPCLIP` and page setup are likewise not
-//! modeled.
+//! the layers globally. Polygonal `VPCLIP` is likewise not modeled. Page setup
+//! is written by the typed `PAGESETUP`/`PSETUPIN` forms in
+//! [`crate::command_id::extended`]; `MVIEW` appends one rectangular paper
+//! viewport and is documented there.
 //!
 //! `-VPORTS` is a spelling alias of `VPORTS`, not a second command: it
 //! normalizes to the same [`crate::CommandId::Vports`] and the same handler.

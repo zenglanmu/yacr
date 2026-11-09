@@ -59,7 +59,6 @@ fn reason(ext: ExtendedCommandId) -> String {
         ExtendedCommandId::VPlayer => {
             "vplayer.viewport_layer_state_unsupported: no per-viewport layer state"
         }
-        ExtendedCommandId::MView => "mview.viewport_creation_unsupported: no viewport creation API",
         ExtendedCommandId::PsbScale => "psbscale.write_unsupported: no viewport scale write API",
         ExtendedCommandId::PstScale => "pstscale.write_unsupported: no viewport scale write API",
         ExtendedCommandId::MvSetup => "mvsetup.unsupported: no viewport-group model",
