@@ -577,7 +577,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 |---|---|---|---|
 | `DIMSTYLE` | 部分实现 | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles` | `SET <name>` 按 `dimstyle.set_unavailable` 拒绝（只有 builder 写 API）；未知名称 `dimstyle.unknown`；裸命令 `dimstyle.needs_option` |
 | `-DIMSTYLE` | 部分实现 | `DIMSTYLE` 的别名（同一 `CommandId`/路径） | 同上 |
-| `DIMTEDIT` | 部分实现 | 恰好一个选中标注；`MOVE <x> <y>` 写组 11、`ROTATE <degrees>` 写组 53（不归一化，0 = 派生）、`RESET` 复位；一条事务/一步撤销；无变化 `dimtedit.unchanged` | 对齐/倾斜编辑 NOT IMPLEMENTED；无交互文字拖动 |
+| `DIMTEDIT` | 部分实现 | 恰好一个选中标注；`MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 移动锚点并设置字形级 `h_align`（线性/对齐/半径/直径）；一条事务/一步撤销；无变化 `dimtedit.unchanged` | 角/坐标标注 justify、Oblique、交互文字拖动未实现；导入默认 Center、导出不写组 72 |
 | `DIMEDIT` | 部分实现 | 所有选中标注；`TEXT <override>` 逐字存组 1（`<>` 占位，≤1024），`RESET` 删除；一条事务/一步撤销 | 延伸线编辑 NOT IMPLEMENTED；无对话框/逐项确认 |
 | `DIMOVERRIDE` | 部分实现 | 闭集的实体快照变量（`DIMTXT`…`DIMLUNIT`）；一条事务/一步撤销；样式表不改 | 未知变量、仅表变量、坏值、未实现值分别具名拒绝；无对话框 |
 | `DIMREGEN` | 部分实现 | payload-free；本构建非关联，返回 `dimregen.non_associative` 且不改变任何状态 | 不是 AutoCAD 的关联标注重算；无 revision/历史 |

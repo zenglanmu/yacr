@@ -20,7 +20,7 @@ use crate::dimension_synthesis::{
     compute_measurement, is_finite_point, kind_affix, length, normalize, resolve_measurement_text,
     synthesize, SynthesizedDimension,
 };
-use crate::{CadError, CadResult, Mesh, Point3, SemanticGeometry, StyleId, Transform3};
+use crate::{CadError, CadResult, Mesh, Point3, SemanticGeometry, StyleId, TextAlignH, Transform3};
 
 // ---------------------------------------------------------------------------
 // Subtype and definition points (ADR 0017 A.3).
@@ -448,6 +448,15 @@ pub struct DimensionGeometry {
     measurement: f64,
     text_override: Option<String>,
     display: Vec<SemanticGeometry>,
+    /// The glyph-level horizontal alignment of the measurement text.
+    ///
+    /// The anchor (`definition.text_middle`, DXF group 11) and the glyph
+    /// alignment are separate: `DIMTEDIT LEFT|RIGHT|CENTER` moves the anchor
+    /// *and* selects which side of it the glyphs extend from. Synthesis itself
+    /// is centred (AutoCAD's default), so this is `Center` unless an edit sets
+    /// it. Imported dimensions default to `Center`; DXF group 72 is not parsed
+    /// or written by this build (declared).
+    text_h_align: TextAlignH,
     source: DisplaySource,
 }
 
@@ -469,6 +478,7 @@ impl DimensionGeometry {
             text_override.as_deref(),
             prefix,
             suffix,
+            TextAlignH::Center,
         );
         let measurement = synthesized.measurement;
         let mut display = synthesized.children;
@@ -480,6 +490,7 @@ impl DimensionGeometry {
             measurement,
             text_override,
             display,
+            text_h_align: TextAlignH::Center,
             source: DisplaySource::Synthesized,
         })
     }
@@ -503,6 +514,7 @@ impl DimensionGeometry {
             measurement,
             text_override,
             display: members,
+            text_h_align: TextAlignH::Center,
             source: DisplaySource::Picture,
         })
     }
@@ -562,6 +574,7 @@ impl DimensionGeometry {
             measurement,
             text_override: self.text_override.clone(),
             display,
+            text_h_align: self.text_h_align,
             source: self.source,
         })
     }
@@ -602,6 +615,31 @@ impl DimensionGeometry {
         self.text_override.as_deref()
     }
 
+    /// The glyph-level horizontal alignment of the measurement text.
+    ///
+    /// Defaults to [`TextAlignH::Center`] (the synthesis's own placement) and is
+    /// only changed by `DIMTEDIT LEFT|RIGHT|CENTER`.
+    pub fn text_h_align(&self) -> TextAlignH {
+        self.text_h_align
+    }
+
+    /// Return this dimension with another glyph-level horizontal alignment.
+    ///
+    /// The stored anchor (`definition.text_middle`) is **not** moved: callers
+    /// that want AutoCAD's LEFT/RIGHT/CENTER behaviour move the anchor
+    /// themselves and pass the matching alignment here. The display is not
+    /// rebuilt; only the existing `Text` child's `h_align` is rewritten, so
+    /// position/rotation/height/style/font/vertical alignment are unchanged.
+    pub fn with_text_h_align(mut self, h_align: TextAlignH) -> Self {
+        self.text_h_align = h_align;
+        for child in &mut self.display {
+            if let SemanticGeometry::Text { h_align: slot, .. } = child {
+                *slot = h_align;
+            }
+        }
+        self
+    }
+
     /// Rebuild this dimension under another DIMSTYLE snapshot.
     ///
     /// The definition (including the per-entity text middle/rotation), the text
@@ -612,19 +650,26 @@ impl DimensionGeometry {
     /// measurement/style snapshot recomputed.
     pub fn with_style(&self, style_name: String, style: DimensionStyleValues) -> CadResult<Self> {
         match self.source {
-            DisplaySource::Synthesized => Self::synthesized(
+            DisplaySource::Synthesized => Ok(Self::synthesized(
                 self.definition.clone(),
                 style_name,
                 style,
                 self.text_override.clone(),
-            ),
-            DisplaySource::Picture => Self::from_picture(
-                self.definition.clone(),
-                style_name,
-                style,
-                self.text_override.clone(),
-                self.display.clone(),
-            ),
+            )?
+            .with_text_h_align(self.text_h_align)),
+            DisplaySource::Picture => {
+                let mut rebuilt = Self::from_picture(
+                    self.definition.clone(),
+                    style_name,
+                    style,
+                    self.text_override.clone(),
+                    self.display.clone(),
+                )?;
+                // The picture is authoritative for its own text placement; keep
+                // the stored alignment without rewriting the picture's children.
+                rebuilt.text_h_align = self.text_h_align;
+                Ok(rebuilt)
+            }
         }
     }
 }
@@ -636,6 +681,7 @@ pub(crate) fn place_text(
     text_override: Option<&str>,
     prefix: &str,
     suffix: &str,
+    h_align: TextAlignH,
 ) -> SemanticGeometry {
     let explicit = definition.text_middle;
     let position = if length(explicit) > 1e-9 {
@@ -662,7 +708,7 @@ pub(crate) fn place_text(
         height: style.text_height,
         rotation,
         font: style.text_font.clone(),
-        h_align: crate::TextAlignH::Center,
+        h_align,
         v_align: crate::TextAlignV::Middle,
         // Dimension text has no source width boundary.
         wrap_width: None,

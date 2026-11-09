@@ -428,6 +428,117 @@ fn dimtedit_moves_justifies_homes_and_angles_text_in_one_undo_each() {
 }
 
 #[test]
+fn dimtedit_justifies_glyph_alignment_and_undo_redo_restore_it() {
+    let (mut app, mut session) = dimension_edit_app();
+    select(&mut session, &[DIM_A]);
+    let text_align = |app: &Application, id: u128| -> TextAlignH {
+        stored(app, id)
+            .display()
+            .iter()
+            .find_map(|child| match child {
+                SemanticGeometry::Text { h_align, .. } => Some(*h_align),
+                _ => None,
+            })
+            .expect("the dimension has a text child")
+    };
+    // Synthesis centres the glyphs and the fixture stores the default anchor.
+    assert_eq!(stored(&app, DIM_A).text_h_align(), TextAlignH::Center);
+    assert_eq!(text_align(&app, DIM_A), TextAlignH::Center);
+    assert_eq!(undo_depth(&app), 0);
+
+    // LEFT/RIGHT/CENTER set both the anchor and the glyph alignment.
+    for (option, expected_align, expected_x) in [
+        (DimTextEditCommand::Left, TextAlignH::Left, 0.0),
+        (DimTextEditCommand::Right, TextAlignH::Right, 10.0),
+        (DimTextEditCommand::Center, TextAlignH::Center, 5.0),
+    ] {
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::DimTextEdit,
+            text_edit_payload(option),
+        )
+        .unwrap();
+        let dimension = stored(&app, DIM_A);
+        assert_eq!(dimension.text_h_align(), expected_align, "{option:?}");
+        assert_eq!(text_align(&app, DIM_A), expected_align, "{option:?}");
+        let middle = dimension.definition().text_middle;
+        assert!(approx(middle.x, expected_x), "{option:?}: {middle:?}");
+        assert!(approx(middle.y, -5.0), "{option:?}: {middle:?}");
+    }
+
+    // Move/Home/Angle preserve the current alignment (here LEFT).
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::DimTextEdit,
+        text_edit_payload(DimTextEditCommand::Left),
+    )
+    .unwrap();
+    for (option, expected_middle) in [
+        (DimTextEditCommand::Move { x: 3.0, y: 4.0 }, point(3.0, 4.0)),
+        (DimTextEditCommand::Home, point(0.0, 0.0)),
+        (DimTextEditCommand::Angle { degrees: 15.0 }, point(0.0, 0.0)),
+    ] {
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::DimTextEdit,
+            text_edit_payload(option),
+        )
+        .unwrap();
+        let dimension = stored(&app, DIM_A);
+        assert_eq!(dimension.text_h_align(), TextAlignH::Left, "{option:?}");
+        assert_eq!(text_align(&app, DIM_A), TextAlignH::Left, "{option:?}");
+        assert_eq!(
+            dimension.definition().text_middle,
+            expected_middle,
+            "{option:?}"
+        );
+    }
+
+    // One undo step per justify; UNDO restores the previous anchor *and*
+    // alignment, REDO reapplies both.
+    let before_undo = undo_depth(&app);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::DimTextEdit,
+        text_edit_payload(DimTextEditCommand::Center),
+    )
+    .unwrap();
+    assert_eq!(undo_depth(&app), before_undo + 1);
+    assert_eq!(stored(&app, DIM_A).text_h_align(), TextAlignH::Center);
+    assert!(approx(stored(&app, DIM_A).definition().text_middle.x, 5.0));
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    let undone = stored(&app, DIM_A);
+    assert_eq!(undone.text_h_align(), TextAlignH::Left);
+    assert_eq!(text_align(&app, DIM_A), TextAlignH::Left);
+    assert_eq!(undone.definition().text_middle, point(0.0, 0.0));
+    assert_eq!(undo_depth(&app), before_undo);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    let redone = stored(&app, DIM_A);
+    assert_eq!(redone.text_h_align(), TextAlignH::Center);
+    assert_eq!(text_align(&app, DIM_A), TextAlignH::Center);
+    assert!(approx(redone.definition().text_middle.x, 5.0));
+    assert_eq!(undo_depth(&app), before_undo + 1);
+}
+
+#[test]
 fn dimtedit_justifies_radius_and_aligned_but_refuses_ordinate_by_name() {
     let (mut app, mut session) = dimension_edit_app();
     // Radius: LEFT is the centre-side end of the leader, RIGHT the arc-side.

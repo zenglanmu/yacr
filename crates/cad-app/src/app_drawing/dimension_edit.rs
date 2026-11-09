@@ -22,7 +22,7 @@
 
 use super::*;
 use cad_db::{DbEntity, DrawingDatabase};
-use cad_domain::DimensionStyleValues;
+use cad_domain::{DimensionStyleValues, TextAlignH};
 
 /// The minimum extent used by the degeneracy guards (the same order as the
 /// other dimension commands).
@@ -70,12 +70,13 @@ fn plane_z(points: &DimensionPoints) -> f64 {
 
 /// The text anchor for `DIMTEDIT LEFT|RIGHT|CENTER`.
 ///
-/// The domain stores an **anchor** (group 11) with centered glyph alignment, so
-/// justification cannot change the glyph alignment there. This build therefore
-/// declares its rule: the anchor moves to the start (minimum projection), end
-/// (maximum projection) or midpoint of the dimension line. For a linear/aligned
-/// dimension that is the first/second extension-line foot; for radius/diameter it
-/// is the centre-side/arc-side end of the radial leader.
+/// The domain stores an **anchor** (group 11) and, separately, the glyph-level
+/// horizontal alignment ([`DimensionGeometry::text_h_align`]). Justification
+/// moves this anchor to the start (minimum projection), end (maximum
+/// projection) or midpoint of the dimension line, and the caller sets the
+/// matching glyph alignment. For a linear/aligned dimension that is the
+/// first/second extension-line foot; for radius/diameter it is the centre-side/
+/// arc-side end of the radial leader.
 ///
 /// Other subtypes (angular, ordinate) have no single straight dimension line in
 /// this model and are refused by name.
@@ -272,18 +273,35 @@ fn resolve_selected_dimensions(
 
 /// Rebuild one dimension from a mutated definition / style / override through
 /// the single shared synthesis (never a second geometry path).
+///
+/// The synthesis places the text centred, so the caller's glyph alignment is
+/// applied afterwards with [`DimensionGeometry::with_text_h_align`]; that only
+/// rewrites the existing `Text` child's `h_align` and never rebuilds the display.
 fn rebuild_dimension(
     dimension: &DimensionGeometry,
     definition: DimensionDefinition,
     style: Option<DimensionStyleValues>,
     text_override: Option<String>,
+    h_align: TextAlignH,
 ) -> CadResult<DimensionGeometry> {
-    DimensionGeometry::synthesized(
+    Ok(DimensionGeometry::synthesized(
         definition,
         dimension.style_name().to_string(),
         style.unwrap_or_else(|| dimension.style().clone()),
         text_override,
-    )
+    )?
+    .with_text_h_align(h_align))
+}
+
+/// The glyph alignment a `DIMTEDIT` request selects; everything except
+/// LEFT/RIGHT/CENTER preserves the dimension's current alignment.
+fn dimtedit_alignment(dimension: &DimensionGeometry, request: DimTextEditCommand) -> TextAlignH {
+    match request {
+        DimTextEditCommand::Left => TextAlignH::Left,
+        DimTextEditCommand::Right => TextAlignH::Right,
+        DimTextEditCommand::Center => TextAlignH::Center,
+        _ => dimension.text_h_align(),
+    }
 }
 
 /// Read a required batch payload.
@@ -389,9 +407,11 @@ impl Application {
     /// The documented set is `MOVE <x> <y>`, `LEFT`, `RIGHT`, `CENTER`, `HOME`
     /// and `ANGLE <degrees>`. Justification is admitted only for linear/aligned,
     /// radius and diameter dimensions; other kinds are refused by name
-    /// (`dimtedit.justify_unsupported`). `ANGLE` follows AutoCAD's UCS-X-axis
-    /// convention and keeps the text centre fixed; `0` restores the derived
-    /// orientation. `HOME` restores the derived position only.
+    /// (`dimtedit.justify_unsupported`). `LEFT`/`RIGHT`/`CENTER` move the anchor
+    /// and set the glyph-level horizontal alignment; `MOVE`/`HOME`/`ANGLE`
+    /// preserve the alignment. `ANGLE` follows AutoCAD's UCS-X-axis convention
+    /// and keeps the text centre fixed; `0` restores the derived orientation.
+    /// `HOME` restores the derived position only.
     pub(crate) fn dim_text_edit(
         &mut self,
         session: &mut SessionState,
@@ -461,6 +481,7 @@ impl Application {
             definition,
             None,
             target.dimension.text_override().map(str::to_string),
+            dimtedit_alignment(&target.dimension, request),
         )
         .map_err(|error| {
             invalid(
@@ -539,6 +560,7 @@ impl Application {
                 target.dimension.definition().clone(),
                 None,
                 override_text.clone(),
+                target.dimension.text_h_align(),
             )
             .map_err(|error| {
                 invalid(
@@ -604,6 +626,7 @@ impl Application {
                 target.dimension.definition().clone(),
                 Some(style),
                 target.dimension.text_override().map(str::to_string),
+                target.dimension.text_h_align(),
             )
             .map_err(|error| {
                 invalid(

@@ -414,7 +414,7 @@
 | `DIMSPACE` | 已实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | `-DIMSTYLE` | 部分实现 | `DIMSTYLE` 的别名，同一实现 |
 | `DIMSTYLE` | 部分实现 | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 按 `dimstyle.set_unavailable` 拒绝（无 post-import 样式表写 API）；未知名称拒绝 |
-| `DIMTEDIT` | 部分实现 | `MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`（`ROTATE`→`ANGLE`）；Left/Right/Center 仅线性/对齐/半径/直径；Angle 固定文字中心、`0` 复位；一条事务/一步撤销；**字形级对齐未实现**（只移动锚点，标注模型无 `h_align`） |
+| `DIMTEDIT` | 部分实现 | `MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`（`ROTATE`→`ANGLE`）；Left/Right/Center 同时移动锚点并设置字形级 `h_align`（仅线性/对齐/半径/直径）；Angle 固定文字中心、`0` 复位；一条事务/一步撤销；角/坐标标注的 justify 与 Oblique 未实现 |
 | `DIST` | 已实现 | — |
 | `DIVIDE` | 已实现 | `LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`/含 bulge 折线，按等弧长；开放 N−1、闭合 N；块选项支持 Align=Yes/No（切线对齐，均匀比例 1） |
 | `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心圆；`inner=0` 只建外圆并诊断；无中心拾取提示 |
@@ -1119,7 +1119,7 @@
 | 306 | `DIMSPACE` | 已实现 | Adjusts the spacing between linear dimensions or angular dimensions. | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | 307 | `-DIMSTYLE` | 部分实现 | At the Command prompt, creates and modifies dimension styles. | `DIMSTYLE` 的别名，同一实现 |
 | 308 | `DIMSTYLE` | 部分实现 | Creates and modifies dimension styles. | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 按 `dimstyle.set_unavailable` 拒绝（无 post-import 样式表写 API）；未知名称拒绝 |
-| 309 | `DIMTEDIT` | 部分实现 | Moves and rotates dimension text and relocates the dimension line. | `MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`（`ROTATE`→`ANGLE`）；Left/Right/Center 仅线性/对齐/半径/直径；Angle 固定文字中心、`0` 复位；一条事务/一步撤销；**字形级对齐未实现**（只移动锚点，标注模型无 `h_align`） |
+| 309 | `DIMTEDIT` | 部分实现 | Moves and rotates dimension text and relocates the dimension line. | `MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 同时移动锚点并设置字形级 `h_align`（仅线性/对齐/半径/直径）；Angle 固定文字中心，`0` 复位；一条事务/一步撤销；角/坐标标注 justify 与 Oblique 未实现 |
 | 310 | `DIST` | 已实现 | Measures the distance and angle between two points. | — |
 | 311 | `DISTANTLIGHT` | 未实现 | Creates a distant light. | — |
 | 312 | `DIVIDE` | 已实现 | Creates evenly spaced point objects or blocks along the length or perimeter of an object. | `LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`/含 bulge 折线，按等弧长；开放 N−1、闭合 N；块选项支持 Align=Yes/No（切线对齐，均匀比例 1） |

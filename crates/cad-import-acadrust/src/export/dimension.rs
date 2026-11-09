@@ -4,6 +4,10 @@
 //! Submodule of [`crate::export`]. AutoCAD requires a DIMENSION's graphical
 //! representation (the content block); the `ExportReport` records every
 //! conversion and the deliberate drops (groups 51/52/71/72, group 70 bit 32).
+//! In particular group 72 (horizontal text justification) is not written even
+//! though `DIMTEDIT LEFT|RIGHT|CENTER` now stores a glyph alignment: the
+//! generated content block already carries the placed text, so a re-import
+//! defaults to `Center` (declared).
 
 use acadrust::entities::{
     Dimension, DimensionAligned, DimensionAngular2Ln, DimensionAngular3Pt, DimensionBase,
