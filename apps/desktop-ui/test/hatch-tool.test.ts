@@ -691,7 +691,7 @@ test('the hatch glyph is a dedicated boundary-with-fill icon, not a neighbour gl
   // and the draw-order utility HATCHTOBACK. No unrelated command may reuse it.
   assert.deepEqual(
     COMMAND_CATALOG.filter(command => command.icon === HATCH.icon).map(command => command.id),
-    ['HATCH', 'HATCHPOINT', 'HATCHGENERATEBOUNDARY', 'HATCHTOBACK', 'GRADIENT', 'HATCHEDIT'],
+    ['HATCH', 'HATCHPOINT', 'HATCHGENERATEBOUNDARY', 'HATCHTOBACK', 'GRADIENT', 'HATCHEDIT', '-BOUNDARY', '-HATCH', '-HATCHEDIT'],
   );
   // Every draw-panel glyph is a real name, so no draw button falls back to a dot.
   for (const tabId of ['home', 'draw']) {

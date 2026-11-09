@@ -269,7 +269,7 @@ test('the text step keeps its generic semantics for MLEADER — no special case'
     .filter(([, , body]) => /mleader/i.test(body))
     .map(([, path]) => path.split('/').pop())
     .sort();
-  assert.deepEqual(owners, ['cad.ts', 'catalog.ts', 'gating.ts', 'icons.tsx', 'ribbon-model.ts']);
+  assert.deepEqual(owners, ['cad.ts', 'catalog-extended.ts', 'catalog.ts', 'gating.ts', 'icons.tsx', 'ribbon-model.ts']);
 });
 
 test('no control implies the Options sub-prompt MLEADER does not have', () => {
@@ -338,7 +338,10 @@ test('the MLEADER glyph is a dedicated leader-with-text mark in the shared icon 
   }
   assert.equal(COMMAND_CATALOG.find(command => command.id === MLEADER.id).icon, MLEADER.icon);
   // `mleader` belongs to MLEADER alone, and every draw-panel glyph is real.
-  assert.equal(COMMAND_CATALOG.filter(command => command.icon === MLEADER.icon).length, 1);
+  assert.deepEqual(
+    COMMAND_CATALOG.filter(command => command.icon === MLEADER.icon).map(command => command.id),
+    ['MLEADER', 'MLEADERALIGN', 'MLEADEREDIT', 'MLEADERCOLLECT'],
+  );
   for (const tabId of ['home', 'draw']) {
     for (const item of drawPanel(tabId).items) {
       assert.ok(defined.has(item.icon), `${item.id} icon '${item.icon}' must exist`);

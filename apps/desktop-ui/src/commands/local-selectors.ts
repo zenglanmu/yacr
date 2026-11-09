@@ -85,12 +85,22 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
   if (isCommandLineHideCommand(text)) return { kind: 'commandLine', value: false };
   if (isResourcesCommand(text)) return { kind: 'resources' };
   if (isFontsCommand(text)) return { kind: 'fonts' };
-  if (isPropertiesCommand(text) || isQuickPropertiesCommand(text)) {
+  if (isPropertiesCommand(text)) {
     return dockedPaletteOpenable(layout)
       ? { kind: 'properties' }
       : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.properties };
   }
-  if (isLayersCommand(text) || isClassicLayerCommand(text)) {
+  if (isQuickPropertiesCommand(text)) {
+    return dockedPaletteOpenable(layout)
+      ? { kind: 'properties' }
+      : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.properties };
+  }
+  if (isLayersCommand(text)) {
+    return dockedPaletteOpenable(layout)
+      ? { kind: 'layers' }
+      : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.layers };
+  }
+  if (isClassicLayerCommand(text)) {
     return dockedPaletteOpenable(layout)
       ? { kind: 'layers' }
       : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.layers };

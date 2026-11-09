@@ -26,9 +26,9 @@ test('the selector is the bare LAYERCLOSE word, case- and whitespace-insensitive
   // derived from the one table.
   assert.deepEqual(
     [...CHROME_COMMAND_NAMES],
-    ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE'],
+    ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE', 'DSETTINGS', 'QUICKPROPERTIES', 'CLASSICLAYER', 'COMMANDLINE', 'COMMANDLINEHIDE'],
   );
-  assert.equal(CHROME_COMMANDS.length, 5);
+  assert.equal(CHROME_COMMANDS.length, 10);
   assert.equal(CHROME_COMMANDS[4].name, 'LAYERCLOSE');
   for (const text of ['LAYERCLOSE', 'layerclose', '  LayerClose ', 'lAyErClOsE']) {
     assert.equal(isLayerCloseCommand(text), true, text);

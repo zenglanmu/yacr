@@ -26,9 +26,9 @@ test('the selector is the bare PROPERTIESCLOSE word, case- and whitespace-insens
   // the later `LAYERCLOSE` row; the name list is derived from the one table.
   assert.deepEqual(
     [...CHROME_COMMAND_NAMES],
-    ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE'],
+    ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE', 'DSETTINGS', 'QUICKPROPERTIES', 'CLASSICLAYER', 'COMMANDLINE', 'COMMANDLINEHIDE'],
   );
-  assert.equal(CHROME_COMMANDS.length, 5);
+  assert.equal(CHROME_COMMANDS.length, 10);
   assert.equal(CHROME_COMMANDS[3].name, 'PROPERTIESCLOSE');
   for (const text of ['PROPERTIESCLOSE', 'propertiesclose', '  PropertiesClose ', 'pRoPeRtIeScLoSe']) {
     assert.equal(isPropertiesCloseCommand(text), true, text);

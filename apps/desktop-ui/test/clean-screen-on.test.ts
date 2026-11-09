@@ -27,9 +27,9 @@ test('the selector is the bare CLEANSCREENON word, case- and whitespace-insensit
   // later PROPERTIESCLOSE and LAYERCLOSE rows; the name list is derived.
   assert.deepEqual(
     [...CHROME_COMMAND_NAMES],
-    ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE'],
+    ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE', 'DSETTINGS', 'QUICKPROPERTIES', 'CLASSICLAYER', 'COMMANDLINE', 'COMMANDLINEHIDE'],
   );
-  assert.equal(CHROME_COMMANDS.length, 5);
+  assert.equal(CHROME_COMMANDS.length, 10);
   for (const text of ['CLEANSCREENON', 'cleanscreenon', '  CleanScreenOn ', 'cLeAnScReEnOn']) {
     assert.equal(isCleanScreenOnCommand(text), true, text);
   }
