@@ -6,8 +6,9 @@ workspace；它只是 `index.html` / `styles.css` / `main.js` / `downloads.json`
 `docs/release-notes/*.md` 生成（见下文“更新日志”）。
 
 - 线上地址：<https://yacr.pages.dev/>（Cloudflare Pages 项目 `yacr`）
-- 安装包镜像：Cloudflare R2 桶 `yacr-downloads`，通过 r2.dev 公共域名分发
-- 对象前缀：`releases/<tag>/`（例如 `releases/v0.1.7/yacr-0.1.6-linux-x86_64.flatpak`）
+- 安装包镜像：Cloudflare R2 桶 `yacr-downloads`，主下载域名 `https://dl.snakeheartgo.top`
+  （自定义域名 + Cache Rule），`r2.dev` 托管域名只作显式回退
+- 对象前缀：`releases/<tag>/`（例如 `releases/v0.1.7/yacr-0.1.7-linux-x86_64.flatpak`）
 
 > 部署/上传成功只是**分发**证据，不是运行时、GPU、真机或像素验收。页面与下载清单也不构成
 > DWG/DXF 兼容性承诺。
@@ -29,10 +30,48 @@ token 只在脚本内部使用，脚本不会打印 token。缺少任一 secret 
 python3 scripts/serve-web.py --directory apps/landing --port 8091
 ```
 
-`downloads.json` 现在提交了当前 `v0.1.7` 的 R2 清单（`cdnBase` 指向 `yacr-downloads` 的
-r2.dev 公共域名），页面主按钮直接走 R2，GitHub 作为次链接与校验来源。`upload-r2-downloads.sh`
-会在每次发布后原子重写它；若 R2 未配置或被删除，把 `cdnBase` 设为 `null` 即回退 GitHub。
-本地预览无需 Cloudflare 凭据。
+`downloads.json` 现在提交了当前 `v0.1.7` 的 R2 清单（`cdnBase` 在自定义域名验证后指向
+`https://dl.snakeheartgo.top`），页面主按钮直接走 R2 + Cloudflare 缓存，GitHub 作为次链接与校验
+来源。`upload-r2-downloads.sh` 会在每次发布后原子重写它；若 R2 未配置或被删除，把 `cdnBase`
+设为 `null` 即回退 GitHub。本地预览无需 Cloudflare 凭据。
+
+## 下载域名与 CDN 缓存（dl.snakeheartgo.top）
+
+R2 桶 `yacr-downloads` 的主下载域名是 **`https://dl.snakeheartgo.top`**。它绑定在同一个
+Cloudflare 账户的 zone `snakeheartgo.top` 上，因此可以套用 Cloudflare 的缓存；`r2.dev` 托管域名
+**不能**使用缓存/WAF，且有约数百 req/s 的限速，只作显式回退。
+
+### 一次性配置（Cloudflare Dashboard）
+
+1. **绑定自定义域名**：R2 → bucket `yacr-downloads` → Settings → Custom Domains →
+   Connect Domain → `dl.snakeheartgo.top` → Connect。Cloudflare 会自动在 zone 里建一条代理
+   CNAME；等待状态变成 **Active**（DNS/TLS 可能需要几分钟）。
+2. **建 Cache Rule**：zone `snakeheartgo.top` → Caching → Cache Rules → Create rule：
+   - 名称：`R2 release downloads`
+   - 匹配：`http.host eq "dl.snakeheartgo.top"`
+   - Cache eligibility：**Eligible for cache**
+   - Edge TTL：**Override origin** → `31536000` 秒（包路径带 tag，内容不可变）
+   - Browser TTL：**Respect origin**（对象本身是 `public, max-age=31536000, immutable`）
+   - 如 Dashboard 提供 **Origin Range Requests**，建议开启，避免断点续传按段回源。
+3. **验证**（同一 URL 连续两次）：
+   ```bash
+   curl -sI https://dl.snakeheartgo.top/releases/v0.1.7/yacr-0.1.7-linux-x86_64.flatpak
+   # 第一次 cf-cache-status: MISS，第二次 HIT；Server: cloudflare
+   ```
+   命中后重复下载不再产生 R2 `GetObject`（Class B）；冷缓存/缓存过期后仍会回源。
+
+### 仓库侧接线
+
+- `scripts/upload-r2-downloads.sh` 把 `cdnBase` 写成
+  `${R2_PUBLIC_BASE}/releases/<tag>`，默认 `https://dl.snakeheartgo.top`；写入前会对 4 个主包做
+  **HEAD 探测**，自定义域名不可达时**非零退出**（不会静默退回 r2.dev）。显式回退：
+  `R2_PUBLIC_BASE=managed`。
+- `.github/workflows/site.yml` 的 `public_base` 输入（默认 `https://dl.snakeheartgo.top`）传给该
+  脚本；因此在自定义域名 Active 之前，`upload_downloads=true` 的部署会 fail-closed。
+  只改文案/布局时用 `upload_downloads=false`，部署仓库里已提交的 `downloads.json`。
+- 提交的 `downloads.json` 在域名验证通过后同步为 `cdnBase=https://dl.snakeheartgo.top/releases/<tag>`；
+  `scripts/test-landing-site.py` 会锁这个常量。
+- 这里减少的是 **R2 Class B 请求数**（出网本来免费）；缓存命中/部署成功都不构成运行时或像素验收。
 
 ## 本地/手动镜像与部署
 
@@ -50,9 +89,9 @@ CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... bash scripts/deploy-landing-p
 1. `gh release download` 下载 Linux Flatpak（含 `.sha256`、`.flatpak.gpg`）、Windows zip（含
    `.sha256`）、macOS tar.gz（含 `.sha256`）、Android APK（含 `.sha256`）与 `SIGNING.txt`；
 2. 对每个 `*.sha256` 运行 `sha256sum -c`；
-3. 幂等创建 `yacr-downloads` 桶并启用 r2.dev 托管域名；
+3. 幂等创建 `yacr-downloads` 桶并启用 r2.dev 托管域名（显式回退用）；
 4. 用 wrangler v4 `r2 object put ... --remote` 上传（**必须** `--remote`，v4 默认写本地模拟）；
-5. 对 4 个主包做 `curl -fsI` HEAD；
+5. 对 4 个主包在选定的公共 base（默认 `dl.snakeheartgo.top`）做 `curl -fsI` HEAD；
 6. 全部成功后用临时文件 + `mv` 原子重写 `apps/landing/downloads.json`。
 
 `deploy-landing-pages.sh` 会先校验静态目录（文件非空、`index.html` 引用 `styles.css`/`main.js`、
@@ -79,6 +118,8 @@ python3 scripts/build-landing-changelog.py --check   # 只校验是否已过期�
   不猜测。
 - 新增版本时：写 `docs/release-notes/vX.Y.Z.md` → 跑一次生成脚本 → 与版本 bump 一起提交。
   输出不含时间戳，因此 `--check` 在 CI 是确定性的。
+- 版本说明按 `docs/release-notes/TEMPLATE.md` 写：只列用户可见变化，默认 60 行以内（功能密集版本
+  最多约 80 行）；证据边界在文末用一句话指向 `AGENTS.md` / `docs/handoff.md`，不重复整段免责声明。
 
 ## CI
 
@@ -99,10 +140,11 @@ python3 scripts/build-landing-changelog.py --check   # 只校验是否已过期�
 
 ## 诚实边界
 
-- **r2.dev 是测试/低成本镜像**：有速率限制，不承诺生产 SLA，也不适合当作唯一 CDN。国内访问
-  r2.dev 与 `pages.dev` 均可能不稳定；需要稳定分发时应另接自有域名/CDN（本仓库不自动化域名绑定）。
-- `downloads.json` 的 `cdnBase` 可以是 `null`（GitHub 回退）或已启用的 r2.dev URL；当前提交的
-  v0.1.7 清单带 R2 base。若把 `cdnBase` 设为 `null`，页面回退 GitHub，
+- **`r2.dev` 是测试/低成本回退**：有速率限制、不承诺生产 SLA，且**不能**使用 Cloudflare 缓存/
+  Cache Rules；主下载域名应使用已绑定的自定义域名 `dl.snakeheartgo.top`。国内访问
+  `r2.dev`、`pages.dev` 与自定义域名仍可能不稳定，缓存只能减少回源，不改变可达性。
+- `downloads.json` 的 `cdnBase` 可以是 `null`（GitHub 回退）、自定义下载域名，或显式回退到
+  r2.dev（`R2_PUBLIC_BASE=managed`）。若把 `cdnBase` 设为 `null`，页面回退 GitHub，
   `deploy-landing-pages.sh` 会打印 warning 但允许部署。
 - 上传/部署成功不等于安装包在真机、真实 GPU 上运行通过；Windows/macOS/Android 的运行时证据边界
   仍以 `AGENTS.md` 平台表与 `docs/handoff.md` 为准。

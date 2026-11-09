@@ -38,6 +38,11 @@ on:
         required: true
         default: true
         type: boolean
+      public_base:
+        description: "Public download base written to cdnBase (use 'managed' for r2.dev)"
+        required: false
+        default: "https://dl.snakeheartgo.top"
+        type: string
 
 permissions:
   contents: read
@@ -68,6 +73,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           R2_BUCKET: yacr-downloads
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          R2_PUBLIC_BASE: ${{ inputs.public_base }}
           GH_TOKEN: ${{ github.token }}
           LANDING_DIR: ${{ github.workspace }}/apps/landing
         run: bash scripts/upload-r2-downloads.sh

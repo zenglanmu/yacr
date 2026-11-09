@@ -304,6 +304,8 @@ def check_scripts(errors: list[str]) -> None:
             "releases/",
             "downloads.json",
             "app-universal-release.apk",
+            "R2_PUBLIC_BASE",
+            "dl.snakeheartgo.top",
         ):
             if fragment not in upload:
                 fail(f"scripts/upload-r2-downloads.sh is missing {fragment!r}", errors)
@@ -320,6 +322,8 @@ def check_workflow(errors: list[str]) -> None:
         "scripts/deploy-landing-pages.sh",
         "CLOUDFLARE_API_TOKEN",
         "secrets.CLOUDFLARE_ACCOUNT_ID",
+        "R2_PUBLIC_BASE",
+        "public_base",
         "concurrency",
         "timeout-minutes",
     ):
