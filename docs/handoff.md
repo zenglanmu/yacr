@@ -1,5 +1,14 @@
 AD
 
+## 2026-11-10 DIMTEDIT 字形级水平对齐
+
+- `DimensionGeometry` 新增私有 `text_h_align`（默认 Center），`with_text_h_align` 只改现有 Text 子实体的 `h_align`；`transformed`/`with_style` 保留。
+- `DIMTEDIT LEFT/RIGHT/CENTER` 仍移动锚点，同时设置字形级 `h_align`；MOVE/HOME/ANGLE 保留当前对齐；一条事务/一步撤销。
+- 导入仍默认 Center（组 72 未解析）、导出仍不写组 72，均已在 import/export 注释中声明。
+- **已运行**：`cargo test -p cad-domain`（90+）、`cargo test -p cad-app --lib`（2267 passed, 3 ignored）、clippy（domain/app）、fmt、file-size、check-command-docs 全绿。
+- **提交**：`979d799b` DIMTEDIT glyph-level horizontal alignment。
+
+
 ## 2026-11-10 JOIN 椭圆弧混合 + LAYVPI 逐视口图层
 
 - **JOIN**：新增精确 `ellipse_spans`（圆有理二次的仿射像，≤90° 分段、权重 `cos(Δ/2)`），`JOIN MULTIPLE` 现可把 ELLIPSE 与 LINE/ARC/POLYLINE/SPLINE 焊成一条有理 B 样条；同时修复 `chain_spans` prepend 方向错误。`JOIN CLOSE` 的混合 SPLINE 仍拒绝。
