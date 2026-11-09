@@ -859,6 +859,58 @@ pub enum ExtendedCommandId {
     Mirror3D,
     /// `ROTATE3D`: no 3D rotate-axis model.
     Rotate3D,
+
+    // Wave 15: stable named refusals (Viewer-legal).
+    /// `SURFBLEND`: surface blending is not implemented.
+    SurfBlend,
+    /// `SURFEXTEND`: surface extension is not implemented.
+    SurfExtend,
+    /// `SURFEXTRACTCURVE`: surface curve extraction is not implemented.
+    SurfExtractCurve,
+    /// `SURFFILLET`: surface filleting is not implemented.
+    SurfFillet,
+    /// `SURFNETWORK`: surface network creation is not implemented.
+    SurfNetwork,
+    /// `SURFOFFSET`: surface offset is not implemented.
+    SurfOffset,
+    /// `SURFPATCH`: surface patching is not implemented.
+    SurfPatch,
+    /// `SURFSCULPT`: surface sculpting is not implemented.
+    SurfSculpt,
+    /// `SURFTRIM`: surface trimming is not implemented.
+    SurfTrim,
+    /// `SURFUNTRIM`: surface untrimming is not implemented.
+    SurfUntrim,
+    /// `MESH`: free-form mesh creation is not implemented.
+    MeshCreate,
+    /// `MESHCAP`: mesh capping is not implemented.
+    MeshCap,
+    /// `MESHCOLLAPSE`: mesh collapse is not implemented.
+    MeshCollapse,
+    /// `MESHCREASE`: mesh creasing is not implemented.
+    MeshCrease,
+    /// `MESHEXTRUDE`: mesh extrusion is not implemented.
+    MeshExtrude,
+    /// `MESHMERGE`: mesh merge is not implemented.
+    MeshMerge,
+    /// `MESHOPTIONS`: no mesh tessellation options model.
+    MeshOptions,
+    /// `MESHPRIMITIVEOPTIONS`: no mesh primitive options model.
+    MeshPrimitiveOptions,
+    /// `MESHREFINE`: mesh refinement is not implemented.
+    MeshRefine,
+    /// `MESHSMOOTH`: mesh smoothing conversion is not implemented.
+    MeshSmooth,
+    /// `MESHSMOOTHLESS`: no mesh smoothness level model.
+    MeshSmoothLess,
+    /// `MESHSMOOTHMORE`: no mesh smoothness level model.
+    MeshSmoothMore,
+    /// `MESHSPIN`: mesh edge spin is not implemented.
+    MeshSpin,
+    /// `MESHSPLIT`: mesh face split is not implemented.
+    MeshSplit,
+    /// `MESHUNCREASE`: mesh uncreasing is not implemented.
+    MeshUncrease,
 }
 
 impl ExtendedCommandId {

@@ -1372,6 +1372,38 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `MIRROR3D` | **部分实现（具名拒绝）**：`mirror3d.unsupported: no 3D mirror-plane model` | 不写库/不升修订/不入历史 |
 | `ROTATE3D` | **部分实现（具名拒绝）**：`rotate3d.unsupported: no 3D rotate-axis model` | 不写库/不升修订/不入历史 |
 
+### 2026-11-09 Wave 15 扩展命令（曲面/网格拒绝）
+
+> 3D 低于 2D；以下名字只提供诚实命令路径（具名拒绝），不是可用曲面/网格功能。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `SURFBLEND` | **部分实现（具名拒绝）**：`surfblend.unsupported: surface blending is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFEXTEND` | **部分实现（具名拒绝）**：`surfextend.unsupported: surface extension is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFEXTRACTCURVE` | **部分实现（具名拒绝）**：`surfextractcurve.unsupported: surface curve extraction is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFFILLET` | **部分实现（具名拒绝）**：`surffillet.unsupported: surface filleting is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFNETWORK` | **部分实现（具名拒绝）**：`surfnetwork.unsupported: surface network creation is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFOFFSET` | **部分实现（具名拒绝）**：`surfoffset.unsupported: surface offset is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFPATCH` | **部分实现（具名拒绝）**：`surfpatch.unsupported: surface patching is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFSCULPT` | **部分实现（具名拒绝）**：`surfsculpt.unsupported: surface sculpting is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFTRIM` | **部分实现（具名拒绝）**：`surftrim.unsupported: surface trimming is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFUNTRIM` | **部分实现（具名拒绝）**：`surfuntrim.unsupported: surface untrimming is not implemented` | 不写库/不升修订/不入历史 |
+| `MESH` | **部分实现（具名拒绝）**：`mesh.unsupported: free-form mesh creation is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHCAP` | **部分实现（具名拒绝）**：`meshcap.unsupported: mesh capping is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHCOLLAPSE` | **部分实现（具名拒绝）**：`meshcollapse.unsupported: mesh collapse is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHCREASE` | **部分实现（具名拒绝）**：`meshcrease.unsupported: mesh creasing is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHEXTRUDE` | **部分实现（具名拒绝）**：`meshextrude.unsupported: mesh extrusion is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHMERGE` | **部分实现（具名拒绝）**：`meshmerge.unsupported: mesh merge is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHOPTIONS` | **部分实现（具名拒绝）**：`meshoptions.unsupported: no mesh tessellation options model` | 不写库/不升修订/不入历史 |
+| `MESHPRIMITIVEOPTIONS` | **部分实现（具名拒绝）**：`meshprimitiveoptions.unsupported: no mesh primitive options model` | 不写库/不升修订/不入历史 |
+| `MESHREFINE` | **部分实现（具名拒绝）**：`meshrefine.unsupported: mesh refinement is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHSMOOTH` | **部分实现（具名拒绝）**：`meshsmooth.unsupported: mesh smoothing conversion is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHSMOOTHLESS` | **部分实现（具名拒绝）**：`meshsmoothless.unsupported: no mesh smoothness level model` | 不写库/不升修订/不入历史 |
+| `MESHSMOOTHMORE` | **部分实现（具名拒绝）**：`meshsmoothmore.unsupported: no mesh smoothness level model` | 不写库/不升修订/不入历史 |
+| `MESHSPIN` | **部分实现（具名拒绝）**：`meshspin.unsupported: mesh edge spin is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHSPLIT` | **部分实现（具名拒绝）**：`meshsplit.unsupported: mesh face split is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHUNCREASE` | **部分实现（具名拒绝）**：`meshuncrease.unsupported: mesh uncreasing is not implemented` | 不写库/不升修订/不入历史 |
+
 ## P2 晋升与边界更新（2026-11-09）
 
 > 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux

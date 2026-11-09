@@ -417,6 +417,32 @@ impl Application {
             | ExtendedCommandId::Edge
             | ExtendedCommandId::Mirror3D
             | ExtendedCommandId::Rotate3D => self.extended_w14_refusals(command, ext)?,
+            // Wave 15: stable named refusals.
+            ExtendedCommandId::SurfBlend
+            | ExtendedCommandId::SurfExtend
+            | ExtendedCommandId::SurfExtractCurve
+            | ExtendedCommandId::SurfFillet
+            | ExtendedCommandId::SurfNetwork
+            | ExtendedCommandId::SurfOffset
+            | ExtendedCommandId::SurfPatch
+            | ExtendedCommandId::SurfSculpt
+            | ExtendedCommandId::SurfTrim
+            | ExtendedCommandId::SurfUntrim
+            | ExtendedCommandId::MeshCreate
+            | ExtendedCommandId::MeshCap
+            | ExtendedCommandId::MeshCollapse
+            | ExtendedCommandId::MeshCrease
+            | ExtendedCommandId::MeshExtrude
+            | ExtendedCommandId::MeshMerge
+            | ExtendedCommandId::MeshOptions
+            | ExtendedCommandId::MeshPrimitiveOptions
+            | ExtendedCommandId::MeshRefine
+            | ExtendedCommandId::MeshSmooth
+            | ExtendedCommandId::MeshSmoothLess
+            | ExtendedCommandId::MeshSmoothMore
+            | ExtendedCommandId::MeshSpin
+            | ExtendedCommandId::MeshSplit
+            | ExtendedCommandId::MeshUncrease => self.extended_w15_refusals(command, ext)?,
         };
         Ok(Some(outcome))
     }

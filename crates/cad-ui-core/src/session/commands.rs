@@ -734,6 +734,33 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MIRROR3D", CommandId::Extended(ExtendedCommandId::Mirror3D)),
     ("ROTATE3D", CommandId::Extended(ExtendedCommandId::Rotate3D)),
 
+    // Wave 15 (2026-11-09): stable named refusals.
+    ("SURFBLEND", CommandId::Extended(ExtendedCommandId::SurfBlend)),
+    ("SURFEXTEND", CommandId::Extended(ExtendedCommandId::SurfExtend)),
+    ("SURFEXTRACTCURVE", CommandId::Extended(ExtendedCommandId::SurfExtractCurve)),
+    ("SURFFILLET", CommandId::Extended(ExtendedCommandId::SurfFillet)),
+    ("SURFNETWORK", CommandId::Extended(ExtendedCommandId::SurfNetwork)),
+    ("SURFOFFSET", CommandId::Extended(ExtendedCommandId::SurfOffset)),
+    ("SURFPATCH", CommandId::Extended(ExtendedCommandId::SurfPatch)),
+    ("SURFSCULPT", CommandId::Extended(ExtendedCommandId::SurfSculpt)),
+    ("SURFTRIM", CommandId::Extended(ExtendedCommandId::SurfTrim)),
+    ("SURFUNTRIM", CommandId::Extended(ExtendedCommandId::SurfUntrim)),
+    ("MESH", CommandId::Extended(ExtendedCommandId::MeshCreate)),
+    ("MESHCAP", CommandId::Extended(ExtendedCommandId::MeshCap)),
+    ("MESHCOLLAPSE", CommandId::Extended(ExtendedCommandId::MeshCollapse)),
+    ("MESHCREASE", CommandId::Extended(ExtendedCommandId::MeshCrease)),
+    ("MESHEXTRUDE", CommandId::Extended(ExtendedCommandId::MeshExtrude)),
+    ("MESHMERGE", CommandId::Extended(ExtendedCommandId::MeshMerge)),
+    ("MESHOPTIONS", CommandId::Extended(ExtendedCommandId::MeshOptions)),
+    ("MESHPRIMITIVEOPTIONS", CommandId::Extended(ExtendedCommandId::MeshPrimitiveOptions)),
+    ("MESHREFINE", CommandId::Extended(ExtendedCommandId::MeshRefine)),
+    ("MESHSMOOTH", CommandId::Extended(ExtendedCommandId::MeshSmooth)),
+    ("MESHSMOOTHLESS", CommandId::Extended(ExtendedCommandId::MeshSmoothLess)),
+    ("MESHSMOOTHMORE", CommandId::Extended(ExtendedCommandId::MeshSmoothMore)),
+    ("MESHSPIN", CommandId::Extended(ExtendedCommandId::MeshSpin)),
+    ("MESHSPLIT", CommandId::Extended(ExtendedCommandId::MeshSplit)),
+    ("MESHUNCREASE", CommandId::Extended(ExtendedCommandId::MeshUncrease)),
+
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**

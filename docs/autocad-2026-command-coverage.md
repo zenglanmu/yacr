@@ -27,9 +27,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **66** |
-| 部分实现（有写明的界） | **507** |
-| **已实现合计（完整 + 部分）** | **573** |
-| 未实现 | **408** |
+| 部分实现（有写明的界） | **532** |
+| **已实现合计（完整 + 部分）** | **598** |
+| 未实现 | **383** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -73,11 +73,12 @@
 > **2026-11-09 增补（Wave 12）**：`3DSIN`…`SCRIPT` 二十五个文件/导入导出/扩展运行时名全部按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串；不写库/不升修订/不入历史）；唯一矢量输出仍是 `PLOT`（SVG/PDF）。计入 **523 已实现（66 完整 + 457 部分）/ 458 未实现**。
 > **2026-11-09 增补（Wave 13）**：`PAGESETUP`/`-PAGESETUP` 只读页面设置报告、`CONVERTPOLY` 只读单一多段线表示报告，以及 `PSETUPIN`…`LAYTRANS` 二十二个具名拒绝（页面设置导入/打印样式/表格/字段/远程文字/拼写/超级填充/视口对齐同步/图层转换）计入 **548 已实现（66 完整 + 482 部分）/ 433 未实现**；无 GUI/GPU/像素证据。
 > **2026-11-09 增补（Wave 14）**：`BOX`…`ROTATE3D` 二十五个 3D 实体图元/布尔/剖切/边编辑名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D，不计为可用 3D 功能。计入 **573 已实现（66 完整 + 507 部分）/ 408 未实现**。
+> **2026-11-09 增补（Wave 15）**：`SURFBLEND`…`MESHUNCREASE` 二十五个曲面/网格名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D。计入 **598 已实现（66 完整 + 532 部分）/ 383 未实现**。
 >
 > **本轮 100 条（Wave 9–12）已交付**：2D 真实编辑/别名/路由/报告 + 3D/文件扩展的诚实拒绝；全部结论仅 Linux 编译 + 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
 > **2026-11-09 增补（P1 晋升批）**：按 AutoCAD 2026 ENU 帮助页逐条核对后，`ALIGN`、`BREAK`、`DIVIDE`、`SELECTSIMILAR`、`MATCHPROP`、`SETBYLAYER`、`LIST`、`DIMSPACE`、`TORIENT` 九条从**部分实现**晋升为**完整实现**：补齐 1/3 对点 ALIGN（3 对点为平面刚性、不缩放）、椭圆 BREAK、全曲线 DIVIDE + 块对齐、SELECTSIMILAR 默认「图层+类型」与 `Name`/`Object style`、MATCHPROP 的 Text/Dimension/Hatch 特殊组、SETBYLAYER 透明度与 Include blocks、LIST 的纸空间/块空间与样式名、DIMSPACE 的 Auto=2×文字高度/`0` 对齐/角度标注、TORIENT Reverse（本项目扩展）。`LENGTHEN` 补了近端语义、开放多段线/椭圆弧/开放样条与 DY，但**开放样条延长**仍是具名拒绝，故保留**部分实现**。三处实现偏差已按官方语义修正：ALIGN 三对点禁缩放、SELECTSIMILAR 默认集、DIMSPACE Auto 公式。计入 **423 已实现（59 完整 + 364 部分）/ 558 未实现**；全部结论仍只覆盖 Linux 编译与契约测试，GUI/GPU/像素 NOT VERIFIED。
 >
-> **573 已实现（66 完整 + 507 部分）/ 408 未实现**；无未保存修改提示，无多文档。
+> **598 已实现（66 完整 + 532 部分）/ 383 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -527,6 +528,21 @@
 | `MATCHPROP` | 已实现 | Basic 六项 + Settings 子集；Text 组复制文字样式与字体、Dimension 组复制标注样式、Hatch 组复制填充样式/图案/渐变；**不**复制字高、标注覆盖值与填充原点（与 AutoCAD 一致）；异类目标跳过该组并报告 |
 | `MENU` | 部分实现 | 具名拒绝（`menu.unsupported`）：本构建无菜单文件模型，界面固定。 |
 | `MEASUREGEOM` | 部分实现 | 选项路由：DISTANCE/ANGLE/AREA/POLYLINE 复用既有工具，RADIUS 只读报告；VOLUME 显式未实现（无 3D 体积模型） |
+| `MESH` | 部分实现 | 具名拒绝（`mesh.unsupported: free-form mesh creation is not implemented`）。 |
+| `MESHCAP` | 部分实现 | 具名拒绝（`meshcap.unsupported: mesh capping is not implemented`）。 |
+| `MESHCOLLAPSE` | 部分实现 | 具名拒绝（`meshcollapse.unsupported: mesh collapse is not implemented`）。 |
+| `MESHCREASE` | 部分实现 | 具名拒绝（`meshcrease.unsupported: mesh creasing is not implemented`）。 |
+| `MESHEXTRUDE` | 部分实现 | 具名拒绝（`meshextrude.unsupported: mesh extrusion is not implemented`）。 |
+| `MESHMERGE` | 部分实现 | 具名拒绝（`meshmerge.unsupported: mesh merge is not implemented`）。 |
+| `MESHOPTIONS` | 部分实现 | 具名拒绝（`meshoptions.unsupported: no mesh tessellation options model`）。 |
+| `MESHPRIMITIVEOPTIONS` | 部分实现 | 具名拒绝（`meshprimitiveoptions.unsupported: no mesh primitive options model`）。 |
+| `MESHREFINE` | 部分实现 | 具名拒绝（`meshrefine.unsupported: mesh refinement is not implemented`）。 |
+| `MESHSMOOTH` | 部分实现 | 具名拒绝（`meshsmooth.unsupported: mesh smoothing conversion is not implemented`）。 |
+| `MESHSMOOTHLESS` | 部分实现 | 具名拒绝（`meshsmoothless.unsupported: no mesh smoothness level model`）。 |
+| `MESHSMOOTHMORE` | 部分实现 | 具名拒绝（`meshsmoothmore.unsupported: no mesh smoothness level model`）。 |
+| `MESHSPIN` | 部分实现 | 具名拒绝（`meshspin.unsupported: mesh edge spin is not implemented`）。 |
+| `MESHSPLIT` | 部分实现 | 具名拒绝（`meshsplit.unsupported: mesh face split is not implemented`）。 |
+| `MESHUNCREASE` | 部分实现 | 具名拒绝（`meshuncrease.unsupported: mesh uncreasing is not implemented`）。 |
 | `MIRROR` | 部分实现 | `MIRRTEXT=0` 可读镜像（位置镜像、文字保持可读）、`MIRROR ERASE YES/NO`、标注反射后重合成；**`MIRRTEXT=1` 字形镜像未实现**（文字实体无镜像标志） |
 | `MINSERT` | 部分实现 | 具名拒绝（`minsert.unsupported`）：需要块名与行列数；请用 INSERT + ARRAYRECT。 |
 | `MIRROR3D` | 部分实现 | 具名拒绝（`mirror3d.unsupported: no 3D mirror-plane model`）。 |
@@ -621,6 +637,16 @@
 | `STYLESMANAGER` | 部分实现 | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |
 | `SUBTRACT` | 部分实现 | 具名拒绝（`subtract.unsupported: no 3D boolean model`）。 |
 | `SUPERHATCH` | 部分实现 | 具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 |
+| `SURFBLEND` | 部分实现 | 具名拒绝（`surfblend.unsupported: surface blending is not implemented`）。 |
+| `SURFEXTEND` | 部分实现 | 具名拒绝（`surfextend.unsupported: surface extension is not implemented`）。 |
+| `SURFEXTRACTCURVE` | 部分实现 | 具名拒绝（`surfextractcurve.unsupported: surface curve extraction is not implemented`）。 |
+| `SURFFILLET` | 部分实现 | 具名拒绝（`surffillet.unsupported: surface filleting is not implemented`）。 |
+| `SURFNETWORK` | 部分实现 | 具名拒绝（`surfnetwork.unsupported: surface network creation is not implemented`）。 |
+| `SURFOFFSET` | 部分实现 | 具名拒绝（`surfoffset.unsupported: surface offset is not implemented`）。 |
+| `SURFPATCH` | 部分实现 | 具名拒绝（`surfpatch.unsupported: surface patching is not implemented`）。 |
+| `SURFSCULPT` | 部分实现 | 具名拒绝（`surfsculpt.unsupported: surface sculpting is not implemented`）。 |
+| `SURFTRIM` | 部分实现 | 具名拒绝（`surftrim.unsupported: surface trimming is not implemented`）。 |
+| `SURFUNTRIM` | 部分实现 | 具名拒绝（`surfuntrim.unsupported: surface untrimming is not implemented`）。 |
 | `SWEEP` | 部分实现 | 具名拒绝（`sweep.unsupported: 3D sweep is not implemented`）。 |
 | `SYSVARMONITOR` | 部分实现 | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | `SYSVDLG` | 部分实现 | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
@@ -1289,21 +1315,21 @@
 | 531 | `MEASURE` | 未实现（同名不同义） | Creates point objects or blocks at measured intervals along the length or perimeter of an object. | 本项目 MEASURE 是测量入口（默认 DIST），不是沿对象放置点/块；**不计入覆盖** |
 | 532 | `MEASUREGEOM` | 部分实现 | Measures the distance, radius, angle, area, and volume of selected objects, a sequence of points, or dynamically. | **v1（2026-11-07）选项路由**：`MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 复用既有 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE` 工具（同一交互请求，无第二测量引擎）；`RADIUS` 只读报告所选单个 `ARC`/`CIRCLE` 的圆心/半径/直径/圆周长（圆弧另报弧长）。裸名 `measuregeom.needs_option`，未知选项按名拒绝。**未实现**：`VOLUME`（本构建无 3D 实体/体积模型，显式 `measuregeom.volume_unsupported`，不编造数值）；AutoCAD 的其它选项/动态测量未接线。 |
 | 533 | `MENU` | 部分实现 | Obsolete. Loads a customization file. | 具名拒绝（`menu.unsupported`）：本构建无菜单文件模型，界面固定。 |
-| 534 | `MESH` | 未实现 | Creates a 3D mesh primitive object such as a box, cone, cylinder, pyramid, sphere, wedge, or torus. | — |
-| 535 | `MESHCAP` | 未实现 | Creates a mesh face that connects open edges. | — |
-| 536 | `MESHCOLLAPSE` | 未实现 | Merges the vertices of selected mesh faces or edges. | — |
-| 537 | `MESHCREASE` | 未实现 | Sharpens the edges of selected mesh subobjects. | — |
-| 538 | `MESHEXTRUDE` | 未实现 | Extends a mesh face into 3D space. | — |
-| 539 | `MESHMERGE` | 未实现 | Merges adjacent faces into a single face. | — |
-| 540 | `MESHOPTIONS` | 未实现 | Displays the Mesh Tessellation Options dialog box, which controls default settings for converting existing objects to mesh objects. | — |
-| 541 | `MESHPRIMITIVEOPTIONS` | 未实现 | Displays the Mesh Primitive Options dialog box, which sets the tessellation defaults for primitive mesh objects. | — |
-| 542 | `MESHREFINE` | 未实现 | Multiplies the number of faces in selected mesh objects or faces. | — |
-| 543 | `MESHSMOOTH` | 未实现 | Converts 3D objects such as polygon meshes, surfaces, and solids to mesh objects. | — |
-| 544 | `MESHSMOOTHLESS` | 未实现 | Decreases the level of smoothness for mesh objects by one level. | — |
-| 545 | `MESHSMOOTHMORE` | 未实现 | Increases the level of smoothness for mesh objects by one level. | — |
-| 546 | `MESHSPIN` | 未实现 | Spins the adjoining edge of two triangular mesh faces. | — |
-| 547 | `MESHSPLIT` | 未实现 | Splits a mesh face into two faces. | — |
-| 548 | `MESHUNCREASE` | 未实现 | Removes the crease from selected mesh faces, edges, or vertices. | — |
+| 534 | `MESH` | 部分实现 | Creates a 3D mesh primitive object such as a box, cone, cylinder, pyramid, sphere, wedge, or torus. | 具名拒绝（`mesh.unsupported: free-form mesh creation is not implemented`）。 |
+| 535 | `MESHCAP` | 部分实现 | Creates a mesh face that connects open edges. | 具名拒绝（`meshcap.unsupported: mesh capping is not implemented`）。 |
+| 536 | `MESHCOLLAPSE` | 部分实现 | Merges the vertices of selected mesh faces or edges. | 具名拒绝（`meshcollapse.unsupported: mesh collapse is not implemented`）。 |
+| 537 | `MESHCREASE` | 部分实现 | Sharpens the edges of selected mesh subobjects. | 具名拒绝（`meshcrease.unsupported: mesh creasing is not implemented`）。 |
+| 538 | `MESHEXTRUDE` | 部分实现 | Extends a mesh face into 3D space. | 具名拒绝（`meshextrude.unsupported: mesh extrusion is not implemented`）。 |
+| 539 | `MESHMERGE` | 部分实现 | Merges adjacent faces into a single face. | 具名拒绝（`meshmerge.unsupported: mesh merge is not implemented`）。 |
+| 540 | `MESHOPTIONS` | 部分实现 | Displays the Mesh Tessellation Options dialog box, which controls default settings for converting existing objects to mesh objects. | 具名拒绝（`meshoptions.unsupported: no mesh tessellation options model`）。 |
+| 541 | `MESHPRIMITIVEOPTIONS` | 部分实现 | Displays the Mesh Primitive Options dialog box, which sets the tessellation defaults for primitive mesh objects. | 具名拒绝（`meshprimitiveoptions.unsupported: no mesh primitive options model`）。 |
+| 542 | `MESHREFINE` | 部分实现 | Multiplies the number of faces in selected mesh objects or faces. | 具名拒绝（`meshrefine.unsupported: mesh refinement is not implemented`）。 |
+| 543 | `MESHSMOOTH` | 部分实现 | Converts 3D objects such as polygon meshes, surfaces, and solids to mesh objects. | 具名拒绝（`meshsmooth.unsupported: mesh smoothing conversion is not implemented`）。 |
+| 544 | `MESHSMOOTHLESS` | 部分实现 | Decreases the level of smoothness for mesh objects by one level. | 具名拒绝（`meshsmoothless.unsupported: no mesh smoothness level model`）。 |
+| 545 | `MESHSMOOTHMORE` | 部分实现 | Increases the level of smoothness for mesh objects by one level. | 具名拒绝（`meshsmoothmore.unsupported: no mesh smoothness level model`）。 |
+| 546 | `MESHSPIN` | 部分实现 | Spins the adjoining edge of two triangular mesh faces. | 具名拒绝（`meshspin.unsupported: mesh edge spin is not implemented`）。 |
+| 547 | `MESHSPLIT` | 部分实现 | Splits a mesh face into two faces. | 具名拒绝（`meshsplit.unsupported: mesh face split is not implemented`）。 |
+| 548 | `MESHUNCREASE` | 部分实现 | Removes the crease from selected mesh faces, edges, or vertices. | 具名拒绝（`meshuncrease.unsupported: mesh uncreasing is not implemented`）。 |
 | 549 | `MIGRATEMATERIALS` | 未实现 | Finds any legacy materials in Tool Palettes and converts them to generic type. | — |
 | 550 | `MINSERT` | 部分实现 | Inserts multiple instances of a block in a rectangular array. | 具名拒绝（`minsert.unsupported`）：需要块名与行列数；请用 INSERT + ARRAYRECT。 |
 | 551 | `MIRROR` | 部分实现 | Creates a mirrored copy of selected objects. | `MIRRTEXT=0` 可读镜像（位置镜像、文字保持可读）、`MIRROR ERASE YES/NO`、标注反射后重合成；**`MIRRTEXT=1` 字形镜像未实现**（文字实体无镜像标志） |
@@ -1583,16 +1609,16 @@
 | 825 | `SUNPROPERTIES` | 未实现 | Displays the Sun Properties palette. | — |
 | 826 | `SUNPROPERTIESCLOSE` | 未实现 | Closes the Sun Properties palette | — |
 | 827 | `SUPERHATCH` | 部分实现 | Hatches an area using a selected image, block, xref, or wipeout object. | 具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 |
-| 828 | `SURFBLEND` | 未实现 | Creates a continuous blend surface between two existing surfaces. | — |
-| 829 | `SURFEXTEND` | 未实现 | Lengthens a surface by a specified distance. | — |
-| 830 | `SURFEXTRACTCURVE` | 未实现 | Creates curves on surfaces and 3D solids. | — |
-| 831 | `SURFFILLET` | 未实现 | Creates a filleted surface between two other surfaces. | — |
-| 832 | `SURFNETWORK` | 未实现 | Creates a surface in the space between several curves in the U and V directions, including surface and solid edge subobjects. | — |
-| 833 | `SURFOFFSET` | 未实现 | Creates a parallel surface a specified distance from the original surface. | — |
-| 834 | `SURFPATCH` | 未实现 | Creates a new surface by fitting a cap over a surface edge that forms a closed loop. | — |
-| 835 | `SURFSCULPT` | 未实现 | Trims and combines a set of surfaces or meshes that completely enclose a volume to create a 3D solid. | — |
-| 836 | `SURFTRIM` | 未实现 | Trims portions of a surface where it meets another surface or type of geometry. | — |
-| 837 | `SURFUNTRIM` | 未实现 | Replaces surface areas removed by the SURFTRIM command. | — |
+| 828 | `SURFBLEND` | 部分实现 | Creates a continuous blend surface between two existing surfaces. | 具名拒绝（`surfblend.unsupported: surface blending is not implemented`）。 |
+| 829 | `SURFEXTEND` | 部分实现 | Lengthens a surface by a specified distance. | 具名拒绝（`surfextend.unsupported: surface extension is not implemented`）。 |
+| 830 | `SURFEXTRACTCURVE` | 部分实现 | Creates curves on surfaces and 3D solids. | 具名拒绝（`surfextractcurve.unsupported: surface curve extraction is not implemented`）。 |
+| 831 | `SURFFILLET` | 部分实现 | Creates a filleted surface between two other surfaces. | 具名拒绝（`surffillet.unsupported: surface filleting is not implemented`）。 |
+| 832 | `SURFNETWORK` | 部分实现 | Creates a surface in the space between several curves in the U and V directions, including surface and solid edge subobjects. | 具名拒绝（`surfnetwork.unsupported: surface network creation is not implemented`）。 |
+| 833 | `SURFOFFSET` | 部分实现 | Creates a parallel surface a specified distance from the original surface. | 具名拒绝（`surfoffset.unsupported: surface offset is not implemented`）。 |
+| 834 | `SURFPATCH` | 部分实现 | Creates a new surface by fitting a cap over a surface edge that forms a closed loop. | 具名拒绝（`surfpatch.unsupported: surface patching is not implemented`）。 |
+| 835 | `SURFSCULPT` | 部分实现 | Trims and combines a set of surfaces or meshes that completely enclose a volume to create a 3D solid. | 具名拒绝（`surfsculpt.unsupported: surface sculpting is not implemented`）。 |
+| 836 | `SURFTRIM` | 部分实现 | Trims portions of a surface where it meets another surface or type of geometry. | 具名拒绝（`surftrim.unsupported: surface trimming is not implemented`）。 |
+| 837 | `SURFUNTRIM` | 部分实现 | Replaces surface areas removed by the SURFTRIM command. | 具名拒绝（`surfuntrim.unsupported: surface untrimming is not implemented`）。 |
 | 838 | `SWEEP` | 部分实现 | Creates a 3D solid or 3D surface by sweeping a 2D object or subobject along an open or closed path. | 具名拒绝（`sweep.unsupported: 3D sweep is not implemented`）。 |
 | 839 | `SYSVARMONITOR` | 部分实现 | Monitors a list of system variables and sends notifications when there are changes to any one in the list. | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | 840 | `SYSVDLG` | 部分实现 | Allows you to view, edit, save, and restore system variable settings. | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
