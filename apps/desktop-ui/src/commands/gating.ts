@@ -204,6 +204,13 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'DIMCONSTRAINT', 'GEOMCONSTRAINT', 'DCALIGNED', 'DCANGULAR', 'DCCONVERT',
   'DCDIAMETER', 'DCDISPLAY', 'DCFORM', 'DCHORIZONTAL', 'DCLINEAR',
 
+  // The 2026-11-09 Wave 8 batch: two session tokens (ELEV/UCSICON) and eight
+  // stable refusals (UCS through RIBBON). They are payload-free and read only
+  // the session or answer, so the start page disables them with the catalog's
+  // own "no drawing is open" sentence; none takes a capability gate.
+  'ELEV', 'UCSICON', 'UCS', 'UCSMAN', 'TABLET', 'TASKBAR', 'REINIT',
+  'SYSWINDOWS', 'MENU', 'RIBBON',
+
 ]);
 
 /** One command's precondition on the **current selection**. */

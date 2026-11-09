@@ -4,11 +4,12 @@
 //! names `DRAGMODE`, `HIGHLIGHTNEW`, `TRAYSETTINGS`, `TEXTSCR`/`GRAPHSCR`,
 //! `FINDINCLUDE`, `FINDMATCH`, `ISOPLANE` and `APERTURE`/`REVCLOUDPROPERTIES`
 //! each own one flag or token here, Wave 5 adds the `ATTDISP` token and Wave 6
-//! adds the `DWGLOG`/`LOGFILEON`/`LOGFILEOFF` drawing-log token. This is
-//! **session state only**: no database write, revision bump, `cad-history` entry
-//! or `ChangeSet`. This lane wires no renderer/behaviour consumer, so the command
-//! handler reports that the effect is not implemented rather than pretending the
-//! drawing changed.
+//! adds the `DWGLOG`/`LOGFILEON`/`LOGFILEOFF` drawing-log token. Wave 8 adds the
+//! `ELEV` elevation token and the `UCSICON` flag. This is **session state only**:
+//! no database write, revision bump, `cad-history` entry or `ChangeSet`. This
+//! lane wires no renderer/behaviour consumer, so the command handler reports
+//! that the effect is not implemented rather than pretending the drawing
+//! changed.
 
 /// The current 2D isometric drafting plane token (`ISOPLANE`).
 ///
@@ -64,6 +65,8 @@ pub struct DraftingExtras {
     revcloud_arc_length: f64,
     attdisp: bool,
     dwglog: bool,
+    elev: f64,
+    ucsicon: bool,
 }
 
 impl Default for DraftingExtras {
@@ -75,7 +78,8 @@ impl Default for DraftingExtras {
         // case-insensitive find start OFF; the Wave 5 `ATTDISP` token starts ON
         // (AutoCAD's default) and the Wave 6 `DWGLOG` token starts OFF. These are
         // session defaults only — nothing here is read from or written to the
-        // drawing, and no log file exists.
+        // drawing, and no log file exists. The Wave 8 `ELEV` token starts at 0.0
+        // (AutoCAD's default) and the `UCSICON` flag starts OFF.
         Self {
             qtext: false,
             fill: true,
@@ -93,6 +97,8 @@ impl Default for DraftingExtras {
             revcloud_arc_length: 15.0,
             attdisp: true,
             dwglog: false,
+            elev: 0.0,
+            ucsicon: false,
         }
     }
 }
@@ -329,5 +335,39 @@ impl DraftingExtras {
     pub fn toggle_dwglog(&mut self) -> bool {
         self.dwglog = !self.dwglog;
         self.dwglog
+    }
+
+    /// The session `ELEV` elevation token (default 0.0).
+    ///
+    /// This build stores the value but has no elevation consumer: the typed
+    /// setter form `ELEV <height>` is NOT IMPLEMENTED and no new object is
+    /// created at an elevation. The handler says exactly that.
+    pub fn elev(&self) -> f64 {
+        self.elev
+    }
+
+    /// Set the session `ELEV` token (only the report path would use this today;
+    /// the typed setter is NOT IMPLEMENTED).
+    pub fn set_elev(&mut self, value: f64) {
+        self.elev = value;
+    }
+
+    /// The session `UCSICON` flag (default OFF, i.e. no icon).
+    ///
+    /// This build renders no UCS icon, so the flag has no renderer consumer; the
+    /// handler says exactly that.
+    pub fn ucsicon(&self) -> bool {
+        self.ucsicon
+    }
+
+    /// Set the session `UCSICON` flag.
+    pub fn set_ucsicon(&mut self, value: bool) {
+        self.ucsicon = value;
+    }
+
+    /// Flip the `UCSICON` flag and return the new state.
+    pub fn toggle_ucsicon(&mut self) -> bool {
+        self.ucsicon = !self.ucsicon;
+        self.ucsicon
     }
 }

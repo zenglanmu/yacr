@@ -199,6 +199,9 @@ mod extended_refusals6;
 // The 2026-11-09 Wave 7 extended-command contracts.
 mod extended_dyn7;
 mod extended_refusals7;
+// The 2026-11-09 Wave 8 extended-command contracts.
+mod extended_refusals8;
+mod extended_session8;
 mod grips;
 mod grips_curves;
 mod grips_dimension;

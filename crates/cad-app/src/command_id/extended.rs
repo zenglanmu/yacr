@@ -122,6 +122,13 @@
 //!
 //! Every Wave 7 variant stays Viewer-legal: no database write, no revision bump,
 //! no `cad-history` entry.
+//!
+//! # Wave 8 (2026-11-09)
+//!
+//! `ELEV` (read-only session elevation report; setter NOT IMPLEMENTED) and
+//! `UCSICON` (session flag, no icon) plus eight named refusals (`UCS`, `UCSMAN`,
+//! `TABLET`, `TASKBAR`, `REINIT`, `SYSWINDOWS`, `MENU`, `RIBBON`) for the absent
+//! UCS/tablet/menu models and host-owned chrome. All Viewer-legal.
 
 /// One payload-free command in the extended wrapper batches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -534,6 +541,18 @@ pub enum ExtendedCommandId {
     DcHorizontal,
     /// `DCLINEAR`: no dimensional-constraint model.
     DcLinear,
+
+    // Wave 8: two session tokens and eight named refusals (all Viewer-legal).
+    Elev,
+    UcsIcon,
+    Ucs,
+    UcsMan,
+    Tablet,
+    TaskBar,
+    Reinit,
+    SysWindows,
+    Menu,
+    Ribbon,
 }
 
 impl ExtendedCommandId {
@@ -731,6 +750,16 @@ impl ExtendedCommandId {
             Self::DcForm => "DCFORM",
             Self::DcHorizontal => "DCHORIZONTAL",
             Self::DcLinear => "DCLINEAR",
+            Self::Elev => "ELEV",
+            Self::UcsIcon => "UCSICON",
+            Self::Ucs => "UCS",
+            Self::UcsMan => "UCSMAN",
+            Self::Tablet => "TABLET",
+            Self::TaskBar => "TASKBAR",
+            Self::Reinit => "REINIT",
+            Self::SysWindows => "SYSWINDOWS",
+            Self::Menu => "MENU",
+            Self::Ribbon => "RIBBON",
         }
     }
 
@@ -951,5 +980,15 @@ impl ExtendedCommandId {
         Self::DcForm,
         Self::DcHorizontal,
         Self::DcLinear,
+        Self::Elev,
+        Self::UcsIcon,
+        Self::Ucs,
+        Self::UcsMan,
+        Self::Tablet,
+        Self::TaskBar,
+        Self::Reinit,
+        Self::SysWindows,
+        Self::Menu,
+        Self::Ribbon,
     ];
 }

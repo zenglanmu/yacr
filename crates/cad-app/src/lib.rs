@@ -64,6 +64,9 @@ mod app_extended_refusals6;
 // The Wave 7 extended-command handlers (dynamic-block visibility reports+refusals).
 mod app_extended_dyn7;
 mod app_extended_refusals7;
+// The Wave 8 extended-command handlers (session tokens+refusals).
+mod app_extended_refusals8;
+mod app_extended_session8;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;

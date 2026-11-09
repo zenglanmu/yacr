@@ -27,9 +27,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **363** |
-| **已实现合计（完整 + 部分）** | **413** |
-| 未实现 | **568** |
+| 部分实现（有写明的界） | **373** |
+| **已实现合计（完整 + 部分）** | **423** |
+| 未实现 | **558** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -66,7 +66,8 @@
 > **2026-11-09 增补（Wave 5）**：`ATTDISP` 一个会话令牌（默认开；本构建无块属性模型，不渲染属性，不写图/不升修订），`BATTMAN`/`BATTORDER` 两个块定义只读列表（复用 `drawing.blocks()`，并明说 `*.attributes_not_modeled`），`XREF`/`-XREF`/`EXTERNALREFERENCES` 三个外部参照**导入期溯源**只读报告（真实读取 `drawing.external_references()`，不虚构行；`EXTERNALREFERENCES` 另报 `palette_not_implemented`），`EXTERNALREFERENCESCLOSE` 一个具名 no-op（无选项板可关）；另加 `ATTDEF`…`CLASSICXREF` 二十三个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **353 已实现（50 完整 + 303 部分）/ 628 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-09 增补（Wave 6）**：`DWGLOG`/`LOGFILEON`/`LOGFILEOFF` 三个名字共用**一个会话图形日志令牌**（默认关；本构建不写日志文件、不写图/不升修订），`DWGPROPS` 一个只读文档报告（文档 id/修订/实体数；标题、作者、自定义特性**未建模**），`DWFFORMAT`/`EXPORTPDF` 两个**只读能力报告**（DWF/DWFx 不导出；PDF 由宿主经 `PLOT` 负责，二者都不是错误）；另加 `SAVEALL`…`AUTOPUBLISH` 二十四个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **383 已实现（50 完整 + 333 部分）/ 598 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-09 增补（Wave 7）**：`BVSTATE`/`-BVSTATE` 两个**只读动态块可见性报告**（逐选中 INSERT 读取 `DrawingDatabase::block_dynamic_visibility` 的活动状态；无 INSERT 报 `*.no_selection`，无描述符或活动状态未解析报 `*.not_set`，绝不猜测；不设置状态/不写库/不升修订）；另加 `BACTION`…`DCLINEAR` 二十八个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，覆盖动态块动作/参数/查找表/构造几何/按状态隐藏显示、块编写选项板、参数重置与几何/尺寸约束；不写库/不升修订/不入历史）计入 **413 已实现（50 完整 + 363 部分）/ 568 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
-> **413 已实现（50 完整 + 363 部分）/ 568 未实现**；无未保存修改提示，无多文档。
+> **2026-11-09 增补（Wave 8）**：`ELEV` 一个**只读会话标高令牌报告**（默认 0.0；`ELEV <height>` 设置形式未实现，不按标高创建对象），`UCSICON` 一个会话开关（默认关；不渲染任何 UCS 图标）；另加 `UCS`/`UCSMAN`/`TABLET`/`TASKBAR`/`REINIT`/`SYSWINDOWS`/`MENU`/`RIBBON` 八个**具名拒绝**（`CadError::Unsupported` + 稳定原因串：无 UCS 模型、无数字化仪/设备初始化模型、无菜单文件模型，窗口装饰/布局/功能区可见性由宿主负责；不写库/不升修订/不入历史）计入 **423 已实现（50 完整 + 373 部分）/ 558 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
+> **423 已实现（50 完整 + 373 部分）/ 558 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -276,6 +277,7 @@
 | `EATTEDIT` | 部分实现 | 具名拒绝（`eattedit.unsupported`）：本构建无块属性模型。 |
 | `EATTEXT` | 部分实现 | 具名拒绝（`eatttext.unsupported`）：本构建无块属性模型。 |
 | `EDITTIME` | 部分实现 | 只读：当前 UTC 时钟 + 文档修订/实体数；创建/修改时间与会话用时 NOT TRACKED。 |
+| `ELEV` | 部分实现 | 只读报告会话标高档位（默认 0.0）；`ELEV <height>` 设置形式未实现，不按标高创建对象。 |
 | `ELLIPSE` | 已实现 | — |
 | `ERASE` | 已实现 | — |
 | `ETRANSMIT` | 部分实现 | 具名拒绝（`etransmit.unsupported`）：本构建无 eTransmit/zip 打包模型。 |
@@ -365,6 +367,7 @@
 | `LTSCALE` | 部分实现 | 一个正有限小数；写内存 `$LTSCALE`（一次 revision，无撤销）；当前导出器不写该变量，SAVE→OPEN 不往返 |
 | `MASSPROP` | 部分实现 | 只读；仅选定闭合共面圆/完整椭圆/闭合多段线；面积/周长/包围盒/形心。椭圆周长近似；无惯性矩/主轴/体积/密度/`.mpr` |
 | `MATCHPROP` | 部分实现 | 只转移 layer/color/linetype/lineweight/transparency |
+| `MENU` | 部分实现 | 具名拒绝（`menu.unsupported`）：本构建无菜单文件模型，界面固定。 |
 | `MEASUREGEOM` | 部分实现 | 选项路由：DISTANCE/ANGLE/AREA/POLYLINE 复用既有工具，RADIUS 只读报告；VOLUME 显式未实现（无 3D 体积模型） |
 | `MIRROR` | 部分实现 | 保留原件；拒绝 Text/MultiLeader |
 | `MINSERT` | 部分实现 | 具名拒绝（`minsert.unsupported`）：需要块名与行列数；请用 INSERT + ARRAYRECT。 |
@@ -432,6 +435,9 @@
 | `STYLESMANAGER` | 部分实现 | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |
 | `SYSVARMONITOR` | 部分实现 | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | `SYSVDLG` | 部分实现 | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
+| `SYSWINDOWS` | 部分实现 | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
+| `TABLET` | 部分实现 | 具名拒绝（`tablet.unsupported`）：本构建无数字化仪模型。 |
+| `TASKBAR` | 部分实现 | 具名拒绝（`taskbar.unsupported`）：应用窗口装饰由宿主负责。 |
 | `TEXTSCR` | 部分实现 | 置会话 `text_screen`=true；无文本屏幕窗口、不显示提示历史。 |
 | `TRAYSETTINGS` | 部分实现 | 会话令牌（默认 ON）；无状态栏托盘 UI。 |
 | `VIEWPLOTDETAILS` | 部分实现 | 具名拒绝（`viewplotdetails.unsupported`）：无打印详细信息模型。 |
@@ -460,10 +466,12 @@
 | `-RENAME` | 部分实现 | `RENAME` 的别名，同一实现 |
 | `REGENAUTO` | 部分实现 | 会话令牌 `regenauto`；本构建无自动重生成开关，需显式 REGEN。 |
 | `REGION` | 部分实现 | 具名拒绝（`region.unsupported`）：无面域几何模型。 |
+| `REINIT` | 部分实现 | 具名拒绝（`reinit.unsupported`）：本构建无设备/数字化仪初始化模型。 |
 | `RENAME` | 部分实现 | `RENAME <kind> <old> <new>`；仅 LAYER 有重命名 API，其余 kind 按名拒绝；不可撤销 |
 | `RESETBLOCK` | 部分实现 | 具名拒绝（`resetblock.unsupported`）：本构建无动态块参数重置 API。 |
 | `REVCLOUD` | 部分实现 | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
 | `REVERSE` | 部分实现 | 仅 LINE/LWPOLYLINE/SPLINE，当前选择为全部输入；无交互拾取提示，无螺旋/3D 变体 |
+| `RIBBON` | 部分实现 | 具名拒绝（`ribbon.unsupported`）：功能区可见性由宿主窗口装饰负责。 |
 | `ROTATE` | 已实现 | — |
 | `SAVE` | 部分实现 | 有损 DXF 另存；源为 `.dwg` 时可**实验性导出 DWG**（上游 `acadrust::DwgWriter`，新文件、默认 `<stem>-export.dwg`、绝不覆盖源）；DWG 导出有损/不完整，仅合成 self-roundtrip 证据，vendor/AutoCAD **NOT VERIFIED** |
 | `SAVEAS` | 部分实现 | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
@@ -502,6 +510,9 @@
 | `TSCALE` | 部分实现 | `TSCALE <factor>`；复用 SCALETEXT 的唯一 `scaled_text` 规则（height + MText `wrap_width`）；factor=1 为 `tscale.unchanged` 且不开事务 |
 | `TXT2MTXT` | 部分实现 | 选择式：至少一个模型空间 Text/MText，按上→下、左→右稳定排序后用 `\P` 原样拼接成一个 `AcDbMText`，沿用首个源的样式/位置/字高/旋转/对齐/层/绘制顺序/`wrap_width`，同一事务删除全部源；设置对话框与强制统一行距未实现 |
 | `U` | 已实现 | — |
+| `UCS` | 部分实现 | 具名拒绝（`ucs.unsupported`）：本构建无 UCS 模型。 |
+| `UCSICON` | 部分实现 | 会话开关（默认关）：翻转 `ucsicon`；不渲染任何 UCS 图标。 |
+| `UCSMAN` | 部分实现 | 具名拒绝（`ucsman.unsupported`）：本构建无 UCS 模型。 |
 | `UNDO` | 已实现 | — |
 | `UNGROUP` | 部分实现 | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
 | `UNISOLATEOBJECTS` | 部分实现 | 清空会话隐藏集；无数据库写/撤销 |
@@ -871,7 +882,7 @@
 | 335 | `EDGESURF` | 未实现 | Creates a mesh between four contiguous edges or curves. | — |
 | 336 | `EDITSHOT` | 未实现 | Edits a saved named view with or without motion. | — |
 | 337 | `EDITTIME` | 部分实现 | Tracks the amount of active editing time for a drawing. | 只读：当前 UTC 时钟 + 文档修订/实体数；创建/修改时间与会话用时 NOT TRACKED。 |
-| 338 | `ELEV` | 未实现 | Sets elevation and extrusion thickness of new objects. | — |
+| 338 | `ELEV` | 部分实现 | Sets elevation and extrusion thickness of new objects. | 只读报告会话标高档位（默认 0.0）；`ELEV <height>` 设置形式未实现，不按标高创建对象。 |
 | 339 | `ELLIPSE` | 已实现 | Creates an ellipse or an elliptical arc. | — |
 | 340 | `ERASE` | 已实现 | Removes objects from a drawing. | — |
 | 341 | `-ETRANSMIT` | 部分实现 | From the Command line, packages a set of files for internet transmission. | 具名拒绝（`-etransmit.unsupported`）：本构建无 eTransmit/zip 打包模型；命令行拼写。 |
@@ -1066,7 +1077,7 @@
 | 530 | `MATERIALSCLOSE` | 未实现 | Closes the Materials Browser. | — |
 | 531 | `MEASURE` | 未实现（同名不同义） | Creates point objects or blocks at measured intervals along the length or perimeter of an object. | 本项目 MEASURE 是测量入口（默认 DIST），不是沿对象放置点/块；**不计入覆盖** |
 | 532 | `MEASUREGEOM` | 部分实现 | Measures the distance, radius, angle, area, and volume of selected objects, a sequence of points, or dynamically. | **v1（2026-11-07）选项路由**：`MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 复用既有 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE` 工具（同一交互请求，无第二测量引擎）；`RADIUS` 只读报告所选单个 `ARC`/`CIRCLE` 的圆心/半径/直径/圆周长（圆弧另报弧长）。裸名 `measuregeom.needs_option`，未知选项按名拒绝。**未实现**：`VOLUME`（本构建无 3D 实体/体积模型，显式 `measuregeom.volume_unsupported`，不编造数值）；AutoCAD 的其它选项/动态测量未接线。 |
-| 533 | `MENU` | 未实现 | Obsolete. Loads a customization file. | — |
+| 533 | `MENU` | 部分实现 | Obsolete. Loads a customization file. | 具名拒绝（`menu.unsupported`）：本构建无菜单文件模型，界面固定。 |
 | 534 | `MESH` | 未实现 | Creates a 3D mesh primitive object such as a box, cone, cylinder, pyramid, sphere, wedge, or torus. | — |
 | 535 | `MESHCAP` | 未实现 | Creates a mesh face that connects open edges. | — |
 | 536 | `MESHCOLLAPSE` | 未实现 | Merges the vertices of selected mesh faces or edges. | — |
@@ -1260,7 +1271,7 @@
 | 724 | `REGENALL` | 部分实现 | Regenerates the entire drawing and refreshes all viewports. | 所有视口 regeneration；不写库 |
 | 725 | `REGENAUTO` | 部分实现 | Obsolete. Controls automatic regeneration of a drawing. | 会话令牌 `regenauto`；本构建无自动重生成开关，需显式 REGEN。 |
 | 726 | `REGION` | 部分实现 | Converts objects that enclose an area into a 2D region object. | 具名拒绝（`region.unsupported`）：无面域几何模型。 |
-| 727 | `REINIT` | 未实现 | Reinitializes the digitizer, digitizer input/output port, and program parameters file. | — |
+| 727 | `REINIT` | 部分实现 | Reinitializes the digitizer, digitizer input/output port, and program parameters file. | 具名拒绝（`reinit.unsupported`）：本构建无设备/数字化仪初始化模型。 |
 | 728 | `-RENAME` | 部分实现 | Changes the names assigned to named objects from the Command prompt. | `RENAME` 的别名，同一实现 |
 | 729 | `RENAME` | 部分实现 | Changes the names assigned to items such as layers and dimension styles. | `RENAME <kind> <old> <new>`；仅 LAYER 有重命名 API，其余 kind 按名拒绝；不可撤销 |
 | 730 | `-RENDER` | 未实现 | Creates a photorealistic or realistically shaded image of a 3D solid or surface model from the Command prompt. | — |
@@ -1285,7 +1296,7 @@
 | 749 | `REVERT` | 部分实现 | Closes and then reopens the current drawing. | 具名拒绝（`revert.unsupported`）：本构建无重新打开源文件的路径。 |
 | 750 | `REVOLVE` | 未实现 | Creates a 3D solid or surface by sweeping an object around an axis. | — |
 | 751 | `REVSURF` | 未实现 | Creates a mesh by revolving a profile about an axis. | — |
-| 752 | `RIBBON` | 未实现 | Displays the ribbon. | ribbon 恒显示；无 RIBBON 命令 |
+| 752 | `RIBBON` | 部分实现 | Displays the ribbon. | 具名拒绝（`ribbon.unsupported`）：功能区可见性由宿主窗口装饰负责。 |
 | 753 | `RIBBONCLOSE` | 未实现 | Hides the ribbon. | — |
 | 754 | `ROTATE` | 已实现 | Rotates objects around a base point. | — |
 | 755 | `ROTATE3D` | 未实现 | Moves objects about a 3D axis. | — |
@@ -1374,16 +1385,16 @@
 | 838 | `SWEEP` | 未实现 | Creates a 3D solid or 3D surface by sweeping a 2D object or subobject along an open or closed path. | — |
 | 839 | `SYSVARMONITOR` | 部分实现 | Monitors a list of system variables and sends notifications when there are changes to any one in the list. | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | 840 | `SYSVDLG` | 部分实现 | Allows you to view, edit, save, and restore system variable settings. | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
-| 841 | `SYSWINDOWS` | 未实现 | Arranges windows and icons when the application window is shared with external applications. | — |
+| 841 | `SYSWINDOWS` | 部分实现 | Arranges windows and icons when the application window is shared with external applications. | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
 | 842 | `-TABLE` | 未实现 | Creates an empty table object. | — |
 | 843 | `TABLE` | 未实现 | Creates an empty table object. | — |
 | 844 | `TABLEDIT` | 未实现 | Edits text in a table cell. | — |
 | 845 | `TABLEEXPORT` | 未实现 | Exports data from a table object in CSV file format. | — |
 | 846 | `TABLESTYLE` | 未实现 | Creates, modifies, or specifies table styles. | — |
-| 847 | `TABLET` | 未实现 | Calibrates, configures, and turns on and off an attached digitizing tablet. | — |
+| 847 | `TABLET` | 部分实现 | Calibrates, configures, and turns on and off an attached digitizing tablet. | 具名拒绝（`tablet.unsupported`）：本构建无数字化仪模型。 |
 | 848 | `TABSURF` | 未实现 | Creates a mesh from a line or curve that is swept along a straight path. | — |
 | 849 | `TARGETPOINT` | 未实现 | Creates a target point light. | — |
-| 850 | `TASKBAR` | 未实现 | Controls the Peek/Preview behavior of the application's button in the Windows taskbar when multiple drawings are open. | — |
+| 850 | `TASKBAR` | 部分实现 | Controls the Peek/Preview behavior of the application's button in the Windows taskbar when multiple drawings are open. | 具名拒绝（`taskbar.unsupported`）：应用窗口装饰由宿主负责。 |
 | 851 | `TCASE` | 部分实现 | Changes the case of selected text, mtext, attributes, and dimension text. | 选择式；只处理 Text/MText（MULTILEADER 走 with_text）；裸命令默认 Title，键入 `TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE` 或 `U/L/T/S/G`；MTEXT 格式转义逐字保留；属性/标注文字未建模（`tcase.not_reset`） |
 | 852 | `TCIRCLE` | 部分实现 | Creates a circle, a slot, or a rectangle around each selected text or mtext object. | `TCIRCLE CIRCLE\|RECTANGLE`；用**估算**文字外框（宽 = `height × 字符数`、高 = `height`、忽略旋转）在文字所在图层建 `Circle` 或闭合 `Polyline`；保留文字；无关联性 |
 | 853 | `TCOUNT` | 部分实现 | Adds sequential numbering to text and mtext objects as a prefix, suffix, or replacement text. | `TCOUNT <start> <step> [prefix] [suffix]`；按上→下/左→右顺序把每个选中 Text/MText 替换为 `prefix+编号+suffix`；`step` 必须 >0；AutoCAD 的逐项前缀/后缀对话框模式未实现 |
@@ -1425,9 +1436,9 @@
 | 889 | `TXT2MTXT` | 部分实现 | Converts or combines single-line or multiline text objects into one or more multiline text objects. | 选择式 v1：仅模型空间 Text/MText；上→下、左→右稳定排序，`\P` 原样拼接为一个 `AcDbMText`；沿用首源样式/位置/字高/旋转/对齐/层/绘制顺序/`wrap_width`；同事务删除源；设置对话框/强制统一行距未实现 |
 | 890 | `TXTEXP` | 未实现 | Explodes text or mtext objects into polyline objects. | — |
 | 891 | `U` | 已实现 | Reverses the most recent operation. | — |
-| 892 | `UCS` | 未实现 | Sets the origin and orientation of the current user coordinate system (UCS). | — |
-| 893 | `UCSICON` | 未实现 | Controls the visibility, placement, appearance, and selectability of the UCS icon. | — |
-| 894 | `UCSMAN` | 未实现 | Manages UCS definitions. | — |
+| 892 | `UCS` | 部分实现 | Sets the origin and orientation of the current user coordinate system (UCS). | 具名拒绝（`ucs.unsupported`）：本构建无 UCS 模型。 |
+| 893 | `UCSICON` | 部分实现 | Controls the visibility, placement, appearance, and selectability of the UCS icon. | 会话开关（默认关）：翻转 `ucsicon`；不渲染任何 UCS 图标。 |
+| 894 | `UCSMAN` | 部分实现 | Manages UCS definitions. | 具名拒绝（`ucsman.unsupported`）：本构建无 UCS 模型。 |
 | 895 | `ULAYERS` | 未实现 | Controls the display of layers in a DWF, DWFx, PDF, or DGN underlay. | — |
 | 896 | `UNDEFINE` | 未实现 | Allows an application-defined command to override an internal command. | — |
 | 897 | `UNDO` | 已实现 | Reverses the effect of commands. | — |

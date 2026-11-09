@@ -1184,3 +1184,18 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `DCFORM` | **部分实现（具名拒绝）**：`dcform.unsupported: this build has no dimensional-constraint model` | 同上 |
 | `DCHORIZONTAL` | **部分实现（具名拒绝）**：`dchorizontal.unsupported: this build has no dimensional-constraint model` | 同上 |
 | `DCLINEAR` | **部分实现（具名拒绝）**：`dclinear.unsupported: this build has no dimensional-constraint model` | 同上 |
+
+### 2026-11-09 Wave 8 扩展命令（会话令牌 / 稳定拒绝）
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `ELEV` | **部分实现（只读）**：报告会话标高档位（默认 0.0，`elev.value`） | `ELEV <height>` 设置形式未实现；不按标高创建对象；不写库/不升修订 |
+| `UCSICON` | **部分实现（会话开关）**：翻转 `ucsicon`（默认关，`ucsicon.toggled`） | 本构建不渲染 UCS 图标，不声称图标可见性/位置/外观；不写库/不升修订 |
+| `UCS` | **部分实现（具名拒绝）**：`ucs.unsupported: this build has no UCS model` | 不写库/不升修订/不入历史 |
+| `UCSMAN` | **部分实现（具名拒绝）**：`ucsman.unsupported: this build has no UCS model` | 同上 |
+| `TABLET` | **部分实现（具名拒绝）**：`tablet.unsupported: no tablet/digitizer model` | 同上 |
+| `TASKBAR` | **部分实现（具名拒绝）**：`taskbar.unsupported: application window chrome is host-owned` | 同上 |
+| `REINIT` | **部分实现（具名拒绝）**：`reinit.unsupported: no device/digitizer initialization model` | 同上 |
+| `SYSWINDOWS` | **部分实现（具名拒绝）**：`syswindows.unsupported: application window layout is host-owned` | 同上 |
+| `MENU` | **部分实现（具名拒绝）**：`menu.unsupported: no menu-file model; the UI is fixed` | 同上 |
+| `RIBBON` | **部分实现（具名拒绝）**：`ribbon.unsupported: ribbon visibility is host-owned chrome` | 同上 |

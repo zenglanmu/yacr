@@ -13,8 +13,10 @@
 //! `app_extended_file6` (drawing-log token plus file/plot/export reports) and
 //! `app_extended_refusals6` (named refusals). Wave 7 adds `app_extended_dyn7`
 //! (read-only dynamic-block visibility reports) and `app_extended_refusals7`
-//! (named refusals). Keeping the routing here means `application.rs` stays a
-//! one-line interception rather than growing a hundred more arms.
+//! (named refusals). Wave 8 adds `app_extended_session8` (session tokens) and
+//! `app_extended_refusals8` (named refusals). Keeping the routing here means
+//! `application.rs` stays a one-line interception rather than growing a hundred
+//! more arms.
 
 use super::*;
 
@@ -248,6 +250,20 @@ impl Application {
             | ExtendedCommandId::DcForm
             | ExtendedCommandId::DcHorizontal
             | ExtendedCommandId::DcLinear => self.extended_refusal7(command, ext)?,
+            // Wave 8 session tokens: ELEV reports one token, UCSICON flips one.
+            // Both are session-only and never write the drawing.
+            ExtendedCommandId::Elev | ExtendedCommandId::UcsIcon => {
+                self.extended_session8(session, command, ext)?
+            }
+            // Wave 8 named refusals: a stable `Unsupported` reason per name.
+            ExtendedCommandId::Ucs
+            | ExtendedCommandId::UcsMan
+            | ExtendedCommandId::Tablet
+            | ExtendedCommandId::TaskBar
+            | ExtendedCommandId::Reinit
+            | ExtendedCommandId::SysWindows
+            | ExtendedCommandId::Menu
+            | ExtendedCommandId::Ribbon => self.extended_refusal8(command, ext)?,
         };
         Ok(Some(outcome))
     }

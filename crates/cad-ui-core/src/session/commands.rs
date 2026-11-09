@@ -560,6 +560,20 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("DCFORM", CommandId::Extended(ExtendedCommandId::DcForm)),
     ("DCHORIZONTAL", CommandId::Extended(ExtendedCommandId::DcHorizontal)),
     ("DCLINEAR", CommandId::Extended(ExtendedCommandId::DcLinear)),
+    // Wave 8 (2026-11-09): session tokens and stable named refusals. ELEV is a
+    // read-only elevation-token report and UCSICON flips a session flag; the
+    // rest refuse the absent UCS/tablet/menu models and host-owned chrome. All
+    // Viewer-legal.
+    ("ELEV", CommandId::Extended(ExtendedCommandId::Elev)),
+    ("UCSICON", CommandId::Extended(ExtendedCommandId::UcsIcon)),
+    ("UCS", CommandId::Extended(ExtendedCommandId::Ucs)),
+    ("UCSMAN", CommandId::Extended(ExtendedCommandId::UcsMan)),
+    ("TABLET", CommandId::Extended(ExtendedCommandId::Tablet)),
+    ("TASKBAR", CommandId::Extended(ExtendedCommandId::TaskBar)),
+    ("REINIT", CommandId::Extended(ExtendedCommandId::Reinit)),
+    ("SYSWINDOWS", CommandId::Extended(ExtendedCommandId::SysWindows)),
+    ("MENU", CommandId::Extended(ExtendedCommandId::Menu)),
+    ("RIBBON", CommandId::Extended(ExtendedCommandId::Ribbon)),
 
 ];
 

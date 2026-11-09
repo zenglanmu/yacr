@@ -898,4 +898,18 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'DCHORIZONTAL', labelKey: 'draw.kind.dchorizontal', icon: 'dimlinear', group: 'annotate' },
   { id: 'DCLINEAR', labelKey: 'draw.kind.dclinear', icon: 'dimlinear', group: 'annotate' },
 
+  // The 2026-11-09 Wave 8 batch: two session tokens (ELEV, UCSICON) and eight
+  // stable named refusals (UCS through RIBBON). Appended last so no shipped row
+  // moves.
+  { id: 'ELEV', labelKey: 'draw.kind.elev', icon: 'settings', group: 'view' },
+  { id: 'UCSICON', labelKey: 'draw.kind.ucsicon', icon: 'axes', group: 'view' },
+  { id: 'UCS', labelKey: 'draw.kind.ucs', icon: 'axes', group: 'view' },
+  { id: 'UCSMAN', labelKey: 'draw.kind.ucsman', icon: 'axes', group: 'view' },
+  { id: 'TABLET', labelKey: 'draw.kind.tablet', icon: 'pencil', group: 'view' },
+  { id: 'TASKBAR', labelKey: 'draw.kind.taskbar', icon: 'app', group: 'view' },
+  { id: 'REINIT', labelKey: 'draw.kind.reinit', icon: 'settings', group: 'view' },
+  { id: 'SYSWINDOWS', labelKey: 'draw.kind.syswindows', icon: 'app', group: 'view' },
+  { id: 'MENU', labelKey: 'draw.kind.menu', icon: 'menu', group: 'view' },
+  { id: 'RIBBON', labelKey: 'draw.kind.ribbon', icon: 'menu', group: 'view' },
+
 ]);
