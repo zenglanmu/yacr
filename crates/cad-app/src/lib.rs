@@ -61,6 +61,9 @@ mod app_extended_refusals5;
 // The Wave 6 extended-command handlers (file/plot/export token+reports+refusals).
 mod app_extended_file6;
 mod app_extended_refusals6;
+// The Wave 7 extended-command handlers (dynamic-block visibility reports+refusals).
+mod app_extended_dyn7;
+mod app_extended_refusals7;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;

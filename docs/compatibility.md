@@ -1149,3 +1149,38 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `PUBLISH` | **部分实现（具名拒绝）**：`publish.unsupported: no batch publish model` | 同上 |
 | `-PUBLISH` | **部分实现（具名拒绝）**：`-publish.unsupported: no batch publish model` | 同上 |
 | `AUTOPUBLISH` | **部分实现（具名拒绝）**：`autopublish.unsupported: no automatic publish model` | 同上 |
+
+### 2026-11-09 Wave 7 扩展命令（动态块 / 约束）
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `BVSTATE` | **部分实现（只读）**：逐选中 INSERT 报告 `block_dynamic_visibility` 的活动状态；`bvstate.report` | 无 INSERT 报 `bvstate.no_selection`；无描述符或活动状态未解析报 `bvstate.not_set`，不猜测/不设置状态 |
+| `-BVSTATE` | **部分实现（只读）**：同 `BVSTATE`，使用 `-bvstate.*` 诊断码 | 同上；不设置状态 |
+| `BACTION` | **部分实现（具名拒绝）**：`baction.unsupported: this build has no dynamic-block action model` | 不写库/不升修订/不入历史 |
+| `BACTIONBAR` | **部分实现（具名拒绝）**：`bactionbar.unsupported: this build has no dynamic-block action model` | 同上 |
+| `BACTIONSET` | **部分实现（具名拒绝）**：`bactionset.unsupported: this build has no dynamic-block action model` | 同上 |
+| `BACTIONTOOL` | **部分实现（具名拒绝）**：`bactiontool.unsupported: this build has no dynamic-block action model` | 同上 |
+| `BASSOCIATE` | **部分实现（具名拒绝）**：`bassociate.unsupported: this build has no dynamic-block action model` | 同上 |
+| `BAUTHORPALETTE` | **部分实现（具名拒绝）**：`bauthorpalette.unsupported: this build has no block editor` | 同上 |
+| `BAUTHORPALETTECLOSE` | **部分实现（具名拒绝）**：`bauthorpaletteclose.unsupported: this build has no block editor` | 同上 |
+| `BCONSTRUCTION` | **部分实现（具名拒绝）**：`bconstruction.unsupported: this build has no dynamic-block construction geometry` | 同上 |
+| `BCPARAMETER` | **部分实现（具名拒绝）**：`bcparameter.unsupported: this build has no dynamic-block parameter model` | 同上 |
+| `-BCPARAMETER` | **部分实现（具名拒绝）**：`-bcparameter.unsupported: this build has no dynamic-block parameter model` | 同上 |
+| `BPARAMETER` | **部分实现（具名拒绝）**：`bparameter.unsupported: this build has no dynamic-block parameter model` | 同上 |
+| `BLOOKUPTABLE` | **部分实现（具名拒绝）**：`blookuptable.unsupported: this build has no dynamic-block lookup table` | 同上 |
+| `BTABLE` | **部分实现（具名拒绝）**：`btable.unsupported: this build has no dynamic-block lookup table` | 同上 |
+| `BVHIDE` | **部分实现（具名拒绝）**：`bvhide.unsupported: no per-visibility-state entity hide API` | 同上 |
+| `BVSHOW` | **部分实现（具名拒绝）**：`bvshow.unsupported: no per-visibility-state entity show API` | 同上 |
+| `RESETBLOCK` | **部分实现（具名拒绝）**：`resetblock.unsupported: no dynamic-block parameter reset API` | 同上 |
+| `AUTOCONSTRAIN` | **部分实现（具名拒绝）**：`autoconstrain.unsupported: this build has no geometric-constraint model` | 同上 |
+| `DELCONSTRAINT` | **部分实现（具名拒绝）**：`delconstraint.unsupported: this build has no geometric-constraint model` | 同上 |
+| `DIMCONSTRAINT` | **部分实现（具名拒绝）**：`dimconstraint.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `GEOMCONSTRAINT` | **部分实现（具名拒绝）**：`geomconstraint.unsupported: this build has no geometric-constraint model` | 同上 |
+| `DCALIGNED` | **部分实现（具名拒绝）**：`dcaligned.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCANGULAR` | **部分实现（具名拒绝）**：`dcangular.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCCONVERT` | **部分实现（具名拒绝）**：`dcconvert.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCDIAMETER` | **部分实现（具名拒绝）**：`dcdiameter.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCDISPLAY` | **部分实现（具名拒绝）**：`dcdisplay.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCFORM` | **部分实现（具名拒绝）**：`dcform.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCHORIZONTAL` | **部分实现（具名拒绝）**：`dchorizontal.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCLINEAR` | **部分实现（具名拒绝）**：`dclinear.unsupported: this build has no dimensional-constraint model` | 同上 |

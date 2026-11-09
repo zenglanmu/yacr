@@ -193,6 +193,17 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'EXPORTLAYOUT', 'PLOTSTAMP', '-PLOTSTAMP', '-PLOT', '-EXPORT', 'ETRANSMIT',
   '-ETRANSMIT', 'ARCHIVE', '-ARCHIVE', 'PUBLISH', '-PUBLISH', 'AUTOPUBLISH',
 
+  // The 2026-11-09 Wave 7 batch: the two read-only visibility-state reports and
+  // the twenty-eight dynamic-block/constraint refusals all read the open
+  // drawing, so the start page disables them with the catalog's own "no drawing
+  // is open" sentence. None takes a capability gate: the reports only read.
+  'BVSTATE', '-BVSTATE', 'BACTION', 'BACTIONBAR', 'BACTIONSET', 'BACTIONTOOL',
+  'BASSOCIATE', 'BAUTHORPALETTE', 'BAUTHORPALETTECLOSE', 'BCONSTRUCTION',
+  'BCPARAMETER', '-BCPARAMETER', 'BPARAMETER', 'BLOOKUPTABLE', 'BTABLE',
+  'BVHIDE', 'BVSHOW', 'RESETBLOCK', 'AUTOCONSTRAIN', 'DELCONSTRAINT',
+  'DIMCONSTRAINT', 'GEOMCONSTRAINT', 'DCALIGNED', 'DCANGULAR', 'DCCONVERT',
+  'DCDIAMETER', 'DCDISPLAY', 'DCFORM', 'DCHORIZONTAL', 'DCLINEAR',
+
 ]);
 
 /** One command's precondition on the **current selection**. */

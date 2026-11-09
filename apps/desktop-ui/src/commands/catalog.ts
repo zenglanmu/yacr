@@ -863,4 +863,39 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: '-PUBLISH', labelKey: 'draw.kind.dashpublish', icon: 'printer', group: 'file' },
   { id: 'AUTOPUBLISH', labelKey: 'draw.kind.autopublish', icon: 'printer', group: 'file' },
 
+  // The 2026-11-09 Wave 7 batch: the dynamic-block / constraint surfaces.
+  // BVSTATE and -BVSTATE are read-only reports of each selected INSERT's active
+  // visibility state; the rest are stable named refusals. Appended last so no
+  // shipped row moves.
+  { id: 'BVSTATE', labelKey: 'draw.kind.bvstate', icon: 'properties', group: 'properties' },
+  { id: '-BVSTATE', labelKey: 'draw.kind.dashbvstate', icon: 'properties', group: 'properties' },
+  { id: 'BACTION', labelKey: 'draw.kind.baction', icon: 'app', group: 'modify' },
+  { id: 'BACTIONBAR', labelKey: 'draw.kind.bactionbar', icon: 'app', group: 'modify' },
+  { id: 'BACTIONSET', labelKey: 'draw.kind.bactionset', icon: 'app', group: 'modify' },
+  { id: 'BACTIONTOOL', labelKey: 'draw.kind.bactiontool', icon: 'app', group: 'modify' },
+  { id: 'BASSOCIATE', labelKey: 'draw.kind.bassociate', icon: 'app', group: 'modify' },
+  { id: 'BAUTHORPALETTE', labelKey: 'draw.kind.bauthorpalette', icon: 'palette', group: 'modify' },
+  { id: 'BAUTHORPALETTECLOSE', labelKey: 'draw.kind.bauthorpaletteclose', icon: 'palette', group: 'modify' },
+  { id: 'BCONSTRUCTION', labelKey: 'draw.kind.bconstruction', icon: 'xline', group: 'modify' },
+  { id: 'BCPARAMETER', labelKey: 'draw.kind.bcparameter', icon: 'settings', group: 'modify' },
+  { id: '-BCPARAMETER', labelKey: 'draw.kind.dashbcparameter', icon: 'settings', group: 'modify' },
+  { id: 'BPARAMETER', labelKey: 'draw.kind.bparameter', icon: 'settings', group: 'modify' },
+  { id: 'BLOOKUPTABLE', labelKey: 'draw.kind.blookuptable', icon: 'properties', group: 'properties' },
+  { id: 'BTABLE', labelKey: 'draw.kind.btable', icon: 'properties', group: 'properties' },
+  { id: 'BVHIDE', labelKey: 'draw.kind.bvhide', icon: 'eyeOff', group: 'modify' },
+  { id: 'BVSHOW', labelKey: 'draw.kind.bvshow', icon: 'eye', group: 'modify' },
+  { id: 'RESETBLOCK', labelKey: 'draw.kind.resetblock', icon: 'settings', group: 'modify' },
+  { id: 'AUTOCONSTRAIN', labelKey: 'draw.kind.autoconstrain', icon: 'settings', group: 'modify' },
+  { id: 'DELCONSTRAINT', labelKey: 'draw.kind.delconstraint', icon: 'settings', group: 'modify' },
+  { id: 'DIMCONSTRAINT', labelKey: 'draw.kind.dimconstraint', icon: 'dimlinear', group: 'annotate' },
+  { id: 'GEOMCONSTRAINT', labelKey: 'draw.kind.geomconstraint', icon: 'settings', group: 'modify' },
+  { id: 'DCALIGNED', labelKey: 'draw.kind.dcaligned', icon: 'dimaligned', group: 'annotate' },
+  { id: 'DCANGULAR', labelKey: 'draw.kind.dcangular', icon: 'dimangular', group: 'annotate' },
+  { id: 'DCCONVERT', labelKey: 'draw.kind.dcconvert', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DCDIAMETER', labelKey: 'draw.kind.dcdiameter', icon: 'dimdiameter', group: 'annotate' },
+  { id: 'DCDISPLAY', labelKey: 'draw.kind.dcdisplay', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DCFORM', labelKey: 'draw.kind.dcform', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DCHORIZONTAL', labelKey: 'draw.kind.dchorizontal', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DCLINEAR', labelKey: 'draw.kind.dclinear', icon: 'dimlinear', group: 'annotate' },
+
 ]);

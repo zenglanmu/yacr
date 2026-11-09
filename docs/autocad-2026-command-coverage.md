@@ -27,9 +27,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **333** |
-| **已实现合计（完整 + 部分）** | **383** |
-| 未实现 | **598** |
+| 部分实现（有写明的界） | **363** |
+| **已实现合计（完整 + 部分）** | **413** |
+| 未实现 | **568** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -65,7 +65,8 @@
 > **2026-11-09 增补（Wave 4）**：`CENTERMARK`/`CENTERLINE`/`NCOPY`/`COPYTOLAYER`/`-COPYTOLAYER`/`CDORDER`/`FLATTEN`/`XPLODE`/`BTRIM`/`BEXTEND`/`CHANGE`/`CHPROP` 十二个**真实选择式 2D 编辑**（复用既有创建漏斗、`plan_trim`/`plan_extend`、`plan_entity` 与 EXPLODE 路径；均为 Work-only，一条事务/一步撤销；各自写明部分边界），以及 `BSCALE`…`CHSPACE` 十八个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **323 已实现（50 完整 + 273 部分）/ 658 未实现**。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-09 增补（Wave 5）**：`ATTDISP` 一个会话令牌（默认开；本构建无块属性模型，不渲染属性，不写图/不升修订），`BATTMAN`/`BATTORDER` 两个块定义只读列表（复用 `drawing.blocks()`，并明说 `*.attributes_not_modeled`），`XREF`/`-XREF`/`EXTERNALREFERENCES` 三个外部参照**导入期溯源**只读报告（真实读取 `drawing.external_references()`，不虚构行；`EXTERNALREFERENCES` 另报 `palette_not_implemented`），`EXTERNALREFERENCESCLOSE` 一个具名 no-op（无选项板可关）；另加 `ATTDEF`…`CLASSICXREF` 二十三个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **353 已实现（50 完整 + 303 部分）/ 628 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-09 增补（Wave 6）**：`DWGLOG`/`LOGFILEON`/`LOGFILEOFF` 三个名字共用**一个会话图形日志令牌**（默认关；本构建不写日志文件、不写图/不升修订），`DWGPROPS` 一个只读文档报告（文档 id/修订/实体数；标题、作者、自定义特性**未建模**），`DWFFORMAT`/`EXPORTPDF` 两个**只读能力报告**（DWF/DWFx 不导出；PDF 由宿主经 `PLOT` 负责，二者都不是错误）；另加 `SAVEALL`…`AUTOPUBLISH` 二十四个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **383 已实现（50 完整 + 333 部分）/ 598 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
-> **383 已实现（50 完整 + 333 部分）/ 598 未实现**；无未保存修改提示，无多文档。
+> **2026-11-09 增补（Wave 7）**：`BVSTATE`/`-BVSTATE` 两个**只读动态块可见性报告**（逐选中 INSERT 读取 `DrawingDatabase::block_dynamic_visibility` 的活动状态；无 INSERT 报 `*.no_selection`，无描述符或活动状态未解析报 `*.not_set`，绝不猜测；不设置状态/不写库/不升修订）；另加 `BACTION`…`DCLINEAR` 二十八个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，覆盖动态块动作/参数/查找表/构造几何/按状态隐藏显示、块编写选项板、参数重置与几何/尺寸约束；不写库/不升修订/不入历史）计入 **413 已实现（50 完整 + 363 部分）/ 568 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
+> **413 已实现（50 完整 + 363 部分）/ 568 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -120,8 +121,10 @@
 | `-ATTDEF` | 部分实现 | 具名拒绝（`-attdef.unsupported`）：本构建无块属性模型；命令行拼写。 |
 | `-ATTEDIT` | 部分实现 | 具名拒绝（`-attedit.unsupported`）：本构建无块属性模型；命令行拼写。 |
 | `-ATTEXT` | 部分实现 | 具名拒绝（`-attext.unsupported`）：本构建无块属性模型；命令行拼写。 |
+| `-BCPARAMETER` | 部分实现 | 具名拒绝（`-bcparameter.unsupported`）：本构建无动态块参数模型；命令行拼写。 |
 | `-BEDIT` | 部分实现 | 具名拒绝（`-bedit.unsupported`）：本构建无块编辑器；命令行拼写。 |
 | `-BREPLACE` | 部分实现 | 具名拒绝（`-breplace.unsupported`）：BREPLACE 的命令行拼写。 |
+| `-BVSTATE` | 部分实现 | 只读：每个选中 INSERT 的活动动态块可见性状态（`-bvstate.report`）；无 INSERT 报 `-bvstate.no_selection`，无状态报 `-bvstate.not_set`；不设置状态。 |
 | `-COPYTOLAYER` | 部分实现 | 真实编辑：同 COPYTOLAYER，命令行拼写；一条事务/一步撤销。 |
 | `-DIMINSPECT` | 部分实现 | 具名拒绝（`-diminspect.unsupported`）：同一具名拒绝的命令行拼写。 |
 | `-EATTEXT` | 部分实现 | 具名拒绝（`-eatttext.unsupported`）：本构建无块属性模型；命令行拼写。 |
@@ -162,12 +165,22 @@
 | `ATTREDEF` | 部分实现 | 具名拒绝（`attredef.unsupported`）：本构建无块属性模型。 |
 | `ATTSYNC` | 部分实现 | 具名拒绝（`attsync.unsupported`）：本构建无块属性模型。 |
 | `AUDIT` | 部分实现 | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
+| `AUTOCONSTRAIN` | 部分实现 | 具名拒绝（`autoconstrain.unsupported`）：本构建无几何约束模型。 |
 | `AUTOPUBLISH` | 部分实现 | 具名拒绝（`autopublish.unsupported`）：本构建无自动发布模型。 |
+| `BACTION` | 部分实现 | 具名拒绝（`baction.unsupported`）：本构建无动态块动作模型。 |
+| `BACTIONBAR` | 部分实现 | 具名拒绝（`bactionbar.unsupported`）：本构建无动态块动作模型。 |
+| `BACTIONSET` | 部分实现 | 具名拒绝（`bactionset.unsupported`）：本构建无动态块动作模型。 |
+| `BACTIONTOOL` | 部分实现 | 具名拒绝（`bactiontool.unsupported`）：本构建无动态块动作模型。 |
 | `BASE` | 部分实现 | 具名拒绝（`base.unsupported`）：图形不保存插入基点。 |
+| `BASSOCIATE` | 部分实现 | 具名拒绝（`bassociate.unsupported`）：本构建无动态块动作模型。 |
 | `BATTMAN` | 部分实现 | 只读：块定义与成员数（`battman.entry`/`battman.summary`）；块属性未建模（`battman.attributes_not_modeled`）。 |
 | `BATTORDER` | 部分实现 | 只读：块定义列表（`battorder.entry`/`battorder.summary`）；属性顺序未建模（`battorder.attributes_not_modeled`）。 |
+| `BAUTHORPALETTE` | 部分实现 | 具名拒绝（`bauthorpalette.unsupported`）：本构建无块编辑器。 |
+| `BAUTHORPALETTECLOSE` | 部分实现 | 具名拒绝（`bauthorpaletteclose.unsupported`）：本构建无块编辑器。 |
 | `BCLOSE` | 部分实现 | 具名拒绝（`bclose.unsupported`）：本构建无块编辑器。 |
+| `BCONSTRUCTION` | 部分实现 | 具名拒绝（`bconstruction.unsupported`）：本构建无动态块构造几何。 |
 | `BCOUNT` | 部分实现 | 只读：统计整个模型空间的块参照实例数（按块名分组）；无 AutoCAD 的 Select objects 提示、不展开块成员、不统计图纸空间。 |
+| `BCPARAMETER` | 部分实现 | 具名拒绝（`bcparameter.unsupported`）：本构建无动态块参数模型。 |
 | `BCYCLEORDER` | 部分实现 | 具名拒绝（`bcycleorder.unsupported`）：本构建无动态块夹点模型。 |
 | `BEDIT` | 部分实现 | 具名拒绝（`bedit.unsupported`）：本构建无块编辑器。 |
 | `BESETTINGS` | 部分实现 | 具名拒绝（`besettings.unsupported`）：本构建无块编辑器。 |
@@ -176,16 +189,22 @@
 | `BLOCK` | 已实现 | — |
 | `BLOCK?` | 部分实现 | 只读列出块定义与成员数（复用 `XLIST` 的 `drawing.blocks()`）；不是块编辑器。 |
 | `BLOCKREPLACE` | 部分实现 | 具名拒绝（`blockreplace.unsupported`）：需要两个块定义；无块替换编辑器。 |
+| `BLOOKUPTABLE` | 部分实现 | 具名拒绝（`blookuptable.unsupported`）：本构建无动态块查找表。 |
 | `BOUNDARY` | 部分实现 | 一个内部点 → 每个发现的闭合环（含嵌套岛）一条闭合非关联多段线；仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 选项（边界集/关闭岛检测/面域输出/对象类型）未实现；无 `BO`/`BPOLY` 别名 |
+| `BPARAMETER` | 部分实现 | 具名拒绝（`bparameter.unsupported`）：本构建无动态块参数模型。 |
 | `BREAK` | 部分实现 | 两点打断；无 F 第一点覆盖、无多段打断；LWPOLYLINE 按名拒绝 |
 | `BREAKATPOINT` | 部分实现 | 交互工具：先拾取对象再指定断点（断点可投影到对象上）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
 | `BREPLACE` | 部分实现 | 具名拒绝（`breplace.unsupported`）：需要两个块定义；无块替换编辑器。 |
 | `BSAVE` | 部分实现 | 具名拒绝（`bsave.unsupported`）：本构建无块编辑器。 |
 | `BSAVEAS` | 部分实现 | 具名拒绝（`bsaveas.unsupported`）：本构建无块编辑器。 |
 | `BSCALE` | 部分实现 | 具名拒绝（`bscale.unsupported`）：需要比例因子与插入参照；请对选中块参照用 SCALE。 |
+| `BTABLE` | 部分实现 | 具名拒绝（`btable.unsupported`）：本构建无动态块查找表。 |
 | `BTESTBLOCK` | 部分实现 | 具名拒绝（`btestblock.unsupported`）：本构建无块编辑器。 |
 | `BTRIM` | 部分实现 | 真实编辑：首个选中 INSERT 成员为边界，其余选中对象复用 TRIM 规划器修剪；一条事务/一步撤销；无交互边界提示。 |
 | `BURST` | 部分实现 | 具名拒绝（`burst.unsupported`）：无块属性模型可保留。 |
+| `BVHIDE` | 部分实现 | 具名拒绝（`bvhide.unsupported`）：本构建无按可见性状态隐藏实体的 API。 |
+| `BVSHOW` | 部分实现 | 具名拒绝（`bvshow.unsupported`）：本构建无按可见性状态显示实体的 API。 |
+| `BVSTATE` | 部分实现 | 只读：每个选中 INSERT 的活动动态块可见性状态（`bvstate.report`）；无 INSERT 报 `bvstate.no_selection`，无状态报 `bvstate.not_set`；不设置状态。 |
 | `CDORDER` | 部分实现 | 真实编辑：按颜色索引升序重写选中（空选择=全部模型空间）绘制顺序；一条事务/一步撤销；无对话框。 |
 | `CENTERLINE` | 部分实现 | 真实编辑：恰好两条平行直线之间创建一条中间直线，覆盖投影重叠；一条事务/一步撤销；无延伸/间隙选项。 |
 | `CENTERMARK` | 部分实现 | 真实编辑：每个选中圆/圆弧圆心两条交叉直线，臂长=半径 10%（声明规则）；一条事务/一步撤销；无关联对象/无可配置尺寸。 |
@@ -212,11 +231,21 @@
 | `CUTBASE` | 部分实现 | 应用内剪贴板 + 基点；不是 OS 剪贴板，不跨应用 |
 | `CUTCLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
 | `DBLIST` | 部分实现 | 只读列出所有顶层模型/图纸实体（id/type/layer/space/draw order）；块定义成员计数并跳过 |
+| `DCALIGNED` | 部分实现 | 具名拒绝（`dcaligned.unsupported`）：本构建无尺寸约束模型。 |
+| `DCANGULAR` | 部分实现 | 具名拒绝（`dcangular.unsupported`）：本构建无尺寸约束模型。 |
+| `DCCONVERT` | 部分实现 | 具名拒绝（`dcconvert.unsupported`）：本构建无尺寸约束模型。 |
+| `DCDIAMETER` | 部分实现 | 具名拒绝（`dcdiameter.unsupported`）：本构建无尺寸约束模型。 |
+| `DCDISPLAY` | 部分实现 | 具名拒绝（`dcdisplay.unsupported`）：本构建无尺寸约束模型。 |
+| `DCFORM` | 部分实现 | 具名拒绝（`dcform.unsupported`）：本构建无尺寸约束模型。 |
+| `DCHORIZONTAL` | 部分实现 | 具名拒绝（`dchorizontal.unsupported`）：本构建无尺寸约束模型。 |
+| `DCLINEAR` | 部分实现 | 具名拒绝（`dclinear.unsupported`）：本构建无尺寸约束模型。 |
+| `DELCONSTRAINT` | 部分实现 | 具名拒绝（`delconstraint.unsupported`）：本构建无几何约束模型。 |
 | `DIMALIGNED` | 已实现 | — |
 | `DIMANGULAR` | 部分实现 | 仅两线形式可交互；三点形式只到载荷层 |
 | `DIMBASELINE` | 已实现 | — |
 | `DIMBREAK` | 部分实现 | 按 `dimbreak.unsupported` 拒绝（无标注线打断记录）；绝不删除/裁剪标注本身 |
 | `DIMCENTER` | 已实现 | — |
+| `DIMCONSTRAINT` | 部分实现 | 具名拒绝（`dimconstraint.unsupported`）：本构建无尺寸约束模型。 |
 | `DIMCONTINUE` | 已实现 | — |
 | `DIMDIAMETER` | 已实现 | — |
 | `DIMDISASSOCIATE` | 部分实现 | payload-free；无关联模型，`dimdisassociate.already_non_associative` 且不改变任何状态 |
@@ -269,6 +298,7 @@
 | `FLATTEN` | 部分实现 | 真实编辑：选中 LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/POINT/SPLINE 的 z 置 0；一条事务/一步撤销；MESH/INSERT/3D 按名拒绝（Express 行为简化为 z=0）。 |
 | `FS` | 部分实现 | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把**直接**接触（相交或相切都算）的可见模型空间对象并入选择。默认 `FSMODE=OFF`：链式接触（`FSMODE=ON`）未实现；不展开块实例成员 |
 | `GATTE` | 部分实现 | 具名拒绝（`gatte.unsupported`）：本构建无块属性模型。 |
+| `GEOMCONSTRAINT` | 部分实现 | 具名拒绝（`geomconstraint.unsupported`）：本构建无几何约束模型。 |
 | `GETSEL` | 部分实现 | `GETSEL LAYER\ |
 | `GRADIENT` | 部分实现 | 预选择闭合边界（Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链）且必须位于 +Z 平面；复用 HATCH 创建路径，强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5），一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 |
 | `GRAPHSCR` | 部分实现 | 置会话 `text_screen`=false；无文本屏幕窗口可隐藏。 |
@@ -431,6 +461,7 @@
 | `REGENAUTO` | 部分实现 | 会话令牌 `regenauto`；本构建无自动重生成开关，需显式 REGEN。 |
 | `REGION` | 部分实现 | 具名拒绝（`region.unsupported`）：无面域几何模型。 |
 | `RENAME` | 部分实现 | `RENAME <kind> <old> <new>`；仅 LAYER 有重命名 API，其余 kind 按名拒绝；不可撤销 |
+| `RESETBLOCK` | 部分实现 | 具名拒绝（`resetblock.unsupported`）：本构建无动态块参数重置 API。 |
 | `REVCLOUD` | 部分实现 | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
 | `REVERSE` | 部分实现 | 仅 LINE/LWPOLYLINE/SPLINE，当前选择为全部输入；无交互拾取提示，无螺旋/3D 变体 |
 | `ROTATE` | 已实现 | — |
@@ -595,23 +626,23 @@
 | 90 | `ATTREDEF` | 部分实现 | Redefines a block and updates associated attributes. | 具名拒绝（`attredef.unsupported`）：本构建无块属性模型。 |
 | 91 | `ATTSYNC` | 部分实现 | Applies attribute changes in a block definition to all block references. | 具名拒绝（`attsync.unsupported`）：本构建无块属性模型。 |
 | 92 | `AUDIT` | 部分实现 | Evaluates the integrity of a drawing and corrects some errors. | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
-| 93 | `AUTOCONSTRAIN` | 未实现 | Applies geometric constraints to a selection set of objects based on orientation of the objects relative to one another. | — |
+| 93 | `AUTOCONSTRAIN` | 部分实现 | Applies geometric constraints to a selection set of objects based on orientation of the objects relative to one another. | 具名拒绝（`autoconstrain.unsupported`）：本构建无几何约束模型。 |
 | 94 | `AUTOPUBLISH` | 部分实现 | Publishes drawings to DWF, DWFx, or PDF files automatically to a specified location. | 具名拒绝（`autopublish.unsupported`）：本构建无自动发布模型。 |
-| 95 | `BACTION` | 未实现 | Adds an action to a dynamic block definition. | — |
-| 96 | `BACTIONBAR` | 未实现 | Displays or hides action bars for a selection set of parameter objects. | — |
-| 97 | `BACTIONSET` | 未实现 | Specifies the selection set of objects associated with an action in a dynamic block definition. | — |
-| 98 | `BACTIONTOOL` | 未实现 | Adds an action to a dynamic block definition. | — |
+| 95 | `BACTION` | 部分实现 | Adds an action to a dynamic block definition. | 具名拒绝（`baction.unsupported`）：本构建无动态块动作模型。 |
+| 96 | `BACTIONBAR` | 部分实现 | Displays or hides action bars for a selection set of parameter objects. | 具名拒绝（`bactionbar.unsupported`）：本构建无动态块动作模型。 |
+| 97 | `BACTIONSET` | 部分实现 | Specifies the selection set of objects associated with an action in a dynamic block definition. | 具名拒绝（`bactionset.unsupported`）：本构建无动态块动作模型。 |
+| 98 | `BACTIONTOOL` | 部分实现 | Adds an action to a dynamic block definition. | 具名拒绝（`bactiontool.unsupported`）：本构建无动态块动作模型。 |
 | 99 | `BASE` | 部分实现 | Sets the insertion base point for the current drawing. | 具名拒绝（`base.unsupported`）：图形不保存插入基点。 |
-| 100 | `BASSOCIATE` | 未实现 | Associates an action with a parameter in a dynamic block definition. | — |
+| 100 | `BASSOCIATE` | 部分实现 | Associates an action with a parameter in a dynamic block definition. | 具名拒绝（`bassociate.unsupported`）：本构建无动态块动作模型。 |
 | 101 | `BATTMAN` | 部分实现 | Manages the attributes for a selected block definition. | 只读：列出块定义与成员数（复用 `drawing.blocks()`；`battman.entry`/`battman.summary`）；块属性未建模（`battman.attributes_not_modeled`）。 |
 | 102 | `BATTORDER` | 部分实现 | Specifies the order of attributes for a block. | 只读：列出块定义（`battorder.entry`/`battorder.summary`）；属性显示顺序未建模（`battorder.attributes_not_modeled`）。 |
-| 103 | `BAUTHORPALETTE` | 未实现 | Opens the Block Authoring Palettes window in the Block Editor. | — |
-| 104 | `BAUTHORPALETTECLOSE` | 未实现 | Closes the Block Authoring Palettes window in the Block Editor. | — |
+| 103 | `BAUTHORPALETTE` | 部分实现 | Opens the Block Authoring Palettes window in the Block Editor. | 具名拒绝（`bauthorpalette.unsupported`）：本构建无块编辑器。 |
+| 104 | `BAUTHORPALETTECLOSE` | 部分实现 | Closes the Block Authoring Palettes window in the Block Editor. | 具名拒绝（`bauthorpaletteclose.unsupported`）：本构建无块编辑器。 |
 | 105 | `BCLOSE` | 部分实现 | Closes the Block Editor. | 具名拒绝（`bclose.unsupported`）：无块编辑器。 |
-| 106 | `BCONSTRUCTION` | 未实现 | Converts block geometry into construction geometry, which may be hidden or displayed. | — |
+| 106 | `BCONSTRUCTION` | 部分实现 | Converts block geometry into construction geometry, which may be hidden or displayed. | 具名拒绝（`bconstruction.unsupported`）：本构建无动态块构造几何。 |
 | 107 | `BCOUNT` | 部分实现 | Creates a report of the number of instances of each block in a selection set or in the entire drawing. | 只读：统计整个模型空间的块参照实例数（按块名分组）；无 AutoCAD 的 Select objects 提示、不展开块成员、不统计图纸空间。 |
-| 108 | `-BCPARAMETER` | 未实现 | Applies constraint parameters to selected objects, or converts dimensional constraints to parameter constraints. | — |
-| 109 | `BCPARAMETER` | 未实现 | Applies constraint parameters to selected objects, or converts dimensional constraints to parameter constraints. | — |
+| 108 | `-BCPARAMETER` | 部分实现 | Applies constraint parameters to selected objects, or converts dimensional constraints to parameter constraints. | 具名拒绝（`-bcparameter.unsupported`）：本构建无动态块参数模型；命令行拼写。 |
+| 109 | `BCPARAMETER` | 部分实现 | Applies constraint parameters to selected objects, or converts dimensional constraints to parameter constraints. | 具名拒绝（`bcparameter.unsupported`）：本构建无动态块参数模型。 |
 | 110 | `BCYCLEORDER` | 部分实现 | Changes the cycling order of grips for a dynamic block reference. | 具名拒绝（`bcycleorder.unsupported`）：无动态块夹点模型。 |
 | 111 | `BDETECT` | 未实现 | Displays the Detect palette where you can start object detection and manage the objects that are eligible for conversion. | — |
 | 112 | `-BEDIT` | 部分实现 | Opens the block definition in the Block Editor from the Command prompt. | 具名拒绝（`-bedit.unsupported`）：同一拒绝的命令行拼写。 |
@@ -629,12 +660,12 @@
 | 124 | `BLOCKSPALETTE` | 未实现 | Displays the Blocks palette, which you can use to insert blocks and drawings into the current drawing. | — |
 | 125 | `BLOCKSPALETTECLOSE` | 未实现 | Closes the Blocks palette. | — |
 | 126 | `BLOCKTOXREF` | 未实现 | Replaces all instances of a specified block with an xref. | — |
-| 127 | `BLOOKUPTABLE` | 未实现 | Displays or creates a lookup table for a dynamic block definition. | — |
+| 127 | `BLOOKUPTABLE` | 部分实现 | Displays or creates a lookup table for a dynamic block definition. | 具名拒绝（`blookuptable.unsupported`）：本构建无动态块查找表。 |
 | 128 | `BMPOUT` | 未实现 | Saves selected objects to a file in device-independent bitmap format. | — |
 | 129 | `-BOUNDARY` | 未实现 | At the Command prompt, creates regions or polylines from enclosed areas. | 选项形式（边界集、关闭岛检测、面域输出、对象类型）未实现；仅交互 `BOUNDARY` 的拾取式多边形 v1 |
 | 130 | `BOUNDARY` | 部分实现 | Creates regions or a polylines from enclosed areas. | 一个内部点 → 复用 HATCHPOINT 发现（最小可见闭合边界 + 嵌套岛）；每个环在当前层创建一条闭合、非关联 `AcDbPolyline`（保留 bulge、丢重复末点、世界 `+Z`）；源对象保留；仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 的边界集/关闭岛检测/面域输出/对象类型未实现；不承认 `BO`/`BPOLY` 别名 |
 | 131 | `BOX` | 未实现 | Creates a 3D solid box. | — |
-| 132 | `BPARAMETER` | 未实现 | Adds a parameter with grips to a dynamic block definition. | — |
+| 132 | `BPARAMETER` | 部分实现 | Adds a parameter with grips to a dynamic block definition. | 具名拒绝（`bparameter.unsupported`）：本构建无动态块参数模型。 |
 | 133 | `BREAK` | 部分实现 | Breaks the selected object between two points. | 两点打断；无 F 第一点覆盖、无多段打断；LWPOLYLINE 按名拒绝 |
 | 134 | `BREAKATPOINT` | 部分实现 | Breaks the selected object into two objects at a specified point. | 交互工具：先拾取对象再指定断点（断点可投影）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
 | 135 | `BREAKLINE` | 未实现 | Creates a breakline, a polyline that includes the breakline symbol. | — |
@@ -646,14 +677,14 @@
 | 141 | `BSAVEAS` | 部分实现 | Saves a copy of the current block definition under a new name. | 具名拒绝（`bsaveas.unsupported`）：本构建无块编辑器。 |
 | 142 | `BSCALE` | 部分实现 | Scales a block reference relative to its insertion point. | 具名拒绝（`bscale.unsupported`）：需要比例因子与插入参照；请对选中块参照用 SCALE。 |
 | 143 | `BSEARCH` | 未实现 | Displays the Convert dialog box, which provides options to convert selected entities and identical instances into blocks. | — |
-| 144 | `BTABLE` | 未实现 | Stores variations of a block in the Block Properties Table. | — |
+| 144 | `BTABLE` | 部分实现 | Stores variations of a block in the Block Properties Table. | 具名拒绝（`btable.unsupported`）：本构建无动态块查找表。 |
 | 145 | `BTESTBLOCK` | 部分实现 | Displays a window within the Block Editor to test a dynamic block. | 具名拒绝（`btestblock.unsupported`）：无块编辑器。 |
 | 146 | `BTRIM` | 部分实现 | Trim objects to blocks. | 真实编辑：首个选中 INSERT 成员为边界，其余选中对象复用 TRIM 规划器修剪；一条事务/一步撤销；无交互边界提示。 |
 | 147 | `BURST` | 部分实现 | Explodes selected blocks, preserving the block layer and converting attribute values to text objects. | 具名拒绝（`burst.unsupported`）：无块属性模型可保留。 |
-| 148 | `BVHIDE` | 未实现 | Makes objects invisible in the current visibility state or all visibility states in a dynamic block definition. | — |
-| 149 | `BVSHOW` | 未实现 | Makes objects visible in the current visibility state or all visibility states in a dynamic block definition. | — |
-| 150 | `-BVSTATE` | 未实现 | At the command prompt, creates, sets, or deletes a visibility state in a dynamic block. | — |
-| 151 | `BVSTATE` | 未实现 | Creates, sets, or deletes a visibility state in a dynamic block. | — |
+| 148 | `BVHIDE` | 部分实现 | Makes objects invisible in the current visibility state or all visibility states in a dynamic block definition. | 具名拒绝（`bvhide.unsupported`）：本构建无按可见性状态隐藏实体的 API。 |
+| 149 | `BVSHOW` | 部分实现 | Makes objects visible in the current visibility state or all visibility states in a dynamic block definition. | 具名拒绝（`bvshow.unsupported`）：本构建无按可见性状态显示实体的 API。 |
+| 150 | `-BVSTATE` | 部分实现 | At the command prompt, creates, sets, or deletes a visibility state in a dynamic block. | 只读：同 `BVSTATE`，使用 `-bvstate.*` 诊断码；无 INSERT 报 `-bvstate.no_selection`，无状态报 `-bvstate.not_set`；不设置状态。 |
+| 151 | `BVSTATE` | 部分实现 | Creates, sets, or deletes a visibility state in a dynamic block. | 只读：每个选中 INSERT 的活动动态块可见性状态（`bvstate.report`）；无 INSERT 报 `bvstate.no_selection`，无状态报 `bvstate.not_set`；不设置状态/不写库/不升修订。 |
 | 152 | `CAL` | 未实现 | Evaluates mathematical and geometric expressions at the Command prompt or within a command. | — |
 | 153 | `CAMERA` | 未实现 | Sets a camera and target location to create and save a 3D perspective view of objects. | — |
 | 154 | `CDORDER` | 部分实现 | Arranges the drawing order of selected objects by their color number. | 真实编辑：按颜色索引升序重写选中（空选择=全部模型空间）绘制顺序；一条事务/一步撤销；无对话框。 |
@@ -752,18 +783,18 @@
 | 247 | `DBCDEFINELT` | 未实现 | Opens the Select Data Object Dialog Box (dbConnect Manager) | — |
 | 248 | `DBCONNECT` | 未实现 | Provides an interface to external database tables. | — |
 | 249 | `DBLIST` | 部分实现 | Lists database information for each object in the drawing. | 只读列出所有顶层模型/图纸实体（id/type/layer/space/draw order）；块定义成员计数并跳过 |
-| 250 | `DCALIGNED` | 未实现 | Constrains the distance between two points on different objects. | — |
-| 251 | `DCANGULAR` | 未实现 | Constrains the angle between line or polyline segments, the angle swept out by an arc or a polyline arc segment, or the angle between three points on objects. | — |
-| 252 | `DCCONVERT` | 未实现 | Converts associative dimensions to dimensional constraints. | — |
-| 253 | `DCDIAMETER` | 未实现 | Constrains the diameter of a circle or an arc. | — |
-| 254 | `DCDISPLAY` | 未实现 | Displays or hides the dynamic constraints associated with a selection set of objects. | — |
-| 255 | `DCFORM` | 未实现 | Specifies whether the dimensional constraint being created is dynamic or annotational. | — |
-| 256 | `DCHORIZONTAL` | 未实现 | Constrains the X distance between points on an object, or between two points on different objects. | — |
-| 257 | `DCLINEAR` | 未实现 | Creates a horizontal, vertical, or rotated constraint based on the locations of the extension line origins and the dimension line. | — |
+| 250 | `DCALIGNED` | 部分实现 | Constrains the distance between two points on different objects. | 具名拒绝（`dcaligned.unsupported`）：本构建无尺寸约束模型。 |
+| 251 | `DCANGULAR` | 部分实现 | Constrains the angle between line or polyline segments, the angle swept out by an arc or a polyline arc segment, or the angle between three points on objects. | 具名拒绝（`dcangular.unsupported`）：本构建无尺寸约束模型。 |
+| 252 | `DCCONVERT` | 部分实现 | Converts associative dimensions to dimensional constraints. | 具名拒绝（`dcconvert.unsupported`）：本构建无尺寸约束模型。 |
+| 253 | `DCDIAMETER` | 部分实现 | Constrains the diameter of a circle or an arc. | 具名拒绝（`dcdiameter.unsupported`）：本构建无尺寸约束模型。 |
+| 254 | `DCDISPLAY` | 部分实现 | Displays or hides the dynamic constraints associated with a selection set of objects. | 具名拒绝（`dcdisplay.unsupported`）：本构建无尺寸约束模型。 |
+| 255 | `DCFORM` | 部分实现 | Specifies whether the dimensional constraint being created is dynamic or annotational. | 具名拒绝（`dcform.unsupported`）：本构建无尺寸约束模型。 |
+| 256 | `DCHORIZONTAL` | 部分实现 | Constrains the X distance between points on an object, or between two points on different objects. | 具名拒绝（`dchorizontal.unsupported`）：本构建无尺寸约束模型。 |
+| 257 | `DCLINEAR` | 部分实现 | Creates a horizontal, vertical, or rotated constraint based on the locations of the extension line origins and the dimension line. | 具名拒绝（`dclinear.unsupported`）：本构建无尺寸约束模型。 |
 | 258 | `DCRADIUS` | 未实现 | Constrains the radius of a circle or an arc. | — |
 | 259 | `DCVERTICAL` | 未实现 | Constrains the Y distance between points on an object, or between two points on different objects. | — |
 | 260 | `DELAY` | 未实现 | Provides a timed pause within a script. | — |
-| 261 | `DELCONSTRAINT` | 未实现 | Removes all geometric and dimensional constraints from a selection set of objects. | — |
+| 261 | `DELCONSTRAINT` | 部分实现 | Removes all geometric and dimensional constraints from a selection set of objects. | 具名拒绝（`delconstraint.unsupported`）：本构建无几何约束模型。 |
 | 262 | `DETACHURL` | 未实现 | Removes hyperlinks in a drawing. | — |
 | 263 | `DETECTCLOSE` | 未实现 | Ends the detection review. | — |
 | 264 | `DETECTCONVERT` | 未实现 | Displays the Convert dialog box, which provides options to convert the detected objects and instances into blocks. | — |
@@ -789,7 +820,7 @@
 | 284 | `DIMBASELINE` | 已实现 | Creates a linear, angular, or ordinate dimension from the baseline of the previous or selected dimension. | — |
 | 285 | `DIMBREAK` | 部分实现 | Breaks or restores dimension and extension lines where they cross other objects. | 按 `dimbreak.unsupported` 拒绝（无标注线打断记录）；绝不删除/裁剪标注本身 |
 | 286 | `DIMCENTER` | 已实现 | Creates the non-associative center mark or the centerlines of circles and arcs. | — |
-| 287 | `DIMCONSTRAINT` | 未实现 | Applies dimensional constraints to selected objects or points on objects, or converts associative dimensions to dimensional constraints. | — |
+| 287 | `DIMCONSTRAINT` | 部分实现 | Applies dimensional constraints to selected objects or points on objects, or converts associative dimensions to dimensional constraints. | 具名拒绝（`dimconstraint.unsupported`）：本构建无尺寸约束模型。 |
 | 288 | `DIMCONTINUE` | 已实现 | Creates a dimension that starts from an extension line of the previous or selected dimension. | — |
 | 289 | `DIMDIAMETER` | 已实现 | Creates a diameter dimension for a circle or an arc. | — |
 | 290 | `DIMDISASSOCIATE` | 部分实现 | Removes associativity from selected dimensions. | payload-free；无关联模型，`dimdisassociate.already_non_associative` 且不改变任何状态 |
@@ -901,7 +932,7 @@
 | 396 | `GEOMARKME` | 未实现 | Places a position marker in the drawing area at the coordinates corresponding to your current position. | — |
 | 397 | `GEOMARKPOINT` | 未实现 | Places a position marker at a specified point in model space. | — |
 | 398 | `GEOMARKPOSITION` | 未实现 | Places a position marker at a location you specify. | — |
-| 399 | `GEOMCONSTRAINT` | 未实现 | Applies or persists geometric relationships between objects or points on objects. | — |
+| 399 | `GEOMCONSTRAINT` | 部分实现 | Applies or persists geometric relationships between objects or points on objects. | 具名拒绝（`geomconstraint.unsupported`）：本构建无几何约束模型。 |
 | 400 | `GEOREMOVE` | 未实现 | Removes all geographic location information from the drawing file. | — |
 | 401 | `GEOREORIENTMARKER` | 未实现 | Changes the north direction and position of the geographic marker in model space, without changing its latitude and longitude. | — |
 | 402 | `GETSEL` | 部分实现 | Creates a selection set of objects based on layer and object type filters. | `GETSEL LAYER\|TYPE <name>`；替换选择 |
@@ -1246,7 +1277,7 @@
 | 741 | `RENDERWINDOW` | 未实现 | Displays the Render window without starting a rendering operation. | — |
 | 742 | `RENDERWINDOWCLOSE` | 未实现 | Closes the Render window. | — |
 | 743 | `REPURLS` | 未实现 | Finds and replaces a specified text string in a URL used in hyperlinks that are attached to all selected objects. | — |
-| 744 | `RESETBLOCK` | 未实现 | Resets one or more dynamic block references to the default values of the block definition. | — |
+| 744 | `RESETBLOCK` | 部分实现 | Resets one or more dynamic block references to the default values of the block definition. | 具名拒绝（`resetblock.unsupported`）：本构建无动态块参数重置 API。 |
 | 745 | `RESUME` | 未实现 | Continues an interrupted script. | — |
 | 746 | `REVCLOUD` | 部分实现 | Creates or modifies a revision cloud. | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
 | 747 | `REVCLOUDPROPERTIES` | 部分实现 | Controls the approximate chord length for the arcs in a selected revision cloud. | 只读报告会话弧长令牌（默认 15）；设置形式未实现，REVCLOUD 不读取该令牌。 |

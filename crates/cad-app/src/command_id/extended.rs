@@ -103,6 +103,25 @@
 //!
 //! Every Wave 6 variant stays Viewer-legal: no database write, no revision bump,
 //! no `cad-history` entry, and no host-owned file I/O is re-implemented here.
+//!
+//! # Wave 7 (2026-11-09)
+//!
+//! Thirty more names over the dynamic-block and constraint surfaces:
+//!
+//! * **Read-only reports** (`BVSTATE`, `-BVSTATE`): the active dynamic-block
+//!   visibility state of every directly selected INSERT, read through
+//!   `DrawingDatabase::block_dynamic_visibility` (the read half of
+//!   `set_block_visibility_state`). The report never sets a state; a selection
+//!   with no INSERT is `*.no_selection`, and an INSERT whose block records no
+//!   resolved state is `*.not_set` — nothing is invented.
+//! * **Named refusals** (`BACTION` through `DCLINEAR`): no dynamic-block action,
+//!   parameter, lookup-table, construction-geometry or visibility-hide/show
+//!   model, no block authoring palette/editor, no parameter-reset API, and no
+//!   geometric/dimensional constraint model. Each is `CadError::Unsupported`
+//!   with a stable reason.
+//!
+//! Every Wave 7 variant stays Viewer-legal: no database write, no revision bump,
+//! no `cad-history` entry.
 
 /// One payload-free command in the extended wrapper batches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -451,6 +470,70 @@ pub enum ExtendedCommandId {
     DashPublish,
     /// `AUTOPUBLISH`: no automatic publish model.
     AutoPublish,
+
+    // -- Wave 7: read-only dynamic-block visibility reports (dyn7) ----------
+    /// `BVSTATE`: read-only active visibility state of each selected INSERT.
+    BvState,
+    /// `-BVSTATE`: the same report under its own diagnostic codes.
+    DashBvState,
+
+    // -- Wave 7: named refusals (app_extended_refusals7) --------------------
+    /// `BACTION`: no dynamic-block action model.
+    BAction,
+    /// `BACTIONBAR`: no dynamic-block action model.
+    BActionBar,
+    /// `BACTIONSET`: no dynamic-block action model.
+    BActionSet,
+    /// `BACTIONTOOL`: no dynamic-block action model.
+    BActionTool,
+    /// `BASSOCIATE`: no dynamic-block action model.
+    BAssociate,
+    /// `BAUTHORPALETTE`: no block editor.
+    BAuthorPalette,
+    /// `BAUTHORPALETTECLOSE`: no block editor.
+    BAuthorPaletteClose,
+    /// `BCONSTRUCTION`: no dynamic-block construction geometry.
+    BConstruction,
+    /// `BCPARAMETER`: no dynamic-block parameter model.
+    BCParameter,
+    /// `-BCPARAMETER`: the command-line spelling of the same refusal.
+    DashBCParameter,
+    /// `BPARAMETER`: no dynamic-block parameter model.
+    BParameter,
+    /// `BLOOKUPTABLE`: no dynamic-block lookup table.
+    BLookupTable,
+    /// `BTABLE`: no dynamic-block lookup table.
+    BTable,
+    /// `BVHIDE`: no per-visibility-state entity hide API.
+    BvHide,
+    /// `BVSHOW`: no per-visibility-state entity show API.
+    BvShow,
+    /// `RESETBLOCK`: no dynamic-block parameter reset API.
+    ResetBlock,
+    /// `AUTOCONSTRAIN`: no geometric-constraint model.
+    AutoConstrain,
+    /// `DELCONSTRAINT`: no geometric-constraint model.
+    DelConstraint,
+    /// `DIMCONSTRAINT`: no dimensional-constraint model.
+    DimConstraint,
+    /// `GEOMCONSTRAINT`: no geometric-constraint model.
+    GeomConstraint,
+    /// `DCALIGNED`: no dimensional-constraint model.
+    DcAligned,
+    /// `DCANGULAR`: no dimensional-constraint model.
+    DcAngular,
+    /// `DCCONVERT`: no dimensional-constraint model.
+    DcConvert,
+    /// `DCDIAMETER`: no dimensional-constraint model.
+    DcDiameter,
+    /// `DCDISPLAY`: no dimensional-constraint model.
+    DcDisplay,
+    /// `DCFORM`: no dimensional-constraint model.
+    DcForm,
+    /// `DCHORIZONTAL`: no dimensional-constraint model.
+    DcHorizontal,
+    /// `DCLINEAR`: no dimensional-constraint model.
+    DcLinear,
 }
 
 impl ExtendedCommandId {
@@ -618,6 +701,36 @@ impl ExtendedCommandId {
             Self::Publish => "PUBLISH",
             Self::DashPublish => "-PUBLISH",
             Self::AutoPublish => "AUTOPUBLISH",
+            Self::BvState => "BVSTATE",
+            Self::DashBvState => "-BVSTATE",
+            Self::BAction => "BACTION",
+            Self::BActionBar => "BACTIONBAR",
+            Self::BActionSet => "BACTIONSET",
+            Self::BActionTool => "BACTIONTOOL",
+            Self::BAssociate => "BASSOCIATE",
+            Self::BAuthorPalette => "BAUTHORPALETTE",
+            Self::BAuthorPaletteClose => "BAUTHORPALETTECLOSE",
+            Self::BConstruction => "BCONSTRUCTION",
+            Self::BCParameter => "BCPARAMETER",
+            Self::DashBCParameter => "-BCPARAMETER",
+            Self::BParameter => "BPARAMETER",
+            Self::BLookupTable => "BLOOKUPTABLE",
+            Self::BTable => "BTABLE",
+            Self::BvHide => "BVHIDE",
+            Self::BvShow => "BVSHOW",
+            Self::ResetBlock => "RESETBLOCK",
+            Self::AutoConstrain => "AUTOCONSTRAIN",
+            Self::DelConstraint => "DELCONSTRAINT",
+            Self::DimConstraint => "DIMCONSTRAINT",
+            Self::GeomConstraint => "GEOMCONSTRAINT",
+            Self::DcAligned => "DCALIGNED",
+            Self::DcAngular => "DCANGULAR",
+            Self::DcConvert => "DCCONVERT",
+            Self::DcDiameter => "DCDIAMETER",
+            Self::DcDisplay => "DCDISPLAY",
+            Self::DcForm => "DCFORM",
+            Self::DcHorizontal => "DCHORIZONTAL",
+            Self::DcLinear => "DCLINEAR",
         }
     }
 
@@ -808,5 +921,35 @@ impl ExtendedCommandId {
         Self::Publish,
         Self::DashPublish,
         Self::AutoPublish,
+        Self::BvState,
+        Self::DashBvState,
+        Self::BAction,
+        Self::BActionBar,
+        Self::BActionSet,
+        Self::BActionTool,
+        Self::BAssociate,
+        Self::BAuthorPalette,
+        Self::BAuthorPaletteClose,
+        Self::BConstruction,
+        Self::BCParameter,
+        Self::DashBCParameter,
+        Self::BParameter,
+        Self::BLookupTable,
+        Self::BTable,
+        Self::BvHide,
+        Self::BvShow,
+        Self::ResetBlock,
+        Self::AutoConstrain,
+        Self::DelConstraint,
+        Self::DimConstraint,
+        Self::GeomConstraint,
+        Self::DcAligned,
+        Self::DcAngular,
+        Self::DcConvert,
+        Self::DcDiameter,
+        Self::DcDisplay,
+        Self::DcForm,
+        Self::DcHorizontal,
+        Self::DcLinear,
     ];
 }

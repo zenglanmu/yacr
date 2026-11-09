@@ -11,9 +11,10 @@
 //! `app_extended_attrs5` (ATTDISP token plus attribute/xref reports) and
 //! `app_extended_refusals5` (named refusals); Wave 6 adds
 //! `app_extended_file6` (drawing-log token plus file/plot/export reports) and
-//! `app_extended_refusals6` (named refusals). Keeping the routing here means
-//! `application.rs` stays a one-line interception rather than growing a hundred
-//! more arms.
+//! `app_extended_refusals6` (named refusals). Wave 7 adds `app_extended_dyn7`
+//! (read-only dynamic-block visibility reports) and `app_extended_refusals7`
+//! (named refusals). Keeping the routing here means `application.rs` stays a
+//! one-line interception rather than growing a hundred more arms.
 
 use super::*;
 
@@ -212,6 +213,41 @@ impl Application {
             | ExtendedCommandId::Publish
             | ExtendedCommandId::DashPublish
             | ExtendedCommandId::AutoPublish => self.extended_refusal6(command, ext)?,
+            // Wave 7 read-only dynamic-block visibility reports: BVSTATE and
+            // -BVSTATE read the active state of each selected INSERT through
+            // the existing read accessor; they never set a state.
+            ExtendedCommandId::BvState | ExtendedCommandId::DashBvState => {
+                self.extended_dyn7(session, command, ext)?
+            }
+            // Wave 7 named refusals: a stable `Unsupported` reason per name.
+            ExtendedCommandId::BAction
+            | ExtendedCommandId::BActionBar
+            | ExtendedCommandId::BActionSet
+            | ExtendedCommandId::BActionTool
+            | ExtendedCommandId::BAssociate
+            | ExtendedCommandId::BAuthorPalette
+            | ExtendedCommandId::BAuthorPaletteClose
+            | ExtendedCommandId::BConstruction
+            | ExtendedCommandId::BCParameter
+            | ExtendedCommandId::DashBCParameter
+            | ExtendedCommandId::BParameter
+            | ExtendedCommandId::BLookupTable
+            | ExtendedCommandId::BTable
+            | ExtendedCommandId::BvHide
+            | ExtendedCommandId::BvShow
+            | ExtendedCommandId::ResetBlock
+            | ExtendedCommandId::AutoConstrain
+            | ExtendedCommandId::DelConstraint
+            | ExtendedCommandId::DimConstraint
+            | ExtendedCommandId::GeomConstraint
+            | ExtendedCommandId::DcAligned
+            | ExtendedCommandId::DcAngular
+            | ExtendedCommandId::DcConvert
+            | ExtendedCommandId::DcDiameter
+            | ExtendedCommandId::DcDisplay
+            | ExtendedCommandId::DcForm
+            | ExtendedCommandId::DcHorizontal
+            | ExtendedCommandId::DcLinear => self.extended_refusal7(command, ext)?,
         };
         Ok(Some(outcome))
     }

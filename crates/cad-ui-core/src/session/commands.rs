@@ -523,6 +523,43 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("PUBLISH", CommandId::Extended(ExtendedCommandId::Publish)),
     ("-PUBLISH", CommandId::Extended(ExtendedCommandId::DashPublish)),
     ("AUTOPUBLISH", CommandId::Extended(ExtendedCommandId::AutoPublish)),
+    // Wave 7 (2026-11-09): dynamic-block and constraint surfaces. BVSTATE and
+    // -BVSTATE are read-only reports of each selected INSERT's active
+    // dynamic-block visibility state; the rest are stable named refusals. All
+    // Viewer-legal.
+    ("BVSTATE", CommandId::Extended(ExtendedCommandId::BvState)),
+    ("-BVSTATE", CommandId::Extended(ExtendedCommandId::DashBvState)),
+    ("BACTION", CommandId::Extended(ExtendedCommandId::BAction)),
+    ("BACTIONBAR", CommandId::Extended(ExtendedCommandId::BActionBar)),
+    ("BACTIONSET", CommandId::Extended(ExtendedCommandId::BActionSet)),
+    ("BACTIONTOOL", CommandId::Extended(ExtendedCommandId::BActionTool)),
+    ("BASSOCIATE", CommandId::Extended(ExtendedCommandId::BAssociate)),
+    ("BAUTHORPALETTE", CommandId::Extended(ExtendedCommandId::BAuthorPalette)),
+    (
+        "BAUTHORPALETTECLOSE",
+        CommandId::Extended(ExtendedCommandId::BAuthorPaletteClose),
+    ),
+    ("BCONSTRUCTION", CommandId::Extended(ExtendedCommandId::BConstruction)),
+    ("BCPARAMETER", CommandId::Extended(ExtendedCommandId::BCParameter)),
+    ("-BCPARAMETER", CommandId::Extended(ExtendedCommandId::DashBCParameter)),
+    ("BPARAMETER", CommandId::Extended(ExtendedCommandId::BParameter)),
+    ("BLOOKUPTABLE", CommandId::Extended(ExtendedCommandId::BLookupTable)),
+    ("BTABLE", CommandId::Extended(ExtendedCommandId::BTable)),
+    ("BVHIDE", CommandId::Extended(ExtendedCommandId::BvHide)),
+    ("BVSHOW", CommandId::Extended(ExtendedCommandId::BvShow)),
+    ("RESETBLOCK", CommandId::Extended(ExtendedCommandId::ResetBlock)),
+    ("AUTOCONSTRAIN", CommandId::Extended(ExtendedCommandId::AutoConstrain)),
+    ("DELCONSTRAINT", CommandId::Extended(ExtendedCommandId::DelConstraint)),
+    ("DIMCONSTRAINT", CommandId::Extended(ExtendedCommandId::DimConstraint)),
+    ("GEOMCONSTRAINT", CommandId::Extended(ExtendedCommandId::GeomConstraint)),
+    ("DCALIGNED", CommandId::Extended(ExtendedCommandId::DcAligned)),
+    ("DCANGULAR", CommandId::Extended(ExtendedCommandId::DcAngular)),
+    ("DCCONVERT", CommandId::Extended(ExtendedCommandId::DcConvert)),
+    ("DCDIAMETER", CommandId::Extended(ExtendedCommandId::DcDiameter)),
+    ("DCDISPLAY", CommandId::Extended(ExtendedCommandId::DcDisplay)),
+    ("DCFORM", CommandId::Extended(ExtendedCommandId::DcForm)),
+    ("DCHORIZONTAL", CommandId::Extended(ExtendedCommandId::DcHorizontal)),
+    ("DCLINEAR", CommandId::Extended(ExtendedCommandId::DcLinear)),
 
 ];
 
