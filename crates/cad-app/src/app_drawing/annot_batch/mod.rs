@@ -23,6 +23,11 @@ mod leader;
 mod textfit;
 mod xdlist;
 
+// `HATCHEDIT ADDBOUNDARIES`/`REMOVEBOUNDARIES` convert selected closed entities
+// into hatch-plane loops with the same projection/unprojection rules as
+// `HATCHSETBOUNDARY`; share that one implementation instead of copying it.
+pub(crate) use hatch::boundary_loop;
+
 use crate::groups::EntityGroup;
 
 use super::*;

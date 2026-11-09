@@ -15,6 +15,10 @@
 //! bare selector and is refused as `hatchedit.needs_option`; any other payload is
 //! `hatchedit.payload`.
 //!
+//! The two boundary options are the exception to "one or more hatches": their
+//! selection is exactly one hatch plus the closed entities that supply or remove
+//! loops (see below).
+//!
 //! ## Typed option grammar
 //!
 //! This build has no interactive Hatch Edit dialog, so the option is typed on
@@ -33,6 +37,8 @@
 //! | `DRAWORDER BEHIND/FRONT/BOUNDARY` | model-space draw order (`BOUNDARY` refused) |
 //! | `RECREATEBOUNDARY` | one closed polyline per stored loop |
 //! | `SEPARATE` | split a multi-loop hatch into one hatch per loop |
+//! | `ADDBOUNDARIES` | append the other selected closed boundaries as loops |
+//! | `REMOVEBOUNDARIES` | remove stored loops matching the other selected boundaries |
 //!
 //! A bare `HATCHEDIT` is admitted by name and refused by the application with
 //! `hatchedit.needs_option`. An argument outside the grammar is refused before
@@ -45,13 +51,32 @@
 //! * `ASSOCIATE` / `DISASSOCIATE` — `hatchedit.no_association`: this build has
 //!   no hatch/boundary association record;
 //! * `ANNOTATIVE` — `hatchedit.annotative_unsupported`: no annotative-scale
-//!   model;
-//! * `ADDBOUNDARIES` / `REMOVEBOUNDARIES` — `hatchedit.boundaries_unsupported`:
-//!   the loop set cannot be rebuilt safely from added/removed picks, so the
-//!   command refuses rather than fake a boundary edit.
+//!   model.
 //!
 //! These refusals are answered before the selection is read, and none of them
 //! opens a transaction.
+//!
+//! ## Boundary edits (pre-selection model)
+//!
+//! `ADDBOUNDARIES` / `REMOVEBOUNDARIES` do not open an interactive pick prompt:
+//! the selection is the input. It must hold exactly **one** hatch (the target)
+//! plus one or more closed boundary entities (`Polyline`, `Circle` or a full
+//! `Ellipse`) on that hatch's plane. Each non-hatch selection is converted with
+//! the same OCS projection as `HATCHSETBOUNDARY`, so a non-coplanar or
+//! unsupported shape is refused by that code. `ADDBOUNDARIES` appends the
+//! converted loops (a set that adds nothing is `hatchedit.add_boundaries_invalid`);
+//! `REMOVEBOUNDARIES` removes stored loops matching a converted loop by
+//! **points + bulges** (`1e-9` tolerance, flags/source edges ignored) and refuses
+//! an unmatched set (`hatchedit.remove_no_match`) or removing the last loop
+//! (`hatchedit.remove_last_loop`). Exactly one hatch is required:
+//! `hatchedit.multiple_hatches` / `hatchedit.selection`; a missing boundary
+//! source is `hatchedit.no_boundary_source`.
+//!
+//! The rebuilt loop set goes through `HatchGeometry::new` (creation-path
+//! validation), so duplicate/crossing rings are `hatchedit.add_boundaries_invalid`
+//! / `hatchedit.remove_boundaries_invalid`. The hatch plane, style, fill, seeds,
+//! pixel size and pattern type are preserved, and the edit is one transaction /
+//! one undo step.
 //!
 //! ## Rebuild
 //!
@@ -72,7 +97,6 @@
 //!
 //! ## NOT IMPLEMENTED
 //!
-//! Pattern origin, association/disassociation, annotative scaling, add/remove
-//! boundaries, draw order relative to a boundary, a per-loop pattern origin and
-//! the interactive dialog. Work-only (Viewer mode refuses it at the command
-//! layer).
+//! Pattern origin, association/disassociation, annotative scaling, draw order
+//! relative to a boundary, a per-loop pattern origin and the interactive dialog.
+//! Work-only (Viewer mode refuses it at the command layer).

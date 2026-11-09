@@ -66,6 +66,7 @@ mod grip;
 mod hatch;
 mod hatch_boundary;
 mod hatch_edit;
+mod hatch_edit_boundaries;
 mod hatch_internal_point;
 mod hatch_parameters;
 mod hatch_stitch;

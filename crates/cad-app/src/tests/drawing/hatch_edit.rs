@@ -812,14 +812,6 @@ fn hatchedit_global_capability_refusals_are_named_and_write_nothing() {
             HatchEditOption::Annotative,
             "hatchedit.annotative_unsupported",
         ),
-        (
-            HatchEditOption::AddBoundaries,
-            "hatchedit.boundaries_unsupported",
-        ),
-        (
-            HatchEditOption::RemoveBoundaries,
-            "hatchedit.boundaries_unsupported",
-        ),
     ] {
         let error = execute(
             &mut app,
