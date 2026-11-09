@@ -100,6 +100,7 @@ pub(super) fn grid_viewports(
                 ],
                 model_to_paper: Transform3 { matrix },
                 completeness: Completeness::Complete,
+                layer_overrides: std::collections::BTreeMap::new(),
             });
         }
     }

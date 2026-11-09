@@ -257,6 +257,11 @@ pub(crate) fn paper_viewport(
         clip,
         model_to_paper: Transform3 { matrix },
         completeness,
+        // VPLAYER parsing is NOT IMPLEMENTED: an imported viewport starts with
+        // no per-viewport layer overrides, so every layer keeps its global
+        // state. A source with VPLAYER data stays `Partial` through
+        // `completeness`; this build never invents overrides it did not read.
+        layer_overrides: std::collections::BTreeMap::new(),
     })
 }
 

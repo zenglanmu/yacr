@@ -562,7 +562,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `VPMIN` | 部分实现 | 恢复会话标记；空状态为 `vpmin.nothing_to_restore` | 同上；不写库 |
 | `VPCLIP` | 部分实现 | 校验 `RECT <minx> <miny> <maxx> <maxy>`；非矩形按 `vpclip.polygonal_not_implemented` 拒绝；合法矩形后按 `vpclip.viewport_selection_unsupported` 拒绝 | 无选中视口/裁剪写 API；多边形裁剪未实现 |
 | `VPSCALE` | 部分实现 | 校验零/非有限/未知比例；解析后按 `vpscale.write_unsupported` 拒绝 | 无视口比例写 API；不修改视口 |
-| `LAYVPI` | 部分实现 | 校验层名后按 `layvpi.viewport_layer_state_unsupported` 拒绝 | 无 per-viewport 层状态；**绝不**全局冻结 |
+| `LAYVPI` | 部分实现 | 真实写入活动布局所有视口的 `PaperViewport.layer_overrides`，纸空间表示按视口过滤模型几何；一条事务/一步撤销；**绝不**全局冻结 | 无视口选择（应用到全部视口）；导入 VPLAYER 未解析 |
 
 > **证据边界**：以上 10 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
 > 真机或 vendor-AutoCAD 证据。layout-batch 的前端测试在主仓库合并后运行通过；worktree 内因缺
@@ -1467,7 +1467,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `PSETUPIN` / `-PSETUPIN` | 同图纸内复制已存 `PLOTSETTINGS` 到目标布局，一步撤销 | 跨文件导入未实现；无源记录拒绝 |
 | `MVIEW` | 活动图纸空间创建矩形视口，一步撤销 | 无多边形/非矩形；无视口选择 |
 | `VPMAX` / `VPMIN` | 会话标记（不变） | 仅第一个视口 |
-| `LAYVPI` / `MVSETUP` | 仍为具名拒绝 | 无逐视口图层状态/视口组模型 |
+| `MVSETUP` | 仍为具名拒绝 | 无视口组模型 |
 
 ## P2 晋升与边界更新（2026-11-09）
 

@@ -4,8 +4,9 @@
 //! promoted **writes** (`LAYOUT NEW|RENAME|DELETE`, `LAYOUTMERGE`,
 //! `LAYOUTWIZARD`, `VPORTS`, `VPCLIP RECT`, `VPSCALE`) are exercised end to end.
 //! Every write is one revision, one `ChangeSet` and one undo step; the round
-//! trips assert undo/redo and the status projection. `LAYVPI` remains a named
-//! refusal because this build has no per-viewport layer state.
+//! trips assert undo/redo and the status projection. `LAYVPI` freezes real
+//! per-viewport layer overrides in every viewport of the active layout and
+//! never writes the global layer table.
 
 use super::*;
 use cad_db::{DrawingDatabaseBuilder, Layer, Layout, PaperViewport, Scale};
@@ -40,6 +41,7 @@ fn viewport() -> PaperViewport {
         ],
         model_to_paper: Transform3::scale(100.0),
         completeness: Completeness::Complete,
+        layer_overrides: std::collections::BTreeMap::new(),
     }
 }
 
@@ -866,39 +868,84 @@ fn layoutwizard_creates_the_layout_and_applies_the_paper_setup() {
     assert_eq!(codes(&no_paper), vec!["layout.created"]);
 }
 
-#[test]
-fn layvpi_refuses_per_viewport_layer_state_and_never_freezes_globally() {
-    let (mut app, mut session) = standard_fixture();
-    switch_to(&mut app, &mut session, "Sheet1");
-    let refusal_text = refusal(app.execute(
-        &mut session,
-        command(
-            CommandId::LayVpi,
-            layout_payload(LayoutPayload::FreezeViewportLayers {
-                layers: vec!["WALLS".into()],
-            }),
-        ),
-    ));
-    assert!(
-        refusal_text.contains("layvpi.viewport_layer_state_unsupported"),
-        "{refusal_text}"
-    );
-    assert!(
-        refusal_text.contains("never freezes them globally"),
-        "{refusal_text}"
-    );
-    let unknown = refusal(app.execute(
-        &mut session,
-        command(
-            CommandId::LayVpi,
-            layout_payload(LayoutPayload::FreezeViewportLayers {
-                layers: vec!["NOPE".into()],
-            }),
-        ),
-    ));
-    assert!(unknown.contains("layvpi.unknown_layer"), "{unknown}");
+fn layvpi(layers: &[&str]) -> Command {
+    command(
+        CommandId::LayVpi,
+        layout_payload(LayoutPayload::FreezeViewportLayers {
+            layers: layers.iter().map(|name| (*name).to_string()).collect(),
+        }),
+    )
 }
 
+fn undo_depth(app: &Application) -> usize {
+    app.history
+        .get(&DOC)
+        .map(|history| history.undo_depth())
+        .unwrap_or(0)
+}
+
+fn override_of(app: &Application, layout: u128, viewport: usize) -> Option<bool> {
+    drawing(app)
+        .layout(LayoutId(layout))
+        .expect("layout exists")
+        .viewports[viewport]
+        .layer_overrides
+        .get(&LayerId(1))
+        .copied()
+}
+
+#[test]
+fn layvpi_freezes_layers_per_viewport_and_round_trips_through_undo_redo() {
+    let (mut app, mut session) = standard_fixture();
+    switch_to(&mut app, &mut session, "Sheet1");
+    let before = revision(&app);
+    let depth = undo_depth(&app);
+
+    let outcome = app
+        .execute(&mut session, layvpi(&["WALLS"]))
+        .expect("LAYVPI freezes real per-viewport state");
+    assert_eq!(codes(&outcome), vec!["layvpi.frozen"]);
+    assert!(outcome.diagnostics[0].message.contains("WALLS"));
+    assert_eq!(revision(&app), Revision(before.0 + 1), "one revision");
+    assert_eq!(undo_depth(&app), depth + 1, "exactly one undo step");
+    assert_eq!(override_of(&app, 1, 0), Some(true));
+    assert_eq!(override_of(&app, 2, 0), None, "other layout untouched");
+    assert!(drawing(&app).layer(LayerId(1)).unwrap().visible);
+
+    undo(&mut app, &mut session);
+    assert_eq!(override_of(&app, 1, 0), None, "undo restores the map");
+    redo(&mut app, &mut session);
+    assert_eq!(override_of(&app, 1, 0), Some(true), "redo reapplies it");
+}
+
+#[test]
+fn layvpi_refusals_and_the_unchanged_case_write_nothing() {
+    let (mut empty, mut empty_session) = fixture(&[(1, "Sheet1", false)]);
+    switch_to(&mut empty, &mut empty_session, "Sheet1");
+    let empty_before = revision(&empty);
+    let no_viewport = refusal(empty.execute(&mut empty_session, layvpi(&["WALLS"])));
+    assert!(no_viewport.contains("layvpi.no_viewport"), "{no_viewport}");
+    assert_eq!(revision(&empty), empty_before);
+    assert!(!undo_available(&empty), "a refusal records nothing");
+    let (mut app, mut session) = standard_fixture();
+    switch_to(&mut app, &mut session, "Sheet1");
+    let before = revision(&app);
+    let unknown = refusal(app.execute(&mut session, layvpi(&["NOPE"])));
+    assert!(unknown.contains("layvpi.unknown_layer"), "{unknown}");
+    assert_eq!(revision(&app), before);
+    assert!(!undo_available(&app), "a refusal records nothing");
+
+    app.execute(&mut session, layvpi(&["WALLS"]))
+        .expect("the first LAYVPI writes");
+    let written = revision(&app);
+    let depth = undo_depth(&app);
+    let outcome = app
+        .execute(&mut session, layvpi(&["WALLS"]))
+        .expect("a repeated LAYVPI is a declared no-op");
+    assert_eq!(codes(&outcome), vec!["layvpi.unchanged"]);
+    assert_eq!(revision(&app), written, "no revision bump");
+    assert_eq!(undo_depth(&app), depth, "no new undo step");
+}
 #[test]
 fn vpmax_and_vpmin_round_trip_session_state_only() {
     let (mut app, mut session) = standard_fixture();

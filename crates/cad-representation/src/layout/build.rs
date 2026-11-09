@@ -108,6 +108,15 @@ fn report_clip_degradation(
 /// shared by several viewports is reported once, naming the first viewport that
 /// hit it.
 ///
+/// A viewport's own [`cad_db::PaperViewport::layer_overrides`] are applied on
+/// top of the caller's `visible` predicate: an entity whose layer is frozen
+/// (`Some(&true)`) in that viewport contributes no geometry to it, while the
+/// same layer still draws in a viewport that did not freeze it. The sheet's own
+/// paper entities are never affected by a viewport override. The shared
+/// `model_reps` fast path is kept: entities are built once and only the
+/// per-viewport fragment pass filters, so a frozen layer costs no extra
+/// tessellation.
+///
 /// A viewport whose state cannot be drawn exactly contributes no geometry and a
 /// `Partial` report plus a `representation.viewport_unsupported` diagnostic
 /// naming the stable reason — never a guessed transform. A layout that does not
@@ -196,21 +205,33 @@ pub fn build_paper_space(
         }
     }
 
-    // 3. Build each visible model entity once, only when at least one viewport
-    // can actually show it. With no supported viewport the model contributes no
-    // geometry and no diagnostics, exactly as before.
-    let model_reps: Vec<DisplayRepresentation> = if supported_viewports.is_empty() {
+    // 3. Build each visible model entity once, only when at least one supported
+    // viewport can actually show it. With no supported viewport the model
+    // contributes no geometry and no diagnostics, exactly as before. A layer
+    // frozen in *every* supported viewport is skipped here (nothing can show
+    // it), but a layer frozen in only some of them is still built once and
+    // filtered per viewport below, so the shared-rep fast path survives.
+    let model_reps: Vec<(LayerId, DisplayRepresentation)> = if supported_viewports.is_empty() {
         Vec::new()
     } else {
         database
             .model_space()
             .into_iter()
             .filter(|entity| visible(entity))
-            .map(|entity| registry.build_expanded(database, entity, context))
+            .filter(|entity| {
+                supported_viewports.iter().any(|(index, _)| {
+                    layout.viewports[*index].layer_overrides.get(&entity.layer) != Some(&true)
+                })
+            })
+            .map(|entity| {
+                registry
+                    .build_expanded(database, entity, context)
+                    .map(|rep| (entity.layer, rep))
+            })
             .collect::<CadResult<Vec<_>>>()?
     };
 
-    for rep in &model_reps {
+    for (_, rep) in &model_reps {
         out.completeness = weaker(&out.completeness, &rep.completeness);
         for diagnostic in rep.diagnostics.iter().cloned() {
             push_unique_diagnostic(&mut out, &mut diagnostic_seen, diagnostic);
@@ -218,15 +239,19 @@ pub fn build_paper_space(
     }
 
     // 4. Each supported viewport's window into model space, reusing the model
-    // representations above. Output order is sheet, viewport, model entity,
-    // fragment.
+    // representations above and dropping the layers this viewport froze.
+    // Output order is sheet, viewport, model entity, fragment.
     for (index, transform) in &supported_viewports {
         let index = *index;
         let transform = transform.as_ref();
+        let overrides = &layout.viewports[index].layer_overrides;
         let matrix = transform.as_transform3();
         let center = transform.paper_center;
         let half = transform.paper_half;
-        for rep in &model_reps {
+        for (layer, rep) in &model_reps {
+            if overrides.get(layer) == Some(&true) {
+                continue;
+            }
             for fragment in &rep.fragments {
                 let transformed = fragment.primitive.transformed(&matrix);
                 match transformed {

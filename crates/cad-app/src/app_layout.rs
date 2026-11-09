@@ -4,10 +4,13 @@
 //! real, and so are the table/viewport **writes** promoted now that `cad-db`
 //! owns the sanctioned post-import layout write paths: `LAYOUT NEW|RENAME|DELETE`,
 //! `LAYOUTMERGE`, `LAYOUTWIZARD` (including its optional authored page setup),
-//! `MVIEW`, `VPORTS`/`-VPORTS`, `VPCLIP RECT` and `VPSCALE` each publish exactly
-//! one revision and one undo step. The typed `PAGESETUP`/`PSETUPIN` writes live
-//! here too (`page_setup_write`). `LAYVPI` stays a named refusal because this
-//! build still has no per-viewport layer state; the full boundary is in
+//! `MVIEW`, `VPORTS`/`-VPORTS`, `VPCLIP RECT`, `VPSCALE` and `LAYVPI` each
+//! publish exactly one revision and one undo step. The typed
+//! `PAGESETUP`/`PSETUPIN` writes live here too (`page_setup_write`). `LAYVPI`
+//! writes real per-viewport layer overrides
+//! ([`cad_db::PaperViewport::layer_overrides`]); because this build has no
+//! viewport selection, it applies them to every viewport of the active layout
+//! and never touches the global layer table. The full boundary is in
 //! [`crate::command_id::layout`].
 
 use super::*;
@@ -18,7 +21,7 @@ use cad_history::{drawing_patch, layout_patch, DrawingUndoRecord};
 use crate::app_drawing::{layout_row, next_transaction_id};
 use crate::app_layout_geometry::{clip_center, grid_viewports, resolve_viewport_scale};
 use crate::app_layout_names::{
-    find_layout_named, resolve_layer_name, resolve_layout_name, validate_layout_name, LayoutSummary,
+    find_layout_named, resolve_layout_name, validate_layout_name, LayoutSummary,
 };
 
 impl Application {
@@ -552,22 +555,7 @@ impl Application {
                 })
             }
             LayoutPayload::FreezeViewportLayers { layers } => {
-                require_paper_space(session, "layvpi")?;
-                if layers.is_empty() {
-                    return Err(CadError::InvalidInput(
-                        "layvpi.invalid_argument: LAYVPI needs at least one layer name".into(),
-                    ));
-                }
-                let drawing = self.drawing(command.document)?;
-                for name in layers {
-                    resolve_layer_name(drawing, name)?;
-                }
-                Err(CadError::Unsupported(
-                    "layvpi.viewport_layer_state_unsupported: this build has no per-viewport \
-                     layer state, so LAYVPI cannot freeze layers in other viewports; it never \
-                     freezes them globally"
-                        .into(),
-                ))
+                self.freeze_viewport_layers(session, command, layers)
             }
             // Page setup has its own handler (`page_setup_write`), routed by the
             // extended dispatch; these arms keep the enum match exhaustive
@@ -808,6 +796,7 @@ impl Application {
             clip,
             model_to_paper: Transform3 { matrix },
             completeness: Completeness::Complete,
+            layer_overrides: std::collections::BTreeMap::new(),
         });
         let index = viewports.len() - 1;
         let before = layout_row(&drawing, layout_id);
@@ -869,7 +858,7 @@ impl Application {
 }
 
 /// Require an active paper layout for a viewport-scoped command, returning it.
-fn require_paper_space(session: &SessionState, prefix: &str) -> CadResult<LayoutId> {
+pub(super) fn require_paper_space(session: &SessionState, prefix: &str) -> CadResult<LayoutId> {
     match &session.active_space {
         SpaceId::Paper(layout_id) => Ok(*layout_id),
         _ => Err(CadError::Unsupported(format!(
@@ -879,7 +868,7 @@ fn require_paper_space(session: &SessionState, prefix: &str) -> CadResult<Layout
 }
 
 /// The viewports of `layout_id`, cloned so a candidate can be edited independently.
-fn layout_viewports(
+pub(super) fn layout_viewports(
     drawing: &DrawingDatabase,
     layout_id: LayoutId,
 ) -> CadResult<Vec<PaperViewport>> {

@@ -103,6 +103,7 @@ fn finite_viewport() -> PaperViewport {
         ],
         model_to_paper: Transform3::identity(),
         completeness: Completeness::Complete,
+        layer_overrides: std::collections::BTreeMap::new(),
     }
 }
 
@@ -603,4 +604,60 @@ fn set_plot_settings_refuses_unknown_layout_bad_paper_and_bad_scale() {
         "every refusal leaves the revision alone"
     );
     assert!(db.plot_settings(LayoutId(2)).is_none());
+}
+
+#[test]
+fn paper_viewport_starts_with_no_layer_overrides() {
+    let viewport = finite_viewport();
+    assert!(
+        viewport.layer_overrides.is_empty(),
+        "an absent override means the global layer state"
+    );
+}
+
+#[test]
+fn layout_patch_round_trips_viewport_layer_overrides_exactly() {
+    let mut db = layout_db();
+    let mut viewport = finite_viewport();
+    viewport.layer_overrides.insert(LayerId(0), true);
+    viewport.layer_overrides.insert(LayerId(1), false);
+    db.set_layout_viewports(
+        LayoutId(1),
+        vec![viewport.clone()],
+        TransactionId(1),
+        "layvpi",
+    )
+    .unwrap();
+    let frozen = row_of(&db, LayoutId(1));
+    assert_eq!(
+        frozen.layout.viewports[0].layer_overrides.get(&LayerId(0)),
+        Some(&true)
+    );
+
+    // Drop the viewports through a layout patch, then restore the recorded row:
+    // the override map must come back byte-for-byte, including an explicit
+    // `false` entry that is not the same as an absent key.
+    let mut without = frozen.clone();
+    without.layout.viewports[0].layer_overrides.clear();
+    db.apply_layout_changes(
+        "undo layvpi",
+        TransactionId(2),
+        &[(LayoutId(1), Some(without.clone()))],
+    )
+    .unwrap();
+    assert!(db.layout(LayoutId(1)).unwrap().viewports[0]
+        .layer_overrides
+        .is_empty());
+
+    db.apply_layout_changes(
+        "redo layvpi",
+        TransactionId(3),
+        &[(LayoutId(1), Some(frozen.clone()))],
+    )
+    .unwrap();
+    assert_eq!(row_of(&db, LayoutId(1)), frozen);
+    assert_eq!(
+        db.layout(LayoutId(1)).unwrap().viewports[0].layer_overrides,
+        viewport.layer_overrides
+    );
 }

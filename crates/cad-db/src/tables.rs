@@ -291,11 +291,22 @@ pub struct Layout {
     pub viewports: Vec<PaperViewport>,
 }
 
+/// One paper-space viewport: its paper rectangle, the stored model↔paper view,
+/// and its own layer state.
+///
+/// [`PaperViewport::layer_overrides`] is **per-viewport** state, never the
+/// global layer table: a `true` value freezes (hides) that layer in this
+/// viewport only, and an absent key means the layer follows its global
+/// [`Layer::visible`] state. Freezing a layer here never writes [`Layer`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaperViewport {
     pub clip: Vec<Point3>,
     pub model_to_paper: Transform3,
     pub completeness: Completeness,
+    /// Layer visibility overrides for this viewport only: `true` = frozen /
+    /// hidden. A key absent from the map means the layer keeps its global
+    /// state; this map is never the global layer authority.
+    pub layer_overrides: std::collections::BTreeMap<LayerId, bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

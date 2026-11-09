@@ -53,7 +53,7 @@ pub const VPORTS_SELECTOR: &str = "VPORTS";
 pub const VPCLIP_SELECTOR: &str = "VPCLIP";
 /// `VPSCALE`: set the selected viewport's scale.
 pub const VPSCALE_SELECTOR: &str = "VPSCALE";
-/// `LAYVPI`: freeze layers in every other layout viewport.
+/// `LAYVPI`: freeze layers in every viewport of the active paper layout (per-viewport override).
 pub const LAYVPI_SELECTOR: &str = "LAYVPI";
 
 /// Parse one `LAYOUT <option>` argument.

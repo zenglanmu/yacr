@@ -283,6 +283,7 @@ pub(super) fn session_with_layouts(layouts: &[(u128, &str, Option<&str>)]) -> Ca
                     ],
                     model_to_paper: cad_domain::Transform3::scale(100.0),
                     completeness: cad_domain::Completeness::Partial(vec![(*reason).to_string()]),
+                    layer_overrides: std::collections::BTreeMap::new(),
                 }]
             })
             .unwrap_or_default();

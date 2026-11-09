@@ -2223,5 +2223,6 @@
   "draw.kind.vports.hint": "Creates a simple rows x columns viewport grid over the sheet in one transaction/one undo step; named/standard viewport configurations are not implemented.",
   "draw.kind.dashvports.hint": "The command-line spelling of VPORTS; same simple grid and one-step undo.",
   "draw.kind.vpclip.hint": "Applies a rectangular clip to the first viewport of the active layout in one transaction/one undo step (this build has no viewport selection); polygonal clips are not implemented.",
-  "draw.kind.vpscale.hint": "Sets the first viewport's scale in the active layout in one transaction/one undo step (no viewport selection), preserving the model anchor."
+  "draw.kind.vpscale.hint": "Sets the first viewport's scale in the active layout in one transaction/one undo step (no viewport selection), preserving the model anchor.",
+  "draw.kind.layvpi.hint": "Freeze the named layers in every viewport of the active paper layout as per-viewport overrides (the global layer table is never changed). One transaction/one undo step; imported VPLAYER state is not parsed."
 }

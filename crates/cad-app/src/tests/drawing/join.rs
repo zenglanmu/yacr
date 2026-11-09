@@ -62,6 +62,7 @@ fn app_with_paper_layout(entities: Vec<DbEntity>) -> (Application, SessionState)
             clip: corners(),
             model_to_paper: Transform3::scale(100.0),
             completeness: Completeness::Complete,
+            layer_overrides: std::collections::BTreeMap::new(),
         }],
     })
     .unwrap();

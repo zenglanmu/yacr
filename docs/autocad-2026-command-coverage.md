@@ -173,7 +173,7 @@
   `SSX`（实体标志位/厚度/挤出）、`DIMTEDIT`（字形级对齐）、`REVCLOUD`（`Calligraphy`）、
   `TEXTMASK`（`3dface`/`Solid`）、`TXT2MTXT`（强制行距）。
 - P4 **基础完成**（2026-11-10）：`cad-history` 的 `LayerPatch` + 应用器已落地；`LAYDEL`/`-LAYDEL`、`LAYMRG`/`-LAYMRG`、`LAYFRZ`、`LAYLCK`、`LAYULK`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYERSTATE RESTORE` 的图层表写入均纳入 `DrawingUndoRecord`（一条事务/一步撤销）。仍保留图纸空间/块内实体与 Settings 选项边界，故仍为**部分实现**，没有把边界算作完成。
-- P5 **部分完成**（2026-11-10）：`cad-db` 布局/视口写 API + `LayoutPatch` 已落地；`LAYOUT` 的 `NEW/RENAME/DELETE`、`LAYOUTMERGE`（升为**已实现**）、`LAYOUTWIZARD` 的布局创建、`VPORTS`/`-VPORTS`、`VPCLIP RECT`、`VPSCALE`、`PAGESETUP`/`-PAGESETUP`、`PSETUPIN`/`-PSETUPIN`、`MVIEW`、`LAYOUTWIZARD` 纸张已真实写入并一条事务/一步撤销。仍保留 `LAYVPI`、`MVSETUP`、跨文件页面设置、视口选择与多边形裁剪边界；`VPMAX`/`VPMIN` 仍是会话标记。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
+- P5 **部分完成**（2026-11-10）：`cad-db` 布局/视口写 API + `LayoutPatch` 已落地；`LAYOUT` 的 `NEW/RENAME/DELETE`、`LAYOUTMERGE`（升为**已实现**）、`LAYOUTWIZARD` 的布局创建、`VPORTS`/`-VPORTS`、`VPCLIP RECT`、`VPSCALE`、`PAGESETUP`/`-PAGESETUP`、`PSETUPIN`/`-PSETUPIN`、`MVIEW`、`LAYOUTWIZARD` 纸张已真实写入并一条事务/一步撤销。仍保留 `MVSETUP`、跨文件页面设置、视口选择与多边形裁剪边界；`VPMAX`/`VPMIN` 仍是会话标记。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
 
 ## 已实现 / 部分实现命令索引（按字母序）
 
@@ -532,7 +532,7 @@
 | `LAYTRANS` | 部分实现 | 具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 |
 | `LAYULK` | 部分实现 | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入一条事务/一步撤销 |
 | `LAYUNISO` | 已实现 | — |
-| `LAYVPI` | 部分实现 | 层名校验后 `layvpi.viewport_layer_state_unsupported`；永不全局冻结 |
+| `LAYVPI` | 部分实现 | 真实写入活动布局**所有**视口的 per-viewport 图层冻结覆盖（`PaperViewport.layer_overrides`），纸空间表示按视口过滤模型几何；一条事务/一步撤销；绝不改全局层表；无视口选择，导入 VPLAYER 未解析 |
 | `LAYWALK` | 部分实现 | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
 | `LEADER` | 部分实现 | 创建单个 MULTILEADER（旧实体映射为 MULTILEADER）；一次事务/一步撤销；无引线样式/注释类型选项 |
 | `LENGTHEN` | 部分实现 | `DE`/`PER`/`TOT` 从**靠近拾取点**的端点改长度；`DY` 拖一端；`LINE`/`ARC`/开放多段线/椭圆弧/开放样条；闭合对象拒绝；开放样条**延长**未实现（`lengthen.spline_extend_unsupported`），缩短精确 |
@@ -1300,7 +1300,7 @@
 | 487 | `LAYTRANS` | 部分实现 | Translates the layers in the current drawing to specified layer standards. | 具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 |
 | 488 | `LAYULK` | 部分实现 | Unlocks the layer of a selected object. | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入一条事务/一步撤销 |
 | 489 | `LAYUNISO` | 已实现 | Restores all layers that were hidden or locked with the LAYISO command. | — |
-| 490 | `LAYVPI` | 部分实现 | Freezes selected layers in all layout viewports except the current viewport. | 层名校验后 `layvpi.viewport_layer_state_unsupported`；永不全局冻结 |
+| 490 | `LAYVPI` | 部分实现 | Freezes selected layers in all layout viewports except the current viewport. | 真实写入活动布局所有视口的 per-viewport 图层冻结覆盖，纸空间表示按视口过滤模型几何；一条事务/一步撤销；绝不改全局层表；无视口选择，导入 VPLAYER 未解析 |
 | 491 | `LAYWALK` | 部分实现 | Displays objects on selected layers and hides objects on all other layers. | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
 | 492 | `LEADER` | 部分实现 | Creates a line that connects annotation to a feature. | 创建单个 MULTILEADER（旧实体映射为 MULTILEADER）；一次事务/一步撤销；无引线样式/注释类型选项 |
 | 493 | `LENGTHEN` | 部分实现 | Changes the length of objects and the included angle of arcs. | `DE`/`PER`/`TOT` 从**靠近拾取点**的端点改长度；`DY` 拖一端；`LINE`/`ARC`/开放多段线/椭圆弧/开放样条；闭合对象拒绝；开放样条**延长**未实现（`lengthen.spline_extend_unsupported`），缩短精确 |

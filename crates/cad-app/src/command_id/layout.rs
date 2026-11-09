@@ -23,17 +23,24 @@
 //!   `VPSCALE` edit the **first** viewport because this build has no
 //!   per-viewport selection model. That is a declared narrowing, not a
 //!   fabricated second viewport authority.
+//! * `LAYVPI <layer>[,<layer>...]` freezes real per-viewport layer overrides
+//!   ([`cad_db::PaperViewport::layer_overrides`]) in every viewport of the
+//!   active paper layout, as one revision and one undo step
+//!   (`layvpi.frozen`). It never writes the global layer table. Because this
+//!   build has no viewport selection, "all viewports of the active layout" is
+//!   the declared scope; an already-frozen state is a no-op
+//!   (`layvpi.unchanged`, no transaction), a layout without a viewport is
+//!   `layvpi.no_viewport`.
 //! * `VPMAX` / `VPMIN` set and clear one session-only maximized-viewport marker
 //!   naming the active paper layout and its first viewport.
 //!
 //! # The remaining hard boundary
 //!
-//! `LAYVPI` stays a named `Unsupported` refusal: this build has no per-viewport
-//! layer state (`layvpi.viewport_layer_state_unsupported`), and it never freezes
-//! the layers globally. Polygonal `VPCLIP` is likewise not modeled. Page setup
-//! is written by the typed `PAGESETUP`/`PSETUPIN` forms in
-//! [`crate::command_id::extended`]; `MVIEW` appends one rectangular paper
-//! viewport and is documented there.
+//! Polygonal `VPCLIP` is not modeled. Imported `VPLAYER` data is not parsed:
+//! imported viewports start with no overrides and stay `Partial` when the source
+//! carried per-viewport layer state. Page setup is written by the typed
+//! `PAGESETUP`/`PSETUPIN` forms in [`crate::command_id::extended`]; `MVIEW`
+//! appends one rectangular paper viewport and is documented there.
 //!
 //! `-VPORTS` is a spelling alias of `VPORTS`, not a second command: it
 //! normalizes to the same [`crate::CommandId::Vports`] and the same handler.

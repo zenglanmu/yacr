@@ -148,6 +148,7 @@ fn application_with_layouts() -> (Application, SessionState) {
             clip: corners(),
             model_to_paper: Transform3::scale(100.0),
             completeness: Completeness::Complete,
+            layer_overrides: std::collections::BTreeMap::new(),
         }],
     })
     .unwrap();
@@ -158,6 +159,7 @@ fn application_with_layouts() -> (Application, SessionState) {
             clip: corners(),
             model_to_paper: Transform3::scale(100.0),
             completeness: Completeness::Partial(vec!["importer dropped height".into()]),
+            layer_overrides: std::collections::BTreeMap::new(),
         }],
     })
     .unwrap();

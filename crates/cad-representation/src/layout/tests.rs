@@ -13,6 +13,7 @@ fn viewport(clip: Vec<Point3>, scale: f64) -> PaperViewport {
         clip,
         model_to_paper: Transform3::scale(scale),
         completeness: Completeness::Complete,
+        layer_overrides: std::collections::BTreeMap::new(),
     }
 }
 
@@ -47,6 +48,7 @@ fn four_corner_viewport() -> PaperViewport {
         clip: vec![p(0.0, 0.0), p(100.0, 0.0), p(100.0, 50.0), p(0.0, 50.0)],
         model_to_paper: stored_view(100.0, translation),
         completeness: Completeness::Complete,
+        layer_overrides: std::collections::BTreeMap::new(),
     }
 }
 /// Exactly the shape the importer now writes for a 1:100 top/plan viewport:
@@ -73,6 +75,7 @@ fn imported_one_to_one_hundred() -> PaperViewport {
         clip,
         model_to_paper: Transform3 { matrix: m },
         completeness: Completeness::Complete,
+        layer_overrides: std::collections::BTreeMap::new(),
     }
 }
 

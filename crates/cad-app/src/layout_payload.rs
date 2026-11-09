@@ -69,8 +69,12 @@ pub enum LayoutPayload {
     /// `VPSCALE <scale>`: a standard scale name or ratio, resolved against the
     /// drawing's scale table and applied to the **first** viewport.
     Scale { name: String },
-    /// `LAYVPI <layer>[,<layer>...]`: the names are parsed and validated, then
-    /// refused because there is no per-viewport layer state.
+    /// `LAYVPI <layer>[,<layer>...]`: resolve every name, then freeze those
+    /// layers in **every** viewport of the active paper layout
+    /// ([`cad_db::PaperViewport::layer_overrides`]) as one revision and one
+    /// undo step. The global layer table is never written. This build has no
+    /// viewport selection, so "all viewports of the active layout" is the
+    /// declared scope.
     FreezeViewportLayers { layers: Vec<String> },
 }
 

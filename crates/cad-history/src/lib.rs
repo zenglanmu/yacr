@@ -255,6 +255,10 @@ impl DrawingUndoRecord {
                 bytes += row.layout.viewports.len() * std::mem::size_of::<cad_db::PaperViewport>();
                 for viewport in &row.layout.viewports {
                     bytes += viewport.clip.len() * std::mem::size_of::<Point3>();
+                    // Per-viewport layer overrides are a map entry each; count
+                    // the key/value pair so a LAYVPI step is not under-budgeted.
+                    bytes +=
+                        viewport.layer_overrides.len() * std::mem::size_of::<(LayerId, bool)>();
                 }
                 if let Some(plot) = &row.plot {
                     bytes += plot.paper_size_name.len();

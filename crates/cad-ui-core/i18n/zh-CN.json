@@ -2223,5 +2223,6 @@
   "draw.kind.vports.hint": "在图纸上创建简单的 rows x columns 视口网格，一条事务/一步撤销；命名/标准视口配置未实现。",
   "draw.kind.dashvports.hint": "VPORTS 的命令行拼写；同一简单网格与一步撤销。",
   "draw.kind.vpclip.hint": "对活动布局的第一个视口应用矩形裁剪，一条事务/一步撤销（本构建无视口选择）；多边形裁剪未实现。",
-  "draw.kind.vpscale.hint": "设置活动布局第一个视口的比例，一条事务/一步撤销（无视口选择），保留模型锚点。"
+  "draw.kind.vpscale.hint": "设置活动布局第一个视口的比例，一条事务/一步撤销（无视口选择），保留模型锚点。",
+  "draw.kind.layvpi.hint": "把命名图层冻结在活动图纸布局的每个视口中（逐视口覆盖，绝不改全局层表）。一条事务/一步撤销；导入的 VPLAYER 状态未解析。"
 }

@@ -93,6 +93,7 @@ mod app_extended_w16_refusals;
 mod app_extras;
 mod app_layout;
 mod app_layout_geometry;
+mod app_layout_layvpi;
 mod app_layout_names;
 mod app_layout_session;
 mod app_reports;
