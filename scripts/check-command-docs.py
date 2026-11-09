@@ -31,7 +31,7 @@ or missing doc section) -- a shape error is never reported as a pass.
 
 Stdlib only, no network, no writes. Paths default to this repository (resolved
 from ``__file__``, *not* the current directory) and can be overridden with
-``--doc`` / ``--coverage`` / ``--commands``.
+``--doc`` / ``--coverage`` / ``--commands`` / ``--aliases``.
 
 Behaviour is ported from the audit snippet that used to live in
 ``docs/autocad-2026-command-coverage.md`` §5b (2026-10-27). That snippet was a
@@ -46,6 +46,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_COMMANDS = ROOT / "crates" / "cad-ui-core" / "src" / "session" / "commands.rs"
+# The alias table moved to `cad-app` (the `ALIASEDIT` report runs there and the
+# UI crate may not be a dependency of it); `commands.rs` re-exports the same
+# rows. Read the definition from its one authority.
+DEFAULT_ALIASES = ROOT / "crates" / "cad-app" / "src" / "command_aliases.rs"
 DEFAULT_DOC = ROOT / "docs" / "shortcuts.md"
 DEFAULT_COVERAGE = ROOT / "docs" / "autocad-2026-command-coverage.md"
 
@@ -124,7 +128,9 @@ class Report:
 
 
 def check(commands_text: str, doc_text: str, coverage_text: str,
-          commands_path: Path, doc_path: Path, coverage_path: Path) -> Report:
+          commands_path: Path, doc_path: Path, coverage_path: Path,
+          aliases_text: str | None = None,
+          aliases_path: Path | None = None) -> Report:
     report = Report()
 
     table = re.findall(r'\("([^"]+)"',
@@ -141,7 +147,9 @@ def check(commands_text: str, doc_text: str, coverage_text: str,
                                       'ARGUMENT_SELECTORS'),
                            re.M)
     alias = dict(re.findall(r'\("([^"]+)",\s*"([^"]+)"\)',
-                            const_body(ALIASES_RE, commands_text, commands_path,
+                            const_body(ALIASES_RE,
+                                       commands_text if aliases_text is None else aliases_text,
+                                       commands_path if aliases_path is None else aliases_path,
                                        'COMMAND_ALIASES')))
 
     admitted = set(table) | set(measurement) | set(zoom)
@@ -238,6 +246,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument('--commands', type=Path, default=DEFAULT_COMMANDS,
                         help='authority table source (default: %(default)s)')
+    parser.add_argument('--aliases', type=Path, default=DEFAULT_ALIASES,
+                        help='alias table source (default: %(default)s)')
     parser.add_argument('--doc', type=Path, default=DEFAULT_DOC,
                         help='shortcuts doc to check (default: %(default)s)')
     parser.add_argument('--coverage', type=Path, default=DEFAULT_COVERAGE,
@@ -255,6 +265,8 @@ def main(argv: list[str]) -> int:
             args.commands,
             args.doc,
             args.coverage,
+            aliases_text=read_text(args.aliases),
+            aliases_path=args.aliases,
         )
     except ShapeError as exc:
         print('command-docs FAILED: %s' % exc)

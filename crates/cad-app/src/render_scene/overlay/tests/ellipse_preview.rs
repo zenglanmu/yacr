@@ -22,6 +22,7 @@ fn ellipse_preview_draws_a_closed_bounded_tessellated_curve() {
         candidate: None,
         remaining: 1,
         selection_count: 0,
+        point_target: None,
         ready: false,
         polygon_sides: None,
         awaiting_text: false,

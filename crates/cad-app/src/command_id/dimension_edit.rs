@@ -34,18 +34,28 @@
 //!
 //! Payload is [`crate::DimensionBatchPayload::TextEdit`], applied to **exactly
 //! one** directly addressable selected `DIMENSION` (model or paper space; the
-//! one-entity selection is the input):
+//! one-entity selection is the input). The documented AutoCAD 2026 option set is
+//! `Left`, `Right`, `Center`, `Home`, `Angle` plus the free text location;
+//! **there is no `Rotate` option** (that is `DIMEDIT`'s Rotate).
 //!
 //! * `DIMTEDIT MOVE <x> <y>` sets group 11 (`DimensionDefinition::text_middle`)
 //!   to the typed drawing-plane X/Y. The Z is the dimension's own definition
 //!   plane Z, never typed, so the text stays in plane.
-//! * `DIMTEDIT ROTATE <degrees>` sets group 53
-//!   (`DimensionDefinition::text_rotation`) to the typed angle in radians. No
-//!   normalisation is applied (the DIMROTATED convention); `0` returns to the
-//!   derived rotation because group 53's `0` is the "derive" sentinel.
-//! * `DIMTEDIT RESET` restores both group 11 and group 53 to the derive
-//!   sentinels. It does **not** clear the text override (that is `DIMEDIT
-//!   RESET`).
+//! * `DIMTEDIT LEFT|RIGHT|CENTER` justifies the text **along the dimension
+//!   line**, only for linear/aligned, radius and diameter dimensions. The domain
+//!   stores a centered text anchor (group 11) and no per-entity justification
+//!   field, so this build's declared rule is: the anchor moves to the
+//!   start (minimum projection), end (maximum projection) or midpoint of the
+//!   dimension line. For a linear/aligned dimension those are the two
+//!   extension-line feet; for radius/diameter the centre-side and arc-side ends
+//!   of the radial leader. Angular and ordinate dimensions are refused by name
+//!   (`dimtedit.justify_unsupported`, naming the kind).
+//! * `DIMTEDIT ANGLE <degrees>` sets group 53
+//!   (`DimensionDefinition::text_rotation`) to the typed angle in radians about
+//!   the UCS X axis; the text centre does not move and `0` restores the derived
+//!   orientation (group 53's `0` is the derive sentinel).
+//! * `DIMTEDIT HOME` restores group 11 to the derive sentinel; the rotation is
+//!   untouched.
 //!
 //! Each real change rebuilds the dimension through the shared
 //! [`cad_domain::DimensionGeometry::synthesized`] from the mutated definition,
@@ -56,11 +66,12 @@
 //! Refusals (nothing written): `dimtedit.payload`, `dimtedit.selection` (not
 //! exactly one), `dimtedit.duplicate`, `dimtedit.not_addressable` (block member
 //! or sub-element), `dimtedit.target_missing`, `dimtedit.not_dimension`,
-//! `dimtedit.degenerate` (the mutated definition has no display).
+//! `dimtedit.bad_position`, `dimtedit.bad_rotation`, `dimtedit.degenerate`,
+//! `dimtedit.justify_unsupported`.
 //!
-//! **NOT IMPLEMENTED**: the AutoCAD `Left`/`Right`/`Center`/`Home` text-justify
-//! options and the oblique/angle dimension-line edit. The domain models only
-//! group 11 and group 53 here.
+//! **NOT IMPLEMENTED**: glyph-level justification (the centered anchor is the
+//! only text alignment the domain stores), the oblique dimension-line edit and a
+//! `RESET` spelling (use `HOME` for position and `ANGLE 0` for orientation).
 //!
 //! ## Declared display-source consequence
 //!
@@ -135,27 +146,58 @@
 //!
 //! # `QDIM`
 //!
-//! Payload-free; the current selection is the whole input. v1 supports exactly
-//! **straight `LINE` entities** and produces one `DimensionKind::Aligned`
-//! dimension per line, between its start and end points, on the active layer in
-//! model space. The dimension line is placed on the line's left normal at the
-//! resolved `Standard` style's `DIMDLI` distance from the measured midpoint, so
-//! the placement is style-driven and deterministic (there is no location prompt).
+//! Payload is [`crate::DimensionBatchPayload::QDim`]
+//! ([`crate::QDimCommand`]); the current selection is the rest of the input. A
+//! bare `QDIM` defaults to **Continuous**. The nine documented AutoCAD 2026 modes
+//! map onto the payload as follows:
 //!
-//! All lines are built and inserted in **one transaction / one undo step**. The
-//! measurement is the true endpoint distance (the shared synthesis), and the
-//! dimensions are non-associative.
+//! | documented mode | payload |
+//! | --- | --- |
+//! | Continuous (default) | [`crate::QDimMode::Continuous`] |
+//! | Staggered | [`crate::QDimMode::Staggered`] |
+//! | Baseline | [`crate::QDimMode::Baseline`] |
+//! | Ordinate | [`crate::QDimMode::Ordinate`] |
+//! | Radius | [`crate::QDimMode::Radius`] |
+//! | Diameter | [`crate::QDimMode::Diameter`] |
+//! | Datum Point | `QDimCommand::datum` (common baseline origin / ordinate datum) |
+//! | Edit | `QDimCommand::remove` (0-based origin/target indices) |
+//! | Settings | `QDimCommand::snap` (`Endpoints`/`Intersections`) |
 //!
-//! Refusals (nothing written): `qdim.payload`, `qdim.selection`,
-//! `qdim.duplicate`, `qdim.not_addressable`, `qdim.target_missing`, `qdim.space`
-//! (v1 creates in model space only), `qdim.circle_unsupported`,
-//! `qdim.arc_unsupported`, `qdim.point_unsupported`, `qdim.unsupported_kind`
-//! (anything else, named by class), `qdim.degenerate` (a zero-length line) and
-//! `qdim.no_style` (no `Standard` style).
+//! Angular is deliberately absent: AutoCAD 2026 does not document an angular
+//! QDIM mode. Existing dimensions may be selected; a linear/aligned dimension
+//! contributes its two extension origins, an ordinate dimension its feature
+//! point and a radius/diameter dimension its arc point. Radial modes consume
+//! selected `CIRCLE`s and `ARC`s instead.
 //!
-//! **NOT IMPLEMENTED**: AutoCAD's location prompt, radial/ordinate QDIM for
-//! arcs/circles, chain/baseline arrangement from one QDIM run, and point input
-//! (a lone point has no measurable extent and no ordering primitive here).
+//! Linear modes order the origins by projection on a chain direction (the first
+//! selected LINE's direction, else the first linear dimension's rotation, else
+//! the extreme origin pair): **Continuous** puts consecutive origins on one
+//! dimension line at `+DIMDLI`; **Staggered** steps `i · increment` (the
+//! increment is `DIMDLI` unless `INCREMENT` supplies one — a declared reading,
+//! since AutoCAD 2026 does not document the source); **Baseline** measures from
+//! the datum (or the first origin) with rows stacked by `DIMDLI` (an origin with
+//! the datum's own projection measures zero and is skipped); **Ordinate**
+//! measures the dominant axis of `origin − datum` with the leader on the chain
+//! normal. The default ordinate datum is the drawing origin `(0, 0, 0)`.
+//!
+//! **Per-item skip** is the declared policy for unsupported selected entities:
+//! each one produces the stable `qdim.skipped` diagnostic (object + reason) and
+//! the rest of the selection is still dimensioned. A selection with no usable
+//! target is the named `qdim.no_targets` refusal. Whole-run refusals (nothing
+//! written): `qdim.payload`, `qdim.selection`, `qdim.duplicate`,
+//! `qdim.not_addressable`, `qdim.target_missing`, `qdim.space`, `qdim.no_style`,
+//! `qdim.bad_spacing`, `qdim.bad_increment`, `qdim.off_plane`, `qdim.degenerate`,
+//! `qdim.no_intersections`, `qdim.edit_range`, `qdim.no_targets`.
+//!
+//! All created dimensions land in **one transaction / one undo step** on the
+//! active layer in model space. They are ordinary non-associative dimensions
+//! synthesized by the shared builder, so the measurement is the true projected
+//! distance and no second geometry path exists.
+//!
+//! **NOT IMPLEMENTED**: AutoCAD's interactive location pick and option loop
+//! (the location is style-driven), a persistent QDIM session state (Datum/Edit/
+//! Settings are per-invocation payload fields), angular QDIM and point-only
+//! input.
 //!
 //! # `DIMJOGLINE`
 //!

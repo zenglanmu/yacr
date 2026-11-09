@@ -1,16 +1,17 @@
-//! `PEDIT` v1 (AutoCAD 2026) contract tests: the declared `CLOSE` / `OPEN` /
-//! `REVERSE` option subset.
+//! `PEDIT` (AutoCAD 2026) contract tests.
 //!
-//! Pins the selection rule (exactly one directly addressable model-space
-//! LWPOLYLINE), the exact writes (only `closed` or the REVERSE geometry change;
-//! points/bulges/layer/space/draw order preserved otherwise), the named no-ops
-//! (`pedit.already_closed` / `pedit.already_open`) and every refusal: none of
-//! them bumps the revision or records an undo entry. A real change is exactly one
-//! transaction / one undo step.
+//! Pins the selection rule (one directly addressable model-space LWPOLYLINE,
+//! plus the touching JOIN picks), the exact writes for `CLOSE`/`OPEN`/`REVERSE`,
+//! `JOIN`, `FIT`, `SPLINE`, `DECURVE` and `UNDO`, the `PEDITACCEPT` conversion
+//! answer, the named no-ops (`pedit.already_closed` / `pedit.already_open` /
+//! `pedit.already_fit` / `pedit.already_decurved`) and every named refusal:
+//! none of them bumps the revision or records an undo entry. A real change is
+//! exactly one transaction / one undo step.
 
 use super::*;
+use crate::command_payload::{PeditEditCommand, PeditEditOption};
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
-use cad_geometry::{arbitrary_axis, bulge_arc_geometry};
+use cad_geometry::{arbitrary_axis, bulge_arc_geometry, clamped_uniform_knots, NurbsCurve};
 
 fn p3(x: f64, y: f64, z: f64) -> Point3 {
     Point3 { x, y, z }
@@ -120,6 +121,53 @@ fn pedit(
         session,
         command(CommandId::Pedit, CommandPayload::PeditOption(option)),
     )
+}
+
+fn pedit_edit(
+    app: &mut Application,
+    session: &mut SessionState,
+    option: PeditEditOption,
+) -> CadResult<CommandOutcome> {
+    pedit_edit_with(app, session, option, false)
+}
+
+fn pedit_edit_with(
+    app: &mut Application,
+    session: &mut SessionState,
+    option: PeditEditOption,
+    convert: bool,
+) -> CadResult<CommandOutcome> {
+    app.execute(
+        session,
+        command(
+            CommandId::Pedit,
+            CommandPayload::PeditEdit(PeditEditCommand { option, convert }),
+        ),
+    )
+}
+
+/// One straight segment piece: `[start, end]` with a zero bulge.
+fn straight_piece(start: Point3, end: Point3) -> SemanticGeometry {
+    SemanticGeometry::Polyline {
+        points: vec![start, end],
+        bulges: vec![0.0],
+        closed: false,
+    }
+}
+
+/// Rotate a planar direction by `angle` (radians).
+fn rotate(direction: (f64, f64), angle: f64) -> (f64, f64) {
+    (
+        direction.0 * angle.cos() - direction.1 * angle.sin(),
+        direction.0 * angle.sin() + direction.1 * angle.cos(),
+    )
+}
+
+fn chord_direction(a: Point3, b: Point3) -> (f64, f64) {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let len = dx.hypot(dy);
+    (dx / len, dy / len)
 }
 
 /// Three vertices, two bulged segments; the per-vertex storage shape includes
@@ -568,3 +616,6 @@ fn viewer_mode_is_refused_before_anything_is_read_or_written() {
     assert_wrote_nothing(&app, rev);
     assert_eq!(geometry(&app, 1), open_bulged());
 }
+
+#[path = "pedit_extended.rs"]
+mod extended;

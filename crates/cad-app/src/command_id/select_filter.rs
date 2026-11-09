@@ -7,45 +7,94 @@
 //!
 //! ## Selection filters (`QSELECT` / `FILTER` / `GETSEL`)
 //!
-//! Grammar, parsed from the typed argument (`QSELECT <PROPERTY> <VALUE>`):
+//! Two payload forms are accepted for `QSELECT`/`FILTER`:
 //!
-//! * `PROPERTY` is `TYPE`, `LAYER`, `COLOR` or `LINETYPE`, ASCII
-//!   case-insensitive. Any other word is an explicit refusal
-//!   (`qselect.unknown_property` / `filter.unknown_property` /
-//!   `getsel.unknown_property`), never an empty match.
-//! * `VALUE` is the trimmed remainder (spaces allowed) and must be non-empty.
-//! * `TYPE` matches an entity's stored `object.type_key` case-insensitively and
-//!   also the friendly geometry-kind alias of its [`cad_domain::SemanticGeometry`]
-//!   (`LINE`, `CIRCLE`, `ARC`, `POLYLINE`, `ELLIPSE`, `SPLINE`, `POINT`,
-//!   `TEXT`, `MTEXT`, `INSERT`, `DIMENSION`, `HATCH`, `MULTILEADER`, `IMAGE`,
-//!   `SHAPE`, `MESH`, `WIPEOUT`/`MASK`, `OPAQUE`, `COMPOUND`).
-//! * `LAYER` matches the entity's stored layer **name** (model-space entities
-//!   have no instance path, so the stored layer is the effective layer).
-//! * `COLOR` / `LINETYPE` match the canonical string projection of
-//!   [`crate::property_value`] (`ByLayer`, `ByBlock`, `aci:N`, `#RRGGBB` /
-//!   the drawing's linetype name), case-insensitively.
+//! * the legacy one-shot line `PROPERTY VALUE` (also the only `GETSEL` form),
+//!   carried as `CommandPayload::SelectFilter`; and
+//! * the structured dialog form carried as
+//!   [`crate::SelectionToolPayload::QSelect`]/`Filter` — operators, scope,
+//!   apply mode and the FILTER logical tree. The structured types live in
+//!   `command_payload::payload_extra`; the UI/host wiring for them is **not yet
+//!   done** (the command accepts them today, the frontend does not build them).
 //!
-//! The candidate set is **every model-space entity** in the drawing (layer
-//! off/frozen state does not filter a QSELECT result; a filter is a data query,
-//! not a screen query). Zero matches is **not an error**: `QSELECT` replaces the
-//! selection with the (possibly empty) match and reports `qselect.no_match`;
-//! `FILTER` adds nothing and reports `filter.no_match`; `GETSEL` behaves like
-//! `QSELECT`. `FILTER` on an empty current selection is valid (ADD to empty).
+//! `PROPERTY` is `TYPE`, `LAYER`, `COLOR`, `LINETYPE`, `LINEWEIGHT`,
+//! `LINETYPESCALE`/`LTSCALE`, `TRANSPARENCY`, `SPACE`, `TEXT` or `NAME`, ASCII
+//! case-insensitive (the structured form also accepts the object-type and
+//! operator enumerations). Any other word is an explicit refusal
+//! (`qselect.unknown_property` / `filter.unknown_property`), never an empty
+//! match. `VALUE` must be non-empty (except `Select All`).
 //!
-//! `GETSEL` accepts only `LAYER` and `TYPE` (the AutoCAD form); `COLOR` and
-//! `LINETYPE` are named refusals there.
+//! `TYPE` matches an entity's stored `object.type_key` case-insensitively and
+//! also the friendly geometry-kind alias (`LINE`, `CIRCLE`, `ARC`, `POLYLINE`,
+//! `ELLIPSE`, `SPLINE`, `POINT`, `TEXT`, `MTEXT`, `INSERT`, `DIMENSION`,
+//! `HATCH`, `MULTILEADER`, `IMAGE`, `SHAPE`, `MESH`, `WIPEOUT`/`MASK`,
+//! `OPAQUE`, `COMPOUND`). `LAYER` matches the stored layer name. The other
+//! properties use the canonical `cad_app::property_value` projection
+//! (`ByLayer`, `ByBlock`, `aci:N`, `#RRGGBB`, the linetype name, the canonical
+//! lineweight, the transparency percentage) or read the entity's own linetype
+//! scale / space / text / block name. Relative operators (`<`, `>`, `>=`,
+//! `<=`) are numeric-only and refused by name on a non-numeric property.
+//! `*Wildcard Match*` implements anchored ASCII-case-insensitive `*`/`?`; the
+//! other AutoCAD wildcard tokens are literal (a declared boundary).
 //!
-//! ## Property similarity (`SSX` / `SELECTCOUNT`)
+//! **Scope and apply.** The dialog's apply-to is **entire drawing** or **current
+//! selection**; the apply mode is **include in new selection set**, **exclude
+//! from new selection set** or **append**. "Entire drawing" enumerates every
+//! **top-level entity in the current space** (Autodesk does not document
+//! current-space scoping; this is a declared Build choice). Nested block objects
+//! are **never** selected or counted. A legacy `FILTER` is ADD/append; a legacy
+//! `QSELECT` is Replace/include, with Add/append and Remove/exclude accepted.
+//! A legacy payload with any other merge mode is a named refusal.
 //!
-//! The **first** selected entity is the template. Two entities are similar when
-//! all five of these agree: type key (ASCII case-insensitive) plus geometry
-//! discriminant, stored layer, canonical colour projection, canonical linetype
-//! projection and space. `SSX` **unions** every matching model-space entity into
-//! the current selection (AutoCAD's SSX adds); `SELECTCOUNT` only reports the
-//! count and never touches the selection. An empty selection is refused
-//! (`ssx.selection_required` / `selectcount.selection_required`), and a
-//! template carrying an instance path or sub-element is refused
-//! (`ssx.template_not_addressable`) because it has no single entity row to read.
+//! FILTER expressions use `AND`/`OR` (≥ 1 member), `XOR` (exactly 2) and `NOT`
+//! (exactly 1); groups are the typed balanced Begin/End pairs. Invalid arity is
+//! a named refusal (`filter.group_arity`/`xor_arity`/`not_arity`) before any
+//! read. Named filters (`filter.nfl`) are host file I/O and are refused by name
+//! (`filter.named_unsupported`).
+//!
+//! Zero matches is **not an error**: `QSELECT` reports a `.result` diagnostic
+//! and (for include) an empty selection; `FILTER` adds nothing. `FILTER` on an
+//! empty current selection is valid (append to empty).
+//!
+//! `GETSEL` accepts only `LAYER` and `TYPE` (the AutoCAD form); every other
+//! property is a named refusal there.
+//!
+//! ## `SSX` (Express-Tool selection-set builder)
+//!
+//! `SSX` is **not** `SELECTSIMILAR`. It builds an `ssget`-style filter list from
+//! explicit criteria and returns the matches (implementation and the typed
+//! payload types: [`crate::ssx`]). The criteria are `Block`, `Color`, `Entity`
+//! (object type), `Flag`, `LAyer`, `LType`, `Pick`, `Style`, `Thickness` and
+//! `Vector` (extrusion). Each criterion holds **one value**: setting an existing
+//! criterion overwrites it, `SSX CLEAR <criterion>` removes it (a no-op when it
+//! was not set), and `SSX PICK` / the bare command seed every supportable
+//! criterion from the current selection's first object (the template path) and
+//! apply. The typed forms are `SSX BLOCK|COLOR|ENTITY|LAYER|LTYPE|STYLE <value>`,
+//! `SSX FLAG`, `SSX THICKNESS <v>`, `SSX VECTOR <x> <y> <z>`, `SSX PICK` and
+//! `SSX CLEAR <criterion>` (`cad-ui-core` owns that grammar).
+//!
+//! Matching uses the modelled properties only: block table name (INSERT), the
+//! canonical colour projection (`aci:<n>`, `#RRGGBB`, `ByLayer`/`ByBlock`; a bare
+//! ACI number is accepted), the stored type key / friendly alias, layer name,
+//! linetype name and the resolved text-style name (TEXT/MTEXT, a MULTILEADER's
+//! annotation text style, a DIMENSION's text style). `Flag` (the DXF
+//! entity-flags / attributes-follow bit), `Thickness` and `Vector` have no
+//! `cad-db` field: the criterion is recorded and applying it is the named
+//! `ssx.flag_not_modelled` / `ssx.thickness_not_modelled` /
+//! `ssx.vector_not_modelled` refusal.
+//!
+//! The result **replaces** the session selection. AutoCAD keeps the pre-command
+//! selection in its `Previous` selection set; this build has no `Previous` set,
+//! so the old selection is only read by the template seed and then replaced (the
+//! documented mapping). Only **top-level entities in the current space** are
+//! candidates: nested block members are never selected, a block-space context is
+//! `ssx.block_space`, and cross-layout selection is not documented (and not
+//! implemented). A filter with no criterion is `ssx.empty_filter`. The command is
+//! read-only: it never opens a transaction, bumps a revision or writes history.
+//!
+//! `SELECTCOUNT` is a separate read-only count of the five-property template
+//! signature (type key + geometry kind, layer, colour, linetype, space); it is
+//! unchanged by `SSX`.
 //!
 //! ## Text find (`-FIND` / `FIND`)
 //!

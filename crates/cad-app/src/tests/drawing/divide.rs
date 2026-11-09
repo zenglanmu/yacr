@@ -429,27 +429,53 @@ fn a_closed_polyline_that_repeats_its_first_vertex_is_not_closed_twice() {
 }
 
 #[test]
-fn a_bulged_polyline_is_refused_by_name_and_writes_nothing() {
+fn a_bulged_polyline_is_divided_by_its_exact_arc_length() {
+    // First segment: chord 4 with bulge 0.5 (arc length r·θ). Second: straight 4.
+    // The half-total mark therefore lies on the first arc, not on the vertex.
     let source = curve_entity(
         1,
         LayerId(0),
         polyline_geometry(
             vec![point(0.0, 0.0), point(4.0, 0.0), point(4.0, 4.0)],
-            vec![0.0, 1.0],
+            vec![0.5, 0.0],
             false,
         ),
         "AcDbPolyline",
         0,
     );
     let (mut app, mut session) = app_with(vec![source]);
-    set_segments(&mut session, 4.0);
-    let before_revision = revision(&app);
+    set_segments(&mut session, 2.0);
+    divide(&mut app, &mut session, vec![ref_of(1)]).expect("the bulged polyline divides");
 
-    let error = divide(&mut app, &mut session, vec![ref_of(1)]).expect_err("bulges are refused");
-    assert_unsupported(error, "divide.bulged_segment");
-    assert_eq!(revision(&app), before_revision, "no revision bump");
-    assert_eq!(entity_count(&app), 1, "nothing written");
-    assert_eq!(undo_depth(&app), 0, "no transaction");
+    let marks = point_positions(&app);
+    assert_eq!(marks.len(), 1);
+    let SemanticGeometry::Arc {
+        center,
+        normal,
+        radius,
+        start,
+        sweep,
+    } = cad_geometry::bulge_arc_geometry(point(0.0, 0.0), point(4.0, 0.0), 0.5, p3(0.0, 0.0, 1.0))
+        .expect("the bulged segment resolves")
+    else {
+        panic!("expected an arc");
+    };
+    let arc_length = radius * sweep.abs();
+    let total = arc_length + 4.0;
+    let fraction = (total * 0.5) / arc_length;
+    let (ax, ay, _) = cad_geometry::arbitrary_axis(normal);
+    let angle = start + sweep * fraction;
+    let expected = Point3 {
+        x: center.x + ax.x * radius * angle.cos() + ay.x * radius * angle.sin(),
+        y: center.y + ax.y * radius * angle.cos() + ay.y * radius * angle.sin(),
+        z: center.z + ax.z * radius * angle.cos() + ay.z * radius * angle.sin(),
+    };
+    assert!(
+        near_point(marks[0], expected),
+        "mark {:?} != {expected:?} (arc length {arc_length}, total {total})",
+        marks[0]
+    );
+    assert_eq!(undo_depth(&app), 1);
 }
 
 #[test]
@@ -538,7 +564,28 @@ fn divide_needs_exactly_one_selected_curve() {
 }
 
 #[test]
-fn a_spline_target_is_the_explicit_unsupported_refusal() {
+fn a_linear_spline_is_divided_by_arc_length_not_by_raw_parameter() {
+    // A degree-1 clamped spline with two control points is the straight segment
+    // (0,0)-(9,0); its equal arc-length marks are therefore 3 and 6.
+    let spline = SemanticGeometry::Spline {
+        degree: 1,
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        control_points: vec![point(0.0, 0.0), point(9.0, 0.0)],
+        weights: vec![1.0, 1.0],
+    };
+    let source = curve_entity(1, LayerId(0), spline, "AcDbSpline", 0);
+    let (mut app, mut session) = app_with(vec![source]);
+    set_segments(&mut session, 3.0);
+    divide(&mut app, &mut session, vec![ref_of(1)]).expect("the spline divides");
+    let marks = point_positions(&app);
+    assert_eq!(marks.len(), 2);
+    assert!(near_point(marks[0], point(3.0, 0.0)), "{:?}", marks[0]);
+    assert!(near_point(marks[1], point(6.0, 0.0)), "{:?}", marks[1]);
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn a_curved_spline_is_accepted_and_places_points_on_the_curve() {
     let fit = vec![
         point(0.0, 0.0),
         point(1.0, 2.0),
@@ -556,21 +603,28 @@ fn a_spline_target_is_the_explicit_unsupported_refusal() {
     };
     let source = curve_entity(1, LayerId(0), spline, "AcDbSpline", 0);
     let (mut app, mut session) = app_with(vec![source]);
-    let error = divide(&mut app, &mut session, vec![ref_of(1)]).expect_err("SPLINE is refused");
-    assert_unsupported(error, "SPLINE is not supported");
-    assert_eq!(entity_count(&app), 1);
-    assert_eq!(undo_depth(&app), 0);
+    set_segments(&mut session, 4.0);
+    divide(&mut app, &mut session, vec![ref_of(1)]).expect("the spline divides");
+    let marks = point_positions(&app);
+    assert_eq!(marks.len(), 3, "an open spline places N - 1 marks");
+    for (index, mark) in marks.iter().enumerate() {
+        assert!(
+            mark.x.is_finite() && mark.y.is_finite() && mark.z.is_finite(),
+            "mark {index}: {mark:?}"
+        );
+    }
+    assert_eq!(undo_depth(&app), 1);
 }
 
 #[test]
-fn an_ellipse_is_the_explicit_unsupported_refusal() {
+fn a_full_ellipse_divides_into_equal_arc_length_quadrants() {
     let ellipse = curve_entity(
         1,
         LayerId(0),
         SemanticGeometry::Ellipse {
             center: point(0.0, 0.0),
             normal: p3(0.0, 0.0, 1.0),
-            major_axis: p3(1.0, 0.0, 0.0),
+            major_axis: p3(5.0, 0.0, 0.0),
             ratio: 0.5,
             start: 0.0,
             sweep: TAU,
@@ -579,9 +633,31 @@ fn an_ellipse_is_the_explicit_unsupported_refusal() {
         0,
     );
     let (mut app, mut session) = app_with(vec![ellipse]);
-    let error = divide(&mut app, &mut session, vec![ref_of(1)]).expect_err("ELLIPSE is refused");
-    assert_unsupported(error, "ELLIPSE is not supported");
-    assert_eq!(undo_depth(&app), 0);
+    set_segments(&mut session, 4.0);
+    let outcome = divide(&mut app, &mut session, vec![ref_of(1)]).expect("the ellipse divides");
+    assert_eq!(outcome.objects.len(), 4, "a periodic curve places N marks");
+    let marks = point_positions(&app);
+    for (index, expected) in [
+        point(5.0, 0.0),
+        point(0.0, 2.5),
+        point(-5.0, 0.0),
+        point(0.0, -2.5),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert!(
+            (marks[index].x - expected.x).abs() < 1e-4
+                && (marks[index].y - expected.y).abs() < 1e-4,
+            "mark {index}: {:?} != {expected:?}",
+            marks[index]
+        );
+    }
+    assert!(matches!(
+        entity(&app, 1).geometry,
+        SemanticGeometry::Ellipse { .. }
+    ));
+    assert_eq!(undo_depth(&app), 1);
 }
 
 #[test]
@@ -638,6 +714,64 @@ fn viewer_mode_refuses_divide() {
 }
 
 #[test]
+fn the_block_align_option_rotates_each_block_to_the_curve_tangent() {
+    // A vertical line (0,0)-(0,9) has a +90° tangent at every point, so with
+    // Align=Yes each block's local +X direction turns onto +Y.
+    let source = curve_entity(
+        1,
+        LayerId(0),
+        line_geometry(0.0, 0.0, 0.0, 9.0),
+        "AcDbLine",
+        0,
+    );
+    let (mut app, mut session) = build_with_block(vec![source], "MARK", point(0.0, 0.0));
+    set_segments(&mut session, 3.0);
+    session
+        .set_tool_parameter(ToolParameter::DivideAlignBlock, ToolValue::Flag(true))
+        .unwrap();
+    session.selection.replace([ref_of(1)]);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Divide,
+        CommandPayload::InsertBlock {
+            insertion: point(0.0, 0.0),
+            name: "MARK".into(),
+        },
+    )
+    .expect("the aligned block option divides");
+    assert_eq!(outcome.objects.len(), 2);
+    let inserts: Vec<DbEntity> = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .model_space()
+        .iter()
+        .filter(|entity| matches!(&entity.geometry, SemanticGeometry::Insert { .. }))
+        .map(|entity| DbEntity::clone(entity))
+        .collect();
+    assert_eq!(inserts.len(), 2);
+    for (index, expected) in [point(0.0, 3.0), point(0.0, 6.0)].into_iter().enumerate() {
+        let SemanticGeometry::Insert { transform, .. } = &inserts[index].geometry else {
+            panic!("expected an INSERT");
+        };
+        assert!(
+            near_point(transform.apply_point(point(0.0, 0.0)), expected),
+            "insert {index} lands at {:?}",
+            transform.apply_point(point(0.0, 0.0))
+        );
+        assert!(
+            near_point(transform.apply_vector(point(1.0, 0.0)), point(0.0, 1.0)),
+            "insert {index} is rotated to the tangent: {:?}",
+            transform.apply_vector(point(1.0, 0.0))
+        );
+        assert!(
+            near_point(transform.apply_vector(point(0.0, 1.0)), point(-1.0, 0.0)),
+            "uniform scale stays 1 (only rotated)"
+        );
+    }
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
 fn a_missing_target_is_refused_by_name() {
     let source = curve_entity(
         1,
@@ -671,4 +805,170 @@ fn a_sub_element_reference_is_not_addressable() {
         .expect_err("a sub-element is not addressable");
     assert_invalid(error, "divide.not_addressable");
     assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn a_non_planar_bulged_polyline_is_refused_by_name() {
+    let source = curve_entity(
+        1,
+        LayerId(0),
+        polyline_geometry(
+            vec![point(0.0, 0.0), point(4.0, 0.0), p3(4.0, 4.0, 1.0)],
+            vec![0.5, 0.0],
+            false,
+        ),
+        "AcDbPolyline",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    set_segments(&mut session, 2.0);
+    let before = revision(&app);
+    let error = divide(&mut app, &mut session, vec![ref_of(1)])
+        .expect_err("a non-planar bulge has no circular arc");
+    assert_unsupported(error, "divide.bulged_segment");
+    assert_eq!(revision(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+fn build_with_block(
+    entities: Vec<DbEntity>,
+    block_name: &str,
+    base: Point3,
+) -> (Application, SessionState) {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [(LayerId(0), "0"), (LayerId(7), "WALLS")] {
+        b.insert_layer(Layer {
+            id,
+            name: name.into(),
+            visible: true,
+        })
+        .unwrap();
+    }
+    b.insert_block(cad_db::BlockDefinition {
+        id: cad_domain::BlockId(0),
+        entities: Vec::new(),
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    b.set_block_metadata(cad_domain::BlockId(0), block_name, base)
+        .unwrap();
+    for entity in entities {
+        b.insert_entity(entity).unwrap();
+    }
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([53u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
+#[test]
+fn the_block_option_inserts_one_independent_insert_per_division_point() {
+    let source = curve_entity(
+        1,
+        LayerId(0),
+        line_geometry(0.0, 0.0, 9.0, 0.0),
+        "AcDbLine",
+        0,
+    );
+    let (mut app, mut session) = build_with_block(vec![source], "MARK", point(0.0, 0.0));
+    set_segments(&mut session, 3.0);
+    session.active_layer = LayerId(7);
+    session.selection.replace([ref_of(1)]);
+    let before_revision = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Divide,
+        CommandPayload::InsertBlock {
+            insertion: point(0.0, 0.0),
+            name: "MARK".into(),
+        },
+    )
+    .expect("the block option divides");
+    assert_eq!(outcome.objects.len(), 2, "two division inserts");
+    assert_eq!(outcome.diagnostics[0].code, "drawing.divide");
+    assert!(outcome.diagnostics[0].message.contains("INSERT"));
+
+    let inserts: Vec<DbEntity> = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .model_space()
+        .iter()
+        .filter(|entity| matches!(&entity.geometry, SemanticGeometry::Insert { .. }))
+        .map(|entity| DbEntity::clone(entity))
+        .collect();
+    assert_eq!(inserts.len(), 2);
+    for (index, expected) in [point(3.0, 0.0), point(6.0, 0.0)].into_iter().enumerate() {
+        let SemanticGeometry::Insert { block, transform } = &inserts[index].geometry else {
+            panic!("expected an INSERT");
+        };
+        assert_eq!(*block, cad_domain::BlockId(0));
+        assert!(
+            near_point(transform.apply_point(point(0.0, 0.0)), expected),
+            "insert {index} lands at {:?}, expected {expected:?}",
+            transform.apply_point(point(0.0, 0.0))
+        );
+        // Uniform scale 1 and rotation 0 leave a direction untouched.
+        assert!(near_point(
+            transform.apply_vector(point(1.0, 0.0)),
+            point(1.0, 0.0)
+        ));
+        assert_eq!(inserts[index].layer, LayerId(7), "active layer");
+        assert_eq!(inserts[index].object.type_key, "AcDbBlockReference");
+    }
+    assert_eq!(entity_count(&app), 3, "source + two INSERTs");
+    assert_eq!(revision(&app).0, before_revision.0 + 1, "one transaction");
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+    assert!(matches!(
+        entity(&app, 1).geometry,
+        SemanticGeometry::Line { .. }
+    ));
+}
+
+#[test]
+fn the_block_option_refuses_an_invalid_or_unknown_name_without_writing() {
+    let source = curve_entity(
+        1,
+        LayerId(0),
+        line_geometry(0.0, 0.0, 9.0, 0.0),
+        "AcDbLine",
+        0,
+    );
+    let (mut app, mut session) = build_with_block(vec![source], "MARK", point(0.0, 0.0));
+    set_segments(&mut session, 3.0);
+    session.selection.replace([ref_of(1)]);
+    for (label, name, expected) in [
+        ("unknown block", "NOPE", "divide.unknown_block"),
+        ("empty name", "   ", "divide.invalid_name"),
+        ("multi-line name", "A\nB", "divide.invalid_name"),
+    ] {
+        let before = revision(&app);
+        let count = entity_count(&app);
+        let error = execute(
+            &mut app,
+            &mut session,
+            CommandId::Divide,
+            CommandPayload::InsertBlock {
+                insertion: point(0.0, 0.0),
+                name: name.into(),
+            },
+        )
+        .expect_err(label);
+        assert_invalid(error, expected);
+        assert_eq!(revision(&app), before, "{label}: no revision bump");
+        assert_eq!(entity_count(&app), count, "{label}: nothing written");
+        assert_eq!(undo_depth(&app), 0, "{label}: no transaction");
+    }
 }

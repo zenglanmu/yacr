@@ -33,8 +33,12 @@ mod select_all;
 mod select_box;
 mod select_filter;
 mod select_similar;
+// `MULTIPLE` session repeat state (split out of `session_state`).
+mod session_multiple;
+// SSX: the Express-Tool selection-filter builder (criteria + apply).
 pub mod selection;
 pub mod snap;
+mod ssx;
 pub mod tasks;
 pub mod tool_state;
 pub mod vendor;
@@ -42,11 +46,38 @@ pub mod viewer_config;
 pub mod zoom_history;
 
 mod app_audit;
+// The extended-command wrapper: dispatch, session toggles and reports.
+mod app_dispatch;
+mod app_drafting;
+// The Wave 2 extended-command handlers (session tokens, reports, refusals).
+mod app_extended_refusals;
+mod app_extended_reports2;
+mod app_extended_session2;
+// The Wave 3 extended-command handlers (reports/session and refusals).
+mod app_extended_refusals3;
+mod app_extended_reports3;
+// The Wave 4 extended-command handlers (real selection edits and refusals).
+mod app_extended_edit4;
+mod app_extended_refusals4;
+// The Wave 5 extended-command handlers (attribute/xref token+reports+refusals).
+mod app_extended_attrs5;
+mod app_extended_refusals5;
+// The Wave 6 extended-command handlers (file/plot/export token+reports+refusals).
+mod app_extended_file6;
+mod app_extended_refusals6;
+// The Wave 7 extended-command handlers (dynamic-block visibility reports+refusals).
+mod app_extended_dyn7;
+mod app_extended_refusals7;
+// The Wave 8 extended-command handlers (session tokens+refusals).
+mod app_extended_refusals8;
+mod app_extended_session8;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;
 mod app_reports;
+mod app_reports_ext;
 mod app_utility;
+mod app_vendor_snapshot;
 mod app_view;
 mod app_view_extras;
 mod app_zoom;
@@ -68,11 +99,12 @@ pub use camera::{
     orthonormal_work_plane, xy_work_plane, Camera, Camera2dParams, Camera3dParams, Projection,
     ProjectionKind, StandardView, ViewBasis,
 };
+pub mod command_aliases;
 pub mod command_id;
-pub use command_id::{AppMode, CommandId};
+pub use command_id::{AppMode, CommandId, ExtendedCommandId};
 pub use draw_tool::{
-    circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity, ToolParameter,
-    ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES,
+    circle_radius, AlignPairSet, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity,
+    ToolParameter, ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES,
     HATCH_GRADIENT_DEFAULT_ACI_A, HATCH_GRADIENT_DEFAULT_ACI_B, HATCH_GRADIENT_LINEAR,
     HATCH_GRADIENT_SPHERICAL, HATCH_PATTERN_TYPE_GRADIENT, HATCH_PATTERN_TYPE_PREDEFINED,
     HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE,
@@ -121,8 +153,8 @@ pub struct Document {
 mod session_state;
 
 pub use session_state::{
-    BackendChoice, ClipboardEntry, LayoutViewportRef, MultipleRepeat, SessionState, ViewExtras,
-    VisualStyleToken,
+    BackendChoice, ChamferMethod, ClipboardEntry, IsoPlane, LayoutViewportRef, ModifyOptions,
+    MultipleRepeat, SessionState, ViewExtras, VisualStyleToken, WipeoutFrames,
 };
 
 #[cfg(test)]
@@ -366,14 +398,25 @@ pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 pub use command_payload::{
     AngularDimensionInput, AnnotationBatchPayload, CommandPayload, DimEditCommand,
     DimJogLineCommand, DimOverrideCommand, DimStyleCommand, DimTextEditCommand,
-    DimensionBatchPayload, DimensionChainCommand, GripStretchCommand, GroupCommand,
-    GroupEditCommand, HatchEditOption, HatchOriginCommand, JustifyTextCommand, LayerStateCommand,
-    LeaderCommand, LinetypeCommand, MeasureGeomOption, MocoroCommand, NamedObjectKind,
-    OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget, RadialDimensionCommand,
-    RenameCommand, RotatedLinearDimensionCommand, TCircleCommand, TCountCommand, TextAlignCommand,
-    TextAlignEdge, TextBoundaryShape, TextCaseMode, TextFitCommand, TextScaleCommand,
-    TwoLineCommand, VPointInput, ViewCommand,
+    DimensionBatchPayload, DimensionChainCommand, FilterExpression, FilterLogic, FilterRequest,
+    GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder, HatchEditOption,
+    HatchOriginCommand, JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand,
+    LeaderCommand, LinetypeCommand, MatchPropSettings, MeasureGeomOption, MirrorOptions,
+    MocoroCommand, NamedObjectKind, OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions,
+    OrdinateAxis, OrdinateDimensionCommand, PeditEditCommand, PeditEditOption, PeditOption,
+    PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest, RadialDimensionCommand,
+    RenameCommand, RevCloudStyle, RevisionCloudMode, RevisionCloudOptions,
+    RotatedLinearDimensionCommand, SelectSimilarSettings, SelectionApply, SelectionOperator,
+    SelectionPredicate, SelectionProperty, SelectionScope, SelectionToolPayload,
+    SetByLayerSettings, StretchPolygonCommand, TCircleCommand, TCountCommand, TextAlignCommand,
+    TextAlignEdge, TextBoundaryShape, TextCaseMode, TextFitCommand, TextMaskKind, TextMaskOptions,
+    TextOrder, TextScaleCommand, TwoLineCommand, Txt2MTextOptions, UtilityPayload, VPointInput,
+    ViewCommand, WipeoutPayload,
 };
+
+pub use app_audit::AuditRequest;
+pub use app_drawing::OverkillSettings;
+pub use ssx::{SsxCriterion, SsxCriterionKind, SsxFilter, SsxRequest};
 
 pub struct Command {
     pub schema_version: u32,

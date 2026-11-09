@@ -116,41 +116,6 @@ pub enum TextCaseMode {
     Toggle,
 }
 
-/// The declared AutoCAD 2026 `PEDIT` v1 option subset.
-///
-/// The command line carries the option (`PEDIT CLOSE|OPEN|REVERSE`) because this
-/// build has no in-command option prompt. Full contract:
-/// [`crate::command_id::pedit`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PeditOption {
-    /// `CLOSE` / `C`: close the one selected open polyline (at least 3 vertices).
-    Close,
-    /// `OPEN` / `O`: open the one selected closed polyline.
-    Open,
-    /// `REVERSE` / `R`: reverse vertex order and bulges exactly like `REVERSE`.
-    Reverse,
-}
-
-/// The typed option of the AutoCAD 2026 `HATCHEDIT` command (v1).
-///
-/// The command line carries the option (`HATCHEDIT ANGLE 45`,
-/// `HATCHEDIT SCALE 2`, `HATCHEDIT SOLID`, `HATCHEDIT GRADIENT`) because this
-/// build has no in-command dialog. The selection (exactly one directly
-/// addressable model-space hatch) is the rest of the input. Full contract:
-/// [`crate::command_id::hatchedit`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum HatchEditOption {
-    /// `ANGLE <degrees>`: set the stored pattern angle (only a `Pattern` fill).
-    Angle(f64),
-    /// `SCALE <factor>`: set the stored pattern scale (> 0, only a `Pattern`
-    /// fill).
-    Scale(f64),
-    /// `SOLID`: replace the fill with the solid variant.
-    Solid,
-    /// `GRADIENT`: replace the fill with the default two-colour linear ramp.
-    Gradient,
-}
-
 /// The option of the AutoCAD 2026 `MEASUREGEOM` inquiry router.
 ///
 /// The typed grammar (`cad_ui_core::session::parse_measuregeom_argument`)
@@ -195,9 +160,8 @@ pub enum CommandPayload {
         yaw: f64,
         pitch: f64,
     },
-    /// Structured zoom: a positive factor plus the cursor in logical pixels that
-    /// must stay anchored. Distinct from the legacy `Points`-payload zoom that
-    /// takes no cursor.
+    /// Structured zoom: a positive factor plus the logical-pixel cursor that must
+    /// stay anchored (distinct from the legacy `Points`-payload zoom, which has none).
     ZoomAt {
         factor: f64,
         cursor: [f64; 2],
@@ -214,9 +178,8 @@ pub enum CommandPayload {
     /// `InvalidInput` before any camera change, never a clamped fit.
     ///
     /// **2D orthographic only**: in a 3D observation the command refuses by name
-    /// (`zoom.window.requires_2d`) rather than faking a perspective fit.
-    /// View-only (allowed in Viewer mode): no database write, no revision bump,
-    /// no `cad-history` entry, and no `session.generation` bump.
+    /// (`zoom.window.requires_2d`) rather than faking a perspective fit. View-only
+    /// (allowed in Viewer mode): no write, revision bump, history or generation bump.
     ZoomWindow {
         rect_logical: [[f64; 2]; 2],
     },
@@ -301,6 +264,15 @@ pub enum CommandPayload {
         axis_start: Point3,
         axis_end: Point3,
     },
+    /// The full MIRROR option set: `MIRRTEXT` and `Erase source objects`
+    /// (`crate::app_drawing::drawing_edit::mirror_entities_with_options`).
+    ///
+    /// The typed `MIRROR TEXT 0|1` / `MIRROR ERASE YES|NO` lines store these
+    /// session defaults, and a capture that runs with a non-default set travels
+    /// through this variant instead of the legacy [`Self::Mirror`] payload. A
+    /// bare `Mirror` payload keeps the documented defaults (readable text, no
+    /// erase) and delegates to the same option entry point.
+    MirrorOptions(Box<MirrorOptions>),
     /// Offset a single selected LINE, CIRCLE, ARC or LWPOLYLINE (straight or
     /// bulged) by the distance and side defined by `side_point` (OFFSET, spec
     /// F-EDIT). A polyline is offset with miter joins and its vertex
@@ -312,6 +284,17 @@ pub enum CommandPayload {
         refs: Vec<SelectionRef>,
         side_point: Point3,
     },
+    /// The full OFFSET option set: distance / `Through`, `Erase`, `Layer`,
+    /// `Multiple` (one side/through point per repetition) and the
+    /// `OFFSETGAPTYPE` join (see
+    /// [`crate::app_drawing::drawing_edit::offset_entities_with_options`]).
+    ///
+    /// The typed `OFFSET <distance>` / `OFFSET THROUGH` / `OFFSET ERASE` /
+    /// `OFFSET LAYER ...` lines store these session defaults, and a capture that
+    /// runs with a non-default set travels through this variant instead of the
+    /// legacy [`Self::Offset`] payload. A bare `Offset` payload keeps the legacy
+    /// `Through` semantics and delegates to the same option entry point.
+    OffsetOptions(Box<OffsetOptions>),
     /// Trim one target against a list of boundary refs, keeping the side that
     /// contains `pick_point` (TRIM, spec F-EDIT). See `docs/drawing-edit.md` §3
     /// for the supported subset.
@@ -366,14 +349,14 @@ pub enum CommandPayload {
     Divide {
         refs: Vec<SelectionRef>,
     },
-    /// `LENGTHEN` the one selected LINE/ARC (Work-only).
+    /// `LENGTHEN` the one selected curve (Work-only).
     ///
-    /// The selection snapshot is the whole input (the capture is zero-point); the
-    /// mode and amount are the session typed channel
-    /// ([`crate::draw_tool::ToolParameter::LengthenMode`] /
+    /// The selection snapshot names the target; the static DE/PER/TOT modes also
+    /// accept a one-point `Points([pick])` whose pick chooses the end that moves
+    /// (the legacy no-pick payload moves the far end). The mode and amount are
+    /// the session typed channel ([`crate::draw_tool::ToolParameter::LengthenMode`] /
     /// [`crate::draw_tool::ToolParameter::LengthenValue`]), read by the handler.
-    /// The same entity id is updated (the **end** endpoint moves) in one
-    /// transaction / one undo step.
+    /// The same entity id is updated in one transaction / one undo step.
     Lengthen {
         refs: Vec<SelectionRef>,
     },
@@ -402,6 +385,7 @@ pub enum CommandPayload {
     Torient {
         angle_degrees: Option<f64>,
     },
+    TorientReverse, // TORIENT Reverse: add 180°; typed as TORIENT REVERSE|R.
     /// `TCASE` (Work-only): change the case of the selected text.
     ///
     /// The selection is read from the session at apply time (bare `TCASE` uses
@@ -421,6 +405,15 @@ pub enum CommandPayload {
     /// with `pedit.needs_option`, because this build has no in-command option
     /// prompt. Full contract: [`crate::command_id::pedit`].
     PeditOption(PeditOption),
+    /// `PEDIT` (Work-only): the full typed option line (`JOIN`, `WIDTH`, `FIT`,
+    /// `SPLINE <0-99>`, `DECURVE`, `LTYPE GEN`, `UNDO`, …) plus the
+    /// `PEDITACCEPT` conversion answer. Full contract:
+    /// [`crate::command_id::pedit`].
+    PeditEdit(PeditEditCommand),
+    /// `JOIN` (Work-only): the typed `Close`/`MULTIPLE` sub-options. A bare
+    /// `JOIN` keeps `CommandPayload::None` and means the source-object mode with
+    /// no close. Full contract: [`crate::CommandId::Join`].
+    Join(JoinOptions),
     /// `HATCHEDIT` (Work-only): one typed option applied to the one selected
     /// model-space hatch.
     ///
@@ -519,6 +512,10 @@ pub enum CommandPayload {
         base: Point3,
         delta: Point3,
     },
+    /// STRETCH inside a **crossing polygon** (or a free-form lasso, which is the
+    /// same containment rule over the same vertex list); see
+    /// [`StretchPolygonCommand`].
+    StretchPolygon(Box<StretchPolygonCommand>),
     /// Set the session's active layer for new entities. Session state only.
     ActiveLayer(LayerId),
     /// `CREATELAYER`: the new layer's name.
@@ -605,6 +602,7 @@ pub enum CommandPayload {
     /// transaction / one undo step. Any finite rotation is accepted (a negative
     /// angle is legal and is not normalised).
     RotatedLinearDimension(Box<RotatedLinearDimensionCommand>),
+    DimSpace(Option<f64>), // None = Auto (2 x style height); Some(0) = align; Some(d>0) = spacing.
     /// HATCH the pre-selected boundary entities (ADR 0018 decision D, P6b).
     ///
     /// `refs` is the selection snapshot the tool started with (the tool captures
@@ -945,6 +943,8 @@ pub enum CommandPayload {
         value: String,
         mode: SelectionMode,
     },
+    /// Typed settings for `SELECTSIMILAR` / `MATCHPROP` / `SETBYLAYER`.
+    SelectionTool(Box<SelectionToolPayload>),
     /// `-FIND`/`FIND`; full contract in [`crate::command_id::select_filter`].
     /// `replacement = None` is the report-only form; `-FIND` refuses `Some`.
     TextFind {

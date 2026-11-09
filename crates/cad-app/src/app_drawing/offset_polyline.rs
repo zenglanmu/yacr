@@ -14,6 +14,15 @@
 //! distance to the picked (nearest) segment, and every segment is moved that far to
 //! the pick's side. Straight vertices are joined with **miter** joins.
 //!
+//! ## `OFFSETGAPTYPE`
+//!
+//! [`OffsetGapType::Sharp`] (0) is this module's analytic miter. `Fillet` (1) and
+//! `Chamfer` (2) fill each real gap at a joint through [`super::offset_gap`]: the
+//! tangent arc of radius equal to the offset distance (centred on the source
+//! vertex) or the straight segment between the two offset segment ends. Where the
+//! offset segments cross (a concave corner) the miter trims and no gap is filled;
+//! the sharp path is byte-identical to the pre-gap-type implementation.
+//!
 //! ## Declared construction (straight segments)
 //!
 //! With `n` the polyline's plane unit normal, `u_i` the unit direction of segment
@@ -56,14 +65,20 @@
 //!
 //! ## Honest limitation
 //!
-//! Only **vertex-local** collapse is detected. An offset whose *distant* segments
-//! cross each other (a global self-intersection that no single vertex reveals) is
-//! NOT detected here; it is not silently reported as fine either — it simply is
-//! not checked, and that is a known gap of this command (both arms).
+//! Only **vertex-local** collapse is detected by the miter/join checks. A
+//! **closed** offset ring is additionally sampled and refused by name
+//! (`offset.self_intersection`) if it crosses itself away from a vertex; an
+//! **open** offset polyline is not self-intersection-checked (Autodesk does not
+//! document a trimming rule for either case, and this build does not invent
+//! one).
 
 use super::helpers::offset_tolerance;
 use super::*;
-use cad_geometry::{add, cross, dot, length, normalize, scale, sub};
+use crate::command_payload::OffsetGapType;
+use cad_geometry::{
+    add, arbitrary_axis, clamped_uniform_knots, cross, dot, length, normalize, scale, sub,
+    tessellate_geometry, NurbsCurve, TessellationParams,
+};
 
 /// Below this a polyline bulge is a straight segment (the tessellator's rule,
 /// matching `app_drawing::explode`'s `STRAIGHT_BULGE`).
@@ -96,12 +111,37 @@ fn miter_reversal_tolerance() -> f64 {
 /// distance to the picked segment), so the command can report the exact value
 /// instead of a re-derivation. A polyline with at least one real bulge is handed
 /// to the arc arm ([`super::offset_polyline_bulge`]); everything here is then the
-/// straight-only path and is byte-for-byte what it always was.
+/// straight-only path and is byte-for-byte what it always was under
+/// [`OffsetGapType::Sharp`].
 pub(super) fn offset_polyline(
     points: &[Point3],
     bulges: &[f64],
     closed: bool,
     side_point: Point3,
+    gap: OffsetGapType,
+) -> CadResult<(SemanticGeometry, f64)> {
+    offset_polyline_with_distance(points, bulges, closed, side_point, None, gap)
+}
+
+/// The same arm with an optional fixed distance.
+///
+/// `distance = Some(d)` implements the `OFFSET` **distance** prompt: the side
+/// point only selects the side, every segment still moves by exactly `d`.
+/// `None` is the bare-command `Through` behaviour (the pick's distance to the
+/// nearest segment is used).
+///
+/// `gap` is `OFFSETGAPTYPE`: [`OffsetGapType::Sharp`] keeps the analytic miter
+/// (byte-identical to the pre-gap-type path), while [`OffsetGapType::Fillet`]
+/// and [`OffsetGapType::Chamfer`] fill every real gap between two offset
+/// segments at a joint and keep the miter where the offset segments already
+/// cross (a trim, not a gap).
+pub(super) fn offset_polyline_with_distance(
+    points: &[Point3],
+    bulges: &[f64],
+    closed: bool,
+    side_point: Point3,
+    distance: Option<f64>,
+    gap: OffsetGapType,
 ) -> CadResult<(SemanticGeometry, f64)> {
     let tol = offset_tolerance();
     // An arc segment is the sibling arm's job; a bulge that is not even a finite
@@ -112,7 +152,7 @@ pub(super) fn offset_polyline(
         .any(|bulge| bulge.is_finite() && bulge.abs() > STRAIGHT_BULGE)
     {
         return super::offset_polyline_bulge::offset_polyline_with_arcs(
-            points, bulges, closed, side_point,
+            points, bulges, closed, side_point, distance, gap,
         );
     }
     for (index, bulge) in bulges.iter().enumerate() {
@@ -136,7 +176,19 @@ pub(super) fn offset_polyline(
 
     let dirs = unit_segment_directions(points, closed, tol)?;
     let normal = polyline_normal(points, &dirs, closed, side_point, tol)?;
-    let signed = pick_signed_distance(points, &dirs, normal, side_point);
+    let picked = pick_signed_distance(points, &dirs, normal, side_point);
+    let signed = match distance {
+        Some(requested) => {
+            if picked.abs() <= tol {
+                return Err(CadError::InvalidInput(
+                    "OFFSET side point must not lie on the polyline when a distance is given"
+                        .into(),
+                ));
+            }
+            picked.signum() * requested
+        }
+        None => picked,
+    };
     let distance = signed.abs();
     if !distance.is_finite() || distance <= tol {
         return Err(CadError::InvalidInput(
@@ -153,6 +205,11 @@ pub(super) fn offset_polyline(
 
     let count = points.len();
     let segments = dirs.len();
+    if gap != OffsetGapType::Sharp {
+        return super::offset_gap::offset_straight_with_gap(
+            points, bulges, closed, gap, &dirs, &offsets, normal, signed, distance, tol,
+        );
+    }
     let mut out: Vec<Point3> = Vec::with_capacity(count);
     if closed {
         for index in 0..count {
@@ -180,20 +237,17 @@ pub(super) fn offset_polyline(
         out.push(add(points[count - 1], offsets[segments - 1]));
     }
     require_no_vertex_collapse(&out, &dirs, tol)?;
-    Ok((
-        SemanticGeometry::Polyline {
-            points: out,
-            bulges: bulges.to_vec(),
-            closed,
-        },
-        distance,
-    ))
+    let geometry = SemanticGeometry::Polyline {
+        points: out,
+        bulges: bulges.to_vec(),
+        closed,
+    };
+    if closed {
+        require_no_closed_self_intersection(&geometry, normal, tol)?;
+    }
+    Ok((geometry, distance))
 }
 
-/// The unit direction of every segment, in ring order.
-///
-/// A zero-length segment is an explicit refusal: it has no direction, so there is
-/// no offset side and no way to keep the vertex count meaningful.
 pub(super) fn unit_segment_directions(
     points: &[Point3],
     closed: bool,
@@ -371,4 +425,460 @@ fn require_no_vertex_collapse(out: &[Point3], dirs: &[Point3], tol: f64) -> CadR
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Sampled offset arms: ELLIPSE / elliptical arc and SPLINE sources.
+//
+// A constant-distance offset of an ellipse is **not** an ellipse (the offset
+// curve has a different eccentricity), so both arms produce a real B-spline
+// through sampled offset points — the "oval-shaped spline" AutoCAD produces —
+// and never an `Ellipse`.
+//
+// ## Sampling tolerance
+//
+// The samples are chosen so the sampled polyline's chord deviation from the
+// true offset is at most `scale · 1e-4` world units (and never below the
+// tolerance policy's predicate tolerance), where `scale` is the curve's largest
+// radius / control-polygon extent. The step follows the circle sagitta
+// `h ≈ sqrt(8 · tol · scale)`; the sample count is clamped to `[16, 2048]`, so
+// the tolerance is honoured up to that budget and reported as a documented
+// approximation, never as an exact curve.
+//
+// ## Result kind
+//
+// The result is a **clamped, approximating** cubic B-spline whose control
+// points are the sampled offsets (stored with the `knots: []` clamped-uniform
+// shorthand and `weights: []` all-ones shorthand). The curve interpolates its
+// first and last sample; interior samples are approximated. A full ellipse
+// repeats its first sample at the end, so the result closes visually; the
+// domain has no closed-spline flag, and that is stated here rather than
+// invented in the geometry.
+// ---------------------------------------------------------------------------
+
+/// The world sampling tolerance shared by both sampled arms.
+fn sample_tolerance(scale: f64) -> f64 {
+    (scale.abs() * 1e-4).max(offset_tolerance())
+}
+
+/// The number of sampling steps for a parameter span and a curve scale.
+fn sample_steps(span: f64, scale: f64) -> usize {
+    let scale = scale.abs().max(offset_tolerance());
+    let step = (8.0 * sample_tolerance(scale) * scale).sqrt();
+    // Arc length is at most `span · scale`; `step` is the chord budget.
+    let steps = (span.max(0.0) * scale / step.max(1e-12)).ceil();
+    if !steps.is_finite() {
+        return 2048;
+    }
+    (steps as usize).clamp(16, 2048)
+}
+
+/// Build the clamped cubic (degree 3, degree 1 for a degenerate count) spline
+/// through `points`, using the database's shorthand conventions.
+pub(super) fn spline_through_points(points: Vec<Point3>) -> CadResult<SemanticGeometry> {
+    if points.len() < 2 || !points.iter().all(|point| is_finite_point(*point)) {
+        return Err(CadError::InvalidInput(
+            "OFFSET sampled offset needs at least two finite points".into(),
+        ));
+    }
+    let degree = if points.len() >= 4 { 3 } else { 1 };
+    Ok(SemanticGeometry::Spline {
+        degree,
+        // Empty vectors are the database's documented shorthand:
+        // clamped-uniform knots and unit weights.
+        knots: Vec::new(),
+        control_points: points,
+        weights: Vec::new(),
+    })
+}
+
+/// Offset an `ELLIPSE` (full) or an elliptical arc into a spline.
+///
+/// `distance = Some(d)` is the fixed-distance prompt; `None` lets
+/// `side_point` define the distance (the bare/`Through` behaviour). The side
+/// point also selects the side in both cases.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn offset_ellipse_as_spline(
+    center: Point3,
+    normal: Point3,
+    major_axis: Point3,
+    ratio: f64,
+    start: f64,
+    sweep: f64,
+    side_point: Point3,
+    distance_override: Option<f64>,
+) -> CadResult<(SemanticGeometry, f64)> {
+    let tol = offset_tolerance();
+    let major_len = length(major_axis);
+    if !is_finite_point(center)
+        || !is_finite_point(side_point)
+        || !major_len.is_finite()
+        || major_len <= tol
+        || !ratio.is_finite()
+        || ratio.abs() <= tol
+        || !start.is_finite()
+        || !sweep.is_finite()
+    {
+        return Err(CadError::InvalidInput(
+            "OFFSET ellipse: source parameters must be finite and non-degenerate".into(),
+        ));
+    }
+    let span = sweep.abs();
+    let full_turn = std::f64::consts::TAU;
+    if span <= tol || span > full_turn + tol {
+        return Err(CadError::Unsupported(format!(
+            "OFFSET offset.ellipse_span: an elliptical arc sweep of {sweep} is not a storable \
+             span (0 < |sweep| <= 2π)"
+        )));
+    }
+    let unit_normal = if length(normal) <= tol {
+        return Err(CadError::InvalidInput(
+            "OFFSET ellipse: source plane normal is degenerate".into(),
+        ));
+    } else {
+        normalize(normal)
+    };
+    let major = scale(major_axis, 1.0 / major_len);
+    let minor_dir = normalize(cross(unit_normal, major));
+    if !is_finite_point(minor_dir) || length(minor_dir) <= tol {
+        return Err(CadError::InvalidInput(
+            "OFFSET ellipse: source plane frame is degenerate".into(),
+        ));
+    }
+    let minor = scale(minor_dir, major_len * ratio.abs());
+    let point_at = |angle: f64| {
+        add(
+            center,
+            add(scale(major_axis, angle.cos()), scale(minor, angle.sin())),
+        )
+    };
+    let outward_at = |angle: f64| {
+        let tangent = add(scale(major_axis, -angle.sin()), scale(minor, angle.cos()));
+        let outward = cross(tangent, unit_normal);
+        (length(tangent) > tol && length(outward) > tol).then(|| normalize(outward))
+    };
+    let scale_extent = major_len.max(major_len * ratio.abs());
+    let steps = sample_steps(span, scale_extent);
+    let mut samples = Vec::with_capacity(steps + 1);
+    let mut normals = Vec::with_capacity(steps + 1);
+    for index in 0..=steps {
+        let angle = start + sweep * (index as f64) / (steps as f64);
+        let Some(outward) = outward_at(angle) else {
+            return Err(CadError::Unsupported(
+                "OFFSET offset.collapsed: the ellipse has a point with no offset direction".into(),
+            ));
+        };
+        samples.push(point_at(angle));
+        normals.push(outward);
+    }
+    let (signed, applied) =
+        pick_side_and_distance(&samples, &normals, side_point, distance_override, tol)?;
+    let offsets = samples
+        .iter()
+        .zip(&normals)
+        .map(|(point, outward)| add(*point, scale(*outward, signed)))
+        .collect();
+    let geometry = spline_through_points(offsets)?;
+    if span >= full_turn - tol {
+        require_no_closed_self_intersection(&geometry, unit_normal, tol)?;
+    }
+    Ok((geometry, applied))
+}
+
+/// Offset a `SPLINE` into a new spline through sampled offset points.
+///
+/// The source must be **planar**: a general 3D spline has no single offset
+/// plane, so a non-planar spline is refused by name (`offset.non_planar`). The
+/// plane comes from the control polygon (or, for a collinear control polygon,
+/// from the first tangent and the side point exactly like the LINE arm).
+pub(super) fn offset_spline_as_spline(
+    degree: u32,
+    knots: &[f64],
+    control_points: &[Point3],
+    weights: &[f64],
+    side_point: Point3,
+    distance_override: Option<f64>,
+) -> CadResult<(SemanticGeometry, f64)> {
+    let tol = offset_tolerance();
+    let count = control_points.len();
+    if count < 2 || !control_points.iter().all(|point| is_finite_point(*point)) {
+        return Err(CadError::InvalidInput(
+            "OFFSET source SPLINE needs at least two finite control points".into(),
+        ));
+    }
+    let degree_usize = degree as usize;
+    if degree_usize == 0 || count < degree_usize + 1 {
+        return Err(CadError::InvalidInput(format!(
+            "OFFSET source SPLINE degree {degree} is not indexable with {count} control points"
+        )));
+    }
+    let expanded_knots = if knots.is_empty() {
+        clamped_uniform_knots(count, degree_usize)
+    } else {
+        knots.to_vec()
+    };
+    let curve = NurbsCurve::new(
+        degree_usize,
+        control_points.to_vec(),
+        expanded_knots,
+        weights.to_vec(),
+    )?;
+    let (t0, t1) = curve.domain();
+    if t1 <= t0 {
+        return Err(CadError::InvalidInput(
+            "OFFSET source SPLINE has an empty parameter domain".into(),
+        ));
+    }
+    // The plane comes from the control polygon; a non-planar one is refused.
+    let mut normal: Option<Point3> = None;
+    let sine_tol = turn_sine_tolerance();
+    for index in 0..count.saturating_sub(2) {
+        let turn = cross(
+            sub(control_points[index + 1], control_points[index]),
+            sub(control_points[index + 2], control_points[index]),
+        );
+        if length(turn) > sine_tol {
+            normal = Some(normalize(turn));
+            break;
+        }
+    }
+    let normal = match normal {
+        Some(normal) => {
+            let base = control_points[0];
+            for (index, point) in control_points.iter().enumerate() {
+                if dot(sub(*point, base), normal).abs() > tol {
+                    return Err(CadError::Unsupported(format!(
+                        "OFFSET offset.non_planar: SPLINE control point {index} is off the curve's \
+                         own plane; a non-planar spline has no single offset side"
+                    )));
+                }
+            }
+            normal
+        }
+        None => {
+            // Collinear control polygon: the plane is the tangent plus the pick.
+            let tangent = spline_tangent(&curve, t0, t0, t1, tol)?;
+            let toward = sub(side_point, control_points[0]);
+            if length(cross(tangent, toward)) <= sine_tol {
+                return Err(CadError::InvalidInput(
+                    "OFFSET distance must be positive; pick a point off the spline".into(),
+                ));
+            }
+            normalize(cross(tangent, toward))
+        }
+    };
+    let polygon_len: f64 = control_points
+        .windows(2)
+        .map(|pair| length(sub(pair[1], pair[0])))
+        .sum();
+    let steps = sample_steps(
+        std::f64::consts::TAU,
+        polygon_len.max(length(sub(control_points[1], control_points[0]))),
+    );
+    let mut samples = Vec::with_capacity(steps + 1);
+    let mut normals = Vec::with_capacity(steps + 1);
+    for index in 0..=steps {
+        let t = t0 + (t1 - t0) * (index as f64) / (steps as f64);
+        let tangent = spline_tangent(&curve, t, t0, t1, tol)?;
+        let outward = cross(tangent, normal);
+        if length(outward) <= sine_tol {
+            return Err(CadError::Unsupported(
+                "OFFSET offset.collapsed: the spline has a point with no offset direction".into(),
+            ));
+        }
+        samples.push(curve.evaluate(t));
+        normals.push(normalize(outward));
+    }
+    let (signed, applied) =
+        pick_side_and_distance(&samples, &normals, side_point, distance_override, tol)?;
+    let offsets = samples
+        .iter()
+        .zip(&normals)
+        .map(|(point, outward)| add(*point, scale(*outward, signed)))
+        .collect();
+    let geometry = spline_through_points(offsets)?;
+    let closed = length(sub(samples[samples.len() - 1], samples[0])) <= tol.max(polygon_len * 1e-6);
+    if closed {
+        require_no_closed_self_intersection(&geometry, normal, tol)?;
+    }
+    Ok((geometry, applied))
+}
+
+/// The finite-difference tangent of a spline at `t`.
+fn spline_tangent(curve: &NurbsCurve, t: f64, t0: f64, t1: f64, tol: f64) -> CadResult<Point3> {
+    let span = t1 - t0;
+    let h = (span * 1e-6).max(span * 1e-12);
+    let (a, b) = if t - h < t0 {
+        (t, (t + h).min(t1))
+    } else if t + h > t1 {
+        ((t - h).max(t0), t)
+    } else {
+        (t - h, t + h)
+    };
+    let tangent = sub(curve.evaluate(b), curve.evaluate(a));
+    let len = length(tangent);
+    if !len.is_finite() || len <= tol {
+        return Err(CadError::Unsupported(
+            "OFFSET offset.collapsed: the spline has no tangent at a sampled parameter".into(),
+        ));
+    }
+    Ok(scale(tangent, 1.0 / len))
+}
+
+/// The pick's side sign and the applied distance for a sampled curve.
+fn pick_side_and_distance(
+    samples: &[Point3],
+    normals: &[Point3],
+    side_point: Point3,
+    distance_override: Option<f64>,
+    tol: f64,
+) -> CadResult<(f64, f64)> {
+    let mut best: Option<(f64, f64)> = None;
+    for (point, outward) in samples.iter().zip(normals) {
+        let toward = sub(side_point, *point);
+        let distance = length(toward);
+        if best.map(|(current, _)| distance < current).unwrap_or(true) {
+            best = Some((distance, dot(toward, *outward)));
+        }
+    }
+    let (_, signed_pick) = best.unwrap_or((0.0, 0.0));
+    let signed = match distance_override {
+        Some(requested) => {
+            if signed_pick.abs() <= tol {
+                return Err(CadError::InvalidInput(
+                    "OFFSET side point must not lie on the curve when a distance is given".into(),
+                ));
+            }
+            signed_pick.signum() * requested
+        }
+        None => signed_pick,
+    };
+    let applied = signed.abs();
+    if !applied.is_finite() || applied <= tol {
+        return Err(CadError::InvalidInput(
+            "OFFSET distance must be positive; pick a point off the curve".into(),
+        ));
+    }
+    Ok((signed, applied))
+}
+
+/// Refuse a **closed** offset ring whose sampled curve crosses itself.
+///
+/// Closed self-intersection behaviour is not documented by Autodesk, so this
+/// build does not trim/fill/merge the ring: it reports the named refusal
+/// `offset.self_intersection` and writes nothing. The check samples the result
+/// (tolerance `32 ×` the predicate tolerance, at most 512 segments) and looks
+/// for a proper crossing between non-adjacent ring segments.
+pub(super) fn require_no_closed_self_intersection(
+    geometry: &SemanticGeometry,
+    normal: Point3,
+    tol: f64,
+) -> CadResult<()> {
+    let params = TessellationParams {
+        tolerance: (tol * 32.0).max(1e-6),
+        max_segments: 512,
+        min_segments: 16,
+    };
+    let mut samples = tessellate_geometry(geometry, params);
+    if samples.len() < 4 {
+        return Ok(());
+    }
+    if length(sub(samples[samples.len() - 1], samples[0])) <= tol * 4.0 {
+        samples.pop();
+    }
+    let ring = samples.len();
+    if ring < 4 {
+        return Ok(());
+    }
+    let (ax, ay, _) = arbitrary_axis(normal);
+    let projected: Vec<(f64, f64)> = samples.iter().map(|p| (dot(*p, ax), dot(*p, ay))).collect();
+    for i in 0..ring {
+        let a0 = projected[i];
+        let a1 = projected[(i + 1) % ring];
+        for j in (i + 1)..ring {
+            // Adjacent ring segments share a vertex; that is not a crossing.
+            if (i + 1) % ring == j || (j + 1) % ring == i {
+                continue;
+            }
+            if segments_properly_cross(a0, a1, projected[j], projected[(j + 1) % ring]) {
+                return Err(CadError::Unsupported(
+                    "OFFSET offset.self_intersection: the offset ring crosses itself; closed \
+                     self-intersection behaviour is not documented, so this build refuses rather \
+                     than trimming or filling the result"
+                        .into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A proper crossing of two 2D segments (interior intersection, not a shared end).
+fn segments_properly_cross(a0: (f64, f64), a1: (f64, f64), b0: (f64, f64), b1: (f64, f64)) -> bool {
+    const EPS: f64 = 1e-9;
+    let cross2 = |p: (f64, f64), q: (f64, f64)| p.0 * q.1 - p.1 * q.0;
+    let r = (a1.0 - a0.0, a1.1 - a0.1);
+    let s = (b1.0 - b0.0, b1.1 - b0.1);
+    let denominator = cross2(r, s);
+    if denominator.abs() <= EPS {
+        return false;
+    }
+    let delta = (b0.0 - a0.0, b0.1 - a0.1);
+    let t = cross2(delta, s) / denominator;
+    let u = cross2(delta, r) / denominator;
+    t > EPS && t < 1.0 - EPS && u > EPS && u < 1.0 - EPS
+}
+
+#[cfg(test)]
+mod self_intersection_tests {
+    use super::*;
+
+    /// Closed self-intersection is not documented by Autodesk, so the ring check
+    /// must report the named refusal (never trim/fill). A bow-tie ring is the
+    /// smallest shape that crosses itself away from any vertex.
+    #[test]
+    fn a_closed_ring_that_crosses_itself_is_refused_by_name() {
+        let geometry = SemanticGeometry::Polyline {
+            points: vec![
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 10.0,
+                    y: 10.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 10.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 0.0,
+                    y: 10.0,
+                    z: 0.0,
+                },
+            ],
+            bulges: Vec::new(),
+            closed: true,
+        };
+        let error = require_no_closed_self_intersection(
+            &geometry,
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            1e-6,
+        )
+        .expect_err("a bow-tie ring crosses itself");
+        match error {
+            CadError::Unsupported(reason) => {
+                assert!(reason.contains("offset.self_intersection"), "{reason}");
+            }
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
+    }
 }

@@ -8,6 +8,9 @@
 
 use cad_domain::{CadError, CadResult, Point3, SelectionRef};
 
+use crate::command_payload::{
+    MirrorOptions, OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions,
+};
 use crate::{Command, DrawIntent};
 
 use super::HostController;
@@ -286,21 +289,61 @@ impl HostController {
                     factor,
                 },
             ),
-            DrawIntent::Mirror { p1, p2 } => (
-                crate::CommandId::MirrorEntities,
-                crate::CommandPayload::Mirror {
-                    refs: selection.to_vec(),
-                    axis_start: p1,
-                    axis_end: p2,
-                },
-            ),
-            DrawIntent::Offset { side_point } => (
-                crate::CommandId::OffsetEntity,
-                crate::CommandPayload::Offset {
-                    refs: selection.to_vec(),
-                    side_point,
-                },
-            ),
+            DrawIntent::Mirror { p1, p2 } => {
+                let options = self.session.modify_options;
+                if options.mirror_is_default() {
+                    (
+                        crate::CommandId::MirrorEntities,
+                        crate::CommandPayload::Mirror {
+                            refs: selection.to_vec(),
+                            axis_start: p1,
+                            axis_end: p2,
+                        },
+                    )
+                } else {
+                    (
+                        crate::CommandId::MirrorEntities,
+                        crate::CommandPayload::MirrorOptions(Box::new(MirrorOptions {
+                            refs: selection.to_vec(),
+                            axis_start: p1,
+                            axis_end: p2,
+                            mirrortext: options.mirrortext(),
+                            erase_source: options.mirror_erase(),
+                        })),
+                    )
+                }
+            }
+            DrawIntent::Offset { side_point } => {
+                let options = self.session.modify_options;
+                if options.offset_is_default() {
+                    (
+                        crate::CommandId::OffsetEntity,
+                        crate::CommandPayload::Offset {
+                            refs: selection.to_vec(),
+                            side_point,
+                        },
+                    )
+                } else {
+                    (
+                        crate::CommandId::OffsetEntity,
+                        crate::CommandPayload::OffsetOptions(Box::new(OffsetOptions {
+                            refs: selection.to_vec(),
+                            side_points: vec![side_point],
+                            mode: match options.offset_distance() {
+                                Some(distance) => OffsetMode::Distance(distance),
+                                None => OffsetMode::Through,
+                            },
+                            erase_source: options.offset_erase(),
+                            layer: if options.offset_current_layer() {
+                                OffsetLayer::Current(self.session.active_layer)
+                            } else {
+                                OffsetLayer::Source
+                            },
+                            gap: OffsetGapType::Sharp,
+                        })),
+                    )
+                }
+            }
             // COPYBASE/CUTBASE: the same capture shape, mapped to two different
             // commands and payloads. The choice is the **active command** recorded
             // by the session when the tool started (never a guess from the kind):
@@ -383,24 +426,43 @@ impl HostController {
                     center,
                 },
             ),
-            // ALIGN: the selection snapshot plus the four captured points travel
-            // on the payload; the `AlignScale` flag is the session typed channel
-            // the command layer reads, so it never rides the payload.
-            DrawIntent::Align {
-                source1,
-                dest1,
-                source2,
-                dest2,
-            } => (
-                crate::CommandId::AlignEntities,
-                crate::CommandPayload::Align {
-                    refs: selection.to_vec(),
+            // ALIGN: one pair is a pure move and three pairs a rigid planar transform;
+            // both use the existing typed `Points` shape the command already
+            // accepts (2 and 6 points). The command reads the selection from the
+            // session for that shape, so the snapshot is the same refs the tool
+            // started with. Two pairs keep the dedicated `Align` payload with the
+            // snapshot refs explicitly. The `AlignScale` flag is the session typed
+            // channel the command layer reads, so it never rides the payload.
+            DrawIntent::Align(pairs) => match pairs {
+                crate::AlignPairSet::One { source, dest } => (
+                    crate::CommandId::AlignEntities,
+                    crate::CommandPayload::Points(vec![source, dest]),
+                ),
+                crate::AlignPairSet::Two {
                     source1,
                     dest1,
                     source2,
                     dest2,
-                },
-            ),
+                } => (
+                    crate::CommandId::AlignEntities,
+                    crate::CommandPayload::Align {
+                        refs: selection.to_vec(),
+                        source1,
+                        dest1,
+                        source2,
+                        dest2,
+                    },
+                ),
+                // The six-point payload groups the three sources and then the
+                // three destinations (the order `align_input` reads), while the
+                // capture prompts interleave source/destination per pair.
+                crate::AlignPairSet::Three { sources, dests } => (
+                    crate::CommandId::AlignEntities,
+                    crate::CommandPayload::Points(vec![
+                        sources[0], sources[1], sources[2], dests[0], dests[1], dests[2],
+                    ]),
+                ),
+            },
             // STRETCH: the two captured window corners are mapped back to canvas
             // logical coordinates (the `BoxSelect` convention the payload uses),
             // and the base/displacement points travel as world coordinates. The
@@ -557,8 +619,8 @@ impl HostController {
                 crate::CommandPayload::BoundaryPoint { seed },
             ),
             // DIVIDE/LENGTHEN: the selection snapshot is the whole input (the
-            // tool captures no points); the segment count / mode+amount are the
-            // session typed channel the command layer reads, so they never ride
+            // default capture is zero-point); the segment count / mode+amount are
+            // the session typed channel the command layer reads, so they never ride
             // the payload.
             DrawIntent::Divide => (
                 crate::CommandId::Divide,
@@ -566,11 +628,40 @@ impl HostController {
                     refs: selection.to_vec(),
                 },
             ),
-            DrawIntent::Lengthen => (
-                crate::CommandId::Lengthen,
-                crate::CommandPayload::Lengthen {
-                    refs: selection.to_vec(),
+            // The DIVIDE block option reuses the existing `InsertBlock` payload as
+            // the name channel; `insertion` is a finite placeholder because the
+            // real insertions are the division points, and the curve selection is
+            // read from the session by the command.
+            DrawIntent::DivideBlock { name } => (
+                crate::CommandId::Divide,
+                crate::CommandPayload::InsertBlock {
+                    insertion: Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    name,
                 },
+            ),
+            // LENGTHEN DE/PER/TOT: the one captured pick travels through the
+            // existing one-point `Points` shape and chooses the end that moves; the
+            // legacy no-pick form keeps the `Lengthen { refs }` payload. The mode
+            // and amount are the session typed channel.
+            DrawIntent::Lengthen { pick } => (
+                crate::CommandId::Lengthen,
+                match pick {
+                    Some(pick) => crate::CommandPayload::Points(vec![pick]),
+                    None => crate::CommandPayload::Lengthen {
+                        refs: selection.to_vec(),
+                    },
+                },
+            ),
+            // LENGTHEN DY: the two captured picks travel as the existing two-point
+            // `Points` shape the command reads (the object pick and the new end);
+            // the command projects the second and moves the nearer end.
+            DrawIntent::LengthenDynamic { pick, new_end } => (
+                crate::CommandId::Lengthen,
+                crate::CommandPayload::Points(vec![pick, new_end]),
             ),
             // SCALETEXT: the selection snapshot is the whole input (the tool
             // captures no points); the factor is the session typed channel the

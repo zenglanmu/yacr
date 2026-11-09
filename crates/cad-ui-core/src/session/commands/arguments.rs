@@ -330,17 +330,17 @@ pub fn invalid_zoom_argument_reason(text: &str) -> String {
     )
 }
 
-/// The stable rejection reason for a `PEDIT` argument outside the grammar.
+/// The stable rejection reason for a `PEDIT` argument outside the legacy subset.
 ///
-/// The typed line is echoed and the implemented option set (with its single
-/// letters) is named, so a typo or an unimplemented AutoCAD option is refused by
-/// name. The NOT IMPLEMENTED options are listed too, so nobody reads the subset
-/// as a promise that `JOIN`/`WIDTH`/`SPLINE` work.
+/// The typed line is echoed and the two grammars are named: the legacy
+/// `CLOSE`/`OPEN`/`REVERSE` subset (which keeps `PeditOption`) and the full
+/// option line (`PeditEdit`), so a typo is refused by name and nobody reads the
+/// legacy subset as the whole surface.
 pub fn invalid_pedit_argument_reason(text: &str) -> String {
     format!(
-        "unsupported CAD command: {} (PEDIT needs CLOSE, OPEN or REVERSE, or C, O, R; Join, \
-         Width, Halfwidth, Fit, Spline, Decurve, Ltype gen, Undo, Multiple and Edit vertex are \
-         NOT implemented)",
+        "unsupported CAD command: {} (the legacy PEDIT subset is CLOSE, OPEN or REVERSE, or C, \
+         O, R; the full option line is JOIN, WIDTH <w>, EDIT, FIT, SPLINE [0-99], DECURVE, \
+         LTYPE [GEN|ON|OFF] and UNDO, optionally prefixed by CONVERT Y|N)",
         text.trim()
     )
 }

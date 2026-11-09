@@ -174,10 +174,34 @@ mod area_object;
 mod audit;
 mod cjk_baseline;
 mod commands;
+mod drafting_toggles;
 mod drawing;
 mod drawing_space;
 // The 2026-11-07 extras batch contract tests.
+mod extra_reports;
 mod extras;
+// The 2026-11-09 Wave 2 extended-command contracts.
+mod extended_refusals;
+mod extended_reports2;
+mod extended_session2;
+// The 2026-11-09 Wave 3 extended-command contracts.
+mod extended_refusals3;
+mod extended_reports3;
+// The 2026-11-09 Wave 4 extended-command contracts.
+mod extended_edit4;
+mod extended_refusals4;
+
+mod extended_attrs5;
+mod extended_refusals5;
+// The 2026-11-09 Wave 6 extended-command contracts.
+mod extended_file6;
+mod extended_refusals6;
+// The 2026-11-09 Wave 7 extended-command contracts.
+mod extended_dyn7;
+mod extended_refusals7;
+// The 2026-11-09 Wave 8 extended-command contracts.
+mod extended_refusals8;
+mod extended_session8;
 mod grips;
 mod grips_curves;
 mod grips_dimension;
@@ -205,7 +229,10 @@ mod point_display_style;
 mod revision_cloud;
 mod select_filter;
 mod select_similar;
+// SSX Express-Tool selection-filter contracts.
+mod ssx;
 mod text_commands;
+mod txt2mtxt;
 mod utility;
 mod view_batch;
 

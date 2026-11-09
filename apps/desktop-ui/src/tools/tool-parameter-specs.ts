@@ -218,6 +218,21 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     labelKey: 'status.tool_parameter.align_scale',
     hintKey: 'status.tool_parameter.align_scale.hint',
   },
+  // ALIGN's capture shape: the number of point pairs (1 move, 2 move + rotate,
+  // 3 rigid rotation + translation). The host fixes the step count from this
+  // value at tool start, so the strip must offer only the three implemented
+  // counts.
+  alignPairs: {
+    kind: 'number', statusKey: 'alignPairs', step: 1,
+    ...closedSet(1, 2, 3),
+    choiceLabelKeys: Object.freeze({
+      1: 'status.tool_parameter.align_pairs.single',
+      2: 'status.tool_parameter.align_pairs.two',
+      3: 'status.tool_parameter.align_pairs.three',
+    }),
+    labelKey: 'status.tool_parameter.align_pairs',
+    hintKey: 'status.tool_parameter.align_pairs.hint',
+  },
   arrayRows: {
     kind: 'number', statusKey: 'arrayRows', step: 1,
     offered: integerAtLeast(1),
@@ -481,17 +496,41 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     labelKey: 'status.tool_parameter.divide_segments',
     hintKey: 'status.tool_parameter.divide_segments.hint',
   },
+  // DIVIDE's block option switches the marks from POINTs to insertions of an
+  // existing block; the host then adds the terminal block-name text step, which
+  // the UI names from `awaiting_text`.
+  divideUseBlock: {
+    kind: 'flag', statusKey: 'divideUseBlock',
+    labelKey: 'status.tool_parameter.divide_use_block',
+    hintKey: 'status.tool_parameter.divide_use_block.hint',
+  },
+  // DIVIDE's block-align option (AutoCAD 2026's "Align block with object?
+  // [Yes/No]"): on rotates each inserted block to the object's local tangent at
+  // its division point; off keeps rotation 0. Uniform scale stays 1.
+  divideAlignBlock: {
+    kind: 'flag', statusKey: 'divideAlignBlock',
+    labelKey: 'status.tool_parameter.divide_align_block',
+    hintKey: 'status.tool_parameter.divide_align_block.hint',
+  },
+  // BREAK's `F` override: the first click only selects the object, and two more
+  // picks define the break span. Off keeps the plain two-click form.
+  breakFirstPoint: {
+    kind: 'flag', statusKey: 'breakFirstPoint',
+    labelKey: 'status.tool_parameter.break_first_point',
+    hintKey: 'status.tool_parameter.break_first_point.hint',
+  },
   // LENGTHEN's mode is a **closed set of three codes** — `0` delta, `1` percent,
   // `2` total — so the strip can only reach a code the host accepts, and the
   // codes are read **by name** (a raw 0/1/2 stepper would be a number nobody
   // decodes), the same treatment HATCH's fill kinds and MTEXT's attachment get.
   lengthenMode: {
     kind: 'number', statusKey: 'lengthenMode', step: 1,
-    ...closedSet(0, 1, 2),
+    ...closedSet(0, 1, 2, 3),
     choiceLabelKeys: Object.freeze({
       0: 'status.tool_parameter.lengthen_mode.delta',
       1: 'status.tool_parameter.lengthen_mode.percent',
       2: 'status.tool_parameter.lengthen_mode.total',
+      3: 'status.tool_parameter.lengthen_mode.dynamic',
     }),
     labelKey: 'status.tool_parameter.lengthen_mode',
     hintKey: 'status.tool_parameter.lengthen_mode.hint',
@@ -583,7 +622,12 @@ export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   },
   'draw.fillet': { command: 'FILLET', keys: ['filletRadius'] },
   'draw.chamfer': { command: 'CHAMFER', keys: ['chamferDistanceA', 'chamferDistanceB'] },
-  'draw.align': { command: 'ALIGN', keys: ['alignScale'] },
+  // ALIGN's pair count selects the capture shape (1/2/3 pairs); the scale flag
+  // only applies to the two-pair path, so it follows the count in the strip.
+  'draw.align': { command: 'ALIGN', keys: ['alignPairs', 'alignScale'] },
+  // BREAK's one row selects the `F` first-point form: the host then captures an
+  // entity pick plus two break points instead of the plain two-click form.
+  'draw.break': { command: 'BREAK', keys: ['breakFirstPoint'] },
   'draw.arrayrect': { command: 'ARRAYRECT', keys: ['arrayRows', 'arrayColumns', 'arrayRowSpacing', 'arrayColumnSpacing'] },
   'draw.arraypolar': { command: 'ARRAYPOLAR', keys: ['arrayItems', 'arrayFillAngle', 'arrayRotateItems'] },
   // TEXT and MTEXT create their glyphs with the **one** session `textHeight`
@@ -601,7 +645,7 @@ export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   // and the amount, in that order — the mode first because the amount's meaning
   // depends on it. Their gating command is the running tool's own, exactly like
   // the other rows here.
-  'draw.divide': { command: 'DIVIDE', keys: ['divideSegments'] },
+  'draw.divide': { command: 'DIVIDE', keys: ['divideSegments', 'divideUseBlock', 'divideAlignBlock'] },
   'draw.lengthen': { command: 'LENGTHEN', keys: ['lengthenMode', 'lengthenValue'] },
   // SCALETEXT (2026-11-01) is another zero-pick tool shape: the current
   // selection (one or more Text/MTEXT objects) is the input and the single

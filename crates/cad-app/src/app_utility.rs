@@ -341,25 +341,13 @@ impl Application {
         };
         let drawing = document_drawing(self, command)?;
         let name = name.trim().to_ascii_uppercase();
-        let (value, kind) = match name.as_str() {
-            "PDMODE" => (drawing.point_display_mode().to_string(), "integer"),
-            "PDSIZE" => (drawing.point_display_size().to_string(), "real"),
-            "SNAPUNIT" => (session.snap_spacing().to_string(), "real"),
-            "LTSCALE" => (drawing.linetype_scale().to_string(), "real"),
-            "GRID" => (session.grid_enabled().to_string(), "boolean"),
-            "SNAP" => (session.snap_grid_enabled().to_string(), "boolean"),
-            "ORTHO" => (session.ortho_enabled().to_string(), "boolean"),
-            "TEXTSIZE" => match session.tool_parameter(ToolParameter::TextHeight) {
-                ToolValue::Number(height) => (height.to_string(), "real"),
-                ToolValue::Flag(flag) => (flag.to_string(), "boolean"),
-            },
-            _ => {
-                return Err(CadError::InvalidInput(format!(
-                    "setvar.unknown_variable: SETVAR does not model '{name}'; the closed set is \
-                     PDMODE, PDSIZE, SNAPUNIT, LTSCALE, GRID, SNAP, ORTHO, TEXTSIZE"
-                )))
-            }
-        };
+        let (value, kind) =
+            modelled_system_variable(&drawing, session, &name).ok_or_else(|| {
+                CadError::InvalidInput(format!(
+                    "setvar.unknown_variable: SETVAR does not model '{name}'; the closed set is {}",
+                    MODELLED_SYSTEM_VARIABLES.join(", ")
+                ))
+            })?;
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: None,
@@ -558,7 +546,39 @@ fn with_payload(command: &Command, id: CommandId, payload: CommandPayload) -> Co
     }
 }
 
-fn document_drawing(
+/// The `SETVAR` closed set: the system variables this build really models, in
+/// report order. `SETVAR` and the `SYSVARMONITOR`/`SYSVDLG` reports read exactly
+/// this list, so a report can never advertise a variable the router does not
+/// model.
+pub(crate) const MODELLED_SYSTEM_VARIABLES: [&str; 8] = [
+    "PDMODE", "PDSIZE", "SNAPUNIT", "LTSCALE", "GRID", "SNAP", "ORTHO", "TEXTSIZE",
+];
+
+/// Read one modelled system variable as `(value, kind)`, or `None` when the name
+/// is outside [`MODELLED_SYSTEM_VARIABLES`].
+pub(crate) fn modelled_system_variable(
+    drawing: &cad_db::DrawingDatabase,
+    session: &SessionState,
+    name: &str,
+) -> Option<(String, &'static str)> {
+    let value = match name {
+        "PDMODE" => (drawing.point_display_mode().to_string(), "integer"),
+        "PDSIZE" => (drawing.point_display_size().to_string(), "real"),
+        "SNAPUNIT" => (session.snap_spacing().to_string(), "real"),
+        "LTSCALE" => (drawing.linetype_scale().to_string(), "real"),
+        "GRID" => (session.grid_enabled().to_string(), "boolean"),
+        "SNAP" => (session.snap_grid_enabled().to_string(), "boolean"),
+        "ORTHO" => (session.ortho_enabled().to_string(), "boolean"),
+        "TEXTSIZE" => match session.tool_parameter(ToolParameter::TextHeight) {
+            ToolValue::Number(height) => (height.to_string(), "real"),
+            ToolValue::Flag(flag) => (flag.to_string(), "boolean"),
+        },
+        _ => return None,
+    };
+    Some(value)
+}
+
+pub(crate) fn document_drawing(
     app: &Application,
     command: &Command,
 ) -> CadResult<Arc<cad_db::DrawingDatabase>> {
@@ -573,7 +593,7 @@ fn document_drawing(
     Ok(document.drawing.clone())
 }
 
-fn require_none_payload(command: &Command, name: &str) -> CadResult<()> {
+pub(crate) fn require_none_payload(command: &Command, name: &str) -> CadResult<()> {
     if matches!(command.payload, CommandPayload::None) {
         Ok(())
     } else {
@@ -606,7 +626,7 @@ fn layer_label(database: &cad_db::DrawingDatabase, layer: LayerId) -> String {
 
 /// Format Unix seconds as `YYYY-MM-DDTHH:MM:SSZ` (UTC), without a calendar
 /// dependency. Uses Howard Hinnant's civil-from-days algorithm.
-fn format_utc(seconds: u64) -> String {
+pub(crate) fn format_utc(seconds: u64) -> String {
     let days = (seconds / 86_400) as i64;
     let rem = seconds % 86_400;
     let (year, month, day) = civil_from_days(days);

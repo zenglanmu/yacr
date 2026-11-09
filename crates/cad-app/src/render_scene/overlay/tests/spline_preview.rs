@@ -21,6 +21,7 @@ fn spline_preview_draws_a_bounded_chord_approximation_of_the_curve() {
         candidate: None,
         remaining: 0,
         selection_count: 0,
+        point_target: None,
         ready: true,
         polygon_sides: None,
         awaiting_text: false,

@@ -13,16 +13,6 @@ impl Application {
         }
     }
 
-    /// Install or clear the vendor derived-representation snapshot. The render
-    /// session keeps its own `Arc`; measurement/query read this copy, and a
-    /// replacement document clears it so a stale handle can never measure.
-    pub fn set_vendor_representations(
-        &mut self,
-        store: Option<Arc<crate::vendor::VendorRepresentationStore>>,
-    ) {
-        self.vendor_representations = store;
-    }
-
     /// Execute a command. This is the single entry point shared by UI and CLI.
     pub fn execute(
         &mut self,
@@ -32,6 +22,9 @@ impl Application {
         session.authorize(command.id)?;
         if session.document != command.document {
             return Err(CadError::StaleResult);
+        }
+        if let Some(outcome) = self.dispatch_extended(session, &command)? {
+            return Ok(outcome);
         }
         match command.id {
             CommandId::SelectAll => self.select_all(session, &command),

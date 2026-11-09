@@ -8,40 +8,41 @@
 ///
 /// # What is implemented
 ///
-/// Payload is [`crate::CommandPayload::Points`] with the **closed implicit ring**
-/// of the mask boundary: at least three finite, `+Z`-coplanar vertices in click
-/// order. The ring is implicit, so the first vertex is **not** repeated at the
-/// end; a payload that repeats it (a duplicate closing point) is refused rather
-/// than silently deduplicated. The stored geometry is
+/// The free point-run form is [`crate::CommandPayload::Points`] or
+/// `WipeoutPayload::Points` with the **closed implicit
+/// ring** of the mask boundary: at least three finite, `+Z`-coplanar vertices in
+/// click order. The ring is implicit, so the first vertex is **not** repeated at
+/// the end; a payload that repeats it (a duplicate closing point) is refused
+/// rather than silently deduplicated. The stored geometry is
 /// `SemanticGeometry::Mask { boundary, inverted: false }` and the entity's stored
-/// type key is `AcDbWipeout` (the domain's own `class_name` mapping). One entity,
-/// one transaction and one undo step on the session's active layer, through the
-/// shared create funnel.
+/// type key is `AcDbWipeout`. One entity, one transaction and one undo step on
+/// the session's active layer.
 ///
-/// The interactive form is the open-ended [`crate::draw_tool::DrawToolKind::Wipeout`]
-/// capture: first point, then every further point, finished with Enter — which is
-/// AutoCAD's default polygon flow, and which the existing open-ended capture
-/// machine expresses without a new state. At least three points are required
-/// before the capture is confirmable.
+/// `WipeoutPayload::Polyline` is the documented
+/// `Polyline` → `Erase Polyline [Yes/No]` form: the target must be a closed,
+/// straight-segment `LWPOLYLINE` (zero width is the only width the model has).
+/// `erase = true` deletes the source in the same transaction; `false` keeps it.
+///
+/// `WipeoutPayload::Frames` stores the session
+/// `WIPEOUTFRAME` state (`0` off, `1` on, `2` display-not-plot) and applies it to
+/// every wipeout in the drawing. The mask always renders; no frame geometry is
+/// emitted and the vector plot path has no wipeout-frame channel, so the
+/// display/plot split is declared **display-only state**.
 ///
 /// Refusals (all before any write, all with a stable machine prefix):
 ///
-/// * `wipeout.payload` — the payload is not a point list;
+/// * `wipeout.payload` — the payload is not a point list / supported option;
 /// * `wipeout.too_few_points` — fewer than three vertices;
 /// * `wipeout.invalid_point` — a non-finite vertex;
-/// * `wipeout.not_planar` — the vertices are not on one `+Z` plane (the same
-///   flat work-plane subset RECTANG/ELLIPSE/POLYGON use);
-/// * `wipeout.duplicate_vertex` — two consecutive vertices (the closing pair
-///   included) coincide, so the ring has no real edge there;
-/// * `wipeout.zero_area` — the ring encloses no area (all vertices collinear).
+/// * `wipeout.not_planar` — the vertices are not on one `+Z` plane;
+/// * `wipeout.duplicate_vertex` — two consecutive vertices coincide;
+/// * `wipeout.zero_area` — the ring encloses no area;
+/// * `wipeout.polyline_open`, `wipeout.polyline_bulged`,
+///   `wipeout.polyline_not_polyline`, `wipeout.polyline_not_addressable`,
+///   `wipeout.polyline_target_missing` — the `Polyline` option's target checks.
 ///
 /// # NOT IMPLEMENTED (named, not implied)
 ///
-/// * **`Frames` ON/OFF/`Display-not-plot`** — there is no wipeout-frame model at
-///   all (no frame entity, no `WIPEOUTFRAME` sysvar, no plot/display split), so
-///   the command authors no frame;
-/// * the **`Polyline`** and **`Erase Polyline`** options — no existing polyline
-///   can be converted or consumed, and no temp polyline is created;
 /// * **self-intersection detection** — a self-crossing ring is stored as given
 ///   (the renderer fills it with the even-odd rule), never rejected;
 /// * **picking/frame selection** of an existing wipeout, and `WIPEOUT` editing;

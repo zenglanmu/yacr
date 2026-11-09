@@ -92,12 +92,31 @@ impl Application {
         })
     }
 
-    /// Mirror the selected entities into fresh copies, keeping the originals.
-    pub(super) fn mirror_selection(
+    /// Mirror the selected entities into fresh copies.
+    ///
+    /// `erase_source = false` is AutoCAD's default: the sources are kept and the
+    /// mirrored copies are inserted with fresh ids. `erase_source = true` deletes
+    /// the sources in the **same** transaction, so one undo step restores them.
+    ///
+    /// `mirrortext` is `MIRRTEXT`: `false` (the default) keeps a text run
+    /// readable, `true` is a named refusal (`mirror.mirrortext_glyphs`) because
+    /// the flat-text domain cannot mirror glyphs.
+    ///
+    /// A reflection is orientation-reversing, which the generic transform surface
+    /// refuses for `Arc`/`Ellipse`/`Text`. MIRROR therefore reflects those kinds
+    /// **explicitly** (`app_drawing::mirror_curves`): the plane normal is negated,
+    /// the arc's start angle is re-derived and its sweep preserved, the ellipse's
+    /// axis/parameter are reflected as-is, text keeps its position mirrored with a
+    /// readable rotation, and a dimension's definition points are reflected with
+    /// its display re-synthesized. Any kind this build cannot mirror honestly
+    /// (`Shape`, `Opaque`, …) refuses the whole command, never a silent drop.
+    pub(super) fn mirror_selection_with_options(
         &mut self,
         command: &Command,
         refs: &[SelectionRef],
         transform: &Transform3,
+        mirrortext: bool,
+        erase_source: bool,
     ) -> CadResult<CommandOutcome> {
         if refs.is_empty() {
             return Err(CadError::InvalidInput(
@@ -123,17 +142,17 @@ impl Application {
             false,
         )?;
         // Refuse the whole command if any selected geometry cannot be mirrored,
-        // never drop it. Arc/Ellipse are mirrored by this crate's explicit
-        // reflection arms (`mirror_geometry`); every other kind keeps the generic
-        // transform surface's behaviour and refusals (Text/Shape/Opaque).
+        // never drop it.
         for source in &sources {
-            mirror_geometry(&source.geometry, transform).map_err(|error| match error {
-                CadError::Unsupported(reason) => CadError::Unsupported(format!(
-                    "MIRROR cannot mirror {}: {reason}",
-                    geometry_kind(&source.geometry)
-                )),
-                other => other,
-            })?;
+            mirror_geometry_with_options(&source.geometry, transform, mirrortext).map_err(
+                |error| match error {
+                    CadError::Unsupported(reason) => CadError::Unsupported(format!(
+                        "MIRROR cannot mirror {}: {reason}",
+                        geometry_kind(&source.geometry)
+                    )),
+                    other => other,
+                },
+            )?;
             // A per-entity display override cannot be carried by the current write
             // path; report the honest fallback instead of a silent change.
             if drawing.entity_render_attributes(source.id)
@@ -160,7 +179,7 @@ impl Application {
         let mut copies: Vec<(EntityId, DbEntity)> = Vec::with_capacity(sources.len());
         for (index, source) in sources.iter().enumerate() {
             let new_id = drawing.allocate_entity_id();
-            let geometry = mirror_geometry(&source.geometry, transform)?;
+            let geometry = mirror_geometry_with_options(&source.geometry, transform, mirrortext)?;
             let copy = DbEntity {
                 object: cad_db::DbObject {
                     id: ObjectId(new_id.0),
@@ -176,6 +195,15 @@ impl Application {
             };
             copies.push((new_id, copy));
         }
+        // Capture the display state a source erase will prune, so undo restores it.
+        let erased: Vec<(DbEntity, cad_db::EntityDisplayState)> = if erase_source {
+            sources
+                .iter()
+                .map(|source| (source.clone(), drawing.entity_display_state(source.id)))
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         let transaction = next_transaction_id();
         let change_set = {
@@ -183,12 +211,18 @@ impl Application {
             for (_, copy) in &copies {
                 staged.insert_entity(copy.clone())?;
             }
+            for (source, _) in &erased {
+                staged.delete_entity(source.id)?;
+            }
             staged.commit()?
         };
-        let patches: Vec<DrawingPatch> = copies
+        let mut patches: Vec<DrawingPatch> = copies
             .iter()
             .map(|(id, copy)| drawing_patch(*id, None, Some(copy.clone())))
             .collect();
+        for (source, state) in erased {
+            patches.push(drawing_patch_deleted(source.id, source, state));
+        }
         self.publish_candidate(
             document_id,
             candidate,

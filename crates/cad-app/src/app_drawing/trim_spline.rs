@@ -76,7 +76,7 @@ const SPAN_END_ROUNDING_FRACTION: f64 = 1e-12;
 /// A validated SPLINE target: the source curve plus the two derived quantities the
 /// plan needs (its expanded geometry and its world length).
 #[derive(Debug, Clone)]
-pub(super) struct SplineTarget {
+pub(crate) struct SplineTarget {
     /// The validated, shorthand-expanded source curve.
     curve: NurbsCurve,
     /// The same curve as a stored `SemanticGeometry::Spline`, handed to the

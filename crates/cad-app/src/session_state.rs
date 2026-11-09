@@ -3,7 +3,10 @@
 
 use cad_db::MeasurementRecord;
 use cad_domain::*;
+mod drafting_extras;
+mod draw_plan;
 mod erase_snapshot;
+mod modify_options;
 mod toggles;
 mod view_extras;
 use crate::draw_tool::{
@@ -19,14 +22,13 @@ use crate::selection::SelectionSet;
 use crate::tool_state::{DrawCapture, ToolSnapshot, ToolState};
 use crate::view_states::ViewStates;
 use crate::{AppMode, CommandId};
+pub use drafting_extras::{ChamferMethod, DraftingExtras, IsoPlane, WipeoutFrames};
 pub use erase_snapshot::{EraseEntry, EraseSnapshot};
+pub use modify_options::ModifyOptions;
 pub use view_extras::{ViewExtras, VisualStyleToken};
 
-/// One entity captured into the in-process clipboard.
-///
-/// The [`DbEntity`] carries the row; [`cad_db::EntityDisplayState`] carries the
-/// per-entity render attributes and dynamic-visibility membership the row does
-/// **not**, so a paste preserves exactly what a cut's undo would restore.
+/// One entity captured into the in-process clipboard: the row plus the
+/// per-entity render/visibility state the row does **not** carry.
 #[derive(Debug, Clone)]
 pub struct ClipboardEntry {
     pub entity: cad_db::DbEntity,
@@ -58,6 +60,10 @@ pub struct SessionState {
     /// the shared visibility walk and published to the renderer as
     /// `OverlayInputs.hidden` (`FLAG_HIDDEN`). `UNISOLATEOBJECTS` clears it.
     pub hidden_entities: SelectionSet,
+    /// The `SSX` Express-Tool selection filter being edited (one value per
+    /// criterion). Session editor state only: it is never written to the
+    /// drawing, and applying it only replaces [`Self::selection`].
+    pub ssx_filter: crate::ssx::SsxFilter,
     /// Bounded history of layer-override snapshots for `LAYERP`
     /// ([`crate::layer_history`]): session view state only, never persisted.
     pub layer_history: LayerOverrideHistory,
@@ -74,6 +80,12 @@ pub struct SessionState {
     maximized_viewport: Option<LayoutViewportRef>,
     /// Session-only `VIEWRES` percentage and `VSCURRENT` style token.
     pub view_extras: ViewExtras,
+    /// Session-only drafting flags toggled by the extended command batch
+    /// (`QTEXT`, `FILL`, `TFRAMES`, `REGENAUTO`, `ISODRAFT`).
+    pub drafting_extras: DraftingExtras,
+    /// Session-only stored MIRROR/OFFSET capture options (`MIRRTEXT`, erase,
+    /// OFFSET distance/layer). Defaults keep the legacy payloads exactly.
+    pub modify_options: ModifyOptions,
 
     pub tool: ToolState,
     /// Generation incremented whenever an active tool lifecycle is replaced.
@@ -221,17 +233,12 @@ pub struct SessionState {
     /// Session state only. This host has no command repeat loop, so the flag is
     /// recorded and `MULTIPLE` reports the named boundary; no command is
     /// repeated and nothing is written to the drawing.
-    multiple: Option<MultipleRepeat>,
+    pub(crate) multiple: Option<MultipleRepeat>,
 }
 
-/// What a `MULTIPLE` invocation asked to repeat.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MultipleRepeat {
-    /// Bare `MULTIPLE`: repeat the next command.
-    NextCommand,
-    /// `MULTIPLE <command>`: repeat that canonical selector.
-    Command(String),
-}
+// `MultipleRepeat` and its accessors live in `session_multiple` so this file
+// stays inside the code-size ceiling; the public path is re-exported below.
+pub use crate::session_multiple::MultipleRepeat;
 
 /// CAD backend preference shared by UI, app state and hosts (spec §6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,6 +257,7 @@ impl SessionState {
             selection: SelectionSet::new(),
             layer_overrides: LayerOverrideSet::new(),
             hidden_entities: SelectionSet::new(),
+            ssx_filter: crate::ssx::SsxFilter::default(),
             layer_history: LayerOverrideHistory::new(),
             layer_states: LayerStates::new(),
             view_states: ViewStates::new(),
@@ -257,6 +265,8 @@ impl SessionState {
             regen_generation: 0,
             maximized_viewport: None,
             view_extras: ViewExtras::default(),
+            drafting_extras: DraftingExtras::default(),
+            modify_options: ModifyOptions::default(),
 
             tool: ToolState::Idle,
             tool_generation: 0,
@@ -279,24 +289,6 @@ impl SessionState {
             multiple: None,
             ml_styles: crate::MultilineStyleStore::default(),
         }
-    }
-
-    /// Arm the `MULTIPLE` repeat request (`None` target = the next command).
-    pub fn arm_multiple(&mut self, target: Option<String>) {
-        self.multiple = Some(match target {
-            Some(name) => MultipleRepeat::Command(name),
-            None => MultipleRepeat::NextCommand,
-        });
-    }
-
-    /// The armed `MULTIPLE` request, if any. Session state only.
-    pub fn multiple_target(&self) -> Option<&MultipleRepeat> {
-        self.multiple.as_ref()
-    }
-
-    /// Disarm the `MULTIPLE` request.
-    pub fn clear_multiple(&mut self) {
-        self.multiple = None;
     }
 
     /// The session-only maximized layout viewport (`VPMAX`), if any.
@@ -427,6 +419,10 @@ impl SessionState {
         self.authorize(authorizing_command(parameter))?;
         parameter.validate(value)?;
         self.tool_parameters.set(parameter, value);
+        // A parameter that selects the interactive shape (ALIGN pairs, BREAK `F`,
+        // LENGTHEN `DY`, DIVIDE block) re-plans the active capture while the
+        // captured points still fit; every other parameter is untouched here.
+        self.refresh_draw_capture_plan();
         Ok(())
     }
 
@@ -533,6 +529,14 @@ impl SessionState {
         } else {
             Ok(())
         }
+    }
+
+    /// The current session mode (`Viewer` / `Work`).
+    ///
+    /// Read-only projection of the mode set by [`Self::switch_mode`]; session
+    /// state only, never a drawing write.
+    pub fn app_mode(&self) -> AppMode {
+        self.mode
     }
 
     /// Switch modes; an unconfirmed tool is cancelled, never silently committed.
@@ -653,7 +657,15 @@ impl SessionState {
         };
         self.authorize(command)?;
         let selection = self.selection.refs().to_vec();
-        let tool = DrawTool::new(kind, selection.len());
+        let mut tool = DrawTool::new(kind, selection.len());
+        // The parameter-selected interactive shapes are fixed from the **live**
+        // session values when the capture starts (and re-planned by
+        // `set_tool_parameter` while the capture still fits): ALIGN's pair count,
+        // BREAK's `F` override and LENGTHEN's dynamic mode add or remove picks,
+        // while DIVIDE's block option adds the terminal block-name step.
+        let (point_target, text_required) = self.draw_capture_plan(kind);
+        tool.set_point_target(point_target);
+        tool.set_text_required(text_required);
         self.tool = ToolState::Drawing(Box::new(DrawCapture {
             tool,
             selection,

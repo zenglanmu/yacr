@@ -124,6 +124,93 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'SKETCH', 'TRACE', 'MOCORO', 'MSTRETCH', 'VIEWRES', 'VSCURRENT', 'LINETYPE',
   '-LINETYPE', '-PAN', 'REGEN3',
 
+  // The 2026-11-09 pilot batch: the five session-only display tokens
+  // (QTEXT/FILL/TFRAMES/REGENAUTO/ISODRAFT) and the five read-only reports
+  // (BCOUNT/COUNT/EDITTIME/JULIAN/XLIST) all read or depend on the open drawing,
+  // so the start page disables them with the catalog's own "no drawing is open"
+  // sentence. None takes a capability gate: no file I/O is involved.
+  'QTEXT', 'FILL', 'TFRAMES', 'REGENAUTO', 'ISODRAFT',
+  'BCOUNT', 'COUNT', 'EDITTIME', 'JULIAN', 'XLIST',
+
+  // The 2026-11-09 Wave 2 batch: ten session tokens, eight read-only reports and
+  // twelve named refusals. All thirty need the open drawing (the tokens are
+  // per-drawing session state; the reports read it; the refusals answer from the
+  // build's model, which is only meaningful with a document open), so the start
+  // page disables them with the catalog's own "no drawing is open" sentence.
+  // None takes a capability gate: no file I/O is involved.
+  'DRAGMODE', 'APERTURE', 'ISOPLANE', 'HIGHLIGHTNEW', 'TRAYSETTINGS', 'TEXTSCR',
+  'GRAPHSCR', 'FINDINCLUDE', 'FINDMATCH', 'REVCLOUDPROPERTIES',
+  'SYSVARMONITOR', 'SYSVDLG', 'VTOPTIONS', 'ALIASEDIT', 'WHOHAS', 'ACADINFO',
+  'PTYPE', 'SCALELISTEDIT',
+  'HYPERLINKOPTIONS', 'INPUTSEARCHOPTIONS', '-INPUTSEARCHOPTIONS', 'SIGVALIDATE',
+  'BASE', 'LIMITS', 'VIEWPLOTDETAILS', 'VPLAYER', 'MVIEW', 'PSBSCALE', 'PSTSCALE',
+  'MVSETUP',
+
+  // The 2026-11-09 Wave 3 batch: eight reports/session commands and twenty-two
+  // named refusals. All thirty need the open drawing (the space switches and
+  // reports read its tables; the refusals answer from the build's model, which
+  // is only meaningful with a document open), so the start page disables them
+  // with the catalog's own "no drawing is open" sentence. None takes a
+  // capability gate: no file I/O is involved.
+  'MSPACE', 'PSPACE', 'STYLE', '-STYLE', 'MLEADERSTYLE', 'BLOCK?',
+  'DIMREASSOC', 'DIMREASSOCIATE',
+  'DIMJOGGED', 'DIMINSPECT', '-DIMINSPECT', 'ANNORESET', 'ANNOUPDATE',
+  'OBJECTSCALE', '-OBJECTSCALE', 'QLATTACH', 'QLATTACHSET', 'QLDETACHSET',
+  'ARRAYCLOSE', 'ARRAYEDIT', 'BEDIT', '-BEDIT', 'BCLOSE', 'BCYCLEORDER',
+  'BGRIPSET', 'BESETTINGS', 'BTESTBLOCK', 'LAYERPALETTE', 'CONSTRAINTBAR',
+  'CONSTRAINTSETTINGS',
+
+  // The 2026-11-09 Wave 4 batch: the twelve real selection edits and the
+  // eighteen named refusals all read the open drawing (the edits read its
+  // entities, the refusals answer from the build's model), so the start page
+  // disables them with the catalog's own "no drawing is open" sentence. None
+  // takes a capability gate: no file I/O is involved.
+  'CENTERMARK', 'CENTERLINE', 'NCOPY', 'COPYTOLAYER', '-COPYTOLAYER',
+  'CDORDER', 'FLATTEN', 'XPLODE', 'BTRIM', 'BEXTEND', 'CHANGE', 'CHPROP',
+  'BSCALE', 'MINSERT', 'BLOCKREPLACE', 'BREPLACE', '-BREPLACE', 'SPLINEDIT',
+  'MLEDIT', '-MLEDIT', 'BURST', 'CLIP', 'CLIPIT', 'REGION', 'ADDSELECTED',
+  'WBLOCK', '-WBLOCK', 'BSAVE', 'BSAVEAS', 'CHSPACE',
+
+  // The 2026-11-09 Wave 5 batch: the ATTDISP token, the six read-only
+  // attribute/xref reports and the twenty-three named refusals all read the
+  // open drawing, so the start page disables them with the catalog's own "no
+  // drawing is open" sentence. None takes a capability gate: no file I/O is
+  // performed (the xref report reads import provenance already in the database).
+  'ATTDISP', 'BATTMAN', 'BATTORDER', 'XREF', '-XREF', 'EXTERNALREFERENCES',
+  'EXTERNALREFERENCESCLOSE', 'ATTDEF', '-ATTDEF', 'ATTEDIT', '-ATTEDIT',
+  'ATTIPEDIT', 'ATTIN', 'ATTOUT', 'ATTEXT', '-ATTEXT', 'EATTEDIT', 'EATTEXT',
+  '-EATTEXT', 'ATTREDEF', 'ATTSYNC', 'GATTE', 'XDATA', 'XBIND', '-XBIND',
+  'XATTACH', 'ATTACH', '-ATTACH', 'XOPEN', 'CLASSICXREF',
+
+  // The 2026-11-09 Wave 6 batch: the drawing-log token, the three read-only
+  // file/plot/export reports and the twenty-four named refusals all read the
+  // open drawing, so the start page disables them with the catalog's own "no
+  // drawing is open" sentence. None takes a capability gate: no file I/O is
+  // performed in cad-app (plot/export remain host-owned).
+  'DWGLOG', 'LOGFILEON', 'LOGFILEOFF', 'DWGPROPS', 'DWFFORMAT', 'EXPORTPDF',
+  'SAVEALL', 'QNEW', 'REVERT', 'CLOSEALL', 'CLOSEALLOTHER', 'QQUIT', 'QUIT',
+  'PROPULATE', 'PLOTTERMANAGER', 'STYLESMANAGER', 'EXPORTSETTINGS', 'PREVIEW',
+  'EXPORTLAYOUT', 'PLOTSTAMP', '-PLOTSTAMP', '-PLOT', '-EXPORT', 'ETRANSMIT',
+  '-ETRANSMIT', 'ARCHIVE', '-ARCHIVE', 'PUBLISH', '-PUBLISH', 'AUTOPUBLISH',
+
+  // The 2026-11-09 Wave 7 batch: the two read-only visibility-state reports and
+  // the twenty-eight dynamic-block/constraint refusals all read the open
+  // drawing, so the start page disables them with the catalog's own "no drawing
+  // is open" sentence. None takes a capability gate: the reports only read.
+  'BVSTATE', '-BVSTATE', 'BACTION', 'BACTIONBAR', 'BACTIONSET', 'BACTIONTOOL',
+  'BASSOCIATE', 'BAUTHORPALETTE', 'BAUTHORPALETTECLOSE', 'BCONSTRUCTION',
+  'BCPARAMETER', '-BCPARAMETER', 'BPARAMETER', 'BLOOKUPTABLE', 'BTABLE',
+  'BVHIDE', 'BVSHOW', 'RESETBLOCK', 'AUTOCONSTRAIN', 'DELCONSTRAINT',
+  'DIMCONSTRAINT', 'GEOMCONSTRAINT', 'DCALIGNED', 'DCANGULAR', 'DCCONVERT',
+  'DCDIAMETER', 'DCDISPLAY', 'DCFORM', 'DCHORIZONTAL', 'DCLINEAR',
+
+  // The 2026-11-09 Wave 8 batch: two session tokens (ELEV/UCSICON) and eight
+  // stable refusals (UCS through RIBBON). They are payload-free and read only
+  // the session or answer, so the start page disables them with the catalog's
+  // own "no drawing is open" sentence; none takes a capability gate.
+  'ELEV', 'UCSICON', 'UCS', 'UCSMAN', 'TABLET', 'TASKBAR', 'REINIT',
+  'SYSWINDOWS', 'MENU', 'RIBBON',
+
 ]);
 
 /** One command's precondition on the **current selection**. */

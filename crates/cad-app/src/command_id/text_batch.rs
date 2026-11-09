@@ -231,62 +231,58 @@ pub enum TextBoundaryShape {
 /// refusal inserts none. Work-only.
 pub struct TCircleCommand;
 
-/// `TEXTMASK`: insert an independent `AcDbWipeout` mask behind every selected
-/// Text/MText.
+/// `TEXTMASK`: insert an `AcDbWipeout` mask behind every selected Text/MText.
 ///
-/// Payload is [`crate::CommandPayload::None`]; the selection is the input.
+/// Payload is [`crate::CommandPayload::None`] (documented defaults) or
+/// `UtilityPayload::TextMask`; the selection is the
+/// input. The offset factor (default **0.35**) grows the estimated text box by
+/// `factor × stored height` on every side. Mask types: `Wipeout` is stored as
+/// `SemanticGeometry::Mask { boundary, inverted: false }` (`AcDbWipeout`);
+/// `3dface` and `Solid` have no entity model and are named `Unsupported`
+/// refusals (`textmask.mask_type`).
 ///
-/// For each directly addressable model-space Text/MText the estimated bounds are
-/// converted to a closed four-vertex boundary and stored as
-/// `SemanticGeometry::Mask { boundary, inverted: false }` — the same mask
-/// geometry (and `AcDbWipeout` type key through the domain's `class_name`) the
-/// `WIPEOUT` create path stores. The mask is inserted on the **text's layer**, in
-/// model space, with `draw_order = text.draw_order - 1` (saturating at
-/// `i64::MIN`), i.e. just below the text. Where another row already holds that
-/// order the tie is resolved by the renderer's existing order/id rule; the
-/// command does not renumber unrelated rows.
-///
-/// ## No association model
-///
-/// The mask is a **plain independent entity**: it stores no owner, no text id and
-/// no back-reference, so moving, editing or deleting the text later leaves the
-/// mask where it is. `TEXTUNMASK` therefore cannot prove provenance either (see
-/// below). AutoCAD's text frame/background association and the mask's
-/// frames/display-not-plot options are **NOT IMPLEMENTED**.
+/// The text and its new mask are added to the existing session group store under
+/// a generated `*TEXTMASK-<n>` name, so group-aware move/copy/erase sees them
+/// together. The mask remains a **plain independent entity** in the DWG (no
+/// owner/back-reference); re-running TEXTMASK deletes the previous
+/// `*TEXTMASK-*` group mask for the selected text and creates the new one in the
+/// same transaction. A full group store is `textmask.group_cap`, never a silent
+/// drop.
 ///
 /// Refusals: `textmask.needs_selection`, `textmask.invalid_payload`,
-/// `textmask.not_addressable`, `textmask.target_missing`, `textmask.degenerate`
-/// (non-finite/non-positive stored height, or a zero-area estimate), and the
-/// whole-command `Unsupported` for a non-text target. One transaction / one undo
-/// step inserts every mask. Work-only.
+/// `textmask.invalid_offset`, `textmask.mask_type`,
+/// `textmask.not_addressable`, `textmask.target_missing`,
+/// `textmask.degenerate`, `textmask.group_cap`, and the whole-command
+/// `Unsupported` for a non-text target. One transaction / one undo step inserts
+/// every mask and deletes the replaced ones. Work-only.
 pub struct TextMaskCommand;
 
-/// `TEXTUNMASK`: delete masks covered by the selected text.
+/// `TEXTUNMASK`: delete masks belonging to the selected text.
 ///
 /// Payload is [`crate::CommandPayload::None`]; the selection is the input.
 ///
-/// ## Deletion rule (heuristic, declared)
+/// ## Deletion rule
 ///
-/// * The deletion set is the selected `SemanticGeometry::Mask` entities. A mask
-///   is deleted when **every** boundary vertex lies inside the estimated bounds
-///   of **at least one** selected Text/MText (a small world tolerance is allowed
-///   so a boundary drawn from the same estimate always matches).
-/// * When **no** Text/MText is selected, every selected mask is deleted (the
-///   "only masks are selected" form).
-/// * Only **selected** masks are ever deleted. Unselected masks are never
-///   scanned or removed, and a text-only selection reports `textunmask.unchanged`.
+/// * A selected text's `*TEXTMASK-*` group names the exact mask to remove, so
+///   `TEXTUNMASK` deletes that mask even when the mask itself is not selected.
+///   Only groups created by TEXTMASK are consulted; unrelated drawing masks are
+///   never scanned.
+/// * Selected `SemanticGeometry::Mask` entities continue to use the declared
+///   estimated-bounds heuristic: a mask is deleted when every boundary vertex
+///   lies inside the estimated bounds of at least one selected text (with a
+///   small world tolerance).
+/// * When no text is selected, every selected mask is deleted.
+///
+/// The TEXTMASK group is removed after its mask is deleted. A selection with no
+/// deletable mask is `textunmask.unchanged` with no transaction.
 ///
 /// ## Honest limits
 ///
-/// A mask stores no provenance, so this command **cannot prove** that a mask was
-/// created by `TEXTMASK` — any mask whose boundary happens to lie inside the
-/// estimate is treated the same. The estimate is `height × char_count` and
-/// ignores rotation, so a rotated or proportionally wider text can leave a real
-/// mask outside the test. Non-mask selected entities are reported as
-/// `textunmask.skipped` and never fail the command when at least one mask was
-/// deleted.
+/// The DWG stores no association record; this command cannot prove provenance
+/// for a selected mask outside a TEXTMASK group. The estimate is
+/// `height × char_count` and ignores rotation. Non-mask selected entities are
+/// `textunmask.skipped`.
 ///
-/// Refusals: `textunmask.needs_selection`, `textunmask.invalid_payload`. A
-/// selection with no deletable mask is `textunmask.unchanged` (no transaction).
-/// One transaction / one undo step deletes every mask. Work-only.
+/// Refusals: `textunmask.needs_selection`, `textunmask.invalid_payload`. One
+/// transaction / one undo step deletes every mask. Work-only.
 pub struct TextUnmaskCommand;

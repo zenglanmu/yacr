@@ -1,8 +1,10 @@
-//! `PEDIT` (AutoCAD 2026) vocabulary: the declared v1 option subset.
+//! `PEDIT` (AutoCAD 2026) vocabulary: the legacy option subset.
 //!
 //! Pins the typed-argument grammar (`CLOSE`/`OPEN`/`REVERSE` and their single
-//! letters), the stable invalid-argument refusal, the Work-only capability and
-//! the one-canonical-selector rule (the option words are grammar, not names).
+//! letters) that keeps the older `PeditOption` payload, the stable refusal, the
+//! Work-only capability and the one-canonical-selector rule. The full option
+//! line (`JOIN`, `WIDTH`, `SPLINE`, …, `PeditEdit`) is pinned by
+//! `modify_arguments`.
 
 use super::super::super::*;
 use super::super::test_support::*;
@@ -23,17 +25,17 @@ fn pedit_is_the_declared_work_only_v1_option_subset() {
     ] {
         assert_eq!(parse_pedit_argument(argument), Some(option), "{argument}");
     }
-    // No other AutoCAD option, option stack, partial spelling or empty argument.
+    // The legacy subset parser still refuses everything the full line handles;
+    // the full grammar has its own test module (`modify_arguments`).
     for refused in [
         "", "JOIN", "WIDTH", "FIT", "SPLINE", "C O", "REV", "MULTIPLE",
     ] {
         assert_eq!(parse_pedit_argument(refused), None, "{refused:?}");
     }
-    // The refusal names the implemented set, so an unimplemented AutoCAD option
-    // is refused by name and never silently defaulted.
-    let reason = invalid_pedit_argument_reason("PEDIT JOIN");
+    // The refusal names both grammars, so a typo is refused by name.
+    let reason = invalid_pedit_argument_reason("PEDIT REV");
     assert!(reason.contains("CLOSE, OPEN or REVERSE"), "{reason}");
-    assert!(reason.contains("NOT implemented"), "{reason}");
+    assert!(reason.contains("full option line"), "{reason}");
     // It is a typed argument of one canonical selector, not a new command name.
     assert_eq!(
         typed_command_argument("PEDIT CLOSE"),
@@ -56,10 +58,7 @@ fn pedit_is_the_declared_work_only_v1_option_subset() {
     let error = session.command("PEDIT").unwrap_err();
     assert!(error.contains("pedit.needs_option"), "{error}");
     let error = session.command("PEDIT JOIN").unwrap_err();
-    assert!(
-        error.contains("PEDIT needs CLOSE, OPEN or REVERSE"),
-        "{error}"
-    );
+    assert!(error.contains("pedit.join"), "{error}");
     let error = session.command("PEDIT CLOSE").unwrap_err();
     assert!(error.contains("pedit.selection"), "{error}");
 }

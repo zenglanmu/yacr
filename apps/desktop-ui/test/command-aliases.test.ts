@@ -103,11 +103,12 @@ test('an alias stays a suggestion: admission still routes through the host vocab
 test('suggestions merge alias rows between canonical prefix and mid-string matches', () => {
   loadAliases();
   // The canonical names that start with `l` now fill the layer run, the layout
-  // batch, LINE, LENGTHEN, LIST and the two palette selectors, so this ordering
-  // test asks for a window long enough to reach the shorthand as well. The limit
-  // itself — a full canonical list hides the alias rows — is pinned by the
-  // isolation test below, not by widening this one silently.
-  const rows = filterCommandSuggestions('l', { limit: 32 });
+  // batch, LINE, LENGTHEN, LIST, the two palette selectors and the Wave 6 log
+  // tokens (LOGFILEON/LOGFILEOFF), so this ordering test asks for a window long
+  // enough to reach the shorthand as well. The limit itself — a full canonical
+  // list hides the alias rows — is pinned by the isolation test below, not by
+  // widening this one silently.
+  const rows = filterCommandSuggestions('l', { limit: 64 });
   const aliasRow = rows.find(row => row.id === 'L');
   assert.ok(aliasRow, 'L must be suggested once the alias table is loaded');
   assert.equal(aliasRow.target, 'LINE', 'the alias entry carries its canonical target');
@@ -126,10 +127,13 @@ test('suggestions merge alias rows between canonical prefix and mid-string match
   // Typing the alias exactly highlights its own row (Enter submits `L`, which the
   // host canonicalises), and the row still shows the meaning.
   assert.equal(rows[defaultSuggestionIndex(rows, 'L')].id, 'L');
-  // Canonical prefix matches still win: `co` starts with a canonical name.
+  // Canonical prefix matches still win: `co` starts with canonical names.
+  // CONSTRAINTBAR is now alphabetically first among them; COPY keeps its row.
   const co = filterCommandSuggestions('co');
-  assert.equal(co[0].id, 'COPY');
-  assert.ok(co.findIndex(row => row.id === 'CO') > co.findIndex(row => row.id === 'COPY'));
+  assert.equal(co[0].id, 'CONSTRAINTBAR');
+  const copyAt = co.findIndex(row => row.id === 'COPY');
+  assert.ok(copyAt >= 0);
+  assert.ok(co.findIndex(row => row.id === 'CO') > copyAt);
   assert.equal(co.find(row => row.id === 'CO').target, 'COPY');
   setCommandAliases([]);
 });
@@ -138,9 +142,16 @@ test('alias rows match a typed prefix only, and the limit covers the merged list
   loadAliases();
   // `X` is an alias, so it appears for `x`; a mid-string match on the alias is
   // deliberately not a thing (`EX` contains `X` but is not a prefix match).
+  // The catalogue now has more than the default eight canonical X-prefixed
+  // names (XATTACH … XPLODE), and they fill the default slice, so the alias row
+  // is only visible with a wider limit.
   const x = filterCommandSuggestions('x');
-  assert.deepEqual(x.filter(row => row.target).map(row => row.id), ['X']);
-  const ex = filterCommandSuggestions('ex');
+  assert.deepEqual(x.filter(row => row.target).map(row => row.id), []);
+  const wide = filterCommandSuggestions('x', { limit: 64 });
+  assert.deepEqual(wide.filter(row => row.target).map(row => row.id), ['X']);
+  // The Wave 6 export commands (EXPORTLAYOUT/EXPORTPDF/EXPORTSETTINGS) also start
+  // with `ex` and fill the default slice, so the alias row needs a wider window.
+  const ex = filterCommandSuggestions('ex', { limit: 64 });
   assert.deepEqual(ex.filter(row => row.target).map(row => row.id), ['EX']);
   // An empty query browses the catalog only — never the shorthand rows.
   assert.equal(filterCommandSuggestions('').some(row => row.target), false);

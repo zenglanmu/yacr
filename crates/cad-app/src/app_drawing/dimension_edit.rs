@@ -39,7 +39,7 @@ fn unsupported(code: &str, detail: impl std::fmt::Display) -> CadError {
 }
 
 /// The document's drawing, with the ordinary stale-document guard.
-fn drawing_of(app: &Application, command: &Command) -> CadResult<Arc<DrawingDatabase>> {
+pub(super) fn drawing_of(app: &Application, command: &Command) -> CadResult<Arc<DrawingDatabase>> {
     let document = app
         .workspace
         .documents
@@ -66,6 +66,145 @@ fn plane_z(points: &DimensionPoints) -> f64 {
         DimensionPoints::Angular3Pt { arc_point, .. } => arc_point.z,
         DimensionPoints::Ordinate { feature, .. } => feature.z,
     }
+}
+
+/// The text anchor for `DIMTEDIT LEFT|RIGHT|CENTER`.
+///
+/// The domain stores an **anchor** (group 11) with centered glyph alignment, so
+/// justification cannot change the glyph alignment there. This build therefore
+/// declares its rule: the anchor moves to the start (minimum projection), end
+/// (maximum projection) or midpoint of the dimension line. For a linear/aligned
+/// dimension that is the first/second extension-line foot; for radius/diameter it
+/// is the centre-side/arc-side end of the radial leader.
+///
+/// Other subtypes (angular, ordinate) have no single straight dimension line in
+/// this model and are refused by name.
+fn justify_text_anchor(
+    dimension: &DimensionGeometry,
+    request: DimTextEditCommand,
+) -> CadResult<Point3> {
+    let select = |start: Point3, end: Point3| match request {
+        DimTextEditCommand::Left => start,
+        DimTextEditCommand::Right => end,
+        _ => Point3 {
+            x: (start.x + end.x) * 0.5,
+            y: (start.y + end.y) * 0.5,
+            z: (start.z + end.z) * 0.5,
+        },
+    };
+    match (dimension.kind(), &dimension.definition().points) {
+        (
+            DimensionKind::Linear { rotation },
+            DimensionPoints::Linear {
+                first,
+                second,
+                dimension_line,
+            },
+        ) => {
+            let direction = direction_of(rotation);
+            let t1 = dot(sub(*first, *dimension_line), direction);
+            let t2 = dot(sub(*second, *dimension_line), direction);
+            let (low, high) = if t1 <= t2 { (t1, t2) } else { (t2, t1) };
+            let t = match request {
+                DimTextEditCommand::Left => low,
+                DimTextEditCommand::Right => high,
+                _ => (low + high) * 0.5,
+            };
+            Ok(add(*dimension_line, scale_point(direction, t)))
+        }
+        (
+            DimensionKind::Aligned,
+            DimensionPoints::Linear {
+                first,
+                second,
+                dimension_line,
+            },
+        ) => {
+            let raw = sub(*second, *first);
+            let length = dot(raw, raw).sqrt();
+            if !length.is_finite() || length <= MIN_DIMENSION_EDIT_EXTENT {
+                return Err(invalid(
+                    "dimtedit.degenerate",
+                    "the aligned dimension has no measurable direction to justify along",
+                ));
+            }
+            let direction = scale_point(raw, 1.0 / length);
+            let t1 = dot(sub(*first, *dimension_line), direction);
+            let t2 = dot(sub(*second, *dimension_line), direction);
+            let (low, high) = if t1 <= t2 { (t1, t2) } else { (t2, t1) };
+            let t = match request {
+                DimTextEditCommand::Left => low,
+                DimTextEditCommand::Right => high,
+                _ => (low + high) * 0.5,
+            };
+            Ok(add(*dimension_line, scale_point(direction, t)))
+        }
+        (
+            DimensionKind::Radius | DimensionKind::Diameter,
+            DimensionPoints::Radial {
+                center,
+                point_on_arc,
+                ..
+            },
+        ) => Ok(select(*center, *point_on_arc)),
+        (kind, _) => Err(unsupported(
+            "dimtedit.justify_unsupported",
+            format!(
+                "DIMTEDIT LEFT/RIGHT/CENTER applies to linear, aligned, radius and diameter \
+                 dimensions only; this entity is {}",
+                describe_dimension_kind(kind)
+            ),
+        )),
+    }
+}
+
+/// The stable kind name used by the DIMTEDIT justification refusal.
+fn describe_dimension_kind(kind: DimensionKind) -> &'static str {
+    match kind {
+        DimensionKind::Linear { .. } => "a linear dimension",
+        DimensionKind::Aligned => "an aligned dimension",
+        DimensionKind::Angular2Ln | DimensionKind::Angular3Pt => "an angular dimension",
+        DimensionKind::Radius => "a radius dimension",
+        DimensionKind::Diameter => "a diameter dimension",
+        DimensionKind::Ordinate { .. } => "an ordinate dimension",
+    }
+}
+
+/// The XY unit direction of a linear dimension's group-50 rotation.
+fn direction_of(rotation: f64) -> Point3 {
+    Point3 {
+        x: rotation.cos(),
+        y: rotation.sin(),
+        z: 0.0,
+    }
+}
+
+fn add(a: Point3, b: Point3) -> Point3 {
+    Point3 {
+        x: a.x + b.x,
+        y: a.y + b.y,
+        z: a.z + b.z,
+    }
+}
+
+fn sub(a: Point3, b: Point3) -> Point3 {
+    Point3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
+}
+
+fn scale_point(point: Point3, factor: f64) -> Point3 {
+    Point3 {
+        x: point.x * factor,
+        y: point.y * factor,
+        z: point.z * factor,
+    }
+}
+
+fn dot(a: Point3, b: Point3) -> f64 {
+    a.x * b.x + a.y * b.y + a.z * b.z
 }
 
 /// Resolve one selection ref to a directly addressable dimension entity.
@@ -244,7 +383,15 @@ impl Application {
         }
     }
 
-    /// `DIMTEDIT`: move/rotate/reset the text of exactly one selected dimension.
+    /// `DIMTEDIT`: move/justify/rotate/home the text of exactly one selected
+    /// dimension.
+    ///
+    /// The documented set is `MOVE <x> <y>`, `LEFT`, `RIGHT`, `CENTER`, `HOME`
+    /// and `ANGLE <degrees>`. Justification is admitted only for linear/aligned,
+    /// radius and diameter dimensions; other kinds are refused by name
+    /// (`dimtedit.justify_unsupported`). `ANGLE` follows AutoCAD's UCS-X-axis
+    /// convention and keeps the text centre fixed; `0` restores the derived
+    /// orientation. `HOME` restores the derived position only.
     pub(crate) fn dim_text_edit(
         &mut self,
         session: &mut SessionState,
@@ -255,7 +402,7 @@ impl Application {
             _ => {
                 return Err(invalid(
                     "dimtedit.payload",
-                    "DIMTEDIT takes MOVE <x> <y>, ROTATE <degrees> or RESET",
+                    "DIMTEDIT takes MOVE <x> <y>, LEFT, RIGHT, CENTER, HOME or ANGLE <degrees>",
                 ))
             }
         };
@@ -287,22 +434,26 @@ impl Application {
                     z: plane_z(&definition.points),
                 };
             }
-            DimTextEditCommand::Rotate { degrees } => {
+            DimTextEditCommand::Left | DimTextEditCommand::Right | DimTextEditCommand::Center => {
+                definition.text_middle = justify_text_anchor(&target.dimension, request)?;
+            }
+            DimTextEditCommand::Home => {
+                definition.text_middle = Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                };
+            }
+            DimTextEditCommand::Angle { degrees } => {
                 if !degrees.is_finite() {
                     return Err(invalid(
                         "dimtedit.bad_rotation",
                         "the text rotation must be finite",
                     ));
                 }
+                // Group 53 stores radians from the UCS X axis; `0` is the
+                // "derive from the dimension line" sentinel.
                 definition.text_rotation = degrees.to_radians();
-            }
-            DimTextEditCommand::Reset => {
-                definition.text_middle = Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                };
-                definition.text_rotation = 0.0;
             }
         }
         let after = rebuild_dimension(
@@ -522,176 +673,6 @@ impl Application {
                       non-associative; nothing changed"
                 .into(),
         }]))
-    }
-
-    /// `QDIM` v1: one aligned dimension per selected straight LINE.
-    pub(crate) fn qdim(
-        &mut self,
-        session: &mut SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        if !matches!(command.payload, CommandPayload::None) {
-            return Err(invalid(
-                "qdim.payload",
-                "QDIM takes no payload; the current selection is the input",
-            ));
-        }
-        let references = session.selection.refs();
-        if references.is_empty() {
-            return Err(invalid(
-                "qdim.selection",
-                "QDIM needs at least one selected straight LINE",
-            ));
-        }
-        let drawing = drawing_of(self, command)?;
-        // Every object is resolved and validated before the first line is built.
-        let mut seen = std::collections::BTreeSet::new();
-        let mut segments = Vec::with_capacity(references.len());
-        for reference in references {
-            if !seen.insert(reference.entity) {
-                return Err(invalid(
-                    "qdim.duplicate",
-                    format!("entity {} is selected twice", reference.entity.0),
-                ));
-            }
-            if reference.document != command.document {
-                return Err(invalid(
-                    "qdim.not_addressable",
-                    "the selected object belongs to another document",
-                ));
-            }
-            if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
-                return Err(invalid(
-                    "qdim.not_addressable",
-                    "a block-instance member or sub-element cannot be measured; select the \
-                     line entity itself",
-                ));
-            }
-            let entity = drawing.entity(reference.entity).cloned().ok_or_else(|| {
-                invalid(
-                    "qdim.target_missing",
-                    format!(
-                        "the selected entity {} no longer exists",
-                        reference.entity.0
-                    ),
-                )
-            })?;
-            if entity.space != SpaceId::Model {
-                return Err(invalid(
-                    "qdim.space",
-                    "QDIM v1 creates dimensions in model space only",
-                ));
-            }
-            match &entity.geometry {
-                SemanticGeometry::Line { start, end } => {
-                    let length = distance(*start, *end);
-                    if !length.is_finite() || length <= MIN_DIMENSION_EDIT_EXTENT {
-                        return Err(invalid(
-                            "qdim.degenerate",
-                            format!(
-                                "the selected LINE {} has no measurable length",
-                                reference.entity.0
-                            ),
-                        ));
-                    }
-                    segments.push((*start, *end, length));
-                }
-                SemanticGeometry::Circle { .. } => {
-                    return Err(unsupported(
-                        "qdim.circle_unsupported",
-                        "QDIM v1 produces linear/aligned dimensions from straight LINEs only; a \
-                         circle would need a radial/diameter QDIM, which is NOT IMPLEMENTED",
-                    ))
-                }
-                SemanticGeometry::Arc { .. } => {
-                    return Err(unsupported(
-                        "qdim.arc_unsupported",
-                        "QDIM v1 produces linear/aligned dimensions from straight LINEs only; an \
-                         arc would need a radial QDIM, which is NOT IMPLEMENTED",
-                    ))
-                }
-                SemanticGeometry::Point(_) => {
-                    return Err(unsupported(
-                        "qdim.point_unsupported",
-                        "a lone POINT has no measurable extent and this build has no point \
-                         ordering/reference primitive for QDIM",
-                    ))
-                }
-                other => {
-                    return Err(unsupported(
-                        "qdim.unsupported_kind",
-                        format!(
-                            "QDIM v1 supports straight LINEs only; {} is not supported",
-                            geometry_kind(other)
-                        ),
-                    ))
-                }
-            }
-        }
-        let style = drawing.resolve_dim_style("Standard").ok_or_else(|| {
-            invalid(
-                "qdim.no_style",
-                "the drawing has no 'Standard' dimension style to create with",
-            )
-        })?;
-        let offset = style.dim_line_increment;
-        if !offset.is_finite() || offset <= MIN_DIMENSION_EDIT_EXTENT {
-            return Err(invalid(
-                "qdim.bad_spacing",
-                format!("the Standard style's DIMDLI must be finite and positive, got {offset}"),
-            ));
-        }
-        let mut geometries = Vec::with_capacity(segments.len());
-        for (start, end, length) in segments {
-            let direction = Point3 {
-                x: (end.x - start.x) / length,
-                y: (end.y - start.y) / length,
-                z: 0.0,
-            };
-            let normal = Point3 {
-                x: -direction.y,
-                y: direction.x,
-                z: 0.0,
-            };
-            let midpoint = Point3 {
-                x: (start.x + end.x) * 0.5,
-                y: (start.y + end.y) * 0.5,
-                z: (start.z + end.z) * 0.5,
-            };
-            let location = Point3 {
-                x: midpoint.x + normal.x * offset,
-                y: midpoint.y + normal.y * offset,
-                z: midpoint.z,
-            };
-            let definition = DimensionDefinition {
-                kind: DimensionKind::Aligned,
-                points: DimensionPoints::Linear {
-                    first: start,
-                    second: end,
-                    dimension_line: location,
-                },
-                text_middle: Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                text_rotation: 0.0,
-                normal: Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
-            };
-            geometries.push(SemanticGeometry::Dimension(Box::new(
-                DimensionGeometry::synthesized(
-                    definition,
-                    "Standard".to_string(),
-                    style.clone(),
-                    None,
-                )?,
-            )));
-        }
-        self.commit_new_entities(session, command, geometries, "qdim")
     }
 
     /// `DIMJOGLINE`: unconditional capability refusal.

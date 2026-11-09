@@ -1,15 +1,18 @@
-//! `AUDIT` contract tests: detect-only drawing validation.
+//! `AUDIT` contract tests: the detect-only report and the provable repairs.
 //!
-//! Pinned here: a valid drawing reports `audit.clean` and changes nothing; a
-//! stored invalid entity is reported as `audit.invalid_entity` behind an
-//! `audit.summary` (the import builder is deliberately permissive, so this state
-//! is constructible through the ordinary builder without bypassing a validated
-//! write); the command refuses a payload and a stale document; and every path is
-//! read-only — no revision bump, no `ChangeSet`, no undo entry, no repair.
+//! Pinned here: a valid drawing in **Fix = No** reports `audit.clean` and changes
+//! nothing; a stored invalid entity is reported as `audit.invalid_entity` behind
+//! an `audit.summary` (the import builder is deliberately permissive, so this
+//! state is constructible through the ordinary builder without bypassing a
+//! validated write); the command refuses a payload and a stale document; and
+//! every **Fix = No** path is read-only — no revision bump, no `ChangeSet`, no
+//! undo entry, no repair.
 //!
-//! There is deliberately no "repaired" assertion: AUDIT does **not** repair, so
-//! the invalid entity must still be there (same revision, same geometry) after
-//! the report.
+//! The **Fix = Yes** tests pin the sectioned report (header variables, block
+//! definitions, object passes 1 and 2, `Total errors found N fixed M`), the
+//! repair of geometry-invalid entities in one transaction / one undo step, the
+//! unfixable reference-error path, the Viewer refusal, and the named `AUDITCTL`
+//! log refusal.
 
 use super::*;
 
@@ -208,4 +211,312 @@ fn a_stale_document_is_refused() {
         matches!(error, CadError::StaleResult),
         "expected StaleResult, got {error:?}"
     );
+}
+
+// --- Fix = Yes ---------------------------------------------------------------
+
+fn entity_count(app: &Application) -> usize {
+    app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity_count()
+}
+
+fn undo_depth(app: &Application) -> usize {
+    app.history
+        .get(&DocumentId(1))
+        .map(|history| history.undo_depth())
+        .unwrap_or(0)
+}
+
+fn audit_with(
+    app: &mut Application,
+    session: &mut SessionState,
+    request: AuditRequest,
+) -> CadResult<CommandOutcome> {
+    app.execute(
+        session,
+        command(
+            CommandId::AuditDrawing,
+            CommandPayload::SelectionTool(Box::new(SelectionToolPayload::Audit(request))),
+        ),
+    )
+}
+
+fn app_with_builder(
+    configure: impl FnOnce(&mut DrawingDatabaseBuilder),
+) -> (Application, SessionState) {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    configure(&mut b);
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([7u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
+#[test]
+fn audit_fix_yes_normalizes_fixable_fields_atomically() {
+    let text_with_bad_wrap = |id: u128| {
+        entity(
+            id,
+            SemanticGeometry::Text {
+                text: "Hello".into(),
+                position: point(0.0, 0.0),
+                style: StyleId(0),
+                height: 2.5,
+                rotation: 0.0,
+                font: None,
+                h_align: TextAlignH::Left,
+                v_align: TextAlignV::Baseline,
+                wrap_width: Some(0.0),
+            },
+        )
+    };
+    let mut mismatched = line(12, point(0.0, 0.0), point(1.0, 0.0));
+    mismatched.object.id = ObjectId(9);
+    let (mut app, mut session) = app_with(vec![
+        line(1, point(0.0, 0.0), point(10.0, 0.0)),
+        text_with_bad_wrap(11),
+        mismatched,
+        // No canonical repair exists for a degenerate LINE: reported, not fixed.
+        line(13, point(4.0, 4.0), point(4.0, 4.0)),
+    ]);
+    let before = revision(&app);
+    let outcome = audit_with(
+        &mut app,
+        &mut session,
+        AuditRequest {
+            fix: true,
+            auditctl_log: false,
+        },
+    )
+    .unwrap();
+
+    let codes: Vec<&str> = outcome
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect();
+    assert_eq!(codes.first(), Some(&"audit.header"), "{codes:?}");
+    for code in ["audit.blocks", "audit.pass1", "audit.pass2"] {
+        assert!(codes.contains(&code), "missing {code}: {codes:?}");
+    }
+    assert_eq!(
+        codes
+            .iter()
+            .filter(|code| **code == "audit.repaired")
+            .count(),
+        2
+    );
+    assert!(codes.contains(&"audit.repairs_not_undoable"), "{codes:?}");
+    let total = outcome.diagnostics.last().expect("total diagnostic");
+    assert_eq!(total.code, "audit.total");
+    assert_eq!(total.message, "Total errors found 3 fixed 2");
+
+    // The repaired rows are stored in their normalized form and now validate.
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    let text = drawing.entity(EntityId(11)).expect("text stays");
+    match &text.geometry {
+        SemanticGeometry::Text { wrap_width, .. } => assert_eq!(*wrap_width, None),
+        other => panic!("expected text, got {other:?}"),
+    }
+    assert!(cad_db::validate_entity(drawing, EntityId(11), text).is_ok());
+    let fixed = drawing.entity(EntityId(12)).expect("line stays");
+    assert_eq!(fixed.object.id, ObjectId(12));
+    assert!(cad_db::validate_entity(drawing, EntityId(12), fixed).is_ok());
+    // The degenerate LINE is retained: no canonical repair exists for it.
+    assert!(drawing.entity(EntityId(13)).is_some());
+    assert_eq!(entity_count(&app), 4);
+
+    assert!(outcome.changes.is_some());
+    assert_eq!(outcome.objects.len(), 2);
+    assert_ne!(revision(&app), before);
+    // The repair is atomic but not an undo step (the before row is invalid).
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn audit_fix_yes_reports_reference_errors_it_cannot_repair() {
+    let (mut app, mut session) = app_with_builder(|b| {
+        // An INSERT whose block definition does not exist: the detect and pass-1
+        // checks see it, but inventing a block would fabricate geometry.
+        b.insert_entity(entity(
+            2,
+            SemanticGeometry::Insert {
+                block: BlockId(9),
+                transform: Transform3::identity(),
+            },
+        ))
+        .unwrap();
+    });
+    let before_revision = revision(&app);
+    let before_count = entity_count(&app);
+
+    let outcome = audit_with(
+        &mut app,
+        &mut session,
+        AuditRequest {
+            fix: true,
+            auditctl_log: false,
+        },
+    )
+    .unwrap();
+    let codes: Vec<&str> = outcome
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect();
+    assert!(codes.contains(&"audit.invalid_entity"), "{codes:?}");
+    assert!(!codes.contains(&"audit.repaired"), "{codes:?}");
+    let total = outcome.diagnostics.last().expect("total diagnostic");
+    assert_eq!(total.message, "Total errors found 1 fixed 0");
+
+    // Nothing is repaired: the row stays and the command writes nothing.
+    assert_eq!(entity_count(&app), before_count);
+    assert_eq!(revision(&app), before_revision);
+    assert!(outcome.changes.is_none());
+    assert_eq!(undo_depth(&app), 0);
+
+    // The error object of the current space is the mapped Previous selection.
+    let ids: Vec<u128> = session
+        .selection
+        .refs()
+        .iter()
+        .map(|reference| reference.entity.0)
+        .collect();
+    assert_eq!(ids, vec![2]);
+}
+
+#[test]
+fn audit_fix_yes_on_a_clean_drawing_reports_a_zero_total() {
+    let (mut app, mut session) = app_with(vec![line(1, point(0.0, 0.0), point(1.0, 0.0))]);
+    let before = revision(&app);
+    let outcome = audit_with(
+        &mut app,
+        &mut session,
+        AuditRequest {
+            fix: true,
+            auditctl_log: false,
+        },
+    )
+    .unwrap();
+    let total = outcome.diagnostics.last().expect("total diagnostic");
+    assert_eq!(total.code, "audit.total");
+    assert_eq!(total.message, "Total errors found 0 fixed 0");
+    assert!(outcome.changes.is_none());
+    assert_eq!(revision(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn audit_fix_yes_reports_an_invalid_header_variable() {
+    let (mut app, mut session) = app_with_builder(|b| {
+        // `$PDSIZE` is stored raw; a non-finite value is reported, not repaired.
+        b.set_point_display_size(f64::NAN);
+        b.insert_entity(line(1, point(0.0, 0.0), point(1.0, 0.0)))
+            .unwrap();
+    });
+    let outcome = audit_with(
+        &mut app,
+        &mut session,
+        AuditRequest {
+            fix: true,
+            auditctl_log: false,
+        },
+    )
+    .unwrap();
+    let codes: Vec<&str> = outcome
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect();
+    assert!(codes.contains(&"audit.invalid_header"), "{codes:?}");
+    let total = outcome.diagnostics.last().expect("total diagnostic");
+    assert_eq!(total.message, "Total errors found 1 fixed 0");
+}
+
+#[test]
+fn audit_fix_yes_is_refused_in_viewer_mode() {
+    let (mut app, mut session) = app_with(vec![line(2, point(3.0, 3.0), point(3.0, 3.0))]);
+    let mut viewer = SessionState::new(DocumentId(1), AppMode::Viewer);
+    let before = revision(&app);
+    let error = audit_with(
+        &mut app,
+        &mut viewer,
+        AuditRequest {
+            fix: true,
+            auditctl_log: false,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error, CadError::PermissionDenied);
+    assert_eq!(entity_count(&app), 1);
+    assert_eq!(revision(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+    let _ = &mut session;
+}
+
+#[test]
+fn audit_auditctl_log_is_a_named_refusal() {
+    let (mut app, mut session) = app_with(vec![line(1, point(0.0, 0.0), point(1.0, 0.0))]);
+    for fix in [false, true] {
+        let error = audit_with(
+            &mut app,
+            &mut session,
+            AuditRequest {
+                fix,
+                auditctl_log: true,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, CadError::Unsupported(ref reason) if reason.starts_with("audit.auditctl_log")),
+            "expected the AUDITCTL refusal, got {error:?}"
+        );
+    }
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn audit_fix_no_payload_is_byte_compatible_with_the_bare_command() {
+    let build = || {
+        app_with(vec![
+            line(1, point(0.0, 0.0), point(10.0, 0.0)),
+            line(2, point(3.0, 3.0), point(3.0, 3.0)),
+        ])
+    };
+    let (mut app, mut session) = build();
+    let bare = audit(&mut app, &mut session).unwrap();
+    let (mut app, mut session) = build();
+    let typed = audit_with(
+        &mut app,
+        &mut session,
+        AuditRequest {
+            fix: false,
+            auditctl_log: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(bare.diagnostics.len(), typed.diagnostics.len());
+    for (a, b) in bare.diagnostics.iter().zip(&typed.diagnostics) {
+        assert_eq!((&a.code, &a.message), (&b.code, &b.message));
+    }
 }

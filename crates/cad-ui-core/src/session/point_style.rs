@@ -26,17 +26,19 @@ use super::annot_arguments::{
 };
 use super::commands::{
     parse_linetype_argument, parse_mocoro_argument, parse_pan_argument, parse_trace_argument,
-    parse_viewres_argument, parse_vscurrent_argument, DONUT_SELECTOR, DRAWORDER_SELECTOR,
-    FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, HELIX_SELECTOR,
-    LINETYPE_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR,
-    MREDO_SELECTOR, MULTIPLE_SELECTOR, PAN_SELECTOR, PURGE_SELECTOR, QSELECT_SELECTOR,
-    RENAME_SELECTOR, SETVAR_SELECTOR, SOLID_SELECTOR, TRACE_SELECTOR, TREX_SELECTOR,
-    VIEWRES_SELECTOR, VSCURRENT_SELECTOR,
+    parse_viewres_argument, parse_vscurrent_argument, AUDIT_SELECTOR, CHAMFER_SELECTOR,
+    DONUT_SELECTOR, DRAWORDER_SELECTOR, FILLET_SELECTOR, FILTER_SELECTOR, FIND_REPORT_SELECTOR,
+    FIND_SELECTOR, GETSEL_SELECTOR, HELIX_SELECTOR, JOIN_SELECTOR, LINETYPE_SELECTOR,
+    MIRROR_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR,
+    MREDO_SELECTOR, MULTIPLE_SELECTOR, OFFSET_SELECTOR, OVERKILL_SELECTOR, PAN_SELECTOR,
+    PURGE_SELECTOR, QSELECT_SELECTOR, RENAME_SELECTOR, REVCLOUD_SELECTOR, SETVAR_SELECTOR,
+    SOLID_SELECTOR, SSX_SELECTOR, TEXTMASK_SELECTOR, TRACE_SELECTOR, TREX_SELECTOR,
+    TXT2MTXT_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR, WIPEOUT_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::dim_arguments::{
-    DIMEDIT_SELECTOR, DIMJOGLINE_SELECTOR, DIMOVERRIDE_SELECTOR, DIMSTYLE_SELECTOR,
-    DIMTEDIT_SELECTOR,
+    DIMEDIT_SELECTOR, DIMJOGLINE_SELECTOR, DIMOVERRIDE_SELECTOR, DIMSPACE_SELECTOR,
+    DIMSTYLE_SELECTOR, DIMTEDIT_SELECTOR, QDIM_SELECTOR,
 };
 use super::{
     CadSession, ARGUMENT_SELECTOR, HATCHEDIT_SELECTOR, JUSTIFYTEXT_SELECTOR, PDMODE_SELECTOR,
@@ -75,6 +77,11 @@ impl CadSession {
             // `PEDIT <option>` (2026-11-07): the one selected polyline is the
             // input; the option travels in the payload.
             PEDIT_SELECTOR => self.pedit_argument(argument, text),
+            // The interactive modify option lines (2026-11-09): JOIN's modes,
+            // the OFFSET/MIRROR stored options, and the CHAMFER/FILLET stored
+            // modes plus their polyline forms.
+            JOIN_SELECTOR | OFFSET_SELECTOR | MIRROR_SELECTOR | CHAMFER_SELECTOR
+            | FILLET_SELECTOR => self.modify_argument(selector, argument, text),
             // `HATCHEDIT <option>` (2026-11-07): the one selected hatch is the
             // input; the typed option travels in the payload.
             HATCHEDIT_SELECTOR => self.hatchedit_argument(argument, text),
@@ -96,6 +103,8 @@ impl CadSession {
             QSELECT_SELECTOR | FILTER_SELECTOR | GETSEL_SELECTOR => {
                 self.select_filter_argument(selector, argument, text)
             }
+            SSX_SELECTOR => self.ssx_argument(argument, text),
+            AUDIT_SELECTOR => self.audit_argument(argument, text),
             FIND_SELECTOR | FIND_REPORT_SELECTOR => self.find_argument(selector, argument, text),
             // The 2026-11-07 utility/named-object batch.
             PURGE_SELECTOR | RENAME_SELECTOR | SETVAR_SELECTOR | MREDO_SELECTOR
@@ -120,9 +129,13 @@ impl CadSession {
             | super::commands::VPSCALE_SELECTOR
             | super::commands::LAYVPI_SELECTOR => self.layout_argument(selector, argument, text),
 
+            // `DIMSPACE <spacing>`: the explicit positive row pitch rides the
+            // payload; a bare `DIMSPACE` keeps the name-only Auto form.
+            DIMSPACE_SELECTOR => self.dimspace_argument(argument, text),
+
             // The 2026-11-07 dimension-editing batch typed forms.
             DIMSTYLE_SELECTOR | DIMTEDIT_SELECTOR | DIMEDIT_SELECTOR | DIMOVERRIDE_SELECTOR
-            | DIMJOGLINE_SELECTOR => self.dim_argument(selector, argument, text),
+            | DIMJOGLINE_SELECTOR | QDIM_SELECTOR => self.dim_argument(selector, argument, text),
 
             // The 2026-11-07 annotation/group batch typed forms.
             GROUP_SELECTOR
@@ -138,6 +151,10 @@ impl CadSession {
             | VSCURRENT_SELECTOR | LINETYPE_SELECTOR => {
                 self.extras_argument(selector, argument, text)
             }
+            // The 2026-11 P3 option batch: the payloads already exist, only the
+            // typed argument grammar/dispatch was missing.
+            OVERKILL_SELECTOR | REVCLOUD_SELECTOR | WIPEOUT_SELECTOR | TEXTMASK_SELECTOR
+            | TXT2MTXT_SELECTOR => self.payload_option_argument(selector, argument, text),
 
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);

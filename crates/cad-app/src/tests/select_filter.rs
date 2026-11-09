@@ -8,7 +8,8 @@
 
 use super::*;
 use cad_db::{
-    DbEntity, DbObject, DrawingDatabaseBuilder, EntityColor, EntityRenderAttributes, Layer,
+    DbEntity, DbObject, DrawingDatabaseBuilder, EntityColor, EntityLineWeight,
+    EntityRenderAttributes, EntityTransparency, Layer,
 };
 use cad_domain::{MLeaderPathType, MLeaderStyleValues, MultiLeaderGeometry, StyleId};
 
@@ -98,6 +99,9 @@ fn filter_app() -> (Application, SessionState) {
         LINE_RED,
         EntityRenderAttributes {
             color: EntityColor::Explicit([255, 0, 0]),
+            lineweight: EntityLineWeight::Explicit(0.50),
+            transparency: EntityTransparency::Explicit(0.75),
+            linetype_scale: 2.0,
             ..EntityRenderAttributes::default()
         },
     )
@@ -108,6 +112,15 @@ fn filter_app() -> (Application, SessionState) {
         LayerId(0),
         line((0.0, 1.0), (1.0, 1.0)),
     ))
+    .unwrap();
+    b.set_entity_render_attributes(
+        LINE_PLAIN,
+        EntityRenderAttributes {
+            lineweight: EntityLineWeight::Explicit(0.25),
+            transparency: EntityTransparency::Explicit(1.0),
+            ..EntityRenderAttributes::default()
+        },
+    )
     .unwrap();
     b.insert_entity(entity(
         CIRCLE,
@@ -123,6 +136,15 @@ fn filter_app() -> (Application, SessionState) {
             },
         },
     ))
+    .unwrap();
+    b.set_entity_render_attributes(
+        CIRCLE,
+        EntityRenderAttributes {
+            lineweight: EntityLineWeight::Explicit(0.50),
+            transparency: EntityTransparency::Explicit(0.5),
+            ..EntityRenderAttributes::default()
+        },
+    )
     .unwrap();
     b.insert_entity(entity(
         TEXT,
@@ -401,32 +423,31 @@ fn getsel_accepts_layer_and_type_only() {
 }
 
 #[test]
-fn ssx_unions_by_all_five_properties_and_selectcount_is_read_only() {
+fn selectcount_counts_by_the_template_signature_and_is_read_only() {
+    // `SSX` is a separate Express-Tool criteria builder (its own contract file);
+    // `SELECTCOUNT` keeps the five-property template signature: the red line on
+    // WALLS is the only object with that exact combination.
     let (mut app, mut session) = filter_app();
-    // The red line and the circle share layer WALLS but differ in type/colour,
-    // so the template is the red line itself.
     session.selection.insert(model_ref(LINE_RED));
     let undo_before = undo_depth(&app);
+    let selection_before = session.selection.clone();
+    let revision_before = revision(&app);
 
-    let outcome = run(
+    let count = run(
         &mut app,
         &mut session,
-        CommandId::SelectMatchingProperties,
+        CommandId::SelectCount,
         CommandPayload::None,
     )
     .unwrap();
-    assert_eq!(
-        ids(&session),
-        vec![LINE_RED],
-        "no other entity has all five"
-    );
-    assert!(outcome
+    assert_eq!(session.selection, selection_before);
+    assert_eq!(revision(&app), revision_before);
+    assert!(count
         .diagnostics
         .iter()
-        .any(|d| d.code == "ssx.result" && d.message.contains("added 0")));
+        .any(|d| d.code == "selectcount.result" && d.message.contains("1 model-space object(s)")));
 
-    // Add a second identical red line: SSX now unions it.
-    let (mut app, mut session) = filter_app();
+    // Add a second line with the same five properties: the count follows.
     {
         let document = app.workspace.documents.get_mut(&DocumentId(1)).unwrap();
         let mut candidate = document.drawing.as_ref().clone();
@@ -444,7 +465,6 @@ fn ssx_unions_by_all_five_properties_and_selectcount_is_read_only() {
         transaction.commit().unwrap();
         document.drawing = Arc::new(candidate);
     }
-    // The duplicate needs the same explicit colour to match the five properties.
     {
         let document = app.workspace.documents.get_mut(&DocumentId(1)).unwrap();
         let mut candidate = document.drawing.as_ref().clone();
@@ -464,18 +484,6 @@ fn ssx_unions_by_all_five_properties_and_selectcount_is_read_only() {
         document.drawing = Arc::new(candidate);
     }
     session.selection.replace([model_ref(LINE_RED)]);
-    run(
-        &mut app,
-        &mut session,
-        CommandId::SelectMatchingProperties,
-        CommandPayload::None,
-    )
-    .unwrap();
-    assert_eq!(ids(&session), vec![LINE_RED, EntityId(20)]);
-
-    // SELECTCOUNT reports the same pair without touching the selection.
-    let selection_before = session.selection.clone();
-    let revision_before = revision(&app);
     let count = run(
         &mut app,
         &mut session,
@@ -483,8 +491,6 @@ fn ssx_unions_by_all_five_properties_and_selectcount_is_read_only() {
         CommandPayload::None,
     )
     .unwrap();
-    assert_eq!(session.selection, selection_before);
-    assert_eq!(revision(&app), revision_before);
     assert!(count
         .diagnostics
         .iter()
@@ -799,3 +805,5 @@ fn find_replacement_rebuilds_the_multileader_display() {
         panic!("expected a multileader");
     }
 }
+
+mod select_filter_query;

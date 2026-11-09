@@ -538,10 +538,11 @@ fn explode_refuses_a_dimension_like_compound_by_type_key() {
 }
 
 #[test]
-fn explode_refuses_a_dimension_entity_by_type_key() {
-    // ADR 0017 A.8: the new `SemanticGeometry::Dimension` arm must refuse rather
-    // than decompose. The existing test only covered a `Compound` carrying the
-    // `"AcDbDimension"` string; this exercises the real variant.
+fn explode_dimension_produces_its_display_children_and_deletes_the_source() {
+    // ADR 0017 A.8 / AutoCAD: EXPLODE loses associativity and yields the
+    // dimension's real display objects (lines, the angular arc if any, arrow
+    // triangle meshes and the measurement text) on the dimension's layer, space
+    // and draw order; the source is deleted in the same one-undo transaction.
     let dimension = DimensionGeometry::synthesized(
         dimension_definition(),
         "Standard".into(),
@@ -549,23 +550,95 @@ fn explode_refuses_a_dimension_entity_by_type_key() {
         None,
     )
     .expect("synthesized");
+    let display = dimension.display().to_vec();
     let (mut app, mut session) = single_app(
         SemanticGeometry::Dimension(Box::new(dimension)),
         "AcDbDimension",
     );
-    let before = revision(&app);
+    let source = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(1))
+        .cloned()
+        .expect("the dimension source");
     select_one(&mut app, &mut session, 1);
-    let error = explode(&mut app, &mut session).expect_err("a dimension is refused");
-    match error {
-        CadError::Unsupported(reason) => assert!(
-            reason.contains("type_key"),
-            "the refusal must name the type_key reason: {reason}"
-        ),
-        other => panic!("expected an Unsupported type_key refusal, got {other:?}"),
+    let outcome = explode(&mut app, &mut session).unwrap();
+
+    assert_eq!(
+        outcome.objects.len(),
+        display.len(),
+        "every display child becomes one real entity"
+    );
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(1))
+            .is_none(),
+        "the dimension source is deleted"
+    );
+    let produced = model_geometry(&app);
+    assert_eq!(produced.len(), display.len());
+    let mut remaining = display;
+    for (id, geometry) in &produced {
+        let index = remaining
+            .iter()
+            .position(|child| child == geometry)
+            .expect("each display child is produced exactly once");
+        remaining.remove(index);
+        let entity = app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(*id)
+            .cloned()
+            .expect("the produced entity");
+        assert_eq!(entity.layer, source.layer, "the dimension's layer");
+        assert_eq!(entity.space, source.space, "the dimension's space");
+        assert_eq!(
+            entity.draw_order, source.draw_order,
+            "the dimension's draw order"
+        );
     }
-    assert_eq!(revision(&app), before, "a refusal changes nothing");
-    assert_eq!(entity_count(&app), 1);
-    assert_eq!(undo_depth(&app), 0);
+    assert!(remaining.is_empty(), "no display child is dropped");
+    assert!(
+        produced
+            .iter()
+            .any(|(_, geometry)| matches!(geometry, SemanticGeometry::Line { .. })),
+        "the dimension lines are real LINE entities"
+    );
+    assert!(
+        produced
+            .iter()
+            .any(|(_, geometry)| matches!(geometry, SemanticGeometry::Mesh(_))),
+        "the arrowheads are triangle meshes"
+    );
+    let text = produced
+        .iter()
+        .find_map(|(id, geometry)| match geometry {
+            SemanticGeometry::Text { text, .. } => Some((*id, text.clone())),
+            _ => None,
+        })
+        .expect("the measurement text is a real TEXT entity");
+    assert!(!text.1.is_empty());
+    let text_entity = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(text.0)
+        .cloned()
+        .expect("the produced text");
+    assert_eq!(text_entity.object.type_key, "AcDbText");
+    assert_eq!(undo_depth(&app), 1, "one transaction / one undo step");
+
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .unwrap();
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(1))
+            .is_some(),
+        "one undo restores the dimension source"
+    );
+    assert_eq!(
+        entity_count(&app),
+        1,
+        "one undo also removes every produced child"
+    );
 }
 
 /// A synthesized dimension's style snapshot for the EXPLODE tests.
@@ -705,4 +778,104 @@ fn explode_insert_with_a_hatch_member_keeps_the_in_block_refusal() {
     assert_eq!(revision(&app), before, "nothing is written");
     assert_eq!(entity_count(&app), 2);
     assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn explode_multileader_produces_leader_lines_text_and_arrow_mesh() {
+    // AutoCAD's MLEADER explosion yields leader lines, the arrow object and the
+    // annotation as MTEXT. This build derives exactly those display pieces:
+    // straight path segments and the dogleg become LINEs, the arrowhead is its
+    // triangle MESH (no 2D-solid variant exists), and the text becomes MTEXT.
+    let style = MLeaderStyleValues {
+        path_type: MLeaderPathType::StraightLineSegments,
+        enable_landing: true,
+        enable_dogleg: true,
+        landing_distance: 2.0,
+        landing_gap: 0.1,
+        arrowhead_size: 0.5,
+        text_height: 0.2,
+        text_style: StyleId(0),
+        text_style_name: "Standard".into(),
+        text_font: None,
+        scale_factor: 1.0,
+    };
+    let leader = MultiLeaderGeometry::created(
+        style,
+        "Standard".into(),
+        2,
+        point(0.0, 0.0),
+        point(10.0, 0.0),
+        "Hello leader".into(),
+    )
+    .expect("a valid created leader");
+    let display = leader.display().to_vec();
+    let (mut app, mut session) = single_app(
+        SemanticGeometry::MultiLeader(Box::new(leader)),
+        "AcDbMultiLeader",
+    );
+    let source = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(1))
+        .cloned()
+        .expect("the multileader source");
+    select_one(&mut app, &mut session, 1);
+    explode(&mut app, &mut session).unwrap();
+
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(1))
+            .is_none(),
+        "the multileader source is deleted"
+    );
+    let produced = model_geometry(&app);
+    assert!(
+        produced
+            .iter()
+            .filter(|(_, geometry)| matches!(geometry, SemanticGeometry::Line { .. }))
+            .count()
+            >= 2,
+        "the path segment and the dogleg are LINEs: {produced:?}"
+    );
+    assert_eq!(
+        produced
+            .iter()
+            .filter(|(_, geometry)| matches!(geometry, SemanticGeometry::Mesh(_)))
+            .count(),
+        1,
+        "one arrowhead triangle mesh"
+    );
+    let (text_id, text) = produced
+        .iter()
+        .find_map(|(id, geometry)| match geometry {
+            SemanticGeometry::Text { text, .. } => Some((*id, text.clone())),
+            _ => None,
+        })
+        .expect("the annotation text is produced");
+    assert_eq!(text, "Hello leader");
+    let text_entity = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(text_id)
+        .cloned()
+        .expect("the produced text");
+    assert_eq!(
+        text_entity.object.type_key, "AcDbMText",
+        "the leader annotation is MTEXT"
+    );
+    assert_eq!(
+        produced.len(),
+        display.len(),
+        "the polyline path becomes one LINE per straight segment"
+    );
+    for (id, _) in &produced {
+        let entity = app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(*id)
+            .cloned()
+            .expect("the produced entity");
+        assert_eq!(entity.layer, source.layer);
+        assert_eq!(entity.space, source.space);
+        assert_eq!(entity.draw_order, source.draw_order);
+    }
+    assert_eq!(undo_depth(&app), 1);
 }

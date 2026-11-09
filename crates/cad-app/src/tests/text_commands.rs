@@ -332,6 +332,70 @@ fn torient_absolute_angle_sets_that_rotation_without_moving_the_text() {
 }
 
 #[test]
+fn torient_reverse_adds_180_degrees_and_undo_restores_the_original() {
+    let source = text_entity(
+        1,
+        "dir",
+        p3(1.0, 2.0, 0.0),
+        30f64.to_radians(),
+        0,
+        "AcDbMText",
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    select(&mut session, &[1]);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Torient,
+        CommandPayload::TorientReverse,
+    )
+    .expect("reverse TORIENT");
+    assert_eq!(outcome.objects, vec![ObjectId(1)]);
+    assert!(near(rotation_of(&app, 1).to_degrees(), 210.0));
+    assert_eq!(text_of(&app, 1), "dir", "content is untouched");
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo");
+    assert!(near(rotation_of(&app, 1).to_degrees(), 30.0));
+}
+
+#[test]
+fn torient_skip_report_names_the_entity_kind_and_is_stable() {
+    let (mut app, mut session) = app_with(vec![line_entity(2, 0)]);
+    select(&mut session, &[2]);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Torient,
+        CommandPayload::TorientReverse,
+    )
+    .expect("a non-text selection is reported, not fatal");
+    let skipped: Vec<&str> = outcome
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "torient.not_reset")
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+    assert_eq!(skipped.len(), 1);
+    assert!(skipped[0].contains("entity 2 (LINE)"), "{}", skipped[0]);
+    assert!(
+        skipped[0].contains("TORIENT resets Text/MText rotations only"),
+        "{}",
+        skipped[0]
+    );
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "torient.unchanged"));
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
 fn torient_reports_non_text_targets_but_still_rewrites_the_text() {
     let (mut app, mut session) = app_with(vec![
         text_entity(
@@ -708,11 +772,7 @@ fn txt2mtxt_sorts_top_down_then_left_right_and_joins_raw_strings() {
     assert!(outcome
         .diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.code == "txt2mtxt.settings_dialog"));
-    assert!(outcome
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "txt2mtxt.uniform_line_spacing"));
+        .any(|diagnostic| diagnostic.code == "drawing.txt2mtxt"));
 
     // One undo restores every source and removes the new MTEXT.
     execute(

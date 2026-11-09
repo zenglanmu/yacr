@@ -124,12 +124,16 @@
 //!   candidates equally near the vertex are refused.
 //! * **Arc growth is allowed** (see above): a strict `|new| <= |old|` rule would
 //!   refuse every outward offset at a convex corner.
+//! * **`OFFSETGAPTYPE` 1/2** replace the miter with the fill geometry from
+//!   [`super::offset_gap`] at every **diverging** joint; a crossing keeps the
+//!   miter trim, so the sharp path is unchanged.
 
 use super::helpers::offset_tolerance;
 use super::offset_polyline::{
     line_pick, miter_vertex, turn_sine_tolerance, unit_segment_directions, STRAIGHT_BULGE,
 };
 use super::*;
+use crate::command_payload::OffsetGapType;
 use cad_geometry::{
     add, arbitrary_axis, arc_sweep_to_bulge, bulge_arc_geometry, cross, dot, length,
     polyline_plane_normal, scale, sub, DefaultGeometryEngine, GeometryEngine,
@@ -147,16 +151,16 @@ const MAX_SWEEP_GROWTH: f64 = std::f64::consts::PI;
 /// (`arbitrary_axis(plane_normal)`), i.e. the very angles the tessellator and
 /// EXPLODE read the bulge with.
 #[derive(Debug, Clone, Copy)]
-struct SourceArc {
-    center: Point3,
-    radius: f64,
-    start: f64,
-    sweep: f64,
+pub(super) struct SourceArc {
+    pub(super) center: Point3,
+    pub(super) radius: f64,
+    pub(super) start: f64,
+    pub(super) sweep: f64,
 }
 
 impl SourceArc {
     /// The arc's point at one plane angle.
-    fn point_at(&self, angle: f64, ax: Point3, ay: Point3) -> Point3 {
+    pub(super) fn point_at(&self, angle: f64, ax: Point3, ay: Point3) -> Point3 {
         add(
             self.center,
             scale(
@@ -167,7 +171,7 @@ impl SourceArc {
     }
 
     /// The plane angle of `point` about this arc's centre.
-    fn angle_of(&self, point: Point3, ax: Point3, ay: Point3) -> f64 {
+    pub(super) fn angle_of(&self, point: Point3, ax: Point3, ay: Point3) -> f64 {
         let offset = sub(point, self.center);
         dot(offset, ay).atan2(dot(offset, ax))
     }
@@ -175,7 +179,7 @@ impl SourceArc {
 
 /// One offset segment, untrimmed, in the polyline's plane.
 #[derive(Debug, Clone, Copy)]
-enum OffsetSegment {
+pub(super) enum OffsetSegment {
     /// Already moved by `s·m`; `start`/`end` are the moved endpoints.
     Line { start: Point3, end: Point3 },
     /// Concentric with its source (radius already offset).
@@ -192,6 +196,8 @@ pub(super) fn offset_polyline_with_arcs(
     bulges: &[f64],
     closed: bool,
     side_point: Point3,
+    distance_override: Option<f64>,
+    gap: OffsetGapType,
 ) -> CadResult<(SemanticGeometry, f64)> {
     let tol = offset_tolerance();
     if points.len() < 2 {
@@ -220,7 +226,19 @@ pub(super) fn offset_polyline_with_arcs(
     let normal = arc_plane_normal(points, &dirs, closed, tol)?;
     let arcs = source_arcs(points, bulges, normal, &dirs, tol)?;
 
-    let signed = pick_signed_distance(points, &dirs, &arcs, normal, side_point);
+    let picked = pick_signed_distance(points, &dirs, &arcs, normal, side_point);
+    let signed = match distance_override {
+        Some(requested) => {
+            if picked.abs() <= tol {
+                return Err(CadError::InvalidInput(
+                    "OFFSET side point must not lie on the polyline when a distance is given"
+                        .into(),
+                ));
+            }
+            picked.signum() * requested
+        }
+        None => picked,
+    };
     let distance = signed.abs();
     if !distance.is_finite() || distance <= tol {
         return Err(CadError::InvalidInput(
@@ -233,6 +251,12 @@ pub(super) fn offset_polyline_with_arcs(
         .collect::<CadResult<Vec<_>>>()?;
 
     let (ax, ay, _) = arbitrary_axis(normal);
+    if gap != OffsetGapType::Sharp {
+        let geometry = super::offset_gap::gapped_arc_ring(
+            points, bulges, closed, gap, &dirs, &offset, normal, signed, tol, ax, ay,
+        )?;
+        return Ok((geometry, distance));
+    }
     let mut out: Vec<Point3> = Vec::with_capacity(count);
     if closed {
         // One single pass including the wrap corner: a closed ring has a join at
@@ -256,14 +280,15 @@ pub(super) fn offset_polyline_with_arcs(
 
     let out_bulges = rederive_bulges(bulges, &offset, &out, normal, tol)?;
     require_no_line_collapse(&out, &offset, &dirs, tol)?;
-    Ok((
-        SemanticGeometry::Polyline {
-            points: out,
-            bulges: out_bulges,
-            closed,
-        },
-        distance,
-    ))
+    let geometry = SemanticGeometry::Polyline {
+        points: out,
+        bulges: out_bulges,
+        closed,
+    };
+    if closed {
+        super::offset_polyline::require_no_closed_self_intersection(&geometry, normal, tol)?;
+    }
+    Ok((geometry, distance))
 }
 
 /// The polyline's plane normal, or a named refusal when a bulge has no plane.
@@ -466,7 +491,12 @@ fn offset_segment(
 }
 
 /// The open end of one offset segment (no cap, no mitre).
-fn open_vertex(segment: &OffsetSegment, ax: Point3, ay: Point3, at_start: bool) -> Point3 {
+pub(super) fn open_vertex(
+    segment: &OffsetSegment,
+    ax: Point3,
+    ay: Point3,
+    at_start: bool,
+) -> Point3 {
     match segment {
         OffsetSegment::Line { start, end } => {
             if at_start {
@@ -487,7 +517,7 @@ fn open_vertex(segment: &OffsetSegment, ax: Point3, ay: Point3, at_start: bool) 
 }
 
 /// The join at source vertex `index` between the two segments either side of it.
-fn join_vertex(
+pub(super) fn join_vertex(
     index: usize,
     points: &[Point3],
     dirs: &[Point3],
@@ -696,7 +726,6 @@ fn rederive_bulges(
     normal: Point3,
     tol: f64,
 ) -> CadResult<Vec<f64>> {
-    let (ax, ay, _) = arbitrary_axis(normal);
     let mut out_bulges = bulges.to_vec();
     for (index, segment) in offset.iter().enumerate() {
         let OffsetSegment::Arc(arc) = segment else {
@@ -704,42 +733,62 @@ fn rederive_bulges(
         };
         let start = out[index];
         let end = out[(index + 1) % out.len()];
-        let angle_tolerance = (tol / arc.radius).max(1e-12);
-        let start_angle = arc.angle_of(start, ax, ay);
-        let end_angle = arc.angle_of(end, ax, ay);
-        // The forward span in the traversal direction: always the same sign as the
-        // source sweep, so a reversal cannot slip through.
-        let sweep = if arc.sweep >= 0.0 {
-            norm_tau(end_angle - start_angle)
-        } else {
-            -norm_tau(start_angle - end_angle)
-        };
-        if !sweep.is_finite() || sweep.abs() <= angle_tolerance {
-            return Err(CadError::Unsupported(format!(
-                "OFFSET offset.collapsed: offset arc segment {index} collapses to zero sweep \
-                 between its two joins"
-            )));
-        }
-        if sweep.abs() > arc.sweep.abs() + MAX_SWEEP_GROWTH {
-            return Err(CadError::Unsupported(format!(
-                "OFFSET offset.arc_mismatch: offset arc segment {index} would need a {:.6} rad \
-                 sweep where its source has {:.6} rad, which means the join wrapped to the far \
-                 side of the circle",
-                sweep, arc.sweep
-            )));
-        }
-        let bulge = arc_sweep_to_bulge(sweep).ok_or_else(|| {
-            CadError::Unsupported(format!(
-                "OFFSET offset.arc_mismatch: offset arc segment {index} produced a \
-                 non-representable sweep {sweep}"
-            ))
-        })?;
-        require_recovered_arc(index, start, end, bulge, arc, sweep, normal)?;
+        let bulge = arc_segment_bulge(index, arc, start, end, normal, tol)?;
         if index < out_bulges.len() {
             out_bulges[index] = bulge;
         }
     }
     Ok(out_bulges)
+}
+
+/// The bulge of one offset arc segment trimmed from `start` to `end`.
+///
+/// The sweep comes from the **centre angles only** (never from a cross product),
+/// measured along the traversal direction, so the sign is preserved by
+/// construction; the emitted bulge is then verified through
+/// [`cad_geometry::bulge_arc_geometry`]. Shared by the sharp re-derivation and the
+/// gapped assembly, so the two can never disagree about an arc's bulge.
+pub(super) fn arc_segment_bulge(
+    index: usize,
+    arc: &SourceArc,
+    start: Point3,
+    end: Point3,
+    normal: Point3,
+    tol: f64,
+) -> CadResult<f64> {
+    let (ax, ay, _) = arbitrary_axis(normal);
+    let angle_tolerance = (tol / arc.radius).max(1e-12);
+    let start_angle = arc.angle_of(start, ax, ay);
+    let end_angle = arc.angle_of(end, ax, ay);
+    // The forward span in the traversal direction: always the same sign as the
+    // source sweep, so a reversal cannot slip through.
+    let sweep = if arc.sweep >= 0.0 {
+        norm_tau(end_angle - start_angle)
+    } else {
+        -norm_tau(start_angle - end_angle)
+    };
+    if !sweep.is_finite() || sweep.abs() <= angle_tolerance {
+        return Err(CadError::Unsupported(format!(
+            "OFFSET offset.collapsed: offset arc segment {index} collapses to zero sweep \
+             between its two joins"
+        )));
+    }
+    if sweep.abs() > arc.sweep.abs() + MAX_SWEEP_GROWTH {
+        return Err(CadError::Unsupported(format!(
+            "OFFSET offset.arc_mismatch: offset arc segment {index} would need a {:.6} rad \
+             sweep where its source has {:.6} rad, which means the join wrapped to the far \
+             side of the circle",
+            sweep, arc.sweep
+        )));
+    }
+    let bulge = arc_sweep_to_bulge(sweep).ok_or_else(|| {
+        CadError::Unsupported(format!(
+            "OFFSET offset.arc_mismatch: offset arc segment {index} produced a \
+             non-representable sweep {sweep}"
+        ))
+    })?;
+    require_recovered_arc(index, start, end, bulge, arc, sweep, normal)?;
+    Ok(bulge)
 }
 
 /// Verify an emitted bulge against the single `bulge → arc` authority.

@@ -216,7 +216,8 @@ fn unchanged_values_are_named_no_ops_without_a_transaction() {
     let undo_before = undo_depth(&app);
 
     for option in [HatchEditOption::Angle(0.0), HatchEditOption::Scale(2.0)] {
-        let out = edit(&mut app, &mut session, id, option).expect("a no-op is not an error");
+        let out =
+            edit(&mut app, &mut session, id, option.clone()).expect("a no-op is not an error");
         assert!(out.objects.is_empty(), "{option:?}");
         assert!(out.changes.is_none(), "{option:?}");
         assert_eq!(out.diagnostics[0].code, "hatchedit.unchanged", "{option:?}");
@@ -410,4 +411,425 @@ fn the_rebuilt_display_is_fresh_not_a_stale_copy() {
             .any(|geometry| matches!(geometry, SemanticGeometry::Polyline { closed: false, .. })),
         "a user-defined pattern has display polylines"
     );
+}
+
+// ---------------------------------------------------------------------------
+// 2026-11 AutoCAD gap-closing options: style, pattern type, colour,
+// transparency, layer, draw order, boundary recreation and separation.
+// ---------------------------------------------------------------------------
+
+use crate::HatchDrawOrder;
+use cad_db::EntityColor;
+use cad_domain::HatchStyle;
+
+fn stored_hatch(app: &Application, id: u128) -> HatchGeometry {
+    let entity = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(id))
+        .expect("the hatch entity");
+    match &entity.geometry {
+        SemanticGeometry::Hatch(hatch) => (**hatch).clone(),
+        other => panic!("expected a hatch, got {other:?}"),
+    }
+}
+
+fn stored_layer(app: &Application, id: u128) -> LayerId {
+    app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(id))
+        .expect("the entity")
+        .layer
+}
+
+fn stored_order(app: &Application, id: u128) -> i64 {
+    app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(id))
+        .expect("the entity")
+        .draw_order
+}
+
+/// A drawing with layer 0 and a second layer "Walls" (id 7).
+fn layered_hatch_app() -> (Application, SessionState) {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [(LayerId(0), "0"), (LayerId(7), "Walls")] {
+        b.insert_layer(Layer {
+            id,
+            name: name.into(),
+            visible: true,
+        })
+        .unwrap();
+    }
+    b.insert_entity(ent(1, square_geometry(0.0, 10.0), 0))
+        .unwrap();
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([4u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
+fn square_geometry(min: f64, max: f64) -> SemanticGeometry {
+    SemanticGeometry::Polyline {
+        points: vec![
+            p3(min, min, 0.0),
+            p3(max, min, 0.0),
+            p3(max, max, 0.0),
+            p3(min, max, 0.0),
+        ],
+        bulges: vec![0.0; 4],
+        closed: true,
+    }
+}
+
+#[test]
+fn hatchedit_style_and_pattern_type_edits_change_the_stored_properties() {
+    let (mut app, mut session) = hatch_app(vec![square(1, 0.0, 10.0, 0.0)]);
+    let id = pattern_hatch(&mut app, &mut session);
+
+    let before = the_hatch(&app).style();
+    let out = edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::Style(HatchStyle::Outer),
+    )
+    .expect("STYLE OUTER");
+    assert_eq!(out.objects, vec![ObjectId(id)]);
+    assert_eq!(the_hatch(&app).style(), HatchStyle::Outer);
+    assert_ne!(before, HatchStyle::Outer);
+    let undo_before = undo_depth(&app);
+    let out = edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::Style(HatchStyle::Outer),
+    )
+    .unwrap();
+    assert_eq!(out.diagnostics[0].code, "hatchedit.unchanged");
+    assert_eq!(undo_depth(&app), undo_before);
+
+    assert_eq!(
+        the_hatch(&app).pattern_type(),
+        HatchPatternType::UserDefined
+    );
+    edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::PatternType(HatchPatternType::Predefined),
+    )
+    .expect("PATTERNTYPE PREDEFINED");
+    assert_eq!(the_hatch(&app).pattern_type(), HatchPatternType::Predefined);
+    assert_eq!(
+        pattern(the_hatch(&app)).scale,
+        2.0,
+        "the fill itself is preserved"
+    );
+}
+
+#[test]
+fn hatchedit_color_and_transparency_edits_write_the_entity_display_attributes() {
+    let (mut app, mut session) = hatch_app(vec![square(1, 0.0, 10.0, 0.0)]);
+    let id = pattern_hatch(&mut app, &mut session);
+    fn attributes(app: &Application, id: u128) -> cad_db::EntityRenderAttributes {
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity_render_attributes(EntityId(id))
+    }
+    assert_eq!(attributes(&app, id).color, EntityColor::ByLayer);
+
+    edit(&mut app, &mut session, id, HatchEditOption::Color(30)).expect("COLOR 30");
+    assert_eq!(
+        attributes(&app, id).color,
+        EntityColor::Explicit(
+            crate::property_value::rgb_for_aci(30).expect("ACI 30 is a real colour")
+        )
+    );
+    edit(&mut app, &mut session, id, HatchEditOption::ColorByLayer).expect("COLOR BYLAYER");
+    assert_eq!(attributes(&app, id).color, EntityColor::ByLayer);
+
+    edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::Transparency(50),
+    )
+    .expect("TRANSPARENCY 50");
+    assert_eq!(
+        attributes(&app, id).transparency,
+        cad_db::EntityTransparency::Explicit(0.5)
+    );
+    edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::TransparencyByLayer,
+    )
+    .expect("TRANSPARENCY BYLAYER");
+    assert_eq!(
+        attributes(&app, id).transparency,
+        cad_db::EntityTransparency::ByLayer
+    );
+
+    // An ACI index outside 1..=255 (a hand-built payload) is a named refusal.
+    let undo_before = undo_depth(&app);
+    let error =
+        edit(&mut app, &mut session, id, HatchEditOption::Color(0)).expect_err("ACI 0 is symbolic");
+    assert!(
+        format!("{error:?}").contains("hatchedit.color"),
+        "{error:?}"
+    );
+    let error = edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::Transparency(91),
+    )
+    .expect_err("91% is out of the entity bound");
+    assert!(
+        format!("{error:?}").contains("hatchedit.transparency"),
+        "{error:?}"
+    );
+    assert_eq!(undo_depth(&app), undo_before);
+}
+
+#[test]
+fn hatchedit_layer_edits_move_every_target_and_refuse_an_unknown_layer() {
+    let (mut app, mut session) = layered_hatch_app();
+    let id = run(&mut app, &mut session, &[1]).expect("HATCH").objects[0].0;
+    assert_eq!(stored_layer(&app, id), LayerId(0));
+
+    edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::Layer("Walls".into()),
+    )
+    .expect("LAYER Walls");
+    assert_eq!(stored_layer(&app, id), LayerId(7));
+    let out = edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::Layer("walls".into()),
+    )
+    .unwrap();
+    assert_eq!(
+        out.diagnostics[0].code, "hatchedit.unchanged",
+        "a case-insensitive match is the same layer"
+    );
+    let undo_before = undo_depth(&app);
+    let error = edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::Layer("Missing".into()),
+    )
+    .expect_err("unknown layer");
+    assert!(
+        format!("{error:?}").contains("hatchedit.unknown_layer"),
+        "{error:?}"
+    );
+    assert_eq!(undo_depth(&app), undo_before);
+    assert_eq!(stored_layer(&app, id), LayerId(7));
+}
+
+#[test]
+fn hatchedit_draw_order_moves_the_selected_hatch_behind_and_in_front() {
+    let (mut app, mut session) =
+        hatch_app(vec![square(1, 0.0, 10.0, 0.0), square(2, 20.0, 30.0, 0.0)]);
+    let id = run(&mut app, &mut session, &[1]).expect("HATCH").objects[0].0;
+    let other_order = stored_order(&app, 2);
+    assert!(
+        stored_order(&app, id) > other_order,
+        "the hatch starts on top"
+    );
+
+    // FRONT is already satisfied: named no-op, no transaction.
+    let undo_before = undo_depth(&app);
+    let out = edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::DrawOrder(HatchDrawOrder::InFrontOfAll),
+    )
+    .unwrap();
+    assert_eq!(out.diagnostics[0].code, "hatchedit.unchanged");
+    assert_eq!(undo_depth(&app), undo_before);
+
+    edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::DrawOrder(HatchDrawOrder::BehindAll),
+    )
+    .expect("DRAWORDER BEHIND");
+    assert!(stored_order(&app, id) < other_order);
+
+    edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::DrawOrder(HatchDrawOrder::InFrontOfAll),
+    )
+    .expect("DRAWORDER FRONT");
+    assert!(stored_order(&app, id) > other_order);
+
+    let error = edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::DrawOrder(HatchDrawOrder::BehindBoundary),
+    )
+    .expect_err("no boundary record");
+    assert!(
+        format!("{error:?}").contains("hatchedit.draw_order_boundary"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn hatchedit_recreate_boundary_inserts_one_closed_polyline_per_loop() {
+    let (mut app, mut session) = hatch_app(vec![square(1, 0.0, 10.0, 0.0)]);
+    let id = run(&mut app, &mut session, &[1]).expect("HATCH").objects[0].0;
+    let before = entity_count(&app);
+    let out = edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::RecreateBoundary,
+    )
+    .expect("RECREATEBOUNDARY");
+    assert_eq!(entity_count(&app), before + 1);
+    assert_eq!(out.objects.len(), 1);
+    let created = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(out.objects[0].0))
+        .expect("the boundary polyline");
+    assert_eq!(created.layer, LayerId(0));
+    match &created.geometry {
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed,
+        } => {
+            assert!(*closed);
+            assert_eq!(points.len(), 4);
+            assert_eq!(bulges.len(), 4);
+            assert_eq!(points[0], p3(0.0, 0.0, 0.0));
+        }
+        other => panic!("expected a polyline, got {other:?}"),
+    }
+}
+
+#[test]
+fn hatchedit_separate_hatches_splits_a_multi_loop_hatch_into_one_hatch_per_loop() {
+    let (mut app, mut session) =
+        hatch_app(vec![square(1, 0.0, 10.0, 0.0), square(2, 20.0, 30.0, 0.0)]);
+    let id = run(&mut app, &mut session, &[1, 2])
+        .expect("HATCH from two boundaries")
+        .objects[0]
+        .0;
+    assert_eq!(stored_hatch(&app, id).loops().len(), 2);
+    let before = entity_count(&app);
+    let out = edit(&mut app, &mut session, id, HatchEditOption::SeparateHatches).expect("SEPARATE");
+    assert_eq!(entity_count(&app), before + 1);
+    assert_eq!(stored_hatch(&app, id).loops().len(), 1);
+    assert_eq!(out.objects.len(), 2, "the original and the new hatch");
+    let created = out
+        .objects
+        .iter()
+        .find(|object| object.0 != id)
+        .expect("the split-off hatch");
+    assert_eq!(stored_hatch(&app, created.0).loops().len(), 1);
+    let undo_before = undo_depth(&app);
+    let out = edit(&mut app, &mut session, id, HatchEditOption::SeparateHatches).unwrap();
+    assert_eq!(
+        out.diagnostics[0].code, "hatchedit.unchanged",
+        "a one-loop hatch cannot be separated"
+    );
+    assert_eq!(undo_depth(&app), undo_before);
+}
+
+#[test]
+fn hatchedit_one_run_edits_every_selected_hatch_in_one_undo() {
+    let (mut app, mut session) =
+        hatch_app(vec![square(1, 0.0, 10.0, 0.0), square(2, 20.0, 30.0, 0.0)]);
+    let first = pattern_hatch(&mut app, &mut session);
+    // A second pattern hatch from the other square.
+    set_number(&mut session, ToolParameter::HatchSpacing, 1.0);
+    let second = run(&mut app, &mut session, &[2]).expect("HATCH 2").objects[0].0;
+    assert_ne!(first, second);
+    let undo_before = undo_depth(&app);
+
+    select(&mut session, &[first, second]);
+    let out = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchEdit,
+        CommandPayload::HatchEdit(HatchEditOption::Angle(45.0)),
+    )
+    .expect("multi-target HATCHEDIT");
+    assert_eq!(out.objects.len(), 2);
+    assert_eq!(
+        undo_depth(&app),
+        undo_before + 1,
+        "one transaction / one undo"
+    );
+    for id in [first, second] {
+        assert!(
+            (pattern(&stored_hatch(&app, id)).angle - 45.0f64.to_radians()).abs() < 1e-12,
+            "entity {id} was edited"
+        );
+    }
+}
+
+#[test]
+fn hatchedit_global_capability_refusals_are_named_and_write_nothing() {
+    let (mut app, mut session) = hatch_app(vec![square(1, 0.0, 10.0, 0.0)]);
+    let id = run(&mut app, &mut session, &[1]).expect("HATCH").objects[0].0;
+    select(&mut session, &[id]);
+    let revision_before = revision(&app);
+    let undo_before = undo_depth(&app);
+    for (option, code) in [
+        (HatchEditOption::Origin, "hatchedit.missing_field"),
+        (HatchEditOption::Associate, "hatchedit.no_association"),
+        (HatchEditOption::Disassociate, "hatchedit.no_association"),
+        (
+            HatchEditOption::Annotative,
+            "hatchedit.annotative_unsupported",
+        ),
+        (
+            HatchEditOption::AddBoundaries,
+            "hatchedit.boundaries_unsupported",
+        ),
+        (
+            HatchEditOption::RemoveBoundaries,
+            "hatchedit.boundaries_unsupported",
+        ),
+    ] {
+        let error = execute(
+            &mut app,
+            &mut session,
+            CommandId::HatchEdit,
+            CommandPayload::HatchEdit(option),
+        )
+        .expect_err("the missing model must refuse");
+        assert!(format!("{error:?}").contains(code), "{code}: {error:?}");
+    }
+    assert_eq!(revision(&app), revision_before);
+    assert_eq!(undo_depth(&app), undo_before);
 }

@@ -42,19 +42,20 @@ pub enum CommandId {
     /// Select visible model-space pick items without editing the drawing.
     /// Requires `CommandPayload::None`; incomplete picking is explicitly refused.
     SelectAll,
-    /// `SELECTSIMILAR`: add every visible model-space pick item whose **geometry
-    /// kind** matches a currently selected item to the existing selection.
+    /// `SELECTSIMILAR`: add every visible pick item in the **active space** that
+    /// matches a currently selected item to the existing selection.
     ///
-    /// Payload is [`crate::CommandPayload::None`]; a non-empty current selection
-    /// is required (`selectsimilar.selection_required`) and paper/block active
-    /// space is an explicit `Unsupported` refusal. v1 is **type-based only**: the
-    /// match is the `SemanticGeometry` discriminant, and attribute similarity
-    /// (layer/colour/linetype/lineweight/transparency) is NOT IMPLEMENTED. The
-    /// command is a union, never a replacement, and writes nothing: no database
-    /// write, revision bump, `cad-history` entry or `ChangeSet`, so Viewer and
-    /// Work both allow it. Enumeration reuses the SELECTALL preflight and
-    /// visibility filter (cycles/depth/dynamic visibility/opaque geometry are
-    /// explicit refusals, never silent truncation).
+    /// Payload is [`crate::CommandPayload::None`] (default similarity set) or
+    /// the typed [`crate::SelectSimilarSettings`] subset: layer, colour,
+    /// linetype, lineweight, name and object style (type is always required;
+    /// default: type + layer). Model and paper space are supported; every seed
+    /// must be in the active space (`selectsimilar.space`) and matches only that
+    /// space. A non-empty selection is required
+    /// (`selectsimilar.selection_required`); block-space objects are not
+    /// addressable, and `selectsimilar.settings` reports the accepted
+    /// dimensions. The command is a union, never a replacement, and writes
+    /// nothing: no database write, revision bump, `cad-history` entry or
+    /// `ChangeSet`, so Viewer and Work both allow it; enumeration reuses the SELECTALL preflight and visibility filter.
     SelectSimilar,
     /// Select model-space items in a window/crossing rectangle without editing
     /// the drawing (ADR 0014 B). Allowed in Viewer and Work; requires
@@ -77,7 +78,7 @@ pub enum CommandId {
     Redo,
     Resources,
     Diagnostics,
-    /// `AUDIT`: detect-only drawing audit (no repair, read-only; see `app_audit`).
+    /// `AUDIT` (`Fix any errors detected? [Yes/No]`, default No; `AUDIT YES` repairs only validator-accepted normalizations and is refused in Viewer). Contract: [`crate::app_audit`].
     AuditDrawing,
     SwitchBackend,
     Switch2d3d,
@@ -410,7 +411,9 @@ pub enum CommandId {
     /// polyline equivalent. AutoCAD's radius auto-reduction is **not**
     /// reproduced — a radius that does not fit is a refusal. Work-only.
     FilletPolyline,
-    /// `REVCLOUD` (Work-only): selection-based Object mode v1 (`app_drawing::revision_cloud`).
+    /// `REVCLOUD` (Work-only): Object / Rectangular / Polygonal / Freehand /
+    /// Style / Modify with a declared constant-chord arc rule
+    /// (`app_drawing::revision_cloud`).
     RevisionCloud,
     /// ARRAYRECT: insert **independent** copies of the current selection on a
     /// rectangular grid, growing up and to the right (ADR 0016 decision D).
@@ -444,15 +447,13 @@ pub enum CommandId {
     /// selection or untransformable geometry is an explicit refusal that changes
     /// nothing. Work-only.
     AlignEntities,
-    /// STRETCH the entities inside a **crossing window**: a fully enclosed entity
-    /// is translated by the displacement; a partially enclosed LINE/LWPOLYLINE
-    /// has only its in-window vertices moved (bulge preserved, UNVERIFIED). The
-    /// window is always CROSSING (AutoCAD requires one); the enclosure
-    /// classification is recomputed from the rectangle and the geometry — never
-    /// stored in the selection. Payload is
-    /// `Stretch { rect_logical, base, delta }`. One transaction and one undo
-    /// step for the whole command; an in-window entity that cannot be handled
-    /// fails the whole command (nothing written). Work-only.
+    /// STRETCH the entities inside a **crossing window** (rectangle, crossing
+    /// polygon or lasso): fully enclosed moves whole; partially enclosed
+    /// LINE/LWPOLYLINE moves only its in-window vertices (bulge preserved,
+    /// UNVERIFIED). Enclosure is recomputed from the window and geometry, never
+    /// stored in the selection. Payloads are `Stretch { rect_logical, base,
+    /// delta }` and `StretchPolygon { polygon_logical, base, delta }`. One
+    /// transaction/undo; an unhandled in-window entity refuses the whole command.
     StretchEntities,
     /// Delete every entity in the current selection in one transaction. An
     /// empty selection is an explicit refusal. Work-only.
@@ -460,17 +461,15 @@ pub enum CommandId {
     /// `JOIN`: weld the current selection into one polyline; full contract:
     /// `crate::app_drawing::join`.
     Join,
-    /// EXPLODE the current selection one level at a time (ADR 0016 decision G): a LWPOLYLINE
-    /// becomes straight segments plus ARCs (bulge segments through `bulge_arc_geometry`), a
-    /// uniformly scaled INSERT becomes its block members with the placement baked in (nested inserts expanded under a cycle stack
-    /// and a depth cap of 32), and a Compound becomes **all** of its children (a
-    /// MINSERT yields its Insert instances). Members keep their own
-    /// block-definition layers. Refusals (nothing written): a selection with
-    /// nothing decomposable; `TEXT`/`SPLINE`/`SHAPE`/`OPAQUE` and mirrored
-    /// Arc/Ellipse children via the transform surface; `IMAGE`/`MASK` by policy;
-    /// `Dimension`/`MTable`/`MLeader` compounds by `type_key`; a non-uniformly
-    /// scaled INSERT; and an INSERT with an untransformable member (the whole
-    /// command fails). One transaction and one undo step. Work-only.
+    /// EXPLODE one level at a time (ADR 0016 G): LWPOLYLINE -> LINE/ARC segments,
+    /// INSERT -> its direct members (nested refs stay refs), DIMENSION -> its real
+    /// display LINE/ARC/TEXT plus arrow MESH on the source layer/space/draw order,
+    /// MULTILEADER -> leader LINE/SPLINE + arrow MESH + MTEXT, Compound -> all children.
+    /// A non-uniform INSERT places every member with an exact affine image
+    /// (Circle/Arc/Ellipse -> exact Ellipse) and otherwise refuses by member id/kind.
+    /// Named refusals: nothing decomposable, TEXT/SPLINE/SHAPE/OPAQUE members,
+    /// IMAGE/MASK policy, legacy Dimension/MTable/MLeader compounds, MINSERT, XREF.
+    /// One transaction / one undo step. Work-only.
     ExplodeEntities,
     /// Clone every entity in the current selection with a fresh id, translating
     /// its geometry by a world delta, in one transaction. An empty selection or
@@ -762,12 +761,13 @@ pub enum CommandId {
     /// selected text. Full contract:
     /// [`crate::command_id::text_batch::TCircleCommand`].
     TextCircle,
-    /// `TEXTMASK` (Work-only): insert an independent `AcDbWipeout` mask behind
-    /// each selected text. Full contract:
+    /// `TEXTMASK` (Work-only): insert an offset `AcDbWipeout` mask behind each
+    /// selected text and group the pair. Full contract:
     /// [`crate::command_id::text_batch::TextMaskCommand`].
     TextMask,
-    /// `TEXTUNMASK` (Work-only): delete selected masks covered by selected text.
-    /// Full contract: [`crate::command_id::text_batch::TextUnmaskCommand`].
+    /// `TEXTUNMASK` (Work-only): delete the masks belonging to the selected
+    /// text (TEXTMASK groups first). Full contract:
+    /// [`crate::command_id::text_batch::TextUnmaskCommand`].
     TextUnmask,
     /// The 2026-11-07 selection/filter batch (`QSELECT`, `FILTER`, `GETSEL`,
     /// `SSX`, `SELECTCOUNT`, `-FIND`, `FIND`, `HIDEOBJECTS`,
@@ -953,10 +953,15 @@ pub enum CommandId {
     /// `LINETYPE` (Viewer-legal for `LIST`; `SET` re-authorizes work mode):
     /// list the drawing's linetypes or set one on the selection.
     Linetype,
+    /// The sustained extended-command wrapper batch (payload-free 2D/session/
+    /// report commands). Contract: [`crate::command_id::extended`].
+    Extended(ExtendedCommandId),
 }
 
 mod capabilities;
+mod extended;
 mod mode;
+pub use extended::ExtendedCommandId;
 pub use mode::AppMode;
 
 pub mod annot_batch;

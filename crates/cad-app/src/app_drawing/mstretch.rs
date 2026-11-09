@@ -14,6 +14,7 @@
 
 use super::*;
 
+use crate::app_drawing::stretch_window::StretchWindow;
 use crate::select_box::Rect;
 
 fn refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
@@ -118,6 +119,11 @@ impl Application {
                 "MSTRETCH displacement must be non-zero and finite (nothing to do)",
             ));
         }
-        self.stretch_windows(session, command, rects, translation)
+        self.stretch_windows(
+            session,
+            command,
+            rects.into_iter().map(StretchWindow::Rect).collect(),
+            translation,
+        )
     }
 }

@@ -1,6 +1,7 @@
 use super::trim_boundary::{collect_boundaries, BoundarySet};
 use super::trim_curves::{cut_tolerance, plan_extend, plan_trim, TargetCurve, TrimPlan};
 use super::*;
+use crate::command_payload::{OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions};
 
 /// The per-insertion options of the shared create funnel
 /// ([`Application::insert_new_entities`]).
@@ -21,146 +22,35 @@ struct NewEntityInsert<'a> {
 }
 
 impl Application {
-    /// Create an offset copy of a single selected LINE, CIRCLE, ARC or
-    /// LWPOLYLINE (straight or bulged segments).
+    /// Create an offset copy of a single selected LINE, CIRCLE, ARC, ELLIPSE,
+    /// elliptical arc, LWPOLYLINE (straight or bulged) or SPLINE.
     ///
-    /// The picked `side_point` defines both the side and the distance: for a LINE
-    /// it is the perpendicular distance to the infinite line (the new line lies
-    /// on the side the point is on); for a CIRCLE the new radius is
-    /// `|side_point − centre|` (a point outside the circle grows it, inside
-    /// shrinks it); an ARC uses exactly the same distance model and keeps its
-    /// centre, normal, start angle and sweep, so only its radius changes
-    /// ([`offset_arc`]); for a LWPOLYLINE every segment is moved that far to the
-    /// pick's side and the vertices are re-joined with **miter** joins
-    /// ([`offset_polyline`]). A bulge segment (an arc) is offset exactly by the
-    /// arc arm: concentric, with the same centre and the joins as exact
-    /// line/circle or circle/circle intersections (`offset_polyline_bulge`). Any
-    /// other geometry kind is an explicit `Unsupported` refusal — a bulge that is
-    /// not a constructible arc keeps its own name (`offset.bulge_segment`) rather
-    /// than being folded into that generic arm, and an ELLIPSE is refused by name
-    /// too (a uniform offset of an ellipse is not an ellipse; it is not faked).
-    /// Exactly one source entity is required. The new entity has a fresh id, the
-    /// source's layer/space, and the source's display state; one transaction and
-    /// one undo step.
+    /// This is the **bare** entry point: it is exactly the legacy behaviour
+    /// ([`OffsetMode::Through`], no erase, source layer, sharp joins) and
+    /// delegates to [`Self::offset_entities_with_options`], so the two can never
+    /// disagree. See that method for the documented option set and the selected
+    /// geometry contract.
     pub(crate) fn offset_entity(&mut self, command: &Command) -> CadResult<CommandOutcome> {
-        let CommandPayload::Offset { refs, side_point } = &command.payload else {
-            return Err(CadError::InvalidInput(
-                "OffsetEntity needs an Offset { refs, side_point } payload".into(),
-            ));
-        };
-        if !is_finite_point(*side_point) {
-            return Err(CadError::InvalidInput(
-                "OffsetEntity side point must be finite".into(),
-            ));
-        }
-        let document_id = command.document;
-        let (geometry, layer, space, display, message, diagnostics) = {
-            let document = self
-                .workspace
-                .documents
-                .get(&document_id)
-                .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-            let drawing = &document.drawing;
-            let (sources, diagnostics) = Self::resolve_selection(
-                drawing,
-                document_id,
-                refs,
-                "offset",
-                "OffsetEntity",
-                "偏移",
-                false,
-            )?;
-            if sources.len() != 1 {
-                return Err(CadError::InvalidInput(format!(
-                    "OffsetEntity requires exactly one selected entity, got {}",
-                    sources.len()
-                )));
+        let options = match &command.payload {
+            CommandPayload::Offset { refs, side_point } => OffsetOptions {
+                refs: refs.clone(),
+                side_points: vec![*side_point],
+                mode: OffsetMode::Through,
+                erase_source: false,
+                layer: OffsetLayer::Source,
+                gap: OffsetGapType::Sharp,
+            },
+            CommandPayload::OffsetOptions(options) => {
+                return self.offset_entities_with_options(command, options);
             }
-            let source = &sources[0];
-            let (geometry, message) = match &source.geometry {
-                SemanticGeometry::Line { start, end } => {
-                    let (geometry, distance) = offset_line(*start, *end, *side_point)?;
-                    (geometry, format!("OFFSET：直线沿拾取侧偏移 {distance:.4}"))
-                }
-                SemanticGeometry::Circle {
-                    center,
-                    normal,
-                    radius,
-                } => {
-                    let (geometry, distance) =
-                        offset_circle(*center, *normal, *radius, *side_point)?;
-                    (geometry, format!("OFFSET：圆偏移，新半径 {distance:.4}"))
-                }
-                SemanticGeometry::Arc {
-                    center,
-                    normal,
-                    radius,
-                    start,
-                    sweep,
-                } => {
-                    let (geometry, distance) =
-                        offset_arc(*center, *normal, *radius, *start, *sweep, *side_point)?;
-                    (
-                        geometry,
-                        format!("OFFSET: arc offset, new radius {distance:.4}"),
-                    )
-                }
-                SemanticGeometry::Polyline {
-                    points,
-                    bulges,
-                    closed,
-                } => {
-                    let (geometry, distance) =
-                        offset_polyline(points, bulges, *closed, *side_point)?;
-                    (
-                        geometry,
-                        format!("OFFSET: polyline offset by {distance:.4} (miter joins)"),
-                    )
-                }
-                // Uniformly offsetting an ellipse is not an ellipse (the offset
-                // of a non-circular conic is a higher-order curve), so it gets
-                // its own named refusal instead of being faked.
-                SemanticGeometry::Ellipse { .. } => {
-                    return Err(CadError::Unsupported(
-                        "OFFSET ellipse: a uniform offset of an ellipse is not an ellipse; \
-                         not implemented"
-                            .into(),
-                    ));
-                }
-                other => {
-                    return Err(CadError::Unsupported(format!(
-                        "OFFSET supports LINE, CIRCLE, ARC and LWPOLYLINE (straight or bulged) \
-                         only, got {}",
-                        geometry_kind(other)
-                    )));
-                }
-            };
-            let display = drawing.entity_display_state(source.id);
-            (
-                geometry,
-                source.layer,
-                source.space.clone(),
-                display,
-                message,
-                diagnostics,
-            )
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "OffsetEntity needs an Offset { refs, side_point } or OffsetOptions payload"
+                        .into(),
+                ));
+            }
         };
-        let mut outcome = self.commit_new_entity_in(
-            command,
-            geometry,
-            layer,
-            space,
-            Some(display),
-            "offset entity",
-        )?;
-        let mut merged = vec![Diagnostic {
-            object: outcome.objects.first().copied(),
-            code: "drawing.offset".into(),
-            message,
-        }];
-        merged.extend(diagnostics);
-        outcome.diagnostics = merged;
-        Ok(outcome)
+        self.offset_entities_with_options(command, &options)
     }
 
     /// Trim one LINE/ARC/CIRCLE target against a supported boundary set (plus a
@@ -557,7 +447,7 @@ impl Application {
     /// missing layer is an explicit error), every entity lands in one transaction
     /// and one undo step, and the whole batch is all-or-nothing. An empty batch is
     /// an explicit refusal, never a silent empty success.
-    pub(super) fn commit_new_entities(
+    pub(crate) fn commit_new_entities(
         &mut self,
         session: &SessionState,
         command: &Command,
@@ -759,7 +649,7 @@ impl Application {
     /// leaves both the current drawing (including its ID allocator) and history
     /// unchanged; after it succeeds, publishing the already-built candidate is
     /// infallible.
-    pub(super) fn publish_candidate(
+    pub(crate) fn publish_candidate(
         &mut self,
         document_id: DocumentId,
         candidate: DrawingDatabase,
@@ -777,4 +667,105 @@ impl Application {
         document.drawing = Arc::new(candidate);
         Ok(())
     }
+}
+
+/// Offset a LINE by a fixed distance to the pick's side (`Through` when
+/// `distance` is `None`).
+pub(super) fn offset_line_with_distance(
+    start: Point3,
+    end: Point3,
+    side_point: Point3,
+    distance: Option<f64>,
+) -> CadResult<(SemanticGeometry, f64)> {
+    let (probe, picked) = offset_line(start, end, side_point)?;
+    let Some(requested) = distance else {
+        return Ok((probe, picked));
+    };
+    let SemanticGeometry::Line {
+        start: probe_start, ..
+    } = probe
+    else {
+        return Err(CadError::Invariant(
+            "the LINE offset planner returned a non-line".into(),
+        ));
+    };
+    let unit = cad_geometry::scale(
+        cad_geometry::sub(probe_start, start),
+        1.0 / picked.max(f64::MIN_POSITIVE),
+    );
+    Ok((
+        SemanticGeometry::Line {
+            start: cad_geometry::add(start, cad_geometry::scale(unit, requested)),
+            end: cad_geometry::add(end, cad_geometry::scale(unit, requested)),
+        },
+        requested,
+    ))
+}
+
+/// Offset a CIRCLE by a fixed distance to the pick's side (`Through` when
+/// `distance` is `None`). A point outside grows the radius, inside shrinks it.
+pub(super) fn offset_circle_with_distance(
+    center: Point3,
+    normal: Point3,
+    radius: f64,
+    side_point: Point3,
+    distance: Option<f64>,
+) -> CadResult<(SemanticGeometry, f64)> {
+    let (probe, picked) = offset_circle(center, normal, radius, side_point)?;
+    let Some(requested) = distance else {
+        return Ok((probe, picked));
+    };
+    let tolerance = super::helpers::offset_tolerance();
+    let stored = radius.abs();
+    let sign = if picked > stored { 1.0 } else { -1.0 };
+    let new_radius = stored + sign * requested;
+    if !new_radius.is_finite() || new_radius <= tolerance {
+        return Err(CadError::Unsupported(
+            "OFFSET offset.collapsed: the fixed distance would collapse the circle's radius".into(),
+        ));
+    }
+    Ok((
+        SemanticGeometry::Circle {
+            center,
+            normal,
+            radius: new_radius,
+        },
+        requested,
+    ))
+}
+
+/// Offset an ARC by a fixed distance to the pick's side (`Through` when
+/// `distance` is `None`). The span and frame are preserved; only the radius
+/// changes, exactly like the `Through` arm.
+pub(super) fn offset_arc_with_distance(
+    center: Point3,
+    normal: Point3,
+    radius: f64,
+    start: f64,
+    sweep: f64,
+    side_point: Point3,
+    distance: Option<f64>,
+) -> CadResult<(SemanticGeometry, f64)> {
+    let (probe, picked) = offset_arc(center, normal, radius, start, sweep, side_point)?;
+    let Some(requested) = distance else {
+        return Ok((probe, picked));
+    };
+    let tolerance = super::helpers::offset_tolerance();
+    let sign = if picked > radius.abs() { 1.0 } else { -1.0 };
+    let new_radius = radius.abs() + sign * requested;
+    if !new_radius.is_finite() || new_radius <= tolerance {
+        return Err(CadError::Unsupported(
+            "OFFSET offset.collapsed: the fixed distance would collapse the arc's radius".into(),
+        ));
+    }
+    Ok((
+        SemanticGeometry::Arc {
+            center,
+            normal,
+            radius: new_radius,
+            start,
+            sweep,
+        },
+        requested,
+    ))
 }

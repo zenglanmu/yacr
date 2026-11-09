@@ -5,7 +5,7 @@
 //! survive the real production save path (`HostController::export_dxf`).
 
 use super::*;
-use crate::{CommandPayload, DrawIntent};
+use crate::{AlignPairSet, CommandPayload, DrawIntent, ToolParameter, ToolValue};
 
 fn entity(id: u128, geometry: SemanticGeometry, order: i64) -> DbEntity {
     DbEntity {
@@ -199,12 +199,12 @@ fn align_capture_maps_the_four_points_to_the_payload() {
     let intent = controller.session.draw_intent().unwrap();
     assert_eq!(
         intent,
-        DrawIntent::Align {
+        DrawIntent::Align(AlignPairSet::Two {
             source1: p(0.0, 0.0),
             dest1: p(10.0, 0.0),
             source2: p(1.0, 0.0),
             dest2: p(10.0, 3.0),
-        }
+        })
     );
     let selection = controller
         .session
@@ -277,4 +277,238 @@ fn align_is_work_only_and_refused_in_viewer() {
         .begin_draw_tool(DrawToolKind::Align)
         .expect_err("ALIGN is Work-only");
     assert!(matches!(error, CadError::PermissionDenied), "{error:?}");
+}
+
+/// Set the session pair count before the capture starts.
+fn set_pairs(controller: &mut HostController, pairs: f64) {
+    controller
+        .session
+        .set_tool_parameter(ToolParameter::AlignPairs, ToolValue::Number(pairs))
+        .unwrap();
+}
+
+#[test]
+fn align_one_pair_capture_is_a_pure_move_about_the_pair_delta() {
+    let mut controller = fixture();
+    controller
+        .set_selection(vec![reference(&controller, 201)])
+        .unwrap();
+    set_pairs(&mut controller, 1.0);
+    let revision_before = controller.drawing().unwrap().revision();
+    let undo_before = undo_depth(&controller);
+    controller.begin_draw_tool(DrawToolKind::Align).unwrap();
+    assert_eq!(
+        controller
+            .session
+            .draw_preview()
+            .unwrap()
+            .remaining_points(),
+        Some(2),
+        "one pair is exactly source + destination"
+    );
+    controller.capture_tool_point(p(0.0, 0.0)).unwrap();
+    assert!(!controller.session.draw_preview().unwrap().can_confirm());
+    controller.capture_tool_point(p(10.0, 0.0)).unwrap();
+    assert!(controller.session.draw_preview().unwrap().can_confirm());
+
+    let intent = controller.session.draw_intent().unwrap();
+    assert_eq!(
+        intent,
+        DrawIntent::Align(AlignPairSet::One {
+            source: p(0.0, 0.0),
+            dest: p(10.0, 0.0),
+        })
+    );
+    let selection = controller
+        .session
+        .draw_selection_snapshot()
+        .unwrap()
+        .to_vec();
+    let command = controller
+        .command_for_draw_intent(intent, &selection)
+        .unwrap();
+    assert_eq!(command.id, crate::CommandId::AlignEntities);
+    match command.payload {
+        CommandPayload::Points(ref points) => {
+            assert_eq!(points, &vec![p(0.0, 0.0), p(10.0, 0.0)])
+        }
+        _ => panic!("one-pair ALIGN uses the typed Points payload"),
+    }
+
+    let outcome = controller.confirm_draw().unwrap();
+    assert_eq!(outcome.objects.len(), 0, "ALIGN transforms in place");
+    assert_eq!(
+        controller.drawing().unwrap().revision(),
+        Revision(revision_before.0 + 1),
+        "exactly one database transaction"
+    );
+    assert_eq!(undo_depth(&controller), undo_before + 1, "one undo step");
+    let (start, end) = match &controller
+        .drawing()
+        .unwrap()
+        .entity(EntityId(201))
+        .unwrap()
+        .geometry
+    {
+        SemanticGeometry::Line { start, end } => (*start, *end),
+        other => panic!("expected a LINE, got {other:?}"),
+    };
+    assert!((start.x - 10.0).abs() < 1e-9 && (start.y - 0.0).abs() < 1e-9);
+    assert!((end.x - 11.0).abs() < 1e-9 && (end.y - 0.0).abs() < 1e-9);
+}
+
+#[test]
+fn align_three_pair_capture_takes_six_picks_and_builds_the_grouped_payload() {
+    let mut controller = fixture();
+    controller
+        .set_selection(vec![reference(&controller, 201)])
+        .unwrap();
+    set_pairs(&mut controller, 3.0);
+    let revision_before = controller.drawing().unwrap().revision();
+    let undo_before = undo_depth(&controller);
+    controller.begin_draw_tool(DrawToolKind::Align).unwrap();
+    assert_eq!(
+        controller
+            .session
+            .draw_preview()
+            .unwrap()
+            .remaining_points(),
+        Some(6)
+    );
+    // Source/destination interleaved per pair: (0,0)→(10,0), (1,0)→(10,1),
+    // (0,1)→(9,0) is a +90° rotation plus a +10 X translation, with every side
+    // length unchanged (three-pair ALIGN is rigid, never scaled).
+    for point in [
+        p(0.0, 0.0),
+        p(10.0, 0.0),
+        p(1.0, 0.0),
+        p(10.0, 1.0),
+        p(0.0, 1.0),
+        p(9.0, 0.0),
+    ] {
+        controller.capture_tool_point(point).unwrap();
+    }
+    assert!(controller.session.draw_preview().unwrap().can_confirm());
+    let error = controller
+        .capture_tool_point(p(99.0, 99.0))
+        .expect_err("a seventh point is refused");
+    assert!(matches!(error, CadError::InvalidInput(_)), "{error:?}");
+
+    let intent = controller.session.draw_intent().unwrap();
+    assert_eq!(
+        intent,
+        DrawIntent::Align(AlignPairSet::Three {
+            sources: [p(0.0, 0.0), p(1.0, 0.0), p(0.0, 1.0)],
+            dests: [p(10.0, 0.0), p(10.0, 1.0), p(9.0, 0.0)],
+        })
+    );
+    let selection = controller
+        .session
+        .draw_selection_snapshot()
+        .unwrap()
+        .to_vec();
+    let command = controller
+        .command_for_draw_intent(intent, &selection)
+        .unwrap();
+    assert_eq!(command.id, crate::CommandId::AlignEntities);
+    match command.payload {
+        CommandPayload::Points(points) => assert_eq!(
+            points,
+            vec![
+                p(0.0, 0.0),
+                p(1.0, 0.0),
+                p(0.0, 1.0),
+                p(10.0, 0.0),
+                p(10.0, 1.0),
+                p(9.0, 0.0),
+            ],
+            "the six-point form groups the three sources then the three destinations"
+        ),
+        _ => panic!("three-pair ALIGN uses the typed Points payload"),
+    }
+
+    let outcome = controller.confirm_draw().unwrap();
+    assert_eq!(outcome.objects.len(), 0, "ALIGN transforms in place");
+    assert_eq!(
+        controller.drawing().unwrap().revision(),
+        Revision(revision_before.0 + 1),
+        "exactly one database transaction"
+    );
+    assert_eq!(undo_depth(&controller), undo_before + 1, "one undo step");
+    let (start, end) = match &controller
+        .drawing()
+        .unwrap()
+        .entity(EntityId(201))
+        .unwrap()
+        .geometry
+    {
+        SemanticGeometry::Line { start, end } => (*start, *end),
+        other => panic!("expected a LINE, got {other:?}"),
+    };
+    assert!((start.x - 10.0).abs() < 1e-9 && (start.y - 0.0).abs() < 1e-9);
+    assert!((end.x - 10.0).abs() < 1e-9 && (end.y - 1.0).abs() < 1e-9);
+}
+
+#[test]
+fn align_two_pair_default_does_not_capture_a_third_pair() {
+    let mut controller = fixture();
+    controller
+        .set_selection(vec![reference(&controller, 201)])
+        .unwrap();
+    controller.begin_draw_tool(DrawToolKind::Align).unwrap();
+    capture_four(&mut controller);
+    // The default is still two pairs: a fifth click is refused, never taken as
+    // the start of an ambiguous third pair.
+    let error = controller
+        .capture_tool_point(p(0.0, 1.0))
+        .expect_err("a third pair needs the alignPairs parameter");
+    assert!(matches!(error, CadError::InvalidInput(_)), "{error:?}");
+    assert_eq!(
+        controller.session.draw_preview().unwrap().points.len(),
+        4,
+        "the refused click is not captured"
+    );
+}
+
+#[test]
+fn align_pair_count_changes_replan_the_live_capture_only_when_they_fit() {
+    let mut controller = fixture();
+    controller
+        .set_selection(vec![reference(&controller, 201)])
+        .unwrap();
+    controller.begin_draw_tool(DrawToolKind::Align).unwrap();
+    assert_eq!(
+        controller
+            .session
+            .draw_preview()
+            .unwrap()
+            .remaining_points(),
+        Some(4),
+        "the default stays the two-pair form"
+    );
+    // Growing the plan while the capture is empty takes effect immediately.
+    set_pairs(&mut controller, 3.0);
+    assert_eq!(
+        controller
+            .session
+            .draw_preview()
+            .unwrap()
+            .remaining_points(),
+        Some(6)
+    );
+    // A shrink that would strand captured points is not applied; the sequence
+    // already in progress stays valid instead of dropping picks.
+    controller.capture_tool_point(p(0.0, 0.0)).unwrap();
+    controller.capture_tool_point(p(10.0, 0.0)).unwrap();
+    controller.capture_tool_point(p(1.0, 0.0)).unwrap();
+    set_pairs(&mut controller, 1.0);
+    assert_eq!(
+        controller
+            .session
+            .draw_preview()
+            .unwrap()
+            .remaining_points(),
+        Some(3),
+        "the six-pick plan is kept because three points are already captured"
+    );
 }

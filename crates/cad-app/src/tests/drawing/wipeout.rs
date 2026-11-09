@@ -287,3 +287,200 @@ fn create_wipeout_is_work_only() {
     // The command layer refuses it in Viewer mode (it writes the drawing).
     assert!(CommandId::Wipeout.requires_work_mode());
 }
+
+// --- 2026-11 WIPEOUT Frames / Polyline options -------------------------------
+
+use crate::command_payload::{UtilityPayload, WipeoutPayload};
+
+fn wipeout_payload(payload: WipeoutPayload) -> CommandPayload {
+    CommandPayload::Annotation(Box::new(AnnotationBatchPayload::Utility(Box::new(
+        UtilityPayload::Wipeout(payload),
+    ))))
+}
+
+#[test]
+fn wipeout_frames_state_is_session_wide_and_writes_nothing() {
+    let (mut app, mut session) = drawing_app();
+    let before = revision(&app);
+    for (mode, value, label) in [
+        (crate::WipeoutFrames::Off, 0, "OFF"),
+        (crate::WipeoutFrames::On, 1, "ON"),
+        (crate::WipeoutFrames::DisplayNotPlot, 2, "DISPLAY-NOT-PLOT"),
+    ] {
+        let outcome = execute(
+            &mut app,
+            &mut session,
+            CommandId::Wipeout,
+            wipeout_payload(WipeoutPayload::Frames(mode)),
+        )
+        .expect("Frames stores the session state");
+        assert_eq!(session.drafting_extras.wipeout_frames(), mode);
+        assert_eq!(session.drafting_extras.wipeout_frames().value(), value);
+        assert_eq!(session.drafting_extras.wipeout_frames().label(), label);
+        assert!(outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "wipeout.frames"));
+        assert!(outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "wipeout.frames_display_only"));
+    }
+    assert_eq!(revision(&app), before, "Frames never writes the drawing");
+    assert!(
+        !app.can_undo(&DocumentId(1)),
+        "Frames records no undo entry"
+    );
+}
+
+#[test]
+fn wipeout_polyline_erase_yes_and_no_share_one_transaction() {
+    let (mut app, mut session) = drawing_app();
+    let rectangle = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateRectangle,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(4.0, 3.0)]),
+    )
+    .unwrap()
+    .objects[0]
+        .0;
+    let before = revision(&app);
+    let undo_before = app.history[&DocumentId(1)].undo_depth();
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Wipeout,
+        wipeout_payload(WipeoutPayload::Polyline {
+            target: ref_of(rectangle),
+            erase: true,
+        }),
+    )
+    .expect("Polyline converts and erases the source");
+    let mask = outcome.objects[0];
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(rectangle))
+            .is_none(),
+        "Erase Polyline Yes deletes the source"
+    );
+    assert_mask(
+        &app,
+        mask,
+        &[
+            point(0.0, 0.0),
+            point(4.0, 0.0),
+            point(4.0, 3.0),
+            point(0.0, 3.0),
+        ],
+    );
+    assert_eq!(revision(&app).0, before.0 + 1, "one transaction");
+    assert_eq!(
+        app.history[&DocumentId(1)].undo_depth(),
+        undo_before + 1,
+        "one undo step"
+    );
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(rectangle))
+            .is_some(),
+        "undo restores the erased polyline"
+    );
+    assert!(find_wipeout(&app).is_none(), "undo removes the mask");
+
+    let rectangle = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateRectangle,
+        CommandPayload::Points(vec![point(20.0, 0.0), point(24.0, 3.0)]),
+    )
+    .unwrap()
+    .objects[0]
+        .0;
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Wipeout,
+        wipeout_payload(WipeoutPayload::Polyline {
+            target: ref_of(rectangle),
+            erase: false,
+        }),
+    )
+    .expect("Polyline keeps the source when Erase is No");
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(rectangle))
+            .is_some(),
+        "Erase Polyline No keeps the source"
+    );
+}
+
+fn find_wipeout(app: &Application) -> Option<cad_db::DbEntity> {
+    app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entities()
+        .find(|entity| matches!(entity.geometry, SemanticGeometry::Mask { .. }))
+        .cloned()
+}
+
+#[test]
+fn wipeout_polyline_refuses_open_and_non_polyline_targets_without_writing() {
+    let (mut app, mut session) = drawing_app();
+    let open = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreatePolyline,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(4.0, 0.0), point(4.0, 3.0)]),
+    )
+    .unwrap()
+    .objects[0]
+        .0;
+    let before = revision(&app);
+    let message = match execute(
+        &mut app,
+        &mut session,
+        CommandId::Wipeout,
+        wipeout_payload(WipeoutPayload::Polyline {
+            target: ref_of(open),
+            erase: false,
+        }),
+    )
+    .unwrap_err()
+    {
+        CadError::InvalidInput(message) | CadError::Unsupported(message) => message,
+        other => panic!("expected a named refusal, got {other:?}"),
+    };
+    assert!(message.contains("wipeout.polyline_open"), "{message}");
+    assert_eq!(revision(&app), before);
+
+    let message = match execute(
+        &mut app,
+        &mut session,
+        CommandId::Wipeout,
+        wipeout_payload(WipeoutPayload::Polyline {
+            target: ref_of(1),
+            erase: false,
+        }),
+    )
+    .unwrap_err()
+    {
+        CadError::InvalidInput(message) | CadError::Unsupported(message) => message,
+        other => panic!("expected a named refusal, got {other:?}"),
+    };
+    assert!(
+        message.contains("wipeout.polyline_not_polyline"),
+        "{message}"
+    );
+    assert_eq!(revision(&app), before);
+}

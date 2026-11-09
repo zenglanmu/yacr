@@ -17,6 +17,7 @@ use crate::property_value;
 use cad_db::{
     BlockDefinition, ChangeMask, EntityColor, EntityLineType, EntityLineWeight,
     EntityRenderAttributes, EntityTransparency, Layer, LineType, LinetypePattern, ObjectChange,
+    Style,
 };
 
 /// A drawing with layers `0`/`WALLS`, linetypes `CONTINUOUS`/`DASHED`, a block
@@ -33,6 +34,13 @@ fn match_app() -> (Application, SessionState) {
 /// The same fixture with the source entity's display attributes replaced, so a
 /// test can store a legal-but-unwritable display state on the source.
 fn match_app_with_source(attributes: EntityRenderAttributes) -> (Application, SessionState) {
+    match_app_with_source_and_locked(attributes, None)
+}
+
+fn match_app_with_source_and_locked(
+    attributes: EntityRenderAttributes,
+    locked: Option<LayerId>,
+) -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     for (id, name) in [(LayerId(0), "0"), (LayerId(1), "WALLS")] {
         b.insert_layer(Layer {
@@ -40,6 +48,16 @@ fn match_app_with_source(attributes: EntityRenderAttributes) -> (Application, Se
             name: name.into(),
             visible: true,
         })
+        .unwrap();
+    }
+    if let Some(layer) = locked {
+        b.set_layer_attributes(
+            layer,
+            cad_db::LayerAttributes {
+                locked: true,
+                ..cad_db::LayerAttributes::default()
+            },
+        )
         .unwrap();
     }
     for (id, name, pattern) in [
@@ -157,8 +175,8 @@ fn source_attributes() -> EntityRenderAttributes {
 }
 
 /// A destination whose display values differ from [`source_attributes`] in every
-/// attribute, with a linetype scale the paint must **not** change (the scale is
-/// not one of the five transferred keys).
+/// attribute, with a linetype scale the default paint replaces (the scale is a
+/// separate Settings toggle).
 fn destination_attributes() -> EntityRenderAttributes {
     EntityRenderAttributes {
         linetype: EntityLineType::Explicit {
@@ -166,12 +184,13 @@ fn destination_attributes() -> EntityRenderAttributes {
             pattern: LinetypePattern::continuous(),
             scale: 2.5,
         },
+        linetype_scale: 2.5,
         ..EntityRenderAttributes::default()
     }
 }
 
-/// The display values a destination is expected to hold after being painted from
-/// the fixture's source: the source's four attributes plus the destination's own
+/// The display values a destination is expected to hold after the default paint
+/// from the fixture's source: all four display attributes plus the source's
 /// linetype scale.
 fn painted_attributes(scale: f64) -> EntityRenderAttributes {
     EntityRenderAttributes {
@@ -183,12 +202,17 @@ fn painted_attributes(scale: f64) -> EntityRenderAttributes {
             pattern: LinetypePattern::from_elements([0.5, -0.25]),
             scale,
         },
+        linetype_scale: scale,
         ..EntityRenderAttributes::default()
     }
 }
 
 fn run_match(app: &mut Application, session: &mut SessionState) -> CadResult<CommandOutcome> {
     execute(app, session, CommandId::MatchProp, CommandPayload::None)
+}
+
+fn approx(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-9
 }
 
 fn stored_drawing(app: &Application) -> Arc<DrawingDatabase> {
@@ -227,9 +251,9 @@ fn same_kind_copies_all_five_properties_in_one_undo_step() {
     );
     assert_eq!(
         stored_attributes(&app, 2),
-        painted_attributes(2.5),
-        "colour/linetype/lineweight/transparency come from the source; the \
-         destination keeps its own linetype scale"
+        painted_attributes(1.0),
+        "colour/linetype/lineweight/transparency and the source linetype scale \
+         come from the source"
     );
     // The source itself is untouched.
     assert_eq!(stored_layer(&app, 1), LayerId(1));
@@ -275,7 +299,7 @@ fn same_kind_copies_all_five_properties_in_one_undo_step() {
     )
     .unwrap();
     assert_eq!(stored_layer(&app, 2), LayerId(1));
-    assert_eq!(stored_attributes(&app, 2), painted_attributes(2.5));
+    assert_eq!(stored_attributes(&app, 2), painted_attributes(1.0));
 }
 
 #[test]
@@ -304,7 +328,7 @@ fn destination_already_matching_contributes_no_change() {
     // with a still-mismatching destination (the ARC).
     session.selection.replace([ref_of(1), ref_of(2)]);
     run_match(&mut app, &mut session).unwrap();
-    assert_eq!(stored_attributes(&app, 2), painted_attributes(2.5));
+    assert_eq!(stored_attributes(&app, 2), painted_attributes(1.0));
 
     session.selection.replace([ref_of(1), ref_of(2), ref_of(3)]);
     let before = revision(&app);
@@ -327,7 +351,7 @@ fn destination_already_matching_contributes_no_change() {
     );
     assert_eq!(
         stored_attributes(&app, 2),
-        painted_attributes(2.5),
+        painted_attributes(1.0),
         "the already-matching destination was never staged"
     );
     // The second command recorded exactly one entry: undoing it removed only the
@@ -357,7 +381,7 @@ fn all_destinations_matching_is_a_no_op_without_an_undo_entry() {
         "an explicit nothing-to-change completion: {:?}",
         outcome.diagnostics
     );
-    assert_eq!(stored_attributes(&app, 2), painted_attributes(2.5));
+    assert_eq!(stored_attributes(&app, 2), painted_attributes(1.0));
     // Undo removes the *first* paint (the only real entry), never an empty one.
     undo(&mut app, &mut session);
     assert_eq!(stored_attributes(&app, 2), destination_attributes());
@@ -495,7 +519,7 @@ fn the_first_selected_entity_is_the_source_regardless_of_id_order() {
     assert_eq!(stored_layer(&app, 3), LayerId(1));
     assert_eq!(stored_attributes(&app, 3), painted_attributes(1.0));
     assert_eq!(stored_layer(&app, 2), LayerId(1));
-    assert_eq!(stored_attributes(&app, 2), painted_attributes(2.5));
+    assert_eq!(stored_attributes(&app, 2), painted_attributes(1.0));
 }
 
 #[test]
@@ -531,4 +555,417 @@ fn viewer_mode_is_refused_before_any_write() {
     assert_eq!(revision(&app), before);
     assert_eq!(stored_layer(&app, 2), LayerId(0));
     assert!(!app.can_undo(&DocumentId(1)));
+}
+
+fn run_match_with(
+    app: &mut Application,
+    session: &mut SessionState,
+    settings: MatchPropSettings,
+) -> CadResult<CommandOutcome> {
+    execute(
+        app,
+        session,
+        CommandId::MatchProp,
+        CommandPayload::SelectionTool(Box::new(SelectionToolPayload::MatchProp(settings))),
+    )
+}
+
+#[test]
+fn settings_subset_writes_only_the_toggled_properties() {
+    // Colour only: layer, linetype, lineweight, transparency and the linetype
+    // scale stay exactly as the destination had them.
+    let (mut app, mut session) = match_app();
+    session.selection.replace([ref_of(1), ref_of(2)]);
+    let before = revision(&app);
+    let outcome = run_match_with(
+        &mut app,
+        &mut session,
+        MatchPropSettings {
+            layer: false,
+            color: true,
+            linetype: false,
+            lineweight: false,
+            transparency: false,
+            linetype_scale: false,
+            ..MatchPropSettings::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(revision(&app), Revision(before.0 + 1));
+    assert_eq!(stored_layer(&app, 2), LayerId(0), "layer was not toggled");
+    assert_eq!(
+        stored_attributes(&app, 2),
+        EntityRenderAttributes {
+            color: EntityColor::Explicit([255, 0, 0]),
+            ..destination_attributes()
+        }
+    );
+    assert_eq!(outcome.changes.expect("one ChangeSet").changes.len(), 1);
+    undo(&mut app, &mut session);
+    assert_eq!(stored_attributes(&app, 2), destination_attributes());
+
+    // Layer only: the display attributes are untouched.
+    let (mut app, mut session) = match_app();
+    session.selection.replace([ref_of(1), ref_of(2)]);
+    run_match_with(
+        &mut app,
+        &mut session,
+        MatchPropSettings {
+            layer: true,
+            color: false,
+            linetype: false,
+            lineweight: false,
+            transparency: false,
+            linetype_scale: false,
+            ..MatchPropSettings::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(stored_layer(&app, 2), LayerId(1));
+    assert_eq!(stored_attributes(&app, 2), destination_attributes());
+}
+
+#[test]
+fn linetype_scale_is_a_separate_toggle() {
+    let (mut app, mut session) = match_app();
+    session.selection.replace([ref_of(1), ref_of(2)]);
+    run_match_with(
+        &mut app,
+        &mut session,
+        MatchPropSettings {
+            layer: false,
+            color: false,
+            linetype: false,
+            lineweight: false,
+            transparency: false,
+            linetype_scale: true,
+            ..MatchPropSettings::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(stored_layer(&app, 2), LayerId(0));
+    assert_eq!(
+        stored_attributes(&app, 2),
+        EntityRenderAttributes {
+            linetype: EntityLineType::Explicit {
+                name: "CONTINUOUS".into(),
+                pattern: LinetypePattern::continuous(),
+                scale: 1.0,
+            },
+            linetype_scale: 1.0,
+            ..EntityRenderAttributes::default()
+        },
+        "only the entity linetype scale changed (both authoritative copies)"
+    );
+}
+
+#[test]
+fn an_unwritable_untoggled_source_value_does_not_refuse() {
+    let (mut app, mut session) = match_app_with_source(EntityRenderAttributes {
+        transparency: EntityTransparency::Explicit(1.5),
+        ..source_attributes()
+    });
+    session.selection.replace([ref_of(1), ref_of(2)]);
+    run_match_with(
+        &mut app,
+        &mut session,
+        MatchPropSettings {
+            layer: false,
+            color: true,
+            linetype: false,
+            lineweight: false,
+            transparency: false,
+            linetype_scale: false,
+            ..MatchPropSettings::default()
+        },
+    )
+    .expect("the disabled transparency is never resolved");
+
+    assert_eq!(
+        stored_attributes(&app, 2).color,
+        EntityColor::Explicit([255, 0, 0])
+    );
+}
+
+#[test]
+fn a_locked_destination_or_locked_target_layer_is_refused_by_name() {
+    // (a) the destination itself is on a locked layer;
+    // (b) the layer setting would move it onto the locked source layer.
+    for locked in [LayerId(0), LayerId(1)] {
+        let (mut app, mut session) =
+            match_app_with_source_and_locked(source_attributes(), Some(locked));
+        session.selection.replace([ref_of(1), ref_of(2)]);
+        let before = revision(&app);
+        let error = run_match(&mut app, &mut session).unwrap_err();
+        assert!(
+            format!("{error:?}").contains("layer.locked"),
+            "the database's stable lock reason, got {error:?}"
+        );
+        assert_eq!(revision(&app), before);
+        assert_eq!(stored_layer(&app, 2), LayerId(0), "nothing written");
+        assert_eq!(stored_attributes(&app, 2), destination_attributes());
+        assert!(!app.can_undo(&DocumentId(1)), "no undo entry");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Special groups: Text / Dimension / Hatch.
+// ---------------------------------------------------------------------------
+
+fn text_geometry(text: &str, style: StyleId, height: f64, font: Option<&str>) -> SemanticGeometry {
+    SemanticGeometry::Text {
+        text: text.to_string(),
+        position: point(0.0, 0.0),
+        style,
+        height,
+        rotation: 0.0,
+        font: font.map(str::to_string),
+        h_align: TextAlignH::Left,
+        v_align: TextAlignV::Baseline,
+        wrap_width: None,
+    }
+}
+
+fn dimension_geometry(
+    style_name: &str,
+    text_height: f64,
+    override_text: Option<&str>,
+    line_y: f64,
+) -> SemanticGeometry {
+    let mut style = cad_db::DimStyle::standard_metric(DimStyleId(0)).resolved(
+        "Standard".to_string(),
+        StyleId(0),
+        None,
+    );
+    style.text_height = text_height;
+    SemanticGeometry::Dimension(Box::new(
+        DimensionGeometry::synthesized(
+            DimensionDefinition {
+                kind: DimensionKind::Linear { rotation: 0.0 },
+                points: DimensionPoints::Linear {
+                    first: point(0.0, 0.0),
+                    second: point(10.0, 0.0),
+                    dimension_line: point(5.0, line_y),
+                },
+                text_middle: point(0.0, 0.0),
+                text_rotation: 0.0,
+                normal: p3(0.0, 0.0, 1.0),
+            },
+            style_name.to_string(),
+            style,
+            override_text.map(str::to_string),
+        )
+        .expect("fixture dimension"),
+    ))
+}
+
+fn hatch_geometry(style: HatchStyle, fill: HatchFill, elevation: f64) -> SemanticGeometry {
+    SemanticGeometry::Hatch(Box::new(
+        HatchGeometry::new(
+            vec![HatchLoop::new(
+                vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                vec![0.0; 4],
+                HatchLoopFlags(HatchLoopFlags::POLYLINE),
+            )],
+            HatchPlane::new(p3(0.0, 0.0, 1.0), elevation),
+            style,
+            fill,
+            Vec::new(),
+            None,
+            HatchPatternType::Predefined,
+        )
+        .expect("fixture hatch"),
+    ))
+}
+
+fn pattern_fill() -> HatchFill {
+    HatchFill::Pattern(HatchPattern {
+        name: "ANSI31".into(),
+        angle: 0.5,
+        scale: 2.0,
+        double: false,
+        lines: vec![HatchPatternLine {
+            angle: 0.0,
+            base_x: 0.0,
+            base_y: 0.0,
+            offset_x: 0.0,
+            offset_y: 1.0,
+            dashes: Vec::new(),
+        }],
+    })
+}
+
+/// One source/destination pair per Special group plus a LINE that is a
+/// wrong-class destination.
+fn special_app() -> (Application, SessionState) {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    for (id, name) in [(StyleId(1), "NOTE"), (StyleId(2), "TITLE")] {
+        b.insert_style(Style {
+            id,
+            name: name.into(),
+            resource_keys: Vec::new(),
+        })
+        .unwrap();
+    }
+    b.insert_entity(ent(
+        100,
+        text_geometry("SRC", StyleId(1), 2.0, Some("arial.ttf")),
+        0,
+    ))
+    .unwrap();
+    b.insert_entity(ent(101, text_geometry("DST", StyleId(2), 8.0, None), 1))
+        .unwrap();
+    b.insert_entity(ent(
+        102,
+        dimension_geometry("Standard", 2.5, Some("SRC-OVERRIDE"), -5.0),
+        2,
+    ))
+    .unwrap();
+    b.insert_entity(ent(
+        103,
+        dimension_geometry("Fancy", 5.0, Some("DST-OVERRIDE"), -15.0),
+        3,
+    ))
+    .unwrap();
+    b.insert_entity(ent(
+        104,
+        hatch_geometry(HatchStyle::Outer, pattern_fill(), 0.0),
+        4,
+    ))
+    .unwrap();
+    b.insert_entity(ent(
+        105,
+        hatch_geometry(HatchStyle::Normal, HatchFill::Solid, 7.0),
+        5,
+    ))
+    .unwrap();
+    b.insert_entity(ent(
+        106,
+        SemanticGeometry::Line {
+            start: point(0.0, 20.0),
+            end: point(10.0, 20.0),
+        },
+        6,
+    ))
+    .unwrap();
+    let drawing = b.finish().unwrap();
+
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([13u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
+fn stored_geometry(app: &Application, entity: u128) -> SemanticGeometry {
+    stored_drawing(app)
+        .entity(EntityId(entity))
+        .expect("the entity")
+        .geometry
+        .clone()
+}
+
+#[test]
+fn text_special_group_copies_style_but_not_height() {
+    let (mut app, mut session) = special_app();
+    session.selection.replace([ref_of(100), ref_of(101)]);
+    run_match(&mut app, &mut session).expect("text style paint");
+
+    let SemanticGeometry::Text {
+        text,
+        style,
+        height,
+        font,
+        ..
+    } = stored_geometry(&app, 101)
+    else {
+        panic!("expected TEXT");
+    };
+    assert_eq!(style, StyleId(1), "the text style reference is copied");
+    assert_eq!(font.as_deref(), Some("arial.ttf"), "the style font follows");
+    assert_eq!(height, 8.0, "text height is explicitly not copied");
+    assert_eq!(text, "DST", "the text content is not touched");
+}
+
+#[test]
+fn dimension_special_group_copies_style_but_not_overrides() {
+    let (mut app, mut session) = special_app();
+    session.selection.replace([ref_of(102), ref_of(103)]);
+    run_match(&mut app, &mut session).expect("dimension style paint");
+
+    let SemanticGeometry::Dimension(dimension) = stored_geometry(&app, 103) else {
+        panic!("expected DIMENSION");
+    };
+    assert_eq!(dimension.style_name(), "Standard");
+    assert!(approx(dimension.style().text_height, 2.5));
+    assert_eq!(
+        dimension.text_override(),
+        Some("DST-OVERRIDE"),
+        "the destination's own override is not replaced by the source's"
+    );
+    let DimensionPoints::Linear {
+        first,
+        second,
+        dimension_line,
+    } = &dimension.definition().points
+    else {
+        panic!("expected linear points");
+    };
+    assert_eq!(
+        (*first, *second, *dimension_line),
+        (point(0.0, 0.0), point(10.0, 0.0), point(5.0, -15.0)),
+        "the destination's own definition is kept"
+    );
+}
+
+#[test]
+fn hatch_special_group_copies_pattern_but_not_origin() {
+    let (mut app, mut session) = special_app();
+    session.selection.replace([ref_of(104), ref_of(105)]);
+    run_match(&mut app, &mut session).expect("hatch property paint");
+
+    let SemanticGeometry::Hatch(hatch) = stored_geometry(&app, 105) else {
+        panic!("expected HATCH");
+    };
+    assert_eq!(hatch.style(), HatchStyle::Outer);
+    assert_eq!(hatch.fill(), &pattern_fill());
+    assert!(approx(hatch.plane().elevation, 7.0), "origin is not copied");
+}
+
+#[test]
+fn a_wrong_class_destination_skips_the_special_group_and_reports_it() {
+    let (mut app, mut session) = special_app();
+    session.selection.replace([ref_of(100), ref_of(106)]);
+    let before = revision(&app);
+    let outcome = run_match(&mut app, &mut session).expect("the line skips the text group");
+
+    assert!(outcome.changes.is_none(), "no transaction");
+    assert_eq!(outcome.diagnostics[0].code, "matchprop.unchanged");
+    assert!(
+        outcome.diagnostics[0]
+            .message
+            .contains("text style skipped on 1 non-text destination"),
+        "{}",
+        outcome.diagnostics[0].message
+    );
+    assert_eq!(revision(&app), before);
 }

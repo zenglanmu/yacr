@@ -334,6 +334,74 @@ export const HOST_NAMES = [
   // that the value is persisted. Admission tests read this list, never a Rust
   // import.
   'PDMODE', 'PDSIZE',
+  // The 2026-11-09 pilot batch: five session-only display tokens with no renderer
+  // effect (QTEXT/FILL/TFRAMES/REGENAUTO/ISODRAFT) and five read-only reports
+  // (BCOUNT/COUNT/EDITTIME/JULIAN/XLIST). All are payload-free canonical
+  // selectors, never aliases. This mirror stands in for the loaded
+  // `cad_commands` vocabulary and never proves the host advertises them.
+  'QTEXT', 'FILL', 'TFRAMES', 'REGENAUTO', 'ISODRAFT',
+  'BCOUNT', 'COUNT', 'EDITTIME', 'JULIAN', 'XLIST',
+  // The 2026-11-09 Wave 2 batch: thirty payload-free canonical selectors — ten
+  // session tokens (no renderer effect), eight read-only reports and twelve
+  // named refusals. `-INPUTSEARCHOPTIONS` is its own canonical selector here,
+  // not an alias spelling.
+  'DRAGMODE', 'APERTURE', 'ISOPLANE', 'HIGHLIGHTNEW', 'TRAYSETTINGS', 'TEXTSCR',
+  'GRAPHSCR', 'FINDINCLUDE', 'FINDMATCH', 'REVCLOUDPROPERTIES',
+  'SYSVARMONITOR', 'SYSVDLG', 'VTOPTIONS', 'ALIASEDIT', 'WHOHAS', 'ACADINFO',
+  'PTYPE', 'SCALELISTEDIT',
+  'HYPERLINKOPTIONS', 'INPUTSEARCHOPTIONS', '-INPUTSEARCHOPTIONS', 'SIGVALIDATE',
+  'BASE', 'LIMITS', 'VIEWPLOTDETAILS', 'VPLAYER', 'MVIEW', 'PSBSCALE', 'PSTSCALE',
+  'MVSETUP',
+  // The 2026-11-09 Wave 3 batch: thirty payload-free canonical selectors — eight
+  // reports/session commands (two space switches, four table reports, two
+  // non-associative no-ops) and twenty-two named refusals. `-STYLE`, `-BEDIT`,
+  // `-DIMINSPECT` and `-OBJECTSCALE` are their own canonical selectors here,
+  // not aliases.
+  'MSPACE', 'PSPACE', 'STYLE', '-STYLE', 'MLEADERSTYLE', 'BLOCK?',
+  'DIMREASSOC', 'DIMREASSOCIATE', 'DIMJOGGED', 'DIMINSPECT', '-DIMINSPECT',
+  'ANNORESET', 'ANNOUPDATE', 'OBJECTSCALE', '-OBJECTSCALE', 'QLATTACH',
+  'QLATTACHSET', 'QLDETACHSET', 'ARRAYCLOSE', 'ARRAYEDIT', 'BEDIT', '-BEDIT',
+  'BCLOSE', 'BCYCLEORDER', 'BGRIPSET', 'BESETTINGS', 'BTESTBLOCK',
+  'LAYERPALETTE', 'CONSTRAINTBAR', 'CONSTRAINTSETTINGS',
+  // The 2026-11-09 Wave 4 batch: twelve real selection edits (Work-only) plus
+  // eighteen named refusals. All thirty are canonical selectors of their own;
+  // `-COPYTOLAYER`, `-BREPLACE`, `-MLEDIT` and `-WBLOCK` are not aliases.
+  'CENTERMARK', 'CENTERLINE', 'NCOPY', 'COPYTOLAYER', '-COPYTOLAYER',
+  'CDORDER', 'FLATTEN', 'XPLODE', 'BTRIM', 'BEXTEND', 'CHANGE', 'CHPROP',
+  'BSCALE', 'MINSERT', 'BLOCKREPLACE', 'BREPLACE', '-BREPLACE', 'SPLINEDIT',
+  'MLEDIT', '-MLEDIT', 'BURST', 'CLIP', 'CLIPIT', 'REGION', 'ADDSELECTED',
+  'WBLOCK', '-WBLOCK', 'BSAVE', 'BSAVEAS', 'CHSPACE',
+  // The 2026-11-09 Wave 5 batch: the ATTDISP token, six read-only attribute/xref
+  // reports and twenty-three named refusals. All thirty are canonical selectors
+  // of their own; `-XREF`, `-ATTDEF`, `-ATTEDIT`, `-ATTEXT`, `-EATTEXT`,
+  // `-XBIND` and `-ATTACH` are not aliases.
+  'ATTDISP', 'BATTMAN', 'BATTORDER', 'XREF', '-XREF', 'EXTERNALREFERENCES',
+  'EXTERNALREFERENCESCLOSE', 'ATTDEF', '-ATTDEF', 'ATTEDIT', '-ATTEDIT',
+  'ATTIPEDIT', 'ATTIN', 'ATTOUT', 'ATTEXT', '-ATTEXT', 'EATTEDIT', 'EATTEXT',
+  '-EATTEXT', 'ATTREDEF', 'ATTSYNC', 'GATTE', 'XDATA', 'XBIND', '-XBIND',
+  'XATTACH', 'ATTACH', '-ATTACH', 'XOPEN', 'CLASSICXREF',
+  // The 2026-11-09 Wave 6 batch: the drawing-log token, three read-only
+  // file/plot/export reports and twenty-four named refusals. All thirty are
+  // canonical selectors of their own; `-PLOTSTAMP`, `-PLOT`, `-EXPORT`,
+  // `-ETRANSMIT`, `-ARCHIVE` and `-PUBLISH` are not aliases.
+  'DWGLOG', 'LOGFILEON', 'LOGFILEOFF', 'DWGPROPS', 'DWFFORMAT', 'EXPORTPDF',
+  'SAVEALL', 'QNEW', 'REVERT', 'CLOSEALL', 'CLOSEALLOTHER', 'QQUIT', 'QUIT',
+  'PROPULATE', 'PLOTTERMANAGER', 'STYLESMANAGER', 'EXPORTSETTINGS', 'PREVIEW',
+  'EXPORTLAYOUT', 'PLOTSTAMP', '-PLOTSTAMP', '-PLOT', '-EXPORT', 'ETRANSMIT',
+  '-ETRANSMIT', 'ARCHIVE', '-ARCHIVE', 'PUBLISH', '-PUBLISH', 'AUTOPUBLISH',
+  // The 2026-11-09 Wave 7 batch: two read-only dynamic-block visibility reports
+  // and twenty-eight named refusals. All thirty are canonical selectors of their
+  // own; `-BVSTATE` and `-BCPARAMETER` are not aliases.
+  'BVSTATE', '-BVSTATE', 'BACTION', 'BACTIONBAR', 'BACTIONSET', 'BACTIONTOOL',
+  'BASSOCIATE', 'BAUTHORPALETTE', 'BAUTHORPALETTECLOSE', 'BCONSTRUCTION',
+  'BCPARAMETER', '-BCPARAMETER', 'BPARAMETER', 'BLOOKUPTABLE', 'BTABLE',
+  'BVHIDE', 'BVSHOW', 'RESETBLOCK', 'AUTOCONSTRAIN', 'DELCONSTRAINT',
+  'DIMCONSTRAINT', 'GEOMCONSTRAINT', 'DCALIGNED', 'DCANGULAR', 'DCCONVERT',
+  'DCDIAMETER', 'DCDISPLAY', 'DCFORM', 'DCHORIZONTAL', 'DCLINEAR',
+  // The 2026-11-09 Wave 8 batch: two session tokens and eight stable named
+  // refusals. All ten are canonical selectors of their own.
+  'ELEV', 'UCSICON', 'UCS', 'UCSMAN', 'TABLET', 'TASKBAR', 'REINIT',
+  'SYSWINDOWS', 'MENU', 'RIBBON',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented

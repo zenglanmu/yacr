@@ -358,3 +358,246 @@ fn align_is_one_transaction_one_undo_step_and_undo_restores_exactly() {
     assert_eq!(polyline_of(&app, 2), original_rect);
     assert_eq!(undo_depth(&app), 0);
 }
+
+fn select(session: &mut SessionState, refs: Vec<SelectionRef>) {
+    session.selection.replace(refs);
+}
+
+fn assert_invalid_code(error: CadError, code: &str) {
+    match error {
+        CadError::InvalidInput(message) => assert!(
+            message.starts_with(code),
+            "expected refusal starting with {code}, got {message}"
+        ),
+        other => panic!("expected InvalidInput {code}, got {other:?}"),
+    }
+}
+
+#[test]
+fn align_one_pair_is_a_pure_move() {
+    let (mut app, mut session) = align_app();
+    select(&mut session, vec![ref_of(1)]);
+    let before = revision(&app);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::AlignEntities,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(10.0, 5.0)]),
+    )
+    .expect("one pair moves the selection");
+    let (start, end) = line_of(&app, 1);
+    assert!(near(start, point(10.0, 5.0)), "{start:?}");
+    assert!(near(end, point(11.0, 5.0)), "{end:?}");
+    assert_eq!(revision(&app).0, before.0 + 1, "one transaction");
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+    assert_eq!(entity_count(&app), 2, "in place, no copies");
+}
+
+#[test]
+fn align_one_pair_identity_is_the_named_no_op() {
+    let (mut app, mut session) = align_app();
+    select(&mut session, vec![ref_of(1)]);
+    let before = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::AlignEntities,
+        CommandPayload::Points(vec![point(3.0, 4.0), point(3.0, 4.0)]),
+    )
+    .expect("an identity move is a success");
+    assert!(outcome.changes.is_none(), "no ChangeSet");
+    assert_eq!(outcome.diagnostics[0].code, "align.unchanged");
+    assert_eq!(revision(&app), before, "no revision bump");
+    assert_eq!(undo_depth(&app), 0, "no undo entry");
+    let (start, end) = line_of(&app, 1);
+    assert!(near(start, point(0.0, 0.0)) && near(end, point(1.0, 0.0)));
+}
+
+#[test]
+fn align_three_pairs_is_a_rigid_rotation_and_translation() {
+    // Source triangle (0,0),(1,0),(0,1) maps onto (10,10),(10,11),(9,10): the
+    // first pair is the translation and the first side turns +90°, with no
+    // scaling (every side stays 1 unit long). The line (0,0)-(1,0) becomes
+    // (10,10)-(10,11).
+    let (mut app, mut session) = align_app();
+    select(&mut session, vec![ref_of(1)]);
+    let before = revision(&app);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::AlignEntities,
+        CommandPayload::Points(vec![
+            point(0.0, 0.0),
+            point(1.0, 0.0),
+            point(0.0, 1.0),
+            point(10.0, 10.0),
+            point(10.0, 11.0),
+            point(9.0, 10.0),
+        ]),
+    )
+    .expect("a congruent triangle pair maps rigidly");
+    let (start, end) = line_of(&app, 1);
+    assert!(near(start, point(10.0, 10.0)), "{start:?}");
+    assert!(near(end, point(10.0, 11.0)), "{end:?}");
+    assert_eq!(revision(&app).0, before.0 + 1, "one transaction");
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+}
+
+#[test]
+fn align_three_pairs_never_scales_even_when_align_scale_is_true() {
+    // AutoCAD 2026 offers no scaling with three pairs. The same congruent pair
+    // with AlignScale on must still be the rigid result, not a 2× similarity.
+    let (mut app, mut session) = align_app();
+    set_align_scale(&mut session, true);
+    select(&mut session, vec![ref_of(1)]);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::AlignEntities,
+        CommandPayload::Points(vec![
+            point(0.0, 0.0),
+            point(1.0, 0.0),
+            point(0.0, 1.0),
+            point(10.0, 10.0),
+            point(10.0, 12.0),
+            point(8.0, 10.0),
+        ]),
+    )
+    .expect_err("a 2× destination triangle is not congruent");
+    assert_invalid_code(error, "align.non_congruent");
+    let (start, end) = line_of(&app, 1);
+    assert!(near(start, point(0.0, 0.0)) && near(end, point(1.0, 0.0)));
+    assert_eq!(undo_depth(&app), 0, "a refusal writes nothing");
+}
+
+#[test]
+fn align_three_pairs_refuses_a_mirror_order_triangle() {
+    // The destination third point is below the first pair, so the destination
+    // triangle winds the other way: only a reflection would map it, which the
+    // three-pair rigid transform does not offer.
+    let (mut app, mut session) = align_app();
+    select(&mut session, vec![ref_of(2)]);
+    let before = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::AlignEntities,
+        CommandPayload::Points(vec![
+            point(0.0, 0.0),
+            point(1.0, 0.0),
+            point(0.0, 1.0),
+            point(0.0, 0.0),
+            point(1.0, 0.0),
+            point(0.0, -1.0),
+        ]),
+    )
+    .expect_err("a mirrored triangle pair is refused");
+    assert_invalid_code(error, "align.mirrored");
+    assert_eq!(revision(&app), before, "no revision bump");
+    assert_eq!(undo_depth(&app), 0, "no transaction");
+    let points = polyline_of(&app, 2);
+    assert!(near(points[0], point(0.0, 0.0)) && near(points[2], point(2.0, 1.0)));
+}
+
+#[test]
+fn align_three_pairs_refuses_non_coplanar_and_degenerate_triangles() {
+    let cases: [(&str, Vec<Point3>); 4] = [
+        (
+            "non-coplanar destination",
+            vec![
+                point(0.0, 0.0),
+                point(1.0, 0.0),
+                point(0.0, 1.0),
+                point(10.0, 0.0),
+                point(11.0, 0.0),
+                Point3 {
+                    x: 10.0,
+                    y: 1.0,
+                    z: 1.0,
+                },
+            ],
+        ),
+        (
+            "collinear source",
+            vec![
+                point(0.0, 0.0),
+                point(1.0, 0.0),
+                point(2.0, 0.0),
+                point(10.0, 0.0),
+                point(11.0, 0.0),
+                point(10.0, 1.0),
+            ],
+        ),
+        (
+            "coincident source pair",
+            vec![
+                point(0.0, 0.0),
+                point(0.0, 0.0),
+                point(0.0, 1.0),
+                point(10.0, 0.0),
+                point(11.0, 0.0),
+                point(10.0, 1.0),
+            ],
+        ),
+        (
+            "non-congruent triangles",
+            vec![
+                point(0.0, 0.0),
+                point(1.0, 0.0),
+                point(0.0, 1.0),
+                point(0.0, 0.0),
+                point(1.0, 0.0),
+                point(0.0, 2.0),
+            ],
+        ),
+    ];
+    for (label, points) in cases {
+        let (mut app, mut session) = align_app();
+        select(&mut session, vec![ref_of(1)]);
+        let before = revision(&app);
+        let error = execute(
+            &mut app,
+            &mut session,
+            CommandId::AlignEntities,
+            CommandPayload::Points(points),
+        )
+        .expect_err(label);
+        assert_invalid_code(
+            error,
+            match label {
+                "non-coplanar destination" => "align.non_coplanar",
+                "non-congruent triangles" => "align.non_congruent",
+                _ => "align.source_degenerate",
+            },
+        );
+        assert_eq!(revision(&app), before, "{label}: no revision bump");
+        assert_eq!(undo_depth(&app), 0, "{label}: no transaction");
+        let (start, end) = line_of(&app, 1);
+        assert!(near(start, point(0.0, 0.0)) && near(end, point(1.0, 0.0)));
+    }
+}
+
+#[test]
+fn viewer_mode_refuses_align_without_writing() {
+    let (mut app, mut session) = align_app();
+    session
+        .switch_mode(AppMode::Viewer)
+        .expect("Viewer mode is available");
+    let before = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::AlignEntities,
+        align_payload(
+            vec![ref_of(1)],
+            point(0.0, 0.0),
+            point(1.0, 0.0),
+            point(1.0, 0.0),
+            point(2.0, 0.0),
+        ),
+    )
+    .expect_err("ALIGN is Work-only");
+    assert!(matches!(error, CadError::PermissionDenied), "{error:?}");
+    assert_eq!(revision(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+}

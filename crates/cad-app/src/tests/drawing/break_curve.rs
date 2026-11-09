@@ -381,6 +381,90 @@ fn circle_break_turns_the_source_into_one_arc_complement() {
 }
 
 #[test]
+fn ellipse_break_turns_the_full_ellipse_into_one_elliptical_arc_complement() {
+    let source = part(
+        1,
+        SemanticGeometry::Ellipse {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            major_axis: p3(5.0, 0.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            sweep: TAU,
+        },
+        LayerId(0),
+        SpaceId::Model,
+        "AcDbEllipse",
+        4,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    let before_count = entity_count(&app);
+
+    // Remove the first quarter (parameter 0 → π/2); the kept complement is 3/4
+    // of the ellipse's parameter span, starting at the second pick.
+    let outcome = break_at(&mut app, &mut session, 1, point(5.0, 0.0), point(0.0, 2.5))
+        .expect("the full ellipse breaks");
+    assert_eq!(
+        outcome.objects,
+        vec![ObjectId(1)],
+        "the source stays the one object"
+    );
+    assert_eq!(entity_count(&app), before_count, "no extra entity");
+
+    let after = entity(&app, 1);
+    assert_eq!(after.object.type_key, "AcDbEllipse");
+    match &after.geometry {
+        SemanticGeometry::Ellipse {
+            major_axis,
+            ratio,
+            start,
+            sweep,
+            ..
+        } => {
+            assert!(near(major_axis.x, 5.0) && near(*ratio, 0.5));
+            assert!(
+                near(*start, std::f64::consts::FRAC_PI_2),
+                "starts at u2: {start}"
+            );
+            assert!(
+                near(*sweep, TAU * 0.75),
+                "keeps the 1 - removed complement, got {sweep}"
+            );
+        }
+        other => panic!("expected the kept elliptical arc, got {other:?}"),
+    }
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn an_elliptical_arc_target_is_refused_by_name() {
+    let source = part(
+        1,
+        SemanticGeometry::Ellipse {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            major_axis: p3(5.0, 0.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            sweep: std::f64::consts::FRAC_PI_2,
+        },
+        LayerId(0),
+        SpaceId::Model,
+        "AcDbEllipse",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    let before_revision = revision(&app);
+    let error = break_at(&mut app, &mut session, 1, point(5.0, 0.0), point(0.0, 2.5))
+        .expect_err("a partial ellipse has no documented BREAK semantics");
+    assert!(
+        refusal_message(error).contains("break.elliptical_arc_unsupported"),
+        "expected the named elliptical-arc refusal"
+    );
+    assert_unchanged(&app, before_revision, 1);
+}
+
+#[test]
 fn spline_break_leaves_two_splines_or_a_named_refusal_that_writes_nothing() {
     let fit = vec![
         point(0.0, 0.0),
@@ -450,22 +534,74 @@ fn whole_curve_is_a_named_refusal_that_writes_nothing() {
 }
 
 #[test]
-fn a_pick_outside_the_target_span_is_a_named_refusal() {
+fn an_off_object_second_pick_is_projected_onto_the_curve() {
+    // The second point (20, 0) lies beyond the line's end; AutoCAD projects it to
+    // the nearest point of the curve, so it is the endpoint and the kept piece is
+    // [0, 5].
+    let source = line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 10.0, 0.0), 0);
+    let (mut app, mut session) = app_with(vec![source]);
+    let outcome = break_at(&mut app, &mut session, 1, point(5.0, 0.0), point(20.0, 0.0))
+        .expect("an off-object second pick is projected");
+    assert_eq!(outcome.objects.len(), 1, "only the [0, 5] piece remains");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Line { start, end } => {
+            assert!(near(start.x, 0.0) && near(end.x, 5.0), "{start:?} {end:?}");
+        }
+        other => panic!("expected one LINE, got {other:?}"),
+    }
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn an_off_object_first_pick_is_still_refused() {
+    // The first pick is the entity pick: it must project inside an open target's
+    // own span, so a click beyond the curve is a named refusal.
     let source = line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 10.0, 0.0), 0);
     let (mut app, mut session) = app_with(vec![source]);
     let before_revision = revision(&app);
-    let error = break_at(&mut app, &mut session, 1, point(5.0, 0.0), point(20.0, 0.0))
-        .expect_err("the second pick is beyond the line's own span");
+    let error = break_at(&mut app, &mut session, 1, point(20.0, 0.0), point(5.0, 0.0))
+        .expect_err("the first pick is outside the line's own span");
     assert_invalid(error, "break.pick_outside_span");
     assert_unchanged(&app, before_revision, 1);
 }
 
 #[test]
-fn a_polyline_target_is_the_shared_unsupported_refusal() {
+fn break_f_first_point_override_uses_the_payload_first_point() {
+    // The target ref and `first` are independent: this is the F override shape,
+    // where the first break point is not the entity-pick point.
+    let source = line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 10.0, 0.0), 0);
+    let (mut app, mut session) = app_with(vec![source]);
+    let outcome = break_at(&mut app, &mut session, 1, point(2.0, 0.0), point(7.0, 0.0))
+        .expect("the override first point drives the break");
+    assert_eq!(outcome.objects.len(), 2);
+    let first = entity(&app, 1);
+    match &first.geometry {
+        SemanticGeometry::Line { start, end } => {
+            assert!(near(start.x, 0.0) && near(end.x, 2.0), "{start:?} {end:?}");
+        }
+        other => panic!("expected a LINE, got {other:?}"),
+    }
+    let second = entity(&app, EntityId(outcome.objects[1].0).0);
+    match &second.geometry {
+        SemanticGeometry::Line { start, end } => {
+            assert!(near(start.x, 7.0) && near(end.x, 10.0), "{start:?} {end:?}");
+        }
+        other => panic!("expected a LINE, got {other:?}"),
+    }
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn open_polyline_break_keeps_the_two_complementary_chains() {
     let source = part(
         1,
         SemanticGeometry::Polyline {
-            points: vec![point(0.0, 0.0), point(10.0, 0.0), point(10.0, 5.0)],
+            points: vec![
+                point(0.0, 0.0),
+                point(4.0, 0.0),
+                point(4.0, 4.0),
+                point(0.0, 4.0),
+            ],
             bulges: vec![0.0; 3],
             closed: false,
         },
@@ -475,11 +611,160 @@ fn a_polyline_target_is_the_shared_unsupported_refusal() {
         0,
     );
     let (mut app, mut session) = app_with(vec![source]);
+    let before_count = entity_count(&app);
     let before_revision = revision(&app);
-    let error = break_at(&mut app, &mut session, 1, point(2.0, 0.0), point(8.0, 0.0))
-        .expect_err("LWPOLYLINE is not supported in v1");
-    assert_unsupported(error, "LINE, ARC, CIRCLE or SPLINE");
-    assert_unchanged(&app, before_revision, 1);
+    let outcome = break_at(&mut app, &mut session, 1, point(2.0, 0.0), point(4.0, 2.0))
+        .expect("the open polyline breaks");
+    assert_eq!(outcome.objects.len(), 2);
+    let first = entity(&app, 1);
+    match &first.geometry {
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed: false,
+        } => {
+            assert_eq!(points.len(), 2);
+            assert!(near(points[0].x, 0.0) && near(points[1].x, 2.0));
+            assert_eq!(bulges, &vec![0.0]);
+        }
+        other => panic!("expected the first polyline piece, got {other:?}"),
+    }
+    let second = entity(&app, EntityId(outcome.objects[1].0).0);
+    match &second.geometry {
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed: false,
+        } => {
+            assert_eq!(points.len(), 3);
+            assert!(near(points[0].x, 4.0) && near(points[0].y, 2.0));
+            assert!(near(points[2].x, 0.0) && near(points[2].y, 4.0));
+            assert_eq!(bulges, &vec![0.0, 0.0]);
+        }
+        other => panic!("expected the second polyline piece, got {other:?}"),
+    }
+    assert_eq!(first.object.type_key, "AcDbPolyline");
+    assert_eq!(entity_count(&app), before_count + 1);
+    assert_eq!(revision(&app).0, before_revision.0 + 1);
+    assert_eq!(undo_depth(&app), 1);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("the polyline break is undoable");
+    assert_eq!(entity_count(&app), before_count);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn polyline_break_splits_a_bulged_segment_and_keeps_both_bulges() {
+    let source = part(
+        1,
+        SemanticGeometry::Polyline {
+            points: vec![point(0.0, 0.0), point(4.0, 0.0), point(4.0, 4.0)],
+            bulges: vec![0.5, 0.0],
+            closed: false,
+        },
+        LayerId(0),
+        SpaceId::Model,
+        "AcDbPolyline",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    // The arc midpoint of the first (bulged) segment.
+    let SemanticGeometry::Arc {
+        center,
+        normal,
+        radius,
+        start,
+        sweep,
+    } = cad_geometry::bulge_arc_geometry(point(0.0, 0.0), point(4.0, 0.0), 0.5, p3(0.0, 0.0, 1.0))
+        .expect("the bulged segment resolves")
+    else {
+        panic!("expected an arc");
+    };
+    let (ax, ay, _) = cad_geometry::arbitrary_axis(normal);
+    let angle = start + sweep * 0.5;
+    let midpoint = Point3 {
+        x: center.x + ax.x * radius * angle.cos() + ay.x * radius * angle.sin(),
+        y: center.y + ax.y * radius * angle.cos() + ay.y * radius * angle.sin(),
+        z: center.z + ax.z * radius * angle.cos() + ay.z * radius * angle.sin(),
+    };
+    let outcome = break_at(&mut app, &mut session, 1, midpoint, point(4.0, 2.0))
+        .expect("the bulged polyline breaks");
+    let first = entity(&app, 1);
+    match &first.geometry {
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed: false,
+        } => {
+            assert_eq!(points.len(), 2);
+            assert!(near(points[1].x, midpoint.x) && near(points[1].y, midpoint.y));
+            let half = (4.0 * 0.5_f64.atan() * 0.5 / 4.0).tan();
+            assert!((bulges[0] - half).abs() <= 1e-9, "{}", bulges[0]);
+        }
+        other => panic!("expected the first polyline piece, got {other:?}"),
+    }
+    let second = entity(&app, EntityId(outcome.objects[1].0).0);
+    match &second.geometry {
+        SemanticGeometry::Polyline { points, bulges, .. } => {
+            assert_eq!(points.len(), 2);
+            assert!(near(points[0].x, 4.0) && near(points[0].y, 2.0));
+            assert_eq!(bulges, &vec![0.0]);
+        }
+        other => panic!("expected the second polyline piece, got {other:?}"),
+    }
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn closed_polyline_break_becomes_one_open_polyline_starting_at_the_second_pick() {
+    let source = part(
+        1,
+        SemanticGeometry::Polyline {
+            points: vec![
+                point(0.0, 0.0),
+                point(4.0, 0.0),
+                point(4.0, 4.0),
+                point(0.0, 4.0),
+            ],
+            bulges: vec![0.0; 4],
+            closed: true,
+        },
+        LayerId(0),
+        SpaceId::Model,
+        "AcDbPolyline",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    let before_count = entity_count(&app);
+    let before_revision = revision(&app);
+    let outcome = break_at(&mut app, &mut session, 1, point(4.0, 2.0), point(2.0, 0.0))
+        .expect("the closed polyline breaks");
+    assert_eq!(outcome.objects, vec![ObjectId(1)], "one open piece only");
+    let source = entity(&app, 1);
+    match &source.geometry {
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed: false,
+        } => {
+            assert_eq!(points.len(), 3, "(2,0) -> (4,0) -> (4,2)");
+            assert!(near(points[0].x, 2.0) && near(points[0].y, 0.0));
+            assert!(near(points[1].x, 4.0) && near(points[1].y, 0.0));
+            assert!(near(points[2].x, 4.0) && near(points[2].y, 2.0));
+            assert_eq!(bulges, &vec![0.0, 0.0]);
+        }
+        other => panic!("expected the kept open polyline, got {other:?}"),
+    }
+    assert_eq!(source.object.type_key, "AcDbPolyline");
+    assert_eq!(entity_count(&app), before_count, "no second entity");
+    assert_eq!(revision(&app).0, before_revision.0 + 1);
+    assert_eq!(undo_depth(&app), 1);
 }
 
 #[test]
@@ -566,4 +851,26 @@ fn viewer_mode_refuses_break() {
     );
     assert_eq!(revision(&app), before_revision);
     assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn a_non_planar_bulged_polyline_break_is_refused_by_name() {
+    let source = part(
+        1,
+        SemanticGeometry::Polyline {
+            points: vec![point(0.0, 0.0), point(4.0, 0.0), p3(4.0, 4.0, 1.0)],
+            bulges: vec![0.5, 0.0],
+            closed: false,
+        },
+        LayerId(0),
+        SpaceId::Model,
+        "AcDbPolyline",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    let before_revision = revision(&app);
+    let error = break_at(&mut app, &mut session, 1, point(2.0, 0.0), point(4.0, 2.0))
+        .expect_err("a non-planar bulge has no circular arc");
+    assert_unsupported(error, "break.bulged_segment");
+    assert_unchanged(&app, before_revision, 1);
 }

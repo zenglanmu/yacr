@@ -22,6 +22,45 @@ fn line_is(app: &Application, entity: u128, a: Point3, b: Point3) -> bool {
     (same(start, a) && same(end, b)) || (same(start, b) && same(end, a))
 }
 
+/// The stored entity of one id.
+fn db_entity(app: &Application, entity: u128) -> DbEntity {
+    app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(entity))
+        .unwrap()
+        .clone()
+}
+
+/// The stored geometry of one entity.
+fn stored_geometry(app: &Application, entity: u128) -> SemanticGeometry {
+    app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(entity))
+        .unwrap()
+        .geometry
+        .clone()
+}
+
+/// Wrap a finished drawing in the standard application/session pair.
+fn app_from(drawing: cad_db::DrawingDatabase) -> (Application, SessionState) {
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([7u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
 /// A drawing with two straight lines (ids 1 and 2) on layer 0, a second layer
 /// `5`, and an ARC (id 3) for the wrong-type refusal.
 fn two_line_app(l1: (Point3, Point3), l2: (Point3, Point3)) -> (Application, SessionState) {
@@ -64,23 +103,7 @@ fn two_line_app(l1: (Point3, Point3), l2: (Point3, Point3)) -> (Application, Ses
         2,
     ))
     .unwrap();
-    let drawing = b.finish().unwrap();
-    let mut app = Application::new();
-    app.workspace.documents.insert(
-        DocumentId(1),
-        Document {
-            id: DocumentId(1),
-            drawing: Arc::new(drawing),
-            identity: DocumentIdentity::Sha256([7u8; 32]),
-            units: UnitContext::drawing_units(),
-            resource_keys: Vec::new(),
-        },
-    );
-    app.workspace.viewports.insert(
-        ViewportId(1),
-        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
-    );
-    (app, SessionState::new(DocumentId(1), AppMode::Work))
+    app_from(b.finish().unwrap())
 }
 
 /// An L corner at the origin: L1 the +x axis, L2 the +y axis, both 10 long.
@@ -542,7 +565,7 @@ fn assert_refused(
 }
 
 #[test]
-fn chamfer_and_fillet_refuse_parallel_lines() {
+fn chamfer_refuses_parallel_lines_and_fillet_uses_the_auto_radius() {
     let parallel = || {
         two_line_app(
             (point(0.0, 0.0), point(10.0, 0.0)),
@@ -559,17 +582,35 @@ fn chamfer_and_fillet_refuse_parallel_lines() {
         chamfer(1, 2, point(8.0, 0.0), point(8.0, 5.0)),
         false,
     );
-    // FILLET refuses parallel lines too (AutoCAD auto-adjusts the radius; we
-    // refuse and say so).
+    // FILLET ignores the stored radius for parallel lines and uses half the
+    // perpendicular gap (5 / 2 = 2.5).
     let (mut app, mut session) = parallel();
-    set_number(&mut session, ToolParameter::FilletRadius, 2.0);
-    assert_refused(
+    set_number(&mut session, ToolParameter::FilletRadius, 20.0);
+    let outcome = execute(
         &mut app,
         &mut session,
         CommandId::FilletLines,
-        fillet(1, 2, point(8.0, 0.0), point(8.0, 5.0)),
-        false,
-    );
+        fillet(1, 2, point(8.0, 0.0), point(10.0, 5.0)),
+    )
+    .expect("parallel lines take the auto-radius tangent arc");
+    assert_eq!(outcome.changes.as_ref().unwrap().changes.len(), 3);
+    let arc = db_entity(&app, outcome.objects[2].0);
+    let SemanticGeometry::Arc {
+        center,
+        radius,
+        sweep,
+        ..
+    } = arc.geometry
+    else {
+        panic!("expected the tangent ARC, got {:?}", arc.geometry);
+    };
+    assert!((radius - 2.5).abs() < 1e-9, "effective radius {radius}");
+    assert!((sweep.abs() - std::f64::consts::PI).abs() < 1e-9);
+    // The centre sits on the midline; the pick projections average to x = 9.
+    assert!((center.x - 9.0).abs() < 1e-9 && (center.y - 2.5).abs() < 1e-9);
+    // Both lines are trimmed at their perpendicular feet on the pick side.
+    assert!(line_is(&app, 1, point(0.0, 0.0), point(9.0, 0.0)));
+    assert!(line_is(&app, 2, point(9.0, 5.0), point(10.0, 5.0)));
 }
 
 #[test]
@@ -710,6 +751,228 @@ fn chamfer_and_fillet_refuse_a_missing_active_layer() {
         fillet(1, 2, point(8.0, 0.0), point(0.0, 8.0)),
         false,
     );
+}
+
+/// A drawing with a LINE (entity 1) and a CIRCLE (entity 2) on layer 0.
+fn line_circle_app(
+    line: (Point3, Point3),
+    center: Point3,
+    radius: f64,
+) -> (Application, SessionState) {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(ent(
+        1,
+        SemanticGeometry::Line {
+            start: line.0,
+            end: line.1,
+        },
+        0,
+    ))
+    .unwrap();
+    b.insert_entity(ent(
+        2,
+        SemanticGeometry::Circle {
+            center,
+            normal: p3(0.0, 0.0, 1.0),
+            radius,
+        },
+        0,
+    ))
+    .unwrap();
+    app_from(b.finish().unwrap())
+}
+
+#[test]
+fn chamfer_angle_method_uses_the_documented_derivation() {
+    let (mut app, mut session) = l_corner();
+    session
+        .drafting_extras
+        .corner_modes_mut()
+        .set_chamfer_method(crate::session_state::ChamferMethod::Angle);
+    session
+        .drafting_extras
+        .corner_modes_mut()
+        .set_chamfer_angle_degrees(30.0)
+        .unwrap();
+    set_number(&mut session, ToolParameter::ChamferDistanceA, 2.0);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::ChamferLines,
+        chamfer(1, 2, point(8.0, 0.0), point(0.0, 8.0)),
+    )
+    .expect("the angle method chamfers a perpendicular corner");
+    assert_eq!(outcome.changes.as_ref().unwrap().changes.len(), 3);
+    // d₂ = d·sin α / sin(φ + α) = 2·tan(30°) for φ = 90°.
+    let second = 2.0 * (30.0f64).to_radians().tan();
+    assert!(line_is(&app, 1, point(2.0, 0.0), point(10.0, 0.0)));
+    assert!(
+        line_is(&app, 2, point(0.0, second), point(0.0, 10.0)),
+        "{:?}",
+        line_ends(&app, 2)
+    );
+
+    // Distance 0 + angle 0 is the documented intersect-only form.
+    let (mut app, mut session) = l_corner();
+    session
+        .drafting_extras
+        .corner_modes_mut()
+        .set_chamfer_method(crate::session_state::ChamferMethod::Angle);
+    set_number(&mut session, ToolParameter::ChamferDistanceA, 0.0);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::ChamferLines,
+        chamfer(1, 2, point(8.0, 0.0), point(0.0, 8.0)),
+    )
+    .unwrap();
+    assert_eq!(outcome.changes.as_ref().unwrap().changes.len(), 2);
+    assert!(line_is(&app, 1, point(0.0, 0.0), point(10.0, 0.0)));
+    assert!(line_is(&app, 2, point(0.0, 0.0), point(0.0, 10.0)));
+
+    let modes = session.drafting_extras.corner_modes_mut();
+    for bad in [-1.0, 180.0, f64::NAN] {
+        let error = modes.set_chamfer_angle_degrees(bad).unwrap_err();
+        assert!(
+            error.to_string().contains("chamfer.angle_out_of_range"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn trim_off_leaves_both_objects_and_creates_only_the_join() {
+    // CHAMFER: both lines byte-identical, one inserted LINE.
+    let (mut app, mut session) = l_corner();
+    set_number(&mut session, ToolParameter::ChamferDistanceA, 2.0);
+    set_number(&mut session, ToolParameter::ChamferDistanceB, 5.0);
+    session.drafting_extras.corner_modes_mut().set_trim(false);
+    let first_before = stored_geometry(&app, 1);
+    let second_before = stored_geometry(&app, 2);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::ChamferLines,
+        chamfer(1, 2, point(8.0, 0.0), point(0.0, 8.0)),
+    )
+    .unwrap();
+    assert_eq!(outcome.changes.as_ref().unwrap().changes.len(), 1);
+    assert_eq!(outcome.objects.len(), 1);
+    assert_eq!(stored_geometry(&app, 1), first_before);
+    assert_eq!(stored_geometry(&app, 2), second_before);
+    assert!(line_is(
+        &app,
+        outcome.objects[0].0,
+        point(2.0, 0.0),
+        point(0.0, 5.0)
+    ));
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1);
+
+    let (mut app, mut session) = l_corner();
+    set_number(&mut session, ToolParameter::FilletRadius, 0.0);
+    session.drafting_extras.corner_modes_mut().set_trim(false);
+    assert_refused(
+        &mut app,
+        &mut session,
+        CommandId::FilletLines,
+        fillet(1, 2, point(8.0, 0.0), point(0.0, 8.0)),
+        false,
+    );
+
+    let (mut app, mut session) = l_corner();
+    session.drafting_extras.corner_modes_mut().set_trim(false);
+    assert_refused(
+        &mut app,
+        &mut session,
+        CommandId::ChamferLines,
+        chamfer(1, 2, point(8.0, 0.0), point(0.0, 8.0)),
+        false,
+    );
+}
+
+#[test]
+fn fillet_meets_a_circle_tangentially_and_never_trims_it() {
+    let (mut app, mut session) =
+        line_circle_app((point(0.0, 0.0), point(20.0, 0.0)), point(10.0, 5.0), 3.0);
+    set_number(&mut session, ToolParameter::FilletRadius, 2.0);
+    let circle_before = db_entity(&app, 2);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::FilletLines,
+        fillet(1, 2, point(5.0, 0.0), point(8.0, 3.0)),
+    )
+    .expect("the line-circle fillet is supported");
+    assert_eq!(outcome.changes.as_ref().unwrap().changes.len(), 2);
+    assert_eq!(outcome.objects.len(), 2, "trimmed line + inserted arc");
+
+    let circle_after = db_entity(&app, 2);
+    assert_eq!(circle_after.geometry, circle_before.geometry);
+    assert_eq!(circle_after.object.revision, circle_before.object.revision);
+
+    let arc = db_entity(&app, outcome.objects[1].0);
+    let SemanticGeometry::Arc { center, radius, .. } = arc.geometry else {
+        panic!("expected the tangent ARC, got {:?}", arc.geometry);
+    };
+    assert!((radius - 2.0).abs() < 1e-9);
+    assert!((center.y.abs() - 2.0).abs() < 1e-9, "{center:?}");
+    let gap = ((center.x - 10.0).powi(2) + (center.y - 5.0).powi(2)).sqrt();
+    assert!((gap - 5.0).abs() < 1e-9, "{gap}");
+}
+
+#[test]
+fn negative_radius_and_distance_are_named_refusals() {
+    let (mut app, mut session) = l_corner();
+    session.force_tool_parameter(ToolParameter::FilletRadius, ToolValue::Number(-1.0));
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::FilletLines,
+        fillet(1, 2, point(8.0, 0.0), point(0.0, 8.0)),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("radius_negative"), "{error}");
+
+    let (mut app, mut session) = l_corner();
+    session.force_tool_parameter(ToolParameter::ChamferDistanceA, ToolValue::Number(-1.0));
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::ChamferLines,
+        chamfer(1, 2, point(8.0, 0.0), point(0.0, 8.0)),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("non-negative"), "{error}");
+}
+
+#[test]
+fn repeated_invocations_are_one_undo_step_each() {
+    let (mut app, mut session) = l_corner();
+    set_number(&mut session, ToolParameter::ChamferDistanceA, 1.0);
+    set_number(&mut session, ToolParameter::ChamferDistanceB, 1.0);
+    let payload = || chamfer(1, 2, point(8.0, 0.0), point(0.0, 8.0));
+    for _ in 0..2 {
+        execute(&mut app, &mut session, CommandId::ChamferLines, payload()).unwrap();
+    }
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 2);
+    for _ in 0..2 {
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::Undo,
+            CommandPayload::None,
+        )
+        .unwrap();
+    }
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 0);
+    assert!(line_is(&app, 1, point(0.0, 0.0), point(10.0, 0.0)));
+    assert!(line_is(&app, 2, point(0.0, 0.0), point(0.0, 10.0)));
 }
 
 #[test]

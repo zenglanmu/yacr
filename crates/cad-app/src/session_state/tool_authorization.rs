@@ -77,5 +77,11 @@ pub(crate) fn authorizing_command(parameter: ToolParameter) -> CommandId {
         // DIMROTATED create command, so a Viewer-mode set is refused exactly
         // like every other Work-only parameter.
         ToolParameter::DimRotation => CommandId::DimRotated,
+        // The interactive-shape selectors belong to their own edit command, so a
+        // Viewer-mode set is refused exactly like the parameters above.
+        ToolParameter::AlignPairs => CommandId::AlignEntities,
+        ToolParameter::BreakFirstPoint => CommandId::Break,
+        ToolParameter::DivideUseBlock => CommandId::Divide,
+        ToolParameter::DivideAlignBlock => CommandId::Divide,
     }
 }

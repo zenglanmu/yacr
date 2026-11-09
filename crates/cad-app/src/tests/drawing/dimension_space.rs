@@ -1,18 +1,22 @@
 //! DIMSPACE contract tests (AutoCAD 2026).
 //!
-//! v1 is the **selection-based, always-automatic** form: the first selected
-//! linear dimension is the base, the rest are spaced in pick order at the base
-//! style's `DIMDLI`, and the interactive value prompt is NOT IMPLEMENTED. Pinned
-//! here:
+//! v1 is the **selection-based** form: the first selected dimension is the base,
+//! the rest are spaced in pick order at either twice the base **style text
+//! height** (Auto), an explicit positive spacing, or explicit `0` (align).
+//! The interactive value prompt is replaced by the payload. Pinned here:
 //!
-//! * target `i` moves to `base.location + n̂ · (i · DIMDLI)`, with `n̂` pointing
+//! * target `i` moves to `base.location + n̂ · (i · spacing)`, with `n̂` pointing
 //!   away from the base's measured geometry;
-//! * every target keeps its own origins, rotation, style snapshot and text
-//!   override, and its measurement is unchanged;
-//! * all changed targets land in one transaction / one undo step;
+//! * every target keeps its own origins, subtype/rotation, style snapshot and
+//!   text override, and its measurement is unchanged;
+//! * an explicit spacing value produces exact offsets and all changed targets
+//!   land in one transaction / one undo step;
+//! * an explicit `0` aligns every target on the base dimension line;
+//! * an aligned dimension is accepted as base (direction from its measured
+//!   segment) and as a target (its `Aligned` subtype is preserved);
+//! * angular dimensions are spaced concentrically by arc radius;
 //! * every refusal is named, changes nothing and records no history;
-//! * a run where every target already sits on its row is a `dimspace.unchanged`
-//!   no-op with no transaction;
+//! * a run with no movement is a `dimspace.unchanged` no-op with no transaction;
 //! * Viewer mode refuses the command.
 
 use super::*;
@@ -39,6 +43,14 @@ fn standard_style(dimdli: f64) -> DimensionStyleValues {
 }
 
 fn synthesized(kind: DimensionKind, points: DimensionPoints, dimdli: f64) -> DimensionGeometry {
+    synthesized_with_style(kind, points, standard_style(dimdli))
+}
+
+fn synthesized_with_style(
+    kind: DimensionKind,
+    points: DimensionPoints,
+    style: DimensionStyleValues,
+) -> DimensionGeometry {
     DimensionGeometry::synthesized(
         DimensionDefinition {
             kind,
@@ -48,7 +60,7 @@ fn synthesized(kind: DimensionKind, points: DimensionPoints, dimdli: f64) -> Dim
             normal: p3(0.0, 0.0, 1.0),
         },
         "Standard".to_string(),
-        standard_style(dimdli),
+        style,
         None,
     )
     .expect("the fixture dimension synthesizes")
@@ -91,7 +103,11 @@ fn ent_in_space(id: u128, geometry: SemanticGeometry, order: i64, space: SpaceId
 /// A drawing whose base dimension line is 10 units below its measured segment,
 /// plus two targets at arbitrary dimension lines and one object of every shape
 /// DIMSPACE must refuse.
-fn space_app(dimdli: f64, base_location: Point3) -> (Application, SessionState) {
+fn space_app(
+    dimdli: f64,
+    base_location: Point3,
+    base_text_height: f64,
+) -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -105,15 +121,19 @@ fn space_app(dimdli: f64, base_location: Point3) -> (Application, SessionState) 
         viewports: Vec::new(),
     })
     .unwrap();
+    let mut base_style = standard_style(dimdli);
+    base_style.text_height = base_text_height;
     b.insert_entity(ent(
         BASE_ID,
-        linear_entity(
-            point(0.0, 0.0),
-            point(10.0, 0.0),
-            base_location,
-            0.0,
-            dimdli,
-        ),
+        SemanticGeometry::Dimension(Box::new(synthesized_with_style(
+            DimensionKind::Linear { rotation: 0.0 },
+            DimensionPoints::Linear {
+                first: point(0.0, 0.0),
+                second: point(10.0, 0.0),
+                dimension_line: base_location,
+            },
+            base_style,
+        ))),
         0,
     ))
     .unwrap();
@@ -222,7 +242,7 @@ fn space_app(dimdli: f64, base_location: Point3) -> (Application, SessionState) 
 }
 
 fn default_app() -> (Application, SessionState) {
-    space_app(4.0, point(5.0, -10.0))
+    space_app(4.0, point(5.0, -10.0), 2.5)
 }
 
 fn select(session: &mut SessionState, ids: &[u128]) {
@@ -263,7 +283,7 @@ fn approx(a: f64, b: f64) -> bool {
 }
 
 #[test]
-fn targets_are_spaced_at_repeated_dimdli_away_from_the_measured_geometry() {
+fn targets_are_spaced_at_repeated_base_measurement_away_from_the_measured_geometry() {
     let (mut app, mut session) = default_app();
     select(&mut session, &[BASE_ID, TARGET_A, TARGET_B]);
     let before = revision(&app);
@@ -283,18 +303,94 @@ fn targets_are_spaced_at_repeated_dimdli_away_from_the_measured_geometry() {
         "the success diagnostic names the applied state"
     );
 
-    // Row 1 and row 2, along -Y (the base line is below its geometry), at
-    // `base.location + n̂ · (i · 4)`.
+    // Auto = twice the base dimension's style text height (2 x 2.5 = 5), along
+    // -Y (the base line is below its geometry), at
+    // `base.location + n̂ · (i · 5)`.
     let (first, second, line) = linear_points(&stored(&app, TARGET_A));
     assert_eq!((first, second), (point(20.0, 5.0), point(30.0, 5.0)));
-    assert_eq!(line, point(5.0, -14.0), "target A row 1");
+    assert_eq!(line, point(5.0, -15.0), "target A row 1");
     assert!(approx(stored(&app, TARGET_A).measurement(), 10.0));
     let (first, second, line) = linear_points(&stored(&app, TARGET_B));
     assert_eq!((first, second), (point(40.0, 0.0), point(50.0, 0.0)));
-    assert_eq!(line, point(5.0, -18.0), "target B row 2");
+    assert_eq!(line, point(5.0, -20.0), "target B row 2");
     assert!(approx(stored(&app, TARGET_B).measurement(), 10.0));
     // The base is untouched.
     assert_eq!(linear_points(&stored(&app, BASE_ID)).2, point(5.0, -10.0));
+}
+
+#[test]
+fn explicit_spacing_produces_exact_offsets_in_one_undo_step() {
+    let (mut app, mut session) = default_app();
+    select(&mut session, &[BASE_ID, TARGET_A, TARGET_B]);
+    let before_undo = undo_depth(&app);
+    let before = revision(&app);
+    let out = execute(
+        &mut app,
+        &mut session,
+        CommandId::DimSpace,
+        CommandPayload::DimSpace(Some(2.5)),
+    )
+    .unwrap();
+    assert_eq!(out.objects.len(), 2);
+    assert_eq!(out.changes.as_ref().unwrap().after.0, before.0 + 1);
+    // Explicit 2.5: rows at -12.5 and -15, independent of the style DIMDLI (4).
+    assert_eq!(linear_points(&stored(&app, TARGET_A)).2, point(5.0, -12.5));
+    assert_eq!(linear_points(&stored(&app, TARGET_B)).2, point(5.0, -15.0));
+    assert_eq!(undo_depth(&app), before_undo + 1, "one undo step");
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(linear_points(&stored(&app, TARGET_A)).2, point(25.0, -3.0));
+    assert_eq!(linear_points(&stored(&app, TARGET_B)).2, point(45.0, -20.0));
+}
+
+#[test]
+fn aligned_dimensions_work_as_base_and_keep_their_subtype_as_targets() {
+    // Aligned base: direction 45° from (0,60) -> (10,70), dimension line at
+    // (0,70). Explicit spacing 2 moves target A along the base's away normal.
+    let (mut app, mut session) = default_app();
+    select(&mut session, &[ALIGNED_ID, TARGET_A]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::DimSpace,
+        CommandPayload::DimSpace(Some(2.0)),
+    )
+    .unwrap();
+    let (_, _, line) = linear_points(&stored(&app, TARGET_A));
+    let expected = point(
+        0.0 - 2.0 * (std::f64::consts::FRAC_1_SQRT_2),
+        70.0 + 2.0 * (std::f64::consts::FRAC_1_SQRT_2),
+    );
+    assert!(
+        approx(line.x, expected.x) && approx(line.y, expected.y),
+        "got {line:?}"
+    );
+
+    // Aligned target: subtype and measured points are preserved; only the
+    // dimension line moves down one explicit row.
+    let (mut app, mut session) = default_app();
+    select(&mut session, &[BASE_ID, ALIGNED_ID]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::DimSpace,
+        CommandPayload::DimSpace(Some(2.0)),
+    )
+    .unwrap();
+    let aligned = stored(&app, ALIGNED_ID);
+    assert_eq!(aligned.kind(), DimensionKind::Aligned, "subtype preserved");
+    let (first, second, line) = linear_points(&aligned);
+    assert_eq!((first, second), (point(0.0, 60.0), point(10.0, 70.0)));
+    // The row is measured from the **base** dimension line (5, -10) along the
+    // base's away normal (0, -1), not from the target's old line.
+    assert_eq!(line, point(5.0, -12.0), "aligned target row 1");
+    assert!(approx(aligned.measurement(), 200.0f64.sqrt()));
 }
 
 #[test]
@@ -328,7 +424,8 @@ fn one_transaction_one_undo_step_and_all_targets_restore() {
 
 #[test]
 fn a_target_already_on_its_row_is_a_noop_with_no_transaction() {
-    // Build the two targets exactly at rows 1 and 2 (spacing 4, base at y −10).
+    // Build the two targets exactly at Auto rows 1 and 2 (spacing 5, base at
+    // y −10) — the style DIMDLI 4 is deliberately different and must not be read.
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -353,7 +450,7 @@ fn a_target_already_on_its_row_is_a_noop_with_no_transaction() {
         linear_entity(
             point(20.0, 5.0),
             point(30.0, 5.0),
-            point(5.0, -14.0),
+            point(5.0, -15.0),
             0.0,
             4.0,
         ),
@@ -365,7 +462,7 @@ fn a_target_already_on_its_row_is_a_noop_with_no_transaction() {
         linear_entity(
             point(40.0, 0.0),
             point(50.0, 0.0),
-            point(5.0, -18.0),
+            point(5.0, -20.0),
             0.0,
             4.0,
         ),
@@ -417,7 +514,6 @@ fn refusals_are_named_and_change_nothing() {
 
     let cases: Vec<(Vec<u128>, &str)> = vec![
         (vec![BASE_ID], "dimspace.selection"),
-        (vec![BASE_ID, ALIGNED_ID], "dimspace.kind"),
         (vec![BASE_ID, RADIAL_ID], "dimspace.kind"),
         (vec![BASE_ID, LINE_ID], "dimspace.not_dimension"),
         (vec![BASE_ID, PAPER_ID], "dimspace.space"),
@@ -455,16 +551,17 @@ fn refusals_are_named_and_change_nothing() {
 }
 
 #[test]
-fn bad_spacing_and_an_undecidable_normal_are_refused() {
-    // DIMDLI = 0 would stack every target on the base line.
-    let (mut app, mut session) = space_app(0.0, point(5.0, -10.0));
+fn bad_explicit_spacing_and_an_undecidable_normal_are_refused() {
+    // A negative explicit spacing is refused by name; 0 is the align form (see
+    // `explicit_zero_aligns_every_target_on_the_base_dimension_line`).
+    let (mut app, mut session) = default_app();
     select(&mut session, &[BASE_ID, TARGET_A]);
     let before = revision(&app);
     let error = execute(
         &mut app,
         &mut session,
         CommandId::DimSpace,
-        CommandPayload::None,
+        CommandPayload::DimSpace(Some(-1.0)),
     )
     .unwrap_err();
     assert!(
@@ -474,7 +571,7 @@ fn bad_spacing_and_an_undecidable_normal_are_refused() {
     assert_eq!(revision(&app), before);
 
     // A base dimension line on its measured segment leaves the side undecidable.
-    let (mut app, mut session) = space_app(4.0, point(5.0, 0.0));
+    let (mut app, mut session) = space_app(4.0, point(5.0, 0.0), 2.5);
     select(&mut session, &[BASE_ID, TARGET_A]);
     let before = revision(&app);
     let error = execute(
@@ -489,6 +586,193 @@ fn bad_spacing_and_an_undecidable_normal_are_refused() {
         "{error:?}"
     );
     assert_eq!(revision(&app), before);
+}
+
+#[test]
+fn auto_uses_the_style_text_height_not_the_zero_measurement() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(ent(
+        BASE_ID,
+        linear_entity(
+            point(5.0, 0.0),
+            point(5.0, 0.0),
+            point(5.0, -10.0),
+            0.0,
+            4.0,
+        ),
+        0,
+    ))
+    .unwrap();
+    b.insert_entity(ent(
+        TARGET_A,
+        linear_entity(
+            point(20.0, 5.0),
+            point(30.0, 5.0),
+            point(25.0, -3.0),
+            0.0,
+            4.0,
+        ),
+        1,
+    ))
+    .unwrap();
+    let mut style = cad_db::DimStyle::standard_metric(DimStyleId(0));
+    style.dim_line_increment = 4.0;
+    b.insert_dim_style(style).unwrap();
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([7u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+
+    let before = revision(&app);
+    select(&mut session, &[BASE_ID, TARGET_A]);
+    let out = execute(
+        &mut app,
+        &mut session,
+        CommandId::DimSpace,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(
+        out.changes.as_ref().expect("a transaction").after.0,
+        before.0 + 1
+    );
+    // Auto is 2 x 2.5 = 5 even though the base measures zero.
+    assert_eq!(linear_points(&stored(&app, TARGET_A)).2, point(5.0, -15.0));
+    assert_eq!(out.diagnostics[0].code, "dimspace.applied");
+}
+
+#[test]
+fn explicit_zero_aligns_every_target_on_the_base_dimension_line() {
+    let (mut app, mut session) = default_app();
+    select(&mut session, &[BASE_ID, TARGET_A, TARGET_B]);
+    let before_undo = undo_depth(&app);
+    let out = execute(
+        &mut app,
+        &mut session,
+        CommandId::DimSpace,
+        CommandPayload::DimSpace(Some(0.0)),
+    )
+    .unwrap();
+    assert_eq!(out.objects.len(), 2);
+    assert_eq!(linear_points(&stored(&app, TARGET_A)).2, point(5.0, -10.0));
+    assert_eq!(linear_points(&stored(&app, TARGET_B)).2, point(5.0, -10.0));
+    assert_eq!(undo_depth(&app), before_undo + 1, "one undo step");
+    assert!(
+        out.diagnostics[0].message.contains("aligned"),
+        "{}",
+        out.diagnostics[0].message
+    );
+}
+
+#[test]
+fn auto_refuses_a_base_style_without_a_positive_text_height() {
+    let (mut app, mut session) = space_app(4.0, point(5.0, -10.0), 0.0);
+    select(&mut session, &[BASE_ID, TARGET_A]);
+    let before = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::DimSpace,
+        CommandPayload::None,
+    )
+    .unwrap_err();
+    assert!(
+        format!("{error:?}").contains("dimspace.style_height"),
+        "{error:?}"
+    );
+    assert_eq!(revision(&app), before);
+}
+
+#[test]
+fn angular_dimensions_are_spaced_concentrically() {
+    const ANGULAR_BASE: u128 = 708;
+    const ANGULAR_TARGET: u128 = 709;
+
+    let angular = |id: u128, arc_point: Point3, order: i64| {
+        ent_in_space(
+            id,
+            SemanticGeometry::Dimension(Box::new(synthesized(
+                DimensionKind::Angular3Pt,
+                DimensionPoints::Angular3Pt {
+                    vertex: point(0.0, 0.0),
+                    first: point(10.0, 0.0),
+                    second: point(0.0, 10.0),
+                    arc_point,
+                },
+                4.0,
+            ))),
+            order,
+            SpaceId::Model,
+        )
+    };
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(angular(ANGULAR_BASE, point(3.5, 3.5), 0))
+        .unwrap();
+    b.insert_entity(angular(ANGULAR_TARGET, point(1.0, 1.0), 1))
+        .unwrap();
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([7u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+    select(&mut session, &[ANGULAR_BASE, ANGULAR_TARGET]);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::DimSpace,
+        CommandPayload::DimSpace(Some(2.0)),
+    )
+    .unwrap();
+
+    let base_radius = (3.5f64 * 3.5 + 3.5 * 3.5).sqrt();
+    let stored = stored(&app, ANGULAR_TARGET);
+    let DimensionPoints::Angular3Pt { arc_point, .. } = &stored.definition().points else {
+        panic!("expected Angular3Pt points");
+    };
+    let radius = arc_point.x.hypot(arc_point.y);
+    assert!(
+        approx(radius, base_radius + 2.0),
+        "target radius {radius} must be base {base_radius} + 2"
+    );
+    // The target's own radial direction is preserved.
+    assert!(
+        approx(arc_point.x, arc_point.y),
+        "direction stays 45 degrees: {arc_point:?}"
+    );
 }
 
 #[test]

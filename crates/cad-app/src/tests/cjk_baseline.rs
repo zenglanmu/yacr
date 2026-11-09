@@ -21,8 +21,6 @@ use std::path::{Path, PathBuf};
 /// prefer routing new user-visible copy through the i18n catalog. The point is to
 /// make any growth a conscious edit instead of an unnoticed one.
 const CJK_BASELINE: &[&str] = &[
-    "OFFSET：圆偏移，新半径 {distance:.4}",
-    "OFFSET：直线沿拾取侧偏移 {distance:.4}",
     "TRIM：目标完全位于边界内，整段删除",
     "{}：已选 {} 点",
     "{}：已选 {} 点，可确认",

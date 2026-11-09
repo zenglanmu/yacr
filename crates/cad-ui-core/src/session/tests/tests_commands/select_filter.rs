@@ -9,8 +9,9 @@
 //! which is exactly the proof that the line reached the application layer.
 
 use super::super::super::commands::{
-    invalid_filter_argument_reason, invalid_find_argument_reason, invalid_getsel_argument_reason,
-    parse_find_argument, parse_property_filter,
+    invalid_audit_argument_reason, invalid_filter_argument_reason, invalid_find_argument_reason,
+    invalid_getsel_argument_reason, invalid_ssx_argument_reason, parse_audit_argument,
+    parse_find_argument, parse_property_filter, parse_ssx_argument,
 };
 use super::super::super::*;
 use super::super::test_support::*;
@@ -70,11 +71,14 @@ fn filter_grammar_is_property_plus_trimmed_value() {
     );
     // A bare selector keeps the name-only funnel (the application refuses it).
     assert_eq!(typed_command_argument("QSELECT"), None);
+    // SSX and AUDIT are argument-taking selectors (bare forms stay name-only).
+    assert_eq!(typed_command_argument("SSX 1"), Some(("SSX", "1")));
     assert_eq!(
-        typed_command_argument("SSX 1"),
-        None,
-        "SSX takes no argument"
+        typed_command_argument("SSX BLOCK CHAIR"),
+        Some(("SSX", "BLOCK CHAIR"))
     );
+    assert_eq!(typed_command_argument("AUDIT YES"), Some(("AUDIT", "YES")));
+    assert_eq!(typed_command_argument("AUDIT"), None);
 
     assert_eq!(
         parse_property_filter("TYPE AcDbLine"),
@@ -179,4 +183,88 @@ fn well_formed_lines_reach_the_application_and_refusals_stay_local() {
     assert!(error.contains("LAYER|TYPE"), "{error}");
     let error = session.command("-FIND a => b").unwrap_err();
     assert!(error.contains("never replaces"), "{error}");
+}
+
+#[test]
+fn ssx_and_audit_typed_grammars() {
+    use cad_app::{SsxCriterion, SsxCriterionKind, SsxRequest};
+
+    assert_eq!(
+        parse_ssx_argument("BLOCK CHAIR"),
+        Some(SsxRequest::Set(SsxCriterion::Block("CHAIR".into())))
+    );
+    assert_eq!(
+        parse_ssx_argument("layer My Wall"),
+        Some(SsxRequest::Set(SsxCriterion::Layer("My Wall".into())))
+    );
+    assert_eq!(
+        parse_ssx_argument("COLOR 1"),
+        Some(SsxRequest::Set(SsxCriterion::Color("1".into())))
+    );
+    assert_eq!(
+        parse_ssx_argument("ENTITY CIRCLE"),
+        Some(SsxRequest::Set(SsxCriterion::Entity("CIRCLE".into())))
+    );
+    assert_eq!(
+        parse_ssx_argument("FLAG"),
+        Some(SsxRequest::Set(SsxCriterion::Flag))
+    );
+    assert_eq!(
+        parse_ssx_argument("LTYPE DASHED"),
+        Some(SsxRequest::Set(SsxCriterion::LType("DASHED".into())))
+    );
+    assert_eq!(
+        parse_ssx_argument("STYLE Note"),
+        Some(SsxRequest::Set(SsxCriterion::Style("Note".into())))
+    );
+    assert_eq!(
+        parse_ssx_argument("THICKNESS 2.5"),
+        Some(SsxRequest::Set(SsxCriterion::Thickness(2.5)))
+    );
+    assert_eq!(
+        parse_ssx_argument("VECTOR 0 0 1"),
+        Some(SsxRequest::Set(SsxCriterion::Vector(cad_domain::Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        })))
+    );
+    assert_eq!(parse_ssx_argument("PICK"), Some(SsxRequest::Pick));
+    assert_eq!(
+        parse_ssx_argument("CLEAR LAYER"),
+        Some(SsxRequest::Clear(SsxCriterionKind::Layer))
+    );
+
+    for refused in [
+        "",
+        "BLOCK",
+        "FLAG x",
+        "THICKNESS abc",
+        "THICKNESS NaN",
+        "VECTOR 1 2",
+        "VECTOR 1 2 3 4",
+        "CLEAR",
+        "CLEAR NOPE",
+        "NOPE 1",
+    ] {
+        assert_eq!(parse_ssx_argument(refused), None, "{refused:?}");
+    }
+    let reason = invalid_ssx_argument_reason("SSX NOPE 1");
+    assert!(reason.contains("BLOCK|COLOR|ENTITY|FLAG|LAYER"), "{reason}");
+
+    for (line, fix, log) in [
+        ("YES", true, false),
+        ("y", true, false),
+        ("NO", false, false),
+        ("n", false, false),
+        ("LOG", false, true),
+    ] {
+        let request = parse_audit_argument(line).expect(line);
+        assert_eq!((request.fix, request.auditctl_log), (fix, log), "{line}");
+    }
+    for refused in ["", "MAYBE", "YES LOG"] {
+        assert_eq!(parse_audit_argument(refused), None, "{refused:?}");
+    }
+    let reason = invalid_audit_argument_reason("AUDIT MAYBE");
+    assert!(reason.contains("YES"), "{reason}");
 }

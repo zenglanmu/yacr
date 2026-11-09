@@ -196,10 +196,13 @@ fn the_bare_batch_selectors_are_admitted_and_work_only() {
         assert!(id.requires_work_mode(), "{selector} writes the drawing");
         assert_eq!(command_name(id), Some(selector));
     }
-    // TEXTMASK/TEXTUNMASK take no argument: they never enter the typed grammar.
-    for selector in ["TEXTMASK", "TEXTUNMASK"] {
-        assert_eq!(typed_command_argument(&format!("{selector} 1")), None);
-    }
+    // TEXTMASK takes the P3 option line; TEXTUNMASK takes no argument.
+    assert_eq!(
+        typed_command_argument("TEXTMASK OFFSET 0.5"),
+        Some(("TEXTMASK", "OFFSET 0.5"))
+    );
+    assert_eq!(typed_command_argument("TEXTMASK"), None);
+    assert_eq!(typed_command_argument("TEXTUNMASK 1"), None);
 }
 
 #[test]

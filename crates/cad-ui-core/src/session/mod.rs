@@ -38,6 +38,7 @@ mod layers;
 mod layout_arguments;
 mod layout_tabs;
 mod measuregeom;
+mod payload_options;
 mod pedit;
 mod performance;
 pub mod plugins;
@@ -77,7 +78,6 @@ use self::diagnostics::{
     cad_error_text, camera_status, request_error_text, resource_diagnostic_text,
     resource_keys_error, status_error,
 };
-// `plan_input` is re-exported for the intra-doc link and sibling tests.
 #[allow(unused_imports)]
 use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
 use self::status::{assemble_status, cad_tool, document_capabilities};

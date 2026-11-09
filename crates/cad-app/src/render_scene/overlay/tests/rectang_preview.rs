@@ -19,6 +19,7 @@ fn rectang_preview_draws_the_closed_outline_between_the_two_corners() {
         candidate: None,
         remaining: 1,
         selection_count: 0,
+        point_target: None,
         ready: false,
         polygon_sides: None,
         awaiting_text: false,

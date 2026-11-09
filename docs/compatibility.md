@@ -257,14 +257,14 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 |---|---|---|
 | LINE / CIRCLE / ARC | 创建（点捕获或几何直通）；`CIRCLE 2P`/`CIRCLE 3P`/`CIRCLE D`（2026-11-01，多词 canonical）分别按直径两端点、三点外接圆、圆心+直径距离创建一个 `Circle` | 退化/共线/非有限输入显式拒绝；`CIRCLE D` 的拾取距离是**直径**，半径 = 距离/2 |
 | XLINE / RAY | 创建有界构造线：两点 → 有限 `Line`（type-key `AcDbXline`/`AcDbRay`），裁到模型包围盒（外扩 5%/至少 1.0）或默认 1000 盒；一条事务/一步撤销 | **不是无限几何**；方向退化/出界/非有限点按名拒绝；导出写 `LINE`（`Converted`）；无 3D/OCS 版本 |
-| INSERT | 创建块参照（**点-后-名**：先拾取插入点，再输入**本图已有块**的名称；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`，活动图层/模型空间，一条事务/一步撤销） | **无块表写入**（只读块定义 + 名称/基点元数据）；无块选择器/palette、比例/旋转/属性值/动态块参数；未知名称/缺元数据/空名/换行/非有限点按名拒绝；`WBLOCK` 仍缺（`PASTEBLOCK` 已实现 v1） |
+| INSERT | 创建块参照（**点-后-名**：先拾取插入点，再输入**本图已有块**的名称；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`，活动图层/模型空间，一条事务/一步撤销） | **无块表写入**（只读块定义 + 名称/基点元数据）；无块选择器/palette、比例/旋转/属性值/动态块参数；未知名称/缺元数据/空名/换行/非有限点按名拒绝；`WBLOCK` 为具名拒绝（未实现单文件写出；`PASTEBLOCK` 已实现 v1） |
 | BLOCK | **选择 → 基点 → 名称**（终端文本）：选中模型空间顶层实体写入新块定义并移入 `SpaceId::Block`，几何**逐位保留**、只改空间；元数据存基点；参照为 identity `T(基点)·T(−基点)`，后续 `INSERT` 仍按 `T(I)·T(−基点)`；一条事务/一步撤销，块级 undo 补丁 | 无 ATTDEF/ATTRIB、动态块参数、retain/delete 选择、块选择器；重名（精确/ASCII 大小写不敏感）、实例路径/子元素、图纸空间/块成员、空/换行/非法名称、非有限基点、锁定图层按名拒绝 |
 | MOVE | 平移选择（折叠重复 ref） | 不可变换几何整条拒绝，不静默丢弃。**`SPLINE` 自 2026-10-26 起可平移**：NURBS 曲线是**仿射不变**的（映射每个控制点、`degree`/`knots`/`weights` 逐字复制 = 曲线的精确仿射像），`cad-db` 的 `transform_geometry` 不再按种类拒绝样条 |
 | COPY | 复制（新 id） | 同上（含 `SPLINE` 可变换）；按对象样式覆盖无法复制时记 `drawing.copy.style`（副本继承图层样式） |
 | ERASE | 删除选择 | 空选择拒绝；撤销恢复渲染属性与动态可见性成员 |
-| BREAK | 两点打断（**第一次拾取实体同时是第一断点**，第二点确定移除区间）；`LINE`/`ARC`/`CIRCLE`/`SPLINE` 走同一 `TargetCurve` 精确子曲线；`CIRCLE` 变 `ARC`（补集），源实体保留为第一段、第二段新 id，一条事务/一步撤销 | **Polyline 按名拒绝**；两点同参数（`break.zero_span`）/整条曲线（`break.whole_curve`）/拾取投影出界（`break.pick_outside_span`）/块成员/非模型空间 ⇒ 具名拒绝；**无 `F` 第一点覆盖、无多段打断** |
-| DIVIDE | **选择式**：恰好 1 条 `LINE`/`ARC`/`CIRCLE`/**直线段** `LWPOLYLINE`，按**等弧长**放 `POINT`；开放曲线 `N−1` 个、闭合曲线 `N` 个（含起始参数）；`divideSegments` 2–1024；源保留、一条事务/一步撤销 | `SPLINE`/椭圆/含 bulge 折线（`divide.bulged_segment`）/非有限或零长/选择数≠1 ⇒ 具名拒绝；POINT 落在**活动图层**，**不**分割源实体 |
-| LENGTHEN | **选择式**：恰好 1 条 `LINE`/`ARC`；`lengthenMode` `0` Delta / `1` Percent / `2` Total + `lengthenValue`，改**末端**长度（`LINE` 的 end、`ARC` 的 sweep）；实体 id/图层/空间/draw order/`type_key` 保留；一条事务/一步撤销 | `CIRCLE`/`LWPOLYLINE`/`SPLINE`/其它、非正新长度（`lengthen.non_positive`）、ARC 超过一整圈（`lengthen.sweep_overflow`）、选择数≠1 ⇒ 具名拒绝；**只改末端、无逐端拾取**（v1 偏离） |
+| BREAK | **实现** | 两断点 + `F` 首点覆盖；`LINE`/`ARC`/`CIRCLE`/`SPLINE`/`LWPOLYLINE`/整椭圆走精确子曲线；第二点可离对象并投影到曲线；`CIRCLE`→`ARC`（补集）；源保留为第一段、第二段新 id；一条事务/一步撤销 | 部分椭圆弧打断未在 AutoCAD 文档中列出 ⇒ 具名 `break.elliptical_arc_unsupported`；无多段打断（AutoCAD 亦无此模式）；块成员/非模型空间按名拒绝 |
+| DIVIDE | **实现** | 选择式：`LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`/含 bulge `LWPOLYLINE` 按等弧长放 `POINT`；开放 N−1、闭合 N；块选项 `divideUseBlock` + `divideAlignBlock`（Align=Yes 按局部切线旋转，比例 1）；源保留，一条事务/一步撤销 | 非有限/零长/选择数≠1 按名拒绝；POINT 落活动图层，不分割源实体 |
+| LENGTHEN | 部分实现 | `DE`/`PER`/`TOT` 从**靠近拾取点**的端点改长度（正延长、负裁剪）；`DY` 拖一端；支持 `LINE`/`ARC`/开放 `LWPOLYLINE`/椭圆弧/开放 `SPLINE`；一条事务/一步撤销 | 开放样条**延长**未实现（`lengthen.spline_extend_unsupported`）；闭合对象按名拒绝（`lengthen.closed`） |
 | SCALETEXT | **选择式**：一个或多个 `TEXT`/`MTEXT`；`scaleTextFactor` 有限 **> 0** 缩放字高，MTEXT 的 `wrap_width: Some(w)` 同步；`1.0` 为具名 no-op；位置/旋转/对齐/样式逐位保留；一条事务/一步撤销 | 混合/非文本整命令拒绝（不部分写入）；无 `Height`/`Matches` 子选项、无逐实体高度输入；通道只拒绝 ≤0/非有限，`1.0` 由命令层拒绝 |
 | TORIENT | **选择式**（Express 工具）：裸命令 Most Readable，把每个 Text/MText 的 `rotation` 按 180° 步进归一到 `(-π/2, π/2]`；`TORIENT <angle-degrees>` 设为绝对旋转（有限十进制，可带符号）；只改 rotation，位置/字高/内容/样式/对齐/层/空间/绘制顺序逐位保留；一条事务/一步撤销 | 非 Text（含 MULTILEADER、INSERT 属性、标注文字）逐条 `torient.not_reset`，不整体失败；无变化 ⇒ `torient.unchanged` 且不开事务；属性定义/块属性未建模 |
 | TCASE | **选择式**（Express 工具）：裸命令 Title（文档化默认），`TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE`（或 `U/L/T/S/G`）显式选择；只改可见字符，MTEXT 格式转义（`\P`、`\f…;`、`\H…;`、`\C…;`、`{}`、`\~`、`\\`）逐字保留；MULTILEADER 文本走 `with_text`；一条事务/一步撤销 | 属性/标注文字未建模 ⇒ `tcase.not_reset`；无变化 ⇒ `tcase.unchanged` 且不开事务；非文本不整体失败 |
@@ -275,14 +275,84 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | MIRROR | 镜像（**保留原件**，新增副本）：含 `Arc` 与 `Ellipse`（**含椭圆弧**，2026-10-26 起） | 反射的 `normal' = −R(normal)`，弧的 `start` 由镜像后的起点在新帧中**重新求角**、`sweep` **符号保留**（负法向已把帧的重手性翻正；若同时取反 sweep，端点映射不成立——两种写法都验证过）。椭圆：圆心/长轴向量反射、`ratio` 与参数保留。仍拒绝 `Text`/`Shape`/`Opaque`/`MultiLeader`：`Text` 只镜像拒绝（平面文字无法表达真反射），`MultiLeader` 拒绝一切缩放 |
 | OFFSET | LINE / CIRCLE / **ARC** / **LWPOLYLINE**（直线段自 2026-10-26、**含弧段自 2026-10-28**；ARC 自 2026-10-27）偏移 | 折线整条**同一侧**、常数距离（拾取点在最近段上的 `m = cross(n,u)` 位移；弧段沿同一 `m` **径向**量）。**弧段同心偏移**：`R' = R − s·sign(sweep)`（圆心不变；`R' <= tol` ⇒ `offset.arc_collapsed`，**不删除、不与邻居混合**）。**接点**：line/line 用钉住的 miter；line/circle 与 circle/circle 取**离源顶点最近**的解析交点（0 个或两个等距 ⇒ `offset.join_failed`；**相切按闭式**判定，不会被浮点判别式抖成失败）；弧的 `start`/`sweep` 由接点重新导出并过 `bulge_arc_geometry` 回验（`offset.arc_mismatch`）。**闭合环一趟**（含 wrap 角）；开口折线的弧端**不封口**。按名拒绝：`offset.arc_collapsed`、`offset.join_failed`、`offset.ambiguous_plane`（全弦共线却带 bulge，平面不可定）、`offset.arc_mismatch`、`offset.bulge_segment`（**只剩**非有限或不可构造的 bulge）、`offset.collapsed`（顶点处近 180° 反折或偏移段塌缩/归零）、`offset.non_planar`（顶点偏离自身平面）；退化段/点数 < 2/非有限顶点/闭合零面积/拾取点落在折线上 ⇒ `InvalidInput`。**ARC 与 CIRCLE 共用同一距离模型**（新半径 = `\|拾取点 − 圆心\|` 的**3D** 距离：拾取点在圆外则放大、在圆内则缩小；`center`/`normal`/`start`/`sweep` **逐位保留**，顺时针 sweep 仍为**负**，只有半径变，因此偏移弧覆盖同一角跨）；退化存储半径/拾取点落在圆心/拾取点落在该弧自身圆上（零偏移）⇒ 按名 `InvalidInput`，不创建、不改状态、不记撤销步。**`ELLIPSE` 单独按名拒绝**（椭圆的等距偏移**不是**椭圆，不拿近似冒充）；其余几何（SPLINE/INSERT/…）走通用 `Unsupported`（串中点名 `LINE, CIRCLE, ARC and straight-segment LWPOLYLINE`——**含弧段折线已支持，这串措辞尚未更新**）。**声明的偏差**：**不做** AutoCAD 的弧段删除与邻居重接（半径耗尽即 `offset.arc_collapsed`）；**无全局自交修剪**（只在顶点处检测局部塌缩，远端偏移段之间的自交**未检查**）；**2 顶点（纯弧）或全弦共线的带 bulge 折线** ⇒ `offset.ambiguous_plane`；弧的修剪允许**增长**，上限 `\|new\| <= \|old\| + π`（外凸 miter 会延长弧；严格的 `+tol` 上限会拒绝合法的外偏） |
 | COPYCLIP / CUTCLIP / COPYBASE / CUTBASE / PASTECLIP / PASTEORIG | **应用内**剪贴板：两个捕获形状 + 两个粘贴形状（2026-10-28） | 非 OS 剪贴板；替换文档清空；空选择/空剪贴板拒绝。**捕获**：`COPYCLIP` 只读（0 事务，Viewer 可用）、`CUTCLIP` 捕获 + 一次事务删除（一步撤销）；两者**不记基点**（`clipboard_base = None`，陈旧基点不会改写它们）。`COPYBASE`（只读、Viewer 可用）/`CUTBASE`（work-only）在**预选择**之上再抓**一个基点**并存进剪贴板元数据；`CUTBASE` 是**先删除成功、再提交剪贴板与基点**，失败的剪切不毁旧剪贴板。**粘贴**：`PASTECLIP` 是**单点插入点工具**，`delta = 插入点 − 基点`（`base = clipboard_base.unwrap_or(世界原点)`），复用 COPY 的同一个 `cad_db::transform_geometry`——**不再是原坐标粘贴**；`PASTEORIG` 是显式**原坐标**粘贴（忽略基点，等价改动前的 `PASTECLIP`）。两者都是新 id + 一条事务/一步撤销，几何不可平移时**在开事务前整命令拒绝**。**`PASTEBLOCK` 已实现 v1（2026-11-01，`Ctrl+Shift+V`）**：应用内剪贴板 → 自动命名 `PasteBlockN` 块 + 一个插入点参照；成员为新 id 克隆、保持原坐标与显示属性；基点 = `clipboard_base` 或世界原点；一条事务/一步撤销；剪贴板不清空、成功后选中新参照；块成员/图纸空间条目按名拒绝。**不是** OS 剪贴板，也不写 `*U` 匿名块 |
-| MATCHPROP（别名 `MA`） | **选择式**特性匹配（AutoCAD 特性刷的文档化变体）：当前选择按**选择顺序**（用户的拾取顺序，**从不**按 id/handle 重排）取**第一个**实体为**源**，其余每个选中实体为**目标**。转移的属性**恰好**是属性写路径支持的五项显示属性：`layer`、`color`、`linetype`、`lineweight`、`transparency`（语法与 `SETENTITYPROPERTY` 同一份，不复制第二套解析）。源/目标**类型可以不同**（只要每个值对目标合法）。目标已与源一致 ⇒ 该目标不产生变更、不进撤销补丁；全部目标都一致 ⇒ 显式 `matchprop.unchanged` 完成，**不**开事务、**不**产生空撤销步；否则一条事务、一步撤销 | **开始改写前**全部拒绝（零 DB 变更、零撤销步）：选择少于两个实体（`matchprop.needs_two`）；源**或**目标引用是块实例成员（instance path）/子图元/属于其它文档/不存在（`property.not_addressable`/`property.target_missing`，与属性写路径同一规则）；源值的存储形式无法用写语法表达、或语法拒绝该值（如 `ByBlock` 透明度、无名显式线型）⇒ `matchprop.source_value`，**点名**源实体与属性并保留解析器自己的 `property.*` 码。**明确不转移**（绝不静默近似）：MATCHPROP 的 **Settings 子集**（选择“复制哪些属性”）未实现（总是转移全部五项）；非显示属性——文字样式/字高、标注样式、填充图案等一律**不**转移；实体自身的**线型比例**不在五项之内，给名线型目标只在目标上保留**目标自己的**比例（与属性写路径一致），符号值（`ByLayer`/`ByBlock`）整值替换 |
+| MATCHPROP（别名 `MA`） | **实现** | 选择式：首个选中为源；Basic 六项（layer/color/linetype/lineweight/transparency/linetype scale）+ Settings 子集；Special 组按目标类：Text→文字样式+字体、Dimension→标注样式、Hatch→填充样式/图案/渐变；一条事务/一步撤销 | 字高、标注覆盖值、填充原点**不**复制（与 AutoCAD 一致）；plot style/thickness 未建模（全局范围）；异类目标跳过该组并报告 |
 | REVCLOUD | **对象模式 v1（2026-11-07）**：恰好 1 条选中的**闭合、全直线段** LWPOLYLINE；每条边换成一段**向外**弧（bulge 幅度 `0.5`，sweep ≈ 106.26°；CCW 环 `+0.5`、CW `-0.5`），实体**原地重写**、一条事务/一步撤销 | 开放折线/已有 bulge/非折线/`+Z` 外/非有限/零面积/多选或空选 ⇒ 具名拒绝；**无**矩形/多边形交互绘制、无 `Arc length` 参数、无对象拾取模式；不是 AutoCAD 的全功能 REVCLOUD |
-| SELECTSIMILAR | **v1 仅按几何类型（2026-11-07）**：把可见模型空间中与当前选择**同 `SemanticGeometry` 变体**的拾取项**并入**现有选择（保留顺序，不替换）；复用 `SELECTALL` 的可见目录与预检 | **无** layer/颜色/线型/线宽/透明度属性匹配、无 Settings 子集；仅模型空间；空选择按名拒绝；只读（无写/历史/revision） |
+| SELECTSIMILAR | **实现** | 对象类型强制；默认**图层+类型**；Color/Linetype/Lineweight/Name/Object style 独立开关；`Name` 按根块参照名匹配展开成员；模型/图纸空间各自匹配；只读 | 透明不参与（AutoCAD 亦不参与）；块定义不是图形对象；空选择/跨空间种子按名拒绝 |
 | MODEL | **payload-free（2026-11-07）**：等价于 `SPACE MODEL`，复用同一校验 + 自动取景；会话状态 only，无数据库写/历史/revision；Model 标签页直接派发 `MODEL` | 只切**已存在的模型空间**；不是第二套空间状态；图纸标签仍走 `SPACE #<id>` |
 | PLAN | **Top/plan 2D 视图（2026-11-07）**：payload-free，等价于 `StandardView::Top`；已在 2D 时是具名 no-op，不记 `ZOOM PREVIOUS` | **无** UCS/World/Current 选项（本构建无 UCS 模型）；不是任意 UCS 平面视图 |
 | AUDIT | **只检测（2026-11-07）**：逐实体调用 `cad_db::validate_entity`，输出 `audit.clean` 或 `audit.summary` + 每个 `audit.invalid_entity`；只读，无事务/历史/revision | **不修复**（AutoCAD 的「corrects some errors」未实现）；不删除、不改写任何实体；只覆盖实体级校验，不是完整 DWG 修复器 |
 | JOIN | 合并当前选择为**一个**实体：共线且首尾相接/重叠的 `LINE` → 一条 `LINE`；同圆心/法向/半径且扫掠相续的 `ARC` → 一条 `ARC` | 一条事务、**一步撤销**，全有或全无（先全部校验，再删除 N + 插入 1）。**仅 LINE 与 ARC**：折线/样条/圆、需要桥接空隙、跨图层/跨空间、非同心弧、块内成员 ⇒ 显式拒绝（`join.needs_two`/`join.mixed_kinds`/`join.not_collinear`/`join.not_contiguous`/`join.layer_mismatch`/`join.space_mismatch`/`join.sweep_overflow`/`join.degenerate`）。合并 `LINE` 的端点按 `(x,y,z)` 升序归一（同一批拾取总得同一几何）；`draw_order` 取源最小值（原位替换，不跳到最上层）；扫掠和恰为一整圈时**保留 `2π` ARC**，不静默转成 `CIRCLE`；反向法向的弧按「不相续」拒绝而非重新推导 |
 
+| QTEXT | **会话令牌 v1（2026-11-09）**：`QTEXT` payload-free，翻转 `SessionState::drafting_extras.qtext`；会话状态 only，无事务/修订/历史，Viewer-legal | 渲染器**不消费**该标志：文字仍按几何绘制、无占位框、不切换绘图输出；`qtext.toggled` 明说「NOT IMPLEMENTED / 无视觉效果」 | 近似实现：仅命令路径/状态 |
+| FILL | **会话令牌 v1（2026-11-09）**：翻转 `fill`（默认 ON）；会话状态 only，Viewer-legal | 渲染器不按该标志切换填充/宽线显示；无视觉变化 | 近似实现：仅命令路径/状态 |
+| TFRAMES | **会话令牌 v1（2026-11-09）**：翻转 `tframes`；会话状态 only，Viewer-legal | 不改变图像/外部参照/文字边框可见性 | 近似实现：仅命令路径/状态 |
+| REGENAUTO | **会话令牌 v1（2026-11-09）**：翻转 `regenauto`；会话状态 only，Viewer-legal | 本构建无自动重生成开关；需显式 `REGEN` | 近似实现：仅命令路径/状态 |
+| ISODRAFT | **会话令牌 v1（2026-11-09）**：翻转 `isodraft`；会话状态 only，Viewer-legal | 不切换等轴测平面或光标、不改变捕捉/正交行为 | 近似实现：仅命令路径/状态 |
+| BCOUNT | **只读报告 v1（2026-11-09）**：统计整个模型空间的 `SemanticGeometry::Insert` 实例，按块名分组，输出 `bcount.block` + `bcount.summary`；无事务/修订/历史，Viewer-legal | 无 AutoCAD 的 `Select objects` 提示（声明为整模型空间）；不展开块成员、不统计图纸空间；不修改图形 | 只读，无写 |
+| COUNT | **只读报告 v1（2026-11-09）**：当前选择非空时按选择统计，否则统计全部模型空间顶层实体；按 `type_key` 分组，输出 `count.type`/`count.summary`；块成员/子元素/失效引用另报 `count.unresolved`；不改选择、无事务/修订/历史，Viewer-legal | 不实现 AutoCAD 的计数高亮/导航面板；不统计块内成员 | 只读，无写 |
+| EDITTIME | **只读报告 v1（2026-11-09）**：当前 UTC 时钟 + 文档 id/修订/实体数（`edittime.report`）；创建/修改时间与会话用时恒 `edittime.not_tracked`；Viewer-legal | 数据库不存时间戳，会话不跟踪 uptime；不伪造日期 | 只读，无写 |
+| JULIAN | **只读报告 v1（2026-11-09）**：当前 UTC 时刻的儒略日（整数日 + 小数，`julian.value`）；Viewer-legal | 不解析日期参数、不做 DATE/CAL 转换；只报"现在" | 只读，无写 |
+| XLIST | **只读报告 v1（2026-11-09）**：列出 `drawing.blocks()` 的每个块定义与成员数（`xlist.block` + `xlist.summary`）；`xlist.xdata_not_retained` 明说 XDATA 不保留；Viewer-legal | 不是 AutoCAD 的“列出嵌套对象类型/块名/图层/颜色/线型”全格式；不列出 xref 嵌套、不读 XDATA | 只读，无写 |
+| DRAGMODE | **会话令牌 v1（2026-11-09）**：payload-free，翻转 `drafting_extras.dragmode`（默认 ON），`dragmode.toggled`；会话状态 only，无事务/修订/历史，Viewer-legal | 渲染器不消费该标志：本构建无拖动预览，不显示拖动中的图像 | 近似实现：仅命令路径/状态 |
+| APERTURE | **只读报告 v1（2026-11-09）**：报告会话靶框令牌（默认 10），`aperture.value`；Viewer-legal | `APERTURE <n>` 设置形式 **NOT IMPLEMENTED**；不绘制捕捉靶框，也不改变捕捉判定 | 只读，无写 |
+| ISOPLANE | **会话令牌 v1（2026-11-09）**：循环 `LEFT→TOP→RIGHT`，`isoplane.toggled`；会话状态 only，Viewer-legal | 无等轴测光标、无捕捉/正交变化，绘图平面不真正切换 | 近似实现：仅命令路径/状态 |
+| HIGHLIGHTNEW | **会话令牌 v1（2026-11-09）**：翻转 `highlightnew`（默认 ON），`highlightnew.toggled`；Viewer-legal | 不渲染新功能高亮（无橙点） | 近似实现：仅命令路径/状态 |
+| TRAYSETTINGS | **会话令牌 v1（2026-11-09）**：翻转 `traysettings`（默认 ON），`traysettings.toggled`；Viewer-legal | 本构建无状态栏托盘 UI，图标/通知不变化 | 近似实现：仅命令路径/状态 |
+| TEXTSCR | **会话令牌 v1（2026-11-09）**：置 `text_screen = true`，`textscr.toggled`；会话状态 only，Viewer-legal | 无文本屏幕窗口、不显示提示历史 | 近似实现：仅命令路径/状态 |
+| GRAPHSCR | **会话令牌 v1（2026-11-09）**：置 `text_screen = false`，`graphscr.toggled`；会话状态 only，Viewer-legal | 无文本屏幕窗口可隐藏 | 近似实现：仅命令路径/状态 |
+| FINDINCLUDE | **会话令牌 v1（2026-11-09）**：翻转 `find_include`（默认 ON），`findinclude.toggled`；Viewer-legal | 跨块/外部参照文字搜索 **NOT IMPLEMENTED**；`-FIND`/`FIND` 仍只搜顶层模型空间，该标志不改变其范围 | 近似实现：仅命令路径/状态 |
+| FINDMATCH | **会话令牌 v1（2026-11-09）**：翻转 `find_match_case`（默认 OFF），`findmatch.toggled`；Viewer-legal | 已实现的 `-FIND`/`FIND` 恒按 ASCII 不区分大小写比较，该标志不改变匹配 | 近似实现：仅命令路径/状态 |
+| REVCLOUDPROPERTIES | **只读报告 v1（2026-11-09）**：报告会话弧长令牌（默认 15），`revcloud.properties`；Viewer-legal | `REVCLOUDPROPERTIES <length>` 设置形式 **NOT IMPLEMENTED**；`REVCLOUD` 不读取该令牌 | 只读，无写 |
+| SYSVARMONITOR | **只读报告 v1（2026-11-09）**：逐条报告 `SETVAR` 闭集 8 个变量（PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE）的当前值，`sysvarmonitor.value` + `sysvarmonitor.summary`；Viewer-legal | 不监视任何变化、不发通知；闭集之外的变量不建模也不杜撰 | 只读，无写 |
+| SYSVDLG | **只读报告 v1（2026-11-09）**：同一 8 个变量，`sysvdlg.value` + `sysvdlg.summary` + `sysvdlg.dialog_not_implemented`；Viewer-legal | 本构建无系统变量对话框：不能编辑/保存/恢复，单值读取请用 `SETVAR <name>` | 只读，无写 |
+| VTOPTIONS | **只读报告 v1（2026-11-09）**：`vtoptions.not_tracked` 明说视图过渡设置未建模（代码串按 Wave 2 契约原样保留）；Viewer-legal | 不报告也不杜撰平滑/时长/缩放平移过渡选项 | 只读，无写 |
+| ALIASEDIT | **只读报告 v1（2026-11-09）**：逐行列出规范 `COMMAND_ALIASES`（`aliasedit.alias`）+ `aliasedit.summary`；表本身在 `cad-app::command_aliases`，`cad-ui-core` 重导出同一份；Viewer-legal | 创建/修改/删除别名 **NOT IMPLEMENTED**（无 `acad.pgp` 解析、无用户别名存储） | 只读，无写 |
+| WHOHAS | **只读报告 v1（2026-11-09）**：`whohas.single_document`；Viewer-legal | 单文档构建：无网络查询，无法列出其他用户、其他打开文档或文件锁 | 只读，无写 |
+| ACADINFO | **只读报告 v1（2026-11-09）**：产品版本（`CARGO_PKG_VERSION`）+ debug/release 构建配置 + 文档修订/实体数（`acadinfo.report`）；`acadinfo.not_collected` 明说许可证/硬件/模块数据不收集；Viewer-legal | 不写文件、不导出安装信息；没有的数据一律不杜撰 | 只读，无写 |
+| PTYPE | **只读报告 v1（2026-11-09）**：报告 `$PDMODE`/`$PDSIZE`（`ptype.report`）；Viewer-legal | 写入仍只走现有 `PDMODE`/`PDSIZE`；PTYPE 对话框形式 **NOT IMPLEMENTED** | 只读，无写 |
+| SCALELISTEDIT | **只读报告 v1（2026-11-09）**：报告第一个图纸布局的页面（纸张/比例，`scalelistedit.summary`）+ `scalelistedit.write_unsupported`；Viewer-legal | 编辑比例列表 **NOT IMPLEMENTED**：无比例列表存储，不增删/重置任何比例 | 只读，无写 |
+| HYPERLINKOPTIONS | **具名拒绝 v1（2026-11-09）**：`CadError::Unsupported` / `hyperlinkoptions.unsupported: this build has no hyperlink storage model`；不写库/不升修订/不入历史，Viewer-legal | 无超链接存储模型：不保存、不显示任何超链接 | 拒绝，无写 |
+| INPUTSEARCHOPTIONS | **具名拒绝 v1（2026-11-09）**：`inputsearchoptions.unsupported: input-search settings are not modeled`；Viewer-legal | 输入搜索设置未建模（对话框形式） | 拒绝，无写 |
+| -INPUTSEARCHOPTIONS | **具名拒绝 v1（2026-11-09）**：`-inputsearchoptions.unsupported: input-search settings are not modeled`；本构建的**独立选择子**（不是别名）；Viewer-legal | 同上，命令行拼写 | 拒绝，无写 |
+| SIGVALIDATE | **具名拒绝 v1（2026-11-09）**：`sigvalidate.unsupported: this build has no digital-signature model`；Viewer-legal | 无数字签名模型：不读取、不校验签名 | 拒绝，无写 |
+| BASE | **具名拒绝 v1（2026-11-09）**：`base.unsupported: the drawing stores no insertion base point`；Viewer-legal | 图形不保存插入基点：既不设置也不报告 | 拒绝，无写 |
+| LIMITS | **具名拒绝 v1（2026-11-09）**：`limits.unsupported: this build has no drawing-limits model`；Viewer-legal | 无图形界限模型：不设置、不限制拾取/栅格 | 拒绝，无写 |
+| VIEWPLOTDETAILS | **具名拒绝 v1（2026-11-09）**：`viewplotdetails.unsupported: no plot-details model`；Viewer-legal | 无打印详细信息模型：不列出已完成打印/发布任务 | 拒绝，无写 |
+| VPLAYER | **具名拒绝 v1（2026-11-09）**：`vplayer.viewport_layer_state_unsupported: no per-viewport layer state`；Viewer-legal | 无逐视口图层状态 | 拒绝，无写 |
+| MVIEW | **具名拒绝 v1（2026-11-09）**：`mview.viewport_creation_unsupported: no viewport creation API`；Viewer-legal | 无创建视口 API（现有 `VPORTS` 等路径不创建视口） | 拒绝，无写 |
+| PSBSCALE | **具名拒绝 v1（2026-11-09）**：`psbscale.write_unsupported: no viewport scale write API`；Viewer-legal | 无视口比例写入 API | 拒绝，无写 |
+| PSTSCALE | **具名拒绝 v1（2026-11-09）**：`pstscale.write_unsupported: no viewport scale write API`；Viewer-legal | 无视口比例写入 API | 拒绝，无写 |
+| MVSETUP | **具名拒绝 v1（2026-11-09）**：`mvsetup.unsupported: no viewport-group model`；Viewer-legal | 无视口组模型 | 拒绝，无写 |
+| MSPACE | **会话切换 v1（2026-11-09）**：payload-free，复用 `MODEL`/`SPACE` 的 `switch_space_command` 切到模型空间，`mspace.switched`；已在模型空间为 `mspace.noop`；会话状态 only，无数据库写/修订/历史，Viewer-legal | 不是第二套空间权威；不创建或移动视口，不改变图纸空间内容 | 会话状态，无写 |
+| PSPACE | **会话切换 v1（2026-11-09）**：切到第一个图纸布局（`drawing.layouts()` 第一个），`pspace.switched`；无图纸布局为 `pspace.no_layout`；Viewer-legal | 只取第一个布局；若原有 `SPACE` 路径校验/取景失败则显式拒绝，不静默回退 | 会话状态，无写 |
+| STYLE | **只读报告 v1（2026-11-09）**：列出 `drawing.styles()` 每个文字样式（名称/id/资源键数，`style.entry` + `style.summary`）；Viewer-legal | 创建或修改文字样式 NOT IMPLEMENTED；不解析字体文件内容 | 只读，无写 |
+| -STYLE | **只读报告 v1（2026-11-09）**：与 `STYLE` 同一列表，使用 `-style.entry` + `-style.summary`；本构建的**独立选择子**（不是别名）；Viewer-legal | 编辑文字样式 NOT IMPLEMENTED | 只读，无写 |
+| MLEADERSTYLE | **只读报告 v1（2026-11-09）**：列出 `drawing.mleader_styles()`（名称/content type/字高/箭头/文字样式，`mleaderstyle.entry` + `mleaderstyle.summary`）；Viewer-legal | 创建、修改或设当前样式 NOT IMPLEMENTED；没有样式对话框 | 只读，无写 |
+| BLOCK? | **只读报告 v1（2026-11-09）**：列出 `drawing.blocks()` 每个块定义的名称与成员数（`block.entry` + `block.summary`）；Viewer-legal | 只读列表，不是块编辑器；不列嵌套/xref/XDATA | 只读，无写 |
+| DIMREASSOC | **非关联 no-op v1（2026-11-09）**：`dimreassoc.non_associative` 明说本构建标注非关联，无可恢复的关联；不写库/不升修订/不入历史，Viewer-legal | 无关联模型：不能恢复被覆盖/修改的标注测量值 | no-op，无写 |
+| DIMREASSOCIATE | **非关联 no-op v1（2026-11-09）**：`dimreassociate.non_associative` 明说本构建标注非关联；不写库/不升修订/不入历史，Viewer-legal | 无关联模型：不能把标注关联到对象或点 | no-op，无写 |
+| DIMJOGGED | **具名拒绝 v1（2026-11-09）**：`dimjogged.unsupported: the dimension domain stores no jog field`；Viewer-legal | 标注域不存储折弯字段：不创建折弯标注 | 拒绝，无写 |
+| DIMINSPECT | **具名拒绝 v1（2026-11-09）**：`diminspect.unsupported: the dimension domain stores no inspection data`；Viewer-legal | 标注域不存储检验数据 | 拒绝，无写 |
+| -DIMINSPECT | **具名拒绝 v1（2026-11-09）**：`-diminspect.unsupported: the dimension domain stores no inspection data`；Viewer-legal | 同一拒绝的命令行拼写；不存储检验数据 | 拒绝，无写 |
+| ANNORESET | **具名拒绝 v1（2026-11-09）**：`annoreset.unsupported: this build has no annotative-object model`；Viewer-legal | 无注释性对象模型：不能重置替代比例表示的位置 | 拒绝，无写 |
+| ANNOUPDATE | **具名拒绝 v1（2026-11-09）**：`annoupdate.unsupported: this build has no annotative-object model`；Viewer-legal | 无注释性对象模型：不能按样式更新注释性对象 | 拒绝，无写 |
+| OBJECTSCALE | **具名拒绝 v1（2026-11-09）**：`objectscale.unsupported: this build has no annotative-object model`；Viewer-legal | 无注释性对象模型：不能增删支持比例 | 拒绝，无写 |
+| -OBJECTSCALE | **具名拒绝 v1（2026-11-09）**：`-objectscale.unsupported: this build has no annotative-object model`；Viewer-legal | 同一拒绝的命令行拼写；无注释性对象模型 | 拒绝，无写 |
+| QLATTACH | **具名拒绝 v1（2026-11-09）**：`qlattach.unsupported: this build has no QLEADER annotation-attachment model`；Viewer-legal | 无 QLEADER 注释附着模型：不能把引线附到 MText/公差/块参照 | 拒绝，无写 |
+| QLATTACHSET | **具名拒绝 v1（2026-11-09）**：`qlattachset.unsupported: this build has no QLEADER annotation-attachment model`；Viewer-legal | 无 QLEADER 注释附着模型：不能全局附着引线 | 拒绝，无写 |
+| QLDETACHSET | **具名拒绝 v1（2026-11-09）**：`qldetchset.unsupported: this build has no QLEADER annotation-attachment model`；Viewer-legal | 无 QLEADER 注释附着模型：不能全局分离引线 | 拒绝，无写 |
+| ARRAYCLOSE | **具名拒绝 v1（2026-11-09）**：`arrayclose.unsupported: this build has no associative-array edit state`；Viewer-legal | 无关联阵列编辑状态：不能保存/放弃阵列源对象修改 | 拒绝，无写 |
+| ARRAYEDIT | **具名拒绝 v1（2026-11-09）**：`arrayedit.unsupported: this build has no associative-array edit state`；Viewer-legal | 无关联阵列编辑状态：不能编辑阵列源对象 | 拒绝，无写 |
+| BEDIT | **具名拒绝 v1（2026-11-09）**：`bedit.unsupported: this build has no block editor`；Viewer-legal | 无块编辑器：不能打开块定义进行编辑 | 拒绝，无写 |
+| -BEDIT | **具名拒绝 v1（2026-11-09）**：`-bedit.unsupported: this build has no block editor`；Viewer-legal | 同一拒绝的命令行拼写；无块编辑器 | 拒绝，无写 |
+| BCLOSE | **具名拒绝 v1（2026-11-09）**：`bclose.unsupported: this build has no block editor`；Viewer-legal | 无块编辑器可关闭 | 拒绝，无写 |
+| BCYCLEORDER | **具名拒绝 v1（2026-11-09）**：`bcycleorder.unsupported: this build has no dynamic-block grip model`；Viewer-legal | 无动态块夹点模型：不能改变夹点循环顺序 | 拒绝，无写 |
+| BGRIPSET | **具名拒绝 v1（2026-11-09）**：`bgripset.unsupported: this build has no dynamic-block parameter model`；Viewer-legal | 无动态块参数模型：不能创建/删除/重置参数夹点 | 拒绝，无写 |
+| BESETTINGS | **具名拒绝 v1（2026-11-09）**：`besettings.unsupported: this build has no block editor`；Viewer-legal | 无块编辑器设置对话框 | 拒绝，无写 |
+| BTESTBLOCK | **具名拒绝 v1（2026-11-09）**：`btestblock.unsupported: this build has no block editor`；Viewer-legal | 无块编辑器：不能测试动态块 | 拒绝，无写 |
+| LAYERPALETTE | **具名拒绝 v1（2026-11-09）**：`layerpalette.unsupported: there is no separate layer palette; use LAYER`；Viewer-legal | 本构建没有独立图层调色板；请使用现有 `LAYER` | 拒绝，无写 |
+| CONSTRAINTBAR | **具名拒绝 v1（2026-11-09）**：`constraintbar.unsupported: this build has no constraint model`；Viewer-legal | 无约束模型：不能显示/隐藏几何约束栏 | 拒绝，无写 |
+| CONSTRAINTSETTINGS | **具名拒绝 v1（2026-11-09）**：`constraintsettings.unsupported: this build has no constraint model`；Viewer-legal | 无约束模型：不能控制约束栏显示 | 拒绝，无写 |
 - 变换/偏移的**不支持几何**（`Spline`/`Shape`/`Opaque`/`Compound`；**以及 `MultiLeader`——拒绝一切缩放**）返回显式
   （**更正**：`Text` 自 P7a 起**可**平移/旋转/均匀缩放，**不在**此列表；仅镜像与非均匀缩放拒绝。
   **2026-10-26 起 `MIRROR` 的 `Arc`/`Ellipse` 不再被拒**，见上表 MIRROR 行。）
@@ -333,7 +403,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `FILLET POLYLINE` | **实现**（Polyline 模式的选择式变体，2026-10-28） | **恰好 1 条**选中实体：**开放**、≥3 顶点、**每段直线**（`\|bulge\| ≤ tol`）、`+Z` 平面的 LWPOLYLINE。每个**内顶点**换成两切点 + 一段**会话半径**的圆弧（`filletRadius`）：`phi = acos((-u_in)·u_out)`、`d = R/tan(phi/2)`，圆心在内角平分线上；sweep 由圆心角导出、经 `cad_geometry::arc_sweep_to_bulge` 转 bulge，再用 `bulge_arc_geometry` **回验**（圆心/半径/sweep 不一致 ⇒ `fillet.polyline_arc_mismatch`，整条命令拒绝）。实体**原地重写**（id/图层/空间/draw order/样式保留），一条事务/一步撤销；端顶点不动、不造端帽、不产生新实体 | 全部**具名且在任何写入之前**：带 payload、选择 ≠ 1、不可寻址/缺失、不是折线、**闭合环**、<3 顶点、**含 bulge 段**、**非 `+Z` 平面**、重复/零长段、共线顶点、退化接缝、`R ≤ 0`（两线 `R=0` 的移角形式无折线等价物）、**角放不下**（`fillet.polyline_too_large`，**不**做 AutoCAD 的自动缩半径）、缺会话参数、弧不自洽；Viewer 由命令层拒绝。**不建模 `TRIMMODE`**。**证据**：`cad-app` 契约测试（含与两线 `plan_fillet` 在 `1e-12` 内的对照、DXF 导出往返），**无 GUI/像素/真窗口证据** |
 | `CHAMFER POLYLINE` | **实现**（同上选择式，2026-10-28） | 形状同上（开放、≥3 顶点、直线段、`+Z`）；每个内顶点按 `chamferDistanceA` 量**入边**、`chamferDistanceB` 量**出边**切成两点，连接段 `bulge = 0`；同样是原地重写 + 一条事务/一步撤销 | 拒绝面同 `FILLET POLYLINE`（`A=B=0` 或负数、角放不下都具名），另加：**A/B 方向是我们的规则**（入边/出边），**不是** AutoCAD 提示顺序的复刻；**无 `Angle` 方法**、不建模 `TRIMMODE`、不做任何自动缩距。**证据同上：契约测试，无 GUI/像素/真窗口证据** |
 | `ARRAYRECT` / `ARRAYPOLAR` | **实现** | **独立副本**（AutoCAD 默认关联，记为**有意偏离**）；矩形：间距=**基点间距离**、向上右生成、副本数 = `行×列−1`；极坐标：捕获中心点，副本数 = `项数−1`，**角度步长 = `i·填充角/项数`**（**我们的规则**：部分填充时 AutoCAD 是首尾跨满 `fill/(items−1)`，故 `180°/3 项` 我们为 0/60/120 而 AutoCAD 为 0/90/180——**刻意偏离**，已测试），`rotateItems` 决定绕中心旋转或仅平移（**未查证选择**） | `Path`/`Levels`/`Total`/角度间隔输入/关联编辑（`ARRAYEDIT`/grips）/`MAXARRAY` 可配置化/3D/**负间距反向**；1×1 或单项阵列**不产生副本并显式诊断**（不开事务） |
-| `ALIGN` | **实现** | **两对点**：平移（第一对）+ 旋转（两对方向夹角）+ `AlignScale` 为真时按"目标对长/源对长"做**均匀**缩放；以 `source1` 为枢轴，原位变换整个选择。**含 `MultiLeader` 且 `AlignScale` 为真 ⇒ 整命令失败**（同 C.5） | 3 对点 3D 对齐、**非均匀**缩放、**1 对点移动**（等价于 `MOVE`，不做） |
+| `ALIGN` | **实现** | 1 对点 = 纯移动；2 对点 = 平移+旋转，`AlignScale` 时按“目标对长/源对长”做**均匀**缩放；3 对点 = 平面**刚性**（旋转+平移，**不缩放**）；一条事务/一步撤销 | 3 对点的 3D 平面旋转属全局范围；非均匀缩放 AutoCAD 也不提供；非共面/非全等/镜像按名拒绝（`align.non_coplanar`/`align.non_congruent`/`align.mirrored`） |
 | `STRETCH` | **实现** | 交叉窗口（**恒 CROSSING**）：**部分包围=逐顶点移动**（只动窗内顶点）、**完全包围=整移**；分类按几何类型分两种口径（直线/无 bulge 折线=逐顶点包含；圆/椭圆/块/ARC/含 bulge 折线=保守包围盒完全包含）；**bulge 数值保留**（未查证）。**逐顶点来源（按类，2026-10-26）**：`LINE` = 两端点；`POLYLINE`/`LWPOLYLINE` = 每个存储顶点（bulge 原样保留，未查证）；`SPLINE` = 每个存储**控制点**（`degree`/`knots`/`weights` **逐字复制**）；`ARC` = 存储**起点/终点**两点（规则见下）。**NURBS 声明**：控制点**不是曲线点**（只有 clamped 样条的首/末控制点落在曲线上），单个控制点的支撑域是 `degree+1` 个节点区间，故**部分**拉伸会**整体**重塑曲线——这是 NURBS 控制点编辑的固有性质，**不是缺陷**，也不做任何重拟合/求值；复制向量后定义仍满足 `cad-db` 不变量（契约测试用 `cad_db::validate_geometry` 断言）。**ARC 部分拉伸（本项目的选择，非 AutoCAD 断言）**：窗内端点各按其「平移后位置相对圆心的**平面内方向**」改角，`center`/`radius`/`normal` **逐位不变**（弧不离开自身平面，位移的平面外分量被丢弃），窗外端点保持原角，`sweep` 按**存储方向**重算（`sweep<0` 仍顺时针）；以下三种结果**只报诊断、该实体不写入、绝不夹取**：重算张角 ~0 或 ~2π（阈值 `1e-9`，与 tessellator / 弧端点夹点同一 slack）→ `drawing.stretch.arc_degenerate_sweep`；被拖端点无平面内方向（落在圆心或法线上）→ `drawing.stretch.arc_no_direction`；规则使两个存储角都不变（位移在弧平面内**无切向分量**，如纯径向/纯平面外）→ `drawing.stretch.arc_unchanged`。其余「不动」路径的具名码：窗内**没有**顶点/控制点/端点 → `drawing.stretch.no_vertex`；定义不可索引的样条（knot/weight 数量不符，导入路径可产生）→ `drawing.stretch.spline_inconsistent`（部分包围；**完全包围整移**则由 `cad-db` 的写路径校验按同一稳定码拒绝，整命令失败、不写入）。**完全包围的 `SPLINE` 整移**：与其它种类**同一条路径**——`cad-db` 的 `transform_geometry`（NURBS 仿射不变，见下「仿射不变规则」）；上一轮为绕过 `cad-db` 拒绝而加的应用内「纯平移控制点」例外**已删除**，故完全包围的 STRETCH 与 MOVE 对样条**不可能**给出不同结果。**INSERT 部分拉伸（本项目的选择，非 AutoCAD 断言）**：块参照在这条路径上只有**一个**可寻址「顶点」——**插入点**（块坐标系原点 `(0,0,0)` 过实例放置的 `Transform3::apply_point`，即放置矩阵的平移列）。**部分包围**时：插入点**落在交叉窗口内** ⇒ 整条参照**刚性平移** delta（走 `cad-db` 的 `transform_geometry` 平移路径，**与完全包围整移同一个调用**），放置矩阵的**线性部分（旋转/缩放/镜像列）逐位不变**、`block` 不变、只有平移列改变；插入点**不在窗口内**（窗口只压到块成员的显示几何/保守包围盒）⇒ **逐位不动** + `drawing.stretch.insert_outside`（**不写入、不 staging**）。**完全包围** ⇒ 整移（未变）；**窗口外** ⇒ 完全不动（无写入）。**诚实的边界（非目标，不得读成「已支持块」）**：块**成员不会被逐个拉伸**（实例路径在这条路径上不可寻址，规划只写顶层模型空间所有者，没有逐成员顶点编辑）；**旋转/缩放/镜像**的参照只**刚性平移**、**不重拟合**（不按窗口重塑，旋转与比例逐位保留）；这**不是** AutoCAD 的完整块参照 STRETCH 语义——定义级编辑、嵌套成员拉伸、属性重排均**未建模、不声明** | cpolygon/lasso、**单独选取即整移**、`TEXT`（**相似变换语义受限** ⇒ 整命令拒绝，ADR-0019 B.2——**不是**因为变换面拒绝：P7a 起 `Text` 可平移/旋转/均匀缩放）、`MultiLeader`（**显式按 `type_key` 整命令拒绝**）、`HATCH` 的**拉伸**（部分包围不动+诊断、完全包围整移）、`INSERT` 的**成员级**拉伸（只做插入点刚移，见前）、3D；宽度未建模 |
 | `GRIPSTRETCH`（**本项目选择器**，AutoCAD 无同名命令） | **宿主拖拽已实现（仅 `native-below`）；`dom-canvas` 载体无夹点路径；UI 层 Escape 已接线（无运行时证据）** | 纯模型（`crates/cad-app/src/grips/`：`mod.rs` 句柄表/命中/文档 + `drag.rs` 各类拖拽规则）+ 命令（`crates/cad-app/src/app_drawing/grip.rs`）：**一个夹点、一个实体** → 一次 `update_entity`、一条事务 / 一步撤销（undo 恢复被拖端点/位置的**位级**原值，未拖端点/其它坐标逐位不变）。支持面：`LINE` 三夹点（`Endpoint` `index` 0 = start、1 = end，`Midpoint` `index` 2 —— 拖中点让**整条线平移**，两端走同一 delta，方向与长度不变；中点位置是两存储端点的 f64 精确中点）、`CIRCLE` 五夹点（`Center` `index` 0；`Quadrant` `index` 0..=3 = 圆自身平面内 `+ax` / `+ay` / `-ax` / `-ay`，拖象限**只改半径**：半径 = 中心到目标的**平面内**距离（不是 3D 距离、也不是 x/y 距离），圆心与法向逐位不变，故圆不会被拖成倾斜椭圆）、`ARC` 三夹点（`Center` `index` 0 = 刚性平移：半径/法向/起始角/张角逐位不变；`Endpoint` `index` 0 = 弧**起点**、`index` 1 = 弧**终点** —— 拖端点让弧留在**同一圆**上（圆心/半径/法向逐位不变），被拖端点的角度 = 目标在弧自身平面内的方向，**另一端保持原角度**，张角按**原方向**重算且必须落在开区间 `(0, 2π)`；会把弧压没（张角 ~0 或 ~2π，阈值 `1e-9` rad，与 tessellator/provider 判「整圆」同一 slack）或目标在平面内没有方向（圆心本身/圆心法线上）时按名拒绝 `grip.degenerate_arc`，**绝不夹取**；该端点规则是**本项目的选择，不是 AutoCAD 断言**）、`POLYLINE`/`LWPOLYLINE` 顶点夹点（`Vertex` `index` = **存储**顶点序号，一顶点一夹点；拖拽只把该顶点 x/y 设为目标、**保留其自身 z**，其余顶点与 `closed` 逐位不变，`bulges` 向量整体原样复制 —— **不重算任何 bulge**（进/出该顶点的段保留原 bulge；这是我们的解读，**未经 vendor 验证**）；越界 `index` 为 `grip.stale_handle`；`GripId::index` 是 `u8`，故只为顶点 `0..=255` 提供夹点，更多顶点在本版本不可寻址）、`ELLIPSE` 夹点（`Center` `index` 0；`Quadrant` `index` 0..=3 = 椭圆**自身存储轴**帧内的 `+major` / `+minor` / `-major` / `-minor`，与 `CIRCLE` 象限同 `+, +, -, -` 次序）：中心拖拽**刚体平移**（`normal`/`major_axis`/`ratio`/`start`/`sweep` 逐位不变）；轴象限拖拽把**该轴的半径**设为“中心到目标在椭圆自身平面内的距离”（不是 3D 距离、也不是 x/y 距离），中心与法向逐位不变；**轴方向永不旋转**（本项目选择，**不是 AutoCAD 断言**）：major 拖动把存储 `major_axis` 按 `distance / |major_axis|` **缩放**并把 `ratio` 重算为 `minor_len / distance`（保留存储的次半径 `|major_axis| * |ratio|`），minor 拖动只令 `ratio = distance / |major_axis|` 且 `major_axis` 逐位不变；因此目标不在轴上时也只改半径、不转动椭圆，且两轴按构造保持正交。**椭圆弧（部分椭圆）**：存储参数范围不是整圈（`|sweep| < 2π - 1e-9`，与 tessellator/provider 判「整圈」同一 slack）时**只暴露 `Center` 夹点**，象限 id 按名拒绝 `grip.partial_ellipse`（本项目选择，**不是 AutoCAD 断言**：轴点未必落在已绘参数范围内，用它改形等于悄悄重释参数范围；中心拖拽不改半径/参数，故仍可用）。域模型**没有** `minor <= major` 约束（`cad-db` 只要求 `ratio` 正且有限，渲染用它画 `|major| * |ratio|`），故拖到两半径交叉**不拒绝也不静默归一化**（交换轴会旋转存储帧并改变参数化）；只有创建路径（`ellipse_parameters`）恰好保持 `ratio <= 1`，那是轴端点法的存储假设，**不是**夹点不变量。零/非有限平面内半径、或存储帧无法导出平面内半径（`major_axis` 为零/非有限，或法向与其平行）→ `grip.degenerate_radius` 按名拒绝、**不夹取**；把该轴半径拖回原长度（含离开平面但平面内距离不变）→ `grip.zero_displacement`）、`POINT` 位置夹点（`index` 0），以及**块引用插入点夹点（2026-10-26）**——见下方 `INSERT` 条。**`TEXT`/`MTEXT` 插入点夹点（2026-10-26）**：`Insertion` `index` 0 = **存储的 `position` 原值**（三坐标逐位，**不**按 `h_align`/`v_align` 偏移、**不**绕该点按 `rotation` 旋转；对齐或旋转**不改**句柄位置）；拖拽只把 `position` 设为目标，`text`/`style`/`height`/`rotation`/`font`/`h_align`/`v_align`/`wrap_width` **逐位不变**（含 `wrap_width: Some(w)`，属普通 `f64`，只复制不重算）。`TEXT` 与 `MTEXT` 是**同一个** `SemanticGeometry::Text` 变体（只有 `DbEntity.object.type_key` 区分 `AcDbText`/`AcDbMText`），故两者夹点完全相同。**新变体 `Insertion` 而非复用 `Point`**：`Point` 是 `POINT` 实体自身的句柄，共用会让 `grip.stale_handle` 无法区分"文本插入点"与"点实体"。**旋转 / 高度 / 对齐（attachment）/ 宽度夹点一律 NOT IMPLEMENTED**——本轮**只**实现插入点。`SemanticGeometry::Polyline` 是**所有** 折线类（LWPOLYLINE / `AcDb2dPolyline` / 旧 `AcDbPolyline` / 3D `AcDb3dPolyline`）的唯一语义变体，类名不进域模型，因此**无法单独排除 3D 折线**（顶点夹点对所有折线生效；拖拽只改 x/y 并保留自身 z，与 `LINE` 端点规则一致，不做 3D 标高编辑）；**按类区分 3D 折线 NOT IMPLEMENTED**。**`SPLINE` 控制点夹点（2026-10-26）**：`ControlPoint` `index` = **存储**控制点序号，位置 = 存储 `Point3` 原值（逐位，**不做**任何 NURBS 求值——控制点一般**不在**曲线上，只有 clamped 样条的首/末控制点才在；这是定义而非 bug，标记落在曲线外是正确行为）；拖拽把**该**控制点设为目标三坐标原值，`degree`/`knots`/`weights` 与其他控制点**逐位不变**（不重算节点/权重、不做重拟合 ⇒ 结果是参数化相同的**另一个 NURBS**，曲线因此不再经过它原先经过的点；这是本项目选择，AutoCAD 同样直接拖控制点但**不声称** vendor 等价）；`GripId::index` 是 `u8`，故只暴露控制点 `0..=255`，更多控制点在本版本**不可寻址**（**不**回绕、不截断、不重编号）；越界 `index` → `grip.stale_handle`、目标等于存储控制点 → `grip.zero_displacement`、非有限目标 → `grip.non_finite_target`、该几何上的其它 kind → `grip.stale_handle`；存储定义**自相矛盾**（`control_points.len() != weights.len()`，或 `knots.len() != control_points.len() + degree + 1`）时**一个夹点都不暴露**（不猜、不补齐向量；形状有效性以 `cad-db` 校验器为准），其任何控制点 id 均为 `grip.stale_handle`。**`INSERT`（块引用）插入点夹点（2026-10-26）**：`Insertion` `index` 0 = **放置变换的插入点**，即 block-space 原点在 `Transform3` 下的像 —— `Transform3` 是 4x4 仿射且 `apply_point` **不做**齐次除法，故该像**就是**矩阵的平移列；导入器已把块基点折进放置（`insert_array_transform` 的 `translate * rotate * scale * block_placement(-base)`，使 block-space 原点落在 `INSERT` 的存入插入点上），所以这是仓库**既有**的“块引用插入点”定义，本轮**不**引入第二套约定。拖拽是**刚性移动**：只把平移列写成目标（`m[0][3]=to.x`、`m[1][3]=to.y`、`m[2][3]=to.z`），**整个 3x3 线性部分（旋转 / 非均匀缩放 / 镜像 / 剪切）与 `block` 逐位不变**（第 3 行也不变），因此拖拽**永不**旋转或缩放块引用，且插入点**恰好**落在目标上（不做求逆、**无**残差、**不**夹取/捕捉）。有限但**奇异**的放置**不**拒绝（平移仍逐位精确，线性部分原样保留；`cad-db` 本来拒绝**存储**奇异放置，故这属损坏输入）；存储放置含**非有限**系数时按名拒绝 `grip.degenerate_transform`。**块成员（instance path）/ 块内属性（ATTRIB）/ 块内点**的夹点一律 **NOT IMPLEMENTED**：`GripId` 不含 instance path 与子元素字段，`GRIPSTRETCH` 已用 `property.not_addressable` 拒绝非模型空间目标，本模型**不**另立可达性规则。`Insertion` 变体由 TEXT/MTEXT 与 INSERT 共用（靠几何变体区分，**不**新增 `GripKind`）。**`DIMENSION` 定义点夹点（2026-10-26）**：新变体 `DefinitionPoint`，`index` = **该子类型文档化的句柄次序里的位置**，一个句柄对应一个存储的 DXF 定义点，**最后一个**句柄是存储的 文字中点（group 11）：`Linear { rotation }` 与 `Aligned`（共用 `DimensionPoints::Linear`）= `0` `first`(13)、`1` `second`(14)、`2` `dimension_line`(10)、`3` `text_middle`(11)；`Radius`/`Diameter`（`Radial`）= `0` `center`(10)、`1` `point_on_arc`(15)、`2` `text_middle`(11)；`Angular2Ln` = `0` `line1_start`(13)、`1` `line1_end`(14)、`2` `line2_start`(15)、`3` `line2_end`(10)、`4` `arc_point`(16)、`5` `text_middle`(11)；`Angular3Pt` = `0` `vertex`(15)、`1` `first`(13)、`2` `second`(14)、`3` `arc_point`(10)、`4` `text_middle`(11)；`Ordinate` = `0` `feature`(13)、`1` `leader_end`(14)、`2` `base`(10)、`3` `text_middle`(11)。句柄位置 = **存储点逐位原值**（三坐标，不投影、不派生、不偏移）；`leader_length`(40)、`text_rotation`(53)、`Linear { rotation }`/`Ordinate { x_ordinate }` 等子类型标量、`normal` 与整套解析后的 `DimensionStyleValues` **都不是夹点**，任何拖拽都逐位保留。**拖拽规则 = 重合成**：克隆存储定义、只替换那**一个**点，再用 `DimensionGeometry::synthesized` 以**实体自身**的 `style_name`/`style`/`text_override` 重建 —— 故 `kind`、`text_rotation`、`normal`、`style_name`、`style`、文字覆盖串（DXF group 1，**不丢弃**）与未被拖动的定义点/`leader_length` 全部保留，而 `measurement`（group 42）与**整幅显示**由 `cad-domain` 的唯一构建器按改后的定义**重算**（`cad-app` 不手改 dimension 子几何）；拖 `text_middle` 只移动存储的 group-11 锚点并重排显示，`measurement` 不变。**非法结果一律按名拒绝、绝不夹取**：`grip.dimension_inconsistent`（子类型与点槽不符 / 点非有限；两个公开构造器都会拒绝这种定义，故命中它属**缺陷信号**）、`grip.dimension_degenerate`（改后的定义无法合成显示 —— `Radial` 的 `point_on_arc` 拖到圆心、`Angular3Pt` 的 `arc_point` 拖到顶点、两条角尺线被拖成平行等 —— 或合成出的 `measurement` 非有限 / 显示为空：**绝不**存 `NaN` group 42、**绝不**存空显示）。**声明限制**：`cad-domain` 的 `DisplaySource` 是私有的，`cad-app` 无法区分「我们的合成」与「导入的匿名块图片」分支，也没有能从改后定义重建图片分支的构造器，故拖拽**总是**重合成（图片分支的 dimension 拖后变成合成分支，`measurement` 跟随改后的定义）。`DefinitionPoint` 是**新变体**而**不**复用 `Endpoint`/`Insertion`：dimension 的句柄就是它的 DXF 定义点加文字中点，共用会让 `grip.stale_handle` 无法区分。**其余整类 NOT IMPLEMENTED**：块**成员**/块内**属性**（ATTRIB）/块内点（instance path 在 `GripId` 上无法表达，`GRIPSTRETCH` 另有 `property.not_addressable` 兜底）、`MULTILEADER`（其注记文本在本版本**不**通过文本插入点句柄暴露，故**无夹点**）、`HATCH`、`IMAGE`/`MASK`。多夹点/多实体拉伸、拖拽中捕捉、3D 夹点编辑仍不存在。载荷 `CommandPayload::GripStretch(Box<GripStretchCommand>{ id: GripId, to: Point3 })`。命令层 `to` 三坐标原样存储（**不做**工作平面投影）；**宿主**在平面视图里用 `grip_hit_planar`（x/y 距离，**不是** 3D 距离——指针经 `screen_to_world` 落在工作平面上）命中夹点，并**保留被拖夹点自身的 z**，故平面拖拽**不改标高**（**3D 夹点编辑 NOT IMPLEMENTED**）。拒绝（**全部在开事务之前**，不改 revision、不写 ChangeSet、不留空撤销步）：`grip.target_missing`（实体已不存在）、`property.not_addressable`（非模型空间目标：块定义成员 / 图纸空间 —— 复用属性写的可达性理由；`GripId` 不含 instance path / 子元素字段，故那两种形态在载荷上无法表达）、`grip.stale_handle`（kind/index 与**当前**几何不符）、`grip.zero_displacement`（零位移是**错误**而非空 `Ok`，正为避免空撤销步；**宿主**把它按**显式 no-op** 处理：不发命令、不给用户报错）、`grip.unsupported_kind`（`MULTILEADER`/`HATCH`/`IMAGE`/`MASK`/`Opaque`/`Compound`/`Mesh`/`Shape` 等整类无夹点模型；`LINE`/`CIRCLE`/`ARC`/`ELLIPSE`/`POLYLINE`/`SPLINE`/`POINT`/`TEXT`/`MTEXT`/`INSERT` 已不在此列）、`grip.degenerate_radius`（圆/椭圆象限拖拽的平面内半径为 0 或非有限值，或椭圆存储帧无法导出平面内半径 —— 按名拒绝，**不夹取最小值**）、`grip.degenerate_arc`（弧端点拖拽压没张角、张角非有限，或目标在平面内无方向 —— 同样按名拒绝，**不夹取**）、`grip.partial_ellipse`（部分椭圆/椭圆弧上的象限 id：该几何只暴露 `Center` 夹点，按名拒绝而非伪称 stale）、`grip.degenerate_transform`（块引用插入点拖拽时存储的 `Transform3` 含**非有限**系数：刚性规则保留该系数，`cad-db` 提交时本会拒绝，故按名拒绝而不是把失败推后；**有限但奇异**的线性部分**不**拒绝——规则不做求逆/分解）、`grip.dimension_inconsistent`（dimension 存储定义子类型与点槽不符或点非有限：该维度**一个夹点都不暴露**，任何 `DefinitionPoint` id 均为该码；公开构造器本会拒绝这种定义，故命中属**缺陷信号**）、`grip.dimension_degenerate`（dimension 定义点拖拽后无法合成显示，或合成的 `measurement` 非有限/显示为空：按名拒绝、**不夹取**，绝不写 `NaN` group 42 或空显示）、`grip.non_finite_target`（**在读取图形之前**拒绝）。裸 `GRIPSTRETCH` 为 payload-required，按名拒绝（不路由 `BeginDraw`、不伪造拖拽）；**绝不**经过 `StretchEntities` | **宿主侧状态（`crates/cad-host/src/input/grip_drag.rs`，2026-10-26）**：`native-below` 桌面宿主（Linux 原生 Wayland / Windows）在选中实体上绘制夹点标记，并把**单个**已建模夹点（`LINE` 端点/中点、`CIRCLE` 圆心/象限、`ARC` 圆心/两端点、`ELLIPSE` 圆心/四轴点（整圈；椭圆弧仅圆心）、`POLYLINE` 顶点、`SPLINE` 控制点、`POINT` 位置、`TEXT`/`MTEXT` 插入点、`INSERT` 块引用插入点、`DIMENSION` 定义点（按子类型次序）与文字中点）的拖拽接到 `GripStretch`（宿主对夹点种类**无分支**：枚举与命中都来自模型）：按压命中夹点即 arm（2D、非捕获、工具 `Idle`/`Selecting`、主键、选中且**可见**的可直接寻址实体），移动只更新 overlay 预览（`OverlayInputs::grip_markers` 中被拖项替换为当前目标 ⇒ **移动的标记就是预览**，不发导航 delta）；拖拽目标走**与取点相同的**会话辅助 `SessionState::constrained_point`：**先栅格捕捉**（`SNAP`/F9，按 `SNAPUNIT` 间距、以世界原点为基准、半程远离零、`z` 不变）、**再 ORTHO**（`ORTHO`/F8，轴过**被拖夹点的原位**，`|dx| >= |dy|` 取水平、平局取水平，另一坐标逐位保持原位值），**预览与提交共用同一个已约束坐标**（绝不预览一个点、提交另一个）；两开关都关时与旧行为逐位相同；间距非有限或 `<= 0` 会被会话设置拒绝、量化器原样放行（不伪造间距，开关因此无效果）；**OSNAP 已参与夹点拖拽（2026-10-26）**：目标经**取点路径的同一个** `HostController::resolve_snap`
 解析（同一候选生成器、同一 `snap_enabled` 门、同一最佳候选规则与同一光圈容差），命中则**替换**原始
@@ -353,15 +423,15 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 |---|---|---|---|
 | `LAYCUR` / `LAYM C U R` | 部分实现 | LAYCUR 把每个选中模型空间实体移到会话当前层（一条事务/一步撤销）；LAYMCUR 以**第一个**选中实体的层为当前层（仅会话状态，复用既有的 locked/frozen/off 拒绝） | 无交互 Select objects；块实例成员/图纸空间/子图元按名拒绝；多选时 LAYMCUR 只用第一个（`laymcur.first_pick` 诊断） |
 | `LAYFRZ` / `LAYTHW` / `LAYLCK` / `LAYULK` | 部分实现 | 按选中实体所在层改 `LayerAttributes.frozen/locked`；LAYTHW 解冻所有冻结层。层表写**不可撤销**（每次改动一次 revision 提升，无 history patch） | 无 Settings/Viewports/Block Selection 选项；LAYFRZ 对所有视口生效且拒绝当前层；LAYTHW **不**解冻视口级冻结；无 per-layer 撤销 |
-| `SETBYLAYER` | 部分实现 | 选中的可寻址实体把 colour/linetype/lineweight 重置为 `ByLayer`（display 写，一条事务/一步撤销）；遇任一锁定层整命令拒绝 | 不重置 transparency、materials、文字/标注/填充样式；`Include blocks` 未实现；无交互 ByBlock 询问 |
+| `SETBYLAYER` | 实现 | 恢复颜色/线型/线宽/**透明度**为随层；`Include blocks` 递归块成员的显示状态；一条事务/一步撤销 | 材质/命名打印样式未建模（全局范围）；锁定图层拒绝；无交互 ByBlock 询问（全局对话框范围） |
 | `REVERSE` | 部分实现 | 反转选中 LINE / LWPOLYLINE（含 bulge 与闭合映射）/ SPLINE（控制点+节点镜像）方向，一条事务/一步撤销 | 仅当前选择；无 helix/3D；其它种类按名拒绝 |
 | `OOPS` | 部分实现 | 恢复**最近一次 ERASE** 删除的实体（新 id；一条事务/一步撤销；第二次 OOPS 为空操作） | 只记录 ERASE，不覆盖 AutoCAD 的 BLOCK/WBLOCK 删除；撤销 OOPS 不恢复快照 |
 | `OVERKILL` | 部分实现 | 删除同空间/同图层/同几何（1e-9）的**完全重复**选中对象，保留最低 draw order；一条事务/一步撤销 | 无部分重叠、共线合并、圆弧覆盖圆、折线段优化、容差选项、忽略图层/颜色选项 |
 | `BREAKATPOINT` | 部分实现 | 交互工具：拾取对象后指定断点（可投影到对象），把 LINE/ARC/开放 LWPOLYLINE 拆成两段 | 圆/闭合多段线/SPLINE 按名拒绝（闭合对象不在单点拆分）；无选项 |
-| `LIST` | 部分实现 | 读取当前选择，逐对象报告 id/handle/type/layer/space/draw order、标准显示属性与几何摘要；只读 | 不是交互 Select objects；厚度/拉伸方向未建模；不可寻址引用逐条报告后继续 |
+| `LIST` | 实现 | 读取当前选择；报告模型/图纸/块空间、id/handle/type/layer/space/draw order、颜色/线型/线宽/透明度/线型比例/可见性、文字样式/标注样式/块名与几何摘要；只读 | 不是交互 Select objects（输入是当前选择）；厚度/拉伸方向未建模（全局范围）；不可寻址引用逐条报告后继续 |
 | `STATUS` | 部分实现 | 报告数据库/修订/实体与表计数、模型空间范围、当前层、会话模式与绘图开关 | 图形界限、基点、创建/编辑时间、内存均不跟踪（`status.not_tracked`） |
 | `FS` | 部分实现 | Express 工具：把与唯一选中种子**直接接触**的可见模型空间对象并入选择（`FSMODE=OFF`） | 无传递链（`FSMODE=ON`）；不展开块成员；命令行入口，无 ribbon |
-| `TORIENT` | 部分实现 | 裸命令把选中 Text 的旋转归一到 `(-π/2, π/2]`；`TORIENT <角度>` 设绝对角；只改旋转 | 非 Text 目标跳过并诊断；无 Insert 属性/块旋转 |
+| `TORIENT` | 实现 | 裸命令 Most Readable（归一到 `(-π/2, π/2]`）、`TORIENT <角度>` 绝对旋转、`TORIENT REVERSE/R` 再加 180°（**本项目扩展**）；只改 TEXT/MTEXT rotation，位置不变 | ATTDEF/带属性块因无属性模型不适用（全局范围）；MULTILEADER/标注文字不在 AutoCAD TORIENT 范围内，报告跳过 |
 | `TCASE` | 部分实现 | 裸命令按 Title，`TCASE U/L/T/S/G` 分别大写/小写/标题/句首/切换；保留 MTEXT 转义序列 | 属性定义/标注文字未建模；MULTILEADER 只在可实现时改写 |
 | `TXT2MTXT` | 部分实现 | 选中 Text/MText 按上→下、左→右排序并以 `\P` 合并为一个 `AcDbMText`，同时删除来源（一条事务/一步撤销） | Settings 对话框、统一行距、分栏等未实现；保留原字符串转义 |
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 每个选中 HATCH 的每个 loop 生成一条同层/同空间、非关联的闭合 LWPOLYLINE（保留 bulge） | 无关联性；无选项提示 |
@@ -371,7 +441,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `WIPEOUT` | 部分实现 | 开放多边形捕获（≥3 点、`+Z` 平面）生成一个 `AcDbWipeout`（`Mask{inverted:false}`） | 无 Frames/ON/OFF/display-not-plot、无 Polyline/Erase Polyline 选项、无自交拒绝、无既有 wipeout 拾取 |
 | `POLYGON CIRCUMSCRIBED` | 部分实现 | 独立选择子：中心 + 切圆上一点，用 `R=r/cos(π/n)`、顶点在 `θ±π/n` 生成闭合外切正多边形 | `POLYGON` 的 `Edge` 分支、数值半径的捕捉旋转规则仍未实现 |
 | `DIMROTATED` | 部分实现 | 三次拾取（两原点 + 尺寸线位置）+ 会话 `dimRotation` 角度，复用 `DimensionKind::Linear{rotation}` 合成一个非关联尺寸 | 无 AutoCAD 的选项子提示；非 `+Z` 平面/退化输入按名拒绝 |
-| `DIMSPACE` | 部分实现 | 选择式：第一个线性尺寸为基准，其余按 `DIMDLI` 自动等距重排（一条事务/一步撤销） | 无交互 value 提示（恒为 0/自动），无关联重排，非线性尺寸按名拒绝 |
+| `DIMSPACE` | 实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；一条事务/一步撤销 | 模型空间；关联重排未实现（全局范围）；径向/坐标/混合类型按名拒绝 |
 | `PEDIT` | 部分实现 | 恰好一条可寻址模型空间 LWPOLYLINE；`PEDIT CLOSE/OPEN/REVERSE` 改闭合标志或反转顶点+bulge，一条事务/一步撤销；无变化时显式 no-op | 无 `Join`/`Width`/`Fit`/`Spline`/`Decurve`/`Ltype gen`/`Undo`/`Multiple`/`Edit vertex`，无交互选项提示、无 line/arc 转换；裸 `PEDIT` 或未知参数按名拒绝 |
 | `BOUNDARY` | 部分实现 | 一个内部点 → 复用 HATCHPOINT 发现（最小可见闭合边界 + 嵌套岛）；每个环在当前层创建一条闭合、非关联 `AcDbPolyline`（保留 bulge、丢重复末点、世界 `+Z`），一条事务/一步撤销；源对象保留 | 仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 的边界集/关闭岛检测/面域输出/对象类型未实现；无 `BO`/`BPOLY` 别名；不关联 |
 | `TEXTTOFRONT` | 部分实现 | 选择式：仅可寻址模型空间 Text/MultiLeader/Dimension，按相对顺序连续排到所有非合格模型空间对象的最大 draw order 之上；其它选中对象逐条 `texttofront.skipped`；一条事务/一步撤销；已在前方时 `texttofront.unchanged` 不建事务 | 图纸空间/块内 draw order 不重排；选中非文字对象不移动；AutoCAD 的“全图文字”形式与 Draw Order 对话框未实现 |
@@ -974,3 +1044,195 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | --- | --- | --- |
 | `MASSPROP` | **部分实现（只读）**：当前选择为**闭合、共面**的 `CIRCLE` / 完整 `ELLIPSE`（`|sweep| >= 2π − 1e-9`）/ 闭合 `POLYLINE`（任意 bulge，同一平面）。逐对象与汇总诊断报告**面积、周长、精确包围盒（min/max）、形心**；圆/椭圆用解析值，bulged 闭合折线用 `cad_geometry::measure_bulged_ring_area` 的精确面积、直线+圆弧精确周长、直线边+圆缺一阶矩形心。椭圆周长是 **Ramanujan 第二近似**，以 `massprop.approx_ellipse_perimeter` 明示，不是精确椭圆积分。空选择 `massprop.selection`；跨对象法向（符号无关）/标高不一致 `massprop.not_coplanar`；开放折线/圆弧/椭圆弧/样条/文字/块参照/填充/标注/3D/不可寻址引用分别按名拒绝。**无**数据库写、revision、撤销或 `ChangeSet`；Viewer 与 Work 均可用 | **未实现**（每次运行以 `massprop.not_implemented` 明示）：惯性矩/惯性积、回转半径、主惯性矩/主轴、质量/体积/3D 实体、密度、`Add`/`Subtract` 区域组合、写 `.mpr` 文件。证据为源码 + `cad_app` 契约测试（解析值、bulge 形心/包围盒、共面拒绝、零写入）；无 GUI/真实图纸/像素证据 |
 | `MEASUREGEOM` | **部分实现（选项路由）**：`MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 发送与 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE` **相同**的 `BeginMeasurement` 请求（不是第二套测量引擎）；`MEASUREGEOM RADIUS` 只读报告当前选择中**恰好一个** `ARC`/`CIRCLE` 的圆心、半径、直径、圆周长（圆弧另报弧长，代码 `measuregeom.radius`）。裸名 `measuregeom.needs_option`；未知/缩写选项由 `invalid_measuregeom_argument_reason` 列出六个完整选项。只接受完整选项词（大小写不敏感），**不接受**单字母缩写 | **未实现**：`VOLUME`（本构建无 3D 实体/体积模型，显式 `Unsupported` `measuregeom.volume_unsupported`，绝不编造数值）；AutoCAD 其它 `MEASUREGEOM` 选项与动态测量未接线。证据为 `cad-ui-core` 路由契约（每个选项启动与基选择子相同的 `tool.key`）+ `cad_app` RADIUS/VOLUME 契约测试；无真机/像素/性能证据 |
+
+### 2026-11-09 Wave 4 扩展命令（真实 2D 编辑 + 具名拒绝）
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `CENTERMARK` | **部分实现**：每个选中顶层模型空间 `CIRCLE`/`ARC` 圆心创建两条交叉 `LINE`，臂长 = 半径 **10%**（声明规则）；一条事务/一步撤销 | 无关联式 CENTERMARK 对象、无可配置尺寸 |
+| `CENTERLINE` | **部分实现**：恰好两条非退化 `LINE`，平行容差内；创建一条中间 `LINE`，跨两条投影重叠段；一条事务/一步撤销 | 无延伸/间隙选项；非平行/混合选择按名拒绝 |
+| `NCOPY` | **部分实现**：选中 `INSERT` 的可见成员几何按世界变换复制到模型空间（新顶层实体）；一条事务/一步撤销 | 无嵌套选择界面；非 INSERT 按名拒绝 |
+| `COPYTOLAYER` | **部分实现**：首个选中实体的图层为目标；其余选中顶层模型空间实体以新 id 复制到该层，原实体不变；一条事务/一步撤销 | 无图层提示；块成员/图纸空间按名拒绝 |
+| `-COPYTOLAYER` | **部分实现**：与 `COPYTOLAYER` 相同的实现，命令行拼写；一条事务/一步撤销 | 同上 |
+| `CDORDER` | **部分实现**：按颜色索引升序重写选中（空选择 = 全部模型空间）实体的存储绘制顺序；保留候选占用的原 draw-order 槽位；一条事务/一步撤销 | 无对话框；ByBlock=0、非调色板真彩=256、缺层属性=7 是声明排序规则 |
+| `FLATTEN` | **部分实现**：选中 `LINE`/`POLYLINE`/`CIRCLE`/`ARC`/`ELLIPSE`/`POINT`/`SPLINE` 的 z 改写为 0；一条事务/一步撤销 | Express 行为简化为 z=0；`MESH`/`INSERT`/非 Z 法向 3D 几何按名拒绝 |
+| `XPLODE` | **部分实现**：复用既有 `EXPLODE` 路径分解选中 `INSERT`；一条事务/一步撤销 | 属性/特性控制 **NOT IMPLEMENTED**（`xplode.attributes_not_implemented`） |
+| `BTRIM` | **部分实现**：首个选中 `INSERT` 的成员几何为边界，其余选中实体复用既有 TRIM 规划器修剪（拾取点为曲线中点）；一条事务/一步撤销 | 无交互式边界提示；不可规划的目标按名拒绝 |
+| `BEXTEND` | **部分实现**：同上，复用既有 EXTEND 规划器（拾取点为曲线终点）；一条事务/一步撤销 | 无交互式边界提示；不可规划的目标按名拒绝 |
+| `CHANGE` | **部分实现**：选中顶层模型空间实体移到当前图层，并复用属性写路径把颜色/线型/线宽重置为 ByLayer；一条事务/一步撤销 | 无交互式点/特性提示；透明度不重置 |
+| `CHPROP` | **部分实现**：与 `CHANGE` 相同的层/属性重置，独立选择子；一条事务/一步撤销 | 同上 |
+| `BSCALE` | **部分实现（具名拒绝）**：`bscale.unsupported: BSCALE needs a factor and an insertion reference; use SCALE on the selected insert` | 不写库/不升修订/不入历史 |
+| `MINSERT` | **部分实现（具名拒绝）**：`minsert.unsupported: MINSERT needs a block name and row/column counts; use INSERT then ARRAYRECT` | 同上 |
+| `BLOCKREPLACE` | **部分实现（具名拒绝）**：`blockreplace.unsupported: BLOCKREPLACE needs two block definitions; this build has no block-replace editor` | 同上 |
+| `BREPLACE` | **部分实现（具名拒绝）**：`breplace.unsupported: BREPLACE needs two block definitions; this build has no block-replace editor` | 同上 |
+| `-BREPLACE` | **部分实现（具名拒绝）**：`-breplace.unsupported: BREPLACE needs two block definitions; this build has no block-replace editor` | 同上 |
+| `SPLINEDIT` | **部分实现（具名拒绝）**：`splinedit.unsupported: this build has no NURBS edit surface` | 同上 |
+| `MLEDIT` | **部分实现（具名拒绝）**：`mlinedit.unsupported: this build has no MLINE join/cap edit model` | 同上 |
+| `-MLEDIT` | **部分实现（具名拒绝）**：`-mlinedit.unsupported: this build has no MLINE join/cap edit model` | 同上 |
+| `BURST` | **部分实现（具名拒绝）**：`burst.unsupported: this build has no block-attribute model to preserve` | 同上 |
+| `CLIP` | **部分实现（具名拒绝）**：`clip.unsupported: this build has no image/xref clipping model` | 同上 |
+| `CLIPIT` | **部分实现（具名拒绝）**：`clipit.unsupported: this build has no image/xref clipping model` | 同上 |
+| `REGION` | **部分实现（具名拒绝）**：`region.unsupported: this build has no Region geometry model` | 同上 |
+| `ADDSELECTED` | **部分实现（具名拒绝）**：`addselected.unsupported: add-selected needs per-type creation prompts that this build does not model` | 同上 |
+| `WBLOCK` | **部分实现（具名拒绝）**：`wblock.unsupported: writing a block definition to a separate drawing file is not implemented` | 同上 |
+| `-WBLOCK` | **部分实现（具名拒绝）**：`-wblock.unsupported: writing a block definition to a separate drawing file is not implemented` | 同上 |
+| `BSAVE` | **部分实现（具名拒绝）**：`bsave.unsupported: this build has no block editor` | 同上 |
+| `BSAVEAS` | **部分实现（具名拒绝）**：`bsaveas.unsupported: this build has no block editor` | 同上 |
+| `CHSPACE` | **部分实现（具名拒绝）**：`chspace.unsupported: moving entities between model and paper space is not implemented` | 同上 |
+
+### 2026-11-09 Wave 5 扩展命令（属性 + 外部参照）
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `ATTDISP` | **部分实现（会话令牌）**：翻转会话 `attdisp` 令牌（默认 **ON**）；`attdisp.toggled`；无事务/修订/历史 | 本构建**无块属性模型**，因此不渲染（也不隐藏）任何属性；没有渲染器消费者 |
+| `BATTMAN` | **部分实现（只读）**：`battman.entry` 逐块定义 + `battman.summary`（复用 `drawing.blocks()`） | 块属性**未建模**（`battman.attributes_not_modeled`）；不是属性管理器对话框 |
+| `BATTORDER` | **部分实现（只读）**：`battorder.entry` 逐块定义 + `battorder.summary` | 属性显示顺序**未建模**（`battorder.attributes_not_modeled`）；不重排任何内容 |
+| `XREF` | **部分实现（只读）**：读取 `drawing.external_references()` 导入期溯源，`xref.entry`/`xref.summary`（名称/状态/原始与解析路径/深度/overlay/块） | 无附着/卸载/重载/绑定/编辑；空映射报告 0 行，不虚构；浏览器仍按导入期 `browser-unavailable` 状态显示 |
+| `-XREF` | **部分实现（只读）**：同一报告，使用 `-xref.entry`/`-xref.summary` 诊断码 | 同上；命令行拼写不能附着/卸载/重载/绑定 |
+| `EXTERNALREFERENCES` | **部分实现（只读）**：同一报告，`externalreferences.entry`/`.summary` | 本构建**无 External References 选项板**（`externalreferences.palette_not_implemented`）；不打开任何 UI |
+| `EXTERNALREFERENCESCLOSE` | **部分实现（具名 no-op）**：`externalreferences.close_not_implemented`，不改变任何状态 | 没有选项板可关闭 |
+| `ATTDEF` | **部分实现（具名拒绝）**：`attdef.unsupported: this build has no block-attribute model` | 不写库/不升修订/不入历史 |
+| `-ATTDEF` | **部分实现（具名拒绝）**：`-attdef.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTEDIT` | **部分实现（具名拒绝）**：`attedit.unsupported: this build has no block-attribute model` | 同上 |
+| `-ATTEDIT` | **部分实现（具名拒绝）**：`-attedit.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTIPEDIT` | **部分实现（具名拒绝）**：`attipedit.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTIN` | **部分实现（具名拒绝）**：`attin.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTOUT` | **部分实现（具名拒绝）**：`attout.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTEXT` | **部分实现（具名拒绝）**：`attext.unsupported: this build has no block-attribute model` | 同上 |
+| `-ATTEXT` | **部分实现（具名拒绝）**：`-attext.unsupported: this build has no block-attribute model` | 同上 |
+| `EATTEDIT` | **部分实现（具名拒绝）**：`eattedit.unsupported: this build has no block-attribute model` | 同上 |
+| `EATTEXT` | **部分实现（具名拒绝）**：`eatttext.unsupported: this build has no block-attribute model` | 同上（原因串按历史拼写 `eatttext`，与选择子 `EATTEXT` 一致地稳定） |
+| `-EATTEXT` | **部分实现（具名拒绝）**：`-eatttext.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTREDEF` | **部分实现（具名拒绝）**：`attredef.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTSYNC` | **部分实现（具名拒绝）**：`attsync.unsupported: this build has no block-attribute model` | 同上 |
+| `GATTE` | **部分实现（具名拒绝）**：`gatte.unsupported: this build has no block-attribute model` | 同上 |
+| `XDATA` | **部分实现（具名拒绝）**：`xdata.unsupported: this database does not retain entity XDATA` | 同上 |
+| `XBIND` | **部分实现（具名拒绝）**：`xbind.unsupported: this build has no xref bind/insert model` | 同上 |
+| `-XBIND` | **部分实现（具名拒绝）**：`-xbind.unsupported: this build has no xref bind/insert model` | 同上 |
+| `XATTACH` | **部分实现（具名拒绝）**：`xattach.unsupported: this build does not attach external drawings as xrefs` | 同上 |
+| `ATTACH` | **部分实现（具名拒绝）**：`attach.unsupported: this build does not attach external references or underlays` | 同上 |
+| `-ATTACH` | **部分实现（具名拒绝）**：`-attach.unsupported: this build does not attach external references or underlays` | 同上 |
+| `XOPEN` | **部分实现（具名拒绝）**：`xopen.unsupported: this build has no xref editing session` | 同上 |
+| `CLASSICXREF` | **部分实现（具名拒绝）**：`classicxref.unsupported: there is no separate xref palette; use the RESOURCES panel` | 同上 |
+
+### 2026-11-09 Wave 6 扩展命令（文件 / 出图 / 导出）
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `DWGLOG` | **部分实现（会话令牌）**：翻转会话 `dwglog` 令牌（默认 **OFF**）；`dwglog.toggled`；无事务/修订/历史 | 本构建**不写日志文件**，也不写图；没有日志消费者 |
+| `LOGFILEON` | **部分实现（会话令牌）**：把同一 `dwglog` 令牌置 **ON**；`logfileon.toggled` | 不写日志文件 |
+| `LOGFILEOFF` | **部分实现（会话令牌）**：把同一 `dwglog` 令牌置 **OFF**；`logfileoff.toggled` | 不写日志文件 |
+| `DWGPROPS` | **部分实现（只读）**：`dwgprops.report` 报告文档 id、修订号、实体数 | 标题/作者/主题/关键字/自定义特性**未建模**（`dwgprops.metadata_not_tracked`），不杜撰 |
+| `DWFFORMAT` | **部分实现（只读能力报告）**：`dwfformat.not_supported` 说明本构建不导出 DWF/DWFx，并指向 `PLOT` 的 SVG/PDF | 不是错误；没有默认格式设置，不写任何文件 |
+| `EXPORTPDF` | **部分实现（只读能力报告）**：`exportpdf.use_plot` 说明 PDF 导出由宿主经 `PLOT`（平台保存对话框）负责 | 不是错误；本命令自身不写 PDF，`cad-app` 不重实现宿主文件 I/O |
+| `SAVEALL` | **部分实现（具名拒绝）**：`saveall.single_document: this build has one document; use SAVE` | 不写库/不升修订/不入历史 |
+| `QNEW` | **部分实现（具名拒绝）**：`qnew.single_document: use NEW` | 同上 |
+| `REVERT` | **部分实现（具名拒绝）**：`revert.unsupported: no reopen-to-source path` | 同上 |
+| `CLOSEALL` | **部分实现（具名拒绝）**：`closeall.single_document: use CLOSE` | 同上 |
+| `CLOSEALLOTHER` | **部分实现（具名拒绝）**：`closeallother.single_document: only one document exists` | 同上 |
+| `QQUIT` | **部分实现（具名拒绝）**：`qquit.unsupported: application exit is host-owned` | 同上 |
+| `QUIT` | **部分实现（具名拒绝）**：`quit.unsupported: application exit is host-owned` | 同上 |
+| `PROPULATE` | **部分实现（具名拒绝）**：`propulate.unsupported: no property-propagation model` | 同上 |
+| `PLOTTERMANAGER` | **部分实现（具名拒绝）**：`plottermanager.unsupported: no plotter configuration model` | 同上 |
+| `STYLESMANAGER` | **部分实现（具名拒绝）**：`stylesmanager.unsupported: no CTB/STB plot-style model` | 同上 |
+| `EXPORTSETTINGS` | **部分实现（具名拒绝）**：`exportsettings.unsupported: no export-settings model` | 同上 |
+| `PREVIEW` | **部分实现（具名拒绝）**：`preview.unsupported: no plot-preview window` | 同上 |
+| `EXPORTLAYOUT` | **部分实现（具名拒绝）**：`exportlayout.unsupported: use PLOT (one layout, SVG/PDF)` | 同上 |
+| `PLOTSTAMP` | **部分实现（具名拒绝）**：`plotstamp.unsupported: no plot-stamp model` | 同上 |
+| `-PLOTSTAMP` | **部分实现（具名拒绝）**：`-plotstamp.unsupported: no plot-stamp model` | 同上 |
+| `-PLOT` | **部分实现（具名拒绝）**：`-plot.unsupported: use PLOT; this build has one vector plot path` | 同上 |
+| `-EXPORT` | **部分实现（具名拒绝）**：`-export.unsupported: use PLOT/EXPORT; this build has one vector export path` | 同上 |
+| `ETRANSMIT` | **部分实现（具名拒绝）**：`etransmit.unsupported: no eTransmit/zip packaging model` | 同上 |
+| `-ETRANSMIT` | **部分实现（具名拒绝）**：`-etransmit.unsupported: no eTransmit/zip packaging model` | 同上 |
+| `ARCHIVE` | **部分实现（具名拒绝）**：`archive.unsupported: no sheet-set archive packaging model` | 同上 |
+| `-ARCHIVE` | **部分实现（具名拒绝）**：`-archive.unsupported: no sheet-set archive packaging model` | 同上 |
+| `PUBLISH` | **部分实现（具名拒绝）**：`publish.unsupported: no batch publish model` | 同上 |
+| `-PUBLISH` | **部分实现（具名拒绝）**：`-publish.unsupported: no batch publish model` | 同上 |
+| `AUTOPUBLISH` | **部分实现（具名拒绝）**：`autopublish.unsupported: no automatic publish model` | 同上 |
+
+### 2026-11-09 Wave 7 扩展命令（动态块 / 约束）
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `BVSTATE` | **部分实现（只读）**：逐选中 INSERT 报告 `block_dynamic_visibility` 的活动状态；`bvstate.report` | 无 INSERT 报 `bvstate.no_selection`；无描述符或活动状态未解析报 `bvstate.not_set`，不猜测/不设置状态 |
+| `-BVSTATE` | **部分实现（只读）**：同 `BVSTATE`，使用 `-bvstate.*` 诊断码 | 同上；不设置状态 |
+| `BACTION` | **部分实现（具名拒绝）**：`baction.unsupported: this build has no dynamic-block action model` | 不写库/不升修订/不入历史 |
+| `BACTIONBAR` | **部分实现（具名拒绝）**：`bactionbar.unsupported: this build has no dynamic-block action model` | 同上 |
+| `BACTIONSET` | **部分实现（具名拒绝）**：`bactionset.unsupported: this build has no dynamic-block action model` | 同上 |
+| `BACTIONTOOL` | **部分实现（具名拒绝）**：`bactiontool.unsupported: this build has no dynamic-block action model` | 同上 |
+| `BASSOCIATE` | **部分实现（具名拒绝）**：`bassociate.unsupported: this build has no dynamic-block action model` | 同上 |
+| `BAUTHORPALETTE` | **部分实现（具名拒绝）**：`bauthorpalette.unsupported: this build has no block editor` | 同上 |
+| `BAUTHORPALETTECLOSE` | **部分实现（具名拒绝）**：`bauthorpaletteclose.unsupported: this build has no block editor` | 同上 |
+| `BCONSTRUCTION` | **部分实现（具名拒绝）**：`bconstruction.unsupported: this build has no dynamic-block construction geometry` | 同上 |
+| `BCPARAMETER` | **部分实现（具名拒绝）**：`bcparameter.unsupported: this build has no dynamic-block parameter model` | 同上 |
+| `-BCPARAMETER` | **部分实现（具名拒绝）**：`-bcparameter.unsupported: this build has no dynamic-block parameter model` | 同上 |
+| `BPARAMETER` | **部分实现（具名拒绝）**：`bparameter.unsupported: this build has no dynamic-block parameter model` | 同上 |
+| `BLOOKUPTABLE` | **部分实现（具名拒绝）**：`blookuptable.unsupported: this build has no dynamic-block lookup table` | 同上 |
+| `BTABLE` | **部分实现（具名拒绝）**：`btable.unsupported: this build has no dynamic-block lookup table` | 同上 |
+| `BVHIDE` | **部分实现（具名拒绝）**：`bvhide.unsupported: no per-visibility-state entity hide API` | 同上 |
+| `BVSHOW` | **部分实现（具名拒绝）**：`bvshow.unsupported: no per-visibility-state entity show API` | 同上 |
+| `RESETBLOCK` | **部分实现（具名拒绝）**：`resetblock.unsupported: no dynamic-block parameter reset API` | 同上 |
+| `AUTOCONSTRAIN` | **部分实现（具名拒绝）**：`autoconstrain.unsupported: this build has no geometric-constraint model` | 同上 |
+| `DELCONSTRAINT` | **部分实现（具名拒绝）**：`delconstraint.unsupported: this build has no geometric-constraint model` | 同上 |
+| `DIMCONSTRAINT` | **部分实现（具名拒绝）**：`dimconstraint.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `GEOMCONSTRAINT` | **部分实现（具名拒绝）**：`geomconstraint.unsupported: this build has no geometric-constraint model` | 同上 |
+| `DCALIGNED` | **部分实现（具名拒绝）**：`dcaligned.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCANGULAR` | **部分实现（具名拒绝）**：`dcangular.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCCONVERT` | **部分实现（具名拒绝）**：`dcconvert.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCDIAMETER` | **部分实现（具名拒绝）**：`dcdiameter.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCDISPLAY` | **部分实现（具名拒绝）**：`dcdisplay.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCFORM` | **部分实现（具名拒绝）**：`dcform.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCHORIZONTAL` | **部分实现（具名拒绝）**：`dchorizontal.unsupported: this build has no dimensional-constraint model` | 同上 |
+| `DCLINEAR` | **部分实现（具名拒绝）**：`dclinear.unsupported: this build has no dimensional-constraint model` | 同上 |
+
+### 2026-11-09 Wave 8 扩展命令（会话令牌 / 稳定拒绝）
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `ELEV` | **部分实现（只读）**：报告会话标高档位（默认 0.0，`elev.value`） | `ELEV <height>` 设置形式未实现；不按标高创建对象；不写库/不升修订 |
+| `UCSICON` | **部分实现（会话开关）**：翻转 `ucsicon`（默认关，`ucsicon.toggled`） | 本构建不渲染 UCS 图标，不声称图标可见性/位置/外观；不写库/不升修订 |
+| `UCS` | **部分实现（具名拒绝）**：`ucs.unsupported: this build has no UCS model` | 不写库/不升修订/不入历史 |
+| `UCSMAN` | **部分实现（具名拒绝）**：`ucsman.unsupported: this build has no UCS model` | 同上 |
+| `TABLET` | **部分实现（具名拒绝）**：`tablet.unsupported: no tablet/digitizer model` | 同上 |
+| `TASKBAR` | **部分实现（具名拒绝）**：`taskbar.unsupported: application window chrome is host-owned` | 同上 |
+| `REINIT` | **部分实现（具名拒绝）**：`reinit.unsupported: no device/digitizer initialization model` | 同上 |
+| `SYSWINDOWS` | **部分实现（具名拒绝）**：`syswindows.unsupported: application window layout is host-owned` | 同上 |
+| `MENU` | **部分实现（具名拒绝）**：`menu.unsupported: no menu-file model; the UI is fixed` | 同上 |
+| `RIBBON` | **部分实现（具名拒绝）**：`ribbon.unsupported: ribbon visibility is host-owned chrome` | 同上 |
+
+## P2 晋升与边界更新（2026-11-09）
+
+> 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux
+> 编译 + 契约测试，GUI/GPU/像素 NOT VERIFIED。**严格口径**：依赖「未建模能力」的命令保留
+> `部分实现`，不把模型缺口当作完成豁免。
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `CHAMFER` | **完整实现** | `Distance`/`Angle`/`Method`/`Trim`；双零 ⇒ 仅延伸相交；`CHAMFER POLYLINE` 全顶点、弧段替换、过短跳过、开口闭合 | `Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离未文档化 ⇒ 具名拒绝；圆弧/圆/样条 AutoCAD 也不接受 |
+| `FILLET` | 部分实现 | `Radius`/`Trim`/`Polyline` 全顶点；`R=0` 尖角；平行线自动半径 = 间隙/2；直线↔圆/弧相切且圆不修剪 | **曲线对曲线**（圆/弧互选、椭圆、椭圆弧、样条）⇒ `fillet.unsupported_pair` |
+| `PEDIT` | 部分实现 | 全选项行；`Join` 接受线/弧/多段线；`Fit`/`Spline` 含闭合环；`Decurve`/`Reverse`/`Undo`；LINE/ARC/SPLINE 转换 | **`Width`/`Ltype gen`/`Edit vertex` 未实现**（多段线无宽度/`plinegen`/顶点子菜单模型）；偶数环无精确弧拟合 ⇒ `pedit.fit_closure` |
+| `JOIN` | 部分实现 | 源对象模式；`Multiple` 把 LINE/ARC/多段线/SPLINE 精确焊接为**有理 B 样条** | **椭圆弧与其它类型混合**仍拒绝；非共面多段线属 3D 全局范围 |
+| `OFFSET` | **完整实现** | `Through`/`Erase`/`Layer`/`Multiple`（单步）/距离；椭圆与椭圆弧→样条；`OFFSETGAPTYPE` Sharp/**Fillet**/**Chamfer** | `OFFSET MULTIPLE` 的多点循环拒绝（单点捕获，属逐选项提示全局范围）；开放折线远端自交未检查（AutoCAD 未文档化） |
+| `STRETCH` | 部分实现 | 交叉矩形 + 交叉多边形/lasso payload（even-odd 包含）；部分包围逐顶点、完全包围整移；圆按圆心、块/文字按插入点；标注按定义点 | **多边形/lasso 的交互捕获未接线**（只经 API/IPC 可达，工具仍只捕获矩形） |
+| `MIRROR` | 部分实现 | `MIRRTEXT=0` 可读镜像；`MIRROR ERASE YES/NO`；标注反射后重合成 | **`MIRRTEXT=1` 字形镜像未实现**（文字实体无镜像标志） |
+| `EXPLODE` | 部分实现 | 标注→线/弧/箭头网格/文字；多重引线→引线/样条/箭头网格/MTEXT；非均匀块可表示子集；嵌套一层；MINSERT/XREF 拒绝 | **多重引线的背景/分栏/自定义箭头/打断/非默认平面未导入也未产出**；块属性值丢弃（无属性模型） |
+| `QSELECT` | 部分实现 | `Equals`/`Not Equal`/`>`/`<`/`>=`/`<=`/通配符/`Select All`；整图（当前空间）或当前选择；`Include`/`Exclude`/`Append`；嵌套块不参与；只读 | **分类/自定义对象特性未建模**，属性集为基础子集；通配符仅 `*`/`?` |
+| `FILTER` | 部分实现 | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读 | **分类/自定义特性未建模**；**命名 `.nfl` 过滤器未实现**（宿主文件 I/O） |
+
+## P3 晋升与边界更新（2026-11-09）
+
+> 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页（Express Tools 的提示文案
+> 仅旧版手册有，已标注）；证据仅 Linux 编译 + 契约测试，GUI/GPU/像素 NOT VERIFIED。
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `OVERKILL` | **完整实现** | 容差（`0`=精确）、忽略 Color/Layer/Linetype/LTScale/Lineweight/Transparency、多段线段优化 + `Do Not Break Polylines`、共线部分重叠/端到端合并、弧覆盖圆、重复段删除；保留最低 `(draw_order,id)`；一条事务/一步撤销 | 关联保持属关联性全局范围；段宽/厚度/打印样式未建模；逐段 bulge 数组布局按名报告 |
+| `AUDIT` | **完整实现** | `Fix any errors detected? [Yes/No]`（默认 No，键入 `AUDIT YES/NO/LOG`）；分段报告；只修复 `validate_entity` 可证明可修复的行；当前空间错误对象进入 Previous 映射 | 可修复错误类受数据库校验器限制（AutoCAD 也不公布清单）；修复不可撤销（`audit.repairs_not_undoable`）；`AUDITCTL` `.adt` 日志属宿主文件 I/O |
+| `SSX` | 部分实现 | Express **筛选表构建器**（非 SELECTSIMILAR）：`BLOCK/COLOR/ENTITY/LAYER/LTYPE/STYLE/PICK/CLEAR`，单值覆盖/移除；模板来自当前选择；当前空间；替换选择；只读 | **`FLAG`/`THICKNESS`/`VECTOR` 未建模**（实体标志位/厚度/挤出矢量）⇒ 具名拒绝；无 Previous 选择集，映射为替换当前选择 |
+| `QDIM` | **完整实现** | `Continuous`（默认）/`Staggered`/`Baseline`/`Ordinate`/`Radius`/`Diameter` + `Datum Point`/`Edit`/`Settings`；既有标注可作为输入；一条事务/一步撤销 | 无交互位置/选项循环（逐选项提示全局范围）；角度不是 QDIM 模式；Staggered 步长 = `DIMDLI`（声明）；`INTERSECTIONS` 只用选中 LINE 对 |
+| `DIMTEDIT` | 部分实现 | `MOVE`（新位置）/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 仅线性/对齐/半径/直径；Angle 固定文字中心，`0` 复位；一条事务/一步撤销 | **字形级对齐未实现**（只移动锚点；标注模型无 `h_align`）；无 Oblique |
+| `HATCHEDIT` | 部分实现 | 多目标；`Style`/`PatternType`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder Behind/Front`/`Recreate Boundary`/`Separate Hatches`；一条事务/一步撤销 | **`Add Boundaries`/`Remove Boundaries`** 无法从拾取重建环集；`Origin` 无字段；`Associate`/`Disassociate`/`Annotative` 无模型；Boundary draw order 拒绝 |
+| `REVCLOUD` | 部分实现 | `Object`/`Rectangular`/`Polygonal`/`Freehand`/`Arc Length`/`Style`/`Modify`；等弦弧（106.26°）；默认弦长 = 源路径 bbox 对角线 5%（声明替代）；一条事务/一步撤销 | **`Calligraphy` 样式未实现**（多段线无样式字段）；`Modify` 用确定性规则替代交互拾取；`RECT/POLY/FREEHAND/MODIFY` 的路径来自唯一选中 LWPOLYLINE |
+| `WIPEOUT` | 部分实现 | `Frames ON/OFF/DISPLAY` 状态、`Polyline` + `Erase Polyline Yes/No`、自由点串 | **边框几何与出图通道未实现**：`DISPLAY` 目前只记录状态，遮罩始终渲染；`FRAME` 覆盖无命令 |
+| `TEXTMASK` | 部分实现 | 偏移因子（默认 0.35）、`Wipeout` 遮罩、文本+遮罩会话 `GROUP`、重跑替换旧遮罩、`TEXTUNMASK` 按组优先；一条事务/一步撤销 | **`3dface`/`Solid` 遮罩类型未实现**（无对应实体）；`GROUP` 为会话存储（DWG 不落关联记录） |
+| `TXT2MTXT` | 部分实现 | `COMBINE`/`SEPARATE`、`ORDER TOPDOWN/SELECT`、`WRAP`（`wrap_width`）、源对象在同一事务删除 | **`UNIFORM` 强制行距未实现**（文字无行距字段） |

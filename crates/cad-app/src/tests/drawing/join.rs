@@ -1,14 +1,18 @@
 //! JOIN edit-command contract tests.
 //!
-//! Pins the two implemented subsets (collinear LINEs → one LINE, contiguous
-//! concentric ARCs → one ARC with the summed sweep), the fresh-id/one-transaction/
+//! Pins the source-object modes (LINEs with gaps, concentric ARCs with gaps and
+//! `Close` → CIRCLE, same-frame ELLIPSE arcs, contiguous LINE/ARC/POLYLINE →
+//! POLYLINE, contiguous SPLINEs → SPLINE), the `JOIN MULTIPLE` classification
+//! (including the MULTIPLE-only LINE + ARC mix), the fresh-id/one-transaction/
 //! one-undo-step shape (an UNDO restores every source), the explicit refusal set
 //! (nothing written, no revision bump, no undo entry) and the locked-layer
 //! chokepoint.
 
 use super::explode::part;
 use super::*;
+use crate::command_payload::{JoinMode, JoinOptions};
 use cad_db::{DrawingDatabaseBuilder, Layer, LayerAttributes};
+use cad_geometry::clamped_uniform_knots;
 
 fn line_geometry(x0: f64, y0: f64, x1: f64, y1: f64) -> SemanticGeometry {
     SemanticGeometry::Line {
@@ -145,6 +149,56 @@ fn select(app: &mut Application, session: &mut SessionState, entities: &[u128]) 
 
 fn join(app: &mut Application, session: &mut SessionState) -> CadResult<CommandOutcome> {
     execute(app, session, CommandId::Join, CommandPayload::None)
+}
+
+fn join_with(
+    app: &mut Application,
+    session: &mut SessionState,
+    close: bool,
+    mode: JoinMode,
+) -> CadResult<CommandOutcome> {
+    execute(
+        app,
+        session,
+        CommandId::Join,
+        CommandPayload::Join(JoinOptions { close, mode }),
+    )
+}
+
+fn ellipse_geometry(center: Point3, start: f64, sweep: f64) -> SemanticGeometry {
+    SemanticGeometry::Ellipse {
+        center,
+        normal: p3(0.0, 0.0, 1.0),
+        major_axis: p3(5.0, 0.0, 0.0),
+        ratio: 0.5,
+        start,
+        sweep,
+    }
+}
+
+fn spline_geometry(control_points: Vec<Point3>, degree: u32) -> SemanticGeometry {
+    let n = control_points.len();
+    SemanticGeometry::Spline {
+        degree,
+        knots: clamped_uniform_knots(n, degree as usize),
+        control_points,
+        weights: vec![1.0; n],
+    }
+}
+
+fn polyline_geometry(points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> SemanticGeometry {
+    SemanticGeometry::Polyline {
+        points,
+        bulges,
+        closed,
+    }
+}
+
+/// The one produced entity's geometry after a successful JOIN.
+fn one_geometry(app: &Application) -> SemanticGeometry {
+    let produced = model_geometry(app);
+    assert_eq!(produced.len(), 1, "the weld leaves exactly one entity");
+    produced[0].1.clone()
 }
 
 fn entity_count(app: &Application) -> usize {
@@ -427,13 +481,22 @@ fn a_parallel_but_offset_line_is_not_collinear() {
 }
 
 #[test]
-fn a_gap_between_lines_is_not_contiguous() {
+fn a_gap_between_collinear_lines_is_allowed_and_the_span_is_the_union() {
     let (mut app, mut session) = app_with(vec![
         line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 4.0, 0.0), 0),
         line_entity(2, LayerId(0), line_geometry(5.0, 0.0, 9.0, 0.0), 1),
     ]);
     select(&mut app, &mut session, &[1, 2]);
-    assert_refusal_changes_nothing(&mut app, &mut session, "join.not_contiguous", false);
+    join(&mut app, &mut session).expect("a collinear gap is the LINE source-object allowance");
+    match one_geometry(&app) {
+        SemanticGeometry::Line { start, end } => {
+            assert!(near(start, point(0.0, 0.0)), "{start:?}");
+            assert!(near(end, point(9.0, 0.0)), "{end:?}");
+        }
+        other => panic!("expected one LINE, got {other:?}"),
+    }
+    assert_eq!(entity_count(&app), 1);
+    assert_eq!(undo_depth(&app), 1);
 }
 
 #[test]
@@ -504,21 +567,17 @@ fn arcs_with_a_different_radius_are_not_contiguous() {
 }
 
 #[test]
-fn a_non_line_or_arc_kind_is_unsupported() {
+fn a_kind_outside_the_join_source_model_is_unsupported() {
     let (mut app, mut session) = app_with(vec![
-        line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 4.0, 0.0), 0),
         part(
-            2,
-            SemanticGeometry::Polyline {
-                points: vec![point(4.0, 0.0), point(9.0, 0.0)],
-                bulges: vec![0.0, 0.0],
-                closed: false,
-            },
+            1,
+            SemanticGeometry::Point(point(0.0, 0.0)),
             LayerId(0),
             SpaceId::Model,
-            "AcDbPolyline",
-            1,
+            "AcDbPoint",
+            0,
         ),
+        line_entity(2, LayerId(0), line_geometry(0.0, 0.0, 4.0, 0.0), 1),
     ]);
     select(&mut app, &mut session, &[1, 2]);
     assert_refusal_changes_nothing(&mut app, &mut session, "", true);
@@ -566,3 +625,6 @@ fn viewer_mode_refuses_join() {
     assert!(matches!(error, CadError::PermissionDenied), "{error:?}");
     assert_eq!(entity_count(&app), 3);
 }
+
+#[path = "join_extended.rs"]
+mod extended;

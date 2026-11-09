@@ -269,7 +269,7 @@ test('the text step keeps its generic semantics for MLEADER — no special case'
     .filter(([, , body]) => /mleader/i.test(body))
     .map(([, path]) => path.split('/').pop())
     .sort();
-  assert.deepEqual(owners, ['cad.ts', 'catalog.ts', 'icons.tsx', 'ribbon-model.ts']);
+  assert.deepEqual(owners, ['cad.ts', 'catalog.ts', 'gating.ts', 'icons.tsx', 'ribbon-model.ts']);
 });
 
 test('no control implies the Options sub-prompt MLEADER does not have', () => {

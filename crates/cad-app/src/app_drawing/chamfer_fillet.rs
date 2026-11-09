@@ -1,32 +1,83 @@
-use super::helpers::{corner_tolerance, plan_chamfer, plan_fillet, straight_line, TwoLineInput};
+//! CHAMFER and FILLET of two picked objects (AutoCAD 2026 contract).
+//!
+//! ## CHAMFER (`Select first line or [Undo/Polyline/Distance/Angle/Trim/mEthod/Multiple]`)
+//!
+//! Two picked straight objects. The distances are the session typed channel
+//! ([`ToolParameter::ChamferDistanceA`]/`B`); the **method**, **angle** and
+//! **trim** switch are the stored [`crate::session_state::CornerModes`]
+//! (`CHAMMODE`/`TRIMMODE` plus the angle token), read here so the session stays
+//! the single authority:
+//!
+//! * **Distance** — `A` applies to the first-picked object and `B` to the second,
+//!   in selection order. Both distances `0` extend/trim the two objects to their
+//!   intersection and create **no** chamfer line.
+//! * **Angle** — the distance from the first object plus the angle measured from
+//!   that object. The second distance is `d₂ = d·sin α / sin(φ + α)` (`φ` the
+//!   angle between the two picked arms); a zero distance **and** a zero angle are
+//!   again the intersect-only form. A zero angle with a positive distance
+//!   collapses the joining segment and is refused by name (not documented by
+//!   AutoCAD).
+//! * **Trim / No Trim** — with trim on (default) both objects are trimmed or
+//!   extended to the computed points; with trim off they are left untouched and
+//!   only the joining LINE is created. Trim-off intersect-only has nothing to
+//!   create and is refused rather than reported as an empty success.
+//! * **Method / Multiple / Undo** — the method is the stored
+//!   [`crate::session_state::CornerModes::chamfer_method`]; `Multiple` and the
+//!   in-command `Undo` sub-option need the interactive option loop this build
+//!   does not have (each accepted invocation is exactly one transaction / one
+//!   undo step, and the global `UNDO` reverses it).
+//!
+//! Accepted objects are **2D polylines and lines** (a finite RAY/XLINE reaches us
+//! as a LINE). Arcs, circles and splines are refused by name — AutoCAD's CHAMFER
+//! does not accept them either. A negative distance is not documented and is
+//! refused (`chamfer.distance_negative`), never guessed; a negative angle is
+//! refused the same way.
+//!
+//! ## FILLET (`Select first object or [Undo/Polyline/Radius/Trim/Multiple]`)
+//!
+//! * `R = 0` is the sharp corner: both objects are trimmed/extended to their
+//!   intersection and no ARC is created.
+//! * `R > 0` creates one tangent ARC and trims both objects to the tangent points
+//!   (with trim off the objects are untouched).
+//! * **Parallel lines** — the stored radius is ignored and the result is a tangent
+//!   arc whose effective radius is **half the perpendicular gap**. Derivation: a
+//!   circle tangent to two distinct parallel lines has its centre on the midline,
+//!   so its radius is the distance from the midline to either line, i.e.
+//!   `gap / 2`. The tangent points are the perpendicular feet of that centre. The
+//!   centre's position **along** the lines is our declared rule: the average of
+//!   the two pick projections, so the arc lands between the picks.
+//! * Accepted objects: **2D polylines, lines, circles, arcs**. A selected circle
+//!   is **never trimmed**: the fillet meets it tangentially and the circle stays
+//!   whole. An arc is trimmed to the tangent point on its pick side. Ellipses,
+//!   elliptical arcs, splines and every pair beyond line↔line / line↔circle /
+//!   line↔arc are explicit named `Unsupported` refusals in this build.
+//! * A negative radius is not documented and is refused
+//!   (`fillet.radius_negative`).
+//!
+//! Every accepted invocation commits in **one transaction / one undo step**. All
+//! refusals are resolved before the first write, so a refusal changes nothing.
+//! The pure planners live in the private [`corner_geometry`] submodule (declared
+//! with an explicit `#[path]` so the shared `app_drawing/mod.rs` needs no edit).
+
+#[path = "corner_geometry.rs"]
+mod corner_geometry;
+
+use super::helpers::corner_tolerance;
 use super::*;
-
 use crate::draw_tool::ToolParameter;
-
-/// Which two-line edit a CHAMFER/FILLET command performs.
-enum TwoLineSpec {
-    /// CHAMFER with the two session distances (first line, second line).
-    Chamfer { distance_a: f64, distance_b: f64 },
-    /// FILLET with the session radius.
-    Fillet { radius: f64 },
-}
-
-/// The two resolved picks (refs + raw pick points) a two-line edit acts on.
-struct TwoLinePick<'a> {
-    first: &'a SelectionRef,
-    second: &'a SelectionRef,
-    pick_first: Point3,
-    pick_second: Point3,
-}
+use crate::session_state::ChamferMethod;
+use corner_geometry::{
+    fillet_curve, plan_chamfer_two_line, plan_fillet_two_line, straight_line, ChamferSpec,
+    GeometryUpdate, TwoLineCommandKind, TwoLineInput, TwoLinePlan,
+};
 
 impl Application {
-    /// CHAMFER two picked straight lines (ADR 0016 decision C).
+    /// CHAMFER two picked straight objects.
     ///
-    /// The two picks are entity picks resolved at capture time; the distances are
-    /// the session typed channel ([`ToolParameter::ChamferDistanceA`]/`B`), read
-    /// here so the session stays the single authority (exactly like POLYGON's side
-    /// count). One transaction and one undo step cover the two updates and, when a
-    /// distance is non-zero, the one inserted LINE.
+    /// The two picks are entity picks resolved at capture time; the distances
+    /// are the session typed channel, the method/angle/trim are the stored
+    /// [`crate::session_state::CornerModes`]. Read here so the session stays the
+    /// single authority.
     pub(crate) fn chamfer_lines(
         &mut self,
         session: &SessionState,
@@ -37,25 +88,31 @@ impl Application {
                 "ChamferLines needs a Chamfer(TwoLineCommand) payload".into(),
             ));
         };
-        let spec = TwoLineSpec::Chamfer {
-            distance_a: tool_number(session, ToolParameter::ChamferDistanceA),
-            distance_b: tool_number(session, ToolParameter::ChamferDistanceB),
+        let modes = session.drafting_extras.corner_modes();
+        let distance_a = tool_number(session, ToolParameter::ChamferDistanceA);
+        let spec = match modes.chamfer_method() {
+            ChamferMethod::Distance => ChamferSpec::Distances {
+                a: distance_a,
+                b: tool_number(session, ToolParameter::ChamferDistanceB),
+            },
+            ChamferMethod::Angle => ChamferSpec::Angle {
+                distance: distance_a,
+                angle_radians: modes.chamfer_angle_radians(),
+            },
         };
-        let pick = TwoLinePick {
-            first: &payload.first,
-            second: &payload.second,
-            pick_first: payload.pick_first,
-            pick_second: payload.pick_second,
+        let kind = TwoLineCommandKind::Chamfer {
+            spec,
+            trim: modes.trim(),
         };
-        self.two_line_edit(command, session, pick, spec)
+        let plan = self.plan_two_line(command, payload, kind)?;
+        self.commit_two_line(command, session, plan, kind)
     }
 
-    /// FILLET two picked straight lines (ADR 0016 decision B).
+    /// FILLET two picked objects.
     ///
-    /// Same capture shape as CHAMFER; the radius is the session typed channel
-    /// ([`ToolParameter::FilletRadius`], default 0 ⇒ corner only). One transaction
-    /// and one undo step cover the two updates and, for `R > 0`, the one inserted
-    /// tangent ARC.
+    /// The radius is the session typed channel ([`ToolParameter::FilletRadius`]);
+    /// trim is the stored [`crate::session_state::CornerModes::trim`]. `R = 0` is
+    /// the sharp corner.
     pub(crate) fn fillet_lines(
         &mut self,
         session: &SessionState,
@@ -66,55 +123,111 @@ impl Application {
                 "FilletLines needs a Fillet(TwoLineCommand) payload".into(),
             ));
         };
-        let spec = TwoLineSpec::Fillet {
+        let modes = session.drafting_extras.corner_modes();
+        let kind = TwoLineCommandKind::Fillet {
             radius: tool_number(session, ToolParameter::FilletRadius),
+            trim: modes.trim(),
         };
-        let pick = TwoLinePick {
-            first: &payload.first,
-            second: &payload.second,
-            pick_first: payload.pick_first,
-            pick_second: payload.pick_second,
-        };
-        self.two_line_edit(command, session, pick, spec)
+        let plan = self.plan_two_line(command, payload, kind)?;
+        self.commit_two_line(command, session, plan, kind)
     }
 
-    /// The shared two-line edit: resolve both picks, plan the geometry, then
-    /// commit two `update_entity` (plus an optional insert) in one transaction and
-    /// one undo record.
-    ///
-    /// Every input is resolved to plain data before any write, so a refusal
-    /// changes nothing (the database transaction is all-or-nothing and no history
-    /// is recorded). The new entity (when there is one) goes on the **active
-    /// layer** and model space — the ADR records the active-layer choice as ours
-    /// because AutoCAD's rule is unverified.
-    fn two_line_edit(
-        &mut self,
+    /// Resolve both picks and plan the edit **before any write**.
+    fn plan_two_line(
+        &self,
         command: &Command,
-        session: &SessionState,
-        pick: TwoLinePick<'_>,
-        spec: TwoLineSpec,
-    ) -> CadResult<CommandOutcome> {
-        let TwoLinePick {
-            first,
-            second,
-            pick_first,
-            pick_second,
-        } = pick;
-        let (command_name, label) = match spec {
-            TwoLineSpec::Chamfer { .. } => ("CHAMFER", "chamfer lines"),
-            TwoLineSpec::Fillet { .. } => ("FILLET", "fillet lines"),
-        };
-        if first.document != command.document || second.document != command.document {
+        payload: &TwoLineCommand,
+        kind: TwoLineCommandKind,
+    ) -> CadResult<TwoLinePlan> {
+        let (command_name, _) = kind.labels();
+        if payload.first.document != command.document || payload.second.document != command.document
+        {
             return Err(CadError::InvalidInput(format!(
                 "{command_name} references belong to another document"
             )));
         }
-        if first.entity == second.entity {
+        if payload.first.entity == payload.second.entity {
             return Err(CadError::InvalidInput(format!(
-                "{command_name} needs two distinct lines; the same entity was picked twice"
+                "{command_name} needs two distinct objects; the same entity was picked twice"
+            )));
+        }
+        let document = self
+            .workspace
+            .documents
+            .get(&command.document)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let first_entity = document
+            .drawing
+            .entity(payload.first.entity)
+            .ok_or_else(|| {
+                CadError::InvalidInput(format!(
+                    "{command_name} first object {} does not exist",
+                    payload.first.entity.0
+                ))
+            })?;
+        let second_entity = document
+            .drawing
+            .entity(payload.second.entity)
+            .ok_or_else(|| {
+                CadError::InvalidInput(format!(
+                    "{command_name} second object {} does not exist",
+                    payload.second.entity.0
+                ))
+            })?;
+        let tol = corner_tolerance();
+        match kind {
+            TwoLineCommandKind::Chamfer { spec, trim } => {
+                let input = TwoLineInput {
+                    first: straight_line(&first_entity.geometry, command_name)?,
+                    pick_first: payload.pick_first,
+                    second: straight_line(&second_entity.geometry, command_name)?,
+                    pick_second: payload.pick_second,
+                };
+                plan_chamfer_two_line(&input, spec, trim, tol)
+            }
+            TwoLineCommandKind::Fillet { radius, trim } => plan_fillet_two_line(
+                fillet_curve(&first_entity.geometry)?,
+                payload.pick_first,
+                fillet_curve(&second_entity.geometry)?,
+                payload.pick_second,
+                radius,
+                trim,
+                tol,
+            ),
+        }
+        .map_err(CadError::InvalidInput)
+    }
+
+    /// Commit a planned two-line edit: one transaction, one undo record.
+    fn commit_two_line(
+        &mut self,
+        command: &Command,
+        session: &SessionState,
+        plan: TwoLinePlan,
+        kind: TwoLineCommandKind,
+    ) -> CadResult<CommandOutcome> {
+        let (command_name, label) = kind.labels();
+        let TwoLinePlan {
+            first,
+            second,
+            inserted,
+        } = plan;
+        if first.is_none() && second.is_none() && inserted.is_none() {
+            return Err(CadError::InvalidInput(format!(
+                "{command_name}: the current modes produce no geometry"
             )));
         }
         let document_id = command.document;
+        let (first_id, second_id) = match &command.payload {
+            CommandPayload::Chamfer(payload) | CommandPayload::Fillet(payload) => {
+                (payload.first.entity, payload.second.entity)
+            }
+            _ => {
+                return Err(CadError::InvalidInput(format!(
+                    "{command_name} needs its two-object payload"
+                )));
+            }
+        };
         let document = self
             .workspace
             .documents
@@ -130,58 +243,24 @@ impl Application {
                 session.active_layer.0
             )));
         }
-        let first_entity = document
-            .drawing
-            .entity(first.entity)
-            .cloned()
-            .ok_or_else(|| {
-                CadError::InvalidInput(format!(
-                    "{command_name} first line {} does not exist",
-                    first.entity.0
-                ))
+        let first_before =
+            document.drawing.entity(first_id).cloned().ok_or_else(|| {
+                CadError::Invariant(format!("{command_name} first object vanished"))
             })?;
-        let second_entity = document
-            .drawing
-            .entity(second.entity)
-            .cloned()
-            .ok_or_else(|| {
-                CadError::InvalidInput(format!(
-                    "{command_name} second line {} does not exist",
-                    second.entity.0
-                ))
+        let second_before =
+            document.drawing.entity(second_id).cloned().ok_or_else(|| {
+                CadError::Invariant(format!("{command_name} second object vanished"))
             })?;
-        let input = TwoLineInput {
-            first: straight_line(&first_entity.geometry, command_name)?,
-            pick_first,
-            second: straight_line(&second_entity.geometry, command_name)?,
-            pick_second,
-        };
-        let tol = corner_tolerance();
-        let edit = match spec {
-            TwoLineSpec::Chamfer {
-                distance_a,
-                distance_b,
-            } => plan_chamfer(&input, distance_a, distance_b, tol),
-            TwoLineSpec::Fillet { radius } => plan_fillet(&input, radius, tol),
+        let mut updates = Vec::new();
+        if let Some(update) = first {
+            updates.push((first_before.clone(), update));
         }
-        .map_err(CadError::InvalidInput)?;
-
-        let first_id = first_entity.id;
-        let second_id = second_entity.id;
+        if let Some(update) = second {
+            updates.push((second_before.clone(), update));
+        }
         let mut candidate = document.drawing.as_ref().clone();
         let drawing = &mut candidate;
-
-        let mut after_first = first_entity.clone();
-        after_first.geometry = SemanticGeometry::Line {
-            start: edit.first.0,
-            end: edit.first.1,
-        };
-        let mut after_second = second_entity.clone();
-        after_second.geometry = SemanticGeometry::Line {
-            start: edit.second.0,
-            end: edit.second.1,
-        };
-        let inserted = edit.inserted.map(|geometry| {
+        let inserted_entity = inserted.map(|geometry| {
             let draw_order = drawing
                 .model_space()
                 .iter()
@@ -205,32 +284,27 @@ impl Application {
             };
             (entity_id, entity)
         });
-
         let transaction = next_transaction_id();
         let change_set = {
             let mut staged = drawing.begin_drawing_transaction(label, transaction)?;
-            staged.update_entity(after_first.clone())?;
-            staged.update_entity(after_second.clone())?;
-            if let Some((_, entity)) = &inserted {
+            for (before, update) in &updates {
+                staged.update_entity(apply_update(before, *update, command_name)?)?;
+            }
+            if let Some((_, entity)) = &inserted_entity {
                 staged.insert_entity(entity.clone())?;
             }
             staged.commit()?
         };
-
-        // Read both committed entities back so each undo patch's `after` is the
-        // exact stored value, never a re-derivation.
-        let stored_first = drawing.entity(first_id).cloned().ok_or_else(|| {
-            CadError::Invariant(format!("{command_name} first line vanished after commit"))
-        })?;
-        let stored_second = drawing.entity(second_id).cloned().ok_or_else(|| {
-            CadError::Invariant(format!("{command_name} second line vanished after commit"))
-        })?;
-        let mut patches = vec![
-            drawing_patch(first_id, Some(first_entity), Some(stored_first)),
-            drawing_patch(second_id, Some(second_entity), Some(stored_second)),
-        ];
-        let mut objects = vec![ObjectId(first_id.0), ObjectId(second_id.0)];
-        if let Some((entity_id, entity)) = &inserted {
+        let mut patches = Vec::with_capacity(updates.len() + 1);
+        let mut objects = Vec::with_capacity(updates.len() + 1);
+        for (before, _) in &updates {
+            let stored = drawing.entity(before.id).cloned().ok_or_else(|| {
+                CadError::Invariant(format!("{command_name} object vanished after commit"))
+            })?;
+            patches.push(drawing_patch(before.id, Some(before.clone()), Some(stored)));
+            objects.push(ObjectId(before.id.0));
+        }
+        if let Some((entity_id, entity)) = &inserted_entity {
             patches.push(drawing_patch(*entity_id, None, Some(entity.clone())));
             objects.push(ObjectId(entity_id.0));
         }
@@ -245,33 +319,56 @@ impl Application {
                 merge_key: None,
             },
         )?;
-
         Ok(CommandOutcome {
             objects,
             changes: Some(Arc::new(change_set)),
             diagnostics: vec![Diagnostic {
                 object: None,
-                code: match spec {
-                    TwoLineSpec::Chamfer { .. } => "drawing.chamfer".into(),
-                    TwoLineSpec::Fillet { .. } => "drawing.fillet".into(),
+                code: match kind {
+                    TwoLineCommandKind::Chamfer { .. } => "drawing.chamfer".into(),
+                    TwoLineCommandKind::Fillet { .. } => "drawing.fillet".into(),
                 },
-                // Locale-neutral technical diagnostic (never a localized UI label;
-                // the ADR fence forbids new CJK literals on the Rust side).
-                message: match spec {
-                    TwoLineSpec::Chamfer { .. } => {
-                        "CHAMFER: both lines trimmed/extended (a new LINE joins them unless A=B=0)"
-                            .to_string()
-                    }
-                    TwoLineSpec::Fillet { .. } => {
-                        "FILLET: both lines trimmed/extended (a tangent ARC is inserted unless R=0)"
-                            .to_string()
-                    }
-                },
+                message: kind.diagnostic(),
             }],
             measurement: None,
             point_report: None,
         })
     }
+}
+
+/// Apply one planned update to the before-entity.
+fn apply_update(
+    before: &DbEntity,
+    update: GeometryUpdate,
+    command_name: &str,
+) -> CadResult<DbEntity> {
+    let mut after = before.clone();
+    after.geometry = match (update, before.geometry.clone()) {
+        (GeometryUpdate::Line { start, end }, SemanticGeometry::Line { .. }) => {
+            SemanticGeometry::Line { start, end }
+        }
+        (
+            GeometryUpdate::Arc { start, sweep },
+            SemanticGeometry::Arc {
+                center,
+                normal,
+                radius,
+                ..
+            },
+        ) => SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        },
+        (update, other) => {
+            return Err(CadError::Invariant(format!(
+                "{command_name} planned {update:?} for {other:?}"
+            )));
+        }
+    };
+    Ok(after)
 }
 
 /// The numeric value of a session tool parameter (these parameters are validated

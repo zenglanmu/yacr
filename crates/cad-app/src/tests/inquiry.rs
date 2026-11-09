@@ -287,6 +287,218 @@ fn list_includes_canonical_non_bylayer_display_properties() {
 }
 
 #[test]
+fn list_reports_paper_and_block_space_with_every_modelled_display_property() {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_layout(Layout {
+            id: LayoutId(7),
+            name: "Sheet".into(),
+            viewports: Vec::new(),
+        })
+        .unwrap();
+    builder
+        .insert_style(Style {
+            id: StyleId(4),
+            name: "ANNO".into(),
+            resource_keys: Vec::new(),
+        })
+        .unwrap();
+    builder
+        .insert_block(BlockDefinition {
+            id: BlockId(9),
+            entities: vec![EntityId(11)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+    builder
+        .set_block_metadata(BlockId(9), "DOOR", point(0.0, 0.0))
+        .unwrap();
+
+    // Paper-space line with a non-default linetype scale and an explicit
+    // transparency.
+    builder
+        .insert_entity(entity(
+            4,
+            SemanticGeometry::Line {
+                start: point(0.0, 0.0),
+                end: point(1.0, 0.0),
+            },
+            LayerId(0),
+            SpaceId::Paper(LayoutId(7)),
+            "AcDbLine",
+            None,
+        ))
+        .unwrap();
+    builder
+        .set_entity_render_attributes(
+            EntityId(4),
+            cad_db::EntityRenderAttributes {
+                linetype_scale: 2.5,
+                transparency: cad_db::EntityTransparency::Explicit(0.25),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    // A block-definition member, selected directly (not through an INSERT).
+    builder
+        .insert_entity(entity(
+            11,
+            SemanticGeometry::Text {
+                text: "member".into(),
+                position: point(0.0, 0.0),
+                style: StyleId(4),
+                height: 1.0,
+                rotation: 0.0,
+                font: None,
+                h_align: TextAlignH::Left,
+                v_align: TextAlignV::Baseline,
+                wrap_width: None,
+            },
+            LayerId(0),
+            SpaceId::Block(BlockId(9)),
+            "AcDbText",
+            None,
+        ))
+        .unwrap();
+
+    // INSERT naming the block.
+    builder
+        .insert_entity(entity(
+            12,
+            SemanticGeometry::Insert {
+                block: BlockId(9),
+                transform: Transform3::identity(),
+            },
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbBlockReference",
+            None,
+        ))
+        .unwrap();
+
+    // DIMENSION carrying its style-name snapshot.
+    let dim_style = cad_db::DimStyle::standard_metric(DimStyleId(0)).resolved(
+        "Standard".into(),
+        StyleId(0),
+        None,
+    );
+    builder
+        .insert_entity(entity(
+            13,
+            SemanticGeometry::Dimension(Box::new(
+                DimensionGeometry::synthesized(
+                    DimensionDefinition {
+                        kind: DimensionKind::Aligned,
+                        points: DimensionPoints::Linear {
+                            first: point(0.0, 0.0),
+                            second: point(10.0, 0.0),
+                            dimension_line: point(5.0, -4.0),
+                        },
+                        text_middle: point(0.0, 0.0),
+                        text_rotation: 0.0,
+                        normal: Point3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 1.0,
+                        },
+                    },
+                    "Standard".into(),
+                    dim_style,
+                    None,
+                )
+                .unwrap(),
+            )),
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbDimension",
+            Some("D1"),
+        ))
+        .unwrap();
+
+    // A source-hidden entity reports visible=false.
+    builder
+        .insert_entity(entity(
+            14,
+            SemanticGeometry::Line {
+                start: point(2.0, 2.0),
+                end: point(3.0, 3.0),
+            },
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbLine",
+            None,
+        ))
+        .unwrap();
+    builder.set_hidden_entities([EntityId(14)]).unwrap();
+
+    let (mut app, mut session, document) = app_from_builder(builder);
+    session.selection = SelectionSet::from_refs(
+        [4u128, 11, 12, 13, 14].map(|id| model_ref(document, EntityId(id))),
+    );
+    let before = app
+        .workspace
+        .documents
+        .get(&document)
+        .unwrap()
+        .drawing
+        .clone();
+    let outcome = app
+        .execute(&mut session, command(CommandId::List, CommandPayload::None))
+        .expect("LIST reads every directly addressable space");
+
+    let objects = diagnostic(&outcome, "list.object");
+    assert_eq!(objects.len(), 5, "one row per addressable entity");
+    let paper = objects
+        .iter()
+        .find(|message| message.contains("id=4 "))
+        .expect("the paper-space row");
+    assert!(paper.contains("space=Paper(7)"), "{paper}");
+    assert!(paper.contains("ltscale=2.500000"), "{paper}");
+    assert!(paper.contains("transparency=75"), "{paper}");
+    assert!(paper.contains("visible=true"), "{paper}");
+    let block = objects
+        .iter()
+        .find(|message| message.contains("id=11 "))
+        .expect("the block-space row");
+    assert!(block.contains("space=Block(9)"), "{block}");
+    assert!(block.contains("text_style=ANNO"), "{block}");
+    let insert = objects
+        .iter()
+        .find(|message| message.contains("id=12 "))
+        .expect("the INSERT row");
+    assert!(insert.contains("block=9 name=DOOR"), "{insert}");
+    let dimension = objects
+        .iter()
+        .find(|message| message.contains("id=13 "))
+        .expect("the DIMENSION row");
+    assert!(dimension.contains("dim_style=Standard"), "{dimension}");
+    let hidden = objects
+        .iter()
+        .find(|message| message.contains("id=14 "))
+        .expect("the hidden row");
+    assert!(hidden.contains("visible=false"), "{hidden}");
+
+    // Still read-only: no revision bump and no undo entry.
+    let after = app
+        .workspace
+        .documents
+        .get(&document)
+        .unwrap()
+        .drawing
+        .clone();
+    assert_eq!(after.revision(), before.revision());
+    assert!(!app.can_undo(&document));
+}
+
+#[test]
 fn list_refuses_an_empty_selection() {
     let (mut app, mut session, _document) = list_fixture();
     let error = app

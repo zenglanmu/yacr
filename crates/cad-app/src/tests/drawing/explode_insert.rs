@@ -46,9 +46,10 @@ fn insert_app(transform: Transform3) -> (Application, SessionState) {
     app_from(b.finish().unwrap())
 }
 #[test]
-fn explode_minsert_compound_yields_insert_instances_then_members_on_the_next_explode() {
-    // A MINSERT imports as `Compound(Insert…)`; the one-level rule means the first
-    // EXPLODE yields the Insert instances and the next yields their members.
+fn explode_refuses_a_minsert_compound_by_name() {
+    // A MINSERT imports as `Compound(Insert…)`; AutoCAD cannot explode a
+    // MINSERT, so this is a named refusal (nothing written), not a fan-out into
+    // block references.
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -85,53 +86,19 @@ fn explode_minsert_compound_yields_insert_instances_then_members_on_the_next_exp
     ))
     .unwrap();
     let (mut app, mut session) = app_from(b.finish().unwrap());
-
+    let before = revision(&app);
     select_one(&mut app, &mut session, 1);
-    explode(&mut app, &mut session).unwrap();
-    // The source Compound is deleted; two Insert instances remain.
-    assert!(app.workspace.documents[&DocumentId(1)]
-        .drawing
-        .entity(EntityId(1))
-        .is_none());
-    assert!(
-        model_lines(&app).is_empty(),
-        "no member is expanded at the first level"
-    );
-    let inserts: Vec<(EntityId, Transform3)> = model_geometry(&app)
-        .into_iter()
-        .filter_map(|(id, geometry)| match geometry {
-            SemanticGeometry::Insert { transform, .. } => Some((id, transform)),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        inserts.len(),
-        2,
-        "the MINSERT yields its two Insert instances"
-    );
-    assert_eq!(undo_depth(&app), 1, "one undo step");
-
-    // The next EXPLODE on the (10,0) instance expands its member LINE.
-    let instance = inserts
-        .iter()
-        .find(|(_, transform)| (transform.matrix[0][3] - 10.0).abs() < 1e-9)
-        .map(|(id, _)| *id)
-        .expect("the instance translated by (10,0)");
-    session.selection = SelectionSet::from_refs(vec![SelectionRef {
-        document: DocumentId(1),
-        entity: instance,
-        instance: InstancePath::default(),
-        sub_element: None,
-    }]);
-    explode(&mut app, &mut session).unwrap();
-    let lines = model_lines(&app);
-    assert_eq!(lines.len(), 1, "the second level yields the member LINE");
-    assert!(
-        (near(lines[0].0, p3(10.0, 0.0, 0.0)) && near(lines[0].1, p3(11.0, 0.0, 0.0)))
-            || (near(lines[0].0, p3(11.0, 0.0, 0.0)) && near(lines[0].1, p3(10.0, 0.0, 0.0))),
-        "{:?}",
-        lines[0]
-    );
+    let error = explode(&mut app, &mut session).expect_err("a MINSERT is refused");
+    match error {
+        CadError::Unsupported(reason) => assert!(
+            reason.contains("MINSERT"),
+            "the refusal must name the MINSERT: {reason}"
+        ),
+        other => panic!("expected an Unsupported MINSERT refusal, got {other:?}"),
+    }
+    assert_eq!(revision(&app), before);
+    assert_eq!(entity_count(&app), 2);
+    assert_eq!(undo_depth(&app), 0);
 }
 #[test]
 fn explode_uniformly_scaled_insert_bakes_the_placement_and_keeps_member_layers() {
@@ -163,18 +130,183 @@ fn explode_uniformly_scaled_insert_bakes_the_placement_and_keeps_member_layers()
     }
 }
 #[test]
-fn explode_refuses_a_non_uniformly_scaled_insert() {
+fn explode_non_uniform_insert_places_the_member_exactly() {
+    // A non-uniform scale is the deterministic subset: a LINE has an exact
+    // affine image, so it is placed instead of refusing the whole INSERT.
     let (mut app, mut session) = insert_app(non_uniform(2.0, 1.0));
+    select_one(&mut app, &mut session, 1);
+    explode(&mut app, &mut session).unwrap();
+    let lines = model_lines(&app);
+    assert_eq!(lines.len(), 1);
+    assert!(
+        near(lines[0].0, p3(0.0, 0.0, 0.0)) && near(lines[0].1, p3(2.0, 0.0, 0.0)),
+        "{:?}",
+        lines[0]
+    );
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn explode_non_uniform_insert_turns_a_circle_member_into_an_exact_ellipse() {
+    // A circle under (x×2, y×1) is the ellipse with major 2·r and ratio 1/2.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_block(BlockDefinition {
+        id: cad_domain::BlockId(1),
+        entities: vec![EntityId(100)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    b.insert_entity(part(
+        100,
+        SemanticGeometry::Circle {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            radius: 1.0,
+        },
+        LayerId(0),
+        SpaceId::Block(cad_domain::BlockId(1)),
+        "AcDbCircle",
+        0,
+    ))
+    .unwrap();
+    b.insert_entity(part(
+        1,
+        insert(1, non_uniform(2.0, 1.0)),
+        LayerId(0),
+        SpaceId::Model,
+        "AcDbBlockReference",
+        1,
+    ))
+    .unwrap();
+    let (mut app, mut session) = app_from(b.finish().unwrap());
+    select_one(&mut app, &mut session, 1);
+    explode(&mut app, &mut session).unwrap();
+    let produced = model_geometry(&app);
+    assert_eq!(produced.len(), 1);
+    match &produced[0].1 {
+        SemanticGeometry::Ellipse {
+            major_axis,
+            ratio,
+            start,
+            ..
+        } => {
+            assert!((cad_geometry::length(*major_axis) - 2.0).abs() < 1e-9);
+            assert!((*ratio - 0.5).abs() < 1e-9);
+            assert!(start.is_finite());
+        }
+        other => panic!("expected an ELLIPSE, got {other:?}"),
+    }
+}
+
+#[test]
+fn explode_non_uniform_insert_refuses_an_unrepresentable_member_by_name() {
+    // A non-uniformly scaled TEXT has no exact flat-text representation (its
+    // glyphs would be sheared), so the whole command refuses and names the
+    // member.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_block(BlockDefinition {
+        id: cad_domain::BlockId(1),
+        entities: vec![EntityId(101)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    b.insert_entity(part(
+        101,
+        text_geometry(),
+        LayerId(0),
+        SpaceId::Block(cad_domain::BlockId(1)),
+        "AcDbText",
+        0,
+    ))
+    .unwrap();
+    b.insert_entity(part(
+        1,
+        insert(1, non_uniform(2.0, 1.0)),
+        LayerId(0),
+        SpaceId::Model,
+        "AcDbBlockReference",
+        1,
+    ))
+    .unwrap();
+    let (mut app, mut session) = app_from(b.finish().unwrap());
     let before = revision(&app);
     select_one(&mut app, &mut session, 1);
-    let error = explode(&mut app, &mut session).expect_err("a non-uniform INSERT is refused");
-    assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
-    assert_eq!(revision(&app), before, "a refusal changes nothing");
-    assert_eq!(
-        entity_count(&app),
-        2,
-        "the block member and the INSERT remain"
-    );
+    let error = explode(&mut app, &mut session).expect_err("a sheared TEXT is refused");
+    match error {
+        CadError::Unsupported(reason) => {
+            assert!(
+                reason.contains("101"),
+                "the refusal names the member: {reason}"
+            );
+            assert!(reason.contains("AcDbText"), "{reason}");
+        }
+        other => panic!("expected an Unsupported refusal, got {other:?}"),
+    }
+    assert_eq!(revision(&app), before, "nothing is written");
+    assert_eq!(entity_count(&app), 2);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn explode_refuses_an_xref_block_reference_by_name() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_block(BlockDefinition {
+        id: cad_domain::BlockId(3),
+        entities: Vec::new(),
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    b.insert_external_reference(cad_db::ExternalReference {
+        name: "XREF-A".into(),
+        raw_path: r".\xref\base.dwg".into(),
+        resolved_path: Some("/work/xref/base.dwg".into()),
+        block: Some(cad_domain::BlockId(3)),
+        overlay: false,
+        depth: 0,
+        status: cad_db::ExternalReferenceStatus::Loaded,
+        reason: None,
+    })
+    .unwrap();
+    b.insert_entity(part(
+        1,
+        insert(3, Transform3::identity()),
+        LayerId(0),
+        SpaceId::Model,
+        "AcDbBlockReference",
+        0,
+    ))
+    .unwrap();
+    let (mut app, mut session) = app_from(b.finish().unwrap());
+    let before = revision(&app);
+    select_one(&mut app, &mut session, 1);
+    let error = explode(&mut app, &mut session).expect_err("an XREF is refused");
+    match error {
+        CadError::Unsupported(reason) => assert!(
+            reason.contains("XREF"),
+            "the refusal must name the XREF: {reason}"
+        ),
+        other => panic!("expected an Unsupported XREF refusal, got {other:?}"),
+    }
+    assert_eq!(revision(&app), before);
+    assert_eq!(entity_count(&app), 1);
     assert_eq!(undo_depth(&app), 0);
 }
 #[test]
@@ -478,4 +610,68 @@ fn explode_a_self_referential_block_once_yields_the_self_reference_without_recur
         other => panic!("expected the self-reference INSERT, got {other:?}"),
     }
     assert_eq!(undo_depth(&app), 1, "one transaction / one undo step");
+}
+
+#[test]
+fn explode_non_uniform_insert_turns_an_arc_member_into_an_exact_elliptical_arc() {
+    // An ARC under (x×2, y×1) is an elliptical arc with the same angular sweep;
+    // the parameter offset is re-read from the transformed start point.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_block(BlockDefinition {
+        id: cad_domain::BlockId(1),
+        entities: vec![EntityId(100)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    b.insert_entity(part(
+        100,
+        SemanticGeometry::Arc {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            radius: 1.0,
+            start: 0.0,
+            sweep: std::f64::consts::FRAC_PI_2,
+        },
+        LayerId(0),
+        SpaceId::Block(cad_domain::BlockId(1)),
+        "AcDbArc",
+        0,
+    ))
+    .unwrap();
+    b.insert_entity(part(
+        1,
+        insert(1, non_uniform(2.0, 1.0)),
+        LayerId(0),
+        SpaceId::Model,
+        "AcDbBlockReference",
+        1,
+    ))
+    .unwrap();
+    let (mut app, mut session) = app_from(b.finish().unwrap());
+    select_one(&mut app, &mut session, 1);
+    explode(&mut app, &mut session).unwrap();
+    let produced = model_geometry(&app);
+    assert_eq!(produced.len(), 1);
+    match &produced[0].1 {
+        SemanticGeometry::Ellipse {
+            major_axis,
+            ratio,
+            sweep,
+            ..
+        } => {
+            assert!((cad_geometry::length(*major_axis) - 2.0).abs() < 1e-9);
+            assert!((*ratio - 0.5).abs() < 1e-9);
+            assert!(
+                (*sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-9,
+                "the sweep is preserved: {sweep}"
+            );
+        }
+        other => panic!("expected an elliptical ARC as ELLIPSE, got {other:?}"),
+    }
 }

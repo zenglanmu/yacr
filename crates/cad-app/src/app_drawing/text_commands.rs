@@ -5,9 +5,12 @@
 //! All three read the **current session selection** at apply time
 //! ([`SessionState::selection`]); there is no interactive "Select objects"
 //! prompt (the declared divergence in [`crate::command_id::text_commands`]).
-//! The bare selectors travel as [`CommandPayload::None`]; only the two typed
-//! argument forms (`TORIENT <angle>`, `TCASE <mode>`) carry a payload, and both
-//! are parsed by `cad_ui_core::session`.
+//! The bare selectors travel as [`CommandPayload::None`]; only the typed
+//! argument form `TORIENT <angle>` carries an angle payload, and it is parsed by
+//! `cad_ui_core::session`. `TORIENT Reverse` has a payload-only form
+//! ([`CommandPayload::TorientReverse`]): the model can represent it exactly as a
+//! 180° rotation, while a true mirror (negative scale) is not modelled and is
+//! never faked.
 //!
 //! ## Shared rules
 //!
@@ -206,6 +209,32 @@ fn case_mode_name(mode: TextCaseMode) -> &'static str {
     }
 }
 
+/// The rotation rule a `TORIENT` run applies to every resolved `Text` geometry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TorientMode {
+    /// Bare command: fold into `(-π/2, π/2]` by 180° steps.
+    MostReadable,
+    /// `TORIENT <angle>`: the absolute rotation, already in radians.
+    Absolute(f64),
+    /// `TORIENT Reverse`: add 180° (`π`) to the stored rotation, no
+    /// normalisation. This is the rotation-only reverse/reading-direction flip
+    /// the model can represent; a true mirror (negative scale) is not modelled.
+    Reverse,
+}
+
+impl TorientMode {
+    /// The locale-neutral mode name used in the success/no-op diagnostics.
+    fn label(self) -> String {
+        match self {
+            Self::MostReadable => "most readable".to_string(),
+            Self::Absolute(radians) => {
+                format!("absolute {} degrees", radians.to_degrees())
+            }
+            Self::Reverse => "reverse (180 degrees)".to_string(),
+        }
+    }
+}
+
 /// A `torient.not_reset` / `tcase.not_reset` informational diagnostic.
 fn not_reset(code: &str, entity: EntityId, kind: &str, reason: &str) -> Diagnostic {
     Diagnostic {
@@ -236,9 +265,11 @@ fn unchanged(code: &str, message: String, diagnostics: Vec<Diagnostic>) -> Comma
 }
 
 impl Application {
-    /// `TORIENT`: Most Readable (bare) or one absolute rotation.
+    /// `TORIENT`: Most Readable (bare), one absolute rotation, or Reverse.
     ///
-    /// One transaction / one undo step for every changed Text entity; a
+    /// Reverse (`CommandPayload::TorientReverse`) adds 180° to each stored
+    /// rotation — the rotation-only representation of the Express Tools reverse
+    /// mode. One transaction / one undo step for every changed Text entity; a
     /// non-Text selection is reported, never fatal. A selection with no Text
     /// change is `torient.unchanged` and writes nothing.
     pub(crate) fn torient(
@@ -246,23 +277,26 @@ impl Application {
         session: &SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        let angle_degrees = match &command.payload {
-            CommandPayload::None => None,
-            CommandPayload::Torient { angle_degrees } => {
-                if let Some(degrees) = angle_degrees {
+        let mode = match &command.payload {
+            CommandPayload::None => TorientMode::MostReadable,
+            CommandPayload::Torient { angle_degrees } => match angle_degrees {
+                Some(degrees) => {
                     if !degrees.is_finite() {
                         return Err(refusal(
                             "torient.invalid_angle",
                             format!("TORIENT angle must be finite, got {degrees}"),
                         ));
                     }
+                    TorientMode::Absolute(degrees.to_radians())
                 }
-                *angle_degrees
-            }
+                None => TorientMode::MostReadable,
+            },
+            CommandPayload::TorientReverse => TorientMode::Reverse,
             _ => {
                 return Err(refusal(
                     "torient.invalid_payload",
-                    "TORIENT takes no payload, or one Torient { angle_degrees } payload",
+                    "TORIENT takes no payload (Most Readable), one Torient { angle_degrees } \
+                     payload (absolute angle) or TorientReverse",
                 ));
             }
         };
@@ -300,7 +334,7 @@ impl Application {
                     "torient.not_reset",
                     reference.entity,
                     "block-instance member or sub-element",
-                    "only a directly addressable model-space Text/MText has a writable rotation",
+                    "only a directly addressable Text/MText entity has a writable rotation",
                 ));
                 continue;
             }
@@ -322,9 +356,13 @@ impl Application {
                 ));
                 continue;
             };
-            let target = match angle_degrees {
-                Some(degrees) => degrees.to_radians(),
-                None => most_readable_rotation(*rotation),
+            let target = match mode {
+                TorientMode::Absolute(radians) => radians,
+                TorientMode::MostReadable => most_readable_rotation(*rotation),
+                // Reverse is representable purely as a 180° rotation. A true
+                // mirror (negative scale / MIRRTEXT) has no model field, so it is
+                // not faked here; only the rotation is changed.
+                TorientMode::Reverse => *rotation + std::f64::consts::PI,
             };
             if !target.is_finite() {
                 diagnostics.push(not_reset(
@@ -346,15 +384,12 @@ impl Application {
         }
         let selected = references.len();
         if planned.is_empty() {
-            let mode = angle_degrees.map_or_else(
-                || "most readable".to_string(),
-                |degrees| format!("absolute {degrees} degrees"),
-            );
             return Ok(unchanged(
                 "torient.unchanged",
                 format!(
-                    "TORIENT ({mode}): none of the {selected} selected entities changed; \
-                     nothing was written"
+                    "TORIENT ({}): none of the {selected} selected entities changed; \
+                     nothing was written",
+                    mode.label()
                 ),
                 diagnostics,
             ));
@@ -398,10 +433,7 @@ impl Application {
             code: "drawing.torient".into(),
             message: format!(
                 "TORIENT: reset {changed} of {selected} selected text entities to {}",
-                angle_degrees.map_or_else(
-                    || "the most readable rotation".to_string(),
-                    |degrees| format!("the absolute rotation {degrees} degrees")
-                )
+                mode.label()
             ),
         });
         Ok(CommandOutcome {
@@ -575,222 +607,6 @@ impl Application {
             objects,
             changes: Some(Arc::new(change_set)),
             diagnostics: all_diagnostics,
-            measurement: None,
-            point_report: None,
-        })
-    }
-
-    /// `TXT2MTXT`: combine the selected Text/MText entities into one `AcDbMText`.
-    ///
-    /// The selection is the whole input (`CommandPayload::None`). Sources are
-    /// sorted top-to-bottom then left-to-right (stable), joined with `\P`
-    /// verbatim, and deleted in the same transaction as the new entity. The
-    /// settings dialog and uniform line spacing are NOT IMPLEMENTED and are
-    /// reported as diagnostics.
-    pub(crate) fn txt2mtext(
-        &mut self,
-        session: &SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        if !matches!(command.payload, CommandPayload::None) {
-            return Err(refusal(
-                "txt2mtxt.invalid_payload",
-                "TXT2MTXT takes no payload; the selection is the input",
-            ));
-        }
-        let references = session.selection.refs().to_vec();
-        if references.is_empty() {
-            return Err(refusal(
-                "txt2mtxt.needs_selection",
-                "TXT2MTXT needs at least one selected Text/MText entity",
-            ));
-        }
-        let document_id = command.document;
-        let drawing = self
-            .workspace
-            .documents
-            .get(&document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
-            .drawing
-            .as_ref();
-        let mut sources: Vec<DbEntity> = Vec::with_capacity(references.len());
-        let mut seen = std::collections::BTreeSet::new();
-        for reference in &references {
-            if reference.document != document_id {
-                return Err(refusal(
-                    "txt2mtxt.not_addressable",
-                    format!(
-                        "TXT2MTXT target {} belongs to another document",
-                        reference.entity.0
-                    ),
-                ));
-            }
-            if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
-                return Err(refusal(
-                    "txt2mtxt.not_addressable",
-                    format!(
-                        "TXT2MTXT target {} is a block-instance member or sub-element; only \
-                         directly addressable model-space text entities can be combined",
-                        reference.entity.0
-                    ),
-                ));
-            }
-            let entity = drawing.entity(reference.entity).cloned().ok_or_else(|| {
-                refusal(
-                    "txt2mtxt.target_missing",
-                    format!("TXT2MTXT target {} does not exist", reference.entity.0),
-                )
-            })?;
-            if entity.space != SpaceId::Model {
-                return Err(CadError::Unsupported(format!(
-                    "txt2mtxt.unsupported: entity {} is not model space; v1 combines model-space \
-                     text only",
-                    entity.id.0
-                )));
-            }
-            if !matches!(entity.geometry, SemanticGeometry::Text { .. }) {
-                return Err(CadError::Unsupported(format!(
-                    "txt2mtxt.unsupported: {} is not a Text/MText entity; the whole command is \
-                     refused and nothing is converted",
-                    kind_name(&entity.geometry)
-                )));
-            }
-            if seen.insert(entity.id) {
-                sources.push(entity);
-            }
-        }
-        // Top-to-bottom (descending Y), then left-to-right (ascending X). The
-        // sort is stable, so equal anchors keep the selection order.
-        sources.sort_by(|first, second| {
-            let (
-                SemanticGeometry::Text { position: a, .. },
-                SemanticGeometry::Text { position: b, .. },
-            ) = (&first.geometry, &second.geometry)
-            else {
-                return std::cmp::Ordering::Equal;
-            };
-            b.y.total_cmp(&a.y).then_with(|| a.x.total_cmp(&b.x))
-        });
-        let first = sources
-            .first()
-            .ok_or_else(|| CadError::Invariant("TXT2MTXT lost its source set".into()))?;
-        let SemanticGeometry::Text {
-            position,
-            style,
-            height,
-            rotation,
-            font,
-            h_align,
-            v_align,
-            wrap_width,
-            ..
-        } = &first.geometry
-        else {
-            return Err(CadError::Invariant(
-                "TXT2MTXT first source is not Text".into(),
-            ));
-        };
-        let mut joined = String::new();
-        for (index, source) in sources.iter().enumerate() {
-            let SemanticGeometry::Text { text, .. } = &source.geometry else {
-                return Err(CadError::Invariant("TXT2MTXT source is not Text".into()));
-            };
-            if index > 0 {
-                joined.push_str("\\P");
-            }
-            joined.push_str(text);
-        }
-        let geometry = SemanticGeometry::Text {
-            text: joined,
-            position: *position,
-            style: *style,
-            height: *height,
-            rotation: *rotation,
-            font: font.clone(),
-            h_align: *h_align,
-            v_align: *v_align,
-            wrap_width: *wrap_width,
-        };
-        let mut candidate = drawing.clone();
-        let new_id = candidate.allocate_entity_id();
-        // Preserve the first sorted source's draw order (the new MTEXT replaces
-        // that source in the draw stack instead of jumping above every entity).
-        let entity = DbEntity {
-            object: cad_db::DbObject {
-                id: ObjectId(new_id.0),
-                type_key: text_policy::MTEXT_TYPE_KEY.into(),
-                revision: Revision(0),
-                source_handle: None,
-            },
-            id: new_id,
-            layer: first.layer,
-            space: first.space.clone(),
-            geometry,
-            draw_order: first.draw_order,
-        };
-        let display_states: Vec<_> = sources
-            .iter()
-            .map(|source| candidate.entity_display_state(source.id))
-            .collect();
-        let transaction = next_transaction_id();
-        let change_set = {
-            let mut staged = candidate.begin_drawing_transaction("combine text", transaction)?;
-            for source in &sources {
-                staged.delete_entity(source.id)?;
-            }
-            staged.insert_entity(entity.clone())?;
-            staged.commit()?
-        };
-        let mut patches: Vec<DrawingPatch> = sources
-            .iter()
-            .zip(display_states)
-            .map(|(source, state)| drawing_patch_deleted(source.id, source.clone(), state))
-            .collect();
-        let committed = candidate
-            .entity(new_id)
-            .cloned()
-            .ok_or_else(|| CadError::Invariant("combined MTEXT vanished after commit".into()))?;
-        patches.push(drawing_patch(new_id, None, Some(committed)));
-        self.publish_candidate(
-            document_id,
-            candidate,
-            DrawingUndoRecord {
-                transaction: change_set.transaction,
-                label: "combine text".into(),
-                patches,
-                block_patches: Vec::new(),
-                merge_key: None,
-            },
-        )?;
-        Ok(CommandOutcome {
-            objects: vec![ObjectId(new_id.0)],
-            changes: Some(Arc::new(change_set)),
-            diagnostics: vec![
-                Diagnostic {
-                    object: Some(ObjectId(new_id.0)),
-                    code: "drawing.txt2mtxt".into(),
-                    message: format!(
-                        "TXT2MTXT: combined {} text entities into one AcDbMText at the first \
-                         source's position",
-                        sources.len()
-                    ),
-                },
-                Diagnostic {
-                    object: None,
-                    code: "txt2mtxt.settings_dialog".into(),
-                    message: "TXT2MTXT: the AutoCAD settings dialog (single mtext, sort top-down, \
-                              word-wrap, force uniform line spacing) is NOT IMPLEMENTED in v1; \
-                              this build always joins every source into one MTEXT"
-                        .into(),
-                },
-                Diagnostic {
-                    object: None,
-                    code: "txt2mtxt.uniform_line_spacing".into(),
-                    message: "TXT2MTXT: forcing uniform line spacing is NOT IMPLEMENTED; the \
-                              stored string and the first source's text style are preserved"
-                        .into(),
-                },
-            ],
             measurement: None,
             point_report: None,
         })

@@ -195,13 +195,13 @@ impl Application {
 /// Shared with [`super::match_prop`], which applies five resolved values per
 /// entity through the same [`plan_entity`] comparison rules (the no-op rule for
 /// transparency and the linetype-scale preservation live here only).
-pub(super) struct StagedChange {
-    pub(super) id: EntityId,
-    pub(super) before: DbEntity,
-    pub(super) after: DbEntity,
+pub(crate) struct StagedChange {
+    pub(crate) id: EntityId,
+    pub(crate) before: DbEntity,
+    pub(crate) after: DbEntity,
     /// `Some` **iff** a display attribute changes (and therefore the display
     /// state must be replayed).
-    pub(super) after_attributes: Option<EntityRenderAttributes>,
+    pub(crate) after_attributes: Option<EntityRenderAttributes>,
 }
 
 /// Refuse a ref that has no directly addressable entity identity.
@@ -240,7 +240,7 @@ pub(super) fn ensure_addressable(
 /// source entity carries, so the value-independent rules — the transparency
 /// percent no-op comparison, the destination's linetype scale preservation and
 /// the "both state layers or nothing" rule — exist once.
-pub(super) fn plan_entity(
+pub(crate) fn plan_entity(
     drawing: &DrawingDatabase,
     before: DbEntity,
     targets: &[&PropertyValue],

@@ -3,15 +3,18 @@
 
 use super::super::super::*;
 use super::super::test_support::*;
-
+use cad_app::ExtendedCommandId;
 macro_rules! command_selector_contract {
         ($($variant:ident => $selector:literal),+ $(,)?) => {
             const EXPECTED_COMMAND_COUNT: usize = [$(stringify!($variant)),+].len();
             const ALL_COMMAND_IDS: &[CommandId] = &[$(CommandId::$variant),+];
+            const EXPECTED_LEN: usize =
+                EXPECTED_COMMAND_COUNT + ExtendedCommandId::ALL.len();
 
             fn canonical_selector(id: CommandId) -> &'static str {
                 match id {
                     $(CommandId::$variant => $selector,)+
+                    CommandId::Extended(ext) => ext.selector(),
                 }
             }
         };
@@ -263,7 +266,7 @@ fn command_normalization_covers_every_variant() {
             "{name} ({id:?}) must appear exactly once in COMMAND_TABLE"
         );
     }
-    assert_eq!(COMMAND_TABLE.len(), EXPECTED_COMMAND_COUNT);
+    assert_eq!(COMMAND_TABLE.len(), EXPECTED_LEN);
     // Every canonical selector maps to its command and is stable.
     for (name, id) in COMMAND_TABLE {
         assert_eq!(normalize_command(name), Some(*id), "{name}");
@@ -935,7 +938,7 @@ fn text_case_and_orientation_selectors_are_work_only_argument_selectors() {
         );
         assert!(id.requires_work_mode(), "{selector} must be Work-only");
     }
-    // TORIENT/TCASE take one typed argument; TXT2MTXT is name-only.
+    // TORIENT/TCASE take one typed argument; the bare TXT2MTXT is name-only.
     assert_eq!(
         typed_command_argument("TORIENT 45"),
         Some(("TORIENT", "45"))
@@ -949,7 +952,7 @@ fn text_case_and_orientation_selectors_are_work_only_argument_selectors() {
         None,
         "the bare form is Title"
     );
-    assert_eq!(typed_command_argument("TXT2MTXT 1"), None);
+    assert_eq!(typed_command_argument("TXT2MTXT"), None);
     // `TCASE` accepts the five modes and their single letters, nothing else.
     for (argument, mode) in [
         ("UPPER", cad_app::TextCaseMode::Upper),
@@ -968,15 +971,15 @@ fn text_case_and_orientation_selectors_are_work_only_argument_selectors() {
     for refused in ["", "Sentence2", "TITL", "X", "Title case", "UPPER TITLE"] {
         assert_eq!(parse_tcase_argument(refused), None, "{refused:?}");
     }
-    // TORIENT accepts one finite signed decimal angle in degrees.
+    // TORIENT accepts one finite signed decimal angle in degrees or REVERSE/R.
     for (argument, expected) in [("45", 45.0), ("22.5", 22.5), ("0", 0.0), ("-90", -90.0)] {
         assert_eq!(
             parse_torient_argument(argument),
-            Some(expected),
+            Some(TorientArgument::Angle(expected)),
             "{argument}"
         );
     }
-    for refused in ["", "abc", "1e3", ".5", "5.", "45 30", "NaN", "inf"] {
+    for refused in ["", "abc", "1e3", ".5", "5.", "45 30", "NaN", "inf", "REV"] {
         assert_eq!(parse_torient_argument(refused), None, "{refused:?}");
     }
     assert!(invalid_tcase_argument_reason("TCASE NOPE").contains("UPPER"));

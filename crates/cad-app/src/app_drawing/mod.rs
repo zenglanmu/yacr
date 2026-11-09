@@ -31,6 +31,7 @@ use cad_history::{drawing_patch, drawing_patch_deleted, DrawingPatch, DrawingUnd
 
 mod align;
 pub(crate) mod annot_batch;
+mod arc_length;
 mod array;
 mod block_define;
 mod boundary;
@@ -44,6 +45,7 @@ mod dimension_angular;
 mod dimension_chain;
 mod dimension_edit;
 mod dimension_ordinate;
+mod dimension_qdim;
 mod dimension_space;
 mod divide;
 mod drawing_create;
@@ -81,18 +83,30 @@ mod mirror_curves;
 mod mleader;
 // `MSTRETCH`: the one STRETCH planner over several crossing windows.
 mod modify_extra;
+// OVERKILL (Delete Duplicate Objects): the tolerance/ignore/option comparison
+// engine, split out of `modify_extra` so both files stay inside the budget.
+mod overkill;
+pub use overkill::OverkillSettings;
 mod mstretch;
 mod mtext_create;
 mod offset_polyline;
 mod offset_polyline_bulge;
+// The `OFFSETGAPTYPE` fillet/chamfer fill geometry, split out so both offset
+// arms stay inside the code-size limit.
+mod offset_gap;
 mod paste_block;
 mod pedit;
 mod point_style;
+mod polyline_curve;
 mod polyline_fillet;
 mod properties;
 mod revision_cloud;
 mod scale_text;
 mod stretch;
+// The STRETCH containment (rectangle + crossing polygon/lasso) and per-vertex
+// planner, split out so `stretch.rs` stays inside the code-size limit.
+mod stretch_vertices;
+mod stretch_window;
 // The 2026-11-07 2D text batch (JUSTIFYTEXT/TJUST/TSCALE/TEXTALIGN/TCOUNT/
 // TCIRCLE/TEXTMASK/TEXTUNMASK); one estimate and one write discipline.
 pub(crate) mod text_batch;
@@ -102,6 +116,9 @@ mod text_front;
 // The three selection-based text commands (TORIENT / TCASE / TXT2MTXT) and
 // their one pure case transformer.
 mod text_commands;
+// TXT2MTXT's settings-driven combine/split path, split out so `text_commands`
+// stays inside the file-size gate.
+mod txt2mtext;
 // The single line-break / stored-type-key authority MTEXT creation and TEXTEDIT
 // share; `pub(crate)` because the TEXT capture channel refuses a newline too.
 pub(crate) mod text_policy;
@@ -116,6 +133,32 @@ mod trim_extend;
 mod trim_spline;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
+
+/// The 2026-11 text/draw utility payload, if this command carries one.
+///
+/// The four utilities travel through `CommandPayload::Annotation` to keep the
+/// top-level payload enum inside its file-size budget; every handler reads only
+/// its own [`crate::command_payload::UtilityPayload`] arm.
+pub(crate) fn utility_payload(
+    command: &Command,
+) -> Option<&crate::command_payload::UtilityPayload> {
+    match &command.payload {
+        CommandPayload::Annotation(batch) => match batch.as_ref() {
+            crate::AnnotationBatchPayload::Utility(utility) => Some(utility.as_ref()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+// The Wave 4 extended edits reuse the existing planner/write surfaces rather
+// than a second copy: these re-exports are crate-wide only.
+pub(crate) use draw2_edit::CurveChange;
+pub(crate) use properties::plan_entity;
+pub(crate) use trim_boundary::{collect_boundaries, BoundarySet};
+pub(crate) use trim_curves::{
+    cut_tolerance, plan_extend, plan_trim, PlanRefusal, TargetCurve, TrimPlan,
+};
 // The POLYLINE-mode FILLET/CHAMFER planner, its spec and the two-line parity
 // reference: exposed to the crate's tests only (`tests::drawing::polyline_fillet`
 // drives the pure planner and compares it against the two-line `plan_fillet`).
@@ -143,5 +186,5 @@ use helpers::{
     distance, geometry_kind, is_finite_point, is_multiline_text_source, offset_arc, offset_circle,
     offset_line, resolve_created_text_style,
 };
-use mirror_curves::mirror_geometry;
-use offset_polyline::offset_polyline;
+use mirror_curves::mirror_geometry_with_options;
+use offset_polyline::offset_polyline_with_distance;

@@ -1,0 +1,965 @@
+//! Pure geometry for the two-object CHAMFER/FILLET planners.
+//!
+//! Declared from [`super`] with an explicit `#[path]` so the shared
+//! `app_drawing/mod.rs` (owned by other lanes) needs no edit. Everything here is
+//! pure: no database, no session, no history — the command layer resolves the
+//! picks, calls one planner and commits the returned plan in one transaction.
+//!
+//! The contracts (distance order, angle derivation, the parallel auto-radius
+//! derivation, trim-off semantics and every refusal code) are documented on the
+//! command module [`super`] and repeated next to each construction.
+
+use super::super::helpers::{self, distance, normalize_signed};
+use super::super::*;
+use cad_geometry::{infinite_line_intersection, LineIntersection};
+
+/// Map the shared two-line planner's result onto this module's plan type.
+fn from_edit(edit: helpers::TwoLineEdit) -> TwoLinePlan {
+    let line = |(start, end)| GeometryUpdate::Line { start, end };
+    TwoLinePlan {
+        first: Some(line(edit.first)),
+        second: Some(line(edit.second)),
+        inserted: edit.inserted,
+    }
+}
+
+/// The shared [`helpers::TwoLineInput`] view of this module's input.
+fn helper_input(input: &TwoLineInput) -> helpers::TwoLineInput {
+    helpers::TwoLineInput {
+        first: input.first,
+        pick_first: input.pick_first,
+        second: input.second,
+        pick_second: input.pick_second,
+    }
+}
+
+/// The CHAMFER construction a two-line invocation uses.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum ChamferSpec {
+    /// `A` on the first object, `B` on the second (selection order).
+    Distances { a: f64, b: f64 },
+    /// The distance from the first object and the chamfer angle from it.
+    Angle { distance: f64, angle_radians: f64 },
+}
+
+/// The one geometry update a two-line edit applies to a picked entity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum GeometryUpdate {
+    Line {
+        start: Point3,
+        end: Point3,
+    },
+    /// Rewrite an ARC's start angle and sweep (the trimmed pick side).
+    Arc {
+        start: f64,
+        sweep: f64,
+    },
+}
+
+/// The resolved edit: optional updates for the two picks plus the optional new
+/// entity (the chamfer LINE or the fillet ARC).
+pub(super) struct TwoLinePlan {
+    pub first: Option<GeometryUpdate>,
+    pub second: Option<GeometryUpdate>,
+    pub inserted: Option<SemanticGeometry>,
+}
+
+/// The geometric kind a FILLET pick resolved to.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Curve {
+    Line {
+        start: Point3,
+        end: Point3,
+    },
+    Circle {
+        center: Point3,
+        radius: f64,
+    },
+    Arc {
+        center: Point3,
+        radius: f64,
+        start: f64,
+        sweep: f64,
+    },
+}
+
+impl Curve {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Line { .. } => "LINE",
+            Self::Circle { .. } => "CIRCLE",
+            Self::Arc { .. } => "ARC",
+        }
+    }
+}
+
+/// The corner of two infinite lines and the pick-side frame.
+struct Frame {
+    corner: Point3,
+    dir1: (f64, f64),
+    dir2: (f64, f64),
+    keep1: Point3,
+    keep1_is_start: bool,
+    reach1: f64,
+    keep2: Point3,
+    keep2_is_start: bool,
+    reach2: f64,
+}
+
+/// Which command a two-line plan serves (labels + diagnostic text).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum TwoLineCommandKind {
+    Chamfer { spec: ChamferSpec, trim: bool },
+    Fillet { radius: f64, trim: bool },
+}
+
+impl TwoLineCommandKind {
+    pub(super) fn labels(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Chamfer { .. } => ("CHAMFER", "chamfer lines"),
+            Self::Fillet { .. } => ("FILLET", "fillet lines"),
+        }
+    }
+
+    pub(super) fn diagnostic(self) -> String {
+        match self {
+            Self::Chamfer { spec, trim } => format!(
+                "CHAMFER: {}; trim={trim} (a LINE joins the objects unless the result is \
+                 intersect-only)",
+                match spec {
+                    ChamferSpec::Distances { a, b } => format!("distance A={a}, B={b}"),
+                    ChamferSpec::Angle {
+                        distance,
+                        angle_radians,
+                    } => format!(
+                        "distance={distance}, angle={} deg",
+                        angle_radians.to_degrees()
+                    ),
+                }
+            ),
+            Self::Fillet { radius, trim } => format!(
+                "FILLET: radius={radius}; trim={trim} (a tangent ARC is inserted unless R=0)"
+            ),
+        }
+    }
+}
+
+/// The resolved geometry of the two picked straight lines.
+pub(super) struct TwoLineInput {
+    pub first: (Point3, Point3),
+    pub pick_first: Point3,
+    pub second: (Point3, Point3),
+    pub pick_second: Point3,
+}
+
+fn pt(x: f64, y: f64, z: f64) -> Point3 {
+    Point3 { x, y, z }
+}
+
+/// A finite, non-degenerate unit XY direction.
+fn unit_xy(from: Point3, to: Point3, tol: f64, command: &str) -> Result<(f64, f64), String> {
+    let dx = to.x - from.x;
+    let dy = to.y - from.y;
+    let len = dx.hypot(dy);
+    if !len.is_finite() || len <= tol {
+        return Err(format!(
+            "{command}.degenerate_line: the picked object has no direction"
+        ));
+    }
+    Ok((dx / len, dy / len))
+}
+
+fn point_from(corner: Point3, dir: (f64, f64), dist: f64) -> Point3 {
+    pt(corner.x + dir.0 * dist, corner.y + dir.1 * dist, corner.z)
+}
+
+fn retarget(keep_is_start: bool, keep: Point3, target: Point3) -> GeometryUpdate {
+    GeometryUpdate::Line {
+        start: if keep_is_start { keep } else { target },
+        end: if keep_is_start { target } else { keep },
+    }
+}
+
+/// Resolve the intersection corner and the pick-side arms of two straight lines.
+fn corner_frame(input: &TwoLineInput, tol: f64, command: &str) -> Result<Frame, String> {
+    let TwoLineInput {
+        first: (a1, a2),
+        pick_first: p1,
+        second: (b1, b2),
+        pick_second: p2,
+    } = *input;
+    if !is_finite_point(a1)
+        || !is_finite_point(a2)
+        || !is_finite_point(p1)
+        || !is_finite_point(b1)
+        || !is_finite_point(b2)
+        || !is_finite_point(p2)
+    {
+        return Err(format!("{command}.non_finite: picks must be finite"));
+    }
+    let z_tol = 1e-9 * (1.0 + a1.z.abs() + a2.z.abs() + b1.z.abs() + b2.z.abs());
+    if (a2.z - a1.z).abs() > z_tol || (b1.z - a1.z).abs() > z_tol || (b2.z - a1.z).abs() > z_tol {
+        return Err(format!(
+            "{command}.not_coplanar: needs two coplanar (+Z) straight objects"
+        ));
+    }
+    let (u1x, u1y) = unit_xy(a1, a2, tol, command)?;
+    let (u2x, u2y) = unit_xy(b1, b2, tol, command)?;
+    let corner = match infinite_line_intersection(a1, a2, b1, b2, tol) {
+        LineIntersection::Point(corner) => corner,
+        LineIntersection::Parallel => {
+            return Err(format!(
+                "{command}.lines_parallel: the two lines are parallel and meet no unique corner"
+            ));
+        }
+        LineIntersection::Collinear => {
+            return Err(format!(
+                "{command}.lines_collinear: the two lines are collinear and have no unique corner"
+            ));
+        }
+    };
+    let s1 = (p1.x - corner.x) * u1x + (p1.y - corner.y) * u1y;
+    if !s1.is_finite() || s1.abs() <= tol {
+        return Err(format!(
+            "{command}.pick_at_corner: the pick must be away from the corner"
+        ));
+    }
+    let dir1 = if s1 > 0.0 { (u1x, u1y) } else { (-u1x, -u1y) };
+    let s2 = (p2.x - corner.x) * u2x + (p2.y - corner.y) * u2y;
+    if !s2.is_finite() || s2.abs() <= tol {
+        return Err(format!(
+            "{command}.pick_at_corner: the pick must be away from the corner"
+        ));
+    }
+    let dir2 = if s2 > 0.0 { (u2x, u2y) } else { (-u2x, -u2y) };
+    let along1_start = (a1.x - corner.x) * dir1.0 + (a1.y - corner.y) * dir1.1;
+    let along1_end = (a2.x - corner.x) * dir1.0 + (a2.y - corner.y) * dir1.1;
+    let keep1_is_start = along1_start >= along1_end;
+    let (keep1, reach1) = if keep1_is_start {
+        (a1, along1_start)
+    } else {
+        (a2, along1_end)
+    };
+    let along2_start = (b1.x - corner.x) * dir2.0 + (b1.y - corner.y) * dir2.1;
+    let along2_end = (b2.x - corner.x) * dir2.0 + (b2.y - corner.y) * dir2.1;
+    let keep2_is_start = along2_start >= along2_end;
+    let (keep2, reach2) = if keep2_is_start {
+        (b1, along2_start)
+    } else {
+        (b2, along2_end)
+    };
+    Ok(Frame {
+        corner,
+        dir1,
+        dir2,
+        keep1,
+        keep1_is_start,
+        reach1,
+        keep2,
+        keep2_is_start,
+        reach2,
+    })
+}
+
+/// The interior angle between the two pick-side arms (`∈ (0, π)`).
+fn frame_angle(frame: &Frame) -> f64 {
+    (frame.dir1.0 * frame.dir2.0 + frame.dir1.1 * frame.dir2.1)
+        .clamp(-1.0, 1.0)
+        .acos()
+}
+
+/// Plan CHAMFER of two straight lines.
+pub(super) fn plan_chamfer_two_line(
+    input: &TwoLineInput,
+    spec: ChamferSpec,
+    trim: bool,
+    tol: f64,
+) -> Result<TwoLinePlan, String> {
+    let frame = corner_frame(input, tol, "CHAMFER")?;
+    if trim {
+        if let ChamferSpec::Distances { a, b } = spec {
+            // The ordinary distance/distance trim-on form is the shared ADR 0016
+            // planner; the angle and No-Trim forms below are this module's.
+            return helpers::plan_chamfer(&helper_input(input), a, b, tol)
+                .map(from_edit)
+                .map_err(|message| format!("CHAMFER.{message}"));
+        }
+    }
+    let (d1, d2) = match spec {
+        ChamferSpec::Distances { a, b } => {
+            if !a.is_finite() || a < 0.0 || !b.is_finite() || b < 0.0 {
+                return Err(
+                    "CHAMFER.distance_negative: the distances must be finite and non-negative"
+                        .into(),
+                );
+            }
+            (a, b)
+        }
+        ChamferSpec::Angle {
+            distance,
+            angle_radians,
+        } => {
+            if !distance.is_finite() || distance < 0.0 {
+                return Err(
+                    "CHAMFER.distance_negative: the distance must be finite and non-negative"
+                        .into(),
+                );
+            }
+            if !angle_radians.is_finite() || angle_radians < 0.0 {
+                return Err(
+                    "CHAMFER.angle_out_of_range: the angle must be finite and non-negative".into(),
+                );
+            }
+            if angle_radians == 0.0 {
+                (distance, 0.0)
+            } else {
+                // The angle is measured from the first object; the chamfer line
+                // from `t1` at angle α meets the second arm at
+                // `d₂ = d·sin α / sin(φ + α)`.
+                let phi = frame_angle(&frame);
+                let denominator = (phi + angle_radians).sin();
+                if !denominator.is_finite() || denominator <= 1e-9 {
+                    return Err(format!(
+                        "CHAMFER.angle_out_of_range: the angle {} deg leaves no wedge on the \
+                         second object",
+                        angle_radians.to_degrees()
+                    ));
+                }
+                let d2 = distance * angle_radians.sin() / denominator;
+                if !d2.is_finite() || d2 < 0.0 {
+                    return Err(
+                        "CHAMFER.angle_out_of_range: the angle cannot define the second distance"
+                            .into(),
+                    );
+                }
+                (distance, d2)
+            }
+        }
+    };
+    if d1 <= tol && d2 <= tol {
+        // Both zero: extend/trim the two objects to the intersection, create nothing.
+        if !trim {
+            return Err(
+                "CHAMFER.trim_off_no_chamfer: with trim off the intersect-only form creates \
+                 nothing"
+                    .into(),
+            );
+        }
+        if frame.reach1 <= tol || frame.reach2 <= tol {
+            return Err(
+                "CHAMFER.degenerate_line: a picked line collapses when moved to the corner".into(),
+            );
+        }
+        return Ok(TwoLinePlan {
+            first: Some(retarget(frame.keep1_is_start, frame.keep1, frame.corner)),
+            second: Some(retarget(frame.keep2_is_start, frame.keep2, frame.corner)),
+            inserted: None,
+        });
+    }
+    if trim && (d1 >= frame.reach1 - tol || d2 >= frame.reach2 - tol) {
+        return Err("CHAMFER.distance_too_long: a distance collapses the kept segment".into());
+    }
+    let t1 = point_from(frame.corner, frame.dir1, d1);
+    let t2 = point_from(frame.corner, frame.dir2, d2);
+    if distance(t1, t2) <= tol {
+        return Err(
+            "CHAMFER.degenerate_join: the two chamfer points coincide; nothing to join".into(),
+        );
+    }
+    let (first, second) = if trim {
+        (
+            Some(retarget(frame.keep1_is_start, frame.keep1, t1)),
+            Some(retarget(frame.keep2_is_start, frame.keep2, t2)),
+        )
+    } else {
+        (None, None)
+    };
+    Ok(TwoLinePlan {
+        first,
+        second,
+        inserted: Some(SemanticGeometry::Line { start: t1, end: t2 }),
+    })
+}
+
+/// Plan FILLET of two resolved objects.
+pub(super) fn plan_fillet_two_line(
+    first: Curve,
+    pick_first: Point3,
+    second: Curve,
+    pick_second: Point3,
+    radius: f64,
+    trim: bool,
+    tol: f64,
+) -> Result<TwoLinePlan, String> {
+    if !radius.is_finite() || radius < 0.0 {
+        return Err("FILLET.radius_negative: the radius must be finite and non-negative".into());
+    }
+    match (first, second) {
+        (Curve::Line { start: a1, end: a2 }, Curve::Line { start: b1, end: b2 }) => {
+            plan_fillet_lines(
+                &TwoLineInput {
+                    first: (a1, a2),
+                    pick_first,
+                    second: (b1, b2),
+                    pick_second,
+                },
+                radius,
+                trim,
+                tol,
+            )
+        }
+        (Curve::Line { start, end }, Curve::Circle { center, radius: r }) => {
+            plan_fillet_line_curve(PlanArgs {
+                line: (start, end),
+                line_pick: pick_first,
+                center,
+                circle_radius: r,
+                arc: None,
+                curve_pick: pick_second,
+                radius,
+                trim,
+                tol,
+                line_is_first: true,
+            })
+        }
+        (Curve::Circle { center, radius: r }, Curve::Line { start, end }) => {
+            plan_fillet_line_curve(PlanArgs {
+                line: (start, end),
+                line_pick: pick_second,
+                center,
+                circle_radius: r,
+                arc: None,
+                curve_pick: pick_first,
+                radius,
+                trim,
+                tol,
+                line_is_first: false,
+            })
+        }
+        (
+            Curve::Line { start, end },
+            Curve::Arc {
+                center,
+                radius: r,
+                start: arc_start,
+                sweep,
+            },
+        ) => plan_fillet_line_curve(PlanArgs {
+            line: (start, end),
+            line_pick: pick_first,
+            center,
+            circle_radius: r,
+            arc: Some((arc_start, sweep)),
+            curve_pick: pick_second,
+            radius,
+            trim,
+            tol,
+            line_is_first: true,
+        }),
+        (
+            Curve::Arc {
+                center,
+                radius: r,
+                start: arc_start,
+                sweep,
+            },
+            Curve::Line { start, end },
+        ) => plan_fillet_line_curve(PlanArgs {
+            line: (start, end),
+            line_pick: pick_second,
+            center,
+            circle_radius: r,
+            arc: Some((arc_start, sweep)),
+            curve_pick: pick_first,
+            radius,
+            trim,
+            tol,
+            line_is_first: false,
+        }),
+        (first, second) => Err(format!(
+            "FILLET.unsupported_pair: {}/{} fillets are not implemented (line↔line, \
+             line↔circle and line↔arc are)",
+            first.label(),
+            second.label()
+        )),
+    }
+}
+
+/// Plan FILLET of two straight lines, including the parallel auto-radius rule.
+fn plan_fillet_lines(
+    input: &TwoLineInput,
+    radius: f64,
+    trim: bool,
+    tol: f64,
+) -> Result<TwoLinePlan, String> {
+    match infinite_line_intersection(
+        input.first.0,
+        input.first.1,
+        input.second.0,
+        input.second.1,
+        tol,
+    ) {
+        LineIntersection::Point(_) => {}
+        LineIntersection::Parallel => return plan_parallel_fillet(input, trim, tol),
+        LineIntersection::Collinear => {
+            return Err(
+                "FILLET.lines_collinear: collinear lines have no corner and no gap to fillet"
+                    .into(),
+            );
+        }
+    }
+    let frame = corner_frame(input, tol, "FILLET")?;
+    if trim {
+        // The trim-on line/line form (including R=0) is the shared ADR 0016
+        // planner; the No-Trim form below needs the untouched-object rule.
+        return helpers::plan_fillet(&helper_input(input), radius, tol)
+            .map(from_edit)
+            .map_err(|message| format!("FILLET.{message}"));
+    }
+    if radius == 0.0 {
+        if !trim {
+            return Err(
+                "FILLET.trim_off_no_arc: with trim off the R=0 sharp corner creates nothing".into(),
+            );
+        }
+        if frame.reach1 <= tol || frame.reach2 <= tol {
+            return Err("FILLET.degenerate_line: a picked line collapses at the corner".into());
+        }
+        return Ok(TwoLinePlan {
+            first: Some(retarget(frame.keep1_is_start, frame.keep1, frame.corner)),
+            second: Some(retarget(frame.keep2_is_start, frame.keep2, frame.corner)),
+            inserted: None,
+        });
+    }
+    let phi = frame_angle(&frame);
+    let half = phi * 0.5;
+    let (sin_half, cos_half) = half.sin_cos();
+    if !sin_half.is_finite() || sin_half.abs() <= 1e-12 || !cos_half.is_finite() {
+        return Err("FILLET.degenerate_angle: the lines meet at no usable angle".into());
+    }
+    let tan_half = sin_half / cos_half;
+    if !tan_half.is_finite() || tan_half.abs() <= 1e-12 {
+        return Err("FILLET.degenerate_angle: the lines meet at no usable angle".into());
+    }
+    let tangent_distance = radius / tan_half;
+    if !tangent_distance.is_finite() {
+        return Err("FILLET.radius_too_large: the radius has no finite tangent distance".into());
+    }
+    if trim && (tangent_distance >= frame.reach1 - tol || tangent_distance >= frame.reach2 - tol) {
+        return Err("FILLET.radius_too_large: the radius does not fit the picked objects".into());
+    }
+    let t1 = point_from(frame.corner, frame.dir1, tangent_distance);
+    let t2 = point_from(frame.corner, frame.dir2, tangent_distance);
+    let bisector = (frame.dir1.0 + frame.dir2.0, frame.dir1.1 + frame.dir2.1);
+    let bisector_len = bisector.0.hypot(bisector.1);
+    if !bisector_len.is_finite() || bisector_len <= 1e-12 {
+        return Err("FILLET.degenerate_angle: no inside bisector".into());
+    }
+    let centre_distance = radius / sin_half;
+    let centre = pt(
+        frame.corner.x + bisector.0 / bisector_len * centre_distance,
+        frame.corner.y + bisector.1 / bisector_len * centre_distance,
+        frame.corner.z,
+    );
+    let start = (t1.y - centre.y).atan2(t1.x - centre.x);
+    let end = (t2.y - centre.y).atan2(t2.x - centre.x);
+    let sweep = normalize_signed(end - start);
+    if !sweep.is_finite() || sweep.abs() <= 1e-12 {
+        return Err("FILLET.degenerate_arc: the tangent arc has no sweep".into());
+    }
+    let (first, second) = if trim {
+        (
+            Some(retarget(frame.keep1_is_start, frame.keep1, t1)),
+            Some(retarget(frame.keep2_is_start, frame.keep2, t2)),
+        )
+    } else {
+        (None, None)
+    };
+    Ok(TwoLinePlan {
+        first,
+        second,
+        inserted: Some(arc(centre, radius, start, sweep)),
+    })
+}
+
+fn arc(center: Point3, radius: f64, start: f64, sweep: f64) -> SemanticGeometry {
+    SemanticGeometry::Arc {
+        center,
+        normal: pt(0.0, 0.0, 1.0),
+        radius,
+        start,
+        sweep,
+    }
+}
+
+/// Keep the endpoint of `segment` on the pick side of `target` and move the other
+/// endpoint onto `target`.
+fn retarget_pick_side(
+    segment: (Point3, Point3),
+    pick: Point3,
+    target: Point3,
+    tol: f64,
+    command: &str,
+) -> Result<GeometryUpdate, String> {
+    let (a, b) = segment;
+    let dir = unit_xy(a, b, tol, command)?;
+    let pick_side = (pick.x - target.x) * dir.0 + (pick.y - target.y) * dir.1;
+    if !pick_side.is_finite() || pick_side.abs() <= tol {
+        return Err(format!(
+            "{command}.pick_at_tangent: the pick does not select a side of the tangent point"
+        ));
+    }
+    let a_side = ((a.x - target.x) * dir.0 + (a.y - target.y) * dir.1) * pick_side.signum();
+    let b_side = ((b.x - target.x) * dir.0 + (b.y - target.y) * dir.1) * pick_side.signum();
+    let keep_is_start = a_side >= b_side;
+    let keep = if keep_is_start { a } else { b };
+    if distance(keep, target) <= tol {
+        return Err(format!(
+            "{command}.degenerate_line: the tangent point collapses the kept segment"
+        ));
+    }
+    Ok(retarget(keep_is_start, keep, target))
+}
+
+/// Plan FILLET of two parallel lines (the auto-radius rule).
+///
+/// The effective radius is half the perpendicular gap: any circle tangent to two
+/// distinct parallel lines has its centre on the midline, so its radius is the
+/// midline-to-line distance. The centre's along-line position is our declared rule
+/// (the average of the two pick projections); the arc is the `+Z`
+/// counter-clockwise half circle from the first line's tangent point to the
+/// second's.
+fn plan_parallel_fillet(input: &TwoLineInput, trim: bool, tol: f64) -> Result<TwoLinePlan, String> {
+    let (a1, a2) = input.first;
+    let (b1, b2) = input.second;
+    let (ux, uy) = unit_xy(a1, a2, tol, "FILLET")?;
+    let _ = unit_xy(b1, b2, tol, "FILLET")?;
+    let gap = ((b1.x - a1.x) * -uy + (b1.y - a1.y) * ux).abs();
+    if !gap.is_finite() || gap <= tol {
+        return Err("FILLET.lines_collinear: collinear lines have no gap to fillet".into());
+    }
+    let effective_radius = gap * 0.5;
+    let along = (input.pick_first.x * ux
+        + input.pick_first.y * uy
+        + input.pick_second.x * ux
+        + input.pick_second.y * uy)
+        * 0.5;
+    let along_point = |origin: Point3| {
+        let base = origin.x * ux + origin.y * uy;
+        pt(
+            origin.x + ux * (along - base),
+            origin.y + uy * (along - base),
+            origin.z,
+        )
+    };
+    let t1 = along_point(a1);
+    let t2 = along_point(b1);
+    let centre = pt((t1.x + t2.x) * 0.5, (t1.y + t2.y) * 0.5, t1.z);
+    if distance(t1, t2) <= tol {
+        return Err("FILLET.degenerate_arc: the parallel lines have no gap".into());
+    }
+    let start = (t1.y - centre.y).atan2(t1.x - centre.x);
+    let (first, second) = if trim {
+        (
+            Some(retarget_pick_side(
+                (a1, a2),
+                input.pick_first,
+                t1,
+                tol,
+                "FILLET",
+            )?),
+            Some(retarget_pick_side(
+                (b1, b2),
+                input.pick_second,
+                t2,
+                tol,
+                "FILLET",
+            )?),
+        )
+    } else {
+        (None, None)
+    };
+    Ok(TwoLinePlan {
+        first,
+        second,
+        inserted: Some(arc(centre, effective_radius, start, std::f64::consts::PI)),
+    })
+}
+
+/// The argument bundle of one line↔circle/arc fillet plan.
+struct PlanArgs {
+    line: (Point3, Point3),
+    line_pick: Point3,
+    center: Point3,
+    circle_radius: f64,
+    /// `Some((start, sweep))` when the curve target is a finite ARC.
+    arc: Option<(f64, f64)>,
+    curve_pick: Point3,
+    radius: f64,
+    trim: bool,
+    tol: f64,
+    /// Whether the retargeted line is the caller's first pick.
+    line_is_first: bool,
+}
+
+fn single_line_plan(update: GeometryUpdate, line_is_first: bool) -> TwoLinePlan {
+    if line_is_first {
+        TwoLinePlan {
+            first: Some(update),
+            second: None,
+            inserted: None,
+        }
+    } else {
+        TwoLinePlan {
+            first: None,
+            second: Some(update),
+            inserted: None,
+        }
+    }
+}
+
+/// Plan FILLET of one line and one circle (or arc).
+///
+/// The arc centre is the intersection of the line offset by `R` (on the circle's
+/// side) with the circle of radius `r + R` about the circle centre; the tangent
+/// points are the perpendicular foot on the line and the point at ratio
+/// `r / (r + R)` toward the circle centre. A circle is never trimmed.
+fn plan_fillet_line_curve(args: PlanArgs) -> Result<TwoLinePlan, String> {
+    let PlanArgs {
+        line: (a, b),
+        line_pick,
+        center,
+        circle_radius,
+        arc: arc_target,
+        curve_pick,
+        radius,
+        trim,
+        tol,
+        line_is_first,
+    } = args;
+    if !circle_radius.is_finite() || circle_radius <= tol {
+        return Err("FILLET.degenerate_circle: the picked circle has no radius".into());
+    }
+    let z_tol = 1e-9 * (1.0 + a.z.abs() + b.z.abs() + center.z.abs());
+    if (a.z - center.z).abs() > z_tol || (b.z - center.z).abs() > z_tol {
+        return Err("FILLET.not_coplanar: the line and the circle are not coplanar (+Z)".into());
+    }
+    let (ux, uy) = unit_xy(a, b, tol, "FILLET")?;
+    let (nx, ny) = (-uy, ux);
+    if radius == 0.0 {
+        if !trim {
+            return Err(
+                "FILLET.trim_off_no_arc: with trim off the R=0 sharp corner creates nothing".into(),
+            );
+        }
+        // Sharp corner: trim the line to its nearest intersection with the circle.
+        let best = line_circle_intersections(a, (ux, uy), center, circle_radius)
+            .into_iter()
+            .min_by(|p, q| {
+                distance(*p, line_pick)
+                    .partial_cmp(&distance(*q, line_pick))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .ok_or_else(|| {
+                "FILLET.line_does_not_meet_circle: the line does not intersect the circle"
+                    .to_string()
+            })?;
+        let update = retarget_pick_side((a, b), line_pick, best, tol, "FILLET")?;
+        return Ok(single_line_plan(update, line_is_first));
+    }
+    // The fillet lies on the side of the line the circle is on; when the line
+    // crosses the circle the pick side decides (declared).
+    let centre_side = (center.x - a.x) * nx + (center.y - a.y) * ny;
+    let side = if centre_side.abs() > circle_radius {
+        centre_side.signum()
+    } else {
+        let pick_side = (line_pick.x - a.x) * nx + (line_pick.y - a.y) * ny;
+        if pick_side.abs() <= tol {
+            return Err(
+                "FILLET.degenerate_side: the line pick does not select a side of the circle".into(),
+            );
+        }
+        pick_side.signum()
+    };
+    let reach = circle_radius + radius;
+    let offset = pt(a.x + nx * side * radius, a.y + ny * side * radius, a.z);
+    let wx = offset.x - center.x;
+    let wy = offset.y - center.y;
+    let half_b = wx * ux + wy * uy;
+    let discriminant = half_b * half_b - (wx * wx + wy * wy - reach * reach);
+    if !discriminant.is_finite() || discriminant < 0.0 {
+        return Err(
+            "FILLET.no_tangent_arc: no arc of this radius is tangent to both objects".into(),
+        );
+    }
+    let root = discriminant.sqrt();
+    let mut best: Option<(f64, Point3, Point3, Point3, f64, f64)> = None;
+    for parameter in [-half_b - root, -half_b + root] {
+        let arc_centre = pt(
+            offset.x + ux * parameter,
+            offset.y + uy * parameter,
+            offset.z,
+        );
+        let t_line = pt(
+            arc_centre.x - nx * side * radius,
+            arc_centre.y - ny * side * radius,
+            a.z,
+        );
+        let ratio = circle_radius / reach;
+        let t_curve = pt(
+            center.x + (arc_centre.x - center.x) * ratio,
+            center.y + (arc_centre.y - center.y) * ratio,
+            center.z,
+        );
+        let start = (t_line.y - arc_centre.y).atan2(t_line.x - arc_centre.x);
+        let end = (t_curve.y - arc_centre.y).atan2(t_curve.x - arc_centre.x);
+        let sweep = normalize_signed(end - start);
+        if !sweep.is_finite() || sweep.abs() <= 1e-12 {
+            continue;
+        }
+        let score = distance(t_line, line_pick) + distance(t_curve, curve_pick);
+        if best
+            .as_ref()
+            .is_none_or(|(best_score, ..)| score < *best_score)
+        {
+            best = Some((score, arc_centre, t_line, t_curve, start, sweep));
+        }
+    }
+    let Some((_, arc_centre, t_line, t_curve, start, sweep)) = best else {
+        return Err("FILLET.no_tangent_arc: no usable tangent arc was found".into());
+    };
+    let line_update = if trim {
+        Some(retarget_pick_side(
+            (a, b),
+            line_pick,
+            t_line,
+            tol,
+            "FILLET",
+        )?)
+    } else {
+        None
+    };
+    let arc_update = match (arc_target, trim) {
+        (Some((arc_start, arc_sweep)), true) => Some(trim_arc_to(
+            center, arc_start, arc_sweep, t_curve, curve_pick, tol,
+        )?),
+        _ => None,
+    };
+    let inserted = arc(arc_centre, radius, start, sweep);
+    Ok(match line_is_first {
+        true => TwoLinePlan {
+            first: line_update,
+            second: arc_update,
+            inserted: Some(inserted),
+        },
+        false => TwoLinePlan {
+            first: arc_update,
+            second: line_update,
+            inserted: Some(inserted),
+        },
+    })
+}
+
+/// Intersections of the infinite line `(origin, dir)` with a circle.
+fn line_circle_intersections(
+    origin: Point3,
+    dir: (f64, f64),
+    center: Point3,
+    radius: f64,
+) -> Vec<Point3> {
+    let (wx, wy) = (origin.x - center.x, origin.y - center.y);
+    let half_b = wx * dir.0 + wy * dir.1;
+    let discriminant = half_b * half_b - (wx * wx + wy * wy - radius * radius);
+    if !discriminant.is_finite() || discriminant < 0.0 {
+        return Vec::new();
+    }
+    let root = discriminant.sqrt();
+    [-half_b - root, -half_b + root]
+        .into_iter()
+        .map(|t| pt(origin.x + dir.0 * t, origin.y + dir.1 * t, origin.z))
+        .collect()
+}
+
+/// Trim an arc to the tangent point on the pick side, returning the new
+/// `(start, sweep)`.
+fn trim_arc_to(
+    center: Point3,
+    start: f64,
+    sweep: f64,
+    tangent: Point3,
+    pick: Point3,
+    tol: f64,
+) -> Result<GeometryUpdate, String> {
+    let angle = |p: Point3| (p.y - center.y).atan2(p.x - center.x);
+    let sign = sweep.signum();
+    let position = |a: f64| {
+        let tau = std::f64::consts::TAU;
+        let mut value = (a - start) * sign % tau;
+        if value < 0.0 {
+            value += tau;
+        }
+        value
+    };
+    let tangent_position = position(angle(tangent));
+    let pick_position = position(angle(pick));
+    if !tangent_position.is_finite() || tangent_position > sweep.abs() + 1e-9 {
+        return Err(
+            "FILLET.tangent_outside_arc: the tangent point does not lie on the picked arc".into(),
+        );
+    }
+    if pick_position > sweep.abs() + 1e-9 {
+        return Err("FILLET.pick_outside_arc: the pick does not lie on the picked arc".into());
+    }
+    if tangent_position <= tol {
+        return Err("FILLET.degenerate_arc: the tangent point is the arc's own start".into());
+    }
+    if pick_position <= tangent_position {
+        // The pick is on the start→tangent portion: keep it (trim the far end).
+        Ok(GeometryUpdate::Arc {
+            start,
+            sweep: tangent_position * sign,
+        })
+    } else {
+        // The pick is beyond the tangent point: keep that portion instead.
+        Ok(GeometryUpdate::Arc {
+            start: start + tangent_position * sign,
+            sweep: (sweep.abs() - tangent_position) * sign,
+        })
+    }
+}
+
+/// Resolve one FILLET pick to the supported curve kinds.
+pub(super) fn fillet_curve(geometry: &SemanticGeometry) -> CadResult<Curve> {
+    match geometry {
+        SemanticGeometry::Line { start, end } => Ok(Curve::Line {
+            start: *start,
+            end: *end,
+        }),
+        SemanticGeometry::Circle { center, radius, .. } => Ok(Curve::Circle {
+            center: *center,
+            radius: *radius,
+        }),
+        SemanticGeometry::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+            ..
+        } => Ok(Curve::Arc {
+            center: *center,
+            radius: *radius,
+            start: *start,
+            sweep: *sweep,
+        }),
+        other => Err(CadError::Unsupported(format!(
+            "FILLET needs a LINE, CIRCLE or ARC pick in the two-object form (a 2D polyline is \
+             the separate FILLET POLYLINE command); {} is not supported (ellipse, elliptical \
+             arc and spline fillets are NOT IMPLEMENTED)",
+            class_name(other)
+        ))),
+    }
+}
+
+/// Re-export the shared straight-line resolver (keeps one refusal string for
+/// both corner commands).
+pub(super) use super::super::helpers::straight_line;
