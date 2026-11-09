@@ -653,6 +653,33 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("3DWALK", CommandId::Extended(ExtendedCommandId::ThreeDWalk)),
     ("3DZOOM", CommandId::Extended(ExtendedCommandId::ThreeDZoom)),
 
+    // Wave 12 (2026-11-09): file/import/export/extension named refusals.
+    ("3DSIN", CommandId::Extended(ExtendedCommandId::ThreeDsIn)),
+    ("ACISIN", CommandId::Extended(ExtendedCommandId::AcisIn)),
+    ("ACISOUT", CommandId::Extended(ExtendedCommandId::AcisOut)),
+    ("BMPOUT", CommandId::Extended(ExtendedCommandId::BmpOut)),
+    ("JPGOUT", CommandId::Extended(ExtendedCommandId::JpgOut)),
+    ("PNGOUT", CommandId::Extended(ExtendedCommandId::PngOut)),
+    ("TIFOUT", CommandId::Extended(ExtendedCommandId::TifOut)),
+    ("WMFIN", CommandId::Extended(ExtendedCommandId::WmfIn)),
+    ("WMFOUT", CommandId::Extended(ExtendedCommandId::WmfOut)),
+    ("IGESIMPORT", CommandId::Extended(ExtendedCommandId::IgesImport)),
+    ("IGESEXPORT", CommandId::Extended(ExtendedCommandId::IgesExport)),
+    ("STLOUT", CommandId::Extended(ExtendedCommandId::StlOut)),
+    ("IMPORT", CommandId::Extended(ExtendedCommandId::ImportFile)),
+    ("EXPORTTOAUTOCAD", CommandId::Extended(ExtendedCommandId::ExportToAutoCad)),
+    ("DWGCONVERT", CommandId::Extended(ExtendedCommandId::DwgConvert)),
+    ("PLT2DWG", CommandId::Extended(ExtendedCommandId::Plt2Dwg)),
+    ("DXBIN", CommandId::Extended(ExtendedCommandId::DxbIn)),
+    ("APPLOAD", CommandId::Extended(ExtendedCommandId::AppLoad)),
+    ("ARX", CommandId::Extended(ExtendedCommandId::Arx)),
+    ("NETLOAD", CommandId::Extended(ExtendedCommandId::NetLoad)),
+    ("VBAIDE", CommandId::Extended(ExtendedCommandId::VbaIde)),
+    ("VBALOAD", CommandId::Extended(ExtendedCommandId::VbaLoad)),
+    ("VBARUN", CommandId::Extended(ExtendedCommandId::VbaRun)),
+    ("VBAUNLOAD", CommandId::Extended(ExtendedCommandId::VbaUnload)),
+    ("SCRIPT", CommandId::Extended(ExtendedCommandId::Script)),
+
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**

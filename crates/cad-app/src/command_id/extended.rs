@@ -702,6 +702,59 @@ pub enum ExtendedCommandId {
     ThreeDWalk,
     /// `3DZOOM`: 3D zoom: no perspective 3D zoom navigation.
     ThreeDZoom,
+
+    // Wave 12: file/import/export/extension commands. Every name is a stable
+    // named refusal (Viewer-legal).
+    /// `3DSIN`: 3DS import is not implemented.
+    ThreeDsIn,
+    /// `ACISIN`: ACIS (SAT) import is not implemented.
+    AcisIn,
+    /// `ACISOUT`: ACIS (SAT) export is not implemented.
+    AcisOut,
+    /// `BMPOUT`: raster BMP export is not implemented; use PLOT for vector SVG/PDF.
+    BmpOut,
+    /// `JPGOUT`: raster JPEG export is not implemented; use PLOT for vector SVG/PDF.
+    JpgOut,
+    /// `PNGOUT`: raster PNG export is not implemented; use PLOT for vector SVG/PDF.
+    PngOut,
+    /// `TIFOUT`: raster TIFF export is not implemented; use PLOT for vector SVG/PDF.
+    TifOut,
+    /// `WMFIN`: Windows metafile import is not implemented.
+    WmfIn,
+    /// `WMFOUT`: Windows metafile export is not implemented.
+    WmfOut,
+    /// `IGESIMPORT`: IGES import is not implemented.
+    IgesImport,
+    /// `IGESEXPORT`: IGES export is not implemented.
+    IgesExport,
+    /// `STLOUT`: STL export is not implemented.
+    StlOut,
+    /// `IMPORT`: the generic IMPORT picker is not implemented.
+    ImportFile,
+    /// `EXPORTTOAUTOCAD`: exporting to another AutoCAD version is not implemented.
+    ExportToAutoCad,
+    /// `DWGCONVERT`: batch DWG conversion is not implemented.
+    DwgConvert,
+    /// `PLT2DWG`: HPGL (PLT) import is not implemented.
+    Plt2Dwg,
+    /// `DXBIN`: DXB import is not implemented.
+    DxbIn,
+    /// `APPLOAD`: no plug-in/application loader model.
+    AppLoad,
+    /// `ARX`: no ObjectARX loader model.
+    Arx,
+    /// `NETLOAD`: no .NET application loader model.
+    NetLoad,
+    /// `VBAIDE`: no VBA IDE model.
+    VbaIde,
+    /// `VBALOAD`: no VBA loader model.
+    VbaLoad,
+    /// `VBARUN`: no VBA runtime.
+    VbaRun,
+    /// `VBAUNLOAD`: no VBA runtime.
+    VbaUnload,
+    /// `SCRIPT`: no script-file runner.
+    Script,
 }
 
 impl ExtendedCommandId {

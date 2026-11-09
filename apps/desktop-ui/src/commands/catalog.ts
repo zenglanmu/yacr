@@ -12,6 +12,8 @@ export interface CommandCatalogEntry {
   readonly group: string;
 }
 
+import { EXTENDED_COMMAND_CATALOG } from './catalog-extended.ts';
+
 /**
  * Every command name the app exposes in the chrome, in AutoCAD-style listing
  * order (file, draw, modify, view, measure, annotate, classify). `labelKey` is a
@@ -863,137 +865,8 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: '-PUBLISH', labelKey: 'draw.kind.dashpublish', icon: 'printer', group: 'file' },
   { id: 'AUTOPUBLISH', labelKey: 'draw.kind.autopublish', icon: 'printer', group: 'file' },
 
-  // The 2026-11-09 Wave 7 batch: the dynamic-block / constraint surfaces.
-  // BVSTATE and -BVSTATE are read-only reports of each selected INSERT's active
-  // visibility state; the rest are stable named refusals. Appended last so no
-  // shipped row moves.
-  { id: 'BVSTATE', labelKey: 'draw.kind.bvstate', icon: 'properties', group: 'properties' },
-  { id: '-BVSTATE', labelKey: 'draw.kind.dashbvstate', icon: 'properties', group: 'properties' },
-  { id: 'BACTION', labelKey: 'draw.kind.baction', icon: 'app', group: 'modify' },
-  { id: 'BACTIONBAR', labelKey: 'draw.kind.bactionbar', icon: 'app', group: 'modify' },
-  { id: 'BACTIONSET', labelKey: 'draw.kind.bactionset', icon: 'app', group: 'modify' },
-  { id: 'BACTIONTOOL', labelKey: 'draw.kind.bactiontool', icon: 'app', group: 'modify' },
-  { id: 'BASSOCIATE', labelKey: 'draw.kind.bassociate', icon: 'app', group: 'modify' },
-  { id: 'BAUTHORPALETTE', labelKey: 'draw.kind.bauthorpalette', icon: 'palette', group: 'modify' },
-  { id: 'BAUTHORPALETTECLOSE', labelKey: 'draw.kind.bauthorpaletteclose', icon: 'palette', group: 'modify' },
-  { id: 'BCONSTRUCTION', labelKey: 'draw.kind.bconstruction', icon: 'xline', group: 'modify' },
-  { id: 'BCPARAMETER', labelKey: 'draw.kind.bcparameter', icon: 'settings', group: 'modify' },
-  { id: '-BCPARAMETER', labelKey: 'draw.kind.dashbcparameter', icon: 'settings', group: 'modify' },
-  { id: 'BPARAMETER', labelKey: 'draw.kind.bparameter', icon: 'settings', group: 'modify' },
-  { id: 'BLOOKUPTABLE', labelKey: 'draw.kind.blookuptable', icon: 'properties', group: 'properties' },
-  { id: 'BTABLE', labelKey: 'draw.kind.btable', icon: 'properties', group: 'properties' },
-  { id: 'BVHIDE', labelKey: 'draw.kind.bvhide', icon: 'eyeOff', group: 'modify' },
-  { id: 'BVSHOW', labelKey: 'draw.kind.bvshow', icon: 'eye', group: 'modify' },
-  { id: 'RESETBLOCK', labelKey: 'draw.kind.resetblock', icon: 'settings', group: 'modify' },
-  { id: 'AUTOCONSTRAIN', labelKey: 'draw.kind.autoconstrain', icon: 'settings', group: 'modify' },
-  { id: 'DELCONSTRAINT', labelKey: 'draw.kind.delconstraint', icon: 'settings', group: 'modify' },
-  { id: 'DIMCONSTRAINT', labelKey: 'draw.kind.dimconstraint', icon: 'dimlinear', group: 'annotate' },
-  { id: 'GEOMCONSTRAINT', labelKey: 'draw.kind.geomconstraint', icon: 'settings', group: 'modify' },
-  { id: 'DCALIGNED', labelKey: 'draw.kind.dcaligned', icon: 'dimaligned', group: 'annotate' },
-  { id: 'DCANGULAR', labelKey: 'draw.kind.dcangular', icon: 'dimangular', group: 'annotate' },
-  { id: 'DCCONVERT', labelKey: 'draw.kind.dcconvert', icon: 'dimlinear', group: 'annotate' },
-  { id: 'DCDIAMETER', labelKey: 'draw.kind.dcdiameter', icon: 'dimdiameter', group: 'annotate' },
-  { id: 'DCDISPLAY', labelKey: 'draw.kind.dcdisplay', icon: 'dimlinear', group: 'annotate' },
-  { id: 'DCFORM', labelKey: 'draw.kind.dcform', icon: 'dimlinear', group: 'annotate' },
-  { id: 'DCHORIZONTAL', labelKey: 'draw.kind.dchorizontal', icon: 'dimlinear', group: 'annotate' },
-  { id: 'DCLINEAR', labelKey: 'draw.kind.dclinear', icon: 'dimlinear', group: 'annotate' },
-
-  // The 2026-11-09 Wave 8 batch: two session tokens (ELEV, UCSICON) and eight
-  // stable named refusals (UCS through RIBBON). Appended last so no shipped row
-  // moves.
-  { id: 'ELEV', labelKey: 'draw.kind.elev', icon: 'settings', group: 'view' },
-  { id: 'UCSICON', labelKey: 'draw.kind.ucsicon', icon: 'axes', group: 'view' },
-  { id: 'UCS', labelKey: 'draw.kind.ucs', icon: 'axes', group: 'view' },
-  { id: 'UCSMAN', labelKey: 'draw.kind.ucsman', icon: 'axes', group: 'view' },
-  { id: 'TABLET', labelKey: 'draw.kind.tablet', icon: 'pencil', group: 'view' },
-  { id: 'TASKBAR', labelKey: 'draw.kind.taskbar', icon: 'app', group: 'view' },
-  { id: 'REINIT', labelKey: 'draw.kind.reinit', icon: 'settings', group: 'view' },
-  { id: 'SYSWINDOWS', labelKey: 'draw.kind.syswindows', icon: 'app', group: 'view' },
-  { id: 'MENU', labelKey: 'draw.kind.menu', icon: 'menu', group: 'view' },
-  { id: 'RIBBON', labelKey: 'draw.kind.ribbon', icon: 'menu', group: 'view' },
-
-  // The 2026-11-09 Wave 9 batch: 2D draw/modify routes, real edits, aliases and
-  // stable named refusals. Appended last so no shipped row moves.
-  { id: 'ARRAY', labelKey: 'draw.kind.array', icon: 'arrayrect', group: 'modify' },
-  { id: '-ARRAY', labelKey: 'draw.kind.dasharray', icon: 'arrayrect', group: 'modify' },
-  { id: 'ARRAYCLASSIC', labelKey: 'draw.kind.arrayclassic', icon: 'arrayrect', group: 'modify' },
-  { id: 'ARCTEXT', labelKey: 'draw.kind.arctext', icon: 'text', group: 'annotate' },
-  { id: 'BLEND', labelKey: 'draw.kind.blend', icon: 'spline', group: 'modify' },
-  { id: 'BREAKLINE', labelKey: 'draw.kind.breakline', icon: 'line', group: 'draw' },
-  { id: 'MLEADERALIGN', labelKey: 'draw.kind.mleaderalign', icon: 'mleader', group: 'annotate' },
-  { id: 'MLEADEREDIT', labelKey: 'draw.kind.mleaderedit', icon: 'mleader', group: 'annotate' },
-  { id: 'MLEADERCOLLECT', labelKey: 'draw.kind.mleadercollect', icon: 'mleader', group: 'annotate' },
-  { id: 'TOLERANCE', labelKey: 'draw.kind.tolerance', icon: 'dimlinear', group: 'annotate' },
-  { id: 'DIM', labelKey: 'draw.kind.dim', icon: 'dimlinear', group: 'annotate' },
-  { id: 'DIMARC', labelKey: 'draw.kind.dimarc', icon: 'dimangular', group: 'annotate' },
-  { id: 'CAL', labelKey: 'draw.kind.cal', icon: 'settings', group: 'properties' },
-  { id: '-BLOCK', labelKey: 'draw.kind.dashblock', icon: 'copy', group: 'draw' },
-  { id: '-BOUNDARY', labelKey: 'draw.kind.dashboundary', icon: 'hatch', group: 'draw' },
-  { id: '-INSERT', labelKey: 'draw.kind.dashinsert', icon: 'copy', group: 'draw' },
-  { id: '-HATCH', labelKey: 'draw.kind.dashhatch', icon: 'hatch', group: 'draw' },
-  { id: '-HATCHEDIT', labelKey: 'draw.kind.dashhatchedit', icon: 'hatch', group: 'modify' },
-  { id: 'EXOFFSET', labelKey: 'draw.kind.exoffset', icon: 'offset', group: 'modify' },
-  { id: 'DIMEX', labelKey: 'draw.kind.dimex', icon: 'dimlinear', group: 'annotate' },
-  { id: 'DIMIM', labelKey: 'draw.kind.dimim', icon: 'dimlinear', group: 'annotate' },
-  { id: 'SPACETRANS', labelKey: 'draw.kind.spacetrans', icon: 'distance', group: 'measure' },
-  { id: 'TXTEXP', labelKey: 'draw.kind.txtexp', icon: 'explode', group: 'modify' },
-  { id: 'UPDATEFIELD', labelKey: 'draw.kind.updatefield', icon: 'text', group: 'annotate' },
-  { id: 'UNITS', labelKey: 'draw.kind.units', icon: 'settings', group: 'properties' },
-
-  // The 2026-11-09 Wave 10 batch: layer/view/session reports, named refusals
-  // and five chrome-local selectors. Appended last so no shipped row moves.
-  { id: '-UNITS', labelKey: 'draw.kind.dashunits', icon: 'settings', group: 'properties' },
-  { id: '-LAYER', labelKey: 'draw.kind.dashlayer', icon: 'layers', group: 'properties' },
-  { id: 'LAYERSTATESAVE', labelKey: 'draw.kind.layerstatesave', icon: 'layers', group: 'properties' },
-  { id: 'NEWVIEW', labelKey: 'draw.kind.newview', icon: 'view', group: 'view' },
-  { id: '-SCALELISTEDIT', labelKey: 'draw.kind.dashscalelistedit', icon: 'fit', group: 'view' },
-  { id: 'LWEIGHT', labelKey: 'draw.kind.lweight', icon: 'settings', group: 'properties' },
-  { id: '-LWEIGHT', labelKey: 'draw.kind.dashlweight', icon: 'settings', group: 'properties' },
-  { id: 'COLOR', labelKey: 'draw.kind.color', icon: 'palette', group: 'properties' },
-  { id: '-COLOR', labelKey: 'draw.kind.dashcolor', icon: 'palette', group: 'properties' },
-  { id: 'HELP', labelKey: 'draw.kind.help', icon: 'info', group: 'view' },
-  { id: 'CLASSICINSERT', labelKey: 'draw.kind.classicinsert', icon: 'copy', group: 'draw' },
-  { id: 'CLASSICGROUP', labelKey: 'draw.kind.classicgroup', icon: 'selectAll', group: 'modify' },
-  { id: 'FILETAB', labelKey: 'draw.kind.filetab', icon: 'app', group: 'view' },
-  { id: 'FILETABCLOSE', labelKey: 'draw.kind.filetabclose', icon: 'app', group: 'view' },
-  { id: 'HIDEPALETTES', labelKey: 'draw.kind.hidepalettes', icon: 'eyeOff', group: 'view' },
-  { id: 'SHOWPALETTES', labelKey: 'draw.kind.showpalettes', icon: 'eye', group: 'view' },
-  { id: 'RIBBONCLOSE', labelKey: 'draw.kind.ribbonclose', icon: 'menu', group: 'view' },
-  { id: 'GOTOSTART', labelKey: 'draw.kind.gotostart', icon: 'start', group: 'file' },
-  { id: 'COPYHIST', labelKey: 'draw.kind.copyhist', icon: 'copy', group: 'properties' },
-  { id: 'TRANSPARENCY', labelKey: 'draw.kind.transparency', icon: 'eye', group: 'properties' },
-  { id: 'DSETTINGS', labelKey: 'draw.kind.dsettings', icon: 'settings', group: 'properties' },
-  { id: 'QUICKPROPERTIES', labelKey: 'draw.kind.quickproperties', icon: 'properties', group: 'properties' },
-  { id: 'CLASSICLAYER', labelKey: 'draw.kind.classiclayer', icon: 'layers', group: 'properties' },
-  { id: 'COMMANDLINE', labelKey: 'draw.kind.commandline', icon: 'terminal', group: 'view' },
-  { id: 'COMMANDLINEHIDE', labelKey: 'draw.kind.commandlinehide', icon: 'terminal', group: 'view' },
-
-  // The 2026-11-09 Wave 11 batch: 3D is lower priority, so every name is a
-  // stable named refusal. Appended last so no shipped row moves.
-  { id: '3DALIGN', labelKey: 'draw.kind.3dalign', icon: 'align', group: 'modify' },
-  { id: '3DARRAY', labelKey: 'draw.kind.3darray', icon: 'arrayrect', group: 'modify' },
-  { id: '3DCLIP', labelKey: 'draw.kind.3dclip', icon: 'view', group: 'view' },
-  { id: '3DCORBIT', labelKey: 'draw.kind.3dcorbit', icon: 'orbit', group: 'view' },
-  { id: '3DDISTANCE', labelKey: 'draw.kind.3ddistance', icon: 'zoomOut', group: 'view' },
-  { id: '3DDWF', labelKey: 'draw.kind.3ddwf', icon: 'save', group: 'file' },
-  { id: '3DEDITBAR', labelKey: 'draw.kind.3deditbar', icon: 'spline', group: 'modify' },
-  { id: '3DFACE', labelKey: 'draw.kind.3dface', icon: 'dot', group: 'draw' },
-  { id: '3DFLY', labelKey: 'draw.kind.3dfly', icon: 'eye', group: 'view' },
-  { id: '3DFORBIT', labelKey: 'draw.kind.3dforbit', icon: 'orbit', group: 'view' },
-  { id: '3DMESH', labelKey: 'draw.kind.3dmesh', icon: 'dot', group: 'draw' },
-  { id: '3DMOVE', labelKey: 'draw.kind.3dmove', icon: 'move', group: 'modify' },
-  { id: '3DORBIT', labelKey: 'draw.kind.3dorbit', icon: 'orbit', group: 'view' },
-  { id: '3DORBITCTR', labelKey: 'draw.kind.3dorbitctr', icon: 'orbit', group: 'view' },
-  { id: '-3DOSNAP', labelKey: 'draw.kind.dash3dosnap', icon: 'snap', group: 'view' },
-  { id: '3DOSNAP', labelKey: 'draw.kind.3dosnap', icon: 'snap', group: 'view' },
-  { id: '3DPAN', labelKey: 'draw.kind.3dpan', icon: 'pan', group: 'view' },
-  { id: '3DPOLY', labelKey: 'draw.kind.3dpoly', icon: 'polyline', group: 'draw' },
-  { id: '3DPRINT', labelKey: 'draw.kind.3dprint', icon: 'printer', group: 'file' },
-  { id: '3DPRINTSERVICE', labelKey: 'draw.kind.3dprintservice', icon: 'printer', group: 'file' },
-  { id: '3DROTATE', labelKey: 'draw.kind.3drotate', icon: 'rotate', group: 'modify' },
-  { id: '3DSCALE', labelKey: 'draw.kind.3dscale', icon: 'scale', group: 'modify' },
-  { id: '3DSWIVEL', labelKey: 'draw.kind.3dswivel', icon: 'orbit', group: 'view' },
-  { id: '3DWALK', labelKey: 'draw.kind.3dwalk', icon: 'eye', group: 'view' },
-  { id: '3DZOOM', labelKey: 'draw.kind.3dzoom', icon: 'zoomIn', group: 'view' },
-
+  // The 2026-11-09 extended batches (Waves 7–12) live in a sibling module so
+  // neither file approaches the 1000-line code gate. They are appended here in
+  // their original order.
+  ...EXTENDED_COMMAND_CATALOG,
 ]);

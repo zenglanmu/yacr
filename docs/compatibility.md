@@ -1276,6 +1276,38 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `3DWALK` | **部分实现（具名拒绝）**：`3dwalk.unsupported: no 3D walk navigation` | 不写库/不升修订/不入历史 |
 | `3DZOOM` | **部分实现（具名拒绝）**：`3dzoom.unsupported: no perspective 3D zoom navigation` | 不写库/不升修订/不入历史 |
 
+### 2026-11-09 Wave 12 扩展命令（文件/导入导出/扩展运行时拒绝）
+
+> 唯一矢量输出仍是 `PLOT`（SVG/PDF）。以下名字只提供诚实命令路径（具名拒绝），不是可用导入导出/扩展功能；证据仅 Linux 编译 + 契约测试。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `3DSIN` | **部分实现（具名拒绝）**：`3dsin.unsupported: 3DS import is not implemented` | 不写库/不升修订/不入历史 |
+| `ACISIN` | **部分实现（具名拒绝）**：`acisin.unsupported: ACIS (SAT) import is not implemented` | 不写库/不升修订/不入历史 |
+| `ACISOUT` | **部分实现（具名拒绝）**：`acisout.unsupported: ACIS (SAT) export is not implemented` | 不写库/不升修订/不入历史 |
+| `BMPOUT` | **部分实现（具名拒绝）**：`bmpout.unsupported: raster BMP export is not implemented; use PLOT for vector SVG/PDF` | 不写库/不升修订/不入历史 |
+| `JPGOUT` | **部分实现（具名拒绝）**：`jpgout.unsupported: raster JPEG export is not implemented; use PLOT for vector SVG/PDF` | 不写库/不升修订/不入历史 |
+| `PNGOUT` | **部分实现（具名拒绝）**：`pngout.unsupported: raster PNG export is not implemented; use PLOT for vector SVG/PDF` | 不写库/不升修订/不入历史 |
+| `TIFOUT` | **部分实现（具名拒绝）**：`tifout.unsupported: raster TIFF export is not implemented; use PLOT for vector SVG/PDF` | 不写库/不升修订/不入历史 |
+| `WMFIN` | **部分实现（具名拒绝）**：`wmfin.unsupported: Windows metafile import is not implemented` | 不写库/不升修订/不入历史 |
+| `WMFOUT` | **部分实现（具名拒绝）**：`wmfout.unsupported: Windows metafile export is not implemented` | 不写库/不升修订/不入历史 |
+| `IGESIMPORT` | **部分实现（具名拒绝）**：`igesimport.unsupported: IGES import is not implemented` | 不写库/不升修订/不入历史 |
+| `IGESEXPORT` | **部分实现（具名拒绝）**：`igesexport.unsupported: IGES export is not implemented` | 不写库/不升修订/不入历史 |
+| `STLOUT` | **部分实现（具名拒绝）**：`stlout.unsupported: STL export is not implemented` | 不写库/不升修订/不入历史 |
+| `IMPORT` | **部分实现（具名拒绝）**：`import.unsupported: the generic IMPORT picker is not implemented` | 不写库/不升修订/不入历史 |
+| `EXPORTTOAUTOCAD` | **部分实现（具名拒绝）**：`exporttoautocad.unsupported: exporting to another AutoCAD version is not implemented` | 不写库/不升修订/不入历史 |
+| `DWGCONVERT` | **部分实现（具名拒绝）**：`dwgconvert.unsupported: batch DWG conversion is not implemented` | 不写库/不升修订/不入历史 |
+| `PLT2DWG` | **部分实现（具名拒绝）**：`plt2dwg.unsupported: HPGL (PLT) import is not implemented` | 不写库/不升修订/不入历史 |
+| `DXBIN` | **部分实现（具名拒绝）**：`dxbin.unsupported: DXB import is not implemented` | 不写库/不升修订/不入历史 |
+| `APPLOAD` | **部分实现（具名拒绝）**：`appload.unsupported: no plug-in/application loader model` | 不写库/不升修订/不入历史 |
+| `ARX` | **部分实现（具名拒绝）**：`arx.unsupported: no ObjectARX loader model` | 不写库/不升修订/不入历史 |
+| `NETLOAD` | **部分实现（具名拒绝）**：`netload.unsupported: no .NET application loader model` | 不写库/不升修订/不入历史 |
+| `VBAIDE` | **部分实现（具名拒绝）**：`vbaide.unsupported: no VBA IDE model` | 不写库/不升修订/不入历史 |
+| `VBALOAD` | **部分实现（具名拒绝）**：`vbaload.unsupported: no VBA loader model` | 不写库/不升修订/不入历史 |
+| `VBARUN` | **部分实现（具名拒绝）**：`vbarun.unsupported: no VBA runtime` | 不写库/不升修订/不入历史 |
+| `VBAUNLOAD` | **部分实现（具名拒绝）**：`vbaunload.unsupported: no VBA runtime` | 不写库/不升修订/不入历史 |
+| `SCRIPT` | **部分实现（具名拒绝）**：`script.unsupported: no script-file runner` | 不写库/不升修订/不入历史 |
+
 ## P2 晋升与边界更新（2026-11-09）
 
 > 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux

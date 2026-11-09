@@ -210,6 +210,8 @@ mod extended_w9_reports;
 mod extended_w10;
 // The 2026-11-09 Wave 11 extended-command contracts.
 mod extended_w11;
+// The 2026-11-09 Wave 12 extended-command contracts.
+mod extended_w12;
 mod grips;
 mod grips_curves;
 mod grips_dimension;

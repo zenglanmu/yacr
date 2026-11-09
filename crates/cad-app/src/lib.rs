@@ -81,6 +81,8 @@ mod app_extended_w10_refusals;
 mod app_extended_w10_session;
 // The Wave 11 extended-command handlers (3D/mesh/surface refusals).
 mod app_extended_w11_refusals;
+// The Wave 12 extended-command handlers (file/import/export refusals).
+mod app_extended_w12_refusals;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;

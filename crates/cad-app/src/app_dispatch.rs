@@ -339,6 +339,32 @@ impl Application {
             | ExtendedCommandId::ThreeDSwivel
             | ExtendedCommandId::ThreeDWalk
             | ExtendedCommandId::ThreeDZoom => self.extended_w11_refusals(command, ext)?,
+            // Wave 12: file/import/export/extension named refusals.
+            ExtendedCommandId::ThreeDsIn
+            | ExtendedCommandId::AcisIn
+            | ExtendedCommandId::AcisOut
+            | ExtendedCommandId::BmpOut
+            | ExtendedCommandId::JpgOut
+            | ExtendedCommandId::PngOut
+            | ExtendedCommandId::TifOut
+            | ExtendedCommandId::WmfIn
+            | ExtendedCommandId::WmfOut
+            | ExtendedCommandId::IgesImport
+            | ExtendedCommandId::IgesExport
+            | ExtendedCommandId::StlOut
+            | ExtendedCommandId::ImportFile
+            | ExtendedCommandId::ExportToAutoCad
+            | ExtendedCommandId::DwgConvert
+            | ExtendedCommandId::Plt2Dwg
+            | ExtendedCommandId::DxbIn
+            | ExtendedCommandId::AppLoad
+            | ExtendedCommandId::Arx
+            | ExtendedCommandId::NetLoad
+            | ExtendedCommandId::VbaIde
+            | ExtendedCommandId::VbaLoad
+            | ExtendedCommandId::VbaRun
+            | ExtendedCommandId::VbaUnload
+            | ExtendedCommandId::Script => self.extended_w12_refusals(command, ext)?,
         };
         Ok(Some(outcome))
     }
