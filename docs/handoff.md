@@ -1,5 +1,16 @@
 AD
 
+## 2026-11-10 P5 页面设置/MVIEW + HATCHEDIT 边界
+
+- **P5 页面设置写入**：`PlotProvenance::Authored` + `cad-db::set_plot_settings`（校验 layout/key/纸张/比例，单 revision）。`PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]` 真实写 Authored `PLOTSETTINGS`，一条事务/一步撤销；`-PAGESETUP` 同语法；裸 `PAGESETUP` 仍是只读报告。`PSETUPIN <source> <target>` 同图纸复制已存 plot 行（无源记录拒绝，不合成 A4 回退）。`LAYOUTWIZARD` 现在应用纸张设置（`layoutwizard.paper_applied`）。
+- **MVIEW**：活动图纸空间创建矩形 `PaperViewport`（四角 clip、unit scale、`-paper_center` 平移），一条事务/一步撤销；`MVIEW <minx> <miny> <maxx> <maxy>` typed grammar。`MVSETUP`/`LAYVPI` 仍是拒绝。
+- **HATCHEDIT 边界**：`ADDBOUNDARIES`/`REMOVEBOUNDARIES` 变为真实：一个选中 hatch + 其余选中闭合实体为边界；Add 追加 loop，Remove 按 points+bulges（1e-9）匹配删除；重建一个 `HatchGeometry`，一条事务/一步撤销。Origin/Associate/Annotative/Boundary draw order 仍拒绝。
+- **typed grammar/UI**：uCore 新增 PAGESETUP/-PAGESETUP/PSETUPIN/-PSETUPIN/MVIEW 解析与 dispatch，五个 variant 加入 Work mode；前端 `argument-commands.ts` 同步，i18n 与 HATCHEDIT 帮助文案更新。
+- **已运行**：`cargo test -p cad-app --lib`（2261 passed, 3 ignored）、`cad-db`（220+13+5）、`cad-history`（25）、`cad-ui-core`（498+1）、`cargo clippy`（app/db/history/ui-core/cli-tools）、`cargo fmt --check`、`npm test`（1434 passed）、architecture/tauri/fixture/file-size/command-docs/i18n 全绿。
+- **NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机、制造平台运行时、真实 DWG/vendor 对照；页面设置/MVIEW/hatch 边界只有契约测试。
+- **提交**：`f752b0a0` P5 page setup/PSETUPIN/MVIEW；`be3905b7` HATCHEDIT boundaries；typed grammar/UI 与文档另提交。
+
+
 ## 2026-11-10 P4/P5：图层表与布局表写入可撤销 + 布局/视口真实写入
 
 - **用户要求**：继续“做”上一轮建议的高价值路径（P4/P5 晋升），而不是继续增加具名拒绝。

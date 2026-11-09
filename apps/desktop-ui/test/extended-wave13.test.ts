@@ -44,12 +44,16 @@ test('every Wave 13 command is catalogued once with real keys', async () => {
   }
 });
 
-test('reports and refusals state their boundaries', async () => {
+test('reports, writes and refusals state their boundaries', async () => {
   const en = await readCatalog('en');
-  for (const id of ['PAGESETUP', '-PAGESETUP', 'CONVERTPOLY']) {
-    assert.match(en[`${labelSlug(id)}.hint`], /Read-only report/i, id);
+  assert.match(en['draw.kind.convertpoly.hint'], /Read-only report/i);
+  for (const id of ['PAGESETUP', '-PAGESETUP']) {
+    assert.match(en[`${labelSlug(id)}.hint`], /one transaction\/one undo step/i, id);
   }
-  for (const id of ['PSETUPIN', 'PLOTSTYLE', 'TABLE', 'FIELD', 'SPELL', 'SUPERHATCH', 'ALIGNSPACE', 'VPSYNC', 'LAYTRANS']) {
+  for (const id of ['PSETUPIN', '-PSETUPIN']) {
+    assert.match(en[`${labelSlug(id)}.hint`], /same drawing|same-drawing/i, id);
+  }
+  for (const id of ['PLOTSTYLE', 'TABLE', 'FIELD', 'SPELL', 'SUPERHATCH', 'ALIGNSPACE', 'VPSYNC', 'LAYTRANS']) {
     assert.match(en[`${labelSlug(id)}.hint`], /Named refusal/i, id);
   }
 });

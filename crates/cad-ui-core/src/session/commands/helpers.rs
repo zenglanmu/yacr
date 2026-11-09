@@ -88,13 +88,14 @@ pub const PEDIT_SELECTOR: &str = "PEDIT";
 /// AutoCAD's `HATCHEDIT` opens a dialog; this build has no in-command dialog, so
 /// the option is typed on the command line. The grammar
 /// ([`super::parse_hatchedit_argument`]) is `ANGLE <degrees>`, `SCALE <factor>`,
-/// `SOLID` and `GRADIENT`, case-insensitive. The current selection (exactly one
-/// model-space hatch) is still the whole input, so there is no second IPC. A
+/// `SOLID`, `GRADIENT`, `ADDBOUNDARIES` and `REMOVEBOUNDARIES`,
+/// case-insensitive. The current selection (exactly one model-space hatch) is
+/// still the whole input, so there is no second IPC. A
 /// bare `HATCHEDIT` is admitted by name and refused by the application with
 /// `hatchedit.needs_option`; an unknown argument is refused before IPC with
 /// [`super::invalid_hatchedit_argument_reason`]. `Pattern`, `Color`,
-/// `Properties`, `Draw order`, `Add`/`Remove` boundaries and associativity are
-/// NOT IMPLEMENTED.
+/// `Properties`, `Draw order` and associativity are NOT IMPLEMENTED.
+/// `ADDBOUNDARIES`/`REMOVEBOUNDARIES` are real pre-selection boundary edits.
 pub const HATCHEDIT_SELECTOR: &str = "HATCHEDIT";
 /// AutoCAD's `MEASUREGEOM <option>`: the inquiry router's typed argument form.
 ///

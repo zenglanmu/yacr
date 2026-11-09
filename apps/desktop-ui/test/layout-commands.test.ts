@@ -36,6 +36,30 @@ test('the typed layout/viewport grammars mirror the host boundary', () => {
   assert.equal(ARGUMENT_COMMANDS.LAYOUTWIZARD.parse('Sheet3 A4 210 297'), true);
   assert.equal(ARGUMENT_COMMANDS.LAYOUTWIZARD.parse('Sheet3 A4 0 297'), false);
 
+  const pagesetup = ARGUMENT_COMMANDS.PAGESETUP.parse;
+  assert.equal(pagesetup('SheetOne A4 210 297'), true);
+  assert.equal(pagesetup('SheetOne A4 210 297 1:2'), true);
+  assert.equal(pagesetup('SheetOne A4 210 297 1:2 90'), true);
+  assert.equal(pagesetup('SheetOne A4 210 297 270'), true);
+  assert.equal(pagesetup('SheetOne A4 0 297'), false);
+  assert.equal(pagesetup('SheetOne A4 210 297 1:0'), false);
+  assert.equal(pagesetup('SheetOne A4 210 297 45'), false);
+  assert.equal(pagesetup('SheetOne A4 210'), false);
+  assert.equal(ARGUMENT_COMMANDS['-PAGESETUP'].parse('SheetOne A4 210 297'), true);
+
+  assert.equal(ARGUMENT_COMMANDS.PSETUPIN.parse('Source Target'), true);
+  assert.equal(ARGUMENT_COMMANDS.PSETUPIN.parse('Source'), false);
+  assert.equal(ARGUMENT_COMMANDS.PSETUPIN.parse('Source Target Extra'), false);
+  assert.equal(ARGUMENT_COMMANDS['-PSETUPIN'].parse('Source Target'), true);
+
+  const mview = ARGUMENT_COMMANDS.MVIEW.parse;
+  assert.equal(mview('10 20 60 80'), true);
+  assert.equal(mview('-10 -20 60.5 80'), true);
+  assert.equal(mview('10 20 10 80'), false);
+  assert.equal(mview('10 20 60 20'), false);
+  assert.equal(mview('10 20 60'), false);
+  assert.equal(mview('10 20 NaN 80'), false);
+
   const vports = ARGUMENT_COMMANDS.VPORTS.parse;
   assert.equal(vports('2 3'), true);
   assert.equal(vports('0 3'), false);

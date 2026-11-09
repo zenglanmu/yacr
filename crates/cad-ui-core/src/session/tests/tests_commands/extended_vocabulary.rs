@@ -60,6 +60,11 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::DashHatchEdit
                 | ExtendedCommandId::ExOffset
                 | ExtendedCommandId::LayerStateSave
+                | ExtendedCommandId::MView
+                | ExtendedCommandId::PageSetup
+                | ExtendedCommandId::DashPageSetup
+                | ExtendedCommandId::PageSetupIn
+                | ExtendedCommandId::DashPageSetupIn
         );
         assert_eq!(
             variant.requires_work_mode(),

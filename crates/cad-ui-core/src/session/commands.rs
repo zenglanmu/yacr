@@ -876,10 +876,17 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     VIEW_SELECTOR,
     VIEWGO_SELECTOR,
     VPOINT_SELECTOR,
-    // The 2026-11-07 layout/viewport batch argument forms.
+    // The 2026-11-07 layout/viewport batch argument forms, plus the typed
+    // `PAGESETUP`/`PSETUPIN`/`MVIEW` writes. The dash spellings are distinct
+    // extended selectors, not aliases, so each has its own row.
     LAYOUT_SELECTOR,
     LAYOUTMERGE_SELECTOR,
     LAYOUTWIZARD_SELECTOR,
+    PAGESETUP_SELECTOR,
+    DASH_PAGESETUP_SELECTOR,
+    PSETUPIN_SELECTOR,
+    DASH_PSETUPIN_SELECTOR,
+    MVIEW_SELECTOR,
     VPORTS_SELECTOR,
     VPCLIP_SELECTOR,
     VPSCALE_SELECTOR,

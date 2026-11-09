@@ -18,10 +18,12 @@
 //! * `LAYER <name>` — the drawing layer name (spaces allowed);
 //! * `DRAWORDER BEHIND|FRONT|BOUNDARY`;
 //! * `RECREATEBOUNDARY`, `SEPARATE`;
+//! * `ADDBOUNDARIES`, `REMOVEBOUNDARIES` — the pre-selection boundary edit:
+//!   exactly one hatch plus the other selected closed entities, rewritten as one
+//!   transaction / one undo step;
 //! * the named-refusal forms `ORIGIN`, `ASSOCIATE`, `DISASSOCIATE`,
-//!   `ANNOTATIVE`, `ADDBOUNDARIES`, `REMOVEBOUNDARIES` (they parse so the
-//!   application can name the missing model instead of pretending the option
-//!   word is invalid).
+//!   `ANNOTATIVE` (they parse so the application can name the missing model
+//!   instead of pretending the option word is invalid).
 //!
 //! A bare `HATCHEDIT` never reaches here (it keeps the name-only funnel and the
 //! application refuses it with `hatchedit.needs_option`). An argument outside
@@ -170,9 +172,9 @@ fn parse_aci(text: &str) -> Option<u8> {
 pub fn invalid_hatchedit_argument_reason(text: &str) -> String {
     format!(
         "unsupported CAD command: {} (HATCHEDIT needs STYLE, ANGLE, SCALE, PATTERNTYPE, SOLID, \
-         GRADIENT, COLOR, TRANSPARENCY, LAYER, DRAWORDER, RECREATEBOUNDARY or SEPARATE; \
-         ORIGIN/ASSOCIATE/DISASSOCIATE/ANNOTATIVE and Add/Remove boundaries are named \
-         refusals)",
+         GRADIENT, COLOR, TRANSPARENCY, LAYER, DRAWORDER, RECREATEBOUNDARY, SEPARATE, \
+         ADDBOUNDARIES or REMOVEBOUNDARIES; ORIGIN/ASSOCIATE/DISASSOCIATE/ANNOTATIVE are \
+         named refusals)",
         text.trim()
     )
 }

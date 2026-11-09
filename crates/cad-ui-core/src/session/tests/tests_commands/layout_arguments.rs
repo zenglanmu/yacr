@@ -183,3 +183,193 @@ fn vpmax_and_vpmin_are_payload_free_session_commands() {
         .command("VPMIN")
         .expect("VPMIN with an empty state is a named no-op, not an error");
 }
+
+#[test]
+fn pagesetup_grammar_parses_paper_and_optional_scale_and_rotation() {
+    use crate::session::commands::parse_pagesetup_argument;
+    use cad_app::{LayoutPayload, PaperSetup};
+    use cad_db::PlotRotation;
+
+    assert_eq!(
+        parse_pagesetup_argument("SheetOne A4 210 297").expect("the minimal form parses"),
+        LayoutPayload::PageSetup {
+            layout: "SheetOne".into(),
+            paper: PaperSetup {
+                name: "A4".into(),
+                width: 210.0,
+                height: 297.0,
+            },
+            scale: None,
+            rotation: PlotRotation::None,
+        }
+    );
+    assert_eq!(
+        parse_pagesetup_argument("SheetOne A3 420 297 1:2 90").expect("the full form parses"),
+        LayoutPayload::PageSetup {
+            layout: "SheetOne".into(),
+            paper: PaperSetup {
+                name: "A3".into(),
+                width: 420.0,
+                height: 297.0,
+            },
+            scale: Some((1.0, 2.0)),
+            rotation: PlotRotation::Degrees90,
+        },
+        "layout and paper are single tokens, like LAYOUTWIZARD"
+    );
+    let spaced = parse_pagesetup_argument("Sheet One A3 420 297")
+        .expect_err("a layout name with a space is not addressable here");
+    assert!(spaced.contains("finite numbers > 0"), "{spaced}");
+    assert_eq!(
+        parse_pagesetup_argument("SheetOne A4 210 297 270").expect("rotation without scale"),
+        LayoutPayload::PageSetup {
+            layout: "SheetOne".into(),
+            paper: PaperSetup {
+                name: "A4".into(),
+                width: 210.0,
+                height: 297.0,
+            },
+            scale: None,
+            rotation: PlotRotation::Degrees270,
+        }
+    );
+
+    for (argument, expected) in [
+        ("SheetOne A4 0 297", "finite numbers > 0"),
+        ("SheetOne A4 210 NaN", "finite numbers > 0"),
+        ("SheetOne A4 210 297 1:0", "pagesetup.invalid_scale"),
+        ("SheetOne A4 210 297 0:1", "pagesetup.invalid_scale"),
+        ("SheetOne A4 210 297 45", "pagesetup.invalid_rotation"),
+        ("SheetOne A4 210 297 90 180", "at most one rotation"),
+        ("SheetOne A4 210 297 1:2 2:1", "at most one"),
+    ] {
+        let error = parse_pagesetup_argument(argument).expect_err(argument);
+        assert!(error.contains(expected), "{argument}: {error}");
+    }
+    assert!(parse_pagesetup_argument("SheetOne A4 210").is_err());
+}
+
+#[test]
+fn psetupin_and_mview_grammars_are_exact() {
+    use crate::session::commands::{parse_mview_argument, parse_psetupin_argument};
+    use cad_app::LayoutPayload;
+    use cad_domain::Point3;
+
+    assert_eq!(
+        parse_psetupin_argument("Source Target").expect("two tokens parse"),
+        LayoutPayload::PageSetupIn {
+            source: "Source".into(),
+            target: "Target".into(),
+        }
+    );
+    for argument in ["Source", "Source Target Extra", ""] {
+        assert!(
+            parse_psetupin_argument(argument).is_err(),
+            "{argument} is not exactly two names"
+        );
+    }
+
+    let (min, max) = parse_mview_argument("10 20 60.5 80").expect("four signed decimals parse");
+    assert_eq!(
+        min,
+        Point3 {
+            x: 10.0,
+            y: 20.0,
+            z: 0.0,
+        }
+    );
+    assert_eq!(
+        max,
+        Point3 {
+            x: 60.5,
+            y: 80.0,
+            z: 0.0,
+        }
+    );
+    for argument in ["10 20 60", "10 20 10 80", "10 20 60 20", "10 20 NaN 80"] {
+        let error = parse_mview_argument(argument).expect_err(argument);
+        assert!(error.contains("mview.invalid_rect"), "{argument}: {error}");
+    }
+}
+
+#[test]
+fn pagesetup_pagesetupin_and_mview_dispatch_their_real_writes() {
+    let session = session_with_layouts(&[(2, "SheetOne", None), (3, "SheetTwo", None)]);
+
+    session
+        .command("PAGESETUP SheetOne A4 210 297 1:2 90")
+        .expect("PAGESETUP writes the page setup");
+    session
+        .command("PSETUPIN SheetOne SheetTwo")
+        .expect("PSETUPIN copies the stored page setup");
+    let recorded: Vec<String> = session
+        .snapshot(None, None, 0)
+        .command_log
+        .iter()
+        .filter_map(|entry| entry.command.clone())
+        .collect();
+    assert!(recorded.contains(&"PAGESETUP".to_string()), "{recorded:?}");
+    assert!(recorded.contains(&"PSETUPIN".to_string()), "{recorded:?}");
+
+    session
+        .command("LAYOUT SET SheetOne")
+        .expect("switch to the paper layout");
+    session
+        .command("MVIEW 0 0 100 50")
+        .expect("MVIEW writes one rectangular viewport");
+    let status = session.snapshot(None, None, 0);
+    let sheet = status
+        .layouts
+        .iter()
+        .find(|layout| layout.id == 2)
+        .expect("the paper layout tab");
+    assert_eq!(sheet.viewport_count, 1, "one real viewport was appended");
+
+    let degenerate = session
+        .command("MVIEW 10 10 10 50")
+        .expect_err("a degenerate rectangle is refused");
+    assert!(degenerate.contains("mview.invalid_rect"), "{degenerate}");
+    assert_eq!(
+        session
+            .snapshot(None, None, 0)
+            .layouts
+            .iter()
+            .find(|layout| layout.id == 2)
+            .expect("the paper layout tab")
+            .viewport_count,
+        1,
+        "the refusal changes nothing"
+    );
+}
+
+#[test]
+fn bare_pagesetup_stays_a_report_while_bare_psetupin_and_mview_need_a_payload() {
+    let session = session_with_layouts(&[(2, "SheetOne", None)]);
+    session
+        .command("PAGESETUP")
+        .expect("bare PAGESETUP keeps the read-only report");
+    session
+        .command("-PAGESETUP")
+        .expect("bare -PAGESETUP keeps the same report");
+
+    let psetupin = session
+        .command("PSETUPIN")
+        .expect_err("bare PSETUPIN needs a Layout(PageSetupIn) payload");
+    assert!(
+        psetupin.contains("needs a Layout(PageSetupIn) payload"),
+        "{psetupin}"
+    );
+
+    session
+        .command("LAYOUT SET SheetOne")
+        .expect("switch to the paper layout");
+    let mview = session
+        .command("MVIEW")
+        .expect_err("bare MVIEW needs its two corners");
+    assert!(mview.contains("mview.invalid_rect"), "{mview}");
+
+    let no_source = session
+        .command("PSETUPIN SheetOne SheetOne")
+        .expect_err("the fixture stores no page setup to copy");
+    assert!(no_source.contains("psetupin.no_source"), "{no_source}");
+}

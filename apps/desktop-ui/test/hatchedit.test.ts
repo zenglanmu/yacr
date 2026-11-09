@@ -89,6 +89,8 @@ test('HATCHEDIT option forms are argument grammar, not extra command names', () 
     'HATCHEDIT ANGLE -22.5',
     'HATCHEDIT SCALE 2',
     'HATCHEDIT SCALE 0.5',
+    'HATCHEDIT ADDBOUNDARIES',
+    'HATCHEDIT REMOVEBOUNDARIES',
     'hatchedit angle 30',
   ]) {
     const admission = admitCommandText(text, { status: loaded });
@@ -99,6 +101,8 @@ test('HATCHEDIT option forms are argument grammar, not extra command names', () 
   assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('gradient'), true);
   assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('ANGLE 45'), true);
   assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('SCALE 2'), true);
+  assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('ADDBOUNDARIES'), true);
+  assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('REMOVEBOUNDARIES'), true);
   for (const argument of [
     'PATTERN',
     'COLOR',

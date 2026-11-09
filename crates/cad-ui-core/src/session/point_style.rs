@@ -120,14 +120,23 @@ impl CadSession {
             super::commands::VIEW_SELECTOR => self.view_state_argument(argument, text),
             super::commands::VIEWGO_SELECTOR => self.view_go_argument(argument, text),
             super::commands::VPOINT_SELECTOR => self.vpoint_argument(argument, text),
-            // The 2026-11-07 layout/viewport batch typed forms.
+            // The 2026-11-07 layout/viewport batch typed forms, including the
+            // real `PAGESETUP`/`PSETUPIN` page-setup writes. Each dash spelling
+            // is its own extended selector and shares this grammar.
             super::commands::LAYOUT_SELECTOR
             | super::commands::LAYOUTMERGE_SELECTOR
             | super::commands::LAYOUTWIZARD_SELECTOR
+            | super::commands::PAGESETUP_SELECTOR
+            | super::commands::DASH_PAGESETUP_SELECTOR
+            | super::commands::PSETUPIN_SELECTOR
+            | super::commands::DASH_PSETUPIN_SELECTOR
             | super::commands::VPORTS_SELECTOR
             | super::commands::VPCLIP_SELECTOR
             | super::commands::VPSCALE_SELECTOR
             | super::commands::LAYVPI_SELECTOR => self.layout_argument(selector, argument, text),
+            // `MVIEW <minx> <miny> <maxx> <maxy>` carries a two-corner point
+            // payload, so it takes its own typed path.
+            super::commands::MVIEW_SELECTOR => self.mview_argument(argument, text),
 
             // `DIMSPACE <spacing>`: the explicit positive row pitch rides the
             // payload; a bare `DIMSPACE` keeps the name-only Auto form.

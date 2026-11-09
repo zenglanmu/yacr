@@ -25,7 +25,7 @@ const BATCH = [
   // Read-only reports.
   'SYSVARMONITOR', 'SYSVDLG', 'VTOPTIONS', 'ALIASEDIT', 'WHOHAS', 'ACADINFO',
   'PTYPE', 'SCALELISTEDIT',
-  // Named refusals.
+  // Named refusals (and MVIEW, which is now a real rectangular write).
   'HYPERLINKOPTIONS', 'INPUTSEARCHOPTIONS', '-INPUTSEARCHOPTIONS', 'SIGVALIDATE',
   'BASE', 'LIMITS', 'VIEWPLOTDETAILS', 'VPLAYER', 'MVIEW', 'PSBSCALE', 'PSTSCALE',
   'MVSETUP',
@@ -81,6 +81,11 @@ test('the Wave 2 hints state the honest boundary and never promise an effect', a
       assert.ok(hint.length > 20, `${locale} ${key} must say something specific`);
     }
     const english = en[key];
+    if (id === 'MVIEW') {
+      // MVIEW is a real write now, not a named refusal.
+      assert.match(english, /rectangular paper-space viewport/i, `${id} hint: ${english}`);
+      continue;
+    }
     assert.match(
       english,
       /read-only|session token|never|named refusal|NOT IMPLEMENTED/i,

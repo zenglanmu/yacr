@@ -436,7 +436,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `TXT2MTXT` | 部分实现 | 选中 Text/MText 按上→下、左→右排序并以 `\P` 合并为一个 `AcDbMText`，同时删除来源（一条事务/一步撤销） | Settings 对话框、统一行距、分栏等未实现；保留原字符串转义 |
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 每个选中 HATCH 的每个 loop 生成一条同层/同空间、非关联的闭合 LWPOLYLINE（保留 bulge） | 无关联性；无选项提示 |
 | `GRADIENT` | 部分实现 | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5）；边界必须在 +Z 平面；一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 | 无渐变预览、无 `-GRADIENT` 选项提示、无 .pat/关联性；非 `+Z` 平面/非闭合/退化边界按名拒绝；证据只有 `cad-app`/`cad-ui-core`/前端契约测试 |
-| `HATCHEDIT` | 部分实现 | 恰好一个直接可寻址的模型空间 HATCH；键入 `ANGLE <度>`/`SCALE <比例>`（仅 Pattern 填充，>0）或 `SOLID`/`GRADIENT`；经 `HatchGeometry::from_import` 重建显示，保留实体 id/层/空间/draw order/`AcDbHatch`，一条事务/一步撤销；相同值为 `hatchedit.unchanged`（无事务） | 无交互对话框；`Pattern`/`Color`/`Properties`/`Draw order`/`Add`/`Remove` 边界/关联性未实现；裸命令按名拒绝并列出四个已实现形式；证据只有契约测试 |
+| `HATCHEDIT` | 部分实现 | 恰好一个直接可寻址的模型空间 HATCH；`ANGLE`/`SCALE`/`SOLID`/`GRADIENT` 等既有选项；`ADDBOUNDARIES`/`REMOVEBOUNDARIES` 现在真实：一个选中 hatch + 其余选中闭合实体为边界，重建 loop 集，一条事务/一步撤销 | 无交互对话框；`Origin` 无字段、`Associate`/`Annotative` 无模型、Boundary draw order 拒绝；证据只有契约测试 |
 | `HATCHTOBACK` | 部分实现 | 把所有模型空间 HATCH 的 draw order 排到所有非 HATCH 对象之后，保留相对顺序；一条事务/一步撤销 | 图纸空间/块空间不重排；无 Draw Order 对话框 |
 | `WIPEOUT` | 部分实现 | 开放多边形捕获（≥3 点、`+Z` 平面）生成一个 `AcDbWipeout`（`Mask{inverted:false}`） | 无 Frames/ON/OFF/display-not-plot、无 Polyline/Erase Polyline 选项、无自交拒绝、无既有 wipeout 拾取 |
 | `POLYGON CIRCUMSCRIBED` | 部分实现 | 独立选择子：中心 + 切圆上一点，用 `R=r/cos(π/n)`、顶点在 `θ±π/n` 生成闭合外切正多边形 | `POLYGON` 的 `Edge` 分支、数值半径的捕捉旋转规则仍未实现 |
@@ -1459,12 +1459,15 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | --- | --- | --- |
 | `LAYOUT` `NEW`/`RENAME`/`DELETE` | 真实创建/重命名/删除布局；删除级联 `plot_settings`，删除活动布局时回退到首个剩余布局或模型空间；一步撤销 | `COPY`/`TEMPLATE` 未实现 |
 | `LAYOUTMERGE` | 源布局的图纸空间实体移入目标，删除源布局并级联 plot settings；一步撤销；**升为完整实现** | 同一布局拒绝 |
-| `LAYOUTWIZARD` | 真实创建布局，一步撤销 | 提供的页面设置校验后不应用（`layoutwizard.paper_not_applied`） |
+| `LAYOUTWIZARD` | 真实创建布局并应用 Authored 纸张设置，一步撤销 | 无视口向导/打印设备 |
 | `VPORTS` / `-VPORTS` | 活动布局创建简单 rows×cols 网格（四角 clip、`model_per_paper=1`），一步撤销 | 命名/标准视口配置未实现 |
 | `VPCLIP RECT` | 对活动布局第一个视口应用矩形裁剪，一步撤销 | 无视口选择；多边形裁剪未实现 |
 | `VPSCALE` | 设置活动布局第一个视口比例（对角线 `1/factor`，保留模型锚点），一步撤销 | 无视口选择 |
+| `PAGESETUP` / `-PAGESETUP` | 裸命令只读报告；typed 形式写入 Authored `PLOTSETTINGS`（纸张/比例/旋转），一步撤销 | 无绘图仪/CTB/STB |
+| `PSETUPIN` / `-PSETUPIN` | 同图纸内复制已存 `PLOTSETTINGS` 到目标布局，一步撤销 | 跨文件导入未实现；无源记录拒绝 |
+| `MVIEW` | 活动图纸空间创建矩形视口，一步撤销 | 无多边形/非矩形；无视口选择 |
 | `VPMAX` / `VPMIN` | 会话标记（不变） | 仅第一个视口 |
-| `LAYVPI` / `MVIEW` / `MVSETUP` | 仍为具名拒绝 | 无逐视口图层状态/视口创建/视口组模型 |
+| `LAYVPI` / `MVSETUP` | 仍为具名拒绝 | 无逐视口图层状态/视口组模型 |
 
 ## P2 晋升与边界更新（2026-11-09）
 
