@@ -334,31 +334,55 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 // Distinguish every geometry explicitly (evidence only; emitted
                 // only on a layout change, never per frame): the DOM CAD rect,
                 // the margin-receiving client area and the physical child size.
-                eprintln!(
-                    "[probe] geometry top={}x{} container={:.0}x{:.0} dom={}x{} dom_xy=({},{}) scale={} dom_physical={}x{} native_surface={}x{} child_desired={}x{} size_authority={} margins top={} bottom={} start={} end={} revalidated={} state={}",
+                // Evidence, not a progress log: the frontend's reconciliation
+                // heartbeat re-applies an unchanged rect about once a second, so
+                // this line is printed only when the geometry (or the window
+                // size/scale) actually changed.
+                let geometry_key = (
                     size.width,
                     size.height,
-                    container_bounds.0,
-                    container_bounds.1,
-                    rect.width,
-                    rect.height,
-                    rect.x,
-                    rect.y,
-                    scale,
-                    target.0,
-                    target.1,
-                    presented.map(|s| s.0).unwrap_or(0),
-                    presented.map(|s| s.1).unwrap_or(0),
-                    desired.0,
-                    desired.1,
-                    size_authority,
-                    margins.top,
-                    margins.bottom,
-                    margins.start,
-                    margins.end,
-                    revalidate,
-                    state_label,
+                    rect.x.to_bits(),
+                    rect.y.to_bits(),
+                    rect.width.to_bits(),
+                    rect.height.to_bits(),
+                    scale.to_bits(),
                 );
+                let geometry_changed = {
+                    let mut telemetry = lock_telemetry(telemetry);
+                    if telemetry.last_geometry_log == Some(geometry_key) {
+                        false
+                    } else {
+                        telemetry.last_geometry_log = Some(geometry_key);
+                        true
+                    }
+                };
+                if geometry_changed {
+                    eprintln!(
+                        "[probe] geometry top={}x{} container={:.0}x{:.0} dom={}x{} dom_xy=({},{}) scale={} dom_physical={}x{} native_surface={}x{} child_desired={}x{} size_authority={} margins top={} bottom={} start={} end={} revalidated={} state={}",
+                        size.width,
+                        size.height,
+                        container_bounds.0,
+                        container_bounds.1,
+                        rect.width,
+                        rect.height,
+                        rect.x,
+                        rect.y,
+                        scale,
+                        target.0,
+                        target.1,
+                        presented.map(|s| s.0).unwrap_or(0),
+                        presented.map(|s| s.1).unwrap_or(0),
+                        desired.0,
+                        desired.1,
+                        size_authority,
+                        margins.top,
+                        margins.bottom,
+                        margins.start,
+                        margins.end,
+                        revalidate,
+                        state_label,
+                    );
+                }
             }
             Err(LayoutError::StaleSequence) => {}
             Err(error) => {

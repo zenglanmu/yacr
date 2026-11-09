@@ -10,8 +10,9 @@
 # missing UI. That ordering is enforced below; there is no silent fallback.
 #
 # Runs on a Windows GitHub runner (native MSVC, plain `cargo`) and on Linux:
-#   * Windows: TARGET defaults to the rustc host MSVC triple and the CRT is
-#     linked statically (`+crt-static`), so the package needs no VC++
+#   * Windows: TARGET defaults to the rustc host MSVC triple. The GUI gets its
+#     static CRT from `tauri-build` (libcmt/libvcruntime + the OS UCRT API sets)
+#     and the CLI from rustc's `+crt-static`, so the package needs no VC++
 #     redistributable. The WebView2 loader is linked statically as well
 #     (webview2-com-sys → WebView2LoaderStatic), so no WebView2Loader.dll is
 #     shipped; if one ever shows up as an import the non-system DLL check fails.
@@ -21,7 +22,7 @@
 #
 # Output (under target/, gitignored):
 #   target/<TARGET>/release/dist/yacr-<version>-windows-x86_64/
-#     bin/yacr-windows.exe, bin/cad-cli-tools.exe, yacr.ico, fonts/,
+#     yacr-windows.exe, cad-cli-tools.exe, yacr.ico, fonts/,
 #     docs/, scripts/, LICENSE, README.md, THIRD_PARTY_NOTICES.md, PACKAGE.txt
 #   target/<TARGET>/release/dist/yacr-<version>-windows-x86_64.zip
 #   target/<TARGET>/release/dist/yacr-<version>-windows-x86_64.zip.sha256
@@ -49,8 +50,9 @@
 #   PYTHON        python interpreter (default: python3, then python).
 #   YACR_WINDOWS_SMOKE  1 to run the packaged CLI under Wine (Linux only).
 #                 Software translation, not a real-Windows acceptance.
-#   RUSTFLAGS     honoured; on an MSVC target `-C target-feature=+crt-static` is
-#                 appended unless already present.
+#   RUSTFLAGS     honoured, except that an MSVC build must not pre-set
+#                 `-C target-feature=+crt-static` (the GUI's static CRT comes from
+#                 `tauri-build`; see the CRT policy below).
 #   FONT_BASE_URL / FONT_FALLBACK_BASE_URL / FONT_RETRIES  passed to
 #                 fetch-fonts.sh.
 set -euo pipefail
@@ -102,10 +104,22 @@ fi
 [ -n "${PYTHON:-}" ] || die "python3 (or python) is required for the PE import/icon checks"
 export PYTHON
 
-# MSVC: statically link the CRT so a stock Windows 10/11 install runs the
-# package without the VC++ redistributable. Rust's windows-gnu std is static.
-if [[ "$TARGET" == *-msvc ]] && [[ "${RUSTFLAGS:-}" != *crt-static* ]]; then
-  export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
+# MSVC CRT policy: the two binaries get their static CRT from different places.
+#   * GUI (`app-windows`): `tauri-build`'s `static_vcruntime` forces
+#     `libcmt`/`libvcruntime` and links the OS UCRT API sets, so the package needs
+#     no VC++ redistributable. Passing rustc's `+crt-static` *as well* breaks the
+#     link: rustc then asks for the static UCRT (`libucrt`) default library while
+#     `tauri-build` suppresses it, and the C math/string symbols (`atan`, `pow`,
+#     `wcslen`, ...) stay undefined.
+#   * CLI (`cad-cli-tools`): no `tauri-build`, so it needs `+crt-static` to avoid
+#     a `vcruntime140.dll` import.
+# Hence the per-binary flags: the GUI build inherits the caller's RUSTFLAGS
+# untouched, the CLI build adds the flag.
+MSVC_CLI_CRT=""
+if [[ "$TARGET" == *-msvc ]]; then
+  [[ "${RUSTFLAGS:-}" != *crt-static* ]] \
+    || die "RUSTFLAGS must not contain '+crt-static' for an MSVC target: tauri-build already links the GUI's static CRT and rustc's flag makes the UCRT link fail (the CLI gets the flag automatically)"
+  MSVC_CLI_CRT=" -C target-feature=+crt-static"
 fi
 
 if [[ "$TARGET" == *-gnu ]] && ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
@@ -141,16 +155,27 @@ UI_PLUGIN="$UI_DIR/dist/plugins/tch.js"
   || die "$UI_PLUGIN is missing or empty; the Tianzheng vendor plugin would not be embedded (is the plugins/tch submodule initialized?)"
 
 # --- build ------------------------------------------------------------------
-step "building $GUI and $CLI (release, locked, $TARGET)"
+# Two invocations: only the GUI needs `tauri/custom-protocol` (it embeds
+# `apps/desktop-ui/dist`), and only the CLI takes `+crt-static` (see the CRT
+# policy above), so a single shared invocation cannot express both.
+step "building $GUI (release, locked, $TARGET)"
 if [ "${CARGO_XWIN:-0}" = "1" ]; then
   # Local Linux validation of the MSVC target (Windows CI uses plain cargo).
   XWIN_ACCEPT_LICENSE=1 cargo xwin build --release --locked --target "$TARGET" \
-    -p cad-cli-tools -p app-windows --features tauri/custom-protocol
+    -p app-windows --features tauri/custom-protocol
 else
   # `tauri/custom-protocol` is what embeds `apps/desktop-ui/dist` into the
   # executable; without it the release binary still expects the dev server.
-  cargo build --release --locked --target "$TARGET" -p cad-cli-tools -p app-windows \
+  cargo build --release --locked --target "$TARGET" -p app-windows \
     --features tauri/custom-protocol
+fi
+step "building $CLI (release, locked, $TARGET)"
+if [ "${CARGO_XWIN:-0}" = "1" ]; then
+  RUSTFLAGS="${RUSTFLAGS:-}$MSVC_CLI_CRT" XWIN_ACCEPT_LICENSE=1 \
+    cargo xwin build --release --locked --target "$TARGET" -p cad-cli-tools
+else
+  RUSTFLAGS="${RUSTFLAGS:-}$MSVC_CLI_CRT" \
+    cargo build --release --locked --target "$TARGET" -p cad-cli-tools
 fi
 
 GUI_PATH="${RELEASE}/${GUI}"
@@ -162,9 +187,9 @@ CLI_PATH="${RELEASE}/${CLI}"
 step "staging ${STAGE}"
 # Start from a clean dist: a cached `target/` may still hold a previous zip.
 rm -rf "$DIST"
-mkdir -p "$STAGE/bin" "$STAGE/docs" "$STAGE/scripts" "$STAGE/fonts"
-cp "$GUI_PATH" "$STAGE/bin/$GUI"
-cp "$CLI_PATH" "$STAGE/bin/$CLI"
+mkdir -p "$STAGE/docs" "$STAGE/scripts" "$STAGE/fonts"
+cp "$GUI_PATH" "$STAGE/$GUI"
+cp "$CLI_PATH" "$STAGE/$CLI"
 cp README.md LICENSE THIRD_PARTY_NOTICES.md "$STAGE/"
 # App icon (from assets/yacr-icon.svg). yacr-windows.exe also embeds this icon
 # through apps/app-windows/build.rs -> tauri-build; the standalone copy is for
@@ -216,8 +241,8 @@ mingw_lib_dirs() {
 # Library names may carry mixed case on Windows; compare case-insensitively.
 find_runtime_dll() {
   local name="$1" dir
-  if [ -f "$STAGE/bin/$name" ]; then
-    printf '%s\n' "$STAGE/bin/$name"
+  if [ -f "$STAGE/$name" ]; then
+    printf '%s\n' "$STAGE/$name"
     return 0
   fi
   while IFS= read -r dir; do
@@ -232,10 +257,11 @@ find_runtime_dll() {
 }
 
 # Windows system libraries that must come from the OS. Everything else an exe
-# imports has to be statically linked or shipped in bin/. `ucrtbase.dll` and the
-# API sets are OS components; a `vcruntime*`/`msvcp*` import means the MSVC build
-# was not crt-static, and `webview2loader.dll` means the WebView2 loader was not
-# linked statically -- both are rejected instead of silently shipped.
+# imports has to be statically linked or shipped next to the executables.
+# `ucrtbase.dll` and the API sets are OS components; a `vcruntime*`/`msvcp*`
+# import means the MSVC build was not crt-static, and `webview2loader.dll` means
+# the WebView2 loader was not linked statically -- both are rejected instead of
+# silently shipped.
 SYSTEM_DLL_RE='^(kernel32|user32|gdi32|advapi32|shell32|shlwapi|ole32|oleaut32|combase|comctl32|comdlg32|rpcrt4|setupapi|cfgmgr32|dwmapi|dwrite|d2d1|dxgi|d3d11|d3d12|dcomp|vulkan-1|opengl32|msvcrt|ucrtbase|ntdll|ws2_32|mswsock|winmm|imm32|uxtheme|bcrypt|bcryptprimitives|crypt32|secur32|propsys|userenv|uiautomationcore|windowscodecs|version|dbghelp|iphlpapi|dnsapi|normaliz|hid|winhttp|wintrust|sechost|ncrypt|powrprof|psapi|sspicli|oleacc|schannel|msimg32|usp10|d3dcompiler_47|api-ms-win-[a-z0-9-]+|ext-ms-win-[a-z0-9-]+)\.dll$'
 
 copy_runtime_dlls() {
@@ -252,8 +278,8 @@ copy_runtime_dlls() {
     fi
     found="$(find_runtime_dll "$name")" \
       || die "$(basename "$exe") imports non-system '$name'; it is neither crt-static nor available to bundle"
-    if [ "$found" != "$STAGE/bin/$name" ]; then
-      cp -L "$found" "$STAGE/bin/$name"
+    if [ "$found" != "$STAGE/$name" ]; then
+      cp -L "$found" "$STAGE/$name"
     fi
     if [ -z "${SEEN_DLLS[${name,,}]:-}" ]; then
       SEEN_DLLS[${name,,}]=1
@@ -262,7 +288,7 @@ copy_runtime_dlls() {
   done <<< "$imports"
 }
 
-for exe in "$STAGE/bin/$CLI" "$STAGE/bin/$GUI"; do
+for exe in "$STAGE/$CLI" "$STAGE/$GUI"; do
   machine="$("$PYTHON" "$ROOT/scripts/check-pe-imports.py" --machine "$exe")" \
     || die "not a readable PE32+ x86-64 image: $exe"
   [[ "$machine" == *"machine=0x8664"* ]] \
@@ -270,11 +296,11 @@ for exe in "$STAGE/bin/$CLI" "$STAGE/bin/$GUI"; do
 done
 # The GUI must carry the embedded app icon (apps/app-windows/build.rs); a build
 # that silently dropped it is rejected here.
-"$PYTHON" "$ROOT/scripts/check-pe-imports.py" --has-icon "$STAGE/bin/$GUI" \
+"$PYTHON" "$ROOT/scripts/check-pe-imports.py" --has-icon "$STAGE/$GUI" \
   || die "$GUI has no embedded app icon resource"
 
-copy_runtime_dlls "$STAGE/bin/$CLI"
-copy_runtime_dlls "$STAGE/bin/$GUI"
+copy_runtime_dlls "$STAGE/$CLI"
+copy_runtime_dlls "$STAGE/$GUI"
 
 DLL_SUMMARY="none (static CRT; WebView2Loader is linked statically)"
 if [ "${#BUNDLED_DLLS[@]}" -gt 0 ]; then
@@ -305,11 +331,11 @@ dlls    : ${DLL_SUMMARY}
 
 Contents
 --------
-bin/yacr-windows.exe    GUI host (Tauri 2 / WebView2 + shared CAD wgpu renderer).
+yacr-windows.exe        GUI host (Tauri 2 / WebView2 + shared CAD wgpu renderer).
                         Runs the same React UI bundle as the other desktop hosts.
                         Without --open it shows the demo scene; the Open button
                         uses the native file dialog.
-bin/cad-cli-tools.exe   headless CLI (scan/measure/build-representation/render/...).
+cad-cli-tools.exe       headless CLI (scan/measure/build-representation/render/...).
 fonts/                  CAD font package in fonts.json format: the
                         mlightcad/cad-data catalogue plus the committed QCAD
                         osifont.ttf (provenance in fonts/SOURCE.md); auto-loaded
@@ -322,16 +348,16 @@ scripts/                fetch-test-dwg.sh (real-DWG corpus) and render-smoke.sh
                         (POSIX shell helpers; on Windows run them from Git Bash
                         or WSL).
 yacr.ico                the app icon (from assets/yacr-icon.svg) for shortcuts
-                        and installers; bin/yacr-windows.exe also embeds it in
-                        its PE resources.
+                        and installers; yacr-windows.exe also embeds it in its
+                        PE resources.
 README.md, LICENSE, THIRD_PARTY_NOTICES.md
 
 Quick start (Windows)
 ---------------------
-  bin\\yacr-windows.exe
-  bin\\yacr-windows.exe --open C:\\path\\drawing.dwg
-  bin\\cad-cli-tools.exe --help
-  bin\\cad-cli-tools.exe render drawing.dwg --png frame.png --width 1280 --height 720
+  yacr-windows.exe
+  yacr-windows.exe --open C:\\path\\drawing.dwg
+  cad-cli-tools.exe --help
+  cad-cli-tools.exe render drawing.dwg --png frame.png --width 1280 --height 720
 
 Runtime notes (not a compatibility claim)
 -----------------------------------------
@@ -364,7 +390,7 @@ if [ "${YACR_WINDOWS_SMOKE:-0}" = "1" ]; then
   command -v wine >/dev/null 2>&1 \
     || die "YACR_WINDOWS_SMOKE=1 but wine is not installed"
   step "Wine smoke: packaged CLI --help"
-  WINEDEBUG="${WINEDEBUG:--all}" wine "$STAGE/bin/$CLI" --help >/dev/null
+  WINEDEBUG="${WINEDEBUG:--all}" wine "$STAGE/$CLI" --help >/dev/null
   echo "    (Wine is software translation, not a real-Windows acceptance; the GUI/window/GPU are NOT RUN)"
 fi
 
@@ -377,7 +403,7 @@ fi
 if [ "${SKIP_ZIP:-0}" = "1" ]; then
   echo
   echo "stage    : ${STAGE}"
-  echo "note     : SKIP_ZIP=1 -- CI signs bin/*.exe with the self-signed PFX before zipping;"
+  echo "note     : SKIP_ZIP=1 -- CI signs *.exe with the self-signed PFX before zipping;"
   echo "           run scripts/finalize-windows-release.sh --signed|--unsigned to package."
   exit 0
 fi

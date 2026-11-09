@@ -386,7 +386,7 @@ function Shell() {
 
   // Bind (and re-bind) the input lane to the CAD partition element. The binding
   // reports the partition rect immediately, and re-reports it on every resize,
-  // DPR change and layout shift so the host's surface metrics never go stale.
+  // DPR change and layout shift; `useGeometryReconcile` covers a lost report.
   //
   // `inputLaneReady` is a dependency, not just `surfaceNode`: the lane is created a
   // commit *after* the carrier is known (and, on `dom-canvas`, after the session is

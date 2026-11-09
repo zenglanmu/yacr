@@ -807,3 +807,54 @@ test('wheel still reaches the lane when no gesture is active', () => {
   assert.deepEqual(inputs.at(-1), { kind: 'wheel', x: 4, y: 5, dx: 0, dy: 3 });
   binding.dispose();
 });
+
+test('a changed partition schedules exactly one delayed reconciliation report', () => {
+  const { env, element, timers } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  // The startup report is the presenter gate, not a geometry change: it arms
+  // no retry, and a plain re-measure stays deduplicated.
+  assert.equal(inputs.length, 1);
+  assert.equal(timers.size, 0);
+  element.rect = { left: 0, top: 262, width: 1764, height: 657 };
+  env.observerNotify(); env.tick();
+  assert.deepEqual(inputs.at(-1), { kind: 'resize', x: 0, y: 262, width: 1764, height: 657, dpr: 1 });
+  // A change re-arms the single retry rather than stacking timers.
+  assert.equal(timers.size, 1);
+  env.runTimers();
+  // The retry re-sends the unchanged rect (fresh lane sequence) and does not
+  // arm itself again.
+  assert.deepEqual(inputs.at(-1), { kind: 'resize', x: 0, y: 262, width: 1764, height: 657, dpr: 1 });
+  assert.deepEqual(inputs.map(input => input.kind), ['resize', 'resize', 'resize']);
+  assert.equal(timers.size, 0);
+  binding.dispose();
+});
+
+test('a resize whose animation frame never runs is still reported by the timer fallback', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  const before = inputs.length;
+  element.rect = { left: 0, top: 262, width: 1764, height: 657 };
+  env.observerNotify(); // schedules the frame that a throttled webview never runs
+  assert.equal(inputs.length, before);
+  env.runTimers();
+  assert.deepEqual(inputs.at(-1), { kind: 'resize', x: 0, y: 262, width: 1764, height: 657, dpr: 1 });
+  // The cancelled frame must not deliver a second, stale report.
+  env.tick();
+  assert.equal(inputs.length, before + 1);
+  binding.dispose();
+});
+
+test('dispose clears the pending resize fallback and reconciliation retry', () => {
+  const { env, element, timers } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  env.observerNotify();
+  assert.equal(timers.size, 1); // this resize's fallback (no startup retry)
+  const count = inputs.length;
+  binding.dispose();
+  assert.equal(timers.size, 0);
+  env.runTimers();
+  assert.equal(inputs.length, count);
+});

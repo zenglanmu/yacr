@@ -14314,3 +14314,49 @@ host/wasm/clippy + 4 static / diff **均 0**；`fmt` 仅既有陌生未跟踪 `d
   `check-architecture.py` 全部 PASS。
 - **NOT RUN**：`cargo test --workspace --all-targets`（全量）与 Linux GUI 像素证据；
   Windows/macOS/Android/Web 仍只有编译/契约证据，没有真机或 GPU 验收。
+
+## 2026-11-09：Windows 显示修复（DComp 物理像素 + 几何自愈）+ 包布局/控制台子系统
+
+- **缺陷与证据**：用户真 Windows 截图（1886×1152，100% 缩放，窗口 client 1814×1046）。DOM 画布
+  **1764×657 px**，原生表面只覆盖 **1176×350 px**（画布左上角），其余画布**透出桌面**（背后聊天/
+  终端窗口）；无 `cad-present-error`，表面正常出帧。1176×350 正好是一个 **1226×738** 窗口的 CAD
+  分区（nav rail 50 / 顶部 chrome 262 / 命令栏+状态栏 126），即拖动 resize 的中间态——宿主只在
+  **被接受的** `resize` 报告上应用几何，而 `scheduleResize` 此前只有 rAF（遮挡/失焦 webview 会节流）。
+- **合成更正（有文档依据）**：DirectComposition 视觉几何单位是 **pixels**（MSDN “in pixels”），没有
+  DIP 换算、没有任何 `SetDpi`、visual 无尺寸属性：`SetContent` 按缓冲区像素 1:1 绘制，`SetClip` 只
+  裁剪不缩放。`composition_geometry::composition_placement` 改为 offset/clip 都用
+  `round(x·scale)` / `physical_content_size`，clip == swapchain 尺寸；旧实现把 CSS px 当 DIP 传给
+  DComp，在 125%/150% 缩放下只覆盖分区的 `1/scale`。`docs/windows-app.md` §2.2 的 DIP 规则已更正。
+- **几何自愈**：`cad/input.ts` 的 `scheduleResize` 增加 120 ms 定时器兜底（rAF 被节流不再吞掉
+  resize）；每次**几何变化**上报成功后再排一次 1500 ms 防抖重报（同一 rect + 新 sequence，
+  `LayoutTracker` 拒绝相等 sequence，所以这是“重试到宿主真正应用”的通道；启动首报不排，稳态零开销）。
+  `[probe] geometry` 行按几何 key 去重，避免重试把证据行刷成进度日志。
+- **包布局**：Windows zip 的 `yacr-windows.exe` / `cad-cli-tools.exe` / `yacr-dev-codesign.cer` 移到
+  **包根目录**（无 `bin/`）；`package-windows-release.sh`、`finalize-windows-release.sh`、
+  `test-package-windows-release.py`（新增禁止 `bin/` 回归的断言）、`build.yml` 的 windows-release、
+  README/README.zh-CN/docs 同步；`scripts/render-smoke.sh` 同时支持包根与 `bin/` 两种布局
+  （macOS 包的 `bin/` 不变）。
+- **控制台子系统**：release 构建改为 **GUI 子系统**（双击不再出现控制台窗口），启动时
+  `AttachConsole(ATTACH_PARENT_PROCESS)` + `CONOUT$` 重开 stdout/stderr，从终端启动仍能看到
+  `[probe]` 证据行；debug 构建保持控制台子系统。`app-windows` 的 `windows` features 增加
+  `Win32_System_Console` / `Win32_Storage_FileSystem` / `Win32_Security`。
+- **打包 CRT 修正**：`tauri-build` 的 `static_vcruntime` 已给 GUI 强制静态 `libcmt`/`libvcruntime`
+  + OS UCRT API sets；脚本原先再**全局**加 `+crt-static`，会与它的 `/NODEFAULTLIB:libucrt.lib`
+  冲突，链接期报 `atan`/`pow`/`wcslen` 等 undefined（本机 `cargo xwin build` 实测）。改为
+  **两次调用**：GUI 只带 `tauri/custom-protocol`（不带 `+crt-static`），CLI 单独带
+  `+crt-static`；MSVC 下调用方预置 `+crt-static` 直接 fail-closed 并说明原因。最小复现
+  （tiny crate，xwin）：`+crt-static` 单独链接 OK、tauri-build 参数单独 OK、两者叠加失败；导入表
+  分别为 `KERNEL32/ntdll` 与 `api-ms-win-crt-*`（都无 `vcruntime140.dll`）。
+- **已运行**：`cargo test -p app-windows --lib --locked` **10 passed**（新增 4 个
+  `composition_geometry` 契约）；`cargo clippy -p app-windows --all-targets --locked -- -D warnings`
+  PASS；`cargo fmt -p app-windows -- --check` PASS；
+  `cargo xwin check -p app-windows --target x86_64-pc-windows-msvc --all-targets --locked` PASS；
+  `(cd apps/desktop-ui && npm test)` **1,318 passed**（新增几何变更后的单次延后重报、rAF 被节流时
+  定时器兜底、`dispose` 清理兜底/重试 timer 三个用例）；`scripts/test-package-windows-release.py` 10 OK、
+  `scripts/test-release-workflows.py` 20 OK、`check-file-size.py` PASS、`check-i18n.py` PASS、
+  `bash -n` 覆盖两个打包脚本与 render-smoke。
+- **NOT RUN / NOT VERIFIED**：真 Windows 上的显示结果（画布不再透出桌面）、125%/150% 缩放与 DPI
+  切换、双击无控制台窗口 + 终端仍有 `[probe]`、签名/打包/zip 实际内容、真实 GPU 出帧——全部
+  **NOT RUN**；本机只有编译/契约/单元证据，**不得**写成“Windows 显示已修复”。打包改由 GitHub
+  Actions `windows-release`（`workflow_dispatch`，原生 MSVC）出 artifact；本机 `cargo xwin build`
+  的 MSVC 交叉链接不作为出包路径。

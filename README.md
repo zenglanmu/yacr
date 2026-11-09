@@ -280,7 +280,7 @@ CARGO_XWIN=1 TARGET=x86_64-pc-windows-msvc bash scripts/package-windows-release.
 The local zip is **UNSIGNED** (`WITH_FONTS=1` fetches the full font catalogue, `0` stages the committed
 `fonts/` offline). CI signs the staged executables instead: `SKIP_ZIP=1` → `signtool` →
 `bash scripts/finalize-windows-release.sh --signed <stage> <dist>`. Run
-`bin/yacr-windows.exe --open <dwg>`; without WebView2 it prints a diagnostic and exits 5.
+`yacr-windows.exe --open <dwg>`; without WebView2 it prints a diagnostic and exits 5.
 
 **macOS tar.gz.** Must run on macOS — Mach-O needs Apple's SDK/linker and cannot be cross-built from
 Linux:

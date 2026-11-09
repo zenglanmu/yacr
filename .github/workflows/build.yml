@@ -42,7 +42,8 @@ name: CI build layers
 # **sign with LOCAL, SELF-SIGNED material** (switched 2026-11-05):
 #   * Windows: a repository self-signed PFX (GitHub secret) imported on the
 #     runner and applied with `signtool`; the PUBLIC certificate ships as
-#     `bin/yacr-dev-codesign.cer` so users can trust it manually;
+#     `yacr-dev-codesign.cer` (next to the executables at the package root) so
+#     users can trust it manually;
 #   * Android: a repository self-signed keystore (GitHub secret) applied with
 #     `apksigner` after `zipalign`; the SHA-256 and `apksigner verify` output are
 #     published next to the APK;
@@ -422,7 +423,8 @@ jobs:
     # the frontend first (tauri::generate_context! embeds desktop-ui/dist) and
     # links the MSVC CRT statically. With a repository self-signed PFX the staged
     # exes are Authenticode-signed before zipping (SELF-SIGNED: not a public CA)
-    # and the public certificate is shipped as bin/yacr-dev-codesign.cer; without
+    # and the public certificate is shipped as yacr-dev-codesign.cer (next to the
+    # executables at the package root); without
     # it the zip is explicitly UNSIGNED. The ZIP container is never signed.
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: windows-latest
@@ -468,7 +470,7 @@ jobs:
         shell: bash
         env:
           WITH_FONTS: "1"
-          # CI signs bin/*.exe first; scripts/finalize-windows-release.sh writes
+          # CI signs *.exe (package root) first; scripts/finalize-windows-release.sh writes
           # the zip afterwards so the archive carries the real signing state.
           SKIP_ZIP: "1"
         run: |
@@ -489,7 +491,7 @@ jobs:
             throw 'WINDOWS_SELF_SIGNED_PFX_BASE64 is set but WINDOWS_SELF_SIGNED_PFX_PASSWORD is empty; refusing to import an unprotected PFX'
           }
           $pfx = Join-Path $env:RUNNER_TEMP 'yacr-self-signed.pfx'
-          $cer = Join-Path $env:WINDOWS_STAGE 'bin/yacr-dev-codesign.cer'
+          $cer = Join-Path $env:WINDOWS_STAGE 'yacr-dev-codesign.cer'
           try {
             [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SELF_SIGNED_PFX_BASE64))
             $password = ConvertTo-SecureString -String $env:WINDOWS_SELF_SIGNED_PFX_PASSWORD -AsPlainText -Force
@@ -518,8 +520,8 @@ jobs:
             if (-not $signtool) { throw 'signtool.exe was not found (install the Windows SDK build tools)' }
             $thumbprint = $cert.Thumbprint
             foreach ($exe in @(
-                (Join-Path $env:WINDOWS_STAGE 'bin/yacr-windows.exe'),
-                (Join-Path $env:WINDOWS_STAGE 'bin/cad-cli-tools.exe'))) {
+                (Join-Path $env:WINDOWS_STAGE 'yacr-windows.exe'),
+                (Join-Path $env:WINDOWS_STAGE 'cad-cli-tools.exe'))) {
               & $signtool sign /fd SHA256 /f $pfx /p $env:WINDOWS_SELF_SIGNED_PFX_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $exe
               if ($LASTEXITCODE -ne 0) { throw "signtool failed for ${exe} (exit $LASTEXITCODE)" }
               $sig = Get-AuthenticodeSignature -FilePath $exe
@@ -571,7 +573,7 @@ jobs:
             echo '## Windows release package (MSVC)'
             echo 'Built and packaged the React/Tauri host on windows-latest; the CRT is linked statically.'
             if [ "${{ steps.verify-windows.outcome }}" = "success" ]; then
-              echo 'bin/*.exe carry a SELF-SIGNED Authenticode signature (repository certificate, not a public CA) and were verified with Get-AuthenticodeSignature. Import bin/yacr-dev-codesign.cer into Trusted Root / Trusted Publishers to avoid the "unknown publisher" prompt. No SmartScreen reputation and no public trust is claimed; the ZIP container itself is not signed.'
+              echo '*.exe (package root) carry a SELF-SIGNED Authenticode signature (repository certificate, not a public CA) and were verified with Get-AuthenticodeSignature. Import yacr-dev-codesign.cer into Trusted Root / Trusted Publishers to avoid the "unknown publisher" prompt. No SmartScreen reputation and no public trust is claimed; the ZIP container itself is not signed.'
             else
               echo 'UNSIGNED or signing did not complete: this zip is the explicit unsigned fallback (no verified Authenticode signature).'
             fi

@@ -9,7 +9,8 @@
 #   YACR_SOFTWARE_GPU=1 scripts/render-smoke.sh <input.dwg> <out.png> [w] [h]
 #
 # The CLI is taken from $YACR_CLI, or, when this script is inside a release
-# package, from ../bin/cad-cli-tools.
+# package, from the package root (Windows zip: ../cad-cli-tools.exe) or a
+# sibling bin/ directory (Linux/macOS packages).
 set -euo pipefail
 
 if [[ "${YACR_SOFTWARE_GPU:-0}" == "1" && -z "${VK_ICD_FILENAMES:-}" ]]; then
@@ -31,7 +32,20 @@ if [ -n "${YACR_CLI:-}" ]; then
   BIN="$YACR_CLI"
 else
   HERE="$(cd "$(dirname "$0")" && pwd)"
-  BIN="$HERE/../bin/cad-cli-tools"
+  BIN=""
+  # Package layouts: the Windows zip puts the executables at the package root
+  # (with a .exe suffix); the Linux/macOS packages keep them in bin/.
+  for candidate in \
+    "$HERE/../cad-cli-tools" \
+    "$HERE/../cad-cli-tools.exe" \
+    "$HERE/../bin/cad-cli-tools" \
+    "$HERE/../bin/cad-cli-tools.exe"; do
+    if [ -x "$candidate" ]; then
+      BIN="$candidate"
+      break
+    fi
+  done
+  [ -n "$BIN" ] || BIN="$HERE/../cad-cli-tools"
 fi
 [ -x "$BIN" ] || { echo "ERROR: cad-cli-tools not found/executable: $BIN" >&2; exit 1; }
 [ -f "$DWG" ] || { echo "ERROR: input DWG not found: $DWG" >&2; exit 1; }

@@ -13,7 +13,9 @@ The zip + sha256 are written by ``scripts/finalize-windows-release.sh``, which C
 runs *after* the repository self-signed PFX has signed (or explicitly left
 unsigned) the staged
 executables. Both scripts are pinned here so the local UNSIGNED path and the CI
-SIGNED path cannot drift apart.
+SIGNED path cannot drift apart. The executables live at the **root** of the
+staged/extracted package directory (no ``bin/`` subdirectory); a ``bin/`` path
+reappearing in either script is reported as a contract violation.
 
 Every guarantee is checked by **removing it in turn** from the script text and
 requiring the checker to report it, so the pipeline cannot silently drift back
@@ -60,6 +62,9 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("font manifest", "fonts/fonts.json"),
     ("release output root", "target/${TARGET}/release"),
     ("staging directory", 'DIST="${RELEASE}/dist"'),
+    ("root-level GUI staging", 'cp "$GUI_PATH" "$STAGE/$GUI"'),
+    ("root-level CLI staging", 'cp "$CLI_PATH" "$STAGE/$CLI"'),
+    ("root-level icon check", '--has-icon "$STAGE/$GUI"'),
     ("stage-only signing handoff", "SKIP_ZIP"),
     ("shared finalize step", "finalize-windows-release.sh"),
     ("package manifest", "PACKAGE.txt"),
@@ -78,6 +83,7 @@ FINALIZE_REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("package manifest", "PACKAGE.txt"),
     ("self-signed disclosure", "SELF-SIGNED"),
     ("shipped public certificate", "yacr-dev-codesign.cer"),
+    ("root-level staged GUI", '[ -f "$STAGE/yacr-windows.exe" ]'),
 )
 
 FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -85,6 +91,19 @@ FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "retired GUI binary name (the host builds yacr-windows.exe)",
         re.compile(r"(?<![\w-])yacr\.exe"),
+    ),
+    (
+        "retired bin/ package layout (the executables sit in the package root)",
+        re.compile(r"bin[/\\\"'\s]+(?:yacr-windows|cad-cli-tools)\.exe"),
+    ),
+)
+
+# The finalize script writes the zip from the same root layout; a `bin/` path
+# creeping back in there must also be reported.
+FINALIZE_FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "retired bin/ package layout (the executables sit in the package root)",
+        re.compile(r"bin[/\\\"'\s]+(?:yacr-windows|cad-cli-tools)\.exe"),
     ),
 )
 
@@ -107,6 +126,9 @@ def check_finalize(text: str) -> list[str]:
     for label, fragment in FINALIZE_REQUIRED_FRAGMENTS:
         if fragment not in text:
             problems.append(f"missing {label}: {fragment!r}")
+    for label, pattern in FINALIZE_FORBIDDEN_PATTERNS:
+        if pattern.search(text):
+            problems.append(f"must not contain {label}: {pattern.pattern!r}")
     return problems
 
 
@@ -140,6 +162,31 @@ class PackageWindowsReleasePipelineContracts(unittest.TestCase):
         problems = check_pipeline(mutated)
         self.assertTrue(
             any("retired GUI binary name" in problem for problem in problems), problems
+        )
+
+    def test_retired_bin_layout_is_reported(self) -> None:
+        # Moving the executables back under bin/ must fail the contract: the
+        # released package keeps them at the extracted directory root.
+        mutated = self.script.replace(
+            'cp "$GUI_PATH" "$STAGE/$GUI"',
+            'cp "$GUI_PATH" "$STAGE/bin/yacr-windows.exe"',
+        )
+        problems = check_pipeline(mutated)
+        self.assertTrue(
+            any("retired bin/ package layout" in problem for problem in problems),
+            problems,
+        )
+        self.assertTrue(
+            any("root-level GUI staging" in problem for problem in problems), problems
+        )
+        finalize_problems = check_finalize(
+            FINALIZE_SCRIPT.read_text(encoding="utf-8").replace(
+                'stage / "yacr-windows.exe"', 'stage / "bin" / "yacr-windows.exe"'
+            )
+        )
+        self.assertTrue(
+            any("retired bin/ package layout" in problem for problem in finalize_problems),
+            finalize_problems,
         )
 
     def test_finalize_script_implements_the_zip_step(self) -> None:

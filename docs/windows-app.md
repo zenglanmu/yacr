@@ -87,16 +87,24 @@ Windows 宿主始终是 `native-below`，因此按契约提供插件管理器（
    presenter 只拿到 **visual 的裸指针**（`new_from_composition_visual`）。wgpu-hal 30 据此用
    `IDXGIFactory2::CreateSwapChainForComposition` 建链，并在**每次 configure** 时
    `IDCompositionVisual::SetContent`。
-   **DIP 规则**：visual 的 `SetOffset` = CAD rect 的 logical `x/y`（DIP，**不乘 scale**），
-   `SetClip`/`SetRect(0, 0, width, height)` = logical `width/height`（DIP），而 swapchain 仍是
-   **physical** 尺寸（`physical_content_size`，§2.4 的尺寸权威）。clip 到自身内容矩形意味着
-   布局/尺寸竞态最多“少显示”，绝不会把 CAD 像素溢出到 chrome 上。
+   **像素规则（2026-11-09 更正）**：DirectComposition 的视觉几何
+   （`IDCompositionVisual::SetOffsetX/Y`、`IDCompositionRectangleClip::SetLeft/Top/Right/Bottom`）
+   单位是 **pixels**（MSDN 原文 “in pixels”），DComp API **没有** DIP 换算、也没有任何 `SetDpi`
+   （`IDCompositionDevice`/`Device2`/`Device3`/`DesktopDevice` 均无），visual 本身也没有“尺寸”
+   属性：`SetContent` 把 swapchain 按**缓冲区像素 1:1** 画在 visual 原点，`SetClip` 只**裁剪**、
+   不缩放。因此 visual 的 offset/clip 必须是 **logical rect × window scale**（与 swapchain 同一个
+   物理像素数，`composition_placement` 一处计算，与 child HWND 的位置用同一 `round(x·s)`）。
+   旧实现把 CSS/logical px 直接当 DIP 传给 DComp：在 125%/150% 缩放上只覆盖分区的 `1/scale`，
+   其余部分因顶层窗口透明而**透出桌面**（2026-11-09 用户截图即此形态；当时 100% 缩放下该路径是
+   no-op，暴露的是另一条几何失同步，见 §2.6）。clip 等于 swapchain 尺寸 ⇒ 布局/尺寸竞态最多
+   “少显示”，绝不会把 CAD 像素溢出到 chrome 上，也不会缩放画面。
    **Commit 协议**：视觉树的改动只在 `IDCompositionDevice::Commit()` 后生效。宿主按两个条件提交：
    presenter 的 `configure_generation` 变化（init / `resize` / 内部 `Outdated` 重配），**或**
    layout 驱动的 offset/clip 变化（`apply_layout` 记录 pending placement，**即使尺寸没变**也提交，
-   否则纯移动的重排会一直停在旧位置；普通 tick 是 no-op）。成功 reconfig 日志
+   否则纯移动的重排会一直停在旧位置；没有布局变化的普通 tick 是 no-op；只有前端几何重试的那一次延后重报
+   会再提交一次，见 §2.6）。成功 reconfig 日志
    `[probe] surface reconfigure A -> B`，每次布局应用日志
-   `[probe] composition placement offset=(x,y) clip=WxH dip swapchain=WxH`。
+   `[probe] composition placement offset=(x,y) clip=WxH px swapchain=WxH`。
    **安全契约**：device/target/visual/clip 由宿主持有并必须在 surface 存活期间存活；释放顺序是
    presenter(surface) → composition 树 → child HWND（`release_gpu`/`Drop` 强制）；visual 指针在
    host 结构存活期内有效，wgpu 另持一份 COM ref。
@@ -107,7 +115,8 @@ Windows 宿主始终是 `native-below`，因此按契约提供插件管理器（
    `YACR_PROBE_GDI_MARKER` 与 `YACR_PROBE_NO_CLIPSIBLINGS`，见 §6.0.1）。顶层 target 的
    `topmost=FALSE` 槽位是**文档化**的“在子窗口之下”层，正是 DOM-on-top；这也是 wgpu
    （`Dx12SwapchainKind::DxgiFromVisual`：supports transparent windows）与 wry 示例采用的形态。
-   **约束**：同一窗口最多两个 DComp target（每层一个，我们只用层 2 这一个）；visual 几何一律 DIP。
+   **约束**：同一窗口最多两个 DComp target（每层一个，我们只用层 2 这一个）；visual 几何一律
+   **物理像素**（§2.2 的像素规则）。
    **没有** HWND swapchain 回退路径：composition 创建/commit 失败 = 显式
    `cad-present-error class=surface_composition`（`BridgeState::Failed`），不是静默黑区。
    就绪行带 `surface=composition target=top`（`target=child` 仅作为**类型化证据 token**保留，
@@ -129,6 +138,32 @@ Windows 宿主始终是 `native-below`，因此按契约提供插件管理器（
    粘住的 `cad present failed`。残差**不**靠拉伸图像“修复”。
 5. **不变量**：一个 CAD presenter；renderer 只拿到宿主创建的 composition visual 指针（从不拿
    窗口句柄、也不让 wgpu 对象外泄）；无 CPU 帧拷贝/整幅回读。
+
+### 2.6 几何自愈（2026-11-09）
+
+**故障形态（用户真 Windows 截图）**：DOM 画布是 1764×657 px，原生表面却只覆盖 1176×350 px
+（画布左上角），其余画布区域**透出桌面**（截图里是背后的聊天/终端窗口）；日志里没有
+`cad-present-error`，表面在正常出帧（present 计数递增）。
+
+**根因**：宿主只在**被接受的**前端 `resize` 报告上应用几何（`apply_layout`）。一次丢失/未送达的
+报告（`requestAnimationFrame` 在遮挡/失焦 webview 中被节流是最可能的路径；`scheduleResize`
+此前**只有** rAF，没有指针移动路径已有的定时器兜底）会让原生表面永久停在旧 rect；而顶层窗口
+透明，未覆盖的画布就是桌面。尺寸 1176×350 正好等于一个 **1226×738** 窗口的 CAD 分区
+（1226−50 nav rail、738−262 顶部 chrome−126 命令栏/状态栏），即拖动 resize 过程中的中间态。
+
+**修复（两层，均不依赖 DPI 假设）**：
+
+1. **前端定时器兜底**：`scheduleResize` 现在 rAF + `setTimeout`（120 ms）双路径，先到者清除另一条，
+   仍由 `metricsKey` 去重；一次被节流的 rAF 不再能吞掉最后的 resize。
+2. **前端几何重试**：每次**发生变化的** rect 上报成功后，绑定再排一次
+   `RESIZE_RECONCILE_DELAY_MS`（1500 ms，防抖）的延后重报；重报时强制用新 sequence 再发**当时的**
+   rect。宿主的 `LayoutTracker` 拒绝相等 sequence，所以这是“重试到宿主真正应用”的通道。启动首报
+   **不**排重试：首报是 presenter 的准入门（没有 rect 就没有 CAD 表面），失败是显眼的“无 CAD 启动”，
+   不是停在旧 rect 的静默透桌面。稳态零开销——只有真实几何变化才排一次。
+
+**证据边界**：以上全部是源码/契约级修复；真 Windows 上“不再透出桌面”**仍 PENDING user
+real-Windows spike**（§6.1/§8）。`[probe] composition placement … px` 与
+`[probe] geometry … size_authority=ok` 是下一轮 spike 的判据行。
 
 ## 3. WebView2 缺失 = 显式 Unsupported（退出码 5）
 
@@ -167,11 +202,34 @@ yacr: unsupported-runtime: webview2      ← 稳定标记行（第一行，证�
 `cargo check -p app-windows --all-targets --locked`（原生 MSVC，编译门禁，不运行 exe）。
 `windows-release` 自 2026-11-01 起重新启用（仅 `v*` tag / 手工 dispatch）：
 `scripts/package-windows-release.sh` 先构建 React 前端，再以 MSVC 静态 CRT 构建
-`yacr-windows.exe`，校验 PE/图标/非系统 DLL。自签 PFX 存在时用 `signtool` 对
-`bin/yacr-windows.exe`、`bin/cad-cli-tools.exe` 做 Authenticode 签名（并随包导出
-`bin/yacr-dev-codesign.cer`）后上传 `yacr-windows-release`；凭据缺失时显式上传
+`yacr-windows.exe`（GUI 的静态 CRT 由 `tauri-build::static_vcruntime` 提供：`libcmt`/`libvcruntime`
++ OS UCRT API sets；CLI 单独用 `+crt-static`；**不要**给 GUI 加 `+crt-static`，会与
+`tauri-build` 的 `/NODEFAULTLIB:libucrt.lib` 冲突导致链接失败），校验 PE/图标/非系统 DLL。自签 PFX 存在时用 `signtool` 对
+`yacr-windows.exe`、`cad-cli-tools.exe` 做 Authenticode 签名（并随包导出
+`yacr-dev-codesign.cer`）后上传 `yacr-windows-release`；凭据缺失时显式上传
 `yacr-windows-release-unsigned`。**打包/签名不是运行/
 视觉验收**；没有发布通道。签名接线与验证方式见 `docs/code-signing.md`。
+
+**包布局（2026-11-09 起）**：解压后的执行文件在**包根目录**，不再有 `bin/` 子目录：
+
+```
+yacr-<ver>-windows-x86_64/
+  yacr-windows.exe  cad-cli-tools.exe  yacr.ico
+  fonts/  docs/  scripts/  LICENSE  README.md  THIRD_PARTY_NOTICES.md  PACKAGE.txt
+  yacr-dev-codesign.cer        # 仅签名构建
+```
+
+`cad-platform::fonts::font_dir_candidates` 同时接受“exe 旁边的 `fonts/`”和“exe 上一级
+`bin/` 目录里的 exe”，`scripts/render-smoke.sh` 也按包根 / 同级 `bin/` 两种布局查找 CLI，
+所以 Linux/macOS 包的 `bin/` 形态不受影响。契约测试
+`scripts/test-package-windows-release.py` **禁止** `bin/yacr-windows.exe` 回归。
+
+**控制台子系统（2026-11-09 起）**：**release** 构建是 GUI 子系统
+（`#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]`），
+双击运行**不再出现控制台窗口**；从终端启动时 `main.rs` 先 `AttachConsole(ATTACH_PARENT_PROCESS)`
+并重开 `CONOUT$` 作标准输出/错误句柄，`[probe]` 证据行仍进该终端。debug 构建保持控制台子系统。
+**证据边界**：`cargo xwin check --target x86_64-pc-windows-msvc` 只证明可编译；真 Windows 上
+“双击无控制台窗口 + 终端仍有 `[probe]` 行”**NOT VERIFIED**。
 
 **本机（Linux，WP4 门禁实跑，日志在 `$HOME/.cache/yacr-wine/logs/`）**：
 
@@ -288,7 +346,11 @@ CAD child 是 `WS_DISABLED` 纯显示表面，不需要 hit-testing 穿透。
    （三者都是 `physical_content_size` 的同一个数）；出现 `size_authority=FAIL` 即 FAIL，不允许
    “整数舍入内一致”的宽容解释；
 3. resize / 最大化 / 还原后**不残留旧背景**（#2419 类症状），CAD 帧随 CAD rect 重新贴合；
-4. 事件循环持续出帧（`[probe] status … frames=` 递增），无 WebView2 进程崩溃/重启循环。
+4. **原生表面完整覆盖 DOM 画布**：拖动 resize / 最大化 / 还原之后，画布内**任何位置都不透出
+   桌面**（2026-11-09 缺陷形态：表面停在旧 rect，画布其余部分透出背后窗口），且
+   `[probe] composition placement offset=… clip=… px` 的 `clip` 等于 `dom_physical`
+   （`physical_content_size`），不是 CSS px；
+5. 事件循环持续出帧（`[probe] status … frames=` 递增），无 WebView2 进程崩溃/重启循环。
 
 **FAIL**：任一不满足即 FAIL，并按故障域切分（先跑“纯 wgpu child + 不透明顶层窗口”基线，再叠
 透明 WebView2）。**不要**改成“空成功”；按 ADR 0023 D6 停下来与用户决策（接受 Windows 显式
@@ -388,6 +450,13 @@ WP4 实跑（Wine 10.0，专用 64 位 prefix，prefix 内无 WebView2）：
   validation 错误只会进未捕获错误处理器（panic）。本宿主因此把 present 包进显式 validation scope
   （失败 → `ProbeError::Frame("present rejected: …")`），但**不得**把“没有错误”当作 present 成功
   的证明；present 本身在真 Windows 上仍 **NOT RUN**。
+- **2026-11-09 的几何修复**（§2.2 像素规则 + §2.6 几何自愈）只有源码/契约证据：DComp 几何改为
+  **物理像素**、前端增加 rAF 定时器兜底与 1 s 几何自愈，两者在本机（Linux）只验证了单元/契约测试
+  与 `cargo xwin check --target x86_64-pc-windows-msvc`（可编译）。**真 Windows 上是否还存在别的
+  合成/DPI 失配、以及缩放 125%/150% 下的表现，仍是 NOT VERIFIED**；不得据本机结论写“Windows
+  显示已修复”。
+- **release 的 GUI 子系统 + 终端 `[probe]` 重接**（§5）未在真 Windows 上运行：`AttachConsole` +
+  `CONOUT$` 重开标准句柄的可观察结果（双击无黑窗、终端仍有日志）**NOT RUN**。
 - 真 Windows 结论只对“该 Runtime 版本 + 该 GPU/驱动 + 该 Windows 版本 + 该缩放”成立；
   **禁止**推广为“Windows 透明支持”或“跨平台已验收”。
 
@@ -426,8 +495,9 @@ ADR 原文把“原生表面如何出像素”视为渲染器内部细节，未�
 非 child）** + 根 `IDCompositionVisual` + `IDCompositionRectangleClip`；渲染表面是
 `IDXGIFactory2::CreateSwapChainForComposition` 的 swapchain，绑定方式为
 `IDCompositionVisual::SetContent` + `IDCompositionDevice::Commit`。视觉几何遵循两条约束：
-(a) **DIP 单位**——`SetOffset` = logical `x/y`（不乘 scale），`SetClip/SetRect` = logical
-`width/height`，swapchain 仍是 physical 尺寸；
+(a) **像素单位**——`SetOffset` = physical `round(x·scale)` / `round(y·scale)`，
+`SetClip/SetRect` = `physical_content_size`（DIP 概念不适用于 DComp：MSDN 写 “in pixels”，
+没有 `SetDpi`，visual 用缓冲区像素 1:1 绘制、clip 只裁剪），swapchain 也是同一 physical 尺寸；
 (b) **每个窗口最多两个 DComp target**（按层），本设计只占 `topmost=FALSE` 的层 2（在子窗口之下）。
 
 **理由**：

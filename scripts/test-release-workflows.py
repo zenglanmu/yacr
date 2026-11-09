@@ -127,7 +127,12 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("WINDOWS_SELF_SIGNED_PFX_BASE64", block)
         self.assertIn("Import-PfxCertificate", block)
         self.assertIn("Export-Certificate", block)
-        self.assertIn("bin/yacr-dev-codesign.cer", block)
+        self.assertIn("yacr-dev-codesign.cer", block)
+        # The executables and the public certificate sit at the package root;
+        # the retired bin/ layout must not come back.
+        self.assertNotIn("bin/yacr-dev-codesign.cer", block)
+        self.assertNotIn("bin/yacr-windows.exe", block)
+        self.assertNotIn("bin/cad-cli-tools.exe", block)
         self.assertIn("signtool sign", block)
         self.assertIn("Get-AuthenticodeSignature", block)
         self.assertIn("Cert:\\CurrentUser\\Root", block)

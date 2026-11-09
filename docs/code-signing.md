@@ -12,7 +12,7 @@
 
 | 载体 | 机制 | 私钥位置 | 产物 | 公共信任 |
 |---|---|---|---|---|
-| Windows | Authenticode，仓库自签 PFX | GitHub Secrets（PFX + 口令） | `yacr-*.zip` 内两个 `.exe` + `bin/yacr-dev-codesign.cer` | ❌ 需用户手动信任证书 |
+| Windows | Authenticode，仓库自签 PFX | GitHub Secrets（PFX + 口令） | `yacr-*.zip` 内两个根目录 `.exe` + `yacr-dev-codesign.cer` | ❌ 需用户手动信任证书 |
 | Android release APK | APK Signature Scheme v1–v3，仓库自持 keystore | GitHub Secrets（keystore + 口令） | `app-universal-release.apk` + `SIGNING.txt` + `.sha256` | ⚠️ Android 只校验签名一致性，不要求公共 CA |
 | macOS release | `codesign`，默认 ad-hoc（`-`） | 无（ad-hoc 不需要密钥）；可用 `MACOS_SIGN_IDENTITY` 覆盖 | `Yacr.app` + `bin/cad-cli-tools`（tar.gz 内） | ❌ Gatekeeper 仍会拦，未公证 |
 | Linux Flatpak | OSTree/GPG commit signature | GitHub Secrets（GPG 私钥） | `*.flatpak` + `.flatpak.gpg` | ❌ 用户需导入公钥 |
@@ -133,11 +133,11 @@ gh variable set ANDROID_KEY_ALIAS --body yacr
 1. `scripts/package-windows-release.sh` 以 `SKIP_ZIP=1` 只构建/暂存；
 2. 配置了 `WINDOWS_SELF_SIGNED_PFX_BASE64` 时：
    - base64 解码 PFX → `Import-PfxCertificate` 到 runner 的 `CurrentUser\My`；
-   - `Export-Certificate -Type CERT` 把公开证书写入 `bin/yacr-dev-codesign.cer`；
+   - `Export-Certificate -Type CERT` 把公开证书写入 `yacr-dev-codesign.cer`（与两个 exe 同在包根目录）；
    - 把该公开证书导入 runner 的 `CurrentUser\Root`（仅本次运行、临时），否则自签链会报
      `UnknownError`，`Get-AuthenticodeSignature` 不会返回 `Valid`；
    - `signtool sign /fd SHA256 /f <pfx> /p <pass> /tr http://timestamp.digicert.com /td SHA256`
-     签 `bin/yacr-windows.exe` 与 `bin/cad-cli-tools.exe`；
+     签 `yacr-windows.exe` 与 `cad-cli-tools.exe`（包根目录）；
    - `Get-AuthenticodeSignature` 校验 `Status = Valid` **且**签名证书指纹等于导入证书；
 3. `scripts/finalize-windows-release.sh --signed` 写入签名说明并打 zip、算 `.sha256`；
 4. 上传 `yacr-windows-release`。
@@ -196,15 +196,15 @@ bundle 未嵌入公钥，Flatpak 会**静默信任**，所以发布时必须附�
 
 ```powershell
 # Windows：解压 zip 后
-Get-AuthenticodeSignature .\bin\yacr-windows.exe | Format-List Status, StatusMessage, SignerCertificate
+Get-AuthenticodeSignature .\yacr-windows.exe | Format-List Status, StatusMessage, SignerCertificate
 
 # 让本机信任这张自签证书（可选；否则 Status 不是 Valid）
-Import-Certificate -FilePath .\bin\yacr-dev-codesign.cer `
+Import-Certificate -FilePath .\yacr-dev-codesign.cer `
   -CertStoreLocation Cert:\CurrentUser\TrustedPublisher
-Import-Certificate -FilePath .\bin\yacr-dev-codesign.cer `
+Import-Certificate -FilePath .\yacr-dev-codesign.cer `
   -CertStoreLocation Cert:\CurrentUser\Root
 
-signtool verify /pa /v .\bin\yacr-windows.exe   # 仅在证书已受信任时通过
+signtool verify /pa /v .\yacr-windows.exe   # 仅在证书已受信任时通过
 ```
 
 ```bash

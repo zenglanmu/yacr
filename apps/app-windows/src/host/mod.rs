@@ -134,6 +134,10 @@ pub struct RenderTelemetry {
     /// "re-presenting a retained texture" signature; the two revisions separate
     /// "the retained texture contains commit N" from "the scene reached N".
     last_session_counters: Option<SessionCounters>,
+    /// Deduplication key of the last `[probe] geometry` line: the frontend's
+    /// geometry-reconciliation heartbeat re-applies an unchanged rect about once a
+    /// second, and the geometry line is evidence, not a progress log.
+    last_geometry_log: Option<(u32, u32, u32, u32, u32, u32, u64)>,
 }
 
 /// The per-tick bookkeeping the 1 Hz `[probe] actual-render` line reports.
@@ -171,6 +175,7 @@ impl RenderTelemetry {
             last_actual_render: None,
             last_present_error_text: None,
             last_session_counters: None,
+            last_geometry_log: None,
         }
     }
 }

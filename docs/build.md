@@ -229,7 +229,7 @@ artifact，绝不谎称已签名（运行手册见 `docs/code-signing.md`）：
 | 入口 | 状态 |
 |---|---|
 | `scripts/package-linux-release.sh` | **可用（2026-10-17 重启）**——Flatpak bundle（`bin/yacr` + 字体包；默认 `WITH_FONTS=1` 在 host 侧用 `scripts/fetch-fonts.sh` 组装 mlightcad 全量并合并提交包，`WITH_FONTS=0`/`FONTS_DIR` 离线；运行时 `org.gnome.Platform//51`），产出 `target/release/dist/yacr-<version>-linux-<arch>.flatpak` + `.sha256`。CI `linux-release` 已重新启用（event-gated）；配置 `FLATPAK_GPG_*` 时对 OSTree commit 做 GPG 签名并附 `*.flatpak.gpg`，否则未签名。**未发布 Flathub** |
-| `scripts/package-windows-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 `cargo build -p app-windows --features tauri/custom-protocol`（MSVC 静态 CRT），产出 `target/x86_64-pc-windows-msvc/release/dist/*.zip` + `.sha256`；PE 机器类型/图标/非系统 DLL 检查失败即中止。CI `windows-release` 在自签 PFX 存在时用 `signtool` 对 `bin/yacr-windows.exe`、`bin/cad-cli-tools.exe` 做 Authenticode 签名并附 `bin/yacr-dev-codesign.cer`（artifact `yacr-windows-release`），否则上传 `yacr-windows-release-unsigned`；**打包/签名 ≠ 运行/视觉验收** |
+| `scripts/package-windows-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 `cargo build -p app-windows --features tauri/custom-protocol`（MSVC 静态 CRT），产出 `target/x86_64-pc-windows-msvc/release/dist/*.zip` + `.sha256`（exe 与 `.cer` 在包根目录，无 `bin/`）；PE 机器类型/图标/非系统 DLL 检查失败即中止。CI `windows-release` 在自签 PFX 存在时用 `signtool` 对 `yacr-windows.exe`、`cad-cli-tools.exe` 做 Authenticode 签名并附 `yacr-dev-codesign.cer`（artifact `yacr-windows-release`），否则上传 `yacr-windows-release-unsigned`；**打包/签名 ≠ 运行/视觉验收** |
 | `scripts/package-macos-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 universal `cargo build -p app-macos --features tauri/custom-protocol` + `lipo`，产出 `Yacr.app` 的 `*.tar.gz` + `.sha256`；Mach-O 只允许系统库，`CFBundleIdentifier=io.github.zenglanmu.yacr`。**ad-hoc 签名（`MACOS_SIGN_IDENTITY` 可覆盖）/未公证** |
 | `scripts/build-android.sh` | **可用（2026-10-28 起；2026-11-01 起构建原生 `native-below` 载体）**——`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome + 字体包 → `apps/app-android/font-assets`）再 Gradle；**本地 release APK 默认未签名**。CI 只保留 `android-release`（release；自持 keystore 签名 `zipalign` 后的 APK；keystore 缺失时 job 失败，不产出 unsigned）；debug APK 仅本地 `--debug` 构建 |
 
@@ -239,7 +239,8 @@ artifact，绝不谎称已签名（运行手册见 `docs/code-signing.md`）：
   （DOM-on-top；WebView2 缺失 → 标记行 + exit 5）。CI `windows-check` 在 `windows-latest` 上做
   **原生 MSVC 编译门禁**（不运行 exe）；`windows-release` 已重新启用（event-gated），构建
   MSVC release zip artifact：自签 PFX 存在时对两个 `.exe` 做 Authenticode 签名并附
-  `bin/yacr-dev-codesign.cer`（`yacr-windows-release`），否则 `yacr-windows-release-unsigned`。**打包/签名 ≠ 运行/视觉验收**；
+  `yacr-dev-codesign.cer`（与 exe 同在包根目录；`yacr-windows-release`），否则
+  `yacr-windows-release-unsigned`。**打包/签名 ≠ 运行/视觉验收**；
   视觉/运行时验收 = **PENDING user real-Windows spike**（判据见 `docs/windows-app.md`）；
   Wine 只做拒绝合同 smoke。见 `docs/windows-app.md`。
 - **macOS**：`apps/app-macos`（`yacr-macos`）是**真实 Tauri 2 宿主**（2026-10-31 起）——透明

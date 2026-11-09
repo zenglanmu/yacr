@@ -233,7 +233,7 @@ CARGO_XWIN=1 TARGET=x86_64-pc-windows-msvc bash scripts/package-windows-release.
 本地 zip 是**未签名**的（`WITH_FONTS=1` 联网抓完整字体目录，`0` 只用已提交的 `fonts/` 离线打包）。
 CI 走签名路径：`SKIP_ZIP=1` → `signtool` →
 `bash scripts/finalize-windows-release.sh --signed <stage> <dist>`。运行
-`bin/yacr-windows.exe --open <dwg>`；缺 WebView2 时打印诊断并退出码 5。
+`yacr-windows.exe --open <dwg>`；缺 WebView2 时打印诊断并退出码 5。
 
 **macOS tar.gz。** 必须在 macOS 上运行——Mach-O 需要 Apple SDK/链接器，Linux 无法交叉产出：
 

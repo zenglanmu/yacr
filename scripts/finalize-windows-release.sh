@@ -30,7 +30,7 @@ cd "$ROOT"
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 PLACEHOLDER='@@YACR_SIGNING_NOTE@@'
-SIGNED_NOTE='The executables in bin/ carry a SELF-SIGNED Authenticode signature from a repository-issued certificate -- NOT a public CA and not an EV/OV certificate. Windows shows an "unknown publisher" warning unless bin/yacr-dev-codesign.cer is imported into Trusted Root Certification Authorities (or Trusted Publishers); importing it is a manual, per-machine trust decision. Verify with signtool or Get-AuthenticodeSignature (Status must be Valid and the signer thumbprint must match the shipped certificate). The ZIP container itself is not Authenticode-signed.'
+SIGNED_NOTE='The executables in the package root carry a SELF-SIGNED Authenticode signature from a repository-issued certificate -- NOT a public CA and not an EV/OV certificate. Windows shows an "unknown publisher" warning unless yacr-dev-codesign.cer (shipped next to the executables) is imported into Trusted Root Certification Authorities (or Trusted Publishers); importing it is a manual, per-machine trust decision. Verify with signtool or Get-AuthenticodeSignature (Status must be Valid and the signer thumbprint must match the shipped certificate). The ZIP container itself is not Authenticode-signed.'
 UNSIGNED_NOTE='This archive is UNSIGNED -- it is NOT code-signed. Windows SmartScreen may show an "unknown publisher" warning on first launch.'
 
 case "${1:-}" in
@@ -45,8 +45,8 @@ DIST="${3:-}"
 [ -n "$STAGE" ] || die "missing STAGE directory argument"
 [ -n "$DIST" ] || die "missing DIST directory argument"
 [ -d "$STAGE" ] || die "stage directory does not exist: $STAGE"
-[ -f "$STAGE/bin/yacr-windows.exe" ] \
-  || die "refusing to package: $STAGE/bin/yacr-windows.exe is missing"
+[ -f "$STAGE/yacr-windows.exe" ] \
+  || die "refusing to package: $STAGE/yacr-windows.exe is missing"
 [ -f "$STAGE/PACKAGE.txt" ] || die "refusing to package: $STAGE/PACKAGE.txt is missing"
 grep -qF "$PLACEHOLDER" "$STAGE/PACKAGE.txt" \
   || die "$STAGE/PACKAGE.txt has no $PLACEHOLDER placeholder (already finalized?)"
@@ -90,8 +90,8 @@ import zipfile
 
 stage = pathlib.Path(sys.argv[1]).resolve()
 out = pathlib.Path(sys.argv[2])
-if not (stage / "bin" / "yacr-windows.exe").is_file():
-    raise SystemExit(f"refusing to zip: {stage}/bin/yacr-windows.exe is missing")
+if not (stage / "yacr-windows.exe").is_file():
+    raise SystemExit(f"refusing to zip: {stage}/yacr-windows.exe is missing")
 # Entries keep the top-level `<name>/...` prefix (the archive extracts into one
 # directory), exactly like the previous in-package-script implementation.
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
@@ -125,7 +125,7 @@ echo "artifact : ${ZIP}"
 echo "size     : $(wc -c < "$ZIP") bytes"
 echo "sha256   : $(cut -d' ' -f1 "$SHA")"
 if [ "$MODE" = "signed" ]; then
-  echo "signing  : SELF-SIGNED Authenticode (bin/*.exe; repository cert, NOT a public CA)"
+  echo "signing  : SELF-SIGNED Authenticode (*.exe; repository cert, NOT a public CA)"
 else
   echo "signing  : UNSIGNED"
 fi

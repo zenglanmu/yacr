@@ -414,10 +414,13 @@ impl Win32CadSurface {
         self.sync_composition()
     }
 
-    /// Position/clip the composition visual to the accepted CAD rect (DIPs).
+    /// Position/clip the composition visual to the accepted CAD rect (pixels).
     ///
-    /// Records the placement as pending so `sync_composition` commits it, even
-    /// when the swapchain size (and its configure generation) is unchanged.
+    /// DirectComposition geometry is in device pixels (no DIP conversion, no
+    /// device DPI), so the placement carries the window scale itself; see
+    /// [`composition_placement`]. Records the placement as pending so
+    /// `sync_composition` commits it, even when the swapchain size (and its
+    /// configure generation) is unchanged.
     fn apply_composition_placement(
         &mut self,
         rect: &CadMetrics,
@@ -440,7 +443,7 @@ impl Win32CadSurface {
             })?;
         self.pending_placement = Some((placement.offset, placement.clip));
         eprintln!(
-            "[probe] composition placement offset=({:.1},{:.1}) clip={:.1}x{:.1} dip \
+            "[probe] composition placement offset=({:.1},{:.1}) clip={:.1}x{:.1} px \
              swapchain={}x{}",
             placement.offset.0,
             placement.offset.1,

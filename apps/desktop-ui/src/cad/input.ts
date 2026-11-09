@@ -10,6 +10,20 @@ import type { PartitionRect } from './metrics.ts';
 // a flush). A short timer guarantees delivery within this bound while the rAF
 // path stays the preferred flush.
 const MOVE_FLUSH_FALLBACK_MS = 8;
+// Upper bound (ms) on how long a resize report may wait for the animation frame.
+// The same rAF throttling applies; a resize report that never runs leaves the
+// host's native CAD surface at its previous rect, which a transparent
+// `native-below` window exposes as the desktop showing through the canvas.
+const RESIZE_FLUSH_FALLBACK_MS = 120;
+// Delay before the one reconciliation re-report of a changed partition rect.
+//
+// A native host applies the composited surface geometry only for an **accepted**
+// report, so one lost report (a throttled frame, a refused IPC, a rejected rect)
+// would leave the surface at the old rect forever — and a transparent window
+// then shows the desktop through the uncovered canvas. Every real geometry change
+// schedules exactly one delayed re-send of the then-current rect, so the steady
+// state costs nothing.
+const RESIZE_RECONCILE_DELAY_MS = 1500;
 
 /**
  * One queued input message.
@@ -266,6 +280,8 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
   let frame: number | null = null;
   let timer: number | null = null;
   let resizeFrame: number | null = null;
+  let resizeFallback: number | null = null;
+  let reconcileTimer: number | null = null;
   let accepting = true;
   // `button` is the DOM `MouseEvent.button` (0 primary / 1 middle / 2 secondary).
   // It is only meaningful on a press/release, so it rides `pointer_down` and
@@ -498,24 +514,78 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
   };
   const blur = (): void => { cancel(); lane.push({ kind: 'blur' }); };
   let lastMetrics = '';
-  /** Publish a rect the caller already measured (one layout read per move). */
-  const reportRect = (rect: PartitionRect): void => {
+  /**
+   * Publish a rect the caller already measured (one layout read per move).
+   *
+   * `force` re-sends an unchanged rect with a fresh lane sequence: the host's
+   * layout tracker rejects an equal sequence, so this is what lets the delayed
+   * reconciliation heal a report the host never applied.
+   */
+  const reportRect = (rect: PartitionRect, force = false): void => {
     const data = { kind: 'resize', ...rect };
     if (!isReportableRect(data)) return;
     const key = metricsKey(data);
-    if (key !== lastMetrics) {
+    if (force || key !== lastMetrics) {
       flush();
-      if (lane.push(data) !== false) lastMetrics = key;
+      if (lane.push(data) !== false) {
+        // The startup report is the host's presenter gate (no rect, no CAD at
+        // all), not a geometry *change*; the delayed retry covers changes, so a
+        // startup failure stays a visible no-CAD startup rather than a stale
+        // surface.
+        const initial = lastMetrics === '';
+        lastMetrics = key;
+        if (!force && !initial) scheduleReconcile();
+      }
     }
   };
-  const resize = (): void => {
-    reportRect(rectFromElement(element, env.devicePixelRatio || 1));
+  const resize = (force = false): void => {
+    reportRect(rectFromElement(element, env.devicePixelRatio || 1), force);
   };
+  /**
+   * Arm the one delayed reconciliation re-report of the current rect.
+   *
+   * Debounced: an interactive resize re-arms it on every changed rect, so it
+   * fires once, `RESIZE_RECONCILE_DELAY_MS` after the layout settles.
+   */
+  const scheduleReconcile = (): void => {
+    if (reconcileTimer !== null) env.clearTimeout(reconcileTimer);
+    reconcileTimer = env.setTimeout(() => {
+      reconcileTimer = null;
+      resize(true);
+    }, RESIZE_RECONCILE_DELAY_MS);
+  };
+  const clearResizeFallback = (): void => {
+    if (resizeFallback !== null) {
+      env.clearTimeout(resizeFallback);
+      resizeFallback = null;
+    }
+  };
+  /**
+   * Report the partition on the next animation frame, with a timer fallback.
+   *
+   * `requestAnimationFrame` is throttled or suspended in an occluded/unfocused
+   * webview (the same reason the pointer-move path has a timer). A resize report
+   * that never runs would leave the native surface at the previous rect; the
+   * timer guarantees delivery within [`RESIZE_FLUSH_FALLBACK_MS`]. Both paths
+   * report at most once: whichever runs first clears the other.
+   */
   const scheduleResize = (): void => {
-    if (resizeFrame === null) resizeFrame = env.requestAnimationFrame(() => {
-      resizeFrame = null;
-      resize();
-    });
+    if (resizeFrame === null) {
+      resizeFrame = env.requestAnimationFrame(() => {
+        clearResizeFallback();
+        resizeFrame = null;
+        resize();
+      });
+    }
+    if (resizeFallback === null) {
+      resizeFallback = env.setTimeout(() => {
+        resizeFallback = null;
+        if (resizeFrame === null) return;
+        env.cancelAnimationFrame(resizeFrame);
+        resizeFrame = null;
+        resize();
+      }, RESIZE_FLUSH_FALLBACK_MS);
+    }
   };
   let media: MediaQueryList | null = null;
   const dprChanged = (): void => { scheduleResize(); watchDpr(); };
@@ -557,6 +627,8 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
     dispose(): void {
       cancel();
       if (resizeFrame !== null) env.cancelAnimationFrame(resizeFrame);
+      clearResizeFallback();
+      if (reconcileTimer !== null) env.clearTimeout(reconcileTimer);
       observer.disconnect();
       media?.removeEventListener('change', dprChanged);
       env.removeEventListener('blur', blur);

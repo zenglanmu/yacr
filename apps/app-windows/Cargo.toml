@@ -55,8 +55,15 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_DirectComposition",
     "Win32_Graphics_Gdi",
     "Win32_System_Com",
+    # Release builds are GUI-subsystem binaries; `main.rs` re-attaches to the
+    # parent terminal's console so `[probe]` evidence still reaches a terminal.
+    "Win32_System_Console",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
+    "Win32_Storage_FileSystem",
+    # `CreateFileW("CONOUT$")` needs the SECURITY_ATTRIBUTES type in its
+    # signature even though this call passes none.
+    "Win32_Security",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",

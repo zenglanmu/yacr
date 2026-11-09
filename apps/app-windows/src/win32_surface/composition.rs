@@ -102,12 +102,15 @@ impl CompositionSurface {
         })
     }
 
-    /// Position and clip the visual to the accepted CAD rect, in **DIPs**.
+    /// Position and clip the visual to the accepted CAD rect, in **pixels**.
     ///
-    /// The offset is the logical position verbatim (DirectComposition composes in
-    /// DIPs; no scale math here), and the clip is the logical content size from
-    /// the visual's own origin. The change becomes visible on the next `Commit`,
-    /// which the host issues through its pending-placement bookkeeping.
+    /// DirectComposition visual geometry is expressed in device pixels (the
+    /// reference pages say "in pixels"; there is no DPI property on the
+    /// DirectComposition API), so the caller passes the physical rect — the same
+    /// numbers the swapchain is configured with. A logical (CSS) rect here would
+    /// cover only `1/scale` of the partition at fractional display scaling.
+    /// The change becomes visible on the next `Commit`, which the host issues
+    /// through its pending-placement bookkeeping.
     pub(super) fn set_placement(&self, offset: (f32, f32), clip: (f32, f32)) -> Result<(), String> {
         unsafe { self.visual.SetOffsetX2(offset.0) }
             .map_err(|error| format!("IDCompositionVisual::SetOffsetX failed: {error}"))?;
