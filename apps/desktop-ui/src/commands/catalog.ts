@@ -757,4 +757,39 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'CONSTRAINTBAR', labelKey: 'draw.kind.constraintbar', icon: 'alert', group: 'view' },
   { id: 'CONSTRAINTSETTINGS', labelKey: 'draw.kind.constraintsettings', icon: 'settings', group: 'view' },
 
+  // The 2026-11-09 Wave 4 batch: the first extended batch with real entity
+  // writes. The first twelve reuse the existing planners/write paths and are
+  // Work-only; the last eighteen are stable named refusals and stay
+  // Viewer-legal. Appended last so no shipped row moves.
+  { id: 'CENTERMARK', labelKey: 'draw.kind.centermark', icon: 'circle', group: 'draw' },
+  { id: 'CENTERLINE', labelKey: 'draw.kind.centerline', icon: 'line', group: 'draw' },
+  { id: 'NCOPY', labelKey: 'draw.kind.ncopy', icon: 'copy', group: 'modify' },
+  { id: 'COPYTOLAYER', labelKey: 'draw.kind.copytolayer', icon: 'layers', group: 'modify' },
+  { id: '-COPYTOLAYER', labelKey: 'draw.kind.dashcopytolayer', icon: 'layers', group: 'modify' },
+  { id: 'CDORDER', labelKey: 'draw.kind.cdorder', icon: 'arrayrect', group: 'modify' },
+  { id: 'FLATTEN', labelKey: 'draw.kind.flatten', icon: 'move', group: 'modify' },
+  { id: 'XPLODE', labelKey: 'draw.kind.xplode', icon: 'explode', group: 'modify' },
+  { id: 'BTRIM', labelKey: 'draw.kind.btrim', icon: 'trim', group: 'modify' },
+  { id: 'BEXTEND', labelKey: 'draw.kind.bextend', icon: 'extend', group: 'modify' },
+  { id: 'CHANGE', labelKey: 'draw.kind.change', icon: 'properties', group: 'modify' },
+  { id: 'CHPROP', labelKey: 'draw.kind.chprop', icon: 'properties', group: 'modify' },
+  { id: 'BSCALE', labelKey: 'draw.kind.bscale', icon: 'scale', group: 'modify' },
+  { id: 'MINSERT', labelKey: 'draw.kind.minsert', icon: 'arrayrect', group: 'modify' },
+  { id: 'BLOCKREPLACE', labelKey: 'draw.kind.blockreplace', icon: 'copy', group: 'modify' },
+  { id: 'BREPLACE', labelKey: 'draw.kind.breplace', icon: 'copy', group: 'modify' },
+  { id: '-BREPLACE', labelKey: 'draw.kind.dashbreplace', icon: 'copy', group: 'modify' },
+  { id: 'SPLINEDIT', labelKey: 'draw.kind.splinedit', icon: 'spline', group: 'modify' },
+  { id: 'MLEDIT', labelKey: 'draw.kind.mledit', icon: 'line', group: 'modify' },
+  { id: '-MLEDIT', labelKey: 'draw.kind.dashmledit', icon: 'line', group: 'modify' },
+  { id: 'BURST', labelKey: 'draw.kind.burst', icon: 'explode', group: 'modify' },
+  { id: 'CLIP', labelKey: 'draw.kind.clip', icon: 'reference', group: 'modify' },
+  { id: 'CLIPIT', labelKey: 'draw.kind.clipit', icon: 'reference', group: 'modify' },
+  { id: 'REGION', labelKey: 'draw.kind.region', icon: 'polygon', group: 'draw' },
+  { id: 'ADDSELECTED', labelKey: 'draw.kind.addselected', icon: 'selectAll', group: 'modify' },
+  { id: 'WBLOCK', labelKey: 'draw.kind.wblock', icon: 'save', group: 'file' },
+  { id: '-WBLOCK', labelKey: 'draw.kind.dashwblock', icon: 'save', group: 'file' },
+  { id: 'BSAVE', labelKey: 'draw.kind.bsave', icon: 'save', group: 'file' },
+  { id: 'BSAVEAS', labelKey: 'draw.kind.bsaveas', icon: 'save', group: 'file' },
+  { id: 'CHSPACE', labelKey: 'draw.kind.chspace', icon: 'layers', group: 'modify' },
+
 ]);

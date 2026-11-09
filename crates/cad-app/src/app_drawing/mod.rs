@@ -116,6 +116,14 @@ mod trim_extend;
 mod trim_spline;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
+// The Wave 4 extended edits reuse the existing planner/write surfaces rather
+// than a second copy: these re-exports are crate-wide only.
+pub(crate) use draw2_edit::CurveChange;
+pub(crate) use properties::plan_entity;
+pub(crate) use trim_boundary::{collect_boundaries, BoundarySet};
+pub(crate) use trim_curves::{
+    cut_tolerance, plan_extend, plan_trim, PlanRefusal, TargetCurve, TrimPlan,
+};
 // The POLYLINE-mode FILLET/CHAMFER planner, its spec and the two-line parity
 // reference: exposed to the crate's tests only (`tests::drawing::polyline_fillet`
 // drives the pure planner and compares it against the two-line `plan_fillet`).

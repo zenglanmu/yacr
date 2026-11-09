@@ -125,7 +125,7 @@ impl ClosedCurve {
 
 /// The resolved boundary input of a TRIM/EXTEND.
 #[derive(Default)]
-pub(super) struct BoundarySet {
+pub(crate) struct BoundarySet {
     /// One primitive per boundary curve piece (LINE, ARC, CIRCLE, ELLIPSE or
     /// SPLINE).
     primitives: Vec<SemanticGeometry>,
@@ -152,7 +152,7 @@ impl BoundarySet {
         self.spline_boundaries > 0
     }
 
-    pub(super) fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.primitives.is_empty()
             && self.closed_outlines.is_empty()
             && self.closed_curves.is_empty()
@@ -182,7 +182,7 @@ impl BoundarySet {
 /// takes no part in the closed-boundary delete rule (see the module doc). Every
 /// other geometry kind is an explicit `Unsupported` refusal naming the kind and
 /// the operation, before anything is mutated.
-pub(super) fn collect_boundaries(
+pub(crate) fn collect_boundaries(
     geometry: &SemanticGeometry,
     set: &mut BoundarySet,
     policy: &TolerancePolicy,

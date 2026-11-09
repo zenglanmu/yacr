@@ -363,6 +363,14 @@ export const HOST_NAMES = [
   'QLATTACHSET', 'QLDETACHSET', 'ARRAYCLOSE', 'ARRAYEDIT', 'BEDIT', '-BEDIT',
   'BCLOSE', 'BCYCLEORDER', 'BGRIPSET', 'BESETTINGS', 'BTESTBLOCK',
   'LAYERPALETTE', 'CONSTRAINTBAR', 'CONSTRAINTSETTINGS',
+  // The 2026-11-09 Wave 4 batch: twelve real selection edits (Work-only) plus
+  // eighteen named refusals. All thirty are canonical selectors of their own;
+  // `-COPYTOLAYER`, `-BREPLACE`, `-MLEDIT` and `-WBLOCK` are not aliases.
+  'CENTERMARK', 'CENTERLINE', 'NCOPY', 'COPYTOLAYER', '-COPYTOLAYER',
+  'CDORDER', 'FLATTEN', 'XPLODE', 'BTRIM', 'BEXTEND', 'CHANGE', 'CHPROP',
+  'BSCALE', 'MINSERT', 'BLOCKREPLACE', 'BREPLACE', '-BREPLACE', 'SPLINEDIT',
+  'MLEDIT', '-MLEDIT', 'BURST', 'CLIP', 'CLIPIT', 'REGION', 'ADDSELECTED',
+  'WBLOCK', '-WBLOCK', 'BSAVE', 'BSAVEAS', 'CHSPACE',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented

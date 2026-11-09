@@ -557,7 +557,7 @@ impl Application {
     /// missing layer is an explicit error), every entity lands in one transaction
     /// and one undo step, and the whole batch is all-or-nothing. An empty batch is
     /// an explicit refusal, never a silent empty success.
-    pub(super) fn commit_new_entities(
+    pub(crate) fn commit_new_entities(
         &mut self,
         session: &SessionState,
         command: &Command,
@@ -759,7 +759,7 @@ impl Application {
     /// leaves both the current drawing (including its ID allocator) and history
     /// unchanged; after it succeeds, publishing the already-built candidate is
     /// infallible.
-    pub(super) fn publish_candidate(
+    pub(crate) fn publish_candidate(
         &mut self,
         document_id: DocumentId,
         candidate: DrawingDatabase,

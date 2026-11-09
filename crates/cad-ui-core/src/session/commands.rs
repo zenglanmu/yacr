@@ -421,6 +421,42 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CONSTRAINTBAR", CommandId::Extended(ExtendedCommandId::ConstraintBar)),
     ("CONSTRAINTSETTINGS", CommandId::Extended(ExtendedCommandId::ConstraintSettings)),
 
+    // Wave 4 (2026-11-09): the first extended batch with real entity writes.
+    // Twelve selection-based 2D edits (CENTERMARK, CENTERLINE, NCOPY,
+    // COPYTOLAYER, -COPYTOLAYER, CDORDER, FLATTEN, XPLODE, BTRIM, BEXTEND,
+    // CHANGE, CHPROP) are Work-only and reuse the existing planners; the last
+    // eighteen are stable named refusals and stay Viewer-legal.
+    ("CENTERMARK", CommandId::Extended(ExtendedCommandId::CenterMark)),
+    ("CENTERLINE", CommandId::Extended(ExtendedCommandId::CenterLine)),
+    ("NCOPY", CommandId::Extended(ExtendedCommandId::NCopy)),
+    ("COPYTOLAYER", CommandId::Extended(ExtendedCommandId::CopyToLayer)),
+    ("-COPYTOLAYER", CommandId::Extended(ExtendedCommandId::DashCopyToLayer)),
+    ("CDORDER", CommandId::Extended(ExtendedCommandId::CDOrder)),
+    ("FLATTEN", CommandId::Extended(ExtendedCommandId::Flatten)),
+    ("XPLODE", CommandId::Extended(ExtendedCommandId::XPlode)),
+    ("BTRIM", CommandId::Extended(ExtendedCommandId::BTrim)),
+    ("BEXTEND", CommandId::Extended(ExtendedCommandId::BExtend)),
+    ("CHANGE", CommandId::Extended(ExtendedCommandId::Change)),
+    ("CHPROP", CommandId::Extended(ExtendedCommandId::ChProp)),
+    ("BSCALE", CommandId::Extended(ExtendedCommandId::BScale)),
+    ("MINSERT", CommandId::Extended(ExtendedCommandId::MInsert)),
+    ("BLOCKREPLACE", CommandId::Extended(ExtendedCommandId::BlockReplace)),
+    ("BREPLACE", CommandId::Extended(ExtendedCommandId::BReplace)),
+    ("-BREPLACE", CommandId::Extended(ExtendedCommandId::DashBReplace)),
+    ("SPLINEDIT", CommandId::Extended(ExtendedCommandId::SplineEdit)),
+    ("MLEDIT", CommandId::Extended(ExtendedCommandId::MlEdit)),
+    ("-MLEDIT", CommandId::Extended(ExtendedCommandId::DashMlEdit)),
+    ("BURST", CommandId::Extended(ExtendedCommandId::Burst)),
+    ("CLIP", CommandId::Extended(ExtendedCommandId::Clip)),
+    ("CLIPIT", CommandId::Extended(ExtendedCommandId::ClipIt)),
+    ("REGION", CommandId::Extended(ExtendedCommandId::Region)),
+    ("ADDSELECTED", CommandId::Extended(ExtendedCommandId::AddSelected)),
+    ("WBLOCK", CommandId::Extended(ExtendedCommandId::WBlock)),
+    ("-WBLOCK", CommandId::Extended(ExtendedCommandId::DashWBlock)),
+    ("BSAVE", CommandId::Extended(ExtendedCommandId::BSave)),
+    ("BSAVEAS", CommandId::Extended(ExtendedCommandId::BSaveAs)),
+    ("CHSPACE", CommandId::Extended(ExtendedCommandId::ChSpace)),
+
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**

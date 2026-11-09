@@ -50,8 +50,21 @@
 //!   with no storage model or API in this build, refused with a stable
 //!   `CadError::Unsupported` reason.
 //!
-//! Every variant here stays Viewer-legal: no database write, no revision bump,
-//! no `cad-history` entry.
+//! Every variant in Waves 1–3 stays Viewer-legal: no database write, no
+//! revision bump, no `cad-history` entry.
+//!
+//! # Wave 4 (2026-11-09)
+//!
+//! Thirty more names, and the first batch with **real entity writes**:
+//!
+//! * **Selection-based 2D edits** (`CENTERMARK`, `CENTERLINE`, `NCOPY`,
+//!   `COPYTOLAYER`, `-COPYTOLAYER`, `CDORDER`, `FLATTEN`, `XPLODE`, `BTRIM`,
+//!   `BEXTEND`, `CHANGE`, `CHPROP`): each reuses an existing planner/write path
+//!   (creation funnel, `plan_trim`/`plan_extend`, `plan_entity`, EXPLODE). They
+//!   are Work-only and commit exactly one transaction / one undo step.
+//! * **Named refusals** (`BSCALE` through `CHSPACE`): features with no storage
+//!   model or API in this build, refused with a stable
+//!   `CadError::Unsupported` reason. Refusals stay Viewer-legal.
 
 /// One payload-free command in the extended wrapper batches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,6 +221,70 @@ pub enum ExtendedCommandId {
     ConstraintBar,
     /// `CONSTRAINTSETTINGS`: no constraint model.
     ConstraintSettings,
+
+    // -- Wave 4: real selection-based 2D edits (app_extended_edit4) ----------
+    /// `CENTERMARK`: crossing LINEs at the centre of each selected CIRCLE/ARC.
+    CenterMark,
+    /// `CENTERLINE`: one midway LINE between two parallel selected LINEs.
+    CenterLine,
+    /// `NCOPY`: copy block-instance member geometry into model space.
+    NCopy,
+    /// `COPYTOLAYER`: copy the selection onto the first selected entity's layer.
+    CopyToLayer,
+    /// `-COPYTOLAYER`: the command-line spelling of the same copy.
+    DashCopyToLayer,
+    /// `CDORDER`: rewrite the selection's draw order by colour index.
+    CDOrder,
+    /// `FLATTEN`: set the supported selected geometry's z to 0.
+    Flatten,
+    /// `XPLODE`: EXPLODE INSERTs with an attributes-not-implemented report.
+    XPlode,
+    /// `BTRIM`: trim the selection against the first selected INSERT's members.
+    BTrim,
+    /// `BEXTEND`: extend the selection to the first selected INSERT's members.
+    BExtend,
+    /// `CHANGE`: move the selection to the current layer and reset to ByLayer.
+    Change,
+    /// `CHPROP`: the same reset under its own selector.
+    ChProp,
+
+    // -- Wave 4: named refusals (app_extended_refusals4) --------------------
+    /// `BSCALE`: needs a factor plus insertion reference.
+    BScale,
+    /// `MINSERT`: needs a block name plus row/column counts.
+    MInsert,
+    /// `BLOCKREPLACE`: needs two block definitions.
+    BlockReplace,
+    /// `BREPLACE`: needs two block definitions.
+    BReplace,
+    /// `-BREPLACE`: the command-line spelling of the same refusal.
+    DashBReplace,
+    /// `SPLINEDIT`: no NURBS edit surface.
+    SplineEdit,
+    /// `MLEDIT`: no MLINE join/cap edit model.
+    MlEdit,
+    /// `-MLEDIT`: the command-line spelling of the same refusal.
+    DashMlEdit,
+    /// `BURST`: no block-attribute model.
+    Burst,
+    /// `CLIP`: no image/xref clipping model.
+    Clip,
+    /// `CLIPIT`: no image/xref clipping model.
+    ClipIt,
+    /// `REGION`: no Region geometry model.
+    Region,
+    /// `ADDSELECTED`: no per-type creation prompts.
+    AddSelected,
+    /// `WBLOCK`: no separate drawing-file writer.
+    WBlock,
+    /// `-WBLOCK`: the command-line spelling of the same refusal.
+    DashWBlock,
+    /// `BSAVE`: no block editor.
+    BSave,
+    /// `BSAVEAS`: no block editor.
+    BSaveAs,
+    /// `CHSPACE`: no model/paper-space entity move.
+    ChSpace,
 }
 
 impl ExtendedCommandId {
@@ -285,6 +362,36 @@ impl ExtendedCommandId {
             Self::LayerPalette => "LAYERPALETTE",
             Self::ConstraintBar => "CONSTRAINTBAR",
             Self::ConstraintSettings => "CONSTRAINTSETTINGS",
+            Self::CenterMark => "CENTERMARK",
+            Self::CenterLine => "CENTERLINE",
+            Self::NCopy => "NCOPY",
+            Self::CopyToLayer => "COPYTOLAYER",
+            Self::DashCopyToLayer => "-COPYTOLAYER",
+            Self::CDOrder => "CDORDER",
+            Self::Flatten => "FLATTEN",
+            Self::XPlode => "XPLODE",
+            Self::BTrim => "BTRIM",
+            Self::BExtend => "BEXTEND",
+            Self::Change => "CHANGE",
+            Self::ChProp => "CHPROP",
+            Self::BScale => "BSCALE",
+            Self::MInsert => "MINSERT",
+            Self::BlockReplace => "BLOCKREPLACE",
+            Self::BReplace => "BREPLACE",
+            Self::DashBReplace => "-BREPLACE",
+            Self::SplineEdit => "SPLINEDIT",
+            Self::MlEdit => "MLEDIT",
+            Self::DashMlEdit => "-MLEDIT",
+            Self::Burst => "BURST",
+            Self::Clip => "CLIP",
+            Self::ClipIt => "CLIPIT",
+            Self::Region => "REGION",
+            Self::AddSelected => "ADDSELECTED",
+            Self::WBlock => "WBLOCK",
+            Self::DashWBlock => "-WBLOCK",
+            Self::BSave => "BSAVE",
+            Self::BSaveAs => "BSAVEAS",
+            Self::ChSpace => "CHSPACE",
         }
     }
 
@@ -295,7 +402,21 @@ impl ExtendedCommandId {
     /// constant) so a later write-capable extended command can declare its own
     /// authorization here.
     pub fn requires_work_mode(self) -> bool {
-        false
+        matches!(
+            self,
+            Self::CenterMark
+                | Self::CenterLine
+                | Self::NCopy
+                | Self::CopyToLayer
+                | Self::DashCopyToLayer
+                | Self::CDOrder
+                | Self::Flatten
+                | Self::XPlode
+                | Self::BTrim
+                | Self::BExtend
+                | Self::Change
+                | Self::ChProp
+        )
     }
 
     /// Every variant in declaration order; the vocabulary contract test uses it
@@ -371,5 +492,35 @@ impl ExtendedCommandId {
         Self::LayerPalette,
         Self::ConstraintBar,
         Self::ConstraintSettings,
+        Self::CenterMark,
+        Self::CenterLine,
+        Self::NCopy,
+        Self::CopyToLayer,
+        Self::DashCopyToLayer,
+        Self::CDOrder,
+        Self::Flatten,
+        Self::XPlode,
+        Self::BTrim,
+        Self::BExtend,
+        Self::Change,
+        Self::ChProp,
+        Self::BScale,
+        Self::MInsert,
+        Self::BlockReplace,
+        Self::BReplace,
+        Self::DashBReplace,
+        Self::SplineEdit,
+        Self::MlEdit,
+        Self::DashMlEdit,
+        Self::Burst,
+        Self::Clip,
+        Self::ClipIt,
+        Self::Region,
+        Self::AddSelected,
+        Self::WBlock,
+        Self::DashWBlock,
+        Self::BSave,
+        Self::BSaveAs,
+        Self::ChSpace,
     ];
 }

@@ -48,7 +48,7 @@ const TAU: f64 = std::f64::consts::TAU;
 
 /// The world tolerance the cut predicates use (the computation predicate
 /// tolerance, widened to the topology join tolerance).
-pub(super) fn cut_tolerance() -> f64 {
+pub(crate) fn cut_tolerance() -> f64 {
     let policy = TolerancePolicy::default();
     policy
         .computation_world
@@ -58,7 +58,7 @@ pub(super) fn cut_tolerance() -> f64 {
 
 /// What a resolved TRIM will do to the target.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum TrimPlan {
+pub(crate) enum TrimPlan {
     /// The target is fully inside a closed boundary (or would be reduced to
     /// nothing): delete it.
     Delete,
@@ -69,7 +69,7 @@ pub(super) enum TrimPlan {
 
 /// A resolved TRIM plus the honesty notes the command turns into diagnostics.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct TrimResolution {
+pub(crate) struct TrimResolution {
     pub plan: TrimPlan,
     /// One entry per boundary pair whose cut point came from the engine's
     /// **sampled** fallback instead of an analytic solution. Empty when every
@@ -83,7 +83,7 @@ pub(super) struct TrimResolution {
 /// **capability gap**, not bad input: closed-SPLINE containment. Reporting that as
 /// `InvalidInput` would blame the user for a subset the command does not implement.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum PlanRefusal {
+pub(crate) enum PlanRefusal {
     /// Bad or ambiguous input (degenerate target, no intersection, a pick whose
     /// projection falls outside the target's span).
     Invalid(String),
@@ -114,14 +114,14 @@ impl From<&str> for PlanRefusal {
 
 /// A resolved EXTEND plus the same honesty notes.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct ExtendResolution {
+pub(crate) struct ExtendResolution {
     pub geometry: SemanticGeometry,
     pub notes: Vec<String>,
 }
 
 /// The target curve's own parameter space.
 #[derive(Debug, Clone)]
-pub(super) enum TargetCurve {
+pub(crate) enum TargetCurve {
     /// `u ∈ [0, 1]` from `start` to `end`.
     Line { start: Point3, end: Point3 },
     /// `u ∈ [0, 1]` from `start` to `start + sweep` on the circle
@@ -148,7 +148,7 @@ impl TargetCurve {
     ///
     /// An ARC whose sweep exceeds one full turn is refused: it has no single
     /// periodic period, so its cuts would fold at the wrong place.
-    pub(super) fn new(
+    pub(crate) fn new(
         geometry: &SemanticGeometry,
         command: &str,
         supported: &str,
@@ -267,7 +267,7 @@ impl TargetCurve {
 
     /// The point at parameter `u` (extrapolated outside `[0, 1]` for a LINE/ARC; a
     /// SPLINE has no continuation, so it is clamped to the knot domain).
-    pub(super) fn point_at(&self, u: f64) -> Point3 {
+    pub(crate) fn point_at(&self, u: f64) -> Point3 {
         match self {
             Self::Line { start, end } => add(*start, scale(sub(*end, *start), u)),
             Self::Arc {
@@ -459,7 +459,7 @@ impl TargetCurve {
 ///
 /// `Err(reason)` covers the documented degenerate/no-cut/outside-the-span cases so
 /// the caller can refuse without touching the database.
-pub(super) fn plan_trim(
+pub(crate) fn plan_trim(
     curve: &TargetCurve,
     pick: Point3,
     boundaries: &BoundarySet,
@@ -563,7 +563,7 @@ pub(super) fn plan_trim(
 /// most of the circle is the *opposite* end's neighbour reached the long way
 /// round, so it is refused by name instead of silently unfolding the arc.
 /// `Err(reason)` carries those cases to the caller before any mutation.
-pub(super) fn plan_extend(
+pub(crate) fn plan_extend(
     curve: &TargetCurve,
     pick: Point3,
     boundaries: &BoundarySet,

@@ -32,7 +32,28 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
             "{selector}"
         );
         assert_eq!(canonical_command_name(selector), Some(selector));
-        assert!(!variant.requires_work_mode(), "{selector} is Viewer-legal");
+        // Waves 1–3 are Viewer-legal. Wave 4's twelve entity-writing commands
+        // declare Work mode; every other variant stays Viewer-legal.
+        let expected_work = matches!(
+            variant,
+            ExtendedCommandId::CenterMark
+                | ExtendedCommandId::CenterLine
+                | ExtendedCommandId::NCopy
+                | ExtendedCommandId::CopyToLayer
+                | ExtendedCommandId::DashCopyToLayer
+                | ExtendedCommandId::CDOrder
+                | ExtendedCommandId::Flatten
+                | ExtendedCommandId::XPlode
+                | ExtendedCommandId::BTrim
+                | ExtendedCommandId::BExtend
+                | ExtendedCommandId::Change
+                | ExtendedCommandId::ChProp
+        );
+        assert_eq!(
+            variant.requires_work_mode(),
+            expected_work,
+            "{selector} work-mode flag"
+        );
     }
 }
 

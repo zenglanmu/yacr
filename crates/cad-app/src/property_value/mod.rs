@@ -77,7 +77,7 @@ mod aci;
 /// a resolved sRGB value and the two must come from the one palette table: a
 /// second copy would let the entity and layer grammars disagree about what
 /// `aci:30` looks like.
-pub(crate) use aci::rgb_for_aci;
+pub(crate) use aci::{aci_for_rgb, rgb_for_aci};
 
 use cad_db::{
     DbEntity, DrawingDatabase, EntityColor, EntityLineType, EntityLineWeight, EntityTransparency,

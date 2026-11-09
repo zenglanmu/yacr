@@ -160,6 +160,17 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'BGRIPSET', 'BESETTINGS', 'BTESTBLOCK', 'LAYERPALETTE', 'CONSTRAINTBAR',
   'CONSTRAINTSETTINGS',
 
+  // The 2026-11-09 Wave 4 batch: the twelve real selection edits and the
+  // eighteen named refusals all read the open drawing (the edits read its
+  // entities, the refusals answer from the build's model), so the start page
+  // disables them with the catalog's own "no drawing is open" sentence. None
+  // takes a capability gate: no file I/O is involved.
+  'CENTERMARK', 'CENTERLINE', 'NCOPY', 'COPYTOLAYER', '-COPYTOLAYER',
+  'CDORDER', 'FLATTEN', 'XPLODE', 'BTRIM', 'BEXTEND', 'CHANGE', 'CHPROP',
+  'BSCALE', 'MINSERT', 'BLOCKREPLACE', 'BREPLACE', '-BREPLACE', 'SPLINEDIT',
+  'MLEDIT', '-MLEDIT', 'BURST', 'CLIP', 'CLIPIT', 'REGION', 'ADDSELECTED',
+  'WBLOCK', '-WBLOCK', 'BSAVE', 'BSAVEAS', 'CHSPACE',
+
 ]);
 
 /** One command's precondition on the **current selection**. */

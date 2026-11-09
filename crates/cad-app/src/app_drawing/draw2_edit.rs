@@ -34,7 +34,7 @@ fn skipped(code: &str, entity: EntityId, detail: &str) -> Diagnostic {
 }
 
 /// One staged trim change, built before the transaction opens.
-enum CurveChange {
+pub(crate) enum CurveChange {
     Replace(DbEntity, SemanticGeometry),
     Delete(DbEntity, cad_db::EntityDisplayState),
 }
@@ -708,7 +708,7 @@ impl Application {
     }
 
     /// Stage a planned set of curve replacements/deletes in one transaction.
-    fn commit_curve_changes(
+    pub(crate) fn commit_curve_changes(
         &mut self,
         document_id: DocumentId,
         changes: Vec<CurveChange>,

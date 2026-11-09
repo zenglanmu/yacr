@@ -102,6 +102,39 @@ impl Application {
             | ExtendedCommandId::LayerPalette
             | ExtendedCommandId::ConstraintBar
             | ExtendedCommandId::ConstraintSettings => self.extended_refusal3(command, ext)?,
+            // Wave 4 real selection-based 2D edits: each writes entity rows and
+            // is Work-only; one transaction / one undo step per command.
+            ExtendedCommandId::CenterMark
+            | ExtendedCommandId::CenterLine
+            | ExtendedCommandId::NCopy
+            | ExtendedCommandId::CopyToLayer
+            | ExtendedCommandId::DashCopyToLayer
+            | ExtendedCommandId::CDOrder
+            | ExtendedCommandId::Flatten
+            | ExtendedCommandId::XPlode
+            | ExtendedCommandId::BTrim
+            | ExtendedCommandId::BExtend
+            | ExtendedCommandId::Change
+            | ExtendedCommandId::ChProp => self.extended_edit4(session, command, ext)?,
+            // Wave 4 named refusals: a stable `Unsupported` reason per name.
+            ExtendedCommandId::BScale
+            | ExtendedCommandId::MInsert
+            | ExtendedCommandId::BlockReplace
+            | ExtendedCommandId::BReplace
+            | ExtendedCommandId::DashBReplace
+            | ExtendedCommandId::SplineEdit
+            | ExtendedCommandId::MlEdit
+            | ExtendedCommandId::DashMlEdit
+            | ExtendedCommandId::Burst
+            | ExtendedCommandId::Clip
+            | ExtendedCommandId::ClipIt
+            | ExtendedCommandId::Region
+            | ExtendedCommandId::AddSelected
+            | ExtendedCommandId::WBlock
+            | ExtendedCommandId::DashWBlock
+            | ExtendedCommandId::BSave
+            | ExtendedCommandId::BSaveAs
+            | ExtendedCommandId::ChSpace => self.extended_refusal4(command, ext)?,
         };
         Ok(Some(outcome))
     }

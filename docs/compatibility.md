@@ -257,7 +257,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 |---|---|---|
 | LINE / CIRCLE / ARC | 创建（点捕获或几何直通）；`CIRCLE 2P`/`CIRCLE 3P`/`CIRCLE D`（2026-11-01，多词 canonical）分别按直径两端点、三点外接圆、圆心+直径距离创建一个 `Circle` | 退化/共线/非有限输入显式拒绝；`CIRCLE D` 的拾取距离是**直径**，半径 = 距离/2 |
 | XLINE / RAY | 创建有界构造线：两点 → 有限 `Line`（type-key `AcDbXline`/`AcDbRay`），裁到模型包围盒（外扩 5%/至少 1.0）或默认 1000 盒；一条事务/一步撤销 | **不是无限几何**；方向退化/出界/非有限点按名拒绝；导出写 `LINE`（`Converted`）；无 3D/OCS 版本 |
-| INSERT | 创建块参照（**点-后-名**：先拾取插入点，再输入**本图已有块**的名称；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`，活动图层/模型空间，一条事务/一步撤销） | **无块表写入**（只读块定义 + 名称/基点元数据）；无块选择器/palette、比例/旋转/属性值/动态块参数；未知名称/缺元数据/空名/换行/非有限点按名拒绝；`WBLOCK` 仍缺（`PASTEBLOCK` 已实现 v1） |
+| INSERT | 创建块参照（**点-后-名**：先拾取插入点，再输入**本图已有块**的名称；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`，活动图层/模型空间，一条事务/一步撤销） | **无块表写入**（只读块定义 + 名称/基点元数据）；无块选择器/palette、比例/旋转/属性值/动态块参数；未知名称/缺元数据/空名/换行/非有限点按名拒绝；`WBLOCK` 为具名拒绝（未实现单文件写出；`PASTEBLOCK` 已实现 v1） |
 | BLOCK | **选择 → 基点 → 名称**（终端文本）：选中模型空间顶层实体写入新块定义并移入 `SpaceId::Block`，几何**逐位保留**、只改空间；元数据存基点；参照为 identity `T(基点)·T(−基点)`，后续 `INSERT` 仍按 `T(I)·T(−基点)`；一条事务/一步撤销，块级 undo 补丁 | 无 ATTDEF/ATTRIB、动态块参数、retain/delete 选择、块选择器；重名（精确/ASCII 大小写不敏感）、实例路径/子元素、图纸空间/块成员、空/换行/非法名称、非有限基点、锁定图层按名拒绝 |
 | MOVE | 平移选择（折叠重复 ref） | 不可变换几何整条拒绝，不静默丢弃。**`SPLINE` 自 2026-10-26 起可平移**：NURBS 曲线是**仿射不变**的（映射每个控制点、`degree`/`knots`/`weights` 逐字复制 = 曲线的精确仿射像），`cad-db` 的 `transform_geometry` 不再按种类拒绝样条 |
 | COPY | 复制（新 id） | 同上（含 `SPLINE` 可变换）；按对象样式覆盖无法复制时记 `drawing.copy.style`（副本继承图层样式） |
@@ -1044,3 +1044,38 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | --- | --- | --- |
 | `MASSPROP` | **部分实现（只读）**：当前选择为**闭合、共面**的 `CIRCLE` / 完整 `ELLIPSE`（`|sweep| >= 2π − 1e-9`）/ 闭合 `POLYLINE`（任意 bulge，同一平面）。逐对象与汇总诊断报告**面积、周长、精确包围盒（min/max）、形心**；圆/椭圆用解析值，bulged 闭合折线用 `cad_geometry::measure_bulged_ring_area` 的精确面积、直线+圆弧精确周长、直线边+圆缺一阶矩形心。椭圆周长是 **Ramanujan 第二近似**，以 `massprop.approx_ellipse_perimeter` 明示，不是精确椭圆积分。空选择 `massprop.selection`；跨对象法向（符号无关）/标高不一致 `massprop.not_coplanar`；开放折线/圆弧/椭圆弧/样条/文字/块参照/填充/标注/3D/不可寻址引用分别按名拒绝。**无**数据库写、revision、撤销或 `ChangeSet`；Viewer 与 Work 均可用 | **未实现**（每次运行以 `massprop.not_implemented` 明示）：惯性矩/惯性积、回转半径、主惯性矩/主轴、质量/体积/3D 实体、密度、`Add`/`Subtract` 区域组合、写 `.mpr` 文件。证据为源码 + `cad_app` 契约测试（解析值、bulge 形心/包围盒、共面拒绝、零写入）；无 GUI/真实图纸/像素证据 |
 | `MEASUREGEOM` | **部分实现（选项路由）**：`MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 发送与 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE` **相同**的 `BeginMeasurement` 请求（不是第二套测量引擎）；`MEASUREGEOM RADIUS` 只读报告当前选择中**恰好一个** `ARC`/`CIRCLE` 的圆心、半径、直径、圆周长（圆弧另报弧长，代码 `measuregeom.radius`）。裸名 `measuregeom.needs_option`；未知/缩写选项由 `invalid_measuregeom_argument_reason` 列出六个完整选项。只接受完整选项词（大小写不敏感），**不接受**单字母缩写 | **未实现**：`VOLUME`（本构建无 3D 实体/体积模型，显式 `Unsupported` `measuregeom.volume_unsupported`，绝不编造数值）；AutoCAD 其它 `MEASUREGEOM` 选项与动态测量未接线。证据为 `cad-ui-core` 路由契约（每个选项启动与基选择子相同的 `tool.key`）+ `cad_app` RADIUS/VOLUME 契约测试；无真机/像素/性能证据 |
+
+### 2026-11-09 Wave 4 扩展命令（真实 2D 编辑 + 具名拒绝）
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `CENTERMARK` | **部分实现**：每个选中顶层模型空间 `CIRCLE`/`ARC` 圆心创建两条交叉 `LINE`，臂长 = 半径 **10%**（声明规则）；一条事务/一步撤销 | 无关联式 CENTERMARK 对象、无可配置尺寸 |
+| `CENTERLINE` | **部分实现**：恰好两条非退化 `LINE`，平行容差内；创建一条中间 `LINE`，跨两条投影重叠段；一条事务/一步撤销 | 无延伸/间隙选项；非平行/混合选择按名拒绝 |
+| `NCOPY` | **部分实现**：选中 `INSERT` 的可见成员几何按世界变换复制到模型空间（新顶层实体）；一条事务/一步撤销 | 无嵌套选择界面；非 INSERT 按名拒绝 |
+| `COPYTOLAYER` | **部分实现**：首个选中实体的图层为目标；其余选中顶层模型空间实体以新 id 复制到该层，原实体不变；一条事务/一步撤销 | 无图层提示；块成员/图纸空间按名拒绝 |
+| `-COPYTOLAYER` | **部分实现**：与 `COPYTOLAYER` 相同的实现，命令行拼写；一条事务/一步撤销 | 同上 |
+| `CDORDER` | **部分实现**：按颜色索引升序重写选中（空选择 = 全部模型空间）实体的存储绘制顺序；保留候选占用的原 draw-order 槽位；一条事务/一步撤销 | 无对话框；ByBlock=0、非调色板真彩=256、缺层属性=7 是声明排序规则 |
+| `FLATTEN` | **部分实现**：选中 `LINE`/`POLYLINE`/`CIRCLE`/`ARC`/`ELLIPSE`/`POINT`/`SPLINE` 的 z 改写为 0；一条事务/一步撤销 | Express 行为简化为 z=0；`MESH`/`INSERT`/非 Z 法向 3D 几何按名拒绝 |
+| `XPLODE` | **部分实现**：复用既有 `EXPLODE` 路径分解选中 `INSERT`；一条事务/一步撤销 | 属性/特性控制 **NOT IMPLEMENTED**（`xplode.attributes_not_implemented`） |
+| `BTRIM` | **部分实现**：首个选中 `INSERT` 的成员几何为边界，其余选中实体复用既有 TRIM 规划器修剪（拾取点为曲线中点）；一条事务/一步撤销 | 无交互式边界提示；不可规划的目标按名拒绝 |
+| `BEXTEND` | **部分实现**：同上，复用既有 EXTEND 规划器（拾取点为曲线终点）；一条事务/一步撤销 | 无交互式边界提示；不可规划的目标按名拒绝 |
+| `CHANGE` | **部分实现**：选中顶层模型空间实体移到当前图层，并复用属性写路径把颜色/线型/线宽重置为 ByLayer；一条事务/一步撤销 | 无交互式点/特性提示；透明度不重置 |
+| `CHPROP` | **部分实现**：与 `CHANGE` 相同的层/属性重置，独立选择子；一条事务/一步撤销 | 同上 |
+| `BSCALE` | **部分实现（具名拒绝）**：`bscale.unsupported: BSCALE needs a factor and an insertion reference; use SCALE on the selected insert` | 不写库/不升修订/不入历史 |
+| `MINSERT` | **部分实现（具名拒绝）**：`minsert.unsupported: MINSERT needs a block name and row/column counts; use INSERT then ARRAYRECT` | 同上 |
+| `BLOCKREPLACE` | **部分实现（具名拒绝）**：`blockreplace.unsupported: BLOCKREPLACE needs two block definitions; this build has no block-replace editor` | 同上 |
+| `BREPLACE` | **部分实现（具名拒绝）**：`breplace.unsupported: BREPLACE needs two block definitions; this build has no block-replace editor` | 同上 |
+| `-BREPLACE` | **部分实现（具名拒绝）**：`-breplace.unsupported: BREPLACE needs two block definitions; this build has no block-replace editor` | 同上 |
+| `SPLINEDIT` | **部分实现（具名拒绝）**：`splinedit.unsupported: this build has no NURBS edit surface` | 同上 |
+| `MLEDIT` | **部分实现（具名拒绝）**：`mlinedit.unsupported: this build has no MLINE join/cap edit model` | 同上 |
+| `-MLEDIT` | **部分实现（具名拒绝）**：`-mlinedit.unsupported: this build has no MLINE join/cap edit model` | 同上 |
+| `BURST` | **部分实现（具名拒绝）**：`burst.unsupported: this build has no block-attribute model to preserve` | 同上 |
+| `CLIP` | **部分实现（具名拒绝）**：`clip.unsupported: this build has no image/xref clipping model` | 同上 |
+| `CLIPIT` | **部分实现（具名拒绝）**：`clipit.unsupported: this build has no image/xref clipping model` | 同上 |
+| `REGION` | **部分实现（具名拒绝）**：`region.unsupported: this build has no Region geometry model` | 同上 |
+| `ADDSELECTED` | **部分实现（具名拒绝）**：`addselected.unsupported: add-selected needs per-type creation prompts that this build does not model` | 同上 |
+| `WBLOCK` | **部分实现（具名拒绝）**：`wblock.unsupported: writing a block definition to a separate drawing file is not implemented` | 同上 |
+| `-WBLOCK` | **部分实现（具名拒绝）**：`-wblock.unsupported: writing a block definition to a separate drawing file is not implemented` | 同上 |
+| `BSAVE` | **部分实现（具名拒绝）**：`bsave.unsupported: this build has no block editor` | 同上 |
+| `BSAVEAS` | **部分实现（具名拒绝）**：`bsaveas.unsupported: this build has no block editor` | 同上 |
+| `CHSPACE` | **部分实现（具名拒绝）**：`chspace.unsupported: moving entities between model and paper space is not implemented` | 同上 |
