@@ -391,7 +391,7 @@ test('ORBIT stays visible but gesture-disabled with an explicit orbit reason', a
 test('autocomplete prefers prefix matches, then usage, then alphabetical', () => {
   const all = filterCommandSuggestions('');
   assert.ok(all.length > 0);
-  const prefix = filterCommandSuggestions('co');
+  const prefix = filterCommandSuggestions('co', { limit: 64 });
   // CONSTRAINTBAR is a prefix match too and sorts before COPY alphabetically;
   // COPY must still be present in the same suggestion list.
   assert.equal(prefix[0].id, 'COLOR');
