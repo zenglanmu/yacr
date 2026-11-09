@@ -443,6 +443,32 @@ impl Application {
             | ExtendedCommandId::MeshSpin
             | ExtendedCommandId::MeshSplit
             | ExtendedCommandId::MeshUncrease => self.extended_w15_refusals(command, ext)?,
+            // Wave 16: stable named refusals.
+            ExtendedCommandId::Image
+            | ExtendedCommandId::DashImage
+            | ExtendedCommandId::ImageAttach
+            | ExtendedCommandId::ImageClip
+            | ExtendedCommandId::ImageAdjust
+            | ExtendedCommandId::DashImageAdjust
+            | ExtendedCommandId::ImageQuality
+            | ExtendedCommandId::ImageApp
+            | ExtendedCommandId::ImageAsyncWait
+            | ExtendedCommandId::ImageEdit
+            | ExtendedCommandId::ClassicImage
+            | ExtendedCommandId::PdfAttach
+            | ExtendedCommandId::DashPdfAttach
+            | ExtendedCommandId::PdfClip
+            | ExtendedCommandId::PdfLayers
+            | ExtendedCommandId::PdfAdjust
+            | ExtendedCommandId::PdfImport
+            | ExtendedCommandId::DashPdfImport
+            | ExtendedCommandId::PdfShxText
+            | ExtendedCommandId::DashPdfShxText
+            | ExtendedCommandId::DgnAttach
+            | ExtendedCommandId::DashDgnAttach
+            | ExtendedCommandId::DgnClip
+            | ExtendedCommandId::DgnLayers
+            | ExtendedCommandId::DgnAdjust => self.extended_w16_refusals(command, ext)?,
         };
         Ok(Some(outcome))
     }

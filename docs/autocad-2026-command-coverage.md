@@ -27,9 +27,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **66** |
-| 部分实现（有写明的界） | **532** |
-| **已实现合计（完整 + 部分）** | **598** |
-| 未实现 | **383** |
+| 部分实现（有写明的界） | **557** |
+| **已实现合计（完整 + 部分）** | **623** |
+| 未实现 | **358** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -74,11 +74,14 @@
 > **2026-11-09 增补（Wave 13）**：`PAGESETUP`/`-PAGESETUP` 只读页面设置报告、`CONVERTPOLY` 只读单一多段线表示报告，以及 `PSETUPIN`…`LAYTRANS` 二十二个具名拒绝（页面设置导入/打印样式/表格/字段/远程文字/拼写/超级填充/视口对齐同步/图层转换）计入 **548 已实现（66 完整 + 482 部分）/ 433 未实现**；无 GUI/GPU/像素证据。
 > **2026-11-09 增补（Wave 14）**：`BOX`…`ROTATE3D` 二十五个 3D 实体图元/布尔/剖切/边编辑名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D，不计为可用 3D 功能。计入 **573 已实现（66 完整 + 507 部分）/ 408 未实现**。
 > **2026-11-09 增补（Wave 15）**：`SURFBLEND`…`MESHUNCREASE` 二十五个曲面/网格名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D。计入 **598 已实现（66 完整 + 532 部分）/ 383 未实现**。
+> **2026-11-09 增补（Wave 16）**：`IMAGE`…`DGNADJUST` 二十五个图像/PDF/DGN 底图名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）。计入 **623 已实现（66 完整 + 557 部分）/ 358 未实现**。
+>
+> **第二批 100 条（Wave 13–16）已交付**：页面设置/表格/字段/转换报告 + 3D 实体/曲面/网格/底图的诚实拒绝；全部结论仍仅 Linux 编译 + 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
 >
 > **本轮 100 条（Wave 9–12）已交付**：2D 真实编辑/别名/路由/报告 + 3D/文件扩展的诚实拒绝；全部结论仅 Linux 编译 + 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
 > **2026-11-09 增补（P1 晋升批）**：按 AutoCAD 2026 ENU 帮助页逐条核对后，`ALIGN`、`BREAK`、`DIVIDE`、`SELECTSIMILAR`、`MATCHPROP`、`SETBYLAYER`、`LIST`、`DIMSPACE`、`TORIENT` 九条从**部分实现**晋升为**完整实现**：补齐 1/3 对点 ALIGN（3 对点为平面刚性、不缩放）、椭圆 BREAK、全曲线 DIVIDE + 块对齐、SELECTSIMILAR 默认「图层+类型」与 `Name`/`Object style`、MATCHPROP 的 Text/Dimension/Hatch 特殊组、SETBYLAYER 透明度与 Include blocks、LIST 的纸空间/块空间与样式名、DIMSPACE 的 Auto=2×文字高度/`0` 对齐/角度标注、TORIENT Reverse（本项目扩展）。`LENGTHEN` 补了近端语义、开放多段线/椭圆弧/开放样条与 DY，但**开放样条延长**仍是具名拒绝，故保留**部分实现**。三处实现偏差已按官方语义修正：ALIGN 三对点禁缩放、SELECTSIMILAR 默认集、DIMSPACE Auto 公式。计入 **423 已实现（59 完整 + 364 部分）/ 558 未实现**；全部结论仍只覆盖 Linux 编译与契约测试，GUI/GPU/像素 NOT VERIFIED。
 >
-> **598 已实现（66 完整 + 532 部分）/ 383 未实现**；无未保存修改提示，无多文档。
+> **623 已实现（66 完整 + 557 部分）/ 358 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -194,18 +197,24 @@
 | `-BVSTATE` | 部分实现 | 只读：每个选中 INSERT 的活动动态块可见性状态（`-bvstate.report`）；无 INSERT 报 `-bvstate.no_selection`，无状态报 `-bvstate.not_set`；不设置状态。 |
 | `-COLOR` | 部分实现 | 同一当前颜色报告的命令行拼写。 |
 | `-COPYTOLAYER` | 部分实现 | 真实编辑：同 COPYTOLAYER，命令行拼写；一条事务/一步撤销。 |
+| `-DGNATTACH` | 部分实现 | 具名拒绝（`-dgnattach.unsupported: DGN underlays are not implemented`）。 |
 | `-DIMINSPECT` | 部分实现 | 具名拒绝（`-diminspect.unsupported`）：同一具名拒绝的命令行拼写。 |
 | `-EATTEXT` | 部分实现 | 具名拒绝（`-eatttext.unsupported`）：本构建无块属性模型；命令行拼写。 |
 | `-ETRANSMIT` | 部分实现 | 具名拒绝（`-etransmit.unsupported`）：本构建无 eTransmit/zip 打包模型；命令行拼写。 |
 | `-EXPORT` | 部分实现 | 具名拒绝（`-export.unsupported`）：请用 PLOT/EXPORT；本构建只有一条矢量导出路径；命令行拼写。 |
 | `-HATCH` | 部分实现 | `HATCH` 的命令行拼写；同一实现与边界。 |
 | `-HATCHEDIT` | 部分实现 | `HATCHEDIT` 的命令行拼写；同一实现与边界。 |
+| `-IMAGE` | 部分实现 | 具名拒绝（`-image.unsupported: raster image references are not implemented`）。 |
+| `-IMAGEADJUST` | 部分实现 | 具名拒绝（`-imageadjust.unsupported: no image adjustment model`）。 |
 | `-INSERT` | 已实现 | `INSERT` 的命令行拼写；同一实现/写入路径。 |
 | `-LAYER` | 部分实现 | 只读图层表报告（名称/可见/off/frozen/locked/当前层，`layer.entry`）；图层增删改名/开关/冻结/锁定等写形式未实现（`layer.report_only`）。 |
 | `-LWEIGHT` | 部分实现 | 同一线宽显示报告的命令行拼写。 |
 | `-MLEDIT` | 部分实现 | 具名拒绝（`-mlinedit.unsupported`）：MLEDIT 的命令行拼写。 |
 | `-OBJECTSCALE` | 部分实现 | 具名拒绝（`-objectscale.unsupported`）：同一具名拒绝的命令行拼写。 |
 | `-PAGESETUP` | 部分实现 | 同一只读页面设置报告的命令行拼写。 |
+| `-PDFATTACH` | 部分实现 | 具名拒绝（`-pdfattach.unsupported: PDF underlays are not implemented`）。 |
+| `-PDFIMPORT` | 部分实现 | 具名拒绝（`-pdfimport.unsupported: PDF geometry import is not implemented`）。 |
+| `-PDFSHXTEXT` | 部分实现 | 具名拒绝（`-pdfshxtext.unsupported: PDF SHX text conversion is not implemented`）。 |
 | `-PLOT` | 部分实现 | 具名拒绝（`-plot.unsupported`）：请用 PLOT；本构建只有一条矢量出图路径；命令行拼写。 |
 | `-PLOTSTAMP` | 部分实现 | 具名拒绝（`-plotstamp.unsupported`）：本构建无打印戳记模型；命令行拼写。 |
 | `-PLOTSTYLE` | 部分实现 | 具名拒绝（`-plotstyle.unsupported`）：打印样式列表的命令行拼写。 |
@@ -332,6 +341,7 @@
 | `CHSPACE` | 部分实现 | 具名拒绝（`chspace.unsupported`）：模型/图纸空间之间移动实体未实现。 |
 | `CIRCLE` | 已实现 | — |
 | `CLASSICGROUP` | 部分实现 | 具名拒绝（`classicgroup.unsupported`）：无经典编组对话框；请用 GROUP。 |
+| `CLASSICIMAGE` | 部分实现 | 具名拒绝（`classicimage.unsupported: no image manager; use IMAGE`）。 |
 | `CLASSICINSERT` | 部分实现 | 具名拒绝（`classicinsert.unsupported`）：无经典插入对话框；请用 INSERT。 |
 | `CLASSICLAYER` | 部分实现 | chrome 本地选择子：打开现有图层面板；紧凑布局像 LAYER 一样拒绝。 |
 | `CLASSICXREF` | 部分实现 | 具名拒绝（`classicxref.unsupported`）：无独立外部参照选项板；请用 RESOURCES 面板。 |
@@ -371,6 +381,10 @@
 | `DCHORIZONTAL` | 部分实现 | 具名拒绝（`dchorizontal.unsupported`）：本构建无尺寸约束模型。 |
 | `DCLINEAR` | 部分实现 | 具名拒绝（`dclinear.unsupported`）：本构建无尺寸约束模型。 |
 | `DELCONSTRAINT` | 部分实现 | 具名拒绝（`delconstraint.unsupported`）：本构建无几何约束模型。 |
+| `DGNADJUST` | 部分实现 | 具名拒绝（`dgnadjust.unsupported: no DGN underlay adjustment model`）。 |
+| `DGNATTACH` | 部分实现 | 具名拒绝（`dgnattach.unsupported: DGN underlays are not implemented`）。 |
+| `DGNCLIP` | 部分实现 | 具名拒绝（`dgnclip.unsupported: no DGN underlay clip model`）。 |
+| `DGNLAYERS` | 部分实现 | 具名拒绝（`dgnlayers.unsupported: no DGN underlay layer model`）。 |
 | `DIM` | 部分实现 | 只读路由报告（`dim.available`/`dim.router_only`）：列出已实现的 `DIM*` 创建选择子；不创建标注，无交互式类型提示。 |
 | `DIMALIGNED` | 已实现 | — |
 | `DIMANGULAR` | 部分实现 | 仅两线形式可交互；三点形式只到载荷层 |
@@ -470,6 +484,14 @@
 | `-INPUTSEARCHOPTIONS` | 部分实现 | 具名拒绝（`-inputsearchoptions.unsupported`）：同一具名拒绝的命令行拼写。 |
 | `IGESEXPORT` | 部分实现 | 具名拒绝（`igesexport.unsupported: IGES export is not implemented`）。 |
 | `IGESIMPORT` | 部分实现 | 具名拒绝（`igesimport.unsupported: IGES import is not implemented`）。 |
+| `IMAGE` | 部分实现 | 具名拒绝（`image.unsupported: raster image references are not implemented`）。 |
+| `IMAGEADJUST` | 部分实现 | 具名拒绝（`imageadjust.unsupported: no image adjustment model`）。 |
+| `IMAGEAPP` | 部分实现 | 具名拒绝（`imageapp.unsupported: no external image-editor association model`）。 |
+| `IMAGEASYNCWAIT` | 部分实现 | 具名拒绝（`imageasyncwait.unsupported: no asynchronous image loading model`）。 |
+| `IMAGEATTACH` | 部分实现 | 具名拒绝（`imageattach.unsupported: raster image references are not implemented`）。 |
+| `IMAGECLIP` | 部分实现 | 具名拒绝（`imageclip.unsupported: no image clip model`）。 |
+| `IMAGEEDIT` | 部分实现 | 具名拒绝（`imageedit.unsupported: no external image-editor model`）。 |
+| `IMAGEQUALITY` | 部分实现 | 具名拒绝（`imagequality.unsupported: no image display-quality model`）。 |
 | `IMPORT` | 部分实现 | 具名拒绝（`import.unsupported: the generic IMPORT picker is not implemented`）。 |
 | `IMPRINT` | 部分实现 | 具名拒绝（`imprint.unsupported: no 3D imprint model`）。 |
 | `INPUTSEARCHOPTIONS` | 部分实现 | 具名拒绝（`inputsearchoptions.unsupported`）：输入搜索设置未建模。 |
@@ -587,6 +609,12 @@
 | `PASTEBLOCK` | 部分实现 | 应用内剪贴板 → 自动命名块；不是 OS 剪贴板 |
 | `PASTECLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
 | `PASTEORIG` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
+| `PDFADJUST` | 部分实现 | 具名拒绝（`pdfadjust.unsupported: no PDF underlay adjustment model`）。 |
+| `PDFATTACH` | 部分实现 | 具名拒绝（`pdfattach.unsupported: PDF underlays are not implemented`）。 |
+| `PDFCLIP` | 部分实现 | 具名拒绝（`pdfclip.unsupported: no PDF underlay clip model`）。 |
+| `PDFIMPORT` | 部分实现 | 具名拒绝（`pdfimport.unsupported: PDF geometry import is not implemented`）。 |
+| `PDFLAYERS` | 部分实现 | 具名拒绝（`pdflayers.unsupported: no PDF underlay layer model`）。 |
+| `PDFSHXTEXT` | 部分实现 | 具名拒绝（`pdfshxtext.unsupported: PDF SHX text conversion is not implemented`）。 |
 | `PEDIT` | 部分实现 | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；闭合环 `Fit`（奇数环或残差为零的偶数环）与 `Spline` 已实现；**`Width`/`Ltype gen`/`Edit vertex` 未实现**（无宽度/`plinegen`/顶点子菜单模型）；无精确解时 `pedit.fit_closure` |
 | `PLAN` | 部分实现 | payload-free 选择子：Top/plan 2D 视图；无 UCS/World/Current 选项（本构建无 UCS 模型） |
 | `PLINE` | 已实现 | — |
@@ -950,7 +978,7 @@
 | 166 | `CHURLS` | 未实现 | Provides a method to edit a previously attached URL for selected objects. | — |
 | 167 | `CIRCLE` | 已实现 | Creates a circle. | — |
 | 168 | `CLASSICGROUP` | 部分实现 | Opens the legacy Object Grouping dialog box. | 具名拒绝（`classicgroup.unsupported`）：无经典编组对话框；请用 GROUP。 |
-| 169 | `CLASSICIMAGE` | 未实现 | Manages referenced image files in the current drawing. | — |
+| 169 | `CLASSICIMAGE` | 部分实现 | Manages referenced image files in the current drawing. | 具名拒绝（`classicimage.unsupported: no image manager; use IMAGE`）。 |
 | 170 | `CLASSICINSERT` | 部分实现 | Inserts a block or drawing into the current drawing using the classic version of the INSERT command. | 具名拒绝（`classicinsert.unsupported`）：无经典插入对话框；请用 INSERT。 |
 | 171 | `CLASSICLAYER` | 部分实现 | Opens the legacy Layer Properties Manager. | chrome 本地选择子：打开现有图层面板；紧凑布局像 LAYER 一样拒绝。 |
 | 172 | `CLASSICXREF` | 部分实现 | Manages referenced drawing files in the current drawing. | 具名拒绝（`classicxref.unsupported`）：无独立外部参照选项板；请用 RESOURCES 面板。 |
@@ -1050,15 +1078,15 @@
 | 266 | `DETECTREMOVE` | 未实现 | Removes selected instances from the set. | — |
 | 267 | `DETECTREVIEWNEXT` | 未实现 | Displays the next set of detected objects. | — |
 | 268 | `DETECTREVIEWPREV` | 未实现 | Displays the previous set of detected objects. | — |
-| 269 | `DGNADJUST` | 未实现 | Adjust the fade, contrast, and monochrome settings of a DGN underlay. | — |
-| 270 | `-DGNATTACH` | 未实现 | Attach a DGN underlay from the command line. | — |
-| 271 | `DGNATTACH` | 未实现 | Inserts a DGN file as an underlay into the current drawing. | — |
-| 272 | `DGNCLIP` | 未实现 | Crops the display of a selected DGN underlay to a specified boundary. | — |
+| 269 | `DGNADJUST` | 部分实现 | Adjust the fade, contrast, and monochrome settings of a DGN underlay. | 具名拒绝（`dgnadjust.unsupported: no DGN underlay adjustment model`）。 |
+| 270 | `-DGNATTACH` | 部分实现 | Attach a DGN underlay from the command line. | 具名拒绝（`-dgnattach.unsupported: DGN underlays are not implemented`）。 |
+| 271 | `DGNATTACH` | 部分实现 | Inserts a DGN file as an underlay into the current drawing. | 具名拒绝（`dgnattach.unsupported: DGN underlays are not implemented`）。 |
+| 272 | `DGNCLIP` | 部分实现 | Crops the display of a selected DGN underlay to a specified boundary. | 具名拒绝（`dgnclip.unsupported: no DGN underlay clip model`）。 |
 | 273 | `-DGNEXPORT` | 未实现 | At the Command prompt, creates one or more DGN files from the current drawing. | — |
 | 274 | `DGNEXPORT` | 未实现 | Creates one or more DGN files from the current drawing. | — |
 | 275 | `-DGNIMPORT` | 未实现 | At the Command prompt, imports data from DGN files. | — |
 | 276 | `DGNIMPORT` | 未实现 | Imports the data from a DGN file into a new DWG file or the current DWG file, depending on the DGNIMPORTMODE system variable. | — |
-| 277 | `DGNLAYERS` | 未实现 | Controls the display of layers in a DGN underlay. | — |
+| 277 | `DGNLAYERS` | 部分实现 | Controls the display of layers in a DGN underlay. | 具名拒绝（`dgnlayers.unsupported: no DGN underlay layer model`）。 |
 | 278 | `DGNMAPPING` | 未实现 | Allows users to create and edit user-defined DGN mapping setups. | — |
 | 279 | `DIGITALSIGN` | 未实现 | Attaches a digital signature to a drawing, which is removed if an unauthorized change is made. | — |
 | 280 | `DIM` | 部分实现 | Creates multiple dimensions and types of dimensions with a single command. | 只读路由报告（`dim.available`/`dim.router_only`）：列出已实现的 `DIM*` 创建选择子；不创建标注，无交互式类型提示。 |
@@ -1215,16 +1243,16 @@
 | 431 | `ID` | 已实现 | Displays the UCS coordinate values of a specified location. | — |
 | 432 | `IGESEXPORT` | 部分实现 | Saves selected objects in the current drawing to a new IGES (*.igs, *.iges) file. | 具名拒绝（`igesexport.unsupported: IGES export is not implemented`）。 |
 | 433 | `IGESIMPORT` | 部分实现 | Imports data from an IGES (*.igs or *.iges) file into the current drawing. | 具名拒绝（`igesimport.unsupported: IGES import is not implemented`）。 |
-| 434 | `-IMAGE` | 未实现 | Attaches a raster image to the drawing. | — |
-| 435 | `IMAGE` | 未实现 | Displays the External References palette. | — |
-| 436 | `-IMAGEADJUST` | 未实现 | Controls the brightness, contrast, and fade values of images. | — |
-| 437 | `IMAGEADJUST` | 未实现 | Controls the brightness, contrast, and fade values of images. | — |
-| 438 | `IMAGEAPP` | 未实现 | Specifies the image editing program for IMAGEEDIT. | — |
-| 439 | `IMAGEASYNCWAIT` | 未实现 | Ensures that raster images being loaded in the background during file opening are complete before proceeding. | — |
-| 440 | `IMAGEATTACH` | 未实现 | Inserts a reference to an image file. | — |
-| 441 | `IMAGECLIP` | 未实现 | Crops the display of a selected image to a specified boundary. | — |
-| 442 | `IMAGEEDIT` | 未实现 | Launches the image editing program specified by IMAGEAPP for the selected image. | — |
-| 443 | `IMAGEQUALITY` | 未实现 | Controls the display quality of images. | — |
+| 434 | `-IMAGE` | 部分实现 | Attaches a raster image to the drawing. | 具名拒绝（`-image.unsupported: raster image references are not implemented`）。 |
+| 435 | `IMAGE` | 部分实现 | Displays the External References palette. | 具名拒绝（`image.unsupported: raster image references are not implemented`）。 |
+| 436 | `-IMAGEADJUST` | 部分实现 | Controls the brightness, contrast, and fade values of images. | 具名拒绝（`-imageadjust.unsupported: no image adjustment model`）。 |
+| 437 | `IMAGEADJUST` | 部分实现 | Controls the brightness, contrast, and fade values of images. | 具名拒绝（`imageadjust.unsupported: no image adjustment model`）。 |
+| 438 | `IMAGEAPP` | 部分实现 | Specifies the image editing program for IMAGEEDIT. | 具名拒绝（`imageapp.unsupported: no external image-editor association model`）。 |
+| 439 | `IMAGEASYNCWAIT` | 部分实现 | Ensures that raster images being loaded in the background during file opening are complete before proceeding. | 具名拒绝（`imageasyncwait.unsupported: no asynchronous image loading model`）。 |
+| 440 | `IMAGEATTACH` | 部分实现 | Inserts a reference to an image file. | 具名拒绝（`imageattach.unsupported: raster image references are not implemented`）。 |
+| 441 | `IMAGECLIP` | 部分实现 | Crops the display of a selected image to a specified boundary. | 具名拒绝（`imageclip.unsupported: no image clip model`）。 |
+| 442 | `IMAGEEDIT` | 部分实现 | Launches the image editing program specified by IMAGEAPP for the selected image. | 具名拒绝（`imageedit.unsupported: no external image-editor model`）。 |
+| 443 | `IMAGEQUALITY` | 部分实现 | Controls the display quality of images. | 具名拒绝（`imagequality.unsupported: no image display-quality model`）。 |
 | 444 | `IMPORT` | 部分实现 | Imports files of different formats into the current drawing. | 具名拒绝（`import.unsupported: the generic IMPORT picker is not implemented`）。 |
 | 445 | `IMPRINT` | 部分实现 | Imprints 2D geometry on a 3D solid or surface, creating additional edges on planar faces. | 具名拒绝（`imprint.unsupported: no 3D imprint model`）。 |
 | 446 | `-INPUTSEARCHOPTIONS` | 部分实现 | From the command line, controls settings for display of the command line suggestion list for commands, system variables, and named objects. | 具名拒绝（`-inputsearchoptions.unsupported`）：同一具名拒绝的命令行拼写。 |
@@ -1409,15 +1437,15 @@
 | 625 | `PCEXTRACTCORNER` | 未实现 | Creates a point object at the intersection of three planar segments in a point cloud. | — |
 | 626 | `PCEXTRACTEDGE` | 未实现 | Infers the intersection between two adjacent planar segments, and creates a line along the edge. | — |
 | 627 | `PCEXTRACTSECTION` | 未实现 | Generates 2D geometry from a section through a point cloud. | — |
-| 628 | `PDFADJUST` | 未实现 | Adjust the fade, contrast, and monochrome settings of a PDF underlay. | — |
-| 629 | `-PDFATTACH` | 未实现 | Attach a PDF underlay from the command line. | — |
-| 630 | `PDFATTACH` | 未实现 | Inserts a PDF file as an underlay into the current drawing. | — |
-| 631 | `PDFCLIP` | 未实现 | Crops the display of a selected PDF underlay to a specified boundary. | — |
-| 632 | `-PDFIMPORT` | 未实现 | Imports the objects in a PDF file or an attached PDF underlay from the command line. | — |
-| 633 | `PDFIMPORT` | 未实现 | Imports the geometry, fills, raster images, and TrueType text objects from a specified PDF file. | — |
-| 634 | `PDFLAYERS` | 未实现 | Controls the display of layers in a PDF underlay. | — |
-| 635 | `-PDFSHXTEXT` | 未实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects from the command line. | — |
-| 636 | `PDFSHXTEXT` | 未实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects. | — |
+| 628 | `PDFADJUST` | 部分实现 | Adjust the fade, contrast, and monochrome settings of a PDF underlay. | 具名拒绝（`pdfadjust.unsupported: no PDF underlay adjustment model`）。 |
+| 629 | `-PDFATTACH` | 部分实现 | Attach a PDF underlay from the command line. | 具名拒绝（`-pdfattach.unsupported: PDF underlays are not implemented`）。 |
+| 630 | `PDFATTACH` | 部分实现 | Inserts a PDF file as an underlay into the current drawing. | 具名拒绝（`pdfattach.unsupported: PDF underlays are not implemented`）。 |
+| 631 | `PDFCLIP` | 部分实现 | Crops the display of a selected PDF underlay to a specified boundary. | 具名拒绝（`pdfclip.unsupported: no PDF underlay clip model`）。 |
+| 632 | `-PDFIMPORT` | 部分实现 | Imports the objects in a PDF file or an attached PDF underlay from the command line. | 具名拒绝（`-pdfimport.unsupported: PDF geometry import is not implemented`）。 |
+| 633 | `PDFIMPORT` | 部分实现 | Imports the geometry, fills, raster images, and TrueType text objects from a specified PDF file. | 具名拒绝（`pdfimport.unsupported: PDF geometry import is not implemented`）。 |
+| 634 | `PDFLAYERS` | 部分实现 | Controls the display of layers in a PDF underlay. | 具名拒绝（`pdflayers.unsupported: no PDF underlay layer model`）。 |
+| 635 | `-PDFSHXTEXT` | 部分实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects from the command line. | 具名拒绝（`-pdfshxtext.unsupported: PDF SHX text conversion is not implemented`）。 |
+| 636 | `PDFSHXTEXT` | 部分实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects. | 具名拒绝（`pdfshxtext.unsupported: PDF SHX text conversion is not implemented`）。 |
 | 637 | `PEDIT` | 部分实现 | Edits polylines, objects to be joined to polylines, and related objects. | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；闭合环 `Fit`（奇数环或残差为零的偶数环）与 `Spline` 已实现；**`Width`/`Ltype gen`/`Edit vertex` 未实现**（无宽度/`plinegen`/顶点子菜单模型）；无精确解时 `pedit.fit_closure` |
 | 638 | `PERFANALYZER` | 未实现 | Opens the Performance Analyzer palette from which you can diagnose operations in AutoCAD that seem slow or unresponsive. | — |
 | 639 | `PERFANALYZERCLOSE` | 未实现 | Closes the Performance Analyzer palette. | — |

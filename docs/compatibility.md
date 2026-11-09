@@ -1404,6 +1404,38 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `MESHSPLIT` | **部分实现（具名拒绝）**：`meshsplit.unsupported: mesh face split is not implemented` | 不写库/不升修订/不入历史 |
 | `MESHUNCREASE` | **部分实现（具名拒绝）**：`meshuncrease.unsupported: mesh uncreasing is not implemented` | 不写库/不升修订/不入历史 |
 
+### 2026-11-09 Wave 16 扩展命令（图像/PDF/DGN 底图拒绝）
+
+> 以下名字只提供诚实命令路径（具名拒绝），不是可用底图功能。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `IMAGE` | **部分实现（具名拒绝）**：`image.unsupported: raster image references are not implemented` | 不写库/不升修订/不入历史 |
+| `-IMAGE` | **部分实现（具名拒绝）**：`-image.unsupported: raster image references are not implemented` | 不写库/不升修订/不入历史 |
+| `IMAGEATTACH` | **部分实现（具名拒绝）**：`imageattach.unsupported: raster image references are not implemented` | 不写库/不升修订/不入历史 |
+| `IMAGECLIP` | **部分实现（具名拒绝）**：`imageclip.unsupported: no image clip model` | 不写库/不升修订/不入历史 |
+| `IMAGEADJUST` | **部分实现（具名拒绝）**：`imageadjust.unsupported: no image adjustment model` | 不写库/不升修订/不入历史 |
+| `-IMAGEADJUST` | **部分实现（具名拒绝）**：`-imageadjust.unsupported: no image adjustment model` | 不写库/不升修订/不入历史 |
+| `IMAGEQUALITY` | **部分实现（具名拒绝）**：`imagequality.unsupported: no image display-quality model` | 不写库/不升修订/不入历史 |
+| `IMAGEAPP` | **部分实现（具名拒绝）**：`imageapp.unsupported: no external image-editor association model` | 不写库/不升修订/不入历史 |
+| `IMAGEASYNCWAIT` | **部分实现（具名拒绝）**：`imageasyncwait.unsupported: no asynchronous image loading model` | 不写库/不升修订/不入历史 |
+| `IMAGEEDIT` | **部分实现（具名拒绝）**：`imageedit.unsupported: no external image-editor model` | 不写库/不升修订/不入历史 |
+| `CLASSICIMAGE` | **部分实现（具名拒绝）**：`classicimage.unsupported: no image manager; use IMAGE` | 不写库/不升修订/不入历史 |
+| `PDFATTACH` | **部分实现（具名拒绝）**：`pdfattach.unsupported: PDF underlays are not implemented` | 不写库/不升修订/不入历史 |
+| `-PDFATTACH` | **部分实现（具名拒绝）**：`-pdfattach.unsupported: PDF underlays are not implemented` | 不写库/不升修订/不入历史 |
+| `PDFCLIP` | **部分实现（具名拒绝）**：`pdfclip.unsupported: no PDF underlay clip model` | 不写库/不升修订/不入历史 |
+| `PDFLAYERS` | **部分实现（具名拒绝）**：`pdflayers.unsupported: no PDF underlay layer model` | 不写库/不升修订/不入历史 |
+| `PDFADJUST` | **部分实现（具名拒绝）**：`pdfadjust.unsupported: no PDF underlay adjustment model` | 不写库/不升修订/不入历史 |
+| `PDFIMPORT` | **部分实现（具名拒绝）**：`pdfimport.unsupported: PDF geometry import is not implemented` | 不写库/不升修订/不入历史 |
+| `-PDFIMPORT` | **部分实现（具名拒绝）**：`-pdfimport.unsupported: PDF geometry import is not implemented` | 不写库/不升修订/不入历史 |
+| `PDFSHXTEXT` | **部分实现（具名拒绝）**：`pdfshxtext.unsupported: PDF SHX text conversion is not implemented` | 不写库/不升修订/不入历史 |
+| `-PDFSHXTEXT` | **部分实现（具名拒绝）**：`-pdfshxtext.unsupported: PDF SHX text conversion is not implemented` | 不写库/不升修订/不入历史 |
+| `DGNATTACH` | **部分实现（具名拒绝）**：`dgnattach.unsupported: DGN underlays are not implemented` | 不写库/不升修订/不入历史 |
+| `-DGNATTACH` | **部分实现（具名拒绝）**：`-dgnattach.unsupported: DGN underlays are not implemented` | 不写库/不升修订/不入历史 |
+| `DGNCLIP` | **部分实现（具名拒绝）**：`dgnclip.unsupported: no DGN underlay clip model` | 不写库/不升修订/不入历史 |
+| `DGNLAYERS` | **部分实现（具名拒绝）**：`dgnlayers.unsupported: no DGN underlay layer model` | 不写库/不升修订/不入历史 |
+| `DGNADJUST` | **部分实现（具名拒绝）**：`dgnadjust.unsupported: no DGN underlay adjustment model` | 不写库/不升修订/不入历史 |
+
 ## P2 晋升与边界更新（2026-11-09）
 
 > 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux

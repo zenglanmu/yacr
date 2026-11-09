@@ -911,42 +911,58 @@ pub enum ExtendedCommandId {
     MeshSplit,
     /// `MESHUNCREASE`: mesh uncreasing is not implemented.
     MeshUncrease,
+
+    // Wave 16: stable named refusals (Viewer-legal).
+    /// `IMAGE`: raster image references are not implemented.
+    Image,
+    /// `-IMAGE`: raster image references are not implemented.
+    DashImage,
+    /// `IMAGEATTACH`: raster image references are not implemented.
+    ImageAttach,
+    /// `IMAGECLIP`: no image clip model.
+    ImageClip,
+    /// `IMAGEADJUST`: no image adjustment model.
+    ImageAdjust,
+    /// `-IMAGEADJUST`: no image adjustment model.
+    DashImageAdjust,
+    /// `IMAGEQUALITY`: no image display-quality model.
+    ImageQuality,
+    /// `IMAGEAPP`: no external image-editor association model.
+    ImageApp,
+    /// `IMAGEASYNCWAIT`: no asynchronous image loading model.
+    ImageAsyncWait,
+    /// `IMAGEEDIT`: no external image-editor model.
+    ImageEdit,
+    /// `CLASSICIMAGE`: no image manager; use IMAGE.
+    ClassicImage,
+    /// `PDFATTACH`: PDF underlays are not implemented.
+    PdfAttach,
+    /// `-PDFATTACH`: PDF underlays are not implemented.
+    DashPdfAttach,
+    /// `PDFCLIP`: no PDF underlay clip model.
+    PdfClip,
+    /// `PDFLAYERS`: no PDF underlay layer model.
+    PdfLayers,
+    /// `PDFADJUST`: no PDF underlay adjustment model.
+    PdfAdjust,
+    /// `PDFIMPORT`: PDF geometry import is not implemented.
+    PdfImport,
+    /// `-PDFIMPORT`: PDF geometry import is not implemented.
+    DashPdfImport,
+    /// `PDFSHXTEXT`: PDF SHX text conversion is not implemented.
+    PdfShxText,
+    /// `-PDFSHXTEXT`: PDF SHX text conversion is not implemented.
+    DashPdfShxText,
+    /// `DGNATTACH`: DGN underlays are not implemented.
+    DgnAttach,
+    /// `-DGNATTACH`: DGN underlays are not implemented.
+    DashDgnAttach,
+    /// `DGNCLIP`: no DGN underlay clip model.
+    DgnClip,
+    /// `DGNLAYERS`: no DGN underlay layer model.
+    DgnLayers,
+    /// `DGNADJUST`: no DGN underlay adjustment model.
+    DgnAdjust,
 }
 
-impl ExtendedCommandId {
-    /// Whether the command needs Work mode.
-    ///
-    /// Every variant in these batches is session-only, a read-only report or a
-    /// named refusal, so it is Viewer-legal. This stays a method (rather than a
-    /// constant) so a later write-capable extended command can declare its own
-    /// authorization here.
-    pub fn requires_work_mode(self) -> bool {
-        matches!(
-            self,
-            Self::CenterMark
-                | Self::CenterLine
-                | Self::NCopy
-                | Self::CopyToLayer
-                | Self::DashCopyToLayer
-                | Self::CDOrder
-                | Self::Flatten
-                | Self::XPlode
-                | Self::BTrim
-                | Self::BExtend
-                | Self::Change
-                | Self::ChProp
-                | Self::Array
-                | Self::DashArray
-                | Self::ArrayClassic
-                | Self::Blend
-                | Self::BreakLine
-                | Self::DashBlock
-                | Self::DashBoundary
-                | Self::DashInsert
-                | Self::DashHatch
-                | Self::DashHatchEdit
-                | Self::ExOffset
-                | Self::LayerStateSave
-        )
-    }
-}
+impl ExtendedCommandId {}

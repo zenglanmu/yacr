@@ -383,6 +383,31 @@ impl ExtendedCommandId {
             Self::MeshSpin => "MESHSPIN",
             Self::MeshSplit => "MESHSPLIT",
             Self::MeshUncrease => "MESHUNCREASE",
+            Self::Image => "IMAGE",
+            Self::DashImage => "-IMAGE",
+            Self::ImageAttach => "IMAGEATTACH",
+            Self::ImageClip => "IMAGECLIP",
+            Self::ImageAdjust => "IMAGEADJUST",
+            Self::DashImageAdjust => "-IMAGEADJUST",
+            Self::ImageQuality => "IMAGEQUALITY",
+            Self::ImageApp => "IMAGEAPP",
+            Self::ImageAsyncWait => "IMAGEASYNCWAIT",
+            Self::ImageEdit => "IMAGEEDIT",
+            Self::ClassicImage => "CLASSICIMAGE",
+            Self::PdfAttach => "PDFATTACH",
+            Self::DashPdfAttach => "-PDFATTACH",
+            Self::PdfClip => "PDFCLIP",
+            Self::PdfLayers => "PDFLAYERS",
+            Self::PdfAdjust => "PDFADJUST",
+            Self::PdfImport => "PDFIMPORT",
+            Self::DashPdfImport => "-PDFIMPORT",
+            Self::PdfShxText => "PDFSHXTEXT",
+            Self::DashPdfShxText => "-PDFSHXTEXT",
+            Self::DgnAttach => "DGNATTACH",
+            Self::DashDgnAttach => "-DGNATTACH",
+            Self::DgnClip => "DGNCLIP",
+            Self::DgnLayers => "DGNLAYERS",
+            Self::DgnAdjust => "DGNADJUST",
         }
     }
 }
@@ -761,5 +786,68 @@ impl ExtendedCommandId {
         Self::MeshSpin,
         Self::MeshSplit,
         Self::MeshUncrease,
+        Self::Image,
+        Self::DashImage,
+        Self::ImageAttach,
+        Self::ImageClip,
+        Self::ImageAdjust,
+        Self::DashImageAdjust,
+        Self::ImageQuality,
+        Self::ImageApp,
+        Self::ImageAsyncWait,
+        Self::ImageEdit,
+        Self::ClassicImage,
+        Self::PdfAttach,
+        Self::DashPdfAttach,
+        Self::PdfClip,
+        Self::PdfLayers,
+        Self::PdfAdjust,
+        Self::PdfImport,
+        Self::DashPdfImport,
+        Self::PdfShxText,
+        Self::DashPdfShxText,
+        Self::DgnAttach,
+        Self::DashDgnAttach,
+        Self::DgnClip,
+        Self::DgnLayers,
+        Self::DgnAdjust,
     ];
+}
+
+impl ExtendedCommandId {
+    /// Whether the command needs Work mode.
+    ///
+    /// Every variant in these batches is session-only, a read-only report or a
+    /// named refusal, so it is Viewer-legal. This stays a method (rather than a
+    /// constant) so a later write-capable extended command can declare its own
+    /// authorization here.
+    pub fn requires_work_mode(self) -> bool {
+        matches!(
+            self,
+            Self::CenterMark
+                | Self::CenterLine
+                | Self::NCopy
+                | Self::CopyToLayer
+                | Self::DashCopyToLayer
+                | Self::CDOrder
+                | Self::Flatten
+                | Self::XPlode
+                | Self::BTrim
+                | Self::BExtend
+                | Self::Change
+                | Self::ChProp
+                | Self::Array
+                | Self::DashArray
+                | Self::ArrayClassic
+                | Self::Blend
+                | Self::BreakLine
+                | Self::DashBlock
+                | Self::DashBoundary
+                | Self::DashInsert
+                | Self::DashHatch
+                | Self::DashHatchEdit
+                | Self::ExOffset
+                | Self::LayerStateSave
+        )
+    }
 }

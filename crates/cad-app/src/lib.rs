@@ -88,6 +88,7 @@ mod app_extended_w13_refusals;
 mod app_extended_w13_reports;
 mod app_extended_w14_refusals;
 mod app_extended_w15_refusals;
+mod app_extended_w16_refusals;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;
