@@ -97,6 +97,13 @@ NAME="yacr-${VERSION}-macos-${ARCH_LABEL}"
 DIST="target/macos/${ARCH_LABEL}/dist"
 STAGE="${DIST}/${NAME}"
 
+# A restored CI `target/` cache can still hold a previous release's tarball in
+# this directory. The release job uploads `dist/`, so a stale file would be
+# attached to the new tag (v0.1.7 published a `yacr-0.1.6-…` asset this way).
+# Start every package from an empty output directory.
+rm -rf "$DIST"
+mkdir -p "$DIST"
+
 for target in "${TARGETS[@]}"; do
   if ! rustup target list --installed | grep -qx "$target"; then
     die "rust target $target is not installed; run: rustup target add $target"
