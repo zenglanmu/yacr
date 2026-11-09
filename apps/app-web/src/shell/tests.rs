@@ -147,14 +147,18 @@ fn a_live_session_reports_its_own_document_tool_and_selection() {
 fn the_capabilities_are_the_ones_the_carrier_really_keeps() {
     let session = fixture_session();
     let wire = live_wire(&session);
-    // The session performs both exports and the download adapter owns the bytes.
-    for key in ["canSave", "canPlot"] {
+    // The session performs both exports and the download adapter owns the bytes;
+    // New installs a blank document locally (no picker, no filesystem).
+    for key in ["canSave", "canPlot", "canNew"] {
         assert_eq!(wire[key], json!(true), "{key} must be true: {wire}");
     }
-    // No session-drivable file chooser and no New path: neither may be claimed.
-    for key in ["canNew", "canOpen"] {
-        assert_eq!(wire[key], json!(false), "{key} must be false: {wire}");
-    }
+    // No session-drivable file chooser may be claimed: opening is the transport's
+    // command.
+    assert_eq!(
+        wire["canOpen"],
+        json!(false),
+        "canOpen must be false: {wire}"
+    );
     // …and the one every live document has: a refit.
     assert_eq!(wire["canFit"], json!(true));
 }

@@ -121,9 +121,10 @@ fn the_production_session_holds_the_fixture_and_reports_its_own_facts() {
         "a delivered document can be refit (the session's own projection)"
     );
     // The carrier performs save/plot itself (the session exports and the download
-    // adapter owns the bytes), but has no session-drivable picker or New path.
+    // adapter owns the bytes) and New installs a blank document locally; only the
+    // session-drivable picker is absent.
     assert!(status.can_save && status.can_plot);
-    assert!(!status.can_new && !status.can_open);
+    assert!(status.can_new && !status.can_open);
     assert_eq!(status.error, None);
     // The database is retained: that is what makes the facts above real. The two
     // flags describe two carriers, so they are asserted as the constants they are.

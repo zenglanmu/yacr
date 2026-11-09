@@ -84,14 +84,17 @@ pub const MEMORY_PREFERENCE_PATH: &str = "memory://preference";
 /// * `save` / `plot` are **true**: the session itself performs the export and
 ///   the [`crate::download`] adapter owns the download, so a `true` is a claim the
 ///   carrier really keeps.
-/// * `open` / `new` are **false**: the file picker is the page's DOM capability,
-///   not something this session can drive. The TS transport lifts `canOpen`
-///   itself, and the chosen bytes arrive through the session's `open_bytes`
-///   entry — the session never claims to have opened a chooser.
+/// * `new` is **true**: the session installs a blank document locally (the shared
+///   `HostCore::request_new` / `HostController::new_blank_document` path), which
+///   needs no picker and no filesystem — it only replaces the current document.
+/// * `open` is **false**: the file picker is the page's DOM capability, not
+///   something this session can drive. The TS transport lifts `canOpen` itself,
+///   and the chosen bytes arrive through the session's `open_bytes` entry — the
+///   session never claims to have opened a chooser.
 /// * `import_worker` is **false**: in wasm an open runs on the calling thread.
 pub const BROWSER_CAPABILITIES: HostCapabilities = HostCapabilities {
     open: false,
-    new: false,
+    new: true,
     save: true,
     plot: true,
     import_worker: false,

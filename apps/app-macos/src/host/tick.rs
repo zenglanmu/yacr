@@ -421,7 +421,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                     resources: std::rc::Rc::new(cad_host::DesktopResources),
                     capabilities: HostCapabilities {
                         open: true,
-                        new: false,
+                        new: true,
                         save: false,
                         plot: false,
                         import_worker: true,

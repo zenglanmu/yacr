@@ -177,6 +177,12 @@ Android 的产品路径绑在 **WebView 的 GL 实现**上：
 > **DXF**；源为 `.dwg` 时导出**实验性 DWG**（新文件、不原地覆盖来源 URI；DWG 仅合成 self-roundtrip 证据，设备/AutoCAD NOT VERIFIED）。**新建 / 出图仍不支持**
 > （`canNew`/`canPlot` 为 `false`）；「伪造文件身份」与「Vulkan 硬门槛 / 整窗 FIT」两行仍有效。
 > 设备/模拟器上的选择器、读写与外部「打开方式」**NOT RUN**。
+>
+> **2026-11-09 更新（追加，不改写上面的历史决定）**：`New` 已由共享空白文档漏斗支持——
+> `policy::CAN_NEW = true`，`canNew` 为 `true`。安装空白 `untitled` 文档走共享
+> `HostCore::request_new` / `HostController::new_blank_document`，只替换当前文档，不需要 SAF/文件系统，
+> 也**不**建立第二份文档权威。初始文档为空白 `untitled`（`HostOptions::start_blank = true`），不是内置
+> demo 图纸。**出图仍 `canPlot = false`**。设备/模拟器运行仍 **NOT VERIFIED**；本条只改契约与静态接线。
 
 ## 6. 失效条款清单（逐条对照）
 

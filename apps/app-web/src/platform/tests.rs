@@ -232,9 +232,10 @@ fn the_platform_exposes_the_downloads_it_published() {
 }
 
 #[test]
-fn the_browser_capabilities_advertise_save_and_plot_only() {
+fn the_browser_capabilities_advertise_save_plot_and_new() {
     // The constant's own values (const-evaluated: a `true` here is a claim the
-    // carrier keeps — the session exports and the download adapter publishes).
+    // carrier keeps — the session exports, the download adapter publishes, and
+    // the session installs a blank document locally).
     const { assert!(BROWSER_CAPABILITIES.save, "the session performs SAVE") };
     const { assert!(BROWSER_CAPABILITIES.plot, "the session performs PLOT") };
     const {
@@ -243,7 +244,12 @@ fn the_browser_capabilities_advertise_save_and_plot_only() {
             "the page's picker owns selection; the session does not open"
         )
     };
-    const { assert!(!BROWSER_CAPABILITIES.new, "a browser has no New path") };
+    const {
+        assert!(
+            BROWSER_CAPABILITIES.new,
+            "the session installs a blank document locally, no picker needed"
+        )
+    };
     const {
         assert!(
             !BROWSER_CAPABILITIES.import_worker,
@@ -255,7 +261,42 @@ fn the_browser_capabilities_advertise_save_and_plot_only() {
     let (_platform, session) = open(BROWSER_CAPABILITIES);
     let status = session.snapshot(None, None, 0);
     assert!(status.can_save && status.can_plot);
-    assert!(!status.can_open && !status.can_new);
+    assert!(status.can_new && !status.can_open);
+}
+
+#[test]
+fn a_real_new_command_installs_a_blank_untitled_document() {
+    // The whole browser New funnel, end to end on the host: the session opens the
+    // synthetic fixture, NEW is admitted by the real router, and the shared
+    // controller replaces the document with a fresh blank one — no picker, no
+    // filesystem, no fabricated data.
+    let (platform, session) = open(BROWSER_CAPABILITIES);
+    let before = session.snapshot(None, None, 0);
+    assert_eq!(before.document_label.as_deref(), Some(SYNTHETIC_LABEL));
+    assert!(
+        before.entity_count.unwrap_or(0) > 0,
+        "the imported fixture has entities: {:?}",
+        before.entity_count
+    );
+
+    // The host funnel requires a mapped surface before any command (an unmapped
+    // canvas is an explicit `Cancelled`, never an invented size).
+    platform.surface().report([800.0, 600.0], 1.0);
+    session
+        .set_canvas_metrics([800.0, 600.0], 1.0)
+        .expect("the reported surface accepts the canvas metrics");
+
+    session.command("NEW").expect("NEW is admitted");
+
+    let after = session.snapshot(None, None, 0);
+    assert_eq!(after.document_label.as_deref(), Some("untitled"));
+    assert_eq!(
+        after.entity_count,
+        Some(0),
+        "a blank document has no entities"
+    );
+    assert!(after.can_new, "NEW needs no source file");
+    assert!(after.can_fit, "a blank document can be refit");
 }
 
 #[test]

@@ -50,13 +50,13 @@
 | 能力 | 状态 | 实际表现 |
 |---|---|---|
 | 打开 | **支持（SAF，设备 NOT RUN）** | `OPEN` → Kotlin `ACTION_OPEN_DOCUMENT`（`CATEGORY_OPENABLE`、`*/*`、读 + persistable 授权）；worker 线程读完整字节，经 `documentSnapshot` 以 `FileEvent::Opened` 交给共享 `PlatformFiles` 漏斗。`canOpen = true`。宽 MIME 是刻意的：`.dwg` 供应方常报 `application/octet-stream`，窄过滤器会把要打开的文件变灰 |
-| 新建 | **不支持** | `canNew = false`；没有 New 漏斗，也不建第二份文档权威 |
+| 新建 | **支持（设备 NOT RUN）** | `canNew = true`；`NEW` 经共享 `HostCore::request_new` 安装空白 `untitled` 文档（替换当前文档；不走 SAF/文件系统，也不建第二份文档权威）。设备运行 **NOT RUN** |
 | 保存 | **支持（DXF 导出，设备 NOT RUN）** | `SAVE` → Kotlin `ACTION_CREATE_DOCUMENT`（`application/octet-stream`、`EXTRA_TITLE`）；共享保存路径把 **DXF** 字节经 `write_atomic` → `ContentResolver.openOutputStream(uri, "wt")` 写入（SAF 实现是截断写，没有临时文件 + rename）。`canSave = true`。这是**导出一份副本**，不是原地覆盖：打开来源的同一 URI 被 `refuses_source_overwrite` 拒绝。源为 `.dwg` 时经同一共享路径写**实验性 DWG 导出**（上游 `acadrust::DwgWriter`；默认新文件 `<stem>-export.dwg`，SAF URI 守卫拒绝覆盖来源；DWG 仅有合成 self-roundtrip 证据，设备/AutoCAD **NOT VERIFIED**） |
 | 出图 | **不支持** | `canPlot = false`；没有 SVG/PDF 导出 |
 | 文件身份 | **SAF URI，不伪造** | 身份 = `content://` opaque 句柄 + `OpenableColumns.DISPLAY_NAME`（缺列时回退 URI 末段）；没有 `--open` 启动参数。`content://` 目标**没有**文件系统目录，sidecar xref/栅格不可用：`xref_options_for` 对含 `://` 的句柄返回 `None`，引用按不可用报告，不派生假根目录 |
 | 外部「打开方式」 | **已接（设备 NOT RUN）** | `bundle.fileAssociations`（`dwg`；mime 含 `application/octet-stream`）由 tauri-build 在构建期注入 manifest 的 VIEW intent-filter；`MainActivity` 冷启动（`onCreate`）与热启动（`onNewIntent` + `setIntent`，`singleTask`）都投递到同一个读槽 |
 | 导入线程 | **同步（tick 线程）** | `importWorker = false`：DWG 在 tick 线程同步导入；极大图纸会阻塞渲染，属**已记录限制**，不是挂起或假成功 |
-| 初始文档 | **共享核心内置 demo 图纸** | 与桌面宿主不带 `--open` 启动完全一致；外部打开到达后由共享打开漏斗替换 |
+| 初始文档 | **共享核心空白 `untitled` 图纸** | `HostOptions::start_blank = true`；不是共享核心内置 demo 图纸。外部打开到达后由共享打开漏斗替换 |
 | 弹窗宿主 | **已接（in-DOM）** | `AndroidPopupHost`：弹窗是 React 树内的覆盖层，无原生窗口；`open`/`close` 经 `cad_desktop_shell::popup` 的状态机与模态门，主线程跳转有界（5 s）。Options / About / text-edit 可用；`textEdit` 载荷取当前 `CadSession` 选区（无选区 → 共享 `popup.no_text_selection` 拒绝）。设备运行 **NOT VERIFIED** |
 | 持久配置/偏好 | **持久化到应用私有 `filesDir`**（`/data/user/0/io.github.zenglanmu.yacr/files`） | `AndroidConfigStore`：`config.json` / `preference.json`，读 `Absent`/`Text`/`Unreadable` 与桌面一致，写为「建目录 + 临时文件 + `sync_all` + rename」。路径来自 `nativeAssetsReady`（`filesDir` = 公告 `fontsDir` 的父目录）；握手前保持非持久（读 `Absent`、写 `Unsupported`），不发明路径。设备侧落盘 **NOT VERIFIED** |
 | 插件管理器（2026-11-05） | **契约支持（`native-below`），设备 NOT VERIFIED** | Options → Plugins 的五个 `cad_plugin_*` 命令由共享 `cad-desktop-shell` 注册。策略/插件位于应用私有 `filesDir`：`filesDir/plugins.json` 与 `filesDir/plugins/<id>/{plugin.js,manifest.json}`；`AndroidPluginStore` 每次调用惰性解析 `filesDir`，`nativeAssetsReady` 握手前返回 `unsupported-runtime: plugin-store-unavailable`，不缓存启动时的空路径。安装/启用/禁用/卸载立即持久化、**下次启动才生效**（无热重载/热卸载）；卸载真删目录。外部解码器经 Blob URL 导入，故 CSP 含 `blob:`。设备/模拟器运行、目录落盘、插件执行与像素 **NOT VERIFIED** |
@@ -64,8 +64,8 @@
 | FIT / 视口 | **按可见 CAD 矩形取景（2D）** | 渲染目标仍是整窗 `SurfaceView`（Vulkan swapchain 必须等于窗口），但 `SurfaceMetrics { origin, logical }` 来自已接受的 `.native-input` 矩形：fit/zoom 用可见矩形，`place_canvas_camera2d` 把正交相机中心移到矩形中心。修复了“打开图纸文字比 Linux 大约 1.5×”的整窗取景缺陷。3D 透视相机未做离轴投影，属显式 **Partial**（见 `docs/compatibility.md`） |
 | 指针 | **分区原点平移** | tick 内把 DOM 分区局部坐标按 origin 换算成 presented-canvas 坐标；不是第二条输入通道。鼠标/触摸/笔按每事件 `device` 在共享 `cad-host` 仲裁（touch：单指平移、tap 选择、双指 pinch 缩放；mouse/pen：中键平移、2D 主键框选、滚轮缩放） |
 
-UI 侧对能力布尔为 `false` 的项（New / Plot，以及共享路径判定为延后的 DWG 保存）必须**显式禁用/拒绝**
-（带原因），不得空成功、不得伪造文件选择结果或路径。`canOpen`/`canSave` 由本载体的 tick 按
+UI 侧对能力布尔为 `false` 的项（Plot，以及共享路径判定为延后的 DWG 保存）必须**显式禁用/拒绝**
+（带原因），不得空成功、不得伪造文件选择结果或路径。`canOpen`/`canNew`/`canSave` 由本载体的 tick 按
 `policy.rs` 的常量上报，不在 React 侧按平台猜测。
 
 ## 4. 原生表面（`SurfaceView` + JNI）
@@ -182,7 +182,7 @@ apps/app-android/
     src/popup.rs               弹窗接缝：PopupOps payload + AndroidPopupHost 主线程跳转
     src/surface.rs             JNI 表面回调 + SurfaceProbePresenter（Vulkan only）
     src/saf.rs                 Android-only SAF JNI 桥：5 个 document* 实例方法；非 Android 目标不编译
-    src/policy.rs              纯策略：标记行、能力布尔（open/save=true，new/plot=false）、JNI 符号名（可在开发机测试）
+    src/policy.rs              纯策略：标记行、能力布尔（open/new/save=true，plot=false）、JNI 符号名（可在开发机测试）
     src/platform.rs            SAF 文件契约（AndroidFiles）、DOM surface、filesDir 持久 config store
     src/plugin_store.rs        插件管理器持久化：惰性解析 filesDir 的 AndroidPluginStore（委托 FsPluginStore）
     src/input.rs               分区局部 → canvas 坐标（纯函数，开发机单测）

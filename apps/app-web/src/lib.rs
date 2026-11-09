@@ -154,10 +154,11 @@
 //! - **The carrier advertises the host-side operations it really performs**
 //!   ([`platform::BROWSER_CAPABILITIES`]): `canSave`/`canPlot` are `true` because
 //!   the session performs both exports and owns the browser download
-//!   ([`download`]); `canNew`/`canOpen` are `false` because a browser has no
-//!   session-drivable picker — opening is the transport's command (the page's file
-//!   picker), which lifts `canOpen` itself and delivers bytes through
-//!   [`open_bytes`].
+//!   ([`download`]); `canNew` is `true` because the session installs a blank
+//!   document locally, with no picker and no filesystem; `canOpen` is `false`
+//!   because a browser has no session-drivable picker — opening is the
+//!   transport's command (the page's file picker), which lifts `canOpen` itself
+//!   and delivers bytes through [`open_bytes`].
 //! - **Shaping fonts are fetched lazily from the CDN; images have no decoder.**
 //!   Nothing is preloaded: after a document opens, the page reads `cad_fonts`
 //!   (`requested`/`textNeeded`), fetches only the catalogue entries the drawing

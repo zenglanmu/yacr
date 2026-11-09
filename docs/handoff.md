@@ -1,5 +1,33 @@
 AD
 
+## 2026-11-09 全载体开启 New（canNew）
+
+- **用户要求**：把新建空白图能力在所有载体打开。共享实现本来就有：
+  `HostCore::request_new` → `HostController::new_blank_document`，只替换单文档槽，不需要文件选择器/文件系统，
+  也不建立第二份文档权威。
+- **能力位**：Linux 原已 `new = true`；本轮 Windows（`apps/app-windows/src/host/tick.rs`）与 macOS
+  （`apps/app-macos/src/host/tick.rs`）改为 `true`；浏览器/`dom-canvas` 的
+  `BROWSER_CAPABILITIES.new`（`apps/app-web/src/platform.rs`）改为 `true`（同时覆盖 Web 与 Linux
+  X11/XWayland）；Android `policy::CAN_NEW` 改为 `true`。
+- **契约测试**：app-web 新增 `a_real_new_command_installs_a_blank_untitled_document`（真实会话
+  `NEW` → label `untitled`、0 实体、`canNew/canFit = true`），并更新能力/状态/live 测试；Android
+  policy 能力表测试改为 `new = true`；`apps/desktop-ui/test/host-adapter.test.ts` 的 dom-canvas live
+  状态夹具改为 `canNew/canSave/canPlot = true`、`canOpen = false`。
+- **文档**：`docs/windows-app.md`、`docs/macos-app.md`、`docs/android-host.md`（新建行 + 初始文档行）、
+  `apps/app-android/README.md`、ADR-0027（2026-11-09 追加修订）、app-web 相关注释。
+- **已运行**：`cargo test -p app-web --locked`（113 passed）；`cargo check -p app-web --target
+  wasm32-unknown-unknown --locked`（exit 0，仅既有 `vendor.rs` dead_code warning）；
+  `cargo test -p app-android --lib policy --locked`（6 passed）；`node --test
+  test/host-adapter.test.ts test/file-commands.test.ts test/cad.test.ts test/accelerators.test.ts`
+  （65 passed）；`python3 scripts/test-macos-host.py`、`python3 scripts/test-android-host.py`、
+  `python3 scripts/check-architecture.py`（均 exit 0）；本轮 Rust 文件 `rustfmt --check`（exit 0）。
+- **NOT RUN / NOT VERIFIED**：Windows/macOS 目标编译（本机无对应工具链，等 CI `windows-check`/
+  `macos-check`）；真实 Windows/macOS/Android/Web/X11 运行、视觉/像素与真实设备 New 交互。
+  全量 `cargo fmt --all -- --check` 被工作树中并发的无关改动（Options 设置持久化/i18n/`cad-host` 等）
+  判红，未纳入本轮结论。
+- **已知边界**：Windows/macOS 的 `save`/`plot` 仍为 `false`（与本轮无关）；Android `plot` 仍
+  `false`；Web `canOpen` 仍 `false`（打开由 transport 的页面 picker 承担）。
+
 ## 2026-11-09 发布 v0.1.6
 
 - **版本**：`Cargo.toml` workspace 版本、四个 `tauri.conf.json`、Flatpak metainfo 全部

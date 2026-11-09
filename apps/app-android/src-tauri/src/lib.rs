@@ -15,7 +15,7 @@
 //!   shell-only reports, `Shared`/telemetry, and the `MainEventsCleared` tick
 //!   drive;
 //! * [`platform`] — the SAF-backed file contracts (open + DXF-export save;
-//!   New/Plot still refuse by capability), the DOM surface source, the durable
+//!   Plot still refuses by capability), the DOM surface source, the durable
 //!   `filesDir` config/preference store and the `nativeAssetsReady` handshake;
 //! * [`popup`] — the in-DOM popup seam (`PopupOps` payload + the `ShellPopupHost`
 //!   that marshals the shared lifecycle onto the loop thread);

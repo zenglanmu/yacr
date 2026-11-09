@@ -78,6 +78,9 @@ NSWindow (Tauri, transparent)
   **下次启动才生效**；没有热重载/热卸载，卸载是真删目录。外部解码器经 Blob URL 导入，
   `tauri.conf.json` 的 `script-src` 含 `blob:`。**真实 macOS 运行、WKWebView 行为、Options
   交互/像素均 NOT VERIFIED**；本轮**没有**运行 macOS 构建（只有源码/静态契约）。
+- **新建**（`NEW`，`canNew = true`）：已接线，使用共享 `HostCore::request_new` →
+  `HostController::new_blank_document` 安装空白 `untitled` 文档；不需要 picker/文件系统，
+  **无新增平台 I/O**。真实 macOS 运行/视觉仍 **NOT VERIFIED**。
 - **保存/导出**：`begin_save` / `write_atomic` 显式 `Unsupported`（与 Windows 宿主同一边界）。
 - **弹窗**：仍是同一 React 树的 in-DOM 覆盖层；共享 `cad-desktop-shell::popup` 的模态围栏与
   `close`/`reload`/`exit` 触发保留。**renderer crash 触发 ④ 未实现**：tauri 2.12.3 / wry 0.57

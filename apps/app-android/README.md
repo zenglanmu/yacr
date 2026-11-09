@@ -8,7 +8,7 @@ transparent WebView. The wasm `dom-canvas` session is never instantiated; the
 native shell never creates a second document authority (`AGENTS.md` iron rule 8).
 
 Document capabilities are advertised from `src-tauri/src/policy.rs`
-(`CAN_OPEN`/`CAN_SAVE = true`, `CAN_NEW`/`CAN_PLOT = false`,
+(`CAN_OPEN`/`CAN_NEW`/`CAN_SAVE = true`, `CAN_PLOT = false`,
 `IMPORT_WORKER = false`):
 
 - **Open** — SAF `ACTION_OPEN_DOCUMENT` (`CATEGORY_OPENABLE`, `*/*`, read +
@@ -16,6 +16,10 @@ Document capabilities are advertised from `src-tauri/src/policy.rs`
   snapshot and delivers `FileEvent::Opened` through the shared `PlatformFiles`
   funnel. The wildcard MIME is deliberate: `.dwg` providers often report
   `application/octet-stream`.
+- **New** — the shared host funnel (`HostCore::request_new` /
+  `HostController::new_blank_document`) installs a blank `untitled` document in
+  the single native session. No SAF picker or filesystem access is involved and
+  no second document authority is created.
 - **Save** — SAF `ACTION_CREATE_DOCUMENT` (`application/octet-stream`,
   `EXTRA_TITLE`) followed by an **export copy** through
   `ContentResolver.openOutputStream(uri, "wt")`: DXF by default, or the
@@ -23,7 +27,7 @@ Document capabilities are advertised from `src-tauri/src/policy.rs`
   `<stem>-export.dwg`). Overwriting the opened source URI is refused (SAF URI
   guard plus the host's normalized-name backstop). DWG output has synthetic
   acadrust self-roundtrip evidence only; device/AutoCAD are **NOT VERIFIED**.
-  New and Plot remain unsupported.
+  Plot remains unsupported.
 - **External "Open with"** — `.dwg` VIEW filters come from
   `bundle.fileAssociations` (tauri-build injects them into the committed
   manifest); `MainActivity` handles cold (`onCreate`) and warm (`onNewIntent`)

@@ -35,7 +35,7 @@ const SRC_ROOT = new URL('../src/', import.meta.url);
 
 const STATUS_NO_SESSION = `{"adapter":null,"backend":null,"camera":null,"canFit":false,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":null,"entityCount":null,"error":null,"frameCount":0,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":0,"importProgress":null,"loading":false,"orthoEnabled":false,"hostProfile":{"documentOwner":"wasm","palettesAvailable":true,"standardViews":[],"surfaceMode":"dom-canvas"},"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"tool":null}`;
 
-const STATUS_LIVE = `{"adapter":"webgl2: example adapter (wasm32 session)","backend":"webgl2","camera":{"center":[10.0,-5.0],"scale":0.25},"canFit":true,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"canvasSession":{"batches":4,"draws":4,"label":"synthetic-four-lines.dwg"},"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":"synthetic-four-lines.dwg","entityCount":null,"error":null,"frameCount":7,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":1,"importProgress":null,"loading":false,"orthoEnabled":false,"hostProfile":{"documentOwner":"wasm","palettesAvailable":true,"standardViews":[],"surfaceMode":"dom-canvas"},"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"tool":null}`;
+const STATUS_LIVE = `{"adapter":"webgl2: example adapter (wasm32 session)","backend":"webgl2","camera":{"center":[10.0,-5.0],"scale":0.25},"canFit":true,"canNew":true,"canOpen":false,"canPlot":true,"canSave":true,"canvasSession":{"batches":4,"draws":4,"label":"synthetic-four-lines.dwg"},"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":"synthetic-four-lines.dwg","entityCount":null,"error":null,"frameCount":7,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":1,"importProgress":null,"loading":false,"orthoEnabled":false,"hostProfile":{"documentOwner":"wasm","palettesAvailable":true,"standardViews":[],"surfaceMode":"dom-canvas"},"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"tool":null}`;
 
 /** A session refusal, in the session's own words (rethrow-verbatim fixture). */
 const REFUSAL = 'cad_app: PAN: the tool needs a drawing';
@@ -110,12 +110,14 @@ test('parseCadStatus accepts a real shell_status() with a live session', () => {
   assert.equal(status.frameCount, 7);
   assert.equal(status.importCount, 1);
   assert.deepEqual(status.canvasSession, { batches: 4, draws: 4, label: 'synthetic-four-lines.dwg' });
-  // A live session can refit (the open retained its bounds) and still advertises
-  // no file/document capability: opening is the transport's, not the session's.
+  // A live session can refit (the open retained its bounds), creates a local blank
+  // document without a picker, and performs both exports; opening is the
+  // transport's, not the session's.
   assert.equal(status.canFit, true);
-  for (const key of ['canNew', 'canOpen', 'canSave', 'canPlot']) {
-    assert.equal(status[key], false, `${key} must stay false`);
+  for (const key of ['canNew', 'canSave', 'canPlot']) {
+    assert.equal(status[key], true, `${key} must be true`);
   }
+  assert.equal(status.canOpen, false, 'opening stays the transport\'s command');
   // `entityCount` stays `null`: the database is released, so a count would be
   // invented. `FIT` must not depend on it (see `commands.ts`).
   assert.equal(status.entityCount, null);

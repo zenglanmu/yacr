@@ -45,8 +45,11 @@ pub const UNSUPPORTED_RUNTIME_PREFIX: &str = "yacr: unsupported-runtime: ";
 /// `documentReadUri`). The bytes are read by the Kotlin lane and delivered as a
 /// platform event; the tick never opens a document itself.
 pub const CAN_OPEN: bool = true;
-/// No document can be created (no New funnel, no second document authority).
-pub const CAN_NEW: bool = false;
+/// New installs a blank `untitled` document through the shared host funnel
+/// (`HostCore::request_new` / `HostController::new_blank_document`), which
+/// replaces the current document in the single native session. It needs no
+/// picker or filesystem access and still creates no second document authority.
+pub const CAN_NEW: bool = true;
 /// DXF Save As through `documentLaunchSave` + `documentWriteUri` (lossy export).
 pub const CAN_SAVE: bool = true;
 /// No plot/vector export (SVG/PDF) on this carrier yet.
@@ -176,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn open_and_dxf_save_are_advertised_new_and_plot_are_not() {
+    fn open_new_and_dxf_save_are_advertised_plot_is_not() {
         // The mirror of the `HostCapabilities` the tick passes to `CadSession::new`:
         // a fabricated capability would make the chrome offer a dead action, and a
         // missing one would hide a real SAF path. Values are read through a binding
@@ -184,7 +187,7 @@ mod tests {
         let advertised = [
             ("open", CAN_OPEN, true),
             ("save", CAN_SAVE, true),
-            ("new", CAN_NEW, false),
+            ("new", CAN_NEW, true),
             ("plot", CAN_PLOT, false),
             ("import_worker", IMPORT_WORKER, false),
         ];

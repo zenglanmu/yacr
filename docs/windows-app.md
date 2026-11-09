@@ -58,6 +58,11 @@ Windows 宿主始终是 `native-below`，因此按契约提供插件管理器（
 保住 workspace wasm `--lib` 门禁）；二进制返回显式
 `yacr-windows: … this platform is NOT IMPLEMENTED` 并以非零退出——**不是**静默空 GUI。
 
+**NEW / 新建（2026-11-09）**：`HostCapabilities::new = true`，状态里 `canNew` 随之为真。
+`NEW` 走共享 `HostCore::request_new` → `HostController::new_blank_document` 安装空白
+`untitled` 文档；不需要 picker/文件系统，**没有新增平台 I/O**（不涉及 `src/platform.rs`）。
+文档加载中发起 `NEW` 仍被显式拒绝（不自造空成功）。**真实 Windows 运行/视觉仍 NOT VERIFIED**。
+
 ## 2. 合成契约（DOM on top）
 
 1. **DOM/WebView2 在上，CAD child HWND 在下**。
