@@ -107,7 +107,7 @@ export function useUpdateStatus(): UpdateStatus {
   return useSyncExternalStore(subscribe, getUpdateStatus, getUpdateStatus);
 }
 
-async function runUpdateCheck(deps: UpdateDeps, run: number): Promise<void> {
+async function runUpdateCheck(deps: UpdateDeps, run: number, force: boolean): Promise<void> {
   const invokeFn = deps.invoke ?? hostInvoke;
   const nowFn = deps.now ?? Date.now;
   const now = nowFn();
@@ -140,7 +140,8 @@ async function runUpdateCheck(deps: UpdateDeps, run: number): Promise<void> {
 
   // Throttled: do not fetch. `idle` is the honest answer - the check did not
   // produce any comparison, and a re-evaluation only happens when a check runs.
-  if (!shouldCheck(now, deps.storage)) {
+  // A forced check (the About dialog's explicit action) bypasses this throttle.
+  if (!force && !shouldCheck(now, deps.storage)) {
     setStatus({ kind: 'idle' });
     return;
   }
@@ -171,7 +172,10 @@ async function runUpdateCheck(deps: UpdateDeps, run: number): Promise<void> {
     return;
   }
   const skipped = skippedVersion(deps.storage);
-  if (skipped !== null && normalizeVersion(skipped) === latest) {
+  // An explicit check reports the release even if the user previously skipped
+  // it; only the automatic startup check stays quiet. The persisted skip is
+  // left untouched, so the automatic policy is unchanged.
+  if (!force && skipped !== null && normalizeVersion(skipped) === latest) {
     setStatus({ kind: 'skipped', current, latest });
     return;
   }
@@ -191,7 +195,23 @@ export function startUpdateCheck(deps: UpdateDeps = {}): void {
   policyStorage = deps.storage;
   generation += 1;
   const run = generation;
-  void runUpdateCheck(deps, run);
+  void runUpdateCheck(deps, run, false);
+}
+
+/**
+ * Run a check the user asked for explicitly (the About dialog's action).
+ *
+ * It bypasses both the session guard and the 24 h throttle, and it reports a
+ * release even when the user previously skipped it - that is the point of
+ * pressing the button. The persisted skip and the recorded timestamp keep their
+ * automatic-policy meaning; a newer run supersedes any check still in flight.
+ */
+export function forceUpdateCheck(deps: UpdateDeps = {}): void {
+  started = true;
+  if (deps.storage !== undefined) policyStorage = deps.storage;
+  generation += 1;
+  const run = generation;
+  void runUpdateCheck(deps, run, true);
 }
 
 /** Dismiss the notice for this session (`available -> idle`); nothing else changes. */

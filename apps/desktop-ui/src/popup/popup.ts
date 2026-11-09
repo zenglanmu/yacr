@@ -66,6 +66,15 @@ export const POPUP_KEYS = Object.freeze({
   close: 'dialog.popup.close',
   bodyFailed: 'dialog.popup.body_failed',
   ribbonEntry: 'file.about',
+  // The About body's manual update check (ADR 0032). Declared here with the
+  // dialog's other copy so no key literal is repeated in the component.
+  updateCheck: 'dialog.about.check_update',
+  updateChecking: 'dialog.about.update_checking',
+  updateUpToDate: 'dialog.about.update_up_to_date',
+  updateAvailable: 'dialog.about.update_available',
+  updateUnavailable: 'dialog.about.update_unavailable',
+  updateUnsupported: 'dialog.about.update_unsupported',
+  openDownload: 'dialog.about.open_download',
 });
 
 /**

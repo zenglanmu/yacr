@@ -340,10 +340,17 @@ test('the text editor and Options dialogs also leave the header to the overlay',
 
 test('popup copy comes only from the catalog registry, with no hardcoded CJK', async () => {
   assert.deepEqual(Object.values(POPUP_KEYS).sort(), [
+    'dialog.about.check_update',
     'dialog.about.contact',
     'dialog.about.intro',
+    'dialog.about.open_download',
     'dialog.about.subtitle',
     'dialog.about.title',
+    'dialog.about.update_available',
+    'dialog.about.update_checking',
+    'dialog.about.update_unavailable',
+    'dialog.about.update_unsupported',
+    'dialog.about.update_up_to_date',
     'dialog.about.version',
     'dialog.popup.body_failed',
     'dialog.popup.close',
