@@ -1010,6 +1010,7 @@
   "options.error.not_visible": "The change was accepted, but the drawing does not show it yet. Reopen the dialog to check.",
   "options.error.settings.invalid_value": "That value is not accepted for this setting.",
   "options.error.settings.invalid_plot_format": "Only SVG and PDF can be produced.",
+  "options.error.settings.not_persisted": "This setting could not be written to disk; the previous value was kept.",
   "options.error.settings.unknown_key": "This build does not have that setting.",
   "options.tab.display": "Display",
   "options.tab.drafting": "Drafting & Selection",

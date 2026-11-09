@@ -232,6 +232,30 @@ impl ViewerConfigStore {
         self.apply_user_preference(patch)
     }
 
+    /// Replace the accumulated user preference with a previously captured
+    /// document (the inverse of one accepted patch merge).
+    ///
+    /// This exists for the host's rollback: a preference that cannot be made
+    /// durable must not stay applied in memory either. The snapshot came from
+    /// this store's own accepted state under the same host config, so resolving
+    /// it again succeeds; a malformed document or one that no longer validates
+    /// returns an error and leaves the store untouched (atomic like every other
+    /// update).
+    pub fn restore_user_preference_json(&mut self, text: &str) -> Result<(), ConfigError> {
+        let patch: Value = serde_json::from_str(text)
+            .map_err(|e| ConfigError::new("preference", format!("invalid JSON: {e}")))?;
+        if !patch.is_object() {
+            return Err(ConfigError::new(
+                "preference",
+                "user preference must be an object",
+            ));
+        }
+        let effective = self.resolve(&self.host, &patch)?;
+        self.preference = patch;
+        self.publish(effective);
+        Ok(())
+    }
+
     /// The effective config as JSON (never fails for an in-memory config).
     pub fn effective_json(&self) -> String {
         serde_json::to_string(&self.effective).unwrap_or_else(|_| "{}".to_string())

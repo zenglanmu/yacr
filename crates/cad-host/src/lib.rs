@@ -71,8 +71,8 @@ pub use command_log::{
 };
 pub use settings::{
     normalize_wgpu_backend, CadSettingKey, CadSettingValue, HostSettings,
-    SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
-    WGPU_BACKEND_PREFERENCE_KEY, WGPU_BACKEND_VALUES,
+    SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE, SETTINGS_NOT_PERSISTED,
+    SETTINGS_UNKNOWN_KEY, WGPU_BACKEND_PREFERENCE_KEY, WGPU_BACKEND_VALUES,
 };
 #[cfg(test)]
 mod tests;
@@ -858,7 +858,11 @@ impl HostCore {
                 // cannot carry it: capture it here (unknown/absent -> `auto`) so
                 // the settings snapshot reports it and every later write keeps it.
                 *self.wgpu_backend.borrow_mut() = settings::wgpu_backend_from_preference(&text);
-                match self.apply_user_preference_json(&settings::without_wgpu_backend(&text)) {
+                // The document is already durable: a store that cannot
+                // *re-persist* its normalized projection must not make the
+                // loaded values disappear (`load_user_preference` applies them
+                // in memory; only runtime writes demand durability).
+                match self.load_user_preference(&settings::without_wgpu_backend(&text)) {
                     Ok(()) => {
                         if let Err(error) = self.persist_preference() {
                             diagnostics
@@ -935,48 +939,6 @@ impl HostCore {
         self.clear_gestures();
         self.config_dirty.set(true);
         self.full_dirty.set(true);
-        self.sync_render()
-    }
-
-    /// Apply a host-allowed user preference, then persist the allowed projection.
-    ///
-    /// The projection is written after the store accepts the patch (not from a
-    /// `ConfigObserver`, which would re-borrow the store while it is mutably
-    /// borrowed).
-    pub fn apply_user_preference_json(&self, text: &str) -> CadResult<()> {
-        self.require_config_idle()?;
-        self.viewer_config
-            .borrow_mut()
-            .apply_user_preference_json(text)
-            .map_err(|error| CadError::InvalidInput(error.to_string()))?;
-        self.clear_gestures();
-        self.persist_preference()?;
-        self.config_dirty.set(true);
-        self.full_dirty.set(true);
-        self.sync_render()
-    }
-
-    /// Drop the stored user preference so the host defaults apply again.
-    ///
-    /// This is a real clear of the single [`ViewerConfigStore`]: the accumulated
-    /// preference is emptied, the allowed (now empty) projection is persisted
-    /// through the same policy as [`Self::apply_user_preference_json`], and the
-    /// config + render inputs are republished. It never fakes success: a failed
-    /// persistence returns `Err` with the dirty markers retained for a retry,
-    /// and there is no UI callback.
-    pub fn clear_user_preference(&self) -> CadResult<()> {
-        self.require_config_idle()?;
-        self.viewer_config.borrow_mut().clear_user_preference();
-        // The renderer backend choice is a user preference too, even though it
-        // is not a `ViewerConfig` leaf: a real clear resets it to the `auto`
-        // default and removes the leaf from the durable document.
-        *self.wgpu_backend.borrow_mut() = None;
-        self.clear_gestures();
-        // Mark the publish before the fallible persistence, so a failure keeps
-        // the change pending instead of silently dropping it.
-        self.config_dirty.set(true);
-        self.full_dirty.set(true);
-        self.persist_preference()?;
         self.sync_render()
     }
 

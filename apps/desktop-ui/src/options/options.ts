@@ -825,6 +825,37 @@ export async function settleSettings(
 }
 
 /**
+ * The notice a failed apply shows.
+ *
+ * A write the owner thread refused for a durable reason (no preference path, a
+ * read-only file, a busy engine) is rolled back by the host, so the re-read stays
+ * at the old value and [`settleSettings`] reports `stale` — the stable reason
+ * lives in `cad_status.error`, not in the snapshot. `readError` is the text of a
+ * failed `cad_settings` read, or `null` when the read itself succeeded.
+ *
+ * The host's refusal wins when it exists (mapped through the same
+ * `options.error.<code>` catalog lookup as a write refusal); an invisible write
+ * with no host error keeps `options.error.not_visible`. Nothing here ever claims
+ * the change was applied.
+ */
+export function applyFailureView(
+  hostError: string | null | undefined,
+  readError: string | null | undefined,
+  t: Translator,
+): { code: string; text: string } {
+  if (typeof readError === 'string' && readError.length > 0) {
+    return { code: readError, text: t(OPTIONS_KEYS.errorLoad) };
+  }
+  if (typeof hostError === 'string' && hostError.trim().length > 0) {
+    return optionsErrorView(settingErrorCode(hostError), t);
+  }
+  return {
+    code: OPTIONS_KEYS.errorNotVisible,
+    text: t(OPTIONS_KEYS.errorNotVisible),
+  };
+}
+
+/**
  * Whether typed command text is the local `OPTIONS` selector.
  *
  * The Rust router has no such command: the chrome opens the dialog directly and

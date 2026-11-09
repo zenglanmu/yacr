@@ -130,6 +130,17 @@ Vulkan-only；`dx12` 在 Linux **显式失败**（`ProbeError::UnsupportedBacken
 （如 `2.5`）需要解析层同时产出 `CadSettingValue::Real`（见 `crates/cad-desktop-shell`）；在此之前
 小数写入会被显式拒绝为 `settings.invalid_value`（不是静默取整），整数间距（如 `25`）已可用。
 
+**持久化失败 = 显式拒绝（不伪装成功）**：`cad_set_setting` 的 IPC ack 只表示"已入队"，真正执行与落盘
+在 owner tick。落盘失败（无偏好路径、只读文件、IO 错误）现在会把内存改动**回滚**，并返回稳定码
+`settings.not_persisted: <底层原因>`；因此 `cad_settings` 不会报告一个重启后消失的值，Options 对话框
+显示 `options.error.settings.not_persisted` 而不是"已应用"。启动读取**已存在**的 `preference.json` 不受
+此限：文档本来就在磁盘上，走 `load_user_preference` 直接生效；只有"重写规范化投影"失败时记一条
+`preferences … not re-persisted` 诊断，不会丢掉已读设置。
+
+> 诚实边界：`dom-canvas`（X11/XWayland）与 Web 的 wasm 会话使用**内存**配置存储，写入本身成功但
+> 不跨重启——这是载体设计，不是本拒绝路径。Android 在 `nativeAssetsReady` 握手前同样没有持久路径。
+> 上述情况下新行为只会让失败可见（`settings.not_persisted`），**不会**凭空产生持久化。
+
 **窗口默认（最大化，非全屏）**：Linux 宿主默认以**最大化窗口**启动，该策略是窗口管理器**最大化**，
 **保留标题栏/系统面板**，**不是**全屏/无边框 kiosk。源码依据：`apps/app-linux/src/host.rs` 的
 `start_maximized(..)` 默认返回 `true`（`!no_maximize_env_present`），`WindowBuilder::maximized(maximize)`

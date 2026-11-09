@@ -14388,3 +14388,31 @@ host/wasm/clippy + 4 static / diff **均 0**；`fmt` 仅既有陌生未跟踪 `d
   **NOT RUN**；本机只有编译/契约/单元证据，**不得**写成“Windows 显示已修复”。打包改由 GitHub
   Actions `windows-release`（`workflow_dispatch`，原生 MSVC）出 artifact；本机 `cargo xwin build`
   的 MSVC 交叉链接不作为出包路径。
+
+## 2026-11-09：首选项落盘失败不再伪装成功（回滚 + `settings.not_persisted`）
+
+- **缺陷（可诊断性 / 铁律 2）**：`cad_set_setting` 的 IPC ack 只表示"已入队"；真正执行在 owner tick。
+  `HostCore::apply_user_preference_json` 先改内存配置、再 `persist_preference()`，落盘失败时**内存值
+  已生效**，`cad_settings` 回读能看到它，于是 Options 的 `settleSettings` 判定"已应用"。失败原因
+  只在 `cad_status.error` 与 stderr `[probe] cad setting rejected: …`，对话框照样成功——正是
+  "能改、重启全没"的机制（例如无持久路径的载体、只读配置目录）。
+- **修复（写盘与生效原子化）**：新增 `ViewerConfigStore::restore_user_preference_json`；运行期
+  `apply_user_preference_json` 先快照已接受文档，`persist_preference()` 失败即回滚并返回
+  `settings.not_persisted: <原因>`（`SETTINGS_NOT_PERSISTED`）；`apply_wgpu_backend` 用同一映射，
+  `clear_user_preference` 同时回滚偏好文档与 backend 叶子。**启动读取**改走
+  `HostCore::load_user_preference`：已存在于磁盘的文档直接生效，重写规范化投影失败只记诊断，
+  只读 store 不会因此丢掉用户已保存的设置。
+- **UI**：Options 在 settle 非 ok 时优先显示 `cad_status.error`（新增纯函数
+  `applyFailureView`），并把稳定码映射到新目录文案 `options.error.settings.not_persisted`
+  （中/英）。写入未落盘时字段保持旧值，对话框不再声称成功。
+- **已运行**：`cargo test -p cad-host --lib` **288 passed**（settings 52，含新增
+  `a_failed_settings_write_rolls_back_and_reports_not_persisted` /
+  `a_read_only_store_honors_the_loaded_document_but_refuses_new_writes` /
+  `a_failed_clear_rolls_back_the_document_and_the_backend`）；`cargo test -p cad-app --lib`
+  viewer_config **45 passed**；`cargo clippy -p cad-host -p cad-app --all-targets --locked -- -D warnings`
+  PASS；`(cd apps/desktop-ui && npm test)` **1,319 passed**（tsc + node，含新增 `applyFailureView`
+  契约）；`python3 scripts/check-i18n.py` PASS；`cargo fmt -p cad-host -p cad-app`。
+- **NOT RUN / 边界**：真实 GPU/GUI 像素与跨平台真机 **NOT RUN**。`dom-canvas`（X11/XWayland）与
+  Web 的 wasm 会话仍是内存 config store（写入成功但不跨重启，属载体设计）；Android 在
+  `nativeAssetsReady` 握手前没有持久路径。本修复不改变这些载体的持久性，只保证失败/不落盘不再
+  被 UI 报成成功。

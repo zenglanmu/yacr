@@ -20,6 +20,7 @@ import {
   SETTINGS_WAITING,
   SETTINGS_WRITE_COMMAND,
   WGPU_BACKENDS,
+  applyFailureView,
   applyPayload,
   dirtyFields,
   draftFromSettings,
@@ -588,6 +589,31 @@ test('a refusal is shown as catalog copy, with the code kept for the tooltip', (
     assert.equal(view.code, code);
     assert.equal(view.text, en['options.error.generic']);
   }
+});
+
+test('a write that did not become visible reports the host refusal, never success', () => {
+  // A durable-store refusal is rolled back by the host; the read-back keeps the
+  // old value and the reason travels on `cad_status.error`.
+  const refused = applyFailureView(
+    'settings.not_persisted: no durable preference path; preference persistence is disabled',
+    null,
+    tEn,
+  );
+  assert.equal(refused.code, 'settings.not_persisted');
+  assert.equal(refused.text, en['options.error.settings.not_persisted']);
+  assert.ok(!refused.text.includes('settings.'), 'the visible sentence must not be a machine code');
+
+  // A failed snapshot read keeps its own message, even if the host also has an
+  // unrelated error.
+  const readFailed = applyFailureView('cad_busy', 'ipc closed', tEn);
+  assert.equal(readFailed.code, 'ipc closed');
+  assert.equal(readFailed.text, en['options.error.load_failed']);
+
+  // Nothing to attribute: the generic "not visible" copy, with its key as code.
+  const invisible = applyFailureView(null, null, tEn);
+  assert.equal(invisible.code, OPTIONS_KEYS.errorNotVisible);
+  assert.equal(invisible.text, en['options.error.not_visible']);
+  assert.deepEqual(applyFailureView('  ', undefined, tEn), invisible);
 });
 
 test('only the typed OPTIONS word opens the dialog; nothing else is intercepted', () => {

@@ -24,6 +24,14 @@ pub const SETTINGS_UNKNOWN_KEY: &str = "settings.unknown_key";
 pub const SETTINGS_INVALID_VALUE: &str = "settings.invalid_value";
 /// A plot format other than the two the CPU vector path can produce.
 pub const SETTINGS_INVALID_PLOT_FORMAT: &str = "settings.invalid_plot_format";
+/// The host accepted the key/value but could not make it durable (no preference
+/// path, a read-only file, a failing write). Stable, locale-neutral prefix; the
+/// host appends the underlying reason after `: ` for diagnostics.
+///
+/// A write with this refusal is **rolled back** in memory too, so neither the
+/// snapshot nor the Options dialog reports a value that would disappear on the
+/// next start.
+pub const SETTINGS_NOT_PERSISTED: &str = "settings.not_persisted";
 
 /// The durable preference key of the renderer backend choice.
 ///
@@ -544,7 +552,7 @@ impl HostCore {
         let previous = self.wgpu_backend.replace(Some(token.clone()));
         if let Err(error) = self.persist_preference() {
             *self.wgpu_backend.borrow_mut() = previous;
-            return Err(error);
+            return Err(preference_persist_refusal(&error));
         }
         Ok(())
     }
@@ -795,5 +803,125 @@ impl HostCore {
     pub(crate) fn seed_interaction_tolerance(&self) {
         let policy = self.tolerance_policy();
         self.controller.borrow_mut().set_tolerance_policy(policy);
+    }
+}
+
+/// The stable refusal a preference write returns when it cannot be made durable.
+///
+/// The code leads ([`SETTINGS_NOT_PERSISTED`]) so the wire/UI can map it to
+/// catalog copy; the store's own reason follows for diagnostics. The caller has
+/// already rolled the in-memory change back, so no layer can report a value that
+/// would disappear on the next start.
+fn preference_persist_refusal(error: &CadError) -> CadError {
+    CadError::Unsupported(format!(
+        "{SETTINGS_NOT_PERSISTED}: {}",
+        store_error_reason(error)
+    ))
+}
+
+/// The inner reason of a store error, without the `CadError` debug wrapper.
+///
+/// `CadError::Display` delegates to `Debug`, so `to_string()` on the common
+/// string-bearing variants would render `InvalidInput("…")`; diagnostics should
+/// carry the reason itself, not the variant name.
+fn store_error_reason(error: &CadError) -> String {
+    match error {
+        CadError::NotImplemented(feature) => (*feature).to_string(),
+        CadError::InvalidInput(reason)
+        | CadError::Unsupported(reason)
+        | CadError::ResourceMissing(reason)
+        | CadError::CorruptData(reason)
+        | CadError::GpuFailure(reason)
+        | CadError::Invariant(reason) => reason.clone(),
+        other => other.to_string(),
+    }
+}
+
+impl HostCore {
+    /// Apply a host-allowed user preference and persist the allowed projection.
+    ///
+    /// The durable write is part of the change, not a follow-up: the store's
+    /// previous document is captured first, and a failed persistence restores it
+    /// before the refusal is returned. A setting that cannot survive a restart is
+    /// therefore **not applied in memory either**, so `cad_settings` (and the
+    /// Options dialog's read-back) can never report a value that was never
+    /// written. The projection is written from the store, not from a
+    /// `ConfigObserver` (which would re-borrow the store while it is mutably
+    /// borrowed).
+    pub fn apply_user_preference_json(&self, text: &str) -> CadResult<()> {
+        self.require_config_idle()?;
+        let previous = self.viewer_config.borrow().user_preference_json();
+        self.viewer_config
+            .borrow_mut()
+            .apply_user_preference_json(text)
+            .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+        self.clear_gestures();
+        if let Err(error) = self.persist_preference() {
+            self.rollback_user_preference(&previous);
+            return Err(preference_persist_refusal(&error));
+        }
+        self.config_dirty.set(true);
+        self.full_dirty.set(true);
+        self.sync_render()
+    }
+
+    /// Apply a durable preference document that was just read at startup.
+    ///
+    /// The bytes already exist on disk, so this is the one path that does **not**
+    /// require a successful write: a store that cannot re-persist its normalized
+    /// projection still honors what the user saved for this session (the caller
+    /// records that as a diagnostic). Runtime writes use
+    /// [`Self::apply_user_preference_json`], which is all-or-nothing.
+    pub(crate) fn load_user_preference(&self, text: &str) -> CadResult<()> {
+        self.viewer_config
+            .borrow_mut()
+            .apply_user_preference_json(text)
+            .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+        self.clear_gestures();
+        self.config_dirty.set(true);
+        self.full_dirty.set(true);
+        self.sync_render()
+    }
+
+    /// Restore a previously accepted preference document after a failed write.
+    ///
+    /// The snapshot was accepted by this store under the same host config, so
+    /// resolving it again succeeds. If it somehow does not, the persistence
+    /// refusal remains the authoritative error and the next write or the next
+    /// start reconciles the store; this never panics.
+    fn rollback_user_preference(&self, previous: &str) {
+        let _ = self
+            .viewer_config
+            .borrow_mut()
+            .restore_user_preference_json(previous);
+    }
+
+    /// Drop the stored user preference so the host defaults apply again.
+    ///
+    /// This is a real clear of the single [`ViewerConfigStore`]: the accumulated
+    /// preference is emptied, the allowed (now empty) projection is persisted
+    /// through the same policy as [`Self::apply_user_preference_json`], and the
+    /// config + render inputs are republished. It never fakes success: a failed
+    /// persistence restores the previous document (and the backend leaf) and
+    /// returns [`SETTINGS_NOT_PERSISTED`], so nothing reads as cleared while the
+    /// durable file still holds the old values.
+    pub fn clear_user_preference(&self) -> CadResult<()> {
+        self.require_config_idle()?;
+        let previous = self.viewer_config.borrow().user_preference_json();
+        let previous_backend = self.wgpu_backend.borrow().clone();
+        self.viewer_config.borrow_mut().clear_user_preference();
+        // The renderer backend choice is a user preference too, even though it
+        // is not a `ViewerConfig` leaf: a real clear resets it to the `auto`
+        // default and removes the leaf from the durable document.
+        *self.wgpu_backend.borrow_mut() = None;
+        self.clear_gestures();
+        self.config_dirty.set(true);
+        self.full_dirty.set(true);
+        if let Err(error) = self.persist_preference() {
+            self.rollback_user_preference(&previous);
+            *self.wgpu_backend.borrow_mut() = previous_backend;
+            return Err(preference_persist_refusal(&error));
+        }
+        self.sync_render()
     }
 }

@@ -1010,6 +1010,7 @@
   "options.error.not_visible": "更改已被接受，但图形中尚未显示。请重新打开对话框核对。",
   "options.error.settings.invalid_value": "该设置不接受这一取值。",
   "options.error.settings.invalid_plot_format": "只能输出 SVG 和 PDF。",
+  "options.error.settings.not_persisted": "该设置无法写入磁盘，已恢复原值。",
   "options.error.settings.unknown_key": "此版本没有该设置。",
   "options.tab.display": "显示",
   "options.tab.drafting": "草图与选择",

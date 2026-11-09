@@ -21,6 +21,27 @@ impl ConfigStore for RejectingPreferenceStore {
     }
 }
 
+/// A store that can **read** a durable document but refuses every write, so the
+/// startup load and the runtime write refusal can be observed together.
+struct ReadOnlyPreferenceStore(&'static str);
+
+impl ConfigStore for ReadOnlyPreferenceStore {
+    fn load_config(&self) -> ConfigLoad {
+        ConfigLoad::Absent
+    }
+    fn load_preference(&self) -> ConfigLoad {
+        ConfigLoad::Text {
+            path: "preference.json".to_string(),
+            text: self.0.to_string(),
+        }
+    }
+    fn persist_preference(&self, _text: &str) -> CadResult<()> {
+        Err(CadError::InvalidInput(
+            "preference store is read-only".into(),
+        ))
+    }
+}
+
 /// The closed token set is exactly `auto|vulkan|dx12`. Every other string — case
 /// variants, other graphics APIs, trailing whitespace — and every non-string is
 /// refused with the stable code, never coerced to the default.
@@ -214,12 +235,79 @@ fn a_failed_backend_write_rolls_back_and_reports_the_error() {
         )
         .expect_err("the store refuses the write");
     assert!(
-        matches!(&error, CadError::InvalidInput(reason) if reason == "preference store is read-only"),
+        matches!(&error, CadError::Unsupported(reason)
+            if reason == &format!("{SETTINGS_NOT_PERSISTED}: preference store is read-only")),
         "{error:?}"
     );
     assert_eq!(
         core.settings().wgpu_backend,
         "auto",
         "the rejected write left no trace"
+    );
+}
+
+/// The same rollback applies to every settings key, not only the backend: a
+/// value that cannot survive a restart is never reported by `cad_settings`.
+#[test]
+fn a_failed_settings_write_rolls_back_and_reports_not_persisted() {
+    let core = core_with_config(Rc::new(RejectingPreferenceStore));
+    let before = core.settings();
+    let error = core
+        .apply_setting(CadSettingKey::Grid, CadSettingValue::Bool(true))
+        .expect_err("the store refuses every write");
+    assert!(
+        matches!(&error, CadError::Unsupported(reason) if reason.starts_with(SETTINGS_NOT_PERSISTED)),
+        "{error:?}"
+    );
+    assert_eq!(
+        core.settings(),
+        before,
+        "the refused write changed nothing that is visible"
+    );
+    assert!(!core.settings().grid);
+}
+
+/// A durable document that was read at startup is honored even when the store
+/// cannot re-persist it: the bytes already exist, so the session keeps them.
+/// A later runtime write is still refused and rolled back.
+#[test]
+fn a_read_only_store_honors_the_loaded_document_but_refuses_new_writes() {
+    let core = core_with_config(Rc::new(ReadOnlyPreferenceStore(
+        r#"{"wgpu_backend":"dx12","view":{"overlays":{"grid":true}}}"#,
+    )));
+    core.load_startup();
+    assert!(core.settings().grid, "the durable document is applied");
+    assert_eq!(core.settings().wgpu_backend, "dx12");
+
+    let error = core
+        .apply_setting(CadSettingKey::Axes, CadSettingValue::Bool(false))
+        .expect_err("a runtime write cannot be persisted");
+    assert!(
+        matches!(&error, CadError::Unsupported(reason) if reason.starts_with(SETTINGS_NOT_PERSISTED)),
+        "{error:?}"
+    );
+    assert!(core.settings().axes, "the refused write is rolled back");
+}
+
+/// A clear that cannot be persisted restores both the preference document and
+/// the backend leaf, so nothing reads as cleared while the file is unchanged.
+#[test]
+fn a_failed_clear_rolls_back_the_document_and_the_backend() {
+    let core = core_with_config(Rc::new(ReadOnlyPreferenceStore(
+        r#"{"wgpu_backend":"dx12","view":{"overlays":{"grid":true}}}"#,
+    )));
+    core.load_startup();
+    let error = core
+        .clear_user_preference()
+        .expect_err("the clear cannot be persisted");
+    assert!(
+        matches!(&error, CadError::Unsupported(reason) if reason.starts_with(SETTINGS_NOT_PERSISTED)),
+        "{error:?}"
+    );
+    assert!(core.settings().grid, "the clear was rolled back");
+    assert_eq!(
+        core.settings().wgpu_backend,
+        "dx12",
+        "the backend leaf was rolled back"
     );
 }

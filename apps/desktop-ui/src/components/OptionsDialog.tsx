@@ -30,7 +30,7 @@ import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
 import { Button } from './primitives.tsx';
 import { OptionsPlugins } from './OptionsPlugins.tsx';
-import { useI18n } from '../context.ts';
+import { useI18n, useShell } from '../context.ts';
 import type { Locale, Translator } from '../i18n.ts';
 import type { CSSProperties } from 'react';
 import { storeLocale } from '../i18n.ts';
@@ -39,6 +39,7 @@ import {
   LOCALE_CHOICES,
   OPTIONS_FIELDS,
   OPTIONS_KEYS,
+  applyFailureView,
   applyPayload,
   dirtyFields,
   draftFromSettings,
@@ -292,6 +293,7 @@ interface OptionsDialogProps {
 
 export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
   const { t, locale, setLocale } = useI18n();
+  const { status } = useShell();
   const tabs = useMemo(() => optionsTabs(), []);
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
@@ -311,8 +313,16 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
   const alive = useRef(true);
   const retryTimer = useRef<number | undefined>(undefined);
   const localeRef = useRef<Locale>(locale);
+  // The host's latest `cad_status.error`, read only when an apply did not become
+  // visible: a durable-store refusal is reported there (the queue acknowledgement
+  // cannot carry it, and the host rolls the value back).
+  const statusErrorRef = useRef<string | null>(null);
 
   useEffect(() => { localeRef.current = locale; });
+  useEffect(() => {
+    const error = status?.error;
+    statusErrorRef.current = typeof error === 'string' && error.length > 0 ? error : null;
+  }, [status?.error]);
 
   /**
    * Read the snapshot, retrying while the host reports `cad_waiting`.
@@ -419,11 +429,14 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
     if (settled.kind !== 'ok') {
       // The writes were accepted but the snapshot does not show them (or could
       // not be read). Stay open and say so: closing here would claim a result
-      // nobody verified.
-      setNotice({
-        code: ('error' in settled ? settled.error : null) ?? 'settings.apply_not_visible',
-        text: t(settled.kind === 'failed' ? OPTIONS_KEYS.errorLoad : OPTIONS_KEYS.errorNotVisible),
-      });
+      // nobody verified. A durable-store refusal is rolled back by the host and
+      // reported through `cad_status.error`, so that reason is preferred over a
+      // generic "not visible" — the user needs to know the value was not saved.
+      setNotice(applyFailureView(
+        statusErrorRef.current,
+        settled.kind === 'failed' ? settled.error : null,
+        t,
+      ));
       return;
     }
     setSettings(settled.settings);
