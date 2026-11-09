@@ -912,4 +912,32 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'MENU', labelKey: 'draw.kind.menu', icon: 'menu', group: 'view' },
   { id: 'RIBBON', labelKey: 'draw.kind.ribbon', icon: 'menu', group: 'view' },
 
+  // The 2026-11-09 Wave 9 batch: 2D draw/modify routes, real edits, aliases and
+  // stable named refusals. Appended last so no shipped row moves.
+  { id: 'ARRAY', labelKey: 'draw.kind.array', icon: 'arrayrect', group: 'modify' },
+  { id: '-ARRAY', labelKey: 'draw.kind.dasharray', icon: 'arrayrect', group: 'modify' },
+  { id: 'ARRAYCLASSIC', labelKey: 'draw.kind.arrayclassic', icon: 'arrayrect', group: 'modify' },
+  { id: 'ARCTEXT', labelKey: 'draw.kind.arctext', icon: 'text', group: 'annotate' },
+  { id: 'BLEND', labelKey: 'draw.kind.blend', icon: 'spline', group: 'modify' },
+  { id: 'BREAKLINE', labelKey: 'draw.kind.breakline', icon: 'line', group: 'draw' },
+  { id: 'MLEADERALIGN', labelKey: 'draw.kind.mleaderalign', icon: 'mleader', group: 'annotate' },
+  { id: 'MLEADEREDIT', labelKey: 'draw.kind.mleaderedit', icon: 'mleader', group: 'annotate' },
+  { id: 'MLEADERCOLLECT', labelKey: 'draw.kind.mleadercollect', icon: 'mleader', group: 'annotate' },
+  { id: 'TOLERANCE', labelKey: 'draw.kind.tolerance', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DIM', labelKey: 'draw.kind.dim', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DIMARC', labelKey: 'draw.kind.dimarc', icon: 'dimangular', group: 'annotate' },
+  { id: 'CAL', labelKey: 'draw.kind.cal', icon: 'settings', group: 'properties' },
+  { id: '-BLOCK', labelKey: 'draw.kind.dashblock', icon: 'copy', group: 'draw' },
+  { id: '-BOUNDARY', labelKey: 'draw.kind.dashboundary', icon: 'hatch', group: 'draw' },
+  { id: '-INSERT', labelKey: 'draw.kind.dashinsert', icon: 'copy', group: 'draw' },
+  { id: '-HATCH', labelKey: 'draw.kind.dashhatch', icon: 'hatch', group: 'draw' },
+  { id: '-HATCHEDIT', labelKey: 'draw.kind.dashhatchedit', icon: 'hatch', group: 'modify' },
+  { id: 'EXOFFSET', labelKey: 'draw.kind.exoffset', icon: 'offset', group: 'modify' },
+  { id: 'DIMEX', labelKey: 'draw.kind.dimex', icon: 'dimlinear', group: 'annotate' },
+  { id: 'DIMIM', labelKey: 'draw.kind.dimim', icon: 'dimlinear', group: 'annotate' },
+  { id: 'SPACETRANS', labelKey: 'draw.kind.spacetrans', icon: 'distance', group: 'measure' },
+  { id: 'TXTEXP', labelKey: 'draw.kind.txtexp', icon: 'explode', group: 'modify' },
+  { id: 'UPDATEFIELD', labelKey: 'draw.kind.updatefield', icon: 'text', group: 'annotate' },
+  { id: 'UNITS', labelKey: 'draw.kind.units', icon: 'settings', group: 'properties' },
+
 ]);

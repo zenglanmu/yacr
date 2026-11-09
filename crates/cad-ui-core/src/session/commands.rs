@@ -575,6 +575,34 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MENU", CommandId::Extended(ExtendedCommandId::Menu)),
     ("RIBBON", CommandId::Extended(ExtendedCommandId::Ribbon)),
 
+    // Wave 9 (2026-11-09): 2D draw/modify routes, real edits and named
+    // refusals. All are `CommandId::Extended`.
+    ("ARRAY", CommandId::Extended(ExtendedCommandId::Array)),
+    ("-ARRAY", CommandId::Extended(ExtendedCommandId::DashArray)),
+    ("ARRAYCLASSIC", CommandId::Extended(ExtendedCommandId::ArrayClassic)),
+    ("ARCTEXT", CommandId::Extended(ExtendedCommandId::ArcText)),
+    ("BLEND", CommandId::Extended(ExtendedCommandId::Blend)),
+    ("BREAKLINE", CommandId::Extended(ExtendedCommandId::BreakLine)),
+    ("MLEADERALIGN", CommandId::Extended(ExtendedCommandId::MLeaderAlign)),
+    ("MLEADEREDIT", CommandId::Extended(ExtendedCommandId::MLeaderEdit)),
+    ("MLEADERCOLLECT", CommandId::Extended(ExtendedCommandId::MLeaderCollect)),
+    ("TOLERANCE", CommandId::Extended(ExtendedCommandId::Tolerance)),
+    ("DIM", CommandId::Extended(ExtendedCommandId::DimRouter)),
+    ("DIMARC", CommandId::Extended(ExtendedCommandId::DimArc)),
+    ("CAL", CommandId::Extended(ExtendedCommandId::Calc)),
+    ("-BLOCK", CommandId::Extended(ExtendedCommandId::DashBlock)),
+    ("-BOUNDARY", CommandId::Extended(ExtendedCommandId::DashBoundary)),
+    ("-INSERT", CommandId::Extended(ExtendedCommandId::DashInsert)),
+    ("-HATCH", CommandId::Extended(ExtendedCommandId::DashHatch)),
+    ("-HATCHEDIT", CommandId::Extended(ExtendedCommandId::DashHatchEdit)),
+    ("EXOFFSET", CommandId::Extended(ExtendedCommandId::ExOffset)),
+    ("DIMEX", CommandId::Extended(ExtendedCommandId::DimExport)),
+    ("DIMIM", CommandId::Extended(ExtendedCommandId::DimImport)),
+    ("SPACETRANS", CommandId::Extended(ExtendedCommandId::SpaceTrans)),
+    ("TXTEXP", CommandId::Extended(ExtendedCommandId::TextExplode)),
+    ("UPDATEFIELD", CommandId::Extended(ExtendedCommandId::UpdateField)),
+    ("UNITS", CommandId::Extended(ExtendedCommandId::Units)),
+
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**

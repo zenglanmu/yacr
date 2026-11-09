@@ -264,6 +264,32 @@ impl Application {
             | ExtendedCommandId::SysWindows
             | ExtendedCommandId::Menu
             | ExtendedCommandId::Ribbon => self.extended_refusal8(command, ext)?,
+            // Wave 9: 2D draw/modify, real edits, aliases and reports.
+            ExtendedCommandId::Array
+            | ExtendedCommandId::DashArray
+            | ExtendedCommandId::ArrayClassic
+            | ExtendedCommandId::ArcText
+            | ExtendedCommandId::Blend
+            | ExtendedCommandId::BreakLine
+            | ExtendedCommandId::MLeaderAlign
+            | ExtendedCommandId::MLeaderEdit
+            | ExtendedCommandId::MLeaderCollect
+            | ExtendedCommandId::Tolerance
+            | ExtendedCommandId::DimRouter
+            | ExtendedCommandId::DimArc
+            | ExtendedCommandId::Calc => self.extended_w9_draw(session, command, ext)?,
+            ExtendedCommandId::DashBlock
+            | ExtendedCommandId::DashBoundary
+            | ExtendedCommandId::DashInsert
+            | ExtendedCommandId::DashHatch
+            | ExtendedCommandId::DashHatchEdit
+            | ExtendedCommandId::ExOffset => self.extended_w9_alias(session, command, ext)?,
+            ExtendedCommandId::DimExport
+            | ExtendedCommandId::DimImport
+            | ExtendedCommandId::SpaceTrans
+            | ExtendedCommandId::TextExplode
+            | ExtendedCommandId::UpdateField
+            | ExtendedCommandId::Units => self.extended_w9_reports(session, command, ext)?,
         };
         Ok(Some(outcome))
     }

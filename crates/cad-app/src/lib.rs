@@ -71,6 +71,10 @@ mod app_extended_refusals7;
 // The Wave 8 extended-command handlers (session tokens+refusals).
 mod app_extended_refusals8;
 mod app_extended_session8;
+// The Wave 9 extended-command handlers (2D draw/modify, aliases, reports).
+mod app_extended_w9_alias;
+mod app_extended_w9_draw;
+mod app_extended_w9_reports;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;
