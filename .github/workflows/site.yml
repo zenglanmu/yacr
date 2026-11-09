@@ -41,7 +41,7 @@ on:
       public_base:
         description: "Public download base written to cdnBase (use 'managed' for r2.dev)"
         required: false
-        default: "https://dl.snakeheartgo.top"
+        default: "https://dl-yacr.snakeheartgo.top"
         type: string
 
 permissions:

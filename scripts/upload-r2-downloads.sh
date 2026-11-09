@@ -26,11 +26,11 @@
 #                      <repo>/target/landing-downloads/<tag>)
 #   WRANGLER_VERSION   npm version/dist-tag (default: 4)
 #   R2_PUBLIC_BASE     public download base written to `cdnBase`
-#                      (default: https://dl.snakeheartgo.top). Set it to the
+#                      (default: https://dl-yacr.snakeheartgo.top). Set it to the
 #                      literal `managed` to use the rate-limited r2.dev domain.
 #
 # Honesty rules:
-#   * the preferred host is the bucket's custom domain (`dl.snakeheartgo.top`),
+#   * the preferred host is the bucket's custom domain (`dl-yacr.snakeheartgo.top`),
 #     which can carry Cloudflare Cache Rules; the managed r2.dev domain is a
 #     test / low-cost fallback with rate limits and no production SLA;
 #   * the chosen base is only written after a real HEAD probe of every package;
@@ -48,7 +48,7 @@ REPO="${GITHUB_REPOSITORY:-zenglanmu/yacr}"
 LANDING_DIR="${LANDING_DIR:-$ROOT/apps/landing}"
 ASSETS_DIR_OVERRIDE="${ASSETS_DIR:-}"
 WRANGLER_VERSION="${WRANGLER_VERSION:-4}"
-PUBLIC_BASE="${R2_PUBLIC_BASE:-https://dl.snakeheartgo.top}"
+PUBLIC_BASE="${R2_PUBLIC_BASE:-https://dl-yacr.snakeheartgo.top}"
 API="https://api.cloudflare.com/client/v4"
 
 die() {

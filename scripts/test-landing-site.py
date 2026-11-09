@@ -26,6 +26,7 @@ HEADERS = LANDING / "_headers"
 
 RELEASE = "v0.1.7"
 GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.7/"
+CDN_BASE = "https://dl-yacr.snakeheartgo.top/releases/v0.1.7"
 KNOWN_ASSETS = {
     "linux": ("yacr-0.1.7-linux-x86_64.flatpak", 105910304),
     "windows": ("yacr-0.1.7-windows-x86_64.zip", 85858609),
@@ -89,6 +90,12 @@ def check_manifest(text: str, errors: list[str]) -> None:
         fail(f"downloads.json release must be {RELEASE!r}", errors)
     if data.get("githubBase") != GITHUB_BASE:
         fail(f"downloads.json githubBase must be {GITHUB_BASE!r}", errors)
+    if data.get("cdnBase") != CDN_BASE:
+        fail(
+            f"downloads.json cdnBase must be {CDN_BASE!r} (the cached custom "
+            "download domain)",
+            errors,
+        )
 
     cdn_base = data.get("cdnBase")
     if cdn_base is not None and not (
@@ -305,7 +312,7 @@ def check_scripts(errors: list[str]) -> None:
             "downloads.json",
             "app-universal-release.apk",
             "R2_PUBLIC_BASE",
-            "dl.snakeheartgo.top",
+            "dl-yacr.snakeheartgo.top",
         ):
             if fragment not in upload:
                 fail(f"scripts/upload-r2-downloads.sh is missing {fragment!r}", errors)

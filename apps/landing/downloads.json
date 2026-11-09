@@ -1,6 +1,6 @@
 {
   "release": "v0.1.7",
-  "cdnBase": "https://pub-6db90b05eaaa4bce9cbcd41662e73597.r2.dev/releases/v0.1.7",
+  "cdnBase": "https://dl-yacr.snakeheartgo.top/releases/v0.1.7",
   "githubBase": "https://github.com/zenglanmu/yacr/releases/download/v0.1.7/",
   "assets": {
     "linux": {

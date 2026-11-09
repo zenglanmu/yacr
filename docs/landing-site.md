@@ -6,7 +6,7 @@ workspace；它只是 `index.html` / `styles.css` / `main.js` / `downloads.json`
 `docs/release-notes/*.md` 生成（见下文“更新日志”）。
 
 - 线上地址：<https://yacr.pages.dev/>（Cloudflare Pages 项目 `yacr`）
-- 安装包镜像：Cloudflare R2 桶 `yacr-downloads`，主下载域名 `https://dl.snakeheartgo.top`
+- 安装包镜像：Cloudflare R2 桶 `yacr-downloads`，主下载域名 `https://dl-yacr.snakeheartgo.top`
   （自定义域名 + Cache Rule），`r2.dev` 托管域名只作显式回退
 - 对象前缀：`releases/<tag>/`（例如 `releases/v0.1.7/yacr-0.1.7-linux-x86_64.flatpak`）
 
@@ -31,31 +31,31 @@ python3 scripts/serve-web.py --directory apps/landing --port 8091
 ```
 
 `downloads.json` 现在提交了当前 `v0.1.7` 的 R2 清单（`cdnBase` 在自定义域名验证后指向
-`https://dl.snakeheartgo.top`），页面主按钮直接走 R2 + Cloudflare 缓存，GitHub 作为次链接与校验
+`https://dl-yacr.snakeheartgo.top`），页面主按钮直接走 R2 + Cloudflare 缓存，GitHub 作为次链接与校验
 来源。`upload-r2-downloads.sh` 会在每次发布后原子重写它；若 R2 未配置或被删除，把 `cdnBase`
 设为 `null` 即回退 GitHub。本地预览无需 Cloudflare 凭据。
 
-## 下载域名与 CDN 缓存（dl.snakeheartgo.top）
+## 下载域名与 CDN 缓存（dl-yacr.snakeheartgo.top）
 
-R2 桶 `yacr-downloads` 的主下载域名是 **`https://dl.snakeheartgo.top`**。它绑定在同一个
+R2 桶 `yacr-downloads` 的主下载域名是 **`https://dl-yacr.snakeheartgo.top`**。它绑定在同一个
 Cloudflare 账户的 zone `snakeheartgo.top` 上，因此可以套用 Cloudflare 的缓存；`r2.dev` 托管域名
 **不能**使用缓存/WAF，且有约数百 req/s 的限速，只作显式回退。
 
 ### 一次性配置（Cloudflare Dashboard）
 
 1. **绑定自定义域名**：R2 → bucket `yacr-downloads` → Settings → Custom Domains →
-   Connect Domain → `dl.snakeheartgo.top` → Connect。Cloudflare 会自动在 zone 里建一条代理
+   Connect Domain → `dl-yacr.snakeheartgo.top` → Connect。Cloudflare 会自动在 zone 里建一条代理
    CNAME；等待状态变成 **Active**（DNS/TLS 可能需要几分钟）。
 2. **建 Cache Rule**：zone `snakeheartgo.top` → Caching → Cache Rules → Create rule：
    - 名称：`R2 release downloads`
-   - 匹配：`http.host eq "dl.snakeheartgo.top"`
+   - 匹配：`http.host eq "dl-yacr.snakeheartgo.top"`
    - Cache eligibility：**Eligible for cache**
    - Edge TTL：**Override origin** → `31536000` 秒（包路径带 tag，内容不可变）
    - Browser TTL：**Respect origin**（对象本身是 `public, max-age=31536000, immutable`）
    - 如 Dashboard 提供 **Origin Range Requests**，建议开启，避免断点续传按段回源。
 3. **验证**（同一 URL 连续两次）：
    ```bash
-   curl -sI https://dl.snakeheartgo.top/releases/v0.1.7/yacr-0.1.7-linux-x86_64.flatpak
+   curl -sI https://dl-yacr.snakeheartgo.top/releases/v0.1.7/yacr-0.1.7-linux-x86_64.flatpak
    # 第一次 cf-cache-status: MISS，第二次 HIT；Server: cloudflare
    ```
    命中后重复下载不再产生 R2 `GetObject`（Class B）；冷缓存/缓存过期后仍会回源。
@@ -63,13 +63,13 @@ Cloudflare 账户的 zone `snakeheartgo.top` 上，因此可以套用 Cloudflare
 ### 仓库侧接线
 
 - `scripts/upload-r2-downloads.sh` 把 `cdnBase` 写成
-  `${R2_PUBLIC_BASE}/releases/<tag>`，默认 `https://dl.snakeheartgo.top`；写入前会对 4 个主包做
+  `${R2_PUBLIC_BASE}/releases/<tag>`，默认 `https://dl-yacr.snakeheartgo.top`；写入前会对 4 个主包做
   **HEAD 探测**，自定义域名不可达时**非零退出**（不会静默退回 r2.dev）。显式回退：
   `R2_PUBLIC_BASE=managed`。
-- `.github/workflows/site.yml` 的 `public_base` 输入（默认 `https://dl.snakeheartgo.top`）传给该
+- `.github/workflows/site.yml` 的 `public_base` 输入（默认 `https://dl-yacr.snakeheartgo.top`）传给该
   脚本；因此在自定义域名 Active 之前，`upload_downloads=true` 的部署会 fail-closed。
   只改文案/布局时用 `upload_downloads=false`，部署仓库里已提交的 `downloads.json`。
-- 提交的 `downloads.json` 在域名验证通过后同步为 `cdnBase=https://dl.snakeheartgo.top/releases/<tag>`；
+- 提交的 `downloads.json` 在域名验证通过后同步为 `cdnBase=https://dl-yacr.snakeheartgo.top/releases/<tag>`；
   `scripts/test-landing-site.py` 会锁这个常量。
 - 这里减少的是 **R2 Class B 请求数**（出网本来免费）；缓存命中/部署成功都不构成运行时或像素验收。
 
@@ -91,7 +91,7 @@ CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... bash scripts/deploy-landing-p
 2. 对每个 `*.sha256` 运行 `sha256sum -c`；
 3. 幂等创建 `yacr-downloads` 桶并启用 r2.dev 托管域名（显式回退用）；
 4. 用 wrangler v4 `r2 object put ... --remote` 上传（**必须** `--remote`，v4 默认写本地模拟）；
-5. 对 4 个主包在选定的公共 base（默认 `dl.snakeheartgo.top`）做 `curl -fsI` HEAD；
+5. 对 4 个主包在选定的公共 base（默认 `dl-yacr.snakeheartgo.top`）做 `curl -fsI` HEAD；
 6. 全部成功后用临时文件 + `mv` 原子重写 `apps/landing/downloads.json`。
 
 `deploy-landing-pages.sh` 会先校验静态目录（文件非空、`index.html` 引用 `styles.css`/`main.js`、
@@ -141,7 +141,7 @@ python3 scripts/build-landing-changelog.py --check   # 只校验是否已过期�
 ## 诚实边界
 
 - **`r2.dev` 是测试/低成本回退**：有速率限制、不承诺生产 SLA，且**不能**使用 Cloudflare 缓存/
-  Cache Rules；主下载域名应使用已绑定的自定义域名 `dl.snakeheartgo.top`。国内访问
+  Cache Rules；主下载域名应使用已绑定的自定义域名 `dl-yacr.snakeheartgo.top`。国内访问
   `r2.dev`、`pages.dev` 与自定义域名仍可能不稳定，缓存只能减少回源，不改变可达性。
 - `downloads.json` 的 `cdnBase` 可以是 `null`（GitHub 回退）、自定义下载域名，或显式回退到
   r2.dev（`R2_PUBLIC_BASE=managed`）。若把 `cdnBase` 设为 `null`，页面回退 GitHub，
