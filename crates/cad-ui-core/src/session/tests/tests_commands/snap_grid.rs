@@ -259,7 +259,8 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "VPCLIP",
             "VPSCALE",
             "LAYVPI",
-            // The 2026-11-07 dimension-editing batch.
+            // The dimension argument forms.
+            "DIMSPACE",
             "DIMSTYLE",
             "DIMTEDIT",
             "DIMEDIT",

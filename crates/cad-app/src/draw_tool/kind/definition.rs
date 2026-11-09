@@ -305,24 +305,22 @@ pub enum DrawToolKind {
     /// `ARRAYEDIT` / grips, `Path` arrays, `Levels`, `Total` and angle-interval
     /// inputs, a configurable `MAXARRAY`, and 3D.
     ArrayPolar,
-    /// ALIGN: two pairs of points (`Exact(4)`) that move+rotate the selection
-    /// (ADR 0016 decision F).
+    /// ALIGN: one, two or three pairs of points that move+rotate(+scale) the
+    /// selection (ADR 0016 decision F, extended 2026-11-09).
     ///
-    /// Capture order follows AutoCAD: the first **source** point, its
-    /// **destination**, then the second source point and its destination. The
-    /// transform translates `source1 → dest1`, rotates by the angle between the
-    /// two source/destination directions, and (only when the session
-    /// [`super::ToolParameter::AlignScale`] flag is true) applies a **uniform**
-    /// scale of `|dest2 − dest1| / |source2 − source1|` about `source1`. The
-    /// command layer builds and applies the composed transform to the whole
-    /// selection **in place** (no copies) in one transaction / one undo step; the
-    /// flag is the session typed channel, read by the command layer — never a
-    /// payload field.
+    /// Capture order follows AutoCAD: source then destination per pair, with the
+    /// pair count fixed by the session [`super::ToolParameter::AlignPairs`]
+    /// parameter (`Exact(2 × count)`). One pair is a pure move by the pair delta;
+    /// two pairs translate and rotate (and scale only when the session
+    /// [`super::ToolParameter::AlignScale`] flag is true); three pairs are the
+    /// rigid planar transform (no scaling, no reflection). After the second
+    /// destination a third pair is captured only when the parameter says three
+    /// — a plain extra click is refused, never treated as an ambiguous third
+    /// pair. The command layer builds and applies the composed transform **in
+    /// place** (no copies) in one transaction / one undo step.
     ///
-    /// Deliberate subset (NOT IMPLEMENTED for now): three-pair 3D alignment,
-    /// **non-uniform** scaling, and the one-pair "move only" case (its effect is
-    /// exactly MOVE, and the `PointArity` model cannot express AutoCAD's
-    /// even-point "2 or 4 points" prompt — see ADR 0016 decision F).
+    /// Deliberate subset (NOT IMPLEMENTED for now): 3D alignment and
+    /// **non-uniform** scaling.
     Align,
     /// STRETCH: the two opposite corners of a **crossing window**, then a base
     /// point and a displacement point (`Exact(4)`, no entity picks; ADR 0016
@@ -691,21 +689,22 @@ pub enum DrawToolKind {
     /// BREAK: pick one LINE/ARC/CIRCLE/SPLINE (the first click is also the
     /// **first break point**) and then click the second break point.
     ///
-    /// The capture is exactly two points ([`PointArity::Exact(2)`]); only the
-    /// **first** step is an entity pick ([`DrawToolKind::picked_step_count`] is
-    /// `1`), so the first click resolves the target and is stored as `first`,
-    /// while the second click is a free point stored as `second`. The kind
-    /// requires no pre-selection and no typed text.
+    /// The default capture is exactly two points ([`PointArity::Exact(2)`]); only
+    /// the **first** step is an entity pick ([`DrawToolKind::picked_step_count`]
+    /// is `1`), so the first click resolves the target and is stored as `first`,
+    /// while the second click is a free point stored as `second`. With the session
+    /// [`super::ToolParameter::BreakFirstPoint`] flag set, the capture is three
+    /// points: the first click only resolves the target, the second is the first
+    /// break point and the third is the second break point (AutoCAD's `F`). The
+    /// kind requires no pre-selection and no typed text.
     ///
     /// The command layer projects both clicks onto the target's own parameter
     /// space, removes the span between them and keeps the complementary piece(s).
     /// The source entity is retained as the first piece and at most one new entity
     /// is inserted (the second piece, or a CIRCLE's single ARC complement).
     ///
-    /// Declared v1 limits (do not read more into this kind): a LWPOLYLINE (and
-    /// every other geometry kind) is an explicit refusal; AutoCAD's `F`
-    /// first-point override and multiple-break mode are **NOT IMPLEMENTED**.
-    /// Work-only.
+    /// Declared v1 limits (do not read more into this kind): AutoCAD's multiple
+    /// break mode is **NOT IMPLEMENTED**. Work-only.
     Break,
     /// BREAKATPOINT: split one object into two at a single **projected** point.
     ///
@@ -734,6 +733,12 @@ pub enum DrawToolKind {
     /// `2`). It is ready as soon as the selection is non-empty; the command layer
     /// enforces "exactly one" and every geometry refusal.
     ///
+    /// The block option is selected by [`super::ToolParameter::DivideUseBlock`]:
+    /// it adds the terminal typed-text step (the same channel INSERT uses) for the
+    /// **block name**, producing [`crate::DrawIntent::DivideBlock`] and the existing
+    /// `InsertBlock { name, .. }` payload. With the flag off (the default) the
+    /// capture places POINT marks and takes no text.
+    ///
     /// Divisions are by **equal arc length** (not parameter): `N − 1` interior
     /// POINTs on an open LINE/ARC/straight polyline, and `N` POINTs on a periodic
     /// CIRCLE or a closed straight polyline. The source curve is retained; the
@@ -742,27 +747,32 @@ pub enum DrawToolKind {
     ///
     /// Declared v1 limits (do not read more into this kind): `SPLINE` and every
     /// other kind is an explicit refusal (a spline's parameter is not arc length),
-    /// a **bulged** LWPOLYLINE is refused (straight segments only), and AutoCAD's
-    /// block-aligned `DIVIDE` (`B` option) is **NOT IMPLEMENTED**. Work-only.
+    /// and a **bulged** LWPOLYLINE is refused (straight segments only). Work-only.
     Divide,
     /// LENGTHEN: change the length of the **one** pre-selected LINE or ARC
     /// (2026-11-01).
     ///
-    /// Same zero-point pre-selection shape as [`Self::Divide`]: arity is
-    /// [`PointArity::Exact`]`(0)`, no entity-pick steps
+    /// Same zero-point pre-selection shape as [`Self::Divide`] by default: arity
+    /// is [`PointArity::Exact`]`(0)`, no entity-pick steps
     /// ([`Self::picked_step_count`] is `0`), a non-empty selection is required and
     /// no typed text is captured. The mode and amount are the session typed
     /// channel [`super::ToolParameter::LengthenMode`] (`0` Delta, `1` Percent, `2`
-    /// Total) and [`super::ToolParameter::LengthenValue`] (finite, non-zero).
+    /// Total, `3` Dynamic) and [`super::ToolParameter::LengthenValue`] (finite,
+    /// non-zero; not read in Dynamic).
     ///
-    /// **Declared v1 deviation**: AutoCAD lengthens the end nearest the pick;
-    /// this build always moves the **end** endpoint (a LINE's `end`, an ARC's
-    /// `start + sweep`) and keeps the other end/centre fixed. A sweep above one
-    /// full turn is refused rather than clamped; exactly one turn stays an `Arc`.
+    /// When the mode is **Dynamic** (`3`, `DY`) the capture is replanned to two
+    /// picks: the object pick, then the new end point. The command projects the
+    /// second point onto the curve and moves the end nearest it (a LINE endpoint
+    /// or an ARC end). The **second** pick therefore decides which end moves;
+    /// this matches the command's existing `Points` contract.
+    ///
+    /// **Declared v1 deviation**: the static modes always move the **end**
+    /// endpoint (a LINE's `end`, an ARC's `start + sweep`) and keep the other
+    /// end/centre fixed. A sweep above one full turn is refused rather than
+    /// clamped; exactly one turn stays an `Arc`.
     ///
     /// Declared v1 limits: only `LINE` and `ARC` are supported (`CIRCLE`,
-    /// polylines, `SPLINE` and every other kind are explicit refusals), and
-    /// AutoCAD's `DYnamic` drag mode is **NOT IMPLEMENTED**. Work-only.
+    /// polylines, `SPLINE` and every other kind are explicit refusals). Work-only.
     Lengthen,
     /// INSERT: one insertion point, then the block **name** as the terminal typed
     /// text (point-then-name order).

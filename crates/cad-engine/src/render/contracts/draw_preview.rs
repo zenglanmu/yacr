@@ -95,6 +95,7 @@ fn line_preview(cursor: [f64; 2]) -> cad_app::DrawPreview {
         remaining: 1,
         selection_count: 0,
         ready: false,
+        point_target: None,
         polygon_sides: None,
         awaiting_text: false,
         text_prefill: None,

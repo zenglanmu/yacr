@@ -601,6 +601,32 @@ impl DimensionGeometry {
     pub fn text_override(&self) -> Option<&str> {
         self.text_override.as_deref()
     }
+
+    /// Rebuild this dimension under another DIMSTYLE snapshot.
+    ///
+    /// The definition (including the per-entity text middle/rotation), the text
+    /// override and the display provenance are kept; only the style name and the
+    /// resolved style snapshot change. A synthesized dimension is re-synthesized
+    /// so its display and measurement follow the new style; a picture-branch
+    /// dimension keeps its authoritative picture display and has only its
+    /// measurement/style snapshot recomputed.
+    pub fn with_style(&self, style_name: String, style: DimensionStyleValues) -> CadResult<Self> {
+        match self.source {
+            DisplaySource::Synthesized => Self::synthesized(
+                self.definition.clone(),
+                style_name,
+                style,
+                self.text_override.clone(),
+            ),
+            DisplaySource::Picture => Self::from_picture(
+                self.definition.clone(),
+                style_name,
+                style,
+                self.text_override.clone(),
+                self.display.clone(),
+            ),
+        }
+    }
 }
 
 pub(crate) fn place_text(

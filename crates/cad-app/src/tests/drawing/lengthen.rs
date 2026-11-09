@@ -155,16 +155,6 @@ fn assert_invalid(error: CadError, code: &str) {
     }
 }
 
-fn assert_unsupported(error: CadError, needle: &str) {
-    match error {
-        CadError::Unsupported(message) => assert!(
-            message.contains(needle),
-            "expected Unsupported containing {needle}, got {message}"
-        ),
-        other => panic!("expected Unsupported containing {needle}, got {other:?}"),
-    }
-}
-
 fn line_source() -> DbEntity {
     curve_entity(
         1,
@@ -313,7 +303,7 @@ fn an_arc_sweep_of_exactly_one_turn_stays_an_arc() {
         0,
     );
     let (mut app, mut session) = app_with(vec![source]);
-    set_mode_value(&mut session, TOTAL, TAU);
+    set_mode_value(&mut session, TOTAL, 360.0);
     lengthen(&mut app, &mut session, vec![ref_of(1)]).expect("one full turn is accepted");
     match &entity(&app, 1).geometry {
         SemanticGeometry::Arc { sweep, .. } => assert!(near(*sweep, TAU), "{sweep}"),
@@ -350,8 +340,8 @@ fn an_arc_beyond_one_full_turn_overflows_by_name() {
         0,
     );
     let (mut app, mut session) = app_with(vec![source]);
-    // Total length 7 with radius 1 would sweep 7 rad > 2π.
-    set_mode_value(&mut session, TOTAL, 7.0);
+    // Total included angle 361° would sweep more than one full turn.
+    set_mode_value(&mut session, TOTAL, 361.0);
     let before_revision = revision(&app);
     let error = lengthen(&mut app, &mut session, vec![ref_of(1)])
         .expect_err("more than one turn is refused");
@@ -395,7 +385,8 @@ fn degenerate_line_and_arc_targets_are_refused() {
 }
 
 #[test]
-fn only_line_and_arc_targets_are_supported() {
+fn closed_objects_are_refused_and_open_curves_are_supported() {
+    // Circles and full ellipses have no ends, so LENGTHEN refuses them by name.
     let circle = curve_entity(
         1,
         LayerId(0),
@@ -410,10 +401,50 @@ fn only_line_and_arc_targets_are_supported() {
     let (mut app, mut session) = app_with(vec![circle]);
     set_mode_value(&mut session, DELTA, 1.0);
     let error = lengthen(&mut app, &mut session, vec![ref_of(1)]).expect_err("CIRCLE is refused");
-    assert_unsupported(error, "CIRCLE is not supported");
+    assert_invalid(error, "lengthen.closed");
     assert_eq!(undo_depth(&app), 0);
 
-    let polyline = curve_entity(
+    let closed_polyline = curve_entity(
+        1,
+        LayerId(0),
+        SemanticGeometry::Polyline {
+            points: vec![point(0.0, 0.0), point(4.0, 0.0), point(4.0, 4.0)],
+            bulges: vec![0.0; 3],
+            closed: true,
+        },
+        "AcDbPolyline",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![closed_polyline]);
+    set_mode_value(&mut session, DELTA, 1.0);
+    let error = lengthen(&mut app, &mut session, vec![ref_of(1)])
+        .expect_err("a closed polyline is refused");
+    assert_invalid(error, "lengthen.closed");
+    assert_eq!(undo_depth(&app), 0);
+
+    let full_ellipse = curve_entity(
+        1,
+        LayerId(0),
+        SemanticGeometry::Ellipse {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            major_axis: p3(4.0, 0.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            sweep: TAU,
+        },
+        "AcDbEllipse",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![full_ellipse]);
+    set_mode_value(&mut session, DELTA, 1.0);
+    let error =
+        lengthen(&mut app, &mut session, vec![ref_of(1)]).expect_err("a full ellipse is refused");
+    assert_invalid(error, "lengthen.closed");
+    assert_eq!(undo_depth(&app), 0);
+
+    // An open polyline is supported: delta +1 extends the end by one unit.
+    let open_polyline = curve_entity(
         1,
         LayerId(0),
         SemanticGeometry::Polyline {
@@ -424,12 +455,18 @@ fn only_line_and_arc_targets_are_supported() {
         "AcDbPolyline",
         0,
     );
-    let (mut app, mut session) = app_with(vec![polyline]);
+    let (mut app, mut session) = app_with(vec![open_polyline]);
     set_mode_value(&mut session, DELTA, 1.0);
-    let error = lengthen(&mut app, &mut session, vec![ref_of(1)]).expect_err("polyline is refused");
-    assert_unsupported(error, "LWPOLYLINE is not supported");
-    assert_eq!(undo_depth(&app), 0);
+    lengthen(&mut app, &mut session, vec![ref_of(1)]).expect("an open polyline lengthens");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Polyline { points, .. } => {
+            assert!(near(points.last().unwrap().x, 5.0), "{:?}", points);
+        }
+        other => panic!("expected a Polyline, got {other:?}"),
+    }
 
+    // An open spline is supported for shortening; extending a NURBS curve has no
+    // continuation semantics and is refused by name.
     let fit = vec![
         point(0.0, 0.0),
         point(1.0, 2.0),
@@ -448,9 +485,38 @@ fn only_line_and_arc_targets_are_supported() {
     let (mut app, mut session) =
         app_with(vec![curve_entity(1, LayerId(0), spline, "AcDbSpline", 0)]);
     set_mode_value(&mut session, DELTA, 1.0);
-    let error = lengthen(&mut app, &mut session, vec![ref_of(1)]).expect_err("spline is refused");
-    assert_unsupported(error, "SPLINE is not supported");
+    let error = lengthen(&mut app, &mut session, vec![ref_of(1)])
+        .expect_err("extending a spline is refused");
+    assert_invalid(error, "lengthen.spline_extend_unsupported");
     assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn spline_trim_keeps_an_exact_sub_curve() {
+    let fit = vec![
+        point(0.0, 0.0),
+        point(1.0, 2.0),
+        point(2.5, 2.5),
+        point(4.0, 1.0),
+        point(5.5, -1.0),
+    ];
+    let (knots, control_points) =
+        crate::draw_tool::spline_control_points(&fit).expect("a valid fit spline");
+    let spline = SemanticGeometry::Spline {
+        degree: cad_geometry::FIT_SPLINE_DEGREE,
+        knots,
+        control_points,
+        weights: vec![1.0; fit.len()],
+    };
+    let (mut app, mut session) =
+        app_with(vec![curve_entity(1, LayerId(0), spline, "AcDbSpline", 0)]);
+    set_mode_value(&mut session, PERCENT, 50.0);
+    lengthen(&mut app, &mut session, vec![ref_of(1)]).expect("50% of the spline is kept");
+    assert!(matches!(
+        entity(&app, 1).geometry,
+        SemanticGeometry::Spline { .. }
+    ));
+    assert_eq!(undo_depth(&app), 1);
 }
 
 #[test]
@@ -468,7 +534,6 @@ fn lengthen_needs_exactly_one_selected_curve() {
 #[test]
 fn an_invalid_mode_or_amount_is_refused_defensively() {
     let cases: Vec<(&str, Option<f64>, Option<f64>)> = vec![
-        ("mode 3", Some(3.0), Some(1.0)),
         ("fractional mode", Some(0.5), Some(1.0)),
         ("NaN mode", Some(f64::NAN), Some(1.0)),
         ("zero amount", Some(DELTA), Some(0.0)),
@@ -490,10 +555,23 @@ fn an_invalid_mode_or_amount_is_refused_defensively() {
         assert_eq!(undo_depth(&app), 0, "{label}: no transaction");
         assert_eq!(entity_count(&app), 1, "{label}: nothing written");
     }
-    // The typed channel itself refuses the same values.
+    // Mode 3 (Dynamic) is a valid channel value, but the static `Lengthen`
+    // payload has no points to project; it is a named payload refusal.
+    let (mut app, mut session) = app_with(vec![line_source()]);
+    session.force_tool_parameter(ToolParameter::LengthenMode, ToolValue::Number(3.0));
+    let error = lengthen(&mut app, &mut session, vec![ref_of(1)])
+        .expect_err("the static payload cannot resolve the dynamic mode");
+    assert_invalid(error, "lengthen.invalid_payload");
+    assert_eq!(
+        undo_depth(&app),
+        0,
+        "dynamic static payload: no transaction"
+    );
+
+    // The typed channel itself refuses the remaining invalid values.
     let mut session = SessionState::new(DocumentId(1), AppMode::Work);
     assert!(session
-        .set_tool_parameter(ToolParameter::LengthenMode, ToolValue::Number(3.0))
+        .set_tool_parameter(ToolParameter::LengthenMode, ToolValue::Number(4.0))
         .is_err());
     assert!(session
         .set_tool_parameter(ToolParameter::LengthenValue, ToolValue::Number(0.0))
@@ -565,5 +643,298 @@ fn a_sub_element_reference_is_not_addressable() {
     let error = lengthen(&mut app, &mut session, vec![reference])
         .expect_err("a sub-element is not addressable");
     assert_invalid(error, "lengthen.not_addressable");
+    assert_eq!(undo_depth(&app), 0);
+}
+
+fn select_one(session: &mut SessionState, entity: u128) {
+    session.selection.replace([ref_of(entity)]);
+}
+
+fn lengthen_dynamic(
+    app: &mut Application,
+    session: &mut SessionState,
+    entity: u128,
+    pick: Point3,
+    new_end: Point3,
+) -> CadResult<CommandOutcome> {
+    select_one(session, entity);
+    execute(
+        app,
+        session,
+        CommandId::Lengthen,
+        CommandPayload::Points(vec![pick, new_end]),
+    )
+}
+
+/// The static DE/PER/TOT shape: one pick selects the end that moves.
+fn lengthen_static_pick(
+    app: &mut Application,
+    session: &mut SessionState,
+    entity: u128,
+    pick: Point3,
+) -> CadResult<CommandOutcome> {
+    select_one(session, entity);
+    execute(
+        app,
+        session,
+        CommandId::Lengthen,
+        CommandPayload::Points(vec![pick]),
+    )
+}
+
+#[test]
+fn a_static_pick_moves_the_endpoint_nearest_it() {
+    // Pick near the START: the start moves and the end stays at x = 5.
+    let (mut app, mut session) = app_with(vec![line_source()]);
+    set_mode_value(&mut session, DELTA, 2.0);
+    lengthen_static_pick(&mut app, &mut session, 1, point(1.0, 0.0))
+        .expect("delta from the nearest endpoint");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Line { start, end } => {
+            assert!(near(start.x, -2.0), "start moved: {start:?}");
+            assert!(near(end.x, 5.0), "end kept: {end:?}");
+        }
+        other => panic!("expected a LINE, got {other:?}"),
+    }
+    assert!(near(geometry_length(&entity(&app, 1).geometry), 7.0));
+
+    // Pick near the END: the end moves, the start stays.
+    let (mut app, mut session) = app_with(vec![line_source()]);
+    set_mode_value(&mut session, PERCENT, 50.0);
+    lengthen_static_pick(&mut app, &mut session, 1, point(4.0, 0.0))
+        .expect("percent from the nearest endpoint");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Line { start, end } => {
+            assert!(near(start.x, 0.0), "start kept: {start:?}");
+            assert!(near(end.x, 2.5), "end shortened to half: {end:?}");
+        }
+        other => panic!("expected a LINE, got {other:?}"),
+    }
+}
+
+#[test]
+fn total_on_an_arc_measured_from_the_nearest_pick_keeps_the_far_end() {
+    let source = curve_entity(
+        1,
+        LayerId(0),
+        arc_geometry(point(0.0, 0.0), 5.0, 0.0, std::f64::consts::FRAC_PI_2),
+        "AcDbArc",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    set_mode_value(&mut session, TOTAL, 45.0);
+    // The pick is at the start (5, 0), so the start moves back from the end.
+    lengthen_static_pick(&mut app, &mut session, 1, point(5.0, 0.0))
+        .expect("total angle from the nearest endpoint");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Arc { start, sweep, .. } => {
+            assert!(near(*sweep, std::f64::consts::FRAC_PI_4), "{sweep}");
+            assert!(near(*start, std::f64::consts::FRAC_PI_4), "{start}");
+        }
+        other => panic!("expected an ARC, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_static_polyline_pick_trims_the_near_end_and_keeps_the_far_length() {
+    let source = curve_entity(
+        1,
+        LayerId(0),
+        SemanticGeometry::Polyline {
+            points: vec![point(0.0, 0.0), point(4.0, 0.0), point(4.0, 4.0)],
+            bulges: vec![0.0, 0.0],
+            closed: false,
+        },
+        "AcDbPolyline",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    set_mode_value(&mut session, DELTA, -3.0);
+    lengthen_static_pick(&mut app, &mut session, 1, point(0.0, 0.0))
+        .expect("trim from the nearest end");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Polyline { points, .. } => {
+            assert!(
+                near(points[0].x, 3.0) && near(points[0].y, 0.0),
+                "{:?}",
+                points[0]
+            );
+            assert!(
+                near(points[1].x, 4.0) && near(points[1].y, 0.0),
+                "{:?}",
+                points[1]
+            );
+            assert!(near(points[2].y, 4.0), "{:?}", points[2]);
+        }
+        other => panic!("expected a Polyline, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_elliptical_arc_static_pick_moves_the_nearest_end() {
+    let source = curve_entity(
+        1,
+        LayerId(0),
+        SemanticGeometry::Ellipse {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            major_axis: p3(5.0, 0.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            sweep: std::f64::consts::FRAC_PI_2,
+        },
+        "AcDbEllipse",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    set_mode_value(&mut session, DELTA, 1.0);
+    lengthen_static_pick(&mut app, &mut session, 1, point(5.0, 0.0))
+        .expect("delta from the nearest ellipse end");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Ellipse { start, sweep, .. } => {
+            assert!(*sweep > std::f64::consts::FRAC_PI_2, "{sweep}");
+            assert!(*start < 0.0, "the start moved back: {start}");
+        }
+        other => panic!("expected an ELLIPSE, got {other:?}"),
+    }
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn arc_total_mode_reads_the_amount_as_an_included_angle_in_degrees() {
+    let source = curve_entity(
+        1,
+        LayerId(0),
+        arc_geometry(point(0.0, 0.0), 2.0, 0.0, 1.0),
+        "AcDbArc",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    set_mode_value(&mut session, TOTAL, 90.0);
+    lengthen(&mut app, &mut session, vec![ref_of(1)]).expect("90° is the new included angle");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Arc { sweep, .. } => {
+            assert!(near(*sweep, std::f64::consts::FRAC_PI_2), "{sweep}");
+        }
+        other => panic!("expected an ARC, got {other:?}"),
+    }
+}
+
+#[test]
+fn percent_mode_on_an_arc_scales_the_sweep() {
+    let source = curve_entity(
+        1,
+        LayerId(0),
+        arc_geometry(point(0.0, 0.0), 2.0, 0.0, 1.0),
+        "AcDbArc",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    set_mode_value(&mut session, PERCENT, 50.0);
+    lengthen(&mut app, &mut session, vec![ref_of(1)]).expect("50% of length 2 is 1");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Arc { radius, sweep, .. } => {
+            assert!(near(*radius, 2.0));
+            assert!(near(*sweep, 0.5), "{sweep}");
+        }
+        other => panic!("expected an ARC, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_mode_that_leaves_the_curve_at_the_same_length_is_unchanged() {
+    for (label, mode, value) in [
+        ("percent 100", PERCENT, 100.0),
+        ("total equal to the current length", TOTAL, 5.0),
+    ] {
+        let (mut app, mut session) = app_with(vec![line_source()]);
+        set_mode_value(&mut session, mode, value);
+        let before = revision(&app);
+        let outcome = lengthen(&mut app, &mut session, vec![ref_of(1)]).expect(label);
+        assert!(outcome.changes.is_none(), "{label}: no ChangeSet");
+        assert_eq!(outcome.diagnostics[0].code, "lengthen.unchanged", "{label}");
+        assert_eq!(revision(&app), before, "{label}: no revision bump");
+        assert_eq!(undo_depth(&app), 0, "{label}: no undo entry");
+    }
+}
+
+#[test]
+fn dynamic_mode_moves_the_end_nearest_the_new_point() {
+    // The new point (12,3) projects onto (12,0), which is beyond the end, so the
+    // end moves and the line becomes 0..12.
+    let (mut app, mut session) = app_with(vec![line_source()]);
+    lengthen_dynamic(&mut app, &mut session, 1, point(5.0, 0.0), point(12.0, 3.0))
+        .expect("the dynamic end lengthens the line");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Line { start, end } => {
+            assert!(near(start.x, 0.0) && near(start.y, 0.0));
+            assert!(near(end.x, 12.0) && near(end.y, 0.0), "{end:?}");
+        }
+        other => panic!("expected a LINE, got {other:?}"),
+    }
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn dynamic_mode_can_move_the_start_when_the_new_point_is_near_it() {
+    let (mut app, mut session) = app_with(vec![line_source()]);
+    lengthen_dynamic(&mut app, &mut session, 1, point(5.0, 0.0), point(-2.0, 1.0))
+        .expect("the nearer end is the start");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Line { start, end } => {
+            assert!(near(start.x, -2.0) && near(start.y, 0.0), "{start:?}");
+            assert!(near(end.x, 5.0), "{end:?}");
+        }
+        other => panic!("expected a LINE, got {other:?}"),
+    }
+    assert!(near(geometry_length(&entity(&app, 1).geometry), 7.0));
+}
+
+#[test]
+fn dynamic_mode_on_an_arc_projects_the_new_end_radially() {
+    let source = curve_entity(
+        1,
+        LayerId(0),
+        arc_geometry(point(0.0, 0.0), 5.0, 0.0, std::f64::consts::FRAC_PI_2),
+        "AcDbArc",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    let angle = 0.75 * std::f64::consts::PI;
+    lengthen_dynamic(
+        &mut app,
+        &mut session,
+        1,
+        point(5.0, 0.0),
+        point(5.0 * angle.cos(), 5.0 * angle.sin()),
+    )
+    .expect("the dynamic arc end is projected");
+    match &entity(&app, 1).geometry {
+        SemanticGeometry::Arc { sweep, .. } => assert!(near(*sweep, angle), "{sweep}"),
+        other => panic!("expected an ARC, got {other:?}"),
+    }
+}
+
+#[test]
+fn dynamic_mode_unchanged_and_projection_failures_are_named() {
+    let (mut app, mut session) = app_with(vec![line_source()]);
+    let before = revision(&app);
+    let outcome = lengthen_dynamic(&mut app, &mut session, 1, point(2.5, 0.0), point(5.0, 1.0))
+        .expect("the picked end is already there");
+    assert!(outcome.changes.is_none());
+    assert_eq!(outcome.diagnostics[0].code, "lengthen.unchanged");
+    assert_eq!(revision(&app), before);
+
+    let source = curve_entity(
+        1,
+        LayerId(0),
+        arc_geometry(point(0.0, 0.0), 5.0, 0.0, 1.0),
+        "AcDbArc",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    let error = lengthen_dynamic(&mut app, &mut session, 1, point(5.0, 0.0), point(0.0, 0.0))
+        .expect_err("the centre has no radial projection");
+    assert_invalid(error, "lengthen.projection_failed");
     assert_eq!(undo_depth(&app), 0);
 }

@@ -27,6 +27,7 @@ mod snap_grid;
 mod space_argument;
 mod standard_view;
 mod status_projection;
+mod text_arguments;
 mod text_batch;
 mod utility_arguments;
 mod view_arguments;

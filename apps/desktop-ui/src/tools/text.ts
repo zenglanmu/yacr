@@ -96,21 +96,25 @@ export const BLOCK_PICK_PROMPT_KEY = 'tool.prompt.blockdefine.pick_base';
  */
 export const BLOCK_TEXT_PROMPT_KEY = 'tool.prompt.blockdefine.type_name';
 
+export const DIVIDE_BLOCK_TEXT_PROMPT_KEY = 'tool.prompt.divide.type_block';
+
 /**
  * The catalog key naming the **text step** of the active text-carrying tool.
  *
  * The host's `awaiting_text` flag decides *that* the step is open; this only
  * picks the wording. MTEXT gets its own copy because its text is multiline and
  * the prompt must not claim otherwise; INSERT gets its own because its text is a
- * **block name**, not annotation text. Every other text-carrying tool keeps the
- * shared TEXT step key it had before. A missing or malformed tool block still
- * yields the shared key, never a guessed tool.
+ * **block name**, not annotation text; DIVIDE's block option likewise names an
+ * existing block. Every other text-carrying tool keeps the shared TEXT step key
+ * it had before. A missing or malformed tool block still yields the shared key,
+ * never a guessed tool.
  */
 export function textStepPromptKey(tool: unknown): string {
   if (!isRecord(tool)) return TEXT_STEP_PROMPT_KEY;
   if (tool.key === 'draw.mtext') return MTEXT_STEP_PROMPT_KEY;
   if (tool.key === 'draw.insertblock') return INSERT_BLOCK_TEXT_PROMPT_KEY;
   if (tool.key === 'draw.blockdefine') return BLOCK_TEXT_PROMPT_KEY;
+  if (tool.key === 'draw.divide') return DIVIDE_BLOCK_TEXT_PROMPT_KEY;
   return TEXT_STEP_PROMPT_KEY;
 }
 

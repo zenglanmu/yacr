@@ -35,8 +35,8 @@ use super::commands::{
 };
 use super::diagnostics::cad_error_text;
 use super::dim_arguments::{
-    DIMEDIT_SELECTOR, DIMJOGLINE_SELECTOR, DIMOVERRIDE_SELECTOR, DIMSTYLE_SELECTOR,
-    DIMTEDIT_SELECTOR,
+    DIMEDIT_SELECTOR, DIMJOGLINE_SELECTOR, DIMOVERRIDE_SELECTOR, DIMSPACE_SELECTOR,
+    DIMSTYLE_SELECTOR, DIMTEDIT_SELECTOR,
 };
 use super::{
     CadSession, ARGUMENT_SELECTOR, HATCHEDIT_SELECTOR, JUSTIFYTEXT_SELECTOR, PDMODE_SELECTOR,
@@ -119,6 +119,10 @@ impl CadSession {
             | super::commands::VPCLIP_SELECTOR
             | super::commands::VPSCALE_SELECTOR
             | super::commands::LAYVPI_SELECTOR => self.layout_argument(selector, argument, text),
+
+            // `DIMSPACE <spacing>`: the explicit positive row pitch rides the
+            // payload; a bare `DIMSPACE` keeps the name-only Auto form.
+            DIMSPACE_SELECTOR => self.dimspace_argument(argument, text),
 
             // The 2026-11-07 dimension-editing batch typed forms.
             DIMSTYLE_SELECTOR | DIMTEDIT_SELECTOR | DIMEDIT_SELECTOR | DIMOVERRIDE_SELECTOR

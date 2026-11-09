@@ -1,16 +1,17 @@
-//! Typed-argument forms of the 2026-11-07 dimension-editing batch:
-//! `DIMSTYLE`, `-DIMSTYLE`, `DIMTEDIT`, `DIMEDIT`, `DIMOVERRIDE` and
-//! `DIMJOGLINE`.
+//! Typed-argument forms of the dimension commands: `DIMSPACE`, `DIMSTYLE`,
+//! `-DIMSTYLE`, `DIMTEDIT`, `DIMEDIT`, `DIMOVERRIDE` and `DIMJOGLINE`.
 //!
 //! Each is an **argument form of its base selector**, not a second command:
 //! `-DIMSTYLE` normalizes onto `DIMSTYLE` before this module sees it, and every
 //! other selector keeps its one [`CommandId`]. The selection (where relevant) is
 //! still the input; this module only parses the typed argument and dispatches the
-//! matching [`CommandPayload::Dimension`].
+//! matching payload (`CommandPayload::DimSpace` for the spacing value,
+//! [`CommandPayload::Dimension`] for the editing batch).
 //!
-//! A bare selector keeps the name-only funnel and is refused by the application
-//! with `*.needs_option`, never defaulted. An argument outside a grammar is
-//! refused before IPC with [`invalid_dim_argument_reason`] and changes nothing.
+//! A bare selector keeps the name-only funnel (Auto for `DIMSPACE`; the
+//! editing batch is refused by the application with `*.needs_option`), never
+//! defaulted. An argument outside a grammar is refused before IPC with
+//! [`invalid_dim_argument_reason`] and changes nothing.
 
 use cad_app::{
     CommandId, CommandPayload, DimEditCommand, DimJogLineCommand, DimOverrideCommand,
@@ -19,6 +20,10 @@ use cad_app::{
 
 use super::diagnostics::cad_error_text;
 use super::CadSession;
+
+/// `DIMSPACE <spacing>`: one explicit positive row pitch; a bare selector is
+/// Auto (the base dimension's measurement).
+pub const DIMSPACE_SELECTOR: &str = "DIMSPACE";
 
 /// `DIMSTYLE LIST|CURRENT|SET <name>`: the stored DIMSTYLE table.
 pub const DIMSTYLE_SELECTOR: &str = "DIMSTYLE";
@@ -34,6 +39,26 @@ pub const DIMOVERRIDE_SELECTOR: &str = "DIMOVERRIDE";
 
 /// `DIMJOGLINE ADD <x> <y>|REMOVE`: modelled so the refusal can name the gap.
 pub const DIMJOGLINE_SELECTOR: &str = "DIMJOGLINE";
+
+/// Parse `DIMSPACE <spacing>`: exactly one **non-negative** finite decimal.
+///
+/// The numeric shape is the repository's plain-decimal grammar
+/// ([`super::commands::parse_signed_decimal`]) with an unsigned, non-negative
+/// value: `5`, `2.5`, `0.5` and `0`. Zero is meaningful — AutoCAD's
+/// `DIMSPACE 0` **aligns** every target on the base dimension line — so it is
+/// admitted here and handed to the command. Negatives, a leading sign,
+/// exponents (`1e3`), a bare `.`/`5.`, embedded spaces (`5 6`) and trailing
+/// junk are refused with `None`. The caller turns `None` into
+/// [`invalid_dimspace_argument_reason`]; nothing is clamped and no spacing is
+/// invented. A bare `DIMSPACE` is the separate **Auto** form and never reaches
+/// this parser.
+pub fn parse_dimspace_argument(argument: &str) -> Option<f64> {
+    let text = argument.trim();
+    if text.starts_with(['+', '-']) {
+        return None;
+    }
+    super::commands::parse_signed_decimal(text).filter(|value| *value >= 0.0)
+}
 
 /// Parse `DIMSTYLE LIST|CURRENT|SET <name>`.
 ///
@@ -137,6 +162,18 @@ pub fn parse_dimjogline_argument(argument: &str) -> Option<DimJogLineCommand> {
     }
 }
 
+/// The stable refusal for a `DIMSPACE` argument outside the grammar.
+///
+/// The typed line is echoed and both accepted forms are named: one positive
+/// finite spacing value, or no argument for **Auto**.
+pub fn invalid_dimspace_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (DIMSPACE needs one non-negative finite spacing — `0` \
+         aligns — e.g. `DIMSPACE 5`, or no argument for Auto)",
+        text.trim()
+    )
+}
+
 /// The stable refusal for an argument outside a selector's grammar.
 pub fn invalid_dim_argument_reason(selector: &str, text: &str) -> String {
     format!(
@@ -147,6 +184,33 @@ pub fn invalid_dim_argument_reason(selector: &str, text: &str) -> String {
 }
 
 impl CadSession {
+    /// Apply one typed `DIMSPACE <spacing>` line: the explicit positive row
+    /// pitch travels as [`CommandPayload::DimSpace`]`(Some(value))`.
+    ///
+    /// The current selection is still the whole object input. A bare `DIMSPACE`
+    /// never reaches here: it keeps the name-only funnel and dispatches
+    /// `CommandPayload::None` (Auto, the base dimension's measurement).
+    pub(super) fn dimspace_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some(spacing) = parse_dimspace_argument(argument) else {
+            return self.refuse_argument(invalid_dimspace_argument_reason(text));
+        };
+        self.core.record_command(DIMSPACE_SELECTOR);
+        match self
+            .core
+            .command(CommandId::DimSpace, CommandPayload::DimSpace(Some(spacing)))
+        {
+            Ok(()) => {
+                *self.error.borrow_mut() = None;
+                Ok(())
+            }
+            Err(error) => {
+                let text = cad_error_text(&error);
+                *self.error.borrow_mut() = Some(text.clone());
+                Err(text)
+            }
+        }
+    }
+
     /// Dispatch one admitted dimension-batch argument line.
     pub(super) fn dim_argument(
         &self,

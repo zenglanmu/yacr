@@ -1,5 +1,5 @@
 //! The two typed argument forms of the text commands: `TORIENT <angle-degrees>`
-//! and `TCASE <mode>` (2026-11-07).
+//! / `TORIENT REVERSE` and `TCASE <mode>` (2026-11-07).
 //!
 //! Both are **argument forms of their base selectors**, not commands of their
 //! own: there is no second `CommandId` and no second IPC. The selection is still
@@ -7,7 +7,9 @@
 //! matching [`cad_app::CommandPayload`].
 //!
 //! * `TORIENT <angle>` carries [`cad_app::CommandPayload::Torient`] with the
-//!   absolute angle in **degrees** (finite decimal, sign allowed). A bare
+//!   absolute angle in **degrees** (finite decimal, sign allowed). The words
+//!   `REVERSE`/`R` (case-insensitive) carry
+//!   [`cad_app::CommandPayload::TorientReverse`] instead (add 180°). A bare
 //!   `TORIENT` never reaches here: it keeps the name-only funnel and the
 //!   application applies the Most Readable fold.
 //! * `TCASE <mode>` carries [`cad_app::CommandPayload::TCase`] with one of the
@@ -43,18 +45,33 @@ pub const TORIENT_SELECTOR: &str = "TORIENT";
 /// (case-insensitive), parsed by [`parse_tcase_argument`].
 pub const TCASE_SELECTOR: &str = "TCASE";
 
+/// One admitted `TORIENT` argument: an absolute angle or the Reverse option.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TorientArgument {
+    /// Absolute rotation in **degrees** (finite decimal, sign allowed).
+    Angle(f64),
+    /// AutoCAD's `Reverse` option (`REVERSE`/`R`): add 180° to each rotation.
+    Reverse,
+}
+
 /// Parse the argument of a `TORIENT` selector: one finite decimal angle in
-/// **degrees**.
+/// **degrees**, or the `REVERSE`/`R` word.
 ///
 /// The numeric shape is the same narrow decimal as `PDSIZE`
 /// ([`parse_signed_decimal`]): `45`, `22.5`, `0`, `-90`, `+30`. The sign is
 /// meaningful (a clockwise absolute rotation), exponents (`1e3`), a bare
 /// `.`/`5.`, embedded spaces (`45 30`) and every non-finite magnitude are
-/// refused with `None`. The caller turns `None` into the stable refusal from
+/// refused with `None`. `REVERSE` and `R` are matched case-insensitively and
+/// carry [`TorientArgument::Reverse`]; no other word or partial spelling is
+/// admitted. The caller turns `None` into the stable refusal from
 /// [`invalid_torient_argument_reason`]; nothing is clamped and no default angle
 /// is invented. A bare `TORIENT` is the separate Most Readable form.
-pub fn parse_torient_argument(argument: &str) -> Option<f64> {
-    parse_signed_decimal(argument.trim())
+pub fn parse_torient_argument(argument: &str) -> Option<TorientArgument> {
+    let trimmed = argument.trim();
+    if trimmed.eq_ignore_ascii_case("REVERSE") || trimmed.eq_ignore_ascii_case("R") {
+        return Some(TorientArgument::Reverse);
+    }
+    parse_signed_decimal(trimmed).map(TorientArgument::Angle)
 }
 
 /// Parse the argument of a `TCASE` selector: one of the five case modes.
@@ -86,13 +103,14 @@ pub fn parse_tcase_argument(argument: &str) -> Option<TextCaseMode> {
 
 /// The stable rejection reason for a `TORIENT` argument outside the grammar.
 ///
-/// The typed line is echoed and the accepted grammar (one finite decimal angle
-/// in degrees, sign allowed) is named. The bare command is a different form
-/// (Most Readable), so an empty argument never reaches this refusal.
+/// The typed line is echoed and both accepted forms are named: one finite
+/// decimal angle in degrees (sign allowed) or the `REVERSE`/`R` word (add 180°).
+/// The bare command is a different form (Most Readable), so an empty argument
+/// never reaches this refusal.
 pub fn invalid_torient_argument_reason(text: &str) -> String {
     format!(
         "unsupported CAD command: {} (TORIENT needs one finite decimal angle in degrees, e.g. \
-         `TORIENT 45`, or no argument for Most Readable)",
+         `TORIENT 45`, REVERSE or R to add 180°, or no argument for Most Readable)",
         text.trim()
     )
 }
@@ -111,18 +129,18 @@ pub fn invalid_tcase_argument_reason(text: &str) -> String {
 }
 
 impl CadSession {
-    /// Apply one typed `TORIENT <angle-degrees>` line.
+    /// Apply one typed `TORIENT <angle-degrees>` / `TORIENT REVERSE` line.
     fn torient_argument(&self, argument: &str, text: &str) -> Result<(), String> {
-        let Some(angle_degrees) = super::parse_torient_argument(argument) else {
+        let Some(argument) = super::parse_torient_argument(argument) else {
             return self.refuse_argument(super::invalid_torient_argument_reason(text));
         };
-        self.dispatch_argument(
-            TORIENT_SELECTOR,
-            CommandId::Torient,
-            CommandPayload::Torient {
+        let payload = match argument {
+            TorientArgument::Angle(angle_degrees) => CommandPayload::Torient {
                 angle_degrees: Some(angle_degrees),
             },
-        )
+            TorientArgument::Reverse => CommandPayload::TorientReverse,
+        };
+        self.dispatch_argument(TORIENT_SELECTOR, CommandId::Torient, payload)
     }
 
     /// Apply one typed `TCASE <mode>` line.

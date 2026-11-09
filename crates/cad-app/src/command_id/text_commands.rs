@@ -24,7 +24,10 @@
 //!   `(-π/2, π/2]` by adding/subtracting π (180° steps), which is the "keep
 //!   upright" rule;
 //! * `TORIENT <angle-degrees>` sets that **absolute** rotation (finite decimal
-//!   degrees, stored as radians).
+//!   degrees, stored as radians);
+//! * `TORIENT REVERSE` / `TORIENT R` adds exactly 180° to each rotation
+//!   (`CommandPayload::TorientReverse`), which flips the direction without
+//!   changing the text's position or content.
 //!
 //! Only `rotation` changes: position, height, style, font, alignment, layer,
 //! space and draw order are preserved. A selected non-Text entity — including a

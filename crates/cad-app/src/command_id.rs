@@ -42,19 +42,20 @@ pub enum CommandId {
     /// Select visible model-space pick items without editing the drawing.
     /// Requires `CommandPayload::None`; incomplete picking is explicitly refused.
     SelectAll,
-    /// `SELECTSIMILAR`: add every visible model-space pick item whose **geometry
-    /// kind** matches a currently selected item to the existing selection.
+    /// `SELECTSIMILAR`: add every visible pick item in the **active space** that
+    /// matches a currently selected item to the existing selection.
     ///
-    /// Payload is [`crate::CommandPayload::None`]; a non-empty current selection
-    /// is required (`selectsimilar.selection_required`) and paper/block active
-    /// space is an explicit `Unsupported` refusal. v1 is **type-based only**: the
-    /// match is the `SemanticGeometry` discriminant, and attribute similarity
-    /// (layer/colour/linetype/lineweight/transparency) is NOT IMPLEMENTED. The
-    /// command is a union, never a replacement, and writes nothing: no database
-    /// write, revision bump, `cad-history` entry or `ChangeSet`, so Viewer and
-    /// Work both allow it. Enumeration reuses the SELECTALL preflight and
-    /// visibility filter (cycles/depth/dynamic visibility/opaque geometry are
-    /// explicit refusals, never silent truncation).
+    /// Payload is [`crate::CommandPayload::None`] (default similarity set) or
+    /// the typed [`crate::SelectSimilarSettings`] subset: layer, colour,
+    /// linetype, lineweight, name and object style (type is always required;
+    /// default: type + layer). Model and paper space are supported; every seed
+    /// must be in the active space (`selectsimilar.space`) and matches only that
+    /// space. A non-empty selection is required
+    /// (`selectsimilar.selection_required`); block-space objects are not
+    /// addressable, and `selectsimilar.settings` reports the accepted
+    /// dimensions. The command is a union, never a replacement, and writes
+    /// nothing: no database write, revision bump, `cad-history` entry or
+    /// `ChangeSet`, so Viewer and Work both allow it; enumeration reuses the SELECTALL preflight and visibility filter.
     SelectSimilar,
     /// Select model-space items in a window/crossing rectangle without editing
     /// the drawing (ADR 0014 B). Allowed in Viewer and Work; requires

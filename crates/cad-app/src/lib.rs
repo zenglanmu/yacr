@@ -99,8 +99,8 @@ pub mod command_aliases;
 pub mod command_id;
 pub use command_id::{AppMode, CommandId, ExtendedCommandId};
 pub use draw_tool::{
-    circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity, ToolParameter,
-    ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES,
+    circle_radius, AlignPairSet, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity,
+    ToolParameter, ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES,
     HATCH_GRADIENT_DEFAULT_ACI_A, HATCH_GRADIENT_DEFAULT_ACI_B, HATCH_GRADIENT_LINEAR,
     HATCH_GRADIENT_SPHERICAL, HATCH_PATTERN_TYPE_GRADIENT, HATCH_PATTERN_TYPE_PREDEFINED,
     HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE,
@@ -396,9 +396,10 @@ pub use command_payload::{
     DimJogLineCommand, DimOverrideCommand, DimStyleCommand, DimTextEditCommand,
     DimensionBatchPayload, DimensionChainCommand, GripStretchCommand, GroupCommand,
     GroupEditCommand, HatchEditOption, HatchOriginCommand, JustifyTextCommand, LayerStateCommand,
-    LeaderCommand, LinetypeCommand, MeasureGeomOption, MocoroCommand, NamedObjectKind,
-    OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget, RadialDimensionCommand,
-    RenameCommand, RotatedLinearDimensionCommand, TCircleCommand, TCountCommand, TextAlignCommand,
+    LeaderCommand, LinetypeCommand, MatchPropSettings, MeasureGeomOption, MocoroCommand,
+    NamedObjectKind, OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget,
+    RadialDimensionCommand, RenameCommand, RotatedLinearDimensionCommand, SelectSimilarSettings,
+    SelectionToolPayload, SetByLayerSettings, TCircleCommand, TCountCommand, TextAlignCommand,
     TextAlignEdge, TextBoundaryShape, TextCaseMode, TextFitCommand, TextScaleCommand,
     TwoLineCommand, VPointInput, ViewCommand,
 };

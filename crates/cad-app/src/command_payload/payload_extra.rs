@@ -311,3 +311,114 @@ pub enum LinetypeCommand {
     /// `LINETYPE SET <name>`: write that linetype to every selected entity.
     Set(String),
 }
+
+/// The optional property dimensions `SELECTSIMILAR` compares.
+///
+/// AutoCAD 2026's default similarity set is **Layer + Object type only**; every
+/// other modelled dimension is opt-in. Object type is not a toggle: only
+/// objects of the same type are considered at all. Transparency is *not* an
+/// AutoCAD similarity criterion and has no field here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectSimilarSettings {
+    /// Compare the entity's stored layer id (on by default).
+    pub layer: bool,
+    /// Compare the stored display colour (`EntityColor`).
+    pub color: bool,
+    /// Compare the stored display linetype (`EntityLineType`).
+    pub linetype: bool,
+    /// Compare the stored display lineweight (`EntityLineWeight`).
+    pub lineweight: bool,
+    /// Compare the block name of `INSERT` references (AutoCAD's **Name**).
+    pub name: bool,
+    /// Compare the text style (TEXT/MTEXT) or dimension style (DIMENSION)
+    /// name (AutoCAD's **Object style**).
+    pub object_style: bool,
+}
+
+impl Default for SelectSimilarSettings {
+    fn default() -> Self {
+        SelectSimilarSettings {
+            layer: true,
+            color: false,
+            linetype: false,
+            lineweight: false,
+            name: false,
+            object_style: false,
+        }
+    }
+}
+
+/// The per-property `MATCHPROP` Settings subset.
+///
+/// [`Default`] copies every modelled property, matching AutoCAD's Match
+/// Properties defaults. `basic` is the master switch for the Basic group
+/// (colour, layer, linetype, linetype scale, lineweight, transparency); the
+/// three Special groups are gated separately and only apply when the source and
+/// destination are both of the group's object class.
+///
+/// `linetype_scale` is the entity's own scale factor, which this build stores
+/// beside the linetype (`EntityRenderAttributes::linetype_scale`, mirrored
+/// inside `EntityLineType::Explicit`); it is a separate toggle because AutoCAD's
+/// dialog lists it separately. Plot style and thickness are **not modelled** on
+/// an entity in this build, so they have no field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MatchPropSettings {
+    /// The Basic group master switch.
+    pub basic: bool,
+    pub layer: bool,
+    pub color: bool,
+    pub linetype: bool,
+    pub lineweight: bool,
+    pub transparency: bool,
+    pub linetype_scale: bool,
+    /// Text Special group: copy the TEXT/MTEXT style reference (never height).
+    pub text_style: bool,
+    /// Dimension Special group: copy the DIMENSION style reference/snapshot
+    /// (never overrides).
+    pub dimension_style: bool,
+    /// Hatch Special group: copy pattern/angle/scale/style (never the origin).
+    pub hatch: bool,
+}
+
+impl Default for MatchPropSettings {
+    fn default() -> Self {
+        MatchPropSettings {
+            basic: true,
+            layer: true,
+            color: true,
+            linetype: true,
+            lineweight: true,
+            transparency: true,
+            linetype_scale: true,
+            text_style: true,
+            dimension_style: true,
+            hatch: true,
+        }
+    }
+}
+
+/// The `SETBYLAYER` options: AutoCAD's **Include blocks** switch.
+///
+/// The default is `false`, matching the bare command (only the selected
+/// top-level entities are reset). `true` recurses into every selected `INSERT`
+/// and rewrites the display attributes of its block members through the same
+/// transaction/undo step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SetByLayerSettings {
+    pub include_blocks: bool,
+}
+
+/// Typed settings for the selection-based display commands.
+///
+/// One grouped payload variant keeps [`crate::CommandPayload`] inside the
+/// file-size budget; each command accepts only its own arm and refuses any
+/// other, so the union can never make one command read another's settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionToolPayload {
+    /// `SELECTSIMILAR` property dimensions.
+    SelectSimilar(SelectSimilarSettings),
+    /// `MATCHPROP` Settings subset.
+    MatchProp(MatchPropSettings),
+    /// `SETBYLAYER` options.
+    SetByLayer(SetByLayerSettings),
+}

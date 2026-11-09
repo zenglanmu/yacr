@@ -971,15 +971,15 @@ fn text_case_and_orientation_selectors_are_work_only_argument_selectors() {
     for refused in ["", "Sentence2", "TITL", "X", "Title case", "UPPER TITLE"] {
         assert_eq!(parse_tcase_argument(refused), None, "{refused:?}");
     }
-    // TORIENT accepts one finite signed decimal angle in degrees.
+    // TORIENT accepts one finite signed decimal angle in degrees or REVERSE/R.
     for (argument, expected) in [("45", 45.0), ("22.5", 22.5), ("0", 0.0), ("-90", -90.0)] {
         assert_eq!(
             parse_torient_argument(argument),
-            Some(expected),
+            Some(TorientArgument::Angle(expected)),
             "{argument}"
         );
     }
-    for refused in ["", "abc", "1e3", ".5", "5.", "45 30", "NaN", "inf"] {
+    for refused in ["", "abc", "1e3", ".5", "5.", "45 30", "NaN", "inf", "REV"] {
         assert_eq!(parse_torient_argument(refused), None, "{refused:?}");
     }
     assert!(invalid_tcase_argument_reason("TCASE NOPE").contains("UPPER"));

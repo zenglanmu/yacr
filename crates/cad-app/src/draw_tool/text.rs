@@ -42,8 +42,8 @@ impl DrawTool {
     /// `false` for every point-only kind, before the points are complete, and
     /// after the text was submitted (which completes the command).
     pub fn awaiting_text(&self) -> bool {
-        self.kind.requires_text()
-            && self.points.len() >= self.kind.required_points()
+        self.text_required_now()
+            && self.points.len() >= self.required_points_now()
             && self.text.is_none()
     }
 
@@ -71,17 +71,17 @@ impl DrawTool {
     /// command immediately — this request is **terminal**, there is no second
     /// `Confirm`.
     pub fn set_text(&mut self, text: &str) -> CadResult<()> {
-        if !self.kind.requires_text() {
+        if !self.text_required_now() {
             return Err(CadError::InvalidInput(format!(
                 "tool.text_not_awaiting: draw kind '{}' takes no text",
                 self.kind.key()
             )));
         }
-        if self.points.len() < self.kind.required_points() {
+        if self.points.len() < self.required_points_now() {
             return Err(CadError::InvalidInput(format!(
                 "tool.text_points_incomplete: draw kind '{}' needs {} point(s) before text, has {}",
                 self.kind.key(),
-                self.kind.required_points(),
+                self.required_points_now(),
                 self.points.len()
             )));
         }

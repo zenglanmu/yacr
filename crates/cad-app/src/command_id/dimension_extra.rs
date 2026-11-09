@@ -50,20 +50,27 @@
 //!
 //! # `DIMSPACE` (AutoCAD 2026)
 //!
-//! [`crate::CommandId::DimSpace`] is the **selection-based** re-spacing command. Its
-//! payload is [`crate::CommandPayload::None`]: the current selection is the whole
-//! input, exactly like `MATCHPROP`/`JOIN`, and a supplied payload is refused by name
-//! (`dimspace.payload`).
+//! [`crate::CommandId::DimSpace`] is the **selection-based** re-spacing command.
+//! The current selection is the whole object input, exactly like
+//! `MATCHPROP`/`JOIN`. The spacing rule travels in the payload:
+//! [`crate::CommandPayload::None`] or
+//! [`crate::CommandPayload::DimSpace`]`(None)` is **Auto** (twice the base
+//! dimension's style text height, `DIMTXT`); `DimSpace(Some(0))` **aligns**;
+//! [`crate::CommandPayload::DimSpace`]`(Some(d > 0))` is an explicit spacing. The
+//! typed command line exposes the same forms: bare `DIMSPACE` is Auto and
+//! `DIMSPACE <spacing>` is the explicit value. Any other payload is refused by
+//! name (`dimspace.payload`). Linear/aligned and angular dimensions are spaced;
+//! mixing the families or a radial/ordinate dimension is `dimspace.kind`.
 //!
 //! ## Declared v1 boundary
 //!
 //! AutoCAD prompts "Select base dimension", "Select dimensions to space", then
-//! "Enter value or [Auto] <Auto>". This build implements neither the object prompts
-//! (they are replaced by the current selection) nor the **value prompt**: spacing is
-//! **always automatic**, i.e. the base dimension's resolved style `DIMDLI`
-//! ([`cad_domain::DimensionStyleValues::dim_line_increment`], AutoCAD's value `0`).
-//! Associative reflow is **NOT IMPLEMENTED** either: no dimension is re-associated
-//! with its measured geometry, and the measured points never move.
+//! "Enter value or [Auto] <Auto>". This build implements the selection-based
+//! object input and both spacing rules through the payload/command-line argument;
+//! the interactive object prompts and the interactive value prompt are **NOT
+//! IMPLEMENTED**. Associative reflow is **NOT IMPLEMENTED** either: no dimension
+//! is re-associated with its measured geometry, and the measured points never
+//! move.
 //!
 //! ## Construction
 //!
@@ -81,15 +88,17 @@
 //!   `base.location + n̂ · (i · spacing)`; the whole entity is re-synthesized through
 //!   [`cad_domain::DimensionGeometry::synthesized`].
 //!
-//! A non-finite or non-positive base `DIMDLI` is `dimspace.bad_spacing` (it would
-//! stack every target on one line). A target already on its row is not staged, so a
-//! run that changes nothing opens **no** transaction and reports
-//! `dimspace.unchanged`; otherwise every changed target is staged in **one
-//! transaction / one undo step** and the success diagnostic `dimspace.applied`
-//! names the count. Work-only.
+//! A non-finite or non-positive **Auto** base measurement is
+//! `dimspace.bad_spacing` (it would stack every target on one line); a zero
+//! measurement is the `dimspace.unchanged` no-op. An explicit spacing must be
+//! finite and strictly positive, otherwise `dimspace.bad_spacing` (nothing is
+//! written). A target already on its row is not staged, so a run that changes
+//! nothing opens **no** transaction and reports `dimspace.unchanged`; otherwise
+//! every changed target is staged in **one transaction / one undo step** and the
+//! success diagnostic `dimspace.applied` names the count. Work-only.
 //!
 //! ## NOT IMPLEMENTED
 //!
-//! The interactive base/target prompts, the spacing **value** prompt (`0` = auto or
-//! an explicit distance), angular-dimension spacing against its arc, associative
-//! reflow, a live preview, and non-model spaces.
+//! The interactive base/target prompts, the interactive spacing value prompt,
+//! angular-dimension spacing against its arc, associative reflow, a live preview,
+//! and non-model spaces.

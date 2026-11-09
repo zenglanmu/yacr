@@ -159,6 +159,14 @@ pub const LENGTHEN_MODE_PERCENT: f64 = 1.0;
 /// LENGTHEN mode `Total` (`T`): the amount is the absolute new length
 /// (`new = value`).
 pub const LENGTHEN_MODE_TOTAL: f64 = 2.0;
+/// LENGTHEN mode `Dynamic` (`DY`): the new end is the **second** captured point,
+/// projected onto the curve. The end that moves is the one nearest that point.
+///
+/// The mode has no scalar amount, so [`ToolParameter::LengthenValue`] is not read
+/// while it is selected. The interactive capture therefore changes shape from
+/// the zero-point pre-selection form to two picks (the object pick and the new
+/// end) when this mode is set at tool start.
+pub const LENGTHEN_MODE_DYNAMIC: f64 = 3.0;
 
 /// A session-scoped tool parameter with a stable machine key (ADR 0016 decision A).
 ///
@@ -247,9 +255,11 @@ pub enum ToolParameter {
     /// arc-length parts, so a count of `1` would place no mark and `1025` is a
     /// runaway count; both are refused by name, never clamped.
     DivideSegments,
-    /// LENGTHEN mode: a **closed set** — `0` Delta, `1` Percent, `2` Total
-    /// (AutoCAD's three `LENGTHEN` modes). The amount's meaning depends on the
-    /// mode, so the codes are read **by name** rather than as a raw number.
+    /// LENGTHEN mode: a **closed set** — `0` Delta, `1` Percent, `2` Total,
+    /// `3` Dynamic (AutoCAD's four `LENGTHEN` modes). The amount's meaning
+    /// depends on the mode, so the codes are read **by name** rather than as a
+    /// raw number. `Dynamic` (`DY`) reads no amount: it captures the new end as
+    /// a point instead.
     LengthenMode,
     /// LENGTHEN amount: **finite and non-zero** (a zero change is refused, never
     /// clamped to a no-op). Delta may be negative (shorten); Percent and Total
@@ -267,11 +277,36 @@ pub enum ToolParameter {
     /// [`crate::CommandPayload::RotatedLinearDimension`], because the domain stores
     /// the rotation in radians. DIMROTATED is the only consumer.
     DimRotation,
+    /// ALIGN pair count: a **closed set** of `1`, `2` (the default, AutoCAD's
+    /// two-pair form) or `3` point pairs. The count fixes the interactive step
+    /// sequence at tool start: `2 × count` picks, interleaved source then
+    /// destination per pair. One pair is a pure move about the pair delta; two
+    /// pairs are translate + rotate (+ the `AlignScale` flag); three pairs are
+    /// the **rigid** planar transform (rotation + translation, no scaling and no
+    /// reflection). Changing the value while a capture is active re-plans it only
+    /// while the captured points still fit the new count.
+    AlignPairs,
+    /// BREAK `F` first-point override: when `true`, the first click is **only**
+    /// the entity pick and two further picks supply the break span
+    /// (`F` → first break point → second break point). When `false` (the
+    /// default), the plain two-click form applies and the entity pick is also
+    /// the first break point.
+    BreakFirstPoint,
+    /// DIVIDE block option: when `true`, the terminal text step supplies an
+    /// **existing block name** and the division marks are independent INSERTs
+    /// instead of POINTs. When `false` (the default), DIVIDE places POINTs and
+    /// captures no text at all.
+    DivideUseBlock,
+    /// DIVIDE block align option (AutoCAD 2026's "Align block with object?
+    /// [Yes/No]"): when `true`, each inserted block is rotated to the object's
+    /// local tangent direction at its division point; when `false` (the default)
+    /// every block keeps rotation 0. Uniform scale stays 1.
+    DivideAlignBlock,
 }
 
 impl ToolParameter {
     /// Every member, in a fixed order (the key round-trip uses it).
-    pub const ALL: [ToolParameter; 30] = [
+    pub const ALL: [ToolParameter; 34] = [
         ToolParameter::PolygonSides,
         ToolParameter::FilletRadius,
         ToolParameter::ChamferDistanceA,
@@ -308,10 +343,18 @@ impl ToolParameter {
         // DIMROTATED's angle is appended after every pre-existing member, so the
         // frozen slots above never move.
         ToolParameter::DimRotation,
+        // The interactive-shape selectors for ALIGN/BREAK/DIVIDE are appended
+        // after every pre-existing member for the same index-stability reason.
+        ToolParameter::AlignPairs,
+        ToolParameter::BreakFirstPoint,
+        ToolParameter::DivideUseBlock,
+        // DIVIDE's block-align flag is appended after every pre-existing member
+        // for the same index-stability reason.
+        ToolParameter::DivideAlignBlock,
     ];
 
     /// Number of members (the store's fixed width).
-    pub const COUNT: usize = 30;
+    pub const COUNT: usize = 34;
 
     /// The dense index of this member in [`Self::ALL`] (the store's slot).
     pub fn index(self) -> usize {
@@ -347,6 +390,11 @@ impl ToolParameter {
             Self::LengthenValue => 27,
             Self::ScaleTextFactor => 28,
             Self::DimRotation => 29,
+            // The interactive-shape selectors keep the appended order (30-33).
+            Self::AlignPairs => 30,
+            Self::BreakFirstPoint => 31,
+            Self::DivideUseBlock => 32,
+            Self::DivideAlignBlock => 33,
         }
     }
 
@@ -387,6 +435,10 @@ impl ToolParameter {
             Self::LengthenValue => "lengthenValue",
             Self::ScaleTextFactor => "scaleTextFactor",
             Self::DimRotation => "dimRotation",
+            Self::AlignPairs => "alignPairs",
+            Self::BreakFirstPoint => "breakFirstPoint",
+            Self::DivideUseBlock => "divideUseBlock",
+            Self::DivideAlignBlock => "divideAlignBlock",
         }
     }
 
@@ -401,6 +453,9 @@ impl ToolParameter {
     pub fn kind(self) -> ToolValueKind {
         match self {
             Self::AlignScale | Self::ArrayRotateItems | Self::HatchDouble => ToolValueKind::Flag,
+            Self::BreakFirstPoint | Self::DivideUseBlock | Self::DivideAlignBlock => {
+                ToolValueKind::Flag
+            }
             _ => ToolValueKind::Number,
         }
     }
@@ -456,6 +511,14 @@ impl ToolParameter {
     /// * `DimRotation` **0** degrees — AutoCAD's `<0>` default for the rotated
     ///   dimension-line angle (a *valid* value, so the default never limps into a
     ///   forced refusal at commit).
+    /// * `AlignPairs` **2** — AutoCAD's two-pair translate + rotate form (a valid
+    ///   closed-set member, so the default is always accepted).
+    /// * `BreakFirstPoint` **false** — the plain two-click form where the entity
+    ///   pick is also the first break point.
+    /// * `DivideUseBlock` **false** — place POINT marks; the block option is the
+    ///   deliberate alternative.
+    /// * `DivideAlignBlock` **false** — inserted blocks keep rotation 0; the
+    ///   aligned form is the deliberate alternative.
     ///
     /// Note the fill-angle range (ADR 0016 decision A): the legal values are
     /// `0 < |angle| <= 360`, so the full-circle **default 360 is re-settable** (a
@@ -493,6 +556,10 @@ impl ToolParameter {
             Self::LengthenValue => ToolValue::Number(1.0),
             Self::ScaleTextFactor => ToolValue::Number(1.0),
             Self::DimRotation => ToolValue::Number(0.0),
+            Self::AlignPairs => ToolValue::Number(2.0),
+            Self::BreakFirstPoint => ToolValue::Flag(false),
+            Self::DivideUseBlock => ToolValue::Flag(false),
+            Self::DivideAlignBlock => ToolValue::Flag(false),
         }
     }
 
@@ -577,7 +644,7 @@ impl ToolParameter {
             (Self::DivideSegments, ToolValue::Number(number)) => {
                 integer_in_range(self, number, 2, 1024)
             }
-            // LENGTHEN mode: the three documented codes, read by name in the
+            // LENGTHEN mode: the four documented codes, read by name in the
             // refusal so a raw `7` cannot be mistaken for an amount.
             (Self::LengthenMode, ToolValue::Number(number)) => closed_choice(
                 self,
@@ -586,8 +653,9 @@ impl ToolParameter {
                     LENGTHEN_MODE_DELTA,
                     LENGTHEN_MODE_PERCENT,
                     LENGTHEN_MODE_TOTAL,
+                    LENGTHEN_MODE_DYNAMIC,
                 ],
-                "0 (Delta), 1 (Percent) or 2 (Total)",
+                "0 (Delta), 1 (Percent), 2 (Total) or 3 (Dynamic)",
             ),
             // LENGTHEN amount: finite and **non-zero**. A zero change is refused
             // rather than clamped into a no-op; Delta may be negative (shorten),
@@ -604,6 +672,18 @@ impl ToolParameter {
             // and no normalisation (a negative angle is a legal rotation the other
             // way). NaN/±∞ are refused by name.
             (Self::DimRotation, ToolValue::Number(number)) => finite(self, number),
+            // ALIGN pair count: the three documented shapes, read by name in the
+            // refusal. `0`, `4` and a fraction are refused, never clamped.
+            (Self::AlignPairs, ToolValue::Number(number)) => closed_choice(
+                self,
+                number,
+                &[1.0, 2.0, 3.0],
+                "1 (one pair), 2 (two pairs) or 3 (three pairs)",
+            ),
+            // BREAK `F` / DIVIDE block: booleans only.
+            (Self::BreakFirstPoint, ToolValue::Flag(_))
+            | (Self::DivideUseBlock, ToolValue::Flag(_))
+            | (Self::DivideAlignBlock, ToolValue::Flag(_)) => Ok(()),
             // Any other pairing is a kind mismatch: a `Flag` for a numeric
             // parameter, or a `Number` for a flag parameter.
             _ => Err(CadError::InvalidInput(format!(

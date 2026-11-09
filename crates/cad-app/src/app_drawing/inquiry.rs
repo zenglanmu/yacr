@@ -9,10 +9,17 @@
 //!
 //! * `LIST` reads the **current selection** instead of prompting "Select
 //!   objects"; a non-addressable ref is reported per-ref (`list.not_addressable`)
-//!   and does not abort the whole report. It reports the entity's space and its
-//!   canonical colour/linetype/lineweight/transparency (ByLayer/ByBlock or the
-//!   explicit value); thickness and extrusion are **not modelled** by this build
-//!   and the report says so;
+//!   and does not abort the whole report. A directly addressable entity is
+//!   reported in **any** space — model, paper and block definition rows all
+//!   resolve through the same `drawing.entity(id)` path (block-instance
+//!   *members* still need their own ref path and are reported, not expanded).
+//!   The report names the entity's space and every display property this build
+//!   models: canonical colour/linetype/linetype scale/lineweight/transparency
+//!   (ByLayer/ByBlock or the explicit value), the baked hidden (visibility)
+//!   flag, the geometry source, the annotative flag, the resolved TEXT style
+//!   name, the DIMENSION style name and (in the geometry summary) the INSERT
+//!   block name. Thickness and extrusion are **not modelled** by this build and
+//!   the report says so; 3D data is out of scope build-wide;
 //! * `STATUS` does not track drawing creation/edit time, memory usage, drawing
 //!   limits or the base point (this build has no drawing-header model), and says
 //!   so with explicit `status.not_tracked` diagnostics;
@@ -85,23 +92,57 @@ fn handle_label(entity: &cad_db::DbEntity) -> String {
 
 /// Canonical display-property projection for the `LIST` report.
 ///
-/// The four values are the same round-trippable strings `SETENTITYPROPERTY`
-/// accepts (`ByLayer`/`ByBlock` stay symbolic; an explicit value is shown
-/// verbatim). Thickness and extrusion have no stored model in this build, so the
-/// report says `not-modelled` instead of inventing them.
+/// It reads [`cad_db::DrawingDatabase::entity_render_attributes`] and the
+/// entity's baked hidden flag through [`cad_db::DrawingDatabase::entity_hidden`]
+/// (the authoritative imported display state for top-level rows), plus the
+/// canonical round-trippable `SETENTITYPROPERTY` strings (`ByLayer`/`ByBlock`
+/// stay symbolic; an explicit value is shown verbatim). `ltscale` is the
+/// **effective** factor: [`cad_db::sanitize_linetype_scale`] maps a meaningless
+/// non-finite/non-positive stored value to the identity `1.0` (the single rule
+/// the importer and representation also use). Thickness and extrusion have no
+/// stored model in this build, so the report says `not-modelled` instead of
+/// inventing them.
 fn display_summary(database: &cad_db::DrawingDatabase, entity: &cad_db::DbEntity) -> String {
+    let attributes = database.entity_render_attributes(entity.id);
     let value = |key: &str| {
         crate::property_value::property_value(database, entity, key)
             .unwrap_or_else(|| "unresolved".to_string())
     };
     format!(
-        "color={} linetype={} lineweight={} transparency={} thickness=not-modelled \
-         extrusion=not-modelled",
+        "color={} linetype={} ltscale={:.6} lineweight={} transparency={} visible={} \
+         source={:?} annotative={} thickness=not-modelled extrusion=not-modelled",
         value("color"),
         value("linetype"),
+        cad_db::sanitize_linetype_scale(attributes.linetype_scale),
         value("lineweight"),
-        value("transparency")
+        value("transparency"),
+        !database.entity_hidden(entity.id),
+        attributes.geometry_source,
+        attributes.annotative.annotative
     )
+}
+
+/// The type-specific names the report resolves from the drawing tables.
+///
+/// A TEXT keeps its `StyleId`; the name is resolved from the style table and
+/// reported as `-` when the row is missing (never fabricated). A DIMENSION
+/// carries its style **name** snapshot in the geometry, which is reported
+/// verbatim. Every other kind returns an empty string so the stable prefix of
+/// the report is unchanged.
+fn type_summary(database: &cad_db::DrawingDatabase, geometry: &SemanticGeometry) -> String {
+    match geometry {
+        SemanticGeometry::Text { style, .. } => format!(
+            " text_style={}",
+            database
+                .style(*style)
+                .map(|row| row.name.as_str())
+                .unwrap_or("-")
+        ),
+        SemanticGeometry::Dimension(dimension) => {
+            format!(" dim_style={}", dimension.style_name())
+        }
+        _ => String::new(),
+    }
 }
 
 /// A single-line, locale-neutral truncation of a text entity's stored string.
@@ -319,7 +360,7 @@ impl Application {
                 object: Some(ObjectId(entity.id.0)),
                 code: "list.object".into(),
                 message: format!(
-                    "LIST id={} handle={} type={} layer={} space={} draw_order={} {} {}",
+                    "LIST id={} handle={} type={} layer={} space={} draw_order={} {}{} {}",
                     entity.id.0,
                     handle_label(entity),
                     entity.object.type_key,
@@ -327,6 +368,7 @@ impl Application {
                     space_label(&entity.space),
                     entity.draw_order,
                     display_summary(&drawing, entity),
+                    type_summary(&drawing, &entity.geometry),
                     geometry_summary(&drawing, &entity.geometry)
                 ),
             });

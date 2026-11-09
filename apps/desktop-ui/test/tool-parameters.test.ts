@@ -110,7 +110,10 @@ test('the per-tool map and the spec table stay consistent', () => {
   });
   // The two zero-pick curve edits (2026-11-01): one row for DIVIDE, and the mode
   // before the amount for LENGTHEN (the amount's meaning depends on the mode).
-  assert.deepEqual(TOOL_PARAMETERS['draw.divide'], { command: 'DIVIDE', keys: ['divideSegments'] });
+  assert.deepEqual(TOOL_PARAMETERS['draw.divide'], {
+    command: 'DIVIDE',
+    keys: ['divideSegments', 'divideUseBlock', 'divideAlignBlock'],
+  });
   assert.deepEqual(TOOL_PARAMETERS['draw.lengthen'], {
     command: 'LENGTHEN',
     keys: ['lengthenMode', 'lengthenValue'],
@@ -126,6 +129,16 @@ test('the per-tool map and the spec table stay consistent', () => {
     command: 'DIMROTATED',
     keys: ['dimRotation'],
   });
+  // The parameter-selected capture shapes added 2026-11-09: ALIGN's pair count,
+  // BREAK's `F` override and DIVIDE's block option.
+  assert.deepEqual(TOOL_PARAMETERS['draw.align'], {
+    command: 'ALIGN',
+    keys: ['alignPairs', 'alignScale'],
+  });
+  assert.deepEqual(TOOL_PARAMETERS['draw.break'], {
+    command: 'BREAK',
+    keys: ['breakFirstPoint'],
+  });
   // Every key a tool maps to has a spec, and every spec is reachable through the
   // map — so a later phase only adds a row (the specs already exist).
   const mapped = new Set();
@@ -138,12 +151,13 @@ test('the per-tool map and the spec table stay consistent', () => {
   assert.deepEqual([...mapped].sort(), Object.keys(TOOL_PARAMETER_SPECS).sort());
   // The spec keys are the frozen machine keys the wire carries (ADR 0016 A).
   assert.deepEqual(Object.keys(TOOL_PARAMETER_SPECS).sort(), [
-    'alignScale', 'arrayColumnSpacing', 'arrayColumns', 'arrayFillAngle', 'arrayItems',
-    'arrayRotateItems', 'arrayRowSpacing', 'arrayRows', 'chamferDistanceA',
-    'chamferDistanceB', 'dimRotation', 'divideSegments', 'filletRadius', 'hatchAngle', 'hatchDouble',
-    'hatchGradientAngle', 'hatchGradientColorA', 'hatchGradientColorB', 'hatchGradientKind',
-    'hatchPattern', 'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'lengthenMode',
-    'lengthenValue', 'mtextAttachment', 'polygonSides', 'scaleTextFactor', 'textHeight', 'textRotation',
+    'alignPairs', 'alignScale', 'arrayColumnSpacing', 'arrayColumns', 'arrayFillAngle', 'arrayItems',
+    'arrayRotateItems', 'arrayRowSpacing', 'arrayRows', 'breakFirstPoint', 'chamferDistanceA',
+    'chamferDistanceB', 'dimRotation', 'divideAlignBlock', 'divideSegments', 'divideUseBlock', 'filletRadius', 'hatchAngle',
+    'hatchDouble', 'hatchGradientAngle', 'hatchGradientColorA', 'hatchGradientColorB',
+    'hatchGradientKind', 'hatchPattern', 'hatchPatternType', 'hatchSpacing', 'hatchStyle',
+    'lengthenMode', 'lengthenValue', 'mtextAttachment', 'polygonSides', 'scaleTextFactor',
+    'textHeight', 'textRotation',
   ]);
   assert.equal(TOOL_PARAMETER_SPECS.alignScale.kind, 'flag');
   assert.equal(TOOL_PARAMETER_SPECS.arrayRotateItems.kind, 'flag');

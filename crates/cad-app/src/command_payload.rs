@@ -195,9 +195,8 @@ pub enum CommandPayload {
         yaw: f64,
         pitch: f64,
     },
-    /// Structured zoom: a positive factor plus the cursor in logical pixels that
-    /// must stay anchored. Distinct from the legacy `Points`-payload zoom that
-    /// takes no cursor.
+    /// Structured zoom: a positive factor plus the logical-pixel cursor that must
+    /// stay anchored (distinct from the legacy `Points`-payload zoom, which has none).
     ZoomAt {
         factor: f64,
         cursor: [f64; 2],
@@ -214,9 +213,8 @@ pub enum CommandPayload {
     /// `InvalidInput` before any camera change, never a clamped fit.
     ///
     /// **2D orthographic only**: in a 3D observation the command refuses by name
-    /// (`zoom.window.requires_2d`) rather than faking a perspective fit.
-    /// View-only (allowed in Viewer mode): no database write, no revision bump,
-    /// no `cad-history` entry, and no `session.generation` bump.
+    /// (`zoom.window.requires_2d`) rather than faking a perspective fit. View-only
+    /// (allowed in Viewer mode): no write, revision bump, history or generation bump.
     ZoomWindow {
         rect_logical: [[f64; 2]; 2],
     },
@@ -366,14 +364,14 @@ pub enum CommandPayload {
     Divide {
         refs: Vec<SelectionRef>,
     },
-    /// `LENGTHEN` the one selected LINE/ARC (Work-only).
+    /// `LENGTHEN` the one selected curve (Work-only).
     ///
-    /// The selection snapshot is the whole input (the capture is zero-point); the
-    /// mode and amount are the session typed channel
-    /// ([`crate::draw_tool::ToolParameter::LengthenMode`] /
+    /// The selection snapshot names the target; the static DE/PER/TOT modes also
+    /// accept a one-point `Points([pick])` whose pick chooses the end that moves
+    /// (the legacy no-pick payload moves the far end). The mode and amount are
+    /// the session typed channel ([`crate::draw_tool::ToolParameter::LengthenMode`] /
     /// [`crate::draw_tool::ToolParameter::LengthenValue`]), read by the handler.
-    /// The same entity id is updated (the **end** endpoint moves) in one
-    /// transaction / one undo step.
+    /// The same entity id is updated in one transaction / one undo step.
     Lengthen {
         refs: Vec<SelectionRef>,
     },
@@ -402,6 +400,7 @@ pub enum CommandPayload {
     Torient {
         angle_degrees: Option<f64>,
     },
+    TorientReverse, // TORIENT Reverse: add 180°; typed as TORIENT REVERSE|R.
     /// `TCASE` (Work-only): change the case of the selected text.
     ///
     /// The selection is read from the session at apply time (bare `TCASE` uses
@@ -605,6 +604,7 @@ pub enum CommandPayload {
     /// transaction / one undo step. Any finite rotation is accepted (a negative
     /// angle is legal and is not normalised).
     RotatedLinearDimension(Box<RotatedLinearDimensionCommand>),
+    DimSpace(Option<f64>), // None = Auto (2 x style height); Some(0) = align; Some(d>0) = spacing.
     /// HATCH the pre-selected boundary entities (ADR 0018 decision D, P6b).
     ///
     /// `refs` is the selection snapshot the tool started with (the tool captures
@@ -945,6 +945,8 @@ pub enum CommandPayload {
         value: String,
         mode: SelectionMode,
     },
+    /// Typed settings for `SELECTSIMILAR` / `MATCHPROP` / `SETBYLAYER`.
+    SelectionTool(Box<SelectionToolPayload>),
     /// `-FIND`/`FIND`; full contract in [`crate::command_id::select_filter`].
     /// `replacement = None` is the report-only form; `-FIND` refuses `Some`.
     TextFind {

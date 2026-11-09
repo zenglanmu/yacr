@@ -51,8 +51,8 @@ pub use session::{
     BytesDocument, CadActiveSpace, CadCamera, CadCommandLogEntry, CadCommandLogKind, CadLayer,
     CadLayers, CadLayoutTab, CadMeasurementEcho, CadReferenceStatus, CadSelection, CadSelectionRow,
     CadSession, CadSettingKey, CadSettingValue, CadSettings, CadStatus, LayerStateOption,
-    ZoomArgument, ARGUMENT_SELECTOR, COMMAND_ALIASES, COMMAND_TABLE, SETTINGS_INVALID_PLOT_FORMAT,
-    SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
+    TorientArgument, ZoomArgument, ARGUMENT_SELECTOR, COMMAND_ALIASES, COMMAND_TABLE,
+    SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 pub use shell::{
     admit_command, bind_allowed, clear_host_error, note_host_error, projected_status,

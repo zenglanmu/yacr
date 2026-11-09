@@ -637,6 +637,33 @@ impl HatchGeometry {
         &self.fill
     }
 
+    /// Replace the hatch style/fill/pattern type and rebuild the derived display.
+    ///
+    /// The boundary loops, plane (**including its origin/elevation**), seeds and
+    /// pixel size are untouched, so a property painter can copy the pattern
+    /// definition without moving the hatch. Degradations that prevent a fill are
+    /// handled exactly like [`Self::transformed`]: the boundary display is still
+    /// built and the reasons are not promoted to a command failure.
+    pub fn with_style_and_fill(
+        &self,
+        style: HatchStyle,
+        fill: HatchFill,
+        pattern_type: HatchPatternType,
+    ) -> HatchGeometry {
+        let mut hatch = HatchGeometry {
+            loops: self.loops.clone(),
+            plane: self.plane,
+            style,
+            fill,
+            seeds: self.seeds.clone(),
+            pixel_size: self.pixel_size,
+            pattern_type,
+            display: Vec::new(),
+        };
+        hatch.display = hatch.build_display().0;
+        hatch
+    }
+
     pub fn seeds(&self) -> &[[f64; 2]] {
         &self.seeds
     }

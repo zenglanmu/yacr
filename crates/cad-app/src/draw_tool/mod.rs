@@ -25,7 +25,7 @@ mod kind;
 mod status;
 mod text;
 
-pub use self::intent::DrawIntent;
+pub use self::intent::{AlignPairSet, DrawIntent};
 pub use self::kind::{DrawToolKind, PointArity};
 
 /// Snapshot of an in-progress draw for the UI preview layer.
@@ -63,6 +63,14 @@ pub struct DrawPreview {
     pub selection_count: usize,
     /// Whether the operation can be committed right now.
     pub ready: bool,
+    /// The capture's point target when it is **not** the kind's static arity, or
+    /// `None`.
+    ///
+    /// The interactive shape of ALIGN/BREAK/LENGTHEN depends on a session tool
+    /// parameter (`alignPairs`, `breakFirstPoint`, `lengthenMode = 3`), so the
+    /// honest complement is the live plan rather than [`DrawToolKind::arity`].
+    /// `None` means the kind's own arity applies.
+    pub point_target: Option<usize>,
     /// The POLYGON side count for a live POLYGON capture, or `None` for every
     /// other kind.
     ///
@@ -105,12 +113,15 @@ impl DrawPreview {
 
     /// The capture arity of the tool this preview describes.
     pub fn arity(&self) -> PointArity {
-        self.kind.arity()
+        match self.point_target {
+            Some(target) => PointArity::Exact(target),
+            None => self.kind.arity(),
+        }
     }
 
     /// Whether this capture is open-ended (accepts points past its minimum).
     pub fn is_open_ended(&self) -> bool {
-        self.kind.arity().is_open_ended()
+        self.arity().is_open_ended()
     }
 
     /// Honest projection of how many more points the capture requires.
@@ -121,10 +132,10 @@ impl DrawPreview {
     /// the hard cap and the user finishes with Enter, so there is no fixed
     /// "remaining" count to report (never a fabricated `0`).
     pub fn remaining_points(&self) -> Option<usize> {
-        let minimum = self.kind.required_points();
+        let minimum = self.arity().minimum();
         if self.points.len() < minimum {
             Some(minimum - self.points.len())
-        } else if self.kind.arity().is_open_ended() {
+        } else if self.arity().is_open_ended() {
             None
         } else {
             Some(0)
@@ -154,6 +165,14 @@ pub struct DrawTool {
     /// and before the pick. It is only a projection for the UI: the command
     /// re-reads the entity and never trusts this value.
     text_prefill: Option<String>,
+    /// A live point-target override for a kind whose interactive shape depends on
+    /// a session tool parameter (ALIGN's pair count, BREAK's `F` override,
+    /// LENGTHEN's `DY` mode), or `None` for the kind's static arity.
+    point_target: Option<usize>,
+    /// Whether this capture additionally requires a terminal text step (DIVIDE's
+    /// block option). This widens [`DrawToolKind::requires_text`] for one
+    /// parameter-selected shape; `false` keeps the kind's own rule.
+    text_required: bool,
 }
 
 impl DrawTool {
@@ -172,7 +191,52 @@ impl DrawTool {
             selection_count,
             text: None,
             text_prefill: None,
+            point_target: None,
+            text_required: false,
         }
+    }
+
+    /// Override the capture's point target, or return to the static arity with `None`.
+    ///
+    /// The session sets this when a capture starts from the live tool
+    /// parameters; the pure accessor [`Self::capture_arity`] then keeps every
+    /// capture/readiness/intent check on one plan. Non-finite input is not
+    /// possible (the target is a `usize`), and a target below the points already
+    /// captured is the caller's responsibility — the session only applies one
+    /// that still fits.
+    pub fn set_point_target(&mut self, target: Option<usize>) {
+        self.point_target = target;
+    }
+
+    /// The live point target, or `None` for the kind's static arity.
+    pub fn point_target(&self) -> Option<usize> {
+        self.point_target
+    }
+
+    /// Require (or stop requiring) a terminal text step in addition to the
+    /// kind's own rule (DIVIDE's block option).
+    pub fn set_text_required(&mut self, required: bool) {
+        self.text_required = required;
+    }
+
+    /// The capture arity actually in force (the parameter-selected target or the
+    /// kind's static arity).
+    fn capture_arity(&self) -> PointArity {
+        match self.point_target {
+            Some(target) => PointArity::Exact(target),
+            None => self.kind.arity(),
+        }
+    }
+
+    /// The minimum points actually required (the live plan's complement).
+    fn required_points_now(&self) -> usize {
+        self.capture_arity().minimum()
+    }
+
+    /// Whether the capture's last step is typed text, including the
+    /// parameter-selected DIVIDE block name.
+    fn text_required_now(&self) -> bool {
+        self.kind.requires_text() || self.text_required
     }
 
     pub fn kind(&self) -> DrawToolKind {
@@ -245,8 +309,8 @@ impl DrawTool {
             // Only a **fixed-arity** kind can be past its complement: an
             // open-ended kind with a leading pick (DIMBASELINE/DIMCONTINUE) keeps
             // accepting measured points after the pick, up to the shared cap.
-            if !self.kind.arity().is_open_ended()
-                && self.points.len() >= self.kind.required_points()
+            if !self.capture_arity().is_open_ended()
+                && self.points.len() >= self.required_points_now()
             {
                 return Err(CadError::InvalidInput(format!(
                     "draw kind '{}' is ready; press Enter to confirm",
@@ -294,7 +358,7 @@ impl DrawTool {
         if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
             return Err(CadError::InvalidInput("draw point must be finite".into()));
         }
-        match self.kind.arity() {
+        match self.capture_arity() {
             PointArity::Exact(n) => {
                 if self.points.len() >= n {
                     return Err(CadError::InvalidInput(format!(
@@ -326,10 +390,10 @@ impl DrawTool {
     /// are still accepted and the capture is finished with Enter, so there is no
     /// fixed count to report (never a fabricated `0`).
     pub fn remaining(&self) -> Option<usize> {
-        let minimum = self.kind.required_points();
+        let minimum = self.required_points_now();
         if self.points.len() < minimum {
             Some(minimum - self.points.len())
-        } else if self.kind.arity().is_open_ended() {
+        } else if self.capture_arity().is_open_ended() {
             None
         } else {
             Some(0)
@@ -342,7 +406,7 @@ impl DrawTool {
     /// entity-pick step, so a radial capture with its pick missed is never
     /// confirmable even once the location point is captured.
     pub fn is_ready(&self) -> bool {
-        self.points.len() >= self.kind.required_points()
+        self.points.len() >= self.required_points_now()
             && (!self.kind.requires_selection() || self.selection_count > 0)
             && self.picks.len() >= self.kind.picked_step_count()
     }
@@ -359,13 +423,15 @@ impl DrawTool {
             remaining: self.remaining().unwrap_or(0),
             selection_count: self.selection_count,
             ready: self.is_ready(),
+            // The live parameter-selected plan, or `None` for the static arity.
+            point_target: self.point_target,
             // The pure tool never invents a sysvar: the session injects the
             // POLYGON side count when it builds the preview/tool snapshot.
             polygon_sides: None,
             awaiting_text: self.awaiting_text(),
             // Only a text tool can carry a prefill; every other kind reports
             // `None` even if a stale value were ever set.
-            text_prefill: if self.kind.requires_text() {
+            text_prefill: if self.text_required_now() {
                 self.text_prefill.clone()
             } else {
                 None
@@ -382,11 +448,11 @@ impl DrawTool {
                 self.kind.key()
             )));
         }
-        if self.points.len() < self.kind.required_points() {
+        if self.points.len() < self.required_points_now() {
             return Err(CadError::InvalidInput(format!(
                 "draw kind '{}' needs at least {} point(s), has {}",
                 self.kind.key(),
-                self.kind.required_points(),
+                self.required_points_now(),
                 self.points.len()
             )));
         }
@@ -402,7 +468,7 @@ impl DrawTool {
         // must never complete it through the back door (ADR 0019 decision A.1).
         // The host refuses `Confirm` earlier with the prompt-specific reason; this
         // is the same rule at the single intent-construction point.
-        if self.kind.requires_text() && self.text.is_none() {
+        if self.text_required_now() && self.text.is_none() {
             return Err(CadError::InvalidInput(format!(
                 "tool.text_required: draw kind '{}' needs its text before it can be committed",
                 self.kind.key()
@@ -421,15 +487,31 @@ impl DrawTool {
         if self.kind == DrawToolKind::Hatch {
             return Ok(DrawIntent::Hatch);
         }
-        // DIVIDE/LENGTHEN are the same zero-point pre-selection shape: the one
-        // selected curve is the input and their settings are the typed session
-        // parameters, so they never read a point (return **before** the
-        // `points[0]` index below).
+        // DIVIDE is the zero-point pre-selection shape by default. Its block
+        // option adds a **terminal block name** (the `text_required_now` gate
+        // above refuses a missing name) and the command inserts INSERTs at the
+        // division points instead of POINTs.
         if self.kind == DrawToolKind::Divide {
-            return Ok(DrawIntent::Divide);
+            return Ok(if self.text_required_now() {
+                DrawIntent::DivideBlock {
+                    name: self.text.clone().unwrap_or_default(),
+                }
+            } else {
+                DrawIntent::Divide
+            });
         }
+        // LENGTHEN: a static pick chooses the moving end; `DY` captures two picks.
         if self.kind == DrawToolKind::Lengthen {
-            return Ok(DrawIntent::Lengthen);
+            return Ok(if self.point_target == Some(2) {
+                DrawIntent::LengthenDynamic {
+                    pick: self.points[0],
+                    new_end: self.points[1],
+                }
+            } else {
+                DrawIntent::Lengthen {
+                    pick: self.points.first().copied(),
+                }
+            });
         }
         // SCALETEXT is the same zero-point pre-selection shape: the selected text
         // entities are the input and the factor is the typed session parameter, so
@@ -630,14 +712,22 @@ impl DrawTool {
                 boundary: self.picks[1].clone(),
                 pick_point: a,
             },
-            // BREAK: the first click resolved the target **and** is the first
-            // break point, so the ref comes from the one resolved pick and the
-            // two raw clicks are the two break points.
-            DrawToolKind::Break => DrawIntent::Break {
-                target: self.picks[0].clone(),
-                first: a,
-                second: b,
-            },
+            // BREAK: with the plain two-click form the first click resolved the
+            // target **and** is the first break point. With the `F` override the
+            // first click only resolved the target and `points[1]`/`points[2]`
+            // are the two break points.
+            DrawToolKind::Break => {
+                let (first, second) = if self.point_target == Some(3) {
+                    (self.points[1], self.points[2])
+                } else {
+                    (a, b)
+                };
+                DrawIntent::Break {
+                    target: self.picks[0].clone(),
+                    first,
+                    second,
+                }
+            }
             // BREAKATPOINT: first click = target, second = projected break point.
             DrawToolKind::BreakAtPoint => DrawIntent::BreakAtPoint {
                 target: self.picks[0].clone(),
@@ -730,16 +820,34 @@ impl DrawTool {
             // count, fill angle and rotate-items flag are the session typed channel,
             // read by the command layer.
             DrawToolKind::ArrayPolar => DrawIntent::ArrayPolar { center: a },
-            // ALIGN: the four captured points in AutoCAD's order (source1, dest1,
-            // source2, dest2). The `AlignScale` flag is the session typed channel
-            // read by the command layer, so the intent stays the pure description
-            // of what the user clicked; the degeneracy refusals live in the command
-            // layer too (the transform is built there).
-            DrawToolKind::Align => DrawIntent::Align {
-                source1: self.points[0],
-                dest1: self.points[1],
-                source2: self.points[2],
-                dest2: self.points[3],
+            // ALIGN: the captured pairs in AutoCAD's order (source1, dest1, then
+            // optionally source2, dest2 and source3, dest3). The live point target
+            // fixes how many pairs the capture took; `AlignScale` is the session
+            // typed channel read by the command layer, so the intent stays the pure
+            // description of what the user clicked and every degeneracy refusal
+            // lives in the command layer.
+            DrawToolKind::Align => match self.points.len() {
+                2 => DrawIntent::Align(AlignPairSet::One {
+                    source: self.points[0],
+                    dest: self.points[1],
+                }),
+                4 => DrawIntent::Align(AlignPairSet::Two {
+                    source1: self.points[0],
+                    dest1: self.points[1],
+                    source2: self.points[2],
+                    dest2: self.points[3],
+                }),
+                6 => DrawIntent::Align(AlignPairSet::Three {
+                    sources: [self.points[0], self.points[2], self.points[4]],
+                    dests: [self.points[1], self.points[3], self.points[5]],
+                }),
+                // The point gate above only admits the three planned counts, so
+                // this arm is unreachable; refuse rather than fabricate a pair.
+                count => {
+                    return Err(CadError::InvalidInput(format!(
+                        "align capture has {count} point(s); ALIGN takes 2, 4 or 6"
+                    )))
+                }
             },
             // STRETCH: the two window corners, the base point and the displacement
             // point, exactly as captured (the enclosure classification and the
@@ -829,7 +937,7 @@ impl DrawTool {
             // DIVIDE/LENGTHEN: handled by the early returns above (zero captured
             // points). The arms are unreachable here but keep the match exhaustive.
             DrawToolKind::Divide => DrawIntent::Divide,
-            DrawToolKind::Lengthen => DrawIntent::Lengthen,
+            DrawToolKind::Lengthen => DrawIntent::Lengthen { pick: None },
             // SCALETEXT: handled by the early return above (zero captured points).
             // The arm is unreachable here but keeps the match exhaustive.
             DrawToolKind::ScaleText => DrawIntent::ScaleText,
@@ -874,6 +982,7 @@ pub use parameter::{
     HATCH_GRADIENT_DEFAULT_ACI_B, HATCH_GRADIENT_LINEAR, HATCH_GRADIENT_SPHERICAL,
     HATCH_PATTERN_TYPE_GRADIENT, HATCH_PATTERN_TYPE_PREDEFINED, HATCH_PATTERN_TYPE_SOLID,
     HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
+    LENGTHEN_MODE_DELTA, LENGTHEN_MODE_DYNAMIC, LENGTHEN_MODE_PERCENT, LENGTHEN_MODE_TOTAL,
     MTEXT_ATTACHMENT_MAX, MTEXT_ATTACHMENT_MIN, MTEXT_ATTACHMENT_TOP_LEFT, TEXT_DEFAULT_HEIGHT,
     TEXT_DEFAULT_ROTATION_DEGREES,
 };

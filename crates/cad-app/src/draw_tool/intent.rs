@@ -15,6 +15,35 @@ use cad_domain::{Point3, SelectionRef};
 // The catalog constants named by the doc links below are not used at runtime; the
 // links are kept fully qualified so this module needs no import for them.
 
+/// The one/two/three point pairs a confirmed ALIGN capture carries.
+///
+/// The capture order is source then destination per pair, matching AutoCAD's
+/// prompts:
+///
+/// * one pair — `source` → `dest` (a pure move by `dest − source`);
+/// * two pairs — `source1` → `dest1` → `source2` → `dest2` (translate + rotate,
+///   plus the uniform `AlignScale` when the flag is set);
+/// * three pairs — the same interleaving through `source3` → `dest3` (the planar
+///   similarity).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AlignPairSet {
+    /// A single pair: move the selection by `dest − source`.
+    One { source: Point3, dest: Point3 },
+    /// The original two-pair translate + rotate shape.
+    Two {
+        source1: Point3,
+        dest1: Point3,
+        source2: Point3,
+        dest2: Point3,
+    },
+    /// Three pairs: the rigid planar transform (rotation + translation) solved from
+    /// the two triangles; no scaling and no reflection.
+    Three {
+        sources: [Point3; 3],
+        dests: [Point3; 3],
+    },
+}
+
 /// The pure description of a commit the command layer turns into exactly one
 /// drawing transaction.
 ///
@@ -235,20 +264,18 @@ pub enum DrawIntent {
     /// `center` is the one captured point; the item count, fill angle and
     /// rotate-items flag are the session typed channel, read by the command layer.
     ArrayPolar { center: Point3 },
-    /// ALIGN the current selection from two point pairs (ADR 0016 decision F).
+    /// ALIGN the current selection from one, two or three point pairs
+    /// (ADR 0016 decision F, extended 2026-11-09).
     ///
-    /// The four points are exactly the four clicks in AutoCAD's capture order
-    /// (`source1`, `dest1`, then `source2`, `dest2`); the `AlignScale` flag is the
-    /// session typed channel ([`super::ToolParameter::AlignScale`]) read by the command
-    /// layer, so it never rides the intent. The selection refs travel separately
-    /// (the caller supplies the snapshot), and the composed transform is applied
-    /// **in place** — no copies.
-    Align {
-        source1: Point3,
-        dest1: Point3,
-        source2: Point3,
-        dest2: Point3,
-    },
+    /// The pairs are exactly the captured clicks, in AutoCAD's order (source
+    /// then destination per pair). The `AlignScale` flag is the session typed
+    /// channel ([`super::ToolParameter::AlignScale`]) read by the command layer,
+    /// so it never rides the intent. The selection refs travel separately (the
+    /// caller supplies the snapshot). One pair is a pure move by the pair delta;
+    /// two pairs are translate + rotate (+ optional uniform scale); three pairs
+    /// are the rigid planar transform. The composed transform is applied **in place**
+    /// — no copies.
+    Align(AlignPairSet),
     /// STRETCH the entities inside a crossing window (ADR 0016 decision E).
     ///
     /// The four points are the four clicks in AutoCAD's order: the two opposite
@@ -480,14 +507,27 @@ pub enum DrawIntent {
     /// the intent stays the pure description of what the user asked for. This
     /// kind captures **no points** (the zero-point exact complement).
     Divide,
-    /// LENGTHEN the one pre-selected LINE/ARC (2026-11-01).
+    /// `DIVIDE … B`: divide the one pre-selected curve and place an INSERT of
+    /// the existing block `name` at each division point.
     ///
-    /// Carries no field for the same reason as [`DrawIntent::Divide`]: the
-    /// selection snapshot is the input and the mode/amount are the session typed
-    /// channel ([`super::ToolParameter::LengthenMode`] /
-    /// [`super::ToolParameter::LengthenValue`]) read by the command layer. The
-    /// command always moves the **end** endpoint (declared v1 deviation).
-    Lengthen,
+    /// `name` is the terminal typed string (the same text channel INSERT uses),
+    /// re-validated by the command. The division points and the segment count are
+    /// the command layer's; the selection snapshot travels separately.
+    DivideBlock { name: String },
+    /// LENGTHEN the one pre-selected curve (2026-11-01; nearest-endpoint pick
+    /// 2026-11-09).
+    ///
+    /// The selection snapshot is the input and the mode/amount are the session
+    /// typed channel ([`super::ToolParameter::LengthenMode`] /
+    /// [`super::ToolParameter::LengthenValue`]) read by the command layer. `pick`
+    /// is the one captured point that chooses the end which moves for the static
+    /// DE/PER/TOT modes; `None` keeps the legacy "move the far end" behaviour.
+    Lengthen { pick: Option<Point3> },
+    /// `LENGTHEN DY`: the `pick` is the object pick and `new_end` is the point
+    /// projected onto the selected curve. The command moves the end nearest
+    /// `new_end` (a LINE endpoint or an ARC end) and owns every projection and
+    /// degeneracy refusal.
+    LengthenDynamic { pick: Point3, new_end: Point3 },
     /// SCALETEXT the pre-selected Text/MText entities' glyph height.
     ///
     /// Carries no field for the same reason as [`DrawIntent::Divide`]: the

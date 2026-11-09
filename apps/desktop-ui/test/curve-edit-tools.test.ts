@@ -7,10 +7,11 @@
 //     curve *and* is the first break point, so the tool reports one point per
 //     click from the start; the second click is the other end of the removed
 //     span. It is **not** a pre-selection tool.
-//   * DIVIDE (`draw.divide`) and LENGTHEN (`draw.lengthen`) take **no pick at
-//     all**: the one preselected curve is the whole input, so their chip is
-//     chosen by the host's readiness, never by a point count. Their settings are
-//     the shared tool-parameter strip.
+//   * DIVIDE (`draw.divide`) takes **no pick at all**: the one preselected curve
+//     is the whole input, so its chip is chosen by the host's readiness, never by
+//     a point count. LENGTHEN (`draw.lengthen`) takes one pick for the static
+//     modes (the end that moves) and two for `DY`; its settings are the shared
+//     tool-parameter strip.
 //
 // The copy assertions only check presence and the honest distinction between the
 // two shapes — this suite does not claim the backend implements the edits.
@@ -92,8 +93,12 @@ test('BREAK is a pick capture, never a pre-selection tool', () => {
   assert.equal(PRESELECT_PROMPTS[BREAK.toolKey], undefined);
   // Its ready copy is not the shared dimension sentence: nothing is dimensioned.
   assert.notEqual(TOOL_READY_PROMPTS[BREAK.toolKey], 'tool.prompt.dim.ready');
-  // And it owns no tool parameters — the two clicks are the whole input.
-  assert.equal(TOOL_PARAMETERS[BREAK.toolKey], undefined);
+  // The `F` override is its one parameter: on, the first click only selects the
+  // object and two more picks define the span; off, the plain two-click form.
+  assert.deepEqual(TOOL_PARAMETERS[BREAK.toolKey], {
+    command: 'BREAK',
+    keys: ['breakFirstPoint'],
+  });
 });
 
 // --- DIVIDE / LENGTHEN: zero picks, readiness decides the chip ---------------
@@ -115,19 +120,61 @@ test('DIVIDE is a pre-selection tool whose chip follows the host readiness only'
   assert.equal(toolStepPromptKey(tool(DIVIDE.toolKey, 3, false)), DIVIDE.idle);
 });
 
-test('LENGTHEN is a pre-selection tool whose chip follows the host readiness only', () => {
-  assert.deepEqual(PRESELECT_PROMPTS[LENGTHEN.toolKey], { idle: LENGTHEN.idle, ready: LENGTHEN.ready });
-  assert.equal(TOOL_STEP_PROMPTS[LENGTHEN.toolKey], undefined);
-  assert.equal(TOOL_READY_PROMPTS[LENGTHEN.toolKey], undefined);
-  assert.equal(toolStepPromptKey(tool(LENGTHEN.toolKey, 0, false)), LENGTHEN.idle);
-  assert.equal(toolStepPromptKey(tool(LENGTHEN.toolKey, 0, true)), LENGTHEN.ready);
-  assert.equal(toolStepPromptKey(tool(LENGTHEN.toolKey, 2, false)), LENGTHEN.idle);
+test('LENGTHEN names the nearest-endpoint pick for the static modes', () => {
+  // Static DE/PER/TOT capture one pick (the end that moves); DY takes two. There
+  // is no readiness-only pre-selection chip for LENGTHEN any more.
+  assert.equal(
+    TOOL_READY_PROMPTS[LENGTHEN.toolKey],
+    'tool.prompt.lengthen.dynamic_ready',
+  );
+  assert.equal(
+    toolStepPromptKey(tool(LENGTHEN.toolKey, 0, false)),
+    'tool.prompt.lengthen.static_pick',
+  );
+  assert.equal(
+    toolStepPromptKey(tool(LENGTHEN.toolKey, 0, true)),
+    'tool.prompt.lengthen.static_pick',
+    "readiness never skips the pick",
+  );
+  assert.equal(
+    toolStepPromptKey(tool(LENGTHEN.toolKey, 1, true)),
+    'tool.prompt.lengthen.ready',
+  );
 });
 
 // --- the parameter rows ------------------------------------------------------
 
-test('DIVIDE owns one integer segment count and LENGTHEN owns the mode plus the amount', () => {
-  assert.deepEqual(TOOL_PARAMETERS[DIVIDE.toolKey], { command: 'DIVIDE', keys: [DIVIDE.param] });
+test('DIVIDE owns the segment count and its two block options; LENGTHEN owns the mode plus the amount', () => {
+  assert.deepEqual(TOOL_PARAMETERS[DIVIDE.toolKey], {
+    command: 'DIVIDE',
+    keys: [DIVIDE.param, 'divideUseBlock', 'divideAlignBlock'],
+  });
+  assert.equal(TOOL_PARAMETER_SPECS.divideUseBlock.kind, 'flag');
+  assert.equal(TOOL_PARAMETER_SPECS.divideUseBlock.statusKey, 'divideUseBlock');
+  assert.equal(
+    TOOL_PARAMETER_SPECS.divideUseBlock.labelKey,
+    'status.tool_parameter.divide_use_block',
+  );
+  assert.equal(
+    TOOL_PARAMETER_SPECS.divideUseBlock.hintKey,
+    'status.tool_parameter.divide_use_block.hint',
+  );
+  assert.equal(TOOL_PARAMETER_SPECS.divideAlignBlock.kind, 'flag');
+  assert.equal(TOOL_PARAMETER_SPECS.divideAlignBlock.statusKey, 'divideAlignBlock');
+  assert.equal(
+    TOOL_PARAMETER_SPECS.divideAlignBlock.labelKey,
+    'status.tool_parameter.divide_align_block',
+  );
+  assert.equal(
+    TOOL_PARAMETER_SPECS.divideAlignBlock.hintKey,
+    'status.tool_parameter.divide_align_block.hint',
+  );
+  assert.equal(TOOL_PARAMETER_SPECS.breakFirstPoint.kind, 'flag');
+  assert.equal(TOOL_PARAMETER_SPECS.breakFirstPoint.statusKey, 'breakFirstPoint');
+  assert.equal(
+    TOOL_PARAMETER_SPECS.breakFirstPoint.labelKey,
+    'status.tool_parameter.break_first_point',
+  );
   assert.deepEqual(TOOL_PARAMETERS[LENGTHEN.toolKey], { command: 'LENGTHEN', keys: LENGTHEN.params });
 
   const segments = TOOL_PARAMETER_SPECS.divideSegments;
@@ -147,14 +194,15 @@ test('DIVIDE owns one integer segment count and LENGTHEN owns the mode plus the 
   assert.equal(mode.kind, 'number');
   assert.equal(mode.statusKey, 'lengthenMode');
   assert.equal(mode.step, 1);
-  assert.deepEqual([...mode.choices], [0, 1, 2]);
-  for (const value of [0, 1, 2]) assert.equal(mode.offered(value), true, String(value));
-  for (const value of [-1, 3, 0.5, NaN, Infinity]) assert.equal(mode.offered(value), false, String(value));
+  assert.deepEqual([...mode.choices], [0, 1, 2, 3]);
+  for (const value of [0, 1, 2, 3]) assert.equal(mode.offered(value), true, String(value));
+  for (const value of [-1, 4, 0.5, NaN, Infinity]) assert.equal(mode.offered(value), false, String(value));
   // The three codes are read by name, so a raw 0/1/2 stepper never appears.
   assert.deepEqual({ ...mode.choiceLabelKeys }, {
     0: 'status.tool_parameter.lengthen_mode.delta',
     1: 'status.tool_parameter.lengthen_mode.percent',
     2: 'status.tool_parameter.lengthen_mode.total',
+    3: 'status.tool_parameter.lengthen_mode.dynamic',
   });
   assert.equal(mode.labelKey, 'status.tool_parameter.lengthen_mode');
   assert.equal(mode.hintKey, 'status.tool_parameter.lengthen_mode.hint');
@@ -240,8 +288,30 @@ test('the catalog carries both locales for every label, prompt and parameter row
     'status.tool_parameter.lengthen_mode.delta',
     'status.tool_parameter.lengthen_mode.percent',
     'status.tool_parameter.lengthen_mode.total',
+    'status.tool_parameter.lengthen_mode.dynamic',
     'status.tool_parameter.lengthen_value',
     'status.tool_parameter.lengthen_value.hint',
+    'status.tool_parameter.divide_use_block',
+    'status.tool_parameter.divide_use_block.hint',
+    'status.tool_parameter.break_first_point',
+    'status.tool_parameter.break_first_point.hint',
+    'status.tool_parameter.align_pairs',
+    'status.tool_parameter.align_pairs.hint',
+    'status.tool_parameter.align_pairs.single',
+    'status.tool_parameter.align_pairs.two',
+    'status.tool_parameter.align_pairs.three',
+    'tool.prompt.align.source_1',
+    'tool.prompt.align.dest_1',
+    'tool.prompt.align.source_2',
+    'tool.prompt.align.dest_2',
+    'tool.prompt.align.source_3',
+    'tool.prompt.align.dest_3',
+    'tool.prompt.align.ready',
+    'tool.prompt.break.first_point',
+    'tool.prompt.lengthen.dynamic_pick',
+    'tool.prompt.lengthen.dynamic_new_end',
+    'tool.prompt.lengthen.dynamic_ready',
+    'tool.prompt.divide.type_block',
   ];
   for (const key of keys) {
     assert.equal(typeof en[key], 'string', `en missing ${key}`);
@@ -256,11 +326,109 @@ test('the catalog carries both locales for every label, prompt and parameter row
     assert.equal(zh[entry.labelKey], zh[entry.toolLabelKey], `${entry.id} (zh-CN)`);
   }
   // The three lengthen modes are three distinct names, never one string thrice.
-  const modes = ['delta', 'percent', 'total'].map(name => `status.tool_parameter.lengthen_mode.${name}`);
-  assert.equal(new Set(modes.map(key => en[key])).size, 3);
-  assert.equal(new Set(modes.map(key => zh[key])).size, 3);
+  const modes = ['delta', 'percent', 'total', 'dynamic'].map(name => `status.tool_parameter.lengthen_mode.${name}`);
+  assert.equal(new Set(modes.map(key => en[key])).size, 4);
+  assert.equal(new Set(modes.map(key => zh[key])).size, 4);
   // No copy names a dimension or a finish verb these commands do not have.
   for (const key of [BREAK.selectEntity, BREAK.secondPoint, BREAK.ready, DIVIDE.idle, DIVIDE.ready, LENGTHEN.idle, LENGTHEN.ready]) {
     assert.equal(/dimension/i.test(en[key]), false, `${key} must not name a dimension`);
   }
+});
+
+// --- parameter-selected capture shapes (2026-11-09) --------------------------
+
+test('the parameter-selected shapes name their own picks instead of a fixed list', () => {
+  const withParams = (key, points, ready, params) => ({ key, points, ready, params });
+
+  // ALIGN's pair count slices the six-prompt list: 1 pair asks for source/dest,
+  // 2 pairs stops before the third pair, and 3 pairs asks for all six.
+  assert.equal(
+    toolStepPromptKey(withParams('draw.align', 0, false, { alignPairs: 1 })),
+    'tool.prompt.align.source_1',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.align', 1, false, { alignPairs: 1 })),
+    'tool.prompt.align.dest_1',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.align', 2, true, { alignPairs: 1 })),
+    'tool.prompt.align.ready',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.align', 4, false, { alignPairs: 2 })),
+    'tool.prompt.align.ready',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.align', 4, false, { alignPairs: 3 })),
+    'tool.prompt.align.source_3',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.align', 5, false, { alignPairs: 3 })),
+    'tool.prompt.align.dest_3',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.align', 6, true, { alignPairs: 3 })),
+    'tool.prompt.align.ready',
+  );
+
+  // BREAK's `F` form: the first click only selects the object.
+  assert.equal(
+    toolStepPromptKey(withParams('draw.break', 0, false, { breakFirstPoint: true })),
+    'tool.prompt.break.select_entity',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.break', 1, false, { breakFirstPoint: true })),
+    'tool.prompt.break.first_point',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.break', 2, false, { breakFirstPoint: true })),
+    'tool.prompt.break.second_point',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.break', 3, true, { breakFirstPoint: true })),
+    'tool.prompt.break.ready',
+  );
+  // Off keeps the plain two-click list (the first pick is the first break point).
+  assert.equal(
+    toolStepPromptKey(withParams('draw.break', 0, false, { breakFirstPoint: false })),
+    'tool.prompt.break.select_entity',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.break', 1, false, { breakFirstPoint: false })),
+    'tool.prompt.break.second_point',
+  );
+
+  // LENGTHEN's dynamic mode replaces the pre-selection chip with two picks.
+  assert.equal(
+    toolStepPromptKey(withParams('draw.lengthen', 0, false, { lengthenMode: 3 })),
+    'tool.prompt.lengthen.dynamic_pick',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.lengthen', 1, false, { lengthenMode: 3 })),
+    'tool.prompt.lengthen.dynamic_new_end',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.lengthen', 2, true, { lengthenMode: 3 })),
+    'tool.prompt.lengthen.dynamic_ready',
+  );
+  // A static mode now takes one pick (the end that moves) and then shows the
+  // ready copy.
+  assert.equal(
+    toolStepPromptKey(withParams('draw.lengthen', 0, false, { lengthenMode: 2 })),
+    'tool.prompt.lengthen.static_pick',
+  );
+  assert.equal(
+    toolStepPromptKey(withParams('draw.lengthen', 1, false, { lengthenMode: 2 })),
+    'tool.prompt.lengthen.ready',
+  );
+
+  // DIVIDE's block option is a text step; the host's `awaiting_text` names it.
+  assert.equal(
+    toolStepPromptKey(withParams('draw.divide', 0, false, { divideUseBlock: false })),
+    'tool.prompt.divide.select_curve',
+  );
+  assert.equal(
+    toolStepPromptKey({ ...withParams('draw.divide', 0, false, { divideUseBlock: true }), awaiting_text: true }),
+    'tool.prompt.divide.type_block',
+  );
 });

@@ -11,6 +11,7 @@ mod align;
 mod array;
 mod chamfer_fillet;
 mod clipboard;
+mod curve_edits;
 mod dimension;
 mod document;
 mod draw_pick;

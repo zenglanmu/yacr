@@ -6,8 +6,8 @@ use super::annot_arguments::{
     TEXTFIT_SELECTOR, UNGROUP_SELECTOR,
 };
 pub use super::dim_arguments::{
-    DIMEDIT_SELECTOR, DIMJOGLINE_SELECTOR, DIMOVERRIDE_SELECTOR, DIMSTYLE_SELECTOR,
-    DIMTEDIT_SELECTOR,
+    DIMEDIT_SELECTOR, DIMJOGLINE_SELECTOR, DIMOVERRIDE_SELECTOR, DIMSPACE_SELECTOR,
+    DIMSTYLE_SELECTOR, DIMTEDIT_SELECTOR,
 };
 use super::text_batch::{
     JUSTIFYTEXT_SELECTOR, TCIRCLE_SELECTOR, TCOUNT_SELECTOR, TEXTALIGN_SELECTOR, TSCALE_SELECTOR,
@@ -642,9 +642,13 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 ///   positive spacing / one integer / one signed decimal, in that order;
 /// * [`SPACE_SELECTOR`] (`SPACE`): `MODEL`, `#<u128>` or a layout display name,
 ///   resolved against the authoritative drawing by the session;
-/// * [`TORIENT_SELECTOR`] (`TORIENT`) / [`TCASE_SELECTOR`] (`TCASE`): one finite
-///   angle in degrees / one case mode ([`parse_torient_argument`],
-///   [`parse_tcase_argument`]);
+/// * [`TORIENT_SELECTOR`] (`TORIENT`): one finite angle in degrees or
+///   `REVERSE`/`R` ([`parse_torient_argument`]);
+/// * [`TCASE_SELECTOR`] (`TCASE`): one case mode ([`parse_tcase_argument`]);
+/// * [`DIMSPACE_SELECTOR`] (`DIMSPACE`): one non-negative finite spacing (`0`
+///   aligns), or no
+///   argument for Auto
+///   ([`super::dim_arguments::parse_dimspace_argument`]);
 ///
 /// PEDIT/HATCHEDIT/MEASUREGEOM take one declared option; the text batch takes
 /// `<H> <V>`, a factor, an edge word, a numbering run or a shape; the layer
@@ -703,6 +707,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     VPCLIP_SELECTOR,
     VPSCALE_SELECTOR,
     LAYVPI_SELECTOR,
+    // `DIMSPACE` is a dimension argument form of its own (not part of the
+    // editing batch).
+    DIMSPACE_SELECTOR,
     // The 2026-11-07 dimension-editing batch argument forms.
     DIMSTYLE_SELECTOR,
     DIMTEDIT_SELECTOR,

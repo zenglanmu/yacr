@@ -4,6 +4,7 @@
 use cad_db::MeasurementRecord;
 use cad_domain::*;
 mod drafting_extras;
+mod draw_plan;
 mod erase_snapshot;
 mod toggles;
 mod view_extras;
@@ -433,6 +434,10 @@ impl SessionState {
         self.authorize(authorizing_command(parameter))?;
         parameter.validate(value)?;
         self.tool_parameters.set(parameter, value);
+        // A parameter that selects the interactive shape (ALIGN pairs, BREAK `F`,
+        // LENGTHEN `DY`, DIVIDE block) re-plans the active capture while the
+        // captured points still fit; every other parameter is untouched here.
+        self.refresh_draw_capture_plan();
         Ok(())
     }
 
@@ -659,7 +664,15 @@ impl SessionState {
         };
         self.authorize(command)?;
         let selection = self.selection.refs().to_vec();
-        let tool = DrawTool::new(kind, selection.len());
+        let mut tool = DrawTool::new(kind, selection.len());
+        // The parameter-selected interactive shapes are fixed from the **live**
+        // session values when the capture starts (and re-planned by
+        // `set_tool_parameter` while the capture still fits): ALIGN's pair count,
+        // BREAK's `F` override and LENGTHEN's dynamic mode add or remove picks,
+        // while DIVIDE's block option adds the terminal block-name step.
+        let (point_target, text_required) = self.draw_capture_plan(kind);
+        tool.set_point_target(point_target);
+        tool.set_text_required(text_required);
         self.tool = ToolState::Drawing(Box::new(DrawCapture {
             tool,
             selection,

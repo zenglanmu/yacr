@@ -569,6 +569,14 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // ("Dimension defined; press Enter to confirm") would be false twice over, so
   // this names the one honest state — both ends known, Enter breaks.
   'draw.break': 'tool.prompt.break.ready',
+  // ALIGN's complement depends on the pair count; the shared dimension copy would
+  // be false (nothing is dimensioned), so the shape branch in
+  // [`toolStepPromptKey`] names the captured state instead.
+  'draw.align': 'tool.prompt.align.ready',
+  // LENGTHEN's `DY` shape is complete after two picks, but the static modes are
+  // pre-selection tools. Only the dynamic shape reaches a count-derived ready
+  // state; the pre-selection table keeps its own ready copy.
+  'draw.lengthen': 'tool.prompt.lengthen.dynamic_ready',
   // BREAKATPOINT's complement is its two steps; once both are captured the object
   // is ready to split. The shared dimension copy would be false (nothing is
   // dimensioned), so this names the one honest state.
@@ -649,6 +657,82 @@ export const PRESELECT_PROMPTS: Readonly<Record<string, PreselectPrompt>> = Obje
 const DEFAULT_READY_PROMPT: string = 'tool.prompt.dim.ready';
 
 /**
+ * ALIGN's picks in AutoCAD's order: source then destination, three pairs deep.
+ *
+ * The live pair count (`alignPairs`) slices this list, so a one-pair capture
+ * names only the first two picks and a two-pair capture stops before the third
+ * pair — the tool never asks for a pick the host is not going to capture.
+ */
+const ALIGN_STEP_PROMPTS: readonly string[] = Object.freeze([
+  'tool.prompt.align.source_1',
+  'tool.prompt.align.dest_1',
+  'tool.prompt.align.source_2',
+  'tool.prompt.align.dest_2',
+  'tool.prompt.align.source_3',
+  'tool.prompt.align.dest_3',
+]);
+
+/** BREAK's three picks with the `F` first-point override on. */
+const BREAK_FIRST_POINT_STEP_PROMPTS: readonly string[] = Object.freeze([
+  'tool.prompt.break.select_entity',
+  'tool.prompt.break.first_point',
+  'tool.prompt.break.second_point',
+]);
+
+/** LENGTHEN's static DE/PER/TOT pick: the end nearest the pick moves. */
+const LENGTHEN_STATIC_STEP_PROMPTS: readonly string[] = Object.freeze([
+  'tool.prompt.lengthen.static_pick',
+  'tool.prompt.lengthen.ready',
+]);
+
+/** LENGTHEN's two picks in `DY` (dynamic) mode. */
+const LENGTHEN_DYNAMIC_STEP_PROMPTS: readonly string[] = Object.freeze([
+  'tool.prompt.lengthen.dynamic_pick',
+  'tool.prompt.lengthen.dynamic_new_end',
+]);
+
+/** A numeric tool parameter if the host projects one, otherwise `null`. */
+function parameterNumber(tool: CadTool, key: string): number | null {
+  const value = tool.params?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** A boolean tool parameter if the host projects one, otherwise `null`. */
+function parameterFlag(tool: CadTool, key: string): boolean | null {
+  const value = tool.params?.[key];
+  return typeof value === 'boolean' ? value : null;
+}
+
+/**
+ * The step list of a **parameter-selected** capture shape, or `null` for a tool
+ * whose fixed list / pre-selection table applies.
+ *
+ * These three shapes cannot live in [`TOOL_STEP_PROMPTS`] because their length
+ * depends on a live session parameter: ALIGN's pair count, BREAK's `F` flag and
+ * LENGTHEN's `DY` mode. Every fallback is the host's own default (2 pairs, `F`
+ * off, static mode), so a missing or malformed parameter never invents a pick.
+ */
+function captureShapeSteps(tool: CadTool): readonly string[] | null {
+  if (tool.key === 'draw.align') {
+    const pairs = parameterNumber(tool, 'alignPairs');
+    const count = pairs === 1 || pairs === 2 || pairs === 3 ? pairs : 2;
+    return ALIGN_STEP_PROMPTS.slice(0, 2 * count);
+  }
+  if (tool.key === 'draw.break' && parameterFlag(tool, 'breakFirstPoint') === true) {
+    return BREAK_FIRST_POINT_STEP_PROMPTS;
+  }
+  if (tool.key === 'draw.lengthen') {
+    // DY takes two picks; every static mode takes one pick (the end that moves)
+    // and then shows the ready copy. The static list carries the ready sentence
+    // as its second entry because this shape's last actual step is a pick.
+    return parameterNumber(tool, 'lengthenMode') === 3
+      ? LENGTHEN_DYNAMIC_STEP_PROMPTS
+      : LENGTHEN_STATIC_STEP_PROMPTS;
+  }
+  return null;
+}
+
+/**
  * The catalog key for the next expected pick of the active `tool`, or `null`.
  *
  * A tool the host reports as `awaiting_text` names its **text step** first — that
@@ -684,6 +768,18 @@ export function toolStepPromptKey(tool: CadTool | null | undefined): string | nu
   // flag is the only source of truth for it. The wording is per tool
   // ([`textStepPromptKey`]) so MTEXT's multiline copy is never TEXT's.
   if (toolAwaitingText(tool)) return textStepPromptKey(tool);
+  // The parameter-selected capture shapes (ALIGN's pair count, BREAK's `F`
+  // override and LENGTHEN's `DY` mode) own their step lists; a mismatch between
+  // the parameter and a fixed list would name the wrong pick, so this branch
+  // precedes both the pre-selection table (LENGTHEN `DY` is not zero-pick) and the
+  // generic list.
+  const shape = captureShapeSteps(tool);
+  if (shape) {
+    const points = Number.isSafeInteger(tool.points) && tool.points >= 0 ? tool.points : 0;
+    return points < shape.length
+      ? shape[points]
+      : TOOL_READY_PROMPTS[tool.key] ?? DEFAULT_READY_PROMPT;
+  }
   const preselect = PRESELECT_PROMPTS[tool.key];
   if (preselect) return tool.ready === true ? preselect.ready : preselect.idle;
   const points = Number.isSafeInteger(tool.points) && tool.points >= 0 ? tool.points : 0;

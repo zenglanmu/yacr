@@ -103,25 +103,25 @@
 //!
 //! ## `SETBYLAYER`
 //!
-//! "Changes the property overrides of selected objects to ByLayer." Resets
-//! exactly **colour, linetype and lineweight** to their symbolic `ByLayer`
-//! forms through `update_entity_display` in one transaction / one undo step
-//! (display writes are undoable through display-state patches). Transparency is
-//! deliberately **not** reset in this build, and materials are not modelled;
-//! text style/height, dimension style, hatch colour/pattern and polyline
-//! thickness are not modelled either, so `setbylayer.properties_not_reset`
-//! names them (including transparency and materials) in every run. AutoCAD's
-//! **Include blocks** option is **NOT IMPLEMENTED**. `linetype_scale`, layer,
-//! space, geometry and every other field are preserved. If any selected entity
-//! is on a locked layer the whole command is refused (`setbylayer.locked`):
-//! AutoCAD does not modify objects on locked layers, and the display-write path
-//! would otherwise bypass the lock. An all-ByLayer selection opens no
-//! transaction and reports `setbylayer.unchanged`; success is
-//! `setbylayer.applied` with the entity count. Work-only.
+//! Resets the four modelled display overrides — **colour, linetype, lineweight
+//! and transparency** — to symbolic `ByLayer` through `update_entity_display`
+//! in one transaction / one undo step. Materials, text/dimension/hatch/polyline
+//! properties are not modelled and are named by
+//! `setbylayer.properties_not_reset`.
+//!
+//! The typed [`SetByLayerSettings::include_blocks`] option (AutoCAD's
+//! **Include blocks**) recurses into selected `INSERT`s and rewrites block
+//! members' display attributes through the same transaction; only display state
+//! changes, so no block row/member list or block write path is touched.
+//! `linetype_scale`, layer, space and geometry are preserved. Any target on a
+//! locked layer — selected or block member — refuses the whole command
+//! (`setbylayer.locked`), because the display path bypasses the lock. Work-only.
 
 use super::*;
+use crate::{SelectionToolPayload, SetByLayerSettings};
 use cad_db::{
-    EntityColor, EntityLineType, EntityLineWeight, EntityRenderAttributes, LayerAttributes,
+    EntityColor, EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency,
+    LayerAttributes,
 };
 
 /// A named, non-capability refusal (`<command>.<code>: <detail>`).
@@ -241,15 +241,81 @@ pub(super) fn selected_distinct_layers(
 
 /// The `SETBYLAYER` informational diagnostic: what AutoCAD's command also resets
 /// but this build deliberately does not.
-fn properties_not_reset() -> Diagnostic {
+fn properties_not_reset(include_blocks: bool) -> Diagnostic {
+    let include = if include_blocks {
+        "Include blocks was requested and block members were included"
+    } else {
+        "Include blocks was not requested"
+    };
     Diagnostic {
         object: None,
         code: "setbylayer.properties_not_reset".into(),
-        message: "SETBYLAYER: transparency and materials are not reset, and text style/height, \
-                  dimension style, hatch colour/pattern and polyline thickness are not modelled; \
-                  the Include blocks option is not implemented"
-            .into(),
+        message: format!(
+            "SETBYLAYER: materials are not reset, and text style/height, dimension style, hatch \
+             colour/pattern and polyline thickness are not modelled; {include}"
+        ),
     }
+}
+
+/// Read the optional `SETBYLAYER` options; `None` means the bare command.
+fn setbylayer_settings(command: &Command) -> CadResult<SetByLayerSettings> {
+    match &command.payload {
+        CommandPayload::None => Ok(SetByLayerSettings::default()),
+        CommandPayload::SelectionTool(payload) => match payload.as_ref() {
+            SelectionToolPayload::SetByLayer(settings) => Ok(*settings),
+            _ => Err(invalid(
+                "setbylayer",
+                "payload",
+                "SETBYLAYER accepts only its own typed settings",
+            )),
+        },
+        _ => Err(invalid(
+            "setbylayer",
+            "payload",
+            "SETBYLAYER takes no payload or its typed settings",
+        )),
+    }
+}
+
+/// Collect the block members of `block`, recursing into nested `INSERT`s.
+///
+/// Member entities live in [`SpaceId::Block`]; only their display state changes,
+/// so the authoritative block row/member list is not touched. `visited` prevents
+/// a cyclic block graph from looping, and `targets` is the deduplicated list of
+/// entity ids already scheduled (a block referenced twice is written once).
+fn collect_block_members(
+    drawing: &DrawingDatabase,
+    block: BlockId,
+    visited: &mut Vec<BlockId>,
+    targets: &mut Vec<EntityId>,
+) -> CadResult<()> {
+    if visited.contains(&block) {
+        return Ok(());
+    }
+    visited.push(block);
+    let definition = drawing.block(block).ok_or_else(|| {
+        unsupported(
+            "setbylayer",
+            "include_blocks_missing_block",
+            format!("block {} does not exist in this drawing", block.0),
+        )
+    })?;
+    for member in definition.entities.clone() {
+        let entity = drawing.entity(member).ok_or_else(|| {
+            unsupported(
+                "setbylayer",
+                "include_blocks_missing_member",
+                format!("block {} lists missing member entity {}", block.0, member.0),
+            )
+        })?;
+        if !targets.contains(&member) {
+            targets.push(member);
+        }
+        if let SemanticGeometry::Insert { block: nested, .. } = &entity.geometry {
+            collect_block_members(drawing, *nested, visited, targets)?;
+        }
+    }
+    Ok(())
 }
 
 impl Application {
@@ -577,13 +643,13 @@ impl Application {
         self.set_selected_layers_locked(session, command, "layulk", "LAYULK", false)
     }
 
-    /// `SETBYLAYER`: reset the three modelled display overrides to ByLayer.
+    /// `SETBYLAYER`: reset the modelled display overrides to ByLayer.
     fn setbylayer(
         &mut self,
         session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        ensure_no_payload(command, "setbylayer", "SETBYLAYER")?;
+        let settings = setbylayer_settings(command)?;
         let references = selection_snapshot(session, "setbylayer", "SETBYLAYER")?;
         let document_id = command.document;
         let drawing = self
@@ -598,13 +664,35 @@ impl Application {
             ensure_model_space_addressable(drawing.as_ref(), command, reference, "setbylayer")?;
         }
 
+        // The write set: the selected rows, plus (with Include blocks) every
+        // member of every selected INSERT, recursively.
+        let mut targets: Vec<EntityId> = references
+            .iter()
+            .map(|reference| reference.entity)
+            .collect();
+        let mut block_member_count = 0usize;
+        if settings.include_blocks {
+            let mut visited: Vec<BlockId> = Vec::new();
+            for reference in &references {
+                let entity = drawing
+                    .entity(reference.entity)
+                    .expect("preflight verified the entity resolves");
+                if let SemanticGeometry::Insert { block, .. } = &entity.geometry {
+                    let before = targets.len();
+                    collect_block_members(drawing.as_ref(), *block, &mut visited, &mut targets)?;
+                    block_member_count += targets.len() - before;
+                }
+            }
+        }
+
         // AutoCAD does not modify objects on locked layers. The display-write
         // path deliberately bypasses the lock (it is a representation rebuild),
-        // so this command owns the refusal for the whole batch.
-        for reference in &references {
+        // so this command owns the refusal for the whole batch — selected rows
+        // and included block members alike.
+        for id in &targets {
             let entity = drawing
-                .entity(reference.entity)
-                .expect("preflight verified the entity resolves");
+                .entity(*id)
+                .ok_or_else(|| CadError::Invariant("SETBYLAYER target vanished".into()))?;
             if drawing.layer_locked(entity.layer) {
                 let name = drawing
                     .layer(entity.layer)
@@ -622,26 +710,28 @@ impl Application {
             }
         }
 
-        // Only the three modelled overrides change. Transparency, materials,
+        // Only the four modelled overrides change. Materials,
         // text/dimension/hatch/polyline properties are outside this reset (see
         // `properties_not_reset`), and `linetype_scale` is preserved because the
         // symbolic `ByLayer` variant carries no scale of its own.
         let mut changes: Vec<(EntityId, DbEntity, EntityRenderAttributes)> = Vec::new();
-        for reference in &references {
+        for id in &targets {
             let before = drawing
-                .entity(reference.entity)
-                .expect("preflight verified the entity resolves")
+                .entity(*id)
+                .ok_or_else(|| CadError::Invariant("SETBYLAYER target vanished".into()))?
                 .clone();
             let mut attributes = drawing.entity_render_attributes(before.id);
             if attributes.color == EntityColor::ByLayer
                 && attributes.linetype == EntityLineType::ByLayer
                 && attributes.lineweight == EntityLineWeight::ByLayer
+                && attributes.transparency == EntityTransparency::ByLayer
             {
                 continue;
             }
             attributes.color = EntityColor::ByLayer;
             attributes.linetype = EntityLineType::ByLayer;
             attributes.lineweight = EntityLineWeight::ByLayer;
+            attributes.transparency = EntityTransparency::ByLayer;
             changes.push((before.id, before, attributes));
         }
 
@@ -653,11 +743,11 @@ impl Application {
                     Diagnostic {
                         object: None,
                         code: "setbylayer.unchanged".into(),
-                        message: "SETBYLAYER: colour, linetype and lineweight are already ByLayer \
-                                  on every selected entity"
+                        message: "SETBYLAYER: colour, linetype, lineweight and transparency are \
+                                  already ByLayer on every target entity"
                             .into(),
                     },
-                    properties_not_reset(),
+                    properties_not_reset(settings.include_blocks),
                 ],
                 measurement: None,
                 point_report: None,
@@ -687,6 +777,11 @@ impl Application {
             objects.push(ObjectId(id.0));
         }
         let count = changes.len();
+        let block_note = if settings.include_blocks {
+            format!("; {block_member_count} block member(s) included")
+        } else {
+            String::new()
+        };
         self.publish_candidate(
             document_id,
             candidate,
@@ -707,11 +802,11 @@ impl Application {
                     object: None,
                     code: "setbylayer.applied".into(),
                     message: format!(
-                        "SETBYLAYER: reset colour, linetype and lineweight to ByLayer on {count} \
-                         entities (one transaction / one undo step)"
+                        "SETBYLAYER: reset colour, linetype, lineweight and transparency to \
+                         ByLayer on {count} entities (one transaction / one undo step){block_note}"
                     ),
                 },
-                properties_not_reset(),
+                properties_not_reset(settings.include_blocks),
             ],
             measurement: None,
             point_report: None,

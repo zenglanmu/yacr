@@ -1,4 +1,5 @@
-//! `DIVIDE`: place POINT marks at equal **arc-length** divisions of one curve.
+//! `DIVIDE`: place POINT marks (or block references) at equal **arc-length**
+//! divisions of one curve.
 //!
 //! The capture is the zero-point pre-selection shape
 //! ([`crate::draw_tool::DrawToolKind::Divide`]): the one selected curve is the
@@ -6,27 +7,46 @@
 //! ([`crate::draw_tool::ToolParameter::DivideSegments`], an integer in `2..=1024`,
 //! default `2`). Nothing is picked inside the command.
 //!
-//! ## Point placement (equal arc length, never parameter)
+//! ## Point placement (equal arc length, never raw parameter)
 //!
 //! | target | marks |
 //! | --- | --- |
-//! | `LINE`, `ARC` (open) | `N − 1` interior POINTs at parameter `k/N`, `k = 1..N−1` |
-//! | `CIRCLE`, a full-turn `ARC` (periodic) | `N` POINTs at `k/N`, `k = 0..N−1` (including the start parameter) |
-//! | open straight `LWPOLYLINE` | `N − 1` POINTs at `k/N · total` arc length, `k = 1..N−1` |
-//! | closed straight `LWPOLYLINE` | `N` POINTs at `k/N · total`, `k = 0..N−1` |
+//! | `LINE`, `ARC` (open) | `N − 1` interior POINTs at arc length `k/N`, `k = 1..N−1` |
+//! | `CIRCLE`, a full-turn `ARC`, a full `ELLIPSE` (periodic) | `N` POINTs at `k/N`, `k = 0..N−1` |
+//! | `SPLINE` | `N − 1` POINTs at equal arc length of the sampled curve |
+//! | open `LWPOLYLINE` (straight **or bulged**) | `N − 1` POINTs at arc length `k/N · total` |
+//! | closed `LWPOLYLINE` (straight **or bulged**) | `N` POINTs at arc length `k/N · total` |
+//! | elliptical arc (open) | `N − 1` POINTs at equal ellipse arc length |
 //!
 //! A LINE/ARC/CIRCLE uses the shared [`TargetCurve`] model TRIM/EXTEND/BREAK use,
-//! whose `point_at` is already arc-length proportional for those kinds. A
-//! **periodic** curve (a CIRCLE, or an ARC whose `|sweep|` is exactly one turn)
-//! has no interior, so its `N` draws include the start parameter; an open curve
-//! has `N − 1` interior marks. A straight LWPOLYLINE is walked by a locally built
-//! cumulative arc-length table — `cad-geometry` is deliberately untouched — and a
-//! closed ring appends its first vertex to close the loop (unless the last vertex
-//! already repeats it) so the seam is measured exactly once.
+//! whose `point_at` is already arc-length proportional for those kinds. SPLINE
+//! and ELLIPSE instead use a local adaptive chord table and invert it to equal
+//! arc length; a spline's raw knot parameter is never used directly. A LWPOLYLINE
+//! is walked by an exact per-segment table: straight chords and circular bulges
+//! (`radius · |sweep|`), so a bulged segment is divided exactly, not approximated.
 //!
 //! Every mark is a new `POINT` on the **active layer** in **model space**, in one
 //! transaction / one undo step, through the shared create funnel; the source curve
 //! is **retained**.
+//!
+//! ## Block option
+//!
+//! AutoCAD's `DIVIDE … B` inserts a named block at each division point instead of
+//! a POINT. That option is accepted through the existing typed
+//! `InsertBlock { name, .. }` payload: `name` is the existing block to place, the
+//! `insertion` field is a finite placeholder (the division points are the real
+//! insertions), and the curve selection comes from the session. The interactive
+//! capture selects this shape when the session `divideUseBlock` flag is set: the
+//! terminal text step supplies the block name. Each mark becomes an independent
+//! `INSERT` on the active layer, with the importer's own
+//! `T(insertion) · T(−base_point)` transform and uniform scale `1`.
+//!
+//! AutoCAD 2026 then asks "Align block with object? [Yes/No]"
+//! ([`crate::draw_tool::ToolParameter::DivideAlignBlock`], default No). With
+//! Yes, each block is rotated to the object's **local tangent direction at its
+//! division point** (the transform becomes
+//! `T(insertion) · R(tangent) · T(−base_point)`); with No every block keeps
+//! rotation `0`. Uniform scale stays `1` either way.
 //!
 //! ## Refusals (all before any write)
 //!
@@ -36,17 +56,18 @@
 //! | `divide.not_addressable` | block-instance member, sub-element, or non-model-space target |
 //! | `divide.target_missing` | the ref does not resolve (or belongs to another document) |
 //! | `divide.invalid_segments` | the session count is not an integer in `2..=1024` |
-//! | `divide.bulged_segment` | a LWPOLYLINE with a non-zero bulge (straight segments only) |
-//! | `divide.degenerate` | fewer than two polyline vertices, a non-finite point, a non-positive total/target length |
+//! | `divide.degenerate` | non-finite/degenerate geometry, fewer than two vertices, non-positive total length |
+//! | `divide.invalid_name` / `divide.unknown_block` / `divide.block_metadata_missing` | the block option's name or definition |
+//! | `divide.bulged_segment` | a non-planar polyline carries a bulge (no circular arc exists) |
 //!
-//! `SPLINE` and every other geometry kind is the explicit
-//! [`CadError::Unsupported`] "DIVIDE supports LINE, ARC, CIRCLE and straight
-//! LWPOLYLINE only". A spline is **not** routed through [`TargetCurve`]: its
-//! parameter is not arc length, so placing marks at `k/N` of it would be a lie.
-//! Work-only through [`crate::CommandId::Divide`].
+//! Every other geometry kind is the explicit [`CadError::Unsupported`]. Work-only
+//! through [`crate::CommandId::Divide`].
 
+use super::arc_length::ArcLengthTable;
+use super::polyline_curve::PolylineCurve;
 use super::trim_curves::{cut_tolerance, TargetCurve};
 use super::*;
+use crate::draw_tool::rotation_transform;
 
 /// A DIVIDE refusal: `InvalidInput` carrying its stable code.
 fn refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
@@ -72,22 +93,51 @@ fn kind_name(geometry: &SemanticGeometry) -> &'static str {
     }
 }
 
+/// What the command should insert at each division point.
+enum DivideMarks {
+    Points,
+    Block { name: String },
+}
+
 impl Application {
     /// `DIVIDE` the one selected curve into equal arc-length parts.
     ///
-    /// The marks are POINT entities on the active layer in model space; the source
-    /// curve is retained. One transaction / one undo step, and every refusal
-    /// happens before it is opened (no revision bump, no `ChangeSet`, no undo
-    /// entry).
+    /// The marks are POINT entities on the active layer in model space (or
+    /// independent INSERTs for the block option); the source curve is retained.
+    /// One transaction / one undo step, and every refusal happens before it is
+    /// opened (no revision bump, no `ChangeSet`, no undo entry).
     pub(crate) fn divide_curve(
         &mut self,
         session: &SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        let CommandPayload::Divide { refs } = &command.payload else {
-            return Err(CadError::InvalidInput(
-                "DIVIDE needs a Divide { refs } payload".into(),
-            ));
+        let (refs, marks_kind) = match &command.payload {
+            CommandPayload::Divide { refs } => (refs.clone(), DivideMarks::Points),
+            // The block option's name channel (see the module docs).
+            CommandPayload::InsertBlock { insertion, name } => {
+                if !is_finite_point(*insertion) {
+                    return Err(refusal(
+                        "divide.invalid_point",
+                        "the DIVIDE block placeholder point must be finite",
+                    ));
+                }
+                (
+                    session.selection.refs().to_vec(),
+                    DivideMarks::Block { name: name.clone() },
+                )
+            }
+            other => {
+                return Err(refusal(
+                    "divide.invalid_payload",
+                    format!(
+                        "DIVIDE needs a Divide payload or an InsertBlock name, got {} point(s)",
+                        match other {
+                            CommandPayload::Points(points) => points.len(),
+                            _ => 0,
+                        }
+                    ),
+                ))
+            }
         };
         // 1. Exactly one selected curve.
         let [reference] = refs.as_slice() else {
@@ -125,7 +175,7 @@ impl Application {
             let (sources, _diagnostics) = Self::resolve_selection(
                 drawing,
                 document_id,
-                refs,
+                &refs,
                 "divide",
                 "DIVIDE",
                 "divide",
@@ -161,22 +211,126 @@ impl Application {
             (source.id, marks, closed)
         };
 
-        let point_count = marks.len();
-        let geometries: Vec<SemanticGeometry> =
-            marks.into_iter().map(SemanticGeometry::Point).collect();
+        let mark_count = marks.len();
+        let (geometries, message) = match marks_kind {
+            DivideMarks::Points => (
+                marks
+                    .into_iter()
+                    .map(|(insertion, _tangent)| SemanticGeometry::Point(insertion))
+                    .collect(),
+                format!(
+                    "DIVIDE: source {} split into {segments} equal arc-length parts ({mark_count} \
+                     POINT(s) on the {} curve)",
+                    source_id.0,
+                    if closed { "closed" } else { "open" }
+                ),
+            ),
+            DivideMarks::Block { name } => {
+                let (block, block_name, base_point) = resolve_divide_block(
+                    self.workspace
+                        .documents
+                        .get(&document_id)
+                        .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+                        .drawing
+                        .as_ref(),
+                    &name,
+                )?;
+                let align = matches!(
+                    session.tool_parameter(ToolParameter::DivideAlignBlock),
+                    ToolValue::Flag(true)
+                );
+                let to_origin = Transform3::translation(Point3 {
+                    x: -base_point.x,
+                    y: -base_point.y,
+                    z: -base_point.z,
+                });
+                let geometries = marks
+                    .into_iter()
+                    .map(|(insertion, tangent)| {
+                        // "Align block with object? [Yes/No]": yes rotates each
+                        // block to the curve's local tangent at its division point;
+                        // no keeps rotation 0. Uniform scale is 1 either way.
+                        let rotation = if align { tangent } else { 0.0 };
+                        let rotate = rotation_transform(
+                            Point3 {
+                                x: 0.0,
+                                y: 0.0,
+                                z: 0.0,
+                            },
+                            rotation,
+                        );
+                        SemanticGeometry::Insert {
+                            block,
+                            transform: Transform3::translation(insertion)
+                                .matrix_mul(&rotate)
+                                .matrix_mul(&to_origin),
+                        }
+                    })
+                    .collect();
+                (
+                    geometries,
+                    format!(
+                        "DIVIDE: source {} split into {segments} equal arc-length parts \
+                         ({mark_count} INSERT(s) of block '{block_name}' on the active layer, \
+                         uniform scale 1, rotation {})",
+                        source_id.0,
+                        if align {
+                            "aligned to the curve tangent"
+                        } else {
+                            "0"
+                        }
+                    ),
+                )
+            }
+        };
         let mut outcome = self.commit_new_entities(session, command, geometries, "divide curve")?;
         outcome.diagnostics.push(Diagnostic {
             object: Some(ObjectId(source_id.0)),
             code: "drawing.divide".into(),
-            message: format!(
-                "DIVIDE: source {} split into {segments} equal arc-length parts ({point_count} \
-                 POINT(s) on the {} curve)",
-                source_id.0,
-                if closed { "closed" } else { "open" }
-            ),
+            message,
         });
         Ok(outcome)
     }
+}
+
+/// Resolve the named block and its base point for the block option.
+fn resolve_divide_block(
+    drawing: &cad_db::DrawingDatabase,
+    name: &str,
+) -> CadResult<(cad_domain::BlockId, String, Point3)> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(refusal(
+            "divide.invalid_name",
+            "DIVIDE needs a non-empty block name",
+        ));
+    }
+    if name.contains('\r') || name.contains('\n') {
+        return Err(refusal(
+            "divide.invalid_name",
+            "the DIVIDE block name must be a single line",
+        ));
+    }
+    let characters = name.chars().count();
+    if characters > MAX_TOOL_TEXT_CHARS {
+        return Err(refusal(
+            "divide.invalid_name",
+            format!("DIVIDE allows at most {MAX_TOOL_TEXT_CHARS} characters, got {characters}"),
+        ));
+    }
+    let definition = drawing.block_by_name(name).ok_or_else(|| {
+        refusal(
+            "divide.unknown_block",
+            format!("no block named '{name}' in this drawing"),
+        )
+    })?;
+    let metadata = drawing.block_metadata(definition.id).ok_or_else(|| {
+        refusal(
+            "divide.block_metadata_missing",
+            format!("block {:?} has no stored name/base point", definition.id),
+        )
+    })?;
+    Ok((definition.id, metadata.name.clone(), metadata.base_point))
 }
 
 /// The channel error's inner message (a named refusal keeps its own text).
@@ -212,9 +366,13 @@ fn divide_segments(session: &SessionState) -> CadResult<usize> {
     }
 }
 
-/// The POINT positions for `segments` equal arc-length divisions of `geometry`,
-/// plus whether the curve is closed/periodic.
-fn division_points(geometry: &SemanticGeometry, segments: usize) -> CadResult<(Vec<Point3>, bool)> {
+/// The mark positions for `segments` equal arc-length divisions of `geometry`
+/// (each with the curve's local tangent angle), plus whether the curve is
+/// closed/periodic.
+fn division_points(
+    geometry: &SemanticGeometry,
+    segments: usize,
+) -> CadResult<(Vec<(Point3, f64)>, bool)> {
     match geometry {
         // LINE/ARC/CIRCLE: the shared parameter model, whose `point_at` is
         // arc-length proportional for these kinds. A periodic curve (a CIRCLE, or
@@ -226,7 +384,7 @@ fn division_points(geometry: &SemanticGeometry, segments: usize) -> CadResult<(V
             let curve = TargetCurve::new(
                 geometry,
                 "DIVIDE",
-                "LINE, ARC, CIRCLE or straight LWPOLYLINE",
+                "LINE, ARC, CIRCLE, SPLINE, ELLIPSE or LWPOLYLINE",
             )?;
             let length = curve.length();
             let eps = cut_tolerance();
@@ -243,124 +401,190 @@ fn division_points(geometry: &SemanticGeometry, segments: usize) -> CadResult<(V
             let count = if closed { segments } else { segments - 1 };
             let first = if closed { 0 } else { 1 };
             let marks = (first..first + count)
-                .map(|k| curve.point_at(k as f64 / segments as f64))
+                .map(|k| {
+                    let u = k as f64 / segments as f64;
+                    (curve.point_at(u), curve_tangent_angle(&curve, u))
+                })
                 .collect();
             Ok((marks, closed))
         }
-        // A straight-segment LWPOLYLINE: walked by its own cumulative arc-length
-        // table (never `cad-geometry`, and never the parameter model, which a
-        // polyline does not have).
+        // SPLINE: sample the exact curve, build a chord-length table and invert
+        // it. The raw knot parameter is deliberately never used as "length".
+        SemanticGeometry::Spline { .. } => {
+            let curve = TargetCurve::new(
+                geometry,
+                "DIVIDE",
+                "LINE, ARC, CIRCLE, SPLINE, ELLIPSE or LWPOLYLINE",
+            )?;
+            sampled_marks(|u| curve.point_at(u), false, segments)
+        }
+        SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => ellipse_division_points(
+            *center,
+            *normal,
+            *major_axis,
+            *ratio,
+            *start,
+            *sweep,
+            segments,
+        ),
+        // A LWPOLYLINE: exact straight chords and exact circular bulges.
         SemanticGeometry::Polyline {
             points,
             bulges,
             closed,
-        } => polyline_division_points(points, bulges, *closed, segments),
-        // A SPLINE (and everything else) is a capability gap, not bad input. A
-        // spline is deliberately **not** routed through `TargetCurve`: its
-        // parameter is not arc length, so `k/N` marks would be misplaced.
+        } => {
+            if points.iter().any(|point| !is_finite_point(*point)) {
+                return Err(refusal(
+                    "divide.degenerate",
+                    "DIVIDE polyline vertices must be finite",
+                ));
+            }
+            let curve = PolylineCurve::new(points, bulges, *closed, "divide")?;
+            let total = curve.total_length();
+            let eps = cut_tolerance();
+            if !total.is_finite() || total <= eps {
+                return Err(refusal(
+                    "divide.degenerate",
+                    "DIVIDE polyline has no measurable length",
+                ));
+            }
+            let count = if *closed { segments } else { segments - 1 };
+            let first = if *closed { 0 } else { 1 };
+            let marks = (first..first + count)
+                .map(|k| {
+                    let distance = total * k as f64 / segments as f64;
+                    (
+                        curve.point_at_distance(distance),
+                        polyline_tangent_angle(&curve, distance, total),
+                    )
+                })
+                .collect();
+            Ok((marks, *closed))
+        }
         other => Err(CadError::Unsupported(format!(
-            "DIVIDE supports LINE, ARC, CIRCLE and straight LWPOLYLINE only; {} is not supported",
+            "DIVIDE supports LINE, ARC, CIRCLE, SPLINE, ELLIPSE and LWPOLYLINE only; {} is not \
+             supported",
             kind_name(other)
         ))),
     }
 }
 
-/// Equal arc-length marks on a straight-segment LWPOLYLINE.
-///
-/// A closed ring appends its first vertex to close the loop (unless the last
-/// vertex already repeats it), so the seam segment is measured exactly once. An
-/// open polyline places `N − 1` interior marks; a closed one places `N` (its
-/// `k = 0` mark is the start vertex). A bulged segment is refused: its exact
-/// length would need an arc-length integral this v1 does not implement, and a
-/// chord approximation would be a lie.
-fn polyline_division_points(
-    points: &[Point3],
-    bulges: &[f64],
+/// The equal-arc-length marks of an ELLIPSE (or elliptical arc).
+fn ellipse_division_points(
+    center: Point3,
+    normal: Point3,
+    major_axis: Point3,
+    ratio: f64,
+    start: f64,
+    sweep: f64,
+    segments: usize,
+) -> CadResult<(Vec<(Point3, f64)>, bool)> {
+    let eps = cut_tolerance();
+    let major_len = cad_geometry::length(major_axis);
+    let normal_len = cad_geometry::length(normal);
+    let ratio = ratio.abs();
+    if !major_len.is_finite()
+        || major_len <= eps
+        || !normal_len.is_finite()
+        || normal_len <= eps
+        || !ratio.is_finite()
+        || ratio <= eps
+        || !sweep.is_finite()
+        || sweep.abs() <= eps
+    {
+        return Err(refusal(
+            "divide.degenerate",
+            "the DIVIDE target ELLIPSE has no measurable length",
+        ));
+    }
+    if sweep.abs() > std::f64::consts::TAU + 1e-9 {
+        return Err(refusal(
+            "divide.degenerate",
+            format!("the DIVIDE target ELLIPSE sweeps more than one full turn: {sweep}"),
+        ));
+    }
+    let unit_major = cad_geometry::scale(major_axis, 1.0 / major_len);
+    let cross = cad_geometry::cross(normal, unit_major);
+    let cross_len = cad_geometry::length(cross);
+    if !cross_len.is_finite() || cross_len <= eps {
+        return Err(refusal(
+            "divide.degenerate",
+            "the DIVIDE target ELLIPSE has a degenerate minor axis",
+        ));
+    }
+    let unit_minor = cad_geometry::scale(cross, 1.0 / cross_len);
+    let minor = cad_geometry::scale(unit_minor, major_len * ratio);
+    let point_at = |u: f64| {
+        let angle = start + sweep * u;
+        Point3 {
+            x: center.x + angle.cos() * major_axis.x + angle.sin() * minor.x,
+            y: center.y + angle.cos() * major_axis.y + angle.sin() * minor.y,
+            z: center.z + angle.cos() * major_axis.z + angle.sin() * minor.z,
+        }
+    };
+    let closed = sweep.abs() >= std::f64::consts::TAU - 1e-9;
+    sampled_marks(point_at, closed, segments)
+}
+
+/// Equal arc-length marks on a sampled curve, each with its local tangent angle.
+fn sampled_marks(
+    point_at: impl Fn(f64) -> Point3,
     closed: bool,
     segments: usize,
-) -> CadResult<(Vec<Point3>, bool)> {
-    if bulges.iter().any(|bulge| *bulge != 0.0) {
-        return Err(CadError::Unsupported(
-            "divide.bulged_segment: DIVIDE supports straight-segment polylines only".into(),
-        ));
-    }
+) -> CadResult<(Vec<(Point3, f64)>, bool)> {
+    let table = ArcLengthTable::sample(&point_at);
+    let total = table.total();
     let eps = cut_tolerance();
-    let mut vertices: Vec<Point3> = points.to_vec();
-    if closed && vertices.len() >= 2 {
-        let first = vertices[0];
-        let last = *vertices.last().expect("checked non-empty above");
-        if !same_vertex(first, last, eps) {
-            vertices.push(first);
-        }
-    }
-    if vertices.len() < 2 {
-        return Err(refusal(
-            "divide.degenerate",
-            "DIVIDE needs a polyline with at least two vertices",
-        ));
-    }
-    if vertices.iter().any(|point| !is_finite_point(*point)) {
-        return Err(refusal(
-            "divide.degenerate",
-            "DIVIDE polyline vertices must be finite",
-        ));
-    }
-    // Cumulative arc-length table: `cumulative[i]` is the distance from the first
-    // vertex to vertex `i`.
-    let mut cumulative = Vec::with_capacity(vertices.len());
-    cumulative.push(0.0);
-    for pair in vertices.windows(2) {
-        let step = distance(pair[0], pair[1]);
-        let next = cumulative.last().copied().unwrap_or(0.0) + step;
-        cumulative.push(next);
-    }
-    let total = cumulative.last().copied().unwrap_or(0.0);
     if !total.is_finite() || total <= eps {
         return Err(refusal(
             "divide.degenerate",
-            "DIVIDE polyline has no measurable length",
+            "the DIVIDE target has no measurable length",
         ));
     }
-    let indices = if closed { 0..segments } else { 1..segments };
-    let marks = indices
-        .map(|k| point_at_distance(&vertices, &cumulative, total * k as f64 / segments as f64))
+    let count = if closed { segments } else { segments - 1 };
+    let first = if closed { 0 } else { 1 };
+    let h = 1e-6;
+    let marks = (first..first + count)
+        .map(|k| {
+            let u = table.parameter_at(total * k as f64 / segments as f64);
+            (
+                point_at(u),
+                direction_angle(point_at(u + h), point_at(u - h)),
+            )
+        })
         .collect();
     Ok((marks, closed))
 }
 
-/// Whether two vertices are the same point within `eps` (the seam-repeat check).
-fn same_vertex(a: Point3, b: Point3, eps: f64) -> bool {
-    distance(a, b) <= eps
+/// The tangent direction angle (radians) from `from` to `to` in the XY plane.
+fn direction_angle(to: Point3, from: Point3) -> f64 {
+    let dx = to.x - from.x;
+    let dy = to.y - from.y;
+    if !dx.is_finite() || !dy.is_finite() || dx.hypot(dy) <= 1e-12 {
+        0.0
+    } else {
+        dy.atan2(dx)
+    }
 }
 
-/// The point at `target` arc length along the vertex chain `vertices`.
-///
-/// `cumulative` is the matching non-decreasing length table; `target` is clamped
-/// to the chain's own span, so a floating-point overshoot at the seam returns the
-/// last vertex instead of a point beyond the curve.
-fn point_at_distance(vertices: &[Point3], cumulative: &[f64], target: f64) -> Point3 {
-    let last = vertices.len() - 1;
-    if !target.is_finite() || target <= 0.0 {
-        return vertices[0];
-    }
-    let total = cumulative[last];
-    if target >= total {
-        return vertices[last];
-    }
-    let upper = cumulative
-        .partition_point(|length| *length <= target)
-        .min(last);
-    let lower = upper.saturating_sub(1);
-    let span = cumulative[upper] - cumulative[lower];
-    if !span.is_finite() || span <= 0.0 {
-        return vertices[upper];
-    }
-    let fraction = (target - cumulative[lower]) / span;
-    let start = vertices[lower];
-    let end = vertices[upper];
-    Point3 {
-        x: start.x + (end.x - start.x) * fraction,
-        y: start.y + (end.y - start.y) * fraction,
-        z: start.z + (end.z - start.z) * fraction,
-    }
+/// The tangent angle of a LINE/ARC/CIRCLE/SPLINE target at parameter `u`.
+fn curve_tangent_angle(curve: &TargetCurve, u: f64) -> f64 {
+    let h = 1e-6;
+    direction_angle(curve.point_at(u + h), curve.point_at(u - h))
+}
+
+/// The tangent angle of a polyline at `distance` along its arc length.
+fn polyline_tangent_angle(curve: &PolylineCurve, distance: f64, total: f64) -> f64 {
+    let h = (total * 1e-6).max(1e-9);
+    direction_angle(
+        curve.point_at_distance(distance + h),
+        curve.point_at_distance(distance - h),
+    )
 }

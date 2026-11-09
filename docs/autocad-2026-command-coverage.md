@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **50** |
-| 部分实现（有写明的界） | **373** |
+| 完整实现 | **59** |
+| 部分实现（有写明的界） | **364** |
 | **已实现合计（完整 + 部分）** | **423** |
 | 未实现 | **558** |
 
@@ -67,7 +67,9 @@
 > **2026-11-09 增补（Wave 6）**：`DWGLOG`/`LOGFILEON`/`LOGFILEOFF` 三个名字共用**一个会话图形日志令牌**（默认关；本构建不写日志文件、不写图/不升修订），`DWGPROPS` 一个只读文档报告（文档 id/修订/实体数；标题、作者、自定义特性**未建模**），`DWFFORMAT`/`EXPORTPDF` 两个**只读能力报告**（DWF/DWFx 不导出；PDF 由宿主经 `PLOT` 负责，二者都不是错误）；另加 `SAVEALL`…`AUTOPUBLISH` 二十四个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **383 已实现（50 完整 + 333 部分）/ 598 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-09 增补（Wave 7）**：`BVSTATE`/`-BVSTATE` 两个**只读动态块可见性报告**（逐选中 INSERT 读取 `DrawingDatabase::block_dynamic_visibility` 的活动状态；无 INSERT 报 `*.no_selection`，无描述符或活动状态未解析报 `*.not_set`，绝不猜测；不设置状态/不写库/不升修订）；另加 `BACTION`…`DCLINEAR` 二十八个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，覆盖动态块动作/参数/查找表/构造几何/按状态隐藏显示、块编写选项板、参数重置与几何/尺寸约束；不写库/不升修订/不入历史）计入 **413 已实现（50 完整 + 363 部分）/ 568 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-09 增补（Wave 8）**：`ELEV` 一个**只读会话标高令牌报告**（默认 0.0；`ELEV <height>` 设置形式未实现，不按标高创建对象），`UCSICON` 一个会话开关（默认关；不渲染任何 UCS 图标）；另加 `UCS`/`UCSMAN`/`TABLET`/`TASKBAR`/`REINIT`/`SYSWINDOWS`/`MENU`/`RIBBON` 八个**具名拒绝**（`CadError::Unsupported` + 稳定原因串：无 UCS 模型、无数字化仪/设备初始化模型、无菜单文件模型，窗口装饰/布局/功能区可见性由宿主负责；不写库/不升修订/不入历史）计入 **423 已实现（50 完整 + 373 部分）/ 558 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
-> **423 已实现（50 完整 + 373 部分）/ 558 未实现**；无未保存修改提示，无多文档。
+> **2026-11-09 增补（P1 晋升批）**：按 AutoCAD 2026 ENU 帮助页逐条核对后，`ALIGN`、`BREAK`、`DIVIDE`、`SELECTSIMILAR`、`MATCHPROP`、`SETBYLAYER`、`LIST`、`DIMSPACE`、`TORIENT` 九条从**部分实现**晋升为**完整实现**：补齐 1/3 对点 ALIGN（3 对点为平面刚性、不缩放）、椭圆 BREAK、全曲线 DIVIDE + 块对齐、SELECTSIMILAR 默认「图层+类型」与 `Name`/`Object style`、MATCHPROP 的 Text/Dimension/Hatch 特殊组、SETBYLAYER 透明度与 Include blocks、LIST 的纸空间/块空间与样式名、DIMSPACE 的 Auto=2×文字高度/`0` 对齐/角度标注、TORIENT Reverse（本项目扩展）。`LENGTHEN` 补了近端语义、开放多段线/椭圆弧/开放样条与 DY，但**开放样条延长**仍是具名拒绝，故保留**部分实现**。三处实现偏差已按官方语义修正：ALIGN 三对点禁缩放、SELECTSIMILAR 默认集、DIMSPACE Auto 公式。计入 **423 已实现（59 完整 + 364 部分）/ 558 未实现**；全部结论仍只覆盖 Linux 编译与契约测试，GUI/GPU/像素 NOT VERIFIED。
+>
+> **423 已实现（59 完整 + 364 部分）/ 558 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -109,6 +111,42 @@
 > **部分实现**计入：`WHOHAS` 是单文档只读报告，`MVIEW`/`MVSETUP` 是具名拒绝（`Unsupported` +
 > 稳定原因串）。「部分实现」只表示命令路径存在并如实回答，不等于功能可用。
 
+## 部分实现 → 完整实现 晋升计划（50 条，2026-11-09 起）
+
+> **这不是验收，是排期与口径。** 目标是把 50 条已经存在的 `部分实现` 命令在**支持域内**补到
+> `完整实现`。晋升后该命令行不再写任何「界」；做不到的保留 `部分实现` 并缩小界，绝不把缺口
+> 改写成空成功。
+
+**晋升口径**
+
+- `完整实现` = 该命令在其支持域内没有剩余的可写明缺口（覆盖表与 `docs/compatibility.md` 都不再
+  列界）。
+- **全局范围声明**（不再逐条计入某命令的界）：3D/实体/曲面/B-rep、UCS、无人值守对话框/逐选项
+  提示、多文档、OS 级剪贴板、真实打印样式/绘图仪、协作/云端、**块属性模型**（ATTDEF/ATTRIB）、
+  **关联性/反应器**（标注与填充的双向关联）、**厚度/拉伸方向**、**材质与命名打印样式**。这些是
+  构建级范围，不是单条命令的晋升目标；落在这些范围的差异不再写成某条命令的界。
+- 命令自身的选项顺序、提示文案与系统变量副作用仍按 AutoCAD 2026 帮助页核对；**已核对过**
+  `ALIGN`/`LENGTHEN`/`BREAK`/`DIVIDE`/`SELECTSIMILAR`/`MATCHPROP`/`SETBYLAYER`/`LIST`/
+  `DIMSPACE`/`TORIENT` 的 2026 ENU 页面，并据此修正了三处实现偏差（ALIGN 三对点禁缩放、
+  SELECTSIMILAR 默认仅图层+类型、DIMSPACE Auto = 2×标注文字高度）。
+- 支持域内做不到的能力必须保留**具名拒绝**，该命令继续算 `部分实现`。
+- 晋升不新增命令名，因此不改 `CommandId`/`COMMAND_TABLE`/UI catalog/i18n；只改实现、契约测试、
+  本条文档与 `docs/compatibility.md`。
+
+**分批与退出条件**
+
+| 批次 | 命令 | 退出条件（支持域内） |
+| --- | --- | --- |
+| P1 | `ALIGN` `LENGTHEN` `BREAK` `DIVIDE` `SELECTSIMILAR` `MATCHPROP` `SETBYLAYER` `LIST` `DIMSPACE` `TORIENT` | 1/3 对点对齐、四种 LENGTHEN 模式、`F` 首点与多段线打断、椭圆/样条/含 bulge 折线等分与块等分、按属性相似选择、MATCHPROP 设置子集、SETBYLAYER 透明度与块内、LIST 全部已建模属性、DIMSPACE 间距值、TORIENT 全模式 |
+| P2 | `CHAMFER` `FILLET` `PEDIT` `JOIN` `OFFSET` `STRETCH` `MIRROR` `EXPLODE` `QSELECT` `FILTER` | Angle/Trim/Multiple/Undo 与多段线、PEDIT Join/Width/Fit/Spline/Decurve/Edit vertex、折线/样条连接、椭圆偏移、文本整体拉伸与多边形窗口、全部实体镜像、标注/多重引线/非均匀块分解、QSELECT/FILTER 全属性与 Append/Exclude |
+| P3 | `OVERKILL` `AUDIT` `QDIM` `DIMTEDIT` `REVCLOUD` `WIPEOUT` `TEXTMASK` `TXT2MTXT` `HATCHEDIT` `SSX` | 共线/部分重叠去重、AUDIT 可修复项、QDIM 圆/弧、DIMTEDIT 全选项、矩形/多边形修订云线、WIPEOUT/TEXTMASK 边框模型、TXT2MTXT 选项、HATCHEDIT 图案/颜色、SSX 全属性 |
+| P4 | `LAYDEL` `-LAYDEL` `LAYMRG` `-LAYMRG` `LAYFRZ` `LAYLCK` `LAYULK` `LAYTHW` `RENAME` `-RENAME` | 图层表写入纳入 `DrawingUndoRecord`（一条事务/一步撤销），并补齐图纸空间/块内实体与 Settings 选项；基础改动是 `cad-history` 的 `LayerPatch` + 应用器 |
+| P5 | `CLIP` `CLIPIT` `VPORTS` `VPSCALE` `VPCLIP` `LAYVPI` `LAYOUTMERGE` `LAYOUTWIZARD` `MVIEW` `MVSETUP` | `cad-db` 新增 image clip 写路径与 `Layout`/`PaperViewport` 变更 API；`LAYVPI` 另需 per-viewport 图层状态模型 |
+
+**进度**：P1 **已完成**（2026-11-09）：9 条晋升（`ALIGN` `BREAK` `DIVIDE` `SELECTSIMILAR`
+`MATCHPROP` `SETBYLAYER` `LIST` `DIMSPACE` `TORIENT`），`LENGTHEN` 因开放样条延长未实现保留
+`部分实现`。P2–P5 未开始。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
+
 ## 已实现 / 部分实现命令索引（按字母序）
 
 > 本索引覆盖官方清单里所有当前为「已实现」或「部分实现」的名字（含 `-` 别名）；
@@ -144,7 +182,7 @@
 | `ACADINFO` | 部分实现 | 只读：产品版本/构建配置 + 文档修订/实体数；许可证/硬件/模块数据不收集。 |
 | `ADDSELECTED` | 部分实现 | 具名拒绝（`addselected.unsupported`）：缺少按类型创建提示模型。 |
 | `ALIASEDIT` | 部分实现 | 只读：逐行列出规范 `COMMAND_ALIASES`；创建/修改/删除别名未实现。 |
-| `ALIGN` | 部分实现 | 仅两对点（平移 + 旋转 + 可选均匀缩放）；无 3 对点 3D、无非均匀缩放 |
+| `ALIGN` | 已实现 | 1 对点移动、2 对点平移+旋转+可选均匀缩放、3 对点平面**刚性**（旋转+平移，不缩放）；退化/非共面/非全等/镜像按名拒绝；3 对点的 3D 平面旋转属全局范围 |
 | `ANNORESET` | 部分实现 | 具名拒绝（`annoreset.unsupported`）：本构建无注释性对象模型。 |
 | `ANNOUPDATE` | 部分实现 | 具名拒绝（`annoupdate.unsupported`）：本构建无注释性对象模型。 |
 | `APERTURE` | 部分实现 | 只读报告会话靶框令牌（默认 10）；`APERTURE <n>` 设置形式未实现，不绘制捕捉靶框。 |
@@ -193,7 +231,7 @@
 | `BLOOKUPTABLE` | 部分实现 | 具名拒绝（`blookuptable.unsupported`）：本构建无动态块查找表。 |
 | `BOUNDARY` | 部分实现 | 一个内部点 → 每个发现的闭合环（含嵌套岛）一条闭合非关联多段线；仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 选项（边界集/关闭岛检测/面域输出/对象类型）未实现；无 `BO`/`BPOLY` 别名 |
 | `BPARAMETER` | 部分实现 | 具名拒绝（`bparameter.unsupported`）：本构建无动态块参数模型。 |
-| `BREAK` | 部分实现 | 两点打断；无 F 第一点覆盖、无多段打断；LWPOLYLINE 按名拒绝 |
+| `BREAK` | 已实现 | 两断点 + `F` 首点覆盖；`LINE`/`ARC`/`CIRCLE`/`SPLINE`/整椭圆/`LWPOLYLINE`；第二点可离对象并投影到曲线；圆→弧；**无多段打断**（AutoCAD 无此模式）；部分椭圆弧按名拒绝 |
 | `BREAKATPOINT` | 部分实现 | 交互工具：先拾取对象再指定断点（断点可投影到对象上）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
 | `BREPLACE` | 部分实现 | 具名拒绝（`breplace.unsupported`）：需要两个块定义；无块替换编辑器。 |
 | `BSAVE` | 部分实现 | 具名拒绝（`bsave.unsupported`）：本构建无块编辑器。 |
@@ -262,12 +300,12 @@
 | `DIMREASSOCIATE` | 部分实现 | 非关联标注的具名 no-op（`dimreassociate.non_associative`）；不改变任何状态。 |
 | `DIMREGEN` | 部分实现 | payload-free；本构建非关联，`dimregen.non_associative` 且不改变任何状态 |
 | `DIMROTATED` | 部分实现 | 三点拾取（两尺寸界线原点 + 尺寸线位置）；尺寸线角度来自会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
-| `DIMSPACE` | 部分实现 | 选择驱动：首个选中的线性标注为基准，其余按拾取顺序以基准样式 `DIMDLI` 自动等距；无交互间距值提示、无关联重排、仅模型空间线性标注 |
+| `DIMSPACE` | 已实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | `-DIMSTYLE` | 部分实现 | `DIMSTYLE` 的别名，同一实现 |
 | `DIMSTYLE` | 部分实现 | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 按 `dimstyle.set_unavailable` 拒绝（无 post-import 样式表写 API）；未知名称拒绝 |
 | `DIMTEDIT` | 部分实现 | 恰好一个选中标注；`MOVE <x> <y>` 写组 11、`ROTATE <deg>` 写组 53、`RESET` 复位；一条事务/一步撤销；无变化 `dimtedit.unchanged` |
 | `DIST` | 已实现 | — |
-| `DIVIDE` | 部分实现 | 仅 LINE/ARC/CIRCLE/直线段 LWPOLYLINE；按等弧长放 POINT |
+| `DIVIDE` | 已实现 | `LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`/含 bulge 折线，按等弧长；开放 N−1、闭合 N；块选项支持 Align=Yes/No（切线对齐，均匀比例 1） |
 | `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心圆；`inner=0` 只建外圆并诊断；无中心拾取提示 |
 | `DRAGMODE` | 部分实现 | 会话令牌 `dragmode`（默认 ON）；渲染器不消费，无拖动预览。 |
 | `DRAWORDER` | 部分实现 | `FRONT\ |
@@ -356,17 +394,17 @@
 | `LAYVPI` | 部分实现 | 层名校验后 `layvpi.viewport_layer_state_unsupported`；永不全局冻结 |
 | `LAYWALK` | 部分实现 | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
 | `LEADER` | 部分实现 | 创建单个 MULTILEADER（旧实体映射为 MULTILEADER）；一次事务/一步撤销；无引线样式/注释类型选项 |
-| `LENGTHEN` | 部分实现 | 仅 LINE/ARC，只改末端 |
+| `LENGTHEN` | 部分实现 | `DE`/`PER`/`TOT` 从**靠近拾取点**的端点改长度；`DY` 拖一端；`LINE`/`ARC`/开放多段线/椭圆弧/开放样条；闭合对象拒绝；开放样条**延长**未实现（`lengthen.spline_extend_unsupported`），缩短精确 |
 | `LIMITS` | 部分实现 | 具名拒绝（`limits.unsupported`）：无图形界限模型。 |
 | `LINE` | 已实现 | — |
 | `-LINETYPE` | 部分实现 | `LINETYPE` 的别名（同一 `CommandId`/路径）；`LIST` 只读、`SET` 复用 `SETENTITYPROPERTY` |
 | `LINETYPE` | 部分实现 | `LIST` 只读（Viewer 合法）；`SET <name>` 复用 `SETENTITYPROPERTY`、重新授权工作模式、一条事务/一步撤销；未知名 `property.unknown_linetype`；无线型表加载/新建/删除/改名 |
-| `LIST` | 部分实现 | 读取**当前选择**而非 AutoCAD 的交互式 “Select objects”；逐对象报告 id/handle/type/layer/space/draw order、标准颜色/线型/线宽/透明度与几何摘要。不建模厚度/拉伸方向；不可寻址引用逐条报告后继续 |
+| `LIST` | 已实现 | 读取当前选择；报告模型/图纸/块空间、图层、draw order、颜色/线型/线宽/透明度/线型比例/可见性、文字样式/标注样式/块名与几何摘要；厚度/拉伸方向属未建模的全局范围 |
 | `LOGFILEOFF` | 部分实现 | 会话令牌置关（`logfileoff.toggled`）；无日志文件。 |
 | `LOGFILEON` | 部分实现 | 会话令牌置开（`logfileon.toggled`）；无日志文件。 |
 | `LTSCALE` | 部分实现 | 一个正有限小数；写内存 `$LTSCALE`（一次 revision，无撤销）；当前导出器不写该变量，SAVE→OPEN 不往返 |
 | `MASSPROP` | 部分实现 | 只读；仅选定闭合共面圆/完整椭圆/闭合多段线；面积/周长/包围盒/形心。椭圆周长近似；无惯性矩/主轴/体积/密度/`.mpr` |
-| `MATCHPROP` | 部分实现 | 只转移 layer/color/linetype/lineweight/transparency |
+| `MATCHPROP` | 已实现 | Basic 六项 + Settings 子集；Text 组复制文字样式与字体、Dimension 组复制标注样式、Hatch 组复制填充样式/图案/渐变；**不**复制字高、标注覆盖值与填充原点（与 AutoCAD 一致）；异类目标跳过该组并报告 |
 | `MENU` | 部分实现 | 具名拒绝（`menu.unsupported`）：本构建无菜单文件模型，界面固定。 |
 | `MEASUREGEOM` | 部分实现 | 选项路由：DISTANCE/ANGLE/AREA/POLYLINE 复用既有工具，RADIUS 只读报告；VOLUME 显式未实现（无 3D 体积模型） |
 | `MIRROR` | 部分实现 | 保留原件；拒绝 Text/MultiLeader |
@@ -479,8 +517,8 @@
 | `SCALETEXT` | 已实现 | — |
 | `SELECT` | 部分实现 | 以选择载荷设置会话选择；不是 AutoCAD 的交互式 SELECT |
 | `SELECTCOUNT` | 部分实现 | 只读统计与第一个选中对象五特性相同的模型空间对象数；不改选择/无事务 |
-| `SELECTSIMILAR` | 部分实现 | v1 仅按几何类型匹配并并入当前选择；无 layer/颜色/线型等属性匹配；仅模型空间 |
-| `SETBYLAYER` | 部分实现 | 预选择输入（不弹 Select objects）；只重置颜色/线型/线宽为随层；不重置透明度与材质，文字/标注/填充/多段线厚度未建模；Include blocks 未实现；锁定图层整命令拒绝；显示写入可撤销 |
+| `SELECTSIMILAR` | 已实现 | 对象类型强制；默认**图层+类型**；Color/Linetype/Lineweight/Name/Object style 独立开关；透明**不**参与；`Name` 按**根块参照名**匹配展开成员；模型/图纸空间各自匹配；只读 |
+| `SETBYLAYER` | 已实现 | 颜色/线型/线宽/透明度复位随层；Include blocks 递归块成员；锁定图层拒绝；材质/命名打印样式属未建模的全局范围（AutoCAD 的 SETBYLAYER 本就不含文字/标注/填充样式） |
 | `SETVAR` | 部分实现 | 读/写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`；写复用既有命令路径；未知/越界按名拒绝 |
 | `SKETCH` | 部分实现 | 仅 `CommandPayload::Points`：一条活动层开放 LWPOLYLINE；两点以上且有限；一条事务/一步撤销；交互式定时采样 NOT IMPLEMENTED |
 | `SNAP` | 已实现 | — |
@@ -503,7 +541,7 @@
 | `TFRAMES` | 部分实现 | 会话令牌 `tframes`；不改变图像/外部参照边框可见性。 |
 | `TIME` | 部分实现 | 只读：revision/实体数 + UTC 时钟；创建/编辑时间与会话 uptime 显式 NOT TRACKED |
 | `TJUST` | 部分实现 | `JUSTIFYTEXT` 的别名，同一语法与实现 |
-| `TORIENT` | 部分实现 | Express 工具、选择式：裸命令按 180° 步进归一到 `(-π/2, π/2]`（Most Readable），`TORIENT <角度>` 设为绝对旋转；只改 rotation，位置/字高/内容不变；非 Text（含 MULTILEADER/INSERT 属性）报告 `torient.not_reset`，不整体失败 |
+| `TORIENT` | 已实现 | 裸命令 Most Readable、`TORIENT <角度>` 绝对旋转、`TORIENT REVERSE|R` 再加 180°（**本项目扩展**，AutoCAD 2026 无此选项）；只改 TEXT/MTEXT 的 rotation，位置不变；ATTDEF/带属性块因无属性模型不适用（全局范围） |
 | `TREESTAT` | 部分实现 | 显式 `treestat.not_tracked`；不造假计数 |
 | `TREX` | 部分实现 | `TREX TRIM\ |
 | `TRIM` | 部分实现 | 目标 LINE/ARC/CIRCLE/SPLINE；边界含折线/样条采样 |
@@ -591,7 +629,7 @@
 | 44 | `ADDSELECTED` | 部分实现 | Creates a new object of the same type and general properties as a selected object, but with different geometric values. | 具名拒绝（`addselected.unsupported`）：缺少按类型创建提示模型。 |
 | 45 | `ADJUST` | 未实现 | Adjusts the fade, contrast and monochrome settings of the selected underlay (DWF, DWFx, PDF, or DGN), or image. | — |
 | 46 | `ALIASEDIT` | 部分实现 | Creates, modifies, and deletes AutoCAD command aliases. | 只读：逐行列出规范 `COMMAND_ALIASES`；创建/修改/删除别名未实现。 |
-| 47 | `ALIGN` | 部分实现 | Aligns objects with other objects in 2D and 3D. | 仅两对点（平移 + 旋转 + 可选均匀缩放）；无 3 对点 3D、无非均匀缩放 |
+| 47 | `ALIGN` | 已实现 | Aligns objects with other objects in 2D and 3D. | 1 对点移动、2 对点平移+旋转+可选均匀缩放、3 对点平面**刚性**（旋转+平移，不缩放）；退化/非共面/非全等/镜像按名拒绝；3 对点的 3D 平面旋转属全局范围 |
 | 48 | `ALIGNSPACE` | 未实现 | Adjusts the pan and zoom factor of a view in a layout viewport based on the alignment points specified in model space and paper space. | — |
 | 49 | `AMECONVERT` | 未实现 | Converts AME solid models to AutoCAD solid objects. | — |
 | 50 | `ANALYSISCURVATURE` | 未实现 | Displays a color gradient onto a surface to evaluate different aspects of its curvature. | — |
@@ -677,7 +715,7 @@
 | 130 | `BOUNDARY` | 部分实现 | Creates regions or a polylines from enclosed areas. | 一个内部点 → 复用 HATCHPOINT 发现（最小可见闭合边界 + 嵌套岛）；每个环在当前层创建一条闭合、非关联 `AcDbPolyline`（保留 bulge、丢重复末点、世界 `+Z`）；源对象保留；仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 的边界集/关闭岛检测/面域输出/对象类型未实现；不承认 `BO`/`BPOLY` 别名 |
 | 131 | `BOX` | 未实现 | Creates a 3D solid box. | — |
 | 132 | `BPARAMETER` | 部分实现 | Adds a parameter with grips to a dynamic block definition. | 具名拒绝（`bparameter.unsupported`）：本构建无动态块参数模型。 |
-| 133 | `BREAK` | 部分实现 | Breaks the selected object between two points. | 两点打断；无 F 第一点覆盖、无多段打断；LWPOLYLINE 按名拒绝 |
+| 133 | `BREAK` | 已实现 | Breaks the selected object between two points. | 两断点 + `F` 首点覆盖；`LINE`/`ARC`/`CIRCLE`/`SPLINE`/整椭圆/`LWPOLYLINE`；第二点可离对象并投影到曲线；圆→弧；**无多段打断**（AutoCAD 无此模式）；部分椭圆弧按名拒绝 |
 | 134 | `BREAKATPOINT` | 部分实现 | Breaks the selected object into two objects at a specified point. | 交互工具：先拾取对象再指定断点（断点可投影）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
 | 135 | `BREAKLINE` | 未实现 | Creates a breakline, a polyline that includes the breakline symbol. | — |
 | 136 | `BREP` | 未实现 | Removes the history from 3D solids and composite solids, and associativity from surfaces. | — |
@@ -850,13 +888,13 @@
 | 303 | `DIMREASSOCIATE` | 部分实现 | Associates or reassociates selected dimensions to objects or points on objects. | 非关联标注 no-op（`dimreassociate.non_associative`）；无状态变化。 |
 | 304 | `DIMREGEN` | 部分实现 | Updates the locations of all associative dimensions. | payload-free；本构建非关联，`dimregen.non_associative` 且不改变任何状态 |
 | 305 | `DIMROTATED` | 部分实现 | Creates a rotated linear dimension. | 三点拾取（两尺寸界线原点 + 尺寸线位置）；角度为会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
-| 306 | `DIMSPACE` | 部分实现 | Adjusts the spacing between linear dimensions or angular dimensions. | 选择驱动 v1：首个线性标注为基准，其余按拾取顺序以基准样式 `DIMDLI` 自动等距；无交互间距值提示、无关联重排、仅模型空间线性标注 |
+| 306 | `DIMSPACE` | 已实现 | Adjusts the spacing between linear dimensions or angular dimensions. | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | 307 | `-DIMSTYLE` | 部分实现 | At the Command prompt, creates and modifies dimension styles. | `DIMSTYLE` 的别名，同一实现 |
 | 308 | `DIMSTYLE` | 部分实现 | Creates and modifies dimension styles. | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 按 `dimstyle.set_unavailable` 拒绝（无 post-import 样式表写 API）；未知名称拒绝 |
 | 309 | `DIMTEDIT` | 部分实现 | Moves and rotates dimension text and relocates the dimension line. | 恰好一个选中标注；`MOVE <x> <y>` 写组 11、`ROTATE <deg>` 写组 53、`RESET` 复位；一条事务/一步撤销；无变化 `dimtedit.unchanged` |
 | 310 | `DIST` | 已实现 | Measures the distance and angle between two points. | — |
 | 311 | `DISTANTLIGHT` | 未实现 | Creates a distant light. | — |
-| 312 | `DIVIDE` | 部分实现 | Creates evenly spaced point objects or blocks along the length or perimeter of an object. | 仅 LINE/ARC/CIRCLE/直线段 LWPOLYLINE；按等弧长放 POINT |
+| 312 | `DIVIDE` | 已实现 | Creates evenly spaced point objects or blocks along the length or perimeter of an object. | `LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`/含 bulge 折线，按等弧长；开放 N−1、闭合 N；块选项支持 Align=Yes/No（切线对齐，均匀比例 1） |
 | 313 | `DONUT` | 部分实现 | Creates a filled circle or a wide ring. | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心圆；`inner=0` 只建外圆并诊断；无中心拾取提示 |
 | 314 | `DOWNLOADMANAGER` | 未实现 | Reports the status of the of the current download. | — |
 | 315 | `DRAGMODE` | 部分实现 | Controls the way dragged objects are displayed. | 会话令牌 `dragmode`（默认 ON）；渲染器不消费，无拖动预览。 |
@@ -1037,7 +1075,7 @@
 | 490 | `LAYVPI` | 部分实现 | Freezes selected layers in all layout viewports except the current viewport. | 层名校验后 `layvpi.viewport_layer_state_unsupported`；永不全局冻结 |
 | 491 | `LAYWALK` | 部分实现 | Displays objects on selected layers and hides objects on all other layers. | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
 | 492 | `LEADER` | 部分实现 | Creates a line that connects annotation to a feature. | 创建单个 MULTILEADER（旧实体映射为 MULTILEADER）；一次事务/一步撤销；无引线样式/注释类型选项 |
-| 493 | `LENGTHEN` | 部分实现 | Changes the length of objects and the included angle of arcs. | 仅 LINE/ARC，只改末端 |
+| 493 | `LENGTHEN` | 部分实现 | Changes the length of objects and the included angle of arcs. | `DE`/`PER`/`TOT` 从**靠近拾取点**的端点改长度；`DY` 拖一端；`LINE`/`ARC`/开放多段线/椭圆弧/开放样条；闭合对象拒绝；开放样条**延长**未实现（`lengthen.spline_extend_unsupported`），缩短精确 |
 | 494 | `LIGHT` | 未实现 | Creates a light. | — |
 | 495 | `LIGHTLIST` | 未实现 | Displays the Lights in Model palette that lists all lights in the model. | — |
 | 496 | `LIGHTLISTCLOSE` | 未实现 | Closes the Lights in Model palette. | — |
@@ -1045,7 +1083,7 @@
 | 498 | `LINE` | 已实现 | Create a series of contiguous line segments. Each segment is a line object that can be edited separately. | — |
 | 499 | `-LINETYPE` | 部分实现 | At the Command prompt, loads, sets, and modifies linetypes. | `LINETYPE` 的别名（同一 `CommandId`/路径）；`LIST` 只读、`SET` 复用 `SETENTITYPROPERTY` |
 | 500 | `LINETYPE` | 部分实现 | Loads, sets, and modifies linetypes. | `LIST` 只读（Viewer 合法）；`SET <name>` 复用 `SETENTITYPROPERTY`、重新授权工作模式、一条事务/一步撤销；未知名 `property.unknown_linetype`；无线型表加载/新建/删除/改名 |
-| 501 | `LIST` | 部分实现 | Displays property data for selected objects. | 选择驱动（非交互式选取）；逐对象报告空间、图层、标准显示属性与几何摘要；厚度/拉伸方向不建模，显式说明 |
+| 501 | `LIST` | 已实现 | Displays property data for selected objects. | 读取当前选择；报告模型/图纸/块空间、图层、draw order、颜色/线型/线宽/透明度/线型比例/可见性、文字样式/标注样式/块名与几何摘要；厚度/拉伸方向属未建模的全局范围 |
 | 502 | `LIVESECTION` | 未实现 | Turns on live sectioning for a selected section object. | — |
 | 503 | `LOAD` | 未实现 | Makes the symbols in compiled shape (SHX) files available for use by the SHAPE command. | — |
 | 504 | `LOFT` | 未实现 | Creates a 3D solid or surface in the space between several cross sections. | — |
@@ -1067,7 +1105,7 @@
 | 520 | `MATBROWSERCLOSE` | 未实现 | Closes the Materials Browser. | — |
 | 521 | `MATBROWSEROPEN` | 未实现 | Opens the Materials Browser. | — |
 | 522 | `MATCHCELL` | 未实现 | Applies the properties of a selected table cell to other table cells. | — |
-| 523 | `MATCHPROP` | 部分实现 | Applies the properties of a selected object to other objects. | 只转移 layer/color/linetype/lineweight/transparency |
+| 523 | `MATCHPROP` | 已实现 | Applies the properties of a selected object to other objects. | Basic 六项 + Settings 子集；Text 组复制文字样式与字体、Dimension 组复制标注样式、Hatch 组复制填充样式/图案/渐变；**不**复制字高、标注覆盖值与填充原点（与 AutoCAD 一致）；异类目标跳过该组并报告 |
 | 524 | `MATEDITORCLOSE` | 未实现 | Closes the Materials Editor. | — |
 | 525 | `MATEDITOROPEN` | 未实现 | Opens the Materials Editor. | — |
 | 526 | `MATERIALASSIGN` | 未实现 | Assigns the material defined in the CMATERIAL system variable to the objects you select. | — |
@@ -1327,8 +1365,8 @@
 | 780 | `SECURITYOPTIONS` | 未实现 | Controls the security restrictions for running executable files in the product. | — |
 | 781 | `SELECT` | 部分实现 | Places selected objects in the Previous selection set. | 以选择载荷设置会话选择；不是 AutoCAD 的交互式 SELECT |
 | 782 | `SELECTCOUNT` | 部分实现 | Finds all objects within the current count that match the properties of the selected objects, and then adds them to the selection set. | 只读统计与第一个选中对象五特性相同的模型空间对象数；不改选择/无事务 |
-| 783 | `SELECTSIMILAR` | 部分实现 | Finds all objects within the current drawing that match the properties of selected objects, and then adds them to the selection set. | v1 仅按几何类型匹配并并入当前选择；无 layer/颜色/线型等属性匹配；仅模型空间 |
-| 784 | `SETBYLAYER` | 部分实现 | Changes the property overrides of selected objects to ByLayer. | 预选择输入（不弹 Select objects）；只重置颜色/线型/线宽为随层；不重置透明度与材质，文字/标注/填充/多段线厚度未建模；Include blocks 未实现；锁定图层整命令拒绝；显示写入可撤销 |
+| 783 | `SELECTSIMILAR` | 已实现 | Finds all objects within the current drawing that match the properties of selected objects, and then adds them to the selection set. | 对象类型强制；默认**图层+类型**；Color/Linetype/Lineweight/Name/Object style 独立开关；透明**不**参与；`Name` 按**根块参照名**匹配展开成员；模型/图纸空间各自匹配；只读 |
+| 784 | `SETBYLAYER` | 已实现 | Changes the property overrides of selected objects to ByLayer. | 颜色/线型/线宽/透明度复位随层；Include blocks 递归块成员；锁定图层拒绝；材质/命名打印样式属未建模的全局范围（AutoCAD 的 SETBYLAYER 本就不含文字/标注/填充样式） |
 | 785 | `SETVAR` | 部分实现 | Lists or changes the values of system variables. | 读/写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`；写复用既有命令路径；未知/越界按名拒绝 |
 | 786 | `-SHADEMODE` | 未实现 | Provides simple shading for 3D solids and surfaces. | — |
 | 787 | `SHADEMODE` | 未实现 | Controls the display of 3D objects. | — |
@@ -1417,7 +1455,7 @@
 | 870 | `TOOLBAR` | 未实现 | Displays, hides, and customizes toolbars. | — |
 | 871 | `TOOLPALETTES` | 未实现 | Opens the Tool Palettes window. | — |
 | 872 | `TOOLPALETTESCLOSE` | 未实现 | Closes the Tool Palettes window. | — |
-| 873 | `TORIENT` | 部分实现 | Rotates text, mtext, attribute definitions, and blocks with attributes for readability. | 选择式；裸命令 Most Readable（归一到 `(-π/2, π/2]`），`TORIENT <角度>` 绝对旋转；只改 rotation；非 Text/属性/块属性报告 `torient.not_reset`；MULTILEADER 文本旋转无 setter |
+| 873 | `TORIENT` | 已实现 | Rotates text, mtext, attribute definitions, and blocks with attributes for readability. | 裸命令 Most Readable、`TORIENT <角度>` 绝对旋转、`TORIENT REVERSE|R` 再加 180°（**本项目扩展**，AutoCAD 2026 无此选项）；只改 TEXT/MTEXT 的 rotation，位置不变；ATTDEF/带属性块因无属性模型不适用（全局范围） |
 | 874 | `TORUS` | 未实现 | Creates a donut-shaped 3D solid. | — |
 | 875 | `TPNAVIGATE` | 未实现 | Displays a specified tool palette or palette group. | — |
 | 876 | `TRACE` | 未实现（同名不同义） | Opens and manages traces from the command prompt. | AutoCAD 2026 的 `TRACE` 是协作追踪；本构建同名命令是**旧式宽线带**（闭合 4 顶点 LWPOLYLINE），语义不同，**不计入覆盖** |

@@ -31,6 +31,7 @@ use cad_history::{drawing_patch, drawing_patch_deleted, DrawingPatch, DrawingUnd
 
 mod align;
 pub(crate) mod annot_batch;
+mod arc_length;
 mod array;
 mod block_define;
 mod boundary;
@@ -88,6 +89,7 @@ mod offset_polyline_bulge;
 mod paste_block;
 mod pedit;
 mod point_style;
+mod polyline_curve;
 mod polyline_fillet;
 mod properties;
 mod revision_cloud;
