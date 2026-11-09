@@ -391,6 +391,32 @@ impl Application {
             | ExtendedCommandId::AlignSpace
             | ExtendedCommandId::VpSync
             | ExtendedCommandId::LayTrans => self.extended_w13_refusals(session, command, ext)?,
+            // Wave 14: stable named refusals.
+            ExtendedCommandId::Box
+            | ExtendedCommandId::Cone
+            | ExtendedCommandId::Cylinder
+            | ExtendedCommandId::Sphere
+            | ExtendedCommandId::Torus
+            | ExtendedCommandId::Wedge
+            | ExtendedCommandId::Pyramid
+            | ExtendedCommandId::PolySolid
+            | ExtendedCommandId::Extrude
+            | ExtendedCommandId::Revolve
+            | ExtendedCommandId::Sweep
+            | ExtendedCommandId::Loft
+            | ExtendedCommandId::Intersect
+            | ExtendedCommandId::Union
+            | ExtendedCommandId::Subtract
+            | ExtendedCommandId::Slice
+            | ExtendedCommandId::Thicken
+            | ExtendedCommandId::PressPull
+            | ExtendedCommandId::Imprint
+            | ExtendedCommandId::OffsetEdge
+            | ExtendedCommandId::ChamferEdge
+            | ExtendedCommandId::FilletEdge
+            | ExtendedCommandId::Edge
+            | ExtendedCommandId::Mirror3D
+            | ExtendedCommandId::Rotate3D => self.extended_w14_refusals(command, ext)?,
         };
         Ok(Some(outcome))
     }

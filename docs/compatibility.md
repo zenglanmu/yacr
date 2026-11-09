@@ -1340,6 +1340,38 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `VPSYNC` | **部分实现**：具名拒绝（`vpsync.unsupported`）：视口同步未实现（无视口组模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `LAYTRANS` | **部分实现**：具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 | 不写库/不升修订/不入历史（报告类只读） |
 
+### 2026-11-09 Wave 14 扩展命令（3D 实体/布尔/边编辑拒绝）
+
+> 3D 低于 2D；以下名字只提供诚实命令路径（具名拒绝），不是可用 3D 功能。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `BOX` | **部分实现（具名拒绝）**：`box.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `CONE` | **部分实现（具名拒绝）**：`cone.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `CYLINDER` | **部分实现（具名拒绝）**：`cylinder.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `SPHERE` | **部分实现（具名拒绝）**：`sphere.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `TORUS` | **部分实现（具名拒绝）**：`torus.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `WEDGE` | **部分实现（具名拒绝）**：`wedge.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `PYRAMID` | **部分实现（具名拒绝）**：`pyramid.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `POLYSOLID` | **部分实现（具名拒绝）**：`polysolid.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `EXTRUDE` | **部分实现（具名拒绝）**：`extrude.unsupported: 3D extrusion is not implemented` | 不写库/不升修订/不入历史 |
+| `REVOLVE` | **部分实现（具名拒绝）**：`revolve.unsupported: 3D revolution is not implemented` | 不写库/不升修订/不入历史 |
+| `SWEEP` | **部分实现（具名拒绝）**：`sweep.unsupported: 3D sweep is not implemented` | 不写库/不升修订/不入历史 |
+| `LOFT` | **部分实现（具名拒绝）**：`loft.unsupported: 3D loft is not implemented` | 不写库/不升修订/不入历史 |
+| `INTERSECT` | **部分实现（具名拒绝）**：`intersect.unsupported: no 3D boolean model` | 不写库/不升修订/不入历史 |
+| `UNION` | **部分实现（具名拒绝）**：`union.unsupported: no 3D boolean model` | 不写库/不升修订/不入历史 |
+| `SUBTRACT` | **部分实现（具名拒绝）**：`subtract.unsupported: no 3D boolean model` | 不写库/不升修订/不入历史 |
+| `SLICE` | **部分实现（具名拒绝）**：`slice.unsupported: no 3D slicing model` | 不写库/不升修订/不入历史 |
+| `THICKEN` | **部分实现（具名拒绝）**：`thicken.unsupported: no surface-to-solid model` | 不写库/不升修订/不入历史 |
+| `PRESSPULL` | **部分实现（具名拒绝）**：`presspull.unsupported: no press/pull model` | 不写库/不升修订/不入历史 |
+| `IMPRINT` | **部分实现（具名拒绝）**：`imprint.unsupported: no 3D imprint model` | 不写库/不升修订/不入历史 |
+| `OFFSETEDGE` | **部分实现（具名拒绝）**：`offsetedge.unsupported: no 3D face/edge offset model` | 不写库/不升修订/不入历史 |
+| `CHAMFEREDGE` | **部分实现（具名拒绝）**：`chamferedge.unsupported: no 3D edge chamfer model` | 不写库/不升修订/不入历史 |
+| `FILLETEDGE` | **部分实现（具名拒绝）**：`filletedge.unsupported: no 3D edge fillet model` | 不写库/不升修订/不入历史 |
+| `EDGE` | **部分实现（具名拒绝）**：`edge.unsupported: no 3D face-edge visibility model` | 不写库/不升修订/不入历史 |
+| `MIRROR3D` | **部分实现（具名拒绝）**：`mirror3d.unsupported: no 3D mirror-plane model` | 不写库/不升修订/不入历史 |
+| `ROTATE3D` | **部分实现（具名拒绝）**：`rotate3d.unsupported: no 3D rotate-axis model` | 不写库/不升修订/不入历史 |
+
 ## P2 晋升与边界更新（2026-11-09）
 
 > 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux

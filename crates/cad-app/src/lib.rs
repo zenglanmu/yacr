@@ -86,6 +86,7 @@ mod app_extended_w12_refusals;
 // The Wave 13 extended-command handlers (2D/table/page-setup reports+refusals).
 mod app_extended_w13_refusals;
 mod app_extended_w13_reports;
+mod app_extended_w14_refusals;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;

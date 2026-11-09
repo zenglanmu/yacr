@@ -807,6 +807,58 @@ pub enum ExtendedCommandId {
     VpSync,
     /// `LAYTRANS`: layer translation standards are NOT IMPLEMENTED.
     LayTrans,
+
+    // Wave 14: stable named refusals (Viewer-legal).
+    /// `BOX`: 3D solid primitives are not implemented.
+    Box,
+    /// `CONE`: 3D solid primitives are not implemented.
+    Cone,
+    /// `CYLINDER`: 3D solid primitives are not implemented.
+    Cylinder,
+    /// `SPHERE`: 3D solid primitives are not implemented.
+    Sphere,
+    /// `TORUS`: 3D solid primitives are not implemented.
+    Torus,
+    /// `WEDGE`: 3D solid primitives are not implemented.
+    Wedge,
+    /// `PYRAMID`: 3D solid primitives are not implemented.
+    Pyramid,
+    /// `POLYSOLID`: 3D solid primitives are not implemented.
+    PolySolid,
+    /// `EXTRUDE`: 3D extrusion is not implemented.
+    Extrude,
+    /// `REVOLVE`: 3D revolution is not implemented.
+    Revolve,
+    /// `SWEEP`: 3D sweep is not implemented.
+    Sweep,
+    /// `LOFT`: 3D loft is not implemented.
+    Loft,
+    /// `INTERSECT`: no 3D boolean model.
+    Intersect,
+    /// `UNION`: no 3D boolean model.
+    Union,
+    /// `SUBTRACT`: no 3D boolean model.
+    Subtract,
+    /// `SLICE`: no 3D slicing model.
+    Slice,
+    /// `THICKEN`: no surface-to-solid model.
+    Thicken,
+    /// `PRESSPULL`: no press/pull model.
+    PressPull,
+    /// `IMPRINT`: no 3D imprint model.
+    Imprint,
+    /// `OFFSETEDGE`: no 3D face/edge offset model.
+    OffsetEdge,
+    /// `CHAMFEREDGE`: no 3D edge chamfer model.
+    ChamferEdge,
+    /// `FILLETEDGE`: no 3D edge fillet model.
+    FilletEdge,
+    /// `EDGE`: no 3D face-edge visibility model.
+    Edge,
+    /// `MIRROR3D`: no 3D mirror-plane model.
+    Mirror3D,
+    /// `ROTATE3D`: no 3D rotate-axis model.
+    Rotate3D,
 }
 
 impl ExtendedCommandId {
