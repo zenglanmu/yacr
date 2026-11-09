@@ -28,10 +28,15 @@ import { isResourcesCommand } from '../references/references.ts';
 import { isFontsCommand } from '../fonts/fonts.ts';
 import {
   isAboutCommand,
+  isClassicLayerCommand,
   isCleanScreenOffCommand,
   isCleanScreenOnCommand,
+  isCommandLineCommand,
+  isCommandLineHideCommand,
+  isDSettingsCommand,
   isLayerCloseCommand,
   isPropertiesCloseCommand,
+  isQuickPropertiesCommand,
 } from './chrome-commands.ts';
 
 /** One selector's destination. `refused` names the panel the layout cannot show. */
@@ -48,6 +53,8 @@ export type LocalSelectorResult =
   | { readonly kind: 'propertiesClose' }
   /** Close the layers palette; already closed is a success, not a refusal. */
   | { readonly kind: 'layersClose' }
+  /** Set the command line's visibility (COMMANDLINE shows, COMMANDLINEHIDE hides). */
+  | { readonly kind: 'commandLine'; readonly value: boolean }
   | { readonly kind: 'refused'; readonly panelKey: string };
 
 /** The panel labels the layout refusal names. */
@@ -73,6 +80,9 @@ export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
  */
 export function localSelectorFor(text: string, layout: LayoutMode): LocalSelectorResult | null {
   if (isOptionsCommand(text)) return { kind: 'options' };
+  if (isDSettingsCommand(text)) return { kind: 'options' };
+  if (isCommandLineCommand(text)) return { kind: 'commandLine', value: true };
+  if (isCommandLineHideCommand(text)) return { kind: 'commandLine', value: false };
   if (isResourcesCommand(text)) return { kind: 'resources' };
   if (isFontsCommand(text)) return { kind: 'fonts' };
   if (isPropertiesCommand(text)) {
@@ -80,7 +90,17 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
       ? { kind: 'properties' }
       : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.properties };
   }
+  if (isQuickPropertiesCommand(text)) {
+    return dockedPaletteOpenable(layout)
+      ? { kind: 'properties' }
+      : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.properties };
+  }
   if (isLayersCommand(text)) {
+    return dockedPaletteOpenable(layout)
+      ? { kind: 'layers' }
+      : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.layers };
+  }
+  if (isClassicLayerCommand(text)) {
     return dockedPaletteOpenable(layout)
       ? { kind: 'layers' }
       : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.layers };
@@ -113,6 +133,8 @@ export interface LocalSelectorHost {
   readonly closeProperties: () => void;
   /** Close the layers palette (`LAYERCLOSE`; a no-op when already closed). */
   readonly closeLayers: () => void;
+  /** Set the command line's visibility (`COMMANDLINE`/`COMMANDLINEHIDE`). */
+  readonly setCommandLineOpen: (value: boolean) => void;
   /** Put a refusal sentence on the chrome's one error line. */
   readonly reportError: (message: string) => void;
 }
@@ -140,6 +162,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     setCleanScreen,
     closeProperties,
     closeLayers,
+    setCommandLineOpen,
     reportError,
   } = host;
   return useCallback((text: string, fromInput: boolean): boolean => {
@@ -161,6 +184,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'cleanScreen': setCleanScreen(result.value); break;
       case 'propertiesClose': closeProperties(); break;
       case 'layersClose': closeLayers(); break;
+      case 'commandLine': setCommandLineOpen(result.value); break;
     }
     return true;
   }, [
@@ -177,6 +201,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     setCleanScreen,
     closeProperties,
     closeLayers,
+    setCommandLineOpen,
     reportError,
   ]);
 }

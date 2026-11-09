@@ -511,6 +511,7 @@ function Shell() {
     setCleanScreen,
     closeProperties: () => setPropertiesOpen(false),
     closeLayers: () => setLayersOpen(false),
+    setCommandLineOpen: (value: boolean) => setCommandLineOpen(value),
     reportError: setError,
   });
 

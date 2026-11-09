@@ -564,10 +564,26 @@ fn a_staged_block_is_a_valid_reference_target_only_inside_the_batch() {
 
     // The same rows are valid with the batch's block id staged.
     let staged: BTreeSet<BlockId> = [new].into_iter().collect();
-    crate::validate::validate_entity_in(&db, EntityId(1), &member, &staged)
-        .expect("the staged block owns this member");
-    crate::validate::validate_entity_in(&db, EntityId(3), &insert, &staged)
-        .expect("the staged block is an insert target");
+    let no_layers: BTreeSet<LayerId> = BTreeSet::new();
+    let no_layouts: BTreeSet<LayoutId> = BTreeSet::new();
+    crate::validate::validate_entity_in(
+        &db,
+        EntityId(1),
+        &member,
+        &staged,
+        &no_layers,
+        &no_layouts,
+    )
+    .expect("the staged block owns this member");
+    crate::validate::validate_entity_in(
+        &db,
+        EntityId(3),
+        &insert,
+        &staged,
+        &no_layers,
+        &no_layouts,
+    )
+    .expect("the staged block is an insert target");
 }
 
 #[test]

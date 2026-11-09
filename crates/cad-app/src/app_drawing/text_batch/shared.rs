@@ -291,6 +291,8 @@ pub(super) fn commit_text_updates(
             label: label.into(),
             patches,
             block_patches: Vec::new(),
+            layer_patches: Vec::new(),
+            layout_patches: Vec::new(),
             merge_key: None,
         },
     )?;
@@ -331,6 +333,8 @@ pub(super) fn commit_new_rows(
             label: label.into(),
             patches,
             block_patches: Vec::new(),
+            layer_patches: Vec::new(),
+            layout_patches: Vec::new(),
             merge_key: None,
         },
     )?;

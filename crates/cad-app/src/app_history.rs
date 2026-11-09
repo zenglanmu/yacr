@@ -37,6 +37,8 @@ impl Application {
             record.transaction,
             &record.patches,
             &record.block_patches,
+            &record.layer_patches,
+            &record.layout_patches,
             false,
         ) {
             Ok(changes) => changes,
@@ -82,6 +84,8 @@ impl Application {
             record.transaction,
             &record.patches,
             &record.block_patches,
+            &record.layer_patches,
+            &record.layout_patches,
             true,
         ) {
             Ok(changes) => changes,

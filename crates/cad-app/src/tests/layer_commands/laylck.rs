@@ -43,12 +43,33 @@ fn laylck_locks_every_distinct_selected_layer_including_the_current_one() {
     assert_eq!(revision(&app), Revision(before.0 .0 + 2));
     assert_eq!(
         undo_depth(&app),
-        before.1,
-        "layer-table edits are not undoable"
+        before.1 + 1,
+        "one undo step for the whole layer batch"
     );
     assert_eq!(diagnostic_codes(&outcome), vec!["laylck.applied"]);
     assert!(outcome.diagnostics[0].message.contains('2'));
-    assert!(outcome.diagnostics[0].message.contains("not undoable"));
+    assert!(outcome.diagnostics[0].message.contains("one transaction"));
+
+    // Undo unlocks both rows (exact attributes), redo locks them again.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo LAYLCK");
+    assert!(!layer_attributes(&app, LayerId(0)).locked);
+    assert!(!layer_attributes(&app, LayerId(3)).locked);
+    assert!(layer_attributes(&app, LayerId(3)).frozen_in_new_viewport);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo LAYLCK");
+    assert!(layer_attributes(&app, LayerId(0)).locked);
+    assert!(layer_attributes(&app, LayerId(3)).locked);
 }
 
 #[test]
@@ -109,8 +130,27 @@ fn layulk_unlocks_the_selected_layers_and_preserves_other_flags() {
         "unlocking does not thaw"
     );
     assert_eq!(revision(&app), Revision(before.0 .0 + 1));
-    assert_eq!(undo_depth(&app), before.1);
+    assert_eq!(undo_depth(&app), before.1 + 1, "one undo step");
     assert_eq!(diagnostic_codes(&outcome), vec!["layulk.applied"]);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo LAYULK");
+    assert!(layer_attributes(&app, LayerId(3)).locked);
+    assert!(layer_attributes(&app, LayerId(3)).frozen);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo LAYULK");
+    assert!(!layer_attributes(&app, LayerId(3)).locked);
+    assert!(layer_attributes(&app, LayerId(3)).frozen);
 }
 
 #[test]

@@ -66,6 +66,7 @@ mod grip;
 mod hatch;
 mod hatch_boundary;
 mod hatch_edit;
+mod hatch_edit_boundaries;
 mod hatch_internal_point;
 mod hatch_parameters;
 mod hatch_stitch;
@@ -77,6 +78,8 @@ mod join;
 mod layer_commands;
 mod layer_edit;
 mod layer_extended;
+mod layer_record;
+mod layout_record;
 mod lengthen;
 mod match_prop;
 mod mirror_curves;
@@ -133,6 +136,7 @@ mod trim_extend;
 mod trim_spline;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
+pub(crate) use layout_record::layout_row;
 
 /// The 2026-11 text/draw utility payload, if this command carries one.
 ///

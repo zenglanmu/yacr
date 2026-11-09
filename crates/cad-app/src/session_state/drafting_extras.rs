@@ -219,6 +219,12 @@ pub struct DraftingExtras {
     elev: f64,
     ucsicon: bool,
     corner_modes: CornerModes,
+    /// `LWEIGHT`: whether lineweights are displayed (AutoCAD `LWDISPLAY`).
+    /// This build stores the token but has no renderer consumer.
+    lweight_display: bool,
+    /// `COLOR`: the session current-colour ACI (256 = ByLayer). This build
+    /// stores the token but no creation path consumes it.
+    current_color: i16,
 }
 
 impl Default for DraftingExtras {
@@ -253,6 +259,8 @@ impl Default for DraftingExtras {
             elev: 0.0,
             ucsicon: false,
             corner_modes: CornerModes::default(),
+            lweight_display: true,
+            current_color: 256,
         }
     }
 }
@@ -533,6 +541,22 @@ impl DraftingExtras {
     pub fn toggle_ucsicon(&mut self) -> bool {
         self.ucsicon = !self.ucsicon;
         self.ucsicon
+    }
+
+    /// The session `LWEIGHT` lineweight-display token (default ON).
+    ///
+    /// The renderer does not consume this flag in this build; the handler says
+    /// exactly that instead of claiming a visual change.
+    pub fn lweight_display(&self) -> bool {
+        self.lweight_display
+    }
+
+    /// The session `COLOR` current-colour ACI (default 256 = ByLayer).
+    ///
+    /// No creation path reads this token yet; the handler reports the stored
+    /// value and names the missing colour dialog.
+    pub fn current_color(&self) -> i16 {
+        self.current_color
     }
 
     /// The stored CHAMFER/FILLET construction modes (session state only).

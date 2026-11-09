@@ -270,7 +270,10 @@ impl Application {
 /// `plane = None` in the first pass only collects shapes before the hatch has
 /// been found; the second pass always supplies the hatch plane and performs the
 /// coplanarity check.
-fn boundary_loop(entity: &DbEntity, plane: Option<&HatchGeometry>) -> CadResult<HatchLoop> {
+pub(crate) fn boundary_loop(
+    entity: &DbEntity,
+    plane: Option<&HatchGeometry>,
+) -> CadResult<HatchLoop> {
     match &entity.geometry {
         SemanticGeometry::Polyline {
             points,

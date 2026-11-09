@@ -148,6 +148,7 @@ fn application_with_layouts() -> (Application, SessionState) {
             clip: corners(),
             model_to_paper: Transform3::scale(100.0),
             completeness: Completeness::Complete,
+            layer_overrides: std::collections::BTreeMap::new(),
         }],
     })
     .unwrap();
@@ -158,6 +159,7 @@ fn application_with_layouts() -> (Application, SessionState) {
             clip: corners(),
             model_to_paper: Transform3::scale(100.0),
             completeness: Completeness::Partial(vec!["importer dropped height".into()]),
+            layer_overrides: std::collections::BTreeMap::new(),
         }],
     })
     .unwrap();
@@ -202,6 +204,21 @@ mod extended_refusals7;
 // The 2026-11-09 Wave 8 extended-command contracts.
 mod extended_refusals8;
 mod extended_session8;
+// The 2026-11-09 Wave 9 extended-command contracts.
+mod extended_w9_alias;
+mod extended_w9_draw;
+mod extended_w9_reports;
+// The 2026-11-09 Wave 10 extended-command contracts.
+mod extended_w10;
+// The 2026-11-09 Wave 11 extended-command contracts.
+mod extended_w11;
+// The 2026-11-09 Wave 12 extended-command contracts.
+mod extended_w12;
+// The 2026-11-09 Wave 13 extended-command contracts.
+mod extended_w13;
+mod extended_w14;
+mod extended_w15;
+mod extended_w16;
 mod grips;
 mod grips_curves;
 mod grips_dimension;
@@ -220,6 +237,7 @@ mod layers_isolate;
 mod layers_off;
 mod layers_previous;
 mod layout_commands;
+mod layout_page_setup;
 mod locked_layers;
 mod measure_extra;
 mod model_space;

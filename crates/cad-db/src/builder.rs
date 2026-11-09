@@ -68,6 +68,7 @@ impl DrawingDatabaseBuilder {
                 next_entity_id: 1,
                 next_block_id: 1,
                 next_layer_id: 1,
+                next_layout_id: 1,
                 external_references: BTreeMap::new(),
                 bounds_cache: Default::default(),
             },
@@ -663,6 +664,11 @@ impl DrawingDatabaseBuilder {
         // later delete of the largest row cannot make its id reusable.
         let max_layer = self.database.layers.keys().map(|l| l.0).max().unwrap_or(0);
         self.database.next_layer_id = max_layer.saturating_add(1);
+        // Initialise the layout-id allocator the same way. `max(1)` keeps
+        // `LayoutId(0)` — the reserved synthetic model row — out of the
+        // allocator.
+        let max_layout = self.database.layouts.keys().map(|l| l.0).max().unwrap_or(0);
+        self.database.next_layout_id = max_layout.saturating_add(1).max(1);
         Ok(self.database)
     }
 }

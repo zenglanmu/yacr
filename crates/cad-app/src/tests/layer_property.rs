@@ -12,8 +12,7 @@
 //! * every refusal (unknown layer, unknown key, unimplemented key, bad value, a
 //!   missing linetype) leaves the attributes, the revision and the undo depth
 //!   untouched;
-//! * one real change is one revision bump and **no** undo entry (layer edits are
-//!   not undoable).
+//! * one real change is one revision bump and **one** layer-patch undo step.
 
 use super::*;
 use crate::layers::{visible_model_entities, LayerOverrideSet};
@@ -91,6 +90,13 @@ fn execute(
 
 fn revision(app: &Application) -> Revision {
     app.workspace.documents[&DocumentId(1)].drawing.revision()
+}
+
+fn undo_depth(app: &Application) -> usize {
+    app.history
+        .get(&DocumentId(1))
+        .map(|history| history.undo_depth())
+        .unwrap_or(0)
 }
 
 fn drawing(app: &Application) -> Arc<DrawingDatabase> {
@@ -401,16 +407,31 @@ fn rewriting_the_stored_value_is_a_no_op_without_a_revision_bump() {
 }
 
 #[test]
-fn a_layer_attribute_write_records_no_undo_entry() {
+fn a_layer_attribute_write_records_one_undo_step() {
     let (mut app, mut session) = layer_property_app();
     assert!(!app.can_undo(&DocumentId(1)));
+    let before = attributes(&app, "WALLS");
 
     write(&mut app, &mut session, "WALLS", "color", "aci:3").expect("a legal colour");
+    let after = attributes(&app, "WALLS");
+    assert_eq!(undo_depth(&app), 1, "one layer patch per write");
 
-    assert!(
-        !app.can_undo(&DocumentId(1)),
-        "layer edits are not undoable: history has no layer patch kind"
-    );
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo the attribute write");
+    assert_eq!(attributes(&app, "WALLS"), before);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo the attribute write");
+    assert_eq!(attributes(&app, "WALLS"), after);
 }
 
 #[test]

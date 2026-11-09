@@ -48,6 +48,23 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::BExtend
                 | ExtendedCommandId::Change
                 | ExtendedCommandId::ChProp
+                | ExtendedCommandId::Array
+                | ExtendedCommandId::DashArray
+                | ExtendedCommandId::ArrayClassic
+                | ExtendedCommandId::Blend
+                | ExtendedCommandId::BreakLine
+                | ExtendedCommandId::DashBlock
+                | ExtendedCommandId::DashBoundary
+                | ExtendedCommandId::DashInsert
+                | ExtendedCommandId::DashHatch
+                | ExtendedCommandId::DashHatchEdit
+                | ExtendedCommandId::ExOffset
+                | ExtendedCommandId::LayerStateSave
+                | ExtendedCommandId::MView
+                | ExtendedCommandId::PageSetup
+                | ExtendedCommandId::DashPageSetup
+                | ExtendedCommandId::PageSetupIn
+                | ExtendedCommandId::DashPageSetupIn
         );
         assert_eq!(
             variant.requires_work_mode(),

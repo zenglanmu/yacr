@@ -31,6 +31,8 @@ fn drawing_record(id: u128) -> DrawingUndoRecord {
         label: "create line".into(),
         patches: vec![drawing_patch(EntityId(id), None, Some(entity(id, 0.0)))],
         block_patches: Vec::new(),
+        layer_patches: Vec::new(),
+        layout_patches: Vec::new(),
         merge_key: None,
     }
 }
@@ -79,6 +81,8 @@ fn merge_key_coalesces_records() {
             Some(entity(1, t)),
         )],
         block_patches: Vec::new(),
+        layer_patches: Vec::new(),
+        layout_patches: Vec::new(),
         merge_key: Some("drag-1".into()),
     };
     history.record_drawing(r(1.0)).unwrap();
@@ -99,6 +103,8 @@ fn coalesced_creation_and_deletion_remove_the_entry() {
             label: "edit".into(),
             patches: vec![drawing_patch(EntityId(5), None, Some(entity(5, 1.0)))],
             block_patches: Vec::new(),
+            layer_patches: Vec::new(),
+            layout_patches: Vec::new(),
             merge_key: Some("edit".into()),
         })
         .unwrap();
@@ -108,6 +114,8 @@ fn coalesced_creation_and_deletion_remove_the_entry() {
             label: "delete".into(),
             patches: vec![drawing_patch(EntityId(5), Some(entity(5, 1.0)), None)],
             block_patches: Vec::new(),
+            layer_patches: Vec::new(),
+            layout_patches: Vec::new(),
             merge_key: Some("edit".into()),
         })
         .unwrap();
@@ -125,6 +133,8 @@ fn empty_record_is_rejected() {
         label: "noop".into(),
         patches: Vec::new(),
         block_patches: Vec::new(),
+        layer_patches: Vec::new(),
+        layout_patches: Vec::new(),
         merge_key: None,
     });
     assert!(matches!(result, Err(CadError::InvalidInput(_))));
@@ -304,6 +314,8 @@ fn block_only_record_is_accepted_and_round_trips() {
         label: "create block".into(),
         patches: Vec::new(),
         block_patches: vec![block_patch(3, None, Some(block_row(3, "B1", &[1, 2])))],
+        layer_patches: Vec::new(),
+        layout_patches: Vec::new(),
         merge_key: None,
     };
     history.record_drawing(record.clone()).unwrap();
@@ -373,6 +385,8 @@ fn merge_key_with_block_patches_is_refused_without_touching_history() {
         label: "block".into(),
         patches: Vec::new(),
         block_patches: vec![block_patch(3, None, Some(block_row(3, "B1", &[1])))],
+        layer_patches: Vec::new(),
+        layout_patches: Vec::new(),
         merge_key: Some("drag".into()),
     };
     assert!(matches!(
@@ -412,4 +426,221 @@ fn approx_bytes_counts_block_rows_members_and_metadata() {
         .unwrap()
         .name = "B".repeat(128);
     assert!(longer_name.approx_bytes() > with_block.approx_bytes());
+}
+
+fn layer_row(id: u128, name: &str, frozen: bool) -> cad_db::LayerRow {
+    cad_db::LayerRow {
+        layer: cad_db::Layer {
+            id: LayerId(id),
+            name: name.into(),
+            visible: !frozen,
+        },
+        attributes: cad_db::LayerAttributes {
+            frozen,
+            ..Default::default()
+        },
+    }
+}
+
+/// A layer-only record is a complete undo step: the row plus its attributes is
+/// the whole edit, so no entity patch is required.
+#[test]
+fn layer_only_record_is_accepted_and_round_trips() {
+    let mut history = History::default();
+    let record = DrawingUndoRecord {
+        transaction: TransactionId(12),
+        label: "freeze layer".into(),
+        patches: Vec::new(),
+        block_patches: Vec::new(),
+        layer_patches: vec![layer_patch(
+            LayerId(3),
+            Some(layer_row(3, "WALLS", false)),
+            Some(layer_row(3, "WALLS", true)),
+        )],
+        layout_patches: Vec::new(),
+        merge_key: None,
+    };
+    history.record_drawing(record.clone()).unwrap();
+    assert_eq!(history.undo_depth(), 1);
+    assert!(
+        history.used_bytes() > std::mem::size_of::<DrawingUndoRecord>(),
+        "the retained layer rows are accounted for"
+    );
+
+    let back = history.begin_drawing_undo().unwrap();
+    assert_eq!(back, record, "the layer patch is retained verbatim");
+    history.finish_drawing().unwrap();
+    let forward = history.begin_drawing_redo().unwrap();
+    assert_eq!(forward, record);
+    history.finish_drawing().unwrap();
+    assert_eq!(history.undo_depth(), 1);
+}
+
+#[test]
+fn layer_patch_without_a_before_or_after_state_is_rejected() {
+    let mut history = History::default();
+    let mut record = drawing_record(1);
+    record.layer_patches = vec![layer_patch(LayerId(3), None, None)];
+    assert!(matches!(
+        history.record_drawing(record),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(!history.can_undo());
+}
+
+#[test]
+fn duplicate_layer_ids_are_rejected() {
+    let mut history = History::default();
+    let mut record = drawing_record(1);
+    record.layer_patches = vec![
+        layer_patch(LayerId(3), None, Some(layer_row(3, "A", false))),
+        layer_patch(LayerId(3), None, Some(layer_row(3, "B", false))),
+    ];
+    assert!(matches!(
+        history.record_drawing(record),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(!history.can_undo());
+}
+
+/// Layer rows are never coalesced: merging an attribute write into an earlier
+/// record could silently drop or reorder it, so a merge key is refused outright
+/// and the existing history stays byte-for-byte unchanged.
+#[test]
+fn merge_key_with_layer_patches_is_refused_without_touching_history() {
+    let mut history = History::default();
+    history.record_drawing(drawing_record(1)).unwrap();
+    let bytes = history.used_bytes();
+
+    let mut merged = drawing_record(2);
+    merged.merge_key = Some("drag".into());
+    merged.layer_patches = vec![layer_patch(
+        LayerId(3),
+        Some(layer_row(3, "WALLS", false)),
+        Some(layer_row(3, "WALLS", true)),
+    )];
+
+    assert!(matches!(
+        history.record_drawing(merged),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert_eq!(history.undo_depth(), 1, "no record was merged or added");
+    assert_eq!(history.used_bytes(), bytes);
+    assert!(!history.can_redo());
+}
+
+/// A layout row carrying one plot settings record, keyed to the row id.
+fn layout_table_row(id: u128, name: &str, paper: &str) -> cad_db::LayoutRow {
+    cad_db::LayoutRow {
+        layout: cad_db::Layout {
+            id: LayoutId(id),
+            name: name.into(),
+            viewports: Vec::new(),
+        },
+        plot: Some(cad_db::PlotSettingsRecord {
+            layout: LayoutId(id),
+            paper_size_name: paper.into(),
+            paper_width: 210.0,
+            paper_height: 297.0,
+            margins: cad_db::PlotMargins::uniform(5.0),
+            rotation: cad_db::PlotRotation::None,
+            scale_numerator: 1.0,
+            scale_denominator: 1.0,
+            plot_type: cad_db::PlotType::Layout,
+            paper_units: cad_db::PlotPaperUnits::Millimeters,
+            provenance: cad_db::PlotProvenance::Imported,
+        }),
+    }
+}
+
+/// A layout-only record is a complete undo step: the row plus its plot settings
+/// is the whole edit, so no entity patch is required, and its bytes are counted.
+#[test]
+fn layout_only_record_is_accepted_and_round_trips() {
+    let mut history = History::default();
+    let record = DrawingUndoRecord {
+        transaction: TransactionId(30),
+        label: "create layout".into(),
+        patches: Vec::new(),
+        block_patches: Vec::new(),
+        layer_patches: Vec::new(),
+        layout_patches: vec![layout_patch(
+            LayoutId(7),
+            None,
+            Some(layout_table_row(7, "SheetLayout", "ISO_A4")),
+        )],
+        merge_key: None,
+    };
+    assert!(
+        record.approx_bytes()
+            > std::mem::size_of::<DrawingUndoRecord>()
+                + std::mem::size_of::<cad_db::LayoutRow>()
+                + "SheetLayout".len()
+                + "ISO_A4".len(),
+        "the layout name and paper size are accounted for"
+    );
+    history.record_drawing(record.clone()).unwrap();
+    assert_eq!(history.undo_depth(), 1);
+    assert_eq!(history.used_bytes(), record.approx_bytes());
+
+    let back = history.begin_drawing_undo().unwrap();
+    assert_eq!(back, record, "the layout patch is retained verbatim");
+    history.finish_drawing().unwrap();
+    let forward = history.begin_drawing_redo().unwrap();
+    assert_eq!(forward, record);
+    history.finish_drawing().unwrap();
+    assert_eq!(history.undo_depth(), 1);
+}
+
+#[test]
+fn layout_patch_without_a_before_or_after_state_is_rejected() {
+    let mut history = History::default();
+    let mut record = drawing_record(1);
+    record.layout_patches = vec![layout_patch(LayoutId(7), None, None)];
+    assert!(matches!(
+        history.record_drawing(record),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(!history.can_undo());
+}
+
+#[test]
+fn duplicate_layout_ids_are_rejected() {
+    let mut history = History::default();
+    let mut record = drawing_record(1);
+    record.layout_patches = vec![
+        layout_patch(LayoutId(7), None, Some(layout_table_row(7, "A", "ISO_A4"))),
+        layout_patch(LayoutId(7), None, Some(layout_table_row(7, "B", "ISO_A3"))),
+    ];
+    assert!(matches!(
+        history.record_drawing(record),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(!history.can_undo());
+}
+
+/// Layout rows are never coalesced: merging a layout write into an earlier
+/// record could silently drop or reorder it, so a merge key is refused outright
+/// and the existing history stays byte-for-byte unchanged.
+#[test]
+fn merge_key_with_layout_patches_is_refused_without_touching_history() {
+    let mut history = History::default();
+    history.record_drawing(drawing_record(1)).unwrap();
+    let bytes = history.used_bytes();
+
+    let mut merged = drawing_record(2);
+    merged.merge_key = Some("drag".into());
+    merged.layout_patches = vec![layout_patch(
+        LayoutId(7),
+        Some(layout_table_row(7, "Sheet", "ISO_A4")),
+        Some(layout_table_row(7, "Sheet A", "ISO_A4")),
+    )];
+
+    assert!(matches!(
+        history.record_drawing(merged),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert_eq!(history.undo_depth(), 1, "no record was merged or added");
+    assert_eq!(history.used_bytes(), bytes);
+    assert!(!history.can_redo());
 }

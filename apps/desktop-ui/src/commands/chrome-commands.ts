@@ -37,6 +37,21 @@ export const PROPERTIESCLOSE_COMMAND = 'PROPERTIESCLOSE';
 /** The typed word that closes the layers palette (a no-op when already closed). */
 export const LAYERCLOSE_COMMAND = 'LAYERCLOSE';
 
+/** The typed word that opens the existing Options dialog (Drafting settings). */
+export const DSETTINGS_COMMAND = 'DSETTINGS';
+
+/** The typed word that opens the existing properties palette. */
+export const QUICKPROPERTIES_COMMAND = 'QUICKPROPERTIES';
+
+/** The typed word that opens the existing layers palette. */
+export const CLASSICLAYER_COMMAND = 'CLASSICLAYER';
+
+/** The typed word that shows and focuses the command line. */
+export const COMMANDLINE_COMMAND = 'COMMANDLINE';
+
+/** The typed word that hides the command line. */
+export const COMMANDLINEHIDE_COMMAND = 'COMMANDLINEHIDE';
+
 /** One chrome-local selector: its canonical word and how typed text matches it. */
 export interface ChromeCommandSelector {
   readonly name: string;
@@ -73,6 +88,31 @@ export function isLayerCloseCommand(text: unknown): boolean {
   return normalized(text) === LAYERCLOSE_COMMAND;
 }
 
+/** Whether typed text is the bare `DSETTINGS` selector. */
+export function isDSettingsCommand(text: unknown): boolean {
+  return normalized(text) === DSETTINGS_COMMAND;
+}
+
+/** Whether typed text is the bare `QUICKPROPERTIES` selector. */
+export function isQuickPropertiesCommand(text: unknown): boolean {
+  return normalized(text) === QUICKPROPERTIES_COMMAND;
+}
+
+/** Whether typed text is the bare `CLASSICLAYER` selector. */
+export function isClassicLayerCommand(text: unknown): boolean {
+  return normalized(text) === CLASSICLAYER_COMMAND;
+}
+
+/** Whether typed text is the bare `COMMANDLINE` selector. */
+export function isCommandLineCommand(text: unknown): boolean {
+  return normalized(text) === COMMANDLINE_COMMAND;
+}
+
+/** Whether typed text is the bare `COMMANDLINEHIDE` selector. */
+export function isCommandLineHideCommand(text: unknown): boolean {
+  return normalized(text) === COMMANDLINEHIDE_COMMAND;
+}
+
 /**
  * Every chrome-local selector this module owns, in append order.
  *
@@ -87,6 +127,11 @@ export const CHROME_COMMANDS: readonly ChromeCommandSelector[] = Object.freeze([
   { name: CLEANSCREENOFF_COMMAND, matches: isCleanScreenOffCommand },
   { name: PROPERTIESCLOSE_COMMAND, matches: isPropertiesCloseCommand },
   { name: LAYERCLOSE_COMMAND, matches: isLayerCloseCommand },
+  { name: DSETTINGS_COMMAND, matches: isDSettingsCommand },
+  { name: QUICKPROPERTIES_COMMAND, matches: isQuickPropertiesCommand },
+  { name: CLASSICLAYER_COMMAND, matches: isClassicLayerCommand },
+  { name: COMMANDLINE_COMMAND, matches: isCommandLineCommand },
+  { name: COMMANDLINEHIDE_COMMAND, matches: isCommandLineHideCommand },
 ]);
 
 /** The bare names of [`CHROME_COMMANDS`], for exhaustive admission tests. */

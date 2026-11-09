@@ -75,7 +75,6 @@ impl Application {
             | ExtendedCommandId::DrawingLimits
             | ExtendedCommandId::ViewPlotDetails
             | ExtendedCommandId::VPlayer
-            | ExtendedCommandId::MView
             | ExtendedCommandId::PsbScale
             | ExtendedCommandId::PstScale
             | ExtendedCommandId::MvSetup => self.extended_refusal(command, ext)?,
@@ -264,6 +263,213 @@ impl Application {
             | ExtendedCommandId::SysWindows
             | ExtendedCommandId::Menu
             | ExtendedCommandId::Ribbon => self.extended_refusal8(command, ext)?,
+            // Wave 9: 2D draw/modify, real edits, aliases and reports.
+            ExtendedCommandId::Array
+            | ExtendedCommandId::DashArray
+            | ExtendedCommandId::ArrayClassic
+            | ExtendedCommandId::ArcText
+            | ExtendedCommandId::Blend
+            | ExtendedCommandId::BreakLine
+            | ExtendedCommandId::MLeaderAlign
+            | ExtendedCommandId::MLeaderEdit
+            | ExtendedCommandId::MLeaderCollect
+            | ExtendedCommandId::Tolerance
+            | ExtendedCommandId::DimRouter
+            | ExtendedCommandId::DimArc
+            | ExtendedCommandId::Calc => self.extended_w9_draw(session, command, ext)?,
+            ExtendedCommandId::DashBlock
+            | ExtendedCommandId::DashBoundary
+            | ExtendedCommandId::DashInsert
+            | ExtendedCommandId::DashHatch
+            | ExtendedCommandId::DashHatchEdit
+            | ExtendedCommandId::ExOffset => self.extended_w9_alias(session, command, ext)?,
+            ExtendedCommandId::DimExport
+            | ExtendedCommandId::DimImport
+            | ExtendedCommandId::SpaceTrans
+            | ExtendedCommandId::TextExplode
+            | ExtendedCommandId::UpdateField
+            | ExtendedCommandId::Units => self.extended_w9_reports(session, command, ext)?,
+            // Wave 10: layer/view/session reports and named refusals.
+            ExtendedCommandId::DashLayer
+            | ExtendedCommandId::LayerStateSave
+            | ExtendedCommandId::NewView
+            | ExtendedCommandId::DashScaleListEdit
+            | ExtendedCommandId::CopyHist => self.extended_w10_layer(session, command, ext)?,
+            ExtendedCommandId::DashUnits
+            | ExtendedCommandId::LineWeight
+            | ExtendedCommandId::DashLineWeight
+            | ExtendedCommandId::Color
+            | ExtendedCommandId::DashColor => self.extended_w10_session(session, command, ext)?,
+            ExtendedCommandId::Help
+            | ExtendedCommandId::ClassicInsert
+            | ExtendedCommandId::ClassicGroup
+            | ExtendedCommandId::FileTab
+            | ExtendedCommandId::FileTabClose
+            | ExtendedCommandId::HidePalettes
+            | ExtendedCommandId::ShowPalettes
+            | ExtendedCommandId::RibbonClose
+            | ExtendedCommandId::GoToStart
+            | ExtendedCommandId::Transparency => {
+                self.extended_w10_refusals(session, command, ext)?
+            }
+            // Wave 11: stable named refusals for 3D/mesh/surface commands.
+            ExtendedCommandId::ThreeDAlign
+            | ExtendedCommandId::ThreeDArray
+            | ExtendedCommandId::ThreeDClip
+            | ExtendedCommandId::ThreeDCorbit
+            | ExtendedCommandId::ThreeDDistance
+            | ExtendedCommandId::ThreeDDwf
+            | ExtendedCommandId::ThreeDEditBar
+            | ExtendedCommandId::ThreeDFace
+            | ExtendedCommandId::ThreeDFly
+            | ExtendedCommandId::ThreeDForbit
+            | ExtendedCommandId::ThreeDMesh
+            | ExtendedCommandId::ThreeDMove
+            | ExtendedCommandId::ThreeDOrbit
+            | ExtendedCommandId::ThreeDOrbitCtr
+            | ExtendedCommandId::Dash3DOsnap
+            | ExtendedCommandId::ThreeDObjectSnap
+            | ExtendedCommandId::ThreeDPan
+            | ExtendedCommandId::ThreeDPoly
+            | ExtendedCommandId::ThreeDPrint
+            | ExtendedCommandId::ThreeDPrintService
+            | ExtendedCommandId::ThreeDRotate
+            | ExtendedCommandId::ThreeDScale
+            | ExtendedCommandId::ThreeDSwivel
+            | ExtendedCommandId::ThreeDWalk
+            | ExtendedCommandId::ThreeDZoom => self.extended_w11_refusals(command, ext)?,
+            // Wave 12: file/import/export/extension named refusals.
+            ExtendedCommandId::ThreeDsIn
+            | ExtendedCommandId::AcisIn
+            | ExtendedCommandId::AcisOut
+            | ExtendedCommandId::BmpOut
+            | ExtendedCommandId::JpgOut
+            | ExtendedCommandId::PngOut
+            | ExtendedCommandId::TifOut
+            | ExtendedCommandId::WmfIn
+            | ExtendedCommandId::WmfOut
+            | ExtendedCommandId::IgesImport
+            | ExtendedCommandId::IgesExport
+            | ExtendedCommandId::StlOut
+            | ExtendedCommandId::ImportFile
+            | ExtendedCommandId::ExportToAutoCad
+            | ExtendedCommandId::DwgConvert
+            | ExtendedCommandId::Plt2Dwg
+            | ExtendedCommandId::DxbIn
+            | ExtendedCommandId::AppLoad
+            | ExtendedCommandId::Arx
+            | ExtendedCommandId::NetLoad
+            | ExtendedCommandId::VbaIde
+            | ExtendedCommandId::VbaLoad
+            | ExtendedCommandId::VbaRun
+            | ExtendedCommandId::VbaUnload
+            | ExtendedCommandId::Script => self.extended_w12_refusals(command, ext)?,
+            // Wave 13: page-setup writes/reports, the MVIEW viewport write, and
+            // read-only conversion reports.
+            ExtendedCommandId::MView => self.mview(session, command)?,
+            ExtendedCommandId::PageSetup
+            | ExtendedCommandId::DashPageSetup
+            | ExtendedCommandId::PageSetupIn
+            | ExtendedCommandId::DashPageSetupIn
+            | ExtendedCommandId::ConvertPoly => self.extended_w13_reports(session, command, ext)?,
+            ExtendedCommandId::PlotStyleList
+            | ExtendedCommandId::DashPlotStyleList
+            | ExtendedCommandId::ConvertPlotStyles
+            | ExtendedCommandId::ConvertCtb
+            | ExtendedCommandId::ConvertGeneric
+            | ExtendedCommandId::TableCreate
+            | ExtendedCommandId::DashTable
+            | ExtendedCommandId::TableEdit
+            | ExtendedCommandId::TableExport
+            | ExtendedCommandId::TableStyleList
+            | ExtendedCommandId::TableInsert
+            | ExtendedCommandId::MatchCell
+            | ExtendedCommandId::Field
+            | ExtendedCommandId::RText
+            | ExtendedCommandId::RTextEdit
+            | ExtendedCommandId::Spell
+            | ExtendedCommandId::SuperHatch
+            | ExtendedCommandId::AlignSpace
+            | ExtendedCommandId::VpSync
+            | ExtendedCommandId::LayTrans => self.extended_w13_refusals(session, command, ext)?,
+            // Wave 14: stable named refusals.
+            ExtendedCommandId::Box
+            | ExtendedCommandId::Cone
+            | ExtendedCommandId::Cylinder
+            | ExtendedCommandId::Sphere
+            | ExtendedCommandId::Torus
+            | ExtendedCommandId::Wedge
+            | ExtendedCommandId::Pyramid
+            | ExtendedCommandId::PolySolid
+            | ExtendedCommandId::Extrude
+            | ExtendedCommandId::Revolve
+            | ExtendedCommandId::Sweep
+            | ExtendedCommandId::Loft
+            | ExtendedCommandId::Intersect
+            | ExtendedCommandId::Union
+            | ExtendedCommandId::Subtract
+            | ExtendedCommandId::Slice
+            | ExtendedCommandId::Thicken
+            | ExtendedCommandId::PressPull
+            | ExtendedCommandId::Imprint
+            | ExtendedCommandId::OffsetEdge
+            | ExtendedCommandId::ChamferEdge
+            | ExtendedCommandId::FilletEdge
+            | ExtendedCommandId::Edge
+            | ExtendedCommandId::Mirror3D
+            | ExtendedCommandId::Rotate3D => self.extended_w14_refusals(command, ext)?,
+            // Wave 15: stable named refusals.
+            ExtendedCommandId::SurfBlend
+            | ExtendedCommandId::SurfExtend
+            | ExtendedCommandId::SurfExtractCurve
+            | ExtendedCommandId::SurfFillet
+            | ExtendedCommandId::SurfNetwork
+            | ExtendedCommandId::SurfOffset
+            | ExtendedCommandId::SurfPatch
+            | ExtendedCommandId::SurfSculpt
+            | ExtendedCommandId::SurfTrim
+            | ExtendedCommandId::SurfUntrim
+            | ExtendedCommandId::MeshCreate
+            | ExtendedCommandId::MeshCap
+            | ExtendedCommandId::MeshCollapse
+            | ExtendedCommandId::MeshCrease
+            | ExtendedCommandId::MeshExtrude
+            | ExtendedCommandId::MeshMerge
+            | ExtendedCommandId::MeshOptions
+            | ExtendedCommandId::MeshPrimitiveOptions
+            | ExtendedCommandId::MeshRefine
+            | ExtendedCommandId::MeshSmooth
+            | ExtendedCommandId::MeshSmoothLess
+            | ExtendedCommandId::MeshSmoothMore
+            | ExtendedCommandId::MeshSpin
+            | ExtendedCommandId::MeshSplit
+            | ExtendedCommandId::MeshUncrease => self.extended_w15_refusals(command, ext)?,
+            // Wave 16: stable named refusals.
+            ExtendedCommandId::Image
+            | ExtendedCommandId::DashImage
+            | ExtendedCommandId::ImageAttach
+            | ExtendedCommandId::ImageClip
+            | ExtendedCommandId::ImageAdjust
+            | ExtendedCommandId::DashImageAdjust
+            | ExtendedCommandId::ImageQuality
+            | ExtendedCommandId::ImageApp
+            | ExtendedCommandId::ImageAsyncWait
+            | ExtendedCommandId::ImageEdit
+            | ExtendedCommandId::ClassicImage
+            | ExtendedCommandId::PdfAttach
+            | ExtendedCommandId::DashPdfAttach
+            | ExtendedCommandId::PdfClip
+            | ExtendedCommandId::PdfLayers
+            | ExtendedCommandId::PdfAdjust
+            | ExtendedCommandId::PdfImport
+            | ExtendedCommandId::DashPdfImport
+            | ExtendedCommandId::PdfShxText
+            | ExtendedCommandId::DashPdfShxText
+            | ExtendedCommandId::DgnAttach
+            | ExtendedCommandId::DashDgnAttach
+            | ExtendedCommandId::DgnClip
+            | ExtendedCommandId::DgnLayers
+            | ExtendedCommandId::DgnAdjust => self.extended_w16_refusals(command, ext)?,
         };
         Ok(Some(outcome))
     }

@@ -89,6 +89,11 @@ impl ImporterBuilder<'_> {
     /// expanded members become the dimension's `display` via
     /// [`DimensionGeometry::from_picture`] (ADR 0017 A.6). Otherwise the display
     /// is our shared synthesis.
+    ///
+    /// The glyph-level horizontal alignment (`TextAlignH`, DXF group 72) is not
+    /// parsed by this build: an imported dimension stores the synthesis default
+    /// `Center`, which matches our centred placement (declared). `DIMTEDIT`
+    /// can change it afterwards; the export does not write group 72 back.
     pub(crate) fn dimension_semantics(
         &mut self,
         d: &Dimension,

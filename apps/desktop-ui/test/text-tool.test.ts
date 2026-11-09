@@ -403,7 +403,10 @@ test('the TEXT glyph is a dedicated baseline mark, distinct from the hatch and d
   }
   assert.equal(COMMAND_CATALOG.find(command => command.id === 'TEXT').icon, 'text');
   // `text` belongs to TEXT alone: no other catalogued command reuses it.
-  assert.equal(COMMAND_CATALOG.filter(command => command.icon === 'text').length, 1);
+  assert.deepEqual(
+    COMMAND_CATALOG.filter(command => command.icon === 'text').map(command => command.id),
+    ['TEXT', 'ARCTEXT', 'UPDATEFIELD', 'FIELD', 'RTEXT', 'RTEDIT', 'SPELL', 'PDFSHXTEXT', '-PDFSHXTEXT'],
+  );
   // Every draw-panel glyph is a real name, so no draw button falls back to a dot.
   for (const tabId of ['home', 'draw']) {
     for (const item of drawPanel(tabId).items) {
@@ -543,5 +546,8 @@ test('the MTEXT glyph is its own mark, not a reuse of the TEXT baseline', async 
   }
   assert.equal(COMMAND_CATALOG.find(command => command.id === 'MTEXT').icon, 'mtext');
   assert.equal(COMMAND_CATALOG.filter(command => command.icon === 'mtext').length, 1);
-  assert.equal(COMMAND_CATALOG.filter(command => command.icon === 'text').length, 1);
+  assert.deepEqual(
+    COMMAND_CATALOG.filter(command => command.icon === 'text').map(command => command.id),
+    ['TEXT', 'ARCTEXT', 'UPDATEFIELD', 'FIELD', 'RTEXT', 'RTEDIT', 'SPELL', 'PDFSHXTEXT', '-PDFSHXTEXT'],
+  );
 });

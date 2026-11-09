@@ -43,6 +43,47 @@ AD
   **亮度台阶**表达（61 → 93），不是不同的像素宽度；真正的 sub-pixel 线宽需要渲染器级别的
   per-batch ink width 特性，本轮未做。Windows/macOS/Android/Web **NOT VERIFIED**。
 
+## 2026-11-10 DIMTEDIT 字形级水平对齐
+
+- `DimensionGeometry` 新增私有 `text_h_align`（默认 Center），`with_text_h_align` 只改现有 Text 子实体的 `h_align`；`transformed`/`with_style` 保留。
+- `DIMTEDIT LEFT/RIGHT/CENTER` 仍移动锚点，同时设置字形级 `h_align`；MOVE/HOME/ANGLE 保留当前对齐；一条事务/一步撤销。
+- 导入仍默认 Center（组 72 未解析）、导出仍不写组 72，均已在 import/export 注释中声明。
+- **已运行**：`cargo test -p cad-domain`（90+）、`cargo test -p cad-app --lib`（2267 passed, 3 ignored）、clippy（domain/app）、fmt、file-size、check-command-docs 全绿。
+- **提交**：`979d799b` DIMTEDIT glyph-level horizontal alignment。
+
+
+## 2026-11-10 JOIN 椭圆弧混合 + LAYVPI 逐视口图层
+
+- **JOIN**：新增精确 `ellipse_spans`（圆有理二次的仿射像，≤90° 分段、权重 `cos(Δ/2)`），`JOIN MULTIPLE` 现可把 ELLIPSE 与 LINE/ARC/POLYLINE/SPLINE 焊成一条有理 B 样条；同时修复 `chain_spans` prepend 方向错误。`JOIN CLOSE` 的混合 SPLINE 仍拒绝。
+- **LAYVPI**：`PaperViewport.layer_overrides: BTreeMap<LayerId,bool>`（true=冻结/隐藏），`cad-representation` 按视口过滤模型几何；`LAYVPI <layers>` 真实写入活动布局所有视口，一条事务/一步撤销，绝不改全局层表；导入 VPLAYER 未解析、无视口选择。
+- **已运行**：`cargo test -p cad-app --lib`（2266 passed, 3 ignored）、`cad-db`（222+13+5）、`cad-representation`（245）、`cad-ui-core`（498+1）、`cad-import-acadrust`、`cargo clippy`（db/representation/app/import）、`cargo fmt --check`、`npm test`、architecture/tauri/fixture/file-size/command-docs/i18n 全绿。
+- **NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机、真实 DWG/vendor 对照；JOIN/LAYVPI 只有契约/表示层测试。
+- **提交**：`cc7c085d` JOIN ellipse-arc mixed weld；`edaf9879` LAYVPI per-viewport layer freezing。
+
+
+## 2026-11-10 P5 页面设置/MVIEW + HATCHEDIT 边界
+
+- **P5 页面设置写入**：`PlotProvenance::Authored` + `cad-db::set_plot_settings`（校验 layout/key/纸张/比例，单 revision）。`PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]` 真实写 Authored `PLOTSETTINGS`，一条事务/一步撤销；`-PAGESETUP` 同语法；裸 `PAGESETUP` 仍是只读报告。`PSETUPIN <source> <target>` 同图纸复制已存 plot 行（无源记录拒绝，不合成 A4 回退）。`LAYOUTWIZARD` 现在应用纸张设置（`layoutwizard.paper_applied`）。
+- **MVIEW**：活动图纸空间创建矩形 `PaperViewport`（四角 clip、unit scale、`-paper_center` 平移），一条事务/一步撤销；`MVIEW <minx> <miny> <maxx> <maxy>` typed grammar。`MVSETUP`/`LAYVPI` 仍是拒绝。
+- **HATCHEDIT 边界**：`ADDBOUNDARIES`/`REMOVEBOUNDARIES` 变为真实：一个选中 hatch + 其余选中闭合实体为边界；Add 追加 loop，Remove 按 points+bulges（1e-9）匹配删除；重建一个 `HatchGeometry`，一条事务/一步撤销。Origin/Associate/Annotative/Boundary draw order 仍拒绝。
+- **typed grammar/UI**：uCore 新增 PAGESETUP/-PAGESETUP/PSETUPIN/-PSETUPIN/MVIEW 解析与 dispatch，五个 variant 加入 Work mode；前端 `argument-commands.ts` 同步，i18n 与 HATCHEDIT 帮助文案更新。
+- **已运行**：`cargo test -p cad-app --lib`（2261 passed, 3 ignored）、`cad-db`（220+13+5）、`cad-history`（25）、`cad-ui-core`（498+1）、`cargo clippy`（app/db/history/ui-core/cli-tools）、`cargo fmt --check`、`npm test`（1434 passed）、architecture/tauri/fixture/file-size/command-docs/i18n 全绿。
+- **NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机、制造平台运行时、真实 DWG/vendor 对照；页面设置/MVIEW/hatch 边界只有契约测试。
+- **提交**：`f752b0a0` P5 page setup/PSETUPIN/MVIEW；`be3905b7` HATCHEDIT boundaries；typed grammar/UI 与文档另提交。
+
+
+## 2026-11-10 P4/P5：图层表与布局表写入可撤销 + 布局/视口真实写入
+
+- **用户要求**：继续“做”上一轮建议的高价值路径（P4/P5 晋升），而不是继续增加具名拒绝。
+- **P4（图层表写入撤销）**：`cad-db` 新增 `LayerRow`/`LayerPatch` + 组合应用入口（layer upsert 先于实体、delete 后于实体、post-batch 引用检查、单 revision）；`cad-history` 的 `DrawingUndoRecord.layer_patches` 参与校验/大小/merge 拒绝；`cad-app` UNDO/REDO 重放图层行。`LAYDEL`/`-LAYDEL`、`LAYMRG`/`-LAYMRG`、`LAYFRZ`、`LAYLCK`、`LAYULK`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYERSTATE RESTORE` 均**一条事务/一步撤销**；`PURGE` 有意保持不记历史。图纸空间/块内实体与 Settings 边界仍在，故这些命令仍为**部分实现**（未把边界算完成）。
+- **P5（布局/视口写）**：`cad-db` 新增 `LayoutRow`/`LayoutPatch`、单调 `next_layout_id`、`create/rename/delete_layout`、`set_layout_viewports`、组合实体+布局应用入口；`cad-history` 增加 `layout_patches`；`LAYOUT NEW/RENAME/DELETE`、`LAYOUTMERGE`（升为**完整实现**）、`LAYOUTWIZARD` 布局创建、`VPORTS`/`-VPORTS`、`VPCLIP RECT`、`VPSCALE` 均真实写入并一步撤销。`LAYVPI`、`MVIEW`、`MVSETUP`、页面设置写入、视口选择与多边形裁剪仍拒绝。
+- **会话一致性**：删除活动布局回退到首个剩余布局或模型空间；删除/合并时清理或重映射 `maximized_viewport`；`VPMAX`/`VPMIN` 仍是会话标记。
+- **文档/UI**：覆盖文档、`docs/compatibility.md`、中英 i18n 提示已更新；catalog/gating 早已接线，无需新增命令名。
+- **已运行**：见各 lane 报告；最终 `cargo test -p cad-app --lib --locked`（2252 passed）、`cad-db`、`cad-history`、`cad-ui-core`（494 passed）、`cargo clippy`、`cargo fmt --check`、`check-file-size.py`、`check-i18n.py`、`check-command-docs.py` 全绿；前端 `npm test` 另行复跑。
+- **NOT RUN / NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机；Windows/macOS/Android/Web 运行时；真实 DWG/AutoCAD vendor 对照；视口布局的像素/渲染证据。
+- **提交**：`fb135de2` 基础设施；P5 handler 与文档另提交。
+
+
 ## 2026-11-09 新建空白图：默认视图尺度与参考网格/坐标轴
 
 用户报告：新建空白页（`untitled`）十字光标变成一个整屏粗带 + 4 个圆点，命令栏显示红字
@@ -121,6 +162,34 @@ AD
   不是运行时/GPU/真机验收。
 - **证据边界**：以上是编译/打包/签名/上传与分发证据；真机、真实 GPU、视觉/像素与性能验收
   一律 **NOT VERIFIED**。
+## 2026-11-09 AutoCAD 2026 第二批 100 条命令（Wave 13–16）
+
+- **用户要求**：继续再实施 100 条未完成命令；2D 优先；同样更新同一份覆盖文档、UI 接线、逐批提交。
+- **交付**：官方覆盖 523 → **623 已实现（66 完整 + 557 部分）/ 358 未实现**；Wave 13/14/15/16 各 25 个名字，全部为 `CommandId::Extended` router 命令。
+  - Wave 13（2D/页面设置/表格）：`PAGESETUP`/`-PAGESETUP` 只读 `PLOTSETTINGS` 报告、`CONVERTPOLY` 只读单一多段线表示报告；`PSETUPIN`/`PLOTSTYLE`/`TABLE*`/`FIELD`/`RTEXT`/`SPELL`/`SUPERHATCH`/`ALIGNSPACE`/`VPSYNC`/`LAYTRANS` 等 22 个具名拒绝。
+  - Wave 14：3D 实体图元/布尔/剖切/边编辑 25 个具名拒绝（`BOX`…`ROTATE3D`）。
+  - Wave 15：曲面/网格 25 个具名拒绝（`SURFBLEND`…`MESHUNCREASE`）。
+  - Wave 16：图像/PDF/DGN 底图 25 个具名拒绝（`IMAGE`…`DGNADJUST`）。
+- **UI**：100 个名字全部加入 catalog、`DOCUMENT_SCOPED_COMMANDS`、`HOST_NAMES` 镜像与中英 i18n（label + hint）；每波有独立 `extended-wave{13..16}.test.ts`。
+- **DWG 保存 / acadrust patch**：与上一批相同，本轮无行为变化；DWG 默认 `<stem>-export.dwg`、绝不覆盖源；acadrust 0.6.8 未修改，台账仍为空。
+- **已运行**：`cargo test -p cad-app --lib --locked`（**2241 passed, 3 ignored**）；`cargo test -p cad-ui-core --locked`（**494 passed, 1 ignored**）；`cargo clippy -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings`；`cargo fmt --all -- --check`；`npm test`（**1425 passed**，tsc + 插件 tsc + node --test）；`check-architecture.py`/`check-tauri-capabilities.py`/`check-fixture-manifest.py`/`check-file-size.py`/`check-command-docs.py`/`test-check-command-docs.py`/`check-i18n.py` 全绿。
+- **NOT RUN / NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机；Windows/macOS/Android/Web 运行时；真实 DWG/AutoCAD vendor 对照；本批 97/100 是具名拒绝，不是可用功能。
+- **提交**：Wave 13 `03d5ac35`、Wave 14 `08b5d3a5`、Wave 15 `51338e29`、Wave 16 `f33ca901`、UI 契约 `aeb1b946`。
+
+
+## 2026-11-09 AutoCAD 2026 下一批 100 条命令（Wave 9–12）
+
+- **用户要求**：按 `docs/autocad-2026-command-coverage.md` 继续实施 100 条未完成命令，2D 优先；每条命令同时接线 UI（除非 AutoCAD 也无 UI 入口）；更新同一份覆盖文档；DWG 保存不覆盖源文件；允许 acadrust patch 但必须有台账。
+- **交付**：官方覆盖从 423 → **523 已实现（66 完整 + 457 部分）/ 458 未实现**；Wave 9/10/11/12 各 25 个名字。
+  - Wave 9（2D 优先）：`ARRAY`/`-ARRAY`/`ARRAYCLASSIC` 阵列路由、`BLEND`/`BREAKLINE` 真实 2D 编辑、`-BLOCK`/`-INSERT` 完成别名、`-BOUNDARY`/`-HATCH`/`-HATCHEDIT`/`EXOFFSET` 部分别名、`DIM`/`UNITS` 只读报告、12 个具名拒绝。
+  - Wave 10：`-LAYER`/`-SCALELISTEDIT`/`LWEIGHT`/`COLOR`/`-UNITS`/`COPYHIST` 只读报告，`LAYERSTATESAVE`/`NEWVIEW` 载荷路由，10 个具名拒绝，`DSETTINGS`/`QUICKPROPERTIES`/`CLASSICLAYER`/`COMMANDLINE`/`COMMANDLINEHIDE` chrome 本地选择子。
+  - Wave 11/12：3D/网格/曲面 25 个 + 文件/导入导出/扩展运行时 25 个**具名拒绝**；3D 明确低于 2D，不是可用 3D 功能。
+- **DWG 保存**：已有实现满足要求——源为 `.dwg` 时默认 `<stem>-export.dwg`，写新文件、绝不覆盖源；`save.dwg_exported_experimental`/`_partial` 明说实验性/有损/不完整。契约测试 `cargo test -p cad-host --lib dwg` **4 passed**（含 `save_on_a_dwg_source_suggests_a_new_export_name`、`choosing_the_opened_dwg_source_is_refused_and_writes_nothing`）。
+- **acadrust patch**：本轮**未修改** acadrust 0.6.8；根 `[patch.crates-io]` 仍为空，`docs/acadrust-patches.md` 是唯一台账入口（ADR-0031，`check-architecture.py` 强制；补丁必须登记上游版本/rev、文件、行为差异、测试与 remove-when）。
+- **已运行**：`cargo test -p cad-app --lib --locked`（2231 passed, 3 ignored）；`cargo test -p cad-ui-core --locked`；`cargo clippy -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings`；`cargo fmt --all -- --check`；`npm test`（1425 passed，含 tsc + 插件 tsc + `node --test`）；`check-architecture.py`/`check-tauri-capabilities.py`/`check-fixture-manifest.py`/`check-file-size.py`/`check-command-docs.py`/`test-check-command-docs.py`/`check-i18n.py` 全绿。
+- **NOT RUN / NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机；Windows/macOS/Android/Web 运行时；真实 DWG/AutoCAD vendor 对照；Wave 11/12 的 3D/文件能力只是具名拒绝，不是可用功能。
+- **提交**：Wave 9 `85973595`、Wave 10 `14af4bca`、Wave 11 `204da8af`、Wave 12 `60da7170`、UI 契约 `42a73d6e`（+ clippy 修复）。
+
 
 ## 2026-11-09 应用内更新检测 + 落地页下载/更新日志改版
 

@@ -312,6 +312,8 @@ impl Application {
                     before: None,
                     after: Some(block_row),
                 }],
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

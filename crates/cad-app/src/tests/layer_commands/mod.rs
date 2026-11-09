@@ -4,7 +4,7 @@
 //! machine cannot ask AutoCAD's *Select objects* prompt, so the current session
 //! selection is the whole input (`LAYCUR` here; the rest of the run is added
 //! beside it). Pinned per command: the success shape, one transaction / one
-//! undo entry where entity rows are written, **no** undo entry for layer-table
+//! undo entry where entity rows are written, **one** undo entry for layer-table
 //! edits, every refusal leaving revision + history untouched, the
 //! addressability preflight, the current-layer refusal for LAYFRZ, the locked
 //! destination refusal and (later) SETBYLAYER's preserved fields.

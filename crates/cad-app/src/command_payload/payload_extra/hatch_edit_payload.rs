@@ -65,8 +65,10 @@ pub enum HatchEditOption {
     Disassociate,
     /// `ANNOTATIVE`: named refusal — there is no annotative-scale model.
     Annotative,
-    /// `ADDBOUNDARIES`: named refusal — a loop set cannot be rebuilt from picks.
+    /// `ADDBOUNDARIES`: append the other selected closed entities as boundary
+    /// loops (the selection holds exactly one hatch plus the sources).
     AddBoundaries,
-    /// `REMOVEBOUNDARIES`: named refusal — a loop set cannot be rebuilt from picks.
+    /// `REMOVEBOUNDARIES`: remove the stored loops matching the other selected
+    /// closed entities (points + bulges, `1e-9`).
     RemoveBoundaries,
 }

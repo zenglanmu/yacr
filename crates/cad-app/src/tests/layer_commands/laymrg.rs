@@ -2,10 +2,10 @@
 //!
 //! Declared deviation: sources come from the current selection and the target is
 //! the session's active layer (no interactive source/target prompts). Every
-//! entity on a source layer is rewritten to the active layer in one transaction /
-//! one undo step; the source layer rows are then deleted (layer-table edits are
-//! not undoable). Refusals: empty selection, a payload, a source equal to the
-//! active layer, and the default layer `0`.
+//! entity on a source layer is rewritten to the active layer and the source
+//! layer rows are deleted in one transaction / one undo step; undo restores the
+//! rows and the entities' original layers. Refusals: empty selection, a payload,
+//! a source equal to the active layer, and the default layer `0`.
 
 use super::*;
 
@@ -60,10 +60,43 @@ fn laymrg_moves_every_entity_from_the_selected_layers_into_the_active_layer() {
     assert_eq!(
         undo_depth(&app),
         before.1 + 1,
-        "only the entity half is undoable"
+        "one undo step covers both the entities and the source layer row"
     );
     assert!(outcome.changes.is_some());
     assert_eq!(diagnostic_codes(&outcome), vec!["laymrg.applied"]);
+
+    // Undo restores the source layer row and puts its entities back on it.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo LAYMRG");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(revision(&app), Revision(before.0 .0 + 3));
+    assert_eq!(
+        drawing.layer(LayerId(3)).map(|row| row.name.as_str()),
+        Some("WALLS")
+    );
+    assert_eq!(entity_layer(&app, 1), LayerId(3));
+    assert_eq!(entity_layer(&app, 2), LayerId(3));
+    assert_eq!(entity_layer(&app, 3), LayerId(5));
+
+    // Redo re-applies the merge and removes the source row again.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo LAYMRG");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(revision(&app), Revision(before.0 .0 + 4));
+    assert!(drawing.layer(LayerId(3)).is_none());
+    assert_eq!(entity_layer(&app, 1), LayerId(5));
+    assert_eq!(entity_layer(&app, 2), LayerId(5));
+    assert_eq!(entity_layer(&app, 3), LayerId(5));
 }
 
 #[test]

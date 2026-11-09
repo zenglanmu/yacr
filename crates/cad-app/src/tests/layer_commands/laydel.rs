@@ -1,11 +1,11 @@
 //! `LAYDEL` (AutoCAD 2026): delete the selection's layers and their model entities.
 //!
 //! The source layers are the distinct layers of the current selection. Every
-//! **model-space** entity on those layers is deleted in one transaction / one undo
-//! step; the layer rows are then deleted (not undoable). Refusals: empty
-//! selection, a payload, a source equal to the active layer, the default layer
-//! `0`, and a source that still has paper-space or block members (the command
-//! only deletes model-space entities).
+//! **model-space** entity on those layers and the layer rows are deleted in one
+//! candidate / one transaction / one undo step; undo restores both the layer row
+//! and its deleted entities. Refusals: empty selection, a payload, a source equal
+//! to the active layer, the default layer `0`, and a source that still has
+//! paper-space or block members (the command only deletes model-space entities).
 
 use super::*;
 
@@ -58,7 +58,7 @@ fn laydel_deletes_the_model_entities_and_the_layer_rows() {
     assert_eq!(
         undo_depth(&app),
         before.1 + 1,
-        "only the entity half is undoable"
+        "one undo step covers both the entities and the layer row"
     );
     assert!(outcome.changes.is_some());
     assert!(diagnostic_codes(&outcome).contains(&"laydel.applied"));
@@ -66,6 +66,40 @@ fn laydel_deletes_the_model_entities_and_the_layer_rows() {
         session.selection.refs().is_empty(),
         "the deleted entities are dropped from the selection"
     );
+
+    // Undo restores the layer row first and then its entities, all in one
+    // revision: no entity is left pointing at a missing layer.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo LAYDEL");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(revision(&app), Revision(before.0 .0 + 3));
+    assert_eq!(
+        drawing.layer(LayerId(3)).map(|row| row.name.as_str()),
+        Some("WALLS")
+    );
+    assert_eq!(entity_layer(&app, 1), LayerId(3));
+    assert_eq!(entity_layer(&app, 2), LayerId(3));
+    assert_eq!(entity_layer(&app, 3), LayerId(5));
+
+    // Redo removes the layer rows and the entities again.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo LAYDEL");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(revision(&app), Revision(before.0 .0 + 4));
+    assert!(drawing.layer(LayerId(3)).is_none());
+    assert!(drawing.entity(EntityId(1)).is_none());
+    assert!(drawing.entity(EntityId(2)).is_none());
+    assert!(drawing.entity(EntityId(3)).is_some());
 }
 
 #[test]

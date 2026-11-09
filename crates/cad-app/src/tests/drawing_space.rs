@@ -56,6 +56,7 @@ fn application_with_spaces() -> (Application, SessionState) {
         ],
         model_to_paper: Transform3::scale(100.0),
         completeness: Completeness::Complete,
+        layer_overrides: std::collections::BTreeMap::new(),
     };
     b.insert_layout(Layout {
         id: LayoutId(1),

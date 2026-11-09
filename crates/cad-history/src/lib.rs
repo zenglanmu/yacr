@@ -67,13 +67,39 @@ pub fn drawing_patch_deleted(
     }
 }
 
+/// Build a reversible layer-table patch from the before/after rows.
+///
+/// `None` on either side means the row did not exist (a create) / no longer
+/// exists (a delete). Handlers that will record layer writes use this instead of
+/// spelling the struct out, so the row shape stays in `cad-db`.
+pub fn layer_patch(
+    id: LayerId,
+    before: Option<cad_db::LayerRow>,
+    after: Option<cad_db::LayerRow>,
+) -> cad_db::LayerPatch {
+    cad_db::LayerPatch { id, before, after }
+}
+
+/// Build a reversible layout-table patch from the before/after rows.
+///
+/// `None` on either side means the row did not exist (a create) / no longer
+/// exists (a delete). The row carries its plot settings, so the delete cascade
+/// (delete the layout ⇒ delete its plot row) round-trips exactly.
+pub fn layout_patch(
+    id: LayoutId,
+    before: Option<cad_db::LayoutRow>,
+    after: Option<cad_db::LayoutRow>,
+) -> cad_db::LayoutPatch {
+    cad_db::LayoutPatch { id, before, after }
+}
+
 /// A reversible batch of drawing-entity changes.
 ///
 /// The patches carry the full before/after [`DbEntity`]; `transaction` is the
 /// id to reuse when the record is undone/redone so the resulting [`ChangeSet`]
-/// is traceable to the same logical edit. An empty record (no entity and no
-/// block patch) is a caller bug and [`History`] rejects it, so a command can
-/// never record a silent no-op.
+/// is traceable to the same logical edit. An empty record (no entity, block,
+/// layer or layout patch) is a caller bug and [`History`] rejects it, so a
+/// command can never record a silent no-op.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrawingUndoRecord {
     pub transaction: TransactionId,
@@ -84,6 +110,19 @@ pub struct DrawingUndoRecord {
     /// definition here and the member moves/reference insert as entity patches,
     /// so undo/redo restores the whole edit atomically.
     pub block_patches: Vec<cad_db::BlockPatch>,
+    /// Reversible layer-table rows (layer + attributes) committed together with
+    /// `patches`/`block_patches` as one revision. A layer-only record (create,
+    /// rename, delete, attribute write) carries these and no entity patch; a
+    /// record that deletes a layer and its entities carries both, and the
+    /// database applies the layer deletes last.
+    pub layer_patches: Vec<cad_db::LayerPatch>,
+    /// Reversible layout-table rows (layout + plot settings) committed together
+    /// with the other batches as one revision. A layout-only record (create,
+    /// rename, delete, viewport/plot write) carries these and no entity patch; a
+    /// record that moves the last entity out of a layout and deletes it carries
+    /// both, and the database applies layout upserts first and layout deletes
+    /// last.
+    pub layout_patches: Vec<cad_db::LayoutPatch>,
     /// Records with an equal merge key may be coalesced (e.g. a drag). The
     /// drawing commands in `cad-app` deliberately pass `None` so each user
     /// action is exactly one undo step.
@@ -92,17 +131,28 @@ pub struct DrawingUndoRecord {
 
 impl DrawingUndoRecord {
     fn validate(&self) -> CadResult<()> {
-        if self.patches.is_empty() && self.block_patches.is_empty() {
+        if self.patches.is_empty()
+            && self.block_patches.is_empty()
+            && self.layer_patches.is_empty()
+            && self.layout_patches.is_empty()
+        {
             return Err(CadError::InvalidInput(
-                "a drawing undo record needs at least one patch or block patch".into(),
+                "a drawing undo record needs at least one patch, block patch, layer patch or \
+                 layout patch"
+                    .into(),
             ));
         }
-        // Block rows are not orthogonal per-key edits like a drag: coalescing
-        // them into the previous record could silently drop a definition or its
-        // members. Refuse the combination instead of guessing.
-        if self.merge_key.is_some() && !self.block_patches.is_empty() {
+        // Block, layer and layout rows are not orthogonal per-key edits like a
+        // drag: coalescing them into the previous record could silently drop a
+        // definition or its members/attributes. Refuse the combination instead
+        // of guessing.
+        if self.merge_key.is_some()
+            && (!self.block_patches.is_empty()
+                || !self.layer_patches.is_empty()
+                || !self.layout_patches.is_empty())
+        {
             return Err(CadError::InvalidInput(
-                "a drawing undo record with block patches cannot be merged".into(),
+                "a drawing undo record with block, layer or layout patches cannot be merged".into(),
             ));
         }
         let mut block_ids = HashSet::new();
@@ -115,6 +165,32 @@ impl DrawingUndoRecord {
             if patch.before.is_none() && patch.after.is_none() {
                 return Err(CadError::InvalidInput(
                     "a block patch needs a before or after state".into(),
+                ));
+            }
+        }
+        let mut layer_ids = HashSet::new();
+        for patch in &self.layer_patches {
+            if !layer_ids.insert(patch.id) {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record cannot contain duplicate layer ids".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "a layer patch needs a before or after state".into(),
+                ));
+            }
+        }
+        let mut layout_ids = HashSet::new();
+        for patch in &self.layout_patches {
+            if !layout_ids.insert(patch.id) {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record cannot contain duplicate layout ids".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "a layout patch needs a before or after state".into(),
                 ));
             }
         }
@@ -159,6 +235,33 @@ impl DrawingUndoRecord {
                     + row.definition.entities.len() * std::mem::size_of::<EntityId>();
                 if let Some(metadata) = &row.metadata {
                     bytes += metadata.name.len();
+                }
+            }
+        }
+        for p in &self.layer_patches {
+            bytes += std::mem::size_of::<cad_db::LayerPatch>();
+            for row in p.before.iter().chain(p.after.iter()) {
+                bytes += std::mem::size_of::<cad_db::LayerRow>() + row.layer.name.len();
+                bytes += row.attributes.linetype.len();
+                if let Some(plot_style) = &row.attributes.plot_style {
+                    bytes += plot_style.len();
+                }
+            }
+        }
+        for p in &self.layout_patches {
+            bytes += std::mem::size_of::<cad_db::LayoutPatch>();
+            for row in p.before.iter().chain(p.after.iter()) {
+                bytes += std::mem::size_of::<cad_db::LayoutRow>() + row.layout.name.len();
+                bytes += row.layout.viewports.len() * std::mem::size_of::<cad_db::PaperViewport>();
+                for viewport in &row.layout.viewports {
+                    bytes += viewport.clip.len() * std::mem::size_of::<Point3>();
+                    // Per-viewport layer overrides are a map entry each; count
+                    // the key/value pair so a LAYVPI step is not under-budgeted.
+                    bytes +=
+                        viewport.layer_overrides.len() * std::mem::size_of::<(LayerId, bool)>();
+                }
+                if let Some(plot) = &row.plot {
+                    bytes += plot.paper_size_name.len();
                 }
             }
         }

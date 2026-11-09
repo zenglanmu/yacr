@@ -502,30 +502,45 @@ fn validate_mesh(mesh: &Mesh) -> CadResult<()> {
 /// - an `INSERT` names an existing `Block` definition (a dangling block
 ///   reference could never be expanded).
 ///
-/// This is the plain, standalone check: an **empty** staged block set. The
-/// combined atomic block+entity write path uses [`validate_entity_in`] so a
-/// block created by the *same* batch is a valid target.
+/// This is the plain, standalone check: an **empty** staged block/layer set. The
+/// combined atomic block+entity and layer+entity write paths use
+/// [`validate_entity_in`] so a block or layer created/updated by the *same*
+/// batch is a valid target.
 pub fn validate_entity(
     db: &crate::DrawingDatabase,
     id: EntityId,
     entity: &DbEntity,
 ) -> CadResult<()> {
-    validate_entity_in(db, id, entity, &std::collections::BTreeSet::new())
+    validate_entity_in(
+        db,
+        id,
+        entity,
+        &std::collections::BTreeSet::new(),
+        &std::collections::BTreeSet::new(),
+        &std::collections::BTreeSet::new(),
+    )
 }
 
-/// [`validate_entity`] with the block ids a combined batch stages.
+/// [`validate_entity`] with the block, layer and layout ids a combined batch
+/// stages.
 ///
 /// `staged_blocks` are the definitions the *same* transaction creates/updates:
 /// they do not exist in `db` yet, so both `SpaceId::Block(id)` and
 /// `SemanticGeometry::Insert { block: id }` must accept them for the batch to be
-/// expressible in one revision. Every other reference still has to resolve
-/// against the stored table, so the staged set widens the check by exactly the
-/// batch, never by a guess.
+/// expressible in one revision. `staged_layers` is the same widening for the
+/// entity's `layer` reference, and `staged_layouts` for `SpaceId::Paper(id)`: an
+/// undo record that restores a layer/layout and the entities that sit in it
+/// lands both in one revision, so the entity batch must accept a row that only
+/// exists after the batch. Every other reference still has to resolve against
+/// the stored table, so the staged sets widen the check by exactly the batch,
+/// never by a guess.
 pub(crate) fn validate_entity_in(
     db: &crate::DrawingDatabase,
     id: EntityId,
     entity: &DbEntity,
     staged_blocks: &std::collections::BTreeSet<BlockId>,
+    staged_layers: &std::collections::BTreeSet<LayerId>,
+    staged_layouts: &std::collections::BTreeSet<LayoutId>,
 ) -> CadResult<()> {
     if entity.id != id {
         return Err(CadError::Invariant(format!(
@@ -540,7 +555,7 @@ pub(crate) fn validate_entity_in(
         )));
     }
     validate_geometry(&entity.geometry)?;
-    if !db.layers.contains_key(&entity.layer) {
+    if !db.layers.contains_key(&entity.layer) && !staged_layers.contains(&entity.layer) {
         return Err(CadError::Invariant(format!(
             "entity {id:?} references missing layer {:?}",
             entity.layer
@@ -549,7 +564,7 @@ pub(crate) fn validate_entity_in(
     match &entity.space {
         SpaceId::Model => {}
         SpaceId::Paper(layout) => {
-            if !db.layouts.contains_key(layout) {
+            if !db.layouts.contains_key(layout) && !staged_layouts.contains(layout) {
                 return Err(CadError::Invariant(format!(
                     "entity {id:?} references missing layout {layout:?}"
                 )));

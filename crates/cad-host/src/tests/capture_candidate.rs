@@ -64,6 +64,7 @@ fn install_trim_fixture(core: &HostCore) {
                 clip: vec![p(0.0, 0.0), p(100.0, 50.0), p(10.0, 20.0)],
                 model_to_paper: Transform3::scale(100.0),
                 completeness: Completeness::Complete,
+                layer_overrides: std::collections::BTreeMap::new(),
             }],
         })
         .unwrap();

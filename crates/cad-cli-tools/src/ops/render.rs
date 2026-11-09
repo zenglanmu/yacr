@@ -354,6 +354,7 @@ fn paper_json(
 ) -> serde_json::Value {
     let (provenance, default_reason) = match &record.provenance {
         cad_db::PlotProvenance::Imported => ("imported", serde_json::Value::Null),
+        cad_db::PlotProvenance::Authored => ("authored", serde_json::Value::Null),
         cad_db::PlotProvenance::DefaultPage { reason } => {
             ("default_page", serde_json::Value::String(reason.clone()))
         }

@@ -180,9 +180,9 @@ impl Application {
                 }
                 self.switch_space_command(session, &command, SpaceId::Model)
             }
-            // The 2026-11-07 layout/viewport batch. Read/list and the space
-            // switch are real; every write is a named refusal because cad-db has
-            // no post-import layout/viewport write API.
+            // The 2026-11-07 layout/viewport batch. Read/list, the space switch
+            // and the table/viewport writes are real; `LAYVPI` stays a named
+            // refusal because this build has no per-viewport layer state.
             CommandId::Layout
             | CommandId::LayoutMerge
             | CommandId::LayoutWizard

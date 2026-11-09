@@ -10,6 +10,10 @@
 //! * `LAYOUT LIST|NEW <name>|RENAME <old> <new>|DELETE <name>|SET <name>`;
 //! * `LAYOUTMERGE <source> <target>`;
 //! * `LAYOUTWIZARD <name> [<paper> <width> <height>]`;
+//! * `PAGESETUP|-PAGESETUP <layout> <paper> <width> <height> [<num>:<den>]
+//!   [0|90|180|270]`;
+//! * `PSETUPIN|-PSETUPIN <source-layout> <target-layout>`;
+//! * `MVIEW <minx> <miny> <maxx> <maxy>`;
 //! * `VPORTS <rows> <cols>` (`-VPORTS` normalizes here);
 //! * `VPCLIP RECT <minx> <miny> <maxx> <maxy>`;
 //! * `VPSCALE <scale-name-or-ratio>`;
@@ -19,9 +23,12 @@
 //! forms split at the first whitespace, so their **left-hand** name cannot
 //! contain a space; that is a grammar boundary, not a guessed name.
 //! `LAYOUTWIZARD`'s name is the first token because the optional paper triple
-//! follows it.
+//! follows it; `PAGESETUP` and `PSETUPIN` are single-token forms for the same
+//! reason. `-PAGESETUP`/`-PSETUPIN` are distinct extended selectors, not
+//! aliases, and share their canonical sibling's grammar.
 
 use cad_app::{LayoutPayload, PaperSetup};
+use cad_db::PlotRotation;
 use cad_domain::Point3;
 
 /// `LAYOUT`: list/modify the layout table and switch the active space.
@@ -30,13 +37,23 @@ pub const LAYOUT_SELECTOR: &str = "LAYOUT";
 pub const LAYOUTMERGE_SELECTOR: &str = "LAYOUTMERGE";
 /// `LAYOUTWIZARD`: create a layout with an optional page setup.
 pub const LAYOUTWIZARD_SELECTOR: &str = "LAYOUTWIZARD";
+/// `PAGESETUP`: write one authored page setup (canonical spelling).
+pub const PAGESETUP_SELECTOR: &str = "PAGESETUP";
+/// `-PAGESETUP`: the distinct extended selector with the same grammar.
+pub const DASH_PAGESETUP_SELECTOR: &str = "-PAGESETUP";
+/// `PSETUPIN`: copy a stored page setup between layouts of this drawing.
+pub const PSETUPIN_SELECTOR: &str = "PSETUPIN";
+/// `-PSETUPIN`: the distinct extended selector with the same grammar.
+pub const DASH_PSETUPIN_SELECTOR: &str = "-PSETUPIN";
+/// `MVIEW`: create one rectangular paper-space viewport.
+pub const MVIEW_SELECTOR: &str = "MVIEW";
 /// `VPORTS`: create a rectangular viewport grid.
 pub const VPORTS_SELECTOR: &str = "VPORTS";
 /// `VPCLIP`: set a viewport clip boundary (RECT only in this build).
 pub const VPCLIP_SELECTOR: &str = "VPCLIP";
 /// `VPSCALE`: set the selected viewport's scale.
 pub const VPSCALE_SELECTOR: &str = "VPSCALE";
-/// `LAYVPI`: freeze layers in every other layout viewport.
+/// `LAYVPI`: freeze layers in every viewport of the active paper layout (per-viewport override).
 pub const LAYVPI_SELECTOR: &str = "LAYVPI";
 
 /// Parse one `LAYOUT <option>` argument.
@@ -144,6 +161,158 @@ pub fn parse_layoutwizard_argument(argument: &str) -> Result<LayoutPayload, Stri
         }
     };
     Ok(LayoutPayload::Wizard { name, paper: None })
+}
+
+/// Parse one `PAGESETUP <layout> <paper> <width> <height> [<num>:<den>]
+/// [0|90|180|270]` argument.
+///
+/// `<layout>` and `<paper>` are single tokens, exactly like `LAYOUTWIZARD`'s
+/// name and paper: a name with a space is not addressable through this typed
+/// form. Width and height are millimetres and must be finite and `> 0`. The
+/// optional scale is `<num>:<den>` with two finite positive components; omitted
+/// means the `1:1` default (`None`). The optional rotation is one of the four
+/// typed quarter turns; omitted means [`PlotRotation::None`].
+pub fn parse_pagesetup_argument(argument: &str) -> Result<LayoutPayload, String> {
+    let tokens: Vec<&str> = argument.split_whitespace().collect();
+    if !(4..=6).contains(&tokens.len()) {
+        return Err(invalid(
+            "pagesetup",
+            "PAGESETUP needs <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]",
+        ));
+    }
+    let layout = tokens[0].to_string();
+    let paper = tokens[1].to_string();
+    let number = |text: &str| {
+        text.parse::<f64>().map_err(|_| {
+            invalid(
+                "pagesetup",
+                "PAGESETUP paper width and height must be finite numbers > 0",
+            )
+        })
+    };
+    let width = number(tokens[2])?;
+    let height = number(tokens[3])?;
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return Err(invalid(
+            "pagesetup",
+            "PAGESETUP paper width and height must be finite numbers > 0",
+        ));
+    }
+    let mut scale = None;
+    let mut rotation: Option<PlotRotation> = None;
+    for token in &tokens[4..] {
+        if token.contains(':') {
+            if scale.is_some() {
+                return Err(invalid(
+                    "pagesetup",
+                    "PAGESETUP takes at most one <num>:<den> scale",
+                ));
+            }
+            scale = Some(parse_pagesetup_scale(token)?);
+        } else {
+            if rotation.is_some() {
+                return Err(invalid(
+                    "pagesetup",
+                    "PAGESETUP takes at most one rotation (0, 90, 180 or 270)",
+                ));
+            }
+            rotation = Some(parse_pagesetup_rotation(token)?);
+        }
+    }
+    Ok(LayoutPayload::PageSetup {
+        layout,
+        paper: PaperSetup {
+            name: paper,
+            width,
+            height,
+        },
+        scale,
+        rotation: rotation.unwrap_or(PlotRotation::None),
+    })
+}
+
+/// Parse the optional `PAGESETUP <num>:<den>` scale: two finite positive parts.
+fn parse_pagesetup_scale(text: &str) -> Result<(f64, f64), String> {
+    let Some((numerator, denominator)) = text.split_once(':') else {
+        return Err("pagesetup.invalid_scale: PAGESETUP scale needs <num>:<den>".into());
+    };
+    let number = |value: &str| {
+        value.parse::<f64>().map_err(|_| {
+            "pagesetup.invalid_scale: PAGESETUP scale needs two finite numbers > 0".to_string()
+        })
+    };
+    let numerator = number(numerator)?;
+    let denominator = number(denominator)?;
+    if !numerator.is_finite() || !denominator.is_finite() || numerator <= 0.0 || denominator <= 0.0
+    {
+        return Err("pagesetup.invalid_scale: PAGESETUP scale needs two finite numbers > 0".into());
+    }
+    Ok((numerator, denominator))
+}
+
+/// Parse the optional `PAGESETUP` rotation: exactly `0`, `90`, `180` or `270`.
+fn parse_pagesetup_rotation(text: &str) -> Result<PlotRotation, String> {
+    match text {
+        "0" => Ok(PlotRotation::None),
+        "90" => Ok(PlotRotation::Degrees90),
+        "180" => Ok(PlotRotation::Degrees180),
+        "270" => Ok(PlotRotation::Degrees270),
+        _ => Err("pagesetup.invalid_rotation: PAGESETUP rotation must be 0, 90, 180 or 270".into()),
+    }
+}
+
+/// Parse one `PSETUPIN <source-layout> <target-layout>` argument.
+///
+/// Both names are single tokens; the copy is same-drawing only.
+pub fn parse_psetupin_argument(argument: &str) -> Result<LayoutPayload, String> {
+    let tokens: Vec<&str> = argument.split_whitespace().collect();
+    let [source, target] = tokens.as_slice() else {
+        return Err(invalid(
+            "psetupin",
+            "PSETUPIN needs <source-layout> <target-layout>",
+        ));
+    };
+    Ok(LayoutPayload::PageSetupIn {
+        source: (*source).to_string(),
+        target: (*target).to_string(),
+    })
+}
+
+/// Parse one `MVIEW <minx> <miny> <maxx> <maxy>` argument.
+///
+/// Four signed finite decimals with `minx < maxx` and `miny < maxy`; the
+/// rectangle is paper-space and not canonicalised.
+pub fn parse_mview_argument(argument: &str) -> Result<(Point3, Point3), String> {
+    let tokens: Vec<&str> = argument.split_whitespace().collect();
+    let [minx, miny, maxx, maxy] = tokens.as_slice() else {
+        return Err("mview.invalid_rect: MVIEW needs <minx> <miny> <maxx> <maxy>".to_string());
+    };
+    let value = |text: &str| {
+        text.parse::<f64>().map_err(|_| {
+            "mview.invalid_rect: MVIEW needs four finite numbers <minx> <miny> <maxx> <maxy>"
+                .to_string()
+        })
+    };
+    let min = Point3 {
+        x: value(minx)?,
+        y: value(miny)?,
+        z: 0.0,
+    };
+    let max = Point3 {
+        x: value(maxx)?,
+        y: value(maxy)?,
+        z: 0.0,
+    };
+    if !min.x.is_finite()
+        || !min.y.is_finite()
+        || !max.x.is_finite()
+        || !max.y.is_finite()
+        || min.x >= max.x
+        || min.y >= max.y
+    {
+        return Err("mview.invalid_rect: MVIEW needs finite minx < maxx and miny < maxy".into());
+    }
+    Ok((min, max))
 }
 
 /// Parse one `VPORTS <rows> <cols>` argument.

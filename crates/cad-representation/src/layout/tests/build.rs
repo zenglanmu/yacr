@@ -148,6 +148,7 @@ fn paper_build_reports_a_rotated_viewport_as_partial_not_a_squared_off_guess() {
             clip: vec![p(50.0, 0.0), p(100.0, 50.0), p(50.0, 100.0), p(0.0, 50.0)],
             model_to_paper: Transform3::scale(100.0),
             completeness: Completeness::Complete,
+            layer_overrides: std::collections::BTreeMap::new(),
         }],
     })
     .unwrap();
@@ -394,7 +395,147 @@ fn four_corner_viewport_at(min_x: f64) -> PaperViewport {
         ],
         model_to_paper: stored_view(100.0, translation),
         completeness: Completeness::Complete,
+        layer_overrides: std::collections::BTreeMap::new(),
     }
+}
+
+// ---- per-viewport layer overrides --------------------------------------
+
+#[test]
+fn viewport_layer_override_hides_a_frozen_layer_only_in_that_viewport() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [(LayerId(0), "0"), (LayerId(1), "L")] {
+        b.insert_layer(Layer {
+            id,
+            name: name.into(),
+            visible: true,
+        })
+        .unwrap();
+    }
+    // Control line on layer 0 (paper y 25.0) and the frozen line on layer L
+    // (paper y 25.05). Both are inside both viewport windows.
+    b.insert_entity(model_entity(
+        1,
+        SemanticGeometry::Line {
+            start: p(5.0, 20.0),
+            end: p(15.0, 20.0),
+        },
+        0,
+    ))
+    .unwrap();
+    let mut frozen_line = model_entity(
+        2,
+        SemanticGeometry::Line {
+            start: p(5.0, 25.0),
+            end: p(15.0, 25.0),
+        },
+        1,
+    );
+    frozen_line.layer = LayerId(1);
+    b.insert_entity(frozen_line).unwrap();
+
+    let mut frozen_viewport = four_corner_viewport_at(0.0);
+    frozen_viewport.layer_overrides.insert(LayerId(1), true);
+    b.insert_layout(cad_db::Layout {
+        id: LayoutId(1),
+        name: "L1".into(),
+        viewports: vec![frozen_viewport, four_corner_viewport_at(200.0)],
+    })
+    .unwrap();
+    let db = b.finish().unwrap();
+
+    let registry = ProviderRegistry::with_default_provider();
+    let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
+    let lines: Vec<_> = rep
+        .fragments
+        .iter()
+        .filter_map(|f| match &f.primitive {
+            DisplayPrimitive::Lines(points) => Some(points.clone()),
+            _ => None,
+        })
+        .collect();
+
+    // Viewport 0 (frozen L) saw only the control line; viewport 1 saw both.
+    assert_eq!(
+        lines.len(),
+        3,
+        "1 line in the frozen viewport + 2 in the other"
+    );
+    let in_first: Vec<_> = lines
+        .iter()
+        .filter(|points| (points[0].x - 49.95).abs() < 1e-9)
+        .collect();
+    let in_second: Vec<_> = lines
+        .iter()
+        .filter(|points| (points[0].x - 249.95).abs() < 1e-9)
+        .collect();
+    assert_eq!(in_first.len(), 1, "the frozen layer is absent here");
+    assert!((in_first[0][0].y - 25.0).abs() < 1e-9);
+    assert_eq!(
+        in_second.len(),
+        2,
+        "the unfrozen viewport keeps both layers"
+    );
+    assert!(in_second
+        .iter()
+        .any(|points| (points[0].y - 25.05).abs() < 1e-9));
+    assert_eq!(rep.completeness, Completeness::Complete);
+}
+
+#[test]
+fn viewport_override_hiding_every_model_layer_keeps_the_sheet_drawable() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    // One model line on layer 0 plus one paper-space line on the sheet.
+    b.insert_entity(model_entity(
+        1,
+        SemanticGeometry::Line {
+            start: p(5.0, 20.0),
+            end: p(15.0, 20.0),
+        },
+        0,
+    ))
+    .unwrap();
+    let mut sheet_line = model_entity(
+        2,
+        SemanticGeometry::Line {
+            start: p(10.0, 10.0),
+            end: p(20.0, 10.0),
+        },
+        1,
+    );
+    sheet_line.space = SpaceId::Paper(LayoutId(1));
+    b.insert_entity(sheet_line).unwrap();
+    let mut viewport = four_corner_viewport_at(0.0);
+    viewport.layer_overrides.insert(LayerId(0), true);
+    b.insert_layout(cad_db::Layout {
+        id: LayoutId(1),
+        name: "L1".into(),
+        viewports: vec![viewport],
+    })
+    .unwrap();
+    let db = b.finish().unwrap();
+
+    let registry = ProviderRegistry::with_default_provider();
+    let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
+    assert_eq!(
+        rep.fragments.len(),
+        1,
+        "only the sheet's own paper line survives"
+    );
+    match &rep.fragments[0].primitive {
+        DisplayPrimitive::Lines(points) => {
+            assert_eq!(points[0], p(10.0, 10.0));
+            assert_eq!(points[1], p(20.0, 10.0));
+        }
+        _ => panic!("expected the paper line"),
+    }
+    assert_eq!(rep.completeness, Completeness::Complete);
 }
 
 fn model_entity(id: u128, geometry: SemanticGeometry, draw_order: i64) -> DbEntity {

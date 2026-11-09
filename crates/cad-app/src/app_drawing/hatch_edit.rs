@@ -21,14 +21,27 @@
 //! * `DRAWORDER BEHIND|FRONT|BOUNDARY` — model-space draw order
 //!   (`BOUNDARY` is a named refusal: there is no boundary record);
 //! * `RECREATEBOUNDARY` — one closed polyline per stored loop;
-//! * `SEPARATE` — split a multi-loop hatch into one hatch per loop.
+//! * `SEPARATE` — split a multi-loop hatch into one hatch per loop;
+//! * `ADDBOUNDARIES` / `REMOVEBOUNDARIES` — edit the stored loop set from the
+//!   selected closed entities (see below).
 //!
 //! Named refusals (global scope, before the selection is read): `ORIGIN`
 //! (`hatchedit.missing_field`: no pattern-origin field), `ASSOCIATE` /
 //! `DISASSOCIATE` (`hatchedit.no_association`) and `ANNOTATIVE`
-//! (`hatchedit.annotative_unsupported`). `ADDBOUNDARIES` / `REMOVEBOUNDARIES`
-//! are `hatchedit.boundaries_unsupported`: the domain cannot rebuild a loop set
-//! from picks, so pretending to add/remove one would be a lie.
+//! (`hatchedit.annotative_unsupported`).
+//!
+//! `ADDBOUNDARIES` / `REMOVEBOUNDARIES` use the pre-selection model: the
+//! selection must hold exactly **one** hatch (the target) plus one or more
+//! closed boundary entities (`Polyline`/`Circle`/full `Ellipse`) on that
+//! hatch's plane. Every non-hatch selection is converted with the same
+//! `HATCHSETBOUNDARY` projection (`annot_batch::hatch::boundary_loop`), so a
+//! non-coplanar or unsupported shape is refused by that code. `ADDBOUNDARIES`
+//! appends the converted loops; `REMOVEBOUNDARIES` removes the stored loops that
+//! match a converted loop by **points + bulges** (`1e-9` tolerance, flags and
+//! source edges ignored) and refuses when nothing matches or when the last loop
+//! would go. The rebuilt set goes through `HatchGeometry::new` (constructor
+//! validation: duplicate/crossing rings are `hatchedit.*_boundaries_invalid`),
+//! keeping the hatch plane, style, fill, seeds, pixel size and pattern type.
 //!
 //! The edit rebuilds hatch geometry through the domain constructor
 //! (`HatchGeometry::from_import` / `with_style_and_fill`) from the stored loops,
@@ -52,12 +65,12 @@ fn refusal(code: &str, detail: impl std::fmt::Display) -> String {
 }
 
 /// A named, non-capability refusal (bad input for a supported shape).
-fn invalid(code: &str, detail: impl std::fmt::Display) -> CadError {
+pub(super) fn invalid(code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::InvalidInput(refusal(code, detail))
 }
 
 /// A named capability-gap refusal (nothing is written).
-fn unsupported(code: &str, detail: impl std::fmt::Display) -> CadError {
+pub(super) fn unsupported(code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::Unsupported(refusal(code, detail))
 }
 
@@ -133,20 +146,20 @@ fn draw_order_label(order: HatchDrawOrder) -> &'static str {
 }
 
 /// One stored hatch resolved from the selection.
-struct Target {
-    entity: DbEntity,
-    hatch: HatchGeometry,
+pub(super) struct Target {
+    pub(super) entity: DbEntity,
+    pub(super) hatch: HatchGeometry,
 }
 
 /// One updated entity plus an optional display-attribute write.
-struct Change {
-    before: DbEntity,
-    after: DbEntity,
-    display: Option<EntityRenderAttributes>,
+pub(super) struct Change {
+    pub(super) before: DbEntity,
+    pub(super) after: DbEntity,
+    pub(super) display: Option<EntityRenderAttributes>,
 }
 
 /// One inserted entity plus an optional display-attribute write.
-struct NewEntity {
+pub(super) struct NewEntity {
     entity: DbEntity,
     display: Option<EntityRenderAttributes>,
 }
@@ -228,11 +241,9 @@ impl Application {
                 ))
             }
             HatchEditOption::AddBoundaries | HatchEditOption::RemoveBoundaries => {
-                return Err(unsupported(
-                    "boundaries_unsupported",
-                    "the domain cannot rebuild a hatch loop set safely from added/removed \
-                     boundary picks, so HATCHEDIT ADDBOUNDARIES/REMOVEBOUNDARIES changes nothing",
-                ))
+                // Handled after the drawing is loaded, before the generic
+                // per-hatch target resolution: the selection mixes the one target
+                // hatch with plain boundary entities.
             }
             HatchEditOption::DrawOrder(HatchDrawOrder::BehindBoundary) => {
                 return Err(unsupported(
@@ -260,6 +271,21 @@ impl Application {
             document.drawing.clone()
         };
         let mut candidate = drawing.as_ref().clone();
+        // ADDBOUNDARIES/REMOVEBOUNDARIES take exactly one target hatch plus
+        // plain boundary entities, so they cannot go through `resolve_targets`
+        // (which requires every selected entity to be a hatch).
+        if matches!(
+            option,
+            HatchEditOption::AddBoundaries | HatchEditOption::RemoveBoundaries
+        ) {
+            return self.hatch_edit_boundaries(
+                command,
+                references,
+                drawing.as_ref(),
+                candidate,
+                &option,
+            );
+        }
         let targets = resolve_targets(&candidate, command, references)?;
 
         let mut changes: Vec<Change> = Vec::new();
@@ -605,7 +631,7 @@ impl Application {
             | HatchEditOption::Disassociate
             | HatchEditOption::Annotative
             | HatchEditOption::AddBoundaries
-            | HatchEditOption::RemoveBoundaries => unreachable!("refused above"),
+            | HatchEditOption::RemoveBoundaries => unreachable!("handled above"),
         }
 
         if changes.is_empty() && inserts.is_empty() {
@@ -622,7 +648,7 @@ impl Application {
     }
 
     /// Apply the planned hatch changes in one transaction / one undo step.
-    fn commit_hatch_edits(
+    pub(super) fn commit_hatch_edits(
         &mut self,
         command: &Command,
         before_drawing: &DrawingDatabase,
@@ -691,6 +717,8 @@ impl Application {
                 label: "hatchedit".to_string(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

@@ -436,7 +436,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `TXT2MTXT` | 部分实现 | 选中 Text/MText 按上→下、左→右排序并以 `\P` 合并为一个 `AcDbMText`，同时删除来源（一条事务/一步撤销） | Settings 对话框、统一行距、分栏等未实现；保留原字符串转义 |
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 每个选中 HATCH 的每个 loop 生成一条同层/同空间、非关联的闭合 LWPOLYLINE（保留 bulge） | 无关联性；无选项提示 |
 | `GRADIENT` | 部分实现 | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5）；边界必须在 +Z 平面；一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 | 无渐变预览、无 `-GRADIENT` 选项提示、无 .pat/关联性；非 `+Z` 平面/非闭合/退化边界按名拒绝；证据只有 `cad-app`/`cad-ui-core`/前端契约测试 |
-| `HATCHEDIT` | 部分实现 | 恰好一个直接可寻址的模型空间 HATCH；键入 `ANGLE <度>`/`SCALE <比例>`（仅 Pattern 填充，>0）或 `SOLID`/`GRADIENT`；经 `HatchGeometry::from_import` 重建显示，保留实体 id/层/空间/draw order/`AcDbHatch`，一条事务/一步撤销；相同值为 `hatchedit.unchanged`（无事务） | 无交互对话框；`Pattern`/`Color`/`Properties`/`Draw order`/`Add`/`Remove` 边界/关联性未实现；裸命令按名拒绝并列出四个已实现形式；证据只有契约测试 |
+| `HATCHEDIT` | 部分实现 | 恰好一个直接可寻址的模型空间 HATCH；`ANGLE`/`SCALE`/`SOLID`/`GRADIENT` 等既有选项；`ADDBOUNDARIES`/`REMOVEBOUNDARIES` 现在真实：一个选中 hatch + 其余选中闭合实体为边界，重建 loop 集，一条事务/一步撤销 | 无交互对话框；`Origin` 无字段、`Associate`/`Annotative` 无模型、Boundary draw order 拒绝；证据只有契约测试 |
 | `HATCHTOBACK` | 部分实现 | 把所有模型空间 HATCH 的 draw order 排到所有非 HATCH 对象之后，保留相对顺序；一条事务/一步撤销 | 图纸空间/块空间不重排；无 Draw Order 对话框 |
 | `WIPEOUT` | 部分实现 | 开放多边形捕获（≥3 点、`+Z` 平面）生成一个 `AcDbWipeout`（`Mask{inverted:false}`） | 无 Frames/ON/OFF/display-not-plot、无 Polyline/Erase Polyline 选项、无自交拒绝、无既有 wipeout 拾取 |
 | `POLYGON CIRCUMSCRIBED` | 部分实现 | 独立选择子：中心 + 切圆上一点，用 `R=r/cos(π/n)`、顶点在 `θ±π/n` 生成闭合外切正多边形 | `POLYGON` 的 `Edge` 分支、数值半径的捕捉旋转规则仍未实现 |
@@ -562,7 +562,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `VPMIN` | 部分实现 | 恢复会话标记；空状态为 `vpmin.nothing_to_restore` | 同上；不写库 |
 | `VPCLIP` | 部分实现 | 校验 `RECT <minx> <miny> <maxx> <maxy>`；非矩形按 `vpclip.polygonal_not_implemented` 拒绝；合法矩形后按 `vpclip.viewport_selection_unsupported` 拒绝 | 无选中视口/裁剪写 API；多边形裁剪未实现 |
 | `VPSCALE` | 部分实现 | 校验零/非有限/未知比例；解析后按 `vpscale.write_unsupported` 拒绝 | 无视口比例写 API；不修改视口 |
-| `LAYVPI` | 部分实现 | 校验层名后按 `layvpi.viewport_layer_state_unsupported` 拒绝 | 无 per-viewport 层状态；**绝不**全局冻结 |
+| `LAYVPI` | 部分实现 | 真实写入活动布局所有视口的 `PaperViewport.layer_overrides`，纸空间表示按视口过滤模型几何；一条事务/一步撤销；**绝不**全局冻结 | 无视口选择（应用到全部视口）；导入 VPLAYER 未解析 |
 
 > **证据边界**：以上 10 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
 > 真机或 vendor-AutoCAD 证据。layout-batch 的前端测试在主仓库合并后运行通过；worktree 内因缺
@@ -577,7 +577,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 |---|---|---|---|
 | `DIMSTYLE` | 部分实现 | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles` | `SET <name>` 按 `dimstyle.set_unavailable` 拒绝（只有 builder 写 API）；未知名称 `dimstyle.unknown`；裸命令 `dimstyle.needs_option` |
 | `-DIMSTYLE` | 部分实现 | `DIMSTYLE` 的别名（同一 `CommandId`/路径） | 同上 |
-| `DIMTEDIT` | 部分实现 | 恰好一个选中标注；`MOVE <x> <y>` 写组 11、`ROTATE <degrees>` 写组 53（不归一化，0 = 派生）、`RESET` 复位；一条事务/一步撤销；无变化 `dimtedit.unchanged` | 对齐/倾斜编辑 NOT IMPLEMENTED；无交互文字拖动 |
+| `DIMTEDIT` | 部分实现 | 恰好一个选中标注；`MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 移动锚点并设置字形级 `h_align`（线性/对齐/半径/直径）；一条事务/一步撤销；无变化 `dimtedit.unchanged` | 角/坐标标注 justify、Oblique、交互文字拖动未实现；导入默认 Center、导出不写组 72 |
 | `DIMEDIT` | 部分实现 | 所有选中标注；`TEXT <override>` 逐字存组 1（`<>` 占位，≤1024），`RESET` 删除；一条事务/一步撤销 | 延伸线编辑 NOT IMPLEMENTED；无对话框/逐项确认 |
 | `DIMOVERRIDE` | 部分实现 | 闭集的实体快照变量（`DIMTXT`…`DIMLUNIT`）；一条事务/一步撤销；样式表不改 | 未知变量、仅表变量、坏值、未实现值分别具名拒绝；无对话框 |
 | `DIMREGEN` | 部分实现 | payload-free；本构建非关联，返回 `dimregen.non_associative` 且不改变任何状态 | 不是 AutoCAD 的关联标注重算；无 revision/历史 |
@@ -1200,6 +1200,275 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `MENU` | **部分实现（具名拒绝）**：`menu.unsupported: no menu-file model; the UI is fixed` | 同上 |
 | `RIBBON` | **部分实现（具名拒绝）**：`ribbon.unsupported: ribbon visibility is host-owned chrome` | 同上 |
 
+### 2026-11-09 Wave 9 扩展命令（2D 绘制/修改 + 别名 + 报告）
+
+> 证据仅 Linux 编译 + `cad-app`/`cad-ui-core` 契约测试 + 前端 `node --test`；GUI/GPU/像素/真机 NOT VERIFIED。`部分实现` 只表示命令路径存在并如实工作/拒绝。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `ARRAY` / `-ARRAY` / `ARRAYCLASSIC` | **部分实现（路由）**：`ArrayRect`/`ArrayPolar` 载荷转交现有 `ARRAYRECT`/`ARRAYPOLAR`；无载荷时 `array.needs_payload` 只读报告 | 无旧式对话框、无关联阵列/Levels/Path；路由本身不新增写路径 |
+| `BLEND` | **部分实现（真实 2D 编辑）**：两条开放 `LINE`/`ARC`/`LWPOLYLINE` 最近端点间一条三次 `SPLINE` | 内部控制点沿源切线取间隙 1/3（声明规则）；无曲线连续性/多段混合；仅开放曲线 |
+| `BREAKLINE` | **部分实现（真实 2D 编辑）**：两点间一条开放折线含锯齿折断符号（15% 宽 / 5% 深） | 符号是声明式规则，不是 AutoCAD 块式折断符号；无尺寸选项 |
+| `-BLOCK` / `-INSERT` | **已实现（别名）**：调用唯一 `BLOCK` / `INSERT` 处理器 | 同一事务/撤销；无第二套实现 |
+| `-BOUNDARY` / `-HATCH` / `-HATCHEDIT` / `EXOFFSET` | **部分实现（别名）**：调用唯一 `BOUNDARY`/`HATCH`/`HATCHEDIT`/`OFFSET` 处理器 | 边界与各自父命令完全一致 |
+| `DIM` | **部分实现（只读路由报告）**：`dim.available` 列出已实现 `DIM*` 选择子；`dim.router_only` | 不创建标注；无交互式类型提示 |
+| `UNITS` | **部分实现（只读报告）**：`units.report`（图纸单位 4 位小数、角度用度）；`units.dialog_not_implemented` | 无 UNITS 对话框/逐图纸单位表；不写入 |
+| `ARCTEXT` | **部分实现（具名拒绝）**：`arctext.unsupported: text along an arc is not modeled; no combined arc+text payload` | 不写库/不升修订/不入历史 |
+| `MLEADERALIGN` | **部分实现（具名拒绝）**：`mleaderalign.unsupported: no multileader alignment model` | 同上 |
+| `MLEADEREDIT` | **部分实现（具名拒绝）**：`mleaderedit.unsupported: no add/remove leader-line API` | 同上 |
+| `MLEADERCOLLECT` | **部分实现（具名拒绝）**：`mleadercollect.unsupported: no multileader collection/table model` | 同上 |
+| `TOLERANCE` | **部分实现（具名拒绝）**：`tolerance.unsupported: no feature-control-frame (tolerance) object model` | 同上 |
+| `DIMARC` | **部分实现（具名拒绝）**：`dimarc.unsupported: the dimension domain has no arc-length kind` | 同上 |
+| `CAL` | **部分实现（具名拒绝）**：`cal.unsupported: no expression evaluator is implemented` | 同上 |
+| `DIMEX` / `DIMIM` | **部分实现（具名拒绝）**：`dimex.unsupported` / `dimim.unsupported`：标注样式文件未建模 | 同上 |
+| `SPACETRANS` | **部分实现（具名拒绝）**：`spacetrans.unsupported: no model/paper distance-conversion API` | 同上 |
+| `TXTEXP` | **部分实现（具名拒绝）**：`txtexp.unsupported: no font-outline-to-geometry path is implemented` | 同上 |
+| `UPDATEFIELD` | **部分实现（具名拒绝）**：`updatefield.unsupported: fields are not modeled` | 同上 |
+
+### 2026-11-09 Wave 10 扩展命令（图层/视图/会话报告 + chrome 本地）
+
+> 证据仅 Linux 编译 + `cad-app`/`cad-ui-core` 契约测试 + 前端 `node --test`；GUI/GPU/像素/真机 NOT VERIFIED。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `-LAYER` | **部分实现（只读报告）**：真实图层表（名称/可见/off/frozen/locked/当前层） | 图层增删改名/开关/冻结/锁定写形式未实现；不写库 |
+| `LAYERSTATESAVE` | **部分实现（载荷路由）**：`LayerState` 载荷转交既有 `LAYERSTATE` 会话存储 | 无收录对话框；无载荷只报告；会话状态不持久化 |
+| `NEWVIEW` | **部分实现（载荷路由）**：`View` 载荷转交既有命名视图存储 | 无窗口/名称提示；会话状态不持久化 |
+| `-SCALELISTEDIT` | **部分实现（只读报告）**：真实 `ACAD_SCALELIST` 条目 | 创建/编辑/删除/排序比例未实现 |
+| `LWEIGHT` / `-LWEIGHT` | **部分实现（只读报告）**：会话线宽显示令牌（默认 ON） | 渲染器不消费该标志；LWEIGHT 对话框未实现 |
+| `COLOR` / `-COLOR` | **部分实现（只读报告）**：会话当前颜色 ACI（默认 256=ByLayer） | 无创建路径消费；颜色对话框未实现 |
+| `-UNITS` | **部分实现（只读报告）**：固定单位显示规则 | Units 对话框/逐图纸单位表未实现 |
+| `COPYHIST` | **部分实现（只读报告）**：`copyhist.not_tracked` | 会话不存命令历史文本；不复制 |
+| `HELP` / `CLASSICINSERT` / `CLASSICGROUP` | **部分实现（具名拒绝）**：`help.unsupported` / `classicinsert.unsupported` / `classicgroup.unsupported` | 不写库/不升修订/不入历史 |
+| `FILETAB` / `FILETABCLOSE` / `HIDEPALETTES` / `SHOWPALETTES` / `RIBBONCLOSE` / `GOTOSTART` | **部分实现（具名拒绝）**：窗口/选项板/功能区/开始页 chrome 由宿主负责 | 同上 |
+| `TRANSPARENCY` | **部分实现（具名拒绝）**：`transparency.unsupported: image transparency is not modeled` | 同上 |
+| `DSETTINGS` / `QUICKPROPERTIES` / `CLASSICLAYER` / `COMMANDLINE` / `COMMANDLINEHIDE` | **部分实现（chrome 本地选择子）**：分别打开 Options / 特性面板 / 图层面板，或显示/隐藏命令行 | 不读写图纸；紧凑布局对特性/图层面板给出既有拒绝句 |
+
+### 2026-11-09 Wave 11 扩展命令（3D/网格/曲面拒绝）
+
+> 3D 优先级低于 2D。以下名字只提供诚实命令路径（具名拒绝），不是可用 3D 功能；证据仅 Linux 编译 + 契约测试。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `3DALIGN` | **部分实现（具名拒绝）**：`3dalign.unsupported: 3D alignment is not modeled; use the 2D ALIGN path` | 不写库/不升修订/不入历史 |
+| `3DARRAY` | **部分实现（具名拒绝）**：`3darray.unsupported: 3D arrays are not modeled; use ARRAY/ARRAYRECT/ARRAYPOLAR` | 不写库/不升修订/不入历史 |
+| `3DCLIP` | **部分实现（具名拒绝）**：`3dclip.unsupported: no 3D clipping-plane model` | 不写库/不升修订/不入历史 |
+| `3DCORBIT` | **部分实现（具名拒绝）**：`3dcorbit.unsupported: no continuous 3D orbit controller` | 不写库/不升修订/不入历史 |
+| `3DDISTANCE` | **部分实现（具名拒绝）**：`3ddistance.unsupported: no interactive 3D distance navigation` | 不写库/不升修订/不入历史 |
+| `3DDWF` | **部分实现（具名拒绝）**：`3ddwf.unsupported: DWF/DWFx export is not implemented; use PLOT for SVG/PDF` | 不写库/不升修订/不入历史 |
+| `3DEDITBAR` | **部分实现（具名拒绝）**：`3deditbar.unsupported: no NURBS/spline edit bar` | 不写库/不升修订/不入历史 |
+| `3DFACE` | **部分实现（具名拒绝）**：`3dface.unsupported: no 3DFACE entity model` | 不写库/不升修订/不入历史 |
+| `3DFLY` | **部分实现（具名拒绝）**：`3dfly.unsupported: no 3D fly navigation` | 不写库/不升修订/不入历史 |
+| `3DFORBIT` | **部分实现（具名拒绝）**：`3dforbit.unsupported: no free 3D orbit controller` | 不写库/不升修订/不入历史 |
+| `3DMESH` | **部分实现（具名拒绝）**：`3dmesh.unsupported: no free-form mesh creation model` | 不写库/不升修订/不入历史 |
+| `3DMOVE` | **部分实现（具名拒绝）**：`3dmove.unsupported: no 3D move gizmo` | 不写库/不升修订/不入历史 |
+| `3DORBIT` | **部分实现（具名拒绝）**：`3dorbit.unsupported: no interactive 3D orbit controller; use ORBIT` | 不写库/不升修订/不入历史 |
+| `3DORBITCTR` | **部分实现（具名拒绝）**：`3dorbitctr.unsupported: no 3D orbit-center model` | 不写库/不升修订/不入历史 |
+| `-3DOSNAP` | **部分实现（具名拒绝）**：`-3dosnap.unsupported: no 3D object-snap model` | 不写库/不升修订/不入历史 |
+| `3DOSNAP` | **部分实现（具名拒绝）**：`3dosnap.unsupported: no 3D object-snap model` | 不写库/不升修订/不入历史 |
+| `3DPAN` | **部分实现（具名拒绝）**：`3dpan.unsupported: no 3D pan navigation` | 不写库/不升修订/不入历史 |
+| `3DPOLY` | **部分实现（具名拒绝）**：`3dpoly.unsupported: no 3D polyline entity model` | 不写库/不升修订/不入历史 |
+| `3DPRINT` | **部分实现（具名拒绝）**：`3dprint.unsupported: no 3D print model` | 不写库/不升修订/不入历史 |
+| `3DPRINTSERVICE` | **部分实现（具名拒绝）**：`3dprintservice.unsupported: no STL export or 3D print service` | 不写库/不升修订/不入历史 |
+| `3DROTATE` | **部分实现（具名拒绝）**：`3drotate.unsupported: no 3D rotate gizmo` | 不写库/不升修订/不入历史 |
+| `3DSCALE` | **部分实现（具名拒绝）**：`3dscale.unsupported: no 3D scale gizmo` | 不写库/不升修订/不入历史 |
+| `3DSWIVEL` | **部分实现（具名拒绝）**：`3dswivel.unsupported: no 3D swivel navigation` | 不写库/不升修订/不入历史 |
+| `3DWALK` | **部分实现（具名拒绝）**：`3dwalk.unsupported: no 3D walk navigation` | 不写库/不升修订/不入历史 |
+| `3DZOOM` | **部分实现（具名拒绝）**：`3dzoom.unsupported: no perspective 3D zoom navigation` | 不写库/不升修订/不入历史 |
+
+### 2026-11-09 Wave 12 扩展命令（文件/导入导出/扩展运行时拒绝）
+
+> 唯一矢量输出仍是 `PLOT`（SVG/PDF）。以下名字只提供诚实命令路径（具名拒绝），不是可用导入导出/扩展功能；证据仅 Linux 编译 + 契约测试。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `3DSIN` | **部分实现（具名拒绝）**：`3dsin.unsupported: 3DS import is not implemented` | 不写库/不升修订/不入历史 |
+| `ACISIN` | **部分实现（具名拒绝）**：`acisin.unsupported: ACIS (SAT) import is not implemented` | 不写库/不升修订/不入历史 |
+| `ACISOUT` | **部分实现（具名拒绝）**：`acisout.unsupported: ACIS (SAT) export is not implemented` | 不写库/不升修订/不入历史 |
+| `BMPOUT` | **部分实现（具名拒绝）**：`bmpout.unsupported: raster BMP export is not implemented; use PLOT for vector SVG/PDF` | 不写库/不升修订/不入历史 |
+| `JPGOUT` | **部分实现（具名拒绝）**：`jpgout.unsupported: raster JPEG export is not implemented; use PLOT for vector SVG/PDF` | 不写库/不升修订/不入历史 |
+| `PNGOUT` | **部分实现（具名拒绝）**：`pngout.unsupported: raster PNG export is not implemented; use PLOT for vector SVG/PDF` | 不写库/不升修订/不入历史 |
+| `TIFOUT` | **部分实现（具名拒绝）**：`tifout.unsupported: raster TIFF export is not implemented; use PLOT for vector SVG/PDF` | 不写库/不升修订/不入历史 |
+| `WMFIN` | **部分实现（具名拒绝）**：`wmfin.unsupported: Windows metafile import is not implemented` | 不写库/不升修订/不入历史 |
+| `WMFOUT` | **部分实现（具名拒绝）**：`wmfout.unsupported: Windows metafile export is not implemented` | 不写库/不升修订/不入历史 |
+| `IGESIMPORT` | **部分实现（具名拒绝）**：`igesimport.unsupported: IGES import is not implemented` | 不写库/不升修订/不入历史 |
+| `IGESEXPORT` | **部分实现（具名拒绝）**：`igesexport.unsupported: IGES export is not implemented` | 不写库/不升修订/不入历史 |
+| `STLOUT` | **部分实现（具名拒绝）**：`stlout.unsupported: STL export is not implemented` | 不写库/不升修订/不入历史 |
+| `IMPORT` | **部分实现（具名拒绝）**：`import.unsupported: the generic IMPORT picker is not implemented` | 不写库/不升修订/不入历史 |
+| `EXPORTTOAUTOCAD` | **部分实现（具名拒绝）**：`exporttoautocad.unsupported: exporting to another AutoCAD version is not implemented` | 不写库/不升修订/不入历史 |
+| `DWGCONVERT` | **部分实现（具名拒绝）**：`dwgconvert.unsupported: batch DWG conversion is not implemented` | 不写库/不升修订/不入历史 |
+| `PLT2DWG` | **部分实现（具名拒绝）**：`plt2dwg.unsupported: HPGL (PLT) import is not implemented` | 不写库/不升修订/不入历史 |
+| `DXBIN` | **部分实现（具名拒绝）**：`dxbin.unsupported: DXB import is not implemented` | 不写库/不升修订/不入历史 |
+| `APPLOAD` | **部分实现（具名拒绝）**：`appload.unsupported: no plug-in/application loader model` | 不写库/不升修订/不入历史 |
+| `ARX` | **部分实现（具名拒绝）**：`arx.unsupported: no ObjectARX loader model` | 不写库/不升修订/不入历史 |
+| `NETLOAD` | **部分实现（具名拒绝）**：`netload.unsupported: no .NET application loader model` | 不写库/不升修订/不入历史 |
+| `VBAIDE` | **部分实现（具名拒绝）**：`vbaide.unsupported: no VBA IDE model` | 不写库/不升修订/不入历史 |
+| `VBALOAD` | **部分实现（具名拒绝）**：`vbaload.unsupported: no VBA loader model` | 不写库/不升修订/不入历史 |
+| `VBARUN` | **部分实现（具名拒绝）**：`vbarun.unsupported: no VBA runtime` | 不写库/不升修订/不入历史 |
+| `VBAUNLOAD` | **部分实现（具名拒绝）**：`vbaunload.unsupported: no VBA runtime` | 不写库/不升修订/不入历史 |
+| `SCRIPT` | **部分实现（具名拒绝）**：`script.unsupported: no script-file runner` | 不写库/不升修订/不入历史 |
+
+### 2026-11-09 Wave 13 扩展命令（页面设置/表格/字段/转换）
+
+> 证据仅 Linux 编译 + 契约测试；GUI/GPU/像素/真机 NOT VERIFIED。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `PAGESETUP` | **部分实现**：只读报告每个布局的入库 `PLOTSETTINGS`（纸张/旋转/比例/出图类型/provenance）；修改未实现（`pagesetup.report_only`）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `-PAGESETUP` | **部分实现**：同一只读页面设置报告的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
+| `PSETUPIN` | **部分实现**：具名拒绝（`psetupin.unsupported`）：从其他图纸导入页面设置未实现。 | 不写库/不升修订/不入历史（报告类只读） |
+| `-PSETUPIN` | **部分实现**：具名拒绝（`-psetupin.unsupported`）：同一页面设置导入的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
+| `PLOTSTYLE` | **部分实现**：具名拒绝（`plotstyle.unsupported`）：命名打印样式未实现（无 CTB/STB 表）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `-PLOTSTYLE` | **部分实现**：具名拒绝（`-plotstyle.unsupported`）：打印样式列表的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
+| `CONVERTPSTYLES` | **部分实现**：具名拒绝（`convertpstyles.unsupported`）：打印样式转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `CONVERTCTB` | **部分实现**：具名拒绝（`convertctb.unsupported`）：CTB 转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `CONVERTPOLY` | **部分实现**：只读报告（`convertpoly.single_representation`）：本构建只存一种 `LWPOLYLINE` 表示，无旧式多段线可转换。 | 不写库/不升修订/不入历史（报告类只读） |
+| `CONVERT` | **部分实现**：具名拒绝（`convert.unsupported`）：通用对象转换未实现。 | 不写库/不升修订/不入历史（报告类只读） |
+| `TABLE` | **部分实现**：具名拒绝（`table.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `-TABLE` | **部分实现**：具名拒绝（`-table.unsupported`）：表格创建的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
+| `TABLEDIT` | **部分实现**：具名拒绝（`tabledit.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `TABLEEXPORT` | **部分实现**：具名拒绝（`tableexport.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `TABLESTYLE` | **部分实现**：具名拒绝（`tablestyle.unsupported`）：无表格样式模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `TINSERT` | **部分实现**：具名拒绝（`tinsert.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `MATCHCELL` | **部分实现**：具名拒绝（`matchcell.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `FIELD` | **部分实现**：具名拒绝（`field.unsupported`）：字段未实现（无字段模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `RTEXT` | **部分实现**：具名拒绝（`rtext.unsupported`）：远程文字未实现（无 RTEXT 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `RTEDIT` | **部分实现**：具名拒绝（`rtedit.unsupported`）：远程文字未实现（无 RTEXT 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `SPELL` | **部分实现**：具名拒绝（`spell.unsupported`）：无拼写检查词典/模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `SUPERHATCH` | **部分实现**：具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 | 不写库/不升修订/不入历史（报告类只读） |
+| `ALIGNSPACE` | **部分实现**：具名拒绝（`alignspace.unsupported`）：视口对齐未实现（无视口对齐 API）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `VPSYNC` | **部分实现**：具名拒绝（`vpsync.unsupported`）：视口同步未实现（无视口组模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `LAYTRANS` | **部分实现**：具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 | 不写库/不升修订/不入历史（报告类只读） |
+
+### 2026-11-09 Wave 14 扩展命令（3D 实体/布尔/边编辑拒绝）
+
+> 3D 低于 2D；以下名字只提供诚实命令路径（具名拒绝），不是可用 3D 功能。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `BOX` | **部分实现（具名拒绝）**：`box.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `CONE` | **部分实现（具名拒绝）**：`cone.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `CYLINDER` | **部分实现（具名拒绝）**：`cylinder.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `SPHERE` | **部分实现（具名拒绝）**：`sphere.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `TORUS` | **部分实现（具名拒绝）**：`torus.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `WEDGE` | **部分实现（具名拒绝）**：`wedge.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `PYRAMID` | **部分实现（具名拒绝）**：`pyramid.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `POLYSOLID` | **部分实现（具名拒绝）**：`polysolid.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `EXTRUDE` | **部分实现（具名拒绝）**：`extrude.unsupported: 3D extrusion is not implemented` | 不写库/不升修订/不入历史 |
+| `REVOLVE` | **部分实现（具名拒绝）**：`revolve.unsupported: 3D revolution is not implemented` | 不写库/不升修订/不入历史 |
+| `SWEEP` | **部分实现（具名拒绝）**：`sweep.unsupported: 3D sweep is not implemented` | 不写库/不升修订/不入历史 |
+| `LOFT` | **部分实现（具名拒绝）**：`loft.unsupported: 3D loft is not implemented` | 不写库/不升修订/不入历史 |
+| `INTERSECT` | **部分实现（具名拒绝）**：`intersect.unsupported: no 3D boolean model` | 不写库/不升修订/不入历史 |
+| `UNION` | **部分实现（具名拒绝）**：`union.unsupported: no 3D boolean model` | 不写库/不升修订/不入历史 |
+| `SUBTRACT` | **部分实现（具名拒绝）**：`subtract.unsupported: no 3D boolean model` | 不写库/不升修订/不入历史 |
+| `SLICE` | **部分实现（具名拒绝）**：`slice.unsupported: no 3D slicing model` | 不写库/不升修订/不入历史 |
+| `THICKEN` | **部分实现（具名拒绝）**：`thicken.unsupported: no surface-to-solid model` | 不写库/不升修订/不入历史 |
+| `PRESSPULL` | **部分实现（具名拒绝）**：`presspull.unsupported: no press/pull model` | 不写库/不升修订/不入历史 |
+| `IMPRINT` | **部分实现（具名拒绝）**：`imprint.unsupported: no 3D imprint model` | 不写库/不升修订/不入历史 |
+| `OFFSETEDGE` | **部分实现（具名拒绝）**：`offsetedge.unsupported: no 3D face/edge offset model` | 不写库/不升修订/不入历史 |
+| `CHAMFEREDGE` | **部分实现（具名拒绝）**：`chamferedge.unsupported: no 3D edge chamfer model` | 不写库/不升修订/不入历史 |
+| `FILLETEDGE` | **部分实现（具名拒绝）**：`filletedge.unsupported: no 3D edge fillet model` | 不写库/不升修订/不入历史 |
+| `EDGE` | **部分实现（具名拒绝）**：`edge.unsupported: no 3D face-edge visibility model` | 不写库/不升修订/不入历史 |
+| `MIRROR3D` | **部分实现（具名拒绝）**：`mirror3d.unsupported: no 3D mirror-plane model` | 不写库/不升修订/不入历史 |
+| `ROTATE3D` | **部分实现（具名拒绝）**：`rotate3d.unsupported: no 3D rotate-axis model` | 不写库/不升修订/不入历史 |
+
+### 2026-11-09 Wave 15 扩展命令（曲面/网格拒绝）
+
+> 3D 低于 2D；以下名字只提供诚实命令路径（具名拒绝），不是可用曲面/网格功能。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `SURFBLEND` | **部分实现（具名拒绝）**：`surfblend.unsupported: surface blending is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFEXTEND` | **部分实现（具名拒绝）**：`surfextend.unsupported: surface extension is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFEXTRACTCURVE` | **部分实现（具名拒绝）**：`surfextractcurve.unsupported: surface curve extraction is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFFILLET` | **部分实现（具名拒绝）**：`surffillet.unsupported: surface filleting is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFNETWORK` | **部分实现（具名拒绝）**：`surfnetwork.unsupported: surface network creation is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFOFFSET` | **部分实现（具名拒绝）**：`surfoffset.unsupported: surface offset is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFPATCH` | **部分实现（具名拒绝）**：`surfpatch.unsupported: surface patching is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFSCULPT` | **部分实现（具名拒绝）**：`surfsculpt.unsupported: surface sculpting is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFTRIM` | **部分实现（具名拒绝）**：`surftrim.unsupported: surface trimming is not implemented` | 不写库/不升修订/不入历史 |
+| `SURFUNTRIM` | **部分实现（具名拒绝）**：`surfuntrim.unsupported: surface untrimming is not implemented` | 不写库/不升修订/不入历史 |
+| `MESH` | **部分实现（具名拒绝）**：`mesh.unsupported: free-form mesh creation is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHCAP` | **部分实现（具名拒绝）**：`meshcap.unsupported: mesh capping is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHCOLLAPSE` | **部分实现（具名拒绝）**：`meshcollapse.unsupported: mesh collapse is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHCREASE` | **部分实现（具名拒绝）**：`meshcrease.unsupported: mesh creasing is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHEXTRUDE` | **部分实现（具名拒绝）**：`meshextrude.unsupported: mesh extrusion is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHMERGE` | **部分实现（具名拒绝）**：`meshmerge.unsupported: mesh merge is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHOPTIONS` | **部分实现（具名拒绝）**：`meshoptions.unsupported: no mesh tessellation options model` | 不写库/不升修订/不入历史 |
+| `MESHPRIMITIVEOPTIONS` | **部分实现（具名拒绝）**：`meshprimitiveoptions.unsupported: no mesh primitive options model` | 不写库/不升修订/不入历史 |
+| `MESHREFINE` | **部分实现（具名拒绝）**：`meshrefine.unsupported: mesh refinement is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHSMOOTH` | **部分实现（具名拒绝）**：`meshsmooth.unsupported: mesh smoothing conversion is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHSMOOTHLESS` | **部分实现（具名拒绝）**：`meshsmoothless.unsupported: no mesh smoothness level model` | 不写库/不升修订/不入历史 |
+| `MESHSMOOTHMORE` | **部分实现（具名拒绝）**：`meshsmoothmore.unsupported: no mesh smoothness level model` | 不写库/不升修订/不入历史 |
+| `MESHSPIN` | **部分实现（具名拒绝）**：`meshspin.unsupported: mesh edge spin is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHSPLIT` | **部分实现（具名拒绝）**：`meshsplit.unsupported: mesh face split is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHUNCREASE` | **部分实现（具名拒绝）**：`meshuncrease.unsupported: mesh uncreasing is not implemented` | 不写库/不升修订/不入历史 |
+
+### 2026-11-09 Wave 16 扩展命令（图像/PDF/DGN 底图拒绝）
+
+> 以下名字只提供诚实命令路径（具名拒绝），不是可用底图功能。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `IMAGE` | **部分实现（具名拒绝）**：`image.unsupported: raster image references are not implemented` | 不写库/不升修订/不入历史 |
+| `-IMAGE` | **部分实现（具名拒绝）**：`-image.unsupported: raster image references are not implemented` | 不写库/不升修订/不入历史 |
+| `IMAGEATTACH` | **部分实现（具名拒绝）**：`imageattach.unsupported: raster image references are not implemented` | 不写库/不升修订/不入历史 |
+| `IMAGECLIP` | **部分实现（具名拒绝）**：`imageclip.unsupported: no image clip model` | 不写库/不升修订/不入历史 |
+| `IMAGEADJUST` | **部分实现（具名拒绝）**：`imageadjust.unsupported: no image adjustment model` | 不写库/不升修订/不入历史 |
+| `-IMAGEADJUST` | **部分实现（具名拒绝）**：`-imageadjust.unsupported: no image adjustment model` | 不写库/不升修订/不入历史 |
+| `IMAGEQUALITY` | **部分实现（具名拒绝）**：`imagequality.unsupported: no image display-quality model` | 不写库/不升修订/不入历史 |
+| `IMAGEAPP` | **部分实现（具名拒绝）**：`imageapp.unsupported: no external image-editor association model` | 不写库/不升修订/不入历史 |
+| `IMAGEASYNCWAIT` | **部分实现（具名拒绝）**：`imageasyncwait.unsupported: no asynchronous image loading model` | 不写库/不升修订/不入历史 |
+| `IMAGEEDIT` | **部分实现（具名拒绝）**：`imageedit.unsupported: no external image-editor model` | 不写库/不升修订/不入历史 |
+| `CLASSICIMAGE` | **部分实现（具名拒绝）**：`classicimage.unsupported: no image manager; use IMAGE` | 不写库/不升修订/不入历史 |
+| `PDFATTACH` | **部分实现（具名拒绝）**：`pdfattach.unsupported: PDF underlays are not implemented` | 不写库/不升修订/不入历史 |
+| `-PDFATTACH` | **部分实现（具名拒绝）**：`-pdfattach.unsupported: PDF underlays are not implemented` | 不写库/不升修订/不入历史 |
+| `PDFCLIP` | **部分实现（具名拒绝）**：`pdfclip.unsupported: no PDF underlay clip model` | 不写库/不升修订/不入历史 |
+| `PDFLAYERS` | **部分实现（具名拒绝）**：`pdflayers.unsupported: no PDF underlay layer model` | 不写库/不升修订/不入历史 |
+| `PDFADJUST` | **部分实现（具名拒绝）**：`pdfadjust.unsupported: no PDF underlay adjustment model` | 不写库/不升修订/不入历史 |
+| `PDFIMPORT` | **部分实现（具名拒绝）**：`pdfimport.unsupported: PDF geometry import is not implemented` | 不写库/不升修订/不入历史 |
+| `-PDFIMPORT` | **部分实现（具名拒绝）**：`-pdfimport.unsupported: PDF geometry import is not implemented` | 不写库/不升修订/不入历史 |
+| `PDFSHXTEXT` | **部分实现（具名拒绝）**：`pdfshxtext.unsupported: PDF SHX text conversion is not implemented` | 不写库/不升修订/不入历史 |
+| `-PDFSHXTEXT` | **部分实现（具名拒绝）**：`-pdfshxtext.unsupported: PDF SHX text conversion is not implemented` | 不写库/不升修订/不入历史 |
+| `DGNATTACH` | **部分实现（具名拒绝）**：`dgnattach.unsupported: DGN underlays are not implemented` | 不写库/不升修订/不入历史 |
+| `-DGNATTACH` | **部分实现（具名拒绝）**：`-dgnattach.unsupported: DGN underlays are not implemented` | 不写库/不升修订/不入历史 |
+| `DGNCLIP` | **部分实现（具名拒绝）**：`dgnclip.unsupported: no DGN underlay clip model` | 不写库/不升修订/不入历史 |
+| `DGNLAYERS` | **部分实现（具名拒绝）**：`dgnlayers.unsupported: no DGN underlay layer model` | 不写库/不升修订/不入历史 |
+| `DGNADJUST` | **部分实现（具名拒绝）**：`dgnadjust.unsupported: no DGN underlay adjustment model` | 不写库/不升修订/不入历史 |
+
+### 2026-11-10 P4：图层表写入纳入 `DrawingUndoRecord`
+
+> `cad-db` 新增 `LayerRow`/`LayerPatch` 与组合应用入口；`cad-history` 的 `DrawingUndoRecord.layer_patches` 参与校验/大小/合并拒绝；`cad-app` 的 `UNDO`/`REDO` 与应用器按同一 revision 重放图层行。以下命令的图层表写入现在是**一条事务/一步撤销**；旧的“图层表写入不可撤销”界已删除。图纸空间/块内实体与 Settings 选项边界仍在，因此状态仍为**部分实现**。
+
+| 命令 | 当前行为 | 剩余边界 |
+| --- | --- | --- |
+| `LAYDEL` / `-LAYDEL` | 删除模型空间实体 + 层行，实体与层行同一记录/一步撤销 | 当前层/0 层/图纸空间或块内实体仍拒绝 |
+| `LAYMRG` / `-LAYMRG` | 重写实体 + 删除源层，实体与层行同一记录/一步撤销 | 当前层/0 层不能作源；无交互 Settings |
+| `LAYFRZ` | 冻结选中对象所在层，一步撤销 | 无 Settings/Viewports/Block 选项；当前层拒绝 |
+| `LAYLCK` / `LAYULK` | 锁定/解锁选中对象所在层，一步撤销 | 预选择输入；无 Settings |
+| `LAYTHW` | 解冻全部冻结层，一步撤销 | 无视口级冻结 |
+| `RENAME` / `-RENAME` | 图层重命名一步撤销 | 仅 LAYER 有重命名 API |
+| `LAYERSTATE RESTORE` | 恢复的图层属性写入一步撤销 | 状态仍为会话内、不持久化 DWG |
+| `PURGE` | **有意不记历史**（复用无历史删除体） | 只清未使用图层 |
+
+### 2026-11-10 P5：布局/视口写 API 与撤销
+
+> `cad-db` 新增 `LayoutRow`/`LayoutPatch`、单调 `next_layout_id`、`create/rename/delete_layout`、`set_layout_viewports` 与组合实体+布局应用入口；`cad-history` 的 `DrawingUndoRecord.layout_patches` 参与校验/大小/合并拒绝；`UNDO`/`REDO` 按同一 revision 重放布局行与 plot settings。以下写入均为**一条事务/一步撤销**。
+
+| 命令 | 当前行为 | 剩余边界 |
+| --- | --- | --- |
+| `LAYOUT` `NEW`/`RENAME`/`DELETE` | 真实创建/重命名/删除布局；删除级联 `plot_settings`，删除活动布局时回退到首个剩余布局或模型空间；一步撤销 | `COPY`/`TEMPLATE` 未实现 |
+| `LAYOUTMERGE` | 源布局的图纸空间实体移入目标，删除源布局并级联 plot settings；一步撤销；**升为完整实现** | 同一布局拒绝 |
+| `LAYOUTWIZARD` | 真实创建布局并应用 Authored 纸张设置，一步撤销 | 无视口向导/打印设备 |
+| `VPORTS` / `-VPORTS` | 活动布局创建简单 rows×cols 网格（四角 clip、`model_per_paper=1`），一步撤销 | 命名/标准视口配置未实现 |
+| `VPCLIP RECT` | 对活动布局第一个视口应用矩形裁剪，一步撤销 | 无视口选择；多边形裁剪未实现 |
+| `VPSCALE` | 设置活动布局第一个视口比例（对角线 `1/factor`，保留模型锚点），一步撤销 | 无视口选择 |
+| `PAGESETUP` / `-PAGESETUP` | 裸命令只读报告；typed 形式写入 Authored `PLOTSETTINGS`（纸张/比例/旋转），一步撤销 | 无绘图仪/CTB/STB |
+| `PSETUPIN` / `-PSETUPIN` | 同图纸内复制已存 `PLOTSETTINGS` 到目标布局，一步撤销 | 跨文件导入未实现；无源记录拒绝 |
+| `MVIEW` | 活动图纸空间创建矩形视口，一步撤销 | 无多边形/非矩形；无视口选择 |
+| `VPMAX` / `VPMIN` | 会话标记（不变） | 仅第一个视口 |
+| `MVSETUP` | 仍为具名拒绝 | 无视口组模型 |
+
 ## P2 晋升与边界更新（2026-11-09）
 
 > 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux
@@ -1211,7 +1480,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `CHAMFER` | **完整实现** | `Distance`/`Angle`/`Method`/`Trim`；双零 ⇒ 仅延伸相交；`CHAMFER POLYLINE` 全顶点、弧段替换、过短跳过、开口闭合 | `Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离未文档化 ⇒ 具名拒绝；圆弧/圆/样条 AutoCAD 也不接受 |
 | `FILLET` | 部分实现 | `Radius`/`Trim`/`Polyline` 全顶点；`R=0` 尖角；平行线自动半径 = 间隙/2；直线↔圆/弧相切且圆不修剪 | **曲线对曲线**（圆/弧互选、椭圆、椭圆弧、样条）⇒ `fillet.unsupported_pair` |
 | `PEDIT` | 部分实现 | 全选项行；`Join` 接受线/弧/多段线；`Fit`/`Spline` 含闭合环；`Decurve`/`Reverse`/`Undo`；LINE/ARC/SPLINE 转换 | **`Width`/`Ltype gen`/`Edit vertex` 未实现**（多段线无宽度/`plinegen`/顶点子菜单模型）；偶数环无精确弧拟合 ⇒ `pedit.fit_closure` |
-| `JOIN` | 部分实现 | 源对象模式；`Multiple` 把 LINE/ARC/多段线/SPLINE 精确焊接为**有理 B 样条** | **椭圆弧与其它类型混合**仍拒绝；非共面多段线属 3D 全局范围 |
+| `JOIN` | 部分实现 | 源对象模式；`Multiple` 把 LINE/ARC/多段线/SPLINE/椭圆弧精确焊接为**有理 B 样条**（椭圆弧 = 圆有理二次的精确仿射像） | `JOIN CLOSE` 的混合 SPLINE 仍拒绝；非共面多段线属 3D 全局范围 |
 | `OFFSET` | **完整实现** | `Through`/`Erase`/`Layer`/`Multiple`（单步）/距离；椭圆与椭圆弧→样条；`OFFSETGAPTYPE` Sharp/**Fillet**/**Chamfer** | `OFFSET MULTIPLE` 的多点循环拒绝（单点捕获，属逐选项提示全局范围）；开放折线远端自交未检查（AutoCAD 未文档化） |
 | `STRETCH` | 部分实现 | 交叉矩形 + 交叉多边形/lasso payload（even-odd 包含）；部分包围逐顶点、完全包围整移；圆按圆心、块/文字按插入点；标注按定义点 | **多边形/lasso 的交互捕获未接线**（只经 API/IPC 可达，工具仍只捕获矩形） |
 | `MIRROR` | 部分实现 | `MIRRTEXT=0` 可读镜像；`MIRROR ERASE YES/NO`；标注反射后重合成 | **`MIRRTEXT=1` 字形镜像未实现**（文字实体无镜像标志） |

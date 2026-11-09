@@ -186,7 +186,8 @@ pub struct RenameCommand {
 pub enum LayerStateCommand {
     /// Snapshot the layer attributes, active layer and overrides.
     Save(String),
-    /// Apply a saved snapshot (layer-table write; not undoable).
+    /// Apply a saved snapshot (layer-table write; records one layer-patch undo
+    /// step for the changed rows).
     Restore(String),
     /// Report the saved names; writes nothing.
     List,

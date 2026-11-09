@@ -175,7 +175,7 @@ test('the command catalog lists exactly the router-refused dead affordances, and
   // read-only Font Manager and owns its report (`cad_fonts`), never a router line.
   assert.equal(isLocalChromeCommand('resources'), true, 'the selector is case-insensitive');
   assert.equal(isLocalChromeCommand('fonts'), true, 'the selector is case-insensitive');
-  assert.deepEqual([...LOCAL_CHROME_COMMANDS], ['PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES', 'ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE']);
+  assert.deepEqual([...LOCAL_CHROME_COMMANDS], ['PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES', 'ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE', 'DSETTINGS', 'QUICKPROPERTIES', 'CLASSICLAYER', 'COMMANDLINE', 'COMMANDLINEHIDE']);
   // `PLINE` is now a real (draw) selector, so it is neither reserved nor dead:
   // `ANGLE` (not an AutoCAD command) stays absent from the catalog and refused.
   assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('ANGLE'), false, 'ANGLE');
@@ -391,13 +391,13 @@ test('ORBIT stays visible but gesture-disabled with an explicit orbit reason', a
 test('autocomplete prefers prefix matches, then usage, then alphabetical', () => {
   const all = filterCommandSuggestions('');
   assert.ok(all.length > 0);
-  const prefix = filterCommandSuggestions('co');
+  const prefix = filterCommandSuggestions('co', { limit: 64 });
   // CONSTRAINTBAR is a prefix match too and sorts before COPY alphabetically;
   // COPY must still be present in the same suggestion list.
-  assert.equal(prefix[0].id, 'CONSTRAINTBAR');
+  assert.equal(prefix[0].id, 'COLOR');
   assert.ok(prefix.some(suggestion => suggestion.id === 'COPY'));
   // Mid-string search still finds commands that do not start with the needle.
-  assert.ok(filterCommandSuggestions('ine').some(suggestion => suggestion.id === 'LINE'));
+  assert.ok(filterCommandSuggestions('ine', { limit: 64 }).some(suggestion => suggestion.id === 'LINE'));
   const used = filterCommandSuggestions('c', { query: 'c', history: ['CIRCLE', 'CIRCLE'] });
   assert.equal(used[0].id, 'CIRCLE');
   const limited = filterCommandSuggestions('', { limit: 3 });
@@ -434,7 +434,9 @@ test('autocomplete marks supported commands and never injects unknown ids', () =
   assert.deepEqual(filterCommandSuggestions('zzz'), []);
   // Before the host answers, every suggestion is unsupported — never "allowed".
   setCommandCatalog([]);
-  assert.ok(filterCommandSuggestions('LINE').every(suggestion => suggestion.supported === false));
+  assert.ok(filterCommandSuggestions('LINE')
+    .filter(suggestion => !LOCAL_CHROME_COMMANDS.includes(suggestion.id))
+    .every(suggestion => suggestion.supported === false));
   setCommandCatalog(HOST_NAMES);
 });
 
@@ -613,7 +615,7 @@ test('every chrome-local selector is admitted without the host vocabulary and ha
   // that same state, PROPERTIESCLOSE closes the properties window and LAYERCLOSE
   // closes the layers palette. All nine are answered by the chrome before the
   // router and none needs a document.
-  assert.deepEqual([...LOCAL_CHROME_COMMANDS].sort(), ['ABOUT', 'CLEANSCREENOFF', 'CLEANSCREENON', 'FONTS', 'LAYER', 'LAYERCLOSE', 'PROPERTIES', 'PROPERTIESCLOSE', 'RESOURCES']);
+  assert.deepEqual([...LOCAL_CHROME_COMMANDS].sort(), ['ABOUT', 'CLASSICLAYER', 'CLEANSCREENOFF', 'CLEANSCREENON', 'COMMANDLINE', 'COMMANDLINEHIDE', 'DSETTINGS', 'FONTS', 'LAYER', 'LAYERCLOSE', 'PROPERTIES', 'PROPERTIESCLOSE', 'QUICKPROPERTIES', 'RESOURCES']);
   for (const id of LOCAL_CHROME_COMMANDS) {
     assert.equal(isLocalChromeCommand(id), true, id);
     assert.equal(isLocalChromeCommand(id.toLowerCase()), true, id);

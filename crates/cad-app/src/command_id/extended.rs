@@ -31,10 +31,11 @@
 //!   `write_unsupported` diagnostic, never an invented value.
 //! * **Named refusals** (`HYPERLINKOPTIONS`, `INPUTSEARCHOPTIONS`,
 //!   `-INPUTSEARCHOPTIONS`, `SIGVALIDATE`, `BASE`, `LIMITS`,
-//!   `VIEWPLOTDETAILS`, `VPLAYER`, `MVIEW`, `PSBSCALE`, `PSTSCALE`,
+//!   `VIEWPLOTDETAILS`, `VPLAYER`, `PSBSCALE`, `PSTSCALE`,
 //!   `MVSETUP`): `CadError::Unsupported` with a stable reason string, because
 //!   the feature has no storage model or no API in this build. A refusal writes
-//!   nothing, bumps no revision and records no history.
+//!   nothing, bumps no revision and records no history. (`MVIEW` graduated to a
+//!   real Wave 13 viewport write and is no longer a refusal.)
 //!
 //! # Wave 3 (2026-11-09)
 //!
@@ -130,6 +131,8 @@
 //! `TABLET`, `TASKBAR`, `REINIT`, `SYSWINDOWS`, `MENU`, `RIBBON`) for the absent
 //! UCS/tablet/menu models and host-owned chrome. All Viewer-legal.
 
+mod selectors;
+
 /// One payload-free command in the extended wrapper batches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtendedCommandId {
@@ -212,7 +215,8 @@ pub enum ExtendedCommandId {
     ViewPlotDetails,
     /// `VPLAYER`: no per-viewport layer state.
     VPlayer,
-    /// `MVIEW`: no viewport creation API.
+    /// `MVIEW`: append one rectangular paper viewport to the active layout from
+    /// a two-corner `Points` payload (Work-only write).
     MView,
     /// `PSBSCALE`: no viewport scale write API.
     PsbScale,
@@ -553,442 +557,418 @@ pub enum ExtendedCommandId {
     SysWindows,
     Menu,
     Ribbon,
+
+    // Wave 9: 2D draw/modify routes, real edits, and named refusals.
+    /// `ARRAY`: route a typed array payload to the existing ARRAYRECT/ARRAYPOLAR planner; no legacy dialog.
+    Array,
+    /// `-ARRAY`: the command-line spelling of the same array router.
+    DashArray,
+    /// `ARRAYCLASSIC`: the legacy dialog is NOT IMPLEMENTED; routes to the ARRAY planner when a typed payload is supplied.
+    ArrayClassic,
+    /// `ARCTEXT`: text-along-arc is NOT IMPLEMENTED (no combined arc+text payload model).
+    ArcText,
+    /// `BLEND`: one cubic SPLINE bridging two open LINE/POLYLINE/ARC ends; tangents from the source curves.
+    Blend,
+    /// `BREAKLINE`: one open polyline with a break symbol between two picked points.
+    BreakLine,
+    /// `MLEADERALIGN`: multileader alignment is NOT IMPLEMENTED (no multileader alignment model).
+    MLeaderAlign,
+    /// `MLEADEREDIT`: adding/removing leader lines is NOT IMPLEMENTED (no leader-edit API).
+    MLeaderEdit,
+    /// `MLEADERCOLLECT`: collecting multileaders into one is NOT IMPLEMENTED (no collection/table model).
+    MLeaderCollect,
+    /// `TOLERANCE`: feature control frames are NOT IMPLEMENTED (no tolerance-object model).
+    Tolerance,
+    /// `DIM`: read-only router report listing the implemented DIM* creation commands; no dimension is created.
+    DimRouter,
+    /// `DIMARC`: arc-length dimensions are NOT IMPLEMENTED (the dimension domain has no arc-length kind).
+    DimArc,
+    /// `CAL`: expression evaluation is NOT IMPLEMENTED; reports the missing evaluator and writes nothing.
+    Calc,
+    /// `-BLOCK`: the command-line spelling of `BLOCK`; re-dispatches to the existing block-definition path.
+    DashBlock,
+    /// `-BOUNDARY`: the command-line spelling of `BOUNDARY`; re-dispatches to the existing boundary path.
+    DashBoundary,
+    /// `-INSERT`: the command-line spelling of `INSERT`; re-dispatches to the existing block-insert path.
+    DashInsert,
+    /// `-HATCH`: the command-line spelling of `HATCH`; re-dispatches to the existing hatch path.
+    DashHatch,
+    /// `-HATCHEDIT`: the command-line spelling of `HATCHEDIT`; re-dispatches to the existing hatch-edit path.
+    DashHatchEdit,
+    /// `EXOFFSET`: the Express offset name; re-dispatches to the existing OFFSET planner.
+    ExOffset,
+    /// `DIMEX`: dimension-style export to an external file is NOT IMPLEMENTED (no file format model).
+    DimExport,
+    /// `DIMIM`: dimension-style import from an external file is NOT IMPLEMENTED (no file format model).
+    DimImport,
+    /// `SPACETRANS`: model/paper distance conversion is NOT IMPLEMENTED (no layout scale conversion API).
+    SpaceTrans,
+    /// `TXTEXP`: exploding text into polylines is NOT IMPLEMENTED (no font-outline-to-geometry path).
+    TextExplode,
+    /// `UPDATEFIELD`: fields are NOT IMPLEMENTED (no field model).
+    UpdateField,
+    /// `UNITS`: read-only report of the session display-format token; the full UNITS dialog is NOT IMPLEMENTED.
+    Units,
+
+    // Wave 10: layer/view/session reports and named refusals.
+    /// `-UNITS`: the command-line spelling of the read-only UNITS report.
+    DashUnits,
+    /// `-LAYER`: read-only layer-table report (name/on/off/frozen/locked/current); mutations are NOT IMPLEMENTED.
+    DashLayer,
+    /// `LAYERSTATESAVE`: with a `LayerState::Save` payload it routes to the existing layer-state store; otherwise it reports the missing dialog.
+    LayerStateSave,
+    /// `NEWVIEW`: with a `View::Save` payload it routes to the existing named-view store; otherwise it reports the missing window-name prompt.
+    NewView,
+    /// `-SCALELISTEDIT`: read-only scale-list report; the write is NOT IMPLEMENTED.
+    DashScaleListEdit,
+    /// `LWEIGHT`: read-only report of the session lineweight-display token; the LWEIGHT dialog is NOT IMPLEMENTED.
+    LineWeight,
+    /// `-LWEIGHT`: the command-line spelling of the same lineweight-display report.
+    DashLineWeight,
+    /// `COLOR`: read-only report of the session current-colour token; the colour dialog is NOT IMPLEMENTED.
+    Color,
+    /// `-COLOR`: the command-line spelling of the same current-colour report.
+    DashColor,
+    /// `HELP`: the help system is host-owned and NOT IMPLEMENTED in this build.
+    Help,
+    /// `CLASSICINSERT`: the classic insert dialog is NOT IMPLEMENTED; use INSERT.
+    ClassicInsert,
+    /// `CLASSICGROUP`: the classic group dialog is NOT IMPLEMENTED; use GROUP.
+    ClassicGroup,
+    /// `FILETAB`: file-tab chrome is host-owned; this build has no file-tab model.
+    FileTab,
+    /// `FILETABCLOSE`: file-tab chrome is host-owned; this build has no file-tab model.
+    FileTabClose,
+    /// `HIDEPALETTES`: palette chrome is host-owned; no global palette-visibility model.
+    HidePalettes,
+    /// `SHOWPALETTES`: palette chrome is host-owned; no global palette-visibility model.
+    ShowPalettes,
+    /// `RIBBONCLOSE`: ribbon chrome is host-owned; use RIBBON or the host affordance.
+    RibbonClose,
+    /// `GOTOSTART`: switching to the start tab is host-owned and NOT IMPLEMENTED by the router.
+    GoToStart,
+    /// `COPYHIST`: the session stores no command-history text; the UI command log owns it, so nothing is copied.
+    CopyHist,
+    /// `TRANSPARENCY`: image transparency is NOT IMPLEMENTED (no image-transparency model).
+    Transparency,
+
+    // Wave 11: 3D/mesh/surface commands. 3D is lower priority; every name is a
+    // stable named refusal (Viewer-legal).
+    /// `3DALIGN`: 3D align: 3D alignment is not modeled; the 2D ALIGN path is the supported one.
+    ThreeDAlign,
+    /// `3DARRAY`: 3D array: 3D arrays are not modeled; use the 2D ARRAY/ARRAYRECT/ARRAYPOLAR paths.
+    ThreeDArray,
+    /// `3DCLIP`: 3D clip: no 3D clipping-plane model.
+    ThreeDClip,
+    /// `3DCORBIT`: continuous 3D orbit: no orbit controller is implemented.
+    ThreeDCorbit,
+    /// `3DDISTANCE`: interactive 3D distance: no 3D distance navigation is implemented.
+    ThreeDDistance,
+    /// `3DDWF`: DWF export: DWF/DWFx export is not implemented; use PLOT for SVG/PDF.
+    ThreeDDwf,
+    /// `3DEDITBAR`: 3D edit bar: no NURBS/spline edit bar.
+    ThreeDEditBar,
+    /// `3DFACE`: 3D face: no 3DFACE entity model.
+    ThreeDFace,
+    /// `3DFLY`: 3D fly: no fly navigation is implemented.
+    ThreeDFly,
+    /// `3DFORBIT`: free 3D orbit: no orbit controller is implemented.
+    ThreeDForbit,
+    /// `3DMESH`: 3D mesh: no free-form mesh creation model.
+    ThreeDMesh,
+    /// `3DMOVE`: 3D move: no 3D move gizmo.
+    ThreeDMove,
+    /// `3DORBIT`: 3D orbit: no interactive orbit controller; use ORBIT for the implemented camera path.
+    ThreeDOrbit,
+    /// `3DORBITCTR`: 3D orbit center: no orbit-center model.
+    ThreeDOrbitCtr,
+    /// `-3DOSNAP`: 3D object snap: no 3D object-snap model.
+    Dash3DOsnap,
+    /// `3DOSNAP`: 3D object snap: no 3D object-snap model.
+    ThreeDObjectSnap,
+    /// `3DPAN`: 3D pan: no 3D pan navigation is implemented.
+    ThreeDPan,
+    /// `3DPOLY`: 3D polyline: no 3D polyline entity model.
+    ThreeDPoly,
+    /// `3DPRINT`: 3D print: no 3D print model.
+    ThreeDPrint,
+    /// `3DPRINTSERVICE`: 3D print service: no STL export or print service.
+    ThreeDPrintService,
+    /// `3DROTATE`: 3D rotate: no 3D rotate gizmo.
+    ThreeDRotate,
+    /// `3DSCALE`: 3D scale: no 3D scale gizmo.
+    ThreeDScale,
+    /// `3DSWIVEL`: 3D swivel: no swivel navigation is implemented.
+    ThreeDSwivel,
+    /// `3DWALK`: 3D walk: no walk navigation is implemented.
+    ThreeDWalk,
+    /// `3DZOOM`: 3D zoom: no perspective 3D zoom navigation.
+    ThreeDZoom,
+
+    // Wave 12: file/import/export/extension commands. Every name is a stable
+    // named refusal (Viewer-legal).
+    /// `3DSIN`: 3DS import is not implemented.
+    ThreeDsIn,
+    /// `ACISIN`: ACIS (SAT) import is not implemented.
+    AcisIn,
+    /// `ACISOUT`: ACIS (SAT) export is not implemented.
+    AcisOut,
+    /// `BMPOUT`: raster BMP export is not implemented; use PLOT for vector SVG/PDF.
+    BmpOut,
+    /// `JPGOUT`: raster JPEG export is not implemented; use PLOT for vector SVG/PDF.
+    JpgOut,
+    /// `PNGOUT`: raster PNG export is not implemented; use PLOT for vector SVG/PDF.
+    PngOut,
+    /// `TIFOUT`: raster TIFF export is not implemented; use PLOT for vector SVG/PDF.
+    TifOut,
+    /// `WMFIN`: Windows metafile import is not implemented.
+    WmfIn,
+    /// `WMFOUT`: Windows metafile export is not implemented.
+    WmfOut,
+    /// `IGESIMPORT`: IGES import is not implemented.
+    IgesImport,
+    /// `IGESEXPORT`: IGES export is not implemented.
+    IgesExport,
+    /// `STLOUT`: STL export is not implemented.
+    StlOut,
+    /// `IMPORT`: the generic IMPORT picker is not implemented.
+    ImportFile,
+    /// `EXPORTTOAUTOCAD`: exporting to another AutoCAD version is not implemented.
+    ExportToAutoCad,
+    /// `DWGCONVERT`: batch DWG conversion is not implemented.
+    DwgConvert,
+    /// `PLT2DWG`: HPGL (PLT) import is not implemented.
+    Plt2Dwg,
+    /// `DXBIN`: DXB import is not implemented.
+    DxbIn,
+    /// `APPLOAD`: no plug-in/application loader model.
+    AppLoad,
+    /// `ARX`: no ObjectARX loader model.
+    Arx,
+    /// `NETLOAD`: no .NET application loader model.
+    NetLoad,
+    /// `VBAIDE`: no VBA IDE model.
+    VbaIde,
+    /// `VBALOAD`: no VBA loader model.
+    VbaLoad,
+    /// `VBARUN`: no VBA runtime.
+    VbaRun,
+    /// `VBAUNLOAD`: no VBA runtime.
+    VbaUnload,
+    /// `SCRIPT`: no script-file runner.
+    Script,
+
+    // Wave 13: 2D/annotation/table/page-setup surfaces.
+    /// `PAGESETUP`: with no payload, report each layout's stored plot settings;
+    /// with a typed `Layout(PageSetup)` payload, write one authored page setup
+    /// (Work-only).
+    PageSetup,
+    /// `-PAGESETUP`: the command-line spelling of the same report/write.
+    DashPageSetup,
+    /// `PSETUPIN`: with a typed `Layout(PageSetupIn)` payload, copy a stored page
+    /// setup between layouts of this drawing (Work-only); there is no
+    /// cross-drawing transfer in this build.
+    PageSetupIn,
+    /// `-PSETUPIN`: the command-line spelling of the same page-setup copy.
+    DashPageSetupIn,
+    /// `PLOTSTYLE`: named plot styles are NOT IMPLEMENTED (no CTB/STB table).
+    PlotStyleList,
+    /// `-PLOTSTYLE`: the command-line spelling of the unsupported plot-style list.
+    DashPlotStyleList,
+    /// `CONVERTPSTYLES`: plot-style conversion is NOT IMPLEMENTED (no CTB/STB model).
+    ConvertPlotStyles,
+    /// `CONVERTCTB`: CTB conversion is NOT IMPLEMENTED (no CTB/STB model).
+    ConvertCtb,
+    /// `CONVERTPOLY`: read-only report that this build stores one LWPOLYLINE representation; no legacy polyline conversion is performed.
+    ConvertPoly,
+    /// `CONVERT`: generic object conversion is NOT IMPLEMENTED.
+    ConvertGeneric,
+    /// `TABLE`: no table entity model is implemented.
+    TableCreate,
+    /// `-TABLE`: the command-line spelling of the unsupported table creation.
+    DashTable,
+    /// `TABLEDIT`: no table entity model is implemented.
+    TableEdit,
+    /// `TABLEEXPORT`: no table entity model is implemented.
+    TableExport,
+    /// `TABLESTYLE`: no table-style model is implemented.
+    TableStyleList,
+    /// `TINSERT`: no table entity model is implemented.
+    TableInsert,
+    /// `MATCHCELL`: no table entity model is implemented.
+    MatchCell,
+    /// `FIELD`: fields are NOT IMPLEMENTED (no field model).
+    Field,
+    /// `RTEXT`: remote text is NOT IMPLEMENTED (no RTEXT model).
+    RText,
+    /// `RTEDIT`: remote text is NOT IMPLEMENTED (no RTEXT model).
+    RTextEdit,
+    /// `SPELL`: no spell-check dictionary or model is implemented.
+    Spell,
+    /// `SUPERHATCH`: image/block-based super-hatching is NOT IMPLEMENTED.
+    SuperHatch,
+    /// `ALIGNSPACE`: viewport alignment is NOT IMPLEMENTED (no viewport alignment API).
+    AlignSpace,
+    /// `VPSYNC`: viewport synchronization is NOT IMPLEMENTED (no viewport group model).
+    VpSync,
+    /// `LAYTRANS`: layer translation standards are NOT IMPLEMENTED.
+    LayTrans,
+
+    // Wave 14: stable named refusals (Viewer-legal).
+    /// `BOX`: 3D solid primitives are not implemented.
+    Box,
+    /// `CONE`: 3D solid primitives are not implemented.
+    Cone,
+    /// `CYLINDER`: 3D solid primitives are not implemented.
+    Cylinder,
+    /// `SPHERE`: 3D solid primitives are not implemented.
+    Sphere,
+    /// `TORUS`: 3D solid primitives are not implemented.
+    Torus,
+    /// `WEDGE`: 3D solid primitives are not implemented.
+    Wedge,
+    /// `PYRAMID`: 3D solid primitives are not implemented.
+    Pyramid,
+    /// `POLYSOLID`: 3D solid primitives are not implemented.
+    PolySolid,
+    /// `EXTRUDE`: 3D extrusion is not implemented.
+    Extrude,
+    /// `REVOLVE`: 3D revolution is not implemented.
+    Revolve,
+    /// `SWEEP`: 3D sweep is not implemented.
+    Sweep,
+    /// `LOFT`: 3D loft is not implemented.
+    Loft,
+    /// `INTERSECT`: no 3D boolean model.
+    Intersect,
+    /// `UNION`: no 3D boolean model.
+    Union,
+    /// `SUBTRACT`: no 3D boolean model.
+    Subtract,
+    /// `SLICE`: no 3D slicing model.
+    Slice,
+    /// `THICKEN`: no surface-to-solid model.
+    Thicken,
+    /// `PRESSPULL`: no press/pull model.
+    PressPull,
+    /// `IMPRINT`: no 3D imprint model.
+    Imprint,
+    /// `OFFSETEDGE`: no 3D face/edge offset model.
+    OffsetEdge,
+    /// `CHAMFEREDGE`: no 3D edge chamfer model.
+    ChamferEdge,
+    /// `FILLETEDGE`: no 3D edge fillet model.
+    FilletEdge,
+    /// `EDGE`: no 3D face-edge visibility model.
+    Edge,
+    /// `MIRROR3D`: no 3D mirror-plane model.
+    Mirror3D,
+    /// `ROTATE3D`: no 3D rotate-axis model.
+    Rotate3D,
+
+    // Wave 15: stable named refusals (Viewer-legal).
+    /// `SURFBLEND`: surface blending is not implemented.
+    SurfBlend,
+    /// `SURFEXTEND`: surface extension is not implemented.
+    SurfExtend,
+    /// `SURFEXTRACTCURVE`: surface curve extraction is not implemented.
+    SurfExtractCurve,
+    /// `SURFFILLET`: surface filleting is not implemented.
+    SurfFillet,
+    /// `SURFNETWORK`: surface network creation is not implemented.
+    SurfNetwork,
+    /// `SURFOFFSET`: surface offset is not implemented.
+    SurfOffset,
+    /// `SURFPATCH`: surface patching is not implemented.
+    SurfPatch,
+    /// `SURFSCULPT`: surface sculpting is not implemented.
+    SurfSculpt,
+    /// `SURFTRIM`: surface trimming is not implemented.
+    SurfTrim,
+    /// `SURFUNTRIM`: surface untrimming is not implemented.
+    SurfUntrim,
+    /// `MESH`: free-form mesh creation is not implemented.
+    MeshCreate,
+    /// `MESHCAP`: mesh capping is not implemented.
+    MeshCap,
+    /// `MESHCOLLAPSE`: mesh collapse is not implemented.
+    MeshCollapse,
+    /// `MESHCREASE`: mesh creasing is not implemented.
+    MeshCrease,
+    /// `MESHEXTRUDE`: mesh extrusion is not implemented.
+    MeshExtrude,
+    /// `MESHMERGE`: mesh merge is not implemented.
+    MeshMerge,
+    /// `MESHOPTIONS`: no mesh tessellation options model.
+    MeshOptions,
+    /// `MESHPRIMITIVEOPTIONS`: no mesh primitive options model.
+    MeshPrimitiveOptions,
+    /// `MESHREFINE`: mesh refinement is not implemented.
+    MeshRefine,
+    /// `MESHSMOOTH`: mesh smoothing conversion is not implemented.
+    MeshSmooth,
+    /// `MESHSMOOTHLESS`: no mesh smoothness level model.
+    MeshSmoothLess,
+    /// `MESHSMOOTHMORE`: no mesh smoothness level model.
+    MeshSmoothMore,
+    /// `MESHSPIN`: mesh edge spin is not implemented.
+    MeshSpin,
+    /// `MESHSPLIT`: mesh face split is not implemented.
+    MeshSplit,
+    /// `MESHUNCREASE`: mesh uncreasing is not implemented.
+    MeshUncrease,
+
+    // Wave 16: stable named refusals (Viewer-legal).
+    /// `IMAGE`: raster image references are not implemented.
+    Image,
+    /// `-IMAGE`: raster image references are not implemented.
+    DashImage,
+    /// `IMAGEATTACH`: raster image references are not implemented.
+    ImageAttach,
+    /// `IMAGECLIP`: no image clip model.
+    ImageClip,
+    /// `IMAGEADJUST`: no image adjustment model.
+    ImageAdjust,
+    /// `-IMAGEADJUST`: no image adjustment model.
+    DashImageAdjust,
+    /// `IMAGEQUALITY`: no image display-quality model.
+    ImageQuality,
+    /// `IMAGEAPP`: no external image-editor association model.
+    ImageApp,
+    /// `IMAGEASYNCWAIT`: no asynchronous image loading model.
+    ImageAsyncWait,
+    /// `IMAGEEDIT`: no external image-editor model.
+    ImageEdit,
+    /// `CLASSICIMAGE`: no image manager; use IMAGE.
+    ClassicImage,
+    /// `PDFATTACH`: PDF underlays are not implemented.
+    PdfAttach,
+    /// `-PDFATTACH`: PDF underlays are not implemented.
+    DashPdfAttach,
+    /// `PDFCLIP`: no PDF underlay clip model.
+    PdfClip,
+    /// `PDFLAYERS`: no PDF underlay layer model.
+    PdfLayers,
+    /// `PDFADJUST`: no PDF underlay adjustment model.
+    PdfAdjust,
+    /// `PDFIMPORT`: PDF geometry import is not implemented.
+    PdfImport,
+    /// `-PDFIMPORT`: PDF geometry import is not implemented.
+    DashPdfImport,
+    /// `PDFSHXTEXT`: PDF SHX text conversion is not implemented.
+    PdfShxText,
+    /// `-PDFSHXTEXT`: PDF SHX text conversion is not implemented.
+    DashPdfShxText,
+    /// `DGNATTACH`: DGN underlays are not implemented.
+    DgnAttach,
+    /// `-DGNATTACH`: DGN underlays are not implemented.
+    DashDgnAttach,
+    /// `DGNCLIP`: no DGN underlay clip model.
+    DgnClip,
+    /// `DGNLAYERS`: no DGN underlay layer model.
+    DgnLayers,
+    /// `DGNADJUST`: no DGN underlay adjustment model.
+    DgnAdjust,
 }
 
-impl ExtendedCommandId {
-    /// The stable uppercase selector (the name in `cad-ui-core`'s
-    /// `COMMAND_TABLE`).
-    pub fn selector(self) -> &'static str {
-        match self {
-            Self::QText => "QTEXT",
-            Self::Fill => "FILL",
-            Self::TFrames => "TFRAMES",
-            Self::RegenAuto => "REGENAUTO",
-            Self::IsoDraft => "ISODRAFT",
-            Self::BlockCount => "BCOUNT",
-            Self::CountObjects => "COUNT",
-            Self::EditTime => "EDITTIME",
-            Self::JulianDate => "JULIAN",
-            Self::XList => "XLIST",
-            Self::DragMode => "DRAGMODE",
-            Self::Aperture => "APERTURE",
-            Self::IsoPlane => "ISOPLANE",
-            Self::HighlightNew => "HIGHLIGHTNEW",
-            Self::TraySettings => "TRAYSETTINGS",
-            Self::TextScreen => "TEXTSCR",
-            Self::GraphScreen => "GRAPHSCR",
-            Self::FindInclude => "FINDINCLUDE",
-            Self::FindMatch => "FINDMATCH",
-            Self::RevCloudProperties => "REVCLOUDPROPERTIES",
-            Self::SysVarMonitor => "SYSVARMONITOR",
-            Self::SysVarDialog => "SYSVDLG",
-            Self::ViewTransitionOptions => "VTOPTIONS",
-            Self::AliasEdit => "ALIASEDIT",
-            Self::WhoHas => "WHOHAS",
-            Self::AcadInfo => "ACADINFO",
-            Self::PointType => "PTYPE",
-            Self::ScaleListEdit => "SCALELISTEDIT",
-            Self::HyperlinkOptions => "HYPERLINKOPTIONS",
-            Self::InputSearchOptions => "INPUTSEARCHOPTIONS",
-            Self::DashInputSearchOptions => "-INPUTSEARCHOPTIONS",
-            Self::SigValidate => "SIGVALIDATE",
-            Self::BasePoint => "BASE",
-            Self::DrawingLimits => "LIMITS",
-            Self::ViewPlotDetails => "VIEWPLOTDETAILS",
-            Self::VPlayer => "VPLAYER",
-            Self::MView => "MVIEW",
-            Self::PsbScale => "PSBSCALE",
-            Self::PstScale => "PSTSCALE",
-            Self::MvSetup => "MVSETUP",
-            Self::Mspace => "MSPACE",
-            Self::Pspace => "PSPACE",
-            Self::TextStyle => "STYLE",
-            Self::DashStyle => "-STYLE",
-            Self::MLeaderStyleList => "MLEADERSTYLE",
-            Self::BlockList => "BLOCK?",
-            Self::DimReassoc => "DIMREASSOC",
-            Self::DimReassociate => "DIMREASSOCIATE",
-            Self::DimJogged => "DIMJOGGED",
-            Self::DimInspect => "DIMINSPECT",
-            Self::DashDimInspect => "-DIMINSPECT",
-            Self::AnnoReset => "ANNORESET",
-            Self::AnnoUpdate => "ANNOUPDATE",
-            Self::ObjectScale => "OBJECTSCALE",
-            Self::DashObjectScale => "-OBJECTSCALE",
-            Self::QlAttach => "QLATTACH",
-            Self::QlAttachSet => "QLATTACHSET",
-            Self::QlDetachSet => "QLDETACHSET",
-            Self::ArrayClose => "ARRAYCLOSE",
-            Self::ArrayEdit => "ARRAYEDIT",
-            Self::BlockEditor => "BEDIT",
-            Self::DashBlockEditor => "-BEDIT",
-            Self::BlockEditorClose => "BCLOSE",
-            Self::BCycleOrder => "BCYCLEORDER",
-            Self::BGripSet => "BGRIPSET",
-            Self::BEditorSettings => "BESETTINGS",
-            Self::BTestBlock => "BTESTBLOCK",
-            Self::LayerPalette => "LAYERPALETTE",
-            Self::ConstraintBar => "CONSTRAINTBAR",
-            Self::ConstraintSettings => "CONSTRAINTSETTINGS",
-            Self::CenterMark => "CENTERMARK",
-            Self::CenterLine => "CENTERLINE",
-            Self::NCopy => "NCOPY",
-            Self::CopyToLayer => "COPYTOLAYER",
-            Self::DashCopyToLayer => "-COPYTOLAYER",
-            Self::CDOrder => "CDORDER",
-            Self::Flatten => "FLATTEN",
-            Self::XPlode => "XPLODE",
-            Self::BTrim => "BTRIM",
-            Self::BExtend => "BEXTEND",
-            Self::Change => "CHANGE",
-            Self::ChProp => "CHPROP",
-            Self::BScale => "BSCALE",
-            Self::MInsert => "MINSERT",
-            Self::BlockReplace => "BLOCKREPLACE",
-            Self::BReplace => "BREPLACE",
-            Self::DashBReplace => "-BREPLACE",
-            Self::SplineEdit => "SPLINEDIT",
-            Self::MlEdit => "MLEDIT",
-            Self::DashMlEdit => "-MLEDIT",
-            Self::Burst => "BURST",
-            Self::Clip => "CLIP",
-            Self::ClipIt => "CLIPIT",
-            Self::Region => "REGION",
-            Self::AddSelected => "ADDSELECTED",
-            Self::WBlock => "WBLOCK",
-            Self::DashWBlock => "-WBLOCK",
-            Self::BSave => "BSAVE",
-            Self::BSaveAs => "BSAVEAS",
-            Self::ChSpace => "CHSPACE",
-            Self::AttDisp => "ATTDISP",
-            Self::BattMan => "BATTMAN",
-            Self::BattOrder => "BATTORDER",
-            Self::XRef => "XREF",
-            Self::DashXRef => "-XREF",
-            Self::ExternalReferences => "EXTERNALREFERENCES",
-            Self::ExternalReferencesClose => "EXTERNALREFERENCESCLOSE",
-            Self::AttDef => "ATTDEF",
-            Self::DashAttDef => "-ATTDEF",
-            Self::AttEdit => "ATTEDIT",
-            Self::DashAttEdit => "-ATTEDIT",
-            Self::AttIpEdit => "ATTIPEDIT",
-            Self::AttIn => "ATTIN",
-            Self::AttOut => "ATTOUT",
-            Self::AttExt => "ATTEXT",
-            Self::DashAttExt => "-ATTEXT",
-            Self::EAttEdit => "EATTEDIT",
-            Self::EAttExt => "EATTEXT",
-            Self::DashEAttExt => "-EATTEXT",
-            Self::AttRedef => "ATTREDEF",
-            Self::AttSync => "ATTSYNC",
-            Self::Gatte => "GATTE",
-            Self::XData => "XDATA",
-            Self::XBind => "XBIND",
-            Self::DashXBind => "-XBIND",
-            Self::XAttach => "XATTACH",
-            Self::Attach => "ATTACH",
-            Self::DashAttach => "-ATTACH",
-            Self::XOpen => "XOPEN",
-            Self::ClassicXRef => "CLASSICXREF",
-            Self::DwgLog => "DWGLOG",
-            Self::LogFileOn => "LOGFILEON",
-            Self::LogFileOff => "LOGFILEOFF",
-            Self::DwgProps => "DWGPROPS",
-            Self::DwfFormat => "DWFFORMAT",
-            Self::ExportPdf => "EXPORTPDF",
-            Self::SaveAll => "SAVEALL",
-            Self::QNew => "QNEW",
-            Self::Revert => "REVERT",
-            Self::CloseAll => "CLOSEALL",
-            Self::CloseAllOther => "CLOSEALLOTHER",
-            Self::QQuit => "QQUIT",
-            Self::Quit => "QUIT",
-            Self::Propulate => "PROPULATE",
-            Self::PlotterManager => "PLOTTERMANAGER",
-            Self::StylesManager => "STYLESMANAGER",
-            Self::ExportSettings => "EXPORTSETTINGS",
-            Self::Preview => "PREVIEW",
-            Self::ExportLayout => "EXPORTLAYOUT",
-            Self::PlotStamp => "PLOTSTAMP",
-            Self::DashPlotStamp => "-PLOTSTAMP",
-            Self::DashPlot => "-PLOT",
-            Self::DashExport => "-EXPORT",
-            Self::ETransmit => "ETRANSMIT",
-            Self::DashETransmit => "-ETRANSMIT",
-            Self::Archive => "ARCHIVE",
-            Self::DashArchive => "-ARCHIVE",
-            Self::Publish => "PUBLISH",
-            Self::DashPublish => "-PUBLISH",
-            Self::AutoPublish => "AUTOPUBLISH",
-            Self::BvState => "BVSTATE",
-            Self::DashBvState => "-BVSTATE",
-            Self::BAction => "BACTION",
-            Self::BActionBar => "BACTIONBAR",
-            Self::BActionSet => "BACTIONSET",
-            Self::BActionTool => "BACTIONTOOL",
-            Self::BAssociate => "BASSOCIATE",
-            Self::BAuthorPalette => "BAUTHORPALETTE",
-            Self::BAuthorPaletteClose => "BAUTHORPALETTECLOSE",
-            Self::BConstruction => "BCONSTRUCTION",
-            Self::BCParameter => "BCPARAMETER",
-            Self::DashBCParameter => "-BCPARAMETER",
-            Self::BParameter => "BPARAMETER",
-            Self::BLookupTable => "BLOOKUPTABLE",
-            Self::BTable => "BTABLE",
-            Self::BvHide => "BVHIDE",
-            Self::BvShow => "BVSHOW",
-            Self::ResetBlock => "RESETBLOCK",
-            Self::AutoConstrain => "AUTOCONSTRAIN",
-            Self::DelConstraint => "DELCONSTRAINT",
-            Self::DimConstraint => "DIMCONSTRAINT",
-            Self::GeomConstraint => "GEOMCONSTRAINT",
-            Self::DcAligned => "DCALIGNED",
-            Self::DcAngular => "DCANGULAR",
-            Self::DcConvert => "DCCONVERT",
-            Self::DcDiameter => "DCDIAMETER",
-            Self::DcDisplay => "DCDISPLAY",
-            Self::DcForm => "DCFORM",
-            Self::DcHorizontal => "DCHORIZONTAL",
-            Self::DcLinear => "DCLINEAR",
-            Self::Elev => "ELEV",
-            Self::UcsIcon => "UCSICON",
-            Self::Ucs => "UCS",
-            Self::UcsMan => "UCSMAN",
-            Self::Tablet => "TABLET",
-            Self::TaskBar => "TASKBAR",
-            Self::Reinit => "REINIT",
-            Self::SysWindows => "SYSWINDOWS",
-            Self::Menu => "MENU",
-            Self::Ribbon => "RIBBON",
-        }
-    }
-
-    /// Whether the command needs Work mode.
-    ///
-    /// Every variant in these batches is session-only, a read-only report or a
-    /// named refusal, so it is Viewer-legal. This stays a method (rather than a
-    /// constant) so a later write-capable extended command can declare its own
-    /// authorization here.
-    pub fn requires_work_mode(self) -> bool {
-        matches!(
-            self,
-            Self::CenterMark
-                | Self::CenterLine
-                | Self::NCopy
-                | Self::CopyToLayer
-                | Self::DashCopyToLayer
-                | Self::CDOrder
-                | Self::Flatten
-                | Self::XPlode
-                | Self::BTrim
-                | Self::BExtend
-                | Self::Change
-                | Self::ChProp
-        )
-    }
-
-    /// Every variant in declaration order; the vocabulary contract test uses it
-    /// to prove the table and the enum cannot drift.
-    pub const ALL: &'static [ExtendedCommandId] = &[
-        Self::QText,
-        Self::Fill,
-        Self::TFrames,
-        Self::RegenAuto,
-        Self::IsoDraft,
-        Self::BlockCount,
-        Self::CountObjects,
-        Self::EditTime,
-        Self::JulianDate,
-        Self::XList,
-        Self::DragMode,
-        Self::Aperture,
-        Self::IsoPlane,
-        Self::HighlightNew,
-        Self::TraySettings,
-        Self::TextScreen,
-        Self::GraphScreen,
-        Self::FindInclude,
-        Self::FindMatch,
-        Self::RevCloudProperties,
-        Self::SysVarMonitor,
-        Self::SysVarDialog,
-        Self::ViewTransitionOptions,
-        Self::AliasEdit,
-        Self::WhoHas,
-        Self::AcadInfo,
-        Self::PointType,
-        Self::ScaleListEdit,
-        Self::HyperlinkOptions,
-        Self::InputSearchOptions,
-        Self::DashInputSearchOptions,
-        Self::SigValidate,
-        Self::BasePoint,
-        Self::DrawingLimits,
-        Self::ViewPlotDetails,
-        Self::VPlayer,
-        Self::MView,
-        Self::PsbScale,
-        Self::PstScale,
-        Self::MvSetup,
-        Self::Mspace,
-        Self::Pspace,
-        Self::TextStyle,
-        Self::DashStyle,
-        Self::MLeaderStyleList,
-        Self::BlockList,
-        Self::DimReassoc,
-        Self::DimReassociate,
-        Self::DimJogged,
-        Self::DimInspect,
-        Self::DashDimInspect,
-        Self::AnnoReset,
-        Self::AnnoUpdate,
-        Self::ObjectScale,
-        Self::DashObjectScale,
-        Self::QlAttach,
-        Self::QlAttachSet,
-        Self::QlDetachSet,
-        Self::ArrayClose,
-        Self::ArrayEdit,
-        Self::BlockEditor,
-        Self::DashBlockEditor,
-        Self::BlockEditorClose,
-        Self::BCycleOrder,
-        Self::BGripSet,
-        Self::BEditorSettings,
-        Self::BTestBlock,
-        Self::LayerPalette,
-        Self::ConstraintBar,
-        Self::ConstraintSettings,
-        Self::CenterMark,
-        Self::CenterLine,
-        Self::NCopy,
-        Self::CopyToLayer,
-        Self::DashCopyToLayer,
-        Self::CDOrder,
-        Self::Flatten,
-        Self::XPlode,
-        Self::BTrim,
-        Self::BExtend,
-        Self::Change,
-        Self::ChProp,
-        Self::BScale,
-        Self::MInsert,
-        Self::BlockReplace,
-        Self::BReplace,
-        Self::DashBReplace,
-        Self::SplineEdit,
-        Self::MlEdit,
-        Self::DashMlEdit,
-        Self::Burst,
-        Self::Clip,
-        Self::ClipIt,
-        Self::Region,
-        Self::AddSelected,
-        Self::WBlock,
-        Self::DashWBlock,
-        Self::BSave,
-        Self::BSaveAs,
-        Self::ChSpace,
-        Self::AttDisp,
-        Self::BattMan,
-        Self::BattOrder,
-        Self::XRef,
-        Self::DashXRef,
-        Self::ExternalReferences,
-        Self::ExternalReferencesClose,
-        Self::AttDef,
-        Self::DashAttDef,
-        Self::AttEdit,
-        Self::DashAttEdit,
-        Self::AttIpEdit,
-        Self::AttIn,
-        Self::AttOut,
-        Self::AttExt,
-        Self::DashAttExt,
-        Self::EAttEdit,
-        Self::EAttExt,
-        Self::DashEAttExt,
-        Self::AttRedef,
-        Self::AttSync,
-        Self::Gatte,
-        Self::XData,
-        Self::XBind,
-        Self::DashXBind,
-        Self::XAttach,
-        Self::Attach,
-        Self::DashAttach,
-        Self::XOpen,
-        Self::ClassicXRef,
-        Self::DwgLog,
-        Self::LogFileOn,
-        Self::LogFileOff,
-        Self::DwgProps,
-        Self::DwfFormat,
-        Self::ExportPdf,
-        Self::SaveAll,
-        Self::QNew,
-        Self::Revert,
-        Self::CloseAll,
-        Self::CloseAllOther,
-        Self::QQuit,
-        Self::Quit,
-        Self::Propulate,
-        Self::PlotterManager,
-        Self::StylesManager,
-        Self::ExportSettings,
-        Self::Preview,
-        Self::ExportLayout,
-        Self::PlotStamp,
-        Self::DashPlotStamp,
-        Self::DashPlot,
-        Self::DashExport,
-        Self::ETransmit,
-        Self::DashETransmit,
-        Self::Archive,
-        Self::DashArchive,
-        Self::Publish,
-        Self::DashPublish,
-        Self::AutoPublish,
-        Self::BvState,
-        Self::DashBvState,
-        Self::BAction,
-        Self::BActionBar,
-        Self::BActionSet,
-        Self::BActionTool,
-        Self::BAssociate,
-        Self::BAuthorPalette,
-        Self::BAuthorPaletteClose,
-        Self::BConstruction,
-        Self::BCParameter,
-        Self::DashBCParameter,
-        Self::BParameter,
-        Self::BLookupTable,
-        Self::BTable,
-        Self::BvHide,
-        Self::BvShow,
-        Self::ResetBlock,
-        Self::AutoConstrain,
-        Self::DelConstraint,
-        Self::DimConstraint,
-        Self::GeomConstraint,
-        Self::DcAligned,
-        Self::DcAngular,
-        Self::DcConvert,
-        Self::DcDiameter,
-        Self::DcDisplay,
-        Self::DcForm,
-        Self::DcHorizontal,
-        Self::DcLinear,
-        Self::Elev,
-        Self::UcsIcon,
-        Self::Ucs,
-        Self::UcsMan,
-        Self::Tablet,
-        Self::TaskBar,
-        Self::Reinit,
-        Self::SysWindows,
-        Self::Menu,
-        Self::Ribbon,
-    ];
-}
+impl ExtendedCommandId {}

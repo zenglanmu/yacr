@@ -19,16 +19,14 @@
 //! * LINEs/ARCs/POLYLINEs (including the otherwise-invalid **LINE + ARC** mix)
 //!   that are contiguous and coplanar → POLYLINE;
 //! * pure SPLINE or pure ELLIPSE selections use the source rules;
-//! * a SPLINE mixed with LINEs/ARCs/POLYLINEs (and with other SPLINEs) →
-//!   **SPLINE**: every participant is converted to an exact rational NURBS piece
-//!   (LINE → degree-1 span, ARC → rational quadratic spans with
-//!   `w = cos(Δ/2)`, bulged POLYLINE segments → the same rational quadratic,
-//!   SPLINE → its own Bezier decomposition by exact knot insertion), elevated to
-//!   the common degree and welded C0 into one clamped spline. See
+//! * a SPLINE or ELLIPSE mixed with LINEs/ARCs/POLYLINEs (and with other
+//!   SPLINEs/ELLIPSEs) → **SPLINE**: every participant is converted to an exact
+//!   rational NURBS piece (LINE → degree-1 span, ARC → rational quadratic spans
+//!   with `w = cos(Δ/2)`, ELLIPSE elliptical arc → the affine image of the same
+//!   rational quadratic spans, bulged POLYLINE segments → the same rational
+//!   quadratic, SPLINE → its own Bezier decomposition by exact knot insertion),
+//!   elevated to the common degree and welded C0 into one clamped spline. See
 //!   `join_nurbs` for the exact construction;
-//! * an ELLIPSE mixed with other kinds is still `Unsupported`
-//!   (`join.multiple_spline_mix`): the elliptical NURBS conversion is not
-//!   implemented.
 //!
 //! Named refusals write nothing (the whole plan is resolved before the first
 //! write): `join.needs_two`, `join.mixed_kinds`, `join.not_collinear`,
@@ -214,6 +212,8 @@ impl Application {
                 label: "join entities".into(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

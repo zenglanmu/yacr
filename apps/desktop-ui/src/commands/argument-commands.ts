@@ -151,19 +151,24 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       .includes(argument.trim().toUpperCase()),
   }),
   /**
-   * `HATCHEDIT <option>` (AutoCAD 2026) is the typed v1 hatch edit. The four
+   * `HATCHEDIT <option>` (AutoCAD 2026) is the typed v1 hatch edit. The
    * implemented forms are `ANGLE <degrees>` (one finite signed decimal),
-   * `SCALE <factor>` (one finite decimal > 0), `SOLID` and `GRADIENT`. The bare
-   * `HATCHEDIT` is admitted by the base name and refused by the host with
-   * `hatchedit.needs_option`; every other AutoCAD dialog field (`Pattern`,
-   * `Color`, `Properties`, `Draw order`, boundary add/remove, associativity) is
-   * NOT IMPLEMENTED and is refused locally.
+   * `SCALE <factor>` (one finite decimal > 0), `SOLID`, `GRADIENT`,
+   * `ADDBOUNDARIES` and `REMOVEBOUNDARIES` (the other selected closed entities
+   * become loops, or the stored loops matching them are removed; one undo
+   * step). The bare `HATCHEDIT` is admitted by the base name and refused by the
+   * host with `hatchedit.needs_option`; every other AutoCAD dialog field
+   * (`Pattern`, `Color`, `Properties`, `Draw order`, associativity) is NOT
+   * IMPLEMENTED and is refused locally.
    */
   HATCHEDIT: Object.freeze({
     parse: (argument: string) => {
       const parts = argument.trim().toUpperCase().split(/\s+/).filter(part => part.length > 0);
       const [word, ...rest] = parts;
-      if (word === 'SOLID' || word === 'GRADIENT') return rest.length === 0;
+      if (word === 'SOLID' || word === 'GRADIENT' || word === 'ADDBOUNDARIES'
+        || word === 'REMOVEBOUNDARIES') {
+        return rest.length === 0;
+      }
       if (word === 'ANGLE') return rest.length === 1 && isSignedDecimal(rest[0]);
       if (word === 'SCALE') return rest.length === 1 && isPositiveSignedDecimal(rest[0]);
       return false;
@@ -426,6 +431,35 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return parts.length === 4 && isPositiveDecimal(parts[2]) && isPositiveDecimal(parts[3]);
     },
   }),
+  /**
+   * `PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]`:
+   * one authored page setup for an existing layout. `<layout>` and `<paper>` are
+   * single tokens (the host grammar boundary), the dimensions are positive
+   * decimals, the optional scale is two positive decimal components and the
+   * optional rotation is exactly one of the four quarter turns. `-PAGESETUP` is
+   * a distinct extended selector with the same grammar, not an alias.
+   */
+  PAGESETUP: Object.freeze({
+    parse: parsePageSetupArgument,
+  }),
+  '-PAGESETUP': Object.freeze({
+    parse: parsePageSetupArgument,
+  }),
+  /** `PSETUPIN <source-layout> <target-layout>`: same-drawing copy, two names. */
+  PSETUPIN: Object.freeze({
+    parse: (argument: string) => tokens(argument).length === 2,
+  }),
+  '-PSETUPIN': Object.freeze({
+    parse: (argument: string) => tokens(argument).length === 2,
+  }),
+  /** `MVIEW <minx> <miny> <maxx> <maxy>`: one non-degenerate rectangle. */
+  MVIEW: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      if (parts.length !== 4 || !parts.every(isSignedDecimal)) return false;
+      return Number(parts[0]) < Number(parts[2]) && Number(parts[1]) < Number(parts[3]);
+    },
+  }),
   VPORTS: Object.freeze({
     parse: parseVportsGrid,
   }),
@@ -571,6 +605,35 @@ function parseVportsGrid(argument: string): boolean {
   return parts.length === 2
     && /^[0-9]+$/.test(parts[0]) && /^[0-9]+$/.test(parts[1])
     && Number(parts[0]) >= 1 && Number(parts[1]) >= 1;
+}
+
+/**
+ * `PAGESETUP`/`-PAGESETUP`: `<layout> <paper> <width> <height> [<num>:<den>]
+ * [0|90|180|270]`.
+ *
+ * Mirrors the host parser's single-token names, positive paper dimensions, two
+ * positive scale components and four typed rotations. The optional tail is
+ * classified by the presence of `:` (a scale) or by being one of the four
+ * rotation words; a second occurrence of either is refused locally.
+ */
+function parsePageSetupArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  if (parts.length < 4 || parts.length > 6) return false;
+  if (!isPositiveDecimal(parts[2]) || !isPositiveDecimal(parts[3])) return false;
+  let scale = false;
+  let rotation = false;
+  for (const part of parts.slice(4)) {
+    if (part.includes(':')) {
+      if (scale) return false;
+      const ratio = part.split(':');
+      if (ratio.length !== 2 || !ratio.every(isPositiveDecimal)) return false;
+      scale = true;
+    } else {
+      if (rotation || !['0', '90', '180', '270'].includes(part)) return false;
+      rotation = true;
+    }
+  }
+  return true;
 }
 
 /** Whether `text` is one `x,y` pair of finite signed decimals. */

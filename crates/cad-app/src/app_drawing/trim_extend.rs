@@ -208,6 +208,8 @@ impl Application {
                 label: "trim entity".into(),
                 patches: vec![patch],
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -366,6 +368,8 @@ impl Application {
                 label: "extend entity".into(),
                 patches: vec![drawing_patch(target_id, Some(target_entity), Some(stored))],
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -627,6 +631,8 @@ impl Application {
                 label: label.to_string(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

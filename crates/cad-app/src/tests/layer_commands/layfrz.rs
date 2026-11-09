@@ -48,17 +48,42 @@ fn layfrz_freezes_every_distinct_selected_layer_and_preserves_other_attributes()
         "the all-viewports freeze does not touch the new-viewport flag"
     );
     assert!(!layer_attributes(&app, LayerId(0)).frozen);
-    // One `set_layer_attributes` per changed layer: two revision bumps.
+    // One `set_layer_attributes` per changed layer: two revision bumps, but the
+    // whole command is one undo step.
     assert_eq!(revision(&app), Revision(before.0 .0 + 2));
     assert_eq!(
         undo_depth(&app),
-        before.1,
-        "layer-table edits are not undoable"
+        before.1 + 1,
+        "one undo step for the whole layer batch"
     );
     assert!(outcome.changes.is_some());
     assert_eq!(diagnostic_codes(&outcome), vec!["layfrz.applied"]);
     assert!(outcome.diagnostics[0].message.contains('2'));
-    assert!(outcome.diagnostics[0].message.contains("not undoable"));
+    assert!(outcome.diagnostics[0].message.contains("one transaction"));
+
+    // Undo restores the exact before attributes (frozen back to false, other
+    // flags untouched); redo freezes again.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo LAYFRZ");
+    assert_eq!(revision(&app), Revision(before.0 .0 + 3));
+    assert!(!layer_attributes(&app, LayerId(3)).frozen);
+    assert!(!layer_attributes(&app, LayerId(4)).frozen);
+    assert!(layer_attributes(&app, LayerId(3)).locked);
+    assert!(layer_attributes(&app, LayerId(3)).frozen_in_new_viewport);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo LAYFRZ");
+    assert!(layer_attributes(&app, LayerId(3)).frozen);
+    assert!(layer_attributes(&app, LayerId(4)).frozen);
 }
 
 #[test]

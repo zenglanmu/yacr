@@ -262,11 +262,98 @@ fn synthesized_display_matches_synthesis_of_the_definition() {
         DimensionGeometry::synthesized(definition.clone(), "Standard".to_string(), style(), None)
             .expect("synthesized");
     let synthesized = synthesize(&definition, geometry.style()).expect("synthesis");
-    let text = place_text(&definition, &synthesized, geometry.style(), None, "", "");
+    let text = place_text(
+        &definition,
+        &synthesized,
+        geometry.style(),
+        None,
+        "",
+        "",
+        TextAlignH::Center,
+    );
     let mut expected = synthesized.children;
     expected.push(text);
     assert_eq!(geometry.display(), expected.as_slice());
     assert!(approx(geometry.measurement(), 42.0));
+}
+
+#[test]
+fn text_h_align_rewrites_only_the_text_child_and_survives_transform() {
+    let geometry =
+        DimensionGeometry::synthesized(aligned_definition(), "Standard".to_string(), style(), None)
+            .expect("synthesized");
+    assert_eq!(geometry.text_h_align(), TextAlignH::Center);
+    let text_before = geometry
+        .display()
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Text {
+                position,
+                rotation,
+                height,
+                v_align,
+                ..
+            } => Some((*position, *rotation, *height, *v_align)),
+            _ => None,
+        })
+        .expect("text child");
+
+    let left = geometry.clone().with_text_h_align(TextAlignH::Left);
+    assert_eq!(left.text_h_align(), TextAlignH::Left);
+    // Every non-text child, and the text's position/rotation/height/vertical
+    // alignment, are unchanged: only `h_align` is rewritten.
+    let non_text_before: Vec<_> = geometry
+        .display()
+        .iter()
+        .filter(|child| !matches!(child, SemanticGeometry::Text { .. }))
+        .collect();
+    let non_text_after: Vec<_> = left
+        .display()
+        .iter()
+        .filter(|child| !matches!(child, SemanticGeometry::Text { .. }))
+        .collect();
+    assert_eq!(non_text_before, non_text_after);
+    let text_after = left
+        .display()
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Text {
+                position,
+                rotation,
+                height,
+                h_align,
+                v_align,
+                ..
+            } => Some((*position, *rotation, *height, *h_align, *v_align)),
+            _ => None,
+        })
+        .expect("text child");
+    assert_eq!(
+        text_after,
+        (
+            text_before.0,
+            text_before.1,
+            text_before.2,
+            TextAlignH::Left,
+            text_before.3,
+        )
+    );
+
+    // A similarity copies the alignment and keeps the transformed text child in
+    // step with it.
+    let moved = left
+        .transformed(&Transform3::translation(point(10.0, -2.0, 0.0)))
+        .expect("transformed");
+    assert_eq!(moved.text_h_align(), TextAlignH::Left);
+    let moved_text = moved
+        .display()
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Text { h_align, .. } => Some(*h_align),
+            _ => None,
+        })
+        .expect("text child");
+    assert_eq!(moved_text, TextAlignH::Left);
 }
 
 #[test]

@@ -37,9 +37,10 @@
 //!   `multiple.repeat_not_implemented`; the command never claims it repeated
 //!   anything.
 //!
-//! All layer-table writes are **not undoable** (`cad-history` stores entity
-//! patches only); every report path writes nothing, bumps no revision and records
-//! no history.
+//! `RENAME LAYER` reuses the ordinary `RENAMELAYER` command, so it records the
+//! same one-step layer patch; `PURGE` still publishes its layer deletes without
+//! history (out of scope for the layer-undo lane). Every report path writes
+//! nothing, bumps no revision and records no history.
 
 use super::*;
 
@@ -84,12 +85,14 @@ impl Application {
     /// `PURGE` / `-PURGE`: remove unused named objects through the sanctioned
     /// delete paths.
     ///
-    /// Layer rows go through [`Self::layer_command`] with the ordinary
-    /// `DELETELAYER` payload, so the active-layer fallback and override cleanup
-    /// are the existing ones. Each non-default layer is reported as removed or
-    /// refused (an in-use layer is refused by the database). Block/linetype/style
-    /// have no delete API: an explicit kind is a named `Unsupported`; the bare
-    /// `PURGE` reports each unsupported kind and still purges what it can.
+    /// Layer rows go through [`Self::layer_command_without_history`] with the
+    /// ordinary `DELETELAYER` payload, so the active-layer fallback and override
+    /// cleanup are the existing ones while PURGE keeps its documented
+    /// non-undoable behaviour (it is out of scope for the one-step layer lane).
+    /// Each non-default layer is reported as removed or refused (an in-use layer
+    /// is refused by the database). Block/linetype/style have no delete API: an
+    /// explicit kind is a named `Unsupported`; the bare `PURGE` reports each
+    /// unsupported kind and still purges what it can.
     fn purge(
         &mut self,
         session: &mut SessionState,
@@ -130,7 +133,7 @@ impl Application {
                     layer: name.clone(),
                 },
             );
-            match self.layer_command(session, &inner) {
+            match self.layer_command_without_history(session, &inner) {
                 Ok(outcome) => {
                     removed += 1;
                     if outcome.changes.is_some() {
@@ -178,7 +181,7 @@ impl Application {
                 "purge.summary".into()
             },
             message: format!(
-                "PURGE: {removed} unused layer row(s) removed; layer-table writes are not \
+                "PURGE: {removed} unused layer row(s) removed; PURGE layer deletions are not \
                  undoable"
             ),
         });

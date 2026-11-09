@@ -23,9 +23,16 @@
 //! * a successful write replaces the document's `Arc<DrawingDatabase>` and
 //!   publishes the database's `ChangeSet` (new revision, no entity changes), the
 //!   documented staleness signal every projection binds to;
-//! * **no undo entry is recorded**: layer edits are not undoable because
-//!   `cad-history` stores entity patches only. A layer patch kind is a separate
-//!   lane; advertising undo here would restore nothing.
+//! * **every real write records exactly one layer-table undo step**: the
+//!   before/after [`cad_db::LayerRow`] pair goes through
+//!   [`Application::publish_layer_record`], so create (`before: None`), rename,
+//!   delete (`after: None`) and attribute change each undo and redo in one
+//!   revision. An authoritative no-op (rename to the stored name, writing an
+//!   identical attribute set) records nothing, exactly like before.
+//!   `active_layer` and the temporary visibility overrides are **session** state
+//!   and are deliberately not history: undoing a delete restores the layer row,
+//!   but not the session's choice of active layer (deleting the active layer also
+//!   falls back to `0`; the fallback is reported and not undone);
 //! * the temporary visibility override set is pruned when its layer is deleted,
 //!   so no override outlives the row it referred to;
 //! * **a write never hides the session's current layer**
@@ -39,15 +46,42 @@
 //!   other key including `locked`, stay allowed on the current layer, and a
 //!   non-current layer can still be turned off or frozen.
 
+use super::layer_record::layer_row;
 use super::*;
 use crate::layer_property::LayerPropertyValue;
 
 impl Application {
     /// Dispatch the layer-table commands.
+    ///
+    /// The ordinary dispatch records exactly one layer patch per command; the
+    /// no-history variant ([`Self::layer_command_without_history`]) is the legacy
+    /// `PURGE` reuse and publishes without a history entry.
     pub(crate) fn layer_command(
         &mut self,
         session: &mut SessionState,
         command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        self.layer_command_recording(session, command, true)
+    }
+
+    /// Delete a layer row through the same validated path as `DELETELAYER` but
+    /// publish **without** an undo record.
+    ///
+    /// Only `PURGE` uses this: it keeps its documented non-undoable behaviour,
+    /// while the ordinary `DELETELAYER` path records one step.
+    pub(crate) fn layer_command_without_history(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        self.layer_command_recording(session, command, false)
+    }
+
+    fn layer_command_recording(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+        record_history: bool,
     ) -> CadResult<CommandOutcome> {
         let document_id = command.document;
         let drawing = self
@@ -59,10 +93,20 @@ impl Application {
             .clone();
         let mut candidate = drawing.as_ref().clone();
         let transaction = next_transaction_id();
+        // One record per command: label plus the exact before/after row(s).
+        let mut pending: Option<(&'static str, Vec<cad_db::LayerPatch>)> = None;
 
         let outcome = match &command.payload {
             CommandPayload::CreateLayer(name) => {
                 let (id, changeset) = candidate.create_layer(name, transaction, "create layer")?;
+                pending = Some((
+                    "create layer",
+                    vec![cad_history::layer_patch(
+                        id,
+                        None,
+                        layer_row(&candidate, id),
+                    )],
+                ));
                 let stored = candidate
                     .layer(id)
                     .map(|layer| layer.name.clone())
@@ -87,7 +131,20 @@ impl Application {
                     .ok_or_else(|| {
                         CadError::Invariant("resolved layer vanished before the rename".into())
                     })?;
+                let before = layer_row(drawing.as_ref(), id);
                 let changeset = candidate.rename_layer(id, name, transaction, "rename layer")?;
+                // Renaming to the stored name is an authoritative no-op: no
+                // revision move, so no undo entry either.
+                if changeset.before != changeset.after {
+                    pending = Some((
+                        "rename layer",
+                        vec![cad_history::layer_patch(
+                            id,
+                            before,
+                            layer_row(&candidate, id),
+                        )],
+                    ));
+                }
                 let stored = candidate
                     .layer(id)
                     .map(|row| row.name.clone())
@@ -133,7 +190,12 @@ impl Application {
                 } else {
                     None
                 };
+                let before = layer_row(drawing.as_ref(), id);
                 let changeset = candidate.delete_layer(id, transaction, "delete layer")?;
+                pending = Some((
+                    "delete layer",
+                    vec![cad_history::layer_patch(id, before, None)],
+                ));
 
                 // Post-commit session hygiene: neither the temporary override nor
                 // the active layer may keep a reference to the removed row.
@@ -141,8 +203,8 @@ impl Application {
                 // Deliberately **not** a `LAYERP` step (`crate::layer_history`
                 // records layer-*view* mutations: toggle/batch/isolate/layoff/
                 // restore). Pushing here would let `LAYERP` restore an override on
-                // a layer id that no longer exists, and the delete itself is not
-                // undoable either (history has no layer patch kind).
+                // a layer id that no longer exists. Undo restores the deleted row
+                // (through the layer patch below) but not these session choices.
                 session.layer_overrides.remove(id);
                 let mut diagnostics = vec![Diagnostic {
                     object: None,
@@ -155,7 +217,8 @@ impl Application {
                         object: None,
                         code: "drawing.active_layer_fallback".into(),
                         message: format!(
-                            "active layer '{deleted}' was deleted; the active layer is now '{}'",
+                            "active layer '{deleted}' was deleted; the active layer is now '{}' \
+                             (this session choice is not part of the layer-table undo step)",
                             cad_db::DEFAULT_LAYER_NAME
                         ),
                     });
@@ -186,6 +249,7 @@ impl Application {
                 // keeps owning the invariant (`visible == !(off || frozen)`) with
                 // no second copy of this policy.
                 ensure_current_layer_stays_visible(session, id, &name, &parsed)?;
+                let before = layer_row(drawing.as_ref(), id);
                 let mut attributes = drawing.layer_attributes(id);
                 crate::layer_property::apply(&mut attributes, parsed);
                 // The database recomputes `visible` from the new `off`/`frozen`
@@ -199,8 +263,18 @@ impl Application {
                 )?;
                 // A write of the stored value is an authoritative no-op: the
                 // revision did not move, so the report says so instead of
-                // claiming a change.
+                // claiming a change, and no undo entry is recorded.
                 let changed = changeset.before != changeset.after;
+                if changed {
+                    pending = Some((
+                        "set layer property",
+                        vec![cad_history::layer_patch(
+                            id,
+                            before,
+                            layer_row(&candidate, id),
+                        )],
+                    ));
+                }
                 CommandOutcome {
                     objects: Vec::new(),
                     changes: Some(Arc::new(changeset)),
@@ -231,13 +305,16 @@ impl Application {
             }
         };
 
-        // Publish the already-validated candidate. No history record: layer edits
-        // are not undoable (see the module docs).
-        self.workspace
-            .documents
-            .get_mut(&document_id)
-            .ok_or_else(|| CadError::Invariant("document disappeared while publishing".into()))?
-            .drawing = Arc::new(candidate);
+        // Publish the already-validated candidate with the one record this
+        // command produced. A branch that changed nothing records nothing (the
+        // record type rejects an empty patch list, and a no-op must not invent a
+        // step). `PURGE`'s reuse publishes without history.
+        match pending {
+            Some((label, patches)) if record_history => {
+                self.publish_layer_record(document_id, candidate, transaction, label, patches)?;
+            }
+            _ => self.publish_layer_table(document_id, candidate)?,
+        }
         Ok(outcome)
     }
 }

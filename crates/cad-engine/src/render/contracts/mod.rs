@@ -58,6 +58,7 @@ fn db_with_layout() -> DrawingDatabase {
             clip: vec![p(0.0, 0.0), p(100.0, 50.0), p(10.0, 20.0)],
             model_to_paper: cad_domain::Transform3::scale(100.0),
             completeness: Completeness::Complete,
+            layer_overrides: std::collections::BTreeMap::new(),
         }],
     })
     .unwrap();

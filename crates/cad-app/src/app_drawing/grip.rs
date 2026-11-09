@@ -130,6 +130,8 @@ impl Application {
                 label: "stretch grip".into(),
                 patches: vec![drawing_patch(before.id, Some(before), Some(after))],
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

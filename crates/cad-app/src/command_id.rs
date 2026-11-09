@@ -569,9 +569,8 @@ pub enum CommandId {
     /// is trimmed and validated by the database: empty/whitespace-only, an
     /// AutoCAD-illegal character and a duplicate (compared
     /// **case-insensitively**) are all explicit refusals that change nothing. One
-    /// revision bump, one layer row; the new layer is visible. Layer edits are
-    /// **not undoable** (history has no layer patch kind), so no undo entry is
-    /// recorded. Work-only.
+    /// revision bump, one layer row; the new layer is visible. Records exactly
+    /// one layer-patch undo step (create = `before: None`). Work-only.
     CreateLayer,
     /// `RENAMELAYER`: rename an existing layer table entry.
     ///
@@ -579,8 +578,8 @@ pub enum CommandId {
     /// existing layer addressed **by name** (exact match first, then a unique
     /// case-insensitive one; unknown and ambiguous names are distinct refusals)
     /// and its new name, validated exactly like [`CommandId::CreateLayer`]'s.
-    /// Entity references are by id, so a rename retargets nothing. Not undoable;
-    /// one revision bump. Work-only.
+    /// Entity references are by id, so a rename retargets nothing. Records one
+    /// layer-patch undo step; one revision bump. Work-only.
     RenameLayer,
     /// `DELETELAYER`: delete a layer table entry.
     ///
@@ -589,11 +588,12 @@ pub enum CommandId {
     /// and for a layer still referenced by any entity (the refusal names the
     /// count); an entity's `layer` is never re-pointed behind the user's back.
     /// When the deleted layer is the session's active layer, the session falls
-    /// back to layer `0` and reports it in the diagnostics. Not undoable; one
-    /// revision bump. Work-only.
+    /// back to layer `0` and reports it in the diagnostics (that session choice
+    /// is not undone). Records one layer-patch undo step; one revision bump.
+    /// Work-only.
     DeleteLayer,
-    /// `SETLAYERPROPERTY`: write one validated layer-table property; layer
-    /// writes are not undoable. Full contract: `crate::command_id::layers`.
+    /// `SETLAYERPROPERTY`: write one validated layer-table property; a real
+    /// change records one layer-patch undo step. Contract: `command_id::layers`.
     SetLayerProperty,
     /// The layer-selection run (`LAYCUR`…`SETBYLAYER`); see [`crate::app_drawing::layer_commands`].
     LayCur,
@@ -635,11 +635,10 @@ pub enum CommandId {
     ToggleSnap,
     /// Flip the display grid overlay for this session (`GRID`, F7). Session /
     /// display state only (no database write, no history, no `ChangeSet`), so
-    /// Viewer and Work both allow it. Defaults **off** (the grid is opt-in); the
-    /// host draws the grid only when this switch **and** the persisted
-    /// `view.overlays.grid` preference are both on. This is the **display** grid
-    /// only — grid snap has its own switch
-    /// ([`CommandId::ToggleSnapGrid`]). See [`crate::SessionState::grid_enabled`].
+    /// Viewer and Work both allow it. Defaults **off** (opt-in). The host draws
+    /// it only when this switch **and** the persisted `view.overlays.grid`
+    /// preference are both on. Display grid only — grid snap is
+    /// [`CommandId::ToggleSnapGrid`]; see [`crate::SessionState::grid_enabled`].
     ToggleGrid,
     /// Flip the **grid snap** switch for this session (`SNAP`, F9). Session /
     /// display state only (no database write, no history, no `ChangeSet`), so
@@ -787,11 +786,12 @@ pub enum CommandId {
     /// `PURGE` / `-PURGE`: remove unused named objects through the database's
     /// sanctioned delete APIs. Layers are the only kind with a delete API in
     /// this build; block/linetype/style are explicit named refusals. Work-only;
-    /// layer-table writes are not undoable.
+    /// layer deletions made by PURGE are not undoable (out of scope for the
+    /// layer-patch lane).
     Purge,
     /// `RENAME` / `-RENAME`: rename one named object. Only layers have a rename
-    /// API; the other kinds are explicit named refusals. Work-only; not
-    /// undoable.
+    /// API (reusing `RENAMELAYER`, one layer-patch undo step); the other kinds
+    /// are explicit named refusals. Work-only.
     Rename,
     /// `SETVAR <name>`: read-only report of one modelled variable. The typed
     /// write form routes to the existing `PDMODE`/`PDSIZE`/`LTSCALE`/`SNAPUNIT`/

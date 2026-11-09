@@ -160,6 +160,8 @@ impl Application {
                 label: "hatch generate boundary".into(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -293,6 +295,8 @@ impl Application {
                 label: "hatch to back".into(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

@@ -1,6 +1,7 @@
 //! Wave 2 named-refusal contracts: `HYPERLINKOPTIONS`, `INPUTSEARCHOPTIONS`,
 //! `-INPUTSEARCHOPTIONS`, `SIGVALIDATE`, `BASE`, `LIMITS`, `VIEWPLOTDETAILS`,
-//! `VPLAYER`, `MVIEW`, `PSBSCALE`, `PSTSCALE`, `MVSETUP`.
+//! `VPLAYER`, `PSBSCALE`, `PSTSCALE`, `MVSETUP` (`MVIEW` graduated to a real
+//! viewport write).
 //!
 //! Each name is admitted by the vocabulary and refused with
 //! `CadError::Unsupported` carrying a **stable** reason. A refusal is a
@@ -10,7 +11,7 @@
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 12] = [
+const REFUSALS: [(ExtendedCommandId, &str); 11] = [
     (
         ExtendedCommandId::HyperlinkOptions,
         "hyperlinkoptions.unsupported: this build has no hyperlink storage model",
@@ -42,10 +43,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 12] = [
     (
         ExtendedCommandId::VPlayer,
         "vplayer.viewport_layer_state_unsupported: no per-viewport layer state",
-    ),
-    (
-        ExtendedCommandId::MView,
-        "mview.viewport_creation_unsupported: no viewport creation API",
     ),
     (
         ExtendedCommandId::PsbScale,
@@ -108,13 +105,13 @@ fn a_refusal_payload_is_rejected_before_the_feature_reason() {
     let refused = app.execute(
         &mut session,
         command(
-            CommandId::Extended(ExtendedCommandId::MView),
+            CommandId::Extended(ExtendedCommandId::VPlayer),
             CommandPayload::Points(vec![point(1.0, 2.0)]),
         ),
     );
     match refused {
         Err(CadError::InvalidInput(message)) => {
-            assert!(message.contains("MVIEW needs no payload"), "{message}");
+            assert!(message.contains("VPLAYER needs no payload"), "{message}");
         }
         other => panic!("expected InvalidInput for a payload, got {other:?}"),
     }

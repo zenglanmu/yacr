@@ -569,22 +569,29 @@ pub(super) fn offset_arc(
 /// Apply a list of drawing patches to a database (used by undo/redo).
 ///
 /// `forward` selects the `after` side (redo); otherwise the `before` side is
-/// applied (undo). Both the entity batch and the block batch are selected the
-/// same way and committed through the database's single validated combined write
-/// path ([`DrawingDatabase::apply_drawing_changes_with_blocks_and_display`]),
+/// applied (undo). The entity batch, the block batch, the layer batch and the
+/// layout batch are all selected the same way and committed through the
+/// database's single validated combined write path
+/// ([`DrawingDatabase::apply_drawing_changes_with_blocks_display_layers_and_layouts`]),
 /// together with each re-applied side's captured display state, so a patch that
 /// no longer matches the store is refused, never silently force-written. That
-/// path owns the phase order (block creates before member moves, display states
-/// after the entity rows, block deletes after the members leave), so undo and
-/// redo never reorder manually, and the display restore lands in the **same**
-/// revision and `ChangeSet` (carrying `ChangeMask::STYLE` for every restored
-/// entity) instead of being a second, unreported mutation.
+/// path owns the phase order (layout/layer/block creates before member moves,
+/// display states after the entity rows, block deletes, layer deletes and then
+/// layout deletes after the references leave), so undo and redo never reorder
+/// manually, and the display restore plus any layer/layout restore land in the
+/// **same** revision and `ChangeSet` instead of being second, unreported
+/// mutations.
+// The replay shape mirrors the record: one argument per patch kind, so a new
+// kind cannot be forgotten by a caller.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_drawing_patches(
     drawing: &mut DrawingDatabase,
     reason: &str,
     transaction: TransactionId,
     patches: &[DrawingPatch],
     block_patches: &[cad_db::BlockPatch],
+    layer_patches: &[cad_db::LayerPatch],
+    layout_patches: &[cad_db::LayoutPatch],
     forward: bool,
 ) -> CadResult<ChangeSet> {
     let changes: Vec<(EntityId, Option<DbEntity>)> = patches
@@ -613,9 +620,35 @@ pub(crate) fn apply_drawing_patches(
             )
         })
         .collect();
+    let layer_changes: Vec<(LayerId, Option<cad_db::LayerRow>)> = layer_patches
+        .iter()
+        .map(|p| {
+            (
+                p.id,
+                if forward {
+                    p.after.clone()
+                } else {
+                    p.before.clone()
+                },
+            )
+        })
+        .collect();
+    let layout_changes: Vec<(LayoutId, Option<cad_db::LayoutRow>)> = layout_patches
+        .iter()
+        .map(|p| {
+            (
+                p.id,
+                if forward {
+                    p.after.clone()
+                } else {
+                    p.before.clone()
+                },
+            )
+        })
+        .collect();
     // Only a side that exists can carry a display state; the shared write path
     // applies it after the entity rows, so an inserted side works too.
-    let display: Vec<(EntityId, cad_db::EntityDisplayState)> = patches
+    let display: Vec<(EntityId, Option<cad_db::EntityDisplayState>)> = patches
         .iter()
         .filter_map(|patch| {
             let (entity, state) = if forward {
@@ -624,15 +657,17 @@ pub(crate) fn apply_drawing_patches(
                 (&patch.before, &patch.before_state)
             };
             entity.as_ref()?;
-            state.clone().map(|state| (patch.id, state))
+            state.clone().map(|state| (patch.id, Some(state)))
         })
         .collect();
-    drawing.apply_drawing_changes_with_blocks_and_display(
+    drawing.apply_drawing_changes_with_blocks_display_layers_and_layouts(
         reason,
         transaction,
         &block_changes,
         changes,
         &display,
+        &layer_changes,
+        &layout_changes,
     )
 }
 
