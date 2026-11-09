@@ -1,10 +1,9 @@
 // Start state: shown in the left column when no drawing is open. It is the
 // product's welcome screen, not a generic empty panel: the mark and product line
-// lead, a short honest intro follows, and the two real creation actions are the
+// lead, a short intro follows, and the two real creation actions are the
 // only bright elements. Each action is enabled only by the shared admission
 // rules (host vocabulary plus the `cad_status` capability booleans
-// `canOpen`/`canNew`), and the footer states which carriers this build has
-// actually been run on — it never claims product acceptance.
+// `canOpen`/`canNew`).
 import React from 'react';
 import { Icon } from '../icons.tsx';
 import { Button } from './primitives.tsx';
@@ -71,10 +70,6 @@ export function StartPanel() {
           <p>{t('start.recent_empty')}</p>
           <p className="start-panel__note">{t('start.recent_unavailable')}</p>
         </div>
-        <p className="start-panel__status">
-          <span className="start-panel__status-dot" aria-hidden="true" />
-          <span>{t('start.host_status')}</span>
-        </p>
       </div>
     </section>
   );

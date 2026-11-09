@@ -99,14 +99,14 @@ test('AboutDialog carries no hardcoded CJK copy and no inline dialog keys', asyn
   assert.doesNotMatch(source, /'(dialog\.|file\.about)/, 'dialog copy comes through POPUP_KEYS');
 });
 
-test('the platform-acceptance sentence is gone from both intros', () => {
+test('the platform-acceptance and maturity sentences are gone from both intros', () => {
   assert.doesNotMatch(en['dialog.about.intro'], /Linux\/Wayland is the primary development target/);
   assert.doesNotMatch(en['dialog.about.intro'], /Android APK has been sideloaded/);
-  assert.match(en['dialog.about.intro'], /early development with no shippable release\.$/);
+  assert.doesNotMatch(en['dialog.about.intro'], /early development|no shippable release/);
 
   assert.doesNotMatch(zh['dialog.about.intro'], /Linux\/Wayland 是主开发目标/);
   assert.doesNotMatch(zh['dialog.about.intro'], /Android APK 已由维护者侧载运行/);
-  assert.match(zh['dialog.about.intro'], /早期开发，尚无可交付版本。$/);
+  assert.doesNotMatch(zh['dialog.about.intro'], /早期开发|尚无可交付/);
 
   // The product description on both sides is untouched.
   assert.match(en['dialog.about.intro'], /Rust core[\s\S]*React \+ Tauri[\s\S]*wgpu/);

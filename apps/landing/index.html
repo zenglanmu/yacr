@@ -14,7 +14,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="yacr">
   <meta property="og:title" content="yacr — Yet Another CAD in Rust">
-  <meta property="og:description" content="Rust 核心负责文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。预览版已可直接下载，但 DWG 兼容性、真实图纸与性能验收尚未完成。">
+  <meta property="og:description" content="Rust 核心负责文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。预览版可直接下载，尚非生产级 CAD。">
   <meta property="og:url" content="https://yacr.pages.dev/">
   <meta property="og:image" content="https://yacr.pages.dev/assets/yacr-1024.png">
   <meta property="og:image:width" content="1024">
@@ -116,8 +116,8 @@
             <div class="hero-notice" role="note">
               <span class="notice-label">PREVIEW <br>BUILDS</span>
               <p>
-                <span class="lang--zh">yacr 已进入可用的预览阶段：<strong>Linux、Windows、macOS、Android 与 Web 都有可下载 / 可打开的预览构建</strong>。Linux/Wayland 是主开发目标、支持最完整；Android APK 已由维护者侧载运行；Windows/macOS 的运行时与视觉验收仍待补。<strong>它不是生产级 CAD：DWG 兼容性、真实图纸与性能验收尚未完成。</strong></span>
-                <span class="lang--en" lang="en">yacr has reached a usable preview stage: <strong>Linux, Windows, macOS, Android, and the Web all have downloadable preview builds</strong>. Linux/Wayland is the primary development target with the strongest support; the Android APK has been sideloaded and run by the maintainer; runtime and visual acceptance for Windows/macOS is still pending. <strong>It is not a production-grade CAD tool: DWG compatibility, real drawings, and performance acceptance are not finished.</strong></span>
+                <span class="lang--zh">预览版：可直接下载，尚非生产级 CAD。</span>
+                <span class="lang--en" lang="en">Preview builds you can download today. Not yet production-grade.</span>
               </p>
             </div>
 
@@ -271,18 +271,11 @@
               <p class="stat-label">
                 <span class="lang--zh">条命令有实现路径</span><span class="lang--en" lang="en">commands with an implementation path</span>
               </p>
-              <p class="stat-note">
-                <span class="lang--zh">50 完整 + 173 部分 · 清单计数，不是兼容率</span>
-                <span class="lang--en" lang="en">50 complete + 173 partial · list count, not a compatibility rate</span>
-              </p>
             </div>
             <div class="stat">
               <p class="stat-value">DWG<span class="stat-plus">+</span>DXF</p>
               <p class="stat-label">
                 <span class="lang--zh">读取 / 解析</span><span class="lang--en" lang="en">read / parse</span>
-              </p>
-              <p class="stat-note">
-                <span class="lang--zh">DWG 兼容性未验收</span><span class="lang--en" lang="en">DWG compatibility is not verified</span>
               </p>
             </div>
             <div class="stat">
@@ -511,8 +504,8 @@
             <span class="lang--en" lang="en">Get viewing and measuring right first.</span>
           </h2>
           <p class="lead">
-            <span class="lang--zh">从导入、数据库、渲染到测量与命令覆盖，每张卡片都写明能力边界。</span>
-            <span class="lang--en" lang="en">From import and the database to rendering, measurement, and command coverage — every card states its boundary.</span>
+            <span class="lang--zh">从导入、数据库、渲染到测量与命令覆盖。</span>
+            <span class="lang--en" lang="en">From import and the database to rendering, measurement, and command coverage.</span>
           </p>
         </header>
 
@@ -524,8 +517,8 @@
             </div>
             <h3><span class="lang--zh">打开 DWG / DXF</span><span class="lang--en" lang="en">Open DWG / DXF</span></h3>
             <p>
-              <span class="lang--zh"><code>acadrust</code> 0.6.8（未修改）。DWG 与 DXF ASCII/二进制导入，异步导入、进度与取消。这里不宣称已验证的兼容矩阵。</span>
-              <span class="lang--en" lang="en"><code>acadrust</code> 0.6.8, unmodified. DWG and DXF ASCII/binary import with asynchronous loading, progress, and cancel. No verified compatibility matrix is claimed.</span>
+              <span class="lang--zh"><code>acadrust</code> 0.6.8（未修改）。DWG 与 DXF ASCII/二进制导入，异步导入、进度与取消。</span>
+              <span class="lang--en" lang="en"><code>acadrust</code> 0.6.8, unmodified. DWG and DXF ASCII/binary import with asynchronous loading, progress, and cancel.</span>
             </p>
             <div class="chips" aria-hidden="true"><span>DWG</span><span>DXF ASCII</span><span>DXF BINARY</span></div>
           </article>
@@ -550,8 +543,8 @@
             </div>
             <h3><span class="lang--zh">wgpu 渲染，面向大图纸</span><span class="lang--en" lang="en">wgpu rendering for large drawings</span></h3>
             <p>
-              <span class="lang--zh">Rust + wgpu 使用现代 GPU 特性；批处理、导航 LOD、VRAM 预检。测试图纸展开后约 72 万图元，已在真实 GPU 宿主上打开并渲染；性能验收仍未完成。渲染是派生，不反向成为数据源。</span>
-              <span class="lang--en" lang="en">Rust + wgpu uses modern GPU features: batching, navigation LOD, and VRAM preflight. Test drawings expand to roughly 725K entities and open and render on a real GPU host; performance acceptance is still pending. Rendering is derived and never becomes the data source.</span>
+              <span class="lang--zh">Rust + wgpu 使用现代 GPU 特性；批处理、导航 LOD、VRAM 预检。测试图纸展开后约 72 万图元，已在真实 GPU 宿主上打开并渲染。渲染是派生，不反向成为数据源。</span>
+              <span class="lang--en" lang="en">Rust + wgpu uses modern GPU features: batching, navigation LOD, and VRAM preflight. Test drawings expand to roughly 725K entities and open and render on a real GPU host. Rendering is derived and never becomes the data source.</span>
             </p>
             <div class="chips" aria-hidden="true"><span>2D / 3D</span><span>725K ENTITIES</span><span>LOD / VRAM</span></div>
           </article>
@@ -629,8 +622,8 @@
                 <span class="lang--en" lang="en"><code>plugins/tch</code> (<code>tangent-ts</code>) is wired as a git submodule and handles Tianzheng/TCH entities and proxy-graphics display. The plugin bundle ships in every carrier. Plugin-manager state persists, and vendor entities can be selected with property rows.</span>
               </p>
               <p class="feature-caveat">
-                <span class="lang--zh">无 proxy graphics 缓存时不显示；这不是 AutoCAD 兼容性声明。</span>
-                <span class="lang--en" lang="en">No cached proxy graphics means no display; this is not an AutoCAD compatibility claim.</span>
+                <span class="lang--zh">无 proxy graphics 缓存时不显示。</span>
+                <span class="lang--en" lang="en">No cached proxy graphics means no display.</span>
               </p>
               <div class="chips" aria-hidden="true"><span>TCH</span><span>TYPESCRIPT</span><span>PROXY GRAPHICS</span><span>22 CLASSES</span></div>
             </div>
@@ -715,8 +708,8 @@
             <span class="lang--en" lang="en">One core. Five surfaces.</span>
           </h2>
           <p class="lead">
-            <span class="lang--zh">状态按仓库当前证据边界标注，不等于产品验收。Linux/Wayland 是主开发目标；Android APK 已由维护者侧载运行；Windows/macOS 是真实宿主，运行时仍待验收。</span>
-            <span class="lang--en" lang="en">Status reflects the evidence currently in the repository; it is not product acceptance. Linux/Wayland is the primary development target; the Android APK has been sideloaded by the maintainer; Windows/macOS are real hosts whose runtime still needs acceptance.</span>
+            <span class="lang--zh">Linux/Wayland 是主开发目标；Android APK 已由维护者侧载运行。</span>
+            <span class="lang--en" lang="en">Linux/Wayland is the primary development target; the Android APK has been sideloaded and run by the maintainer.</span>
           </p>
         </header>
 
@@ -733,7 +726,6 @@
               <span class="lang--en" lang="en">Native Wayland uses native-below; X11/XWayland uses dom-canvas. Distributed as Flatpak — the primary development target, with the strongest Wayland support.</span>
             </p>
             <ul class="platform-evidence">
-              <li><span class="ev-label"><span class="lang--zh">证据</span><span class="lang--en" lang="en">Evidence</span></span><span class="lang--zh">有界证据：GNOME/Mutter + P620 + <code>scale=1</code></span><span class="lang--en" lang="en">Bounded evidence: GNOME/Mutter + P620 + <code>scale=1</code></span></li>
               <li><span class="ev-label">Flatpak</span><span>io.github.zenglanmu.yacr</span></li>
             </ul>
           </article>
@@ -751,7 +743,6 @@
             </p>
             <ul class="platform-evidence">
               <li><span class="ev-label"><span class="lang--zh">入口</span><span class="lang--en" lang="en">Entry</span></span><a href="https://yacr-examples.pages.dev/" target="_blank" rel="noopener">yacr-examples.pages.dev <span class="ext" aria-hidden="true">↗</span></a></li>
-              <li><span class="ev-label"><span class="lang--zh">证据</span><span class="lang--en" lang="en">Evidence</span></span><span class="lang--zh">CI smoke 使用 SwiftShader 软件渲染，不是 GPU 或像素结论。</span><span class="lang--en" lang="en">CI smoke uses SwiftShader software rendering — not a GPU or pixel conclusion.</span></li>
             </ul>
           </article>
 
@@ -766,9 +757,6 @@
               <span class="lang--zh">真实 Tauri/WebView2 加 Win32 child HWND。缺少 WebView2 时以退出码 5 拒绝。</span>
               <span class="lang--en" lang="en">Real Tauri/WebView2 with a Win32 child HWND. Refuses with exit code 5 when WebView2 is missing.</span>
             </p>
-            <ul class="platform-evidence">
-              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">真实宿主已实现，预期可运行；当前证据为编译门禁 + Wine 拒绝合同，运行时/视觉/真 Windows 仍待验收。</span><span class="lang--en" lang="en">The real host is implemented and expected to run; current evidence is a build gate + Wine refusal contract. Runtime, visuals, and real Windows still need acceptance.</span></li>
-            </ul>
           </article>
 
           <article class="platform reveal reveal--d1">
@@ -782,9 +770,6 @@
               <span class="lang--zh">真实 Tauri/WKWebView 加 CAD 子 <code>NSView</code>（Metal）。</span>
               <span class="lang--en" lang="en">Real Tauri/WKWebView with a CAD child <code>NSView</code> (Metal).</span>
             </p>
-            <ul class="platform-evidence">
-              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">真实宿主已实现，预期可运行；当前证据仅 CI 编译，窗口/Metal/层序/DPI/像素仍待验收。</span><span class="lang--en" lang="en">The real host is implemented and expected to run; current evidence is CI compile only. Window, Metal, layer order, DPI, and pixels still need acceptance.</span></li>
-            </ul>
           </article>
 
           <article class="platform reveal reveal--d2">
@@ -798,9 +783,6 @@
               <span class="lang--zh">Tauri WebView + 原生 <code>CadSession</code> + Vulkan <code>SurfaceView</code>；wasm 会话不实例化。SAF 打开与 DXF 导出已接线，DWG 保存显式延后。维护者已侧载 APK 并运行成功。</span>
               <span class="lang--en" lang="en">Tauri WebView + native <code>CadSession</code> + Vulkan <code>SurfaceView</code>; the wasm session is not instantiated. SAF open and DXF export are wired; DWG save is explicitly deferred. The maintainer has sideloaded the APK and run it successfully.</span>
             </p>
-            <ul class="platform-evidence">
-              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">维护者侧载运行成功（非 CI 验收）；设备/真实 GPU/像素的正式验收仍待补。</span><span class="lang--en" lang="en">The maintainer sideloaded and ran it successfully (not a CI acceptance); formal device, real-GPU, and pixel acceptance is still pending.</span></li>
-            </ul>
           </article>
         </div>
       </div>
@@ -864,13 +846,9 @@
               </div>
               <div>
                 <dt>SCOPE</dt>
-                <dd><span class="lang--zh">构建与打包记录</span><span class="lang--en" lang="en">Build and packaging record</span></dd>
+                <dd><span class="lang--zh">构建产物</span><span class="lang--en" lang="en">Build artifacts</span></dd>
               </div>
             </dl>
-            <p class="release-honest">
-              <span class="lang--zh">产物来自 CI workflow。<strong>这不是运行时、真机、GPU 或像素验收。</strong></span>
-              <span class="lang--en" lang="en">Artifacts come from the CI workflow. <strong>This is not runtime, device, GPU, or pixel acceptance.</strong></span>
-            </p>
           </div>
         </div>
 
@@ -887,7 +865,7 @@
           <span><span data-release-assets>4</span> ASSETS</span>
           <span>SHA-256</span>
           <span>SIGNING.txt</span>
-          <span class="release-meta-end">BUILD ARTIFACTS · NOT RUNTIME ACCEPTANCE</span>
+          <span class="release-meta-end">BUILD ARTIFACTS</span>
         </div>
 
         <div class="download-grid" id="download-cards">
@@ -1209,10 +1187,6 @@
           </noscript>
 
           <p class="cl-foot">
-            <span class="cl-foot-note">
-              <span class="lang--zh">构建与打包记录；不是运行时、真机、GPU 或像素验收。</span>
-              <span class="lang--en" lang="en">Build and packaging notes — not runtime, device, GPU, or pixel acceptance.</span>
-            </span>
             <a class="cl-all" href="https://github.com/zenglanmu/yacr/releases" target="_blank" rel="noopener">
               <span class="lang--zh">全部发布</span><span class="lang--en" lang="en">All releases</span>
               <span class="ext" aria-hidden="true">↗</span>
@@ -1262,8 +1236,8 @@
               </summary>
               <div class="faq-a">
                 <p>
-                  <span class="lang--zh">还不能当生产 CAD。项目处于活跃开发的预览阶段：可以打开 DWG/DXF、查看 2D/3D、测量，但 DWG 兼容性、真实图纸、vendor 与性能验收都未完成；请自留副本。平台运行时边界见上方平台卡片。</span>
-                  <span class="lang--en" lang="en">Not yet. The project is in an active-development preview stage: it can open DWG/DXF, view 2D/3D, and measure, but DWG compatibility, real drawings, vendor entities, and performance acceptance are all unfinished — keep your own copies. Platform runtime boundaries are in the platform cards above.</span>
+                  <span class="lang--zh">还不能。项目处于活跃开发的预览阶段：可以打开 DWG/DXF、查看 2D/3D、测量；请自留副本。</span>
+                  <span class="lang--en" lang="en">Not yet. The project is in an active-development preview stage: it can open DWG/DXF, view 2D/3D, and measure — keep your own copies.</span>
                 </p>
               </div>
             </details>
@@ -1415,13 +1389,9 @@
       </section>
 
       <div class="footer-honest">
-        <p>
-          <span class="lang--zh"><strong>诚实声明：</strong>本页是项目宣传页，不是产品验收；平台状态以仓库 <code>docs/handoff.md</code>、<code>docs/compatibility.md</code> 和实际代码为准。</span>
-          <span class="lang--en" lang="en"><strong>Honest disclosure:</strong> this page is a project landing page, not acceptance evidence. Platform status follows <code>docs/handoff.md</code>, <code>docs/compatibility.md</code>, and the actual code in the repository.</span>
-        </p>
         <p class="footer-meta">
-          <span class="lang--zh">© 2026 yacr · 页面与插画为项目自制；工程示意图不是产品截图，实机截图见上方。</span>
-          <span class="lang--en" lang="en">© 2026 yacr · Page and illustration are project-made; the engineering illustration is not a screenshot — the real capture is shown above.</span>
+          <span class="lang--zh">© 2026 yacr · 页面与插画为项目自制。</span>
+          <span class="lang--en" lang="en">© 2026 yacr · Page and illustration are project-made.</span>
         </p>
       </div>
     </div>

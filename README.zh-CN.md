@@ -10,10 +10,8 @@ X11/`dom-canvas`）、Windows、macOS、Android 与 Web。
 
 yacr 处于活跃开发中，**预览版现在即可下载**：Linux Flatpak、Windows zip、macOS tarball、Android APK
 与浏览器版本。它可以打开 DWG/DXF、用 wgpu 查看 2D/3D 图纸、做测量，命令清单 981 条中有 223 条有实现
-路径（50 完整 + 173 部分）；未支持的选项按名拒绝，不静默成功。Linux/Wayland 是主开发目标、运行证据
-最完整（GNOME/Mutter 上的有界本地验收）；Android APK 已由维护者侧载运行；Windows/macOS 是真实 Tauri
-宿主，运行时/视觉验收仍待补；浏览器版本跑 wasm 会话，只有无头/软件渲染 smoke。它**还不是生产级 CAD**：
-DWG 兼容性、真实图纸、跨 vendor、golden 图像与性能验收均未完成，打开文件请自留副本。
+路径（50 完整 + 173 部分）；未支持的选项按名拒绝，不静默成功。它**还不是生产级 CAD**；各平台状态与
+证据边界见 `docs/handoff.md` 与 `docs/compatibility.md`。
 
 **作者 / 联系：** zenglanmu@126.com · **许可证：** AGPL-3.0（`LICENSE`）
 
@@ -278,24 +276,20 @@ mlightcad 全量（需网络），`WITH_FONTS=0` 只放提交包（离线），`
 
 ### 其他平台
 
-Windows/macOS 为真实宿主但仅编译/合同证据；Android 为原生 `native-below` 载体（设备 NOT VERIFIED）；
-Web 的 wasm 会话真实、浏览器 smoke 为 SwiftShader 冒烟。发布/打包脚本是真实入口；CI release job
-仅在 `v*` tag / 手工 dispatch 运行并上传 workflow artifact（凭据存在时可选签名）。当前真实状态见
-`docs/build.md` 与 `docs/ci.md`；打包/签名不等于运行或 GPU 验收。
+Windows/macOS/Android/Web 的实现程度不同；宿主细节与证据边界见 `docs/windows-app.md`、
+`docs/macos-app.md`、`docs/android-host.md` 与 `docs/validation-web.md`。打包/签名不等于运行或
+GPU 验收。
 
 ## 现有进度
 
-**编译通过不等于运行验收。** 各端实际运行到什么程度如下（`docs/validation*.md` 中已退役宿主的
-证据**不**迁移为 React/Tauri 宿主的结论）：
+**编译通过不等于运行验收。** 各端实现状态与证据统一维护在内部文档：
 
-| 平台 | 宿主 | 当前实际状态 |
-|---|---|---|
-| **Linux 桌面（主开发目标）** | `apps/app-linux`（`yacr`） | React/Tauri chrome + 原生 GTK/wgpu CAD 分区。命令面覆盖打开/关闭、导航、选择、图层、测量，以及 981 条命令中 223 条的实现路径；逐项缺口见 `docs/compatibility.md`。已做有界本地验收：React 迁移 P6 gate **ACCEPT-WITH-FIXES**（合成夹具上的硬件 Vulkan 真实窗口 smoke）、原生 Wayland W3 **ACCEPT-WITH-LIMITATIONS**（GNOME/Mutter + Quadro P620、`scale=1`）——见 `docs/validation-react-linux-migration-2026-10-16.md`、`docs/validation-native-wayland-2026-10-16.md` 与宣传页实机截图。**仅有界本地 Linux 验收**，**不是**完整 CAD 产品/跨平台/vendor/golden/性能验收。 |
-| **Windows 桌面** | `apps/app-windows`（`yacr-windows`） | **真实 Tauri/WebView2 `native-below` 宿主**：透明 WebView 覆盖在 Win32 子 HWND 之上。CI 编译（`windows-check`）并打包 release zip（`windows-release`，event-gated；自签 Authenticode 或 `-unsigned`）。视觉/运行时/真 Windows **NOT VERIFIED**（Wine 只覆盖缺 WebView2 的拒绝合同，退出码 5）；打包不等于运行验收。 |
-| **macOS 桌面** | `apps/app-macos`（`yacr-macos`） | **真实 Tauri 2 宿主，仅编译**：透明 WKWebView 在上、原生 CAD 子 `NSView`（wgpu/Metal）在下。CI 编译（`macos-check`）并打包 ad-hoc 签名、未公证的 universal tarball（`macos-release`，event-gated）。窗口/Metal/层序/DPI/对话框/像素一律 **NOT VERIFIED**；打包不等于运行验收。 |
-| **Android** | `apps/app-android` | **原生 `native-below` 载体**：Tauri WebView 跑共享 React chrome，原生 Rust `CadSession` 拥有 `cad-db`，wgpu(Vulkan) 呈现到 WebView 下方的 `SurfaceView`。SAF 打开与 DXF 导出（SAVE）已接线，DWG 保存显式延后。维护者已侧载并运行 release APK（2026-11-08，非 CI 验收）；设备/真实 GPU/像素的正式验收仍 **NOT VERIFIED**。见 `docs/android-host.md`。 |
-| **Web** | `apps/app-web` | **浏览器载体（`dom-canvas`）**：wasm `CadSession` + DOM canvas；OPEN 走页面上传，SAVE/PLOT 走浏览器下载（DXF/SVG/PDF，不回写 DWG）。两份 bundle 默认把全量字体包 staged 到 `fonts/`（`WITH_FONTS=0`/`FONTS_DIR` 离线）；打开图纸后仍只从同源 `fonts/` 懒加载需要的面；`cad_fonts`/`FONTS` 报告真实加载。仅有界本地证据（无头 Chromium，**软件渲染**）——无真实 GPU/像素/设备验收。 |
-| **无头 CLI** | `cad-cli-tools` | 保留：经共享应用路径无头打开/出图。 |
+- Linux（主开发目标）：`docs/react-linux-app.md`、`docs/validation*.md`
+- Windows：`docs/windows-app.md`
+- macOS：`docs/macos-app.md`
+- Android：`docs/android-host.md`
+- Web：`docs/validation-web.md`
+- 能力矩阵：`docs/compatibility.md` · 逐轮证据：`docs/handoff.md`
 
 近期（2026-10-17/18）在真实使用下打磨了渲染与拾取路径：CPU 拾取接入场景空间索引（ADR 0012，S4；
 `cad-spatial` 每 chunk R-tree，实测权衡如实记录）、帧 pacing / 增量提交修复、每帧 CPU plan 与 encode
@@ -306,9 +300,8 @@ Web 的 wasm 会话真实、浏览器 smoke 为 SwiftShader 冒烟。发布/打�
 
 - **没有已验收的 DWG 兼容性、实体或平台。** `fixtures/manifest` 含合成夹具与一个开源 QCAD `flange`
   样本（`Partial`）；构建证据不等于兼容性。
-- **验证证据的边界**：静态门禁与契约/合成测试，以及有界可执行证据（前端测试、`--locked` 编译/测试、
-  合成夹具上的硬件 Vulkan 真实窗口 smoke、以及一次有界原生 Wayland 运行）。真实 GPU 像素矩阵、真机、
-  精确视觉 golden、性能与真实图纸验收**未覆盖**，不得推广；软件渲染结果须显式标注，绝不冒充真实 GPU 结论。
+- **验证证据的边界**：逐轮证据见 `docs/handoff.md`，详细验证记录见 `docs/validation*.md`。静态门禁与
+  合成测试不等于真实 GPU、真机、golden 或性能验收。
 - **明确未支持 / 未实现**（不伪造成功）：
   - 代理图元的厂商 opcode 记录（仅公开缓存记录）；无缓存几何不显示。
   - 外部内容：PDF/DWF/DGN underlay、OLE2 嵌入对象、CoordinationModel / Navisworks NWD 不加载。
