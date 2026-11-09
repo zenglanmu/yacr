@@ -1,5 +1,14 @@
 AD
 
+## 2026-11-10 JOIN 椭圆弧混合 + LAYVPI 逐视口图层
+
+- **JOIN**：新增精确 `ellipse_spans`（圆有理二次的仿射像，≤90° 分段、权重 `cos(Δ/2)`），`JOIN MULTIPLE` 现可把 ELLIPSE 与 LINE/ARC/POLYLINE/SPLINE 焊成一条有理 B 样条；同时修复 `chain_spans` prepend 方向错误。`JOIN CLOSE` 的混合 SPLINE 仍拒绝。
+- **LAYVPI**：`PaperViewport.layer_overrides: BTreeMap<LayerId,bool>`（true=冻结/隐藏），`cad-representation` 按视口过滤模型几何；`LAYVPI <layers>` 真实写入活动布局所有视口，一条事务/一步撤销，绝不改全局层表；导入 VPLAYER 未解析、无视口选择。
+- **已运行**：`cargo test -p cad-app --lib`（2266 passed, 3 ignored）、`cad-db`（222+13+5）、`cad-representation`（245）、`cad-ui-core`（498+1）、`cad-import-acadrust`、`cargo clippy`（db/representation/app/import）、`cargo fmt --check`、`npm test`、architecture/tauri/fixture/file-size/command-docs/i18n 全绿。
+- **NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机、真实 DWG/vendor 对照；JOIN/LAYVPI 只有契约/表示层测试。
+- **提交**：`cc7c085d` JOIN ellipse-arc mixed weld；`edaf9879` LAYVPI per-viewport layer freezing。
+
+
 ## 2026-11-10 P5 页面设置/MVIEW + HATCHEDIT 边界
 
 - **P5 页面设置写入**：`PlotProvenance::Authored` + `cad-db::set_plot_settings`（校验 layout/key/纸张/比例，单 revision）。`PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]` 真实写 Authored `PLOTSETTINGS`，一条事务/一步撤销；`-PAGESETUP` 同语法；裸 `PAGESETUP` 仍是只读报告。`PSETUPIN <source> <target>` 同图纸复制已存 plot 行（无源记录拒绝，不合成 A4 回退）。`LAYOUTWIZARD` 现在应用纸张设置（`layoutwizard.paper_applied`）。
