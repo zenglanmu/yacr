@@ -27,9 +27,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **66** |
-| 部分实现（有写明的界） | **457** |
-| **已实现合计（完整 + 部分）** | **523** |
-| 未实现 | **458** |
+| 部分实现（有写明的界） | **482** |
+| **已实现合计（完整 + 部分）** | **548** |
+| 未实现 | **433** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -71,11 +71,12 @@
 > **2026-11-09 增补（Wave 10）**：`-LAYER` 只读图层表、`-SCALELISTEDIT` 只读真实比例表、`LAYERSTATESAVE`/`NEWVIEW` 两个载荷路由、`LWEIGHT`/`-LWEIGHT`/`COLOR`/`-COLOR`/`-UNITS`/`COPYHIST` 六个只读会话/日志报告、`HELP`…`TRANSPARENCY` 十个具名拒绝，以及 `DSETTINGS`/`QUICKPROPERTIES`/`CLASSICLAYER`/`COMMANDLINE`/`COMMANDLINEHIDE` 五个 chrome 本地选择子计入 **473 已实现（66 完整 + 407 部分）/ 508 未实现**；无 GUI/GPU/像素证据。
 > **2026-11-09 增补（Wave 11）**：`3DALIGN`…`3DZOOM` 二十五个 3D/网格/曲面/3D 导航/打印名全部按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）；3D 优先级低于 2D，本批只提供诚实命令路径，不计为可用 3D 功能。计入 **498 已实现（66 完整 + 432 部分）/ 483 未实现**。
 > **2026-11-09 增补（Wave 12）**：`3DSIN`…`SCRIPT` 二十五个文件/导入导出/扩展运行时名全部按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串；不写库/不升修订/不入历史）；唯一矢量输出仍是 `PLOT`（SVG/PDF）。计入 **523 已实现（66 完整 + 457 部分）/ 458 未实现**。
+> **2026-11-09 增补（Wave 13）**：`PAGESETUP`/`-PAGESETUP` 只读页面设置报告、`CONVERTPOLY` 只读单一多段线表示报告，以及 `PSETUPIN`…`LAYTRANS` 二十二个具名拒绝（页面设置导入/打印样式/表格/字段/远程文字/拼写/超级填充/视口对齐同步/图层转换）计入 **548 已实现（66 完整 + 482 部分）/ 433 未实现**；无 GUI/GPU/像素证据。
 >
 > **本轮 100 条（Wave 9–12）已交付**：2D 真实编辑/别名/路由/报告 + 3D/文件扩展的诚实拒绝；全部结论仅 Linux 编译 + 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
 > **2026-11-09 增补（P1 晋升批）**：按 AutoCAD 2026 ENU 帮助页逐条核对后，`ALIGN`、`BREAK`、`DIVIDE`、`SELECTSIMILAR`、`MATCHPROP`、`SETBYLAYER`、`LIST`、`DIMSPACE`、`TORIENT` 九条从**部分实现**晋升为**完整实现**：补齐 1/3 对点 ALIGN（3 对点为平面刚性、不缩放）、椭圆 BREAK、全曲线 DIVIDE + 块对齐、SELECTSIMILAR 默认「图层+类型」与 `Name`/`Object style`、MATCHPROP 的 Text/Dimension/Hatch 特殊组、SETBYLAYER 透明度与 Include blocks、LIST 的纸空间/块空间与样式名、DIMSPACE 的 Auto=2×文字高度/`0` 对齐/角度标注、TORIENT Reverse（本项目扩展）。`LENGTHEN` 补了近端语义、开放多段线/椭圆弧/开放样条与 DY，但**开放样条延长**仍是具名拒绝，故保留**部分实现**。三处实现偏差已按官方语义修正：ALIGN 三对点禁缩放、SELECTSIMILAR 默认集、DIMSPACE Auto 公式。计入 **423 已实现（59 完整 + 364 部分）/ 558 未实现**；全部结论仍只覆盖 Linux 编译与契约测试，GUI/GPU/像素 NOT VERIFIED。
 >
-> **523 已实现（66 完整 + 457 部分）/ 458 未实现**；无未保存修改提示，无多文档。
+> **548 已实现（66 完整 + 482 部分）/ 433 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -202,11 +203,15 @@
 | `-LWEIGHT` | 部分实现 | 同一线宽显示报告的命令行拼写。 |
 | `-MLEDIT` | 部分实现 | 具名拒绝（`-mlinedit.unsupported`）：MLEDIT 的命令行拼写。 |
 | `-OBJECTSCALE` | 部分实现 | 具名拒绝（`-objectscale.unsupported`）：同一具名拒绝的命令行拼写。 |
+| `-PAGESETUP` | 部分实现 | 同一只读页面设置报告的命令行拼写。 |
 | `-PLOT` | 部分实现 | 具名拒绝（`-plot.unsupported`）：请用 PLOT；本构建只有一条矢量出图路径；命令行拼写。 |
 | `-PLOTSTAMP` | 部分实现 | 具名拒绝（`-plotstamp.unsupported`）：本构建无打印戳记模型；命令行拼写。 |
+| `-PLOTSTYLE` | 部分实现 | 具名拒绝（`-plotstyle.unsupported`）：打印样式列表的命令行拼写。 |
+| `-PSETUPIN` | 部分实现 | 具名拒绝（`-psetupin.unsupported`）：同一页面设置导入的命令行拼写。 |
 | `-PUBLISH` | 部分实现 | 具名拒绝（`-publish.unsupported`）：本构建无批量发布模型；命令行拼写。 |
 | `-SCALELISTEDIT` | 部分实现 | 只读报告真实 `ACAD_SCALELIST`（`scalelistedit.entry`）；创建/编辑/删除/排序比例未实现（`scalelistedit.write_unsupported`）。 |
 | `-STYLE` | 部分实现 | 与 `STYLE` 相同的只读文字样式列表，使用 `-style.*` 诊断码；编辑未实现。 |
+| `-TABLE` | 部分实现 | 具名拒绝（`-table.unsupported`）：表格创建的命令行拼写。 |
 | `-UNITS` | 部分实现 | 只读报告固定单位显示规则（`-units.*` 诊断码）；Units 对话框/逐图纸单位表未实现。 |
 | `-WBLOCK` | 部分实现 | 具名拒绝（`-wblock.unsupported`）：将块定义写入独立图形文件未实现。 |
 | `-XBIND` | 部分实现 | 具名拒绝（`-xbind.unsupported`）：本构建无外部参照绑定/插入模型；命令行拼写。 |
@@ -243,6 +248,7 @@
 | `ADDSELECTED` | 部分实现 | 具名拒绝（`addselected.unsupported`）：缺少按类型创建提示模型。 |
 | `ALIASEDIT` | 部分实现 | 只读：逐行列出规范 `COMMAND_ALIASES`；创建/修改/删除别名未实现。 |
 | `ALIGN` | 已实现 | 1 对点移动、2 对点平移+旋转+可选均匀缩放、3 对点平面**刚性**（旋转+平移，不缩放）；退化/非共面/非全等/镜像按名拒绝；3 对点的 3D 平面旋转属全局范围 |
+| `ALIGNSPACE` | 部分实现 | 具名拒绝（`alignspace.unsupported`）：视口对齐未实现（无视口对齐 API）。 |
 | `ANNORESET` | 部分实现 | 具名拒绝（`annoreset.unsupported`）：本构建无注释性对象模型。 |
 | `ANNOUPDATE` | 部分实现 | 具名拒绝（`annoupdate.unsupported`）：本构建无注释性对象模型。 |
 | `APERTURE` | 部分实现 | 只读报告会话靶框令牌（默认 10）；`APERTURE <n>` 设置形式未实现，不绘制捕捉靶框。 |
@@ -337,6 +343,10 @@
 | `COMMANDLINEHIDE` | 部分实现 | chrome 本地选择子：隐藏命令行（与状态栏开关同一状态）。 |
 | `CONSTRAINTBAR` | 部分实现 | 具名拒绝（`constraintbar.unsupported`）：本构建无约束模型。 |
 | `CONSTRAINTSETTINGS` | 部分实现 | 具名拒绝（`constraintsettings.unsupported`）：本构建无约束模型。 |
+| `CONVERT` | 部分实现 | 具名拒绝（`convert.unsupported`）：通用对象转换未实现。 |
+| `CONVERTCTB` | 部分实现 | 具名拒绝（`convertctb.unsupported`）：CTB 转换未实现（无 CTB/STB 模型）。 |
+| `CONVERTPOLY` | 部分实现 | 只读报告（`convertpoly.single_representation`）：本构建只存一种 `LWPOLYLINE` 表示，无旧式多段线可转换。 |
+| `CONVERTPSTYLES` | 部分实现 | 具名拒绝（`convertpstyles.unsupported`）：打印样式转换未实现（无 CTB/STB 模型）。 |
 | `COPY` | 已实现 | — |
 | `COPYBASE` | 部分实现 | 应用内剪贴板 + 基点；不是 OS 剪贴板，不跨应用 |
 | `COPYCLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
@@ -413,6 +423,7 @@
 | `EXTERNALREFERENCES` | 部分实现 | 只读：外部参照导入溯源报告（`externalreferences.entry`/`.summary`）；无选项板（`.palette_not_implemented`）。 |
 | `EXTERNALREFERENCESCLOSE` | 部分实现 | 具名 no-op（`externalreferences.close_not_implemented`）：无外部参照选项板可关闭。 |
 | `EXTRIM` | 部分实现 | 第一个选中为边界，其余为被裁对象；复用 trim 规划；不支持边界/目标按名拒绝 |
+| `FIELD` | 部分实现 | 具名拒绝（`field.unsupported`）：字段未实现（无字段模型）。 |
 | `FILETAB` | 部分实现 | 具名拒绝（`filetab.unsupported`）：文件标签 chrome 由宿主负责。 |
 | `FILETABCLOSE` | 部分实现 | 具名拒绝（`filetabclose.unsupported`）：文件标签 chrome 由宿主负责。 |
 | `FILL` | 部分实现 | 会话令牌 `fill`（默认 ON）；渲染器不消费该标志，无视觉变化；不写库/不入历史。 |
@@ -484,6 +495,7 @@
 | `LAYOUTMERGE` | 部分实现 | 名称校验后 `layoutmerge.write_unsupported`（无布局/实体移动/删除 API） |
 | `LAYOUTWIZARD` | 部分实现 | 名称/页面设置校验后 `layoutwizard.write_unsupported`（无布局/页面设置写 API） |
 | `LAYTHW` | 部分实现 | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入不可撤销 |
+| `LAYTRANS` | 部分实现 | 具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 |
 | `LAYULK` | 部分实现 | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入不可撤销 |
 | `LAYUNISO` | 已实现 | — |
 | `LAYVPI` | 部分实现 | 层名校验后 `layvpi.viewport_layer_state_unsupported`；永不全局冻结 |
@@ -500,6 +512,7 @@
 | `LTSCALE` | 部分实现 | 一个正有限小数；写内存 `$LTSCALE`（一次 revision，无撤销）；当前导出器不写该变量，SAVE→OPEN 不往返 |
 | `LWEIGHT` | 部分实现 | 只读报告会话线宽显示令牌（默认 ON，`lweight.report`）；渲染器不消费该标志，LWEIGHT 对话框未实现。 |
 | `MASSPROP` | 部分实现 | 只读；仅选定闭合共面圆/完整椭圆/闭合多段线；面积/周长/包围盒/形心。椭圆周长近似；无惯性矩/主轴/体积/密度/`.mpr` |
+| `MATCHCELL` | 部分实现 | 具名拒绝（`matchcell.unsupported`）：无表格实体模型。 |
 | `MATCHPROP` | 已实现 | Basic 六项 + Settings 子集；Text 组复制文字样式与字体、Dimension 组复制标注样式、Hatch 组复制填充样式/图案/渐变；**不**复制字高、标注覆盖值与填充原点（与 AutoCAD 一致）；异类目标跳过该组并报告 |
 | `MENU` | 部分实现 | 具名拒绝（`menu.unsupported`）：本构建无菜单文件模型，界面固定。 |
 | `MEASUREGEOM` | 部分实现 | 选项路由：DISTANCE/ANGLE/AREA/POLYLINE 复用既有工具，RADIUS 只读报告；VOLUME 显式未实现（无 3D 体积模型） |
@@ -540,6 +553,7 @@
 | `-OVERKILL` | 部分实现 | `OVERKILL` 的别名，同一去重实现 |
 | `OVERKILL` | 已实现 | 容差（`0` = 精确）、忽略 Color/Layer/Linetype/LTScale/Lineweight/Transparency、多段线段优化与 `NOBREAK`、共线部分重叠/端到端合并、弧覆盖圆、重复段删除；保留最低 `(draw_order,id)`；一条事务/一步撤销；关联保持/段宽/厚度/打印样式属全局 |
 | `-PAN` | 部分实现 | `PAN` 的别名；`dx dy` 或两点，走既有相机路径；只改视图（不写库/不 bump 修订/不入历史） |
+| `PAGESETUP` | 部分实现 | 只读报告每个布局的入库 `PLOTSETTINGS`（纸张/旋转/比例/出图类型/provenance）；修改未实现（`pagesetup.report_only`）。 |
 | `PAN` | 已实现 | — |
 | `PASTEBLOCK` | 部分实现 | 应用内剪贴板 → 自动命名块；不是 OS 剪贴板 |
 | `PASTECLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
@@ -549,6 +563,7 @@
 | `PLINE` | 已实现 | — |
 | `PLOT` | 部分实现 | 仅矢量 SVG/PDF；无 CTB/STB、无批量多布局 |
 | `PLOTSTAMP` | 部分实现 | 具名拒绝（`plotstamp.unsupported`）：本构建无打印戳记模型。 |
+| `PLOTSTYLE` | 部分实现 | 具名拒绝（`plotstyle.unsupported`）：命名打印样式未实现（无 CTB/STB 表）。 |
 | `PLOTTERMANAGER` | 部分实现 | 具名拒绝（`plottermanager.unsupported`）：本构建无绘图仪配置模型。 |
 | `PLT2DWG` | 部分实现 | 具名拒绝（`plt2dwg.unsupported: HPGL (PLT) import is not implemented`）。 |
 | `PNGOUT` | 部分实现 | 具名拒绝（`pngout.unsupported: raster PNG export is not implemented; use PLOT for vector SVG/PDF`）。 |
@@ -557,6 +572,7 @@
 | `PREVIEW` | 部分实现 | 具名拒绝（`preview.unsupported`）：本构建无打印预览窗口。 |
 | `PROPULATE` | 部分实现 | 具名拒绝（`propulate.unsupported`）：本构建无特性传播模型。 |
 | `PSBSCALE` | 部分实现 | 具名拒绝（`psbscale.write_unsupported`）：无视口比例写入 API。 |
+| `PSETUPIN` | 部分实现 | 具名拒绝（`psetupin.unsupported`）：从其他图纸导入页面设置未实现。 |
 | `PSPACE` | 部分实现 | 会话切换到第一个图纸布局，复用现有 `SPACE` 路径；无图纸布局时报 `pspace.no_layout`。 |
 | `PSTSCALE` | 部分实现 | 具名拒绝（`pstscale.write_unsupported`）：无视口比例写入 API。 |
 | `PTYPE` | 部分实现 | 只读：`$PDMODE`/`$PDSIZE`；写入仍走 PDMODE/PDSIZE，无 PTYPE 对话框。 |
@@ -571,22 +587,31 @@
 | `REVCLOUDPROPERTIES` | 部分实现 | 只读报告会话弧长令牌（默认 15）；设置形式未实现，REVCLOUD 不读取该令牌。 |
 | `REVERT` | 部分实现 | 具名拒绝（`revert.unsupported`）：本构建无重新打开源文件的路径。 |
 | `RIBBONCLOSE` | 部分实现 | 具名拒绝（`ribbonclose.unsupported`）：功能区 chrome 由宿主负责；请用 RIBBON。 |
+| `RTEDIT` | 部分实现 | 具名拒绝（`rtedit.unsupported`）：远程文字未实现（无 RTEXT 模型）。 |
+| `RTEXT` | 部分实现 | 具名拒绝（`rtext.unsupported`）：远程文字未实现（无 RTEXT 模型）。 |
 | `SAVEALL` | 部分实现 | 具名拒绝（`saveall.single_document`）：本构建只有一个文档；请用 SAVE。 |
 | `SCALELISTEDIT` | 部分实现 | 只读：第一个图纸布局的页面 + `scalelistedit.write_unsupported`；无比例列表存储。 |
 | `SCRIPT` | 部分实现 | 具名拒绝（`script.unsupported: no script-file runner`）。 |
 | `SHOWPALETTES` | 部分实现 | 具名拒绝（`showpalettes.unsupported`）：选项板 chrome 由宿主负责。 |
 | `SIGVALIDATE` | 部分实现 | 具名拒绝（`sigvalidate.unsupported`）：无数字签名模型。 |
 | `SPACETRANS` | 部分实现 | 具名拒绝（`spacetrans.unsupported`）：无模型/图纸距离换算 API。 |
+| `SPELL` | 部分实现 | 具名拒绝（`spell.unsupported`）：无拼写检查词典/模型。 |
 | `STLOUT` | 部分实现 | 具名拒绝（`stlout.unsupported: STL export is not implemented`）。 |
 | `STYLE` | 部分实现 | 只读列出图形的文字样式；创建/修改文字样式未实现。 |
 | `STYLESMANAGER` | 部分实现 | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |
+| `SUPERHATCH` | 部分实现 | 具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 |
 | `SYSVARMONITOR` | 部分实现 | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | `SYSVDLG` | 部分实现 | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
 | `SYSWINDOWS` | 部分实现 | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
+| `TABLE` | 部分实现 | 具名拒绝（`table.unsupported`）：无表格实体模型。 |
+| `TABLEDIT` | 部分实现 | 具名拒绝（`tabledit.unsupported`）：无表格实体模型。 |
+| `TABLEEXPORT` | 部分实现 | 具名拒绝（`tableexport.unsupported`）：无表格实体模型。 |
+| `TABLESTYLE` | 部分实现 | 具名拒绝（`tablestyle.unsupported`）：无表格样式模型。 |
 | `TABLET` | 部分实现 | 具名拒绝（`tablet.unsupported`）：本构建无数字化仪模型。 |
 | `TASKBAR` | 部分实现 | 具名拒绝（`taskbar.unsupported`）：应用窗口装饰由宿主负责。 |
 | `TEXTSCR` | 部分实现 | 置会话 `text_screen`=true；无文本屏幕窗口、不显示提示历史。 |
 | `TIFOUT` | 部分实现 | 具名拒绝（`tifout.unsupported: raster TIFF export is not implemented; use PLOT for vector SVG/PDF`）。 |
+| `TINSERT` | 部分实现 | 具名拒绝（`tinsert.unsupported`）：无表格实体模型。 |
 | `TOLERANCE` | 部分实现 | 具名拒绝（`tolerance.unsupported`）：无特征控制框（公差）对象模型。 |
 | `TRANSPARENCY` | 部分实现 | 具名拒绝（`transparency.unsupported`）：未建模图像透明度。 |
 | `TRAYSETTINGS` | 部分实现 | 会话令牌（默认 ON）；无状态栏托盘 UI。 |
@@ -599,6 +624,7 @@
 | `VBAUNLOAD` | 部分实现 | 具名拒绝（`vbaunload.unsupported: no VBA runtime`）。 |
 | `VIEWPLOTDETAILS` | 部分实现 | 具名拒绝（`viewplotdetails.unsupported`）：无打印详细信息模型。 |
 | `VPLAYER` | 部分实现 | 具名拒绝（`vplayer.viewport_layer_state_unsupported`）：无逐视口图层状态。 |
+| `VPSYNC` | 部分实现 | 具名拒绝（`vpsync.unsupported`）：视口同步未实现（无视口组模型）。 |
 | `VTOPTIONS` | 部分实现 | 只读：视图过渡设置未建模（`vtoptions.not_tracked`），不杜撰平滑/时长数值。 |
 | `WBLOCK` | 部分实现 | 具名拒绝（`wblock.unsupported`）：将块定义写入独立图形文件未实现。 |
 | `WHOHAS` | 部分实现 | 只读：单文档构建，无网络查询，不列其他用户或文件锁。 |
@@ -751,7 +777,7 @@
 | 45 | `ADJUST` | 未实现 | Adjusts the fade, contrast and monochrome settings of the selected underlay (DWF, DWFx, PDF, or DGN), or image. | — |
 | 46 | `ALIASEDIT` | 部分实现 | Creates, modifies, and deletes AutoCAD command aliases. | 只读：逐行列出规范 `COMMAND_ALIASES`；创建/修改/删除别名未实现。 |
 | 47 | `ALIGN` | 已实现 | Aligns objects with other objects in 2D and 3D. | 1 对点移动、2 对点平移+旋转+可选均匀缩放、3 对点平面**刚性**（旋转+平移，不缩放）；退化/非共面/非全等/镜像按名拒绝；3 对点的 3D 平面旋转属全局范围 |
-| 48 | `ALIGNSPACE` | 未实现 | Adjusts the pan and zoom factor of a view in a layout viewport based on the alignment points specified in model space and paper space. | — |
+| 48 | `ALIGNSPACE` | 部分实现 | Adjusts the pan and zoom factor of a view in a layout viewport based on the alignment points specified in model space and paper space. | 具名拒绝（`alignspace.unsupported`）：视口对齐未实现（无视口对齐 API）。 |
 | 49 | `AMECONVERT` | 未实现 | Converts AME solid models to AutoCAD solid objects. | — |
 | 50 | `ANALYSISCURVATURE` | 未实现 | Displays a color gradient onto a surface to evaluate different aspects of its curvature. | — |
 | 51 | `ANALYSISDRAFT` | 未实现 | Displays a color gradient onto a 3D model to evaluate whether there is adequate space between a part and its mold. | — |
@@ -899,12 +925,12 @@
 | 193 | `CONE` | 未实现 | Creates a 3D solid cone. | — |
 | 194 | `CONSTRAINTBAR` | 部分实现 | Displays or hides the geometric constraints on an object. | 具名拒绝（`constraintbar.unsupported`）：无约束模型。 |
 | 195 | `CONSTRAINTSETTINGS` | 部分实现 | Controls the display of geometric constraints on constraint bars. | 具名拒绝（`constraintsettings.unsupported`）：无约束模型。 |
-| 196 | `CONVERT` | 未实现 | Converts "legacy" 2D polylines and hatches for use with later product releases. | — |
-| 197 | `CONVERTCTB` | 未实现 | Converts a color-dependent plot style table (CTB) to a named plot style table (STB). | — |
+| 196 | `CONVERT` | 部分实现 | Converts "legacy" 2D polylines and hatches for use with later product releases. | 具名拒绝（`convert.unsupported`）：通用对象转换未实现。 |
+| 197 | `CONVERTCTB` | 部分实现 | Converts a color-dependent plot style table (CTB) to a named plot style table (STB). | 具名拒绝（`convertctb.unsupported`）：CTB 转换未实现（无 CTB/STB 模型）。 |
 | 198 | `CONVERTOLDLIGHTS` | 未实现 | Converts lights created in previous drawing file formats to the current format. | — |
 | 199 | `CONVERTOLDMATERIALS` | 未实现 | Converts older materials to use the current materials format. | — |
-| 200 | `CONVERTPOLY` | 未实现 | Converts 2D polylines between the "legacy" heavy and optimized lightweight formats. | — |
-| 201 | `CONVERTPSTYLES` | 未实现 | Converts the current drawing to either named or color-dependent plot styles. | — |
+| 200 | `CONVERTPOLY` | 部分实现 | Converts 2D polylines between the "legacy" heavy and optimized lightweight formats. | 只读报告（`convertpoly.single_representation`）：本构建只存一种 `LWPOLYLINE` 表示，无旧式多段线可转换。 |
+| 201 | `CONVERTPSTYLES` | 部分实现 | Converts the current drawing to either named or color-dependent plot styles. | 具名拒绝（`convertpstyles.unsupported`）：打印样式转换未实现（无 CTB/STB 模型）。 |
 | 202 | `CONVTOMESH` | 未实现 | Converts 3D objects such as polygon meshes, surfaces, and solids to mesh objects. | — |
 | 203 | `CONVTONURBS` | 未实现 | Converts 3D solids and surfaces into NURBS surfaces. | — |
 | 204 | `CONVTOSOLID` | 未实现 | Converts eligible 3D objects to 3D solids. | — |
@@ -1065,7 +1091,7 @@
 | 359 | `EXTRIM` | 部分实现 | Trims all objects at the cutting edge specified by a selected polyline, line, circle, arc, ellipse, text, mtext, or attribute definition. | 第一个选中为边界，其余为被裁对象；复用 trim 规划；不支持边界/目标按名拒绝 |
 | 360 | `EXTRUDE` | 未实现 | Creates a 3D solid from an object that encloses an area, or a 3D surface from an object with open ends. | — |
 | 361 | `FADEMARKUP` | 未实现 | Fade individual markups so they are less visible on a trace. | — |
-| 362 | `FIELD` | 未实现 | Creates a multiline text object with a field that can be updated automatically as the field value changes. | — |
+| 362 | `FIELD` | 部分实现 | Creates a multiline text object with a field that can be updated automatically as the field value changes. | 具名拒绝（`field.unsupported`）：字段未实现（无字段模型）。 |
 | 363 | `FILETAB` | 部分实现 | Displays the file tabs at the top of the drawing area. | 具名拒绝（`filetab.unsupported`）：文件标签 chrome 由宿主负责。 |
 | 364 | `FILETABCLOSE` | 部分实现 | Hides the file tabs at the top of the drawing area. | 具名拒绝（`filetabclose.unsupported`）：文件标签 chrome 由宿主负责。 |
 | 365 | `FILL` | 部分实现 | Controls the display of filled objects such as hatches, 2D solids, and wide polylines. | 会话令牌 `fill`（默认 ON）；渲染器不消费该标志，无视觉变化；不写库/不入历史。 |
@@ -1190,7 +1216,7 @@
 | 484 | `LAYOUTMERGE` | 部分实现 | Combines specified layouts into a single layout. | 名称校验后 `layoutmerge.write_unsupported`（无布局/实体移动/删除 API） |
 | 485 | `LAYOUTWIZARD` | 部分实现 | Creates a new layout tab and specifies page and plot settings. | 名称/页面设置校验后 `layoutwizard.write_unsupported`（无布局/页面设置写 API） |
 | 486 | `LAYTHW` | 部分实现 | Thaws all layers in the drawing. | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入不可撤销 |
-| 487 | `LAYTRANS` | 未实现 | Translates the layers in the current drawing to specified layer standards. | — |
+| 487 | `LAYTRANS` | 部分实现 | Translates the layers in the current drawing to specified layer standards. | 具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 |
 | 488 | `LAYULK` | 部分实现 | Unlocks the layer of a selected object. | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入不可撤销 |
 | 489 | `LAYUNISO` | 已实现 | Restores all layers that were hidden or locked with the LAYISO command. | — |
 | 490 | `LAYVPI` | 部分实现 | Freezes selected layers in all layout viewports except the current viewport. | 层名校验后 `layvpi.viewport_layer_state_unsupported`；永不全局冻结 |
@@ -1225,7 +1251,7 @@
 | 519 | `MASSPROP` | 部分实现 | Calculates the mass properties of selected 2D regions or 3D solids. | **v1（2026-11-07）只读**：当前选择中的闭合共面 `CIRCLE` / 完整 `ELLIPSE` / 闭合 `POLYLINE`（含任意 bulge，同一平面）；逐对象 + 汇总报告**面积/周长/精确包围盒/形心**。椭圆周长是 Ramanujan 第二近似（`massprop.approx_ellipse_perimeter`），不是精确椭圆积分。**未实现**：惯性矩/惯性积、回转半径、主惯性矩/主轴、质量/体积/3D 实体、密度、`Add`/`Subtract` 组合、写 `.mpr` 文件；非共面/开放折线/圆弧/样条/文字/块参照/填充/标注等按名拒绝。 |
 | 520 | `MATBROWSERCLOSE` | 未实现 | Closes the Materials Browser. | — |
 | 521 | `MATBROWSEROPEN` | 未实现 | Opens the Materials Browser. | — |
-| 522 | `MATCHCELL` | 未实现 | Applies the properties of a selected table cell to other table cells. | — |
+| 522 | `MATCHCELL` | 部分实现 | Applies the properties of a selected table cell to other table cells. | 具名拒绝（`matchcell.unsupported`）：无表格实体模型。 |
 | 523 | `MATCHPROP` | 已实现 | Applies the properties of a selected object to other objects. | Basic 六项 + Settings 子集；Text 组复制文字样式与字体、Dimension 组复制标注样式、Hatch 组复制填充样式/图案/渐变；**不**复制字高、标注覆盖值与填充原点（与 AutoCAD 一致）；异类目标跳过该组并报告 |
 | 524 | `MATEDITORCLOSE` | 未实现 | Closes the Materials Editor. | — |
 | 525 | `MATEDITOROPEN` | 未实现 | Opens the Materials Editor. | — |
@@ -1312,8 +1338,8 @@
 | 606 | `OSNAP` | 已实现 | Sets running object snap modes. | — |
 | 607 | `-OVERKILL` | 部分实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines partially overlapping or contiguous ones. | `OVERKILL` 的别名，同一去重实现 |
 | 608 | `OVERKILL` | 已实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines those that are partially overlapping or contiguous. | 容差（`0` = 精确）、忽略 Color/Layer/Linetype/LTScale/Lineweight/Transparency、多段线段优化与 `NOBREAK`、共线部分重叠/端到端合并、弧覆盖圆、重复段删除；保留最低 `(draw_order,id)`；一条事务/一步撤销；关联保持/段宽/厚度/打印样式属全局 |
-| 609 | `-PAGESETUP` | 未实现 | Modifies the current page layout settings for the plotting device, paper size, plot scale, and several other settings in the command line. | — |
-| 610 | `PAGESETUP` | 未实现 | Controls the page layout, plotting device, paper size, and other settings for each new layout. | — |
+| 609 | `-PAGESETUP` | 部分实现 | Modifies the current page layout settings for the plotting device, paper size, plot scale, and several other settings in the command line. | 同一只读页面设置报告的命令行拼写。 |
+| 610 | `PAGESETUP` | 部分实现 | Controls the page layout, plotting device, paper size, and other settings for each new layout. | 只读报告每个布局的入库 `PLOTSETTINGS`（纸张/旋转/比例/出图类型/provenance）；修改未实现（`pagesetup.report_only`）。 |
 | 611 | `-PAN` | 部分实现 | Shifts the view by specifying up to two points to determine a distance and direction. | `PAN` 的别名；`dx dy` 或两点，走既有相机路径；只改视图（不写库/不 bump 修订/不入历史） |
 | 612 | `PAN` | 已实现 | Shifts the view without changing the viewing direction or magnification. | — |
 | 613 | `-PARAMETERS` | 未实现 | Opens the Parameters Manager palette that includes all dimensional constraint parameters, reference parameters, and user variables in the current drawing. | — |
@@ -1351,8 +1377,8 @@
 | 645 | `PLOT` | 部分实现 | Plots a drawing to a plotter, printer, or file. | 仅矢量 SVG/PDF；无 CTB/STB、无批量多布局 |
 | 646 | `-PLOTSTAMP` | 部分实现 | Places a plot stamp on a specified corner of each drawing and logs it to a file. | 具名拒绝（`-plotstamp.unsupported`）：本构建无打印戳记模型；命令行拼写。 |
 | 647 | `PLOTSTAMP` | 部分实现 | Places a plot stamp with information such as date, time, and scale on a specified corner of each drawing and logs it to a file. | 具名拒绝（`plotstamp.unsupported`）：本构建无打印戳记模型。 |
-| 648 | `-PLOTSTYLE` | 未实现 | Lists all available plotstyles in the current drawing and to set a plotstyle current. | — |
-| 649 | `PLOTSTYLE` | 未实现 | Controls the named plot styles that are attached to the current layout and can be assigned to objects. | — |
+| 648 | `-PLOTSTYLE` | 部分实现 | Lists all available plotstyles in the current drawing and to set a plotstyle current. | 具名拒绝（`-plotstyle.unsupported`）：打印样式列表的命令行拼写。 |
+| 649 | `PLOTSTYLE` | 部分实现 | Controls the named plot styles that are attached to the current layout and can be assigned to objects. | 具名拒绝（`plotstyle.unsupported`）：命名打印样式未实现（无 CTB/STB 表）。 |
 | 650 | `PLOTTERMANAGER` | 部分实现 | Displays the Plotter Manager, where you can add or edit a plotter configuration. | 具名拒绝（`plottermanager.unsupported`）：本构建无绘图仪配置模型。 |
 | 651 | `PLT2DWG` | 部分实现 | Imports legacy HPGL files into the current drawing, retaining all colors. | 具名拒绝（`plt2dwg.unsupported: HPGL (PLT) import is not implemented`）。 |
 | 652 | `PMTOGGLE` | 未实现 | Controls whether the Performance Recorder is turned on or off. | — |
@@ -1378,8 +1404,8 @@
 | 672 | `PROPERTIESCLOSE` | 已实现 | Closes the Properties palette. | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
 | 673 | `PROPULATE` | 部分实现 | Update, list, or clear Drawing Properties data. | 具名拒绝（`propulate.unsupported`）：本构建无特性传播模型。 |
 | 674 | `PSBSCALE` | 部分实现 | Specifies or updates the scale of block objects relative to paper space. | 具名拒绝（`psbscale.write_unsupported`）：无视口比例写入 API。 |
-| 675 | `-PSETUPIN` | 未实现 | Imports a user-defined page setup into a new drawing layout using the command line. | — |
-| 676 | `PSETUPIN` | 未实现 | Imports a user-defined page setup into a new drawing layout. | — |
+| 675 | `-PSETUPIN` | 部分实现 | Imports a user-defined page setup into a new drawing layout using the command line. | 具名拒绝（`-psetupin.unsupported`）：同一页面设置导入的命令行拼写。 |
+| 676 | `PSETUPIN` | 部分实现 | Imports a user-defined page setup into a new drawing layout. | 具名拒绝（`psetupin.unsupported`）：从其他图纸导入页面设置未实现。 |
 | 677 | `PSOUT` | 未实现 | Creates a PostScript file from DWG file. | — |
 | 678 | `PSPACE` | 部分实现 | In a layout, switches from model space in a layout viewport to paper space. | 复用 `SPACE` 会话路径切到第一个图纸布局；无图纸布局为 `pspace.no_layout`，不写库。 |
 | 679 | `PSTSCALE` | 部分实现 | Specifies or updates the scale of text objects relative to paper space. | 具名拒绝（`pstscale.write_unsupported`）：无视口比例写入 API。 |
@@ -1462,8 +1488,8 @@
 | 756 | `RPREF` | 未实现 | Displays the Render Presets Manager palette used to configure rendering settings. | — |
 | 757 | `RPREFCLOSE` | 未实现 | Closes the Render Settings Manager palette. | — |
 | 758 | `RSCRIPT` | 未实现 | Repeats a script file. | — |
-| 759 | `RTEDIT` | 未实现 | Edits existing remote text (rtext) objects. | — |
-| 760 | `RTEXT` | 未实现 | Creates remote text (rtext) objects. | — |
+| 759 | `RTEDIT` | 部分实现 | Edits existing remote text (rtext) objects. | 具名拒绝（`rtedit.unsupported`）：远程文字未实现（无 RTEXT 模型）。 |
+| 760 | `RTEXT` | 部分实现 | Creates remote text (rtext) objects. | 具名拒绝（`rtext.unsupported`）：远程文字未实现（无 RTEXT 模型）。 |
 | 761 | `RTUCS` | 未实现 | Rotates the UCS dynamically with your pointing device. | — |
 | 762 | `RULESURF` | 未实现 | Creates a mesh that represents the surface between two lines or curves. | — |
 | 763 | `SAVE` | 部分实现 | Saves the current drawing under a different file name or location without changing which drawing file is the current one. | 有损 DXF 另存；无 DWG 回写 |
@@ -1514,7 +1540,7 @@
 | 808 | `SOLPROF` | 未实现 | Creates 2D profile images of 3D solids for display in a layout viewport. | — |
 | 809 | `SOLVIEW` | 未实现 | Creates orthographic views, layers, and layout viewports automatically for 3D solids. | — |
 | 810 | `SPACETRANS` | 部分实现 | Calculates equivalent model space and paper space distances in a layout. | 具名拒绝（`spacetrans.unsupported`）：无模型/图纸距离换算 API。 |
-| 811 | `SPELL` | 未实现 | Checks spelling in a drawing. | — |
+| 811 | `SPELL` | 部分实现 | Checks spelling in a drawing. | 具名拒绝（`spell.unsupported`）：无拼写检查词典/模型。 |
 | 812 | `SPHERE` | 未实现 | Creates a 3D solid sphere. | — |
 | 813 | `SPLINE` | 已实现 | Creates a smooth curve that passes through or near a set of fit points, or that is defined by the vertices in a control frame. | — |
 | 814 | `SPLINEDIT` | 部分实现 | Modifies the parameters of a spline or converts a spline-fit polyline to a spline. | 具名拒绝（`splinedit.unsupported`）：无 NURBS 编辑面。 |
@@ -1530,7 +1556,7 @@
 | 824 | `SUBTRACT` | 未实现 | Creates as a new object by subtracting one overlapping region or 3D solid from another. | — |
 | 825 | `SUNPROPERTIES` | 未实现 | Displays the Sun Properties palette. | — |
 | 826 | `SUNPROPERTIESCLOSE` | 未实现 | Closes the Sun Properties palette | — |
-| 827 | `SUPERHATCH` | 未实现 | Hatches an area using a selected image, block, xref, or wipeout object. | — |
+| 827 | `SUPERHATCH` | 部分实现 | Hatches an area using a selected image, block, xref, or wipeout object. | 具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 |
 | 828 | `SURFBLEND` | 未实现 | Creates a continuous blend surface between two existing surfaces. | — |
 | 829 | `SURFEXTEND` | 未实现 | Lengthens a surface by a specified distance. | — |
 | 830 | `SURFEXTRACTCURVE` | 未实现 | Creates curves on surfaces and 3D solids. | — |
@@ -1545,11 +1571,11 @@
 | 839 | `SYSVARMONITOR` | 部分实现 | Monitors a list of system variables and sends notifications when there are changes to any one in the list. | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | 840 | `SYSVDLG` | 部分实现 | Allows you to view, edit, save, and restore system variable settings. | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
 | 841 | `SYSWINDOWS` | 部分实现 | Arranges windows and icons when the application window is shared with external applications. | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
-| 842 | `-TABLE` | 未实现 | Creates an empty table object. | — |
-| 843 | `TABLE` | 未实现 | Creates an empty table object. | — |
-| 844 | `TABLEDIT` | 未实现 | Edits text in a table cell. | — |
-| 845 | `TABLEEXPORT` | 未实现 | Exports data from a table object in CSV file format. | — |
-| 846 | `TABLESTYLE` | 未实现 | Creates, modifies, or specifies table styles. | — |
+| 842 | `-TABLE` | 部分实现 | Creates an empty table object. | 具名拒绝（`-table.unsupported`）：表格创建的命令行拼写。 |
+| 843 | `TABLE` | 部分实现 | Creates an empty table object. | 具名拒绝（`table.unsupported`）：无表格实体模型。 |
+| 844 | `TABLEDIT` | 部分实现 | Edits text in a table cell. | 具名拒绝（`tabledit.unsupported`）：无表格实体模型。 |
+| 845 | `TABLEEXPORT` | 部分实现 | Exports data from a table object in CSV file format. | 具名拒绝（`tableexport.unsupported`）：无表格实体模型。 |
+| 846 | `TABLESTYLE` | 部分实现 | Creates, modifies, or specifies table styles. | 具名拒绝（`tablestyle.unsupported`）：无表格样式模型。 |
 | 847 | `TABLET` | 部分实现 | Calibrates, configures, and turns on and off an attached digitizing tablet. | 具名拒绝（`tablet.unsupported`）：本构建无数字化仪模型。 |
 | 848 | `TABSURF` | 未实现 | Creates a mesh from a line or curve that is swept along a straight path. | — |
 | 849 | `TARGETPOINT` | 未实现 | Creates a target point light. | — |
@@ -1569,7 +1595,7 @@
 | 863 | `THICKEN` | 未实现 | Converts a surface into a 3D solid with a specified thickness. | — |
 | 864 | `TIFOUT` | 部分实现 | Saves selected objects to a file in TIFF file format. | 具名拒绝（`tifout.unsupported: raster TIFF export is not implemented; use PLOT for vector SVG/PDF`）。 |
 | 865 | `TIME` | 部分实现 | Displays the date and time statistics of a drawing. | 只读：revision/实体数 + UTC 时钟；创建/编辑时间与会话 uptime 显式 NOT TRACKED |
-| 866 | `TINSERT` | 未实现 | Inserts a block in a table cell. | — |
+| 866 | `TINSERT` | 部分实现 | Inserts a block in a table cell. | 具名拒绝（`tinsert.unsupported`）：无表格实体模型。 |
 | 867 | `TJUST` | 部分实现 | Changes the justification point of a text object without moving the text. Works with text, mtext, and attribute definition objects. | `JUSTIFYTEXT` 的别名，同一语法与实现 |
 | 868 | `TOLERANCE` | 部分实现 | Creates geometric tolerances contained in a feature control frame. | 具名拒绝（`tolerance.unsupported`）：无特征控制框（公差）对象模型。 |
 | 869 | `-TOOLBAR` | 未实现 | Displays, hides, and customizes toolbars from the Command prompt. | — |
@@ -1648,7 +1674,7 @@
 | 942 | `-VPORTS` | 部分实现 | Creates multiple viewports in model space or paper space. | `VPORTS` 的别名，同一实现 |
 | 943 | `VPORTS` | 部分实现 | Creates multiple viewports in model space or in a layout (paper space). | 网格校验 + 图纸空间检查后 `vports.write_unsupported`（无视口创建 API） |
 | 944 | `VPSCALE` | 部分实现 | On a layout, displays the scale of the current viewport or of a selected layout viewport. | 零/非有限/未知拒绝；解析比例后 `vpscale.write_unsupported`（无视口比例写 API） |
-| 945 | `VPSYNC` | 未实现 | Aligns the views in one or more adjacent layout viewports with a master layout viewport. | — |
+| 945 | `VPSYNC` | 部分实现 | Aligns the views in one or more adjacent layout viewports with a master layout viewport. | 具名拒绝（`vpsync.unsupported`）：视口同步未实现（无视口组模型）。 |
 | 946 | `VSCURRENT` | 部分实现 | Sets the visual style in the current viewport. | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented`；无渲染器切换、NOT pixel-verified |
 | 947 | `VSLIDE` | 未实现 | Displays an image slide file in the current viewport. | — |
 | 948 | `VSSAVE` | 未实现 | Saves the current visual style under a new name. | — |

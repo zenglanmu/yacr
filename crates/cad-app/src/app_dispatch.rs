@@ -365,6 +365,32 @@ impl Application {
             | ExtendedCommandId::VbaRun
             | ExtendedCommandId::VbaUnload
             | ExtendedCommandId::Script => self.extended_w12_refusals(command, ext)?,
+            // Wave 13: 2D/annotation/table/page-setup reports and refusals.
+            ExtendedCommandId::PageSetup
+            | ExtendedCommandId::DashPageSetup
+            | ExtendedCommandId::ConvertPoly => self.extended_w13_reports(session, command, ext)?,
+            ExtendedCommandId::PageSetupIn
+            | ExtendedCommandId::DashPageSetupIn
+            | ExtendedCommandId::PlotStyleList
+            | ExtendedCommandId::DashPlotStyleList
+            | ExtendedCommandId::ConvertPlotStyles
+            | ExtendedCommandId::ConvertCtb
+            | ExtendedCommandId::ConvertGeneric
+            | ExtendedCommandId::TableCreate
+            | ExtendedCommandId::DashTable
+            | ExtendedCommandId::TableEdit
+            | ExtendedCommandId::TableExport
+            | ExtendedCommandId::TableStyleList
+            | ExtendedCommandId::TableInsert
+            | ExtendedCommandId::MatchCell
+            | ExtendedCommandId::Field
+            | ExtendedCommandId::RText
+            | ExtendedCommandId::RTextEdit
+            | ExtendedCommandId::Spell
+            | ExtendedCommandId::SuperHatch
+            | ExtendedCommandId::AlignSpace
+            | ExtendedCommandId::VpSync
+            | ExtendedCommandId::LayTrans => self.extended_w13_refusals(session, command, ext)?,
         };
         Ok(Some(outcome))
     }

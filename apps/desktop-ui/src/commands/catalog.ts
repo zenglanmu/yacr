@@ -869,4 +869,32 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // neither file approaches the 1000-line code gate. They are appended here in
   // their original order.
   ...EXTENDED_COMMAND_CATALOG,
+  // The 2026-11-09 Wave 13 batch: page-setup/conversion reports, table/field
+  // surfaces and named refusals. Appended last so no shipped row moves.
+  { id: 'PAGESETUP', labelKey: 'draw.kind.pagesetup', icon: 'printer', group: 'file' },
+  { id: '-PAGESETUP', labelKey: 'draw.kind.dashpagesetup', icon: 'printer', group: 'file' },
+  { id: 'PSETUPIN', labelKey: 'draw.kind.psetupin', icon: 'printer', group: 'file' },
+  { id: '-PSETUPIN', labelKey: 'draw.kind.dashpsetupin', icon: 'printer', group: 'file' },
+  { id: 'PLOTSTYLE', labelKey: 'draw.kind.plotstyle', icon: 'printer', group: 'file' },
+  { id: '-PLOTSTYLE', labelKey: 'draw.kind.dashplotstyle', icon: 'printer', group: 'file' },
+  { id: 'CONVERTPSTYLES', labelKey: 'draw.kind.convertpstyles', icon: 'printer', group: 'file' },
+  { id: 'CONVERTCTB', labelKey: 'draw.kind.convertctb', icon: 'printer', group: 'file' },
+  { id: 'CONVERTPOLY', labelKey: 'draw.kind.convertpoly', icon: 'polyline', group: 'modify' },
+  { id: 'CONVERT', labelKey: 'draw.kind.convert', icon: 'settings', group: 'modify' },
+  { id: 'TABLE', labelKey: 'draw.kind.table', icon: 'properties', group: 'annotate' },
+  { id: '-TABLE', labelKey: 'draw.kind.dashtable', icon: 'properties', group: 'annotate' },
+  { id: 'TABLEDIT', labelKey: 'draw.kind.tabledit', icon: 'properties', group: 'annotate' },
+  { id: 'TABLEEXPORT', labelKey: 'draw.kind.tableexport', icon: 'save', group: 'annotate' },
+  { id: 'TABLESTYLE', labelKey: 'draw.kind.tablestyle', icon: 'properties', group: 'annotate' },
+  { id: 'TINSERT', labelKey: 'draw.kind.tinsert', icon: 'properties', group: 'annotate' },
+  { id: 'MATCHCELL', labelKey: 'draw.kind.matchcell', icon: 'matchprop', group: 'annotate' },
+  { id: 'FIELD', labelKey: 'draw.kind.field', icon: 'text', group: 'annotate' },
+  { id: 'RTEXT', labelKey: 'draw.kind.rtext', icon: 'text', group: 'annotate' },
+  { id: 'RTEDIT', labelKey: 'draw.kind.rtedit', icon: 'text', group: 'annotate' },
+  { id: 'SPELL', labelKey: 'draw.kind.spell', icon: 'text', group: 'annotate' },
+  { id: 'SUPERHATCH', labelKey: 'draw.kind.superhatch', icon: 'hatch', group: 'draw' },
+  { id: 'ALIGNSPACE', labelKey: 'draw.kind.alignspace', icon: 'view', group: 'view' },
+  { id: 'VPSYNC', labelKey: 'draw.kind.vpsync', icon: 'view', group: 'view' },
+  { id: 'LAYTRANS', labelKey: 'draw.kind.laytrans', icon: 'layers', group: 'properties' },
+
 ]);

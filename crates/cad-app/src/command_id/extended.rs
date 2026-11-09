@@ -755,6 +755,58 @@ pub enum ExtendedCommandId {
     VbaUnload,
     /// `SCRIPT`: no script-file runner.
     Script,
+
+    // Wave 13: 2D/annotation/table/page-setup surfaces.
+    /// `PAGESETUP`: read-only report of each layout's stored plot settings; the page-setup dialog is NOT IMPLEMENTED.
+    PageSetup,
+    /// `-PAGESETUP`: the command-line spelling of the same plot-settings report.
+    DashPageSetup,
+    /// `PSETUPIN`: importing a page setup from another drawing is NOT IMPLEMENTED.
+    PageSetupIn,
+    /// `-PSETUPIN`: the command-line spelling of the unsupported page-setup import.
+    DashPageSetupIn,
+    /// `PLOTSTYLE`: named plot styles are NOT IMPLEMENTED (no CTB/STB table).
+    PlotStyleList,
+    /// `-PLOTSTYLE`: the command-line spelling of the unsupported plot-style list.
+    DashPlotStyleList,
+    /// `CONVERTPSTYLES`: plot-style conversion is NOT IMPLEMENTED (no CTB/STB model).
+    ConvertPlotStyles,
+    /// `CONVERTCTB`: CTB conversion is NOT IMPLEMENTED (no CTB/STB model).
+    ConvertCtb,
+    /// `CONVERTPOLY`: read-only report that this build stores one LWPOLYLINE representation; no legacy polyline conversion is performed.
+    ConvertPoly,
+    /// `CONVERT`: generic object conversion is NOT IMPLEMENTED.
+    ConvertGeneric,
+    /// `TABLE`: no table entity model is implemented.
+    TableCreate,
+    /// `-TABLE`: the command-line spelling of the unsupported table creation.
+    DashTable,
+    /// `TABLEDIT`: no table entity model is implemented.
+    TableEdit,
+    /// `TABLEEXPORT`: no table entity model is implemented.
+    TableExport,
+    /// `TABLESTYLE`: no table-style model is implemented.
+    TableStyleList,
+    /// `TINSERT`: no table entity model is implemented.
+    TableInsert,
+    /// `MATCHCELL`: no table entity model is implemented.
+    MatchCell,
+    /// `FIELD`: fields are NOT IMPLEMENTED (no field model).
+    Field,
+    /// `RTEXT`: remote text is NOT IMPLEMENTED (no RTEXT model).
+    RText,
+    /// `RTEDIT`: remote text is NOT IMPLEMENTED (no RTEXT model).
+    RTextEdit,
+    /// `SPELL`: no spell-check dictionary or model is implemented.
+    Spell,
+    /// `SUPERHATCH`: image/block-based super-hatching is NOT IMPLEMENTED.
+    SuperHatch,
+    /// `ALIGNSPACE`: viewport alignment is NOT IMPLEMENTED (no viewport alignment API).
+    AlignSpace,
+    /// `VPSYNC`: viewport synchronization is NOT IMPLEMENTED (no viewport group model).
+    VpSync,
+    /// `LAYTRANS`: layer translation standards are NOT IMPLEMENTED.
+    LayTrans,
 }
 
 impl ExtendedCommandId {

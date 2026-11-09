@@ -680,6 +680,33 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("VBAUNLOAD", CommandId::Extended(ExtendedCommandId::VbaUnload)),
     ("SCRIPT", CommandId::Extended(ExtendedCommandId::Script)),
 
+    // Wave 13 (2026-11-09): 2D/annotation/table/page-setup surfaces.
+    ("PAGESETUP", CommandId::Extended(ExtendedCommandId::PageSetup)),
+    ("-PAGESETUP", CommandId::Extended(ExtendedCommandId::DashPageSetup)),
+    ("PSETUPIN", CommandId::Extended(ExtendedCommandId::PageSetupIn)),
+    ("-PSETUPIN", CommandId::Extended(ExtendedCommandId::DashPageSetupIn)),
+    ("PLOTSTYLE", CommandId::Extended(ExtendedCommandId::PlotStyleList)),
+    ("-PLOTSTYLE", CommandId::Extended(ExtendedCommandId::DashPlotStyleList)),
+    ("CONVERTPSTYLES", CommandId::Extended(ExtendedCommandId::ConvertPlotStyles)),
+    ("CONVERTCTB", CommandId::Extended(ExtendedCommandId::ConvertCtb)),
+    ("CONVERTPOLY", CommandId::Extended(ExtendedCommandId::ConvertPoly)),
+    ("CONVERT", CommandId::Extended(ExtendedCommandId::ConvertGeneric)),
+    ("TABLE", CommandId::Extended(ExtendedCommandId::TableCreate)),
+    ("-TABLE", CommandId::Extended(ExtendedCommandId::DashTable)),
+    ("TABLEDIT", CommandId::Extended(ExtendedCommandId::TableEdit)),
+    ("TABLEEXPORT", CommandId::Extended(ExtendedCommandId::TableExport)),
+    ("TABLESTYLE", CommandId::Extended(ExtendedCommandId::TableStyleList)),
+    ("TINSERT", CommandId::Extended(ExtendedCommandId::TableInsert)),
+    ("MATCHCELL", CommandId::Extended(ExtendedCommandId::MatchCell)),
+    ("FIELD", CommandId::Extended(ExtendedCommandId::Field)),
+    ("RTEXT", CommandId::Extended(ExtendedCommandId::RText)),
+    ("RTEDIT", CommandId::Extended(ExtendedCommandId::RTextEdit)),
+    ("SPELL", CommandId::Extended(ExtendedCommandId::Spell)),
+    ("SUPERHATCH", CommandId::Extended(ExtendedCommandId::SuperHatch)),
+    ("ALIGNSPACE", CommandId::Extended(ExtendedCommandId::AlignSpace)),
+    ("VPSYNC", CommandId::Extended(ExtendedCommandId::VpSync)),
+    ("LAYTRANS", CommandId::Extended(ExtendedCommandId::LayTrans)),
+
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**

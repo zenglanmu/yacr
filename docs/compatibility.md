@@ -1308,6 +1308,38 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `VBAUNLOAD` | **部分实现（具名拒绝）**：`vbaunload.unsupported: no VBA runtime` | 不写库/不升修订/不入历史 |
 | `SCRIPT` | **部分实现（具名拒绝）**：`script.unsupported: no script-file runner` | 不写库/不升修订/不入历史 |
 
+### 2026-11-09 Wave 13 扩展命令（页面设置/表格/字段/转换）
+
+> 证据仅 Linux 编译 + 契约测试；GUI/GPU/像素/真机 NOT VERIFIED。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `PAGESETUP` | **部分实现**：只读报告每个布局的入库 `PLOTSETTINGS`（纸张/旋转/比例/出图类型/provenance）；修改未实现（`pagesetup.report_only`）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `-PAGESETUP` | **部分实现**：同一只读页面设置报告的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
+| `PSETUPIN` | **部分实现**：具名拒绝（`psetupin.unsupported`）：从其他图纸导入页面设置未实现。 | 不写库/不升修订/不入历史（报告类只读） |
+| `-PSETUPIN` | **部分实现**：具名拒绝（`-psetupin.unsupported`）：同一页面设置导入的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
+| `PLOTSTYLE` | **部分实现**：具名拒绝（`plotstyle.unsupported`）：命名打印样式未实现（无 CTB/STB 表）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `-PLOTSTYLE` | **部分实现**：具名拒绝（`-plotstyle.unsupported`）：打印样式列表的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
+| `CONVERTPSTYLES` | **部分实现**：具名拒绝（`convertpstyles.unsupported`）：打印样式转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `CONVERTCTB` | **部分实现**：具名拒绝（`convertctb.unsupported`）：CTB 转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `CONVERTPOLY` | **部分实现**：只读报告（`convertpoly.single_representation`）：本构建只存一种 `LWPOLYLINE` 表示，无旧式多段线可转换。 | 不写库/不升修订/不入历史（报告类只读） |
+| `CONVERT` | **部分实现**：具名拒绝（`convert.unsupported`）：通用对象转换未实现。 | 不写库/不升修订/不入历史（报告类只读） |
+| `TABLE` | **部分实现**：具名拒绝（`table.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `-TABLE` | **部分实现**：具名拒绝（`-table.unsupported`）：表格创建的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
+| `TABLEDIT` | **部分实现**：具名拒绝（`tabledit.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `TABLEEXPORT` | **部分实现**：具名拒绝（`tableexport.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `TABLESTYLE` | **部分实现**：具名拒绝（`tablestyle.unsupported`）：无表格样式模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `TINSERT` | **部分实现**：具名拒绝（`tinsert.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `MATCHCELL` | **部分实现**：具名拒绝（`matchcell.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `FIELD` | **部分实现**：具名拒绝（`field.unsupported`）：字段未实现（无字段模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `RTEXT` | **部分实现**：具名拒绝（`rtext.unsupported`）：远程文字未实现（无 RTEXT 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `RTEDIT` | **部分实现**：具名拒绝（`rtedit.unsupported`）：远程文字未实现（无 RTEXT 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `SPELL` | **部分实现**：具名拒绝（`spell.unsupported`）：无拼写检查词典/模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `SUPERHATCH` | **部分实现**：具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 | 不写库/不升修订/不入历史（报告类只读） |
+| `ALIGNSPACE` | **部分实现**：具名拒绝（`alignspace.unsupported`）：视口对齐未实现（无视口对齐 API）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `VPSYNC` | **部分实现**：具名拒绝（`vpsync.unsupported`）：视口同步未实现（无视口组模型）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `LAYTRANS` | **部分实现**：具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 | 不写库/不升修订/不入历史（报告类只读） |
+
 ## P2 晋升与边界更新（2026-11-09）
 
 > 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux
