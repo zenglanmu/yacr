@@ -827,4 +827,40 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'XOPEN', labelKey: 'draw.kind.xopen', icon: 'open', group: 'file' },
   { id: 'CLASSICXREF', labelKey: 'draw.kind.classicxref', icon: 'reference', group: 'file' },
 
+  // The 2026-11-09 Wave 6 batch: the file / plot / export surfaces. DWGLOG,
+  // LOGFILEON and LOGFILEOFF are one session token (no log file is written);
+  // DWGPROPS is a read-only document report, DWFFORMAT/EXPORTPDF are read-only
+  // capability reports; the rest are stable named refusals. Appended last so no
+  // shipped row moves.
+  { id: 'DWGLOG', labelKey: 'draw.kind.dwglog', icon: 'save', group: 'file' },
+  { id: 'LOGFILEON', labelKey: 'draw.kind.logfileon', icon: 'save', group: 'file' },
+  { id: 'LOGFILEOFF', labelKey: 'draw.kind.logfileoff', icon: 'save', group: 'file' },
+  { id: 'DWGPROPS', labelKey: 'draw.kind.dwgprops', icon: 'properties', group: 'properties' },
+  { id: 'DWFFORMAT', labelKey: 'draw.kind.dwfformat', icon: 'printer', group: 'file' },
+  { id: 'EXPORTPDF', labelKey: 'draw.kind.exportpdf', icon: 'printer', group: 'file' },
+  { id: 'SAVEALL', labelKey: 'draw.kind.saveall', icon: 'save', group: 'file' },
+  { id: 'QNEW', labelKey: 'draw.kind.qnew', icon: 'new', group: 'file' },
+  { id: 'REVERT', labelKey: 'draw.kind.revert', icon: 'open', group: 'file' },
+  { id: 'CLOSEALL', labelKey: 'draw.kind.closeall', icon: 'close', group: 'file' },
+  { id: 'CLOSEALLOTHER', labelKey: 'draw.kind.closeallother', icon: 'close', group: 'file' },
+  { id: 'QQUIT', labelKey: 'draw.kind.qquit', icon: 'close', group: 'file' },
+  { id: 'QUIT', labelKey: 'draw.kind.quit', icon: 'close', group: 'file' },
+  { id: 'PROPULATE', labelKey: 'draw.kind.propulate', icon: 'matchprop', group: 'modify' },
+  { id: 'PLOTTERMANAGER', labelKey: 'draw.kind.plottermanager', icon: 'printer', group: 'file' },
+  { id: 'STYLESMANAGER', labelKey: 'draw.kind.stylesmanager', icon: 'printer', group: 'file' },
+  { id: 'EXPORTSETTINGS', labelKey: 'draw.kind.exportsettings', icon: 'settings', group: 'file' },
+  { id: 'PREVIEW', labelKey: 'draw.kind.preview', icon: 'eye', group: 'file' },
+  { id: 'EXPORTLAYOUT', labelKey: 'draw.kind.exportlayout', icon: 'printer', group: 'file' },
+  { id: 'PLOTSTAMP', labelKey: 'draw.kind.plotstamp', icon: 'printer', group: 'file' },
+  { id: '-PLOTSTAMP', labelKey: 'draw.kind.dashplotstamp', icon: 'printer', group: 'file' },
+  { id: '-PLOT', labelKey: 'draw.kind.dashplot', icon: 'printer', group: 'file' },
+  { id: '-EXPORT', labelKey: 'draw.kind.dashexport', icon: 'printer', group: 'file' },
+  { id: 'ETRANSMIT', labelKey: 'draw.kind.etransmit', icon: 'save', group: 'file' },
+  { id: '-ETRANSMIT', labelKey: 'draw.kind.dashetransmit', icon: 'save', group: 'file' },
+  { id: 'ARCHIVE', labelKey: 'draw.kind.archive', icon: 'save', group: 'file' },
+  { id: '-ARCHIVE', labelKey: 'draw.kind.dasharchive', icon: 'save', group: 'file' },
+  { id: 'PUBLISH', labelKey: 'draw.kind.publish', icon: 'printer', group: 'file' },
+  { id: '-PUBLISH', labelKey: 'draw.kind.dashpublish', icon: 'printer', group: 'file' },
+  { id: 'AUTOPUBLISH', labelKey: 'draw.kind.autopublish', icon: 'printer', group: 'file' },
+
 ]);

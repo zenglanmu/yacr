@@ -9,7 +9,9 @@
 //! (named refusals), and the Wave 4 handlers in `app_extended_edit4` (real
 //! edits) and `app_extended_refusals4` (named refusals). Wave 5 adds
 //! `app_extended_attrs5` (ATTDISP token plus attribute/xref reports) and
-//! `app_extended_refusals5` (named refusals). Keeping the routing here means
+//! `app_extended_refusals5` (named refusals); Wave 6 adds
+//! `app_extended_file6` (drawing-log token plus file/plot/export reports) and
+//! `app_extended_refusals6` (named refusals). Keeping the routing here means
 //! `application.rs` stays a one-line interception rather than growing a hundred
 //! more arms.
 
@@ -175,6 +177,41 @@ impl Application {
             | ExtendedCommandId::DashAttach
             | ExtendedCommandId::XOpen
             | ExtendedCommandId::ClassicXRef => self.extended_refusal5(command, ext)?,
+            // Wave 6 session tokens + file/plot/export reports: DWGLOG/LOGFILEON/
+            // LOGFILEOFF flip one session flag (no log file is written); the
+            // three reports read the document and name the absent export models.
+            // All are Viewer-legal.
+            ExtendedCommandId::DwgLog
+            | ExtendedCommandId::LogFileOn
+            | ExtendedCommandId::LogFileOff
+            | ExtendedCommandId::DwgProps
+            | ExtendedCommandId::DwfFormat
+            | ExtendedCommandId::ExportPdf => self.extended_file6(session, command, ext)?,
+            // Wave 6 named refusals: a stable `Unsupported` reason per name.
+            ExtendedCommandId::SaveAll
+            | ExtendedCommandId::QNew
+            | ExtendedCommandId::Revert
+            | ExtendedCommandId::CloseAll
+            | ExtendedCommandId::CloseAllOther
+            | ExtendedCommandId::QQuit
+            | ExtendedCommandId::Quit
+            | ExtendedCommandId::Propulate
+            | ExtendedCommandId::PlotterManager
+            | ExtendedCommandId::StylesManager
+            | ExtendedCommandId::ExportSettings
+            | ExtendedCommandId::Preview
+            | ExtendedCommandId::ExportLayout
+            | ExtendedCommandId::PlotStamp
+            | ExtendedCommandId::DashPlotStamp
+            | ExtendedCommandId::DashPlot
+            | ExtendedCommandId::DashExport
+            | ExtendedCommandId::ETransmit
+            | ExtendedCommandId::DashETransmit
+            | ExtendedCommandId::Archive
+            | ExtendedCommandId::DashArchive
+            | ExtendedCommandId::Publish
+            | ExtendedCommandId::DashPublish
+            | ExtendedCommandId::AutoPublish => self.extended_refusal6(command, ext)?,
         };
         Ok(Some(outcome))
     }

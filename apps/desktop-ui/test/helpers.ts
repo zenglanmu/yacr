@@ -380,6 +380,15 @@ export const HOST_NAMES = [
   'ATTIPEDIT', 'ATTIN', 'ATTOUT', 'ATTEXT', '-ATTEXT', 'EATTEDIT', 'EATTEXT',
   '-EATTEXT', 'ATTREDEF', 'ATTSYNC', 'GATTE', 'XDATA', 'XBIND', '-XBIND',
   'XATTACH', 'ATTACH', '-ATTACH', 'XOPEN', 'CLASSICXREF',
+  // The 2026-11-09 Wave 6 batch: the drawing-log token, three read-only
+  // file/plot/export reports and twenty-four named refusals. All thirty are
+  // canonical selectors of their own; `-PLOTSTAMP`, `-PLOT`, `-EXPORT`,
+  // `-ETRANSMIT`, `-ARCHIVE` and `-PUBLISH` are not aliases.
+  'DWGLOG', 'LOGFILEON', 'LOGFILEOFF', 'DWGPROPS', 'DWFFORMAT', 'EXPORTPDF',
+  'SAVEALL', 'QNEW', 'REVERT', 'CLOSEALL', 'CLOSEALLOTHER', 'QQUIT', 'QUIT',
+  'PROPULATE', 'PLOTTERMANAGER', 'STYLESMANAGER', 'EXPORTSETTINGS', 'PREVIEW',
+  'EXPORTLAYOUT', 'PLOTSTAMP', '-PLOTSTAMP', '-PLOT', '-EXPORT', 'ETRANSMIT',
+  '-ETRANSMIT', 'ARCHIVE', '-ARCHIVE', 'PUBLISH', '-PUBLISH', 'AUTOPUBLISH',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented

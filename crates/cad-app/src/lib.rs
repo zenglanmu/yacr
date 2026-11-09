@@ -58,6 +58,9 @@ mod app_extended_refusals4;
 // The Wave 5 extended-command handlers (attribute/xref token+reports+refusals).
 mod app_extended_attrs5;
 mod app_extended_refusals5;
+// The Wave 6 extended-command handlers (file/plot/export token+reports+refusals).
+mod app_extended_file6;
+mod app_extended_refusals6;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;

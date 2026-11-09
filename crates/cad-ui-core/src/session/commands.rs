@@ -489,6 +489,40 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("-ATTACH", CommandId::Extended(ExtendedCommandId::DashAttach)),
     ("XOPEN", CommandId::Extended(ExtendedCommandId::XOpen)),
     ("CLASSICXREF", CommandId::Extended(ExtendedCommandId::ClassicXRef)),
+    // Wave 6 (2026-11-09): file / plot / export surfaces. DWGLOG/LOGFILEON/
+    // LOGFILEOFF are one session token (no log file is written); DWGPROPS is a
+    // read-only document report; DWFFORMAT/EXPORTPDF are read-only capability
+    // reports; the rest are stable named refusals. All Viewer-legal.
+    ("DWGLOG", CommandId::Extended(ExtendedCommandId::DwgLog)),
+    ("LOGFILEON", CommandId::Extended(ExtendedCommandId::LogFileOn)),
+    ("LOGFILEOFF", CommandId::Extended(ExtendedCommandId::LogFileOff)),
+    ("DWGPROPS", CommandId::Extended(ExtendedCommandId::DwgProps)),
+    ("DWFFORMAT", CommandId::Extended(ExtendedCommandId::DwfFormat)),
+    ("EXPORTPDF", CommandId::Extended(ExtendedCommandId::ExportPdf)),
+    ("SAVEALL", CommandId::Extended(ExtendedCommandId::SaveAll)),
+    ("QNEW", CommandId::Extended(ExtendedCommandId::QNew)),
+    ("REVERT", CommandId::Extended(ExtendedCommandId::Revert)),
+    ("CLOSEALL", CommandId::Extended(ExtendedCommandId::CloseAll)),
+    ("CLOSEALLOTHER", CommandId::Extended(ExtendedCommandId::CloseAllOther)),
+    ("QQUIT", CommandId::Extended(ExtendedCommandId::QQuit)),
+    ("QUIT", CommandId::Extended(ExtendedCommandId::Quit)),
+    ("PROPULATE", CommandId::Extended(ExtendedCommandId::Propulate)),
+    ("PLOTTERMANAGER", CommandId::Extended(ExtendedCommandId::PlotterManager)),
+    ("STYLESMANAGER", CommandId::Extended(ExtendedCommandId::StylesManager)),
+    ("EXPORTSETTINGS", CommandId::Extended(ExtendedCommandId::ExportSettings)),
+    ("PREVIEW", CommandId::Extended(ExtendedCommandId::Preview)),
+    ("EXPORTLAYOUT", CommandId::Extended(ExtendedCommandId::ExportLayout)),
+    ("PLOTSTAMP", CommandId::Extended(ExtendedCommandId::PlotStamp)),
+    ("-PLOTSTAMP", CommandId::Extended(ExtendedCommandId::DashPlotStamp)),
+    ("-PLOT", CommandId::Extended(ExtendedCommandId::DashPlot)),
+    ("-EXPORT", CommandId::Extended(ExtendedCommandId::DashExport)),
+    ("ETRANSMIT", CommandId::Extended(ExtendedCommandId::ETransmit)),
+    ("-ETRANSMIT", CommandId::Extended(ExtendedCommandId::DashETransmit)),
+    ("ARCHIVE", CommandId::Extended(ExtendedCommandId::Archive)),
+    ("-ARCHIVE", CommandId::Extended(ExtendedCommandId::DashArchive)),
+    ("PUBLISH", CommandId::Extended(ExtendedCommandId::Publish)),
+    ("-PUBLISH", CommandId::Extended(ExtendedCommandId::DashPublish)),
+    ("AUTOPUBLISH", CommandId::Extended(ExtendedCommandId::AutoPublish)),
 
 ];
 

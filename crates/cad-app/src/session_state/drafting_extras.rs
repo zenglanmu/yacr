@@ -3,7 +3,8 @@
 //! `QTEXT`, `FILL`, `TFRAMES`, `REGENAUTO` and `ISODRAFT` (pilot) plus the Wave 2
 //! names `DRAGMODE`, `HIGHLIGHTNEW`, `TRAYSETTINGS`, `TEXTSCR`/`GRAPHSCR`,
 //! `FINDINCLUDE`, `FINDMATCH`, `ISOPLANE` and `APERTURE`/`REVCLOUDPROPERTIES`
-//! each own one flag or token here, and Wave 5 adds the `ATTDISP` token. This is
+//! each own one flag or token here, Wave 5 adds the `ATTDISP` token and Wave 6
+//! adds the `DWGLOG`/`LOGFILEON`/`LOGFILEOFF` drawing-log token. This is
 //! **session state only**: no database write, revision bump, `cad-history` entry
 //! or `ChangeSet`. This lane wires no renderer/behaviour consumer, so the command
 //! handler reports that the effect is not implemented rather than pretending the
@@ -62,6 +63,7 @@ pub struct DraftingExtras {
     find_match_case: bool,
     revcloud_arc_length: f64,
     attdisp: bool,
+    dwglog: bool,
 }
 
 impl Default for DraftingExtras {
@@ -71,8 +73,9 @@ impl Default for DraftingExtras {
         // is 10, the isometric plane is Left and the revision-cloud arc length is
         // 15. `QTEXT`/`TFRAMES`/`REGENAUTO`/`ISODRAFT`, the text screen and
         // case-insensitive find start OFF; the Wave 5 `ATTDISP` token starts ON
-        // (AutoCAD's default). These are session defaults only — nothing here is
-        // read from or written to the drawing.
+        // (AutoCAD's default) and the Wave 6 `DWGLOG` token starts OFF. These are
+        // session defaults only — nothing here is read from or written to the
+        // drawing, and no log file exists.
         Self {
             qtext: false,
             fill: true,
@@ -89,6 +92,7 @@ impl Default for DraftingExtras {
             find_match_case: false,
             revcloud_arc_length: 15.0,
             attdisp: true,
+            dwglog: false,
         }
     }
 }
@@ -165,6 +169,15 @@ impl DraftingExtras {
     /// the token exists so a caller can see that the command was received.
     pub fn attdisp(&self) -> bool {
         self.attdisp
+    }
+
+    /// The session drawing-log token (default OFF, shared by `DWGLOG`,
+    /// `LOGFILEON` and `LOGFILEOFF`).
+    ///
+    /// This build writes no log file, so the token exists only so a caller can
+    /// see that the commands were received; the handler says exactly that.
+    pub fn dwglog(&self) -> bool {
+        self.dwglog
     }
 
     pub fn set_qtext(&mut self, value: bool) {
@@ -304,5 +317,17 @@ impl DraftingExtras {
     pub fn toggle_attdisp(&mut self) -> bool {
         self.attdisp = !self.attdisp;
         self.attdisp
+    }
+
+    /// Set the session drawing-log token (`LOGFILEON` = true, `LOGFILEOFF` =
+    /// false).
+    pub fn set_dwglog(&mut self, value: bool) {
+        self.dwglog = value;
+    }
+
+    /// Flip the `DWGLOG` token and return the new state.
+    pub fn toggle_dwglog(&mut self) -> bool {
+        self.dwglog = !self.dwglog;
+        self.dwglog
     }
 }

@@ -182,6 +182,17 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   '-EATTEXT', 'ATTREDEF', 'ATTSYNC', 'GATTE', 'XDATA', 'XBIND', '-XBIND',
   'XATTACH', 'ATTACH', '-ATTACH', 'XOPEN', 'CLASSICXREF',
 
+  // The 2026-11-09 Wave 6 batch: the drawing-log token, the three read-only
+  // file/plot/export reports and the twenty-four named refusals all read the
+  // open drawing, so the start page disables them with the catalog's own "no
+  // drawing is open" sentence. None takes a capability gate: no file I/O is
+  // performed in cad-app (plot/export remain host-owned).
+  'DWGLOG', 'LOGFILEON', 'LOGFILEOFF', 'DWGPROPS', 'DWFFORMAT', 'EXPORTPDF',
+  'SAVEALL', 'QNEW', 'REVERT', 'CLOSEALL', 'CLOSEALLOTHER', 'QQUIT', 'QUIT',
+  'PROPULATE', 'PLOTTERMANAGER', 'STYLESMANAGER', 'EXPORTSETTINGS', 'PREVIEW',
+  'EXPORTLAYOUT', 'PLOTSTAMP', '-PLOTSTAMP', '-PLOT', '-EXPORT', 'ETRANSMIT',
+  '-ETRANSMIT', 'ARCHIVE', '-ARCHIVE', 'PUBLISH', '-PUBLISH', 'AUTOPUBLISH',
+
 ]);
 
 /** One command's precondition on the **current selection**. */

@@ -85,6 +85,24 @@
 //!
 //! Every Wave 5 variant stays Viewer-legal: no database write, no revision bump,
 //! no `cad-history` entry.
+//!
+//! # Wave 6 (2026-11-09)
+//!
+//! Thirty more names over the file/plot/export surfaces:
+//!
+//! * **Session tokens** (`DWGLOG`, `LOGFILEON`, `LOGFILEOFF`): one `dwglog`
+//!   flag (default OFF) in [`crate::session_state::DraftingExtras`]. This build
+//!   writes no log file, so the handler reports the token and says exactly that.
+//! * **Read-only reports** (`DWGPROPS`, `DWFFORMAT`, `EXPORTPDF`): document
+//!   id/revision/entity counts, and two honest capability reports that name the
+//!   absent export path instead of pretending to export. None is an error.
+//! * **Named refusals** (`SAVEALL` through `AUTOPUBLISH`): no multi-document
+//!   model, no reopen-to-source path, no plotter/plot-style/export-settings
+//!   model, no plot preview/stamp, no batch publish/eTransmit/archive packaging.
+//!   Each is `CadError::Unsupported` with a stable reason.
+//!
+//! Every Wave 6 variant stays Viewer-legal: no database write, no revision bump,
+//! no `cad-history` entry, and no host-owned file I/O is re-implemented here.
 
 /// One payload-free command in the extended wrapper batches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -369,6 +387,70 @@ pub enum ExtendedCommandId {
     XOpen,
     /// `CLASSICXREF`: no separate xref palette (use the RESOURCES panel).
     ClassicXRef,
+
+    // -- Wave 6: session tokens / reports (app_extended_file6) --------------
+    /// `DWGLOG`: toggle the session drawing-log token (default OFF).
+    DwgLog,
+    /// `LOGFILEON`: set the session drawing-log token ON.
+    LogFileOn,
+    /// `LOGFILEOFF`: set the session drawing-log token OFF.
+    LogFileOff,
+    /// `DWGPROPS`: read-only document/entity report plus the metadata gap.
+    DwgProps,
+    /// `DWFFORMAT`: report that DWF is not an export format here.
+    DwfFormat,
+    /// `EXPORTPDF`: report that PDF export is host-owned through PLOT.
+    ExportPdf,
+
+    // -- Wave 6: named refusals (app_extended_refusals6) --------------------
+    /// `SAVEALL`: this build has one document; use SAVE.
+    SaveAll,
+    /// `QNEW`: this build has one document; use NEW.
+    QNew,
+    /// `REVERT`: no reopen-to-source path.
+    Revert,
+    /// `CLOSEALL`: this build has one document; use CLOSE.
+    CloseAll,
+    /// `CLOSEALLOTHER`: only one document exists.
+    CloseAllOther,
+    /// `QQUIT`: application exit is host-owned.
+    QQuit,
+    /// `QUIT`: application exit is host-owned.
+    Quit,
+    /// `PROPULATE`: no property-propagation model.
+    Propulate,
+    /// `PLOTTERMANAGER`: no plotter configuration model.
+    PlotterManager,
+    /// `STYLESMANAGER`: no CTB/STB plot-style model.
+    StylesManager,
+    /// `EXPORTSETTINGS`: no export-settings model.
+    ExportSettings,
+    /// `PREVIEW`: no plot-preview window.
+    Preview,
+    /// `EXPORTLAYOUT`: use PLOT (one layout, SVG/PDF).
+    ExportLayout,
+    /// `PLOTSTAMP`: no plot-stamp model.
+    PlotStamp,
+    /// `-PLOTSTAMP`: the command-line spelling of the same refusal.
+    DashPlotStamp,
+    /// `-PLOT`: use PLOT; this build has one vector plot path.
+    DashPlot,
+    /// `-EXPORT`: use PLOT/EXPORT; this build has one vector export path.
+    DashExport,
+    /// `ETRANSMIT`: no eTransmit/zip packaging model.
+    ETransmit,
+    /// `-ETRANSMIT`: the command-line spelling of the same refusal.
+    DashETransmit,
+    /// `ARCHIVE`: no sheet-set archive packaging model.
+    Archive,
+    /// `-ARCHIVE`: the command-line spelling of the same refusal.
+    DashArchive,
+    /// `PUBLISH`: no batch publish model.
+    Publish,
+    /// `-PUBLISH`: the command-line spelling of the same refusal.
+    DashPublish,
+    /// `AUTOPUBLISH`: no automatic publish model.
+    AutoPublish,
 }
 
 impl ExtendedCommandId {
@@ -506,6 +588,36 @@ impl ExtendedCommandId {
             Self::DashAttach => "-ATTACH",
             Self::XOpen => "XOPEN",
             Self::ClassicXRef => "CLASSICXREF",
+            Self::DwgLog => "DWGLOG",
+            Self::LogFileOn => "LOGFILEON",
+            Self::LogFileOff => "LOGFILEOFF",
+            Self::DwgProps => "DWGPROPS",
+            Self::DwfFormat => "DWFFORMAT",
+            Self::ExportPdf => "EXPORTPDF",
+            Self::SaveAll => "SAVEALL",
+            Self::QNew => "QNEW",
+            Self::Revert => "REVERT",
+            Self::CloseAll => "CLOSEALL",
+            Self::CloseAllOther => "CLOSEALLOTHER",
+            Self::QQuit => "QQUIT",
+            Self::Quit => "QUIT",
+            Self::Propulate => "PROPULATE",
+            Self::PlotterManager => "PLOTTERMANAGER",
+            Self::StylesManager => "STYLESMANAGER",
+            Self::ExportSettings => "EXPORTSETTINGS",
+            Self::Preview => "PREVIEW",
+            Self::ExportLayout => "EXPORTLAYOUT",
+            Self::PlotStamp => "PLOTSTAMP",
+            Self::DashPlotStamp => "-PLOTSTAMP",
+            Self::DashPlot => "-PLOT",
+            Self::DashExport => "-EXPORT",
+            Self::ETransmit => "ETRANSMIT",
+            Self::DashETransmit => "-ETRANSMIT",
+            Self::Archive => "ARCHIVE",
+            Self::DashArchive => "-ARCHIVE",
+            Self::Publish => "PUBLISH",
+            Self::DashPublish => "-PUBLISH",
+            Self::AutoPublish => "AUTOPUBLISH",
         }
     }
 
@@ -666,5 +778,35 @@ impl ExtendedCommandId {
         Self::DashAttach,
         Self::XOpen,
         Self::ClassicXRef,
+        Self::DwgLog,
+        Self::LogFileOn,
+        Self::LogFileOff,
+        Self::DwgProps,
+        Self::DwfFormat,
+        Self::ExportPdf,
+        Self::SaveAll,
+        Self::QNew,
+        Self::Revert,
+        Self::CloseAll,
+        Self::CloseAllOther,
+        Self::QQuit,
+        Self::Quit,
+        Self::Propulate,
+        Self::PlotterManager,
+        Self::StylesManager,
+        Self::ExportSettings,
+        Self::Preview,
+        Self::ExportLayout,
+        Self::PlotStamp,
+        Self::DashPlotStamp,
+        Self::DashPlot,
+        Self::DashExport,
+        Self::ETransmit,
+        Self::DashETransmit,
+        Self::Archive,
+        Self::DashArchive,
+        Self::Publish,
+        Self::DashPublish,
+        Self::AutoPublish,
     ];
 }

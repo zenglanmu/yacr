@@ -1114,3 +1114,38 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `-ATTACH` | **部分实现（具名拒绝）**：`-attach.unsupported: this build does not attach external references or underlays` | 同上 |
 | `XOPEN` | **部分实现（具名拒绝）**：`xopen.unsupported: this build has no xref editing session` | 同上 |
 | `CLASSICXREF` | **部分实现（具名拒绝）**：`classicxref.unsupported: there is no separate xref palette; use the RESOURCES panel` | 同上 |
+
+### 2026-11-09 Wave 6 扩展命令（文件 / 出图 / 导出）
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `DWGLOG` | **部分实现（会话令牌）**：翻转会话 `dwglog` 令牌（默认 **OFF**）；`dwglog.toggled`；无事务/修订/历史 | 本构建**不写日志文件**，也不写图；没有日志消费者 |
+| `LOGFILEON` | **部分实现（会话令牌）**：把同一 `dwglog` 令牌置 **ON**；`logfileon.toggled` | 不写日志文件 |
+| `LOGFILEOFF` | **部分实现（会话令牌）**：把同一 `dwglog` 令牌置 **OFF**；`logfileoff.toggled` | 不写日志文件 |
+| `DWGPROPS` | **部分实现（只读）**：`dwgprops.report` 报告文档 id、修订号、实体数 | 标题/作者/主题/关键字/自定义特性**未建模**（`dwgprops.metadata_not_tracked`），不杜撰 |
+| `DWFFORMAT` | **部分实现（只读能力报告）**：`dwfformat.not_supported` 说明本构建不导出 DWF/DWFx，并指向 `PLOT` 的 SVG/PDF | 不是错误；没有默认格式设置，不写任何文件 |
+| `EXPORTPDF` | **部分实现（只读能力报告）**：`exportpdf.use_plot` 说明 PDF 导出由宿主经 `PLOT`（平台保存对话框）负责 | 不是错误；本命令自身不写 PDF，`cad-app` 不重实现宿主文件 I/O |
+| `SAVEALL` | **部分实现（具名拒绝）**：`saveall.single_document: this build has one document; use SAVE` | 不写库/不升修订/不入历史 |
+| `QNEW` | **部分实现（具名拒绝）**：`qnew.single_document: use NEW` | 同上 |
+| `REVERT` | **部分实现（具名拒绝）**：`revert.unsupported: no reopen-to-source path` | 同上 |
+| `CLOSEALL` | **部分实现（具名拒绝）**：`closeall.single_document: use CLOSE` | 同上 |
+| `CLOSEALLOTHER` | **部分实现（具名拒绝）**：`closeallother.single_document: only one document exists` | 同上 |
+| `QQUIT` | **部分实现（具名拒绝）**：`qquit.unsupported: application exit is host-owned` | 同上 |
+| `QUIT` | **部分实现（具名拒绝）**：`quit.unsupported: application exit is host-owned` | 同上 |
+| `PROPULATE` | **部分实现（具名拒绝）**：`propulate.unsupported: no property-propagation model` | 同上 |
+| `PLOTTERMANAGER` | **部分实现（具名拒绝）**：`plottermanager.unsupported: no plotter configuration model` | 同上 |
+| `STYLESMANAGER` | **部分实现（具名拒绝）**：`stylesmanager.unsupported: no CTB/STB plot-style model` | 同上 |
+| `EXPORTSETTINGS` | **部分实现（具名拒绝）**：`exportsettings.unsupported: no export-settings model` | 同上 |
+| `PREVIEW` | **部分实现（具名拒绝）**：`preview.unsupported: no plot-preview window` | 同上 |
+| `EXPORTLAYOUT` | **部分实现（具名拒绝）**：`exportlayout.unsupported: use PLOT (one layout, SVG/PDF)` | 同上 |
+| `PLOTSTAMP` | **部分实现（具名拒绝）**：`plotstamp.unsupported: no plot-stamp model` | 同上 |
+| `-PLOTSTAMP` | **部分实现（具名拒绝）**：`-plotstamp.unsupported: no plot-stamp model` | 同上 |
+| `-PLOT` | **部分实现（具名拒绝）**：`-plot.unsupported: use PLOT; this build has one vector plot path` | 同上 |
+| `-EXPORT` | **部分实现（具名拒绝）**：`-export.unsupported: use PLOT/EXPORT; this build has one vector export path` | 同上 |
+| `ETRANSMIT` | **部分实现（具名拒绝）**：`etransmit.unsupported: no eTransmit/zip packaging model` | 同上 |
+| `-ETRANSMIT` | **部分实现（具名拒绝）**：`-etransmit.unsupported: no eTransmit/zip packaging model` | 同上 |
+| `ARCHIVE` | **部分实现（具名拒绝）**：`archive.unsupported: no sheet-set archive packaging model` | 同上 |
+| `-ARCHIVE` | **部分实现（具名拒绝）**：`-archive.unsupported: no sheet-set archive packaging model` | 同上 |
+| `PUBLISH` | **部分实现（具名拒绝）**：`publish.unsupported: no batch publish model` | 同上 |
+| `-PUBLISH` | **部分实现（具名拒绝）**：`-publish.unsupported: no batch publish model` | 同上 |
+| `AUTOPUBLISH` | **部分实现（具名拒绝）**：`autopublish.unsupported: no automatic publish model` | 同上 |
