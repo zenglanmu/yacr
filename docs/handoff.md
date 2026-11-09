@@ -1,5 +1,20 @@
 AD
 
+## 2026-11-09 AutoCAD 2026 第二批 100 条命令（Wave 13–16）
+
+- **用户要求**：继续再实施 100 条未完成命令；2D 优先；同样更新同一份覆盖文档、UI 接线、逐批提交。
+- **交付**：官方覆盖 523 → **623 已实现（66 完整 + 557 部分）/ 358 未实现**；Wave 13/14/15/16 各 25 个名字，全部为 `CommandId::Extended` router 命令。
+  - Wave 13（2D/页面设置/表格）：`PAGESETUP`/`-PAGESETUP` 只读 `PLOTSETTINGS` 报告、`CONVERTPOLY` 只读单一多段线表示报告；`PSETUPIN`/`PLOTSTYLE`/`TABLE*`/`FIELD`/`RTEXT`/`SPELL`/`SUPERHATCH`/`ALIGNSPACE`/`VPSYNC`/`LAYTRANS` 等 22 个具名拒绝。
+  - Wave 14：3D 实体图元/布尔/剖切/边编辑 25 个具名拒绝（`BOX`…`ROTATE3D`）。
+  - Wave 15：曲面/网格 25 个具名拒绝（`SURFBLEND`…`MESHUNCREASE`）。
+  - Wave 16：图像/PDF/DGN 底图 25 个具名拒绝（`IMAGE`…`DGNADJUST`）。
+- **UI**：100 个名字全部加入 catalog、`DOCUMENT_SCOPED_COMMANDS`、`HOST_NAMES` 镜像与中英 i18n（label + hint）；每波有独立 `extended-wave{13..16}.test.ts`。
+- **DWG 保存 / acadrust patch**：与上一批相同，本轮无行为变化；DWG 默认 `<stem>-export.dwg`、绝不覆盖源；acadrust 0.6.8 未修改，台账仍为空。
+- **已运行**：`cargo test -p cad-app --lib --locked`（**2241 passed, 3 ignored**）；`cargo test -p cad-ui-core --locked`（**494 passed, 1 ignored**）；`cargo clippy -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings`；`cargo fmt --all -- --check`；`npm test`（**1425 passed**，tsc + 插件 tsc + node --test）；`check-architecture.py`/`check-tauri-capabilities.py`/`check-fixture-manifest.py`/`check-file-size.py`/`check-command-docs.py`/`test-check-command-docs.py`/`check-i18n.py` 全绿。
+- **NOT RUN / NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机；Windows/macOS/Android/Web 运行时；真实 DWG/AutoCAD vendor 对照；本批 97/100 是具名拒绝，不是可用功能。
+- **提交**：Wave 13 `03d5ac35`、Wave 14 `08b5d3a5`、Wave 15 `51338e29`、Wave 16 `f33ca901`、UI 契约 `aeb1b946`。
+
+
 ## 2026-11-09 AutoCAD 2026 下一批 100 条命令（Wave 9–12）
 
 - **用户要求**：按 `docs/autocad-2026-command-coverage.md` 继续实施 100 条未完成命令，2D 优先；每条命令同时接线 UI（除非 AutoCAD 也无 UI 入口）；更新同一份覆盖文档；DWG 保存不覆盖源文件；允许 acadrust patch 但必须有台账。
