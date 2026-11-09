@@ -630,6 +630,27 @@ def check_generated_project_and_ignores() -> list[str]:
         if not re.search(r"minSdk\s*=\s*24", text):
             problems.append("gen/android/app/build.gradle.kts: minSdk must be 24")
 
+    # Deterministic release packaging: the incubated Gradle configuration cache
+    # is disabled for this generated project. Kotlin Gradle Plugin 2.2.x could not
+    # serialize `:app:compileUniversalReleaseKotlin`
+    # ("error writing value of type ... ExistingNamedDomainObjectProvider",
+    # "Configuration cache entry discarded due to serialization error"), which
+    # failed the CI `android-release` APK build *before* signing (run
+    # 42568875800, 2026-11-09; a plain rerun passed, so it is intermittent — the
+    # package step must not depend on that). Re-enable only after KGP/Gradle fix
+    # the serialization, with a fresh successful release run as evidence.
+    gradle_properties = GEN_ANDROID / "gradle.properties"
+    if gradle_properties.is_file():
+        properties = read(gradle_properties)
+        if not re.search(r"^org\.gradle\.configuration-cache=false$", properties, re.MULTILINE):
+            problems.append(
+                "gen/android/gradle.properties: 'org.gradle.configuration-cache=false' is "
+                "required — KGP 2.2.x configuration-cache serialization failures break the "
+                "release APK build (see the comment in that file)"
+            )
+    else:
+        problems.append("src-tauri/gen/android/gradle.properties must be committed")
+
     ignore_rules = read(ROOT / ".gitignore")
     for rule in ("apps/app-android/dist/", "apps/app-android/node_modules/"):
         if rule not in ignore_rules:
@@ -661,7 +682,8 @@ def main() -> int:
         return 1
     print("android-host OK: src-tauri layout, conf, Android-only tauri, shell reports, refusal contract, "
           "gesture-bar inset publisher, native SurfaceView/JNI carrier, SAF document picker/read slot, "
-          "dwg file associations, pinned NDK + generated full font package")
+          "dwg file associations, pinned NDK + generated full font package, "
+          "deterministic Gradle (configuration cache disabled)")
     return 0
 
 

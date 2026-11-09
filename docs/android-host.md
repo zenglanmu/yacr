@@ -195,6 +195,14 @@ apps/app-android/
 
 - `gen/android` **提交**：它由 CLI 版本决定；重新生成会随 CLI 漂移，提交后构建可复现。
   `app/src/main/assets/tauri.conf.json`、`jniLibs/*.so` 等生成物由 `gen/android/app/.gitignore` 忽略。
+- **Gradle 配置缓存已关闭（2026-11-09）**：`gen/android/gradle.properties` 里
+  `org.gradle.configuration-cache=false`。原因是一次真实 CI 失败：Gradle 9.6.1 + Kotlin Gradle
+  Plugin 2.2.10 在 `:app:compileUniversalReleaseKotlin` 上无法序列化
+  （`error writing value of type … ExistingNamedDomainObjectProvider` /
+  `Configuration cache entry discarded due to serialization error`），`android-release` 在建 APK
+  阶段就失败、根本没走到签名；同一提交直接重跑又通过 ⇒ **间歇性**，发布打包不能依赖它。
+  代价只是配置阶段变慢，`scripts/test-android-host.py` 钉住该行，避免 `tauri android init` 回填
+  `=true`。KGP/Gradle 修好序列化后可改回，但必须以一次绿色的 release 运行为证据。
 - `gen/android/app/src/main/java/io/github/zenglanmu/yacr/MainActivity.kt` 是**手写且提交**的宿主 Activity。
   重新 `tauri android init` 会覆盖它；`scripts/test-android-host.py` 会判红。它只把五个 `document*`
   实例方法委派给 `DocumentPicker`，自身不持有 CAD 文档。
@@ -313,8 +321,11 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
   `srcDir`（且 `scripts/build-android-ui.sh` 经共享 `scripts/lib/font-package.sh` staged）、透明主题、
   `configChanges` 保留 `orientation|screenSize|smallestScreenSize|uiMode`；
   `check_document_picker_wiring` 另外断言 SAF 打开/另存、五个 `document*` 实例方法、外部
-  `onNewIntent`、`.dwg` 关联 mime 集与 ProGuard keep 行。**无变异即失败**：把表面改成 on-top、去掉一个
-  JNI 符号、换掉 NDK 版本、改回 `ACTION_GET_CONTENT` 或删掉 keep 规则都会判红。**注意：这些是静态
+  `onNewIntent`、`.dwg` 关联 mime 集与 ProGuard keep 行。`check_generated_project_and_ignores` 还断言
+  `gen/android/gradle.properties` 保持 `org.gradle.configuration-cache=false`（见 §6 的 CI 失败原因）。
+  **无变异即失败**：把表面改成 on-top、去掉一个
+  JNI 符号、换掉 NDK 版本、改回 `ACTION_GET_CONTENT`、删掉 keep 规则或把配置缓存改回 `=true`
+  都会判红。**注意：这些是静态
   接线，不是设备/像素/SAF 运行证据。**
 - `cargo test -p app-android --locked`：纯函数与源码结构契约（host target 上运行）。
 - `cargo check -p app-android --target aarch64-linux-android --locked`：真实编译门禁。
