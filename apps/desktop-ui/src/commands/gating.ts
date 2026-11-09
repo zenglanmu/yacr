@@ -236,6 +236,26 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'TXTEXP',
   'UPDATEFIELD',
   'UNITS',
+  '-UNITS',
+  '-LAYER',
+  'LAYERSTATESAVE',
+  'NEWVIEW',
+  '-SCALELISTEDIT',
+  'LWEIGHT',
+  '-LWEIGHT',
+  'COLOR',
+  '-COLOR',
+  'HELP',
+  'CLASSICINSERT',
+  'CLASSICGROUP',
+  'FILETAB',
+  'FILETABCLOSE',
+  'HIDEPALETTES',
+  'SHOWPALETTES',
+  'RIBBONCLOSE',
+  'GOTOSTART',
+  'COPYHIST',
+  'TRANSPARENCY',
 ]);
 
 /** One command's precondition on the **current selection**. */
@@ -509,4 +529,9 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
 export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze([
   'PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES', ABOUT_COMMAND, CLEANSCREENON_COMMAND,
   CLEANSCREENOFF_COMMAND, PROPERTIESCLOSE_COMMAND, LAYERCLOSE_COMMAND,
+  'DSETTINGS',
+  'QUICKPROPERTIES',
+  'CLASSICLAYER',
+  'COMMANDLINE',
+  'COMMANDLINEHIDE',
 ]);

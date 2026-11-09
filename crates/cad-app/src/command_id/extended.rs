@@ -607,6 +607,48 @@ pub enum ExtendedCommandId {
     UpdateField,
     /// `UNITS`: read-only report of the session display-format token; the full UNITS dialog is NOT IMPLEMENTED.
     Units,
+
+    // Wave 10: layer/view/session reports and named refusals.
+    /// `-UNITS`: the command-line spelling of the read-only UNITS report.
+    DashUnits,
+    /// `-LAYER`: read-only layer-table report (name/on/off/frozen/locked/current); mutations are NOT IMPLEMENTED.
+    DashLayer,
+    /// `LAYERSTATESAVE`: with a `LayerState::Save` payload it routes to the existing layer-state store; otherwise it reports the missing dialog.
+    LayerStateSave,
+    /// `NEWVIEW`: with a `View::Save` payload it routes to the existing named-view store; otherwise it reports the missing window-name prompt.
+    NewView,
+    /// `-SCALELISTEDIT`: read-only scale-list report; the write is NOT IMPLEMENTED.
+    DashScaleListEdit,
+    /// `LWEIGHT`: read-only report of the session lineweight-display token; the LWEIGHT dialog is NOT IMPLEMENTED.
+    LineWeight,
+    /// `-LWEIGHT`: the command-line spelling of the same lineweight-display report.
+    DashLineWeight,
+    /// `COLOR`: read-only report of the session current-colour token; the colour dialog is NOT IMPLEMENTED.
+    Color,
+    /// `-COLOR`: the command-line spelling of the same current-colour report.
+    DashColor,
+    /// `HELP`: the help system is host-owned and NOT IMPLEMENTED in this build.
+    Help,
+    /// `CLASSICINSERT`: the classic insert dialog is NOT IMPLEMENTED; use INSERT.
+    ClassicInsert,
+    /// `CLASSICGROUP`: the classic group dialog is NOT IMPLEMENTED; use GROUP.
+    ClassicGroup,
+    /// `FILETAB`: file-tab chrome is host-owned; this build has no file-tab model.
+    FileTab,
+    /// `FILETABCLOSE`: file-tab chrome is host-owned; this build has no file-tab model.
+    FileTabClose,
+    /// `HIDEPALETTES`: palette chrome is host-owned; no global palette-visibility model.
+    HidePalettes,
+    /// `SHOWPALETTES`: palette chrome is host-owned; no global palette-visibility model.
+    ShowPalettes,
+    /// `RIBBONCLOSE`: ribbon chrome is host-owned; use RIBBON or the host affordance.
+    RibbonClose,
+    /// `GOTOSTART`: switching to the start tab is host-owned and NOT IMPLEMENTED by the router.
+    GoToStart,
+    /// `COPYHIST`: the session stores no command-history text; the UI command log owns it, so nothing is copied.
+    CopyHist,
+    /// `TRANSPARENCY`: image transparency is NOT IMPLEMENTED (no image-transparency model).
+    Transparency,
 }
 
 impl ExtendedCommandId {
@@ -642,6 +684,7 @@ impl ExtendedCommandId {
                 | Self::DashHatch
                 | Self::DashHatchEdit
                 | Self::ExOffset
+                | Self::LayerStateSave
         )
     }
 }

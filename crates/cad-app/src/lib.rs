@@ -75,6 +75,10 @@ mod app_extended_session8;
 mod app_extended_w9_alias;
 mod app_extended_w9_draw;
 mod app_extended_w9_reports;
+// The Wave 10 extended-command handlers (layer/view/session reports, refusals).
+mod app_extended_w10_layer;
+mod app_extended_w10_refusals;
+mod app_extended_w10_session;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;

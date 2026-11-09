@@ -940,4 +940,32 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'UPDATEFIELD', labelKey: 'draw.kind.updatefield', icon: 'text', group: 'annotate' },
   { id: 'UNITS', labelKey: 'draw.kind.units', icon: 'settings', group: 'properties' },
 
+  // The 2026-11-09 Wave 10 batch: layer/view/session reports, named refusals
+  // and five chrome-local selectors. Appended last so no shipped row moves.
+  { id: '-UNITS', labelKey: 'draw.kind.dashunits', icon: 'settings', group: 'properties' },
+  { id: '-LAYER', labelKey: 'draw.kind.dashlayer', icon: 'layers', group: 'properties' },
+  { id: 'LAYERSTATESAVE', labelKey: 'draw.kind.layerstatesave', icon: 'layers', group: 'properties' },
+  { id: 'NEWVIEW', labelKey: 'draw.kind.newview', icon: 'view', group: 'view' },
+  { id: '-SCALELISTEDIT', labelKey: 'draw.kind.dashscalelistedit', icon: 'fit', group: 'view' },
+  { id: 'LWEIGHT', labelKey: 'draw.kind.lweight', icon: 'settings', group: 'properties' },
+  { id: '-LWEIGHT', labelKey: 'draw.kind.dashlweight', icon: 'settings', group: 'properties' },
+  { id: 'COLOR', labelKey: 'draw.kind.color', icon: 'palette', group: 'properties' },
+  { id: '-COLOR', labelKey: 'draw.kind.dashcolor', icon: 'palette', group: 'properties' },
+  { id: 'HELP', labelKey: 'draw.kind.help', icon: 'info', group: 'view' },
+  { id: 'CLASSICINSERT', labelKey: 'draw.kind.classicinsert', icon: 'copy', group: 'draw' },
+  { id: 'CLASSICGROUP', labelKey: 'draw.kind.classicgroup', icon: 'selectAll', group: 'modify' },
+  { id: 'FILETAB', labelKey: 'draw.kind.filetab', icon: 'app', group: 'view' },
+  { id: 'FILETABCLOSE', labelKey: 'draw.kind.filetabclose', icon: 'app', group: 'view' },
+  { id: 'HIDEPALETTES', labelKey: 'draw.kind.hidepalettes', icon: 'eyeOff', group: 'view' },
+  { id: 'SHOWPALETTES', labelKey: 'draw.kind.showpalettes', icon: 'eye', group: 'view' },
+  { id: 'RIBBONCLOSE', labelKey: 'draw.kind.ribbonclose', icon: 'menu', group: 'view' },
+  { id: 'GOTOSTART', labelKey: 'draw.kind.gotostart', icon: 'start', group: 'file' },
+  { id: 'COPYHIST', labelKey: 'draw.kind.copyhist', icon: 'copy', group: 'properties' },
+  { id: 'TRANSPARENCY', labelKey: 'draw.kind.transparency', icon: 'eye', group: 'properties' },
+  { id: 'DSETTINGS', labelKey: 'draw.kind.dsettings', icon: 'settings', group: 'properties' },
+  { id: 'QUICKPROPERTIES', labelKey: 'draw.kind.quickproperties', icon: 'properties', group: 'properties' },
+  { id: 'CLASSICLAYER', labelKey: 'draw.kind.classiclayer', icon: 'layers', group: 'properties' },
+  { id: 'COMMANDLINE', labelKey: 'draw.kind.commandline', icon: 'terminal', group: 'view' },
+  { id: 'COMMANDLINEHIDE', labelKey: 'draw.kind.commandlinehide', icon: 'terminal', group: 'view' },
+
 ]);

@@ -290,6 +290,29 @@ impl Application {
             | ExtendedCommandId::TextExplode
             | ExtendedCommandId::UpdateField
             | ExtendedCommandId::Units => self.extended_w9_reports(session, command, ext)?,
+            // Wave 10: layer/view/session reports and named refusals.
+            ExtendedCommandId::DashLayer
+            | ExtendedCommandId::LayerStateSave
+            | ExtendedCommandId::NewView
+            | ExtendedCommandId::DashScaleListEdit
+            | ExtendedCommandId::CopyHist => self.extended_w10_layer(session, command, ext)?,
+            ExtendedCommandId::DashUnits
+            | ExtendedCommandId::LineWeight
+            | ExtendedCommandId::DashLineWeight
+            | ExtendedCommandId::Color
+            | ExtendedCommandId::DashColor => self.extended_w10_session(session, command, ext)?,
+            ExtendedCommandId::Help
+            | ExtendedCommandId::ClassicInsert
+            | ExtendedCommandId::ClassicGroup
+            | ExtendedCommandId::FileTab
+            | ExtendedCommandId::FileTabClose
+            | ExtendedCommandId::HidePalettes
+            | ExtendedCommandId::ShowPalettes
+            | ExtendedCommandId::RibbonClose
+            | ExtendedCommandId::GoToStart
+            | ExtendedCommandId::Transparency => {
+                self.extended_w10_refusals(session, command, ext)?
+            }
         };
         Ok(Some(outcome))
     }

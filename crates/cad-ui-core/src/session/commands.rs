@@ -603,6 +603,28 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("UPDATEFIELD", CommandId::Extended(ExtendedCommandId::UpdateField)),
     ("UNITS", CommandId::Extended(ExtendedCommandId::Units)),
 
+    // Wave 10 (2026-11-09): layer/view/session reports and named refusals.
+    ("-UNITS", CommandId::Extended(ExtendedCommandId::DashUnits)),
+    ("-LAYER", CommandId::Extended(ExtendedCommandId::DashLayer)),
+    ("LAYERSTATESAVE", CommandId::Extended(ExtendedCommandId::LayerStateSave)),
+    ("NEWVIEW", CommandId::Extended(ExtendedCommandId::NewView)),
+    ("-SCALELISTEDIT", CommandId::Extended(ExtendedCommandId::DashScaleListEdit)),
+    ("LWEIGHT", CommandId::Extended(ExtendedCommandId::LineWeight)),
+    ("-LWEIGHT", CommandId::Extended(ExtendedCommandId::DashLineWeight)),
+    ("COLOR", CommandId::Extended(ExtendedCommandId::Color)),
+    ("-COLOR", CommandId::Extended(ExtendedCommandId::DashColor)),
+    ("HELP", CommandId::Extended(ExtendedCommandId::Help)),
+    ("CLASSICINSERT", CommandId::Extended(ExtendedCommandId::ClassicInsert)),
+    ("CLASSICGROUP", CommandId::Extended(ExtendedCommandId::ClassicGroup)),
+    ("FILETAB", CommandId::Extended(ExtendedCommandId::FileTab)),
+    ("FILETABCLOSE", CommandId::Extended(ExtendedCommandId::FileTabClose)),
+    ("HIDEPALETTES", CommandId::Extended(ExtendedCommandId::HidePalettes)),
+    ("SHOWPALETTES", CommandId::Extended(ExtendedCommandId::ShowPalettes)),
+    ("RIBBONCLOSE", CommandId::Extended(ExtendedCommandId::RibbonClose)),
+    ("GOTOSTART", CommandId::Extended(ExtendedCommandId::GoToStart)),
+    ("COPYHIST", CommandId::Extended(ExtendedCommandId::CopyHist)),
+    ("TRANSPARENCY", CommandId::Extended(ExtendedCommandId::Transparency)),
+
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**

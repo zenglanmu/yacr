@@ -1225,6 +1225,25 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `TXTEXP` | **部分实现（具名拒绝）**：`txtexp.unsupported: no font-outline-to-geometry path is implemented` | 同上 |
 | `UPDATEFIELD` | **部分实现（具名拒绝）**：`updatefield.unsupported: fields are not modeled` | 同上 |
 
+### 2026-11-09 Wave 10 扩展命令（图层/视图/会话报告 + chrome 本地）
+
+> 证据仅 Linux 编译 + `cad-app`/`cad-ui-core` 契约测试 + 前端 `node --test`；GUI/GPU/像素/真机 NOT VERIFIED。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `-LAYER` | **部分实现（只读报告）**：真实图层表（名称/可见/off/frozen/locked/当前层） | 图层增删改名/开关/冻结/锁定写形式未实现；不写库 |
+| `LAYERSTATESAVE` | **部分实现（载荷路由）**：`LayerState` 载荷转交既有 `LAYERSTATE` 会话存储 | 无收录对话框；无载荷只报告；会话状态不持久化 |
+| `NEWVIEW` | **部分实现（载荷路由）**：`View` 载荷转交既有命名视图存储 | 无窗口/名称提示；会话状态不持久化 |
+| `-SCALELISTEDIT` | **部分实现（只读报告）**：真实 `ACAD_SCALELIST` 条目 | 创建/编辑/删除/排序比例未实现 |
+| `LWEIGHT` / `-LWEIGHT` | **部分实现（只读报告）**：会话线宽显示令牌（默认 ON） | 渲染器不消费该标志；LWEIGHT 对话框未实现 |
+| `COLOR` / `-COLOR` | **部分实现（只读报告）**：会话当前颜色 ACI（默认 256=ByLayer） | 无创建路径消费；颜色对话框未实现 |
+| `-UNITS` | **部分实现（只读报告）**：固定单位显示规则 | Units 对话框/逐图纸单位表未实现 |
+| `COPYHIST` | **部分实现（只读报告）**：`copyhist.not_tracked` | 会话不存命令历史文本；不复制 |
+| `HELP` / `CLASSICINSERT` / `CLASSICGROUP` | **部分实现（具名拒绝）**：`help.unsupported` / `classicinsert.unsupported` / `classicgroup.unsupported` | 不写库/不升修订/不入历史 |
+| `FILETAB` / `FILETABCLOSE` / `HIDEPALETTES` / `SHOWPALETTES` / `RIBBONCLOSE` / `GOTOSTART` | **部分实现（具名拒绝）**：窗口/选项板/功能区/开始页 chrome 由宿主负责 | 同上 |
+| `TRANSPARENCY` | **部分实现（具名拒绝）**：`transparency.unsupported: image transparency is not modeled` | 同上 |
+| `DSETTINGS` / `QUICKPROPERTIES` / `CLASSICLAYER` / `COMMANDLINE` / `COMMANDLINEHIDE` | **部分实现（chrome 本地选择子）**：分别打开 Options / 特性面板 / 图层面板，或显示/隐藏命令行 | 不读写图纸；紧凑布局对特性/图层面板给出既有拒绝句 |
+
 ## P2 晋升与边界更新（2026-11-09）
 
 > 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux

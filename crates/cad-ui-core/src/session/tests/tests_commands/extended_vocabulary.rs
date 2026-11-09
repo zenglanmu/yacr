@@ -59,6 +59,7 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::DashHatch
                 | ExtendedCommandId::DashHatchEdit
                 | ExtendedCommandId::ExOffset
+                | ExtendedCommandId::LayerStateSave
         );
         assert_eq!(
             variant.requires_work_mode(),

@@ -481,7 +481,7 @@ impl Application {
     }
 
     /// `LAYERSTATE <option>`: bounded named layer states.
-    fn layer_state(
+    pub(crate) fn layer_state(
         &mut self,
         session: &mut SessionState,
         command: &Command,
