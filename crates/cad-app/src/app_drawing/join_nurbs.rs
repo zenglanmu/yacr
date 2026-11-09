@@ -8,6 +8,7 @@
 //! | --- | --- |
 //! | LINE | degree-1 clamped Bezier (the chord) |
 //! | ARC | rational quadratic Bezier spans (`w = cos(Δ/2)`), split into ≤ 90° spans |
+//! | ELLIPSE (elliptical arc) | the affine image of the ARC construction (same `w = cos(Δ/2)`, midpoint scaled by the major/minor axes) |
 //! | POLYLINE | one degree-1 span per straight segment, one rational quadratic span per bulged segment |
 //! | SPLINE | its own clamped B-spline, decomposed into Bezier spans by exact knot insertion |
 //!
@@ -20,9 +21,10 @@
 //!
 //! ## Scope
 //!
-//! * ELLIPSE (elliptical arc) mixes are still refused by name
-//!   (`join.multiple_spline_mix`): the elliptical NURBS conversion is not
-//!   implemented.
+//! * Every source kind JOIN supports (`LINE`, `ARC`, `ELLIPSE` elliptical arc,
+//!   `POLYLINE`, `SPLINE`) converts exactly; an ellipse is the affine image of
+//!   the circular rational-quadratic construction, so no sampling or refit is
+//!   involved.
 //! * `JOIN CLOSE` on a mixed weld is refused (`join.close_spline`), matching the
 //!   pure-SPLINE mode (the model has no closed spline flag).
 //! * Pieces must touch end-to-end (within [`super::join_tolerance`]); JOIN never
@@ -36,7 +38,8 @@ use super::super::*;
 use super::plan::Joined;
 use super::{angle_tolerance, invalid, join_tolerance, unsupported};
 use cad_geometry::{
-    add, arbitrary_axis, bulge_arc_geometry, clamped_uniform_knots, is_xy_parallel, scale,
+    add, arbitrary_axis, bulge_arc_geometry, clamped_uniform_knots, cross, is_xy_parallel, length,
+    normalize, scale,
 };
 
 /// One rational Bezier span: `points.len() == weights.len()`, degree `len - 1`.
@@ -213,6 +216,104 @@ fn arc_spans(
             add(
                 scale(ax, radius / weight * middle.cos()),
                 scale(ay, radius / weight * middle.sin()),
+            ),
+        );
+        spans.push(Span {
+            points: vec![point(first), apex, point(first + step)],
+            weights: vec![1.0, weight, 1.0],
+        });
+    }
+    Ok(spans)
+}
+
+/// One ELLIPSE (elliptical arc) as exact rational quadratic spans.
+///
+/// The ellipse is the affine image `P(a) = c + M·cos a + N·sin a` of the unit
+/// circle (`M` = the stored major-radius vector, `N = cross(normal, M)·ratio`).
+/// Affine maps commute with the rational Bezier construction, so the circular
+/// spans map directly: the same weights `[1, cos(Δ/2), 1]` and the middle
+/// control point `c + (M·cos(mid) + N·sin(mid)) / cos(Δ/2)`. The result is the
+/// stored ellipse to the last bit — no sampling, no refit.
+fn ellipse_spans(
+    center: Point3,
+    normal: Point3,
+    major_axis: Point3,
+    ratio: f64,
+    start: f64,
+    sweep: f64,
+) -> CadResult<Vec<Span>> {
+    if !is_finite_point(center) || !is_finite_point(normal) || !is_finite_point(major_axis) {
+        return Err(invalid("join.degenerate", "an ELLIPSE is not finite"));
+    }
+    let major_length = length(major_axis);
+    if !major_length.is_finite() || major_length <= join_tolerance() {
+        return Err(invalid("join.degenerate", "an ELLIPSE has no major axis"));
+    }
+    // No stored ellipse uses a negative ratio (`join_plan` and the representation
+    // both reject it); a non-positive ratio has no second axis to span.
+    if !ratio.is_finite() || ratio <= 0.0 {
+        return Err(invalid(
+            "join.degenerate",
+            "an ELLIPSE has no valid minor/major ratio",
+        ));
+    }
+    let normal = normalize(normal);
+    if length(cross(normal, major_axis)) <= join_tolerance() {
+        return Err(invalid(
+            "join.degenerate",
+            "an ELLIPSE has no second axis (its normal is parallel to the major axis)",
+        ));
+    }
+    if !start.is_finite() {
+        return Err(invalid(
+            "join.degenerate",
+            "an ELLIPSE has a non-finite start angle",
+        ));
+    }
+    let angle_tol = angle_tolerance(major_length);
+    if !sweep.is_finite() || sweep.abs() <= angle_tol {
+        return Err(invalid("join.degenerate", "an ELLIPSE has no sweep"));
+    }
+    if sweep.abs() > std::f64::consts::TAU + angle_tol {
+        return Err(unsupported(
+            "join.sweep_overflow",
+            "an ELLIPSE arc of more than one full turn has no single exact rational span chain",
+        ));
+    }
+    let minor_axis = scale(cross(normal, major_axis), ratio);
+    let parts = (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize;
+    let parts = parts.clamp(1, 4);
+    let step = sweep / parts as f64;
+    let point = |angle: f64| {
+        add(
+            center,
+            add(
+                scale(major_axis, angle.cos()),
+                scale(minor_axis, angle.sin()),
+            ),
+        )
+    };
+    let mut spans = Vec::with_capacity(parts);
+    for index in 0..parts {
+        let first = start + step * index as f64;
+        let middle = first + step * 0.5;
+        let weight = (step * 0.5).cos();
+        if weight <= 1e-12 {
+            return Err(invalid(
+                "join.degenerate",
+                "an ELLIPSE span has no finite rational weight",
+            ));
+        }
+        // The middle control point is the affine image of the circular tangent
+        // intersection: the axes' mid-angle vector scaled by `1 / cos(Δ/2)`.
+        let apex = add(
+            center,
+            scale(
+                add(
+                    scale(major_axis, middle.cos()),
+                    scale(minor_axis, middle.sin()),
+                ),
+                1.0 / weight,
             ),
         );
         spans.push(Span {
@@ -470,14 +571,14 @@ fn chain_spans(mut chains: Vec<Vec<Span>>) -> CadResult<Vec<Span>> {
                 break;
             }
             if distance(chain_tail, head) <= tol {
-                let mut chain = reversed_chain(chains.remove(index));
+                let mut chain = chains.remove(index);
                 chain.extend(current);
                 current = chain;
                 matched = true;
                 break;
             }
             if distance(chain_head, head) <= tol {
-                let mut chain = chains.remove(index);
+                let mut chain = reversed_chain(chains.remove(index));
                 chain.extend(current);
                 current = chain;
                 matched = true;
@@ -541,17 +642,6 @@ pub(super) fn plan_mixed_weld(sources: &[DbEntity], close: bool) -> CadResult<Jo
              closed flag)",
         ));
     }
-    if sources
-        .iter()
-        .any(|source| matches!(source.geometry, SemanticGeometry::Ellipse { .. }))
-    {
-        return Err(unsupported(
-            "join.multiple_spline_mix",
-            "an ELLIPSE (elliptical arc) mixed with other kinds needs the exact elliptical \
-             NURBS conversion that this build does not implement; LINE/ARC/POLYLINE/SPLINE \
-             mixes are welded into a SPLINE",
-        ));
-    }
     let mut chains = Vec::with_capacity(sources.len());
     for source in sources {
         let spans = match &source.geometry {
@@ -563,6 +653,14 @@ pub(super) fn plan_mixed_weld(sources: &[DbEntity], close: bool) -> CadResult<Jo
                 start,
                 sweep,
             } => arc_spans(*center, *normal, *radius, *start, *sweep)?,
+            SemanticGeometry::Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                start,
+                sweep,
+            } => ellipse_spans(*center, *normal, *major_axis, *ratio, *start, *sweep)?,
             SemanticGeometry::Polyline {
                 points,
                 bulges,

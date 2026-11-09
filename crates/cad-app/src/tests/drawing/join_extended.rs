@@ -416,6 +416,17 @@ fn spline_cps(app: &Application) -> (u32, Vec<f64>, Vec<Point3>, Vec<f64>) {
     }
 }
 
+/// The exact eccentric angle at local Bezier parameter `s` of one rational
+/// quadratic span starting at `start` with angular `step`.
+///
+/// The rational quadratic map is `tan(θ/2) = s·sin(h) / (1 − s + s·cos(h))`
+/// with `h = step/2`, so the parameter is not the angle and a sample has to
+/// invert that map instead of assuming `θ = start + step·s`.
+fn rational_ellipse_angle(start: f64, step: f64, s: f64) -> f64 {
+    let half = step * 0.5;
+    start + 2.0 * (s * half.sin()).atan2(1.0 - s + s * half.cos())
+}
+
 #[test]
 fn multiple_mode_welds_a_line_and_a_spline_exactly() {
     // LINE (0,0)→(4,0) touches a cubic single-span spline starting at (4,0).
@@ -632,45 +643,194 @@ fn multiple_mode_welds_an_arc_and_a_spline_into_a_rational_spline() {
 }
 
 #[test]
-fn multiple_mode_refuses_an_ellipse_mix_and_a_closed_mixed_weld() {
+fn multiple_mode_welds_an_ellipse_arc_and_a_line_exactly() {
+    // LINE (0,0)→(5,0), then the quarter elliptical arc from that point
+    // (P(0) = (5,0)) to P(π/2) = (0, 2.5) on the ellipse with major axis
+    // (5,0,0) and ratio 0.5.
     let (mut app, mut session) = app_with(vec![
+        line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 5.0, 0.0), 0),
         part(
-            1,
-            ellipse_geometry(point(0.0, 0.0), 0.0, 1.0),
+            2,
+            ellipse_geometry(point(0.0, 0.0), 0.0, std::f64::consts::FRAC_PI_2),
             LayerId(0),
             SpaceId::Model,
             "AcDbEllipse",
-            0,
-        ),
-        part(
-            2,
-            spline_geometry(
-                vec![
-                    point(0.0, 5.0),
-                    point(1.0, 6.0),
-                    point(2.0, 6.0),
-                    point(3.0, 5.0),
-                ],
-                3,
-            ),
-            LayerId(0),
-            SpaceId::Model,
-            "AcDbSpline",
             1,
         ),
     ]);
     let before_revision = revision(&app);
     select(&mut app, &mut session, &[1, 2]);
-    let error = join_with(&mut app, &mut session, false, JoinMode::Multiple).unwrap_err();
-    assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
-    assert!(
-        format!("{error:?}").contains("join.multiple_spline_mix"),
-        "{error:?}"
+    join_with(&mut app, &mut session, false, JoinMode::Multiple)
+        .expect("ELLIPSE arc + LINE welds into one exact SPLINE");
+    let (degree, knots, control_points, weights) = spline_cps(&app);
+    assert_eq!(degree, 2, "one line span elevated to the ellipse's degree");
+    assert_eq!(
+        control_points.len(),
+        6,
+        "the elevated LINE span plus the ellipse span"
     );
-    assert_eq!(revision(&app), before_revision);
-    assert_eq!(entity_count(&app), 2);
-    assert_eq!(undo_depth(&app), 0);
+    assert_eq!(knots.len(), 6 + 2 + 1);
+    assert!(
+        weights.iter().any(|weight| (weight - 1.0).abs() > 1e-6),
+        "the ellipse keeps its rational weights: {weights:?}"
+    );
+    // Endpoints are the two sources': LINE start and the ellipse arc's end.
+    assert!(near(evaluate_weld(&app, 0.0), point(0.0, 0.0)));
+    assert!(near(evaluate_weld(&app, 1.0), point(5.0, 0.0)));
+    assert!(near(evaluate_weld(&app, 2.0), point(0.0, 2.5)));
+    // Span 1 is the ellipse, exactly `c + M·cos a + N·sin a`.
+    for step in 0..=10 {
+        let u = step as f64 / 10.0;
+        let welded = evaluate_weld(&app, 1.0 + u);
+        let angle = rational_ellipse_angle(0.0, std::f64::consts::FRAC_PI_2, u);
+        let expected = point(5.0 * angle.cos(), 2.5 * angle.sin());
+        assert!(
+            near(welded, expected),
+            "ellipse span at u={u}: {welded:?} vs {expected:?}"
+        );
+    }
+    assert_eq!(entity_count(&app), 1);
+    assert_eq!(revision(&app).0, before_revision.0 + 1, "one transaction");
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+}
 
+#[test]
+fn multiple_mode_welds_an_ellipse_first_selection_in_chain_order() {
+    // The same two curves picked ELLIPSE first: the LINE lies ahead of the
+    // ellipse's start, so the chain has to be prepended with the LINE reversed.
+    // A wrong prepend still returns a SPLINE, but it jumps at the junction.
+    let (mut app, mut session) = app_with(vec![
+        part(
+            1,
+            ellipse_geometry(point(0.0, 0.0), 0.0, std::f64::consts::FRAC_PI_2),
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbEllipse",
+            0,
+        ),
+        line_entity(2, LayerId(0), line_geometry(5.0, 0.0, 9.0, 0.0), 1),
+    ]);
+    select(&mut app, &mut session, &[1, 2]);
+    join_with(&mut app, &mut session, false, JoinMode::Multiple)
+        .expect("ELLIPSE arc + LINE welds regardless of pick order");
+    let (degree, _, control_points, _) = spline_cps(&app);
+    assert_eq!(degree, 2);
+    assert_eq!(control_points.len(), 6);
+    assert!(near(evaluate_weld(&app, 0.0), point(9.0, 0.0)));
+    assert!(near(evaluate_weld(&app, 0.5), point(7.0, 0.0)));
+    // The junction is the shared ellipse start, not the LINE's far end.
+    assert!(near(evaluate_weld(&app, 1.0), point(5.0, 0.0)));
+    assert!(near(evaluate_weld(&app, 2.0), point(0.0, 2.5)));
+}
+
+#[test]
+fn multiple_mode_welds_an_ellipse_arc_and_an_arc_exactly() {
+    // The 90° ARC (1.5,0)→(0,1.5), then the elliptical arc whose P(π/2) is that
+    // same point and whose P(π) is (-3,0).
+    let (mut app, mut session) = app_with(vec![
+        arc_entity(
+            1,
+            LayerId(0),
+            arc_geometry(point(0.0, 0.0), 1.5, 0.0, std::f64::consts::FRAC_PI_2),
+            0,
+        ),
+        part(
+            2,
+            SemanticGeometry::Ellipse {
+                center: point(0.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                major_axis: p3(3.0, 0.0, 0.0),
+                ratio: 0.5,
+                start: std::f64::consts::FRAC_PI_2,
+                sweep: std::f64::consts::FRAC_PI_2,
+            },
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbEllipse",
+            1,
+        ),
+    ]);
+    select(&mut app, &mut session, &[1, 2]);
+    join_with(&mut app, &mut session, false, JoinMode::Multiple)
+        .expect("ELLIPSE arc + ARC welds into one exact rational SPLINE");
+    let (degree, _, _, weights) = spline_cps(&app);
+    assert_eq!(degree, 2);
+    assert!(
+        weights.iter().any(|weight| (weight - 1.0).abs() > 1e-6),
+        "both rational pieces keep their weights: {weights:?}"
+    );
+    assert!(near(evaluate_weld(&app, 0.0), point(1.5, 0.0)));
+    assert!(near(evaluate_weld(&app, 1.0), point(0.0, 1.5)));
+    assert!(near(evaluate_weld(&app, 2.0), point(-3.0, 0.0)));
+    for step in 0..=10 {
+        let u = step as f64 / 10.0;
+        let welded = evaluate_weld(&app, 1.0 + u);
+        let angle =
+            rational_ellipse_angle(std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2, u);
+        let expected = point(3.0 * angle.cos(), 1.5 * angle.sin());
+        assert!(
+            near(welded, expected),
+            "ellipse span at u={u}: {welded:?} vs {expected:?}"
+        );
+    }
+    assert_eq!(undo_depth(&app), 1);
+}
+
+/// A degenerate elliptical arc in a mixed selection is refused by name; the
+/// refusal writes nothing and leaves no undo entry.
+#[test]
+fn multiple_mode_refuses_a_degenerate_ellipse_mix_by_name() {
+    let ellipse = |major_axis: Point3, ratio: f64, sweep: f64| SemanticGeometry::Ellipse {
+        center: point(0.0, 0.0),
+        normal: p3(0.0, 0.0, 1.0),
+        major_axis,
+        ratio,
+        start: 0.0,
+        sweep,
+    };
+    let cases = [
+        (
+            ellipse(p3(0.0, 0.0, 0.0), 0.5, 1.0),
+            "join.degenerate",
+            "zero major axis",
+        ),
+        (
+            ellipse(p3(5.0, 0.0, 0.0), 0.0, 1.0),
+            "join.degenerate",
+            "zero ratio",
+        ),
+        (
+            ellipse(p3(5.0, 0.0, 0.0), 0.5, 0.0),
+            "join.degenerate",
+            "zero sweep",
+        ),
+        (
+            ellipse(p3(5.0, 0.0, 0.0), 0.5, std::f64::consts::TAU + 0.5),
+            "join.closed_object",
+            "more than a full turn",
+        ),
+    ];
+    for (geometry, code, label) in cases {
+        let (mut app, mut session) = app_with(vec![
+            part(1, geometry, LayerId(0), SpaceId::Model, "AcDbEllipse", 0),
+            line_entity(2, LayerId(0), line_geometry(0.0, 0.0, 5.0, 0.0), 1),
+        ]);
+        let before_revision = revision(&app);
+        select(&mut app, &mut session, &[1, 2]);
+        let error = join_with(&mut app, &mut session, false, JoinMode::Multiple)
+            .expect_err("the degenerate ellipse is refused");
+        assert!(
+            format!("{error:?}").contains(code),
+            "{label}: expected {code}, got {error:?}"
+        );
+        assert_eq!(revision(&app), before_revision, "{label}: no revision bump");
+        assert_eq!(entity_count(&app), 2, "{label}: no partial write");
+        assert_eq!(undo_depth(&app), 0, "{label}: no undo entry");
+    }
+}
+
+#[test]
+fn multiple_mode_refuses_a_closed_mixed_weld() {
     // JOIN CLOSE on a mixed weld is refused by name (no closed spline flag).
     let (mut app, mut session) = app_with(vec![
         line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 4.0, 0.0), 0),

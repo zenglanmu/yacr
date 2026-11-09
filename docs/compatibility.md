@@ -1480,7 +1480,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `CHAMFER` | **完整实现** | `Distance`/`Angle`/`Method`/`Trim`；双零 ⇒ 仅延伸相交；`CHAMFER POLYLINE` 全顶点、弧段替换、过短跳过、开口闭合 | `Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离未文档化 ⇒ 具名拒绝；圆弧/圆/样条 AutoCAD 也不接受 |
 | `FILLET` | 部分实现 | `Radius`/`Trim`/`Polyline` 全顶点；`R=0` 尖角；平行线自动半径 = 间隙/2；直线↔圆/弧相切且圆不修剪 | **曲线对曲线**（圆/弧互选、椭圆、椭圆弧、样条）⇒ `fillet.unsupported_pair` |
 | `PEDIT` | 部分实现 | 全选项行；`Join` 接受线/弧/多段线；`Fit`/`Spline` 含闭合环；`Decurve`/`Reverse`/`Undo`；LINE/ARC/SPLINE 转换 | **`Width`/`Ltype gen`/`Edit vertex` 未实现**（多段线无宽度/`plinegen`/顶点子菜单模型）；偶数环无精确弧拟合 ⇒ `pedit.fit_closure` |
-| `JOIN` | 部分实现 | 源对象模式；`Multiple` 把 LINE/ARC/多段线/SPLINE 精确焊接为**有理 B 样条** | **椭圆弧与其它类型混合**仍拒绝；非共面多段线属 3D 全局范围 |
+| `JOIN` | 部分实现 | 源对象模式；`Multiple` 把 LINE/ARC/多段线/SPLINE/椭圆弧精确焊接为**有理 B 样条**（椭圆弧 = 圆有理二次的精确仿射像） | `JOIN CLOSE` 的混合 SPLINE 仍拒绝；非共面多段线属 3D 全局范围 |
 | `OFFSET` | **完整实现** | `Through`/`Erase`/`Layer`/`Multiple`（单步）/距离；椭圆与椭圆弧→样条；`OFFSETGAPTYPE` Sharp/**Fillet**/**Chamfer** | `OFFSET MULTIPLE` 的多点循环拒绝（单点捕获，属逐选项提示全局范围）；开放折线远端自交未检查（AutoCAD 未文档化） |
 | `STRETCH` | 部分实现 | 交叉矩形 + 交叉多边形/lasso payload（even-odd 包含）；部分包围逐顶点、完全包围整移；圆按圆心、块/文字按插入点；标注按定义点 | **多边形/lasso 的交互捕获未接线**（只经 API/IPC 可达，工具仍只捕获矩形） |
 | `MIRROR` | 部分实现 | `MIRRTEXT=0` 可读镜像；`MIRROR ERASE YES/NO`；标注反射后重合成 | **`MIRRTEXT=1` 字形镜像未实现**（文字实体无镜像标志） |
