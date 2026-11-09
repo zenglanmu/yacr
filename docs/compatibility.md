@@ -1244,6 +1244,38 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `TRANSPARENCY` | **部分实现（具名拒绝）**：`transparency.unsupported: image transparency is not modeled` | 同上 |
 | `DSETTINGS` / `QUICKPROPERTIES` / `CLASSICLAYER` / `COMMANDLINE` / `COMMANDLINEHIDE` | **部分实现（chrome 本地选择子）**：分别打开 Options / 特性面板 / 图层面板，或显示/隐藏命令行 | 不读写图纸；紧凑布局对特性/图层面板给出既有拒绝句 |
 
+### 2026-11-09 Wave 11 扩展命令（3D/网格/曲面拒绝）
+
+> 3D 优先级低于 2D。以下名字只提供诚实命令路径（具名拒绝），不是可用 3D 功能；证据仅 Linux 编译 + 契约测试。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `3DALIGN` | **部分实现（具名拒绝）**：`3dalign.unsupported: 3D alignment is not modeled; use the 2D ALIGN path` | 不写库/不升修订/不入历史 |
+| `3DARRAY` | **部分实现（具名拒绝）**：`3darray.unsupported: 3D arrays are not modeled; use ARRAY/ARRAYRECT/ARRAYPOLAR` | 不写库/不升修订/不入历史 |
+| `3DCLIP` | **部分实现（具名拒绝）**：`3dclip.unsupported: no 3D clipping-plane model` | 不写库/不升修订/不入历史 |
+| `3DCORBIT` | **部分实现（具名拒绝）**：`3dcorbit.unsupported: no continuous 3D orbit controller` | 不写库/不升修订/不入历史 |
+| `3DDISTANCE` | **部分实现（具名拒绝）**：`3ddistance.unsupported: no interactive 3D distance navigation` | 不写库/不升修订/不入历史 |
+| `3DDWF` | **部分实现（具名拒绝）**：`3ddwf.unsupported: DWF/DWFx export is not implemented; use PLOT for SVG/PDF` | 不写库/不升修订/不入历史 |
+| `3DEDITBAR` | **部分实现（具名拒绝）**：`3deditbar.unsupported: no NURBS/spline edit bar` | 不写库/不升修订/不入历史 |
+| `3DFACE` | **部分实现（具名拒绝）**：`3dface.unsupported: no 3DFACE entity model` | 不写库/不升修订/不入历史 |
+| `3DFLY` | **部分实现（具名拒绝）**：`3dfly.unsupported: no 3D fly navigation` | 不写库/不升修订/不入历史 |
+| `3DFORBIT` | **部分实现（具名拒绝）**：`3dforbit.unsupported: no free 3D orbit controller` | 不写库/不升修订/不入历史 |
+| `3DMESH` | **部分实现（具名拒绝）**：`3dmesh.unsupported: no free-form mesh creation model` | 不写库/不升修订/不入历史 |
+| `3DMOVE` | **部分实现（具名拒绝）**：`3dmove.unsupported: no 3D move gizmo` | 不写库/不升修订/不入历史 |
+| `3DORBIT` | **部分实现（具名拒绝）**：`3dorbit.unsupported: no interactive 3D orbit controller; use ORBIT` | 不写库/不升修订/不入历史 |
+| `3DORBITCTR` | **部分实现（具名拒绝）**：`3dorbitctr.unsupported: no 3D orbit-center model` | 不写库/不升修订/不入历史 |
+| `-3DOSNAP` | **部分实现（具名拒绝）**：`-3dosnap.unsupported: no 3D object-snap model` | 不写库/不升修订/不入历史 |
+| `3DOSNAP` | **部分实现（具名拒绝）**：`3dosnap.unsupported: no 3D object-snap model` | 不写库/不升修订/不入历史 |
+| `3DPAN` | **部分实现（具名拒绝）**：`3dpan.unsupported: no 3D pan navigation` | 不写库/不升修订/不入历史 |
+| `3DPOLY` | **部分实现（具名拒绝）**：`3dpoly.unsupported: no 3D polyline entity model` | 不写库/不升修订/不入历史 |
+| `3DPRINT` | **部分实现（具名拒绝）**：`3dprint.unsupported: no 3D print model` | 不写库/不升修订/不入历史 |
+| `3DPRINTSERVICE` | **部分实现（具名拒绝）**：`3dprintservice.unsupported: no STL export or 3D print service` | 不写库/不升修订/不入历史 |
+| `3DROTATE` | **部分实现（具名拒绝）**：`3drotate.unsupported: no 3D rotate gizmo` | 不写库/不升修订/不入历史 |
+| `3DSCALE` | **部分实现（具名拒绝）**：`3dscale.unsupported: no 3D scale gizmo` | 不写库/不升修订/不入历史 |
+| `3DSWIVEL` | **部分实现（具名拒绝）**：`3dswivel.unsupported: no 3D swivel navigation` | 不写库/不升修订/不入历史 |
+| `3DWALK` | **部分实现（具名拒绝）**：`3dwalk.unsupported: no 3D walk navigation` | 不写库/不升修订/不入历史 |
+| `3DZOOM` | **部分实现（具名拒绝）**：`3dzoom.unsupported: no perspective 3D zoom navigation` | 不写库/不升修订/不入历史 |
+
 ## P2 晋升与边界更新（2026-11-09）
 
 > 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux

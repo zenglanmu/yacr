@@ -313,6 +313,32 @@ impl Application {
             | ExtendedCommandId::Transparency => {
                 self.extended_w10_refusals(session, command, ext)?
             }
+            // Wave 11: stable named refusals for 3D/mesh/surface commands.
+            ExtendedCommandId::ThreeDAlign
+            | ExtendedCommandId::ThreeDArray
+            | ExtendedCommandId::ThreeDClip
+            | ExtendedCommandId::ThreeDCorbit
+            | ExtendedCommandId::ThreeDDistance
+            | ExtendedCommandId::ThreeDDwf
+            | ExtendedCommandId::ThreeDEditBar
+            | ExtendedCommandId::ThreeDFace
+            | ExtendedCommandId::ThreeDFly
+            | ExtendedCommandId::ThreeDForbit
+            | ExtendedCommandId::ThreeDMesh
+            | ExtendedCommandId::ThreeDMove
+            | ExtendedCommandId::ThreeDOrbit
+            | ExtendedCommandId::ThreeDOrbitCtr
+            | ExtendedCommandId::Dash3DOsnap
+            | ExtendedCommandId::ThreeDObjectSnap
+            | ExtendedCommandId::ThreeDPan
+            | ExtendedCommandId::ThreeDPoly
+            | ExtendedCommandId::ThreeDPrint
+            | ExtendedCommandId::ThreeDPrintService
+            | ExtendedCommandId::ThreeDRotate
+            | ExtendedCommandId::ThreeDScale
+            | ExtendedCommandId::ThreeDSwivel
+            | ExtendedCommandId::ThreeDWalk
+            | ExtendedCommandId::ThreeDZoom => self.extended_w11_refusals(command, ext)?,
         };
         Ok(Some(outcome))
     }

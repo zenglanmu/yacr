@@ -27,9 +27,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **66** |
-| 部分实现（有写明的界） | **407** |
-| **已实现合计（完整 + 部分）** | **473** |
-| 未实现 | **508** |
+| 部分实现（有写明的界） | **432** |
+| **已实现合计（完整 + 部分）** | **498** |
+| 未实现 | **483** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -69,9 +69,10 @@
 > **2026-11-09 增补（Wave 8）**：`ELEV` 一个**只读会话标高令牌报告**（默认 0.0；`ELEV <height>` 设置形式未实现，不按标高创建对象），`UCSICON` 一个会话开关（默认关；不渲染任何 UCS 图标）；另加 `UCS`/`UCSMAN`/`TABLET`/`TASKBAR`/`REINIT`/`SYSWINDOWS`/`MENU`/`RIBBON` 八个**具名拒绝**（`CadError::Unsupported` + 稳定原因串：无 UCS 模型、无数字化仪/设备初始化模型、无菜单文件模型，窗口装饰/布局/功能区可见性由宿主负责；不写库/不升修订/不入历史）计入 **423 已实现（50 完整 + 373 部分）/ 558 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-09 增补（Wave 9）**：`ARRAY`/`-ARRAY`/`ARRAYCLASSIC` 三个阵列路由（`ArrayRect`/`ArrayPolar` 载荷转交现有 `ARRAYRECT`/`ARRAYPOLAR`）、`BLEND` 与 `BREAKLINE` 两个真实 2D 编辑（三次样条桥接、锯齿折断线；符号/切线规则为声明式）、`-BLOCK`/`-INSERT` 两个已实现别名、`-BOUNDARY`/`-HATCH`/`-HATCHEDIT`/`EXOFFSET` 四个部分别名、`DIM` 只读路由报告、`UNITS` 只读单位报告，以及 `ARCTEXT`…`UPDATEFIELD` 十二个具名拒绝计入 **448 已实现（66 完整 + 382 部分）/ 533 未实现**；全部 Viewer-legal 或 Work-only 边界已写明，无 GUI/GPU/像素证据。
 > **2026-11-09 增补（Wave 10）**：`-LAYER` 只读图层表、`-SCALELISTEDIT` 只读真实比例表、`LAYERSTATESAVE`/`NEWVIEW` 两个载荷路由、`LWEIGHT`/`-LWEIGHT`/`COLOR`/`-COLOR`/`-UNITS`/`COPYHIST` 六个只读会话/日志报告、`HELP`…`TRANSPARENCY` 十个具名拒绝，以及 `DSETTINGS`/`QUICKPROPERTIES`/`CLASSICLAYER`/`COMMANDLINE`/`COMMANDLINEHIDE` 五个 chrome 本地选择子计入 **473 已实现（66 完整 + 407 部分）/ 508 未实现**；无 GUI/GPU/像素证据。
+> **2026-11-09 增补（Wave 11）**：`3DALIGN`…`3DZOOM` 二十五个 3D/网格/曲面/3D 导航/打印名全部按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）；3D 优先级低于 2D，本批只提供诚实命令路径，不计为可用 3D 功能。计入 **498 已实现（66 完整 + 432 部分）/ 483 未实现**。
 > **2026-11-09 增补（P1 晋升批）**：按 AutoCAD 2026 ENU 帮助页逐条核对后，`ALIGN`、`BREAK`、`DIVIDE`、`SELECTSIMILAR`、`MATCHPROP`、`SETBYLAYER`、`LIST`、`DIMSPACE`、`TORIENT` 九条从**部分实现**晋升为**完整实现**：补齐 1/3 对点 ALIGN（3 对点为平面刚性、不缩放）、椭圆 BREAK、全曲线 DIVIDE + 块对齐、SELECTSIMILAR 默认「图层+类型」与 `Name`/`Object style`、MATCHPROP 的 Text/Dimension/Hatch 特殊组、SETBYLAYER 透明度与 Include blocks、LIST 的纸空间/块空间与样式名、DIMSPACE 的 Auto=2×文字高度/`0` 对齐/角度标注、TORIENT Reverse（本项目扩展）。`LENGTHEN` 补了近端语义、开放多段线/椭圆弧/开放样条与 DY，但**开放样条延长**仍是具名拒绝，故保留**部分实现**。三处实现偏差已按官方语义修正：ALIGN 三对点禁缩放、SELECTSIMILAR 默认集、DIMSPACE Auto 公式。计入 **423 已实现（59 完整 + 364 部分）/ 558 未实现**；全部结论仍只覆盖 Linux 编译与契约测试，GUI/GPU/像素 NOT VERIFIED。
 >
-> **473 已实现（66 完整 + 407 部分）/ 508 未实现**；无未保存修改提示，无多文档。
+> **498 已实现（66 完整 + 432 部分）/ 483 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -172,6 +173,7 @@
 
 | Command | 状态 | 说明 |
 | --- | --- | --- |
+| `-3DOSNAP` | 部分实现 | 具名拒绝（`-3dosnap.unsupported: no 3D object-snap model`）。 |
 | `-ARCHIVE` | 部分实现 | 具名拒绝（`-archive.unsupported`）：本构建无图纸集归档打包模型；命令行拼写。 |
 | `-ARRAY` | 部分实现 | `ARRAY` 的命令行拼写，同一路由与边界。 |
 | `-ATTACH` | 部分实现 | 具名拒绝（`-attach.unsupported`）：不附着外部参照或底图；命令行拼写。 |
@@ -206,6 +208,30 @@
 | `-WBLOCK` | 部分实现 | 具名拒绝（`-wblock.unsupported`）：将块定义写入独立图形文件未实现。 |
 | `-XBIND` | 部分实现 | 具名拒绝（`-xbind.unsupported`）：本构建无外部参照绑定/插入模型；命令行拼写。 |
 | `-XREF` | 部分实现 | 只读：外部参照导入溯源报告（`-xref.entry`/`-xref.summary`）；附着/卸载/重载/绑定未实现。 |
+| `3DALIGN` | 部分实现 | 具名拒绝（`3dalign.unsupported: 3D alignment is not modeled; use the 2D ALIGN path`）。 |
+| `3DARRAY` | 部分实现 | 具名拒绝（`3darray.unsupported: 3D arrays are not modeled; use ARRAY/ARRAYRECT/ARRAYPOLAR`）。 |
+| `3DCLIP` | 部分实现 | 具名拒绝（`3dclip.unsupported: no 3D clipping-plane model`）。 |
+| `3DCORBIT` | 部分实现 | 具名拒绝（`3dcorbit.unsupported: no continuous 3D orbit controller`）。 |
+| `3DDISTANCE` | 部分实现 | 具名拒绝（`3ddistance.unsupported: no interactive 3D distance navigation`）。 |
+| `3DDWF` | 部分实现 | 具名拒绝（`3ddwf.unsupported: DWF/DWFx export is not implemented; use PLOT for SVG/PDF`）。 |
+| `3DEDITBAR` | 部分实现 | 具名拒绝（`3deditbar.unsupported: no NURBS/spline edit bar`）。 |
+| `3DFACE` | 部分实现 | 具名拒绝（`3dface.unsupported: no 3DFACE entity model`）。 |
+| `3DFLY` | 部分实现 | 具名拒绝（`3dfly.unsupported: no 3D fly navigation`）。 |
+| `3DFORBIT` | 部分实现 | 具名拒绝（`3dforbit.unsupported: no free 3D orbit controller`）。 |
+| `3DMESH` | 部分实现 | 具名拒绝（`3dmesh.unsupported: no free-form mesh creation model`）。 |
+| `3DMOVE` | 部分实现 | 具名拒绝（`3dmove.unsupported: no 3D move gizmo`）。 |
+| `3DORBIT` | 部分实现 | 具名拒绝（`3dorbit.unsupported: no interactive 3D orbit controller; use ORBIT`）。 |
+| `3DORBITCTR` | 部分实现 | 具名拒绝（`3dorbitctr.unsupported: no 3D orbit-center model`）。 |
+| `3DOSNAP` | 部分实现 | 具名拒绝（`3dosnap.unsupported: no 3D object-snap model`）。 |
+| `3DPAN` | 部分实现 | 具名拒绝（`3dpan.unsupported: no 3D pan navigation`）。 |
+| `3DPOLY` | 部分实现 | 具名拒绝（`3dpoly.unsupported: no 3D polyline entity model`）。 |
+| `3DPRINT` | 部分实现 | 具名拒绝（`3dprint.unsupported: no 3D print model`）。 |
+| `3DPRINTSERVICE` | 部分实现 | 具名拒绝（`3dprintservice.unsupported: no STL export or 3D print service`）。 |
+| `3DROTATE` | 部分实现 | 具名拒绝（`3drotate.unsupported: no 3D rotate gizmo`）。 |
+| `3DSCALE` | 部分实现 | 具名拒绝（`3dscale.unsupported: no 3D scale gizmo`）。 |
+| `3DSWIVEL` | 部分实现 | 具名拒绝（`3dswivel.unsupported: no 3D swivel navigation`）。 |
+| `3DWALK` | 部分实现 | 具名拒绝（`3dwalk.unsupported: no 3D walk navigation`）。 |
+| `3DZOOM` | 部分实现 | 具名拒绝（`3dzoom.unsupported: no perspective 3D zoom navigation`）。 |
 | `ABOUT` | 已实现 | chrome 本地选择子：打开 About 对话框（与 File > About 同一路径） |
 | `ACADINFO` | 部分实现 | 只读：产品版本/构建配置 + 文档修订/实体数；许可证/硬件/模块数据不收集。 |
 | `ADDSELECTED` | 部分实现 | 具名拒绝（`addselected.unsupported`）：缺少按类型创建提示模型。 |
@@ -650,32 +676,32 @@
 
 | # | Command | 状态 | 官方说明 | 说明 / 本项目选择子 |
 | ---: | --- | --- | --- | --- |
-| 1 | `3DALIGN` | 未实现 | Aligns objects with other objects in 2D and 3D. | — |
-| 2 | `3DARRAY` | 未实现 | Creates nonassociative, 3D rectangular or polar arrays. | — |
-| 3 | `3DCLIP` | 未实现 | Opens the Adjust Clipping Planes window, where you can specify what portions of a 3D model to display. | — |
-| 4 | `3DCORBIT` | 未实现 | Rotates the view in 3D space with continuous motion. | — |
-| 5 | `3DDISTANCE` | 未实现 | Starts the interactive 3D view and makes objects appear closer or farther away. | — |
-| 6 | `3DDWF` | 未实现 | Creates a 3D DWF or 3D DWFx file of your 3D model and displays it in the DWF Viewer. | — |
-| 7 | `3DEDITBAR` | 未实现 | Reshapes splines and NURBS surfaces, including their tangency properties. | — |
-| 8 | `3DFACE` | 未实现 | Creates a three-sided or four-sided surface in 3D space. | — |
-| 9 | `3DFLY` | 未实现 | Changes the 3D view in a drawing interactively to create the appearance of flying through the model. | — |
-| 10 | `3DFORBIT` | 未实现 | Rotates the view in 3D space without constraining roll. | — |
-| 11 | `3DMESH` | 未实现 | Creates a free-form polygon mesh. | — |
-| 12 | `3DMOVE` | 未实现 | In a 3D view, displays the 3D Move gizmo to aid in moving 3D objects a specified distance in a specified direction. | — |
-| 13 | `3DORBIT` | 未实现 | Provides interactive viewing in 3D with the mouse. Right-click to display viewing options. | — |
-| 14 | `3DORBITCTR` | 未实现 | Sets a specific center of rotation in 3D Orbit view. | — |
-| 15 | `-3DOSNAP` | 未实现 | Uses command prompts to set running object snap modes for 3D objects. | — |
-| 16 | `3DOSNAP` | 未实现 | Sets the object snap modes for 3D objects. | — |
-| 17 | `3DPAN` | 未实现 | Shifts the view without changing the viewing direction or magnification. | — |
-| 18 | `3DPOLY` | 未实现 | Creates a 3D polyline. | — |
-| 19 | `3DPRINT` | 未实现 | Specifies 3D Plot settings, and prepares your drawing for 3D printing. | — |
-| 20 | `3DPRINTSERVICE` | 未实现 | Creates an STL file that can be sent to a 3D printing service. | — |
-| 21 | `3DROTATE` | 未实现 | In a 3D view, displays the 3D Rotate gizmo to aid in revolving 3D objects around a base point. | — |
-| 22 | `3DSCALE` | 未实现 | In a 3D view, displays the 3D Scale gizmo to aid in resizing 3D objects. | — |
+| 1 | `3DALIGN` | 部分实现 | Aligns objects with other objects in 2D and 3D. | 具名拒绝（`3dalign.unsupported: 3D alignment is not modeled; use the 2D ALIGN path`）。 |
+| 2 | `3DARRAY` | 部分实现 | Creates nonassociative, 3D rectangular or polar arrays. | 具名拒绝（`3darray.unsupported: 3D arrays are not modeled; use ARRAY/ARRAYRECT/ARRAYPOLAR`）。 |
+| 3 | `3DCLIP` | 部分实现 | Opens the Adjust Clipping Planes window, where you can specify what portions of a 3D model to display. | 具名拒绝（`3dclip.unsupported: no 3D clipping-plane model`）。 |
+| 4 | `3DCORBIT` | 部分实现 | Rotates the view in 3D space with continuous motion. | 具名拒绝（`3dcorbit.unsupported: no continuous 3D orbit controller`）。 |
+| 5 | `3DDISTANCE` | 部分实现 | Starts the interactive 3D view and makes objects appear closer or farther away. | 具名拒绝（`3ddistance.unsupported: no interactive 3D distance navigation`）。 |
+| 6 | `3DDWF` | 部分实现 | Creates a 3D DWF or 3D DWFx file of your 3D model and displays it in the DWF Viewer. | 具名拒绝（`3ddwf.unsupported: DWF/DWFx export is not implemented; use PLOT for SVG/PDF`）。 |
+| 7 | `3DEDITBAR` | 部分实现 | Reshapes splines and NURBS surfaces, including their tangency properties. | 具名拒绝（`3deditbar.unsupported: no NURBS/spline edit bar`）。 |
+| 8 | `3DFACE` | 部分实现 | Creates a three-sided or four-sided surface in 3D space. | 具名拒绝（`3dface.unsupported: no 3DFACE entity model`）。 |
+| 9 | `3DFLY` | 部分实现 | Changes the 3D view in a drawing interactively to create the appearance of flying through the model. | 具名拒绝（`3dfly.unsupported: no 3D fly navigation`）。 |
+| 10 | `3DFORBIT` | 部分实现 | Rotates the view in 3D space without constraining roll. | 具名拒绝（`3dforbit.unsupported: no free 3D orbit controller`）。 |
+| 11 | `3DMESH` | 部分实现 | Creates a free-form polygon mesh. | 具名拒绝（`3dmesh.unsupported: no free-form mesh creation model`）。 |
+| 12 | `3DMOVE` | 部分实现 | In a 3D view, displays the 3D Move gizmo to aid in moving 3D objects a specified distance in a specified direction. | 具名拒绝（`3dmove.unsupported: no 3D move gizmo`）。 |
+| 13 | `3DORBIT` | 部分实现 | Provides interactive viewing in 3D with the mouse. Right-click to display viewing options. | 具名拒绝（`3dorbit.unsupported: no interactive 3D orbit controller; use ORBIT`）。 |
+| 14 | `3DORBITCTR` | 部分实现 | Sets a specific center of rotation in 3D Orbit view. | 具名拒绝（`3dorbitctr.unsupported: no 3D orbit-center model`）。 |
+| 15 | `-3DOSNAP` | 部分实现 | Uses command prompts to set running object snap modes for 3D objects. | 具名拒绝（`-3dosnap.unsupported: no 3D object-snap model`）。 |
+| 16 | `3DOSNAP` | 部分实现 | Sets the object snap modes for 3D objects. | 具名拒绝（`3dosnap.unsupported: no 3D object-snap model`）。 |
+| 17 | `3DPAN` | 部分实现 | Shifts the view without changing the viewing direction or magnification. | 具名拒绝（`3dpan.unsupported: no 3D pan navigation`）。 |
+| 18 | `3DPOLY` | 部分实现 | Creates a 3D polyline. | 具名拒绝（`3dpoly.unsupported: no 3D polyline entity model`）。 |
+| 19 | `3DPRINT` | 部分实现 | Specifies 3D Plot settings, and prepares your drawing for 3D printing. | 具名拒绝（`3dprint.unsupported: no 3D print model`）。 |
+| 20 | `3DPRINTSERVICE` | 部分实现 | Creates an STL file that can be sent to a 3D printing service. | 具名拒绝（`3dprintservice.unsupported: no STL export or 3D print service`）。 |
+| 21 | `3DROTATE` | 部分实现 | In a 3D view, displays the 3D Rotate gizmo to aid in revolving 3D objects around a base point. | 具名拒绝（`3drotate.unsupported: no 3D rotate gizmo`）。 |
+| 22 | `3DSCALE` | 部分实现 | In a 3D view, displays the 3D Scale gizmo to aid in resizing 3D objects. | 具名拒绝（`3dscale.unsupported: no 3D scale gizmo`）。 |
 | 23 | `3DSIN` | 未实现 | Imports a 3ds Max (3DS) file. | — |
-| 24 | `3DSWIVEL` | 未实现 | Changes the target of the view in the direction that you drag. | — |
-| 25 | `3DWALK` | 未实现 | Changes the 3D view in a drawing interactively to create the appearance of walking through the model. | — |
-| 26 | `3DZOOM` | 未实现 | Zooms in and out in a perspective view. | — |
+| 24 | `3DSWIVEL` | 部分实现 | Changes the target of the view in the direction that you drag. | 具名拒绝（`3dswivel.unsupported: no 3D swivel navigation`）。 |
+| 25 | `3DWALK` | 部分实现 | Changes the 3D view in a drawing interactively to create the appearance of walking through the model. | 具名拒绝（`3dwalk.unsupported: no 3D walk navigation`）。 |
+| 26 | `3DZOOM` | 部分实现 | Zooms in and out in a perspective view. | 具名拒绝（`3dzoom.unsupported: no perspective 3D zoom navigation`）。 |
 | 27 | `ABOUT` | 已实现 | Displays information about your product. | chrome 本地选择子：打开 About 对话框（与 File > About 同一路径） |
 | 28 | `ACADINFO` | 部分实现 | Creates a file that stores information about your AutoCAD installation and current setup. | 只读：产品版本/构建配置 + 文档修订/实体数；许可证/硬件/模块数据不收集。 |
 | 29 | `ACISIN` | 未实现 | Imports an ACIS (SAT) file and creates 3D solid, body, or region objects. | — |

@@ -625,6 +625,34 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("COPYHIST", CommandId::Extended(ExtendedCommandId::CopyHist)),
     ("TRANSPARENCY", CommandId::Extended(ExtendedCommandId::Transparency)),
 
+    // Wave 11 (2026-11-09): 3D commands are lower priority; every name is a
+    // stable named refusal.
+    ("3DALIGN", CommandId::Extended(ExtendedCommandId::ThreeDAlign)),
+    ("3DARRAY", CommandId::Extended(ExtendedCommandId::ThreeDArray)),
+    ("3DCLIP", CommandId::Extended(ExtendedCommandId::ThreeDClip)),
+    ("3DCORBIT", CommandId::Extended(ExtendedCommandId::ThreeDCorbit)),
+    ("3DDISTANCE", CommandId::Extended(ExtendedCommandId::ThreeDDistance)),
+    ("3DDWF", CommandId::Extended(ExtendedCommandId::ThreeDDwf)),
+    ("3DEDITBAR", CommandId::Extended(ExtendedCommandId::ThreeDEditBar)),
+    ("3DFACE", CommandId::Extended(ExtendedCommandId::ThreeDFace)),
+    ("3DFLY", CommandId::Extended(ExtendedCommandId::ThreeDFly)),
+    ("3DFORBIT", CommandId::Extended(ExtendedCommandId::ThreeDForbit)),
+    ("3DMESH", CommandId::Extended(ExtendedCommandId::ThreeDMesh)),
+    ("3DMOVE", CommandId::Extended(ExtendedCommandId::ThreeDMove)),
+    ("3DORBIT", CommandId::Extended(ExtendedCommandId::ThreeDOrbit)),
+    ("3DORBITCTR", CommandId::Extended(ExtendedCommandId::ThreeDOrbitCtr)),
+    ("-3DOSNAP", CommandId::Extended(ExtendedCommandId::Dash3DOsnap)),
+    ("3DOSNAP", CommandId::Extended(ExtendedCommandId::ThreeDObjectSnap)),
+    ("3DPAN", CommandId::Extended(ExtendedCommandId::ThreeDPan)),
+    ("3DPOLY", CommandId::Extended(ExtendedCommandId::ThreeDPoly)),
+    ("3DPRINT", CommandId::Extended(ExtendedCommandId::ThreeDPrint)),
+    ("3DPRINTSERVICE", CommandId::Extended(ExtendedCommandId::ThreeDPrintService)),
+    ("3DROTATE", CommandId::Extended(ExtendedCommandId::ThreeDRotate)),
+    ("3DSCALE", CommandId::Extended(ExtendedCommandId::ThreeDScale)),
+    ("3DSWIVEL", CommandId::Extended(ExtendedCommandId::ThreeDSwivel)),
+    ("3DWALK", CommandId::Extended(ExtendedCommandId::ThreeDWalk)),
+    ("3DZOOM", CommandId::Extended(ExtendedCommandId::ThreeDZoom)),
+
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**

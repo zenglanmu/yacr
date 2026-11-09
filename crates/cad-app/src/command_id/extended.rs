@@ -649,6 +649,59 @@ pub enum ExtendedCommandId {
     CopyHist,
     /// `TRANSPARENCY`: image transparency is NOT IMPLEMENTED (no image-transparency model).
     Transparency,
+
+    // Wave 11: 3D/mesh/surface commands. 3D is lower priority; every name is a
+    // stable named refusal (Viewer-legal).
+    /// `3DALIGN`: 3D align: 3D alignment is not modeled; the 2D ALIGN path is the supported one.
+    ThreeDAlign,
+    /// `3DARRAY`: 3D array: 3D arrays are not modeled; use the 2D ARRAY/ARRAYRECT/ARRAYPOLAR paths.
+    ThreeDArray,
+    /// `3DCLIP`: 3D clip: no 3D clipping-plane model.
+    ThreeDClip,
+    /// `3DCORBIT`: continuous 3D orbit: no orbit controller is implemented.
+    ThreeDCorbit,
+    /// `3DDISTANCE`: interactive 3D distance: no 3D distance navigation is implemented.
+    ThreeDDistance,
+    /// `3DDWF`: DWF export: DWF/DWFx export is not implemented; use PLOT for SVG/PDF.
+    ThreeDDwf,
+    /// `3DEDITBAR`: 3D edit bar: no NURBS/spline edit bar.
+    ThreeDEditBar,
+    /// `3DFACE`: 3D face: no 3DFACE entity model.
+    ThreeDFace,
+    /// `3DFLY`: 3D fly: no fly navigation is implemented.
+    ThreeDFly,
+    /// `3DFORBIT`: free 3D orbit: no orbit controller is implemented.
+    ThreeDForbit,
+    /// `3DMESH`: 3D mesh: no free-form mesh creation model.
+    ThreeDMesh,
+    /// `3DMOVE`: 3D move: no 3D move gizmo.
+    ThreeDMove,
+    /// `3DORBIT`: 3D orbit: no interactive orbit controller; use ORBIT for the implemented camera path.
+    ThreeDOrbit,
+    /// `3DORBITCTR`: 3D orbit center: no orbit-center model.
+    ThreeDOrbitCtr,
+    /// `-3DOSNAP`: 3D object snap: no 3D object-snap model.
+    Dash3DOsnap,
+    /// `3DOSNAP`: 3D object snap: no 3D object-snap model.
+    ThreeDObjectSnap,
+    /// `3DPAN`: 3D pan: no 3D pan navigation is implemented.
+    ThreeDPan,
+    /// `3DPOLY`: 3D polyline: no 3D polyline entity model.
+    ThreeDPoly,
+    /// `3DPRINT`: 3D print: no 3D print model.
+    ThreeDPrint,
+    /// `3DPRINTSERVICE`: 3D print service: no STL export or print service.
+    ThreeDPrintService,
+    /// `3DROTATE`: 3D rotate: no 3D rotate gizmo.
+    ThreeDRotate,
+    /// `3DSCALE`: 3D scale: no 3D scale gizmo.
+    ThreeDScale,
+    /// `3DSWIVEL`: 3D swivel: no swivel navigation is implemented.
+    ThreeDSwivel,
+    /// `3DWALK`: 3D walk: no walk navigation is implemented.
+    ThreeDWalk,
+    /// `3DZOOM`: 3D zoom: no perspective 3D zoom navigation.
+    ThreeDZoom,
 }
 
 impl ExtendedCommandId {

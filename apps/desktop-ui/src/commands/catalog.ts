@@ -968,4 +968,32 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'COMMANDLINE', labelKey: 'draw.kind.commandline', icon: 'terminal', group: 'view' },
   { id: 'COMMANDLINEHIDE', labelKey: 'draw.kind.commandlinehide', icon: 'terminal', group: 'view' },
 
+  // The 2026-11-09 Wave 11 batch: 3D is lower priority, so every name is a
+  // stable named refusal. Appended last so no shipped row moves.
+  { id: '3DALIGN', labelKey: 'draw.kind.3dalign', icon: 'align', group: 'modify' },
+  { id: '3DARRAY', labelKey: 'draw.kind.3darray', icon: 'arrayrect', group: 'modify' },
+  { id: '3DCLIP', labelKey: 'draw.kind.3dclip', icon: 'view', group: 'view' },
+  { id: '3DCORBIT', labelKey: 'draw.kind.3dcorbit', icon: 'orbit', group: 'view' },
+  { id: '3DDISTANCE', labelKey: 'draw.kind.3ddistance', icon: 'zoomOut', group: 'view' },
+  { id: '3DDWF', labelKey: 'draw.kind.3ddwf', icon: 'save', group: 'file' },
+  { id: '3DEDITBAR', labelKey: 'draw.kind.3deditbar', icon: 'spline', group: 'modify' },
+  { id: '3DFACE', labelKey: 'draw.kind.3dface', icon: 'dot', group: 'draw' },
+  { id: '3DFLY', labelKey: 'draw.kind.3dfly', icon: 'eye', group: 'view' },
+  { id: '3DFORBIT', labelKey: 'draw.kind.3dforbit', icon: 'orbit', group: 'view' },
+  { id: '3DMESH', labelKey: 'draw.kind.3dmesh', icon: 'dot', group: 'draw' },
+  { id: '3DMOVE', labelKey: 'draw.kind.3dmove', icon: 'move', group: 'modify' },
+  { id: '3DORBIT', labelKey: 'draw.kind.3dorbit', icon: 'orbit', group: 'view' },
+  { id: '3DORBITCTR', labelKey: 'draw.kind.3dorbitctr', icon: 'orbit', group: 'view' },
+  { id: '-3DOSNAP', labelKey: 'draw.kind.dash3dosnap', icon: 'snap', group: 'view' },
+  { id: '3DOSNAP', labelKey: 'draw.kind.3dosnap', icon: 'snap', group: 'view' },
+  { id: '3DPAN', labelKey: 'draw.kind.3dpan', icon: 'pan', group: 'view' },
+  { id: '3DPOLY', labelKey: 'draw.kind.3dpoly', icon: 'polyline', group: 'draw' },
+  { id: '3DPRINT', labelKey: 'draw.kind.3dprint', icon: 'printer', group: 'file' },
+  { id: '3DPRINTSERVICE', labelKey: 'draw.kind.3dprintservice', icon: 'printer', group: 'file' },
+  { id: '3DROTATE', labelKey: 'draw.kind.3drotate', icon: 'rotate', group: 'modify' },
+  { id: '3DSCALE', labelKey: 'draw.kind.3dscale', icon: 'scale', group: 'modify' },
+  { id: '3DSWIVEL', labelKey: 'draw.kind.3dswivel', icon: 'orbit', group: 'view' },
+  { id: '3DWALK', labelKey: 'draw.kind.3dwalk', icon: 'eye', group: 'view' },
+  { id: '3DZOOM', labelKey: 'draw.kind.3dzoom', icon: 'zoomIn', group: 'view' },
+
 ]);
