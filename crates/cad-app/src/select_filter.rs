@@ -1,7 +1,11 @@
 //! The 2026-11-07 selection/filter/visibility batch (`QSELECT`, `FILTER`,
-//! `GETSEL`, `SSX`, `SELECTCOUNT`, `HIDEOBJECTS`, `ISOLATEOBJECTS`,
+//! `GETSEL`, `SELECTCOUNT`, `HIDEOBJECTS`, `ISOLATEOBJECTS`,
 //! `UNISOLATEOBJECTS`) plus the AutoCAD-2026 dialog semantics of `QSELECT` and
 //! `FILTER`.
+//!
+//! `SSX` is dispatched by [`crate::Application::select_matching_properties`] but
+//! implemented in [`crate::ssx`]: it is the Express-Tool criteria builder, not a
+//! template-signature query, so it has its own module and contract.
 //!
 //! Every command here is a **selection or session** operation: it mutates
 //! `SessionState::selection` / `SessionState::hidden_entities` and calls
@@ -283,40 +287,10 @@ impl Application {
         ))
     }
 
-    /// `SSX`: add every model-space entity matching the first selection's five
-    /// properties (type key + geometry kind, layer, colour, linetype, space).
-    pub(crate) fn select_matching_properties(
-        &self,
-        session: &mut SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        require_none_payload(command)?;
-        let document = self.document(command)?;
-        if session.active_space != SpaceId::Model {
-            return Err(CadError::Unsupported(
-                "ssx.model_space_only: SSX currently supports model space only".into(),
-            ));
-        }
-        let template = template_signature(&document.drawing, session, "ssx")?;
-        let database = &document.drawing;
-        let before = session.selection.len();
-        for entity in database.model_space() {
-            if template.matches(database, entity) {
-                session
-                    .selection
-                    .insert(model_ref(command.document, entity.id));
-            }
-        }
-        let added = session.selection.len() - before;
-        session.begin_selecting();
-        Ok(selection_outcome(
-            "ssx.result".into(),
-            format!("SSX: added {added} matching object(s) to the selection"),
-        ))
-    }
-
     /// `SELECTCOUNT`: report how many model-space entities match the first
     /// selection's five properties. Read-only: the selection is untouched.
+    /// (`SSX` itself lives in [`crate::ssx`]; it is a separate Express-Tool
+    /// criteria builder and is **not** this template-signature count.)
     pub(crate) fn select_count(
         &self,
         session: &mut SessionState,

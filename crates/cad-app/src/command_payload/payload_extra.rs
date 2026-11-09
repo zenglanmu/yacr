@@ -5,25 +5,14 @@ use cad_domain::{CadError, CadResult, LayerId, Point3, SelectionRef};
 
 use crate::grips::GripId;
 
-/// The typed option of the AutoCAD 2026 `HATCHEDIT` command (v1).
-///
-/// The command line carries the option (`HATCHEDIT ANGLE 45`,
-/// `HATCHEDIT SCALE 2`, `HATCHEDIT SOLID`, `HATCHEDIT GRADIENT`) because this
-/// build has no in-command dialog. The selection (exactly one directly
-/// addressable model-space hatch) is the rest of the input. Full contract:
-/// [`crate::command_id::hatchedit`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum HatchEditOption {
-    /// `ANGLE <degrees>`: set the stored pattern angle (only a `Pattern` fill).
-    Angle(f64),
-    /// `SCALE <factor>`: set the stored pattern scale (> 0, only a `Pattern`
-    /// fill).
-    Scale(f64),
-    /// `SOLID`: replace the fill with the solid variant.
-    Solid,
-    /// `GRADIENT`: replace the fill with the default two-colour linear ramp.
-    Gradient,
-}
+mod hatch_edit_payload;
+mod qdim_payload;
+
+pub use hatch_edit_payload::*;
+pub use qdim_payload::*;
+
+mod utility;
+pub use utility::*;
 
 /// The first OFFSET prompt: a fixed offset distance, or `Through` (the pick
 /// point defines the distance, so the offset passes through it).
@@ -266,7 +255,7 @@ pub struct OrdinateDimensionCommand {
 pub enum DimensionBatchPayload {
     /// `DIMSTYLE LIST|CURRENT|SET <name>`.
     Style(DimStyleCommand),
-    /// `DIMTEDIT MOVE|ROTATE|RESET`.
+    /// `DIMTEDIT MOVE|LEFT|RIGHT|CENTER|HOME|ANGLE`.
     TextEdit(DimTextEditCommand),
     /// `DIMEDIT TEXT <override>|RESET`.
     Edit(DimEditCommand),
@@ -274,6 +263,8 @@ pub enum DimensionBatchPayload {
     Override(DimOverrideCommand),
     /// `DIMJOGLINE ADD <x> <y>|REMOVE`.
     JogLine(DimJogLineCommand),
+    /// `QDIM <mode> [DATUM x y] [EDIT i…] [SETTINGS ENDPOINTS|INTERSECTIONS]`.
+    QDim(QDimCommand),
 }
 
 /// The typed option of a `DIMSTYLE` line.
@@ -289,16 +280,29 @@ pub enum DimStyleCommand {
 }
 
 /// The typed option of a `DIMTEDIT` line.
+///
+/// The documented AutoCAD 2026 set is `Left`/`Right`/`Center`/`Home`/`Angle`
+/// plus the free text location; the former `ROTATE` spelling is the `Angle`
+/// option (`DIMEDIT`'s Rotate is a different command). There is no `RESET`:
+/// `Home` restores the default text position and `Angle 0` the default
+/// orientation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DimTextEditCommand {
     /// Move the measurement text to this drawing-plane X/Y (Z stays on the
     /// dimension's own plane).
     Move { x: f64, y: f64 },
-    /// Set the text rotation to these degrees (no normalisation; `0` returns to
-    /// the derived rotation).
-    Rotate { degrees: f64 },
-    /// Restore the derived text placement/rotation (the group 11/53 sentinels).
-    Reset,
+    /// Justify the text to the start (minimum projection) of its dimension line.
+    Left,
+    /// Justify the text to the end (maximum projection) of its dimension line.
+    Right,
+    /// Justify the text to the midpoint of its dimension line.
+    Center,
+    /// Restore the derived text position (the group 11 sentinel); the rotation
+    /// is untouched.
+    Home,
+    /// Set the text rotation to these degrees about the UCS X axis, keeping the
+    /// text centre where it is; `0` restores the derived orientation.
+    Angle { degrees: f64 },
 }
 
 /// The typed option of a `DIMEDIT` line.
@@ -344,6 +348,9 @@ pub enum AnnotationBatchPayload {
     TextFit(TextFitCommand),
     /// `HATCHSETORIGIN <x> <y>`.
     HatchSetOrigin(HatchOriginCommand),
+    /// The 2026-11 text/draw utilities (`REVCLOUD`, `WIPEOUT`, `TEXTMASK`,
+    /// `TXT2MTXT`) grouped here so `CommandPayload` keeps its file-size budget.
+    Utility(Box<UtilityPayload>),
 }
 
 /// The typed option of a `GROUP` line.
@@ -517,17 +524,15 @@ pub struct SetByLayerSettings {
     pub include_blocks: bool,
 }
 
-/// Typed settings for the selection-based display commands.
+/// Typed payloads of the selection-based commands and of three commands that
+/// share this already-boxed channel because [`crate::CommandPayload`] is at its
+/// code-size ceiling (`OVERKILL`, `SSX`, `AUDIT`).
 ///
-/// One grouped payload variant keeps [`crate::CommandPayload`] inside the
-/// file-size budget; each command accepts only its own arm and refuses any
-/// other, so the union can never make one command read another's settings.
-///
-/// `QSelect` and `Filter` are the structured form of the 2026-11 AutoCAD
-/// dialog semantics. The older `CommandPayload::SelectFilter` form stays the
-/// one-shot `PROPERTY VALUE` command line; both are handled by
-/// [`crate::select_filter`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Each command accepts only its own arm and refuses any other, so the union can
+/// never make one command read another's settings. The older
+/// `CommandPayload::SelectFilter` form stays the one-shot `PROPERTY VALUE`
+/// command line; both are handled by [`crate::select_filter`].
+#[derive(Debug, Clone, PartialEq)]
 pub enum SelectionToolPayload {
     /// `SELECTSIMILAR` property dimensions.
     SelectSimilar(SelectSimilarSettings),
@@ -539,6 +544,19 @@ pub enum SelectionToolPayload {
     QSelect(Box<QSelectRequest>),
     /// Structured `FILTER` (logical expression over the shared property set).
     Filter(Box<FilterRequest>),
+    /// `OVERKILL` (Delete Duplicate Objects) tolerance/ignore/option set. This is
+    /// not a selection *tool*; it rides this already-boxed payload channel
+    /// because [`crate::CommandPayload`] is at its code-size ceiling and adding a
+    /// top-level variant is not possible without a sibling refactor. The typed
+    /// settings are [`crate::OverkillSettings`]; the handler is
+    /// `Application::overkill`.
+    Overkill(Box<crate::app_drawing::OverkillSettings>),
+    /// `SSX` Express-Tool filter edit + apply. Contract:
+    /// [`crate::command_id::select_filter`] and [`crate::ssx`].
+    Ssx(crate::ssx::SsxRequest),
+    /// `AUDIT` answers (the `Fix any errors detected?` prompt and `AUDITCTL`).
+    /// Contract: [`crate::app_audit`].
+    Audit(crate::app_audit::AuditRequest),
 }
 
 /// A property QSELECT/FILTER can compare.

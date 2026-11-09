@@ -772,11 +772,7 @@ fn txt2mtxt_sorts_top_down_then_left_right_and_joins_raw_strings() {
     assert!(outcome
         .diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.code == "txt2mtxt.settings_dialog"));
-    assert!(outcome
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "txt2mtxt.uniform_line_spacing"));
+        .any(|diagnostic| diagnostic.code == "drawing.txt2mtxt"));
 
     // One undo restores every source and removes the new MTEXT.
     execute(

@@ -33,8 +33,12 @@ mod select_all;
 mod select_box;
 mod select_filter;
 mod select_similar;
+// `MULTIPLE` session repeat state (split out of `session_state`).
+mod session_multiple;
+// SSX: the Express-Tool selection-filter builder (criteria + apply).
 pub mod selection;
 pub mod snap;
+mod ssx;
 pub mod tasks;
 pub mod tool_state;
 pub mod vendor;
@@ -150,7 +154,7 @@ mod session_state;
 
 pub use session_state::{
     BackendChoice, ChamferMethod, ClipboardEntry, IsoPlane, LayoutViewportRef, ModifyOptions,
-    MultipleRepeat, SessionState, ViewExtras, VisualStyleToken,
+    MultipleRepeat, SessionState, ViewExtras, VisualStyleToken, WipeoutFrames,
 };
 
 #[cfg(test)]
@@ -395,17 +399,24 @@ pub use command_payload::{
     AngularDimensionInput, AnnotationBatchPayload, CommandPayload, DimEditCommand,
     DimJogLineCommand, DimOverrideCommand, DimStyleCommand, DimTextEditCommand,
     DimensionBatchPayload, DimensionChainCommand, FilterExpression, FilterLogic, FilterRequest,
-    GripStretchCommand, GroupCommand, GroupEditCommand, HatchEditOption, HatchOriginCommand,
-    JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand,
-    MatchPropSettings, MeasureGeomOption, MirrorOptions, MocoroCommand, NamedObjectKind,
-    OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis, OrdinateDimensionCommand,
-    PeditEditCommand, PeditEditOption, PeditOption, PurgeTarget, QSelectRequest,
-    RadialDimensionCommand, RenameCommand, RotatedLinearDimensionCommand, SelectSimilarSettings,
-    SelectionApply, SelectionOperator, SelectionPredicate, SelectionProperty, SelectionScope,
-    SelectionToolPayload, SetByLayerSettings, StretchPolygonCommand, TCircleCommand, TCountCommand,
-    TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode, TextFitCommand,
-    TextScaleCommand, TwoLineCommand, VPointInput, ViewCommand,
+    GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder, HatchEditOption,
+    HatchOriginCommand, JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand,
+    LeaderCommand, LinetypeCommand, MatchPropSettings, MeasureGeomOption, MirrorOptions,
+    MocoroCommand, NamedObjectKind, OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions,
+    OrdinateAxis, OrdinateDimensionCommand, PeditEditCommand, PeditEditOption, PeditOption,
+    PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest, RadialDimensionCommand,
+    RenameCommand, RevCloudStyle, RevisionCloudMode, RevisionCloudOptions,
+    RotatedLinearDimensionCommand, SelectSimilarSettings, SelectionApply, SelectionOperator,
+    SelectionPredicate, SelectionProperty, SelectionScope, SelectionToolPayload,
+    SetByLayerSettings, StretchPolygonCommand, TCircleCommand, TCountCommand, TextAlignCommand,
+    TextAlignEdge, TextBoundaryShape, TextCaseMode, TextFitCommand, TextMaskKind, TextMaskOptions,
+    TextOrder, TextScaleCommand, TwoLineCommand, Txt2MTextOptions, UtilityPayload, VPointInput,
+    ViewCommand, WipeoutPayload,
 };
+
+pub use app_audit::AuditRequest;
+pub use app_drawing::OverkillSettings;
+pub use ssx::{SsxCriterion, SsxCriterionKind, SsxFilter, SsxRequest};
 
 pub struct Command {
     pub schema_version: u32,

@@ -1,47 +1,59 @@
-//! Long-form notes for [`crate::CommandId::Overkill`] (`OVERKILL`).
+//! Long-form notes for [`crate::CommandId::Overkill`] (`OVERKILL` / `-OVERKILL`).
 //!
 //! Split out of `command_id.rs` to keep that catalogue inside the code-size
 //! limit; the variant keeps a compact doc and links here. The implementation is
-//! `app_drawing::modify_extra::overkill`.
+//! `app_drawing::overkill` ([`crate::OverkillSettings`] is its typed payload).
 //!
 //! ## Input
 //!
-//! Payload is [`crate::CommandPayload::None`]; the current selection is the
-//! whole input (the declared divergence from AutoCAD's interactive
-//! select-objects prompt). An empty selection is `overkill.selection`. A ref
+//! The current selection is the whole input (the declared divergence from
+//! AutoCAD's interactive Delete Duplicate Objects dialog). `CommandPayload::None`
+//! applies the documented defaults; the typed
+//! [`crate::SelectionToolPayload::Overkill`] form carries the dialog's tolerance,
+//! ignore toggles and options. An empty selection is `overkill.selection`. A ref
 //! that is not directly addressable (another document, a block-instance member,
 //! a sub-element) is `overkill.not_addressable`; a missing entity is
-//! `overkill.target_missing`. Both refuse the whole command and write nothing.
+//! `overkill.target_missing`. A negative/non-finite tolerance is
+//! `overkill.tolerance`. Every refusal happens before a write.
 //!
-//! ## What v1 removes
+//! ## Comparison model
 //!
-//! **Exact duplicates only.** Two selected entities are duplicates when they are
-//! directly addressable, in the **same space** and on the **same layer**, have
-//! the same geometry kind and compare equal within `1e-9` world units:
+//! AutoCAD documents **one** comparison precision, the dialog's *Tolerance*
+//! (`0` = objects must match exactly). There is no per-class fuzz. Two entities
+//! are compared only in the **same space** and when every property whose ignore
+//! toggle is off agrees:
 //!
-//! | kind | comparison |
+//! | property | comparison |
 //! | --- | --- |
-//! | LINE | the unordered endpoint pair |
-//! | LWPOLYLINE | points pairwise, per-segment bulges within `1e-9`, closed flag |
-//! | CIRCLE | centre, normal, radius |
-//! | ARC | centre, normal, radius, start, sweep |
-//! | SPLINE | degree, knots, control points, weights |
+//! | Layer | the stored layer id |
+//! | Color | the stored display colour (`EntityColor`) |
+//! | Linetype | the stored linetype name / ByLayer / ByBlock (not the embedded scale) |
+//! | Linetype scale | the entity's own factor, within the tolerance |
+//! | Lineweight | the stored display lineweight |
+//! | Transparency | the stored display transparency |
 //!
-//! Any other kind (and any kind paired with a different kind) is never a
-//! duplicate. Each group keeps its lowest `draw_order` (ties: lowest entity id);
-//! the rest are deleted in **one transaction / one undo step** through the shared
-//! delete path, so undo restores them with their render attributes and
-//! visibility membership.
+//! Thickness, plot style and material are **not modelled** on a `cad-db` entity;
+//! the defaults ignore them, and asking to compare one is the named
+//! `overkill.<property>_not_modelled` refusal (never a silently weaker match).
 //!
-//! ## Declared NOT IMPLEMENTED
+//! ## What is removed / combined
 //!
-//! Everything AutoCAD's OVERKILL does beyond exact duplicates: partial overlaps,
-//! collinear merging, **arc-over-circle replacement**, polyline segment
-//! optimization, the numeric tolerance option, and the ignore-layer/colour
-//! options. The success and no-op paths both report
-//! `overkill.v1_exact_duplicates_only` as an informational diagnostic, and the
-//! command never merges or deletes across layers or spaces.
+//! | operation | option gate | result |
+//! | --- | --- | --- |
+//! | duplicate kinds (LINE, LWPOLYLINE, CIRCLE, ARC, SPLINE) | always | keep the lowest `(draw_order, id)`, delete the rest |
+//! | zero-length / repeated straight polyline segments | `optimize_segments` and not `do_not_break_polylines` | rewrite the polyline (delete it if fewer than two vertices remain) |
+//! | collinear LINEs that partially overlap (containment included) | `combine_partial_overlap` | keeper stores the union, other deleted |
+//! | collinear LINEs that touch end to end | `combine_end_to_end` | keeper stores the union, other deleted |
+//! | ARC on a comparable CIRCLE's circumference | always | delete the redundant ARC |
+//! | standalone LINE/ARC duplicated by a polyline segment | `optimize_segments` | delete the standalone object; the polyline is the keeper and is never modified by this comparison |
 //!
-//! Success is `overkill.applied` with the deleted count; a selection with no
-//! duplicates creates **no** transaction and reports `overkill.unchanged`.
-//! Work-only.
+//! The keeper of every duplicate/merge is the **lowest `(draw_order, id)`**, so a
+//! delete can never pick the wrong copy. `Maintain Associative Objects` is a
+//! named no-op (`overkill.associative_noop`: no association model) and
+//! `Ignore Polyline Segment Width` is reported as a no-op
+//! (`overkill.segment_width_not_modelled`: no per-segment width field).
+//!
+//! Every successful write is **one transaction / one undo step** with full
+//! before/after patches (deletes capture the display state). Success is
+//! `overkill.applied` with the per-operation counts; nothing to do creates **no**
+//! transaction and reports `overkill.unchanged`. Work-only.

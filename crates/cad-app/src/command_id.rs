@@ -78,7 +78,7 @@ pub enum CommandId {
     Redo,
     Resources,
     Diagnostics,
-    /// `AUDIT`: detect-only drawing audit (no repair, read-only; see `app_audit`).
+    /// `AUDIT` (`Fix any errors detected? [Yes/No]`, default No; `AUDIT YES` repairs only validator-accepted normalizations and is refused in Viewer). Contract: [`crate::app_audit`].
     AuditDrawing,
     SwitchBackend,
     Switch2d3d,
@@ -411,7 +411,9 @@ pub enum CommandId {
     /// polyline equivalent. AutoCAD's radius auto-reduction is **not**
     /// reproduced — a radius that does not fit is a refusal. Work-only.
     FilletPolyline,
-    /// `REVCLOUD` (Work-only): selection-based Object mode v1 (`app_drawing::revision_cloud`).
+    /// `REVCLOUD` (Work-only): Object / Rectangular / Polygonal / Freehand /
+    /// Style / Modify with a declared constant-chord arc rule
+    /// (`app_drawing::revision_cloud`).
     RevisionCloud,
     /// ARRAYRECT: insert **independent** copies of the current selection on a
     /// rectangular grid, growing up and to the right (ADR 0016 decision D).
@@ -759,12 +761,13 @@ pub enum CommandId {
     /// selected text. Full contract:
     /// [`crate::command_id::text_batch::TCircleCommand`].
     TextCircle,
-    /// `TEXTMASK` (Work-only): insert an independent `AcDbWipeout` mask behind
-    /// each selected text. Full contract:
+    /// `TEXTMASK` (Work-only): insert an offset `AcDbWipeout` mask behind each
+    /// selected text and group the pair. Full contract:
     /// [`crate::command_id::text_batch::TextMaskCommand`].
     TextMask,
-    /// `TEXTUNMASK` (Work-only): delete selected masks covered by selected text.
-    /// Full contract: [`crate::command_id::text_batch::TextUnmaskCommand`].
+    /// `TEXTUNMASK` (Work-only): delete the masks belonging to the selected
+    /// text (TEXTMASK groups first). Full contract:
+    /// [`crate::command_id::text_batch::TextUnmaskCommand`].
     TextUnmask,
     /// The 2026-11-07 selection/filter batch (`QSELECT`, `FILTER`, `GETSEL`,
     /// `SSX`, `SELECTCOUNT`, `-FIND`, `FIND`, `HIDEOBJECTS`,

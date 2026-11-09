@@ -28,6 +28,119 @@ pub const GETSEL_SELECTOR: &str = "GETSEL";
 pub const FIND_SELECTOR: &str = "FIND";
 /// `-FIND <needle>`: report-only text search.
 pub const FIND_REPORT_SELECTOR: &str = "-FIND";
+/// `SSX <criterion> ...`: the Express-Tool selection-filter builder.
+pub const SSX_SELECTOR: &str = "SSX";
+/// `AUDIT [YES|NO|LOG]`: the drawing audit and its `Fix any errors detected?`
+/// answer (bare = the documented default **No**).
+pub const AUDIT_SELECTOR: &str = "AUDIT";
+
+/// Parse one typed `SSX` criterion line.
+///
+/// Grammar (keywords ASCII case-insensitive, one value per criterion):
+///
+/// | line | request |
+/// | --- | --- |
+/// | `BLOCK <name>` / `COLOR <n>` / `ENTITY <type>` / `LAYER <name>` / `LTYPE <name>` / `STYLE <name>` | overwrite that criterion |
+/// | `FLAG` | the unmodelled entity-flags criterion (applying refuses by name) |
+/// | `THICKNESS <v>` / `VECTOR <x> <y> <z>` | the unmodelled criteria (applying refuses by name) |
+/// | `PICK` | seed every criterion from the current selection and apply |
+/// | `CLEAR <criterion>` | remove that criterion and apply |
+///
+/// A name value is the trimmed remainder (spaces allowed). `None` is the local
+/// refusal; the application owns the semantic refusals (empty filter,
+/// unmodelled criterion).
+pub fn parse_ssx_argument(argument: &str) -> Option<cad_app::SsxRequest> {
+    use cad_app::{SsxCriterion, SsxCriterionKind, SsxRequest};
+
+    let trimmed = argument.trim();
+    let split = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+    let keyword = trimmed[..split].to_ascii_uppercase();
+    let rest = trimmed[split..].trim();
+    let name = |rest: &str| (!rest.is_empty()).then(|| rest.to_string());
+    let criterion = match keyword.as_str() {
+        "BLOCK" => SsxCriterion::Block(name(rest)?),
+        "COLOR" => SsxCriterion::Color(name(rest)?),
+        "ENTITY" => SsxCriterion::Entity(name(rest)?),
+        "LAYER" => SsxCriterion::Layer(name(rest)?),
+        "LTYPE" => SsxCriterion::LType(name(rest)?),
+        "STYLE" => SsxCriterion::Style(name(rest)?),
+        "FLAG" if rest.is_empty() => SsxCriterion::Flag,
+        "THICKNESS" => {
+            let value: f64 = rest.parse().ok()?;
+            value
+                .is_finite()
+                .then_some(SsxCriterion::Thickness(value))?
+        }
+        "VECTOR" => {
+            let mut parts = rest.split_whitespace();
+            let x: f64 = parts.next()?.parse().ok()?;
+            let y: f64 = parts.next()?.parse().ok()?;
+            let z: f64 = parts.next()?.parse().ok()?;
+            if parts.next().is_some() || ![x, y, z].iter().all(|value| value.is_finite()) {
+                return None;
+            }
+            SsxCriterion::Vector(cad_domain::Point3 { x, y, z })
+        }
+        "PICK" if rest.is_empty() => return Some(SsxRequest::Pick),
+        "CLEAR" => {
+            let kind = match rest.to_ascii_uppercase().as_str() {
+                "BLOCK" => SsxCriterionKind::Block,
+                "COLOR" => SsxCriterionKind::Color,
+                "ENTITY" => SsxCriterionKind::Entity,
+                "FLAG" => SsxCriterionKind::Flag,
+                "LAYER" => SsxCriterionKind::Layer,
+                "LTYPE" => SsxCriterionKind::LType,
+                "STYLE" => SsxCriterionKind::Style,
+                "THICKNESS" => SsxCriterionKind::Thickness,
+                "VECTOR" => SsxCriterionKind::Vector,
+                _ => return None,
+            };
+            return Some(SsxRequest::Clear(kind));
+        }
+        _ => return None,
+    };
+    Some(SsxRequest::Set(criterion))
+}
+
+/// The stable refusal for an `SSX` argument outside the grammar.
+pub fn invalid_ssx_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (SSX needs \
+         `<BLOCK|COLOR|ENTITY|FLAG|LAYER|LTYPE|STYLE|THICKNESS|VECTOR|PICK|CLEAR> ...`)",
+        text.trim()
+    )
+}
+
+/// Parse the typed `AUDIT` answer.
+///
+/// `YES`/`Y` = attempt the provable repairs, `NO`/`N` = detect only (the bare
+/// selector's documented default), `LOG` = request the `AUDITCTL` `.adt` log
+/// (refused by the application: host file I/O).
+pub fn parse_audit_argument(argument: &str) -> Option<cad_app::AuditRequest> {
+    match argument.trim().to_ascii_uppercase().as_str() {
+        "YES" | "Y" => Some(cad_app::AuditRequest {
+            fix: true,
+            auditctl_log: false,
+        }),
+        "NO" | "N" => Some(cad_app::AuditRequest {
+            fix: false,
+            auditctl_log: false,
+        }),
+        "LOG" => Some(cad_app::AuditRequest {
+            fix: false,
+            auditctl_log: true,
+        }),
+        _ => None,
+    }
+}
+
+/// The stable refusal for an `AUDIT` argument outside the grammar.
+pub fn invalid_audit_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (AUDIT needs `YES`, `NO` or `LOG`)",
+        text.trim()
+    )
+}
 
 /// Parse `<PROPERTY> <VALUE>` for the three filter selectors.
 ///

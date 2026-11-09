@@ -59,17 +59,42 @@
 //! `GETSEL` accepts only `LAYER` and `TYPE` (the AutoCAD form); every other
 //! property is a named refusal there.
 //!
-//! ## Property similarity (`SSX` / `SELECTCOUNT`)
+//! ## `SSX` (Express-Tool selection-set builder)
 //!
-//! The **first** selected entity is the template. Two entities are similar when
-//! all five of these agree: type key (ASCII case-insensitive) plus geometry
-//! discriminant, stored layer, canonical colour projection, canonical linetype
-//! projection and space. `SSX` **unions** every matching model-space entity into
-//! the current selection (AutoCAD's SSX adds); `SELECTCOUNT` only reports the
-//! count and never touches the selection. An empty selection is refused
-//! (`ssx.selection_required` / `selectcount.selection_required`), and a
-//! template carrying an instance path or sub-element is refused
-//! (`ssx.template_not_addressable`) because it has no single entity row to read.
+//! `SSX` is **not** `SELECTSIMILAR`. It builds an `ssget`-style filter list from
+//! explicit criteria and returns the matches (implementation and the typed
+//! payload types: [`crate::ssx`]). The criteria are `Block`, `Color`, `Entity`
+//! (object type), `Flag`, `LAyer`, `LType`, `Pick`, `Style`, `Thickness` and
+//! `Vector` (extrusion). Each criterion holds **one value**: setting an existing
+//! criterion overwrites it, `SSX CLEAR <criterion>` removes it (a no-op when it
+//! was not set), and `SSX PICK` / the bare command seed every supportable
+//! criterion from the current selection's first object (the template path) and
+//! apply. The typed forms are `SSX BLOCK|COLOR|ENTITY|LAYER|LTYPE|STYLE <value>`,
+//! `SSX FLAG`, `SSX THICKNESS <v>`, `SSX VECTOR <x> <y> <z>`, `SSX PICK` and
+//! `SSX CLEAR <criterion>` (`cad-ui-core` owns that grammar).
+//!
+//! Matching uses the modelled properties only: block table name (INSERT), the
+//! canonical colour projection (`aci:<n>`, `#RRGGBB`, `ByLayer`/`ByBlock`; a bare
+//! ACI number is accepted), the stored type key / friendly alias, layer name,
+//! linetype name and the resolved text-style name (TEXT/MTEXT, a MULTILEADER's
+//! annotation text style, a DIMENSION's text style). `Flag` (the DXF
+//! entity-flags / attributes-follow bit), `Thickness` and `Vector` have no
+//! `cad-db` field: the criterion is recorded and applying it is the named
+//! `ssx.flag_not_modelled` / `ssx.thickness_not_modelled` /
+//! `ssx.vector_not_modelled` refusal.
+//!
+//! The result **replaces** the session selection. AutoCAD keeps the pre-command
+//! selection in its `Previous` selection set; this build has no `Previous` set,
+//! so the old selection is only read by the template seed and then replaced (the
+//! documented mapping). Only **top-level entities in the current space** are
+//! candidates: nested block members are never selected, a block-space context is
+//! `ssx.block_space`, and cross-layout selection is not documented (and not
+//! implemented). A filter with no criterion is `ssx.empty_filter`. The command is
+//! read-only: it never opens a transaction, bumps a revision or writes history.
+//!
+//! `SELECTCOUNT` is a separate read-only count of the five-property template
+//! signature (type key + geometry kind, layer, colour, linetype, space); it is
+//! unchanged by `SSX`.
 //!
 //! ## Text find (`-FIND` / `FIND`)
 //!

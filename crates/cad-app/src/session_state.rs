@@ -22,7 +22,7 @@ use crate::selection::SelectionSet;
 use crate::tool_state::{DrawCapture, ToolSnapshot, ToolState};
 use crate::view_states::ViewStates;
 use crate::{AppMode, CommandId};
-pub use drafting_extras::{ChamferMethod, DraftingExtras, IsoPlane};
+pub use drafting_extras::{ChamferMethod, DraftingExtras, IsoPlane, WipeoutFrames};
 pub use erase_snapshot::{EraseEntry, EraseSnapshot};
 pub use modify_options::ModifyOptions;
 pub use view_extras::{ViewExtras, VisualStyleToken};
@@ -60,6 +60,10 @@ pub struct SessionState {
     /// the shared visibility walk and published to the renderer as
     /// `OverlayInputs.hidden` (`FLAG_HIDDEN`). `UNISOLATEOBJECTS` clears it.
     pub hidden_entities: SelectionSet,
+    /// The `SSX` Express-Tool selection filter being edited (one value per
+    /// criterion). Session editor state only: it is never written to the
+    /// drawing, and applying it only replaces [`Self::selection`].
+    pub ssx_filter: crate::ssx::SsxFilter,
     /// Bounded history of layer-override snapshots for `LAYERP`
     /// ([`crate::layer_history`]): session view state only, never persisted.
     pub layer_history: LayerOverrideHistory,
@@ -229,17 +233,12 @@ pub struct SessionState {
     /// Session state only. This host has no command repeat loop, so the flag is
     /// recorded and `MULTIPLE` reports the named boundary; no command is
     /// repeated and nothing is written to the drawing.
-    multiple: Option<MultipleRepeat>,
+    pub(crate) multiple: Option<MultipleRepeat>,
 }
 
-/// What a `MULTIPLE` invocation asked to repeat.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MultipleRepeat {
-    /// Bare `MULTIPLE`: repeat the next command.
-    NextCommand,
-    /// `MULTIPLE <command>`: repeat that canonical selector.
-    Command(String),
-}
+// `MultipleRepeat` and its accessors live in `session_multiple` so this file
+// stays inside the code-size ceiling; the public path is re-exported below.
+pub use crate::session_multiple::MultipleRepeat;
 
 /// CAD backend preference shared by UI, app state and hosts (spec §6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,6 +257,7 @@ impl SessionState {
             selection: SelectionSet::new(),
             layer_overrides: LayerOverrideSet::new(),
             hidden_entities: SelectionSet::new(),
+            ssx_filter: crate::ssx::SsxFilter::default(),
             layer_history: LayerOverrideHistory::new(),
             layer_states: LayerStates::new(),
             view_states: ViewStates::new(),
@@ -289,24 +289,6 @@ impl SessionState {
             multiple: None,
             ml_styles: crate::MultilineStyleStore::default(),
         }
-    }
-
-    /// Arm the `MULTIPLE` repeat request (`None` target = the next command).
-    pub fn arm_multiple(&mut self, target: Option<String>) {
-        self.multiple = Some(match target {
-            Some(name) => MultipleRepeat::Command(name),
-            None => MultipleRepeat::NextCommand,
-        });
-    }
-
-    /// The armed `MULTIPLE` request, if any. Session state only.
-    pub fn multiple_target(&self) -> Option<&MultipleRepeat> {
-        self.multiple.as_ref()
-    }
-
-    /// Disarm the `MULTIPLE` request.
-    pub fn clear_multiple(&mut self) {
-        self.multiple = None;
     }
 
     /// The session-only maximized layout viewport (`VPMAX`), if any.
@@ -547,6 +529,14 @@ impl SessionState {
         } else {
             Ok(())
         }
+    }
+
+    /// The current session mode (`Viewer` / `Work`).
+    ///
+    /// Read-only projection of the mode set by [`Self::switch_mode`]; session
+    /// state only, never a drawing write.
+    pub fn app_mode(&self) -> AppMode {
+        self.mode
     }
 
     /// Switch modes; an unconfirmed tool is cancelled, never silently committed.

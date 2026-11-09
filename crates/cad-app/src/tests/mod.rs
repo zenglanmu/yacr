@@ -229,7 +229,10 @@ mod point_display_style;
 mod revision_cloud;
 mod select_filter;
 mod select_similar;
+// SSX Express-Tool selection-filter contracts.
+mod ssx;
 mod text_commands;
+mod txt2mtxt;
 mod utility;
 mod view_batch;
 

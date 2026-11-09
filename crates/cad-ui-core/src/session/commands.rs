@@ -7,7 +7,7 @@ use super::annot_arguments::{
 };
 pub use super::dim_arguments::{
     DIMEDIT_SELECTOR, DIMJOGLINE_SELECTOR, DIMOVERRIDE_SELECTOR, DIMSPACE_SELECTOR,
-    DIMSTYLE_SELECTOR, DIMTEDIT_SELECTOR,
+    DIMSTYLE_SELECTOR, DIMTEDIT_SELECTOR, QDIM_SELECTOR,
 };
 use super::text_batch::{
     JUSTIFYTEXT_SELECTOR, TCIRCLE_SELECTOR, TCOUNT_SELECTOR, TEXTALIGN_SELECTOR, TSCALE_SELECTOR,
@@ -687,8 +687,12 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     QSELECT_SELECTOR,
     FILTER_SELECTOR,
     GETSEL_SELECTOR,
+    SSX_SELECTOR,
     FIND_SELECTOR,
     FIND_REPORT_SELECTOR,
+    // `AUDIT YES|NO|LOG` answers the `Fix any errors detected?` prompt (bare
+    // AUDIT keeps the default No) and names the `AUDITCTL` log request.
+    AUDIT_SELECTOR,
     // The 2026-11-07 utility batch argument forms.
     PURGE_SELECTOR,
     RENAME_SELECTOR,
@@ -724,6 +728,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     DIMEDIT_SELECTOR,
     DIMOVERRIDE_SELECTOR,
     DIMJOGLINE_SELECTOR,
+    // `QDIM <mode>` is the argument form of the QDIM selector (the bare selector
+    // keeps the Continuous default).
+    QDIM_SELECTOR,
     // The 2026-11-07 annotation/group batch argument forms.
     GROUP_SELECTOR,
     UNGROUP_SELECTOR,
@@ -740,6 +747,14 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     VIEWRES_SELECTOR,
     VSCURRENT_SELECTOR,
     LINETYPE_SELECTOR,
+    // The 2026-11 P3 option batch: OVERKILL's dialog set, REVCLOUD's mode/arc
+    // length, WIPEOUT's Frames/Polyline pair, TEXTMASK's offset/mask type and
+    // TXT2MTXT's settings. Each is an argument of its existing selector.
+    payload_options::OVERKILL_SELECTOR,
+    payload_options::REVCLOUD_SELECTOR,
+    payload_options::WIPEOUT_SELECTOR,
+    payload_options::TEXTMASK_SELECTOR,
+    payload_options::TXT2MTXT_SELECTOR,
 ];
 
 // The alias table lives in `cad-app`: the `ALIASEDIT` read-only report runs
@@ -774,6 +789,11 @@ pub use layout::*;
 // The 2026-11-07 extras grammars (`-PAN`, `TRACE` … `LINETYPE`).
 mod extras;
 pub use extras::*;
+
+// The 2026-11 P3 option grammars (`OVERKILL`, `REVCLOUD`, `WIPEOUT`,
+// `TEXTMASK`, `TXT2MTXT`).
+mod payload_options;
+pub use payload_options::*;
 
 // The interactive modify argument grammars (`JOIN`, `OFFSET`, `MIRROR`,
 // `CHAMFER`, `FILLET` and the full `PEDIT` option line).

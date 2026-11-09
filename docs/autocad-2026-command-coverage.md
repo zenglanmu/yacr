@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **66** |
-| 部分实现（有写明的界） | **357** |
+| 完整实现 | **74** |
+| 部分实现（有写明的界） | **349** |
 | **已实现合计（完整 + 部分）** | **423** |
 | 未实现 | **558** |
 
@@ -69,7 +69,7 @@
 > **2026-11-09 增补（Wave 8）**：`ELEV` 一个**只读会话标高令牌报告**（默认 0.0；`ELEV <height>` 设置形式未实现，不按标高创建对象），`UCSICON` 一个会话开关（默认关；不渲染任何 UCS 图标）；另加 `UCS`/`UCSMAN`/`TABLET`/`TASKBAR`/`REINIT`/`SYSWINDOWS`/`MENU`/`RIBBON` 八个**具名拒绝**（`CadError::Unsupported` + 稳定原因串：无 UCS 模型、无数字化仪/设备初始化模型、无菜单文件模型，窗口装饰/布局/功能区可见性由宿主负责；不写库/不升修订/不入历史）计入 **423 已实现（50 完整 + 373 部分）/ 558 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-09 增补（P1 晋升批）**：按 AutoCAD 2026 ENU 帮助页逐条核对后，`ALIGN`、`BREAK`、`DIVIDE`、`SELECTSIMILAR`、`MATCHPROP`、`SETBYLAYER`、`LIST`、`DIMSPACE`、`TORIENT` 九条从**部分实现**晋升为**完整实现**：补齐 1/3 对点 ALIGN（3 对点为平面刚性、不缩放）、椭圆 BREAK、全曲线 DIVIDE + 块对齐、SELECTSIMILAR 默认「图层+类型」与 `Name`/`Object style`、MATCHPROP 的 Text/Dimension/Hatch 特殊组、SETBYLAYER 透明度与 Include blocks、LIST 的纸空间/块空间与样式名、DIMSPACE 的 Auto=2×文字高度/`0` 对齐/角度标注、TORIENT Reverse（本项目扩展）。`LENGTHEN` 补了近端语义、开放多段线/椭圆弧/开放样条与 DY，但**开放样条延长**仍是具名拒绝，故保留**部分实现**。三处实现偏差已按官方语义修正：ALIGN 三对点禁缩放、SELECTSIMILAR 默认集、DIMSPACE Auto 公式。计入 **423 已实现（59 完整 + 364 部分）/ 558 未实现**；全部结论仍只覆盖 Linux 编译与契约测试，GUI/GPU/像素 NOT VERIFIED。
 >
-> **423 已实现（66 完整 + 357 部分）/ 558 未实现**；无未保存修改提示，无多文档。
+> **423 已实现（74 完整 + 349 部分）/ 558 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -125,7 +125,9 @@
   提示、多文档、OS 级剪贴板、真实打印样式/绘图仪、协作/云端、**块属性模型**（ATTDEF/ATTRIB）、
   **关联性/反应器**（标注与填充的双向关联）、**厚度/拉伸方向**、**材质与命名打印样式**、
   **多段线宽度/`plinegen`/顶点子菜单**、**文字字形镜像（`MIRRTEXT=1`）**、**分类/自定义对象特性**、
-  **MULTILEADER 导入未覆盖的内容**（背景/分栏/自定义箭头/打断/非默认平面）。这些是构建级范围
+  **MULTILEADER 导入未覆盖的内容**（背景/分栏/自定义箭头/打断/非默认平面）、**实体标志位/厚度/
+  挤出矢量**、**标注文字的字形级对齐/排版**、**3DFACE / 2D SOLID 实体**、**文字行距/段落间距**、
+  **多段线样式（REVCLOUD Calligraphy）**。这些是构建级范围
   （实体模型或导入层根本没有的数据），不是单条命令的晋升目标；落在这些范围的差异不再写成某条
   命令的界。
 - 命令自身的选项顺序、提示文案与系统变量副作用仍按 AutoCAD 2026 帮助页核对；**已核对过**
@@ -153,7 +155,10 @@
 - P2 **已完成**（2026-11-09）：7 条晋升（`CHAMFER` `PEDIT` `OFFSET` `MIRROR` `EXPLODE`
   `QSELECT` `FILTER`）；`FILLET`（曲线对曲线）、`JOIN`（椭圆弧混合）、`STRETCH`（多边形/lasso
   捕获未接线）保留 `部分实现`。全部 payload/dispatch/命令行语法已接线。
-- P3–P5 未开始。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
+- P3 **已完成**（2026-11-09）：8 条晋升（`OVERKILL` `AUDIT` `SSX` `QDIM` `DIMTEDIT`
+  `REVCLOUD` `TEXTMASK` `TXT2MTXT`）；`HATCHEDIT`（`Add/Remove Boundaries`）与 `WIPEOUT`
+  （边框渲染/出图通道）保留 `部分实现`。
+- P4–P5 未开始。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
 
 ## 已实现 / 部分实现命令索引（按字母序）
 
@@ -211,7 +216,7 @@
 | `ATTOUT` | 部分实现 | 具名拒绝（`attout.unsupported`）：本构建无块属性模型。 |
 | `ATTREDEF` | 部分实现 | 具名拒绝（`attredef.unsupported`）：本构建无块属性模型。 |
 | `ATTSYNC` | 部分实现 | 具名拒绝（`attsync.unsupported`）：本构建无块属性模型。 |
-| `AUDIT` | 部分实现 | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
+| `AUDIT` | 已实现 | `Fix any errors detected? [Yes/No]`（默认 No）+ 分段报告（头变量/块定义/Pass 1/2/`Total errors found N fixed M`）；只修复 `validate_entity` 可证明可修复的行（ObjectId 归一、非法 TEXT wrap→None），一条事务；修复不可撤销（`audit.repairs_not_undoable`）；`AUDITCTL` 属宿主文件 I/O 全局 |
 | `AUTOCONSTRAIN` | 部分实现 | 具名拒绝（`autoconstrain.unsupported`）：本构建无几何约束模型。 |
 | `AUTOPUBLISH` | 部分实现 | 具名拒绝（`autopublish.unsupported`）：本构建无自动发布模型。 |
 | `BACTION` | 部分实现 | 具名拒绝（`baction.unsupported`）：本构建无动态块动作模型。 |
@@ -311,7 +316,7 @@
 | `DIMSPACE` | 已实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | `-DIMSTYLE` | 部分实现 | `DIMSTYLE` 的别名，同一实现 |
 | `DIMSTYLE` | 部分实现 | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 按 `dimstyle.set_unavailable` 拒绝（无 post-import 样式表写 API）；未知名称拒绝 |
-| `DIMTEDIT` | 部分实现 | 恰好一个选中标注；`MOVE <x> <y>` 写组 11、`ROTATE <deg>` 写组 53、`RESET` 复位；一条事务/一步撤销；无变化 `dimtedit.unchanged` |
+| `DIMTEDIT` | 已实现 | `MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`（`ROTATE`→`ANGLE`）；Left/Right/Center 仅线性/对齐/半径/直径；Angle 固定文字中心、`0` 复位；一条事务/一步撤销；**字形级对齐**属未建模标注排版全局 |
 | `DIST` | 已实现 | — |
 | `DIVIDE` | 已实现 | `LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`/含 bulge 折线，按等弧长；开放 N−1、闭合 N；块选项支持 Align=Yes/No（切线对齐，均匀比例 1） |
 | `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心圆；`inner=0` 只建外圆并诊断；无中心拾取提示 |
@@ -355,7 +360,7 @@
 | `GROUP` | 部分实现 | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
 | `GROUPEDIT` | 部分实现 | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；单次会话变更；不写实体/数据库 |
 | `HATCH` | 部分实现 | 整实体闭合边界 + LINE/ARC 边链；无 .pat/关联性/实时预览 |
-| `HATCHEDIT` | 部分实现 | 恰好一个可寻址模型空间 hatch；键入 `ANGLE <度>`/`SCALE <比例>`（仅 Pattern 填充）或 `SOLID`/`GRADIENT`，经域构造器重建显示并保留 id/层/空间/次序/type_key；一条事务/一步撤销，无变化为 `hatchedit.unchanged` |
+| `HATCHEDIT` | 部分实现 | 多目标；`Style`/`PatternType`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder Behind|Front`/`Recreate Boundary`/`Separate Hatches`；一条事务/一步撤销；**`Add Boundaries`/`Remove Boundaries`** 无重建设计、Origin 无字段、Associate/Annotative 无模型、Boundary draw order 拒绝 |
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 预选择 hatch；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；无关联/无选项提示 |
 | `HATCHSETBOUNDARY` | 部分实现 | 恰好一个 hatch + 一条闭合 Polyline/Circle/完整 Ellipse，共面性校验；用 `HatchGeometry::new` 重建、丢弃旧种子；失败 `hatchsetboundary.rebuild_failed` |
 | `HATCHSETORIGIN` | 部分实现 | 恒按 `hatchsetorigin.missing_field` 拒绝（`HatchGeometry` 无图案原点字段）；不写入 |
@@ -445,7 +450,7 @@
 | `ORTHO` | 已实现 | — |
 | `OSNAP` | 已实现 | — |
 | `-OVERKILL` | 部分实现 | `OVERKILL` 的别名，同一去重实现 |
-| `OVERKILL` | 部分实现 | v1 仅删除完全相同的重复对象（同空间/图层/几何，1e-9）；无部分重叠、共线合并、圆弧覆盖圆、折线段优化、容差与图层/颜色忽略 |
+| `OVERKILL` | 已实现 | 容差（`0` = 精确）、忽略 Color/Layer/Linetype/LTScale/Lineweight/Transparency、多段线段优化与 `NOBREAK`、共线部分重叠/端到端合并、弧覆盖圆、重复段删除；保留最低 `(draw_order,id)`；一条事务/一步撤销；关联保持/段宽/厚度/打印样式属全局 |
 | `-PAN` | 部分实现 | `PAN` 的别名；`dx dy` 或两点，走既有相机路径；只改视图（不写库/不 bump 修订/不入历史） |
 | `PAN` | 已实现 | — |
 | `PASTEBLOCK` | 部分实现 | 应用内剪贴板 → 自动命名块；不是 OS 剪贴板 |
@@ -496,7 +501,7 @@
 | `PROPERTIESCLOSE` | 已实现 | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
 | `-PURGE` | 部分实现 | `PURGE` 的别名，同一实现 |
 | `PURGE` | 部分实现 | 只清未使用的**图层**（复用 `DELETELAYER` 的引用拒绝）；BLOCK/STYLE/LINETYPE 无删除 API，按名拒绝；层表写不可撤销 |
-| `QDIM` | 部分实现 | v1 仅直线 `LINE`：每条线创建一个 `DimensionKind::Aligned`（端点距离，尺寸线按 `DIMDLI` 偏移），一条事务/一步撤销；圆/弧/点等按名拒绝 |
+| `QDIM` | 已实现 | `Continuous`/`Staggered`/`Baseline`/`Ordinate`/`Radius`/`Diameter` + `Datum Point`/`Edit`/`Settings`；Staggered 步长 = `DIMDLI`（声明）；Ordinate 基准默认 `(0,0,0)`；不支持项逐条 `qdim.skipped`；一条事务/一步撤销；角度不是 QDIM 模式 |
 | `QLEADER` | 部分实现 | 创建单个 MULTILEADER；无 QLEADER 设置对话框/引线样式/注释类型选项 |
 | `QSAVE` | 部分实现 | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
 | `QSELECT` | 已实现 | `Equals`/`Not Equal`/`>`/`<`/`>=`/`<=`/通配符/`Select All`；整图（当前空间）或当前选择；`Include`/`Exclude`/`Append`；嵌套块不参与；属性集覆盖已建模实体属性；只读 |
@@ -515,7 +520,7 @@
 | `REINIT` | 部分实现 | 具名拒绝（`reinit.unsupported`）：本构建无设备/数字化仪初始化模型。 |
 | `RENAME` | 部分实现 | `RENAME <kind> <old> <new>`；仅 LAYER 有重命名 API，其余 kind 按名拒绝；不可撤销 |
 | `RESETBLOCK` | 部分实现 | 具名拒绝（`resetblock.unsupported`）：本构建无动态块参数重置 API。 |
-| `REVCLOUD` | 部分实现 | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
+| `REVCLOUD` | 已实现 | `Object`/`Rectangular`/`Polygonal`/`Freehand`/`Arc Length`/`Style`/`Modify`；等弦弧（106.26°）；默认弦长 = 源路径 bbox 对角线 5%（视口不在命令层的声明替代）；一条事务/一步撤销；`Calligraphy` 属多段线样式全局 |
 | `REVERSE` | 部分实现 | 仅 LINE/LWPOLYLINE/SPLINE，当前选择为全部输入；无交互拾取提示，无螺旋/3D 变体 |
 | `RIBBON` | 部分实现 | 具名拒绝（`ribbon.unsupported`）：功能区可见性由宿主窗口装饰负责。 |
 | `ROTATE` | 已实现 | — |
@@ -533,7 +538,7 @@
 | `SOLID` | 部分实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（`AcDbSolid`）；DXF 导出写 polyface mesh，不是 SOLID 记录 |
 | `SPLINE` | 已实现 | — |
 | `SPLINEDIT` | 部分实现 | 具名拒绝（`splinedit.unsupported`）：无 NURBS 编辑面。 |
-| `SSX` | 部分实现 | 以第一个选中对象的五特性（类型/层/颜色/线型/空间）为模板，并入匹配的模型空间对象；空选择/不可寻址模板拒绝 |
+| `SSX` | 已实现 | Express **筛选表构建器**（不是 SELECTSIMILAR）：`BLOCK`/`COLOR`/`ENTITY`/`LAYER`/`LTYPE`/`STYLE`/`PICK`/`CLEAR`，单值覆盖/移除；模板来自当前选择；仅当前空间；替换选择；只读；`FLAG`/`THICKNESS`/`VECTOR` 属未建模实体字段全局 |
 | `STATUS` | 部分实现 | 报告图形/数据库 id、修订、实体数（模型/图纸/块）、图层（off/frozen/locked）、块/线型/文字样式/标注样式/多重引线样式/布局数、模型空间范围、当前图层、会话模式与网格/捕捉/正交/对象捕捉状态、缩放历史深度。创建/编辑时间、内存、图形界限与基点**不跟踪**（无图形头模型），以 `status.not_tracked` 显式说明 |
 | `STRETCH` | 部分实现 | 交叉矩形与**交叉多边形/lasso 的 payload**；整移 vs 顶点拉伸；圆按圆心、块/文字按插入点；标注按定义点；**多边形/lasso 的交互捕获尚未接线**（仅 API/IPC 可达） |
 | `TCASE` | 部分实现 | Express 工具、选择式：只改 Text/MText 的可见字符大小写；裸命令默认 Title，键入 `TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE`（或 `U/L/T/S/G`）；MTEXT 格式转义逐字保留；属性/标注文字未建模（`tcase.not_reset`）；MULTILEADER 走 `with_text` |
@@ -543,7 +548,7 @@
 | `TEXTALIGN` | 部分实现 | `TEXTALIGN LEFT\ |
 | `TEXTEDIT` | 部分实现 | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
 | `TEXTFIT` | 部分实现 | 仅按 `height = target / char_count` 调整字高；真实宽度拉伸 NOT IMPLEMENTED；坏宽度/空选择/非文字/空文本具名拒绝 |
-| `TEXTMASK` | 部分实现 | 为每个选中 Text/MText 用**估算**外框创建独立 `Mask`（type-key `AcDbWipeout`，`draw_order = 文字 − 1`）；无关联模型，遮罩是独立实体 |
+| `TEXTMASK` | 已实现 | 偏移因子（默认 0.35）、`Wipeout` 遮罩、文本+遮罩会话 `GROUP`、重跑替换旧遮罩、`TEXTUNMASK` 按组优先；一条事务/一步撤销；`3dface`/`Solid` 遮罩类型属未建模实体全局 |
 | `TEXTTOFRONT` | 部分实现 | 选择式；仅模型空间 Text/MultiLeader/Dimension 上移到所有非合格对象之前；其它选中对象逐条诊断跳过；图纸空间/块内不重排；“全图文字”形式与 Draw Order 对话框未实现 |
 | `TEXTUNMASK` | 部分实现 | 只删除**选中**的、落在选中文字估算外框内的 `Mask`；启发式无法证明来源；未选中的 Mask 不扫描 |
 | `TFRAMES` | 部分实现 | 会话令牌 `tframes`；不改变图像/外部参照边框可见性。 |
@@ -554,7 +559,7 @@
 | `TREX` | 部分实现 | `TREX TRIM\ |
 | `TRIM` | 部分实现 | 目标 LINE/ARC/CIRCLE/SPLINE；边界含折线/样条采样 |
 | `TSCALE` | 部分实现 | `TSCALE <factor>`；复用 SCALETEXT 的唯一 `scaled_text` 规则（height + MText `wrap_width`）；factor=1 为 `tscale.unchanged` 且不开事务 |
-| `TXT2MTXT` | 部分实现 | 选择式：至少一个模型空间 Text/MText，按上→下、左→右稳定排序后用 `\P` 原样拼接成一个 `AcDbMText`，沿用首个源的样式/位置/字高/旋转/对齐/层/绘制顺序/`wrap_width`，同一事务删除全部源；设置对话框与强制统一行距未实现 |
+| `TXT2MTXT` | 已实现 | `COMBINE`/`SEPARATE`、`ORDER TOPDOWN|SELECT`、`WRAP`（`wrap_width`）、源在同一事务删除；`UNIFORM` 强制行距属未建模文字行距全局 |
 | `U` | 已实现 | — |
 | `UCS` | 部分实现 | 具名拒绝（`ucs.unsupported`）：本构建无 UCS 模型。 |
 | `UCSICON` | 部分实现 | 会话开关（默认关）：翻转 `ucsicon`；不渲染任何 UCS 图标。 |
@@ -576,7 +581,7 @@
 | `VPORTS` | 部分实现 | 网格校验 + 图纸空间检查后 `vports.write_unsupported`（无视口创建 API） |
 | `VPSCALE` | 部分实现 | 零/非有限/未知拒绝；解析比例后 `vpscale.write_unsupported`（无视口比例写 API） |
 | `VSCURRENT` | 部分实现 | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented`；无渲染器切换、NOT pixel-verified |
-| `WIPEOUT` | 部分实现 | v1 多边形遮罩：拾取边界点（≥3，回车结束）→ 一个 `Mask`（type-key `AcDbWipeout`，`inverted: false`，环不重复首点）。无边框模型（Frames ON/OFF/不打印）、无 `Polyline`/`Erase Polyline` 选项、不检查自交、不能拾取已有遮罩 |
+| `WIPEOUT` | 部分实现 | `Frames ON|OFF|DISPLAY` 状态 + `Polyline`/`Erase Polyline` + 自由点串；**边框几何与出图通道未实现**，`DISPLAY` 目前只记录状态；`FRAME` 覆盖无命令 |
 | `XATTACH` | 部分实现 | 具名拒绝（`xattach.unsupported`）：不把外部图纸作为外部参照附着。 |
 | `XBIND` | 部分实现 | 具名拒绝（`xbind.unsupported`）：本构建无外部参照绑定/插入模型。 |
 | `XDATA` | 部分实现 | 具名拒绝（`xdata.unsupported`）：本数据库不保留实体 XDATA。 |
@@ -682,7 +687,7 @@
 | 89 | `ATTOUT` | 部分实现 | Exports block attribute values to an external file in tab-delimited ASCII format. | 具名拒绝（`attout.unsupported`）：本构建无块属性模型。 |
 | 90 | `ATTREDEF` | 部分实现 | Redefines a block and updates associated attributes. | 具名拒绝（`attredef.unsupported`）：本构建无块属性模型。 |
 | 91 | `ATTSYNC` | 部分实现 | Applies attribute changes in a block definition to all block references. | 具名拒绝（`attsync.unsupported`）：本构建无块属性模型。 |
-| 92 | `AUDIT` | 部分实现 | Evaluates the integrity of a drawing and corrects some errors. | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
+| 92 | `AUDIT` | 已实现 | Evaluates the integrity of a drawing and corrects some errors. | `Fix any errors detected? [Yes/No]`（默认 No）+ 分段报告（头变量/块定义/Pass 1/2/`Total errors found N fixed M`）；只修复 `validate_entity` 可证明可修复的行（ObjectId 归一、非法 TEXT wrap→None），一条事务；修复不可撤销（`audit.repairs_not_undoable`）；`AUDITCTL` 属宿主文件 I/O 全局 |
 | 93 | `AUTOCONSTRAIN` | 部分实现 | Applies geometric constraints to a selection set of objects based on orientation of the objects relative to one another. | 具名拒绝（`autoconstrain.unsupported`）：本构建无几何约束模型。 |
 | 94 | `AUTOPUBLISH` | 部分实现 | Publishes drawings to DWF, DWFx, or PDF files automatically to a specified location. | 具名拒绝（`autopublish.unsupported`）：本构建无自动发布模型。 |
 | 95 | `BACTION` | 部分实现 | Adds an action to a dynamic block definition. | 具名拒绝（`baction.unsupported`）：本构建无动态块动作模型。 |
@@ -899,7 +904,7 @@
 | 306 | `DIMSPACE` | 已实现 | Adjusts the spacing between linear dimensions or angular dimensions. | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | 307 | `-DIMSTYLE` | 部分实现 | At the Command prompt, creates and modifies dimension styles. | `DIMSTYLE` 的别名，同一实现 |
 | 308 | `DIMSTYLE` | 部分实现 | Creates and modifies dimension styles. | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 按 `dimstyle.set_unavailable` 拒绝（无 post-import 样式表写 API）；未知名称拒绝 |
-| 309 | `DIMTEDIT` | 部分实现 | Moves and rotates dimension text and relocates the dimension line. | 恰好一个选中标注；`MOVE <x> <y>` 写组 11、`ROTATE <deg>` 写组 53、`RESET` 复位；一条事务/一步撤销；无变化 `dimtedit.unchanged` |
+| 309 | `DIMTEDIT` | 已实现 | Moves and rotates dimension text and relocates the dimension line. | `MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`（`ROTATE`→`ANGLE`）；Left/Right/Center 仅线性/对齐/半径/直径；Angle 固定文字中心、`0` 复位；一条事务/一步撤销；**字形级对齐**属未建模标注排版全局 |
 | 310 | `DIST` | 已实现 | Measures the distance and angle between two points. | — |
 | 311 | `DISTANTLIGHT` | 未实现 | Creates a distant light. | — |
 | 312 | `DIVIDE` | 已实现 | Creates evenly spaced point objects or blocks along the length or perimeter of an object. | `LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`/含 bulge 折线，按等弧长；开放 N−1、闭合 N；块选项支持 Align=Yes/No（切线对齐，均匀比例 1） |
@@ -1006,7 +1011,7 @@
 | 413 | `-HATCH` | 未实现 | Uses command prompts to fill an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | — |
 | 414 | `HATCH` | 部分实现 | Fills an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | 整实体闭合边界 + LINE/ARC 边链；无 .pat/关联性/实时预览 |
 | 415 | `-HATCHEDIT` | 未实现 | From the Command prompt, modifies existing hatches or fills. | — |
-| 416 | `HATCHEDIT` | 部分实现 | Modifies an existing hatch or fill. | 选择式 v1：恰好一个直接可寻址的模型空间 HATCH；键入 `HATCHEDIT ANGLE <度>`/`SCALE <比例>`（仅 `HatchFill::Pattern`）或 `SOLID`/`GRADIENT`。ANGLE/SCALE 保留 loops/plane/style/seeds/pixel_size/pattern_type 并改 pattern，SOLID/GRADIENT 改填充（默认双色线性渐变）；显示由 `HatchGeometry::from_import` 重建，保留实体 id/层/空间/draw order/`AcDbHatch`，一条事务/一步撤销；相同值为 `hatchedit.unchanged`（无事务）。无交互对话框；`Pattern`/`Color`/`Properties`/`Draw order`/`Add`/`Remove` 边界/关联性未实现 |
+| 416 | `HATCHEDIT` | 部分实现 | Modifies an existing hatch or fill. | 多目标；`Style`/`PatternType`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder Behind|Front`/`Recreate Boundary`/`Separate Hatches`；一条事务/一步撤销；**`Add Boundaries`/`Remove Boundaries`** 无重建设计、Origin 无字段、Associate/Annotative 无模型、Boundary draw order 拒绝 |
 | 417 | `HATCHGENERATEBOUNDARY` | 部分实现 | Creates a non-associated polyline around a selected hatch. | 预选择输入（不弹 Select objects 选项）；每个 hatch loop 生成一条同层同空间的非关联闭合多段线（含内岛、保留 bulge）；源 hatch 保留；无关联性 |
 | 418 | `HATCHSETBOUNDARY` | 部分实现 | Redefines a selected hatch or fill to conform to a different closed boundary. | 恰好一个 hatch + 一条闭合 Polyline/Circle/完整 Ellipse，共面性校验；用 `HatchGeometry::new` 重建、丢弃旧种子；失败 `hatchsetboundary.rebuild_failed` |
 | 419 | `HATCHSETORIGIN` | 部分实现 | Controls the starting location of hatch pattern generation for a selected hatch. | 恒按 `hatchsetorigin.missing_field` 拒绝（`HatchGeometry` 无图案原点字段）；不写入 |
@@ -1198,7 +1203,7 @@
 | 605 | `ORTHO` | 已实现 | Constrains cursor movement to the horizontal or vertical direction. | — |
 | 606 | `OSNAP` | 已实现 | Sets running object snap modes. | — |
 | 607 | `-OVERKILL` | 部分实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines partially overlapping or contiguous ones. | `OVERKILL` 的别名，同一去重实现 |
-| 608 | `OVERKILL` | 部分实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines those that are partially overlapping or contiguous. | v1 仅删除完全相同的重复对象（同空间/图层/几何，1e-9）；无部分重叠、共线合并、圆弧覆盖圆、折线段优化、容差与图层/颜色忽略 |
+| 608 | `OVERKILL` | 已实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines those that are partially overlapping or contiguous. | 容差（`0` = 精确）、忽略 Color/Layer/Linetype/LTScale/Lineweight/Transparency、多段线段优化与 `NOBREAK`、共线部分重叠/端到端合并、弧覆盖圆、重复段删除；保留最低 `(draw_order,id)`；一条事务/一步撤销；关联保持/段宽/厚度/打印样式属全局 |
 | 609 | `-PAGESETUP` | 未实现 | Modifies the current page layout settings for the plotting device, paper size, plot scale, and several other settings in the command line. | — |
 | 610 | `PAGESETUP` | 未实现 | Controls the page layout, plotting device, paper size, and other settings for each new layout. | — |
 | 611 | `-PAN` | 部分实现 | Shifts the view by specifying up to two points to determine a distance and direction. | `PAN` 的别名；`dx dy` 或两点，走既有相机路径；只改视图（不写库/不 bump 修订/不入历史） |
@@ -1280,7 +1285,7 @@
 | 687 | `PUSHTODOCSOPEN` | 未实现 | Opens the Push to Autodesk Docs palette where you can select AutoCAD layouts to upload as PDFs to Autodesk Docs. | — |
 | 688 | `PYRAMID` | 未实现 | Creates a 3D solid pyramid. | — |
 | 689 | `QCCLOSE` | 未实现 | Closes the QuickCalc calculator. | — |
-| 690 | `QDIM` | 部分实现 | Creates a series of dimensions quickly from selected objects. | v1 仅直线 `LINE`：每条线创建一个 `DimensionKind::Aligned`（端点距离，尺寸线按 `DIMDLI` 偏移），一条事务/一步撤销；圆/弧/点等按名拒绝 |
+| 690 | `QDIM` | 已实现 | Creates a series of dimensions quickly from selected objects. | `Continuous`/`Staggered`/`Baseline`/`Ordinate`/`Radius`/`Diameter` + `Datum Point`/`Edit`/`Settings`；Staggered 步长 = `DIMDLI`（声明）；Ordinate 基准默认 `(0,0,0)`；不支持项逐条 `qdim.skipped`；一条事务/一步撤销；角度不是 QDIM 模式 |
 | 691 | `QLATTACH` | 部分实现 | Attaches a leader line to an mtext, tolerance, or block reference object. | 具名拒绝（`qlattach.unsupported`）：无 QLEADER 注释附着模型。 |
 | 692 | `QLATTACHSET` | 部分实现 | Globally attaches leader lines to mtext, tolerance, or block reference objects. | 具名拒绝（`qlattachset.unsupported`）：无 QLEADER 注释附着模型。 |
 | 693 | `QLDETACHSET` | 部分实现 | Detaches a leader line from an mtext, tolerance, or block reference object. | 具名拒绝（`qldetchset.unsupported`）：无 QLEADER 注释附着模型。 |
@@ -1336,7 +1341,7 @@
 | 743 | `REPURLS` | 未实现 | Finds and replaces a specified text string in a URL used in hyperlinks that are attached to all selected objects. | — |
 | 744 | `RESETBLOCK` | 部分实现 | Resets one or more dynamic block references to the default values of the block definition. | 具名拒绝（`resetblock.unsupported`）：本构建无动态块参数重置 API。 |
 | 745 | `RESUME` | 未实现 | Continues an interrupted script. | — |
-| 746 | `REVCLOUD` | 部分实现 | Creates or modifies a revision cloud. | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
+| 746 | `REVCLOUD` | 已实现 | Creates or modifies a revision cloud. | `Object`/`Rectangular`/`Polygonal`/`Freehand`/`Arc Length`/`Style`/`Modify`；等弦弧（106.26°）；默认弦长 = 源路径 bbox 对角线 5%（视口不在命令层的声明替代）；一条事务/一步撤销；`Calligraphy` 属多段线样式全局 |
 | 747 | `REVCLOUDPROPERTIES` | 部分实现 | Controls the approximate chord length for the arcs in a selected revision cloud. | 只读报告会话弧长令牌（默认 15）；设置形式未实现，REVCLOUD 不读取该令牌。 |
 | 748 | `REVERSE` | 部分实现 | Reverses the vertices of selected lines, polylines, splines, and helixes, which is useful for linetypes with included text, or wide polylines with differing beginning and ending widths. | 仅 LINE/LWPOLYLINE/SPLINE，当前选择为全部输入；无交互拾取提示，无螺旋/3D 变体 |
 | 749 | `REVERT` | 部分实现 | Closes and then reopens the current drawing. | 具名拒绝（`revert.unsupported`）：本构建无重新打开源文件的路径。 |
@@ -1406,7 +1411,7 @@
 | 813 | `SPLINE` | 已实现 | Creates a smooth curve that passes through or near a set of fit points, or that is defined by the vertices in a control frame. | — |
 | 814 | `SPLINEDIT` | 部分实现 | Modifies the parameters of a spline or converts a spline-fit polyline to a spline. | 具名拒绝（`splinedit.unsupported`）：无 NURBS 编辑面。 |
 | 815 | `SPOTLIGHT` | 未实现 | Creates a spotlight that emits a directional cone of light. | — |
-| 816 | `SSX` | 部分实现 | Creates a selection set based on a selected object. | 以第一个选中对象的五特性（类型/层/颜色/线型/空间）为模板，并入匹配的模型空间对象；空选择/不可寻址模板拒绝 |
+| 816 | `SSX` | 已实现 | Creates a selection set based on a selected object. | Express **筛选表构建器**（不是 SELECTSIMILAR）：`BLOCK`/`COLOR`/`ENTITY`/`LAYER`/`LTYPE`/`STYLE`/`PICK`/`CLEAR`，单值覆盖/移除；模板来自当前选择；仅当前空间；替换选择；只读；`FLAG`/`THICKNESS`/`VECTOR` 属未建模实体字段全局 |
 | 817 | `STANDARDS` | 未实现 | Manages the association of standards files with drawings. | — |
 | 818 | `STATUS` | 部分实现 | Displays drawing statistics, modes, and extents. | 报告统计/模式/模型空间范围；创建/编辑时间、内存、图形界限与基点显式 `status.not_tracked`（无图形头模型） |
 | 819 | `STLOUT` | 未实现 | Stores 3D solids and watertight meshes in a format that can be used with stereolithography apparatus. | — |
@@ -1448,7 +1453,7 @@
 | 855 | `TEXTALIGN` | 部分实现 | Aligns multiple text objects vertically, horizontally, or obliquely. | `TEXTALIGN LEFT\|RIGHT\|CENTER\|TOP\|MIDDLE\|BOTTOM`；把选中文字 `position` 对齐到共同边/中心；宽/高为**估算**值（无字形外框 API）；<2 个目标拒绝 |
 | 856 | `TEXTEDIT` | 部分实现 | Edits a selected multiline or single-line text object, or the text in a dimension object. | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
 | 857 | `TEXTFIT` | 部分实现 | Expands or compresses the width of text objects based on new starting and ending points. | 仅按 `height = target / char_count` 调整字高；真实宽度拉伸 NOT IMPLEMENTED；坏宽度/空选择/非文字/空文本具名拒绝 |
-| 858 | `TEXTMASK` | 部分实现 | Creates a blank area behind selected text or mtext objects. | 为每个选中 Text/MText 用**估算**外框创建独立 `Mask`（type-key `AcDbWipeout`，`draw_order = 文字 − 1`）；无关联模型，遮罩是独立实体 |
+| 858 | `TEXTMASK` | 已实现 | Creates a blank area behind selected text or mtext objects. | 偏移因子（默认 0.35）、`Wipeout` 遮罩、文本+遮罩会话 `GROUP`、重跑替换旧遮罩、`TEXTUNMASK` 按组优先；一条事务/一步撤销；`3dface`/`Solid` 遮罩类型属未建模实体全局 |
 | 859 | `TEXTSCR` | 部分实现 | Opens a text window that displays a history of prompts and command line entries for the current session. | 置会话 `text_screen`=true；无文本屏幕窗口、不显示提示历史。 |
 | 860 | `TEXTTOFRONT` | 部分实现 | Brings text, leaders, and dimensions in front of all other objects in the drawing. | 以**当前选择**为输入（偏离 AutoCAD 的 Select objects 提示）；仅可寻址模型空间 Text/MultiLeader/Dimension 参与，其它选中对象逐条 `texttofront.skipped` 跳过；以所有非合格模型空间对象的最大 draw order 为基线，按相对顺序连续上移（一条事务/一步撤销）；已在前方时 `texttofront.unchanged` 不建事务；图纸空间/块内 draw order 不重排；AutoCAD 的“全图文字”形式与 Draw Order 对话框未实现 |
 | 861 | `TEXTUNMASK` | 部分实现 | Removes the mask from selected text or mtext that were masked with TEXTMASK. | 只删除**选中**的、落在选中文字估算外框内的 `Mask`；启发式无法证明来源；未选中的 Mask 不扫描 |
@@ -1479,7 +1484,7 @@
 | 886 | `TREX` | 部分实现 | Combines the TRIM and EXTEND commands. | `TREX TRIM\|EXTEND`；选择集为边界，复用 `plan_trim`/`plan_extend`；无边界提示 |
 | 887 | `TRIM` | 部分实现 | Trims objects to meet the edges of other objects. | 目标 LINE/ARC/CIRCLE/SPLINE；边界含折线/样条采样 |
 | 888 | `TSCALE` | 部分实现 | Scales text, mtext, attributes, and attribute definitions. | `TSCALE <factor>`；复用 SCALETEXT 的唯一 `scaled_text` 规则（height + MText `wrap_width`）；factor=1 为 `tscale.unchanged` 且不开事务 |
-| 889 | `TXT2MTXT` | 部分实现 | Converts or combines single-line or multiline text objects into one or more multiline text objects. | 选择式 v1：仅模型空间 Text/MText；上→下、左→右稳定排序，`\P` 原样拼接为一个 `AcDbMText`；沿用首源样式/位置/字高/旋转/对齐/层/绘制顺序/`wrap_width`；同事务删除源；设置对话框/强制统一行距未实现 |
+| 889 | `TXT2MTXT` | 已实现 | Converts or combines single-line or multiline text objects into one or more multiline text objects. | `COMBINE`/`SEPARATE`、`ORDER TOPDOWN|SELECT`、`WRAP`（`wrap_width`）、源在同一事务删除；`UNIFORM` 强制行距属未建模文字行距全局 |
 | 890 | `TXTEXP` | 未实现 | Explodes text or mtext objects into polyline objects. | — |
 | 891 | `U` | 已实现 | Reverses the most recent operation. | — |
 | 892 | `UCS` | 部分实现 | Sets the origin and orientation of the current user coordinate system (UCS). | 具名拒绝（`ucs.unsupported`）：本构建无 UCS 模型。 |
@@ -1547,7 +1552,7 @@
 | 954 | `WEBLOAD` | 未实现 | Loads a JavaScript file from a URL, and then executes the JavaScript code contained in the file. | — |
 | 955 | `WEDGE` | 未实现 | Creates a 3D solid wedge. | — |
 | 956 | `WHOHAS` | 部分实现 | Displays information about an open drawing file. | 只读：单文档构建，无网络查询，不列其他用户或文件锁。 |
-| 957 | `WIPEOUT` | 部分实现 | Creates a wipeout object, and controls whether wipeout frames are displayed in the drawing. | v1 多边形遮罩：拾取边界点（≥3，回车结束）→ 一个 `Mask`（type-key `AcDbWipeout`，`inverted: false`）。**无**边框模型（Frames ON/OFF/不打印）、**无** `Polyline`/`Erase Polyline` 选项、**不检查**自交、不能拾取已有遮罩 |
+| 957 | `WIPEOUT` | 部分实现 | Creates a wipeout object, and controls whether wipeout frames are displayed in the drawing. | `Frames ON|OFF|DISPLAY` 状态 + `Polyline`/`Erase Polyline` + 自由点串；**边框几何与出图通道未实现**，`DISPLAY` 目前只记录状态；`FRAME` 覆盖无命令 |
 | 958 | `WMFIN` | 未实现 | Imports a Windows metafile. | — |
 | 959 | `WMFOPTS` | 未实现 | Sets options for WMFIN. | — |
 | 960 | `WMFOUT` | 未实现 | Saves objects to a Windows metafile. | — |

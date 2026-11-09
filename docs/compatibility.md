@@ -1218,3 +1218,21 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `EXPLODE` | **完整实现** | 标注→线/弧/箭头网格/文字；多重引线→引线/样条/箭头网格/MTEXT；非均匀块可表示子集（圆→椭圆）；嵌套一层；MINSERT/XREF 拒绝 | 多重引线未导入的背景/分栏/自定义箭头属 MULTILEADER 导入全局范围；块属性值丢弃（无属性模型） |
 | `QSELECT` | **完整实现** | `Equals`/`Not Equal`/`>`/`<`/`>=`/`<=`/通配符/`Select All`；整图（当前空间）或当前选择；`Include`/`Exclude`/`Append`；嵌套块不参与；只读 | 分类/自定义特性属全局范围；通配符仅 `*`/`?` |
 | `FILTER` | **完整实现** | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读 | 命名 `.nfl` 过滤器属宿主文件 I/O 全局范围；分类/自定义特性同上 |
+
+## P3 晋升与边界更新（2026-11-09）
+
+> 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页（Express Tools 的提示文案
+> 仅旧版手册有，已标注）；证据仅 Linux 编译 + 契约测试，GUI/GPU/像素 NOT VERIFIED。
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `OVERKILL` | **完整实现** | 容差（`0`=精确）、忽略 Color/Layer/Linetype/LTScale/Lineweight/Transparency、多段线段优化 + `Do Not Break Polylines`、共线部分重叠/端到端合并、弧覆盖圆、重复段删除；保留最低 `(draw_order,id)`；一条事务/一步撤销 | 关联保持属关联性全局范围；段宽/厚度/打印样式未建模；逐段 bulge 数组布局按名报告 |
+| `AUDIT` | **完整实现** | `Fix any errors detected? [Yes/No]`（默认 No，键入 `AUDIT YES/NO/LOG`）；分段报告（头变量/块定义/Pass 1/2/`Total errors found N fixed M`）；只修复 `validate_entity` 可证明可修复的行；当前空间错误对象进入 Previous 映射 | 可修复错误类受数据库校验器限制（AutoCAD 也不公布清单）；修复不可撤销（`audit.repairs_not_undoable`）；`AUDITCTL` `.adt` 日志属宿主文件 I/O |
+| `SSX` | **完整实现** | Express **筛选表构建器**（非 SELECTSIMILAR）：`BLOCK/COLOR/ENTITY/LAYER/LTYPE/STYLE/PICK/CLEAR`，单值覆盖/移除；模板来自当前选择；当前空间；替换选择；只读 | `FLAG`/`THICKNESS`/`VECTOR` 属未建模实体标志/厚度/挤出字段（全局范围）；无 Previous 选择集，映射为替换当前选择 |
+| `QDIM` | **完整实现** | `Continuous`（默认）/`Staggered`/`Baseline`/`Ordinate`/`Radius`/`Diameter` + `Datum Point`/`Edit`/`Settings`；既有标注可作为输入；一条事务/一步撤销 | 无交互位置/选项循环（逐选项提示全局范围）；角度不是 QDIM 模式；Staggered 步长 = `DIMDLI`（声明）；`INTERSECTIONS` 只用选中 LINE 对 |
+| `DIMTEDIT` | **完整实现** | `MOVE`（新位置）/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 仅线性/对齐/半径/直径；Angle 固定文字中心，`0` 复位；一条事务/一步撤销 | 标注文字的字形级对齐/排版属未建模标注排版全局范围（本实现移动锚点）；无 Oblique |
+| `HATCHEDIT` | 部分实现 | 多目标；`Style`/`PatternType`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder Behind/Front`/`Recreate Boundary`/`Separate Hatches`；一条事务/一步撤销 | **`Add Boundaries`/`Remove Boundaries`** 无法从拾取重建环集；`Origin` 无字段；`Associate`/`Disassociate`/`Annotative` 无模型；Boundary draw order 拒绝 |
+| `REVCLOUD` | **完整实现** | `Object`/`Rectangular`/`Polygonal`/`Freehand`/`Arc Length`/`Style`/`Modify`；等弦弧（106.26°）；默认弦长 = 源路径 bbox 对角线 5%（命令层无视口的声明替代）；一条事务/一步撤销 | `Calligraphy` 属多段线样式全局范围；`Modify` 用确定性“插最近段点、删最近弧”规则替代交互拾取；`RECT/POLY/FREEHAND/MODIFY` 的路径来自唯一选中 LWPOLYLINE（单行参数无法携带捕获几何） |
+| `WIPEOUT` | 部分实现 | `Frames ON/OFF/DISPLAY` 状态、`Polyline` + `Erase Polyline Yes/No`、自由点串 | **边框几何与出图通道未实现**：`DISPLAY` 目前只记录状态，遮罩始终渲染；`FRAME` 覆盖无命令 |
+| `TEXTMASK` | **完整实现** | 偏移因子（默认 0.35）、`Wipeout` 遮罩、文本+遮罩会话 `GROUP`、重跑替换旧遮罩、`TEXTUNMASK` 按组优先；一条事务/一步撤销 | `3dface`/`Solid` 遮罩类型属未建模实体全局范围；`GROUP` 为会话存储（DWG 不落关联记录） |
+| `TXT2MTXT` | **完整实现** | `COMBINE`/`SEPARATE`、`ORDER TOPDOWN/SELECT`、`WRAP`（`wrap_width`）、源对象在同一事务删除 | `UNIFORM` 强制行距属未建模文字行距全局范围 |

@@ -1,69 +1,74 @@
-//! `REVCLOUD` v1 — the **Object mode**: turn one selected closed,
-//! straight-segment LWPOLYLINE into a closed revision-cloud polyline.
+//! `REVCLOUD` — AutoCAD 2026's revision-cloud command.
 //!
-//! ## Why a selection-based command
+//! ## Implemented options
 //!
-//! AutoCAD's `REVCLOUD` is an interactive draw command (a rectangle or a polygon
-//! is picked and the cloud follows it). This build's fixed-step capture machine
-//! cannot express that prompt, so v1 implements AutoCAD's *Object* mode only: the
-//! current selection is the whole input ([`CommandPayload::None`]), exactly like
-//! [`CommandId::FilletPolyline`] / `JOIN`. There is **no** rectangular or
-//! polygonal draw mode, no `Arc length` option and no interactive object picking.
+//! * **Object** — converts the one selected `CIRCLE`, `ELLIPSE`, `LWPOLYLINE`
+//!   or `SPLINE` into a cloud. The source is rewritten in place (same id) for a
+//!   polyline; an analytic curve is tessellated, resampled and stored as the
+//!   cloud polyline.
+//! * **Rectangular** — two opposite corners, optionally reversing the arc side.
+//! * **Polygonal** — a vertex run; `closed` closes the ring.
+//! * **Freehand** — a point run; `closed` closes the ring.
+//! * **Arc Length** — the approximate **chord** length of every arc.
+//! * **Style** — `Normal` is the stored style (a named no-op); `Calligraphy` is
+//!   a named refusal because the model has no style field.
+//! * **Modify** — inserts the supplied points on the cloud path and opens the
+//!   ring at the arc nearest the pick side.
 //!
-//! ## The construction
+//! ## Arc rule (declared)
 //!
-//! Every edge of the closed ring is replaced by exactly one arc whose **bulge
-//! magnitude** is [`REVCLOUD_BULGE`] (`0.5`, i.e. a sweep of
-//! `4 * atan(0.5) ≈ 106.26°`). The vertices themselves do not move; only the
-//! per-vertex bulges change, so the new geometry has the same point count as the
-//! input and `closed == true`.
+//! The source path is resampled at a constant distance and every resulting
+//! segment carries one arc of fixed **bulge magnitude** [`REVCLOUD_BULGE`]
+//! (`0.5`, sweep `4·atan(0.5) ≈ 106.26°`). The sampled segment length is the
+//! approximate chord length, so `Arc Length` is honoured at the chord level, not
+//! at an exact arc-length integral. The sign follows the ring winding (positive
+//! on a counter-clockwise closed ring = bows outward) and is negated by the
+//! documented `reverse` flag.
 //!
-//! The **sign** follows the ring's winding so the cloud bulges **away from the
-//! polygon interior**. In this build `bulge = tan(sweep / 4)` with a positive
-//! sweep counter-clockwise in the `+Z` plane (the single convention
-//! [`cad_geometry::bulge_arc_geometry`] and the tessellator implement): on a
-//! counter-clockwise ring (positive [`cad_geometry::signed_area`]) the arc that
-//! bows to the right of its chord — the outside — is the **positive** bulge, so
-//! every edge is `+0.5`; a clockwise ring gets `-0.5`. (This is pinned by the
-//! `cad_geometry::area` contract: a `+1.0` bulge on the bottom edge of a
-//! counter-clockwise rectangle adds area, i.e. bulges outside.)
+//! `arc_length = None` uses the declared first-cloud default:
+//! [`DEFAULT_ARC_LENGTH_FRACTION`] (5 %) of the source path's bounding-box
+//! diagonal. This build has no viewport in the command layer, so the path
+//! diagonal is the deterministic surrogate for AutoCAD's view-diagonal rule.
 //!
-//! ## Refusals (all named, all ASCII, all before any write)
+//! ## Result and write discipline
 //!
-//! | code | meaning |
-//! | --- | --- |
-//! | `revcloud.payload` | a payload was supplied (the selection is the input) |
-//! | `revcloud.selection` | the selection is not exactly one entity |
-//! | `revcloud.not_addressable` | another document's ref, a block-instance member, a sub-element, or a non-model-space entity |
-//! | `revcloud.target_missing` | the referenced entity does not exist |
-//! | `revcloud.not_polyline` | the pick is not an LWPOLYLINE (`Unsupported`) |
-//! | `revcloud.open_polyline` | an open polyline (`Unsupported`) |
-//! | `revcloud.too_few_vertices` | fewer than three vertices |
-//! | `revcloud.bulged_segment` | a segment is already an arc (`\|bulge\| > 1e-9`, `Unsupported`) |
-//! | `revcloud.degenerate` | a non-finite vertex or a zero-area ring |
-//! | `revcloud.not_planar` | the vertices are not coplanar on one `+Z` plane |
+//! A closed input produces a closed cloud; a freehand/polygonal path that is not
+//! closed produces a closed ring only when `closed` is set, otherwise an open
+//! cloud. Every refusal happens before a transaction. A successful conversion is
+//! **one** transaction / **one** undo step; Object/Modify update the source id,
+//! while the three point-run modes insert one entity on the active layer.
 //!
-//! ## The write
-//!
-//! One `update_entity` in one transaction / one undo step. The entity keeps its
-//! id, layer, space, draw order, type key and every non-geometry field, so UNDO
-//! restores the straight closed polyline exactly. The success diagnostic is
-//! `revcloud.applied` and names the edge count.
+//! Refusals are stable ASCII codes: `revcloud.payload`, `revcloud.selection`,
+//! `revcloud.not_addressable`, `revcloud.target_missing`,
+//! `revcloud.not_polyline`, `revcloud.not_convertible`, `revcloud.open_polyline`,
+//! `revcloud.too_few_vertices`, `revcloud.bulged_segment`,
+//! `revcloud.invalid_arc_length`, `revcloud.degenerate`, `revcloud.not_planar`,
+//! `revcloud.too_many_vertices`, `revcloud.modify_open` and
+//! `revcloud.style_unsupported`.
 
 use super::*;
-use cad_geometry::{is_xy_parallel, signed_area};
+use crate::command_payload::{
+    RevCloudStyle, RevisionCloudMode, RevisionCloudOptions, UtilityPayload,
+};
+use cad_geometry::{is_xy_parallel, signed_area, tessellate_geometry, TessellationParams};
 
-/// The bulge magnitude every edge of the revision cloud carries. AutoCAD's cloud
-/// style is arc-length based; v1 fixes one arc per edge instead (declared
-/// boundary), so this is the whole shape parameter.
-const REVCLOUD_BULGE: f64 = 0.5;
+/// The bulge magnitude every generated arc carries. AutoCAD's exact arc-length
+/// construction is not reproduced; the declared rule is one 106.26° arc per
+/// constant-chord segment.
+pub const REVCLOUD_BULGE: f64 = 0.5;
 
-/// A segment whose bulge exceeds this magnitude is an arc; v1 refuses to
-/// overwrite it instead of silently straightening what the user drew.
+/// The first-cloud default chord as a fraction of the source path's bounding-box
+/// diagonal (the deterministic surrogate for AutoCAD's view diagonal).
+pub const DEFAULT_ARC_LENGTH_FRACTION: f64 = 0.05;
+
+/// A segment whose bulge exceeds this magnitude is already an arc.
 const REVCLOUD_STRAIGHT_TOLERANCE: f64 = 1e-9;
 
 /// The smallest polygon area (world units squared) that is not degenerate.
 const REVCLOUD_MIN_AREA: f64 = 1e-12;
+
+/// The hard vertex budget of one generated cloud.
+const REVCLOUD_MAX_VERTICES: usize = 4096;
 
 /// A `revcloud.<code>: <detail>` refusal string (ASCII only).
 fn refusal(code: &str, detail: impl std::fmt::Display) -> String {
@@ -80,45 +85,620 @@ fn unsupported(code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::Unsupported(refusal(code, detail))
 }
 
+/// The `REVCLOUD` options carried by this command, or the documented default
+/// Object mode for the bare selection form.
+fn options(command: &Command) -> CadResult<RevisionCloudOptions> {
+    match utility_payload(command) {
+        Some(UtilityPayload::RevisionCloud(options)) => Ok(options.clone()),
+        Some(_) => Err(invalid(
+            "payload",
+            "REVCLOUD does not accept another utility command's payload",
+        )),
+        None => match &command.payload {
+            CommandPayload::None => Ok(RevisionCloudOptions {
+                mode: RevisionCloudMode::Object,
+                arc_length: None,
+            }),
+            _ => Err(invalid(
+                "payload",
+                "REVCLOUD takes no payload (Object mode) or a RevisionCloud utility payload",
+            )),
+        },
+    }
+}
+
+/// Validate the explicit chord and apply the deterministic default.
+fn chord_length(explicit: Option<f64>, diagonal: f64) -> CadResult<f64> {
+    if let Some(value) = explicit {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(invalid(
+                "invalid_arc_length",
+                format!("Arc Length must be finite and strictly positive, got {value}"),
+            ));
+        }
+        return Ok(value);
+    }
+    if !diagonal.is_finite() || diagonal <= 0.0 {
+        return Err(invalid(
+            "degenerate",
+            "the source path has no positive bounding-box diagonal for the default Arc Length",
+        ));
+    }
+    Ok((diagonal * DEFAULT_ARC_LENGTH_FRACTION).max(1e-9))
+}
+
+/// The world-space diagonal of the path's axis-aligned bounding box.
+fn bounding_diagonal(points: &[Point3]) -> f64 {
+    let Some(first) = points.first() else {
+        return 0.0;
+    };
+    let (mut min, mut max) = (*first, *first);
+    for point in points {
+        min.x = min.x.min(point.x);
+        min.y = min.y.min(point.y);
+        min.z = min.z.min(point.z);
+        max.x = max.x.max(point.x);
+        max.y = max.y.max(point.y);
+        max.z = max.z.max(point.z);
+    }
+    (max.x - min.x).hypot(max.y - min.y).hypot(max.z - min.z)
+}
+
+/// Drop a repeated closing point from a sampled ring.
+fn drop_closing_duplicate(points: &mut Vec<Point3>) {
+    if points.len() > 1 {
+        let first = points[0];
+        let last = *points.last().expect("non-empty");
+        let tolerance = 1e-9 * (1.0 + first.x.abs().max(first.y.abs()).max(first.z.abs()));
+        if (first.x - last.x)
+            .hypot(first.y - last.y)
+            .hypot(first.z - last.z)
+            <= tolerance
+        {
+            points.pop();
+        }
+    }
+}
+
+/// Remove consecutive duplicate vertices.
+fn dedup_consecutive(points: &mut Vec<Point3>) {
+    let mut write = 1;
+    for read in 1..points.len() {
+        let previous = points[write - 1];
+        let current = points[read];
+        let tolerance = 1e-9 * (1.0 + previous.x.abs().max(previous.y.abs()).max(previous.z.abs()));
+        if (previous.x - current.x)
+            .hypot(previous.y - current.y)
+            .hypot(previous.z - current.z)
+            > tolerance
+        {
+            points[write] = current;
+            write += 1;
+        }
+    }
+    points.truncate(write);
+}
+
+/// One point at `distance` along the path.
+fn sample_at(points: &[Point3], cumulative: &[f64], closed: bool, distance: f64) -> Point3 {
+    let count = points.len();
+    let segments = if closed {
+        count
+    } else {
+        count.saturating_sub(1)
+    };
+    if segments == 0 {
+        return points[0];
+    }
+    let distance = distance.max(0.0).min(cumulative[segments]);
+    let mut index = 0;
+    while index + 1 < segments && cumulative[index + 1] < distance {
+        index += 1;
+    }
+    let a = points[index];
+    let b = points[(index + 1) % count];
+    let span = cumulative[index + 1] - cumulative[index];
+    let t = if span > 0.0 {
+        ((distance - cumulative[index]) / span).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    Point3 {
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+        z: a.z + (b.z - a.z) * t,
+    }
+}
+
+/// Resample a path at a constant chord and author one outward arc per segment.
+fn resample_cloud(
+    points: Vec<Point3>,
+    closed: bool,
+    chord: f64,
+    reverse: bool,
+) -> CadResult<SemanticGeometry> {
+    let mut points = points;
+    dedup_consecutive(&mut points);
+    if closed {
+        drop_closing_duplicate(&mut points);
+    }
+    let minimum = if closed { 3 } else { 2 };
+    if points.len() < minimum {
+        return Err(invalid(
+            "too_few_vertices",
+            format!(
+                "the path needs at least {minimum} distinct vertices, got {}",
+                points.len()
+            ),
+        ));
+    }
+    if !points.iter().all(|point| is_finite_point(*point)) {
+        return Err(invalid("degenerate", "the path has a non-finite vertex"));
+    }
+    if !is_xy_parallel(&points) {
+        return Err(invalid(
+            "not_planar",
+            "the path vertices are not coplanar on one +Z plane",
+        ));
+    }
+    let count = points.len();
+    let segments = if closed { count } else { count - 1 };
+    let mut cumulative = Vec::with_capacity(segments + 1);
+    cumulative.push(0.0);
+    for index in 0..segments {
+        let a = points[index];
+        let b = points[(index + 1) % count];
+        cumulative.push(cumulative[index] + (a.x - b.x).hypot(a.y - b.y).hypot(a.z - b.z));
+    }
+    let total = cumulative[segments];
+    if !total.is_finite() || total <= 1e-12 {
+        return Err(invalid("degenerate", "the path has no length"));
+    }
+    let segment_count = (total / chord).ceil();
+    if !segment_count.is_finite() || segment_count > REVCLOUD_MAX_VERTICES as f64 {
+        return Err(invalid(
+            "too_many_vertices",
+            format!(
+                "Arc Length {chord} would generate more than {REVCLOUD_MAX_VERTICES} arcs; use a \
+                 larger Arc Length"
+            ),
+        ));
+    }
+    let segments_out = (segment_count as usize).max(minimum);
+    let step = total / segments_out as f64;
+    let out_count = if closed {
+        segments_out
+    } else {
+        segments_out + 1
+    };
+    let sampled: Vec<Point3> = (0..out_count)
+        .map(|index| sample_at(&points, &cumulative, closed, index as f64 * step))
+        .collect();
+    let sign = if closed {
+        let area = signed_area(&sampled);
+        if !area.is_finite() || area.abs() <= REVCLOUD_MIN_AREA {
+            return Err(invalid(
+                "degenerate",
+                format!("the closed path encloses no area (signed area {area})"),
+            ));
+        }
+        if area > 0.0 {
+            1.0
+        } else {
+            -1.0
+        }
+    } else {
+        1.0
+    };
+    let sign = if reverse { -sign } else { sign };
+    Ok(SemanticGeometry::Polyline {
+        bulges: vec![sign * REVCLOUD_BULGE; sampled.len()],
+        points: sampled,
+        closed,
+    })
+}
+
+/// The tessellation budget for one analytic source (the result is resampled
+/// again, so this only needs to preserve the shape).
+fn source_params(chord: f64) -> TessellationParams {
+    TessellationParams {
+        tolerance: (chord * 0.25).max(1e-9),
+        max_segments: 2048,
+        min_segments: 32,
+    }
+}
+
+/// Flatten one selected path entity to a point run and a closed flag.
+fn flatten_source(entity: &DbEntity, chord: f64) -> CadResult<(Vec<Point3>, bool)> {
+    match &entity.geometry {
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed,
+        } => {
+            let straight = bulges
+                .iter()
+                .all(|bulge| bulge.abs() <= REVCLOUD_STRAIGHT_TOLERANCE);
+            let mut points = if straight {
+                points.clone()
+            } else {
+                tessellate_geometry(&entity.geometry, source_params(chord))
+            };
+            if *closed {
+                drop_closing_duplicate(&mut points);
+            }
+            Ok((points, *closed))
+        }
+        SemanticGeometry::Circle { .. } => {
+            let mut points = tessellate_geometry(&entity.geometry, source_params(chord));
+            drop_closing_duplicate(&mut points);
+            Ok((points, true))
+        }
+        SemanticGeometry::Ellipse { sweep, .. } => {
+            let closed = sweep.abs() >= std::f64::consts::TAU - 1e-9;
+            let mut points = tessellate_geometry(&entity.geometry, source_params(chord));
+            if closed {
+                drop_closing_duplicate(&mut points);
+            }
+            Ok((points, closed))
+        }
+        SemanticGeometry::Spline { .. } => {
+            let mut points = tessellate_geometry(&entity.geometry, source_params(chord));
+            let closed = points.len() > 2 && {
+                let first = points[0];
+                let last = *points.last().expect("non-empty");
+                (first.x - last.x)
+                    .hypot(first.y - last.y)
+                    .hypot(first.z - last.z)
+                    <= 1e-9
+            };
+            if closed {
+                drop_closing_duplicate(&mut points);
+            }
+            Ok((points, closed))
+        }
+        SemanticGeometry::Line { .. } => Err(unsupported(
+            "not_convertible",
+            "REVCLOUD Object mode converts CIRCLE, ELLIPSE, LWPOLYLINE and SPLINE; a LINE has \
+             no closed region to cloud",
+        )),
+        other => Err(unsupported(
+            "not_convertible",
+            format!(
+                "REVCLOUD Object mode converts CIRCLE, ELLIPSE, LWPOLYLINE and SPLINE; {} is not \
+                 supported",
+                class_name(other)
+            ),
+        )),
+    }
+}
+
+/// The approximate bounding-box diagonal of one source entity, used to derive
+/// the deterministic default chord before the source is flattened.
+fn source_diagonal(entity: &DbEntity) -> f64 {
+    match &entity.geometry {
+        SemanticGeometry::Polyline { points, .. } => bounding_diagonal(points),
+        SemanticGeometry::Circle { radius, .. } => {
+            let diameter = radius.abs() * 2.0;
+            diameter.hypot(diameter)
+        }
+        SemanticGeometry::Ellipse {
+            major_axis, ratio, ..
+        } => {
+            let major = (major_axis.x * major_axis.x
+                + major_axis.y * major_axis.y
+                + major_axis.z * major_axis.z)
+                .sqrt();
+            let minor = major * ratio.abs();
+            (major * 2.0).hypot(minor * 2.0)
+        }
+        SemanticGeometry::Spline { control_points, .. } => bounding_diagonal(control_points),
+        _ => 0.0,
+    }
+}
+
+/// Reject a non-finite / degenerate rectangle or point run before sampling.
+fn validate_build_points(points: &[Point3]) -> CadResult<()> {
+    if points.iter().any(|point| !is_finite_point(*point)) {
+        return Err(invalid("degenerate", "a construction point is not finite"));
+    }
+    Ok(())
+}
+
+/// Project `point` onto segment `a`–`b`, returning the projected point and its
+/// distance from the input.
+fn project_on_segment(a: Point3, b: Point3, point: Point3) -> (Point3, f64) {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let length_sq = dx * dx + dy * dy;
+    let t = if length_sq > 0.0 {
+        (((point.x - a.x) * dx + (point.y - a.y) * dy) / length_sq).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let projected = Point3 {
+        x: a.x + dx * t,
+        y: a.y + dy * t,
+        z: a.z + (b.z - a.z) * t,
+    };
+    (
+        projected,
+        (projected.x - point.x)
+            .hypot(projected.y - point.y)
+            .hypot(projected.z - point.z),
+    )
+}
+
+/// Insert every `add` point into the path at its nearest segment.
+fn insert_add_points(path: &mut Vec<Point3>, add_points: &[Point3]) {
+    for add in add_points {
+        if path.len() < 2 {
+            path.push(*add);
+            continue;
+        }
+        let segments = path.len();
+        let mut best = (0usize, f64::INFINITY, *add);
+        for index in 0..segments {
+            let (projected, distance) =
+                project_on_segment(path[index], path[(index + 1) % segments], *add);
+            if distance < best.1 {
+                best = (index, distance, projected);
+            }
+        }
+        path.insert(best.0 + 1, best.2);
+    }
+    dedup_consecutive(path);
+}
+
+/// Open a closed cloud by omitting the segment whose chord midpoint is nearest
+/// `erase_side`.
+fn erase_nearest_segment(
+    points: &[Point3],
+    bulges: &[f64],
+    erase_side: Point3,
+) -> CadResult<SemanticGeometry> {
+    let count = points.len();
+    if count < 4 {
+        return Err(invalid(
+            "degenerate",
+            "Modify needs at least four cloud vertices to erase one segment",
+        ));
+    }
+    let mut best = (0usize, f64::INFINITY);
+    for index in 0..count {
+        let a = points[index];
+        let b = points[(index + 1) % count];
+        let mid = Point3 {
+            x: (a.x + b.x) * 0.5,
+            y: (a.y + b.y) * 0.5,
+            z: (a.z + b.z) * 0.5,
+        };
+        let distance = (mid.x - erase_side.x)
+            .hypot(mid.y - erase_side.y)
+            .hypot(mid.z - erase_side.z);
+        if distance < best.1 {
+            best = (index, distance);
+        }
+    }
+    let erased = best.0;
+    let mut out_points = Vec::with_capacity(count);
+    let mut out_bulges = Vec::with_capacity(count - 1);
+    for step in 0..count {
+        out_points.push(points[(erased + 1 + step) % count]);
+        if step + 1 < count {
+            out_bulges.push(bulges[(erased + 1 + step) % count]);
+        }
+    }
+    // One bulge per vertex is the storage convention; the final entry is
+    // unused for an open polyline (there is no closing segment).
+    out_bulges.push(0.0);
+    Ok(SemanticGeometry::Polyline {
+        points: out_points,
+        bulges: out_bulges,
+        closed: false,
+    })
+}
+
+/// Replace one entity's geometry in one transaction / one undo step.
+fn commit_updated_cloud(
+    app: &mut Application,
+    document_id: DocumentId,
+    entity: DbEntity,
+    geometry: SemanticGeometry,
+    label: &str,
+    message: String,
+) -> CadResult<CommandOutcome> {
+    let document = app
+        .workspace
+        .documents
+        .get_mut(&document_id)
+        .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+    let mut candidate = document.drawing.as_ref().clone();
+    let entity_id = entity.id;
+    let mut after = entity.clone();
+    after.geometry = geometry;
+    let transaction = next_transaction_id();
+    let change_set = {
+        let mut staged = candidate.begin_drawing_transaction(label, transaction)?;
+        staged.update_entity(after)?;
+        staged.commit()?
+    };
+    let stored = candidate
+        .entity(entity_id)
+        .cloned()
+        .ok_or_else(|| CadError::Invariant(format!("{label}: the entity vanished after commit")))?;
+    app.publish_candidate(
+        document_id,
+        candidate,
+        DrawingUndoRecord {
+            transaction: change_set.transaction,
+            label: label.to_string(),
+            patches: vec![drawing_patch(entity_id, Some(entity), Some(stored))],
+            block_patches: Vec::new(),
+            merge_key: None,
+        },
+    )?;
+    Ok(CommandOutcome {
+        objects: vec![ObjectId(entity_id.0)],
+        changes: Some(Arc::new(change_set)),
+        diagnostics: vec![Diagnostic {
+            object: Some(ObjectId(entity_id.0)),
+            code: format!("{label}.applied"),
+            message,
+        }],
+        measurement: None,
+        point_report: None,
+    })
+}
+
 impl Application {
-    /// `REVCLOUD` Object mode v1: rewrite the one selected closed
-    /// straight-segment polyline as a revision cloud (one outward arc bulge per
-    /// edge) in place.
-    ///
-    /// The selection is the whole input, so a payload is refused by name. Every
-    /// shape requirement is checked before the drawing transaction starts; a
-    /// refusal changes no revision and records no history.
+    /// `REVCLOUD`: convert, build or modify one revision cloud.
     pub(crate) fn revision_cloud(
         &mut self,
         session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        if !matches!(command.payload, CommandPayload::None) {
-            return Err(invalid(
-                "payload",
-                "REVCLOUD takes no payload; the selected polyline is the input",
-            ));
+        let options = options(command)?;
+        match &options.mode {
+            RevisionCloudMode::Style(style) => {
+                if options.arc_length.is_some() {
+                    chord_length(options.arc_length, 1.0)?;
+                }
+                match style {
+                    RevCloudStyle::Normal => Ok(CommandOutcome {
+                        objects: Vec::new(),
+                        changes: None,
+                        diagnostics: vec![Diagnostic {
+                            object: None,
+                            code: "revcloud.style".into(),
+                            message: "REVCLOUD Style Normal: Normal is this build's only stored \
+                                      style; nothing changes"
+                                .into(),
+                        }],
+                        measurement: None,
+                        point_report: None,
+                    }),
+                    RevCloudStyle::Calligraphy => Err(unsupported(
+                        "style_unsupported",
+                        "REVCLOUD Style Calligraphy: the model has no revision-cloud style field, \
+                         so the calligraphy visual style cannot be stored (Normal is always used)",
+                    )),
+                }
+            }
+            RevisionCloudMode::Object => self.revcloud_object(session, command, &options),
+            RevisionCloudMode::Rectangular {
+                first,
+                second,
+                reverse,
+            } => {
+                validate_build_points(&[*first, *second])?;
+                let min_x = first.x.min(second.x);
+                let max_x = first.x.max(second.x);
+                let min_y = first.y.min(second.y);
+                let max_y = first.y.max(second.y);
+                if max_x - min_x <= 1e-12 || max_y - min_y <= 1e-12 {
+                    return Err(invalid(
+                        "degenerate",
+                        "the two rectangle corners must span a positive width and height",
+                    ));
+                }
+                let z = first.z;
+                let points = vec![
+                    Point3 {
+                        x: min_x,
+                        y: min_y,
+                        z,
+                    },
+                    Point3 {
+                        x: max_x,
+                        y: min_y,
+                        z,
+                    },
+                    Point3 {
+                        x: max_x,
+                        y: max_y,
+                        z,
+                    },
+                    Point3 {
+                        x: min_x,
+                        y: max_y,
+                        z,
+                    },
+                ];
+                let chord = chord_length(options.arc_length, bounding_diagonal(&points))?;
+                let geometry = resample_cloud(points, true, chord, *reverse)?;
+                let mut outcome =
+                    self.commit_new_entity(session, command, geometry, "revision cloud")?;
+                outcome.diagnostics.push(Diagnostic {
+                    object: outcome.objects.first().copied(),
+                    code: "revcloud.applied".into(),
+                    message: format!(
+                        "REVCLOUD Rectangular: built a closed cloud with chord {chord} and reverse \
+                         {reverse}"
+                    ),
+                });
+                Ok(outcome)
+            }
+            RevisionCloudMode::Polygonal {
+                points,
+                closed,
+                reverse,
+            }
+            | RevisionCloudMode::Freehand {
+                points,
+                closed,
+                reverse,
+            } => {
+                validate_build_points(points)?;
+                let chord = chord_length(options.arc_length, bounding_diagonal(points))?;
+                let geometry = resample_cloud(points.clone(), *closed, chord, *reverse)?;
+                let mut outcome =
+                    self.commit_new_entity(session, command, geometry, "revision cloud")?;
+                outcome.diagnostics.push(Diagnostic {
+                    object: outcome.objects.first().copied(),
+                    code: "revcloud.applied".into(),
+                    message: format!(
+                        "REVCLOUD {}: built a {} cloud with chord {chord} and reverse {reverse}",
+                        if *closed { "closed path" } else { "open path" },
+                        if *closed { "closed" } else { "open" }
+                    ),
+                });
+                Ok(outcome)
+            }
+            RevisionCloudMode::Modify {
+                target,
+                add_points,
+                erase_side,
+            } => self.revcloud_modify(command, target, add_points, *erase_side, &options),
         }
-        let references = session.selection.refs();
-        match references {
+    }
+
+    /// `REVCLOUD Object`: convert the one selected path entity.
+    fn revcloud_object(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+        options: &RevisionCloudOptions,
+    ) -> CadResult<CommandOutcome> {
+        let references = session.selection.refs().to_vec();
+        let reference = match references.as_slice() {
             [] => {
                 return Err(invalid(
                     "selection",
-                    "REVCLOUD converts exactly one closed polyline, got none selected",
+                    "REVCLOUD Object mode converts exactly one selected path, got none selected",
                 ));
             }
-            [_] => {}
+            [one] => one.clone(),
             many => {
                 return Err(invalid(
                     "selection",
                     format!(
-                        "REVCLOUD converts exactly one closed polyline, got {} selected",
+                        "REVCLOUD Object mode converts exactly one selected path, got {} selected",
                         many.len()
                     ),
                 ));
             }
-        }
-        let reference = &references[0];
+        };
         if reference.document != command.document {
             return Err(invalid(
                 "not_addressable",
@@ -132,168 +712,176 @@ impl Application {
             return Err(unsupported(
                 "not_addressable",
                 format!(
-                    "REVCLOUD needs an addressable model-space polyline; entity {} is \
-                     referenced through a block instance or a sub-element",
+                    "REVCLOUD needs an addressable model-space path; entity {} is referenced \
+                     through a block instance or a sub-element",
                     reference.entity.0
                 ),
             ));
         }
-
         let document_id = command.document;
-        let document = self
+        let entity = self
             .workspace
             .documents
-            .get_mut(&document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let mut candidate = document.drawing.as_ref().clone();
-        let drawing = &mut candidate;
-        let entity = drawing.entity(reference.entity).cloned().ok_or_else(|| {
-            invalid(
-                "target_missing",
-                format!(
-                    "entity {} does not exist in this drawing",
-                    reference.entity.0
-                ),
-            )
-        })?;
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing
+            .entity(reference.entity)
+            .cloned()
+            .ok_or_else(|| {
+                invalid(
+                    "target_missing",
+                    format!(
+                        "entity {} does not exist in this drawing",
+                        reference.entity.0
+                    ),
+                )
+            })?;
         if entity.space != SpaceId::Model {
             return Err(unsupported(
                 "not_addressable",
                 format!(
-                    "REVCLOUD v1 converts model-space polylines only; entity {} is in another \
-                     space",
-                    reference.entity.0
+                    "REVCLOUD converts model-space paths only; entity {} is in another space",
+                    entity.id.0
                 ),
             ));
         }
-
-        let (points, bulges, closed) = match &entity.geometry {
-            SemanticGeometry::Polyline {
-                points,
-                bulges,
-                closed,
-            } => (points.clone(), bulges.clone(), *closed),
-            other => {
-                return Err(unsupported(
-                    "not_polyline",
-                    format!(
-                        "REVCLOUD needs a POLYLINE selection; {} is not supported",
-                        class_name(other)
-                    ),
-                ));
-            }
-        };
-        if !closed {
+        if !matches!(
+            entity.geometry,
+            SemanticGeometry::Polyline { .. }
+                | SemanticGeometry::Circle { .. }
+                | SemanticGeometry::Ellipse { .. }
+                | SemanticGeometry::Spline { .. }
+        ) {
             return Err(unsupported(
-                "open_polyline",
-                "REVCLOUD needs a closed polyline; an open polyline has no enclosed interior \
-                 to place the outward arcs against",
-            ));
-        }
-        if points.len() < 3 {
-            return Err(invalid(
-                "too_few_vertices",
+                "not_convertible",
                 format!(
-                    "REVCLOUD needs at least three vertices, got {}",
-                    points.len()
+                    "REVCLOUD Object mode converts CIRCLE, ELLIPSE, LWPOLYLINE and SPLINE; {} is \
+                     not supported",
+                    class_name(&entity.geometry)
                 ),
             ));
         }
-        // The stored data uses one bulge per vertex; a segment is straight when
-        // its bulge is zero. An arc segment is refused, never overwritten.
-        for (index, bulge) in bulges.iter().enumerate() {
-            if !bulge.is_finite() || bulge.abs() > REVCLOUD_STRAIGHT_TOLERANCE {
-                return Err(unsupported(
-                    "bulged_segment",
-                    format!(
-                        "polyline segment {index} is already an arc (bulge {bulge}); only closed \
-                         polylines whose every segment is straight can be converted"
-                    ),
+        let chord = chord_length(options.arc_length, source_diagonal(&entity))?;
+        let (points, closed) = flatten_source(&entity, chord)?;
+        let geometry = resample_cloud(points, closed, chord, false)?;
+        let edges = match &geometry {
+            SemanticGeometry::Polyline { points, .. } => points.len(),
+            _ => 0,
+        };
+        commit_updated_cloud(
+            self,
+            document_id,
+            entity,
+            geometry,
+            "revcloud",
+            format!(
+                "REVCLOUD Object: converted the selected path into a {} cloud with {edges} \
+                 arc(s) of chord {chord}",
+                if closed { "closed" } else { "open" }
+            ),
+        )
+    }
+
+    /// `REVCLOUD Modify`: add points and erase the picked side.
+    fn revcloud_modify(
+        &mut self,
+        command: &Command,
+        target: &cad_domain::SelectionRef,
+        add_points: &[Point3],
+        erase_side: Point3,
+        options: &RevisionCloudOptions,
+    ) -> CadResult<CommandOutcome> {
+        if target.document != command.document {
+            return Err(invalid(
+                "not_addressable",
+                format!(
+                    "the selected ref for entity {} belongs to another document",
+                    target.entity.0
+                ),
+            ));
+        }
+        if !target.instance.0.is_empty() || target.sub_element.is_some() {
+            return Err(unsupported(
+                "not_addressable",
+                format!(
+                    "REVCLOUD Modify needs an addressable model-space cloud; entity {} is \
+                     referenced through a block instance or a sub-element",
+                    target.entity.0
+                ),
+            ));
+        }
+        let document_id = command.document;
+        let entity = self
+            .workspace
+            .documents
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing
+            .entity(target.entity)
+            .cloned()
+            .ok_or_else(|| {
+                invalid(
+                    "target_missing",
+                    format!("entity {} does not exist in this drawing", target.entity.0),
+                )
+            })?;
+        if entity.space != SpaceId::Model {
+            return Err(unsupported(
+                "not_addressable",
+                format!(
+                    "REVCLOUD Modify converts model-space clouds only; entity {} is in another \
+                     space",
+                    entity.id.0
+                ),
+            ));
+        }
+        if !matches!(entity.geometry, SemanticGeometry::Polyline { .. }) {
+            return Err(unsupported(
+                "not_polyline",
+                format!(
+                    "REVCLOUD Modify needs a POLYLINE cloud; {} is not supported",
+                    class_name(&entity.geometry)
+                ),
+            ));
+        }
+        validate_build_points(add_points)?;
+        if !is_finite_point(erase_side) {
+            return Err(invalid("degenerate", "the erase-side pick is not finite"));
+        }
+        let chord = chord_length(options.arc_length, source_diagonal(&entity))?;
+        let (mut points, closed) = flatten_source(&entity, chord)?;
+        if !closed {
+            return Err(invalid(
+                "modify_open",
+                "REVCLOUD Modify erases a side of a closed cloud; the selected polyline is open",
+            ));
+        }
+        insert_add_points(&mut points, add_points);
+        let cloud = resample_cloud(points, true, chord, false)?;
+        let (points, bulges) = match cloud {
+            SemanticGeometry::Polyline { points, bulges, .. } => (points, bulges),
+            _ => {
+                return Err(CadError::Invariant(
+                    "REVCLOUD Modify: resampling did not produce a polyline".into(),
                 ));
             }
-        }
-        if !points.iter().all(|point| is_finite_point(*point)) {
-            return Err(invalid(
-                "degenerate",
-                "the polyline has a non-finite vertex",
-            ));
-        }
-        // The same `+Z` coplanarity predicate the tessellator/EXPLODE use to read
-        // a bulge: a non-`+Z` ring has no well-defined outward side in this build.
-        if !is_xy_parallel(&points) {
-            return Err(invalid(
-                "not_planar",
-                "the polyline vertices are not coplanar on one +Z plane; only +Z planar \
-                 polylines can be converted",
-            ));
-        }
-        let area = signed_area(&points);
-        if !area.is_finite() || area.abs() <= REVCLOUD_MIN_AREA {
-            return Err(invalid(
-                "degenerate",
-                format!(
-                    "the polyline encloses no area (signed area {area}); there is no interior \
-                     to bulge outward from"
-                ),
-            ));
-        }
-        // CCW (positive signed area): the interior is left of every chord, so the
-        // arc bows right — outward — and in this build's `bulge = tan(sweep/4)`
-        // convention that is the positive bulge. CW is the mirror.
-        let bulge = if area > 0.0 {
-            REVCLOUD_BULGE
-        } else {
-            -REVCLOUD_BULGE
         };
-        let edges = points.len();
-        let after_geometry = SemanticGeometry::Polyline {
-            points,
-            bulges: vec![bulge; edges],
-            closed: true,
+        let geometry = erase_nearest_segment(&points, &bulges, erase_side)?;
+        let edges = match &geometry {
+            SemanticGeometry::Polyline { points, .. } => points.len(),
+            _ => 0,
         };
-
-        let entity_id = entity.id;
-        let mut after = entity.clone();
-        after.geometry = after_geometry;
-        let transaction = next_transaction_id();
-        let change_set = {
-            let mut staged = drawing.begin_drawing_transaction("revcloud", transaction)?;
-            staged.update_entity(after)?;
-            staged.commit()?
-        };
-        // Read the committed entity back so the undo patch's `after` is the exact
-        // stored value, never a re-derivation.
-        let stored = drawing.entity(entity_id).cloned().ok_or_else(|| {
-            CadError::Invariant("REVCLOUD: the polyline vanished after commit".into())
-        })?;
-        self.publish_candidate(
+        commit_updated_cloud(
+            self,
             document_id,
-            candidate,
-            DrawingUndoRecord {
-                transaction: change_set.transaction,
-                label: "revcloud".to_string(),
-                patches: vec![drawing_patch(entity_id, Some(entity), Some(stored))],
-                block_patches: Vec::new(),
-                merge_key: None,
-            },
-        )?;
-
-        Ok(CommandOutcome {
-            objects: vec![ObjectId(entity_id.0)],
-            changes: Some(Arc::new(change_set)),
-            diagnostics: vec![Diagnostic {
-                object: Some(ObjectId(entity_id.0)),
-                code: "revcloud.applied".into(),
-                // Locale-neutral technical diagnostic: English ASCII only.
-                message: format!(
-                    "REVCLOUD: replaced {edges} straight edge(s) of entity {} with one outward \
-                     arc bulge of magnitude {REVCLOUD_BULGE} (sweep {} rad) each",
-                    entity_id.0,
-                    4.0 * REVCLOUD_BULGE.atan()
-                ),
-            }],
-            measurement: None,
-            point_report: None,
-        })
+            entity,
+            geometry,
+            "revcloud",
+            format!(
+                "REVCLOUD Modify: inserted {} point(s) and erased the arc nearest the pick, \
+                 leaving an open {edges}-vertex cloud with chord {chord}",
+                add_points.len()
+            ),
+        )
     }
 }

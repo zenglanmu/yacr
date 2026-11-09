@@ -21,6 +21,7 @@ mod layer_arguments;
 mod layout_arguments;
 mod layout_status;
 mod modify_arguments;
+mod payload_options;
 mod pedit;
 mod point_style;
 mod select_filter;

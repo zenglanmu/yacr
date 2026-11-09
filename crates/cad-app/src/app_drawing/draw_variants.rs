@@ -7,38 +7,235 @@
 //! unchanged.
 
 use super::*;
+use crate::command_payload::{UtilityPayload, WipeoutPayload};
 
 impl Application {
-    /// Insert a closed polygon **mask** (`WIPEOUT`) into model space.
+    /// Insert a closed polygon **mask** (`WIPEOUT`) into model space, convert a
+    /// closed straight-segment polyline, or set the session frame state.
     ///
-    /// Payload is `Points(boundary)`: the **closed implicit ring** of the mask —
-    /// at least three finite, `+Z`-coplanar vertices in click order, with the
-    /// first vertex **not** repeated at the end. The stored geometry is
-    /// `SemanticGeometry::Mask { boundary, inverted: false }`; the entity's
-    /// stored type key is `AcDbWipeout` (the domain's own `class_name` mapping,
-    /// the same one the importer and the renderer use). One entity, one
-    /// transaction and one undo step on the active layer through the shared
-    /// [`Self::commit_new_entity`] funnel.
+    /// Payloads:
     ///
-    /// Full contract, including the named NOT-IMPLEMENTED surface (`Frames`
-    /// ON/OFF/`Display-not-plot`, the `Polyline`/`Erase Polyline` options,
-    /// self-intersection rejection and picking): [`crate::command_id::draw_variants::WipeoutCommand`].
-    /// Every refusal (`wipeout.payload`, `wipeout.too_few_points`,
-    /// `wipeout.invalid_point`, `wipeout.not_planar`,
-    /// `wipeout.duplicate_vertex`, `wipeout.zero_area`) happens before the
-    /// transaction, so a refused command changes nothing.
+    /// * [`CommandPayload::Points`] / [`WipeoutPayload::Points`] — the existing
+    ///   **closed implicit ring** of the mask: at least three finite,
+    ///   `+Z`-coplanar vertices in click order, with the first vertex **not**
+    ///   repeated at the end;
+    /// * [`WipeoutPayload::Polyline`] — `Polyline` → `Erase Polyline [Yes/No]`.
+    ///   The target must be a closed `LWPOLYLINE` whose every segment is straight
+    ///   (zero width is the only width the model has), and `erase` deletes it in
+    ///   the same transaction;
+    /// * [`WipeoutPayload::Frames`] — `Frames ON|OFF|Display but not plot`.
+    ///   This is session/drawing-wide state (`WIPEOUTFRAME` 1/0/2) applied to
+    ///   every wipeout. The mask always renders; the frame/plot split is recorded
+    ///   state because this build emits no wipeout frame geometry and its vector
+    ///   plot path has no frame channel (declared display-only).
+    ///
+    /// The free point-run form uses the shared [`Self::commit_new_entity`] funnel
+    /// (one entity, one transaction, one undo step, active layer). The `Polyline`
+    /// form inserts and optionally deletes in one custom transaction, with the
+    /// deleted row's display state captured for undo. Every refusal
+    /// (`wipeout.*`) happens before the transaction.
     pub(crate) fn create_wipeout(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let utility = utility_payload(command);
+        if let Some(UtilityPayload::Wipeout(WipeoutPayload::Frames(frames))) = utility {
+            session.drafting_extras.set_wipeout_frames(*frames);
+            return Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![
+                    Diagnostic {
+                        object: None,
+                        code: "wipeout.frames".into(),
+                        message: format!(
+                            "WIPEOUT Frames {}: WIPEOUTFRAME = {} applies to every wipeout in \
+                             the drawing",
+                            frames.label(),
+                            frames.value()
+                        ),
+                    },
+                    Diagnostic {
+                        object: None,
+                        code: "wipeout.frames_display_only".into(),
+                        message: "WIPEOUT Frames: the state is stored and reported, but this \
+                                  build draws no wipeout frame geometry and its vector plot path \
+                                  has no frame channel; the mask itself always renders"
+                            .into(),
+                    },
+                ],
+                measurement: None,
+                point_report: None,
+            });
+        }
+        if let Some(UtilityPayload::Wipeout(WipeoutPayload::Polyline { target, erase })) = utility {
+            return self.create_wipeout_from_polyline(session, command, target, *erase);
+        }
+        let points = match (utility, &command.payload) {
+            (Some(UtilityPayload::Wipeout(WipeoutPayload::Points(points))), _) => points.clone(),
+            (Some(_), _) => {
+                return Err(CadError::InvalidInput(
+                    "wipeout.payload: WIPEOUT does not accept another utility command's payload"
+                        .into(),
+                ));
+            }
+            (None, CommandPayload::Points(points)) => points.clone(),
+            (None, _) => {
+                return Err(CadError::InvalidInput(
+                    "wipeout.payload: WIPEOUT needs a Points([boundary…]) payload, a Polyline \
+                     target or a Frames option"
+                        .into(),
+                ));
+            }
+        };
+        let geometry = wipeout_geometry(points)?;
+        self.commit_new_entity(session, command, geometry, "create wipeout")
+    }
+
+    /// `WIPEOUT Polyline`: convert one closed straight-segment polyline.
+    fn create_wipeout_from_polyline(
         &mut self,
         session: &SessionState,
         command: &Command,
+        target: &SelectionRef,
+        erase: bool,
     ) -> CadResult<CommandOutcome> {
-        let CommandPayload::Points(points) = &command.payload else {
-            return Err(CadError::InvalidInput(
-                "wipeout.payload: WIPEOUT needs a Points([boundary…]) payload".into(),
-            ));
+        if target.document != command.document {
+            return Err(CadError::InvalidInput(format!(
+                "wipeout.polyline_not_addressable: target {} belongs to another document",
+                target.entity.0
+            )));
+        }
+        if !target.instance.0.is_empty() || target.sub_element.is_some() {
+            return Err(CadError::Unsupported(format!(
+                "wipeout.polyline_not_addressable: target {} is a block-instance member or \
+                 sub-element; only directly addressable model-space polylines are supported",
+                target.entity.0
+            )));
+        }
+        let document_id = command.document;
+        let document = self
+            .workspace
+            .documents
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let mut candidate = document.drawing.as_ref().clone();
+        let source = candidate.entity(target.entity).cloned().ok_or_else(|| {
+            CadError::InvalidInput(format!(
+                "wipeout.polyline_target_missing: target {} does not exist",
+                target.entity.0
+            ))
+        })?;
+        if source.space != SpaceId::Model {
+            return Err(CadError::Unsupported(format!(
+                "wipeout.polyline_not_addressable: target {} is not model space",
+                source.id.0
+            )));
+        }
+        let (boundary, closed) = match &source.geometry {
+            SemanticGeometry::Polyline {
+                points,
+                bulges,
+                closed,
+            } => {
+                if !closed {
+                    return Err(CadError::InvalidInput(
+                        "wipeout.polyline_open: the Polyline option needs a closed polyline".into(),
+                    ));
+                }
+                if bulges.iter().any(|bulge| bulge.abs() > 1e-9) {
+                    return Err(CadError::Unsupported(
+                        "wipeout.polyline_bulged: the Polyline option needs straight segments \
+                         only; zero width is the only width this build models"
+                            .into(),
+                    ));
+                }
+                (points.clone(), *closed)
+            }
+            other => {
+                return Err(CadError::Unsupported(format!(
+                    "wipeout.polyline_not_polyline: {} is not an LWPOLYLINE",
+                    class_name(other)
+                )));
+            }
         };
-        let geometry = wipeout_geometry(points.clone())?;
-        self.commit_new_entity(session, command, geometry, "create wipeout")
+        if !closed {
+            return Err(CadError::InvalidInput(
+                "wipeout.polyline_open: the Polyline option needs a closed polyline".into(),
+            ));
+        }
+        let geometry = wipeout_geometry(boundary)?;
+        let target_display = erase.then(|| candidate.entity_display_state(source.id));
+        let new_id = candidate.allocate_entity_id();
+        let base_order = candidate
+            .entities()
+            .filter(|entity| entity.space == SpaceId::Model)
+            .map(|entity| entity.draw_order)
+            .max()
+            .map(|order| order.saturating_add(1))
+            .unwrap_or(0);
+        let mask = DbEntity {
+            object: cad_db::DbObject {
+                id: ObjectId(new_id.0),
+                type_key: class_name(&geometry).to_string(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: new_id,
+            layer: session.active_layer,
+            space: SpaceId::Model,
+            geometry,
+            draw_order: base_order,
+        };
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged =
+                candidate.begin_drawing_transaction("wipeout polyline", transaction)?;
+            staged.insert_entity(mask.clone())?;
+            if erase {
+                staged.delete_entity(source.id)?;
+            }
+            staged.commit()?
+        };
+        let stored = candidate
+            .entity(new_id)
+            .cloned()
+            .ok_or_else(|| CadError::Invariant("WIPEOUT: the mask vanished after commit".into()))?;
+        let mut patches = vec![drawing_patch(new_id, None, Some(stored))];
+        if erase {
+            patches.push(drawing_patch_deleted(
+                source.id,
+                source.clone(),
+                target_display.expect("captured when erase is true"),
+            ));
+        }
+        self.publish_candidate(
+            document_id,
+            candidate,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: "wipeout polyline".into(),
+                patches,
+                block_patches: Vec::new(),
+                merge_key: None,
+            },
+        )?;
+        Ok(CommandOutcome {
+            objects: vec![ObjectId(new_id.0)],
+            changes: Some(Arc::new(change_set)),
+            diagnostics: vec![Diagnostic {
+                object: Some(ObjectId(new_id.0)),
+                code: "wipeout.polyline".into(),
+                message: format!(
+                    "WIPEOUT Polyline: converted the closed straight polyline into one \
+                     AcDbWipeout mask; Erase Polyline = {}",
+                    if erase { "Yes" } else { "No" }
+                ),
+            }],
+            measurement: None,
+            point_report: None,
+        })
     }
 
     /// Insert a closed regular POLYGON **circumscribed about a circle**, as one

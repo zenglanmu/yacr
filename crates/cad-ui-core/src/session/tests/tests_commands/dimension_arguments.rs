@@ -12,14 +12,17 @@ use cad_domain::{
     LayerId, LayoutId, ObjectId, Revision, SpaceId, StyleId,
 };
 
+use cad_app::{QDimMode, QDimSnap};
+use cad_domain::Point3;
+
 use crate::session::commands::{
     ARGUMENT_SELECTORS, DIMEDIT_SELECTOR, DIMJOGLINE_SELECTOR, DIMOVERRIDE_SELECTOR,
-    DIMSPACE_SELECTOR, DIMSTYLE_SELECTOR, DIMTEDIT_SELECTOR,
+    DIMSPACE_SELECTOR, DIMSTYLE_SELECTOR, DIMTEDIT_SELECTOR, QDIM_SELECTOR,
 };
 use crate::session::dim_arguments::{
     invalid_dimspace_argument_reason, parse_dimedit_argument, parse_dimjogline_argument,
     parse_dimoverride_argument, parse_dimspace_argument, parse_dimstyle_argument,
-    parse_dimtedit_argument,
+    parse_dimtedit_argument, parse_qdim_argument,
 };
 
 #[test]
@@ -28,6 +31,7 @@ fn every_argument_selector_is_admitted() {
         DIMSPACE_SELECTOR,
         DIMSTYLE_SELECTOR,
         DIMTEDIT_SELECTOR,
+        QDIM_SELECTOR,
         DIMEDIT_SELECTOR,
         DIMOVERRIDE_SELECTOR,
         DIMJOGLINE_SELECTOR,
@@ -107,7 +111,7 @@ fn dimstyle_grammar_is_list_current_or_set_name() {
 }
 
 #[test]
-fn dimtedit_grammar_is_move_rotate_or_reset() {
+fn dimtedit_grammar_is_move_justify_home_or_angle() {
     assert_eq!(
         parse_dimtedit_argument("MOVE 1 2"),
         Some(DimTextEditCommand::Move { x: 1.0, y: 2.0 })
@@ -116,20 +120,82 @@ fn dimtedit_grammar_is_move_rotate_or_reset() {
         parse_dimtedit_argument("move -1.5 2.5"),
         Some(DimTextEditCommand::Move { x: -1.5, y: 2.5 })
     );
+    for (text, expected) in [
+        ("LEFT", DimTextEditCommand::Left),
+        ("right", DimTextEditCommand::Right),
+        ("Center", DimTextEditCommand::Center),
+        ("HOME", DimTextEditCommand::Home),
+    ] {
+        assert_eq!(parse_dimtedit_argument(text), Some(expected), "{text:?}");
+    }
     assert_eq!(
-        parse_dimtedit_argument("ROTATE 30"),
-        Some(DimTextEditCommand::Rotate { degrees: 30.0 })
+        parse_dimtedit_argument("ANGLE 30"),
+        Some(DimTextEditCommand::Angle { degrees: 30.0 })
     );
     assert_eq!(
-        parse_dimtedit_argument("ROTATE -45.5"),
-        Some(DimTextEditCommand::Rotate { degrees: -45.5 })
+        parse_dimtedit_argument("ANGLE -45.5"),
+        Some(DimTextEditCommand::Angle { degrees: -45.5 })
     );
-    assert_eq!(
-        parse_dimtedit_argument("RESET"),
-        Some(DimTextEditCommand::Reset)
-    );
-    for bad in ["", "MOVE 1", "MOVE 1 2 3", "ROTATE x", "RESET 1", "HOME"] {
+    // Rotate is DIMEDIT's option; DIMTEDIT has Angle instead.
+    for bad in [
+        "",
+        "MOVE 1",
+        "MOVE 1 2 3",
+        "ANGLE x",
+        "ROTATE 30",
+        "RESET",
+        "LEFT 1",
+        "HOME 1",
+    ] {
         assert_eq!(parse_dimtedit_argument(bad), None, "{bad:?}");
+    }
+}
+
+#[test]
+fn qdim_grammar_covers_every_documented_mode_and_option() {
+    assert_eq!(
+        parse_qdim_argument("CONSECUTIVE"),
+        None,
+        "unknown mode is refused"
+    );
+    for (text, mode) in [
+        ("CONTINUOUS", QDimMode::Continuous),
+        ("C", QDimMode::Continuous),
+        ("STAGGERED", QDimMode::Staggered),
+        ("BASELINE", QDimMode::Baseline),
+        ("ORDINATE", QDimMode::Ordinate),
+        ("RADIUS", QDimMode::Radius),
+        ("DIAMETER", QDimMode::Diameter),
+    ] {
+        let request = parse_qdim_argument(text).unwrap_or_else(|| panic!("{text}"));
+        assert_eq!(request.mode, mode, "{text}");
+        assert_eq!(request.snap, QDimSnap::Endpoints);
+    }
+    let request = parse_qdim_argument("BASELINE DATUM 1 2 EDIT 0 2 SETTINGS INTERSECTIONS")
+        .expect("baseline options");
+    assert_eq!(request.mode, QDimMode::Baseline);
+    assert_eq!(
+        request.datum,
+        Some(Point3 {
+            x: 1.0,
+            y: 2.0,
+            z: 0.0
+        })
+    );
+    assert_eq!(request.remove, vec![0, 2]);
+    assert_eq!(request.snap, QDimSnap::Intersections);
+    let request = parse_qdim_argument("STAGGERED INCREMENT 2.5").expect("staggered");
+    assert_eq!(request.increment, Some(2.5));
+    for bad in [
+        "",
+        "BASELINE DATUM 1",
+        "BASELINE SETTINGS MIDPOINTS",
+        "STAGGERED INCREMENT 0",
+        "CONTINUOUS EDIT",
+        "CONTINUOUS EDIT x",
+        "CONTINUOUS EXTRA",
+    ] {
+        assert_eq!(parse_qdim_argument(bad), None, "{bad:?}");
     }
 }
 

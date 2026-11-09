@@ -237,8 +237,10 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "QSELECT",
             "FILTER",
             "GETSEL",
+            "SSX",
             "FIND",
             "-FIND",
+            "AUDIT",
             "PURGE",
             "RENAME",
             "SETVAR",
@@ -272,6 +274,8 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "DIMEDIT",
             "DIMOVERRIDE",
             "DIMJOGLINE",
+            // `QDIM <mode>` is QDIM's argument form.
+            "QDIM",
             // The 2026-11-07 annotation/group batch.
             "GROUP",
             "UNGROUP",
@@ -286,7 +290,13 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "MOCORO",
             "VIEWRES",
             "VSCURRENT",
-            "LINETYPE"
+            "LINETYPE",
+            // The 2026-11 P3 option batch.
+            "OVERKILL",
+            "REVCLOUD",
+            "WIPEOUT",
+            "TEXTMASK",
+            "TXT2MTXT"
         ]
     );
     assert_eq!(

@@ -1,8 +1,54 @@
-//! `TCIRCLE` (estimated-bounds boundary), `TEXTMASK` (independent wipeout) and
-//! `TEXTUNMASK` (selected-mask deletion heuristic).
+//! `TCIRCLE` (estimated-bounds boundary), `TEXTMASK` (offset grouped wipeout)
+//! and `TEXTUNMASK` (group-aware mask deletion).
 
 use super::shared::*;
 use super::*;
+use crate::command_payload::{TextMaskKind, TextMaskOptions, UtilityPayload};
+
+/// The group-name prefix `TEXTMASK` uses for its text/mask pairs.
+const TEXTMASK_GROUP_PREFIX: &str = "*TEXTMASK-";
+
+/// The `*TEXTMASK-*` groups that contain `reference`.
+fn textmask_groups_for<'a>(
+    session: &'a SessionState,
+    reference: &SelectionRef,
+) -> Vec<&'a crate::EntityGroup> {
+    session
+        .groups
+        .groups()
+        .filter(|group| {
+            group.name.starts_with(TEXTMASK_GROUP_PREFIX) && group.members.contains(reference)
+        })
+        .collect()
+}
+
+/// Allocate `count` fresh `*TEXTMASK-<n>` names, avoiding retained groups.
+fn allocate_textmask_names(
+    session: &SessionState,
+    old_groups: &std::collections::BTreeSet<String>,
+    count: usize,
+) -> Vec<String> {
+    let removed: std::collections::BTreeSet<String> = old_groups
+        .iter()
+        .map(|name| name.to_ascii_lowercase())
+        .collect();
+    let mut names: Vec<String> = Vec::with_capacity(count);
+    let mut index = 1usize;
+    while names.len() < count {
+        let name = format!("{TEXTMASK_GROUP_PREFIX}{index}");
+        index += 1;
+        if removed.contains(&name.to_ascii_lowercase())
+            || session.groups.contains(&name)
+            || names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&name))
+        {
+            continue;
+        }
+        names.push(name);
+    }
+    names
+}
 
 impl Application {
     /// `TCIRCLE CIRCLE|RECTANGLE`: draw an estimated-bounds boundary per text.
@@ -135,16 +181,54 @@ impl Application {
         })
     }
 
-    /// `TEXTMASK`: insert one independent `AcDbWipeout` mask behind each text.
+    /// `TEXTMASK`: insert an `AcDbWipeout` mask behind each selected text.
+    ///
+    /// The documented offset factor (default **0.35**) grows the estimated text
+    /// box by `factor × height` on every side. Only the `Wipeout` mask type has a
+    /// modelled entity; `3dface` and `Solid` are named `Unsupported` refusals.
+    /// The text and its new mask are grouped in the existing session group store
+    /// (`GROUP`), so a group-aware move/copy/erase sees them together; the DWG
+    /// itself still has no association record. Re-running TEXTMASK deletes the
+    /// previous `*TEXTMASK-*` group mask for each selected text and creates the
+    /// new one in the same transaction.
     pub(crate) fn text_mask(
         &mut self,
-        session: &SessionState,
+        session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        if !matches!(command.payload, CommandPayload::None) {
+        let options = match utility_payload(command) {
+            Some(UtilityPayload::TextMask(options)) => *options,
+            Some(_) => {
+                return Err(refusal(
+                    "textmask.invalid_payload",
+                    "TEXTMASK does not accept another utility command's payload",
+                ));
+            }
+            None => match command.payload {
+                CommandPayload::None => TextMaskOptions::default(),
+                _ => {
+                    return Err(refusal(
+                        "textmask.invalid_payload",
+                        "TEXTMASK takes no payload or a TextMask utility payload; the current \
+                         selection is the input",
+                    ));
+                }
+            },
+        };
+        if options.kind != TextMaskKind::Wipeout {
+            return Err(CadError::Unsupported(format!(
+                "textmask.mask_type: the {:?} mask type has no entity model in this build; only \
+                 Wipeout (`AcDbWipeout`) is supported",
+                options.kind
+            )));
+        }
+        if !options.offset_factor.is_finite() || options.offset_factor < 0.0 {
             return Err(refusal(
-                "textmask.invalid_payload",
-                "TEXTMASK takes no payload; the current selection is the input",
+                "textmask.invalid_offset",
+                format!(
+                    "the mask offset factor must be finite and non-negative, got {}",
+                    options.offset_factor
+                ),
             ));
         }
         let references = session.selection.refs().to_vec();
@@ -163,17 +247,52 @@ impl Application {
             .drawing
             .as_ref()
             .clone();
-        let mut sources = Vec::with_capacity(references.len());
+        let mut sources: Vec<(SelectionRef, DbEntity)> = Vec::with_capacity(references.len());
         let mut seen = std::collections::BTreeSet::new();
         for reference in &references {
             let entity = resolve_model_entity(&candidate, document_id, reference, "textmask")?;
             require_text("textmask", &entity)?;
             if seen.insert(entity.id) {
-                sources.push(entity);
+                sources.push((reference.clone(), entity));
             }
         }
+        // Previous TEXTMASK groups/masks belonging to these texts only.
+        let mut old_groups = std::collections::BTreeSet::new();
+        let mut old_masks: Vec<DbEntity> = Vec::new();
+        let mut old_seen = std::collections::BTreeSet::new();
+        for (reference, _) in &sources {
+            for group in textmask_groups_for(session, reference) {
+                old_groups.insert(group.name.clone());
+                for member in &group.members {
+                    if member.entity == reference.entity
+                        || member.document != document_id
+                        || !member.instance.0.is_empty()
+                        || member.sub_element.is_some()
+                    {
+                        continue;
+                    }
+                    if let Some(entity) = candidate.entity(member.entity).cloned() {
+                        if matches!(entity.geometry, SemanticGeometry::Mask { .. })
+                            && old_seen.insert(entity.id)
+                        {
+                            old_masks.push(entity);
+                        }
+                    }
+                }
+            }
+        }
+        let remaining_groups = session.groups.len().saturating_sub(old_groups.len());
+        if remaining_groups + sources.len() > session.groups.cap() {
+            return Err(CadError::Unsupported(format!(
+                "textmask.group_cap: grouping {} text/mask pair(s) would exceed the session group \
+                 capacity of {} (currently {remaining_groups} other group(s) retained)",
+                sources.len(),
+                session.groups.cap()
+            )));
+        }
+        let names = allocate_textmask_names(session, &old_groups, sources.len());
         let mut entities = Vec::with_capacity(sources.len());
-        for source in &sources {
+        for (_, source) in &sources {
             let bounds = estimate_text_bounds(source, "textmask")?;
             if bounds.width() <= 0.0 || bounds.height() <= 0.0 {
                 return Err(refusal(
@@ -184,8 +303,32 @@ impl Application {
                     ),
                 ));
             }
+            let pad = options.offset_factor
+                * match &source.geometry {
+                    SemanticGeometry::Text { height, .. } => *height,
+                    _ => 0.0,
+                };
+            if !pad.is_finite() {
+                return Err(refusal(
+                    "textmask.degenerate",
+                    format!("the offset for text {} is not finite", source.id.0),
+                ));
+            }
+            let expanded = EstimatedTextBounds {
+                min_x: bounds.min_x - pad,
+                min_y: bounds.min_y - pad,
+                max_x: bounds.max_x + pad,
+                max_y: bounds.max_y + pad,
+                z: bounds.z,
+            };
+            if expanded.width() <= 0.0 || expanded.height() <= 0.0 {
+                return Err(refusal(
+                    "textmask.degenerate",
+                    format!("the offset bounds of text {} enclose no area", source.id.0),
+                ));
+            }
             let geometry = SemanticGeometry::Mask {
-                boundary: bounds.corners(),
+                boundary: expanded.corners(),
                 inverted: false,
             };
             let entity_id = candidate.allocate_entity_id();
@@ -206,35 +349,83 @@ impl Application {
                 draw_order: source.draw_order.saturating_sub(1),
             });
         }
-        let (objects, change_set) = commit_new_rows(
-            self,
+        let delete_states: Vec<_> = old_masks
+            .iter()
+            .map(|mask| candidate.entity_display_state(mask.id))
+            .collect();
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged = candidate.begin_drawing_transaction("text mask", transaction)?;
+            for mask in &old_masks {
+                staged.delete_entity(mask.id)?;
+            }
+            for entity in &entities {
+                staged.insert_entity(entity.clone())?;
+            }
+            staged.commit()?
+        };
+        let mut patches: Vec<DrawingPatch> = old_masks
+            .iter()
+            .zip(delete_states)
+            .map(|(mask, state)| drawing_patch_deleted(mask.id, mask.clone(), state))
+            .collect();
+        let mut objects = Vec::with_capacity(entities.len());
+        for entity in &entities {
+            let stored = candidate.entity(entity.id).cloned().ok_or_else(|| {
+                CadError::Invariant("TEXTMASK: an inserted mask vanished after commit".into())
+            })?;
+            patches.push(drawing_patch(entity.id, None, Some(stored)));
+            objects.push(ObjectId(entity.id.0));
+        }
+        self.publish_candidate(
             document_id,
             candidate,
-            entities,
-            "text mask",
-            "text mask",
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: "text mask".into(),
+                patches,
+                block_patches: Vec::new(),
+                merge_key: None,
+            },
         )?;
+        for name in &old_groups {
+            session.groups.remove(name);
+        }
+        for (((reference, _), mask_id), name) in sources.iter().zip(&objects).zip(&names) {
+            session.groups.create(
+                name,
+                vec![
+                    reference.clone(),
+                    SelectionRef {
+                        document: document_id,
+                        entity: EntityId(mask_id.0),
+                        instance: InstancePath::default(),
+                        sub_element: None,
+                    },
+                ],
+            );
+        }
         let count = objects.len();
         Ok(CommandOutcome {
             objects,
-            changes: Some(change_set),
+            changes: Some(Arc::new(change_set)),
             diagnostics: vec![
                 Diagnostic {
                     object: None,
                     code: "drawing.textmask".into(),
                     message: format!(
-                        "TEXTMASK: inserted {} AcDbWipeout masks behind the selected text from \
-                         the estimated bounds",
-                        count
+                        "TEXTMASK: inserted {count} AcDbWipeout mask(s) behind the selected text \
+                         with offset factor {} and created {count} session group(s)",
+                        options.offset_factor
                     ),
                 },
                 Diagnostic {
                     object: None,
                     code: "textmask.estimated_bounds".into(),
-                    message: "TEXTMASK: the mask boundary is the declared estimate \
-                              (height × char_count and height, rotation ignored); no mask is \
-                              associated with the text and no frame/display-not-plot option is \
-                              implemented"
+                    message: "TEXTMASK: the mask boundary is the declared estimate (height x \
+                              char_count and height, rotation ignored) expanded by the offset \
+                              factor; the text and mask are grouped in the session group store \
+                              (`*TEXTMASK-*`), but the DWG stores no association record"
                         .into(),
                 },
             ],
@@ -243,10 +434,15 @@ impl Application {
         })
     }
 
-    /// `TEXTUNMASK`: delete selected masks covered by the selected text.
+    /// `TEXTUNMASK`: delete masks belonging to the selected text.
+    ///
+    /// A selected text's `*TEXTMASK-*` group names the exact mask to remove, even
+    /// when the mask itself is not in the selection. Selected masks continue to
+    /// use the declared estimated-bounds heuristic. No unselected, ungrouped mask
+    /// is ever scanned.
     pub(crate) fn text_unmask(
         &mut self,
-        session: &SessionState,
+        session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
         if !matches!(command.payload, CommandPayload::None) {
@@ -273,6 +469,7 @@ impl Application {
             .clone();
         let mut diagnostics = Vec::new();
         let mut text_bounds = Vec::new();
+        let mut text_refs = Vec::new();
         let mut masks = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
         for reference in &references {
@@ -290,6 +487,7 @@ impl Application {
                 };
             match &entity.geometry {
                 SemanticGeometry::Text { .. } => {
+                    text_refs.push(reference.clone());
                     match estimate_text_bounds(&entity, "textunmask") {
                         Ok(bounds) => text_bounds.push(bounds),
                         Err(error) => diagnostics.push(skipped(
@@ -311,21 +509,54 @@ impl Application {
                 )),
             }
         }
+        // Group membership is the association authority: only groups created by
+        // TEXTMASK are consulted, and only for the selected text refs.
+        let mut group_names = std::collections::BTreeSet::new();
+        for reference in &text_refs {
+            for group in textmask_groups_for(session, reference) {
+                group_names.insert(group.name.clone());
+                for member in &group.members {
+                    if member.entity == reference.entity
+                        || member.document != document_id
+                        || !member.instance.0.is_empty()
+                        || member.sub_element.is_some()
+                    {
+                        continue;
+                    }
+                    if let Some(entity) = candidate.entity(member.entity).cloned() {
+                        if matches!(entity.geometry, SemanticGeometry::Mask { .. })
+                            && seen.insert(entity.id)
+                        {
+                            masks.push(entity);
+                        }
+                    }
+                }
+            }
+        }
         if masks.is_empty() {
             return Ok(unchanged_outcome(
                 "textunmask.unchanged",
-                "TEXTUNMASK: no mask was selected; nothing was written".into(),
+                "TEXTUNMASK: no grouped or selected mask was found; nothing was written".into(),
                 diagnostics,
             ));
         }
-        // With text selected, the text bounds filter the masks; with no text, every
-        // selected mask is deleted. Only selected masks are ever removed.
+        // With text selected, selected masks must lie inside the text bounds; a
+        // group member is already the exact mask for its text and bypasses that
+        // filter. With no text, every selected mask is deleted.
         let doomed: Vec<DbEntity> = if text_bounds.is_empty() {
             masks
         } else {
             masks
                 .into_iter()
-                .filter(|mask| mask_lies_within_any(mask, &text_bounds))
+                .filter(|mask| {
+                    group_names.iter().any(|name| {
+                        session.groups.resolve(name).is_some_and(|group| {
+                            group.members.iter().any(|member| {
+                                member.entity == mask.id && member.document == document_id
+                            })
+                        })
+                    }) || mask_lies_within_any(mask, &text_bounds)
+                })
                 .collect()
         };
         if doomed.is_empty() {
@@ -336,6 +567,19 @@ impl Application {
                     .into(),
                 diagnostics,
             ));
+        }
+        let doomed_ids: std::collections::BTreeSet<EntityId> =
+            doomed.iter().map(|mask| mask.id).collect();
+        let mut groups_to_remove = group_names.clone();
+        for group in session.groups.groups() {
+            if group.name.starts_with(TEXTMASK_GROUP_PREFIX)
+                && group
+                    .members
+                    .iter()
+                    .any(|member| doomed_ids.contains(&member.entity))
+            {
+                groups_to_remove.insert(group.name.clone());
+            }
         }
         let display_states: Vec<_> = doomed
             .iter()
@@ -366,14 +610,17 @@ impl Application {
                 merge_key: None,
             },
         )?;
+        for name in &groups_to_remove {
+            session.groups.remove(name);
+        }
         let removed = objects.len();
         let mut all = diagnostics;
         all.push(Diagnostic {
             object: None,
             code: "drawing.textunmask".into(),
             message: format!(
-                "TEXTUNMASK: deleted {removed} selected mask entities covered by the estimated \
-                 text bounds (the heuristic cannot prove a mask came from TEXTMASK)"
+                "TEXTUNMASK: deleted {removed} mask entity(ies) belonging to the selected text \
+                 (session groups) and/or selected masks covered by the estimated text bounds"
             ),
         });
         Ok(CommandOutcome {

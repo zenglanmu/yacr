@@ -59,20 +59,27 @@
 //! ## `TXT2MTXT`
 //!
 //! AutoCAD combines selected TEXT/MTEXT objects into MTEXT with a settings
-//! dialog (single mtext, sort top-down, word-wrap, force uniform line spacing).
-//! **v1 declares that dialog NOT IMPLEMENTED** and reports
-//! `txt2mtxt.settings_dialog` / `txt2mtxt.uniform_line_spacing`; nothing is
-//! silently applied.
+//! dialog. This build implements the four documented toggles as a typed payload
+//! ([`crate::command_payload::Txt2MTextOptions`]); the bare command uses the
+//! defaults:
 //!
-//! The command requires at least one directly addressable model-space `Text`
-//! entity. Every source must be a Text/MText; a non-text kind is
-//! `txt2mtxt.unsupported` and a block-instance member/sub-element is
-//! `txt2mtxt.not_addressable` — both refuse the **whole** command, never a
-//! partial conversion. Sources are sorted top-to-bottom (descending Y) then
-//! left-to-right (ascending X), stably, and their **raw** strings are joined
-//! with `\P` without re-processing escapes. One new `AcDbMText` entity is
-//! created at the first sorted source's position, carrying its style/font/
-//! height/rotation/h_align/v_align, layer, space, draw order and `wrap_width`
-//! (`None` stays `None`; no width is invented). All sources are deleted in the
-//! **same** transaction / undo step, so one UNDO restores every source and
-//! removes the new MTEXT.
+//! * **Combine into a single mtext object** (default on): raw strings are joined
+//!   with `\P`; the first source in the chosen order supplies style/font/height/
+//!   rotation/alignment/position/layer/draw order. Per-source font/size
+//!   differences cannot survive one object (declared).
+//! * **Combine off**: each source becomes its own new `AcDbMText` at its own
+//!   position/style, and every source is still deleted in the same transaction
+//!   (the declared one-per-source rule).
+//! * **Text ordering**: `TopDown` sorts descending Y then ascending X, stably;
+//!   `Selection` keeps selection order.
+//! * **Word-wrap**: uses the existing `wrap_width`; off stores `None`, on
+//!   preserves each source's boundary (including `None` = no wrap).
+//! * **Force uniform line spacing**: AutoCAD's MTEXT line-spacing factor has no
+//!   field in this build (`\P` is only a paragraph break), so the setting is a
+//!   named `txt2mtxt.uniform_line_spacing` `Unsupported` refusal; nothing is
+//!   half-applied.
+//!
+//! Every source is deleted and the replacement(s) inserted in **one**
+//! transaction / undo step. A non-text source is `txt2mtxt.unsupported` and a
+//! block-instance member/sub-element is `txt2mtxt.not_addressable`; both refuse
+//! the whole command, never a partial conversion.

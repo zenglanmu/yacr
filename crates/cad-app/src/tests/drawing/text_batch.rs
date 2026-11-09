@@ -756,7 +756,18 @@ fn textmask_inserts_an_independent_wipeout_behind_the_text() {
     };
     assert_eq!(boundary.len(), 4, "the estimated bounds rectangle");
     assert!(!*inverted);
+    // Height 2.0, offset 0.35 -> 0.7 world units on every side.
+    assert_eq!(boundary[0], p3(-0.7, -0.7, 0.0));
+    assert_eq!(boundary[1], p3(8.7, -0.7, 0.0));
+    assert_eq!(boundary[2], p3(8.7, 2.7, 0.0));
+    assert_eq!(boundary[3], p3(-0.7, 2.7, 0.0));
     assert!(entity(&app, 1).is_some(), "the text is retained");
+    assert_eq!(session.groups.len(), 1, "text and mask are grouped");
+    let group = session.groups.groups().next().unwrap();
+    assert!(group.name.starts_with("*TEXTMASK-"));
+    assert_eq!(group.members.len(), 2);
+    assert_eq!(group.members[0].entity, EntityId(1));
+    assert_eq!(group.members[1].entity, mask.id);
     assert_eq!(undo_depth(&app), 1);
 }
 
@@ -827,7 +838,7 @@ fn textunmask_with_only_masks_selected_deletes_them() {
 }
 
 #[test]
-fn textunmask_with_only_text_selected_changes_nothing() {
+fn textunmask_with_only_text_selected_removes_its_grouped_mask() {
     let (mut app, mut session) = app_with(vec![simple_text(1, "abcd", p3(0.0, 0.0, 0.0), 5)]);
     select(&mut session, &[1]);
     execute(
@@ -837,20 +848,128 @@ fn textunmask_with_only_text_selected_changes_nothing() {
         CommandPayload::None,
     )
     .expect("TEXTMASK");
+    assert_eq!(session.groups.len(), 1);
     let depth = undo_depth(&app);
-    // Only the text is selected: no mask is selected, so nothing is deleted.
+    // The group names the exact mask, so selecting only the text removes it.
     execute(
         &mut app,
         &mut session,
         CommandId::TextUnmask,
         CommandPayload::None,
     )
-    .expect("a named no-op");
+    .expect("TEXTUNMASK follows the group");
     assert!(
-        find_by_type(&app, "AcDbWipeout").is_some(),
-        "unselected masks are never scanned"
+        find_by_type(&app, "AcDbWipeout").is_none(),
+        "the grouped mask is removed without scanning unrelated masks"
     );
-    assert_eq!(undo_depth(&app), depth, "no empty undo entry");
+    assert!(
+        session.groups.is_empty(),
+        "the TEXTMASK group is cleaned up"
+    );
+    assert_eq!(undo_depth(&app), depth + 1);
+}
+
+fn textmask_payload(options: crate::command_payload::TextMaskOptions) -> CommandPayload {
+    CommandPayload::Annotation(Box::new(AnnotationBatchPayload::Utility(Box::new(
+        crate::command_payload::UtilityPayload::TextMask(options),
+    ))))
+}
+
+#[test]
+fn textmask_offset_factor_and_mask_types_are_explicit() {
+    let (mut app, mut session) = app_with(vec![simple_text(1, "abcd", p3(0.0, 0.0, 0.0), 5)]);
+    select(&mut session, &[1]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::TextMask,
+        textmask_payload(crate::command_payload::TextMaskOptions {
+            offset_factor: 1.0,
+            kind: crate::command_payload::TextMaskKind::Wipeout,
+        }),
+    )
+    .expect("a custom offset factor");
+    let mask = find_by_type(&app, "AcDbWipeout").expect("mask");
+    let SemanticGeometry::Mask { boundary, .. } = &mask.geometry else {
+        panic!("expected a Mask");
+    };
+    assert_eq!(boundary[0], p3(-2.0, -2.0, 0.0));
+    assert_eq!(boundary[2], p3(10.0, 4.0, 0.0));
+
+    let before = revision(&app);
+    for kind in [
+        crate::command_payload::TextMaskKind::Face3d,
+        crate::command_payload::TextMaskKind::Solid,
+    ] {
+        let error = execute(
+            &mut app,
+            &mut session,
+            CommandId::TextMask,
+            textmask_payload(crate::command_payload::TextMaskOptions {
+                offset_factor: 0.35,
+                kind,
+            }),
+        )
+        .expect_err("unmodelled mask types refuse");
+        assert!(
+            matches!(error, CadError::Unsupported(ref message) if message.contains("textmask.mask_type")),
+            "{error:?}"
+        );
+        assert_eq!(revision(&app), before, "a refusal writes nothing");
+    }
+
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::TextMask,
+        textmask_payload(crate::command_payload::TextMaskOptions {
+            offset_factor: -0.1,
+            kind: crate::command_payload::TextMaskKind::Wipeout,
+        }),
+    )
+    .expect_err("a negative offset refuses");
+    assert!(
+        matches!(error, CadError::InvalidInput(ref message) if message.contains("textmask.invalid_offset")),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn textmask_rerun_replaces_the_previous_mask_and_does_not_duplicate_groups() {
+    let (mut app, mut session) = app_with(vec![simple_text(1, "abcd", p3(0.0, 0.0, 0.0), 5)]);
+    select(&mut session, &[1]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::TextMask,
+        CommandPayload::None,
+    )
+    .expect("first TEXTMASK");
+    let first_mask = find_by_type(&app, "AcDbWipeout").expect("first mask").id;
+    assert_eq!(session.groups.len(), 1);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::TextMask,
+        CommandPayload::None,
+    )
+    .expect("second TEXTMASK");
+    assert!(
+        entity(&app, first_mask.0).is_none(),
+        "the previous mask is erased"
+    );
+    let masks: Vec<_> = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entities()
+        .filter(|entity| matches!(&entity.geometry, SemanticGeometry::Mask { .. }))
+        .collect();
+    assert_eq!(masks.len(), 1, "exactly one mask remains");
+    assert_eq!(
+        session.groups.len(),
+        1,
+        "the group is replaced, not duplicated"
+    );
+    assert_eq!(undo_depth(&app), 2, "each TEXTMASK is one undo step");
 }
 
 // --- Catalogue facts ---------------------------------------------------------

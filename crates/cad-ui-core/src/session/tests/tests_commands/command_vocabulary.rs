@@ -938,7 +938,7 @@ fn text_case_and_orientation_selectors_are_work_only_argument_selectors() {
         );
         assert!(id.requires_work_mode(), "{selector} must be Work-only");
     }
-    // TORIENT/TCASE take one typed argument; TXT2MTXT is name-only.
+    // TORIENT/TCASE take one typed argument; the bare TXT2MTXT is name-only.
     assert_eq!(
         typed_command_argument("TORIENT 45"),
         Some(("TORIENT", "45"))
@@ -952,7 +952,7 @@ fn text_case_and_orientation_selectors_are_work_only_argument_selectors() {
         None,
         "the bare form is Title"
     );
-    assert_eq!(typed_command_argument("TXT2MTXT 1"), None);
+    assert_eq!(typed_command_argument("TXT2MTXT"), None);
     // `TCASE` accepts the five modes and their single letters, nothing else.
     for (argument, mode) in [
         ("UPPER", cad_app::TextCaseMode::Upper),

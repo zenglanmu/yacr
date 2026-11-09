@@ -11,6 +11,45 @@
 //! that the effect is not implemented rather than pretending the drawing
 //! changed.
 
+/// The session `WIPEOUTFRAME` state.
+///
+/// AutoCAD's three documented values apply to **all** wipeouts in the drawing:
+/// `0` hides every frame (the mask still masks), `1` displays and plots them, and
+/// `2` displays them without plotting. This build stores the token and reports it
+/// from `WIPEOUT Frames`; the mask always renders, but no frame geometry is
+/// emitted by the renderer and the vector plot path has no wipeout-frame channel,
+/// so the display/plot split is recorded state only (a declared boundary).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WipeoutFrames {
+    /// `WIPEOUTFRAME 0`: frames are neither displayed nor plotted.
+    Off,
+    /// `WIPEOUTFRAME 1` (the documented initial value): displayed and plotted.
+    #[default]
+    On,
+    /// `WIPEOUTFRAME 2`: displayed but not plotted.
+    DisplayNotPlot,
+}
+
+impl WipeoutFrames {
+    /// The numeric `WIPEOUTFRAME` value.
+    pub fn value(self) -> u8 {
+        match self {
+            Self::Off => 0,
+            Self::On => 1,
+            Self::DisplayNotPlot => 2,
+        }
+    }
+
+    /// The stable uppercase label used in reports.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "OFF",
+            Self::On => "ON",
+            Self::DisplayNotPlot => "DISPLAY-NOT-PLOT",
+        }
+    }
+}
+
 /// The current 2D isometric drafting plane token (`ISOPLANE`).
 ///
 /// The token cycles `Left → Top → Right → Left`, exactly the AutoCAD order. This
@@ -174,6 +213,7 @@ pub struct DraftingExtras {
     find_include: bool,
     find_match_case: bool,
     revcloud_arc_length: f64,
+    wipeout_frames: WipeoutFrames,
     attdisp: bool,
     dwglog: bool,
     elev: f64,
@@ -207,6 +247,7 @@ impl Default for DraftingExtras {
             find_include: true,
             find_match_case: false,
             revcloud_arc_length: 15.0,
+            wipeout_frames: WipeoutFrames::On,
             attdisp: true,
             dwglog: false,
             elev: 0.0,
@@ -280,6 +321,16 @@ impl DraftingExtras {
     /// The session revision-cloud arc-length token (default 15).
     pub fn revcloud_arc_length(&self) -> f64 {
         self.revcloud_arc_length
+    }
+
+    /// The session `WIPEOUTFRAME` state (default ON).
+    pub fn wipeout_frames(&self) -> WipeoutFrames {
+        self.wipeout_frames
+    }
+
+    /// Store the session `WIPEOUTFRAME` state.
+    pub fn set_wipeout_frames(&mut self, value: WipeoutFrames) {
+        self.wipeout_frames = value;
     }
 
     /// The session `ATTDISP` token (default ON).

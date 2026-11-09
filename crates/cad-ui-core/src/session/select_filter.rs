@@ -17,11 +17,13 @@ use cad_app::{CommandId, CommandPayload, SelectionToolPayload};
 
 use super::{
     commands::{
-        invalid_filter_argument_reason, invalid_filter_logic_argument_reason,
-        invalid_find_argument_reason, invalid_getsel_argument_reason,
-        invalid_qselect_argument_reason, looks_like_filter_expression, looks_like_structured_query,
-        parse_filter_request, parse_find_argument, parse_property_filter, parse_qselect_request,
-        FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, QSELECT_SELECTOR,
+        invalid_audit_argument_reason, invalid_filter_argument_reason,
+        invalid_filter_logic_argument_reason, invalid_find_argument_reason,
+        invalid_getsel_argument_reason, invalid_qselect_argument_reason,
+        invalid_ssx_argument_reason, looks_like_filter_expression, looks_like_structured_query,
+        parse_audit_argument, parse_filter_request, parse_find_argument, parse_property_filter,
+        parse_qselect_request, parse_ssx_argument, AUDIT_SELECTOR, FILTER_SELECTOR,
+        FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, QSELECT_SELECTOR, SSX_SELECTOR,
     },
     CadSession,
 };
@@ -119,6 +121,34 @@ impl CadSession {
                 needle,
                 replacement,
             },
+        )
+    }
+
+    /// Apply one typed `SSX <criterion> ...` line.
+    ///
+    /// The line edits the application's session filter (one value per
+    /// criterion) and applies it; the application owns the unknown-criterion,
+    /// empty-filter and unmodelled-criterion refusals.
+    pub(super) fn ssx_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some(request) = parse_ssx_argument(argument) else {
+            return self.refuse_argument(invalid_ssx_argument_reason(text));
+        };
+        self.core.record_command(SSX_SELECTOR);
+        self.dispatch_payload(
+            CommandId::SelectMatchingProperties,
+            CommandPayload::SelectionTool(Box::new(SelectionToolPayload::Ssx(request))),
+        )
+    }
+
+    /// Apply one typed `AUDIT [YES|NO|LOG]` line.
+    pub(super) fn audit_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some(request) = parse_audit_argument(argument) else {
+            return self.refuse_argument(invalid_audit_argument_reason(text));
+        };
+        self.core.record_command(AUDIT_SELECTOR);
+        self.dispatch_payload(
+            CommandId::AuditDrawing,
+            CommandPayload::SelectionTool(Box::new(SelectionToolPayload::Audit(request))),
         )
     }
 }

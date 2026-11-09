@@ -1,59 +1,78 @@
-//! Long-form notes for [`crate::CommandId::HatchEdit`] (`HATCHEDIT`).
+//! Long-form notes for [`crate::CommandId::HatchEdit`] (`HATCHEDIT` /
+//! `-HATCHEDIT`).
 //!
 //! Split out of `command_id.rs` to keep that catalogue inside the code-size
 //! limit; the implementation lives in `app_drawing/hatch_edit.rs`.
 //!
 //! ## Input
 //!
-//! The current selection is the whole input: **exactly one** directly
-//! addressable, model-space `AcDbHatch` entity. A different count is
-//! `hatchedit.selection`; a ref through a block instance or sub-element, another
-//! document, a missing id or a non-model-space entity is
-//! `hatchedit.not_addressable`; any other geometry kind is `hatchedit.not_hatch`.
-//! A payload of [`crate::CommandPayload::None`] is the bare selector and is
-//! refused as `hatchedit.needs_option`; any other payload is
+//! The current selection is the whole input: **one or more** directly
+//! addressable, model-space `AcDbHatch` entities. An empty selection is
+//! `hatchedit.selection`; a duplicate ref is `hatchedit.duplicate`; a ref through
+//! a block instance or sub-element, another document, a missing id or a
+//! non-model-space entity is `hatchedit.not_addressable`; any other geometry kind
+//! is `hatchedit.not_hatch`. A payload of [`crate::CommandPayload::None`] is the
+//! bare selector and is refused as `hatchedit.needs_option`; any other payload is
 //! `hatchedit.payload`.
 //!
-//! ## Typed option grammar (the only v1 surface)
+//! ## Typed option grammar
 //!
 //! This build has no interactive Hatch Edit dialog, so the option is typed on
 //! the command line (case-insensitive):
 //!
-//! * `HATCHEDIT ANGLE <degrees>` — set the stored pattern angle. The value is a
-//!   finite decimal, converted to radians exactly once, and is applied only to a
-//!   `HatchFill::Pattern` fill; a Solid/Gradient fill is `hatchedit.not_pattern`.
-//! * `HATCHEDIT SCALE <factor>` — set the stored pattern scale. The factor must
-//!   be finite and strictly positive (`hatchedit.scale` otherwise), and is
-//!   likewise pattern-only.
-//! * `HATCHEDIT SOLID` — replace the fill with `HatchFill::Solid`.
-//! * `HATCHEDIT GRADIENT` — replace the fill with the default two-colour linear
-//!   ramp (angle 0, ACI 1 red → ACI 5 blue).
+//! | option | behaviour |
+//! | --- | --- |
+//! | `STYLE IGNORE/OUTER/NORMAL` | set the DXF group 75 island style |
+//! | `ANGLE <degrees>` | set the pattern angle (pattern fill only) |
+//! | `SCALE <factor>` | set the pattern scale > 0 (pattern fill only) |
+//! | `PATTERNTYPE USER/PREDEFINED/CUSTOM` | set DXF group 76 |
+//! | `SOLID` / `GRADIENT` | replace the fill with the solid / default linear ramp |
+//! | `COLOR <aci>` / `COLOR BYLAYER` | set the entity display colour |
+//! | `TRANSPARENCY <0..=90>` / `TRANSPARENCY BYLAYER` | set the entity opacity |
+//! | `LAYER <name>` | move every target to that drawing layer |
+//! | `DRAWORDER BEHIND/FRONT/BOUNDARY` | model-space draw order (`BOUNDARY` refused) |
+//! | `RECREATEBOUNDARY` | one closed polyline per stored loop |
+//! | `SEPARATE` | split a multi-loop hatch into one hatch per loop |
 //!
 //! A bare `HATCHEDIT` is admitted by name and refused by the application with
-//! `hatchedit.needs_option`, which lists the four implemented forms. An
-//! argument outside the grammar is refused before IPC with
-//! `invalid_hatchedit_argument_reason`.
+//! `hatchedit.needs_option`. An argument outside the grammar is refused before
+//! IPC with `invalid_hatchedit_argument_reason`.
+//!
+//! ## Named refusals (global scope)
+//!
+//! * `ORIGIN` — `hatchedit.missing_field`: the domain stores no pattern origin
+//!   (group 43/44/45 are derived, not an editable field here);
+//! * `ASSOCIATE` / `DISASSOCIATE` — `hatchedit.no_association`: this build has
+//!   no hatch/boundary association record;
+//! * `ANNOTATIVE` — `hatchedit.annotative_unsupported`: no annotative-scale
+//!   model;
+//! * `ADDBOUNDARIES` / `REMOVEBOUNDARIES` — `hatchedit.boundaries_unsupported`:
+//!   the loop set cannot be rebuilt safely from added/removed picks, so the
+//!   command refuses rather than fake a boundary edit.
+//!
+//! These refusals are answered before the selection is read, and none of them
+//! opens a transaction.
 //!
 //! ## Rebuild
 //!
-//! ANGLE/SCALE keep the same loops, plane, style, seeds, pixel size and
-//! `pattern_type`, and only the pattern's `angle`/`scale` change. SOLID/GRADIENT
-//! keep loops, plane, style, seeds and pixel size, and replace the fill; both
-//! record `HatchPatternType::Predefined` (`76=1`), matching what the HATCH
-//! creation path writes for those fill kinds. The display is always rebuilt by
-//! the domain constructor (`HatchGeometry::from_import`), never hand-edited.
-//! The entity keeps its id, layer, space, draw order and `AcDbHatch` type key,
-//! and is written with **one** `update_entity` in one transaction / one undo
-//! step.
+//! ANGLE/SCALE/PATTERNTYPE/STYLE and SOLID/GRADIENT keep the stored loops,
+//! plane, seeds, pixel size and every property the option does not name, and
+//! rebuild the display through the domain constructor
+//! (`HatchGeometry::from_import` / `with_style_and_fill`) — never by hand-editing
+//! the display. `RECREATEBOUNDARY` writes non-associative closed polylines on the
+//! hatch's layer/space; `SEPARATE` keeps the first loop in the original entity and
+//! inserts one hatch per remaining loop (nested-island semantics are not
+//! preserved — declared). Colour/transparency are entity display attributes;
+//! layer and draw order are entity row fields.
 //!
-//! A no-op — the same angle, the same scale, or the same fill variant — is the
-//! named `hatchedit.unchanged` outcome with **no** transaction, revision bump or
-//! undo entry.
+//! Every changed target (and every created entity) is written in **one
+//! transaction / one undo step**, so one undo restores all of them. A run that
+//! changes nothing is the named `hatchedit.unchanged` outcome with **no**
+//! transaction, revision bump or undo entry.
 //!
 //! ## NOT IMPLEMENTED
 //!
-//! The options AutoCAD's dialog offers beyond this v1 subset: pattern name /
-//! `Pattern`, colour, layer/transparency/lineweight `Properties`, draw order,
-//! `Add`/`Remove` boundaries, re-associativity, annotative scaling, origin, and
-//! the `-HATCHEDIT` command-line variant. Work-only (Viewer mode refuses it at
-//! the command layer).
+//! Pattern origin, association/disassociation, annotative scaling, add/remove
+//! boundaries, draw order relative to a boundary, a per-loop pattern origin and
+//! the interactive dialog. Work-only (Viewer mode refuses it at the command
+//! layer).

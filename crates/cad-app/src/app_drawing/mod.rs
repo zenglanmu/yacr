@@ -45,6 +45,7 @@ mod dimension_angular;
 mod dimension_chain;
 mod dimension_edit;
 mod dimension_ordinate;
+mod dimension_qdim;
 mod dimension_space;
 mod divide;
 mod drawing_create;
@@ -82,6 +83,10 @@ mod mirror_curves;
 mod mleader;
 // `MSTRETCH`: the one STRETCH planner over several crossing windows.
 mod modify_extra;
+// OVERKILL (Delete Duplicate Objects): the tolerance/ignore/option comparison
+// engine, split out of `modify_extra` so both files stay inside the budget.
+mod overkill;
+pub use overkill::OverkillSettings;
 mod mstretch;
 mod mtext_create;
 mod offset_polyline;
@@ -111,6 +116,9 @@ mod text_front;
 // The three selection-based text commands (TORIENT / TCASE / TXT2MTXT) and
 // their one pure case transformer.
 mod text_commands;
+// TXT2MTXT's settings-driven combine/split path, split out so `text_commands`
+// stays inside the file-size gate.
+mod txt2mtext;
 // The single line-break / stored-type-key authority MTEXT creation and TEXTEDIT
 // share; `pub(crate)` because the TEXT capture channel refuses a newline too.
 pub(crate) mod text_policy;
@@ -125,6 +133,24 @@ mod trim_extend;
 mod trim_spline;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
+
+/// The 2026-11 text/draw utility payload, if this command carries one.
+///
+/// The four utilities travel through `CommandPayload::Annotation` to keep the
+/// top-level payload enum inside its file-size budget; every handler reads only
+/// its own [`crate::command_payload::UtilityPayload`] arm.
+pub(crate) fn utility_payload(
+    command: &Command,
+) -> Option<&crate::command_payload::UtilityPayload> {
+    match &command.payload {
+        CommandPayload::Annotation(batch) => match batch.as_ref() {
+            crate::AnnotationBatchPayload::Utility(utility) => Some(utility.as_ref()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 // The Wave 4 extended edits reuse the existing planner/write surfaces rather
 // than a second copy: these re-exports are crate-wide only.
 pub(crate) use draw2_edit::CurveChange;

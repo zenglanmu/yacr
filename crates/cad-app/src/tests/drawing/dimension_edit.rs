@@ -24,6 +24,8 @@ const CIRCLE: u128 = 805;
 const ARC: u128 = 806;
 const POINT: u128 = 807;
 const DIMROTATED_ID: u128 = 808;
+const DIM_RADIAL: u128 = 809;
+const DIM_ORDINATE: u128 = 810;
 
 fn standard_style() -> DimensionStyleValues {
     cad_db::DimStyle::standard_metric(DimStyleId(0)).resolved(
@@ -162,6 +164,32 @@ fn dimension_edit_app() -> (Application, SessionState) {
     .unwrap();
     b.insert_entity(ent(POINT, SemanticGeometry::Point(point(300.0, 100.0)), 7))
         .unwrap();
+    b.insert_entity(ent(
+        DIM_RADIAL,
+        synthesized(
+            DimensionKind::Radius,
+            DimensionPoints::Radial {
+                center: point(500.0, 0.0),
+                point_on_arc: point(505.0, 0.0),
+                leader_length: 0.0,
+            },
+        ),
+        8,
+    ))
+    .unwrap();
+    b.insert_entity(ent(
+        DIM_ORDINATE,
+        synthesized(
+            DimensionKind::Ordinate { x_ordinate: true },
+            DimensionPoints::Ordinate {
+                feature: point(600.0, 0.0),
+                leader_end: point(600.0, 5.0),
+                base: point(0.0, 0.0),
+            },
+        ),
+        9,
+    ))
+    .unwrap();
     let drawing = b.finish().unwrap();
 
     let mut app = Application::new();
@@ -302,7 +330,7 @@ fn dimstyle_reports_are_read_only_and_set_is_a_named_capability_refusal() {
 }
 
 #[test]
-fn dimtedit_moves_rotates_and_resets_text_in_one_undo_each() {
+fn dimtedit_moves_justifies_homes_and_angles_text_in_one_undo_each() {
     let (mut app, mut session) = dimension_edit_app();
     select(&mut session, &[DIM_A]);
     let before = revision(&app);
@@ -320,14 +348,17 @@ fn dimtedit_moves_rotates_and_resets_text_in_one_undo_each() {
     assert_eq!(revision(&app).0, before.0 + 1);
     assert_eq!(undo_depth(&app), 1);
 
-    let error = execute(
+    // ANGLE keeps the text centre where MOVE put it and stores radians about the
+    // UCS X axis; 0 is the "derive" sentinel.
+    execute(
         &mut app,
         &mut session,
         CommandId::DimTextEdit,
-        text_edit_payload(DimTextEditCommand::Rotate { degrees: 30.0 }),
-    );
-    assert!(error.is_ok());
+        text_edit_payload(DimTextEditCommand::Angle { degrees: 30.0 }),
+    )
+    .unwrap();
     let dimension = stored(&app, DIM_A);
+    assert_eq!(dimension.definition().text_middle, point(3.0, 4.0));
     assert!(approx(
         dimension.definition().text_rotation,
         std::f64::consts::PI / 6.0
@@ -338,25 +369,125 @@ fn dimtedit_moves_rotates_and_resets_text_in_one_undo_each() {
         &mut app,
         &mut session,
         CommandId::DimTextEdit,
-        text_edit_payload(DimTextEditCommand::Reset),
+        text_edit_payload(DimTextEditCommand::Angle { degrees: 0.0 }),
     )
     .unwrap();
-    let dimension = stored(&app, DIM_A);
-    assert_eq!(dimension.definition().text_middle, point(0.0, 0.0));
-    assert!(approx(dimension.definition().text_rotation, 0.0));
+    assert!(approx(stored(&app, DIM_A).definition().text_rotation, 0.0));
     assert_eq!(undo_depth(&app), 3);
 
-    // Resetting an already-reset dimension is a named no-op: no transaction.
+    // LEFT/RIGHT/CENTER place the text anchor at the low/high/mid projection of
+    // the two extension-line origins on the dimension line (y = -5 here).
+    for (option, expected_x) in [
+        (DimTextEditCommand::Left, 0.0),
+        (DimTextEditCommand::Right, 10.0),
+        (DimTextEditCommand::Center, 5.0),
+    ] {
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::DimTextEdit,
+            text_edit_payload(option),
+        )
+        .unwrap();
+        let middle = stored(&app, DIM_A).definition().text_middle;
+        assert!(approx(middle.x, expected_x), "{option:?}: {middle:?}");
+        assert!(approx(middle.y, -5.0), "{option:?}: {middle:?}");
+    }
+    let after_justify = undo_depth(&app);
     let out = execute(
         &mut app,
         &mut session,
         CommandId::DimTextEdit,
-        text_edit_payload(DimTextEditCommand::Reset),
+        text_edit_payload(DimTextEditCommand::Center),
     )
     .unwrap();
     assert_eq!(out.diagnostics[0].code, "dimtedit.unchanged");
-    assert!(out.changes.is_none());
-    assert_eq!(undo_depth(&app), 3);
+    assert_eq!(undo_depth(&app), after_justify);
+
+    // HOME restores the derived position only; the rotation stays as set.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::DimTextEdit,
+        text_edit_payload(DimTextEditCommand::Angle { degrees: 15.0 }),
+    )
+    .unwrap();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::DimTextEdit,
+        text_edit_payload(DimTextEditCommand::Home),
+    )
+    .unwrap();
+    let dimension = stored(&app, DIM_A);
+    assert_eq!(dimension.definition().text_middle, point(0.0, 0.0));
+    assert!(approx(
+        dimension.definition().text_rotation,
+        15.0f64.to_radians()
+    ));
+}
+
+#[test]
+fn dimtedit_justifies_radius_and_aligned_but_refuses_ordinate_by_name() {
+    let (mut app, mut session) = dimension_edit_app();
+    // Radius: LEFT is the centre-side end of the leader, RIGHT the arc-side.
+    select(&mut session, &[DIM_RADIAL]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::DimTextEdit,
+        text_edit_payload(DimTextEditCommand::Left),
+    )
+    .unwrap();
+    assert_eq!(
+        stored(&app, DIM_RADIAL).definition().text_middle,
+        point(500.0, 0.0)
+    );
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::DimTextEdit,
+        text_edit_payload(DimTextEditCommand::Right),
+    )
+    .unwrap();
+    assert_eq!(
+        stored(&app, DIM_RADIAL).definition().text_middle,
+        point(505.0, 0.0)
+    );
+
+    // Aligned is part of the linear family and is admitted.
+    select(&mut session, &[DIMROTATED_ID]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::DimTextEdit,
+        text_edit_payload(DimTextEditCommand::Right),
+    )
+    .unwrap();
+    let middle = stored(&app, DIMROTATED_ID).definition().text_middle;
+    assert!(
+        approx(middle.x, 42.5) && approx(middle.y, 17.5),
+        "{middle:?}"
+    );
+
+    // Ordinate has no single dimension line in this model: named refusal.
+    select(&mut session, &[DIM_ORDINATE]);
+    let revision_before = revision(&app);
+    let undo_before = undo_depth(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::DimTextEdit,
+        text_edit_payload(DimTextEditCommand::Left),
+    )
+    .unwrap_err();
+    assert!(
+        format!("{error}").contains("dimtedit.justify_unsupported"),
+        "{error}"
+    );
+    assert!(format!("{error}").contains("ordinate dimension"), "{error}");
+    assert_eq!(revision(&app), revision_before);
+    assert_eq!(undo_depth(&app), undo_before);
 }
 
 #[test]
@@ -370,7 +501,7 @@ fn dimtedit_refuses_the_wrong_selection_count_and_non_dimensions() {
             &mut app,
             &mut session,
             CommandId::DimTextEdit,
-            text_edit_payload(DimTextEditCommand::Reset),
+            text_edit_payload(DimTextEditCommand::Home),
         )
         .unwrap_err();
         assert!(format!("{error}").contains("dimtedit.selection"), "{error}");
@@ -381,7 +512,7 @@ fn dimtedit_refuses_the_wrong_selection_count_and_non_dimensions() {
         &mut app,
         &mut session,
         CommandId::DimTextEdit,
-        text_edit_payload(DimTextEditCommand::Reset),
+        text_edit_payload(DimTextEditCommand::Home),
     )
     .unwrap_err();
     assert!(
@@ -575,80 +706,6 @@ fn dimregen_and_dimdisassociate_are_named_noops() {
 }
 
 #[test]
-fn qdim_creates_aligned_dimensions_from_lines_in_one_transaction() {
-    let (mut app, mut session) = dimension_edit_app();
-    select(&mut session, &[LINE_A, LINE_B]);
-    let before = revision(&app);
-
-    let out = execute(
-        &mut app,
-        &mut session,
-        CommandId::QDim,
-        CommandPayload::None,
-    )
-    .unwrap();
-    assert_eq!(out.objects.len(), 2);
-    assert_eq!(revision(&app).0, before.0 + 1);
-    assert_eq!(undo_depth(&app), 1);
-
-    let first = stored(&app, out.objects[0].0);
-    match first.kind() {
-        DimensionKind::Aligned => {}
-        other => panic!("QDIM must create aligned dimensions, got {other:?}"),
-    }
-    assert!(approx(first.measurement(), 10.0));
-    let (first_point, second_point, dimension_line) = match &first.definition().points {
-        DimensionPoints::Linear {
-            first,
-            second,
-            dimension_line,
-        } => (*first, *second, *dimension_line),
-        other => panic!("expected Linear points, got {other:?}"),
-    };
-    assert_eq!(first_point, point(0.0, 100.0));
-    assert_eq!(second_point, point(10.0, 100.0));
-    // Left normal of +X is +Y; the Standard DIMDLI places the line 3.75 above.
-    assert_eq!(dimension_line, point(5.0, 103.75));
-
-    let second = stored(&app, out.objects[1].0);
-    assert!(approx(second.measurement(), 10.0));
-}
-
-#[test]
-fn qdim_refuses_non_line_kinds_by_name() {
-    let (mut app, mut session) = dimension_edit_app();
-    let before = revision(&app);
-    let checks = [
-        (CIRCLE, "qdim.circle_unsupported"),
-        (ARC, "qdim.arc_unsupported"),
-        (POINT, "qdim.point_unsupported"),
-        (DIM_A, "qdim.unsupported_kind"),
-    ];
-    for (id, code) in checks {
-        select(&mut session, &[id]);
-        let error = execute(
-            &mut app,
-            &mut session,
-            CommandId::QDim,
-            CommandPayload::None,
-        )
-        .unwrap_err();
-        assert!(format!("{error}").contains(code), "{id}: {error}");
-    }
-    select(&mut session, &[]);
-    let error = execute(
-        &mut app,
-        &mut session,
-        CommandId::QDim,
-        CommandPayload::None,
-    )
-    .unwrap_err();
-    assert!(format!("{error}").contains("qdim.selection"), "{error}");
-    assert_eq!(revision(&app), before);
-    assert_eq!(undo_depth(&app), 0);
-}
-
-#[test]
 fn dimjogline_and_dimbreak_name_the_missing_domain_field() {
     let (mut app, mut session) = dimension_edit_app();
     select(&mut session, &[DIM_A]);
@@ -716,7 +773,7 @@ fn viewer_mode_refuses_the_work_only_dimension_edits() {
     for (id, payload) in [
         (
             CommandId::DimTextEdit,
-            text_edit_payload(DimTextEditCommand::Reset),
+            text_edit_payload(DimTextEditCommand::Home),
         ),
         (CommandId::DimEdit, edit_payload(DimEditCommand::Reset)),
         (CommandId::DimOverride, override_payload("DIMTXT", "5")),

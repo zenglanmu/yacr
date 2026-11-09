@@ -15,7 +15,7 @@
 
 use cad_app::{
     CommandId, CommandPayload, DimEditCommand, DimJogLineCommand, DimOverrideCommand,
-    DimStyleCommand, DimTextEditCommand, DimensionBatchPayload,
+    DimStyleCommand, DimTextEditCommand, DimensionBatchPayload, QDimCommand, QDimMode, QDimSnap,
 };
 
 use super::diagnostics::cad_error_text;
@@ -28,8 +28,12 @@ pub const DIMSPACE_SELECTOR: &str = "DIMSPACE";
 /// `DIMSTYLE LIST|CURRENT|SET <name>`: the stored DIMSTYLE table.
 pub const DIMSTYLE_SELECTOR: &str = "DIMSTYLE";
 
-/// `DIMTEDIT MOVE <x> <y>|ROTATE <degrees>|RESET`: text placement/rotation.
+/// `DIMTEDIT MOVE <x> <y>|LEFT|RIGHT|CENTER|HOME|ANGLE <degrees>`: text
+/// placement/justification/orientation.
 pub const DIMTEDIT_SELECTOR: &str = "DIMTEDIT";
+
+/// `QDIM <mode> [options]`: the dimension-chain generator.
+pub const QDIM_SELECTOR: &str = "QDIM";
 
 /// `DIMEDIT TEXT <override>|RESET`: the dimension text override.
 pub const DIMEDIT_SELECTOR: &str = "DIMEDIT";
@@ -83,11 +87,12 @@ pub fn parse_dimstyle_argument(argument: &str) -> Option<DimStyleCommand> {
     None
 }
 
-/// Parse `DIMTEDIT MOVE <x> <y>|ROTATE <degrees>|RESET`.
+/// Parse `DIMTEDIT MOVE <x> <y>|LEFT|RIGHT|CENTER|HOME|ANGLE <degrees>`.
 ///
 /// The coordinates/angle use the repository's one signed plain-decimal grammar
 /// (no exponent, no bare `.`/`5.`). No other word, partial spelling or trailing
-/// token is admitted.
+/// token is admitted. `ROTATE` is **not** an option of AutoCAD 2026 `DIMTEDIT`
+/// (that is `DIMEDIT`'s Rotate); the orientation option is `ANGLE`.
 pub fn parse_dimtedit_argument(argument: &str) -> Option<DimTextEditCommand> {
     let tokens: Vec<&str> = argument.split_whitespace().collect();
     match tokens.as_slice() {
@@ -95,14 +100,100 @@ pub fn parse_dimtedit_argument(argument: &str) -> Option<DimTextEditCommand> {
             x: super::commands::parse_signed_decimal(x)?,
             y: super::commands::parse_signed_decimal(y)?,
         }),
-        [word, degrees] if word.eq_ignore_ascii_case("ROTATE") => {
-            Some(DimTextEditCommand::Rotate {
-                degrees: super::commands::parse_signed_decimal(degrees)?,
-            })
-        }
-        [word] if word.eq_ignore_ascii_case("RESET") => Some(DimTextEditCommand::Reset),
+        [word] if word.eq_ignore_ascii_case("LEFT") => Some(DimTextEditCommand::Left),
+        [word] if word.eq_ignore_ascii_case("RIGHT") => Some(DimTextEditCommand::Right),
+        [word] if word.eq_ignore_ascii_case("CENTER") => Some(DimTextEditCommand::Center),
+        [word] if word.eq_ignore_ascii_case("HOME") => Some(DimTextEditCommand::Home),
+        [word, degrees] if word.eq_ignore_ascii_case("ANGLE") => Some(DimTextEditCommand::Angle {
+            degrees: super::commands::parse_signed_decimal(degrees)?,
+        }),
         _ => None,
     }
+}
+
+/// Parse `QDIM <mode> [DATUM <x> <y>] [SETTINGS ENDPOINTS|INTERSECTIONS]
+/// [INCREMENT <value>] [EDIT <i>…]`.
+///
+/// The six generation modes are `CONTINUOUS` (default), `STAGGERED`,
+/// `BASELINE`, `ORDINATE`, `RADIUS` and `DIAMETER` (single-letter abbreviations
+/// `C`/`S`/`B`/`O`/`R`/`D` are admitted). The other three documented modes are
+/// option fields: `DATUM` (Datum Point), `EDIT` (remove origin/target indices)
+/// and `SETTINGS` (object-snap priority). A bare `QDIM` never reaches this
+/// parser (it keeps the name-only funnel and defaults to `CONTINUOUS`).
+pub fn parse_qdim_argument(argument: &str) -> Option<QDimCommand> {
+    let tokens: Vec<&str> = argument.split_whitespace().collect();
+    let mode = match *tokens.first()? {
+        word if word.eq_ignore_ascii_case("CONTINUOUS") || word.eq_ignore_ascii_case("C") => {
+            QDimMode::Continuous
+        }
+        word if word.eq_ignore_ascii_case("STAGGERED") || word.eq_ignore_ascii_case("S") => {
+            QDimMode::Staggered
+        }
+        word if word.eq_ignore_ascii_case("BASELINE") || word.eq_ignore_ascii_case("B") => {
+            QDimMode::Baseline
+        }
+        word if word.eq_ignore_ascii_case("ORDINATE") || word.eq_ignore_ascii_case("O") => {
+            QDimMode::Ordinate
+        }
+        word if word.eq_ignore_ascii_case("RADIUS") || word.eq_ignore_ascii_case("R") => {
+            QDimMode::Radius
+        }
+        word if word.eq_ignore_ascii_case("DIAMETER") || word.eq_ignore_ascii_case("D") => {
+            QDimMode::Diameter
+        }
+        _ => return None,
+    };
+    let mut request = QDimCommand {
+        mode,
+        ..QDimCommand::default()
+    };
+    let mut index = 1;
+    while index < tokens.len() {
+        let word = tokens[index];
+        if word.eq_ignore_ascii_case("DATUM") {
+            let x = super::commands::parse_signed_decimal(tokens.get(index + 1)?)?;
+            let y = super::commands::parse_signed_decimal(tokens.get(index + 2)?)?;
+            request.datum = Some(cad_domain::Point3 { x, y, z: 0.0 });
+            index += 3;
+        } else if word.eq_ignore_ascii_case("SETTINGS") {
+            let value = *tokens.get(index + 1)?;
+            request.snap = if value.eq_ignore_ascii_case("ENDPOINTS") {
+                QDimSnap::Endpoints
+            } else if value.eq_ignore_ascii_case("INTERSECTIONS") {
+                QDimSnap::Intersections
+            } else {
+                return None;
+            };
+            index += 2;
+        } else if word.eq_ignore_ascii_case("INCREMENT") {
+            let value = super::commands::parse_signed_decimal(tokens.get(index + 1)?)?;
+            if value <= 0.0 {
+                return None;
+            }
+            request.increment = Some(value);
+            index += 2;
+        } else if word.eq_ignore_ascii_case("EDIT") {
+            index += 1;
+            let start = index;
+            while index < tokens.len() && !is_qdim_keyword(tokens[index]) {
+                request.remove.push(tokens[index].parse::<usize>().ok()?);
+                index += 1;
+            }
+            if index == start {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    }
+    Some(request)
+}
+
+fn is_qdim_keyword(token: &str) -> bool {
+    token.eq_ignore_ascii_case("DATUM")
+        || token.eq_ignore_ascii_case("SETTINGS")
+        || token.eq_ignore_ascii_case("INCREMENT")
+        || token.eq_ignore_ascii_case("EDIT")
 }
 
 /// Parse `DIMEDIT TEXT <override>|RESET`.
@@ -226,6 +317,10 @@ impl CadSession {
             DIMTEDIT_SELECTOR => (
                 CommandId::DimTextEdit,
                 parse_dimtedit_argument(argument).map(DimensionBatchPayload::TextEdit),
+            ),
+            QDIM_SELECTOR => (
+                CommandId::QDim,
+                parse_qdim_argument(argument).map(DimensionBatchPayload::QDim),
             ),
             DIMEDIT_SELECTOR => (
                 CommandId::DimEdit,
