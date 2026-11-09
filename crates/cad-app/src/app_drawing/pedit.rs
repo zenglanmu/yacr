@@ -12,9 +12,9 @@
 //! | `CLOSE` / `OPEN` | one polyline | `closed` flag |
 //! | `REVERSE` | one polyline (or the spline produced by `SPLINE`) | reversed points/bulges or control frame |
 //! | `JOIN` | one open base polyline + touching LINE/ARC/open POLYLINE picks | appended segments; the joined entities are deleted |
-//! | `FIT` | one open polyline | tangent-continuous arc segments through every vertex |
-//! | `SPLINE` | one open polyline | the vertices as a clamped B-spline control frame |
-//! | `DECURVE` | one polyline or a PEDIT-generated SPLINE | removes bulges / restores the control frame |
+//! | `FIT` | one open or closed polyline | tangent-continuous arc segments through every vertex |
+//! | `SPLINE` | one open or closed polyline | the vertices as a clamped B-spline control frame |
+//! | `DECURVE` | one polyline or a PEDIT-generated SPLINE | removes bulges / restores the (open or closed) control frame |
 //! | `UNDO` | no selection needed | applies the document undo step |
 //!
 //! ## `FIT`
@@ -22,13 +22,26 @@
 //! One circular arc per original segment, chosen so the end tangent of segment
 //! `i` equals the start tangent of segment `i + 1` (the exact `bulge` rule:
 //! start tangent `= chord − δ`, end tangent `= chord + δ`, `bulge = tan(δ/2)`).
-//! The chain has one free end condition; this build declares it as
+//!
+//! **Open**: the chain has one free end condition; this build declares it as
 //! **δ₀ = 0** (the first tangent follows the first chord), so the fit is
-//! deterministic and the first segment is straight. A vertex that would need
-//! `|δ| ≥ π/2` (a corner at or beyond a half-turn arc) is refused by name
-//! (`pedit.fit_tangent`) rather than emitted as a wrapped bulge. No fit
-//! vertices are inserted: the original vertices are exactly the arc
-//! endpoints, so `DECURVE` restores the frame by clearing the bulges.
+//! deterministic and the first segment is straight.
+//!
+//! **Closed**: the ring has no free end, so the closing segment's turn closes the
+//! cyclic tangent system `δᵢ + δᵢ₊₁ = turnᵢ` (indices modulo `n`) and the fit is
+//! a tangent-continuous loop back to the start. For an odd vertex count the
+//! cyclic system has exactly one solution; for an even count it is solvable only
+//! when the alternating turn residual vanishes (a square or any equi-turning
+//! ring), and the remaining one-parameter family is fixed by **minimising the
+//! largest segment turn** (the most even arc radii); a ring whose turns cannot
+//! close is refused by name (`pedit.fit_closure`), never emitted as a broken
+//! loop.
+//!
+//! In both cases a vertex that would need `|δ| ≥ π/2` (a corner at or beyond a
+//! half-turn arc) is refused by name (`pedit.fit_tangent`) rather than emitted
+//! as a wrapped bulge. No fit vertices are inserted: the original vertices are
+//! exactly the arc endpoints, so `DECURVE` restores the frame by clearing the
+//! bulges (and keeps a closed ring closed).
 //!
 //! ## `SPLINE`
 //!
@@ -36,11 +49,21 @@
 //! B-spline of degree `min(3, n − 1)` with unit weights. The curve passes
 //! through the first and last vertex and is pulled toward, but not necessarily
 //! through, the interior ones (an approximating, not interpolating, spline).
+//!
+//! **Closed**: the control frame repeats the first vertex at the end
+//! (`P₀ … Pₙ₋₁ P₀`, degree `min(3, n − 1)` for `n` ring vertices) so the curve
+//! starts and ends at `P₀` with a closed control polygon. The SPLINE model has
+//! no closed flag, so exactly this repeated control point is the marker: `DECURVE`
+//! reads a unit-weight, clamped-uniform frame whose ends coincide as the closed
+//! form and restores the closed ring (`n` bulges). An open frame that happens to
+//! end where it starts is therefore read as the closed form — a declared
+//! ambiguity of a model without a periodic flag.
+//!
 //! The stored entity is an exact `AcDbSpline` (the LWPOLYLINE model has no
 //! spline-fit flag); the id, layer, space and draw order are kept and the type
 //! key becomes `AcDbSpline`. `DECURVE` on such a spline restores its control
-//! frame as an open polyline with no bulges. Original bulges are not
-//! recoverable (there is no fit-data storage), which is a declared divergence.
+//! frame as a polyline with no bulges. Original bulges are not recoverable
+//! (there is no fit-data storage), which is a declared divergence.
 //!
 //! `SPLINE <precision>` accepts AutoCAD's 0–99 prompt. The value is validated
 //! and echoed in the diagnostic but is geometrically inert: the result is an
@@ -70,8 +93,9 @@
 //!
 //! `pedit.needs_option`, `pedit.payload`, `pedit.selection`,
 //! `pedit.join.selection`, `pedit.not_addressable`, `pedit.not_polyline`,
-//! `pedit.too_few_vertices`, `pedit.fit_closed`, `pedit.fit_tangent`,
-//! `pedit.spline_closed`, `pedit.spline_precision`, `pedit.decurve_spline`,
+//! `pedit.too_few_vertices`, `pedit.fit_plane`, `pedit.fit_degenerate`,
+//! `pedit.fit_tangent`, `pedit.fit_closure`, `pedit.spline_precision`,
+//! `pedit.decurve_spline`,
 //! `pedit.width_invalid`, `pedit.width_unsupported`,
 //! `pedit.ltype_gen_unsupported`, `pedit.edit_vertex_unsupported`,
 //! `pedit.undo_empty`, plus the `pedit.join.*` chain refusals. `WIDTH` and
@@ -86,9 +110,15 @@ use super::join::PolylinePiece;
 use super::*;
 use crate::command_payload::{PeditEditCommand, PeditEditOption};
 use crate::PeditOption;
-use cad_geometry::{
-    add, arbitrary_axis, arc_sweep_to_bulge, clamped_uniform_knots, is_xy_parallel, length, scale,
-    sub, tessellate_spline, TessellationParams,
+use cad_geometry::clamped_uniform_knots;
+
+// The pure curve planners (conversion, fit, spline-form recognition) live in
+// their own file so this one stays inside the code-size limit; they are a
+// private helper of THIS module, not a second option surface.
+#[path = "pedit_curves.rs"]
+mod curves;
+use curves::{
+    convert_to_polyline, fit_bulges, fit_bulges_closed, pedit_spline_restore, reverse_spline,
 };
 
 /// A `pedit.<code>: <detail>` refusal string (ASCII only).
@@ -139,245 +169,6 @@ fn v1_option(option: PeditOption) -> PeditEditOption {
         PeditOption::Close => PeditEditOption::Close,
         PeditOption::Open => PeditEditOption::Open,
         PeditOption::Reverse => PeditEditOption::Reverse,
-    }
-}
-
-/// The point at `angle` on a circle/arc in its own plane.
-fn arc_point(center: Point3, normal: Point3, radius: f64, angle: f64) -> Point3 {
-    let (ax, ay, _) = arbitrary_axis(normal);
-    add(
-        center,
-        add(
-            scale(ax, radius * angle.cos()),
-            scale(ay, radius * angle.sin()),
-        ),
-    )
-}
-
-/// Convert one LINE/ARC/SPLINE to a polyline (the `PEDITACCEPT` answer `true`).
-fn convert_to_polyline(geometry: &SemanticGeometry) -> CadResult<SemanticGeometry> {
-    let tol = super::join::join_tolerance();
-    match geometry {
-        SemanticGeometry::Line { start, end } => {
-            if distance(*start, *end) <= tol {
-                return Err(invalid("convert_degenerate", "the LINE has no length"));
-            }
-            Ok(SemanticGeometry::Polyline {
-                points: vec![*start, *end],
-                bulges: vec![0.0],
-                closed: false,
-            })
-        }
-        SemanticGeometry::Arc {
-            center,
-            normal,
-            radius,
-            start,
-            sweep,
-        } => {
-            let radius = radius.abs();
-            if !is_finite_point(*center) || !is_finite_point(*normal) {
-                return Err(invalid("convert_degenerate", "the ARC is not finite"));
-            }
-            if radius <= tol || !sweep.is_finite() || sweep.abs() <= 1e-12 {
-                return Err(invalid(
-                    "convert_degenerate",
-                    "the ARC has no radius or sweep",
-                ));
-            }
-            let Some(bulge) = arc_sweep_to_bulge(*sweep) else {
-                return Err(unsupported(
-                    "convert_sweep",
-                    "an ARC of one full turn or more cannot be one polyline bulge segment",
-                ));
-            };
-            if geometry_normal(*normal).z < 1.0 - 1e-9 {
-                return Err(unsupported(
-                    "convert_plane",
-                    "an ARC outside the +Z plane cannot become a bulged polyline",
-                ));
-            }
-            Ok(SemanticGeometry::Polyline {
-                points: vec![
-                    arc_point(*center, *normal, radius, *start),
-                    arc_point(*center, *normal, radius, start + sweep),
-                ],
-                bulges: vec![bulge],
-                closed: false,
-            })
-        }
-        SemanticGeometry::Spline {
-            degree,
-            knots,
-            control_points,
-            weights,
-        } => {
-            if control_points.len() < 2 {
-                return Err(invalid(
-                    "convert_degenerate",
-                    "the SPLINE has fewer than two control points",
-                ));
-            }
-            let extent = control_extent(control_points).max(1e-9);
-            let samples = tessellate_spline(
-                control_points,
-                knots,
-                weights,
-                *degree,
-                TessellationParams {
-                    tolerance: (extent * 1e-4).max(1e-9),
-                    max_segments: 4096,
-                    min_segments: 8,
-                },
-            );
-            if samples.len() < 2 {
-                return Err(invalid(
-                    "convert_degenerate",
-                    "the SPLINE produced fewer than two polyline vertices",
-                ));
-            }
-            let segments = samples.len() - 1;
-            Ok(SemanticGeometry::Polyline {
-                points: samples,
-                bulges: vec![0.0; segments],
-                closed: false,
-            })
-        }
-        other => Err(unsupported(
-            "not_polyline",
-            format!(
-                "PEDIT needs a POLYLINE selection; {} cannot be converted",
-                class_name(other)
-            ),
-        )),
-    }
-}
-
-/// `normal` normalised, with a documented +Z fallback for a zero vector.
-fn geometry_normal(normal: Point3) -> Point3 {
-    let length = length(normal);
-    if length <= 1e-12 {
-        Point3 {
-            x: 0.0,
-            y: 0.0,
-            z: 1.0,
-        }
-    } else {
-        scale(normal, 1.0 / length)
-    }
-}
-
-/// The largest coordinate extent of a control polygon.
-fn control_extent(points: &[Point3]) -> f64 {
-    let mut min = points[0];
-    let mut max = points[0];
-    for point in points {
-        min.x = min.x.min(point.x);
-        min.y = min.y.min(point.y);
-        min.z = min.z.min(point.z);
-        max.x = max.x.max(point.x);
-        max.y = max.y.max(point.y);
-        max.z = max.z.max(point.z);
-    }
-    (max.x - min.x).max(max.y - min.y).max(max.z - min.z)
-}
-
-/// Build the tangent-continuous fit bulges (one arc per original segment).
-fn fit_bulges(points: &[Point3]) -> CadResult<Vec<f64>> {
-    let n = points.len();
-    if n < 2 {
-        return Err(invalid(
-            "too_few_vertices",
-            "FIT needs at least two vertices",
-        ));
-    }
-    if !is_xy_parallel(points) {
-        return Err(unsupported(
-            "fit_plane",
-            "FIT needs a polyline in the +Z plane to resolve its arc segments",
-        ));
-    }
-    let tol = super::join::join_tolerance();
-    let mut bulges = Vec::with_capacity(n - 1);
-    let mut delta = 0.0_f64;
-    let mut previous: Option<f64> = None;
-    for index in 0..n - 1 {
-        let chord = sub(points[index + 1], points[index]);
-        if length(chord) <= tol {
-            return Err(invalid(
-                "fit_degenerate",
-                format!("segment {index} has no length to fit an arc through"),
-            ));
-        }
-        let alpha = chord.y.atan2(chord.x);
-        if let Some(previous) = previous {
-            // end tangent (previous) = start tangent (this segment)
-            delta = super::helpers::normalize_signed(alpha - previous - delta);
-        }
-        if delta.abs() >= std::f64::consts::FRAC_PI_2 - 1e-9 {
-            return Err(unsupported(
-                "fit_tangent",
-                format!(
-                    "segment {index} needs a half-turn-or-more arc to stay tangent-continuous; \
-                     one bulge segment cannot represent it"
-                ),
-            ));
-        }
-        bulges.push((delta * 0.5).tan());
-        previous = Some(alpha);
-    }
-    Ok(bulges)
-}
-
-/// Whether `geometry` is exactly the SPLINE this module's `SPLINE` writes.
-fn is_pedit_spline(
-    degree: &u32,
-    knots: &[f64],
-    control_points: &[Point3],
-    weights: &[f64],
-) -> bool {
-    let n = control_points.len();
-    if n < 2 {
-        return false;
-    }
-    let expected_degree = 3.min(n - 1) as u32;
-    if *degree != expected_degree {
-        return false;
-    }
-    if weights.len() != n || weights.iter().any(|weight| (*weight - 1.0).abs() > 1e-12) {
-        return false;
-    }
-    let expected = clamped_uniform_knots(n, expected_degree as usize);
-    knots.len() == expected.len()
-        && knots
-            .iter()
-            .zip(&expected)
-            .all(|(actual, expected)| (actual - expected).abs() <= 1e-12)
-}
-
-/// Reverse a spline: reversed control frame and mirrored knot vector.
-fn reverse_spline(
-    degree: u32,
-    knots: &[f64],
-    control_points: &[Point3],
-    weights: &[f64],
-) -> SemanticGeometry {
-    let n = control_points.len();
-    let mut points = control_points.to_vec();
-    points.reverse();
-    let mut weights = weights.to_vec();
-    weights.reverse();
-    let knots = if knots.is_empty() {
-        clamped_uniform_knots(n, degree as usize)
-    } else {
-        let sum = knots[0] + knots[knots.len() - 1];
-        knots.iter().rev().map(|knot| sum - knot).collect()
-    };
-    SemanticGeometry::Spline {
-        degree,
-        knots,
-        control_points: points,
-        weights,
     }
 }
 
@@ -842,19 +633,15 @@ fn plan_fit(geometry: SemanticGeometry) -> CadResult<Plan> {
         points,
         closed,
         bulges,
-        ..
     } = geometry
     else {
         return Err(unsupported("not_polyline", "FIT needs a POLYLINE"));
     };
-    if closed {
-        return Err(unsupported(
-            "fit_closed",
-            "PEDIT FIT on a closed polyline is not implemented (the cyclic tangent system has \
-             no declared end condition)",
-        ));
-    }
-    let fitted = fit_bulges(&points)?;
+    let fitted = if closed {
+        fit_bulges_closed(&points)?
+    } else {
+        fit_bulges(&points)?
+    };
     // A fit whose bulges are all zero is the already-straight frame.
     if fitted.iter().all(|bulge| bulge.abs() <= 1e-12)
         && bulges.iter().all(|bulge| bulge.abs() <= 1e-12)
@@ -869,9 +656,13 @@ fn plan_fit(geometry: SemanticGeometry) -> CadResult<Plan> {
         geometry: SemanticGeometry::Polyline {
             points,
             bulges: fitted,
-            closed: false,
+            closed,
         },
-        label: "FIT (tangent-continuous arc chain)".into(),
+        label: if closed {
+            "FIT (closed tangent-continuous arc ring)".into()
+        } else {
+            "FIT (tangent-continuous arc chain)".into()
+        },
         deleted: Vec::new(),
     })
 }
@@ -883,32 +674,46 @@ fn plan_spline(geometry: SemanticGeometry, precision: u8) -> CadResult<Plan> {
             format!("PEDIT SPLINE precision must be 0..=99, got {precision}"),
         ));
     }
-    let SemanticGeometry::Polyline { points, closed, .. } = geometry else {
+    let SemanticGeometry::Polyline {
+        points,
+        closed,
+        bulges: _,
+    } = geometry
+    else {
         return Err(unsupported("not_polyline", "SPLINE needs a POLYLINE"));
     };
-    if closed {
-        return Err(unsupported(
-            "spline_closed",
-            "PEDIT SPLINE on a closed polyline is not implemented (the SPLINE model has no \
-             closed flag)",
-        ));
-    }
-    if points.len() < 2 {
+    let minimum = if closed { 3 } else { 2 };
+    if points.len() < minimum {
         return Err(invalid(
             "too_few_vertices",
-            "PEDIT SPLINE needs at least two vertices",
+            format!(
+                "PEDIT SPLINE needs at least {minimum} vertices on a{} polyline, got {}",
+                if closed { " closed" } else { "n open" },
+                points.len()
+            ),
         ));
     }
-    let n = points.len();
-    let degree = 3.min(n - 1) as u32;
+    // The degree is fixed by the ring's own vertex count; the closed frame then
+    // repeats the first vertex so the control polygon closes on itself.
+    let degree = 3.min(points.len() - 1) as u32;
+    let mut control_points = points;
+    if closed {
+        let first = control_points[0];
+        control_points.push(first);
+    }
+    let n = control_points.len();
     Ok(Plan::Write {
         geometry: SemanticGeometry::Spline {
             degree,
             knots: clamped_uniform_knots(n, degree as usize),
-            control_points: points,
+            control_points,
             weights: vec![1.0; n],
         },
-        label: format!("SPLINE (control frame, precision {precision})"),
+        label: if closed {
+            format!("SPLINE (closed control frame, precision {precision})")
+        } else {
+            format!("SPLINE (control frame, precision {precision})")
+        },
         deleted: Vec::new(),
     })
 }
@@ -945,19 +750,21 @@ fn plan_decurve(geometry: SemanticGeometry) -> CadResult<Plan> {
             control_points,
             weights,
         } => {
-            if !is_pedit_spline(&degree, &knots, &control_points, &weights) {
+            let Some((points, bulges, closed)) =
+                pedit_spline_restore(&degree, &knots, &control_points, &weights)
+            else {
                 return Err(unsupported(
                     "decurve_spline",
                     "PEDIT DECURVE only restores a SPLINE written by `PEDIT SPLINE` (clamped \
-                     uniform degree min(3, n-1), unit weights); this spline is not that form",
+                     uniform degree min(3, n-1), unit weights, closed frames repeated at the \
+                     start vertex); this spline is not that form",
                 ));
-            }
-            let n = control_points.len();
+            };
             Ok(Plan::Write {
                 geometry: SemanticGeometry::Polyline {
-                    points: control_points,
-                    bulges: vec![0.0; n.saturating_sub(1)],
-                    closed: false,
+                    points,
+                    bulges,
+                    closed,
                 },
                 label: "DECURVE (SPLINE control frame restored)".into(),
                 deleted: Vec::new(),

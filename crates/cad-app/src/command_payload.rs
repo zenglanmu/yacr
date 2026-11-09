@@ -512,6 +512,10 @@ pub enum CommandPayload {
         base: Point3,
         delta: Point3,
     },
+    /// STRETCH inside a **crossing polygon** (or a free-form lasso, which is the
+    /// same containment rule over the same vertex list); see
+    /// [`StretchPolygonCommand`].
+    StretchPolygon(Box<StretchPolygonCommand>),
     /// Set the session's active layer for new entities. Session state only.
     ActiveLayer(LayerId),
     /// `CREATELAYER`: the new layer's name.

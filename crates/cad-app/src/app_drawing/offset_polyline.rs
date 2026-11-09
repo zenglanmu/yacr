@@ -14,6 +14,15 @@
 //! distance to the picked (nearest) segment, and every segment is moved that far to
 //! the pick's side. Straight vertices are joined with **miter** joins.
 //!
+//! ## `OFFSETGAPTYPE`
+//!
+//! [`OffsetGapType::Sharp`] (0) is this module's analytic miter. `Fillet` (1) and
+//! `Chamfer` (2) fill each real gap at a joint through [`super::offset_gap`]: the
+//! tangent arc of radius equal to the offset distance (centred on the source
+//! vertex) or the straight segment between the two offset segment ends. Where the
+//! offset segments cross (a concave corner) the miter trims and no gap is filled;
+//! the sharp path is byte-identical to the pre-gap-type implementation.
+//!
 //! ## Declared construction (straight segments)
 //!
 //! With `n` the polyline's plane unit normal, `u_i` the unit direction of segment
@@ -65,6 +74,7 @@
 
 use super::helpers::offset_tolerance;
 use super::*;
+use crate::command_payload::OffsetGapType;
 use cad_geometry::{
     add, arbitrary_axis, clamped_uniform_knots, cross, dot, length, normalize, scale, sub,
     tessellate_geometry, NurbsCurve, TessellationParams,
@@ -101,14 +111,16 @@ fn miter_reversal_tolerance() -> f64 {
 /// distance to the picked segment), so the command can report the exact value
 /// instead of a re-derivation. A polyline with at least one real bulge is handed
 /// to the arc arm ([`super::offset_polyline_bulge`]); everything here is then the
-/// straight-only path and is byte-for-byte what it always was.
+/// straight-only path and is byte-for-byte what it always was under
+/// [`OffsetGapType::Sharp`].
 pub(super) fn offset_polyline(
     points: &[Point3],
     bulges: &[f64],
     closed: bool,
     side_point: Point3,
+    gap: OffsetGapType,
 ) -> CadResult<(SemanticGeometry, f64)> {
-    offset_polyline_with_distance(points, bulges, closed, side_point, None)
+    offset_polyline_with_distance(points, bulges, closed, side_point, None, gap)
 }
 
 /// The same arm with an optional fixed distance.
@@ -117,12 +129,19 @@ pub(super) fn offset_polyline(
 /// point only selects the side, every segment still moves by exactly `d`.
 /// `None` is the bare-command `Through` behaviour (the pick's distance to the
 /// nearest segment is used).
+///
+/// `gap` is `OFFSETGAPTYPE`: [`OffsetGapType::Sharp`] keeps the analytic miter
+/// (byte-identical to the pre-gap-type path), while [`OffsetGapType::Fillet`]
+/// and [`OffsetGapType::Chamfer`] fill every real gap between two offset
+/// segments at a joint and keep the miter where the offset segments already
+/// cross (a trim, not a gap).
 pub(super) fn offset_polyline_with_distance(
     points: &[Point3],
     bulges: &[f64],
     closed: bool,
     side_point: Point3,
     distance: Option<f64>,
+    gap: OffsetGapType,
 ) -> CadResult<(SemanticGeometry, f64)> {
     let tol = offset_tolerance();
     // An arc segment is the sibling arm's job; a bulge that is not even a finite
@@ -133,7 +152,7 @@ pub(super) fn offset_polyline_with_distance(
         .any(|bulge| bulge.is_finite() && bulge.abs() > STRAIGHT_BULGE)
     {
         return super::offset_polyline_bulge::offset_polyline_with_arcs(
-            points, bulges, closed, side_point, distance,
+            points, bulges, closed, side_point, distance, gap,
         );
     }
     for (index, bulge) in bulges.iter().enumerate() {
@@ -186,6 +205,11 @@ pub(super) fn offset_polyline_with_distance(
 
     let count = points.len();
     let segments = dirs.len();
+    if gap != OffsetGapType::Sharp {
+        return super::offset_gap::offset_straight_with_gap(
+            points, bulges, closed, gap, &dirs, &offsets, normal, signed, distance, tol,
+        );
+    }
     let mut out: Vec<Point3> = Vec::with_capacity(count);
     if closed {
         for index in 0..count {
@@ -224,10 +248,6 @@ pub(super) fn offset_polyline_with_distance(
     Ok((geometry, distance))
 }
 
-/// The unit direction of every segment, in ring order.
-///
-/// A zero-length segment is an explicit refusal: it has no direction, so there is
-/// no offset side and no way to keep the vertex count meaningful.
 pub(super) fn unit_segment_directions(
     points: &[Point3],
     closed: bool,

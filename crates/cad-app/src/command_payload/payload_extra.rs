@@ -56,11 +56,12 @@ pub enum OffsetLayer {
 
 /// The OFFSET `OFFSETGAPTYPE` option for polyline joins.
 ///
-/// Only [`OffsetGapType::Sharp`] (AutoCAD `OFFSETGAPTYPE` 0, the analytic miter
-/// join) is implemented; the fillet/chamfer gap types are carried so an
-/// explicit request is refused by name instead of being silently treated as a
-/// sharp corner.
-#[allow(dead_code)]
+/// All three documented values are implemented: [`OffsetGapType::Sharp`]
+/// (AutoCAD `OFFSETGAPTYPE` 0, the analytic miter join), [`OffsetGapType::Fillet`]
+/// (1, a tangent arc of radius equal to the offset distance filling each real
+/// gap) and [`OffsetGapType::Chamfer`] (2, a straight segment across each real
+/// gap). Where two offset segments already cross (a concave corner) every value
+/// keeps the miter, because there is no gap to fill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OffsetGapType {
     Sharp,
@@ -879,4 +880,25 @@ pub fn validate_expression(prefix: &str, expression: &FilterExpression) -> CadRe
             Ok(())
         }
     }
+}
+
+/// The input of a STRETCH inside a **crossing polygon** (or a crossing lasso).
+///
+/// `polygon_logical` is the free-form boundary in **canvas logical pixels**, the
+/// same convention as `CommandPayload::Stretch`'s `rect_logical`; a lasso is the
+/// same polygon (the capture records its free-form path as this vertex list), so
+/// there is exactly one containment rule. The command maps every vertex through
+/// the active viewport's orthographic plan view and tests containment with an
+/// even-odd **point-in-polygon** predicate on the XY plane (winding-independent).
+/// `base`/`delta` are world points; the effective translation is `delta − base`.
+///
+/// Capture wiring: this build's `draw_tool` capture state machine only has
+/// fixed-arity point runs (`PointArity::Exact`) and no Enter-terminated vertex
+/// list, so no draw intent produces this payload yet. Hosts/IPC supply it; the
+/// exact capture wiring need is reported with the change rather than half-wired.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StretchPolygonCommand {
+    pub polygon_logical: Vec<[f64; 2]>,
+    pub base: Point3,
+    pub delta: Point3,
 }

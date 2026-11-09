@@ -86,6 +86,9 @@ mod mstretch;
 mod mtext_create;
 mod offset_polyline;
 mod offset_polyline_bulge;
+// The `OFFSETGAPTYPE` fillet/chamfer fill geometry, split out so both offset
+// arms stay inside the code-size limit.
+mod offset_gap;
 mod paste_block;
 mod pedit;
 mod point_style;
@@ -95,6 +98,10 @@ mod properties;
 mod revision_cloud;
 mod scale_text;
 mod stretch;
+// The STRETCH containment (rectangle + crossing polygon/lasso) and per-vertex
+// planner, split out so `stretch.rs` stays inside the code-size limit.
+mod stretch_vertices;
+mod stretch_window;
 // The 2026-11-07 2D text batch (JUSTIFYTEXT/TJUST/TSCALE/TEXTALIGN/TCOUNT/
 // TCIRCLE/TEXTMASK/TEXTUNMASK); one estimate and one write discipline.
 pub(crate) mod text_batch;

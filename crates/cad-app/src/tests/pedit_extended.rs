@@ -1,4 +1,5 @@
-//! Extended `PEDIT` options: FIT, SPLINE, DECURVE, JOIN, conversion and UNDO.
+//! Extended `PEDIT` options: FIT (open and closed), SPLINE (open and closed),
+//! DECURVE, JOIN, conversion and UNDO.
 
 use super::*;
 
@@ -68,14 +69,142 @@ fn fit_writes_tangent_continuous_arcs_through_every_vertex() {
 }
 
 #[test]
-fn fit_refuses_a_closed_polyline_and_a_half_turn_corner() {
-    let (mut app, mut session) = build(vec![ent(1, closed_bulged(), 0)], AppMode::Work);
+fn fit_writes_a_closed_tangent_continuous_ring() {
+    // A square: every turn is +π/2, so the closed fit is four +90° arcs (the
+    // circle through the corners), i.e. δ = π/4 and bulge = tan(π/8).
+    let points = vec![
+        p3(0.0, 0.0, 0.0),
+        p3(4.0, 0.0, 0.0),
+        p3(4.0, 4.0, 0.0),
+        p3(0.0, 4.0, 0.0),
+    ];
+    let fixture = SemanticGeometry::Polyline {
+        points: points.clone(),
+        bulges: vec![0.0; 4],
+        closed: true,
+    };
+    let (mut app, mut session) = build(vec![ent(1, fixture, 3)], AppMode::Work);
+    select(&mut session, &[1]);
+    let rev = revision(&app);
+
+    pedit_edit(&mut app, &mut session, PeditEditOption::Fit).expect("closed FIT succeeds");
+    let SemanticGeometry::Polyline {
+        points: fitted_points,
+        bulges,
+        closed,
+    } = geometry(&app, 1)
+    else {
+        panic!("FIT keeps the entity a POLYLINE");
+    };
+    assert_eq!(fitted_points, points, "FIT keeps every ring vertex");
+    assert!(closed, "FIT keeps the ring closed");
+    assert_eq!(bulges.len(), 4, "one arc per ring segment");
+    let expected = (std::f64::consts::FRAC_PI_8).tan();
+    for (index, bulge) in bulges.iter().enumerate() {
+        assert!(
+            (bulge - expected).abs() <= 1e-9,
+            "segment {index} bulge {bulge} != {expected}"
+        );
+    }
+    // Tangent continuity around the loop, including the closing vertex.
+    for vertex in 0..4 {
+        let incoming = (vertex + 3) % 4;
+        let delta_in = 2.0 * bulges[incoming].atan();
+        let delta_out = 2.0 * bulges[vertex].atan();
+        let end_tangent = rotate(
+            chord_direction(fitted_points[incoming], fitted_points[vertex]),
+            delta_in,
+        );
+        let start_tangent = rotate(
+            chord_direction(fitted_points[vertex], fitted_points[(vertex + 1) % 4]),
+            -delta_out,
+        );
+        let dot = end_tangent.0 * start_tangent.0 + end_tangent.1 * start_tangent.1;
+        assert!(
+            (dot - 1.0).abs() <= 1e-9,
+            "vertex {vertex} is not tangent-continuous: {dot}"
+        );
+    }
+    assert_ne!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 1);
+
+    // DECURVE restores the closed frame (bulges cleared, ring still closed).
+    pedit_edit(&mut app, &mut session, PeditEditOption::Decurve).expect("DECURVE succeeds");
+    assert_eq!(
+        geometry(&app, 1),
+        SemanticGeometry::Polyline {
+            points,
+            bulges: vec![0.0; 4],
+            closed: true,
+        },
+        "the closed fit round-trips through DECURVE"
+    );
+    assert_eq!(undo_depth(&app), 2);
+}
+
+#[test]
+fn fit_writes_a_closed_ring_for_an_odd_vertex_count() {
+    // An equilateral triangle: the cyclic system is uniquely solvable and each
+    // segment becomes a +120° arc, i.e. δ = π/3 and bulge = tan(π/6).
+    let points = vec![
+        p3(0.0, 0.0, 0.0),
+        p3(4.0, 0.0, 0.0),
+        p3(2.0, 3.4641016151377544, 0.0),
+    ];
+    let (mut app, mut session) = build(
+        vec![ent(
+            1,
+            SemanticGeometry::Polyline {
+                points,
+                bulges: vec![0.0; 3],
+                closed: true,
+            },
+            0,
+        )],
+        AppMode::Work,
+    );
+    select(&mut session, &[1]);
+    pedit_edit(&mut app, &mut session, PeditEditOption::Fit).expect("closed FIT succeeds");
+    let SemanticGeometry::Polyline { bulges, closed, .. } = geometry(&app, 1) else {
+        panic!("FIT keeps the entity a POLYLINE");
+    };
+    assert!(closed);
+    let expected = (std::f64::consts::FRAC_PI_6).tan();
+    assert_eq!(bulges.len(), 3);
+    assert!(
+        bulges.iter().all(|bulge| (bulge - expected).abs() <= 1e-9),
+        "every segment is a 120° arc: {bulges:?}"
+    );
+}
+
+#[test]
+fn fit_refuses_a_closed_ring_whose_turns_cannot_close_and_a_half_turn_corner() {
+    // A generic quadrilateral: an even ring whose alternating turn residual does
+    // not vanish has no single-arc-per-segment tangent-continuous fit.
+    let (mut app, mut session) = build(
+        vec![ent(
+            1,
+            SemanticGeometry::Polyline {
+                points: vec![
+                    p3(0.0, 0.0, 0.0),
+                    p3(4.0, 0.0, 0.0),
+                    p3(4.0, 3.0, 0.0),
+                    p3(1.0, 2.0, 0.0),
+                ],
+                bulges: vec![0.0; 4],
+                closed: true,
+            },
+            0,
+        )],
+        AppMode::Work,
+    );
     select(&mut session, &[1]);
     let rev = revision(&app);
     let error = pedit_edit(&mut app, &mut session, PeditEditOption::Fit).unwrap_err();
-    assert_unsupported(error, "pedit.fit_closed");
+    assert_unsupported(error, "pedit.fit_closure");
     assert_wrote_nothing(&app, rev);
 
+    // An open right-angle corner still needs a half-turn arc: refused by name.
     let (mut app, mut session) = build(
         vec![ent(
             1,
@@ -169,19 +298,79 @@ fn spline_stores_the_vertices_as_a_clamped_control_frame() {
 }
 
 #[test]
-fn spline_refuses_closed_polylines_and_out_of_range_precision() {
-    let (mut app, mut session) = build(vec![ent(1, closed_bulged(), 0)], AppMode::Work);
+fn spline_stores_a_closed_polyline_as_a_repeated_closed_control_frame() {
+    let points = vec![
+        p3(0.0, 0.0, 0.0),
+        p3(4.0, 0.0, 0.0),
+        p3(4.0, 4.0, 0.0),
+        p3(0.0, 4.0, 0.0),
+    ];
+    let (mut app, mut session) = build(
+        vec![ent(
+            1,
+            SemanticGeometry::Polyline {
+                points: points.clone(),
+                bulges: vec![0.0; 4],
+                closed: true,
+            },
+            0,
+        )],
+        AppMode::Work,
+    );
     select(&mut session, &[1]);
     let rev = revision(&app);
-    let error = pedit_edit(
+
+    pedit_edit(
         &mut app,
         &mut session,
         PeditEditOption::Spline { precision: 8 },
     )
-    .unwrap_err();
-    assert_unsupported(error, "pedit.spline_closed");
-    assert_wrote_nothing(&app, rev);
+    .expect("closed SPLINE succeeds");
+    let after = entity(&app, 1);
+    assert_eq!(after.object.type_key, "AcDbSpline");
+    let SemanticGeometry::Spline {
+        degree,
+        knots,
+        control_points,
+        weights,
+    } = after.geometry.clone()
+    else {
+        panic!("SPLINE stores a B-spline");
+    };
+    assert_eq!(degree, 3, "degree is min(3, n-1) over the ring vertices");
+    let mut expected_points = points.clone();
+    expected_points.push(points[0]);
+    assert_eq!(
+        control_points, expected_points,
+        "the closed frame repeats the first vertex at the end"
+    );
+    assert_eq!(knots, clamped_uniform_knots(5, 3));
+    assert_eq!(weights, vec![1.0; 5]);
+    // The clamped spline starts and ends on the repeated first control point.
+    let curve = NurbsCurve::new(3, control_points.clone(), knots.clone(), weights.clone()).unwrap();
+    assert_point_close(curve.evaluate(0.0), points[0], "closed spline start");
+    assert_point_close(curve.evaluate(1.0), points[0], "closed spline end");
+    assert_ne!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 1);
 
+    // DECURVE reads the repeated control point as the closed form.
+    pedit_edit(&mut app, &mut session, PeditEditOption::Decurve).expect("DECURVE succeeds");
+    let restored = entity(&app, 1);
+    assert_eq!(restored.object.type_key, "AcDbPolyline");
+    assert_eq!(
+        restored.geometry,
+        SemanticGeometry::Polyline {
+            points,
+            bulges: vec![0.0; 4],
+            closed: true,
+        },
+        "DECURVE restores the closed frame"
+    );
+    assert_eq!(undo_depth(&app), 2);
+}
+
+#[test]
+fn spline_refuses_out_of_range_precision() {
     let (mut app, mut session) = build(vec![ent(1, open_bulged(), 0)], AppMode::Work);
     select(&mut session, &[1]);
     let rev = revision(&app);

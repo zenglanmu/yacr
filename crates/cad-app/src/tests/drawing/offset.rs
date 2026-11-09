@@ -817,34 +817,6 @@ fn offset_options_payload_reaches_the_option_entry_point_through_dispatch() {
 }
 
 #[test]
-fn offset_fillet_and_chamfer_gap_types_are_named_refusals() {
-    for gap in [OffsetGapType::Fillet, OffsetGapType::Chamfer] {
-        let mut app = two_layer_line_app();
-        let rev = revision(&app);
-        let options = OffsetOptions {
-            refs: vec![ref_of(1)],
-            side_points: vec![point(5.0, 3.0)],
-            mode: OffsetMode::Through,
-            erase_source: false,
-            layer: OffsetLayer::Source,
-            gap,
-        };
-        let error = app
-            .offset_entities_with_options(&offset_command(point(5.0, 3.0)), &options)
-            .unwrap_err();
-        match error {
-            CadError::Unsupported(reason) => {
-                assert!(reason.contains("offset.gap_type"), "{reason}");
-                assert!(reason.contains("sharp"), "{reason}");
-            }
-            other => panic!("expected Unsupported, got {other:?}"),
-        }
-        assert_eq!(revision(&app), rev);
-        assert!(!app.can_undo(&DocumentId(1)));
-    }
-}
-
-#[test]
 fn offset_ellipse_and_elliptical_arc_produce_a_spline_not_an_ellipse() {
     for sweep in [std::f64::consts::TAU, 1.5] {
         let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));

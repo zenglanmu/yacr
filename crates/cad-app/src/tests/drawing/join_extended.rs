@@ -1,6 +1,8 @@
-//! Extended `JOIN` modes: gaps, `Close`, ELLIPSE/POLYLINE/SPLINE sources and MULTIPLE.
+//! Extended `JOIN` modes: gaps, `Close`, ELLIPSE/POLYLINE/SPLINE sources and
+//! MULTIPLE (including the mixed-type exact NURBS weld).
 
 use super::*;
+use cad_geometry::NurbsCurve;
 
 // --- source-object modes: GAPS, Close, ELLIPSE, POLYLINE, SPLINE -------------
 
@@ -383,6 +385,355 @@ fn multiple_mode_collinear_lines_make_one_line_across_the_gap() {
         }
         other => panic!("expected one LINE, got {other:?}"),
     }
+}
+
+// --- MULTIPLE mode: mixed-type NURBS weld ------------------------------------
+
+/// Evaluate the welded spline of the drawing at `t` (its own knot domain).
+fn evaluate_weld(app: &Application, t: f64) -> Point3 {
+    match one_geometry(app) {
+        SemanticGeometry::Spline {
+            degree,
+            knots,
+            control_points,
+            weights,
+        } => NurbsCurve::new(degree as usize, control_points, knots, weights)
+            .expect("valid weld")
+            .evaluate(t),
+        other => panic!("expected one SPLINE, got {other:?}"),
+    }
+}
+
+fn spline_cps(app: &Application) -> (u32, Vec<f64>, Vec<Point3>, Vec<f64>) {
+    match one_geometry(app) {
+        SemanticGeometry::Spline {
+            degree,
+            knots,
+            control_points,
+            weights,
+        } => (degree, knots, control_points, weights),
+        other => panic!("expected one SPLINE, got {other:?}"),
+    }
+}
+
+#[test]
+fn multiple_mode_welds_a_line_and_a_spline_exactly() {
+    // LINE (0,0)→(4,0) touches a cubic single-span spline starting at (4,0).
+    let source = spline_geometry(
+        vec![
+            point(4.0, 0.0),
+            point(5.0, 2.0),
+            point(7.0, 2.0),
+            point(9.0, 0.0),
+        ],
+        3,
+    );
+    let SemanticGeometry::Spline {
+        degree,
+        knots,
+        control_points,
+        weights,
+    } = source
+    else {
+        unreachable!()
+    };
+    let original = NurbsCurve::new(degree as usize, control_points, knots, weights).unwrap();
+    let (mut app, mut session) = app_with(vec![
+        line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 4.0, 0.0), 0),
+        part(
+            2,
+            spline_geometry(
+                vec![
+                    point(4.0, 0.0),
+                    point(5.0, 2.0),
+                    point(7.0, 2.0),
+                    point(9.0, 0.0),
+                ],
+                3,
+            ),
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbSpline",
+            1,
+        ),
+    ]);
+    let before_revision = revision(&app);
+    select(&mut app, &mut session, &[1, 2]);
+    join_with(&mut app, &mut session, false, JoinMode::Multiple)
+        .expect("LINE + SPLINE welds into one exact SPLINE");
+    let (degree_out, knots_out, control_points, weights) = spline_cps(&app);
+    assert_eq!(degree_out, 3);
+    assert_eq!(
+        control_points.len(),
+        8,
+        "the elevated LINE span plus the spline span"
+    );
+    assert_eq!(knots_out.len(), 8 + 3 + 1);
+    assert_eq!(weights, vec![1.0; 8], "the LINE elevation is polynomial");
+    assert!(near(control_points[0], point(0.0, 0.0)));
+    assert!(near(
+        *control_points.last().expect("eight points"),
+        point(9.0, 0.0)
+    ));
+    // First span = the straight LINE, exact: t = 0.5 is its midpoint.
+    assert!(near(evaluate_weld(&app, 0.5), point(2.0, 0.0)));
+    assert!(near(evaluate_weld(&app, 1.0), point(4.0, 0.0)));
+    // Second span = the source spline, unchanged: t = 1 + u.
+    for step in 0..=10 {
+        let u = step as f64 / 10.0;
+        let welded = evaluate_weld(&app, 1.0 + u);
+        let expected = original.evaluate(u);
+        assert!(
+            near(welded, expected),
+            "spline span at u={u}: {welded:?} vs {expected:?}"
+        );
+    }
+    assert_eq!(entity_count(&app), 1);
+    assert_eq!(revision(&app).0, before_revision.0 + 1, "one transaction");
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+}
+
+#[test]
+fn multiple_mode_welds_a_polyline_and_a_reversed_spline_exactly() {
+    // POLYLINE (0,0)→(4,0)→(8,0), then a spline GIVEN right-to-left: its tail
+    // touches the polyline, so the weld must reverse it.
+    let reversed_source = vec![
+        point(10.0, 0.0),
+        point(9.0, 1.5),
+        point(8.5, 1.5),
+        point(8.0, 0.0),
+    ];
+    let original = NurbsCurve::new(
+        3,
+        reversed_source.clone(),
+        clamped_uniform_knots(4, 3),
+        vec![1.0; 4],
+    )
+    .unwrap();
+    let (mut app, mut session) = app_with(vec![
+        part(
+            1,
+            polyline_geometry(
+                vec![point(0.0, 0.0), point(4.0, 0.0), point(8.0, 0.0)],
+                vec![0.0, 0.0],
+                false,
+            ),
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbPolyline",
+            0,
+        ),
+        part(
+            2,
+            spline_geometry(reversed_source, 3),
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbSpline",
+            1,
+        ),
+    ]);
+    select(&mut app, &mut session, &[1, 2]);
+    join_with(&mut app, &mut session, false, JoinMode::Multiple)
+        .expect("POLYLINE + SPLINE welds into one exact SPLINE");
+    let (degree, knots, control_points, weights) = spline_cps(&app);
+    assert_eq!(degree, 3);
+    assert_eq!(
+        control_points.len(),
+        12,
+        "two polyline spans + one spline span"
+    );
+    assert_eq!(knots.len(), 16);
+    assert_eq!(weights, vec![1.0; 12]);
+    assert!(near(control_points[0], point(0.0, 0.0)));
+    assert!(near(
+        *control_points.last().expect("twelve"),
+        point(10.0, 0.0)
+    ));
+    assert!(near(evaluate_weld(&app, 1.0), point(4.0, 0.0)));
+    assert!(near(evaluate_weld(&app, 2.0), point(8.0, 0.0)));
+    // The reversed span is the source curve traversed backwards.
+    for step in 0..=10 {
+        let u = step as f64 / 10.0;
+        let welded = evaluate_weld(&app, 2.0 + u);
+        let expected = original.evaluate(1.0 - u);
+        assert!(
+            near(welded, expected),
+            "reversed spline span at u={u}: {welded:?} vs {expected:?}"
+        );
+    }
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn multiple_mode_welds_an_arc_and_a_spline_into_a_rational_spline() {
+    // LINE (0,0)→(4,0), the 90° ARC (4,0)→(8,4), then a cubic spline from (8,4).
+    let (mut app, mut session) = app_with(vec![
+        line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 4.0, 0.0), 0),
+        arc_entity(
+            2,
+            LayerId(0),
+            arc_geometry(
+                point(4.0, 4.0),
+                4.0,
+                -std::f64::consts::FRAC_PI_2,
+                std::f64::consts::FRAC_PI_2,
+            ),
+            1,
+        ),
+        part(
+            3,
+            spline_geometry(
+                vec![
+                    point(8.0, 4.0),
+                    point(9.0, 6.0),
+                    point(11.0, 6.0),
+                    point(12.0, 4.0),
+                ],
+                3,
+            ),
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbSpline",
+            2,
+        ),
+    ]);
+    select(&mut app, &mut session, &[1, 2, 3]);
+    join_with(&mut app, &mut session, false, JoinMode::Multiple)
+        .expect("LINE + ARC + SPLINE welds into one rational SPLINE");
+    let (degree, _, _, weights) = spline_cps(&app);
+    assert_eq!(degree, 3, "the common degree is the spline's");
+    assert!(
+        weights.iter().any(|weight| (weight - 1.0).abs() > 1e-6),
+        "the arc keeps its rational weights through the elevation: {weights:?}"
+    );
+    // Span 0 is the line, span 1 the arc (t ∈ [1, 2]), span 2 the spline.
+    assert!(near(evaluate_weld(&app, 1.0), point(4.0, 0.0)));
+    assert!(near(evaluate_weld(&app, 2.0), point(8.0, 4.0)));
+    let center = point(4.0, 4.0);
+    for step in 1..=9 {
+        let u = step as f64 / 10.0;
+        let point_on_arc = evaluate_weld(&app, 1.0 + u);
+        let radius =
+            ((point_on_arc.x - center.x).powi(2) + (point_on_arc.y - center.y).powi(2)).sqrt();
+        assert!(
+            (radius - 4.0).abs() <= 1e-9,
+            "the welded arc stays on the circle at u={u}: radius {radius}"
+        );
+    }
+    // The exact mid-arc point is at -45°.
+    let mid = evaluate_weld(&app, 1.5);
+    let expected_mid = point(
+        4.0 + 4.0 * (std::f64::consts::FRAC_PI_4).cos(),
+        4.0 - 4.0 * (std::f64::consts::FRAC_PI_4).cos(),
+    );
+    assert!(near(mid, expected_mid), "{mid:?} vs {expected_mid:?}");
+    assert_eq!(entity_count(&app), 1);
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn multiple_mode_refuses_an_ellipse_mix_and_a_closed_mixed_weld() {
+    let (mut app, mut session) = app_with(vec![
+        part(
+            1,
+            ellipse_geometry(point(0.0, 0.0), 0.0, 1.0),
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbEllipse",
+            0,
+        ),
+        part(
+            2,
+            spline_geometry(
+                vec![
+                    point(0.0, 5.0),
+                    point(1.0, 6.0),
+                    point(2.0, 6.0),
+                    point(3.0, 5.0),
+                ],
+                3,
+            ),
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbSpline",
+            1,
+        ),
+    ]);
+    let before_revision = revision(&app);
+    select(&mut app, &mut session, &[1, 2]);
+    let error = join_with(&mut app, &mut session, false, JoinMode::Multiple).unwrap_err();
+    assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
+    assert!(
+        format!("{error:?}").contains("join.multiple_spline_mix"),
+        "{error:?}"
+    );
+    assert_eq!(revision(&app), before_revision);
+    assert_eq!(entity_count(&app), 2);
+    assert_eq!(undo_depth(&app), 0);
+
+    // JOIN CLOSE on a mixed weld is refused by name (no closed spline flag).
+    let (mut app, mut session) = app_with(vec![
+        line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 4.0, 0.0), 0),
+        part(
+            2,
+            spline_geometry(
+                vec![
+                    point(4.0, 0.0),
+                    point(5.0, 2.0),
+                    point(7.0, 2.0),
+                    point(0.0, 0.0),
+                ],
+                3,
+            ),
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbSpline",
+            1,
+        ),
+    ]);
+    let before_revision = revision(&app);
+    select(&mut app, &mut session, &[1, 2]);
+    let error = join_with(&mut app, &mut session, true, JoinMode::Multiple).unwrap_err();
+    assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
+    assert!(
+        format!("{error:?}").contains("join.close_spline"),
+        "{error:?}"
+    );
+    assert_eq!(revision(&app), before_revision);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn multiple_mode_refuses_a_gap_in_a_mixed_weld() {
+    let (mut app, mut session) = app_with(vec![
+        line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 4.0, 0.0), 0),
+        part(
+            2,
+            spline_geometry(
+                vec![
+                    point(5.0, 0.0),
+                    point(6.0, 2.0),
+                    point(8.0, 2.0),
+                    point(9.0, 0.0),
+                ],
+                3,
+            ),
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbSpline",
+            1,
+        ),
+    ]);
+    let before_revision = revision(&app);
+    select(&mut app, &mut session, &[1, 2]);
+    let error = join_with(&mut app, &mut session, false, JoinMode::Multiple).unwrap_err();
+    assert!(
+        format!("{error:?}").contains("join.not_contiguous"),
+        "{error:?}"
+    );
+    assert_eq!(revision(&app), before_revision);
+    assert_eq!(entity_count(&app), 2);
+    assert_eq!(undo_depth(&app), 0);
 }
 
 // --- closed / construction / non-coplanar refusals ---------------------------

@@ -628,13 +628,15 @@ impl Application {
     /// is likewise offset through samples; a non-planar spline is refused
     /// (`offset.non_planar`).
     ///
-    /// A polyline is offset segment by segment with the sharp-corner join
-    /// (`OFFSETGAPTYPE` 0): straight vertices use the analytic miter, bulge
-    /// vertices the exact line/circle and circle/circle intersections of the
-    /// arc arm. `OffsetGapType::Fillet`/`Chamfer` are named refusals
-    /// (`offset.gap_type`) rather than being treated as sharp. A **closed**
-    /// offset ring that crosses itself is refused by name
-    /// (`offset.self_intersection`): Autodesk does not document that case, so
+    /// A polyline is offset segment by segment with the configured
+    /// `OFFSETGAPTYPE` join: `Sharp` (0) uses the analytic miter for straight
+    /// vertices and the exact line/circle and circle/circle intersections of the
+    /// arc arm; `Fillet` (1) fills a real gap with the tangent arc of radius equal
+    /// to the offset distance centred on the source vertex; `Chamfer` (2) joins
+    /// the two offset segment ends with a straight segment. Where the offset
+    /// segments already cross (a concave corner, a trim not a gap) every gap type
+    /// keeps the miter. A **closed** offset ring that crosses itself is refused by
+    /// name (`offset.self_intersection`): Autodesk does not document that case, so
     /// this build neither trims nor fills it.
     ///
     /// `Erase` deletes the source in the **same** transaction as the insert(s)
@@ -677,14 +679,6 @@ impl Application {
             }
             OffsetMode::Through => None,
         };
-        if matches!(options.gap, OffsetGapType::Fillet | OffsetGapType::Chamfer) {
-            return Err(CadError::Unsupported(
-                "OFFSET offset.gap_type: only OFFSETGAPTYPE 0 (sharp miter/analytic joins) is \
-                 implemented; the fillet and chamfer gap types are not modelled"
-                    .into(),
-            ));
-        }
-
         let document_id = command.document;
         let (source, layer, display, planned, diagnostics) = {
             let document = self
@@ -722,7 +716,12 @@ impl Application {
             let display = drawing.entity_display_state(source.id);
             let mut planned = Vec::with_capacity(options.side_points.len());
             for side_point in &options.side_points {
-                planned.push(plan_offset(&source.geometry, *side_point, fixed_distance)?);
+                planned.push(plan_offset(
+                    &source.geometry,
+                    *side_point,
+                    fixed_distance,
+                    options.gap,
+                )?);
             }
             (source, layer, display, planned, diagnostics)
         };
@@ -875,6 +874,7 @@ fn plan_offset(
     geometry: &SemanticGeometry,
     side_point: Point3,
     distance: Option<f64>,
+    gap: OffsetGapType,
 ) -> CadResult<(SemanticGeometry, f64, String)> {
     match geometry {
         SemanticGeometry::Line { start, end } => {
@@ -922,17 +922,22 @@ fn plan_offset(
             closed,
         } => {
             let (geometry, applied) = match distance {
-                Some(_) => {
-                    offset_polyline_with_distance(points, bulges, *closed, side_point, distance)?
-                }
-                None => {
-                    super::offset_polyline::offset_polyline(points, bulges, *closed, side_point)?
-                }
+                Some(_) => offset_polyline_with_distance(
+                    points, bulges, *closed, side_point, distance, gap,
+                )?,
+                None => super::offset_polyline::offset_polyline(
+                    points, bulges, *closed, side_point, gap,
+                )?,
+            };
+            let join = match gap {
+                OffsetGapType::Sharp => "sharp",
+                OffsetGapType::Fillet => "fillet",
+                OffsetGapType::Chamfer => "chamfer",
             };
             Ok((
                 geometry,
                 applied,
-                "OFFSET: polyline offset by {distance} (sharp joins)".into(),
+                format!("OFFSET: polyline offset by {{distance}} ({join} joins)"),
             ))
         }
         SemanticGeometry::Ellipse {

@@ -50,6 +50,8 @@ pub(super) enum Joined {
         closed: bool,
     },
     Spline(SplineCurve),
+    /// A geometry a planner already assembled (the mixed NURBS weld).
+    Raw(SemanticGeometry),
 }
 
 impl Joined {
@@ -103,6 +105,7 @@ impl Joined {
                 closed,
             },
             Joined::Spline(curve) => curve.geometry(),
+            Joined::Raw(geometry) => geometry,
         }
     }
 }
@@ -457,11 +460,7 @@ fn plan_multiple(sources: &[DbEntity], close: bool) -> CadResult<Joined> {
         return plan_splines(sources, close);
     }
     if has_spline || has_ellipse {
-        return Err(unsupported(
-            "join.multiple_spline_mix",
-            "a SPLINE/ELLIPSE mixed with other kinds needs the exact NURBS conversion that \
-             this build does not implement",
-        ));
+        return super::nurbs::plan_mixed_weld(sources, close);
     }
     if all_polyline_family {
         return plan_polyline_sources(sources, close);

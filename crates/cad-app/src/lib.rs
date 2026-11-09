@@ -402,9 +402,9 @@ pub use command_payload::{
     PeditEditCommand, PeditEditOption, PeditOption, PurgeTarget, QSelectRequest,
     RadialDimensionCommand, RenameCommand, RotatedLinearDimensionCommand, SelectSimilarSettings,
     SelectionApply, SelectionOperator, SelectionPredicate, SelectionProperty, SelectionScope,
-    SelectionToolPayload, SetByLayerSettings, TCircleCommand, TCountCommand, TextAlignCommand,
-    TextAlignEdge, TextBoundaryShape, TextCaseMode, TextFitCommand, TextScaleCommand,
-    TwoLineCommand, VPointInput, ViewCommand,
+    SelectionToolPayload, SetByLayerSettings, StretchPolygonCommand, TCircleCommand, TCountCommand,
+    TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode, TextFitCommand,
+    TextScaleCommand, TwoLineCommand, VPointInput, ViewCommand,
 };
 
 pub struct Command {

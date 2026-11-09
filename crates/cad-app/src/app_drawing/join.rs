@@ -19,16 +19,24 @@
 //! * LINEs/ARCs/POLYLINEs (including the otherwise-invalid **LINE + ARC** mix)
 //!   that are contiguous and coplanar → POLYLINE;
 //! * pure SPLINE or pure ELLIPSE selections use the source rules;
-//! * a spline/elliptical arc mixed with other kinds is
-//!   `Unsupported` (`join.multiple_spline_mix`): the exact NURBS conversion of
-//!   the mixed curves is not implemented.
+//! * a SPLINE mixed with LINEs/ARCs/POLYLINEs (and with other SPLINEs) →
+//!   **SPLINE**: every participant is converted to an exact rational NURBS piece
+//!   (LINE → degree-1 span, ARC → rational quadratic spans with
+//!   `w = cos(Δ/2)`, bulged POLYLINE segments → the same rational quadratic,
+//!   SPLINE → its own Bezier decomposition by exact knot insertion), elevated to
+//!   the common degree and welded C0 into one clamped spline. See
+//!   `join_nurbs` for the exact construction;
+//! * an ELLIPSE mixed with other kinds is still `Unsupported`
+//!   (`join.multiple_spline_mix`): the elliptical NURBS conversion is not
+//!   implemented.
 //!
 //! Named refusals write nothing (the whole plan is resolved before the first
 //! write): `join.needs_two`, `join.mixed_kinds`, `join.not_collinear`,
 //! `join.not_contiguous`, `join.layer_mismatch`, `join.space_mismatch`,
 //! `join.sweep_overflow`, `join.degenerate`, `join.not_closed`,
 //! `join.closed_object`, `join.construction_line`, `join.spline_degree`,
-//! `join.spline_clamped`, `join.multiple_spline_mix`, `join.noncoplanar`.
+//! `join.spline_clamped`, `join.close_spline`, `join.multiple_spline_mix`,
+//! `join.noncoplanar`.
 //! A CIRCLE, a closed polyline/spline/ellipse and an XLINE/RAY can never be
 //! joined. Non-coplanar POLYLINE results are refused (`join.noncoplanar`, a 3D
 //! scope boundary); SPLINE joins keep their 3D coordinates.
@@ -42,6 +50,8 @@
 use super::*;
 use crate::command_payload::JoinOptions;
 
+#[path = "join_nurbs.rs"]
+mod nurbs;
 #[path = "join_pieces.rs"]
 mod pieces;
 #[path = "join_plan.rs"]
