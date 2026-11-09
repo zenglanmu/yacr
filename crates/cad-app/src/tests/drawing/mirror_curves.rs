@@ -434,20 +434,17 @@ fn mirror_still_refuses_kinds_it_cannot_reflect_honestly() {
         },
     )
     .expect("a LINE + ARC selection is supported now");
-    // A kind the flat-text domain cannot reflect still refuses the whole command;
-    // `Text` is the case the generic transform surface still rejects.
-    let text = SemanticGeometry::Text {
-        text: "A".into(),
+    // A kind this build cannot reflect still refuses the whole command (Text is
+    // now mirrored readably; `Shape` keeps the generic transform refusal).
+    let shape = SemanticGeometry::Shape {
+        shape_name: "BOX".into(),
+        code: 1,
         position: point(1.0, 1.0),
-        style: cad_domain::StyleId(0),
-        height: 1.0,
+        size: 1.0,
         rotation: 0.0,
         font: None,
-        h_align: cad_domain::TextAlignH::Left,
-        v_align: cad_domain::TextAlignV::Baseline,
-        wrap_width: None,
     };
-    let mut app = line_and_boundary_app(ent(2, text, 1), None);
+    let mut app = line_and_boundary_app(ent(2, shape, 1), None);
     let count = app.workspace.documents[&DocumentId(1)]
         .drawing
         .entity_count();
@@ -462,11 +459,11 @@ fn mirror_still_refuses_kinds_it_cannot_reflect_honestly() {
             axis_end: point(1.0, 1.0),
         },
     )
-    .expect_err("TEXT cannot be mirrored");
+    .expect_err("SHAPE cannot be mirrored");
     assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
     assert!(
-        error.to_string().contains("would mirror it"),
-        "the generic refusal is kept, and it no longer names Arc/Ellipse: {error}"
+        error.to_string().contains("Shape"),
+        "the refusal names the kind: {error}"
     );
     assert_eq!(revision(&app), rev);
     assert_eq!(
@@ -476,4 +473,273 @@ fn mirror_still_refuses_kinds_it_cannot_reflect_honestly() {
         count,
         "nothing may be added when one kind is refused"
     );
+}
+
+// ---------------------------------------------------------------------------
+// MIRRTEXT, Erase-source, and the dimension arm. These exercise the option
+// entry point (`CommandPayload` has no variant for the options while it sits at
+// its 1000-line ceiling).
+// ---------------------------------------------------------------------------
+
+use crate::command_payload::MirrorOptions;
+
+fn mirror_with_options(
+    app: &mut Application,
+    options: &MirrorOptions,
+) -> CadResult<CommandOutcome> {
+    let command = command(
+        CommandId::MirrorEntities,
+        CommandPayload::Mirror {
+            refs: options.refs.clone(),
+            axis_start: options.axis_start,
+            axis_end: options.axis_end,
+        },
+    );
+    app.mirror_entities_with_options(&command, options)
+}
+
+fn text_geometry(position: Point3, rotation: f64) -> SemanticGeometry {
+    SemanticGeometry::Text {
+        text: "ABC".into(),
+        position,
+        style: cad_domain::StyleId(0),
+        height: 1.0,
+        rotation,
+        font: None,
+        h_align: cad_domain::TextAlignH::Left,
+        v_align: cad_domain::TextAlignV::Baseline,
+        wrap_width: None,
+    }
+}
+
+#[test]
+fn mirror_options_payload_reaches_the_option_entry_point_through_dispatch() {
+    // `Erase source objects? Yes` through the **command dispatch** (the variant,
+    // not the crate entry point) deletes the source in one undo step.
+    let mut app = line_and_boundary_app(ent(2, text_geometry(point(2.0, 0.0), 0.3), 1), None);
+    let options = MirrorOptions {
+        refs: vec![ref_of(2)],
+        axis_start: point(0.0, 0.0),
+        axis_end: point(0.0, 1.0),
+        mirrortext: false,
+        erase_source: true,
+    };
+    let outcome = execute(
+        &mut app,
+        &mut SessionState::new(DocumentId(1), AppMode::Work),
+        CommandId::MirrorEntities,
+        CommandPayload::MirrorOptions(Box::new(options)),
+    )
+    .expect("MirrorOptions routes");
+    assert_eq!(outcome.objects.len(), 1);
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(2))
+            .is_none(),
+        "erase_source reached the entry point"
+    );
+    assert_eq!(
+        app.history
+            .get(&DocumentId(1))
+            .map(|history| history.undo_depth())
+            .unwrap_or(0),
+        1
+    );
+
+    // `MIRRTEXT = 1` is a named refusal through the same routed variant.
+    let mut app = line_and_boundary_app(ent(2, text_geometry(point(2.0, 0.0), 0.3), 1), None);
+    let options = MirrorOptions {
+        refs: vec![ref_of(2)],
+        axis_start: point(0.0, 0.0),
+        axis_end: point(0.0, 1.0),
+        mirrortext: true,
+        erase_source: false,
+    };
+    let error = execute(
+        &mut app,
+        &mut SessionState::new(DocumentId(1), AppMode::Work),
+        CommandId::MirrorEntities,
+        CommandPayload::MirrorOptions(Box::new(options)),
+    )
+    .unwrap_err();
+    assert!(
+        format!("{error:?}").contains("mirror.mirrortext_glyphs"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn mirror_text_position_mirrors_and_the_run_stays_readable_by_default() {
+    let mut app = line_and_boundary_app(ent(2, text_geometry(point(2.0, 0.0), 0.3), 1), None);
+    let options = MirrorOptions {
+        refs: vec![ref_of(2)],
+        axis_start: point(0.0, 0.0),
+        axis_end: point(0.0, 1.0),
+        mirrortext: false,
+        erase_source: false,
+    };
+    let outcome = mirror_with_options(&mut app, &options).unwrap();
+    let copy = EntityId(outcome.objects[0].0);
+    let SemanticGeometry::Text {
+        text,
+        position,
+        rotation,
+        ..
+    } = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(copy)
+        .unwrap()
+        .geometry
+        .clone()
+    else {
+        panic!("expected a mirrored TEXT");
+    };
+    assert_eq!(text, "ABC", "the string is never reversed at MIRRTEXT=0");
+    assert_point_eq(position, point(-2.0, 0.0), "mirrored insertion point");
+    // Readable: the reflected baseline (π − 0.3) is turned back by π, so the run
+    // still faces the same way as the source.
+    assert!(rotation.cos() * 0.3_f64.cos() > 0.0, "rotation {rotation}");
+    assert!((rotation + 0.3).abs() < 1e-9, "rotation {rotation}");
+}
+
+#[test]
+fn mirror_mirrortext_glyphs_is_a_named_refusal() {
+    let mut app = line_and_boundary_app(ent(2, text_geometry(point(2.0, 0.0), 0.0), 1), None);
+    let count = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity_count();
+    let rev = revision(&app);
+    let options = MirrorOptions {
+        refs: vec![ref_of(2)],
+        axis_start: point(0.0, 0.0),
+        axis_end: point(0.0, 1.0),
+        mirrortext: true,
+        erase_source: false,
+    };
+    let error = mirror_with_options(&mut app, &options).unwrap_err();
+    match error {
+        CadError::Unsupported(reason) => {
+            assert!(reason.contains("mirror.mirrortext_glyphs"), "{reason}");
+        }
+        other => panic!("expected Unsupported, got {other:?}"),
+    }
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity_count(),
+        count
+    );
+    assert_eq!(revision(&app), rev);
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn mirror_erase_source_deletes_the_original_in_the_same_undo_step() {
+    let mut app = line_and_boundary_app(ent(2, text_geometry(point(2.0, 0.0), 0.0), 1), None);
+    let count = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity_count();
+    let options = MirrorOptions {
+        refs: vec![ref_of(1), ref_of(2)],
+        axis_start: point(0.0, 0.0),
+        axis_end: point(0.0, 1.0),
+        mirrortext: false,
+        erase_source: true,
+    };
+    let outcome = mirror_with_options(&mut app, &options).unwrap();
+    assert_eq!(outcome.objects.len(), 2, "two mirrored copies");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(
+        drawing.entity_count(),
+        count,
+        "erase source keeps the count"
+    );
+    assert!(drawing.entity(EntityId(1)).is_none());
+    assert!(drawing.entity(EntityId(2)).is_none());
+    assert_eq!(
+        app.history
+            .get(&DocumentId(1))
+            .map(|history| history.undo_depth())
+            .unwrap_or(0),
+        1
+    );
+    execute(
+        &mut app,
+        &mut SessionState::new(DocumentId(1), AppMode::Work),
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(drawing.entity_count(), count);
+    assert!(drawing.entity(EntityId(1)).is_some());
+    assert!(drawing.entity(EntityId(2)).is_some());
+}
+
+fn linear_dimension_geometry() -> SemanticGeometry {
+    let style = DimensionStyleValues {
+        arrow_size: 2.5,
+        ext_offset: 0.625,
+        ext_beyond: 1.25,
+        text_height: 2.5,
+        text_gap: 0.625,
+        center_mark: 0.0,
+        dim_line_increment: 3.75,
+        text_vertical: 1,
+        text_vertical_position: 0.0,
+        suppress_ext1: false,
+        suppress_ext2: false,
+        suppress_dim1: false,
+        suppress_dim2: false,
+        linear_factor: 1.0,
+        decimals: 4,
+        rounding: 0.0,
+        postfix: String::new(),
+        zero_suppression: 0,
+        linear_unit_format: 2,
+        decimal_separator: 46,
+        text_style_name: "Standard".into(),
+        text_style: cad_domain::StyleId(0),
+        text_font: None,
+    };
+    let definition = DimensionDefinition {
+        kind: DimensionKind::Aligned,
+        points: DimensionPoints::Linear {
+            first: point(1.0, 0.0),
+            second: point(3.0, 0.0),
+            dimension_line: point(2.0, -4.0),
+        },
+        text_middle: point(2.0, -4.0),
+        text_rotation: 0.0,
+        normal: p3(0.0, 0.0, 1.0),
+    };
+    let dimension =
+        DimensionGeometry::synthesized(definition, "Standard".into(), style, None).unwrap();
+    SemanticGeometry::Dimension(Box::new(dimension))
+}
+
+#[test]
+fn mirror_reflects_a_dimension_definition_and_rebuilds_its_display() {
+    let mut app = line_and_boundary_app(ent(2, linear_dimension_geometry(), 1), None);
+    let mirrored = mirror_one(
+        &mut app,
+        &mut SessionState::new(DocumentId(1), AppMode::Work),
+        MirrorAxis::Y,
+    );
+    let SemanticGeometry::Dimension(dimension) = mirrored else {
+        panic!("expected a mirrored DIMENSION");
+    };
+    let DimensionPoints::Linear {
+        first,
+        second,
+        dimension_line,
+    } = &dimension.definition().points
+    else {
+        panic!("expected a linear definition");
+    };
+    assert_point_eq(*first, point(-1.0, 0.0), "first");
+    assert_point_eq(*second, point(-3.0, 0.0), "second");
+    assert_point_eq(*dimension_line, point(-2.0, -4.0), "dimension_line");
+    assert!(!dimension.display().is_empty(), "display rebuilt");
 }

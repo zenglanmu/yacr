@@ -153,5 +153,5 @@ use helpers::{
     distance, geometry_kind, is_finite_point, is_multiline_text_source, offset_arc, offset_circle,
     offset_line, resolve_created_text_style,
 };
-use mirror_curves::mirror_geometry;
-use offset_polyline::offset_polyline;
+use mirror_curves::mirror_geometry_with_options;
+use offset_polyline::offset_polyline_with_distance;

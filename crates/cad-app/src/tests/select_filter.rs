@@ -8,7 +8,8 @@
 
 use super::*;
 use cad_db::{
-    DbEntity, DbObject, DrawingDatabaseBuilder, EntityColor, EntityRenderAttributes, Layer,
+    DbEntity, DbObject, DrawingDatabaseBuilder, EntityColor, EntityLineWeight,
+    EntityRenderAttributes, EntityTransparency, Layer,
 };
 use cad_domain::{MLeaderPathType, MLeaderStyleValues, MultiLeaderGeometry, StyleId};
 
@@ -98,6 +99,9 @@ fn filter_app() -> (Application, SessionState) {
         LINE_RED,
         EntityRenderAttributes {
             color: EntityColor::Explicit([255, 0, 0]),
+            lineweight: EntityLineWeight::Explicit(0.50),
+            transparency: EntityTransparency::Explicit(0.75),
+            linetype_scale: 2.0,
             ..EntityRenderAttributes::default()
         },
     )
@@ -108,6 +112,15 @@ fn filter_app() -> (Application, SessionState) {
         LayerId(0),
         line((0.0, 1.0), (1.0, 1.0)),
     ))
+    .unwrap();
+    b.set_entity_render_attributes(
+        LINE_PLAIN,
+        EntityRenderAttributes {
+            lineweight: EntityLineWeight::Explicit(0.25),
+            transparency: EntityTransparency::Explicit(1.0),
+            ..EntityRenderAttributes::default()
+        },
+    )
     .unwrap();
     b.insert_entity(entity(
         CIRCLE,
@@ -123,6 +136,15 @@ fn filter_app() -> (Application, SessionState) {
             },
         },
     ))
+    .unwrap();
+    b.set_entity_render_attributes(
+        CIRCLE,
+        EntityRenderAttributes {
+            lineweight: EntityLineWeight::Explicit(0.50),
+            transparency: EntityTransparency::Explicit(0.5),
+            ..EntityRenderAttributes::default()
+        },
+    )
     .unwrap();
     b.insert_entity(entity(
         TEXT,
@@ -799,3 +821,5 @@ fn find_replacement_rebuilds_the_multileader_display() {
         panic!("expected a multileader");
     }
 }
+
+mod select_filter_query;

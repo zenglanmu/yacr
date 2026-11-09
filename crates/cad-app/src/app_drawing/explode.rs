@@ -17,54 +17,60 @@
 //!   here (it was already lost at import).
 //! * **`Insert` → its direct block members (exactly one level)**, with the
 //!   placement transform **baked in** through the existing [`transform_geometry`]
-//!   surface. A member that is itself a block reference (a nested INSERT or a
-//!   MINSERT instance) **stays a block reference**: only the placement is
-//!   composed into its transform, and its contents are produced only by
-//!   exploding that reference again — AutoCAD's "remove one grouping level at a
-//!   time". Because the walk never descends into a member's block definition, the
-//!   export layer's block-reference **cycle stack** and **depth cap** are **not
-//!   needed here** (a self-referential block exploded once simply yields the
-//!   self-reference again, so no infinite loop exists); this deliberately differs
-//!   from the export layer, which flattens a block reference to leaf geometry.
-//!   Members keep their **own block-definition layers** (AutoCAD consistent).
-//!   Dynamic-block member visibility follows the export layer's active-state rule
-//!   ([`DrawingDatabase::block_visible_entities`]); AutoCAD's own dynamic-block
-//!   EXPLODE behaviour is **unverified**, so this is our declared choice.
+//!   surface. A member that is itself a block reference (a nested INSERT) **stays
+//!   a block reference**: only the placement is composed into its transform, and
+//!   its contents are produced only by exploding that reference again —
+//!   AutoCAD's "remove one grouping level at a time". Because the walk never
+//!   descends into a member's block definition, no cycle stack or depth cap is
+//!   needed: a self-referential block exploded once simply yields the
+//!   self-reference again. Members keep their **own block-definition layers**
+//!   (AutoCAD consistent). Block attribute values are dropped: this project has
+//!   no attribute model, which is the global rule for every INSERT.
+//! * **Non-uniformly scaled INSERT → the deterministic subset.** AutoCAD warns
+//!   that the result may be unexpected; instead of refusing the whole reference,
+//!   every member with an **exact** image under the composed transform is placed.
+//!   A `Circle`/`Arc`/`Ellipse` member whose image is an ellipse/elliptical arc
+//!   is converted to the domain's exact `Ellipse` representation (see
+//!   [`affine_conic_image`]). Any other member (a sheared `Text`, a polyline with
+//!   bulge arcs, a `Shape`/`Opaque`/`Compound`) is a **named refusal that lists
+//!   the member id and kind**, and the whole command writes nothing.
+//! * **`Dimension` → its derived display children.** The dimension loses
+//!   associativity and becomes real entities: extension/dimension lines as
+//!   `LINE`, the angular arc as `ARC`, the arrow triangles as `MESH` (the domain
+//!   has no 2D-solid variant; AutoCAD's exact arrow kind is **NOT modelled**),
+//!   and the measurement text as `TEXT`. Each child keeps the dimension's
+//!   **layer, space and draw order**, then the source is deleted. The text is not
+//!   decomposed further.
+//! * **`MultiLeader` → leader lines + text.** Straight path segments and the
+//!   dogleg become `LINE`, a spline path stays the exact `SPLINE` display child,
+//!   arrowheads stay their triangle `MESH`, and the annotation text becomes
+//!   `MTEXT` (`AcDbMText`). Children keep the source's layer/space/draw order.
 //! * **`Compound` → every child (one level).** A hatch imports as a `Compound`
 //!   whose children are the boundary loops **plus** the fill mesh and pattern
 //!   polylines, so decomposing to loops only would be a **silent loss**; all
 //!   children are produced. This is a deliberate divergence from AutoCAD's hatch
 //!   explosion (whose product is unverified).
-//! * **MINSERT** imports as `Compound(Insert…)`, so the one-level rule handles it
-//!   naturally: the first EXPLODE yields the Insert instances, the next yields
-//!   their members.
 //!
 //! ## Refusals (explicit, nothing written)
 //!
 //! * A selection with nothing decomposable, or any selected entity that is not a
-//!   decomposable kind (only LWPOLYLINE / INSERT / Compound are) — an explicit
-//!   refusal, never a silent success.
-//! * `TEXT` / `SPLINE` / `SHAPE` / `OPAQUE` and mirrored `Arc`/`Ellipse`
-//!   children are refused **explicitly by kind** (`push_produced` /
-//!   `child_refusal`). `Text` used to be refused as a side effect of the
-//!   transform surface; ADR 0019 decision B made text transformable, so the
-//!   refusal is now its own named reason and this command's behaviour is
-//!   unchanged (TEXT still is not exploded). A `Compound` member of an INSERT
-//!   (for example an in-block MINSERT or hatch) is likewise refused explicitly.
-//! * `IMAGE` / `MASK` by **policy**: AutoCAD does not explode raster images (its
-//!   wording is **unverified**). `Image`/`Mask` **are** transformable, so this is
-//!   a policy refusal, **not** the transform layer.
-//! * `Dimension` / `MTable` / `MLeader`-like compounds, refused explicitly by
-//!   `type_key` (they import as `Compound`, so the general rule would otherwise
-//!   decompose them; the project does not model the dimension-explosion
-//!   semantics, and their children usually include `Text`).
-//! * A non-uniformly scaled INSERT.
-//! * An INSERT whose members include an untransformable kind — the whole command
-//!   fails.
+//!   decomposable kind.
+//! * `TEXT` / `SPLINE` / `SHAPE` / `OPAQUE` as **members** of an INSERT or
+//!   compound (they are atomic display pieces, not decomposable further).
+//! * `IMAGE` / `MASK` by **policy**: AutoCAD does not explode raster images
+//!   (wording unverified); both **are** transformable, so this is a policy
+//!   refusal, not the transform layer.
+//! * A `Compound` carrying the legacy `AcDbDimension`/`AcDbTable`/
+//!   `AcDbMultiLeader` type key (a real dimension/multileader uses its own
+//!   semantic variant). `MTable` has no explosion model.
+//! * A **MINSERT** (imports as `Compound(Insert…)`) and an **XREF** block
+//!   reference: AutoCAD cannot explode either.
+//! * A non-uniform INSERT member with no exact representation (named by member
+//!   id and kind).
 //!
 //! NOT IMPLEMENTED: exploding more than one level at once, `EXPLMODE`, colour /
-//! linetype / lineweight changes, Dimension decomposition, associative-array
-//! decomposition, attribute semantics, xref semantics.
+//! linetype / lineweight changes, associative-array decomposition, attribute
+//! semantics, and a 2D-solid arrow representation (arrows stay `MESH`).
 
 use super::*;
 
@@ -81,6 +87,10 @@ struct Produced {
     space: SpaceId,
     type_key: String,
     geometry: SemanticGeometry,
+    /// The draw order the child must inherit, when the source kind prescribes
+    /// one (`DIMENSION`/`MULTILEADER` display children keep their source's
+    /// order); otherwise the command allocates a fresh ascending order.
+    draw_order: Option<i64>,
 }
 
 impl Application {
@@ -165,7 +175,7 @@ impl Application {
                 layer: child.layer,
                 space: child.space,
                 geometry: child.geometry,
-                draw_order: base_order + index as i64,
+                draw_order: child.draw_order.unwrap_or(base_order + index as i64),
             };
             children.push((new_id, entity));
         }
@@ -255,21 +265,13 @@ fn explode_source(
         SemanticGeometry::Insert { block, transform } => {
             explode_insert(drawing, &source.space, *block, transform, out)
         }
-        SemanticGeometry::Compound(children) => {
-            refuse_compound_type_key(source)?;
-            for child in children {
-                push_produced(source.layer, source.space.clone(), child.clone(), out)?;
-            }
-            Ok(())
-        }
+        SemanticGeometry::Compound(children) => explode_compound(source, children, out),
         SemanticGeometry::Image { .. } => Err(policy_refusal("IMAGE")),
         SemanticGeometry::Mask { .. } => Err(policy_refusal("MASK")),
-        // A dimension keeps the ADR-0016 refusal: EXPLODE refuses it by its
-        // stored `AcDbDimension` type key (ADR 0017 A.8).
-        SemanticGeometry::Dimension(_) => {
-            refuse_compound_type_key(source)?;
-            Err(policy_refusal("DIMENSION"))
-        }
+        // A DIMENSION loses its associativity and becomes its derived display
+        // children (lines/arcs, arrow meshes and the measurement text), each a
+        // real entity on the dimension's layer/space/draw order (ADR 0017 A.8).
+        SemanticGeometry::Dimension(dimension) => explode_dimension(source, dimension, out),
         // A HATCH keeps today's decomposition: its derived display is the
         // boundary loops plus the fill mesh and pattern polylines, exactly the
         // children the old `Compound` produced (ADR 0018 E). The `type_key`
@@ -281,13 +283,11 @@ fn explode_source(
             }
             Ok(())
         }
-        // A MULTILEADER keeps the pre-P7b refusal, now explicit by type key: it
-        // is not decomposed (that would be a behaviour change), and its
-        // children include `Text` (ADR 0019 decision G).
-        SemanticGeometry::MultiLeader(_) => {
-            refuse_compound_type_key(source)?;
-            Err(policy_refusal("MULTILEADER"))
-        }
+        // A MULTILEADER becomes its derived display: leader paths (their
+        // straight segments as LINEs, a spline path as the SPLINE it already
+        // is), arrowhead triangle meshes, doglegs and the annotation text as
+        // MTEXT. Parts this build cannot represent are named refusals.
+        SemanticGeometry::MultiLeader(leader) => explode_multileader(source, leader, out),
         other => Err(CadError::Unsupported(format!(
             "EXPLODE cannot explode {}: only LWPOLYLINE, INSERT and Compound are \
              decomposable",
@@ -310,6 +310,23 @@ fn explode_polyline(
     closed: bool,
     out: &mut Vec<Produced>,
 ) -> CadResult<()> {
+    for geometry in polyline_segments(points, bulges, closed)? {
+        push_produced(source.layer, source.space.clone(), geometry, out)?;
+    }
+    Ok(())
+}
+
+/// One LINE per straight segment and one ARC per bulge segment (in segment
+/// order, including the closing segment of a closed polyline).
+///
+/// A bulge segment whose chord or plane is degenerate (so no in-plane arc
+/// exists) is an explicit refusal, never a silently straightened segment. The
+/// polyline **width is not modelled**, so nothing is discarded here.
+fn polyline_segments(
+    points: &[Point3],
+    bulges: &[f64],
+    closed: bool,
+) -> CadResult<Vec<SemanticGeometry>> {
     if points.len() < 2 {
         return Err(CadError::InvalidInput(
             "EXPLODE cannot explode a polyline with fewer than two vertices".into(),
@@ -320,6 +337,7 @@ fn explode_polyline(
     let plane_normal = cad_geometry::polyline_plane_normal(points);
     let count = points.len();
     let segments = if closed { count } else { count - 1 };
+    let mut out = Vec::with_capacity(segments);
     for index in 0..segments {
         let a = points[index];
         let b = points[(index + 1) % count];
@@ -334,19 +352,18 @@ fn explode_polyline(
                 ))
             })?
         };
-        push_produced(source.layer, source.space.clone(), geometry, out)?;
+        out.push(geometry);
     }
-    Ok(())
+    Ok(out)
 }
 
 /// Explode one INSERT into its **direct** block members, baking the placement
 /// transform into each (ADR 0016 decision G).
 ///
 /// The walk is **exactly one level**: a member that is itself a block reference
-/// (a nested INSERT or a MINSERT instance) is emitted **as a block reference**
-/// with its own transform composed with the placement, and its contents are
-/// produced only by exploding that reference again — AutoCAD's "remove one
-/// grouping level at a time".
+/// (a nested INSERT) is emitted **as a block reference** with its own transform
+/// composed with the placement, and its contents are produced only by exploding
+/// that reference again — AutoCAD's "remove one grouping level at a time".
 ///
 /// Because the walk never descends into a member's block definition, the export
 /// layer's block-reference **cycle stack** and **depth cap are not needed here**:
@@ -354,12 +371,29 @@ fn explode_polyline(
 /// so no infinite loop exists. (This deliberately differs from the export layer,
 /// which flattens a block reference to leaf geometry.)
 ///
-/// Members keep their own block-definition layer; the placement is baked through
-/// the existing [`transform_geometry`] surface, which handles a `Spline` exactly
-/// (a NURBS is affinely invariant). A member this build cannot place (a
-/// `Shape`/`Opaque`/`Compound` member, e.g. an in-block MINSERT/hatch) or cannot
-/// decompose (`Text` and `Spline`, refused explicitly by [`push_produced`] /
-/// [`child_refusal`]) fails the whole command.
+/// Members keep their own block-definition layer. The placement is baked through
+/// the existing [`transform_geometry`] surface, which handles `Line`, a
+/// straight-segment `Polyline`, `Point`, `Mesh`, `Spline`, `Image`, `Mask` and
+/// the similarity-only conics exactly.
+///
+/// **Non-uniform scale.** AutoCAD warns that a non-uniformly scaled block's
+/// exploded result may be unexpected; this build implements the deterministic
+/// subset instead of refusing the whole reference:
+///
+/// * every member whose geometry has an exact image under the composed transform
+///   is placed (the `transform_geometry` surface above);
+/// * a `Circle`/`Arc`/`Ellipse` member whose exact image is an **ellipse** (or an
+///   elliptical arc) is converted to one — the domain's `Ellipse { normal,
+///   major_axis, ratio, start, sweep }` represents it exactly, so nothing is
+///   approximated;
+/// * any other member (a `Text` whose glyphs would be sheared, a polyline with
+///   bulge arcs, a `Shape`/`Opaque`/`Compound`) is a **named refusal listing the
+///   member id and kind**, and the whole command writes nothing.
+///
+/// A plain (non-nested) MINSERT never reaches this function: it imports as a
+/// `Compound(Insert…)` and is refused by [`explode_compound`]. An XREF block
+/// reference is refused here by name. Block attribute values are dropped (this
+/// project has no attribute model), which is the global rule for every INSERT.
 fn explode_insert(
     drawing: &DrawingDatabase,
     space: &SpaceId,
@@ -367,12 +401,13 @@ fn explode_insert(
     transform: &Transform3,
     out: &mut Vec<Produced>,
 ) -> CadResult<()> {
-    // A non-uniform scale cannot be baked into the members exactly; refuse rather
-    // than shear them (ADR 0016 decision G).
-    if !transform.is_uniform_scale(INSERT_SIMILARITY_TOLERANCE) {
+    // AutoCAD cannot explode an external reference, and this build has no
+    // meaningful decomposition of one: refuse by name instead of emitting the
+    // xref's cached members as ordinary geometry.
+    if drawing.is_xref_block(block) {
         return Err(CadError::Unsupported(
-            "EXPLODE refuses a non-uniformly scaled INSERT (its members cannot be \
-             represented exactly)"
+            "EXPLODE refuses an XREF block reference: an external reference cannot be \
+             exploded into this drawing's own entities"
                 .into(),
         ));
     }
@@ -385,6 +420,7 @@ fn explode_insert(
         Some(visible) => visible,
         None => definition.entities.clone(),
     };
+    let uniform = transform.is_uniform_scale(INSERT_SIMILARITY_TOLERANCE);
     for member in &members {
         let child = drawing.entity(*member).ok_or_else(|| {
             CadError::Unsupported(format!(
@@ -398,8 +434,8 @@ fn explode_insert(
         // behaviour (ADR 0019 decision G).
         if child.object.type_key == "AcDbMultiLeader" {
             return Err(CadError::Unsupported(format!(
-                "EXPLODE refuses the in-block {} by type_key: this project does not model the \
-                 mleader explosion semantics (and its display contains text)",
+                "EXPLODE refuses the in-block {} by type_key: a block member is not \
+                 decomposed (only a top-level MULTILEADER becomes its display children)",
                 child.object.type_key
             )));
         }
@@ -417,18 +453,338 @@ fn explode_insert(
                 push_produced(child.layer, space.clone(), geometry, out)?;
             }
             other => {
-                let placed = transform_geometry(other, transform).map_err(|error| {
-                    CadError::Unsupported(format!(
-                        "EXPLODE cannot place block member {} ({}): {error}",
-                        member.0,
-                        geometry_kind(other)
-                    ))
-                })?;
+                let placed = match transform_geometry(other, transform) {
+                    Ok(placed) => placed,
+                    // A non-uniform scale has an exact affine image for every
+                    // conic; the shared transform surface refuses it because it
+                    // is a similarity-only API, so the deterministic subset is
+                    // completed here.
+                    Err(CadError::Unsupported(_)) if !uniform => {
+                        affine_conic_image(other, transform).ok_or_else(|| {
+                            CadError::Unsupported(format!(
+                                "EXPLODE cannot place block member {} ({}): its exact image \
+                                 under the non-uniform placement is not representable",
+                                member.0,
+                                geometry_kind(other)
+                            ))
+                        })?
+                    }
+                    Err(error) => {
+                        return Err(CadError::Unsupported(format!(
+                            "EXPLODE cannot place block member {} ({}): {error}",
+                            member.0,
+                            geometry_kind(other)
+                        )))
+                    }
+                };
                 push_produced(child.layer, space.clone(), placed, out)?;
             }
         }
     }
     Ok(())
+}
+
+/// The exact affine image of a `Circle`/`Arc`/`Ellipse` as an `Ellipse`, or
+/// `None` when the image collapses (or the source kind is not a conic).
+///
+/// The source is written as `center + cos θ · p + sin θ · q` (the same
+/// parameterisation the tessellator uses: the AutoCAD arbitrary-axis frame for a
+/// circle/arc, the stored major/minor vectors for an ellipse). An affine map
+/// sends that to `center' + cos θ · p' + sin θ · q'`, which is an ellipse with
+/// conjugate semi-diameters `p'`/`q'`. The principal axes come from the 2×2
+/// eigenproblem of `(p·p, p·q, q·q)`; `normal` is the oriented plane normal
+/// `p' × q'`, so a mirror reverses it exactly like the similarity path does.
+/// The parameter offset between `θ` and the ellipse's own `start` is read from
+/// the transformed start point; the sweep magnitude and sign are preserved
+/// (the parameter map has slope +1 in both directions).
+fn affine_conic_image(
+    geometry: &SemanticGeometry,
+    transform: &Transform3,
+) -> Option<SemanticGeometry> {
+    let (center, _normal, p, q, start, sweep) = match geometry {
+        SemanticGeometry::Circle {
+            center,
+            normal,
+            radius,
+        } => {
+            let (u, v, _) = cad_geometry::arbitrary_axis(*normal);
+            (
+                *center,
+                *normal,
+                cad_geometry::scale(u, radius.abs()),
+                cad_geometry::scale(v, radius.abs()),
+                0.0,
+                std::f64::consts::TAU,
+            )
+        }
+        SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } => {
+            let (u, v, _) = cad_geometry::arbitrary_axis(*normal);
+            (
+                *center,
+                *normal,
+                cad_geometry::scale(u, radius.abs()),
+                cad_geometry::scale(v, radius.abs()),
+                *start,
+                *sweep,
+            )
+        }
+        SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => {
+            let major_len = cad_geometry::length(*major_axis);
+            if major_len < 1e-12 {
+                return None;
+            }
+            let u = cad_geometry::scale(*major_axis, 1.0 / major_len);
+            // `minor = cross(normal, major_unit)`, the domain's own rule.
+            let minor_unit =
+                cad_geometry::normalize(cad_geometry::cross(cad_geometry::normalize(*normal), u));
+            (
+                *center,
+                *normal,
+                *major_axis,
+                cad_geometry::scale(minor_unit, major_len * ratio.abs()),
+                *start,
+                *sweep,
+            )
+        }
+        _ => return None,
+    };
+
+    let p = transform.apply_vector(p);
+    let q = transform.apply_vector(q);
+    let a = cad_geometry::dot(p, p);
+    let b = cad_geometry::dot(p, q);
+    let c = cad_geometry::dot(q, q);
+    let mean = (a + c) * 0.5;
+    let spread = ((a - c) * 0.5).powi(2) + b * b;
+    if !mean.is_finite() || !spread.is_finite() || spread < 0.0 {
+        return None;
+    }
+    let root = spread.sqrt();
+    let major_sq = mean + root;
+    let minor_sq = mean - root;
+    let major_len = major_sq.max(0.0).sqrt();
+    let minor_len = minor_sq.max(0.0).sqrt();
+    if !major_len.is_finite() || !minor_len.is_finite() || minor_len < 1e-12 {
+        return None;
+    }
+    // Eigenvector of the major axis in the (p, q) parameter basis.
+    let (w1, w2) = if b.abs() > 1e-12 {
+        (b, major_sq - a)
+    } else if a >= c {
+        (1.0, 0.0)
+    } else {
+        (0.0, 1.0)
+    };
+    let norm = (w1 * w1 + w2 * w2).sqrt();
+    if !norm.is_finite() || norm < 1e-12 {
+        return None;
+    }
+    let (w1, w2) = (w1 / norm, w2 / norm);
+    let major_dir = cad_geometry::normalize(cad_geometry::add(
+        cad_geometry::scale(p, w1),
+        cad_geometry::scale(q, w2),
+    ));
+    let normal_image = cad_geometry::cross(p, q);
+    if cad_geometry::length(normal_image) < 1e-12 {
+        return None;
+    }
+    let normal_image = cad_geometry::normalize(normal_image);
+    let minor_dir = cad_geometry::normalize(cad_geometry::cross(normal_image, major_dir));
+    if cad_geometry::length(minor_dir) < 1e-12 {
+        return None;
+    }
+    // Read the ellipse parameter at the transformed start point.
+    let start_offset = cad_geometry::add(
+        cad_geometry::scale(p, start.cos()),
+        cad_geometry::scale(q, start.sin()),
+    );
+    let new_start = (cad_geometry::dot(start_offset, minor_dir) / minor_len)
+        .atan2(cad_geometry::dot(start_offset, major_dir) / major_len);
+    let ratio = minor_len / major_len;
+    if !new_start.is_finite() || !ratio.is_finite() || ratio <= 0.0 {
+        return None;
+    }
+    Some(SemanticGeometry::Ellipse {
+        center: transform.apply_point(center),
+        normal: normal_image,
+        major_axis: cad_geometry::scale(major_dir, major_len),
+        ratio,
+        start: new_start,
+        sweep,
+    })
+}
+
+/// `Compound` decomposition (one level).
+///
+/// A compound whose members are all `Insert` instances is the importer's
+/// MINSERT representation (`rows × columns` cells). AutoCAD cannot explode a
+/// MINSERT, so it is a named refusal rather than a silent fan-out into block
+/// references.
+fn explode_compound(
+    source: &DbEntity,
+    children: &[SemanticGeometry],
+    out: &mut Vec<Produced>,
+) -> CadResult<()> {
+    if !children.is_empty()
+        && children
+            .iter()
+            .all(|child| matches!(child, SemanticGeometry::Insert { .. }))
+    {
+        return Err(CadError::Unsupported(
+            "EXPLODE refuses a MINSERT (an insert array imports as a Compound of Insert \
+             instances): AutoCAD cannot explode a MINSERT"
+                .into(),
+        ));
+    }
+    refuse_compound_type_key(source)?;
+    for child in children {
+        push_produced(source.layer, source.space.clone(), child.clone(), out)?;
+    }
+    Ok(())
+}
+
+/// The exact `DIMENSION` decomposition: every derived display child becomes a
+/// real entity on the dimension's layer, space and draw order, then the source
+/// is deleted by the caller.
+///
+/// The display already holds the extension/dimension lines, the angular arc, the
+/// arrowhead triangle meshes (the domain has no 2D-solid variant, so the arrow
+/// stays a `MESH`; AutoCAD's exact output kind is NOT modelled) and the
+/// measurement text. The text is produced as `TEXT`, not decomposed further.
+/// Every child is exact display geometry; a child kind this build cannot stand
+/// alone is a named refusal.
+fn explode_dimension(
+    source: &DbEntity,
+    dimension: &cad_domain::DimensionGeometry,
+    out: &mut Vec<Produced>,
+) -> CadResult<()> {
+    let display = dimension.display();
+    if display.is_empty() {
+        return Err(CadError::Unsupported(
+            "EXPLODE cannot explode a DIMENSION with no derived display geometry".into(),
+        ));
+    }
+    for child in display {
+        push_display_child(
+            source.layer,
+            source.space.clone(),
+            source.draw_order,
+            None,
+            child.clone(),
+            out,
+        )?;
+    }
+    Ok(())
+}
+
+/// The `MULTILEADER` decomposition: leader paths, arrowhead meshes, doglegs and
+/// the annotation text.
+///
+/// A `Polyline` path is exploded into its straight `LINE` segments (the display
+/// only ever builds a straight path as a polyline), a `Spline` path stays the
+/// `SPLINE` it already is, and the annotation text is produced as `MTEXT`
+/// (`AcDbMText`, the source class of a leader's annotation). Arrowheads are the
+/// derived triangle `MESH` (there is no 2D-solid variant). Parts with no
+/// semantic form (`Shape`/`Opaque` and any nested compound) are named refusals.
+fn explode_multileader(
+    source: &DbEntity,
+    leader: &cad_domain::MultiLeaderGeometry,
+    out: &mut Vec<Produced>,
+) -> CadResult<()> {
+    let display = leader.display();
+    if display.is_empty() {
+        return Err(CadError::Unsupported(
+            "EXPLODE cannot explode a MULTILEADER with no derived display geometry".into(),
+        ));
+    }
+    for child in display {
+        match child {
+            SemanticGeometry::Polyline {
+                points,
+                bulges,
+                closed,
+            } => {
+                for geometry in polyline_segments(points, bulges, *closed)? {
+                    push_display_child(
+                        source.layer,
+                        source.space.clone(),
+                        source.draw_order,
+                        None,
+                        geometry,
+                        out,
+                    )?;
+                }
+            }
+            SemanticGeometry::Text { .. } => push_display_child(
+                source.layer,
+                source.space.clone(),
+                source.draw_order,
+                Some(text_policy::MTEXT_TYPE_KEY),
+                child.clone(),
+                out,
+            )?,
+            other => push_display_child(
+                source.layer,
+                source.space.clone(),
+                source.draw_order,
+                None,
+                other.clone(),
+                out,
+            )?,
+        }
+    }
+    Ok(())
+}
+
+/// Append one **derived display** child (`DIMENSION`/`MULTILEADER`) as a real
+/// entity with the source's layer, space and draw order.
+///
+/// Unlike [`push_produced`] this accepts `Text` and `Spline`: they are not being
+/// decomposed further, they are already the exact display entity and can stand
+/// alone. `type_key` overrides the stored class (`MULTILEADER` text is MTEXT).
+fn push_display_child(
+    layer: LayerId,
+    space: SpaceId,
+    draw_order: i64,
+    type_key: Option<&str>,
+    geometry: SemanticGeometry,
+    out: &mut Vec<Produced>,
+) -> CadResult<()> {
+    match &geometry {
+        SemanticGeometry::Image { .. }
+        | SemanticGeometry::Mask { .. }
+        | SemanticGeometry::Shape { .. }
+        | SemanticGeometry::Opaque { .. }
+        | SemanticGeometry::Compound(_)
+        | SemanticGeometry::Dimension(_)
+        | SemanticGeometry::Hatch(_)
+        | SemanticGeometry::MultiLeader(_) => Err(child_refusal(&geometry)),
+        _ => {
+            out.push(Produced {
+                layer,
+                space,
+                type_key: type_key
+                    .unwrap_or_else(|| class_name(&geometry))
+                    .to_string(),
+                geometry,
+                draw_order: Some(draw_order),
+            });
+            Ok(())
+        }
+    }
 }
 
 /// Validate and append one produced child geometry.
@@ -462,6 +818,7 @@ fn push_produced(
                 space,
                 type_key,
                 geometry,
+                draw_order: None,
             });
             Ok(())
         }
@@ -504,7 +861,7 @@ fn child_refusal(geometry: &SemanticGeometry) -> CadError {
             "EXPLODE does not decompose opaque/proxy geometry: it has no semantic form"
         }
         SemanticGeometry::Dimension(_) => {
-            "EXPLODE does not decompose a DIMENSION compound in this build"
+            "EXPLODE does not decompose a DIMENSION member inside a compound in this build"
         }
         SemanticGeometry::Compound(_) => {
             "EXPLODE does not decompose a nested Compound member (for example an in-block \
@@ -514,8 +871,7 @@ fn child_refusal(geometry: &SemanticGeometry) -> CadError {
             "EXPLODE does not decompose a HATCH member inside a compound in this build"
         }
         SemanticGeometry::MultiLeader(_) => {
-            "EXPLODE does not decompose a MULTILEADER: this project does not model the \
-             mleader explosion semantics, and its display contains text"
+            "EXPLODE does not decompose a MULTILEADER member inside a compound in this build"
         }
         _ => "EXPLODE does not decompose this kind",
     };
@@ -525,23 +881,20 @@ fn child_refusal(geometry: &SemanticGeometry) -> CadError {
     ))
 }
 
-/// Refuse a `Dimension`/`MTable`-like compound by its stored `type_key`.
+/// Refuse a legacy `Compound` carrying a dimension/table/mleader `type_key`.
 ///
-/// These import as a `Compound` (their `type_key` is `AcDbDimension` /
-/// `AcDbTable`), so the general "Compound → all children" rule would otherwise
-/// decompose them. `AcDbMultiLeader` is also listed for the merged MULTILEADER
-/// variant and for any legacy compound still carrying that key. The project does
-/// not model the dimension-explosion semantics (associativity loss + 2D
-/// solid/text output), and their children usually include `Text` (which EXPLODE
-/// refuses by its own named reason, never from the transform surface), so an
-/// explicit `type_key` refusal is clearer than the generic failure.
+/// A real `DIMENSION`/`MULTILEADER` is its own [`SemanticGeometry`] variant and
+/// is decomposed by [`explode_dimension`]/[`explode_multileader`]. A `Compound`
+/// that merely carries the old key is a legacy/ambiguous representation: the
+/// general "Compound → all children" rule would silently change its meaning, so
+/// it stays an explicit `type_key` refusal. `AcDbTable` (MTable) has no
+/// explosion model in this build at all.
 fn refuse_compound_type_key(source: &DbEntity) -> CadResult<()> {
     match source.object.type_key.as_str() {
         "AcDbDimension" | "AcDbTable" | "AcDbMultiLeader" => Err(CadError::Unsupported(format!(
-            "EXPLODE refuses a {} compound by type_key: this project does not model the \
-             dimension/table/mleader explosion semantics (and its children usually include \
-             Text)",
-            source.object.type_key
+            "EXPLODE refuses a {} compound by type_key: a real {} entity uses its own \
+             semantic variant; a Compound carrying this key is not decomposed",
+            source.object.type_key, source.object.type_key
         ))),
         _ => Ok(()),
     }

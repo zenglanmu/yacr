@@ -46,6 +46,117 @@ impl IsoPlane {
     }
 }
 
+/// The stored CHAMFER construction method (AutoCAD's `CHAMMODE`).
+///
+/// AutoCAD owns two CHAMFER methods: the distance/distances form and the
+/// distance+angle form. Both are real construction rules, so the method is a
+/// stored session mode (never an ignored flag). The value is read by
+/// [`crate::CommandId::ChamferLines`] and `CHAMFER POLYLINE`; the interactive
+/// `Method` sub-option that would set it is NOT WIRED yet (the command layer has
+/// no in-command option prompt in this build).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChamferMethod {
+    /// Two distances, applied in selection order (AutoCAD's default).
+    Distance,
+    /// Distance from the first object plus the chamfer angle from that object.
+    Angle,
+}
+
+impl ChamferMethod {
+    /// The stable uppercase token (`DISTANCE` / `ANGLE`).
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Distance => "DISTANCE",
+            Self::Angle => "ANGLE",
+        }
+    }
+}
+
+/// The stored CHAMFER/FILLET construction modes.
+///
+/// Session state only (AutoCAD keeps the same values as `TRIMMODE` and
+/// `CHAMMODE` sysvars): no database write, revision bump, undo entry or
+/// `ChangeSet`. Every field is a **consumed** mode — the two corner commands read
+/// it for the actual geometry, so a stored value can never be a decorative flag:
+///
+/// * `trim` — `TRIMMODE` 1 (default) trims/extends the picked objects to the
+///   corner result; `false` (`No Trim`, `TRIMMODE` 0) leaves them untouched and
+///   only creates the joining line/arc.
+/// * `chamfer_method` — see [`ChamferMethod`].
+/// * `chamfer_angle_degrees` — the angle used when the method is
+///   [`ChamferMethod::Angle`], in the prompt unit (degrees). `0` is AutoCAD's
+///   initial `CHAMFERA`/`CHAMFERB`-era angle, and a zero distance with a zero
+///   angle is the documented "extend/trim to intersect, create nothing" form.
+///
+/// The interactive `Trim` / `Method` / `Angle` sub-prompts that would write these
+/// fields are NOT WIRED in this build; the setters are the single channel a
+/// follow-up wiring lane must call.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CornerModes {
+    trim: bool,
+    chamfer_method: ChamferMethod,
+    chamfer_angle_degrees: f64,
+}
+
+impl Default for CornerModes {
+    fn default() -> Self {
+        // AutoCAD's initial TRIMMODE is 1 and CHAMMODE is 0 (distance form).
+        Self {
+            trim: true,
+            chamfer_method: ChamferMethod::Distance,
+            chamfer_angle_degrees: 0.0,
+        }
+    }
+}
+
+impl CornerModes {
+    /// Whether the picked objects are trimmed/extended (`TRIMMODE`).
+    pub fn trim(&self) -> bool {
+        self.trim
+    }
+
+    /// The stored CHAMFER method (`CHAMMODE`).
+    pub fn chamfer_method(&self) -> ChamferMethod {
+        self.chamfer_method
+    }
+
+    /// The stored CHAMFER angle in the prompt unit (degrees).
+    pub fn chamfer_angle_degrees(&self) -> f64 {
+        self.chamfer_angle_degrees
+    }
+
+    /// The stored CHAMFER angle in radians (the geometry unit).
+    pub fn chamfer_angle_radians(&self) -> f64 {
+        self.chamfer_angle_degrees.to_radians()
+    }
+
+    /// Set the `TRIMMODE` switch. Session state only.
+    pub fn set_trim(&mut self, trim: bool) {
+        self.trim = trim;
+    }
+
+    /// Set the `CHAMMODE` method. Session state only.
+    pub fn set_chamfer_method(&mut self, method: ChamferMethod) {
+        self.chamfer_method = method;
+    }
+
+    /// Store the CHAMFER angle (degrees).
+    ///
+    /// Only a **finite** angle in `0..180` is stored: a negative angle is not
+    /// documented by AutoCAD for the angle method and is refused by name rather
+    /// than guessed, and 180 leaves no wedge to chamfer. Session state only.
+    pub fn set_chamfer_angle_degrees(&mut self, degrees: f64) -> crate::CadResult<()> {
+        if !degrees.is_finite() || !(0.0..180.0).contains(&degrees) {
+            return Err(crate::CadError::InvalidInput(format!(
+                "chamfer.angle_out_of_range: the CHAMFER angle must be finite and in 0..180 \
+                 degrees, got {degrees}"
+            )));
+        }
+        self.chamfer_angle_degrees = degrees;
+        Ok(())
+    }
+}
+
 /// The drafting display flags and session tokens the extended batches own.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DraftingExtras {
@@ -67,6 +178,7 @@ pub struct DraftingExtras {
     dwglog: bool,
     elev: f64,
     ucsicon: bool,
+    corner_modes: CornerModes,
 }
 
 impl Default for DraftingExtras {
@@ -99,6 +211,7 @@ impl Default for DraftingExtras {
             dwglog: false,
             elev: 0.0,
             ucsicon: false,
+            corner_modes: CornerModes::default(),
         }
     }
 }
@@ -369,5 +482,18 @@ impl DraftingExtras {
     pub fn toggle_ucsicon(&mut self) -> bool {
         self.ucsicon = !self.ucsicon;
         self.ucsicon
+    }
+
+    /// The stored CHAMFER/FILLET construction modes (session state only).
+    ///
+    /// See [`CornerModes`] for the exact meaning of each consumed field.
+    pub fn corner_modes(&self) -> CornerModes {
+        self.corner_modes
+    }
+
+    /// Mutable access to the stored corner modes (the single setter channel a
+    /// wiring lane uses; every value is validated by the `CornerModes` setters).
+    pub fn corner_modes_mut(&mut self) -> &mut CornerModes {
+        &mut self.corner_modes
     }
 }

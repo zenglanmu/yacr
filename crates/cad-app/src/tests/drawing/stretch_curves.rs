@@ -859,8 +859,8 @@ fn stretch_regression_line_polyline_and_circle_behaviour_is_unchanged() {
     assert_eq!(bulges, vec![0.5, 0.0, 0.0]);
     assert!(!closed);
 
-    // CIRCLE: still move-only, so a partial enclosure writes nothing and reports
-    // the move-only diagnostic.
+    // CIRCLE: still move-only. Here the window crosses the circle but its centre
+    // is outside, so nothing is written and the named reason is reported.
     let circle = SemanticGeometry::Circle {
         center: point(5.0, 5.0),
         normal: p3(0.0, 0.0, 1.0),
@@ -871,7 +871,7 @@ fn stretch_regression_line_polyline_and_circle_behaviour_is_unchanged() {
     let outcome = stretch(
         &mut app,
         &mut session,
-        window(point(0.0, 0.0), point(6.0, 6.0)),
+        window(point(0.0, 0.0), point(4.0, 4.0)),
         point(0.0, 0.0),
         point(1.0, 1.0),
     )
@@ -883,7 +883,7 @@ fn stretch_regression_line_polyline_and_circle_behaviour_is_unchanged() {
     assert_eq!(radius, 3.0);
     assert_eq!(geometry_of(&app, 1), circle);
     assert!(
-        has_code(&outcome, "drawing.stretch.not_stretchable"),
+        has_code(&outcome, "drawing.stretch.circle_center_outside"),
         "{:?}",
         outcome.diagnostics
     );

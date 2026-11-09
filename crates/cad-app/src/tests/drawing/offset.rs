@@ -322,8 +322,8 @@ fn offset_refuses_unsupported_geometry() {
         other => panic!("expected an Unsupported refusal, got {other:?}"),
     };
     assert!(
-        message.contains("LINE, CIRCLE, ARC and LWPOLYLINE (straight or bulged)"),
-        "the generic refusal names ARC: {message}"
+        message.contains("LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE and SPLINE"),
+        "the generic refusal names the supported source set: {message}"
     );
     assert_eq!(revision(&app), rev);
     assert_eq!(
@@ -632,4 +632,366 @@ fn offset_refuses_a_degenerate_line_source() {
     .unwrap_err();
     assert!(matches!(err, CadError::InvalidInput(_)));
     assert_eq!(revision(&app), rev);
+}
+
+// ---------------------------------------------------------------------------
+// The modelled AutoCAD option set (payload data in `payload_extra`): distance,
+// `Through`, `Erase`, `Layer`, `Multiple`, gap type, and the ellipse -> spline
+// arm. `command_payload.rs` is at its 1000-line ceiling, so these exercise the
+// crate entry point the host will wire the enum variant to.
+// ---------------------------------------------------------------------------
+
+use crate::command_payload::{OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions};
+
+fn undo_depth(app: &Application) -> usize {
+    app.history
+        .get(&DocumentId(1))
+        .map(|history| history.undo_depth())
+        .unwrap_or(0)
+}
+
+fn offset_command(side: Point3) -> Command {
+    command(
+        CommandId::OffsetEntity,
+        CommandPayload::Offset {
+            refs: vec![ref_of(1)],
+            side_point: side,
+        },
+    )
+}
+
+fn two_layer_line_app() -> Application {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [(LayerId(0), "0"), (LayerId(1), "WALLS")] {
+        b.insert_layer(Layer {
+            id,
+            name: name.into(),
+            visible: true,
+        })
+        .unwrap();
+    }
+    b.insert_entity(ent(
+        1,
+        SemanticGeometry::Line {
+            start: point(0.0, 0.0),
+            end: point(10.0, 0.0),
+        },
+        0,
+    ))
+    .unwrap();
+    app_with_drawing(b.finish().unwrap())
+}
+
+fn line_y(app: &Application, id: EntityId) -> f64 {
+    match &app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(id)
+        .expect("entity exists")
+        .geometry
+    {
+        SemanticGeometry::Line { start, .. } => start.y,
+        other => panic!("expected a line, got {other:?}"),
+    }
+}
+
+#[test]
+fn offset_explicit_distance_uses_the_pick_only_for_the_side() {
+    let mut app = two_layer_line_app();
+    let options = OffsetOptions {
+        refs: vec![ref_of(1)],
+        side_points: vec![point(5.0, 3.0)],
+        mode: OffsetMode::Distance(2.0),
+        erase_source: false,
+        layer: OffsetLayer::Source,
+        gap: OffsetGapType::Sharp,
+    };
+    let outcome = app
+        .offset_entities_with_options(&offset_command(point(5.0, 3.0)), &options)
+        .unwrap();
+    assert_eq!(outcome.objects.len(), 1);
+    assert!((line_y(&app, EntityId(outcome.objects[0].0)) - 2.0).abs() < 1e-9);
+    // The source is kept.
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity_count(),
+        2
+    );
+}
+
+#[test]
+fn offset_multiple_erase_and_current_layer_are_one_undo_step() {
+    let mut app = two_layer_line_app();
+    let options = OffsetOptions {
+        refs: vec![ref_of(1)],
+        side_points: vec![point(5.0, 3.0), point(5.0, -3.0)],
+        mode: OffsetMode::Distance(2.0),
+        erase_source: true,
+        layer: OffsetLayer::Current(LayerId(1)),
+        gap: OffsetGapType::Sharp,
+    };
+    let outcome = app
+        .offset_entities_with_options(&offset_command(point(5.0, 3.0)), &options)
+        .unwrap();
+    assert_eq!(outcome.objects.len(), 2, "Multiple creates one per point");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(
+        drawing.entity(EntityId(1)).is_none(),
+        "Erase removes the source"
+    );
+    assert_eq!(drawing.entity_count(), 2);
+    let mut ys = Vec::new();
+    for object in &outcome.objects {
+        let id = EntityId(object.0);
+        ys.push(line_y(&app, id));
+        assert_eq!(
+            drawing.entity(id).unwrap().layer,
+            LayerId(1),
+            "Layer option"
+        );
+    }
+    ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert!(
+        (ys[0] + 2.0).abs() < 1e-9 && (ys[1] - 2.0).abs() < 1e-9,
+        "{ys:?}"
+    );
+    assert_eq!(undo_depth(&app), 1, "one transaction / one undo");
+
+    // One undo restores the source and removes both offsets.
+    execute(
+        &mut app,
+        &mut SessionState::new(DocumentId(1), AppMode::Work),
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(drawing.entity(EntityId(1)).is_some());
+    assert_eq!(drawing.entity_count(), 1);
+}
+
+#[test]
+fn offset_options_payload_reaches_the_option_entry_point_through_dispatch() {
+    let mut app = two_layer_line_app();
+    let options = OffsetOptions {
+        refs: vec![ref_of(1)],
+        side_points: vec![point(5.0, 3.0)],
+        mode: OffsetMode::Distance(2.0),
+        erase_source: true,
+        layer: OffsetLayer::Current(LayerId(1)),
+        gap: OffsetGapType::Sharp,
+    };
+    let outcome = execute(
+        &mut app,
+        &mut SessionState::new(DocumentId(1), AppMode::Work),
+        CommandId::OffsetEntity,
+        CommandPayload::OffsetOptions(Box::new(options)),
+    )
+    .expect("OffsetOptions routes");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(drawing.entity(EntityId(1)).is_none(), "erase_source routed");
+    let created = EntityId(outcome.objects[0].0);
+    assert!((line_y(&app, created) - 2.0).abs() < 1e-9);
+    assert_eq!(drawing.entity(created).unwrap().layer, LayerId(1));
+    assert_eq!(undo_depth(&app), 1);
+
+    // `Through` + source layer is the legacy shape, still expressible as data.
+    let mut app = two_layer_line_app();
+    let options = OffsetOptions {
+        refs: vec![ref_of(1)],
+        side_points: vec![point(5.0, 3.0)],
+        mode: OffsetMode::Through,
+        erase_source: false,
+        layer: OffsetLayer::Source,
+        gap: OffsetGapType::Sharp,
+    };
+    let outcome = execute(
+        &mut app,
+        &mut SessionState::new(DocumentId(1), AppMode::Work),
+        CommandId::OffsetEntity,
+        CommandPayload::OffsetOptions(Box::new(options)),
+    )
+    .expect("Through routes");
+    let created = EntityId(outcome.objects[0].0);
+    assert!((line_y(&app, created) - 3.0).abs() < 1e-9);
+}
+
+#[test]
+fn offset_fillet_and_chamfer_gap_types_are_named_refusals() {
+    for gap in [OffsetGapType::Fillet, OffsetGapType::Chamfer] {
+        let mut app = two_layer_line_app();
+        let rev = revision(&app);
+        let options = OffsetOptions {
+            refs: vec![ref_of(1)],
+            side_points: vec![point(5.0, 3.0)],
+            mode: OffsetMode::Through,
+            erase_source: false,
+            layer: OffsetLayer::Source,
+            gap,
+        };
+        let error = app
+            .offset_entities_with_options(&offset_command(point(5.0, 3.0)), &options)
+            .unwrap_err();
+        match error {
+            CadError::Unsupported(reason) => {
+                assert!(reason.contains("offset.gap_type"), "{reason}");
+                assert!(reason.contains("sharp"), "{reason}");
+            }
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
+        assert_eq!(revision(&app), rev);
+        assert!(!app.can_undo(&DocumentId(1)));
+    }
+}
+
+#[test]
+fn offset_ellipse_and_elliptical_arc_produce_a_spline_not_an_ellipse() {
+    for sweep in [std::f64::consts::TAU, 1.5] {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(ent(
+            1,
+            SemanticGeometry::Ellipse {
+                center: point(0.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                major_axis: p3(5.0, 0.0, 0.0),
+                ratio: 0.5,
+                start: 0.0,
+                sweep,
+            },
+            0,
+        ))
+        .unwrap();
+        let mut app = app_with_drawing(b.finish().unwrap());
+        // (0, 8) is 5.5 world units beyond the ellipse's top point (0, 2.5).
+        let outcome = execute(
+            &mut app,
+            &mut SessionState::new(DocumentId(1), AppMode::Work),
+            CommandId::OffsetEntity,
+            CommandPayload::Offset {
+                refs: vec![ref_of(1)],
+                side_point: point(0.0, 8.0),
+            },
+        )
+        .unwrap();
+        let created = EntityId(outcome.objects[0].0);
+        let geometry = app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(created)
+            .unwrap()
+            .geometry
+            .clone();
+        let SemanticGeometry::Spline {
+            degree,
+            control_points,
+            ..
+        } = geometry
+        else {
+            panic!("the ellipse offset must be a SPLINE, got {geometry:?}");
+        };
+        assert_eq!(degree, 3);
+        assert!(control_points.len() >= 16, "sampled spline");
+        // The sampled offset's top extreme is near y = 8 (2.5 + 5.5). Sampling is
+        // a documented approximation, so the nearest control point is within a
+        // fraction of a sampling step of that extreme.
+        if sweep > 1.6 {
+            assert!(
+                control_points
+                    .iter()
+                    .any(|p| (p.y - 8.0).abs() < 0.2 && p.x.abs() < 0.2),
+                "top offset sample: {control_points:?}"
+            );
+            assert!(
+                control_points
+                    .iter()
+                    .any(|p| (p.x - 10.5).abs() < 0.2 && p.y.abs() < 0.2),
+                "right offset sample: {control_points:?}"
+            );
+        }
+        assert_eq!(undo_depth(&app), 1);
+    }
+}
+
+#[test]
+fn offset_spline_source_offsets_to_a_spline_and_refuses_a_non_planar_one() {
+    fn spline_app(control_points: Vec<Point3>) -> Application {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(ent(
+            1,
+            SemanticGeometry::Spline {
+                degree: 3,
+                knots: Vec::new(),
+                control_points,
+                weights: Vec::new(),
+            },
+            0,
+        ))
+        .unwrap();
+        app_with_drawing(b.finish().unwrap())
+    }
+    // A planar spline offsets into a new spline.
+    let mut app = spline_app(vec![
+        p3(0.0, 0.0, 0.0),
+        p3(2.0, 2.0, 0.0),
+        p3(4.0, 0.0, 0.0),
+        p3(6.0, 2.0, 0.0),
+    ]);
+    let outcome = execute(
+        &mut app,
+        &mut SessionState::new(DocumentId(1), AppMode::Work),
+        CommandId::OffsetEntity,
+        CommandPayload::Offset {
+            refs: vec![ref_of(1)],
+            side_point: point(3.0, 10.0),
+        },
+    )
+    .unwrap();
+    let geometry = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(outcome.objects[0].0))
+        .unwrap()
+        .geometry
+        .clone();
+    assert!(
+        matches!(geometry, SemanticGeometry::Spline { .. }),
+        "a spline offset stays a spline, got {geometry:?}"
+    );
+
+    // A non-planar spline has no single offset side: named refusal, no write.
+    let mut app = spline_app(vec![
+        p3(0.0, 0.0, 0.0),
+        p3(2.0, 2.0, 0.5),
+        p3(4.0, 0.0, 0.0),
+        p3(6.0, 2.0, 0.0),
+    ]);
+    let rev = revision(&app);
+    let err = execute(
+        &mut app,
+        &mut SessionState::new(DocumentId(1), AppMode::Work),
+        CommandId::OffsetEntity,
+        CommandPayload::Offset {
+            refs: vec![ref_of(1)],
+            side_point: point(3.0, 10.0),
+        },
+    )
+    .unwrap_err();
+    match err {
+        CadError::Unsupported(reason) => {
+            assert!(reason.contains("offset.non_planar"), "{reason}");
+        }
+        other => panic!("expected Unsupported, got {other:?}"),
+    }
+    assert_eq!(revision(&app), rev);
+    assert!(!app.can_undo(&DocumentId(1)));
 }

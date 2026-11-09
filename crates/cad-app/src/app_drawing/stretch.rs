@@ -1,120 +1,40 @@
 //! STRETCH edit command (ADR 0016 decision E).
 //!
 //! The interaction is four points: the two opposite corners of a **crossing
-//! window**, then a base point and a displacement point. The window is **always
-//! treated as CROSSING** (AutoCAD requires a crossing window; cpolygon/lasso
-//! selection is NOT IMPLEMENTED), and the enclosure classification is
-//! recomputed from the rectangle and the geometry — it is never stored in the
-//! selection (single source of truth).
+//! window** (cpolygon/lasso are NOT IMPLEMENTED; the payload is always treated as
+//! crossing), then a base point and a displacement point. Enclosure is recomputed
+//! from the rectangle and the geometry, never stored in the selection.
 //!
-//! Behaviour (Autodesk's two-way rule, with the per-kind refinements below):
+//! Behaviour (Autodesk's two-way rule):
 //!
-//! * **fully enclosed ⇒ move**: the whole entity is translated by the
-//!   displacement (`transform_geometry`, exactly what MOVE does);
-//! * **partially enclosed ⇒ stretch**: only the vertices/endpoints inside the
-//!   window move; every other vertex is unchanged. The per-vertex kinds are
-//!   `LINE` (start/end), `POLYLINE`/`LWPOLYLINE` (every stored vertex, bulges
-//!   preserved) and `SPLINE` (every stored **control point**); an `ARC` is
-//!   stretchable per endpoint under the declared rule below;
-//! * `CIRCLE`/`ELLIPSE` cannot be stretched: fully enclosed ⇒ move, partial ⇒
-//!   unchanged plus a diagnostic; `INSERT` follows the insertion-point rule;
-//! * `TEXT` fails the **whole** command: per-vertex stretch has no meaning for a
-//!   text run (Autodesk does not document it), so it is not guessed into a move;
-//! * a crossing entity with no vertex inside is unchanged plus a diagnostic.
+//! * **fully enclosed ⇒ move** the whole entity (`transform_geometry`, exactly
+//!   what MOVE does);
+//! * **partially enclosed ⇒ stretch** only the vertices/endpoints inside the
+//!   window. Per-vertex kinds: `LINE` (start/end), `POLYLINE`/`LWPOLYLINE` (every
+//!   stored vertex; bulges kept; no width/tangent/curve-fit field is touched),
+//!   `SPLINE` (stored control points; a control point is not on the curve, so
+//!   this reshapes the whole curve) and `ARC`
+//!   (the two stored endpoints move on their own circle; our declared endpoint
+//!   rule is the arc grip's rule);
+//! * `CIRCLE` cannot be stretched and moves **only when its centre** is enclosed;
+//! * `TEXT`/`MTEXT` move **only when their insertion point** is enclosed (the
+//!   documented MTEXT rule, declared for TEXT too);
+//! * `INSERT` moves rigidly only when its insertion point is enclosed; block
+//!   members are never stretched individually;
+//! * `DIMENSION` definition points inside the window move and the display is
+//!   re-synthesized (Autodesk documents dimensions as stretchable);
+//! * `ELLIPSE` and `HATCH` are move-only: a partial enclosure leaves them
+//!   unchanged with a named diagnostic (HATCH is not documented in STRETCH, so it
+//!   is not invented here).
 //!
-//! **SPLINE partial stretch.** A spline's addressable vertices are its stored
-//! **control points** (`SemanticGeometry::Spline::control_points`), and a control
-//! point is generally **not on the curve** — only a clamped spline's first and
-//! last control point are; that is the definition, not a defect. Every in-window
-//! control point is translated by the displacement, every out-of-window control
-//! point is copied bit-identically, and `degree`/`knots`/`weights` are copied
-//! verbatim. The result is therefore a **different NURBS curve with the same
-//! parameterisation**: a control point shapes the curve over a support of
-//! `degree + 1` knot spans rather than at one point, so a partial stretch
-//! reshapes the **whole** curve instead of "moving one piece of it". That is
-//! inherent to NURBS control-point editing, not a bug, and it is the same
-//! property the spline control-point grip has. Copying the vectors verbatim keeps
-//! the definition indexable, so the stored spline still satisfies `cad-db`'s
-//! invariants (`knots.len() == control_points.len() + degree + 1`,
-//! `weights.len() == control_points.len()`, non-decreasing knots) — the contract
-//! test asserts the committed entity through `cad_db::validate_geometry`. A spline
-//! whose stored definition is **already** inconsistent (either relation violated:
-//! nothing can index it, so nothing can edit it faithfully) is left unchanged with
-//! `drawing.stretch.spline_inconsistent` rather than writing vectors no consumer
-//! can evaluate. All of that is **our choice**: Autodesk does not document
-//! STRETCH on a spline.
-//!
-//! A **fully enclosed** spline is translated as a whole like every other kind,
-//! through `cad-db`'s `transform_geometry`. That arm used to be missing: `cad-db`
-//! refused to bake a spline at all, so this command kept a private
-//! translation-only control-point shift for the fully enclosed case. `cad-db` now
-//! bakes a spline under **any** finite affine transform (a NURBS is affinely
-//! invariant: mapping the control points with `degree`/`knots`/`weights` copied
-//! verbatim is exactly the affine image of the curve), so the app-side exception
-//! is **gone** and a fully enclosed STRETCH and a MOVE cannot disagree about a
-//! spline. Only a stored definition that is already unindexable is refused, by
-//! the same `transform_geometry`/`validate_geometry` rules every other kind obeys.
-//!
-//! **ARC partial stretch (our declared rule).** An arc has exactly two addressable
-//! vertices: its stored start point and end point,
-//! `centre + radius·(cos θ·ax + sin θ·ay)` at `θ = start` and `θ = start + sweep`,
-//! with `(ax, ay)` from `cad_geometry::arbitrary_axis` — the frame the tessellator
-//! and the arc endpoint grips measure angles in. For a partially enclosed arc,
-//! **each endpoint whose point lies inside the window moves**: its new angle is
-//! the in-plane direction of `point + delta` seen from the centre, so the arc
-//! stays on the **same circle** (`center`/`radius`/`normal` are copied
-//! bit-identically) and the out-of-plane part of the displacement is discarded
-//! (an arc endpoint cannot leave its own plane). The endpoint outside the window
-//! keeps its stored angle, and `sweep` is recomputed **in the stored direction**
-//! (`sweep < 0`, the clockwise/reflected arc, stays clockwise). Three outcomes are
-//! refused per entity with a named diagnostic and nothing written — never clamped,
-//! never a partial write: an in-window endpoint whose translated point has **no
-//! in-plane direction** (it sits on the centre or on the normal through it) is
-//! `drawing.stretch.arc_no_direction`; a recomputed sweep of ~0 or ~2π (`|sweep| <=
-//! 1e-9` or `2π − |sweep| <= 1e-9`, the same slack the tessellator and the arc grip
-//! model use) is `drawing.stretch.arc_degenerate_sweep`; and a rule that leaves
-//! both stored angles untouched (a displacement with no tangential in-plane
-//! component, e.g. purely radial or purely out-of-plane) is
-//! `drawing.stretch.arc_unchanged`. An arc the window merely crosses, with
-//! **neither** endpoint inside, is unchanged with `drawing.stretch.no_vertex`.
-//! This endpoint rule is **our choice, not an AutoCAD assertion**; it is
-//! deliberately the same rule the arc endpoint grip applies, so the grip and the
-//! command never disagree about what "move an arc endpoint" means.
-//!
-//! **INSERT partial stretch (our declared rule).** A block reference has exactly one
-//! addressable "vertex" through this path: its **insertion point**, i.e. the
-//! block-space origin `(0, 0, 0)` mapped through the instance placement
-//! (`Transform3::apply_point`), which is the placement's translation column. A
-//! partially enclosed INSERT therefore translates the **whole reference rigidly** —
-//! one `transform_geometry` translation of the placement, the same call a fully
-//! enclosed move makes, so the linear part (rotation / uniform or non-uniform scale
-//! / mirror columns) is copied **bit-identically** and only the translation column
-//! gains the displacement — **iff** that insertion point lies inside the crossing
-//! window. Otherwise the reference is left **bit-identically** unchanged and the
-//! reason is named: `drawing.stretch.insert_outside` (the window overlaps the
-//! reference's displayed geometry, e.g. its members' conservative bounds, but not
-//! its insertion point). A fully enclosed INSERT keeps the ordinary whole-move path,
-//! and a reference outside the window is not touched at all (no staging, no write).
-//!
-//! Honest limits (all deliberate; none of them is "block support"): block
-//! members are not stretched individually; a rotated/scaled/mirrored reference
-//! moves rigidly and is never re-fitted; and this is **not** AutoCAD's full
-//! block-reference STRETCH semantics (definition edits, nested members and
-//! attribute reflow are NOT MODELLED). A non-finite placement simply reports
-//! `insert_outside` and is untouched.
-//!
-//! The per-vertex edits are built here as new geometry and staged as
-
-//! `update_entity`, exactly like TRIM's keep branch; `cad-db` re-validates at
-//! commit. The whole command is one transaction with one undo step, and an
-//! in-window entity that cannot be handled fails the whole command and writes
-//! nothing (the `copy_entities` whole-command-refusal precedent).
+//! `MULTILEADER` still fails the whole command (its compound display has no
+//! per-vertex semantics). An in-window entity that cannot be handled fails the
+//! whole command and writes nothing; one transaction / one undo step.
 //!
 //! **UNVERIFIED**: Autodesk documents only that STRETCH does not modify
-//! width/tangency/curve-fit information and does not document what happens to a
-//! bulge when a bulge-segment endpoint is dragged, so our declared rule is to
-//! **keep the stored bulge value unchanged** (move the vertex only). The
-//! contract tests pin the stored bulge numerically.
+//! width/tangency/curve-fit information and does not document a bulge when a
+//! bulge-segment endpoint is dragged; our declared rule keeps the stored bulge
+//! value unchanged (the tests pin it numerically).
 
 use super::*;
 
@@ -334,20 +254,6 @@ impl Application {
             if enclosure == Enclosure::Outside {
                 continue;
             }
-            // TEXT: the whole command still fails (ADR 0019 decision B keeps this
-            // behaviour). The reason is NOT "text cannot be transformed" any more
-            // — text accepts a similarity — but that STRETCH's per-vertex
-            // semantics have no meaning for a text run, and Autodesk does not
-            // document STRETCH's behaviour on text, so resolving it into a
-            // translation would be a guess.
-            if matches!(&owner_entity.geometry, SemanticGeometry::Text { .. }) {
-                return Err(CadError::Unsupported(
-                    "STRETCH cannot handle TEXT: its similarity-only transform (ADR 0019 B) has \
-                     no per-vertex stretch semantics, and Autodesk does not document STRETCH's \
-                     text behaviour, so the whole command is refused rather than guessed"
-                        .into(),
-                ));
-            }
             // MULTILEADER: the whole command still fails, exactly as the pre-P7b
             // `Compound` did (both partial and full enclosure). It is refused
             // explicitly by type now that the variant has its own transform arm;
@@ -375,10 +281,36 @@ impl Application {
                     | SemanticGeometry::Arc { .. } => {
                         plan.push((owner, StretchAction::Stretch));
                     }
-                    // CIRCLE/ELLIPSE cannot be stretched. Both are move-only when
-                    // fully enclosed and unchanged here.
-                    SemanticGeometry::Circle { .. } | SemanticGeometry::Ellipse { .. } => {
+                    // CIRCLE cannot be stretched at all. It moves as a whole only
+                    // when its **centre** is enclosed (AutoCAD's documented rule);
+                    // a circle whose centre is outside the crossing window is left
+                    // unchanged with the named reason `circle_center_outside`.
+                    SemanticGeometry::Circle { center, .. } => {
+                        if rects.iter().any(|rect| rect.contains_point(*center)) {
+                            plan.push((owner, StretchAction::Move));
+                        } else {
+                            diagnostics
+                                .push(stretch_unchanged_diagnostic(owner, "circle_center_outside"));
+                        }
+                    }
+                    // ELLIPSE cannot be stretched: move-only when fully enclosed,
+                    // unchanged here.
+                    SemanticGeometry::Ellipse { .. } => {
                         plan.push((owner, StretchAction::Unchanged));
+                    }
+                    // TEXT/MTEXT follow the **insertion-point** rule: move the whole
+                    // run iff its stored anchor (`position`) is inside the crossing
+                    // window; otherwise leave it unchanged with the named reason
+                    // `text_outside`. Autodesk documents this rule for MTEXT and is
+                    // silent for TEXT; using the same rule for both is our declared
+                    // choice (and is the only rule this flat-text domain can state
+                    // honestly, since it stores an anchor and no per-glyph vertices).
+                    SemanticGeometry::Text { position, .. } => {
+                        if rects.iter().any(|rect| rect.contains_point(*position)) {
+                            plan.push((owner, StretchAction::Move));
+                        } else {
+                            diagnostics.push(stretch_unchanged_diagnostic(owner, "text_outside"));
+                        }
                     }
                     // INSERT: the reference has no per-vertex edit, so the declared
                     // rule is rigid: translate the whole reference by the
@@ -400,13 +332,12 @@ impl Application {
                             diagnostics.push(stretch_unchanged_diagnostic(owner, "insert_outside"));
                         }
                     }
-                    // A dimension is not stretchable: a partial enclosure leaves
-                    // it unchanged (like ARC) rather than failing the command,
-                    // and a full enclosure moves it as a whole (the
-                    // `Enclosure::Full` arm above; ADR 0017 A.8).
+                    // A dimension's **definition points** stretch: every point
+                    // inside the crossing window moves by the displacement and the
+                    // derived display is re-synthesized. Autodesk documents
+                    // dimensions as stretchable; see `stretched_dimension`.
                     SemanticGeometry::Dimension(_) => {
-                        diagnostics.push(stretch_unchanged_diagnostic(owner, "dimension"));
-                        plan.push((owner, StretchAction::Unchanged));
+                        plan.push((owner, StretchAction::Stretch));
                     }
                     // A hatch follows `compatibility.md`'s existing rule: a
                     // partial enclosure leaves it unchanged with a diagnostic,
@@ -543,15 +474,9 @@ impl Application {
     }
 }
 
-/// The insertion point of an `INSERT`: the block-space origin `(0, 0, 0)` mapped
-/// through the instance placement, i.e. the placement's translation column.
-///
-/// This is the **one** addressable vertex a block reference has on this path (see
-/// the module doc): a partial enclosure moves the whole reference rigidly iff this
-/// point is inside the crossing window. Mapping the origin (rather than reading the
-/// column directly) keeps the definition honest for any affine placement, including a
-/// reflected or sheared one, and a non-finite placement simply yields a non-finite
-/// point that is inside no window.
+/// The insertion point of an `INSERT`: the block-space origin mapped through the
+/// placement (the translation column). Mapping the origin stays honest for any
+/// affine placement; a non-finite placement lies in no window.
 fn insertion_point(transform: &Transform3) -> Point3 {
     transform.apply_point(Point3 {
         x: 0.0,
@@ -562,19 +487,11 @@ fn insertion_point(transform: &Transform3) -> Point3 {
 
 /// Classify one entity's geometry against the crossing window.
 ///
-/// The "fully enclosed" rule is **two-way** (ADR 0016 decision E): for a straight
-/// `LINE` and for a LWPOLYLINE whose segments are all straight, every vertex must
-/// be inside the window (`Rect::contains_point`); for `CIRCLE`/`ELLIPSE`/`INSERT`,
-/// for a polyline with bulge segments, and for `SPLINE`/`ARC` (and every other
-/// kind), the **conservative world AABB** must be fully inside
-/// (`Rect::contains_aabb`) — a bulge arc or a spline can bow out of the window
-/// while all its vertices are inside, and this boundary case is our declared
-/// choice. The classification is deliberately independent of the per-kind edit:
-/// `SPLINE`/`ARC` are classified here by bounds and then **stretched** per vertex
-/// or endpoint when the answer is `Partial`, which is why the window may contain
-/// every control point / both endpoints and still produce a per-vertex edit.
-/// "Partial" is then a hit on the window (the shared crossing hit test) that is
-/// not fully enclosed.
+/// "Fully enclosed" is two-way (ADR 0016 decision E): a straight `LINE`/polyline
+/// needs every vertex inside one window; every other kind (curves can bow out of
+/// the vertex hull) needs its conservative world AABB fully inside one window.
+/// "Partial" is a hit on the window (the shared crossing hit test) that is not
+/// fully enclosed; the per-kind edit is decided independently.
 fn classify_enclosure(
     geometry: &SemanticGeometry,
     items: &[&crate::PickItem],
@@ -644,53 +561,20 @@ fn union_bounds(items: &[&crate::PickItem]) -> Option<(Point3, Point3)> {
 }
 
 /// The whole-entity translation used by `Enclosure::Full` — exactly MOVE's
-/// result.
-///
-/// Every kind goes through `cad-db`'s [`transform_geometry`], the same call MOVE
-/// makes, so a fully enclosed STRETCH and a MOVE cannot disagree. That includes
-/// `SPLINE`: a NURBS is affinely invariant under a control-point map with
-/// `degree`/`knots`/`weights` copied verbatim, so `transform_geometry` bakes a
-/// spline under any finite affine transform and this command needs no per-kind
-/// exception (the translation-only control-point shift that used to live here for
-/// the fully enclosed case was removed once that arm existed).
-///
-/// A stored spline definition that cannot be indexed (knot or weight count not
-/// matching the control points) is refused by `cad-db` (the transform's result is
-/// re-validated on commit) rather than staged: a fully enclosed entity that
-/// cannot be written fails the whole command, which is the `Move` arm's rule.
+/// result, through the same `cad-db` `transform_geometry` (a NURBS is affinely
+/// invariant), so the two commands cannot disagree.
 fn moved_geometry(geometry: &SemanticGeometry, translation: Point3) -> CadResult<SemanticGeometry> {
     transform_geometry(geometry, &Transform3::translation(translation))
 }
 
-/// Build the per-vertex stretched geometry for a `LINE`, `POLYLINE`, `SPLINE` or
-/// `ARC`, moving only the vertices inside the window by `delta`.
+/// Build the per-vertex stretched geometry for `LINE`, `POLYLINE`, `SPLINE`,
+/// `ARC` or `DIMENSION`, moving only what lies inside the window.
 ///
-/// `Ok(geometry)` means the entity moved (the geometry always differs from the
-/// stored one in at least one bit-identical vertex / angle); `Err(reason)` means
-/// nothing moved and carries the stable diagnostic reason the command reports, so
-/// an in-window entity is never silent.
-///
-/// **Bulge preservation is UNVERIFIED**: Autodesk documents only that STRETCH
-/// does not modify width/tangency/curve-fit information and does not document what
-/// happens to a bulge when a bulge-segment endpoint is dragged, so our declared
-/// rule is to keep the stored bulge value unchanged (move the vertex only). The
-/// contract tests pin the stored bulge numerically.
-///
-/// **SPLINE**: the moved vertices are the stored control points (see the module
-/// doc: a control point is not a curve point, so a partial stretch reshapes the
-/// curve globally), and `degree`/`knots`/`weights` are copied verbatim so the
-/// definition stays indexable. A stored definition that is **already**
-/// inconsistent is refused by name (`spline_inconsistent`) rather than staged for
-/// the database to reject.
-///
-/// **ARC**: see the module doc for the declared endpoint rule. The helpers that
-/// express the angle convention (`arc_plane_axes`, `arc_point`, `in_plane_angle`,
-/// `sweep_in_direction`) are local to this module for the same reason
-/// `select_box`/`trim_boundary` keep their own: `cad-app`'s grip helpers are
-/// module-private, and this command must not reach into the grip model. They
-/// evaluate the tessellator's expression term for term, and the degeneracy slack is
-/// imported from the grip model ([`crate::grips::ARC_SWEEP_EPSILON`]) so the two
-/// cannot disagree about which sweeps are unstorable.
+/// `Err(reason)` means nothing moved and carries the stable diagnostic reason, so
+/// an in-window entity is never silent. Bulges are kept as-is (UNVERIFIED by
+/// Autodesk; our declared rule); a spline's stored control points move with its
+/// `degree`/`knots`/`weights` copied verbatim; the arc helpers below reproduce the
+/// tessellator's angle frame term for term and use the grip model's sweep slack.
 fn stretched_geometry(
     geometry: &SemanticGeometry,
     rects: &[Rect],
@@ -835,24 +719,123 @@ fn stretched_geometry(
                 sweep: new_sweep,
             })
         }
-        // The plan only ever routes the four kinds above into `Stretch`; anything
-        // else here would be a planning defect, reported rather than guessed.
+        SemanticGeometry::Dimension(dimension) => {
+            stretched_dimension(dimension, &inside, &shift).ok_or("dimension_unchanged")
+        }
+        // The plan only ever routes the four kinds above (plus DIMENSION) into
+        // `Stretch`; anything else here would be a planning defect, reported
+        // rather than guessed.
         _ => Err("not_stretchable"),
     }
 }
 
-/// The explicit "unchanged" diagnostic for an in-window entity that is not
-/// stretched, never a silent drop.
+/// Stretch a dimension by moving only its **definition points** that lie inside
+/// the crossing window.
 ///
-/// `reason` is the stable suffix of the diagnostic code
-/// (`drawing.stretch.<reason>`); the ones in use are `no_vertex` (a per-vertex
-/// kind with no vertex inside), `not_stretchable` (a move-only kind),
-/// `dimension`/`hatch` (a kind unchanged by its own documented rule),
-/// `insert_outside` (a block reference whose insertion point is outside the
-/// window, so its rigid move does not apply),
-/// `spline_inconsistent` (a spline definition that cannot be indexed),
-/// `arc_no_direction`, `arc_degenerate_sweep` and `arc_unchanged` (the three ARC
-/// outcomes of the declared endpoint rule).
+/// Autodesk documents dimensions as stretchable: the extension-line origins and
+/// the dimension-line location move with the window, and the measurement follows.
+/// Every point slot of [`DimensionPoints`] plus the group-11 text middle point is
+/// moved independently; `kind`, `text_rotation` (an explicit rotation is kept),
+/// `normal`, the style snapshot and the text override are copied. The display is
+/// rebuilt through the domain's single synthesizer ([`DimensionGeometry::synthesized`])
+/// so measurement and drawn number stay in step (ADR 0017 A.4 invariant 1) — this
+/// command never hand-builds dimension geometry.
+///
+/// `None` means nothing moved (no point inside the window) or the stretched
+/// definition cannot be synthesized (e.g. it collapsed); the caller reports the
+/// named `dimension_unchanged` diagnostic and writes nothing for this entity.
+/// This is **our declared choice**, not an Autodesk assertion about which
+/// individual definition point moves first.
+fn stretched_dimension(
+    dimension: &DimensionGeometry,
+    inside: &impl Fn(Point3) -> bool,
+    shift: &impl Fn(Point3) -> Point3,
+) -> Option<SemanticGeometry> {
+    let source = dimension.definition();
+    let moved = |point: Point3| {
+        if inside(point) {
+            shift(point)
+        } else {
+            point
+        }
+    };
+    let points = match &source.points {
+        DimensionPoints::Linear {
+            first,
+            second,
+            dimension_line,
+        } => DimensionPoints::Linear {
+            first: moved(*first),
+            second: moved(*second),
+            dimension_line: moved(*dimension_line),
+        },
+        DimensionPoints::Radial {
+            center,
+            point_on_arc,
+            leader_length,
+        } => DimensionPoints::Radial {
+            center: moved(*center),
+            point_on_arc: moved(*point_on_arc),
+            leader_length: *leader_length,
+        },
+        DimensionPoints::Angular2Ln {
+            line1_start,
+            line1_end,
+            line2_start,
+            line2_end,
+            arc_point,
+        } => DimensionPoints::Angular2Ln {
+            line1_start: moved(*line1_start),
+            line1_end: moved(*line1_end),
+            line2_start: moved(*line2_start),
+            line2_end: moved(*line2_end),
+            arc_point: moved(*arc_point),
+        },
+        DimensionPoints::Angular3Pt {
+            vertex,
+            first,
+            second,
+            arc_point,
+        } => DimensionPoints::Angular3Pt {
+            vertex: moved(*vertex),
+            first: moved(*first),
+            second: moved(*second),
+            arc_point: moved(*arc_point),
+        },
+        DimensionPoints::Ordinate {
+            feature,
+            leader_end,
+            base,
+        } => DimensionPoints::Ordinate {
+            feature: moved(*feature),
+            leader_end: moved(*leader_end),
+            base: moved(*base),
+        },
+    };
+    let text_middle = moved(source.text_middle);
+    if points == source.points && text_middle == source.text_middle {
+        return None;
+    }
+    let definition = DimensionDefinition {
+        kind: source.kind,
+        points,
+        text_middle,
+        text_rotation: source.text_rotation,
+        normal: source.normal,
+    };
+    let rebuilt = DimensionGeometry::synthesized(
+        definition,
+        dimension.style_name().to_string(),
+        dimension.style().clone(),
+        dimension.text_override().map(str::to_string),
+    )
+    .ok()?;
+    Some(SemanticGeometry::Dimension(Box::new(rebuilt)))
+}
+
+/// The explicit "unchanged" diagnostic for an in-window entity that is not
+/// stretched, never a silent drop. `reason` is the stable suffix of
+/// `drawing.stretch.<reason>`; see the match arms below for the full set.
 fn stretch_unchanged_diagnostic(entity: EntityId, reason: &str) -> Diagnostic {
     let move_only = format!(
         "STRETCH: entity {} crosses the window but cannot be stretched (move-only kind); \
@@ -896,6 +879,26 @@ fn stretch_unchanged_diagnostic(entity: EntityId, reason: &str) -> Diagnostic {
              transformed block-space origin) is outside it, and STRETCH moves a block reference \
              only rigidly by its insertion point (block members are not stretched individually); \
              left unchanged",
+            entity.0
+        ),
+        // Documented AutoCAD circle rule: a circle cannot be stretched, and it
+        // only moves as a whole when its centre is in the crossing window.
+        "circle_center_outside" => format!(
+            "STRETCH: circle {} crosses the window but its centre is outside it; a circle cannot \
+             be stretched and only moves (as a whole) when its centre is enclosed, so it is left \
+             unchanged",
+            entity.0
+        ),
+        // Our declared TEXT/MTEXT rule (Autodesk documents it for MTEXT): the run
+        // moves only by its insertion point.
+        "text_outside" => format!(
+            "STRETCH: text {} crosses the window but its insertion point is outside it; TEXT and \
+             MTEXT move only when their insertion point is enclosed, so it is left unchanged",
+            entity.0
+        ),
+        "dimension_unchanged" => format!(
+            "STRETCH: dimension {} crosses the window but no definition point is inside it (or \
+             the stretched definition cannot be synthesized); left unchanged",
             entity.0
         ),
         _ => move_only,

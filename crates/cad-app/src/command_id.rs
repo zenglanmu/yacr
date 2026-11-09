@@ -461,17 +461,15 @@ pub enum CommandId {
     /// `JOIN`: weld the current selection into one polyline; full contract:
     /// `crate::app_drawing::join`.
     Join,
-    /// EXPLODE the current selection one level at a time (ADR 0016 decision G): a LWPOLYLINE
-    /// becomes straight segments plus ARCs (bulge segments through `bulge_arc_geometry`), a
-    /// uniformly scaled INSERT becomes its block members with the placement baked in (nested inserts expanded under a cycle stack
-    /// and a depth cap of 32), and a Compound becomes **all** of its children (a
-    /// MINSERT yields its Insert instances). Members keep their own
-    /// block-definition layers. Refusals (nothing written): a selection with
-    /// nothing decomposable; `TEXT`/`SPLINE`/`SHAPE`/`OPAQUE` and mirrored
-    /// Arc/Ellipse children via the transform surface; `IMAGE`/`MASK` by policy;
-    /// `Dimension`/`MTable`/`MLeader` compounds by `type_key`; a non-uniformly
-    /// scaled INSERT; and an INSERT with an untransformable member (the whole
-    /// command fails). One transaction and one undo step. Work-only.
+    /// EXPLODE one level at a time (ADR 0016 G): LWPOLYLINE -> LINE/ARC segments,
+    /// INSERT -> its direct members (nested refs stay refs), DIMENSION -> its real
+    /// display LINE/ARC/TEXT plus arrow MESH on the source layer/space/draw order,
+    /// MULTILEADER -> leader LINE/SPLINE + arrow MESH + MTEXT, Compound -> all children.
+    /// A non-uniform INSERT places every member with an exact affine image
+    /// (Circle/Arc/Ellipse -> exact Ellipse) and otherwise refuses by member id/kind.
+    /// Named refusals: nothing decomposable, TEXT/SPLINE/SHAPE/OPAQUE members,
+    /// IMAGE/MASK policy, legacy Dimension/MTable/MLeader compounds, MINSERT, XREF.
+    /// One transaction / one undo step. Work-only.
     ExplodeEntities,
     /// Clone every entity in the current selection with a fresh id, translating
     /// its geometry by a world delta, in one transaction. An empty selection or

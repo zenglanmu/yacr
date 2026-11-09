@@ -410,7 +410,7 @@ fn stretch_bulge_polyline_conservative_bounds_rule_pins_partial_and_full() {
 }
 
 #[test]
-fn stretch_fully_enclosed_circle_is_moved_and_partially_enclosed_circle_is_unchanged() {
+fn stretch_circle_moves_only_when_its_centre_is_enclosed() {
     let circle = || SemanticGeometry::Circle {
         center: point(5.0, 5.0),
         normal: p3(0.0, 0.0, 1.0),
@@ -430,10 +430,10 @@ fn stretch_fully_enclosed_circle_is_moved_and_partially_enclosed_circle_is_uncha
     assert!(near(center, point(7.0, 8.0)), "{center:?}");
     assert!((radius - 3.0).abs() < 1e-9, "radius is unchanged");
 
-    // Partially enclosed: unchanged plus a diagnostic (a circle cannot stretch).
+    // Centre enclosed but the circle is not fully enclosed: AutoCAD moves the
+    // whole circle (it cannot be stretched), so the centre shifts.
     let (mut app2, mut session2) = build(vec![ent(1, circle(), 0)], Vec::new());
-    let before = revision(&app2);
-    let outcome = stretch(
+    stretch(
         &mut app2,
         &mut session2,
         window(point(0.0, 0.0), point(6.0, 6.0)),
@@ -441,13 +441,28 @@ fn stretch_fully_enclosed_circle_is_moved_and_partially_enclosed_circle_is_uncha
         point(1.0, 1.0),
     )
     .unwrap();
-    assert!(outcome.changes.is_none());
-    assert_eq!(revision(&app2), before);
     let (center, radius) = circle_of(&app2, 1);
+    assert!(near(center, point(6.0, 6.0)), "{center:?}");
+    assert!((radius - 3.0).abs() < 1e-9);
+
+    // Centre outside the crossing window: unchanged plus the named reason.
+    let (mut app3, mut session3) = build(vec![ent(1, circle(), 0)], Vec::new());
+    let before = revision(&app3);
+    let outcome = stretch(
+        &mut app3,
+        &mut session3,
+        window(point(0.0, 0.0), point(4.0, 4.0)),
+        point(0.0, 0.0),
+        point(1.0, 1.0),
+    )
+    .unwrap();
+    assert!(outcome.changes.is_none());
+    assert_eq!(revision(&app3), before);
+    let (center, radius) = circle_of(&app3, 1);
     assert!(near(center, point(5.0, 5.0)), "{center:?}");
     assert!((radius - 3.0).abs() < 1e-9);
     assert!(
-        has_code(&outcome, "drawing.stretch.not_stretchable"),
+        has_code(&outcome, "drawing.stretch.circle_center_outside"),
         "{:?}",
         outcome.diagnostics
     );
@@ -546,8 +561,8 @@ fn stretch_fully_enclosed_arc_is_moved_whole() {
 }
 
 #[test]
-fn stretch_fails_the_whole_command_for_text_in_the_window_and_writes_nothing() {
-    let text = SemanticGeometry::Text {
+fn stretch_text_moves_only_when_its_insertion_point_is_enclosed() {
+    let text = || SemanticGeometry::Text {
         text: "AB".into(),
         position: point(5.0, 5.0),
         style: StyleId(0),
@@ -558,37 +573,45 @@ fn stretch_fails_the_whole_command_for_text_in_the_window_and_writes_nothing() {
         v_align: Default::default(),
         wrap_width: None,
     };
-    // A fully enclosed TEXT still fails the whole command. ADR 0019 decision B
-    // keeps this behaviour: TEXT accepts a similarity transform now, but STRETCH's
-    // per-vertex semantics do not apply to a text run and Autodesk does not
-    // document its behaviour, so the refusal is the restricted transform, not
-    // "text cannot be transformed".
-    let (mut app, mut session) = build(vec![ent(1, text, 0)], Vec::new());
-    let before = revision(&app);
-    let error = stretch(
+    // The insertion point is inside a crossing window that does not fully enclose
+    // the run: TEXT/MTEXT follow the insertion-point rule, so the whole run moves.
+    let (mut app, mut session) = build(vec![ent(1, text(), 0)], Vec::new());
+    stretch(
         &mut app,
         &mut session,
-        window(point(0.0, 0.0), point(10.0, 10.0)),
+        window(point(4.0, 4.0), point(6.0, 6.0)),
         point(0.0, 0.0),
         point(1.0, 1.0),
     )
-    .unwrap_err();
-    match error {
-        CadError::Unsupported(reason) => {
-            assert!(
-                reason.contains("similarity-only transform"),
-                "the reason must state the restricted transform: {reason}"
-            );
-            assert!(
-                !reason.contains("transform surface refuses"),
-                "the stale reason must be gone: {reason}"
-            );
-        }
-        other => panic!("expected Unsupported, got {other:?}"),
+    .unwrap();
+    let SemanticGeometry::Text { position, .. } = geometry_of(&app, 1) else {
+        panic!("expected TEXT");
+    };
+    assert!(near(position, point(6.0, 6.0)), "{position:?}");
+
+    // The window crosses the run but the insertion point is outside: unchanged
+    // plus the named `text_outside` reason.
+    let mut outside = text();
+    if let SemanticGeometry::Text { position, .. } = &mut outside {
+        *position = point(0.0, 0.0);
     }
-    assert_eq!(revision(&app), before, "a refusal changes nothing");
-    assert_eq!(entity_count(&app), 1);
-    assert_eq!(undo_depth(&app), 0);
+    let (mut app2, mut session2) = build(vec![ent(1, outside, 0)], Vec::new());
+    let before = revision(&app2);
+    let outcome = stretch(
+        &mut app2,
+        &mut session2,
+        window(point(0.4, -1.0), point(3.0, 2.0)),
+        point(0.0, 0.0),
+        point(1.0, 1.0),
+    )
+    .unwrap();
+    assert!(outcome.changes.is_none());
+    assert_eq!(revision(&app2), before);
+    assert!(
+        has_code(&outcome, "drawing.stretch.text_outside"),
+        "{:?}",
+        outcome.diagnostics
+    );
 }
 
 #[test]
@@ -683,4 +706,87 @@ fn stretch_is_one_transaction_one_undo_step_and_undo_restores_exactly() {
     assert_eq!(line_of(&app, 1), original_1);
     assert_eq!(line_of(&app, 2), original_2);
     assert_eq!(undo_depth(&app), 0);
+}
+
+fn linear_dimension_geometry() -> SemanticGeometry {
+    let style = DimensionStyleValues {
+        arrow_size: 2.5,
+        ext_offset: 0.625,
+        ext_beyond: 1.25,
+        text_height: 2.5,
+        text_gap: 0.625,
+        center_mark: 0.0,
+        dim_line_increment: 3.75,
+        text_vertical: 1,
+        text_vertical_position: 0.0,
+        suppress_ext1: false,
+        suppress_ext2: false,
+        suppress_dim1: false,
+        suppress_dim2: false,
+        linear_factor: 1.0,
+        decimals: 4,
+        rounding: 0.0,
+        postfix: String::new(),
+        zero_suppression: 0,
+        linear_unit_format: 2,
+        decimal_separator: 46,
+        text_style_name: "Standard".into(),
+        text_style: StyleId(0),
+        text_font: None,
+    };
+    let definition = DimensionDefinition {
+        kind: DimensionKind::Aligned,
+        points: DimensionPoints::Linear {
+            first: point(0.0, 0.0),
+            second: point(10.0, 0.0),
+            dimension_line: point(5.0, -5.0),
+        },
+        text_middle: point(5.0, -5.0),
+        text_rotation: 0.0,
+        normal: p3(0.0, 0.0, 1.0),
+    };
+    let dimension =
+        DimensionGeometry::synthesized(definition, "Standard".into(), style, None).unwrap();
+    SemanticGeometry::Dimension(Box::new(dimension))
+}
+
+#[test]
+fn stretch_moves_only_the_dimension_definition_points_inside_the_window() {
+    let (mut app, mut session) = build(vec![ent(1, linear_dimension_geometry(), 0)], Vec::new());
+    let outcome = stretch(
+        &mut app,
+        &mut session,
+        window(point(-2.0, -2.0), point(2.0, 2.0)),
+        point(0.0, 0.0),
+        point(3.0, 4.0),
+    )
+    .unwrap();
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+    let SemanticGeometry::Dimension(dimension) = geometry_of(&app, 1) else {
+        panic!("expected a DIMENSION");
+    };
+    let DimensionPoints::Linear {
+        first,
+        second,
+        dimension_line,
+    } = &dimension.definition().points
+    else {
+        panic!("expected a linear definition");
+    };
+    assert!(
+        near(*first, point(3.0, 4.0)),
+        "in-window point moves: {first:?}"
+    );
+    assert!(
+        near(*second, point(10.0, 0.0)),
+        "outside point stays: {second:?}"
+    );
+    assert!(
+        near(*dimension_line, point(5.0, -5.0)),
+        "outside dimension line stays: {dimension_line:?}"
+    );
+    // The display and measurement were re-synthesized from the moved definition.
+    assert!(!dimension.display().is_empty());
+    assert!((dimension.measurement() - (7.0_f64 * 7.0 + 4.0 * 4.0).sqrt()).abs() < 1e-9);
+    assert!(has_code(&outcome, "drawing.stretch"));
 }

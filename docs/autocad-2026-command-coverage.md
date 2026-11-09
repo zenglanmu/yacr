@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **59** |
-| 部分实现（有写明的界） | **364** |
+| 完整实现 | **60** |
+| 部分实现（有写明的界） | **363** |
 | **已实现合计（完整 + 部分）** | **423** |
 | 未实现 | **558** |
 
@@ -69,7 +69,7 @@
 > **2026-11-09 增补（Wave 8）**：`ELEV` 一个**只读会话标高令牌报告**（默认 0.0；`ELEV <height>` 设置形式未实现，不按标高创建对象），`UCSICON` 一个会话开关（默认关；不渲染任何 UCS 图标）；另加 `UCS`/`UCSMAN`/`TABLET`/`TASKBAR`/`REINIT`/`SYSWINDOWS`/`MENU`/`RIBBON` 八个**具名拒绝**（`CadError::Unsupported` + 稳定原因串：无 UCS 模型、无数字化仪/设备初始化模型、无菜单文件模型，窗口装饰/布局/功能区可见性由宿主负责；不写库/不升修订/不入历史）计入 **423 已实现（50 完整 + 373 部分）/ 558 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-09 增补（P1 晋升批）**：按 AutoCAD 2026 ENU 帮助页逐条核对后，`ALIGN`、`BREAK`、`DIVIDE`、`SELECTSIMILAR`、`MATCHPROP`、`SETBYLAYER`、`LIST`、`DIMSPACE`、`TORIENT` 九条从**部分实现**晋升为**完整实现**：补齐 1/3 对点 ALIGN（3 对点为平面刚性、不缩放）、椭圆 BREAK、全曲线 DIVIDE + 块对齐、SELECTSIMILAR 默认「图层+类型」与 `Name`/`Object style`、MATCHPROP 的 Text/Dimension/Hatch 特殊组、SETBYLAYER 透明度与 Include blocks、LIST 的纸空间/块空间与样式名、DIMSPACE 的 Auto=2×文字高度/`0` 对齐/角度标注、TORIENT Reverse（本项目扩展）。`LENGTHEN` 补了近端语义、开放多段线/椭圆弧/开放样条与 DY，但**开放样条延长**仍是具名拒绝，故保留**部分实现**。三处实现偏差已按官方语义修正：ALIGN 三对点禁缩放、SELECTSIMILAR 默认集、DIMSPACE Auto 公式。计入 **423 已实现（59 完整 + 364 部分）/ 558 未实现**；全部结论仍只覆盖 Linux 编译与契约测试，GUI/GPU/像素 NOT VERIFIED。
 >
-> **423 已实现（59 完整 + 364 部分）/ 558 未实现**；无未保存修改提示，无多文档。
+> **423 已实现（60 完整 + 363 部分）/ 558 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -143,9 +143,14 @@
 | P4 | `LAYDEL` `-LAYDEL` `LAYMRG` `-LAYMRG` `LAYFRZ` `LAYLCK` `LAYULK` `LAYTHW` `RENAME` `-RENAME` | 图层表写入纳入 `DrawingUndoRecord`（一条事务/一步撤销），并补齐图纸空间/块内实体与 Settings 选项；基础改动是 `cad-history` 的 `LayerPatch` + 应用器 |
 | P5 | `CLIP` `CLIPIT` `VPORTS` `VPSCALE` `VPCLIP` `LAYVPI` `LAYOUTMERGE` `LAYOUTWIZARD` `MVIEW` `MVSETUP` | `cad-db` 新增 image clip 写路径与 `Layout`/`PaperViewport` 变更 API；`LAYVPI` 另需 per-viewport 图层状态模型 |
 
-**进度**：P1 **已完成**（2026-11-09）：9 条晋升（`ALIGN` `BREAK` `DIVIDE` `SELECTSIMILAR`
-`MATCHPROP` `SETBYLAYER` `LIST` `DIMSPACE` `TORIENT`），`LENGTHEN` 因开放样条延长未实现保留
-`部分实现`。P2–P5 未开始。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
+**进度**：
+
+- P1 **已完成**（2026-11-09）：9 条晋升（`ALIGN` `BREAK` `DIVIDE` `SELECTSIMILAR` `MATCHPROP`
+  `SETBYLAYER` `LIST` `DIMSPACE` `TORIENT`），`LENGTHEN` 因开放样条延长未实现保留 `部分实现`。
+- P2 **核心与接线已完成**（2026-11-09）：`CHAMFER` 晋升；`FILLET`/`PEDIT`/`JOIN`/`OFFSET`/`STRETCH`/
+  `MIRROR`/`EXPLODE`/`QSELECT`/`FILTER` 的界已显著缩小并全部接线（payload/dispatch/命令行语法），
+  但各自仍有一个支持域内的真实缺口，故保留 `部分实现`。
+- P3–P5 未开始。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
 
 ## 已实现 / 部分实现命令索引（按字母序）
 
@@ -247,7 +252,7 @@
 | `CDORDER` | 部分实现 | 真实编辑：按颜色索引升序重写选中（空选择=全部模型空间）绘制顺序；一条事务/一步撤销；无对话框。 |
 | `CENTERLINE` | 部分实现 | 真实编辑：恰好两条平行直线之间创建一条中间直线，覆盖投影重叠；一条事务/一步撤销；无延伸/间隙选项。 |
 | `CENTERMARK` | 部分实现 | 真实编辑：每个选中圆/圆弧圆心两条交叉直线，臂长=半径 10%（声明规则）；一条事务/一步撤销；无关联对象/无可配置尺寸。 |
-| `CHAMFER` | 部分实现 | 两线形式 + 独立 CHAMFER POLYLINE 选择子；无 Angle/Multiple/Trim |
+| `CHAMFER` | 已实现 | `Distance`/`Angle`/`Method`/`Trim`/No-Trim/`Polyline` 全顶点；双零距离/角度=仅延伸相交；多段线弧段替换、过短跳过、开口闭合；`Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离未文档化⇒具名拒绝 |
 | `CHANGE` | 部分实现 | 真实编辑：选中模型空间实体移到当前层并重置颜色/线型/线宽为 ByLayer；一条事务/一步撤销；无交互点/特性提示。 |
 | `CHPROP` | 部分实现 | 真实编辑：同 CHANGE（移到当前层并重置颜色/线型/线宽为 ByLayer）；一条事务/一步撤销；无交互提示。 |
 | `CHSPACE` | 部分实现 | 具名拒绝（`chspace.unsupported`）：模型/图纸空间之间移动实体未实现。 |
@@ -319,7 +324,7 @@
 | `ELLIPSE` | 已实现 | — |
 | `ERASE` | 已实现 | — |
 | `ETRANSMIT` | 部分实现 | 具名拒绝（`etransmit.unsupported`）：本构建无 eTransmit/zip 打包模型。 |
-| `EXPLODE` | 部分实现 | 一次一层；拒绝 Dimension/MULTILEADER/非均匀 INSERT |
+| `EXPLODE` | 部分实现 | 标注→线/文字/箭头网格、多重引线→引线/箭头/MTEXT、非均匀块的可表示子集、嵌套仍一层、MINSERT/XREF 拒绝；多重引线的自定义箭头/背景/分栏等显示缺失部分无法产出 |
 | `EXPORT` | 部分实现 | PLOT 别名：仅矢量 SVG/PDF |
 | `EXPORTLAYOUT` | 部分实现 | 具名拒绝（`exportlayout.unsupported`）：请用 PLOT（单一布局，SVG/PDF）。 |
 | `EXPORTPDF` | 部分实现 | 只读能力报告（`exportpdf.use_plot`）：PDF 导出由宿主经 PLOT 负责，本命令自身不写文件。 |
@@ -329,8 +334,8 @@
 | `EXTERNALREFERENCESCLOSE` | 部分实现 | 具名 no-op（`externalreferences.close_not_implemented`）：无外部参照选项板可关闭。 |
 | `EXTRIM` | 部分实现 | 第一个选中为边界，其余为被裁对象；复用 trim 规划；不支持边界/目标按名拒绝 |
 | `FILL` | 部分实现 | 会话令牌 `fill`（默认 ON）；渲染器不消费该标志，无视觉变化；不写库/不入历史。 |
-| `FILLET` | 部分实现 | 两线形式 + 独立 FILLET POLYLINE 选择子；无 Multiple/Trim |
-| `FILTER` | 部分实现 | 同 QSELECT 语法但并入现有选择；仅顶层模型空间 |
+| `FILLET` | 部分实现 | `Radius`/`Trim`/`Polyline` 全顶点、零半径尖角、**平行线自动半径=间隙/2**、圆不被修剪、圆弧侧修剪；**曲线对曲线**（圆/弧/椭圆/样条互选）仍具名拒绝；`Multiple` 属全局 |
+| `FILTER` | 部分实现 | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号分组、元数校验）、相对运算符与已建模属性集；命名过滤器 `.nfl` 需宿主文件 I/O，未实现 |
 | `-FIND` | 部分实现 | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告；不写库 |
 | `FIND` | 部分实现 | `FIND <needle> [=> <replacement>]`；替换形式一条事务/一步撤销；不解析 MTEXT 格式 run；TEXT 单行拒绝换行 |
 | `FINDINCLUDE` | 部分实现 | 会话令牌（默认 ON）；跨块/外部参照文字搜索未实现。 |
@@ -363,7 +368,7 @@
 | `ISODRAFT` | 部分实现 | 会话令牌 `isodraft`；不切换等轴测平面/光标，无视觉变化。 |
 | `ISOLATEOBJECTS` | 部分实现 | 会话隐藏集：隐藏除当前选择外的模型空间对象；无数据库写/撤销 |
 | `ISOPLANE` | 部分实现 | 循环会话令牌 LEFT→TOP→RIGHT；无等轴测光标/捕捉变化。 |
-| `JOIN` | 部分实现 | 仅共线 LINE 或同心相续 ARC |
+| `JOIN` | 部分实现 | 源对象模式：线（共线可留隙）/弧（同心同半径）/椭圆弧/多段线（共面连续）/样条；`Multiple` 模式含 line+arc→多段线；**样条与其它类型混合的 Multiple** 仍具名拒绝；3D 多段线属全局 |
 | `JULIAN` | 部分实现 | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；不解析日期参数。 |
 | `JUSTIFYTEXT` | 部分实现 | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
 | `LAYCUR` | 部分实现 | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
@@ -407,7 +412,7 @@
 | `MATCHPROP` | 已实现 | Basic 六项 + Settings 子集；Text 组复制文字样式与字体、Dimension 组复制标注样式、Hatch 组复制填充样式/图案/渐变；**不**复制字高、标注覆盖值与填充原点（与 AutoCAD 一致）；异类目标跳过该组并报告 |
 | `MENU` | 部分实现 | 具名拒绝（`menu.unsupported`）：本构建无菜单文件模型，界面固定。 |
 | `MEASUREGEOM` | 部分实现 | 选项路由：DISTANCE/ANGLE/AREA/POLYLINE 复用既有工具，RADIUS 只读报告；VOLUME 显式未实现（无 3D 体积模型） |
-| `MIRROR` | 部分实现 | 保留原件；拒绝 Text/MultiLeader |
+| `MIRROR` | 部分实现 | `MIRRTEXT=0` 可读镜像（位置镜像、文字保持可读）、`Erase source`、标注反射；**`MIRRTEXT=1` 字形镜像**无模型；Shape/Opaque/MultiLeader 拒绝 |
 | `MINSERT` | 部分实现 | 具名拒绝（`minsert.unsupported`）：需要块名与行列数；请用 INSERT + ARRAYRECT。 |
 | `MLEADER` | 部分实现 | 单簇/2 顶点/仅直线；无 Options |
 | `MLEADERSTYLE` | 部分实现 | 只读列出多重引线样式；创建/修改/设当前样式未实现。 |
@@ -430,7 +435,7 @@
 | `NCOPY` | 部分实现 | 真实编辑：选中块参照成员按世界变换复制到模型空间；一条事务/一步撤销；无嵌套选择界面。 |
 | `NEW` | 已实现 | — |
 | `OBJECTSCALE` | 部分实现 | 具名拒绝（`objectscale.unsupported`）：本构建无注释性对象模型。 |
-| `OFFSET` | 部分实现 | LINE/CIRCLE/ARC/LWPOLYLINE；ELLIPSE 拒绝；无全局自交修剪 |
+| `OFFSET` | 部分实现 | `Through`/`Erase`/`Layer`/`Multiple`(单步)/固定距离；椭圆与椭圆弧→**样条**；尖角接缝；`Fillet`/`Chamfer` 接缝仍具名拒绝；开放折线自交未检查（AutoCAD 未文档化） |
 | `OOPS` | 部分实现 | v1 只恢复最近一次 ERASE（不覆盖 AutoCAD 的 BLOCK/WBLOCK 删除）；恢复实体用新 id；撤销恢复副本但不恢复快照 |
 | `OPEN` | 已实现 | — |
 | `OPTIONS` | 已实现 | chrome 本地选择子：打开选项对话框 |
@@ -443,7 +448,7 @@
 | `PASTEBLOCK` | 部分实现 | 应用内剪贴板 → 自动命名块；不是 OS 剪贴板 |
 | `PASTECLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
 | `PASTEORIG` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
-| `PEDIT` | 部分实现 | v1 参数式选项子集：仅 `CLOSE`/`OPEN`/`REVERSE`（或 `C`/`O`/`R`），选项作为命令参数传入（无命令内选项提示）；预选择恰好一条可直接寻址的模型空间 LWPOLYLINE（无交互 Select polyline / `Multiple`）；`Join`、`Width`/`Halfwidth`、`Fit`、`Spline`、`Decurve`、`Ltype gen`、`Undo`、`Edit vertex`、非多段线的 `Reverse` 与 `PEDITACCEPT` 转换提示均未实现；无宽度/厚度模型 |
+| `PEDIT` | 部分实现 | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；**`Width`/`Ltype gen`/`Edit vertex`** 因无宽度/`plinegen`/顶点子菜单模型拒绝；闭合多段线 `Fit`/`Spline` 未实现 |
 | `PLAN` | 部分实现 | payload-free 选择子：Top/plan 2D 视图；无 UCS/World/Current 选项（本构建无 UCS 模型） |
 | `PLINE` | 已实现 | — |
 | `PLOT` | 部分实现 | 仅矢量 SVG/PDF；无 CTB/STB、无批量多布局 |
@@ -491,7 +496,7 @@
 | `QDIM` | 部分实现 | v1 仅直线 `LINE`：每条线创建一个 `DimensionKind::Aligned`（端点距离，尺寸线按 `DIMDLI` 偏移），一条事务/一步撤销；圆/弧/点等按名拒绝 |
 | `QLEADER` | 部分实现 | 创建单个 MULTILEADER；无 QLEADER 设置对话框/引线样式/注释类型选项 |
 | `QSAVE` | 部分实现 | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
-| `QSELECT` | 部分实现 | `QSELECT <PROPERTY> <VALUE>`（TYPE/LAYER/COLOR/LINETYPE，ASCII 不区分大小写）；替换选择；仅顶层模型空间；零匹配=空选择+诊断 |
+| `QSELECT` | 部分实现 | `Equals`/`Not Equal`/`>`/`<`/`>=`/`<=`/通配符/`Select All`；整图（当前空间）或当前选择；`Include`/`Exclude`/`Append`；嵌套块不参与；属性集是已建模子集 |
 | `QTEXT` | 部分实现 | 会话令牌 `qtext`；仍按几何绘制文字，不显示占位框。 |
 | `RAY` | 部分实现 | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | `RECTANG` | 已实现 | — |
@@ -527,7 +532,7 @@
 | `SPLINEDIT` | 部分实现 | 具名拒绝（`splinedit.unsupported`）：无 NURBS 编辑面。 |
 | `SSX` | 部分实现 | 以第一个选中对象的五特性（类型/层/颜色/线型/空间）为模板，并入匹配的模型空间对象；空选择/不可寻址模板拒绝 |
 | `STATUS` | 部分实现 | 报告图形/数据库 id、修订、实体数（模型/图纸/块）、图层（off/frozen/locked）、块/线型/文字样式/标注样式/多重引线样式/布局数、模型空间范围、当前图层、会话模式与网格/捕捉/正交/对象捕捉状态、缩放历史深度。创建/编辑时间、内存、图形界限与基点**不跟踪**（无图形头模型），以 `status.not_tracked` 显式说明 |
-| `STRETCH` | 部分实现 | 恒交叉窗口；TEXT/MultiLeader 整命令拒绝 |
+| `STRETCH` | 部分实现 | 整移 vs 顶点拉伸；圆按**圆心**、块/MTEXT/文字按**插入点**；标注按定义点；**交叉多边形/lasso** 未实现（仅交叉矩形） |
 | `TCASE` | 部分实现 | Express 工具、选择式：只改 Text/MText 的可见字符大小写；裸命令默认 Title，键入 `TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE`（或 `U/L/T/S/G`）；MTEXT 格式转义逐字保留；属性/标注文字未建模（`tcase.not_reset`）；MULTILEADER 走 `with_text` |
 | `TCIRCLE` | 部分实现 | `TCIRCLE CIRCLE\ |
 | `TCOUNT` | 部分实现 | `TCOUNT <start> <step> [prefix] [suffix]`；按上→下/左→右顺序把每个选中 Text/MText 替换为 `prefix+编号+suffix`；`step` 必须 >0；AutoCAD 的逐项前缀/后缀对话框模式未实现 |
@@ -742,7 +747,7 @@
 | 157 | `CENTERMARK` | 部分实现 | Creates an associative, cross-shaped mark at the center of a selected circle or arc. | 真实编辑：每个选中圆/圆弧圆心两条交叉直线，臂长=半径 10%（声明规则）；一条事务/一步撤销；无关联对象/无可配置尺寸。 |
 | 158 | `CENTERREASSOCIATE` | 未实现 | Associates or reassociates a center mark or centerline object to selected objects. | — |
 | 159 | `CENTERRESET` | 未实现 | Resets the centerlines to the current value specified in the CENTEREXE system variable. | — |
-| 160 | `CHAMFER` | 部分实现 | Bevels or chamfers the edges of two 2D objects or the adjacent faces of a 3D solid. | 两线形式 + 独立 CHAMFER POLYLINE 选择子；无 Angle/Multiple/Trim |
+| 160 | `CHAMFER` | 已实现 | Bevels or chamfers the edges of two 2D objects or the adjacent faces of a 3D solid. | `Distance`/`Angle`/`Method`/`Trim`/No-Trim/`Polyline` 全顶点；双零距离/角度=仅延伸相交；多段线弧段替换、过短跳过、开口闭合；`Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离未文档化⇒具名拒绝 |
 | 161 | `CHAMFEREDGE` | 未实现 | Bevels the edges of 3D solids and surfaces. | — |
 | 162 | `CHANGE` | 部分实现 | Changes the properties of existing objects. | 真实编辑：选中模型空间实体移到当前层并重置颜色/线型/线宽为 ByLayer；一条事务/一步撤销；无交互点/特性提示。 |
 | 163 | `CHECKSTANDARDS` | 未实现 | Checks the current drawing for standards violations. | — |
@@ -927,7 +932,7 @@
 | 342 | `ETRANSMIT` | 部分实现 | Packages a set of files for Internet transmission. | 具名拒绝（`etransmit.unsupported`）：本构建无 eTransmit/zip 打包模型。 |
 | 343 | `EXOFFSET` | 未实现 | Offsets selected objects. | — |
 | 344 | `EXPLAN` | 未实现 | Displays an orthographic view of the XY plane of a specified UCS without changing the view magnification. | — |
-| 345 | `EXPLODE` | 部分实现 | Breaks a compound object into its component objects. | 一次一层；拒绝 Dimension/MULTILEADER/非均匀 INSERT |
+| 345 | `EXPLODE` | 部分实现 | Breaks a compound object into its component objects. | 标注→线/文字/箭头网格、多重引线→引线/箭头/MTEXT、非均匀块的可表示子集、嵌套仍一层、MINSERT/XREF 拒绝；多重引线的自定义箭头/背景/分栏等显示缺失部分无法产出 |
 | 346 | `-EXPORT` | 部分实现 | Creates a DWF, DWFx, or PDF file from the command line. | 具名拒绝（`-export.unsupported`）：请用 PLOT/EXPORT；本构建只有一条矢量导出路径；命令行拼写。 |
 | 347 | `EXPORT` | 部分实现 | Saves the objects in a drawing to a different file format. | PLOT 别名：仅矢量 SVG/PDF |
 | 348 | `EXPORTDWF` | 未实现 | Creates a DWF file and allows you to set individual page setup overrides on a sheet-by-sheet basis. | — |
@@ -948,9 +953,9 @@
 | 363 | `FILETAB` | 未实现 | Displays the file tabs at the top of the drawing area. | — |
 | 364 | `FILETABCLOSE` | 未实现 | Hides the file tabs at the top of the drawing area. | — |
 | 365 | `FILL` | 部分实现 | Controls the display of filled objects such as hatches, 2D solids, and wide polylines. | 会话令牌 `fill`（默认 ON）；渲染器不消费该标志，无视觉变化；不写库/不入历史。 |
-| 366 | `FILLET` | 部分实现 | Rounds or fillets the edges of two 2D objects or the adjacent faces of a 3D solid. | 两线形式 + 独立 FILLET POLYLINE 选择子；无 Multiple/Trim |
+| 366 | `FILLET` | 部分实现 | Rounds or fillets the edges of two 2D objects or the adjacent faces of a 3D solid. | `Radius`/`Trim`/`Polyline` 全顶点、零半径尖角、**平行线自动半径=间隙/2**、圆不被修剪、圆弧侧修剪；**曲线对曲线**（圆/弧/椭圆/样条互选）仍具名拒绝；`Multiple` 属全局 |
 | 367 | `FILLETEDGE` | 未实现 | Rounds and fillets the edges of solid objects. | — |
-| 368 | `FILTER` | 部分实现 | Creates a list of requirements that an object must meet to be included in a selection set. | 同 QSELECT 语法但并入现有选择；仅顶层模型空间 |
+| 368 | `FILTER` | 部分实现 | Creates a list of requirements that an object must meet to be included in a selection set. | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号分组、元数校验）、相对运算符与已建模属性集；命名过滤器 `.nfl` 需宿主文件 I/O，未实现 |
 | 369 | `-FIND` | 部分实现 | Searches for the text that you specify in the entire drawing, the current space or layout, or selected objects. | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告；不写库 |
 | 370 | `FIND` | 部分实现 | Finds the text that you specify, and can optionally replace it with other text. | `FIND <needle> [=> <replacement>]`；替换形式一条事务/一步撤销；不解析 MTEXT 格式 run；TEXT 单行拒绝换行 |
 | 371 | `FINDINCLUDE` | 部分实现 | Controls the types of text objects included in a search when using the -FIND command. | 会话令牌（默认 ON）；跨块/外部参照文字搜索未实现。 |
@@ -1040,7 +1045,7 @@
 | 455 | `ISODRAFT` | 部分实现 | Turns isometric drafting settings on or off, and specifies the current 2D isometric drafting plane. | 会话令牌 `isodraft`；不切换等轴测平面/光标，无视觉变化。 |
 | 456 | `ISOLATEOBJECTS` | 部分实现 | Temporarily suppresses the display of all objects except those you select. | 会话隐藏集：隐藏除当前选择外的模型空间对象；无数据库写/撤销 |
 | 457 | `ISOPLANE` | 部分实现 | Specifies the current plane for 2D isometric drawing. | 循环会话令牌 LEFT→TOP→RIGHT；无等轴测光标/捕捉变化。 |
-| 458 | `JOIN` | 部分实现 | Joins the endpoints of linear and curved objects to create a single object. | 仅共线 LINE 或同心相续 ARC |
+| 458 | `JOIN` | 部分实现 | Joins the endpoints of linear and curved objects to create a single object. | 源对象模式：线（共线可留隙）/弧（同心同半径）/椭圆弧/多段线（共面连续）/样条；`Multiple` 模式含 line+arc→多段线；**样条与其它类型混合的 Multiple** 仍具名拒绝；3D 多段线属全局 |
 | 459 | `JPGOUT` | 未实现 | Saves selected objects to a file in JPEG file format. | — |
 | 460 | `JULIAN` | 部分实现 | Contains the DATE tool and several AutoCAD Julian date and calendar date conversion routines. | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；不解析日期参数。 |
 | 461 | `JUSTIFYTEXT` | 部分实现 | Changes the justification point of selected text objects without changing their locations. | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
@@ -1133,7 +1138,7 @@
 | 548 | `MESHUNCREASE` | 未实现 | Removes the crease from selected mesh faces, edges, or vertices. | — |
 | 549 | `MIGRATEMATERIALS` | 未实现 | Finds any legacy materials in Tool Palettes and converts them to generic type. | — |
 | 550 | `MINSERT` | 部分实现 | Inserts multiple instances of a block in a rectangular array. | 具名拒绝（`minsert.unsupported`）：需要块名与行列数；请用 INSERT + ARRAYRECT。 |
-| 551 | `MIRROR` | 部分实现 | Creates a mirrored copy of selected objects. | 保留原件；拒绝 Text/MultiLeader |
+| 551 | `MIRROR` | 部分实现 | Creates a mirrored copy of selected objects. | `MIRRTEXT=0` 可读镜像（位置镜像、文字保持可读）、`Erase source`、标注反射；**`MIRRTEXT=1` 字形镜像**无模型；Shape/Opaque/MultiLeader 拒绝 |
 | 552 | `MIRROR3D` | 未实现 | Creates a mirrored copy of selected 3D objects across a mirroring plane. | — |
 | 553 | `MKLTYPE` | 未实现 | Creates a linetype definition based on selected objects and stores them in a specified linetype definition (LIN) file. | — |
 | 554 | `MKSHAPE` | 未实现 | Creates a shape definition based on selected objects. | — |
@@ -1174,7 +1179,7 @@
 | 589 | `NEWVIEW` | 未实现 | Saves a new, named view from the display in the current viewport, or by defining a rectangular window. | — |
 | 590 | `-OBJECTSCALE` | 部分实现 | From the Command prompt, adds or deletes supported scales for annotative objects. | 具名拒绝（`-objectscale.unsupported`）：同一拒绝的命令行拼写。 |
 | 591 | `OBJECTSCALE` | 部分实现 | Adds or deletes supported scales for annotative objects. | 具名拒绝（`objectscale.unsupported`）：无注释性对象模型。 |
-| 592 | `OFFSET` | 部分实现 | Creates concentric circles, parallel lines, and parallel curves. | LINE/CIRCLE/ARC/LWPOLYLINE；ELLIPSE 拒绝；无全局自交修剪 |
+| 592 | `OFFSET` | 部分实现 | Creates concentric circles, parallel lines, and parallel curves. | `Through`/`Erase`/`Layer`/`Multiple`(单步)/固定距离；椭圆与椭圆弧→**样条**；尖角接缝；`Fillet`/`Chamfer` 接缝仍具名拒绝；开放折线自交未检查（AutoCAD 未文档化） |
 | 593 | `OFFSETEDGE` | 未实现 | Creates a closed polyline or spline object that is offset at a specified distance from the edges of a selected planar face on a 3D solid or surface. | — |
 | 594 | `OLECONVERT` | 未实现 | Specifies a different source application for an embedded OLE object, and controls whether the OLE object is represented by an icon. | — |
 | 595 | `OLELINKS` | 未实现 | Updates, changes, and cancels a selected linked OLE object. | — |
@@ -1219,7 +1224,7 @@
 | 634 | `PDFLAYERS` | 未实现 | Controls the display of layers in a PDF underlay. | — |
 | 635 | `-PDFSHXTEXT` | 未实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects from the command line. | — |
 | 636 | `PDFSHXTEXT` | 未实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects. | — |
-| 637 | `PEDIT` | 部分实现 | Edits polylines, objects to be joined to polylines, and related objects. | v1 参数式选项子集 `CLOSE`/`OPEN`/`REVERSE`（`C`/`O`/`R`）：预选择恰好一条模型空间 LWPOLYLINE，选项随命令行传入；无命令内选项提示、无 Select polyline/`Multiple`；`Join`/`Width`/`Halfwidth`/`Fit`/`Spline`/`Decurve`/`Ltype gen`/`Undo`/`Edit vertex`、非多段线 `Reverse` 与 `PEDITACCEPT` 转换未实现；无宽度/厚度模型 |
+| 637 | `PEDIT` | 部分实现 | Edits polylines, objects to be joined to polylines, and related objects. | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；**`Width`/`Ltype gen`/`Edit vertex`** 因无宽度/`plinegen`/顶点子菜单模型拒绝；闭合多段线 `Fit`/`Spline` 未实现 |
 | 638 | `PERFANALYZER` | 未实现 | Opens the Performance Analyzer palette from which you can diagnose operations in AutoCAD that seem slow or unresponsive. | — |
 | 639 | `PERFANALYZERCLOSE` | 未实现 | Closes the Performance Analyzer palette. | — |
 | 640 | `PFACE` | 未实现 | Creates a 3D polyface mesh, vertex by vertex. | — |
@@ -1280,7 +1285,7 @@
 | 695 | `QNEW` | 部分实现 | Starts a new drawing from a specified drawing template file. | 具名拒绝（`qnew.single_document`）：本构建只有一个文档；请用 NEW。 |
 | 696 | `QQUIT` | 部分实现 | Closes all open drawings and exit. | 具名拒绝（`qquit.unsupported`）：应用退出由宿主负责。 |
 | 697 | `QSAVE` | 部分实现 | Saves the current drawing using the specified default file format. | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
-| 698 | `QSELECT` | 部分实现 | Creates a selection set based on filtering criteria. | `QSELECT <PROPERTY> <VALUE>`（TYPE/LAYER/COLOR/LINETYPE，ASCII 不区分大小写）；替换选择；仅顶层模型空间；零匹配=空选择+诊断 |
+| 698 | `QSELECT` | 部分实现 | Creates a selection set based on filtering criteria. | `Equals`/`Not Equal`/`>`/`<`/`>=`/`<=`/通配符/`Select All`；整图（当前空间）或当前选择；`Include`/`Exclude`/`Append`；嵌套块不参与；属性集是已建模子集 |
 | 699 | `QTEXT` | 部分实现 | Controls the display and plotting of text and attribute objects. | 会话令牌 `qtext`；仍按几何绘制文字，不显示占位框。 |
 | 700 | `QUICKCALC` | 未实现 | Opens the QuickCalc calculator. | — |
 | 701 | `QUICKCUI` | 未实现 | Displays the Customize User Interface Editor in a collapsed state. | — |
@@ -1402,7 +1407,7 @@
 | 817 | `STANDARDS` | 未实现 | Manages the association of standards files with drawings. | — |
 | 818 | `STATUS` | 部分实现 | Displays drawing statistics, modes, and extents. | 报告统计/模式/模型空间范围；创建/编辑时间、内存、图形界限与基点显式 `status.not_tracked`（无图形头模型） |
 | 819 | `STLOUT` | 未实现 | Stores 3D solids and watertight meshes in a format that can be used with stereolithography apparatus. | — |
-| 820 | `STRETCH` | 部分实现 | Stretches objects crossed by a selection window or polygon. | 恒交叉窗口；TEXT/MultiLeader 整命令拒绝 |
+| 820 | `STRETCH` | 部分实现 | Stretches objects crossed by a selection window or polygon. | 整移 vs 顶点拉伸；圆按**圆心**、块/MTEXT/文字按**插入点**；标注按定义点；**交叉多边形/lasso** 未实现（仅交叉矩形） |
 | 821 | `-STYLE` | 部分实现 | Creates, modifies, or specifies text styles. | 同一只读文字样式列表，使用 `-style.entry`/`-style.summary`；独立选择子，非别名。 |
 | 822 | `STYLE` | 部分实现 | Creates, modifies, or specifies text styles. | 只读列出文字样式表（`style.entry`/`style.summary`）；创建或修改未实现。 |
 | 823 | `STYLESMANAGER` | 部分实现 | Displays the Plot Style Manager, where you can revise plot style tables. | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |

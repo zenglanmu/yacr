@@ -1,5 +1,10 @@
 use super::*;
 
+use super::helpers::offset_tolerance;
+use crate::command_payload::{
+    MirrorOptions, OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions,
+};
+
 /// One deleted row plus the display state the delete pruned (the `OOPS` snapshot
 /// entry shape).
 pub(crate) type DeletedEntityState = (DbEntity, cad_db::EntityDisplayState);
@@ -537,37 +542,446 @@ impl Application {
         )
     }
 
-    /// Mirror the current selection across the axis `axis_start`→`axis_end`.
+    /// Mirror the current selection across the axis `axis_start`→`axis_end`
+    /// (the bare payload form).
     ///
-    /// Mirrors MOVE/COPY's contract but **keeps the originals** (AutoCAD default):
-    /// mirrored copies are inserted with fresh ids in one transaction and one undo
-    /// step, leaving the sources untouched.
-    ///
-    /// A reflection is orientation-reversing, which the generic transform surface
-    /// refuses for `Arc`/`Ellipse`. MIRROR therefore reflects those two kinds
-    /// **explicitly** (`app_drawing::mirror_geometry`): the plane normal is negated,
-    /// the arc's start angle is re-derived from its mirrored start point with the
-    /// sweep preserved, and the ellipse's axis/parameter are reflected as-is (so a
-    /// full ellipse **and** an elliptical arc are exact). Any kind this build
-    /// cannot mirror honestly (`Text`, `Shape`, `Opaque`, …) still refuses the whole
-    /// command, never a silent drop.
+    /// This is exactly AutoCAD's default option set: **keep the originals**
+    /// (`erase_source = false`) and **readable text** (`MIRRTEXT = 0`). It
+    /// delegates to [`Self::mirror_entities_with_options`], the full option
+    /// entry point, so the two can never disagree.
     pub(crate) fn mirror_entities(&mut self, command: &Command) -> CadResult<CommandOutcome> {
-        let CommandPayload::Mirror {
-            refs,
-            axis_start,
-            axis_end,
-        } = &command.payload
-        else {
-            return Err(CadError::InvalidInput(
-                "MirrorEntities needs a Mirror { refs, axis_start, axis_end } payload".into(),
-            ));
+        let options = match &command.payload {
+            CommandPayload::Mirror {
+                refs,
+                axis_start,
+                axis_end,
+            } => MirrorOptions {
+                refs: refs.clone(),
+                axis_start: *axis_start,
+                axis_end: *axis_end,
+                mirrortext: false,
+                erase_source: false,
+            },
+            CommandPayload::MirrorOptions(options) => {
+                return self.mirror_entities_with_options(command, options);
+            }
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "MirrorEntities needs a Mirror { refs, axis_start, axis_end } or \
+                     MirrorOptions payload"
+                        .into(),
+                ));
+            }
         };
-        if !is_finite_point(*axis_start) || !is_finite_point(*axis_end) {
+        self.mirror_entities_with_options(command, &options)
+    }
+
+    /// The full MIRROR option set: `MIRRTEXT` and `Erase source objects`.
+    ///
+    /// `MIRRTEXT = 0` (readable) is the default and the implemented behaviour:
+    /// text/MTEXT positions mirror and the run stays readable (ATTDEF would
+    /// follow the same rule, but this build has no attribute model), and a
+    /// mirrored block reference reflects its placement, so member glyphs
+    /// (including constant-attribute text) are reversed with it **regardless** of
+    /// `MIRRTEXT`; that is a global note, not a per-attribute rule. `MIRRTEXT = 1`
+    /// is a named refusal (`mirror.mirrortext_glyphs`) because the flat-text
+    /// domain cannot mirror glyphs.
+    ///
+    /// Dimensions are mirrored as a **documented choice**: definition points are
+    /// reflected and the display is re-synthesized (Autodesk does not document
+    /// MIRROR on dimensions). `erase_source` deletes every source in the same
+    /// transaction as the insert, so one undo step restores them.
+    ///
+    /// Wiring: [`CommandPayload::MirrorOptions`] routes here directly; the bare
+    /// `Mirror` payload keeps the defaults above.
+    pub(crate) fn mirror_entities_with_options(
+        &mut self,
+        command: &Command,
+        options: &MirrorOptions,
+    ) -> CadResult<CommandOutcome> {
+        if !is_finite_point(options.axis_start) || !is_finite_point(options.axis_end) {
             return Err(CadError::InvalidInput(
                 "MirrorEntities axis points must be finite".into(),
             ));
         }
-        let transform = crate::draw_tool::mirror_transform(*axis_start, *axis_end)?;
-        self.mirror_selection(command, refs, &transform)
+        let transform = crate::draw_tool::mirror_transform(options.axis_start, options.axis_end)?;
+        self.mirror_selection_with_options(
+            command,
+            &options.refs,
+            &transform,
+            options.mirrortext,
+            options.erase_source,
+        )
+    }
+}
+
+impl Application {
+    /// The full OFFSET option set: distance / `Through`, `Erase`, `Layer`,
+    /// `Multiple` (one side/through point per repetition) and the
+    /// `OFFSETGAPTYPE` join.
+    ///
+    /// Supported sources: LINE, CIRCLE, ARC, ELLIPSE (full or elliptical arc),
+    /// LWPOLYLINE (straight or bulged) and SPLINE. An ellipse or elliptical arc
+    /// is offset into a **clamped approximating B-spline** through sampled
+    /// offset points — never an ellipse — with the sampling tolerance documented
+    /// on [`super::offset_polyline::offset_ellipse_as_spline`]. A spline source
+    /// is likewise offset through samples; a non-planar spline is refused
+    /// (`offset.non_planar`).
+    ///
+    /// A polyline is offset segment by segment with the sharp-corner join
+    /// (`OFFSETGAPTYPE` 0): straight vertices use the analytic miter, bulge
+    /// vertices the exact line/circle and circle/circle intersections of the
+    /// arc arm. `OffsetGapType::Fillet`/`Chamfer` are named refusals
+    /// (`offset.gap_type`) rather than being treated as sharp. A **closed**
+    /// offset ring that crosses itself is refused by name
+    /// (`offset.self_intersection`): Autodesk does not document that case, so
+    /// this build neither trims nor fills it.
+    ///
+    /// `Erase` deletes the source in the **same** transaction as the insert(s)
+    /// (one undo step restores it). `Layer::Current` stores the caller-resolved
+    /// current layer; `Layer::Source` keeps the source layer. Every offset
+    /// carries the source's display state. A refusal changes nothing and records
+    /// no history.
+    pub(crate) fn offset_entities_with_options(
+        &mut self,
+        command: &Command,
+        options: &OffsetOptions,
+    ) -> CadResult<CommandOutcome> {
+        if options.refs.is_empty() {
+            return Err(CadError::InvalidInput(
+                "OffsetEntity needs at least one selected reference".into(),
+            ));
+        }
+        if options.side_points.is_empty() {
+            return Err(CadError::InvalidInput(
+                "OFFSET needs at least one side/through point".into(),
+            ));
+        }
+        if !options
+            .side_points
+            .iter()
+            .all(|point| is_finite_point(*point))
+        {
+            return Err(CadError::InvalidInput(
+                "OffsetEntity side point must be finite".into(),
+            ));
+        }
+        let fixed_distance = match options.mode {
+            OffsetMode::Distance(distance) => {
+                if !distance.is_finite() || distance <= offset_tolerance() {
+                    return Err(CadError::InvalidInput(
+                        "OFFSET distance must be finite and positive".into(),
+                    ));
+                }
+                Some(distance)
+            }
+            OffsetMode::Through => None,
+        };
+        if matches!(options.gap, OffsetGapType::Fillet | OffsetGapType::Chamfer) {
+            return Err(CadError::Unsupported(
+                "OFFSET offset.gap_type: only OFFSETGAPTYPE 0 (sharp miter/analytic joins) is \
+                 implemented; the fillet and chamfer gap types are not modelled"
+                    .into(),
+            ));
+        }
+
+        let document_id = command.document;
+        let (source, layer, display, planned, diagnostics) = {
+            let document = self
+                .workspace
+                .documents
+                .get(&document_id)
+                .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+            let drawing = &document.drawing;
+            let (sources, diagnostics) = Self::resolve_selection(
+                drawing,
+                document_id,
+                &options.refs,
+                "offset",
+                "OffsetEntity",
+                "偏移",
+                false,
+            )?;
+            if sources.len() != 1 {
+                return Err(CadError::InvalidInput(format!(
+                    "OffsetEntity requires exactly one selected entity, got {}",
+                    sources.len()
+                )));
+            }
+            let source = sources[0].clone();
+            let layer = match options.layer {
+                OffsetLayer::Source => source.layer,
+                OffsetLayer::Current(layer) => layer,
+            };
+            if drawing.layer(layer).is_none() {
+                return Err(CadError::InvalidInput(format!(
+                    "OFFSET target layer {} does not exist",
+                    layer.0
+                )));
+            }
+            let display = drawing.entity_display_state(source.id);
+            let mut planned = Vec::with_capacity(options.side_points.len());
+            for side_point in &options.side_points {
+                planned.push(plan_offset(&source.geometry, *side_point, fixed_distance)?);
+            }
+            (source, layer, display, planned, diagnostics)
+        };
+
+        let geometries: Vec<SemanticGeometry> = planned
+            .iter()
+            .map(|(geometry, _, _)| geometry.clone())
+            .collect();
+        let erase = options
+            .erase_source
+            .then(|| (source.clone(), display.clone()));
+        let mut outcome = self.commit_offset_batch(
+            command,
+            geometries,
+            layer,
+            source.space.clone(),
+            Some(display),
+            erase,
+        )?;
+        let mut merged = Vec::new();
+        for (index, (_, applied, message)) in planned.iter().enumerate() {
+            let object = outcome.objects.get(index).copied();
+            merged.push(Diagnostic {
+                object,
+                code: "drawing.offset".into(),
+                message: message.replace("{distance}", &format!("{applied:.4}")),
+            });
+        }
+        merged.extend(diagnostics);
+        outcome.diagnostics = merged;
+        Ok(outcome)
+    }
+
+    /// Insert every offset in one transaction, optionally erasing the source in
+    /// the same transaction (one undo step).
+    fn commit_offset_batch(
+        &mut self,
+        command: &Command,
+        geometries: Vec<SemanticGeometry>,
+        layer: LayerId,
+        space: SpaceId,
+        display: Option<cad_db::EntityDisplayState>,
+        erase: Option<(DbEntity, cad_db::EntityDisplayState)>,
+    ) -> CadResult<CommandOutcome> {
+        if geometries.is_empty() {
+            return Err(CadError::InvalidInput(
+                "OFFSET needs at least one offset to insert".into(),
+            ));
+        }
+        let document_id = command.document;
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
+        if drawing.layer(layer).is_none() {
+            return Err(CadError::InvalidInput(format!(
+                "OFFSET target layer {} does not exist",
+                layer.0
+            )));
+        }
+        let base_order = drawing
+            .entities()
+            .filter(|entity| entity.space == SpaceId::Model)
+            .map(|entity| entity.draw_order)
+            .max()
+            .map(|order| order.saturating_add(1))
+            .unwrap_or(0);
+        let mut entities: Vec<DbEntity> = Vec::with_capacity(geometries.len());
+        for (index, geometry) in geometries.into_iter().enumerate() {
+            let entity_id = drawing.allocate_entity_id();
+            entities.push(DbEntity {
+                object: cad_db::DbObject {
+                    id: ObjectId(entity_id.0),
+                    type_key: class_name(&geometry).to_string(),
+                    revision: Revision(0),
+                    source_handle: None,
+                },
+                id: entity_id,
+                layer,
+                space: space.clone(),
+                geometry,
+                draw_order: base_order + index as i64,
+            });
+        }
+
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged = drawing.begin_drawing_transaction("offset entity", transaction)?;
+            for entity in &entities {
+                staged.insert_entity(entity.clone())?;
+            }
+            if let Some(state) = &display {
+                for entity in &entities {
+                    staged.update_entity_display_state(entity.id, state)?;
+                }
+            }
+            if let Some((source, _)) = &erase {
+                staged.delete_entity(source.id)?;
+            }
+            staged.commit()?
+        };
+        let mut patches: Vec<DrawingPatch> = entities
+            .iter()
+            .map(|entity| DrawingPatch {
+                id: entity.id,
+                before: None,
+                after: Some(entity.clone()),
+                before_state: None,
+                after_state: display.clone(),
+            })
+            .collect();
+        if let Some((source, state)) = erase {
+            patches.push(drawing_patch_deleted(source.id, source, state));
+        }
+        self.publish_candidate(
+            document_id,
+            candidate,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: "offset entity".into(),
+                patches,
+                block_patches: Vec::new(),
+                merge_key: None,
+            },
+        )?;
+
+        Ok(CommandOutcome {
+            objects: entities
+                .iter()
+                .map(|entity| ObjectId(entity.id.0))
+                .collect(),
+            changes: Some(Arc::new(change_set)),
+            diagnostics: Vec::new(),
+            measurement: None,
+            point_report: None,
+        })
+    }
+}
+
+/// Plan one offset for the given source geometry and side/through point.
+///
+/// `distance = Some(d)` is the fixed-distance prompt (the point only picks the
+/// side); `None` is `Through` (the pick also fixes the distance). The returned
+/// message contains a `{distance}` placeholder the caller replaces with the
+/// applied distance, so the command reports one number per created entity.
+fn plan_offset(
+    geometry: &SemanticGeometry,
+    side_point: Point3,
+    distance: Option<f64>,
+) -> CadResult<(SemanticGeometry, f64, String)> {
+    match geometry {
+        SemanticGeometry::Line { start, end } => {
+            let (geometry, applied) =
+                super::trim_extend::offset_line_with_distance(*start, *end, side_point, distance)?;
+            Ok((
+                geometry,
+                applied,
+                "OFFSET: line offset by {distance} on the picked side".into(),
+            ))
+        }
+        SemanticGeometry::Circle {
+            center,
+            normal,
+            radius,
+        } => {
+            let (geometry, applied) = super::trim_extend::offset_circle_with_distance(
+                *center, *normal, *radius, side_point, distance,
+            )?;
+            Ok((
+                geometry,
+                applied,
+                "OFFSET: circle offset, new radius {distance}".into(),
+            ))
+        }
+        SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } => {
+            let (geometry, applied) = super::trim_extend::offset_arc_with_distance(
+                *center, *normal, *radius, *start, *sweep, side_point, distance,
+            )?;
+            Ok((
+                geometry,
+                applied,
+                "OFFSET: arc offset, new radius {distance}".into(),
+            ))
+        }
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed,
+        } => {
+            let (geometry, applied) = match distance {
+                Some(_) => {
+                    offset_polyline_with_distance(points, bulges, *closed, side_point, distance)?
+                }
+                None => {
+                    super::offset_polyline::offset_polyline(points, bulges, *closed, side_point)?
+                }
+            };
+            Ok((
+                geometry,
+                applied,
+                "OFFSET: polyline offset by {distance} (sharp joins)".into(),
+            ))
+        }
+        SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => {
+            let (geometry, applied) = super::offset_polyline::offset_ellipse_as_spline(
+                *center,
+                *normal,
+                *major_axis,
+                *ratio,
+                *start,
+                *sweep,
+                side_point,
+                distance,
+            )?;
+            Ok((
+                geometry,
+                applied,
+                "OFFSET: ellipse offset approximated by a spline, distance {distance}".into(),
+            ))
+        }
+        SemanticGeometry::Spline {
+            degree,
+            knots,
+            control_points,
+            weights,
+        } => {
+            let (geometry, applied) = super::offset_polyline::offset_spline_as_spline(
+                *degree,
+                knots,
+                control_points,
+                weights,
+                side_point,
+                distance,
+            )?;
+            Ok((
+                geometry,
+                applied,
+                "OFFSET: spline offset approximated by a spline, distance {distance}".into(),
+            ))
+        }
+        other => Err(CadError::Unsupported(format!(
+            "OFFSET supports LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE and SPLINE, got {}",
+            geometry_kind(other)
+        ))),
     }
 }

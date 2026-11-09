@@ -19,6 +19,12 @@ use super::*;
 /// a second time.
 pub fn typed_command_argument(text: &str) -> Option<(&'static str, &str)> {
     let trimmed = text.trim();
+    // A whole line that is itself a canonical selector is a name-only command,
+    // never a `name + argument` split: `CHAMFER POLYLINE` / `FILLET POLYLINE`
+    // stay their own selectors even though `CHAMFER`/`FILLET` now take options.
+    if canonical_command_name(trimmed).is_some() {
+        return None;
+    }
     let split = trimmed.find([' ', '\t'])?;
     let (name, rest) = trimmed.split_at(split);
     let argument = rest.trim_start_matches([' ', '\t']).trim_end();

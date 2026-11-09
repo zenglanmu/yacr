@@ -13,12 +13,14 @@
 //! with its own needs-argument reason, never defaulted.
 
 use cad_app::interaction::SelectionMode;
-use cad_app::{CommandId, CommandPayload};
+use cad_app::{CommandId, CommandPayload, SelectionToolPayload};
 
 use super::{
     commands::{
-        invalid_filter_argument_reason, invalid_find_argument_reason,
-        invalid_getsel_argument_reason, parse_find_argument, parse_property_filter,
+        invalid_filter_argument_reason, invalid_filter_logic_argument_reason,
+        invalid_find_argument_reason, invalid_getsel_argument_reason,
+        invalid_qselect_argument_reason, looks_like_filter_expression, looks_like_structured_query,
+        parse_filter_request, parse_find_argument, parse_property_filter, parse_qselect_request,
         FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, QSELECT_SELECTOR,
     },
     CadSession,
@@ -26,12 +28,47 @@ use super::{
 
 impl CadSession {
     /// Apply one typed filter line (`QSELECT`/`FILTER`/`GETSEL`).
+    ///
+    /// The structured forms are tried first (they carry an operator/logic
+    /// grammar the legacy `PROPERTY VALUE` line never has); a line without an
+    /// operator falls through to the legacy one-shot payload, so both contracts
+    /// stay reachable.
     pub(super) fn select_filter_argument(
         &self,
         selector: &'static str,
         argument: &str,
         text: &str,
     ) -> Result<(), String> {
+        if selector == QSELECT_SELECTOR {
+            if let Some(request) = parse_qselect_request(argument) {
+                self.core.record_command(selector);
+                return self.dispatch_payload(
+                    CommandId::QSelect,
+                    CommandPayload::SelectionTool(Box::new(SelectionToolPayload::QSelect(
+                        Box::new(request),
+                    ))),
+                );
+            }
+            // A property/operator shape that parsed as a property but not as a
+            // complete request is a malformed structured line, not a legacy one.
+            if looks_like_structured_query(argument) {
+                return self.refuse_argument(invalid_qselect_argument_reason(text));
+            }
+        }
+        if selector == FILTER_SELECTOR {
+            if let Some(request) = parse_filter_request(argument) {
+                self.core.record_command(selector);
+                return self.dispatch_payload(
+                    CommandId::FilterSelect,
+                    CommandPayload::SelectionTool(Box::new(SelectionToolPayload::Filter(
+                        Box::new(request),
+                    ))),
+                );
+            }
+            if looks_like_filter_expression(argument) {
+                return self.refuse_argument(invalid_filter_logic_argument_reason(text));
+            }
+        }
         let Some((property, value)) = parse_property_filter(argument) else {
             return self.refuse_argument(invalid_filter_argument_reason(text, selector));
         };

@@ -20,6 +20,7 @@ mod input_and_lifecycle;
 mod layer_arguments;
 mod layout_arguments;
 mod layout_status;
+mod modify_arguments;
 mod pedit;
 mod point_style;
 mod select_filter;

@@ -192,6 +192,7 @@ pub(super) fn offset_polyline_with_arcs(
     bulges: &[f64],
     closed: bool,
     side_point: Point3,
+    distance_override: Option<f64>,
 ) -> CadResult<(SemanticGeometry, f64)> {
     let tol = offset_tolerance();
     if points.len() < 2 {
@@ -220,7 +221,19 @@ pub(super) fn offset_polyline_with_arcs(
     let normal = arc_plane_normal(points, &dirs, closed, tol)?;
     let arcs = source_arcs(points, bulges, normal, &dirs, tol)?;
 
-    let signed = pick_signed_distance(points, &dirs, &arcs, normal, side_point);
+    let picked = pick_signed_distance(points, &dirs, &arcs, normal, side_point);
+    let signed = match distance_override {
+        Some(requested) => {
+            if picked.abs() <= tol {
+                return Err(CadError::InvalidInput(
+                    "OFFSET side point must not lie on the polyline when a distance is given"
+                        .into(),
+                ));
+            }
+            picked.signum() * requested
+        }
+        None => picked,
+    };
     let distance = signed.abs();
     if !distance.is_finite() || distance <= tol {
         return Err(CadError::InvalidInput(
@@ -256,14 +269,15 @@ pub(super) fn offset_polyline_with_arcs(
 
     let out_bulges = rederive_bulges(bulges, &offset, &out, normal, tol)?;
     require_no_line_collapse(&out, &offset, &dirs, tol)?;
-    Ok((
-        SemanticGeometry::Polyline {
-            points: out,
-            bulges: out_bulges,
-            closed,
-        },
-        distance,
-    ))
+    let geometry = SemanticGeometry::Polyline {
+        points: out,
+        bulges: out_bulges,
+        closed,
+    };
+    if closed {
+        super::offset_polyline::require_no_closed_self_intersection(&geometry, normal, tol)?;
+    }
+    Ok((geometry, distance))
 }
 
 /// The polyline's plane normal, or a named refusal when a bulge has no plane.

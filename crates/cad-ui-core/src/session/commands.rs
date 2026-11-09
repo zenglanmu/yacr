@@ -665,6 +665,14 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     TORIENT_SELECTOR,
     TCASE_SELECTOR,
     PEDIT_SELECTOR,
+    // The interactive modify option lines (2026-11-09): JOIN's two modes, the
+    // OFFSET option set, MIRROR's `MIRRTEXT`/erase answers, and the CHAMFER /
+    // FILLET stored modes (plus their polyline forms).
+    JOIN_SELECTOR,
+    OFFSET_SELECTOR,
+    MIRROR_SELECTOR,
+    CHAMFER_SELECTOR,
+    FILLET_SELECTOR,
     HATCHEDIT_SELECTOR,
     MEASUREGEOM_SELECTOR,
     JUSTIFYTEXT_SELECTOR,
@@ -766,6 +774,11 @@ pub use layout::*;
 // The 2026-11-07 extras grammars (`-PAN`, `TRACE` … `LINETYPE`).
 mod extras;
 pub use extras::*;
+
+// The interactive modify argument grammars (`JOIN`, `OFFSET`, `MIRROR`,
+// `CHAMFER`, `FILLET` and the full `PEDIT` option line).
+mod modify;
+pub use modify::*;
 
 // The selector -> interactive-tool routing table (split out for the code-size
 // gate). Re-exported so `commands::interaction_request_for` still resolves.

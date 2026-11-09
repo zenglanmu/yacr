@@ -26,10 +26,11 @@ use super::annot_arguments::{
 };
 use super::commands::{
     parse_linetype_argument, parse_mocoro_argument, parse_pan_argument, parse_trace_argument,
-    parse_viewres_argument, parse_vscurrent_argument, DONUT_SELECTOR, DRAWORDER_SELECTOR,
-    FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, HELIX_SELECTOR,
-    LINETYPE_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR,
-    MREDO_SELECTOR, MULTIPLE_SELECTOR, PAN_SELECTOR, PURGE_SELECTOR, QSELECT_SELECTOR,
+    parse_viewres_argument, parse_vscurrent_argument, CHAMFER_SELECTOR, DONUT_SELECTOR,
+    DRAWORDER_SELECTOR, FILLET_SELECTOR, FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR,
+    GETSEL_SELECTOR, HELIX_SELECTOR, JOIN_SELECTOR, LINETYPE_SELECTOR, MIRROR_SELECTOR,
+    MLINE_SELECTOR, MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR, MREDO_SELECTOR,
+    MULTIPLE_SELECTOR, OFFSET_SELECTOR, PAN_SELECTOR, PURGE_SELECTOR, QSELECT_SELECTOR,
     RENAME_SELECTOR, SETVAR_SELECTOR, SOLID_SELECTOR, TRACE_SELECTOR, TREX_SELECTOR,
     VIEWRES_SELECTOR, VSCURRENT_SELECTOR,
 };
@@ -75,6 +76,11 @@ impl CadSession {
             // `PEDIT <option>` (2026-11-07): the one selected polyline is the
             // input; the option travels in the payload.
             PEDIT_SELECTOR => self.pedit_argument(argument, text),
+            // The interactive modify option lines (2026-11-09): JOIN's modes,
+            // the OFFSET/MIRROR stored options, and the CHAMFER/FILLET stored
+            // modes plus their polyline forms.
+            JOIN_SELECTOR | OFFSET_SELECTOR | MIRROR_SELECTOR | CHAMFER_SELECTOR
+            | FILLET_SELECTOR => self.modify_argument(selector, argument, text),
             // `HATCHEDIT <option>` (2026-11-07): the one selected hatch is the
             // input; the typed option travels in the payload.
             HATCHEDIT_SELECTOR => self.hatchedit_argument(argument, text),

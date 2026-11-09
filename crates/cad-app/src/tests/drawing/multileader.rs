@@ -1,8 +1,9 @@
 //! P7b-1 MULTILEADER contract tests: explicit match-point arms.
 //!
-//! Covers ADR 0019 decision G — EXPLODE refuses by type key (top level and
-//! in-block), STRETCH refuses the whole command, pick/bounds/snap match the
-//! pre-P7b `Compound`, and the stored `class_name` is `AcDbMultiLeader`.
+//! Covers ADR 0019 decision G — EXPLODE decomposes a top-level MULTILEADER into
+//! its display children and refuses an in-block one by type key, STRETCH refuses
+//! the whole command, pick/bounds/snap match the pre-P7b `Compound`, and the
+//! stored `class_name` is `AcDbMultiLeader`.
 
 use super::*;
 use cad_measure::snap::SnapTarget;
@@ -160,7 +161,7 @@ fn window(a: Point3, b: Point3) -> [[f64; 2]; 2] {
 }
 
 #[test]
-fn explode_refuses_a_top_level_multileader_by_type_key_and_writes_nothing() {
+fn explode_decomposes_a_top_level_multileader_into_its_display_children() {
     let (mut app, mut session) = app_with(
         vec![ent_with(
             1,
@@ -173,27 +174,31 @@ fn explode_refuses_a_top_level_multileader_by_type_key_and_writes_nothing() {
     );
     let before = app.workspace.documents[&DocumentId(1)].drawing.revision();
     select_one(&mut app, &mut session, 1);
-    let error = execute(
+    let outcome = execute(
         &mut app,
         &mut session,
         CommandId::ExplodeEntities,
         CommandPayload::None,
     )
-    .expect_err("a multileader is refused");
-    match error {
-        CadError::Unsupported(reason) => assert!(
-            reason.contains("AcDbMultiLeader") && reason.contains("type_key"),
-            "the refusal must name the type key: {reason}"
-        ),
-        other => panic!("expected an Unsupported type_key refusal, got {other:?}"),
-    }
+    .expect("a multileader explodes into its display");
     assert_eq!(
-        app.workspace.documents[&DocumentId(1)].drawing.revision(),
-        before,
-        "a refusal changes nothing"
+        outcome.objects.len(),
+        4,
+        "two path LINEs, the arrowhead MESH and the dogleg LINE"
     );
-    assert_eq!(entity_count(&app), 1);
-    assert_eq!(undo_depth(&app), 0);
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(1))
+            .is_none(),
+        "the source MULTILEADER is deleted"
+    );
+    assert_ne!(
+        app.workspace.documents[&DocumentId(1)].drawing.revision(),
+        before
+    );
+    assert_eq!(entity_count(&app), 4);
+    assert_eq!(undo_depth(&app), 1, "one transaction / one undo step");
 }
 
 #[test]

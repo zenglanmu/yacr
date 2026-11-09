@@ -1199,3 +1199,21 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `SYSWINDOWS` | **部分实现（具名拒绝）**：`syswindows.unsupported: application window layout is host-owned` | 同上 |
 | `MENU` | **部分实现（具名拒绝）**：`menu.unsupported: no menu-file model; the UI is fixed` | 同上 |
 | `RIBBON` | **部分实现（具名拒绝）**：`ribbon.unsupported: ribbon visibility is host-owned chrome` | 同上 |
+
+## P2 晋升与边界更新（2026-11-09）
+
+> 以下条目**取代正文中同名命令的旧界**（正文保留为历史记录）；未列出的能力仍以对应条目为准。
+> 依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux 编译 + 契约测试，GUI/GPU/像素 NOT VERIFIED。
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `CHAMFER` | **完整实现** | `Distance`（按拾取顺序）/`Angle`（`d₂=d·sinα/sin(φ+α)`）/`Method`/`Trim`/No-Trim；双零 ⇒ 仅延伸相交、不建倒角线；`CHAMFER POLYLINE` 全顶点、弧段替换、过短跳过、开口闭合；一条事务/一步撤销 | `Multiple` 与命令内 `Undo` 属逐选项提示全局范围（每次调用一步撤销，`UNDO` 可用）；负距离/负角度未在 AutoCAD 文档中定义 ⇒ 具名拒绝；圆弧/圆/样条目标 AutoCAD 也不接受 |
+| `FILLET` | 部分实现 | `Radius`/`Trim`/`Polyline` 全顶点；`R=0` 尖角；**平行线自动半径 = 间隙/2**；直线↔圆/弧相切且**圆不被修剪**；弧按拾取侧修剪；一条事务/一步撤销 | **曲线对曲线**（圆/弧/圆‑弧、椭圆、椭圆弧、样条互选）仍 `fillet.unsupported_pair`；`Multiple` 属全局 |
+| `PEDIT` | 部分实现 | 全选项行：`Close`/`Open`/`Join`/`Fit`/`Spline [0-99]`/`Decurve`/`Reverse`/`Undo` + `PEDIT CONVERT` 的 LINE/ARC/SPLINE 转换；Join 接受线/弧/多段线；一条事务/一步撤销 | `Width`/`Ltype gen`/`Edit vertex`（域无宽度、`plinegen`、顶点子菜单）；闭合多段线 `Fit`/`Spline` 未实现；样条精度已验证记录但不改变几何 |
+| `JOIN` | 部分实现 | 源对象模式：共线线（可留隙）→LINE、同心同半径弧（可留隙）→ARC/`Close`→CIRCLE、椭圆弧→ELLIPSE、共面连续线/弧/多段线→POLYLINE、连续样条→SPLINE；`JOIN MULTIPLE` 含 line+arc→POLYLINE | **样条/椭圆弧与其它类型的 Multiple 混合** ⇒ `join.multiple_spline_mix`；非共面多段线结果 ⇒ `join.noncoplanar`（3D 属全局） |
+| `OFFSET` | 部分实现 | `Through`/`Erase`/`Layer`/`Multiple`（单步）/固定距离；椭圆与椭圆弧→**样条**（采样容差 `scale·1e-4`）；尖角接缝；闭合环自交拒绝 | `OFFSETGAPTYPE` 的 `Fillet`/`Chamfer` 接缝拒绝；开放折线远端自交未检查（AutoCAD 未文档化）；`OFFSET MULTIPLE` 的多点循环拒绝（单点捕获） |
+| `STRETCH` | 部分实现 | 交叉矩形：部分包围=逐顶点、完全包围=整移；圆按**圆心**、块/MTEXT/文字按**插入点**；标注按定义点重合成；一条事务/一步撤销 | **交叉多边形/lasso** 未实现；`HATCH` 拉伸未文档化 ⇒ 不修改；宽度/切线/拟合信息不改 |
+| `MIRROR` | 部分实现 | `MIRRTEXT=0` 默认：位置镜像、文字保持可读；`MIRROR ERASE YES/NO`；标注反射后重合成；一条事务/一步撤销 | **`MIRRTEXT=1` 字形镜像**无模型 ⇒ 具名拒绝；`Shape`/`Opaque`/`MultiLeader` 拒绝（`MultiLeader` 缩放/镜像整选择拒绝） |
+| `EXPLODE` | 部分实现 | 标注→线/弧/箭头网格/文字；多重引线→引线/样条/箭头网格/MTEXT；非均匀块的可表示子集（圆→椭圆）；嵌套仍一层；MINSERT/XREF 拒绝；一条事务/一步撤销 | 多重引线的自定义箭头块/背景/分栏/打断/非默认平面在 `display()` 中缺失，无法产出；块属性值丢弃（无属性模型，全局） |
+| `QSELECT` | 部分实现 | `Equals`/`Not Equal`/`>`/`<`/`>=`/`<=`/通配符/`Select All`；整图（当前空间）或当前选择；`Include`/`Exclude`/`Append`；嵌套块不参与；只读 | 属性集是已建模子集（AutoCAD 的属性列表按对象类型动态、可含自定义特性）；通配符仅 `*`/`?` |
+| `FILTER` | 部分实现 | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读 | 命名过滤器 `.nfl` 需宿主文件 I/O；属性集同上 |

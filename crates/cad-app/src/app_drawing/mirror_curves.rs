@@ -68,15 +68,20 @@ use cad_geometry::{add, arbitrary_axis, dot, length, normalize, scale, sub};
 /// falls back to `−Z` (the reflected `+Z` default every other kind starts at).
 const DEGENERATE_NORMAL: f64 = 1e-12;
 
-/// Reflect one entity's geometry for MIRROR.
+/// Reflect one entity's geometry for MIRROR, with the `MIRRTEXT` policy.
+///
+/// `mirrortext = false` (AutoCAD's default) keeps a reflected text run readable:
+/// the position mirrors and the rotation follows the reflected baseline, but the
+/// glyph order is never reversed. `mirrortext = true` is a named refusal because
+/// the flat-text domain has no mirrored-glyph representation.
 ///
 /// `Arc`/`Ellipse` are handled here; every other kind keeps the generic
-/// `transform_geometry` behaviour (including its `Text`/`Shape`/`Opaque`
-/// refusals). A **proper** transform (positive determinant) is not a reflection, so
-/// it is delegated too.
-pub(super) fn mirror_geometry(
+/// `transform_geometry` behaviour. A **proper** transform (positive determinant)
+/// is not a reflection, so it is delegated too.
+pub(super) fn mirror_geometry_with_options(
     geometry: &SemanticGeometry,
     transform: &Transform3,
+    mirrortext: bool,
 ) -> CadResult<SemanticGeometry> {
     if transform.determinant() >= 0.0 {
         return transform_geometry(geometry, transform);
@@ -105,8 +110,215 @@ pub(super) fn mirror_geometry(
             *sweep,
             transform,
         ),
+        SemanticGeometry::Text {
+            text,
+            position,
+            style,
+            height,
+            rotation,
+            font,
+            h_align,
+            v_align,
+            wrap_width,
+        } => mirror_text(
+            text,
+            *position,
+            *style,
+            *height,
+            *rotation,
+            font,
+            *h_align,
+            *v_align,
+            *wrap_width,
+            transform,
+            mirrortext,
+        ),
+        SemanticGeometry::Dimension(dimension) => mirror_dimension(dimension, transform),
         other => transform_geometry(other, transform),
     }
+}
+
+/// `TEXT`/`MTEXT`: mirror the insertion point and keep the run readable
+/// (`MIRRTEXT` 0).
+///
+/// The stored `position` is the insertion/anchor point, so it mirrors exactly.
+/// The rotation follows the reflected baseline; when that would run the text
+/// backwards relative to the source (`cos θ · cos θ' < 0`, the upstream AutoCAD
+/// `MIRRTEXT=0` predicate), a half turn is added so the run stays upright.
+/// Horizontal/vertical alignment and wrap width are copied unchanged: this
+/// domain stores an anchor, not a measured run, so no width compensation is
+/// invented. `MIRRTEXT=1` would need a mirrored-glyph flag the flat-text domain
+/// does not have, so it is a named refusal.
+#[allow(clippy::too_many_arguments)]
+fn mirror_text(
+    text: &str,
+    position: Point3,
+    style: StyleId,
+    height: f64,
+    rotation: f64,
+    font: &Option<String>,
+    h_align: TextAlignH,
+    v_align: TextAlignV,
+    wrap_width: Option<f64>,
+    transform: &Transform3,
+    mirrortext: bool,
+) -> CadResult<SemanticGeometry> {
+    if mirrortext {
+        return Err(CadError::Unsupported(
+            "MIRROR mirror.mirrortext_glyphs: MIRRTEXT=1 would mirror the glyphs themselves, \
+             which the flat-text domain cannot represent; use the readable default (MIRRTEXT=0)"
+                .into(),
+        ));
+    }
+    let new_position = transform.apply_point(position);
+    let reflected = reflected_angle(rotation, transform);
+    let new_rotation = readable_rotation(rotation, reflected);
+    if !is_finite_point(new_position) || !new_rotation.is_finite() {
+        return Err(CadError::InvalidInput(
+            "MIRROR cannot mirror TEXT: the reflected parameters are not finite".into(),
+        ));
+    }
+    Ok(SemanticGeometry::Text {
+        text: text.to_string(),
+        position: new_position,
+        style,
+        height,
+        rotation: new_rotation,
+        font: font.clone(),
+        h_align,
+        v_align,
+        wrap_width,
+    })
+}
+
+/// `DIMENSION`: reflect its definition points and re-synthesize the display.
+///
+/// Autodesk does not document MIRROR on dimensions, so this is our declared
+/// choice: every definition point (including the group-11 text middle point) is
+/// reflected, the plane normal is negated exactly like the arc/ellipse arms, and
+/// the display is rebuilt through the domain's single synthesizer (so the
+/// measurement and drawn number stay in step). The dimension's own text stays
+/// readable because the synthesizer draws normal text. A dimension whose display
+/// came from an external picture block is re-synthesized too; this command cannot
+/// address individual picture members, and the definition is the authority here.
+fn mirror_dimension(
+    dimension: &DimensionGeometry,
+    transform: &Transform3,
+) -> CadResult<SemanticGeometry> {
+    let source = dimension.definition();
+    let definition = DimensionDefinition {
+        kind: mirror_dimension_kind(source.kind, transform),
+        points: mirror_dimension_points(&source.points, transform),
+        text_middle: transform.apply_point(source.text_middle),
+        text_rotation: if source.text_rotation == 0.0 {
+            0.0
+        } else {
+            readable_rotation(
+                source.text_rotation,
+                reflected_angle(source.text_rotation, transform),
+            )
+        },
+        normal: reflected_normal(source.normal, transform),
+    };
+    let rebuilt = DimensionGeometry::synthesized(
+        definition,
+        dimension.style_name().to_string(),
+        dimension.style().clone(),
+        dimension.text_override().map(str::to_string),
+    )?;
+    Ok(SemanticGeometry::Dimension(Box::new(rebuilt)))
+}
+
+/// The reflected subtype: a linear dimension's group-50 rotation follows the
+/// reflection; the ordinate's X/Y axis flag and every other subtype are kept.
+fn mirror_dimension_kind(kind: DimensionKind, transform: &Transform3) -> DimensionKind {
+    match kind {
+        DimensionKind::Linear { rotation } => DimensionKind::Linear {
+            rotation: reflected_angle(rotation, transform),
+        },
+        other => other,
+    }
+}
+
+/// Reflect every definition point of a dimension.
+fn mirror_dimension_points(points: &DimensionPoints, transform: &Transform3) -> DimensionPoints {
+    let p = |point: Point3| transform.apply_point(point);
+    match points {
+        DimensionPoints::Linear {
+            first,
+            second,
+            dimension_line,
+        } => DimensionPoints::Linear {
+            first: p(*first),
+            second: p(*second),
+            dimension_line: p(*dimension_line),
+        },
+        DimensionPoints::Radial {
+            center,
+            point_on_arc,
+            leader_length,
+        } => DimensionPoints::Radial {
+            center: p(*center),
+            point_on_arc: p(*point_on_arc),
+            leader_length: *leader_length,
+        },
+        DimensionPoints::Angular2Ln {
+            line1_start,
+            line1_end,
+            line2_start,
+            line2_end,
+            arc_point,
+        } => DimensionPoints::Angular2Ln {
+            line1_start: p(*line1_start),
+            line1_end: p(*line1_end),
+            line2_start: p(*line2_start),
+            line2_end: p(*line2_end),
+            arc_point: p(*arc_point),
+        },
+        DimensionPoints::Angular3Pt {
+            vertex,
+            first,
+            second,
+            arc_point,
+        } => DimensionPoints::Angular3Pt {
+            vertex: p(*vertex),
+            first: p(*first),
+            second: p(*second),
+            arc_point: p(*arc_point),
+        },
+        DimensionPoints::Ordinate {
+            feature,
+            leader_end,
+            base,
+        } => DimensionPoints::Ordinate {
+            feature: p(*feature),
+            leader_end: p(*leader_end),
+            base: p(*base),
+        },
+    }
+}
+
+/// The direction angle of a vector reflected by `transform`:
+/// `β − θ`, where `β` is the angle of the reflected `+X` direction.
+fn reflected_angle(angle: f64, transform: &Transform3) -> f64 {
+    let x = transform.apply_vector(Point3 {
+        x: 1.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    let beta = x.y.atan2(x.x);
+    beta - angle
+}
+
+/// The `MIRRTEXT=0` readable rotation: reflect the baseline, then add a half
+/// turn when the reflected run would face backwards (`cos θ · cos θ' < 0`).
+fn readable_rotation(original: f64, reflected: f64) -> f64 {
+    let adjusted = if original.cos() * reflected.cos() < 0.0 {
+        reflected + std::f64::consts::PI
+    } else {
+        reflected
+    };
+    super::helpers::normalize_signed(adjusted)
 }
 
 /// `ARC`: reflect the centre and the plane, re-derive the start angle from the

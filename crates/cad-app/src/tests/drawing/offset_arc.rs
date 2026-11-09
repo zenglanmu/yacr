@@ -216,7 +216,12 @@ fn offset_arc_refuses_degenerate_stored_radii() {
 }
 
 #[test]
-fn offset_refuses_an_ellipse_by_name() {
+fn offset_ellipse_is_a_spline_and_not_an_ellipse() {
+    // A uniform offset of an ellipse is not an ellipse (the result has a
+    // different eccentricity), so the command produces the "oval-shaped" spline
+    // through sampled offset points. This test pins the kind change and the single
+    // undo step; the sampling tolerance and extreme points are pinned in
+    // `tests::drawing::offset`.
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -240,24 +245,28 @@ fn offset_refuses_an_ellipse_by_name() {
     let mut app = app_with_drawing(b.finish().unwrap());
     let mut session = SessionState::new(DocumentId(1), AppMode::Work);
     let before = entity_count(&app);
-    let rev = revision(&app);
 
-    let err = offset(&mut app, &mut session, point(0.0, 8.0)).unwrap_err();
-    let message = match err {
-        CadError::Unsupported(message) => message,
-        other => panic!("expected an Unsupported refusal, got {other:?}"),
-    };
-    assert!(
-        message.starts_with("OFFSET ellipse:"),
-        "the refusal names the ellipse: {message}"
+    let outcome = offset(&mut app, &mut session, point(0.0, 8.0)).unwrap();
+    let created = EntityId(outcome.objects[0].0);
+    match geometry_of(&app, created) {
+        SemanticGeometry::Spline {
+            degree,
+            control_points,
+            ..
+        } => {
+            assert_eq!(degree, 3);
+            assert!(control_points.len() >= 16);
+        }
+        other => panic!("expected a SPLINE, got {other:?}"),
+    }
+    assert_eq!(entity_count(&app), before + 1);
+    assert_eq!(
+        app.history
+            .get(&DocumentId(1))
+            .map(|history| history.undo_depth())
+            .unwrap_or(0),
+        1
     );
-    assert!(
-        message.contains("not an ellipse"),
-        "the refusal states why it is not implemented: {message}"
-    );
-    assert_eq!(revision(&app), rev, "no write");
-    assert_eq!(entity_count(&app), before, "no entity");
-    assert!(!app.can_undo(&DocumentId(1)), "no undo record");
 }
 
 #[test]

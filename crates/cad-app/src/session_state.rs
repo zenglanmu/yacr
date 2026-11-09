@@ -6,6 +6,7 @@ use cad_domain::*;
 mod drafting_extras;
 mod draw_plan;
 mod erase_snapshot;
+mod modify_options;
 mod toggles;
 mod view_extras;
 use crate::draw_tool::{
@@ -21,15 +22,13 @@ use crate::selection::SelectionSet;
 use crate::tool_state::{DrawCapture, ToolSnapshot, ToolState};
 use crate::view_states::ViewStates;
 use crate::{AppMode, CommandId};
-pub use drafting_extras::{DraftingExtras, IsoPlane};
+pub use drafting_extras::{ChamferMethod, DraftingExtras, IsoPlane};
 pub use erase_snapshot::{EraseEntry, EraseSnapshot};
+pub use modify_options::ModifyOptions;
 pub use view_extras::{ViewExtras, VisualStyleToken};
 
-/// One entity captured into the in-process clipboard.
-///
-/// The [`DbEntity`] carries the row; [`cad_db::EntityDisplayState`] carries the
-/// per-entity render attributes and dynamic-visibility membership the row does
-/// **not**, so a paste preserves exactly what a cut's undo would restore.
+/// One entity captured into the in-process clipboard: the row plus the
+/// per-entity render/visibility state the row does **not** carry.
 #[derive(Debug, Clone)]
 pub struct ClipboardEntry {
     pub entity: cad_db::DbEntity,
@@ -80,6 +79,9 @@ pub struct SessionState {
     /// Session-only drafting flags toggled by the extended command batch
     /// (`QTEXT`, `FILL`, `TFRAMES`, `REGENAUTO`, `ISODRAFT`).
     pub drafting_extras: DraftingExtras,
+    /// Session-only stored MIRROR/OFFSET capture options (`MIRRTEXT`, erase,
+    /// OFFSET distance/layer). Defaults keep the legacy payloads exactly.
+    pub modify_options: ModifyOptions,
 
     pub tool: ToolState,
     /// Generation incremented whenever an active tool lifecycle is replaced.
@@ -264,6 +266,7 @@ impl SessionState {
             maximized_viewport: None,
             view_extras: ViewExtras::default(),
             drafting_extras: DraftingExtras::default(),
+            modify_options: ModifyOptions::default(),
 
             tool: ToolState::Idle,
             tool_generation: 0,

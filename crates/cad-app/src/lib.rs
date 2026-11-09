@@ -149,8 +149,8 @@ pub struct Document {
 mod session_state;
 
 pub use session_state::{
-    BackendChoice, ClipboardEntry, IsoPlane, LayoutViewportRef, MultipleRepeat, SessionState,
-    ViewExtras, VisualStyleToken,
+    BackendChoice, ChamferMethod, ClipboardEntry, IsoPlane, LayoutViewportRef, ModifyOptions,
+    MultipleRepeat, SessionState, ViewExtras, VisualStyleToken,
 };
 
 #[cfg(test)]
@@ -394,11 +394,14 @@ pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 pub use command_payload::{
     AngularDimensionInput, AnnotationBatchPayload, CommandPayload, DimEditCommand,
     DimJogLineCommand, DimOverrideCommand, DimStyleCommand, DimTextEditCommand,
-    DimensionBatchPayload, DimensionChainCommand, GripStretchCommand, GroupCommand,
-    GroupEditCommand, HatchEditOption, HatchOriginCommand, JustifyTextCommand, LayerStateCommand,
-    LeaderCommand, LinetypeCommand, MatchPropSettings, MeasureGeomOption, MocoroCommand,
-    NamedObjectKind, OrdinateAxis, OrdinateDimensionCommand, PeditOption, PurgeTarget,
+    DimensionBatchPayload, DimensionChainCommand, FilterExpression, FilterLogic, FilterRequest,
+    GripStretchCommand, GroupCommand, GroupEditCommand, HatchEditOption, HatchOriginCommand,
+    JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand,
+    MatchPropSettings, MeasureGeomOption, MirrorOptions, MocoroCommand, NamedObjectKind,
+    OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis, OrdinateDimensionCommand,
+    PeditEditCommand, PeditEditOption, PeditOption, PurgeTarget, QSelectRequest,
     RadialDimensionCommand, RenameCommand, RotatedLinearDimensionCommand, SelectSimilarSettings,
+    SelectionApply, SelectionOperator, SelectionPredicate, SelectionProperty, SelectionScope,
     SelectionToolPayload, SetByLayerSettings, TCircleCommand, TCountCommand, TextAlignCommand,
     TextAlignEdge, TextBoundaryShape, TextCaseMode, TextFitCommand, TextScaleCommand,
     TwoLineCommand, VPointInput, ViewCommand,
