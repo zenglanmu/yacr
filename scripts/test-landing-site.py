@@ -24,13 +24,13 @@ BUILD_CHANGELOG = ROOT / "scripts" / "build-landing-changelog.py"
 CHANGELOG = LANDING / "changelog.json"
 HEADERS = LANDING / "_headers"
 
-RELEASE = "v0.1.6"
-GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.6/"
+RELEASE = "v0.1.7"
+GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.7/"
 KNOWN_ASSETS = {
-    "linux": ("yacr-0.1.6-linux-x86_64.flatpak", 106080944),
-    "windows": ("yacr-0.1.6-windows-x86_64.zip", 84980956),
-    "macos": ("yacr-0.1.6-macos-universal.tar.gz", 114185643),
-    "android": ("app-universal-release.apk", 91895265),
+    "linux": ("yacr-0.1.7-linux-x86_64.flatpak", 105910304),
+    "windows": ("yacr-0.1.7-windows-x86_64.zip", 85858609),
+    "macos": ("yacr-0.1.7-macos-universal.tar.gz", 115728695),
+    "android": ("app-universal-release.apk", 92935649),
 }
 
 # The page shows one genuine product screenshot; the asset must exist, be a PNG

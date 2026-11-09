@@ -1,5 +1,33 @@
 AD
 
+## 2026-11-09 发布 v0.1.7（应用内更新检测 + 落地页改版）
+
+- **版本**：`Cargo.toml` workspace 版本、四个 `tauri.conf.json`、Flatpak metainfo 全部
+  `0.1.6` → `0.1.7`；`Cargo.lock` 只有 28 处 workspace 成员 `version` 行变化（无依赖/checksum 漂移）。
+  发布说明：`docs/release-notes/v0.1.7.md`。
+- **tag / run**：`v0.1.7` → `CI build layers` run
+  [`42630422730`](https://github.com/zenglanmu/yacr/actions/runs/42630422730) **11/11 job 绿**
+  （linux/windows/macos/android 四个 release + linux/windows/macos check + shader + web-build/
+  web-smoke/web-deploy）；同 tag 的 `CI` run
+  [`42630422907`](https://github.com/zenglanmu/yacr/actions/runs/42630422907) 绿；`main` push run
+  [`42629893320`](https://github.com/zenglanmu/yacr/actions/runs/42629893320) /
+  [`42629893274`](https://github.com/zenglanmu/yacr/actions/runs/42629893274) 绿。
+- **发布**：`publish-release.yml` run
+  [`42632331903`](https://github.com/zenglanmu/yacr/actions/runs/42632331903) 绿 → Release
+  <https://github.com/zenglanmu/yacr/releases/tag/v0.1.7>。
+- **artifact（大小从 Release API 核对）**：
+  `yacr-0.1.7-linux-x86_64.flatpak` 105,910,304 B（+ `.sha256` + `.flatpak.gpg`）；
+  `yacr-0.1.7-windows-x86_64.zip` 85,858,609 B（+ `.sha256`；**unsigned**：run 内 artifact 名为
+  `yacr-windows-release-unsigned`，未配置自签名 PFX secret）；
+  `yacr-0.1.7-macos-universal.tar.gz` 115,728,695 B（+ `.sha256`，ad-hoc 签名、未公证）；
+  `app-universal-release.apk` 92,935,649 B（仓库自签名 keystore）+ `SIGNING.txt` + `.sha256`。
+- **发布修正（诚实记录）**：第一次发布时 macOS artifact 目录被 CI `target/` 缓存里的旧
+  `yacr-0.1.6-macos-universal.tar.gz` 污染，Release 同时出现了 0.1.6 与 0.1.7 两个 macOS 包；
+  已用 `gh release delete-asset` 删除两个 0.1.6 文件。根因修复：`scripts/package-macos-release.sh`
+  现在每次打包前 `rm -rf "$DIST"` 并重建，避免旧 `dist/` 产物被 release job 上传。
+- **证据边界**：以上是编译/打包/签名/上传与分发证据；真机、真实 GPU、视觉/像素与性能验收
+  一律 **NOT VERIFIED**。
+
 ## 2026-11-09 应用内更新检测 + 落地页下载/更新日志改版
 
 - **用户要求**：加入自动更新检测——从落地页检查新版本、提醒用户并跳转到下载界面；下载页面重新设计并加入更新日志。

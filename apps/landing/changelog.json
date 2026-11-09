@@ -2,6 +2,40 @@
   "generatedFrom": "docs/release-notes",
   "releases": [
     {
+      "version": "v0.1.7",
+      "title": "yacr v0.1.7",
+      "date": "2026-11-09",
+      "url": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.7",
+      "sections": [
+        {
+          "heading": "应用内更新检测 / In-app update detection",
+          "items": [
+            "应用启动后读取落地页 https://yacr.pages.dev/downloads.json 的 release 字段，与运行版本比较；有新版本时显示非模态提示条，可打开下载页、跳过此版本或稍后。检查每天最多一次；网络/解析/宿主命令失败一律记为不可用，不会谎报“已是最新”。设计见 ADR 0032。",
+            "新增共享纯命令 cad_app_version：native-below 回答原生二进制版本，dom-canvas 回答 wasm 产物版本；无会话时也回答，不伪造 NO_SESSION。",
+            "新增 shell 能力 cad_open_release_page：不接受 URL 参数，固定打开 https://yacr.pages.dev/#download；平台 seam ShellReleaseOpener 分别使用 Linux xdg-open、Windows cmd /C start、macOS open，Web 载体用 window.open。Android 暂无 opener，返回稳定的 unsupported-runtime: cad_open_release_page 拒绝，并提供复制链接回退。",
+            "跨源读取所需配置：落地页 _headers 的 /downloads.json 增加 Access-Control-Allow-Origin: *；四个 Tauri tauri.conf.json 与 web harness 的 connect-src 增加 https://yacr.pages.dev。其余 CSP 指令未变。",
+            "“跳过此版本”与 24 h 节流保存在 localStorage（yacr.update.*），不进入 CAD 设置表面（CadSettingKey/preference.json）；提示不设置 cad_status.popup 模态门控，不阻塞 CAD 输入。"
+          ]
+        },
+        {
+          "heading": "落地页 / Landing site",
+          "items": [
+            "下载区重做：最新版本 hero（版本、日期、产物数、总体积）、四平台卡片（体积、签名/公证状态、CDN 与 GitHub 链接、SHA-256、可复制安装命令），版本信息从 downloads.json 水合，保留静态回退。",
+            "新增更新日志区块：从 apps/landing/changelog.json 渲染版本时间线（默认展开最新版本），每版可展开/收起并链接到 GitHub Release；脚本拉取失败或无 JS 时回退到 GitHub Releases。",
+            "changelog.json 由新脚本 scripts/build-landing-changelog.py 从 docs/release-notes/*.md 生成；--check 在 CI/部署中 fail-closed。deploy-landing-pages.sh 与 scripts/test-landing-site.py 增加 changelog schema、新鲜度、最新版本与 downloads.json 一致性、CORS 头等契约。"
+          ]
+        },
+        {
+          "heading": "构建与验证边界 / Build and evidence scope",
+          "items": [
+            "CI 只做编译 / 打包 / 签名 / 上传 / 页面部署；没有真机、真实 GPU、像素或性能验收。",
+            "应用内更新检测的真实网络、CSP 生效、localStorage 与外部浏览器打开，在 Windows/macOS/Android/ Web 上均 NOT VERIFIED；Android 的 Intent opener 明确延后。Linux 上只做了宿主目标契约测试。",
+            "落地页的浏览器验证是 headless Chromium（软件渲染） 的 DOM/布局证据（390/820/1440 px），不是 GPU、真机或视觉验收。"
+          ]
+        }
+      ]
+    },
+    {
       "version": "v0.1.6",
       "title": "yacr v0.1.6",
       "date": "2026-11-09",
