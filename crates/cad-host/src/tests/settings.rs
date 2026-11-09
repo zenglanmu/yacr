@@ -237,9 +237,14 @@ fn overlay_settings_change_the_values_the_render_path_reads() {
     // policy in the store, and the render inputs follow on the first sync.
     core.sync_render().unwrap();
     assert!(!core.render.overlays().visibility.grid);
+    assert!(!core.controller.borrow().grid_enabled(), "grid starts off");
 
     core.apply_setting(CadSettingKey::Grid, CadSettingValue::Bool(true))
         .unwrap();
+    assert!(
+        core.controller.borrow().grid_enabled(),
+        "an Options write also opens the live session gate"
+    );
     assert!(core.render.overlays().visibility.grid);
 
     core.apply_setting(CadSettingKey::Axes, CadSettingValue::Bool(false))

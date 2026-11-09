@@ -403,8 +403,8 @@ fn grid_selector_toggles_the_projected_display_flag_only() {
         (c.document_id, c.drawing().unwrap())
     };
     assert!(
-        session.snapshot(None, None, 0).grid_enabled,
-        "the display-grid switch defaults on and is projected"
+        !session.snapshot(None, None, 0).grid_enabled,
+        "display grid defaults off"
     );
 
     // The canonical selector flips the session flag. `SNAP` is AutoCAD's grid
@@ -412,13 +412,13 @@ fn grid_selector_toggles_the_projected_display_flag_only() {
     // accepted as the display-grid selector.
     assert_eq!(normalize_command("SNAP"), Some(CommandId::ToggleSnapGrid));
     session.command("GRID").expect("GRID is admitted");
-    assert!(!session.snapshot(None, None, 0).grid_enabled);
+    assert!(session.snapshot(None, None, 0).grid_enabled);
     assert!(
         session.command("snap").is_ok(),
         "SNAP is admitted, but as the grid-snap selector"
     );
     assert!(
-        !session.snapshot(None, None, 0).grid_enabled,
+        session.snapshot(None, None, 0).grid_enabled,
         "SNAP must not be accepted as the display-grid selector"
     );
     assert!(
@@ -488,7 +488,7 @@ fn ortho_selector_toggles_the_projected_drafting_flag_only() {
     // ORTHO is independent of the other drafting switches.
     let status = session.snapshot(None, None, 0);
     assert!(status.snap_enabled, "flipping ORTHO must not flip OSNAP");
-    assert!(status.grid_enabled, "flipping ORTHO must not flip GRID");
+    assert!(!status.grid_enabled, "ORTHO must not flip grid (off)");
 
     // Session state only: no database revision, no undo entry and no persisted
     // preference write (there is no ORTHO preference at all).

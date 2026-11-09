@@ -177,7 +177,8 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
     `STANDARDVIEW`（2D 下的 plan 视图是 no-op、不记）、`SWITCH2D3D`、`PROJECTION`、`RESETVIEW`。**pan、滚轮缩放、orbit 拖动
     **不记录**——这是**声明的偏离**（AutoCAD 会把这些也走一遍）。空栈不是错误：给 `zoom.previous.empty` 诊断、不动视图。
     参数**只认全词**：`ZOOM PREV` 被拒。
-- `GRID` 只切换**显示栅格叠加**（会话状态；宿主还要 `view.overlays.grid` 偏好同时为真才真正绘制）。
+- `GRID` 只切换**显示栅格叠加**（会话状态，**默认关**；宿主还要 `view.overlays.grid` 偏好同时为真才真正绘制）。
+  Options 的 Grid 写入会**同步**打开/关闭该会话开关（显式用户选择），F7/`GRID` 只切会话开关、不改偏好。
   它与栅格**捕捉**（`SNAP`/F9）是两个独立开关，`GRID` 不移动任何点。
 - `SNAP` 切换**会话内的栅格捕捉**（默认**关**，与 AutoCAD 初始状态一致）：开启后每次取点把 **X 与 Y**
   四舍五入到会话捕捉间距的最近整数倍（`z` 原样保留，栅格捕捉是**二维**辅助）。**恰好一半**的值
@@ -327,7 +328,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `Ctrl+9` | 切换命令行展开 | `App.tsx` 直接分支 |
 | `F2` | 切换命令**历史**面板 | `App.tsx` 直接分支 |
 | `F3` | 切换对象捕捉 `OSNAP` | `DRAFTING_ACCELERATORS` |
-| `F7` | 切换显示栅格 `GRID` | `DRAFTING_ACCELERATORS` |
+| `F7` | 切换显示栅格 `GRID`（默认关） | `DRAFTING_ACCELERATORS` |
 | `F8` | 切换正交 `ORTHO` | `DRAFTING_ACCELERATORS` |
 | `F9` | 切换**栅格捕捉** `SNAP`（默认关） | `DRAFTING_ACCELERATORS` |
 | `Enter` | **仅当工具有效且焦点不在输入框**：确认（发 `CONFIRM`）；否则交给输入控件/命令行 | `toolCommandForKey` |

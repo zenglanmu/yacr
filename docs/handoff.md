@@ -1,5 +1,91 @@
 AD
 
+## 2026-11-10 显示栅格：AutoCAD 式主/次两级线 + 默认关闭
+
+用户要求：栅格要像 AutoCAD 的 model-space 线栅格（**主/次两级**、次要线明显更淡更细、整体比正常图线淡），
+并且**栅格功能默认关闭**。上一轮（2026-11-09 空白图）只让网格在空白图上回退到视口矩形，网格仍是
+单一级。
+
+- **两级几何**（`crates/cad-app/src/render_scene/overlay/axes_grid.rs`）：`grid_overlay` 现在输出两个
+  `Lines` batch——**minor** 与 **major**。主轴间隔取 AutoCAD `GRIDMAJOR` 初始值 **5**
+  （`GRID_MAJOR_INTERVAL`，即两条主线之间 4 条次线）；次线位置按整数索引过滤掉主线位置，主/次不重合。
+  次线步长仍用 1/2/5×10ⁿ 自适应，目标从约 10–15 条改为 **约 30–60 条次线/轴**
+  （`GRID_TARGET_MINOR_DIVISIONS = 60`，即约 6–12 个主格），与 AutoCAD 的“缩放时自动增减密度”一致。
+  两级分别有 per-axis 上限（`GRID_MAX_MINOR_PER_AXIS = 160`、`GRID_MAX_MAJOR_PER_AXIS = 40`），
+  合计 ≤ `GRID_MAX_LINES = 400`。
+- **颜色**（`overlay/types.rs`）：按 AutoCAD 深色 model-space 的三色元素（minor / major / axis）取值；
+  本机真实 GPU 采样：**minor ≈ sRGB(61,64,71)**、**major ≈ sRGB(93,96,105)**，正常图线为白色，
+  坐标轴保持 `AXES_COLOR` 的亮灰。两条 grid batch 仍用 `AXES_GRID_DRAW_ORDER`（轴为 +1），
+  在选中高亮之下、底图之上。
+- **默认关闭**（`crates/cad-app/src/session_state.rs`）：会话显示栅格开关 `grid_enabled` 初始值
+  `true → false`；持久化偏好 `view.overlays.grid` 本来就是 `false`。宿主仍是 AND 两门
+  （偏好 && 会话开关），所以**启动时不画栅格**，即使本地 `preference.json` 写着 `"grid":true`
+  也要先按 `GRID`/F7 打开。为了让 Options 的 Grid 勾选仍然“所见即所得”，`HostCore::apply_setting(Grid, …)`
+  在持久化偏好后**同步**设置会话开关（`cad-host/src/settings.rs`）；F7/`GRID` 仍只切会话开关、不改偏好。
+  相关契约/文档同步：`command_id.rs`、`session_state/toggles.rs`、`docs/shortcuts.md`、host/ui-core/app 的默认值断言。
+- **契约测试**：新增独立测试模块
+  `crates/cad-app/src/render_scene/overlay/grid_tests.rs`（`tests.rs` 已达 1000 行上限），覆盖
+  两 batch、颜色、总行数上限、**每 5 个次线恰好 1 条主线**、极端 pan/zoom；`overlay/tests.rs`
+  只保留其余契约。更新 `crates/cad-host/src/tests/grid_overlay.rs`（默认关闭 + AND 两门）、
+  `crates/cad-host/src/tests/settings.rs`、`crates/cad-ui-core/.../{tests_settings,command_vocabulary,snap_grid}.rs`、
+  `crates/cad-app/src/host/tests/toggles.rs`、`tests/{inquiry,utility}.rs`。
+- **已运行**：`cargo test -p cad-app --lib` **2204 passed / 0 failed / 3 ignored**；
+  `-p cad-ui-core --lib` **494 passed / 1 ignored**；`-p cad-host --lib` **288 passed**；
+  `cargo clippy -p cad-app -p cad-ui-core -p cad-host --all-targets -- -D warnings`、`cargo fmt --all -- --check`、
+  `check-file-size.py`、`check-i18n.py` 通过。
+- **真实运行证据**：Quadro P620 / native Wayland / 最大化（`scale=1`）。栅格关闭：最终构建 + 本地
+  `preference.json`（其中 `grid:true`）+ 会话默认 off → 画布无栅格、F7/GRID 前的状态正确
+  （`/tmp/opencode/grid_off_default.png`）。栅格样式：为看到“开启”画面，临时把会话默认临时置 true
+  构建后截屏（`/tmp/opencode/grid_on_style.png`），**风格证据不是默认值证据**；像素采样见上。
+  最终源码已恢复默认关闭并重新构建。
+- **已知限制**：渲染器的 SDF 线一律 **1 device-pixel 墨宽**（`lineweight` 只携带、不光栅化；
+  `line.wgsl`/`line_instanced.wgsl` 的 `w = world_per_px`），因此“次线比主线细一级”目前用
+  **亮度台阶**表达（61 → 93），不是不同的像素宽度；真正的 sub-pixel 线宽需要渲染器级别的
+  per-batch ink width 特性，本轮未做。Windows/macOS/Android/Web **NOT VERIFIED**。
+
+## 2026-11-09 新建空白图：默认视图尺度与参考网格/坐标轴
+
+用户报告：新建空白页（`untitled`）十字光标变成一个整屏粗带 + 4 个圆点，命令栏显示红字
+`axes/grid requested but the drawing has no model-space bounds; omitted`；打开任意 DWG 后正常。
+
+- **根因 1（光标）**：`HostController::new_blank_document` 把相机重置为
+  `MIN_ORTHO_SCALE`（1e-9 world/logical-px），即“最大放大”的退化视图。渲染器的抗锯齿线 SDF
+  使用**固定世界量**下限：quad 边距 `margin = max(2·wpp, 1e-6)`、墨宽
+  `max(wpp, 1e-8)`；在 wpp≈1.5e-9 时空库的拾取框（20px）与十字臂只有 ~1e-8–1e-6 world，
+  这些下限把 quad 放大到约整屏、把墨宽放大到 ~12px，于是整屏横带 + 只有端帽可见的 4 点。
+  真实图纸 wpp≈5e-3 不触发，所以“打开文件后正常”。
+- **根因 2（状态栏）**：空库 `bounds() == None`，`render_scene` 在 `None` 分支把网格与坐标轴
+  一起省略并 `VisualOverlay::partial("overlay.bounds-unavailable", …)`，该诊断经
+  `RenderSessionHandle::view_diagnostic()` 显示为命令栏红字。空白图是正常状态，不应报错。
+- **修复**：
+  - `crates/cad-app/src/host/mod.rs`：新空白图相机改用 `DEFAULT_ORTHO_SCALE`（1.0），
+    与 `camera/types.rs` 的“无可继承尺度时的平面视图尺度”语义一致；不再是 `MIN_ORTHO_SCALE`。
+  - `crates/cad-app/src/render_scene/mod.rs`：参考叠加层在无模型 bounds 时回退到
+    `overlays.viewport_bounds`（`db.bounds().or(overlays.viewport_bounds)`）；网格继续优先
+    视口矩形，坐标轴用同一参考矩形。`overlay.bounds-unavailable` 只在**既无模型 bounds 又无
+    2D 视口矩形**（如 3D 空库）时产生，文案改为
+    `axes/grid requested but neither the drawing nor the 2D viewport has bounds; omitted`。
+    这是参考 chrome 的视口回退，不是伪造模型数据或取景。
+- **契约测试**：更新 `host::tests::document::new_blank_document_resets_the_viewport_camera_to_the_default`
+  （期望 `DEFAULT_ORTHO_SCALE`）；新增
+  `render_scene/reference_fallback_tests.rs::a_blank_drawing_falls_back_to_the_viewport_for_axes_and_grid`
+  （空库 + 视口矩形 ⇒ 网格/坐标轴批次存在、无诊断、`Completeness::Complete`）。为守住
+  `check-file-size.py` 的 1000 行上限，新用例放进独立测试模块，未并入已 989 行的
+  `render_scene/tests.rs`。既有
+  `axes_without_bounds_report_a_diagnostic_instead_of_pretending`（无视口矩形）继续通过。
+- **已运行证据**：`cargo test -p cad-app --lib --locked` → **2207 passed / 0 failed / 3 ignored**；
+  `cargo clippy -p cad-app -p cad-render-wgpu --all-targets --locked -- -D warnings` 通过；
+  `cargo fmt --all -- --check`、`python3 scripts/check-file-size.py` 通过。真实运行：本机
+  **Quadro P620 / native Wayland / scale=1**，`target/release/yacr` 生产默认 `start_blank=true`，
+  `YACR_PROBE_EVIDENCE=1`（**合成 DOM pointer，不是真实鼠标**），Mutter ScreenCast 截图：
+  修复前 = 整屏横带 + 4 个角点 + 红字；修复后 = 1px 十字（CURSORSIZE=100 全屏臂）+ 20px 拾取框 +
+  参考网格，无红字（截图 `/tmp/opencode/dbg_shot.png`、`/tmp/opencode/fixed_blank.png`，本地）。
+- **边界/已知限制**：以上仅为 Linux Wayland + P620 + scale=1 的视觉证据；Windows/macOS/
+  Android/Web **NOT VERIFIED**（未运行）。渲染器线 SDF 的**绝对世界量**下限在 wpp < 1e-8
+  （把视图放大到接近 `MIN_ORTHO_SCALE`）时仍会放大所有线条，包括光标；本轮只消除默认空白图
+  路径，未改共享 shader，记为已知限制，后续若需支持极端放大应把下限改为相对量并同步
+  `line.wgsl`/`line_pulled.wgsl`/`line_instanced.wgsl` 三份 shader。
+
 ## 2026-11-09 发布 v0.1.7（应用内更新检测 + 落地页改版）
 
 - **版本**：`Cargo.toml` workspace 版本、四个 `tauri.conf.json`、Flatpak metainfo 全部

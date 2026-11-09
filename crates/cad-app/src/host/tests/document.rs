@@ -293,9 +293,10 @@ fn new_blank_document_resets_the_viewport_camera_to_the_default() {
     assert_eq!(
         camera.projection,
         crate::Projection::Orthographic {
-            scale: crate::camera::MIN_ORTHO_SCALE
+            scale: crate::camera::DEFAULT_ORTHO_SCALE
         },
-        "New uses the fresh-document default scale, not the old framing"
+        "New uses the readable fresh-document default scale, not the old framing \
+         or the near-degenerate minimum"
     );
 }
 

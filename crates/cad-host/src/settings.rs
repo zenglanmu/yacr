@@ -508,7 +508,21 @@ impl HostCore {
         key.validate(&value)
             .map_err(|code| CadError::InvalidInput(code.to_string()))?;
         match key {
-            CadSettingKey::Grid => self.apply_overlay_preference("grid", &value),
+            CadSettingKey::Grid => {
+                self.apply_overlay_preference("grid", &value)?;
+                // The display grid has two gates: the persisted preference AND
+                // the live session switch. An Options write is an explicit user
+                // choice, so it also drives the live switch — otherwise checking
+                // "Grid" would persist a preference that stays hidden until F7.
+                // F7/`GRID` still toggles the session gate on its own.
+                if let CadSettingValue::Bool(enabled) = value {
+                    if self.controller.borrow().grid_enabled() != enabled {
+                        self.controller.borrow_mut().set_grid_enabled(enabled);
+                        self.sync_render()?;
+                    }
+                }
+                Ok(())
+            }
             CadSettingKey::Axes => self.apply_overlay_preference("axes", &value),
             CadSettingKey::SelectionHighlight => {
                 self.apply_overlay_preference("selectionHighlight", &value)

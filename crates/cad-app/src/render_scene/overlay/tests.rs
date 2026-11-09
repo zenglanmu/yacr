@@ -1,4 +1,3 @@
-use super::axes_grid::grid_positions;
 use super::selection::same_entity_instance;
 use super::*;
 use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
@@ -766,61 +765,6 @@ fn axes_overlay_draws_a_symmetric_origin_cross_below_the_highlight() {
     assert_eq!(batch.color, AXES_COLOR);
     assert!(batch.draw_order < 900_000);
     assert!(!batch.color_unresolved);
-}
-
-#[test]
-fn grid_overlay_is_one_bounded_batch_spanning_the_supplied_view_bounds() {
-    let overlay = grid_overlay((p(-50.0, -50.0), p(50.0, 50.0)), DocumentId(1));
-    assert_eq!(overlay.drawn(), 1);
-    let batch = &overlay.batches[0];
-    assert!(!batch.vertices.is_empty());
-    assert_eq!(batch.vertices.len() % 2, 0);
-    assert!(batch.vertices.len() / 2 <= GRID_MAX_LINES);
-    assert_eq!(batch.color, GRID_COLOR);
-    assert!(batch.draw_order < 900_000);
-    // Geometry spans the supplied view rectangle; line batches are clipped
-    // to this exact extent by the renderer for every live camera/resize.
-    let world_points = batch.vertices.iter().map(|v| {
-        (
-            v[0] as f64 + batch.local_origin.x,
-            v[1] as f64 + batch.local_origin.y,
-        )
-    });
-    let (min_x, max_x, min_y, max_y) = world_points.fold(
-        (
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-        ),
-        |(min_x, max_x, min_y, max_y), (x, y)| {
-            (min_x.min(x), max_x.max(x), min_y.min(y), max_y.max(y))
-        },
-    );
-    assert!((min_x + 50.0).abs() < 1e-4 && (max_x - 50.0).abs() < 1e-4);
-    assert!((min_y + 50.0).abs() < 1e-4 && (max_y - 50.0).abs() < 1e-4);
-}
-
-#[test]
-fn grid_positions_caps_a_dense_axis_without_shrinking_it() {
-    let positions = grid_positions(0.0, 1000.0, 0.001, 10);
-    assert_eq!(positions.len(), 10);
-    assert_eq!(positions[0], 0.0);
-    assert!(
-        positions.last().copied().unwrap() > 900.0,
-        "the cap samples across the whole range, not just the corner"
-    );
-}
-
-#[test]
-fn grid_overlay_remains_bounded_at_extreme_pan_and_zoom() {
-    let overlay = grid_overlay(
-        (p(1.0e12, -1.0e12), p(1.0e12 + 1.0e-2, -1.0e12 + 1.0e-2)),
-        DocumentId(1),
-    );
-    let batch = &overlay.batches[0];
-    assert!(!batch.vertices.is_empty());
-    assert!(batch.vertices.len() / 2 <= GRID_MAX_LINES);
 }
 
 #[test]

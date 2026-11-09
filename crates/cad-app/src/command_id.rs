@@ -635,9 +635,10 @@ pub enum CommandId {
     ToggleSnap,
     /// Flip the display grid overlay for this session (`GRID`, F7). Session /
     /// display state only (no database write, no history, no `ChangeSet`), so
-    /// Viewer and Work both allow it. Defaults on; the host draws the grid only
-    /// when this switch **and** the persisted `view.overlays.grid` preference are
-    /// both on. This is the **display** grid only — grid snap has its own switch
+    /// Viewer and Work both allow it. Defaults **off** (the grid is opt-in); the
+    /// host draws the grid only when this switch **and** the persisted
+    /// `view.overlays.grid` preference are both on. This is the **display** grid
+    /// only — grid snap has its own switch
     /// ([`CommandId::ToggleSnapGrid`]). See [`crate::SessionState::grid_enabled`].
     ToggleGrid,
     /// Flip the **grid snap** switch for this session (`SNAP`, F9). Session /

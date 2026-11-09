@@ -395,8 +395,13 @@ impl HostController {
     /// cleared, so a later `poll_async_open` cannot clobber the fresh drawing.
     ///
     /// The active viewport camera is reset to the deterministic fresh-document
-    /// plan view (origin-anchored, minimum orthographic scale) — a default, not a
-    /// fabricated fit. The returned [`NewDrawing::has_extent`] is always `false`.
+    /// plan view (origin-anchored, [`crate::camera::DEFAULT_ORTHO_SCALE`]) — a
+    /// default, not a fabricated fit. It deliberately does **not** use
+    /// [`crate::camera::MIN_ORTHO_SCALE`]: a blank drawing must start in a
+    /// readable empty model space, and the renderer's anti-aliased line ink uses
+    /// world-space floors that a near-degenerate world-per-pixel scale would turn
+    /// into a viewport-sized crosshair/pickbox. The returned
+    /// [`NewDrawing::has_extent`] is always `false`.
     pub fn new_blank_document(&mut self) -> CadResult<NewDrawing> {
         // Supersede any open before the slot changes.
         self.import_manager.cancel();
@@ -451,7 +456,7 @@ impl HostController {
                     z: 0.0,
                 },
                 projection: crate::Projection::Orthographic {
-                    scale: crate::camera::MIN_ORTHO_SCALE,
+                    scale: crate::camera::DEFAULT_ORTHO_SCALE,
                 },
             };
             viewport.camera = camera;
