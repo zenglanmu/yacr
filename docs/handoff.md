@@ -25,6 +25,14 @@ AD
   `yacr-0.1.6-macos-universal.tar.gz` 污染，Release 同时出现了 0.1.6 与 0.1.7 两个 macOS 包；
   已用 `gh release delete-asset` 删除两个 0.1.6 文件。根因修复：`scripts/package-macos-release.sh`
   现在每次打包前 `rm -rf "$DIST"` 并重建，避免旧 `dist/` 产物被 release job 上传。
+- **落地页**：`apps/landing` 更新到 v0.1.7（真实大小/校验和、R2 base、JSON-LD、下载链接、
+  页面静态回退值），`docs/release-notes/v0.1.7.md` 与 `changelog.json` 同步；`site.yml` 默认
+  `release_tag` 同步。`Landing site` run
+  [`42633555589`](https://github.com/zenglanmu/yacr/actions/runs/42633555589) 绿：R2 镜像 + Pages
+  部署完成。线上复核：`https://yacr.pages.dev/downloads.json` = v0.1.7 且
+  `Access-Control-Allow-Origin: *`，`changelog.json` 含 v0.1.7，页面显示 v0.1.7；4 个 R2 主包
+  HEAD 均 200；headless Chromium（软件渲染）对线上页面跑 34 项 DOM/布局断言全过。分发证据，
+  不是运行时/GPU/真机验收。
 - **证据边界**：以上是编译/打包/签名/上传与分发证据；真机、真实 GPU、视觉/像素与性能验收
   一律 **NOT VERIFIED**。
 
@@ -67,8 +75,8 @@ AD
   `#download`/`#changelog` 深链、changelog 拉取失败回退。
 - **NOT RUN / NOT VERIFIED**：真实 Linux 应用运行（未启动 host/窗口）与真实网络；Windows/macOS/
   Android/Web 的真实网络、CSP 生效、`localStorage`、外部浏览器打开；Android Intent opener 明确
-  延后；任何 GPU/像素/真机验收。**部署前提**：在 `site.yml` 重新部署落地页（带新 CORS 头与
-  `changelog.json`）之前，线上 `downloads.json` 仍无 CORS，应用会诚实地显示 `unavailable`（无提示）。
+  延后；任何 GPU/像素/真机验收。**落地页已部署**（见下方 v0.1.7 发布条目）：`downloads.json`
+  带 CORS 且为 v0.1.7，应用具备真实检查条件；但打包应用对线上网络的读取仍未在真机/真实宿主验证。
 - **附带修复**：`apps/app-linux/src/host/tests.rs` 的 `CadToolParams` 测试初始化缺 4 个已提交字段，
   导致 `cargo check -p app-linux --all-targets` 在 HEAD 即失败；本轮补齐（无行为变化）。
 
