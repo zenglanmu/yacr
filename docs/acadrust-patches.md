@@ -1,8 +1,10 @@
 # acadrust 补丁台账（`[patch]` policy）
 
-> **当前状态（2026-11-07）：没有补丁。** 上游 `acadrust` **0.6.8**（`rsproxy` registry，
+> **当前状态（2026-11-09 复核）：没有补丁。** 上游 `acadrust` **0.6.8**（`rsproxy` registry，
 > features `serde` + `import`）未被修改，`Cargo.toml` 中没有 `[patch]`。实验性 DWG 导出使用的是
 > 上游已有的 `acadrust::DwgWriter`，不是本地补丁。
+
+> 2026-11-09：本轮确认补丁**允许路径**已放宽为“只允许 `acadrust` + 固定版本/rev + 台账登记”，但**不是**强制打补丁；本轮未修改上游，台账仍为空。任何未来补丁必须先在本文件登记再进入 `Cargo.toml`。
 
 ## 1. 目的
 

@@ -447,7 +447,7 @@ fn nearest_ends(a: OpenEnds, b: OpenEnds) -> CadResult<(Point3, Point3, Point3, 
         if !gap.is_finite() {
             continue;
         }
-        if best.map_or(true, |(_, _, _, _, best_gap)| gap < best_gap) {
+        if best.is_none_or(|(_, _, _, _, best_gap)| gap < best_gap) {
             best = Some((pa, ta, pb, tb, gap));
         }
     }

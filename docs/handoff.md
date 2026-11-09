@@ -1,5 +1,19 @@
 AD
 
+## 2026-11-09 AutoCAD 2026 下一批 100 条命令（Wave 9–12）
+
+- **用户要求**：按 `docs/autocad-2026-command-coverage.md` 继续实施 100 条未完成命令，2D 优先；每条命令同时接线 UI（除非 AutoCAD 也无 UI 入口）；更新同一份覆盖文档；DWG 保存不覆盖源文件；允许 acadrust patch 但必须有台账。
+- **交付**：官方覆盖从 423 → **523 已实现（66 完整 + 457 部分）/ 458 未实现**；Wave 9/10/11/12 各 25 个名字。
+  - Wave 9（2D 优先）：`ARRAY`/`-ARRAY`/`ARRAYCLASSIC` 阵列路由、`BLEND`/`BREAKLINE` 真实 2D 编辑、`-BLOCK`/`-INSERT` 完成别名、`-BOUNDARY`/`-HATCH`/`-HATCHEDIT`/`EXOFFSET` 部分别名、`DIM`/`UNITS` 只读报告、12 个具名拒绝。
+  - Wave 10：`-LAYER`/`-SCALELISTEDIT`/`LWEIGHT`/`COLOR`/`-UNITS`/`COPYHIST` 只读报告，`LAYERSTATESAVE`/`NEWVIEW` 载荷路由，10 个具名拒绝，`DSETTINGS`/`QUICKPROPERTIES`/`CLASSICLAYER`/`COMMANDLINE`/`COMMANDLINEHIDE` chrome 本地选择子。
+  - Wave 11/12：3D/网格/曲面 25 个 + 文件/导入导出/扩展运行时 25 个**具名拒绝**；3D 明确低于 2D，不是可用 3D 功能。
+- **DWG 保存**：已有实现满足要求——源为 `.dwg` 时默认 `<stem>-export.dwg`，写新文件、绝不覆盖源；`save.dwg_exported_experimental`/`_partial` 明说实验性/有损/不完整。契约测试 `cargo test -p cad-host --lib dwg` **4 passed**（含 `save_on_a_dwg_source_suggests_a_new_export_name`、`choosing_the_opened_dwg_source_is_refused_and_writes_nothing`）。
+- **acadrust patch**：本轮**未修改** acadrust 0.6.8；根 `[patch.crates-io]` 仍为空，`docs/acadrust-patches.md` 是唯一台账入口（ADR-0031，`check-architecture.py` 强制；补丁必须登记上游版本/rev、文件、行为差异、测试与 remove-when）。
+- **已运行**：`cargo test -p cad-app --lib --locked`（2231 passed, 3 ignored）；`cargo test -p cad-ui-core --locked`；`cargo clippy -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings`；`cargo fmt --all -- --check`；`npm test`（1425 passed，含 tsc + 插件 tsc + `node --test`）；`check-architecture.py`/`check-tauri-capabilities.py`/`check-fixture-manifest.py`/`check-file-size.py`/`check-command-docs.py`/`test-check-command-docs.py`/`check-i18n.py` 全绿。
+- **NOT RUN / NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机；Windows/macOS/Android/Web 运行时；真实 DWG/AutoCAD vendor 对照；Wave 11/12 的 3D/文件能力只是具名拒绝，不是可用功能。
+- **提交**：Wave 9 `85973595`、Wave 10 `14af4bca`、Wave 11 `204da8af`、Wave 12 `60da7170`、UI 契约 `42a73d6e`（+ clippy 修复）。
+
+
 ## 2026-11-09 应用内更新检测 + 落地页下载/更新日志改版
 
 - **用户要求**：加入自动更新检测——从落地页检查新版本、提醒用户并跳转到下载界面；下载页面重新设计并加入更新日志。
