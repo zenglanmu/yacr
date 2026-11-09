@@ -32,15 +32,15 @@
 //! is deliberately **not** done — that would claim geometry/style changed when it
 //! did not.
 //!
-//! # These writes are NOT undoable
+//! # These methods record no undo step themselves
 //!
-//! `cad-history` records entity patches only
-//! ([`cad_history::DrawingPatch`] is `{ EntityId, before/after DbEntity }`), so a
-//! layer create/rename/delete cannot be represented in an undo record. These
-//! methods are deliberately **not** called through a
-//! [`DrawingTransaction`](super::DrawingTransaction) and record no undo step;
-//! undo/redo leaves the layer table untouched. A layer patch kind is a separate
-//! lane; until it exists, do not advertise layers as undoable.
+//! `cad-history` has a layer patch kind ([`super::LayerPatch`]) and the command
+//! layer (`cad-app`) now records the before/after [`super::LayerRow`] pair for
+//! every real layer write, so the layer commands are one-step undoable. These
+//! database methods still do not go through a
+//! [`DrawingTransaction`](super::DrawingTransaction); they only validate, mutate
+//! and publish the [`ChangeSet`]. Undo/redo of a layer edit therefore lives
+//! entirely in the caller's recorded patch.
 //!
 //! # Naming rules
 //!
@@ -99,8 +99,8 @@ impl DrawingDatabase {
     ///
     /// Refusals (nothing written, revision unchanged): an empty/whitespace-only
     /// name, an AutoCAD-illegal character in the name, and a name that duplicates
-    /// an existing layer case-insensitively. Layer edits are **not undoable** —
-    /// see the module docs.
+    /// an existing layer case-insensitively. This method records no history; the
+    /// command layer records the row patch (see the module docs).
     pub fn create_layer(
         &mut self,
         name: &str,
@@ -145,7 +145,7 @@ impl DrawingDatabase {
     ///
     /// Refusals (nothing written, revision unchanged): an unknown layer id, an
     /// empty/whitespace-only name, an illegal character, and a duplicate of
-    /// another layer's name. Not undoable — see the module docs.
+    /// another layer's name. Records no history itself; see the module docs.
     pub fn rename_layer(
         &mut self,
         id: LayerId,
@@ -195,7 +195,8 @@ impl DrawingDatabase {
     ///   re-pointed: deleting an in-use layer is refused, never silently
     ///   "retargeted".
     ///
-    /// Not undoable — see the module docs.
+    /// Records no history itself; the command layer records the row patch (see
+    /// the module docs).
     pub fn delete_layer(
         &mut self,
         id: LayerId,
@@ -257,7 +258,8 @@ impl DrawingDatabase {
     /// layer's legal key set, its linetype table's names or the wire grammar. It
     /// only keeps the stored state consistent.
     ///
-    /// Not undoable — see the module docs.
+    /// Records no history itself; the command layer records the row patch (see
+    /// the module docs).
     pub fn set_layer_attributes(
         &mut self,
         id: LayerId,
@@ -347,7 +349,12 @@ impl DrawingDatabase {
 }
 
 /// Trim and validate a layer name, returning the value that is stored.
-fn validated_layer_name(name: &str) -> CadResult<String> {
+///
+/// `pub(super)` so the combined write path
+/// ([`super::layer_patch`]) applies the exact same name grammar as
+/// [`DrawingDatabase::create_layer`]/[`DrawingDatabase::rename_layer`] instead
+/// of a second copy that could drift.
+pub(super) fn validated_layer_name(name: &str) -> CadResult<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return Err(CadError::InvalidInput(

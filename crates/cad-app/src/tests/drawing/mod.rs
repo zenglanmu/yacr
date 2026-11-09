@@ -316,6 +316,8 @@ mod hatch_stitch;
 mod hatch_utilities;
 mod insert_block;
 mod join;
+mod layer_undo;
+mod layout_undo;
 mod lengthen;
 mod match_prop;
 mod mirror_curves;

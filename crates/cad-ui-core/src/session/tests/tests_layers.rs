@@ -112,9 +112,25 @@ fn a_layer_attribute_write_reads_back_through_the_projection() {
     assert!(walls.locked);
     assert!(!walls.plottable);
     assert!(walls.visible, "locking and not plotting hide nothing");
-    // Five real changes, five revision bumps, still no undo entry.
+    // Five real changes, five revision bumps: each write is its own committed
+    // revision **and** one undo step. Undo replays the last one through the
+    // validated layer-patch path.
     assert_eq!(revision(&session), cad_domain::Revision(before.0 + 5));
-    assert!(!can_undo(&session));
+    assert_eq!(
+        undo_depth(&session),
+        5,
+        "each property write is one undo step"
+    );
+    session.command("UNDO").expect("undo the plottable write");
+    let layers = session.layers().expect("layers");
+    let walls = row(&layers, "WALLS");
+    assert!(
+        walls.plottable,
+        "undo restores the recorded before row verbatim"
+    );
+    assert_eq!(walls.color.aci, Some(30), "earlier writes stay applied");
+    assert_eq!(revision(&session), cad_domain::Revision(before.0 + 6));
+    assert_eq!(undo_depth(&session), 4);
 }
 
 #[test]
@@ -513,8 +529,18 @@ fn can_undo(session: &CadSession) -> bool {
     controller.application.can_undo(&controller.document_id)
 }
 
+fn undo_depth(session: &CadSession) -> usize {
+    let controller = session.core.controller.borrow();
+    controller
+        .application
+        .history
+        .get(&controller.document_id)
+        .map(|history| history.undo_depth())
+        .unwrap_or(0)
+}
+
 #[test]
-fn create_layer_adds_a_row_in_one_revision_bump_and_no_undo_entry() {
+fn create_layer_adds_a_row_in_one_revision_bump_and_one_undo_entry() {
     let session = fresh_session();
     let before_rows = session.layers().expect("layers").layers.len();
     let before_revision = revision(&session);
@@ -527,12 +553,35 @@ fn create_layer_adds_a_row_in_one_revision_bump_and_no_undo_entry() {
     assert!(doors.visible, "a new layer is stored visible");
     assert!(doors.database_visible);
     assert!(!doors.overridden, "a create adds no temporary override");
-    // A real database write: exactly one revision bump, no undo entry.
+    // A real database write: exactly one revision bump and exactly one undo
+    // step (the layer row is recorded as a layer patch).
     assert_eq!(
         revision(&session),
         cad_domain::Revision(before_revision.0 + 1)
     );
-    assert!(!can_undo(&session), "layer edits are not undoable");
+    assert_eq!(undo_depth(&session), 1, "a layer create is one undo step");
+
+    // UNDO removes the row again in exactly one revision; REDO restores it.
+    session
+        .command("UNDO")
+        .expect("the recorded layer patch applies");
+    let layers = session.layers().expect("layers");
+    assert_eq!(layers.layers.len(), before_rows);
+    assert!(layers.layers.iter().all(|row| row.name != "DOORS"));
+    assert_eq!(
+        revision(&session),
+        cad_domain::Revision(before_revision.0 + 2)
+    );
+    assert!(!can_undo(&session));
+
+    session.command("REDO").expect("the redo side applies");
+    let layers = session.layers().expect("layers");
+    assert_eq!(layers.layers.len(), before_rows + 1);
+    row(&layers, "DOORS");
+    assert_eq!(
+        revision(&session),
+        cad_domain::Revision(before_revision.0 + 3)
+    );
 }
 
 #[test]

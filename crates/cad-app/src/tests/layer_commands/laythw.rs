@@ -52,12 +52,34 @@ fn laythw_thaws_every_frozen_layer_and_leaves_the_viewport_flag_alone() {
     );
     assert_eq!(
         undo_depth(&app),
-        before.1,
-        "layer-table edits are not undoable"
+        before.1 + 1,
+        "one undo step for the whole thaw batch"
     );
     assert_eq!(diagnostic_codes(&outcome), vec!["laythw.applied"]);
     assert!(outcome.diagnostics[0].message.contains("viewport-level"));
-    assert!(outcome.diagnostics[0].message.contains("not undoable"));
+    assert!(outcome.diagnostics[0].message.contains("one transaction"));
+
+    // Undo re-freezes the two changed rows exactly; redo thaws them again.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo LAYTHW");
+    assert!(layer_attributes(&app, LayerId(0)).frozen);
+    assert!(layer_attributes(&app, LayerId(3)).frozen);
+    assert!(layer_attributes(&app, LayerId(3)).frozen_in_new_viewport);
+    assert!(!layer_attributes(&app, LayerId(4)).frozen);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo LAYTHW");
+    assert!(!layer_attributes(&app, LayerId(0)).frozen);
+    assert!(!layer_attributes(&app, LayerId(3)).frozen);
 }
 
 #[test]

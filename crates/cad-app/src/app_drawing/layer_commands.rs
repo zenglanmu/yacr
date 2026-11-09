@@ -36,9 +36,11 @@
 //! patches, exactly like `app_drawing::revision_cloud` / `properties`.
 //!
 //! Layer-**table** writes use
-//! [`cad_db::DrawingDatabase::set_layer_attributes`]. They raise the revision
-//! but are **not undoable** (cad-history has no layer patch kind); the success
-//! diagnostic says so, and no undo entry is recorded.
+//! [`cad_db::DrawingDatabase::set_layer_attributes`]. Each changed row is one
+//! database call (so the revision still moves once per changed layer), but the
+//! whole command records **one** undo step through
+//! [`Application::publish_layer_record`]: undo/redo restores every changed
+//! row's exact before/after attribute set in one transaction.
 //!
 //! Every refusal happens before anything is published: the original drawing
 //! keeps its revision, its layer rows and its history. A locked destination
@@ -76,8 +78,9 @@
 //! **all viewports** (this build has no per-viewport freeze model); the
 //! `frozen_in_new_viewport` flag and every other attribute are left untouched.
 //! One `set_layer_attributes` call per changed layer means one revision bump per
-//! layer; the write is **not undoable**. Success is `layfrz.applied` with the
-//! changed-layer count; an all-frozen selection is `layfrz.unchanged`. Work-only.
+//! layer; the command still records **one** undo step. Success is `layfrz.applied`
+//! with the changed-layer count; an all-frozen selection is `layfrz.unchanged`.
+//! Work-only.
 //!
 //! ## `LAYTHW`
 //!
@@ -86,8 +89,9 @@
 //! layer-table pass, and an all-thawed drawing is `laythw.unchanged` with no
 //! write. This build has no viewport model, so **viewport-level frozen layers
 //! are not thawed** and `frozen_in_new_viewport` is left untouched; the same
-//! one-revision-bump-per-changed-layer and not-undoable rules apply. Success is
-//! `laythw.applied` with the changed-layer count. Work-only.
+//! one-revision-bump-per-changed-layer rule applies, and the whole command is
+//! **one** undo step. Success is `laythw.applied` with the changed-layer count.
+//! Work-only.
 //!
 //! ## `LAYLCK` / `LAYULK`
 //!
@@ -98,8 +102,9 @@
 //! other attribute is preserved. Already-locked (or already-unlocked) rows are
 //! not staged, and an all-unchanged selection reports `laylck.unchanged` /
 //! `layulk.unchanged` without a write. Unknown layer rows are refused by name.
-//! One revision bump per changed layer; **not undoable**. Success is
-//! `laylck.applied` / `layulk.applied` with the changed-layer count. Work-only.
+//! One revision bump per changed layer, but exactly **one** undo step for the
+//! command. Success is `laylck.applied` / `layulk.applied` with the changed-layer
+//! count. Work-only.
 //!
 //! ## `SETBYLAYER`
 //!
@@ -121,7 +126,6 @@ use super::*;
 use crate::{SelectionToolPayload, SetByLayerSettings};
 use cad_db::{
     EntityColor, EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency,
-    LayerAttributes,
 };
 
 /// A named, non-capability refusal (`<command>.<code>: <detail>`).
@@ -339,69 +343,6 @@ impl Application {
         }
     }
 
-    /// Publish an already-validated layer-table candidate. **No history**: layer
-    /// edits are not undoable (cad-history has no layer patch kind).
-    pub(super) fn publish_layer_table(
-        &mut self,
-        document_id: DocumentId,
-        candidate: DrawingDatabase,
-    ) -> CadResult<()> {
-        self.workspace
-            .documents
-            .get_mut(&document_id)
-            .ok_or_else(|| CadError::Invariant("document disappeared while publishing".into()))?
-            .drawing = Arc::new(candidate);
-        Ok(())
-    }
-
-    /// Apply one boolean layer-attribute change to every layer in `layers`.
-    ///
-    /// Each changed row is one [`DrawingDatabase::set_layer_attributes`] call, so
-    /// a multi-layer command raises the revision once per changed layer (a
-    /// documented limitation). `mutate` returns whether the row actually changed;
-    /// unchanged rows are not staged, so the revision does not move for them.
-    /// Nothing is published when no row changes. A successful write reports one
-    /// combined revision span and the changed-row count.
-    fn write_layer_flags(
-        &mut self,
-        document_id: DocumentId,
-        layers: &[LayerId],
-        reason: &str,
-        mutate: impl Fn(&mut LayerAttributes) -> bool,
-    ) -> CadResult<(Option<Arc<ChangeSet>>, usize)> {
-        let drawing = self
-            .workspace
-            .documents
-            .get(&document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
-            .drawing
-            .clone();
-        let mut candidate = drawing.as_ref().clone();
-        let before = candidate.revision();
-        let transaction = next_transaction_id();
-        let mut changed = 0;
-        for id in layers {
-            let mut attributes = candidate.layer_attributes(*id);
-            if mutate(&mut attributes) {
-                candidate.set_layer_attributes(*id, attributes, transaction, reason)?;
-                changed += 1;
-            }
-        }
-        if changed == 0 {
-            return Ok((None, 0));
-        }
-        let changeset = ChangeSet {
-            database: candidate.id(),
-            before,
-            after: candidate.revision(),
-            transaction,
-            reason: reason.to_string(),
-            changes: Vec::new(),
-        };
-        self.publish_layer_table(document_id, candidate)?;
-        Ok((Some(Arc::new(changeset)), changed))
-    }
-
     /// `LAYFRZ`: freeze every distinct layer in the selection except the current
     /// one. Freezing the current layer is never a partial operation: the whole
     /// command is refused (`layfrz.current_layer`).
@@ -480,8 +421,8 @@ impl Application {
                 object: None,
                 code: "layfrz.applied".into(),
                 message: format!(
-                    "LAYFRZ: froze {count} layer(s) in all viewports (layer-table edit; not \
-                     undoable; Settings/Viewports/Block options are not implemented)"
+                    "LAYFRZ: froze {count} layer(s) in all viewports (one transaction / one \
+                     undo step; Settings/Viewports/Block options are not implemented)"
                 ),
             }],
             measurement: None,
@@ -544,7 +485,7 @@ impl Application {
                 code: "laythw.applied".into(),
                 message: format!(
                     "LAYTHW: thawed {count} layer(s) (viewport-level frozen layers are not \
-                     thawed; layer-table edit, not undoable, one revision bump per changed layer)"
+                     thawed; one transaction / one undo step)"
                 ),
             }],
             measurement: None,
@@ -616,8 +557,7 @@ impl Application {
                 object: None,
                 code: format!("{prefix}.applied"),
                 message: format!(
-                    "{label}: {action} {count} layer(s) (layer-table edit; not undoable; one \
-                     revision bump per changed layer)"
+                    "{label}: {action} {count} layer(s) (one transaction / one undo step)"
                 ),
             }],
             measurement: None,
@@ -790,6 +730,8 @@ impl Application {
                 label: "setbylayer".to_string(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -977,6 +919,8 @@ impl Application {
                 label: "laycur".to_string(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

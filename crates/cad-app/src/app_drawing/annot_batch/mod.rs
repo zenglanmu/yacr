@@ -100,6 +100,8 @@ fn commit_one_entity(
             label: label.to_string(),
             patches: vec![drawing_patch(entity_id, Some(before.clone()), Some(stored))],
             block_patches: Vec::new(),
+            layer_patches: Vec::new(),
+            layout_patches: Vec::new(),
             merge_key: None,
         },
     )?;

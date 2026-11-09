@@ -2,9 +2,10 @@
 //!
 //! A snapshot records per-layer attributes, the active layer id and the session
 //! visibility overrides. `SAVE`/`LIST`/`DELETE` are session-only; `RESTORE` writes
-//! the layer table (one revision bump per changed layer, **no** undo entry, as
-//! layer-table edits are not undoable). Refusals: an unknown name, a bare
-//! selector, and a snapshot naming a layer that no longer exists.
+//! the layer table and records **one** undo step with every changed row (undo
+//! restores the attributes; the restored active layer/overrides are session state
+//! and are not undone). Refusals: an unknown name, a bare selector, and a snapshot
+//! naming a layer that no longer exists.
 
 use super::*;
 use cad_db::DrawingDatabaseBuilder;
@@ -84,9 +85,36 @@ fn layerstate_save_and_restore_round_trip_attributes_active_layer_and_overrides(
     assert_eq!(session.layer_overrides.get(LayerId(5)), Some(false));
     assert_eq!(
         undo_depth(&app),
-        before.1,
-        "layer-table edits are not undoable"
+        before.1 + 1,
+        "RESTORE records one undo step for every changed row"
     );
+
+    // Undo restores the saved attributes; the restored active layer/override
+    // choice is session state and stays as RESTORE left it.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo the RESTORE");
+    assert!(
+        layer_attributes(&app, LayerId(3)).locked,
+        "undo restores the pre-restore locked attribute"
+    );
+    assert_eq!(
+        session.active_layer,
+        LayerId(3),
+        "the session active layer is not part of the layer-table undo step"
+    );
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo the RESTORE");
+    assert!(!layer_attributes(&app, LayerId(3)).locked);
 }
 
 #[test]

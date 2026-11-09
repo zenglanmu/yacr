@@ -24,6 +24,8 @@ mod bounds;
 mod edit;
 mod layer_edit;
 mod layer_inherit;
+mod layer_patch;
+mod layout_edit;
 mod linetype_scale;
 mod lock;
 mod point_style;
@@ -36,6 +38,8 @@ pub use access::{EntityDisplayState, VisibilityMembership, VisibilityStateMember
 pub use block_edit::{BlockPatch, BlockRow};
 pub use layer_edit::{DEFAULT_LAYER_NAME, ILLEGAL_LAYER_NAME_CHARS};
 pub use layer_inherit::LayerScope;
+pub use layer_patch::{LayerPatch, LayerRow};
+pub use layout_edit::{LayoutPatch, LayoutRow, ILLEGAL_LAYOUT_NAME_CHARS, MAX_LAYOUT_NAME_CHARS};
 pub use transaction::DrawingTransaction;
 
 pub(crate) use bounds::BoundsCache;
@@ -184,6 +188,11 @@ pub struct DrawingDatabase {
     /// rewound by a delete, so a deleted layer id is never reused (a stale layer
     /// reference could otherwise alias a newly created layer).
     pub(crate) next_layer_id: u128,
+    /// Next layout id to hand out. Monotonic like [`Self::next_entity_id`]: the
+    /// builder initialises it from `max(existing layout id) + 1` (at least 1) and
+    /// it is never rewound by a delete, so a deleted layout id is never reused
+    /// and `LayoutId(0)` (the reserved synthetic model row) is never allocated.
+    pub(crate) next_layout_id: u128,
     /// External-reference metadata/provenance, keyed by the xref block name.
     ///
     /// Import-only, like every other table: it is populated by

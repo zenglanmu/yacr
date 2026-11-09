@@ -235,6 +235,8 @@ impl Application {
                 label: format!("match properties from {}", source.id.0),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

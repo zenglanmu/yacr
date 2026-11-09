@@ -77,6 +77,8 @@ mod join;
 mod layer_commands;
 mod layer_edit;
 mod layer_extended;
+mod layer_record;
+mod layout_record;
 mod lengthen;
 mod match_prop;
 mod mirror_curves;

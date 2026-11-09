@@ -127,6 +127,8 @@ impl Application {
                 label: "move entities".into(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -268,6 +270,8 @@ impl Application {
                 label: "erase entities".into(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -464,6 +468,8 @@ impl Application {
                 label: "copy entities".into(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -847,6 +853,8 @@ impl Application {
                 label: "offset entity".into(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

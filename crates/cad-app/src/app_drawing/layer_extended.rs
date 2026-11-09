@@ -6,22 +6,23 @@
 //!
 //! ## Writes and undo
 //!
-//! * `LAYMCH` / `LAYMCH` and the entity half of `LAYMGR` / `LAYMCH` and `LAYDEL`
-//!   use the established `begin_drawing_transaction` → `update_entity` /
+//! * `LAYMCH`, `LAYMRG` and `LAYDEL` stage their entity rows through the
+//!   established `begin_drawing_transaction` → `update_entity` /
 //!   `delete_entity` → `commit` → `publish_candidate` pattern: **one transaction
 //!   and one undo step** for the entity rows.
 //! * Layer-**table** writes (`delete_layer`, `set_layer_attributes`) raise the
-//!   revision once per changed row but are **not undoable** (`cad-history` has no
-//!   layer patch kind). A merge/delete therefore publishes one `ChangeSet` whose
-//!   `before`/`after` span the entity commit plus the layer-table bumps, while the
-//!   undo record carries only the entity patches. Undoing a `LAYDEL`/`LAYMRG`
-//!   restores the entity rows but **not** the deleted layer rows: an undo can leave
-//!   an entity pointing at a layer that no longer exists. That is a documented
-//!   boundary of this build, not a silent success.
+//!   revision once per changed row, and the command records the matching
+//!   before/after [`cad_db::LayerPatch`] rows in the **same** `DrawingUndoRecord`
+//!   as the entity patches. A merge/delete is therefore one atomic undo step:
+//!   undo restores the deleted layer rows before (and together with) the entity
+//!   rows, and redo re-applies both. The published `ChangeSet` still spans the
+//!   entity commit plus the layer-table bumps.
 //! * `LAYERSTATE RESTORE` applies stored attributes with `set_layer_attributes`
-//!   (one revision bump per changed layer, no undo).
+//!   (one revision bump per changed layer) and records all changed rows as one
+//!   layer-patch undo step. The restored active layer and override set are
+//!   session state and are not part of history.
 //! * `LTSCALE` writes the drawing header (`$LTSCALE`): one revision bump, **no**
-//!   undo entry.
+//!   undo entry (there is no header-variable patch kind).
 //! * `LAYERPMODE` and `LAYWALK` are session state only: no database write, no
 //!   revision bump, no history.
 
@@ -35,6 +36,7 @@ use super::layer_commands::{
     selection_snapshot,
 };
 use super::layer_edit::resolve_layer;
+use super::layer_record::layer_row;
 use super::*;
 use crate::command_payload::LayerStateCommand;
 
@@ -170,6 +172,8 @@ impl Application {
                 label: "laymch".to_string(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -196,7 +200,9 @@ impl Application {
     /// current selection and the target is the session's active layer. Every
     /// entity on a source layer (model space, paper space or block member) is
     /// rewritten to the active layer in one transaction / one undo step; each
-    /// source layer is then deleted from the layer table (not undoable). Sources
+    /// source layer is then deleted from the layer table in the same transaction
+    /// and the same undo record (entity patches + one layer patch per source row).
+    /// Sources
     /// equal to the active layer (`laymrg.source_is_active`) and the default layer
     /// `0` (`laymrg.default_layer`) are refused because the layer table cannot
     /// represent either merge. Empty selection is `laymrg.selection`.
@@ -291,10 +297,13 @@ impl Application {
         }
         let entity_count = patches.len();
         let before_revision = drawing.revision();
-        // Layer-table deletes raise the revision per row and are not undoable; the
-        // published change set spans both halves.
+        // Each source row is recorded as a layer patch in the same undo step, so
+        // undo restores the row before the entity rows are put back onto it.
+        let mut layer_patches = Vec::with_capacity(sources.len());
         for source in &sources {
+            let before = layer_row(drawing.as_ref(), *source);
             candidate.delete_layer(*source, transaction, "merge layer")?;
+            layer_patches.push(cad_history::layer_patch(*source, before, None));
         }
         let after_revision = candidate.revision();
         for source in &sources {
@@ -316,6 +325,8 @@ impl Application {
                 label: "laymrg".to_string(),
                 patches,
                 block_patches: Vec::new(),
+                layer_patches,
+                layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -327,8 +338,8 @@ impl Application {
                 code: "laymrg.applied".into(),
                 message: format!(
                     "LAYMRG: merged {entity_count} entities from {} source layer(s) into the \
-                     current layer '{active_name}'; the source rows were deleted (layer-table \
-                     edits are not undoable)",
+                     current layer '{active_name}'; the source rows were deleted (one \
+                     transaction / one undo step)",
                     sources.len()
                 ),
             }],
@@ -340,14 +351,16 @@ impl Application {
     /// `LAYDEL` / `-LAYDEL`: delete the selection's layers and their model entities.
     ///
     /// The source layers are the distinct layers of the current selection. Every
-    /// **model-space** entity on those layers is deleted through
-    /// [`Application::delete_entity_refs`] (one transaction / one undo step); each
-    /// source layer is then deleted from the layer table (not undoable) and its
-    /// session override is dropped. Entities in paper space or block definitions
-    /// are **not** deleted by this command: the preflight refuses a source layer
-    /// that still has such members (`laydel.layer_in_use`) so the subsequent
-    /// database delete cannot fail halfway. The active layer and the default layer
-    /// `0` are refused, as is an empty selection.
+    /// **model-space** entity on those layers is deleted in the **same candidate
+    /// / transaction / undo step** as the layer rows: the record carries both the
+    /// entity patches and one layer patch per deleted row, so undo restores the
+    /// rows and their entities together and redo removes both. Each source row's
+    /// session override is dropped (session state, not history). Entities in paper
+    /// space or block definitions are **not** deleted by this command: the
+    /// preflight refuses a source layer that still has such members
+    /// (`laydel.layer_in_use`) so the database delete cannot fail halfway. The
+    /// active layer and the default layer `0` are refused, as is an empty
+    /// selection.
     fn laydel(
         &mut self,
         session: &mut SessionState,
@@ -427,21 +440,41 @@ impl Application {
                 sub_element: None,
             })
             .collect();
+        let entity_rows: Vec<DbEntity> = model_refs
+            .iter()
+            .map(|reference| {
+                drawing
+                    .entity(reference.entity)
+                    .cloned()
+                    .ok_or_else(|| CadError::Invariant("LAYDEL: selected entity vanished".into()))
+            })
+            .collect::<CadResult<_>>()?;
+        let display_states: Vec<_> = entity_rows
+            .iter()
+            .map(|entity| drawing.entity_display_state(entity.id))
+            .collect();
         let before_revision = drawing.revision();
-        let (entity_changes, mut diagnostics) =
-            self.delete_entity_refs(document_id, &model_refs, "LAYDEL")?;
-
-        let drawing_after = self
-            .workspace
-            .documents
-            .get(&document_id)
-            .ok_or_else(|| CadError::Invariant("document disappeared after LAYDEL delete".into()))?
-            .drawing
-            .clone();
-        let mut candidate = drawing_after.as_ref().clone();
         let transaction = next_transaction_id();
+        // Both halves share one candidate, one transaction and one undo record;
+        // nothing is published until the layer rows are deleted below.
+        let mut candidate = drawing.as_ref().clone();
+        let change_set = {
+            let mut staged =
+                candidate.begin_drawing_transaction("delete layer entities", transaction)?;
+            for entity in &entity_rows {
+                staged.delete_entity(entity.id)?;
+            }
+            staged.commit()?
+        };
+        let mut patches = Vec::with_capacity(entity_rows.len());
+        for (entity, state) in entity_rows.into_iter().zip(display_states) {
+            patches.push(drawing_patch_deleted(entity.id, entity, state));
+        }
+        let mut layer_patches = Vec::with_capacity(sources.len());
         for source in &sources {
+            let before = layer_row(drawing.as_ref(), *source);
             candidate.delete_layer(*source, transaction, "delete layer")?;
+            layer_patches.push(cad_history::layer_patch(*source, before, None));
         }
         for source in &sources {
             session.layer_overrides.remove(*source);
@@ -453,20 +486,30 @@ impl Application {
             after: after_revision,
             transaction,
             reason: "laydel".to_string(),
-            changes: entity_changes
-                .as_ref()
-                .map(|changes| changes.changes.clone())
-                .unwrap_or_default(),
+            changes: change_set.changes.clone(),
         };
-        self.publish_layer_table(document_id, candidate)?;
+        self.publish_candidate(
+            document_id,
+            candidate,
+            DrawingUndoRecord {
+                transaction,
+                label: "laydel".to_string(),
+                patches,
+                block_patches: Vec::new(),
+                layer_patches,
+                layout_patches: Vec::new(),
+                merge_key: None,
+            },
+        )?;
         // The deleted entities must not stay in the session selection.
         self.reconcile_selection(session);
+        let mut diagnostics = Vec::new();
         diagnostics.push(Diagnostic {
             object: None,
             code: "laydel.applied".into(),
             message: format!(
-                "LAYDEL: deleted {} model-space entities and {} layer(s); layer-table edits are \
-                 not undoable and entities in paper space/block definitions are not deleted",
+                "LAYDEL: deleted {} model-space entities and {} layer(s) in one transaction / \
+                 one undo step; entities in paper space/block definitions are not deleted",
                 model_refs.len(),
                 sources.len()
             ),
@@ -632,18 +675,24 @@ impl Application {
                 let transaction = next_transaction_id();
                 let before_revision = drawing.revision();
                 let mut candidate = drawing.as_ref().clone();
-                let mut changed = 0;
+                let mut patches = Vec::new();
                 for (layer, attributes) in &snapshot.attributes {
                     if drawing.layer_attributes(*layer) != *attributes {
+                        let before = layer_row(drawing.as_ref(), *layer);
                         candidate.set_layer_attributes(
                             *layer,
                             attributes.clone(),
                             transaction,
                             "restore layer state",
                         )?;
-                        changed += 1;
+                        patches.push(cad_history::layer_patch(
+                            *layer,
+                            before,
+                            layer_row(&candidate, *layer),
+                        ));
                     }
                 }
+                let changed = patches.len();
                 let changes = (changed > 0).then(|| {
                     Arc::new(ChangeSet {
                         database: candidate.id(),
@@ -655,11 +704,18 @@ impl Application {
                     })
                 });
                 if changed > 0 {
-                    self.publish_layer_table(document_id, candidate)?;
+                    self.publish_layer_record(
+                        document_id,
+                        candidate,
+                        transaction,
+                        "layerstate restore",
+                        patches,
+                    )?;
                 }
                 // Session half: the saved active layer and override set replace the
-                // current ones. This is a named-state restore, not an undoable
-                // layer-table edit, so no `LAYERP` snapshot is pushed.
+                // current ones. This is session state, not a layer-table patch, so
+                // undo restores the attributes but not the active-layer/override
+                // choice; no `LAYERP` snapshot is pushed.
                 session.active_layer = snapshot.active_layer;
                 session.layer_overrides = snapshot.overrides.clone();
                 Ok(CommandOutcome {
@@ -669,9 +725,10 @@ impl Application {
                         object: None,
                         code: "layerstate.restored".into(),
                         message: format!(
-                            "LAYERSTATE: restored '{name}' ({changed} layer row(s) changed, \
-                             active layer {}; {} override(s) replaced; layer-table edits are not \
-                             undoable)",
+                            "LAYERSTATE: restored '{name}' ({changed} layer row(s) changed in one \
+                             transaction / one undo step, active layer {}; {} override(s) \
+                             replaced; the active-layer/override choice is session state and is \
+                             not undone)",
                             snapshot.active_layer.0,
                             snapshot.overrides.len()
                         ),

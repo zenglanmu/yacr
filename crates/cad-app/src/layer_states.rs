@@ -27,12 +27,13 @@
 //! changing which overrides are applied. The flag gates
 //! [`crate::SessionState::push_layer_override_snapshot`], the single push site.
 //!
-//! ## Restore writes are not undoable
+//! ## Restore writes record one undo step
 //!
 //! `RESTORE` writes the layer **table** through
-//! [`cad_db::DrawingDatabase::set_layer_attributes`], which raises the revision
-//! but has no `cad-history` layer patch kind. A restore therefore records no undo
-//! entry; the command reports that explicitly.
+//! [`cad_db::DrawingDatabase::set_layer_attributes`] (one revision bump per
+//! changed row) and records every changed before/after row as one layer-patch
+//! undo step. The restored active layer and override set are session state and
+//! are not part of history.
 
 use std::collections::{BTreeMap, VecDeque};
 

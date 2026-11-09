@@ -535,6 +535,8 @@ fn commit_updated_cloud(
             label: label.to_string(),
             patches: vec![drawing_patch(entity_id, Some(entity), Some(stored))],
             block_patches: Vec::new(),
+            layer_patches: Vec::new(),
+            layout_patches: Vec::new(),
             merge_key: None,
         },
     )?;

@@ -52,6 +52,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cad_domain::*;
 
+use super::layer_patch::{validate_layer_batch, LayerRow};
+use super::layout_edit::{validate_layout_batch, LayoutRow};
 use super::{DrawingDatabase, EntityDisplayState};
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
 use crate::entity::DbEntity;
@@ -199,8 +201,46 @@ impl DrawingDatabase {
         changes: Vec<(EntityId, Option<DbEntity>)>,
         display: &[(EntityId, EntityDisplayState)],
     ) -> CadResult<ChangeSet> {
+        self.apply_drawing_changes_combined(
+            reason,
+            transaction,
+            block_changes,
+            changes,
+            display,
+            &[],
+            &[],
+        )
+    }
+
+    /// The shared implementation of the combined write paths.
+    ///
+    /// [`Self::apply_drawing_changes_with_blocks_and_display`] passes no layer or
+    /// layout rows,
+    /// [`Self::apply_drawing_changes_with_blocks_display_and_layers`] passes the
+    /// layer batch, and
+    /// [`Self::apply_drawing_changes_with_blocks_display_layers_and_layouts`]
+    /// passes both; see `drawing::layer_patch` and `drawing::layout_edit` for the
+    /// table halves of the contract.
+    // The batch shape is the contract: every table is one argument so a caller
+    // cannot silently omit a half of an atomic write.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn apply_drawing_changes_combined(
+        &mut self,
+        reason: &str,
+        transaction: TransactionId,
+        block_changes: &[(BlockId, Option<BlockRow>)],
+        changes: Vec<(EntityId, Option<DbEntity>)>,
+        display: &[(EntityId, EntityDisplayState)],
+        layer_changes: &[(LayerId, Option<LayerRow>)],
+        layout_changes: &[(LayoutId, Option<LayoutRow>)],
+    ) -> CadResult<ChangeSet> {
         let before = self.revision;
-        if block_changes.is_empty() && changes.is_empty() && display.is_empty() {
+        if block_changes.is_empty()
+            && changes.is_empty()
+            && display.is_empty()
+            && layer_changes.is_empty()
+            && layout_changes.is_empty()
+        {
             // Nothing staged: no revision bump, no fabricated change.
             return Ok(ChangeSet {
                 database: self.id,
@@ -255,31 +295,70 @@ impl DrawingDatabase {
             validate_display_state_blocks(self, block_changes, *id, state)?;
         }
 
-        // Phase 1b: the whole block batch (shape, names, membership, deletes).
+        // Phase 1b: the layer batch, then the block batch (shape, names,
+        // membership, deletes).
         //
         // The post-batch entity view exists only for this validation: building it
         // clones every non-batch row into a `Vec` and sorts the **whole resident
         // scene** by `draw_order` (plus the batch map allocation). A normal
-        // entity-only edit has no block rows at all, so the view is not built and
-        // the pass is skipped instead of paying a scene-sized `O(N log N)` cost
-        // per commit. Phase 1c (`validate_entity_in`) is unaffected and still runs
-        // for every batch with an empty staged-block set.
-        let staged_blocks = if block_changes.is_empty() {
-            BTreeSet::new()
-        } else {
-            let batch: BTreeMap<EntityId, Option<&DbEntity>> = changes
-                .iter()
-                .map(|(id, change)| (*id, change.as_ref()))
-                .collect();
-            let post_batch = post_batch_entities(self, &batch);
-            validate_block_batch(self, block_changes, &post_batch)?
-        };
+        // entity-only edit has no block or layer rows at all, so the view is not
+        // built and the pass is skipped instead of paying a scene-sized
+        // `O(N log N)` cost per commit. Phase 1c (`validate_entity_in`) is
+        // unaffected and still runs for every batch with empty staged sets.
+        //
+        // The layer batch is validated before the entity batch so the staged
+        // layer ids it returns are available to `validate_entity_in`: an undo
+        // record that restores a layer and its entities must be expressible in
+        // one revision.
+        let (staged_layers, staged_blocks, staged_layouts) =
+            if block_changes.is_empty() && layer_changes.is_empty() && layout_changes.is_empty() {
+                (BTreeSet::new(), BTreeSet::new(), BTreeSet::new())
+            } else {
+                let batch: BTreeMap<EntityId, Option<&DbEntity>> = changes
+                    .iter()
+                    .map(|(id, change)| (*id, change.as_ref()))
+                    .collect();
+                let post_batch = post_batch_entities(self, &batch);
+                let staged_layers = if layer_changes.is_empty() {
+                    BTreeSet::new()
+                } else {
+                    validate_layer_batch(self, layer_changes, &post_batch)?
+                };
+                let staged_blocks = if block_changes.is_empty() {
+                    BTreeSet::new()
+                } else {
+                    validate_block_batch(self, block_changes, &post_batch)?
+                };
+                // The layout batch validates against the same post-batch entity
+                // view: deleting a layout after moving/removing its last paper
+                // entity in this record is legal, while a surviving reference is
+                // still refused.
+                let staged_layouts = if layout_changes.is_empty() {
+                    BTreeSet::new()
+                } else {
+                    validate_layout_batch(self, layout_changes, |layout| {
+                        post_batch
+                            .iter()
+                            .filter(|entity| entity.space == SpaceId::Paper(layout))
+                            .count()
+                    })?
+                };
+                (staged_layers, staged_blocks, staged_layouts)
+            };
 
-        // Phase 1c: entity rows, with the same batch's block ids staged as valid
-        // references (`SpaceId::Block(new)` and `Insert { block: new }`).
+        // Phase 1c: entity rows, with the same batch's block, layer **and
+        // layout** ids staged as valid references (`SpaceId::Block(new)`,
+        // `Insert { block: new }`, `layer: new` and `SpaceId::Paper(new)`).
         for (id, change) in &changes {
             match change {
-                Some(entity) => validate_entity_in(self, *id, entity, &staged_blocks)?,
+                Some(entity) => validate_entity_in(
+                    self,
+                    *id,
+                    entity,
+                    &staged_blocks,
+                    &staged_layers,
+                    &staged_layouts,
+                )?,
                 None => {
                     if !self.entities.contains_key(id) {
                         return Err(CadError::Invariant(format!("entity {id:?} does not exist")));
@@ -306,7 +385,24 @@ impl DrawingDatabase {
         // Phase 2: mutate. The batch is known-valid; keep the caller's order.
         let mut ordered = Vec::with_capacity(changes.len());
 
-        // 2a: block creates/updates first, so a member can attach to its row.
+        // 2a: layout creates/updates **first**, so an entity restored in the
+        // same record already has its layout row when it lands.
+        for (id, change) in layout_changes {
+            if let Some(row) = change {
+                self.install_layout_row(*id, row);
+            }
+        }
+
+        // 2b: layer creates/updates next, so an entity restored in the same
+        // record already has its layer row (and the derived `visible` flag) when
+        // it lands.
+        for (id, change) in layer_changes {
+            if let Some(row) = change {
+                self.install_layer_row(*id, row);
+            }
+        }
+
+        // 2c: block creates/updates next, so a member can attach to its row.
         for (id, change) in block_changes {
             if let Some(row) = change {
                 self.install_block_row(*id, row);
@@ -314,7 +410,7 @@ impl DrawingDatabase {
             }
         }
 
-        // 2b: the entity batch (the existing membership attach/detach).
+        // 2d: the entity batch (the existing membership attach/detach).
         for (id, change) in changes {
             match change {
                 Some(entity) => {
@@ -348,7 +444,7 @@ impl DrawingDatabase {
             }
         }
 
-        // 2c: display states, once the entity rows they belong to exist. Applied
+        // 2e: display states, once the entity rows they belong to exist. Applied
         // through the crate's single display writer, which also clears the
         // revision-keyed bounds cache (membership changes the extent).
         for (id, state) in display {
@@ -361,7 +457,7 @@ impl DrawingDatabase {
             }
         }
 
-        // 2d: block deletes last, once nothing references them any more.
+        // 2f: block deletes, once nothing references them any more.
         for (id, change) in block_changes {
             if change.is_none() {
                 self.blocks.remove(id);
@@ -371,10 +467,39 @@ impl DrawingDatabase {
             }
         }
 
+        // 2g: layer deletes next, once the same batch's entity deletes have
+        // removed every reference (delete safety was checked against the
+        // post-batch entity view, so this order is what makes it true).
+        for (id, change) in layer_changes {
+            if change.is_none() {
+                self.layers.remove(id);
+                // The attributes row is keyed by layer id and must not outlive
+                // its layer (see `delete_layer`).
+                self.layer_attributes.remove(id);
+                self.next_layer_id = self.next_layer_id.max(id.0.saturating_add(1));
+            }
+        }
+
+        // 2h: layout deletes **last**, after the entity deletes above (and any
+        // entity still in `SpaceId::Paper(id)` was refused in phase 1b). The
+        // plot settings row is removed with its layout, exactly like
+        // `delete_layout`.
+        for (id, change) in layout_changes {
+            if change.is_none() {
+                self.remove_layout_row(*id);
+            }
+        }
+
         // The revision bump keeps the model-space bounds memo exact for the
-        // insert-only shape (Phase 1d) instead of leaving it stale.
+        // insert-only shape (Phase 1d) instead of leaving it stale. Layer and
+        // layout edits are not geometry changes, but they raise the revision, so
+        // the memo is invalidated explicitly (the same defensive rule
+        // `layer_edit`/`layout_edit` use).
         let after = Revision(before.0 + 1);
         self.revision = after;
+        if !layer_changes.is_empty() || !layout_changes.is_empty() {
+            self.invalidate_bounds_cache();
+        }
         if let Some(bounds) = incremental_bounds {
             self.store_insert_only_bounds(after, bounds);
         }

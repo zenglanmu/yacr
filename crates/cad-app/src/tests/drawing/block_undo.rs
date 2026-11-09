@@ -149,6 +149,8 @@ fn block_create_undo_and_redo_apply_all_patches_in_one_revision_each() {
                 before: None,
                 after: Some(after_row.clone()),
             }],
+            layer_patches: Vec::new(),
+            layout_patches: Vec::new(),
             merge_key: None,
         })
         .expect("one valid block undo step");

@@ -65,6 +65,13 @@ fn revision(app: &Application) -> Revision {
     app.workspace.documents[&DocumentId(1)].drawing.revision()
 }
 
+fn undo_depth(app: &Application) -> usize {
+    app.history
+        .get(&DocumentId(1))
+        .map(|history| history.undo_depth())
+        .unwrap_or(0)
+}
+
 fn entity_count(app: &Application) -> usize {
     app.workspace.documents[&DocumentId(1)]
         .drawing
@@ -116,7 +123,7 @@ fn purge_removes_only_unused_layers_and_refuses_referenced_ones() {
         .find(|diagnostic| diagnostic.code == "purge.layer_refused")
         .unwrap();
     assert!(refused.message.contains("WALLS"), "{}", refused.message);
-    // Layer-table writes are not undoable.
+    // PURGE layer deletions are not undoable (out of scope for the layer lane).
     assert!(!app.can_undo(&DocumentId(1)));
 }
 
@@ -171,7 +178,27 @@ fn rename_layer_succeeds_and_refuses_duplicate_unknown_and_illegal_names() {
     .expect("a legal rename succeeds");
     assert!(layer_names(&app).contains(&"ENTRY".to_string()));
     assert!(revision(&app) > before);
-    assert!(!app.can_undo(&DocumentId(1)));
+    // RENAME LAYER reuses RenameLayer, which now records one layer-table step.
+    assert_eq!(undo_depth(&app), 1, "RENAME records one undo step");
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo the rename");
+    assert!(layer_names(&app).contains(&"DOORS".to_string()));
+    assert!(!layer_names(&app).contains(&"ENTRY".to_string()));
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo the rename");
+    assert!(layer_names(&app).contains(&"ENTRY".to_string()));
+    assert_eq!(undo_depth(&app), 1, "undo and redo stay one step");
 
     let before_failure = revision(&app);
     for (old, new, code) in [

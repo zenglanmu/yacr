@@ -22,9 +22,9 @@
 //! write ([`CadSession::set_layer_property`] → [`CommandId::SetLayerProperty`])
 //! are different: they are real database writes with one revision bump each,
 //! they carry a name selector instead of a resolved id (the application layer
-//! applies the same resolution rule), and they are **not undoable** —
-//! `cad-history` stores entity patches only, so a layer patch kind is a separate
-//! lane.
+//! applies the same resolution rule), and each real change is **one undo step**:
+//! the application records a [`cad_db::LayerPatch`] and `cad-history` replays it
+//! through the validated combined write path.
 //!
 //! Every [`CadLayer`] row also carries the layer's stored attributes (colour,
 //! linetype, lineweight, transparency and the off/frozen/locked/plottable flags),
@@ -139,8 +139,8 @@ impl CadLayers {
 /// and the attribute write. A parallel enum would have to duplicate the same
 /// bounded queue and the same popup/probe-mode gates for no gain, so the one
 /// queue stays the single admission point. The table variants are real database
-/// writes (one revision bump each, not undoable); the visibility/active variants
-/// stay session state only.
+/// writes (one revision bump each and one undo step per changed row); the
+/// visibility/active variants stay session state only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CadLayerWrite {
     /// Set the temporary visibility of one layer, addressed by name.
@@ -171,7 +171,7 @@ pub enum CadLayerWrite {
     /// transparent). The application layer resolves the name, parses the value
     /// against the drawing's tables and writes through
     /// [`cad_db::DrawingDatabase::set_layer_attributes`] in one revision bump.
-    /// Not undoable, like the other layer-table writes.
+    /// Undoable: the application records the before/after layer row.
     SetProperty {
         layer: String,
         key: String,
@@ -314,10 +314,10 @@ impl CadSession {
     ///
     /// A **real database write**: the application layer validates the name (trim,
     /// empty/whitespace-only, the AutoCAD-illegal character set, unique
-    /// **case-insensitively**) and commits one revision bump. Nothing is repaired
-    /// here — a bad name comes back as the database's own explicit refusal, which
-    /// is recorded for `cad_status.error`. Layer edits are **not undoable**
-    /// (history has no layer patch kind).
+    /// **case-insensitively**) and commits one revision bump and records one
+    /// layer-patch undo step. Nothing is repaired here — a bad name comes back as
+    /// the database's own explicit refusal, which is recorded for
+    /// `cad_status.error`.
     ///
     /// The answer is the ordinary queued ack; the panel re-reads [`Self::layers`],
     /// whose rows are projected from the drawing's own table.
@@ -336,7 +336,7 @@ impl CadSession {
     /// case-insensitive one), including its stable `layer.unknown` /
     /// `layer.ambiguous_name` reasons, so a row the panel selected always resolves
     /// the same way. Entity references are by id, so the rename retargets nothing.
-    /// Not undoable.
+    /// Undoable: the rename records one layer patch.
     pub fn rename_layer(&self, layer: &str, name: &str) -> Result<(), String> {
         self.require_layer_document()?;
         self.dispatch_payload(
@@ -354,7 +354,9 @@ impl CadSession {
     /// still references (naming the count), so no `Entity.layer` is ever left
     /// dangling. When the deleted layer is the session's active layer the active
     /// layer falls back to `0`; the panel sees that in the next [`Self::layers`]
-    /// read (`active`), never as a stale id. Not undoable.
+    /// read (`active`), never as a stale id. Undoable: the delete records one
+    /// layer patch (and the application applies layer deletes after entity
+    /// deletes in the same revision).
     pub fn delete_layer(&self, layer: &str) -> Result<(), String> {
         self.require_layer_document()?;
         self.dispatch_payload(
@@ -373,8 +375,8 @@ impl CadSession {
     /// parses `value` with the one layer grammar
     /// ([`cad_app::layer_property`]) — which checks a linetype name against the
     /// drawing's own table — and applies it to a **candidate** attribute set
-    /// before publishing. One revision bump per real change, **no** undo entry
-    /// (layer edits are not undoable).
+    /// before publishing. One revision bump per real change and one undo step per
+    /// changed row (a write of the stored value records nothing).
     ///
     /// `off` / `frozen` are the only keys with behaviour: the database recomputes
     /// `Layer::visible` from the pair in the same mutation, so the scene hides a

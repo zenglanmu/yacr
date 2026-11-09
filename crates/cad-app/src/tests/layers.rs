@@ -95,6 +95,13 @@ pub(super) fn revision(app: &Application) -> Revision {
     app.workspace.documents[&DocumentId(1)].drawing.revision()
 }
 
+fn undo_depth(app: &Application) -> usize {
+    app.history
+        .get(&DocumentId(1))
+        .map(|history| history.undo_depth())
+        .unwrap_or(0)
+}
+
 pub(super) fn drawing(app: &Application) -> Arc<DrawingDatabase> {
     app.workspace.documents[&DocumentId(1)].drawing.clone()
 }
@@ -118,7 +125,7 @@ fn layer_id(app: &Application, name: &str) -> LayerId {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn create_layer_adds_a_row_in_one_revision_bump_and_no_undo_entry() {
+fn create_layer_adds_a_row_in_one_revision_bump_and_one_undo_step() {
     let (mut app, mut session) = app_with_entity_on_walls();
     let before = revision(&app);
 
@@ -141,8 +148,25 @@ fn create_layer_adds_a_row_in_one_revision_bump_and_no_undo_entry() {
     assert_eq!(outcome.diagnostics[0].code, "drawing.layer_created");
     // The session's active layer is untouched by a structural create.
     assert_eq!(session.active_layer, LayerId(0));
-    // Not undoable: layer edits record no history entry.
-    assert!(!app.can_undo(&DocumentId(1)));
+    // One layer patch: a create is one undo step (before: None).
+    assert_eq!(undo_depth(&app), 1, "create records one undo step");
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo the create");
+    assert_eq!(layer_names(&app), vec!["0", "WALLS"]);
+    assert_eq!(undo_depth(&app), 0);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo the create");
+    assert_eq!(layer_names(&app), vec!["0", "DOORS", "WALLS"]);
 }
 
 #[test]
@@ -197,6 +221,7 @@ fn rename_layer_makes_the_entity_property_label_follow_and_retires_the_old_name(
     .expect("a fresh legal name is accepted");
 
     assert_eq!(revision(&app), Revision(before.0 + 1));
+    assert_eq!(undo_depth(&app), 1, "rename records one undo step");
     // The panel's layer row is derived from the database, so the entity's
     // property label follows the rename with no second source of truth.
     let db = drawing(&app);
@@ -241,6 +266,25 @@ fn rename_layer_makes_the_entity_property_label_follow_and_retires_the_old_name(
     )
     .expect_err("entity 1 is still on the renamed layer");
     assert!(error.to_string().contains("layer.in_use"), "{error}");
+
+    // The rename is one undo step: undo retires PARTITIONS and restores WALLS,
+    // redo re-applies it.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo the rename");
+    assert_eq!(layer_names(&app), vec!["0", "WALLS"]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo the rename");
+    assert_eq!(layer_names(&app), vec!["0", "PARTITIONS"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +368,36 @@ fn deleting_the_active_layer_falls_back_to_layer_zero_and_prunes_its_override() 
         .find(|diagnostic| diagnostic.code == "drawing.active_layer_fallback")
         .expect("the fallback is reported, never silent");
     assert!(fallback.message.contains("'0'"), "{}", fallback.message);
+    // Create + delete are two recorded layer-table steps.
+    assert_eq!(
+        undo_depth(&app),
+        2,
+        "create and delete each record one step"
+    );
+
+    // Undo restores the deleted row, but the session's fallback to layer 0 is
+    // session state: it is deliberately not part of the layer-table patch.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo the delete");
+    assert!(layer_names(&app).contains(&"DOORS".to_string()));
+    assert_eq!(
+        session.active_layer,
+        LayerId(0),
+        "undo restores the row but not the session active-layer choice"
+    );
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo the delete");
+    assert!(!layer_names(&app).contains(&"DOORS".to_string()));
 }
 
 #[test]
@@ -603,6 +677,11 @@ fn a_layer_can_still_be_locked_or_frozen_while_it_is_not_current() {
         "a layer-table write never moves the current layer"
     );
     assert!(revision(&app).0 > before.0, "the writes are real changes");
+    assert_eq!(
+        undo_depth(&app),
+        2,
+        "each SetLayerProperty write records one undo step"
+    );
 }
 
 // ---------------------------------------------------------------------------

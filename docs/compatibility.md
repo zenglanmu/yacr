@@ -1436,6 +1436,21 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `DGNLAYERS` | **部分实现（具名拒绝）**：`dgnlayers.unsupported: no DGN underlay layer model` | 不写库/不升修订/不入历史 |
 | `DGNADJUST` | **部分实现（具名拒绝）**：`dgnadjust.unsupported: no DGN underlay adjustment model` | 不写库/不升修订/不入历史 |
 
+### 2026-11-10 P4：图层表写入纳入 `DrawingUndoRecord`
+
+> `cad-db` 新增 `LayerRow`/`LayerPatch` 与组合应用入口；`cad-history` 的 `DrawingUndoRecord.layer_patches` 参与校验/大小/合并拒绝；`cad-app` 的 `UNDO`/`REDO` 与应用器按同一 revision 重放图层行。以下命令的图层表写入现在是**一条事务/一步撤销**；旧的“图层表写入不可撤销”界已删除。图纸空间/块内实体与 Settings 选项边界仍在，因此状态仍为**部分实现**。
+
+| 命令 | 当前行为 | 剩余边界 |
+| --- | --- | --- |
+| `LAYDEL` / `-LAYDEL` | 删除模型空间实体 + 层行，实体与层行同一记录/一步撤销 | 当前层/0 层/图纸空间或块内实体仍拒绝 |
+| `LAYMRG` / `-LAYMRG` | 重写实体 + 删除源层，实体与层行同一记录/一步撤销 | 当前层/0 层不能作源；无交互 Settings |
+| `LAYFRZ` | 冻结选中对象所在层，一步撤销 | 无 Settings/Viewports/Block 选项；当前层拒绝 |
+| `LAYLCK` / `LAYULK` | 锁定/解锁选中对象所在层，一步撤销 | 预选择输入；无 Settings |
+| `LAYTHW` | 解冻全部冻结层，一步撤销 | 无视口级冻结 |
+| `RENAME` / `-RENAME` | 图层重命名一步撤销 | 仅 LAYER 有重命名 API |
+| `LAYERSTATE RESTORE` | 恢复的图层属性写入一步撤销 | 状态仍为会话内、不持久化 DWG |
+| `PURGE` | **有意不记历史**（复用无历史删除体） | 只清未使用图层 |
+
 ## P2 晋升与边界更新（2026-11-09）
 
 > 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux
