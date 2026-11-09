@@ -27,9 +27,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **273** |
-| **已实现合计（完整 + 部分）** | **323** |
-| 未实现 | **658** |
+| 部分实现（有写明的界） | **303** |
+| **已实现合计（完整 + 部分）** | **353** |
+| 未实现 | **628** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -63,7 +63,8 @@
 
 > **2026-11-09 增补（Wave 3）**：`MSPACE`/`PSPACE` 两个会话空间切换（复用现有 `MODEL`/`SPACE` 路径，无第二套空间权威；`PSPACE` 无图纸布局时 `pspace.no_layout`）、`STYLE`/`-STYLE` 文字样式只读列表、`MLEADERSTYLE` 多重引线样式只读列表、`BLOCK?` 块定义只读列表（复用 `XLIST` 的 `drawing.blocks()`），以及 `DIMREASSOC`/`DIMREASSOCIATE` 两个非关联 no-op 报告；另加 `DIMJOGGED`…`CONSTRAINTSETTINGS` 二十二个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **293 已实现（50 完整 + 243 部分）/ 688 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-09 增补（Wave 4）**：`CENTERMARK`/`CENTERLINE`/`NCOPY`/`COPYTOLAYER`/`-COPYTOLAYER`/`CDORDER`/`FLATTEN`/`XPLODE`/`BTRIM`/`BEXTEND`/`CHANGE`/`CHPROP` 十二个**真实选择式 2D 编辑**（复用既有创建漏斗、`plan_trim`/`plan_extend`、`plan_entity` 与 EXPLODE 路径；均为 Work-only，一条事务/一步撤销；各自写明部分边界），以及 `BSCALE`…`CHSPACE` 十八个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **323 已实现（50 完整 + 273 部分）/ 658 未实现**。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
-> **323 已实现（50 完整 + 273 部分）/ 658 未实现**；无未保存修改提示，无多文档。
+> **2026-11-09 增补（Wave 5）**：`ATTDISP` 一个会话令牌（默认开；本构建无块属性模型，不渲染属性，不写图/不升修订），`BATTMAN`/`BATTORDER` 两个块定义只读列表（复用 `drawing.blocks()`，并明说 `*.attributes_not_modeled`），`XREF`/`-XREF`/`EXTERNALREFERENCES` 三个外部参照**导入期溯源**只读报告（真实读取 `drawing.external_references()`，不虚构行；`EXTERNALREFERENCES` 另报 `palette_not_implemented`），`EXTERNALREFERENCESCLOSE` 一个具名 no-op（无选项板可关）；另加 `ATTDEF`…`CLASSICXREF` 二十三个**具名拒绝**（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）计入 **353 已实现（50 完整 + 303 部分）/ 628 未实现**；全部 Viewer-legal。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
+> **353 已实现（50 完整 + 303 部分）/ 628 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -113,14 +114,21 @@
 
 | Command | 状态 | 说明 |
 | --- | --- | --- |
+| `-ATTACH` | 部分实现 | 具名拒绝（`-attach.unsupported`）：不附着外部参照或底图；命令行拼写。 |
+| `-ATTDEF` | 部分实现 | 具名拒绝（`-attdef.unsupported`）：本构建无块属性模型；命令行拼写。 |
+| `-ATTEDIT` | 部分实现 | 具名拒绝（`-attedit.unsupported`）：本构建无块属性模型；命令行拼写。 |
+| `-ATTEXT` | 部分实现 | 具名拒绝（`-attext.unsupported`）：本构建无块属性模型；命令行拼写。 |
 | `-BEDIT` | 部分实现 | 具名拒绝（`-bedit.unsupported`）：本构建无块编辑器；命令行拼写。 |
 | `-BREPLACE` | 部分实现 | 具名拒绝（`-breplace.unsupported`）：BREPLACE 的命令行拼写。 |
 | `-COPYTOLAYER` | 部分实现 | 真实编辑：同 COPYTOLAYER，命令行拼写；一条事务/一步撤销。 |
 | `-DIMINSPECT` | 部分实现 | 具名拒绝（`-diminspect.unsupported`）：同一具名拒绝的命令行拼写。 |
+| `-EATTEXT` | 部分实现 | 具名拒绝（`-eatttext.unsupported`）：本构建无块属性模型；命令行拼写。 |
 | `-MLEDIT` | 部分实现 | 具名拒绝（`-mlinedit.unsupported`）：MLEDIT 的命令行拼写。 |
 | `-OBJECTSCALE` | 部分实现 | 具名拒绝（`-objectscale.unsupported`）：同一具名拒绝的命令行拼写。 |
 | `-STYLE` | 部分实现 | 与 `STYLE` 相同的只读文字样式列表，使用 `-style.*` 诊断码；编辑未实现。 |
 | `-WBLOCK` | 部分实现 | 具名拒绝（`-wblock.unsupported`）：将块定义写入独立图形文件未实现。 |
+| `-XBIND` | 部分实现 | 具名拒绝（`-xbind.unsupported`）：本构建无外部参照绑定/插入模型；命令行拼写。 |
+| `-XREF` | 部分实现 | 只读：外部参照导入溯源报告（`-xref.entry`/`-xref.summary`）；附着/卸载/重载/绑定未实现。 |
 | `ABOUT` | 已实现 | chrome 本地选择子：打开 About 对话框（与 File > About 同一路径） |
 | `ACADINFO` | 部分实现 | 只读：产品版本/构建配置 + 文档修订/实体数；许可证/硬件/模块数据不收集。 |
 | `ADDSELECTED` | 部分实现 | 具名拒绝（`addselected.unsupported`）：缺少按类型创建提示模型。 |
@@ -135,8 +143,20 @@
 | `ARRAYEDIT` | 部分实现 | 具名拒绝（`arrayedit.unsupported`）：本构建无关联阵列编辑状态。 |
 | `ARRAYPOLAR` | 部分实现 | 独立副本、非关联；角度步长为我们的规则 |
 | `ARRAYRECT` | 部分实现 | 独立副本、非关联；无 Path/Levels/关联编辑 |
+| `ATTACH` | 部分实现 | 具名拒绝（`attach.unsupported`）：不附着外部参照或底图。 |
+| `ATTDEF` | 部分实现 | 具名拒绝（`attdef.unsupported`）：本构建无块属性模型。 |
+| `ATTDISP` | 部分实现 | 会话令牌（默认开）：翻转 `attdisp`；无块属性模型，不渲染属性、不写图。 |
+| `ATTEDIT` | 部分实现 | 具名拒绝（`attedit.unsupported`）：本构建无块属性模型。 |
+| `ATTEXT` | 部分实现 | 具名拒绝（`attext.unsupported`）：本构建无块属性模型。 |
+| `ATTIN` | 部分实现 | 具名拒绝（`attin.unsupported`）：本构建无块属性模型。 |
+| `ATTIPEDIT` | 部分实现 | 具名拒绝（`attipedit.unsupported`）：本构建无块属性模型。 |
+| `ATTOUT` | 部分实现 | 具名拒绝（`attout.unsupported`）：本构建无块属性模型。 |
+| `ATTREDEF` | 部分实现 | 具名拒绝（`attredef.unsupported`）：本构建无块属性模型。 |
+| `ATTSYNC` | 部分实现 | 具名拒绝（`attsync.unsupported`）：本构建无块属性模型。 |
 | `AUDIT` | 部分实现 | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
 | `BASE` | 部分实现 | 具名拒绝（`base.unsupported`）：图形不保存插入基点。 |
+| `BATTMAN` | 部分实现 | 只读：块定义与成员数（`battman.entry`/`battman.summary`）；块属性未建模（`battman.attributes_not_modeled`）。 |
+| `BATTORDER` | 部分实现 | 只读：块定义列表（`battorder.entry`/`battorder.summary`）；属性顺序未建模（`battorder.attributes_not_modeled`）。 |
 | `BCLOSE` | 部分实现 | 具名拒绝（`bclose.unsupported`）：本构建无块编辑器。 |
 | `BCOUNT` | 部分实现 | 只读：统计整个模型空间的块参照实例数（按块名分组）；无 AutoCAD 的 Select objects 提示、不展开块成员、不统计图纸空间。 |
 | `BCYCLEORDER` | 部分实现 | 具名拒绝（`bcycleorder.unsupported`）：本构建无动态块夹点模型。 |
@@ -165,6 +185,7 @@
 | `CHPROP` | 部分实现 | 真实编辑：同 CHANGE（移到当前层并重置颜色/线型/线宽为 ByLayer）；一条事务/一步撤销；无交互提示。 |
 | `CHSPACE` | 部分实现 | 具名拒绝（`chspace.unsupported`）：模型/图纸空间之间移动实体未实现。 |
 | `CIRCLE` | 已实现 | — |
+| `CLASSICXREF` | 部分实现 | 具名拒绝（`classicxref.unsupported`）：无独立外部参照选项板；请用 RESOURCES 面板。 |
 | `CLEANSCREENOFF` | 部分实现 | chrome 本地选择子：显式退出 clean-screen；只恢复 chrome 可见性，不重开各面板 |
 | `CLEANSCREENON` | 部分实现 | chrome 本地选择子：显式进入 clean-screen；只隐藏 chrome，不记录各面板的独立开关 |
 | `CLIP` | 部分实现 | 具名拒绝（`clip.unsupported`）：无图像/外部参照裁剪模型。 |
@@ -209,12 +230,16 @@
 | `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心圆；`inner=0` 只建外圆并诊断；无中心拾取提示 |
 | `DRAGMODE` | 部分实现 | 会话令牌 `dragmode`（默认 ON）；渲染器不消费，无拖动预览。 |
 | `DRAWORDER` | 部分实现 | `FRONT\ |
+| `EATTEDIT` | 部分实现 | 具名拒绝（`eattedit.unsupported`）：本构建无块属性模型。 |
+| `EATTEXT` | 部分实现 | 具名拒绝（`eatttext.unsupported`）：本构建无块属性模型。 |
 | `EDITTIME` | 部分实现 | 只读：当前 UTC 时钟 + 文档修订/实体数；创建/修改时间与会话用时 NOT TRACKED。 |
 | `ELLIPSE` | 已实现 | — |
 | `ERASE` | 已实现 | — |
 | `EXPLODE` | 部分实现 | 一次一层；拒绝 Dimension/MULTILEADER/非均匀 INSERT |
 | `EXPORT` | 部分实现 | PLOT 别名：仅矢量 SVG/PDF |
 | `EXTEND` | 部分实现 | 目标仅 LINE/ARC；SPLINE/CIRCLE 目标拒绝 |
+| `EXTERNALREFERENCES` | 部分实现 | 只读：外部参照导入溯源报告（`externalreferences.entry`/`.summary`）；无选项板（`.palette_not_implemented`）。 |
+| `EXTERNALREFERENCESCLOSE` | 部分实现 | 具名 no-op（`externalreferences.close_not_implemented`）：无外部参照选项板可关闭。 |
 | `EXTRIM` | 部分实现 | 第一个选中为边界，其余为被裁对象；复用 trim 规划；不支持边界/目标按名拒绝 |
 | `FILL` | 部分实现 | 会话令牌 `fill`（默认 ON）；渲染器不消费该标志，无视觉变化；不写库/不入历史。 |
 | `FILLET` | 部分实现 | 两线形式 + 独立 FILLET POLYLINE 选择子；无 Multiple/Trim |
@@ -225,6 +250,7 @@
 | `FINDMATCH` | 部分实现 | 会话令牌（默认 OFF）；已实现的 -FIND/FIND 恒按 ASCII 不区分大小写比较。 |
 | `FLATTEN` | 部分实现 | 真实编辑：选中 LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/POINT/SPLINE 的 z 置 0；一条事务/一步撤销；MESH/INSERT/3D 按名拒绝（Express 行为简化为 z=0）。 |
 | `FS` | 部分实现 | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把**直接**接触（相交或相切都算）的可见模型空间对象并入选择。默认 `FSMODE=OFF`：链式接触（`FSMODE=ON`）未实现；不展开块实例成员 |
+| `GATTE` | 部分实现 | 具名拒绝（`gatte.unsupported`）：本构建无块属性模型。 |
 | `GETSEL` | 部分实现 | `GETSEL LAYER\ |
 | `GRADIENT` | 部分实现 | 预选择闭合边界（Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链）且必须位于 +Z 平面；复用 HATCH 创建路径，强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5），一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 |
 | `GRAPHSCR` | 部分实现 | 置会话 `text_screen`=false；无文本屏幕窗口可隐藏。 |
@@ -432,10 +458,15 @@
 | `VPSCALE` | 部分实现 | 零/非有限/未知拒绝；解析比例后 `vpscale.write_unsupported`（无视口比例写 API） |
 | `VSCURRENT` | 部分实现 | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented`；无渲染器切换、NOT pixel-verified |
 | `WIPEOUT` | 部分实现 | v1 多边形遮罩：拾取边界点（≥3，回车结束）→ 一个 `Mask`（type-key `AcDbWipeout`，`inverted: false`，环不重复首点）。无边框模型（Frames ON/OFF/不打印）、无 `Polyline`/`Erase Polyline` 选项、不检查自交、不能拾取已有遮罩 |
+| `XATTACH` | 部分实现 | 具名拒绝（`xattach.unsupported`）：不把外部图纸作为外部参照附着。 |
+| `XBIND` | 部分实现 | 具名拒绝（`xbind.unsupported`）：本构建无外部参照绑定/插入模型。 |
+| `XDATA` | 部分实现 | 具名拒绝（`xdata.unsupported`）：本数据库不保留实体 XDATA。 |
 | `XDLIST` | 部分实现 | 只读；每个选中实体报告 `xdlist.not_retained`；不伪造 xdata |
 | `XLINE` | 部分实现 | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | `XLIST` | 部分实现 | 只读：列出块定义及成员数；实体 XDATA 不保留，不列出。 |
+| `XOPEN` | 部分实现 | 具名拒绝（`xopen.unsupported`）：本构建无外部参照编辑会话。 |
 | `XPLODE` | 部分实现 | 真实编辑：复用 EXPLODE 分解选中 INSERT；一条事务/一步撤销；属性/特性控制未实现。 |
+| `XREF` | 部分实现 | 只读：外部参照导入溯源报告（`xref.entry`/`xref.summary`）；附着/卸载/重载/绑定未实现。 |
 | `ZOOM` | 部分实现 | 无 OBJECT/DYNAMIC/图纸空间 nXP；WINDOW/PREVIOUS 已实现 |
 
 ## 全量清单（官方字母序）
@@ -518,21 +549,21 @@
 | 74 | `ARX` | 未实现 | Loads, unloads, and provides information about ObjectARX applications. | — |
 | 75 | `ASSISTANTCLOSE` | 未实现 | Closes Autodesk Assistant. | — |
 | 76 | `ASSISTANTOPEN` | 未实现 | Displays Autodesk Assistant. | — |
-| 77 | `-ATTACH` | 未实现 | From the Command prompt, inserts references to external files such as other drawings, raster images, point clouds, coordination models, and underlays. | — |
-| 78 | `ATTACH` | 未实现 | Inserts references to external files such as other drawings, raster images, point clouds, coordination models, and underlays. | — |
+| 77 | `-ATTACH` | 部分实现 | From the Command prompt, inserts references to external files such as other drawings, raster images, point clouds, coordination models, and underlays. | 具名拒绝（`-attach.unsupported`）：不附着外部参照或底图。 |
+| 78 | `ATTACH` | 部分实现 | Inserts references to external files such as other drawings, raster images, point clouds, coordination models, and underlays. | 具名拒绝（`attach.unsupported`）：不附着外部参照或底图。 |
 | 79 | `ATTACHURL` | 未实现 | Attaches hyperlinks to objects or areas in a drawing. | — |
-| 80 | `-ATTDEF` | 未实现 | At the Command prompt, creates an attribute definition for storing data in a block. | — |
-| 81 | `ATTDEF` | 未实现 | Creates an attribute definition for storing data in a block. | — |
-| 82 | `ATTDISP` | 未实现 | Controls the visibility overrides for all block attributes in a drawing. | — |
-| 83 | `-ATTEDIT` | 未实现 | At the Command prompt, changes attribute information in a block. | — |
-| 84 | `ATTEDIT` | 未实现 | Changes attribute information in a block. | — |
-| 85 | `-ATTEXT` | 未实现 | From the Command prompt, extracts attribute data, informational text associated with a block, into a file. | — |
-| 86 | `ATTEXT` | 未实现 | Extracts attribute data, informational text associated with a block, into a file. | — |
-| 87 | `ATTIN` | 未实现 | Imports block attribute values from an external, tab-delimited ASCII file. | — |
-| 88 | `ATTIPEDIT` | 未实现 | Changes the textual content of an attribute within a block. | — |
-| 89 | `ATTOUT` | 未实现 | Exports block attribute values to an external file in tab-delimited ASCII format. | — |
-| 90 | `ATTREDEF` | 未实现 | Redefines a block and updates associated attributes. | — |
-| 91 | `ATTSYNC` | 未实现 | Applies attribute changes in a block definition to all block references. | — |
+| 80 | `-ATTDEF` | 部分实现 | At the Command prompt, creates an attribute definition for storing data in a block. | 具名拒绝（`-attdef.unsupported`）：本构建无块属性模型。 |
+| 81 | `ATTDEF` | 部分实现 | Creates an attribute definition for storing data in a block. | 具名拒绝（`attdef.unsupported`）：本构建无块属性模型。 |
+| 82 | `ATTDISP` | 部分实现 | Controls the visibility overrides for all block attributes in a drawing. | 会话令牌（默认开）：翻转 `attdisp`；无块属性模型，不渲染属性、不写图、不升修订。 |
+| 83 | `-ATTEDIT` | 部分实现 | At the Command prompt, changes attribute information in a block. | 具名拒绝（`-attedit.unsupported`）：本构建无块属性模型。 |
+| 84 | `ATTEDIT` | 部分实现 | Changes attribute information in a block. | 具名拒绝（`attedit.unsupported`）：本构建无块属性模型。 |
+| 85 | `-ATTEXT` | 部分实现 | From the Command prompt, extracts attribute data, informational text associated with a block, into a file. | 具名拒绝（`-attext.unsupported`）：本构建无块属性模型。 |
+| 86 | `ATTEXT` | 部分实现 | Extracts attribute data, informational text associated with a block, into a file. | 具名拒绝（`attext.unsupported`）：本构建无块属性模型。 |
+| 87 | `ATTIN` | 部分实现 | Imports block attribute values from an external, tab-delimited ASCII file. | 具名拒绝（`attin.unsupported`）：本构建无块属性模型。 |
+| 88 | `ATTIPEDIT` | 部分实现 | Changes the textual content of an attribute within a block. | 具名拒绝（`attipedit.unsupported`）：本构建无块属性模型。 |
+| 89 | `ATTOUT` | 部分实现 | Exports block attribute values to an external file in tab-delimited ASCII format. | 具名拒绝（`attout.unsupported`）：本构建无块属性模型。 |
+| 90 | `ATTREDEF` | 部分实现 | Redefines a block and updates associated attributes. | 具名拒绝（`attredef.unsupported`）：本构建无块属性模型。 |
+| 91 | `ATTSYNC` | 部分实现 | Applies attribute changes in a block definition to all block references. | 具名拒绝（`attsync.unsupported`）：本构建无块属性模型。 |
 | 92 | `AUDIT` | 部分实现 | Evaluates the integrity of a drawing and corrects some errors. | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
 | 93 | `AUTOCONSTRAIN` | 未实现 | Applies geometric constraints to a selection set of objects based on orientation of the objects relative to one another. | — |
 | 94 | `AUTOPUBLISH` | 未实现 | Publishes drawings to DWF, DWFx, or PDF files automatically to a specified location. | — |
@@ -542,8 +573,8 @@
 | 98 | `BACTIONTOOL` | 未实现 | Adds an action to a dynamic block definition. | — |
 | 99 | `BASE` | 部分实现 | Sets the insertion base point for the current drawing. | 具名拒绝（`base.unsupported`）：图形不保存插入基点。 |
 | 100 | `BASSOCIATE` | 未实现 | Associates an action with a parameter in a dynamic block definition. | — |
-| 101 | `BATTMAN` | 未实现 | Manages the attributes for a selected block definition. | — |
-| 102 | `BATTORDER` | 未实现 | Specifies the order of attributes for a block. | — |
+| 101 | `BATTMAN` | 部分实现 | Manages the attributes for a selected block definition. | 只读：列出块定义与成员数（复用 `drawing.blocks()`；`battman.entry`/`battman.summary`）；块属性未建模（`battman.attributes_not_modeled`）。 |
+| 102 | `BATTORDER` | 部分实现 | Specifies the order of attributes for a block. | 只读：列出块定义（`battorder.entry`/`battorder.summary`）；属性显示顺序未建模（`battorder.attributes_not_modeled`）。 |
 | 103 | `BAUTHORPALETTE` | 未实现 | Opens the Block Authoring Palettes window in the Block Editor. | — |
 | 104 | `BAUTHORPALETTECLOSE` | 未实现 | Closes the Block Authoring Palettes window in the Block Editor. | — |
 | 105 | `BCLOSE` | 部分实现 | Closes the Block Editor. | 具名拒绝（`bclose.unsupported`）：无块编辑器。 |
@@ -613,7 +644,7 @@
 | 169 | `CLASSICIMAGE` | 未实现 | Manages referenced image files in the current drawing. | — |
 | 170 | `CLASSICINSERT` | 未实现 | Inserts a block or drawing into the current drawing using the classic version of the INSERT command. | — |
 | 171 | `CLASSICLAYER` | 未实现 | Opens the legacy Layer Properties Manager. | — |
-| 172 | `CLASSICXREF` | 未实现 | Manages referenced drawing files in the current drawing. | — |
+| 172 | `CLASSICXREF` | 部分实现 | Manages referenced drawing files in the current drawing. | 具名拒绝（`classicxref.unsupported`）：无独立外部参照选项板；请用 RESOURCES 面板。 |
 | 173 | `CLEANSCREENOFF` | 部分实现 | Restores the state of the display before CLEANSCREENON was used. | chrome 本地选择子：显式退出 clean-screen；只恢复 chrome 可见性，不重开各面板 |
 | 174 | `CLEANSCREENON` | 部分实现 | Clears the screen of toolbars and dockable windows, excluding the command window. | chrome 本地选择子：显式进入 clean-screen；只隐藏 chrome，不记录各面板的独立开关 |
 | 175 | `CLIP` | 部分实现 | Crops selected objects such as blocks, external references, images, viewports, and underlays to a specified boundary. | 具名拒绝（`clip.unsupported`）：无图像/外部参照裁剪模型。 |
@@ -772,9 +803,9 @@
 | 328 | `DWGLOG` | 未实现 | Creates and maintains an individual log file for each drawing file as it is accessed. | — |
 | 329 | `DWGPROPS` | 未实现 | Sets and displays the file properties of the current drawing. | — |
 | 330 | `DXBIN` | 未实现 | Imports an AutoCAD DXB (drawing interchange binary) file. | — |
-| 331 | `EATTEDIT` | 未实现 | Edits attributes in a block reference. | — |
-| 332 | `-EATTEXT` | 未实现 | From the Command line, extracts data as specified in an existing attribute extraction template (BLK) file or data extraction (DXE or DXEX) file. | — |
-| 333 | `EATTEXT` | 未实现 | Exports block attribute information to a table or to an external file. | — |
+| 331 | `EATTEDIT` | 部分实现 | Edits attributes in a block reference. | 具名拒绝（`eattedit.unsupported`）：本构建无块属性模型。 |
+| 332 | `-EATTEXT` | 部分实现 | From the Command line, extracts data as specified in an existing attribute extraction template (BLK) file or data extraction (DXE or DXEX) file. | 具名拒绝（`-eatttext.unsupported`）：本构建无块属性模型。 |
+| 333 | `EATTEXT` | 部分实现 | Exports block attribute information to a table or to an external file. | 具名拒绝（`eatttext.unsupported`）：本构建无块属性模型。 |
 | 334 | `EDGE` | 未实现 | Changes the visibility of 3D face edges. | — |
 | 335 | `EDGESURF` | 未实现 | Creates a mesh between four contiguous edges or curves. | — |
 | 336 | `EDITSHOT` | 未实现 | Edits a saved named view with or without motion. | — |
@@ -798,8 +829,8 @@
 | 354 | `EXPRESSMENU` | 未实现 | Loads the AutoCAD Express Tools menu and displays the Express menu on the menu bar. | — |
 | 355 | `EXPRESSTOOLS` | 未实现 | Loads the AutoCAD Express Tools libraries, places the Express folder in the search path, and loads and places the Express menu on the menu bar. | — |
 | 356 | `EXTEND` | 部分实现 | Extends objects to meet the edges of other objects. | 目标仅 LINE/ARC；SPLINE/CIRCLE 目标拒绝 |
-| 357 | `EXTERNALREFERENCES` | 未实现 | Opens the External References palette. | — |
-| 358 | `EXTERNALREFERENCESCLOSE` | 未实现 | Closes the External References palette. | — |
+| 357 | `EXTERNALREFERENCES` | 部分实现 | Opens the External References palette. | 只读：外部参照导入溯源报告（`externalreferences.entry`/`externalreferences.summary`）；本构建无选项板（`externalreferences.palette_not_implemented`）。 |
+| 358 | `EXTERNALREFERENCESCLOSE` | 部分实现 | Closes the External References palette. | 具名 no-op（`externalreferences.close_not_implemented`）：本构建无外部参照选项板，无窗口可关闭。 |
 | 359 | `EXTRIM` | 部分实现 | Trims all objects at the cutting edge specified by a selected polyline, line, circle, arc, ellipse, text, mtext, or attribute definition. | 第一个选中为边界，其余为被裁对象；复用 trim 规划；不支持边界/目标按名拒绝 |
 | 360 | `EXTRUDE` | 未实现 | Creates a 3D solid from an object that encloses an area, or a 3D surface from an object with open ends. | — |
 | 361 | `FADEMARKUP` | 未实现 | Fade individual markups so they are less visible on a trace. | — |
@@ -819,7 +850,7 @@
 | 375 | `FREESPOT` | 未实现 | Creates a free spotlight which is a spotlight without a specified target. | — |
 | 376 | `FREEWEB` | 未实现 | Creates a free web light which is a web light without a specified target. | — |
 | 377 | `FS` | 部分实现 | Creates a selection set of all objects that touch the selected object. | Express 工具、仅命令行；当前唯一选择为种子，并入**直接**接触（相交或相切）的可见模型空间对象（默认 FSMODE=OFF；链式 FSMODE=ON 未实现）；不展开块实例成员 |
-| 378 | `GATTE` | 未实现 | Globally changes attribute values for all instances of a specified block. | — |
+| 378 | `GATTE` | 部分实现 | Globally changes attribute values for all instances of a specified block. | 具名拒绝（`gatte.unsupported`）：本构建无块属性模型。 |
 | 379 | `GCCOINCIDENT` | 未实现 | Constrains two points together or a point to a curve (or an extension of a curve). | — |
 | 380 | `GCCOLLINEAR` | 未实现 | Causes two or more line segments to lie along the same line. | — |
 | 381 | `GCCONCENTRIC` | 未实现 | Constrains two arcs, circles, or ellipses to the same center point. | — |
@@ -1405,23 +1436,23 @@
 | 961 | `WORKSPACE` | 未实现 | Creates, modifies, and saves workspaces and makes a workspace current. | — |
 | 962 | `WSSAVE` | 未实现 | Saves a workspace. | — |
 | 963 | `WSSETTINGS` | 未实现 | Sets options for workspaces. | — |
-| 964 | `XATTACH` | 未实现 | Attaches selected DWG files as external references (xrefs). | — |
-| 965 | `-XBIND` | 未实现 | Binds one or more definitions of named objects in an xref to the current drawing. | — |
-| 966 | `XBIND` | 未实现 | Binds one or more definitions of named objects in an xref to the current drawing. | — |
+| 964 | `XATTACH` | 部分实现 | Attaches selected DWG files as external references (xrefs). | 具名拒绝（`xattach.unsupported`）：本构建不把外部图纸作为外部参照附着。 |
+| 965 | `-XBIND` | 部分实现 | Binds one or more definitions of named objects in an xref to the current drawing. | 具名拒绝（`-xbind.unsupported`）：本构建无外部参照绑定/插入模型。 |
+| 966 | `XBIND` | 部分实现 | Binds one or more definitions of named objects in an xref to the current drawing. | 具名拒绝（`xbind.unsupported`）：本构建无外部参照绑定/插入模型。 |
 | 967 | `XCLIP` | 未实现 | Crops the display of a selected external reference or block reference to a specified boundary. | — |
 | 968 | `XCOMPARE` | 未实现 | Compares an attached xref with the latest state of the referenced drawing file, highlighting the differences with color within revision clouds. | — |
 | 969 | `XCOMPARECLOSE` | 未实现 | Closes the Xref Compare toolbar and ends the comparison. | — |
 | 970 | `XCOMPARERCNEXT` | 未实现 | Zooms to the next change set of the xref comparison result. | — |
 | 971 | `XCOMPARERCPREV` | 未实现 | Zooms to the previous change set of the xref comparison result. | — |
-| 972 | `XDATA` | 未实现 | Attaches extended object data (xdata) to a selected object. | — |
+| 972 | `XDATA` | 部分实现 | Attaches extended object data (xdata) to a selected object. | 具名拒绝（`xdata.unsupported`）：本数据库不保留实体 XDATA。 |
 | 973 | `XDLIST` | 部分实现 | Lists the xdata attached to an object. | 只读；每个选中实体报告 `xdlist.not_retained`；不伪造 xdata |
 | 974 | `XEDGES` | 未实现 | Creates wireframe geometry from the edges of a 3D solid, surface, mesh, region, or subobject. | — |
 | 975 | `XLINE` | 部分实现 | Creates a construction line of infinite length. | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | 976 | `XLIST` | 部分实现 | Lists the type, block name, layer name, color and linetype of a nested object in a block or an xref. | 只读：列出块定义及成员数；实体 XDATA 不保留，不列出。 |
-| 977 | `XOPEN` | 未实现 | Opens a selected drawing reference (xref) in a new window. | — |
+| 977 | `XOPEN` | 部分实现 | Opens a selected drawing reference (xref) in a new window. | 具名拒绝（`xopen.unsupported`）：本构建无外部参照编辑会话。 |
 | 978 | `XPLODE` | 部分实现 | Breaks a compound object into its component objects, with specified properties for the resulting objects. | 真实编辑：复用 EXPLODE 分解选中 INSERT；一条事务/一步撤销；属性/特性控制未实现。 |
-| 979 | `-XREF` | 未实现 | From the Command prompt, manages drawings inserted as external references (xrefs). | — |
-| 980 | `XREF` | 未实现 | Starts the EXTERNALREFERENCES command. | 无 `XREF`/`-XREF` 命令（无附着/卸载/重载/绑定）；打开图纸时只读导入期合并被参照图纸（v1，见 `docs/xref.md`），浏览器显式 `browser-unavailable`，DXF 另存拒绝摊平 |
+| 979 | `-XREF` | 部分实现 | From the Command prompt, manages drawings inserted as external references (xrefs). | 只读：外部参照导入溯源报告（`-xref.entry`/`-xref.summary`）；附着/卸载/重载/绑定未实现。 |
+| 980 | `XREF` | 部分实现 | Starts the EXTERNALREFERENCES command. | 只读：外部参照导入溯源报告（`xref.entry`/`xref.summary`）；附着/卸载/重载/绑定/编辑未实现；本构建无选项板。 |
 | 981 | `ZOOM` | 部分实现 | Increases or decreases the magnification of the view in the current viewport. | 无 OBJECT/DYNAMIC/图纸空间 nXP；WINDOW/PREVIOUS 已实现 |
 
 ## 项目词表审计（合并自 `docs/autocad-command-coverage.md`）
@@ -1563,7 +1594,7 @@
 | `INSERT`（**创建**侧） | **实现（v1，2026-11-01）** | **点-后-名**：先拾取插入点，再输入**本图已有块**的名称（终端文本通道）；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`，活动图层/模型空间，一条事务/一步撤销。**无块表写入**（只读块定义 + 名称/基点元数据）；**无**块选择器/palette、比例/旋转/属性值/动态块参数；未知名称/缺元数据/空名/换行/非有限点按名拒绝。`BLOCK`/`PASTEBLOCK` 已实现 v1；`WBLOCK` 是具名拒绝（未实现单文件写出） |
 | `BLOCK` | **实现（v1，2026-11-01）** | **选择 → 基点 → 名称**（终端文本）：选中模型空间顶层实体写入新块定义并移入 `SpaceId::Block`，几何**逐位保留**、只改空间；元数据存基点；参照为 identity `T(基点)·T(−基点)`，后续 `INSERT` 仍按 `T(I)·T(−基点)`；**一条事务/一步撤销**，块级 undo 补丁；参照 draw_order = 成员最大 draw_order、参照在活动图层。**v1 上限**：无 ATTDEF/ATTRIB、动态块参数、retain/delete 选择、块选择器；重名（精确/ASCII 大小写不敏感）拒绝；实例路径/子元素/图纸空间/块成员拒绝；名称非法字符/空/换行拒绝 |
 | `WBLOCK` | **部分实现（具名拒绝）** | `wblock.unsupported`：无「写块到文件」；不写库/不升修订/不入历史 |
-| `XREF` | **未实现（命令面）；只读导入期合并 v1** | **无 `XREF` 命令**：无附着/卸载/重载（RELOAD）/绑定（BIND）/编辑/xref 编写。打开图纸时按路径策略读取并合并被参照图纸的模型空间到宿主 xref 块，图层 `xref\|layer`、块 `xref$0$name` 命名空间，状态见 `docs/xref.md`。浏览器无文件系统 ⇒ 显式 `browser-unavailable` 提示，**不 fetch/不猜**；DXF 另存拒绝摊平 xref 内容（`export.xref_content_dropped`），无 xref 记录/路径往返 |
+| `XREF` | **部分实现（只读报告）；只读导入期合并 v1** | `XREF`/`-XREF`/`EXTERNALREFERENCES` 只读报告 `drawing.external_references()` 中的导入期溯源行（`xref.entry`/`xref.summary` 等），`EXTERNALREFERENCESCLOSE` 是具名 no-op（无选项板）。**仍无**附着/卸载/重载（RELOAD）/绑定（BIND）/编辑/xref 编写，也无 External References 选项板。打开图纸时按路径策略读取并合并被参照图纸的模型空间到宿主 xref 块，图层 `xref\|layer`、块 `xref$0$name` 命名空间，状态见 `docs/xref.md`。浏览器无文件系统 ⇒ 显式 `browser-unavailable` 提示，**不 fetch/不猜**；DXF 另存拒绝摊平 xref 内容（`export.xref_content_dropped`），无 xref 记录/路径往返 |
 | `IMPORT` | **未实现** | 打开 DWG/DXF 是**打开管线**，不是 `IMPORT` 命令（无 `IMPORT` 选择子） |
 | `PUBLISH` | **未实现** | 无多布局批量出图 |
 
@@ -1631,7 +1662,7 @@
 | `POLYLINE`（旧式 heavy 2D 折线实体）创建 | **M** | 需要写 `AcDb2dPolyline` + 顶点子实体；**不得**把 `POLYLINE` 别名到 `PLINE`（不在官方 981 索引） |
 | `XLINE`/`RAY` 真正的无限几何 | **L** | 命令已实现（有界线段）；真正无限表示要新增几何变体，影响 validate/bounds/transform/渲染/选择/导出等约 14 处强制点 + 约 12 处兜底 |
 | `WBLOCK` | **L** | `BLOCK`/`PASTEBLOCK` 已有运行时块写入口；缺单文件写出、块定义导出与 `SavePurpose::WBlock` |
-| `XREF` 命令面 | **L** | 只读导入期合并 v1 已落地；缺附着/卸载/重载/绑定、xref 记录与路径往返、`XCLIP`/完整 `VISRETAIN` |
+| `XREF` 命令面 | **L** | 只读导入期合并 v1 + Wave 5 的 `XREF`/`-XREF`/`EXTERNALREFERENCES` 溯源报告已落地；仍缺附着/卸载/重载/绑定、xref 记录与路径往返、`XCLIP`/完整 `VISRETAIN` 与选项板 |
 | `IMPORT` | **L** | 依赖 acadrust 格式能力与迁移策略；打开 DWG/DXF 走 `OPEN`，不是 `IMPORT` |
 | `PUBLISH` | **L** | 多布局/多图幅批量出图 + 设备/图幅/打印样式；`PLOT` 只到矢量单页 |
 | `DIMSTYLE` 样式表写入与追溯语义 | **M** | `LIST`/`CURRENT` 只读、`SET` 具名拒绝；缺 post-import 样式表写 API 与“改样式是否回写实体”的产品决策（ADR-0017 定为不追溯） |

@@ -429,7 +429,7 @@ test('autocomplete marks supported commands and never injects unknown ids', () =
   const layer = filterCommandSuggestions('LAYER');
   assert.equal(layer.find(suggestion => suggestion.id === 'LAYER').supported, true);
   const open = filterCommandSuggestions('open');
-  assert.deepEqual(open.map(suggestion => suggestion.id), ['OPEN']);
+  assert.deepEqual(open.map(suggestion => suggestion.id), ['OPEN', 'XOPEN']);
   assert.equal(open[0].supported, true);
   assert.deepEqual(filterCommandSuggestions('zzz'), []);
   // Before the host answers, every suggestion is unsupported — never "allowed".

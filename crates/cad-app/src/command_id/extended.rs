@@ -65,6 +65,26 @@
 //! * **Named refusals** (`BSCALE` through `CHSPACE`): features with no storage
 //!   model or API in this build, refused with a stable
 //!   `CadError::Unsupported` reason. Refusals stay Viewer-legal.
+//!
+//! # Wave 5 (2026-11-09)
+//!
+//! Thirty more names over the attribute and external-reference surfaces:
+//!
+//! * **Session token** (`ATTDISP`): one `attdisp` flag (default ON) in
+//!   [`crate::session_state::DraftingExtras`]. This build has no block-attribute
+//!   model, so nothing is rendered either way and the outcome says exactly that.
+//! * **Read-only reports** (`BATTMAN`, `BATTORDER`, `XREF`, `-XREF`,
+//!   `EXTERNALREFERENCES`, `EXTERNALREFERENCESCLOSE`): block definitions/member
+//!   counts from `drawing.blocks()` and external-reference provenance from
+//!   `drawing.external_references()`. Absent data is named
+//!   (`*.attributes_not_modeled`, `externalreferences.palette_not_implemented`),
+//!   never invented.
+//! * **Named refusals** (`ATTDEF` through `CLASSICXREF`): no block-attribute
+//!   model, no entity XDATA store, no xref bind/attach/edit/palette API. Each is
+//!   `CadError::Unsupported` with a stable reason.
+//!
+//! Every Wave 5 variant stays Viewer-legal: no database write, no revision bump,
+//! no `cad-history` entry.
 
 /// One payload-free command in the extended wrapper batches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -285,6 +305,70 @@ pub enum ExtendedCommandId {
     BSaveAs,
     /// `CHSPACE`: no model/paper-space entity move.
     ChSpace,
+
+    // -- Wave 5: session token / reports (app_extended_attrs5) --------------
+    /// `ATTDISP`: toggle the session attribute-display token (default ON).
+    AttDisp,
+    /// `BATTMAN`: read-only block definition/member list plus the attribute gap.
+    BattMan,
+    /// `BATTORDER`: read-only block definition list plus the attribute gap.
+    BattOrder,
+    /// `XREF`: read-only report of the drawing's external references.
+    XRef,
+    /// `-XREF`: the same report under its own diagnostic codes.
+    DashXRef,
+    /// `EXTERNALREFERENCES`: the same report; this build has no palette.
+    ExternalReferences,
+    /// `EXTERNALREFERENCESCLOSE`: named no-op (there is no palette to close).
+    ExternalReferencesClose,
+
+    // -- Wave 5: named refusals (app_extended_refusals5) --------------------
+    /// `ATTDEF`: no block-attribute model.
+    AttDef,
+    /// `-ATTDEF`: the command-line spelling of the same refusal.
+    DashAttDef,
+    /// `ATTEDIT`: no block-attribute model.
+    AttEdit,
+    /// `-ATTEDIT`: the command-line spelling of the same refusal.
+    DashAttEdit,
+    /// `ATTIPEDIT`: no block-attribute model.
+    AttIpEdit,
+    /// `ATTIN`: no block-attribute model.
+    AttIn,
+    /// `ATTOUT`: no block-attribute model.
+    AttOut,
+    /// `ATTEXT`: no block-attribute model.
+    AttExt,
+    /// `-ATTEXT`: the command-line spelling of the same refusal.
+    DashAttExt,
+    /// `EATTEDIT`: no block-attribute model.
+    EAttEdit,
+    /// `EATTEXT`: no block-attribute model.
+    EAttExt,
+    /// `-EATTEXT`: the command-line spelling of the same refusal.
+    DashEAttExt,
+    /// `ATTREDEF`: no block-attribute model.
+    AttRedef,
+    /// `ATTSYNC`: no block-attribute model.
+    AttSync,
+    /// `GATTE`: no block-attribute model.
+    Gatte,
+    /// `XDATA`: entity XDATA is not retained.
+    XData,
+    /// `XBIND`: no xref bind/insert model.
+    XBind,
+    /// `-XBIND`: the command-line spelling of the same refusal.
+    DashXBind,
+    /// `XATTACH`: external drawings are not attached as xrefs.
+    XAttach,
+    /// `ATTACH`: no external-reference/underlay attachment API.
+    Attach,
+    /// `-ATTACH`: the command-line spelling of the same refusal.
+    DashAttach,
+    /// `XOPEN`: no xref editing session.
+    XOpen,
+    /// `CLASSICXREF`: no separate xref palette (use the RESOURCES panel).
+    ClassicXRef,
 }
 
 impl ExtendedCommandId {
@@ -392,6 +476,36 @@ impl ExtendedCommandId {
             Self::BSave => "BSAVE",
             Self::BSaveAs => "BSAVEAS",
             Self::ChSpace => "CHSPACE",
+            Self::AttDisp => "ATTDISP",
+            Self::BattMan => "BATTMAN",
+            Self::BattOrder => "BATTORDER",
+            Self::XRef => "XREF",
+            Self::DashXRef => "-XREF",
+            Self::ExternalReferences => "EXTERNALREFERENCES",
+            Self::ExternalReferencesClose => "EXTERNALREFERENCESCLOSE",
+            Self::AttDef => "ATTDEF",
+            Self::DashAttDef => "-ATTDEF",
+            Self::AttEdit => "ATTEDIT",
+            Self::DashAttEdit => "-ATTEDIT",
+            Self::AttIpEdit => "ATTIPEDIT",
+            Self::AttIn => "ATTIN",
+            Self::AttOut => "ATTOUT",
+            Self::AttExt => "ATTEXT",
+            Self::DashAttExt => "-ATTEXT",
+            Self::EAttEdit => "EATTEDIT",
+            Self::EAttExt => "EATTEXT",
+            Self::DashEAttExt => "-EATTEXT",
+            Self::AttRedef => "ATTREDEF",
+            Self::AttSync => "ATTSYNC",
+            Self::Gatte => "GATTE",
+            Self::XData => "XDATA",
+            Self::XBind => "XBIND",
+            Self::DashXBind => "-XBIND",
+            Self::XAttach => "XATTACH",
+            Self::Attach => "ATTACH",
+            Self::DashAttach => "-ATTACH",
+            Self::XOpen => "XOPEN",
+            Self::ClassicXRef => "CLASSICXREF",
         }
     }
 
@@ -522,5 +636,35 @@ impl ExtendedCommandId {
         Self::BSave,
         Self::BSaveAs,
         Self::ChSpace,
+        Self::AttDisp,
+        Self::BattMan,
+        Self::BattOrder,
+        Self::XRef,
+        Self::DashXRef,
+        Self::ExternalReferences,
+        Self::ExternalReferencesClose,
+        Self::AttDef,
+        Self::DashAttDef,
+        Self::AttEdit,
+        Self::DashAttEdit,
+        Self::AttIpEdit,
+        Self::AttIn,
+        Self::AttOut,
+        Self::AttExt,
+        Self::DashAttExt,
+        Self::EAttEdit,
+        Self::EAttExt,
+        Self::DashEAttExt,
+        Self::AttRedef,
+        Self::AttSync,
+        Self::Gatte,
+        Self::XData,
+        Self::XBind,
+        Self::DashXBind,
+        Self::XAttach,
+        Self::Attach,
+        Self::DashAttach,
+        Self::XOpen,
+        Self::ClassicXRef,
     ];
 }

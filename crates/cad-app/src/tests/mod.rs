@@ -190,6 +190,9 @@ mod extended_reports3;
 // The 2026-11-09 Wave 4 extended-command contracts.
 mod extended_edit4;
 mod extended_refusals4;
+
+mod extended_attrs5;
+mod extended_refusals5;
 mod grips;
 mod grips_curves;
 mod grips_dimension;

@@ -171,6 +171,17 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'MLEDIT', '-MLEDIT', 'BURST', 'CLIP', 'CLIPIT', 'REGION', 'ADDSELECTED',
   'WBLOCK', '-WBLOCK', 'BSAVE', 'BSAVEAS', 'CHSPACE',
 
+  // The 2026-11-09 Wave 5 batch: the ATTDISP token, the six read-only
+  // attribute/xref reports and the twenty-three named refusals all read the
+  // open drawing, so the start page disables them with the catalog's own "no
+  // drawing is open" sentence. None takes a capability gate: no file I/O is
+  // performed (the xref report reads import provenance already in the database).
+  'ATTDISP', 'BATTMAN', 'BATTORDER', 'XREF', '-XREF', 'EXTERNALREFERENCES',
+  'EXTERNALREFERENCESCLOSE', 'ATTDEF', '-ATTDEF', 'ATTEDIT', '-ATTEDIT',
+  'ATTIPEDIT', 'ATTIN', 'ATTOUT', 'ATTEXT', '-ATTEXT', 'EATTEDIT', 'EATTEXT',
+  '-EATTEXT', 'ATTREDEF', 'ATTSYNC', 'GATTE', 'XDATA', 'XBIND', '-XBIND',
+  'XATTACH', 'ATTACH', '-ATTACH', 'XOPEN', 'CLASSICXREF',
+
 ]);
 
 /** One command's precondition on the **current selection**. */

@@ -1079,3 +1079,38 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `BSAVE` | **部分实现（具名拒绝）**：`bsave.unsupported: this build has no block editor` | 同上 |
 | `BSAVEAS` | **部分实现（具名拒绝）**：`bsaveas.unsupported: this build has no block editor` | 同上 |
 | `CHSPACE` | **部分实现（具名拒绝）**：`chspace.unsupported: moving entities between model and paper space is not implemented` | 同上 |
+
+### 2026-11-09 Wave 5 扩展命令（属性 + 外部参照）
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `ATTDISP` | **部分实现（会话令牌）**：翻转会话 `attdisp` 令牌（默认 **ON**）；`attdisp.toggled`；无事务/修订/历史 | 本构建**无块属性模型**，因此不渲染（也不隐藏）任何属性；没有渲染器消费者 |
+| `BATTMAN` | **部分实现（只读）**：`battman.entry` 逐块定义 + `battman.summary`（复用 `drawing.blocks()`） | 块属性**未建模**（`battman.attributes_not_modeled`）；不是属性管理器对话框 |
+| `BATTORDER` | **部分实现（只读）**：`battorder.entry` 逐块定义 + `battorder.summary` | 属性显示顺序**未建模**（`battorder.attributes_not_modeled`）；不重排任何内容 |
+| `XREF` | **部分实现（只读）**：读取 `drawing.external_references()` 导入期溯源，`xref.entry`/`xref.summary`（名称/状态/原始与解析路径/深度/overlay/块） | 无附着/卸载/重载/绑定/编辑；空映射报告 0 行，不虚构；浏览器仍按导入期 `browser-unavailable` 状态显示 |
+| `-XREF` | **部分实现（只读）**：同一报告，使用 `-xref.entry`/`-xref.summary` 诊断码 | 同上；命令行拼写不能附着/卸载/重载/绑定 |
+| `EXTERNALREFERENCES` | **部分实现（只读）**：同一报告，`externalreferences.entry`/`.summary` | 本构建**无 External References 选项板**（`externalreferences.palette_not_implemented`）；不打开任何 UI |
+| `EXTERNALREFERENCESCLOSE` | **部分实现（具名 no-op）**：`externalreferences.close_not_implemented`，不改变任何状态 | 没有选项板可关闭 |
+| `ATTDEF` | **部分实现（具名拒绝）**：`attdef.unsupported: this build has no block-attribute model` | 不写库/不升修订/不入历史 |
+| `-ATTDEF` | **部分实现（具名拒绝）**：`-attdef.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTEDIT` | **部分实现（具名拒绝）**：`attedit.unsupported: this build has no block-attribute model` | 同上 |
+| `-ATTEDIT` | **部分实现（具名拒绝）**：`-attedit.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTIPEDIT` | **部分实现（具名拒绝）**：`attipedit.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTIN` | **部分实现（具名拒绝）**：`attin.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTOUT` | **部分实现（具名拒绝）**：`attout.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTEXT` | **部分实现（具名拒绝）**：`attext.unsupported: this build has no block-attribute model` | 同上 |
+| `-ATTEXT` | **部分实现（具名拒绝）**：`-attext.unsupported: this build has no block-attribute model` | 同上 |
+| `EATTEDIT` | **部分实现（具名拒绝）**：`eattedit.unsupported: this build has no block-attribute model` | 同上 |
+| `EATTEXT` | **部分实现（具名拒绝）**：`eatttext.unsupported: this build has no block-attribute model` | 同上（原因串按历史拼写 `eatttext`，与选择子 `EATTEXT` 一致地稳定） |
+| `-EATTEXT` | **部分实现（具名拒绝）**：`-eatttext.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTREDEF` | **部分实现（具名拒绝）**：`attredef.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTSYNC` | **部分实现（具名拒绝）**：`attsync.unsupported: this build has no block-attribute model` | 同上 |
+| `GATTE` | **部分实现（具名拒绝）**：`gatte.unsupported: this build has no block-attribute model` | 同上 |
+| `XDATA` | **部分实现（具名拒绝）**：`xdata.unsupported: this database does not retain entity XDATA` | 同上 |
+| `XBIND` | **部分实现（具名拒绝）**：`xbind.unsupported: this build has no xref bind/insert model` | 同上 |
+| `-XBIND` | **部分实现（具名拒绝）**：`-xbind.unsupported: this build has no xref bind/insert model` | 同上 |
+| `XATTACH` | **部分实现（具名拒绝）**：`xattach.unsupported: this build does not attach external drawings as xrefs` | 同上 |
+| `ATTACH` | **部分实现（具名拒绝）**：`attach.unsupported: this build does not attach external references or underlays` | 同上 |
+| `-ATTACH` | **部分实现（具名拒绝）**：`-attach.unsupported: this build does not attach external references or underlays` | 同上 |
+| `XOPEN` | **部分实现（具名拒绝）**：`xopen.unsupported: this build has no xref editing session` | 同上 |
+| `CLASSICXREF` | **部分实现（具名拒绝）**：`classicxref.unsupported: there is no separate xref palette; use the RESOURCES panel` | 同上 |

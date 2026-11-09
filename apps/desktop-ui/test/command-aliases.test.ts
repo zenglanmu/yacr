@@ -141,8 +141,13 @@ test('alias rows match a typed prefix only, and the limit covers the merged list
   loadAliases();
   // `X` is an alias, so it appears for `x`; a mid-string match on the alias is
   // deliberately not a thing (`EX` contains `X` but is not a prefix match).
+  // The catalogue now has more than the default eight canonical X-prefixed
+  // names (XATTACH … XPLODE), and they fill the default slice, so the alias row
+  // is only visible with a wider limit.
   const x = filterCommandSuggestions('x');
-  assert.deepEqual(x.filter(row => row.target).map(row => row.id), ['X']);
+  assert.deepEqual(x.filter(row => row.target).map(row => row.id), []);
+  const wide = filterCommandSuggestions('x', { limit: 64 });
+  assert.deepEqual(wide.filter(row => row.target).map(row => row.id), ['X']);
   const ex = filterCommandSuggestions('ex');
   assert.deepEqual(ex.filter(row => row.target).map(row => row.id), ['EX']);
   // An empty query browses the catalog only — never the shorthand rows.

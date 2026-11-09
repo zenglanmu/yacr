@@ -792,4 +792,39 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'BSAVEAS', labelKey: 'draw.kind.bsaveas', icon: 'save', group: 'file' },
   { id: 'CHSPACE', labelKey: 'draw.kind.chspace', icon: 'layers', group: 'modify' },
 
+  // The 2026-11-09 Wave 5 batch: the attribute and external-reference surfaces.
+  // ATTDISP is a session token; BATTMAN/BATTORDER/XREF/-XREF/
+  // EXTERNALREFERENCES(/CLOSE) are read-only reports; the rest are stable named
+  // refusals. Appended last so no shipped row moves.
+  { id: 'ATTDISP', labelKey: 'draw.kind.attdisp', icon: 'properties', group: 'view' },
+  { id: 'BATTMAN', labelKey: 'draw.kind.battman', icon: 'properties', group: 'properties' },
+  { id: 'BATTORDER', labelKey: 'draw.kind.battorder', icon: 'properties', group: 'properties' },
+  { id: 'XREF', labelKey: 'draw.kind.xref', icon: 'reference', group: 'file' },
+  { id: '-XREF', labelKey: 'draw.kind.dashxref', icon: 'reference', group: 'file' },
+  { id: 'EXTERNALREFERENCES', labelKey: 'draw.kind.externalreferences', icon: 'reference', group: 'file' },
+  { id: 'EXTERNALREFERENCESCLOSE', labelKey: 'draw.kind.externalreferencesclose', icon: 'reference', group: 'file' },
+  { id: 'ATTDEF', labelKey: 'draw.kind.attdef', icon: 'properties', group: 'draw' },
+  { id: '-ATTDEF', labelKey: 'draw.kind.dashattdef', icon: 'properties', group: 'draw' },
+  { id: 'ATTEDIT', labelKey: 'draw.kind.attedit', icon: 'properties', group: 'modify' },
+  { id: '-ATTEDIT', labelKey: 'draw.kind.dashattedit', icon: 'properties', group: 'modify' },
+  { id: 'ATTIPEDIT', labelKey: 'draw.kind.attipedit', icon: 'properties', group: 'modify' },
+  { id: 'ATTIN', labelKey: 'draw.kind.attin', icon: 'open', group: 'file' },
+  { id: 'ATTOUT', labelKey: 'draw.kind.attout', icon: 'save', group: 'file' },
+  { id: 'ATTEXT', labelKey: 'draw.kind.attext', icon: 'save', group: 'file' },
+  { id: '-ATTEXT', labelKey: 'draw.kind.dashattext', icon: 'save', group: 'file' },
+  { id: 'EATTEDIT', labelKey: 'draw.kind.eattedit', icon: 'properties', group: 'modify' },
+  { id: 'EATTEXT', labelKey: 'draw.kind.eattext', icon: 'save', group: 'file' },
+  { id: '-EATTEXT', labelKey: 'draw.kind.dasheattext', icon: 'save', group: 'file' },
+  { id: 'ATTREDEF', labelKey: 'draw.kind.attredef', icon: 'properties', group: 'modify' },
+  { id: 'ATTSYNC', labelKey: 'draw.kind.attsync', icon: 'properties', group: 'modify' },
+  { id: 'GATTE', labelKey: 'draw.kind.gatte', icon: 'properties', group: 'modify' },
+  { id: 'XDATA', labelKey: 'draw.kind.xdata', icon: 'properties', group: 'modify' },
+  { id: 'XBIND', labelKey: 'draw.kind.xbind', icon: 'reference', group: 'file' },
+  { id: '-XBIND', labelKey: 'draw.kind.dashxbind', icon: 'reference', group: 'file' },
+  { id: 'XATTACH', labelKey: 'draw.kind.xattach', icon: 'reference', group: 'file' },
+  { id: 'ATTACH', labelKey: 'draw.kind.attach', icon: 'reference', group: 'file' },
+  { id: '-ATTACH', labelKey: 'draw.kind.dashattach', icon: 'reference', group: 'file' },
+  { id: 'XOPEN', labelKey: 'draw.kind.xopen', icon: 'open', group: 'file' },
+  { id: 'CLASSICXREF', labelKey: 'draw.kind.classicxref', icon: 'reference', group: 'file' },
+
 ]);

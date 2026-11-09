@@ -3,10 +3,11 @@
 //! `QTEXT`, `FILL`, `TFRAMES`, `REGENAUTO` and `ISODRAFT` (pilot) plus the Wave 2
 //! names `DRAGMODE`, `HIGHLIGHTNEW`, `TRAYSETTINGS`, `TEXTSCR`/`GRAPHSCR`,
 //! `FINDINCLUDE`, `FINDMATCH`, `ISOPLANE` and `APERTURE`/`REVCLOUDPROPERTIES`
-//! each own one flag or token here. This is **session state only**: no database
-//! write, revision bump, `cad-history` entry or `ChangeSet`. This lane wires no
-//! renderer/behaviour consumer, so the command handler reports that the effect is
-//! not implemented rather than pretending the drawing changed.
+//! each own one flag or token here, and Wave 5 adds the `ATTDISP` token. This is
+//! **session state only**: no database write, revision bump, `cad-history` entry
+//! or `ChangeSet`. This lane wires no renderer/behaviour consumer, so the command
+//! handler reports that the effect is not implemented rather than pretending the
+//! drawing changed.
 
 /// The current 2D isometric drafting plane token (`ISOPLANE`).
 ///
@@ -60,6 +61,7 @@ pub struct DraftingExtras {
     find_include: bool,
     find_match_case: bool,
     revcloud_arc_length: f64,
+    attdisp: bool,
 }
 
 impl Default for DraftingExtras {
@@ -68,8 +70,9 @@ impl Default for DraftingExtras {
         // `HIGHLIGHTNEW`, `TRAYSETTINGS` and `FINDINCLUDE` start ON, the aperture
         // is 10, the isometric plane is Left and the revision-cloud arc length is
         // 15. `QTEXT`/`TFRAMES`/`REGENAUTO`/`ISODRAFT`, the text screen and
-        // case-insensitive find start OFF. These are session defaults only —
-        // nothing here is read from or written to the drawing.
+        // case-insensitive find start OFF; the Wave 5 `ATTDISP` token starts ON
+        // (AutoCAD's default). These are session defaults only — nothing here is
+        // read from or written to the drawing.
         Self {
             qtext: false,
             fill: true,
@@ -85,6 +88,7 @@ impl Default for DraftingExtras {
             find_include: true,
             find_match_case: false,
             revcloud_arc_length: 15.0,
+            attdisp: true,
         }
     }
 }
@@ -153,6 +157,14 @@ impl DraftingExtras {
     /// The session revision-cloud arc-length token (default 15).
     pub fn revcloud_arc_length(&self) -> f64 {
         self.revcloud_arc_length
+    }
+
+    /// The session `ATTDISP` token (default ON).
+    ///
+    /// This build has no block-attribute model, so nothing renders either way;
+    /// the token exists so a caller can see that the command was received.
+    pub fn attdisp(&self) -> bool {
+        self.attdisp
     }
 
     pub fn set_qtext(&mut self, value: bool) {
@@ -286,5 +298,11 @@ impl DraftingExtras {
     pub fn cycle_isoplane(&mut self) -> IsoPlane {
         self.isoplane = self.isoplane.next();
         self.isoplane
+    }
+
+    /// Flip the `ATTDISP` token and return the new state.
+    pub fn toggle_attdisp(&mut self) -> bool {
+        self.attdisp = !self.attdisp;
+        self.attdisp
     }
 }

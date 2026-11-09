@@ -371,6 +371,15 @@ export const HOST_NAMES = [
   'BSCALE', 'MINSERT', 'BLOCKREPLACE', 'BREPLACE', '-BREPLACE', 'SPLINEDIT',
   'MLEDIT', '-MLEDIT', 'BURST', 'CLIP', 'CLIPIT', 'REGION', 'ADDSELECTED',
   'WBLOCK', '-WBLOCK', 'BSAVE', 'BSAVEAS', 'CHSPACE',
+  // The 2026-11-09 Wave 5 batch: the ATTDISP token, six read-only attribute/xref
+  // reports and twenty-three named refusals. All thirty are canonical selectors
+  // of their own; `-XREF`, `-ATTDEF`, `-ATTEDIT`, `-ATTEXT`, `-EATTEXT`,
+  // `-XBIND` and `-ATTACH` are not aliases.
+  'ATTDISP', 'BATTMAN', 'BATTORDER', 'XREF', '-XREF', 'EXTERNALREFERENCES',
+  'EXTERNALREFERENCESCLOSE', 'ATTDEF', '-ATTDEF', 'ATTEDIT', '-ATTEDIT',
+  'ATTIPEDIT', 'ATTIN', 'ATTOUT', 'ATTEXT', '-ATTEXT', 'EATTEDIT', 'EATTEXT',
+  '-EATTEXT', 'ATTREDEF', 'ATTSYNC', 'GATTE', 'XDATA', 'XBIND', '-XBIND',
+  'XATTACH', 'ATTACH', '-ATTACH', 'XOPEN', 'CLASSICXREF',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented

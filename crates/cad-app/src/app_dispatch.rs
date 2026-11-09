@@ -6,8 +6,12 @@
 //! `app_extended_session2` (tokens), `app_extended_reports2` (reports) and
 //! `app_extended_refusals` (named refusals), and the Wave 3 handlers in
 //! `app_extended_reports3` (reports/session) and `app_extended_refusals3`
-//! (named refusals). Keeping the routing here means `application.rs` stays a
-//! one-line interception rather than growing seventy more arms.
+//! (named refusals), and the Wave 4 handlers in `app_extended_edit4` (real
+//! edits) and `app_extended_refusals4` (named refusals). Wave 5 adds
+//! `app_extended_attrs5` (ATTDISP token plus attribute/xref reports) and
+//! `app_extended_refusals5` (named refusals). Keeping the routing here means
+//! `application.rs` stays a one-line interception rather than growing a hundred
+//! more arms.
 
 use super::*;
 
@@ -135,6 +139,42 @@ impl Application {
             | ExtendedCommandId::BSave
             | ExtendedCommandId::BSaveAs
             | ExtendedCommandId::ChSpace => self.extended_refusal4(command, ext)?,
+            // Wave 5 session token + attribute/xref reports: ATTDISP flips one
+            // session flag; the rest read the block and xref tables this build
+            // really stores. All are Viewer-legal.
+            ExtendedCommandId::AttDisp
+            | ExtendedCommandId::BattMan
+            | ExtendedCommandId::BattOrder
+            | ExtendedCommandId::XRef
+            | ExtendedCommandId::DashXRef
+            | ExtendedCommandId::ExternalReferences
+            | ExtendedCommandId::ExternalReferencesClose => {
+                self.extended_attrs5(session, command, ext)?
+            }
+            // Wave 5 named refusals: a stable `Unsupported` reason per name.
+            ExtendedCommandId::AttDef
+            | ExtendedCommandId::DashAttDef
+            | ExtendedCommandId::AttEdit
+            | ExtendedCommandId::DashAttEdit
+            | ExtendedCommandId::AttIpEdit
+            | ExtendedCommandId::AttIn
+            | ExtendedCommandId::AttOut
+            | ExtendedCommandId::AttExt
+            | ExtendedCommandId::DashAttExt
+            | ExtendedCommandId::EAttEdit
+            | ExtendedCommandId::EAttExt
+            | ExtendedCommandId::DashEAttExt
+            | ExtendedCommandId::AttRedef
+            | ExtendedCommandId::AttSync
+            | ExtendedCommandId::Gatte
+            | ExtendedCommandId::XData
+            | ExtendedCommandId::XBind
+            | ExtendedCommandId::DashXBind
+            | ExtendedCommandId::XAttach
+            | ExtendedCommandId::Attach
+            | ExtendedCommandId::DashAttach
+            | ExtendedCommandId::XOpen
+            | ExtendedCommandId::ClassicXRef => self.extended_refusal5(command, ext)?,
         };
         Ok(Some(outcome))
     }

@@ -55,6 +55,9 @@ mod app_extended_reports3;
 // The Wave 4 extended-command handlers (real selection edits and refusals).
 mod app_extended_edit4;
 mod app_extended_refusals4;
+// The Wave 5 extended-command handlers (attribute/xref token+reports+refusals).
+mod app_extended_attrs5;
+mod app_extended_refusals5;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;
