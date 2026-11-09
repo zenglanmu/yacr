@@ -108,7 +108,10 @@ export type InvokeRoute = 'tauri' | 'web';
  * and only when the bridge is actually there (see the module header). The two
  * canvas reports have no answer; the five `cad_plugin_*` commands read or mutate
  * the **shell's** plugin registry, which is not CAD document data and therefore
- * never belongs to the wasm session.
+ * never belongs to the wasm session. `cad_open_release_page` is the same kind of
+ * shell capability: it asks the shell (or, on a bridge-less page, the browser
+ * transport) to open the download page, and the wasm session has nothing to say
+ * about it.
  */
 export const SHELL_ONLY_COMMANDS: readonly string[] = [
   'canvas_runtime_failed',
@@ -118,6 +121,7 @@ export const SHELL_ONLY_COMMANDS: readonly string[] = [
   'cad_plugin_enable',
   'cad_plugin_uninstall',
   'cad_plugin_read_entry',
+  'cad_open_release_page',
 ];
 
 /** The Tauri callable this module routes to (injectable for tests). */

@@ -13,11 +13,14 @@ import assert from 'node:assert/strict';
 
 import {
   WEB_PLUGIN_COMMANDS,
+  WEB_POPUP_BLOCKED,
+  WEB_OPEN_RELEASE_COMMAND,
   WEB_VENDOR_APPLY_COMMAND,
   WEB_VENDOR_RECORDS_COMMAND,
   WEB_VENDOR_STATUS_COMMAND,
   createWebAdapter,
 } from '../src/host/web-adapter.ts';
+import { RELEASE_PAGE_URL } from '../src/update/config.ts';
 
 /**
  * A stand-in session module with just the vendor exports a test gives it.
@@ -165,5 +168,46 @@ test('vendor_status answers the session\'s parsed descriptor', async () => {
   await assert.rejects(
     createWebAdapter(broken.module).invoke(WEB_VENDOR_STATUS_COMMAND),
     /expected a JSON object/,
+  );
+});
+
+test('cad_open_release_page opens the one release page, never the session', async () => {
+  // The action belongs to the transport: the wasm session has no browser to
+  // open, so this command must not be forwarded to it at all.
+  const opened = [];
+  const calls = [];
+  const module = {
+    invoke(name) { calls.push(name); return JSON.stringify({ ok: true, value: null }); },
+  };
+  const adapter = createWebAdapter(module, {
+    openUrl: (...args) => { opened.push(args); return {}; },
+  });
+
+  assert.deepEqual(await adapter.invoke(WEB_OPEN_RELEASE_COMMAND), { accepted: true });
+  assert.deepEqual(opened, [[RELEASE_PAGE_URL, '_blank', 'noopener,noreferrer']], 'the single URL constant');
+  // No arguments are needed, and any that are sent are ignored.
+  assert.deepEqual(await adapter.invoke(WEB_OPEN_RELEASE_COMMAND, { url: 'https://example.test' }), { accepted: true });
+  assert.deepEqual(calls, [], 'nothing reaches the wasm session');
+});
+
+test('a blocked popup and a page without window.open are named refusals', async () => {
+  for (const answer of [null, undefined]) {
+    await assert.rejects(
+      createWebAdapter({}, { openUrl: () => answer }).invoke(WEB_OPEN_RELEASE_COMMAND),
+      error => error instanceof Error && error.message === WEB_POPUP_BLOCKED,
+      `openUrl returning ${String(answer)}`,
+    );
+  }
+
+  // Node has no `window.open`: the default opener reports the same refusal.
+  await assert.rejects(
+    createWebAdapter({}).invoke(WEB_OPEN_RELEASE_COMMAND),
+    error => error instanceof Error && error.message === WEB_POPUP_BLOCKED,
+  );
+
+  // A throw from the browser is surfaced as-is, never as an accepted action.
+  await assert.rejects(
+    createWebAdapter({}, { openUrl: () => { throw new Error('popup.denied'); } }).invoke(WEB_OPEN_RELEASE_COMMAND),
+    /popup\.denied/,
   );
 });

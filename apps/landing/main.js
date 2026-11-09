@@ -223,10 +223,12 @@
     revealItems.forEach((item) => revealObserver.observe(item));
   }
 
-  /* -------------------------------------------------------------- downloads */
+  /* ------------------------------------------------------- release metadata */
 
   function normalizeBase(value) {
-    return typeof value === 'string' ? value.trim().replace(/\/+$/, '') : '';
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim().replace(/\/+$/, '');
+    return /^https:\/\//i.test(trimmed) ? trimmed : '';
   }
 
   function assetUrl(base, file) {
@@ -236,6 +238,77 @@
       .join('/');
     return `${base}/${safeFile}`;
   }
+
+  function httpsUrl(value) {
+    if (typeof value !== 'string' || !value.trim()) return '';
+    try {
+      const url = new URL(value.trim());
+      return url.protocol === 'https:' ? url.href : '';
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  function releaseTagUrl(release) {
+    if (typeof release !== 'string' || !release.trim()) return '';
+    return `https://github.com/zenglanmu/yacr/releases/tag/${encodeURIComponent(release.trim())}`;
+  }
+
+  function formatMiB(bytes) {
+    return (bytes / 1048576).toFixed(1);
+  }
+
+  function setReleaseVersion(value) {
+    if (typeof value !== 'string' || !value.trim()) return;
+    const version = value.trim();
+    doc.querySelectorAll('[data-release-version]').forEach((node) => {
+      node.textContent = version;
+    });
+  }
+
+  function setReleaseDate(value) {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return;
+    const date = value.trim();
+    doc.querySelectorAll('[data-release-date]').forEach((node) => {
+      node.textContent = date;
+      node.setAttribute('datetime', date);
+    });
+  }
+
+  function setReleaseUrl(value) {
+    const url = httpsUrl(value);
+    if (!url) return;
+    doc.querySelectorAll('[data-release-url]').forEach((node) => {
+      node.href = url;
+    });
+  }
+
+  function setReleaseCount(count) {
+    if (!Number.isFinite(count) || count <= 0) return;
+    doc.querySelectorAll('[data-release-assets]').forEach((node) => {
+      node.textContent = String(count);
+    });
+  }
+
+  function setReleaseTotal(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return;
+    doc.querySelectorAll('[data-release-total]').forEach((node) => {
+      node.textContent = `≈ ${formatMiB(bytes)} MiB`;
+    });
+  }
+
+  function updateCommandTemplates(assets) {
+    doc.querySelectorAll('[data-cmd-template]').forEach((code) => {
+      const asset = assets[code.dataset.cmdFile];
+      if (!asset || typeof asset.file !== 'string' || !asset.file) return;
+      code.textContent = code.dataset.cmdTemplate.replace('{file}', asset.file);
+      const command = code.closest('.cmd');
+      const button = command ? command.querySelector('.copy-btn') : null;
+      if (button) button.dataset.copy = code.textContent;
+    });
+  }
+
+  /* -------------------------------------------------------------- downloads */
 
   async function hydrateDownloads() {
     let data;
@@ -248,41 +321,329 @@
       return;
     }
 
-    if (!data || typeof data !== 'object' || !data.assets) return;
+    if (!data || typeof data !== 'object' || !data.assets || typeof data.assets !== 'object') {
+      return;
+    }
 
     const cdnBase = normalizeBase(data.cdnBase);
     const githubBase = normalizeBase(data.githubBase);
     const assets = data.assets;
+    const release = typeof data.release === 'string' ? data.release.trim() : '';
 
-    doc.querySelectorAll('[data-download]').forEach((link) => {
-      const asset = assets[link.dataset.download];
-      if (!asset || typeof asset.file !== 'string') return;
-      const base = cdnBase || githubBase;
-      if (!base) return;
-      link.href = assetUrl(base, asset.file);
+    if (release) {
+      setReleaseVersion(release);
+      setReleaseUrl(releaseTagUrl(release));
+    }
 
-      const badge = link.querySelector('.cdn-badge');
-      if (badge) badge.hidden = !cdnBase;
-    });
+    const assetKeys = Object.keys(assets);
+    setReleaseCount(assetKeys.length);
 
-    if (!githubBase) return;
+    const totalBytes = assetKeys.reduce((sum, key) => {
+      const asset = assets[key];
+      const size = asset ? Number(asset.size) : NaN;
+      return Number.isFinite(size) && size > 0 ? sum + size : sum;
+    }, 0);
+    setReleaseTotal(totalBytes);
 
-    doc.querySelectorAll('[data-github]').forEach((link) => {
-      const asset = assets[link.dataset.github];
-      if (asset && typeof asset.file === 'string') {
-        link.href = assetUrl(githubBase, asset.file);
+    doc.querySelectorAll('[data-file-for]').forEach((node) => {
+      const asset = assets[node.dataset.fileFor];
+      if (asset && typeof asset.file === 'string' && asset.file) {
+        node.textContent = asset.file;
       }
     });
 
-    doc.querySelectorAll('[data-sha]').forEach((link) => {
-      const asset = assets[link.dataset.sha];
-      if (asset && typeof asset.file === 'string') {
+    doc.querySelectorAll('[data-size-for]').forEach((node) => {
+      const asset = assets[node.dataset.sizeFor];
+      const size = asset ? Number(asset.size) : NaN;
+      if (!Number.isFinite(size) || size <= 0) return;
+      const strong = doc.createElement('strong');
+      strong.textContent = size.toLocaleString('en-US');
+      const label = doc.createElement('span');
+      label.textContent = `bytes · ≈ ${formatMiB(size)} MiB`;
+      node.replaceChildren(strong, doc.createTextNode(' '), label);
+    });
+
+    doc.querySelectorAll('[data-sha-for]').forEach((node) => {
+      const asset = assets[node.dataset.shaFor];
+      const digest = asset && typeof asset.sha256 === 'string' ? asset.sha256.trim() : '';
+      if (!/^[0-9a-f]{64}$/i.test(digest)) return;
+      node.textContent = digest;
+      const block = node.closest('.dl-hash');
+      const button = block ? block.querySelector('.copy-btn') : null;
+      if (button) button.dataset.copy = digest;
+    });
+
+    if (githubBase) {
+      doc.querySelectorAll('[data-github]').forEach((link) => {
+        const asset = assets[link.dataset.github];
+        if (!asset || typeof asset.file !== 'string' || !asset.file) return;
+        link.href = assetUrl(githubBase, `${asset.file}${link.dataset.githubSuffix || ''}`);
+      });
+
+      doc.querySelectorAll('[data-github-file]').forEach((link) => {
+        if (link.dataset.githubFile) link.href = assetUrl(githubBase, link.dataset.githubFile);
+      });
+    }
+
+    const primaryBase = cdnBase || githubBase;
+    if (primaryBase) {
+      doc.querySelectorAll('[data-download]').forEach((link) => {
+        const asset = assets[link.dataset.download];
+        if (!asset || typeof asset.file !== 'string' || !asset.file) return;
+        link.href = assetUrl(primaryBase, asset.file);
+
+        const badge = link.querySelector('.cdn-badge');
+        if (badge) badge.hidden = !cdnBase;
+      });
+    }
+
+    if (githubBase) {
+      doc.querySelectorAll('[data-sha]').forEach((link) => {
+        const asset = assets[link.dataset.sha];
+        if (!asset || typeof asset.file !== 'string' || !asset.file) return;
         link.href = assetUrl(githubBase, `${asset.file}.sha256`);
-      }
-    });
+      });
+    }
+
+    updateCommandTemplates(assets);
   }
 
   hydrateDownloads();
+
+  /* -------------------------------------------------------------- changelog */
+
+  function bilingual(tag, zh, en) {
+    const node = doc.createElement(tag);
+    const zhNode = doc.createElement('span');
+    zhNode.className = 'lang--zh';
+    zhNode.textContent = zh;
+    const enNode = doc.createElement('span');
+    enNode.className = 'lang--en';
+    enNode.lang = 'en';
+    enNode.textContent = en;
+    node.append(zhNode, enNode);
+    return node;
+  }
+
+  function showChangelogFallback() {
+    const mount = doc.querySelector('[data-changelog]');
+    const loading = doc.querySelector('[data-changelog-loading]');
+    const list = doc.querySelector('[data-changelog-list]');
+    const fallback = doc.querySelector('[data-changelog-fallback]');
+    if (loading) loading.hidden = true;
+    if (list) {
+      list.hidden = true;
+      list.replaceChildren();
+    }
+    if (fallback) fallback.hidden = false;
+    if (mount) mount.setAttribute('aria-busy', 'false');
+  }
+
+  function buildRelease(release, index) {
+    const latest = index === 0;
+    const version = release.version.trim();
+    const panelId = `cl-panel-${index}`;
+
+    const item = doc.createElement('li');
+    item.className = latest ? 'cl-release cl-release--latest is-open' : 'cl-release';
+
+    const head = doc.createElement('div');
+    head.className = 'cl-release-head';
+
+    const main = doc.createElement('div');
+    main.className = 'cl-head-main';
+
+    const heading = doc.createElement('h3');
+    heading.className = 'cl-version';
+    heading.textContent = version;
+
+    if (latest) {
+      const badge = bilingual('span', '最新', 'LATEST');
+      badge.className = 'cl-latest';
+      heading.append(' ', badge);
+    }
+
+    const meta = doc.createElement('p');
+    meta.className = 'cl-meta';
+
+    if (typeof release.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(release.date.trim())) {
+      const date = release.date.trim();
+      const time = doc.createElement('time');
+      time.dateTime = date;
+      time.textContent = date;
+      meta.append(time);
+    }
+
+    const title = typeof release.title === 'string' ? release.title.trim() : '';
+    const genericTitle = `yacr ${version}`;
+    if (title && title.toLowerCase() !== genericTitle.toLowerCase()) {
+      const titleNode = doc.createElement('span');
+      titleNode.className = 'cl-title';
+      titleNode.textContent = title;
+      if (meta.childNodes.length) meta.append(doc.createTextNode(' · '));
+      meta.append(titleNode);
+    }
+
+    const groups = release.sections.filter(
+      (section) => section && typeof section === 'object'
+    );
+    if (meta.childNodes.length) meta.append(doc.createTextNode(' · '));
+    meta.append(bilingual('span', `${groups.length} 个分组`, `${groups.length} sections`));
+
+    main.append(heading, meta);
+
+    const actions = doc.createElement('div');
+    actions.className = 'cl-head-actions';
+
+    const url = httpsUrl(release.url);
+    if (url) {
+      const link = doc.createElement('a');
+      link.className = 'cl-full-link';
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.append(bilingual('span', '查看完整发布说明', 'Full release notes'));
+      const ext = doc.createElement('span');
+      ext.className = 'ext';
+      ext.setAttribute('aria-hidden', 'true');
+      ext.textContent = '↗';
+      link.append(ext);
+      actions.append(link);
+    }
+
+    const toggle = doc.createElement('button');
+    toggle.className = 'cl-toggle';
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', String(latest));
+    toggle.setAttribute('aria-controls', panelId);
+
+    const togglePrefix = doc.createElement('span');
+    togglePrefix.className = 'sr-only';
+    togglePrefix.textContent = `${version} `;
+    const closedLabel = bilingual('span', '展开', 'Expand');
+    closedLabel.className = 'cl-when-closed';
+    const openLabel = bilingual('span', '收起', 'Collapse');
+    openLabel.className = 'cl-when-open';
+    const chevron = doc.createElement('span');
+    chevron.className = 'cl-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    toggle.append(togglePrefix, closedLabel, openLabel, chevron);
+    actions.append(toggle);
+
+    const panel = doc.createElement('div');
+    panel.className = 'cl-panel';
+    panel.id = panelId;
+    panel.hidden = !latest;
+
+    let renderedGroups = 0;
+    groups.forEach((group) => {
+      const headingText = typeof group.heading === 'string' ? group.heading.trim() : '';
+      const entries = Array.isArray(group.items)
+        ? group.items.filter((entry) => typeof entry === 'string' && entry.trim())
+        : [];
+      if (!headingText && !entries.length) return;
+
+      const block = doc.createElement('section');
+      block.className = 'cl-group';
+      if (headingText) {
+        const groupHeading = doc.createElement('h4');
+        groupHeading.textContent = headingText;
+        block.append(groupHeading);
+      }
+      if (entries.length) {
+        const list = doc.createElement('ul');
+        entries.forEach((entry) => {
+          const entryNode = doc.createElement('li');
+          entryNode.textContent = entry.trim();
+          list.append(entryNode);
+        });
+        block.append(list);
+      }
+      panel.append(block);
+      renderedGroups += 1;
+    });
+
+    if (!renderedGroups) {
+      const empty = doc.createElement('p');
+      empty.className = 'cl-empty';
+      empty.append(
+        bilingual(
+          'span',
+          '这个 tag 没有分组条目；完整发布说明在 GitHub 上。',
+          'No grouped entries for this tag; the full release notes are on GitHub.'
+        )
+      );
+      panel.append(empty);
+    }
+
+    toggle.addEventListener('click', () => {
+      const isOpen = toggle.getAttribute('aria-expanded') === 'true';
+      toggle.setAttribute('aria-expanded', String(!isOpen));
+      panel.hidden = isOpen;
+      item.classList.toggle('is-open', !isOpen);
+    });
+
+    head.append(main, actions);
+    item.append(head, panel);
+    return item;
+  }
+
+  function renderChangelog(releases) {
+    const mount = doc.querySelector('[data-changelog]');
+    const loading = doc.querySelector('[data-changelog-loading]');
+    const list = doc.querySelector('[data-changelog-list]');
+    const fallback = doc.querySelector('[data-changelog-fallback]');
+    if (!mount || !list) return;
+
+    const valid = releases
+      .filter(
+        (release) =>
+          release &&
+          typeof release === 'object' &&
+          typeof release.version === 'string' &&
+          release.version.trim() &&
+          Array.isArray(release.sections)
+      )
+      .slice(0, 30);
+
+    if (!valid.length) {
+      showChangelogFallback();
+      return;
+    }
+
+    valid.forEach((release, index) => {
+      list.append(buildRelease(release, index));
+    });
+
+    if (loading) loading.hidden = true;
+    if (fallback) fallback.hidden = true;
+    list.hidden = false;
+    mount.setAttribute('aria-busy', 'false');
+
+    const latest = valid[0];
+    setReleaseVersion(latest.version);
+    setReleaseDate(latest.date);
+    setReleaseUrl(latest.url);
+  }
+
+  async function hydrateChangelog() {
+    let data;
+    try {
+      const response = await fetch('./changelog.json', { cache: 'no-store' });
+      if (!response.ok) {
+        showChangelogFallback();
+        return;
+      }
+      data = await response.json();
+    } catch (_error) {
+      showChangelogFallback();
+      return;
+    }
+
+    renderChangelog(data && Array.isArray(data.releases) ? data.releases : []);
+  }
+
+  hydrateChangelog();
 
   /* -------------------------------------------------------------- copy text */
 

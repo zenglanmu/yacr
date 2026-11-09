@@ -58,3 +58,12 @@ pub use shell::{
     admit_command, bind_allowed, clear_host_error, note_host_error, projected_status,
     queue_cad_input, HostError, HostErrorKind, ShellState, CAD_COMMAND_CAP, CAD_INPUT_CAP,
 };
+
+/// The running UI crate version. Same value the About dialog reports and the
+/// workspace `Cargo.toml` version (`env!("CARGO_PKG_VERSION")`).
+///
+/// Kept here (not in `session/mod.rs`, which is at the file-size limit) because
+/// it is a property of the process serving the command, not of the wire session.
+pub fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}

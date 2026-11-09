@@ -14,6 +14,9 @@
 //! - [`popup`]: the shared modal-popup lifecycle (gate mapping and the
 //!   four-trigger clear contract); popups are in-DOM overlays, so it owns no
 //!   window.
+//! - [`release`]: the release-page shell capability (fixed download URL + the
+//!   platform `ShellReleaseOpener` seam; a carrier without an opener refuses by
+//!   name).
 //! - [`threading`]: the shared main-thread marshalling (probe + dispatch seam),
 //!   so every desktop host reuses one channel protocol instead of copying it.
 //!
@@ -70,6 +73,13 @@ pub mod popup;
     target_os = "macos",
     target_os = "android"
 ))]
+pub mod release;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
 pub mod state;
 #[cfg(any(
     target_os = "linux",
@@ -107,6 +117,13 @@ pub use events::TauriEventSink;
     target_os = "android"
 ))]
 pub use popup::DesktopPopupTarget;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
+pub use release::ShellReleaseOpener;
 #[cfg(any(
     target_os = "linux",
     target_os = "windows",

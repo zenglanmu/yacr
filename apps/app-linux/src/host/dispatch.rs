@@ -271,7 +271,8 @@ fn host_commands<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Syn
         cad_desktop_shell::plugins::cad_plugin_install,
         cad_desktop_shell::plugins::cad_plugin_enable,
         cad_desktop_shell::plugins::cad_plugin_uninstall,
-        cad_desktop_shell::plugins::cad_plugin_read_entry
+        cad_desktop_shell::plugins::cad_plugin_read_entry,
+        cad_desktop_shell::release::cad_open_release_page
     ]
 }
 
@@ -302,6 +303,12 @@ pub fn invoke_handler<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send 
             // `supported:false` / `accepted:false` with the stable carrier reason
             // on `dom-canvas`, so the chrome gets the frontend wire shape rather
             // than a Tauri "command not found".
+            return host(invoke);
+        }
+        if cad_desktop_shell::release::is_release_command(&command) {
+            // Shell capability with a fixed URL and no arguments. Routed on every
+            // carrier before the surface-mode branch: it performs no CAD work, so
+            // neither carrier has a reason to refuse it.
             return host(invoke);
         }
         if is_vendor_command(&command) {
@@ -519,6 +526,25 @@ mod tests {
         let source = include_str!("dispatch.rs");
         assert!(source.contains("if is_plugin_command(&command) {"));
         assert!(source.contains("return host(invoke);"));
+    }
+
+    #[test]
+    fn the_release_command_is_host_owned_and_routed_on_both_carriers() {
+        let command = cad_desktop_shell::release::CAD_OPEN_RELEASE_PAGE_COMMAND;
+        assert!(cad_desktop_shell::release::is_release_command(command));
+        // Shell capability, not a CAD wire command: no second registration in the
+        // shared registry, and no native-session refusal (it does no CAD work).
+        assert!(!COMMAND_NAMES.contains(&command));
+        assert!(!WIRE_COMMAND_NAMES.contains(&command));
+        assert_eq!(
+            native_session_refusal(command, SurfaceMode::DomCanvas),
+            None
+        );
+        // Source contract: the dispatcher forwards it to the host handler before
+        // the surface-mode branch, on every carrier.
+        let source = include_str!("dispatch.rs");
+        assert!(source.contains("cad_desktop_shell::release::is_release_command(&command)"));
+        assert!(source.contains("cad_desktop_shell::release::cad_open_release_page"));
     }
 
     #[test]

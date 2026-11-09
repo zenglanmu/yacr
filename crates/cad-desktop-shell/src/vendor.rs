@@ -174,6 +174,7 @@ pub fn register_commands_with_vendor<R: tauri::Runtime>(
     let shared = crate::commands::register_commands::<R>();
     let vendor = register_vendor_commands::<R>();
     let plugins = crate::plugins::register_plugin_commands::<R>();
+    let release = crate::release::register_release_commands::<R>();
     move |invoke: Invoke<R>| {
         let command = invoke.message.command().to_string();
         if is_vendor_command(&command) {
@@ -182,6 +183,11 @@ pub fn register_commands_with_vendor<R: tauri::Runtime>(
             // The plugin registry is a shell capability too, but its five
             // commands are not part of the shared CAD wire registry.
             plugins(invoke)
+        } else if crate::release::is_release_command(&command) {
+            // The release page is a shell capability (fixed URL, no arguments);
+            // every native carrier registers it, and a carrier without an opener
+            // refuses by name instead of falling through to the shared handler.
+            release(invoke)
         } else {
             shared(invoke)
         }

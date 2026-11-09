@@ -171,6 +171,12 @@ pub struct Shared {
     /// registers it; the popup commands then refuse explicitly instead of
     /// pretending a window exists.
     pub popup_host: Option<Arc<dyn ShellPopupHost>>,
+    /// The platform release-page seam (see
+    /// [`crate::release::ShellReleaseOpener`]). `None` before the host registers
+    /// one, and permanently on a carrier with no browser (Android): the command
+    /// then refuses with its stable `unsupported-runtime` marker instead of a
+    /// fabricated acknowledgement.
+    pub release_opener: Option<Arc<dyn crate::release::ShellReleaseOpener>>,
     /// The WebView vendor-decoding pass (pending → records → apply). Host
     /// transport state, not document state: it carries a token and bounded
     /// diagnostics, never geometry or a second `cad-db`.
@@ -223,6 +229,7 @@ impl Shared {
             cad_fonts: None,
             telemetry: None,
             popup_host: None,
+            release_opener: None,
             vendor: crate::vendor::VendorStore::default(),
             vendor_pending_representations: None,
             vendor_representations_clear: false,
@@ -279,6 +286,19 @@ pub struct ProbeShared(pub Arc<Mutex<Shared>>);
 /// Create the shared probe state with the parsed launch options.
 pub fn new_shared(launch: LaunchOptions) -> Arc<Mutex<Shared>> {
     Arc::new(Mutex::new(Shared::new(launch)))
+}
+
+/// Install the release-page platform seam (see
+/// [`crate::release::ShellReleaseOpener`]).
+///
+/// Mirrors how the hosts install `telemetry`/`popup_host`: a host with a URL
+/// opener calls this once during startup; a carrier without one simply never
+/// calls it and the command keeps its explicit `unsupported-runtime` refusal.
+pub fn configure_release_opener(
+    shared: &Arc<Mutex<Shared>>,
+    opener: Arc<dyn crate::release::ShellReleaseOpener>,
+) {
+    lock(shared).release_opener = Some(opener);
 }
 
 /// Lock [`Shared`], recovering the guard from a poisoned mutex.

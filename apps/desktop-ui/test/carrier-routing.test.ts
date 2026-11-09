@@ -44,6 +44,10 @@ const DATA_COMMANDS = [
   'probe_input',
   'cad_standard_view',
   'cad_open_popup',
+  // The running app version is host data: the native host answers it, the wasm
+  // session refuses by name. It is deliberately **not** shell-only: on a
+  // `dom-canvas` carrier the adapter owns the answer (the honest refusal).
+  'cad_app_version',
 ];
 
 // ---------------------------------------------------------------------------
@@ -171,6 +175,7 @@ test('every build x observed carrier x bridge x command class resolves the same 
   assert.deepEqual([...SHELL_ONLY_COMMANDS], [
     'canvas_runtime_failed', 'canvas_session_status',
     'cad_plugin_status', 'cad_plugin_install', 'cad_plugin_enable', 'cad_plugin_uninstall', 'cad_plugin_read_entry',
+    'cad_open_release_page',
   ]);
   for (const command of SHELL_ONLY_COMMANDS) {
     // The two reports prefer an existing bridge on every carrier the adapter
@@ -196,6 +201,24 @@ test('a bridged native carrier routes exactly what it always did', () => {
     assert.equal(invokeRoute('tauri', command, true), invokeRoute('tauri', command, true, 'native-below'));
     assert.equal(invokeRoute('tauri', command, true), 'tauri', command);
   }
+});
+
+test('the update commands route by capability, not by build', () => {
+  // Opening the download page is a shell capability performed by the transport
+  // when a bridge exists (`window.open` is not a CAD answer)...
+  assert.equal(invokeRoute('tauri', 'cad_open_release_page', true, 'dom-canvas'), 'tauri');
+  assert.equal(invokeRoute('android', 'cad_open_release_page', true, 'dom-canvas'), 'tauri');
+  // ...and by the browser adapter when there is no bridge to ask.
+  assert.equal(invokeRoute('tauri', 'cad_open_release_page', false, 'dom-canvas'), 'web');
+  assert.equal(invokeRoute('web', 'cad_open_release_page', false, 'dom-canvas'), 'web');
+
+  // The running app version is host data, so it follows the data routing: the
+  // native host answers it on `native-below`; on `dom-canvas` the wasm session
+  // owns the route and refuses by name (which the store maps to `unsupported`).
+  assert.equal(invokeRoute('tauri', 'cad_app_version', true, 'native-below'), 'tauri');
+  assert.equal(invokeRoute('android', 'cad_app_version', true, 'native-below'), 'tauri');
+  assert.equal(invokeRoute('tauri', 'cad_app_version', true, 'dom-canvas'), 'web');
+  assert.equal(invokeRoute('web', 'cad_app_version', false, 'dom-canvas'), 'web');
 });
 
 // ---------------------------------------------------------------------------

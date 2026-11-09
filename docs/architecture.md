@@ -163,6 +163,12 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   所以**适配器**仍然只路由四条，但会话本身已能执行其余命令；把 `web-adapter.ts` 改成单漏斗
   `invoke` 是**下一轮前端**的事（不是会话能力缺口）。同一 wasm 实例的 **worker/offscreen 载体**
   仍是旧的 viewer 会话（无 wire/输入/弹窗面），见 `docs/validation-dom-canvas-flip-2026-10-28.md`。
+- **更新检测是 UI 侧派生能力（ADR 0032）**：唯一网络读取在
+  `apps/desktop-ui/src/update/source.ts`（落地页 `downloads.json`，`no-store`、8 s、≤64 KB）；
+  运行版本由共享纯命令 `cad_app_version` 按载体回答（`native-below` = 原生产物，`dom-canvas` =
+  wasm 产物）；打开下载页是 shell 能力 `cad_open_release_page`（固定 URL、无调用方参数，平台 seam
+  `ShellReleaseOpener`，无 opener 的载体如 Android 稳定 `unsupported-runtime` 拒绝）。它不读写
+  `cad-db`，不建立第二份文档状态，也不设置 `cad_status.popup` 模态门控。
 - **每宿主产物互不共享**：桌面 `apps/desktop-ui/dist`（`npm run build`）、Web
   `apps/app-web/dist-ui`（`scripts/build-web-ui.sh`）、Android `apps/app-android/dist`
   （`scripts/build-android-ui.sh`）。三者用不同运行时常量编译，**不得**互相覆盖，也**不得**把其中

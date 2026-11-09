@@ -50,9 +50,9 @@
 //! There is none any more: the production session ([`crate::live`] /
 //! [`crate::page`]) is what serves this transport, so `invoke` exists on every
 //! wasm build and answers from the live session. A build (or a moment) with **no
-//! live session** still answers the two vocabulary reads from the shared tables —
-//! they are pure — and refuses every other known command with [`NO_SESSION`], never
-//! with a fabricated acknowledgement.
+//! live session** still answers the two vocabulary reads and the crate version
+//! from shared data — they are pure — and refuses every other known command with
+//! [`NO_SESSION`], never with a fabricated acknowledgement.
 
 use cad_app::{StandardView, ToolParameter, ToolValue};
 use cad_ui_core::session::wire::{self, AdmissionTarget, ControlReads, PopupTarget};
@@ -411,14 +411,16 @@ pub fn is_wire_command(name: &str) -> bool {
 
 /// The answers a carrier **without a live CAD session** can still give honestly.
 ///
-/// The two vocabulary reads are pure functions of the shared tables, so they are
-/// served; every other known command is the explicit [`NO_SESSION`] refusal and an
-/// unknown name keeps [`unsupported_runtime`]. Nothing is answered as a success
-/// that this carrier cannot perform.
+/// The two vocabulary reads are pure functions of the shared tables, and the crate
+/// version is a compile-time constant, so all three are served; every other known
+/// command is the explicit [`NO_SESSION`] refusal and an unknown name keeps
+/// [`unsupported_runtime`]. Nothing is answered as a success that this carrier
+/// cannot perform.
 pub(crate) fn without_session(name: &str) -> Result<Value, String> {
     match name {
         "cad_commands" => Ok(serde_json::json!(wire::commands())),
         "cad_command_aliases" => Ok(serde_json::json!(wire::aliases())),
+        "cad_app_version" => Ok(serde_json::json!(cad_ui_core::app_version())),
         known if is_wire_command(known) => {
             Err(format!("{UNSUPPORTED_RUNTIME}: {known}: {NO_SESSION}"))
         }

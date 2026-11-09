@@ -6,6 +6,11 @@
   Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 
 /downloads.json
+  Access-Control-Allow-Origin: *
+  Cache-Control: no-store
+  Content-Type: application/json; charset=utf-8
+
+/changelog.json
   Cache-Control: no-store
   Content-Type: application/json; charset=utf-8
 

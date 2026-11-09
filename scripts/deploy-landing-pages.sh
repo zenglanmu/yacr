@@ -55,7 +55,7 @@ done
 
 # Exactly these files, each non-empty: a stale or partial directory must never
 # be published.
-for file in index.html styles.css main.js downloads.json; do
+for file in index.html styles.css main.js downloads.json changelog.json; do
   [ -s "$DIST/$file" ] \
     || { echo "missing or empty $DIST/$file; refusing to publish a partial site" >&2; exit 1; }
 done
@@ -69,6 +69,13 @@ grep -q 'main.js' "$DIST/index.html" \
 # would leave the page with no working download links.
 python3 -m json.tool "$DIST/downloads.json" >/dev/null \
   || { echo "$DIST/downloads.json is not valid JSON" >&2; exit 1; }
+
+# The changelog is generated from `docs/release-notes/*.md`; a stale committed
+# copy would publish release notes that do not match the repo.
+python3 -m json.tool "$DIST/changelog.json" >/dev/null \
+  || { echo "$DIST/changelog.json is not valid JSON" >&2; exit 1; }
+python3 "$ROOT/scripts/build-landing-changelog.py" --check \
+  || { echo "apps/landing/changelog.json is stale; run scripts/build-landing-changelog.py" >&2; exit 1; }
 
 # At least one non-empty asset (the page's own images/icons, not a bundle).
 [ -d "$DIST/assets" ] \

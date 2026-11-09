@@ -73,6 +73,9 @@
      collapsed. One token for both, so the two states cannot drift apart and the
      partition rect stays identical across collapse/expand. */
   --ribbon-bar-h: 26px;
+  /* The docked right-edge navigation rail's width. The update banner uses it to
+     stay inside the drawing area, so both surfaces read one number. */
+  --navrail-w: 34px;
 }
 
 * { box-sizing: border-box; }
@@ -529,6 +532,7 @@ button, input, select { font: inherit; color: inherit; }
 
 /* Workspace -------------------------------------------------------------- */
 .workspace {
+  position: relative;
   flex: 1 1 auto;
   display: flex; align-items: stretch;
   min-height: 0; min-width: 0;
@@ -1231,7 +1235,7 @@ button, input, select { font: inherit; color: inherit; }
 /* Navigation rail -------------------------------------------------------- */
 .navrail {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  width: 34px; padding: 6px 0;
+  width: var(--navrail-w); padding: 6px 0;
   background: var(--chrome-3); border-left: 1px solid var(--line);
 }
 .navrail__button {
@@ -1906,6 +1910,145 @@ button, input, select { font: inherit; color: inherit; }
   font-size: 12px; line-height: 1.55;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
+
+/* In-app update banner ---------------------------------------------------- */
+/* A new release is news, not a blocker. Unlike the notices above this is not a
+   dialog: no backdrop, no focus trap, no global key handler. It is a card in a
+   pointer-transparent layer docked above the status bar (inside the workspace,
+   so the host's native CAD surface rect never changes).
+   Stacking: the layer sits at `9`, i.e. above the CAD carrier but *below*
+   `.palette-layer` (`10`). A palette dragged over the bottom-right corner
+   therefore covers the banner instead of the banner covering the palette, and
+   the portalled popup/notice layers (60/62) always paint above both. */
+.update-notice-layer {
+  position: absolute;
+  inset: 0 var(--navrail-w) 0 0;
+  z-index: 9;
+  pointer-events: none;
+}
+.update-notice {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "mark content"
+    "actions actions";
+  align-items: start;
+  gap: 9px 10px;
+  width: min(380px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  background: var(--chrome-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+  pointer-events: auto;
+  animation: notice-rise var(--t-med) both;
+}
+@keyframes notice-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+/* Same well-and-left-rule language as the notice marks, but accented: this is an
+   opportunity, not the degraded-path warning the host notice carries. */
+.update-notice__mark {
+  grid-area: mark;
+  display: grid; place-items: center;
+  width: 36px; height: 36px;
+  background: var(--field);
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--accent-text);
+}
+.update-notice__content {
+  grid-area: content;
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
+}
+.update-notice__title {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px; font-weight: 600; line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.update-notice__body {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11.5px; line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+/* The open action failed: reveal the destination instead of pretending it
+   worked. The URL is real selectable text, and the copy action reports its own
+   success/failure line below it. */
+.update-notice__fallback {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.update-notice__hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11.5px; line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.update-notice__url {
+  display: block;
+  padding: 5px 7px;
+  background: var(--field);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  color: var(--accent-text);
+  font-family: var(--font-mono);
+  font-size: 11px; line-height: 1.35;
+  overflow-wrap: anywhere;
+  user-select: text; -webkit-user-select: text;
+}
+.update-notice__copy {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+}
+.update-notice__copy-state { font-size: 11px; line-height: 1.35; }
+.update-notice__copy-state.is-copied { color: var(--ok); }
+.update-notice__copy-state.is-failed { color: var(--danger); }
+.update-notice__actions {
+  grid-area: actions;
+  display: flex; align-items: center; justify-content: flex-end;
+  flex-wrap: wrap; gap: 6px;
+  padding-top: 2px;
+}
+.update-notice__actions .ui-button { min-height: 24px; }
+/* Compact layout: the same single React tree, full-width-ish card above the
+   command bar. The command bar already owns the bottom safe-area inset, so this
+   card only respects the left/right cutouts. `data-layout` is the one breakpoint
+   attribute `use-layout-mode.ts` writes (never a second media query). */
+:root[data-layout="mobile"] .update-notice-layer { inset: 0; }
+:root[data-layout="mobile"] .update-notice {
+  left: max(8px, env(safe-area-inset-left));
+  right: max(8px, env(safe-area-inset-right));
+  bottom: 8px;
+  width: auto;
+  max-height: calc(100% - 16px);
+  padding: 12px;
+}
+:root[data-layout="mobile"] .update-notice__title { font-size: 13px; }
+:root[data-layout="mobile"] .update-notice__body,
+:root[data-layout="mobile"] .update-notice__hint { font-size: 12px; }
+/* The primary action spans the card; Skip and Later share the next row. Every
+   control is a 44px touch target. */
+:root[data-layout="mobile"] .update-notice__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+:root[data-layout="mobile"] .update-notice__actions .ui-button {
+  height: 44px;
+  justify-content: center;
+}
+:root[data-layout="mobile"] .update-notice__actions .ui-button--solid { grid-column: 1 / -1; }
 
 /* CAD shortcut menu ------------------------------------------------------- */
 /* The right-click menu (the one in-DOM overlay `ContextMenu.jsx` renders). It

@@ -1,7 +1,9 @@
 # 宣传页部署（Landing site）
 
 本文件描述 `apps/landing/` 静态宣传页的部署路径。页面本身**没有构建步骤**，也不属于 Cargo
-workspace；它只是 `index.html` / `styles.css` / `main.js` / `downloads.json` / `assets/`。
+workspace；它只是 `index.html` / `styles.css` / `main.js` / `downloads.json` / `changelog.json` /
+`assets/`。其中 `changelog.json` 由 `scripts/build-landing-changelog.py` 从
+`docs/release-notes/*.md` 生成（见下文“更新日志”）。
 
 - 线上地址：<https://yacr.pages.dev/>（Cloudflare Pages 项目 `yacr`）
 - 安装包镜像：Cloudflare R2 桶 `yacr-downloads`，通过 r2.dev 公共域名分发
@@ -54,8 +56,29 @@ CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... bash scripts/deploy-landing-p
 6. 全部成功后用临时文件 + `mv` 原子重写 `apps/landing/downloads.json`。
 
 `deploy-landing-pages.sh` 会先校验静态目录（文件非空、`index.html` 引用 `styles.css`/`main.js`、
-`downloads.json` 可解析、`assets/` 至少一个非空文件、可用时 `node --check main.js`），再幂等创建
-Pages 项目并 `wrangler pages deploy`。它不管理自定义域名。
+`downloads.json` 与 `changelog.json` 可解析、`changelog.json` 与 release notes 未被改旧、`assets/`
+至少一个非空文件、可用时 `node --check main.js`），再幂等创建 Pages 项目并 `wrangler pages deploy`。
+它不管理自定义域名。
+
+## 更新日志（changelog）
+
+`apps/landing/changelog.json` 是**生成文件**，唯一数据源是 `docs/release-notes/v*.md`：
+
+```bash
+python3 scripts/build-landing-changelog.py           # 重新生成（提交它）
+python3 scripts/build-landing-changelog.py --check   # 只校验是否已过期（CI/部署用）
+```
+
+- 只发布每个版本 `## 本版变化 / What changed` 下的条目；`## 资产` / `## 安装速览` 不重复进
+  更新日志（下载区已经承载这些信息）。Markdown 在生成期被压成纯文本（去 `**`、反引号、
+  链接语法），页面用 `textContent` 渲染，不注入 HTML。
+- 语义版本按 `vMAJOR.MINOR.PATCH` 解析并**从新到旧**排序；最新一条的 `version` 必须等于
+  `downloads.json` 的 `release`，否则 `scripts/test-landing-site.py` 失败。
+- 日期来源：release notes 里可写 `发布日期 / Released: YYYY-MM-DD`；否则回退到 Flatpak
+  metainfo 的 `<release version="x.y.z" date="...">`。两者都没有时 `date` 为 `null`（页面隐藏日期），
+  不猜测。
+- 新增版本时：写 `docs/release-notes/vX.Y.Z.md` → 跑一次生成脚本 → 与版本 bump 一起提交。
+  输出不含时间戳，因此 `--check` 在 CI 是确定性的。
 
 ## CI
 
@@ -106,7 +129,8 @@ Pages 项目并 `wrangler pages deploy`。它不管理自定义域名。
 
 ## 门禁
 
-`python3 scripts/test-landing-site.py` 是纯标准库契约测试，校验页面文件/下载清单 schema、两个
+`python3 scripts/test-landing-site.py` 是纯标准库契约测试，校验页面文件/下载清单 schema、
+`changelog.json` schema 与“最新版本 = downloads.json release”、生成文件是否过期、两个
 部署脚本的 fail-closed 片段、实机截图资产（存在性、PNG 头、尺寸）以及 `site.yml` 保持手动触发、
 不发布 GitHub Release。它已接入 `core-quality`（`scripts/check-workflows.py` 同步固定该命令），
-页面缺失或清单漂移会让门禁失败。
+页面缺失或清单/更新日志漂移会让门禁失败。

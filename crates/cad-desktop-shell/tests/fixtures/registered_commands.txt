@@ -1,3 +1,4 @@
+cad_app_version
 cad_close_popup
 cad_command
 cad_command_aliases

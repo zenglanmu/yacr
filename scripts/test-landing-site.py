@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -19,6 +20,9 @@ LANDING = ROOT / "apps" / "landing"
 DEPLOY = ROOT / "scripts" / "deploy-landing-pages.sh"
 UPLOAD = ROOT / "scripts" / "upload-r2-downloads.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "site.yml"
+BUILD_CHANGELOG = ROOT / "scripts" / "build-landing-changelog.py"
+CHANGELOG = LANDING / "changelog.json"
+HEADERS = LANDING / "_headers"
 
 RELEASE = "v0.1.6"
 GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.6/"
@@ -118,6 +122,129 @@ def check_manifest(text: str, errors: list[str]) -> None:
             fail(f"downloads.json assets.{label}.sha256 is not a SHA-256 digest", errors)
 
 
+def check_changelog(text: str, release: str | None, errors: list[str]) -> None:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        fail(f"changelog.json is not valid JSON: {exc}", errors)
+        return
+    if not isinstance(data, dict):
+        fail("changelog.json must be a JSON object", errors)
+        return
+    if data.get("generatedFrom") != "docs/release-notes":
+        fail("changelog.json generatedFrom must be 'docs/release-notes'", errors)
+    releases = data.get("releases")
+    if not isinstance(releases, list) or not releases:
+        fail("changelog.json releases must be a non-empty array", errors)
+        return
+
+    keys: list[tuple[int, int, int]] = []
+    versions: list[str] = []
+    for index, entry in enumerate(releases):
+        where = f"changelog.json releases[{index}]"
+        if not isinstance(entry, dict):
+            fail(f"{where} must be an object", errors)
+            continue
+        version = entry.get("version")
+        if not isinstance(version, str) or re.fullmatch(r"v\d+\.\d+\.\d+", version) is None:
+            fail(f"{where}.version must be vMAJOR.MINOR.PATCH", errors)
+        else:
+            versions.append(version)
+            keys.append(tuple(int(part) for part in version[1:].split(".")))  # type: ignore[arg-type]
+        if not isinstance(entry.get("title"), str) or not entry["title"].strip():
+            fail(f"{where}.title must be a non-empty string", errors)
+        url = entry.get("url")
+        if not isinstance(url, str) or not url.startswith(
+            "https://github.com/zenglanmu/yacr/releases/tag/"
+        ):
+            fail(f"{where}.url must be a GitHub release tag URL", errors)
+        date = entry.get("date")
+        if date is not None and (
+            not isinstance(date, str) or re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) is None
+        ):
+            fail(f"{where}.date must be null or YYYY-MM-DD", errors)
+        sections = entry.get("sections")
+        if not isinstance(sections, list) or not sections:
+            fail(f"{where}.sections must be a non-empty array", errors)
+            continue
+        for section in sections:
+            if not isinstance(section, dict):
+                fail(f"{where}.sections entries must be objects", errors)
+                continue
+            if not isinstance(section.get("heading"), str) or not section["heading"].strip():
+                fail(f"{where}.sections[].heading must be a non-empty string", errors)
+            items = section.get("items")
+            if not isinstance(items, list) or not items:
+                fail(f"{where}.sections[].items must be a non-empty array", errors)
+                continue
+            if any(not isinstance(item, str) or not item.strip() for item in items):
+                fail(f"{where}.sections[].items must be non-empty strings", errors)
+
+    if len(versions) != len(set(versions)):
+        fail("changelog.json releases contain duplicate versions", errors)
+    if keys and keys != sorted(keys, reverse=True):
+        fail("changelog.json releases must be newest-first", errors)
+    if release is not None and versions and versions[0] != release:
+        fail(
+            f"changelog.json latest release {versions[0]!r} must match "
+            f"downloads.json release {release!r}",
+            errors,
+        )
+
+
+def check_changelog_freshness(errors: list[str]) -> None:
+    """The committed changelog must equal a fresh build from the release notes."""
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(BUILD_CHANGELOG), "--check"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        fail(f"could not run scripts/build-landing-changelog.py: {exc}", errors)
+        return
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        fail(
+            "apps/landing/changelog.json is stale; run "
+            f"scripts/build-landing-changelog.py ({detail})",
+            errors,
+        )
+
+
+def check_headers(text: str, errors: list[str]) -> None:
+    """`/downloads.json` must stay cross-origin readable by the desktop/web app.
+
+    The in-app update check fetches this manifest from `tauri://localhost` /
+    `http://tauri.localhost` / the web bundle origin, so the landing deployment
+    has to send `Access-Control-Allow-Origin: *`. The rest of the site stays
+    same-origin-only (`connect-src 'self'`).
+    """
+    blocks: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in text.splitlines():
+        if line and not line[0].isspace():
+            current = line.strip()
+            blocks[current] = []
+        elif current is not None:
+            blocks[current].append(line.strip())
+    manifest = blocks.get("/downloads.json")
+    if manifest is None:
+        fail("apps/landing/_headers has no /downloads.json block", errors)
+        return
+    headers = [line for line in manifest if line]
+    if "Access-Control-Allow-Origin: *" not in headers:
+        fail(
+            "apps/landing/_headers /downloads.json must send "
+            "'Access-Control-Allow-Origin: *' for the in-app update check",
+            errors,
+        )
+    if "Content-Type: application/json; charset=utf-8" not in headers:
+        fail("apps/landing/_headers /downloads.json must declare JSON content type", errors)
+
+
 def check_index(text: str, errors: list[str]) -> None:
     for fragment in (
         "yacr.pages.dev",
@@ -138,7 +265,7 @@ def check_index(text: str, errors: list[str]) -> None:
 
 
 def check_main_js(text: str, errors: list[str]) -> None:
-    for fragment in ("downloads.json", "cdnBase"):
+    for fragment in ("downloads.json", "changelog.json", "cdnBase"):
         if fragment not in text:
             fail(f"apps/landing/main.js is missing {fragment!r}", errors)
     if "catch" not in text and "githubBase" not in text:
@@ -161,6 +288,7 @@ def check_scripts(errors: list[str]) -> None:
             "CLOUDFLARE_ACCOUNT_ID",
             "node --check",
             "downloads.json",
+            "build-landing-changelog.py",
         ):
             if fragment not in deploy:
                 fail(f"scripts/deploy-landing-pages.sh is missing {fragment!r}", errors)
@@ -219,17 +347,36 @@ def check_workflow(errors: list[str]) -> None:
 def main() -> int:
     errors: list[str] = []
     texts: dict[str, str] = {}
-    for name in ("index.html", "styles.css", "main.js", "downloads.json"):
+    for name in (
+        "index.html",
+        "styles.css",
+        "main.js",
+        "downloads.json",
+        "changelog.json",
+    ):
         text = non_empty(LANDING / name, errors)
         if text is not None:
             texts[name] = text
+    release: str | None = None
     if "downloads.json" in texts:
         check_manifest(texts["downloads.json"], errors)
+        try:
+            parsed = json.loads(texts["downloads.json"])
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict) and isinstance(parsed.get("release"), str):
+            release = parsed["release"]
+    if "changelog.json" in texts:
+        check_changelog(texts["changelog.json"], release, errors)
+    check_changelog_freshness(errors)
     if "index.html" in texts:
         check_index(texts["index.html"], errors)
     check_screenshot(errors)
     if "main.js" in texts:
         check_main_js(texts["main.js"], errors)
+    headers = non_empty(HEADERS, errors)
+    if headers is not None:
+        check_headers(headers, errors)
     check_scripts(errors)
     check_workflow(errors)
 

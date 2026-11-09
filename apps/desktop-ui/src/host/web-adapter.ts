@@ -80,6 +80,7 @@ import {
 import type { CanvasEnv } from '../cad/canvas-host.ts';
 import type { CadStatus } from '../cad/cad-status.ts';
 import { rectFromElement } from '../cad/metrics.ts';
+import { RELEASE_PAGE_URL } from '../update/config.ts';
 import { withTransportCapabilities } from './transport-capabilities.ts';
 
 /** The session exports this transport calls, after validation. */
@@ -162,6 +163,16 @@ export const WEB_INPUT_COMMAND = 'probe_input';
 export const WEB_SESSION_COMMAND = 'canvas_session_status';
 /** A failure report the chrome sends; printed and remembered, never answered. */
 export const WEB_FAILURE_COMMAND = 'canvas_runtime_failed';
+
+/**
+ * Open the download page: an action the **transport** performs.
+ *
+ * A page has no shell to hand the URL to, so the browser transport opens a new
+ * tab itself (`window.open`). Like `OPEN`, this is not a fabricated CAD answer:
+ * the command asks the carrier to perform an action, and a blocked popup is a
+ * named refusal (`update.popup_blocked: …`), never a silent success.
+ */
+export const WEB_OPEN_RELEASE_COMMAND = 'cad_open_release_page';
 
 /**
  * The three vendor-pass commands (`vendor/vendor-pass.ts`).
@@ -591,6 +602,14 @@ export interface WebAdapterDeps {
    * driven from Node).
    */
   readonly document?: Document | null;
+  /**
+   * The browser's `window.open`, used by `cad_open_release_page`.
+   *
+   * Defaults to `globalThis.open`; injected so the popup path is testable in
+   * Node (where no `window` exists). Returning `null`/`undefined` means the
+   * browser blocked the popup.
+   */
+  readonly openUrl?: (url: string, target: string, features: string) => unknown;
 }
 
 /** The browser transport [`createWebAdapter`] returns. */
@@ -611,6 +630,40 @@ function canvasCount(value: unknown): number | null {
 /** The argument record of a report command (`{}` for anything else). */
 function argRecord(args: unknown): Record<string, unknown> {
   return plainRecord(args) ?? {};
+}
+
+/** The stable refusal when the browser will not open a new tab. */
+export const WEB_POPUP_BLOCKED = 'update.popup_blocked: the browser blocked the download page';
+
+/**
+ * The page's `window.open`, called with its global receiver (some browsers throw
+ * on a detached call). A page without `open` returns `undefined`, which the
+ * caller reports as a blocked popup.
+ */
+function defaultOpenUrl(url: string, target: string, features: string): unknown {
+  const open = (globalThis as {
+    readonly open?: (url?: string, target?: string, features?: string) => unknown;
+  }).open;
+  if (typeof open !== 'function') return undefined;
+  return open.call(globalThis, url, target, features);
+}
+
+/**
+ * Open the release page in a new tab, or refuse by name.
+ *
+ * A popup that returns `null`/`undefined` was blocked (or there is no `window`
+ * at all); that is a real failure the notice can explain, not an accepted action.
+ */
+function openReleasePage(deps: WebAdapterDeps): unknown {
+  const open = deps.openUrl ?? defaultOpenUrl;
+  let opened: unknown;
+  try {
+    opened = open(RELEASE_PAGE_URL, '_blank', 'noopener,noreferrer');
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+  if (opened === null || opened === undefined) throw new Error(WEB_POPUP_BLOCKED);
+  return { accepted: true };
 }
 
 /**
@@ -699,6 +752,10 @@ export function createWebAdapter(source: WebShellSource, deps: WebAdapterDeps = 
           };
           return undefined;
         }
+        case WEB_OPEN_RELEASE_COMMAND:
+          // An action this transport performs (like `OPEN`), not a question for
+          // the session: a page has no shell to hand the URL to.
+          return openReleasePage(deps);
         case WEB_VENDOR_RECORDS_COMMAND:
         case WEB_VENDOR_APPLY_COMMAND:
         case WEB_VENDOR_STATUS_COMMAND:

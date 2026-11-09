@@ -1806,5 +1806,14 @@
   "draw.kind.menu": "Menu (MENU)",
   "draw.kind.menu.hint": "MENU is a named refusal: no menu-file model; the UI is fixed.",
   "draw.kind.ribbon": "Ribbon (RIBBON)",
-  "draw.kind.ribbon.hint": "RIBBON is a named refusal: ribbon visibility is host-owned chrome."
+  "draw.kind.ribbon.hint": "RIBBON is a named refusal: ribbon visibility is host-owned chrome.",
+  "update.available.title": "New version {latest} available",
+  "update.available.body": "You are on {current}.",
+  "update.available.open": "Open download page",
+  "update.available.skip": "Skip this version",
+  "update.available.later": "Later",
+  "update.open.failed": "The download page could not be opened. Open this address in your browser, or copy it:",
+  "update.copy": "Copy link",
+  "update.copy.copied": "Link copied.",
+  "update.copy.failed": "The link could not be copied. Select it and copy it manually."
 }

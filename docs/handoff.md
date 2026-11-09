@@ -1,5 +1,49 @@
 AD
 
+## 2026-11-09 应用内更新检测 + 落地页下载/更新日志改版
+
+- **用户要求**：加入自动更新检测——从落地页检查新版本、提醒用户并跳转到下载界面；下载页面重新设计并加入更新日志。
+  交互确认：更新检测**仅应用内**（应用读落地页版本清单），落地页负责下载区改版与 changelog。
+- **版本来源（唯一机器可读）**：`https://yacr.pages.dev/downloads.json` 的 `release` 字段。落地页
+  `_headers` 的 `/downloads.json` 新增 `Access-Control-Allow-Origin: *`（WebView/浏览器跨源读取）；
+  四个 Tauri `tauri.conf.json` 与 `apps/app-web/web/index.html` 的 `connect-src` 增加
+  `https://yacr.pages.dev`。其余 CSP 指令未改。
+- **共享命令（ADR 0032）**：
+  - `cad_app_version`：`registry.rs` 的 `shared/pure` 行，回答 `env!("CARGO_PKG_VERSION")`；
+    `native-below` = 原生产物、`dom-canvas` = wasm 产物；`without_session` 也回答（无假 `NO_SESSION`）。
+  - `cad_open_release_page`：shell 能力，**无 URL 参数**，固定
+    `https://yacr.pages.dev/#download`；`ShellReleaseOpener` 平台 seam 装在 `apps/app-*`；
+    有 bridge 的 `dom-canvas`（X11）走 Tauri，Web 无 bridge 由 `web-adapter` `window.open`；
+    Android 暂无 opener ⇒ 稳定 `unsupported-runtime: cad_open_release_page` 拒绝。
+- **前端**：`apps/desktop-ui/src/update/{config,version,manifest,policy,source,store}.ts`
+  （8 s 超时、`no-store`、≤64 KB、严格 `^v?\d+\.\d+\.\d+$`、失败始终 `unavailable`/`unsupported`，
+  绝不谎报“已是最新”）；24 h 节流与“跳过此版本”在 `localStorage`（`yacr.update.*`，不进
+  `CadSettingKey`/`preference.json`）。提示是 **非模态 banner**（`UpdateNotice`/`UpdateNoticeHost`，
+  `Workspace` 挂载），仅 `available` 可见；打开失败时展示可复制链接（`clipboard.ts`）。9 个
+  `update.*` i18n 键（zh/en 对齐）。
+- **落地页**：`#download` 重做为 release hero + 四平台卡片（体积、签名/公证状态、CDN/GitHub、
+  SHA-256、安装命令），版本/日期/体积从 `downloads.json` 水合；新增 `#changelog` 时间线，从
+  `apps/landing/changelog.json` 渲染（`textContent`，无 HTML 注入；失败/无 JS 回退 GitHub Releases）。
+  `changelog.json` 由 **新脚本** `scripts/build-landing-changelog.py` 从 `docs/release-notes/*.md`
+  生成（`--check` 确定性门禁；日期来自 `发布日期 / Released:` 或 Flatpak metainfo）。
+  `deploy-landing-pages.sh` 与 `scripts/test-landing-site.py` 增加 changelog schema/新鲜度、
+  最新版本 == `downloads.json.release`、CORS 头等 fail-closed 断言。`v0.1.4.md` 补了发布日期行。
+- **已运行**：`cargo test -p cad-ui-core --locked`、`cargo test -p cad-desktop-shell --locked`、
+  `cargo test -p app-web --locked`、`cargo check -p app-linux --all-targets --locked`、
+  `cargo check -p app-web --target wasm32-unknown-unknown --locked`、`cargo fmt --all -- --check`
+  （均 exit 0）；前端 `npm test`（`tsc --noEmit` + 插件 tsc + 1411 tests，全过）；
+  `check-architecture.py`/`check-tauri-capabilities.py`/`check-file-size.py`/`check-i18n.py`
+  （1817 键）/`check-command-docs.py`/`test-landing-site.py`/`git diff --check` 全绿。
+  落地页用 headless Chromium（软件渲染）在 390/820/1440 px 跑 34 项 DOM/布局断言全过：无横向溢出、
+  无 console/page error、版本与产物数水合、changelog ≥3 版本、折叠/展开、复制、语言切换、
+  `#download`/`#changelog` 深链、changelog 拉取失败回退。
+- **NOT RUN / NOT VERIFIED**：真实 Linux 应用运行（未启动 host/窗口）与真实网络；Windows/macOS/
+  Android/Web 的真实网络、CSP 生效、`localStorage`、外部浏览器打开；Android Intent opener 明确
+  延后；任何 GPU/像素/真机验收。**部署前提**：在 `site.yml` 重新部署落地页（带新 CORS 头与
+  `changelog.json`）之前，线上 `downloads.json` 仍无 CORS，应用会诚实地显示 `unavailable`（无提示）。
+- **附带修复**：`apps/app-linux/src/host/tests.rs` 的 `CadToolParams` 测试初始化缺 4 个已提交字段，
+  导致 `cargo check -p app-linux --all-targets` 在 HEAD 即失败；本轮补齐（无行为变化）。
+
 ## 2026-11-09 全载体开启 New（canNew）
 
 - **用户要求**：把新建空白图能力在所有载体打开。共享实现本来就有：

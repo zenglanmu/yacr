@@ -397,6 +397,35 @@ fn the_native_entry_refuses_a_session_command_and_answers_the_vocabulary() {
     }
 }
 
+/// The crate version is served identically with and without a live session: it is
+/// a compile-time constant, so a read before the canvas session starts must not
+/// become a false `NO_SESSION`.
+#[test]
+fn the_crate_version_is_served_with_and_without_a_live_session() {
+    let expected = serde_json::json!(cad_ui_core::app_version());
+
+    // No session: the native/wasm-pre-start answer, as `invoke` serves it.
+    let without = without_session("cad_app_version").expect("served without a session");
+    assert_eq!(without, expected);
+    assert!(cad_ui_core::session::WIRE_COMMAND_NAMES.contains(&"cad_app_version"));
+
+    // Live session: the generated dispatch arm answers the same value.
+    let session = session();
+    let mut sink = DirectSink::new(&session);
+    let reads = DirectReads::new(&session);
+    let mut popups = NoPopups;
+    let with = dispatch("cad_app_version", "{}", &mut sink, &reads, &mut popups)
+        .expect("served by a live session");
+    assert_eq!(with, expected);
+    assert_eq!(with, without);
+
+    // And through the native entry with no page session.
+    let invoked: Value =
+        serde_json::from_str(&invoke("cad_app_version", "{}")).expect("valid JSON");
+    assert_eq!(invoked["ok"], Value::Bool(true));
+    assert_eq!(invoked["value"], expected);
+}
+
 #[test]
 fn the_wire_command_set_is_the_registrys_shared_set() {
     // Both lists are generated from the one registry (`SHARED_WIRE_COMMAND_NAMES`

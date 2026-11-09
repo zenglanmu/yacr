@@ -215,6 +215,7 @@ test('every runtime x carrier x bridge x command class resolves to adapter or Ta
   assert.deepEqual([...SHELL_ONLY_COMMANDS], [
     'canvas_runtime_failed', 'canvas_session_status',
     'cad_plugin_status', 'cad_plugin_install', 'cad_plugin_enable', 'cad_plugin_uninstall', 'cad_plugin_read_entry',
+    'cad_open_release_page',
   ]);
 });
 

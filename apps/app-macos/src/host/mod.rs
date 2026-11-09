@@ -42,6 +42,7 @@ mod fonts;
 mod init;
 mod layers;
 mod popup;
+mod release;
 mod tick;
 
 pub(crate) use cad_desktop_shell::state::lock;
@@ -247,9 +248,14 @@ fn register_seams(
     shared: &Arc<Mutex<Shared>>,
     telemetry: &Arc<Mutex<RenderTelemetry>>,
 ) {
-    let mut state = lock(shared);
-    state.telemetry = Some(Arc::new(AppTelemetry(telemetry.clone())));
-    state.popup_host = Some(Arc::new(AppPopupHost { app: app.clone() }));
+    {
+        let mut state = lock(shared);
+        state.telemetry = Some(Arc::new(AppTelemetry(telemetry.clone())));
+        state.popup_host = Some(Arc::new(AppPopupHost { app: app.clone() }));
+    }
+    // Shell capability, not document state: hand the fixed release URL to the OS.
+    // Installed after the shell lock is released, like the seams above.
+    cad_desktop_shell::state::configure_release_opener(shared, Arc::new(release::MacReleaseOpener));
 }
 
 /// Ask the tick to stop and release the presenter (idempotent).

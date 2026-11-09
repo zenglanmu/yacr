@@ -1,0 +1,140 @@
+{
+  "generatedFrom": "docs/release-notes",
+  "releases": [
+    {
+      "version": "v0.1.6",
+      "title": "yacr v0.1.6",
+      "date": "2026-11-09",
+      "url": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.6",
+      "sections": [
+        {
+          "heading": "Android 取景 / Android framing",
+          "items": [
+            "修复打开图纸文字过大（约 1.5×）：Android 渲染目标必须是整窗 SurfaceView，但 tick 曾把整窗同时当成 canvas metrics 与 session.render(logical) 的取景尺寸；fit 使用整窗而不是可见矩形，图中内容被画得比可见区大。现在 SurfaceMetrics 新增 origin，cad-ui-core::layout::window_surface_metrics → cad-host（保留 origin）→ ViewSnapshot.canvas_origin → place_canvas_camera2d 只平移正交相机中心；渲染目标仍是整窗。origin = None 的旧调用/GPU 契约逐位不变；3D 透视相机的离轴投影未做，记为 Partial。",
+            "共享契约测试覆盖 layout 映射/越界、放置数学、零偏移逐位相等、rect-local screen→world 对拍、快照校验与 cad-host 的 visible-rect fit。均为 host-target，无 GPU/像素断言。"
+          ]
+        },
+        {
+          "heading": "字体 / Fonts",
+          "items": [
+            "修复 SHX 大字体（CJK bigfont）字高解析：read_bigfont_metrics 在 strip_name 之后又找 NUL 并要求其后 ≥4 字节，真实 gbcbig / hztxt / tssdchn 等 info 块不满足，height 保持默认 10；这些字体的字形在约 100–127 单位 cell 中，factor = size/height 曾把 CJK 放大约 10×（hztxt 实测 12.2×、gbcbig 9.1×）。现在从 stripped info 开头读取 above,below（height = above + below），并补充两个不嵌入第三方字节的合成回归测试。",
+            "gbcbig 的字形仍比其声明 cell 高约 1.38×（bytecode 归一化待单独核对），记为 Partial。本版未做真实字体 / AutoCAD golden 对照。"
+          ]
+        },
+        {
+          "heading": "落地页 / Landing site",
+          "items": [
+            "宣传页新增编号 A 的实机截图区块与大图纸指标（“725K 图元、展开后”口径），截图来自真实 Linux Wayland 运行（NVIDIA Quadro P620 / Vulkan / wgpu），不是渲染图。",
+            "页面/README 平台措辞改为：Linux/Wayland 是主开发目标；Windows/macOS 是真实宿主但运行时与视觉验收待补；Android APK 已由维护者侧载运行（非 CI 验收）。",
+            "新增 python3 scripts/test-landing-site.py 契约（文件/清单 schema、截图资产、部署脚本 fail-closed 片段、site.yml 手动触发约束），已接入 core-quality。"
+          ]
+        },
+        {
+          "heading": "文档 / Docs",
+          "items": [
+            "移除仓库中已退役 UI 工具包（Slint）的遗留命名。",
+            "去掉“无可交付产品”的过时措辞并补充致谢；去掉背书免责声明。"
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v0.1.5",
+      "title": "yacr v0.1.5",
+      "date": "2026-11-08",
+      "url": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.5",
+      "sections": [
+        {
+          "heading": "命令覆盖 / Command coverage",
+          "items": [
+            "完成 2026-11-07 的“下一批 100 条”批次：99/100 计入官方覆盖，TRACE 按“同名不同义”（AutoCAD 2026 是协作追踪，本项目同名命令是旧式宽线带）不计入。",
+            "官方索引覆盖从 123 提升到 223 已实现（50 完整 + 173 部分）/ 758 未实现（共 981 条）。CLOSE（关闭当前唯一文档）以部分实现计入。",
+            "新增批次包含（均为声明的部分实现 / v1 子集，界外显式拒绝）：",
+            "绘制/编辑：DONUT SOLID HELIX MLINE MLSTYLE TREX EXTRIM MPEDIT DRAWORDER WIPEOUT POLYGON（外切） REVCLOUD（对象模式 v1） BOUNDARY TEXTTOFRONT OVERKILL（v1 仅完全重复） OOPS BREAKATPOINT REVERSE PEDIT（v1 选项子集） GRADIENT HATCHEDIT HATCHTOBACK HATCHGENERATEBOUNDARY SKETCH TRACE MOCORO MSTRETCH -PAN VIEWRES VSCURRENT REGEN3 LINETYPE",
+            "查询：MASSPROP MEASUREGEOM LIST STATUS FS AUDIT",
+            "图层：LAYMCH LAYMGR LAYDEL LAYERSTATE LAYERPMODE LTSCALE LAYWALK LAYCUR LAYMCUR LAYFRZ LAYTHW LAYLCK LAYULK SETBYLAYER",
+            "选择：QSELECT FILTER GETSEL SSX SELECTCOUNT FIND SELECTSIMILAR、对象隐藏",
+            "文本/标注：JUSTIFYTEXT TJUST TSCALE TEXTALIGN TCOUNT TCIRCLE TEXTMASK TEXTUNMASK TORIENT TCASE TXT2MTXT；DIMSTYLE DIMTEDIT DIMEDIT DIMOVERRIDE DIMREGEN DIMDISASSOCIATE QDIM DIMROTATED DIMSPACE；GROUP UNGROUP GROUPEDIT QLEADER LEADER TEXTFIT HATCHSETBOUNDARY HATCHSETORIGIN XDLIST",
+            "视图/布局：REDRAW REGEN VIEW VIEWGO VIEWBACK VIEWFORWARD VPOINT PLAN MODEL；LAYOUT VPORTS VPMAX VPMIN VPCLIP VPSCALE LAYVPI",
+            "工具/会话：PURGE RENAME SETVAR TIME DBLIST TREESTAT MREDO MULTIPLE",
+            "界面命令：ABOUT CLEANSCREENON CLEANSCREENOFF LAYERCLOSE PROPERTIESCLOSE",
+            "覆盖计数只是清单计数，不是 AutoCAD 兼容率；未支持选项一律显式拒绝。逐条边界见 docs/autocad-2026-command-coverage.md / docs/compatibility.md。"
+          ]
+        },
+        {
+          "heading": "界面 / UI",
+          "items": [
+            "功能区可收起为 AutoCAD-classic 菜单栏，收起时以菜单行承载同一批命令。",
+            "空白启动 + CLOSE：不再强制打开图纸；开始页与 About 对话框刷新。",
+            "统一命令历史：固定栏 + 详细弹窗；命令历史可复制到系统剪贴板。",
+            "Shift 点击加入现有选择集。",
+            "五个面板可浮动在绘图区之上。",
+            "诊断拆分为 File info 与 Performance 两个面板。",
+            "移动端仍是同一棵 React 树，仅按宽度切换布局（MOBILE_MAX_WIDTH = 1024）。"
+          ]
+        },
+        {
+          "heading": "天正 / vendor plugin",
+          "items": [
+            "plugins/tch（tangent-ts）作为 git submodule 接入，插件 bundle 进入所有载体产物；TCH 扩展到 22 个类，含派生测量与 base-6 解码。",
+            "插件管理器持久化；vendor 实体可被选择并提供属性行。",
+            "动态块隐藏成员修复：源文件 invisible 是烘焙显示状态，*U231 等匿名块不再把全部状态几何叠画；无激活状态的成员按烘焙 invisible 隐藏。",
+            "停止 TCH 自动换行（auto-wrap）。"
+          ]
+        },
+        {
+          "heading": "渲染与性能 / Rendering & performance",
+          "items": [
+            "渲染器自有瞬态光标覆盖层；瞬态覆盖层与 CAD base 解耦，消除闪烁。",
+            "增量原地更新：LINE、圆弧/圆、移动实体、驻留批次退役/追加、ChangeSet 驱动的任意实体类追加。",
+            "导航 LOD、VRAM 预检、批处理；移除平移/缩放卡顿。",
+            "显式 WebGPU canvas 偏好，缺失时拒绝而不是静默降级；后端能力从设备 limits 推导。",
+            "绘制顺序 tie-break 固定到代码并纳入契约测试。"
+          ]
+        },
+        {
+          "heading": "文件与字体 / Files & fonts",
+          "items": [
+            "Save As DWG：新文件写入，覆盖源文件前警告；实验性 DWG 导出走上游 acadrust DwgWriter。",
+            "Web 端 OPEN 走页面上传、SAVE/PLOT 走浏览器下载；Android SAF 打开/保存已接线。",
+            "打包 Noto CJK 回退字体、Web 懒加载 CDN、字体管理器；每个载体一份 CAD 字体包。"
+          ]
+        },
+        {
+          "heading": "构建与发布 / CI & release",
+          "items": [
+            "新增 publish-release.yml：仅手工 dispatch，是唯一带 contents: write 的发布入口。",
+            "签名改为仓库自签名材料：Android keystore（缺失即失败，只发签名 APK）、Flatpak GPG、Windows PFX（配置时 signtool）、macOS 默认 ad-hoc。均非公共信任，未公证。",
+            "新增 fail-closed pre-push 子模块 gitlink 守卫；acadrust 补丁台账门禁。",
+            "排除 debug APK release job；发布资产 staged 到 release-assets/，不污染受跟踪的 assets/。"
+          ]
+        },
+        {
+          "heading": "修复 / Fixes",
+          "items": [
+            "视口锚定到 DXF 视图中心；圆锥曲线裁剪。",
+            "预览链展开为 LineList 段对，预览不再走重建路径。",
+            "矩形 VPCLIP 布局可打开；光标输入更平滑。",
+            "REVCLOUD 同时出现在两个绘制面板；MASSPROP/MEASUREGEOM 合并后的面板与契约对齐。",
+            "退出期 corrupted double-linked list 已定位为 WebKitWebProcess 在 atexit 拆除 EGL/GBM（Mesa）的上游竞态；主进程退出码仍为 0，本项目未内置规避、也未掩盖。"
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v0.1.4",
+      "title": "yacr v0.1.4",
+      "date": "2026-11-01",
+      "url": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.4",
+      "sections": [
+        {
+          "heading": "本版变化 / What changed",
+          "items": [
+            "Tauri v2 capability 修复：四个 Tauri 宿主（Linux/Windows/macOS/Android）新增最小 core:event:allow-listen + core:event:allow-unlisten capability。此前的 push-only cad_event 流被 ACL 拒绝（Command plugin:event|listen not allowed by ACL），表现为命令全部禁用、CAD 层透明露出桌面。",
+            "Android NDK 链接修复：关闭 ndk 的 nativewindow feature——它无条件链接 -lnativewindow，而该 stub 只有 API ≥ 26 才有，本应用 minSdkVersion = 24。Android APK 恢复可构建。"
+          ]
+        }
+      ]
+    }
+  ]
+}
