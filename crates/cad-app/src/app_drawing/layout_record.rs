@@ -9,10 +9,8 @@
 //! `ChangeSet` shape as every other edit, and a delete is applied after its
 //! entity deletes.
 //!
-//! Nothing here is wired into a command yet: the layout command handlers are the
-//! next lane's work. The helpers exist now so those handlers record through one
-//! shared shape instead of spelling the row/record out, exactly like
-//! `layer_record`.
+//! The layout command handlers ([`crate::app_layout`]) record through these
+//! helpers, exactly like the layer writes use `layer_record`.
 
 use super::*;
 
@@ -23,8 +21,7 @@ use super::*;
 /// `before: None` and a delete records `after: None` without inventing a row.
 /// The plot row travels with the layout because a delete cascades to it and an
 /// undo must restore both.
-#[allow(dead_code)] // wired by the layout-command lane
-pub(super) fn layout_row(database: &DrawingDatabase, id: LayoutId) -> Option<cad_db::LayoutRow> {
+pub(crate) fn layout_row(database: &DrawingDatabase, id: LayoutId) -> Option<cad_db::LayoutRow> {
     database.layout(id).map(|layout| cad_db::LayoutRow {
         layout: layout.clone(),
         plot: database.plot_settings(id).cloned(),
@@ -41,8 +38,7 @@ impl Application {
     /// `ChangeSet`). History is validated **before** the candidate replaces the
     /// authoritative drawing, so a rejected record leaves both the drawing and
     /// the history untouched.
-    #[allow(dead_code)] // wired by the layout-command lane
-    pub(super) fn publish_layout_record(
+    pub(crate) fn publish_layout_record(
         &mut self,
         document_id: DocumentId,
         candidate: DrawingDatabase,

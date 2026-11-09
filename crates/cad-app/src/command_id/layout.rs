@@ -1,42 +1,38 @@
 //! The 2026-11-07 layout / viewport batch.
 //!
-//! These selectors cover the **read** half of AutoCAD's paper-space surface and
-//! explicitly refuse every write the database cannot publish.
-//!
-//! # The hard boundary
-//!
-//! `cad-db` exposes the layout table and each `PaperViewport` as **read-only**
-//! accessors after import ([`cad_db::DrawingDatabase::layout`],
-//! [`cad_db::DrawingDatabase::layouts`]). There is no layout insert, rename,
-//! delete, page-setup, viewport insert, clip or per-viewport layer method — the
-//! builder is the only writer. This build therefore does **not** mutate a clone
-//! of the drawing (that would leave the session, renderer and undo history on
-//! stale data). Every command that would need such a write returns a stable
-//! `Unsupported` refusal naming the missing capability:
-//!
-//! * `layout.write_unsupported` — `LAYOUT NEW|RENAME|DELETE`;
-//! * `layoutmerge.write_unsupported` — entity moves plus layout delete;
-//! * `layoutwizard.write_unsupported` — layout creation plus page setup;
-//! * `vports.write_unsupported` — `PaperViewport` creation;
-//! * `vpclip.viewport_selection_unsupported` — there is no selected-viewport
-//!   state and no clip write;
-//! * `vpscale.write_unsupported` — no viewport scale write;
-//! * `layvpi.viewport_layer_state_unsupported` — no per-viewport layer state.
+//! These selectors cover AutoCAD's paper-space surface. The table/viewport
+//! **writes** are real now that `cad-db` owns sanctioned post-import layout
+//! writes: `LAYOUT NEW|RENAME|DELETE`, `LAYOUTMERGE`, `LAYOUTWIZARD`,
+//! `VPORTS`/`-VPORTS`, `VPCLIP RECT` and `VPSCALE` each apply through one
+//! validated database write and record exactly one undo step.
 //!
 //! # What really works
 //!
 //! * `LAYOUT LIST` reads the authoritative layout descriptors.
 //! * `LAYOUT SET <name>` switches the session's active space through the one
 //!   `SwitchSpace` path (session state only: no database write, no undo entry).
-//! * `VPMAX` / `VPMIN` set and clear one session-only maximized-viewport marker.
-//!   The marker names the active paper layout and its **first** viewport
-//!   (index 0), because this build has no per-viewport selection model; that is
-//!   a declared narrowing, not a fabricated second viewport authority. The
-//!   marker is published by [`crate::SessionState::maximized_viewport`] for a
-//!   host to render; it writes no drawing data.
+//! * `LAYOUT NEW` / `LAYOUT RENAME` / `LAYOUT DELETE` write the layout table;
+//!   delete also cascades the plot settings and leaves the session on a valid
+//!   space when the deleted layout was active.
+//! * `LAYOUTMERGE` moves every source paper entity and deletes the source row in
+//!   one combined revision. `LAYOUTWIZARD` creates the layout but still does
+//!   **not** model page setup (`layoutwizard.paper_not_applied`).
+//! * `VPORTS` creates a declared simple `rows * cols` grid; `VPCLIP RECT` and
+//!   `VPSCALE` edit the **first** viewport because this build has no
+//!   per-viewport selection model. That is a declared narrowing, not a
+//!   fabricated second viewport authority.
+//! * `VPMAX` / `VPMIN` set and clear one session-only maximized-viewport marker
+//!   naming the active paper layout and its first viewport.
+//!
+//! # The remaining hard boundary
+//!
+//! `LAYVPI` stays a named `Unsupported` refusal: this build has no per-viewport
+//! layer state (`layvpi.viewport_layer_state_unsupported`), and it never freezes
+//! the layers globally. Polygonal `VPCLIP` and page setup are likewise not
+//! modeled.
 //!
 //! `-VPORTS` is a spelling alias of `VPORTS`, not a second command: it
-//! normalizes to the same [`crate::CommandId::Vports`] and the same refusal.
+//! normalizes to the same [`crate::CommandId::Vports`] and the same handler.
 //!
 //! # Name grammar
 //!

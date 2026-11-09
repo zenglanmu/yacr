@@ -1,9 +1,10 @@
 //! The typed argument forms of the 2026-11-07 layout / viewport batch.
 //!
 //! These tests pin the selector admission, the narrow grammar and the
-//! normalized `-VPORTS` alias. The semantic refusals and the real read commands
-//! are pinned in `cad-app`'s `layout_commands` tests; here the session must only
-//! route the parsed payload to the right `CommandId` and echo the selector.
+//! normalized `-VPORTS` alias. The semantic write behaviour is pinned in
+//! `cad-app`'s `layout_commands` tests; here the session must route the parsed
+//! payload to the right `CommandId` and surface the real outcome (a successful
+//! write, or the payload/space-level refusal such as `vpclip.no_viewport`).
 
 use super::super::super::*;
 use super::super::test_support::*;
@@ -52,36 +53,29 @@ fn layout_grammar_rejects_missing_options_and_illegal_names() {
         .command("LAYOUT NEW Bad/Name")
         .expect_err("an illegal name is refused");
     assert!(illegal.contains("layout.invalid_name"), "{illegal}");
-    let write = session
+    session
         .command("LAYOUT NEW Sheet Two")
-        .expect_err("a valid name reaches the write boundary");
-    assert!(write.contains("layout.write_unsupported"), "{write}");
+        .expect("a valid name creates the layout");
 }
 
 #[test]
-fn layoutmerge_and_layoutwizard_parse_then_name_their_boundaries() {
+fn layoutmerge_and_layoutwizard_apply_and_keep_their_name_grammar() {
     let session = session_with_layouts(&[
         (2, "Sheet One", None),
         (3, "Sheet Two", None),
         (4, "Dup", None),
     ]);
-    let merge = session
-        .command("LAYOUTMERGE Dup Sheet One")
-        .expect_err("LAYOUTMERGE reaches its write boundary");
-    assert!(merge.contains("layoutmerge.write_unsupported"), "{merge}");
     let same = session
         .command("LAYOUTMERGE Dup Dup")
         .expect_err("same layouts are refused");
     assert!(same.contains("layoutmerge.same_layout"), "{same}");
+    session
+        .command("LAYOUTMERGE Dup Sheet One")
+        .expect("LAYOUTMERGE moves and deletes the source row");
 
-    let wizard = session
+    session
         .command("LAYOUTWIZARD SheetThree A4 210 297")
-        .expect_err("LAYOUTWIZARD reaches its write boundary");
-    assert!(
-        wizard.contains("layoutwizard.write_unsupported"),
-        "{wizard}"
-    );
-    assert!(wizard.contains("A4"), "{wizard}");
+        .expect("LAYOUTWIZARD creates the layout and reports the paper boundary");
     let bad_paper = session
         .command("LAYOUTWIZARD SheetThree A4 0 297")
         .expect_err("a zero paper width is refused before dispatch");
@@ -110,11 +104,9 @@ fn vports_typed_form_and_the_dash_vports_alias_share_one_path() {
 
     switch_to_sheet(&session);
     for text in ["VPORTS 2 3", "-VPORTS 2 3"] {
-        let error = session.command(text).expect_err(text);
-        assert!(
-            error.contains("vports.write_unsupported"),
-            "{text}: {error}"
-        );
+        session
+            .command(text)
+            .unwrap_or_else(|error| panic!("{text}: {error}"));
     }
 }
 
@@ -139,11 +131,8 @@ fn vpclip_rect_is_the_only_grammar_and_degenerate_rects_are_named() {
     switch_to_sheet(&session);
     let valid = session
         .command("VPCLIP RECT 0 0 100 50")
-        .expect_err("the clip write is absent");
-    assert!(
-        valid.contains("vpclip.viewport_selection_unsupported"),
-        "{valid}"
-    );
+        .expect_err("the fixture layout has no viewport to clip");
+    assert!(valid.contains("vpclip.no_viewport"), "{valid}");
 }
 
 #[test]
@@ -161,8 +150,8 @@ fn vpscale_refuses_zero_non_finite_and_unknown_before_the_write() {
     switch_to_sheet(&session);
     let ratio = session
         .command("VPSCALE 2:1")
-        .expect_err("a valid ratio reaches the write boundary");
-    assert!(ratio.contains("vpscale.write_unsupported"), "{ratio}");
+        .expect_err("the fixture layout has no viewport to scale");
+    assert!(ratio.contains("vpscale.no_viewport"), "{ratio}");
     let unknown = session
         .command("VPSCALE NOPE")
         .expect_err("an unknown named scale is refused");

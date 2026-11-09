@@ -1451,6 +1451,21 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `LAYERSTATE RESTORE` | 恢复的图层属性写入一步撤销 | 状态仍为会话内、不持久化 DWG |
 | `PURGE` | **有意不记历史**（复用无历史删除体） | 只清未使用图层 |
 
+### 2026-11-10 P5：布局/视口写 API 与撤销
+
+> `cad-db` 新增 `LayoutRow`/`LayoutPatch`、单调 `next_layout_id`、`create/rename/delete_layout`、`set_layout_viewports` 与组合实体+布局应用入口；`cad-history` 的 `DrawingUndoRecord.layout_patches` 参与校验/大小/合并拒绝；`UNDO`/`REDO` 按同一 revision 重放布局行与 plot settings。以下写入均为**一条事务/一步撤销**。
+
+| 命令 | 当前行为 | 剩余边界 |
+| --- | --- | --- |
+| `LAYOUT` `NEW`/`RENAME`/`DELETE` | 真实创建/重命名/删除布局；删除级联 `plot_settings`，删除活动布局时回退到首个剩余布局或模型空间；一步撤销 | `COPY`/`TEMPLATE` 未实现 |
+| `LAYOUTMERGE` | 源布局的图纸空间实体移入目标，删除源布局并级联 plot settings；一步撤销；**升为完整实现** | 同一布局拒绝 |
+| `LAYOUTWIZARD` | 真实创建布局，一步撤销 | 提供的页面设置校验后不应用（`layoutwizard.paper_not_applied`） |
+| `VPORTS` / `-VPORTS` | 活动布局创建简单 rows×cols 网格（四角 clip、`model_per_paper=1`），一步撤销 | 命名/标准视口配置未实现 |
+| `VPCLIP RECT` | 对活动布局第一个视口应用矩形裁剪，一步撤销 | 无视口选择；多边形裁剪未实现 |
+| `VPSCALE` | 设置活动布局第一个视口比例（对角线 `1/factor`，保留模型锚点），一步撤销 | 无视口选择 |
+| `VPMAX` / `VPMIN` | 会话标记（不变） | 仅第一个视口 |
+| `LAYVPI` / `MVIEW` / `MVSETUP` | 仍为具名拒绝 | 无逐视口图层状态/视口创建/视口组模型 |
+
 ## P2 晋升与边界更新（2026-11-09）
 
 > 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页逐条核对；证据仅 Linux

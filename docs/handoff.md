@@ -1,5 +1,17 @@
 AD
 
+## 2026-11-10 P4/P5：图层表与布局表写入可撤销 + 布局/视口真实写入
+
+- **用户要求**：继续“做”上一轮建议的高价值路径（P4/P5 晋升），而不是继续增加具名拒绝。
+- **P4（图层表写入撤销）**：`cad-db` 新增 `LayerRow`/`LayerPatch` + 组合应用入口（layer upsert 先于实体、delete 后于实体、post-batch 引用检查、单 revision）；`cad-history` 的 `DrawingUndoRecord.layer_patches` 参与校验/大小/merge 拒绝；`cad-app` UNDO/REDO 重放图层行。`LAYDEL`/`-LAYDEL`、`LAYMRG`/`-LAYMRG`、`LAYFRZ`、`LAYLCK`、`LAYULK`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYERSTATE RESTORE` 均**一条事务/一步撤销**；`PURGE` 有意保持不记历史。图纸空间/块内实体与 Settings 边界仍在，故这些命令仍为**部分实现**（未把边界算完成）。
+- **P5（布局/视口写）**：`cad-db` 新增 `LayoutRow`/`LayoutPatch`、单调 `next_layout_id`、`create/rename/delete_layout`、`set_layout_viewports`、组合实体+布局应用入口；`cad-history` 增加 `layout_patches`；`LAYOUT NEW/RENAME/DELETE`、`LAYOUTMERGE`（升为**完整实现**）、`LAYOUTWIZARD` 布局创建、`VPORTS`/`-VPORTS`、`VPCLIP RECT`、`VPSCALE` 均真实写入并一步撤销。`LAYVPI`、`MVIEW`、`MVSETUP`、页面设置写入、视口选择与多边形裁剪仍拒绝。
+- **会话一致性**：删除活动布局回退到首个剩余布局或模型空间；删除/合并时清理或重映射 `maximized_viewport`；`VPMAX`/`VPMIN` 仍是会话标记。
+- **文档/UI**：覆盖文档、`docs/compatibility.md`、中英 i18n 提示已更新；catalog/gating 早已接线，无需新增命令名。
+- **已运行**：见各 lane 报告；最终 `cargo test -p cad-app --lib --locked`（2252 passed）、`cad-db`、`cad-history`、`cad-ui-core`（494 passed）、`cargo clippy`、`cargo fmt --check`、`check-file-size.py`、`check-i18n.py`、`check-command-docs.py` 全绿；前端 `npm test` 另行复跑。
+- **NOT RUN / NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机；Windows/macOS/Android/Web 运行时；真实 DWG/AutoCAD vendor 对照；视口布局的像素/渲染证据。
+- **提交**：`fb135de2` 基础设施；P5 handler 与文档另提交。
+
+
 ## 2026-11-09 AutoCAD 2026 第二批 100 条命令（Wave 13–16）
 
 - **用户要求**：继续再实施 100 条未完成命令；2D 优先；同样更新同一份覆盖文档、UI 接线、逐批提交。

@@ -135,6 +135,7 @@ mod trim_extend;
 mod trim_spline;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
+pub(crate) use layout_record::layout_row;
 
 /// The 2026-11 text/draw utility payload, if this command carries one.
 ///

@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **66** |
-| 部分实现（有写明的界） | **557** |
+| 完整实现 | **67** |
+| 部分实现（有写明的界） | **556** |
 | **已实现合计（完整 + 部分）** | **623** |
 | 未实现 | **358** |
 
@@ -81,7 +81,7 @@
 > **本轮 100 条（Wave 9–12）已交付**：2D 真实编辑/别名/路由/报告 + 3D/文件扩展的诚实拒绝；全部结论仅 Linux 编译 + 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
 > **2026-11-09 增补（P1 晋升批）**：按 AutoCAD 2026 ENU 帮助页逐条核对后，`ALIGN`、`BREAK`、`DIVIDE`、`SELECTSIMILAR`、`MATCHPROP`、`SETBYLAYER`、`LIST`、`DIMSPACE`、`TORIENT` 九条从**部分实现**晋升为**完整实现**：补齐 1/3 对点 ALIGN（3 对点为平面刚性、不缩放）、椭圆 BREAK、全曲线 DIVIDE + 块对齐、SELECTSIMILAR 默认「图层+类型」与 `Name`/`Object style`、MATCHPROP 的 Text/Dimension/Hatch 特殊组、SETBYLAYER 透明度与 Include blocks、LIST 的纸空间/块空间与样式名、DIMSPACE 的 Auto=2×文字高度/`0` 对齐/角度标注、TORIENT Reverse（本项目扩展）。`LENGTHEN` 补了近端语义、开放多段线/椭圆弧/开放样条与 DY，但**开放样条延长**仍是具名拒绝，故保留**部分实现**。三处实现偏差已按官方语义修正：ALIGN 三对点禁缩放、SELECTSIMILAR 默认集、DIMSPACE Auto 公式。计入 **423 已实现（59 完整 + 364 部分）/ 558 未实现**；全部结论仍只覆盖 Linux 编译与契约测试，GUI/GPU/像素 NOT VERIFIED。
 >
-> **623 已实现（66 完整 + 557 部分）/ 358 未实现**；无未保存修改提示，无多文档。
+> **623 已实现（67 完整 + 556 部分）/ 358 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -173,7 +173,7 @@
   `SSX`（实体标志位/厚度/挤出）、`DIMTEDIT`（字形级对齐）、`REVCLOUD`（`Calligraphy`）、
   `TEXTMASK`（`3dface`/`Solid`）、`TXT2MTXT`（强制行距）。
 - P4 **基础完成**（2026-11-10）：`cad-history` 的 `LayerPatch` + 应用器已落地；`LAYDEL`/`-LAYDEL`、`LAYMRG`/`-LAYMRG`、`LAYFRZ`、`LAYLCK`、`LAYULK`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYERSTATE RESTORE` 的图层表写入均纳入 `DrawingUndoRecord`（一条事务/一步撤销）。仍保留图纸空间/块内实体与 Settings 选项边界，故仍为**部分实现**，没有把边界算作完成。
-- P5 **进行中**（2026-11-10）：`cad-db` 布局/视口写 API + `LayoutPatch` 已落地，布局命令提升见下一节。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
+- P5 **部分完成**（2026-11-10）：`cad-db` 布局/视口写 API + `LayoutPatch` 已落地；`LAYOUT` 的 `NEW/RENAME/DELETE`、`LAYOUTMERGE`（升为**已实现**）、`LAYOUTWIZARD` 的布局创建、`VPORTS`/`-VPORTS`、`VPCLIP RECT`、`VPSCALE` 已真实写入并一条事务/一步撤销。仍保留 `LAYVPI`、`MVIEW`、`MVSETUP`、页面设置写入、视口选择与多边形裁剪边界；`VPMAX`/`VPMIN` 仍是会话标记。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
 
 ## 已实现 / 部分实现命令索引（按字母序）
 
@@ -525,9 +525,9 @@
 | `LAYMRG` | 部分实现 | 选择式：选中对象的层合并到当前层（重写实体 + 删除源层），同一事务/一步撤销；当前层/0 层不能作源；无交互 Settings |
 | `LAYOFF` | 已实现 | — |
 | `LAYON` | 已实现 | — |
-| `LAYOUT` | 部分实现 | `LIST`/`SET` 真实（读布局表 + 会话空间切换）；`NEW/RENAME/DELETE` 名称校验后按 `layout.write_unsupported` 拒绝（无 post-import 布局写 API）；不写库 |
-| `LAYOUTMERGE` | 部分实现 | 名称校验后 `layoutmerge.write_unsupported`（无布局/实体移动/删除 API） |
-| `LAYOUTWIZARD` | 部分实现 | 名称/页面设置校验后 `layoutwizard.write_unsupported`（无布局/页面设置写 API） |
+| `LAYOUT` | 部分实现 | `LIST`/`SET` 真实；`NEW/RENAME/DELETE` 真实写布局表（名称校验、重复名拒绝、删除级联 plot settings），一条事务/一步撤销；`COPY`/`TEMPLATE` 未实现 |
+| `LAYOUTMERGE` | 已实现 | 把源布局的图纸空间实体移入目标并删除源布局（plot settings 级联），同一事务/一步撤销；同一布局拒绝 |
+| `LAYOUTWIZARD` | 部分实现 | 真实创建布局（一条事务/一步撤销）；提供的页面设置校验后报 `layoutwizard.paper_not_applied`，尚未写 plot settings |
 | `LAYTHW` | 部分实现 | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入一条事务/一步撤销 |
 | `LAYTRANS` | 部分实现 | 具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 |
 | `LAYULK` | 部分实现 | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入一条事务/一步撤销 |
@@ -786,13 +786,13 @@
 | `VIEWFORWARD` | 部分实现 | 新的每视口前进栈（上限 16）；空栈 no-op；文档化偏离 |
 | `VIEWGO` | 部分实现 | 同 `VIEW RESTORE`；未知名称按名拒绝 |
 | `VIEWRES` | 部分实现 | 整数 `1..=1000` 仅存会话 token；越界 `viewres.out_of_range`；渲染器消费/像素效果 NOT IMPLEMENTED / NOT VERIFIED |
-| `VPCLIP` | 部分实现 | `RECT` 校验；非矩形 `vpclip.polygonal_not_implemented`；合法矩形后 `vpclip.viewport_selection_unsupported`（无选中视口/裁剪写 API） |
+| `VPCLIP` | 部分实现 | 对活动布局**第一个**视口应用矩形裁剪（四角 clip），一条事务/一步撤销；无视口选择、无多边形裁剪 |
 | `VPMAX` | 部分实现 | 会话标记（活动图纸布局的第一个视口）；不写库 |
 | `VPMIN` | 部分实现 | 恢复会话标记；空状态 `vpmin.nothing_to_restore` |
 | `VPOINT` | 部分实现 | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；零/非有限向量拒绝；不改模型；向量形式进入 3D 透视 |
-| `-VPORTS` | 部分实现 | `VPORTS` 的别名，同一实现 |
-| `VPORTS` | 部分实现 | 网格校验 + 图纸空间检查后 `vports.write_unsupported`（无视口创建 API） |
-| `VPSCALE` | 部分实现 | 零/非有限/未知拒绝；解析比例后 `vpscale.write_unsupported`（无视口比例写 API） |
+| `-VPORTS` | 部分实现 | `VPORTS` 的别名，同一实现；同一边界 |
+| `VPORTS` | 部分实现 | 在活动图纸布局创建简单 rows×cols 视口网格（四角 clip、`model_per_paper=1`），一条事务/一步撤销；命名/标准视口配置未实现 |
+| `VPSCALE` | 部分实现 | 设置活动布局**第一个**视口比例（存储对角线 `1/factor`，保留模型锚点），一条事务/一步撤销；无视口选择 |
 | `VSCURRENT` | 部分实现 | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented`；无渲染器切换、NOT pixel-verified |
 | `WIPEOUT` | 部分实现 | `Frames ON|OFF|DISPLAY` 状态 + `Polyline`/`Erase Polyline` + 自由点串；**边框几何与出图通道未实现**，`DISPLAY` 目前只记录状态；`FRAME` 覆盖无命令 |
 | `WMFIN` | 部分实现 | 具名拒绝（`wmfin.unsupported: Windows metafile import is not implemented`）。 |
@@ -1293,9 +1293,9 @@
 | 480 | `LAYMRG` | 部分实现 | Merges selected layers into a target layer, removing them from the drawing. | 选择式：选中对象的层合并到当前层（重写实体 + 删除源层），同一事务/一步撤销；当前层/0 层不能作源；无交互 Settings |
 | 481 | `LAYOFF` | 已实现 | Turns off the layer of a selected object. | — |
 | 482 | `LAYON` | 已实现 | Turns on all layers in the drawing. | — |
-| 483 | `LAYOUT` | 部分实现 | Creates and modifies drawing layouts. | `LIST`/`SET` 真实（读布局表 + 会话空间切换）；`NEW/RENAME/DELETE` 名称校验后按 `layout.write_unsupported` 拒绝（无 post-import 布局写 API）；不写库 |
-| 484 | `LAYOUTMERGE` | 部分实现 | Combines specified layouts into a single layout. | 名称校验后 `layoutmerge.write_unsupported`（无布局/实体移动/删除 API） |
-| 485 | `LAYOUTWIZARD` | 部分实现 | Creates a new layout tab and specifies page and plot settings. | 名称/页面设置校验后 `layoutwizard.write_unsupported`（无布局/页面设置写 API） |
+| 483 | `LAYOUT` | 部分实现 | Creates and modifies drawing layouts. | `LIST`/`SET` 真实；`NEW/RENAME/DELETE` 真实写布局表（名称校验、重复名拒绝、删除级联 plot settings），一条事务/一步撤销；`COPY`/`TEMPLATE` 未实现 |
+| 484 | `LAYOUTMERGE` | 已实现 | Combines specified layouts into a single layout. | 把源布局的图纸空间实体移入目标并删除源布局（plot settings 级联），同一事务/一步撤销；同一布局拒绝 |
+| 485 | `LAYOUTWIZARD` | 部分实现 | Creates a new layout tab and specifies page and plot settings. | 真实创建布局（一条事务/一步撤销）；提供的页面设置校验后报 `layoutwizard.paper_not_applied`，尚未写 plot settings |
 | 486 | `LAYTHW` | 部分实现 | Thaws all layers in the drawing. | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入一条事务/一步撤销 |
 | 487 | `LAYTRANS` | 部分实现 | Translates the layers in the current drawing to specified layer standards. | 具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 |
 | 488 | `LAYULK` | 部分实现 | Unlocks the layer of a selected object. | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入一条事务/一步撤销 |
@@ -1747,14 +1747,14 @@
 | 934 | `VISUALSTYLES` | 未实现 | Creates and modifies visual styles and applies a visual style to a viewport. | — |
 | 935 | `VISUALSTYLESCLOSE` | 未实现 | Closes the Visual Styles Manager. | — |
 | 936 | `VLISP` | 未实现 | Displays the AutoLISP development environment. | — |
-| 937 | `VPCLIP` | 部分实现 | Redefines a layout viewport object while retaining its properties. | `RECT` 校验；非矩形 `vpclip.polygonal_not_implemented`；合法矩形后 `vpclip.viewport_selection_unsupported`（无选中视口/裁剪写 API） |
+| 937 | `VPCLIP` | 部分实现 | Redefines a layout viewport object while retaining its properties. | 对活动布局**第一个**视口应用矩形裁剪（四角 clip），一条事务/一步撤销；无视口选择、无多边形裁剪 |
 | 938 | `VPLAYER` | 部分实现 | Sets layer visibility within viewports. | 具名拒绝（`vplayer.viewport_layer_state_unsupported`）：无逐视口图层状态。 |
 | 939 | `VPMAX` | 部分实现 | Expands the current layout viewport for editing. | 会话标记（活动图纸布局的第一个视口）；不写库 |
 | 940 | `VPMIN` | 部分实现 | Restores the current layout viewport. | 恢复会话标记；空状态 `vpmin.nothing_to_restore` |
 | 941 | `VPOINT` | 部分实现 | Sets the viewing direction for a 3D visualization of the drawing. | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；零/非有限向量拒绝；不改模型；向量形式进入 3D 透视 |
-| 942 | `-VPORTS` | 部分实现 | Creates multiple viewports in model space or paper space. | `VPORTS` 的别名，同一实现 |
-| 943 | `VPORTS` | 部分实现 | Creates multiple viewports in model space or in a layout (paper space). | 网格校验 + 图纸空间检查后 `vports.write_unsupported`（无视口创建 API） |
-| 944 | `VPSCALE` | 部分实现 | On a layout, displays the scale of the current viewport or of a selected layout viewport. | 零/非有限/未知拒绝；解析比例后 `vpscale.write_unsupported`（无视口比例写 API） |
+| 942 | `-VPORTS` | 部分实现 | Creates multiple viewports in model space or paper space. | `VPORTS` 的别名，同一实现；同一边界 |
+| 943 | `VPORTS` | 部分实现 | Creates multiple viewports in model space or in a layout (paper space). | 在活动图纸布局创建简单 rows×cols 视口网格（四角 clip、`model_per_paper=1`），一条事务/一步撤销；命名/标准视口配置未实现 |
+| 944 | `VPSCALE` | 部分实现 | On a layout, displays the scale of the current viewport or of a selected layout viewport. | 设置活动布局**第一个**视口比例（存储对角线 `1/factor`，保留模型锚点），一条事务/一步撤销；无视口选择 |
 | 945 | `VPSYNC` | 部分实现 | Aligns the views in one or more adjacent layout viewports with a master layout viewport. | 具名拒绝（`vpsync.unsupported`）：视口同步未实现（无视口组模型）。 |
 | 946 | `VSCURRENT` | 部分实现 | Sets the visual style in the current viewport. | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented`；无渲染器切换、NOT pixel-verified |
 | 947 | `VSLIDE` | 未实现 | Displays an image slide file in the current viewport. | — |

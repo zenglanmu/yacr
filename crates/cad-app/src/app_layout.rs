@@ -1,17 +1,22 @@
 //! The 2026-11-07 layout / viewport command implementations.
 //!
 //! The **read** commands (`LAYOUT LIST`, `LAYOUT SET`, `VPMAX`, `VPMIN`) are
-//! real. Every layout/viewport **write** is a named `Unsupported` refusal:
-//! `cad-db` has no post-import layout or `PaperViewport` write API, so mutating
-//! a clone would publish nothing. The full boundary is in
-//! [`crate::command_id::layout`].
+//! real, and so are the table/viewport **writes** promoted now that `cad-db`
+//! owns the sanctioned post-import layout write paths: `LAYOUT NEW|RENAME|DELETE`,
+//! `LAYOUTMERGE`, `LAYOUTWIZARD`, `VPORTS`/`-VPORTS`, `VPCLIP RECT` and
+//! `VPSCALE` each publish exactly one revision and one undo step. `LAYVPI` stays
+//! a named refusal because this build still has no per-viewport layer state; the
+//! full boundary is in [`crate::command_id::layout`].
 
 use super::*;
 
-use cad_db::DrawingDatabase;
+use cad_db::{DrawingDatabase, PaperViewport};
+use cad_history::{drawing_patch, layout_patch, DrawingUndoRecord};
+
+use crate::app_drawing::{layout_row, next_transaction_id};
 
 /// One paper layout row the commands resolve against.
-type LayoutRow = (LayoutId, String, usize);
+type LayoutSummary = (LayoutId, String, usize);
 
 impl Application {
     /// Dispatch one `CommandPayload::Layout` input.
@@ -55,39 +60,51 @@ impl Application {
             }
             LayoutPayload::New { name } => {
                 let name = validate_layout_name(name)?;
-                let drawing = self.drawing(command.document)?;
-                if find_layout_named(drawing, &name, None).is_some() {
-                    return Err(CadError::InvalidInput(format!(
-                        "layout.duplicate_name: a layout named {:?} already exists",
-                        name
-                    )));
-                }
-                Err(CadError::Unsupported(format!(
-                    "layout.write_unsupported: cannot create layout {:?}; cad-db has no \
-                     post-import layout write API",
-                    name
-                )))
+                self.create_layout_with_name(command, &name, "layout-new", "layout.created")
             }
             LayoutPayload::Rename { old, new } => {
-                let drawing = self.drawing(command.document)?;
-                let (id, resolved, _) = resolve_layout_name(drawing, old)?;
+                let document_id = command.document;
+                let drawing = self.drawing(document_id)?.clone();
+                let (id, resolved, _) = resolve_layout_name(&drawing, old)?;
                 let new = validate_layout_name(new)?;
-                if find_layout_named(drawing, &new, Some(id)).is_some() {
+                if find_layout_named(&drawing, &new, Some(id)).is_some() {
                     return Err(CadError::InvalidInput(format!(
                         "layout.duplicate_name: a layout named {:?} already exists",
                         new
                     )));
                 }
-                Err(CadError::Unsupported(format!(
-                    "layout.write_unsupported: cannot rename layout {} ({:?}) to {:?}; cad-db \
-                     has no post-import layout write API",
-                    id.0, resolved, new
-                )))
+                let before = layout_row(&drawing, id);
+                let transaction = next_transaction_id();
+                let mut candidate = drawing;
+                let change_set = candidate.rename_layout(id, &new, transaction, "rename layout")?;
+                let after = layout_row(&candidate, id);
+                self.publish_layout_record(
+                    document_id,
+                    candidate,
+                    transaction,
+                    "layout-rename",
+                    vec![layout_patch(id, before, after)],
+                )?;
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: Some(Arc::new(change_set)),
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "layout.renamed".into(),
+                        message: format!(
+                            "LAYOUT RENAME: renamed layout {} from {:?} to {:?}",
+                            id.0, resolved, new
+                        ),
+                    }],
+                    measurement: None,
+                    point_report: None,
+                })
             }
             LayoutPayload::Delete { name } => {
-                let drawing = self.drawing(command.document)?;
-                let rows = self.layout_rows(command.document)?;
-                let (id, resolved, _) = resolve_layout_name(drawing, name)?;
+                let document_id = command.document;
+                let drawing = self.drawing(document_id)?.clone();
+                let rows = crate::render_scene::layout_descriptors(&drawing);
+                let (id, resolved, _) = resolve_layout_name(&drawing, name)?;
                 if rows.len() <= 1 {
                     return Err(CadError::InvalidInput(format!(
                         "layout.last_layout: cannot delete layout {} ({:?}); it is the only \
@@ -95,11 +112,64 @@ impl Application {
                         id.0, resolved
                     )));
                 }
-                Err(CadError::Unsupported(format!(
-                    "layout.write_unsupported: cannot delete layout {} ({:?}); cad-db has no \
-                     post-import layout write API",
-                    id.0, resolved
-                )))
+                let before = layout_row(&drawing, id);
+                let transaction = next_transaction_id();
+                let mut candidate = drawing;
+                let change_set = candidate.delete_layout(id, transaction, "delete layout")?;
+                // The session may not stay on a space the delete removed. The
+                // first remaining paper layout (id order is tab order) is the
+                // fallback; model space is the fallback when none remains.
+                let switch_target = if session.active_space == SpaceId::Paper(id) {
+                    let remaining = candidate.layouts().map(|layout| layout.id).next();
+                    Some(remaining.map(SpaceId::Paper).unwrap_or(SpaceId::Model))
+                } else {
+                    None
+                };
+                let cleared_maximized = session
+                    .maximized_viewport()
+                    .is_some_and(|viewport| viewport.layout == id);
+                if cleared_maximized {
+                    session.clear_maximized_viewport();
+                }
+                self.publish_layout_record(
+                    document_id,
+                    candidate,
+                    transaction,
+                    "layout-delete",
+                    vec![layout_patch(id, before, None)],
+                )?;
+                let mut diagnostics = vec![Diagnostic {
+                    object: None,
+                    code: "layout.deleted".into(),
+                    message: format!(
+                        "LAYOUT DELETE: deleted layout {} ({:?}) and its plot settings",
+                        id.0, resolved
+                    ),
+                }];
+                if let Some(target) = switch_target {
+                    let previous = session.active_space.clone();
+                    if self.switch_space_command(session, command, target).is_err() {
+                        // A remaining layout this build cannot draw must not
+                        // leave the session on the deleted space: fall back to
+                        // model space through the same validated switch path.
+                        session.active_space = previous;
+                        self.switch_space_command(session, command, SpaceId::Model)?;
+                        diagnostics.push(Diagnostic {
+                            object: None,
+                            code: "layout.deleted.no_drawable_fallback".into(),
+                            message: "LAYOUT DELETE: the remaining paper layout is not drawable \
+                                      by this build; switched to model space"
+                                .into(),
+                        });
+                    }
+                }
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: Some(Arc::new(change_set)),
+                    diagnostics,
+                    measurement: None,
+                    point_report: None,
+                })
             }
             LayoutPayload::Set { name } => {
                 let id = {
@@ -109,45 +179,118 @@ impl Application {
                 self.switch_space_command(session, command, SpaceId::Paper(id))
             }
             LayoutPayload::Merge { source, target } => {
-                let drawing = self.drawing(command.document)?;
-                let (source_id, source_name, _) = resolve_layout_name(drawing, source)?;
-                let (target_id, target_name, _) = resolve_layout_name(drawing, target)?;
+                let document_id = command.document;
+                let drawing = self.drawing(document_id)?.clone();
+                let (source_id, source_name, _) = resolve_layout_name(&drawing, source)?;
+                let (target_id, target_name, _) = resolve_layout_name(&drawing, target)?;
                 if source_id == target_id {
                     return Err(CadError::InvalidInput(format!(
                         "layoutmerge.same_layout: {:?} and {:?} are the same layout {}",
                         source_name, target_name, source_id.0
                     )));
                 }
-                Err(CadError::Unsupported(format!(
-                    "layoutmerge.write_unsupported: cannot move entities from layout {} ({:?}) \
-                     into layout {} ({:?}); cad-db has no entity-space move API and no layout \
-                     delete API",
-                    source_id.0, source_name, target_id.0, target_name
-                )))
+                let moved: Vec<cad_db::DbEntity> = drawing
+                    .entities()
+                    .filter(|entity| entity.space == SpaceId::Paper(source_id))
+                    .cloned()
+                    .collect();
+                let before_row = layout_row(&drawing, source_id);
+                let transaction = next_transaction_id();
+                let mut candidate = drawing;
+                let entity_changes: Vec<(EntityId, Option<cad_db::DbEntity>)> = moved
+                    .iter()
+                    .map(|before| {
+                        let mut after = before.clone();
+                        after.space = SpaceId::Paper(target_id);
+                        (before.id, Some(after))
+                    })
+                    .collect();
+                // One combined write: entity spaces move and the source layout
+                // row is deleted in the same revision and `ChangeSet`; delete
+                // safety counts the post-batch entity view, so moving the last
+                // paper entity out and deleting the row is one legal batch.
+                let change_set = candidate
+                    .apply_drawing_changes_with_blocks_display_layers_and_layouts(
+                        "layoutmerge",
+                        transaction,
+                        &[],
+                        entity_changes,
+                        &[],
+                        &[],
+                        &[(source_id, None)],
+                    )?;
+                let mut patches = Vec::with_capacity(moved.len());
+                let mut objects = Vec::with_capacity(moved.len());
+                for before in moved {
+                    let id = before.id;
+                    let after = candidate.entity(id).cloned().ok_or_else(|| {
+                        CadError::Invariant("LAYOUTMERGE: moved entity vanished".into())
+                    })?;
+                    patches.push(drawing_patch(id, Some(before), Some(after)));
+                    objects.push(ObjectId(id.0));
+                }
+                let moved_count = patches.len();
+                if session.active_space == SpaceId::Paper(source_id) {
+                    session.active_space = SpaceId::Paper(target_id);
+                }
+                if session
+                    .maximized_viewport()
+                    .is_some_and(|viewport| viewport.layout == source_id)
+                {
+                    session.clear_maximized_viewport();
+                }
+                self.publish_candidate(
+                    document_id,
+                    candidate,
+                    DrawingUndoRecord {
+                        transaction,
+                        label: "layoutmerge".to_string(),
+                        patches,
+                        block_patches: Vec::new(),
+                        layer_patches: Vec::new(),
+                        layout_patches: vec![layout_patch(source_id, before_row, None)],
+                        merge_key: None,
+                    },
+                )?;
+                Ok(CommandOutcome {
+                    objects,
+                    changes: Some(Arc::new(change_set)),
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "layoutmerge.applied".into(),
+                        message: format!(
+                            "LAYOUTMERGE: moved {moved_count} paper entities from layout {} \
+                             ({:?}) into layout {} ({:?}) and deleted the source layout; \
+                             one transaction / one undo step",
+                            source_id.0, source_name, target_id.0, target_name
+                        ),
+                    }],
+                    measurement: None,
+                    point_report: None,
+                })
             }
             LayoutPayload::Wizard { name, paper } => {
                 let name = validate_layout_name(name)?;
-                let drawing = self.drawing(command.document)?;
-                if find_layout_named(drawing, &name, None).is_some() {
-                    return Err(CadError::InvalidInput(format!(
-                        "layout.duplicate_name: a layout named {:?} already exists",
-                        name
-                    )));
-                }
                 if let Some(paper) = paper {
                     validate_paper_setup(paper)?;
-                    return Err(CadError::Unsupported(format!(
-                        "layoutwizard.write_unsupported: cannot create layout {:?} with page \
-                         setup {} ({} x {}); cad-db has no layout creation or page-setup write \
-                         API, so the paper size is not applied",
-                        name, paper.name, paper.width, paper.height
-                    )));
                 }
-                Err(CadError::Unsupported(format!(
-                    "layoutwizard.write_unsupported: cannot create layout {:?}; cad-db has no \
-                     post-import layout write API and no page-setup write API",
-                    name
-                )))
+                let outcome =
+                    self.create_layout_with_name(command, &name, "layoutwizard", "layout.created")?;
+                let Some(paper) = paper else {
+                    return Ok(outcome);
+                };
+                let mut outcome = outcome;
+                outcome.diagnostics.push(Diagnostic {
+                    object: None,
+                    code: "layoutwizard.paper_not_applied".into(),
+                    message: format!(
+                        "LAYOUTWIZARD: created layout {:?} but did not apply page setup {} \
+                         ({} x {}); page setup is still not modeled, so no plot settings were \
+                         written",
+                        name, paper.name, paper.width, paper.height
+                    ),
+                });
+                Ok(outcome)
             }
             LayoutPayload::Viewports { rows, cols } => {
                 if *rows < 1 || *cols < 1 {
@@ -160,14 +303,43 @@ impl Application {
                         "vports.invalid_grid: VPORTS rows x columns overflows".into(),
                     )
                 })?;
-                require_paper_space(session, "vports")?;
-                Err(CadError::Unsupported(format!(
-                    "vports.write_unsupported: cannot create a {rows} x {cols} grid of {total} \
-                     PaperViewport(s); cad-db has no post-import viewport write API"
-                )))
+                let layout_id = require_paper_space(session, "vports")?;
+                let document_id = command.document;
+                let drawing = self.drawing(document_id)?.clone();
+                let before = layout_row(&drawing, layout_id);
+                let viewports = grid_viewports(&drawing, layout_id, *rows, *cols, total);
+                let transaction = next_transaction_id();
+                let mut candidate = drawing;
+                let change_set =
+                    candidate.set_layout_viewports(layout_id, viewports, transaction, "vports")?;
+                let after = layout_row(&candidate, layout_id);
+                self.publish_layout_record(
+                    document_id,
+                    candidate,
+                    transaction,
+                    "vports",
+                    vec![layout_patch(layout_id, before, after)],
+                )?;
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: Some(Arc::new(change_set)),
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "vports.created".into(),
+                        message: format!(
+                            "VPORTS: created a {rows} x {cols} grid of {total} viewports in \
+                             layout {} as a declared simple layout (equal cells, model origin at \
+                             each cell centre); this is not an AutoCAD Standard viewport \
+                             configuration",
+                            layout_id.0
+                        ),
+                    }],
+                    measurement: None,
+                    point_report: None,
+                })
             }
             LayoutPayload::ClipRect { min, max } => {
-                require_paper_space(session, "vpclip")?;
+                let layout_id = require_paper_space(session, "vpclip")?;
                 if !min.x.is_finite()
                     || !min.y.is_finite()
                     || !max.x.is_finite()
@@ -181,22 +353,151 @@ impl Application {
                             .into(),
                     ));
                 }
-                Err(CadError::Unsupported(
-                    "vpclip.viewport_selection_unsupported: this build has no selected-viewport \
-                     state and cad-db has no viewport clip write API; polygonal clips are NOT \
-                     IMPLEMENTED"
-                        .into(),
-                ))
+                let document_id = command.document;
+                let drawing = self.drawing(document_id)?.clone();
+                let mut viewports = layout_viewports(&drawing, layout_id)?;
+                let viewport = viewports.first_mut().ok_or_else(|| {
+                    CadError::Unsupported(format!(
+                        "vpclip.no_viewport: layout {} has no viewport to clip; this build has \
+                         no viewport selection, so VPCLIP uses the first viewport",
+                        layout_id.0
+                    ))
+                })?;
+                let clip = vec![
+                    Point3 {
+                        x: min.x,
+                        y: min.y,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: max.x,
+                        y: min.y,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: max.x,
+                        y: max.y,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: min.x,
+                        y: max.y,
+                        z: 0.0,
+                    },
+                ];
+                viewport.clip = clip;
+                let before = layout_row(&drawing, layout_id);
+                let transaction = next_transaction_id();
+                let mut candidate = drawing;
+                let change_set =
+                    candidate.set_layout_viewports(layout_id, viewports, transaction, "vpclip")?;
+                let after = layout_row(&candidate, layout_id);
+                self.publish_layout_record(
+                    document_id,
+                    candidate,
+                    transaction,
+                    "vpclip",
+                    vec![layout_patch(layout_id, before, after)],
+                )?;
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: Some(Arc::new(change_set)),
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "vpclip.applied".into(),
+                        message: format!(
+                            "VPCLIP RECT: replaced the clip of viewport 0 in layout {} with the \
+                             rectangle ({}, {})-({}, {}); this build has no viewport selection, so \
+                             the first viewport was clipped (polygonal clips are NOT IMPLEMENTED)",
+                            layout_id.0, min.x, min.y, max.x, max.y
+                        ),
+                    }],
+                    measurement: None,
+                    point_report: None,
+                })
             }
             LayoutPayload::Scale { name } => {
-                require_paper_space(session, "vpscale")?;
-                let drawing = self.drawing(command.document)?;
-                let (scale_name, factor) = resolve_viewport_scale(drawing, name)?;
-                Err(CadError::Unsupported(format!(
-                    "vpscale.write_unsupported: resolved scale {:?} (factor {factor}); cad-db \
-                     has no viewport scale write API, so no viewport was changed",
-                    scale_name
-                )))
+                let layout_id = require_paper_space(session, "vpscale")?;
+                let document_id = command.document;
+                let drawing = self.drawing(document_id)?.clone();
+                let (scale_name, factor) = resolve_viewport_scale(&drawing, name)?;
+                if !factor.is_finite() || factor <= 0.0 {
+                    return Err(CadError::InvalidInput(format!(
+                        "vpscale.invalid_factor: resolved scale {:?} has a non-finite or \
+                         non-positive factor {factor}",
+                        scale_name
+                    )));
+                }
+                let mut viewports = layout_viewports(&drawing, layout_id)?;
+                let viewport = viewports.first_mut().ok_or_else(|| {
+                    CadError::Unsupported(format!(
+                        "vpscale.no_viewport: layout {} has no viewport to scale; this build has \
+                         no viewport selection, so VPSCALE uses the first viewport",
+                        layout_id.0
+                    ))
+                })?;
+                // `factor` is paper/drawing, so the stored paper→model diagonal
+                // is its reciprocal (model units per paper unit).
+                let new_scale = 1.0 / factor;
+                let center = clip_center(&viewport.clip).ok_or_else(|| {
+                    CadError::InvalidInput(format!(
+                        "vpscale.invalid_viewport: the clip of layout {} viewport 0 has no \
+                         finite paper rectangle",
+                        layout_id.0
+                    ))
+                })?;
+                let old_scale = viewport.model_to_paper.matrix[0][0];
+                let old_scale_y = viewport.model_to_paper.matrix[1][1];
+                if !old_scale.is_finite()
+                    || !old_scale_y.is_finite()
+                    || old_scale <= 0.0
+                    || old_scale_y <= 0.0
+                {
+                    return Err(CadError::InvalidInput(format!(
+                        "vpscale.invalid_viewport: layout {} viewport 0 has a non-finite or \
+                         non-positive model_to_paper scale",
+                        layout_id.0
+                    )));
+                }
+                // Preserve the model point shown at the clip centre:
+                // anchor = translation + scale * paper_center.
+                let old_tx = viewport.model_to_paper.matrix[0][3];
+                let old_ty = viewport.model_to_paper.matrix[1][3];
+                let anchor_x = old_tx + old_scale * center.x;
+                let anchor_y = old_ty + old_scale_y * center.y;
+                viewport.model_to_paper.matrix[0][0] = new_scale;
+                viewport.model_to_paper.matrix[1][1] = new_scale;
+                viewport.model_to_paper.matrix[0][3] = anchor_x - new_scale * center.x;
+                viewport.model_to_paper.matrix[1][3] = anchor_y - new_scale * center.y;
+                let before = layout_row(&drawing, layout_id);
+                let transaction = next_transaction_id();
+                let mut candidate = drawing;
+                let change_set =
+                    candidate.set_layout_viewports(layout_id, viewports, transaction, "vpscale")?;
+                let after = layout_row(&candidate, layout_id);
+                self.publish_layout_record(
+                    document_id,
+                    candidate,
+                    transaction,
+                    "vpscale",
+                    vec![layout_patch(layout_id, before, after)],
+                )?;
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: Some(Arc::new(change_set)),
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "vpscale.applied".into(),
+                        message: format!(
+                            "VPSCALE: applied scale {:?} (paper/drawing factor {factor}) to \
+                             viewport 0 of layout {}; stored model units per paper unit = \
+                             {new_scale}",
+                            scale_name, layout_id.0
+                        ),
+                    }],
+                    measurement: None,
+                    point_report: None,
+                })
             }
             LayoutPayload::FreezeViewportLayers { layers } => {
                 require_paper_space(session, "layvpi")?;
@@ -219,119 +520,50 @@ impl Application {
         }
     }
 
-    /// `VPMAX`: set the session-only maximized-viewport marker.
-    pub(crate) fn vp_max(
+    /// Create one layout row and record it as one undo step.
+    ///
+    /// Shared by `LAYOUT NEW` and `LAYOUTWIZARD` so both name grammar checks,
+    /// the duplicate check, the revision and the recorded patch shape exist once.
+    fn create_layout_with_name(
         &mut self,
-        session: &mut SessionState,
         command: &Command,
+        name: &str,
+        label: &str,
+        diagnostic_code: &str,
     ) -> CadResult<CommandOutcome> {
-        if !matches!(command.payload, CommandPayload::None) {
-            return Err(CadError::InvalidInput(
-                "vpmax.invalid_payload: VPMAX takes no payload".into(),
-            ));
-        }
-        let SpaceId::Paper(layout_id) = &session.active_space else {
-            return Err(CadError::Unsupported(
-                "vpmax.paper_space_required: VPMAX needs an active paper layout".into(),
-            ));
-        };
-        let layout_id = *layout_id;
-        let viewports = self
-            .drawing(command.document)?
-            .layout(layout_id)
-            .ok_or_else(|| {
-                CadError::InvalidInput(format!("vpmax.unknown_layout: layout {}", layout_id.0))
-            })?
-            .viewports
-            .len();
-        if viewports == 0 {
-            return Err(CadError::Unsupported(format!(
-                "vpmax.no_viewports: layout {} has no viewports to maximize",
-                layout_id.0
+        let document_id = command.document;
+        let drawing = self.drawing(document_id)?.clone();
+        if find_layout_named(&drawing, name, None).is_some() {
+            return Err(CadError::InvalidInput(format!(
+                "layout.duplicate_name: a layout named {:?} already exists",
+                name
             )));
         }
-        let target = LayoutViewportRef {
-            layout: layout_id,
-            index: 0,
-        };
-        if session.maximized_viewport() == Some(target) {
-            return Ok(CommandOutcome {
-                objects: Vec::new(),
-                changes: None,
-                diagnostics: vec![Diagnostic {
-                    object: None,
-                    code: "vpmax.already_maximized".into(),
-                    message: format!(
-                        "VPMAX: layout {} viewport {} is already maximized",
-                        layout_id.0, target.index
-                    ),
-                }],
-                measurement: None,
-                point_report: None,
-            });
-        }
-        session.set_maximized_viewport(target);
+        let transaction = next_transaction_id();
+        let mut candidate = drawing;
+        let (id, change_set) = candidate.create_layout(name, transaction, label)?;
+        let after = layout_row(&candidate, id);
+        self.publish_layout_record(
+            document_id,
+            candidate,
+            transaction,
+            label,
+            vec![layout_patch(id, None, after)],
+        )?;
         Ok(CommandOutcome {
             objects: Vec::new(),
-            changes: None,
+            changes: Some(Arc::new(change_set)),
             diagnostics: vec![Diagnostic {
                 object: None,
-                code: "vpmax.maximized".into(),
-                message: format!(
-                    "VPMAX: maximized layout {} viewport {} (session display state only; the \
-                     first viewport is used because this build has no viewport selection)",
-                    layout_id.0, target.index
-                ),
+                code: diagnostic_code.into(),
+                message: format!("LAYOUT: created layout {} ({:?})", id.0, name),
             }],
             measurement: None,
             point_report: None,
         })
     }
 
-    /// `VPMIN`: clear the session-only maximized-viewport marker.
-    pub(crate) fn vp_min(
-        &mut self,
-        session: &mut SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        if !matches!(command.payload, CommandPayload::None) {
-            return Err(CadError::InvalidInput(
-                "vpmin.invalid_payload: VPMIN takes no payload".into(),
-            ));
-        }
-        match session.maximized_viewport() {
-            Some(viewport) => {
-                session.clear_maximized_viewport();
-                Ok(CommandOutcome {
-                    objects: Vec::new(),
-                    changes: None,
-                    diagnostics: vec![Diagnostic {
-                        object: None,
-                        code: "vpmin.restored".into(),
-                        message: format!(
-                            "VPMIN: restored the layout viewport (layout {} viewport {})",
-                            viewport.layout.0, viewport.index
-                        ),
-                    }],
-                    measurement: None,
-                    point_report: None,
-                })
-            }
-            None => Ok(CommandOutcome {
-                objects: Vec::new(),
-                changes: None,
-                diagnostics: vec![Diagnostic {
-                    object: None,
-                    code: "vpmin.nothing_to_restore".into(),
-                    message: "VPMIN: no viewport is maximized; nothing changed".into(),
-                }],
-                measurement: None,
-                point_report: None,
-            }),
-        }
-    }
-
-    fn drawing(&self, document: DocumentId) -> CadResult<&DrawingDatabase> {
+    pub(crate) fn drawing(&self, document: DocumentId) -> CadResult<&DrawingDatabase> {
         self.workspace
             .documents
             .get(&document)
@@ -340,7 +572,7 @@ impl Application {
     }
 
     /// The authoritative paper-layout rows, in `LayoutId` order.
-    fn layout_rows(&self, document: DocumentId) -> CadResult<Vec<LayoutRow>> {
+    fn layout_rows(&self, document: DocumentId) -> CadResult<Vec<LayoutSummary>> {
         Ok(
             crate::render_scene::layout_descriptors(self.drawing(document)?)
                 .into_iter()
@@ -350,15 +582,129 @@ impl Application {
     }
 }
 
-/// Require an active paper layout for a viewport-scoped command.
-fn require_paper_space(session: &SessionState, prefix: &str) -> CadResult<()> {
-    if matches!(&session.active_space, SpaceId::Paper(_)) {
-        Ok(())
-    } else {
-        Err(CadError::Unsupported(format!(
+/// Require an active paper layout for a viewport-scoped command, returning it.
+fn require_paper_space(session: &SessionState, prefix: &str) -> CadResult<LayoutId> {
+    match &session.active_space {
+        SpaceId::Paper(layout_id) => Ok(*layout_id),
+        _ => Err(CadError::Unsupported(format!(
             "{prefix}.paper_space_required: the command needs an active paper layout"
-        )))
+        ))),
     }
+}
+
+/// The viewports of `layout_id`, cloned so a candidate can be edited independently.
+fn layout_viewports(
+    drawing: &DrawingDatabase,
+    layout_id: LayoutId,
+) -> CadResult<Vec<PaperViewport>> {
+    drawing
+        .layout(layout_id)
+        .map(|layout| layout.viewports.clone())
+        .ok_or_else(|| {
+            CadError::InvalidInput(format!(
+                "layout.unknown_id: this drawing has no layout with id {}",
+                layout_id.0
+            ))
+        })
+}
+
+/// The centre of a viewport clip's axis-aligned paper rectangle.
+fn clip_center(clip: &[Point3]) -> Option<Point3> {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for point in clip {
+        if !point.x.is_finite() || !point.y.is_finite() {
+            return None;
+        }
+        min_x = min_x.min(point.x);
+        min_y = min_y.min(point.y);
+        max_x = max_x.max(point.x);
+        max_y = max_y.max(point.y);
+    }
+    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+        return None;
+    }
+    Some(Point3 {
+        x: (min_x + max_x) * 0.5,
+        y: (min_y + max_y) * 0.5,
+        z: 0.0,
+    })
+}
+
+/// Build a `rows x cols` grid of axis-aligned viewports covering the sheet.
+///
+/// The cells are equal, cover the sheet from its own origin, and each clip is the
+/// four paper corners `(minx,miny)`, `(maxx,miny)`, `(maxx,maxy)`, `(minx,maxy)`.
+/// The stored transform follows the importer's paper→model convention with
+/// `model_per_paper = 1.0` and translation `anchor - paper_center`: the model
+/// **origin** is the anchor, so `model_to_paper` maps model origin to each cell
+/// centre. This is a declared simple layout, not an AutoCAD Standard
+/// configuration.
+fn grid_viewports(
+    drawing: &DrawingDatabase,
+    layout_id: LayoutId,
+    rows: u32,
+    cols: u32,
+    total: u32,
+) -> Vec<PaperViewport> {
+    let (width, height) = {
+        let (width, height) = drawing.plot_settings_for(layout_id).rotated_size();
+        if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
+            (width, height)
+        } else {
+            (210.0, 297.0)
+        }
+    };
+    let mut viewports = Vec::with_capacity(total as usize);
+    for row in 0..rows {
+        for col in 0..cols {
+            let min_x = width * f64::from(col) / f64::from(cols);
+            let max_x = width * f64::from(col + 1) / f64::from(cols);
+            let min_y = height * f64::from(row) / f64::from(rows);
+            let max_y = height * f64::from(row + 1) / f64::from(rows);
+            let paper_center = Point3 {
+                x: (min_x + max_x) * 0.5,
+                y: (min_y + max_y) * 0.5,
+                z: 0.0,
+            };
+            // The view centre is the model origin; the stored paper→model
+            // translation is `anchor - paper_center` with a unit scale.
+            let mut matrix = Transform3::identity().matrix;
+            matrix[0][0] = 1.0;
+            matrix[1][1] = 1.0;
+            matrix[0][3] = -paper_center.x;
+            matrix[1][3] = -paper_center.y;
+            viewports.push(PaperViewport {
+                clip: vec![
+                    Point3 {
+                        x: min_x,
+                        y: min_y,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: max_x,
+                        y: min_y,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: max_x,
+                        y: max_y,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: min_x,
+                        y: max_y,
+                        z: 0.0,
+                    },
+                ],
+                model_to_paper: Transform3 { matrix },
+                completeness: Completeness::Complete,
+            });
+        }
+    }
+    viewports
 }
 
 /// Validate a layout name and return the trimmed form.
@@ -402,8 +748,8 @@ fn find_layout_named(
 }
 
 /// Resolve a layout name: exact first, then a unique case-insensitive match.
-fn resolve_layout_name(drawing: &DrawingDatabase, name: &str) -> CadResult<LayoutRow> {
-    let rows: Vec<LayoutRow> = drawing
+fn resolve_layout_name(drawing: &DrawingDatabase, name: &str) -> CadResult<LayoutSummary> {
+    let rows: Vec<LayoutSummary> = drawing
         .layouts()
         .map(|layout| (layout.id, layout.name.clone(), layout.viewports.len()))
         .collect();
@@ -414,7 +760,7 @@ fn resolve_layout_name(drawing: &DrawingDatabase, name: &str) -> CadResult<Layou
     {
         return Ok((*row).clone());
     }
-    let matching: Vec<&LayoutRow> = rows
+    let matching: Vec<&LayoutSummary> = rows
         .iter()
         .filter(|(_, layout_name, _)| layout_name.eq_ignore_ascii_case(wanted))
         .collect();
