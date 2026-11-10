@@ -173,8 +173,10 @@ fn cad_status_wire_matches_the_pinned_fixtures() {
         snapshot.can_save = true;
         snapshot.can_plot = true;
         snapshot.can_fit = true;
-        // A live session's display-grid switch defaults on (`GRID`/F7). The
-        // unsupported/probe snapshots keep `false` because no session exists.
+        // The display-grid switch is **on** in this live-session fixture
+        // (`GRID`/F7). Its session default is off; the fixture sets it explicitly
+        // so the wire golden covers the `true` value. The unsupported/probe
+        // snapshots keep `false` because no session exists.
         snapshot.grid_enabled = true;
         // `SNAP` (grid snap, F9) defaults **off**, so a clean live session keeps
         // the `unsupported_status` value: the fixture asserts that initial state.

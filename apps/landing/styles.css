@@ -1462,15 +1462,6 @@ html[data-lang="en"] .lang--en { display: inline !important; }
   overflow-wrap: anywhere;
 }
 .release-fact-note { color: rgba(243, 240, 232, 0.42); }
-.release-honest {
-  margin-top: auto;
-  padding-top: 18px;
-  border-top: 1px solid rgba(134, 222, 241, 0.13);
-  color: rgba(243, 240, 232, 0.5);
-  font-size: 0.78rem;
-  line-height: 1.68;
-}
-.release-honest strong { color: rgba(243, 240, 232, 0.8); }
 
 .download-note {
   display: flex;
@@ -2113,7 +2104,6 @@ html[data-lang="en"] .copy-btn::after { content: attr(data-copied-en) !important
   font-size: 0.76rem;
   line-height: 1.65;
 }
-.cl-foot-note { max-width: 76ch; }
 .cl-all {
   color: var(--cyan-deep);
   font-family: var(--mono);

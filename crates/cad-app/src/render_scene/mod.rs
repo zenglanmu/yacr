@@ -641,7 +641,16 @@ impl CadSceneController {
                     // draw above the axes/grid (they also carry a higher
                     // draw order, but merge order keeps the batch list readable).
                     if overlays.visibility.axes || overlays.visibility.grid {
-                        match db.bounds() {
+                        // Reference chrome is derived from model-space bounds when
+                        // the drawing has content; a **blank** drawing has no
+                        // model bounds, so fall back to the live 2D viewport
+                        // rectangle. Grid/axes are view chrome, not model data, so
+                        // covering an empty model space is honest rather than a
+                        // fabricated fit — and it is exactly what AutoCAD shows on
+                        // a new drawing. The diagnostic is kept only for the
+                        // genuinely reference-less case (3D view with no bounds).
+                        let reference_bounds = db.bounds().or(overlays.viewport_bounds);
+                        match reference_bounds {
                             Some(bounds) => {
                                 if overlays.visibility.grid {
                                     overlay.merge(grid_overlay(
@@ -655,8 +664,8 @@ impl CadSceneController {
                             }
                             None => overlay.partial(
                                 "overlay.bounds-unavailable",
-                                "axes/grid requested but the drawing has no model-space bounds; \
-                                 omitted"
+                                "axes/grid requested but neither the drawing nor the 2D \
+                                 viewport has bounds; omitted"
                                     .into(),
                             ),
                         }
@@ -984,5 +993,7 @@ impl CadSceneController {
     }
 }
 
+#[cfg(test)]
+mod reference_fallback_tests;
 #[cfg(test)]
 mod tests;

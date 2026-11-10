@@ -275,7 +275,12 @@ impl SessionState {
             active_layer: LayerId(0),
             tool_parameters: ToolParameterStore::defaults(),
             snap_enabled: true,
-            grid_enabled: true,
+            // The display grid starts hidden: AutoCAD-style grid chrome is an
+            // opt-in aid, and a fresh session must not paint reference lines
+            // before the user asks for them. `GRID`/F7 opens the session gate;
+            // the persisted `view.overlays.grid` preference must also be on for
+            // the host to draw it.
+            grid_enabled: false,
             snap_grid_enabled: false,
             snap_spacing: crate::snap::DEFAULT_SNAP_SPACING,
             ortho_enabled: false,

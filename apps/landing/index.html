@@ -14,7 +14,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="yacr">
   <meta property="og:title" content="yacr — Yet Another CAD in Rust">
-  <meta property="og:description" content="Rust 核心负责文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。预览版已可直接下载，但 DWG 兼容性、真实图纸与性能验收尚未完成。">
+  <meta property="og:description" content="Rust 核心负责文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。预览版可直接下载，尚非生产级 CAD。">
   <meta property="og:url" content="https://yacr.pages.dev/">
   <meta property="og:image" content="https://yacr.pages.dev/assets/yacr-1024.png">
   <meta property="og:image:width" content="1024">
@@ -43,7 +43,7 @@
     "applicationCategory": "DesignApplication",
     "operatingSystem": "Linux, Windows, macOS, Android, Web",
     "url": "https://yacr.pages.dev/",
-    "downloadUrl": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.6",
+    "downloadUrl": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.8",
     "license": "https://www.gnu.org/licenses/agpl-3.0.html",
     "isAccessibleForFree": true,
     "description": "Open-source CAD viewing and measurement system with a Rust core and a React + Tauri interface. Preview builds are downloadable across Linux, Windows, macOS, Android, and the Web; not yet production-grade."
@@ -116,8 +116,8 @@
             <div class="hero-notice" role="note">
               <span class="notice-label">PREVIEW <br>BUILDS</span>
               <p>
-                <span class="lang--zh">yacr 已进入可用的预览阶段：<strong>Linux、Windows、macOS、Android 与 Web 都有可下载 / 可打开的预览构建</strong>。Linux/Wayland 是主开发目标、支持最完整；Android APK 已由维护者侧载运行；Windows/macOS 的运行时与视觉验收仍待补。<strong>它不是生产级 CAD：DWG 兼容性、真实图纸与性能验收尚未完成。</strong></span>
-                <span class="lang--en" lang="en">yacr has reached a usable preview stage: <strong>Linux, Windows, macOS, Android, and the Web all have downloadable preview builds</strong>. Linux/Wayland is the primary development target with the strongest support; the Android APK has been sideloaded and run by the maintainer; runtime and visual acceptance for Windows/macOS is still pending. <strong>It is not a production-grade CAD tool: DWG compatibility, real drawings, and performance acceptance are not finished.</strong></span>
+                <span class="lang--zh">预览版：可直接下载，尚非生产级 CAD。</span>
+                <span class="lang--en" lang="en">Preview builds you can download today. Not yet production-grade.</span>
               </p>
             </div>
 
@@ -128,7 +128,7 @@
               </a>
               <a class="btn btn--ghost" href="#download">
                 <span class="lang--zh">下载</span><span class="lang--en" lang="en">Download</span>
-                <span data-release-version>v0.1.6</span>
+                <span data-release-version>v0.1.8</span>
                 <span class="ext" aria-hidden="true">↓</span>
               </a>
               <a class="btn btn--text" href="https://github.com/zenglanmu/yacr" target="_blank" rel="noopener">
@@ -271,18 +271,11 @@
               <p class="stat-label">
                 <span class="lang--zh">条命令有实现路径</span><span class="lang--en" lang="en">commands with an implementation path</span>
               </p>
-              <p class="stat-note">
-                <span class="lang--zh">50 完整 + 173 部分 · 清单计数，不是兼容率</span>
-                <span class="lang--en" lang="en">50 complete + 173 partial · list count, not a compatibility rate</span>
-              </p>
             </div>
             <div class="stat">
               <p class="stat-value">DWG<span class="stat-plus">+</span>DXF</p>
               <p class="stat-label">
                 <span class="lang--zh">读取 / 解析</span><span class="lang--en" lang="en">read / parse</span>
-              </p>
-              <p class="stat-note">
-                <span class="lang--zh">DWG 兼容性未验收</span><span class="lang--en" lang="en">DWG compatibility is not verified</span>
               </p>
             </div>
             <div class="stat">
@@ -511,8 +504,8 @@
             <span class="lang--en" lang="en">Get viewing and measuring right first.</span>
           </h2>
           <p class="lead">
-            <span class="lang--zh">从导入、数据库、渲染到测量与命令覆盖，每张卡片都写明能力边界。</span>
-            <span class="lang--en" lang="en">From import and the database to rendering, measurement, and command coverage — every card states its boundary.</span>
+            <span class="lang--zh">从导入、数据库、渲染到测量与命令覆盖。</span>
+            <span class="lang--en" lang="en">From import and the database to rendering, measurement, and command coverage.</span>
           </p>
         </header>
 
@@ -524,8 +517,8 @@
             </div>
             <h3><span class="lang--zh">打开 DWG / DXF</span><span class="lang--en" lang="en">Open DWG / DXF</span></h3>
             <p>
-              <span class="lang--zh"><code>acadrust</code> 0.6.8（未修改）。DWG 与 DXF ASCII/二进制导入，异步导入、进度与取消。这里不宣称已验证的兼容矩阵。</span>
-              <span class="lang--en" lang="en"><code>acadrust</code> 0.6.8, unmodified. DWG and DXF ASCII/binary import with asynchronous loading, progress, and cancel. No verified compatibility matrix is claimed.</span>
+              <span class="lang--zh"><code>acadrust</code> 0.6.8（未修改）。DWG 与 DXF ASCII/二进制导入，异步导入、进度与取消。</span>
+              <span class="lang--en" lang="en"><code>acadrust</code> 0.6.8, unmodified. DWG and DXF ASCII/binary import with asynchronous loading, progress, and cancel.</span>
             </p>
             <div class="chips" aria-hidden="true"><span>DWG</span><span>DXF ASCII</span><span>DXF BINARY</span></div>
           </article>
@@ -550,8 +543,8 @@
             </div>
             <h3><span class="lang--zh">wgpu 渲染，面向大图纸</span><span class="lang--en" lang="en">wgpu rendering for large drawings</span></h3>
             <p>
-              <span class="lang--zh">Rust + wgpu 使用现代 GPU 特性；批处理、导航 LOD、VRAM 预检。测试图纸展开后约 72 万图元，已在真实 GPU 宿主上打开并渲染；性能验收仍未完成。渲染是派生，不反向成为数据源。</span>
-              <span class="lang--en" lang="en">Rust + wgpu uses modern GPU features: batching, navigation LOD, and VRAM preflight. Test drawings expand to roughly 725K entities and open and render on a real GPU host; performance acceptance is still pending. Rendering is derived and never becomes the data source.</span>
+              <span class="lang--zh">Rust + wgpu 使用现代 GPU 特性；批处理、导航 LOD、VRAM 预检。测试图纸展开后约 72 万图元，已在真实 GPU 宿主上打开并渲染。渲染是派生，不反向成为数据源。</span>
+              <span class="lang--en" lang="en">Rust + wgpu uses modern GPU features: batching, navigation LOD, and VRAM preflight. Test drawings expand to roughly 725K entities and open and render on a real GPU host. Rendering is derived and never becomes the data source.</span>
             </p>
             <div class="chips" aria-hidden="true"><span>2D / 3D</span><span>725K ENTITIES</span><span>LOD / VRAM</span></div>
           </article>
@@ -629,8 +622,8 @@
                 <span class="lang--en" lang="en"><code>plugins/tch</code> (<code>tangent-ts</code>) is wired as a git submodule and handles Tianzheng/TCH entities and proxy-graphics display. The plugin bundle ships in every carrier. Plugin-manager state persists, and vendor entities can be selected with property rows.</span>
               </p>
               <p class="feature-caveat">
-                <span class="lang--zh">无 proxy graphics 缓存时不显示；这不是 AutoCAD 兼容性声明。</span>
-                <span class="lang--en" lang="en">No cached proxy graphics means no display; this is not an AutoCAD compatibility claim.</span>
+                <span class="lang--zh">无 proxy graphics 缓存时不显示。</span>
+                <span class="lang--en" lang="en">No cached proxy graphics means no display.</span>
               </p>
               <div class="chips" aria-hidden="true"><span>TCH</span><span>TYPESCRIPT</span><span>PROXY GRAPHICS</span><span>22 CLASSES</span></div>
             </div>
@@ -715,8 +708,8 @@
             <span class="lang--en" lang="en">One core. Five surfaces.</span>
           </h2>
           <p class="lead">
-            <span class="lang--zh">状态按仓库当前证据边界标注，不等于产品验收。Linux/Wayland 是主开发目标；Android APK 已由维护者侧载运行；Windows/macOS 是真实宿主，运行时仍待验收。</span>
-            <span class="lang--en" lang="en">Status reflects the evidence currently in the repository; it is not product acceptance. Linux/Wayland is the primary development target; the Android APK has been sideloaded by the maintainer; Windows/macOS are real hosts whose runtime still needs acceptance.</span>
+            <span class="lang--zh">Linux/Wayland 是主开发目标；Android APK 已由维护者侧载运行。</span>
+            <span class="lang--en" lang="en">Linux/Wayland is the primary development target; the Android APK has been sideloaded and run by the maintainer.</span>
           </p>
         </header>
 
@@ -733,7 +726,6 @@
               <span class="lang--en" lang="en">Native Wayland uses native-below; X11/XWayland uses dom-canvas. Distributed as Flatpak — the primary development target, with the strongest Wayland support.</span>
             </p>
             <ul class="platform-evidence">
-              <li><span class="ev-label"><span class="lang--zh">证据</span><span class="lang--en" lang="en">Evidence</span></span><span class="lang--zh">有界证据：GNOME/Mutter + P620 + <code>scale=1</code></span><span class="lang--en" lang="en">Bounded evidence: GNOME/Mutter + P620 + <code>scale=1</code></span></li>
               <li><span class="ev-label">Flatpak</span><span>io.github.zenglanmu.yacr</span></li>
             </ul>
           </article>
@@ -751,7 +743,6 @@
             </p>
             <ul class="platform-evidence">
               <li><span class="ev-label"><span class="lang--zh">入口</span><span class="lang--en" lang="en">Entry</span></span><a href="https://yacr-examples.pages.dev/" target="_blank" rel="noopener">yacr-examples.pages.dev <span class="ext" aria-hidden="true">↗</span></a></li>
-              <li><span class="ev-label"><span class="lang--zh">证据</span><span class="lang--en" lang="en">Evidence</span></span><span class="lang--zh">CI smoke 使用 SwiftShader 软件渲染，不是 GPU 或像素结论。</span><span class="lang--en" lang="en">CI smoke uses SwiftShader software rendering — not a GPU or pixel conclusion.</span></li>
             </ul>
           </article>
 
@@ -766,9 +757,6 @@
               <span class="lang--zh">真实 Tauri/WebView2 加 Win32 child HWND。缺少 WebView2 时以退出码 5 拒绝。</span>
               <span class="lang--en" lang="en">Real Tauri/WebView2 with a Win32 child HWND. Refuses with exit code 5 when WebView2 is missing.</span>
             </p>
-            <ul class="platform-evidence">
-              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">真实宿主已实现，预期可运行；当前证据为编译门禁 + Wine 拒绝合同，运行时/视觉/真 Windows 仍待验收。</span><span class="lang--en" lang="en">The real host is implemented and expected to run; current evidence is a build gate + Wine refusal contract. Runtime, visuals, and real Windows still need acceptance.</span></li>
-            </ul>
           </article>
 
           <article class="platform reveal reveal--d1">
@@ -782,9 +770,6 @@
               <span class="lang--zh">真实 Tauri/WKWebView 加 CAD 子 <code>NSView</code>（Metal）。</span>
               <span class="lang--en" lang="en">Real Tauri/WKWebView with a CAD child <code>NSView</code> (Metal).</span>
             </p>
-            <ul class="platform-evidence">
-              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">真实宿主已实现，预期可运行；当前证据仅 CI 编译，窗口/Metal/层序/DPI/像素仍待验收。</span><span class="lang--en" lang="en">The real host is implemented and expected to run; current evidence is CI compile only. Window, Metal, layer order, DPI, and pixels still need acceptance.</span></li>
-            </ul>
           </article>
 
           <article class="platform reveal reveal--d2">
@@ -798,9 +783,6 @@
               <span class="lang--zh">Tauri WebView + 原生 <code>CadSession</code> + Vulkan <code>SurfaceView</code>；wasm 会话不实例化。SAF 打开与 DXF 导出已接线，DWG 保存显式延后。维护者已侧载 APK 并运行成功。</span>
               <span class="lang--en" lang="en">Tauri WebView + native <code>CadSession</code> + Vulkan <code>SurfaceView</code>; the wasm session is not instantiated. SAF open and DXF export are wired; DWG save is explicitly deferred. The maintainer has sideloaded the APK and run it successfully.</span>
             </p>
-            <ul class="platform-evidence">
-              <li><span class="ev-label"><span class="lang--zh">边界</span><span class="lang--en" lang="en">Boundary</span></span><span class="lang--zh">维护者侧载运行成功（非 CI 验收）；设备/真实 GPU/像素的正式验收仍待补。</span><span class="lang--en" lang="en">The maintainer sideloaded and ran it successfully (not a CI acceptance); formal device, real-GPU, and pixel acceptance is still pending.</span></li>
-            </ul>
           </article>
         </div>
       </div>
@@ -814,10 +796,6 @@
             <span class="lang--zh">下载最新构建。</span>
             <span class="lang--en" lang="en">Get the latest build.</span>
           </h2>
-          <p class="lead">
-            <span class="lang--zh">主按钮走 Cloudflare R2 国内镜像；GitHub Release 作为上游与校验来源。若 CDN 未配置，自动回退 GitHub。</span>
-            <span class="lang--en" lang="en">Primary buttons use the Cloudflare R2 mirror for mainland China. GitHub Releases remain the upstream source and checksum reference. If the CDN is not configured, links fall back to GitHub automatically.</span>
-          </p>
         </header>
 
         <div class="release-hero reveal">
@@ -828,17 +806,17 @@
               <span class="release-kicker-sep" aria-hidden="true">/</span>
               <span class="lang--zh">最新版本</span><span class="lang--en" lang="en">latest version</span>
             </p>
-            <p class="release-version" data-release-version>v0.1.6</p>
+            <p class="release-version" data-release-version>v0.1.8</p>
             <p class="release-sub">
               <span class="release-sub-label"><span class="lang--zh">发布于</span><span class="lang--en" lang="en">Released</span></span>
               <time data-release-date datetime="2026-11-09">2026-11-09</time>
               <span class="release-dot" aria-hidden="true">/</span>
               <span><span data-release-assets>4</span> <span class="lang--zh">个产物</span><span class="lang--en" lang="en">assets</span></span>
               <span class="release-dot" aria-hidden="true">/</span>
-              <span data-release-total>≈ 378.7 MiB</span>
+              <span data-release-total>≈ 383.4 MiB</span>
             </p>
             <div class="release-actions">
-              <a class="btn btn--primary" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/yacr-0.1.6-linux-x86_64.flatpak" target="_blank" rel="noopener" data-download="linux">
+              <a class="btn btn--primary" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/yacr-0.1.8-linux-x86_64.flatpak" target="_blank" rel="noopener" data-download="linux">
                 <span class="lang--zh">下载 Linux Flatpak</span><span class="lang--en" lang="en">Get the Linux Flatpak</span>
                 <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
               </a>
@@ -846,7 +824,7 @@
                 <span class="lang--zh">所有平台</span><span class="lang--en" lang="en">All platforms</span>
                 <span class="ext" aria-hidden="true">↓</span>
               </a>
-              <a class="btn btn--text" href="https://github.com/zenglanmu/yacr/releases/tag/v0.1.6" target="_blank" rel="noopener" data-release-url>
+              <a class="btn btn--text" href="https://github.com/zenglanmu/yacr/releases/tag/v0.1.8" target="_blank" rel="noopener" data-release-url>
                 GitHub Release <span class="ext" aria-hidden="true">↗</span>
               </a>
             </div>
@@ -868,13 +846,9 @@
               </div>
               <div>
                 <dt>SCOPE</dt>
-                <dd><span class="lang--zh">构建与打包记录</span><span class="lang--en" lang="en">Build and packaging record</span></dd>
+                <dd><span class="lang--zh">构建产物</span><span class="lang--en" lang="en">Build artifacts</span></dd>
               </div>
             </dl>
-            <p class="release-honest">
-              <span class="lang--zh">产物来自 CI workflow。<strong>这不是运行时、真机、GPU 或像素验收。</strong></span>
-              <span class="lang--en" lang="en">Artifacts come from the CI workflow. <strong>This is not runtime, device, GPU, or pixel acceptance.</strong></span>
-            </p>
           </div>
         </div>
 
@@ -887,11 +861,11 @@
         </div>
 
         <div class="release-meta reveal">
-          <span>RELEASE / <span data-release-version>v0.1.6</span></span>
+          <span>RELEASE / <span data-release-version>v0.1.8</span></span>
           <span><span data-release-assets>4</span> ASSETS</span>
           <span>SHA-256</span>
           <span>SIGNING.txt</span>
-          <span class="release-meta-end">BUILD ARTIFACTS · NOT RUNTIME ACCEPTANCE</span>
+          <span class="release-meta-end">BUILD ARTIFACTS</span>
         </div>
 
         <div class="download-grid" id="download-cards">
@@ -907,8 +881,8 @@
                 <span class="dl-sign dl-sign--ok"><span class="lang--zh">GPG 可选</span><span class="lang--en" lang="en">GPG optional</span></span>
               </div>
             </div>
-            <p class="dl-file"><code data-file-for="linux">yacr-0.1.6-linux-x86_64.flatpak</code></p>
-            <p class="dl-size" data-size-for="linux"><strong>106,080,944</strong> <span>bytes · ≈ 101.2 MiB</span></p>
+            <p class="dl-file"><code data-file-for="linux">yacr-0.1.8-linux-x86_64.flatpak</code></p>
+            <p class="dl-size" data-size-for="linux"><strong>106,470,512</strong> <span>bytes · ≈ 101.5 MiB</span></p>
             <dl class="dl-specs">
               <div>
                 <dt>REQUIRES</dt>
@@ -924,19 +898,19 @@
               </div>
             </dl>
             <div class="dl-actions">
-              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/yacr-0.1.6-linux-x86_64.flatpak" target="_blank" rel="noopener" data-download="linux">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/yacr-0.1.8-linux-x86_64.flatpak" target="_blank" rel="noopener" data-download="linux">
                 <span class="lang--zh">下载 Flatpak</span><span class="lang--en" lang="en">Download Flatpak</span>
                 <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
               </a>
               <div class="dl-links">
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/yacr-0.1.6-linux-x86_64.flatpak" target="_blank" rel="noopener" data-github="linux">GitHub <span class="ext" aria-hidden="true">↗</span></a>
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/yacr-0.1.6-linux-x86_64.flatpak.sha256" target="_blank" rel="noopener" data-sha="linux">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/yacr-0.1.8-linux-x86_64.flatpak" target="_blank" rel="noopener" data-github="linux">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/yacr-0.1.8-linux-x86_64.flatpak.sha256" target="_blank" rel="noopener" data-sha="linux">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
               </div>
             </div>
             <div class="cmd-stack">
               <div class="cmd">
-                <code data-cmd-file="linux" data-cmd-template="flatpak install --user {file}">flatpak install --user yacr-0.1.6-linux-x86_64.flatpak</code>
-                <button class="copy-btn" type="button" data-copy="flatpak install --user yacr-0.1.6-linux-x86_64.flatpak" data-aria-zh="复制 Flatpak 安装命令" data-aria-en="Copy the Flatpak install command" data-copied-zh="已复制" data-copied-en="Copied">
+                <code data-cmd-file="linux" data-cmd-template="flatpak install --user {file}">flatpak install --user yacr-0.1.8-linux-x86_64.flatpak</code>
+                <button class="copy-btn" type="button" data-copy="flatpak install --user yacr-0.1.8-linux-x86_64.flatpak" data-aria-zh="复制 Flatpak 安装命令" data-aria-en="Copy the Flatpak install command" data-copied-zh="已复制" data-copied-en="Copied">
                   <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
                 </button>
               </div>
@@ -961,8 +935,8 @@
                 <span class="dl-sign dl-sign--warn"><span class="lang--zh">未签名</span><span class="lang--en" lang="en">Unsigned</span></span>
               </div>
             </div>
-            <p class="dl-file"><code data-file-for="windows">yacr-0.1.6-windows-x86_64.zip</code></p>
-            <p class="dl-size" data-size-for="windows"><strong>84,980,956</strong> <span>bytes · ≈ 81.0 MiB</span></p>
+            <p class="dl-file"><code data-file-for="windows">yacr-0.1.8-windows-x86_64.zip</code></p>
+            <p class="dl-size" data-size-for="windows"><strong>86,110,804</strong> <span>bytes · ≈ 82.1 MiB</span></p>
             <dl class="dl-specs">
               <div>
                 <dt>REQUIRES</dt>
@@ -978,19 +952,19 @@
               </div>
             </dl>
             <div class="dl-actions">
-              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/yacr-0.1.6-windows-x86_64.zip" target="_blank" rel="noopener" data-download="windows">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/yacr-0.1.8-windows-x86_64.zip" target="_blank" rel="noopener" data-download="windows">
                 <span class="lang--zh">下载 ZIP</span><span class="lang--en" lang="en">Download ZIP</span>
                 <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
               </a>
               <div class="dl-links">
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/yacr-0.1.6-windows-x86_64.zip" target="_blank" rel="noopener" data-github="windows">GitHub <span class="ext" aria-hidden="true">↗</span></a>
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/yacr-0.1.6-windows-x86_64.zip.sha256" target="_blank" rel="noopener" data-sha="windows">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/yacr-0.1.8-windows-x86_64.zip" target="_blank" rel="noopener" data-github="windows">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/yacr-0.1.8-windows-x86_64.zip.sha256" target="_blank" rel="noopener" data-sha="windows">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
               </div>
             </div>
             <div class="cmd-stack">
               <div class="cmd">
-                <code data-cmd-file="windows" data-cmd-template="Expand-Archive {file} -DestinationPath yacr">Expand-Archive yacr-0.1.6-windows-x86_64.zip -DestinationPath yacr</code>
-                <button class="copy-btn" type="button" data-copy="Expand-Archive yacr-0.1.6-windows-x86_64.zip -DestinationPath yacr" data-aria-zh="复制解压命令" data-aria-en="Copy the unzip command" data-copied-zh="已复制" data-copied-en="Copied">
+                <code data-cmd-file="windows" data-cmd-template="Expand-Archive {file} -DestinationPath yacr">Expand-Archive yacr-0.1.8-windows-x86_64.zip -DestinationPath yacr</code>
+                <button class="copy-btn" type="button" data-copy="Expand-Archive yacr-0.1.8-windows-x86_64.zip -DestinationPath yacr" data-aria-zh="复制解压命令" data-aria-en="Copy the unzip command" data-copied-zh="已复制" data-copied-en="Copied">
                   <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
                 </button>
               </div>
@@ -1015,8 +989,8 @@
                 <span class="dl-sign dl-sign--warn"><span class="lang--zh">ad-hoc · 未公证</span><span class="lang--en" lang="en">Ad-hoc · not notarized</span></span>
               </div>
             </div>
-            <p class="dl-file"><code data-file-for="macos">yacr-0.1.6-macos-universal.tar.gz</code></p>
-            <p class="dl-size" data-size-for="macos"><strong>114,185,643</strong> <span>bytes · ≈ 108.9 MiB</span></p>
+            <p class="dl-file"><code data-file-for="macos">yacr-0.1.8-macos-universal.tar.gz</code></p>
+            <p class="dl-size" data-size-for="macos"><strong>116,176,958</strong> <span>bytes · ≈ 110.8 MiB</span></p>
             <dl class="dl-specs">
               <div>
                 <dt>REQUIRES</dt>
@@ -1032,19 +1006,19 @@
               </div>
             </dl>
             <div class="dl-actions">
-              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/yacr-0.1.6-macos-universal.tar.gz" target="_blank" rel="noopener" data-download="macos">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/yacr-0.1.8-macos-universal.tar.gz" target="_blank" rel="noopener" data-download="macos">
                 <span class="lang--zh">下载 TAR.GZ</span><span class="lang--en" lang="en">Download TAR.GZ</span>
                 <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
               </a>
               <div class="dl-links">
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/yacr-0.1.6-macos-universal.tar.gz" target="_blank" rel="noopener" data-github="macos">GitHub <span class="ext" aria-hidden="true">↗</span></a>
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/yacr-0.1.6-macos-universal.tar.gz.sha256" target="_blank" rel="noopener" data-sha="macos">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/yacr-0.1.8-macos-universal.tar.gz" target="_blank" rel="noopener" data-github="macos">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/yacr-0.1.8-macos-universal.tar.gz.sha256" target="_blank" rel="noopener" data-sha="macos">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
               </div>
             </div>
             <div class="cmd-stack">
               <div class="cmd">
-                <code data-cmd-file="macos" data-cmd-template="tar -xzf {file}">tar -xzf yacr-0.1.6-macos-universal.tar.gz</code>
-                <button class="copy-btn" type="button" data-copy="tar -xzf yacr-0.1.6-macos-universal.tar.gz" data-aria-zh="复制解压命令" data-aria-en="Copy the extract command" data-copied-zh="已复制" data-copied-en="Copied">
+                <code data-cmd-file="macos" data-cmd-template="tar -xzf {file}">tar -xzf yacr-0.1.8-macos-universal.tar.gz</code>
+                <button class="copy-btn" type="button" data-copy="tar -xzf yacr-0.1.8-macos-universal.tar.gz" data-aria-zh="复制解压命令" data-aria-en="Copy the extract command" data-copied-zh="已复制" data-copied-en="Copied">
                   <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
                 </button>
               </div>
@@ -1070,7 +1044,7 @@
               </div>
             </div>
             <p class="dl-file"><code data-file-for="android">app-universal-release.apk</code></p>
-            <p class="dl-size" data-size-for="android"><strong>91,895,265</strong> <span>bytes · ≈ 87.6 MiB</span></p>
+            <p class="dl-size" data-size-for="android"><strong>93,238,753</strong> <span>bytes · ≈ 88.9 MiB</span></p>
             <dl class="dl-specs">
               <div>
                 <dt>REQUIRES</dt>
@@ -1090,13 +1064,13 @@
               </div>
             </dl>
             <div class="dl-actions">
-              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/app-universal-release.apk" target="_blank" rel="noopener" data-download="android">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/app-universal-release.apk" target="_blank" rel="noopener" data-download="android">
                 <span class="lang--zh">下载 APK</span><span class="lang--en" lang="en">Download APK</span>
                 <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
               </a>
               <div class="dl-links">
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/app-universal-release.apk" target="_blank" rel="noopener" data-github="android">GitHub <span class="ext" aria-hidden="true">↗</span></a>
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/app-universal-release.apk.sha256" target="_blank" rel="noopener" data-sha="android">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/app-universal-release.apk" target="_blank" rel="noopener" data-github="android">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/app-universal-release.apk.sha256" target="_blank" rel="noopener" data-sha="android">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
               </div>
             </div>
             <div class="cmd-stack">
@@ -1121,14 +1095,14 @@
             </p>
             <div class="cmd-stack">
               <div class="cmd">
-                <code data-cmd-file="linux" data-cmd-template="sha256sum -c {file}.sha256">sha256sum -c yacr-0.1.6-linux-x86_64.flatpak.sha256</code>
-                <button class="copy-btn" type="button" data-copy="sha256sum -c yacr-0.1.6-linux-x86_64.flatpak.sha256" data-aria-zh="复制 Linux 校验命令" data-aria-en="Copy the Linux checksum command" data-copied-zh="已复制" data-copied-en="Copied">
+                <code data-cmd-file="linux" data-cmd-template="sha256sum -c {file}.sha256">sha256sum -c yacr-0.1.8-linux-x86_64.flatpak.sha256</code>
+                <button class="copy-btn" type="button" data-copy="sha256sum -c yacr-0.1.8-linux-x86_64.flatpak.sha256" data-aria-zh="复制 Linux 校验命令" data-aria-en="Copy the Linux checksum command" data-copied-zh="已复制" data-copied-en="Copied">
                   <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
                 </button>
               </div>
               <div class="cmd">
-                <code data-cmd-file="windows" data-cmd-template="Get-FileHash .\{file} -Algorithm SHA256">Get-FileHash .\yacr-0.1.6-windows-x86_64.zip -Algorithm SHA256</code>
-                <button class="copy-btn" type="button" data-copy="Get-FileHash .\yacr-0.1.6-windows-x86_64.zip -Algorithm SHA256" data-aria-zh="复制 Windows 校验命令" data-aria-en="Copy the Windows checksum command" data-copied-zh="已复制" data-copied-en="Copied">
+                <code data-cmd-file="windows" data-cmd-template="Get-FileHash .\{file} -Algorithm SHA256">Get-FileHash .\yacr-0.1.8-windows-x86_64.zip -Algorithm SHA256</code>
+                <button class="copy-btn" type="button" data-copy="Get-FileHash .\yacr-0.1.8-windows-x86_64.zip -Algorithm SHA256" data-aria-zh="复制 Windows 校验命令" data-aria-en="Copy the Windows checksum command" data-copied-zh="已复制" data-copied-en="Copied">
                   <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
                 </button>
               </div>
@@ -1143,9 +1117,9 @@
               </div>
             </div>
             <ul class="dl-verify-links">
-              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/SIGNING.txt" target="_blank" rel="noopener" data-github-file="SIGNING.txt">SIGNING.txt <span class="ext" aria-hidden="true">↗</span></a></li>
-              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.6/yacr-0.1.6-linux-x86_64.flatpak.gpg" target="_blank" rel="noopener" data-github="linux" data-github-suffix=".flatpak.gpg">.flatpak.gpg <span class="ext" aria-hidden="true">↗</span></a></li>
-              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/tag/v0.1.6" target="_blank" rel="noopener" data-release-url>GitHub Release <span class="ext" aria-hidden="true">↗</span></a></li>
+              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/SIGNING.txt" target="_blank" rel="noopener" data-github-file="SIGNING.txt">SIGNING.txt <span class="ext" aria-hidden="true">↗</span></a></li>
+              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.8/yacr-0.1.8-linux-x86_64.flatpak.gpg" target="_blank" rel="noopener" data-github="linux" data-github-suffix=".gpg">.flatpak.gpg <span class="ext" aria-hidden="true">↗</span></a></li>
+              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/tag/v0.1.8" target="_blank" rel="noopener" data-release-url>GitHub Release <span class="ext" aria-hidden="true">↗</span></a></li>
             </ul>
             <p class="dl-hash-label dl-sign-matrix-label">SIGNING STATUS</p>
             <ul class="dl-sign-matrix">
@@ -1172,10 +1146,6 @@
             <span class="lang--zh">每一版，改了什么。</span>
             <span class="lang--en" lang="en">What changed, release by release.</span>
           </h2>
-          <p class="lead">
-            <span class="lang--zh">发布说明来自 <code>docs/release-notes</code>：记录每个 tag 的构建、打包与仍然未验证的边界。<strong>它们不是运行时、真实 GPU、设备或像素验收。</strong></span>
-            <span class="lang--en" lang="en">Release notes are generated from <code>docs/release-notes</code>: what each tag builds, packages, and still leaves unverified. <strong>They are not runtime, real-GPU, device, or pixel acceptance.</strong></span>
-          </p>
         </header>
 
         <div class="changelog reveal" data-changelog aria-busy="true">
@@ -1217,10 +1187,6 @@
           </noscript>
 
           <p class="cl-foot">
-            <span class="cl-foot-note">
-              <span class="lang--zh">构建与打包记录；不是运行时、真机、GPU 或像素验收。</span>
-              <span class="lang--en" lang="en">Build and packaging notes — not runtime, device, GPU, or pixel acceptance.</span>
-            </span>
             <a class="cl-all" href="https://github.com/zenglanmu/yacr/releases" target="_blank" rel="noopener">
               <span class="lang--zh">全部发布</span><span class="lang--en" lang="en">All releases</span>
               <span class="ext" aria-hidden="true">↗</span>
@@ -1270,8 +1236,8 @@
               </summary>
               <div class="faq-a">
                 <p>
-                  <span class="lang--zh">还不能当生产 CAD。项目处于活跃开发的预览阶段：可以打开 DWG/DXF、查看 2D/3D、测量，但 DWG 兼容性、真实图纸、vendor 与性能验收都未完成；请自留副本。平台运行时边界见上方平台卡片。</span>
-                  <span class="lang--en" lang="en">Not yet. The project is in an active-development preview stage: it can open DWG/DXF, view 2D/3D, and measure, but DWG compatibility, real drawings, vendor entities, and performance acceptance are all unfinished — keep your own copies. Platform runtime boundaries are in the platform cards above.</span>
+                  <span class="lang--zh">还不能。项目处于活跃开发的预览阶段：可以打开 DWG/DXF、查看 2D/3D、测量；请自留副本。</span>
+                  <span class="lang--en" lang="en">Not yet. The project is in an active-development preview stage: it can open DWG/DXF, view 2D/3D, and measure — keep your own copies.</span>
                 </p>
               </div>
             </details>
@@ -1423,13 +1389,9 @@
       </section>
 
       <div class="footer-honest">
-        <p>
-          <span class="lang--zh"><strong>诚实声明：</strong>本页是项目宣传页，不是产品验收；平台状态以仓库 <code>docs/handoff.md</code>、<code>docs/compatibility.md</code> 和实际代码为准。</span>
-          <span class="lang--en" lang="en"><strong>Honest disclosure:</strong> this page is a project landing page, not acceptance evidence. Platform status follows <code>docs/handoff.md</code>, <code>docs/compatibility.md</code>, and the actual code in the repository.</span>
-        </p>
         <p class="footer-meta">
-          <span class="lang--zh">© 2026 yacr · 页面与插画为项目自制；工程示意图不是产品截图，实机截图见上方。</span>
-          <span class="lang--en" lang="en">© 2026 yacr · Page and illustration are project-made; the engineering illustration is not a screenshot — the real capture is shown above.</span>
+          <span class="lang--zh">© 2026 yacr · 页面与插画为项目自制。</span>
+          <span class="lang--en" lang="en">© 2026 yacr · Page and illustration are project-made.</span>
         </p>
       </div>
     </div>

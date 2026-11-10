@@ -121,7 +121,8 @@ GitHub Actions 的 workflow artifact 需要登录且会过期，**不能**作为
 `permissions:`，未列出的 scope 就是 `none`）。它**不构建/不打包/不签名**，只从指定的
 `CI build layers` run 拉取四个平台 artifact：`android-release` 直接取签名 APK；Windows 优先
 `yacr-windows-release`，缺失时回退 `yacr-windows-release-unsigned`；Flatpak artifact 若含 `*.flatpak.gpg` 则一并分发。校验 `.sha256` 后
-附加到该 tag 的 GitHub Release；release notes 来自仓库内文件（如 `docs/release-notes/v0.1.4.md`）。
+附加到该 tag 的 GitHub Release；release notes 来自仓库内文件（如 `docs/release-notes/v0.1.4.md`），
+按 `docs/release-notes/TEMPLATE.md` 写：只列用户可见变化，证据边界文末一句带过。
 **签名只发生在 build job（自签名/GPG），publisher 从不签名。**
 
 职责因此是分开的：`build.yml` 的 release job 构建 + 上传 artifact（在凭据存在时签名；

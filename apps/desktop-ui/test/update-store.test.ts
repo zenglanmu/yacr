@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 
 import {
   dismissUpdate,
+  forceUpdateCheck,
   getUpdateStatus,
   openReleasePage,
   resetUpdateStoreForTests,
@@ -311,6 +312,57 @@ test('subscribers are notified on every status change and can unsubscribe', asyn
   const before = seen.length;
   dismissUpdate();
   assert.equal(seen.length, before, 'no notification after unsubscribe');
+});
+
+test('a forced check bypasses the 24 h throttle and the session guard', async () => {
+  let invokes = 0;
+  let fetchCalls = 0;
+  const storage = memoryStorage({ [LAST_CHECK_KEY]: NOW - 60_000 });
+  const deps = {
+    storage,
+    now: () => NOW,
+    invoke: async () => { invokes += 1; return '0.1.6'; },
+    fetch: async () => { fetchCalls += 1; return manifestResponse('v0.1.7'); },
+  };
+
+  forceUpdateCheck(deps);
+  await settle();
+  assert.deepEqual(getUpdateStatus(), { kind: 'available', current: '0.1.6', latest: '0.1.7' });
+  assert.equal(fetchCalls, 1, 'the throttle does not block an explicit check');
+
+  forceUpdateCheck(deps);
+  await settle();
+  assert.equal(invokes, 2, 'an explicit check runs again even after the session check');
+  assert.equal(fetchCalls, 2);
+});
+
+test('a forced check reports a previously skipped release without forgetting the skip', async () => {
+  const storage = memoryStorage({ [SKIPPED_VERSION_KEY]: '0.1.7' });
+  forceUpdateCheck({
+    storage,
+    now: () => NOW,
+    invoke: async () => '0.1.6',
+    fetch: async () => manifestResponse('v0.1.7'),
+  });
+  await settle();
+
+  assert.deepEqual(getUpdateStatus(), { kind: 'available', current: '0.1.6', latest: '0.1.7' });
+  assert.equal(storage.map.get(SKIPPED_VERSION_KEY), '0.1.7', 'the persisted skip is untouched');
+});
+
+test('a forced check that fails is unavailable and leaves the timestamp alone', async () => {
+  const storage = memoryStorage();
+  forceUpdateCheck({
+    storage,
+    now: () => NOW,
+    invoke: async () => '0.1.6',
+    fetch: async () => failureResponse(503),
+  });
+  await settle();
+
+  assert.equal(getUpdateStatus().kind, 'unavailable');
+  assert.match(getUpdateStatus().reason, /^update\.http_status: 503/);
+  assert.equal(lastCheckAt(0, storage), null);
 });
 
 test('openReleasePage reports success and the verbatim refusal', async () => {

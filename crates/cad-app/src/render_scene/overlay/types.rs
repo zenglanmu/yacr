@@ -13,18 +13,42 @@ pub const PREVIEW_DRAW_ORDER: i64 = 2_000_000;
 /// (`0`).
 pub const AXES_GRID_DRAW_ORDER: i64 = 800_000;
 
-/// Safety cap on the total number of grid line segments in one batch.
+/// Safety cap on the total number of grid line segments across the minor and
+/// major reference batches.
 ///
-/// The nice-step chooser targets roughly ten divisions per axis, but a
-/// pathological extent could still ask for far more. The generator samples the
-/// grid down to at most this many segments so the overlay batch stays bounded;
-/// this is a guard, not the normal spacing.
+/// The nice-step chooser targets roughly 30–60 minor divisions per axis, but a
+/// pathological extent could still ask for far more. The generator samples each
+/// level down to its per-axis cap so the overlay batches stay bounded; this is a
+/// guard, not the normal spacing. Segments = `2 axes × (minor + major)`.
 pub const GRID_MAX_LINES: usize = 400;
+
+/// Per-axis safety caps for the two grid levels, sized so the two levels
+/// together cannot exceed [`GRID_MAX_LINES`]: `2 × (160 + 40) = 400`.
+pub const GRID_MAX_MINOR_PER_AXIS: usize = 160;
+pub const GRID_MAX_MAJOR_PER_AXIS: usize = 40;
+
+/// Number of minor intervals between two major grid lines (AutoCAD `GRIDMAJOR`
+/// initial value).
+///
+/// `5` means one major line every five minor intervals, i.e. **four** minor
+/// lines between two major lines — the lined model-space grid AutoCAD shows with
+/// its default `GRIDMAJOR`. `1` would make every line major.
+pub const GRID_MAJOR_INTERVAL: u32 = 5;
 
 /// Colour of the world X/Y axes.
 pub const AXES_COLOR: [f32; 3] = [0.65, 0.67, 0.72];
-/// Colour of the reference grid, deliberately dimmer than the axes.
-pub const GRID_COLOR: [f32; 3] = [0.42, 0.45, 0.50];
+/// Colour of a **minor** reference grid line.
+///
+/// Deliberately much fainter than the major lines, the axes and the drawing
+/// geometry: AutoCAD's grid is a background aid, and its minor lines are the
+/// faintest of the three separately coloured grid elements. The renderer draws
+/// all SDF lines at one device-pixel of ink (lineweight is not rasterized), so
+/// the minor/major "one level thinner" look is carried by this brightness step.
+pub const GRID_COLOR: [f32; 3] = [0.06, 0.067, 0.08];
+/// Colour of a **major** reference grid line: the brighter line every
+/// [`GRID_MAJOR_INTERVAL`] minor intervals. Still clearly dimmer than
+/// [`AXES_COLOR`] and than normal drawing geometry.
+pub const GRID_MAJOR_COLOR: [f32; 3] = [0.14, 0.15, 0.18];
 
 /// Default half-extent of a point marker cross, in world units.
 ///

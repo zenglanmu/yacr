@@ -671,7 +671,7 @@ fn status_reports_fixture_counts_and_honest_not_tracked_lines() {
     assert!(diagnostic(&outcome, "status.active_layer")[0].contains("WALLS"));
     let session_line = diagnostic(&outcome, "status.session")[0];
     assert!(session_line.contains("mode=Work"), "{session_line}");
-    assert!(session_line.contains("grid=true"), "{session_line}");
+    assert!(session_line.contains("grid=false"), "{session_line}");
     assert!(session_line.contains("snap=false"), "{session_line}");
     assert!(session_line.contains("snap_grid=false"), "{session_line}");
     assert!(session_line.contains("ortho=false"), "{session_line}");

@@ -15,6 +15,10 @@ ADR 0027。
 >   Web（`apps/app-web`）。CAD 画在 DOM `<canvas>`。
 >
 > **大量“已通过”只是合成测试或有界环境证据**（模拟器、软件 GPU、无头浏览器），不是产品验收。
+>
+> 这些证据边界**写在仓库内部文档**：`docs/handoff.md`、`docs/compatibility.md`、
+> `docs/validation*.md` 与下方平台表。不要复制进 UI 文案、`apps/landing/`、`docs/release-notes/`、
+> GitHub Release 或 README 的每个段落；用户可见面只保留必要的状态标签，或一句指向内部文档。
 
 ## 铁律（违反即返工）
 
@@ -27,7 +31,9 @@ ADR 0027。
 4. 增量更新：ChangeSet → 依赖失效 → 显示表示重建，不重解析底图。
 5. 每项改动同步补契约测试与文档。
 6. 证据诚实：未运行就写 NOT RUN；合成测试、模拟器、软件渲染、无头浏览器结论不得推广为真机/
-   真实 GPU/vendor/golden/性能结论；历史宿主的证据不得冒充 React 宿主结论。
+   真实 GPU/vendor/golden/性能结论；历史宿主的证据不得冒充 React 宿主结论。**边界统一写在
+   内部文档**（`docs/handoff.md`/`docs/compatibility.md`/`docs/validation*.md` 与本文件平台表），
+   不复制到 UI 文案、`apps/landing/`、`docs/release-notes/` 或 GitHub Release。
 7. 不覆盖/删除陌生变更（并发实现常见）；先读源码与最新构建证据。
 8. **载体权威不可混淆**：`dom-canvas`（X11/XWayland、Web）只有 wasm 侧 CAD 会话持有 `cad-db`；
    `native-below`（Wayland、Windows、macOS、Android）只有 native 会话持有。另一侧**不得**实例化
@@ -39,7 +45,8 @@ ADR 0027。
    `surfaceMode`/`documentOwner` 接线；**不得**把 Linux（或任一单一宿主）的实现当成通用实现。
    某一载体暂时不能支持时必须显式拒绝（稳定的 `unsupported-runtime: ...` / `vendor.*` 原因），
    不得静默成功。当前只在 Linux 环境做运行/契约验证；Windows/macOS/Android/Web 的结论只能写
-   “仅编译 / 仅契约 / NOT VERIFIED”，不得写成已验收。
+   “仅编译 / 仅契约 / NOT VERIFIED”，不得写成已验收；这些结论记在内部文档与下方平台表，
+   UI/发行说明只保留状态标签。
 
 ## 分层与边界（`scripts/check-architecture.py` 强制）
 
@@ -77,7 +84,8 @@ submodule**；克隆后必须 `git submodule update --init --recursive`，否则
 `dist-ui`、Android `dist`、Flatpak/zip/tar.gz/APK）。
 
 **日常只验证自己的改动范围**（改动 crate 的编译、自己的契约测试、自己文件的 fmt/clippy）。
-全量门禁与全量测试只在用户明确要求或发版/发布验收前运行；未运行必须写 **NOT RUN**。
+全量门禁与全量测试只在用户明确要求或发版/发布验收前运行；未运行必须写 **NOT RUN**（写进本轮
+`docs/handoff.md` 或验证记录，不是 UI 或发行说明）。
 
 ```bash
 # 单 crate / 单测试（GPU/CLI 用例串行）
@@ -189,6 +197,9 @@ web-smoke/web-deploy + 5 个 event-gated release job）。`check-workflows.py` �
 
 ## 平台状态（勿过度承诺）
 
+**平台边界的唯一汇总处是本表与 `docs/handoff.md`；UI、落地页与发行说明只保留状态标签，不复制
+表格里的免责描述。**
+
 | 载体 / 平台 | 实现与证据边界 |
 |---|---|
 | Linux `app-linux`（`yacr`） | **主开发目标 / 运行证据最完整**。原生 Wayland = `native-below` 生产路径；X11/XWayland = `dom-canvas`。只有 GNOME/Mutter + P620 + `scale=1` 的有界运行证据 |
@@ -226,3 +237,4 @@ tag 的 Release）；`web-deploy` 也只在该事件下把 `apps/app-web/dist-ui
 `docs/android-host.md`、`docs/windows-app.md`、`docs/macos-app.md`、`docs/xref.md`、`docs/ci.md`
 （部分历史条目已过期，以 workflow 与实际代码为准）、`docs/adr/`（0010、0017–0027）。
 `docs/linux-app.md`、`docs/verify-ui.md` 与旧宿主验证记录是历史材料，不得作为当前证据。
+发行说明按 `docs/release-notes/TEMPLATE.md` 写：只列用户可见变化，证据边界文末一句带过。

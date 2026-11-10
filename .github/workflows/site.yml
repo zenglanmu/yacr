@@ -13,7 +13,7 @@ name: Landing site
 # Order matters: R2 first (it rewrites `apps/landing/downloads.json` with the
 # real CDN base/hashes), Pages second (it uploads the rewritten manifest).
 # `upload_downloads: false` skips the mirror and deploys the committed
-# `downloads.json` as-is (currently the v0.1.6 R2 manifest) — useful for
+# `downloads.json` as-is (currently the v0.1.8 R2 manifest) — useful for
 # copy/layout fixes without re-uploading 396 MB. Set cdnBase to null in that
 # file if you want the GitHub fallback instead.
 #
@@ -31,13 +31,18 @@ on:
       release_tag:
         description: "Release tag to mirror to R2"
         required: true
-        default: "v0.1.6"
+        default: "v0.1.8"
         type: string
       upload_downloads:
         description: "Mirror release assets to R2 and rewrite downloads.json"
         required: true
         default: true
         type: boolean
+      public_base:
+        description: "Public download base written to cdnBase (use 'managed' for r2.dev)"
+        required: false
+        default: "https://dl-yacr.snakeheartgo.top"
+        type: string
 
 permissions:
   contents: read
@@ -68,6 +73,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           R2_BUCKET: yacr-downloads
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          R2_PUBLIC_BASE: ${{ inputs.public_base }}
           GH_TOKEN: ${{ github.token }}
           LANDING_DIR: ${{ github.workspace }}/apps/landing
         run: bash scripts/upload-r2-downloads.sh

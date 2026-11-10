@@ -24,13 +24,14 @@ BUILD_CHANGELOG = ROOT / "scripts" / "build-landing-changelog.py"
 CHANGELOG = LANDING / "changelog.json"
 HEADERS = LANDING / "_headers"
 
-RELEASE = "v0.1.6"
-GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.6/"
+RELEASE = "v0.1.8"
+GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.8/"
+CDN_BASE = "https://dl-yacr.snakeheartgo.top/releases/v0.1.8"
 KNOWN_ASSETS = {
-    "linux": ("yacr-0.1.6-linux-x86_64.flatpak", 106080944),
-    "windows": ("yacr-0.1.6-windows-x86_64.zip", 84980956),
-    "macos": ("yacr-0.1.6-macos-universal.tar.gz", 114185643),
-    "android": ("app-universal-release.apk", 91895265),
+    "linux": ("yacr-0.1.8-linux-x86_64.flatpak", 106470512),
+    "windows": ("yacr-0.1.8-windows-x86_64.zip", 86110804),
+    "macos": ("yacr-0.1.8-macos-universal.tar.gz", 116176958),
+    "android": ("app-universal-release.apk", 93238753),
 }
 
 # The page shows one genuine product screenshot; the asset must exist, be a PNG
@@ -89,6 +90,12 @@ def check_manifest(text: str, errors: list[str]) -> None:
         fail(f"downloads.json release must be {RELEASE!r}", errors)
     if data.get("githubBase") != GITHUB_BASE:
         fail(f"downloads.json githubBase must be {GITHUB_BASE!r}", errors)
+    if data.get("cdnBase") != CDN_BASE:
+        fail(
+            f"downloads.json cdnBase must be {CDN_BASE!r} (the cached custom "
+            "download domain)",
+            errors,
+        )
 
     cdn_base = data.get("cdnBase")
     if cdn_base is not None and not (
@@ -304,6 +311,8 @@ def check_scripts(errors: list[str]) -> None:
             "releases/",
             "downloads.json",
             "app-universal-release.apk",
+            "R2_PUBLIC_BASE",
+            "dl-yacr.snakeheartgo.top",
         ):
             if fragment not in upload:
                 fail(f"scripts/upload-r2-downloads.sh is missing {fragment!r}", errors)
@@ -320,6 +329,8 @@ def check_workflow(errors: list[str]) -> None:
         "scripts/deploy-landing-pages.sh",
         "CLOUDFLARE_API_TOKEN",
         "secrets.CLOUDFLARE_ACCOUNT_ID",
+        "R2_PUBLIC_BASE",
+        "public_base",
         "concurrency",
         "timeout-minutes",
     ):

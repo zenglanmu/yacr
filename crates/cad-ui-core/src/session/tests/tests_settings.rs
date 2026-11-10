@@ -59,6 +59,10 @@ fn session_apply_setting_reports_new_values_and_changes_the_live_state() {
         .expect("an allowed overlay write");
     assert!(settings.grid);
     assert!(
+        session.snapshot(None, None, 0).grid_enabled,
+        "an explicit Options write also opens the live session gate"
+    );
+    assert!(
         session.render_session().overlays().visibility.grid,
         "the render input the host draws from carries the new value"
     );

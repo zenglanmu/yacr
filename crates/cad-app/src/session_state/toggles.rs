@@ -33,9 +33,10 @@ impl SessionState {
 
     /// Whether the display grid overlay is enabled in this session.
     ///
-    /// Session/display state only. `true` here does not by itself mean the grid
-    /// is drawn: the host also requires the persisted `view.overlays.grid`
-    /// preference, so the two gates compose with AND.
+    /// Session/display state only, and **off** when a session is created (the
+    /// grid is opt-in). `true` here does not by itself mean the grid is drawn:
+    /// the host also requires the persisted `view.overlays.grid` preference, so
+    /// the two gates compose with AND.
     pub fn grid_enabled(&self) -> bool {
         self.grid_enabled
     }

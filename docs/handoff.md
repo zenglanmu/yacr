@@ -10,6 +10,80 @@ AD
 - **NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机、Windows/macOS/Android/Web 运行时、真实 DWG/vendor 对照；这 200 条只有契约测试，且没有一条是可用功能。
 - **剩余 158**：主要是 3D/点云/协作/发布/Express 等；真正的高价值 2D 缺口（表格、字段、PDF/图像底图、ARRAYPATH、COPYM、XCLIP 等）仍应作为独立模型实现，而不是继续拒绝。
 
+## 2026-11-10 发布 v0.1.8（命令覆盖 623 + 栅格/空白图修复）
+
+- **版本**：`Cargo.toml` workspace 版本、`Cargo.lock`（仅 28 处 workspace 成员 `version`）、四个
+  `tauri.conf.json`、Flatpak metainfo 全部 `0.1.7` → `0.1.8`；README（中英）命令计数从 423 更新为
+  623（66 完整 + 557 部分）。发布说明：`docs/release-notes/v0.1.8.md`（提交 `3ca1fcaf`，同时更新
+  `downloads.json`/`index.html`/`changelog.json`/`site.yml`/`test-landing-site.py`）。
+- **tag / run**：`v0.1.8`（`edf67c74`）→ `CI build layers` run
+  [`42726538112`](https://github.com/zenglanmu/yacr/actions/runs/42726538112) **11/11 job 绿**
+  （四个 release + linux/windows/macos check + shader + web-build/web-smoke/web-deploy）；同 tag 的
+  `CI` run [`42726538016`](https://github.com/zenglanmu/yacr/actions/runs/42726538016) 绿；`main`
+  push run [`42726509371`](https://github.com/zenglanmu/yacr/actions/runs/42726509371) /
+  [`42726509132`](https://github.com/zenglanmu/yacr/actions/runs/42726509132)（`edf67c74`）与
+  [`42731809304`](https://github.com/zenglanmu/yacr/actions/runs/42731809304) /
+  [`42731809731`](https://github.com/zenglanmu/yacr/actions/runs/42731809731)（`3ca1fcaf`）均绿。
+- **发布**：`publish-release.yml` run
+  [`42731815734`](https://github.com/zenglanmu/yacr/actions/runs/42731815734) 绿 → Release
+  <https://github.com/zenglanmu/yacr/releases/tag/v0.1.8>（非 draft / 非 prerelease）。
+- **artifact（大小从 Release API 与 CDN HEAD 核对）**：
+  `yacr-0.1.8-linux-x86_64.flatpak` 106,470,512 B + `.sha256` + `.flatpak.gpg`；
+  `yacr-0.1.8-windows-x86_64.zip` 86,110,804 B + `.sha256`（**unsigned**：run 内 artifact 名为
+  `yacr-windows-release-unsigned`，未配置自签名 PFX secret）；
+  `yacr-0.1.8-macos-universal.tar.gz` 116,176,958 B + `.sha256`（ad-hoc、未公证）；
+  `app-universal-release.apk` 93,238,753 B + `.sha256` + `SIGNING.txt`（APK v2/v3 自签名）。
+- **落地页**：`Landing site` run
+  [`42731969274`](https://github.com/zenglanmu/yacr/actions/runs/42731969274) 绿（R2 镜像 + Pages）。
+  线上复核：`https://yacr.pages.dev/downloads.json` = `v0.1.8` 且 `Access-Control-Allow-Origin: *`；
+  `changelog.json` 首版为 `v0.1.8`；页面静态回退显示 `v0.1.8`；4 个主包 + `SIGNING.txt` +
+  `.flatpak.gpg` 的 CDN HEAD 均 200，Flatpak/APK 的 `Content-Length` 与清单一致。分发证据，
+  不是运行时/GPU/真机验收。
+- **证据边界**：以上是编译/打包/签名/上传与分发证据；真机、真实 GPU、视觉/像素与性能验收
+  一律 **NOT VERIFIED**。
+
+## 2026-11-10 显示栅格：AutoCAD 式主/次两级线 + 默认关闭
+
+用户要求：栅格要像 AutoCAD 的 model-space 线栅格（**主/次两级**、次要线明显更淡更细、整体比正常图线淡），
+并且**栅格功能默认关闭**。上一轮（2026-11-09 空白图）只让网格在空白图上回退到视口矩形，网格仍是
+单一级。
+
+- **两级几何**（`crates/cad-app/src/render_scene/overlay/axes_grid.rs`）：`grid_overlay` 现在输出两个
+  `Lines` batch——**minor** 与 **major**。主轴间隔取 AutoCAD `GRIDMAJOR` 初始值 **5**
+  （`GRID_MAJOR_INTERVAL`，即两条主线之间 4 条次线）；次线位置按整数索引过滤掉主线位置，主/次不重合。
+  次线步长仍用 1/2/5×10ⁿ 自适应，目标从约 10–15 条改为 **约 30–60 条次线/轴**
+  （`GRID_TARGET_MINOR_DIVISIONS = 60`，即约 6–12 个主格），与 AutoCAD 的“缩放时自动增减密度”一致。
+  两级分别有 per-axis 上限（`GRID_MAX_MINOR_PER_AXIS = 160`、`GRID_MAX_MAJOR_PER_AXIS = 40`），
+  合计 ≤ `GRID_MAX_LINES = 400`。
+- **颜色**（`overlay/types.rs`）：按 AutoCAD 深色 model-space 的三色元素（minor / major / axis）取值；
+  本机真实 GPU 采样：**minor ≈ sRGB(61,64,71)**、**major ≈ sRGB(93,96,105)**，正常图线为白色，
+  坐标轴保持 `AXES_COLOR` 的亮灰。两条 grid batch 仍用 `AXES_GRID_DRAW_ORDER`（轴为 +1），
+  在选中高亮之下、底图之上。
+- **默认关闭**（`crates/cad-app/src/session_state.rs`）：会话显示栅格开关 `grid_enabled` 初始值
+  `true → false`；持久化偏好 `view.overlays.grid` 本来就是 `false`。宿主仍是 AND 两门
+  （偏好 && 会话开关），所以**启动时不画栅格**，即使本地 `preference.json` 写着 `"grid":true`
+  也要先按 `GRID`/F7 打开。为了让 Options 的 Grid 勾选仍然“所见即所得”，`HostCore::apply_setting(Grid, …)`
+  在持久化偏好后**同步**设置会话开关（`cad-host/src/settings.rs`）；F7/`GRID` 仍只切会话开关、不改偏好。
+  相关契约/文档同步：`command_id.rs`、`session_state/toggles.rs`、`docs/shortcuts.md`、host/ui-core/app 的默认值断言。
+- **契约测试**：新增独立测试模块
+  `crates/cad-app/src/render_scene/overlay/grid_tests.rs`（`tests.rs` 已达 1000 行上限），覆盖
+  两 batch、颜色、总行数上限、**每 5 个次线恰好 1 条主线**、极端 pan/zoom；`overlay/tests.rs`
+  只保留其余契约。更新 `crates/cad-host/src/tests/grid_overlay.rs`（默认关闭 + AND 两门）、
+  `crates/cad-host/src/tests/settings.rs`、`crates/cad-ui-core/.../{tests_settings,command_vocabulary,snap_grid}.rs`、
+  `crates/cad-app/src/host/tests/toggles.rs`、`tests/{inquiry,utility}.rs`。
+- **已运行**：`cargo test -p cad-app --lib` **2204 passed / 0 failed / 3 ignored**；
+  `-p cad-ui-core --lib` **494 passed / 1 ignored**；`-p cad-host --lib` **288 passed**；
+  `cargo clippy -p cad-app -p cad-ui-core -p cad-host --all-targets -- -D warnings`、`cargo fmt --all -- --check`、
+  `check-file-size.py`、`check-i18n.py` 通过。
+- **真实运行证据**：Quadro P620 / native Wayland / 最大化（`scale=1`）。栅格关闭：最终构建 + 本地
+  `preference.json`（其中 `grid:true`）+ 会话默认 off → 画布无栅格、F7/GRID 前的状态正确
+  （`/tmp/opencode/grid_off_default.png`）。栅格样式：为看到“开启”画面，临时把会话默认临时置 true
+  构建后截屏（`/tmp/opencode/grid_on_style.png`），**风格证据不是默认值证据**；像素采样见上。
+  最终源码已恢复默认关闭并重新构建。
+- **已知限制**：渲染器的 SDF 线一律 **1 device-pixel 墨宽**（`lineweight` 只携带、不光栅化；
+  `line.wgsl`/`line_instanced.wgsl` 的 `w = world_per_px`），因此“次线比主线细一级”目前用
+  **亮度台阶**表达（61 → 93），不是不同的像素宽度；真正的 sub-pixel 线宽需要渲染器级别的
+  per-batch ink width 特性，本轮未做。Windows/macOS/Android/Web **NOT VERIFIED**。
 
 ## 2026-11-10 DIMTEDIT 字形级水平对齐
 
@@ -52,6 +126,84 @@ AD
 - **提交**：`fb135de2` 基础设施；P5 handler 与文档另提交。
 
 
+## 2026-11-09 新建空白图：默认视图尺度与参考网格/坐标轴
+
+用户报告：新建空白页（`untitled`）十字光标变成一个整屏粗带 + 4 个圆点，命令栏显示红字
+`axes/grid requested but the drawing has no model-space bounds; omitted`；打开任意 DWG 后正常。
+
+- **根因 1（光标）**：`HostController::new_blank_document` 把相机重置为
+  `MIN_ORTHO_SCALE`（1e-9 world/logical-px），即“最大放大”的退化视图。渲染器的抗锯齿线 SDF
+  使用**固定世界量**下限：quad 边距 `margin = max(2·wpp, 1e-6)`、墨宽
+  `max(wpp, 1e-8)`；在 wpp≈1.5e-9 时空库的拾取框（20px）与十字臂只有 ~1e-8–1e-6 world，
+  这些下限把 quad 放大到约整屏、把墨宽放大到 ~12px，于是整屏横带 + 只有端帽可见的 4 点。
+  真实图纸 wpp≈5e-3 不触发，所以“打开文件后正常”。
+- **根因 2（状态栏）**：空库 `bounds() == None`，`render_scene` 在 `None` 分支把网格与坐标轴
+  一起省略并 `VisualOverlay::partial("overlay.bounds-unavailable", …)`，该诊断经
+  `RenderSessionHandle::view_diagnostic()` 显示为命令栏红字。空白图是正常状态，不应报错。
+- **修复**：
+  - `crates/cad-app/src/host/mod.rs`：新空白图相机改用 `DEFAULT_ORTHO_SCALE`（1.0），
+    与 `camera/types.rs` 的“无可继承尺度时的平面视图尺度”语义一致；不再是 `MIN_ORTHO_SCALE`。
+  - `crates/cad-app/src/render_scene/mod.rs`：参考叠加层在无模型 bounds 时回退到
+    `overlays.viewport_bounds`（`db.bounds().or(overlays.viewport_bounds)`）；网格继续优先
+    视口矩形，坐标轴用同一参考矩形。`overlay.bounds-unavailable` 只在**既无模型 bounds 又无
+    2D 视口矩形**（如 3D 空库）时产生，文案改为
+    `axes/grid requested but neither the drawing nor the 2D viewport has bounds; omitted`。
+    这是参考 chrome 的视口回退，不是伪造模型数据或取景。
+- **契约测试**：更新 `host::tests::document::new_blank_document_resets_the_viewport_camera_to_the_default`
+  （期望 `DEFAULT_ORTHO_SCALE`）；新增
+  `render_scene/reference_fallback_tests.rs::a_blank_drawing_falls_back_to_the_viewport_for_axes_and_grid`
+  （空库 + 视口矩形 ⇒ 网格/坐标轴批次存在、无诊断、`Completeness::Complete`）。为守住
+  `check-file-size.py` 的 1000 行上限，新用例放进独立测试模块，未并入已 989 行的
+  `render_scene/tests.rs`。既有
+  `axes_without_bounds_report_a_diagnostic_instead_of_pretending`（无视口矩形）继续通过。
+- **已运行证据**：`cargo test -p cad-app --lib --locked` → **2207 passed / 0 failed / 3 ignored**；
+  `cargo clippy -p cad-app -p cad-render-wgpu --all-targets --locked -- -D warnings` 通过；
+  `cargo fmt --all -- --check`、`python3 scripts/check-file-size.py` 通过。真实运行：本机
+  **Quadro P620 / native Wayland / scale=1**，`target/release/yacr` 生产默认 `start_blank=true`，
+  `YACR_PROBE_EVIDENCE=1`（**合成 DOM pointer，不是真实鼠标**），Mutter ScreenCast 截图：
+  修复前 = 整屏横带 + 4 个角点 + 红字；修复后 = 1px 十字（CURSORSIZE=100 全屏臂）+ 20px 拾取框 +
+  参考网格，无红字（截图 `/tmp/opencode/dbg_shot.png`、`/tmp/opencode/fixed_blank.png`，本地）。
+- **边界/已知限制**：以上仅为 Linux Wayland + P620 + scale=1 的视觉证据；Windows/macOS/
+  Android/Web **NOT VERIFIED**（未运行）。渲染器线 SDF 的**绝对世界量**下限在 wpp < 1e-8
+  （把视图放大到接近 `MIN_ORTHO_SCALE`）时仍会放大所有线条，包括光标；本轮只消除默认空白图
+  路径，未改共享 shader，记为已知限制，后续若需支持极端放大应把下限改为相对量并同步
+  `line.wgsl`/`line_pulled.wgsl`/`line_instanced.wgsl` 三份 shader。
+
+## 2026-11-09 发布 v0.1.7（应用内更新检测 + 落地页改版）
+
+- **版本**：`Cargo.toml` workspace 版本、四个 `tauri.conf.json`、Flatpak metainfo 全部
+  `0.1.6` → `0.1.7`；`Cargo.lock` 只有 28 处 workspace 成员 `version` 行变化（无依赖/checksum 漂移）。
+  发布说明：`docs/release-notes/v0.1.7.md`。
+- **tag / run**：`v0.1.7` → `CI build layers` run
+  [`42630422730`](https://github.com/zenglanmu/yacr/actions/runs/42630422730) **11/11 job 绿**
+  （linux/windows/macos/android 四个 release + linux/windows/macos check + shader + web-build/
+  web-smoke/web-deploy）；同 tag 的 `CI` run
+  [`42630422907`](https://github.com/zenglanmu/yacr/actions/runs/42630422907) 绿；`main` push run
+  [`42629893320`](https://github.com/zenglanmu/yacr/actions/runs/42629893320) /
+  [`42629893274`](https://github.com/zenglanmu/yacr/actions/runs/42629893274) 绿。
+- **发布**：`publish-release.yml` run
+  [`42632331903`](https://github.com/zenglanmu/yacr/actions/runs/42632331903) 绿 → Release
+  <https://github.com/zenglanmu/yacr/releases/tag/v0.1.7>。
+- **artifact（大小从 Release API 核对）**：
+  `yacr-0.1.7-linux-x86_64.flatpak` 105,910,304 B（+ `.sha256` + `.flatpak.gpg`）；
+  `yacr-0.1.7-windows-x86_64.zip` 85,858,609 B（+ `.sha256`；**unsigned**：run 内 artifact 名为
+  `yacr-windows-release-unsigned`，未配置自签名 PFX secret）；
+  `yacr-0.1.7-macos-universal.tar.gz` 115,728,695 B（+ `.sha256`，ad-hoc 签名、未公证）；
+  `app-universal-release.apk` 92,935,649 B（仓库自签名 keystore）+ `SIGNING.txt` + `.sha256`。
+- **发布修正（诚实记录）**：第一次发布时 macOS artifact 目录被 CI `target/` 缓存里的旧
+  `yacr-0.1.6-macos-universal.tar.gz` 污染，Release 同时出现了 0.1.6 与 0.1.7 两个 macOS 包；
+  已用 `gh release delete-asset` 删除两个 0.1.6 文件。根因修复：`scripts/package-macos-release.sh`
+  现在每次打包前 `rm -rf "$DIST"` 并重建，避免旧 `dist/` 产物被 release job 上传。
+- **落地页**：`apps/landing` 更新到 v0.1.7（真实大小/校验和、R2 base、JSON-LD、下载链接、
+  页面静态回退值），`docs/release-notes/v0.1.7.md` 与 `changelog.json` 同步；`site.yml` 默认
+  `release_tag` 同步。`Landing site` run
+  [`42633555589`](https://github.com/zenglanmu/yacr/actions/runs/42633555589) 绿：R2 镜像 + Pages
+  部署完成。线上复核：`https://yacr.pages.dev/downloads.json` = v0.1.7 且
+  `Access-Control-Allow-Origin: *`，`changelog.json` 含 v0.1.7，页面显示 v0.1.7；4 个 R2 主包
+  HEAD 均 200；headless Chromium（软件渲染）对线上页面跑 34 项 DOM/布局断言全过。分发证据，
+  不是运行时/GPU/真机验收。
+- **证据边界**：以上是编译/打包/签名/上传与分发证据；真机、真实 GPU、视觉/像素与性能验收
+  一律 **NOT VERIFIED**。
 ## 2026-11-09 AutoCAD 2026 第二批 100 条命令（Wave 13–16）
 
 - **用户要求**：继续再实施 100 条未完成命令；2D 优先；同样更新同一份覆盖文档、UI 接线、逐批提交。
@@ -120,8 +272,8 @@ AD
   `#download`/`#changelog` 深链、changelog 拉取失败回退。
 - **NOT RUN / NOT VERIFIED**：真实 Linux 应用运行（未启动 host/窗口）与真实网络；Windows/macOS/
   Android/Web 的真实网络、CSP 生效、`localStorage`、外部浏览器打开；Android Intent opener 明确
-  延后；任何 GPU/像素/真机验收。**部署前提**：在 `site.yml` 重新部署落地页（带新 CORS 头与
-  `changelog.json`）之前，线上 `downloads.json` 仍无 CORS，应用会诚实地显示 `unavailable`（无提示）。
+  延后；任何 GPU/像素/真机验收。**落地页已部署**（见下方 v0.1.7 发布条目）：`downloads.json`
+  带 CORS 且为 v0.1.7，应用具备真实检查条件；但打包应用对线上网络的读取仍未在真机/真实宿主验证。
 - **附带修复**：`apps/app-linux/src/host/tests.rs` 的 `CadToolParams` 测试初始化缺 4 个已提交字段，
   导致 `cargo check -p app-linux --all-targets` 在 HEAD 即失败；本轮补齐（无行为变化）。
 

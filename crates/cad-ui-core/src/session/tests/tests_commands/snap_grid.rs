@@ -43,7 +43,10 @@ fn snap_selector_toggles_the_projected_grid_snap_flag_only() {
     let status = session.snapshot(None, None, 0);
     assert!(status.snap_grid_enabled);
     assert!(status.snap_enabled, "SNAP must not flip object snapping");
-    assert!(status.grid_enabled, "SNAP must not flip the display grid");
+    assert!(
+        !status.grid_enabled,
+        "SNAP must not flip the display grid (it starts off)"
+    );
     assert!(!status.ortho_enabled, "SNAP must not flip ORTHO");
 
     // Case-insensitive, and it toggles back off with the same selector.

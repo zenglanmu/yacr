@@ -950,19 +950,6 @@ button, input, select { font: inherit; color: inherit; }
 }
 .start-panel__empty p { margin: 0; }
 .start-panel__note { font-size: 11px; color: var(--text-muted); }
-/* Carrier honesty, not a product badge: the line names the one host this build
-   has actually run on and keeps the others at their evidence level. */
-.start-panel__status {
-  display: flex; align-items: flex-start; gap: 6px;
-  margin: 16px 0 0; padding-top: 10px;
-  border-top: 1px solid var(--line);
-  font-size: 11px; line-height: 1.45; color: var(--text-muted);
-}
-.start-panel__status-dot {
-  flex: 0 0 auto; width: 6px; height: 6px; margin-top: 5px;
-  border-radius: 999px; background: var(--ok);
-}
-
 /* Layers palette --------------------------------------------------------- */
 /* A list built for the palette window: a search strip, an optional restore
  * strip, then a sticky column band over one row per layer. A row is a 24px

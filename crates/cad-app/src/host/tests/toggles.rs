@@ -155,18 +155,18 @@ fn toggle_snap_is_allowed_in_viewer_mode_and_reports_the_value() {
     assert!(!controller.application.can_undo(&controller.document_id));
 }
 
-// --- display grid switch (default ON, `GRID`/F7) -----------------------------
+// --- display grid switch (default OFF, `GRID`/F7) ----------------------------
 
 #[test]
-fn grid_defaults_on_and_the_controller_toggles_session_state_only() {
+fn grid_defaults_off_and_the_controller_toggles_session_state_only() {
     let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
     let before = controller.drawing().unwrap();
-    assert!(controller.grid_enabled(), "the display grid defaults on");
+    assert!(!controller.grid_enabled(), "the display grid defaults off");
 
-    assert!(!controller.toggle_grid(), "the first toggle disables");
-    assert!(!controller.grid_enabled());
-    assert!(controller.toggle_grid(), "the second toggle enables");
+    assert!(controller.toggle_grid(), "the first toggle enables");
     assert!(controller.grid_enabled());
+    assert!(!controller.toggle_grid(), "the second toggle disables");
+    assert!(!controller.grid_enabled());
 
     // Session/display state only: no database revision and no history step.
     let after = controller.drawing().unwrap();
@@ -266,8 +266,8 @@ fn ortho_defaults_off_and_the_controller_toggles_session_state_only() {
         "flipping ORTHO must not flip OSNAP"
     );
     assert!(
-        controller.grid_enabled(),
-        "flipping ORTHO must not flip GRID"
+        !controller.grid_enabled(),
+        "flipping ORTHO must not flip GRID (the grid starts off)"
     );
     assert!(
         controller.hover_preview_enabled(),
@@ -354,8 +354,8 @@ fn snap_grid_defaults_off_and_the_controller_toggles_session_state_only() {
         "flipping SNAP must not flip object snapping"
     );
     assert!(
-        controller.grid_enabled(),
-        "flipping SNAP must not flip GRID"
+        !controller.grid_enabled(),
+        "flipping SNAP must not flip GRID (the grid starts off)"
     );
     assert!(
         !controller.ortho_enabled(),

@@ -258,7 +258,7 @@ fn setvar_reports_the_closed_set_and_refuses_unknown_or_missing_names() {
         ("PDSIZE", "0"),
         ("SNAPUNIT", "10"),
         ("LTSCALE", "1"),
-        ("GRID", "true"),
+        ("GRID", "false"),
         ("SNAP", "false"),
         ("ORTHO", "false"),
         ("TEXTSIZE", "2.5"),

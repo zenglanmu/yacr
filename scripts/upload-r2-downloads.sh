@@ -25,10 +25,17 @@
 #   ASSETS_DIR         local asset staging directory (default:
 #                      <repo>/target/landing-downloads/<tag>)
 #   WRANGLER_VERSION   npm version/dist-tag (default: 4)
+#   R2_PUBLIC_BASE     public download base written to `cdnBase`
+#                      (default: https://dl-yacr.snakeheartgo.top). Set it to the
+#                      literal `managed` to use the rate-limited r2.dev domain.
 #
 # Honesty rules:
-#   * r2.dev is a test / low-cost mirror with rate limits; it is not a production
-#     SLA and the generated manifest is not a compatibility claim;
+#   * the preferred host is the bucket's custom domain (`dl-yacr.snakeheartgo.top`),
+#     which can carry Cloudflare Cache Rules; the managed r2.dev domain is a
+#     test / low-cost fallback with rate limits and no production SLA;
+#   * the chosen base is only written after a real HEAD probe of every package;
+#     a missing/unreachable custom domain is a loud non-zero exit, never a
+#     silent downgrade to r2.dev;
 #   * a failed checksum, upload or HEAD probe is a loud non-zero exit;
 #   * tokens are never printed; a successful upload is distribution evidence only
 #     (not runtime, GPU, device or pixel acceptance).
@@ -41,6 +48,7 @@ REPO="${GITHUB_REPOSITORY:-zenglanmu/yacr}"
 LANDING_DIR="${LANDING_DIR:-$ROOT/apps/landing}"
 ASSETS_DIR_OVERRIDE="${ASSETS_DIR:-}"
 WRANGLER_VERSION="${WRANGLER_VERSION:-4}"
+PUBLIC_BASE="${R2_PUBLIC_BASE:-https://dl-yacr.snakeheartgo.top}"
 API="https://api.cloudflare.com/client/v4"
 
 die() {
@@ -137,7 +145,6 @@ printf '%s' "$body" | jq -e '.success and .result.enabled' >/dev/null \
   || { echo "r2.dev managed domain was not enabled:" >&2; printf '%s\n' "$body" >&2; exit 1; }
 DOMAIN="$(printf '%s' "$body" | jq -r '.result.domain')"
 [ -n "$DOMAIN" ] || die "Cloudflare did not return an r2.dev domain"
-CDN_BASE="https://$DOMAIN/releases/$TAG"
 
 # --- upload ----------------------------------------------------------------
 
@@ -163,12 +170,21 @@ for file in "${required[@]}"; do
     --remote
 done
 
-# r2.dev propagation can lag a few seconds; retry the probe before giving up.
+# The preferred public base is the bucket's custom domain (it can carry Cache
+# Rules). The managed r2.dev host is only an explicit opt-in fallback.
+if [ "$PUBLIC_BASE" = "managed" ]; then
+  CDN_BASE="https://$DOMAIN/releases/$TAG"
+  echo "WARNING: R2_PUBLIC_BASE=managed; using the rate-limited r2.dev domain" >&2
+else
+  CDN_BASE="$PUBLIC_BASE/releases/$TAG"
+fi
+
+# DNS/propagation can lag a few seconds; retry the probe before giving up.
 for file in "$LINUX" "$WINDOWS" "$MACOS" "$ANDROID"; do
   echo "verifying $CDN_BASE/$file"
   curl -fsS -I --retry 10 --retry-delay 3 --retry-all-errors \
     "$CDN_BASE/$file" >/dev/null \
-    || die "HEAD probe failed for $CDN_BASE/$file"
+    || die "HEAD probe failed for $CDN_BASE/$file; bind the custom download domain in Cloudflare (R2 -> bucket -> Custom Domains) and add the Cache Rule, or set R2_PUBLIC_BASE=managed to fall back to r2.dev"
 done
 
 # --- manifest --------------------------------------------------------------
@@ -212,5 +228,5 @@ trap - EXIT
 
 echo "CDN_BASE=$CDN_BASE"
 echo "wrote $LANDING_DIR/downloads.json"
-echo "NOTE: r2.dev is a rate-limited test mirror, not a production SLA; this upload"
-echo "      is distribution evidence only, not runtime/GPU/device/pixel acceptance."
+echo "NOTE: the custom domain is only a cache front; a successful upload is"
+echo "      distribution evidence only, not runtime/GPU/device/pixel acceptance."
