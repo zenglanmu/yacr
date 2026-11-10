@@ -203,3 +203,13 @@ codegen-units = 1
 
 [profile.dev]
 opt-level = 1
+
+# Dependencies carry line tables only; the workspace's own crates keep full
+# debuginfo. A fully instrumented `cadmpeg-ir` rlib is ~0.93 GB, and Cargo keeps
+# one artefact per feature unification (per-package `-p` builds each resolve a
+# different subset), so dependency debuginfo is what pushed `target/` into the
+# tens of GB. Line tables keep dependency frames named in backtraces and usable
+# for line-level breakpoints; only stepping into dependency internals loses
+# variable/type information.
+[profile.dev.package."*"]
+debug = 1
