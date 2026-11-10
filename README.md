@@ -11,7 +11,7 @@ macOS, Android and the web.
 
 yacr is under active development, and **preview builds are available now** — Linux Flatpak, Windows
 zip, macOS tarball, Android APK, and a browser build. It opens DWG/DXF, views 2D/3D drawings with
-wgpu, measures, and has an implementation path for 223 of 981 commands (50 complete, 173 partial);
+wgpu, measures, and has an implementation path for 623 of 981 commands (66 complete, 557 partial);
 unsupported options are rejected by name instead of silently succeeding. It is **not yet a production
 CAD system**; per-platform status and evidence boundaries are in `docs/handoff.md` and
 `docs/compatibility.md`.

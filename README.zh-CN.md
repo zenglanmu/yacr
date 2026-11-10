@@ -9,8 +9,8 @@ X11/`dom-canvas`）、Windows、macOS、Android 与 Web。
 **宣传页：** <https://yacr.pages.dev/> · **Web 版：** <https://yacr-examples.pages.dev/>
 
 yacr 处于活跃开发中，**预览版现在即可下载**：Linux Flatpak、Windows zip、macOS tarball、Android APK
-与浏览器版本。它可以打开 DWG/DXF、用 wgpu 查看 2D/3D 图纸、做测量，命令清单 981 条中有 223 条有实现
-路径（50 完整 + 173 部分）；未支持的选项按名拒绝，不静默成功。它**还不是生产级 CAD**；各平台状态与
+与浏览器版本。它可以打开 DWG/DXF、用 wgpu 查看 2D/3D 图纸、做测量，命令清单 981 条中有 623 条有实现
+路径（66 完整 + 557 部分）；未支持的选项按名拒绝，不静默成功。它**还不是生产级 CAD**；各平台状态与
 证据边界见 `docs/handoff.md` 与 `docs/compatibility.md`。
 
 **作者 / 联系：** zenglanmu@126.com · **许可证：** AGPL-3.0（`LICENSE`）
