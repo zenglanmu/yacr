@@ -1,5 +1,15 @@
 AD
 
+## 2026-11-10 真实能力：FILLET 曲线对、ARRAYPATH、IMAGE attach/clip
+
+- **FILLET 曲线–曲线**：`CIRCLE`/`ARC` 两两组合走偏移圆构造（外部 `r+R` / 内部 `|r−R|`，四个候选按拾取点选解），插入一段**次弧**（有符号 sweep 保持 `|sweep| ≤ π`），ARC 侧用 `trim_arc_to` 修剪、CIRCLE 不修剪；一条事务/一步撤销。新增 `+Z` 法向校验（`FILLET.unsupported_plane`，同时补上既有 line↔circle 的漏洞）、`Trim=No` 时仍在弧外切点拒绝（`FILLET.tangent_outside_arc`）、近零修剪拒绝（`FILLET.degenerate_arc`）。`ELLIPSE`/样条对、Multiple/多解循环仍拒绝。
+- **ARRAYPATH 真实 v1**：选择第一个实体为路径、其余为项目；`ARRAYPATH <count> [ALIGN]`，`count` 是**副本数**（源对象保留）。闭合/周期路径用 `i/count`（不重复接缝），开放路径含两端；等弧长取点复用 DIVIDE 的曲线集，LWPOLYLINE 切线解析化；`ALIGN` 每个副本绕**自身平移后的锚点**旋转；INSERT 项目用块基点；payload 自带 `refs`；空间/块成员/子图元拒绝；垂直路径 + ALIGN 拒绝 `arraypath.no_plane_tangent`。一条事务/一步撤销。
+- **IMAGE 真实授权**：`IMAGE`/`-IMAGE` 只读报告所有 IMAGE 实体（id/空间/file key/pixels/visible/clip/origin，Viewer-legal）；`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>` 经 `image_resource_key` 规范化后创建真实 `SemanticGeometry::Image`（+Z 平面、per-pixel u/v、一条事务/一步撤销，纹理由宿主按图纸目录解析）；`IMAGECLIP <minx> <miny> <maxx> <maxy>`/`OFF` 在恰好一个选中 IMAGE 上写/清二顶点像素坐标 `ImageClip{inside:true}`，一条事务/一步撤销。`IMAGEADJUST`/PDF/DGN 等仍拒绝。
+- **已运行**：`cargo test -p cad-app --lib`（2294 passed, 3 ignored）、`cad-ui-core`（506+1）、`cargo clippy`（app/ui-core）、`cargo fmt --check`、`npm test`（1452）、file-size/command-docs/i18n 全绿（FILLET 为 2279 时、ARRAYPATH 加固为 2294 时、IMAGE 为 2287 时分别验证；合并后本轮再跑一次）。
+- **NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机、Windows/macOS/Android/Web 运行时、真实 DWG/vendor 对照；以上只有合成契约测试。IMAGE 的纹理解析/显示另有既有 `image.unresolved` 边界，跨载体未验证。
+- **提交**：`f6d73035` FILLET curve-curve；`a19778b5` ARRAYPATH v1；`2e3fd0e0` ARRAYPATH 加固；`c4dd8d75` IMAGE attach/clip/report。
+
+
 ## 2026-11-10 Batch 3：Wave 17–24（200 条具名拒绝，覆盖 623 → 823）
 
 - **新增 200 条命令路径**（A–O，官方索引 31–601）：动作录制、Activity Insights/DesignCenter/Blocks/Command Macros/CUI 面板、OLE/超链接、AutoLISP/SHX、灯光/材质/NURBS 控制点、几何与尺寸约束、数据提取/dbConnect/Data Link、DWF/DGN 底图与导出、标记/追踪协作、对象检测/计数、比较、图纸集、GIS、3D 相机/分析/导航等。全部是**具名拒绝**（`CadError::Unsupported` + 稳定 `<name>.unsupported: ...` 原因串），不写库/不升修订/不入历史/Viewer-legal；不是可用功能。
