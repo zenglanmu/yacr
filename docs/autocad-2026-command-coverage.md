@@ -667,8 +667,8 @@
 | `IMAGEADJUST` | 部分实现 | 具名拒绝（`imageadjust.unsupported: no image adjustment model`）。 |
 | `IMAGEAPP` | 部分实现 | 具名拒绝（`imageapp.unsupported: no external image-editor association model`）。 |
 | `IMAGEASYNCWAIT` | 部分实现 | 具名拒绝（`imageasyncwait.unsupported: no asynchronous image loading model`）。 |
-| `IMAGEATTACH` | 部分实现 | 真实创建 `SemanticGeometry::Image`：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>`；逻辑 key 经 `image_resource_key` 规范化（拒绝绝对路径/`..`/URL），+Z 平面、`u=(upp,0,0)`/`v=(0,upp,0)`，一条事务/一步撤销；纹理由宿主按图纸目录解析。 |
-| `IMAGECLIP` | 部分实现 | 恰好一个选中 IMAGE；`IMAGECLIP <minx> <miny> <maxx> <maxy>`（像素坐标）写入二顶点 `ImageClip{inside:true}`，`OFF` 清除；一条事务/一步撤销；仅矩形 inside 裁剪，非凸/outside 未授权。 |
+| `IMAGEATTACH` | 部分实现 | 真实创建 `SemanticGeometry::Image`：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>`；逻辑 key 经 `image_resource_key` 规范化（拒绝绝对路径/`..`/URL），+Z 平面、`u=(upp,0,0)`/`v=(0,upp,0)`，一条事务/一步撤销；宿主在提交后按 key 集变化重载纹理（大小写敏感文件系统用逐段不敏感回退），未解析 key 进入宿主图像报告。 |
+| `IMAGECLIP` | 部分实现 | 恰好一个选中 IMAGE；`IMAGECLIP <minx> <miny> <maxx> <maxy>`（像素坐标）写入二顶点 `ImageClip{inside:true}`，`OFF` 清除；一条事务/一步撤销；裁剪多边形与 `[0,pixels]` 求交（全在外→`image.clip_unsupported`），x 沿 u、y 沿 v（自下而上）；仅矩形 inside 授权，非凸/outside 未授权。 |
 | `IMAGEEDIT` | 部分实现 | 具名拒绝（`imageedit.unsupported: no external image-editor model`）。 |
 | `IMAGEQUALITY` | 部分实现 | 具名拒绝（`imagequality.unsupported: no image display-quality model`）。 |
 | `IMPORT` | 部分实现 | 具名拒绝（`import.unsupported: the generic IMPORT picker is not implemented`）。 |
@@ -935,7 +935,7 @@
 | `SYSVARMONITOR` | 部分实现 | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | `SYSVDLG` | 部分实现 | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
 | `SYSWINDOWS` | 部分实现 | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
-| `TABLE` | 部分实现 | **导入的 ACAD_TABLE 已建模**：行/列/单元格/合并/文字/边框，可 MOVE/ROTATE/SCALE、可拾取/显示、可 FIND、真实 DXF 导出；创建未实现（`table.unsupported`）；单元格块/字段内容、边框颜色/线宽/填充为声明损失。
+| `TABLE` | 部分实现 | **导入的 ACAD_TABLE 已建模**：行/列/单元格/合并/文字/边框，可 MOVE/ROTATE/SCALE（相似变换；+Z 表格文字随旋转）、可拾取/显示、FIND 逐单元格报告/替换、真实 DXF 导出（块内表格带 INSERT 变换）；导入文字高度/样式按 `cell→row→base→TableStyle` 解析；创建未实现（`table.unsupported`）；单元格块/字段内容、边框颜色/线宽/填充、对齐/逐格旋转、TABLESTYLE 名称不往返均为声明损失。
 | `TABLEDIT` | 部分实现 | 导入表格可显示/变换；**无单元格编辑命令面**（`tabledit.unsupported`）。
 | `TABLEEXPORT` | 部分实现 | **无 CSV/文件写出**（`tableexport.unsupported`）；表格单元格数据已在模型里。
 | `TABLESTYLE` | 部分实现 | **无表格样式表**（`tablestyle.unsupported`）；导入时只按样式解析边框可见性/双线。
@@ -1457,7 +1457,7 @@
 | 437 | `IMAGEADJUST` | 部分实现 | Controls the brightness, contrast, and fade values of images. | 具名拒绝（`imageadjust.unsupported: no image adjustment model`）。 |
 | 438 | `IMAGEAPP` | 部分实现 | Specifies the image editing program for IMAGEEDIT. | 具名拒绝（`imageapp.unsupported: no external image-editor association model`）。 |
 | 439 | `IMAGEASYNCWAIT` | 部分实现 | Ensures that raster images being loaded in the background during file opening are complete before proceeding. | 具名拒绝（`imageasyncwait.unsupported: no asynchronous image loading model`）。 |
-| 440 | `IMAGEATTACH` | 部分实现 | Inserts a reference to an image file. | 真实创建 `SemanticGeometry::Image`：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>`；逻辑 key 经 `image_resource_key` 规范化（拒绝绝对路径/`..`/URL），+Z 平面、`u=(upp,0,0)`/`v=(0,upp,0)`，一条事务/一步撤销；纹理由宿主按图纸目录解析。 |
+| 440 | `IMAGEATTACH` | 部分实现 | Inserts a reference to an image file. | 真实创建 `SemanticGeometry::Image`：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>`；逻辑 key 经 `image_resource_key` 规范化（拒绝绝对路径/`..`/URL），+Z 平面、`u=(upp,0,0)`/`v=(0,upp,0)`，一条事务/一步撤销；宿主在提交后按 key 集变化重载纹理（大小写敏感文件系统用逐段不敏感回退），未解析 key 进入宿主图像报告。 |
 | 441 | `IMAGECLIP` | 部分实现 | Crops the display of a selected image to a specified boundary. | 恰好一个选中 IMAGE；`IMAGECLIP <minx> <miny> <maxx> <maxy>`（像素坐标）写入二顶点 `ImageClip{inside:true}`，`OFF` 清除；一条事务/一步撤销；仅矩形 inside 裁剪，非凸/outside 未授权。 |
 | 442 | `IMAGEEDIT` | 部分实现 | Launches the image editing program specified by IMAGEAPP for the selected image. | 具名拒绝（`imageedit.unsupported: no external image-editor model`）。 |
 | 443 | `IMAGEQUALITY` | 部分实现 | Controls the display quality of images. | 具名拒绝（`imagequality.unsupported: no image display-quality model`）。 |
@@ -1860,7 +1860,7 @@
 | 840 | `SYSVDLG` | 部分实现 | Allows you to view, edit, save, and restore system variable settings. | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
 | 841 | `SYSWINDOWS` | 部分实现 | Arranges windows and icons when the application window is shared with external applications. | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
 | 842 | `-TABLE` | 部分实现 | Creates an empty table object. | 表格创建的命令行拼写；**导入的 ACAD_TABLE 已建模**（行/列/单元格/合并/文字/边框，可变换/拾取/显示/FIND/真实 DXF 导出）；创建未实现（`-table.unsupported`）。
-| 843 | `TABLE` | 部分实现 | Creates an empty table object. | **导入的 ACAD_TABLE 已建模**：行/列/单元格/合并/文字/边框，可 MOVE/ROTATE/SCALE、可拾取/显示、可 FIND、真实 DXF 导出；创建未实现（`table.unsupported`）；单元格块/字段内容、边框颜色/线宽/填充为声明损失。
+| 843 | `TABLE` | 部分实现 | Creates an empty table object. | **导入的 ACAD_TABLE 已建模**：行/列/单元格/合并/文字/边框，可 MOVE/ROTATE/SCALE（相似变换；+Z 表格文字随旋转）、可拾取/显示、FIND 逐单元格报告/替换、真实 DXF 导出（块内表格带 INSERT 变换）；导入文字高度/样式按 `cell→row→base→TableStyle` 解析；创建未实现（`table.unsupported`）；单元格块/字段内容、边框颜色/线宽/填充、对齐/逐格旋转、TABLESTYLE 名称不往返均为声明损失。
 | 844 | `TABLEDIT` | 部分实现 | Edits text in a table cell. | 导入表格可显示/变换；**无单元格编辑命令面**（`tabledit.unsupported`）。
 | 845 | `TABLEEXPORT` | 部分实现 | Exports data from a table object in CSV file format. | **无 CSV/文件写出**（`tableexport.unsupported`）；表格单元格数据已在模型里。
 | 846 | `TABLESTYLE` | 部分实现 | Creates, modifies, or specifies table styles. | **无表格样式表**（`tablestyle.unsupported`）；导入时只按样式解析边框可见性/双线。

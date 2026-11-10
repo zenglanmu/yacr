@@ -1,5 +1,16 @@
 AD
 
+## 2026-11-10 TABLE 模型 v1 + 加固
+
+- **真实模型**：`SemanticGeometry::Table(Box<TableGeometry>)`（`cad-domain/src/table_entity.rs`）：frame、行/列、单元格文字/高度/样式、合并跨度、四边边框 + 派生显示（与旧 `Compound` 显示逐行等价）。导入 `ACAD_TABLE` 保留网格/合并/文字/边框；`Completeness::Partial` 原因覆盖对齐强制 Center/Middle、逐格旋转、块/字段/额外内容、非 +Z 文字、未解析样式。
+- **传播**：`cad-db` 变换（相似 + 保持朝向；+Z 文字随 `atan2(horizontal)` 旋转，倾斜拒绝）、validate/bounds；`cad-geometry` tessellate/vector/engine/intersect；`cad-spatial` pick/bounds；representation 分组；font/image 收集；FIND 逐单元格（不再跨单元格拼接）与批量替换一次重建；selection/filter/properties；EXPLODE/grip 具名拒绝；DXF 真实 `EntityType::Table` 导出（块内表格应用 INSERT 变换；重导入验证）。
+- **加固**：导入文字高度/样式按 `cell.style → row.style → base_style → TableStyle.data_row_style → content → 2.5` 解析；合并跨度先按网格 clamp；validate 拒绝重叠合并/负双线间距/非单位 frame；导出按不同样式名各注册一次；TABLESTYLE 对象/名称、TABLECONTENT name/description 明确报告不往返。
+- **仍拒绝**：`TABLE`/`-TABLE` 创建、`TABLEDIT`、`TABLEEXPORT`（无 CSV/文件写出）、`TABLESTYLE`、`TINSERT`、`MATCHCELL`，原因串已改为“导入模型已存在、创建/编辑/导出面未实现”。
+- **已运行**：`cargo test -p cad-domain -p cad-db -p cad-import-acadrust -p cad-app --all-targets`（2306 cad-app + 373 import 等全绿）、clippy/fmt/file-size/i18n/npm test 全绿；未运行 app-android 构建与真实 DWG/AutoCAD 对照。
+- **NOT VERIFIED**：无真实 DWG `ACAD_TABLE` 样本、无 AutoCAD/vendor 往返、无 GUI/GPU/像素/真机证据。
+- **提交**：`beced4dd` TABLE 模型 v1；`aa43b64e` 加固。
+
+
 ## 2026-11-10 真实能力：FILLET 曲线对、ARRAYPATH、IMAGE attach/clip
 
 - **FILLET 曲线–曲线**：`CIRCLE`/`ARC` 两两组合走偏移圆构造（外部 `r+R` / 内部 `|r−R|`，四个候选按拾取点选解），插入一段**次弧**（有符号 sweep 保持 `|sweep| ≤ π`），ARC 侧用 `trim_arc_to` 修剪、CIRCLE 不修剪；一条事务/一步撤销。新增 `+Z` 法向校验（`FILLET.unsupported_plane`，同时补上既有 line↔circle 的漏洞）、`Trim=No` 时仍在弧外切点拒绝（`FILLET.tangent_outside_arc`）、近零修剪拒绝（`FILLET.degenerate_arc`）。`ELLIPSE`/样条对、Multiple/多解循环仍拒绝。

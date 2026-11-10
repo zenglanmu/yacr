@@ -1324,7 +1324,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `CONVERTCTB` | **部分实现**：具名拒绝（`convertctb.unsupported`）：CTB 转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERTPOLY` | **部分实现**：只读报告（`convertpoly.single_representation`）：本构建只存一种 `LWPOLYLINE` 表示，无旧式多段线可转换。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERT` | **部分实现**：具名拒绝（`convert.unsupported`）：通用对象转换未实现。 | 不写库/不升修订/不入历史（报告类只读） |
-| `TABLE` | **部分实现（真实导入模型 + 创建拒绝）**：导入的 `ACAD_TABLE` 现在是 `SemanticGeometry::Table`（行/列/单元格/合并/文字/边框 + 派生显示），可 MOVE/ROTATE/SCALE（相似变换）、可拾取/显示/FIND、真实 DXF `ACAD_TABLE` 导出；创建按 `table.unsupported` 拒绝 | 单元格块/字段内容、边框颜色/线宽/填充、表格样式对象、TABLECONTENT 的 name/description 不往返；EXPLODE 仍拒绝；无 GUI/像素/真实 DWG 对照 |
+| `TABLE` | **部分实现（真实导入模型 + 创建拒绝）**：导入的 `ACAD_TABLE` 现在是 `SemanticGeometry::Table`（行/列/单元格/合并/文字/边框 + 派生显示），可 MOVE/ROTATE/SCALE（相似变换；+Z 表格文字随旋转，倾斜拒绝）、可拾取/显示/FIND（逐单元格报告/替换）、真实 DXF `ACAD_TABLE` 导出（块内表格带 INSERT 变换）；导入文字高度/样式按 `cell→row→base→TableStyle` 解析；创建按 `table.unsupported` 拒绝 | 单元格块/字段内容、边框颜色/线宽/填充、对齐/逐格旋转、TABLESTYLE 名称与 TABLECONTENT name/description 不往返；EXPLODE 仍拒绝；无 GUI/像素/真实 DWG 对照 |
 | `-TABLE` | **部分实现（创建拒绝）**：命令行拼写；导入模型与 `TABLE` 相同 | 创建未实现 |
 | `TABLEDIT` | **部分实现（拒绝）**：导入表格可显示/变换/查询；无单元格编辑命令面 | `tabledit.unsupported` |
 | `TABLEEXPORT` | **部分实现（拒绝）**：单元格数据在模型里，但无 CSV/文件写出 | `tableexport.unsupported` |
@@ -1412,8 +1412,8 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | --- | --- | --- |
 | `IMAGE` | **部分实现（只读报告）**：列出所有 IMAGE 实体的 id/空间/file key/pixels/visible/clip/origin（`image.entry`/`image.report`，空图 `image.none`）；Viewer-legal | 无 External References 面板/重载/卸载；不写库 |
 | `-IMAGE` | **部分实现（只读报告）**：`-IMAGE` 命令行拼写，`-image.*` 诊断码；无写 | 同上，命令行拼写 |
-| `IMAGEATTACH` | **部分实现（真实写入）**：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>` 创建真实 IMAGE 实体；逻辑 key 规范化，一条事务/一步撤销；宿主按图纸目录解析纹理 | 无对话框/文件选择器；纹理不可解析时表示层显示边框 + `image.unresolved`；跨载体纹理证据 NOT VERIFIED |
-| `IMAGECLIP` | **部分实现（真实写入）**：一个选中 IMAGE + 像素坐标矩形（或 `OFF`），写二顶点 `ImageClip{inside:true}`，一条事务/一步撤销 | 仅矩形 inside 裁剪；非凸/outside 裁剪未授权；无交互拖拽 |
+| `IMAGEATTACH` | **部分实现（真实写入）**：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>` 创建真实 IMAGE 实体；逻辑 key 规范化（控制符/`..`/绝对路径拒绝），一条事务/一步撤销；宿主在提交后按 key 集变化重载纹理，大小写敏感文件系统逐段不敏感回退 | 无对话框/文件选择器；未解析 key 显示边框并进入宿主图像报告；web carrier 显式拒绝（`unsupported-runtime: images`）；跨载体纹理/GPU 证据 NOT VERIFIED |
+| `IMAGECLIP` | **部分实现（真实写入）**：一个选中 IMAGE + 像素坐标矩形（或 `OFF`），写二顶点 `ImageClip{inside:true}`，一条事务/一步撤销；裁剪多边形与 `[0,pixels]` 求交（全在外→`image.clip_unsupported`），x 沿 u、y 沿 v（自下而上） | 仅矩形 inside 裁剪；非凸/outside 未授权；无交互拖拽 |
 | `IMAGEADJUST` | **部分实现（具名拒绝）**：`imageadjust.unsupported: no image adjustment model` | 不写库/不升修订/不入历史 |
 | `-IMAGEADJUST` | **部分实现（具名拒绝）**：`-imageadjust.unsupported: no image adjustment model` | 不写库/不升修订/不入历史 |
 | `IMAGEQUALITY` | **部分实现（具名拒绝）**：`imagequality.unsupported: no image display-quality model` | 不写库/不升修订/不入历史 |
