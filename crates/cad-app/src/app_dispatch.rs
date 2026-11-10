@@ -372,14 +372,16 @@ impl Application {
             | ExtendedCommandId::PageSetupIn
             | ExtendedCommandId::DashPageSetupIn
             | ExtendedCommandId::ConvertPoly => self.extended_w13_reports(session, command, ext)?,
+            // TABLE / -TABLE create one real table; TABLEDIT edits one selected
+            // table's cell text. Each is one transaction / one undo step.
+            ExtendedCommandId::TableCreate
+            | ExtendedCommandId::DashTable
+            | ExtendedCommandId::TableEdit => self.table_edit(session, command, ext)?,
             ExtendedCommandId::PlotStyleList
             | ExtendedCommandId::DashPlotStyleList
             | ExtendedCommandId::ConvertPlotStyles
             | ExtendedCommandId::ConvertCtb
             | ExtendedCommandId::ConvertGeneric
-            | ExtendedCommandId::TableCreate
-            | ExtendedCommandId::DashTable
-            | ExtendedCommandId::TableEdit
             | ExtendedCommandId::TableExport
             | ExtendedCommandId::TableStyleList
             | ExtendedCommandId::TableInsert

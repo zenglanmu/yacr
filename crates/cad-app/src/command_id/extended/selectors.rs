@@ -857,6 +857,11 @@ impl ExtendedCommandId {
                 // or rewrites one selected image's clip.
                 | Self::ImageAttach
                 | Self::ImageClip
+                // TABLE / -TABLE insert one table row; TABLEDIT rewrites one
+                // selected table's cell text.
+                | Self::TableCreate
+                | Self::DashTable
+                | Self::TableEdit
         )
     }
 }

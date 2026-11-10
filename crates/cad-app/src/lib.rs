@@ -434,10 +434,10 @@ pub use command_payload::{
     RadialDimensionCommand, RenameCommand, RevCloudStyle, RevisionCloudMode, RevisionCloudOptions,
     RotatedLinearDimensionCommand, SelectSimilarSettings, SelectionApply, SelectionOperator,
     SelectionPredicate, SelectionProperty, SelectionScope, SelectionToolPayload,
-    SetByLayerSettings, StretchPolygonCommand, TCircleCommand, TCountCommand, TextAlignCommand,
-    TextAlignEdge, TextBoundaryShape, TextCaseMode, TextFitCommand, TextMaskKind, TextMaskOptions,
-    TextOrder, TextScaleCommand, TwoLineCommand, Txt2MTextOptions, UtilityPayload, VPointInput,
-    ViewCommand, WipeoutPayload,
+    SetByLayerSettings, StretchPolygonCommand, TCircleCommand, TCountCommand, TableCreateCommand,
+    TableEditCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode,
+    TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand, TwoLineCommand,
+    Txt2MTextOptions, UtilityPayload, VPointInput, ViewCommand, WipeoutPayload,
 };
 
 pub use app_audit::AuditRequest;

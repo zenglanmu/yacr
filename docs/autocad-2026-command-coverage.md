@@ -71,7 +71,7 @@
 > **2026-11-09 增补（Wave 10）**：`-LAYER` 只读图层表、`-SCALELISTEDIT` 只读真实比例表、`LAYERSTATESAVE`/`NEWVIEW` 两个载荷路由、`LWEIGHT`/`-LWEIGHT`/`COLOR`/`-COLOR`/`-UNITS`/`COPYHIST` 六个只读会话/日志报告、`HELP`…`TRANSPARENCY` 十个具名拒绝，以及 `DSETTINGS`/`QUICKPROPERTIES`/`CLASSICLAYER`/`COMMANDLINE`/`COMMANDLINEHIDE` 五个 chrome 本地选择子计入 **473 已实现（66 完整 + 407 部分）/ 508 未实现**；无 GUI/GPU/像素证据。
 > **2026-11-09 增补（Wave 11）**：`3DALIGN`…`3DZOOM` 二十五个 3D/网格/曲面/3D 导航/打印名全部按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）；3D 优先级低于 2D，本批只提供诚实命令路径，不计为可用 3D 功能。计入 **498 已实现（66 完整 + 432 部分）/ 483 未实现**。
 > **2026-11-09 增补（Wave 12）**：`3DSIN`…`SCRIPT` 二十五个文件/导入导出/扩展运行时名全部按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串；不写库/不升修订/不入历史）；唯一矢量输出仍是 `PLOT`（SVG/PDF）。计入 **523 已实现（66 完整 + 457 部分）/ 458 未实现**。
-> **2026-11-09 增补（Wave 13）**：`PAGESETUP`/`-PAGESETUP` 只读页面设置报告、`CONVERTPOLY` 只读单一多段线表示报告，以及 `PSETUPIN`…`LAYTRANS` 二十二个具名拒绝（页面设置导入/打印样式/表格/字段/远程文字/拼写/超级填充/视口对齐同步/图层转换；表格实体模型已于 2026-11-10 落地——导入/变换/FIND/导出真实，创建/编辑仍拒绝）计入 **548 已实现（66 完整 + 482 部分）/ 433 未实现**；无 GUI/GPU/像素证据。
+> **2026-11-09 增补（Wave 13）**：`PAGESETUP`/`-PAGESETUP` 只读页面设置报告、`CONVERTPOLY` 只读单一多段线表示报告，以及 `PSETUPIN`…`LAYTRANS` 二十二个具名拒绝（页面设置导入/打印样式/表格/字段/远程文字/拼写/超级填充/视口对齐同步/图层转换；表格已真实落地（模型 + 创建 + TABLEDIT）；TABLESTYLE/TINSERT/MATCHCELL/TABLEEXPORT 仍拒绝）计入 **548 已实现（66 完整 + 482 部分）/ 433 未实现**；无 GUI/GPU/像素证据。
 > **2026-11-09 增补（Wave 14）**：`BOX`…`ROTATE3D` 二十五个 3D 实体图元/布尔/剖切/边编辑名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D，不计为可用 3D 功能。计入 **573 已实现（66 完整 + 507 部分）/ 408 未实现**。
 > **2026-11-09 增补（Wave 15）**：`SURFBLEND`…`MESHUNCREASE` 二十五个曲面/网格名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D。计入 **598 已实现（66 完整 + 532 部分）/ 383 未实现**。
 > **2026-11-09 增补（Wave 16）**：`IMAGE`…`DGNADJUST` 二十五个图像/PDF/DGN 底图名全部按**具名拒绝**计入（`IMAGE`/`-IMAGE`/`IMAGEATTACH`/`IMAGECLIP` 已于 2026-11-10 晋升：前两者只读报告、后两者真实写入；其余仍拒绝）（稳定原因串，不写库/不升修订/不入历史）。计入 **623 已实现（66 完整 + 557 部分）/ 358 未实现**。
@@ -257,7 +257,7 @@
 | `-RENAME` | 部分实现 | `RENAME` 的别名，同一实现；图层重命名一条事务/一步撤销。 |
 | `-SCALELISTEDIT` | 部分实现 | 只读报告真实 `ACAD_SCALELIST`（`scalelistedit.entry`）；创建/编辑/删除/排序比例未实现（`scalelistedit.write_unsupported`）。 |
 | `-STYLE` | 部分实现 | 与 `STYLE` 相同的只读文字样式列表，使用 `-style.*` 诊断码；编辑未实现。 |
-| `-TABLE` | 部分实现 | 表格创建的命令行拼写；**导入的 ACAD_TABLE 已建模**（行/列/单元格/合并/文字/边框，可变换/拾取/显示/FIND/真实 DXF 导出）；创建未实现（`-table.unsupported`）。
+| `-TABLE` | 部分实现 | 真实创建（与 `TABLE` 同实现）：`-TABLE <rows> <cols> <col_width> <row_height> <x> <y>`，+X/+Z、空单元格/Standard、一条事务/一步撤销；无对话框。
 | `-UNITS` | 部分实现 | 只读报告固定单位显示规则（`-units.*` 诊断码）；Units 对话框/逐图纸单位表未实现。 |
 | `-VIEW` | 部分实现 | `VIEW` 的别名，同一实现 |
 | `-VPORTS` | 部分实现 | `VPORTS` 的别名，同一实现；同一边界 |
@@ -935,8 +935,8 @@
 | `SYSVARMONITOR` | 部分实现 | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | `SYSVDLG` | 部分实现 | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
 | `SYSWINDOWS` | 部分实现 | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
-| `TABLE` | 部分实现 | **导入的 ACAD_TABLE 已建模**：行/列/单元格/合并/文字/边框，可 MOVE/ROTATE/SCALE（相似变换；+Z 表格文字随旋转）、可拾取/显示、FIND 逐单元格报告/替换、真实 DXF 导出（块内表格带 INSERT 变换）；导入文字高度/样式按 `cell→row→base→TableStyle` 解析；创建未实现（`table.unsupported`）；单元格块/字段内容、边框颜色/线宽/填充、对齐/逐格旋转、TABLESTYLE 名称不往返均为声明损失。
-| `TABLEDIT` | 部分实现 | 导入表格可显示/变换；**无单元格编辑命令面**（`tabledit.unsupported`）。
+| `TABLE` | 部分实现 | **导入的 ACAD_TABLE 已建模**：行/列/单元格/合并/文字/边框，可 MOVE/ROTATE/SCALE（相似变换；+Z 表格文字随旋转）、可拾取/显示、FIND 逐单元格报告/替换、真实 DXF 导出（块内表格带 INSERT 变换）；导入文字高度/样式按 `cell→row→base→TableStyle` 解析；创建真实：`TABLE <rows> <cols> <col_width> <row_height> <x> <y>`（空单元格/Standard、+X/+Z、一条事务/一步撤销）；单元格块/字段内容、边框颜色/线宽/填充、对齐/逐格旋转、TABLESTYLE 名称不往返均为声明损失；无对话框/单元格样式/创建时合并。
+| `TABLEDIT` | 部分实现 | 真实单元格文本编辑：`TABLEDIT <row> <col> [text]`（1-based；选中一个表格；剩余整行作为文本，空文本清除），FIND 可见；一条事务/一步撤销；无样式/合并/块内容编辑。
 | `TABLEEXPORT` | 部分实现 | **无 CSV/文件写出**（`tableexport.unsupported`）；表格单元格数据已在模型里。
 | `TABLESTYLE` | 部分实现 | **无表格样式表**（`tablestyle.unsupported`）；导入时只按样式解析边框可见性/双线。
 | `TABLET` | 部分实现 | 具名拒绝（`tablet.unsupported`）：本构建无数字化仪模型。 |
@@ -1859,9 +1859,9 @@
 | 839 | `SYSVARMONITOR` | 部分实现 | Monitors a list of system variables and sends notifications when there are changes to any one in the list. | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | 840 | `SYSVDLG` | 部分实现 | Allows you to view, edit, save, and restore system variable settings. | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
 | 841 | `SYSWINDOWS` | 部分实现 | Arranges windows and icons when the application window is shared with external applications. | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
-| 842 | `-TABLE` | 部分实现 | Creates an empty table object. | 表格创建的命令行拼写；**导入的 ACAD_TABLE 已建模**（行/列/单元格/合并/文字/边框，可变换/拾取/显示/FIND/真实 DXF 导出）；创建未实现（`-table.unsupported`）。
-| 843 | `TABLE` | 部分实现 | Creates an empty table object. | **导入的 ACAD_TABLE 已建模**：行/列/单元格/合并/文字/边框，可 MOVE/ROTATE/SCALE（相似变换；+Z 表格文字随旋转）、可拾取/显示、FIND 逐单元格报告/替换、真实 DXF 导出（块内表格带 INSERT 变换）；导入文字高度/样式按 `cell→row→base→TableStyle` 解析；创建未实现（`table.unsupported`）；单元格块/字段内容、边框颜色/线宽/填充、对齐/逐格旋转、TABLESTYLE 名称不往返均为声明损失。
-| 844 | `TABLEDIT` | 部分实现 | Edits text in a table cell. | 导入表格可显示/变换；**无单元格编辑命令面**（`tabledit.unsupported`）。
+| 842 | `-TABLE` | 部分实现 | Creates an empty table object. | `TABLE` 的命令行拼写；同一真实创建实现。
+| 843 | `TABLE` | 部分实现 | Creates an empty table object. | **导入模型 + 真实创建**：`TABLE <rows> <cols> <col_width> <row_height> <x> <y>` 创建空表格（Standard、+X/+Z、一条事务/一步撤销）；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐单元格、真实 DXF 导出；无对话框/创建时合并/单元格样式。
+| 844 | `TABLEDIT` | 部分实现 | Edits text in a table cell. | 真实单元格文本编辑 `TABLEDIT <row> <col> [text]`（1-based、选中一个表格、剩余整行文本、空文本清除）；一条事务/一步撤销；无样式/合并/块内容编辑。
 | 845 | `TABLEEXPORT` | 部分实现 | Exports data from a table object in CSV file format. | **无 CSV/文件写出**（`tableexport.unsupported`）；表格单元格数据已在模型里。
 | 846 | `TABLESTYLE` | 部分实现 | Creates, modifies, or specifies table styles. | **无表格样式表**（`tablestyle.unsupported`）；导入时只按样式解析边框可见性/双线。
 | 847 | `TABLET` | 部分实现 | Calibrates, configures, and turns on and off an attached digitizing tablet. | 具名拒绝（`tablet.unsupported`）：本构建无数字化仪模型。 |

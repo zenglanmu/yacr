@@ -1324,9 +1324,9 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `CONVERTCTB` | **部分实现**：具名拒绝（`convertctb.unsupported`）：CTB 转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERTPOLY` | **部分实现**：只读报告（`convertpoly.single_representation`）：本构建只存一种 `LWPOLYLINE` 表示，无旧式多段线可转换。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERT` | **部分实现**：具名拒绝（`convert.unsupported`）：通用对象转换未实现。 | 不写库/不升修订/不入历史（报告类只读） |
-| `TABLE` | **部分实现（真实导入模型 + 创建拒绝）**：导入的 `ACAD_TABLE` 现在是 `SemanticGeometry::Table`（行/列/单元格/合并/文字/边框 + 派生显示），可 MOVE/ROTATE/SCALE（相似变换；+Z 表格文字随旋转，倾斜拒绝）、可拾取/显示/FIND（逐单元格报告/替换）、真实 DXF `ACAD_TABLE` 导出（块内表格带 INSERT 变换）；导入文字高度/样式按 `cell→row→base→TableStyle` 解析；创建按 `table.unsupported` 拒绝 | 单元格块/字段内容、边框颜色/线宽/填充、对齐/逐格旋转、TABLESTYLE 名称与 TABLECONTENT name/description 不往返；EXPLODE 仍拒绝；无 GUI/像素/真实 DWG 对照 |
-| `-TABLE` | **部分实现（创建拒绝）**：命令行拼写；导入模型与 `TABLE` 相同 | 创建未实现 |
-| `TABLEDIT` | **部分实现（拒绝）**：导入表格可显示/变换/查询；无单元格编辑命令面 | `tabledit.unsupported` |
+| `TABLE` | **部分实现（真实模型 + 创建）**：`TABLE <rows> <cols> <col_width> <row_height> <x> <y>` 创建空表格（Standard、+X/+Z、一条事务/一步撤销）；导入的 `ACAD_TABLE` 为 `SemanticGeometry::Table`，可 MOVE/ROTATE/SCALE（+Z 文字随旋转，倾斜拒绝）、拾取/显示/FIND 逐单元格、真实 DXF 导出（块内表格带 INSERT 变换） | 无对话框/创建时合并/单元格样式；块/字段内容、边框颜色/线宽/填充、对齐/逐格旋转、TABLESTYLE 名称与 TABLECONTENT name/description 不往返；EXPLODE 拒绝；无 GUI/像素/真实 DWG 对照 |
+| `-TABLE` | **部分实现（真实创建）**：命令行拼写，与 `TABLE` 同实现 | 同 `TABLE` |
+| `TABLEDIT` | **部分实现（真实编辑）**：`TABLEDIT <row> <col> [text]`（1-based、选中一个表格、剩余整行文本、空文本清除），一条事务/一步撤销，FIND 可见 | 无样式/合并/块内容编辑；无交互单元格对话框 |
 | `TABLEEXPORT` | **部分实现（拒绝）**：单元格数据在模型里，但无 CSV/文件写出 | `tableexport.unsupported` |
 | `TABLESTYLE` | **部分实现（拒绝）**：导入时按样式解析边框可见性/双线；无表格样式表 | `tablestyle.unsupported` |
 | `TINSERT` | **部分实现（拒绝）**：无块进入单元格的创建；导入单元格块内容未建模 | `tinsert.unsupported` |

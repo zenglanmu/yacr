@@ -990,4 +990,11 @@ pub enum CommandPayload {
     /// `IMAGECLIP <minx> <miny> <maxx> <maxy>` / `IMAGECLIP OFF`: set or clear a
     /// pixel-space rectangular clip on the one selected image (Work-only).
     ImageClip(Box<ImageClipCommand>),
+    /// `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`: one real
+    /// `SemanticGeometry::Table` grid (Work-only); contract in `app_drawing::table_edit`.
+    TableCreate(Box<TableCreateCommand>),
+    /// `TABLEDIT <row> <col> [text...]`: replace one 1-based cell's text on the
+    /// single selected table (Work-only). Contract:
+    /// [`crate::app_drawing::table_edit`].
+    TableEdit(Box<TableEditCommand>),
 }

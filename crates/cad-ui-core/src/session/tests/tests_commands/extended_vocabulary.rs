@@ -68,6 +68,11 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 // Wave 16 raster-image authoring writes entity rows.
                 | ExtendedCommandId::ImageAttach
                 | ExtendedCommandId::ImageClip
+                // TABLE / -TABLE insert one table row; TABLEDIT rewrites one
+                // selected table's cell text.
+                | ExtendedCommandId::TableCreate
+                | ExtendedCommandId::DashTable
+                | ExtendedCommandId::TableEdit
         );
         assert_eq!(
             variant.requires_work_mode(),

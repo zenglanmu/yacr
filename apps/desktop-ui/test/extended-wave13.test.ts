@@ -53,9 +53,18 @@ test('reports, writes and refusals state their boundaries', async () => {
   for (const id of ['PSETUPIN', '-PSETUPIN']) {
     assert.match(en[`${labelSlug(id)}.hint`], /same drawing|same-drawing/i, id);
   }
-  for (const id of ['PLOTSTYLE', 'TABLE', 'FIELD', 'SPELL', 'SUPERHATCH', 'ALIGNSPACE', 'VPSYNC', 'LAYTRANS']) {
+  for (const id of ['PLOTSTYLE', 'FIELD', 'SPELL', 'SUPERHATCH', 'ALIGNSPACE', 'VPSYNC', 'LAYTRANS']) {
     assert.match(en[`${labelSlug(id)}.hint`], /Named refusal/i, id);
   }
+  // TABLE / -TABLE / TABLEDIT are implemented writes now: their hints describe
+  // the real one-transaction behaviour, not a refusal.
+  for (const id of ['TABLE', '-TABLE']) {
+    assert.match(en[`${labelSlug(id)}.hint`], /one transaction\s*\/\s*one undo step/i, id);
+    assert.doesNotMatch(en[`${labelSlug(id)}.hint`], /Named refusal/i, id);
+  }
+  assert.match(en['draw.kind.tabledit.hint'], /1-based/i);
+  assert.match(en['draw.kind.tabledit.hint'], /one transaction\s*\/\s*one undo step/i);
+  assert.doesNotMatch(en['draw.kind.tabledit.hint'], /Named refusal/i);
 });
 
 test('the Wave 13 names are admitted with a drawing and refused without one', () => {

@@ -581,6 +581,30 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return parts.length === 4 && parts.every(isSignedDecimal);
     },
   }),
+  /**
+   * `TABLE <rows> <cols> <col_width> <row_height> <x> <y>` and its `-TABLE`
+   * spelling: an empty table grid on the world XY plane. The counts are positive
+   * integers, the two cell sizes are positive decimals and the origin is a pair
+   * of signed decimals. The host owns the 1000 × 1000 / 100 000-cell caps and
+   * every semantic refusal (`table.invalid_dimensions` / `.create_too_large` /
+   * `.invalid_origin` / `.invalid_size`), so nothing is clamped here.
+   */
+  TABLE: Object.freeze({
+    parse: isTableCreateArgument,
+  }),
+  '-TABLE': Object.freeze({
+    parse: isTableCreateArgument,
+  }),
+  /**
+   * `TABLEDIT <row> <col> [text...]`: a 1-based cell address on the single
+   * selected table. The text is the remainder of the line and may contain
+   * spaces (it is preserved by the host); an empty remainder clears the cell.
+   * The host owns the range and selection refusals (`tabledit.out_of_range` /
+   * `.no_selection` / `.multiple` / `.not_table`).
+   */
+  TABLEDIT: Object.freeze({
+    parse: isTableEditArgument,
+  }),
 
 });
 
@@ -688,6 +712,31 @@ function parsePageSetupArgument(argument: string): boolean {
 function isCoordinatePair(text: string): boolean {
   const parts = text.split(',');
   return parts.length === 2 && parts.every(isSignedDecimal);
+}
+
+/**
+ * `TABLE`/`-TABLE`: positive integer counts, positive cell sizes and a signed
+ * origin pair. This is the six-token shape the host grammar admits; the caps
+ * and every semantic refusal belong to the command layer.
+ */
+function isTableCreateArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  return parts.length === 6
+    && /^[0-9]+$/.test(parts[0]) && /^[0-9]+$/.test(parts[1])
+    && Number(parts[0]) > 0 && Number(parts[1]) > 0
+    && isPositiveDecimal(parts[2]) && isPositiveDecimal(parts[3])
+    && isSignedDecimal(parts[4]) && isSignedDecimal(parts[5]);
+}
+
+/**
+ * `TABLEDIT <row> <col> [text...]`: a 1-based cell address plus an optional
+ * text remainder. The remainder is the whole rest of the line (spaces
+ * included) and is never re-tokenised here — the host preserves it verbatim.
+ */
+function isTableEditArgument(argument: string): boolean {
+  const match = /^\s*([0-9]+)[ \t]+([0-9]+)(?:[ \t]+[\s\S]*)?$/.exec(argument);
+  if (match === null) return false;
+  return Number(match[1]) > 0 && Number(match[2]) > 0;
 }
 
 

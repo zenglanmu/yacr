@@ -8,10 +8,12 @@ use crate::grips::GripId;
 mod hatch_edit_payload;
 mod image;
 mod qdim_payload;
+mod table;
 
 pub use hatch_edit_payload::*;
 pub use image::*;
 pub use qdim_payload::*;
+pub use table::*;
 
 mod utility;
 pub use utility::*;

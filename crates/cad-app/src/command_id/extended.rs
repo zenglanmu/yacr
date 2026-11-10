@@ -786,19 +786,19 @@ pub enum ExtendedCommandId {
     ConvertPoly,
     /// `CONVERT`: generic object conversion is NOT IMPLEMENTED.
     ConvertGeneric,
-    /// `TABLE`: no table entity model is implemented.
+    /// `TABLE`: writes one empty table grid (Work-only).
     TableCreate,
-    /// `-TABLE`: the command-line spelling of the unsupported table creation.
+    /// `-TABLE`: the command-line spelling of the same table creation (Work-only).
     DashTable,
-    /// `TABLEDIT`: no table entity model is implemented.
+    /// `TABLEDIT`: rewrites one selected table's cell text (Work-only).
     TableEdit,
-    /// `TABLEEXPORT`: no table entity model is implemented.
+    /// `TABLEEXPORT`: CSV/file table export is NOT IMPLEMENTED (no CSV/file writer).
     TableExport,
-    /// `TABLESTYLE`: no table-style model is implemented.
+    /// `TABLESTYLE`: named table styles are NOT IMPLEMENTED (no table-style table).
     TableStyleList,
-    /// `TINSERT`: no table entity model is implemented.
+    /// `TINSERT`: inserting a block in a table cell is NOT IMPLEMENTED (no block-in-cell model).
     TableInsert,
-    /// `MATCHCELL`: no table entity model is implemented.
+    /// `MATCHCELL`: copying a cell style is NOT IMPLEMENTED (no cell-style copy surface).
     MatchCell,
     /// `FIELD`: fields are NOT IMPLEMENTED (no field model).
     Field,

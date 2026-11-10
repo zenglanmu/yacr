@@ -353,6 +353,7 @@ mod stretch_curves;
 mod stretch_insert;
 mod stretch_polygon;
 mod table;
+mod table_edit;
 mod text;
 mod text_batch;
 mod text_edit;

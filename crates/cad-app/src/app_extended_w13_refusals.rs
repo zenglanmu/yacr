@@ -40,17 +40,6 @@ fn reason(ext: ExtendedCommandId) -> String {
             "convertctb.unsupported: CTB conversion is not implemented (no CTB/STB model)"
         }
         ExtendedCommandId::ConvertGeneric => "convert.unsupported: generic object conversion is not implemented",
-        ExtendedCommandId::TableCreate => {
-            "table.unsupported: table creation model is not implemented (imported ACAD_TABLE \
-             entities are modeled)"
-        }
-        ExtendedCommandId::DashTable => {
-            "-table.unsupported: table creation model is not implemented (imported ACAD_TABLE \
-             entities are modeled)"
-        }
-        ExtendedCommandId::TableEdit => {
-            "tabledit.unsupported: no cell-edit command surface is implemented"
-        }
         ExtendedCommandId::TableExport => {
             "tableexport.unsupported: no CSV/file writer is implemented"
         }

@@ -52,7 +52,7 @@ fn convertpoly_reports_the_single_representation() {
         .any(|row| row.code == "convertpoly.single_representation"));
 }
 
-const REFUSALS: [(ExtendedCommandId, &str); 20] = [
+const REFUSALS: [(ExtendedCommandId, &str); 17] = [
     (
         ExtendedCommandId::PlotStyleList,
         "plotstyle.unsupported: named plot styles are not implemented (no CTB/STB table)",
@@ -72,20 +72,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 20] = [
     (
         ExtendedCommandId::ConvertGeneric,
         "convert.unsupported: generic object conversion is not implemented",
-    ),
-    (
-        ExtendedCommandId::TableCreate,
-        "table.unsupported: table creation model is not implemented (imported ACAD_TABLE \
-         entities are modeled)",
-    ),
-    (
-        ExtendedCommandId::DashTable,
-        "-table.unsupported: table creation model is not implemented (imported ACAD_TABLE \
-         entities are modeled)",
-    ),
-    (
-        ExtendedCommandId::TableEdit,
-        "tabledit.unsupported: no cell-edit command surface is implemented",
     ),
     (
         ExtendedCommandId::TableExport,

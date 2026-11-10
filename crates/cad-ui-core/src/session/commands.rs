@@ -877,10 +877,13 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // `ARRAYPATH <count> [ALIGN]`: the count/align ride the payload; the current
     // selection (path first) is the whole input.
     ARRAYPATH_SELECTOR,
-    // The raster-image typed forms: `IMAGEATTACH <file> <x> <y> <w> <h> <upp>`
-    // and `IMAGECLIP <minx> <miny> <maxx> <maxy>|OFF`.
+    // The raster-image and table typed forms (`IMAGEATTACH`, `IMAGECLIP`,
+    // `TABLE`, `-TABLE`, `TABLEDIT`); their grammars live in the sibling modules.
     IMAGEATTACH_SELECTOR,
     IMAGECLIP_SELECTOR,
+    TABLE_SELECTOR,
+    DASH_TABLE_SELECTOR,
+    TABLEDIT_SELECTOR,
     VIEW_SELECTOR,
     VIEWGO_SELECTOR,
     VPOINT_SELECTOR,
@@ -969,6 +972,9 @@ pub use draw2::*;
 // The raster-image grammars (`IMAGEATTACH`, `IMAGECLIP`).
 mod image;
 pub use image::*;
+
+mod table;
+pub use table::*;
 
 // The 2026-11-07 layout/viewport grammars (`LAYOUT` … `LAYVPI`).
 mod layout;
