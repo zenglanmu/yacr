@@ -27,7 +27,14 @@ AD
   并断言 `dist/canvas` 不存在；Windows/macOS 打包移除本地残留的 `canvas/`。Linux 保留（X11
   `dom-canvas` 需要）。
 - **落地页**：hero 的 Web CTA 下新增“首次打开需下载约 20 MB 以上 wasm”的中英提示；`site.yml`
-  以 `release_tag=v0.1.9`、`upload_downloads=true` 部署到 <https://yacr.pages.dev>。
+  run [`42844339794`](https://github.com/zenglanmu/yacr/actions/runs/42844339794) 以
+  `release_tag=v0.1.9`、`upload_downloads=true` 完成 R2 镜像并部署到 <https://yacr.pages.dev>。
+  线上复核：`/downloads.json` = `v0.1.9`、`/changelog.json` 首版 `v0.1.9`、页面含中英提示；
+  R2 `releases/v0.1.9/yacr-0.1.9-linux-x86_64.flatpak` HEAD 112,155,680 B、
+  `app-universal-release.apk` HEAD 112,137,697 B。
+- **CI 修正**：`main` 首次推送的 core-quality 因 `test-android-host.py` 把注释里的
+  `build-canvas-wasm.sh` 误判为构建调用而失败；已改为只禁止实际调用（`bash
+  "$REPO_ROOT/scripts/build-canvas-wasm.sh"`）与 `app_web_bg.wasm` 产物。
 - **NOT VERIFIED**：未做真机/真实 GPU/像素验收；Windows/macOS/Android 仅编译与打包证据；
   `web-smoke` 是 Chromium + SwiftShader 软件渲染；发布成功不代表运行时验收。
 

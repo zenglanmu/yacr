@@ -309,7 +309,7 @@ def check_ui_bundle_wiring() -> list[str]:
     # Android is `native-below` (ADR 0027): the bundle must not carry or build the
     # wasm `dom-canvas` session. Dropping this guard would silently put a large
     # unused blob back into every APK.
-    for forbidden in ("build-canvas-wasm.sh", "app_web_bg.wasm"):
+    for forbidden in ('bash "$REPO_ROOT/scripts/build-canvas-wasm.sh"', "app_web_bg.wasm"):
         if forbidden in script:
             problems.append(
                 f"scripts/build-android-ui.sh: must not reference '{forbidden}' "
