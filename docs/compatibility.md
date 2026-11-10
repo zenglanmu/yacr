@@ -1410,10 +1410,10 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
-| `IMAGE` | **部分实现（具名拒绝）**：`image.unsupported: raster image references are not implemented` | 不写库/不升修订/不入历史 |
-| `-IMAGE` | **部分实现（具名拒绝）**：`-image.unsupported: raster image references are not implemented` | 不写库/不升修订/不入历史 |
-| `IMAGEATTACH` | **部分实现（具名拒绝）**：`imageattach.unsupported: raster image references are not implemented` | 不写库/不升修订/不入历史 |
-| `IMAGECLIP` | **部分实现（具名拒绝）**：`imageclip.unsupported: no image clip model` | 不写库/不升修订/不入历史 |
+| `IMAGE` | **部分实现（只读报告）**：列出所有 IMAGE 实体的 id/空间/file key/pixels/visible/clip/origin（`image.entry`/`image.report`，空图 `image.none`）；Viewer-legal | 无 External References 面板/重载/卸载；不写库 |
+| `-IMAGE` | **部分实现（只读报告）**：`-IMAGE` 命令行拼写，`-image.*` 诊断码；无写 | 同上，命令行拼写 |
+| `IMAGEATTACH` | **部分实现（真实写入）**：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>` 创建真实 IMAGE 实体；逻辑 key 规范化，一条事务/一步撤销；宿主按图纸目录解析纹理 | 无对话框/文件选择器；纹理不可解析时表示层显示边框 + `image.unresolved`；跨载体纹理证据 NOT VERIFIED |
+| `IMAGECLIP` | **部分实现（真实写入）**：一个选中 IMAGE + 像素坐标矩形（或 `OFF`），写二顶点 `ImageClip{inside:true}`，一条事务/一步撤销 | 仅矩形 inside 裁剪；非凸/outside 裁剪未授权；无交互拖拽 |
 | `IMAGEADJUST` | **部分实现（具名拒绝）**：`imageadjust.unsupported: no image adjustment model` | 不写库/不升修订/不入历史 |
 | `-IMAGEADJUST` | **部分实现（具名拒绝）**：`-imageadjust.unsupported: no image adjustment model` | 不写库/不升修订/不入历史 |
 | `IMAGEQUALITY` | **部分实现（具名拒绝）**：`imagequality.unsupported: no image display-quality model` | 不写库/不升修订/不入历史 |

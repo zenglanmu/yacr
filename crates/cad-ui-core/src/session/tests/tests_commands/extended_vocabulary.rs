@@ -65,6 +65,9 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::DashPageSetup
                 | ExtendedCommandId::PageSetupIn
                 | ExtendedCommandId::DashPageSetupIn
+                // Wave 16 raster-image authoring writes entity rows.
+                | ExtendedCommandId::ImageAttach
+                | ExtendedCommandId::ImageClip
         );
         assert_eq!(
             variant.requires_work_mode(),

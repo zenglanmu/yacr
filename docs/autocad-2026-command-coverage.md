@@ -74,7 +74,7 @@
 > **2026-11-09 增补（Wave 13）**：`PAGESETUP`/`-PAGESETUP` 只读页面设置报告、`CONVERTPOLY` 只读单一多段线表示报告，以及 `PSETUPIN`…`LAYTRANS` 二十二个具名拒绝（页面设置导入/打印样式/表格/字段/远程文字/拼写/超级填充/视口对齐同步/图层转换）计入 **548 已实现（66 完整 + 482 部分）/ 433 未实现**；无 GUI/GPU/像素证据。
 > **2026-11-09 增补（Wave 14）**：`BOX`…`ROTATE3D` 二十五个 3D 实体图元/布尔/剖切/边编辑名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D，不计为可用 3D 功能。计入 **573 已实现（66 完整 + 507 部分）/ 408 未实现**。
 > **2026-11-09 增补（Wave 15）**：`SURFBLEND`…`MESHUNCREASE` 二十五个曲面/网格名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D。计入 **598 已实现（66 完整 + 532 部分）/ 383 未实现**。
-> **2026-11-09 增补（Wave 16）**：`IMAGE`…`DGNADJUST` 二十五个图像/PDF/DGN 底图名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）。计入 **623 已实现（66 完整 + 557 部分）/ 358 未实现**。
+> **2026-11-09 增补（Wave 16）**：`IMAGE`…`DGNADJUST` 二十五个图像/PDF/DGN 底图名全部按**具名拒绝**计入（`IMAGE`/`-IMAGE`/`IMAGEATTACH`/`IMAGECLIP` 已于 2026-11-10 晋升：前两者只读报告、后两者真实写入；其余仍拒绝）（稳定原因串，不写库/不升修订/不入历史）。计入 **623 已实现（66 完整 + 557 部分）/ 358 未实现**。
 > **2026-11-10 增补（Wave 17）**：25 个名字按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史；`ACTBASEPOINT`…`ASSISTANTOPEN`）：`ACTBASEPOINT`/`ACTIVITYINSIGHTSCLOSE`/`ACTIVITYINSIGHTSOPEN`/`ACTMANAGER`/`ACTRECORD`/`-ACTSTOP`/`ACTSTOP`/`ACTUSERINPUT`/`-ACTUSERMESSAGE`/`ACTUSERMESSAGE`/`ADCCLOSE`/`ADCENTER`/`ADCNAVIGATE`/`ADJUST`/`AMECONVERT`/`ANALYSISCURVATURE`/`ANALYSISDRAFT`/`ANALYSISOPTIONS`/`ANALYSISZEBRA`/`ANIPATH`/`APPAUTOLOADER`/`APPSTORE`/`ASSISTANTCLOSE`/`ASSISTANTOPEN`（`ARRAYPATH` 已在同日晋升为真实 path array，见其命令行）。计入 **648 已实现（67 完整 + 581 部分）/ 333 未实现**。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-10 增补（Wave 18）**：25 个名字按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史；`ATTACHURL`…`COMPILE`）：`ATTACHURL`/`BDETECT`/`BLOCKICON`/`BLOCKSDATAOPTION`/`BLOCKSPALETTE`/`BLOCKSPALETTECLOSE`/`BLOCKTOXREF`/`BREP`/`BROWSER`/`BSEARCH`/`CAMERA`/`CENTERDISASSOCIATE`/`CENTERREASSOCIATE`/`CENTERRESET`/`CHECKSTANDARDS`/`CHURLS`/`COMMANDMACROS`/`COMMANDMACROSCLOSE`/`-COMPARE`/`COMPARE`/`COMPARECLOSE`/`COMPAREEXPORT`/`COMPAREIMPORT`/`COMPAREINFO`/`COMPILE`。计入 **673 已实现（67 完整 + 606 部分）/ 308 未实现**。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-10 增补（Wave 19）**：25 个名字按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史；`CONVERTOLDLIGHTS`…`CUSTOMIZE`）：`CONVERTOLDLIGHTS`/`CONVERTOLDMATERIALS`/`CONVTOMESH`/`CONVTONURBS`/`CONVTOSOLID`/`CONVTOSURFACE`/`COORDINATIONMODELATTACH`/`COPYFROMTRACE`/`COPYLINK`/`COPYM`/`COUNTAREA`/`COUNTAREACLOSE`/`COUNTCLOSE`/`COUNTFIELD`/`COUNTLIST`/`COUNTLISTCLOSE`/`COUNTNAVNEXT`/`COUNTNAVPREV`/`COUNTTABLE`/`CUI`/`CUIEXPORT`/`CUIIMPORT`/`CUILOAD`/`CUIUNLOAD`/`CUSTOMIZE`。计入 **698 已实现（67 完整 + 631 部分）/ 283 未实现**。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
@@ -225,7 +225,7 @@
 | `-HATCH` | 部分实现 | `HATCH` 的命令行拼写；同一实现与边界。 |
 | `-HATCHEDIT` | 部分实现 | `HATCHEDIT` 的命令行拼写；同一实现与边界。 |
 | `-HYPERLINK` | 部分实现 | 具名拒绝（`-hyperlink.unsupported: this build has no hyperlink storage model`）。 |
-| `-IMAGE` | 部分实现 | 具名拒绝（`-image.unsupported: raster image references are not implemented`）。 |
+| `-IMAGE` | 部分实现 | 只读报告所有 IMAGE 实体（id/空间/file key/pixels/visible/clip/origin，`-image.*` 诊断码）；Viewer-legal，不写库。 |
 | `-IMAGEADJUST` | 部分实现 | 具名拒绝（`-imageadjust.unsupported: no image adjustment model`）。 |
 | `-INPUTSEARCHOPTIONS` | 部分实现 | 具名拒绝（`-inputsearchoptions.unsupported`）：同一具名拒绝的命令行拼写。 |
 | `-INSERT` | 已实现 | `INSERT` 的命令行拼写；同一实现/写入路径。 |
@@ -663,12 +663,12 @@
 | `ID` | 已实现 | — |
 | `IGESEXPORT` | 部分实现 | 具名拒绝（`igesexport.unsupported: IGES export is not implemented`）。 |
 | `IGESIMPORT` | 部分实现 | 具名拒绝（`igesimport.unsupported: IGES import is not implemented`）。 |
-| `IMAGE` | 部分实现 | 具名拒绝（`image.unsupported: raster image references are not implemented`）。 |
+| `IMAGE` | 部分实现 | 只读报告所有 IMAGE 实体（id/空间/file key/pixels/visible/clip/origin，`image.*` 诊断码）；Viewer-legal，不写库；无 External References 面板。 |
 | `IMAGEADJUST` | 部分实现 | 具名拒绝（`imageadjust.unsupported: no image adjustment model`）。 |
 | `IMAGEAPP` | 部分实现 | 具名拒绝（`imageapp.unsupported: no external image-editor association model`）。 |
 | `IMAGEASYNCWAIT` | 部分实现 | 具名拒绝（`imageasyncwait.unsupported: no asynchronous image loading model`）。 |
-| `IMAGEATTACH` | 部分实现 | 具名拒绝（`imageattach.unsupported: raster image references are not implemented`）。 |
-| `IMAGECLIP` | 部分实现 | 具名拒绝（`imageclip.unsupported: no image clip model`）。 |
+| `IMAGEATTACH` | 部分实现 | 真实创建 `SemanticGeometry::Image`：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>`；逻辑 key 经 `image_resource_key` 规范化（拒绝绝对路径/`..`/URL），+Z 平面、`u=(upp,0,0)`/`v=(0,upp,0)`，一条事务/一步撤销；纹理由宿主按图纸目录解析。 |
+| `IMAGECLIP` | 部分实现 | 恰好一个选中 IMAGE；`IMAGECLIP <minx> <miny> <maxx> <maxy>`（像素坐标）写入二顶点 `ImageClip{inside:true}`，`OFF` 清除；一条事务/一步撤销；仅矩形 inside 裁剪，非凸/outside 未授权。 |
 | `IMAGEEDIT` | 部分实现 | 具名拒绝（`imageedit.unsupported: no external image-editor model`）。 |
 | `IMAGEQUALITY` | 部分实现 | 具名拒绝（`imagequality.unsupported: no image display-quality model`）。 |
 | `IMPORT` | 部分实现 | 具名拒绝（`import.unsupported: the generic IMPORT picker is not implemented`）。 |
@@ -1451,14 +1451,14 @@
 | 431 | `ID` | 已实现 | Displays the UCS coordinate values of a specified location. | — |
 | 432 | `IGESEXPORT` | 部分实现 | Saves selected objects in the current drawing to a new IGES (*.igs, *.iges) file. | 具名拒绝（`igesexport.unsupported: IGES export is not implemented`）。 |
 | 433 | `IGESIMPORT` | 部分实现 | Imports data from an IGES (*.igs or *.iges) file into the current drawing. | 具名拒绝（`igesimport.unsupported: IGES import is not implemented`）。 |
-| 434 | `-IMAGE` | 部分实现 | Attaches a raster image to the drawing. | 具名拒绝（`-image.unsupported: raster image references are not implemented`）。 |
-| 435 | `IMAGE` | 部分实现 | Displays the External References palette. | 具名拒绝（`image.unsupported: raster image references are not implemented`）。 |
+| 434 | `-IMAGE` | 部分实现 | Attaches a raster image to the drawing. | 只读报告所有 IMAGE 实体（id/空间/file key/pixels/visible/clip/origin，`-image.*` 诊断码）；Viewer-legal，不写库。 |
+| 435 | `IMAGE` | 部分实现 | Displays the External References palette. | 只读报告所有 IMAGE 实体（id/空间/file key/pixels/visible/clip/origin，`image.*` 诊断码）；Viewer-legal，不写库；无 External References 面板。 |
 | 436 | `-IMAGEADJUST` | 部分实现 | Controls the brightness, contrast, and fade values of images. | 具名拒绝（`-imageadjust.unsupported: no image adjustment model`）。 |
 | 437 | `IMAGEADJUST` | 部分实现 | Controls the brightness, contrast, and fade values of images. | 具名拒绝（`imageadjust.unsupported: no image adjustment model`）。 |
 | 438 | `IMAGEAPP` | 部分实现 | Specifies the image editing program for IMAGEEDIT. | 具名拒绝（`imageapp.unsupported: no external image-editor association model`）。 |
 | 439 | `IMAGEASYNCWAIT` | 部分实现 | Ensures that raster images being loaded in the background during file opening are complete before proceeding. | 具名拒绝（`imageasyncwait.unsupported: no asynchronous image loading model`）。 |
-| 440 | `IMAGEATTACH` | 部分实现 | Inserts a reference to an image file. | 具名拒绝（`imageattach.unsupported: raster image references are not implemented`）。 |
-| 441 | `IMAGECLIP` | 部分实现 | Crops the display of a selected image to a specified boundary. | 具名拒绝（`imageclip.unsupported: no image clip model`）。 |
+| 440 | `IMAGEATTACH` | 部分实现 | Inserts a reference to an image file. | 真实创建 `SemanticGeometry::Image`：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>`；逻辑 key 经 `image_resource_key` 规范化（拒绝绝对路径/`..`/URL），+Z 平面、`u=(upp,0,0)`/`v=(0,upp,0)`，一条事务/一步撤销；纹理由宿主按图纸目录解析。 |
+| 441 | `IMAGECLIP` | 部分实现 | Crops the display of a selected image to a specified boundary. | 恰好一个选中 IMAGE；`IMAGECLIP <minx> <miny> <maxx> <maxy>`（像素坐标）写入二顶点 `ImageClip{inside:true}`，`OFF` 清除；一条事务/一步撤销；仅矩形 inside 裁剪，非凸/outside 未授权。 |
 | 442 | `IMAGEEDIT` | 部分实现 | Launches the image editing program specified by IMAGEAPP for the selected image. | 具名拒绝（`imageedit.unsupported: no external image-editor model`）。 |
 | 443 | `IMAGEQUALITY` | 部分实现 | Controls the display quality of images. | 具名拒绝（`imagequality.unsupported: no image display-quality model`）。 |
 | 444 | `IMPORT` | 部分实现 | Imports files of different formats into the current drawing. | 具名拒绝（`import.unsupported: the generic IMPORT picker is not implemented`）。 |

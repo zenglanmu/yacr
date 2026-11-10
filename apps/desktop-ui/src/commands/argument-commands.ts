@@ -549,6 +549,35 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return parts.length === 1 || parts[1].toUpperCase() === 'ALIGN';
     },
   }),
+  /**
+   * `IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>`: the
+   * file is one token (a path with spaces cannot be typed in v1), the point is a
+   * pair of signed decimals, and the pixel size plus the units-per-pixel scale
+   * are positive decimals. The host re-checks the reference (safe relative key)
+   * and every value; nothing is clamped here.
+   */
+  IMAGEATTACH: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return parts.length === 6
+        && isSignedDecimal(parts[1]) && isSignedDecimal(parts[2])
+        && isPositiveDecimal(parts[3]) && isPositiveDecimal(parts[4])
+        && isPositiveDecimal(parts[5]);
+    },
+  }),
+  /**
+   * `IMAGECLIP <minx> <miny> <maxx> <maxy>` or `IMAGECLIP OFF`: four signed
+   * decimals in the image's pixel space, or the `OFF` word. Ordering
+   * (`minx < maxx`, `miny < maxy`) is the host's `imageclip.invalid_rect`
+   * refusal, so it is deliberately not rejected locally.
+   */
+  IMAGECLIP: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      if (parts.length === 1) return parts[0].toUpperCase() === 'OFF';
+      return parts.length === 4 && parts.every(isSignedDecimal);
+    },
+  }),
 
 });
 

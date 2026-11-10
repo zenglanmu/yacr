@@ -853,6 +853,10 @@ impl ExtendedCommandId {
                 | Self::DashPageSetup
                 | Self::PageSetupIn
                 | Self::DashPageSetupIn
+                // Wave 16 raster-image authoring writes one entity row (attach)
+                // or rewrites one selected image's clip.
+                | Self::ImageAttach
+                | Self::ImageClip
         )
     }
 }

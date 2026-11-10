@@ -91,6 +91,8 @@ mod app_extended_w13_reports;
 mod app_extended_w14_refusals;
 mod app_extended_w15_refusals;
 mod app_extended_w16_refusals;
+// The Wave 16 read-only raster-image report (`IMAGE` / `-IMAGE`).
+mod app_extended_w16_reports;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;
@@ -424,12 +426,12 @@ pub use command_payload::{
     DimJogLineCommand, DimOverrideCommand, DimStyleCommand, DimTextEditCommand,
     DimensionBatchPayload, DimensionChainCommand, FilterExpression, FilterLogic, FilterRequest,
     GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder, HatchEditOption,
-    HatchOriginCommand, JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand,
-    LeaderCommand, LinetypeCommand, MatchPropSettings, MeasureGeomOption, MirrorOptions,
-    MocoroCommand, NamedObjectKind, OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions,
-    OrdinateAxis, OrdinateDimensionCommand, PeditEditCommand, PeditEditOption, PeditOption,
-    PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest, RadialDimensionCommand,
-    RenameCommand, RevCloudStyle, RevisionCloudMode, RevisionCloudOptions,
+    HatchOriginCommand, ImageAttachCommand, ImageClipCommand, JoinMode, JoinOptions,
+    JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand, MatchPropSettings,
+    MeasureGeomOption, MirrorOptions, MocoroCommand, NamedObjectKind, OffsetGapType, OffsetLayer,
+    OffsetMode, OffsetOptions, OrdinateAxis, OrdinateDimensionCommand, PeditEditCommand,
+    PeditEditOption, PeditOption, PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest,
+    RadialDimensionCommand, RenameCommand, RevCloudStyle, RevisionCloudMode, RevisionCloudOptions,
     RotatedLinearDimensionCommand, SelectSimilarSettings, SelectionApply, SelectionOperator,
     SelectionPredicate, SelectionProperty, SelectionScope, SelectionToolPayload,
     SetByLayerSettings, StretchPolygonCommand, TCircleCommand, TCountCommand, TextAlignCommand,

@@ -6,9 +6,11 @@ use cad_domain::{CadError, CadResult, LayerId, Point3, SelectionRef};
 use crate::grips::GripId;
 
 mod hatch_edit_payload;
+mod image;
 mod qdim_payload;
 
 pub use hatch_edit_payload::*;
+pub use image::*;
 pub use qdim_payload::*;
 
 mod utility;

@@ -1,28 +1,14 @@
 //! Wave 16 named-refusal contracts.
 //!
-//! Each name is admitted by the vocabulary and refused with
+//! Each remaining Wave 16 name is admitted by the vocabulary and refused with
 //! `CadError::Unsupported` carrying a stable reason; nothing is written, no
 //! revision is bumped and no history entry appears. All are Viewer-legal.
+//! `IMAGE`/`-IMAGE`, `IMAGEATTACH` and `IMAGECLIP` are real commands and are
+//! pinned in `tests::drawing::image`.
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 25] = [
-    (
-        ExtendedCommandId::Image,
-        "image.unsupported: raster image references are not implemented",
-    ),
-    (
-        ExtendedCommandId::DashImage,
-        "-image.unsupported: raster image references are not implemented",
-    ),
-    (
-        ExtendedCommandId::ImageAttach,
-        "imageattach.unsupported: raster image references are not implemented",
-    ),
-    (
-        ExtendedCommandId::ImageClip,
-        "imageclip.unsupported: no image clip model",
-    ),
+const REFUSALS: [(ExtendedCommandId, &str); 21] = [
     (
         ExtendedCommandId::ImageAdjust,
         "imageadjust.unsupported: no image adjustment model",

@@ -15,6 +15,7 @@ mod extended_vocabulary;
 mod extras_arguments;
 mod gradient;
 mod hatchedit;
+mod image_arguments;
 mod import_accounting;
 mod input_and_lifecycle;
 mod layer_arguments;

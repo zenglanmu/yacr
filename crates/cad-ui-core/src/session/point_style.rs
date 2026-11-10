@@ -28,12 +28,13 @@ use super::commands::{
     parse_linetype_argument, parse_mocoro_argument, parse_pan_argument, parse_trace_argument,
     parse_viewres_argument, parse_vscurrent_argument, ARRAYPATH_SELECTOR, AUDIT_SELECTOR,
     CHAMFER_SELECTOR, DONUT_SELECTOR, DRAWORDER_SELECTOR, FILLET_SELECTOR, FILTER_SELECTOR,
-    FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, HELIX_SELECTOR, JOIN_SELECTOR,
-    LINETYPE_SELECTOR, MIRROR_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MOCORO_SELECTOR,
-    MPEDIT_SELECTOR, MREDO_SELECTOR, MULTIPLE_SELECTOR, OFFSET_SELECTOR, OVERKILL_SELECTOR,
-    PAN_SELECTOR, PURGE_SELECTOR, QSELECT_SELECTOR, RENAME_SELECTOR, REVCLOUD_SELECTOR,
-    SETVAR_SELECTOR, SOLID_SELECTOR, SSX_SELECTOR, TEXTMASK_SELECTOR, TRACE_SELECTOR,
-    TREX_SELECTOR, TXT2MTXT_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR, WIPEOUT_SELECTOR,
+    FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, HELIX_SELECTOR, IMAGEATTACH_SELECTOR,
+    IMAGECLIP_SELECTOR, JOIN_SELECTOR, LINETYPE_SELECTOR, MIRROR_SELECTOR, MLINE_SELECTOR,
+    MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR, MREDO_SELECTOR, MULTIPLE_SELECTOR,
+    OFFSET_SELECTOR, OVERKILL_SELECTOR, PAN_SELECTOR, PURGE_SELECTOR, QSELECT_SELECTOR,
+    RENAME_SELECTOR, REVCLOUD_SELECTOR, SETVAR_SELECTOR, SOLID_SELECTOR, SSX_SELECTOR,
+    TEXTMASK_SELECTOR, TRACE_SELECTOR, TREX_SELECTOR, TXT2MTXT_SELECTOR, VIEWRES_SELECTOR,
+    VSCURRENT_SELECTOR, WIPEOUT_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::dim_arguments::{
@@ -117,6 +118,11 @@ impl CadSession {
             // `ARRAYPATH <count> [ALIGN]`: count/align ride the payload; the
             // selection is the whole input.
             ARRAYPATH_SELECTOR => self.arraypath_argument(argument, text),
+            // The raster-image typed forms: the file/pixel/scale or clip rectangle
+            // ride the payload; the command layer owns every semantic refusal.
+            IMAGEATTACH_SELECTOR | IMAGECLIP_SELECTOR => {
+                self.image_argument(selector, argument, text)
+            }
             // The 2026-11-07 view batch: named views and the camera direction.
             // `-VIEW` normalises to `VIEW` before this dispatch, so it lands on
             // the same arm.

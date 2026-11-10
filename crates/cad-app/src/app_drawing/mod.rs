@@ -72,6 +72,7 @@ mod hatch_parameters;
 mod hatch_stitch;
 mod hatch_utilities;
 mod helpers;
+mod image_edit;
 mod inquiry;
 mod insert_block;
 mod join;
