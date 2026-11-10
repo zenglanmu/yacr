@@ -1,5 +1,37 @@
 AD
 
+## 2026-11-10 发布 v0.1.8（命令覆盖 623 + 栅格/空白图修复）
+
+- **版本**：`Cargo.toml` workspace 版本、`Cargo.lock`（仅 28 处 workspace 成员 `version`）、四个
+  `tauri.conf.json`、Flatpak metainfo 全部 `0.1.7` → `0.1.8`；README（中英）命令计数从 423 更新为
+  623（66 完整 + 557 部分）。发布说明：`docs/release-notes/v0.1.8.md`（提交 `3ca1fcaf`，同时更新
+  `downloads.json`/`index.html`/`changelog.json`/`site.yml`/`test-landing-site.py`）。
+- **tag / run**：`v0.1.8`（`edf67c74`）→ `CI build layers` run
+  [`42726538112`](https://github.com/zenglanmu/yacr/actions/runs/42726538112) **11/11 job 绿**
+  （四个 release + linux/windows/macos check + shader + web-build/web-smoke/web-deploy）；同 tag 的
+  `CI` run [`42726538016`](https://github.com/zenglanmu/yacr/actions/runs/42726538016) 绿；`main`
+  push run [`42726509371`](https://github.com/zenglanmu/yacr/actions/runs/42726509371) /
+  [`42726509132`](https://github.com/zenglanmu/yacr/actions/runs/42726509132)（`edf67c74`）与
+  [`42731809304`](https://github.com/zenglanmu/yacr/actions/runs/42731809304) /
+  [`42731809731`](https://github.com/zenglanmu/yacr/actions/runs/42731809731)（`3ca1fcaf`）均绿。
+- **发布**：`publish-release.yml` run
+  [`42731815734`](https://github.com/zenglanmu/yacr/actions/runs/42731815734) 绿 → Release
+  <https://github.com/zenglanmu/yacr/releases/tag/v0.1.8>（非 draft / 非 prerelease）。
+- **artifact（大小从 Release API 与 CDN HEAD 核对）**：
+  `yacr-0.1.8-linux-x86_64.flatpak` 106,470,512 B + `.sha256` + `.flatpak.gpg`；
+  `yacr-0.1.8-windows-x86_64.zip` 86,110,804 B + `.sha256`（**unsigned**：run 内 artifact 名为
+  `yacr-windows-release-unsigned`，未配置自签名 PFX secret）；
+  `yacr-0.1.8-macos-universal.tar.gz` 116,176,958 B + `.sha256`（ad-hoc、未公证）；
+  `app-universal-release.apk` 93,238,753 B + `.sha256` + `SIGNING.txt`（APK v2/v3 自签名）。
+- **落地页**：`Landing site` run
+  [`42731969274`](https://github.com/zenglanmu/yacr/actions/runs/42731969274) 绿（R2 镜像 + Pages）。
+  线上复核：`https://yacr.pages.dev/downloads.json` = `v0.1.8` 且 `Access-Control-Allow-Origin: *`；
+  `changelog.json` 首版为 `v0.1.8`；页面静态回退显示 `v0.1.8`；4 个主包 + `SIGNING.txt` +
+  `.flatpak.gpg` 的 CDN HEAD 均 200，Flatpak/APK 的 `Content-Length` 与清单一致。分发证据，
+  不是运行时/GPU/真机验收。
+- **证据边界**：以上是编译/打包/签名/上传与分发证据；真机、真实 GPU、视觉/像素与性能验收
+  一律 **NOT VERIFIED**。
+
 ## 2026-11-10 显示栅格：AutoCAD 式主/次两级线 + 默认关闭
 
 用户要求：栅格要像 AutoCAD 的 model-space 线栅格（**主/次两级**、次要线明显更淡更细、整体比正常图线淡），
