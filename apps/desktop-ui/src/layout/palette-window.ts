@@ -25,11 +25,14 @@ export interface PaletteLayerSize {
   readonly height: number;
 }
 
-/** The width a palette opens at: the same 300px the old dock used. */
+/** The width a palette opens at on a narrow drawing: the old 300px dock width. */
 export const PALETTE_DEFAULT_WIDTH = 300;
 
+/** The widest the responsive default may grow to on a wide drawing. */
+export const PALETTE_MAX_DEFAULT_WIDTH = 460;
+
 /** The narrowest a palette may be resized to. */
-export const PALETTE_MIN_WIDTH = 220;
+export const PALETTE_MIN_WIDTH = 280;
 
 /**
  * How much of a window must stay inside the layer while dragging. The header is
@@ -84,9 +87,26 @@ export function cascadeOffset(index = 0): number {
   return slot * PALETTE_CASCADE_STEP;
 }
 
+/**
+ * The width a palette opens at on a drawing `layerWidth` wide.
+ *
+ * A property row needs a readable label column *and* a value well, and the old
+ * fixed 300px window was too narrow for both. The default therefore follows the
+ * drawing area a little (32% of it), bounded below by the old 300px and above by
+ * [`PALETTE_MAX_DEFAULT_WIDTH`]. A missing, zero or non-finite layer keeps the
+ * fixed default instead of inventing a size.
+ */
+export function defaultPaletteWidth(layerWidth?: number): number {
+  if (typeof layerWidth !== 'number' || !Number.isFinite(layerWidth) || layerWidth <= 0) {
+    return PALETTE_DEFAULT_WIDTH;
+  }
+  const share = Math.round(layerWidth * 0.32);
+  return Math.max(PALETTE_DEFAULT_WIDTH, Math.min(PALETTE_MAX_DEFAULT_WIDTH, share));
+}
+
 /** The default placement of the `index`-th palette: left edge, cascaded down. */
-export function defaultPaletteGeometry(index = 0): PaletteGeometry {
-  return { left: 0, top: cascadeOffset(index), width: PALETTE_DEFAULT_WIDTH };
+export function defaultPaletteGeometry(index = 0, layerWidth?: number): PaletteGeometry {
+  return { left: 0, top: cascadeOffset(index), width: defaultPaletteWidth(layerWidth) };
 }
 
 /** Clamp a width to `[PALETTE_MIN_WIDTH, layerWidth]` (min wins on a tiny layer). */

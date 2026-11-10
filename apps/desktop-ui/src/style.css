@@ -1581,7 +1581,16 @@ button, input, select { font: inherit; color: inherit; }
 }
 .statusbar__group { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
 .statusbar__spacer { flex: 1 1 auto; }
-.statusbar__error { display: inline-flex; align-items: center; gap: 5px; color: var(--danger); max-width: 44ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statusbar__error {
+  display: inline-flex; align-items: center; gap: 5px;
+  flex: 0 1 auto; min-width: 0;
+  max-width: 44ch; padding: 0; border: 0; background: none;
+  color: var(--danger); font: inherit; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer;
+}
+.statusbar__error:hover { text-decoration: underline; }
+.statusbar__error:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .status-toggle {
   flex: 0 0 auto;
   min-width: 0;
@@ -1845,6 +1854,79 @@ button, input, select { font: inherit; color: inherit; }
   background: rgba(8, 11, 15, .55);
 }
 .popup-dialog { display: flex; flex-direction: column; }
+
+/* Global error report ----------------------------------------------------- */
+/* A captured uncaught error, rejection, render failure, Rust panic or host
+   diagnostic, shown with its stack in a copyable dialog. It is portalled from
+   its own React root, so it is still reachable when the App tree failed to
+   render. Stacking is above the popup (60) and notice (62) layers. */
+.popup-overlay.error-report-overlay { z-index: 70; }
+.error-report {
+  width: min(760px, calc(100vw - 32px));
+  height: min(72vh, 620px);
+  height: min(72dvh, 620px);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+}
+.error-report__head { border-bottom: 1px solid var(--line); }
+.error-report__title { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.error-report__title .icon { color: var(--danger); }
+.error-report__body {
+  gap: 12px;
+  overscroll-behavior: contain;
+}
+.error-report__meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 7px 12px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.error-report__kind {
+  display: inline-flex; align-items: center;
+  height: 19px; padding: 0 7px;
+  border: 1px solid var(--danger); border-radius: 999px;
+  color: var(--danger);
+  font-size: 10.5px; letter-spacing: .2px; white-space: nowrap;
+}
+.error-report__time { font-family: var(--font-mono); font-size: 10.5px; overflow-wrap: anywhere; }
+.error-report__nav { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.error-report__position { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.error-report__field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.error-report__field-label {
+  font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--text-muted);
+}
+/* The point of the dialog: real selectable text. No `user-select: none` sits on
+   the card or any ancestor painted here. `touch-action: pan-y` keeps a finger
+   drag scrolling the body while a long-press still selects a run. */
+.error-report__message,
+.error-report__location,
+.error-report__pre {
+  margin: 0; min-width: 0;
+  color: var(--text);
+  font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  user-select: text; -webkit-user-select: text;
+  cursor: text; touch-action: pan-y;
+}
+.error-report__location { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+.error-report__pre {
+  padding: 8px 10px;
+  background: var(--field);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px; line-height: 1.45;
+}
+.error-report__foot { flex-wrap: wrap; gap: 10px; }
+.error-report__hint {
+  margin: 0 auto 0 0;
+  min-width: 0; max-width: 52ch;
+  font-size: 11px; line-height: 1.4;
+  color: var(--text-muted);
+}
 
 /* Small host notices ------------------------------------------------------ */
 /* The plugin's editing refusal (ADR 0028 D5) and the shell's own one-shot

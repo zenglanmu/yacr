@@ -191,6 +191,18 @@ pub const NOT_IMPLEMENTED: &str =
 /// unit-tested on the host, not only observable as a dead module in a browser.
 pub mod budget;
 
+/// **Wasm panic reporting**: a Rust panic in this module becomes a structured JSON
+/// report (`{message, location?, stack?}`) the React chrome can show, instead of
+/// only a `RuntimeError: unreachable` wasm trap.
+///
+/// The formatter ([`panic::panic_report_json`]) is target-independent, so the exact
+/// payload is asserted by `cargo test -p app-web` on the host; the hook install is
+/// wasm-only and runs from the module start function `yacr_wasm_start` before any
+/// session export. Read the module docs for the delivery order
+/// (`__yacr_report_panic` → `__YACR_PANIC_LOG__` → console) and for why the panic
+/// still traps afterwards.
+pub mod panic;
+
 /// The camera arithmetic of the **viewer** carrier's open and `FIT` selector.
 ///
 /// Target-independent on purpose (no DOM, no GPU, no session state). The production
@@ -296,6 +308,24 @@ mod session;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+
+/// The wasm module's **start function**: install the panic hook before any export
+/// can run.
+///
+/// `#[wasm_bindgen(start)]` runs this from the generated `init()` (the bootstrap
+/// awaits it), so a panic during module initialisation — the case that would
+/// otherwise reach the DOM as a bare `unreachable` trap — is reported too. The
+/// generated glue also emits it as a callable export; the chrome must not call it,
+/// because the start section has already run it (installing the hook twice is
+/// harmless but pointless).
+///
+/// The hook reports and lets the panic continue; it never aborts early, never
+/// resumes and never turns a failed call into a success. See [`panic`].
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(start)]
+pub fn yacr_wasm_start() {
+    panic::install_panic_hook();
+}
 
 /// Route a carrier-agnostic export to whichever carrier owns the session.
 ///

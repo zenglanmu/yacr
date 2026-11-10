@@ -284,8 +284,9 @@ test('App always renders the shell and mounts the overlay from cad_status.popup'
   // The overlay still takes the popup straight off the status (now optional-chained
   // in TS), never a constant or a local mirror of the state.
   assert.match(app, /\{popupOpen \? <PopupOverlay popup=\{status\??\.popup\} payload=\{popupPayload\} \/> : null\}/);
-  // The shell's global accelerator stands down while the overlay owns Escape.
-  assert.ok(app.includes('if (popupOpen) return;'));
+  // The shell's global accelerator stands down while the overlay owns Escape, and
+  // while the global error dialog (its own React root) is up.
+  assert.match(app, /if \(popupOpen(?:\s*\|\|\s*isErrorReportVisible\(\))?\) return;/);
   // The fresh payload is local state seeded from the ack, never re-derived from
   // status (the wire carries it once).
   assert.ok(app.includes('setPopupPayload(result.payload)'));

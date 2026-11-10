@@ -25,6 +25,7 @@ import {
   PALETTE_Z_BASE,
   clampGeometry,
   defaultPaletteGeometry,
+  defaultPaletteWidth,
   isDragHandleTarget,
   moveGeometry,
   resizeGeometry,
@@ -42,6 +43,10 @@ export interface PaletteWindowProps {
 interface WindowState {
   readonly geometry: PaletteGeometry;
   readonly z: number;
+  /** The user moved or resized this window; its width is never overwritten. */
+  readonly touched: boolean;
+  /** The first real layer measurement has already chosen the default width. */
+  readonly sized: boolean;
 }
 
 const STATES = new Map<string, WindowState>();
@@ -66,6 +71,8 @@ function stateOf(windowKey: string, initialIndex: number): WindowState {
     // Properties (index 0) starts on top; the cascade already keeps every header
     // visible, and a press raises the pressed window above all of them.
     z: PALETTE_Z_BASE - index,
+    touched: false,
+    sized: false,
   };
   STATES.set(windowKey, created);
   return created;
@@ -78,8 +85,30 @@ function subscribe(listener: () => void): () => void {
 
 function setGeometry(windowKey: string, initialIndex: number, geometry: PaletteGeometry): void {
   const current = stateOf(windowKey, initialIndex);
-  STATES.set(windowKey, { ...current, geometry });
+  // Any explicit geometry change is the user's: once touched, the responsive
+  // first-measure default must never overwrite the window again.
+  STATES.set(windowKey, { ...current, geometry, touched: true, sized: true });
   notify();
+}
+
+/**
+ * Apply the responsive default width once, on the first usable layer
+ * measurement, and only while the user has done nothing to the window. The
+ * `sized` flag makes it a one-time decision, so a later layer resize does not
+ * rewrite a width the user never set either.
+ */
+function applyResponsiveDefault(windowKey: string, initialIndex: number, layerWidth: number): void {
+  if (!Number.isFinite(layerWidth) || layerWidth <= 0) return;
+  const current = stateOf(windowKey, initialIndex);
+  if (current.touched || current.sized) return;
+  const width = defaultPaletteWidth(layerWidth);
+  const changed = width !== current.geometry.width;
+  STATES.set(windowKey, {
+    ...current,
+    geometry: changed ? { ...current.geometry, width } : current.geometry,
+    sized: true,
+  });
+  if (changed) notify();
 }
 
 function raise(windowKey: string, initialIndex: number): void {
@@ -140,6 +169,13 @@ export function PaletteWindow({ windowKey, initialIndex = 0, children }: Palette
     observer.observe(parent);
     return () => observer.disconnect();
   }, []);
+
+  // First real measurement chooses the responsive default width. It runs once
+  // per window (`sized`) and never while `touched`, so a drag/resize is final.
+  const measuredWidth = layer?.width ?? 0;
+  useLayoutEffect(() => {
+    applyResponsiveDefault(windowKey, initialIndex, measuredWidth);
+  }, [measuredWidth, windowKey, initialIndex]);
 
   // The displayed placement is always clamped to the measured layer, so a
   // window that was moved on a wide drawing stays reachable after a resize; the

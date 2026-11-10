@@ -57,9 +57,11 @@ test('the shell accelerator stands down while the overlay owns Escape', async ()
   const shellShortcut = /const onKeyDown = \(event(?:: [\w.]+)?\) => \{/.exec(app);
   assert.ok(shellShortcut);
   const shellShortcutAt = shellShortcut.index;
-  const guardAt = app.indexOf('if (popupOpen) return;', shellShortcutAt);
-  assert.ok(guardAt !== -1 && guardAt - shellShortcutAt < 400,
-    'the shell handler must return before any plain-key branch while a popup is open');
+  // The global error dialog is portalled from its own root, so it cannot be part
+  // of `popupOpen`; it must gate the same early return (one guard, two owners).
+  const guard = /if \(popupOpen(?:\s*\|\|\s*isErrorReportVisible\(\))?\) return;/.exec(app.slice(shellShortcutAt));
+  assert.ok(guard !== null && guard.index < 400,
+    'the shell handler must return before any plain-key branch while a popup or the error dialog is open');
   assert.ok(app.includes('[popupOpen, submitCommand, toolActive, gripDragActive, textStep, canCommand, layout, t]'),
     'the guard must re-install when the popup, tool, armed-drag, text-step or layout state changes');
 });

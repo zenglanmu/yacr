@@ -529,13 +529,23 @@
   height: 44px;
 }
 .mobile-commandbar__message {
+  display: block;
+  width: 100%;
+  min-height: 44px;
   margin: 0 2px;
+  padding: 8px 2px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
   color: var(--danger);
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  cursor: pointer;
 }
 .mobile-commandbar__message.error { color: var(--danger); }
+.mobile-commandbar__message:hover { text-decoration: underline; }
 .mobile-commandbar__hint {
   margin: 0 2px;
   color: var(--text-muted);
@@ -714,6 +724,28 @@
   border-right: 0 !important;
   border-bottom: 0 !important;
   padding-bottom: env(safe-area-inset-bottom);
+}
+/* The error report is a bottom sheet on a phone as well. Its content is the
+   stack, so the card takes whatever height it needs up to the viewport and the
+   body scrolls inside it; the close/step/copy controls are finger-sized. */
+:root[data-layout="mobile"] .error-report {
+  width: 100% !important;
+  height: auto !important;
+  max-height: 100dvh;
+  border-radius: 0 !important;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+:root[data-layout="mobile"] .error-report .error-report__head {
+  height: 44px !important;
+  padding: 0 6px 0 12px !important;
+}
+:root[data-layout="mobile"] .error-report .ui-icon-button { width: 44px; height: 44px; }
+:root[data-layout="mobile"] .error-report .ui-button { height: 44px; }
+:root[data-layout="mobile"] .error-report .error-report__body { font-size: 13px; }
+:root[data-layout="mobile"] .error-report .error-report__message,
+:root[data-layout="mobile"] .error-report .error-report__location { font-size: 13px; }
+:root[data-layout="mobile"] .error-report .error-report__foot {
+  padding-bottom: calc(10px + env(safe-area-inset-bottom)) !important;
 }
 /* The Options dialog's rail turns into a horizontal chip row above the content,
    and its two-column rows become one column: 156px of rail plus a 148px label

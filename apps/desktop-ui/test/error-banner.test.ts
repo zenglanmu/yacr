@@ -84,10 +84,22 @@ test('the banner is the host\'s, and it is not a command-line refusal line', asy
   assert.ok(source.includes('errorText: displayError'), 'the status bar still reads it');
   // Both presentations still paint that banner, each in its own slot.
   const statusbar = await readModule('components/StatusBar.tsx');
-  assert.ok(statusbar.includes('className="statusbar__error" role="alert"'), 'the desktop banner is a status-bar alert');
+  assert.ok(statusbar.includes('className="statusbar__error"'), 'the desktop banner keeps its status-bar class');
+  assert.ok(statusbar.includes('role="alert"'), 'the desktop banner is still an alert');
+  assert.ok(statusbar.includes('<button'), 'the desktop banner is a real trigger for the copyable detail');
   assert.ok(statusbar.includes('{shell.errorText}'), 'the desktop banner reads the host sentence');
+  assert.ok(
+    statusbar.includes("reportError({ kind: 'host', message: shell.errorText"),
+    'the desktop banner opens the host-kind error report',
+  );
   const mobile = await readModule('components/MobileCommandBar.tsx');
   assert.ok(mobile.includes('{shell.displayedError}'), 'the mobile bar still shows the host sentence');
+  assert.ok(mobile.includes('className="mobile-commandbar__message error"'), 'the mobile banner keeps its class');
+  assert.ok(mobile.includes('<button'), 'the mobile banner is a real trigger too');
+  assert.ok(
+    mobile.includes("reportError({ kind: 'host', message: shell.displayedError"),
+    'the mobile banner opens the same host-kind error report',
+  );
   // ...and neither paints the command-line refusal that used to sit under the
   // input as a second copy of a history row.
   for (const [name, presentation] of [['StatusBar.tsx', statusbar], ['MobileCommandBar.tsx', mobile]]) {

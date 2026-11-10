@@ -24,6 +24,7 @@ import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSna
 import { importProgressView } from '../cad/cad-status.ts';
 import { statusBannerText } from '../host/notice.ts';
 import { toolParameterViews } from '../tools/tool-parameters.ts';
+import { reportError } from '../errors/error-report.ts';
 
 // The drafting aids this build has: GRID (display grid, F7), SNAP (grid snap,
 // F9), OSNAP (object snap, F3) and ORTHO (orthographic constraint, F8). Each is a
@@ -234,10 +235,20 @@ export function StatusBar() {
       <span className="statusbar__spacer" />
 
       {shell.errorText ? (
-        <span className="statusbar__error" role="alert" title={shell.errorText}>
+        // The red line is the trigger, not the whole story: the technical string
+        // is hard-clipped at 44ch, so the button opens the copyable dialog with
+        // the same host sentence plus any detail the store can add.
+        <button
+          type="button"
+          className="statusbar__error"
+          role="alert"
+          title={shell.errorText}
+          aria-label={t('error.status.open')}
+          onClick={() => reportError({ kind: 'host', message: shell.errorText, detail: shell.errorText })}
+        >
           <Icon name="alert" size={13} />
           {bannerText}
-        </span>
+        </button>
       ) : null}
 
       <div className="statusbar__group statusbar__group--end">

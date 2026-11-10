@@ -29,6 +29,7 @@ import type { ToolParameterPending } from './tools/tool-parameters.ts';
 import { awaitingToolText, setToolText } from './tools/text.ts';
 import { setSelectedText } from './tools/textedit.ts';
 import { submitStandardView } from './cad/view3d.ts';
+import { isErrorReportVisible } from './errors/error-report.ts';
 import { bindBrowserDefaults, cadContextMenuRequest, isTextEntryTarget } from './defaults.ts';
 import { admitCommandText, toolCommandForKey } from './commands/commands.ts';
 import { commandMessageFor } from './commands/command-message.ts';
@@ -619,9 +620,10 @@ function Shell() {
       setError, setCleanScreen, setPropertiesOpen, setCommandLineOpen, setHistoryOpen,
     });
     const onKeyDown = (event: KeyboardEvent) => {
-      // While a popup is open the overlay owns its one accelerator (Escape). The
-      // shell must not also cancel a tool, toggle a panel or blur a field.
-      if (popupOpen) return;
+      // A popup owns its own Escape, and the global error dialog is portalled
+      // from its own root (it survives an App crash), so it is not part of
+      // `popupOpen`; both gate the shell's shortcuts the same way.
+      if (popupOpen || isErrorReportVisible()) return;
       // Ctrl+0 is both the app's clean-screen toggle and WebKit's zoom reset.
       // Handle it before the `defaultPrevented` check: the webview-default guard
       // also prevents the browser action, and listener order must not decide

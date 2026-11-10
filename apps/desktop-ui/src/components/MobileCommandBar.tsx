@@ -37,6 +37,7 @@ import type { ContextMenuItem, ContextMenuModel } from '../commands/context-menu
 import { releaseFocusOnOutsidePress } from '../focus-release.ts';
 import type { FocusReleaseRoot } from '../focus-release.ts';
 import { statusBannerText } from '../host/notice.ts';
+import { reportError } from '../errors/error-report.ts';
 
 /** The open history sheet's right-click menu: where it sits, and the row it hit. */
 interface HistoryMenuState {
@@ -283,9 +284,19 @@ export function MobileCommandBar() {
         />
       </div>
       {shell.displayedError ? (
-        <p className="mobile-commandbar__message error" role="alert" title={shell.displayedError}>
+        // The compact banner is the same trigger as the desktop status bar: a
+        // finger-sized button that opens the global error dialog, because the
+        // sentence itself is clipped/wrapped in the bar.
+        <button
+          type="button"
+          className="mobile-commandbar__message error"
+          role="alert"
+          title={shell.displayedError}
+          aria-label={t('error.status.open')}
+          onClick={() => reportError({ kind: 'host', message: shell.displayedError, detail: shell.displayedError })}
+        >
           {bannerText}
-        </p>
+        </button>
       ) : null}
       {copyMenu !== null ? (
         // Reuses the shortcut-menu overlay: fixed at the press, keyboard-driven,

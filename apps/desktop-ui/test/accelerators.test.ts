@@ -243,7 +243,9 @@ test('the shell wires one accelerator call site before the defaultPrevented guar
     'preventDefault sits inside the dispatch branch, immediately before the submit');
   // Order inside the handler: popup guard, then Ctrl+0, then the table, then the
   // defaultPrevented/modifier guard (the Ctrl+P listener-order exception).
-  const popupAt = app.indexOf('if (popupOpen) return;');
+  // The guard also covers the global error dialog, which lives outside `popupOpen`.
+  const popupMatch = /if \(popupOpen(?:\s*\|\|\s*isErrorReportVisible\(\))?\) return;/.exec(app);
+  const popupAt = popupMatch?.index ?? -1;
   const zeroAt = app.indexOf("!event.altKey && event.key === '0'");
   const defaultPreventedAt = app.indexOf('if (event.defaultPrevented || event.metaKey || event.altKey) return;');
   const guardAt = app.indexOf('bindBrowserDefaults(window, {');

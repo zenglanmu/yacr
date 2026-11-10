@@ -14,6 +14,7 @@ import {
   PALETTE_DEFAULT_WIDTH,
   PALETTE_DRAG_BLOCKER_SELECTOR,
   PALETTE_HEADER_HEIGHT,
+  PALETTE_MAX_DEFAULT_WIDTH,
   PALETTE_MIN_VISIBLE_WIDTH,
   PALETTE_MIN_WIDTH,
   cascadeOffset,
@@ -22,6 +23,7 @@ import {
   clampTop,
   clampWidth,
   defaultPaletteGeometry,
+  defaultPaletteWidth,
   isDragHandleTarget,
   moveGeometry,
   resizeGeometry,
@@ -51,6 +53,24 @@ test('a palette defaults to the left edge and cascades down by a fixed step', ()
   assert.equal(cascadeOffset(Number.NaN), 0);
 });
 
+test('a palette opens wider on a wide drawing, within [300, 460]', () => {
+  assert.equal(PALETTE_DEFAULT_WIDTH, 300);
+  assert.equal(PALETTE_MAX_DEFAULT_WIDTH, 460);
+  assert.equal(defaultPaletteWidth(), 300);
+  assert.equal(defaultPaletteWidth(Number.NaN), 300);
+  assert.equal(defaultPaletteWidth(0), 300);
+  assert.equal(defaultPaletteWidth(-1000), 300);
+  // 32% of the drawing, never below 300 and never above 460.
+  assert.equal(defaultPaletteWidth(500), 300);
+  assert.equal(defaultPaletteWidth(1000), 320);
+  assert.equal(defaultPaletteWidth(1250), 400);
+  assert.equal(defaultPaletteWidth(1600), 460);
+  assert.equal(defaultPaletteWidth(100000), 460);
+  // The placement stays at the left edge and keeps its cascade.
+  assert.deepEqual(defaultPaletteGeometry(1, 1000), { left: 0, top: 24, width: 320 });
+  assert.deepEqual(defaultPaletteGeometry(1), { left: 0, top: 24, width: 300 });
+});
+
 test('dragging clamps at all four edges and keeps 80px of width visible', () => {
   const start = defaultPaletteGeometry(0);
   // Left: the window may overhang, but 80px (its right edge) stays in the layer.
@@ -65,7 +85,7 @@ test('dragging clamps at all four edges and keeps 80px of width visible', () => 
   assert.deepEqual(moveGeometry(start, 120, 80, LAYER), { left: 120, top: 80, width: 300 });
 });
 
-test('resizing clamps to [220, layerWidth] and re-clamps the position', () => {
+test('resizing clamps to [280, layerWidth] and re-clamps the position', () => {
   const start = defaultPaletteGeometry(0);
   assert.equal(resizeGeometry(start, 100, LAYER).width, PALETTE_MIN_WIDTH);
   assert.equal(resizeGeometry(start, 400, LAYER).width, 400);
@@ -73,7 +93,7 @@ test('resizing clamps to [220, layerWidth] and re-clamps the position', () => {
   // A window overhanging the left edge is pulled back when it narrows: the
   // visible share must still be inside the layer.
   const overhanging = { left: -220, top: 0, width: 300 };
-  assert.deepEqual(resizeGeometry(overhanging, 220, LAYER), { left: -140, top: 0, width: 220 });
+  assert.deepEqual(resizeGeometry(overhanging, 220, LAYER), { left: -200, top: 0, width: 280 });
   // A layer narrower than the minimum still allows the minimum (min wins): the
   // window would otherwise become unusable, and the layer clips it visually.
   assert.equal(clampWidth(300, 100), PALETTE_MIN_WIDTH);
@@ -104,6 +124,20 @@ test('the header drag handle is chrome, never a control', () => {
   for (const part of ['button', 'a', 'input', 'select', 'textarea', '[role="button"]', '[data-no-drag]']) {
     assert.ok(PALETTE_DRAG_BLOCKER_SELECTOR.includes(part), `the blocker selector names ${part}`);
   }
+});
+
+test('the responsive default is applied once and never overwrites a user resize', async () => {
+  const source = await readModule('components/PaletteWindow.tsx');
+  assert.ok(source.includes('defaultPaletteWidth(layerWidth)'), 'the first measurement reads the responsive width');
+  assert.ok(source.includes('if (current.touched || current.sized) return;'), 'a touched or already-sized window is left alone');
+  assert.ok(source.includes('touched: true, sized: true'), 'a drag/resize marks the window as user-owned');
+  assert.ok(
+    source.includes('applyResponsiveDefault(windowKey, initialIndex, measuredWidth)'),
+    'the measured layer width is what chooses the default',
+  );
+  // The close/reopen restore contract is unchanged: the store is still keyed by
+  // windowKey and the stored geometry is still what a reopen reads.
+  assert.ok(source.includes('STATES.set(windowKey'), 'geometry is still stored per window');
 });
 
 test('the shared container owns drag, resize, keyboard and geometry state', async () => {

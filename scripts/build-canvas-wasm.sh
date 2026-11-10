@@ -7,15 +7,28 @@
 #   app_web.js       wasm-bindgen `--target web` ES module (the whole session).
 #   app_web_bg.wasm  the one wasm binary; both JS files initialise from it.
 #   bootstrap.js     a tiny **hand-written-by-this-script** ES module, served from
-#                    `public/` so no bundler transforms it. It initialises the
-#                    module, publishes `{ready, ...module}` and wraps `open_bytes`:
-#                    after a document opens it lazily fetches the faces that
-#                    document needs from the project Pages CDN (`fonts/`) and
-#                    installs them on the live session.
+#                    `public/` so no bundler transforms it. It installs the wasm
+#                    panic bridge, initialises the module, publishes
+#                    `{ready, ...module}` and wraps `open_bytes`: after a document
+#                    opens it lazily fetches the faces that document needs from the
+#                    project Pages CDN (`fonts/`) and installs them on the live
+#                    session.
+#
+#                      globalThis.__YACR_PANIC_LOG__ ??= [];
+#                      globalThis.__yacr_report_panic ??= (payload) => { … };
 #
 #                      import init, * as mod from './app_web.js';
 #                      const wasm = init(…);
 #                      globalThis.__YACR_CANVAS_MODULE__ = { ready: wasm, ...mod, open_bytes: wrapped };
+#
+#                    The panic bridge is created **before** `init()` on purpose: a
+#                    Rust panic inside the module's start function (or anywhere
+#                    later) reaches `globalThis.__yacr_report_panic`, which appends
+#                    the report to `__YACR_PANIC_LOG__` and dispatches a
+#                    `yacr:panic` CustomEvent. The React chrome drains the log on
+#                    mount (so an init-time panic is not lost) and listens for the
+#                    event afterwards. A richer `__yacr_report_panic` installed by
+#                    the chrome first is never replaced.
 #
 # Why a `public/` bootstrap module and not an import from the app bundle, and not
 # the `--target no-modules` classic script:
@@ -85,6 +98,21 @@ readonly BOOTSTRAP_JS="bootstrap.js"
 # (same-origin `fonts/`), and only when the drawing needs text or names a face.
 BOOTSTRAP_SOURCE=$(cat <<'BOOTSTRAP'
 import init, * as mod from './app_web.js';
+
+// Wasm panics: the Rust hook (`apps/app-web/src/panic.rs`) calls this when present.
+// Keep the log so a panic during module init is not lost before the chrome has
+// installed its listener. The React chrome drains `__YACR_PANIC_LOG__` on mount and
+// listens for the `yacr:panic` CustomEvent afterwards; a richer
+// `globalThis.__yacr_report_panic` it installed first is left untouched.
+globalThis.__YACR_PANIC_LOG__ ??= [];
+globalThis.__yacr_report_panic ??= (payload) => {
+  let detail = payload;
+  if (typeof payload === 'string') {
+    try { detail = JSON.parse(payload); } catch { detail = { message: payload }; }
+  }
+  globalThis.__YACR_PANIC_LOG__.push(detail);
+  try { globalThis.dispatchEvent(new CustomEvent('yacr:panic', { detail })); } catch {}
+};
 
 const wasm = init(new URL('./app_web_bg.wasm', import.meta.url).href);
 
@@ -320,6 +348,16 @@ grep -qF "apply_font_package" "$OUT_DIR/$BOOTSTRAP_JS" \
   || die "$BOOTSTRAP_JS does not call apply_font_package"
 grep -qF "__YACR_FONT_BASE_URL__" "$OUT_DIR/$BOOTSTRAP_JS" \
   || die "$BOOTSTRAP_JS does not read __YACR_FONT_BASE_URL__"
+# The wasm panic bridge must stay: Rust's panic hook (`apps/app-web/src/panic.rs`)
+# calls `__yacr_report_panic` and falls back to pushing into `__YACR_PANIC_LOG__`.
+# A bootstrap that dropped either half would turn a Rust panic back into a bare
+# `unreachable` trap with no message, location or stack in the DOM.
+grep -qF "__YACR_PANIC_LOG__" "$OUT_DIR/$BOOTSTRAP_JS" \
+  || die "$BOOTSTRAP_JS has no __YACR_PANIC_LOG__ sink for wasm panics"
+grep -qF "__yacr_report_panic" "$OUT_DIR/$BOOTSTRAP_JS" \
+  || die "$BOOTSTRAP_JS has no __yacr_report_panic bridge for wasm panics"
+grep -qF "yacr:panic" "$OUT_DIR/$BOOTSTRAP_JS" \
+  || die "$BOOTSTRAP_JS does not dispatch a yacr:panic event"
 if grep -qF "wasm.then(" "$OUT_DIR/$BOOTSTRAP_JS"; then
   die "$BOOTSTRAP_JS gates ready on something other than init()"
 fi

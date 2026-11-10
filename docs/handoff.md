@@ -1,5 +1,48 @@
 AD
 
+## 2026-11-10 DOM 全局错误弹窗 + wasm panic 上报 + 属性面板宽度
+
+- **红字来源澄清**：桌面状态栏底部的红字**不是** panic/backtrace，而是 `cad_status.error`
+  （`cad-ui-core` 合并 host error 与 session error 后的技术诊断串），本轮截图里是
+  `import.rvt.no_geometry: rvt 0.17.0 decoded Revit 2…`。它此前被 `.statusbar__error` 截断在
+  44ch，完整串只在 `title` 里，用户无法读取/复制。
+- **React 侧（`apps/desktop-ui`）**：新增 `src/errors/error-report.ts`（20 条有界历史、连续重复
+  去重、上/下导航、关闭后可再次捕获）、`install-global-capture.ts`（`error` /
+  `unhandledrejection` / `yacr:panic` / 启动时排空 `__YACR_PANIC_LOG__` / 安装
+  `__yacr_report_panic`）、`root-error-reporting.ts`、`mount-error-report-host.tsx`（独立
+  `#error-report-root`，App 渲染崩溃后弹窗仍存活）、`ErrorReportDialog/Host` 与
+  `error-dialog-focus.ts`。桌面卡片 `min(760px, 100vw-32px) × min(72dvh, 620px)`；移动端
+  `:root[data-layout="mobile"]` 全宽底部 sheet（`max-height:100dvh`、safe-area、44px 控件、
+  13px 正文）；z-index 70（高于 popup 60 / notice 62）。消息、位置、堆栈均为真实可选文本
+  （`user-select: text` + `-webkit-`），并复用 `clipboard.ts` 提供“复制详情/已复制/复制失败”。
+  状态栏红字与移动端错误行改为按钮，打开同一条 `kind: 'host'` 详情；错误弹窗打开时 shell 的
+  全局键盘加速器停用（`isErrorReportVisible()`，因为弹窗在自己的 React root 里，不属于
+  `popupOpen`）。`onUncaughtError` 进弹窗；`onCaughtError` 只保留 console（局部 error boundary
+  已有自己的兜底，避免模态叠模态）。
+- **wasm panic**：`apps/app-web/src/panic.rs` 用 `std::panic::set_hook` 上报
+  `{message, location?, stack?}`；`location` 为 `file:line:col`，`stack` 取自 `js_sys::Error`
+  的 `stack` 属性（`js-sys` 0.3.106 没有 `Error::stack()`，故用 `Reflect::get`）。投递顺序
+  `__yacr_report_panic` → `__YACR_PANIC_LOG__`（JSON 解析为对象）→ `console.error`；桥抛错时
+  落到下一级，panic 仍照常 trap，不改变失败语义。`#[wasm_bindgen(start)]` 的 `yacr_wasm_start`
+  在 `init()` 内先装 hook。`scripts/build-canvas-wasm.sh` 的 bootstrap 在 `init()` **之前**预置
+  `__YACR_PANIC_LOG__` / `__yacr_report_panic` / `yacr:panic`，并新增三条 `grep -qF` 构建门禁。
+- **属性面板尺寸**：`PALETTE_MIN_WIDTH` 220→280；新增 `PALETTE_MAX_DEFAULT_WIDTH = 460` 与
+  `defaultPaletteWidth(layerWidth)`（绘图区 32%，夹在 300–460）；`PaletteWindow` 在首次测到真实
+  layer 宽度时只应用一次，用户拖拽/缩放后（`touched`）不再覆盖。移动端属性面板仍按设计不提供
+  （`commands/local-selectors.ts` 显式拒绝），移动端改的是错误弹窗本身。
+- **已运行**：`(cd apps/desktop-ui && npm test)` **1,471 passed**（tsc + 插件 tsc + node，含新增
+  `error-report` / `error-banner` / `palette-window` / `popup` / `accelerators` 契约）；
+  `python3 scripts/check-i18n.py` OK（2,656 keys，2 catalogs）；`python3 scripts/check-file-size.py`
+  OK（`App.tsx` 恰为 1000 行）；`cargo test -p app-web --locked` **121 passed**；
+  `cargo check -p app-web --target wasm32-unknown-unknown --locked` OK；
+  `cargo fmt -p app-web -- --check` OK；`bash scripts/build-canvas-wasm.sh` **EXIT=0**
+  （wasm-bindgen 0.2.129 post-process 通过，生成的 `public/canvas/bootstrap.js` 含桥；产物仅证明
+  能构建，不是运行时/GPU/像素证据）。
+- **NOT RUN / 边界**：真实浏览器、真实 GPU、真机与窄窗像素验证 **NOT RUN**（弹窗与属性面板目前
+  只有源码/契约级证据）。`native-below`（Wayland/Windows/macOS/Android）里的 Rust panic 发生在
+  原生进程内，DOM 弹窗捕获不到；本弹窗只覆盖 JS 错误、`dom-canvas` 的 wasm panic，以及宿主已
+  上报到 `cad_status.error` 的错误串。
+
 ## 2026-11-10 RVT 预览：材质基色（线性 → sRGB）+ alpha 透明度
 
 - **改动**：`cad-import-rvt` 的 unit 2（GLB → mesh）现在读 `primitive.material` →
