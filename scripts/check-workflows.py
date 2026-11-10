@@ -31,8 +31,10 @@ checks:
     ``scripts/lib/wasm-toolchain.sh``, ``scripts/web-smoke.cjs`` and
     ``scripts/deploy-cloudflare-pages.sh``) are real: the build re-reads the
     ``wasm-bindgen`` pin from ``Cargo.toml`` and compares it with the CLI, runs
-    ``cargo build -p app-web --target wasm32-unknown-unknown --release --locked``,
-    emits the ``--target web`` glue and writes the documented
+    ``cargo build -p app-web --target wasm32-unknown-unknown --profile wasm --locked``
+    under the size profile, shrinks the module with pinned ``wasm-opt -Oz`` and
+    enforces the 25 MiB Cloudflare Pages ceiling, emits the ``--target web`` glue
+    and writes the documented
     ``apps/app-web/dist`` directory it then prints; the smoke waits for the typed
     ``start: ok`` status and labels software rendering; the deploy entry point
     validates every bundle artifact before it hands the directory to wrangler and
@@ -303,16 +305,20 @@ BUILD_WEB_FRAGMENTS: tuple[str, ...] = (
     BUILD_WEB_OUT_DIR,
 )
 
-# Fragments the shared toolchain library must keep: the exact wasm-bindgen pin
-# comparison against `Cargo.toml`, the wasm32 release build and the `--target web`
-# post-processing.
+# Fragments the shared toolchain library must keep: the exact wasm-bindgen and
+# wasm-opt pin comparisons, the wasm32 size-profile build, the `--target web`
+# post-processing and the Cloudflare Pages per-file ceiling.
 WASM_TOOLCHAIN_FRAGMENTS: tuple[str, ...] = (
     "wasm-bindgen",
     "Cargo.toml",
     "--version",
     "wasm32-unknown-unknown",
     "build -p app-web",
-    "--release --locked",
+    "--profile",
+    "--locked",
+    "wasm-opt",
+    "-Oz",
+    "26214400",
     "--target web",
     "--no-typescript",
     "app_web_bg.wasm",
@@ -717,7 +723,7 @@ def entry_point_pass() -> tuple[list[str], list[str]]:
         if not found and not problems:
             ok.append(
                 f"shared wasm toolchain '{WASM_TOOLCHAIN_SCRIPT}' keeps the wasm-bindgen "
-                "pin check and the wasm32 release build"
+                "pin check and the wasm32 size-profile build"
             )
 
     for rel, contract, label in (

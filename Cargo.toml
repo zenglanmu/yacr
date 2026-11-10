@@ -201,6 +201,21 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 
+# The `dom-canvas` wasm session (`app-web`) is published to Cloudflare Pages by
+# `web-deploy`, and Pages rejects any single uploaded file over 25 MiB. A plain
+# `release` build is ~37 MB since the STEP/IFC importers landed, so the browser
+# build uses its own size profile: `opt-level = "s"` + `panic = "abort"` +
+# fat LTO puts the pre-`wasm-opt` module where `wasm-opt -Oz`
+# (`scripts/lib/wasm-toolchain.sh`) can bring it under the limit. Native hosts
+# keep `profile.release`; only `scripts/*build*wasm*` and `scripts/build-web*.sh`
+# select this profile.
+[profile.wasm]
+inherits = "release"
+opt-level = "s"
+panic = "abort"
+lto = "fat"
+codegen-units = 1
+
 [profile.dev]
 opt-level = 1
 

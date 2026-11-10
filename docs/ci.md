@@ -26,8 +26,9 @@
 > （见 `docs/code-signing.md`）。见 ADR 0010 与 ADR 0023。
 
 > **2026-10-25 增补（Web 流水线恢复）**：`apps/app-web` 的 wasm CAD 会话（ADR 0024）已在 CI 中
-> 端到端接线：`web-build` 用**钉住 SHA-256 的 wasm-bindgen 预编译 CLI** 构建
-> `apps/app-web/dist` 并上传 artifact；`web-smoke` 下载该 artifact、起静态服务器、用 Playwright
+> 端到端接线：`web-build` 用**钉住 SHA-256 的 wasm-bindgen 预编译 CLI** 与**钉住
+> version_120 的 binaryen `wasm-opt`** 构建（`[profile.wasm]` + `wasm-opt -Oz`，模块必须 ≤ 25 MiB
+> 才能上传 Cloudflare Pages）`apps/app-web/dist` 并上传 artifact；`web-smoke` 下载该 artifact、起静态服务器、用 Playwright
 > Chromium 打开页面并断言 typed `start: ok` 状态行；同一 job 还构建**共享 chrome bundle**
 > （`scripts/build-web-ui.sh` → `apps/app-web/dist-ui`，上传为 `web-ui-dist`）。
 > `web-deploy` 只在 **`v*` tag 或手工 `workflow_dispatch`** 时把 `web-ui-dist`
@@ -67,7 +68,7 @@
 | `linux-app` | build.yml | `ubuntu-latest` | 安装 GTK/WebKitGTK 前置 + 构建并测试 React 前端 + `cargo check -p app-linux --all-targets --locked`，上传日志 |
 | `windows-check` | build.yml | `windows-latest` | 原生 MSVC `cargo check -p app-windows --all-targets --locked`（**真实 Windows 宿主**的编译门禁；不运行 exe、不是视觉验收） |
 | `macos-check` | build.yml | `macos-latest` | 先构建/测试 React 前端（`apps/desktop-ui`），再 `cargo check -p app-macos --all-targets --locked`（**真实 macOS 宿主**的编译门禁；不运行、不是视觉/Metal/DPI 验收） |
-| `web-build` | build.yml | `ubuntu-latest` | 安装钉住版本的 wasm-bindgen CLI（预编译 release + SHA-256 + `Cargo.lock` 对照）→ `bash scripts/build-web.sh` → 上传 `web-dist` artifact |
+| `web-build` | build.yml | `ubuntu-latest` | 安装钉住版本的 wasm-bindgen CLI 与 binaryen `wasm-opt`（预编译 release + SHA-256）→ `bash scripts/build-web.sh`（`[profile.wasm]` + `wasm-opt -Oz`，≤ 25 MiB）→ 上传 `web-dist` artifact |
 | `web-smoke` | build.yml | `ubuntu-latest` | 下载 `web-dist` → `scripts/serve-web.py` → Playwright Chromium 打开页面，断言 `start: ok` / `target` / `physical` / `batches` / `draws` / `presented`；**SwiftShader 软件渲染**，非 GPU/像素证据 |
 | `web-deploy` | build.yml | `ubuntu-latest` | **仅 `v*` tag 或手工 dispatch**；`needs: web-build`，下载 `web-ui-dist`（`apps/app-web/dist-ui`）后 `scripts/deploy-cloudflare-pages.sh`（`SKIP_BUILD=1`、`BUNDLE_KIND=ui`）发布到 Cloudflare Pages |
 | `android-check` | core.yml | 能力相关（默认 SKIP） | `bash scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome bundle，因为 `tauri::generate_context!` 会内嵌 `frontendDist`；脚本目前仍一并产出 wasm 产物，`native-below` 载体不加载）→ `cargo check --target aarch64-linux-android -p app-android --locked`（**真实 Android 宿主 / 原生 `native-below` 载体**的编译门禁；不跑 Gradle、不建 APK、不跑设备） |
@@ -139,14 +140,18 @@ dispatch 的 publisher 里。publisher 全绿只代表 **artifact 上传成功**
 | Rust | `1.99.0` | `rust-toolchain.toml` |
 | Node | 见 workflow `NODE_VERSION` | React 前端构建/测试、Playwright、wrangler |
 | wasm-bindgen CLI | `0.2.129`（预编译 musl release，SHA-256 固定） | `scripts/lib/wasm-toolchain.sh` 的 pin + `Cargo.lock` |
+| binaryen (`wasm-opt`) | `version_120`（GitHub release，SHA-256 固定） | `scripts/lib/wasm-toolchain.sh` 的 pin；Cloudflare Pages 单文件 25 MiB 上限 |
 | Playwright | `1.64.1`（npm 钉住；不缓存浏览器二进制） | `web-smoke` job |
 
-`web-build` 从 `wasm-bindgen` 官方 release 下载 `wasm-bindgen-0.2.129-x86_64-unknown-linux-musl`
-并用固定 SHA-256 校验，再断言 `wasm-bindgen --version` 与 `Cargo.lock` 的 `0.2.129` 一致——不依赖
-runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh`，与
-`scripts/build-canvas-wasm.sh` 共用 `scripts/lib/wasm-toolchain.sh`）仍自己校验 CLI 与 `Cargo.toml`
-的 `=0.2.129` 钉住**完全一致**，不一致即硬失败；`check-workflows.py` 断言该 pin 检查与
-`cargo build -p app-web --target wasm32-unknown-unknown --release --locked` 不被删除。
+`web-build` 从 `wasm-bindgen` 官方 release 下载 `wasm-bindgen-0.2.129-x86_64-unknown-linux-musl`、
+从 binaryen 官方 release 下载 `binaryen-version_120-x86_64-linux`，都用固定 SHA-256 校验，再断言
+CLI 版本与 pin 一致——不依赖 runner 上恰好存在的工具。**本地** bundle 构建（`scripts/build-web.sh`，
+与 `scripts/build-canvas-wasm.sh` 共用 `scripts/lib/wasm-toolchain.sh`）自己校验 wasm-bindgen 与
+`Cargo.toml` 的 `=0.2.129`、`wasm-opt` 与 binaryen `120` **完全一致**，不一致即硬失败；产物用
+`wasm-opt -Oz --strip-debug --strip-producers` 压缩后仍 > 26,214,400 字节（Cloudflare Pages 单文件
+25 MiB 上限）也是硬失败。`check-workflows.py` 断言这些 pin 检查、
+`cargo build -p app-web --target wasm32-unknown-unknown --profile wasm --locked`、`wasm-opt` 与
+25 MiB 上限不被删除。
 
 ## 子模块推送契约（pre-push hook）
 

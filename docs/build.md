@@ -189,8 +189,8 @@ cargo build -p cad-cli-tools --release --locked
 `import './pkg/app_web.js'`。
 
 ```bash
-export PATH="$HOME/.cargo/bin:$PATH"   # 需要 wasm32-unknown-unknown 目标与 wasm-bindgen 0.2.129
-bash scripts/build-web.sh              # pin 校验 → cargo build -p app-web → wasm-bindgen → 组装 dist
+export PATH="$HOME/.cargo/bin:$PATH"   # 需要 wasm32-unknown-unknown、wasm-bindgen 0.2.129、binaryen wasm-opt 120
+bash scripts/build-web.sh              # pin 校验 → cargo build --profile wasm → wasm-bindgen → wasm-opt -Oz → 组装 dist
 python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
 # 浏览器打开 http://127.0.0.1:8090/ （file:// 不能实例化 wasm）
 ```
@@ -206,7 +206,10 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
   合并/校验站点根 `fonts/`（已存在的文件跳过下载）。
 - 与桌面 `dom-canvas` 共用**同一条** wasm 构建链：`scripts/build-canvas-wasm.sh` 与
   `scripts/build-web.sh` 都经 `scripts/lib/wasm-toolchain.sh`（wasm-bindgen CLI 必须与 `Cargo.toml`
-  的 `=0.2.129` 钉住**完全一致**，否则硬失败）。产物目录每次从零重建，构件缺失/为空即非零退出，
+  的 `=0.2.129`、`wasm-opt` 必须与 binaryen `120` 钉住**完全一致**，否则硬失败）。`app-web` 的
+  wasm 用工作区的 `[profile.wasm]`（`opt-level = "s"`、`panic = "abort"`、fat LTO）构建，再经
+  `wasm-opt -Oz` 压缩；结果必须 ≤ 26,214,400 字节（Cloudflare Pages 单文件 25 MiB 上限），否则
+  `web-deploy` 无法发布，构建直接失败。产物目录每次从零重建，构件缺失/为空即非零退出，
   **不产出半成品 bundle**。
 - **上限**：本地证据只到**合成夹具**（`docs/validation-dom-canvas-wasm-2026-10-24.md`：Chromium 141 /
   WebKitGTK 2.52.6 + 真实 GPU，出图与 zoom；无浏览器矩阵、无 golden、无性能结论）。CI 侧

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# wasm-toolchain.sh — shared toolchain resolution and pin checks for the wasm CAD
-# session (`app-web`) build entry points.
+# wasm-toolchain.sh — shared toolchain resolution, pin checks and size
+# optimization for the wasm CAD session (`app-web`) build entry points.
 #
 # The same wasm binary feeds two entry points, so the fragile parts live **once**
 # here instead of being copied per script:
@@ -20,9 +20,14 @@
 #                                 sets YACR_CARGO_BIN, YACR_WASM_BINDGEN_BIN,
 #                                 YACR_WASM_BINDGEN_VERSION, YACR_WASM_FILE
 #   yacr_build_app_web_wasm       `cargo build -p app-web --target wasm32-unknown-unknown
-#                                 --release --locked`, then asserts the .wasm exists
+#                                 --profile wasm --locked` (the size profile in
+#                                 `Cargo.toml`), then asserts the .wasm exists
 #   yacr_bindgen_web <out-dir>    wasm-bindgen `--target web --no-typescript` into
-#                                 <out-dir>, then asserts both expected artifacts
+#                                 <out-dir>, asserts both artifacts, then runs
+#                                 `yacr_optimize_wasm` on the module
+#   yacr_optimize_wasm <wasm>     `wasm-opt -Oz --strip-debug --strip-producers` in
+#                                 place; a module still over the 25 MiB Cloudflare
+#                                 Pages per-file limit is a hard error
 #   yacr_rotate_generated_dir <dir> <expected> <label>
 #                                 removes + recreates a **generated** directory, and
 #                                 refuses any path other than <expected>
@@ -40,6 +45,16 @@ readonly YACR_WASM_TARGET="wasm32-unknown-unknown"
 # these scripts have to be re-checked rather than silently producing a mismatched
 # module.
 readonly YACR_PINNED_WASM_BINDGEN="0.2.129"
+# `wasm-opt` (binaryen) shrinks the bindgen output; Cloudflare Pages rejects any
+# single file over 25 MiB, so `web-deploy` cannot publish a larger module. The
+# binaryen release is pinned and CI downloads exactly that archive (SHA-256
+# checked) instead of taking whatever the runner image ships.
+readonly YACR_PINNED_WASM_OPT="120"
+# Cloudflare Pages per-file upload ceiling: 25 MiB (26,214,400 bytes).
+readonly YACR_MAX_WASM_BYTES=26214400
+# Custom size profile (`[profile.wasm]` in the workspace manifest); its output
+# lands in `target/<target>/wasm/`, not `.../release/`.
+readonly YACR_WASM_PROFILE="wasm"
 
 yacr_die() {
   printf '%s: %s\n' "${YACR_SCRIPT_NAME:-wasm-toolchain.sh}" "$*" >&2
@@ -100,14 +115,62 @@ yacr_init_wasm_toolchain() {
     yacr_die "wasm-bindgen CLI is $YACR_WASM_BINDGEN_VERSION but the workspace pins $cargo_pin; run: cargo install wasm-bindgen-cli --version $cargo_pin --locked"
   fi
 
-  YACR_WASM_FILE="$YACR_REPO_ROOT/target/$YACR_WASM_TARGET/release/app_web.wasm"
+  if [ -n "${WASM_OPT:-}" ]; then
+    YACR_WASM_OPT_BIN="$WASM_OPT"
+  elif command -v wasm-opt >/dev/null 2>&1; then
+    YACR_WASM_OPT_BIN="$(command -v wasm-opt)"
+  elif [ -x "$HOME/.cargo/bin/wasm-opt" ]; then
+    YACR_WASM_OPT_BIN="$HOME/.cargo/bin/wasm-opt"
+  else
+    yacr_die "wasm-opt (binaryen version_$YACR_PINNED_WASM_OPT) not found; install that binaryen release (https://github.com/WebAssembly/binaryen/releases/tag/version_$YACR_PINNED_WASM_OPT) or set WASM_OPT"
+  fi
+  # `wasm-opt --version` prints e.g. `wasm-opt version 120`.
+  YACR_WASM_OPT_VERSION="$("$YACR_WASM_OPT_BIN" --version | head -n 1 | awk '{print $3}')"
+  if [ "$YACR_WASM_OPT_VERSION" != "$YACR_PINNED_WASM_OPT" ]; then
+    yacr_die "wasm-opt is ${YACR_WASM_OPT_VERSION:-unknown} but these entry points pin binaryen $YACR_PINNED_WASM_OPT; install the pinned binaryen"
+  fi
+
+  YACR_WASM_FILE="$YACR_REPO_ROOT/target/$YACR_WASM_TARGET/$YACR_WASM_PROFILE/app_web.wasm"
 }
 
 yacr_build_app_web_wasm() {
   [ -n "${YACR_CARGO_BIN:-}" ] || yacr_die "yacr_build_app_web_wasm called before yacr_init_wasm_toolchain"
-  printf 'building app-web for %s (release, locked)\n' "$YACR_WASM_TARGET"
-  "$YACR_CARGO_BIN" build -p app-web --target "$YACR_WASM_TARGET" --release --locked
+  printf 'building app-web for %s (profile %s, locked)\n' \
+    "$YACR_WASM_TARGET" "$YACR_WASM_PROFILE"
+  "$YACR_CARGO_BIN" build -p app-web --target "$YACR_WASM_TARGET" \
+    --profile "$YACR_WASM_PROFILE" --locked
   [ -f "$YACR_WASM_FILE" ] || yacr_die "cargo reported success but $YACR_WASM_FILE is missing"
+}
+
+# Shrink the bindgen output in place and enforce the publishable ceiling.
+#
+# `web-deploy` uploads this module to Cloudflare Pages, which rejects any file
+# over 25 MiB. A module that optimizes above the limit is a hard error here (not
+# a deploy-time surprise) with the size and the remedy, so the bundle can never
+# be published partially or silently.
+yacr_optimize_wasm() {
+  local wasm="$1"
+  local optimized="$wasm.opt"
+  [ -n "${YACR_WASM_OPT_BIN:-}" ] || yacr_die "yacr_optimize_wasm called before yacr_init_wasm_toolchain"
+  [ -s "$wasm" ] || yacr_die "wasm to optimize is missing or empty: $wasm"
+  local before after
+  before="$(stat -c '%s' "$wasm")"
+  printf 'optimizing with wasm-opt %s (-Oz, %s bytes)\n' \
+    "$YACR_WASM_OPT_VERSION" "$before"
+  "$YACR_WASM_OPT_BIN" \
+    -Oz \
+    --strip-debug \
+    --strip-producers \
+    -o "$optimized" \
+    "$wasm" \
+    || yacr_die "wasm-opt failed on $wasm"
+  [ -s "$optimized" ] || yacr_die "wasm-opt produced no output for $wasm"
+  mv -f -- "$optimized" "$wasm"
+  after="$(stat -c '%s' "$wasm")"
+  if [ "$after" -gt "$YACR_MAX_WASM_BYTES" ]; then
+    yacr_die "$wasm is $after bytes after wasm-opt -Oz, over the $YACR_MAX_WASM_BYTES-byte (25 MiB) Cloudflare Pages per-file limit; shrink the module (dependencies or [profile.wasm]) instead of deploying it"
+  fi
+  printf '  %-22s %10s -> %s bytes\n' "$(basename -- "$wasm")" "$before" "$after"
 }
 
 yacr_bindgen_web() {
@@ -122,6 +185,7 @@ yacr_bindgen_web() {
     "$YACR_WASM_FILE"
   [ -s "$out_dir/app_web.js" ] || yacr_die "wasm-bindgen produced no app_web.js in $out_dir"
   [ -s "$out_dir/app_web_bg.wasm" ] || yacr_die "wasm-bindgen produced no app_web_bg.wasm in $out_dir"
+  yacr_optimize_wasm "$out_dir/app_web_bg.wasm"
 }
 
 yacr_rotate_generated_dir() {

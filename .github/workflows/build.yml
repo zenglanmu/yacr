@@ -786,6 +786,28 @@ jobs:
           wasm-bindgen --version | grep -Fx "wasm-bindgen ${pin}"
           ( cd apps/desktop-ui && npm ci )
           ( cd apps/app-android && npm ci )
+      - name: Install the pinned binaryen (wasm-opt)
+        run: |
+          set -euo pipefail
+          # `scripts/build-android-ui.sh` reuses the shared wasm chain
+          # (`build-canvas-wasm.sh` -> `wasm-toolchain.sh`), which optimizes the
+          # module with pinned `wasm-opt` before the bundle is assembled.
+          pin="$(sed -n 's/^readonly YACR_PINNED_WASM_OPT="\(.*\)"$/\1/p' scripts/lib/wasm-toolchain.sh)"
+          test -n "$pin" || { echo "no wasm-opt pin in scripts/lib/wasm-toolchain.sh" >&2; exit 1; }
+          case "$pin" in
+            120)
+              sha="006878709d21b77a0b34e3b4a6fd7894ea90ac43173f6a2cd4f0f064601ebe5d" ;;
+            *)
+              echo "no verified download for binaryen $pin; add its release SHA-256 to this step" >&2
+              exit 1 ;;
+          esac
+          archive="binaryen-version_${pin}-x86_64-linux"
+          curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/version_${pin}/${archive}.tar.gz" \
+            -o "/tmp/${archive}.tar.gz"
+          echo "${sha}  /tmp/${archive}.tar.gz" | sha256sum -c -
+          tar -xzf "/tmp/${archive}.tar.gz" -C /tmp
+          install "/tmp/binaryen-version_${pin}/bin/wasm-opt" "$HOME/.cargo/bin/wasm-opt"
+          wasm-opt --version | grep -Fx "wasm-opt version ${pin}"
       - name: Cache the downloaded CAD font catalogue
         # scripts/fetch-fonts.sh caches per file under ~/.cache/yacr/fonts;
         # restore the newest run's cache so this job does not re-download it.
@@ -883,10 +905,11 @@ jobs:
   web-build:
     name: web-build (wasm CAD bundle)
     # `scripts/build-web.sh` builds the real `surfaceMode: dom-canvas` session
-    # (`apps/app-web`, ADR 0024) into `apps/app-web/dist`: wasm32 release build,
-    # pinned wasm-bindgen `--target web`, assembled shell. The CLI version must
-    # equal the workspace pin, so it is installed from the pinned prebuilt release
-    # and verified — never taken from whatever `wasm-bindgen` happens to be on PATH.
+    # (`apps/app-web`, ADR 0024) into `apps/app-web/dist`: wasm32 build under the
+    # `wasm` size profile, pinned wasm-bindgen `--target web`, `wasm-opt -Oz`, and
+    # the assembled shell. The CLI versions must equal the pins in the shared
+    # toolchain library, so both are installed from their pinned prebuilt releases
+    # and verified — never taken from whatever happens to be on PATH.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -933,6 +956,29 @@ jobs:
           wasm-bindgen --version | grep -Fx "wasm-bindgen ${pin}"
           grep -A2 'name = "wasm-bindgen"' Cargo.lock | grep -q "version = \"${pin}\"" \
             || { echo "Cargo.lock wasm-bindgen does not match the installed CLI pin $pin" >&2; exit 1; }
+      - name: Install the pinned binaryen (wasm-opt)
+        run: |
+          set -euo pipefail
+          # Cloudflare Pages rejects any single file over 25 MiB, so the module is
+          # optimized with the pinned binaryen before upload (the shared toolchain
+          # library re-checks the version and the ceiling). Fetch exactly that
+          # release and verify its published SHA-256.
+          pin="$(sed -n 's/^readonly YACR_PINNED_WASM_OPT="\(.*\)"$/\1/p' scripts/lib/wasm-toolchain.sh)"
+          test -n "$pin" || { echo "no wasm-opt pin in scripts/lib/wasm-toolchain.sh" >&2; exit 1; }
+          case "$pin" in
+            120)
+              sha="006878709d21b77a0b34e3b4a6fd7894ea90ac43173f6a2cd4f0f064601ebe5d" ;;
+            *)
+              echo "no verified download for binaryen $pin; add its release SHA-256 to this step" >&2
+              exit 1 ;;
+          esac
+          archive="binaryen-version_${pin}-x86_64-linux"
+          curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/version_${pin}/${archive}.tar.gz" \
+            -o "/tmp/${archive}.tar.gz"
+          echo "${sha}  /tmp/${archive}.tar.gz" | sha256sum -c -
+          tar -xzf "/tmp/${archive}.tar.gz" -C /tmp
+          install "/tmp/binaryen-version_${pin}/bin/wasm-opt" "$HOME/.cargo/bin/wasm-opt"
+          wasm-opt --version | grep -Fx "wasm-opt version ${pin}"
       - name: Cache the downloaded CAD font catalogue
         # scripts/fetch-fonts.sh caches per file under ~/.cache/yacr/fonts;
         # restore the newest run's cache so this job does not re-download it.

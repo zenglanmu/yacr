@@ -129,6 +129,18 @@ for artifact in "${artifacts[@]}"; do
     exit 1
   }
 done
+# Cloudflare Pages rejects any single uploaded file over 25 MiB (26,214,400
+# bytes). The wasm build enforces the same ceiling, so this is a defense against
+# a stale or hand-assembled bundle: fail with the offending paths instead of
+# letting wrangler reject an already-validated directory.
+oversized="$(find "$DIST" -type f -size +26214400c -print)"
+if [ -n "$oversized" ]; then
+  echo "Cloudflare Pages rejects files over 25 MiB (26,214,400 bytes):" >&2
+  printf '%s\n' "$oversized" | while IFS= read -r path; do
+    printf '  %s\n' "$path" >&2
+  done
+  exit 1
+fi
 # The shell must load the module this bundle ships, otherwise the deployment is
 # a blank page nobody notices. Each kind has its own loader.
 if [ "$BUNDLE_KIND" = "ui" ]; then
