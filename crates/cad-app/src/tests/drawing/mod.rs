@@ -279,6 +279,7 @@ mod annot_batch;
 mod arc_extend;
 mod array;
 mod arraypath;
+mod arraypath_positions;
 mod block_define;
 mod block_undo;
 mod boundary;

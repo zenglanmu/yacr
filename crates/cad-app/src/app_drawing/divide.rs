@@ -25,6 +25,16 @@
 //! is walked by an exact per-segment table: straight chords and circular bulges
 //! (`radius · |sweep|`), so a bulged segment is divided exactly, not approximated.
 //!
+//! ## ARRAYPATH fraction rule
+//!
+//! [`path_distribution`] (ARRAYPATH) uses `i / (count - 1)` on an open path but
+//! `i / count` on a **periodic** one (CIRCLE, a full-turn ARC or ELLIPSE, a
+//! closed LWPOLYLINE), because `point_at(1.0) == point_at(0.0)` there. Without
+//! this the final copy duplicated the seam — and `count == 2` on a circle put
+//! both copies on one point. Its tangent is analytic for a LWPOLYLINE (chord or
+//! bulge-arc tangent, outgoing segment at a vertex) and `None` when the path has
+//! no in-plane direction.
+//!
 //! Every mark is a new `POINT` on the **active layer** in **model space**, in one
 //! transaction / one undo step, through the shared create funnel; the source curve
 //! is **retained**.
@@ -403,7 +413,10 @@ fn division_points(
             let marks = (first..first + count)
                 .map(|k| {
                     let u = k as f64 / segments as f64;
-                    (curve.point_at(u), curve_tangent_angle(&curve, u))
+                    (
+                        curve.point_at(u),
+                        curve_tangent_angle(&curve, u).unwrap_or(0.0),
+                    )
                 })
                 .collect();
             Ok((marks, closed))
@@ -462,7 +475,7 @@ fn division_points(
                     let distance = total * k as f64 / segments as f64;
                     (
                         curve.point_at_distance(distance),
-                        polyline_tangent_angle(&curve, distance, total),
+                        curve.tangent_angle_at_distance(distance).unwrap_or(0.0),
                     )
                 })
                 .collect();
@@ -479,26 +492,63 @@ fn division_points(
 /// The path kinds an ARRAYPATH distribution supports (exactly DIVIDE's set).
 const ARRAY_PATH_KINDS: &str = "LINE, ARC, CIRCLE, SPLINE, ELLIPSE or LWPOLYLINE";
 
+/// Whether a path wraps onto itself at `fraction == 1.0`, so its last position
+/// would duplicate its first one.
+///
+/// CIRCLE, an ARC of exactly one turn, an ELLIPSE (or elliptical arc) of exactly
+/// one turn, and a closed LWPOLYLINE are periodic. A SPLINE is **not** periodic
+/// here: the stored geometry carries no closed flag, so it keeps the open
+/// curve's seam semantics (the same declared rule [`TargetCurve::is_periodic`]
+/// uses for DIVIDE).
+fn path_is_periodic(geometry: &SemanticGeometry) -> bool {
+    match geometry {
+        SemanticGeometry::Circle { .. } => true,
+        SemanticGeometry::Arc { sweep, .. } => sweep.abs() >= std::f64::consts::TAU - 1e-9,
+        SemanticGeometry::Ellipse { sweep, .. } => sweep.abs() >= std::f64::consts::TAU - 1e-9,
+        SemanticGeometry::Polyline { closed, .. } => *closed,
+        _ => false,
+    }
+}
+
 /// The equal-arc-length positions along `geometry` for an ARRAYPATH.
 ///
-/// `count` positions sit at `i / (count - 1)` of the path arc length for
-/// `count >= 2` (**both ends included**); `count == 1` places the single position
-/// at the path start. Each position carries the curve's local XY tangent angle in
-/// radians. The supported kinds and the underlying curve model are exactly
+/// ## Position fractions
+///
+/// * `count == 1` — the single position is the path start (`fraction == 0`).
+/// * **periodic** path (CIRCLE, a full-turn ARC, a full ELLIPSE, a closed
+///   LWPOLYLINE) — the positions are `i / count`, `i in 0..count`. There is
+///   **no seam duplicate**: `point_at(1.0)` is `point_at(0.0)` for these kinds,
+///   so the old `i / (count - 1)` rule put `count - 1` distinct copies plus one
+///   coincident copy on the start (and `count == 2` on a circle collapsed both
+///   copies to one point).
+/// * every other (open) path — the positions are `i / (count - 1)`, **both ends
+///   included**.
+///
+/// Each position carries the curve's local XY tangent angle in radians, or
+/// `None` when the path has no in-plane (XY) tangent there (a purely vertical
+/// LINE/polyline segment): `ALIGN` cannot orient a copy then and the command
+/// refuses `arraypath.no_plane_tangent` instead of fabricating an angle.
+///
+/// The supported kinds and the underlying curve model are exactly
 /// [`division_points`]'s; every other kind and a path with no measurable length
 /// is an explicit refusal, never a fabricated position.
 pub(super) fn path_distribution(
     geometry: &SemanticGeometry,
     count: usize,
-) -> CadResult<Vec<(Point3, f64)>> {
+) -> CadResult<Vec<(Point3, Option<f64>)>> {
     if count == 0 {
         return Err(refusal(
             "arraypath.invalid_count",
             "ARRAYPATH needs a positive position count",
         ));
     }
+    let periodic = path_is_periodic(geometry);
     let fractions: Vec<f64> = if count == 1 {
         vec![0.0]
+    } else if periodic {
+        (0..count)
+            .map(|index| index as f64 / count as f64)
+            .collect()
     } else {
         (0..count)
             .map(|index| index as f64 / (count - 1) as f64)
@@ -558,7 +608,7 @@ pub(super) fn path_distribution(
                     let distance = total * fraction;
                     (
                         curve.point_at_distance(distance),
-                        polyline_tangent_angle(&curve, distance, total),
+                        curve.tangent_angle_at_distance(distance),
                     )
                 })
                 .collect())
@@ -580,11 +630,12 @@ fn path_degenerate(kind: &str) -> CadError {
 }
 
 /// Equal-arc-length positions on a sampled curve at the given normalized
-/// distances, each with its local tangent angle.
+/// distances, each with its local XY tangent angle (or `None` when the sampled
+/// curve has no in-plane tangent there).
 fn sampled_path_positions(
     point_at: impl Fn(f64) -> Point3,
     fractions: &[f64],
-) -> CadResult<Vec<(Point3, f64)>> {
+) -> CadResult<Vec<(Point3, Option<f64>)>> {
     let table = ArcLengthTable::sample(&point_at);
     let total = table.total();
     let eps = cut_tolerance();
@@ -732,35 +783,28 @@ fn sampled_marks(
             let u = table.parameter_at(total * k as f64 / segments as f64);
             (
                 point_at(u),
-                direction_angle(point_at(u + h), point_at(u - h)),
+                direction_angle(point_at(u + h), point_at(u - h)).unwrap_or(0.0),
             )
         })
         .collect();
     Ok((marks, closed))
 }
 
-/// The tangent direction angle (radians) from `from` to `to` in the XY plane.
-fn direction_angle(to: Point3, from: Point3) -> f64 {
+/// The tangent direction angle (radians) from `from` to `to` in the XY plane,
+/// or `None` when the direction has no in-plane component (a purely vertical
+/// segment) or is non-finite.
+fn direction_angle(to: Point3, from: Point3) -> Option<f64> {
     let dx = to.x - from.x;
     let dy = to.y - from.y;
     if !dx.is_finite() || !dy.is_finite() || dx.hypot(dy) <= 1e-12 {
-        0.0
+        None
     } else {
-        dy.atan2(dx)
+        Some(dy.atan2(dx))
     }
 }
 
 /// The tangent angle of a LINE/ARC/CIRCLE/SPLINE target at parameter `u`.
-fn curve_tangent_angle(curve: &TargetCurve, u: f64) -> f64 {
+fn curve_tangent_angle(curve: &TargetCurve, u: f64) -> Option<f64> {
     let h = 1e-6;
     direction_angle(curve.point_at(u + h), curve.point_at(u - h))
-}
-
-/// The tangent angle of a polyline at `distance` along its arc length.
-fn polyline_tangent_angle(curve: &PolylineCurve, distance: f64, total: f64) -> f64 {
-    let h = (total * 1e-6).max(1e-9);
-    direction_angle(
-        curve.point_at_distance(distance + h),
-        curve.point_at_distance(distance - h),
-    )
 }

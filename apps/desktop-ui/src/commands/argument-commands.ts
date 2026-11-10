@@ -537,15 +537,18 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
    * `ARRAYPATH <count> [ALIGN]` (2026-11-10): the typed 2D path-array form. The
    * current selection is the input — the first selected entity is the path, the
    * rest are items — so only the count and the optional `ALIGN` word are grammar
-   * here. The count is one positive whole number; the host re-checks it and caps
-   * the total copy count.
+   * here. `<count>` is the number of **copies** (the N source objects stay). The
+   * count is one positive safe integer no larger than the host's
+   * `MAX_ARRAY_ENTITIES` cap (`100_000`); the host re-checks both the count and
+   * the total `count × items`.
    */
   ARRAYPATH: Object.freeze({
     parse: (argument: string) => {
       const parts = tokens(argument);
       if (parts.length === 0 || parts.length > 2) return false;
       if (!/^[0-9]+$/.test(parts[0])) return false;
-      if (Number.parseInt(parts[0], 10) <= 0) return false;
+      const count = Number(parts[0]);
+      if (!Number.isSafeInteger(count) || count <= 0 || count > 100_000) return false;
       return parts.length === 1 || parts[1].toUpperCase() === 'ALIGN';
     },
   }),

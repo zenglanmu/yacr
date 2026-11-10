@@ -474,8 +474,14 @@ pub enum CommandPayload {
         refs: Vec<SelectionRef>,
         center: Point3,
     },
-    /// ARRAYPATH: 2D path array v1 (first selected = path, rest = items; `count` positions; optional `align`).
+    /// ARRAYPATH: 2D path array v1 (first `refs` entry = path, rest = items;
+    /// `count` **copies**, optional `align`). `refs` is the selection snapshot
+    /// (the typed path fills it at argument-dispatch time, exactly like
+    /// [`Self::ArrayRect`]). `count` is the copies inserted per item; the N source
+    /// objects stay, so the array adds `count × items` fresh entities. Position 0
+    /// can coincide with a retained source whose anchor equals the path start.
     ArrayPath {
+        refs: Vec<SelectionRef>,
         count: usize,
         align: bool,
     },

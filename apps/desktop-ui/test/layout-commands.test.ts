@@ -108,6 +108,8 @@ test('ARRAYPATH is a real typed path-array command, not a refusal', () => {
   assert.equal(parse('1'), true);
   assert.equal(parse('4 ALIGN'), true);
   assert.equal(parse('4 align'), true);
+  assert.equal(parse('100000'), true);
+  assert.equal(parse('100001'), false);
   assert.equal(parse('0'), false);
   assert.equal(parse('-1'), false);
   assert.equal(parse('+3'), false);

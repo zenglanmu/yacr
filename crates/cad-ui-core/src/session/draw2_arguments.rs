@@ -77,18 +77,26 @@ impl CadSession {
 
     /// Apply one typed `ARRAYPATH <count> [ALIGN]` line.
     ///
-    /// The count and the align flag ride the payload; the **current selection**
-    /// (first entity = path) is the whole input, exactly like the other
-    /// selection-based modify forms. A malformed argument is refused before IPC
-    /// with the stable reason and changes nothing.
+    /// The count and the align flag ride the payload, together with the
+    /// **selection snapshot** taken here: the first selected entity is the path
+    /// and the rest are items. Carrying the refs in the payload keeps the
+    /// command's input self-contained (the handler never re-reads a mutable
+    /// session), exactly like `ARRAYRECT`/`ARRAYPOLAR`. A malformed argument is
+    /// refused before IPC with the stable reason and changes nothing; an empty or
+    /// single-object selection is refused by the handler with
+    /// `arraypath.selection`.
     pub(super) fn arraypath_argument(&self, argument: &str, text: &str) -> Result<(), String> {
         let Some((count, align)) = parse_arraypath_argument(argument) else {
             return self.refuse_argument(invalid_arraypath_argument_reason(text));
         };
+        let refs = {
+            let controller = self.core.controller.borrow();
+            controller.session.selection.refs().to_vec()
+        };
         self.core.record_command(ARRAYPATH_SELECTOR);
         match self.core.command(
             CommandId::ArrayPath,
-            CommandPayload::ArrayPath { count, align },
+            CommandPayload::ArrayPath { refs, count, align },
         ) {
             Ok(()) => {
                 *self.error.borrow_mut() = None;

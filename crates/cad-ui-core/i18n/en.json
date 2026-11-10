@@ -2276,7 +2276,7 @@
   "draw.kind.appstore": "APPSTORE (not implemented)",
   "draw.kind.appstore.hint": "appstore.unsupported: the host owns this browser/store/chrome action",
   "draw.kind.arraypath": "ARRAYPATH (path array v1)",
-  "draw.kind.arraypath.hint": "Distribute independent copies of the selected items (all but the first) at equal arc-length positions along the selected path (the first selected entity); run `ARRAYPATH <count> [ALIGN]`. Sources are retained; the array is not associative.",
+  "draw.kind.arraypath.hint": "Distribute copies of the selected items (all but the first) at equal arc-length positions along the selected path (the first selected entity); run `ARRAYPATH <count> [ALIGN]`. `<count>` is the number of copies; the N source objects are retained, and position 0 can coincide with a retained source whose anchor equals the path start. The array is not associative.",
   "draw.kind.assistantclose": "ASSISTANTCLOSE (not implemented)",
   "draw.kind.assistantclose.hint": "assistantclose.unsupported: this build has no Autodesk Assistant model",
   "draw.kind.assistantopen": "ASSISTANTOPEN (not implemented)",
