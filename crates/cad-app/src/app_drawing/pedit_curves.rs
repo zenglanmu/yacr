@@ -265,7 +265,7 @@ pub(super) fn fit_bulges_closed(points: &[Point3]) -> CadResult<Vec<f64>> {
     };
     let mut bulges = Vec::with_capacity(n);
     for (index, a_turn) in a.iter().enumerate() {
-        let sign = if index % 2 == 0 { 1.0 } else { -1.0 };
+        let sign = if index.is_multiple_of(2) { 1.0 } else { -1.0 };
         let delta = a_turn + sign * t;
         if delta.abs() >= std::f64::consts::FRAC_PI_2 - 1e-9 {
             return Err(unsupported(
@@ -290,7 +290,7 @@ pub(super) fn fit_bulges_closed(points: &[Point3]) -> CadResult<Vec<f64>> {
 /// the same ring always yields the same fit.
 fn minimax_turn(a: &[f64]) -> f64 {
     let n = a.len();
-    let sign = |index: usize| if index % 2 == 0 { 1.0 } else { -1.0 };
+    let sign = |index: usize| if index.is_multiple_of(2) { 1.0 } else { -1.0 };
     let worst = |t: f64| {
         (0..n)
             .map(|index| (a[index] + sign(index) * t).abs())

@@ -375,7 +375,9 @@ fn the_hatch_records_the_projected_seed_and_exports_group_98() {
         .lines()
         .map(str::trim)
         .collect::<Vec<_>>()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| (pair[0], pair[1]))
         .collect();
     let seed_count = pairs

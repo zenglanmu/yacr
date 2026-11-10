@@ -1,5 +1,121 @@
 AD
 
+## 2026-11-10 多格式导入收口：MSRV 1.88 / 原生选择器 / 浏览器闸门 / 文案 / 文档
+
+- **范围**：各格式 lane 已存在并通过各自 crate 门禁（DWG/DXF `cad-import-acadrust`、OBJ
+  `cad-import-obj`、STL `cad-import-stl`、PLY/OFF `cad-import-mesh`、STEP `cad-import-step`、IFC
+  `cad-import-ifc`、RVT 预览 `cad-import-rvt`），统一经 `cad-import-core` 的 `FormatImporter` /
+  `detect_format` 派发。本轮只做收口，不改任何解析器的判定语义。
+- **各格式诚实状态（摘要；逐项见 `docs/compatibility.md`）**：
+  - OBJ：`tobj` 三角化后单索引；`f` 面 >3 顶点扇三角化 + `import.obj.ngon_fan_triangulated` +
+    `Partial`（凹 n-gon 可能不正确）；`mtllib` 外部材质**不加载**（`import.obj.mtl_not_loaded`，
+    回退 `ByLayer`）；单位未知，不假设毫米。
+  - STL：ASCII/二进制；单位未知；逐面法向展开为逐顶点（平面着色）；退化面丢弃 + `Partial`。
+  - PLY/OFF：仓内手写解析器，不新增第三方依赖；OFF 只接受 `OFF`/`COFF`，其它家族前缀按名拒绝
+    `import.off.variant_refused`；n-gon 扇三角化 + `Partial`；截断/尾随数据是 `CorruptData`。
+  - STEP：`cadmpeg-*` 0.6.11；真实样本会**拒绝个别面**（`import.step.face_refused` → 通常
+    `Partial`），全部面被拒才是 `Unsupported`；长度规范为毫米（`import.step.units_canonicalised`）；
+    装配定位无法解析时按名拒绝 `import.step.assembly_placement_unsupported`，不把 body 堆在原点。
+  - IFC：`ifc-lite-*` 28.2.0（MPL-2.0，精确固定）；按项目声明单位缩放到米、placement 烘焙为世界
+    坐标、`IfcRelVoidsElement` 布尔裁剪（`import.ifc.csg_failure` + `Partial`）；样式不导入；无导出。
+  - RVT：`rvt` 0.17.0，**preview**；2008–2023 构件体是包围盒，2024/2025 `partial`，2026/2027
+    `experimental`；`.rfa`/`.rft` 家族按名拒绝 `import.rvt.family_no_geometry`。**同日并发修复**：
+    `PartAtom` 在存在 `ProjectInformation` 时不再被当成“家族”证据（真实 Revit 2024 项目没有该流）；
+    新增 env 门控用例 `YACR_TEST_RVT`（未设置即跳过，**跳过不是证据**）。本地（**未提交**）
+    Autodesk `racbasicsampleproject.rvt`：**565 meshes / 14,202 triangles**，completeness `partial`。
+    样本不在仓库内，不能当 CI/兼容性/性能证据。
+- **MSRV 1.85 → 1.88**：workspace `[workspace.package] rust-version = "1.88"`（`cadmpeg-ir`/
+  `cadmpeg-codec-step`/`cadmpeg-tessellate` 0.6.11 声明 1.88），删除 `cad-import-rvt` 的
+  `rust-version = "1.87"` 覆写（改为 `rust-version.workspace = true`），`Cargo.toml` 的 rvt 注释
+  同步；全仓不再有第二处 `rust-version` 声明。工具链仍钉 `1.99.0`（`rust-toolchain.toml` 未改）。
+  **副作用**：clippy 的 MSRV 门控建议（`manual_is_multiple_of`、`chunks_exact_to_as_chunks`）全部
+  启用；已在 `cad-domain`/`cad-proxy`/`cad-resources`/`cad-representation`/`cad-ui-core`/`cad-app`/
+  `cad-render-wgpu` 与各 `cad-import-*` 机械改写为 `as_chunks::<N>()` / `is_multiple_of`，行为不变
+  （`cad-app --lib` 2,271 用例与各 crate 用例复跑通过）。
+- **选择器 / 浏览器闸门（14 个扩展名，四个宿主一致）**：`dwg dxf obj stl ply off coff step stp
+  ifc rvt rte rfa rft`。Linux = XDG portal 的括号大小写 glob（`*.[oO][bB][jJ]` …）；Windows =
+  `COMDLG_FILTERSPEC` 的 `*.dwg;*.dxf;…`；macOS = `NSOpenPanel.setAllowedFileTypes`；Android 仍是
+  SAF `*/*`（未改）。`.rfa`/`.rft` **只出现在选择器**，让 RVT 适配器给出精确拒绝；任何“支持格式”
+  文案都不列它们。`web-adapter.ts` 的 `WEB_OPEN_EXTENSIONS` 同步扩展，拒绝文案由该常量拼出，
+  仍是**一条**稳定、诚实的拒绝。三个宿主各补一条契约用例断言扩展名集合。
+- **i18n（`crates/cad-ui-core/i18n/{zh-CN,en}.json`，键集未变）**：`host.open_drawing`、
+  `linux.picker_title`/`linux.picker_filter`、`file.choose`、`windows.picker_title`/`_filter`、
+  `macos.picker_title`/`_filter` 改为“图纸与模型（DWG、DXF、OBJ、STL、PLY、OFF、STEP、IFC，
+  RVT 预览）”，不再只写 DWG/DXF；无新增硬编码中文。
+- **诊断脱敏**：`cad-diagnostics` 把硬编码文档扩展名表提为 `DOCUMENT_EXTENSIONS`，覆盖上述 14 个
+  格式扩展名 + `.json/.sat/.sab/.shx/.ttf`；新增契约用例断言裸文件名 token 同样被脱敏。
+- **README（中英）**：开篇与“能力集 · 打开与解析”改为真实范围（DWG/DXF 为 CAD 数据；OBJ/STL/
+  PLY/OFF/STEP/IFC 为**可显示、可拾取、不可测量**的网格；`.rvt`/`.rte` 仅包围盒预览；家族按名
+  拒绝）；架构示意行的导入链更新为 `cad-import-core ─ cad-import-*`。证据边界段落未复制进 README。
+- **ADR 0033**：待办改为具名跟进项 **A**（由 STEP/IFC 源面填充 `Mesh.face_sources`，纯数据层，
+  是面拾取、面到面距离、特征边的前提）与 **B**（`cad-measure` 目前**没有** `Mesh` 测量入口），
+  两者均明确标注“未实现”，与代码现状一致。
+- **门禁（本机 Linux，2026-11-10，均实跑）**：前端 `(cd apps/desktop-ui && npm ci && npm test &&
+  npm run build)` 全链 EXIT=0（npm test **1,445 passed / 0 failed**）；`cargo check -p app-linux
+  --all-targets --locked` EXIT=0；`cargo check --workspace --all-targets --locked` EXIT=0；
+  `cad-import-obj` **16**、`-stl` **11**、`-mesh` **30**、`-step` **13**、`-ifc` **16**、`-rvt`
+  **24**（并发 lane 其后加到 **25**）、`cad-import-acadrust --lib` **360 passed / 1 ignored**；
+  `cargo check -p app-web --target wasm32-unknown-unknown --locked` EXIT=0；`cargo fmt --all --
+  --check` EXIT=0；`cargo clippy -p cad-import-core -p cad-app --all-targets --locked --
+  -D warnings` EXIT=0；`cargo clippy --workspace --exclude app-android --exclude app-web
+  --all-targets --locked -- -D warnings` EXIT=0；`check-architecture.py` / `check-file-size.py` /
+  `check-fixture-manifest.py` / `check-i18n.py` 全部 EXIT=0（i18n：**2,232 keys / 2 catalogs**）。
+  附带复跑：`cad-app --lib` **2,271 passed / 3 ignored**、`cad-representation` **245**、
+  `cad-ui-core` **498 passed / 1 ignored**、`cad-proxy` **16**、`cad-resources` **47**、
+  `cad-diagnostics` **15**、新增 Linux 选择器契约用例 **1 passed**。
+- **NOT RUN / 证据边界**：未跑全量 `cargo test --workspace`；真实格式语料只有本地零星样本
+  （NIST/ABC STEP、buildingSMART IFC、Autodesk RVT 样本都**不在仓库内**）；Windows/macOS/Android
+  运行时与 Windows/macOS 交叉 check **未运行**（本机只有 Linux 编译/契约）；无 GPU/像素/性能结论；
+  RVT 真实几何只有本地单样本，不得推广为兼容性验收。构建期间 `/home` 曾 100% 满（清
+  `target/debug/incremental` 后恢复），与本轮代码结论无关。
+
+## 2026-11-10 PLY / OFF 导入（`cad-import-mesh`）
+
+- **新增 lane**：`crates/cad-import-mesh`（`PlyImporter`/`OffImporter`），**不新增第三方依赖**；
+  PLY 手写 parser 支持 ASCII / `binary_little_endian` / `binary_big_endian` 1.0，属性按名称读取
+  （任意顺序），OFF 仅 ASCII 且只接受 `OFF`/`COFF`。派发器新增 `DrawingFormat::Ply`/`Off` 两个
+  arm；`UNSUPPORTED_INPUT` 文案列出两种格式；acadrust 适配器的拒绝文案同步更新。
+- **契约**：单文件一个 `DbEntity`；单位未知（`drawing_units`）；measure `Unsupported`；n-gon
+  扇三角化 + `import.ply.ngon_fan_triangulated` / `import.off.ngon_fan_triangulated` + `Partial`；
+  n<3、退化三角形、颜色丢弃各有稳定诊断码；截断/尾随数据是 `CorruptData`，不是部分成功；
+  OFF 的 `NOFF`/`CNOFF`/`STOFF`/`4OFF` 等按名拒绝 `import.off.variant_refused`。
+- **fixtures（synthetic）**：`fixtures/ply/`（ASCII 非标准属性顺序 + LE + BE）与 `fixtures/off/`
+  （OFF quad+triangle、COFF 顶点色）全部进 `fixtures/manifest`；`dwg_version` 为
+  `n/a (PLY)` / `n/a (OFF)`。
+- **门禁（本机 Linux，2026-11-10）**：`cargo check -p cad-import-mesh --all-targets`（EXIT=0）、
+  `cargo test -p cad-import-mesh`（30 passed）、`-p cad-import-obj`（16）、`-p cad-import-stl`（11）、
+  `-p cad-import-step`（13）、`-p cad-import-ifc`（16）、`-p cad-import-acadrust --lib`
+  （360 passed / 1 ignored）、`cargo check -p cad-app --all-targets`（EXIT=0）、
+  `cargo test -p cad-app import::tests`（4 passed）、
+  `cargo check -p app-web --target wasm32-unknown-unknown`（EXIT=0，仅有既有 dead-code 警告）、
+  `cargo fmt --all -- --check`、定向 `clippy -D warnings`、`check-architecture.py`、
+  `check-file-size.py`、`check-fixture-manifest.py` 全部 EXIT=0。
+- **NOT RUN / 证据边界**：未运行全量 `cargo test --workspace` 与 `cargo check --workspace`；未做
+  Android/Windows/macOS/Web 运行时验证；无真实 PLY/OFF 样本对照、无 GPU/像素/性能结论。
+  合成 fixture 只钉 parser/网格不变量，不是兼容性或产品验收证据。
+
+## 2026-11-10 IFC 导入（IFC2X3 / IFC4 / IFC4X3）
+
+- **新增 lane**：`crates/cad-import-ifc`（`ifc-lite-core` + `ifc-lite-geometry` 28.2.0，MPL-2.0，
+  workspace 精确固定 `=28.2.0`）。`cad_app::import::FormatImporter` 按 `FILE_SCHEMA` 把 IFC 交给该
+  lane；STEP 适配器仍对 IFC 按名拒绝（`import.step.ifc_schema_refused`；原
+  `import.ifc.not_implemented` 已删除，避免把已实现的能力继续写成“未实现”）。
+- **契约**：每个有几何 product 一个 `DbEntity`；路由器把 placement 烘焙为世界坐标（合成 IFC2X3
+  两面墙 x 0..4 m / 6..10 m，不堆原点）；单位按项目声明缩放为米（合成 IFC4 墙 4000 mm → 4 m），
+  无单位 → `drawing_units` + `import.ifc.units_unknown` + `Partial`；洞口布尔裁剪（合成墙
+  12→32 三角）；item 级丢弃按类型记 `import.ifc.item_unsupported` + `Partial`；全部 product 失败 → `Unsupported`，无 product → `CorruptData`；孤立 opening
+  不绘制并记 `import.ifc.opening_without_host`；`IfcStyledItem` 不导入（`Partial`）；无 IFC 导出。
+- **门禁（本机 Linux，2026-11-10）**：`cargo test -p cad-import-ifc`（16 passed）、
+  `-p cad-import-step`（13）、`-p cad-import-obj`（16）、`-p cad-import-stl`（11）、
+  `-p cad-import-acadrust --lib`（360 passed / 1 ignored）、`cargo check -p cad-app --all-targets`、
+  `cargo check -p app-web --target wasm32-unknown-unknown`、`cargo fmt --all -- --check`、
+  定向 `clippy -D warnings`（`cad-import-ifc`/`cad-import-core`/`cad-app`）、
+  `check-architecture.py`/`check-file-size.py`/`check-fixture-manifest.py` 全部 EXIT=0。
+- **NOT RUN / 证据边界**：未运行全量 `cargo test --workspace` 与 `cargo check --workspace`；未做
+  Android/Windows/macOS/Web 运行时验证；未提交真实 buildingSMART 样本（`YACR_TEST_IFC` 未设置，
+  该用例跳过，**跳过不是已运行证据**）；真实文件几何比例与 CSG/NURBS best-effort 边界只记录在
+  `docs/compatibility.md`。没有产品验收、像素/GPU/性能结论。
+
 ## 2026-11-10 发布 v0.1.8（命令覆盖 623 + 栅格/空白图修复）
 
 - **版本**：`Cargo.toml` workspace 版本、`Cargo.lock`（仅 28 处 workspace 成员 `version`）、四个

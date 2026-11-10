@@ -15,6 +15,7 @@ import { SHELL_ONLY_COMMANDS, createInvoke, invokeRoute } from '../src/host/invo
 import {
   WEB_FAILURE_COMMAND,
   WEB_INPUT_COMMAND,
+  WEB_OPEN_EXTENSIONS,
   WEB_SESSION_COMMAND,
   WEB_UNAVAILABLE_PREFIX,
   createWebAdapter,
@@ -517,7 +518,15 @@ test('a selected file that is not a drawing is refused by name, before any impor
   const adapter = createWebAdapter(fake.module, { document: page.doc });
   await assert.rejects(
     adapter.invoke('cad_command', { command: 'OPEN' }),
-    /OPEN refused "holiday\.png": only \.dwg \/ \.dxf files/,
+    (error: unknown) => {
+      const message = (error as Error).message;
+      // One stable refusal that names the real set, derived from the constant.
+      assert.match(message, /OPEN refused "holiday\.png": only /);
+      for (const extension of WEB_OPEN_EXTENSIONS) {
+        assert.ok(message.includes(extension), `${extension} must be named in: ${message}`);
+      }
+      return true;
+    },
   );
   assert.deepEqual(fake.calls, [], 'a non-drawing must never reach open_bytes');
   assert.equal(page.inputs[0].removed, true, 'the hidden input is cleaned up either way');

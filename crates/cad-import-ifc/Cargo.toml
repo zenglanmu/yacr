@@ -1,0 +1,26 @@
+[package]
+name = "cad-import-ifc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "IFC (IFC2X3/IFC4/IFC4X3) adapter: parse and mesh into the neutral mesh contract."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-import-core.workspace = true
+# MPL-2.0, pinned exactly in the workspace. `ifc-lite-geometry` owns the
+# placement chain, the file-unit → metre scaling and the void subtraction; this
+# adapter only walks products and converts the resulting f32 mesh.
+ifc-lite-core.workspace = true
+ifc-lite-geometry.workspace = true
+# `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web-time` uses
+# `Performance.now()` there and re-exports std elsewhere.
+web-time.workspace = true
+
+[dev-dependencies]
+# Proves IFC bytes never reach the STEP adapter (which refuses them by name).
+cad-import-step.workspace = true

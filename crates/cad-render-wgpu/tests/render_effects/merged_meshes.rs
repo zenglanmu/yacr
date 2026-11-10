@@ -65,7 +65,11 @@ fn merged_meshes_lines_and_overlays_match_legacy_pixels() {
     );
     let background = opaque_black(&legacy);
     assert!(
-        legacy.chunks_exact(4).any(|px| px != background.as_slice()),
+        legacy
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|px| px != background.as_slice()),
         "the mixed scene must rasterize something; the comparison would be vacuous"
     );
     // Merged/instanced batches use per-chunk `f64` origins while the legacy path
@@ -123,7 +127,11 @@ fn merged_overlapping_ties_match_legacy_pixels() {
     assert_eq!(stats.instanced_batches, 2, "both segments must instance");
     let background = opaque_black(&merged);
     assert!(
-        merged.chunks_exact(4).any(|px| px != background.as_slice()),
+        merged
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|px| px != background.as_slice()),
         "the overlapping scene must rasterize something"
     );
 
@@ -194,7 +202,11 @@ fn merged_meshes_match_legacy_in_perspective() {
     let merged = renderer.read_target_rgba().expect("read 3D merged").pixels;
     let background = opaque_black(&merged);
     assert!(
-        merged.chunks_exact(4).any(|px| px != background.as_slice()),
+        merged
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|px| px != background.as_slice()),
         "3D merged frame rasterized nothing"
     );
 
@@ -259,7 +271,9 @@ fn merged_gradient_mesh_matches_legacy_within_tolerance() {
     // A gradient frame must actually vary (otherwise the fence is vacuous).
     assert!(
         merged
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|px| px != merged[0..4].to_vec().as_slice()),
         "the gradient must produce more than one colour"
     );
@@ -309,7 +323,11 @@ fn merged_mesh_overlay_line_mesh_keeps_legacy_order() {
     );
     let background = opaque_black(&merged);
     assert!(
-        merged.chunks_exact(4).any(|px| px != background.as_slice()),
+        merged
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|px| px != background.as_slice()),
         "the interleaved scene must rasterize something"
     );
 
@@ -584,7 +602,11 @@ fn mirrored_merged_meshes_match_legacy_pixels() {
     assert_eq!(stats.merged_mesh_batches, 2);
     let background = opaque_black(&merged);
     assert!(
-        merged.chunks_exact(4).any(|px| px != background.as_slice()),
+        merged
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|px| px != background.as_slice()),
         "a mirrored quad must not be culled away"
     );
     let (legacy, _) =
@@ -705,7 +727,9 @@ fn mesh_edges_batch_renders_anti_aliased_segments() {
     assert_eq!(legacy_stats.draw_calls, 1, "the batch is submitted once");
     let background = opaque_black(&legacy);
     let legacy_drawn = legacy
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|px| *px != background.as_slice())
         .count();
     assert!(
@@ -721,7 +745,9 @@ fn mesh_edges_batch_renders_anti_aliased_segments() {
         "the MeshEdges batch must be converted to an instanced line run"
     );
     let converted_drawn = converted
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|px| *px != background.as_slice())
         .count();
     assert!(

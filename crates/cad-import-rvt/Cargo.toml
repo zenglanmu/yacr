@@ -1,0 +1,31 @@
+[package]
+name = "cad-import-rvt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Autodesk Revit (.rvt/.rte) preview adapter: rvt -> internal glTF -> neutral mesh."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-import-core.workspace = true
+# Apache-2.0, pinned exactly. `rvt` owns decode, per-release coverage and the
+# GLB emitter; this crate owns the status ceiling, the glb reader and the
+# database adapter.
+rvt.workspace = true
+# Reads the single-buffer GLB `rvt` emits. GLB/glTF is an implementation detail:
+# it is not a user-visible format and is never sniffed by the dispatcher.
+gltf.workspace = true
+# `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web_time` uses
+# `Performance.now()` there and re-exports std elsewhere.
+web-time.workspace = true
+
+[dev-dependencies]
+# Builds malformed/external-buffer glTF JSON documents in unit tests only.
+serde_json = { workspace = true }
+# Builds a family-shaped OLE container in unit tests, so the `.rfa` refusal is
+# exercised by bytes rather than by a path extension.
+cfb = "0.16"

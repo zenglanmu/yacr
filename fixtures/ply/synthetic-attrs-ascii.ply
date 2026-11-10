@@ -1,0 +1,23 @@
+ply
+format ascii 1.0
+comment synthetic fixture authored in this repository; non-standard property order on purpose
+element vertex 5
+property uchar red
+property float z
+property float x
+property uchar blue
+property float y
+property float nx
+property float ny
+property float nz
+property uchar green
+element face 2
+property list uchar int vertex_indices
+end_header
+255 0 0 0 0 0 0 1 0
+0 0 1 0 0 0 0 1 255
+0 0 1 255 1 0 0 1 0
+255 0 0 0 1 0 0 1 255
+255 0 2 255 1 0 0 1 0
+4 0 1 2 3
+3 0 2 4

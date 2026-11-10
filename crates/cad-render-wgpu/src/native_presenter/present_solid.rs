@@ -31,7 +31,7 @@ impl SurfaceProbePresenter {
         timings.configure_us = configure_us;
 
         // Opaque and high-contrast, alternating so a never-updated surface shows.
-        let color = if self.frame_index % 2 == 0 {
+        let color = if self.frame_index.is_multiple_of(2) {
             wgpu::Color {
                 r: 1.0,
                 g: 0.0,

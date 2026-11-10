@@ -257,12 +257,12 @@ pub(crate) fn expand_line_quads(
     };
     match indices {
         None => {
-            for pair in batch.vertices.chunks_exact(2) {
+            for pair in batch.vertices.as_chunks::<2>().0 {
                 push_pair(out, pair[0], pair[1]);
             }
         }
         Some(list) => {
-            for pair in list.chunks_exact(2) {
+            for pair in list.as_chunks::<2>().0 {
                 push_pair(
                     out,
                     batch.vertices[pair[0] as usize],
@@ -292,7 +292,7 @@ pub(crate) fn line_batch_is_instanced(batch: &cad_scene::RenderBatch) -> bool {
         batch.topology,
         RenderTopology::Lines | RenderTopology::MeshEdges
     ) && batch.vertices.len() >= 2
-        && batch.vertices.len() % 2 == 0
+        && batch.vertices.len().is_multiple_of(2)
         && classify_alpha(batch.alpha) == AlphaClass::Opaque
 }
 
@@ -735,12 +735,12 @@ pub(crate) fn push_line_instances(
     };
     match indices {
         None => {
-            for pair in batch.vertices[start..end].chunks_exact(2) {
+            for pair in batch.vertices[start..end].as_chunks::<2>().0 {
                 push_pair(out, pair[0], pair[1]);
             }
         }
         Some(list) => {
-            for pair in list[start..end].chunks_exact(2) {
+            for pair in list[start..end].as_chunks::<2>().0 {
                 push_pair(
                     out,
                     batch.vertices[pair[0] as usize],

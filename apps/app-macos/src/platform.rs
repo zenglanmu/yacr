@@ -50,6 +50,17 @@ const KEY_PICKER_EMPTY: &str = "macos.picker_empty";
 const KEY_PICKER_LOCAL: &str = "macos.picker_local";
 const KEY_PICKER_FAILED: &str = "macos.picker_failed";
 
+/// The extensions `NSOpenPanel` allows, in display order.
+///
+/// `.rfa`/`.rft` are listed **on purpose**: the RVT adapter refuses a family file
+/// with a precise `import.rvt.family_no_geometry` diagnostic, which is more
+/// useful than the file being unselectable. They are deliberately *not* in any
+/// "supported formats" copy (see `README.md` / the i18n filter labels).
+const OPEN_EXTENSIONS: &[&str] = &[
+    "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte", "rfa",
+    "rft",
+];
+
 /// The localized labels the native open dialog and open funnel use.
 ///
 /// Built from the embedded UI catalogue; [`Self::from_locale`] selects the
@@ -549,8 +560,12 @@ fn show_open_panel(labels: &MacosOpenDialogLabels) -> FileChooserOutcome {
     let filter = NSString::from_str(&labels.picker_filter);
     panel.setMessage(Some(&filter));
 
-    let types =
-        NSArray::from_retained_slice(&[NSString::from_str("dwg"), NSString::from_str("dxf")]);
+    let types = NSArray::from_retained_slice(
+        &OPEN_EXTENSIONS
+            .iter()
+            .map(|extension| NSString::from_str(extension))
+            .collect::<Vec<_>>(),
+    );
     panel.setAllowedFileTypes(Some(&types));
 
     let accepted = panel.runModal() == NSModalResponseOK;
@@ -865,5 +880,23 @@ mod tests {
             .unwrap();
         assert_eq!(wgpu_backend_preference(&store), Some("dx12".to_string()));
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// `NSOpenPanel` must offer every extension the dispatcher can read.
+    ///
+    /// `.rfa`/`.rft` are listed on purpose (the importer refuses families by
+    /// name); this test asserts presence only, never "supported".
+    #[test]
+    fn allowed_file_types_cover_the_importer_set() {
+        for extension in [
+            "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
+            "rfa", "rft",
+        ] {
+            assert!(
+                OPEN_EXTENSIONS.contains(&extension),
+                "{extension} must be selectable"
+            );
+        }
+        assert_eq!(&OPEN_EXTENSIONS[..2], &["dwg", "dxf"]);
     }
 }

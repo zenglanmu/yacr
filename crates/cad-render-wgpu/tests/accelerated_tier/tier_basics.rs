@@ -391,7 +391,11 @@ fn accelerated_hidden_flag_discards_identically() {
     let pixels = accelerated.read_target_rgba().unwrap().pixels;
     let background = [pixels[0], pixels[1], pixels[2], pixels[3]];
     assert!(
-        pixels.chunks_exact(4).all(|px| px == background.as_slice()),
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|px| px == background.as_slice()),
         "a FLAG_HIDDEN mesh must be discarded by the pulled shader"
     );
 }

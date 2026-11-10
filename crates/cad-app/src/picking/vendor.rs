@@ -208,7 +208,7 @@ pub(crate) fn vendor_backed_entity(
 pub(crate) fn vendor_primitives_have_pick_geometry(primitives: &[VendorPrimitive]) -> bool {
     primitives.iter().any(|primitive| match primitive {
         VendorPrimitive::Lines(points) => points.len() >= 2,
-        VendorPrimitive::Segments(points) => points.len() >= 2 && points.len() % 2 == 0,
+        VendorPrimitive::Segments(points) => points.len() >= 2 && points.len().is_multiple_of(2),
         VendorPrimitive::Arc { .. } | VendorPrimitive::Circle { .. } | VendorPrimitive::Text(_) => {
             true
         }
@@ -236,8 +236,10 @@ fn vendor_pick_children(primitives: &[VendorPrimitive]) -> Vec<SemanticGeometry>
                     closed: false,
                 });
             }
-            VendorPrimitive::Segments(points) if points.len() >= 2 && points.len() % 2 == 0 => {
-                for pair in points.chunks_exact(2) {
+            VendorPrimitive::Segments(points)
+                if points.len() >= 2 && points.len().is_multiple_of(2) =>
+            {
+                for pair in points.as_chunks::<2>().0 {
                     children.push(SemanticGeometry::Line {
                         start: pair[0],
                         end: pair[1],

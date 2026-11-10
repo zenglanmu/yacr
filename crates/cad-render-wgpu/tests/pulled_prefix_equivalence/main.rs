@@ -197,8 +197,8 @@ fn render_pixels(renderer: &mut Renderer) -> Vec<u8> {
 }
 
 fn is_blank(pixels: &[u8]) -> bool {
-    match pixels.chunks_exact(4).next() {
-        Some(first) => pixels.chunks_exact(4).all(|px| px == first),
+    match pixels.as_chunks::<4>().0.iter().next() {
+        Some(first) => pixels.as_chunks::<4>().0.iter().all(|px| px == first),
         None => true,
     }
 }

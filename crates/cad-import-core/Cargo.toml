@@ -1,0 +1,15 @@
+[package]
+name = "cad-import-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Format-neutral import contract: limits, progress, report, drawing and xref policy."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-resources.workspace = true
+sha2.workspace = true

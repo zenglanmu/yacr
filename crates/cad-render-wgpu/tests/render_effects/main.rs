@@ -320,8 +320,10 @@ fn grid_line_batches(rows: usize, cols: usize) -> Vec<RenderBatch> {
 /// Number of pixels whose RGBA differs on any channel by more than `tolerance`.
 fn differing_pixels(a: &[u8], b: &[u8], tolerance: u8) -> usize {
     assert_eq!(a.len(), b.len(), "frames must have the same size");
-    a.chunks_exact(4)
-        .zip(b.chunks_exact(4))
+    a.as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.as_chunks::<4>().0)
         .filter(|(pa, pb)| {
             pa.iter()
                 .zip(pb.iter())

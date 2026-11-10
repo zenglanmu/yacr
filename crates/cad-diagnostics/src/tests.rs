@@ -13,6 +13,35 @@ fn paths_urls_and_document_names_are_redacted() {
     assert!(redacted.contains("打开"));
 }
 
+/// Every importable format is redacted as a bare token too, not only Cairo-style
+/// absolute paths: importers name files in their diagnostics without a separator.
+#[test]
+fn bare_import_format_tokens_are_redacted() {
+    for name in [
+        "plan.obj",
+        "part.STL",
+        "mesh.ply",
+        "solid.off",
+        "solid.coff",
+        "bracket.step",
+        "bracket.stp",
+        "building.ifc",
+        "house.rvt",
+        "house.rte",
+        "family.rfa",
+        "family.rft",
+    ] {
+        let redacted = redact_text(&format!("import failed: {name}"));
+        assert!(!redacted.contains(name), "{name} leaked into {redacted}");
+        assert!(redacted.contains("«redacted»"), "{redacted}");
+    }
+    // A non-document word is not touched.
+    assert_eq!(
+        redact_text("import failed: object"),
+        "import failed: object"
+    );
+}
+
 #[test]
 fn package_encoding_contains_no_paths() {
     let package = DiagnosticPackage {

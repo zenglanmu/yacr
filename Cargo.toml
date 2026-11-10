@@ -13,7 +13,14 @@ members = [
     "crates/cad-render-wgpu",
     "crates/cad-measure",
     "crates/cad-proxy",
+    "crates/cad-import-core",
     "crates/cad-import-acadrust",
+    "crates/cad-import-obj",
+    "crates/cad-import-stl",
+    "crates/cad-import-mesh",
+    "crates/cad-import-step",
+    "crates/cad-import-ifc",
+    "crates/cad-import-rvt",
     "crates/cad-resources",
     "crates/cad-query",
     "crates/cad-app",
@@ -34,7 +41,12 @@ members = [
 [workspace.package]
 version = "0.1.8"
 edition = "2021"
-rust-version = "1.85"
+# True MSRV floor, not a preference: `cadmpeg-ir`/`cadmpeg-codec-step`/
+# `cadmpeg-tessellate` 0.6.11 declare `rust-version = "1.88"` and `rvt` 0.17.0
+# declares `1.87`, so no lower workspace claim can be honest. Every crate takes
+# this single value via `rust-version.workspace = true`; do not re-declare it per
+# crate. The pinned toolchain (`rust-toolchain.toml`, 1.99.0) is unrelated.
+rust-version = "1.88"
 license = "Apache-2.0 OR MIT"
 authors = ["yacr contributors"]
 repository = "https://example.invalid/yacr"
@@ -52,7 +64,14 @@ cad-scene = { path = "crates/cad-scene" }
 cad-render-wgpu = { path = "crates/cad-render-wgpu" }
 cad-measure = { path = "crates/cad-measure" }
 cad-proxy = { path = "crates/cad-proxy" }
+cad-import-core = { path = "crates/cad-import-core" }
 cad-import-acadrust = { path = "crates/cad-import-acadrust" }
+cad-import-obj = { path = "crates/cad-import-obj" }
+cad-import-stl = { path = "crates/cad-import-stl" }
+cad-import-mesh = { path = "crates/cad-import-mesh" }
+cad-import-step = { path = "crates/cad-import-step" }
+cad-import-ifc = { path = "crates/cad-import-ifc" }
+cad-import-rvt = { path = "crates/cad-import-rvt" }
 cad-resources = { path = "crates/cad-resources" }
 cad-query = { path = "crates/cad-query" }
 cad-app = { path = "crates/cad-app" }
@@ -93,6 +112,46 @@ futures-lite = "2.6"
 # `default-features = false`: rstar's default feature set is empty, stated
 # explicitly so a future default cannot silently widen the dependency.
 rstar = { version = "0.13.0", default-features = false }
+
+# Wavefront OBJ reader (`cad-import-obj`). `default-features = false` is
+# mandatory: the default `ahash` feature pulls `getrandom 0.3`, which does not
+# compile for `wasm32-unknown-unknown`. The loader falls back to `std`'s hasher.
+tobj = { version = "4.0.5", default-features = false }
+
+# STereoLithography reader (`cad-import-stl`): ASCII and binary, pure Rust.
+stl_io = "0.11"
+
+# ISO 10303-21 (STEP) reader + B-rep tessellation (`cad-import-step`).
+# `cadmpeg-ir` is a mandatory direct dependency: the `Codec` trait and
+# `DecodeOptions` live there, not in the codec crate. The codec canonicalises
+# every length to millimetres and exposes no source-unit field; the adapter
+# records that in its units diagnostic. `cadmpeg-core` is deliberately not a
+# dependency: `DecodeDepth` is only needed by the non-default depth path.
+cadmpeg-codec-step = "0.6.11"
+cadmpeg-ir = "0.6.11"
+cadmpeg-tessellate = "0.6.11"
+
+# IFC (IFC2X3/IFC4/IFC4X3) reader + mesh generation (`cad-import-ifc`).
+# MPL-2.0, upstream <https://github.com/LTplus-AG/ifc-lite>. **Pinned exactly**:
+# the crate has published 100+ releases since 2026-01, so a caret range would
+# float across breaking API churn. The geometry crate also carries the placement
+# chain, units-to-metres scaling and void subtraction; see the crate source
+# findings recorded in `crates/cad-import-ifc/src/lib.rs`.
+ifc-lite-core = "=28.2.0"
+ifc-lite-geometry = "=28.2.0"
+
+# Autodesk Revit reader (`cad-import-rvt`). Apache-2.0, pure Rust, pinned
+# exactly: the crate published 19 releases in six weeks. It is a **preview**
+# reader: element bodies are bounding boxes on Revit 2008-2023, 2024/2025 are
+# `partial`, 2026/2027 `experimental`, and family files carry no geometry.
+# Its MSRV is 1.87, below the workspace floor of 1.88 which `cadmpeg-*` sets;
+# `cad-import-rvt` therefore takes `rust-version` from the workspace rather than
+# re-declaring a value. The pinned toolchain is 1.99.
+# glTF is only its internal hand-off format (the crate has no gltf dependency);
+# `gltf` reads that single-buffer GLB. `default-features = false` drops the
+# `image` importer, which this lane never needs, and keeps `utils`/`names`.
+rvt = "=0.17.0"
+gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names"] }
 
 # Portable wall clock. `std::time::Instant::now()` panics on
 # wasm32-unknown-unknown ("time not implemented"); `web-time` re-exports std on

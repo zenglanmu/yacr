@@ -6,7 +6,6 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Cursor;
-use std::sync::Arc;
 
 use acadrust::entities::EntityCommon;
 use acadrust::entities::{
@@ -15,11 +14,10 @@ use acadrust::entities::{
 };
 use acadrust::{DwgReadOptions, DwgReader, DxfReader, EntityType, ReadStats};
 use cad_db::{
-    sanitize_linetype_scale, BlockDefinition, DbEntity, DbObject, DrawingDatabase,
-    DrawingDatabaseBuilder, EntityColor, EntityLineType, EntityLineWeight, EntityRenderAttributes,
-    EntityTransparency, ExternalReference, ExternalReferenceStatus, Layer, LayerAttributes,
-    LayerColor, LayerLineWeight, Layout, LineType as DbLineType, LinetypePattern, PaperViewport,
-    Style,
+    sanitize_linetype_scale, BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder,
+    EntityColor, EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency,
+    ExternalReference, ExternalReferenceStatus, Layer, LayerAttributes, LayerColor,
+    LayerLineWeight, Layout, LineType as DbLineType, LinetypePattern, PaperViewport, Style,
 };
 use cad_domain::hatch::GradientStop;
 use cad_domain::*;
@@ -43,43 +41,13 @@ pub mod export;
 pub mod vendor;
 pub use vendor::{VendorExtraction, VendorRecord, VendorSource};
 
-/// Bounds applied to an untrusted drawing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ImportLimits {
-    pub max_file_bytes: usize,
-    pub max_entities: usize,
-    pub max_block_depth: usize,
-    /// Faces retained from one MESH entity by the DWG reader.
-    ///
-    /// `None` means acadrust's own behaviour (its system-derived budget), so the
-    /// default does not silently change what is accepted or rejected. A host that
-    /// wants a tighter bound sets `Some(n)`; `Some(usize::MAX)` removes the cap.
-    pub max_mesh_faces: Option<usize>,
-    /// Face-corner indices retained from one MESH entity by the DWG reader.
-    ///
-    /// `None` means acadrust's own behaviour (its system-derived budget); see
-    /// [`ImportLimits::max_mesh_faces`].
-    pub max_mesh_face_indices: Option<usize>,
-    /// Upper bound on the decompressed bytes one DWG read may allocate for its
-    /// sections and system pages.
-    ///
-    /// `None` means acadrust's own behaviour (per-section allocation, no shared
-    /// budget), so the default does not silently change what is accepted.
-    pub max_decompressed_bytes: Option<usize>,
-}
-
-impl Default for ImportLimits {
-    fn default() -> Self {
-        ImportLimits {
-            max_file_bytes: 512 * 1024 * 1024,
-            max_entities: 2_000_000,
-            max_block_depth: 32,
-            max_mesh_faces: None,
-            max_mesh_face_indices: None,
-            max_decompressed_bytes: None,
-        }
-    }
-}
+// The format-neutral import contract lives in `cad-import-core`. These are
+// re-exported so every existing `cad_import_acadrust::<Type>` path — and every
+// `use crate::<Type>` inside this crate — keeps working untouched.
+pub use cad_import_core::{
+    ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,
+    ImportStage, ImportedDrawing, Importer, NoopProgress, ObjectXdataApplication, XrefOptions,
+};
 
 /// Translate import limits into acadrust's DWG read options.
 ///
@@ -94,190 +62,11 @@ pub(crate) fn dwg_read_options(limits: &ImportLimits) -> DwgReadOptions {
     }
 }
 
-pub struct ImportRequest {
-    pub document: DocumentId,
-    pub database: DatabaseId,
-    pub bytes: Arc<[u8]>,
-    pub limits: ImportLimits,
-    pub generation: u64,
-    /// External-reference loading policy and host file access.
-    ///
-    /// `None` means this import may not read referenced files: every xref block
-    /// is recorded as `BrowserUnavailable` (never as a silently empty block).
-    /// The host supplies a [`XrefOptions`] with a [`cad_resources::XrefFileSource`]
-    /// to make xref content available. This is import-only; loaded xref content
-    /// is merged into the host database and never re-read afterwards.
-    pub xref: Option<Arc<XrefOptions>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImportStage {
-    Reading,
-    Parsing,
-    Normalizing,
-    Proxy,
-    Indexing,
-    Representations,
-    Uploading,
-}
-
-/// Fine-grained phase of an in-progress import (spec F01).
-///
-/// Distinct from [`ImportStage`], which enumerates the *pipeline* stages a host
-/// may schedule; this enumerates the boundaries the synchronous importer
-/// actually reaches so a progress bar is driven by real work, never a timer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ImportPhase {
-    /// Bytes are being validated/identified before the DWG reader runs.
-    Reading,
-    /// The acadrust DWG reader is running (the coarse, uninterruptible window).
-    Parsing,
-    /// The layer/style/layout/block tables are being copied into the database.
-    Tables,
-    /// Model, block and paper-space entities are being normalised and inserted.
-    Entities,
-    /// A block's display status is being resolved to a fixpoint.
-    Resolving,
-    /// The database builder is finalising indexes and is about to publish.
-    Finishing,
-}
-
-/// One progress tick emitted by an importer.
-///
-/// Counts are always real. `entities_total` is `None` while the source total is
-/// unknown (for example before the DWG reader has produced a document); it must
-/// never be filled with a fabricated guess. `bytes` is only set once a byte
-/// count is actually known (the request's own size during reading).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImportProgress {
-    pub phase: ImportPhase,
-    /// Entities normalised and inserted so far (monotonic non-decreasing).
-    pub entities_done: usize,
-    /// Total entities expected, when the format exposes it.
-    pub entities_total: Option<usize>,
-    /// Source bytes known so far, when measurable.
-    pub bytes: Option<u64>,
-    /// Optional human-facing note for this tick (never a fabricated count).
-    pub message: Option<String>,
-}
-
-impl ImportProgress {
-    /// A phase boundary at a known entity count, with no byte/message payload.
-    pub fn at(phase: ImportPhase, entities_done: usize, entities_total: Option<usize>) -> Self {
-        ImportProgress {
-            phase,
-            entities_done,
-            entities_total,
-            bytes: None,
-            message: None,
-        }
-    }
-}
-
-/// Receives [`ImportProgress`] ticks during an import.
-///
-/// A blanket impl covers closures, so tests and hosts can pass `&|p| { .. }`
-/// without naming this trait.
-pub trait ImportProgressSink {
-    fn report(&self, progress: ImportProgress);
-}
-
-impl<F: Fn(ImportProgress)> ImportProgressSink for F {
-    fn report(&self, progress: ImportProgress) {
-        self(progress)
-    }
-}
-
-/// The progress sink used when a caller does not want ticks.
-///
-/// Explicit and cheap: it drops every tick and never allocates. Importers owned
-/// by the core default to this rather than requiring an `Option` at each site.
-pub struct NoopProgress;
-
-impl ImportProgressSink for NoopProgress {
-    fn report(&self, _progress: ImportProgress) {}
-}
-
 /// The cancellation predicate for callers that never cancel.
 ///
 /// Lets [`ImporterBuilder`] be constructed directly in tests without an
 /// `Option` at each poll site.
 pub(crate) static NEVER_CANCELLED: fn() -> bool = || false;
-
-/// One application name found on object-level EED (XDATA) in the source.
-///
-/// This is read-only metadata decoded by acadrust: yacr reports it so a host can
-/// see what an object carried, but it is **not** applied to geometry, layers or
-/// any other imported state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ObjectXdataApplication {
-    /// Registered application name (`1001` group).
-    pub application: String,
-    /// Number of objects that carry at least one record for this application.
-    pub objects: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct ImportReport {
-    pub identity: DocumentIdentity,
-    pub capabilities: Vec<EntityCapability>,
-    pub completeness: Completeness,
-    pub diagnostics: Vec<Diagnostic>,
-    /// Wall-clock parse/normalise time in milliseconds, when measured.
-    pub parse_ms: Option<f64>,
-    /// Decoded object-level EED (XDATA) applications, sorted by name.
-    ///
-    /// Reported only: the import never applies these values to geometry. Empty
-    /// when the source carries no object xdata.
-    pub object_xdata: Vec<ObjectXdataApplication>,
-}
-
-impl ImportReport {
-    /// Short human-facing completeness label for the UI status line.
-    pub fn completeness_label(&self) -> String {
-        match &self.completeness {
-            Completeness::Complete => "完整".to_string(),
-            Completeness::Partial(items) => format!("部分（{} 项）", items.len()),
-            Completeness::Missing(items) => format!("缺失（{} 项）", items.len()),
-            Completeness::Unverified => "未验证".to_string(),
-        }
-    }
-}
-
-pub struct ImportedDrawing {
-    pub database: DrawingDatabase,
-    pub units: UnitContext,
-    pub report: ImportReport,
-    /// `TCH_*` / TCH-proxy records copied for the WebView vendor pass.
-    ///
-    /// Empty when the drawing carries no Tianzheng objects. These bytes are not
-    /// interpreted here and never enter `cad-db`; the plugin decodes them and the
-    /// host validates the result.
-    pub vendor_records: Vec<vendor::VendorRecord>,
-}
-
-pub trait Importer {
-    fn import(
-        &self,
-        request: &ImportRequest,
-        cancelled: &dyn Fn() -> bool,
-    ) -> CadResult<ImportedDrawing>;
-
-    /// Import while reporting real progress at phase boundaries.
-    ///
-    /// The default implementation delegates to [`Importer::import`] and emits
-    /// nothing: existing callers and implementations keep compiling unchanged.
-    /// An importer that can observe phase boundaries overrides this; the
-    /// synchronous acadrust importer does (see [`AcadrustImporter`]).
-    fn import_with_progress(
-        &self,
-        request: &ImportRequest,
-        cancelled: &dyn Fn() -> bool,
-        _progress: &dyn ImportProgressSink,
-    ) -> CadResult<ImportedDrawing> {
-        self.import(request, cancelled)
-    }
-}
 
 /// The acadrust-backed importer.
 #[derive(Default)]
@@ -324,7 +113,10 @@ impl Importer for AcadrustImporter {
         };
         if !dwg && !dxf {
             return Err(CadError::CorruptData(
-                "input is neither a DWG signature nor an ASCII/binary DXF section stream".into(),
+                "input is neither a DWG signature nor an ASCII/binary DXF section stream; \
+                 this adapter reads DWG/DXF only (Wavefront OBJ, STL, PLY, OFF, STEP and IFC \
+                 are routed by the shared import dispatcher)"
+                    .into(),
             ));
         }
         let started = Instant::now();
@@ -597,7 +389,6 @@ mod style;
 mod support;
 mod xref;
 
-pub use xref::XrefOptions;
 use xref::{xref_current_depth, xref_support_status};
 
 mod annotative;

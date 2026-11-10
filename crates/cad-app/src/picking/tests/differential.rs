@@ -241,9 +241,13 @@ fn random_scene(rng: &mut XorShift, entities: usize, span: f64) -> DrawingDataba
     .unwrap();
     for i in 0..entities {
         let id = 1000 + i as u128;
-        let geometry = if i % 4 == 0 {
+        let geometry = if i.is_multiple_of(4) {
             SemanticGeometry::Insert {
-                block: if i % 8 == 0 { BlockId(1) } else { BlockId(0) },
+                block: if i.is_multiple_of(8) {
+                    BlockId(1)
+                } else {
+                    BlockId(0)
+                },
                 transform: Transform3::translation(rand_point(rng, span)),
             }
         } else {

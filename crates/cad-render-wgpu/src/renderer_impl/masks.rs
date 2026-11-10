@@ -421,7 +421,7 @@ mod tests {
     }
 
     fn covers(triangles: &[[f64; 3]], x: f64, y: f64) -> bool {
-        triangles.chunks_exact(3).any(|triangle| {
+        triangles.as_chunks::<3>().0.iter().any(|triangle| {
             let sign =
                 |a: [f64; 3], b: [f64; 3]| (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
             let d1 = sign(triangle[0], triangle[1]);

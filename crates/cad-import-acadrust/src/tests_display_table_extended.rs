@@ -5,6 +5,7 @@ use acadrust::entities::{
     ArcAlignedTextData, ExtendedEntity, ExtendedEntityData, GeoPositionMarkerData, PointCloudData,
     RemoteTextData, SectionObjectData,
 };
+use std::sync::Arc;
 
 fn make_request() -> ImportRequest {
     ImportRequest {

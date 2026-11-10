@@ -564,21 +564,49 @@ fn read_failure(path: &Path, error: std::io::Error) -> String {
     }
 }
 
+/// The extensions the open chooser accepts, in display order.
+///
+/// `.rfa`/`.rft` are here **on purpose**: a family file cannot produce geometry,
+/// but the RVT adapter refuses it with a precise `import.rvt.family_no_geometry`
+/// diagnostic, which is far more useful than the file being unselectable and the
+/// user only seeing a generic "not a drawing". They are deliberately *not* in any
+/// "supported formats" copy (see `README.md` / the i18n filter labels).
+const OPEN_EXTENSIONS: &[&str] = &[
+    "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte", "rfa",
+    "rft",
+];
+
+/// `"obj"` → `"*.[oO][bB][jJ]"`.
+///
+/// The XDG portal glob has no case-fold flag, so every character is bracketed —
+/// the same style the DWG/DXF globs already used.
+fn case_insensitive_glob(extension: &str) -> String {
+    let mut glob = String::with_capacity(2 + extension.len() * 4);
+    glob.push_str("*.");
+    for character in extension.chars() {
+        glob.push('[');
+        glob.push(character.to_ascii_lowercase());
+        glob.push(character.to_ascii_uppercase());
+        glob.push(']');
+    }
+    glob
+}
+
 /// The real native open chooser (XDG desktop portal via `ashpd`).
 fn portal_choose(labels: &UseOpenDialogLabels) -> FileChooserOutcome {
     use ashpd::desktop::file_chooser::{FileFilter, SelectedFiles};
     use ashpd::desktop::ResponseError;
 
     let result = pollster::block_on(async {
+        let mut filter = FileFilter::new(&labels.picker_filter);
+        for extension in OPEN_EXTENSIONS {
+            filter = filter.glob(&case_insensitive_glob(extension));
+        }
         SelectedFiles::open_file()
             .title(labels.picker_title.as_str())
             .modal(true)
             .multiple(false)
-            .filter(
-                FileFilter::new(&labels.picker_filter)
-                    .glob("*.[dD][wW][gG]")
-                    .glob("*.[dD][xX][fF]"),
-            )
+            .filter(filter)
             .send()
             .await?
             .response()

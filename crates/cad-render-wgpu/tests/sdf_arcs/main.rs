@@ -235,7 +235,7 @@ fn rendered_coverage(image: &RgbaImage, x: u32, y: u32) -> f64 {
 /// relative to `origin`.
 fn straight_lines(origin: Point3, segments: Vec<[f64; 3]>, entity: u128) -> RenderBatch {
     let mut vertices = Vec::new();
-    for pair in segments.chunks_exact(2) {
+    for pair in segments.as_chunks::<2>().0 {
         for p in pair {
             vertices.push([
                 (p[0] - origin.x) as f32,
@@ -447,7 +447,9 @@ fn vertical_line(x: f64, half: f64, alpha: f32, color: [f32; 3], entity: u128) -
 fn core_mask(image: &RgbaImage) -> Vec<bool> {
     image
         .pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|p| coverage(p[0]) >= 0.5)
         .collect()
 }

@@ -374,14 +374,13 @@ pub(crate) fn is_paper_space_name(name: &str) -> bool {
     name.to_ascii_uppercase().starts_with("*PAPER_SPACE")
 }
 
-pub(crate) fn compute_identity(bytes: &[u8]) -> DocumentIdentity {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&hasher.finalize());
-    DocumentIdentity::Sha256(out)
-}
+/// SHA-256 content identity of the imported bytes.
+///
+/// Implemented once in `cad-import-core` so every importer reports the same
+/// identity for the same bytes; re-exported crate-internally to keep the
+/// existing `compute_identity(..)` call sites unchanged.
+pub(crate) use cad_import_core::compute_identity;
+
 pub(crate) trait HandleExt {
     fn null_or_value_zero(&self) -> bool;
 }

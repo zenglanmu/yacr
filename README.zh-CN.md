@@ -2,16 +2,17 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-yacr 是一个跨平台开源 CAD 项目：共享的 Rust 核心负责 DWG/DXF 文档、几何、命令与渲染，
-React + Tauri 提供界面，wgpu 负责绘制。同一套文档与渲染管线面向 Linux（Wayland 原生或
-X11/`dom-canvas`）、Windows、macOS、Android 与 Web。
+yacr 是一个跨平台开源 CAD 项目：共享的 Rust 核心负责 CAD 文档（DWG/DXF，以及网格、STEP、IFC
+与 Revit 导入）、几何、命令与渲染，React + Tauri 提供界面，wgpu 负责绘制。同一套文档与渲染管线
+面向 Linux（Wayland 原生或 X11/`dom-canvas`）、Windows、macOS、Android 与 Web。
 
 **宣传页：** <https://yacr.pages.dev/> · **Web 版：** <https://yacr-examples.pages.dev/>
 
 yacr 处于活跃开发中，**预览版现在即可下载**：Linux Flatpak、Windows zip、macOS tarball、Android APK
-与浏览器版本。它可以打开 DWG/DXF、用 wgpu 查看 2D/3D 图纸、做测量，命令清单 981 条中有 623 条有实现
-路径（66 完整 + 557 部分）；未支持的选项按名拒绝，不静默成功。它**还不是生产级 CAD**；各平台状态与
-证据边界见 `docs/handoff.md` 与 `docs/compatibility.md`。
+与浏览器版本。它可以打开 DWG/DXF，可导入网格/STEP/IFC 文件用于显示、可预览 Revit 工程，能用 wgpu
+查看 2D/3D 图纸、做测量，命令清单 981 条中有 623 条有实现路径（66 完整 + 557 部分）；未支持的
+选项按名拒绝，不静默成功。它**还不是生产级 CAD**；各平台状态与证据边界见 `docs/handoff.md` 与
+`docs/compatibility.md`。
 
 **作者 / 联系：** zenglanmu@126.com · **许可证：** AGPL-3.0（`LICENSE`）
 
@@ -37,7 +38,7 @@ cad-geometry ─ cad-kernel-adapter ─ cad-representation   几何、ACIS/SAT �
   ↑
 cad-spatial ─ cad-scene ─ cad-render-wgpu    空间索引、场景缓存、wgpu 渲染器
   ↑
-cad-proxy ─ cad-import-acadrust ─ cad-resources   代理图形、DWG/DXF 导入、资源解析
+cad-proxy ─ cad-import-core ─ cad-import-* ─ cad-resources   代理图形、格式派发与各导入器、资源解析
   ↑
 cad-measure ─ cad-query ─ cad-app            测量、分页查询、应用/会话/命令
   ↑
@@ -84,7 +85,10 @@ Wayland**（宿主自建 app-owned `wl_surface` + `wl_subsurface`，经 `apps/ap
 - **能力集**（核心、桌面 GUI 与无头 CLI 共享；各载体覆盖度不同，均有契约/合成测试支撑）。
   **保真度不一**：不少图元只是近似表示或仍有缺口，逐项状态以
   `docs/compatibility.md`、`docs/dxf-entity-coverage.md` 为准：
-  - **打开与解析**：本地 DWG / DXF（ASCII 与二进制），共用同一语义/数据库转换；异步导入带进度与取消。
+  - **打开与解析**：本地图纸走同一派发器与同一语义/数据库转换，异步导入带进度与取消：DWG / DXF
+    （ASCII 与二进制）作为 CAD 数据；OBJ、STL、PLY / OFF、STEP（AP203/214/242）与 IFC（2X3/4/4X3）
+    作为**可显示、可拾取的网格**（不可测量；源信息有损处为 `Partial`）；Revit 工程（`.rvt`/`.rte`）
+    仅为**包围盒预览**；Revit 族文件（`.rfa`/`.rft`）按名拒绝。
   - **查看**：模型空间与受支持布局切换；图层显隐、搜索、恢复；图元选择、高亮与基本属性。
   - **导航**：平移、缩放、适应图纸、重置；**2D 与 3D 观察**（轨道旋转、标准视图、正交/透视）。
   - **测量**：距离、折线长度、角度、多边形面积，单位/精度/几何来源可追踪。

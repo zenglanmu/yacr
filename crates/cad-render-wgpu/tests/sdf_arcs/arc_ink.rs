@@ -708,7 +708,7 @@ fn sdf_arc_visual_acceptance_before_after() {
     // has only a handful of levels) and report the counts for the record.
     let levels = |image: &RgbaImage| -> usize {
         let mut set = std::collections::BTreeSet::new();
-        for p in image.pixels.chunks_exact(4) {
+        for p in image.pixels.as_chunks::<4>().0 {
             if p[0] > 8 && p[0] < 247 {
                 set.insert(p[0]);
             }

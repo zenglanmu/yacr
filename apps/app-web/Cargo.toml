@@ -107,7 +107,8 @@ web-sys = { workspace = true, features = [
 # The CAD session itself: import → scene → renderer. `cad-render-wgpu` stays the
 # only wgpu owner; this crate hands it a `Device`/`Queue` it got from the canvas
 # presenter and never constructs a wgpu object of its own.
-cad-import-acadrust.workspace = true
+# The import dispatcher (`cad_app::import`) owns DWG/DXF/OBJ/STL sniffing; the
+# web session names no format adapter directly.
 # `cad-scene::SceneDelta` is the geometry/GPU boundary: `load` produces it, the
 # renderer uploads it. Naming it is what lets a failed open leave the live
 # session untouched.

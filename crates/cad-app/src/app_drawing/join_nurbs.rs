@@ -500,7 +500,7 @@ fn spline_spans(
         }
     }
     let stride = degree + 1;
-    if hom.len() % stride != 0 {
+    if !hom.len().is_multiple_of(stride) {
         return Err(unsupported(
             "join.spline_clamped",
             "a source SPLINE could not be decomposed into Bezier spans",

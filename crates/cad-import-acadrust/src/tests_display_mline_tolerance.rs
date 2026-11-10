@@ -1,6 +1,7 @@
 //! Display-closure contract tests: MLINE joins/caps and TOLERANCE multi-line frame.
 
 use super::*;
+use std::sync::Arc;
 
 fn make_request() -> ImportRequest {
     ImportRequest {

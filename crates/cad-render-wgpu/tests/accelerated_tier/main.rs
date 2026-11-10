@@ -329,8 +329,10 @@ fn assert_tiers_identical(
     );
     assert!(
         accel_px
-            .chunks_exact(4)
-            .any(|px| px != [accel_px[0], accel_px[1], accel_px[2], accel_px[3]]),
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|px| *px != [accel_px[0], accel_px[1], accel_px[2], accel_px[3]]),
         "{what}: the accelerated frame is blank; the comparison would be vacuous"
     );
     assert_eq!(

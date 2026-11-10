@@ -35,7 +35,7 @@ pub fn build_vector_document(
                         "line segments require endpoint pairs".into(),
                     );
                 }
-                for pair in points.chunks_exact(2) {
+                for pair in points.as_chunks::<2>().0 {
                     collect_lines(&mut document, object, pair, fragment, &vector_page);
                 }
             }

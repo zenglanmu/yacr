@@ -578,6 +578,444 @@
         "Upstream SVG vector reference, not a project-generated golden image.",
         "Kept for human inspection; no automated SVG-to-render comparison is claimed."
       ]
+    },
+    {
+      "id": "synthetic-obj-quad",
+      "path": "fixtures/obj/synthetic-quad.obj",
+      "sha256": "f6a09e7050c75acfd636b789b206fef784145befc1a61b6a0207c804162dbf07",
+      "dwg_version": "n/a (Wavefront OBJ)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "One quad on a unit square; the reader fan-triangulates it to two triangles and reports Partial because n-gon fan triangulation is not exact for concave faces.",
+        "No material library, no units and no textures. Contract fixture only, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-stl-quad-ascii",
+      "path": "fixtures/stl/synthetic-quad.stl",
+      "sha256": "c80e00abcd4e7b803895ea033b09f40d1c1ce665fcd4eecff574e137d23b0554",
+      "dwg_version": "n/a (ASCII STL)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "Two flat facets on a unit square; no units, colours or material data. Contract fixture only, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-stl-quad-binary",
+      "path": "fixtures/stl/synthetic-quad-binary.stl",
+      "sha256": "7ca377a0c787ca4a3f93215bc468e79ec5480b7d2aa0c1d0a901d7144d2ccc32",
+      "dwg_version": "n/a (binary STL)",
+      "source": "synthetic, authored in this repository (generated from the same two facets)",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "Standard 80-byte header plus little-endian facet count; same two facets as the ASCII fixture.",
+        "Pins ASCII/binary parity only, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "cadmpeg-step-ap214-sheet",
+      "path": "fixtures/step/ap214-sheet.p21",
+      "sha256": "386b95e5abf75a121aac57546cae90fda35d7408e38ee7650e3407268d24f2ed",
+      "dwg_version": "n/a (ISO 10303-21 AP214)",
+      "source": "cadmpeg-codec-step 0.6.11 tests/fixtures/ap214_sheet.p21",
+      "provenance": {
+        "origin": "https://github.com/cadmpeg/cadmpeg (crate cadmpeg-codec-step 0.6.11, tests/fixtures/ap214_sheet.p21)",
+        "authorization": "authorized redistributable third-party test fixture; copied unmodified",
+        "licence": "Apache-2.0"
+      },
+      "authorized": true,
+      "synthetic": false,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "partial",
+      "known_limits": [
+        "One open-shell triangular face; it tessellates to one triangle but the shell is not a solid, so the import is Partial.",
+        "No plane-angle unit is declared; the decoder reports geometry.document-angle-unit-unresolved. Contract fixture only, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "cadmpeg-step-ap203-sheet",
+      "path": "fixtures/step/ap203-sheet.p21",
+      "sha256": "6b413e93728e96c93d6adde4d7a43a3dd5b181627bdbe28f20859891d5a78f62",
+      "dwg_version": "n/a (ISO 10303-21 AP203)",
+      "source": "cadmpeg-codec-step 0.6.11 tests/fixtures/ap203_sheet.p21",
+      "provenance": {
+        "origin": "https://github.com/cadmpeg/cadmpeg (crate cadmpeg-codec-step 0.6.11, tests/fixtures/ap203_sheet.p21)",
+        "authorization": "authorized redistributable third-party test fixture; copied unmodified",
+        "licence": "Apache-2.0"
+      },
+      "authorized": true,
+      "synthetic": false,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "rejected",
+      "known_limits": [
+        "Its only face is refused by the tessellator (composite boundary curve with no parameter range), so the import is an explicit Unsupported refusal, never an empty success.",
+        "Pins the all-faces-refused path only; not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-step-two-part-assembly",
+      "path": "fixtures/step/synthetic-two-part-assembly.p21",
+      "sha256": "84023742423fb7053e38ef5af2627bbaa54a1c6fe78e3735dc7ad72c8fe775f8",
+      "dwg_version": "n/a (ISO 10303-21 AP214)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "partial",
+      "known_limits": [
+        "Two open-shell triangular sheets placed by NEXT_ASSEMBLY_USAGE_OCCURRENCE at x=0 and x=+100 mm; pins occurrence placement (bodies must not stack at the origin).",
+        "Surface models, not solids, so the import is Partial. Contract fixture only."
+      ]
+    },
+    {
+      "id": "synthetic-step-partial-refusal",
+      "path": "fixtures/step/synthetic-partial-refusal.p21",
+      "sha256": "5cc0fb90727e9625115c1ebfed1703cf1477729c594b7c46b87d09e1cd5eaa97",
+      "dwg_version": "n/a (ISO 10303-21 AP214)",
+      "source": "synthetic; one face from this repository, one refused face derived from cadmpeg ap203_sheet.p21",
+      "provenance": {
+        "origin": "yacr repository; refused-face records derived from cadmpeg-codec-step 0.6.11 tests/fixtures/ap203_sheet.p21",
+        "authorization": "synthetic assembly; derived records retain the cadmpeg Apache-2.0 terms",
+        "licence": "same as the repository; derived records Apache-2.0"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "partial",
+      "known_limits": [
+        "Two faces in one body: one tessellates to one triangle, one is refused. Pins Partial + import.step.face_refused while the surviving geometry is kept.",
+        "Contract fixture only, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-ifc4-wall",
+      "path": "fixtures/ifc/synthetic-wall.ifc",
+      "sha256": "f85a1ec656b143445d82451d6405ab6532ba47aeec8edeca693548e4d6972977",
+      "dwg_version": "n/a (ISO 10303-21 IFC4)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "One IFC4 wall, 4000 x 200 x 3000 mm, extruded from IfcRectangleProfileDef; imports as one entity and 12 triangles, scaled to metres.",
+        "Pins mm -> m canonicalisation and IfcWall extraction only; contract fixture, not compatibility or acceptance evidence."
+      ]
+    },
+    {
+      "id": "synthetic-ifc4-wall-opening",
+      "path": "fixtures/ifc/synthetic-wall-opening.ifc",
+      "sha256": "4fd1081633ece51e0c416af4328bb724dd7d88c23fed260370d20f89862033cd",
+      "dwg_version": "n/a (ISO 10303-21 IFC4)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "The same IFC4 wall plus one IfcOpeningElement linked by IfcRelVoidsElement; the cut produces 32 triangles versus 12 uncut, and the opening itself is not inserted.",
+        "Pins void subtraction on one rectangular through-opening only; non-rectangular/CSG-heavy openings are best-effort and not covered here."
+      ]
+    },
+    {
+      "id": "synthetic-ifc2x3-two-walls",
+      "path": "fixtures/ifc/synthetic-two-walls-ifc2x3.ifc",
+      "sha256": "18673e993be50d3d84dd093e241bb85ad6945e7789c85c5e325ac5b4d68d5596",
+      "dwg_version": "n/a (ISO 10303-21 IFC2X3)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "Two IFC2X3 IfcWallStandardCase products sharing one representation, placed at x=0 and x=6000 mm; imports as two entities at x 0..4 m and 6..10 m (no stacking at the origin).",
+        "Pins IFC2X3 parsing and world placement only; contract fixture, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-ifc4-wall-no-units",
+      "path": "fixtures/ifc/synthetic-wall-no-units.ifc",
+      "sha256": "31cb95c56ef9f1c9a2078e3b1f926c71b021c4833267176d65bd5293771a2f46",
+      "dwg_version": "n/a (ISO 10303-21 IFC4)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "partial",
+      "known_limits": [
+        "The same IFC4 wall with no IfcUnitAssignment; imports as drawing units (raw file numbers) with import.ifc.units_unknown and Partial, never as assumed millimetres.",
+        "Pins the unknown-unit path only; a non-conformant IFC file, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-ifc4-axis-only",
+      "path": "fixtures/ifc/synthetic-axis-only.ifc",
+      "sha256": "b093b6e5dd3ff05ea7b515ba5cf27ff8e3a999e280162e4fb1ec0667b15545b0",
+      "dwg_version": "n/a (ISO 10303-21 IFC4)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "rejected",
+      "known_limits": [
+        "One IFC4 wall whose only representation is an Axis Curve2D; no drawable mesh exists, so the import is an explicit Unsupported (import.ifc.all_elements_failed), never an empty success.",
+        "Pins the every-element-failed channel only."
+      ]
+    },
+    {
+      "id": "synthetic-ifc4-orphan-opening",
+      "path": "fixtures/ifc/synthetic-orphan-opening.ifc",
+      "sha256": "e53a5877e2f2f70c32c414557d1b09d74d57700e7b5233dffd35e8555db9dbbe",
+      "dwg_version": "n/a (ISO 10303-21 IFC4)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "partial",
+      "known_limits": [
+        "One wall plus an IfcOpeningElement that no IfcRelVoidsElement references; the orphan opening is not drawn and is reported as import.ifc.opening_without_host (Partial).",
+        "Pins the orphan-cutter channel only; contract fixture, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-ply-attrs-ascii",
+      "path": "fixtures/ply/synthetic-attrs-ascii.ply",
+      "sha256": "faaf510b3d72d74d35ca6ec59b7f6117f06d62ec412d917adb4a56048d03277c",
+      "dwg_version": "n/a (PLY)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "partial",
+      "known_limits": [
+        "ASCII PLY 1.0 with non-standard vertex property order, uchar colours and normals; one quad plus one triangle fan-triangulate to three output triangles, so the import is Partial.",
+        "No units or materials. Contract fixture only, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-ply-binary-little-endian",
+      "path": "fixtures/ply/synthetic-binary-le.ply",
+      "sha256": "3280b2875312e31bb164b355ac0ea31f4da9d9ddd70eefe233467afd37471893",
+      "dwg_version": "n/a (PLY)",
+      "source": "synthetic, authored in this repository (same mesh as synthetic-attrs-ascii.ply)",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "partial",
+      "known_limits": [
+        "binary_little_endian PLY 1.0 with the same vertices/triangles as the ASCII fixture; the quad still triggers n-gon fan reporting (Partial).",
+        "Pins ASCII/little-endian parity only, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-ply-binary-big-endian",
+      "path": "fixtures/ply/synthetic-binary-be.ply",
+      "sha256": "d914ab0e5c1188f73ed1fcefd15b9b5360d8b9f10570b5b1a6cc8cbea30b91d0",
+      "dwg_version": "n/a (PLY)",
+      "source": "synthetic, authored in this repository (same mesh as synthetic-attrs-ascii.ply)",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "partial",
+      "known_limits": [
+        "binary_big_endian PLY 1.0 with the same vertices/triangles as the ASCII fixture; the quad still triggers n-gon fan reporting (Partial).",
+        "Pins ASCII/big-endian parity only, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-off-quad-triangle",
+      "path": "fixtures/off/synthetic-quad-triangle.off",
+      "sha256": "0a73e972b9cdad6b46b0198b45a3fb666f91c4479009d40a8ad3d310d3fe2330",
+      "dwg_version": "n/a (OFF)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "partial",
+      "known_limits": [
+        "ASCII OFF with one quad and one triangle (three output triangles after fan triangulation); the quad makes the import Partial.",
+        "No units, colours or face colours. Contract fixture only, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-coff-vertex-colours",
+      "path": "fixtures/off/synthetic-colors.coff",
+      "sha256": "3a7967d568d53735b683adf454c02780bee1c63b9da6430820e504435bf4c8a3",
+      "dwg_version": "n/a (OFF)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "ASCII COFF with unambiguous integer 0-255 vertex colours and two triangular faces.",
+        "No units or face colours. Contract fixture only, not compatibility evidence."
+      ]
+    },
+    {
+      "id": "synthetic-rvt-scaffold-2024",
+      "path": "fixtures/rvt/synthetic-scaffold-2024.rvt",
+      "sha256": "da88093b42e740551402b0e0ed30b879b959e067d2044ff8bbc0d8d1553d8e9e",
+      "dwg_version": "n/a (Revit 2024 scaffold, OLE/CFB)",
+      "source": "upstream rvt 0.17.0 gen-fixture (src/bin/gen_fixture.rs), Apache-2.0; generated with name synthetic-scaffold-2024, year 2024, classes Wall,Level,Project, element-count 10",
+      "provenance": {
+        "origin": "https://github.com/DrunkOnJava/rvt-rs (crate rvt 0.17.0, published 2026-11-09)",
+        "authorization": "upstream Apache-2.0 test scaffold, copied unmodified; full record in fixtures/rvt/SOURCE.md",
+        "licence": "Apache-2.0"
+      },
+      "authorized": true,
+      "synthetic": false,
+      "entity_types": [],
+      "expected": "rejected",
+      "known_limits": [
+        "Hand-built OLE/CFB scaffold, not a file Revit wrote; its own generator says it will NOT open in Revit.",
+        "rvt 0.17.0 decodes it to zero building elements, zero geometry and confidence level 'scaffold', so the import is the explicit import.rvt.no_geometry refusal, never an empty success.",
+        "Pins the decode -> GLB hand-off and the honest no-geometry refusal only; not Revit compatibility, geometry or measurement evidence."
+      ]
+    },
+    {
+      "id": "synthetic-rvt-two-node-glb",
+      "path": "fixtures/rvt/synthetic-two-node.glb",
+      "sha256": "56ff8f501177528336db6d46a9ae7d5edd408261d2bc21d68535816814cf5d35",
+      "dwg_version": "n/a (internal glTF 2.0 intermediate)",
+      "source": "synthetic, authored in this repository by fixtures/rvt/make-two-node-glb.py",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "One square instanced by two nodes: a matrix translation x=-1 and a parent+child translation x=+0.5/+0.5; it pins node world transforms and non-overlapping bounds only.",
+        "glTF is an implementation detail of the RVT lane, not a user-visible format; this is a unit-2 contract fixture, not CAD compatibility evidence."
+      ]
     }
   ],
   "notice": "Synthetic entries are contract fixtures and do not establish CAD compatibility. Authorized, redistributable drawings and their reference images may be committed here with full provenance (the QCAD flange sample in fixtures/dxf/qcad-flange/ records its upstream terms in SOURCE.md); its reference images are human-review aids, not project-generated golden images. Unverified vendor or private user data is not committed, and a committed sample is not general CAD compatibility evidence."

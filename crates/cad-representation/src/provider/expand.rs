@@ -363,7 +363,7 @@ fn emit_polyline(
         let mut packed = Vec::new();
         let mut chunk: Vec<Point3> = Vec::new();
         for run in runs {
-            for pair in run.chunks_exact(2) {
+            for pair in run.as_chunks::<2>().0 {
                 if let Some(origin) = chunk.first() {
                     if pair.iter().any(|p| {
                         [p.x - origin.x, p.y - origin.y, p.z - origin.z]

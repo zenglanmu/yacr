@@ -356,7 +356,9 @@ fn two_devices_from_one_instance(what: &str) -> Option<(wgpu::Instance, Headless
 
 fn ink_count(pixels: &[u8]) -> usize {
     pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8)
         .count()
 }

@@ -8,7 +8,9 @@ fn progressive_pages_match_full_scene_without_raising_per_frame_budget() {
     eprintln!("progressive contract adapter: {:?}", gpu.adapter);
     let mut renderer = init(gpu);
     let mut batches: Vec<_> = rectangle_lines()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|points| lines_batch(points.to_vec()))
         .collect();
     let mut transparent = triangle_mesh();

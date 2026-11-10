@@ -29,9 +29,9 @@
 
 use std::sync::Arc;
 
+use cad_app::import::{FormatImporter, ImportLimits, ImportRequest, Importer};
 use cad_app::render_scene::build_scene;
 use cad_domain::{DatabaseId, DocumentId, TaskStamp};
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 use cad_scene::SceneDelta;
 
 use super::session_state::{
@@ -71,7 +71,7 @@ pub(super) fn load(bytes: &[u8], label: &str, logical: [f64; 2]) -> Result<Loade
             format!("{label}: the file is empty (0 bytes)"),
         ));
     }
-    let drawing = AcadrustImporter::new()
+    let drawing = FormatImporter::new()
         .import(
             &ImportRequest {
                 document: DocumentId(SESSION_DOCUMENT),

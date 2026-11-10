@@ -498,7 +498,9 @@ impl RgbaImage {
     /// `tolerance` on any channel.
     pub fn count_differing_from(&self, background: [u8; 4], tolerance: u8) -> usize {
         self.pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|pixel| {
                 (0..4).any(|channel| pixel[channel].abs_diff(background[channel]) > tolerance)
             })
@@ -508,7 +510,9 @@ impl RgbaImage {
     /// Number of distinct RGBA colors in the image.
     pub fn distinct_colors(&self) -> usize {
         self.pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|pixel| [pixel[0], pixel[1], pixel[2], pixel[3]])
             .collect::<HashSet<_>>()
             .len()

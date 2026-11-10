@@ -1,6 +1,7 @@
 //! Display-closure contract tests: DIMENSION large-radial jog/leader and MULTILEADER detail.
 
 use super::*;
+use std::sync::Arc;
 
 pub(crate) fn request() -> ImportRequest {
     ImportRequest {

@@ -2,19 +2,19 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-yacr is a cross-platform open-source CAD project. A shared Rust core handles DWG/DXF documents,
-geometry, commands and rendering; React + Tauri provides the UI, and wgpu draws the scene. The same
-document and rendering pipeline is intended for Linux (native Wayland or X11/`dom-canvas`), Windows,
-macOS, Android and the web.
+yacr is a cross-platform open-source CAD project. A shared Rust core handles CAD documents
+(DWG/DXF, plus mesh, STEP, IFC and Revit import), geometry, commands and rendering; React + Tauri
+provides the UI, and wgpu draws the scene. The same document and rendering pipeline is intended for
+Linux (native Wayland or X11/`dom-canvas`), Windows, macOS, Android and the web.
 
 **Website:** <https://yacr.pages.dev/> · **Web app:** <https://yacr-examples.pages.dev/>
 
 yacr is under active development, and **preview builds are available now** — Linux Flatpak, Windows
-zip, macOS tarball, Android APK, and a browser build. It opens DWG/DXF, views 2D/3D drawings with
-wgpu, measures, and has an implementation path for 623 of 981 commands (66 complete, 557 partial);
-unsupported options are rejected by name instead of silently succeeding. It is **not yet a production
-CAD system**; per-platform status and evidence boundaries are in `docs/handoff.md` and
-`docs/compatibility.md`.
+zip, macOS tarball, Android APK, and a browser build. It opens DWG/DXF, imports mesh/STEP/IFC files
+for display and previews Revit projects, views 2D/3D drawings with wgpu, measures, and has an
+implementation path for 623 of 981 commands (66 complete, 557 partial); unsupported options are
+rejected by name instead of silently succeeding. It is **not yet a production CAD system**;
+per-platform status and evidence boundaries are in `docs/handoff.md` and `docs/compatibility.md`.
 
 **Author / contact:** zenglanmu@126.com · **License:** AGPL-3.0 (`LICENSE`)
 
@@ -42,7 +42,7 @@ cad-geometry ─ cad-kernel-adapter ─ cad-representation   geometry, ACIS/SAT 
   ↑
 cad-spatial ─ cad-scene ─ cad-render-wgpu    spatial index, scene cache, wgpu renderer
   ↑
-cad-proxy ─ cad-import-acadrust ─ cad-resources   proxy graphics, DWG/DXF import, resource resolution
+cad-proxy ─ cad-import-core ─ cad-import-* ─ cad-resources   proxy graphics, format dispatch, resources
   ↑
 cad-measure ─ cad-query ─ cad-app            measurement, paged queries, application/session/commands
   ↑
@@ -100,8 +100,11 @@ fallback**. See ADR 0010 and ADR 0011.
   surface and is backed by contract/synthetic tests). **Fidelity varies**: many entities are only
   approximate or still have gaps; per-item status is in `docs/compatibility.md` and
   `docs/dxf-entity-coverage.md`.
-  - **Open & parse** local DWG / DXF (ASCII and binary) through one semantic/database conversion,
-    with asynchronous import, progress and cancellation.
+  - **Open & parse** local drawings through one dispatcher and one semantic/database conversion, with
+    asynchronous import, progress and cancellation: DWG / DXF (ASCII and binary) as CAD data; OBJ,
+    STL, PLY / OFF, STEP (AP203/214/242) and IFC (2X3/4/4X3) as **display-and-pick meshes** (no
+    measurement, `Partial` where the source loses information); Revit projects (`.rvt`/`.rte`) as a
+    **bounding-box preview** only. Revit families (`.rfa`/`.rft`) are refused by name.
   - **View**: model space and supported layout switching; layer hide/show, search and restore;
     entity selection, highlight and basic properties.
   - **Navigate**: pan, zoom, fit, reset; **2D and 3D observation** (orbit, standard views,

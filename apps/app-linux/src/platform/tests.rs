@@ -623,3 +623,26 @@ fn wgpu_backend_preference_reads_the_durable_store() {
     assert_eq!(wgpu_backend_preference(&store), Some("dx12".to_string()));
     let _ = std::fs::remove_file(&path);
 }
+
+/// The portal filter must offer every extension the dispatcher can read, and it
+/// must keep the bracketed case-insensitive style for each of them.
+///
+/// `.rfa`/`.rft` are selectable **on purpose**: the importer's
+/// `import.rvt.family_no_geometry` refusal is more useful than a file the user
+/// cannot pick at all. No test here asserts the old DWG/DXF-only list.
+#[test]
+fn open_chooser_globs_cover_the_importer_set() {
+    for extension in [
+        "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
+        "rfa", "rft",
+    ] {
+        assert!(
+            OPEN_EXTENSIONS.contains(&extension),
+            "{extension} must be selectable"
+        );
+    }
+    assert_eq!(case_insensitive_glob("dwg"), "*.[dD][wW][gG]");
+    assert_eq!(case_insensitive_glob("obj"), "*.[oO][bB][jJ]");
+    assert_eq!(case_insensitive_glob("coff"), "*.[cC][oO][fF][fF]");
+    assert_eq!(case_insensitive_glob("stp"), "*.[sS][tT][pP]");
+}

@@ -317,7 +317,11 @@ fn renderer_batch_count_sweep() {
     let merged = grid_pixels(&mut renderer, &target, 1);
     let unmerged = grid_pixels(&mut renderer, &target, SWEEP_SEGMENTS);
     let background = [merged[0], merged[1], merged[2], merged[3]];
-    let merge_nonblank = merged.chunks_exact(4).any(|px| px != background.as_slice());
+    let merge_nonblank = merged
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .any(|px| px != background.as_slice());
     assert!(
         merge_nonblank,
         "merge fence frame is blank; the comparison would be vacuous"

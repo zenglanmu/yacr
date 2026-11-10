@@ -29,7 +29,9 @@ fn instanced_lines_match_legacy_pixels() {
     );
     assert!(
         instanced
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|px| px != opaque_black(&instanced).as_slice()),
         "instanced frame rasterized nothing"
     );
@@ -169,7 +171,11 @@ fn odd_line_batch_counts_its_trailing_vertex() {
     );
     let background = opaque_black(&pixels);
     assert!(
-        pixels.chunks_exact(4).any(|px| px != background.as_slice()),
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|px| px != background.as_slice()),
         "the paired segment must still render"
     );
 }
@@ -287,7 +293,9 @@ fn instanced_lines_keep_precision_at_large_coordinates() {
     let background = opaque_black(&instanced);
     assert!(
         instanced
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|px| px != background.as_slice()),
         "a segment at 1e7 centred under the camera must still rasterize"
     );
@@ -344,7 +352,11 @@ fn instanced_deep_zoom_on_a_large_drawing_stays_within_the_precision_bound() {
 
     let background = opaque_black(&legacy);
     assert!(
-        legacy.chunks_exact(4).any(|px| px != background.as_slice()),
+        legacy
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|px| px != background.as_slice()),
         "the framed object must rasterize; the comparison would be vacuous"
     );
     // Anti-aliased strokes make every sub-unit-coverage fringe pixel sensitive to
@@ -622,7 +634,9 @@ fn instanced_lines_match_legacy_in_perspective() {
         .pixels;
     assert!(
         instanced
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|px| px != opaque_black(&instanced).as_slice()),
         "3D instanced frame rasterized nothing"
     );
@@ -670,7 +684,11 @@ fn merged_meshes_match_legacy_pixels() {
     );
     let background = opaque_black(&merged);
     assert!(
-        merged.chunks_exact(4).any(|px| px != background.as_slice()),
+        merged
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|px| px != background.as_slice()),
         "merged mesh frame rasterized nothing"
     );
 

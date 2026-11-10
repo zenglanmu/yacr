@@ -258,8 +258,8 @@ fn the_history_is_bounded_and_drops_the_oldest_state() {
     // 20 real changes (alternating WALLS visible/hidden), recording the state the
     // session was in *after* each change.
     let mut states: Vec<Vec<(LayerId, bool)>> = Vec::new();
-    for index in 0..20 {
-        let visible = index % 2 == 0;
+    for index in 0..20usize {
+        let visible = index.is_multiple_of(2);
         set_visible(&mut app, &mut session, LayerId(3), visible).expect("toggle WALLS");
         states.push(session.layer_overrides.iter().collect());
     }

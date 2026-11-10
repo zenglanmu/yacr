@@ -709,7 +709,7 @@ fn face_loop(
             } => {
                 // The traversal direction of this half-edge: forward keeps the
                 // stored sweep, reverse starts at the end and negates it.
-                let (angle, sweep) = if half % 2 == 0 {
+                let (angle, sweep) = if half.is_multiple_of(2) {
                     (start_angle, sweep)
                 } else {
                     (start_angle + sweep, -sweep)

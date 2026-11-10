@@ -237,7 +237,11 @@ fn accelerated_oversized_line_stream_downgrades_without_validation_error() {
     // The fallback must draw real geometry, not the prepare-time placeholder.
     let background = [pixels[0], pixels[1], pixels[2], pixels[3]];
     assert!(
-        pixels.chunks_exact(4).any(|px| px != background.as_slice()),
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|px| px != background.as_slice()),
         "the fallback frame is blank; the per-stream buffers held no real geometry"
     );
 

@@ -72,6 +72,12 @@ fixtures/debug-default-fonts.dwg
 # externally supplied path via `YACR_TEST_DWG` (a skip is not evidence).
 fixtures/test-tangent*
 
+# Autodesk Revit sample project (licensed by Autodesk, ~19 MB). Local-only
+# evidence for the RVT preview importer; never committed and never listed in
+# `fixtures/manifest`. Re-download from the Autodesk address in
+# `fixtures/rvt/SOURCE.md` when needed.
+fixtures/rvt/samples/
+
 # Loop-command scratch state (session-local, never committed)
 loop.txt
 

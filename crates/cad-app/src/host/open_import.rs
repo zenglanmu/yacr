@@ -6,7 +6,8 @@
 use std::sync::Arc;
 
 use cad_domain::*;
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+
+use crate::import::{FormatImporter, ImportLimits, ImportRequest, Importer};
 
 use super::{HostController, OpenedDrawing, XrefOptions};
 
@@ -47,7 +48,7 @@ impl HostController {
             generation: self.session.generation,
             xref,
         };
-        let importer = AcadrustImporter::new();
+        let importer = FormatImporter::new();
         let imported = importer.import(&request, &|| false)?;
         self.pending_open_label = Some(label.to_string());
         self.publish_imported(

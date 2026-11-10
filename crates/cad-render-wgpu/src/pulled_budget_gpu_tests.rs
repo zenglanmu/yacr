@@ -292,7 +292,9 @@ fn under_budget_scene_still_uses_the_pulled_path() {
     let (pixels, stats) = render_and_read(&mut renderer, &target);
     assert!(
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|px| px[0] > 8 || px[1] > 8 || px[2] > 8),
         "{what}: the frame must draw ink"
     );
@@ -528,7 +530,9 @@ fn captured_out_of_memory_falls_back_instead_of_panicking() {
     );
     assert!(
         fallback_px
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|px| px[0] > 8 || px[1] > 8 || px[2] > 8),
         "{what}: the fallback frame must draw real geometry, not a placeholder"
     );
@@ -653,7 +657,9 @@ fn run_free_suffix_skips_the_rebuild_after_the_oom_fallback() {
     let (pixels, stats) = render_and_read(&mut renderer, &target);
     assert!(
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|px| px[0] > 8 || px[1] > 8 || px[2] > 8),
         "{what}: the skipped suffix must still draw the fallback geometry"
     );

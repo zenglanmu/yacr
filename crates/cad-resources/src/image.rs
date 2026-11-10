@@ -246,12 +246,12 @@ fn expand_to_rgba(
     match color_type {
         png::ColorType::Rgba => out.extend_from_slice(data),
         png::ColorType::GrayscaleAlpha => {
-            for px in data.chunks_exact(2) {
+            for px in data.as_chunks::<2>().0 {
                 out.extend_from_slice(&[px[0], px[0], px[0], px[1]]);
             }
         }
         png::ColorType::Rgb => {
-            for px in data.chunks_exact(3) {
+            for px in data.as_chunks::<3>().0 {
                 out.extend_from_slice(&[px[0], px[1], px[2], 0xFF]);
             }
         }
@@ -314,7 +314,7 @@ fn jpeg_to_rgba(
     match components {
         4 => out.extend_from_slice(pixels),
         3 => {
-            for px in pixels.chunks_exact(3) {
+            for px in pixels.as_chunks::<3>().0 {
                 out.extend_from_slice(&[px[0], px[1], px[2], 0xFF]);
             }
         }

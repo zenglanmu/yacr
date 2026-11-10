@@ -176,7 +176,7 @@ pub fn fill_rings(rings: &[Loop]) -> Result<FillMesh, FillError> {
         .enumerate()
         .map(|(i, r)| {
             let area = ring_area(r).abs();
-            if depth[i] % 2 == 0 {
+            if depth[i].is_multiple_of(2) {
                 area
             } else {
                 -area

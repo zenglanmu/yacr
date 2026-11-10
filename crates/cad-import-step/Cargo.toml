@@ -1,0 +1,22 @@
+[package]
+name = "cad-import-step"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "ISO 10303-21 (STEP, AP203/AP214/AP242) adapter: tessellate B-rep into the neutral mesh contract."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-import-core.workspace = true
+# `cadmpeg-ir` is a direct dependency because `Codec`/`DecodeOptions` live
+# there, not in the codec crate. No features are enabled.
+cadmpeg-codec-step.workspace = true
+cadmpeg-ir.workspace = true
+cadmpeg-tessellate.workspace = true
+# `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web_time` uses
+# `Performance.now()` there and re-exports std elsewhere.
+web-time.workspace = true

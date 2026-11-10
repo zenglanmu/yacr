@@ -48,57 +48,10 @@ pub const MAX_VENDOR_BYTES: usize = 256 * 1024 * 1024;
 /// Upper bound of one stream (main/text/handle) copied from a record.
 pub const MAX_VENDOR_STREAM_BYTES: usize = 16 * 1024 * 1024;
 
-/// Which source shape produced one vendor record.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VendorSource {
-    /// A `TCH_*` object read as `EntityType::Unknown`.
-    UnknownEntity,
-    /// An `ACAD_PROXY_ENTITY` whose class resolves to `TCH_*`.
-    ProxyEntity,
-}
-
-impl VendorSource {
-    /// Stable byte for the ABI frame.
-    pub fn wire_code(self) -> u8 {
-        match self {
-            Self::UnknownEntity => 0,
-            Self::ProxyEntity => 1,
-        }
-    }
-}
-
-/// One vendor record, byte-for-byte what the plugin needs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VendorRecord {
-    /// The TCH class name (`TCH_WALL`, …).
-    pub class_name: String,
-    /// The source entity handle.
-    pub handle: u64,
-    /// DWG version as a stable decimal code (`1027` for AC1027).
-    pub dwg_version: u32,
-    /// Which source shape produced this record.
-    pub source: VendorSource,
-    /// Main stream bytes (common data + class body, bit-aligned at bit 0).
-    pub main: Vec<u8>,
-    /// Exact main-stream bit length.
-    pub main_bits: u32,
-    /// Text stream bytes (bit-aligned at bit 0), empty before R2007.
-    pub text: Vec<u8>,
-    /// Exact text-stream bit length.
-    pub text_bits: u32,
-    /// Handle-stream bytes (bit-aligned at bit 0).
-    pub handle_stream: Vec<u8>,
-    /// Exact handle-stream bit length.
-    pub handle_bits: u32,
-    /// Bits of common data the class-body decoder must skip in `main`.
-    pub main_skip_bits: u32,
-    /// Bits of common data the class-body decoder must skip in `text`.
-    pub text_skip_bits: u32,
-    /// Bits of common data the class-body decoder must skip in `handle_stream`.
-    pub handle_skip_bits: u32,
-    /// Handles referenced by a proxy record (soft/hard pointers).
-    pub references: Vec<u64>,
-}
+// The record shape is part of the format-neutral import contract: the import
+// copies bytes and the host/plugin decodes them, so the type lives in
+// `cad-import-core` and is re-exported here unchanged.
+pub use cad_import_core::{VendorRecord, VendorSource};
 
 /// The extraction result carried by the import.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -50,7 +50,9 @@ fn glyph(kind: SnapHintKind) -> BTreeSet<((i64, i64), (i64, i64))> {
     };
     batch
         .vertices
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let a = q(pair[0]);
             let b = q(pair[1]);

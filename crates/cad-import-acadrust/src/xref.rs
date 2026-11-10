@@ -42,9 +42,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use cad_resources::{
-    check_xref_path, ResourceLimits, XrefFileSource, XrefPathVerdict, XrefSourceError,
-};
+use cad_import_core::DEFAULT_XREF_BYTE_BUDGET;
+use cad_resources::{check_xref_path, ResourceLimits, XrefPathVerdict, XrefSourceError};
 
 use super::*;
 
@@ -53,9 +52,6 @@ pub(crate) use remap::remap_geometry;
 use remap::remap_visibility;
 #[cfg(test)]
 pub(crate) use remap::UNMAPPED_BLOCK;
-
-/// Default total byte budget for all referenced files in one import (1 GiB).
-pub const DEFAULT_XREF_BYTE_BUDGET: u64 = 1024 * 1024 * 1024;
 
 /// Session state for one synchronous xref tree.
 ///
@@ -165,77 +161,6 @@ fn session_pop() {
 /// imported. The host drawing is depth `0`.
 pub(crate) fn xref_current_depth() -> usize {
     session_depth()
-}
-
-/// Host policy and file access for external references.
-///
-/// Construct with [`XrefOptions::new`] or a struct literal, optionally tune the
-/// public fields, and pass it as `ImportRequest::xref`. One value drives the
-/// whole nested tree: a referenced drawing's own xrefs are resolved with the
-/// same source, roots and budget.
-///
-/// ```ignore
-/// let mut options = XrefOptions::new(source, "/drawings");
-/// options.roots = vec![PathBuf::from("/drawings/lib")];
-/// options.max_depth = 4;
-/// ```
-pub struct XrefOptions {
-    /// Carrier that actually reads referenced bytes.
-    pub source: Arc<dyn XrefFileSource>,
-    /// Directory relative references in the host drawing resolve against.
-    /// Nested imports replace this with the referenced file's parent directory.
-    pub drawing_dir: PathBuf,
-    /// Additional lexical roots an absolute reference may live under.
-    pub roots: Vec<PathBuf>,
-    /// Maximum nesting depth. `0` allows only the host's direct attachments.
-    pub max_depth: usize,
-    /// Total bytes every referenced file in this tree may consume.
-    pub total_bytes_budget: u64,
-}
-
-impl XrefOptions {
-    /// Create options for a host drawing at `drawing_dir`.
-    pub fn new(source: Arc<dyn XrefFileSource>, drawing_dir: impl Into<PathBuf>) -> Self {
-        Self {
-            source,
-            drawing_dir: drawing_dir.into(),
-            roots: Vec::new(),
-            max_depth: ResourceLimits::default().max_xref_depth,
-            total_bytes_budget: DEFAULT_XREF_BYTE_BUDGET,
-        }
-    }
-
-    /// Add allowed absolute roots, keeping the configured budget/depth.
-    pub fn with_roots(mut self, roots: Vec<PathBuf>) -> Self {
-        self.roots = roots;
-        self
-    }
-
-    /// Replace the total byte budget for this tree.
-    pub fn with_budget(mut self, total_bytes_budget: u64) -> Self {
-        self.total_bytes_budget = total_bytes_budget;
-        self
-    }
-
-    /// Replace the nesting depth limit.
-    pub fn with_max_depth(mut self, max_depth: usize) -> Self {
-        self.max_depth = max_depth;
-        self
-    }
-
-    fn nested(&self, path: &Path) -> XrefOptions {
-        let drawing_dir = path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| self.drawing_dir.clone());
-        XrefOptions {
-            source: Arc::clone(&self.source),
-            drawing_dir,
-            roots: self.roots.clone(),
-            max_depth: self.max_depth,
-            total_bytes_budget: session_remaining(),
-        }
-    }
 }
 
 /// Map an xref status to the render support scale.
@@ -439,7 +364,7 @@ impl<'a> ImporterBuilder<'a> {
                         bytes: Arc::clone(&bytes),
                         limits: self.request.limits,
                         generation: self.request.generation,
-                        xref: Some(Arc::new(options.nested(&normalized))),
+                        xref: Some(Arc::new(options.nested(&normalized, session_remaining()))),
                     };
                     // Progress is intentionally not forwarded: the nested
                     // entity counts belong to a different document and would

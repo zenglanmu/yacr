@@ -618,7 +618,9 @@ fn snap_hint_kinds() -> [SnapHintKind; 6] {
 fn segment_pairs(batch: &RenderBatch) -> Vec<([f32; 3], [f32; 3])> {
     batch
         .vertices
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| (pair[0], pair[1]))
         .collect()
 }

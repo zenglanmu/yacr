@@ -133,7 +133,7 @@ fn woff_to_sfnt(data: &[u8]) -> CadResult<Vec<u8>> {
             }
             decoded
         };
-        while next_offset % 4 != 0 {
+        while !next_offset.is_multiple_of(4) {
             next_offset += 1;
             body.push(0);
         }

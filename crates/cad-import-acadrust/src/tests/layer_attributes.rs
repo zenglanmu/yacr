@@ -6,6 +6,7 @@
 //! the row invisible. Nothing reads them to change what is drawn.
 
 use super::*;
+use cad_db::DrawingDatabase;
 
 /// sRGB of an ACI index through acadrust's own canonical table, so the test
 /// never hard-codes a colour triple the reader might map differently.

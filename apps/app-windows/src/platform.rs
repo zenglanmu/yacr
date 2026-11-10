@@ -42,6 +42,29 @@ const KEY_PICKER_EMPTY: &str = "windows.picker_empty";
 const KEY_PICKER_LOCAL: &str = "windows.picker_local";
 const KEY_PICKER_FAILED: &str = "windows.picker_failed";
 
+/// The extensions the open dialog accepts, in display order.
+///
+/// `.rfa`/`.rft` are listed **on purpose**: the RVT adapter refuses a family file
+/// with a precise `import.rvt.family_no_geometry` diagnostic, which is more
+/// useful than the file being unselectable. They are deliberately *not* in any
+/// "supported formats" copy (see `README.md` / the i18n filter labels).
+const OPEN_EXTENSIONS: &[&str] = &[
+    "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte", "rfa",
+    "rft",
+];
+
+/// The COM `COMDLG_FILTERSPEC` pattern (`"*.dwg;*.dxf;…"`).
+///
+/// The shell matches this case-insensitively, so no per-character bracketing is
+/// needed (unlike the XDG portal glob in the Linux host).
+fn open_filter_spec() -> String {
+    OPEN_EXTENSIONS
+        .iter()
+        .map(|extension| format!("*.{extension}"))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
 /// The localized labels the native open dialog and open funnel use.
 ///
 /// Built from the embedded UI catalogue; [`Self::from_locale`] selects the
@@ -531,7 +554,7 @@ fn native_choose(labels: &WindowsOpenDialogLabels) -> FileChooserOutcome {
 
     let title = wide(&labels.picker_title);
     let filter_name = wide(&labels.picker_filter);
-    let filter_spec = wide("*.dwg;*.dxf");
+    let filter_spec = wide(&open_filter_spec());
     let filters = [COMDLG_FILTERSPEC {
         pszName: PCWSTR::from_raw(filter_name.as_ptr()),
         pszSpec: PCWSTR::from_raw(filter_spec.as_ptr()),
@@ -873,5 +896,27 @@ mod tests {
             .unwrap();
         assert_eq!(wgpu_backend_preference(&store), Some("dx12".to_string()));
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// The COM filter must offer every extension the dispatcher can read.
+    ///
+    /// `.rfa`/`.rft` are listed on purpose (the importer refuses families by
+    /// name); this test asserts presence only, never "supported".
+    #[test]
+    fn open_filter_spec_lists_the_importer_set() {
+        let spec = open_filter_spec();
+        let patterns: Vec<&str> = spec.split(';').collect();
+        for extension in [
+            "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
+            "rfa", "rft",
+        ] {
+            let pattern = format!("*.{extension}");
+            assert!(
+                patterns.contains(&pattern.as_str()),
+                "{pattern} missing from {spec}"
+            );
+        }
+        assert!(spec.starts_with("*.dwg;*.dxf;"), "{spec}");
+        assert!(!spec.contains(" "), "{spec}");
     }
 }

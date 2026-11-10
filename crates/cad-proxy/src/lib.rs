@@ -244,13 +244,15 @@ fn decode_unicode_text(data: &[u8]) -> CadResult<(String, Point3, f64, f64)> {
     // width_factor at 80, oblique at 88 (reserved for later style support).
 
     let tail = &data[FIXED..];
-    if tail.len() % 2 != 0 {
+    if !tail.len().is_multiple_of(2) {
         return Err(CadError::CorruptData(
             "Unicode text has an odd number of tail bytes".into(),
         ));
     }
     let units: Vec<u16> = tail
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     let terminator = units.iter().position(|u| *u == 0).ok_or_else(|| {

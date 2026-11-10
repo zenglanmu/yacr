@@ -221,10 +221,22 @@ export const WEB_HOST_COMMANDS: readonly string[] = [WEB_OPEN_COMMAND];
 /**
  * The file extensions this carrier opens and the importer reads.
  *
+ * The dispatcher behind the wasm session reads every one of these formats
+ * (`cad-import-core::detect`), and all importers are wasm-clean; so this list is
+ * the importer's set, not a narrower browser subset.
+ *
+ * `.rfa`/`.rft` are included deliberately: a Revit family has no geometry and the
+ * RVT adapter refuses it with a precise `import.rvt.family_no_geometry`
+ * diagnostic, which beats an unexplained "not a drawing" from this gate. They are
+ * deliberately *not* in any "supported formats" copy.
+ *
  * Used **after** the picker returns, never as an `accept` filter (see
  * [`pickDrawingFile`]).
  */
-export const WEB_OPEN_EXTENSIONS: readonly string[] = Object.freeze(['.dwg', '.dxf']);
+export const WEB_OPEN_EXTENSIONS: readonly string[] = Object.freeze([
+  '.dwg', '.dxf', '.obj', '.stl', '.ply', '.off', '.coff',
+  '.step', '.stp', '.ifc', '.rvt', '.rte', '.rfa', '.rft',
+]);
 
 /** The stable prefix of every module-unavailable failure. */
 export const WEB_UNAVAILABLE_PREFIX = 'web-adapter: canvas module unavailable';
@@ -250,7 +262,13 @@ export function isDrawingFileName(name: unknown): boolean {
   return WEB_OPEN_EXTENSIONS.includes(fileExtension(name));
 }
 
-/** The stable refusal for a selected file this carrier cannot import. */
+/**
+ * The stable refusal for a selected file this carrier cannot import.
+ *
+ * The extension list is interpolated, never spelled out separately, so the
+ * message cannot drift from [`WEB_OPEN_EXTENSIONS`]: one refusal, naming the
+ * exact set this carrier accepts.
+ */
 export function drawingFileRefusal(name: unknown): string {
   return `web-adapter: ${WEB_COMMAND_COMMAND}: OPEN refused ${JSON.stringify(String(name ?? ''))}:`
     + ` only ${WEB_OPEN_EXTENSIONS.join(' / ')} files can be opened on this carrier`;

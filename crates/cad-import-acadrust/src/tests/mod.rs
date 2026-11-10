@@ -5,6 +5,7 @@
 //! `use super::*;`.
 
 use super::*;
+use std::sync::Arc;
 
 mod acis;
 mod basics;

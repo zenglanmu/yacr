@@ -34,9 +34,11 @@ use std::thread::JoinHandle;
 
 use cad_domain::{CadError, CadResult, DocumentId, TaskStamp};
 use cad_import_acadrust::{
-    AcadrustImporter, ImportPhase, ImportProgress, ImportProgressSink, ImportRequest,
-    ImportedDrawing, Importer, XrefOptions,
+    ImportPhase, ImportProgress, ImportProgressSink, ImportRequest, ImportedDrawing, Importer,
+    XrefOptions,
 };
+
+use crate::import::FormatImporter;
 use cad_platform::CancellationToken;
 
 use crate::host::HostController;
@@ -229,7 +231,7 @@ impl ImportManager {
         let handle = std::thread::Builder::new()
             .name(format!("yacr-import-{}", stamp.generation))
             .spawn(move || {
-                let importer = AcadrustImporter::new();
+                let importer = FormatImporter::new();
                 let cancelled = {
                     let token = worker_cancel.clone();
                     move || token.is_cancelled()

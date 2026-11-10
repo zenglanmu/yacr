@@ -242,6 +242,17 @@ pub fn hex(hash: &[u8; 32]) -> String {
     out
 }
 
+/// Extensions whose bare tokens are treated as document names by
+/// [`redact_text`], even without a path separator.
+///
+/// The first group is every format the importer accepts (the same set the native
+/// open pickers offer, including the Revit family extensions the RVT adapter
+/// refuses by name); the second is the shipped non-drawing document types.
+const DOCUMENT_EXTENSIONS: &[&str] = &[
+    ".dwg", ".dxf", ".obj", ".stl", ".ply", ".off", ".coff", ".step", ".stp", ".ifc", ".rvt",
+    ".rte", ".rfa", ".rft", ".json", ".sat", ".sab", ".shx", ".ttf",
+];
+
 /// Replace absolute/relative path-like tokens with `«redacted»`.
 ///
 /// Conservative by design: anything containing a path separator or ending in a
@@ -258,7 +269,7 @@ pub fn redact_text(message: &str) -> String {
                 && token.as_bytes().get(1) == Some(&b':')
                 && token.as_bytes()[0].is_ascii_alphabetic();
         let lower = token.to_ascii_lowercase();
-        let is_document = [".dwg", ".dxf", ".json", ".sat", ".sab", ".shx", ".ttf"]
+        let is_document = DOCUMENT_EXTENSIONS
             .iter()
             .any(|extension| lower.ends_with(extension));
         if is_path || is_document {

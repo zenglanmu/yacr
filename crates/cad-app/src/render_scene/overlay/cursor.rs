@@ -127,7 +127,9 @@ pub fn cursor_geometry(
         }
     }
     let mut segments: Vec<[Point3; 2]> = points
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| [pair[0], pair[1]])
         .collect();
     debug_assert!(segments.len() <= cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS);

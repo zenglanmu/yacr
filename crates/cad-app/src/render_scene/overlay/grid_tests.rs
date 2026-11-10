@@ -13,7 +13,8 @@ fn p(x: f64, y: f64) -> Point3 {
 fn segment_pairs(batch: &RenderBatch) -> Vec<([f32; 3], [f32; 3])> {
     batch
         .vertices
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
         .map(|pair| (pair[0], pair[1]))
         .collect()
 }

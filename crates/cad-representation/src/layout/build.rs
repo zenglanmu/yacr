@@ -262,7 +262,7 @@ pub fn build_paper_space(
                             ));
                         }
                         let mut clipped = Vec::new();
-                        for pair in points.chunks_exact(2) {
+                        for pair in points.as_chunks::<2>().0 {
                             for run in clip_polyline_to_rect(pair, center, half) {
                                 clipped.extend(run);
                             }

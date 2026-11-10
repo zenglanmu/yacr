@@ -476,7 +476,7 @@ fn parse_primitive(cursor: &mut Cursor<'_>, kind: u8) -> Result<VendorPrimitive,
             if point_count > MAX_PRIMITIVE_POINTS {
                 return Err("vendor.too_many_points".to_string());
             }
-            if point_count < 2 || (kind == 1 && point_count % 2 != 0) {
+            if point_count < 2 || (kind == 1 && !point_count.is_multiple_of(2)) {
                 return Err("vendor.invalid_point_count".to_string());
             }
             let mut points = Vec::with_capacity(point_count);
