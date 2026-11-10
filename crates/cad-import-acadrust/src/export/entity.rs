@@ -315,8 +315,12 @@ pub(super) fn emit(
             stack,
         ),
         // A first-class TABLE is written as a real `ACAD_TABLE` entity from the
-        // domain grid; the derived display is never written as the entity.
-        SemanticGeometry::Table(table) => super::table::emit_table(doc, entity, table, ctx, acc),
+        // domain grid; the derived display is never written as the entity. A
+        // block-embedded table is placed first with the accumulated INSERT
+        // transform, exactly like every other leaf.
+        SemanticGeometry::Table(table) => {
+            super::table::emit_table(doc, entity, table, transform, ctx, acc)
+        }
         leaf => {
             let owned;
             let placed: &SemanticGeometry = if transform == &Transform3::identity() {

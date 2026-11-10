@@ -6,9 +6,10 @@
 //! from `frame + columns + rows` by [`TableGeometry::build_display`], and the
 //! only writers are [`TableGeometry::new`] (creation path),
 //! [`TableGeometry::from_import`] (import path, which never rejects),
-//! [`TableGeometry::transformed`] and [`TableGeometry::with_cell_text`]. This
-//! mirrors `HatchGeometry`/`MultiLeaderGeometry`, so a caller cannot store a
-//! display that disagrees with the definition.
+//! [`TableGeometry::transformed`], [`TableGeometry::with_cell_text`] and
+//! [`TableGeometry::with_cell_texts`]. This mirrors
+//! `HatchGeometry`/`MultiLeaderGeometry`, so a caller cannot store a display
+//! that disagrees with the definition.
 //!
 //! The display derivation is a **verbatim move** of the pre-table-entity
 //! importer's `cad-import-acadrust::entity::table` cell-grid synthesis: one
@@ -33,11 +34,13 @@ use crate::{
 /// other similarity-only display entity uses).
 const SIMILARITY_TOLERANCE: f64 = 1e-9;
 
-/// The importer's fallback cell text height when the source stores none.
+/// The fallback cell text height when neither the cell/row/table style nor the
+/// content supplies a positive value.
 ///
-/// Verbatim from the pre-table-entity importer: `content.text_height <= 0.0`
-/// becomes 2.5 drawing units.
-const DEFAULT_CELL_TEXT_HEIGHT: f64 = 2.5;
+/// Verbatim from the pre-table-entity importer: a missing or non-positive
+/// source height becomes 2.5 drawing units. The importer uses this one
+/// constant too, so the value has a single definition.
+pub const DEFAULT_CELL_TEXT_HEIGHT: f64 = 2.5;
 
 // ---------------------------------------------------------------------------
 // The table definition.
@@ -138,10 +141,13 @@ pub struct TableCellBorders {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableCellGeometry {
     pub text: String,
-    /// Effective text height the display uses; a source value `<= 0.0` is
-    /// stored as [`DEFAULT_CELL_TEXT_HEIGHT`].
+    /// Effective text height the display uses. It must be finite and positive;
+    /// the import path substitutes [`DEFAULT_CELL_TEXT_HEIGHT`] when every
+    /// source level stores a non-positive value, and [`TableGeometry::new`]
+    /// rejects a non-positive height consistently.
     pub text_height: f64,
-    /// The content's text style name (DXF group 7 equivalent).
+    /// The effective text style name (DXF group 7 equivalent), resolved from the
+    /// cell/row/base/table style and finally the content.
     pub style_name: String,
     /// The resolved text style identity the display `Text` carries.
     ///
@@ -195,8 +201,8 @@ pub struct TableParts {
 /// A first-class TABLE entity.
 ///
 /// All fields are private; the only writers are [`Self::new`],
-/// [`Self::from_import`], [`Self::transformed`] and [`Self::with_cell_text`].
-/// `display` is derived from the other fields.
+/// [`Self::from_import`], [`Self::transformed`], [`Self::with_cell_text`] and
+/// [`Self::with_cell_texts`]. `display` is derived from the other fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableGeometry {
     frame: TableFrame,
@@ -212,12 +218,13 @@ impl TableGeometry {
     /// Build a table on the creation path, rejecting a definition whose display
     /// cannot be derived.
     ///
-    /// The import path uses [`Self::from_import`] instead, which keeps the
-    /// importer's honest degradation and never rejects. `new` refuses only
-    /// **structural** defects: a non-finite or degenerate frame, no column or
-    /// row, a non-finite or negative column width/row height, a total extent
-    /// that is not positive, a merge span outside the grid, a non-finite cell
-    /// text height, and an empty derived display.
+    /// The frame directions are stored normalised. The import path uses
+    /// [`Self::from_import`] instead, which keeps the importer's honest
+    /// degradation and never rejects. `new` refuses only **structural** defects:
+    /// a non-finite or degenerate frame, no column or row, a non-finite or
+    /// negative column width/row height, a total extent that is not positive, a
+    /// merge span outside the grid or overlapping another merge, a non-finite or
+    /// non-positive cell text height, and an empty derived display.
     pub fn new(parts: TableParts) -> CadResult<Self> {
         validate_parts(&parts)?;
         let geometry = Self::from_import(parts);
@@ -231,12 +238,16 @@ impl TableGeometry {
 
     /// Build a table from imported data, degrading honestly and never rejecting.
     ///
-    /// The returned geometry carries exactly the display the pre-table-entity
-    /// importer produced. The importer owns the degradation reasons because only
-    /// it knows whether any cell/row/table style supplied the resolved borders.
+    /// The frame directions are stored normalised, and any merge span is clamped
+    /// to the remaining grid so malformed source spans cannot allocate or
+    /// iterate over billions of covered cells. The returned geometry carries
+    /// exactly the display the pre-table-entity importer produced.
+    ///
+    /// The importer owns the degradation reasons because only it knows whether
+    /// any cell/row/table style supplied the resolved borders.
     pub fn from_import(parts: TableParts) -> Self {
         let mut geometry = TableGeometry {
-            frame: parts.frame,
+            frame: normalize_frame(parts.frame),
             columns: parts.columns,
             rows: parts.rows,
             style_name: parts.style_name,
@@ -244,8 +255,27 @@ impl TableGeometry {
             description: parts.description,
             display: Vec::new(),
         };
+        geometry.clamp_merge_spans();
         geometry.display = geometry.build_display();
         geometry
+    }
+
+    /// Clamp every stored merge span to the remaining grid.
+    ///
+    /// A source can carry `merge_width`/`merge_height` values near `i32::MAX`;
+    /// iterating those literally would hang the import. A span is clipped to the
+    /// columns/rows that remain from the anchor, and never below one.
+    fn clamp_merge_spans(&mut self) {
+        let row_count = self.rows.len();
+        let column_count = self.columns.len();
+        for (row_index, row) in self.rows.iter_mut().enumerate() {
+            for (column_index, cell) in row.cells.iter_mut().enumerate() {
+                let max_width = column_count.saturating_sub(column_index).max(1) as u32;
+                let max_height = row_count.saturating_sub(row_index).max(1) as u32;
+                cell.merge_width = cell.merge_width.clamp(1, max_width);
+                cell.merge_height = cell.merge_height.clamp(1, max_height);
+            }
+        }
     }
 
     /// Transform by a **positive-determinant similarity** (translation +
@@ -256,7 +286,9 @@ impl TableGeometry {
     /// height, cell text height, double-border spacing) scales by the uniform
     /// factor. A non-uniform scale/shear or a mirror cannot be represented by
     /// this grid + flat-text arrangement and is refused for the whole entity
-    /// with a named `Unsupported`, never silently dropped.
+    /// with a named `Unsupported`, never silently dropped. A transform that tilts
+    /// the plane normal away from +Z is refused for the same reason: a cell text
+    /// child can rotate in world XY but cannot represent a tilted plane.
     pub fn transformed(&self, transform: &Transform3) -> CadResult<Self> {
         if !transform.is_uniform_scale(SIMILARITY_TOLERANCE) {
             return Err(CadError::Unsupported(
@@ -283,6 +315,18 @@ impl TableGeometry {
         if length(horizontal) < 1e-9 || length(normal) < 1e-9 {
             return Err(CadError::InvalidInput(
                 "table transform collapses the plane frame".into(),
+            ));
+        }
+        // Cell text is a flat `Text` child: it can carry a rotation in the world
+        // XY plane but not a tilted plane. A transform that tilts the normal away
+        // from +Z is refused for the whole entity instead of silently drawing
+        // text in the wrong orientation (the import path reports the same limit
+        // when a source table already has a non-+Z normal).
+        if (normal.z - 1.0).abs() > SIMILARITY_TOLERANCE {
+            return Err(CadError::Unsupported(
+                "table transform tilts the plane away from +Z; cell text cannot represent a \
+                 tilted plane and the entity is refused rather than drawn with unrotated text"
+                    .into(),
             ));
         }
         let frame = TableFrame {
@@ -339,25 +383,35 @@ impl TableGeometry {
 
     /// Replace one cell's text and rebuild the derived display.
     ///
-    /// Refusals (the receiver is unchanged): a row/column outside the grid
-    /// (`table.cell_out_of_range`) and a cell whose new text height would be
-    /// invalid (`table.text_height`). Empty text is legal: the cell then draws
-    /// no `Text`.
+    /// Refuses a row/column outside the grid (`table.cell_out_of_range`). Empty
+    /// text is legal: the cell then draws no `Text`.
     pub fn with_cell_text(&self, row: usize, column: usize, text: &str) -> CadResult<Self> {
+        self.with_cell_texts(vec![(row, column, text.to_string())])
+    }
+
+    /// Replace several cells' texts and rebuild the derived display **once**.
+    ///
+    /// The importer's FIND path uses this so replacing the same needle in N
+    /// cells is one rebuild and one undo step, not N rebuilds. Every
+    /// `(row, column)` must be inside the grid (`table.cell_out_of_range`);
+    /// on a refusal the receiver is unchanged.
+    pub fn with_cell_texts(&self, changes: Vec<(usize, usize, String)>) -> CadResult<Self> {
         let mut geometry = self.clone();
-        let Some(row_geometry) = geometry.rows.get_mut(row) else {
-            return Err(CadError::InvalidInput(format!(
-                "table.cell_out_of_range: row {row} is outside the table's {} rows",
-                self.rows.len()
-            )));
-        };
-        let Some(cell) = row_geometry.cells.get_mut(column) else {
-            return Err(CadError::InvalidInput(format!(
-                "table.cell_out_of_range: column {column} is outside row {row}'s {} cells",
-                row_geometry.cells.len()
-            )));
-        };
-        cell.text = text.to_string();
+        for (row, column, text) in changes {
+            let row_count = geometry.rows.len();
+            let row_geometry = geometry.rows.get_mut(row).ok_or_else(|| {
+                CadError::InvalidInput(format!(
+                    "table.cell_out_of_range: row {row} is outside the table's {row_count} rows"
+                ))
+            })?;
+            let cell_count = row_geometry.cells.len();
+            let cell = row_geometry.cells.get_mut(column).ok_or_else(|| {
+                CadError::InvalidInput(format!(
+                    "table.cell_out_of_range: column {column} is outside row {row}'s {cell_count} cells"
+                ))
+            })?;
+            cell.text = text;
+        }
         geometry.display = geometry.build_display();
         Ok(geometry)
     }
@@ -428,15 +482,27 @@ impl TableGeometry {
                 add(scale(self.frame.horizontal, x), scale(vertical, y)),
             )
         };
+        // Cell text is a flat `Text` child: it can only rotate within world XY.
+        // For a +Z plane that is the frame's horizontal direction; a tilted
+        // source plane is drawn with world-XY text (rotation 0) and the importer
+        // reports that limit.
+        let text_rotation = if (self.frame.normal.z - 1.0).abs() <= SIMILARITY_TOLERANCE {
+            self.frame.horizontal.y.atan2(self.frame.horizontal.x)
+        } else {
+            0.0
+        };
 
         // Cells covered by a merge anchor (all but the top-left cell). Their
-        // interior edges belong to the merged range and are not drawn.
+        // interior edges belong to the merged range and are not drawn. A
+        // malformed span is clamped to the remaining grid: a raw `i32` span near
+        // 2^31 must never drive this loop.
         let mut covered: std::collections::HashSet<(usize, usize)> =
             std::collections::HashSet::new();
         for (row_index, row) in self.rows.iter().enumerate() {
             for (column_index, cell) in row.cells.iter().enumerate() {
-                let span_w = cell.merge_width.max(1) as usize;
-                let span_h = cell.merge_height.max(1) as usize;
+                let span_w =
+                    clamped_span(cell.merge_width as usize, self.columns.len(), column_index);
+                let span_h = clamped_span(cell.merge_height as usize, self.rows.len(), row_index);
                 for dr in 0..span_h {
                     for dc in 0..span_w {
                         if dr != 0 || dc != 0 {
@@ -461,8 +527,13 @@ impl TableGeometry {
                     x += width;
                     continue;
                 }
-                // A merge anchor spans its covered columns/rows.
-                let span_w: f64 = (0..cell.merge_width.max(1) as usize)
+                // A merge anchor spans its covered columns/rows; clamp the
+                // stored span to the remaining grid.
+                let span_w_cells =
+                    clamped_span(cell.merge_width as usize, self.columns.len(), column_index);
+                let span_h_cells =
+                    clamped_span(cell.merge_height as usize, self.rows.len(), row_index);
+                let span_w: f64 = (0..span_w_cells)
                     .map(|dc| {
                         self.columns
                             .get(column_index + dc)
@@ -470,7 +541,7 @@ impl TableGeometry {
                             .unwrap_or(0.0)
                     })
                     .sum();
-                let span_h: f64 = (0..cell.merge_height.max(1) as usize)
+                let span_h: f64 = (0..span_h_cells)
                     .map(|dr| {
                         self.rows
                             .get(row_index + dr)
@@ -493,7 +564,7 @@ impl TableGeometry {
                         } else {
                             DEFAULT_CELL_TEXT_HEIGHT
                         },
-                        rotation: 0.0,
+                        rotation: text_rotation,
                         font: cell.font.clone(),
                         h_align: TextAlignH::Center,
                         v_align: TextAlignV::Middle,
@@ -519,6 +590,31 @@ fn cross(a: Point3, b: Point3) -> Point3 {
         x: a.y * b.z - a.z * b.y,
         y: a.z * b.x - a.x * b.z,
         z: a.x * b.y - a.y * b.x,
+    }
+}
+
+/// Clamp a merge span to the grid cells remaining from `anchor`.
+///
+/// `span` may be an untrusted source value; the result is always at least one
+/// and never points past `extent`.
+fn clamped_span(span: usize, extent: usize, anchor: usize) -> usize {
+    span.max(1).min(extent.saturating_sub(anchor).max(1))
+}
+
+/// Store the frame with unit horizontal/normal directions.
+fn normalize_frame(frame: TableFrame) -> TableFrame {
+    TableFrame {
+        origin: frame.origin,
+        horizontal: if length(frame.horizontal) >= 1e-9 {
+            normalize(frame.horizontal)
+        } else {
+            frame.horizontal
+        },
+        normal: if length(frame.normal) >= 1e-9 {
+            normalize(frame.normal)
+        } else {
+            frame.normal
+        },
     }
 }
 
@@ -684,121 +780,34 @@ fn validate_parts(parts: &TableParts) -> CadResult<()> {
             }
         }
     }
+    // Merge ranges must not overlap. Rows are visited top to bottom and cells
+    // left to right, so a cell already inside an earlier anchor is a covered
+    // cell (skipped); an anchor that reaches into an already-covered cell is an
+    // overlap and is rejected rather than given a silent precedence.
+    let mut covered = vec![vec![false; parts.columns.len()]; parts.rows.len()];
+    for (row_index, row) in parts.rows.iter().enumerate() {
+        for (column_index, cell) in row.cells.iter().enumerate() {
+            if covered[row_index][column_index] {
+                continue;
+            }
+            let span_w = cell.merge_width.max(1) as usize;
+            let span_h = cell.merge_height.max(1) as usize;
+            for dr in 0..span_h {
+                for dc in 0..span_w {
+                    let (r, c) = (row_index + dr, column_index + dc);
+                    if covered[r][c] {
+                        return Err(CadError::InvalidInput(format!(
+                            "table.structure: the merge at ({row_index}, {column_index}) \
+                             overlaps the merge covering ({r}, {c})"
+                        )));
+                    }
+                    covered[r][c] = true;
+                }
+            }
+        }
+    }
     Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn cell(text: &str) -> TableCellGeometry {
-        TableCellGeometry {
-            text: text.to_string(),
-            text_height: 2.5,
-            style_name: "Standard".into(),
-            style: StyleId(0),
-            font: None,
-            merge_width: 1,
-            merge_height: 1,
-            borders: TableCellBorders::default(),
-        }
-    }
-
-    fn parts() -> TableParts {
-        TableParts {
-            frame: TableFrame::default(),
-            columns: vec![
-                TableColumnGeometry {
-                    width: 4.0,
-                    name: "A".into(),
-                },
-                TableColumnGeometry {
-                    width: 6.0,
-                    name: "B".into(),
-                },
-            ],
-            rows: vec![TableRowGeometry {
-                height: 3.0,
-                cells: vec![cell("id"), cell("name")],
-            }],
-            style_name: "Standard".into(),
-            name: String::new(),
-            description: String::new(),
-        }
-    }
-
-    #[test]
-    fn display_is_one_rectangle_per_visible_cell_plus_text() {
-        let table = TableGeometry::new(parts()).expect("valid table");
-        // Two cells, four edges each, plus two text runs.
-        assert_eq!(table.display().len(), 10, "{:?}", table.display());
-        assert!(matches!(
-            table.display().last(),
-            Some(SemanticGeometry::Text { text, .. }) if text == "name"
-        ));
-        assert_eq!(table.texts(), vec!["id".to_string(), "name".to_string()]);
-    }
-
-    #[test]
-    fn transformed_scales_sizes_and_rotates_the_frame() {
-        let table = TableGeometry::new(parts()).expect("valid table");
-        // 90 degree rotation about Z then a uniform scale of 2.
-        let rotate = Transform3::from_basis(
-            Point3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-            Point3 {
-                x: -1.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            Point3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-        );
-        let transform = Transform3::scale(2.0).matrix_mul(&rotate);
-        let moved = table.transformed(&transform).expect("similarity");
-        assert!((moved.columns()[0].width - 8.0).abs() < 1e-9);
-        assert!((moved.rows()[0].height - 6.0).abs() < 1e-9);
-        assert!(moved.frame().horizontal.x.abs() < 1e-9);
-        assert!((moved.frame().horizontal.y - 1.0).abs() < 1e-9);
-        assert_eq!(moved.display().len(), table.display().len());
-    }
-
-    #[test]
-    fn non_uniform_scale_and_mirror_are_refused() {
-        let table = TableGeometry::new(parts()).expect("valid table");
-        let mut non_uniform = Transform3::identity();
-        non_uniform.matrix[1][1] = 2.0;
-        assert!(matches!(
-            table.transformed(&non_uniform),
-            Err(CadError::Unsupported(_))
-        ));
-        let mut mirror = Transform3::identity();
-        mirror.matrix[0][0] = -1.0;
-        assert!(matches!(
-            table.transformed(&mirror),
-            Err(CadError::Unsupported(_))
-        ));
-    }
-
-    #[test]
-    fn with_cell_text_rebuilds_and_refuses_out_of_range() {
-        let table = TableGeometry::new(parts()).expect("valid table");
-        let edited = table.with_cell_text(0, 0, "code").expect("in range");
-        assert_eq!(edited.texts()[0], "code");
-        assert!(table.with_cell_text(1, 0, "x").is_err());
-        assert!(table.with_cell_text(0, 9, "x").is_err());
-    }
-
-    #[test]
-    fn merge_outside_the_grid_is_rejected() {
-        let mut parts = parts();
-        parts.rows[0].cells[1].merge_width = 2;
-        assert!(TableGeometry::new(parts).is_err());
-    }
-}
+mod tests;

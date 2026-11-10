@@ -54,6 +54,10 @@ fn table_geometry() -> TableGeometry {
 }
 
 fn table_app() -> (Application, SessionState) {
+    table_app_with(table_geometry())
+}
+
+fn table_app_with(geometry: TableGeometry) -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -71,7 +75,7 @@ fn table_app() -> (Application, SessionState) {
         id: EntityId(1),
         layer: LayerId(0),
         space: SpaceId::Model,
-        geometry: SemanticGeometry::Table(Box::new(table_geometry())),
+        geometry: SemanticGeometry::Table(Box::new(geometry)),
         draw_order: 0,
     })
     .unwrap();
@@ -320,4 +324,119 @@ fn grip_drag_refuses_a_table_by_name() {
             if message.contains("grip.unsupported_table")),
         "{error:?}"
     );
+}
+
+#[test]
+fn find_never_matches_across_two_table_cells() {
+    let (mut app, mut session) = table_app();
+    // The old implementation joined cell texts with one space, so "id name"
+    // matched a table whose cells are only "id" and "name".
+    let report = execute(
+        &mut app,
+        &mut session,
+        CommandId::FindReport,
+        CommandPayload::TextFind {
+            needle: "id name".into(),
+            replacement: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "find.result"
+                && diagnostic.message.contains("0 match(es)")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn find_replaces_the_same_needle_in_two_cells_with_one_undo_step() {
+    let mut geometry = table_parts();
+    geometry.rows[0].cells = vec![cell("same"), cell("same")];
+    let rotated = TableGeometry::from_import(geometry);
+    let (mut app, mut session) = table_app_with(rotated);
+    let undo_before = app
+        .history
+        .get(&DocumentId(1))
+        .map(|history| history.undo_depth())
+        .unwrap_or(0);
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::FindReplace,
+        CommandPayload::TextFind {
+            needle: "same".into(),
+            replacement: Some("done".into()),
+        },
+    )
+    .unwrap();
+    assert_eq!(outcome.objects.len(), 1, "one table entity is updated");
+    assert_eq!(
+        stored_table(&app).texts(),
+        vec!["done".to_string(), "done".to_string()]
+    );
+    let undo_after = app
+        .history
+        .get(&DocumentId(1))
+        .map(|history| history.undo_depth())
+        .unwrap_or(0);
+    assert_eq!(
+        undo_after,
+        undo_before + 1,
+        "one transaction / one undo step"
+    );
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(
+        stored_table(&app).texts(),
+        vec!["same".to_string(), "same".to_string()]
+    );
+}
+
+#[test]
+fn a_rotated_table_is_picked_boxed_and_bounded_in_world_space() {
+    let rotate = Transform3::from_basis(p3(0.0, 1.0, 0.0), p3(-1.0, 0.0, 0.0), p3(0.0, 0.0, 0.0));
+    let rotated = table_geometry().transformed(&rotate).expect("rotation");
+    let geometry = SemanticGeometry::Table(Box::new(rotated.clone()));
+    let identity = Transform3::identity();
+
+    // Picking uses the conservative world AABB of the derived display. Cell
+    // text expands it beyond the bare grid, so assert containment of the
+    // rotated grid rather than equality.
+    let (min, max) = cad_spatial::pick::pick_world_bounds(&geometry, &identity)
+        .expect("the rotated table has bounds");
+    assert!(min.x <= -3.0 + 1e-9, "{min:?} {max:?}");
+    assert!(max.x >= 0.0 - 1e-9, "{min:?} {max:?}");
+    assert!(min.y <= 1e-9, "{min:?} {max:?}");
+    assert!(max.y >= 10.0 - 1e-9, "{min:?} {max:?}");
+
+    // Box selection classifies the rotated display, not the local grid.
+    let hit = crate::select_box::Rect::from_corners(p3(-3.5, -1.0, 0.0), p3(0.5, 11.0, 0.0));
+    assert!(crate::select_box::geometry_hits_rect(
+        &geometry, &identity, hit
+    ));
+    let miss = crate::select_box::Rect::from_corners(p3(20.0, 20.0, 0.0), p3(21.0, 21.0, 0.0));
+    assert!(!crate::select_box::geometry_hits_rect(
+        &geometry, &identity, miss
+    ));
+
+    // Drawing bounds are the rotated extent (text conservatively inflated).
+    let (app, _session) = table_app_with(rotated);
+    let (bounds_min, bounds_max) = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .bounds()
+        .expect("the rotated table has an extent");
+    assert!(bounds_min.x <= -3.0 + 1e-9, "{bounds_min:?}");
+    assert!(bounds_max.x >= 0.0 - 1e-9, "{bounds_max:?}");
+    assert!(bounds_min.y <= 1e-9, "{bounds_min:?}");
+    assert!(bounds_max.y >= 10.0 - 1e-9, "{bounds_max:?}");
 }

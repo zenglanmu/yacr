@@ -282,6 +282,145 @@ fn table_semantics_is_a_first_class_table_variant_with_text_and_borders() {
     );
 }
 
+// ---- PART 1c: cell text style/height and malformed data ----
+
+#[test]
+fn table_cell_style_height_and_name_are_read_from_the_cell_style() {
+    let acad = acadrust::CadDocument::new();
+    let req = make_request();
+    let builder = ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
+
+    let mut table = one_cell_table();
+    table.set_cell_text(0, 0, "x");
+    // The DXF reader stores group 140/7 on `cell.style`; the content keeps its
+    // own defaults (0.18 / ""), so reading the content first loses both values.
+    let mut style = acadrust::entities::CellStyle::new();
+    style.text_height = 5.0;
+    style.text_style_name = "MyStyle".into();
+    table.rows[0].cells[0].style = Some(style);
+
+    let (geometry, completeness) = builder.table_semantics(&table);
+    let SemanticGeometry::Table(table_geometry) = &geometry else {
+        panic!("expected a first-class Table, got {geometry:?}");
+    };
+    let cell = table_geometry.cell(0, 0).unwrap();
+    assert!((cell.text_height - 5.0).abs() < 1e-9, "{cell:?}");
+    assert_eq!(cell.style_name, "MyStyle");
+    assert_eq!(cell.font, None);
+    let reasons = partial_reasons(&completeness);
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason.contains("STYLE table") && reason.contains("kept by name only")),
+        "{reasons:?}"
+    );
+}
+
+#[test]
+fn a_zero_size_row_or_column_imports_and_stays_writable() {
+    let acad = acadrust::CadDocument::new();
+    let req = make_request();
+    let builder = ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
+
+    let mut table = acadrust::entities::Table::new(acadrust::types::Vector3::ZERO, 2, 2);
+    table.set_column_width(0, 0.0);
+    table.set_column_width(1, 4.0);
+    table.set_row_height(0, 0.0);
+    table.set_row_height(1, 3.0);
+    table.set_cell_text(1, 1, "x");
+
+    let (geometry, _) = builder.table_semantics(&table);
+    let SemanticGeometry::Table(table_geometry) = &geometry else {
+        panic!("expected a first-class Table, got {geometry:?}");
+    };
+    assert_eq!(table_geometry.texts(), vec!["x".to_string()]);
+    cad_db::validate_geometry(&geometry).expect("a zero-size row/column is writable");
+}
+
+#[test]
+fn a_huge_merge_span_is_clamped_before_iteration() {
+    let acad = acadrust::CadDocument::new();
+    let req = make_request();
+    let builder = ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
+
+    let mut table = acadrust::entities::Table::new(acadrust::types::Vector3::ZERO, 1, 2);
+    table.set_column_width(0, 2.0);
+    table.set_column_width(1, 3.0);
+    table.set_row_height(0, 1.0);
+    table.set_cell_text(0, 0, "x");
+    table.rows[0].cells[0].merge_width = 1_000_000;
+
+    let (geometry, _) = builder.table_semantics(&table);
+    let SemanticGeometry::Table(table_geometry) = &geometry else {
+        panic!("expected a first-class Table, got {geometry:?}");
+    };
+    assert_eq!(table_geometry.cell(0, 0).unwrap().merge_width, 2);
+    cad_db::validate_geometry(&geometry).expect("the clamped span is writable");
+}
+
+#[test]
+fn an_all_borders_hidden_table_still_displays_its_text() {
+    let acad = acadrust::CadDocument::new();
+    let req = make_request();
+    let builder = ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
+
+    let mut table = one_cell_table();
+    table.set_cell_text(0, 0, "x");
+    let mut style = acadrust::entities::CellStyle::new();
+    style.top_border.invisible = true;
+    style.right_border.invisible = true;
+    style.bottom_border.invisible = true;
+    style.left_border.invisible = true;
+    table.rows[0].cells[0].style = Some(style);
+
+    let (geometry, _) = builder.table_semantics(&table);
+    let SemanticGeometry::Table(table_geometry) = &geometry else {
+        panic!("expected a first-class Table, got {geometry:?}");
+    };
+    assert!(
+        table_geometry
+            .display()
+            .iter()
+            .all(|child| matches!(child, SemanticGeometry::Text { .. })),
+        "{:?}",
+        table_geometry.display()
+    );
+    assert_eq!(table_geometry.texts(), vec!["x".to_string()]);
+    cad_db::validate_geometry(&geometry).expect("text-only display is writable");
+}
+
+#[test]
+fn a_non_z_table_reports_world_xy_text() {
+    let acad = acadrust::CadDocument::new();
+    let req = make_request();
+    let builder = ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
+
+    let mut table = one_cell_table();
+    table.set_cell_text(0, 0, "x");
+    table.normal = acadrust::types::Vector3::new(0.0, 0.6, 0.8);
+
+    let (geometry, completeness) = builder.table_semantics(&table);
+    let SemanticGeometry::Table(table_geometry) = &geometry else {
+        panic!("expected a first-class Table, got {geometry:?}");
+    };
+    let text = table_geometry
+        .display()
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Text { rotation, .. } => Some(*rotation),
+            _ => None,
+        })
+        .expect("cell text");
+    assert!(text.abs() < 1e-12, "tilted-plane text is drawn in world XY");
+    let reasons = partial_reasons(&completeness);
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason.contains("not +Z") && reason.contains("world XY")),
+        "{reasons:?}"
+    );
+}
+
 // ---- PART 2: non-proxy Extended entities ----
 
 fn extended(data: ExtendedEntityData) -> ExtendedEntity {

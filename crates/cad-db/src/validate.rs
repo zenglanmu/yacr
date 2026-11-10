@@ -430,10 +430,15 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             if !finite(frame.origin) || !finite(frame.horizontal) || !finite(frame.normal) {
                 return Err(degenerate("table plane frame is non-finite"));
             }
-            if length(frame.horizontal) < MIN_GEOMETRY_EXTENT
-                || length(frame.normal) < MIN_GEOMETRY_EXTENT
+            // The domain builders store unit directions; a stored non-unit frame
+            // would make the derived vertical a different length than the grid
+            // assumes, so require unit length here too.
+            if (length(frame.horizontal) - 1.0).abs() > 1e-6
+                || (length(frame.normal) - 1.0).abs() > 1e-6
             {
-                return Err(degenerate("table plane frame is degenerate"));
+                return Err(degenerate(
+                    "table plane frame directions must be unit length",
+                ));
             }
             if table.columns().is_empty() || table.rows().is_empty() {
                 return Err(degenerate("table has no rows or columns"));
@@ -474,10 +479,43 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                     {
                         return Err(degenerate("table border spacing is non-finite"));
                     }
+                    if cell.borders.top.double_spacing < 0.0
+                        || cell.borders.right.double_spacing < 0.0
+                        || cell.borders.bottom.double_spacing < 0.0
+                        || cell.borders.left.double_spacing < 0.0
+                    {
+                        return Err(degenerate(
+                            "table border double-line spacing must be non-negative",
+                        ));
+                    }
                     if !cell.text_height.is_finite() || cell.text_height <= 0.0 {
                         return Err(degenerate(
                             "table cell text height must be positive and finite",
                         ));
+                    }
+                }
+            }
+            // Merge coverage must be deterministic and non-overlapping. A cell
+            // already inside an earlier anchor is a covered cell (skipped); an
+            // anchor whose range reaches an already-covered cell is an overlap
+            // and is rejected rather than silently given a precedence.
+            let column_count = table.columns().len();
+            let mut covered = vec![vec![false; column_count]; table.rows().len()];
+            for (row_index, row) in table.rows().iter().enumerate() {
+                for (column_index, cell) in row.cells.iter().enumerate() {
+                    if covered[row_index][column_index] {
+                        continue;
+                    }
+                    let span_w = cell.merge_width.max(1) as usize;
+                    let span_h = cell.merge_height.max(1) as usize;
+                    for dr in 0..span_h {
+                        for dc in 0..span_w {
+                            let (r, c) = (row_index + dr, column_index + dc);
+                            if covered[r][c] {
+                                return Err(degenerate("table merge ranges overlap"));
+                            }
+                            covered[r][c] = true;
+                        }
                     }
                 }
             }

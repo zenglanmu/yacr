@@ -9,27 +9,36 @@
 //!
 //! Honest deviations (always `Converted`, never `Exact`):
 //!
-//! * the `TABLESTYLE` object is not written (the model keeps only its name), so
-//!   the table style record/definition is lost;
+//! * neither the `TABLESTYLE` object nor the table style name is written (the
+//!   model keeps only a name), so re-import uses the Standard style instead of
+//!   the source name;
 //! * block content and FIELD references are not representable (the model keeps
 //!   only the first content's text), so they are not written;
 //! * per-cell border colours, lineweights, line types and background fills are
 //!   lost (one colour per entity), and the DXF writer carries no double-line
 //!   border spacing, so a doubled edge is written as a single visible edge.
+//!
+//! A block-embedded table is written at its placed coordinates: the accumulated
+//! INSERT transform is applied through [`cad_db::transform_geometry`]
+//! (translation + rotation + uniform scale), and a placement this grid cannot
+//! represent (a tilt, mirror, or non-uniform scale) is recorded as a named
+//! `Dropped` reason rather than written at block-local coordinates.
 
 use acadrust::entities::{CellStyle, EntityType, Table as AcadTable, TableCell};
 use acadrust::CadDocument;
-use cad_db::DbEntity;
+use cad_db::{transform_geometry, DbEntity};
 use cad_domain::*;
 
 use super::common::{common_for, v3};
-use super::entity::{EntityContext, ExportAccumulator};
+use super::entity::{kind_name, EntityContext, ExportAccumulator};
 use super::report::MappingOutcome;
 use super::tables::ensure_text_style;
 
-/// Named conversion reason: the `TABLESTYLE` record is not written.
+/// Named conversion reason: neither the `TABLESTYLE` object nor its name is
+/// written.
 const REASON_STYLE_OBJECT: &str =
-    "the TABLESTYLE object is not written; only the table style name is preserved";
+    "the TABLESTYLE object is not written; the table style name is also not written, so re-import \
+     uses the Standard style";
 /// Named conversion reason: block content / fields have no representation.
 const REASON_CONTENT_KINDS: &str =
     "cell block content and FIELD references are not representable; only the first content's \
@@ -51,9 +60,44 @@ pub(super) fn emit_table(
     doc: &mut CadDocument,
     entity: &DbEntity,
     table: &TableGeometry,
+    transform: &Transform3,
     ctx: &EntityContext,
     acc: &mut ExportAccumulator,
 ) -> CadResult<()> {
+    let placed;
+    let table: &TableGeometry = if transform == &Transform3::identity() {
+        table
+    } else {
+        match transform_geometry(&SemanticGeometry::Table(Box::new(table.clone())), transform) {
+            Ok(SemanticGeometry::Table(placed_table)) => {
+                placed = *placed_table;
+                &placed
+            }
+            // `transform_geometry` only ever returns the same variant it was
+            // given; this arm is defensive and never reached.
+            Ok(_) => {
+                acc.record(
+                    Some(entity.object.id),
+                    "transform",
+                    MappingOutcome::Dropped(vec![
+                        "table transform returned a different geometry variant".to_string(),
+                    ]),
+                );
+                return Ok(());
+            }
+            Err(error) => {
+                acc.record(
+                    Some(entity.object.id),
+                    "transform",
+                    MappingOutcome::Dropped(vec![format!(
+                        "cannot place {} under an insert transform: {error}",
+                        kind_name(&SemanticGeometry::Table(Box::new(table.clone())))
+                    )]),
+                );
+                return Ok(());
+            }
+        }
+    };
     let object = Some(entity.object.id);
     let rows = table.rows().len().max(1);
     let columns = table.columns().len().max(1);
@@ -89,16 +133,32 @@ pub(super) fn emit_table(
     // Keep the header's merged-range list consistent with the cells' spans.
     out.sync_merged_ranges_from_cells();
 
-    // The cell text style must exist so group 7/340 resolve on re-import.
+    // Every distinct cell text style must exist so group 7/340 resolve on
+    // re-import. Collect first (one entry per distinct name), then ensure each
+    // exactly once: the previous nested `break` only left the inner loop and
+    // registered at most one style per row.
+    let mut styles: std::collections::BTreeMap<String, Option<String>> =
+        std::collections::BTreeMap::new();
     for row in table.rows() {
         for cell in &row.cells {
             if cell.style_name.is_empty() {
                 continue;
             }
-            let (_name, notes) = ensure_text_style(doc, &cell.style_name, cell.font.as_deref());
-            reasons.extend(notes);
-            break;
+            match styles.get_mut(&cell.style_name) {
+                Some(font) => {
+                    if font.is_none() {
+                        *font = cell.font.clone();
+                    }
+                }
+                None => {
+                    styles.insert(cell.style_name.clone(), cell.font.clone());
+                }
+            }
         }
+    }
+    for (name, font) in &styles {
+        let (_name, notes) = ensure_text_style(doc, name, font.as_deref());
+        reasons.extend(notes);
     }
 
     acc.push(EntityType::Table(Box::new(out)), ctx)?;
