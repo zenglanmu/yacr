@@ -155,13 +155,14 @@ fn typed_imageclip_reaches_the_command_layer_and_refuses_no_selection() {
 #[test]
 fn malformed_image_arguments_are_refused_before_dispatch() {
     let session = fresh_session();
-    for line in [
-        "IMAGEATTACH logo.png 0 0 1 1",
-        "IMAGEATTACH logo.png 0 0 1 1 1 2",
-        "IMAGECLIP 0 0 1",
-        "IMAGECLIP NONE",
+    for (line, code) in [
+        ("IMAGEATTACH logo.png 0 0 1 1", "imageattach.argument"),
+        ("IMAGEATTACH logo.png 0 0 1 1 1 2", "imageattach.argument"),
+        ("IMAGECLIP 0 0 1", "imageclip.argument"),
+        ("IMAGECLIP NONE", "imageclip.argument"),
     ] {
         let error = session.command(line).expect_err(line);
-        assert!(error.contains("unsupported CAD command"), "{line}: {error}");
+        assert!(error.starts_with(code), "{line}: {error}");
+        assert!(error.contains("nothing was changed"), "{line}: {error}");
     }
 }

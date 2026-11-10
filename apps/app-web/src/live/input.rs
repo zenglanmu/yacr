@@ -231,6 +231,8 @@ impl Live {
 
     /// Run one CAD command line through the real router.
     pub fn command(&mut self, text: &str) -> Result<(), Failure> {
+        crate::platform::check_image_command(text)
+            .map_err(|message| Failure::new(STEP_INPUT, message))?;
         self.close_pan_inputs();
         self.session
             .command(text)

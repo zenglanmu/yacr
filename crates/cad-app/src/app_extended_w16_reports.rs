@@ -44,6 +44,7 @@ impl Application {
         let mut count = 0usize;
         let mut model = 0usize;
         let mut paper = 0usize;
+        let mut block = 0usize;
         for entity in drawing.entities() {
             let SemanticGeometry::Image {
                 origin,
@@ -60,7 +61,7 @@ impl Application {
             match entity.space {
                 SpaceId::Model => model += 1,
                 SpaceId::Paper(_) => paper += 1,
-                SpaceId::Block(_) => {}
+                SpaceId::Block(_) => block += 1,
             }
             diagnostics.push(Diagnostic {
                 object: Some(ObjectId(entity.id.0)),
@@ -94,8 +95,8 @@ impl Application {
             diagnostics.push(diagnostic(
                 report.summary_code(),
                 format!(
-                    "{}: {count} raster image(s) reported (model {model}, paper {paper}); \
-                     this is a read-only report and nothing was written",
+                    "{}: {count} raster image(s) reported (model {model}, paper {paper}, \
+                     block {block}); this is a read-only report and nothing was written",
                     report.selector()
                 ),
             ));

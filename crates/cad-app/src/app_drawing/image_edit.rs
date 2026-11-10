@@ -15,7 +15,7 @@
 //! Stable refusal codes:
 //!
 //! * `imageattach.payload` / `.unsafe_reference` / `.invalid_origin` /
-//!   `.invalid_pixels` / `.invalid_units_per_pixel`;
+//!   `.invalid_pixels` / `.invalid_units_per_pixel` / `.invalid_extent`;
 //! * `imageclip.payload` / `.no_selection` / `.multiple` / `.not_image` /
 //!   `.invalid_rect`.
 //!
@@ -109,6 +109,20 @@ impl Application {
                 ),
             ));
         }
+        // The world-space extent is `pixels * units_per_pixel`; both products
+        // must stay finite or the frame/basis has no representable extent.
+        let width = pixels[0] * units_per_pixel;
+        let height = pixels[1] * units_per_pixel;
+        if !width.is_finite() || !height.is_finite() {
+            return Err(image_refusal(
+                "imageattach.invalid_extent",
+                format!(
+                    "the world-space extent {} x {} (pixels x units_per_pixel) is not \
+                     finite; reduce the pixel size or units per pixel",
+                    pixels[0], pixels[1]
+                ),
+            ));
+        }
         let stored_key = key.0;
         let geometry = SemanticGeometry::Image {
             origin: *origin,
@@ -127,16 +141,15 @@ impl Application {
             clip: None,
             visible: true,
         };
-        let width = pixels[0] * units_per_pixel;
-        let height = pixels[1] * units_per_pixel;
         let mut outcome = self.commit_new_entity(session, command, geometry, "attach image")?;
         outcome.diagnostics.push(Diagnostic {
             object: outcome.objects.first().copied(),
             code: "imageattach.created".into(),
             message: format!(
                 "IMAGEATTACH: attached `{stored_key}` as {} x {} px at ({}, {}, {}); \
-                 extent {} x {} world units ({} per pixel); the texture resolves host-side \
-                 from the drawing directory",
+                 extent {} x {} world units ({} per pixel); the texture is resolved from \
+                 the drawing directory by the host, which reloads image resources after \
+                 this command (unresolved keys appear in the host image report)",
                 pixels[0], pixels[1], origin.x, origin.y, origin.z, width, height, units_per_pixel
             ),
         });

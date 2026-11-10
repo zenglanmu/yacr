@@ -120,9 +120,16 @@ pub struct Bounds3 {
 }
 /// Clip boundary of a raster `IMAGE`, in the image's own pixel coordinate space.
 ///
-/// `vertices` is a closed polygon; `inside` mirrors DXF clip_mode: `true` keeps
-/// the region inside the boundary, `false` keeps the region outside it (which is
-/// what a WIPEOUT-style inverted mask expresses).
+/// `vertices` is a polygon and may be open or closed (a repeated final vertex is
+/// dropped). **Exactly two vertices** are read as opposite corners of a
+/// rectangle; `inside` defaults to `true` for that form. Three or more vertices
+/// are taken as the polygon directly. `inside` mirrors DXF clip_mode: `true`
+/// keeps the region inside the boundary, `false` keeps the region outside it
+/// (which is what a WIPEOUT-style inverted mask expresses).
+///
+/// Coordinates are pixel-space: X runs along the image's `u` edge and Y along
+/// `v`, with `y = 0` at the **bottom** image edge (bottom-up, matching the
+/// texture's `v = 0`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageClip {
     pub vertices: Vec<[f64; 2]>,

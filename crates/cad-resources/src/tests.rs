@@ -54,6 +54,13 @@ fn image_key_preserves_the_relative_path_and_avoids_bare_name_collisions() {
         image_resource_key("./nested/Logo.PNG").unwrap().as_str(),
         "nested/logo.png"
     );
+    // Empty and `.` segments are canonicalised away, never kept verbatim.
+    assert_eq!(
+        image_resource_key("a//./Textures/./Logo.PNG")
+            .unwrap()
+            .as_str(),
+        "a/textures/logo.png"
+    );
 
     // Empty and unsafe references produce no key at all.
     for unsafe_reference in [
@@ -65,6 +72,7 @@ fn image_key_preserves_the_relative_path_and_avoids_bare_name_collisions() {
         "/etc/passwd",
         "C:\\logo.png",
         "http://example.com/logo.png",
+        "a/\u{1}b.png",
     ] {
         assert_eq!(
             image_resource_key(unsafe_reference),

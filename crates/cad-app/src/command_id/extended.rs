@@ -921,14 +921,15 @@ pub enum ExtendedCommandId {
     /// `MESHUNCREASE`: mesh uncreasing is not implemented.
     MeshUncrease,
 
-    // Wave 16: stable named refusals (Viewer-legal).
-    /// `IMAGE`: raster image references are not implemented.
+    // Wave 16: image report/write (see app_extended_w16_reports /
+    // app_drawing::image_edit) plus its named refusals (Viewer-legal).
+    /// `IMAGE`: read-only report of every stored raster image (writes nothing).
     Image,
-    /// `-IMAGE`: raster image references are not implemented.
+    /// `-IMAGE`: the same read-only raster-image report with dash codes.
     DashImage,
-    /// `IMAGEATTACH`: raster image references are not implemented.
+    /// `IMAGEATTACH`: writes one raster image entity (Work-only).
     ImageAttach,
-    /// `IMAGECLIP`: no image clip model.
+    /// `IMAGECLIP`: writes the selected image's pixel-space clip (Work-only).
     ImageClip,
     /// `IMAGEADJUST`: no image adjustment model.
     ImageAdjust,

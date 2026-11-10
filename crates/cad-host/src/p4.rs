@@ -232,6 +232,13 @@ impl HostCore {
             if let Err(error) = self.ensure_fonts_for_text() {
                 self.note_post_commit_error(&error);
             }
+            // A committed edit may have added/removed/retargeted a raster image
+            // (IMAGEATTACH, ERASE, UNDO). The open funnel installed the cache
+            // once; reinstall only when the referenced key set actually changed,
+            // so an unchanged drawing never re-decodes on every command.
+            if let Err(error) = self.sync_images_if_changed() {
+                self.note_post_commit_error(&error);
+            }
         }
         events.extend(self.changed_events());
         let post = self.trace_state();

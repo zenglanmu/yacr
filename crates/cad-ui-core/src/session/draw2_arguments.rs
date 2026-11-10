@@ -29,11 +29,16 @@ pub fn invalid_draw2_argument_reason(selector: &str, text: &str) -> String {
 
 /// The stable refusal for an `IMAGEATTACH` / `IMAGECLIP` argument outside the
 /// documented grammar.
-pub(crate) fn invalid_image_argument_reason(text: &str) -> String {
+pub(crate) fn invalid_image_argument_reason(selector: &str, text: &str) -> String {
+    let code = if selector == IMAGEATTACH_SELECTOR {
+        "imageattach.argument"
+    } else {
+        "imageclip.argument"
+    };
     format!(
-        "unsupported CAD command: {} (the typed forms are `IMAGEATTACH <file> <x> <y> \
-         <width_px> <height_px> <units_per_pixel>` and `IMAGECLIP <minx> <miny> <maxx> \
-         <maxy>` or `IMAGECLIP OFF`); nothing was changed",
+        "{code}: unsupported or malformed {selector} argument in `{}`: the typed forms are \
+         `IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>` and \
+         `IMAGECLIP <minx> <miny> <maxx> <maxy>` or `IMAGECLIP OFF`; nothing was changed",
         text.trim()
     )
 }
@@ -126,7 +131,7 @@ impl CadSession {
     ) -> Result<(), String> {
         let (id, payload) = if selector == IMAGEATTACH_SELECTOR {
             let Some(payload) = parse_imageattach_argument(argument) else {
-                return self.refuse_argument(invalid_image_argument_reason(text));
+                return self.refuse_argument(invalid_image_argument_reason(selector, text));
             };
             (
                 CommandId::Extended(ExtendedCommandId::ImageAttach),
@@ -134,7 +139,7 @@ impl CadSession {
             )
         } else {
             let Some(payload) = parse_imageclip_argument(argument) else {
-                return self.refuse_argument(invalid_image_argument_reason(text));
+                return self.refuse_argument(invalid_image_argument_reason(selector, text));
             };
             (
                 CommandId::Extended(ExtendedCommandId::ImageClip),

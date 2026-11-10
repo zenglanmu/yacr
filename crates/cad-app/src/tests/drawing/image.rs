@@ -247,6 +247,11 @@ fn imageattach_refusals_write_nothing() {
             attach_payload("logo.png", point(0.0, 0.0), [1.0, 1.0], f64::INFINITY),
             "imageattach.invalid_units_per_pixel",
         ),
+        (
+            // finite operands whose product overflows: no representable extent.
+            attach_payload("logo.png", point(0.0, 0.0), [f64::MAX, 1.0], 2.0),
+            "imageattach.invalid_extent",
+        ),
     ] {
         let error = execute(
             &mut app,
@@ -652,6 +657,93 @@ fn image_report_lists_model_and_paper_images_and_writes_nothing() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "-image.report"));
+}
+
+#[test]
+fn image_report_counts_images_inside_block_definitions() {
+    // One image inside a block definition: the summary must add up
+    // (model 0 + paper 0 + block 1 == 1), never silently skip Block.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(DbEntity {
+        object: DbObject {
+            id: ObjectId(91),
+            type_key: "AcDbRasterImage".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(91),
+        layer: LayerId(0),
+        space: SpaceId::Block(BlockId(4)),
+        geometry: SemanticGeometry::Image {
+            origin: p3(0.0, 0.0, 0.0),
+            u: p3(1.0, 0.0, 0.0),
+            v: p3(0.0, 1.0, 0.0),
+            pixels: [8.0, 8.0],
+            file: Some("block.png".into()),
+            clip: None,
+            visible: true,
+        },
+        draw_order: 0,
+    })
+    .unwrap();
+    b.insert_block(BlockDefinition {
+        id: BlockId(4),
+        entities: vec![EntityId(91)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    b.set_block_metadata(BlockId(4), "STAMP", p3(0.0, 0.0, 0.0))
+        .unwrap();
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([79u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    let mut session = SessionState::new(DocumentId(1), AppMode::Viewer);
+    session.active_layer = LayerId(0);
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Image),
+        CommandPayload::None,
+    )
+    .unwrap();
+    let entry = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "image.entry")
+        .expect("the block image is listed");
+    assert!(entry.message.contains("Block(4)"), "{}", entry.message);
+    let summary = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "image.report")
+        .expect("image.report");
+    assert!(
+        summary
+            .message
+            .contains("1 raster image(s) reported (model 0, paper 0, block 1)"),
+        "{}",
+        summary.message
+    );
 }
 
 #[test]

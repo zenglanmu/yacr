@@ -155,6 +155,7 @@ impl AdmissionTarget for DirectSink<'_> {
     }
 
     fn command(&mut self, normalized: String) -> Result<(), String> {
+        crate::platform::check_image_command(&normalized)?;
         let outcome = self.session.command(&normalized);
         self.applied(outcome)
     }

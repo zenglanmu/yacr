@@ -35,7 +35,11 @@
 //! package the open funnel reports a non-fatal `fonts.failed` status and the text
 //! is honestly unshaped, and any later step that needs shaping
 //! (`ensure_fonts_for_text` on the first created text entity) refuses explicitly.
-//! Images are not decoded at all.
+//! Images are not decoded at all. The carrier therefore also refuses an
+//! `IMAGEATTACH`/`IMAGECLIP` **command** with the stable
+//! [`UNSUPPORTED_IMAGES`]/[`IMAGE_COMMAND_UNSUPPORTED`] pair (see
+//! [`check_image_command`]): accepting one would write an entity the canvas
+//! cannot render. Native carriers keep the shared `image_edit` path.
 //!
 //! ## What is wired, and what is not
 //!
@@ -73,6 +77,36 @@ pub const UNSUPPORTED_FILESYSTEM: &str = "unsupported-filesystem";
 
 /// Stable prefix of the resource refusal (shaping fonts / raster images).
 pub const UNSUPPORTED_RESOURCES: &str = "unsupported-resources";
+
+/// Stable prefix of the browser carrier's raster-image **command** refusal.
+///
+/// The carrier deliberately has no image decoder, so it must never accept an
+/// `IMAGEATTACH`/`IMAGECLIP` that would write an entity the canvas cannot
+/// render (a frame-only image with the diagnostic dropped on the floor).
+pub const UNSUPPORTED_IMAGES: &str = "unsupported-runtime: images";
+
+/// The named refusal following [`UNSUPPORTED_IMAGES`] for an image edit command.
+pub const IMAGE_COMMAND_UNSUPPORTED: &str =
+    "imageattach.unsupported: this carrier has no image decoder";
+
+/// Refuse an `IMAGEATTACH` / `IMAGECLIP` command line on this carrier.
+///
+/// Both the bare selectors and their typed `SELECTOR <argument>` forms are
+/// matched through the shared router tables, so an alias or a differently cased
+/// name cannot slip past. `Ok(())` for every other command (the shared router
+/// remains the authority for names it does not admit). Native carriers keep the
+/// shared `image_edit` path; only this no-decoder carrier refuses here.
+pub fn check_image_command(command: &str) -> Result<(), String> {
+    let is_image = match cad_ui_core::session::canonical_command_name(command) {
+        Some(name) => matches!(name, "IMAGEATTACH" | "IMAGECLIP"),
+        None => cad_ui_core::session::typed_command_argument(command)
+            .is_some_and(|(selector, _)| matches!(selector, "IMAGEATTACH" | "IMAGECLIP")),
+    };
+    if is_image {
+        return Err(format!("{UNSUPPORTED_IMAGES}: {IMAGE_COMMAND_UNSUPPORTED}"));
+    }
+    Ok(())
+}
 
 /// Display path reported for the in-memory config / preference (never a real
 /// file — it exists so a diagnostic can name *where* a value came from).

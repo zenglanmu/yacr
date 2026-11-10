@@ -103,6 +103,93 @@ fn image_with_a_rectangular_clip_maps_the_visible_polygon() {
 }
 
 #[test]
+fn a_clip_partly_outside_the_image_is_intersected_with_the_image_rect() {
+    let registry = ProviderRegistry::with_default_provider();
+    // `(-1,-1)..(1,1)` on a 2x3-pixel image: the image rectangle is the
+    // intersection, so the emitted polygon is exactly `(0,0)..(1,1)` — no
+    // out-of-image UV that the ClampToEdge sampler would smear.
+    let clip = ImageClip {
+        vertices: vec![[-1.0, -1.0], [1.0, 1.0]],
+        inside: true,
+    };
+    let e = image_entity_with_clip(15, Some("clip.png"), Some(clip));
+    let ctx = image_context(&[("clip.png", white_pixel())]);
+    let r = registry.build(&e, &ctx).unwrap();
+    assert_eq!(r.completeness, Completeness::Complete);
+    let DisplayPrimitive::Image { clip, .. } = &r.fragments[0].primitive else {
+        panic!("expected an image primitive");
+    };
+    let polygon = clip.as_ref().expect("the clipped rect is representable");
+    assert_eq!(polygon.len(), 4);
+    let expected = [
+        (p(1.0, 2.0), [0.0, 0.0]),
+        (p(2.0, 2.0), [0.5, 0.0]),
+        (p(2.0, 3.0), [0.5, 1.0 / 3.0]),
+        (p(1.0, 3.0), [0.0, 1.0 / 3.0]),
+    ];
+    for (vertex, (position, uv)) in polygon.iter().zip(expected) {
+        assert_point_eq(vertex.position, position);
+        assert!((vertex.uv[0] - uv[0]).abs() < 1e-9 && (vertex.uv[1] - uv[1]).abs() < 1e-9);
+        assert!((0.0..=1.0).contains(&vertex.uv[0]));
+        assert!((0.0..=1.0).contains(&vertex.uv[1]));
+    }
+}
+
+#[test]
+fn a_clip_fully_outside_the_image_reports_unsupported_and_draws_the_frame() {
+    let registry = ProviderRegistry::with_default_provider();
+    let clip = ImageClip {
+        vertices: vec![[5.0, 5.0], [6.0, 6.0]],
+        inside: true,
+    };
+    let e = image_entity_with_clip(16, Some("clip.png"), Some(clip));
+    let ctx = image_context(&[("clip.png", white_pixel())]);
+    let r = registry.build(&e, &ctx).unwrap();
+    assert!(
+        r.fragments
+            .iter()
+            .all(|f| !matches!(&f.primitive, DisplayPrimitive::Image { .. })),
+        "a fully clipped-away rect must not draw stretched edge texels"
+    );
+    assert!(matches!(
+        &r.fragments[0].primitive,
+        DisplayPrimitive::Lines(_)
+    ));
+    assert!(r
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "image.clip_unsupported"));
+    assert!(matches!(r.completeness, Completeness::Partial(_)));
+}
+
+#[test]
+fn an_inside_clip_rect_is_unchanged_by_the_image_intersection() {
+    let registry = ProviderRegistry::with_default_provider();
+    let clip = ImageClip {
+        vertices: vec![[0.5, 0.5], [1.5, 2.5]],
+        inside: true,
+    };
+    let e = image_entity_with_clip(17, Some("clip.png"), Some(clip));
+    let ctx = image_context(&[("clip.png", white_pixel())]);
+    let r = registry.build(&e, &ctx).unwrap();
+    let DisplayPrimitive::Image { clip, .. } = &r.fragments[0].primitive else {
+        panic!("expected an image primitive");
+    };
+    let polygon = clip.as_ref().expect("an inside rect is representable");
+    let expected = [
+        (p(1.5, 2.5), [0.25, 0.5 / 3.0]),
+        (p(2.5, 2.5), [0.75, 0.5 / 3.0]),
+        (p(2.5, 4.5), [0.75, 2.5 / 3.0]),
+        (p(1.5, 4.5), [0.25, 2.5 / 3.0]),
+    ];
+    assert_eq!(polygon.len(), 4);
+    for (vertex, (position, uv)) in polygon.iter().zip(expected) {
+        assert_point_eq(vertex.position, position);
+        assert!((vertex.uv[0] - uv[0]).abs() < 1e-9 && (vertex.uv[1] - uv[1]).abs() < 1e-9);
+    }
+}
+
+#[test]
 fn image_with_a_closed_polygon_clip_drops_the_repeated_vertex() {
     let registry = ProviderRegistry::with_default_provider();
     let clip = ImageClip {

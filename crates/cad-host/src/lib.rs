@@ -208,6 +208,7 @@ impl HostCore {
             source_target: Rc::new(RefCell::new(None)),
             last_status: Rc::new(RefCell::new(None)),
             last_image_report: Rc::new(RefCell::new(None)),
+            last_image_keys: Rc::new(RefCell::new(std::collections::BTreeSet::new())),
             last_font_report: Rc::new(RefCell::new(None)),
             engine_font_report: Rc::new(RefCell::new(None)),
             sync_terminal: Rc::new(RefCell::new(None)),
@@ -368,6 +369,10 @@ impl HostCore {
             // The engine-scoped copy is kept: a reused engine republishes the
             // faces it actually loaded on the next install.
             self.clear_document_font_report();
+            // The image-key set belongs to the replaced drawing: the next
+            // committed edit must re-evaluate it instead of comparing against
+            // another document's keys.
+            self.last_image_keys.borrow_mut().clear();
             // The command echo belongs to one drawing: a verified replacement
             // (open/new) clears it so no entry from another drawing survives.
             // The sequence counter is kept monotonic across the clear.
