@@ -303,9 +303,18 @@ def check_ui_bundle_wiring() -> list[str]:
         problems.append("apps/app-android/package.json: the 'tauri' script is required (Gradle calls `npm run tauri …`)")
 
     script = read(UI_SCRIPT)
-    for fragment in ("apps/app-android/dist", "build-canvas-wasm.sh", "build:android", "app_web_bg.wasm"):
+    for fragment in ("apps/app-android/dist", "build:android", "no wasm session on this carrier"):
         if fragment not in script:
             problems.append(f"scripts/build-android-ui.sh: must keep '{fragment}'")
+    # Android is `native-below` (ADR 0027): the bundle must not carry or build the
+    # wasm `dom-canvas` session. Dropping this guard would silently put a large
+    # unused blob back into every APK.
+    for forbidden in ("build-canvas-wasm.sh", "app_web_bg.wasm"):
+        if forbidden in script:
+            problems.append(
+                f"scripts/build-android-ui.sh: must not reference '{forbidden}' "
+                "(the Android carrier is native; the wasm session is not bundled)"
+            )
     return problems
 
 

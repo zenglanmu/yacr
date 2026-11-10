@@ -13,9 +13,11 @@
 - **唯一 CAD 权威 = 原生 `CadSession`**：`cad_ui_core::session::CadSession` 持有 `cad-db`、命令/事务与
   显示表示；渲染由 `cad-render-wgpu` 在原生 `SurfaceView` 上完成。宿主上报
   `surfaceMode: "native-below"`、`documentOwner: "native"`（ADR 0027）。
-- **wasm 会话不运行**：`apps/desktop-ui` 的 `dom-canvas` transport effect 以
-  `surfaceMode === 'dom-canvas'` 为门，Android 不会加载 `/canvas/*`。native 壳**不**实例化第二份文档
-  状态、**不**把 native 显示表示当作 wasm 数据源（铁律 8）。
+- **wasm 会话不运行、也不打包**：`apps/desktop-ui` 的 `dom-canvas` transport effect 以
+  `surfaceMode === 'dom-canvas'` 为门，Android 不会加载 `/canvas/*`；`scripts/build-android-ui.sh`
+  因此在构建前删除 `apps/desktop-ui/public/canvas/` 并断言 `apps/app-android/dist` 没有 `canvas/`，
+  APK 不携带 wasm 产物。native 壳**不**实例化第二份文档状态、**不**把 native 显示表示当作 wasm
+  数据源（铁律 8）。
 - **React chrome 是同一棵树**：`apps/desktop-ui` 用 `YACR_RUNTIME=android` 构建，`native-below` 上渲染
   `.native-input`（单一输入漏斗）与**没有** DOM `<canvas>`。
 - **命令集共享**：`cad_desktop_shell::commands::register_commands()`（共享 `generate_handler!` 注册表）
@@ -29,8 +31,8 @@
   不再靠「哪些键存在」推断。
 - `app.windows` **必须**有一条窗口配置：`tauri::app::setup` 从 `app.windows` 创建移动 WebView，
   空数组合法但会**什么都不显示**（这是与桌面 `app.windows: []` + 手建窗口的区别）。
-- CSP 为 `script-src 'self' 'wasm-unsafe-eval' blob:`（bundle 仍包含 wasm 产物；`blob:` 用于
-  插件管理器导入用户安装/校验的 ES module）与
+- CSP 为 `script-src 'self' 'wasm-unsafe-eval' blob:`（`blob:` 用于插件管理器导入用户安装/校验的
+  ES module；APK 已不携带 wasm 会话产物，`'wasm-unsafe-eval'` 为保守保留）与
   `connect-src 'self' ipc: http://ipc.localhost`（Tauri IPC）。
 
 ## 2. 事件、状态与命令语义

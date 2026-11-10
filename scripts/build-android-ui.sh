@@ -4,18 +4,16 @@
 # `apps/desktop-ui` is one React tree for every host (AGENTS.md). For Android it
 # is built once more with the runtime switched to `android` (`YACR_RUNTIME=android`,
 # injected by `vite.config.mjs`): the page runs inside the Tauri WebView, the Tauri
-# IPC bridge **is** present, and `src/host/invoke.ts` routes the two shell-only
-# canvas reports to Tauri while every CAD command goes to the wasm `dom-canvas`
-# session (ADR 0024, iron rule 8).
+# IPC bridge **is** present, and `src/host/invoke.ts` routes every CAD command to
+# the native `CadSession` over that bridge; this carrier is `native-below`
+# (ADR 0027), not the wasm `dom-canvas` session.
 #
 # What this script produces (all **generated**, git-ignored):
 #
-#   apps/desktop-ui/public/canvas/   the wasm session artifacts, via
-#                                    `scripts/build-canvas-wasm.sh`
-#                                    (`app_web.js`, `app_web_bg.wasm`,
-#                                    `bootstrap.js`)
 #   apps/app-android/dist/           the chrome bundle: `index.html`, `assets/*`,
-#                                    and a verbatim copy of `canvas/`
+#                                    and **no `canvas/` wasm**: this carrier is
+#                                    `native-below` (ADR 0027) and never
+#                                    instantiates the wasm session
 #   apps/app-android/font-assets/    the CAD font package every host ships:
 #                                    `fonts.json`, the face files, and the
 #                                    committed license texts
@@ -35,16 +33,15 @@
 #   * it never skips silently — a missing `node_modules`, a missing build entry
 #     point, a missing/empty artifact or a failed font package is a loud non-zero
 #     exit;
-#   * it asserts the artifacts the WebView needs (the chrome bundle, the wasm
-#     module, the wasm binary, at least one emitted JS asset), so a bundle that
-#     would load a blank page is never reported as a success;
+#   * it asserts the artifacts the WebView needs (the chrome bundle and at least
+#     one emitted JS asset), so a bundle that would load a blank page is never
+#     reported as a success;
 #   * it asserts the font package the native loader needs (`fonts.json` plus at
 #     least one face), so an APK that would start without fonts is not a success;
-#   * it never substitutes a stub for the wasm session and never fabricates a
+#   * it never substitutes a stub for the native session and never fabricates a
 #     command answer;
-#   * network: the wasm build is `--locked`, the UI build reuses the checked-in
-#     `package-lock.json` install already on disk, and **fonts are the one networked
-#     step by default** (`WITH_FONTS=1` downloads the full mlightcad catalogue via
+#   * network: the UI build reuses the checked-in `package-lock.json` install
+#     already on disk, and **fonts are the one networked step by default** (`WITH_FONTS=1` downloads the full mlightcad catalogue via
 #     `scripts/fetch-fonts.sh`). `WITH_FONTS=0` stages the committed `fonts/` only
 #     (offline) and `FONTS_DIR=<dir>` reuses a prepared package without downloading;
 #   * a successful build is **artifact evidence only** — not runtime, device, GPU
@@ -54,8 +51,6 @@
 #   bash scripts/build-android-ui.sh
 #
 # Environment:
-#   CARGO        cargo binary to use (passed through to the wasm build)
-#   WASM_BINDGEN wasm-bindgen binary to use (passed through to the wasm build)
 #   NPM          npm binary to use (default: `npm` on PATH)
 #   WITH_FONTS   1 (default) full mlightcad catalogue (network) |
 #                0 committed `fonts/` only (offline)
@@ -72,9 +67,6 @@ YACR_SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 readonly UI_DIR="$REPO_ROOT/apps/desktop-ui"
 readonly OUT_DIR="$REPO_ROOT/apps/app-android/dist"
 readonly FONT_ASSETS="$REPO_ROOT/apps/app-android/font-assets"
-readonly ESM_JS="app_web.js"
-readonly WASM_ARTIFACT="app_web_bg.wasm"
-readonly BOOTSTRAP_JS="bootstrap.js"
 readonly NPM_BIN="${NPM:-npm}"
 
 export YACR_REPO_ROOT="$REPO_ROOT"
@@ -110,15 +102,17 @@ grep -qF '"build:android"' "$UI_DIR/package.json" \
 grep -qF -- '--outDir ../app-android/dist' "$UI_DIR/package.json" \
   || die "$UI_DIR/package.json build:android must write ../app-android/dist (never the desktop dist/)"
 
-# --- 1. the wasm session ---------------------------------------------------
+# --- 1. no wasm session on this carrier ------------------------------------
 
-# The chrome loads its canvas session from `/canvas/bootstrap.js`, which
-# `apps/desktop-ui/public/` serves verbatim. Vite copies `public/**` into the
-# output, so this has to exist *before* the UI build; the shared script asserts
-# the four artifacts itself and exits non-zero on any failure.
-printf '==> wasm CAD session artifacts (scripts/build-canvas-wasm.sh)\n'
-bash "$REPO_ROOT/scripts/build-canvas-wasm.sh" \
-  || die "scripts/build-canvas-wasm.sh failed; no Android bundle was produced"
+# Android is `native-below` (ADR 0027): the native `CadSession` owns the
+# document and the wasm `dom-canvas` session is never instantiated. Vite copies
+# `public/**` verbatim, so a previously generated `apps/desktop-ui/public/canvas/`
+# would leak a large unused wasm blob into the APK. Remove it before the build;
+# section 3 asserts the bundle carries no `canvas/`.
+if [ -e "$UI_DIR/public/canvas" ]; then
+  printf '==> dropping unused dom-canvas artifacts (native-below carrier)\n'
+  rm -rf -- "$UI_DIR/public/canvas"
+fi
 
 # --- 2. the chrome bundle --------------------------------------------------
 
@@ -132,9 +126,10 @@ printf '==> React chrome, runtime=android (npm run build:android)\n'
 
 [ -d "$OUT_DIR" ] || die "build reported success but $OUT_DIR does not exist"
 [ -s "$OUT_DIR/index.html" ] || die "bundle entry missing or empty: $OUT_DIR/index.html"
-[ -s "$OUT_DIR/canvas/$ESM_JS" ] || die "canvas module missing or empty: $OUT_DIR/canvas/$ESM_JS"
-[ -s "$OUT_DIR/canvas/$WASM_ARTIFACT" ] || die "canvas binary missing or empty: $OUT_DIR/canvas/$WASM_ARTIFACT"
-[ -s "$OUT_DIR/canvas/$BOOTSTRAP_JS" ] || die "canvas bootstrap missing or empty: $OUT_DIR/canvas/$BOOTSTRAP_JS"
+# This carrier is `native-below`; a `canvas/` directory means a stale
+# `public/canvas/` was copied into an APK that can never use it.
+[ ! -e "$OUT_DIR/canvas" ] \
+  || die "unexpected $OUT_DIR/canvas: the native Android bundle must not ship the wasm session"
 [ -s "$OUT_DIR/plugins/tch.js" ] \
   || die "vendor plugin missing or empty: $OUT_DIR/plugins/tch.js (is the plugins/tch submodule initialized?)"
 
@@ -180,9 +175,7 @@ font_faces="$(yacr_font_package_faces "$FONT_ASSETS")"
 
 printf 'bundle in %s\n' "$OUT_DIR"
 report_artifact "$OUT_DIR/index.html" "index.html"
-report_artifact "$OUT_DIR/canvas/$ESM_JS" "canvas/$ESM_JS"
-report_artifact "$OUT_DIR/canvas/$WASM_ARTIFACT" "canvas/$WASM_ARTIFACT"
-report_artifact "$OUT_DIR/canvas/$BOOTSTRAP_JS" "canvas/$BOOTSTRAP_JS"
+[ ! -e "$OUT_DIR/canvas" ] || die "bundle still carries canvas/ after the artifact guards"
 report_artifact "$OUT_DIR/plugins/tch.js" "plugins/tch.js"
 printf '  %-28s %s file(s)\n' "assets/*.js" "$asset_count"
 printf 'fonts in %s\n' "$FONT_ASSETS"

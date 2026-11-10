@@ -125,6 +125,12 @@ else
 fi
 
 [ -s "${UI_DIST}/index.html" ] || die "frontend build produced no ${UI_DIST}/index.html"
+# macOS is `native-below`: drop an unused `canvas/` copied from `public/canvas`
+# so the wasm session is not embedded in the app.
+if [ -e "${UI_DIST}/canvas" ]; then
+  echo "==> dropping unused dom-canvas artifacts (native-below carrier)"
+  rm -rf -- "${UI_DIST}/canvas"
+fi
 [ -s "${UI_DIST}/plugins/tch.js" ] \
   || die "frontend build produced no ${UI_DIST}/plugins/tch.js; the Tianzheng vendor plugin would not be embedded (is the plugins/tch submodule initialized?)"
 
