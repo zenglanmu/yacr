@@ -976,7 +976,7 @@
     },
     {
       "id": "synthetic-rvt-scaffold-2024",
-      "path": "fixtures/rvt/synthetic-scaffold-2024.rvt",
+      "path": "fixtures/rvt/upstream-metadata-scaffold-2024-no-geometry.rvt",
       "sha256": "da88093b42e740551402b0e0ed30b879b959e067d2044ff8bbc0d8d1553d8e9e",
       "dwg_version": "n/a (Revit 2024 scaffold, OLE/CFB)",
       "source": "upstream rvt 0.17.0 gen-fixture (src/bin/gen_fixture.rs), Apache-2.0; generated with name synthetic-scaffold-2024, year 2024, classes Wall,Level,Project, element-count 10",

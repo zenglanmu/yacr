@@ -6,11 +6,11 @@ file with real Revit geometry is available to this repository.
 
 | File | Purpose | Authored by | SHA-256 |
 |---|---|---|---|
-| `synthetic-scaffold-2024.rvt` | Unit 1: `rvt` decode -> GLB | upstream `rvt` 0.17.0 `gen-fixture` | `da88093b42e740551402b0e0ed30b879b959e067d2044ff8bbc0d8d1553d8e9e` |
+| `upstream-metadata-scaffold-2024-no-geometry.rvt` | Unit 1: `rvt` decode -> GLB | upstream `rvt` 0.17.0 `gen-fixture` | `da88093b42e740551402b0e0ed30b879b959e067d2044ff8bbc0d8d1553d8e9e` |
 | `synthetic-two-node.glb` | Unit 2: GLB -> world-space mesh | this repository (`make-two-node-glb.py`) | `56ff8f501177528336db6d46a9ae7d5edd408261d2bc21d68535816814cf5d35` |
 | `synthetic-materials.glb` | Unit 2: GLB material -> colour/opacity | this repository (`make-materials-glb.py`) | `cc0bc4b20762532f499eb9ba98c10bf9e327c5f30b36a5dab518da847a033ff5` |
 
-## `synthetic-scaffold-2024.rvt`
+## `upstream-metadata-scaffold-2024-no-geometry.rvt`
 
 Generated with the upstream `rvt` 0.17.0 `gen-fixture` binary, which the crate
 ships as `src/bin/gen_fixture.rs`. It is an OLE/CFB container with the twelve
@@ -30,10 +30,13 @@ Exact generation command (run in a scratch crate that depends on `rvt =
 ```text
 gen_fixture synthetic-scaffold-2024 --year 2024 \
   --classes Wall,Level,Project --element-count 10 \
-  --output fixtures/rvt/synthetic-scaffold-2024.rvt
+  --output fixtures/rvt/upstream-metadata-scaffold-2024-no-geometry.rvt
 ```
 
-The tool is deterministic for the same name/seed/classes/count/year.
+The generator name stays `synthetic-scaffold-2024`: the tool is deterministic for
+the same name/seed/classes/count/year, so renaming the argument would produce
+different bytes. Only the file in this repository is named for what it is — the
+old name looked like a Revit 2024 sample project and was mistaken for one.
 
 **What it proves — and what it does not.** `rvt` 0.17.0 decodes it to
 `confidence.level = "scaffold"`, `building_elements = 0`,

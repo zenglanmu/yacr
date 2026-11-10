@@ -181,7 +181,7 @@ fn a_real_revit_project_imports_when_supplied() {
 #[test]
 fn detection_recognises_the_ole_magic_as_revit() {
     assert_eq!(
-        detect_format(&fixture("synthetic-scaffold-2024.rvt")),
+        detect_format(&fixture("upstream-metadata-scaffold-2024-no-geometry.rvt")),
         DrawingFormat::Rvt
     );
     assert_eq!(
@@ -570,8 +570,12 @@ fn a_glb_without_materials_keeps_every_entity_bylayer() {
 #[test]
 fn the_rvt_scaffold_decodes_to_an_empty_glb_without_claiming_geometry() {
     let limits = ImportLimits::default();
-    let decoded = decode_to_glb(fixture("synthetic-scaffold-2024.rvt"), &limits, &|| false)
-        .expect("the upstream scaffold opens");
+    let decoded = decode_to_glb(
+        fixture("upstream-metadata-scaffold-2024-no-geometry.rvt"),
+        &limits,
+        &|| false,
+    )
+    .expect("the upstream scaffold opens");
     assert!(!decoded.has_geometry);
     assert_eq!(decoded.building_elements, 0);
     assert_eq!(decoded.geometry_elements, 0);
@@ -584,7 +588,9 @@ fn the_rvt_scaffold_decodes_to_an_empty_glb_without_claiming_geometry() {
 
 #[test]
 fn the_rvt_scaffold_import_is_an_explicit_refusal_not_an_empty_success() {
-    let error = import_error(&request(fixture("synthetic-scaffold-2024.rvt")));
+    let error = import_error(&request(fixture(
+        "upstream-metadata-scaffold-2024-no-geometry.rvt",
+    )));
     match error {
         CadError::Unsupported(message) => {
             assert!(message.contains(NO_GEOMETRY), "{message}");
@@ -602,7 +608,7 @@ fn progress_reports_reading_then_parsing_before_the_no_geometry_refusal() {
     let phases = std::cell::RefCell::new(Vec::new());
     let sink = |progress: ImportProgress| phases.borrow_mut().push(progress.phase);
     let result = RvtImporter::new().import_with_progress(
-        &request(fixture("synthetic-scaffold-2024.rvt")),
+        &request(fixture("upstream-metadata-scaffold-2024-no-geometry.rvt")),
         &|| false,
         &sink,
     );
@@ -616,7 +622,7 @@ fn progress_reports_reading_then_parsing_before_the_no_geometry_refusal() {
 #[test]
 fn decode_cancellation_is_honoured_before_the_rvt_run() {
     let error = decode_to_glb(
-        fixture("synthetic-scaffold-2024.rvt"),
+        fixture("upstream-metadata-scaffold-2024-no-geometry.rvt"),
         &ImportLimits::default(),
         &|| true,
     )
@@ -697,7 +703,7 @@ fn oversized_input_is_an_invalid_input_with_counts() {
         max_file_bytes: 8,
         ..ImportLimits::default()
     };
-    let mut request = request(fixture("synthetic-scaffold-2024.rvt"));
+    let mut request = request(fixture("upstream-metadata-scaffold-2024-no-geometry.rvt"));
     request.limits = limits;
     let error = import_error(&request);
     match error {

@@ -156,7 +156,10 @@ mod tests {
         // dispatcher must reach the RVT lane, and the scaffold must be the
         // stable no-geometry refusal, not the generic UNSUPPORTED_INPUT.
         let error = match FormatImporter::new().import(
-            &request(fixture_at("rvt", "synthetic-scaffold-2024.rvt")),
+            &request(fixture_at(
+                "rvt",
+                "upstream-metadata-scaffold-2024-no-geometry.rvt",
+            )),
             &|| false,
         ) {
             Ok(_) => panic!("the RVT scaffold has no geometry"),
