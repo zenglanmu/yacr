@@ -945,7 +945,7 @@ jobs:
           test -n "$pin" || { echo "no wasm-opt pin in scripts/lib/wasm-toolchain.sh" >&2; exit 1; }
           case "$pin" in
             120)
-              sha="006878709d21b77a0b34e3b4a6fd7894ea90ac43173f6a2cd4f0f064601ebe5d" ;;
+              sha="ddb097af51d1bdb17300d986b0de7d97422f1933dedb4c9eda3510e0bf4076cc" ;;
             *)
               echo "no verified download for binaryen $pin; add its release SHA-256 to this step" >&2
               exit 1 ;;
