@@ -14,6 +14,7 @@ use cad_import_core::{detect_format, DrawingFormat, ImportLimits, ImportRequest}
 use serde_json::{json, Value};
 
 use super::*;
+use crate::glb::{linear_to_srgb_byte, validate_factor};
 
 fn fixture(name: &str) -> Vec<u8> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -70,6 +71,19 @@ fn glb_fixture() -> Vec<u8> {
     fixture("synthetic-two-node.glb")
 }
 
+fn materials_glb_fixture() -> Vec<u8> {
+    fixture("synthetic-materials.glb")
+}
+
+/// Find the placed mesh whose glTF node carries `name`.
+fn placed<'a>(scene: &'a GlbScene, name: &str) -> &'a PlacedMesh {
+    scene
+        .meshes
+        .iter()
+        .find(|placed| placed.name.as_deref() == Some(name))
+        .unwrap_or_else(|| panic!("the fixture has a node named {name:?}"))
+}
+
 /// Import and require a refusal. `ImportedDrawing` is not `Debug`, so
 /// `expect_err` cannot be used on the importer's `Result`.
 fn import_error(request: &ImportRequest) -> CadError {
@@ -105,11 +119,22 @@ fn a_real_revit_project_imports_when_supplied() {
 
     let mut meshes = 0usize;
     let mut triangles = 0usize;
+    let mut explicit_colors = 0usize;
+    let mut by_layer_colors = 0usize;
+    let mut explicit_opacity = 0usize;
     for entity in drawing.database.entities() {
         if let cad_domain::SemanticGeometry::Mesh(mesh) = &entity.geometry {
             meshes += 1;
             triangles += mesh.triangles.len();
             assert_mesh_invariants(mesh);
+            let attributes = drawing.database.entity_render_attributes(entity.id);
+            match attributes.color {
+                EntityColor::Explicit(_) => explicit_colors += 1,
+                _ => by_layer_colors += 1,
+            }
+            if matches!(attributes.transparency, EntityTransparency::Explicit(_)) {
+                explicit_opacity += 1;
+            }
         }
     }
 
@@ -123,7 +148,8 @@ fn a_real_revit_project_imports_when_supplied() {
 
     eprintln!(
         "real RVT: bytes={byte_count} meshes={meshes} triangles={triangles} \
-         completeness={} codes={codes:?}",
+         explicit_colors={explicit_colors} by_layer_colors={by_layer_colors} \
+         explicit_opacity={explicit_opacity} completeness={} codes={codes:?}",
         drawing.report.completeness_label()
     );
 
@@ -134,6 +160,11 @@ fn a_real_revit_project_imports_when_supplied() {
         "a real project must yield at least one preview mesh"
     );
     assert!(triangles > 0, "preview meshes must carry triangles");
+    assert_eq!(
+        explicit_colors + by_layer_colors,
+        meshes,
+        "every mesh stores exactly one colour provenance"
+    );
     // Preview is never a measurement source.
     for capability in &drawing.report.capabilities {
         assert_eq!(
@@ -359,6 +390,179 @@ fn a_glb_without_a_scene_is_refused() {
         CadError::CorruptData(message) => assert!(message.contains(NO_SCENE), "{message}"),
         other => panic!("expected CorruptData, got {other:?}"),
     }
+}
+
+// ---- Unit 2: glTF material colours ---------------------------------------
+
+#[test]
+fn linear_base_colours_use_the_srgb_transfer_function() {
+    // `rvt` linearises its sRGB materials (`src/ifc/gltf.rs:665-675`); this is
+    // the exact inverse, not a `powf(1.0 / 2.2)` shortcut.
+    assert_eq!(linear_to_srgb_byte(0.0), 0);
+    assert_eq!(linear_to_srgb_byte(1.0), 255);
+    // sRGB 128 encodes from linear 0.2158605. The often-quoted 0.2140 is
+    // slightly below the midpoint (it encodes to 127.49) and rounds to 127.
+    assert_eq!(linear_to_srgb_byte(0.215_860_5), 128);
+    assert_eq!(linear_to_srgb_byte(0.2140), 127);
+    // The linear toe: 0.0031308 is the largest linear value in the linear part.
+    assert_eq!(linear_to_srgb_byte(0.003_130_8), 10);
+    // Out-of-range inputs clamp instead of wrapping; callers reject them first.
+    assert_eq!(linear_to_srgb_byte(-1.0), 0);
+    assert_eq!(linear_to_srgb_byte(2.0), 255);
+}
+
+#[test]
+fn materials_become_srgb_colour_opacity_or_bylayer() {
+    let scene = read_glb(&materials_glb_fixture(), &ImportLimits::default(), &|| {
+        false
+    })
+    .expect("the synthetic materials GLB reads");
+    assert_eq!(scene.meshes.len(), 4, "one entity per node/mesh instance");
+
+    for placed in &scene.meshes {
+        assert_mesh_invariants(&placed.mesh);
+        // Colour is stored on the entity, never baked per vertex: the mesh
+        // channel stays empty (`Mesh` has no UV/texture either).
+        assert!(
+            placed.mesh.colors.is_empty(),
+            "{:?} must not bake a per-vertex colour",
+            placed.name
+        );
+    }
+
+    // sRGB (200, 100, 50) linearised by rvt and converted back byte-exactly.
+    let opaque = placed(&scene, "opaque");
+    assert_eq!(opaque.color, Some([200, 100, 50]));
+    assert_eq!(
+        opaque.opacity, None,
+        "alpha 1.0 stays opaque, no explicit value"
+    );
+
+    // alpha 0.5 under alphaMode BLEND -> explicit opacity 0.5 (not transparency).
+    let blend = placed(&scene, "blend");
+    assert_eq!(blend.color, Some([30, 144, 255]));
+    match blend.opacity {
+        Some(opacity) => assert!((opacity - 0.5).abs() < f32::EPSILON, "{opacity}"),
+        None => panic!("a BLEND material with alpha 0.5 must store an opacity"),
+    }
+
+    // No material at all: keep the current ByLayer behaviour, invent nothing.
+    let plain = placed(&scene, "plain");
+    assert_eq!(plain.color, None);
+    assert_eq!(plain.opacity, None);
+
+    // One mesh, two primitives, two materials: the merged entity keeps ByLayer
+    // (picking one material would recolour the other primitive's triangles) and
+    // the loss is counted instead of hidden.
+    let conflict = placed(&scene, "conflict");
+    assert_eq!(conflict.color, None);
+    assert_eq!(conflict.opacity, None);
+    assert_eq!(
+        conflict.mesh.triangles.len(),
+        4,
+        "both primitives' geometry survives the merge"
+    );
+    assert_eq!(scene.material_losses.conflicting, 1);
+    assert_eq!(scene.material_losses.index_out_of_range, 0);
+    assert_eq!(scene.material_losses.non_finite, 0);
+    assert_eq!(scene.material_losses.out_of_range, 0);
+}
+
+#[test]
+fn an_out_of_range_material_index_is_refused_at_parse_without_panicking() {
+    // `gltf` 1.4.1's `Primitive::material()` unwraps the index, so this reader
+    // never calls it. `Gltf::from_slice` rejects the file up front instead:
+    // a corrupt internal GLB is refused whole (same rule as a triangle index),
+    // never silently degraded and never an abort.
+    let (mut json, bin) = glb_parts(&materials_glb_fixture());
+    json["meshes"][0]["primitives"][0]["material"] = json!(99);
+    let error = read_glb(&rebuild_glb(&json, &bin), &ImportLimits::default(), &|| {
+        false
+    })
+    .expect_err("an out-of-range material index is refused, not guessed");
+    match error {
+        CadError::CorruptData(message) => {
+            assert!(message.contains(GLB_INVALID), "{message}");
+            assert!(message.contains("Index out of bounds"), "{message}");
+        }
+        other => panic!("expected CorruptData, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_out_of_range_base_color_factor_keeps_bylayer() {
+    let (mut json, bin) = glb_parts(&materials_glb_fixture());
+    json["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"] = json!([1.5, 0.0, 0.0, 1.0]);
+    let scene = read_glb(&rebuild_glb(&json, &bin), &ImportLimits::default(), &|| {
+        false
+    })
+    .expect("an out-of-range factor is a loss, not a refusal");
+    // Never clamped into a plausible red.
+    assert_eq!(placed(&scene, "opaque").color, None);
+    // Both primitives that name material 0 lose it (the opaque node and the
+    // conflict mesh's first primitive), and the conflict is then reported too.
+    assert_eq!(scene.material_losses.out_of_range, 2);
+    assert_eq!(scene.material_losses.conflicting, 1);
+}
+
+#[test]
+fn a_non_finite_base_color_factor_keeps_bylayer() {
+    let mut losses = MaterialLosses::default();
+    assert!(validate_factor([f32::NAN, 0.0, 0.0, 1.0], &mut losses).is_none());
+    assert!(validate_factor([0.0, f32::INFINITY, 0.0, 1.0], &mut losses).is_none());
+    assert_eq!(losses.non_finite, 2);
+    assert_eq!(losses.out_of_range, 0);
+    // A valid factor converts; alpha comes back untouched.
+    let (color, alpha) = validate_factor([1.0, 1.0, 1.0, 0.25], &mut losses).unwrap();
+    assert_eq!(color, [255, 255, 255]);
+    assert_eq!(alpha, 0.25);
+}
+
+#[test]
+fn material_losses_become_stable_diagnostics() {
+    let (mut json, bin) = glb_parts(&materials_glb_fixture());
+    json["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"] = json!([1.5, 0.0, 0.0, 1.0]);
+    let scene = read_glb(&rebuild_glb(&json, &bin), &ImportLimits::default(), &|| {
+        false
+    })
+    .unwrap();
+
+    let mut import = MeshImport::new(&request(Vec::new()), RVT_MESH_TYPE_KEY).unwrap();
+    record_scene(&mut import, &scene);
+    let outcome = import.finish().unwrap();
+    let material: Vec<&cad_domain::Diagnostic> = outcome
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == DIAG_MATERIAL_IGNORED)
+        .collect();
+    assert_eq!(material.len(), 2, "one per loss reason: range and conflict");
+    assert!(
+        material
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("outside glTF's [0, 1] range")),
+        "{:?}",
+        material.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    assert!(
+        material
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("different materials")),
+        "the conflicting-materials case must be reported, not hidden"
+    );
+    // The colour loss does not change the completeness flag by itself; the
+    // preview reason already makes every successful RVT import Partial.
+    assert_eq!(outcome.completeness, cad_domain::Completeness::Complete);
+}
+
+#[test]
+fn a_glb_without_materials_keeps_every_entity_bylayer() {
+    // The original two-node fixture has no materials array at all.
+    let scene = read_glb(&glb_fixture(), &ImportLimits::default(), &|| false).unwrap();
+    for placed in &scene.meshes {
+        assert_eq!(placed.color, None);
+        assert_eq!(placed.opacity, None);
+    }
+    assert!(scene.material_losses.is_empty());
 }
 
 // ---- Unit 1: rvt -> GLB --------------------------------------------------

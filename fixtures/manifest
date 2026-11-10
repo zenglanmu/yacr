@@ -1016,6 +1016,29 @@
         "One square instanced by two nodes: a matrix translation x=-1 and a parent+child translation x=+0.5/+0.5; it pins node world transforms and non-overlapping bounds only.",
         "glTF is an implementation detail of the RVT lane, not a user-visible format; this is a unit-2 contract fixture, not CAD compatibility evidence."
       ]
+    },
+    {
+      "id": "synthetic-rvt-materials-glb",
+      "path": "fixtures/rvt/synthetic-materials.glb",
+      "sha256": "cc0bc4b20762532f499eb9ba98c10bf9e327c5f30b36a5dab518da847a033ff5",
+      "dwg_version": "n/a (internal glTF 2.0 intermediate)",
+      "source": "synthetic, authored in this repository by fixtures/rvt/make-materials-glb.py",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "Four square nodes pin glTF material handling: an opaque linear baseColorFactor, a BLEND material with alpha 0.5, a primitive with no material (ByLayer), and one mesh whose two primitives name different materials (merged entity keeps ByLayer and reports the disagreement).",
+        "The baseColorFactor values are rvt's own linearisation of known sRGB bytes; the contract asserts the reader converts them back byte-exactly. No textures are present because rvt emits none and cad_domain::Mesh has no UV channel.",
+        "glTF is an implementation detail of the RVT lane, not a user-visible format; this is a unit-2 contract fixture, not CAD compatibility evidence."
+      ]
     }
   ],
   "notice": "Synthetic entries are contract fixtures and do not establish CAD compatibility. Authorized, redistributable drawings and their reference images may be committed here with full provenance (the QCAD flange sample in fixtures/dxf/qcad-flange/ records its upstream terms in SOURCE.md); its reference images are human-review aids, not project-generated golden images. Unverified vendor or private user data is not committed, and a committed sample is not general CAD compatibility evidence."

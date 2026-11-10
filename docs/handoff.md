@@ -1,5 +1,38 @@
 AD
 
+## 2026-11-10 RVT 预览：材质基色（线性 → sRGB）+ alpha 透明度
+
+- **改动**：`cad-import-rvt` 的 unit 2（GLB → mesh）现在读 `primitive.material` →
+  `pbrMetallicRoughness.baseColorFactor`（glTF **线性** RGBA）。RGB 按 IEC 61966-2-1 传函
+  （`c ≤ 0.0031308` 线性段，否则 `1.055·c^(1/2.4) − 0.055`）转回 sRGB 存入
+  `EntityColor::Explicit`——这正是 `rvt` 自己 `colour_material`（`src/ifc/gltf.rs:665-675`）
+  线性化的逆运算；alpha 只在 `alphaMode = BLEND` 且 `a < 1` 时写成
+  `EntityTransparency::Explicit(opacity)`（本仓约定该值为**不透明度**，`1.0` 即不透明），
+  `a = 1.0` 不写多余的显式值。primitive 无 `material` → 保持 `ByLayer`（不发明颜色）；
+  非有限 / 超出 `[0,1]` 的因子、以及同一 node 合并的多个 primitive 材质不一致 → `ByLayer` +
+  `import.rvt.material_ignored`；`material` 索引越界由 `gltf` 文档校验拒绝整份 GLB
+  （`import.rvt.invalid_glb`），不会 panic。共享层新增 `MeshImport::push_mesh_with_attributes`
+  （`push_mesh` 行为不变：只写颜色，其余属性仍 `ByLayer`）。测量能力与 release 状态上限未改：
+  颜色不会让 RVT 可测量。
+- **纹理（设计边界，不是缺陷）**：`rvt` 0.17.0 不导出任何纹理（`GltfDocument` 无
+  `images`/`textures`/`samplers`，无 `TEXCOORD_0`，`uri` 恒 `None`），`cad_domain::Mesh` 也只有
+  逐顶点 `colors`、没有 UV 通道 → 纹理既不可得也不可表示。
+- **测试（已运行）**：`cargo test -p cad-import-rvt --locked` **32 passed**。新增合成夹具
+  `fixtures/rvt/synthetic-materials.glb`（`make-materials-glb.py`，SHA-256 记入
+  `fixtures/rvt/SOURCE.md` 与 `fixtures/manifest`，`synthetic: true`）：不透明材质
+  sRGB `(200,100,50)` 字节级往返、alpha 0.5 的 `Explicit(0.5)`、无材质 `ByLayer`、同 mesh
+  双材质 → `ByLayer` + `import.rvt.material_ignored`、越界 `material` 索引按 `import.rvt.invalid_glb`
+  拒绝、越界/非有限因子 `ByLayer`、sRGB 传函已知值（0→0、1→255、0.2158605→128）。
+  `cargo test -p cad-import-core --locked`（新增 `push_mesh` 默认值与
+  `push_mesh_with_attributes` 显式 opacity 契约）。
+- **本地真实样本（未提交，local-only）**：Autodesk `racbasicsampleproject.rvt`（Revit 2024，
+  19,722,240 bytes）**565 meshes 全部带显式 sRGB 颜色（565 explicit / 0 ByLayer），75 个带显式
+  不透明度**，14,202 triangles，无 `import.rvt.material_ignored`。样本在仓库外（`.gitignore`），
+  **不是** CI、兼容性、像素或性能证据；颜色值来自 `rvt` 的类别/图层/元素材质合成，不是 Revit
+  原生外观验收。
+- **NOT RUN**：全量 `cargo test --workspace`、Linux GUI/GPU 像素证据；Windows/macOS/Android/Web
+  仍只有编译/契约状态；真实 Revit 颜色保真度没有第二份样本交叉验证。
+
 ## 2026-11-10 多格式导入收口：MSRV 1.88 / 原生选择器 / 浏览器闸门 / 文案 / 文档
 
 - **范围**：各格式 lane 已存在并通过各自 crate 门禁（DWG/DXF `cad-import-acadrust`、OBJ

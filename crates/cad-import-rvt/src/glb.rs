@@ -22,13 +22,31 @@
 //! Only triangle primitives are converted. Non-indexed triangle soup is
 //! accepted; strip/fan modes are skipped and counted so no primitive
 //! disappears silently.
+//!
+//! **Materials are colours only.** `rvt` emits one `glTF` material per Revit
+//! category, per layer colour (RE-53) and per element whose type draws in one
+//! material (RE-82), each carrying a linear `pbrMetallicRoughness.
+//! baseColorFactor` (`rvt` `src/ifc/gltf.rs:324-400`, `:477`). The factor is
+//! converted back to the sRGB bytes `cad_db::EntityColor::Explicit` stores
+//! (the exact inverse of `rvt`'s own `colour_material` linearisation, `rvt`
+//! `src/ifc/gltf.rs:665`), and its alpha becomes
+//! `cad_db::EntityTransparency::Explicit` (opacity: `1.0` opaque). `rvt` emits
+//! **no textures at all** — no `images`/`textures`/`samplers`, no `TEXCOORD_0`
+//! — and `cad_domain::Mesh` has no UV channel, so texture loss is a property of
+//! the source and the domain, not a defect of this reader.
+//!
+//! A primitive without a material keeps `ByLayer`, and every unusable material
+//! (out-of-range index, non-finite or out-of-range factor, or conflicting
+//! materials inside one merged node) also keeps `ByLayer` and is counted, never
+//! guessed.
 
 use cad_domain::{CadError, CadResult, Mesh, Point3};
 use cad_import_core::ImportLimits;
 use gltf::accessor::{Accessor, DataType, Dimensions};
 use gltf::buffer::Source;
+use gltf::material::AlphaMode;
 use gltf::mesh::Mode;
-use gltf::{Gltf, Node, Primitive, Semantic};
+use gltf::{Document, Gltf, Node, Primitive, Semantic};
 
 use crate::{
     EMPTY_GLB, EXTERNAL_BUFFER, GLB_INVALID, INDEX_OUT_OF_RANGE, INVALID_TRANSFORM,
@@ -54,6 +72,63 @@ pub struct PlacedMesh {
     /// The glTF node name, when the file carries one.
     pub name: Option<String>,
     pub mesh: Mesh,
+    /// sRGB colour from the primitive's `baseColorFactor`, or `None` when the
+    /// node's triangles carry no usable material (the caller then stores
+    /// [`cad_db::EntityColor::ByLayer`]). Never a fabricated colour.
+    pub color: Option<[u8; 3]>,
+    /// Stored opacity in `[0, 1]` (`1.0` opaque), or `None` when the material
+    /// is opaque (the caller stores `ByLayer`, which resolves to opaque) or
+    /// carried no usable material.
+    pub opacity: Option<f32>,
+}
+
+/// Counts of primitive materials that could not become a stored colour.
+///
+/// Every one of these leaves the affected faces `ByLayer`; none is silently
+/// replaced by an invented colour. The importer turns each non-zero count into
+/// one `import.rvt.material_ignored` diagnostic.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct MaterialLosses {
+    /// `primitive.material` named an index past `document.materials`.
+    ///
+    /// `Gltf::from_slice` validation refuses such a file as
+    /// `import.rvt.invalid_glb` before this reader sees it, so this counter is
+    /// defence in depth (the lookup must never panic); it is reported if a
+    /// future validation path lets the index through.
+    pub index_out_of_range: usize,
+    /// A `baseColorFactor` component was NaN or infinite.
+    pub non_finite: usize,
+    /// A `baseColorFactor` component fell outside glTF's `[0, 1]` range.
+    pub out_of_range: usize,
+    /// Triangle primitives of one node named different materials. The node's
+    /// triangles become a single entity (this reader merges a node's
+    /// primitives), so picking one would silently recolour the others.
+    pub conflicting: usize,
+}
+
+impl MaterialLosses {
+    /// `true` when no material was dropped.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// A usable material, already converted to stored units.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MaterialStyle {
+    color: [u8; 3],
+    opacity: Option<f32>,
+}
+
+/// What one primitive's `material` reference resolved to.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PrimitiveMaterial {
+    /// The primitive has no material: keep `ByLayer`.
+    Absent,
+    /// A usable material.
+    Usable(MaterialStyle),
+    /// A material was named but cannot be trusted; already counted.
+    Unusable,
 }
 
 /// Aggregate losses from one GLB read, for stable diagnostics.
@@ -65,6 +140,7 @@ pub struct GlbScene {
     pub empty_nodes: usize,
     pub degenerate_triangles: usize,
     pub normals_dropped: usize,
+    pub material_losses: MaterialLosses,
 }
 
 /// Read a GLB and return every drawable node/mesh instance in world space.
@@ -114,6 +190,7 @@ pub fn read_glb(
             return Err(CadError::Cancelled);
         }
         visit_node(
+            document,
             blob,
             &node,
             IDENTITY,
@@ -128,6 +205,7 @@ pub fn read_glb(
 
 #[allow(clippy::too_many_arguments)]
 fn visit_node(
+    document: &Document,
     blob: Option<&[u8]>,
     node: &Node<'_>,
     parent_world: [[f64; 4]; 4],
@@ -162,16 +240,39 @@ fn visit_node(
 
     if let Some(mesh) = node.mesh() {
         let mut built = MeshBuild::default();
+        // Every triangle primitive of one node becomes a single entity, so a
+        // material is used only when all of them agree on it. Differing
+        // materials keep the layer colour and are counted (`conflicting`):
+        // silently applying one primitive's colour to the others would invent
+        // a colour for geometry the source did not give it. `rvt` 0.17.0 emits
+        // exactly one primitive per mesh, so this only fires on foreign input.
+        let mut agreed: Option<PrimitiveMaterial> = None;
+        let mut conflict = false;
         for primitive in mesh.primitives() {
             if cancelled() {
                 return Err(CadError::Cancelled);
             }
             if primitive.mode() == Mode::Triangles {
                 build_primitive(blob, &primitive, &world, &mut built)?;
+                let style =
+                    resolve_material(document, mesh.index(), &primitive, &mut out.material_losses);
+                match agreed {
+                    None => agreed = Some(style),
+                    Some(previous) if previous != style => conflict = true,
+                    _ => {}
+                }
             } else {
                 out.primitives_skipped += 1;
             }
         }
+        let style = match (conflict, agreed) {
+            (true, _) => {
+                out.material_losses.conflicting += 1;
+                None
+            }
+            (false, Some(PrimitiveMaterial::Usable(style))) => Some(style),
+            _ => None,
+        };
         out.degenerate_triangles += built.degenerate;
         out.normals_dropped += built.normals_dropped;
         // A node's mesh may carry several primitives. Normals are per vertex:
@@ -199,12 +300,14 @@ fn visit_node(
             out.meshes.push(PlacedMesh {
                 name: node.name().map(str::to_string),
                 mesh: built.mesh,
+                color: style.map(|style| style.color),
+                opacity: style.and_then(|style| style.opacity),
             });
         }
     }
 
     for child in node.children() {
-        visit_node(blob, &child, world, stack, limits, cancelled, out)?;
+        visit_node(document, blob, &child, world, stack, limits, cancelled, out)?;
     }
     stack.pop();
     Ok(())
@@ -314,6 +417,99 @@ fn build_primitive(
         out.mesh.triangles.push(placed);
     }
     Ok(())
+}
+
+/// Resolve one primitive's `material` reference into a stored colour.
+///
+/// `Primitive::material()` is not used for the lookup: `gltf` 1.4.1 builds it
+/// with `document.materials().nth(index).unwrap()` (`src/mesh/mod.rs:269-276`),
+/// so an index the document does not contain would panic. `Gltf::from_slice`
+/// currently rejects that case up front ("meshes[...].material: Index out of
+/// bounds" -> [`GLB_INVALID`]), which is the honest refusal this reader wants;
+/// the bounds check below is kept so the lookup cannot panic if that validation
+/// ever moves or a caller loads without it.
+fn resolve_material(
+    document: &Document,
+    mesh_index: usize,
+    primitive: &Primitive<'_>,
+    losses: &mut MaterialLosses,
+) -> PrimitiveMaterial {
+    let json = document.as_json();
+    let Some(index) = json
+        .meshes
+        .get(mesh_index)
+        .and_then(|mesh| mesh.primitives.get(primitive.index()))
+        .and_then(|primitive| primitive.material.as_ref())
+        .map(|index| index.value())
+    else {
+        return PrimitiveMaterial::Absent;
+    };
+    if index >= json.materials.len() {
+        losses.index_out_of_range += 1;
+        return PrimitiveMaterial::Unusable;
+    }
+    let material = document
+        .materials()
+        .nth(index)
+        .expect("index is bounds-checked against document.materials above");
+    let factor = material.pbr_metallic_roughness().base_color_factor();
+    let Some((color, alpha)) = validate_factor(factor, losses) else {
+        return PrimitiveMaterial::Unusable;
+    };
+    // glTF's default `alphaMode` is OPAQUE, where the alpha value is ignored;
+    // MASK is a cutout, not a translucency, and has no `Mesh` equivalent, so it
+    // too is drawn opaque. Only BLEND carries an opacity the database can store.
+    let opacity = match material.alpha_mode() {
+        AlphaMode::Blend if alpha < 1.0 => Some(alpha),
+        _ => None,
+    };
+    PrimitiveMaterial::Usable(MaterialStyle { color, opacity })
+}
+
+/// Validate a glTF `baseColorFactor` and convert its RGB to stored sRGB.
+///
+/// Returns the colour and the alpha, or `None` after counting the reason when
+/// a component is NaN/infinite or outside `[0, 1]` (the glTF spec range). A
+/// non-finite or out-of-range factor is never clamped into a plausible colour:
+/// the caller keeps `ByLayer` and reports it.
+pub(crate) fn validate_factor(
+    factor: [f32; 4],
+    losses: &mut MaterialLosses,
+) -> Option<([u8; 3], f32)> {
+    if factor.iter().any(|value| !value.is_finite()) {
+        losses.non_finite += 1;
+        return None;
+    }
+    if factor.iter().any(|value| !(0.0..=1.0).contains(value)) {
+        losses.out_of_range += 1;
+        return None;
+    }
+    Some((
+        [
+            linear_to_srgb_byte(factor[0]),
+            linear_to_srgb_byte(factor[1]),
+            linear_to_srgb_byte(factor[2]),
+        ],
+        factor[3],
+    ))
+}
+
+/// Linear glTF `baseColorFactor` component -> the sRGB byte the database stores.
+///
+/// This is the IEC 61966-2-1 transfer function, i.e. the exact inverse of the
+/// linearisation `rvt` applies to its own sRGB materials (`rvt`
+/// `src/ifc/gltf.rs:665-675`), not a `powf(1.0 / 2.2)` shortcut: linear below
+/// `0.0031308`, `1.055 * c^(1/2.4) - 0.055` above it. Rounded to nearest and
+/// clamped to `0..=255` (callers reject out-of-range factors first; the clamp
+/// is defence in depth).
+pub(crate) fn linear_to_srgb_byte(linear: f32) -> u8 {
+    let clamped = linear.clamp(0.0, 1.0) as f64;
+    let encoded = if clamped <= 0.003_130_8 {
+        12.92 * clamped
+    } else {
+        1.055 * clamped.powf(1.0 / 2.4) - 0.055
+    };
+    (encoded * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
 fn read_positions(accessor: &Accessor<'_>, blob: Option<&[u8]>) -> CadResult<Vec<Point3>> {

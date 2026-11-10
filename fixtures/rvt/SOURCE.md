@@ -1,6 +1,6 @@
 # RVT fixtures
 
-Two committed fixtures, plus one local-only Autodesk sample that must never be
+Three committed fixtures, plus one local-only Autodesk sample that must never be
 committed (see the last section). They are separated because no *redistributable*
 file with real Revit geometry is available to this repository.
 
@@ -8,6 +8,7 @@ file with real Revit geometry is available to this repository.
 |---|---|---|---|
 | `synthetic-scaffold-2024.rvt` | Unit 1: `rvt` decode -> GLB | upstream `rvt` 0.17.0 `gen-fixture` | `da88093b42e740551402b0e0ed30b879b959e067d2044ff8bbc0d8d1553d8e9e` |
 | `synthetic-two-node.glb` | Unit 2: GLB -> world-space mesh | this repository (`make-two-node-glb.py`) | `56ff8f501177528336db6d46a9ae7d5edd408261d2bc21d68535816814cf5d35` |
+| `synthetic-materials.glb` | Unit 2: GLB material -> colour/opacity | this repository (`make-materials-glb.py`) | `cc0bc4b20762532f499eb9ba98c10bf9e327c5f30b36a5dab518da847a033ff5` |
 
 ## `synthetic-scaffold-2024.rvt`
 
@@ -68,6 +69,41 @@ up. The test asserts the two world bounding boxes are `x ∈ [-1.5, -0.5]` and
 `x ∈ [0.5, 1.5]` — non-overlapping. A reader that ignores node transforms puts
 both squares at the origin, and one that ignores parent composition puts them at
 `-1` and `+0.5`; either fails the assertion.
+
+glTF is an **internal intermediate** of the RVT lane: it is not a user-visible
+format, is not in detection or pickers, and has no capability row. The file is
+a unit-2 contract fixture only, not CAD compatibility evidence.
+
+## `synthetic-materials.glb`
+
+Authored in this repository by `make-materials-glb.py`; regenerate with:
+
+```text
+python3 fixtures/rvt/make-materials-glb.py
+```
+
+Four square nodes, one mesh instance each, laid out along `x` so nothing can
+hide at the origin:
+
+| Node | `material` | What the contract asserts |
+|---|---|---|
+| `opaque` | 0: `baseColorFactor` = rvt's linearisation of sRGB `(200, 100, 50)`, alpha `1.0` | the reader converts linear -> sRGB byte-exactly (`[200, 100, 50]`) and stores no explicit opacity for alpha `1.0` |
+| `blend` | 1: sRGB `(30, 144, 255)`, alpha `0.5`, `alphaMode: "BLEND"` | the reader stores `[30, 144, 255]` plus `EntityTransparency::Explicit(0.5)` (opacity, not a transparency fraction) |
+| `plain` | none | the primitive stays `ByLayer`; no colour is invented |
+| `conflict` | one mesh, two primitives, materials 0 and 1 | the merged entity keeps `ByLayer` (picking one material would recolour the other primitive's triangles) and the loss is reported as `import.rvt.material_ignored` |
+
+The linear values are pinned literals equal to `rvt` 0.17.0's own
+`colour_material` linearisation (`src/ifc/gltf.rs:665-675`) of those sRGB
+bytes, so the fixture pins the exact inverse transfer function rather than a
+`powf(1.0/2.2)` approximation. A separate test patches the JSON to an
+out-of-range `baseColorFactor` (`1.5`) and asserts `ByLayer` plus the stable
+diagnostic.
+
+**No textures, by design.** `rvt` 0.17.0 emits no `images`/`textures`/
+`samplers` and no `TEXCOORD_0` (`GltfDocument` has no such fields), and
+`cad_domain::Mesh` carries only optional per-vertex `colors`, with no UV
+channel. Texture mapping is therefore neither available upstream nor
+representable in the stored geometry, not a missing feature of this reader.
 
 glTF is an **internal intermediate** of the RVT lane: it is not a user-visible
 format, is not in detection or pickers, and has no capability row. The file is

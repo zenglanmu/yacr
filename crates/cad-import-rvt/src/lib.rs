@@ -36,9 +36,9 @@ mod tests;
 pub use decode::{
     classify_document, decode_to_glb, part_atom_declares_family_table, DocumentKind, RvtDecode,
 };
-pub use glb::{read_glb, GlbScene, PlacedMesh};
+pub use glb::{read_glb, GlbScene, MaterialLosses, PlacedMesh};
 
-use cad_db::EntityColor;
+use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
 use cad_domain::{CadError, CadResult, Diagnostic, EntityCapability, SupportStatus, UnitContext};
 use cad_import_core::{
     compute_identity, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,
@@ -87,6 +87,9 @@ pub const DIAG_NORMALS_DROPPED: &str = "import.rvt.normals_dropped";
 pub const DIAG_PRIMITIVE_MODE_SKIPPED: &str = "import.rvt.primitive_mode_skipped";
 /// Diagnostic code: a node's mesh produced no triangle.
 pub const DIAG_EMPTY_NODE: &str = "import.rvt.empty_node";
+/// Diagnostic code: a glTF material could not become a stored colour, so the
+/// affected faces kept the layer colour.
+pub const DIAG_MATERIAL_IGNORED: &str = "import.rvt.material_ignored";
 
 /// Stable error code: the intermediate GLB is missing the `glTF` magic.
 pub const EMPTY_GLB: &str = "import.rvt.invalid_glb";
@@ -241,7 +244,24 @@ impl Importer for RvtImporter {
                 return Err(CadError::Cancelled);
             }
             let object = import.reserve_object()?;
-            import.push_mesh(object, placed.mesh, EntityColor::ByLayer)?;
+            // A usable glTF `baseColorFactor`/alpha becomes the entity's own
+            // colour/opacity; no material keeps `ByLayer`, exactly as before
+            // material support existed. `ByLayer` opacity resolves to opaque
+            // because this import writes no layer attribute row (see
+            // `MeshImport::new`), so an opaque material stores no explicit 1.0.
+            import.push_mesh_with_attributes(
+                object,
+                placed.mesh,
+                EntityRenderAttributes {
+                    color: placed
+                        .color
+                        .map_or(EntityColor::ByLayer, EntityColor::Explicit),
+                    transparency: placed
+                        .opacity
+                        .map_or(EntityTransparency::ByLayer, EntityTransparency::Explicit),
+                    ..Default::default()
+                },
+            )?;
             progress.report(ImportProgress::at(
                 ImportPhase::Entities,
                 import.entity_count(),
@@ -522,6 +542,46 @@ fn record_scene(import: &mut MeshImport, scene: &GlbScene) {
                 message: format!(
                     "{} glTF node(s) had a mesh but no triangle; they were not inserted",
                     scene.empty_nodes
+                ),
+            },
+            None,
+        );
+    }
+    record_material_losses(import, &scene.material_losses);
+}
+
+/// One diagnostic per material-loss reason; all of them leave faces `ByLayer`.
+fn record_material_losses(import: &mut MeshImport, losses: &MaterialLosses) {
+    let reasons = [
+        (
+            losses.index_out_of_range,
+            "reference a material index outside the document's material list",
+        ),
+        (
+            losses.non_finite,
+            "carry a non-finite linear baseColorFactor",
+        ),
+        (
+            losses.out_of_range,
+            "carry a baseColorFactor component outside glTF's [0, 1] range",
+        ),
+        (
+            losses.conflicting,
+            "are one node mesh whose triangle primitives name different materials, so the \
+             merged entity would have to pick one",
+        ),
+    ];
+    for (count, reason) in reasons {
+        if count == 0 {
+            continue;
+        }
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_MATERIAL_IGNORED.into(),
+                message: format!(
+                    "{count} glTF primitive(s)/node mesh(es) {reason}; they kept the layer \
+                     colour instead of an invented one"
                 ),
             },
             None,

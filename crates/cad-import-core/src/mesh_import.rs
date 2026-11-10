@@ -75,11 +75,37 @@ impl MeshImport {
     }
 
     /// Insert one validated mesh as a model-space entity on layer `0`.
+    ///
+    /// Colour-only shorthand for [`Self::push_mesh_with_attributes`]; every
+    /// other render attribute keeps its documented default (`ByLayer`
+    /// transparency, `ByLayer` lineweight/linetype).
     pub fn push_mesh(
         &mut self,
         object: ObjectId,
         mesh: Mesh,
         color: EntityColor,
+    ) -> CadResult<EntityId> {
+        self.push_mesh_with_attributes(
+            object,
+            mesh,
+            EntityRenderAttributes {
+                color,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Insert one validated mesh with the caller's full render attributes.
+    ///
+    /// Used when the source carries more than a colour (the RVT preview lane
+    /// stores a glTF material's alpha as an explicit opacity). The caller owns
+    /// every attribute value: this helper still invents nothing, and layer `0`
+    /// keeps its default (fully opaque, ACI 7) attributes.
+    pub fn push_mesh_with_attributes(
+        &mut self,
+        object: ObjectId,
+        mesh: Mesh,
+        attributes: EntityRenderAttributes,
     ) -> CadResult<EntityId> {
         if mesh.triangles.is_empty() {
             return Err(CadError::Invariant(
@@ -106,13 +132,8 @@ impl MeshImport {
             geometry,
             draw_order: self.inserted as i64,
         })?;
-        self.builder.set_entity_render_attributes(
-            entity_id,
-            EntityRenderAttributes {
-                color,
-                ..Default::default()
-            },
-        )?;
+        self.builder
+            .set_entity_render_attributes(entity_id, attributes)?;
         self.inserted += 1;
         Ok(entity_id)
     }
@@ -173,5 +194,83 @@ impl MeshImport {
             completeness,
             diagnostics: self.diagnostics,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cad_db::EntityTransparency;
+    use cad_domain::{DatabaseId, DocumentId, Point3};
+
+    fn request() -> ImportRequest {
+        ImportRequest {
+            document: DocumentId(1),
+            database: DatabaseId(1),
+            bytes: std::sync::Arc::from(Vec::new().into_boxed_slice()),
+            limits: crate::ImportLimits::default(),
+            generation: 0,
+            xref: None,
+        }
+    }
+
+    fn triangle() -> Mesh {
+        Mesh {
+            vertices: vec![
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            ],
+            triangles: vec![[0, 1, 2]],
+            ..Mesh::default()
+        }
+    }
+
+    #[test]
+    fn push_mesh_keeps_the_documented_bylayer_defaults() {
+        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
+        let object = import.reserve_object().unwrap();
+        let id = import
+            .push_mesh(object, triangle(), EntityColor::Explicit([1, 2, 3]))
+            .unwrap();
+        let outcome = import.finish().unwrap();
+        let attributes = outcome.database.entity_render_attributes(id);
+        assert_eq!(attributes.color, EntityColor::Explicit([1, 2, 3]));
+        assert_eq!(attributes.transparency, EntityTransparency::ByLayer);
+    }
+
+    #[test]
+    fn push_mesh_with_attributes_stores_an_explicit_opacity() {
+        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
+        let object = import.reserve_object().unwrap();
+        let id = import
+            .push_mesh_with_attributes(
+                object,
+                triangle(),
+                EntityRenderAttributes {
+                    color: EntityColor::Explicit([10, 20, 30]),
+                    transparency: EntityTransparency::Explicit(0.5),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let outcome = import.finish().unwrap();
+        let attributes = outcome.database.entity_render_attributes(id);
+        assert_eq!(attributes.color, EntityColor::Explicit([10, 20, 30]));
+        assert_eq!(attributes.transparency, EntityTransparency::Explicit(0.5));
+        // Nothing else is invented: the layer keeps its opaque, ACI 7 defaults.
+        assert_eq!(outcome.database.entity_count(), 1);
     }
 }

@@ -162,10 +162,24 @@ ASCII 与二进制同一路径；缺失/零/非有限法向由三角形几何重
   逆转置矩阵并归一化。
 - **glTF 是实现细节**：不加入检测（`detect_format` 只认 `.rvt`/`.rte` 的 OLE 魔数）、不在
   文件选择器出现、不是用户格式、没有能力行；`D8` 的“拒绝 glTF”仍成立。
+- **颜色与透明度（2026-11-10，只做颜色，不做纹理）**：只读
+  `pbrMetallicRoughness.baseColorFactor`（glTF **线性** RGBA）。RGB 按 IEC 61966-2-1 传函
+  （`c ≤ 0.0031308` 线性段，否则 `1.055·c^(1/2.4) − 0.055`）转回 sRGB 字节写入
+  `EntityColor::Explicit`——这正是 `rvt` 自身 `colour_material`（`src/ifc/gltf.rs:665-675`）
+  线性化的逆运算，合成夹具对 `(200,100,50)` 与 `(30,144,255)` 断言**字节级往返**；alpha 仅在
+  `alphaMode = BLEND` 且 `a < 1.0` 时写成 `EntityTransparency::Explicit(opacity)`（本仓约定该
+  值是**不透明度**，`1.0` 为不透明），`a = 1.0` 不写多余的显式值；primitive 无 `material`
+  保持 `ByLayer`（不发明颜色）；非有限或超出 `[0,1]` 的因子、以及同一 node 合并的多个
+  primitive 材质不一致 → 保持 `ByLayer` 并记 `import.rvt.material_ignored`（并**报告**合并会
+  丢失每个 primitive 的材质区分，而不是静默挑一个）；`material` 索引越界由 `gltf` 文档校验
+  直接拒绝整份 GLB（`import.rvt.invalid_glb`），不会 panic，也不静默降级。**纹理不在范围内且
+  上游不可得**：`rvt` 0.17.0 不导出任何纹理（无 `images`/`textures`/`samplers`，无
+  `TEXCOORD_0`，`uri` 恒为 `None`），`cad_domain::Mesh` 也只有逐顶点 `colors`、没有 UV 通道。
 - **夹具与证据**：unit 1 用 `rvt` 上游 Apache-2.0 的 `gen-fixture` 脚手架（`synthetic: false`
-  台账，0 几何，断言 `import.rvt.no_geometry`）；unit 2 用本仓库合成的双节点 GLB
-  （`synthetic: true`）。**没有真实 Revit 模型**，真实文件的几何/包围盒/定位/单位行为
-  **NOT VERIFIED**，不能由这两个夹具推论。
+  台账，0 几何，断言 `import.rvt.no_geometry`）；unit 2 用本仓库合成的两个 GLB
+  （`synthetic: true`：`synthetic-two-node.glb` 证明世界变换与不重叠包围盒，
+  `synthetic-materials.glb` 证明材质颜色/alpha 与 `ByLayer` 回退）。**没有真实 Revit 模型**，
+  真实文件的几何/包围盒/定位/单位/颜色行为 **NOT VERIFIED**，不能由这些夹具推论。
 
 ### D8 明确拒绝的能力
 
@@ -201,8 +215,8 @@ ASCII 与二进制同一路径；缺失/零/非有限法向由三角形几何重
 - 合成 fixture（OBJ/STL/PLY/OFF）与带 provenance 的公开样本（STEP/IFC）进 `fixtures/manifest`；
   `synthetic: true` 不得声明 `complete/verified/supported`。RVT 按**两个可独立测试的单元**
   分层：① 上游 `rvt` 0.17.0 的 Apache-2.0 脚手架（`synthetic: false` 台账，0 几何，断言显式
-  `import.rvt.no_geometry` 拒绝）；② 本仓库合成的双节点 GLB（`synthetic: true`，证明世界变换
-  与不重叠包围盒）。`.rfa` 拒绝另由测试在内存中构造的家族形状 CFB 覆盖。
+  `import.rvt.no_geometry` 拒绝）；② 本仓库合成的两个 GLB（`synthetic: true`：双节点定位，
+  材质颜色/alpha/`ByLayer` 回退）。`.rfa` 拒绝另由测试在内存中构造的家族形状 CFB 覆盖。
 - 契约测试覆盖：正常解析、n-gon、缺法向、退化面、超限、损坏输入、取消、显式拒绝路径、
   以及 `validate_geometry` 前的网格不变量（法向/颜色为空或与顶点数相等）。
 - 真实模型兼容性、性能、GPU/像素证据均 **NOT RUN**，不得由合成 fixture 推论。RVT 没有任何
