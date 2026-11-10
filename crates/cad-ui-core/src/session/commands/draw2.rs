@@ -20,6 +20,43 @@ pub const MLSTYLE_SELECTOR: &str = "MLSTYLE";
 pub const TREX_SELECTOR: &str = "TREX";
 pub const MPEDIT_SELECTOR: &str = "MPEDIT";
 pub const DRAWORDER_SELECTOR: &str = "DRAWORDER";
+pub const ARRAYPATH_SELECTOR: &str = "ARRAYPATH";
+
+/// `ARRAYPATH <count> [ALIGN]`: the typed 2D path-array form.
+///
+/// The grammar is strict: one positive whole number (ASCII digits, no sign, no
+/// fraction, no exponent) and the optional case-insensitive word `ALIGN`. The
+/// position count is re-checked by the command (its total copy count is capped by
+/// `MAX_ARRAY_ENTITIES`); this parser only admits the shape, never clamps.
+pub fn parse_arraypath_argument(argument: &str) -> Option<(usize, bool)> {
+    let tokens = tokens(argument);
+    if tokens.is_empty() || tokens.len() > 2 {
+        return None;
+    }
+    let count_text = tokens[0];
+    if count_text.is_empty() || !count_text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let count: usize = count_text.parse().ok()?;
+    if count == 0 {
+        return None;
+    }
+    let align = match tokens.get(1) {
+        None => false,
+        Some(word) if word.eq_ignore_ascii_case("ALIGN") => true,
+        Some(_) => return None,
+    };
+    Some((count, align))
+}
+
+/// The stable refusal for an `ARRAYPATH` argument outside the grammar.
+pub fn invalid_arraypath_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (ARRAYPATH needs a position count and an optional ALIGN, \
+         e.g. `ARRAYPATH 4 ALIGN`)",
+        text.trim()
+    )
+}
 
 /// `DONUT <cx> <cy> <inner> <outer>`: four finite numbers; radii are checked for
 /// sign/order by the command (`donut.*`). The declared AutoCAD form

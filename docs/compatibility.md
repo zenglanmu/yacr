@@ -398,7 +398,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
-| `FILLET` | **实现** | 两条**独立直线**：`R>0` ⇒ 两段修剪到切点 + **新增相切 ARC**；`R=0` ⇒ 只延伸/修剪到角点、不产生弧。新实体在**活动图层**（我们的选择，AutoCAD 规则未查证）。**Polyline 模式不在本命令里**：它自 2026-10-28 起是独立选择子 `FILLET POLYLINE`（见下两行） | `Multiple`、命令内 `Undo`、`Trim/No Trim` 开关、**平行线自动调半径**（改为显式拒绝）、Circle/Arc 目标、3D、hatch 关联性；**圆心公式为几何推论（UNVERIFIED）** |
+| `FILLET` | **实现** | 两条**独立直线**：`R>0` ⇒ 两段修剪到切点 + **新增相切 ARC**；`R=0` ⇒ 只延伸/修剪到角点、不产生弧。新实体在**活动图层**（我们的选择，AutoCAD 规则未查证）。**Polyline 模式不在本命令里**：它自 2026-10-28 起是独立选择子 `FILLET POLYLINE`（见下两行） | `Multiple`、命令内 `Undo`、`Trim/No Trim` 开关、**平行线自动调半径**（改为显式拒绝）、椭圆/样条曲线对、3D、hatch 关联性；**圆心公式为几何推论（UNVERIFIED）**；Circle/Arc 两两组合已实现（`corner_curve.rs`） |
 | `CHAMFER` | **实现** | 两条独立直线：两距离**按拾取顺序**施加；`0/0` ⇒ 只做角点（与 `FILLET R=0` 有等价性对照测试）；否则两段修剪 + **新增 LINE**；新实体在**活动图层**（我们的选择，AutoCAD 规则未查证）。**Polyline 模式不在本命令里**：见 `CHAMFER POLYLINE` | `Angle` 方法/`CHAMMODE`、`Multiple`、`Undo`、`Trim/No Trim`、弧段替换、3D；**负距离行为未查证**（一律拒绝） |
 | `FILLET POLYLINE` | **实现**（Polyline 模式的选择式变体，2026-10-28） | **恰好 1 条**选中实体：**开放**、≥3 顶点、**每段直线**（`\|bulge\| ≤ tol`）、`+Z` 平面的 LWPOLYLINE。每个**内顶点**换成两切点 + 一段**会话半径**的圆弧（`filletRadius`）：`phi = acos((-u_in)·u_out)`、`d = R/tan(phi/2)`，圆心在内角平分线上；sweep 由圆心角导出、经 `cad_geometry::arc_sweep_to_bulge` 转 bulge，再用 `bulge_arc_geometry` **回验**（圆心/半径/sweep 不一致 ⇒ `fillet.polyline_arc_mismatch`，整条命令拒绝）。实体**原地重写**（id/图层/空间/draw order/样式保留），一条事务/一步撤销；端顶点不动、不造端帽、不产生新实体 | 全部**具名且在任何写入之前**：带 payload、选择 ≠ 1、不可寻址/缺失、不是折线、**闭合环**、<3 顶点、**含 bulge 段**、**非 `+Z` 平面**、重复/零长段、共线顶点、退化接缝、`R ≤ 0`（两线 `R=0` 的移角形式无折线等价物）、**角放不下**（`fillet.polyline_too_large`，**不**做 AutoCAD 的自动缩半径）、缺会话参数、弧不自洽；Viewer 由命令层拒绝。**不建模 `TRIMMODE`**。**证据**：`cad-app` 契约测试（含与两线 `plan_fillet` 在 `1e-12` 内的对照、DXF 导出往返），**无 GUI/像素/真窗口证据** |
 | `CHAMFER POLYLINE` | **实现**（同上选择式，2026-10-28） | 形状同上（开放、≥3 顶点、直线段、`+Z`）；每个内顶点按 `chamferDistanceA` 量**入边**、`chamferDistanceB` 量**出边**切成两点，连接段 `bulge = 0`；同样是原地重写 + 一条事务/一步撤销 | 拒绝面同 `FILLET POLYLINE`（`A=B=0` 或负数、角放不下都具名），另加：**A/B 方向是我们的规则**（入边/出边），**不是** AutoCAD 提示顺序的复刻；**无 `Angle` 方法**、不建模 `TRIMMODE`、不做任何自动缩距。**证据同上：契约测试，无 GUI/像素/真窗口证据** |
@@ -1468,7 +1468,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `ANIPATH` | **部分实现（具名拒绝）**：`anipath.unsupported: this build has no camera-animation model` | 不写库/不升修订/不入历史 |
 | `APPAUTOLOADER` | **部分实现（具名拒绝）**：`appautoloader.unsupported: this build has no plug-in autoloader registry` | 不写库/不升修订/不入历史 |
 | `APPSTORE` | **部分实现（具名拒绝）**：`appstore.unsupported: the host owns this browser/store/chrome action` | 不写库/不升修订/不入历史 |
-| `ARRAYPATH` | **部分实现（具名拒绝）**：`arraypath.unsupported: the array model has no path-array (2D path distribution) implementation` | 不写库/不升修订/不入历史 |
+| `ARRAYPATH` | **部分实现（真实）**：当前选择第一个实体为路径、其余为项目；等弧长 `ARRAYPATH <count> [ALIGN]`；一条事务/一步撤销 | 无关联性/持久路径参数/项目基点模型；ALIGN 是切向角近似的声明式规则 |
 | `ASSISTANTCLOSE` | **部分实现（具名拒绝）**：`assistantclose.unsupported: this build has no Autodesk Assistant model` | 不写库/不升修订/不入历史 |
 | `ASSISTANTOPEN` | **部分实现（具名拒绝）**：`assistantopen.unsupported: this build has no Autodesk Assistant model` | 不写库/不升修订/不入历史 |
 | `ATTACHURL` | **部分实现（具名拒绝）**：`attachurl.unsupported: this build has no hyperlink storage model` | 不写库/不升修订/不入历史 |
@@ -1689,7 +1689,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
 | `CHAMFER` | **完整实现** | `Distance`/`Angle`/`Method`/`Trim`；双零 ⇒ 仅延伸相交；`CHAMFER POLYLINE` 全顶点、弧段替换、过短跳过、开口闭合 | `Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离未文档化 ⇒ 具名拒绝；圆弧/圆/样条 AutoCAD 也不接受 |
-| `FILLET` | 部分实现 | `Radius`/`Trim`/`Polyline` 全顶点；`R=0` 尖角；平行线自动半径 = 间隙/2；直线↔圆/弧相切且圆不修剪 | **曲线对曲线**（圆/弧互选、椭圆、椭圆弧、样条）⇒ `fillet.unsupported_pair` |
+| `FILLET` | 部分实现 | `Radius`/`Trim`/`Polyline` 全顶点；`R=0` 尖角；平行线自动半径 = 间隙/2；直线↔圆/弧相切且圆不修剪；**圆/弧两两组合**（偏移圆求交、最近拾取解、插入一段 ARC、ARC 侧修剪）一条事务/一步撤销 | 椭圆/椭圆弧/样条互选 ⇒ `fillet.unsupported_pair`；`Multiple`/多解循环未实现 |
 | `PEDIT` | 部分实现 | 全选项行；`Join` 接受线/弧/多段线；`Fit`/`Spline` 含闭合环；`Decurve`/`Reverse`/`Undo`；LINE/ARC/SPLINE 转换 | **`Width`/`Ltype gen`/`Edit vertex` 未实现**（多段线无宽度/`plinegen`/顶点子菜单模型）；偶数环无精确弧拟合 ⇒ `pedit.fit_closure` |
 | `JOIN` | 部分实现 | 源对象模式；`Multiple` 把 LINE/ARC/多段线/SPLINE/椭圆弧精确焊接为**有理 B 样条**（椭圆弧 = 圆有理二次的精确仿射像） | `JOIN CLOSE` 的混合 SPLINE 仍拒绝；非共面多段线属 3D 全局范围 |
 | `OFFSET` | **完整实现** | `Through`/`Erase`/`Layer`/`Multiple`（单步）/距离；椭圆与椭圆弧→样条；`OFFSETGAPTYPE` Sharp/**Fillet**/**Chamfer** | `OFFSET MULTIPLE` 的多点循环拒绝（单点捕获，属逐选项提示全局范围）；开放折线远端自交未检查（AutoCAD 未文档化） |

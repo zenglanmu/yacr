@@ -551,6 +551,7 @@ impl Application {
             | CommandId::RevisionCloud
             | CommandId::ArrayRectangular
             | CommandId::ArrayPolar
+            | CommandId::ArrayPath
             | CommandId::AlignEntities
             | CommandId::StretchEntities
             | CommandId::EraseEntities

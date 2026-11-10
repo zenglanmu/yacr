@@ -201,6 +201,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("OVERKILL", CommandId::Overkill),
     ("ARRAYRECT", CommandId::ArrayRectangular),
     ("ARRAYPOLAR", CommandId::ArrayPolar),
+    ("ARRAYPATH", CommandId::ArrayPath),
     ("ALIGN", CommandId::AlignEntities),
     ("STRETCH", CommandId::StretchEntities),
     ("ERASE", CommandId::EraseEntities),
@@ -873,6 +874,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     TREX_SELECTOR,
     MPEDIT_SELECTOR,
     DRAWORDER_SELECTOR,
+    // `ARRAYPATH <count> [ALIGN]`: the count/align ride the payload; the current
+    // selection (path first) is the whole input.
+    ARRAYPATH_SELECTOR,
     VIEW_SELECTOR,
     VIEWGO_SELECTOR,
     VPOINT_SELECTOR,

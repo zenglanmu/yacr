@@ -597,8 +597,9 @@ export const HOST_NAMES = [
   'VBARUN',
   'VBAUNLOAD',
   'SCRIPT',
-  // The 2026-11-10 Wave 17-24 batch: 200 honest named refusals (admitted
-  // selectors whose feature has no model in this build).
+  // The 2026-11-10 Wave 17-24 batch: 199 honest named refusals plus ARRAYPATH
+  // (now a real typed path-array command). The remaining names are selectors
+  // whose feature has no model in this build.
   'ACTBASEPOINT',
   'ACTIVITYINSIGHTSCLOSE',
   'ACTIVITYINSIGHTSOPEN',

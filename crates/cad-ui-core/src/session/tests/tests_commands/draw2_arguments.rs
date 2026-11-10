@@ -5,10 +5,11 @@ use super::super::super::*;
 use cad_app::{Draw2Payload, DrawOrderMode, MlStyleCommand, TrexMode};
 
 use crate::session::commands::{
-    parse_donut_argument, parse_draworder_argument, parse_helix_argument, parse_mline_argument,
-    parse_mlstyle_argument, parse_mpedit_argument, parse_solid_argument, parse_trex_argument,
-    ARGUMENT_SELECTORS, DONUT_SELECTOR, DRAWORDER_SELECTOR, HELIX_SELECTOR, MLINE_SELECTOR,
-    MLSTYLE_SELECTOR, MPEDIT_SELECTOR, SOLID_SELECTOR, TREX_SELECTOR,
+    parse_arraypath_argument, parse_donut_argument, parse_draworder_argument, parse_helix_argument,
+    parse_mline_argument, parse_mlstyle_argument, parse_mpedit_argument, parse_solid_argument,
+    parse_trex_argument, ARGUMENT_SELECTORS, ARRAYPATH_SELECTOR, DONUT_SELECTOR,
+    DRAWORDER_SELECTOR, HELIX_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MPEDIT_SELECTOR,
+    SOLID_SELECTOR, TREX_SELECTOR,
 };
 
 #[test]
@@ -135,4 +136,43 @@ fn mlstyle_trex_mpedit_and_draworder_words() {
         );
     }
     assert_eq!(parse_draworder_argument("TOP"), None);
+}
+
+#[test]
+fn arraypath_argument_is_a_positive_count_with_an_optional_align() {
+    assert_eq!(parse_arraypath_argument("4"), Some((4, false)));
+    assert_eq!(parse_arraypath_argument("1"), Some((1, false)));
+    assert_eq!(parse_arraypath_argument("4 ALIGN"), Some((4, true)));
+    assert_eq!(parse_arraypath_argument("4 align"), Some((4, true)));
+    // Anything outside the grammar is refused, never clamped or defaulted.
+    assert_eq!(parse_arraypath_argument("0"), None);
+    assert_eq!(parse_arraypath_argument("-1"), None);
+    assert_eq!(parse_arraypath_argument("+3"), None);
+    assert_eq!(parse_arraypath_argument("2.5"), None);
+    assert_eq!(parse_arraypath_argument("1e3"), None);
+    assert_eq!(parse_arraypath_argument(""), None);
+    assert_eq!(parse_arraypath_argument("4 ROTATE"), None);
+    assert_eq!(parse_arraypath_argument("4 ALIGN EXTRA"), None);
+    assert!(
+        ARGUMENT_SELECTORS.contains(&ARRAYPATH_SELECTOR),
+        "ARRAYPATH must be an admitted argument selector"
+    );
+}
+
+#[test]
+fn arraypath_selector_is_a_real_command_table_row() {
+    assert_eq!(normalize_command("ARRAYPATH"), Some(CommandId::ArrayPath));
+    assert_eq!(canonical_command_name("ARRAYPATH"), Some("ARRAYPATH"));
+    assert_eq!(
+        COMMAND_TABLE
+            .iter()
+            .filter(|(_, mapped)| *mapped == CommandId::ArrayPath)
+            .count(),
+        1,
+        "ARRAYPATH must appear exactly once in COMMAND_TABLE"
+    );
+    assert!(
+        !REFUSAL_TABLE.iter().any(|(name, _)| *name == "ARRAYPATH"),
+        "ARRAYPATH is no longer a named refusal"
+    );
 }

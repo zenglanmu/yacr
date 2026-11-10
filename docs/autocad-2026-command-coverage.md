@@ -75,7 +75,7 @@
 > **2026-11-09 增补（Wave 14）**：`BOX`…`ROTATE3D` 二十五个 3D 实体图元/布尔/剖切/边编辑名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D，不计为可用 3D 功能。计入 **573 已实现（66 完整 + 507 部分）/ 408 未实现**。
 > **2026-11-09 增补（Wave 15）**：`SURFBLEND`…`MESHUNCREASE` 二十五个曲面/网格名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D。计入 **598 已实现（66 完整 + 532 部分）/ 383 未实现**。
 > **2026-11-09 增补（Wave 16）**：`IMAGE`…`DGNADJUST` 二十五个图像/PDF/DGN 底图名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）。计入 **623 已实现（66 完整 + 557 部分）/ 358 未实现**。
-> **2026-11-10 增补（Wave 17）**：25 个名字按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史；`ACTBASEPOINT`…`ASSISTANTOPEN`）：`ACTBASEPOINT`/`ACTIVITYINSIGHTSCLOSE`/`ACTIVITYINSIGHTSOPEN`/`ACTMANAGER`/`ACTRECORD`/`-ACTSTOP`/`ACTSTOP`/`ACTUSERINPUT`/`-ACTUSERMESSAGE`/`ACTUSERMESSAGE`/`ADCCLOSE`/`ADCENTER`/`ADCNAVIGATE`/`ADJUST`/`AMECONVERT`/`ANALYSISCURVATURE`/`ANALYSISDRAFT`/`ANALYSISOPTIONS`/`ANALYSISZEBRA`/`ANIPATH`/`APPAUTOLOADER`/`APPSTORE`/`ARRAYPATH`/`ASSISTANTCLOSE`/`ASSISTANTOPEN`。计入 **648 已实现（67 完整 + 581 部分）/ 333 未实现**。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
+> **2026-11-10 增补（Wave 17）**：25 个名字按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史；`ACTBASEPOINT`…`ASSISTANTOPEN`）：`ACTBASEPOINT`/`ACTIVITYINSIGHTSCLOSE`/`ACTIVITYINSIGHTSOPEN`/`ACTMANAGER`/`ACTRECORD`/`-ACTSTOP`/`ACTSTOP`/`ACTUSERINPUT`/`-ACTUSERMESSAGE`/`ACTUSERMESSAGE`/`ADCCLOSE`/`ADCENTER`/`ADCNAVIGATE`/`ADJUST`/`AMECONVERT`/`ANALYSISCURVATURE`/`ANALYSISDRAFT`/`ANALYSISOPTIONS`/`ANALYSISZEBRA`/`ANIPATH`/`APPAUTOLOADER`/`APPSTORE`/`ASSISTANTCLOSE`/`ASSISTANTOPEN`（`ARRAYPATH` 已在同日晋升为真实 path array，见其命令行）。计入 **648 已实现（67 完整 + 581 部分）/ 333 未实现**。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-10 增补（Wave 18）**：25 个名字按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史；`ATTACHURL`…`COMPILE`）：`ATTACHURL`/`BDETECT`/`BLOCKICON`/`BLOCKSDATAOPTION`/`BLOCKSPALETTE`/`BLOCKSPALETTECLOSE`/`BLOCKTOXREF`/`BREP`/`BROWSER`/`BSEARCH`/`CAMERA`/`CENTERDISASSOCIATE`/`CENTERREASSOCIATE`/`CENTERRESET`/`CHECKSTANDARDS`/`CHURLS`/`COMMANDMACROS`/`COMMANDMACROSCLOSE`/`-COMPARE`/`COMPARE`/`COMPARECLOSE`/`COMPAREEXPORT`/`COMPAREIMPORT`/`COMPAREINFO`/`COMPILE`。计入 **673 已实现（67 完整 + 606 部分）/ 308 未实现**。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-10 增补（Wave 19）**：25 个名字按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史；`CONVERTOLDLIGHTS`…`CUSTOMIZE`）：`CONVERTOLDLIGHTS`/`CONVERTOLDMATERIALS`/`CONVTOMESH`/`CONVTONURBS`/`CONVTOSOLID`/`CONVTOSURFACE`/`COORDINATIONMODELATTACH`/`COPYFROMTRACE`/`COPYLINK`/`COPYM`/`COUNTAREA`/`COUNTAREACLOSE`/`COUNTCLOSE`/`COUNTFIELD`/`COUNTLIST`/`COUNTLISTCLOSE`/`COUNTNAVNEXT`/`COUNTNAVPREV`/`COUNTTABLE`/`CUI`/`CUIEXPORT`/`CUIIMPORT`/`CUILOAD`/`CUIUNLOAD`/`CUSTOMIZE`。计入 **698 已实现（67 完整 + 631 部分）/ 283 未实现**。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
 > **2026-11-10 增补（Wave 20）**：25 个名字按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史；`CVADD`…`-DGNEXPORT`）：`CVADD`/`CVHIDE`/`CVREBUILD`/`CVREMOVE`/`CVSHOW`/`-DATAEXTRACTION`/`DATAEXTRACTION`/`DATALINK`/`DATALINKUPDATE`/`DBCCLOSE`/`DBCCONFIGURE`/`DBCDEFINELLT`/`DBCDEFINELT`/`DBCONNECT`/`DCRADIUS`/`DCVERTICAL`/`DELAY`/`DETACHURL`/`DETECTCLOSE`/`DETECTCONVERT`/`DETECTPRIMARY`/`DETECTREMOVE`/`DETECTREVIEWNEXT`/`DETECTREVIEWPREV`/`-DGNEXPORT`。计入 **723 已实现（67 完整 + 656 部分）/ 258 未实现**。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
@@ -173,7 +173,7 @@
 - P1 **已完成**（2026-11-09）：9 条晋升（`ALIGN` `BREAK` `DIVIDE` `SELECTSIMILAR` `MATCHPROP`
   `SETBYLAYER` `LIST` `DIMSPACE` `TORIENT`），`LENGTHEN` 因开放样条延长未实现保留 `部分实现`。
 - P2 **已完成**（2026-11-09）：按严格口径 2 条晋升（`CHAMFER` `OFFSET`）；其余保留 `部分实现`：
-  `FILLET`（曲线对曲线）、`JOIN`（`JOIN CLOSE` 混合 SPLINE）、`STRETCH`（多边形/lasso 捕获未接线）、
+  `FILLET`（椭圆/样条曲线对）、`JOIN`（`JOIN CLOSE` 混合 SPLINE）、`STRETCH`（多边形/lasso 捕获未接线）、
   `PEDIT`（多段线宽度/`plinegen`/顶点子菜单）、`MIRROR`（`MIRRTEXT=1` 字形镜像）、
   `EXPLODE`（MULTILEADER 未导入内容）、`QSELECT`/`FILTER`（分类/自定义特性）。
 - P3 **已完成**（2026-11-09）：按严格口径 3 条晋升（`OVERKILL` `AUDIT` `QDIM`）；其余保留
@@ -329,7 +329,7 @@
 | `ARRAYCLASSIC` | 部分实现 | 无旧式对话框；带阵列载荷时转交 `ARRAY` 规划器，否则报告缺少载荷。 |
 | `ARRAYCLOSE` | 部分实现 | 具名拒绝（`arrayclose.unsupported`）：本构建无关联阵列编辑状态。 |
 | `ARRAYEDIT` | 部分实现 | 具名拒绝（`arrayedit.unsupported`）：本构建无关联阵列编辑状态。 |
-| `ARRAYPATH` | 部分实现 | 具名拒绝（`arraypath.unsupported: the array model has no path-array (2D path distribution) implementation`）。 |
+| `ARRAYPATH` | 部分实现 | 真实 v1：当前选择第一个实体为路径、其余为项目，等弧长分布，`ARRAYPATH <count> [ALIGN]`；一条事务/一步撤销；无关联性/持久路径参数。 |
 | `ARRAYPOLAR` | 部分实现 | 独立副本、非关联；角度步长为我们的规则 |
 | `ARRAYRECT` | 部分实现 | 独立副本、非关联；无 Path/Levels/关联编辑 |
 | `ARX` | 部分实现 | 具名拒绝（`arx.unsupported: no ObjectARX loader model`）。 |
@@ -601,7 +601,7 @@
 | `FILETAB` | 部分实现 | 具名拒绝（`filetab.unsupported`）：文件标签 chrome 由宿主负责。 |
 | `FILETABCLOSE` | 部分实现 | 具名拒绝（`filetabclose.unsupported`）：文件标签 chrome 由宿主负责。 |
 | `FILL` | 部分实现 | 会话令牌 `fill`（默认 ON）；渲染器不消费该标志，无视觉变化；不写库/不入历史。 |
-| `FILLET` | 部分实现 | `Radius`/`Trim`/`Polyline` 全顶点、零半径尖角、平行线自动半径=间隙/2、圆不被修剪、圆弧侧修剪；**曲线对曲线**（圆/弧、椭圆、椭圆弧、样条互选）仍具名拒绝 |
+| `FILLET` | 部分实现 | `Radius`/`Trim`/`Polyline` 全顶点、零半径尖角、平行线自动半径=间隙/2、圆不被修剪、圆弧侧修剪；`CIRCLE`/`ARC` 两两组合的曲线对曲线真实（偏移圆求交、取最近拾取解、插入一段 ARC、ARC 侧修剪、CIRCLE 不修剪），一条事务/一步撤销；`ELLIPSE`/样条等其它曲线对仍具名拒绝；无 Multiple/多解循环 |
 | `FILLETEDGE` | 部分实现 | 具名拒绝（`filletedge.unsupported: no 3D edge fillet model`）。 |
 | `FILTER` | 部分实现 | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读；**分类/自定义特性未建模**；**命名 `.nfl` 过滤器未实现** |
 | `FIND` | 部分实现 | `FIND <needle> [=> <replacement>]`；替换形式一条事务/一步撤销；不解析 MTEXT 格式 run；TEXT 单行拒绝换行 |
@@ -1088,7 +1088,7 @@
 | 68 | `ARRAYCLASSIC` | 部分实现 | Creates arrays using the legacy dialog box. | 无旧式对话框；带阵列载荷时转交 `ARRAY` 规划器，否则报告缺少载荷。 |
 | 69 | `ARRAYCLOSE` | 部分实现 | Saves or discards changes made to an array's source objects and exits the array editing state. | 具名拒绝（`arrayclose.unsupported`）：无关联阵列编辑状态。 |
 | 70 | `ARRAYEDIT` | 部分实现 | Edits associative array objects and their source objects. | 具名拒绝（`arrayedit.unsupported`）：无关联阵列编辑状态。 |
-| 71 | `ARRAYPATH` | 部分实现 | Evenly distributes object copies along a path or a portion of a path. | 具名拒绝（`arraypath.unsupported: the array model has no path-array (2D path distribution) implementation`）。 |
+| 71 | `ARRAYPATH` | 部分实现 | Evenly distributes object copies along a path or a portion of a path. | 真实 v1：当前选择第一个实体为路径、其余为项目，等弧长分布，`ARRAYPATH <count> [ALIGN]`；一条事务/一步撤销；无关联性/持久路径参数。 |
 | 72 | `ARRAYPOLAR` | 部分实现 | Evenly distributes object copies in a circular pattern around a center point or axis of rotation. | 独立副本、非关联；角度步长为我们的规则 |
 | 73 | `ARRAYRECT` | 部分实现 | Distributes object copies into any combination of rows, columns, and levels. | 独立副本、非关联；无 Path/Levels/关联编辑 |
 | 74 | `ARX` | 部分实现 | Loads, unloads, and provides information about ObjectARX applications. | 具名拒绝（`arx.unsupported: no ObjectARX loader model`）。 |
@@ -1383,7 +1383,7 @@
 | 363 | `FILETAB` | 部分实现 | Displays the file tabs at the top of the drawing area. | 具名拒绝（`filetab.unsupported`）：文件标签 chrome 由宿主负责。 |
 | 364 | `FILETABCLOSE` | 部分实现 | Hides the file tabs at the top of the drawing area. | 具名拒绝（`filetabclose.unsupported`）：文件标签 chrome 由宿主负责。 |
 | 365 | `FILL` | 部分实现 | Controls the display of filled objects such as hatches, 2D solids, and wide polylines. | 会话令牌 `fill`（默认 ON）；渲染器不消费该标志，无视觉变化；不写库/不入历史。 |
-| 366 | `FILLET` | 部分实现 | Rounds or fillets the edges of two 2D objects or the adjacent faces of a 3D solid. | `Radius`/`Trim`/`Polyline` 全顶点、零半径尖角、平行线自动半径=间隙/2、圆不被修剪、圆弧侧修剪；**曲线对曲线**（圆/弧、椭圆、椭圆弧、样条互选）仍具名拒绝 |
+| 366 | `FILLET` | 部分实现 | Rounds or fillets the edges of two 2D objects or the adjacent faces of a 3D solid. | `Radius`/`Trim`/`Polyline` 全顶点、零半径尖角、平行线自动半径=间隙/2、圆不被修剪、圆弧侧修剪；`CIRCLE`/`ARC` 两两组合的曲线对曲线真实（偏移圆求交、取最近拾取解、插入一段 ARC、ARC 侧修剪、CIRCLE 不修剪），一条事务/一步撤销；`ELLIPSE`/样条等其它曲线对仍具名拒绝；无 Multiple/多解循环 |
 | 367 | `FILLETEDGE` | 部分实现 | Rounds and fillets the edges of solid objects. | 具名拒绝（`filletedge.unsupported: no 3D edge fillet model`）。 |
 | 368 | `FILTER` | 部分实现 | Creates a list of requirements that an object must meet to be included in a selection set. | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读；**分类/自定义特性未建模**；**命名 `.nfl` 过滤器未实现** |
 | 369 | `-FIND` | 部分实现 | Searches for the text that you specify in the entire drawing, the current space or layout, or selected objects. | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告；不写库 |

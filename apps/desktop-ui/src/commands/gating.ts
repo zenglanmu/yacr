@@ -406,7 +406,8 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'DGNCLIP',
   'DGNLAYERS',
   'DGNADJUST',
-  // The 2026-11-10 Wave 17-24 named refusals (200 honest command paths).
+  // The 2026-11-10 Wave 17-24 named refusals (199 honest command paths; ARRAYPATH
+  // is now a real typed command and stays listed below as a document-scoped name).
   'ACTBASEPOINT',
   'ACTIVITYINSIGHTSCLOSE',
   'ACTIVITYINSIGHTSOPEN',

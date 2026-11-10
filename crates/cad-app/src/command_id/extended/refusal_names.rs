@@ -61,7 +61,6 @@ refusal_names! {
     Anipath => "ANIPATH" => "anipath.unsupported: this build has no camera-animation model",
     Appautoloader => "APPAUTOLOADER" => "appautoloader.unsupported: this build has no plug-in autoloader registry",
     Appstore => "APPSTORE" => "appstore.unsupported: the host owns this browser/store/chrome action",
-    Arraypath => "ARRAYPATH" => "arraypath.unsupported: the array model has no path-array (2D path distribution) implementation",
     Assistantclose => "ASSISTANTCLOSE" => "assistantclose.unsupported: this build has no Autodesk Assistant model",
     Assistantopen => "ASSISTANTOPEN" => "assistantopen.unsupported: this build has no Autodesk Assistant model",
     Attachurl => "ATTACHURL" => "attachurl.unsupported: this build has no hyperlink storage model",

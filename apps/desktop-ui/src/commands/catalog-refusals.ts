@@ -1,4 +1,4 @@
-// The Wave 17-24 named-refusal catalog rows (200 names).
+// The Wave 17-24 named-refusal catalog rows (199 names).
 //
 // Split out of `catalog.ts` to keep every frontend file inside the
 // 1000-line code gate. Every row is display-only and resolves to a stable
@@ -32,7 +32,6 @@ export const REFUSAL_COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.fr
   { id: 'ANIPATH', labelKey: 'draw.kind.anipath', icon: 'settings', group: 'modify' },
   { id: 'APPAUTOLOADER', labelKey: 'draw.kind.appautoloader', icon: 'settings', group: 'modify' },
   { id: 'APPSTORE', labelKey: 'draw.kind.appstore', icon: 'settings', group: 'modify' },
-  { id: 'ARRAYPATH', labelKey: 'draw.kind.arraypath', icon: 'settings', group: 'modify' },
   { id: 'ASSISTANTCLOSE', labelKey: 'draw.kind.assistantclose', icon: 'settings', group: 'modify' },
   { id: 'ASSISTANTOPEN', labelKey: 'draw.kind.assistantopen', icon: 'settings', group: 'modify' },
   { id: 'ATTACHURL', labelKey: 'draw.kind.attachurl', icon: 'settings', group: 'modify' },

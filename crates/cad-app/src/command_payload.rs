@@ -466,16 +466,18 @@ pub enum CommandPayload {
     ArrayRect {
         refs: Vec<SelectionRef>,
     },
-    /// ARRAYPOLAR the selected refs around `center` (ADR 0016 decision D).
-    ///
-    /// `center` is the captured array centre; the item count, fill angle and
-    /// rotate-items flag are the session typed channel
-    /// ([`crate::draw_tool::ToolParameter::ArrayItems`] … `ArrayRotateItems`).
-    /// The source refs are retained; every copy is a fresh entity in one
-    /// transaction. Associativity is NOT IMPLEMENTED.
+    /// ARRAYPOLAR the selected refs around `center` (ADR 0016 decision D). `center`
+    /// is the captured array centre; the item count, fill angle and rotate-items flag
+    /// are the session typed channel (`ArrayItems` … `ArrayRotateItems`). The source
+    /// refs are retained in one transaction; associativity is NOT IMPLEMENTED.
     ArrayPolar {
         refs: Vec<SelectionRef>,
         center: Point3,
+    },
+    /// ARRAYPATH: 2D path array v1 (first selected = path, rest = items; `count` positions; optional `align`).
+    ArrayPath {
+        count: usize,
+        align: bool,
     },
     /// ALIGN the selected refs from two point pairs (ADR 0016 decision F).
     ///

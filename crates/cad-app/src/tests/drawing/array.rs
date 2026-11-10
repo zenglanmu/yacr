@@ -15,7 +15,7 @@ fn set_number(session: &mut SessionState, parameter: ToolParameter, value: f64) 
 
 /// A drawing with one LINE (id 1) `(0,0)-(2,0)` on layer 0. Its bounding-box
 /// lower-left is the origin, so it is a clean array base point.
-fn one_line_app() -> (Application, SessionState) {
+pub(super) fn one_line_app() -> (Application, SessionState) {
     array_app(vec![(
         1,
         SemanticGeometry::Line {
@@ -48,7 +48,7 @@ fn line_and_opaque_app() -> (Application, SessionState) {
 }
 
 /// Build an application with layer 0 and the given model-space entities.
-fn array_app(entities: Vec<(u128, SemanticGeometry)>) -> (Application, SessionState) {
+pub(super) fn array_app(entities: Vec<(u128, SemanticGeometry)>) -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -80,7 +80,7 @@ fn array_app(entities: Vec<(u128, SemanticGeometry)>) -> (Application, SessionSt
 
 /// Every model-space LINE's `(start, end)`, sorted by `(start, end)` so the array
 /// assertions are order-independent.
-fn all_lines(app: &Application) -> Vec<(Point3, Point3)> {
+pub(super) fn all_lines(app: &Application) -> Vec<(Point3, Point3)> {
     let mut lines: Vec<(Point3, Point3)> = app.workspace.documents[&DocumentId(1)]
         .drawing
         .model_space()
@@ -117,13 +117,13 @@ fn lines_near(actual: &[(Point3, Point3)], expected: &[(Point3, Point3)]) -> boo
             .all(|((a0, a1), (e0, e1))| near(*a0, *e0) && near(*a1, *e1))
 }
 
-fn entity_count(app: &Application) -> usize {
+pub(super) fn entity_count(app: &Application) -> usize {
     app.workspace.documents[&DocumentId(1)]
         .drawing
         .entity_count()
 }
 
-fn undo_depth(app: &Application) -> usize {
+pub(super) fn undo_depth(app: &Application) -> usize {
     app.history
         .get(&DocumentId(1))
         .map(|history| history.undo_depth())

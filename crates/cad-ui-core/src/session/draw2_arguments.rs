@@ -8,8 +8,9 @@
 use cad_app::{CommandId, CommandPayload};
 
 use super::commands::{
-    parse_donut_argument, parse_draworder_argument, parse_helix_argument, parse_mline_argument,
-    parse_mlstyle_argument, parse_mpedit_argument, parse_solid_argument, parse_trex_argument,
+    invalid_arraypath_argument_reason, parse_arraypath_argument, parse_donut_argument,
+    parse_draworder_argument, parse_helix_argument, parse_mline_argument, parse_mlstyle_argument,
+    parse_mpedit_argument, parse_solid_argument, parse_trex_argument, ARRAYPATH_SELECTOR,
     DONUT_SELECTOR, HELIX_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MPEDIT_SELECTOR,
     SOLID_SELECTOR, TREX_SELECTOR,
 };
@@ -50,6 +51,33 @@ impl CadSession {
             .core
             .command(id, CommandPayload::Draw2(Box::new(payload)))
         {
+            Ok(()) => {
+                *self.error.borrow_mut() = None;
+                Ok(())
+            }
+            Err(error) => {
+                let text = cad_error_text(&error);
+                *self.error.borrow_mut() = Some(text.clone());
+                Err(text)
+            }
+        }
+    }
+
+    /// Apply one typed `ARRAYPATH <count> [ALIGN]` line.
+    ///
+    /// The count and the align flag ride the payload; the **current selection**
+    /// (first entity = path) is the whole input, exactly like the other
+    /// selection-based modify forms. A malformed argument is refused before IPC
+    /// with the stable reason and changes nothing.
+    pub(super) fn arraypath_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some((count, align)) = parse_arraypath_argument(argument) else {
+            return self.refuse_argument(invalid_arraypath_argument_reason(text));
+        };
+        self.core.record_command(ARRAYPATH_SELECTOR);
+        match self.core.command(
+            CommandId::ArrayPath,
+            CommandPayload::ArrayPath { count, align },
+        ) {
             Ok(()) => {
                 *self.error.borrow_mut() = None;
                 Ok(())

@@ -533,6 +533,22 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return parts.length === 2 && parts.every(isSignedDecimal);
     },
   }),
+  /**
+   * `ARRAYPATH <count> [ALIGN]` (2026-11-10): the typed 2D path-array form. The
+   * current selection is the input — the first selected entity is the path, the
+   * rest are items — so only the count and the optional `ALIGN` word are grammar
+   * here. The count is one positive whole number; the host re-checks it and caps
+   * the total copy count.
+   */
+  ARRAYPATH: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      if (parts.length === 0 || parts.length > 2) return false;
+      if (!/^[0-9]+$/.test(parts[0])) return false;
+      if (Number.parseInt(parts[0], 10) <= 0) return false;
+      return parts.length === 1 || parts[1].toUpperCase() === 'ALIGN';
+    },
+  }),
 
 });
 

@@ -476,6 +476,182 @@ fn division_points(
     }
 }
 
+/// The path kinds an ARRAYPATH distribution supports (exactly DIVIDE's set).
+const ARRAY_PATH_KINDS: &str = "LINE, ARC, CIRCLE, SPLINE, ELLIPSE or LWPOLYLINE";
+
+/// The equal-arc-length positions along `geometry` for an ARRAYPATH.
+///
+/// `count` positions sit at `i / (count - 1)` of the path arc length for
+/// `count >= 2` (**both ends included**); `count == 1` places the single position
+/// at the path start. Each position carries the curve's local XY tangent angle in
+/// radians. The supported kinds and the underlying curve model are exactly
+/// [`division_points`]'s; every other kind and a path with no measurable length
+/// is an explicit refusal, never a fabricated position.
+pub(super) fn path_distribution(
+    geometry: &SemanticGeometry,
+    count: usize,
+) -> CadResult<Vec<(Point3, f64)>> {
+    if count == 0 {
+        return Err(refusal(
+            "arraypath.invalid_count",
+            "ARRAYPATH needs a positive position count",
+        ));
+    }
+    let fractions: Vec<f64> = if count == 1 {
+        vec![0.0]
+    } else {
+        (0..count)
+            .map(|index| index as f64 / (count - 1) as f64)
+            .collect()
+    };
+    match geometry {
+        SemanticGeometry::Line { .. }
+        | SemanticGeometry::Arc { .. }
+        | SemanticGeometry::Circle { .. } => {
+            let curve = TargetCurve::new(geometry, "ARRAYPATH", ARRAY_PATH_KINDS)?;
+            let length = curve.length();
+            let eps = cut_tolerance();
+            if !length.is_finite() || length <= eps {
+                return Err(path_degenerate("LINE/ARC/CIRCLE"));
+            }
+            Ok(fractions
+                .iter()
+                .map(|&u| (curve.point_at(u), curve_tangent_angle(&curve, u)))
+                .collect())
+        }
+        SemanticGeometry::Spline { .. } => {
+            let curve = TargetCurve::new(geometry, "ARRAYPATH", ARRAY_PATH_KINDS)?;
+            sampled_path_positions(|u| curve.point_at(u), &fractions)
+        }
+        SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => {
+            let point_at =
+                ellipse_path_point_at(*center, *normal, *major_axis, *ratio, *start, *sweep)?;
+            sampled_path_positions(point_at, &fractions)
+        }
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed,
+        } => {
+            if points.iter().any(|point| !is_finite_point(*point)) {
+                return Err(refusal(
+                    "arraypath.degenerate",
+                    "ARRAYPATH polyline vertices must be finite",
+                ));
+            }
+            let curve = PolylineCurve::new(points, bulges, *closed, "arraypath")?;
+            let total = curve.total_length();
+            let eps = cut_tolerance();
+            if !total.is_finite() || total <= eps {
+                return Err(path_degenerate("LWPOLYLINE"));
+            }
+            Ok(fractions
+                .iter()
+                .map(|&fraction| {
+                    let distance = total * fraction;
+                    (
+                        curve.point_at_distance(distance),
+                        polyline_tangent_angle(&curve, distance, total),
+                    )
+                })
+                .collect())
+        }
+        other => Err(CadError::Unsupported(format!(
+            "ARRAYPATH supports LINE, ARC, CIRCLE, SPLINE, ELLIPSE and LWPOLYLINE only; {} is not \
+             supported",
+            kind_name(other)
+        ))),
+    }
+}
+
+/// The `arraypath.degenerate` refusal for a path with no measurable length.
+fn path_degenerate(kind: &str) -> CadError {
+    refusal(
+        "arraypath.degenerate",
+        format!("the ARRAYPATH path {kind} has no measurable length"),
+    )
+}
+
+/// Equal-arc-length positions on a sampled curve at the given normalized
+/// distances, each with its local tangent angle.
+fn sampled_path_positions(
+    point_at: impl Fn(f64) -> Point3,
+    fractions: &[f64],
+) -> CadResult<Vec<(Point3, f64)>> {
+    let table = ArcLengthTable::sample(&point_at);
+    let total = table.total();
+    let eps = cut_tolerance();
+    if !total.is_finite() || total <= eps {
+        return Err(path_degenerate("sampled"));
+    }
+    let h = 1e-6;
+    Ok(fractions
+        .iter()
+        .map(|&fraction| {
+            let u = table.parameter_at(total * fraction);
+            (
+                point_at(u),
+                direction_angle(point_at(u + h), point_at(u - h)),
+            )
+        })
+        .collect())
+}
+
+/// The validated ELLIPSE parameter mapping used by [`path_distribution`].
+fn ellipse_path_point_at(
+    center: Point3,
+    normal: Point3,
+    major_axis: Point3,
+    ratio: f64,
+    start: f64,
+    sweep: f64,
+) -> CadResult<impl Fn(f64) -> Point3> {
+    let eps = cut_tolerance();
+    let major_len = cad_geometry::length(major_axis);
+    let normal_len = cad_geometry::length(normal);
+    let ratio = ratio.abs();
+    if !major_len.is_finite()
+        || major_len <= eps
+        || !normal_len.is_finite()
+        || normal_len <= eps
+        || !ratio.is_finite()
+        || ratio <= eps
+        || !sweep.is_finite()
+        || sweep.abs() <= eps
+    {
+        return Err(path_degenerate("ELLIPSE"));
+    }
+    if sweep.abs() > std::f64::consts::TAU + 1e-9 {
+        return Err(refusal(
+            "arraypath.degenerate",
+            format!("the ARRAYPATH path ELLIPSE sweeps more than one full turn: {sweep}"),
+        ));
+    }
+    let unit_major = cad_geometry::scale(major_axis, 1.0 / major_len);
+    let cross = cad_geometry::cross(normal, unit_major);
+    let cross_len = cad_geometry::length(cross);
+    if !cross_len.is_finite() || cross_len <= eps {
+        return Err(path_degenerate("ELLIPSE"));
+    }
+    let unit_minor = cad_geometry::scale(cross, 1.0 / cross_len);
+    let minor = cad_geometry::scale(unit_minor, major_len * ratio);
+    Ok(move |u: f64| {
+        let angle = start + sweep * u;
+        Point3 {
+            x: center.x + angle.cos() * major_axis.x + angle.sin() * minor.x,
+            y: center.y + angle.cos() * major_axis.y + angle.sin() * minor.y,
+            z: center.z + angle.cos() * major_axis.z + angle.sin() * minor.z,
+        }
+    })
+}
+
 /// The equal-arc-length marks of an ELLIPSE (or elliptical arc).
 fn ellipse_division_points(
     center: Point3,

@@ -94,3 +94,26 @@ test('every new catalog label resolves in both catalogs', async () => {
     assert.equal(typeof en[key], 'string', `${key} (en)`);
   }
 });
+
+test('ARRAYPATH is a real typed path-array command, not a refusal', () => {
+  const row = COMMAND_CATALOG.find(command => command.id === 'ARRAYPATH');
+  assert.ok(row, 'ARRAYPATH is catalogued');
+  assert.equal(row.labelKey, 'draw.kind.arraypath');
+  assert.equal(COMMAND_CATALOG.filter(command => command.id === 'ARRAYPATH').length, 1);
+  assert.equal(isSupportedCommand('ARRAYPATH'), true);
+  assert.equal(DOCUMENT_SCOPED_COMMANDS.includes('ARRAYPATH'), true);
+
+  const parse = ARGUMENT_COMMANDS.ARRAYPATH.parse;
+  assert.equal(parse('4'), true);
+  assert.equal(parse('1'), true);
+  assert.equal(parse('4 ALIGN'), true);
+  assert.equal(parse('4 align'), true);
+  assert.equal(parse('0'), false);
+  assert.equal(parse('-1'), false);
+  assert.equal(parse('+3'), false);
+  assert.equal(parse('2.5'), false);
+  assert.equal(parse('1e3'), false);
+  assert.equal(parse(''), false);
+  assert.equal(parse('4 ROTATE'), false);
+  assert.equal(parse('4 ALIGN EXTRA'), false);
+});

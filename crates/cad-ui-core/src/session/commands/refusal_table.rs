@@ -31,7 +31,6 @@ pub const REFUSAL_TABLE: &[(&str, CommandId)] = &[
     ("ANIPATH", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Anipath))),
     ("APPAUTOLOADER", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Appautoloader))),
     ("APPSTORE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Appstore))),
-    ("ARRAYPATH", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Arraypath))),
     ("ASSISTANTCLOSE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Assistantclose))),
     ("ASSISTANTOPEN", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Assistantopen))),
     ("ATTACHURL", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Attachurl))),
