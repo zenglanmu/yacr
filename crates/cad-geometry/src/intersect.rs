@@ -206,6 +206,10 @@ pub(crate) fn conic_of(geometry: &SemanticGeometry) -> Option<Conic> {
         // leader paths/arrowheads/doglegs/text, so the sampled fallback in
         // `intersect_local` flattens the display (ADR 0019 decision G).
         SemanticGeometry::MultiLeader(_) => None,
+        // A TABLE is not one conic primitive either: its display is grid lines
+        // and cell text, so the sampled fallback in `intersect_local` flattens
+        // the display.
+        SemanticGeometry::Table(_) => None,
         _ => None,
     }
 }

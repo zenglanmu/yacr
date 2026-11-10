@@ -314,6 +314,9 @@ pub(super) fn emit(
             acc,
             stack,
         ),
+        // A first-class TABLE is written as a real `ACAD_TABLE` entity from the
+        // domain grid; the derived display is never written as the entity.
+        SemanticGeometry::Table(table) => super::table::emit_table(doc, entity, table, ctx, acc),
         leaf => {
             let owned;
             let placed: &SemanticGeometry = if transform == &Transform3::identity() {
@@ -721,6 +724,17 @@ fn emit_leaf(
                 ]),
             );
         }
+        // A TABLE is written by the dedicated entity writer before this point.
+        SemanticGeometry::Table(_) => {
+            acc.record(
+                object,
+                "internal",
+                MappingOutcome::Dropped(vec![
+                    "table reached the leaf mapper; it is written by the dedicated TABLE writer"
+                        .into(),
+                ]),
+            );
+        }
     }
     Ok(())
 }
@@ -803,6 +817,7 @@ pub(crate) fn kind_name(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Dimension(_) => "Dimension",
         SemanticGeometry::Hatch(_) => "Hatch",
         SemanticGeometry::MultiLeader(_) => "MultiLeader",
+        SemanticGeometry::Table(_) => "Table",
         SemanticGeometry::Image { .. } => "Image",
         SemanticGeometry::Mask { .. } => "Mask",
     }

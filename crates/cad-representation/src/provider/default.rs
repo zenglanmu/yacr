@@ -236,6 +236,9 @@ impl DefaultRepresentationProvider {
             // A multileader renders its display children, exactly like the
             // compound it used to be (ADR 0019 decision G).
             SemanticGeometry::MultiLeader(multileader) => Some(multileader.display()),
+            // A table renders its display children (grid lines and cell text),
+            // exactly like the compound it used to be.
+            SemanticGeometry::Table(table) => Some(table.display()),
             _ => None,
         };
         if let Some(children) = grouped {

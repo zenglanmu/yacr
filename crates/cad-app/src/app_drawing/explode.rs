@@ -290,6 +290,12 @@ fn explode_source(
         // is), arrowhead triangle meshes, doglegs and the annotation text as
         // MTEXT. Parts this build cannot represent are named refusals.
         SemanticGeometry::MultiLeader(leader) => explode_multileader(source, leader, out),
+        // A real TABLE has no explosion model in this build: its display is a
+        // derived grid, not a set of source entities. Refuse by name instead of
+        // silently flattening it.
+        SemanticGeometry::Table(_) => Err(CadError::Unsupported(
+            "EXPLODE refuses AcDbTable: no table explosion model is implemented".into(),
+        )),
         other => Err(CadError::Unsupported(format!(
             "EXPLODE cannot explode {}: only LWPOLYLINE, INSERT and Compound are \
              decomposable",
@@ -773,7 +779,8 @@ fn push_display_child(
         | SemanticGeometry::Compound(_)
         | SemanticGeometry::Dimension(_)
         | SemanticGeometry::Hatch(_)
-        | SemanticGeometry::MultiLeader(_) => Err(child_refusal(&geometry)),
+        | SemanticGeometry::MultiLeader(_)
+        | SemanticGeometry::Table(_) => Err(child_refusal(&geometry)),
         _ => {
             out.push(Produced {
                 layer,
@@ -812,7 +819,8 @@ fn push_produced(
         | SemanticGeometry::Dimension(_)
         | SemanticGeometry::Compound(_)
         | SemanticGeometry::Hatch(_)
-        | SemanticGeometry::MultiLeader(_) => Err(child_refusal(&geometry)),
+        | SemanticGeometry::MultiLeader(_)
+        | SemanticGeometry::Table(_) => Err(child_refusal(&geometry)),
         _ => {
             let type_key = class_name(&geometry).to_string();
             out.push(Produced {
@@ -874,6 +882,9 @@ fn child_refusal(geometry: &SemanticGeometry) -> CadError {
         }
         SemanticGeometry::MultiLeader(_) => {
             "EXPLODE does not decompose a MULTILEADER member inside a compound in this build"
+        }
+        SemanticGeometry::Table(_) => {
+            "EXPLODE does not decompose an AcDbTable: no table explosion model is implemented"
         }
         _ => "EXPLODE does not decompose this kind",
     };

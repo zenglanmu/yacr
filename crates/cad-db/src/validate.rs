@@ -420,6 +420,74 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                 validate_geometry(child)?;
             }
         }
+        SemanticGeometry::Table(table) => {
+            // A table's plane frame must be usable, every stored length finite
+            // and non-negative, every merge span inside the grid, and every
+            // derived display child valid. The total extent must stay positive:
+            // a zero-extent grid has nothing to draw and is not a meaningful
+            // write target.
+            let frame = table.frame();
+            if !finite(frame.origin) || !finite(frame.horizontal) || !finite(frame.normal) {
+                return Err(degenerate("table plane frame is non-finite"));
+            }
+            if length(frame.horizontal) < MIN_GEOMETRY_EXTENT
+                || length(frame.normal) < MIN_GEOMETRY_EXTENT
+            {
+                return Err(degenerate("table plane frame is degenerate"));
+            }
+            if table.columns().is_empty() || table.rows().is_empty() {
+                return Err(degenerate("table has no rows or columns"));
+            }
+            let mut total_width = 0.0;
+            for column in table.columns() {
+                if !column.width.is_finite() || column.width < 0.0 {
+                    return Err(degenerate(
+                        "table column width must be finite and non-negative",
+                    ));
+                }
+                total_width += column.width;
+            }
+            let mut total_height = 0.0;
+            for row in table.rows() {
+                if !row.height.is_finite() || row.height < 0.0 {
+                    return Err(degenerate(
+                        "table row height must be finite and non-negative",
+                    ));
+                }
+                total_height += row.height;
+            }
+            if total_width <= MIN_GEOMETRY_EXTENT || total_height <= MIN_GEOMETRY_EXTENT {
+                return Err(degenerate("table has no positive extent"));
+            }
+            for (row_index, row) in table.rows().iter().enumerate() {
+                for (column_index, cell) in row.cells.iter().enumerate() {
+                    if column_index >= table.columns().len()
+                        || column_index + cell.merge_width.max(1) as usize > table.columns().len()
+                        || row_index + cell.merge_height.max(1) as usize > table.rows().len()
+                    {
+                        return Err(degenerate("table cell or merge span lies outside the grid"));
+                    }
+                    if !cell.borders.top.double_spacing.is_finite()
+                        || !cell.borders.right.double_spacing.is_finite()
+                        || !cell.borders.bottom.double_spacing.is_finite()
+                        || !cell.borders.left.double_spacing.is_finite()
+                    {
+                        return Err(degenerate("table border spacing is non-finite"));
+                    }
+                    if !cell.text_height.is_finite() || cell.text_height <= 0.0 {
+                        return Err(degenerate(
+                            "table cell text height must be positive and finite",
+                        ));
+                    }
+                }
+            }
+            if table.display().is_empty() {
+                return Err(degenerate("table has no display geometry"));
+            }
+            for child in table.display() {
+                validate_geometry(child)?;
+            }
+        }
         SemanticGeometry::Hatch(hatch) => {
             // A hatch must have at least one loop with three finite vertices;
             // bulges and seeds are finite; the derived display is validated like

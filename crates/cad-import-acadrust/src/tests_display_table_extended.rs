@@ -33,6 +33,14 @@ fn collect_lines(geometry: &SemanticGeometry, out: &mut Vec<(Point3, Point3)>) {
                 collect_lines(child, out);
             }
         }
+        // A TABLE is a first-class entity whose display is the same grid it
+        // used to emit as a `Compound`; recurse so the line contract is
+        // unchanged.
+        SemanticGeometry::Table(table) => {
+            for child in table.display() {
+                collect_lines(child, out);
+            }
+        }
         _ => {}
     }
 }
@@ -225,6 +233,52 @@ fn table_merged_interior_edge_is_suppressed() {
             .iter()
             .any(|r| r.contains("table grid and cell text drawn")),
         "{reasons:?}"
+    );
+}
+
+// ---- PART 1b: first-class Table variant ----
+
+#[test]
+fn table_semantics_is_a_first_class_table_variant_with_text_and_borders() {
+    let acad = acadrust::CadDocument::new();
+    let req = make_request();
+    let builder = ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
+
+    let mut table = acadrust::entities::Table::new(acadrust::types::Vector3::ZERO, 2, 2);
+    table.set_column_width(0, 4.0);
+    table.set_column_width(1, 6.0);
+    table.set_row_height(0, 3.0);
+    table.set_row_height(1, 2.0);
+    table.set_cell_text(0, 0, "Total");
+    table.rows[0].cells[0].merge_width = 2;
+    let mut style = acadrust::entities::CellStyle::new();
+    style.top_border.invisible = true;
+    table.rows[1].cells[1].style = Some(style);
+
+    let (geometry, completeness) = builder.table_semantics(&table);
+    let SemanticGeometry::Table(table_geometry) = &geometry else {
+        panic!("expected a first-class Table, got {geometry:?}");
+    };
+    assert_eq!(table_geometry.rows().len(), 2);
+    assert_eq!(table_geometry.columns().len(), 2);
+    assert_eq!(table_geometry.cell(0, 0).unwrap().text, "Total");
+    assert_eq!(table_geometry.cell(0, 0).unwrap().merge_width, 2);
+    assert!(
+        !table_geometry.cell(1, 1).unwrap().borders.top.visible,
+        "the style's invisible top edge is preserved"
+    );
+    assert!(
+        table_geometry.cell(0, 1).unwrap().borders.top.visible,
+        "an unstyled cell keeps the visible default"
+    );
+    // The display is the same grid the old Compound emitted: the merged anchor
+    // (4 edges), the two unmerged cells (4 + 3 visible edges), plus one text.
+    assert_eq!(lines(&geometry).len(), 11, "{:?}", table_geometry.display());
+    assert_eq!(table_geometry.texts(), vec!["Total".to_string()]);
+    assert!(matches!(completeness, Completeness::Partial(_)));
+    assert_eq!(
+        entity_class_name(&EntityType::Table(Box::new(table.clone()))),
+        "AcDbTable"
     );
 }
 

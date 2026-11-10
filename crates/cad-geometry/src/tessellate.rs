@@ -153,6 +153,15 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
             }
             out
         }
+        // A table is drawn from its derived display children (grid lines and
+        // cell text), exactly like the pre-table-entity compound.
+        G::Table(table) => {
+            let mut out = Vec::new();
+            for child in table.display() {
+                out.extend(tessellate_geometry(child, params));
+            }
+            out
+        }
         G::Compound(children) => {
             let mut out = Vec::new();
             for child in children {

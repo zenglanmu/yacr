@@ -1324,13 +1324,13 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `CONVERTCTB` | **部分实现**：具名拒绝（`convertctb.unsupported`）：CTB 转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERTPOLY` | **部分实现**：只读报告（`convertpoly.single_representation`）：本构建只存一种 `LWPOLYLINE` 表示，无旧式多段线可转换。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERT` | **部分实现**：具名拒绝（`convert.unsupported`）：通用对象转换未实现。 | 不写库/不升修订/不入历史（报告类只读） |
-| `TABLE` | **部分实现**：具名拒绝（`table.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
-| `-TABLE` | **部分实现**：具名拒绝（`-table.unsupported`）：表格创建的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
-| `TABLEDIT` | **部分实现**：具名拒绝（`tabledit.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
-| `TABLEEXPORT` | **部分实现**：具名拒绝（`tableexport.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
-| `TABLESTYLE` | **部分实现**：具名拒绝（`tablestyle.unsupported`）：无表格样式模型。 | 不写库/不升修订/不入历史（报告类只读） |
-| `TINSERT` | **部分实现**：具名拒绝（`tinsert.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
-| `MATCHCELL` | **部分实现**：具名拒绝（`matchcell.unsupported`）：无表格实体模型。 | 不写库/不升修订/不入历史（报告类只读） |
+| `TABLE` | **部分实现（真实导入模型 + 创建拒绝）**：导入的 `ACAD_TABLE` 现在是 `SemanticGeometry::Table`（行/列/单元格/合并/文字/边框 + 派生显示），可 MOVE/ROTATE/SCALE（相似变换）、可拾取/显示/FIND、真实 DXF `ACAD_TABLE` 导出；创建按 `table.unsupported` 拒绝 | 单元格块/字段内容、边框颜色/线宽/填充、表格样式对象、TABLECONTENT 的 name/description 不往返；EXPLODE 仍拒绝；无 GUI/像素/真实 DWG 对照 |
+| `-TABLE` | **部分实现（创建拒绝）**：命令行拼写；导入模型与 `TABLE` 相同 | 创建未实现 |
+| `TABLEDIT` | **部分实现（拒绝）**：导入表格可显示/变换/查询；无单元格编辑命令面 | `tabledit.unsupported` |
+| `TABLEEXPORT` | **部分实现（拒绝）**：单元格数据在模型里，但无 CSV/文件写出 | `tableexport.unsupported` |
+| `TABLESTYLE` | **部分实现（拒绝）**：导入时按样式解析边框可见性/双线；无表格样式表 | `tablestyle.unsupported` |
+| `TINSERT` | **部分实现（拒绝）**：无块进入单元格的创建；导入单元格块内容未建模 | `tinsert.unsupported` |
+| `MATCHCELL` | **部分实现（拒绝）**：无单元格样式复制面 | `matchcell.unsupported` |
 | `FIELD` | **部分实现**：具名拒绝（`field.unsupported`）：字段未实现（无字段模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `RTEXT` | **部分实现**：具名拒绝（`rtext.unsupported`）：远程文字未实现（无 RTEXT 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `RTEDIT` | **部分实现**：具名拒绝（`rtedit.unsupported`）：远程文字未实现（无 RTEXT 模型）。 | 不写库/不升修订/不入历史（报告类只读） |

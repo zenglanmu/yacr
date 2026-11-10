@@ -846,5 +846,7 @@ fn child_kind(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Dimension(_) => "Dimension",
         SemanticGeometry::Hatch(_) => "Hatch",
         SemanticGeometry::MultiLeader(_) => "MultiLeader",
+        // A dimension's display never contains a table (defensive kind name).
+        SemanticGeometry::Table(_) => "Table",
     }
 }

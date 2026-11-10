@@ -39,6 +39,9 @@ pub(crate) fn class_name(geometry: &SemanticGeometry) -> &'static str {
         // `type_key` refusal and the importer's `AcDbMultiLeader` agree
         // (ADR 0019 decision G).
         SemanticGeometry::MultiLeader(_) => "AcDbMultiLeader",
+        // A table keeps its source type key so EXPLODE's explicit `type_key`
+        // refusal and the importer's `AcDbTable` agree.
+        SemanticGeometry::Table(_) => "AcDbTable",
     }
 }
 

@@ -71,7 +71,7 @@
 > **2026-11-09 增补（Wave 10）**：`-LAYER` 只读图层表、`-SCALELISTEDIT` 只读真实比例表、`LAYERSTATESAVE`/`NEWVIEW` 两个载荷路由、`LWEIGHT`/`-LWEIGHT`/`COLOR`/`-COLOR`/`-UNITS`/`COPYHIST` 六个只读会话/日志报告、`HELP`…`TRANSPARENCY` 十个具名拒绝，以及 `DSETTINGS`/`QUICKPROPERTIES`/`CLASSICLAYER`/`COMMANDLINE`/`COMMANDLINEHIDE` 五个 chrome 本地选择子计入 **473 已实现（66 完整 + 407 部分）/ 508 未实现**；无 GUI/GPU/像素证据。
 > **2026-11-09 增补（Wave 11）**：`3DALIGN`…`3DZOOM` 二十五个 3D/网格/曲面/3D 导航/打印名全部按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史）；3D 优先级低于 2D，本批只提供诚实命令路径，不计为可用 3D 功能。计入 **498 已实现（66 完整 + 432 部分）/ 483 未实现**。
 > **2026-11-09 增补（Wave 12）**：`3DSIN`…`SCRIPT` 二十五个文件/导入导出/扩展运行时名全部按**具名拒绝**计入（`CadError::Unsupported` + 稳定原因串；不写库/不升修订/不入历史）；唯一矢量输出仍是 `PLOT`（SVG/PDF）。计入 **523 已实现（66 完整 + 457 部分）/ 458 未实现**。
-> **2026-11-09 增补（Wave 13）**：`PAGESETUP`/`-PAGESETUP` 只读页面设置报告、`CONVERTPOLY` 只读单一多段线表示报告，以及 `PSETUPIN`…`LAYTRANS` 二十二个具名拒绝（页面设置导入/打印样式/表格/字段/远程文字/拼写/超级填充/视口对齐同步/图层转换）计入 **548 已实现（66 完整 + 482 部分）/ 433 未实现**；无 GUI/GPU/像素证据。
+> **2026-11-09 增补（Wave 13）**：`PAGESETUP`/`-PAGESETUP` 只读页面设置报告、`CONVERTPOLY` 只读单一多段线表示报告，以及 `PSETUPIN`…`LAYTRANS` 二十二个具名拒绝（页面设置导入/打印样式/表格/字段/远程文字/拼写/超级填充/视口对齐同步/图层转换；表格实体模型已于 2026-11-10 落地——导入/变换/FIND/导出真实，创建/编辑仍拒绝）计入 **548 已实现（66 完整 + 482 部分）/ 433 未实现**；无 GUI/GPU/像素证据。
 > **2026-11-09 增补（Wave 14）**：`BOX`…`ROTATE3D` 二十五个 3D 实体图元/布尔/剖切/边编辑名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D，不计为可用 3D 功能。计入 **573 已实现（66 完整 + 507 部分）/ 408 未实现**。
 > **2026-11-09 增补（Wave 15）**：`SURFBLEND`…`MESHUNCREASE` 二十五个曲面/网格名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D。计入 **598 已实现（66 完整 + 532 部分）/ 383 未实现**。
 > **2026-11-09 增补（Wave 16）**：`IMAGE`…`DGNADJUST` 二十五个图像/PDF/DGN 底图名全部按**具名拒绝**计入（`IMAGE`/`-IMAGE`/`IMAGEATTACH`/`IMAGECLIP` 已于 2026-11-10 晋升：前两者只读报告、后两者真实写入；其余仍拒绝）（稳定原因串，不写库/不升修订/不入历史）。计入 **623 已实现（66 完整 + 557 部分）/ 358 未实现**。
@@ -257,7 +257,7 @@
 | `-RENAME` | 部分实现 | `RENAME` 的别名，同一实现；图层重命名一条事务/一步撤销。 |
 | `-SCALELISTEDIT` | 部分实现 | 只读报告真实 `ACAD_SCALELIST`（`scalelistedit.entry`）；创建/编辑/删除/排序比例未实现（`scalelistedit.write_unsupported`）。 |
 | `-STYLE` | 部分实现 | 与 `STYLE` 相同的只读文字样式列表，使用 `-style.*` 诊断码；编辑未实现。 |
-| `-TABLE` | 部分实现 | 具名拒绝（`-table.unsupported`）：表格创建的命令行拼写。 |
+| `-TABLE` | 部分实现 | 表格创建的命令行拼写；**导入的 ACAD_TABLE 已建模**（行/列/单元格/合并/文字/边框，可变换/拾取/显示/FIND/真实 DXF 导出）；创建未实现（`-table.unsupported`）。
 | `-UNITS` | 部分实现 | 只读报告固定单位显示规则（`-units.*` 诊断码）；Units 对话框/逐图纸单位表未实现。 |
 | `-VIEW` | 部分实现 | `VIEW` 的别名，同一实现 |
 | `-VPORTS` | 部分实现 | `VPORTS` 的别名，同一实现；同一边界 |
@@ -737,7 +737,7 @@
 | `MASSPROP` | 部分实现 | 只读；仅选定闭合共面圆/完整椭圆/闭合多段线；面积/周长/包围盒/形心。椭圆周长近似；无惯性矩/主轴/体积/密度/`.mpr` |
 | `MATBROWSERCLOSE` | 部分实现 | 具名拒绝（`matbrowserclose.unsupported: this build has no material/texture model`）。 |
 | `MATBROWSEROPEN` | 部分实现 | 具名拒绝（`matbrowseropen.unsupported: this build has no material/texture model`）。 |
-| `MATCHCELL` | 部分实现 | 具名拒绝（`matchcell.unsupported`）：无表格实体模型。 |
+| `MATCHCELL` | 部分实现 | **无单元格样式复制面**（`matchcell.unsupported`）。
 | `MATCHPROP` | 已实现 | Basic 六项 + Settings 子集；Text 组复制文字样式与字体、Dimension 组复制标注样式、Hatch 组复制填充样式/图案/渐变；**不**复制字高、标注覆盖值与填充原点（与 AutoCAD 一致）；异类目标跳过该组并报告 |
 | `MATEDITORCLOSE` | 部分实现 | 具名拒绝（`mateditorclose.unsupported: this build has no material/texture model`）。 |
 | `MATEDITOROPEN` | 部分实现 | 具名拒绝（`mateditoropen.unsupported: this build has no material/texture model`）。 |
@@ -935,10 +935,10 @@
 | `SYSVARMONITOR` | 部分实现 | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | `SYSVDLG` | 部分实现 | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
 | `SYSWINDOWS` | 部分实现 | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
-| `TABLE` | 部分实现 | 具名拒绝（`table.unsupported`）：无表格实体模型。 |
-| `TABLEDIT` | 部分实现 | 具名拒绝（`tabledit.unsupported`）：无表格实体模型。 |
-| `TABLEEXPORT` | 部分实现 | 具名拒绝（`tableexport.unsupported`）：无表格实体模型。 |
-| `TABLESTYLE` | 部分实现 | 具名拒绝（`tablestyle.unsupported`）：无表格样式模型。 |
+| `TABLE` | 部分实现 | **导入的 ACAD_TABLE 已建模**：行/列/单元格/合并/文字/边框，可 MOVE/ROTATE/SCALE、可拾取/显示、可 FIND、真实 DXF 导出；创建未实现（`table.unsupported`）；单元格块/字段内容、边框颜色/线宽/填充为声明损失。
+| `TABLEDIT` | 部分实现 | 导入表格可显示/变换；**无单元格编辑命令面**（`tabledit.unsupported`）。
+| `TABLEEXPORT` | 部分实现 | **无 CSV/文件写出**（`tableexport.unsupported`）；表格单元格数据已在模型里。
+| `TABLESTYLE` | 部分实现 | **无表格样式表**（`tablestyle.unsupported`）；导入时只按样式解析边框可见性/双线。
 | `TABLET` | 部分实现 | 具名拒绝（`tablet.unsupported`）：本构建无数字化仪模型。 |
 | `TASKBAR` | 部分实现 | 具名拒绝（`taskbar.unsupported`）：应用窗口装饰由宿主负责。 |
 | `TCASE` | 部分实现 | Express 工具、选择式：只改 Text/MText 的可见字符大小写；裸命令默认 Title，键入 `TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE`（或 `U/L/T/S/G`）；MTEXT 格式转义逐字保留；属性/标注文字未建模（`tcase.not_reset`）；MULTILEADER 走 `with_text` |
@@ -956,7 +956,7 @@
 | `THICKEN` | 部分实现 | 具名拒绝（`thicken.unsupported: no surface-to-solid model`）。 |
 | `TIFOUT` | 部分实现 | 具名拒绝（`tifout.unsupported: raster TIFF export is not implemented; use PLOT for vector SVG/PDF`）。 |
 | `TIME` | 部分实现 | 只读：revision/实体数 + UTC 时钟；创建/编辑时间与会话 uptime 显式 NOT TRACKED |
-| `TINSERT` | 部分实现 | 具名拒绝（`tinsert.unsupported`）：无表格实体模型。 |
+| `TINSERT` | 部分实现 | **无块进入单元格的创建**（`tinsert.unsupported`）；导入的单元格块内容未建模。
 | `TJUST` | 部分实现 | `JUSTIFYTEXT` 的别名，同一语法与实现 |
 | `TOLERANCE` | 部分实现 | 具名拒绝（`tolerance.unsupported`）：无特征控制框（公差）对象模型。 |
 | `TORIENT` | 已实现 | 裸命令 Most Readable、`TORIENT <角度>` 绝对旋转、`TORIENT REVERSE|R` 再加 180°（**本项目扩展**，AutoCAD 2026 无此选项）；只改 TEXT/MTEXT 的 rotation，位置不变；ATTDEF/带属性块因无属性模型不适用（全局范围） |
@@ -1539,7 +1539,7 @@
 | 519 | `MASSPROP` | 部分实现 | Calculates the mass properties of selected 2D regions or 3D solids. | **v1（2026-11-07）只读**：当前选择中的闭合共面 `CIRCLE` / 完整 `ELLIPSE` / 闭合 `POLYLINE`（含任意 bulge，同一平面）；逐对象 + 汇总报告**面积/周长/精确包围盒/形心**。椭圆周长是 Ramanujan 第二近似（`massprop.approx_ellipse_perimeter`），不是精确椭圆积分。**未实现**：惯性矩/惯性积、回转半径、主惯性矩/主轴、质量/体积/3D 实体、密度、`Add`/`Subtract` 组合、写 `.mpr` 文件；非共面/开放折线/圆弧/样条/文字/块参照/填充/标注等按名拒绝。 |
 | 520 | `MATBROWSERCLOSE` | 部分实现 | Closes the Materials Browser. | 具名拒绝（`matbrowserclose.unsupported: this build has no material/texture model`）。 |
 | 521 | `MATBROWSEROPEN` | 部分实现 | Opens the Materials Browser. | 具名拒绝（`matbrowseropen.unsupported: this build has no material/texture model`）。 |
-| 522 | `MATCHCELL` | 部分实现 | Applies the properties of a selected table cell to other table cells. | 具名拒绝（`matchcell.unsupported`）：无表格实体模型。 |
+| 522 | `MATCHCELL` | 部分实现 | Applies the properties of a selected table cell to other table cells. | **无单元格样式复制面**（`matchcell.unsupported`）。
 | 523 | `MATCHPROP` | 已实现 | Applies the properties of a selected object to other objects. | Basic 六项 + Settings 子集；Text 组复制文字样式与字体、Dimension 组复制标注样式、Hatch 组复制填充样式/图案/渐变；**不**复制字高、标注覆盖值与填充原点（与 AutoCAD 一致）；异类目标跳过该组并报告 |
 | 524 | `MATEDITORCLOSE` | 部分实现 | Closes the Materials Editor. | 具名拒绝（`mateditorclose.unsupported: this build has no material/texture model`）。 |
 | 525 | `MATEDITOROPEN` | 部分实现 | Opens the Materials Editor. | 具名拒绝（`mateditoropen.unsupported: this build has no material/texture model`）。 |
@@ -1859,11 +1859,11 @@
 | 839 | `SYSVARMONITOR` | 部分实现 | Monitors a list of system variables and sends notifications when there are changes to any one in the list. | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
 | 840 | `SYSVDLG` | 部分实现 | Allows you to view, edit, save, and restore system variable settings. | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
 | 841 | `SYSWINDOWS` | 部分实现 | Arranges windows and icons when the application window is shared with external applications. | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
-| 842 | `-TABLE` | 部分实现 | Creates an empty table object. | 具名拒绝（`-table.unsupported`）：表格创建的命令行拼写。 |
-| 843 | `TABLE` | 部分实现 | Creates an empty table object. | 具名拒绝（`table.unsupported`）：无表格实体模型。 |
-| 844 | `TABLEDIT` | 部分实现 | Edits text in a table cell. | 具名拒绝（`tabledit.unsupported`）：无表格实体模型。 |
-| 845 | `TABLEEXPORT` | 部分实现 | Exports data from a table object in CSV file format. | 具名拒绝（`tableexport.unsupported`）：无表格实体模型。 |
-| 846 | `TABLESTYLE` | 部分实现 | Creates, modifies, or specifies table styles. | 具名拒绝（`tablestyle.unsupported`）：无表格样式模型。 |
+| 842 | `-TABLE` | 部分实现 | Creates an empty table object. | 表格创建的命令行拼写；**导入的 ACAD_TABLE 已建模**（行/列/单元格/合并/文字/边框，可变换/拾取/显示/FIND/真实 DXF 导出）；创建未实现（`-table.unsupported`）。
+| 843 | `TABLE` | 部分实现 | Creates an empty table object. | **导入的 ACAD_TABLE 已建模**：行/列/单元格/合并/文字/边框，可 MOVE/ROTATE/SCALE、可拾取/显示、可 FIND、真实 DXF 导出；创建未实现（`table.unsupported`）；单元格块/字段内容、边框颜色/线宽/填充为声明损失。
+| 844 | `TABLEDIT` | 部分实现 | Edits text in a table cell. | 导入表格可显示/变换；**无单元格编辑命令面**（`tabledit.unsupported`）。
+| 845 | `TABLEEXPORT` | 部分实现 | Exports data from a table object in CSV file format. | **无 CSV/文件写出**（`tableexport.unsupported`）；表格单元格数据已在模型里。
+| 846 | `TABLESTYLE` | 部分实现 | Creates, modifies, or specifies table styles. | **无表格样式表**（`tablestyle.unsupported`）；导入时只按样式解析边框可见性/双线。
 | 847 | `TABLET` | 部分实现 | Calibrates, configures, and turns on and off an attached digitizing tablet. | 具名拒绝（`tablet.unsupported`）：本构建无数字化仪模型。 |
 | 848 | `TABSURF` | 未实现 | Creates a mesh from a line or curve that is swept along a straight path. | — |
 | 849 | `TARGETPOINT` | 未实现 | Creates a target point light. | — |
@@ -1883,7 +1883,7 @@
 | 863 | `THICKEN` | 部分实现 | Converts a surface into a 3D solid with a specified thickness. | 具名拒绝（`thicken.unsupported: no surface-to-solid model`）。 |
 | 864 | `TIFOUT` | 部分实现 | Saves selected objects to a file in TIFF file format. | 具名拒绝（`tifout.unsupported: raster TIFF export is not implemented; use PLOT for vector SVG/PDF`）。 |
 | 865 | `TIME` | 部分实现 | Displays the date and time statistics of a drawing. | 只读：revision/实体数 + UTC 时钟；创建/编辑时间与会话 uptime 显式 NOT TRACKED |
-| 866 | `TINSERT` | 部分实现 | Inserts a block in a table cell. | 具名拒绝（`tinsert.unsupported`）：无表格实体模型。 |
+| 866 | `TINSERT` | 部分实现 | Inserts a block in a table cell. | **无块进入单元格的创建**（`tinsert.unsupported`）；导入的单元格块内容未建模。
 | 867 | `TJUST` | 部分实现 | Changes the justification point of a text object without moving the text. Works with text, mtext, and attribute definition objects. | `JUSTIFYTEXT` 的别名，同一语法与实现 |
 | 868 | `TOLERANCE` | 部分实现 | Creates geometric tolerances contained in a feature control frame. | 具名拒绝（`tolerance.unsupported`）：无特征控制框（公差）对象模型。 |
 | 869 | `-TOOLBAR` | 未实现 | Displays, hides, and customizes toolbars from the Command prompt. | — |

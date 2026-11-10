@@ -509,6 +509,10 @@ fn style_name<'a>(database: &'a DrawingDatabase, entity: &'a cad_db::DbEntity) -
         cad_domain::SemanticGeometry::Dimension(dimension) => {
             Some(dimension.style().text_style_name.clone())
         }
+        // A table's annotation style name is the table style name it stores.
+        cad_domain::SemanticGeometry::Table(table) => {
+            (!table.style_name().is_empty()).then(|| table.style_name().to_string())
+        }
         _ => None,
     }
 }

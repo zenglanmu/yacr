@@ -171,6 +171,13 @@ pub(crate) fn fallback_scale(geometry: &SemanticGeometry) -> f64 {
             .iter()
             .map(fallback_scale)
             .fold(0.0f64, f64::max),
+        // A table is the same shape: its display (grid lines and cell text)
+        // carries its extent, so the fallback keeps the pre-table-entity scale.
+        G::Table(table) => table
+            .display()
+            .iter()
+            .map(fallback_scale)
+            .fold(0.0f64, f64::max),
         // Point/Text have no closed extent, and Mesh/Insert/Opaque/Shape/Image
         // do not tessellate to a polyline here (see `tessellate_geometry`), so
         // the fallback yields nothing for them anyway.
@@ -503,6 +510,11 @@ impl GeometryEngine for DefaultGeometryEngine {
             // and mirroring are refused (ADR 0019 C.5). Both transform surfaces
             // share that method.
             G::MultiLeader(multileader) => G::MultiLeader(Box::new(multileader.transformed(t)?)),
+            // A table delegates to its domain transform: the plane frame and
+            // every stored length move together and the display is rebuilt. A
+            // non-uniform scale or a mirror is refused. Both transform surfaces
+            // share that method.
+            G::Table(table) => G::Table(Box::new(table.transformed(t)?)),
         };
         // A transform that maps a finite source to a non-finite point is not a
         // usable result; report it instead of returning poisoned geometry

@@ -364,6 +364,13 @@ pub fn transform_geometry(
         SemanticGeometry::MultiLeader(multileader) => {
             SemanticGeometry::MultiLeader(Box::new(multileader.transformed(transform)?))
         }
+        // A table transforms its plane frame and every stored length together
+        // and rebuilds its display; a non-uniform scale or a mirror is refused
+        // for the whole entity (the grid + flat-text arrangement cannot express
+        // it).
+        SemanticGeometry::Table(table) => {
+            SemanticGeometry::Table(Box::new(table.transformed(transform)?))
+        }
     };
     Ok(out)
 }

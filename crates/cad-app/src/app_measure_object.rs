@@ -404,6 +404,7 @@ pub(crate) fn geometry_kind(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Dimension(_) => "a DIMENSION",
         SemanticGeometry::Hatch(_) => "a HATCH",
         SemanticGeometry::MultiLeader(_) => "a MULTILEADER",
+        SemanticGeometry::Table(_) => "a TABLE",
         SemanticGeometry::Image { .. } => "an IMAGE",
         SemanticGeometry::Mask { .. } => "a MASK",
     }

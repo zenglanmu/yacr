@@ -61,7 +61,7 @@ impl Application {
         let matches: Vec<DbEntity> = drawing
             .model_space()
             .into_iter()
-            .filter(|entity| text_of(entity).is_some_and(|text| contains(text, needle)))
+            .filter(|entity| text_of(entity).is_some_and(|text| contains(&text, needle)))
             .cloned()
             .collect();
 
@@ -163,8 +163,8 @@ fn report_outcome(matches: &[DbEntity], needle: &str) -> CommandOutcome {
         .collect();
     let preview = matches
         .first()
-        .and_then(|entity| text_of(entity))
-        .map(|text| preview(text, needle))
+        .and_then(text_of)
+        .map(|text| preview(&text, needle))
         .unwrap_or_default();
     let more = matches.len().saturating_sub(ids.len());
     let ids = if more > 0 {
@@ -190,11 +190,24 @@ fn report_outcome(matches: &[DbEntity], needle: &str) -> CommandOutcome {
 }
 
 /// The stored raw text of one text-bearing entity.
-fn text_of(entity: &DbEntity) -> Option<&str> {
+///
+/// A table has no single text field: every non-empty cell text participates, so
+/// the searchable string is the cell texts joined by one space. The
+/// replacement path edits the individual cells through
+/// [`TableGeometry::with_cell_text`].
+fn text_of(entity: &DbEntity) -> Option<String> {
     match &entity.geometry {
-        SemanticGeometry::Text { text, .. } => Some(text),
+        SemanticGeometry::Text { text, .. } => Some(text.clone()),
         SemanticGeometry::MultiLeader(leader) if leader.content() == MLeaderContent::Text => {
-            Some(&leader.text().string)
+            Some(leader.text().string.clone())
+        }
+        SemanticGeometry::Table(table) => {
+            let texts = table.texts();
+            if texts.is_empty() {
+                None
+            } else {
+                Some(texts.join(" "))
+            }
         }
         _ => None,
     }
@@ -278,6 +291,24 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
             let stored = newlines_to_paragraph_breaks(replacement);
             let replaced = replace_all(&leader.text().string, needle, &stored);
             after.geometry = SemanticGeometry::MultiLeader(Box::new(leader.with_text(&replaced)?));
+        }
+        SemanticGeometry::Table(table) => {
+            // Cell text is single-line; a multi-line replacement is refused by
+            // the same policy the TEXT channel uses, before any transaction.
+            if has_line_break(replacement) {
+                return Err(text_policy::single_line_newline_error("FIND"));
+            }
+            let mut edited = table.as_ref().clone();
+            for (row_index, row) in table.rows().iter().enumerate() {
+                for (column_index, cell) in row.cells.iter().enumerate() {
+                    if cell.text.is_empty() || !contains(&cell.text, needle) {
+                        continue;
+                    }
+                    let replaced = replace_all(&cell.text, needle, replacement);
+                    edited = edited.with_cell_text(row_index, column_index, &replaced)?;
+                }
+            }
+            after.geometry = SemanticGeometry::Table(Box::new(edited));
         }
         other => {
             return Err(CadError::Unsupported(format!(

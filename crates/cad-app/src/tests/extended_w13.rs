@@ -75,31 +75,33 @@ const REFUSALS: [(ExtendedCommandId, &str); 20] = [
     ),
     (
         ExtendedCommandId::TableCreate,
-        "table.unsupported: no table entity model is implemented",
+        "table.unsupported: table creation model is not implemented (imported ACAD_TABLE \
+         entities are modeled)",
     ),
     (
         ExtendedCommandId::DashTable,
-        "-table.unsupported: no table entity model is implemented",
+        "-table.unsupported: table creation model is not implemented (imported ACAD_TABLE \
+         entities are modeled)",
     ),
     (
         ExtendedCommandId::TableEdit,
-        "tabledit.unsupported: no table entity model is implemented",
+        "tabledit.unsupported: no cell-edit command surface is implemented",
     ),
     (
         ExtendedCommandId::TableExport,
-        "tableexport.unsupported: no table entity model is implemented",
+        "tableexport.unsupported: no CSV/file writer is implemented",
     ),
     (
         ExtendedCommandId::TableStyleList,
-        "tablestyle.unsupported: no table-style model is implemented",
+        "tablestyle.unsupported: no table-style table is implemented",
     ),
     (
         ExtendedCommandId::TableInsert,
-        "tinsert.unsupported: no table entity model is implemented",
+        "tinsert.unsupported: no block-in-cell creation is implemented",
     ),
     (
         ExtendedCommandId::MatchCell,
-        "matchcell.unsupported: no table entity model is implemented",
+        "matchcell.unsupported: no cell-style copy surface is implemented",
     ),
     (
         ExtendedCommandId::Field,

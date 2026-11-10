@@ -24,6 +24,7 @@ pub(crate) use entity::kind_name;
 mod hatch;
 mod multileader;
 mod report;
+mod table;
 mod tables;
 
 pub use report::{

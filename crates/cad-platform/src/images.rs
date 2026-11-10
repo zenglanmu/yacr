@@ -117,6 +117,12 @@ fn collect_images(geometry: &SemanticGeometry, out: &mut Vec<String>) {
                 collect_images(part, out);
             }
         }
+        // A table is traversed like the compound it used to be.
+        SemanticGeometry::Table(table) => {
+            for part in table.display() {
+                collect_images(part, out);
+            }
+        }
         _ => {}
     }
 }
