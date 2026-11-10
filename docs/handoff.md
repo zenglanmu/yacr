@@ -1,5 +1,36 @@
 AD
 
+## 2026-11-10 发布 v0.1.9（多格式导入、表格/图像、ARRAYPATH/FILLET、wasm 体积）
+
+- **版本**：`Cargo.toml` workspace 版本、`Cargo.lock`（35 个 workspace 成员）、四个
+  `tauri.conf.json`、Flatpak metainfo 全部 `0.1.8` → `0.1.9`；README（中英）命令计数 623 → 823
+  （67 完整 + 756 部分）。发布说明：`docs/release-notes/v0.1.9.md`，同时更新
+  `downloads.json`/`index.html`/`changelog.json`/`site.yml`/`test-landing-site.py`。
+- **tag / run**：`v0.1.9`（`194201b7`）→ `CI build layers` run
+  [`42826779743`](https://github.com/zenglanmu/yacr/actions/runs/42826779743) **11/11 job 绿**
+  （四个 release + linux/windows/macos check + shader + web-build/web-smoke/web-deploy）。
+  发布后的 `main`（`e6f5ab86` 落地页提示、`ebe1d669` 运行时错误弹窗）**不在**该 tag 内，属下一轮。
+- **发布**：`publish-release.yml` run
+  [`42837559389`](https://github.com/zenglanmu/yacr/actions/runs/42837559389) 绿 → Release
+  <https://github.com/zenglanmu/yacr/releases/tag/v0.1.9>（非 draft / 非 prerelease）。
+- **artifact（大小从 Release API 核对）**：
+  `yacr-0.1.9-linux-x86_64.flatpak` **112,155,680 B** + `.sha256` + `.flatpak.gpg`（仓库 GPG 签名）；
+  `yacr-0.1.9-windows-x86_64.zip` **105,577,088 B** + `.sha256`（**unsigned**：未配置 PFX）；
+  `yacr-0.1.9-macos-universal.tar.gz` **150,115,099 B** + `.sha256`（ad-hoc、未公证）；
+  `app-universal-release.apk` **112,137,697 B** + `.sha256`（仓库自签名 keystore）；
+  `SIGNING.txt` 记录本版签名状态。合计 457.7 MiB。
+- **wasm 体积**：`app-web` 改用 `[profile.wasm]`（`opt-level = "s"`、`panic = "abort"`、fat LTO）
+  并由 `scripts/lib/wasm-toolchain.sh` 跑 `wasm-opt 120 -Oz`（跳过 `merge-similar-functions`，
+  否则 V8 拒绝 1023 参数函数），产物 **22.4 MB**，低于 Cloudflare Pages 单文件 25 MiB 上限；
+  `web-build`/`android-release` 安装钉住 SHA-256 的 binaryen 120，构建与部署脚本都硬拒绝超限产物。
+- **Android**：`build-android-ui.sh` 不再构建/打包 wasm 会话（native `native-below`，ADR 0027），
+  并断言 `dist/canvas` 不存在；Windows/macOS 打包移除本地残留的 `canvas/`。Linux 保留（X11
+  `dom-canvas` 需要）。
+- **落地页**：hero 的 Web CTA 下新增“首次打开需下载约 20 MB 以上 wasm”的中英提示；`site.yml`
+  以 `release_tag=v0.1.9`、`upload_downloads=true` 部署到 <https://yacr.pages.dev>。
+- **NOT VERIFIED**：未做真机/真实 GPU/像素验收；Windows/macOS/Android 仅编译与打包证据；
+  `web-smoke` 是 Chromium + SwiftShader 软件渲染；发布成功不代表运行时验收。
+
 ## 2026-11-10 DOM 全局错误弹窗 + wasm panic 上报 + 属性面板宽度
 
 - **红字来源澄清**：桌面状态栏底部的红字**不是** panic/backtrace，而是 `cad_status.error`

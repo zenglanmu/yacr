@@ -108,7 +108,9 @@ grep -qF -- '--outDir ../app-android/dist' "$UI_DIR/package.json" \
 # document and the wasm `dom-canvas` session is never instantiated. Vite copies
 # `public/**` verbatim, so a previously generated `apps/desktop-ui/public/canvas/`
 # would leak a large unused wasm blob into the APK. Remove it before the build;
-# section 3 asserts the bundle carries no `canvas/`.
+# section 3 asserts the bundle carries no `canvas/`. The shared generated source
+# is deleted, so a later Linux `dom-canvas` package must rebuild it with
+# `scripts/build-canvas-wasm.sh` first.
 if [ -e "$UI_DIR/public/canvas" ]; then
   printf '==> dropping unused dom-canvas artifacts (native-below carrier)\n'
   rm -rf -- "$UI_DIR/public/canvas"

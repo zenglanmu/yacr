@@ -2,6 +2,64 @@
   "generatedFrom": "docs/release-notes",
   "releases": [
     {
+      "version": "v0.1.9",
+      "title": "yacr v0.1.9",
+      "date": "2026-11-10",
+      "url": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.9",
+      "sections": [
+        {
+          "heading": "多格式导入 / More import formats",
+          "items": [
+            "OPEN 现在可直接打开 OBJ、STL、PLY、OFF、STEP/STP 与 IFC（IFC2X3/IFC4/IFC4X3），Revit .rvt/.rte 以包围盒预览；Linux、Windows、macOS 的文件选择器与 Web 上传共用同一组扩展名。",
+            "网格类格式（OBJ/STL/PLY/OFF）可显示、可拾取，但不可测量；STEP/IFC 以毫米/米规范长度，IFC 按项目单位缩放并烘焙 placement，个别面被拒绝时标记 Partial；OBJ 外部 .mtl 不加载，按图层颜色显示。",
+            ".rfa/.rft 不出现在“支持格式”文案中，打开时给出稳定的按名拒绝。"
+          ]
+        },
+        {
+          "heading": "表格 / Tables",
+          "items": [
+            "导入的 ACAD_TABLE 成为真实表格实体：保留行列、单元格文字/高度、合并跨度与四边边框，可变换、拾取、FIND 逐单元格查找/替换，并以 DXF TABLE 导出。",
+            "TABLE 创建空表格（单线四边、Standard、默认文字高度），TABLEDIT [text] 编辑单元格文字；均为一条事务、一步撤销。",
+            "仍不支持创建时合并单元格、单元格式、TABLEEXPORT、TABLESTYLE、TINSERT、MATCHCELL，按名拒绝。"
+          ]
+        },
+        {
+          "heading": "图像 / Images",
+          "items": [
+            "IMAGE 只读列出图纸中的图像实体，IMAGEATTACH 插入真实图像实体，IMAGECLIP 设置或清除矩形裁剪。",
+            "IMAGEADJUST [MONO|COLOR] / RESET 调整选中图像并实时反映到显示；仍是显示属性，本构建不导出栅格图像。"
+          ]
+        },
+        {
+          "heading": "编辑与阵列 / Editing and arrays",
+          "items": [
+            "ARRAYPATH [ALIGN] 成为真实路径阵列：闭合路径不重复接缝、开放路径含两端、按弧长等距，ALIGN 让每个副本沿路径切线朝向。",
+            "FILLET 支持圆/弧两两之间的圆角（内部/外部切、次弧插入、弧修剪），并新增 +Z 平面校验。"
+          ]
+        },
+        {
+          "heading": "遮罩 / Wipeout",
+          "items": [
+            "WIPEOUT Frames ON|OFF|DISPLAY 真实生效：ON 同时显示并出图边框，OFF 仅填充，DISPLAY 只在屏幕显示边框；边框在填充之上绘制，不是假线框。"
+          ]
+        },
+        {
+          "heading": "打包 / Packaging",
+          "items": [
+            "Android APK 不再打包本载体从不实例化的 wasm 会话产物（Android 是 native native-below 宿主），Windows/macOS 打包也会移除本地残留的 canvas/；本版 APK 的体积变化主要来自新增导入器。",
+            "浏览器版 wasm 模块经体积优化后约 21 MB，仍在 Cloudflare Pages 单文件 25 MiB 上限内。"
+          ]
+        },
+        {
+          "heading": "命令覆盖 / Command coverage",
+          "items": [
+            "981 条官方命令中，有实现路径的从 623 提升到 823（67 完整 + 756 部分）。增加的部分多数是具名拒绝（动作录制、协作标记、图纸集、GIS、3D 分析等），不是可用功能。",
+            "未支持能力继续显式拒绝，不会静默成功。"
+          ]
+        }
+      ]
+    },
+    {
       "version": "v0.1.8",
       "title": "yacr v0.1.8",
       "date": "2026-11-10",
