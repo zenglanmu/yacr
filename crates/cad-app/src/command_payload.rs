@@ -983,13 +983,13 @@ pub enum CommandPayload {
     VisualStyle(String),
     /// `LINETYPE`: `LIST` or `SET <name>`.
     Linetype(crate::LinetypeCommand),
-    /// `IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>`:
-    /// one real `SemanticGeometry::Image` entity (Work-only). Contract:
-    /// [`crate::app_drawing::image_edit`].
+    /// `IMAGEATTACH <file> <x> <y> <w> <h> <scale>`: one real `Image` row (Work-only).
     ImageAttach(Box<ImageAttachCommand>),
-    /// `IMAGECLIP <minx> <miny> <maxx> <maxy>` / `IMAGECLIP OFF`: set or clear a
-    /// pixel-space rectangular clip on the one selected image (Work-only).
+    /// `IMAGECLIP <minx> <miny> <maxx> <maxy>` / `OFF`: the selected image's clip (Work-only).
     ImageClip(Box<ImageClipCommand>),
+    /// `IMAGEADJUST <b> <c> <f> [MONO|COLOR]` / `RESET`: the display transfer of
+    /// the one selected image (Work-only); see [`crate::app_drawing::image_edit`].
+    ImageAdjust(Box<ImageAdjustCommand>),
     /// `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`: one real
     /// `SemanticGeometry::Table` grid (Work-only); contract in `app_drawing::table_edit`.
     TableCreate(Box<TableCreateCommand>),

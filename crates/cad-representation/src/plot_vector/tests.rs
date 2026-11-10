@@ -290,6 +290,7 @@ fn image_is_reported_not_dropped() {
         resource: cad_resources::ResourceKey("img:0".into()),
         transform: cad_domain::Transform3::identity(),
         clip: None,
+        adjust: cad_domain::ImageAdjust::default(),
     })]);
     let document = build_vector_document(&representation, &simple_page()).unwrap();
     assert!(document.paths.is_empty());

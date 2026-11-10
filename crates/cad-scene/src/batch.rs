@@ -417,6 +417,9 @@ pub struct ImageBatch {
     pub alpha: f32,
     pub draw_order: i64,
     pub sources: Vec<SelectionRef>,
+    /// Display-only brightness/contrast/fade/monochrome transfer, copied from
+    /// the entity's [`ImageAdjust`] so the image pass can apply it.
+    pub adjust: ImageAdjust,
 }
 
 impl ImageBatch {

@@ -446,17 +446,16 @@ impl Application {
             | ExtendedCommandId::MeshSpin
             | ExtendedCommandId::MeshSplit
             | ExtendedCommandId::MeshUncrease => self.extended_w15_refusals(command, ext)?,
-            // Wave 16: the raster-image report and its two real authoring
+            // Wave 16: the raster-image report and its three real authoring
             // commands; the remaining names are stable refusals.
             ExtendedCommandId::Image | ExtendedCommandId::DashImage => {
                 self.extended_w16_reports(session, command, ext)?
             }
-            ExtendedCommandId::ImageAttach | ExtendedCommandId::ImageClip => {
-                self.image_edit(session, command, ext)?
-            }
-            ExtendedCommandId::ImageAdjust
-            | ExtendedCommandId::DashImageAdjust
-            | ExtendedCommandId::ImageQuality
+            ExtendedCommandId::ImageAttach
+            | ExtendedCommandId::ImageClip
+            | ExtendedCommandId::ImageAdjust
+            | ExtendedCommandId::DashImageAdjust => self.image_edit(session, command, ext)?,
+            ExtendedCommandId::ImageQuality
             | ExtendedCommandId::ImageApp
             | ExtendedCommandId::ImageAsyncWait
             | ExtendedCommandId::ImageEdit

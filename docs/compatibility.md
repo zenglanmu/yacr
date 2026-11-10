@@ -1414,8 +1414,8 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `-IMAGE` | **部分实现（只读报告）**：`-IMAGE` 命令行拼写，`-image.*` 诊断码；无写 | 同上，命令行拼写 |
 | `IMAGEATTACH` | **部分实现（真实写入）**：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>` 创建真实 IMAGE 实体；逻辑 key 规范化（控制符/`..`/绝对路径拒绝），一条事务/一步撤销；宿主在提交后按 key 集变化重载纹理，大小写敏感文件系统逐段不敏感回退 | 无对话框/文件选择器；未解析 key 显示边框并进入宿主图像报告；web carrier 显式拒绝（`unsupported-runtime: images`）；跨载体纹理/GPU 证据 NOT VERIFIED |
 | `IMAGECLIP` | **部分实现（真实写入）**：一个选中 IMAGE + 像素坐标矩形（或 `OFF`），写二顶点 `ImageClip{inside:true}`，一条事务/一步撤销；裁剪多边形与 `[0,pixels]` 求交（全在外→`image.clip_unsupported`），x 沿 u、y 沿 v（自下而上） | 仅矩形 inside 裁剪；非凸/outside 未授权；无交互拖拽 |
-| `IMAGEADJUST` | **部分实现（具名拒绝）**：`imageadjust.unsupported: no image adjustment model` | 不写库/不升修订/不入历史 |
-| `-IMAGEADJUST` | **部分实现（具名拒绝）**：`-imageadjust.unsupported: no image adjustment model` | 不写库/不升修订/不入历史 |
+| `IMAGEADJUST` | **部分实现（真实写入）**：选中一个 IMAGE，`IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` / `RESET`（0..=100，50/50/0 中性），一条事务/一步撤销；渲染 mono→contrast→brightness→fade-to-background | 无对话框；导出仍整体丢弃图像（含这些参数）为声明损失；跨载体/GPU 像素 NOT VERIFIED |
+| `-IMAGEADJUST` | **部分实现（真实写入）**：选中一个 IMAGE，`-IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` / `RESET`（0..=100，50/50/0 中性），一条事务/一步撤销；渲染 mono→contrast→brightness→fade-to-background | 无对话框；导出仍整体丢弃图像（含这些参数）为声明损失；跨载体/GPU 像素 NOT VERIFIED |
 | `IMAGEQUALITY` | **部分实现（具名拒绝）**：`imagequality.unsupported: no image display-quality model` | 不写库/不升修订/不入历史 |
 | `IMAGEAPP` | **部分实现（具名拒绝）**：`imageapp.unsupported: no external image-editor association model` | 不写库/不升修订/不入历史 |
 | `IMAGEASYNCWAIT` | **部分实现（具名拒绝）**：`imageasyncwait.unsupported: no asynchronous image loading model` | 不写库/不升修订/不入历史 |

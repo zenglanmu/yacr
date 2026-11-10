@@ -854,9 +854,11 @@ impl ExtendedCommandId {
                 | Self::PageSetupIn
                 | Self::DashPageSetupIn
                 // Wave 16 raster-image authoring writes one entity row (attach)
-                // or rewrites one selected image's clip.
+                // or rewrites one selected image's clip or display transfer.
                 | Self::ImageAttach
                 | Self::ImageClip
+                | Self::ImageAdjust
+                | Self::DashImageAdjust
                 // TABLE / -TABLE insert one table row; TABLEDIT rewrites one
                 // selected table's cell text.
                 | Self::TableCreate

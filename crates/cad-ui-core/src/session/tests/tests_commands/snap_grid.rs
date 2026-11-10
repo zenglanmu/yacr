@@ -260,9 +260,12 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "DRAWORDER",
             // `ARRAYPATH <count> [ALIGN]` is the typed path-array form.
             "ARRAYPATH",
-            // The raster-image typed forms (`IMAGEATTACH`, `IMAGECLIP`).
+            // The raster-image typed forms (`IMAGEATTACH`, `IMAGECLIP`,
+            // `IMAGEADJUST`/`-IMAGEADJUST`).
             "IMAGEATTACH",
             "IMAGECLIP",
+            "IMAGEADJUST",
+            "-IMAGEADJUST",
             // The table typed forms (`TABLE`, `-TABLE`, `TABLEDIT`).
             "TABLE",
             "-TABLE",

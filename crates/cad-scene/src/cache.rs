@@ -186,6 +186,7 @@ impl SceneCache {
                 resource,
                 transform,
                 clip,
+                adjust,
             } = &fragment.primitive
             {
                 // A real image fragment becomes its own draw item; the renderer
@@ -204,6 +205,7 @@ impl SceneCache {
                     // order for that follow-up.
                     draw_order: 0,
                     sources: vec![fragment.source.clone()],
+                    adjust: *adjust,
                 });
                 previous_was_lines = false;
                 previous_was_conic = false;

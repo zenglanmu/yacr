@@ -1,5 +1,16 @@
 AD
 
+## 2026-11-10 IMAGEADJUST 真实实现
+
+- **模型**：`ImageAdjust { brightness, contrast, fade, monochrome }`（默认 50/50/0/false）进入 `SemanticGeometry::Image`；db 校验 0..=100；transform 原样复制；acadrust `RasterImage` 的 brightness/contrast/fade 直接导入，monochrome 无对应字段→`false` 并声明。
+- **命令**：`IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` / `RESET`，选中恰好一个 IMAGE；一条事务/一步撤销，`imageadjust.applied`/`.unchanged`；`-IMAGEADJUST` 同实现；Work-only。
+- **渲染**：representation `DisplayPrimitive::Image.adjust` → scene `ImageBatch.adjust` → `GpuImage.adjust`；图像 uniform 用未使用的 `key_flags.z/w` 编码 fade/contrast/brightness 与背景 RGB，不改全局 uniform 布局；`image.wgsl` 顺序 mono(luma)→contrast→brightness→fade-to-background（声明近似）。
+- **导出**：本构建仍不导出栅格图像；导出报告现在显式记录 brightness/contrast/fade/monochrome 无法携带，而不是假称已保存。
+- **已运行**：`cargo test`（domain/db/import/representation/scene/app/ui-core 共 3962）、`cad-render-wgpu --test-threads=1`（529，含 5 个软件 GPU 像素契约）、clippy（8 crate）、fmt、file-size/i18n/command-docs/architecture、`npm test`（1457）全绿。
+- **NOT VERIFIED**：真实 GPU/窗口/像素、Windows/macOS/Android/Web 运行时、真实 DWG/vendor 对照；headless 像素仅为软件 Vulkan 契约。
+- **提交**：见本轮 IMAGEADJUST commit。
+
+
 ## 2026-11-10 WIPEOUT frame 真实显示/出图
 
 - **行为**：`WIPEOUT Frames ON` = mask 填充 + 边界边框（显示与矢量出图都输出闭合边界折线）；`OFF` = 仅填充；`DISPLAY` = 显示边框但出图不画。边框在 mask fill **之后**用独立 Always-depth 线管线绘制（普通 Lines 会被 mask 的 clear-color 覆盖），不是假线框。

@@ -331,6 +331,7 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             u,
             v,
             pixels,
+            adjust,
             ..
         } => {
             if !finite(*origin) || !finite(*u) || !finite(*v) {
@@ -343,6 +344,20 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             {
                 return Err(degenerate(
                     "image pixel dimensions must be positive and finite",
+                ));
+            }
+            // `u8` makes a value above 100 representable even though the DXF
+            // fields are percentages; reject it instead of clamping so a bad
+            // writer/stored row is reported rather than silently altered.
+            let ImageAdjust {
+                brightness,
+                contrast,
+                fade,
+                ..
+            } = adjust;
+            if *brightness > 100 || *contrast > 100 || *fade > 100 {
+                return Err(degenerate(
+                    "image brightness/contrast/fade must be within 0..=100",
                 ));
             }
         }
@@ -778,6 +793,7 @@ mod tests {
             file: None,
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         };
         assert!(validate_geometry(&image).is_ok());
 
@@ -799,6 +815,7 @@ mod tests {
             file: None,
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         })
         .is_err());
         // A non-finite edge vector is rejected.
@@ -810,6 +827,7 @@ mod tests {
             file: None,
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         })
         .is_err());
         // A mask needs at least three points to bound an area.
@@ -818,5 +836,56 @@ mod tests {
             inverted: false,
         })
         .is_err());
+    }
+
+    #[test]
+    fn rejects_out_of_range_image_adjustment_and_accepts_the_edges() {
+        let image_with = |adjust: ImageAdjust| SemanticGeometry::Image {
+            origin: p(0.0, 0.0),
+            u: p(1.0, 0.0),
+            v: p(0.0, 1.0),
+            pixels: [10.0, 10.0],
+            file: None,
+            clip: None,
+            visible: true,
+            adjust,
+        };
+        // 0 and 100 are the real DXF percentage bounds.
+        for adjust in [
+            ImageAdjust {
+                brightness: 0,
+                contrast: 100,
+                fade: 0,
+                monochrome: true,
+            },
+            ImageAdjust {
+                brightness: 100,
+                contrast: 0,
+                fade: 100,
+                monochrome: false,
+            },
+        ] {
+            assert!(validate_geometry(&image_with(adjust)).is_ok(), "{adjust:?}");
+        }
+        // `u8` can hold >100; validation rejects it instead of clamping.
+        for adjust in [
+            ImageAdjust {
+                brightness: 101,
+                ..ImageAdjust::default()
+            },
+            ImageAdjust {
+                contrast: 200,
+                ..ImageAdjust::default()
+            },
+            ImageAdjust {
+                fade: 255,
+                ..ImageAdjust::default()
+            },
+        ] {
+            assert!(
+                validate_geometry(&image_with(adjust)).is_err(),
+                "{adjust:?} must be rejected"
+            );
+        }
     }
 }

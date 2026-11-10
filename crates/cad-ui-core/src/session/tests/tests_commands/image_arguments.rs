@@ -1,4 +1,5 @@
-//! The typed `IMAGEATTACH` / `IMAGECLIP` grammars and their dispatch.
+//! The typed `IMAGEATTACH` / `IMAGECLIP` / `IMAGEADJUST` grammars and their
+//! dispatch.
 //!
 //! These pin the textual grammar (a single-token file plus five numbers, or a
 //! four-number clip / `OFF`), the admission of both selectors as argument forms
@@ -11,10 +12,11 @@ use super::super::super::*;
 use super::super::test_support::*;
 
 use crate::session::commands::{
-    parse_imageattach_argument, parse_imageclip_argument, ARGUMENT_SELECTORS, IMAGEATTACH_SELECTOR,
+    parse_imageadjust_argument, parse_imageattach_argument, parse_imageclip_argument,
+    ARGUMENT_SELECTORS, DASH_IMAGEADJUST_SELECTOR, IMAGEADJUST_SELECTOR, IMAGEATTACH_SELECTOR,
     IMAGECLIP_SELECTOR,
 };
-use cad_app::{ExtendedCommandId, ImageAttachCommand, ImageClipCommand};
+use cad_app::{ExtendedCommandId, ImageAdjustCommand, ImageAttachCommand, ImageClipCommand};
 
 fn fresh_session() -> CadSession {
     session(Rc::new(FakeFiles {
@@ -86,8 +88,69 @@ fn imageclip_argument_is_a_rectangle_or_off() {
 }
 
 #[test]
+fn imageadjust_argument_is_three_percentages_plus_an_optional_word_or_reset() {
+    let set = |brightness, contrast, fade, monochrome| ImageAdjustCommand::Set {
+        brightness,
+        contrast,
+        fade,
+        monochrome,
+    };
+    assert_eq!(
+        parse_imageadjust_argument("30 70 20"),
+        Some(set(30, 70, 20, None)),
+        "an omitted MONO/COLOR keeps the stored state"
+    );
+    assert_eq!(
+        parse_imageadjust_argument("30 70 20 MONO"),
+        Some(set(30, 70, 20, Some(true)))
+    );
+    assert_eq!(
+        parse_imageadjust_argument("30 70 20 mono"),
+        Some(set(30, 70, 20, Some(true))),
+        "the word is case-insensitive"
+    );
+    assert_eq!(
+        parse_imageadjust_argument("0 0 0 COLOR"),
+        Some(set(0, 0, 0, Some(false)))
+    );
+    assert_eq!(
+        parse_imageadjust_argument("RESET"),
+        Some(ImageAdjustCommand::Reset)
+    );
+    assert_eq!(
+        parse_imageadjust_argument("reset"),
+        Some(ImageAdjustCommand::Reset)
+    );
+    // 150 is admitted by the *grammar* (a u8 integer); the command refuses the
+    // real 0..=100 range by name, which the dispatch test below pins.
+    assert_eq!(
+        parse_imageadjust_argument("150 50 0"),
+        Some(set(150, 50, 0, None))
+    );
+    for refused in [
+        "",
+        "30",
+        "30 70",
+        "30 70 20 EXTRA",
+        "30 70 20 MONO EXTRA",
+        "-1 50 0",
+        "30.5 70 20",
+        "300 70 20",
+        "a b c",
+        "RESET EXTRA",
+    ] {
+        assert_eq!(parse_imageadjust_argument(refused), None, "{refused:?}");
+    }
+}
+
+#[test]
 fn both_selectors_are_admitted_argument_forms_of_their_extended_commands() {
-    for selector in [IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR] {
+    for selector in [
+        IMAGEATTACH_SELECTOR,
+        IMAGECLIP_SELECTOR,
+        IMAGEADJUST_SELECTOR,
+        DASH_IMAGEADJUST_SELECTOR,
+    ] {
         assert!(
             ARGUMENT_SELECTORS.contains(&selector),
             "{selector} must be an argument selector"
@@ -103,6 +166,16 @@ fn both_selectors_are_admitted_argument_forms_of_their_extended_commands() {
     );
     assert_eq!(canonical_command_name("IMAGEATTACH"), Some("IMAGEATTACH"));
     assert_eq!(canonical_command_name("IMAGECLIP"), Some("IMAGECLIP"));
+    assert_eq!(
+        normalize_command("IMAGEADJUST"),
+        Some(CommandId::Extended(ExtendedCommandId::ImageAdjust))
+    );
+    assert_eq!(
+        normalize_command("-IMAGEADJUST"),
+        Some(CommandId::Extended(ExtendedCommandId::DashImageAdjust))
+    );
+    assert_eq!(canonical_command_name("IMAGEADJUST"), Some("IMAGEADJUST"));
+    assert_eq!(canonical_command_name("-IMAGEADJUST"), Some("-IMAGEADJUST"));
 }
 
 #[test]
@@ -153,6 +226,31 @@ fn typed_imageclip_reaches_the_command_layer_and_refuses_no_selection() {
 }
 
 #[test]
+fn typed_imageadjust_reaches_the_command_layer_and_refuses_by_name() {
+    let session = fresh_session();
+    // Nothing is selected: the payload still reaches the command layer, which is
+    // the authority for the selection refusal.
+    for line in ["IMAGEADJUST 30 70 20", "-IMAGEADJUST 30 70 20 MONO"] {
+        let error = session.command(line).expect_err(line);
+        assert!(
+            error.contains("imageadjust.no_selection"),
+            "{line}: {error}"
+        );
+    }
+    // 150 is out of the 0..=100 range: the command's own named refusal.
+    let error = session
+        .command("IMAGEADJUST 150 50 0")
+        .expect_err("150 is out of range");
+    assert!(error.contains("imageadjust.invalid_value"), "{error}");
+    // A bare selector is admitted by name and refused by the command: the
+    // grammar never defaults a transfer.
+    for line in ["IMAGEADJUST", "-IMAGEADJUST"] {
+        let error = session.command(line).expect_err(line);
+        assert!(error.contains("imageadjust.payload"), "{line}: {error}");
+    }
+}
+
+#[test]
 fn malformed_image_arguments_are_refused_before_dispatch() {
     let session = fresh_session();
     for (line, code) in [
@@ -160,6 +258,9 @@ fn malformed_image_arguments_are_refused_before_dispatch() {
         ("IMAGEATTACH logo.png 0 0 1 1 1 2", "imageattach.argument"),
         ("IMAGECLIP 0 0 1", "imageclip.argument"),
         ("IMAGECLIP NONE", "imageclip.argument"),
+        ("IMAGEADJUST 30 70", "imageadjust.argument"),
+        ("IMAGEADJUST 30 70 20 EXTRA", "imageadjust.argument"),
+        ("-IMAGEADJUST 30 70 20 MONO EXTRA", "imageadjust.argument"),
     ] {
         let error = session.command(line).expect_err(line);
         assert!(error.starts_with(code), "{line}: {error}");

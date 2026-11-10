@@ -57,6 +57,9 @@ pub(crate) struct GpuImage {
     /// interleaving with geometry batches is *not* implemented (see
     /// [`Renderer::upload_images`]).
     pub(crate) draw_order: i64,
+    /// Display-only brightness/contrast/fade/monochrome transfer, copied from
+    /// the `ImageBatch` and encoded into the per-image uniform at draw time.
+    pub(crate) adjust: ImageAdjust,
     /// Exact bytes this quad uploads (vertex + index buffers).
     pub(crate) upload_bytes: usize,
     /// This image's renderer pick key (see [`PickTable`]).

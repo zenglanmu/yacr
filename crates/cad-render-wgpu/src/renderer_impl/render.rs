@@ -583,21 +583,19 @@ impl Renderer {
             legacy_slots += 1;
         }
 
-        // Image slots follow the geometry slots; the same page upload covers
-        // them. Their transform is the camera-only matrix (image vertices are
-        // already world space) and the tint is white with the image's alpha.
-        for (j, &i) in draw_images.iter().enumerate() {
-            let alpha = self.images[i].alpha;
-            let uniform = uniform_bytes(
-                &camera_matrix,
-                [1.0, 1.0, 1.0, alpha],
-                [self.images[i].pick_key, 0, 0, 0],
-                light,
-            );
-            let slot = legacy_slots + j;
-            self.uniforms.write_slot(slot, &uniform);
-            self.image_slots[i] = slot as u32;
-        }
+        // Image slots follow the geometry slots in the same page upload; the
+        // per-image display transfer rides their `key_flags.z`/`.w` words.
+        let clear_color_value = target.clear_color();
+        images::write_image_uniforms(
+            &self.images,
+            &draw_images,
+            &mut self.image_slots,
+            &mut self.uniforms,
+            camera_matrix,
+            clear_color_value,
+            light,
+            legacy_slots,
+        );
 
         // Instanced line streams: one uniform slot per **visible** stream,
         // carrying the stream's fixed-point origin through the same `f64` camera
@@ -665,8 +663,8 @@ impl Renderer {
             next_slot += 1;
         }
         // Wipeout mask uniforms: one fill slot per resident mask, plus one
-        // frame slot per framed mask (the frame colour travels there).
-        let clear_color_value = target.clear_color();
+        // frame slot per framed mask (the frame colour travels there). The
+        // clear colour is the same value the image loop packed for fade.
         let (mask_slots, mut next_slot) = masks::write_mask_uniforms(
             &self.masks,
             &mut self.uniforms,

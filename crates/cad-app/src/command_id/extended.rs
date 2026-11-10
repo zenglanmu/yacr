@@ -931,9 +931,11 @@ pub enum ExtendedCommandId {
     ImageAttach,
     /// `IMAGECLIP`: writes the selected image's pixel-space clip (Work-only).
     ImageClip,
-    /// `IMAGEADJUST`: no image adjustment model.
+    /// `IMAGEADJUST`: writes the selected image's brightness/contrast/fade/
+    /// monochrome display transfer (Work-only).
     ImageAdjust,
-    /// `-IMAGEADJUST`: no image adjustment model.
+    /// `-IMAGEADJUST`: the same display-transfer write with dash codes
+    /// (Work-only).
     DashImageAdjust,
     /// `IMAGEQUALITY`: no image display-quality model.
     ImageQuality,

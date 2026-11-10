@@ -3,20 +3,12 @@
 //! Each remaining Wave 16 name is admitted by the vocabulary and refused with
 //! `CadError::Unsupported` carrying a stable reason; nothing is written, no
 //! revision is bumped and no history entry appears. All are Viewer-legal.
-//! `IMAGE`/`-IMAGE`, `IMAGEATTACH` and `IMAGECLIP` are real commands and are
-//! pinned in `tests::drawing::image`.
+//! `IMAGE`/`-IMAGE`, `IMAGEATTACH`, `IMAGECLIP` and `IMAGEADJUST` are real
+//! commands and are pinned in `tests::drawing::image`.
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 21] = [
-    (
-        ExtendedCommandId::ImageAdjust,
-        "imageadjust.unsupported: no image adjustment model",
-    ),
-    (
-        ExtendedCommandId::DashImageAdjust,
-        "-imageadjust.unsupported: no image adjustment model",
-    ),
+const REFUSALS: [(ExtendedCommandId, &str); 19] = [
     (
         ExtendedCommandId::ImageQuality,
         "imagequality.unsupported: no image display-quality model",

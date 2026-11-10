@@ -1,7 +1,7 @@
 // The raster-image command surface: `IMAGE` / `-IMAGE` (read-only report),
-// `IMAGEATTACH` and `IMAGECLIP` (real writes). The Rust lane is the behaviour
-// authority; this suite pins the typed grammars the chrome admits and the
-// user-facing catalog rows (real labels/hints, not "not implemented").
+// `IMAGEATTACH`, `IMAGECLIP` and `IMAGEADJUST` (real writes). The Rust lane is
+// the behaviour authority; this suite pins the typed grammars the chrome admits
+// and the user-facing catalog rows (real labels/hints, not "not implemented").
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
@@ -41,7 +41,36 @@ test('IMAGECLIP admits a four-number rectangle or OFF', () => {
   }
 });
 
-test('the four raster-image rows carry real labels and hints in both catalogs', async () => {
+test('IMAGEADJUST admits three percentages plus an optional MONO/COLOR word, or RESET', () => {
+  const parse = ARGUMENT_COMMANDS.IMAGEADJUST.parse;
+  const dash = ARGUMENT_COMMANDS['-IMAGEADJUST'].parse;
+  for (const parseOne of [parse, dash]) {
+    assert.equal(parseOne('30 70 20'), true);
+    assert.equal(parseOne('30 70 20 MONO'), true);
+    assert.equal(parseOne('30 70 20 mono'), true);
+    assert.equal(parseOne('0 0 0 COLOR'), true);
+    assert.equal(parseOne('RESET'), true);
+    assert.equal(parseOne('reset'), true);
+    // 0..=100 is the host's `imageadjust.invalid_value`, not local grammar; the
+    // local shape is the u8 integer.
+    assert.equal(parseOne('150 50 0'), true);
+    for (const refused of [
+      '',
+      '30',
+      '30 70',
+      '30 70 20 EXTRA',
+      '30 70 20 MONO EXTRA',
+      '-1 50 0',
+      '30.5 70 20',
+      '300 70 20',
+      'a b c',
+    ]) {
+      assert.equal(parseOne(refused), false, refused);
+    }
+  }
+});
+
+test('the six raster-image rows carry real labels and hints in both catalogs', async () => {
   const zh = await readCatalog('zh-CN');
   const en = await readCatalog('en');
   const rows: readonly (readonly [string, string])[] = [
@@ -49,6 +78,8 @@ test('the four raster-image rows carry real labels and hints in both catalogs', 
     ['-IMAGE', 'draw.kind.dashimage'],
     ['IMAGEATTACH', 'draw.kind.imageattach'],
     ['IMAGECLIP', 'draw.kind.imageclip'],
+    ['IMAGEADJUST', 'draw.kind.imageadjust'],
+    ['-IMAGEADJUST', 'draw.kind.dashimageadjust'],
   ];
   for (const [id, labelKey] of rows) {
     const matches = COMMAND_CATALOG.filter(command => command.id === id);
@@ -59,7 +90,7 @@ test('the four raster-image rows carry real labels and hints in both catalogs', 
       const hint = catalog[`${labelKey}.hint`];
       assert.equal(typeof label, 'string', `${locale} missing ${labelKey}`);
       assert.equal(typeof hint, 'string', `${locale} missing ${labelKey}.hint`);
-      // These four are implemented now: the old "not implemented"/refusal text
+      // These six are implemented now: the old "not implemented"/refusal text
       // must not survive on a row that really runs.
       assert.equal(/not implemented/i.test(label), false, `${locale} ${id}: ${label}`);
       assert.equal(/not implemented/i.test(hint), false, `${locale} ${id}: ${hint}`);
@@ -71,7 +102,6 @@ test('the four raster-image rows carry real labels and hints in both catalogs', 
 test('the still-missing image names stay named refusals', async () => {
   const en = await readCatalog('en');
   for (const key of [
-    'draw.kind.imageadjust.hint',
     'draw.kind.imagequality.hint',
     'draw.kind.imageapp.hint',
     'draw.kind.imageasyncwait.hint',

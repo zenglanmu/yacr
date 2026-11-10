@@ -135,6 +135,46 @@ pub struct ImageClip {
     pub vertices: Vec<[f64; 2]>,
     pub inside: bool,
 }
+
+/// Per-image display adjustment: DXF `IMAGE` brightness, contrast and fade plus
+/// the separate MONOCHROME display flag.
+///
+/// All three percentages use AutoCAD's 0..=100 integer scale and the
+/// **neutral** value is `brightness = 50`, `contrast = 50`, `fade = 0`,
+/// `monochrome = false`. That is what an imported `RasterImage` with default
+/// fields carries and what `IMAGEADJUST RESET` restores, so an untouched image
+/// renders exactly like a plain sample of its texture.
+///
+/// These are *display* parameters, not geometry: they change how the sampled
+/// texel is transferred to the fragment colour, never the placement. The
+/// renderer applies a **declared approximation** of AutoCAD's transfer curve
+/// (monochrome luma → contrast → brightness → fade toward the background); it
+/// is not claimed to be pixel-identical to AutoCAD.
+///
+/// `fade` blends toward the viewport background, so `fade = 100` makes the
+/// image visually disappear into the background while keeping the entity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageAdjust {
+    /// `0..=100`; `50` is neutral.
+    pub brightness: u8,
+    /// `0..=100`; `50` is neutral.
+    pub contrast: u8,
+    /// `0..=100`; `0` is opaque (neutral), `100` fully fades into the background.
+    pub fade: u8,
+    /// MONOCHROME display: convert the sampled colour to luma first.
+    pub monochrome: bool,
+}
+
+impl Default for ImageAdjust {
+    fn default() -> Self {
+        ImageAdjust {
+            brightness: 50,
+            contrast: 50,
+            fade: 0,
+            monochrome: false,
+        }
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WorkPlane {
     pub origin: Point3,
@@ -479,7 +519,8 @@ pub enum SemanticGeometry {
     /// the full extent is `pixels.0 * |u|` by `pixels.1 * |v|`. `pixels` is
     /// `(width, height)` in pixels. `file` is a *logical* resource key resolved
     /// by the host, never a platform path (the same role as `Text::font`).
-    /// `visible` mirrors the SHOW_IMAGE flag.
+    /// `visible` mirrors the SHOW_IMAGE flag; `adjust` is the display-only
+    /// brightness/contrast/fade/monochrome transfer (see [`ImageAdjust`]).
     Image {
         origin: Point3,
         u: Point3,
@@ -488,6 +529,7 @@ pub enum SemanticGeometry {
         file: Option<String>,
         clip: Option<ImageClip>,
         visible: bool,
+        adjust: ImageAdjust,
     },
     /// An erasing mask (DXF `WIPEOUT`).
     ///

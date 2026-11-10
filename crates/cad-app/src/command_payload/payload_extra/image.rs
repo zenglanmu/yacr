@@ -39,3 +39,33 @@ pub struct ImageAttachCommand {
 pub struct ImageClipCommand {
     pub rect: Option<[f64; 4]>,
 }
+
+/// The input of an `IMAGEADJUST` command: the four display-transfer values for
+/// the one selected raster image.
+///
+/// The typed forms are `IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]`
+/// and `IMAGEADJUST RESET`. The three percentages are integers in `0..=100`
+/// (`50`/`50`/`0` is neutral). `monochrome` is `None` when the typed line omits
+/// the MONO/COLOR word, which means **keep the image's current monochrome
+/// state** rather than defaulting it. `RESET` restores the neutral
+/// [`cad_domain::ImageAdjust`] (50/50/0/off).
+///
+/// The selection is not part of the payload: the command reads the session's
+/// current selection and requires exactly one directly addressable `Image`
+/// entity. The command re-validates the ranges (the payload carries `u8`, whose
+/// type alone allows values above 100) and is the authority for
+/// `imageadjust.invalid_value`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageAdjustCommand {
+    /// `IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]`.
+    Set {
+        brightness: u8,
+        contrast: u8,
+        fade: u8,
+        /// `Some(true)` = MONO, `Some(false)` = COLOR, `None` = keep the current
+        /// monochrome state.
+        monochrome: Option<bool>,
+    },
+    /// `IMAGEADJUST RESET`: restore 50/50/0/off.
+    Reset,
+}

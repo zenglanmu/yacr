@@ -12,6 +12,7 @@ fn image_representation(
         resource,
         transform,
         clip: None,
+        adjust: ImageAdjust::default(),
     };
     rep
 }
@@ -90,5 +91,30 @@ fn over_budget_image_batches_are_evicted_and_counted() {
     assert_eq!(
         cache.image_batches()[0].resource,
         ResourceKey("img:2".into())
+    );
+}
+
+/// The scene cache copies the display transfer onto the `ImageBatch`; it is not
+/// reinterpreted or dropped on the way to the renderer.
+#[test]
+fn image_adjustment_is_copied_onto_the_image_batch() {
+    let mut cache = SceneCache::default();
+    let resource = ResourceKey("img:logo".into());
+    let adjust = ImageAdjust {
+        brightness: 30,
+        contrast: 70,
+        fade: 20,
+        monochrome: true,
+    };
+    let mut rep = image_representation(7, resource, Transform3::identity());
+    match &mut rep.fragments[0].primitive {
+        DisplayPrimitive::Image { adjust: slot, .. } => *slot = adjust,
+        _ => panic!("expected an image primitive"),
+    }
+    let delta = cache.build(&rep, stamp()).unwrap();
+    assert_eq!(delta.images.len(), 1);
+    assert_eq!(
+        delta.images[0].adjust, adjust,
+        "the ImageBatch carries the display transfer verbatim"
     );
 }

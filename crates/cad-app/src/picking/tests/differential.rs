@@ -173,6 +173,7 @@ fn rand_geometry(rng: &mut XorShift, span: f64) -> SemanticGeometry {
             file: None,
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         },
         12 => SemanticGeometry::Opaque {
             type_key: "AcDbUnknown".into(),

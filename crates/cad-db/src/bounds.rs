@@ -290,6 +290,7 @@ mod tests {
             file: None,
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         };
         let mut bounds = BoundsAccumulator::new();
         bounds.add_geometry(&image);

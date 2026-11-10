@@ -582,6 +582,19 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     },
   }),
   /**
+   * `IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` or
+   * `IMAGEADJUST RESET`: the display transfer of the one selected image. The
+   * three percentages are plain integers (the host owns the `0..=100` range and
+   * refuses an overshoot by name), and the optional word is `MONO`/`COLOR`.
+   * `RESET` restores 50/50/0/off. `-IMAGEADJUST` takes the same grammar.
+   */
+  IMAGEADJUST: Object.freeze({
+    parse: isImageAdjustArgument,
+  }),
+  '-IMAGEADJUST': Object.freeze({
+    parse: isImageAdjustArgument,
+  }),
+  /**
    * `TABLE <rows> <cols> <col_width> <row_height> <x> <y>` and its `-TABLE`
    * spelling: an empty table grid on the world XY plane. The counts are positive
    * integers, the two cell sizes are positive decimals and the origin is a pair
@@ -739,6 +752,27 @@ function isTableEditArgument(argument: string): boolean {
   return Number(match[1]) > 0 && Number(match[2]) > 0;
 }
 
+/**
+ * `IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` or
+ * `IMAGEADJUST RESET` (and the `-IMAGEADJUST` spelling).
+ *
+ * The three percentages are plain non-negative integers in `u8` shape
+ * (`0..=255`); the host owns the real `0..=100` range and refuses an overshoot
+ * with `imageadjust.invalid_value`, so nothing is clamped or range-checked here.
+ * The optional fourth token is the case-insensitive `MONO`/`COLOR` word, and
+ * omitting it keeps the image's current monochrome state.
+ */
+function isImageAdjustArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  if (parts.length === 1) return parts[0].toUpperCase() === 'RESET';
+  if (parts.length !== 3 && parts.length !== 4) return false;
+  const percentage = (text: string): boolean =>
+    /^[0-9]+$/.test(text) && Number(text) <= 255;
+  if (!percentage(parts[0]) || !percentage(parts[1]) || !percentage(parts[2])) return false;
+  if (parts.length === 3) return true;
+  const word = parts[3].toUpperCase();
+  return word === 'MONO' || word === 'COLOR';
+}
 
 /** The four property words `QSELECT`/`FILTER` accept. */
 const FILTER_PROPERTIES: readonly string[] = Object.freeze(['TYPE', 'LAYER', 'COLOR', 'LINETYPE']);

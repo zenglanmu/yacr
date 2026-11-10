@@ -15,6 +15,7 @@ fn decoded_image_becomes_a_texture_primitive_mapping_the_unit_square() {
         resource,
         transform,
         clip,
+        ..
     } = primitive
     else {
         panic!("expected an image primitive");
@@ -312,4 +313,46 @@ fn hidden_image_emits_no_fragment() {
     assert!(r.fragments.is_empty());
     assert!(r.diagnostics.is_empty());
     assert_eq!(r.completeness, Completeness::Complete);
+}
+
+/// The per-image display transfer is carried on the primitive and is
+/// view-independent: a transform copies it unchanged.
+#[test]
+fn image_adjustment_reaches_the_primitive_and_survives_a_transform() {
+    let registry = ProviderRegistry::with_default_provider();
+    let mut e = image_entity(9, Some("textures/logo.png"), true);
+    let adjust = ImageAdjust {
+        brightness: 30,
+        contrast: 70,
+        fade: 20,
+        monochrome: true,
+    };
+    match &mut e.geometry {
+        SemanticGeometry::Image { adjust: slot, .. } => *slot = adjust,
+        _ => panic!("expected an image"),
+    }
+    let ctx = image_context(&[("textures/logo.png", white_pixel())]);
+    let r = registry.build(&e, &ctx).unwrap();
+    assert_eq!(r.completeness, Completeness::Complete);
+    let DisplayPrimitive::Image {
+        adjust: carried, ..
+    } = &r.fragments[0].primitive
+    else {
+        panic!("expected an image primitive");
+    };
+    assert_eq!(*carried, adjust, "the provider copies the entity transfer");
+
+    let moved = r.fragments[0]
+        .primitive
+        .transformed(&Transform3::translation(p(10.0, 5.0)));
+    let DisplayPrimitive::Image {
+        adjust: after_move, ..
+    } = moved
+    else {
+        panic!("expected an image primitive after the transform");
+    };
+    assert_eq!(
+        after_move, adjust,
+        "brightness/contrast/fade/monochrome are display-only, never transformed"
+    );
 }

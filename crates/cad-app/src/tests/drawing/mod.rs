@@ -319,6 +319,7 @@ mod hatch_predefined;
 mod hatch_stitch;
 mod hatch_utilities;
 mod image;
+mod image_adjust;
 mod insert_block;
 mod join;
 mod layer_undo;

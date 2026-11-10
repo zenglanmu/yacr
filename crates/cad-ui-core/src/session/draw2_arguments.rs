@@ -9,12 +9,13 @@ use cad_app::{CommandId, CommandPayload, ExtendedCommandId};
 
 use super::commands::{
     invalid_arraypath_argument_reason, parse_arraypath_argument, parse_donut_argument,
-    parse_draworder_argument, parse_helix_argument, parse_imageattach_argument,
-    parse_imageclip_argument, parse_mline_argument, parse_mlstyle_argument, parse_mpedit_argument,
-    parse_solid_argument, parse_table_create_argument, parse_tabledit_argument,
-    parse_trex_argument, ARRAYPATH_SELECTOR, DASH_TABLE_SELECTOR, DONUT_SELECTOR, HELIX_SELECTOR,
-    IMAGEATTACH_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MPEDIT_SELECTOR, SOLID_SELECTOR,
-    TABLEDIT_SELECTOR, TABLE_SELECTOR, TREX_SELECTOR,
+    parse_draworder_argument, parse_helix_argument, parse_imageadjust_argument,
+    parse_imageattach_argument, parse_imageclip_argument, parse_mline_argument,
+    parse_mlstyle_argument, parse_mpedit_argument, parse_solid_argument,
+    parse_table_create_argument, parse_tabledit_argument, parse_trex_argument, ARRAYPATH_SELECTOR,
+    DASH_IMAGEADJUST_SELECTOR, DASH_TABLE_SELECTOR, DONUT_SELECTOR, HELIX_SELECTOR,
+    IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MPEDIT_SELECTOR,
+    SOLID_SELECTOR, TABLEDIT_SELECTOR, TABLE_SELECTOR, TREX_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::CadSession;
@@ -28,18 +29,30 @@ pub fn invalid_draw2_argument_reason(selector: &str, text: &str) -> String {
     )
 }
 
-/// The stable refusal for an `IMAGEATTACH` / `IMAGECLIP` argument outside the
-/// documented grammar.
+/// The stable refusal for an `IMAGEATTACH` / `IMAGECLIP` / `IMAGEADJUST`
+/// argument outside the documented grammar.
 pub(crate) fn invalid_image_argument_reason(selector: &str, text: &str) -> String {
-    let code = if selector == IMAGEATTACH_SELECTOR {
-        "imageattach.argument"
+    // String `const`s are not pattern literals in Rust, so this is an if/else
+    // chain rather than a `match` (a `match` arm would bind, not compare).
+    let (code, forms) = if selector == IMAGEATTACH_SELECTOR {
+        (
+            "imageattach.argument",
+            "`IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>`",
+        )
+    } else if selector == IMAGECLIP_SELECTOR {
+        (
+            "imageclip.argument",
+            "`IMAGECLIP <minx> <miny> <maxx> <maxy>` or `IMAGECLIP OFF`",
+        )
     } else {
-        "imageclip.argument"
+        (
+            "imageadjust.argument",
+            "`IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` and `IMAGEADJUST RESET`",
+        )
     };
     format!(
-        "{code}: unsupported or malformed {selector} argument in `{}`: the typed forms are \
-         `IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>` and \
-         `IMAGECLIP <minx> <miny> <maxx> <maxy>` or `IMAGECLIP OFF`; nothing was changed",
+        "{code}: unsupported or malformed {selector} argument in `{}`: the typed form is \
+         {forms}; nothing was changed",
         text.trim()
     )
 }
@@ -132,12 +145,14 @@ impl CadSession {
         }
     }
 
-    /// Apply one typed `IMAGEATTACH ...` / `IMAGECLIP ...` line.
+    /// Apply one typed `IMAGEATTACH ...` / `IMAGECLIP ...` / `IMAGEADJUST ...`
+    /// line.
     ///
     /// The parsed payload rides the existing command funnel with the exact
-    /// `CommandId::Extended(ExtendedCommandId::ImageAttach | ImageClip)`; the
-    /// command layer owns every semantic refusal (safe resource key, positive
-    /// pixel size and units-per-pixel, ordered clip rectangle, exactly one
+    /// `CommandId::Extended(ExtendedCommandId::ImageAttach | ImageClip |
+    /// ImageAdjust | DashImageAdjust)`; the command layer owns every semantic
+    /// refusal (safe resource key, positive pixel size and units-per-pixel,
+    /// ordered clip rectangle, 0..=100 transfer percentages, exactly one
     /// selected image). A malformed argument is refused before IPC with the
     /// stable reason and changes nothing.
     pub(super) fn image_argument(
@@ -154,13 +169,26 @@ impl CadSession {
                 CommandId::Extended(ExtendedCommandId::ImageAttach),
                 CommandPayload::ImageAttach(Box::new(payload)),
             )
-        } else {
+        } else if selector == IMAGECLIP_SELECTOR {
             let Some(payload) = parse_imageclip_argument(argument) else {
                 return self.refuse_argument(invalid_image_argument_reason(selector, text));
             };
             (
                 CommandId::Extended(ExtendedCommandId::ImageClip),
                 CommandPayload::ImageClip(Box::new(payload)),
+            )
+        } else {
+            let Some(payload) = parse_imageadjust_argument(argument) else {
+                return self.refuse_argument(invalid_image_argument_reason(selector, text));
+            };
+            let id = if selector == DASH_IMAGEADJUST_SELECTOR {
+                ExtendedCommandId::DashImageAdjust
+            } else {
+                ExtendedCommandId::ImageAdjust
+            };
+            (
+                CommandId::Extended(id),
+                CommandPayload::ImageAdjust(Box::new(payload)),
             )
         };
         self.core.record_command(selector);

@@ -375,6 +375,7 @@ mod tests {
             file: file.map(str::to_string),
             clip: None,
             visible: true,
+            adjust: cad_domain::ImageAdjust::default(),
         }
     }
 

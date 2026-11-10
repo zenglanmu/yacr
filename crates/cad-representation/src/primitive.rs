@@ -192,6 +192,10 @@ pub enum DisplayPrimitive {
         /// coordinates, so only the visible texture region is mapped and its
         /// UVs are interpolated at the new vertices.
         clip: Option<Arc<[ImageVertex]>>,
+        /// Display-only brightness/contrast/fade/monochrome transfer, carried
+        /// verbatim from the entity so the renderer can apply it without reading
+        /// the database.
+        adjust: ImageAdjust,
     },
     Instance {
         block: BlockId,
@@ -277,6 +281,7 @@ impl DisplayPrimitive {
                 resource,
                 transform: local,
                 clip,
+                adjust,
             } => DisplayPrimitive::Image {
                 resource: resource.clone(),
                 transform: transform.matrix_mul(local),
@@ -292,6 +297,8 @@ impl DisplayPrimitive {
                             .into_boxed_slice(),
                     )
                 }),
+                // The adjustment is display-only and view-independent.
+                adjust: *adjust,
             },
             DisplayPrimitive::Instance {
                 block,

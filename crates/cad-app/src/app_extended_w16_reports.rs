@@ -12,8 +12,8 @@
 //! The `-IMAGE` spelling uses the `-image.*` codes, the same convention `XREF` /
 //! `-XREF` follow.
 //!
-//! Attaching and clipping are the separate, Work-only commands in
-//! [`crate::app_drawing::image_edit`].
+//! Attaching, clipping and the display adjustment are the separate, Work-only
+//! commands in [`crate::app_drawing::image_edit`].
 
 use super::*;
 use crate::app_reports_ext::{diagnostic, report_outcome};

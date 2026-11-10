@@ -314,6 +314,7 @@ fn sample_image() -> SemanticGeometry {
         file: Some("logo.png".to_string()),
         clip: None,
         visible: true,
+        adjust: ImageAdjust::default(),
     }
 }
 
@@ -340,6 +341,7 @@ fn image_and_mask_are_finite_with_finite_placement() {
         file: None,
         clip: None,
         visible: true,
+        adjust: ImageAdjust::default(),
     };
     assert!(!geometry_is_finite(&poisoned));
 }

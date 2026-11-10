@@ -1,5 +1,7 @@
 //! `IMAGE` / `-IMAGE` / `IMAGEATTACH` / `IMAGECLIP` contract tests.
 //!
+//! `IMAGEADJUST` lives in the sibling `image_adjust` module (file-size gate).
+//!
 //! The report is read-only (no transaction, revision, history or `ChangeSet`) and
 //! Viewer-legal; attach inserts one real `SemanticGeometry::Image` through the
 //! shared create funnel; clip rewrites one selected image's pixel-space clip in
@@ -12,7 +14,7 @@ use cad_history::History;
 
 use crate::command_payload::{ImageAttachCommand, ImageClipCommand};
 
-fn undo_depth(app: &Application) -> usize {
+pub(super) fn undo_depth(app: &Application) -> usize {
     app.history
         .get(&DocumentId(1))
         .map(History::undo_depth)
@@ -20,7 +22,7 @@ fn undo_depth(app: &Application) -> usize {
 }
 
 /// A work- or viewer-mode drawing with layer `0` plus `WALLS`, `WALLS` current.
-fn image_app(mode: AppMode) -> (Application, SessionState) {
+pub(super) fn image_app(mode: AppMode) -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     for (id, name) in [(LayerId(0), "0"), (LayerId(7), "WALLS")] {
         b.insert_layer(Layer {
@@ -78,7 +80,7 @@ fn clip_payload(rect: Option<[f64; 4]>) -> CommandPayload {
     CommandPayload::ImageClip(Box::new(ImageClipCommand { rect }))
 }
 
-fn attach_default(
+pub(super) fn attach_default(
     app: &mut Application,
     session: &mut SessionState,
     file: &str,
@@ -96,7 +98,7 @@ fn attach_default(
     EntityId(outcome.objects[0].0)
 }
 
-fn image_geometry(app: &Application, id: EntityId) -> SemanticGeometry {
+pub(super) fn image_geometry(app: &Application, id: EntityId) -> SemanticGeometry {
     stored_image(app, id).geometry
 }
 
@@ -138,11 +140,17 @@ fn imageattach_builds_the_exact_image_entity_in_one_undo_step() {
             file,
             clip,
             visible,
+            adjust,
         } => {
             assert_eq!(origin, p3(10.0, 20.0, 0.0));
             assert_eq!(u, p3(0.05, 0.0, 0.0), "u is the per-pixel edge vector");
             assert_eq!(v, p3(0.0, 0.05, 0.0), "v is the per-pixel edge vector");
             assert_eq!(pixels, [640.0, 480.0]);
+            assert_eq!(
+                adjust,
+                cad_domain::ImageAdjust::default(),
+                "a fresh attach starts neutral (50/50/0/colour)"
+            );
             assert_eq!(
                 file.as_deref(),
                 Some("textures/logo.png"),
@@ -529,6 +537,7 @@ fn image_report_lists_model_and_paper_images_and_writes_nothing() {
             file: Some("sheet.png".into()),
             clip: None,
             visible: false,
+            adjust: ImageAdjust::default(),
         },
         draw_order: 0,
     })
@@ -688,6 +697,7 @@ fn image_report_counts_images_inside_block_definitions() {
             file: Some("block.png".into()),
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         },
         draw_order: 0,
     })
@@ -794,6 +804,7 @@ fn an_image_survives_move_with_its_non_geometric_state_intact() {
             file,
             clip,
             visible,
+            adjust,
         } => {
             assert_eq!(origin, p3(15.0, 18.0, 0.0), "origin translates as a point");
             assert_eq!(u, p3(0.05, 0.0, 0.0), "one pixel's width is unchanged");
@@ -809,6 +820,11 @@ fn an_image_survives_move_with_its_non_geometric_state_intact() {
                 "the pixel-space clip is not geometry and must survive"
             );
             assert!(visible);
+            assert_eq!(
+                adjust,
+                cad_domain::ImageAdjust::default(),
+                "the display transfer is not geometry and must survive a move"
+            );
         }
         other => panic!("expected an image, got {other:?}"),
     }

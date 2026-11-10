@@ -245,6 +245,7 @@ pub fn transform_geometry(
             file,
             clip,
             visible,
+            adjust,
         } => SemanticGeometry::Image {
             origin: transform.apply_point(*origin),
             u: apply_vector(transform, *u),
@@ -253,6 +254,9 @@ pub fn transform_geometry(
             file: file.clone(),
             clip: clip.clone(),
             visible: *visible,
+            // Display-only: a transform never changes brightness/contrast/fade
+            // or the monochrome flag.
+            adjust: *adjust,
         },
         // A mask is a world-space polygon: every boundary point moves as a point.
         SemanticGeometry::Mask { boundary, inverted } => SemanticGeometry::Mask {

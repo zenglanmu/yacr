@@ -566,6 +566,7 @@ impl DefaultRepresentationProvider {
                 file,
                 clip,
                 visible,
+                adjust,
             } => {
                 // A hidden image draws nothing; never substitute a fake frame.
                 if *visible {
@@ -607,6 +608,7 @@ impl DefaultRepresentationProvider {
                                     transform,
                                     clip: clip_vertices
                                         .map(|vertices| Arc::from(vertices.into_boxed_slice())),
+                                    adjust: *adjust,
                                 },
                             });
                         }

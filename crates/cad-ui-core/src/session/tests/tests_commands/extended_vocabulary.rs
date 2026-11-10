@@ -65,9 +65,12 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::DashPageSetup
                 | ExtendedCommandId::PageSetupIn
                 | ExtendedCommandId::DashPageSetupIn
-                // Wave 16 raster-image authoring writes entity rows.
+                // Wave 16 raster-image authoring writes entity rows (attach) or
+                // rewrites one selected image's clip or display transfer.
                 | ExtendedCommandId::ImageAttach
                 | ExtendedCommandId::ImageClip
+                | ExtendedCommandId::ImageAdjust
+                | ExtendedCommandId::DashImageAdjust
                 // TABLE / -TABLE insert one table row; TABLEDIT rewrites one
                 // selected table's cell text.
                 | ExtendedCommandId::TableCreate

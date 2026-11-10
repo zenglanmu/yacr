@@ -1,23 +1,26 @@
-//! `IMAGEATTACH` and `IMAGECLIP`: real raster-image authoring on the existing
-//! `SemanticGeometry::Image` pipeline.
+//! `IMAGEATTACH`, `IMAGECLIP` and `IMAGEADJUST`: real raster-image authoring on
+//! the existing `SemanticGeometry::Image` pipeline.
 //!
-//! Both commands are **Work-only** and write through the normal drawing
+//! All three commands are **Work-only** and write through the normal drawing
 //! transaction path: an attach inserts one entity through the shared
 //! [`Application::commit_new_entity`] funnel (active layer, model space, one
-//! transaction / one undo step), and a clip updates one selected image row in one
-//! transaction / one undo step. Every refusal happens before a transaction, so a
-//! refused command writes nothing, bumps no revision and records no history.
+//! transaction / one undo step), and a clip or adjustment updates one selected
+//! image row in one transaction / one undo step. Every refusal happens before a
+//! transaction, so a refused command writes nothing, bumps no revision and
+//! records no history.
 //!
 //! `IMAGE` / `-IMAGE` are the read-only report and live in
-//! `crate::app_extended_w16_reports`; the adjustment/quality/editor names remain
-//! named refusals in `crate::app_extended_w16_refusals`.
+//! `crate::app_extended_w16_reports`; the quality/editor names remain named
+//! refusals in `crate::app_extended_w16_refusals`.
 //!
 //! Stable refusal codes:
 //!
 //! * `imageattach.payload` / `.unsafe_reference` / `.invalid_origin` /
 //!   `.invalid_pixels` / `.invalid_units_per_pixel` / `.invalid_extent`;
 //! * `imageclip.payload` / `.no_selection` / `.multiple` / `.not_image` /
-//!   `.invalid_rect`.
+//!   `.invalid_rect`;
+//! * `imageadjust.payload` / `.no_selection` / `.multiple` / `.not_image` /
+//!   `.invalid_value`.
 //!
 //! Texture resolution stays host-side: the stored entity carries only the
 //! normalised logical key. When that key is not under the drawing directory the
@@ -25,7 +28,8 @@
 //! `image.unresolved` diagnostic — this command never fabricates a texture.
 
 use super::*;
-use crate::command_payload::{ImageAttachCommand, ImageClipCommand};
+use crate::command_payload::{ImageAdjustCommand, ImageAttachCommand, ImageClipCommand};
+use cad_domain::{DocumentId, ImageAdjust};
 
 /// The image authoring/editing commands (Work-only).
 impl Application {
@@ -39,6 +43,9 @@ impl Application {
         match ext {
             ExtendedCommandId::ImageAttach => self.image_attach(session, command),
             ExtendedCommandId::ImageClip => self.image_clip(session, command),
+            ExtendedCommandId::ImageAdjust | ExtendedCommandId::DashImageAdjust => {
+                self.image_adjust(session, command)
+            }
             other => Err(CadError::Invariant(format!(
                 "not a raster-image edit command: {other:?}"
             ))),
@@ -140,6 +147,7 @@ impl Application {
             file: Some(stored_key.clone()),
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         };
         let mut outcome = self.commit_new_entity(session, command, geometry, "attach image")?;
         outcome.diagnostics.push(Diagnostic {
@@ -176,53 +184,8 @@ impl Application {
             ));
         };
         let ImageClipCommand { rect } = payload.as_ref();
-        let references = session.selection.refs();
-        let reference = match references {
-            [] => {
-                return Err(image_refusal(
-                    "imageclip.no_selection",
-                    "IMAGECLIP needs exactly one selected image; nothing is selected",
-                ));
-            }
-            [one] => one,
-            many => {
-                return Err(image_refusal(
-                    "imageclip.multiple",
-                    format!(
-                        "IMAGECLIP edits exactly one image; {} entities are selected",
-                        many.len()
-                    ),
-                ));
-            }
-        };
-        if reference.document != command.document
-            || !reference.instance.0.is_empty()
-            || reference.sub_element.is_some()
-        {
-            return Err(image_refusal(
-                "imageclip.not_image",
-                format!(
-                    "entity {} is not a directly addressable image in this document",
-                    reference.entity.0
-                ),
-            ));
-        }
-        let document_id = command.document;
-        let document = self
-            .workspace
-            .documents
-            .get(&document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let mut candidate = document.drawing.as_ref().clone();
-        let before = candidate.entity(reference.entity).cloned().ok_or_else(|| {
-            image_refusal(
-                "imageclip.not_image",
-                format!(
-                    "entity {} does not exist in this drawing",
-                    reference.entity.0
-                ),
-            )
-        })?;
+        let (document_id, mut candidate, before) =
+            self.one_selected_image(session, command, "IMAGECLIP", "imageclip")?;
         let SemanticGeometry::Image { clip, .. } = &before.geometry else {
             return Err(image_refusal(
                 "imageclip.not_image",
@@ -338,9 +301,226 @@ impl Application {
             point_report: None,
         })
     }
+
+    /// `IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` /
+    /// `IMAGEADJUST RESET`.
+    ///
+    /// Pre-selection command: exactly one selected, directly addressable `Image`
+    /// entity. The three percentages are stored verbatim in the image's
+    /// `adjust` field (`0..=100`, neutral `50`/`50`/`0`);
+    /// `MONO`/`COLOR` are optional and an omitted word **keeps the image's
+    /// current monochrome state** rather than resetting it. `RESET` restores the
+    /// neutral 50/50/0/off transfer.
+    ///
+    /// A value above 100 is `imageadjust.invalid_value` (the payload is `u8`,
+    /// whose type alone cannot express "at most 100"). An identical transfer is
+    /// `imageadjust.unchanged` and opens no transaction, so a repeated command
+    /// bumps neither the revision nor the undo stack.
+    fn image_adjust(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::ImageAdjust(payload) = &command.payload else {
+            return Err(image_refusal(
+                "imageadjust.payload",
+                "IMAGEADJUST needs an ImageAdjust payload (`<brightness> <contrast> <fade> \
+                 [MONO|COLOR]` or `RESET`)",
+            ));
+        };
+        // The three percentages are validated **before** the selection is read:
+        // a malformed transfer is the same refusal whether or not anything is
+        // selected, and it never opens a transaction.
+        if let ImageAdjustCommand::Set {
+            brightness,
+            contrast,
+            fade,
+            ..
+        } = payload.as_ref()
+        {
+            if *brightness > 100 || *contrast > 100 || *fade > 100 {
+                return Err(image_refusal(
+                    "imageadjust.invalid_value",
+                    format!(
+                        "brightness, contrast and fade are percentages in 0..=100, got \
+                         {brightness}/{contrast}/{fade}"
+                    ),
+                ));
+            }
+        }
+        let (document_id, mut candidate, before) =
+            self.one_selected_image(session, command, "IMAGEADJUST", "imageadjust")?;
+        let current = match &before.geometry {
+            SemanticGeometry::Image { adjust, .. } => *adjust,
+            other => {
+                return Err(image_refusal(
+                    "imageadjust.not_image",
+                    format!(
+                        "entity {} is a {}, not a raster image",
+                        before.id.0,
+                        class_name(other)
+                    ),
+                ));
+            }
+        };
+        let target = match payload.as_ref() {
+            ImageAdjustCommand::Reset => ImageAdjust::default(),
+            ImageAdjustCommand::Set {
+                brightness,
+                contrast,
+                fade,
+                monochrome,
+            } => ImageAdjust {
+                brightness: *brightness,
+                contrast: *contrast,
+                fade: *fade,
+                // An omitted MONO/COLOR word keeps the stored state.
+                monochrome: monochrome.unwrap_or(current.monochrome),
+            },
+        };
+        let object = Some(ObjectId(before.id.0));
+        let mode = |monochrome: bool| {
+            if monochrome {
+                "monochrome (MONO)"
+            } else {
+                "colour (COLOR)"
+            }
+        };
+        if target == current {
+            return Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![Diagnostic {
+                    object,
+                    code: "imageadjust.unchanged".into(),
+                    message: format!(
+                        "IMAGEADJUST: image entity {} already has brightness {}, contrast {}, \
+                         fade {}, {}; nothing was written",
+                        before.id.0,
+                        target.brightness,
+                        target.contrast,
+                        target.fade,
+                        mode(target.monochrome)
+                    ),
+                }],
+                measurement: None,
+                point_report: None,
+            });
+        }
+        let mut after = before.clone();
+        if let SemanticGeometry::Image { adjust: slot, .. } = &mut after.geometry {
+            *slot = target;
+        }
+        let label = "image adjust";
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged = candidate.begin_drawing_transaction(label, transaction)?;
+            staged.update_entity(after.clone())?;
+            staged.commit()?
+        };
+        let stored = candidate.entity(after.id).cloned().ok_or_else(|| {
+            CadError::Invariant("IMAGEADJUST: the image vanished after commit".into())
+        })?;
+        self.publish_candidate(
+            document_id,
+            candidate,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: label.into(),
+                patches: vec![drawing_patch(before.id, Some(before.clone()), Some(stored))],
+                block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
+                merge_key: None,
+            },
+        )?;
+        Ok(CommandOutcome {
+            objects: vec![ObjectId(before.id.0)],
+            changes: Some(Arc::new(change_set)),
+            diagnostics: vec![Diagnostic {
+                object,
+                code: "imageadjust.applied".into(),
+                message: format!(
+                    "IMAGEADJUST: image entity {} set to brightness {}, contrast {}, fade {}, \
+                     {}; the renderer applies these in the declared order monochrome -> \
+                     contrast -> brightness -> fade toward the background",
+                    before.id.0,
+                    target.brightness,
+                    target.contrast,
+                    target.fade,
+                    mode(target.monochrome)
+                ),
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+
+    /// The one directly addressable selected `Image` entity, plus a mutable
+    /// drawing candidate cloned from the document.
+    ///
+    /// Shared by every pre-selection image edit so the selection refusals
+    /// (`<code>.no_selection` / `.multiple` / `.not_image`) are worded and coded
+    /// once. Nothing is written here: the caller stages its own transaction.
+    fn one_selected_image(
+        &self,
+        session: &SessionState,
+        command: &Command,
+        name: &str,
+        code: &str,
+    ) -> CadResult<(DocumentId, cad_db::DrawingDatabase, DbEntity)> {
+        let references = session.selection.refs();
+        let reference = match references {
+            [] => {
+                return Err(image_refusal(
+                    format!("{code}.no_selection"),
+                    format!("{name} needs exactly one selected image; nothing is selected"),
+                ));
+            }
+            [one] => one,
+            many => {
+                return Err(image_refusal(
+                    format!("{code}.multiple"),
+                    format!(
+                        "{name} edits exactly one image; {} entities are selected",
+                        many.len()
+                    ),
+                ));
+            }
+        };
+        if reference.document != command.document
+            || !reference.instance.0.is_empty()
+            || reference.sub_element.is_some()
+        {
+            return Err(image_refusal(
+                format!("{code}.not_image"),
+                format!(
+                    "entity {} is not a directly addressable image in this document",
+                    reference.entity.0
+                ),
+            ));
+        }
+        let document_id = command.document;
+        let document = self
+            .workspace
+            .documents
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let candidate = document.drawing.as_ref().clone();
+        let before = candidate.entity(reference.entity).cloned().ok_or_else(|| {
+            image_refusal(
+                format!("{code}.not_image"),
+                format!(
+                    "entity {} does not exist in this drawing",
+                    reference.entity.0
+                ),
+            )
+        })?;
+        Ok((document_id, candidate, before))
+    }
 }
 
 /// One stable, code-prefixed refusal for an image authoring command.
-fn image_refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
+fn image_refusal(code: impl std::fmt::Display, detail: impl std::fmt::Display) -> CadError {
     CadError::InvalidInput(format!("{code}: {detail}"))
 }

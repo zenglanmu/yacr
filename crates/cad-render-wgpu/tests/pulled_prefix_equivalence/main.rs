@@ -27,7 +27,9 @@
 //! Diagnostic-only: no renderer/pick/commit semantics are asserted beyond
 //! equivalence, and no storage limit or override is changed in production code.
 
-use cad_domain::{DocumentId, EntityId, InstancePath, Point3, SelectionRef, Transform3};
+use cad_domain::{
+    DocumentId, EntityId, ImageAdjust, InstancePath, Point3, SelectionRef, Transform3,
+};
 
 use cad_render_wgpu::headless::{create_headless_gpu, HeadlessGpu};
 
@@ -453,6 +455,7 @@ fn image_quad(draw_order: i64) -> ImageBatch {
         clip: None,
         alpha: 1.0,
         draw_order,
+        adjust: ImageAdjust::default(),
         sources: vec![source(IMAGE_ENTITY)],
     }
 }

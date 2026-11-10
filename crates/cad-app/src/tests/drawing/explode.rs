@@ -93,6 +93,7 @@ fn image_geometry() -> SemanticGeometry {
         file: None,
         clip: None,
         visible: true,
+        adjust: ImageAdjust::default(),
     }
 }
 

@@ -877,10 +877,11 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // `ARRAYPATH <count> [ALIGN]`: the count/align ride the payload; the current
     // selection (path first) is the whole input.
     ARRAYPATH_SELECTOR,
-    // The raster-image and table typed forms (`IMAGEATTACH`, `IMAGECLIP`,
-    // `TABLE`, `-TABLE`, `TABLEDIT`); their grammars live in the sibling modules.
+    // The raster-image and table typed forms; grammars live in the sibling modules.
     IMAGEATTACH_SELECTOR,
     IMAGECLIP_SELECTOR,
+    IMAGEADJUST_SELECTOR,
+    DASH_IMAGEADJUST_SELECTOR,
     TABLE_SELECTOR,
     DASH_TABLE_SELECTOR,
     TABLEDIT_SELECTOR,
@@ -902,8 +903,7 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     VPCLIP_SELECTOR,
     VPSCALE_SELECTOR,
     LAYVPI_SELECTOR,
-    // `DIMSPACE` is a dimension argument form of its own (not part of the
-    // editing batch).
+    // `DIMSPACE` is a dimension argument form of its own (not the editing batch).
     DIMSPACE_SELECTOR,
     // The 2026-11-07 dimension-editing batch argument forms.
     DIMSTYLE_SELECTOR,

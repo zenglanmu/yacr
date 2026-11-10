@@ -18,6 +18,7 @@ mod tests {
                 inside: true,
             }),
             visible: true,
+            adjust: ImageAdjust::default(),
         }
     }
 
@@ -146,5 +147,26 @@ mod tests {
         assert!((via_point.x - direct.x - composed.matrix[0][3]).abs() < 1e-9);
         assert!((via_point.y - direct.y - composed.matrix[1][3]).abs() < 1e-9);
         assert!((via_point.z - direct.z - composed.matrix[2][3]).abs() < 1e-9);
+    }
+    #[test]
+    fn image_adjust_default_is_the_neutral_transfer() {
+        let adjust = ImageAdjust::default();
+        assert_eq!(
+            adjust,
+            ImageAdjust {
+                brightness: 50,
+                contrast: 50,
+                fade: 0,
+                monochrome: false,
+            }
+        );
+        assert_eq!(adjust, ImageAdjust::default(), "Copy/Eq plain data");
+        // The neutral transfer is what an untouched imported image carries.
+        match sample_image() {
+            SemanticGeometry::Image { adjust, .. } => {
+                assert_eq!(adjust, ImageAdjust::default());
+            }
+            other => panic!("expected Image, got {other:?}"),
+        }
     }
 }

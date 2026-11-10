@@ -608,6 +608,7 @@ fn image_and_mask_report_only_stored_metadata() {
         file: Some("logo.png".into()),
         clip: None,
         visible: true,
+        adjust: cad_domain::ImageAdjust::default(),
     });
     let value = |key: &str| {
         rows.iter()

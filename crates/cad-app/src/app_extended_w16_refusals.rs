@@ -1,11 +1,11 @@
 //! Wave 16 **named refusals**.
 //!
-//! The names in this module (image adjustment/quality/editor and the PDF/DGN
-//! underlays) are admitted by the vocabulary and refused with
-//! `CadError::Unsupported` carrying a stable reason. Nothing is written, no
-//! revision is bumped and no `cad-history` entry is recorded; all are
-//! Viewer-legal. `IMAGE`/`-IMAGE` (report), `IMAGEATTACH` and `IMAGECLIP` are
-//! real commands now, so they no longer appear here.
+//! The names in this module (image quality/editor and the PDF/DGN underlays) are
+//! admitted by the vocabulary and refused with `CadError::Unsupported` carrying a
+//! stable reason. Nothing is written, no revision is bumped and no `cad-history`
+//! entry is recorded; all are Viewer-legal. `IMAGE`/`-IMAGE` (report),
+//! `IMAGEATTACH`, `IMAGECLIP` and `IMAGEADJUST` are real commands now, so they no
+//! longer appear here.
 
 use super::*;
 use crate::app_utility::require_none_payload;
@@ -24,8 +24,6 @@ impl Application {
 
 fn reason(ext: ExtendedCommandId) -> String {
     let text = match ext {
-        ExtendedCommandId::ImageAdjust => "imageadjust.unsupported: no image adjustment model",
-        ExtendedCommandId::DashImageAdjust => "-imageadjust.unsupported: no image adjustment model",
         ExtendedCommandId::ImageQuality => {
             "imagequality.unsupported: no image display-quality model"
         }

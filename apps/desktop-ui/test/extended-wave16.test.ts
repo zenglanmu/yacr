@@ -1,10 +1,11 @@
 // The 2026-11-09 Wave 16 batch: image/PDF/DGN underlay commands.
 //
-// `IMAGE` / `-IMAGE` (read-only report), `IMAGEATTACH` and `IMAGECLIP` are real
-// commands now; the remaining names stay named refusals. The Rust lane is the
-// behaviour authority; this suite pins the user-facing surface: one catalog row
-// each, real label/hint keys in both catalogs, the host vocabulary mirror, the
-// "needs an open drawing" rule and no capability gate.
+// `IMAGE` / `-IMAGE` (read-only report), `IMAGEATTACH`, `IMAGECLIP` and
+// `IMAGEADJUST` are real commands now; the remaining names stay named refusals.
+// The Rust lane is the behaviour authority; this suite pins the user-facing
+// surface: one catalog row each, real label/hint keys in both catalogs, the
+// host vocabulary mirror, the "needs an open drawing" rule and no capability
+// gate.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
@@ -12,8 +13,8 @@ import { admitCommandText, isSupportedCommand, setCommandCatalog } from '../src/
 import { CAPABILITY_GATES, DOCUMENT_SCOPED_COMMANDS } from '../src/commands/gating.ts';
 import { HOST_NAMES, readCatalog, readModule } from './helpers.ts';
 
-const IMPLEMENTED = ['IMAGE', '-IMAGE', 'IMAGEATTACH', 'IMAGECLIP'];
-const REFUSALS = ['IMAGEADJUST', '-IMAGEADJUST', 'IMAGEQUALITY', 'IMAGEAPP', 'IMAGEASYNCWAIT', 'IMAGEEDIT', 'CLASSICIMAGE', 'PDFATTACH', '-PDFATTACH', 'PDFCLIP', 'PDFLAYERS', 'PDFADJUST', 'PDFIMPORT', '-PDFIMPORT', 'PDFSHXTEXT', '-PDFSHXTEXT', 'DGNATTACH', '-DGNATTACH', 'DGNCLIP', 'DGNLAYERS', 'DGNADJUST'];
+const IMPLEMENTED = ['IMAGE', '-IMAGE', 'IMAGEATTACH', 'IMAGECLIP', 'IMAGEADJUST', '-IMAGEADJUST'];
+const REFUSALS = ['IMAGEQUALITY', 'IMAGEAPP', 'IMAGEASYNCWAIT', 'IMAGEEDIT', 'CLASSICIMAGE', 'PDFATTACH', '-PDFATTACH', 'PDFCLIP', 'PDFLAYERS', 'PDFADJUST', 'PDFIMPORT', '-PDFIMPORT', 'PDFSHXTEXT', '-PDFSHXTEXT', 'DGNATTACH', '-DGNATTACH', 'DGNCLIP', 'DGNLAYERS', 'DGNADJUST'];
 const BATCH = [...IMPLEMENTED, ...REFUSALS];
 const DOC = { documentLabel: 'drawing.dwg', loading: false };
 const NO_DOC = { documentLabel: null, loading: false };

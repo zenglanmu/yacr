@@ -677,11 +677,18 @@ fn emit_leaf(
                 "SHX shape glyph has no DXF representation without its shape file".into(),
             ]),
         ),
-        SemanticGeometry::Image { .. } => acc.record(
+        SemanticGeometry::Image { adjust, .. } => acc.record(
             object,
             "image",
             MappingOutcome::Dropped(vec![
-                "raster image is not exported (external resource)".into()
+                "raster image is not exported (external resource), so its display transfer \
+                 is not written either"
+                    .into(),
+                format!(
+                    "the image display transfer (brightness {}, contrast {}, fade {}, \
+                     monochrome {}) is not exported with the dropped raster image",
+                    adjust.brightness, adjust.contrast, adjust.fade, adjust.monochrome
+                ),
             ]),
         ),
         SemanticGeometry::Mask { .. } => acc.record(
