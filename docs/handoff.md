@@ -1,5 +1,15 @@
 AD
 
+## 2026-11-10 TABLE 创建 + TABLEDIT
+
+- **TABLE / -TABLE 真实创建**：`TABLE <rows> <cols> <col_width> <row_height> <x> <y>`（`-TABLE` 同实现），+X/+Z frame、空单元格、Standard、默认文字高度、四边可见单线；上限 1000×1000 且 ≤100,000 单元格；经共享 create funnel，一条事务/一步撤销；`table.created`/`-table.created`。无对话框/创建时合并/单元格样式。
+- **TABLEDIT 真实编辑**：`TABLEDIT <row> <col> [text]`（1-based，选中恰好一个表格，剩余整行作为文本、空文本清除）；`with_cell_text` + 一次 `update_entity`，一条事务/一步撤销；`tabledit.cell`/`.unchanged`；FIND 能立即看到编辑后的单元格。无样式/合并/块内容编辑、无交互对话框。
+- **仍拒绝**：`TABLEEXPORT`（无 CSV/文件写出）、`TABLESTYLE`（无样式表）、`TINSERT`（无块进入单元格创建）、`MATCHCELL`（无单元格样式复制面）。
+- **已运行**：`cargo test -p cad-app --lib`（2314 passed, 3 ignored）、`cad-ui-core`（511+1）、`cargo check --workspace --all-targets`、clippy（app/ui-core）、fmt、architecture/tauri/fixture/file-size/command-docs/test-check-command-docs/i18n、`npm test`（1456）全绿。
+- **NOT VERIFIED**：真实 GUI/GPU/像素/真机、真实 DWG/AutoCAD 对照；TABLE 创建/编辑只有合成契约测试。
+- **提交**：`f2594257` TABLE creation and TABLEDIT cell text。
+
+
 ## 2026-11-10 TABLE 模型 v1 + 加固
 
 - **真实模型**：`SemanticGeometry::Table(Box<TableGeometry>)`（`cad-domain/src/table_entity.rs`）：frame、行/列、单元格文字/高度/样式、合并跨度、四边边框 + 派生显示（与旧 `Compound` 显示逐行等价）。导入 `ACAD_TABLE` 保留网格/合并/文字/边框；`Completeness::Partial` 原因覆盖对齐强制 Center/Middle、逐格旋转、块/字段/额外内容、非 +Z 文字、未解析样式。
