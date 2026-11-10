@@ -8,7 +8,7 @@ workspace；它只是 `index.html` / `styles.css` / `main.js` / `downloads.json`
 - 线上地址：<https://yacr.pages.dev/>（Cloudflare Pages 项目 `yacr`）
 - 安装包镜像：Cloudflare R2 桶 `yacr-downloads`，主下载域名 `https://dl-yacr.snakeheartgo.top`
   （自定义域名 + Cache Rule），`r2.dev` 托管域名只作显式回退
-- 对象前缀：`releases/<tag>/`（例如 `releases/v0.1.7/yacr-0.1.7-linux-x86_64.flatpak`）
+- 对象前缀：`releases/<tag>/`（例如 `releases/v0.1.8/yacr-0.1.8-linux-x86_64.flatpak`）
 
 > 部署/上传成功只是**分发**证据，不是运行时、GPU、真机或像素验收。页面与下载清单也不构成
 > DWG/DXF 兼容性承诺。
@@ -30,7 +30,7 @@ token 只在脚本内部使用，脚本不会打印 token。缺少任一 secret 
 python3 scripts/serve-web.py --directory apps/landing --port 8091
 ```
 
-`downloads.json` 现在提交了当前 `v0.1.7` 的 R2 清单（`cdnBase` 在自定义域名验证后指向
+`downloads.json` 现在提交了当前 `v0.1.8` 的 R2 清单（`cdnBase` 在自定义域名验证后指向
 `https://dl-yacr.snakeheartgo.top`），页面主按钮直接走 R2 + Cloudflare 缓存，GitHub 作为次链接与校验
 来源。`upload-r2-downloads.sh` 会在每次发布后原子重写它；若 R2 未配置或被删除，把 `cdnBase`
 设为 `null` 即回退 GitHub。本地预览无需 Cloudflare 凭据。
@@ -55,7 +55,7 @@ Cloudflare 账户的 zone `snakeheartgo.top` 上，因此可以套用 Cloudflare
    - 如 Dashboard 提供 **Origin Range Requests**，建议开启，避免断点续传按段回源。
 3. **验证**（同一 URL 连续两次）：
    ```bash
-   curl -sI https://dl-yacr.snakeheartgo.top/releases/v0.1.7/yacr-0.1.7-linux-x86_64.flatpak
+   curl -sI https://dl-yacr.snakeheartgo.top/releases/v0.1.8/yacr-0.1.8-linux-x86_64.flatpak
    # 第一次 cf-cache-status: MISS，第二次 HIT；Server: cloudflare
    ```
    命中后重复下载不再产生 R2 `GetObject`（Class B）；冷缓存/缓存过期后仍会回源。
@@ -78,7 +78,7 @@ Cloudflare 账户的 zone `snakeheartgo.top` 上，因此可以套用 Cloudflare
 ```bash
 # 1) 把已发布的 release 资产镜像到 R2，并重写 apps/landing/downloads.json
 #    需要 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID，且 gh 已认证
-RELEASE_TAG=v0.1.7 bash scripts/upload-r2-downloads.sh
+RELEASE_TAG=v0.1.8 bash scripts/upload-r2-downloads.sh
 
 # 2) 发布页面（需要 Cloudflare Pages: Edit）
 CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... bash scripts/deploy-landing-pages.sh
@@ -129,9 +129,9 @@ python3 scripts/build-landing-changelog.py --check   # 只校验是否已过期�
   release 资产可下载之前，tag 触发会与手动发布竞态（失败或发布旧页面）。
 - 操作顺序：先等 release 发布完成、资产可下载，再手动 dispatch 本 workflow。
 - inputs：
-  - `release_tag`（默认 `v0.1.7`）：要镜像到 R2 的 release tag；
+  - `release_tag`（默认 `v0.1.8`）：要镜像到 R2 的 release tag；
   - `upload_downloads`（默认 `true`）：关闭时跳过 R2，直接部署仓库里已提交的
-    `downloads.json`（当前是 v0.1.7 的 R2 清单；适合只改文案/布局，避免重复上传 396 MB）。
+    `downloads.json`（当前是 v0.1.8 的 R2 清单；适合只改文案/布局，避免重复上传 396 MB）。
     如需 GitHub 回退，把 `cdnBase` 设为 `null` 再部署。
 - 步骤顺序：先 R2（会重写 `downloads.json`），再 Pages（上传重写后的清单）。
 - `concurrency: landing-production`、`cancel-in-progress: false`、`timeout-minutes: 45`；
