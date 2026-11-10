@@ -429,7 +429,12 @@ test('autocomplete marks supported commands and never injects unknown ids', () =
   const layer = filterCommandSuggestions('LAYER');
   assert.equal(layer.find(suggestion => suggestion.id === 'LAYER').supported, true);
   const open = filterCommandSuggestions('open');
-  assert.deepEqual(open.map(suggestion => suggestion.id), ['OPEN', 'XOPEN']);
+  // Wave 17-24 adds names that contain OPEN (OPENDWFMARKUP, ...OPEN palettes);
+  // the exact/prefix OPEN still ranks first, then the catalog order.
+  assert.deepEqual(open.map(suggestion => suggestion.id), [
+    'OPEN', 'OPENDWFMARKUP', 'ACTIVITYINSIGHTSOPEN', 'ASSISTANTOPEN',
+    'MATBROWSEROPEN', 'MATEDITOROPEN', 'OLEOPEN', 'XOPEN',
+  ]);
   assert.equal(open[0].supported, true);
   assert.deepEqual(filterCommandSuggestions('zzz'), []);
   // Before the host answers, every suggestion is unsupported — never "allowed".

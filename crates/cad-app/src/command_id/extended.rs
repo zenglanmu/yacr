@@ -131,7 +131,10 @@
 //! `TABLET`, `TASKBAR`, `REINIT`, `SYSWINDOWS`, `MENU`, `RIBBON`) for the absent
 //! UCS/tablet/menu models and host-owned chrome. All Viewer-legal.
 
+mod refusal_names;
 mod selectors;
+
+pub use refusal_names::RefusalId;
 
 /// One payload-free command in the extended wrapper batches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -969,6 +972,13 @@ pub enum ExtendedCommandId {
     DgnLayers,
     /// `DGNADJUST`: no DGN underlay adjustment model.
     DgnAdjust,
+
+    // Waves 17-24: 200 named refusals (action macros, palettes, OLE/hyperlinks,
+    // LISP, lights/materials/constraints, data extraction, DWF/DGN underlays,
+    // markup, GIS, compare, sheet sets). The selectors, reasons and variant set
+    // live in `refusal_names.rs`; every one is Viewer-legal and writes nothing.
+    /// `Refusal(name)`: one Wave 17-24 feature with no model in this build.
+    Refusal(RefusalId),
 }
 
 impl ExtendedCommandId {}

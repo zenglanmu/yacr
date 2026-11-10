@@ -51,6 +51,8 @@ mod app_dispatch;
 mod app_drafting;
 // The Wave 2 extended-command handlers (session tokens, reports, refusals).
 mod app_extended_refusals;
+// The Wave 17-24 data-driven named refusals (one registry, one handler).
+mod app_extended_refusal_names;
 mod app_extended_reports2;
 mod app_extended_session2;
 // The Wave 3 extended-command handlers (reports/session and refusals).
@@ -123,7 +125,7 @@ pub use camera::{
 };
 pub mod command_aliases;
 pub mod command_id;
-pub use command_id::{AppMode, CommandId, ExtendedCommandId};
+pub use command_id::{AppMode, CommandId, ExtendedCommandId, RefusalId};
 pub use draw_tool::{
     circle_radius, AlignPairSet, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity,
     ToolParameter, ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES,

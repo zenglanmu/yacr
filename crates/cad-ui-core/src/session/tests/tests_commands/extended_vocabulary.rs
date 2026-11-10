@@ -6,7 +6,7 @@
 //! table's `CommandId::Extended(_)` rows are exactly the `ALL` set.
 
 use super::super::super::*;
-use cad_app::ExtendedCommandId;
+use cad_app::{ExtendedCommandId, RefusalId};
 
 #[test]
 fn every_extended_variant_has_one_table_row_and_normalizes() {
@@ -72,6 +72,34 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
             "{selector} work-mode flag"
         );
     }
+
+    // Waves 17-24: one sibling-table row per `RefusalId`, all Viewer-legal.
+    for &name in RefusalId::ALL {
+        let selector = name.selector();
+        let rows: Vec<_> = REFUSAL_TABLE
+            .iter()
+            .filter(|(candidate, _)| *candidate == selector)
+            .collect();
+        assert_eq!(rows.len(), 1, "{selector} must appear exactly once");
+        assert_eq!(
+            rows[0].1,
+            CommandId::Extended(ExtendedCommandId::Refusal(name)),
+            "{selector}"
+        );
+        assert_eq!(
+            normalize_command(selector),
+            Some(CommandId::Extended(ExtendedCommandId::Refusal(name))),
+            "{selector}"
+        );
+        assert_eq!(canonical_command_name(selector), Some(selector));
+        assert_eq!(name.selector(), selector);
+        assert!(name.reason().starts_with(&selector.to_ascii_lowercase()));
+        assert!(!name.reason().is_empty());
+        assert!(
+            !ExtendedCommandId::Refusal(name).requires_work_mode(),
+            "{selector} must stay Viewer-legal"
+        );
+    }
 }
 
 #[test]
@@ -80,8 +108,10 @@ fn extended_table_rows_are_exactly_the_all_set() {
         .iter()
         .map(|variant| variant.selector())
         .collect();
+    expected.extend(RefusalId::ALL.iter().map(|name| name.selector()));
     let mut found: Vec<&'static str> = COMMAND_TABLE
         .iter()
+        .chain(REFUSAL_TABLE.iter())
         .filter(|(_, id)| matches!(id, CommandId::Extended(_)))
         .map(|(name, _)| *name)
         .collect();

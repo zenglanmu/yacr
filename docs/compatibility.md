@@ -1436,6 +1436,217 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `DGNLAYERS` | **部分实现（具名拒绝）**：`dgnlayers.unsupported: no DGN underlay layer model` | 不写库/不升修订/不入历史 |
 | `DGNADJUST` | **部分实现（具名拒绝）**：`dgnadjust.unsupported: no DGN underlay adjustment model` | 不写库/不升修订/不入历史 |
 
+### 2026-11-10 Wave 17-24 扩展命令（200 条具名拒绝）
+
+> 以下 200 个名字只提供诚实命令路径（`CadError::Unsupported` + 稳定原因串），
+> 不是可用功能：本构建没有对应的模型/API（动作录制、面板、OLE/超链接、LISP、
+> 灯光/材质/约束、数据提取、DWF/DGN 底图、标记协作、GIS、比较、图纸集等）。
+> 全部 Viewer-legal：不写库、不升修订、不入历史。唯一权威是
+> `docs/autocad-2026-command-coverage.md`；此表只复述原因串。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `ACTBASEPOINT` | **部分实现（具名拒绝）**：`actbasepoint.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
+| `ACTIVITYINSIGHTSCLOSE` | **部分实现（具名拒绝）**：`activityinsightsclose.unsupported: this build has no Activity Insights data model` | 不写库/不升修订/不入历史 |
+| `ACTIVITYINSIGHTSOPEN` | **部分实现（具名拒绝）**：`activityinsightsopen.unsupported: this build has no Activity Insights data model` | 不写库/不升修订/不入历史 |
+| `ACTMANAGER` | **部分实现（具名拒绝）**：`actmanager.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
+| `ACTRECORD` | **部分实现（具名拒绝）**：`actrecord.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
+| `-ACTSTOP` | **部分实现（具名拒绝）**：`-actstop.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
+| `ACTSTOP` | **部分实现（具名拒绝）**：`actstop.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
+| `ACTUSERINPUT` | **部分实现（具名拒绝）**：`actuserinput.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
+| `-ACTUSERMESSAGE` | **部分实现（具名拒绝）**：`-actusermessage.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
+| `ACTUSERMESSAGE` | **部分实现（具名拒绝）**：`actusermessage.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
+| `ADCCLOSE` | **部分实现（具名拒绝）**：`adcclose.unsupported: this build has no DesignCenter content palette` | 不写库/不升修订/不入历史 |
+| `ADCENTER` | **部分实现（具名拒绝）**：`adcenter.unsupported: this build has no DesignCenter content palette` | 不写库/不升修订/不入历史 |
+| `ADCNAVIGATE` | **部分实现（具名拒绝）**：`adcnavigate.unsupported: this build has no DesignCenter content palette` | 不写库/不升修订/不入历史 |
+| `ADJUST` | **部分实现（具名拒绝）**：`adjust.unsupported: this build has no underlay/image fade-contrast-monochrome model` | 不写库/不升修订/不入历史 |
+| `AMECONVERT` | **部分实现（具名拒绝）**：`ameconvert.unsupported: this build has no AME solid model` | 不写库/不升修订/不入历史 |
+| `ANALYSISCURVATURE` | **部分实现（具名拒绝）**：`analysiscurvature.unsupported: this build has no 3D curvature/draft/zebra analysis display` | 不写库/不升修订/不入历史 |
+| `ANALYSISDRAFT` | **部分实现（具名拒绝）**：`analysisdraft.unsupported: this build has no 3D curvature/draft/zebra analysis display` | 不写库/不升修订/不入历史 |
+| `ANALYSISOPTIONS` | **部分实现（具名拒绝）**：`analysisoptions.unsupported: this build has no 3D curvature/draft/zebra analysis display` | 不写库/不升修订/不入历史 |
+| `ANALYSISZEBRA` | **部分实现（具名拒绝）**：`analysiszebra.unsupported: this build has no 3D curvature/draft/zebra analysis display` | 不写库/不升修订/不入历史 |
+| `ANIPATH` | **部分实现（具名拒绝）**：`anipath.unsupported: this build has no camera-animation model` | 不写库/不升修订/不入历史 |
+| `APPAUTOLOADER` | **部分实现（具名拒绝）**：`appautoloader.unsupported: this build has no plug-in autoloader registry` | 不写库/不升修订/不入历史 |
+| `APPSTORE` | **部分实现（具名拒绝）**：`appstore.unsupported: the host owns this browser/store/chrome action` | 不写库/不升修订/不入历史 |
+| `ARRAYPATH` | **部分实现（具名拒绝）**：`arraypath.unsupported: the array model has no path-array (2D path distribution) implementation` | 不写库/不升修订/不入历史 |
+| `ASSISTANTCLOSE` | **部分实现（具名拒绝）**：`assistantclose.unsupported: this build has no Autodesk Assistant model` | 不写库/不升修订/不入历史 |
+| `ASSISTANTOPEN` | **部分实现（具名拒绝）**：`assistantopen.unsupported: this build has no Autodesk Assistant model` | 不写库/不升修订/不入历史 |
+| `ATTACHURL` | **部分实现（具名拒绝）**：`attachurl.unsupported: this build has no hyperlink storage model` | 不写库/不升修订/不入历史 |
+| `BDETECT` | **部分实现（具名拒绝）**：`bdetect.unsupported: this build has no object-detection model` | 不写库/不升修订/不入历史 |
+| `BLOCKICON` | **部分实现（具名拒绝）**：`blockicon.unsupported: this build has no block thumbnail/preview model` | 不写库/不升修订/不入历史 |
+| `BLOCKSDATAOPTION` | **部分实现（具名拒绝）**：`blocksdataoption.unsupported: this build has no data-collection consent dialog model` | 不写库/不升修订/不入历史 |
+| `BLOCKSPALETTE` | **部分实现（具名拒绝）**：`blockspalette.unsupported: this build has no Blocks palette; block insertion is the INSERT path` | 不写库/不升修订/不入历史 |
+| `BLOCKSPALETTECLOSE` | **部分实现（具名拒绝）**：`blockspaletteclose.unsupported: this build has no Blocks palette; block insertion is the INSERT path` | 不写库/不升修订/不入历史 |
+| `BLOCKTOXREF` | **部分实现（具名拒绝）**：`blocktoxref.unsupported: block-to-xref replacement needs a writable block table and xref attachment, neither modeled` | 不写库/不升修订/不入历史 |
+| `BREP` | **部分实现（具名拒绝）**：`brep.unsupported: this build has no 3D solid history/brep model` | 不写库/不升修订/不入历史 |
+| `BROWSER` | **部分实现（具名拒绝）**：`browser.unsupported: the host owns this browser/store/chrome action` | 不写库/不升修订/不入历史 |
+| `BSEARCH` | **部分实现（具名拒绝）**：`bsearch.unsupported: this build has no convert-to-block search model` | 不写库/不升修订/不入历史 |
+| `CAMERA` | **部分实现（具名拒绝）**：`camera.unsupported: this build has no 3D camera/target view model` | 不写库/不升修订/不入历史 |
+| `CENTERDISASSOCIATE` | **部分实现（具名拒绝）**：`centerdisassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit` | 不写库/不升修订/不入历史 |
+| `CENTERREASSOCIATE` | **部分实现（具名拒绝）**：`centerreassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit` | 不写库/不升修订/不入历史 |
+| `CENTERRESET` | **部分实现（具名拒绝）**：`centerreset.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit` | 不写库/不升修订/不入历史 |
+| `CHECKSTANDARDS` | **部分实现（具名拒绝）**：`checkstandards.unsupported: this build has no CAD standards (DWS) model` | 不写库/不升修订/不入历史 |
+| `CHURLS` | **部分实现（具名拒绝）**：`churls.unsupported: this build has no hyperlink storage model` | 不写库/不升修订/不入历史 |
+| `COMMANDMACROS` | **部分实现（具名拒绝）**：`commandmacros.unsupported: this build has no command-macro palette model` | 不写库/不升修订/不入历史 |
+| `COMMANDMACROSCLOSE` | **部分实现（具名拒绝）**：`commandmacrosclose.unsupported: this build has no command-macro palette model` | 不写库/不升修订/不入历史 |
+| `-COMPARE` | **部分实现（具名拒绝）**：`-compare.unsupported: this build has no drawing-compare/diff model` | 不写库/不升修订/不入历史 |
+| `COMPARE` | **部分实现（具名拒绝）**：`compare.unsupported: this build has no drawing-compare/diff model` | 不写库/不升修订/不入历史 |
+| `COMPARECLOSE` | **部分实现（具名拒绝）**：`compareclose.unsupported: this build has no drawing-compare/diff model` | 不写库/不升修订/不入历史 |
+| `COMPAREEXPORT` | **部分实现（具名拒绝）**：`compareexport.unsupported: this build has no drawing-compare/diff model` | 不写库/不升修订/不入历史 |
+| `COMPAREIMPORT` | **部分实现（具名拒绝）**：`compareimport.unsupported: this build has no drawing-compare/diff model` | 不写库/不升修订/不入历史 |
+| `COMPAREINFO` | **部分实现（具名拒绝）**：`compareinfo.unsupported: this build has no drawing-compare/diff model` | 不写库/不升修订/不入历史 |
+| `COMPILE` | **部分实现（具名拒绝）**：`compile.unsupported: this build has no SHX shape/font compiler or loader` | 不写库/不升修订/不入历史 |
+| `CONVERTOLDLIGHTS` | **部分实现（具名拒绝）**：`convertoldlights.unsupported: this build has no legacy light/material conversion model` | 不写库/不升修订/不入历史 |
+| `CONVERTOLDMATERIALS` | **部分实现（具名拒绝）**：`convertoldmaterials.unsupported: this build has no legacy light/material conversion model` | 不写库/不升修订/不入历史 |
+| `CONVTOMESH` | **部分实现（具名拒绝）**：`convtomesh.unsupported: 3D solids, surfaces and meshes are not modeled` | 不写库/不升修订/不入历史 |
+| `CONVTONURBS` | **部分实现（具名拒绝）**：`convtonurbs.unsupported: 3D solids, surfaces and meshes are not modeled` | 不写库/不升修订/不入历史 |
+| `CONVTOSOLID` | **部分实现（具名拒绝）**：`convtosolid.unsupported: 3D solids, surfaces and meshes are not modeled` | 不写库/不升修订/不入历史 |
+| `CONVTOSURFACE` | **部分实现（具名拒绝）**：`convtosurface.unsupported: 3D solids, surfaces and meshes are not modeled` | 不写库/不升修订/不入历史 |
+| `COORDINATIONMODELATTACH` | **部分实现（具名拒绝）**：`coordinationmodelattach.unsupported: this build has no Navisworks coordination-model attachment model` | 不写库/不升修订/不入历史 |
+| `COPYFROMTRACE` | **部分实现（具名拒绝）**：`copyfromtrace.unsupported: this build has no collaboration trace model` | 不写库/不升修订/不入历史 |
+| `COPYLINK` | **部分实现（具名拒绝）**：`copylink.unsupported: OLE/clipboard linking is owned by the host` | 不写库/不升修订/不入历史 |
+| `COPYM` | **部分实现（具名拒绝）**：`copym.unsupported: this build has no multi-copy (Repeat/Array/Divide/Measure) session model` | 不写库/不升修订/不入历史 |
+| `COUNTAREA` | **部分实现（具名拒绝）**：`countarea.unsupported: this build has no object-count session model` | 不写库/不升修订/不入历史 |
+| `COUNTAREACLOSE` | **部分实现（具名拒绝）**：`countareaclose.unsupported: this build has no object-count session model` | 不写库/不升修订/不入历史 |
+| `COUNTCLOSE` | **部分实现（具名拒绝）**：`countclose.unsupported: this build has no object-count session model` | 不写库/不升修订/不入历史 |
+| `COUNTFIELD` | **部分实现（具名拒绝）**：`countfield.unsupported: this build has no object-count session model` | 不写库/不升修订/不入历史 |
+| `COUNTLIST` | **部分实现（具名拒绝）**：`countlist.unsupported: this build has no object-count session model` | 不写库/不升修订/不入历史 |
+| `COUNTLISTCLOSE` | **部分实现（具名拒绝）**：`countlistclose.unsupported: this build has no object-count session model` | 不写库/不升修订/不入历史 |
+| `COUNTNAVNEXT` | **部分实现（具名拒绝）**：`countnavnext.unsupported: this build has no object-count session model` | 不写库/不升修订/不入历史 |
+| `COUNTNAVPREV` | **部分实现（具名拒绝）**：`countnavprev.unsupported: this build has no object-count session model` | 不写库/不升修订/不入历史 |
+| `COUNTTABLE` | **部分实现（具名拒绝）**：`counttable.unsupported: this build has no object-count session model` | 不写库/不升修订/不入历史 |
+| `CUI` | **部分实现（具名拒绝）**：`cui.unsupported: this build has no CUIx customization model` | 不写库/不升修订/不入历史 |
+| `CUIEXPORT` | **部分实现（具名拒绝）**：`cuiexport.unsupported: this build has no CUIx customization model` | 不写库/不升修订/不入历史 |
+| `CUIIMPORT` | **部分实现（具名拒绝）**：`cuiimport.unsupported: this build has no CUIx customization model` | 不写库/不升修订/不入历史 |
+| `CUILOAD` | **部分实现（具名拒绝）**：`cuiload.unsupported: this build has no CUIx customization model` | 不写库/不升修订/不入历史 |
+| `CUIUNLOAD` | **部分实现（具名拒绝）**：`cuiunload.unsupported: this build has no CUIx customization model` | 不写库/不升修订/不入历史 |
+| `CUSTOMIZE` | **部分实现（具名拒绝）**：`customize.unsupported: this build has no tool-palette customization model` | 不写库/不升修订/不入历史 |
+| `CVADD` | **部分实现（具名拒绝）**：`cvadd.unsupported: NURBS control-vertex editing is not modeled` | 不写库/不升修订/不入历史 |
+| `CVHIDE` | **部分实现（具名拒绝）**：`cvhide.unsupported: NURBS control-vertex editing is not modeled` | 不写库/不升修订/不入历史 |
+| `CVREBUILD` | **部分实现（具名拒绝）**：`cvrebuild.unsupported: NURBS control-vertex editing is not modeled` | 不写库/不升修订/不入历史 |
+| `CVREMOVE` | **部分实现（具名拒绝）**：`cvremove.unsupported: NURBS control-vertex editing is not modeled` | 不写库/不升修订/不入历史 |
+| `CVSHOW` | **部分实现（具名拒绝）**：`cvshow.unsupported: NURBS control-vertex editing is not modeled` | 不写库/不升修订/不入历史 |
+| `-DATAEXTRACTION` | **部分实现（具名拒绝）**：`-dataextraction.unsupported: this build has no data-extraction/attribute-template model` | 不写库/不升修订/不入历史 |
+| `DATAEXTRACTION` | **部分实现（具名拒绝）**：`dataextraction.unsupported: this build has no data-extraction/attribute-template model` | 不写库/不升修订/不入历史 |
+| `DATALINK` | **部分实现（具名拒绝）**：`datalink.unsupported: this build has no external data-link model` | 不写库/不升修订/不入历史 |
+| `DATALINKUPDATE` | **部分实现（具名拒绝）**：`datalinkupdate.unsupported: this build has no external data-link model` | 不写库/不升修订/不入历史 |
+| `DBCCLOSE` | **部分实现（具名拒绝）**：`dbcclose.unsupported: this build has no dbConnect/external database model` | 不写库/不升修订/不入历史 |
+| `DBCCONFIGURE` | **部分实现（具名拒绝）**：`dbcconfigure.unsupported: this build has no dbConnect/external database model` | 不写库/不升修订/不入历史 |
+| `DBCDEFINELLT` | **部分实现（具名拒绝）**：`dbcdefinellt.unsupported: this build has no dbConnect/external database model` | 不写库/不升修订/不入历史 |
+| `DBCDEFINELT` | **部分实现（具名拒绝）**：`dbcdefinelt.unsupported: this build has no dbConnect/external database model` | 不写库/不升修订/不入历史 |
+| `DBCONNECT` | **部分实现（具名拒绝）**：`dbconnect.unsupported: this build has no dbConnect/external database model` | 不写库/不升修订/不入历史 |
+| `DCRADIUS` | **部分实现（具名拒绝）**：`dcradius.unsupported: this build has no dimensional-constraint model` | 不写库/不升修订/不入历史 |
+| `DCVERTICAL` | **部分实现（具名拒绝）**：`dcvertical.unsupported: this build has no dimensional-constraint model` | 不写库/不升修订/不入历史 |
+| `DELAY` | **部分实现（具名拒绝）**：`delay.unsupported: this build has no script runner, so a timed pause has no effect` | 不写库/不升修订/不入历史 |
+| `DETACHURL` | **部分实现（具名拒绝）**：`detachurl.unsupported: this build has no hyperlink storage model` | 不写库/不升修订/不入历史 |
+| `DETECTCLOSE` | **部分实现（具名拒绝）**：`detectclose.unsupported: this build has no object-detection model` | 不写库/不升修订/不入历史 |
+| `DETECTCONVERT` | **部分实现（具名拒绝）**：`detectconvert.unsupported: this build has no object-detection model` | 不写库/不升修订/不入历史 |
+| `DETECTPRIMARY` | **部分实现（具名拒绝）**：`detectprimary.unsupported: this build has no object-detection model` | 不写库/不升修订/不入历史 |
+| `DETECTREMOVE` | **部分实现（具名拒绝）**：`detectremove.unsupported: this build has no object-detection model` | 不写库/不升修订/不入历史 |
+| `DETECTREVIEWNEXT` | **部分实现（具名拒绝）**：`detectreviewnext.unsupported: this build has no object-detection model` | 不写库/不升修订/不入历史 |
+| `DETECTREVIEWPREV` | **部分实现（具名拒绝）**：`detectreviewprev.unsupported: this build has no object-detection model` | 不写库/不升修订/不入历史 |
+| `-DGNEXPORT` | **部分实现（具名拒绝）**：`-dgnexport.unsupported: this build has no DGN exporter` | 不写库/不升修订/不入历史 |
+| `DGNEXPORT` | **部分实现（具名拒绝）**：`dgnexport.unsupported: this build has no DGN exporter` | 不写库/不升修订/不入历史 |
+| `-DGNIMPORT` | **部分实现（具名拒绝）**：`-dgnimport.unsupported: this build has no DGN importer/exporter or mapping model` | 不写库/不升修订/不入历史 |
+| `DGNIMPORT` | **部分实现（具名拒绝）**：`dgnimport.unsupported: this build has no DGN importer/exporter or mapping model` | 不写库/不升修订/不入历史 |
+| `DGNMAPPING` | **部分实现（具名拒绝）**：`dgnmapping.unsupported: this build has no DGN importer/exporter or mapping model` | 不写库/不升修订/不入历史 |
+| `DIGITALSIGN` | **部分实现（具名拒绝）**：`digitalsign.unsupported: this build has no digital-signature model` | 不写库/不升修订/不入历史 |
+| `DISTANTLIGHT` | **部分实现（具名拒绝）**：`distantlight.unsupported: 3D light objects are not modeled` | 不写库/不升修订/不入历史 |
+| `DOWNLOADMANAGER` | **部分实现（具名拒绝）**：`downloadmanager.unsupported: this build has no download-manager model` | 不写库/不升修订/不入历史 |
+| `DRAWINGRECOVERY` | **部分实现（具名拒绝）**：`drawingrecovery.unsupported: this build has no drawing-recovery manager model` | 不写库/不升修订/不入历史 |
+| `DRAWINGRECOVERYHIDE` | **部分实现（具名拒绝）**：`drawingrecoveryhide.unsupported: this build has no drawing-recovery manager model` | 不写库/不升修订/不入历史 |
+| `DVIEW` | **部分实现（具名拒绝）**：`dview.unsupported: this build has no 3D camera/target view model` | 不写库/不升修订/不入历史 |
+| `DWFADJUST` | **部分实现（具名拒绝）**：`dwfadjust.unsupported: this build has no DWF/DWFx underlay or export model` | 不写库/不升修订/不入历史 |
+| `-DWFATTACH` | **部分实现（具名拒绝）**：`-dwfattach.unsupported: this build has no DWF/DWFx underlay or export model` | 不写库/不升修订/不入历史 |
+| `DWFATTACH` | **部分实现（具名拒绝）**：`dwfattach.unsupported: this build has no DWF/DWFx underlay or export model` | 不写库/不升修订/不入历史 |
+| `DWFCLIP` | **部分实现（具名拒绝）**：`dwfclip.unsupported: this build has no DWF/DWFx underlay or export model` | 不写库/不升修订/不入历史 |
+| `DWFLAYERS` | **部分实现（具名拒绝）**：`dwflayers.unsupported: this build has no DWF/DWFx underlay or export model` | 不写库/不升修订/不入历史 |
+| `EDGESURF` | **部分实现（具名拒绝）**：`edgesurf.unsupported: 3D mesh surfaces are not modeled` | 不写库/不升修订/不入历史 |
+| `EDITSHOT` | **部分实现（具名拒绝）**：`editshot.unsupported: this build has no ShowMotion named-view/motion model` | 不写库/不升修订/不入历史 |
+| `EXPLAN` | **部分实现（具名拒绝）**：`explan.unsupported: this build has no UCS model; the world +Z plan path is PLAN` | 不写库/不升修订/不入历史 |
+| `EXPORTDWF` | **部分实现（具名拒绝）**：`exportdwf.unsupported: this build has no DWF/DWFx exporter` | 不写库/不升修订/不入历史 |
+| `EXPORTDWFX` | **部分实现（具名拒绝）**：`exportdwfx.unsupported: this build has no DWF/DWFx exporter` | 不写库/不升修订/不入历史 |
+| `EXPRESSMENU` | **部分实现（具名拒绝）**：`expressmenu.unsupported: this build has no Express Tools menu/library loader` | 不写库/不升修订/不入历史 |
+| `EXPRESSTOOLS` | **部分实现（具名拒绝）**：`expresstools.unsupported: this build has no Express Tools menu/library loader` | 不写库/不升修订/不入历史 |
+| `FADEMARKUP` | **部分实现（具名拒绝）**：`fademarkup.unsupported: this build has no collaboration markup/trace model` | 不写库/不升修订/不入历史 |
+| `FLATSHOT` | **部分实现（具名拒绝）**：`flatshot.unsupported: 3D solids are not modeled, so there is nothing to flatten` | 不写库/不升修订/不入历史 |
+| `FREESPOT` | **部分实现（具名拒绝）**：`freespot.unsupported: 3D light objects are not modeled` | 不写库/不升修订/不入历史 |
+| `FREEWEB` | **部分实现（具名拒绝）**：`freeweb.unsupported: 3D light objects are not modeled` | 不写库/不升修订/不入历史 |
+| `GCCOINCIDENT` | **部分实现（具名拒绝）**：`gccoincident.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GCCOLLINEAR` | **部分实现（具名拒绝）**：`gccollinear.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GCCONCENTRIC` | **部分实现（具名拒绝）**：`gcconcentric.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GCEQUAL` | **部分实现（具名拒绝）**：`gcequal.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GCFIX` | **部分实现（具名拒绝）**：`gcfix.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GCHORIZONTAL` | **部分实现（具名拒绝）**：`gchorizontal.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GCPARALLEL` | **部分实现（具名拒绝）**：`gcparallel.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GCPERPENDICULAR` | **部分实现（具名拒绝）**：`gcperpendicular.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GCSMOOTH` | **部分实现（具名拒绝）**：`gcsmooth.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GCSYMMETRIC` | **部分实现（具名拒绝）**：`gcsymmetric.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GCTANGENT` | **部分实现（具名拒绝）**：`gctangent.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GCVERTICAL` | **部分实现（具名拒绝）**：`gcvertical.unsupported: this build has no geometric-constraint model` | 不写库/不升修订/不入历史 |
+| `GEOGRAPHICLOCATION` | **部分实现（具名拒绝）**：`geographiclocation.unsupported: this build has no geographic/GIS or online-map model` | 不写库/不升修订/不入历史 |
+| `GEOMAP` | **部分实现（具名拒绝）**：`geomap.unsupported: this build has no geographic/GIS or online-map model` | 不写库/不升修订/不入历史 |
+| `GEOMAPIMAGE` | **部分实现（具名拒绝）**：`geomapimage.unsupported: this build has no geographic/GIS or online-map model` | 不写库/不升修订/不入历史 |
+| `GEOMAPIMAGEUPDATE` | **部分实现（具名拒绝）**：`geomapimageupdate.unsupported: this build has no geographic/GIS or online-map model` | 不写库/不升修订/不入历史 |
+| `GEOMARKLATLONG` | **部分实现（具名拒绝）**：`geomarklatlong.unsupported: this build has no geographic/GIS or online-map model` | 不写库/不升修订/不入历史 |
+| `GEOMARKME` | **部分实现（具名拒绝）**：`geomarkme.unsupported: this build has no geographic/GIS or online-map model` | 不写库/不升修订/不入历史 |
+| `GEOMARKPOINT` | **部分实现（具名拒绝）**：`geomarkpoint.unsupported: this build has no geographic/GIS or online-map model` | 不写库/不升修订/不入历史 |
+| `GEOMARKPOSITION` | **部分实现（具名拒绝）**：`geomarkposition.unsupported: this build has no geographic/GIS or online-map model` | 不写库/不升修订/不入历史 |
+| `GEOREMOVE` | **部分实现（具名拒绝）**：`georemove.unsupported: this build has no geographic/GIS or online-map model` | 不写库/不升修订/不入历史 |
+| `GEOREORIENTMARKER` | **部分实现（具名拒绝）**：`georeorientmarker.unsupported: this build has no geographic/GIS or online-map model` | 不写库/不升修订/不入历史 |
+| `GOTOURL` | **部分实现（具名拒绝）**：`gotourl.unsupported: this build has no hyperlink storage model` | 不写库/不升修订/不入历史 |
+| `-GRAPHICSCONFIG` | **部分实现（具名拒绝）**：`-graphicsconfig.unsupported: renderer/graphics configuration is owned by the host` | 不写库/不升修订/不入历史 |
+| `GRAPHICSCONFIG` | **部分实现（具名拒绝）**：`graphicsconfig.unsupported: renderer/graphics configuration is owned by the host` | 不写库/不升修订/不入历史 |
+| `HIDE` | **部分实现（具名拒绝）**：`hide.unsupported: the renderer has no 3D hidden-line removal` | 不写库/不升修订/不入历史 |
+| `HLSETTINGS` | **部分实现（具名拒绝）**：`hlsettings.unsupported: this build has no hidden-line display settings model` | 不写库/不升修订/不入历史 |
+| `-HYPERLINK` | **部分实现（具名拒绝）**：`-hyperlink.unsupported: this build has no hyperlink storage model` | 不写库/不升修订/不入历史 |
+| `HYPERLINK` | **部分实现（具名拒绝）**：`hyperlink.unsupported: this build has no hyperlink storage model` | 不写库/不升修订/不入历史 |
+| `-INSERTCONTENT` | **部分实现（具名拒绝）**：`-insertcontent.unsupported: this build has no content-palette insertion model` | 不写库/不升修订/不入历史 |
+| `INSERTOBJ` | **部分实现（具名拒绝）**：`insertobj.unsupported: this build has no OLE object storage model` | 不写库/不升修订/不入历史 |
+| `-INTERFERE` | **部分实现（具名拒绝）**：`-interfere.unsupported: 3D solids are not modeled, so interference has nothing to compute` | 不写库/不升修订/不入历史 |
+| `INTERFERE` | **部分实现（具名拒绝）**：`interfere.unsupported: 3D solids are not modeled, so interference has nothing to compute` | 不写库/不升修订/不入历史 |
+| `LIGHT` | **部分实现（具名拒绝）**：`light.unsupported: 3D light objects are not modeled` | 不写库/不升修订/不入历史 |
+| `LIGHTLIST` | **部分实现（具名拒绝）**：`lightlist.unsupported: 3D light objects are not modeled` | 不写库/不升修订/不入历史 |
+| `LIGHTLISTCLOSE` | **部分实现（具名拒绝）**：`lightlistclose.unsupported: 3D light objects are not modeled` | 不写库/不升修订/不入历史 |
+| `LIVESECTION` | **部分实现（具名拒绝）**：`livesection.unsupported: this build has no section-object model` | 不写库/不升修订/不入历史 |
+| `LOAD` | **部分实现（具名拒绝）**：`load.unsupported: this build has no SHX shape-file loader` | 不写库/不升修订/不入历史 |
+| `LSP` | **部分实现（具名拒绝）**：`lsp.unsupported: this build has no AutoLISP runtime or compiler` | 不写库/不升修订/不入历史 |
+| `LSPSURF` | **部分实现（具名拒绝）**：`lspsurf.unsupported: this build has no AutoLISP runtime or compiler` | 不写库/不升修订/不入历史 |
+| `MAKELISPAPP` | **部分实现（具名拒绝）**：`makelispapp.unsupported: this build has no AutoLISP runtime or compiler` | 不写库/不升修订/不入历史 |
+| `MARKUP` | **部分实现（具名拒绝）**：`markup.unsupported: this build has no collaboration markup/trace model` | 不写库/不升修订/不入历史 |
+| `-MARKUPASSIST` | **部分实现（具名拒绝）**：`-markupassist.unsupported: this build has no collaboration markup/trace model` | 不写库/不升修订/不入历史 |
+| `MARKUPASSIST` | **部分实现（具名拒绝）**：`markupassist.unsupported: this build has no collaboration markup/trace model` | 不写库/不升修订/不入历史 |
+| `MARKUPCLOSE` | **部分实现（具名拒绝）**：`markupclose.unsupported: this build has no collaboration markup/trace model` | 不写库/不升修订/不入历史 |
+| `-MARKUPIMPORT` | **部分实现（具名拒绝）**：`-markupimport.unsupported: this build has no collaboration markup/trace model` | 不写库/不升修订/不入历史 |
+| `MARKUPIMPORT` | **部分实现（具名拒绝）**：`markupimport.unsupported: this build has no collaboration markup/trace model` | 不写库/不升修订/不入历史 |
+| `MATBROWSERCLOSE` | **部分实现（具名拒绝）**：`matbrowserclose.unsupported: this build has no material/texture model` | 不写库/不升修订/不入历史 |
+| `MATBROWSEROPEN` | **部分实现（具名拒绝）**：`matbrowseropen.unsupported: this build has no material/texture model` | 不写库/不升修订/不入历史 |
+| `MATEDITORCLOSE` | **部分实现（具名拒绝）**：`mateditorclose.unsupported: this build has no material/texture model` | 不写库/不升修订/不入历史 |
+| `MATEDITOROPEN` | **部分实现（具名拒绝）**：`mateditoropen.unsupported: this build has no material/texture model` | 不写库/不升修订/不入历史 |
+| `MATERIALASSIGN` | **部分实现（具名拒绝）**：`materialassign.unsupported: this build has no material/texture model` | 不写库/不升修订/不入历史 |
+| `MATERIALATTACH` | **部分实现（具名拒绝）**：`materialattach.unsupported: this build has no material/texture model` | 不写库/不升修订/不入历史 |
+| `MATERIALMAP` | **部分实现（具名拒绝）**：`materialmap.unsupported: this build has no material/texture model` | 不写库/不升修订/不入历史 |
+| `MATERIALS` | **部分实现（具名拒绝）**：`materials.unsupported: this build has no material/texture model` | 不写库/不升修订/不入历史 |
+| `MATERIALSCLOSE` | **部分实现（具名拒绝）**：`materialsclose.unsupported: this build has no material/texture model` | 不写库/不升修订/不入历史 |
+| `MIGRATEMATERIALS` | **部分实现（具名拒绝）**：`migratematerials.unsupported: this build has no material/texture model` | 不写库/不升修订/不入历史 |
+| `MKLTYPE` | **部分实现（具名拒绝）**：`mkltype.unsupported: this build has no .lin definition-file writer` | 不写库/不升修订/不入历史 |
+| `MKSHAPE` | **部分实现（具名拒绝）**：`mkshape.unsupported: this build has no SHX shape compiler` | 不写库/不升修订/不入历史 |
+| `MOVEBAK` | **部分实现（具名拒绝）**：`movebak.unsupported: the backup-folder location is owned by the host filesystem` | 不写库/不升修订/不入历史 |
+| `MSLIDE` | **部分实现（具名拒绝）**：`mslide.unsupported: this build has no slide (SLD) writer` | 不写库/不升修订/不入历史 |
+| `NAVBAR` | **部分实现（具名拒绝）**：`navbar.unsupported: this build has no 3D navigation/ViewCube model` | 不写库/不升修订/不入历史 |
+| `NAVSMOTION` | **部分实现（具名拒绝）**：`navsmotion.unsupported: this build has no 3D navigation/ViewCube model` | 不写库/不升修订/不入历史 |
+| `NAVSMOTIONCLOSE` | **部分实现（具名拒绝）**：`navsmotionclose.unsupported: this build has no 3D navigation/ViewCube model` | 不写库/不升修订/不入历史 |
+| `NAVSWHEEL` | **部分实现（具名拒绝）**：`navswheel.unsupported: this build has no 3D navigation/ViewCube model` | 不写库/不升修订/不入历史 |
+| `NAVVCUBE` | **部分实现（具名拒绝）**：`navvcube.unsupported: this build has no 3D navigation/ViewCube model` | 不写库/不升修订/不入历史 |
+| `NEWSHEETSET` | **部分实现（具名拒绝）**：`newsheetset.unsupported: this build has no sheet-set model` | 不写库/不升修订/不入历史 |
+| `NEWSHOT` | **部分实现（具名拒绝）**：`newshot.unsupported: this build has no ShowMotion named-view/motion model` | 不写库/不升修订/不入历史 |
+| `OLECONVERT` | **部分实现（具名拒绝）**：`oleconvert.unsupported: this build has no OLE object storage model` | 不写库/不升修订/不入历史 |
+| `OLELINKS` | **部分实现（具名拒绝）**：`olelinks.unsupported: this build has no OLE object storage model` | 不写库/不升修订/不入历史 |
+| `OLEOPEN` | **部分实现（具名拒绝）**：`oleopen.unsupported: this build has no OLE object storage model` | 不写库/不升修订/不入历史 |
+| `OLERESET` | **部分实现（具名拒绝）**：`olereset.unsupported: this build has no OLE object storage model` | 不写库/不升修订/不入历史 |
+| `OLESCALE` | **部分实现（具名拒绝）**：`olescale.unsupported: this build has no OLE object storage model` | 不写库/不升修订/不入历史 |
+| `OPENDWFMARKUP` | **部分实现（具名拒绝）**：`opendwfmarkup.unsupported: this build has no DWF markup model` | 不写库/不升修订/不入历史 |
+
 ### 2026-11-10 P4：图层表写入纳入 `DrawingUndoRecord`
 
 > `cad-db` 新增 `LayerRow`/`LayerPatch` 与组合应用入口；`cad-history` 的 `DrawingUndoRecord.layer_patches` 参与校验/大小/合并拒绝；`cad-app` 的 `UNDO`/`REDO` 与应用器按同一 revision 重放图层行。以下命令的图层表写入现在是**一条事务/一步撤销**；旧的“图层表写入不可撤销”界已删除。图纸空间/块内实体与 Settings 选项边界仍在，因此状态仍为**部分实现**。

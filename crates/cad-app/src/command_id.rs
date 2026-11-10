@@ -962,7 +962,7 @@ pub enum CommandId {
 mod capabilities;
 mod extended;
 mod mode;
-pub use extended::ExtendedCommandId;
+pub use extended::{ExtendedCommandId, RefusalId};
 pub use mode::AppMode;
 
 pub mod annot_batch;

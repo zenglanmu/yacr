@@ -470,6 +470,8 @@ impl Application {
             | ExtendedCommandId::DgnClip
             | ExtendedCommandId::DgnLayers
             | ExtendedCommandId::DgnAdjust => self.extended_w16_refusals(command, ext)?,
+            // Waves 17-24: the data-driven named refusals (see `RefusalId`).
+            ExtendedCommandId::Refusal(name) => self.extended_refusal_named(command, name)?,
         };
         Ok(Some(outcome))
     }

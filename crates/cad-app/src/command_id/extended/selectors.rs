@@ -408,6 +408,7 @@ impl ExtendedCommandId {
             Self::DgnClip => "DGNCLIP",
             Self::DgnLayers => "DGNLAYERS",
             Self::DgnAdjust => "DGNADJUST",
+            Self::Refusal(name) => name.selector(),
         }
     }
 }

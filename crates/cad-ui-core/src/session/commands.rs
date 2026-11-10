@@ -935,6 +935,10 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
 // are unchanged, and there is still exactly one copy of the rows.
 pub use cad_app::command_aliases::COMMAND_ALIASES;
 
+// The Wave 17-24 named-refusal rows (sibling table for the code gate).
+mod refusal_table;
+pub use refusal_table::REFUSAL_TABLE;
+
 // Command-name resolution, selector constants and the admitted set.
 mod helpers;
 pub use helpers::*;

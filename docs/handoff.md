@@ -1,5 +1,16 @@
 AD
 
+## 2026-11-10 Batch 3：Wave 17–24（200 条具名拒绝，覆盖 623 → 823）
+
+- **新增 200 条命令路径**（A–O，官方索引 31–601）：动作录制、Activity Insights/DesignCenter/Blocks/Command Macros/CUI 面板、OLE/超链接、AutoLISP/SHX、灯光/材质/NURBS 控制点、几何与尺寸约束、数据提取/dbConnect/Data Link、DWF/DGN 底图与导出、标记/追踪协作、对象检测/计数、比较、图纸集、GIS、3D 相机/分析/导航等。全部是**具名拒绝**（`CadError::Unsupported` + 稳定 `<name>.unsupported: ...` 原因串），不写库/不升修订/不入历史/Viewer-legal；不是可用功能。
+- **基础设施**：`cad-app` 新增 `RefusalId` 注册表（`command_id/extended/refusal_names.rs`，单一 `refusal_names!` 表生成 enum/selector/reason/ALL）与 `ExtendedCommandId::Refusal(RefusalId)`；一个 dispatch 臂 + `app_extended_refusal_names` 处理器。`cad-ui-core` 新增兄弟表 `REFUSAL_TABLE`（`commands/refusal_table.rs`），`normalize_command`/`canonical_command_name`/`command_name`/`admissible_names` 同时查两张表，因此新增名字不需要改 `COMMAND_TABLE` 或加 dispatch 臂。
+- **UI/i18n**：`catalog-refusals.ts` 追加 200 条 catalog 行；`gating.ts` 的 `DOCUMENT_SCOPED_COMMANDS` 与 `HOST_NAMES` fixture 同步；en/zh 各 200 个 `draw.kind.*` label 与 `.hint`；新增 `extended-wave17.test.ts` 契约。
+- **文档**：覆盖清单总计 **823 已实现（67 完整 + 756 部分）/ 158 未实现**；8 条 wave 进度行、200 条全量行与索引行、`compatibility.md` 新表。
+- **已运行**：`cargo test -p cad-app --lib`（2270 passed, 3 ignored）、`cad-ui-core`（498+1）、`cad-desktop-shell`（46+3+6）、`cargo clippy`（app/ui-core/desktop-shell）、`cargo fmt --check`、`npm test`（含新 wave17 契约）、architecture/tauri/fixture/file-size/command-docs/test-check-command-docs/i18n 全绿。
+- **NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机、Windows/macOS/Android/Web 运行时、真实 DWG/vendor 对照；这 200 条只有契约测试，且没有一条是可用功能。
+- **剩余 158**：主要是 3D/点云/协作/发布/Express 等；真正的高价值 2D 缺口（表格、字段、PDF/图像底图、ARRAYPATH、COPYM、XCLIP 等）仍应作为独立模型实现，而不是继续拒绝。
+
+
 ## 2026-11-10 DIMTEDIT 字形级水平对齐
 
 - `DimensionGeometry` 新增私有 `text_h_align`（默认 Center），`with_text_h_align` 只改现有 Text 子实体的 `h_align`；`transformed`/`with_style` 保留。

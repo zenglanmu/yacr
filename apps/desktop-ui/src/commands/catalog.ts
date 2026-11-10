@@ -13,6 +13,7 @@ export interface CommandCatalogEntry {
 }
 
 import { EXTENDED_COMMAND_CATALOG } from './catalog-extended.ts';
+import { REFUSAL_COMMAND_CATALOG } from './catalog-refusals.ts';
 
 /**
  * Every command name the app exposes in the chrome, in AutoCAD-style listing
@@ -869,6 +870,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // neither file approaches the 1000-line code gate. They are appended here in
   // their original order.
   ...EXTENDED_COMMAND_CATALOG,
+  ...REFUSAL_COMMAND_CATALOG,
   // The 2026-11-09 Wave 13 batch: page-setup/conversion reports, table/field
   // surfaces and named refusals. Appended last so no shipped row moves.
   { id: 'PAGESETUP', labelKey: 'draw.kind.pagesetup', icon: 'printer', group: 'file' },
