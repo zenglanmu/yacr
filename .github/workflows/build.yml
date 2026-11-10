@@ -956,7 +956,11 @@ jobs:
           echo "${sha}  /tmp/${archive}.tar.gz" | sha256sum -c -
           tar -xzf "/tmp/${archive}.tar.gz" -C /tmp
           install "/tmp/binaryen-version_${pin}/bin/wasm-opt" "$HOME/.cargo/bin/wasm-opt"
-          wasm-opt --version | grep -Fx "wasm-opt version ${pin}"
+          # The release binary prints a build suffix after the version (e.g.
+          # `wasm-opt version 120 (version_120-…)`), so match the prefix only.
+          wasm-opt --version | head -n 1
+          wasm-opt --version | head -n 1 | grep -Eq "^wasm-opt version ${pin}([[:space:]]|$)" \
+            || { echo "unexpected wasm-opt version; expected binaryen ${pin}" >&2; exit 1; }
       - name: Cache the downloaded CAD font catalogue
         # scripts/fetch-fonts.sh caches per file under ~/.cache/yacr/fonts;
         # restore the newest run's cache so this job does not re-download it.
