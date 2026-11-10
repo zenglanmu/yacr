@@ -10,7 +10,7 @@ yacr 是一个跨平台开源 CAD 项目：共享的 Rust 核心负责 CAD 文�
 
 yacr 处于活跃开发中，**预览版现在即可下载**：Linux Flatpak、Windows zip、macOS tarball、Android APK
 与浏览器版本。它可以打开 DWG/DXF，可导入网格/STEP/IFC 文件用于显示、可预览 Revit 工程，能用 wgpu
-查看 2D/3D 图纸、做测量，命令清单 981 条中有 623 条有实现路径（66 完整 + 557 部分）；未支持的
+查看 2D/3D 图纸、做测量，命令清单 981 条中有 823 条有实现路径（67 完整 + 756 部分）；未支持的
 选项按名拒绝，不静默成功。它**还不是生产级 CAD**；各平台状态与证据边界见 `docs/handoff.md` 与
 `docs/compatibility.md`。
 
