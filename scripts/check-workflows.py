@@ -318,6 +318,7 @@ WASM_TOOLCHAIN_FRAGMENTS: tuple[str, ...] = (
     "--locked",
     "wasm-opt",
     "-Oz",
+    "skip-pass=merge-similar-functions",
     "26214400",
     "--target web",
     "--no-typescript",

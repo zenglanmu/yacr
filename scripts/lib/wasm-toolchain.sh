@@ -157,8 +157,13 @@ yacr_optimize_wasm() {
   before="$(stat -c '%s' "$wasm")"
   printf 'optimizing with wasm-opt %s (-Oz, %s bytes)\n' \
     "$YACR_WASM_OPT_VERSION" "$before"
+  # `-Oz` includes binaryen's `merge-similar-functions`, which can emit a
+  # `byn$mgfn-shared$…` function with >1000 parameters; V8 (browser and Node)
+  # then refuses the module: "param count of 1023 exceeds internal limit of
+  # 1000". Skipping that pass keeps the module loadable at a ~0.3 MB cost.
   "$YACR_WASM_OPT_BIN" \
     -Oz \
+    --skip-pass=merge-similar-functions \
     --strip-debug \
     --strip-producers \
     -o "$optimized" \

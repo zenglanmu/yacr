@@ -208,7 +208,7 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
   `scripts/build-web.sh` 都经 `scripts/lib/wasm-toolchain.sh`（wasm-bindgen CLI 必须与 `Cargo.toml`
   的 `=0.2.129`、`wasm-opt` 必须与 binaryen `120` 钉住**完全一致**，否则硬失败）。`app-web` 的
   wasm 用工作区的 `[profile.wasm]`（`opt-level = "s"`、`panic = "abort"`、fat LTO）构建，再经
-  `wasm-opt -Oz` 压缩；结果必须 ≤ 26,214,400 字节（Cloudflare Pages 单文件 25 MiB 上限），否则
+  `wasm-opt -Oz`（跳过 `merge-similar-functions`，避免 V8 的参数上限）压缩；结果必须 ≤ 26,214,400 字节（Cloudflare Pages 单文件 25 MiB 上限），否则
   `web-deploy` 无法发布，构建直接失败。产物目录每次从零重建，构件缺失/为空即非零退出，
   **不产出半成品 bundle**。
 - **上限**：本地证据只到**合成夹具**（`docs/validation-dom-canvas-wasm-2026-10-24.md`：Chromium 141 /
