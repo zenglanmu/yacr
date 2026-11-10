@@ -6,7 +6,9 @@
 //! target back and assert that geometry actually rasterized. When no adapter is
 //! available they skip with a clear message rather than pretending to pass.
 
-use cad_domain::{DocumentId, EntityId, InstancePath, Point3, SelectionRef, TaskStamp, Transform3};
+use cad_domain::{
+    DocumentId, EntityId, ImageAdjust, InstancePath, Point3, SelectionRef, TaskStamp, Transform3,
+};
 
 use cad_render_wgpu::headless::{create_headless_gpu, encode_png, HeadlessGpu, RgbaImage};
 
@@ -20,6 +22,7 @@ use cad_scene::{ImageBatch, RenderBatch, RenderTopology, SceneDelta};
 
 use std::sync::Arc;
 
+mod image_adjust;
 mod images_and_culling;
 mod masks;
 mod navigation_lod;
@@ -299,6 +302,7 @@ fn image_batch(resource: &str) -> ImageBatch {
         clip: None,
         alpha: 1.0,
         draw_order: 0,
+        adjust: ImageAdjust::default(),
         sources: vec![source()],
     }
 }

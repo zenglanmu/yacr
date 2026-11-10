@@ -94,6 +94,13 @@ pub(super) fn generate(
                 generate(child, probe, out, &format!("{prefix}child:{i}:"));
             }
         }
+        // A table's display children (grid corners and cell text anchors) are
+        // real snap vertices, exactly like the compound it used to be.
+        G::Table(table) => {
+            for (i, child) in table.display().iter().enumerate() {
+                generate(child, probe, out, &format!("{prefix}child:{i}:"));
+            }
+        }
         G::Mesh(_)
         | G::Insert { .. }
         | G::Text { .. }

@@ -378,6 +378,11 @@ pub struct MaskBatch {
     pub polygon: Arc<[Point3]>,
     /// `true` for clip mode Inside: mask everything *outside* the polygon.
     pub inverted: bool,
+    /// Resolved boundary-frame colour (`WIPEOUTFRAME` 1/2). `None` means the
+    /// frame is not drawn (`WIPEOUTFRAME 0`); `Some(rgb)` is the sanitised
+    /// linear colour the renderer strokes the closed boundary with, after the
+    /// fill. The fill itself always paints the clear colour, never this.
+    pub frame: Option<[f32; 3]>,
     pub draw_order: i64,
     pub sources: Vec<SelectionRef>,
 }
@@ -387,6 +392,7 @@ impl MaskBatch {
     pub fn approx_bytes(&self) -> usize {
         self.polygon.len() * std::mem::size_of::<Point3>()
             + self.sources.len() * std::mem::size_of::<SelectionRef>()
+            + self.frame.map_or(0, |_| std::mem::size_of::<[f32; 3]>())
     }
 }
 
@@ -411,6 +417,9 @@ pub struct ImageBatch {
     pub alpha: f32,
     pub draw_order: i64,
     pub sources: Vec<SelectionRef>,
+    /// Display-only brightness/contrast/fade/monochrome transfer, copied from
+    /// the entity's [`ImageAdjust`] so the image pass can apply it.
+    pub adjust: ImageAdjust,
 }
 
 impl ImageBatch {

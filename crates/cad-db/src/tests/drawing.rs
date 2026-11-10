@@ -733,6 +733,7 @@ fn drawing_validate_geometry_covers_supported_kinds() {
             file: Some("logo.png".into()),
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         },
         SemanticGeometry::Mask {
             boundary: vec![point(0.0, 0.0), point(2.0, 0.0), point(2.0, 2.0)],
@@ -777,6 +778,12 @@ fn drawing_validate_geometry_covers_supported_kinds() {
 
 #[test]
 fn drawing_transform_bakes_image_placement_and_mask_boundary() {
+    let adjust = ImageAdjust {
+        brightness: 30,
+        contrast: 70,
+        fade: 20,
+        monochrome: true,
+    };
     let image = SemanticGeometry::Image {
         origin: point(1.0, 2.0),
         u: point(0.5, 0.0),
@@ -788,6 +795,7 @@ fn drawing_transform_bakes_image_placement_and_mask_boundary() {
             inside: true,
         }),
         visible: true,
+        adjust,
     };
     // Translate + uniform scale: `origin` moves as a point while `u`/`v` scale
     // as direction vectors (no translation applied to them).
@@ -803,6 +811,7 @@ fn drawing_transform_bakes_image_placement_and_mask_boundary() {
             file,
             clip,
             visible,
+            adjust: stored_adjust,
         } => {
             assert_eq!(origin, point(12.0, 24.0));
             assert_eq!(u, point(1.0, 0.0));
@@ -811,6 +820,8 @@ fn drawing_transform_bakes_image_placement_and_mask_boundary() {
             assert_eq!(file.as_deref(), Some("logo.png"));
             assert!(clip.expect("clip").inside);
             assert!(visible);
+            // The display transfer is not geometry: a transform copies it.
+            assert_eq!(stored_adjust, adjust);
         }
         other => panic!("expected Image, got {other:?}"),
     }

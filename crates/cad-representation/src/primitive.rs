@@ -192,6 +192,10 @@ pub enum DisplayPrimitive {
         /// coordinates, so only the visible texture region is mapped and its
         /// UVs are interpolated at the new vertices.
         clip: Option<Arc<[ImageVertex]>>,
+        /// Display-only brightness/contrast/fade/monochrome transfer, carried
+        /// verbatim from the entity so the renderer can apply it without reading
+        /// the database.
+        adjust: ImageAdjust,
     },
     Instance {
         block: BlockId,
@@ -215,6 +219,10 @@ pub enum DisplayPrimitive {
     Mask {
         boundary: Arc<[Point3]>,
         inverted: bool,
+        /// Whether the mask also draws its boundary frame (`WIPEOUTFRAME`
+        /// 1/2). The fill always draws; this only adds the closed boundary
+        /// outline. Set from [`RepresentationContext::wipeout_frames`].
+        frame: bool,
     },
 }
 
@@ -273,6 +281,7 @@ impl DisplayPrimitive {
                 resource,
                 transform: local,
                 clip,
+                adjust,
             } => DisplayPrimitive::Image {
                 resource: resource.clone(),
                 transform: transform.matrix_mul(local),
@@ -288,6 +297,8 @@ impl DisplayPrimitive {
                             .into_boxed_slice(),
                     )
                 }),
+                // The adjustment is display-only and view-independent.
+                adjust: *adjust,
             },
             DisplayPrimitive::Instance {
                 block,
@@ -299,7 +310,11 @@ impl DisplayPrimitive {
             // A mask boundary is a world-space polygon: the affine map is applied
             // per vertex. The fill is derived from these vertices by the
             // renderer, so no other state changes (`inverted` is view-independent).
-            DisplayPrimitive::Mask { boundary, inverted } => DisplayPrimitive::Mask {
+            DisplayPrimitive::Mask {
+                boundary,
+                inverted,
+                frame,
+            } => DisplayPrimitive::Mask {
                 boundary: Arc::from(
                     boundary
                         .iter()
@@ -308,6 +323,7 @@ impl DisplayPrimitive {
                         .into_boxed_slice(),
                 ),
                 inverted: *inverted,
+                frame: *frame,
             },
         }
     }

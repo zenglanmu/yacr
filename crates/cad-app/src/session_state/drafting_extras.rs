@@ -15,10 +15,10 @@
 ///
 /// AutoCAD's three documented values apply to **all** wipeouts in the drawing:
 /// `0` hides every frame (the mask still masks), `1` displays and plots them, and
-/// `2` displays them without plotting. This build stores the token and reports it
-/// from `WIPEOUT Frames`; the mask always renders, but no frame geometry is
-/// emitted by the renderer and the vector plot path has no wipeout-frame channel,
-/// so the display/plot split is recorded state only (a declared boundary).
+/// `2` displays them without plotting. The display scene is built with the frame
+/// enabled for `1` and `2`; the vector plot context is built with it enabled only
+/// for `1`, which is what makes `2` display-only. Storing the token is session
+/// state only: never a `cad-db` write, revision bump or undo entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WipeoutFrames {
     /// `WIPEOUTFRAME 0`: frames are neither displayed nor plotted.

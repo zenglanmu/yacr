@@ -321,10 +321,14 @@ fn wipeout_frames_state_is_session_wide_and_writes_nothing() {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "wipeout.frames"));
-        assert!(outcome
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "wipeout.frames_display_only"));
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "wipeout.frames_display_only"),
+            "the frame/plot split is implemented now, so the old display-only \
+             diagnostic must be gone"
+        );
     }
     assert_eq!(revision(&app), before, "Frames never writes the drawing");
     assert!(

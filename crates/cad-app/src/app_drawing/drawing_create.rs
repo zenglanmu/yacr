@@ -89,6 +89,7 @@ impl Application {
             CommandId::BreakAtPoint => self.break_at_point(command),
             CommandId::ArrayRectangular => self.array_rect(session, command),
             CommandId::ArrayPolar => self.array_polar(session, command),
+            CommandId::ArrayPath => self.array_path(session, command),
             CommandId::AlignEntities => self.align_entities(session, command),
             CommandId::StretchEntities => self.stretch_entities(session, command),
             CommandId::EraseEntities => self.erase_entities(session, command),

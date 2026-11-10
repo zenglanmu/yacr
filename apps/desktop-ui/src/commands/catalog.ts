@@ -13,6 +13,7 @@ export interface CommandCatalogEntry {
 }
 
 import { EXTENDED_COMMAND_CATALOG } from './catalog-extended.ts';
+import { REFUSAL_COMMAND_CATALOG } from './catalog-refusals.ts';
 
 /**
  * Every command name the app exposes in the chrome, in AutoCAD-style listing
@@ -223,6 +224,11 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'FILLET POLYLINE', labelKey: 'draw.kind.fillet_polyline', icon: 'fillet', group: 'modify' },
   { id: 'ARRAYRECT', labelKey: 'draw.kind.arrayrect', icon: 'arrayrect', group: 'modify' },
   { id: 'ARRAYPOLAR', labelKey: 'draw.kind.arraypolar', icon: 'arraypolar', group: 'modify' },
+  // ARRAYPATH (2026-11-10): the 2D path array. The typed form is
+  // `ARRAYPATH <count> [ALIGN]` (see `ARGUMENT_COMMANDS.ARRAYPATH`); the current
+  // selection is the input — the first selected entity is the path, the rest are
+  // the items. It is its own selector, never an alias of ARRAYRECT/ARRAYPOLAR.
+  { id: 'ARRAYPATH', labelKey: 'draw.kind.arraypath', icon: 'arrayrect', group: 'modify' },
   { id: 'ALIGN', labelKey: 'draw.kind.align', icon: 'align', group: 'modify' },
   { id: 'STRETCH', labelKey: 'draw.kind.stretch', icon: 'stretch', group: 'modify' },
   { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', group: 'modify' },
@@ -869,6 +875,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // neither file approaches the 1000-line code gate. They are appended here in
   // their original order.
   ...EXTENDED_COMMAND_CATALOG,
+  ...REFUSAL_COMMAND_CATALOG,
   // The 2026-11-09 Wave 13 batch: page-setup/conversion reports, table/field
   // surfaces and named refusals. Appended last so no shipped row moves.
   { id: 'PAGESETUP', labelKey: 'draw.kind.pagesetup', icon: 'printer', group: 'file' },

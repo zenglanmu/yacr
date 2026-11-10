@@ -533,6 +533,91 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return parts.length === 2 && parts.every(isSignedDecimal);
     },
   }),
+  /**
+   * `ARRAYPATH <count> [ALIGN]` (2026-11-10): the typed 2D path-array form. The
+   * current selection is the input — the first selected entity is the path, the
+   * rest are items — so only the count and the optional `ALIGN` word are grammar
+   * here. `<count>` is the number of **copies** (the N source objects stay). The
+   * count is one positive safe integer no larger than the host's
+   * `MAX_ARRAY_ENTITIES` cap (`100_000`); the host re-checks both the count and
+   * the total `count × items`.
+   */
+  ARRAYPATH: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      if (parts.length === 0 || parts.length > 2) return false;
+      if (!/^[0-9]+$/.test(parts[0])) return false;
+      const count = Number(parts[0]);
+      if (!Number.isSafeInteger(count) || count <= 0 || count > 100_000) return false;
+      return parts.length === 1 || parts[1].toUpperCase() === 'ALIGN';
+    },
+  }),
+  /**
+   * `IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>`: the
+   * file is one token (a path with spaces cannot be typed in v1), the point is a
+   * pair of signed decimals, and the pixel size plus the units-per-pixel scale
+   * are positive decimals. The host re-checks the reference (safe relative key)
+   * and every value; nothing is clamped here.
+   */
+  IMAGEATTACH: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      return parts.length === 6
+        && isSignedDecimal(parts[1]) && isSignedDecimal(parts[2])
+        && isPositiveDecimal(parts[3]) && isPositiveDecimal(parts[4])
+        && isPositiveDecimal(parts[5]);
+    },
+  }),
+  /**
+   * `IMAGECLIP <minx> <miny> <maxx> <maxy>` or `IMAGECLIP OFF`: four signed
+   * decimals in the image's pixel space, or the `OFF` word. Ordering
+   * (`minx < maxx`, `miny < maxy`) is the host's `imageclip.invalid_rect`
+   * refusal, so it is deliberately not rejected locally.
+   */
+  IMAGECLIP: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      if (parts.length === 1) return parts[0].toUpperCase() === 'OFF';
+      return parts.length === 4 && parts.every(isSignedDecimal);
+    },
+  }),
+  /**
+   * `IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` or
+   * `IMAGEADJUST RESET`: the display transfer of the one selected image. The
+   * three percentages are plain integers (the host owns the `0..=100` range and
+   * refuses an overshoot by name), and the optional word is `MONO`/`COLOR`.
+   * `RESET` restores 50/50/0/off. `-IMAGEADJUST` takes the same grammar.
+   */
+  IMAGEADJUST: Object.freeze({
+    parse: isImageAdjustArgument,
+  }),
+  '-IMAGEADJUST': Object.freeze({
+    parse: isImageAdjustArgument,
+  }),
+  /**
+   * `TABLE <rows> <cols> <col_width> <row_height> <x> <y>` and its `-TABLE`
+   * spelling: an empty table grid on the world XY plane. The counts are positive
+   * integers, the two cell sizes are positive decimals and the origin is a pair
+   * of signed decimals. The host owns the 1000 × 1000 / 100 000-cell caps and
+   * every semantic refusal (`table.invalid_dimensions` / `.create_too_large` /
+   * `.invalid_origin` / `.invalid_size`), so nothing is clamped here.
+   */
+  TABLE: Object.freeze({
+    parse: isTableCreateArgument,
+  }),
+  '-TABLE': Object.freeze({
+    parse: isTableCreateArgument,
+  }),
+  /**
+   * `TABLEDIT <row> <col> [text...]`: a 1-based cell address on the single
+   * selected table. The text is the remainder of the line and may contain
+   * spaces (it is preserved by the host); an empty remainder clears the cell.
+   * The host owns the range and selection refusals (`tabledit.out_of_range` /
+   * `.no_selection` / `.multiple` / `.not_table`).
+   */
+  TABLEDIT: Object.freeze({
+    parse: isTableEditArgument,
+  }),
 
 });
 
@@ -642,6 +727,52 @@ function isCoordinatePair(text: string): boolean {
   return parts.length === 2 && parts.every(isSignedDecimal);
 }
 
+/**
+ * `TABLE`/`-TABLE`: positive integer counts, positive cell sizes and a signed
+ * origin pair. This is the six-token shape the host grammar admits; the caps
+ * and every semantic refusal belong to the command layer.
+ */
+function isTableCreateArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  return parts.length === 6
+    && /^[0-9]+$/.test(parts[0]) && /^[0-9]+$/.test(parts[1])
+    && Number(parts[0]) > 0 && Number(parts[1]) > 0
+    && isPositiveDecimal(parts[2]) && isPositiveDecimal(parts[3])
+    && isSignedDecimal(parts[4]) && isSignedDecimal(parts[5]);
+}
+
+/**
+ * `TABLEDIT <row> <col> [text...]`: a 1-based cell address plus an optional
+ * text remainder. The remainder is the whole rest of the line (spaces
+ * included) and is never re-tokenised here — the host preserves it verbatim.
+ */
+function isTableEditArgument(argument: string): boolean {
+  const match = /^\s*([0-9]+)[ \t]+([0-9]+)(?:[ \t]+[\s\S]*)?$/.exec(argument);
+  if (match === null) return false;
+  return Number(match[1]) > 0 && Number(match[2]) > 0;
+}
+
+/**
+ * `IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` or
+ * `IMAGEADJUST RESET` (and the `-IMAGEADJUST` spelling).
+ *
+ * The three percentages are plain non-negative integers in `u8` shape
+ * (`0..=255`); the host owns the real `0..=100` range and refuses an overshoot
+ * with `imageadjust.invalid_value`, so nothing is clamped or range-checked here.
+ * The optional fourth token is the case-insensitive `MONO`/`COLOR` word, and
+ * omitting it keeps the image's current monochrome state.
+ */
+function isImageAdjustArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  if (parts.length === 1) return parts[0].toUpperCase() === 'RESET';
+  if (parts.length !== 3 && parts.length !== 4) return false;
+  const percentage = (text: string): boolean =>
+    /^[0-9]+$/.test(text) && Number(text) <= 255;
+  if (!percentage(parts[0]) || !percentage(parts[1]) || !percentage(parts[2])) return false;
+  if (parts.length === 3) return true;
+  const word = parts[3].toUpperCase();
+  return word === 'MONO' || word === 'COLOR';
+}
 
 /** The four property words `QSELECT`/`FILTER` accept. */
 const FILTER_PROPERTIES: readonly string[] = Object.freeze(['TYPE', 'LAYER', 'COLOR', 'LINETYPE']);

@@ -1,5 +1,71 @@
 use super::*;
 
+/// Pack the per-image display transfer into the two `key_flags` words every
+/// batch uniform already has, so the uniform layout does not change.
+///
+/// * `z = fade | contrast << 8 | brightness << 16` (each 0..=100, 8 bits);
+/// * `w = monochrome | bg_r << 8 | bg_g << 16 | bg_b << 24`, where `bg_*` is the
+///   render target's clear colour (the colour `fade` blends toward).
+///
+/// The image shader decodes them (see `shaders/image.wgsl`); every other
+/// pipeline keeps its own meaning for these words (the line AA ramp lives in
+/// `.z`), which is why only the image loop calls this.
+pub(crate) fn image_key_flags(
+    pick_key: u32,
+    adjust: ImageAdjust,
+    background: [f32; 4],
+) -> [u32; 4] {
+    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u32;
+    [
+        pick_key,
+        0,
+        u32::from(adjust.fade)
+            | u32::from(adjust.contrast) << 8
+            | u32::from(adjust.brightness) << 16,
+        u32::from(adjust.monochrome)
+            | channel(background[0]) << 8
+            | channel(background[1]) << 16
+            | channel(background[2]) << 24,
+    ]
+}
+
+/// Write one per-image uniform slot per drawn image, starting at `first_slot`,
+/// and record each slot in `image_slots`.
+///
+/// The transform is the camera-only matrix (image vertices are already world
+/// space) and the tint is white with the image's alpha. The display transfer
+/// rides the same uniform's `key_flags.z`/`.w` words (see [`image_key_flags`]),
+/// so the uniform layout is unchanged.
+///
+/// A free function rather than a `Renderer` method: the frame path also holds
+/// immutable borrows of other `Renderer` fields (`device`, `queue`), so only the
+/// two mutable arenas are passed in.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_image_uniforms(
+    images: &[GpuImage],
+    draw_images: &[usize],
+    image_slots: &mut [u32],
+    uniforms: &mut UniformArena,
+    camera_matrix: [f32; 16],
+    background: [f32; 4],
+    light: [f32; 4],
+    first_slot: usize,
+) {
+    for (j, &i) in draw_images.iter().enumerate() {
+        let image = &images[i];
+        let key_flags = image_key_flags(image.pick_key, image.adjust, background);
+        let uniform = uniform_bytes(
+            &camera_matrix,
+            [1.0, 1.0, 1.0, image.alpha],
+            key_flags,
+            light,
+        );
+        let slot = first_slot + j;
+        uniforms.write_slot(slot, &uniform);
+        image_slots[i] = slot as u32;
+    }
+}
+
 impl Renderer {
     /// Upload raster image quads from `images`, resolving each `ResourceKey`
     /// through `cache`.
@@ -161,6 +227,7 @@ impl Renderer {
                 texture_bytes: texture.upload_bytes,
                 alpha: clamp_alpha(batch.alpha),
                 draw_order: batch.draw_order,
+                adjust: batch.adjust,
                 upload_bytes: quad_bytes,
                 pick_key: image_keys[index],
                 sources: batch.sources.clone(),

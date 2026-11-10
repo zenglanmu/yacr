@@ -25,9 +25,11 @@ impl Application {
     ///   the same transaction;
     /// * [`WipeoutPayload::Frames`] — `Frames ON|OFF|Display but not plot`.
     ///   This is session/drawing-wide state (`WIPEOUTFRAME` 1/0/2) applied to
-    ///   every wipeout. The mask always renders; the frame/plot split is recorded
-    ///   state because this build emits no wipeout frame geometry and its vector
-    ///   plot path has no frame channel (declared display-only).
+    ///   every wipeout. The mask fill always renders; `ON` additionally draws and
+    ///   plots the boundary frame, `OFF` hides it, and `Display but not plot`
+    ///   draws it on screen while the vector plot path (built with the frame
+    ///   flag clear) emits no frame. The state is display-only: it never writes
+    ///   the drawing, bumps the revision or creates an undo entry.
     ///
     /// The free point-run form uses the shared [`Self::commit_new_entity`] funnel
     /// (one entity, one transaction, one undo step, active layer). The `Polyline`
@@ -45,26 +47,16 @@ impl Application {
             return Ok(CommandOutcome {
                 objects: Vec::new(),
                 changes: None,
-                diagnostics: vec![
-                    Diagnostic {
-                        object: None,
-                        code: "wipeout.frames".into(),
-                        message: format!(
-                            "WIPEOUT Frames {}: WIPEOUTFRAME = {} applies to every wipeout in \
-                             the drawing",
-                            frames.label(),
-                            frames.value()
-                        ),
-                    },
-                    Diagnostic {
-                        object: None,
-                        code: "wipeout.frames_display_only".into(),
-                        message: "WIPEOUT Frames: the state is stored and reported, but this \
-                                  build draws no wipeout frame geometry and its vector plot path \
-                                  has no frame channel; the mask itself always renders"
-                            .into(),
-                    },
-                ],
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: "wipeout.frames".into(),
+                    message: format!(
+                        "WIPEOUT Frames {}: WIPEOUTFRAME = {} applies to every wipeout in \
+                         the drawing",
+                        frames.label(),
+                        frames.value()
+                    ),
+                }],
                 measurement: None,
                 point_report: None,
             });

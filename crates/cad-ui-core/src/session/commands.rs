@@ -201,6 +201,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("OVERKILL", CommandId::Overkill),
     ("ARRAYRECT", CommandId::ArrayRectangular),
     ("ARRAYPOLAR", CommandId::ArrayPolar),
+    ("ARRAYPATH", CommandId::ArrayPath),
     ("ALIGN", CommandId::AlignEntities),
     ("STRETCH", CommandId::StretchEntities),
     ("ERASE", CommandId::EraseEntities),
@@ -873,6 +874,17 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     TREX_SELECTOR,
     MPEDIT_SELECTOR,
     DRAWORDER_SELECTOR,
+    // `ARRAYPATH <count> [ALIGN]`: the count/align ride the payload; the current
+    // selection (path first) is the whole input.
+    ARRAYPATH_SELECTOR,
+    // The raster-image and table typed forms; grammars live in the sibling modules.
+    IMAGEATTACH_SELECTOR,
+    IMAGECLIP_SELECTOR,
+    IMAGEADJUST_SELECTOR,
+    DASH_IMAGEADJUST_SELECTOR,
+    TABLE_SELECTOR,
+    DASH_TABLE_SELECTOR,
+    TABLEDIT_SELECTOR,
     VIEW_SELECTOR,
     VIEWGO_SELECTOR,
     VPOINT_SELECTOR,
@@ -891,8 +903,7 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     VPCLIP_SELECTOR,
     VPSCALE_SELECTOR,
     LAYVPI_SELECTOR,
-    // `DIMSPACE` is a dimension argument form of its own (not part of the
-    // editing batch).
+    // `DIMSPACE` is a dimension argument form of its own (not the editing batch).
     DIMSPACE_SELECTOR,
     // The 2026-11-07 dimension-editing batch argument forms.
     DIMSTYLE_SELECTOR,
@@ -935,6 +946,10 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
 // are unchanged, and there is still exactly one copy of the rows.
 pub use cad_app::command_aliases::COMMAND_ALIASES;
 
+// The Wave 17-24 named-refusal rows (sibling table for the code gate).
+mod refusal_table;
+pub use refusal_table::REFUSAL_TABLE;
+
 // Command-name resolution, selector constants and the admitted set.
 mod helpers;
 pub use helpers::*;
@@ -953,6 +968,13 @@ pub use filters::*;
 // The 2026-11-07 draw/modify batch grammars (`DONUT` … `DRAWORDER`).
 mod draw2;
 pub use draw2::*;
+
+// The raster-image grammars (`IMAGEATTACH`, `IMAGECLIP`).
+mod image;
+pub use image::*;
+
+mod table;
+pub use table::*;
 
 // The 2026-11-07 layout/viewport grammars (`LAYOUT` … `LAYVPI`).
 mod layout;

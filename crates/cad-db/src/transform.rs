@@ -245,6 +245,7 @@ pub fn transform_geometry(
             file,
             clip,
             visible,
+            adjust,
         } => SemanticGeometry::Image {
             origin: transform.apply_point(*origin),
             u: apply_vector(transform, *u),
@@ -253,6 +254,9 @@ pub fn transform_geometry(
             file: file.clone(),
             clip: clip.clone(),
             visible: *visible,
+            // Display-only: a transform never changes brightness/contrast/fade
+            // or the monochrome flag.
+            adjust: *adjust,
         },
         // A mask is a world-space polygon: every boundary point moves as a point.
         SemanticGeometry::Mask { boundary, inverted } => SemanticGeometry::Mask {
@@ -363,6 +367,13 @@ pub fn transform_geometry(
         // the raw `90` override mask keeps its bits (ADR 0019 C.5).
         SemanticGeometry::MultiLeader(multileader) => {
             SemanticGeometry::MultiLeader(Box::new(multileader.transformed(transform)?))
+        }
+        // A table transforms its plane frame and every stored length together
+        // and rebuilds its display; a non-uniform scale or a mirror is refused
+        // for the whole entity (the grid + flat-text arrangement cannot express
+        // it).
+        SemanticGeometry::Table(table) => {
+            SemanticGeometry::Table(Box::new(table.transformed(transform)?))
         }
     };
     Ok(out)

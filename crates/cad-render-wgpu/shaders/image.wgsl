@@ -10,8 +10,10 @@
 // in this crate binds the flags table at the same group index.
 //
 // There is deliberately no lighting model here. The fragment output is the
-// sampled RGBA modulated by `tint` (rgb * tint.rgb, a * tint.a); no physically
-// based rendering, environment lighting or specular response is claimed.
+// sampled RGBA after the per-image display adjustment (monochrome, contrast,
+// brightness, fade — a declared approximation, see `fs_main`) and then the
+// `tint` factor (rgb * tint.rgb, a * tint.a); no physically based rendering,
+// environment lighting or specular response is claimed.
 //
 // With `flags_ctl.enabled == 0` (the default) the output is exactly what this
 // shader produced before the flags block existed.
@@ -20,7 +22,10 @@ struct Camera {
     transform: mat4x4<f32>,
     // rgb = constant per-image colour factor; a = constant per-image alpha.
     tint: vec4<f32>,
-    // x = renderer pick key, y = INSTANCE_FLAG_* bits, z/w reserved.
+    // x = renderer pick key, y = INSTANCE_FLAG_* bits, z = the image
+    // brightness/contrast/fade pack, w = the image monochrome bit + background
+    // colour pack (see `fs_main`). Every other pipeline reads z as its line AA
+    // ramp / SDF margin and ignores w.
     key_flags: vec4<u32>,
     // rgb = unit vector toward the light, in world space (the same space as
     // `world_normal`); a = reserved 0. It is a per-frame camera property: the
@@ -95,8 +100,42 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         discard;
     }
     let texel = textureSample(image_texture, image_sampler, in.uv);
+
+    // Per-image display adjustment, decoded from the bytes the host packs into
+    // `key_flags.z` / `key_flags.w`:
+    //
+    //   z = fade | contrast << 8 | brightness << 16   (each 0..=100, 8 bits)
+    //   w = monochrome | bg_r << 8 | bg_g << 16 | bg_b << 24
+    //
+    // `bg_*` is the target's clear (background) colour as 8-bit channels, which
+    // is what `fade` blends toward. Neutral values (50/50/0/off) are an exact
+    // identity on the sampled texel.
+    //
+    // This is a DECLARED APPROXIMATION of AutoCAD's image transfer, not its
+    // exact curve. The order is fixed: monochrome (luma) -> contrast ->
+    // brightness -> fade. Each stage is applied in the sampled (linear) space
+    // the texture and clear colour already use, so fade at 100 lands exactly on
+    // the background colour.
+    let fade = f32(camera.key_flags.z & 0xFFu) / 100.0;
+    let contrast = f32((camera.key_flags.z >> 8u) & 0xFFu) / 50.0;
+    let brightness = f32((camera.key_flags.z >> 16u) & 0xFFu) / 50.0;
+    let monochrome = (camera.key_flags.w & 0xFFu) != 0u;
+    let background = vec3<f32>(
+        f32((camera.key_flags.w >> 8u) & 0xFFu) / 255.0,
+        f32((camera.key_flags.w >> 16u) & 0xFFu) / 255.0,
+        f32((camera.key_flags.w >> 24u) & 0xFFu) / 255.0,
+    );
+
+    var rgb = texel.rgb;
+    if (monochrome) {
+        rgb = vec3<f32>(dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722)));
+    }
+    rgb = (rgb - vec3<f32>(0.5)) * contrast + vec3<f32>(0.5);
+    rgb = clamp(rgb * brightness, vec3<f32>(0.0), vec3<f32>(1.0));
+    rgb = mix(rgb, background, clamp(fade, 0.0, 1.0));
+
     return flag_tint(
-        vec4<f32>(texel.rgb * camera.tint.rgb, texel.a * camera.tint.a),
+        vec4<f32>(rgb * camera.tint.rgb, texel.a * camera.tint.a),
         key,
     );
 }

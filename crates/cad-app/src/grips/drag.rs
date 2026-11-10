@@ -25,7 +25,8 @@ use super::{
     is_finite, transform_is_finite, GripId, GripKind, ARC_SWEEP_EPSILON, QUADRANT_DIRECTIONS,
 };
 use cad_domain::{
-    BlockId, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV, Transform3,
+    BlockId, CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV,
+    Transform3,
 };
 use cad_geometry::{add, dot, length, scale, sub};
 
@@ -896,6 +897,13 @@ pub fn apply_grip(
         SemanticGeometry::Dimension(dimension) => {
             super::dimension::apply_dimension(dimension, id, to)
         }
+        // A TABLE has no grip model in this build (no column/row/edge handles
+        // are exposed), so a drag is refused by name rather than treated as an
+        // unknown kind.
+        SemanticGeometry::Table(_) => Err(CadError::Unsupported(
+            "grip.unsupported_table: an AcDbTable has no grippable handle model in this build"
+                .into(),
+        )),
         other => Err(unsupported_kind(crate::app_drawing::class_name(other))),
     }
 }

@@ -41,6 +41,7 @@ fn mask_becomes_a_colourless_mask_primitive_with_the_boundary() {
         DisplayPrimitive::Mask {
             boundary: polygon,
             inverted,
+            frame,
         } => {
             assert_eq!(
                 polygon.as_ref(),
@@ -48,6 +49,7 @@ fn mask_becomes_a_colourless_mask_primitive_with_the_boundary() {
                 "the mask carries the boundary polygon unchanged"
             );
             assert!(!inverted, "clip mode Outside is not inverted");
+            assert!(!frame, "the default context draws no boundary frame");
         }
         other => panic!("expected a Mask primitive, got {}", primitive_kind(other)),
     }
@@ -91,8 +93,10 @@ fn inverted_mask_emits_a_mask_primitive_carrying_the_flag() {
         DisplayPrimitive::Mask {
             boundary: polygon,
             inverted,
+            frame,
         } => {
             assert!(*inverted, "clip mode Inside must reach the renderer");
+            assert!(!frame, "the default context draws no boundary frame");
             assert_eq!(
                 polygon.as_ref(),
                 boundary.as_slice(),
@@ -175,6 +179,27 @@ fn mask_boundary_transforms_with_an_insert() {
         expected.as_slice(),
         "the mask boundary follows the instance transform"
     );
+}
+
+#[test]
+fn mask_frame_follows_the_context_wipeout_frames_flag() {
+    // `WIPEOUTFRAME` is a session token; the representation context is the one
+    // carrier of its display half. Both ON and DisplayNotPlot build the display
+    // context with `true`, OFF with `false`, so the primitive reports exactly
+    // what the renderer must draw.
+    let registry = ProviderRegistry::with_default_provider();
+    for frame in [false, true] {
+        let context = context().with_wipeout_frames(frame);
+        let r = registry
+            .build(&mask_entity(7, rectangle(), false), &context)
+            .unwrap();
+        match &r.fragments[0].primitive {
+            DisplayPrimitive::Mask { frame: carried, .. } => {
+                assert_eq!(*carried, frame, "the mask must carry the context flag");
+            }
+            other => panic!("expected a Mask primitive, got {}", primitive_kind(other)),
+        }
+    }
 }
 
 fn primitive_kind(primitive: &DisplayPrimitive) -> &'static str {

@@ -15,6 +15,7 @@ struct InputKey {
     images_generation: u64,
     vendor: Option<u64>,
     layers: u64,
+    wipeout_frames: bool,
     overlays: u64,
 }
 
@@ -29,6 +30,9 @@ pub(super) struct PreparationInput {
     pub images_generation: u64,
     pub vendor: Option<Arc<VendorRepresentationStore>>,
     pub layers: LayerOverrideSet,
+    /// Display `WIPEOUTFRAME` state for this preparation (see
+    /// [`CadSceneController::set_wipeout_frames`]).
+    pub wipeout_frames: bool,
     pub overlays: OverlayInputs,
     /// Latest admitted edit receipt. It is never consumed here: the bounded
     /// latest mailbox may coalesce several overlay submissions, so the receipt
@@ -53,6 +57,7 @@ impl PreparationInput {
             images_generation: self.images_generation,
             vendor: self.vendor.as_ref().map(|store| store.revision()),
             layers: self.layers.fingerprint(),
+            wipeout_frames: self.wipeout_frames,
             overlays: controller::overlay_fingerprint(&self.overlays),
         }
     }
@@ -99,6 +104,7 @@ impl NativePreparation {
                     }
                     fonts_generation = input.fonts_generation;
                     controller.set_vendor_representations(input.vendor.clone());
+                    controller.set_wipeout_frames(input.wipeout_frames);
                     controller.prepare_shared_with_overlays_and_images_and_edit(
                         input.drawing,
                         input.document,
@@ -176,6 +182,7 @@ mod tests {
             images_generation: 0,
             vendor: None,
             layers: LayerOverrideSet::new(),
+            wipeout_frames: false,
             overlays: OverlayInputs::default(),
             edit: None,
         }

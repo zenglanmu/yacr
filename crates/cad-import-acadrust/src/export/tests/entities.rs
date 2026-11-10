@@ -472,6 +472,7 @@ fn unsupported_kinds_are_dropped_with_stable_codes() {
                 file: None,
                 clip: None,
                 visible: true,
+                adjust: ImageAdjust::default(),
             },
         ),
         (
@@ -506,6 +507,53 @@ fn unsupported_kinds_are_dropped_with_stable_codes() {
             report.entries
         );
         assert_ne!(report.completeness, Completeness::Complete, "{kind}");
+    }
+}
+
+/// Raster images are **not exported** (they reference an external resource), so
+/// the export cannot write the display transfer either. The report must say so
+/// honestly — naming brightness/contrast/fade and the monochrome flag — instead
+/// of dropping the row silently. Tests the current boundary; it is not a claim
+/// that IMAGEADJUST values are written to DXF/DWG.
+#[test]
+fn dropped_image_reports_its_unexported_display_transfer() {
+    let adjust = ImageAdjust {
+        brightness: 30,
+        contrast: 70,
+        fade: 20,
+        monochrome: true,
+    };
+    let (bytes, report) = export_one(SemanticGeometry::Image {
+        origin: p(0.0, 0.0, 0.0),
+        u: p(1.0, 0.0, 0.0),
+        v: p(0.0, 1.0, 0.0),
+        pixels: [8.0, 8.0],
+        file: Some("textures/logo.png".into()),
+        clip: None,
+        visible: true,
+        adjust,
+    });
+    assert!(read_entities(&bytes).is_empty(), "no entity is emitted");
+    assert_eq!(report.counts.dropped, 1);
+    let messages: Vec<&str> = report
+        .entries
+        .iter()
+        .filter(|entry| entry.code == "export.dropped.image")
+        .map(|entry| entry.message.as_str())
+        .collect();
+    assert_eq!(messages.len(), 2, "one drop record per declared reason");
+    let joined = messages.join(" | ");
+    for needle in [
+        "external resource",
+        "brightness 30",
+        "contrast 70",
+        "fade 20",
+        "monochrome true",
+    ] {
+        assert!(
+            joined.contains(needle),
+            "{needle:?} missing from {joined:?}"
+        );
     }
 }
 

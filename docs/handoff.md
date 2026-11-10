@@ -116,6 +116,68 @@ AD
   该用例跳过，**跳过不是已运行证据**）；真实文件几何比例与 CSG/NURBS best-effort 边界只记录在
   `docs/compatibility.md`。没有产品验收、像素/GPU/性能结论。
 
+## 2026-11-10 IMAGEADJUST 真实实现
+
+- **模型**：`ImageAdjust { brightness, contrast, fade, monochrome }`（默认 50/50/0/false）进入 `SemanticGeometry::Image`；db 校验 0..=100；transform 原样复制；acadrust `RasterImage` 的 brightness/contrast/fade 直接导入，monochrome 无对应字段→`false` 并声明。
+- **命令**：`IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` / `RESET`，选中恰好一个 IMAGE；一条事务/一步撤销，`imageadjust.applied`/`.unchanged`；`-IMAGEADJUST` 同实现；Work-only。
+- **渲染**：representation `DisplayPrimitive::Image.adjust` → scene `ImageBatch.adjust` → `GpuImage.adjust`；图像 uniform 用未使用的 `key_flags.z/w` 编码 fade/contrast/brightness 与背景 RGB，不改全局 uniform 布局；`image.wgsl` 顺序 mono(luma)→contrast→brightness→fade-to-background（声明近似）。
+- **导出**：本构建仍不导出栅格图像；导出报告现在显式记录 brightness/contrast/fade/monochrome 无法携带，而不是假称已保存。
+- **已运行**：`cargo test`（domain/db/import/representation/scene/app/ui-core 共 3962）、`cad-render-wgpu --test-threads=1`（529，含 5 个软件 GPU 像素契约）、clippy（8 crate）、fmt、file-size/i18n/command-docs/architecture、`npm test`（1457）全绿。
+- **NOT VERIFIED**：真实 GPU/窗口/像素、Windows/macOS/Android/Web 运行时、真实 DWG/vendor 对照；headless 像素仅为软件 Vulkan 契约。
+- **提交**：见本轮 IMAGEADJUST commit。
+
+
+## 2026-11-10 WIPEOUT frame 真实显示/出图
+
+- **行为**：`WIPEOUT Frames ON` = mask 填充 + 边界边框（显示与矢量出图都输出闭合边界折线）；`OFF` = 仅填充；`DISPLAY` = 显示边框但出图不画。边框在 mask fill **之后**用独立 Always-depth 线管线绘制（普通 Lines 会被 mask 的 clear-color 覆盖），不是假线框。
+- **链路**：session token → `cad-host` sync/plot context → `RenderSessionHandle`/`BaseInputIdentity`/preparation key → `CadSceneController`/`SceneVersion` → `RepresentationContext::wipeout_frames` → `Mask::frame` → `MaskBatch::frame` → `GpuMask.frame_*` + frame pipeline。`DISPLAY` 在 plot context 中按 `mode == On` 关闭边框。
+- **移除**：`wipeout.frames_display_only` 诊断与“无边框几何/出图通道”旧声明；命令仍是 session-only（不写库/不升修订/不撤销）。
+- **已运行**：`cargo test -p cad-representation -p cad-scene -p cad-app -p cad-engine -p cad-host`、`cad-render-wgpu --test-threads=1`（48 headless，含 ON/OFF 像素契约）、`cargo test -p cad-cli-tools`、`cargo clippy`（七 crate）、fmt、file-size/i18n/architecture、`npm test`（1456）全绿。
+- **NOT VERIFIED**：真实 GPU/窗口/像素验收；headless 像素只是软件 GPU 契约；Windows/macOS/Android/Web 运行时未验证。
+- **提交**：见本轮 WIPEOUT commit。
+
+
+## 2026-11-10 TABLE 创建 + TABLEDIT
+
+- **TABLE / -TABLE 真实创建**：`TABLE <rows> <cols> <col_width> <row_height> <x> <y>`（`-TABLE` 同实现），+X/+Z frame、空单元格、Standard、默认文字高度、四边可见单线；上限 1000×1000 且 ≤100,000 单元格；经共享 create funnel，一条事务/一步撤销；`table.created`/`-table.created`。无对话框/创建时合并/单元格样式。
+- **TABLEDIT 真实编辑**：`TABLEDIT <row> <col> [text]`（1-based，选中恰好一个表格，剩余整行作为文本、空文本清除）；`with_cell_text` + 一次 `update_entity`，一条事务/一步撤销；`tabledit.cell`/`.unchanged`；FIND 能立即看到编辑后的单元格。无样式/合并/块内容编辑、无交互对话框。
+- **仍拒绝**：`TABLEEXPORT`（无 CSV/文件写出）、`TABLESTYLE`（无样式表）、`TINSERT`（无块进入单元格创建）、`MATCHCELL`（无单元格样式复制面）。
+- **已运行**：`cargo test -p cad-app --lib`（2314 passed, 3 ignored）、`cad-ui-core`（511+1）、`cargo check --workspace --all-targets`、clippy（app/ui-core）、fmt、architecture/tauri/fixture/file-size/command-docs/test-check-command-docs/i18n、`npm test`（1456）全绿。
+- **NOT VERIFIED**：真实 GUI/GPU/像素/真机、真实 DWG/AutoCAD 对照；TABLE 创建/编辑只有合成契约测试。
+- **提交**：`f2594257` TABLE creation and TABLEDIT cell text。
+
+
+## 2026-11-10 TABLE 模型 v1 + 加固
+
+- **真实模型**：`SemanticGeometry::Table(Box<TableGeometry>)`（`cad-domain/src/table_entity.rs`）：frame、行/列、单元格文字/高度/样式、合并跨度、四边边框 + 派生显示（与旧 `Compound` 显示逐行等价）。导入 `ACAD_TABLE` 保留网格/合并/文字/边框；`Completeness::Partial` 原因覆盖对齐强制 Center/Middle、逐格旋转、块/字段/额外内容、非 +Z 文字、未解析样式。
+- **传播**：`cad-db` 变换（相似 + 保持朝向；+Z 文字随 `atan2(horizontal)` 旋转，倾斜拒绝）、validate/bounds；`cad-geometry` tessellate/vector/engine/intersect；`cad-spatial` pick/bounds；representation 分组；font/image 收集；FIND 逐单元格（不再跨单元格拼接）与批量替换一次重建；selection/filter/properties；EXPLODE/grip 具名拒绝；DXF 真实 `EntityType::Table` 导出（块内表格应用 INSERT 变换；重导入验证）。
+- **加固**：导入文字高度/样式按 `cell.style → row.style → base_style → TableStyle.data_row_style → content → 2.5` 解析；合并跨度先按网格 clamp；validate 拒绝重叠合并/负双线间距/非单位 frame；导出按不同样式名各注册一次；TABLESTYLE 对象/名称、TABLECONTENT name/description 明确报告不往返。
+- **仍拒绝**：`TABLE`/`-TABLE` 创建、`TABLEDIT`、`TABLEEXPORT`（无 CSV/文件写出）、`TABLESTYLE`、`TINSERT`、`MATCHCELL`，原因串已改为“导入模型已存在、创建/编辑/导出面未实现”。
+- **已运行**：`cargo test -p cad-domain -p cad-db -p cad-import-acadrust -p cad-app --all-targets`（2306 cad-app + 373 import 等全绿）、clippy/fmt/file-size/i18n/npm test 全绿；未运行 app-android 构建与真实 DWG/AutoCAD 对照。
+- **NOT VERIFIED**：无真实 DWG `ACAD_TABLE` 样本、无 AutoCAD/vendor 往返、无 GUI/GPU/像素/真机证据。
+- **提交**：`beced4dd` TABLE 模型 v1；`aa43b64e` 加固。
+
+
+## 2026-11-10 真实能力：FILLET 曲线对、ARRAYPATH、IMAGE attach/clip
+
+- **FILLET 曲线–曲线**：`CIRCLE`/`ARC` 两两组合走偏移圆构造（外部 `r+R` / 内部 `|r−R|`，四个候选按拾取点选解），插入一段**次弧**（有符号 sweep 保持 `|sweep| ≤ π`），ARC 侧用 `trim_arc_to` 修剪、CIRCLE 不修剪；一条事务/一步撤销。新增 `+Z` 法向校验（`FILLET.unsupported_plane`，同时补上既有 line↔circle 的漏洞）、`Trim=No` 时仍在弧外切点拒绝（`FILLET.tangent_outside_arc`）、近零修剪拒绝（`FILLET.degenerate_arc`）。`ELLIPSE`/样条对、Multiple/多解循环仍拒绝。
+- **ARRAYPATH 真实 v1**：选择第一个实体为路径、其余为项目；`ARRAYPATH <count> [ALIGN]`，`count` 是**副本数**（源对象保留）。闭合/周期路径用 `i/count`（不重复接缝），开放路径含两端；等弧长取点复用 DIVIDE 的曲线集，LWPOLYLINE 切线解析化；`ALIGN` 每个副本绕**自身平移后的锚点**旋转；INSERT 项目用块基点；payload 自带 `refs`；空间/块成员/子图元拒绝；垂直路径 + ALIGN 拒绝 `arraypath.no_plane_tangent`。一条事务/一步撤销。
+- **IMAGE 真实授权**：`IMAGE`/`-IMAGE` 只读报告所有 IMAGE 实体（id/空间/file key/pixels/visible/clip/origin，Viewer-legal）；`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>` 经 `image_resource_key` 规范化后创建真实 `SemanticGeometry::Image`（+Z 平面、per-pixel u/v、一条事务/一步撤销，纹理由宿主按图纸目录解析）；`IMAGECLIP <minx> <miny> <maxx> <maxy>`/`OFF` 在恰好一个选中 IMAGE 上写/清二顶点像素坐标 `ImageClip{inside:true}`，一条事务/一步撤销。`IMAGEADJUST`/PDF/DGN 等仍拒绝。
+- **已运行**：`cargo test -p cad-app --lib`（2294 passed, 3 ignored）、`cad-ui-core`（506+1）、`cargo clippy`（app/ui-core）、`cargo fmt --check`、`npm test`（1452）、file-size/command-docs/i18n 全绿（FILLET 为 2279 时、ARRAYPATH 加固为 2294 时、IMAGE 为 2287 时分别验证；合并后本轮再跑一次）。
+- **NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机、Windows/macOS/Android/Web 运行时、真实 DWG/vendor 对照；以上只有合成契约测试。IMAGE 的纹理解析/显示另有既有 `image.unresolved` 边界，跨载体未验证。
+- **提交**：`f6d73035` FILLET curve-curve；`a19778b5` ARRAYPATH v1；`2e3fd0e0` ARRAYPATH 加固；`c4dd8d75` IMAGE attach/clip/report。
+
+
+## 2026-11-10 Batch 3：Wave 17–24（200 条具名拒绝，覆盖 623 → 823）
+
+- **新增 200 条命令路径**（A–O，官方索引 31–601）：动作录制、Activity Insights/DesignCenter/Blocks/Command Macros/CUI 面板、OLE/超链接、AutoLISP/SHX、灯光/材质/NURBS 控制点、几何与尺寸约束、数据提取/dbConnect/Data Link、DWF/DGN 底图与导出、标记/追踪协作、对象检测/计数、比较、图纸集、GIS、3D 相机/分析/导航等。全部是**具名拒绝**（`CadError::Unsupported` + 稳定 `<name>.unsupported: ...` 原因串），不写库/不升修订/不入历史/Viewer-legal；不是可用功能。
+- **基础设施**：`cad-app` 新增 `RefusalId` 注册表（`command_id/extended/refusal_names.rs`，单一 `refusal_names!` 表生成 enum/selector/reason/ALL）与 `ExtendedCommandId::Refusal(RefusalId)`；一个 dispatch 臂 + `app_extended_refusal_names` 处理器。`cad-ui-core` 新增兄弟表 `REFUSAL_TABLE`（`commands/refusal_table.rs`），`normalize_command`/`canonical_command_name`/`command_name`/`admissible_names` 同时查两张表，因此新增名字不需要改 `COMMAND_TABLE` 或加 dispatch 臂。
+- **UI/i18n**：`catalog-refusals.ts` 追加 200 条 catalog 行；`gating.ts` 的 `DOCUMENT_SCOPED_COMMANDS` 与 `HOST_NAMES` fixture 同步；en/zh 各 200 个 `draw.kind.*` label 与 `.hint`；新增 `extended-wave17.test.ts` 契约。
+- **文档**：覆盖清单总计 **823 已实现（67 完整 + 756 部分）/ 158 未实现**；8 条 wave 进度行、200 条全量行与索引行、`compatibility.md` 新表。
+- **已运行**：`cargo test -p cad-app --lib`（2270 passed, 3 ignored）、`cad-ui-core`（498+1）、`cad-desktop-shell`（46+3+6）、`cargo clippy`（app/ui-core/desktop-shell）、`cargo fmt --check`、`npm test`（含新 wave17 契约）、architecture/tauri/fixture/file-size/command-docs/test-check-command-docs/i18n 全绿。
+- **NOT VERIFIED**：真实窗口/GUI/GPU/像素/真机、Windows/macOS/Android/Web 运行时、真实 DWG/vendor 对照；这 200 条只有契约测试，且没有一条是可用功能。
+- **剩余 158**：主要是 3D/点云/协作/发布/Express 等；真正的高价值 2D 缺口（表格、字段、PDF/图像底图、ARRAYPATH、COPYM、XCLIP 等）仍应作为独立模型实现，而不是继续拒绝。
+
 ## 2026-11-10 发布 v0.1.8（命令覆盖 623 + 栅格/空白图修复）
 
 - **版本**：`Cargo.toml` workspace 版本、`Cargo.lock`（仅 28 处 workspace 成员 `version`）、四个

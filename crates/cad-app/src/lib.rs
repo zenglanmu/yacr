@@ -52,6 +52,8 @@ mod app_dispatch;
 mod app_drafting;
 // The Wave 2 extended-command handlers (session tokens, reports, refusals).
 mod app_extended_refusals;
+// The Wave 17-24 data-driven named refusals (one registry, one handler).
+mod app_extended_refusal_names;
 mod app_extended_reports2;
 mod app_extended_session2;
 // The Wave 3 extended-command handlers (reports/session and refusals).
@@ -90,6 +92,8 @@ mod app_extended_w13_reports;
 mod app_extended_w14_refusals;
 mod app_extended_w15_refusals;
 mod app_extended_w16_refusals;
+// The Wave 16 read-only raster-image report (`IMAGE` / `-IMAGE`).
+mod app_extended_w16_reports;
 // The 2026-11-07 extras batch dispatcher and its view-only commands.
 mod app_extras;
 mod app_layout;
@@ -124,7 +128,7 @@ pub use camera::{
 };
 pub mod command_aliases;
 pub mod command_id;
-pub use command_id::{AppMode, CommandId, ExtendedCommandId};
+pub use command_id::{AppMode, CommandId, ExtendedCommandId, RefusalId};
 pub use draw_tool::{
     circle_radius, AlignPairSet, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity,
     ToolParameter, ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES,
@@ -423,18 +427,18 @@ pub use command_payload::{
     DimJogLineCommand, DimOverrideCommand, DimStyleCommand, DimTextEditCommand,
     DimensionBatchPayload, DimensionChainCommand, FilterExpression, FilterLogic, FilterRequest,
     GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder, HatchEditOption,
-    HatchOriginCommand, JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand,
-    LeaderCommand, LinetypeCommand, MatchPropSettings, MeasureGeomOption, MirrorOptions,
-    MocoroCommand, NamedObjectKind, OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions,
-    OrdinateAxis, OrdinateDimensionCommand, PeditEditCommand, PeditEditOption, PeditOption,
-    PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest, RadialDimensionCommand,
-    RenameCommand, RevCloudStyle, RevisionCloudMode, RevisionCloudOptions,
-    RotatedLinearDimensionCommand, SelectSimilarSettings, SelectionApply, SelectionOperator,
-    SelectionPredicate, SelectionProperty, SelectionScope, SelectionToolPayload,
-    SetByLayerSettings, StretchPolygonCommand, TCircleCommand, TCountCommand, TextAlignCommand,
-    TextAlignEdge, TextBoundaryShape, TextCaseMode, TextFitCommand, TextMaskKind, TextMaskOptions,
-    TextOrder, TextScaleCommand, TwoLineCommand, Txt2MTextOptions, UtilityPayload, VPointInput,
-    ViewCommand, WipeoutPayload,
+    HatchOriginCommand, ImageAdjustCommand, ImageAttachCommand, ImageClipCommand, JoinMode,
+    JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand,
+    MatchPropSettings, MeasureGeomOption, MirrorOptions, MocoroCommand, NamedObjectKind,
+    OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis, OrdinateDimensionCommand,
+    PeditEditCommand, PeditEditOption, PeditOption, PurgeTarget, QDimCommand, QDimMode, QDimSnap,
+    QSelectRequest, RadialDimensionCommand, RenameCommand, RevCloudStyle, RevisionCloudMode,
+    RevisionCloudOptions, RotatedLinearDimensionCommand, SelectSimilarSettings, SelectionApply,
+    SelectionOperator, SelectionPredicate, SelectionProperty, SelectionScope, SelectionToolPayload,
+    SetByLayerSettings, StretchPolygonCommand, TCircleCommand, TCountCommand, TableCreateCommand,
+    TableEditCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode,
+    TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand, TwoLineCommand,
+    Txt2MTextOptions, UtilityPayload, VPointInput, ViewCommand, WipeoutPayload,
 };
 
 pub use app_audit::AuditRequest;

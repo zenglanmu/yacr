@@ -188,6 +188,7 @@ fn mask_fragment_becomes_a_mask_draw_item_with_its_polygon() {
     rep.fragments[0].primitive = DisplayPrimitive::Mask {
         boundary: polygon.clone().into(),
         inverted: false,
+        frame: false,
     };
 
     let mut cache = SceneCache::default();
@@ -233,6 +234,7 @@ fn mask_without_three_vertices_is_an_explicit_error() {
         ]
         .into(),
         inverted: false,
+        frame: false,
     };
     let mut cache = SceneCache::default();
     assert!(cache.build(&rep, stamp()).is_err());
@@ -268,6 +270,7 @@ fn mask_batch_carries_inverted_clip_mode_through_publish() {
         ]
         .into(),
         inverted: true,
+        frame: false,
     };
     let mut cache = SceneCache::default();
     let delta = cache.build(&rep, stamp()).unwrap();
@@ -278,6 +281,47 @@ fn mask_batch_carries_inverted_clip_mode_through_publish() {
     cache.publish(delta, &stamp()).unwrap();
     assert_eq!(cache.mask_count(), 1);
     assert!(cache.mask_batches()[0].inverted);
+}
+
+/// `WIPEOUTFRAME` reaches the renderer through `MaskBatch::frame`: the scene
+/// resolves the colour once (the fill always paints the clear colour) and the
+/// frame's own bytes are charged to the scene budget.
+#[test]
+fn mask_frame_colour_reaches_the_batch_and_is_charged() {
+    let p = |x: f64, y: f64| Point3 { x, y, z: 0.0 };
+    let boundary = vec![p(0.0, 0.0), p(2.0, 0.0), p(2.0, 2.0)];
+
+    let mut framed = line_representation(12, Vec::new());
+    framed.fragments[0].color = [0.2, 0.4, 0.6];
+    framed.fragments[0].primitive = DisplayPrimitive::Mask {
+        boundary: boundary.clone().into(),
+        inverted: false,
+        frame: true,
+    };
+    let framed_delta = SceneCache::default().build(&framed, stamp()).unwrap();
+    assert_eq!(
+        framed_delta.masks[0].frame,
+        Some([0.2, 0.4, 0.6]),
+        "the frame carries the fragment's sanitised colour"
+    );
+
+    let mut bare = line_representation(12, Vec::new());
+    bare.fragments[0].primitive = DisplayPrimitive::Mask {
+        boundary: boundary.into(),
+        inverted: false,
+        frame: false,
+    };
+    let bare_delta = SceneCache::default().build(&bare, stamp()).unwrap();
+    assert_eq!(
+        bare_delta.masks[0].frame, None,
+        "an OFF mask carries no frame colour"
+    );
+
+    assert_eq!(
+        framed_delta.masks[0].approx_bytes() - bare_delta.masks[0].approx_bytes(),
+        std::mem::size_of::<[f32; 3]>(),
+        "the frame colour is charged exactly once"
+    );
 }
 
 /// End-to-end contract for the threaded display order: entity geometry at
@@ -299,6 +343,7 @@ fn batches_carry_each_fragments_draw_order_including_masks() {
     rep.fragments[3].primitive = DisplayPrimitive::Mask {
         boundary: Arc::from(vec![p(0.0), p(10.0), p(10.0), p(0.0)].into_boxed_slice()),
         inverted: false,
+        frame: false,
     };
 
     for compact in [false, true] {

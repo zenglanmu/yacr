@@ -6,8 +6,10 @@ mod dimension_synthesis;
 pub mod hatch;
 pub mod hatch_entity;
 mod multileader;
+pub mod table_entity;
 pub use hatch_entity::*;
 pub use multileader::*;
+pub use table_entity::*;
 
 #[cfg(test)]
 mod dimension_tests;
@@ -118,13 +120,60 @@ pub struct Bounds3 {
 }
 /// Clip boundary of a raster `IMAGE`, in the image's own pixel coordinate space.
 ///
-/// `vertices` is a closed polygon; `inside` mirrors DXF clip_mode: `true` keeps
-/// the region inside the boundary, `false` keeps the region outside it (which is
-/// what a WIPEOUT-style inverted mask expresses).
+/// `vertices` is a polygon and may be open or closed (a repeated final vertex is
+/// dropped). **Exactly two vertices** are read as opposite corners of a
+/// rectangle; `inside` defaults to `true` for that form. Three or more vertices
+/// are taken as the polygon directly. `inside` mirrors DXF clip_mode: `true`
+/// keeps the region inside the boundary, `false` keeps the region outside it
+/// (which is what a WIPEOUT-style inverted mask expresses).
+///
+/// Coordinates are pixel-space: X runs along the image's `u` edge and Y along
+/// `v`, with `y = 0` at the **bottom** image edge (bottom-up, matching the
+/// texture's `v = 0`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageClip {
     pub vertices: Vec<[f64; 2]>,
     pub inside: bool,
+}
+
+/// Per-image display adjustment: DXF `IMAGE` brightness, contrast and fade plus
+/// the separate MONOCHROME display flag.
+///
+/// All three percentages use AutoCAD's 0..=100 integer scale and the
+/// **neutral** value is `brightness = 50`, `contrast = 50`, `fade = 0`,
+/// `monochrome = false`. That is what an imported `RasterImage` with default
+/// fields carries and what `IMAGEADJUST RESET` restores, so an untouched image
+/// renders exactly like a plain sample of its texture.
+///
+/// These are *display* parameters, not geometry: they change how the sampled
+/// texel is transferred to the fragment colour, never the placement. The
+/// renderer applies a **declared approximation** of AutoCAD's transfer curve
+/// (monochrome luma → contrast → brightness → fade toward the background); it
+/// is not claimed to be pixel-identical to AutoCAD.
+///
+/// `fade` blends toward the viewport background, so `fade = 100` makes the
+/// image visually disappear into the background while keeping the entity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageAdjust {
+    /// `0..=100`; `50` is neutral.
+    pub brightness: u8,
+    /// `0..=100`; `50` is neutral.
+    pub contrast: u8,
+    /// `0..=100`; `0` is opaque (neutral), `100` fully fades into the background.
+    pub fade: u8,
+    /// MONOCHROME display: convert the sampled colour to luma first.
+    pub monochrome: bool,
+}
+
+impl Default for ImageAdjust {
+    fn default() -> Self {
+        ImageAdjust {
+            brightness: 50,
+            contrast: 50,
+            fade: 0,
+            monochrome: false,
+        }
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WorkPlane {
@@ -457,6 +506,12 @@ pub enum SemanticGeometry {
     ///
     /// Boxed for the same reason as `Dimension`.
     MultiLeader(Box<MultiLeaderGeometry>),
+    /// A TABLE (`ACAD_TABLE`): the plane frame, the column/row definition with
+    /// per-cell content and resolved borders, plus a derived `display` (grid
+    /// lines and one text run per anchoring cell).
+    ///
+    /// Boxed for the same reason as `Dimension`.
+    Table(Box<TableGeometry>),
     /// A raster image (DXF `IMAGE` / `AcDbRasterImage`).
     ///
     /// The image is placed by `origin` and two edge vectors: `u` and `v` span
@@ -464,7 +519,8 @@ pub enum SemanticGeometry {
     /// the full extent is `pixels.0 * |u|` by `pixels.1 * |v|`. `pixels` is
     /// `(width, height)` in pixels. `file` is a *logical* resource key resolved
     /// by the host, never a platform path (the same role as `Text::font`).
-    /// `visible` mirrors the SHOW_IMAGE flag.
+    /// `visible` mirrors the SHOW_IMAGE flag; `adjust` is the display-only
+    /// brightness/contrast/fade/monochrome transfer (see [`ImageAdjust`]).
     Image {
         origin: Point3,
         u: Point3,
@@ -473,6 +529,7 @@ pub enum SemanticGeometry {
         file: Option<String>,
         clip: Option<ImageClip>,
         visible: bool,
+        adjust: ImageAdjust,
     },
     /// An erasing mask (DXF `WIPEOUT`).
     ///
@@ -846,152 +903,4 @@ impl Mesh {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn point(x: f64, y: f64, z: f64) -> Point3 {
-        Point3 { x, y, z }
-    }
-
-    fn sample_image() -> SemanticGeometry {
-        SemanticGeometry::Image {
-            origin: point(1.0, 2.0, 0.0),
-            u: point(0.5, 0.0, 0.0),
-            v: point(0.0, 0.25, 0.0),
-            pixels: [640.0, 480.0],
-            file: Some("logo.png".to_string()),
-            clip: Some(ImageClip {
-                vertices: vec![[0.0, 0.0], [640.0, 0.0], [640.0, 480.0]],
-                inside: true,
-            }),
-            visible: true,
-        }
-    }
-
-    fn sample_mask() -> SemanticGeometry {
-        SemanticGeometry::Mask {
-            boundary: vec![
-                point(0.0, 0.0, 0.0),
-                point(10.0, 0.0, 0.0),
-                point(10.0, 10.0, 0.0),
-                point(0.0, 10.0, 0.0),
-            ],
-            inverted: false,
-        }
-    }
-
-    #[test]
-    fn image_variant_constructs_and_compares() {
-        let image = sample_image();
-        assert_eq!(image.clone(), image);
-        match &image {
-            SemanticGeometry::Image {
-                origin,
-                pixels,
-                file,
-                clip,
-                visible,
-                ..
-            } => {
-                assert_eq!(*origin, point(1.0, 2.0, 0.0));
-                assert_eq!(*pixels, [640.0, 480.0]);
-                assert_eq!(file.as_deref(), Some("logo.png"));
-                assert!(clip.as_ref().expect("clip").inside);
-                assert!(*visible);
-            }
-            other => panic!("expected Image, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn image_clip_constructs_and_compares() {
-        let clip = ImageClip {
-            vertices: vec![[1.0, 2.0], [3.0, 4.0]],
-            inside: false,
-        };
-        assert_eq!(clip.clone(), clip);
-        assert_eq!(
-            clip,
-            ImageClip {
-                vertices: vec![[1.0, 2.0], [3.0, 4.0]],
-                inside: false,
-            }
-        );
-        assert_ne!(
-            clip,
-            ImageClip {
-                vertices: vec![[1.0, 2.0], [3.0, 4.0]],
-                inside: true,
-            }
-        );
-    }
-
-    #[test]
-    fn mask_variant_constructs_and_compares() {
-        let mask = sample_mask();
-        assert_eq!(mask.clone(), mask);
-        match &mask {
-            SemanticGeometry::Mask { boundary, inverted } => {
-                assert_eq!(boundary.len(), 4);
-                assert!(!*inverted);
-            }
-            other => panic!("expected Mask, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn apply_vector_is_the_linear_part_of_apply_point() {
-        // A uniform scale composed with a translation: the linear part is the
-        // scale, so the point/vector difference is exactly the translation.
-        let t = Transform3::translation(point(3.0, -4.0, 5.0)).matrix_mul(&Transform3::scale(2.0));
-        let v = point(1.5, -2.0, 0.25);
-        let p = t.apply_point(v);
-        let linear = t.apply_vector(v);
-        assert_eq!(linear, point(3.0, -4.0, 0.5));
-        assert_eq!(p.x - linear.x, 3.0);
-        assert_eq!(p.y - linear.y, -4.0);
-        assert_eq!(p.z - linear.z, 5.0);
-        // A pure translation leaves every vector unchanged.
-        let tr = Transform3::translation(point(9.0, 8.0, 7.0));
-        assert_eq!(tr.apply_vector(v), v);
-        assert_eq!(tr.apply_point(v), point(10.5, 6.0, 7.25));
-    }
-
-    #[test]
-    fn apply_vector_composes_through_nested_transforms() {
-        // Non-uniform scale (2, 0.5) as the inner (block) transform, a rotation
-        // about Z plus a translation as the outer (insert) transform.
-        let inner = Transform3::from_basis(
-            point(2.0, 0.0, 0.0),
-            point(0.0, 0.5, 0.0),
-            point(1.0, 1.0, 0.0),
-        );
-        let (s, c) = (
-            std::f64::consts::FRAC_1_SQRT_2,
-            std::f64::consts::FRAC_1_SQRT_2,
-        );
-        let rotation =
-            Transform3::from_basis(point(c, s, 0.0), point(-s, c, 0.0), point(10.0, -3.0, 2.0));
-        let composed = rotation.matrix_mul(&inner);
-        let v = point(1.0, -2.0, 0.75);
-        let nested = rotation.apply_vector(inner.apply_vector(v));
-        let direct = composed.apply_vector(v);
-        assert!(
-            (direct.x - nested.x).abs() < 1e-9,
-            "{direct:?} vs {nested:?}"
-        );
-        assert!(
-            (direct.y - nested.y).abs() < 1e-9,
-            "{direct:?} vs {nested:?}"
-        );
-        assert!(
-            (direct.z - nested.z).abs() < 1e-9,
-            "{direct:?} vs {nested:?}"
-        );
-        // The composed translation is still excluded from a vector.
-        let via_point = composed.apply_point(v);
-        assert!((via_point.x - direct.x - composed.matrix[0][3]).abs() < 1e-9);
-        assert!((via_point.y - direct.y - composed.matrix[1][3]).abs() < 1e-9);
-        assert!((via_point.z - direct.z - composed.matrix[2][3]).abs() < 1e-9);
-    }
-}
+mod lib_tests;

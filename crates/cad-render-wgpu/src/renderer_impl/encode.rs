@@ -36,7 +36,7 @@ impl Renderer {
         stream_slots: &[u32],
         chunk_slots: &[u32],
         arc_slots: &[u32],
-        mask_slots: &[u32],
+        mask_slots: &[(u32, Option<u32>)],
         transient: Option<(&wgpu::Buffer, u32, u32)>,
         line_pipeline: &wgpu::RenderPipeline,
         line_instanced_pipeline: &wgpu::RenderPipeline,
@@ -778,13 +778,33 @@ impl Renderer {
             // page, so the last page still ends with every mask on top.
             if !self.masks.is_empty() {
                 if let Some(mask_pipeline) = self.mask_pipeline.as_ref() {
-                    // `mask_slots` is one slot per resident mask on the base page
-                    // (masks belong to the base target). The overlay pass passes
-                    // an empty slice: masks are never recomposited there.
-                    for (mask, &slot) in self.masks.iter().zip(mask_slots.iter()) {
-                        let (bind_group, offset) = self.uniforms.binding(slot as usize);
+                    // `mask_slots` is one fill slot (plus an optional frame slot)
+                    // per resident mask on the base page (masks belong to the base
+                    // target). The overlay pass passes an empty slice: masks are
+                    // never recomposited there.
+                    //
+                    // Each mask draws its fill first; a framed mask then draws its
+                    // boundary with the frame pipeline. Both live in this same
+                    // `depth_compare: Always` pass, so the frame is never covered by
+                    // the fill it outlines.
+                    for (mask, &(fill_slot, frame_slot)) in self.masks.iter().zip(mask_slots.iter())
+                    {
+                        let (bind_group, offset) = self.uniforms.binding(fill_slot as usize);
                         encode_state.set_pipeline(&mut pass, mask_pipeline);
                         masks::draw_mask(&mut pass, &mut encode_state, mask, bind_group, offset);
+                        if let (Some(frame_slot), Some(frame_pipeline)) =
+                            (frame_slot, self.mask_frame_pipeline.as_ref())
+                        {
+                            let (bind_group, offset) = self.uniforms.binding(frame_slot as usize);
+                            encode_state.set_pipeline(&mut pass, frame_pipeline);
+                            masks::draw_mask_frame(
+                                &mut pass,
+                                &mut encode_state,
+                                mask,
+                                bind_group,
+                                offset,
+                            );
+                        }
                     }
                 }
             }

@@ -58,18 +58,29 @@ impl Application {
             .drawing
             .clone();
 
-        let matches: Vec<DbEntity> = drawing
+        // Search **cell by cell** for a table: a needle must never match across
+        // two cells (`id` + ` ` + `name`). Each hit records the cell it matched
+        // so the report can name it.
+        let hits: Vec<FindHit> = drawing
             .model_space()
             .into_iter()
-            .filter(|entity| text_of(entity).is_some_and(|text| contains(text, needle)))
-            .cloned()
+            .flat_map(|entity| find_hits(entity, needle))
+            .collect();
+
+        // Replacement works per entity; several cell hits on one table collapse
+        // into one update so the table is rebuilt once.
+        let mut seen = std::collections::HashSet::new();
+        let matches: Vec<DbEntity> = hits
+            .iter()
+            .filter(|hit| seen.insert(hit.entity.id.0))
+            .map(|hit| hit.entity.clone())
             .collect();
 
         let Some(replacement) = replacement else {
-            return Ok(report_outcome(&matches, needle));
+            return Ok(report_outcome(&hits, needle));
         };
         if matches.is_empty() {
-            return Ok(report_outcome(&matches, needle));
+            return Ok(report_outcome(&hits, needle));
         }
 
         // Plan every replacement first: all-or-nothing, no transaction on a
@@ -155,22 +166,104 @@ impl Application {
     }
 }
 
-fn report_outcome(matches: &[DbEntity], needle: &str) -> CommandOutcome {
-    let ids: Vec<String> = matches
-        .iter()
-        .take(10)
-        .map(|entity| entity.id.0.to_string())
-        .collect();
-    let preview = matches
-        .first()
-        .and_then(|entity| text_of(entity))
-        .map(|text| preview(text, needle))
-        .unwrap_or_default();
-    let more = matches.len().saturating_sub(ids.len());
+/// One search hit: the entity, the matching cell when the entity is a table,
+/// and the raw text that matched.
+struct FindHit {
+    entity: DbEntity,
+    cell: Option<(usize, usize)>,
+    text: String,
+}
+
+impl FindHit {
+    fn entity_hit(entity: &DbEntity, text: String) -> Self {
+        FindHit {
+            entity: entity.clone(),
+            cell: None,
+            text,
+        }
+    }
+
+    fn cell_hit(entity: &DbEntity, row: usize, column: usize, text: String) -> Self {
+        FindHit {
+            entity: entity.clone(),
+            cell: Some((row, column)),
+            text,
+        }
+    }
+}
+
+/// Every match in one entity. A table is searched cell by cell so a needle
+/// cannot span two cells; every other text-bearing entity contributes at most
+/// one hit.
+fn find_hits(entity: &DbEntity, needle: &str) -> Vec<FindHit> {
+    match &entity.geometry {
+        SemanticGeometry::Text { text, .. } => {
+            if contains(text, needle) {
+                vec![FindHit::entity_hit(entity, text.clone())]
+            } else {
+                Vec::new()
+            }
+        }
+        SemanticGeometry::MultiLeader(leader) if leader.content() == MLeaderContent::Text => {
+            let text = &leader.text().string;
+            if contains(text, needle) {
+                vec![FindHit::entity_hit(entity, text.clone())]
+            } else {
+                Vec::new()
+            }
+        }
+        SemanticGeometry::Table(table) => {
+            let mut hits = Vec::new();
+            for (row_index, row) in table.rows().iter().enumerate() {
+                for (column_index, cell) in row.cells.iter().enumerate() {
+                    if !cell.text.is_empty() && contains(&cell.text, needle) {
+                        hits.push(FindHit::cell_hit(
+                            entity,
+                            row_index,
+                            column_index,
+                            cell.text.clone(),
+                        ));
+                    }
+                }
+            }
+            hits
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn report_outcome(hits: &[FindHit], needle: &str) -> CommandOutcome {
+    let mut ids: Vec<String> = Vec::new();
+    for hit in hits {
+        let id = hit.entity.id.0.to_string();
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    let total_ids = ids.len();
+    ids.truncate(10);
+    let more = total_ids.saturating_sub(ids.len());
     let ids = if more > 0 {
         format!("{}, +{more} more", ids.join(", "))
     } else {
         ids.join(", ")
+    };
+    let preview = hits
+        .first()
+        .map(|hit| preview(&hit.text, needle))
+        .unwrap_or_default();
+    // Name the matching cells, so a table's per-cell matches are visible rather
+    // than summarised as one joined string.
+    let cells: Vec<String> = hits
+        .iter()
+        .filter_map(|hit| hit.cell)
+        .take(10)
+        .map(|(row, column)| format!("row {row}, column {column}"))
+        .collect();
+    let cells = if cells.is_empty() {
+        String::new()
+    } else {
+        format!("; cells: {}", cells.join(", "))
     };
     CommandOutcome {
         objects: Vec::new(),
@@ -179,24 +272,13 @@ fn report_outcome(matches: &[DbEntity], needle: &str) -> CommandOutcome {
             object: None,
             code: "find.result".into(),
             message: format!(
-                "FIND: {} match(es) for '{needle}' [ids: {}] first: {preview}",
-                matches.len(),
+                "FIND: {} match(es) for '{needle}' [ids: {}] first: {preview}{cells}",
+                hits.len(),
                 ids
             ),
         }],
         measurement: None,
         point_report: None,
-    }
-}
-
-/// The stored raw text of one text-bearing entity.
-fn text_of(entity: &DbEntity) -> Option<&str> {
-    match &entity.geometry {
-        SemanticGeometry::Text { text, .. } => Some(text),
-        SemanticGeometry::MultiLeader(leader) if leader.content() == MLeaderContent::Text => {
-            Some(&leader.text().string)
-        }
-        _ => None,
     }
 }
 
@@ -278,6 +360,30 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
             let stored = newlines_to_paragraph_breaks(replacement);
             let replaced = replace_all(&leader.text().string, needle, &stored);
             after.geometry = SemanticGeometry::MultiLeader(Box::new(leader.with_text(&replaced)?));
+        }
+        SemanticGeometry::Table(table) => {
+            // Cell text is single-line; a multi-line replacement is refused by
+            // the same policy the TEXT channel uses, before any transaction.
+            if has_line_break(replacement) {
+                return Err(text_policy::single_line_newline_error("FIND"));
+            }
+            let mut changes: Vec<(usize, usize, String)> = Vec::new();
+            for (row_index, row) in table.rows().iter().enumerate() {
+                for (column_index, cell) in row.cells.iter().enumerate() {
+                    if cell.text.is_empty() || !contains(&cell.text, needle) {
+                        continue;
+                    }
+                    changes.push((
+                        row_index,
+                        column_index,
+                        replace_all(&cell.text, needle, replacement),
+                    ));
+                }
+            }
+            if !changes.is_empty() {
+                // One bulk rebuild for every matched cell (and one undo step).
+                after.geometry = SemanticGeometry::Table(Box::new(table.with_cell_texts(changes)?));
+            }
         }
         other => {
             return Err(CadError::Unsupported(format!(

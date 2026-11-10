@@ -16,8 +16,8 @@
 //! ```
 
 use cad_domain::{
-    DocumentId, EntityId, InstancePath, Point3, Revision, SelectionRef, SubElementId, TaskStamp,
-    Transform3,
+    DocumentId, EntityId, ImageAdjust, InstancePath, Point3, Revision, SelectionRef, SubElementId,
+    TaskStamp, Transform3,
 };
 use cad_render_wgpu::headless::{create_headless_gpu, HeadlessGpu};
 use cad_render_wgpu::{
@@ -181,6 +181,7 @@ fn image_batch_at(resource: &str, entity: u128, center: [f64; 2]) -> ImageBatch 
         clip: None,
         alpha: 1.0,
         draw_order: 0,
+        adjust: ImageAdjust::default(),
         sources: vec![source(entity)],
     }
 }

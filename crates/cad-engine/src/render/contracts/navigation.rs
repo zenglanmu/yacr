@@ -149,6 +149,7 @@ fn resident_scene_presentable_identity_includes_authoritative_revision() {
         fonts_generation: 0,
         images_generation: 0,
         layers: LayerOverrideSet::new(),
+        wipeout_frames: false,
     };
     let edited = BaseInputIdentity {
         revision: Some(Revision(2)),

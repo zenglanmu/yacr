@@ -313,6 +313,22 @@ fn geometry_summary(database: &cad_db::DrawingDatabase, geometry: &SemanticGeome
                 leader.lines().len()
             )
         }
+        SemanticGeometry::Table(table) => format!(
+            "table style={} name={} rows={} columns={} display_items={}",
+            if table.style_name().is_empty() {
+                "-"
+            } else {
+                table.style_name()
+            },
+            if table.name().is_empty() {
+                "-"
+            } else {
+                table.name()
+            },
+            table.rows().len(),
+            table.columns().len(),
+            table.display().len()
+        ),
     }
 }
 

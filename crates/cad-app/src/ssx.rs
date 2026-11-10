@@ -497,7 +497,14 @@ fn block_name(database: &DrawingDatabase, entity: &cad_db::DbEntity) -> Option<S
     }
 }
 
-/// The resolved text-style name an entity's annotation uses, if any.
+/// The style name an entity's annotation records, for `SSX STYLE`.
+///
+/// For TEXT/MULTILEADER/DIMENSION this is the resolved **text** style. A TABLE
+/// does not store a text style on the entity: its cells carry per-cell styles
+/// and the entity carries a **table** style name, so that name is returned
+/// deliberately (matching `SSX STYLE <table style>`). The two name spaces are
+/// not interchangeable; changing this selection behavior would be a separate
+/// documented decision.
 fn style_name<'a>(database: &'a DrawingDatabase, entity: &'a cad_db::DbEntity) -> Option<String> {
     match &entity.geometry {
         cad_domain::SemanticGeometry::Text { style, .. } => {
@@ -508,6 +515,10 @@ fn style_name<'a>(database: &'a DrawingDatabase, entity: &'a cad_db::DbEntity) -
         }
         cad_domain::SemanticGeometry::Dimension(dimension) => {
             Some(dimension.style().text_style_name.clone())
+        }
+        // A table's annotation style name is the table style name it stores.
+        cad_domain::SemanticGeometry::Table(table) => {
+            (!table.style_name().is_empty()).then(|| table.style_name().to_string())
         }
         _ => None,
     }

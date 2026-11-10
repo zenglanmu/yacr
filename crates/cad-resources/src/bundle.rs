@@ -22,25 +22,34 @@ impl ResourceKey {
 /// [`ResourceKey::sanitize`] reduces a reference to its bare file name, so
 /// `a/logo.png` and `b/logo.png` collide and one entity silently gets the other
 /// texture. An image key instead keeps the normalised relative path: the
-/// reference is trimmed, rejected if it is empty or unsafe
-/// ([`is_safe_reference`] — absolute paths, drive letters, URL schemes and `..`
-/// escapes), its backslashes are folded to `/`, a leading `./` is stripped, and
-/// the result is lowercased. Returns `None` when no usable key remains, so a
-/// caller never looks a hostile reference up.
+/// reference is trimmed, rejected if it is empty, unsafe ([`is_safe_reference`]
+/// — absolute paths, drive letters, URL schemes and `..` escapes) or contains a
+/// control character, its backslashes are folded to `/`, empty and `.` path
+/// segments are dropped (`a//./b.png` → `a/b.png`), and the result is
+/// lowercased. Returns `None` when no usable key remains, so a caller never
+/// looks a hostile reference up.
+///
+/// The key is **case-insensitive** and always lowercased, while the filesystem
+/// may not be: the host resolver must match `textures/logo.png` against a stored
+/// `Textures/Logo.PNG` by comparing path components
+/// case-insensitively (see `cad_platform::images::local::resolve_image_file`).
 ///
 /// The host loader stores a decoded image under this key; a resolver may keep a
 /// bare-file-name fallback for a cache that was populated the old way.
 pub fn image_resource_key(reference: &str) -> Option<ResourceKey> {
     let trimmed = reference.trim();
-    if !is_safe_reference(trimmed) {
+    if trimmed.chars().any(char::is_control) || !is_safe_reference(trimmed) {
         return None;
     }
     let folded = trimmed.replace('\\', "/");
-    let normalised = folded.strip_prefix("./").unwrap_or(&folded);
-    if normalised.is_empty() || normalised == "." {
+    let normalised: Vec<&str> = folded
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect();
+    if normalised.is_empty() {
         return None;
     }
-    Some(ResourceKey(normalised.to_ascii_lowercase()))
+    Some(ResourceKey(normalised.join("/").to_ascii_lowercase()))
 }
 
 /// Category of an external resource.

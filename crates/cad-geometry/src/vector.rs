@@ -219,5 +219,28 @@ pub fn geometry_is_finite(geometry: &SemanticGeometry) -> bool {
                     .all(|p| p[0].is_finite() && p[1].is_finite())
                 && hatch.display().iter().all(geometry_is_finite)
         }
+        // A table is finite when its plane frame, every stored width/height/text
+        // height/border spacing and every display child are finite.
+        G::Table(table) => {
+            let frame = table.frame();
+            finite(frame.origin)
+                && finite(frame.horizontal)
+                && finite(frame.normal)
+                && table
+                    .columns()
+                    .iter()
+                    .all(|column| column.width.is_finite())
+                && table.rows().iter().all(|row| {
+                    row.height.is_finite()
+                        && row.cells.iter().all(|cell| {
+                            cell.text_height.is_finite()
+                                && cell.borders.top.double_spacing.is_finite()
+                                && cell.borders.right.double_spacing.is_finite()
+                                && cell.borders.bottom.double_spacing.is_finite()
+                                && cell.borders.left.double_spacing.is_finite()
+                        })
+                })
+                && table.display().iter().all(geometry_is_finite)
+        }
     }
 }

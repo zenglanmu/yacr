@@ -331,6 +331,7 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             u,
             v,
             pixels,
+            adjust,
             ..
         } => {
             if !finite(*origin) || !finite(*u) || !finite(*v) {
@@ -343,6 +344,20 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             {
                 return Err(degenerate(
                     "image pixel dimensions must be positive and finite",
+                ));
+            }
+            // `u8` makes a value above 100 representable even though the DXF
+            // fields are percentages; reject it instead of clamping so a bad
+            // writer/stored row is reported rather than silently altered.
+            let ImageAdjust {
+                brightness,
+                contrast,
+                fade,
+                ..
+            } = adjust;
+            if *brightness > 100 || *contrast > 100 || *fade > 100 {
+                return Err(degenerate(
+                    "image brightness/contrast/fade must be within 0..=100",
                 ));
             }
         }
@@ -417,6 +432,112 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                 return Err(degenerate("multileader plane frame is non-finite"));
             }
             for child in multileader.display() {
+                validate_geometry(child)?;
+            }
+        }
+        SemanticGeometry::Table(table) => {
+            // A table's plane frame must be usable, every stored length finite
+            // and non-negative, every merge span inside the grid, and every
+            // derived display child valid. The total extent must stay positive:
+            // a zero-extent grid has nothing to draw and is not a meaningful
+            // write target.
+            let frame = table.frame();
+            if !finite(frame.origin) || !finite(frame.horizontal) || !finite(frame.normal) {
+                return Err(degenerate("table plane frame is non-finite"));
+            }
+            // The domain builders store unit directions; a stored non-unit frame
+            // would make the derived vertical a different length than the grid
+            // assumes, so require unit length here too.
+            if (length(frame.horizontal) - 1.0).abs() > 1e-6
+                || (length(frame.normal) - 1.0).abs() > 1e-6
+            {
+                return Err(degenerate(
+                    "table plane frame directions must be unit length",
+                ));
+            }
+            if table.columns().is_empty() || table.rows().is_empty() {
+                return Err(degenerate("table has no rows or columns"));
+            }
+            let mut total_width = 0.0;
+            for column in table.columns() {
+                if !column.width.is_finite() || column.width < 0.0 {
+                    return Err(degenerate(
+                        "table column width must be finite and non-negative",
+                    ));
+                }
+                total_width += column.width;
+            }
+            let mut total_height = 0.0;
+            for row in table.rows() {
+                if !row.height.is_finite() || row.height < 0.0 {
+                    return Err(degenerate(
+                        "table row height must be finite and non-negative",
+                    ));
+                }
+                total_height += row.height;
+            }
+            if total_width <= MIN_GEOMETRY_EXTENT || total_height <= MIN_GEOMETRY_EXTENT {
+                return Err(degenerate("table has no positive extent"));
+            }
+            for (row_index, row) in table.rows().iter().enumerate() {
+                for (column_index, cell) in row.cells.iter().enumerate() {
+                    if column_index >= table.columns().len()
+                        || column_index + cell.merge_width.max(1) as usize > table.columns().len()
+                        || row_index + cell.merge_height.max(1) as usize > table.rows().len()
+                    {
+                        return Err(degenerate("table cell or merge span lies outside the grid"));
+                    }
+                    if !cell.borders.top.double_spacing.is_finite()
+                        || !cell.borders.right.double_spacing.is_finite()
+                        || !cell.borders.bottom.double_spacing.is_finite()
+                        || !cell.borders.left.double_spacing.is_finite()
+                    {
+                        return Err(degenerate("table border spacing is non-finite"));
+                    }
+                    if cell.borders.top.double_spacing < 0.0
+                        || cell.borders.right.double_spacing < 0.0
+                        || cell.borders.bottom.double_spacing < 0.0
+                        || cell.borders.left.double_spacing < 0.0
+                    {
+                        return Err(degenerate(
+                            "table border double-line spacing must be non-negative",
+                        ));
+                    }
+                    if !cell.text_height.is_finite() || cell.text_height <= 0.0 {
+                        return Err(degenerate(
+                            "table cell text height must be positive and finite",
+                        ));
+                    }
+                }
+            }
+            // Merge coverage must be deterministic and non-overlapping. A cell
+            // already inside an earlier anchor is a covered cell (skipped); an
+            // anchor whose range reaches an already-covered cell is an overlap
+            // and is rejected rather than silently given a precedence.
+            let column_count = table.columns().len();
+            let mut covered = vec![vec![false; column_count]; table.rows().len()];
+            for (row_index, row) in table.rows().iter().enumerate() {
+                for (column_index, cell) in row.cells.iter().enumerate() {
+                    if covered[row_index][column_index] {
+                        continue;
+                    }
+                    let span_w = cell.merge_width.max(1) as usize;
+                    let span_h = cell.merge_height.max(1) as usize;
+                    for dr in 0..span_h {
+                        for dc in 0..span_w {
+                            let (r, c) = (row_index + dr, column_index + dc);
+                            if covered[r][c] {
+                                return Err(degenerate("table merge ranges overlap"));
+                            }
+                            covered[r][c] = true;
+                        }
+                    }
+                }
+            }
+            if table.display().is_empty() {
+                return Err(degenerate("table has no display geometry"));
+            }
+            for child in table.display() {
                 validate_geometry(child)?;
             }
         }
@@ -672,6 +793,7 @@ mod tests {
             file: None,
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         };
         assert!(validate_geometry(&image).is_ok());
 
@@ -693,6 +815,7 @@ mod tests {
             file: None,
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         })
         .is_err());
         // A non-finite edge vector is rejected.
@@ -704,6 +827,7 @@ mod tests {
             file: None,
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         })
         .is_err());
         // A mask needs at least three points to bound an area.
@@ -712,5 +836,56 @@ mod tests {
             inverted: false,
         })
         .is_err());
+    }
+
+    #[test]
+    fn rejects_out_of_range_image_adjustment_and_accepts_the_edges() {
+        let image_with = |adjust: ImageAdjust| SemanticGeometry::Image {
+            origin: p(0.0, 0.0),
+            u: p(1.0, 0.0),
+            v: p(0.0, 1.0),
+            pixels: [10.0, 10.0],
+            file: None,
+            clip: None,
+            visible: true,
+            adjust,
+        };
+        // 0 and 100 are the real DXF percentage bounds.
+        for adjust in [
+            ImageAdjust {
+                brightness: 0,
+                contrast: 100,
+                fade: 0,
+                monochrome: true,
+            },
+            ImageAdjust {
+                brightness: 100,
+                contrast: 0,
+                fade: 100,
+                monochrome: false,
+            },
+        ] {
+            assert!(validate_geometry(&image_with(adjust)).is_ok(), "{adjust:?}");
+        }
+        // `u8` can hold >100; validation rejects it instead of clamping.
+        for adjust in [
+            ImageAdjust {
+                brightness: 101,
+                ..ImageAdjust::default()
+            },
+            ImageAdjust {
+                contrast: 200,
+                ..ImageAdjust::default()
+            },
+            ImageAdjust {
+                fade: 255,
+                ..ImageAdjust::default()
+            },
+        ] {
+            assert!(
+                validate_geometry(&image_with(adjust)).is_err(),
+                "{adjust:?} must be rejected"
+            );
+        }
     }
 }

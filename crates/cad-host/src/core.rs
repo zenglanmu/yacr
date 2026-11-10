@@ -324,6 +324,12 @@ pub struct HostCore {
     pub(crate) last_status: Rc<RefCell<Option<StatusMessage>>>,
     /// Last raster-image loading outcome, surfaced by the diagnostics drawer.
     pub(crate) last_image_report: Rc<RefCell<Option<cad_platform::images::ImageLoadReport>>>,
+    /// The normalised image-key set the last `install_images` pass ran for.
+    ///
+    /// A committed edit that changes this set (an `IMAGEATTACH`, an erase or an
+    /// undo) reloads images without a reopen; an unchanged set never decodes
+    /// again. Cleared with a document replacement so the next command rechecks.
+    pub(crate) last_image_keys: Rc<RefCell<std::collections::BTreeSet<cad_resources::ResourceKey>>>,
     /// Last shaping-font loading outcome (the real per-face report), surfaced by
     /// the read-only Font Manager and the diagnostics drawer.
     ///

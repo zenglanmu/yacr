@@ -88,6 +88,7 @@ impl CommandId {
                 | Self::RevisionCloud
                 | Self::ArrayRectangular
                 | Self::ArrayPolar
+                | Self::ArrayPath
                 | Self::AlignEntities
                 | Self::StretchEntities
                 | Self::EraseEntities

@@ -466,16 +466,24 @@ pub enum CommandPayload {
     ArrayRect {
         refs: Vec<SelectionRef>,
     },
-    /// ARRAYPOLAR the selected refs around `center` (ADR 0016 decision D).
-    ///
-    /// `center` is the captured array centre; the item count, fill angle and
-    /// rotate-items flag are the session typed channel
-    /// ([`crate::draw_tool::ToolParameter::ArrayItems`] … `ArrayRotateItems`).
-    /// The source refs are retained; every copy is a fresh entity in one
-    /// transaction. Associativity is NOT IMPLEMENTED.
+    /// ARRAYPOLAR the selected refs around `center` (ADR 0016 decision D). `center`
+    /// is the captured array centre; the item count, fill angle and rotate-items flag
+    /// are the session typed channel (`ArrayItems` … `ArrayRotateItems`). The source
+    /// refs are retained in one transaction; associativity is NOT IMPLEMENTED.
     ArrayPolar {
         refs: Vec<SelectionRef>,
         center: Point3,
+    },
+    /// ARRAYPATH: 2D path array v1 (first `refs` entry = path, rest = items;
+    /// `count` **copies**, optional `align`). `refs` is the selection snapshot
+    /// (the typed path fills it at argument-dispatch time, exactly like
+    /// [`Self::ArrayRect`]). `count` is the copies inserted per item; the N source
+    /// objects stay, so the array adds `count × items` fresh entities. Position 0
+    /// can coincide with a retained source whose anchor equals the path start.
+    ArrayPath {
+        refs: Vec<SelectionRef>,
+        count: usize,
+        align: bool,
     },
     /// ALIGN the selected refs from two point pairs (ADR 0016 decision F).
     ///
@@ -868,39 +876,19 @@ pub enum CommandPayload {
         key: String,
         value: String,
     },
-    /// `GRIPSTRETCH`: move **one** handle of **one** entity to a world point
-    /// (the payload path of a grip drag; see [`crate::grips`] for the model).
+    /// `GRIPSTRETCH`: move **one** handle of **one** entity to a world point (the
+    /// payload of a pointer gesture; the gesture itself lives in `cad-host`).
     ///
-    /// This is **the payload of a pointer gesture**: the gesture itself lives in
-    /// `cad-host` (`input/grip_drag.rs`) — a press on a marker of the selection
-    /// arms a drag, the moved marker is the preview, and the release commits one
-    /// `GripStretch`. The command is defined independently so the write path, its
-    /// refusals and its undo granularity stay pinned without a pointer, a marker
-    /// or a session.
-    ///
-    /// `id` names the dragged handle and `to` the world point it is dragged to.
-    /// The host resolves `to` in the plan view (x/y from the viewport's
-    /// `screen_to_world`, the dragged handle's own `z`) and then runs it through
-    /// the same drafting constraint the capture path uses
-    /// (`SessionState::constrained_point`: grid `SNAP` first, `ORTHO` second
-    /// against the handle's original position), so the previewed marker and the
-    /// committed point are one coordinate. The command stores all three
-    /// coordinates as given — nothing is projected onto a work plane here. The
-    /// handler
-    /// re-reads `id.entity`, refuses a missing entity (`grip.target_missing`) and
-    /// a non-model-space one (`property.not_addressable`), then re-validates the
-    /// handle against the current geometry through
-    /// [`crate::grips::apply_grip`]. On success it stages exactly one
-    /// `update_entity` in one transaction / one undo step; on **any** refusal it
-    /// opens no transaction at all, so there is no empty undo entry and no
-    /// revision bump (a zero displacement is refused, not accepted as a no-op —
-    /// the host turns that refusal into its own no-op). A non-finite `to` is
+    /// The host resolves `to` in the plan view and runs it through the same
+    /// drafting constraint the capture path uses, so the previewed marker and the
+    /// committed point are one coordinate. The handler re-reads `id.entity`,
+    /// refuses a missing entity (`grip.target_missing`) and a non-model-space one
+    /// (`property.not_addressable`), then re-validates the handle against the
+    /// current geometry. One `update_entity` in one transaction / one undo step;
+    /// any refusal opens no transaction and no revision bump. A non-finite `to` is
     /// refused (`grip.non_finite_target`) before the drawing is read. Work-only.
-    ///
-    /// Supported handles are the model's whole surface: a `LINE` endpoint and a
-    /// `POINT` position. Every other geometry kind refuses with
-    /// `grip.unsupported_kind`; this never routes through
-    /// [`CommandId::StretchEntities`] (crossing-window stretch).
+    /// Supported handles: a `LINE` endpoint and a `POINT` position; every other
+    /// kind refuses with `grip.unsupported_kind`.
     GripStretch(Box<GripStretchCommand>),
     /// The option of a `MEASUREGEOM <option>` line (only `Radius`/`Volume`; the
     /// four tool options route to their existing `BeginMeasurement` requests).
@@ -995,4 +983,18 @@ pub enum CommandPayload {
     VisualStyle(String),
     /// `LINETYPE`: `LIST` or `SET <name>`.
     Linetype(crate::LinetypeCommand),
+    /// `IMAGEATTACH <file> <x> <y> <w> <h> <scale>`: one real `Image` row (Work-only).
+    ImageAttach(Box<ImageAttachCommand>),
+    /// `IMAGECLIP <minx> <miny> <maxx> <maxy>` / `OFF`: the selected image's clip (Work-only).
+    ImageClip(Box<ImageClipCommand>),
+    /// `IMAGEADJUST <b> <c> <f> [MONO|COLOR]` / `RESET`: the display transfer of
+    /// the one selected image (Work-only); see [`crate::app_drawing::image_edit`].
+    ImageAdjust(Box<ImageAdjustCommand>),
+    /// `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`: one real
+    /// `SemanticGeometry::Table` grid (Work-only); contract in `app_drawing::table_edit`.
+    TableCreate(Box<TableCreateCommand>),
+    /// `TABLEDIT <row> <col> [text...]`: replace one 1-based cell's text on the
+    /// single selected table (Work-only). Contract:
+    /// [`crate::app_drawing::table_edit`].
+    TableEdit(Box<TableEditCommand>),
 }

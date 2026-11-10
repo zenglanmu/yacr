@@ -27,6 +27,9 @@ fn mask_with_mode(boundary: Vec<Point3>, inverted: bool) -> MaskBatch {
     MaskBatch {
         polygon: boundary.into(),
         inverted,
+        // The frame is a separate `WIPEOUTFRAME` concern; the fill tests use
+        // the default (no frame) so their pixels stay the clear colour.
+        frame: None,
         draw_order: 0,
         sources: vec![source()],
     }
@@ -361,4 +364,87 @@ fn a_configured_background_paints_the_clear_and_the_mask() {
         background,
         "the wipeout mask paints the same configured background"
     );
+}
+
+/// A mask carrying an explicit boundary frame colour (`WIPEOUTFRAME` 1/2).
+fn mask_with_frame(boundary: Vec<Point3>, frame: Option<[f32; 3]>) -> MaskBatch {
+    MaskBatch {
+        polygon: boundary.into(),
+        inverted: false,
+        frame,
+        draw_order: 0,
+        sources: vec![source()],
+    }
+}
+
+/// `WIPEOUTFRAME`: the boundary frame is drawn **after** the fill, and OFF draws
+/// none.
+///
+/// This is the pixel half of the display contract: with `frame = None` the whole
+/// target equals the clear colour (the fill wipes it and nothing is stroked);
+/// with `frame = Some(red)` the boundary is red ink while the interior is still
+/// the clear colour. Software GPU is acceptable as a contract; real-GPU pixels
+/// are NOT VERIFIED here.
+#[test]
+fn wipeout_frames_on_draws_the_boundary_and_off_does_not() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    let target = RenderTarget::new(64, 64);
+
+    // OFF: fill only, no boundary ink anywhere.
+    renderer
+        .upload(&mask_scene(
+            Vec::new(),
+            vec![mask_with_frame(mask_rectangle(), None)],
+        ))
+        .expect("upload the fill-only mask");
+    let stats = renderer.render(camera_2d(), &target).expect("render frame");
+    assert_eq!(stats.mask_draws, 1);
+    assert_eq!(stats.mask_frames, 0, "OFF draws no boundary frame");
+    let off = renderer.read_target_rgba().expect("read back frame");
+    let background = off.pixel(0, 0);
+    for x in 0..64 {
+        for y in 0..64 {
+            assert_eq!(
+                off.pixel(x, y),
+                background,
+                "OFF must leave column {x} row {y} at the clear colour"
+            );
+        }
+    }
+
+    // ON: the same rectangle with a red frame.
+    renderer
+        .upload(&mask_scene(
+            Vec::new(),
+            vec![mask_with_frame(mask_rectangle(), Some([1.0, 0.0, 0.0]))],
+        ))
+        .expect("upload the framed mask");
+    let stats = renderer.render(camera_2d(), &target).expect("render frame");
+    assert_eq!(stats.mask_draws, 1);
+    assert_eq!(stats.mask_frames, 1, "ON draws exactly one boundary frame");
+
+    let on = renderer.read_target_rgba().expect("read back frame");
+    assert_eq!(
+        on.pixel(32, 32),
+        background,
+        "the fill still paints the interior; the frame must not flood it"
+    );
+    assert!(
+        on.pixel(column(0.5), 32)[0] > 10 || on.pixel(column(0.5) - 1, 32)[0] > 10,
+        "the right boundary must carry red frame ink, got {:?} / {:?}",
+        on.pixel(column(0.5) - 1, 32),
+        on.pixel(column(0.5), 32)
+    );
+    let mut red_pixels = 0usize;
+    for x in 0..64 {
+        for y in 0..64 {
+            if on.pixel(x, y)[0] > 10 {
+                red_pixels += 1;
+            }
+        }
+    }
+    assert!(red_pixels > 0, "ON must paint some boundary frame pixels");
 }

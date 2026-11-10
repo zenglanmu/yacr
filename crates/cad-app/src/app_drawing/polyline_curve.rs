@@ -281,6 +281,84 @@ impl PolylineCurve {
         self.point_at(self.segment_count() as f64)
     }
 
+    /// The unit tangent direction angle (radians) at `target` arc length, or
+    /// `None` when the polyline has no in-plane (XY) tangent there.
+    ///
+    /// Exact, not a difference quotient: a straight segment contributes its chord
+    /// direction and a bulged segment the circular arc's tangent. At an exact
+    /// interior vertex (the target lands on a segment boundary) the **outgoing**
+    /// segment is chosen, so the value never straddles two segments (the old
+    /// `point_at_distance(d ± h)` approximation turned a corner into a bisector
+    /// and a long/narrow segment into a wrong direction).
+    pub(super) fn tangent_angle_at_distance(&self, target: f64) -> Option<f64> {
+        let total = self.total_length();
+        if !total.is_finite() || total <= 0.0 || !target.is_finite() {
+            return None;
+        }
+        let target = if self.closed {
+            target.rem_euclid(total)
+        } else {
+            target.clamp(0.0, total)
+        };
+        let eps = 1e-9;
+        let mut traversed = 0.0;
+        let mut chosen = self.segment_count().saturating_sub(1);
+        let mut local = 0.0;
+        for segment in 0..self.segment_count() {
+            let length = self.segment_length(segment);
+            if target < traversed + length - eps || segment + 1 == self.segment_count() {
+                chosen = segment;
+                local = if length > 0.0 {
+                    ((target - traversed) / length).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                break;
+            }
+            traversed += length;
+        }
+        let (a, b) = self.endpoints(chosen);
+        let bulge = self.bulge_at(chosen);
+        if bulge.abs() <= 1e-9 {
+            return in_plane_direction(cad_geometry::sub(b, a));
+        }
+        let SemanticGeometry::Arc {
+            radius,
+            start,
+            sweep,
+            normal,
+            ..
+        } = bulge_arc_geometry(
+            a,
+            b,
+            bulge,
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        )?
+        else {
+            return None;
+        };
+        if !radius.is_finite() || radius <= 0.0 || sweep.abs() <= 1e-12 {
+            return None;
+        }
+        let (ax, ay, _) = arbitrary_axis(normal);
+        let angle = start + sweep * local;
+        let tangent = cad_geometry::add(
+            cad_geometry::scale(ax, -angle.sin()),
+            cad_geometry::scale(ay, angle.cos()),
+        );
+        // The arc's own travel direction is sign(sweep) times the +t tangent.
+        let tangent = if sweep < 0.0 {
+            cad_geometry::scale(tangent, -1.0)
+        } else {
+            tangent
+        };
+        in_plane_direction(tangent)
+    }
+
     /// The point at local segment parameter `t`.
     fn point_on_segment(&self, segment: usize, t: f64) -> CadResult<Point3> {
         let (a, b) = self.endpoints(segment);
@@ -461,4 +539,14 @@ fn sub_bulge(bulge: f64, lo: f64, hi: f64) -> f64 {
         return 0.0;
     }
     cad_geometry::arc_sweep_to_bulge(sweep).unwrap_or(0.0)
+}
+
+/// The XY direction angle (radians) of `v`, or `None` when its in-plane
+/// component vanishes (a purely vertical direction) or is non-finite.
+fn in_plane_direction(v: Point3) -> Option<f64> {
+    if !v.x.is_finite() || !v.y.is_finite() || v.x.hypot(v.y) <= 1e-12 {
+        None
+    } else {
+        Some(v.y.atan2(v.x))
+    }
 }

@@ -52,7 +52,7 @@ fn convertpoly_reports_the_single_representation() {
         .any(|row| row.code == "convertpoly.single_representation"));
 }
 
-const REFUSALS: [(ExtendedCommandId, &str); 20] = [
+const REFUSALS: [(ExtendedCommandId, &str); 17] = [
     (
         ExtendedCommandId::PlotStyleList,
         "plotstyle.unsupported: named plot styles are not implemented (no CTB/STB table)",
@@ -74,32 +74,20 @@ const REFUSALS: [(ExtendedCommandId, &str); 20] = [
         "convert.unsupported: generic object conversion is not implemented",
     ),
     (
-        ExtendedCommandId::TableCreate,
-        "table.unsupported: no table entity model is implemented",
-    ),
-    (
-        ExtendedCommandId::DashTable,
-        "-table.unsupported: no table entity model is implemented",
-    ),
-    (
-        ExtendedCommandId::TableEdit,
-        "tabledit.unsupported: no table entity model is implemented",
-    ),
-    (
         ExtendedCommandId::TableExport,
-        "tableexport.unsupported: no table entity model is implemented",
+        "tableexport.unsupported: no CSV/file writer is implemented",
     ),
     (
         ExtendedCommandId::TableStyleList,
-        "tablestyle.unsupported: no table-style model is implemented",
+        "tablestyle.unsupported: no table-style table is implemented",
     ),
     (
         ExtendedCommandId::TableInsert,
-        "tinsert.unsupported: no table entity model is implemented",
+        "tinsert.unsupported: no block-in-cell creation is implemented",
     ),
     (
         ExtendedCommandId::MatchCell,
-        "matchcell.unsupported: no table entity model is implemented",
+        "matchcell.unsupported: no cell-style copy surface is implemented",
     ),
     (
         ExtendedCommandId::Field,

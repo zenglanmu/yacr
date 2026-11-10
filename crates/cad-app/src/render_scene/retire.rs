@@ -46,6 +46,7 @@ pub(super) fn retire_keeps_base(previous: &SceneVersion, current: &SceneVersion)
         && previous.images == current.images
         && previous.vendor == current.vendor
         && previous.vendor_identity == current.vendor_identity
+        && previous.wipeout_frames == current.wipeout_frames
 }
 
 /// Whether hiding this entity's resident batches by its whole-entity ref is

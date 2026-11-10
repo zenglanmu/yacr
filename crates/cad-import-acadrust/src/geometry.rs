@@ -601,6 +601,9 @@ pub(crate) fn referenced_blocks(geometry: &SemanticGeometry) -> Vec<BlockId> {
             .iter()
             .flat_map(referenced_blocks)
             .collect(),
+        // A table's display is grid lines and cell text; it can never reference
+        // a block, so this arm is explicitly empty.
+        SemanticGeometry::Table(_) => Vec::new(),
         _ => Vec::new(),
     }
 }

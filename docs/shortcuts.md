@@ -97,7 +97,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `CHAMFER POLYLINE` | 编辑（同上选择式：`chamferDistanceA` 量在**入边**、`chamferDistanceB` 量在**出边**——**我们的规则**，不是 AutoCAD 提示顺序的复刻） | 是 | — |
 | `HATCHPOINT` | 绘制（**本项目选择子**：按内部点填充。在可见的**整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` **以及 `LINE`/`ARC` 边链**中取**最小包含边界**，嵌套环作岛屿；`LINE`/`ARC` 用平面半边面行走、弧存**精确 bulge**；**不**使用当前选择、只认 `+Z` 同标高、只支持模型空间；填充参数与 `HATCH` 完全相同） | 是 | — |
 | `REVCLOUD` | 绘制（**对象模式 v1**：恰好 1 条选中的**闭合直线段** LWPOLYLINE，把每条边换成一段向外弧（bulge 幅度 0.5）；无矩形/多边形绘制、无 Arc length、无拾取；实体原地重写、一条事务/一步撤销） | 是 | — |
-| `WIPEOUT` | 绘制（**多边形遮罩 v1**：依次拾取边界点，**≥3 点**后回车结束 → 一个 `SemanticGeometry::Mask`（type-key `AcDbWipeout`、`inverted: false`、隐式闭合环不重复首点）；拒绝非有限点/非 `+Z` 共面/重复相邻点/零面积；**无**边框模型（Frames ON/OFF/不打印）、**无** `Polyline`/`Erase Polyline`、**不检查**自交、不能拾取已有遮罩） | 是 | — |
+| `WIPEOUT` | 绘制（**多边形遮罩 v1**：依次拾取边界点，**≥3 点**后回车结束 → 一个 `SemanticGeometry::Mask`（type-key `AcDbWipeout`、`inverted: false`、隐式闭合环不重复首点）；拒绝非有限点/非 `+Z` 共面/重复相邻点/零面积；`Frames ON/OFF/DISPLAY` 真实（ON=填充+边框且出图；OFF=仅填充；DISPLAY=显示边框但出图不画）、**无** `FRAME` 覆盖、**无** `Polyline`/`Erase Polyline`、**不检查**自交、不能拾取已有遮罩） | 是 | — |
 | `POLYGON CIRCUMSCRIBED` | 绘制（`POLYGON` 的 **外切于圆**（`C`）构造，独立**多词**选择子、非别名：第二点落在**内切（相切）圆**上，拾取方向为**第一条边中点**，顶点半径 `R = r / cos(π/n)`，边心距恒为 `r`；n 取会话 `POLYSIDES`（3–1024）；闭合 `n` 顶点 LWPOLYLINE、零 bulge、逆时针、`+Z`；拒绝非有限点/零半径/非共面/边数越界；无 Edge、无数字半径定向 | 是 | — |
 | `SCALETEXT` | 编辑（选择式：一个或多个 `TEXT`/`MTEXT`，按 `scaleTextFactor`（有限 **> 0**）缩放字高；MTEXT 的 `wrap_width` 同步缩放；`1.0` 为 no-op 并按名拒绝；一条事务/一步撤销，位置/旋转/对齐/样式保留） | 是 | — |
 | `LAYOFF` | 图层（关闭选择所在图层，当前层除外；会话覆盖，不写 DWG、不升 revision） | 否 | — |

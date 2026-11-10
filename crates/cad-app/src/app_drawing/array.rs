@@ -1,11 +1,19 @@
-//! ARRAYRECT / ARRAYPOLAR edit commands (ADR 0016 decision D).
+//! ARRAYRECT / ARRAYPOLAR / ARRAYPATH edit commands (ADR 0016 decision D).
 //!
-//! Both commands insert **independent copies** of the current selection using the
-//! existing N-copies-in-one-transaction shape (`copy_entities`/`mirror_selection`):
+//! All three commands insert **independent copies** of the current selection using
+//! the existing N-copies-in-one-transaction shape (`copy_entities`/`mirror_selection`):
 //! every copy is a fresh entity, the sources are **retained**, and the whole array
 //! is one transaction with one undo step. There is **no** second insertion path and
 //! no associativity (AutoCAD's associative array model is NOT IMPLEMENTED — the
 //! project has no associative object/grip mechanism).
+//!
+//! ARRAYPATH v1 is the 2D **path** array: the first payload ref is the path and
+//! every remaining ref is an item, copied to equal arc-length positions along
+//! that path (see [`Application::array_path`]). `count` is the number of
+//! **copies**; the N source objects stay, and position 0 can coincide with a
+//! retained source whose anchor equals the path start. A periodic path (CIRCLE,
+//! full-turn ARC/ELLIPSE, closed LWPOLYLINE) uses `i / count` so the seam is
+//! never duplicated.
 //!
 //! The placement maths are our **declared** rules (AutoCAD's exact base-point and
 //! polar-placement rules are unverified); they are documented here and pinned by
@@ -363,6 +371,240 @@ impl Application {
             point_report: None,
         })
     }
+
+    /// ARRAYPATH: insert independent copies of the selected items along the
+    /// selected path.
+    ///
+    /// **Input rule (v1)**: the **first `refs` entry is the path**; every
+    /// remaining entry is an **item**. The refs travel in the payload (the typed
+    /// path fills them from the session selection at argument-dispatch time), so
+    /// the handler never re-reads a mutable selection. The path must be one of
+    /// the kinds the shared equal-distance walker supports (`LINE`, `ARC`,
+    /// `CIRCLE`, `SPLINE`, `ELLIPSE`, open/closed `LWPOLYLINE`); the source items
+    /// are retained and the path itself is never duplicated. Every ref must be a
+    /// directly addressable model-or-paper entity (no block-instance member, no
+    /// sub-element) and all of them must share the path's [`SpaceId`].
+    ///
+    /// **Placement (declared rule)**: each item's own anchor is its block base
+    /// point mapped to world (`INSERT`) or its bounding-box XY minimum (every
+    /// other kind), carried at the path start's Z. The group anchor is the
+    /// componentwise minimum of those per-item anchors; every position translates
+    /// the whole group by `position − group anchor`.
+    ///
+    /// **Positions**: `count` is the number of **copies** (the N source objects
+    /// stay; position 0 can coincide with a retained source whose anchor equals
+    /// the path start). An **open** path places the copies at `i / (count - 1)`
+    /// of its arc length (**both ends included**); a **periodic** path (CIRCLE,
+    /// full-turn ARC, full ELLIPSE, closed LWPOLYLINE) places them at
+    /// `i / count`, so `point_at(1.0) == point_at(0.0)` never produces a seam
+    /// duplicate. `count == 1` places the single copy at the path start.
+    ///
+    /// **`ALIGN` (declared approximation)**: each copy keeps the group
+    /// translation and is rotated **in place about its own translated anchor** by
+    /// `tangent_i − tangent_0`, so a spread selection never swings around the
+    /// path point. A position with no in-plane (XY) tangent (a purely vertical
+    /// path) refuses `arraypath.no_plane_tangent`; without `ALIGN` the
+    /// orientation is unchanged and no tangent is needed.
+    ///
+    /// One transaction / one undo step; all inputs are validated before any write,
+    /// so a refusal changes nothing. Refusals: fewer than two payload refs (a
+    /// path needs at least one item), a block-instance member or sub-element
+    /// (`arraypath.block_member`), a path/item space mismatch
+    /// (`arraypath.space_mismatch`), an unsupported or zero-length path,
+    /// `count == 0`, an uncomputable item anchor, an untransformable item and a
+    /// total copy count above [`MAX_ARRAY_ENTITIES`]. Associativity is **NOT
+    /// IMPLEMENTED**.
+    pub(crate) fn array_path(
+        &mut self,
+        _session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::ArrayPath { refs, count, align } = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "arraypath.needs_argument: ARRAYPATH needs a typed position count, e.g. \
+                 `ARRAYPATH 4 [ALIGN]`; nothing was changed"
+                    .into(),
+            ));
+        };
+        let refs = refs.clone();
+        let count = *count;
+        let align = *align;
+        if count == 0 {
+            return Err(CadError::InvalidInput(
+                "arraypath.invalid_count: ARRAYPATH needs a copy count >= 1".into(),
+            ));
+        }
+        if refs.len() < 2 {
+            return Err(CadError::InvalidInput(
+                "arraypath.selection: ARRAYPATH needs a path and at least one item (select two or \
+                 more objects, path first)"
+                    .into(),
+            ));
+        }
+        // Directly addressable entities only: a block-instance member or a
+        // sub-element is never mistaken for a whole selectable path/item. The
+        // check runs before the drawing is read (matching DIVIDE's guard).
+        for reference in &refs {
+            if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
+                return Err(CadError::InvalidInput(format!(
+                    "arraypath.block_member: ARRAYPATH target {} is a block-instance member or \
+                     sub-element; only directly addressable entities can be arrayed",
+                    reference.entity.0
+                )));
+            }
+        }
+
+        let document_id = command.document;
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let mut candidate = document.drawing.as_ref().clone();
+        let drawing = &mut candidate;
+
+        let (sources, mut diagnostics) = Self::resolve_selection(
+            drawing,
+            document_id,
+            &refs,
+            "arraypath",
+            "ARRAYPATH",
+            "array",
+            false,
+        )?;
+        if sources.len() < 2 {
+            return Err(CadError::InvalidInput(
+                "arraypath.selection: ARRAYPATH needs a path and at least one item (select two or \
+                 more objects, path first)"
+                    .into(),
+            ));
+        }
+        let (path, items) = sources.split_first().expect("checked at least two sources");
+
+        // The path and every item must live in the same space: a path in model
+        // space cannot place copies of a paper-space or block-owned item.
+        for item in items {
+            if item.space != path.space {
+                return Err(CadError::InvalidInput(format!(
+                    "arraypath.space_mismatch: the path (entity {}) and item (entity {}) are in \
+                     different spaces",
+                    path.id.0, item.id.0
+                )));
+            }
+        }
+
+        // Every placement of every item is a fresh copy (the path itself is not
+        // duplicated), so the produced total is `count * items`.
+        let produced = count as f64 * items.len() as f64;
+        check_array_cap(produced, "ARRAYPATH")?;
+
+        let positions = super::divide::path_distribution(&path.geometry, count)?;
+        let anchors = array_path_anchor(drawing, items, positions[0].0)?;
+        let shared_anchor = anchors.iter().fold(anchors[0], |group, anchor| Point3 {
+            x: group.x.min(anchor.x),
+            y: group.y.min(anchor.y),
+            z: group.z,
+        });
+        let tangent_0 = positions[0].1;
+        let missing_tangent = if align {
+            positions.iter().position(|(_, tangent)| tangent.is_none())
+        } else {
+            None
+        };
+        if let Some(index) = missing_tangent {
+            return Err(array_path_no_plane_tangent(path.id, index));
+        }
+
+        // Refuse the whole command if any item geometry cannot take the copy
+        // transform (a proper rotation for ALIGN, a translation otherwise).
+        let probe = if align {
+            rotation_transform(shared_anchor, 0.0)
+        } else {
+            Transform3::translation(Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            })
+        };
+        for item in items {
+            transform_geometry(&item.geometry, &probe)
+                .map_err(|error| array_transform_refusal("ARRAYPATH", item, error))?;
+            push_array_style_diagnostic(drawing, item, &mut diagnostics);
+        }
+
+        let base_order = next_draw_order(drawing);
+        let mut copies: Vec<(EntityId, DbEntity)> = Vec::with_capacity(produced as usize);
+        let mut index = 0usize;
+        for (point, tangent) in &positions {
+            let offset = Point3 {
+                x: point.x - shared_anchor.x,
+                y: point.y - shared_anchor.y,
+                z: point.z - shared_anchor.z,
+            };
+            let group_translation = Transform3::translation(offset);
+            for (item, anchor) in items.iter().zip(&anchors) {
+                let transform = if align {
+                    // Keep the group translation, then rotate in place about the
+                    // item's own translated anchor:
+                    // `T(delta) · T(anchor_i) · R(Δ) · T(−anchor_i)`.
+                    let delta = tangent.expect("checked for every position")
+                        - tangent_0.expect("checked for position 0");
+                    group_translation.matrix_mul(&rotation_transform(*anchor, delta))
+                } else {
+                    group_translation
+                };
+                copies.push(array_copy(
+                    drawing,
+                    item,
+                    &transform,
+                    base_order + index as i64,
+                )?);
+                index += 1;
+            }
+        }
+
+        let label = "array path";
+        let transaction = next_transaction_id();
+        let change_set = {
+            let mut staged = drawing.begin_drawing_transaction(label, transaction)?;
+            for (_, copy) in &copies {
+                staged.insert_entity(copy.clone())?;
+            }
+            staged.commit()?
+        };
+        let patches: Vec<DrawingPatch> = copies
+            .iter()
+            .map(|(id, copy)| drawing_patch(*id, None, Some(copy.clone())))
+            .collect();
+        self.publish_candidate(
+            document_id,
+            candidate,
+            DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: label.into(),
+                patches,
+                block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
+                merge_key: None,
+            },
+        )?;
+
+        diagnostics.push(array_path_diagnostic(
+            count,
+            items.len(),
+            path.id,
+            class_name(&path.geometry),
+            align,
+        ));
+        Ok(CommandOutcome {
+            objects: copies.iter().map(|(id, _)| ObjectId(id.0)).collect(),
+            changes: Some(Arc::new(change_set)),
+            diagnostics,
+            measurement: None,
+            point_report: None,
+        })
+    }
 }
 
 /// Build one fresh-id copy of `source` under `transform`, preserving its layer,
@@ -552,6 +794,105 @@ fn array_no_copies_diagnostic(command: &str) -> Diagnostic {
         message: format!(
             "{command}: 0 copies produced (the single cell/item is the retained source \
              itself; associative arrays NOT IMPLEMENTED)"
+        ),
+    }
+}
+
+/// The per-item ARRAYPATH anchors, carried at the **path start's Z** so a 2D
+/// path array stays on the path's plane.
+///
+/// * `INSERT` — the block's stored **base point** mapped to world by the
+///   reference transform (`transform.apply_point(base)`), i.e. the same base point
+///   the importer and `INSERT` use. A block with no stored base point is an
+///   explicit refusal, never an invented zero.
+/// * every other kind — the item's `BoundsAccumulator` XY minimum
+///   ([`BoundsAccumulator::finish`] is the single source of truth; there is no
+///   duplicated per-kind point match). Its circular/elliptical bound is
+///   conservative (`center ± radius·‖transform‖`), so the anchor is a declared
+///   bounding-box corner rather than a tight one. An item with no computable box
+///   is an explicit refusal, never a silently dropped item.
+fn array_path_anchor(
+    drawing: &DrawingDatabase,
+    items: &[DbEntity],
+    path_start: Point3,
+) -> CadResult<Vec<Point3>> {
+    let mut anchors = Vec::with_capacity(items.len());
+    for item in items {
+        let anchor = match &item.geometry {
+            SemanticGeometry::Insert { block, transform } => {
+                let base = drawing.block_base_point(*block).ok_or_else(|| {
+                    CadError::Unsupported(format!(
+                        "ARRAYPATH cannot determine the insertion base point of block {:?} \
+                         referenced by entity {}",
+                        block, item.id.0
+                    ))
+                })?;
+                transform.apply_point(base)
+            }
+            other => {
+                let mut bounds = BoundsAccumulator::new();
+                bounds.add_geometry(other);
+                match bounds.finish() {
+                    Some((min, _max)) => min,
+                    None => {
+                        return Err(CadError::Unsupported(format!(
+                            "ARRAYPATH cannot determine a placement anchor for {} (entity {})",
+                            class_name(other),
+                            item.id.0
+                        )))
+                    }
+                }
+            }
+        };
+        if !is_finite_point(anchor) {
+            return Err(CadError::InvalidInput(format!(
+                "arraypath.anchor: ARRAYPATH cannot determine a finite placement anchor for \
+                 entity {}",
+                item.id.0
+            )));
+        }
+        anchors.push(Point3 {
+            x: anchor.x,
+            y: anchor.y,
+            z: path_start.z,
+        });
+    }
+    if anchors.is_empty() {
+        return Err(CadError::InvalidInput(
+            "arraypath.anchor: ARRAYPATH needs at least one item".into(),
+        ));
+    }
+    Ok(anchors)
+}
+
+/// The ARRAYPATH `ALIGN` refusal: the path has no in-plane (XY) tangent at
+/// `position`, so orienting a copy there would invent an angle.
+fn array_path_no_plane_tangent(path_id: EntityId, position: usize) -> CadError {
+    CadError::InvalidInput(format!(
+        "arraypath.no_plane_tangent: ARRAYPATH ALIGN needs an in-plane (XY) tangent at every \
+         position; position {position} on path entity {} has none (a purely vertical path \
+         segment)",
+        path_id.0
+    ))
+}
+
+/// The ARRAYPATH summary diagnostic (`arraypath.created`), naming the copy count,
+/// the retained source count, the path entity/kind and whether `ALIGN` was
+/// requested.
+fn array_path_diagnostic(
+    count: usize,
+    items: usize,
+    path_id: EntityId,
+    path_kind: &str,
+    align: bool,
+) -> Diagnostic {
+    Diagnostic {
+        object: None,
+        code: "arraypath.created".into(),
+        message: format!(
+            "ARRAYPATH: {count} copies; {items} sources retained; path {} ({path_kind}); \
+             align={align}",
+            path_id.0
         ),
     }
 }

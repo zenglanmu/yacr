@@ -72,14 +72,27 @@ pub fn build_vector_document(
                         .to_string(),
                 );
             }
-            // A mask has no path representation: it erases in the raster frame by
-            // flooding the background. Vector output therefore skips it and names
-            // the omission (ADR 0022 D4), never silently.
-            DisplayPrimitive::Mask { .. } => {
+            // A mask has no path representation for its **fill**: it erases in the
+            // raster frame by flooding the background, and a path writer has no
+            // background flood (ADR 0022 D4). The boundary **frame**, however, is
+            // real vector geometry: when the mask carries `frame` it is emitted as
+            // a closed polyline (`WIPEOUTFRAME` 1 plots the frame; 2 does not,
+            // because the plot context is built without it). The skipped fill is
+            // always named, never silently dropped.
+            DisplayPrimitive::Mask {
+                boundary, frame, ..
+            } => {
+                if *frame {
+                    let mut outline: Vec<Point3> = boundary.iter().copied().collect();
+                    if let Some(first) = boundary.first() {
+                        outline.push(*first);
+                    }
+                    collect_lines(&mut document, object, &outline, fragment, &vector_page);
+                }
                 document.report(
                     object,
                     vector_diagnostic::MASK_UNSUPPORTED,
-                    "wipeout mask is skipped in vector output: there is no background flood in a path writer"
+                    "wipeout mask fill is skipped in vector output: there is no background flood in a path writer"
                         .to_string(),
                 );
             }

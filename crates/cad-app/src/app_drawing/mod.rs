@@ -72,6 +72,7 @@ mod hatch_parameters;
 mod hatch_stitch;
 mod hatch_utilities;
 mod helpers;
+mod image_edit;
 mod inquiry;
 mod insert_block;
 mod join;
@@ -114,6 +115,8 @@ mod stretch_window;
 // TCIRCLE/TEXTMASK/TEXTUNMASK); one estimate and one write discipline.
 pub(crate) mod text_batch;
 mod text_edit;
+// TABLE / -TABLE creation and TABLEDIT cell-text editing (2026-11-10).
+mod table_edit;
 // TEXTTOFRONT (2026-11-07): rewrite the selected text/leader/dimension draw order.
 mod text_front;
 // The three selection-based text commands (TORIENT / TCASE / TXT2MTXT) and

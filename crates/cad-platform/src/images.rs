@@ -117,6 +117,12 @@ fn collect_images(geometry: &SemanticGeometry, out: &mut Vec<String>) {
                 collect_images(part, out);
             }
         }
+        // A table is traversed like the compound it used to be.
+        SemanticGeometry::Table(table) => {
+            for part in table.display() {
+                collect_images(part, out);
+            }
+        }
         _ => {}
     }
 }
@@ -190,8 +196,26 @@ pub mod local {
     /// rejected) before any filesystem access; the joined candidate must also
     /// stay under its root as defence in depth. Returns `Ok(None)` when the key
     /// is safe but no root holds the file, so the caller reports it unresolved.
+    ///
+    /// The stored key is lowercased ([`image_resource_key`]) but the filesystem
+    /// may be case-sensitive, so after an exact miss each root is retried with a
+    /// **bounded, component-by-component case-insensitive scan**. The scan never
+    /// follows a symlink, never accepts `..`/empty path segments and only returns
+    /// a regular file, so it cannot escape the root.
     pub fn resolve_image_file(roots: &[PathBuf], key: &str) -> CadResult<Option<PathBuf>> {
-        if !is_safe_reference(key) {
+        if key.chars().any(char::is_control) || !is_safe_reference(key) {
+            return Err(CadError::InvalidInput(format!(
+                "image reference is not a safe relative key: {key}"
+            )));
+        }
+        // Canonical relative components (empty and `.` dropped), matching the
+        // normalisation `image_resource_key` applies to the cached key.
+        let folded = key.replace('\\', "/");
+        let components: Vec<&str> = folded
+            .split('/')
+            .filter(|segment| !segment.is_empty() && *segment != ".")
+            .collect();
+        if components.is_empty() {
             return Err(CadError::InvalidInput(format!(
                 "image reference is not a safe relative key: {key}"
             )));
@@ -204,8 +228,53 @@ pub mod local {
             if candidate.is_file() {
                 return Ok(Some(candidate));
             }
+            if let Some(found) = case_insensitive_candidate(root, &components) {
+                return Ok(Some(found));
+            }
         }
         Ok(None)
+    }
+
+    /// Resolve `components` under `root` by matching each path component
+    /// case-insensitively.
+    ///
+    /// Only directory entries are considered (never a constructed path), a
+    /// symlink entry is skipped, and the final entry must be a regular file.
+    /// This keeps a hostile stored key from traversing `..`, a symlink or an
+    /// absolute path out of the allowed root.
+    fn case_insensitive_candidate(root: &Path, components: &[&str]) -> Option<PathBuf> {
+        let mut current = root.to_path_buf();
+        for (index, component) in components.iter().enumerate() {
+            let last = index + 1 == components.len();
+            let mut matched = None;
+            for entry in std::fs::read_dir(&current).ok()?.flatten() {
+                let file_type = entry.file_type().ok()?;
+                if file_type.is_symlink() {
+                    continue;
+                }
+                let name = entry.file_name();
+                let Some(name) = name.to_str() else {
+                    continue;
+                };
+                if !name.eq_ignore_ascii_case(component) {
+                    continue;
+                }
+                if last && !file_type.is_file() {
+                    continue;
+                }
+                if !last && !file_type.is_dir() {
+                    continue;
+                }
+                matched = Some(entry.path());
+                break;
+            }
+            current = matched?;
+        }
+        if current.starts_with(root) && current.is_file() {
+            Some(current)
+        } else {
+            None
+        }
     }
 
     /// Resolve, decode and cache the requested images.
@@ -306,6 +375,7 @@ mod tests {
             file: file.map(str::to_string),
             clip: None,
             visible: true,
+            adjust: cad_domain::ImageAdjust::default(),
         }
     }
 
@@ -566,6 +636,58 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(&cache.get(&a).unwrap().rgba[0..4], &[1, 2, 3, 255]);
         assert_eq!(&cache.get(&b).unwrap().rgba[0..4], &[4, 5, 6, 255]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The stored key is lowercased but the filesystem may be case-sensitive:
+    /// `Textures/Logo.PNG` must resolve for a `textures/logo.png` request.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn case_insensitive_components_resolve_a_differently_cased_file() {
+        use cad_resources::image_resource_key;
+        use cad_resources::ResourceLimits;
+        let dir = scratch("case-insensitive");
+        std::fs::create_dir_all(dir.join("Textures")).unwrap();
+        std::fs::write(
+            dir.join("Textures").join("Logo.PNG"),
+            encode_png(1, 1, &[7, 8, 9, 255]),
+        )
+        .unwrap();
+
+        let (cache, report) = local::load_image_cache(
+            &["textures/logo.png".to_string()],
+            Some(&dir),
+            None,
+            &ResourceLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(report.loaded, vec!["textures/logo.png".to_string()]);
+        assert!(report.unresolved.is_empty(), "{:?}", report.unresolved);
+        let decoded = cache
+            .get(&image_resource_key("textures/logo.png").unwrap())
+            .expect("the case-insensitive scan filled the lowercased key");
+        assert_eq!(&decoded.rgba[0..4], &[7, 8, 9, 255]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A control character or a `..` escape is never attempted.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn control_character_and_traversal_keys_are_rejected() {
+        use cad_resources::ResourceLimits;
+        let dir = scratch("unsafe-keys");
+        for key in ["../secret.png", "a/\u{1}b.png", "a/../b.png"] {
+            let (cache, report) = local::load_image_cache(
+                &[key.to_string()],
+                Some(&dir),
+                None,
+                &ResourceLimits::default(),
+            )
+            .unwrap();
+            assert_eq!(report.unresolved, vec![key.to_string()], "{key:?}");
+            assert!(report.loaded.is_empty(), "{key:?}");
+            assert!(cache.is_empty(), "{key:?}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -47,6 +47,7 @@ fn raster_image_emits_image_semantic_with_placement_and_partial() {
         file,
         clip,
         visible,
+        adjust,
     } = geometry
     else {
         panic!("expected an image semantic, got {geometry:?}");
@@ -58,6 +59,11 @@ fn raster_image_emits_image_semantic_with_placement_and_partial() {
     assert_eq!(file.as_deref(), Some("textures/photo.png"));
     assert!(clip.is_none(), "clipping is disabled by default");
     assert!(visible, "SHOW_IMAGE is set by RasterImage::new");
+    assert_eq!(
+        adjust,
+        ImageAdjust::default(),
+        "a default RasterImage maps to the neutral 50/50/0/colour transfer"
+    );
 
     let reasons = partial_reasons(&completeness);
     assert!(
@@ -69,6 +75,35 @@ fn raster_image_emits_image_semantic_with_placement_and_partial() {
     assert!(
         reasons.iter().any(|r| r.contains("frame is the fallback")),
         "{reasons:?}"
+    );
+}
+
+#[test]
+fn raster_image_maps_brightness_contrast_and_fade_and_declares_monochrome() {
+    let mut img = acadrust::entities::RasterImage::new("photo.png", v3(0.0, 0.0, 0.0), 8.0, 8.0);
+    img.brightness = 30;
+    img.contrast = 70;
+    img.fade = 20;
+
+    let (geometry, completeness) = raster_image_semantics(&img);
+    let SemanticGeometry::Image { adjust, .. } = geometry else {
+        panic!("expected an image semantic");
+    };
+    // The three DXF percentages map one-to-one (acadrust stores the same 0..=100
+    // `u8`); monochrome has no acadrust field and is imported as colour.
+    assert_eq!(
+        adjust,
+        ImageAdjust {
+            brightness: 30,
+            contrast: 70,
+            fade: 20,
+            monochrome: false,
+        }
+    );
+    let reasons = partial_reasons(&completeness);
+    assert!(
+        reasons.iter().any(|r| r.contains("monochrome")),
+        "the unmodelled MONOCHROME display flag must be declared: {reasons:?}"
     );
 }
 

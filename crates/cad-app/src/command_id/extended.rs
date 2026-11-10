@@ -131,7 +131,10 @@
 //! `TABLET`, `TASKBAR`, `REINIT`, `SYSWINDOWS`, `MENU`, `RIBBON`) for the absent
 //! UCS/tablet/menu models and host-owned chrome. All Viewer-legal.
 
+mod refusal_names;
 mod selectors;
+
+pub use refusal_names::RefusalId;
 
 /// One payload-free command in the extended wrapper batches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -783,19 +786,19 @@ pub enum ExtendedCommandId {
     ConvertPoly,
     /// `CONVERT`: generic object conversion is NOT IMPLEMENTED.
     ConvertGeneric,
-    /// `TABLE`: no table entity model is implemented.
+    /// `TABLE`: writes one empty table grid (Work-only).
     TableCreate,
-    /// `-TABLE`: the command-line spelling of the unsupported table creation.
+    /// `-TABLE`: the command-line spelling of the same table creation (Work-only).
     DashTable,
-    /// `TABLEDIT`: no table entity model is implemented.
+    /// `TABLEDIT`: rewrites one selected table's cell text (Work-only).
     TableEdit,
-    /// `TABLEEXPORT`: no table entity model is implemented.
+    /// `TABLEEXPORT`: CSV/file table export is NOT IMPLEMENTED (no CSV/file writer).
     TableExport,
-    /// `TABLESTYLE`: no table-style model is implemented.
+    /// `TABLESTYLE`: named table styles are NOT IMPLEMENTED (no table-style table).
     TableStyleList,
-    /// `TINSERT`: no table entity model is implemented.
+    /// `TINSERT`: inserting a block in a table cell is NOT IMPLEMENTED (no block-in-cell model).
     TableInsert,
-    /// `MATCHCELL`: no table entity model is implemented.
+    /// `MATCHCELL`: copying a cell style is NOT IMPLEMENTED (no cell-style copy surface).
     MatchCell,
     /// `FIELD`: fields are NOT IMPLEMENTED (no field model).
     Field,
@@ -918,18 +921,21 @@ pub enum ExtendedCommandId {
     /// `MESHUNCREASE`: mesh uncreasing is not implemented.
     MeshUncrease,
 
-    // Wave 16: stable named refusals (Viewer-legal).
-    /// `IMAGE`: raster image references are not implemented.
+    // Wave 16: image report/write (see app_extended_w16_reports /
+    // app_drawing::image_edit) plus its named refusals (Viewer-legal).
+    /// `IMAGE`: read-only report of every stored raster image (writes nothing).
     Image,
-    /// `-IMAGE`: raster image references are not implemented.
+    /// `-IMAGE`: the same read-only raster-image report with dash codes.
     DashImage,
-    /// `IMAGEATTACH`: raster image references are not implemented.
+    /// `IMAGEATTACH`: writes one raster image entity (Work-only).
     ImageAttach,
-    /// `IMAGECLIP`: no image clip model.
+    /// `IMAGECLIP`: writes the selected image's pixel-space clip (Work-only).
     ImageClip,
-    /// `IMAGEADJUST`: no image adjustment model.
+    /// `IMAGEADJUST`: writes the selected image's brightness/contrast/fade/
+    /// monochrome display transfer (Work-only).
     ImageAdjust,
-    /// `-IMAGEADJUST`: no image adjustment model.
+    /// `-IMAGEADJUST`: the same display-transfer write with dash codes
+    /// (Work-only).
     DashImageAdjust,
     /// `IMAGEQUALITY`: no image display-quality model.
     ImageQuality,
@@ -969,6 +975,13 @@ pub enum ExtendedCommandId {
     DgnLayers,
     /// `DGNADJUST`: no DGN underlay adjustment model.
     DgnAdjust,
+
+    // Waves 17-24: 200 named refusals (action macros, palettes, OLE/hyperlinks,
+    // LISP, lights/materials/constraints, data extraction, DWF/DGN underlays,
+    // markup, GIS, compare, sheet sets). The selectors, reasons and variant set
+    // live in `refusal_names.rs`; every one is Viewer-legal and writes nothing.
+    /// `Refusal(name)`: one Wave 17-24 feature with no model in this build.
+    Refusal(RefusalId),
 }
 
 impl ExtendedCommandId {}

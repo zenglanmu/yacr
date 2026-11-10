@@ -317,6 +317,17 @@ pub(crate) fn raster_image_semantics(
     let visible = img
         .flags
         .contains(acadrust::entities::ImageDisplayFlags::SHOW_IMAGE);
+    // `brightness`/`contrast`/`fade` are the DXF 281/282/283 percentages and
+    // map one-to-one (acadrust stores them as the same 0..=100 `u8`). The
+    // MONOCHROME display flag has **no acadrust field**, so it is imported as
+    // `false` and the loss is declared in the completeness reasons below rather
+    // than invented.
+    let adjust = ImageAdjust {
+        brightness: img.brightness,
+        contrast: img.contrast,
+        fade: img.fade,
+        monochrome: false,
+    };
     (
         SemanticGeometry::Image {
             origin,
@@ -326,10 +337,14 @@ pub(crate) fn raster_image_semantics(
             file,
             clip,
             visible,
+            adjust,
         },
         Completeness::Partial(vec![
             "raster image texture is resolved by the host/representation; \
              the frame is the fallback when the texture is unavailable"
+                .into(),
+            "raster image monochrome display has no acadrust field; imported as colour \
+             (brightness/contrast/fade are mapped)"
                 .into(),
         ]),
     )

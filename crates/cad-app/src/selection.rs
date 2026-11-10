@@ -110,7 +110,8 @@ impl PropertyKind {
             "draw_order" | "length" | "vertices" | "bulges" | "radius" | "start_angle"
             | "sweep" | "ratio" | "degree" | "control_points" | "triangles" | "height" | "size"
             | "opaque_version" | "payload_bytes" | "boundary" | "measurement" | "display"
-            | "loops" | "roots" | "lines" | "children" | "transparency" => PropertyKind::Number,
+            | "loops" | "roots" | "lines" | "children" | "transparency" | "rows" | "columns"
+            | "cells" => PropertyKind::Number,
             "layer" | "linetype" | "lineweight" | "space" | "status" => PropertyKind::Enum,
             _ => PropertyKind::Text,
         }
@@ -810,6 +811,26 @@ fn geometry_property_rows(geometry: &SemanticGeometry) -> Vec<PropertyRow> {
             PropertyRow::new("roots", multileader.roots().len().to_string()),
             PropertyRow::new("lines", multileader.lines().len().to_string()),
             PropertyRow::new("display", multileader.display().len().to_string()),
+        ],
+        // Stored metadata only: the derived display is not re-described here.
+        SemanticGeometry::Table(table) => vec![
+            PropertyRow::new("rows", table.rows().len().to_string()),
+            PropertyRow::new("columns", table.columns().len().to_string()),
+            PropertyRow::new(
+                "cells",
+                table
+                    .rows()
+                    .iter()
+                    .map(|row| row.cells.len())
+                    .sum::<usize>()
+                    .to_string(),
+            ),
+            PropertyRow::in_group(
+                "style_name",
+                table.style_name().to_string(),
+                PropertyGroup::Text,
+            ),
+            PropertyRow::new("name", table.name().to_string()),
         ],
     }
 }

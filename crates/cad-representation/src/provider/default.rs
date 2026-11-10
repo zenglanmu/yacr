@@ -236,6 +236,9 @@ impl DefaultRepresentationProvider {
             // A multileader renders its display children, exactly like the
             // compound it used to be (ADR 0019 decision G).
             SemanticGeometry::MultiLeader(multileader) => Some(multileader.display()),
+            // A table renders its display children (grid lines and cell text),
+            // exactly like the compound it used to be.
+            SemanticGeometry::Table(table) => Some(table.display()),
             _ => None,
         };
         if let Some(children) = grouped {
@@ -563,6 +566,7 @@ impl DefaultRepresentationProvider {
                 file,
                 clip,
                 visible,
+                adjust,
             } => {
                 // A hidden image draws nothing; never substitute a fake frame.
                 if *visible {
@@ -604,6 +608,7 @@ impl DefaultRepresentationProvider {
                                     transform,
                                     clip: clip_vertices
                                         .map(|vertices| Arc::from(vertices.into_boxed_slice())),
+                                    adjust: *adjust,
                                 },
                             });
                         }
@@ -792,6 +797,7 @@ impl DefaultRepresentationProvider {
                         primitive: DisplayPrimitive::Mask {
                             boundary: Arc::from(boundary.clone().into_boxed_slice()),
                             inverted: *inverted,
+                            frame: context.wipeout_frames,
                         },
                     });
                 }

@@ -3,13 +3,13 @@
 
 use super::super::super::*;
 use super::super::test_support::*;
-use cad_app::ExtendedCommandId;
+use cad_app::{ExtendedCommandId, RefusalId};
 macro_rules! command_selector_contract {
         ($($variant:ident => $selector:literal),+ $(,)?) => {
             const EXPECTED_COMMAND_COUNT: usize = [$(stringify!($variant)),+].len();
             const ALL_COMMAND_IDS: &[CommandId] = &[$(CommandId::$variant),+];
             const EXPECTED_LEN: usize =
-                EXPECTED_COMMAND_COUNT + ExtendedCommandId::ALL.len();
+                EXPECTED_COMMAND_COUNT + ExtendedCommandId::ALL.len() + RefusalId::ALL.len();
 
             fn canonical_selector(id: CommandId) -> &'static str {
                 match id {
@@ -124,6 +124,7 @@ command_selector_contract! {
     BreakAtPoint => "BREAKATPOINT",
     ArrayRectangular => "ARRAYRECT",
     ArrayPolar => "ARRAYPOLAR",
+    ArrayPath => "ARRAYPATH",
     AlignEntities => "ALIGN",
     StretchEntities => "STRETCH",
     EraseEntities => "ERASE",
@@ -244,12 +245,11 @@ fn command_normalization_covers_every_variant() {
     assert_eq!(normalize_command("fit\n"), Some(CommandId::FitDrawing));
     assert_eq!(normalize_command("line"), Some(CommandId::CreateLine));
     assert_eq!(normalize_command("export"), Some(CommandId::PlotDrawing));
-    // Contract: `canonical_selector` is an exhaustive `match` over
-    // `CommandId` with no wildcard arm, so a new variant cannot be added
+    // Contract: `canonical_selector` is an exhaustive `match` over `CommandId` with no wildcard arm, so a new variant cannot be added
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 230,
+        EXPECTED_COMMAND_COUNT, 231,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -266,7 +266,7 @@ fn command_normalization_covers_every_variant() {
             "{name} ({id:?}) must appear exactly once in COMMAND_TABLE"
         );
     }
-    assert_eq!(COMMAND_TABLE.len(), EXPECTED_LEN);
+    assert_eq!(COMMAND_TABLE.len() + REFUSAL_TABLE.len(), EXPECTED_LEN);
     // Every canonical selector maps to its command and is stable.
     for (name, id) in COMMAND_TABLE {
         assert_eq!(normalize_command(name), Some(*id), "{name}");

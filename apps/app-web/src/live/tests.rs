@@ -333,6 +333,29 @@ fn the_vocabulary_the_carrier_advertises_is_what_the_router_executes() {
     assert!(error.message.contains("FLOOPY"), "{}", error.message);
 }
 
+#[test]
+fn imageauthoring_commands_are_refused_before_they_touch_the_drawing() {
+    let mut live = live();
+    for line in [
+        "IMAGEATTACH textures/logo.png 0 0 10 10 1",
+        "IMAGECLIP 0 0 10 10",
+    ] {
+        let error = live.command(line).expect_err("no image decoder here");
+        assert!(
+            error.message.contains(crate::platform::UNSUPPORTED_IMAGES),
+            "{}",
+            error.message
+        );
+        assert!(
+            error
+                .message
+                .contains(crate::platform::IMAGE_COMMAND_UNSUPPORTED),
+            "{}",
+            error.message
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Popups
 // ---------------------------------------------------------------------------

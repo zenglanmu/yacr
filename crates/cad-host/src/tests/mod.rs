@@ -47,6 +47,7 @@ mod settings_input;
 mod snap_marker;
 mod text_tool;
 mod tolerance;
+mod wipeout_frames;
 mod zoom_window;
 
 // --- synthetic platform contracts -------------------------------------------

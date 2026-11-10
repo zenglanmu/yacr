@@ -79,6 +79,10 @@ pub(crate) fn remap_geometry(
         // accepts a display. If that ever changes, this arm must be extended
         // together with `referenced_blocks`.
         SemanticGeometry::Hatch(_) | SemanticGeometry::MultiLeader(_) => geometry.clone(),
+        // A TABLE display is grid lines and cell text and cannot contain an
+        // INSERT either; no constructor accepts a display, so the geometry is
+        // cloned unchanged.
+        SemanticGeometry::Table(_) => geometry.clone(),
         other => other.clone(),
     }
 }

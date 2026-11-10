@@ -314,6 +314,13 @@ pub(super) fn emit(
             acc,
             stack,
         ),
+        // A first-class TABLE is written as a real `ACAD_TABLE` entity from the
+        // domain grid; the derived display is never written as the entity. A
+        // block-embedded table is placed first with the accumulated INSERT
+        // transform, exactly like every other leaf.
+        SemanticGeometry::Table(table) => {
+            super::table::emit_table(doc, entity, table, transform, ctx, acc)
+        }
         leaf => {
             let owned;
             let placed: &SemanticGeometry = if transform == &Transform3::identity() {
@@ -670,11 +677,18 @@ fn emit_leaf(
                 "SHX shape glyph has no DXF representation without its shape file".into(),
             ]),
         ),
-        SemanticGeometry::Image { .. } => acc.record(
+        SemanticGeometry::Image { adjust, .. } => acc.record(
             object,
             "image",
             MappingOutcome::Dropped(vec![
-                "raster image is not exported (external resource)".into()
+                "raster image is not exported (external resource), so its display transfer \
+                 is not written either"
+                    .into(),
+                format!(
+                    "the image display transfer (brightness {}, contrast {}, fade {}, \
+                     monochrome {}) is not exported with the dropped raster image",
+                    adjust.brightness, adjust.contrast, adjust.fade, adjust.monochrome
+                ),
             ]),
         ),
         SemanticGeometry::Mask { .. } => acc.record(
@@ -718,6 +732,17 @@ fn emit_leaf(
                 "internal",
                 MappingOutcome::Dropped(vec![
                     "insert/compound reached the leaf mapper; not emitted".into(),
+                ]),
+            );
+        }
+        // A TABLE is written by the dedicated entity writer before this point.
+        SemanticGeometry::Table(_) => {
+            acc.record(
+                object,
+                "internal",
+                MappingOutcome::Dropped(vec![
+                    "table reached the leaf mapper; it is written by the dedicated TABLE writer"
+                        .into(),
                 ]),
             );
         }
@@ -803,6 +828,7 @@ pub(crate) fn kind_name(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Dimension(_) => "Dimension",
         SemanticGeometry::Hatch(_) => "Hatch",
         SemanticGeometry::MultiLeader(_) => "MultiLeader",
+        SemanticGeometry::Table(_) => "Table",
         SemanticGeometry::Image { .. } => "Image",
         SemanticGeometry::Mask { .. } => "Mask",
     }

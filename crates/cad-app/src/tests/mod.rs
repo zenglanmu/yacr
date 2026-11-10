@@ -215,6 +215,7 @@ mod extended_w11;
 // The 2026-11-09 Wave 12 extended-command contracts.
 mod extended_w12;
 // The 2026-11-09 Wave 13 extended-command contracts.
+mod extended_refusal_names;
 mod extended_w13;
 mod extended_w14;
 mod extended_w15;

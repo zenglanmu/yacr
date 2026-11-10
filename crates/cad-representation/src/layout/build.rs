@@ -358,6 +358,7 @@ pub fn build_paper_space(
                         resource,
                         transform: local,
                         clip,
+                        adjust,
                     } => match clip_image_quad_to_rect(&local, center, half) {
                         Ok(vertices) if vertices.is_empty() => {
                             // Fully outside the window: exact omission.
@@ -420,6 +421,7 @@ pub fn build_paper_space(
                                         resource,
                                         transform: local,
                                         clip,
+                                        adjust,
                                     },
                                 ));
                             }
@@ -438,6 +440,7 @@ pub fn build_paper_space(
                                     resource,
                                     transform: local,
                                     clip,
+                                    adjust,
                                 },
                             ));
                         }

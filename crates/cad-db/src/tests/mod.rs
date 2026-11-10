@@ -20,6 +20,7 @@ mod point_style;
 mod scale;
 mod spline_transform;
 mod spline_validation;
+mod table_validation;
 mod text_transform;
 mod visibility;
 mod xref;

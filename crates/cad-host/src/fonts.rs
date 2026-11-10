@@ -113,8 +113,30 @@ impl HostCore {
     }
 
     /// (Re)load the drawing's raster images through the host strategy.
+    ///
+    /// The requested **normalised key set** is recorded after the attempt so a
+    /// later committed edit can cheaply tell whether anything changed; an
+    /// unchanged set is never decoded again by [`Self::sync_images_if_changed`].
     pub fn install_images(&self) -> CadResult<()> {
-        self.resources.install_images(self, &self.render)
+        let outcome = self.resources.install_images(self, &self.render);
+        *self.last_image_keys.borrow_mut() = requested_image_keys(self);
+        outcome
+    }
+
+    /// Reinstall the drawing's images after a committed edit **iff** the set of
+    /// referenced logical image keys changed.
+    ///
+    /// This is the `IMAGEATTACH`-without-reopen path: the open funnel installs
+    /// the resources once, but a command that adds, removes or retargets an image
+    /// entity changes the request set, and the installed [`DecodedImageCache`]
+    /// would otherwise be stale until the drawing was reopened. The check is a
+    /// set comparison only; an unchanged set does no decoding.
+    pub(crate) fn sync_images_if_changed(&self) -> CadResult<()> {
+        let requested = requested_image_keys(self);
+        if !image_keys_changed(&self.last_image_keys.borrow(), &requested) {
+            return Ok(());
+        }
+        self.install_images()
     }
 
     /// Install fonts when a committed command introduced the drawing's first
@@ -140,6 +162,38 @@ impl HostCore {
         }
         Ok(())
     }
+}
+
+/// The normalised logical image-key set the current drawing references.
+///
+/// Keys go through [`cad_resources::image_resource_key`] (the identity the
+/// decoded cache stores); an unsafe key that yields no normalised form is kept
+/// verbatim so a change from one unsafe reference to another is still noticed.
+fn requested_image_keys(core: &HostCore) -> std::collections::BTreeSet<cad_resources::ResourceKey> {
+    core.controller
+        .borrow()
+        .drawing()
+        .map(|drawing| {
+            cad_platform::images::requested_images(drawing.as_ref())
+                .into_iter()
+                .map(|key| {
+                    cad_resources::image_resource_key(&key)
+                        .unwrap_or(cad_resources::ResourceKey(key))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether a committed edit changed the drawing's image-key set.
+///
+/// Pure and order-independent: the caller only reinstalls when this is `true`,
+/// so an unchanged set never triggers a decode pass.
+pub(crate) fn image_keys_changed(
+    installed: &std::collections::BTreeSet<cad_resources::ResourceKey>,
+    requested: &std::collections::BTreeSet<cad_resources::ResourceKey>,
+) -> bool {
+    installed != requested
 }
 
 /// Native desktop resource strategy: the sibling `fonts/`/`images/` package.
@@ -412,5 +466,29 @@ impl HostCore {
                 self.message("web.fonts_unavailable", &[]),
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cad_resources::image_resource_key;
+
+    fn keys(references: &[&str]) -> std::collections::BTreeSet<cad_resources::ResourceKey> {
+        references
+            .iter()
+            .map(|reference| image_resource_key(reference).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn image_keys_changed_only_when_the_reference_set_differs() {
+        let empty = keys(&[]);
+        let one = keys(&["textures/logo.png"]);
+        assert!(!image_keys_changed(&empty, &keys(&[])));
+        assert!(!image_keys_changed(&one, &keys(&["textures/LOGO.PNG"])));
+        assert!(image_keys_changed(&empty, &one));
+        assert!(image_keys_changed(&one, &empty));
+        assert!(image_keys_changed(&one, &keys(&["textures/other.png"])));
     }
 }

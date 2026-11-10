@@ -174,6 +174,7 @@ fn image_and_mask_class_names_match_the_importer_keys() {
         file: None,
         clip: None,
         visible: true,
+        adjust: ImageAdjust::default(),
     };
     let mask = SemanticGeometry::Mask {
         boundary: vec![point(0.0, 0.0), point(1.0, 0.0), point(1.0, 1.0)],

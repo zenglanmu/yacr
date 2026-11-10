@@ -178,6 +178,13 @@ impl BoundsAccumulator {
                     self.add_geometry_transformed(child, transform);
                 }
             }
+            // A table's extent is the extent of its derived display children
+            // (grid lines and cell text), exactly like a compound.
+            SemanticGeometry::Table(table) => {
+                for child in table.display() {
+                    self.add_geometry_transformed(child, transform);
+                }
+            }
         }
     }
 
@@ -283,6 +290,7 @@ mod tests {
             file: None,
             clip: None,
             visible: true,
+            adjust: ImageAdjust::default(),
         };
         let mut bounds = BoundsAccumulator::new();
         bounds.add_geometry(&image);

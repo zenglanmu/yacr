@@ -426,15 +426,15 @@ pub enum CommandId {
     /// ([`crate::app_drawing::MAX_ARRAY_ENTITIES`]) is refused, never truncated.
     /// Associativity is **NOT IMPLEMENTED**. Work-only.
     ArrayRectangular,
-    /// ARRAYPOLAR: insert **independent** copies of the current selection around a
-    /// captured centre point (ADR 0016 decision D). Payload is
+    /// ARRAYPOLAR: insert **independent** copies of the current selection around a captured centre point (ADR 0016 decision D). Payload is
     /// `ArrayPolar { refs, center }`; the item count, fill angle and rotate-items
     /// flag are the session typed channel
-    /// ([`crate::draw_tool::ToolParameter::ArrayItems`] … `ArrayRotateItems`). The
-    /// base point is the selection's bounding-box lower-left; the placement rule
-    /// is our declared (unverified) choice. One transaction and one undo step;
-    /// associativity is **NOT IMPLEMENTED**. Work-only.
+    /// ([`crate::draw_tool::ToolParameter::ArrayItems`] … `ArrayRotateItems`). The base point is the selection's bounding-box lower-left; the placement rule is
+    /// our declared (unverified) choice. One transaction and one undo step; the
+    /// array is not associative. Work-only.
     ArrayPolar,
+    /// ARRAYPATH: 2D path array; see `crate::app_drawing::array`. Work-only.
+    ArrayPath,
     /// ALIGN the current selection from two point pairs (ADR 0016 decision F).
     /// Payload is `Align { refs, source1, dest1, source2, dest2 }`; the
     /// `AlignScale` flag is the session typed channel
@@ -962,7 +962,7 @@ pub enum CommandId {
 mod capabilities;
 mod extended;
 mod mode;
-pub use extended::ExtendedCommandId;
+pub use extended::{ExtendedCommandId, RefusalId};
 pub use mode::AppMode;
 
 pub mod annot_batch;

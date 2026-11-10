@@ -203,6 +203,19 @@ pub(crate) fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, Su
             }
             (render, pick)
         }
+        // A table inherits the weakest status of its display children, so a
+        // table with cell text is `Unverified` rather than the false `Verified`
+        // the wildcard arm would give it.
+        SemanticGeometry::Table(table) => {
+            let mut render = SupportStatus::Verified;
+            let mut pick = SupportStatus::Verified;
+            for child in table.display() {
+                let (r, p) = display_support(child);
+                render = weaker(render, r);
+                pick = weaker(pick, p);
+            }
+            (render, pick)
+        }
         _ => (SupportStatus::Verified, SupportStatus::Verified),
     }
 }

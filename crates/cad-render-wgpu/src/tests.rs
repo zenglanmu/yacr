@@ -188,6 +188,7 @@ fn image_quad_maps_the_unit_square_through_the_transform() {
         alpha: 1.0,
         draw_order: 0,
         sources: Vec::new(),
+        adjust: ImageAdjust::default(),
     };
     let (vertices, indices) = image_quad_vertices(&batch);
     // Four vertices of 20 bytes (position vec3 + uv vec2), two triangles.
@@ -262,6 +263,7 @@ fn image_quad_uses_the_clip_polygon_instead_of_the_unit_square() {
         alpha: 1.0,
         draw_order: 0,
         sources: Vec::new(),
+        adjust: ImageAdjust::default(),
     };
     let (vertices, indices) = image_quad_vertices(&batch);
     // Four clip vertices, fan-triangulated (0,1,2),(0,2,3).

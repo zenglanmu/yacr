@@ -67,6 +67,8 @@ fn geometry_has_text(geometry: &SemanticGeometry) -> bool {
         SemanticGeometry::MultiLeader(multileader) => {
             multileader.display().iter().any(geometry_has_text)
         }
+        // A table's cell text is a display child.
+        SemanticGeometry::Table(table) => table.display().iter().any(geometry_has_text),
         _ => false,
     }
 }
@@ -112,6 +114,82 @@ pub(crate) fn collect_fonts(
                 collect_fonts(database, part, out);
             }
         }
+        // A table's cell text is a display child; without this arm its font is
+        // never registered and the text is silently not drawn.
+        SemanticGeometry::Table(table) => {
+            for part in table.display() {
+                collect_fonts(database, part, out);
+            }
+        }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
+    use cad_domain::{
+        DatabaseId, EntityId, LayerId, ObjectId, Revision, SpaceId, StyleId, TableCellBorders,
+        TableCellGeometry, TableColumnGeometry, TableFrame, TableGeometry, TableParts,
+        TableRowGeometry,
+    };
+
+    fn table() -> SemanticGeometry {
+        let cell = TableCellGeometry {
+            text: "Hello".into(),
+            text_height: 2.5,
+            style_name: "Standard".into(),
+            style: StyleId(0),
+            font: Some("arial.ttf".into()),
+            merge_width: 1,
+            merge_height: 1,
+            borders: TableCellBorders::default(),
+        };
+        let geometry = TableGeometry::from_import(TableParts {
+            frame: TableFrame::default(),
+            columns: vec![TableColumnGeometry {
+                width: 4.0,
+                name: String::new(),
+            }],
+            rows: vec![TableRowGeometry {
+                height: 3.0,
+                cells: vec![cell],
+            }],
+            style_name: String::new(),
+            name: String::new(),
+            description: String::new(),
+        });
+        SemanticGeometry::Table(Box::new(geometry))
+    }
+
+    #[test]
+    fn table_cell_text_requests_shaping_and_registers_its_font() {
+        let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+        builder
+            .insert_layer(Layer {
+                id: LayerId(0),
+                name: "0".into(),
+                visible: true,
+            })
+            .unwrap();
+        builder
+            .insert_entity(DbEntity {
+                object: DbObject {
+                    id: ObjectId(1),
+                    type_key: "AcDbTable".into(),
+                    revision: Revision(0),
+                    source_handle: None,
+                },
+                id: EntityId(1),
+                layer: LayerId(0),
+                space: SpaceId::Model,
+                geometry: table(),
+                draw_order: 0,
+            })
+            .unwrap();
+        let database = builder.finish().unwrap();
+        assert!(needs_text_shaping(&database));
+        assert_eq!(requested_fonts(&database), vec!["arial.ttf".to_string()]);
     }
 }

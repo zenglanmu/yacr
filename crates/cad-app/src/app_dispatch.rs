@@ -372,14 +372,16 @@ impl Application {
             | ExtendedCommandId::PageSetupIn
             | ExtendedCommandId::DashPageSetupIn
             | ExtendedCommandId::ConvertPoly => self.extended_w13_reports(session, command, ext)?,
+            // TABLE / -TABLE create one real table; TABLEDIT edits one selected
+            // table's cell text. Each is one transaction / one undo step.
+            ExtendedCommandId::TableCreate
+            | ExtendedCommandId::DashTable
+            | ExtendedCommandId::TableEdit => self.table_edit(session, command, ext)?,
             ExtendedCommandId::PlotStyleList
             | ExtendedCommandId::DashPlotStyleList
             | ExtendedCommandId::ConvertPlotStyles
             | ExtendedCommandId::ConvertCtb
             | ExtendedCommandId::ConvertGeneric
-            | ExtendedCommandId::TableCreate
-            | ExtendedCommandId::DashTable
-            | ExtendedCommandId::TableEdit
             | ExtendedCommandId::TableExport
             | ExtendedCommandId::TableStyleList
             | ExtendedCommandId::TableInsert
@@ -444,14 +446,16 @@ impl Application {
             | ExtendedCommandId::MeshSpin
             | ExtendedCommandId::MeshSplit
             | ExtendedCommandId::MeshUncrease => self.extended_w15_refusals(command, ext)?,
-            // Wave 16: stable named refusals.
-            ExtendedCommandId::Image
-            | ExtendedCommandId::DashImage
-            | ExtendedCommandId::ImageAttach
+            // Wave 16: the raster-image report and its three real authoring
+            // commands; the remaining names are stable refusals.
+            ExtendedCommandId::Image | ExtendedCommandId::DashImage => {
+                self.extended_w16_reports(session, command, ext)?
+            }
+            ExtendedCommandId::ImageAttach
             | ExtendedCommandId::ImageClip
             | ExtendedCommandId::ImageAdjust
-            | ExtendedCommandId::DashImageAdjust
-            | ExtendedCommandId::ImageQuality
+            | ExtendedCommandId::DashImageAdjust => self.image_edit(session, command, ext)?,
+            ExtendedCommandId::ImageQuality
             | ExtendedCommandId::ImageApp
             | ExtendedCommandId::ImageAsyncWait
             | ExtendedCommandId::ImageEdit
@@ -470,6 +474,8 @@ impl Application {
             | ExtendedCommandId::DgnClip
             | ExtendedCommandId::DgnLayers
             | ExtendedCommandId::DgnAdjust => self.extended_w16_refusals(command, ext)?,
+            // Waves 17-24: the data-driven named refusals (see `RefusalId`).
+            ExtendedCommandId::Refusal(name) => self.extended_refusal_named(command, name)?,
         };
         Ok(Some(outcome))
     }

@@ -40,19 +40,18 @@ fn reason(ext: ExtendedCommandId) -> String {
             "convertctb.unsupported: CTB conversion is not implemented (no CTB/STB model)"
         }
         ExtendedCommandId::ConvertGeneric => "convert.unsupported: generic object conversion is not implemented",
-        ExtendedCommandId::TableCreate => "table.unsupported: no table entity model is implemented",
-        ExtendedCommandId::DashTable => {
-            "-table.unsupported: no table entity model is implemented"
-        }
-        ExtendedCommandId::TableEdit => "tabledit.unsupported: no table entity model is implemented",
         ExtendedCommandId::TableExport => {
-            "tableexport.unsupported: no table entity model is implemented"
+            "tableexport.unsupported: no CSV/file writer is implemented"
         }
         ExtendedCommandId::TableStyleList => {
-            "tablestyle.unsupported: no table-style model is implemented"
+            "tablestyle.unsupported: no table-style table is implemented"
         }
-        ExtendedCommandId::TableInsert => "tinsert.unsupported: no table entity model is implemented",
-        ExtendedCommandId::MatchCell => "matchcell.unsupported: no table entity model is implemented",
+        ExtendedCommandId::TableInsert => {
+            "tinsert.unsupported: no block-in-cell creation is implemented"
+        }
+        ExtendedCommandId::MatchCell => {
+            "matchcell.unsupported: no cell-style copy surface is implemented"
+        }
         ExtendedCommandId::Field => "field.unsupported: fields are not implemented (no field model)",
         ExtendedCommandId::RText => "rtext.unsupported: remote text is not implemented (no RTEXT model)",
         ExtendedCommandId::RTextEdit => {

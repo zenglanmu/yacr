@@ -364,7 +364,8 @@ fn appends_like_full_rebuild(geometry: &SemanticGeometry) -> bool {
         | SemanticGeometry::Compound(_)
         | SemanticGeometry::Dimension(_)
         | SemanticGeometry::Hatch(_)
-        | SemanticGeometry::MultiLeader(_) => true,
+        | SemanticGeometry::MultiLeader(_)
+        | SemanticGeometry::Table(_) => true,
     }
 }
 

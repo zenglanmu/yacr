@@ -224,6 +224,19 @@ fn validate_geometry(geometry: &SemanticGeometry, opaque_is_vendor_backed: bool)
             }
             Ok(())
         }
+        // A table is validated through its display children (grid lines and
+        // cell text), exactly like the compound it used to be.
+        SemanticGeometry::Table(table) => {
+            for child in table.display() {
+                validate_geometry(child, false)?;
+            }
+            if table.display().is_empty() {
+                return Err(CadError::Unsupported(
+                    "SelectAll cannot pick a table with no display geometry".into(),
+                ));
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }

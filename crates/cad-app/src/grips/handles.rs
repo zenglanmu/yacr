@@ -216,6 +216,9 @@ pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
         SemanticGeometry::Dimension(dimension) => {
             super::dimension::definition_point_grips(entity.id, dimension)
         }
+        // A table exposes no grippable handle in this build (no column/row/edge
+        // handles are modelled), explicitly rather than by wildcard fallthrough.
+        SemanticGeometry::Table(_) => Vec::new(),
         _ => Vec::new(),
     }
 }

@@ -520,6 +520,14 @@ fn vertex_count(g: &SemanticGeometry) -> usize {
             .map(vertex_count)
             .sum::<usize>()
             .max(1),
+        // A table estimates its display children (grid lines and cell text),
+        // exactly like the compound it used to be.
+        SemanticGeometry::Table(table) => table
+            .display()
+            .iter()
+            .map(vertex_count)
+            .sum::<usize>()
+            .max(1),
         _ => 4,
     }
 }

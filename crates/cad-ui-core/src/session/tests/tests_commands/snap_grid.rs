@@ -258,6 +258,18 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "TREX",
             "MPEDIT",
             "DRAWORDER",
+            // `ARRAYPATH <count> [ALIGN]` is the typed path-array form.
+            "ARRAYPATH",
+            // The raster-image typed forms (`IMAGEATTACH`, `IMAGECLIP`,
+            // `IMAGEADJUST`/`-IMAGEADJUST`).
+            "IMAGEATTACH",
+            "IMAGECLIP",
+            "IMAGEADJUST",
+            "-IMAGEADJUST",
+            // The table typed forms (`TABLE`, `-TABLE`, `TABLEDIT`).
+            "TABLE",
+            "-TABLE",
+            "TABLEDIT",
             // The 2026-11-07 view batch.
             "VIEW",
             "VIEWGO",

@@ -354,6 +354,7 @@ fn image_and_mask_yield_no_snap_candidates() {
         file: None,
         clip: None,
         visible: true,
+        adjust: ImageAdjust::default(),
     };
     let mask = SemanticGeometry::Mask {
         boundary: vec![flat(-5.0, -5.0), flat(5.0, -5.0), flat(5.0, 5.0)],

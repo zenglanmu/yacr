@@ -422,6 +422,13 @@ fn flatten_geometry(geometry: &SemanticGeometry) -> CadResult<SemanticGeometry> 
             "unsupported",
             "INSERT references are refused by name; flatten the block members instead",
         )),
+        // A table's plane frame has no z-flatten model: refusing by name is
+        // honest instead of dropping the frame's normal and text placement.
+        SemanticGeometry::Table(_) => Err(unsupported(
+            "flatten",
+            "unsupported",
+            "AcDbTable has no z-flatten model in this build",
+        )),
         other => Err(unsupported(
             "flatten",
             "unsupported",

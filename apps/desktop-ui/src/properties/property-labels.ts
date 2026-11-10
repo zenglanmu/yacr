@@ -60,6 +60,11 @@ export function propertyRowLabel(t: CatalogTranslate, key: string): string {
     case 'display': return t('properties.row.display');
     case 'loops': return t('properties.row.loops');
     case 'style': return t('properties.row.style');
+    case 'style_name': return t('properties.row.style_name');
+    case 'name': return t('properties.row.name');
+    case 'rows': return t('properties.row.rows');
+    case 'columns': return t('properties.row.columns');
+    case 'cells': return t('properties.row.cells');
     case 'fill': return t('properties.row.fill');
     case 'roots': return t('properties.row.roots');
     case 'lines': return t('properties.row.lines');

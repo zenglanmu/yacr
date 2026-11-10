@@ -112,11 +112,17 @@ pub(crate) fn run_measure(
     }))
 }
 
-/// The representation context shared by `build-representation` and `render`.
+/// The representation context shared by `build-representation`, `render` and the
+/// vector plot paths.
 ///
 /// Both must build from the same provider registry, document id, tolerance
 /// policy and task stamp; only this constructor is allowed to define that, so
 /// the two paths cannot silently drift apart.
+///
+/// There is no session here, so `WIPEOUTFRAME` takes its documented initial
+/// value (`1`): the mask boundary frame is both displayed and plotted. A caller
+/// that needs the display-only split (`WIPEOUTFRAME 2`) can clear it on the
+/// returned context.
 pub(crate) fn representation_context(
     controller: &HostController,
     fonts: Option<&Arc<cad_representation::FontEngine>>,
@@ -125,7 +131,9 @@ pub(crate) fn representation_context(
         controller.document_id,
         TolerancePolicy::default(),
         TaskStamp::new(controller.document_id, controller.session.generation),
-    );
+    )
+    // AutoCAD's initial `WIPEOUTFRAME` is `1`: frames are displayed and plotted.
+    .with_wipeout_frames(true);
     if let Some(fonts) = fonts {
         context = context.with_fonts(fonts.clone());
     }

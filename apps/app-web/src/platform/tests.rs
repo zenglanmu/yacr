@@ -454,6 +454,49 @@ fn resources_refuse_only_when_the_drawing_asks_for_something() {
     assert!(reason.contains("logo") || reason.contains('1'), "{reason}");
 }
 
+#[test]
+fn image_edit_commands_are_refused_by_the_no_decoder_carrier() {
+    // Both bare selectors and both typed forms: accepting either would write an
+    // image entity this carrier cannot render.
+    for line in [
+        "IMAGEATTACH",
+        "imageattach",
+        "IMAGEATTACH textures/logo.png 0 0 10 10 1",
+        "IMAGECLIP",
+        "IMAGECLIP 0 0 10 10",
+        "IMAGECLIP OFF",
+    ] {
+        let refusal = check_image_command(line).expect_err(line);
+        assert!(refusal.starts_with(UNSUPPORTED_IMAGES), "{line}: {refusal}");
+        assert!(
+            refusal.contains(IMAGE_COMMAND_UNSUPPORTED),
+            "{line}: {refusal}"
+        );
+    }
+    // Other commands (and unknown names) stay the router's authority.
+    for line in ["LINE", "ZOOM ALL", "NOTACOMMAND"] {
+        check_image_command(line).expect(line);
+    }
+}
+
+#[test]
+fn the_direct_wire_sink_refuses_imageattach_with_the_stable_reason() {
+    use cad_ui_core::session::AdmissionTarget;
+    let (_platform, session) = open(BROWSER_CAPABILITIES);
+    let before = session.snapshot(None, None, 0).entity_count;
+    let mut sink = crate::direct::DirectSink::with_gates(&session, true, false);
+    let error = sink
+        .command("IMAGEATTACH textures/logo.png 0 0 10 10 1".into())
+        .expect_err("the browser carrier has no image decoder");
+    assert!(error.contains(UNSUPPORTED_IMAGES), "{error}");
+    assert!(error.contains(IMAGE_COMMAND_UNSUPPORTED), "{error}");
+    assert_eq!(
+        session.snapshot(None, None, 0).entity_count,
+        before,
+        "a refused image command writes nothing"
+    );
+}
+
 // ------------------------------------------------------- font package install
 
 fn p(x: f64, y: f64) -> Point3 {

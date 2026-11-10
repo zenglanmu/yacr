@@ -362,6 +362,7 @@ fn transformed_image_clip_maps_positions_but_keeps_uvs() {
         resource: cad_resources::ResourceKey("img:0".into()),
         transform: Transform3::identity(),
         clip: Some(clip),
+        adjust: ImageAdjust::default(),
     };
     match primitive.transformed(&Transform3::translation(p(10.0, 5.0))) {
         DisplayPrimitive::Image { clip: Some(v), .. } => {

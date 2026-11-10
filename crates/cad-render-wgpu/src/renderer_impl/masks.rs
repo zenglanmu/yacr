@@ -86,10 +86,10 @@ impl Renderer {
                 skips.push("wipeout mask boundary has fewer than three vertices".to_string());
                 continue;
             }
-            if mask.inverted {
+            let mut gpu = if mask.inverted {
                 // The complement needs the frame's visible world rect; keep the
                 // boundary and let the first frame build the ring.
-                staged.push(GpuMask {
+                GpuMask {
                     vertices: None,
                     vertex_count: 0,
                     origin: [0.0; 3],
@@ -97,33 +97,74 @@ impl Renderer {
                     inverted: true,
                     covered: None,
                     vertex_charge: None,
-                });
-                continue;
-            }
-            match mask_fill(&mask.polygon) {
-                Ok(triangles) if !triangles.is_empty() => {
-                    // Budget gate before the fill buffer exists (12 bytes per
-                    // triangle, the exact packed size). A refusal leaves the
-                    // resident mask set untouched.
-                    self.admit_gpu_memory(&[(
-                        GpuMemoryCategory::Mask,
-                        (triangles.len() * 12) as u64,
-                    )])?;
-                    staged.push(staged_mask(
-                        &device,
-                        &queue,
-                        &mask.polygon,
-                        triangles,
-                        false,
-                        None,
-                        &self.gpu_memory,
-                    ));
+                    frame_vertices: None,
+                    frame_vertex_count: 0,
+                    frame_origin: [0.0; 3],
+                    frame_color: None,
+                    frame_charge: None,
                 }
-                // Empty or refused: report the named reason instead of drawing an
-                // approximate fill.
-                Ok(_) => skips.push("wipeout mask boundary has no fillable area".to_string()),
-                Err(reason) => skips.push(reason),
+            } else {
+                match mask_fill(&mask.polygon) {
+                    Ok(triangles) if !triangles.is_empty() => {
+                        // Budget gate before the fill buffer exists (12 bytes per
+                        // triangle, the exact packed size). A refusal leaves the
+                        // resident mask set untouched.
+                        self.admit_gpu_memory(&[(
+                            GpuMemoryCategory::Mask,
+                            (triangles.len() * 12) as u64,
+                        )])?;
+                        staged_mask(
+                            &device,
+                            &queue,
+                            &mask.polygon,
+                            triangles,
+                            false,
+                            None,
+                            &self.gpu_memory,
+                        )
+                    }
+                    // Empty or refused: report the named reason instead of drawing
+                    // an approximate fill. The frame still follows the same rule
+                    // as the fill: no drawable fill means no mask draw item.
+                    Ok(_) => {
+                        skips.push("wipeout mask boundary has no fillable area".to_string());
+                        continue;
+                    }
+                    Err(reason) => {
+                        skips.push(reason);
+                        continue;
+                    }
+                }
+            };
+            // The boundary frame (`WIPEOUTFRAME` 1/2) is independent geometry with
+            // its own uniform slot, so it is built even for an inverted mask whose
+            // fill is not resident yet. It is emitted as pre-expanded AA line
+            // quads so it rasterizes exactly like every other line.
+            if let Some(color) = mask.frame {
+                let origin = [mask.polygon[0].x, mask.polygon[0].y, mask.polygon[0].z];
+                let quads = mask_frame_quads(&mask.polygon, origin);
+                let bytes = line_quad_bytes(&quads);
+                if let Err(refusal) = self
+                    .gpu_memory
+                    .admit(&[(GpuMemoryCategory::Mask, bytes.len() as u64)])
+                {
+                    skips.push(format!(
+                        "wipeout mask frame refused by the GPU budget: {}",
+                        refusal.message()
+                    ));
+                } else if !quads.is_empty() {
+                    let buffer = Renderer::vertex_buffer(&device, Some(&queue), &bytes);
+                    let charge = self
+                        .gpu_memory
+                        .charge(GpuMemoryCategory::Mask, buffer.size());
+                    gpu.frame_vertices = Some(buffer);
+                    gpu.frame_vertex_count = quads.len() as u32;
+                    gpu.frame_origin = origin;
+                    gpu.frame_color = Some(color);
+                    gpu.frame_charge = Some(charge);
+                }
             }
+            staged.push(gpu);
         }
         self.masks = staged;
         self.mask_skips = skips;
@@ -193,6 +234,15 @@ impl Renderer {
                         Some(ring),
                         &self.gpu_memory,
                     );
+                    // The frame is independent of the fill's origin (own slot), so
+                    // a rebuilt complement ring keeps its resident frame.
+                    let previous = &mut self.masks[index];
+                    let mut built = built;
+                    built.frame_vertices = previous.frame_vertices.take();
+                    built.frame_vertex_count = previous.frame_vertex_count;
+                    built.frame_origin = previous.frame_origin;
+                    built.frame_color = previous.frame_color;
+                    built.frame_charge = previous.frame_charge.take();
                     self.masks[index] = built;
                 }
                 Ok(_) => {
@@ -268,7 +318,41 @@ fn staged_mask(
         inverted,
         covered,
         vertex_charge,
+        // The frame is attached by `upload_masks` after staging; it has its own
+        // origin and uniform slot, so a rebuild of the fill never invalidates it.
+        frame_vertices: None,
+        frame_vertex_count: 0,
+        frame_origin: [0.0; 3],
+        frame_color: None,
+        frame_charge: None,
     }
+}
+
+/// Closed-boundary frame as pre-expanded anti-aliased line quads.
+///
+/// Every boundary edge (including the closing one) is expanded with
+/// [`plan::push_line_quad`], the exact expansion the line renderer uses, so the
+/// frame's ink matches ADR-0009. Coordinates are relative to `origin` (the
+/// boundary's first vertex), and the frame's own uniform slot carries that
+/// origin's camera-relative matrix.
+fn mask_frame_quads(boundary: &[Point3], origin: [f64; 3]) -> Vec<LineQuadVertex> {
+    let mut out = Vec::with_capacity(boundary.len() * 6);
+    if boundary.len() < 3 {
+        return out;
+    }
+    let local = |point: &Point3| {
+        [
+            (point.x - origin[0]) as f32,
+            (point.y - origin[1]) as f32,
+            (point.z - origin[2]) as f32,
+        ]
+    };
+    for index in 0..boundary.len() {
+        let a = local(&boundary[index]);
+        let b = local(&boundary[(index + 1) % boundary.len()]);
+        push_line_quad(&mut out, a, b);
+    }
+    out
 }
 
 /// Submit one mask triangle list: bind its uniform slot, then draw.
@@ -289,6 +373,103 @@ pub(super) fn draw_mask(
     state.set_bind_group0(pass, bind_group, uniform_offset);
     state.set_vertex_buffer(pass, 0, vertices);
     pass.draw(0..mask.vertex_count, 0..1);
+}
+
+/// `(fill draws, frame draws)` for this frame's resident masks.
+pub(super) fn mask_draw_counts(masks: &[GpuMask]) -> (u64, u64) {
+    let frames = masks
+        .iter()
+        .filter(|mask| mask.frame_color.is_some() && mask.frame_vertex_count > 0)
+        .count();
+    (masks.len() as u64, frames as u64)
+}
+
+/// Uniform slots a framed mask needs beyond its fill slot.
+pub(super) fn framed_mask_slot_count(masks: &[GpuMask]) -> usize {
+    masks
+        .iter()
+        .filter(|mask| mask.frame_color.is_some() && mask.frame_vertex_count > 0)
+        .count()
+}
+
+/// Write the per-mask uniform slots and return `(fill_slot, frame_slot)` per
+/// resident mask plus the next free slot.
+///
+/// The fill slot carries this frame's clear colour (ADR 0022 D1); a framed mask
+/// gets a second slot carrying the resolved `MaskBatch::frame` colour and its own
+/// `f64` origin. Both go through the same camera-relative subtraction as a batch.
+pub(super) fn write_mask_uniforms(
+    masks: &[GpuMask],
+    uniforms: &mut UniformArena,
+    projection: &FrameProjection,
+    clear_color: [f32; 4],
+    light: [f32; 4],
+    wpp_bits: u32,
+    start_slot: usize,
+) -> (Vec<(u32, Option<u32>)>, usize) {
+    let mut next_slot = start_slot;
+    // One slot per resident fill, plus one slot per
+    // **framed** mask carrying the frame colour. Each uses its own `f64`
+    // origin through the same camera-relative subtraction as a batch. The
+    // fill tint IS this frame's clear colour, so a mask paints the configured
+    // background (ADR 0022 D1) and the representation layer never names a
+    // colour; the frame tint is the resolved `MaskBatch::frame` colour.
+    // `key_flags` is zero for the fill and carries only the AA ramp width for
+    // the frame: a mask carries no pick key.
+    let mut mask_slots: Vec<(u32, Option<u32>)> = Vec::with_capacity(masks.len());
+    let clear_color_value = clear_color;
+    for mask in masks {
+        let fill_slot = next_slot as u32;
+        let matrix = projection.batch_matrix_f64(mask.origin);
+        let uniform = uniform_bytes(&matrix, clear_color_value, [0, 0, 0, 0], light);
+        uniforms.write_slot(next_slot, &uniform);
+        next_slot += 1;
+        let frame_slot = match mask.frame_color {
+            Some(color) if mask.frame_vertex_count > 0 => {
+                let slot = next_slot as u32;
+                let matrix = projection.batch_matrix_f64(mask.frame_origin);
+                // The frame reuses the AA line shader: `key_flags.z` is the
+                // world-units-per-pixel ramp width (`bitcast<f32>`), exactly
+                // like every other line draw.
+                let uniform = uniform_bytes(
+                    &matrix,
+                    [color[0], color[1], color[2], 1.0],
+                    [0, 0, wpp_bits, 0],
+                    light,
+                );
+                uniforms.write_slot(next_slot, &uniform);
+                next_slot += 1;
+                Some(slot)
+            }
+            _ => None,
+        };
+        mask_slots.push((fill_slot, frame_slot));
+    }
+    (mask_slots, next_slot)
+}
+
+/// Submit one mask boundary frame: bind its own uniform slot, then draw the
+/// pre-expanded anti-aliased quads.
+///
+/// The frame paints **after** the fill (the caller draws fills first) in the
+/// same `depth_compare: Always` pass, so it is never covered by the mask it
+/// outlines. It carries no pick key.
+pub(super) fn draw_mask_frame(
+    pass: &mut wgpu::RenderPass<'_>,
+    state: &mut EncodeState,
+    mask: &GpuMask,
+    bind_group: &wgpu::BindGroup,
+    uniform_offset: u32,
+) {
+    let Some(vertices) = mask.frame_vertices.as_ref() else {
+        return;
+    };
+    if mask.frame_vertex_count == 0 {
+        return;
+    }
+    state.set_bind_group0(pass, bind_group, uniform_offset);
+    state.set_vertex_buffer(pass, 0, vertices);
+    pass.draw(0..mask.frame_vertex_count, 0..1);
 }
 
 /// The visible world rect of one frame, used to size an inverted mask's ring.

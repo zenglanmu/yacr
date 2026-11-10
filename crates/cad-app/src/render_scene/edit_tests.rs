@@ -297,6 +297,7 @@ fn receipt_declines_an_image_insert() {
             file: None,
             clip: None,
             visible: true,
+            adjust: cad_domain::ImageAdjust::default(),
         },
         "AcDbRasterImage",
     );
@@ -352,6 +353,7 @@ fn appendable_delta_requires_no_image_or_mask_draw_items() {
             alpha: 1.0,
             draw_order: 0,
             sources: vec![],
+            adjust: cad_domain::ImageAdjust::default(),
         }],
         ..delta.clone()
     };
@@ -361,6 +363,7 @@ fn appendable_delta_requires_no_image_or_mask_draw_items() {
         masks: vec![MaskBatch {
             polygon: Arc::from(vec![p(0.0, 0.0), p(2.0, 0.0), p(2.0, 2.0)]),
             inverted: false,
+            frame: None,
             draw_order: 0,
             sources: vec![],
         }],

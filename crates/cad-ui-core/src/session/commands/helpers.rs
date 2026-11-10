@@ -171,6 +171,9 @@ pub fn canonical_command_name(text: &str) -> Option<&'static str> {
     if let Some(name) = table_name(COMMAND_TABLE, &key) {
         return Some(name);
     }
+    if let Some(name) = table_name(REFUSAL_TABLE, &key) {
+        return Some(name);
+    }
     if let Some(name) = table_name(MEASUREMENT_SELECTORS, &key) {
         return Some(name);
     }
@@ -193,6 +196,7 @@ pub fn canonical_command_name(text: &str) -> Option<&'static str> {
 pub fn command_name(id: CommandId) -> Option<&'static str> {
     COMMAND_TABLE
         .iter()
+        .chain(REFUSAL_TABLE.iter())
         .find(|(_, candidate)| *candidate == id)
         .map(|(name, _)| *name)
 }
@@ -207,6 +211,7 @@ pub fn normalize_command(text: &str) -> Option<CommandId> {
     let name = canonical_command_name(text)?;
     COMMAND_TABLE
         .iter()
+        .chain(REFUSAL_TABLE.iter())
         .find(|(candidate, _)| *candidate == name)
         .map(|(_, id)| *id)
 }
@@ -224,7 +229,11 @@ pub fn unsupported_command_reason(text: &str) -> String {
 /// alias that is not already canonical. Order is stable, so a frontend may sort
 /// it for display without losing the canonical-first grouping.
 pub fn admissible_names() -> Vec<&'static str> {
-    let mut names: Vec<&'static str> = COMMAND_TABLE.iter().map(|(name, _)| *name).collect();
+    let mut names: Vec<&'static str> = COMMAND_TABLE
+        .iter()
+        .chain(REFUSAL_TABLE.iter())
+        .map(|(name, _)| *name)
+        .collect();
     for (name, _) in MEASUREMENT_SELECTORS {
         if !names.contains(name) {
             names.push(name);

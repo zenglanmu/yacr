@@ -109,8 +109,8 @@ pub use self::commands::{
     Point3Input, ViewOption, ZoomArgument, ARGUMENT_SELECTOR, ARGUMENT_SELECTORS, COMMAND_ALIASES,
     COMMAND_TABLE, HATCHEDIT_SELECTOR, LAYERPMODE_SELECTOR, LAYERSTATE_SELECTOR, LAYWALK_SELECTOR,
     LTSCALE_SELECTOR, MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR, PEDIT_SELECTOR,
-    SNAPUNIT_SELECTOR, SPACE_SELECTOR, VIEWGO_SELECTOR, VIEW_SELECTOR, VPOINT_SELECTOR,
-    ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
+    REFUSAL_TABLE, SNAPUNIT_SELECTOR, SPACE_SELECTOR, VIEWGO_SELECTOR, VIEW_SELECTOR,
+    VPOINT_SELECTOR, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
 pub use self::draw2_arguments::invalid_draw2_argument_reason;
 pub use self::events::{
@@ -324,8 +324,8 @@ impl CadSession {
     ///
     /// The typed selector argument forms are listed in [`ARGUMENT_SELECTORS`]
     /// (`ZOOM`, `SNAPUNIT`, `PDMODE`/`PDSIZE`, `SPACE`, `TORIENT`/`TCASE`, `PEDIT`,
-    /// `HATCHEDIT`, `MEASUREGEOM`, `LAYERSTATE`, `LAYWALK`, `LTSCALE`,
-    /// `LAYERPMODE`). An argument outside a selector's grammar is refused with a
+    /// `HATCHEDIT`, `MEASUREGEOM`, `LAYERSTATE`, `LAYWALK`, `LTSCALE`, `IMAGEATTACH`,
+    /// `IMAGECLIP`, `LAYERPMODE`). An argument outside a selector's grammar is refused with a
     /// stable reason, recorded for `cad_status.error`, and changes nothing; a
     /// selector with **no** argument keeps the name-only payload refusal below.
     pub fn command(&self, text: &str) -> Result<(), String> {

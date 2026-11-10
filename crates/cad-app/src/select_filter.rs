@@ -496,6 +496,16 @@ impl SelectionProperty {
             Self::Text => match &entity.geometry {
                 SemanticGeometry::Text { text, .. } => Some(text.clone()),
                 SemanticGeometry::MultiLeader(leader) => Some(leader.text().string.clone()),
+                // A table's searchable text is every non-empty cell, joined by
+                // one space (the same string FIND searches).
+                SemanticGeometry::Table(table) => {
+                    let texts = table.texts();
+                    if texts.is_empty() {
+                        None
+                    } else {
+                        Some(texts.join(" "))
+                    }
+                }
                 _ => None,
             },
             Self::Name => match &entity.geometry {
@@ -953,6 +963,7 @@ pub fn geometry_key(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Dimension(_) => "DIMENSION",
         SemanticGeometry::Hatch(_) => "HATCH",
         SemanticGeometry::MultiLeader(_) => "MULTILEADER",
+        SemanticGeometry::Table(_) => "TABLE",
         SemanticGeometry::Image { .. } => "IMAGE",
         SemanticGeometry::Mask { .. } => "MASK",
     }

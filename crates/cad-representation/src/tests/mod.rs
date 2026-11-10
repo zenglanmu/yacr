@@ -394,6 +394,7 @@ fn image_entity(id: u128, file: Option<&str>, visible: bool) -> DbEntity {
             file: file.map(str::to_string),
             clip: None,
             visible,
+            adjust: ImageAdjust::default(),
         },
     )
 }
@@ -419,6 +420,7 @@ fn image_entity_with_clip(id: u128, file: Option<&str>, clip: Option<ImageClip>)
             file: file.map(str::to_string),
             clip,
             visible: true,
+            adjust: ImageAdjust::default(),
         },
     )
 }

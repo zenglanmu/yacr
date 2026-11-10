@@ -11,6 +11,7 @@
 
 use super::super::helpers::{self, distance, normalize_signed};
 use super::super::*;
+use super::corner_curve::{plan_fillet_curve_curve, positive_z_normal, RoundCurve};
 use cad_geometry::{infinite_line_intersection, LineIntersection};
 
 /// Map the shared two-line planner's result onto this module's plan type.
@@ -152,7 +153,7 @@ pub(super) struct TwoLineInput {
     pub pick_second: Point3,
 }
 
-fn pt(x: f64, y: f64, z: f64) -> Point3 {
+pub(super) fn pt(x: f64, y: f64, z: f64) -> Point3 {
     Point3 { x, y, z }
 }
 
@@ -476,12 +477,17 @@ pub(super) fn plan_fillet_two_line(
             tol,
             line_is_first: false,
         }),
-        (first, second) => Err(format!(
-            "FILLET.unsupported_pair: {}/{} fillets are not implemented (line↔line, \
-             line↔circle and line↔arc are)",
-            first.label(),
-            second.label()
-        )),
+        (first, second) => match (RoundCurve::resolve(first), RoundCurve::resolve(second)) {
+            (Some(first), Some(second)) => {
+                plan_fillet_curve_curve(first, pick_first, second, pick_second, radius, trim, tol)
+            }
+            _ => Err(format!(
+                "FILLET.unsupported_pair: {}/{} fillets are not implemented (line↔line, \
+                 line↔circle, line↔arc, circle↔circle, circle↔arc and arc↔arc are)",
+                first.label(),
+                second.label()
+            )),
+        },
     }
 }
 
@@ -582,7 +588,7 @@ fn plan_fillet_lines(
     })
 }
 
-fn arc(center: Point3, radius: f64, start: f64, sweep: f64) -> SemanticGeometry {
+pub(super) fn arc(center: Point3, radius: f64, start: f64, sweep: f64) -> SemanticGeometry {
     SemanticGeometry::Arc {
         center,
         normal: pt(0.0, 0.0, 1.0),
@@ -880,9 +886,20 @@ fn line_circle_intersections(
         .collect()
 }
 
+/// The along-arc distance from `start` to `point` in the sweep's direction.
+pub(super) fn arc_position(center: Point3, start: f64, sweep: f64, point: Point3) -> f64 {
+    let sign = sweep.signum();
+    let angle = (point.y - center.y).atan2(point.x - center.x);
+    let mut value = (angle - start) * sign % std::f64::consts::TAU;
+    if value < 0.0 {
+        value += std::f64::consts::TAU;
+    }
+    value
+}
+
 /// Trim an arc to the tangent point on the pick side, returning the new
 /// `(start, sweep)`.
-fn trim_arc_to(
+pub(super) fn trim_arc_to(
     center: Point3,
     start: f64,
     sweep: f64,
@@ -890,18 +907,9 @@ fn trim_arc_to(
     pick: Point3,
     tol: f64,
 ) -> Result<GeometryUpdate, String> {
-    let angle = |p: Point3| (p.y - center.y).atan2(p.x - center.x);
     let sign = sweep.signum();
-    let position = |a: f64| {
-        let tau = std::f64::consts::TAU;
-        let mut value = (a - start) * sign % tau;
-        if value < 0.0 {
-            value += tau;
-        }
-        value
-    };
-    let tangent_position = position(angle(tangent));
-    let pick_position = position(angle(pick));
+    let tangent_position = arc_position(center, start, sweep, tangent);
+    let pick_position = arc_position(center, start, sweep, pick);
     if !tangent_position.is_finite() || tangent_position > sweep.abs() + 1e-9 {
         return Err(
             "FILLET.tangent_outside_arc: the tangent point does not lie on the picked arc".into(),
@@ -920,37 +928,59 @@ fn trim_arc_to(
             sweep: tangent_position * sign,
         })
     } else {
-        // The pick is beyond the tangent point: keep that portion instead.
+        // The pick is beyond the tangent point: keep that portion instead. A
+        // tangent at (or rounding onto) the arc's far end leaves no arc at all.
+        let new_sweep = (sweep.abs() - tangent_position) * sign;
+        if !new_sweep.is_finite() || new_sweep.abs() <= tol {
+            return Err(
+                "FILLET.degenerate_arc: the trim leaves a near-zero remainder of the picked arc"
+                    .into(),
+            );
+        }
         Ok(GeometryUpdate::Arc {
             start: start + tangent_position * sign,
-            sweep: (sweep.abs() - tangent_position) * sign,
+            sweep: new_sweep,
         })
     }
 }
 
 /// Resolve one FILLET pick to the supported curve kinds.
+///
+/// A CIRCLE/ARC participant must store a `+Z` normal: imported curves preserve an
+/// arbitrary extrusion normal whose angles are in that frame, and this construction
+/// only models `+Z`; the refusal therefore also covers the line↔circle/arc form.
 pub(super) fn fillet_curve(geometry: &SemanticGeometry) -> CadResult<Curve> {
     match geometry {
         SemanticGeometry::Line { start, end } => Ok(Curve::Line {
             start: *start,
             end: *end,
         }),
-        SemanticGeometry::Circle { center, radius, .. } => Ok(Curve::Circle {
-            center: *center,
-            radius: *radius,
-        }),
+        SemanticGeometry::Circle {
+            center,
+            normal,
+            radius,
+        } => {
+            positive_z_normal(normal, "CIRCLE")?;
+            Ok(Curve::Circle {
+                center: *center,
+                radius: *radius,
+            })
+        }
         SemanticGeometry::Arc {
             center,
+            normal,
             radius,
             start,
             sweep,
-            ..
-        } => Ok(Curve::Arc {
-            center: *center,
-            radius: *radius,
-            start: *start,
-            sweep: *sweep,
-        }),
+        } => {
+            positive_z_normal(normal, "ARC")?;
+            Ok(Curve::Arc {
+                center: *center,
+                radius: *radius,
+                start: *start,
+                sweep: *sweep,
+            })
+        }
         other => Err(CadError::Unsupported(format!(
             "FILLET needs a LINE, CIRCLE or ARC pick in the two-object form (a 2D polyline is \
              the separate FILLET POLYLINE command); {} is not supported (ellipse, elliptical \

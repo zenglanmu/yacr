@@ -271,6 +271,9 @@ impl<'a> ImporterBuilder<'a> {
             // A multileader has no MEASURE target: it is an annotation, not a
             // measurable curve (ADR 0019 decision G).
             SemanticGeometry::MultiLeader(_) => SupportStatus::Unsupported,
+            // A table has no MEASURE target: it is an annotation grid, not a
+            // measurable curve.
+            SemanticGeometry::Table(_) => SupportStatus::Unsupported,
             _ => semantic,
         };
         let entry = self
