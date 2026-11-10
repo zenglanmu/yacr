@@ -42,6 +42,7 @@ impl HostCore {
             drawing,
             view,
             layers,
+            wipeout_frames,
             selection,
             measurement,
             preview,
@@ -108,6 +109,7 @@ impl HostCore {
                 c.drawing(),
                 view,
                 c.session.layer_overrides.clone(),
+                c.session.drafting_extras.wipeout_frames(),
                 c.selection().clone(),
                 c.measurement_preview(),
                 c.session.draw_preview(),
@@ -119,6 +121,15 @@ impl HostCore {
         self.render.sync_drawing_with_edit(drawing, edit);
         self.render.apply_view_snapshot(view)?;
         self.render.set_layers(layers);
+        // `WIPEOUTFRAME` is session state with a display consumer: `ON` and
+        // `Display but not plot` draw the boundary frame in the display base,
+        // `OFF` does not. The plot path resolves its own flag (only `ON` plots
+        // the frame), so `Display but not plot` is display-only without a second
+        // session token.
+        self.render.set_wipeout_frames(matches!(
+            wipeout_frames,
+            cad_app::WipeoutFrames::On | cad_app::WipeoutFrames::DisplayNotPlot
+        ));
         // Build the overlay inputs with the *final* viewport bounds in one shot.
         // Passing `None` here and then calling `set_viewport_bounds` mutated the
         // overlay input twice per sync, so every idle tick bumped the render

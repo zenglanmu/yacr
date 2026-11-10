@@ -321,41 +321,6 @@ pub(crate) struct ArcStream {
     buffer_charge: GpuCharge,
 }
 
-/// One resident WIPEOUT mask: a tessellated fill plus the `f64` reference origin
-/// its stored positions are measured from.
-///
-/// A mask is **not** a [`GpuBatch`]: it is painted by the frame's final pass with
-/// `depth_compare: Always`, no depth write, and the clear colour (ADR 0022 D1),
-/// so it must never enter the ordered geometry plan. The fill is tessellated with
-/// the same even-odd fill solid HATCH uses (`cad_domain::hatch::fill_rings`), so a
-/// concave boundary does not leak.
-///
-/// A non-`inverted` mask is filled at upload from its boundary alone. An
-/// `inverted` mask fills the **complement**, which needs a ring covering the
-/// frame's visible world rect: its geometry is therefore built by the first frame
-/// that draws it (see `ensure_inverted_mask_fill`) and rebuilt only when the view
-/// leaves the resident ring.
-pub(crate) struct GpuMask {
-    /// Triangle list positions, relative to [`GpuMask::origin`]. `None` until an
-    /// inverted mask's first frame has built its complement fill.
-    vertices: Option<wgpu::Buffer>,
-    vertex_count: u32,
-    origin: [f64; 3],
-    /// The untransformed world boundary, retained for the inverted fill (the ring
-    /// depends on the view, so it cannot be baked once).
-    polygon: Arc<[Point3]>,
-    /// `true` for clip mode Inside: mask everything outside `polygon`.
-    inverted: bool,
-    /// World-XY rectangle the resident inverted fill guarantees to cover. `None`
-    /// for a non-inverted mask or before the first inverted fill.
-    covered: Option<MaskCoverage>,
-    /// GPU memory charge of the resident fill geometry, or `None` while an
-    /// inverted mask has no ring yet.
-    // Held only for its `Drop` impl, which releases the ledger charge.
-    #[allow(dead_code)]
-    vertex_charge: Option<GpuCharge>,
-}
-
 /// One accelerated line storage segment: a bind group over a
 /// `VERTEX | STORAGE` buffer holding the [`PulledLine`] records of a run of
 /// whole instance streams. A real scene can exceed
@@ -571,6 +536,10 @@ pub struct Renderer {
     /// write, fragment output = the clear colour (ADR 0022 C1). Drawn in the
     /// frame's final pass.
     mask_pipeline: Option<wgpu::RenderPipeline>,
+    /// Boundary-frame pipeline (`WIPEOUTFRAME`): the shared AA line shader and
+    /// quad vertex layout with the mask pass's `depth_compare: Always` and no
+    /// depth write, so frames paint after the fills.
+    mask_frame_pipeline: Option<wgpu::RenderPipeline>,
     /// Bind-group layout for group 2 of the image pipeline.
     image_texture_layout: Option<wgpu::BindGroupLayout>,
     /// Shared linear, clamp-to-edge sampler for every uploaded image.
@@ -991,10 +960,12 @@ mod tests;
 
 mod api_types;
 mod gpu_image;
+mod gpu_mask;
 mod renderer_state;
 mod uniform_arena;
 
 pub use api_types::*;
 pub(crate) use gpu_image::*;
+pub(crate) use gpu_mask::GpuMask;
 pub use renderer_state::*;
 pub(crate) use uniform_arena::*;

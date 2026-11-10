@@ -205,6 +205,15 @@ pub struct RepresentationContext {
     /// the SDF arc slice (see `docs/adr/0008-sdf-conic-rendering.md`); it never
     /// changes eligibility, only which draw a conic takes.
     pub force_chord_conics: bool,
+    /// Whether a WIPEOUT mask carries a drawable **boundary frame** in addition
+    /// to its fill (`WIPEOUTFRAME` 1/2 versus 0).
+    ///
+    /// The display path is built with this set for `ON` and `DisplayNotPlot`
+    /// (both display the frame); the vector-plot path is built with it set only
+    /// for `ON`, which is exactly what makes `DisplayNotPlot` display-only. The
+    /// primitive carries the resolved flag so the renderer/plot consumer never
+    /// re-reads session state.
+    pub wipeout_frames: bool,
 }
 
 /// The active annotation scale a host applies while building representations.
@@ -239,6 +248,7 @@ impl RepresentationContext {
             packed_line_segments: false,
             conic_stats: None,
             force_chord_conics: false,
+            wipeout_frames: false,
         }
     }
 
@@ -276,6 +286,15 @@ impl RepresentationContext {
     /// Apply the drawing's active annotation scale while building.
     pub fn with_annotation_scale(mut self, scale: AnnotationScaleRef) -> Self {
         self.annotation_scale = Some(scale);
+        self
+    }
+
+    /// Emit a drawable boundary frame on every WIPEOUT mask (`WIPEOUTFRAME`
+    /// 1/2). The display build sets this for `ON` and `DisplayNotPlot`; the
+    /// vector-plot build sets it only for `ON`, which keeps `DisplayNotPlot`
+    /// out of the plot without a second flag.
+    pub fn with_wipeout_frames(mut self, enabled: bool) -> Self {
+        self.wipeout_frames = enabled;
         self
     }
 }

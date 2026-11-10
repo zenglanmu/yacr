@@ -522,6 +522,7 @@ impl Renderer {
             + chunk_slot_count
             + arc_slot_count
             + self.masks.len()
+            + masks::framed_mask_slot_count(&self.masks)
             + overlay_plan.drawn_batches()
             // The renderer-owned cursor's single uniform slot (not an overlay
             // batch; `drawn_batches()` excludes it).
@@ -663,20 +664,18 @@ impl Renderer {
             self.uniforms.write_slot(next_slot, &uniform);
             next_slot += 1;
         }
-        // Wipeout mask uniforms: one slot per resident mask, carrying the mask's
-        // `f64` origin through the same camera-relative subtraction as a batch.
-        // The tint IS this frame's clear colour, so a mask paints the configured
-        // background (ADR 0022 D1) and the representation layer never names a
-        // colour. `key_flags` is zero: a mask carries no pick key.
-        let mut mask_slots: Vec<u32> = Vec::with_capacity(self.masks.len());
+        // Wipeout mask uniforms: one fill slot per resident mask, plus one
+        // frame slot per framed mask (the frame colour travels there).
         let clear_color_value = target.clear_color();
-        for mask in &self.masks {
-            mask_slots.push(next_slot as u32);
-            let matrix = projection.batch_matrix_f64(mask.origin);
-            let uniform = uniform_bytes(&matrix, clear_color_value, [0, 0, 0, 0], light);
-            self.uniforms.write_slot(next_slot, &uniform);
-            next_slot += 1;
-        }
+        let (mask_slots, mut next_slot) = masks::write_mask_uniforms(
+            &self.masks,
+            &mut self.uniforms,
+            &projection,
+            clear_color_value,
+            light,
+            line_wpp_bits,
+            next_slot,
+        );
         // Overlay uniforms: one slot per overlay batch, after every base slot.
         // The overlay is legacy geometry (no runs), so the legacy per-batch
         // `draw_batch` path is its only reader; the shape is identical to the
@@ -775,8 +774,8 @@ impl Renderer {
         // contributes one draw per run). Everything else stays one draw per batch.
         let legacy_opaque = opaque_batches.saturating_sub(base_outcome.converted_batches);
         // Every resident mask is one draw in the frame's final pass, whatever the
-        // page, so the count is included in `draw_calls`.
-        let mask_draws = self.masks.len() as u64;
+        // page; a framed mask adds its boundary draw after the fill.
+        let (mask_draws, mask_frames) = masks::mask_draw_counts(&self.masks);
 
         // Present the copy of the base plus the transient overlay (see
         // `overlay.rs`). The copy runs on every render, even when the base page
@@ -846,6 +845,7 @@ impl Renderer {
             + transparent_batches
             + draw_images.len()
             + mask_draws as usize
+            + mask_frames as usize
             + overlay.draw_calls
             + overlay.transient_draws as usize) as u64;
         let encode_ms = base_outcome.encode_ms + overlay.encode_ms;
@@ -956,6 +956,7 @@ impl Renderer {
             invisible_batches,
             image_batches: draw_images.len(),
             mask_draws,
+            mask_frames,
             cull_chunks_total: cull.total() as u64,
             cull_chunks_kept: cull.kept(),
             lineweight_not_drawn: lineweight_not_drawn.clone(),

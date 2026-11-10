@@ -237,6 +237,23 @@ impl RenderSessionHandle {
         state.advance_input();
         true
     }
+
+    /// Set the display `WIPEOUTFRAME` state (whether each mask draws its
+    /// boundary frame). Returns whether the flag changed.
+    ///
+    /// The flag is part of `BaseInputIdentity` and the preparation key, so a
+    /// change invalidates the published base and schedules a re-preparation; an
+    /// unchanged value is a no-op. Only the display half lives here — the plot
+    /// path resolves `WIPEOUTFRAME 2` separately.
+    pub fn set_wipeout_frames(&self, enabled: bool) -> bool {
+        let mut state = self.0.borrow_mut();
+        if state.wipeout_frames == enabled {
+            return false;
+        }
+        state.wipeout_frames = enabled;
+        state.advance_input();
+        true
+    }
     pub fn set_overlays(&self, overlays: OverlayInputs) -> bool {
         let mut state = self.0.borrow_mut();
         if state.overlays == overlays {

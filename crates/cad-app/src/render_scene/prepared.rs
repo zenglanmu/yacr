@@ -48,6 +48,9 @@ pub(super) struct SceneVersion {
     /// `cad-db`.
     pub(super) vendor: Option<u64>,
     pub(super) vendor_identity: usize,
+    /// Display `WIPEOUTFRAME` state fed to the representation context. A change
+    /// adds/removes the mask boundary frame, so it must rebuild the base.
+    pub(super) wipeout_frames: bool,
 }
 
 /// One staged CPU publication: the resident base, its transient overlay and the

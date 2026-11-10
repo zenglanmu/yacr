@@ -300,6 +300,56 @@ fn image_is_reported_not_dropped() {
 }
 
 #[test]
+fn mask_without_frame_reports_only_the_skipped_fill() {
+    // `WIPEOUTFRAME 0` (OFF) and the plot build of `WIPEOUTFRAME 2`
+    // (DISPLAY) both arrive here with `frame = false`: the fill is still
+    // honestly named as unsupported, and no frame geometry is invented.
+    let mut fragment = lines(vec![]);
+    fragment.primitive = DisplayPrimitive::Mask {
+        boundary: Arc::from(
+            vec![paper(0.0, 0.0), paper(10.0, 0.0), paper(10.0, 10.0)].into_boxed_slice(),
+        ),
+        inverted: false,
+        frame: false,
+    };
+    let document = build_vector_document(&representation(vec![fragment]), &simple_page()).unwrap();
+    assert!(
+        document.paths.is_empty(),
+        "a frame-less mask must not emit boundary geometry"
+    );
+    assert_eq!(
+        document.diagnostics[0].code,
+        vector_diagnostic::MASK_UNSUPPORTED
+    );
+}
+
+#[test]
+fn mask_with_frame_plots_the_closed_boundary_and_names_the_skipped_fill() {
+    // `WIPEOUTFRAME 1` (ON): the boundary frame is real vector geometry, so it
+    // is plotted as a polyline whose last point repeats the first. The fill is
+    // still skipped and named.
+    let boundary = vec![paper(0.0, 0.0), paper(10.0, 0.0), paper(10.0, 10.0)];
+    let mut fragment = lines(vec![]);
+    fragment.primitive = DisplayPrimitive::Mask {
+        boundary: Arc::from(boundary.into_boxed_slice()),
+        inverted: false,
+        frame: true,
+    };
+    let document = build_vector_document(&representation(vec![fragment]), &simple_page()).unwrap();
+    assert_eq!(document.paths.len(), 1, "the frame is one polyline");
+    assert_eq!(
+        document.paths[0].points.len(),
+        4,
+        "the closed ring repeats its first point"
+    );
+    assert_eq!(document.paths[0].points[0], document.paths[0].points[3]);
+    assert_eq!(
+        document.diagnostics[0].code,
+        vector_diagnostic::MASK_UNSUPPORTED
+    );
+}
+
+#[test]
 fn unexpanded_instance_is_reported_not_dropped() {
     let representation = representation(vec![fragment(DisplayPrimitive::Instance {
         block: cad_domain::BlockId(1),

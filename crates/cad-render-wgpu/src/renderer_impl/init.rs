@@ -39,6 +39,7 @@ impl Renderer {
             mesh_pipeline_merged_mirrored: None,
             image_pipeline: None,
             mask_pipeline: None,
+            mask_frame_pipeline: None,
             image_texture_layout: None,
             image_sampler: None,
             target: None,
@@ -561,65 +562,12 @@ impl Renderer {
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
-        // Wipeout mask pipeline (ADR 0022 C1). This is the frame's **final**
-        // pass, and its state is the whole point of the decision:
-        //
-        // * `depth_compare = Always` — the shared pass is depth-tested with
-        //   depth writes (meshes `Less`, lines `LessEqual`), so a filled quad
-        //   drawn later at the same world z is rejected. A mask must ignore what
-        //   is already in the depth buffer and cover the pixels beneath it.
-        // * `depth_write_enabled = false` — a mask hides what was painted
-        //   before it; it must not add its own depth or it would occlude later
-        //   masks at the same depth.
-        // * `cull_mode = None` — the even-odd fill emits consistently wound
-        //   triangles, but a mask must never be dropped by winding.
-        // * fragment output = the clear colour (the renderer owns the
-        //   background; `cad-representation` stays colourless).
-        let mask_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("cad-mask"),
-            source: wgpu::ShaderSource::Wgsl(MASK_SHADER.into()),
-        });
-        let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("cad-mask-pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &mask_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[Some(position_only_layout())],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &mask_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: self.target_format,
-                    // Blended over: with the clear colour's alpha (1.0) this is
-                    // a replace, so the region equals the clear colour exactly.
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let (mask_pipeline, mask_frame_pipeline) = Self::create_mask_pipelines(
+            &device,
+            &pipeline_layout,
+            &line_shader,
+            self.target_format,
+        );
 
         // A successful attachment establishes a new device generation. No
         // batch/attachment from the previous generation may survive, even if
@@ -686,6 +634,7 @@ impl Renderer {
         self.mesh_pipeline_merged_mirrored = Some(mesh_pipeline_merged_mirrored);
         self.image_pipeline = Some(image_pipeline);
         self.mask_pipeline = Some(mask_pipeline);
+        self.mask_frame_pipeline = Some(mask_frame_pipeline);
         self.image_texture_layout = Some(image_texture_layout);
         self.image_sampler = Some(image_sampler);
         self.active_backend = Some(caps.actual);

@@ -1,5 +1,15 @@
 AD
 
+## 2026-11-10 WIPEOUT frame 真实显示/出图
+
+- **行为**：`WIPEOUT Frames ON` = mask 填充 + 边界边框（显示与矢量出图都输出闭合边界折线）；`OFF` = 仅填充；`DISPLAY` = 显示边框但出图不画。边框在 mask fill **之后**用独立 Always-depth 线管线绘制（普通 Lines 会被 mask 的 clear-color 覆盖），不是假线框。
+- **链路**：session token → `cad-host` sync/plot context → `RenderSessionHandle`/`BaseInputIdentity`/preparation key → `CadSceneController`/`SceneVersion` → `RepresentationContext::wipeout_frames` → `Mask::frame` → `MaskBatch::frame` → `GpuMask.frame_*` + frame pipeline。`DISPLAY` 在 plot context 中按 `mode == On` 关闭边框。
+- **移除**：`wipeout.frames_display_only` 诊断与“无边框几何/出图通道”旧声明；命令仍是 session-only（不写库/不升修订/不撤销）。
+- **已运行**：`cargo test -p cad-representation -p cad-scene -p cad-app -p cad-engine -p cad-host`、`cad-render-wgpu --test-threads=1`（48 headless，含 ON/OFF 像素契约）、`cargo test -p cad-cli-tools`、`cargo clippy`（七 crate）、fmt、file-size/i18n/architecture、`npm test`（1456）全绿。
+- **NOT VERIFIED**：真实 GPU/窗口/像素验收；headless 像素只是软件 GPU 契约；Windows/macOS/Android/Web 运行时未验证。
+- **提交**：见本轮 WIPEOUT commit。
+
+
 ## 2026-11-10 TABLE 创建 + TABLEDIT
 
 - **TABLE / -TABLE 真实创建**：`TABLE <rows> <cols> <col_width> <row_height> <x> <y>`（`-TABLE` 同实现），+X/+Z frame、空单元格、Standard、默认文字高度、四边可见单线；上限 1000×1000 且 ≤100,000 单元格；经共享 create funnel，一条事务/一步撤销；`table.created`/`-table.created`。无对话框/创建时合并/单元格样式。

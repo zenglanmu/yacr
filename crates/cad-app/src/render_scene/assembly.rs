@@ -131,7 +131,7 @@ pub fn build_scene_with_space_and_images_and_vendor(
     vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<SceneDelta> {
     build_scene_with_space_and_images_and_vendor_indexed(
-        database, stamp, fonts, images, overrides, space, vendor,
+        database, stamp, fonts, images, overrides, space, vendor, false,
     )
     .map(|(delta, _ranges)| delta)
 }
@@ -153,9 +153,19 @@ pub(crate) fn build_scene_with_space_and_images_and_vendor_indexed(
     overrides: &LayerOverrideSet,
     space: SpaceSelection,
     vendor: Option<&VendorRepresentationStore>,
+    wipeout_frames: bool,
 ) -> CadResult<(SceneDelta, BTreeMap<EntityId, Range<usize>>)> {
-    build_scene_stats_with_vendor_indexed(database, stamp, fonts, images, overrides, space, vendor)
-        .map(|(delta, _stats, ranges)| (delta, ranges))
+    build_scene_stats_with_vendor_indexed(
+        database,
+        stamp,
+        fonts,
+        images,
+        overrides,
+        space,
+        vendor,
+        wipeout_frames,
+    )
+    .map(|(delta, _stats, ranges)| (delta, ranges))
 }
 
 /// Like [`build_scene_with_space_and_images`] but also returns read-only
@@ -188,8 +198,10 @@ pub fn build_scene_stats_with_vendor(
     space: SpaceSelection,
     vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<(SceneDelta, SceneAssemblyStats)> {
-    build_scene_stats_with_vendor_indexed(database, stamp, fonts, images, overrides, space, vendor)
-        .map(|(delta, stats, _ranges)| (delta, stats))
+    build_scene_stats_with_vendor_indexed(
+        database, stamp, fonts, images, overrides, space, vendor, false,
+    )
+    .map(|(delta, stats, _ranges)| (delta, stats))
 }
 
 /// [`build_scene_stats_with_vendor`] plus per-entity ownership of the emitted
@@ -204,6 +216,7 @@ pub(super) fn build_scene_stats_with_vendor_indexed(
     overrides: &LayerOverrideSet,
     space: SpaceSelection,
     vendor: Option<&VendorRepresentationStore>,
+    wipeout_frames: bool,
 ) -> CadResult<(
     SceneDelta,
     SceneAssemblyStats,
@@ -212,7 +225,8 @@ pub(super) fn build_scene_stats_with_vendor_indexed(
     let registry = ProviderRegistry::with_default_provider();
     let mut context =
         RepresentationContext::new(stamp.document, TolerancePolicy::default(), stamp.clone())
-            .with_packed_line_segments();
+            .with_packed_line_segments()
+            .with_wipeout_frames(wipeout_frames);
     if let Some(fonts) = &fonts {
         context = context.with_fonts(Arc::clone(fonts));
     }
@@ -327,6 +341,7 @@ pub(super) fn build_model_entity_scene(
     images: Option<Arc<DecodedImageCache>>,
     overrides: &LayerOverrideSet,
     vendor: Option<&VendorRepresentationStore>,
+    wipeout_frames: bool,
 ) -> CadResult<SceneDelta> {
     let mut cache = SceneCache::new(SceneBudget::default());
     if !overrides.is_entity_visible(database, entity) || database.entity_hidden(entity.id) {
@@ -340,7 +355,8 @@ pub(super) fn build_model_entity_scene(
     let registry = ProviderRegistry::with_default_provider();
     let mut context =
         RepresentationContext::new(stamp.document, TolerancePolicy::default(), stamp.clone())
-            .with_packed_line_segments();
+            .with_packed_line_segments()
+            .with_wipeout_frames(wipeout_frames);
     if let Some(fonts) = &fonts {
         context = context.with_fonts(fonts.clone());
     }

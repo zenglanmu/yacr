@@ -209,7 +209,12 @@ impl SceneCache {
                 previous_was_conic = false;
                 continue;
             }
-            if let DisplayPrimitive::Mask { boundary, inverted } = &fragment.primitive {
+            if let DisplayPrimitive::Mask {
+                boundary,
+                inverted,
+                frame,
+            } = &fragment.primitive
+            {
                 // A WIPEOUT mask is not geometry the frame plan orders: it paints
                 // last, with `depth_compare: Always`, in the renderer's clear
                 // colour (ADR 0022). It is carried with its **world boundary**
@@ -223,6 +228,7 @@ impl SceneCache {
                 delta.masks.push(MaskBatch {
                     polygon: boundary.clone(),
                     inverted: *inverted,
+                    frame: frame.then_some(sanitize_color(fragment.color)),
                     draw_order: fragment.draw_order,
                     sources: vec![fragment.source.clone()],
                 });

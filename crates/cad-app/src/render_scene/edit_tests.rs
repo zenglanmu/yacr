@@ -361,6 +361,7 @@ fn appendable_delta_requires_no_image_or_mask_draw_items() {
         masks: vec![MaskBatch {
             polygon: Arc::from(vec![p(0.0, 0.0), p(2.0, 0.0), p(2.0, 2.0)]),
             inverted: false,
+            frame: None,
             draw_order: 0,
             sources: vec![],
         }],

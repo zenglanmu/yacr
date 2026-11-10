@@ -453,6 +453,13 @@ pub struct FrameStats {
     /// write and the clear colour (ADR 0022 C1). Masks do not interleave with
     /// geometry draw order in this slice.
     pub mask_draws: u64,
+    /// Wipeout mask **boundary frames** drawn this frame (`WIPEOUTFRAME` 1/2).
+    ///
+    /// A framed mask issues one extra draw after its fill, inside the same
+    /// `depth_compare: Always` pass, with the resolved frame colour and the
+    /// shared anti-aliased line quads. `0` when no mask carries a frame
+    /// (`WIPEOUTFRAME 0`).
+    pub mask_frames: u64,
     /// Chunks (instance streams + merged mesh chunks + SDF conic streams) tested
     /// by this frame's view cull. `0` when the scene has no chunked geometry.
     /// Reporting only; `kept + culled == total`.

@@ -176,6 +176,10 @@ struct BaseInputIdentity {
     fonts_generation: u64,
     images_generation: u64,
     layers: LayerOverrideSet,
+    /// Display `WIPEOUTFRAME` state: whether each base mask draws its boundary
+    /// frame (`true` for `ON`/`Display but not plot`). Session state, but part of
+    /// this identity because it changes the base geometry.
+    wipeout_frames: bool,
 }
 
 impl BaseInputIdentity {
@@ -190,6 +194,7 @@ impl BaseInputIdentity {
             fonts_generation: state.fonts_generation,
             images_generation: state.images_generation,
             layers: state.layers.clone(),
+            wipeout_frames: state.wipeout_frames,
         }
     }
 }
@@ -214,6 +219,9 @@ struct State {
     fonts_generation: u64,
     images_generation: u64,
     layers: LayerOverrideSet,
+    /// Display `WIPEOUTFRAME` state, fed to the scene controller. A flip
+    /// rebuilds the base (the mask boundary frame is base geometry).
+    wipeout_frames: bool,
     overlays: OverlayInputs,
     overlay_revision: u64,
     /// Monotonic revision of the **scene identity**. Advances only when an input
@@ -309,6 +317,7 @@ impl Default for State {
             fonts_generation: 0,
             images_generation: 0,
             layers: LayerOverrideSet::new(),
+            wipeout_frames: false,
             overlays: OverlayInputs::default(),
             overlay_revision: 0,
             input_revision: 0,
@@ -632,6 +641,7 @@ fn preparation_input(state: &State) -> PreparationInput {
         images_generation: state.images_generation,
         vendor: state.vendor.clone(),
         layers: state.layers.clone(),
+        wipeout_frames: state.wipeout_frames,
         overlays: state.overlays.clone(),
         edit: state.latest_edit.clone(),
     }
@@ -643,6 +653,7 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
     let input = preparation_input(state);
     let mut candidate = state.controller.clone();
     candidate.set_vendor_representations(input.vendor.clone());
+    candidate.set_wipeout_frames(input.wipeout_frames);
     candidate.prepare_shared_with_overlays_and_images_and_edit(
         input.drawing.clone(),
         input.document,
@@ -664,6 +675,7 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
     let token = state.content_revision;
     let mut candidate = state.controller.clone();
     candidate.set_vendor_representations(state.vendor.clone());
+    candidate.set_wipeout_frames(state.wipeout_frames);
     candidate.prepare_shared_with_overlays_and_images_and_edit(
         state.incoming.borrow().clone(),
         state.view.document,

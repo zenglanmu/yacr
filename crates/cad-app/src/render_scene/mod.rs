@@ -26,6 +26,7 @@ mod resident;
 mod retire;
 #[cfg(test)]
 mod retire_tests;
+mod settings;
 use retire::{
     flags_fingerprint, merge_retired_flags, retire_is_hideable, retire_keeps_base,
     RETIRED_COMPACTION_THRESHOLD,
@@ -35,6 +36,8 @@ mod update;
 mod update_tests;
 #[cfg(test)]
 mod vendor_tests;
+#[cfg(test)]
+mod wipeout_tests;
 pub use overlay::*;
 pub use resident::ResidentScene;
 
@@ -115,6 +118,11 @@ pub struct CadSceneController {
     images: Option<Arc<DecodedImageCache>>,
     /// Derived vendor display snapshot (display-only; never `cad-db` state).
     vendor: Option<Arc<VendorRepresentationStore>>,
+    /// Display `WIPEOUTFRAME` state: whether the base draws each WIPEOUT's
+    /// boundary frame in addition to its fill. It is session state (never
+    /// `cad-db`), so it is part of [`SceneVersion`] instead of the scene
+    /// identity; a flip forces a base rebuild.
+    wipeout_frames: bool,
     /// Visible POINT positions derived from the displayed drawing
     /// (ADR 0015 decision E). Cached because they can only change when the base
     /// changes; a camera-only overlay rebuild reuses them instead of rescanning
@@ -129,19 +137,6 @@ pub struct CadSceneController {
 }
 
 impl CadSceneController {
-    /// Immutable database adoption lets a camera-only prepare reuse the resident
-    /// base without re-deriving scene state. Retaining the Arc prevents pointer
-    /// reuse from hiding a new open, even when the database's id/revision happen
-    /// to match.
-    #[allow(clippy::too_many_arguments)]
-    /// Install the derived vendor snapshot that the next base build must merge.
-    ///
-    /// The caller replaces the whole snapshot; the controller compares its
-    /// revision in [`SceneVersion`] so an unchanged store is free.
-    pub fn set_vendor_representations(&mut self, vendor: Option<Arc<VendorRepresentationStore>>) {
-        self.vendor = vendor;
-    }
-
     pub fn prepare_shared(
         &mut self,
         doc: Option<Arc<DrawingDatabase>>,
@@ -238,9 +233,6 @@ impl CadSceneController {
         self.images = images;
         self.prepare_with_overlays_doc(doc.as_deref(), document, fonts, layers, space, overlays)
     }
-    pub fn fonts_changed(&mut self) {
-        self.fonts_revision += 1;
-    }
 
     #[allow(clippy::too_many_arguments)]
     pub fn prepare(
@@ -327,6 +319,7 @@ impl CadSceneController {
                 .vendor
                 .as_ref()
                 .map_or(0, |store| Arc::as_ptr(store) as usize),
+            wipeout_frames: self.wipeout_frames,
         });
         if let Some(db) = doc {
             crate::validate_space(db, space)?;
@@ -404,6 +397,7 @@ impl CadSceneController {
                 self.images.clone(),
                 layers,
                 self.vendor.as_deref(),
+                self.wipeout_frames,
             )
             .map(|batches| (id, range, batches))
         });
@@ -438,6 +432,7 @@ impl CadSceneController {
                 && old.images == new.images
                 && old.vendor == new.vendor
                 && old.vendor_identity == new.vendor_identity
+                && old.wipeout_frames == new.wipeout_frames
                 && self
                     .model_max_order
                     .is_none_or(|order| entity.draw_order > order))
@@ -472,6 +467,7 @@ impl CadSceneController {
                                 layers,
                                 space,
                                 self.vendor.as_deref(),
+                                self.wipeout_frames,
                             )?;
                         Ok((delta, EntityBatchIndex::from_ranges(ranges)))
                     }
@@ -518,6 +514,7 @@ impl CadSceneController {
                     self.images.clone(),
                     layers,
                     self.vendor.as_deref(),
+                    self.wipeout_frames,
                 )?;
                 if appendable_delta(&delta) {
                     // O(changed): keep the predecessor's prefix `Arc` and push the

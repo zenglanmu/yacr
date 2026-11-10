@@ -438,7 +438,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `GRADIENT` | 部分实现 | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5）；边界必须在 +Z 平面；一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 | 无渐变预览、无 `-GRADIENT` 选项提示、无 .pat/关联性；非 `+Z` 平面/非闭合/退化边界按名拒绝；证据只有 `cad-app`/`cad-ui-core`/前端契约测试 |
 | `HATCHEDIT` | 部分实现 | 恰好一个直接可寻址的模型空间 HATCH；`ANGLE`/`SCALE`/`SOLID`/`GRADIENT` 等既有选项；`ADDBOUNDARIES`/`REMOVEBOUNDARIES` 现在真实：一个选中 hatch + 其余选中闭合实体为边界，重建 loop 集，一条事务/一步撤销 | 无交互对话框；`Origin` 无字段、`Associate`/`Annotative` 无模型、Boundary draw order 拒绝；证据只有契约测试 |
 | `HATCHTOBACK` | 部分实现 | 把所有模型空间 HATCH 的 draw order 排到所有非 HATCH 对象之后，保留相对顺序；一条事务/一步撤销 | 图纸空间/块空间不重排；无 Draw Order 对话框 |
-| `WIPEOUT` | 部分实现 | 开放多边形捕获（≥3 点、`+Z` 平面）生成一个 `AcDbWipeout`（`Mask{inverted:false}`） | 无 Frames/ON/OFF/display-not-plot、无 Polyline/Erase Polyline 选项、无自交拒绝、无既有 wipeout 拾取 |
+| `WIPEOUT` | 部分实现 | 开放多边形捕获（≥3 点、`+Z` 平面）生成一个 `AcDbWipeout`（`Mask{inverted:false}`）；`Frames ON/OFF/DISPLAY` 真实（显示/出图分离） | 无 `FRAME` 覆盖、无 Polyline/Erase Polyline 选项、无自交拒绝、无既有 wipeout 拾取 |
 | `POLYGON CIRCUMSCRIBED` | 部分实现 | 独立选择子：中心 + 切圆上一点，用 `R=r/cos(π/n)`、顶点在 `θ±π/n` 生成闭合外切正多边形 | `POLYGON` 的 `Edge` 分支、数值半径的捕捉旋转规则仍未实现 |
 | `DIMROTATED` | 部分实现 | 三次拾取（两原点 + 尺寸线位置）+ 会话 `dimRotation` 角度，复用 `DimensionKind::Linear{rotation}` 合成一个非关联尺寸 | 无 AutoCAD 的选项子提示；非 `+Z` 平面/退化输入按名拒绝 |
 | `DIMSPACE` | 实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；一条事务/一步撤销 | 模型空间；关联重排未实现（全局范围）；径向/坐标/混合类型按名拒绝 |
@@ -1713,6 +1713,6 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `DIMTEDIT` | 部分实现 | `MOVE`（新位置）/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 仅线性/对齐/半径/直径；Angle 固定文字中心，`0` 复位；一条事务/一步撤销 | **字形级对齐未实现**（只移动锚点；标注模型无 `h_align`）；无 Oblique |
 | `HATCHEDIT` | 部分实现 | 多目标；`Style`/`PatternType`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder Behind/Front`/`Recreate Boundary`/`Separate Hatches`；一条事务/一步撤销 | **`Add Boundaries`/`Remove Boundaries`** 无法从拾取重建环集；`Origin` 无字段；`Associate`/`Disassociate`/`Annotative` 无模型；Boundary draw order 拒绝 |
 | `REVCLOUD` | 部分实现 | `Object`/`Rectangular`/`Polygonal`/`Freehand`/`Arc Length`/`Style`/`Modify`；等弦弧（106.26°）；默认弦长 = 源路径 bbox 对角线 5%（声明替代）；一条事务/一步撤销 | **`Calligraphy` 样式未实现**（多段线无样式字段）；`Modify` 用确定性规则替代交互拾取；`RECT/POLY/FREEHAND/MODIFY` 的路径来自唯一选中 LWPOLYLINE |
-| `WIPEOUT` | 部分实现 | `Frames ON/OFF/DISPLAY` 状态、`Polyline` + `Erase Polyline Yes/No`、自由点串 | **边框几何与出图通道未实现**：`DISPLAY` 目前只记录状态，遮罩始终渲染；`FRAME` 覆盖无命令 |
+| `WIPEOUT` | 部分实现 | `Frames ON/OFF/DISPLAY` 真实：ON = 填充 + 边框（显示与矢量出图边界折线），OFF = 仅填充，DISPLAY = 显示边框、出图不画；边框在 mask fill 之后用 Always-depth 线管线绘制；`Polyline` + `Erase Polyline Yes/No`、自由点串 | `FRAME` 覆盖无命令；遮罩填充在矢量出图仍无背景 flood（边界可出图）；无真实 GPU/像素验收 |
 | `TEXTMASK` | 部分实现 | 偏移因子（默认 0.35）、`Wipeout` 遮罩、文本+遮罩会话 `GROUP`、重跑替换旧遮罩、`TEXTUNMASK` 按组优先；一条事务/一步撤销 | **`3dface`/`Solid` 遮罩类型未实现**（无对应实体）；`GROUP` 为会话存储（DWG 不落关联记录） |
 | `TXT2MTXT` | 部分实现 | `COMBINE`/`SEPARATE`、`ORDER TOPDOWN/SELECT`、`WRAP`（`wrap_width`）、源对象在同一事务删除 | **`UNIFORM` 强制行距未实现**（文字无行距字段） |

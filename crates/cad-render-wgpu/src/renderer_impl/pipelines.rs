@@ -100,6 +100,138 @@ impl Renderer {
         self.gpu_time_feature_override = features;
     }
 
+    /// Create the WIPEOUT mask pass pipelines: the fill and, when
+    /// `WIPEOUTFRAME` is enabled, the boundary frame.
+    ///
+    /// Both are the frame's **final** pass and share
+    /// `depth_compare: Always`, `depth_write_enabled: false`:
+    ///
+    /// * the fill ignores the depth buffer and paints the clear colour;
+    /// * the frame reuses the shared anti-aliased line shader and pre-expanded
+    ///   quad layout (ADR-0009), so it rasterizes identical line ink and paints
+    ///   **after** the fill without ever being covered by it. It is deliberately
+    ///   not `PolygonMode::Line`, which the WebGL2 backend does not support.
+    pub(super) fn create_mask_pipelines(
+        device: &wgpu::Device,
+        layout: &wgpu::PipelineLayout,
+        line_shader: &wgpu::ShaderModule,
+        target_format: wgpu::TextureFormat,
+    ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
+        // Wipeout mask pipeline (ADR 0022 C1). This is the frame's **final**
+        // pass, and its state is the whole point of the decision:
+        //
+        // * `depth_compare = Always` — the shared pass is depth-tested with
+        //   depth writes (meshes `Less`, lines `LessEqual`), so a filled quad
+        //   drawn later at the same world z is rejected. A mask must ignore what
+        //   is already in the depth buffer and cover the pixels beneath it.
+        // * `depth_write_enabled = false` — a mask hides what was painted
+        //   before it; it must not add its own depth or it would occlude later
+        //   masks at the same depth.
+        // * `cull_mode = None` — the even-odd fill emits consistently wound
+        //   triangles, but a mask must never be dropped by winding.
+        // * fragment output = the clear colour (the renderer owns the
+        //   background; `cad-representation` stays colourless).
+        let mask_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cad-mask"),
+            source: wgpu::ShaderSource::Wgsl(MASK_SHADER.into()),
+        });
+        let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cad-mask-pipeline"),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: &mask_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(position_only_layout())],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &mask_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    // Blended over: with the clear colour's alpha (1.0) this is
+                    // a replace, so the region equals the clear colour exactly.
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // WIPEOUT boundary-frame pipeline (`WIPEOUTFRAME` 1/2). It reuses the
+        // shared anti-aliased line shader and pre-expanded quad vertex layout
+        // (`docs/adr/0009-antialiased-line-strokes.md`) — never
+        // `PolygonMode::Line`, which the WebGL2 backend does not support — but
+        // with the mask pass's depth state:
+        //
+        // * `depth_compare = Always` / `depth_write_enabled = false`: the frame
+        //   must paint **after** the fill, on top of whatever is already there,
+        //   and must not occlude a later mask.
+        // * the shared pipeline layout is used so group 0 (the per-draw uniform)
+        //   and group 1 (the selection-flags table) are identical to the line
+        //   pipeline; the frame carries pick key 0, so flags never tint it.
+        let mask_frame_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cad-mask-frame-pipeline"),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: line_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(line_quad_layout())],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: line_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        (mask_pipeline, mask_frame_pipeline)
+    }
+
     pub(super) fn create_mesh_pipeline(
         device: &wgpu::Device,
         pipeline_layout: &wgpu::PipelineLayout,

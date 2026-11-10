@@ -120,11 +120,20 @@ pub(super) fn stage_update(
     images: Option<Arc<DecodedImageCache>>,
     layers: &LayerOverrideSet,
     vendor: Option<&VendorRepresentationStore>,
+    wipeout_frames: bool,
 ) -> Option<Vec<Arc<RenderBatch>>> {
     let entity = doc.entity(id)?;
-    let delta =
-        assembly::build_model_entity_scene(doc, entity, stamp, fonts, images, layers, vendor)
-            .ok()?;
+    let delta = assembly::build_model_entity_scene(
+        doc,
+        entity,
+        stamp,
+        fonts,
+        images,
+        layers,
+        vendor,
+        wipeout_frames,
+    )
+    .ok()?;
     if delta.added.len() != range.len() || !appendable_delta(&delta) {
         return None;
     }

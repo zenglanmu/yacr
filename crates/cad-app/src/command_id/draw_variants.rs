@@ -25,9 +25,10 @@
 ///
 /// `WipeoutPayload::Frames` stores the session
 /// `WIPEOUTFRAME` state (`0` off, `1` on, `2` display-not-plot) and applies it to
-/// every wipeout in the drawing. The mask always renders; no frame geometry is
-/// emitted and the vector plot path has no wipeout-frame channel, so the
-/// display/plot split is declared **display-only state**.
+/// every wipeout in the drawing. `ON` draws and plots the boundary frame, `OFF`
+/// draws only the fill, and `2` draws the frame on screen while the vector plot
+/// path (built with the frame flag clear) omits it. The state never writes the
+/// drawing.
 ///
 /// Refusals (all before any write, all with a stable machine prefix):
 ///

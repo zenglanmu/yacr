@@ -298,9 +298,30 @@ fn repeated_equal_setters_keep_input_token_stable() {
     assert!(!session.set_images(Some(images)));
     assert!(!session.set_fonts(None));
     assert!(!session.set_layers(LayerOverrideSet::new()));
+    assert!(!session.set_wipeout_frames(false));
     assert!(!session.set_selection(SelectionSet::new()));
     assert!(!session.set_overlay_visibility(OverlayVisibility::default()));
     assert_eq!(session.input_revision(), token);
+}
+
+/// `WIPEOUTFRAME` changes the base geometry, so the toggle must advance the
+/// input token exactly once; an unchanged value stays a no-op.
+#[test]
+fn wipeout_frames_toggle_advances_the_input_and_unchanged_is_a_no_op() {
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    let token = session.input_revision();
+    assert!(session.set_wipeout_frames(true));
+    assert!(
+        session.input_revision() > token,
+        "a frame toggle must invalidate the published base"
+    );
+    let toggled = session.input_revision();
+    assert!(!session.set_wipeout_frames(true));
+    assert_eq!(
+        session.input_revision(),
+        toggled,
+        "an unchanged frame state must not churn the base"
+    );
 }
 
 #[test]

@@ -231,6 +231,20 @@ pub(crate) fn line_quad_bytes(vertices: &[LineQuadVertex]) -> Vec<u8> {
     bytemuck::cast_slice(vertices).to_vec()
 }
 
+/// Push one segment `a -> b` as the six anti-aliased quad vertices.
+///
+/// Shared by [`expand_line_quads`] and the WIPEOUT boundary frame so both
+/// rasterize the exact same AA band (`docs/adr/0009-antialiased-line-strokes.md`).
+pub(crate) fn push_line_quad(out: &mut Vec<LineQuadVertex>, a: [f32; 3], b: [f32; 3]) {
+    for corner in LINE_QUAD_CORNERS {
+        out.push(LineQuadVertex {
+            p0: a,
+            p1: b,
+            corner,
+        });
+    }
+}
+
 /// Expand one batch's line geometry into anti-aliased quad vertices.
 ///
 /// With `indices = None` the segments are consecutive pairs of `batch.vertices`
@@ -246,24 +260,15 @@ pub(crate) fn expand_line_quads(
     batch: &cad_scene::RenderBatch,
     indices: Option<&[u32]>,
 ) {
-    let push_pair = |out: &mut Vec<LineQuadVertex>, a: [f32; 3], b: [f32; 3]| {
-        for corner in LINE_QUAD_CORNERS {
-            out.push(LineQuadVertex {
-                p0: a,
-                p1: b,
-                corner,
-            });
-        }
-    };
     match indices {
         None => {
             for pair in batch.vertices.chunks_exact(2) {
-                push_pair(out, pair[0], pair[1]);
+                push_line_quad(out, pair[0], pair[1]);
             }
         }
         Some(list) => {
             for pair in list.chunks_exact(2) {
-                push_pair(
+                push_line_quad(
                     out,
                     batch.vertices[pair[0] as usize],
                     batch.vertices[pair[1] as usize],

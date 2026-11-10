@@ -177,7 +177,7 @@
   `PEDIT`（多段线宽度/`plinegen`/顶点子菜单）、`MIRROR`（`MIRRTEXT=1` 字形镜像）、
   `EXPLODE`（MULTILEADER 未导入内容）、`QSELECT`/`FILTER`（分类/自定义特性）。
 - P3 **已完成**（2026-11-09）：按严格口径 3 条晋升（`OVERKILL` `AUDIT` `QDIM`）；其余保留
-  `部分实现`：`HATCHEDIT`（`Add/Remove Boundaries`）、`WIPEOUT`（边框渲染/出图通道）、
+  `部分实现`：`HATCHEDIT`（`Add/Remove Boundaries`）、`WIPEOUT`（`FRAME` 覆盖）、
   `SSX`（实体标志位/厚度/挤出）、`DIMTEDIT`（字形级对齐）、`REVCLOUD`（`Calligraphy`）、
   `TEXTMASK`（`3dface`/`Solid`）、`TXT2MTXT`（强制行距）。
 - P4 **基础完成**（2026-11-10）：`cad-history` 的 `LayerPatch` + 应用器已落地；`LAYDEL`/`-LAYDEL`、`LAYMRG`/`-LAYMRG`、`LAYFRZ`、`LAYLCK`、`LAYULK`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYERSTATE RESTORE` 的图层表写入均纳入 `DrawingUndoRecord`（一条事务/一步撤销）。仍保留图纸空间/块内实体与 Settings 选项边界，故仍为**部分实现**，没有把边界算作完成。
@@ -1002,7 +1002,7 @@
 | `WBLOCK` | 部分实现 | 具名拒绝（`wblock.unsupported`）：将块定义写入独立图形文件未实现。 |
 | `WEDGE` | 部分实现 | 具名拒绝（`wedge.unsupported: 3D solid primitives are not implemented`）。 |
 | `WHOHAS` | 部分实现 | 只读：单文档构建，无网络查询，不列其他用户或文件锁。 |
-| `WIPEOUT` | 部分实现 | `Frames ON|OFF|DISPLAY` 状态 + `Polyline`/`Erase Polyline` + 自由点串；**边框几何与出图通道未实现**，`DISPLAY` 目前只记录状态；`FRAME` 覆盖无命令 |
+| `WIPEOUT` | 部分实现 | `Frames ON|OFF|DISPLAY` 真实：ON = 遮罩填充 + 边框（显示与矢量出图都画边界折线），OFF = 仅填充，DISPLAY = 显示边框但出图不画；边框在 mask fill 之后用 Always-depth 线管线绘制（不是被覆盖的普通 Lines）；`Polyline`/`Erase Polyline` + 自由点串；`FRAME` 覆盖仍无命令 |
 | `WMFIN` | 部分实现 | 具名拒绝（`wmfin.unsupported: Windows metafile import is not implemented`）。 |
 | `WMFOUT` | 部分实现 | 具名拒绝（`wmfout.unsupported: Windows metafile export is not implemented`）。 |
 | `XATTACH` | 部分实现 | 具名拒绝（`xattach.unsupported`）：不把外部图纸作为外部参照附着。 |
@@ -1974,7 +1974,7 @@
 | 954 | `WEBLOAD` | 未实现 | Loads a JavaScript file from a URL, and then executes the JavaScript code contained in the file. | — |
 | 955 | `WEDGE` | 部分实现 | Creates a 3D solid wedge. | 具名拒绝（`wedge.unsupported: 3D solid primitives are not implemented`）。 |
 | 956 | `WHOHAS` | 部分实现 | Displays information about an open drawing file. | 只读：单文档构建，无网络查询，不列其他用户或文件锁。 |
-| 957 | `WIPEOUT` | 部分实现 | Creates a wipeout object, and controls whether wipeout frames are displayed in the drawing. | `Frames ON|OFF|DISPLAY` 状态 + `Polyline`/`Erase Polyline` + 自由点串；**边框几何与出图通道未实现**，`DISPLAY` 目前只记录状态；`FRAME` 覆盖无命令 |
+| 957 | `WIPEOUT` | 部分实现 | Creates a wipeout object, and controls whether wipeout frames are displayed in the drawing. | `Frames ON|OFF|DISPLAY` 真实：ON = 遮罩填充 + 边框（显示与矢量出图都画边界折线），OFF = 仅填充，DISPLAY = 显示边框但出图不画；边框在 mask fill 之后用 Always-depth 线管线绘制（不是被覆盖的普通 Lines）；`Polyline`/`Erase Polyline` + 自由点串；`FRAME` 覆盖仍无命令 |
 | 958 | `WMFIN` | 部分实现 | Imports a Windows metafile. | 具名拒绝（`wmfin.unsupported: Windows metafile import is not implemented`）。 |
 | 959 | `WMFOPTS` | 未实现 | Sets options for WMFIN. | — |
 | 960 | `WMFOUT` | 部分实现 | Saves objects to a Windows metafile. | 具名拒绝（`wmfout.unsupported: Windows metafile export is not implemented`）。 |

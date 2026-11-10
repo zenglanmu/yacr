@@ -795,6 +795,7 @@ impl DefaultRepresentationProvider {
                         primitive: DisplayPrimitive::Mask {
                             boundary: Arc::from(boundary.clone().into_boxed_slice()),
                             inverted: *inverted,
+                            frame: context.wipeout_frames,
                         },
                     });
                 }

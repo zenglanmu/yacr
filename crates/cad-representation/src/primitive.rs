@@ -215,6 +215,10 @@ pub enum DisplayPrimitive {
     Mask {
         boundary: Arc<[Point3]>,
         inverted: bool,
+        /// Whether the mask also draws its boundary frame (`WIPEOUTFRAME`
+        /// 1/2). The fill always draws; this only adds the closed boundary
+        /// outline. Set from [`RepresentationContext::wipeout_frames`].
+        frame: bool,
     },
 }
 
@@ -299,7 +303,11 @@ impl DisplayPrimitive {
             // A mask boundary is a world-space polygon: the affine map is applied
             // per vertex. The fill is derived from these vertices by the
             // renderer, so no other state changes (`inverted` is view-independent).
-            DisplayPrimitive::Mask { boundary, inverted } => DisplayPrimitive::Mask {
+            DisplayPrimitive::Mask {
+                boundary,
+                inverted,
+                frame,
+            } => DisplayPrimitive::Mask {
                 boundary: Arc::from(
                     boundary
                         .iter()
@@ -308,6 +316,7 @@ impl DisplayPrimitive {
                         .into_boxed_slice(),
                 ),
                 inverted: *inverted,
+                frame: *frame,
             },
         }
     }
