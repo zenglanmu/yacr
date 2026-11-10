@@ -48,17 +48,33 @@
 //!   the two pick projections, so the arc lands between the picks.
 //! * Accepted objects: **2D polylines, lines, circles, arcs**. A selected circle
 //!   is **never trimmed**: the fillet meets it tangentially and the circle stays
-//!   whole. An arc is trimmed to the tangent point on its pick side. Ellipses,
-//!   elliptical arcs, splines and every pair beyond line↔line / line↔circle /
-//!   line↔arc are explicit named `Unsupported` refusals in this build.
+//!   whole. An arc is trimmed to the tangent point on its pick side. Circle↔circle,
+//!   circle↔arc and arc↔arc are the **curve↔curve** form: the fillet centre is an
+//!   intersection of the two offset circles (external `r + R` / internal
+//!   `|r − R|` tangency), and the created ARC is the **minor arc** between the
+//!   tangent points — its signed sweep is the short way round (`|sweep| ≤ π`, with
+//!   the sign following the solution arrangement), not a forced counter-clockwise
+//!   sweep. The candidate nearest the two picks wins (AutoCAD's multi-solution
+//!   cycling is NOT IMPLEMENTED); an exact score tie keeps the first candidate in
+//!   loop order, and the offset-circle intersections are ordered `−u_y` first
+//!   (`+Y` for a `+X` baseline), so the winner is deterministic. A chosen tangent
+//!   outside a picked ARC is refused (`FILLET.tangent_outside_arc`) even with trim
+//!   off, and a circle/arc whose stored `normal` is not `+Z` is refused
+//!   (`FILLET.unsupported_plane`). `R = 0`, concentric curves, non-coplanar curves
+//!   and a radius with no real tangency are named refusals before any write.
+//!   Ellipses, elliptical arcs, splines and every pair outside those six forms are
+//!   explicit named `Unsupported` refusals in this build.
 //! * A negative radius is not documented and is refused
 //!   (`fillet.radius_negative`).
 //!
 //! Every accepted invocation commits in **one transaction / one undo step**. All
 //! refusals are resolved before the first write, so a refusal changes nothing.
-//! The pure planners live in the private [`corner_geometry`] submodule (declared
-//! with an explicit `#[path]` so the shared `app_drawing/mod.rs` needs no edit).
+//! The pure planners live in the private [`corner_geometry`] (line forms) and
+//! [`corner_curve`] (curve↔curve form) submodules, both declared with an explicit
+//! `#[path]` so the shared `app_drawing/mod.rs` needs no edit.
 
+#[path = "corner_curve.rs"]
+mod corner_curve;
 #[path = "corner_geometry.rs"]
 mod corner_geometry;
 
