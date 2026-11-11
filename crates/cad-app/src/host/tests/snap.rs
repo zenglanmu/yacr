@@ -407,3 +407,38 @@ fn hint_overlay_reuses_the_move_query_and_agrees_with_the_committed_point() {
         "the hint/capture path must not rebuild the targets"
     );
 }
+
+#[test]
+fn aperture_token_widens_the_snap_pick_aperture() {
+    // The live `resolve_snap` path reads the session policy
+    // (`SessionState::interaction_tolerance`), not `TolerancePolicy::default()`
+    // directly. The demo's bottom line is `(0,0)-(4000,0)`; at ortho scale 1 the
+    // cursor `(2000, 15)` is 15 logical pixels from its midpoint/perpendicular
+    // foot, and every other candidate is hundreds of pixels away.
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    assert!(
+        controller.resolve_snap(p(2000.0, 5.0)).unwrap().is_some(),
+        "inside the configured 12 px aperture"
+    );
+    assert!(
+        controller.resolve_snap(p(2000.0, 15.0)).unwrap().is_none(),
+        "outside the configured 12 px aperture"
+    );
+
+    let command = crate::Command {
+        schema_version: 1,
+        id: crate::CommandId::Extended(crate::ExtendedCommandId::Aperture),
+        document: controller.document_id,
+        viewport: controller.viewport_id,
+        payload: crate::CommandPayload::LayerWalk(vec!["30".into()]),
+    };
+    controller
+        .application
+        .execute(&mut controller.session, command)
+        .expect("APERTURE 30 is admitted");
+    let candidate = controller
+        .resolve_snap(p(2000.0, 15.0))
+        .unwrap()
+        .expect("the 30 px session aperture reaches the midpoint");
+    assert_eq!(candidate.point, p(2000.0, 0.0));
+}

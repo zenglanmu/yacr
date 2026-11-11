@@ -1,7 +1,12 @@
-//! Wave 4 named-refusal contracts: `BSCALE`, `MINSERT`, `BLOCKREPLACE`,
-//! `BREPLACE`, `-BREPLACE`, `SPLINEDIT`, `MLEDIT`, `-MLEDIT`, `BURST`, `CLIP`,
-//! `CLIPIT`, `REGION`, `ADDSELECTED`, `WBLOCK`, `-WBLOCK`, `BSAVE`, `BSAVEAS`,
-//! `CHSPACE`.
+//! Wave 4 named-refusal contracts: `BSCALE`, `BLOCKREPLACE`, `BREPLACE`,
+//! `-BREPLACE`, `SPLINEDIT`, `BURST`, `CLIP`, `CLIPIT`, `REGION`, `WBLOCK`,
+//! `-WBLOCK`, `BSAVE`, `BSAVEAS`, `CHSPACE`.
+//!
+//! `MINSERT`, `ADDSELECTED` and `MLEDIT`/`-MLEDIT` were refusals in this wave and
+//! graduated to real entity writes on 2026-11-12 (`app_drawing::minsert`,
+//! `app_drawing::addselected`, `app_drawing::mledit`); their contracts live in
+//! `tests::drawing::minsert`, `tests::drawing::addselected` and
+//! `tests::extended_w9_mleader` and are no longer part of this table.
 //!
 //! Each name is admitted by the vocabulary and refused with
 //! `CadError::Unsupported` carrying a **stable** reason. A refusal must write
@@ -10,16 +15,11 @@
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 18] = [
+const REFUSALS: [(ExtendedCommandId, &str); 14] = [
     (
         ExtendedCommandId::BScale,
         "bscale.unsupported: BSCALE needs a factor and an insertion reference; use SCALE on the \
          selected insert",
-    ),
-    (
-        ExtendedCommandId::MInsert,
-        "minsert.unsupported: MINSERT needs a block name and row/column counts; use INSERT then \
-         ARRAYRECT",
     ),
     (
         ExtendedCommandId::BlockReplace,
@@ -41,14 +41,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 18] = [
         "splinedit.unsupported: this build has no NURBS edit surface",
     ),
     (
-        ExtendedCommandId::MlEdit,
-        "mlinedit.unsupported: this build has no MLINE join/cap edit model",
-    ),
-    (
-        ExtendedCommandId::DashMlEdit,
-        "-mlinedit.unsupported: this build has no MLINE join/cap edit model",
-    ),
-    (
         ExtendedCommandId::Burst,
         "burst.unsupported: this build has no block-attribute model to preserve",
     ),
@@ -63,11 +55,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 18] = [
     (
         ExtendedCommandId::Region,
         "region.unsupported: this build has no Region geometry model",
-    ),
-    (
-        ExtendedCommandId::AddSelected,
-        "addselected.unsupported: add-selected needs per-type creation prompts that this build \
-         does not model",
     ),
     (
         ExtendedCommandId::WBlock,

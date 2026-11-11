@@ -37,6 +37,7 @@ impl CommandId {
                 | Self::CreateSpline
                 | Self::CreateText
                 | Self::CreateMText
+                | Self::CreateShape
                 | Self::MLeader
                 | Self::TextEdit
                 | Self::DimLinear

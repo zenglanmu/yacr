@@ -6,10 +6,12 @@
 //! each own one flag or token here, Wave 5 adds the `ATTDISP` token and Wave 6
 //! adds the `DWGLOG`/`LOGFILEON`/`LOGFILEOFF` drawing-log token. Wave 8 adds the
 //! `ELEV` elevation token and the `UCSICON` flag. This is **session state only**:
-//! no database write, revision bump, `cad-history` entry or `ChangeSet`. This
-//! lane wires no renderer/behaviour consumer, so the command handler reports
-//! that the effect is not implemented rather than pretending the drawing
-//! changed.
+//! no database write, revision bump, `cad-history` entry or `ChangeSet`. Most
+//! tokens have no renderer/behaviour consumer, so their handler reports that the
+//! effect is not implemented rather than pretending the drawing changed. Two do:
+//! `APERTURE` is the object-snap aperture
+//! ([`crate::SessionState::interaction_tolerance`], once set explicitly) and
+//! `REVCLOUDPROPERTIES` is the `REVCLOUD` chord token.
 
 /// The session `WIPEOUTFRAME` state.
 ///
@@ -206,6 +208,11 @@ pub struct DraftingExtras {
     isodraft: bool,
     dragmode: bool,
     aperture: u32,
+    /// Whether `APERTURE <n>` set the token in this session. Until it is set, the
+    /// host keeps reading the configured `view.aperture.sizePixels` value
+    /// ([`SessionState::interaction_tolerance`]), so the default snap aperture
+    /// stays bit-identical to the pre-command behaviour.
+    aperture_explicit: bool,
     isoplane: IsoPlane,
     highlightnew: bool,
     traysettings: bool,
@@ -246,6 +253,7 @@ impl Default for DraftingExtras {
             isodraft: false,
             dragmode: true,
             aperture: 10,
+            aperture_explicit: false,
             isoplane: IsoPlane::Left,
             highlightnew: true,
             traysettings: true,
@@ -294,6 +302,21 @@ impl DraftingExtras {
     /// The session object-snap aperture token (default 10).
     pub fn aperture(&self) -> u32 {
         self.aperture
+    }
+
+    /// Whether `APERTURE <n>` set the token (see the field docs).
+    pub fn aperture_explicit(&self) -> bool {
+        self.aperture_explicit
+    }
+
+    /// Set the session aperture token from a validated `APERTURE <n>` line.
+    ///
+    /// Validation (whole pixels inside `ViewAperture::RANGE`) is the command
+    /// layer's job; this records that the token is now explicit, which is what
+    /// makes it authoritative over `view.aperture.sizePixels`.
+    pub fn set_aperture(&mut self, value: u32) {
+        self.aperture = value;
+        self.aperture_explicit = true;
     }
 
     /// The session isometric-plane token (default `Left`).
@@ -383,12 +406,6 @@ impl DraftingExtras {
         self.dragmode = value;
     }
 
-    /// Set the session aperture token (only the report path uses this today; the
-    /// typed `APERTURE <n>` setter is NOT IMPLEMENTED).
-    pub fn set_aperture(&mut self, value: u32) {
-        self.aperture = value;
-    }
-
     /// Set the session isometric-plane token.
     pub fn set_isoplane(&mut self, value: IsoPlane) {
         self.isoplane = value;
@@ -419,8 +436,7 @@ impl DraftingExtras {
         self.find_match_case = value;
     }
 
-    /// Set the session revision-cloud arc-length token (the typed setter is NOT
-    /// IMPLEMENTED).
+    /// Set the session revision-cloud arc-length token.
     pub fn set_revcloud_arc_length(&mut self, value: f64) {
         self.revcloud_arc_length = value;
     }

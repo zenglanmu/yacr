@@ -80,6 +80,7 @@ mod insert_block;
 mod join;
 mod layer_commands;
 mod layer_edit;
+mod style_tables;
 // The typed `-LAYER <option> …` write line (one option per line), split out so
 // both layer modules stay inside the code-size limit.
 mod dash_layer_write;
@@ -90,6 +91,13 @@ mod lengthen;
 mod match_prop;
 mod mirror_curves;
 mod mleader;
+// The 2026-11-12 MULTILEADER edits: `MLEADERALIGN`, `MLEADEREDIT` and
+// `MLEADERCOLLECT` rebuild the stored definition through `MultiLeaderGeometry`.
+mod mleader_edit;
+// `MLEDIT` / `-MLEDIT`: the two-LINE subset of multiline editing.
+mod mledit;
+// `TOLERANCE`: one feature-control frame as separate border/divider/text rows.
+mod tolerance;
 // `MSTRETCH`: the one STRETCH planner over several crossing windows.
 mod modify_extra;
 // OVERKILL (Delete Duplicate Objects): the tolerance/ignore/option comparison
@@ -122,6 +130,12 @@ pub(crate) mod text_batch;
 mod text_edit;
 // TABLE / -TABLE creation and TABLEDIT cell-text editing (2026-11-10).
 mod table_edit;
+// The 2026-11-12 SHAPE family: `SHAPE` glyph creation and the `SHP2BLK`
+// shape→outline-block conversion.
+mod shape;
+// The 2026-11-12 block/copy writes: `MINSERT` (block array) and `ADDSELECTED`.
+mod addselected;
+mod minsert;
 // TEXTTOFRONT (2026-11-07): rewrite the selected text/leader/dimension draw order.
 mod text_front;
 // The three selection-based text commands (TORIENT / TCASE / TXT2MTXT) and

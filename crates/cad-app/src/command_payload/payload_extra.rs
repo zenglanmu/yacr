@@ -156,6 +156,10 @@ pub enum NamedObjectKind {
     Block,
     Style,
     Linetype,
+    /// The `DB.DIMSTYLE` table (post-import write API exists).
+    DimStyle,
+    /// The `DB.MLEADERSTYLE` table (post-import write API exists).
+    MLeaderStyle,
 }
 
 /// The target of a `PURGE` line.
@@ -275,15 +279,30 @@ pub enum DimensionBatchPayload {
 }
 
 /// The typed option of a `DIMSTYLE` line.
+///
+/// `LIST`/`CURRENT` are the read-only reports. The remaining variants are the
+/// post-import table writes (`cad-db`'s `drawing::style_edit`): `SET` makes the
+/// row the session's current dimension style, and `NEW`/`RENAME`/`DELETE`/
+/// `MODIFY` change the table in one transaction / one undo step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DimStyleCommand {
     /// Report every stored dimension style (read-only).
     List,
     /// Report the style dimension creation resolves (read-only).
     Current,
-    /// Request the creation style; this build has no post-import style-table
-    /// write API, so the application refuses it by name.
+    /// Make the named row the session's current dimension style.
     Set(String),
+    /// Create a row; `from` copies an existing row's variables.
+    New { name: String, from: Option<String> },
+    /// Rename a row (refused while a dimension still names it).
+    Rename { old: String, new: String },
+    /// Delete a row (`Standard` and in-use rows are refused).
+    Delete(String),
+    /// Write one or more stored `<field> <value>` pairs of a row.
+    Modify {
+        name: String,
+        assignments: Vec<(String, String)>,
+    },
 }
 
 /// The typed option of a `DIMTEDIT` line.

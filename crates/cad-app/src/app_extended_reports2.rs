@@ -1,8 +1,10 @@
 //! Wave 2 read-only reports for the extended command batch.
 //!
-//! `SYSVARMONITOR`, `SYSVDLG`, `VTOPTIONS`, `ALIASEDIT`, `WHOHAS`, `ACADINFO`,
-//! `PTYPE` and `SCALELISTEDIT` open no transaction, bump no revision, record no
-//! `cad-history` entry and publish no `ChangeSet`, so all eight are Viewer-legal.
+//! `SYSVDLG`, `VTOPTIONS`, `ALIASEDIT`, `WHOHAS`, `ACADINFO`, `PTYPE` and
+//! `SCALELISTEDIT` open no transaction, bump no revision, record no
+//! `cad-history` entry and publish no `ChangeSet`, so all seven are Viewer-legal.
+//! (`SYSVARMONITOR` grew a real session watch set and lives in
+//! `app_extended_sysvar`.)
 //!
 //! Each report reads only data this build really has:
 //!
@@ -32,12 +34,7 @@ impl Application {
         ext: ExtendedCommandId,
     ) -> CadResult<CommandOutcome> {
         match ext {
-            ExtendedCommandId::SysVarMonitor => {
-                self.system_variable_report(session, command, SystemVariableReport::Monitor)
-            }
-            ExtendedCommandId::SysVarDialog => {
-                self.system_variable_report(session, command, SystemVariableReport::Dialog)
-            }
+            ExtendedCommandId::SysVarDialog => self.system_variable_dialog(session, command),
             ExtendedCommandId::ViewTransitionOptions => self.view_transition_report(command),
             ExtendedCommandId::AliasEdit => self.alias_report(command),
             ExtendedCommandId::WhoHas => self.who_has_report(command),
@@ -50,44 +47,48 @@ impl Application {
         }
     }
 
-    /// `SYSVARMONITOR` / `SYSVDLG`: one row per modelled system variable.
+    /// `SYSVDLG`: one row per modelled system variable plus the honest gap.
     ///
-    /// Both read the same closed set; `SYSVDLG` also states that this build has
-    /// no settings dialog. Nothing is watched or written.
-    fn system_variable_report(
+    /// The report reads the same closed set `SETVAR` does. Anything outside it is
+    /// named `sysvdlg.not_tracked`; this build has no settings dialog, so nothing
+    /// can be edited, saved or restored.
+    fn system_variable_dialog(
         &self,
         session: &SessionState,
         command: &Command,
-        report: SystemVariableReport,
     ) -> CadResult<CommandOutcome> {
-        require_none_payload(command, report.selector())?;
+        require_none_payload(command, "SYSVDLG")?;
         let drawing = document_drawing(self, command)?;
-        let mut diagnostics = Vec::with_capacity(MODELLED_SYSTEM_VARIABLES.len() + 2);
+        let mut diagnostics = Vec::with_capacity(MODELLED_SYSTEM_VARIABLES.len() + 3);
         for name in MODELLED_SYSTEM_VARIABLES {
             let (value, kind) = modelled_system_variable(&drawing, session, name)
                 .expect("MODELLED_SYSTEM_VARIABLES is exactly the reader's closed set");
             diagnostics.push(diagnostic(
-                report.value_code(),
-                format!("{} {name} = {value} ({kind})", report.selector()),
+                "sysvdlg.value",
+                format!("SYSVDLG {name} = {value} ({kind})"),
             ));
         }
         diagnostics.push(diagnostic(
-            report.summary_code(),
+            "sysvdlg.summary",
             format!(
-                "{}: {} modelled system variable(s) reported; variables outside the SETVAR \
-                 closed set are not modeled and were not invented",
-                report.selector(),
+                "SYSVDLG: {} modelled system variable(s) reported with live values; variables \
+                 outside the SETVAR closed set are not modeled and were not invented",
                 MODELLED_SYSTEM_VARIABLES.len()
             ),
         ));
-        if report == SystemVariableReport::Dialog {
-            diagnostics.push(diagnostic(
-                "sysvdlg.dialog_not_implemented",
-                "SYSVDLG: this build has no system-variable dialog, so there is no edit/save/\
-                 restore surface; use `SETVAR <name>` to read one modelled value"
-                    .into(),
-            ));
-        }
+        diagnostics.push(diagnostic(
+            "sysvdlg.not_tracked",
+            "SYSVDLG: every other AutoCAD system variable is not tracked by this build — there is \
+             no per-variable table to enumerate, and the write-only shell settings \
+             (NAVVCUBEDISPLAY, DISPLAYVIEWCUBEIN2D, DISPLAYVIEWCUBEIN3D) have no readable value"
+                .into(),
+        ));
+        diagnostics.push(diagnostic(
+            "sysvdlg.dialog_not_implemented",
+            "SYSVDLG: this build has no system-variable dialog, so there is no edit/save/restore \
+             surface; use `SETVAR <name>` to read one modelled value"
+                .into(),
+        ));
         Ok(report_outcome(diagnostics))
     }
 
@@ -179,16 +180,17 @@ impl Application {
 
     /// `PTYPE`: read-only `$PDMODE`/`$PDSIZE` report.
     ///
-    /// The write path is the existing `PDMODE`/`PDSIZE` commands; PTYPE itself
-    /// only reports.
+    /// The write path is the existing `PDMODE`/`PDSIZE` commands; a typed
+    /// `PTYPE <code> [size]` line is routed to exactly those payloads by
+    /// `cad-ui-core`, so PTYPE itself only reports.
     fn point_type_report(&self, command: &Command) -> CadResult<CommandOutcome> {
         require_none_payload(command, "PTYPE")?;
         let drawing = document_drawing(self, command)?;
         Ok(report_outcome(vec![diagnostic(
             "ptype.report",
             format!(
-                "PTYPE: $PDMODE = {} (integer), $PDSIZE = {} (real); this command is read-only — \
-                 set them with PDMODE/PDSIZE (the typed PTYPE dialog form is NOT IMPLEMENTED)",
+                "PTYPE: $PDMODE = {} (integer), $PDSIZE = {} (real); this bare form is read-only — \
+                 set them with PDMODE/PDSIZE or `PTYPE <code> [size]`",
                 drawing.point_display_mode(),
                 drawing.point_display_size()
             ),
@@ -233,37 +235,5 @@ impl Application {
                 .into(),
         ));
         Ok(report_outcome(diagnostics))
-    }
-}
-
-/// Which system-variable report is running.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SystemVariableReport {
-    /// `SYSVARMONITOR`: the closed set only.
-    Monitor,
-    /// `SYSVDLG`: the closed set plus `sysvdlg.dialog_not_implemented`.
-    Dialog,
-}
-
-impl SystemVariableReport {
-    fn selector(self) -> &'static str {
-        match self {
-            Self::Monitor => "SYSVARMONITOR",
-            Self::Dialog => "SYSVDLG",
-        }
-    }
-
-    fn value_code(self) -> &'static str {
-        match self {
-            Self::Monitor => "sysvarmonitor.value",
-            Self::Dialog => "sysvdlg.value",
-        }
-    }
-
-    fn summary_code(self) -> &'static str {
-        match self {
-            Self::Monitor => "sysvarmonitor.summary",
-            Self::Dialog => "sysvdlg.summary",
-        }
     }
 }

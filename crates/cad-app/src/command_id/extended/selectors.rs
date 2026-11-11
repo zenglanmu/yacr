@@ -408,6 +408,7 @@ impl ExtendedCommandId {
             Self::DgnClip => "DGNCLIP",
             Self::DgnLayers => "DGNLAYERS",
             Self::DgnAdjust => "DGNADJUST",
+            Self::Shp2Blk => "SHP2BLK",
             Self::Refusal(name) => name.selector(),
         }
     }
@@ -812,6 +813,7 @@ impl ExtendedCommandId {
         Self::DgnClip,
         Self::DgnLayers,
         Self::DgnAdjust,
+        Self::Shp2Blk,
     ];
 }
 
@@ -841,6 +843,14 @@ impl ExtendedCommandId {
                 | Self::ArrayClassic
                 | Self::Blend
                 | Self::BreakLine
+                // Wave 9's MULTILEADER edits and the TOLERANCE frame write rows;
+                // `MLEDIT`/`-MLEDIT` edit the two-LINE subset of a multiline.
+                | Self::MLeaderAlign
+                | Self::MLeaderEdit
+                | Self::MLeaderCollect
+                | Self::Tolerance
+                | Self::MlEdit
+                | Self::DashMlEdit
                 | Self::DashBlock
                 | Self::DashBoundary
                 | Self::DashInsert
@@ -877,6 +887,12 @@ impl ExtendedCommandId {
                 // Wave 26 viewport alignment writes one layout patch each.
                 | Self::AlignSpace
                 | Self::VpSync
+                // Wave 27: SHP2BLK defines blocks and rewrites entity rows,
+                // MINSERT inserts block references, ADDSELECTED inserts one
+                // entity. Every one is an entity/block-table write.
+                | Self::Shp2Blk
+                | Self::MInsert
+                | Self::AddSelected
         )
     }
 }

@@ -116,6 +116,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("TEXT", CommandId::CreateText),
     // MTEXT: the multiline create command **and** a real two-corner interactive tool; the payload path stays for CLI/host IPC.
     ("MTEXT", CommandId::CreateMText),
+    // SHAPE is one glyph of a compiled SHX shape font: `SHAPE <name-or-code> <x> <y> [size] [rotation_deg]`. The code form draws; the name form stores the name and keeps the existing honest partial (this build's SHX parser keeps shape codes only). Work-only.
+    ("SHAPE", CommandId::CreateShape),
     ("MLEADER", CommandId::MLeader),
     ("TEXTEDIT", CommandId::TextEdit),
     ("DIMLINEAR", CommandId::DimLinear),
@@ -441,6 +443,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CHPROP", CommandId::Extended(ExtendedCommandId::ChProp)),
     ("BSCALE", CommandId::Extended(ExtendedCommandId::BScale)),
     ("MINSERT", CommandId::Extended(ExtendedCommandId::MInsert)),
+    // SHP2BLK converts the selected SHAPE rows into per-glyph block definitions of their outline polylines plus one INSERT at each original position, deleting the sources in one transaction (Work-only).
+    ("SHP2BLK", CommandId::Extended(ExtendedCommandId::Shp2Blk)),
     ("BLOCKREPLACE", CommandId::Extended(ExtendedCommandId::BlockReplace)),
     ("BREPLACE", CommandId::Extended(ExtendedCommandId::BReplace)),
     ("-BREPLACE", CommandId::Extended(ExtendedCommandId::DashBReplace)),
@@ -826,6 +830,10 @@ pub use filters::*;
 mod draw2;
 pub use draw2::*;
 
+// The 2026-11-12 SHAPE/MINSERT/ADDSELECTED grammars.
+mod shape_block;
+pub use shape_block::*;
+
 // The raster-image grammars (`IMAGEATTACH`, `IMAGECLIP`).
 mod image;
 pub use image::*;
@@ -846,10 +854,23 @@ pub use extras::*;
 mod payload_options;
 pub use payload_options::*;
 
+// The paper-space/session/point-style grammars (`VPLAYER`, `MVSETUP`,
+// `APERTURE`, `PTYPE`, `REVCLOUDPROPERTIES`).
+mod paper_arguments;
+pub use paper_arguments::*;
+
+// The named style-table grammars (`STYLE`, `-STYLE`, `MLEADERSTYLE`).
+mod style;
+pub use style::*;
+
 // The interactive modify argument grammars (`JOIN`, `OFFSET`, `MIRROR`,
 // `CHAMFER`, `FILLET` and the full `PEDIT` option line).
 mod modify;
 pub use modify::*;
+
+// The 2026-11-12 MULTILEADER/MLEDIT/TOLERANCE grammars.
+mod mleader;
+pub use mleader::*;
 
 // The selector -> interactive-tool routing table (split out for the code-size
 // gate). Re-exported so `commands::interaction_request_for` still resolves.

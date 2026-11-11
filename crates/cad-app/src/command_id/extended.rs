@@ -184,7 +184,7 @@ pub enum ExtendedCommandId {
     RevCloudProperties,
 
     // -- Wave 2: read-only reports (app_extended_reports2) -------------------
-    /// `SYSVARMONITOR`: report the modelled `SETVAR` closed set.
+    /// `SYSVARMONITOR`: add/remove/list the session watch set.
     SysVarMonitor,
     /// `SYSVDLG`: the same closed set, plus dialog_not_implemented.
     SysVarDialog,
@@ -322,7 +322,8 @@ pub enum ExtendedCommandId {
     // -- Wave 4: named refusals (app_extended_refusals4) --------------------
     /// `BSCALE`: needs a factor plus insertion reference.
     BScale,
-    /// `MINSERT`: needs a block name plus row/column counts.
+    /// `MINSERT`: insert an existing block as a rectangular array of independent
+    /// INSERT references (`app_drawing::minsert`).
     MInsert,
     /// `BLOCKREPLACE`: needs two block definitions.
     BlockReplace,
@@ -332,9 +333,10 @@ pub enum ExtendedCommandId {
     DashBReplace,
     /// `SPLINEDIT`: no NURBS edit surface.
     SplineEdit,
-    /// `MLEDIT`: no MLINE join/cap edit model.
+    /// `MLEDIT`: the two-LINE subset of multiline editing
+    /// (`app_drawing::mledit`).
     MlEdit,
-    /// `-MLEDIT`: the command-line spelling of the same refusal.
+    /// `-MLEDIT`: the command-line spelling of the same edit.
     DashMlEdit,
     /// `BURST`: no block-attribute model.
     Burst,
@@ -344,7 +346,8 @@ pub enum ExtendedCommandId {
     ClipIt,
     /// `REGION`: no Region geometry model.
     Region,
-    /// `ADDSELECTED`: no per-type creation prompts.
+    /// `ADDSELECTED`: create a new entity of the single selected entity's type
+    /// and general properties at the typed point (`app_drawing::addselected`).
     AddSelected,
     /// `WBLOCK`: no separate drawing-file writer.
     WBlock,
@@ -418,7 +421,7 @@ pub enum ExtendedCommandId {
     DashAttach,
     /// `XOPEN`: no xref editing session.
     XOpen,
-    /// `CLASSICXREF`: no separate xref palette (use the RESOURCES panel).
+    /// `CLASSICXREF`: read-only xref report plus the chrome-local classic panel.
     ClassicXRef,
 
     // -- Wave 6: session tokens / reports (app_extended_file6) --------------
@@ -574,13 +577,17 @@ pub enum ExtendedCommandId {
     Blend,
     /// `BREAKLINE`: one open polyline with a break symbol between two picked points.
     BreakLine,
-    /// `MLEADERALIGN`: multileader alignment is NOT IMPLEMENTED (no multileader alignment model).
+    /// `MLEADERALIGN`: align/space the selected MULTILEADERs' text
+    /// (`app_drawing::mleader_edit`).
     MLeaderAlign,
-    /// `MLEADEREDIT`: adding/removing leader lines is NOT IMPLEMENTED (no leader-edit API).
+    /// `MLEADEREDIT`: add/remove one leader line on the selected MULTILEADERs
+    /// (`app_drawing::mleader_edit`).
     MLeaderEdit,
-    /// `MLEADERCOLLECT`: collecting multileaders into one is NOT IMPLEMENTED (no collection/table model).
+    /// `MLEADERCOLLECT`: collect the selected MULTILEADERs into one
+    /// (`app_drawing::mleader_edit`).
     MLeaderCollect,
-    /// `TOLERANCE`: feature control frames are NOT IMPLEMENTED (no tolerance-object model).
+    /// `TOLERANCE`: one feature-control frame as separate border/divider/TEXT
+    /// rows (`app_drawing::tolerance`); no single `AcDbFcf` object is stored.
     Tolerance,
     /// `DIM`: read-only router report listing the implemented DIM* creation commands; no dimension is created.
     DimRouter,
@@ -604,7 +611,7 @@ pub enum ExtendedCommandId {
     DimExport,
     /// `DIMIM`: dimension-style import from an external file is NOT IMPLEMENTED (no file format model).
     DimImport,
-    /// `SPACETRANS`: model/paper distance conversion is NOT IMPLEMENTED (no layout scale conversion API).
+    /// `SPACETRANS`: real model/paper distance conversion for the active viewport.
     SpaceTrans,
     /// `TXTEXP`: exploding text into polylines is NOT IMPLEMENTED (no font-outline-to-geometry path).
     TextExplode,
@@ -975,6 +982,11 @@ pub enum ExtendedCommandId {
     DgnLayers,
     /// `DGNADJUST`: no DGN underlay adjustment model.
     DgnAdjust,
+
+    /// `SHP2BLK` (Work-only): selected SHAPE rows → per-glyph block definitions
+    /// of their outline polylines plus one INSERT per source, sources deleted in
+    /// one transaction. Contract: `crate::app_drawing::shape`.
+    Shp2Blk,
 
     // Waves 17-24: 197 named refusals (action macros, palettes, OLE/hyperlinks,
     // LISP, lights/materials/constraints, data extraction, DWF/DGN underlays,

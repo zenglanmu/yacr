@@ -8,7 +8,7 @@
 //! ([`crate::picking::pick_at_screen_with_visibility`], the default
 //! [`TolerancePolicy`] pickbox aperture, layer-override visibility).
 
-use cad_domain::{CadError, CadResult, Point3, SelectionRef, TolerancePolicy};
+use cad_domain::{CadError, CadResult, Point3, SelectionRef};
 
 use crate::picking::pick_at_screen_with_visibility;
 use crate::{BackFacePolicy, DrawToolKind};
@@ -54,7 +54,7 @@ impl HostController {
             &viewport.camera,
             logical,
             viewport.logical_size,
-            &TolerancePolicy::default(),
+            &self.session_tolerance(),
             BackFacePolicy::Cull,
             &self.session.layer_overrides,
             &self.session.hidden_entities,

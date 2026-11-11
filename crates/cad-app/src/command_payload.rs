@@ -21,126 +21,11 @@ pub use text_batch::*;
 mod payload_extra;
 pub use payload_extra::*;
 
-/// The two straight-line picks of a CHAMFER/FILLET command (ADR 0016 decisions
-/// B/C): the two picked refs in pick order and the raw click point that selects
-/// each pick side.
-///
-/// Boxed inside [`CommandPayload::Chamfer`]/`Fillet` so the command enum stays
-/// small (the same reason [`CommandPayload::Geometry`] boxes its geometry).
-pub struct TwoLineCommand {
-    pub first: SelectionRef,
-    pub second: SelectionRef,
-    pub pick_first: Point3,
-    pub pick_second: Point3,
-}
+mod basic;
+pub use basic::*;
 
-/// The input of a DIMROTATED command (AutoCAD 2026): the two extension-line
-/// origins, the dimension-line location and the **rotation** of the dimension
-/// line in radians (about `+Z`).
-///
-/// Boxed inside [`CommandPayload::RotatedLinearDimension`] so the command enum
-/// stays small. `rotation` is already a radian value: the session parameter
-/// [`crate::draw_tool::ToolParameter::DimRotation`] carries **degrees** and the
-/// host converts it exactly once when it builds this payload. Any finite angle is
-/// legal — a negative angle is a rotation in the other direction, not an error,
-/// and no normalisation is applied.
-pub struct RotatedLinearDimensionCommand {
-    pub first: Point3,
-    pub second: Point3,
-    pub location: Point3,
-    pub rotation: f64,
-}
-
-/// The input of a DIMRADIUS/DIMDIAMETER command (ADR 0017 decision C, P5d): the
-/// picked arc/circle ref and the dimension-line location.
-///
-/// Boxed inside [`CommandPayload::DimRadial`] so the command enum stays small (the
-/// same reason [`TwoLineCommand`] is boxed). Which of the two commands it is comes
-/// from the [`CommandId`], so the payload carries no kind field (a second source
-/// of truth).
-pub struct RadialDimensionCommand {
-    pub target: SelectionRef,
-    pub location: Point3,
-}
-
-/// The two supported DIMANGULAR constructions (ADR 0017 decision C, P5e).
-///
-/// * [`Self::TwoLine`] — the interactive form: two picked straight lines plus the
-///   dimension-arc location. The vertex is the intersection of the two infinite
-///   lines (ADR 0017 U-8, pinned against the committed QCAD fixtures).
-/// * [`Self::ThreePoint`] — the command-level form: a vertex, the two side
-///   points and the dimension-arc location. It has no interactive capture yet:
-///   AutoCAD's first prompt ("select a line **or** specify a vertex") cannot be
-///   expressed by the fixed-step capture state machine. This is declared in the
-///   capability notes, not hidden.
-///
-/// Which variant it is is part of the input, not a second command: both produce
-/// one `DIMENSION` entity through the same funnel.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AngularDimensionInput {
-    /// Vertex, first side point, second side point, dimension-arc location.
-    ThreePoint {
-        vertex: Point3,
-        first: Point3,
-        second: Point3,
-        location: Point3,
-    },
-    /// Two picked straight lines plus the dimension-arc location.
-    TwoLine {
-        first: SelectionRef,
-        second: SelectionRef,
-        location: Point3,
-    },
-}
-
-/// The five modes of the `TCASE` text-case command (AutoCAD's `-TCASE`
-/// `Sentence`/`Lower`/`Upper`/`Title`/`toGgle` prompt, 2026-11-07).
-///
-/// This is the machine form of the typed argument grammar parsed by
-/// `cad_ui_core::session::parse_tcase_argument`; the command layer is the only
-/// consumer. The **bare** `TCASE` selector carries no payload at all and the
-/// command applies [`Self::Title`], the documented current default.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TextCaseMode {
-    /// `UPPER` / `U`: every alphabetic character upper-cased.
-    Upper,
-    /// `LOWER` / `L`: every alphabetic character lower-cased.
-    Lower,
-    /// `TITLE` / `T` (and the bare default): the first alphabetic character of
-    /// each whitespace-separated word upper-cased, the rest lower-cased.
-    Title,
-    /// `SENTENCE` / `S`: the first alphabetic character of the whole string
-    /// upper-cased, the rest lower-cased.
-    Sentence,
-    /// `TOGGLE` / `G`: every alphabetic character's case swapped.
-    Toggle,
-}
-
-/// The option of the AutoCAD 2026 `MEASUREGEOM` inquiry router.
-///
-/// The typed grammar (`cad_ui_core::session::parse_measuregeom_argument`)
-/// admits the full words only; this enum is the machine form. Four options route
-/// to the existing measurement tools and never reach the command layer with this
-/// payload; `Radius` is the read-only report and `Volume` is the explicit
-/// not-implemented refusal. Full contract:
-/// [`crate::command_id::measuregeom`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MeasureGeomOption {
-    /// `MEASUREGEOM DISTANCE` → the `DIST` tool.
-    Distance,
-    /// `MEASUREGEOM ANGLE` → the `MEASUREANGLE` tool.
-    Angle,
-    /// `MEASUREGEOM AREA` → the `AREA` tool.
-    Area,
-    /// `MEASUREGEOM POLYLINE` → the `MEASUREPOLYLINE` tool.
-    Polyline,
-    /// `MEASUREGEOM RADIUS`: read-only radius/diameter/circumference report of
-    /// exactly one selected `ARC`/`CIRCLE`.
-    Radius,
-    /// `MEASUREGEOM VOLUME`: **not implemented** (no 3D-solid/volume model), a
-    /// named `Unsupported`, never a fabricated number.
-    Volume,
-}
+mod style_tables;
+pub use style_tables::*;
 
 pub enum CommandPayload {
     None,
@@ -937,7 +822,25 @@ pub enum CommandPayload {
     },
     Purge(PurgeTarget),
     Rename(RenameCommand),
+    /// One post-import write on a named style table (`STYLE`, `-STYLE`,
+    /// `MLEADERSTYLE`); see [`StyleTableCommand`].
+    StyleTable(StyleTableCommand),
     SetVar(String),
+    /// `SYSVARMONITOR ADD|REMOVE|LIST <name>`: one session-only monitor action.
+    ///
+    /// The monitor holds a bounded set of **modelled** `SETVAR` names plus the
+    /// value seen at the last query. `LIST` compares each watched value with
+    /// that snapshot and reports a change; nothing is written to the drawing.
+    /// There is no background notification: a change is reported only when the
+    /// monitor is queried.
+    SysVarMonitor(SysVarMonitorAction),
+    /// `SPACETRANS <distance>`: one model/paper distance conversion.
+    ///
+    /// The value is a **model-space distance** converted to paper units for the
+    /// active layout viewport (and the inverse is reported too). A model-space
+    /// session or a layout viewport that cannot be resolved exactly is refused
+    /// by name; the conversion never guesses a scale.
+    SpaceTrans(f64),
     MRedo(u32),
     Multiple(Option<String>),
     /// The 2026-11-07 draw/modify batch; contracts in `command_id::draw2`.
@@ -993,4 +896,33 @@ pub enum CommandPayload {
     /// single selected table (Work-only). Contract:
     /// [`crate::app_drawing::table_edit`].
     TableEdit(Box<TableEditCommand>),
+    /// `SHAPE <name-or-code> <x> <y> [size] [rotation_deg]`: one real
+    /// `SemanticGeometry::Shape` glyph (Work-only). The extent is the shape's
+    /// code into the resolved SHX shape font; contract:
+    /// [`crate::app_drawing::shape`].
+    Shape(Box<ShapeCommand>),
+    /// `MINSERT <block> <rows> <columns> <row_spacing> <column_spacing> <x> <y>`:
+    /// a rectangular array of INSERT references in one transaction (Work-only).
+    MInsert(Box<MInsertCommand>),
+    /// `ADDSELECTED <x> <y>`: a new entity of the single selected entity's type
+    /// and general properties at the typed point (Work-only).
+    AddSelected(Box<AddSelectedCommand>),
+    /// `MLEDIT` / `-MLEDIT <option> …`: the two-LINE subset of multiline editing
+    /// (Work-only). The current selection is the object input: exactly two
+    /// `LINE`s. Contract: [`crate::app_drawing::mledit`].
+    MlEdit(Box<MlEditCommand>),
+    /// `MLEADERALIGN <LEFT|RIGHT|CENTER> [spacing]`: align / space the selected
+    /// MULTILEADERs (Work-only). The current selection is the object input.
+    /// Contract: [`crate::app_drawing::mleader_edit`].
+    MLeaderAlign(Box<MLeaderAlignCommand>),
+    /// `MLEADEREDIT ADD <x> <y>` / `MLEADEREDIT REMOVE <index>`: add or remove a
+    /// leader line on every selected MULTILEADER (Work-only). Contract:
+    /// [`crate::app_drawing::mleader_edit`].
+    MLeaderEdit(Box<MLeaderEditCommand>),
+    /// `TOLERANCE <x> <y> <text>`: one feature-control frame built from real
+    /// `LWPOLYLINE`/`LINE`/`TEXT` entities on the active layer (Work-only). This
+    /// build has no single `AcDbFcf` object, so the frame is the declared
+    /// separate-entity representation. Contract:
+    /// [`crate::app_drawing::tolerance`].
+    Tolerance(Box<ToleranceCommand>),
 }

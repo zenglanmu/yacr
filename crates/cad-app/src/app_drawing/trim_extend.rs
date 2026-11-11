@@ -218,6 +218,9 @@ impl Application {
                 patches: vec![patch],
                 block_patches: Vec::new(),
                 layer_patches: Vec::new(),
+                style_patches: Vec::new(),
+                dim_style_patches: Vec::new(),
+                mleader_style_patches: Vec::new(),
                 layout_patches: Vec::new(),
                 merge_key: None,
             },
@@ -392,6 +395,9 @@ impl Application {
                 patches: vec![drawing_patch(target_id, Some(target_entity), Some(stored))],
                 block_patches: Vec::new(),
                 layer_patches: Vec::new(),
+                style_patches: Vec::new(),
+                dim_style_patches: Vec::new(),
+                mleader_style_patches: Vec::new(),
                 layout_patches: Vec::new(),
                 merge_key: None,
             },
@@ -488,6 +494,41 @@ impl Application {
             SpaceId::Model,
             None,
             label,
+        )
+    }
+
+    /// Insert a new entity into `layer`/`space` with a captured display state and
+    /// an optional stored `type_key`.
+    ///
+    /// The same single create funnel as every other insert (one transaction, one
+    /// undo step, all-or-nothing), exposed to the sibling ADDSELECTED handler so
+    /// it can preserve the source row's layer, render attributes and stored type
+    /// key instead of re-deriving them. `type_key: None` stamps
+    /// [`class_name`]; a batch of more than one entity would be refused, so this
+    /// deliberately inserts exactly one.
+    // The batch shape is the contract here too: one argument per stored field,
+    // so the caller cannot silently drop the type key or the display state.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn commit_new_entity_with_display(
+        &mut self,
+        command: &Command,
+        geometry: SemanticGeometry,
+        layer: LayerId,
+        space: SpaceId,
+        display: Option<cad_db::EntityDisplayState>,
+        type_key: Option<&str>,
+        label: &str,
+    ) -> CadResult<CommandOutcome> {
+        self.insert_new_entities(
+            command,
+            vec![geometry],
+            NewEntityInsert {
+                layer,
+                space,
+                display,
+                type_key,
+                label,
+            },
         )
     }
 
@@ -655,6 +696,9 @@ impl Application {
                 patches,
                 block_patches: Vec::new(),
                 layer_patches: Vec::new(),
+                style_patches: Vec::new(),
+                dim_style_patches: Vec::new(),
+                mleader_style_patches: Vec::new(),
                 layout_patches: Vec::new(),
                 merge_key: None,
             },

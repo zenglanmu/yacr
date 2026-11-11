@@ -324,6 +324,8 @@ mod hatch_stitch;
 mod hatch_utilities;
 mod image;
 mod image_adjust;
+// The polygonal IMAGECLIP mode (world-space boundary → pixel-space N-gon).
+mod image_clip_polygon;
 mod insert_block;
 mod join;
 mod layer_undo;
@@ -332,8 +334,12 @@ mod lengthen;
 mod match_prop;
 mod mirror_curves;
 mod mleader_create;
+// The 2026-11-12 SHAPE/MINSERT/ADDSELECTED contracts.
+mod addselected;
+mod minsert;
 mod modify_batch;
 mod modify_extra;
+mod shape;
 // OVERKILL (Delete Duplicate Objects) contract tests.
 mod mtext;
 mod multileader;

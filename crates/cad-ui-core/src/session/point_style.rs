@@ -34,8 +34,8 @@ use super::commands::{
     MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR, MREDO_SELECTOR, MULTIPLE_SELECTOR,
     OFFSET_SELECTOR, OVERKILL_SELECTOR, PAN_SELECTOR, PURGE_SELECTOR, QSELECT_SELECTOR,
     RENAME_SELECTOR, REVCLOUD_SELECTOR, SETVAR_SELECTOR, SOLID_SELECTOR, SSX_SELECTOR,
-    TABLEDIT_SELECTOR, TABLE_SELECTOR, TEXTMASK_SELECTOR, TRACE_SELECTOR, TREX_SELECTOR,
-    TXT2MTXT_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR, WIPEOUT_SELECTOR,
+    SYSVARMONITOR_SELECTOR, TABLEDIT_SELECTOR, TABLE_SELECTOR, TEXTMASK_SELECTOR, TRACE_SELECTOR,
+    TREX_SELECTOR, TXT2MTXT_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR, WIPEOUT_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::dim_arguments::{
@@ -112,8 +112,12 @@ impl CadSession {
             AUDIT_SELECTOR => self.audit_argument(argument, text),
             FIND_SELECTOR | FIND_REPORT_SELECTOR => self.find_argument(selector, argument, text),
             // The 2026-11-07 utility/named-object batch.
-            PURGE_SELECTOR | RENAME_SELECTOR | SETVAR_SELECTOR | MREDO_SELECTOR
-            | MULTIPLE_SELECTOR => self.utility_argument(selector, argument, text),
+            PURGE_SELECTOR
+            | RENAME_SELECTOR
+            | SETVAR_SELECTOR
+            | MREDO_SELECTOR
+            | MULTIPLE_SELECTOR
+            | SYSVARMONITOR_SELECTOR => self.utility_argument(selector, argument, text),
             // The 2026-11-07 draw/modify batch typed forms.
             DONUT_SELECTOR | SOLID_SELECTOR | HELIX_SELECTOR | MLINE_SELECTOR
             | MLSTYLE_SELECTOR | TREX_SELECTOR | MPEDIT_SELECTOR | DRAWORDER_SELECTOR => {
@@ -161,6 +165,13 @@ impl CadSession {
             // payload; a bare `DIMSPACE` keeps the name-only Auto form.
             DIMSPACE_SELECTOR => self.dimspace_argument(argument, text),
 
+            // The named style tables (`STYLE`/`-STYLE`/`MLEADERSTYLE`).
+            super::commands::STYLE_SELECTOR
+            | super::commands::DASH_STYLE_SELECTOR
+            | super::commands::MLEADERSTYLE_SELECTOR => {
+                self.style_argument(selector, argument, text)
+            }
+
             // The 2026-11-07 dimension-editing batch typed forms.
             DIMSTYLE_SELECTOR | DIMTEDIT_SELECTOR | DIMEDIT_SELECTOR | DIMOVERRIDE_SELECTOR
             | DIMJOGLINE_SELECTOR | QDIM_SELECTOR => self.dim_argument(selector, argument, text),
@@ -179,10 +190,34 @@ impl CadSession {
             | VSCURRENT_SELECTOR | LINETYPE_SELECTOR => {
                 self.extras_argument(selector, argument, text)
             }
+            // The 2026-11-12 SHAPE family: SHAPE creation, the MINSERT block
+            // array and the ADDSELECTED copy-of-type form.
+            super::commands::SHAPE_SELECTOR
+            | super::commands::MINSERT_SELECTOR
+            | super::commands::ADDSELECTED_SELECTOR => {
+                self.shape_block_argument(selector, argument, text)
+            }
+            // The 2026-11-12 MULTILEADER edits, the MLEDIT two-LINE subset and the
+            // TOLERANCE frame. Each payload rides the existing selection.
+            super::commands::MLEDIT_SELECTOR
+            | super::commands::DASH_MLEDIT_SELECTOR
+            | super::commands::MLEADERALIGN_SELECTOR
+            | super::commands::MLEADEREDIT_SELECTOR
+            | super::commands::TOLERANCE_SELECTOR => {
+                self.mleader_argument(selector, argument, text)
+            }
             // The 2026-11 P3 option batch: the payloads already exist, only the
             // typed argument grammar/dispatch was missing.
             OVERKILL_SELECTOR | REVCLOUD_SELECTOR | WIPEOUT_SELECTOR | TEXTMASK_SELECTOR
             | TXT2MTXT_SELECTOR => self.payload_option_argument(selector, argument, text),
+            // The paper-space/session/point-style typed forms: `VPLAYER`,
+            // `MVSETUP`, `APERTURE`, `PTYPE` and `REVCLOUDPROPERTIES`.
+            super::commands::VPLAYER_SELECTOR
+            | super::commands::MVSETUP_SELECTOR
+            | super::commands::APERTURE_SELECTOR
+            | super::commands::PTYPE_SELECTOR
+            | super::commands::REVCLOUDPROPERTIES_SELECTOR
+            | super::commands::SPACETRANS_SELECTOR => self.paper_argument(selector, argument, text),
 
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);

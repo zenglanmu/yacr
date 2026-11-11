@@ -254,6 +254,49 @@ fn revcloud_default_arc_length_uses_the_session_revcloud_token() {
 }
 
 #[test]
+fn typed_revcloud_properties_set_changes_the_produced_arc_length() {
+    // The typed `REVCLOUDPROPERTIES <length>` form writes the same session token
+    // the bare Object form reads; this pins the consumer end to end: a typed set
+    // of 1.0 makes the 4x3 rectangle resolve to 14 unit-chord arcs.
+    let (mut app, mut session) = application_with_document();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::RevCloudProperties),
+        CommandPayload::LayerWalk(vec!["1.0".into()]),
+    )
+    .expect("a positive REVCLOUDPROPERTIES value is admitted");
+    assert_eq!(session.drafting_extras.revcloud_arc_length(), 1.0);
+
+    let created = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateRectangle,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(4.0, 3.0)]),
+    )
+    .unwrap();
+    select(&mut app, &mut session, &[created.objects[0].0]);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::RevisionCloud,
+        object_payload(),
+    )
+    .expect("the bare Object form reads the typed session token");
+    let (points, _, closed) = stored_polyline(&app, created.objects[0].0);
+    assert!(closed);
+    assert_eq!(points.len(), 14, "14-unit perimeter at a 1.0 chord");
+    assert_chord(&points, true, 1.0);
+    assert!(
+        outcome.diagnostics[0]
+            .message
+            .contains("session REVCLOUDPROPERTIES arc-length token"),
+        "the diagnostic names the token as the chord source: {}",
+        outcome.diagnostics[0].message
+    );
+}
+
+#[test]
 fn revcloud_explicit_arc_length_overrides_the_session_token() {
     let (mut app, mut session) = application_with_document();
     session.drafting_extras.set_revcloud_arc_length(0.5);

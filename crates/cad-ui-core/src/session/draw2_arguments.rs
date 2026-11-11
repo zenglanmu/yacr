@@ -42,7 +42,8 @@ pub(crate) fn invalid_image_argument_reason(selector: &str, text: &str) -> Strin
     } else if selector == IMAGECLIP_SELECTOR {
         (
             "imageclip.argument",
-            "`IMAGECLIP <minx> <miny> <maxx> <maxy>` or `IMAGECLIP OFF`",
+            "`IMAGECLIP <minx> <miny> <maxx> <maxy>`, `IMAGECLIP POLY <x1> <y1> <x2> <y2> <x3> \
+             <y3> …` or `IMAGECLIP OFF`",
         )
     } else {
         (

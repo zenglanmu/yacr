@@ -114,7 +114,9 @@ pub struct HostController {
     /// [`crate::viewer_config::ViewConfig::tolerance_policy`] and installs it with
     /// [`HostController::set_tolerance_policy`]. Left unset it stays
     /// [`TolerancePolicy::default`] (pickbox 3, aperture 12), so historical
-    /// geometry and snapping are unchanged.
+    /// geometry and snapping are unchanged. Once `APERTURE <n>` sets the session
+    /// token explicitly, [`HostController::session_tolerance`] overlays only the
+    /// object-snap aperture from it; the pickbox is never changed here.
     tolerance: TolerancePolicy,
 }
 
@@ -701,7 +703,7 @@ impl HostController {
             raw,
             world_per_px,
             self.session.active_space.clone(),
-            &self.tolerance,
+            &self.session_tolerance(),
         )?;
         Ok(candidates.into_iter().next())
     }
@@ -760,7 +762,7 @@ impl HostController {
             cursor,
             world_per_px,
             self.session.active_space.clone(),
-            &self.tolerance,
+            &self.session_tolerance(),
         )
     }
 

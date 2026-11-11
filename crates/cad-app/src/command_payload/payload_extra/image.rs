@@ -27,17 +27,33 @@ pub struct ImageAttachCommand {
     pub units_per_pixel: f64,
 }
 
-/// The input of an `IMAGECLIP` command: a pixel-space rectangular clip, or the
-/// `OFF` form that clears it (`rect: None`).
+/// The input of an `IMAGECLIP` command: a clip boundary, or the `OFF` form that
+/// clears it.
 ///
-/// `rect` is `[minx, miny, maxx, maxy]` in the image's own **pixel coordinate
-/// space** (the same space `ImageClip::vertices` uses), and the command stores it
-/// as the two opposite corners of a rectangle with `inside: true`. The
-/// selection is not part of the payload: the command reads the session's current
-/// selection and requires exactly one directly addressable `Image` entity.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ImageClipCommand {
-    pub rect: Option<[f64; 4]>,
+/// Two boundary spaces are supported, matching AutoCAD's two clip prompts:
+///
+/// * [`Self::Rect`] — `[minx, miny, maxx, maxy]` in the image's own **pixel
+///   coordinate space** (the same space `ImageClip::vertices` uses). The command
+///   stores it as the two opposite corners of a rectangle with `inside: true`;
+///   this is the original typed form `IMAGECLIP <minx> <miny> <maxx> <maxy>`.
+/// * [`Self::Polygon`] — three or more **world-space** points (the `IMAGECLIP
+///   POLY x1 y1 x2 y2 x3 y3 …` prompt). The command verifies every point lies on
+///   the image plane, maps it into pixel space with the image's own `u`/`v`
+///   basis and stores the resulting N-gon with `inside: true`. A point that is
+///   not coplanar with the image plane is the named
+///   `imageclip.polygon_non_coplanar` refusal.
+///
+/// The selection is not part of the payload: the command reads the session's
+/// current selection and requires exactly one directly addressable `Image`
+/// entity.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImageClipCommand {
+    /// `IMAGECLIP OFF`: clear the stored clip.
+    Off,
+    /// Pixel-space rectangle: two opposite corners `[minx, miny, maxx, maxy]`.
+    Rect([f64; 4]),
+    /// World-space polygon boundary (at least three distinct points).
+    Polygon(Vec<Point3>),
 }
 
 /// The input of an `IMAGEADJUST` command: the four display-transfer values for

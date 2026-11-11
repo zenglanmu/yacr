@@ -17,6 +17,7 @@ use crate::session::commands::{
     IMAGECLIP_SELECTOR,
 };
 use cad_app::{ExtendedCommandId, ImageAdjustCommand, ImageAttachCommand, ImageClipCommand};
+use cad_domain::Point3;
 
 fn fresh_session() -> CadSession {
     session(Rc::new(FakeFiles {
@@ -59,30 +60,57 @@ fn imageattach_argument_is_a_single_token_file_plus_five_numbers() {
 }
 
 #[test]
-fn imageclip_argument_is_a_rectangle_or_off() {
+fn imageclip_argument_is_a_rectangle_a_polygon_or_off() {
     assert_eq!(
         parse_imageclip_argument("0 0 320 240"),
-        Some(ImageClipCommand {
-            rect: Some([0.0, 0.0, 320.0, 240.0])
-        })
+        Some(ImageClipCommand::Rect([0.0, 0.0, 320.0, 240.0]))
     );
-    assert_eq!(
-        parse_imageclip_argument("OFF"),
-        Some(ImageClipCommand { rect: None })
-    );
-    assert_eq!(
-        parse_imageclip_argument("off"),
-        Some(ImageClipCommand { rect: None })
-    );
+    assert_eq!(parse_imageclip_argument("OFF"), Some(ImageClipCommand::Off));
+    assert_eq!(parse_imageclip_argument("off"), Some(ImageClipCommand::Off));
     // Ordering is the command's `imageclip.invalid_rect` refusal, not syntax:
     // the four finite numbers are admitted and the command decides.
     assert_eq!(
         parse_imageclip_argument("10 0 0 10"),
-        Some(ImageClipCommand {
-            rect: Some([10.0, 0.0, 0.0, 10.0])
-        })
+        Some(ImageClipCommand::Rect([10.0, 0.0, 0.0, 10.0]))
     );
-    for refused in ["", "0 0 1", "0 0 1 1 1", "0 0 x 1", "OFF EXTRA", "NONE"] {
+    // POLY: world-space pairs on the flat work plane.
+    assert_eq!(
+        parse_imageclip_argument("POLY 0 0 10 0 10 5"),
+        Some(ImageClipCommand::Polygon(vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0
+            },
+            Point3 {
+                x: 10.0,
+                y: 0.0,
+                z: 0.0
+            },
+            Point3 {
+                x: 10.0,
+                y: 5.0,
+                z: 0.0
+            },
+        ]))
+    );
+    assert_eq!(
+        parse_imageclip_argument("poly 0 0 10 0 10 5 0 5"),
+        parse_imageclip_argument("POLY 0 0 10 0 10 5 0 5")
+    );
+    for refused in [
+        "",
+        "0 0 1",
+        "0 0 1 1 1",
+        "0 0 x 1",
+        "OFF EXTRA",
+        "NONE",
+        // Fewer than three point pairs, an odd coordinate count and a
+        // non-numeric coordinate are all outside the grammar.
+        "POLY 0 0 10 0",
+        "POLY 0 0 10 0 10",
+        "POLY 0 0 10 0 x 5",
+    ] {
         assert_eq!(parse_imageclip_argument(refused), None, "{refused:?}");
     }
 }

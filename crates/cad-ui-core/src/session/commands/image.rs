@@ -50,22 +50,40 @@ pub fn parse_imageattach_argument(argument: &str) -> Option<ImageAttachCommand> 
 /// The four coordinates are pixel-space signed plain decimals. Ordering
 /// (`minx < maxx`, `miny < maxy`) is the command's `imageclip.invalid_rect`
 /// refusal, not a syntax rule here.
+///
+/// `IMAGECLIP POLY <x1> <y1> <x2> <y2> <x3> <y3> …` is the polygonal form: at
+/// least three **world-space** point pairs on the flat work plane (`z = 0`, the
+/// same plane `IMAGEATTACH` places its images on). The command is the authority
+/// for the coplanarity, distinct-point and self-intersection refusals.
 pub fn parse_imageclip_argument(argument: &str) -> Option<ImageClipCommand> {
     let tokens = tokens(argument);
     if tokens.len() == 1 && tokens[0].eq_ignore_ascii_case("OFF") {
-        return Some(ImageClipCommand { rect: None });
+        return Some(ImageClipCommand::Off);
+    }
+    if tokens.len() >= 2 && tokens[0].eq_ignore_ascii_case("POLY") {
+        let coordinates = &tokens[1..];
+        if coordinates.len() < 6 || !coordinates.len().is_multiple_of(2) {
+            return None;
+        }
+        let mut points = Vec::with_capacity(coordinates.len() / 2);
+        for pair in coordinates.as_chunks::<2>().0 {
+            points.push(Point3 {
+                x: parse_signed_decimal(pair[0])?,
+                y: parse_signed_decimal(pair[1])?,
+                z: 0.0,
+            });
+        }
+        return Some(ImageClipCommand::Polygon(points));
     }
     if tokens.len() != 4 {
         return None;
     }
-    Some(ImageClipCommand {
-        rect: Some([
-            parse_signed_decimal(tokens[0])?,
-            parse_signed_decimal(tokens[1])?,
-            parse_signed_decimal(tokens[2])?,
-            parse_signed_decimal(tokens[3])?,
-        ]),
-    })
+    Some(ImageClipCommand::Rect([
+        parse_signed_decimal(tokens[0])?,
+        parse_signed_decimal(tokens[1])?,
+        parse_signed_decimal(tokens[2])?,
+        parse_signed_decimal(tokens[3])?,
+    ]))
 }
 
 fn tokens(argument: &str) -> Vec<&str> {

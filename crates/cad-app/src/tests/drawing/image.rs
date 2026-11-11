@@ -77,7 +77,10 @@ fn attach_payload(
 }
 
 fn clip_payload(rect: Option<[f64; 4]>) -> CommandPayload {
-    CommandPayload::ImageClip(Box::new(ImageClipCommand { rect }))
+    CommandPayload::ImageClip(Box::new(match rect {
+        Some(rect) => ImageClipCommand::Rect(rect),
+        None => ImageClipCommand::Off,
+    }))
 }
 
 pub(super) fn attach_default(

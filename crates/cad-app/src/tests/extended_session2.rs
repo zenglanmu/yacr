@@ -2,10 +2,12 @@
 //! `HIGHLIGHTNEW`, `TRAYSETTINGS`, `TEXTSCR`, `GRAPHSCR`, `FINDINCLUDE`,
 //! `FINDMATCH`, `REVCLOUDPROPERTIES`.
 //!
-//! Each is payload-free and session-only: it flips or reads one token in
-//! `SessionState::drafting_extras`, emits one honest diagnostic (the effect is
-//! NOT IMPLEMENTED or the form is read-only), never writes the drawing, never
-//! bumps the revision and never records an undo step.
+//! Each flips/reads one token in `SessionState::drafting_extras`, emits one
+//! honest diagnostic, never writes the drawing, never bumps the revision and
+//! never records an undo step. `APERTURE <n>` and `REVCLOUDPROPERTIES <length>`
+//! are the two validated **set** forms (payload carried as `LayerWalk` tokens);
+//! their consumers are `SessionState::interaction_tolerance` and `REVCLOUD`
+//! respectively.
 
 use super::*;
 
@@ -172,7 +174,7 @@ fn text_screen_tokens_set_the_session_flag_polarity() {
 }
 
 #[test]
-fn read_only_token_reports_state_that_their_setter_is_not_implemented() {
+fn aperture_and_revcloud_properties_report_their_session_tokens_read_only() {
     let (mut app, mut session) = application_with_document();
     let before_revision = revision(&app);
 
@@ -185,8 +187,8 @@ fn read_only_token_reports_state_that_their_setter_is_not_implemented() {
         row.message
     );
     assert!(
-        row.message.contains("setter form") && row.message.contains("NOT IMPLEMENTED"),
-        "the setter form is named as missing: {}",
+        row.message.contains("has not been set explicitly"),
+        "the configured value is named until the token is set: {}",
         row.message
     );
 
@@ -203,8 +205,8 @@ fn read_only_token_reports_state_that_their_setter_is_not_implemented() {
         row.message
     );
     assert!(
-        row.message.contains("NOT IMPLEMENTED"),
-        "the setter form is named as missing: {}",
+        row.message.contains("REVCLOUD reads it"),
+        "the consumer is named: {}",
         row.message
     );
 
@@ -214,6 +216,125 @@ fn read_only_token_reports_state_that_their_setter_is_not_implemented() {
         "read-only token reports write nothing"
     );
     assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn aperture_set_writes_only_the_session_token() {
+    let (mut app, mut session) = application_with_document();
+    let before_revision = revision(&app);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::Aperture),
+                CommandPayload::LayerWalk(vec!["24".into()]),
+            ),
+        )
+        .expect("an in-range APERTURE value is admitted");
+    assert!(
+        outcome.changes.is_none(),
+        "no ChangeSet for a session token"
+    );
+    assert!(diagnostic(&outcome, "aperture.set")
+        .message
+        .contains("24 logical pixels"));
+    assert_eq!(session.drafting_extras.aperture(), 24);
+    assert!(session.drafting_extras.aperture_explicit());
+    // The token is the session object-snap aperture, not a pickbox write.
+    let policy = session.interaction_tolerance(cad_domain::TolerancePolicy::default());
+    assert_eq!(policy.interaction_logical_pixels, 24.0);
+    assert_eq!(
+        policy.pickbox_logical_pixels,
+        cad_domain::TolerancePolicy::default().pickbox_logical_pixels,
+        "APERTURE never changes PICKBOX"
+    );
+    assert_eq!(revision(&app), before_revision, "no drawing write");
+    assert!(!app.can_undo(&DocumentId(1)), "no undo entry");
+}
+
+#[test]
+fn aperture_out_of_range_and_malformed_tokens_are_refused_and_change_nothing() {
+    let (mut app, mut session) = application_with_document();
+    let before = session.drafting_extras.aperture();
+    for (tokens, needle) in [
+        (vec!["0".to_string()], "aperture.out_of_range"),
+        (vec!["51".to_string()], "aperture.out_of_range"),
+        (vec!["abc".to_string()], "aperture.invalid_argument"),
+        (vec!["1.5".to_string()], "aperture.invalid_argument"),
+        (
+            vec!["10".to_string(), "20".to_string()],
+            "aperture.invalid_argument",
+        ),
+    ] {
+        let error = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::Extended(ExtendedCommandId::Aperture),
+                    CommandPayload::LayerWalk(tokens),
+                ),
+            )
+            .expect_err("an invalid aperture is refused");
+        match &error {
+            CadError::InvalidInput(reason) => assert!(reason.contains(needle), "{reason}"),
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+        assert_eq!(
+            session.drafting_extras.aperture(),
+            before,
+            "a refusal stores nothing"
+        );
+        assert!(!session.drafting_extras.aperture_explicit());
+    }
+}
+
+#[test]
+fn revcloud_properties_set_writes_the_session_arc_length_token() {
+    let (mut app, mut session) = application_with_document();
+    let before_revision = revision(&app);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::RevCloudProperties),
+                CommandPayload::LayerWalk(vec!["2.5".into()]),
+            ),
+        )
+        .expect("a positive arc length is admitted");
+    assert!(outcome.changes.is_none());
+    assert!(diagnostic(&outcome, "revcloud.properties.set")
+        .message
+        .contains("2.5"));
+    assert_eq!(session.drafting_extras.revcloud_arc_length(), 2.5);
+    assert_eq!(revision(&app), before_revision, "no drawing write");
+    assert!(!app.can_undo(&DocumentId(1)), "no undo entry");
+
+    for (token, needle) in [
+        ("0", "revcloudproperties.invalid_argument"),
+        ("-1", "revcloudproperties.invalid_argument"),
+        ("NaN", "revcloudproperties.invalid_argument"),
+        ("inf", "revcloudproperties.invalid_argument"),
+        ("abc", "revcloudproperties.invalid_argument"),
+    ] {
+        let error = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::Extended(ExtendedCommandId::RevCloudProperties),
+                    CommandPayload::LayerWalk(vec![token.into()]),
+                ),
+            )
+            .expect_err("an unusable arc length is refused");
+        match &error {
+            CadError::InvalidInput(reason) => assert!(reason.contains(needle), "{reason}"),
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+        assert_eq!(
+            session.drafting_extras.revcloud_arc_length(),
+            2.5,
+            "a refusal stores nothing"
+        );
+    }
 }
 
 #[test]

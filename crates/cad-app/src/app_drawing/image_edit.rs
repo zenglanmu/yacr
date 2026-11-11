@@ -18,7 +18,8 @@
 //! * `imageattach.payload` / `.unsafe_reference` / `.invalid_origin` /
 //!   `.invalid_pixels` / `.invalid_units_per_pixel` / `.invalid_extent`;
 //! * `imageclip.payload` / `.no_selection` / `.multiple` / `.not_image` /
-//!   `.invalid_rect`;
+//!   `.invalid_rect` / `.polygon_points` / `.polygon_non_coplanar` /
+//!   `.polygon_self_intersection` / `.degenerate_plane`;
 //! * `imageadjust.payload` / `.no_selection` / `.multiple` / `.not_image` /
 //!   `.invalid_value`.
 //!
@@ -27,6 +28,7 @@
 //! representation layer emits the honest frame plus the existing
 //! `image.unresolved` diagnostic — this command never fabricates a texture.
 
+use super::helpers::offset_tolerance;
 use super::*;
 use crate::command_payload::{ImageAdjustCommand, ImageAttachCommand, ImageClipCommand};
 use cad_domain::{DocumentId, ImageAdjust};
@@ -164,13 +166,24 @@ impl Application {
         Ok(outcome)
     }
 
-    /// `IMAGECLIP <minx> <miny> <maxx> <maxy>` / `IMAGECLIP OFF`.
+    /// `IMAGECLIP <minx> <miny> <maxx> <maxy>` / `IMAGECLIP POLY …` / `IMAGECLIP OFF`.
     ///
     /// Pre-selection command: exactly one selected, directly addressable `Image`
-    /// entity. The rectangle is in the image's **pixel coordinate space** and is
-    /// stored as the two opposite corners with `inside: true` (the renderer reads
-    /// two vertices as a rectangle). `OFF` clears the clip. An identical clip is
-    /// `imageclip.unchanged` and opens no transaction.
+    /// entity. Two boundary forms are stored, both with `inside: true`:
+    ///
+    /// * [`ImageClipCommand::Rect`] — the rectangle is in the image's **pixel
+    ///   coordinate space** and is stored as its two opposite corners (the
+    ///   renderer reads two vertices as a rectangle).
+    /// * [`ImageClipCommand::Polygon`] — three or more **world-space** points.
+    ///   Every point must lie on the image plane (the named
+    ///   `imageclip.polygon_non_coplanar` refusal otherwise); each is mapped into
+    ///   pixel space with the image's own `u`/`v` basis and stored as the N-gon.
+    ///   Fewer than three distinct points is `imageclip.polygon_points`, an
+    ///   edge-crossing boundary is `imageclip.polygon_self_intersection`, and a
+    ///   degenerate image basis is `imageclip.degenerate_plane`.
+    ///
+    /// `OFF` clears the clip. An identical clip is `imageclip.unchanged` and opens
+    /// no transaction.
     fn image_clip(
         &mut self,
         session: &SessionState,
@@ -179,14 +192,17 @@ impl Application {
         let CommandPayload::ImageClip(payload) = &command.payload else {
             return Err(image_refusal(
                 "imageclip.payload",
-                "IMAGECLIP needs an ImageClip payload (`<minx> <miny> <maxx> <maxy>` or \
-                 `OFF`)",
+                "IMAGECLIP needs an ImageClip payload (`<minx> <miny> <maxx> <maxy>`, `POLY <x1> \
+                 <y1> <x2> <y2> <x3> <y3> …` or `OFF`)",
             ));
         };
-        let ImageClipCommand { rect } = payload.as_ref();
+        let request = payload.as_ref();
         let (document_id, mut candidate, before) =
             self.one_selected_image(session, command, "IMAGECLIP", "imageclip")?;
-        let SemanticGeometry::Image { clip, .. } = &before.geometry else {
+        let SemanticGeometry::Image {
+            origin, u, v, clip, ..
+        } = &before.geometry
+        else {
             return Err(image_refusal(
                 "imageclip.not_image",
                 format!(
@@ -196,9 +212,9 @@ impl Application {
                 ),
             ));
         };
-        let new_clip = match rect {
-            None => None,
-            Some([minx, miny, maxx, maxy]) => {
+        let new_clip = match request {
+            ImageClipCommand::Off => None,
+            ImageClipCommand::Rect([minx, miny, maxx, maxy]) => {
                 if ![minx, miny, maxx, maxy]
                     .iter()
                     .all(|value| value.is_finite())
@@ -218,6 +234,7 @@ impl Application {
                     inside: true,
                 })
             }
+            ImageClipCommand::Polygon(points) => Some(polygon_clip(points, *origin, *u, *v)?),
         };
         let object = Some(ObjectId(before.id.0));
         if *clip == new_clip {
@@ -264,12 +281,15 @@ impl Application {
                 patches: vec![drawing_patch(before.id, Some(before.clone()), Some(stored))],
                 block_patches: Vec::new(),
                 layer_patches: Vec::new(),
+                style_patches: Vec::new(),
+                dim_style_patches: Vec::new(),
+                mleader_style_patches: Vec::new(),
                 layout_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
         let (code, message) = match &new_clip {
-            Some(clip) => (
+            Some(clip) if clip.vertices.len() == 2 => (
                 "imageclip.applied",
                 format!(
                     "IMAGECLIP: set a pixel-space clip on image entity {} from ({}, {}) to \
@@ -279,6 +299,15 @@ impl Application {
                     clip.vertices[0][1],
                     clip.vertices[1][0],
                     clip.vertices[1][1]
+                ),
+            ),
+            Some(clip) => (
+                "imageclip.applied",
+                format!(
+                    "IMAGECLIP: set a pixel-space {}-vertex polygon clip on image entity {} \
+                     (inside)",
+                    clip.vertices.len(),
+                    before.id.0
                 ),
             ),
             None => (
@@ -430,6 +459,9 @@ impl Application {
                 patches: vec![drawing_patch(before.id, Some(before.clone()), Some(stored))],
                 block_patches: Vec::new(),
                 layer_patches: Vec::new(),
+                style_patches: Vec::new(),
+                dim_style_patches: Vec::new(),
+                mleader_style_patches: Vec::new(),
                 layout_patches: Vec::new(),
                 merge_key: None,
             },
@@ -523,4 +555,202 @@ impl Application {
 /// One stable, code-prefixed refusal for an image authoring command.
 fn image_refusal(code: impl std::fmt::Display, detail: impl std::fmt::Display) -> CadError {
     CadError::InvalidInput(format!("{code}: {detail}"))
+}
+
+/// Convert a world-space polygon boundary into the image's pixel-space clip.
+///
+/// The image plane is spanned by `u`/`v` from `origin`; a point is valid only
+/// when it lies on that plane (`|(p − origin) · n| / |n| <= tolerance`), which is
+/// the `imageclip.polygon_non_coplanar` refusal. In-plane points are mapped with
+/// the exact inverse of the `origin + u·a + v·b` basis (the same `u`/`v` the
+/// injective image placement and every clip use), so a polygon vertex has the
+/// same pixel coordinate the renderer would compute for it.
+///
+/// Degenerate boundaries are refused before any transaction: fewer than three
+/// distinct points (`imageclip.polygon_points`), a self-intersecting edge ring
+/// (`imageclip.polygon_self_intersection`) and a degenerate image basis
+/// (`imageclip.degenerate_plane`). A repeated final vertex is dropped; the stored
+/// N-gon keeps the engine's open form.
+fn polygon_clip(points: &[Point3], origin: Point3, u: Point3, v: Point3) -> CadResult<ImageClip> {
+    let normal = cross(u, v);
+    let normal_len = length(normal);
+    if !normal_len.is_finite() || normal_len <= 1e-12 {
+        return Err(image_refusal(
+            "imageclip.degenerate_plane",
+            "the image basis is degenerate (u × v has no length), so a world-space clip cannot be \
+             mapped into pixel space",
+        ));
+    }
+    let tolerance = offset_tolerance();
+
+    // Drop a repeated closing vertex and every consecutive duplicate, so the
+    // ring is the open polygon the representation layer stores.
+    let mut ring: Vec<Point3> = Vec::with_capacity(points.len());
+    for point in points {
+        if !is_finite_point(*point) {
+            return Err(image_refusal(
+                "imageclip.polygon_points",
+                "every IMAGECLIP polygon point must be finite",
+            ));
+        }
+        if ring.last().is_some_and(|last| same_point(*last, *point)) {
+            continue;
+        }
+        ring.push(*point);
+    }
+    if ring.len() >= 2 && same_point(ring[0], ring[ring.len() - 1]) {
+        ring.pop();
+    }
+    if ring.len() < 3 {
+        return Err(image_refusal(
+            "imageclip.polygon_points",
+            format!(
+                "IMAGECLIP POLY needs at least three distinct points; got {} after removing \
+                 duplicates",
+                ring.len()
+            ),
+        ));
+    }
+    for point in &ring {
+        let offset = Point3 {
+            x: point.x - origin.x,
+            y: point.y - origin.y,
+            z: point.z - origin.z,
+        };
+        let distance = dot(offset, normal) / normal_len;
+        if !distance.is_finite() || distance.abs() > tolerance {
+            return Err(image_refusal(
+                "imageclip.polygon_non_coplanar",
+                format!(
+                    "polygon point ({}, {}, {}) is {distance} world units off the image plane \
+                     (tolerance {tolerance}); a clip boundary must lie on the image",
+                    point.x, point.y, point.z
+                ),
+            ));
+        }
+    }
+
+    // In-plane inverse: solve `origin + u·a + v·b = p` with the 2×2 Gram matrix.
+    let uu = dot(u, u);
+    let uv = dot(u, v);
+    let vv = dot(v, v);
+    let determinant = uu * vv - uv * uv;
+    if !determinant.is_finite() || determinant <= 1e-24 {
+        return Err(image_refusal(
+            "imageclip.degenerate_plane",
+            "the image basis is singular (u and v are parallel), so a world-space clip cannot be \
+             mapped into pixel space",
+        ));
+    }
+    let vertices: Vec<[f64; 2]> = ring
+        .iter()
+        .map(|point| {
+            let offset = Point3 {
+                x: point.x - origin.x,
+                y: point.y - origin.y,
+                z: point.z - origin.z,
+            };
+            let du = dot(offset, u);
+            let dv = dot(offset, v);
+            [
+                (du * vv - dv * uv) / determinant,
+                (dv * uu - du * uv) / determinant,
+            ]
+        })
+        .collect();
+    if polygon_self_intersects(&vertices) {
+        return Err(image_refusal(
+            "imageclip.polygon_self_intersection",
+            "the IMAGECLIP polygon boundary crosses itself; a simple (non-self-intersecting) ring \
+             is required",
+        ));
+    }
+    Ok(ImageClip {
+        vertices,
+        inside: true,
+    })
+}
+
+/// The 3-vector cross product.
+fn cross(a: Point3, b: Point3) -> Point3 {
+    Point3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
+}
+
+/// The dot product.
+fn dot(a: Point3, b: Point3) -> f64 {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+/// The Euclidean length.
+fn length(a: Point3) -> f64 {
+    dot(a, a).sqrt()
+}
+
+/// Whether two points coincide within the world tolerance.
+fn same_point(a: Point3, b: Point3) -> bool {
+    let tolerance = offset_tolerance();
+    (a.x - b.x).abs() <= tolerance
+        && (a.y - b.y).abs() <= tolerance
+        && (a.z - b.z).abs() <= tolerance
+}
+
+/// Whether the open pixel-space ring has at least one crossing edge pair.
+///
+/// Adjacent edges share an endpoint by construction and are skipped (the shared
+/// closing edge between the last and the first is skipped too); collinear
+/// overlap counts as a crossing, which is the honest answer for a degenerate
+/// boundary. The ring is validated to be non-degenerate before this runs.
+fn polygon_self_intersects(points: &[[f64; 2]]) -> bool {
+    let count = points.len();
+    if count < 4 {
+        return false;
+    }
+    for first in 0..count {
+        let a = points[first];
+        let b = points[(first + 1) % count];
+        for second in (first + 1)..count {
+            // Skip the edge itself, its immediate neighbour and the wrap pair.
+            if second == first || second == (first + 1) % count || (second + 1) % count == first {
+                continue;
+            }
+            let c = points[second];
+            let d = points[(second + 1) % count];
+            if segments_cross(a, b, c, d) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Whether two 2D segments cross (proper crossing or collinear overlap).
+fn segments_cross(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
+    let o1 = orientation(a, b, c);
+    let o2 = orientation(a, b, d);
+    let o3 = orientation(c, d, a);
+    let o4 = orientation(c, d, b);
+    if o1 * o2 < 0.0 && o3 * o4 < 0.0 {
+        return true;
+    }
+    (o1 == 0.0 && on_segment(a, b, c))
+        || (o2 == 0.0 && on_segment(a, b, d))
+        || (o3 == 0.0 && on_segment(c, d, a))
+        || (o4 == 0.0 && on_segment(c, d, b))
+}
+
+/// The signed 2D orientation of `c` relative to the direction `a → b`.
+fn orientation(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
+    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+}
+
+/// Whether `p` lies inside the axis-aligned box of a collinear segment `a → b`.
+fn on_segment(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> bool {
+    p[0] >= a[0].min(b[0])
+        && p[0] <= a[0].max(b[0])
+        && p[1] >= a[1].min(b[1])
+        && p[1] <= a[1].max(b[1])
 }

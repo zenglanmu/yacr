@@ -248,6 +248,7 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "PURGE",
             "RENAME",
             "SETVAR",
+            "SYSVARMONITOR",
             "MREDO",
             "MULTIPLE",
             // The 2026-11-07 draw/modify batch.
@@ -291,6 +292,9 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "LAYVPI",
             // The dimension argument forms.
             "DIMSPACE",
+            "STYLE",
+            "-STYLE",
+            "MLEADERSTYLE",
             "DIMSTYLE",
             "DIMTEDIT",
             "DIMEDIT",
@@ -318,7 +322,25 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "REVCLOUD",
             "WIPEOUT",
             "TEXTMASK",
-            "TXT2MTXT"
+            "TXT2MTXT",
+            // The extended read-only report selectors that already took an
+            // argument when this list was written.
+            "VPLAYER",
+            "MVSETUP",
+            "APERTURE",
+            "PTYPE",
+            "REVCLOUDPROPERTIES",
+            "SPACETRANS",
+            // The 2026-11-12 SHAPE family.
+            "SHAPE",
+            "MINSERT",
+            "ADDSELECTED",
+            // The 2026-11-12 MULTILEADER/MLEDIT/TOLERANCE typed forms.
+            "MLEDIT",
+            "-MLEDIT",
+            "MLEADERALIGN",
+            "MLEADEREDIT",
+            "TOLERANCE"
         ]
     );
     assert_eq!(

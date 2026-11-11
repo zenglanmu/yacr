@@ -38,6 +38,8 @@ mod layers;
 mod layout_arguments;
 mod layout_tabs;
 mod measuregeom;
+mod mleader_arguments;
+mod paper_commands;
 mod payload_options;
 mod pedit;
 mod performance;
@@ -49,6 +51,9 @@ mod reference_status;
 pub mod registry;
 mod select_filter;
 mod settings;
+// The 2026-11-12 SHAPE/MINSERT/ADDSELECTED typed dispatch (sibling of
+// `draw2_arguments`; the grammar lives in `commands::shape_block`).
+mod shape_block_arguments;
 mod shell_settings;
 mod snap_unit;
 mod snapshot;

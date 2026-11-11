@@ -57,9 +57,10 @@ impl Application {
             | ExtendedCommandId::RevCloudProperties => {
                 self.extended_session2_toggle(session, command, ext)?
             }
+            // SYSVARMONITOR owns a real session watch set (add/remove/list).
+            ExtendedCommandId::SysVarMonitor => self.sysvar_monitor(session, command)?,
             // Wave 2 read-only reports: no transaction, no revision, no history.
-            ExtendedCommandId::SysVarMonitor
-            | ExtendedCommandId::SysVarDialog
+            ExtendedCommandId::SysVarDialog
             | ExtendedCommandId::ViewTransitionOptions
             | ExtendedCommandId::AliasEdit
             | ExtendedCommandId::WhoHas
@@ -127,20 +128,22 @@ impl Application {
             | ExtendedCommandId::BExtend
             | ExtendedCommandId::Change
             | ExtendedCommandId::ChProp => self.extended_edit4(session, command, ext)?,
+            // Wave 27 real entity writes: SHP2BLK defines blocks + INSERTs and
+            // deletes the shapes; MINSERT inserts block references; ADDSELECTED
+            // inserts one entity of the selected type. All Work-only.
+            ExtendedCommandId::Shp2Blk => self.shape_to_block(session, command)?,
+            ExtendedCommandId::MInsert => self.minsert(session, command)?,
+            ExtendedCommandId::AddSelected => self.add_selected(session, command)?,
             // Wave 4 named refusals: a stable `Unsupported` reason per name.
             ExtendedCommandId::BScale
-            | ExtendedCommandId::MInsert
             | ExtendedCommandId::BlockReplace
             | ExtendedCommandId::BReplace
             | ExtendedCommandId::DashBReplace
             | ExtendedCommandId::SplineEdit
-            | ExtendedCommandId::MlEdit
-            | ExtendedCommandId::DashMlEdit
             | ExtendedCommandId::Burst
             | ExtendedCommandId::Clip
             | ExtendedCommandId::ClipIt
             | ExtendedCommandId::Region
-            | ExtendedCommandId::AddSelected
             | ExtendedCommandId::WBlock
             | ExtendedCommandId::DashWBlock
             | ExtendedCommandId::BSave
@@ -155,9 +158,8 @@ impl Application {
             | ExtendedCommandId::XRef
             | ExtendedCommandId::DashXRef
             | ExtendedCommandId::ExternalReferences
-            | ExtendedCommandId::ExternalReferencesClose => {
-                self.extended_attrs5(session, command, ext)?
-            }
+            | ExtendedCommandId::ExternalReferencesClose
+            | ExtendedCommandId::ClassicXRef => self.extended_attrs5(session, command, ext)?,
             // Wave 5 named refusals: a stable `Unsupported` reason per name.
             ExtendedCommandId::AttDef
             | ExtendedCommandId::DashAttDef
@@ -180,8 +182,7 @@ impl Application {
             | ExtendedCommandId::XAttach
             | ExtendedCommandId::Attach
             | ExtendedCommandId::DashAttach
-            | ExtendedCommandId::XOpen
-            | ExtendedCommandId::ClassicXRef => self.extended_refusal5(command, ext)?,
+            | ExtendedCommandId::XOpen => self.extended_refusal5(command, ext)?,
             // Wave 6 session tokens + file/plot/export reports: DWGLOG/LOGFILEON/
             // LOGFILEOFF flip one session flag (no log file is written); the
             // three reports read the document and name the absent export models.
@@ -273,13 +274,19 @@ impl Application {
             | ExtendedCommandId::ArcText
             | ExtendedCommandId::Blend
             | ExtendedCommandId::BreakLine
-            | ExtendedCommandId::MLeaderAlign
-            | ExtendedCommandId::MLeaderEdit
-            | ExtendedCommandId::MLeaderCollect
-            | ExtendedCommandId::Tolerance
             | ExtendedCommandId::DimRouter
             | ExtendedCommandId::DimArc
             | ExtendedCommandId::Calc => self.extended_w9_draw(session, command, ext)?,
+            // Wave 9's MULTILEADER edits and the TOLERANCE frame are real writes:
+            // each rebuilds/inserts entities in one transaction / one undo step.
+            ExtendedCommandId::MLeaderAlign => self.mleader_align(session, command)?,
+            ExtendedCommandId::MLeaderEdit => self.mleader_edit(session, command)?,
+            ExtendedCommandId::MLeaderCollect => self.mleader_collect(session, command)?,
+            ExtendedCommandId::Tolerance => self.tolerance_frame(session, command)?,
+            // `MLEDIT` / `-MLEDIT`: the two-LINE subset of multiline editing.
+            ExtendedCommandId::MlEdit | ExtendedCommandId::DashMlEdit => {
+                self.mledit(session, command)?
+            }
             ExtendedCommandId::DashBlock
             | ExtendedCommandId::DashBoundary
             | ExtendedCommandId::DashInsert

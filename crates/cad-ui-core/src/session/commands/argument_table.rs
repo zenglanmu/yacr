@@ -71,6 +71,7 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     PURGE_SELECTOR,
     RENAME_SELECTOR,
     SETVAR_SELECTOR,
+    SYSVARMONITOR_SELECTOR,
     MREDO_SELECTOR,
     MULTIPLE_SELECTOR,
     // The 2026-11-07 draw/modify batch argument forms.
@@ -113,6 +114,11 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     LAYVPI_SELECTOR,
     // `DIMSPACE` is a dimension argument form of its own (not the editing batch).
     DIMSPACE_SELECTOR,
+    // The named style tables: the bare selector is the read-only report, and a
+    // typed line is one post-import create/rename/delete/modify operation.
+    STYLE_SELECTOR,
+    DASH_STYLE_SELECTOR,
+    MLEADERSTYLE_SELECTOR,
     // The 2026-11-07 dimension-editing batch argument forms.
     DIMSTYLE_SELECTOR,
     DIMTEDIT_SELECTOR,
@@ -146,4 +152,24 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     payload_options::WIPEOUT_SELECTOR,
     payload_options::TEXTMASK_SELECTOR,
     payload_options::TXT2MTXT_SELECTOR,
+    // The 2026-11 paper-space/session/point-style typed forms; the grammars live
+    // in `commands::paper_arguments`. A bare `VPLAYER`/`PTYPE`/`APERTURE`/
+    // `REVCLOUDPROPERTIES` keeps its read-only report.
+    VPLAYER_SELECTOR,
+    MVSETUP_SELECTOR,
+    APERTURE_SELECTOR,
+    PTYPE_SELECTOR,
+    REVCLOUDPROPERTIES_SELECTOR,
+    SPACETRANS_SELECTOR,
+    // The 2026-11-12 SHAPE family and its two typed siblings.
+    SHAPE_SELECTOR,
+    MINSERT_SELECTOR,
+    ADDSELECTED_SELECTOR,
+    // The 2026-11-12 MULTILEADER/MLEDIT/TOLERANCE typed forms. `MLEADERCOLLECT`
+    // takes no argument, so it is deliberately absent.
+    MLEDIT_SELECTOR,
+    DASH_MLEDIT_SELECTOR,
+    MLEADERALIGN_SELECTOR,
+    MLEADEREDIT_SELECTOR,
+    TOLERANCE_SELECTOR,
 ];

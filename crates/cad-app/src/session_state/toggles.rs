@@ -31,6 +31,26 @@ impl SessionState {
         self.snap_enabled
     }
 
+    /// The interaction tolerance with this session's `APERTURE` token applied.
+    ///
+    /// `base` is the host's configured policy (`view.aperture.sizePixels` turned
+    /// into [`TolerancePolicy::interaction_logical_pixels`]). Once `APERTURE <n>`
+    /// has set the session token explicitly, that token is authoritative for the
+    /// object-snap aperture; until then the configured value is returned
+    /// unchanged, so a default session keeps the pre-command aperture bit for
+    /// bit. Only the **snap/candidate** aperture moves: `PICKBOX`
+    /// ([`TolerancePolicy::pickbox_logical_pixels`]) is a separate quantity and
+    /// this command never changes it.
+    pub fn interaction_tolerance(&self, base: TolerancePolicy) -> TolerancePolicy {
+        if !self.drafting_extras.aperture_explicit() {
+            return base;
+        }
+        TolerancePolicy {
+            interaction_logical_pixels: f64::from(self.drafting_extras.aperture()),
+            ..base
+        }
+    }
+
     /// Whether the display grid overlay is enabled in this session.
     ///
     /// Session/display state only, and **off** when a session is created (the

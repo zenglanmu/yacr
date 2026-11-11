@@ -34,6 +34,7 @@ impl Application {
             CommandId::CreateSpline => self.create_spline(session, command),
             CommandId::CreateText => self.create_text(session, command),
             CommandId::CreateMText => self.create_mtext(session, command),
+            CommandId::CreateShape => self.create_shape(session, command),
             CommandId::MLeader => self.create_mleader(session, command),
             CommandId::TextEdit => self.edit_text(command),
             CommandId::InsertBlock => self.insert_block(session, command),

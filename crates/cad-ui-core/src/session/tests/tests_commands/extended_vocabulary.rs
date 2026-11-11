@@ -76,6 +76,30 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::TableCreate
                 | ExtendedCommandId::DashTable
                 | ExtendedCommandId::TableEdit
+                // Wave 26 annotation/paper-space writes that landed before this
+                // contract list was extended (TXTEXP/ARCTEXT insert rows; the
+                // page/paper writes rewrite layout or entity rows).
+                | ExtendedCommandId::TextExplode
+                | ExtendedCommandId::ArcText
+                | ExtendedCommandId::MvSetup
+                | ExtendedCommandId::PsbScale
+                | ExtendedCommandId::PstScale
+                | ExtendedCommandId::AlignSpace
+                | ExtendedCommandId::VpSync
+                // Wave 27: SHP2BLK defines blocks and rewrites entity rows,
+                // MINSERT inserts block references, ADDSELECTED inserts one
+                // entity. Every one is an entity/block-table write.
+                | ExtendedCommandId::Shp2Blk
+                | ExtendedCommandId::MInsert
+                | ExtendedCommandId::AddSelected
+                // 2026-11-12: the MULTILEADER edits, the TOLERANCE frame and the
+                // MLEDIT two-LINE subset write entity rows.
+                | ExtendedCommandId::MLeaderAlign
+                | ExtendedCommandId::MLeaderEdit
+                | ExtendedCommandId::MLeaderCollect
+                | ExtendedCommandId::Tolerance
+                | ExtendedCommandId::MlEdit
+                | ExtendedCommandId::DashMlEdit
         );
         assert_eq!(
             variant.requires_work_mode(),
