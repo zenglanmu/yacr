@@ -21,8 +21,14 @@ AD
   size/sha256）；`changelog.json` 由 notes 生成；`site.yml` 默认 `release_tag=v0.1.11`；
   `index.html` 版本/下载链接/size fallback、`docs/landing-site.md`、
   `scripts/test-landing-site.py` 同步。`python3 scripts/test-landing-site.py` PASS。
-- **待办 / NOT RUN**：`site.yml` 尚未 dispatch；R2 镜像、Pages 部署与线上 `/downloads.json`、
-  `/changelog.json`、R2 HEAD 复核尚未进行；Windows/macOS/Android/真机/GPU/像素仍未验收。
+- **落地页部署**：`site.yml` run
+  [`43024114116`](https://github.com/zenglanmu/yacr/actions/runs/43024114116) 绿（R2 镜像 +
+  Pages）。线上复核：`/downloads.json` = v0.1.11（四个 size/sha256 与 Release API 一致）；
+  `/changelog.json` 首版 v0.1.11（2026-11-11）；页面含 v0.1.11 与 **823/981（68 完整 +
+  755 部分）**；R2 HEAD `releases/v0.1.11/yacr-0.1.11-linux-x86_64.flatpak`
+  **200 / 112,224,776 B**（首次检查 `cf-cache-status: DYNAMIC`）。
+- **NOT VERIFIED**：Windows/macOS/Android 真机、真实 GPU、像素与性能仍未验收；发布、打包、
+  上传与落地页部署成功都不是运行时验收。
 
 ## 2026-11-11 修复 Linux GTK 子表面的第二条取整路径（Flatpak 5K/scale=2 下 CAD 区透出桌面）
 
