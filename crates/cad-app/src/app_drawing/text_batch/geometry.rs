@@ -216,10 +216,15 @@ impl Application {
             },
         };
         if options.kind != TextMaskKind::Wipeout {
+            let kind = match options.kind {
+                TextMaskKind::Wipeout => "wipeout",
+                TextMaskKind::Face3d => "3dface",
+                TextMaskKind::Solid => "solid",
+            };
             return Err(CadError::Unsupported(format!(
-                "textmask.mask_type: the {:?} mask type has no entity model in this build; only \
-                 Wipeout (`AcDbWipeout`) is supported",
-                options.kind
+                "textmask.mask_type: the `{kind}` mask type has no entity model in this build \
+                 (there is no 3DFACE or 2D SOLID entity); only `wipeout` (`AcDbWipeout`) is \
+                 supported"
             )));
         }
         if !options.offset_factor.is_finite() || options.offset_factor < 0.0 {
@@ -321,6 +326,20 @@ impl Application {
                 max_y: bounds.max_y + pad,
                 z: bounds.z,
             };
+            if ![
+                expanded.min_x,
+                expanded.min_y,
+                expanded.max_x,
+                expanded.max_y,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+            {
+                return Err(refusal(
+                    "textmask.degenerate",
+                    format!("the offset bounds of text {} are not finite", source.id.0),
+                ));
+            }
             if expanded.width() <= 0.0 || expanded.height() <= 0.0 {
                 return Err(refusal(
                     "textmask.degenerate",
@@ -441,7 +460,10 @@ impl Application {
     /// A selected text's `*TEXTMASK-*` group names the exact mask to remove, even
     /// when the mask itself is not in the selection. Selected masks continue to
     /// use the declared estimated-bounds heuristic. No unselected, ungrouped mask
-    /// is ever scanned.
+    /// is ever scanned. A `*TEXTMASK-*` group of a selected text whose mask row
+    /// no longer exists is dropped as a stale association
+    /// (`textunmask.stale_group`), so no orphan group survives the command; that
+    /// cleanup is session state only and opens no drawing transaction.
     pub(crate) fn text_unmask(
         &mut self,
         session: &mut SessionState,
@@ -512,11 +534,24 @@ impl Application {
             }
         }
         // Group membership is the association authority: only groups created by
-        // TEXTMASK are consulted, and only for the selected text refs.
+        // TEXTMASK are consulted, and only for the selected text refs. A
+        // TEXTMASK group always pairs one text with one mask, so a group with no
+        // live mask member is a stale association (its mask was erased
+        // elsewhere); it is dropped here instead of surviving as an orphan.
         let mut group_names = std::collections::BTreeSet::new();
+        let mut stale_groups = std::collections::BTreeSet::new();
         for reference in &text_refs {
             for group in textmask_groups_for(session, reference) {
                 group_names.insert(group.name.clone());
+                let has_live_mask = group.members.iter().any(|member| {
+                    member.document == document_id
+                        && candidate.entity(member.entity).is_some_and(|entity| {
+                            matches!(entity.geometry, SemanticGeometry::Mask { .. })
+                        })
+                });
+                if !has_live_mask {
+                    stale_groups.insert(group.name.clone());
+                }
                 for member in &group.members {
                     if member.entity == reference.entity
                         || member.document != document_id
@@ -534,6 +569,21 @@ impl Application {
                     }
                 }
             }
+        }
+        for name in &stale_groups {
+            session.groups.remove(name);
+        }
+        if !stale_groups.is_empty() {
+            diagnostics.push(Diagnostic {
+                object: None,
+                code: "textunmask.stale_group".into(),
+                message: format!(
+                    "TEXTUNMASK: dropped {} stale *TEXTMASK-* group(s) whose mask no longer \
+                     exists ({})",
+                    stale_groups.len(),
+                    stale_groups.iter().cloned().collect::<Vec<_>>().join(", ")
+                ),
+            });
         }
         if masks.is_empty() {
             return Ok(unchanged_outcome(
@@ -573,6 +623,7 @@ impl Application {
         let doomed_ids: std::collections::BTreeSet<EntityId> =
             doomed.iter().map(|mask| mask.id).collect();
         let mut groups_to_remove = group_names.clone();
+        groups_to_remove.extend(stale_groups.iter().cloned());
         for group in session.groups.groups() {
             if group.name.starts_with(TEXTMASK_GROUP_PREFIX)
                 && group

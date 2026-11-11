@@ -904,3 +904,7 @@ fn txt2mtxt_refuses_a_viewer_session() {
     .expect_err("Viewer cannot combine text");
     assert!(matches!(error, CadError::PermissionDenied));
 }
+
+// `TEXTFIT` (annotation batch) verification, split out so this file stays inside
+// the code-size limit.
+mod textfit;

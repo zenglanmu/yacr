@@ -988,3 +988,8 @@ fn the_batch_is_work_only_and_has_no_second_path() {
         assert!(id.requires_work_mode(), "{id:?} writes the drawing");
     }
 }
+
+// TEXTALIGN's remaining edges and the TEXTMASK/TEXTUNMASK mask contracts, split
+// out so every file in this batch stays inside the code-size limit.
+mod align;
+mod mask;
