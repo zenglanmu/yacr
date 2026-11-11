@@ -23,6 +23,15 @@ use crate::app_utility::require_none_payload;
 #[path = "app_extended_w9_text_explode.rs"]
 pub(crate) mod text_explode;
 
+/// Install the font engine `TXTEXP` outlines with.
+///
+/// The carrier (a host that already loads shaping fonts for the display) calls
+/// this once per process; `cad-app` never loads font bytes itself. Re-exported
+/// from the crate root so a host adapter has one stable entry point.
+pub fn install_outline_fonts(fonts: std::sync::Arc<cad_representation::FontEngine>) -> bool {
+    text_explode::install_outline_fonts(fonts)
+}
+
 impl Application {
     /// Dispatch one Wave 9 report/refusal.
     pub(crate) fn extended_w9_reports(

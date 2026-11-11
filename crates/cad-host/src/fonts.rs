@@ -224,6 +224,10 @@ impl HostResources for DesktopResources {
         let (engine, report) = core.load_font_engine(&requested, text_needed)?;
         match engine {
             Some(engine) => {
+                // TXTEXP outlines with the same faces the display shapes with.
+                // The first installation wins, so every later document reuses the
+                // already-loaded engine instead of changing typefaces mid-session.
+                cad_app::install_outline_fonts(engine.clone());
                 render.set_fonts(Some(engine));
             }
             None => {

@@ -864,6 +864,11 @@ impl ExtendedCommandId {
                 | Self::TableCreate
                 | Self::DashTable
                 | Self::TableEdit
+                // Wave 26 annotation writes: TXTEXP inserts outline polylines and
+                // deletes the text sources; ARCTEXT inserts per-character TEXT rows
+                // and consumes the selected text entities.
+                | Self::TextExplode
+                | Self::ArcText
         )
     }
 }
