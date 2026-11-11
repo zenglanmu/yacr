@@ -19,7 +19,7 @@
 //! one undo step, and every refusal happens before the transaction opens.
 
 mod hatch;
-mod leader;
+pub(crate) mod leader;
 mod textfit;
 mod xdlist;
 

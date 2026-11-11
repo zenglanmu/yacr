@@ -1,5 +1,5 @@
-//! Wave 9 real-edit contracts: `BLEND` and `BREAKLINE`, plus the `ARRAY`
-//! router report and the stable named refusals.
+//! Wave 9 real-edit contracts: `BLEND`, `BREAKLINE` and `ARCTEXT`, plus the
+//! `ARRAY` router report and the stable named refusals.
 //!
 //! A real edit must create exactly the declared entity and commit exactly one
 //! transaction / one undo step. A refusal must write nothing, bump no revision
@@ -28,17 +28,69 @@ fn line(id: u128, start: Point3, end: Point3) -> DbEntity {
     }
 }
 
-/// Replace the default 0-layer document with one holding the given entities.
+/// One `ARC` on the `+Z` plane, in radians.
+fn arc(id: u128, center: Point3, normal: Point3, radius: f64, start: f64, sweep: f64) -> DbEntity {
+    DbEntity {
+        object: DbObject {
+            id: ObjectId(id),
+            type_key: "AcDbArc".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(id),
+        layer: LayerId(0),
+        space: SpaceId::Model,
+        geometry: SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        },
+        draw_order: id as i64,
+    }
+}
+
+/// One `TEXT` row at `position` with height `2`.
+fn text_at(id: u128, content: &str, position: Point3) -> DbEntity {
+    DbEntity {
+        object: DbObject {
+            id: ObjectId(id),
+            type_key: "AcDbText".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(id),
+        layer: LayerId(3),
+        space: SpaceId::Model,
+        geometry: SemanticGeometry::Text {
+            text: content.into(),
+            position,
+            style: StyleId(0),
+            height: 2.0,
+            rotation: 0.0,
+            font: None,
+            h_align: TextAlignH::Left,
+            v_align: TextAlignV::Baseline,
+            wrap_width: None,
+        },
+        draw_order: id as i64,
+    }
+}
+
+/// Replace the default document with one holding the given entities.
 fn app_with(entities: Vec<DbEntity>) -> (Application, SessionState) {
     let (mut app, session) = application_with_document();
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
-    builder
-        .insert_layer(Layer {
-            id: LayerId(0),
-            name: "0".into(),
-            visible: true,
-        })
-        .unwrap();
+    for (id, name) in [(LayerId(0), "0"), (LayerId(3), "WALLS")] {
+        builder
+            .insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible: true,
+            })
+            .unwrap();
+    }
     for entity in entities {
         builder.insert_entity(entity).unwrap();
     }
@@ -229,11 +281,7 @@ fn array_without_a_payload_reports_the_two_planners_and_writes_nothing() {
     assert_eq!(revision(&app), before);
 }
 
-const REFUSALS: [(ExtendedCommandId, &str); 6] = [
-    (
-        ExtendedCommandId::ArcText,
-        "arctext.unsupported: text along an arc is not modeled; no combined arc+text payload",
-    ),
+const REFUSALS: [(ExtendedCommandId, &str); 5] = [
     (
         ExtendedCommandId::MLeaderAlign,
         "mleaderalign.unsupported: no multileader alignment model",
@@ -285,4 +333,218 @@ fn blend_and_breakline_are_work_only() {
             .expect_err("Viewer cannot edit");
         assert!(matches!(error, CadError::PermissionDenied));
     }
+}
+
+// ---------------------------------------------------------------------------
+// ARCTEXT
+// ---------------------------------------------------------------------------
+
+fn approx(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-9
+}
+
+fn approx_point(a: Point3, b: Point3) -> bool {
+    approx(a.x, b.x) && approx(a.y, b.y) && approx(a.z, b.z)
+}
+
+#[test]
+fn arctext_places_one_text_per_character_at_equal_angular_steps() {
+    let (mut app, mut session) = app_with(vec![
+        arc(
+            1,
+            p3(0.0, 0.0, 0.0),
+            p3(0.0, 0.0, 1.0),
+            5.0,
+            0.0,
+            std::f64::consts::PI,
+        ),
+        text_at(2, "AB", p3(0.0, 6.0, 0.0)),
+    ]);
+    select(&mut session, &[1, 2]);
+    let before = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::ArcText,
+        CommandPayload::None,
+    )
+    .expect("ARCTEXT is admitted");
+    assert!(outcome.changes.is_some(), "ARCTEXT writes one transaction");
+
+    let rows = model_entities(&app);
+    assert_eq!(rows.len(), 3, "the arc plus one entity per character");
+    let arc_kept = rows
+        .iter()
+        .any(|row| matches!(row.geometry, SemanticGeometry::Arc { .. }));
+    assert!(arc_kept, "ARCTEXT keeps the arc it attached text to");
+    let mut placed: Vec<(Point3, f64, String)> = Vec::new();
+    for row in &rows {
+        let SemanticGeometry::Text {
+            text,
+            position,
+            height,
+            rotation,
+            ..
+        } = &row.geometry
+        else {
+            continue;
+        };
+        assert_eq!(*height, 2.0, "the source height is kept");
+        assert_eq!(row.layer, LayerId(3), "the text layer is kept");
+        assert_eq!(row.object.type_key, "AcDbText");
+        placed.push((*position, *rotation, text.clone()));
+    }
+    placed.sort_by(|a, b| a.2.cmp(&b.2));
+    assert_eq!(
+        placed.iter().map(|row| row.2.as_str()).collect::<Vec<_>>(),
+        vec!["A", "B"],
+        "one TEXT entity per character"
+    );
+    // Equal angular steps of sweep / 2 = 90 deg, first character centred in its
+    // step, so the two positions sit at 45 and 135 degrees on the 5-radius arc.
+    let quarter = std::f64::consts::FRAC_PI_4;
+    let expected = [
+        p3(5.0 * quarter.cos(), 5.0 * quarter.sin(), 0.0),
+        p3(
+            5.0 * (3.0 * quarter).cos(),
+            5.0 * (3.0 * quarter).sin(),
+            0.0,
+        ),
+    ];
+    for (index, (position, rotation, label)) in placed.iter().enumerate() {
+        assert!(
+            approx_point(*position, expected[index]),
+            "{label}: position {position:?} is not the expected angular step {:?}",
+            expected[index]
+        );
+        // Tangential and upright: the reading direction never points into -X.
+        assert!(
+            rotation.cos() >= -1e-9,
+            "{label}: rotation {rotation} would read upside down"
+        );
+        assert!(
+            approx(rotation.sin().abs(), quarter.sin()),
+            "{label}: rotation {rotation} is not the arc tangent (45 degrees)"
+        );
+    }
+    assert_eq!(revision(&app), Revision(before.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "arctext.partial"));
+
+    // One undo restores the text source and removes the placed characters.
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .expect("undo");
+    let rows = model_entities(&app);
+    assert_eq!(rows.len(), 2);
+    assert!(rows
+        .iter()
+        .any(|row| matches!(row.geometry, SemanticGeometry::Text { .. })));
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn arctext_refusals_are_named_and_write_nothing() {
+    let cases: Vec<(&str, Vec<DbEntity>, Vec<u128>)> = vec![
+        ("arctext.selection", Vec::new(), Vec::new()),
+        (
+            "arctext.no_arc",
+            vec![text_at(2, "AB", p3(0.0, 6.0, 0.0))],
+            vec![2],
+        ),
+        (
+            "arctext.no_text",
+            vec![arc(
+                1,
+                p3(0.0, 0.0, 0.0),
+                p3(0.0, 0.0, 1.0),
+                5.0,
+                0.0,
+                std::f64::consts::PI,
+            )],
+            vec![1],
+        ),
+        (
+            "arctext.multiple_arcs",
+            vec![
+                arc(1, p3(0.0, 0.0, 0.0), p3(0.0, 0.0, 1.0), 5.0, 0.0, 1.0),
+                arc(2, p3(0.0, 0.0, 0.0), p3(0.0, 0.0, 1.0), 6.0, 0.0, 1.0),
+                text_at(3, "AB", p3(0.0, 6.0, 0.0)),
+            ],
+            vec![1, 2, 3],
+        ),
+        (
+            "arctext.unsupported_selection",
+            vec![
+                arc(1, p3(0.0, 0.0, 0.0), p3(0.0, 0.0, 1.0), 5.0, 0.0, 1.0),
+                text_at(2, "AB", p3(0.0, 6.0, 0.0)),
+                line(3, p3(0.0, 0.0, 0.0), p3(1.0, 0.0, 0.0)),
+            ],
+            vec![1, 2, 3],
+        ),
+        (
+            "arctext.plane",
+            vec![
+                arc(1, p3(0.0, 0.0, 0.0), p3(1.0, 0.0, 0.0), 5.0, 0.0, 1.0),
+                text_at(2, "AB", p3(0.0, 6.0, 0.0)),
+            ],
+            vec![1, 2],
+        ),
+        (
+            "arctext.multiline",
+            vec![
+                arc(1, p3(0.0, 0.0, 0.0), p3(0.0, 0.0, 1.0), 5.0, 0.0, 1.0),
+                text_at(2, "A\\PB", p3(0.0, 6.0, 0.0)),
+            ],
+            vec![1, 2],
+        ),
+        (
+            "arctext.text_empty",
+            vec![
+                arc(1, p3(0.0, 0.0, 0.0), p3(0.0, 0.0, 1.0), 5.0, 0.0, 1.0),
+                text_at(2, "   ", p3(0.0, 6.0, 0.0)),
+            ],
+            vec![1, 2],
+        ),
+    ];
+    for (code, rows, selection) in cases {
+        let (mut app, mut session) = app_with(rows);
+        select(&mut session, &selection);
+        let before = revision(&app);
+        let error = execute(
+            &mut app,
+            &mut session,
+            ExtendedCommandId::ArcText,
+            CommandPayload::None,
+        )
+        .expect_err("every refusal fails the command");
+        let message = match error {
+            CadError::Unsupported(message) | CadError::InvalidInput(message) => message,
+            other => panic!("{code}: expected a named refusal, got {other:?}"),
+        };
+        assert!(message.contains(code), "{code}: {message}");
+        assert_eq!(revision(&app), before, "{code} writes nothing");
+        assert_eq!(undo_depth(&app), 0, "{code} records no undo");
+    }
+}
+
+#[test]
+fn arctext_is_work_only() {
+    // The catalogue flag still calls ARCTEXT Viewer-legal (it used to be a named
+    // refusal); the handler owns the refusal because the command now writes.
+    let (mut app, mut session) = application_with_document();
+    session
+        .switch_mode(AppMode::Viewer)
+        .expect("Viewer is a legal mode");
+    let error = execute(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::ArcText,
+        CommandPayload::None,
+    )
+    .expect_err("Viewer cannot place text");
+    assert!(matches!(error, CadError::PermissionDenied));
+    assert_eq!(undo_depth(&app), 0);
 }

@@ -392,9 +392,96 @@ fn create_mleader_refuses_bad_text_points_and_payloads_without_writing() {
 }
 
 #[test]
-fn create_mleader_refuses_a_spline_style_without_writing() {
+fn create_mleader_honours_a_spline_style_as_the_leader_line_type() {
     let mut standard = MLeaderStyle::standard_metric(MLeaderStyleId(0));
     standard.path_type = MLeaderPathType::Spline;
+    let (mut app, mut session) = mleader_app(Vec::new(), Some(standard));
+    let rev = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::MLeader,
+        payload(p3(0.0, 0.0, 0.0), p3(10.0, 2.0, 0.0), "Note"),
+    )
+    .expect("a spline leader type is representable");
+    assert_eq!(revision(&app), Revision(rev.0 + 1), "exactly one revision");
+    assert_eq!(outcome.objects.len(), 1);
+    let (_, leader) = the_leader(&app);
+    // The stored style snapshot and the line both carry the requested type; the
+    // per-line override bit stays clear so the style value is what a reload reads.
+    assert_eq!(leader.style().path_type, MLeaderPathType::Spline);
+    assert_eq!(leader.lines()[0].path_type, MLeaderPathType::Spline);
+    assert_eq!(
+        leader.lines()[0].override_flags,
+        0,
+        "the path type comes from the style, not a per-line override"
+    );
+    assert_eq!(leader.lines()[0].points.len(), 2);
+    assert!(
+        leader
+            .display()
+            .iter()
+            .any(|child| matches!(child, SemanticGeometry::Spline { .. })),
+        "the derived display uses the spline path: {:?}",
+        leader.display()
+    );
+    // The one derivation rule is untouched: the dogleg start is still derived from
+    // the style's dogleg length.
+    assert!(approx_point(
+        leader.lines()[0].points[1],
+        p3(10.0 - 0.36, 2.0, 0.0)
+    ));
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "mleader.options"));
+    let spline_note = outcome
+        .diagnostics
+        .iter()
+        .find(|row| row.code == "mleader.spline_two_vertices")
+        .expect("the two-vertex spline limit is reported, never hidden");
+    assert!(spline_note.message.contains("three or more vertices"));
+
+    // The leader type is real model data, not a display-only flag: it survives the
+    // export/import round trip on both the entity and its MLEADERSTYLE record.
+    let (bytes, _) = export(&ExportRequest {
+        database: &app.workspace.documents[&DocumentId(1)].drawing,
+        document_id: DocumentId(1),
+        space: ExportSpace::Model,
+        format: ExportFormat::DxfText,
+        limits: ExportLimits::default(),
+        units: None,
+    })
+    .expect("the drawing exports");
+    let request = ImportRequest {
+        document: DocumentId(2),
+        database: DatabaseId(2),
+        bytes: Arc::from(bytes.into_boxed_slice()),
+        limits: ImportLimits::default(),
+        generation: 0,
+        xref: None,
+    };
+    let imported = AcadrustImporter::new()
+        .import(&request, &|| false)
+        .expect("the exported drawing re-imports");
+    let reimported = imported
+        .database
+        .model_space()
+        .iter()
+        .find_map(|entity| match &entity.geometry {
+            SemanticGeometry::MultiLeader(leader) => Some(leader.as_ref()),
+            _ => None,
+        })
+        .expect("the created spline leader re-imports as a MULTILEADER");
+    assert_eq!(reimported.style().path_type, MLeaderPathType::Spline);
+    assert_eq!(reimported.lines()[0].path_type, MLeaderPathType::Spline);
+    assert_eq!(reimported.lines()[0].override_flags, 0);
+}
+
+#[test]
+fn create_mleader_refuses_an_arrowhead_off_style_without_writing() {
+    let mut standard = MLeaderStyle::standard_metric(MLeaderStyleId(0));
+    standard.arrowhead_size = 0.0;
     let (mut app, mut session) = mleader_app(Vec::new(), Some(standard));
     let rev = revision(&app);
     let error = execute(
@@ -405,11 +492,95 @@ fn create_mleader_refuses_a_spline_style_without_writing() {
     )
     .unwrap_err();
     assert!(
-        matches!(error, CadError::Unsupported(ref message) if message.contains("mleader.path_type")),
+        matches!(error, CadError::Unsupported(ref message)
+            if message.contains("mleader.option_arrowhead_off")),
         "{error:?}"
     );
     assert_eq!(revision(&app), rev);
     assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn qleader_and_leader_inherit_the_shared_option_plan() {
+    for command_id in [CommandId::QLeader, CommandId::Leader] {
+        let mut standard = MLeaderStyle::standard_metric(MLeaderStyleId(0));
+        standard.path_type = MLeaderPathType::Spline;
+        let (mut app, mut session) = mleader_app(Vec::new(), Some(standard));
+        let outcome = execute(
+            &mut app,
+            &mut session,
+            command_id,
+            CommandPayload::Annotation(Box::new(AnnotationBatchPayload::Leader(LeaderCommand {
+                arrow: p3(0.0, 0.0, 0.0),
+                landing: p3(10.0, 2.0, 0.0),
+                text: "Note".into(),
+            }))),
+        )
+        .unwrap_or_else(|error| panic!("{command_id:?} creates a leader: {error:?}"));
+        assert_eq!(outcome.objects.len(), 1);
+        let (_, leader) = the_leader(&app);
+        assert_eq!(leader.style().path_type, MLeaderPathType::Spline);
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|row| row.code == "mleader.options"),
+            "{command_id:?} reports the shared option set"
+        );
+        assert!(app.can_undo(&DocumentId(1)));
+    }
+}
+
+#[test]
+fn leader_option_plan_names_the_point_limit_and_the_annotation_type() {
+    use crate::app_drawing::annot_batch::leader::{
+        check_annotation_type, check_leader_points, plan_leader_options, MAX_CREATED_LEADER_POINTS,
+    };
+
+    assert!(check_leader_points(MAX_CREATED_LEADER_POINTS).is_ok());
+    let error = check_leader_points(MAX_CREATED_LEADER_POINTS + 1).unwrap_err();
+    assert!(
+        matches!(error, CadError::Unsupported(ref message)
+            if message.contains("mleader.option_max_points")),
+        "{error:?}"
+    );
+    assert!(check_annotation_type(MLeaderContent::Text).is_ok());
+    for content in [MLeaderContent::None] {
+        let error = check_annotation_type(content).unwrap_err();
+        assert!(
+            matches!(error, CadError::Unsupported(ref message)
+                if message.contains("mleader.content_unsupported")),
+            "{error:?}"
+        );
+    }
+
+    // The plan reads the **stored** row (the resolution clamps a `0` arrowhead
+    // size to the pinned default), so an arrowhead-off style is named, not drawn.
+    let row = MLeaderStyle::standard_metric(MLeaderStyleId(0));
+    let resolution = row.resolved("Standard".into(), StyleId(0), None);
+    let options = plan_leader_options(&row, &resolution).expect("the pinned row plans");
+    assert_eq!(options.path, MLeaderPathType::StraightLineSegments);
+    assert_eq!(options.max_points, MAX_CREATED_LEADER_POINTS);
+    assert!(options.arrowhead);
+    let mut off = row.clone();
+    off.arrowhead_size = 0.0;
+    let resolution = off.resolved("Standard".into(), StyleId(0), None);
+    let error = plan_leader_options(&off, &resolution).unwrap_err();
+    assert!(
+        matches!(error, CadError::Unsupported(ref message)
+            if message.contains("mleader.option_arrowhead_off")),
+        "{error:?}"
+    );
+    // An invisible leader path has no line at all and stays a named refusal.
+    let mut invisible = row.clone();
+    invisible.path_type = MLeaderPathType::Invisible;
+    let resolution = invisible.resolved("Standard".into(), StyleId(0), None);
+    let error = plan_leader_options(&invisible, &resolution).unwrap_err();
+    assert!(
+        matches!(error, CadError::Unsupported(ref message)
+            if message.contains("mleader.path_type")),
+        "{error:?}"
+    );
 }
 
 #[test]

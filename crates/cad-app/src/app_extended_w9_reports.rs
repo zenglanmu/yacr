@@ -1,25 +1,33 @@
-//! Wave 9 **reports and named refusals** for the extended batch.
+//! Wave 9 **reports, real 2D edits and named refusals** for the extended batch.
 //!
 //! `UNITS` is a read-only report of the session display-format token: this
 //! build has no UNITS dialog and stores no per-drawing precision/format table,
 //! so the report states the fixed display rule instead of inventing a value.
 //!
-//! The other six names describe features with no model or API here and are
+//! `TXTEXP` is a real 2D edit: it explodes the selected `TEXT`/`MTEXT` into font
+//! outline `LWPOLYLINE`s through the same font engine the display uses, in one
+//! transaction / one undo step. The whole contract — produced geometry, the
+//! carrier-supplied font engine, and every `txtexp.*` refusal — lives in the
+//! `text_explode` submodule.
+//!
+//! The remaining names describe features with no model or API here and are
 //! refused with a stable `CadError::Unsupported` reason: dimension-style
 //! export/import files (`DIMEX`, `DIMIM`), the model/paper distance converter
-//! (`SPACETRANS`), text-to-polyline explosion (`TXTEXP`) and field updates
-//! (`UPDATEFIELD`). A refusal writes nothing, bumps no revision and records no
-//! `cad-history` entry.
+//! (`SPACETRANS`) and field updates (`UPDATEFIELD`). A refusal writes nothing,
+//! bumps no revision and records no `cad-history` entry.
 
 use super::*;
 use crate::app_reports_ext::{diagnostic, report_outcome};
 use crate::app_utility::require_none_payload;
 
+#[path = "app_extended_w9_text_explode.rs"]
+pub(crate) mod text_explode;
+
 impl Application {
     /// Dispatch one Wave 9 report/refusal.
     pub(crate) fn extended_w9_reports(
         &mut self,
-        _session: &mut SessionState,
+        session: &mut SessionState,
         command: &Command,
         ext: ExtendedCommandId,
     ) -> CadResult<CommandOutcome> {
@@ -41,6 +49,9 @@ impl Application {
                 ),
             ]));
         }
+        if matches!(ext, ExtendedCommandId::TextExplode) {
+            return self.text_explode(session, command);
+        }
         require_none_payload(command, ext.selector())?;
         Err(CadError::Unsupported(reason(ext)))
     }
@@ -56,9 +67,6 @@ fn reason(ext: ExtendedCommandId) -> String {
         }
         ExtendedCommandId::SpaceTrans => {
             "spacetrans.unsupported: no model/paper distance-conversion API"
-        }
-        ExtendedCommandId::TextExplode => {
-            "txtexp.unsupported: no font-outline-to-geometry path is implemented"
         }
         ExtendedCommandId::UpdateField => "updatefield.unsupported: fields are not modeled",
         other => {

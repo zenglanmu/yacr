@@ -14,20 +14,37 @@
 //! `ARRAYRECT`/`ARRAYPOLAR` planner. With no payload they report the available
 //! planners instead of inventing an array.
 //!
-//! Everything else is a stable named refusal: this build has no text-along-arc,
-//! multileader alignment/edit collection, tolerance-object or arc-length
-//! dimension model, and `CAL` has no expression evaluator. A refusal writes
-//! nothing, bumps no revision and records no history.
+//! `ARCTEXT` is a real 2D edit: the current selection supplies exactly one `ARC`
+//! and at least one `TEXT`/`MTEXT`, and each character of the text is placed as
+//! its own `TEXT` at an equal angular step along the arc, rotated to the local
+//! tangent. **Representation divergence** (deliberate, documented): this build has
+//! no `ARCTEXT` object, so the result is *one TEXT entity per character* rather
+//! than a single arc-attached annotation; the arc itself is kept, the text sources
+//! are consumed, and the whole edit is one transaction / one undo step.
+//!
+//! Everything else is a stable named refusal: this build has no multileader
+//! alignment/edit collection, tolerance-object or arc-length dimension model, and
+//! `CAL` has no expression evaluator. A refusal writes nothing, bumps no revision
+//! and records no history.
 
 use super::*;
 use crate::app_drawing::class_name;
+use crate::app_extended_w9_reports::text_explode::{replace_entities, ProducedEntity};
 use crate::app_reports_ext::{diagnostic, report_outcome};
 use crate::app_utility::require_none_payload;
 use cad_db::DbEntity;
-use cad_domain::EntityId;
+use cad_domain::{EntityId, TextAlignH, TextAlignV};
 use cad_geometry::{add, cross, length, normalize, scale, sub};
+use cad_representation::sanitize_text;
 
 const EPS: f64 = 1e-9;
+
+/// The character bound for one `ARCTEXT` line.
+///
+/// Every character becomes its own entity, so an unbounded string would mean an
+/// unbounded write. Well above any hand-authored annotation, this only catches a
+/// hostile value.
+const MAX_ARCTEXT_CHARS: usize = 512;
 
 impl Application {
     /// Dispatch one Wave 9 draw/modify command by its selector.
@@ -41,6 +58,7 @@ impl Application {
             ExtendedCommandId::Array
             | ExtendedCommandId::DashArray
             | ExtendedCommandId::ArrayClassic => self.array_router(session, command, ext),
+            ExtendedCommandId::ArcText => self.arc_text(session, command),
             ExtendedCommandId::Blend => self.blend(session, command),
             ExtendedCommandId::BreakLine => self.break_line(session, command),
             ExtendedCommandId::DimRouter => self.dim_router(command),
@@ -74,6 +92,247 @@ impl Application {
                 ext.selector()
             ))),
         }
+    }
+
+    /// `ARCTEXT`: place one `TEXT` per character along the selected arc.
+    ///
+    /// Selection-based entry (no payload): exactly one `ARC` plus at least one
+    /// `TEXT`/`MTEXT`. The characters are spaced at equal angular steps
+    /// (`sweep / characters`), the first character centred in the first step;
+    /// each glyph is rotated to the arc's tangent at its own angle and flipped by
+    /// 180° when that rotation would read upside down. Height, style, font, layer
+    /// and space come from the **first** selected text; several text sources are
+    /// concatenated in selection order.
+    ///
+    /// **Representation divergence:** this build has no arc-attached text object,
+    /// so the result is one `TEXT` entity per character (a single `ARCTEXT`
+    /// annotation is NOT created) and the text sources are deleted. The arc is
+    /// kept. One transaction / one undo step.
+    ///
+    /// Refusals (named, nothing written): `arctext.payload`,
+    /// `arctext.selection`, `arctext.not_addressable`, `arctext.no_arc`,
+    /// `arctext.multiple_arcs`, `arctext.no_text`, `arctext.unsupported_selection`,
+    /// `arctext.plane`, `arctext.degenerate`, `arctext.multiline`,
+    /// `arctext.text_empty`, `arctext.too_many`, `arctext.height`; Viewer mode is
+    /// `PermissionDenied` (the command writes entity rows).
+    fn arc_text(&mut self, session: &SessionState, command: &Command) -> CadResult<CommandOutcome> {
+        require_none_payload(command, "ARCTEXT")?;
+        if session.app_mode() == AppMode::Viewer {
+            return Err(CadError::PermissionDenied);
+        }
+        let drawing = document_drawing(self, command)?.clone();
+        let entities = resolve_selected(session, &drawing, command, "arctext")?;
+        let mut arcs: Vec<&DbEntity> = Vec::new();
+        let mut texts: Vec<&DbEntity> = Vec::new();
+        for entity in &entities {
+            match &entity.geometry {
+                SemanticGeometry::Arc { .. } => arcs.push(entity),
+                SemanticGeometry::Text { .. } => texts.push(entity),
+                other => {
+                    return Err(invalid(
+                        "arctext",
+                        "unsupported_selection",
+                        format!(
+                            "ARCTEXT takes one ARC plus TEXT/MTEXT; entity {} is {}",
+                            entity.id.0,
+                            class_name(other)
+                        ),
+                    ))
+                }
+            }
+        }
+        let arc = match arcs.len() {
+            0 => {
+                return Err(invalid(
+                    "arctext",
+                    "no_arc",
+                    "the selection holds no ARC; ARCTEXT places text along a selected arc",
+                ))
+            }
+            1 => arcs[0],
+            count => {
+                return Err(invalid(
+                    "arctext",
+                    "multiple_arcs",
+                    format!("ARCTEXT takes exactly one ARC, got {count}"),
+                ))
+            }
+        };
+        if texts.is_empty() {
+            return Err(invalid(
+                "arctext",
+                "no_text",
+                "the selection holds no TEXT/MTEXT to place along the arc",
+            ));
+        }
+        let SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } = &arc.geometry
+        else {
+            return Err(CadError::Invariant(
+                "arctext: the resolved arc is not an arc".into(),
+            ));
+        };
+        let axis = normalize(*normal);
+        if !axis.z.is_finite() || (axis.x).abs() > 1e-9 || (axis.y).abs() > 1e-9 || axis.z <= 0.0 {
+            return Err(unsupported(
+                "arctext",
+                "plane",
+                "ARCTEXT places TEXT entities, whose rotation is the +Z plane's; the selected arc \
+                 is not on the +Z plane",
+            ));
+        }
+        if !radius.is_finite()
+            || *radius <= 0.0
+            || !start.is_finite()
+            || !sweep.is_finite()
+            || sweep.abs() <= EPS
+        {
+            return Err(invalid(
+                "arctext",
+                "degenerate",
+                format!(
+                    "the arc needs a finite positive radius and a non-zero sweep, got radius \
+                     {radius} and sweep {sweep}"
+                ),
+            ));
+        }
+        let mut string = String::new();
+        for source in &texts {
+            if let SemanticGeometry::Text { text, .. } = &source.geometry {
+                string.push_str(&sanitize_text(text));
+            }
+        }
+        if string.contains('\n') {
+            return Err(invalid(
+                "arctext",
+                "multiline",
+                "the selected text is multi-line; ARCTEXT places one single-line arc of characters",
+            ));
+        }
+        let characters: Vec<char> = string.chars().collect();
+        if characters.len() > MAX_ARCTEXT_CHARS {
+            return Err(invalid(
+                "arctext",
+                "too_many",
+                format!(
+                    "ARCTEXT places one entity per character and allows at most \
+                     {MAX_ARCTEXT_CHARS}, got {}",
+                    characters.len()
+                ),
+            ));
+        }
+        let first = texts[0];
+        let SemanticGeometry::Text {
+            style,
+            height,
+            font,
+            ..
+        } = &first.geometry
+        else {
+            return Err(CadError::Invariant(
+                "arctext: the formatting source is not a text".into(),
+            ));
+        };
+        if !height.is_finite() || *height <= 0.0 {
+            return Err(invalid(
+                "arctext",
+                "height",
+                format!("the text height must be finite and positive, got {height}"),
+            ));
+        }
+        let count = characters.len();
+        let step = sweep / count as f64;
+        let mut produced: Vec<ProducedEntity> = Vec::with_capacity(count);
+        let mut flipped = 0usize;
+        for (index, character) in characters.iter().enumerate() {
+            let angle = start + step * (index as f64 + 0.5);
+            let position = arc_point(*center, *normal, *radius, angle);
+            // The tangent at `angle`: the direction of travel keeps the reading
+            // order along the arc (CCW: +90°, CW: -90° from the radius).
+            let mut rotation = if *sweep > 0.0 {
+                angle + std::f64::consts::FRAC_PI_2
+            } else {
+                angle - std::f64::consts::FRAC_PI_2
+            };
+            // An upside-down run is unreadable: flip a glyph whose reading
+            // direction points into the -X half. A 180° turn keeps it tangential.
+            if rotation.cos() < -EPS {
+                rotation += std::f64::consts::PI;
+                flipped += 1;
+            }
+            if character.is_whitespace() {
+                // Whitespace still consumes its angular step, so the visual gaps
+                // match the string, but no empty TEXT row is written.
+                continue;
+            }
+            produced.push(ProducedEntity {
+                geometry: SemanticGeometry::Text {
+                    text: character.to_string(),
+                    position,
+                    style: *style,
+                    height: *height,
+                    rotation: normalize_angle(rotation),
+                    font: font.clone(),
+                    // Each glyph is centred on its own arc position, with its
+                    // baseline on the arc: the declared placement rule.
+                    h_align: TextAlignH::Center,
+                    v_align: TextAlignV::Baseline,
+                    wrap_width: None,
+                },
+                layer: first.layer,
+                space: first.space.clone(),
+            });
+        }
+        if produced.is_empty() {
+            return Err(invalid(
+                "arctext",
+                "text_empty",
+                "the selected text has no non-whitespace character to place along the arc",
+            ));
+        }
+        let placed = produced.len();
+        let source_count = texts.len();
+        let mut outcome = replace_entities(
+            self,
+            command,
+            texts.into_iter().cloned().collect(),
+            produced,
+            "arc text",
+            "drawing.arctext",
+        )?;
+        let mut diagnostics = outcome.diagnostics.clone();
+        diagnostics.push(diagnostic(
+            "arctext.partial",
+            format!(
+                "ARCTEXT: {placed} TEXT entities placed at equal angular steps along the arc \
+                 ({count} character(s), {source_count} text source(s) consumed); this build has \
+                 no arc-attached ARCTEXT object, so one entity per character is the modeled \
+                 representation and the arc itself is kept"
+            ),
+        ));
+        diagnostics.push(diagnostic(
+            "arctext.spacing_rule",
+            "ARCTEXT: the angular step is the arc sweep divided by the character count and the \
+             glyph height/style/font come from the first selected text (a declared rule; AutoCAD \
+             spaces by advance width)"
+                .into(),
+        ));
+        if flipped > 0 {
+            diagnostics.push(diagnostic(
+                "arctext.upright_flip",
+                format!(
+                    "ARCTEXT: {flipped} glyph(s) were turned 180 degrees to stay upright; the turn \
+                     keeps them tangential (the arm of the arc that would read upside down)"
+                ),
+            ));
+        }
+        outcome.diagnostics = diagnostics;
+        Ok(outcome)
     }
 
     /// `BLEND`: one cubic spline bridging the nearest ends of two open curves.
@@ -373,6 +632,21 @@ fn open_endpoints(entity: &DbEntity) -> CadResult<OpenEnds> {
     }
 }
 
+/// Normalise an angle in radians into `(-π, π]`, so a stored text rotation stays
+/// in the range the other rotation writers use and two equivalent angles compare
+/// equal.
+fn normalize_angle(angle: f64) -> f64 {
+    use std::f64::consts::{PI, TAU};
+    let mut value = angle % TAU;
+    if value <= -PI {
+        value += TAU;
+    }
+    if value > PI {
+        value -= TAU;
+    }
+    value
+}
+
 fn arc_point(center: Point3, normal: Point3, radius: f64, angle: f64) -> Point3 {
     let axis = if length(normal) > EPS {
         normalize(normal)
@@ -461,9 +735,6 @@ fn nearest_ends(a: OpenEnds, b: OpenEnds) -> CadResult<(Point3, Point3, Point3, 
 
 fn reason(ext: ExtendedCommandId) -> String {
     let text = match ext {
-        ExtendedCommandId::ArcText => {
-            "arctext.unsupported: text along an arc is not modeled; no combined arc+text payload"
-        }
         ExtendedCommandId::MLeaderAlign => {
             "mleaderalign.unsupported: no multileader alignment model"
         }
