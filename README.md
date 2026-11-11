@@ -12,7 +12,7 @@ Linux (native Wayland or X11/`dom-canvas`), Windows, macOS, Android and the web.
 yacr is under active development, and **preview builds are available now** — Linux Flatpak, Windows
 zip, macOS tarball, Android APK, and a browser build. It opens DWG/DXF, imports mesh/STEP/IFC files
 for display and previews Revit projects, views 2D/3D drawings with wgpu, measures, and has an
-implementation path for 823 of 981 commands (67 complete, 756 partial); unsupported options are
+implementation path for 823 of 981 commands (68 complete, 755 partial); unsupported options are
 rejected by name instead of silently succeeding. It is **not yet a production CAD system**;
 per-platform status and evidence boundaries are in `docs/handoff.md` and `docs/compatibility.md`.
 
