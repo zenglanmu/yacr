@@ -338,8 +338,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | FINDINCLUDE | **会话令牌 v1（2026-11-09）**：翻转 `find_include`（默认 ON），`findinclude.toggled`；Viewer-legal | 跨块/外部参照文字搜索 **NOT IMPLEMENTED**；`-FIND`/`FIND` 仍只搜顶层模型空间，该标志不改变其范围 | 近似实现：仅命令路径/状态 |
 | FINDMATCH | **会话令牌 v1（2026-11-09）**：翻转 `find_match_case`（默认 OFF），`findmatch.toggled`；Viewer-legal | 已实现的 `-FIND`/`FIND` 恒按 ASCII 不区分大小写比较，该标志不改变匹配 | 近似实现：仅命令路径/状态 |
 | REVCLOUDPROPERTIES | **只读报告 v1（2026-11-09）**：报告会话弧长令牌（默认 15），`revcloud.properties`；Viewer-legal | `REVCLOUDPROPERTIES <length>` 设置形式 **NOT IMPLEMENTED**；`REVCLOUD` 不读取该令牌 | 只读，无写 |
-| SYSVARMONITOR | **只读报告 v1（2026-11-09）**：逐条报告 `SETVAR` 闭集 8 个变量（PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE）的当前值，`sysvarmonitor.value` + `sysvarmonitor.summary`；Viewer-legal | 不监视任何变化、不发通知；闭集之外的变量不建模也不杜撰 | 只读，无写 |
-| SYSVDLG | **只读报告 v1（2026-11-09）**：同一 8 个变量，`sysvdlg.value` + `sysvdlg.summary` + `sysvdlg.dialog_not_implemented`；Viewer-legal | 本构建无系统变量对话框：不能编辑/保存/恢复，单值读取请用 `SETVAR <name>` | 只读，无写 |
+| SYSVARMONITOR | **会话监视集（2026-11-12）**：`ADD`/`REMOVE`/`LIST [<name>]`；`LIST`/裸命令对比上次快照，变化报 `sysvarmonitor.changed`，并报 `sysvarmonitor.value`/`.summary`；Viewer-legal | 仅在被查询时检测变化，没有后台通知；闭集之外的变量不建模也不杜撰 | 只有会话状态，无写 |
+| SYSVDLG | **只读报告（2026-11-12）**：列出全部已建模变量当前值（`sysvdlg.value`/`.summary`）+ `sysvdlg.not_tracked` + `sysvdlg.dialog_not_implemented`；Viewer-legal | 本构建无系统变量对话框：不能编辑/保存/恢复，单值读取请用 `SETVAR <name>` | 只读，无写 |
 | VTOPTIONS | **只读报告 v1（2026-11-09）**：`vtoptions.not_tracked` 明说视图过渡设置未建模（代码串按 Wave 2 契约原样保留）；Viewer-legal | 不报告也不杜撰平滑/时长/缩放平移过渡选项 | 只读，无写 |
 | ALIASEDIT | **只读报告 v1（2026-11-09）**：逐行列出规范 `COMMAND_ALIASES`（`aliasedit.alias`）+ `aliasedit.summary`；表本身在 `cad-app::command_aliases`，`cad-ui-core` 重导出同一份；Viewer-legal | 创建/修改/删除别名 **NOT IMPLEMENTED**（无 `acad.pgp` 解析、无用户别名存储） | 只读，无写 |
 | WHOHAS | **只读报告 v1（2026-11-09）**：`whohas.single_document`；Viewer-legal | 单文档构建：无网络查询，无法列出其他用户、其他打开文档或文件锁 | 只读，无写 |
@@ -1151,7 +1151,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `ATTACH` | **部分实现（具名拒绝）**：`attach.unsupported: this build does not attach external references or underlays` | 同上 |
 | `-ATTACH` | **部分实现（具名拒绝）**：`-attach.unsupported: this build does not attach external references or underlays` | 同上 |
 | `XOPEN` | **部分实现（具名拒绝）**：`xopen.unsupported: this build has no xref editing session` | 同上 |
-| `CLASSICXREF` | **部分实现（具名拒绝）**：`classicxref.unsupported: there is no separate xref palette; use the RESOURCES panel` | 同上 |
+| `CLASSICXREF` | **已实现（只读报告 + 界面面板）**：`classicxref.entry`/`.summary` 读取 `drawing.external_references()`；界面本地经典面板列出 `cad_status.references` 行 | 附着/拆离/重载保持 `classicxref.*_unsupported` 具名拒绝 |
 
 ### 2026-11-09 Wave 6 扩展命令（文件 / 出图 / 导出）
 
@@ -1259,7 +1259,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `DIMARC` | **部分实现（具名拒绝）**：`dimarc.unsupported: the dimension domain has no arc-length kind` | 同上 |
 | `CAL` | **部分实现（具名拒绝）**：`cal.unsupported: no expression evaluator is implemented` | 同上 |
 | `DIMEX` / `DIMIM` | **部分实现（具名拒绝）**：`dimex.unsupported` / `dimim.unsupported`：标注样式文件未建模 | 同上 |
-| `SPACETRANS` | **部分实现（具名拒绝）**：`spacetrans.unsupported: no model/paper distance-conversion API` | 同上 |
+| `SPACETRANS` | **已实现（只读换算）**：`SPACETRANS <distance>` 用当前布局视口的 `viewport_transform` 报 `spacetrans.converted`/`.factor` | 模型空间或无可用视口具名拒绝 |
 | `TXTEXP` | **部分实现（具名拒绝）**：`txtexp.unsupported: no font-outline-to-geometry path is implemented` | 同上 |
 | `UPDATEFIELD` | **部分实现（具名拒绝）**：`updatefield.unsupported: fields are not modeled` | 同上 |
 
@@ -1754,3 +1754,35 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `WIPEOUT` | 部分实现 | `Frames ON/OFF/DISPLAY` 真实：ON = 填充 + 边框（显示与矢量出图边界折线），OFF = 仅填充，DISPLAY = 显示边框、出图不画；边框在 mask fill 之后用 Always-depth 线管线绘制；`Polyline` + `Erase Polyline Yes/No`、自由点串 | `FRAME` 覆盖无命令；遮罩填充在矢量出图仍无背景 flood（边界可出图）；无真实 GPU/像素验收 |
 | `TEXTMASK` | 部分实现 | 偏移因子（默认 0.35）、`Wipeout` 遮罩、文本+遮罩会话 `GROUP`、重跑替换旧遮罩、`TEXTUNMASK` 按组优先；一条事务/一步撤销 | **`3dface`/`Solid` 遮罩类型未实现**（无对应实体）；`GROUP` 为会话存储（DWG 不落关联记录） |
 | `TXT2MTXT` | 部分实现 | `COMBINE`/`SEPARATE`、`ORDER TOPDOWN/SELECT`、`WRAP`（`wrap_width`）、源对象在同一事务删除 | **`UNIFORM` 强制行距未实现**（文字无行距字段） |
+
+## Wave 26 边界更新（2026-11-12）
+
+> 以下条目**取代正文中同名命令的旧界**。依据：AutoCAD 2026 ENU 帮助页语义 + 本轮源码/契约测试；
+> 证据仅 Linux 编译 + 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `FILLET` | 部分实现 | 直线/圆/圆弧对 + **椭圆 ↔ LINE/CIRCLE/ARC/ELLIPSE** 数值圆角（采样 + Newton + 投影抛光，椭圆按参数区间修剪），一条事务/一步撤销 | `SPLINE` 对按名拒绝（无控制框修剪）；`Multiple`/多解循环未实现 |
+| `BREAK` | **完整实现** | `LINE`/`ARC`/`CIRCLE`/`SPLINE`/整椭圆/**椭圆弧**/`LWPOLYLINE`；`F` 首点覆盖；圆→弧；一条事务/一步撤销 | 无多段打断（AutoCAD 无此模式） |
+| `DIVIDE` | **完整实现** | 直线/弧/圆/样条/**椭圆与椭圆弧**/含 bulge 折线按等弧长；开放 `N−1`、闭合 `N`；块对齐 | 非曲线种类按名拒绝 |
+| `PEDIT` | 部分实现 | 全选项行 + **Edit vertex 子菜单**（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN）；JOIN 接受 SPLINE 拾取 | `WIDTH`/`LTYPE GEN`/`Edit vertex TANGENT` 无域字段 |
+| `TRIM`/`EXTEND` | 部分实现 | **ELLIPSE/椭圆弧目标**；EXTEND 弧可超过半圈（至整圈前）；INSERT/HATCH/POLYLINE 等目标按名拒绝 | 折线目标剩余子曲线无单一存储；SPLINE 目标的 EXTEND 无外推策略 |
+| `ARRAYRECT`/`ARRAYPOLAR` | 部分实现 | 有符号行/列间距；极坐标步长按 AutoCAD `fill/(items−1)`（半圈）/`fill/items`（整圈） | 独立非关联副本；`Levels`/网格角度无工具参数；关联编辑未建模 |
+| `HATCH` | 部分实现 | **`.pat` 解析器/名称解析**（内置 ANSI31/32/37 同源解析） | 自定义图案无命令行选择通道（`hatchPattern` 闭集 1..=3）；无关联性/实时预览 |
+| `HATCHEDIT` | 部分实现 | `PATTERNTYPE CUSTOM`；**Add/Remove Boundaries**（闭合/共面校验） | `Origin` 无字段；`Associate`/`Annotative`/Boundary draw order 无模型 |
+| `TXTEXP` | **完整实现** | 字体轮廓→每轮廓一条 `LWPOLYLINE`；闭合 sfnt 环闭合、SHX 笔画开放；删除源；一条事务/一步撤销 | 宿主必须安装字体引擎；MTEXT 宽度换行未应用（声明） |
+| `ARCTEXT` | **完整实现** | 沿选中 ARC 等角步逐字符 `TEXT`（切线旋转/倒置翻转）；源文字消费 | 每字符一个 TEXT（表示偏离）；仅 +Z、单行 |
+| `VPLAYER` | **完整实现** | `FREEZE/THAW <layer,...> [<index>]` 写单视口 `layer_overrides`；bare 报告；命令行 grammar 已接 | 一次一个视口（无交互多视口循环）；全局层表不动 |
+| `VPMAX`/`VPMIN` | **完整实现** | 真实最大化编辑态：相机+视图模式+工作平面+空间快照，`VPMIN` 位级恢复 | 一次一个视口；宿主无差异化渲染（无像素证据） |
+| `VPCLIP`/`MVIEW` | 部分实现 | 矩形 + **多边形 clip 真实写入**（N 点、共面/自交校验） | representation 只接受 3/4 点 clip ⇒ 多边形 `*.polygon_not_renderable`；无视口孔洞 |
+| `PSBSCALE`/`PSTSCALE` | 部分实现 | 按活动视口 paper-per-model 因子缩放图纸空间块/文字 | 单一方向/单一视口（声明）；不处理 MULTILEADER/TABLE 文本 |
+| `SHAPE` | **完整实现** | `SHAPE <name-or-code> <x> <y> [size] [rotation_deg]` 创建 `SemanticGeometry::Shape` | 按 name 只建行不解析（本构建 SHX 只保留编号）；表示层保持既有 `Partial` |
+| `SHP2BLK` | **完整实现** | 选中 SHAPE → `(font, code)` 块（轮廓多段线）+ 每个源位置 INSERT，删除源 | 需宿主安装字体引擎；块不链接回 SHX 字体 |
+| `MINSERT` | **完整实现** | 矩形 INSERT 阵列（ARRAYRECT 单元规则 + INSERT `T(-base)`），一条事务 | 独立副本（域无 MINSERT 实体，非关联） |
+| `ADDSELECTED` | 部分实现 | 点锚定型 LINE/CIRCLE/POINT/TEXT/MTEXT 新建，保留五项属性 | ARC/POLYLINE/INSERT 等按名拒绝；仅模型空间 |
+| `IMAGECLIP` | 部分实现 | 矩形 + `POLY` N 边形 + `OFF`；世界坐标经 u/v 映射 | 非凸环存储合法但渲染 fan-triangulate（表示层 partial） |
+| `APERTURE` | **完整实现** | `APERTURE <n>` 写会话孔径，snap/候选拾取真实使用 | `PICKBOX` 保持独立；未显式设置时配置默认值不变 |
+| `PTYPE` | **完整实现** | `PTYPE <code> [size]` 委托 PDMODE/PDSIZE 头部写入 | 两次 header 写、无 header undo 补丁 |
+| `REVCLOUDPROPERTIES` | **完整实现** | `REVCLOUDPROPERTIES <arc-length>` 写 token，REVCLOUD 真实消费 | 仅会话状态，不持久化 DWG |
+| `QUICKCALC`/`QVDRAWING`/`QVLAYOUT`/`WORKSPACE`/`WSSAVE`/`WSSETTINGS`/`TOOLBAR` | **完整实现** | chrome 本地选择子/面板/对话框；不进入 `cad_command` | 会话内存工作空间；无跨重启持久化 |
+| `RIBBON`/`RIBBONCLOSE`/`HIDEPALETTES`/`SHOWPALETTES`/`FILETAB`/`FILETABCLOSE` | **完整实现** | chrome 可见性设置（set，不 toggle）；单文档文件标签 | 视觉/像素 NOT VERIFIED |
