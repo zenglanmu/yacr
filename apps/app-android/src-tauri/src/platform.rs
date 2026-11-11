@@ -36,8 +36,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[cfg(any(target_os = "android", test))]
-use std::sync::Arc;
 use std::sync::Mutex;
 
 use cad_domain::{CadError, CadResult};
