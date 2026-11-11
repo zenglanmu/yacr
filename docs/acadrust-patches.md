@@ -61,3 +61,7 @@
 - 不得用补丁把“未支持能力”改成“空成功”或假数据（AGENTS.md 铁律 2）。
 - 不得通过 patch 机制把平台/UI 依赖塞进 `cad-*`，也不得绕过 `cad-import-acadrust` 的单一
   依赖边界。
+
+> **2026-11-12（Wave 26）**：本轮未使用 `[patch.crates-io]`，台账仍为空。DWG 保存仍走上游
+> `acadrust::DwgWriter`，行为是“另存新文件、不覆盖源图、保存前确认”；若以后为 DWG 往返质量
+> 打补丁，按 §4 固定 revision 并先在本台账登记，再用 `scripts/check-architecture.py` 门禁。

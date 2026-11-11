@@ -15344,3 +15344,12 @@ host/wasm/clippy + 4 static / diff **均 0**；`fmt` 仅既有陌生未跟踪 `d
   Web 的 wasm 会话仍是内存 config store（写入成功但不跨重启，属载体设计）；Android 在
   `nativeAssetsReady` 握手前没有持久路径。本修复不改变这些载体的持久性，只保证失败/不落盘不再
   被 UI 报成成功。
+
+## 2026-11-12：Wave 26（本轮目标 100 个命令名）
+
+- **范围**：本轮推进 **100 个官方命令名**，覆盖编辑/绘制、文字/标注、布局/视口、查询、块/图像、样式表、chrome/QuickView/QuickCalc、系统变量与命令词表控制。逐条状态与边界已写入 `docs/autocad-2026-command-coverage.md`（新增 Wave 26 段）与 `docs/compatibility.md`（Wave 26 正/续两表）；总计从 823 已实现提升到 **840 已实现（105 完整 + 735 部分）/ 141 未实现**。
+- **真实 2D 主要落点**：`FILLET` 椭圆对、`BREAK`/`DIVIDE` 椭圆弧、`PEDIT` 顶点子菜单、`PLINE` bulge/Close、`ELLIPSE` 弧+旋转、`SPLINE` CV/degree、`POINT` Multiple、`TRIM`/`EXTEND` 椭圆、`ARRAYPOLAR` AutoCAD fill 规则、`HATCH` `.pat` 解析、`TXTEXP`/`ARCTEXT`、`MLEADER`/`QLEADER`/`LEADER` 引线与 `MLEADERALIGN/EDIT/COLLECT`、`MLEDIT` 两线子集、`TOLERANCE` 特征框、`VPLAYER`/`MVSETUP`/`PSBSCALE`/`PSTSCALE`/`VPMAX`/`ALIGNSPACE`/`VPSYNC`、多边形 `VPCLIP`/`MVIEW`/`IMAGECLIP` 写入、`SHAPE`/`SHP2BLK`/`MINSERT`/`ADDSELECTED`、`STYLE`/`-STYLE`/`DIMSTYLE`/`MLEADERSTYLE` 表写入、`CLASSICXREF/INSERT/GROUP/IMAGE` 面板、`QUICKCALC`/`QVDRAWING`/`QVLAYOUT`/`WORKSPACE` 系列、`REDEFINE`/`UNDEFINE`/`ALIASEDIT`。
+- **明确未达成**：多边形视口/图像 clip 数据真实但表示层只接受 3/4 点 clip（`*.polygon_not_renderable`）；`HATCH` 自定义图案无命令行选择通道；`TEXTALIGN` 分布/斜排、`TEXTFIT` 真实宽度拉伸、`TXT2MTXT UNIFORM`、`PEDIT`/`PLINE` 宽度仍受域限制；`MINSERT`/`ARRAY*` 非关联；这些命令按 `部分实现` 计，未伪装成完整。
+- **DWG 保存**：`.dwg` 源永远另存为新文件（默认 `<stem>-export.dwg`），保存前新增确认对话框（`save.dwg_confirm.*`），并继续由 `save.picker_waiting_dwg` 告知“实验性/不覆盖源图”。本轮未修改 `acadrust`，`docs/acadrust-patches.md` 台账仍为空（允许路径与登记流程不变）。
+- **已运行**：`cargo check --workspace --all-targets --locked`；`cargo test -p cad-app`（2555 + 集成件全绿）、`-p cad-ui-core`（583）、`-p cad-db`（236）、`-p cad-desktop-shell`（含 wire goldens）、`-p app-web`（121）；`cargo fmt --all -- --check`；`cargo clippy -p cad-db -p cad-history -p cad-app -p cad-ui-core --all-targets -- -D warnings`；`(cd apps/desktop-ui && npm test)` **1516 passed**；`check-file-size.py`/`check-i18n.py`（2836 keys）/`check-command-docs.py`/`check-architecture.py` 全部 PASS。
+- **NOT RUN / NOT VERIFIED**：真实 GPU/GUI/像素、真实 DWG 夹具、Windows/macOS/Android 运行时、Web 真机；本轮只有 Linux 编译 + 契约测试证据。多边形 clip、chrome 面板视觉、`VPMAX` 最大化显示均未做像素验收。
