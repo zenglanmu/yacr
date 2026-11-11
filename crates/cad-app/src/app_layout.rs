@@ -4,16 +4,31 @@
 //! real, and so are the table/viewport **writes** promoted now that `cad-db`
 //! owns the sanctioned post-import layout write paths: `LAYOUT NEW|RENAME|DELETE`,
 //! `LAYOUTMERGE`, `LAYOUTWIZARD` (including its optional authored page setup),
-//! `MVIEW`, `VPORTS`/`-VPORTS`, `VPCLIP RECT`, `VPSCALE` and `LAYVPI` each
-//! publish exactly one revision and one undo step. The typed
-//! `PAGESETUP`/`PSETUPIN` writes live here too (`page_setup_write`). `LAYVPI`
-//! writes real per-viewport layer overrides
+//! `MVIEW` (rectangular and polygonal), `VPORTS`/`-VPORTS`, `VPCLIP RECT` and
+//! `VPCLIP` polygon, `VPSCALE`, `LAYVPI` and the `ALIGNSPACE`/`VPSYNC`
+//! viewport-alignment writes each publish exactly one revision and one undo
+//! step. The typed `PAGESETUP`/`PSETUPIN` writes live here too
+//! (`page_setup_write`). `LAYVPI` writes real per-viewport layer overrides
 //! ([`cad_db::PaperViewport::layer_overrides`]); because this build has no
-//! viewport selection, it applies them to every viewport of the active layout
-//! and never touches the global layer table. The full boundary is in
+//! viewport selection, the unscoped form applies them to every viewport of the
+//! active layout, the targeted form applies them to one viewport index, and
+//! neither touches the global layer table. The full boundary is in
 //! [`crate::command_id::layout`].
+//!
+//! `MVIEW` and the polygonal `VPCLIP` live in the sibling `app_layout_mview`
+//! and `app_layout_vpclip` modules; `ALIGNSPACE`/`VPSYNC` live in
+//! `app_layout_viewport_align`. They are declared here (with an explicit
+//! `#[path]`) so this module keeps one dispatch and stays inside the 1000-line
+//! code gate.
 
 use super::*;
+
+#[path = "app_layout_mview.rs"]
+mod mview;
+#[path = "app_layout_viewport_align.rs"]
+mod viewport_align;
+#[path = "app_layout_vpclip.rs"]
+mod vpclip;
 
 use cad_db::{DrawingDatabase, PaperViewport, PlotRotation};
 use cad_history::{drawing_patch, layout_patch, DrawingUndoRecord};
@@ -23,6 +38,13 @@ use crate::app_layout_geometry::{clip_center, grid_viewports, resolve_viewport_s
 use crate::app_layout_names::{
     find_layout_named, resolve_layout_name, validate_layout_name, LayoutSummary,
 };
+use crate::app_layout_session::VPMAX_RESTORE_VIEW;
+
+// The 2026-11-11 paper-space writes (`MVSETUP`, `PSBSCALE`, `PSTSCALE`), split
+// out so this file stays inside the code-size gate. It reuses this module's
+// viewport helpers, so it is declared here rather than at the crate root.
+#[path = "app_layout_paper.rs"]
+pub(crate) mod paper_writes;
 
 impl Application {
     /// Dispatch one `CommandPayload::Layout` input.
@@ -136,6 +158,9 @@ impl Application {
                     .is_some_and(|viewport| viewport.layout == id);
                 if cleared_maximized {
                     session.clear_maximized_viewport();
+                    // The pre-`VPMAX` view belonged to the deleted sheet; it is
+                    // no longer restorable, so the reserved slot goes with it.
+                    session.view_states.remove(VPMAX_RESTORE_VIEW);
                 }
                 self.publish_layout_record(
                     document_id,
@@ -244,6 +269,7 @@ impl Application {
                     .is_some_and(|viewport| viewport.layout == source_id)
                 {
                     session.clear_maximized_viewport();
+                    session.view_states.remove(VPMAX_RESTORE_VIEW);
                 }
                 self.publish_candidate(
                     document_id,
@@ -463,7 +489,8 @@ impl Application {
                         message: format!(
                             "VPCLIP RECT: replaced the clip of viewport 0 in layout {} with the \
                              rectangle ({}, {})-({}, {}); this build has no viewport selection, so \
-                             the first viewport was clipped (polygonal clips are NOT IMPLEMENTED)",
+                             the first viewport was clipped (use the polygonal VPCLIP form for a \
+                             non-rectangular boundary)",
                             layout_id.0, min.x, min.y, max.x, max.y
                         ),
                     }],
@@ -556,6 +583,10 @@ impl Application {
             }
             LayoutPayload::FreezeViewportLayers { layers } => {
                 self.freeze_viewport_layers(session, command, layers)
+            }
+            LayoutPayload::ClipPolygon { points } => self.clip_polygon(session, command, points),
+            LayoutPayload::FreezeViewportLayersIn { layers, viewport } => {
+                self.freeze_viewport_layers_at(session, command, layers, *viewport)
             }
             // Page setup has its own handler (`page_setup_write`), routed by the
             // extended dispatch; these arms keep the enum match exhaustive
@@ -721,121 +752,6 @@ impl Application {
                     .into(),
             )),
         }
-    }
-
-    /// Create one paper viewport from a typed two-corner rectangle.
-    ///
-    /// The rectangle is a paper-space axis-aligned `min`/`max` pair (not
-    /// canonicalised: the caller must give `minx < maxx` and `miny < maxy`). The
-    /// new viewport is appended to the active layout's existing viewports with a
-    /// four-corner clip, `Completeness::Complete`, unit scale and the same
-    /// `anchor - paper_center` translation convention as `VPORTS`.
-    pub(crate) fn mview(
-        &mut self,
-        session: &SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        let layout_id = require_paper_space(session, "mview")?;
-        let CommandPayload::Points(points) = &command.payload else {
-            return Err(CadError::InvalidInput(
-                "mview.invalid_rect: MVIEW needs exactly two corner points".into(),
-            ));
-        };
-        let [min, max] = points.as_slice() else {
-            return Err(CadError::InvalidInput(
-                "mview.invalid_rect: MVIEW needs exactly two corner points".into(),
-            ));
-        };
-        if !min.x.is_finite()
-            || !min.y.is_finite()
-            || !max.x.is_finite()
-            || !max.y.is_finite()
-            || min.x >= max.x
-            || min.y >= max.y
-        {
-            return Err(CadError::InvalidInput(
-                "mview.invalid_rect: MVIEW needs finite minx < maxx and miny < maxy".into(),
-            ));
-        }
-        let document_id = command.document;
-        let drawing = self.drawing(document_id)?.clone();
-        let mut viewports = layout_viewports(&drawing, layout_id)?;
-        let paper_center = Point3 {
-            x: (min.x + max.x) * 0.5,
-            y: (min.y + max.y) * 0.5,
-            z: 0.0,
-        };
-        let mut matrix = Transform3::identity().matrix;
-        matrix[0][0] = 1.0;
-        matrix[1][1] = 1.0;
-        matrix[0][3] = -paper_center.x;
-        matrix[1][3] = -paper_center.y;
-        let clip = vec![
-            Point3 {
-                x: min.x,
-                y: min.y,
-                z: 0.0,
-            },
-            Point3 {
-                x: max.x,
-                y: min.y,
-                z: 0.0,
-            },
-            Point3 {
-                x: max.x,
-                y: max.y,
-                z: 0.0,
-            },
-            Point3 {
-                x: min.x,
-                y: max.y,
-                z: 0.0,
-            },
-        ];
-        viewports.push(PaperViewport {
-            clip,
-            model_to_paper: Transform3 { matrix },
-            completeness: Completeness::Complete,
-            layer_overrides: std::collections::BTreeMap::new(),
-        });
-        let index = viewports.len() - 1;
-        let before = layout_row(&drawing, layout_id);
-        let transaction = next_transaction_id();
-        let mut candidate = drawing;
-        let change_set =
-            candidate.set_layout_viewports(layout_id, viewports, transaction, "mview")?;
-        let after = layout_row(&candidate, layout_id);
-        self.publish_layout_record(
-            document_id,
-            candidate,
-            transaction,
-            "mview",
-            vec![layout_patch(layout_id, before, after)],
-        )?;
-        Ok(CommandOutcome {
-            objects: Vec::new(),
-            changes: Some(Arc::new(change_set)),
-            diagnostics: vec![
-                Diagnostic {
-                    object: None,
-                    code: "mview.created".into(),
-                    message: format!(
-                        "MVIEW: appended viewport {index} to layout {} with the paper rectangle \
-                         ({}, {})-({}, {})",
-                        layout_id.0, min.x, min.y, max.x, max.y
-                    ),
-                },
-                Diagnostic {
-                    object: None,
-                    code: "mview.no_holes".into(),
-                    message: "MVIEW: the created viewport is one four-corner rectangle with no \
-                              holes; polygonal clips and viewport holes are NOT IMPLEMENTED"
-                        .into(),
-                },
-            ],
-            measurement: None,
-            point_report: None,
-        })
     }
 
     pub(crate) fn drawing(&self, document: DocumentId) -> CadResult<&DrawingDatabase> {

@@ -73,11 +73,14 @@ impl Application {
             | ExtendedCommandId::SigValidate
             | ExtendedCommandId::BasePoint
             | ExtendedCommandId::DrawingLimits
-            | ExtendedCommandId::ViewPlotDetails
-            | ExtendedCommandId::VPlayer
+            | ExtendedCommandId::ViewPlotDetails => self.extended_refusal(command, ext)?,
+            // The graduated Wave 2 paper-space writes: real per-viewport layer
+            // visibility, a scaled viewport grid and the two paper-space scale
+            // writes (`app_layout::paper_writes`).
+            ExtendedCommandId::VPlayer
             | ExtendedCommandId::PsbScale
             | ExtendedCommandId::PstScale
-            | ExtendedCommandId::MvSetup => self.extended_refusal(command, ext)?,
+            | ExtendedCommandId::MvSetup => self.extended_paper_write(session, command, ext)?,
             // Wave 3 reports/session: two space switches plus read-only reports.
             ExtendedCommandId::Mspace
             | ExtendedCommandId::Pspace

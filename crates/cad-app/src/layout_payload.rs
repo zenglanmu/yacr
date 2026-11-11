@@ -66,16 +66,41 @@ pub enum LayoutPayload {
     /// replace the **first** viewport's clip (this build has no viewport
     /// selection).
     ClipRect { min: Point3, max: Point3 },
+    /// `VPCLIP` with a **polygonal** boundary: validate the 3+ point coplanar,
+    /// simple (non self-intersecting) polygon and replace the **first**
+    /// viewport's clip with it.
+    ///
+    /// The boundary is stored verbatim in
+    /// [`cad_db::PaperViewport::clip`], which is a `Vec<Point3>` polygon and
+    /// therefore needs no new database field. The representation lane
+    /// (`cad-representation`) still resolves only three- and four-point clips,
+    /// so the written viewport renders as `viewport_unsupported: clip_arity`
+    /// until that lane learns N-gons; the command reports that residual as
+    /// `vpclip.polygon_not_renderable` instead of claiming a draw.
+    ClipPolygon { points: Vec<Point3> },
     /// `VPSCALE <scale>`: a standard scale name or ratio, resolved against the
     /// drawing's scale table and applied to the **first** viewport.
     Scale { name: String },
     /// `LAYVPI <layer>[,<layer>...]`: resolve every name, then freeze those
     /// layers in **every** viewport of the active paper layout
     /// ([`cad_db::PaperViewport::layer_overrides`]) as one revision and one
-    /// undo step. The global layer table is never written. This build has no
-    /// viewport selection, so "all viewports of the active layout" is the
-    /// declared scope.
+    /// undo step. The global layer table is never written.
+    ///
+    /// AutoCAD's `LAYVPI` freezes in "all viewports except the current one";
+    /// this build has no viewport selection, so "all viewports of the active
+    /// layout" is the declared scope.
     FreezeViewportLayers { layers: Vec<String> },
+    /// `LAYVPI` targeted at **one** viewport index of the active layout.
+    ///
+    /// This is the viewport-targeting form: `viewport` indexes
+    /// [`cad_db::Layout::viewports`] of the active paper layout, so a caller can
+    /// express AutoCAD's "every viewport except the current one" by issuing the
+    /// per-index form for each index it wants. The index is validated against
+    /// the stored viewport count (`layvpi.unknown_viewport`).
+    FreezeViewportLayersIn {
+        layers: Vec<String>,
+        viewport: usize,
+    },
 }
 
 /// The page setup of `PAGESETUP` / `LAYOUTWIZARD`.

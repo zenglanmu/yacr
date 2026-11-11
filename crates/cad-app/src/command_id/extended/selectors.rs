@@ -869,6 +869,14 @@ impl ExtendedCommandId {
                 // and consumes the selected text entities.
                 | Self::TextExplode
                 | Self::ArcText
+                // Wave 26 paper-space writes: per-viewport layer overrides, viewport
+                // grids, paper-relative block/text scaling.
+                | Self::MvSetup
+                | Self::PsbScale
+                | Self::PstScale
+                // Wave 26 viewport alignment writes one layout patch each.
+                | Self::AlignSpace
+                | Self::VpSync
         )
     }
 }

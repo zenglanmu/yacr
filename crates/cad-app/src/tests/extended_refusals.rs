@@ -1,17 +1,31 @@
 //! Wave 2 named-refusal contracts: `HYPERLINKOPTIONS`, `INPUTSEARCHOPTIONS`,
-//! `-INPUTSEARCHOPTIONS`, `SIGVALIDATE`, `BASE`, `LIMITS`, `VIEWPLOTDETAILS`,
-//! `VPLAYER`, `PSBSCALE`, `PSTSCALE`, `MVSETUP` (`MVIEW` graduated to a real
-//! viewport write).
+//! `-INPUTSEARCHOPTIONS`, `SIGVALIDATE`, `BASE`, `LIMITS`, `VIEWPLOTDETAILS`.
 //!
 //! Each name is admitted by the vocabulary and refused with
 //! `CadError::Unsupported` carrying a **stable** reason. A refusal is a
 //! legitimate partial implementation in this build (same shape as
 //! `LAYOUTMERGE`/`DIMBREAK`): it must write nothing, bump no revision and record
 //! no history.
+//!
+//! # Graduated names (2026-11-11)
+//!
+//! `VPLAYER`, `MVSETUP`, `PSBSCALE` and `PSTSCALE` have left this list: they are
+//! real paper-space writes now, dispatched through
+//! [`Application::extended_paper_write`] and contract-tested in
+//! [`paper_space_writes`] (`tests/drawing/layout_commands.rs`). Their old
+//! `*.unsupported` strings are gone on purpose — a graduated command must not
+//! keep a refusal string that claims the feature has no model.
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 11] = [
+// The graduated Wave 2 paper-space writes (`VPLAYER`, `MVSETUP`, `PSBSCALE`,
+// `PSTSCALE`, and the real `VPMAX`/`VPMIN` state). Declared here with an
+// explicit path so `tests/layout_commands.rs` (at the size ceiling) does not
+// have to grow.
+#[path = "drawing/layout_commands.rs"]
+mod paper_space_writes;
+
+const REFUSALS: [(ExtendedCommandId, &str); 7] = [
     (
         ExtendedCommandId::HyperlinkOptions,
         "hyperlinkoptions.unsupported: this build has no hyperlink storage model",
@@ -39,22 +53,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 11] = [
     (
         ExtendedCommandId::ViewPlotDetails,
         "viewplotdetails.unsupported: no plot-details model",
-    ),
-    (
-        ExtendedCommandId::VPlayer,
-        "vplayer.viewport_layer_state_unsupported: no per-viewport layer state",
-    ),
-    (
-        ExtendedCommandId::PsbScale,
-        "psbscale.write_unsupported: no viewport scale write API",
-    ),
-    (
-        ExtendedCommandId::PstScale,
-        "pstscale.write_unsupported: no viewport scale write API",
-    ),
-    (
-        ExtendedCommandId::MvSetup,
-        "mvsetup.unsupported: no viewport-group model",
     ),
 ];
 
@@ -105,13 +103,16 @@ fn a_refusal_payload_is_rejected_before_the_feature_reason() {
     let refused = app.execute(
         &mut session,
         command(
-            CommandId::Extended(ExtendedCommandId::VPlayer),
+            CommandId::Extended(ExtendedCommandId::HyperlinkOptions),
             CommandPayload::Points(vec![point(1.0, 2.0)]),
         ),
     );
     match refused {
         Err(CadError::InvalidInput(message)) => {
-            assert!(message.contains("VPLAYER needs no payload"), "{message}");
+            assert!(
+                message.contains("HYPERLINKOPTIONS needs no payload"),
+                "{message}"
+            );
         }
         other => panic!("expected InvalidInput for a payload, got {other:?}"),
     }

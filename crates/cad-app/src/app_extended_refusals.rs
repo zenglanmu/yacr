@@ -1,9 +1,8 @@
 //! Wave 2 **named refusals** for the extended command batch.
 //!
-//! Twelve AutoCAD 2026 names describe features this build has no model or API
+//! Seven AutoCAD 2026 names describe features this build has no model or API
 //! for: hyperlinks, input-search settings, digital signatures, a drawing
-//! insertion base point, drawing limits, plot-job details, per-viewport layer
-//! state, viewport creation, viewport scale writes and viewport groups.
+//! insertion base point, drawing limits and plot-job details.
 //!
 //! Each name is admitted by the vocabulary and then refused with
 //! `CadError::Unsupported` carrying a **stable** reason string (the same shape
@@ -14,6 +13,15 @@
 //!
 //! A caller payload is refused first with `require_none_payload`, so a malformed
 //! request never reaches the feature-specific reason.
+//!
+//! # Graduated writes (2026-11-11)
+//!
+//! `VPLAYER`, `MVSETUP`, `PSBSCALE` and `PSTSCALE` were Wave 2 refusals and are
+//! now real 2D paper-space features (per-viewport layer visibility, a scaled
+//! viewport grid, and the two paper-space scale writes). They are dispatched
+//! through [`Application::extended_paper_write`] to
+//! [`crate::app_layout::paper_writes`]; the seven names left here keep their
+//! exact published reason strings.
 
 use super::*;
 use crate::app_utility::require_none_payload;
@@ -28,6 +36,26 @@ impl Application {
         let name = ext.selector();
         require_none_payload(command, name)?;
         Err(CadError::Unsupported(reason(ext)))
+    }
+
+    /// Dispatch one graduated Wave 2 **paper-space write**.
+    ///
+    /// Each arm is a real write (one transaction / one layout patch) except the
+    /// bare `VPLAYER` report, which is read-only. The module that owns the
+    /// implementation documents every `*.` refusal code.
+    pub(crate) fn extended_paper_write(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+        ext: ExtendedCommandId,
+    ) -> CadResult<CommandOutcome> {
+        match ext {
+            ExtendedCommandId::VPlayer => self.vplayer(session, command),
+            ExtendedCommandId::MvSetup => self.mv_setup(session, command),
+            ExtendedCommandId::PsbScale => self.psb_scale(session, command),
+            ExtendedCommandId::PstScale => self.pst_scale(session, command),
+            other => Err(CadError::Unsupported(reason(other))),
+        }
     }
 }
 
@@ -56,12 +84,6 @@ fn reason(ext: ExtendedCommandId) -> String {
             "limits.unsupported: this build has no drawing-limits model"
         }
         ExtendedCommandId::ViewPlotDetails => "viewplotdetails.unsupported: no plot-details model",
-        ExtendedCommandId::VPlayer => {
-            "vplayer.viewport_layer_state_unsupported: no per-viewport layer state"
-        }
-        ExtendedCommandId::PsbScale => "psbscale.write_unsupported: no viewport scale write API",
-        ExtendedCommandId::PstScale => "pstscale.write_unsupported: no viewport scale write API",
-        ExtendedCommandId::MvSetup => "mvsetup.unsupported: no viewport-group model",
         other => {
             return format!(
                 "{}: this command is not a Wave 2 refusal",

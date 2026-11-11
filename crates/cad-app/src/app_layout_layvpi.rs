@@ -4,8 +4,24 @@
 //! viewport, never the global layer table), so the write is one validated
 //! `set_layout_viewports` call recorded as one [`cad_db::LayoutPatch`] — one
 //! revision and one undo step. This build has no viewport selection: the
-//! declared scope is every viewport of the active layout, stated in the
-//! `layvpi.frozen` diagnostic and in [`crate::command_id::layout`].
+//! unscoped form (`FreezeViewportLayers`) declares the scope "every viewport of
+//! the active layout", stated in the `layvpi.frozen` diagnostic and in
+//! [`crate::command_id::layout`].
+//!
+//! AutoCAD's `LAYVPI` freezes in *all viewports except the current one*. This
+//! build stores no current-viewport marker for the freeze scope, so that exact
+//! default is **not** what the unscoped form does. The targeted form
+//! (`FreezeViewportLayersIn`) takes an explicit viewport index, which is how a
+//! caller expresses "all except the current one" today: it issues the
+//! per-index form for every index it wants and skips the current viewport. The
+//! command-line parser (`cad-ui-core`) does not produce that form yet — a
+//! documented residual of that out-of-scope lane, not a behaviour of this one.
+//!
+//! # Residual
+//!
+//! The unscoped form is `all viewports`, the targeted form is one index. The
+//! "except current" default needs a current-viewport marker the session does
+//! not own for layer freezes, so it stays unimplemented rather than guessed.
 
 use super::*;
 
@@ -22,6 +38,28 @@ impl Application {
         session: &SessionState,
         command: &Command,
         layers: &[String],
+    ) -> CadResult<CommandOutcome> {
+        self.freeze_viewport_layers_impl(session, command, layers, None)
+    }
+
+    /// Handle `LayoutPayload::FreezeViewportLayersIn`: one viewport index only.
+    pub(super) fn freeze_viewport_layers_at(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        layers: &[String],
+        viewport: usize,
+    ) -> CadResult<CommandOutcome> {
+        self.freeze_viewport_layers_impl(session, command, layers, Some(viewport))
+    }
+
+    /// The one `LAYVPI` write, scoped to every viewport or to one index.
+    fn freeze_viewport_layers_impl(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        layers: &[String],
+        only: Option<usize>,
     ) -> CadResult<CommandOutcome> {
         let layout_id = require_paper_space(session, "layvpi")?;
         if layers.is_empty() {
@@ -55,8 +93,21 @@ impl Application {
                 layout_id.0
             )));
         }
+        if let Some(index) = only {
+            if index >= viewports.len() {
+                return Err(CadError::InvalidInput(format!(
+                    "layvpi.unknown_viewport: layout {} has {} viewport(s); there is no viewport \
+                     {index} to freeze",
+                    layout_id.0,
+                    viewports.len()
+                )));
+            }
+        }
         let mut changed = false;
-        for viewport in &mut viewports {
+        for (index, viewport) in viewports.iter_mut().enumerate() {
+            if only.is_some_and(|wanted| wanted != index) {
+                continue;
+            }
             for (id, _) in &frozen {
                 if viewport.layer_overrides.get(id) != Some(&true) {
                     viewport.layer_overrides.insert(*id, true);
@@ -72,9 +123,11 @@ impl Application {
                     object: None,
                     code: "layvpi.unchanged".into(),
                     message: format!(
-                        "LAYVPI: every viewport of layout {} already freezes the named layer(s); \
-                         no transaction was opened",
-                        layout_id.0
+                        "LAYVPI: {} already freezes the named layer(s); no transaction was opened",
+                        match only {
+                            Some(index) => format!("viewport {index} of layout {}", layout_id.0),
+                            None => format!("every viewport of layout {}", layout_id.0),
+                        }
                     ),
                 }],
                 measurement: None,
@@ -106,12 +159,21 @@ impl Application {
             diagnostics: vec![Diagnostic {
                 object: None,
                 code: "layvpi.frozen".into(),
-                message: format!(
-                    "LAYVPI: froze layer(s) {names} in all {viewport_count} viewport(s) of \
-                     layout {}; this build has no viewport selection, so every viewport of the \
-                     active layout received the override, and the global layer table is unchanged",
-                    layout_id.0
-                ),
+                message: match only {
+                    Some(index) => format!(
+                        "LAYVPI: froze layer(s) {names} in viewport {index} of layout {} ({} of \
+                         {viewport_count} viewport(s); the global layer table is unchanged)",
+                        layout_id.0,
+                        index + 1
+                    ),
+                    None => format!(
+                        "LAYVPI: froze layer(s) {names} in all {viewport_count} viewport(s) of \
+                         layout {}; this form has no viewport selection, so every viewport of the \
+                         active layout received the override, and the global layer table is \
+                         unchanged",
+                        layout_id.0
+                    ),
+                },
             }],
             measurement: None,
             point_report: None,

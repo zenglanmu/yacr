@@ -32,6 +32,144 @@ pub(super) fn clip_center(clip: &[Point3]) -> Option<Point3> {
     })
 }
 
+/// Validate one **polygonal** paper-space clip boundary.
+///
+/// `prefix` is the stable diagnostic namespace of the caller (`vpclip` or
+/// `mview`), so both commands refuse with the same shapes and their own code:
+///
+/// * `{prefix}.degenerate_polygon` — fewer than three points, a non-finite
+///   coordinate, a repeated vertex, or a zero-area (collinear) boundary;
+/// * `{prefix}.non_coplanar` — the points do not lie on one paper plane (the
+///   clip is a 2D paper boundary, so a z spread cannot be honoured);
+/// * `{prefix}.self_intersecting` — two non-adjacent edges touch or cross.
+///
+/// Tolerances are relative to the polygon's own extent so a millimetre clip and
+/// a metre clip behave the same. Nothing here mutates: the caller validates
+/// first and writes through `set_layout_viewports` afterwards.
+pub(super) fn validate_clip_polygon(points: &[Point3], prefix: &str) -> CadResult<()> {
+    if points.len() < 3 {
+        return Err(CadError::InvalidInput(format!(
+            "{prefix}.degenerate_polygon: a polygonal clip needs at least three points; got {}",
+            points.len()
+        )));
+    }
+    let (mut min, mut max) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for point in points {
+        if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
+            return Err(CadError::InvalidInput(format!(
+                "{prefix}.degenerate_polygon: a polygonal clip point is not finite"
+            )));
+        }
+        for (axis, value) in [point.x, point.y, point.z].into_iter().enumerate() {
+            min[axis] = min[axis].min(value);
+            max[axis] = max[axis].max(value);
+        }
+    }
+    let extent = (max[0] - min[0]).max(max[1] - min[1]).max(1.0);
+    let tolerance = 1e-9 * extent;
+    if max[2] - min[2] > tolerance {
+        return Err(CadError::InvalidInput(format!(
+            "{prefix}.non_coplanar: the polygonal clip spans z {}..{}; a paper clip boundary must \
+             lie on one plane",
+            min[2], max[2]
+        )));
+    }
+    for index in 0..points.len() {
+        let next = (index + 1) % points.len();
+        let (a, b) = (points[index], points[next]);
+        if (a.x - b.x).abs() <= tolerance && (a.y - b.y).abs() <= tolerance {
+            return Err(CadError::InvalidInput(format!(
+                "{prefix}.degenerate_polygon: clip vertices {index} and {next} coincide"
+            )));
+        }
+    }
+    let count = points.len();
+    for first in 0..count {
+        let first_next = (first + 1) % count;
+        for second in (first + 1)..count {
+            let second_next = (second + 1) % count;
+            // Adjacent edges share a vertex by construction; only an edge that
+            // touches another edge it does not share a vertex with is a
+            // self-intersection.
+            if second == first_next || second_next == first {
+                continue;
+            }
+            if segments_intersect(
+                points[first],
+                points[first_next],
+                points[second],
+                points[second_next],
+                tolerance,
+            ) {
+                return Err(CadError::InvalidInput(format!(
+                    "{prefix}.self_intersecting: clip edges {first}-{first_next} and \
+                     {second}-{second_next} cross or touch"
+                )));
+            }
+        }
+    }
+    // A symmetric bow-tie has zero signed area; it is reported as a
+    // self-intersection above, so only collinear/degenerate boundaries reach
+    // this check.
+    let signed_area = polygon_signed_area(points);
+    if signed_area.abs() <= tolerance * extent {
+        return Err(CadError::InvalidInput(format!(
+            "{prefix}.degenerate_polygon: the polygonal clip has zero area (collinear vertices)"
+        )));
+    }
+    Ok(())
+}
+
+/// Twice the signed area of the polygon projected onto the paper plane.
+fn polygon_signed_area(points: &[Point3]) -> f64 {
+    let mut area = 0.0;
+    for index in 0..points.len() {
+        let a = points[index];
+        let b = points[(index + 1) % points.len()];
+        area += a.x * b.y - b.x * a.y;
+    }
+    area * 0.5
+}
+
+/// Whether two 2D segments touch or cross, within `tolerance`.
+///
+/// Collinear overlap and endpoint touching count as an intersection: a polygon
+/// boundary that merely grazes itself is not a simple polygon.
+fn segments_intersect(a1: Point3, a2: Point3, b1: Point3, b2: Point3, tolerance: f64) -> bool {
+    let cross = |origin: Point3, first: Point3, second: Point3| {
+        (first.x - origin.x) * (second.y - origin.y) - (first.y - origin.y) * (second.x - origin.x)
+    };
+    let within = |value: f64, limit: f64| value.abs() <= limit;
+    let d1 = cross(b1, b2, a1);
+    let d2 = cross(b1, b2, a2);
+    let d3 = cross(a1, a2, b1);
+    let d4 = cross(a1, a2, b2);
+    let extent = ((b2.x - b1.x).abs())
+        .max((b2.y - b1.y).abs())
+        .max((a2.x - a1.x).abs())
+        .max((a2.y - a1.y).abs())
+        .max(1.0);
+    let limit = tolerance * extent;
+    let opposite = |first: f64, second: f64| {
+        (!within(first, limit) && !within(second, limit)) && first.signum() != second.signum()
+    };
+    if opposite(d1, d2) && opposite(d3, d4) {
+        return true;
+    }
+    // Collinear/touching cases: a vertex of one segment lies on the other.
+    let on_segment = |point: Point3, start: Point3, end: Point3, collinear: f64| {
+        within(collinear, limit)
+            && point.x >= start.x.min(end.x) - limit
+            && point.x <= start.x.max(end.x) + limit
+            && point.y >= start.y.min(end.y) - limit
+            && point.y <= start.y.max(end.y) + limit
+    };
+    on_segment(a1, b1, b2, d1)
+        || on_segment(a2, b1, b2, d2)
+        || on_segment(b1, a1, a2, d3)
+        || on_segment(b2, a1, a2, d4)
+}
+
 /// Build a `rows x cols` grid of axis-aligned viewports covering the sheet.
 ///
 /// The cells are equal, cover the sheet from its own origin, and each clip is the
