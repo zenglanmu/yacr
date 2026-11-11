@@ -141,9 +141,15 @@ def check(commands_text: str, doc_text: str, coverage_text: str,
     zoom = re.findall(r'\("([^"]+)"',
                       const_body(ZOOM_RE, commands_text, commands_path, 'ZOOM_STEP_SELECTORS'))
     # ARGUMENT_SELECTORS holds constant identifiers, not string literals; the
-    # count is reported only (it is not an admitted-name check).
+    # count is reported only (it is not an admitted-name check). The table lives
+    # in a sibling module when `commands.rs` is kept under the code-size gate.
+    arguments_text, arguments_source = commands_text, commands_path
+    if 'pub const ARGUMENT_SELECTORS' not in commands_text:
+        sibling = commands_path.parent / 'commands' / 'argument_table.rs'
+        if sibling.exists():
+            arguments_text, arguments_source = sibling.read_text(), sibling
     arguments = re.findall(r'^\s{4}([A-Z_]+_SELECTOR),$',
-                           const_body(ARGUMENTS_RE, commands_text, commands_path,
+                           const_body(ARGUMENTS_RE, arguments_text, arguments_source,
                                       'ARGUMENT_SELECTORS'),
                            re.M)
     alias = dict(re.findall(r'\("([^"]+)",\s*"([^"]+)"\)',
