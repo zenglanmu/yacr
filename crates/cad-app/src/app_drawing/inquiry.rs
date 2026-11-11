@@ -452,7 +452,7 @@ impl Application {
             .map(|viewport| viewport.zoom_history_len().to_string())
             .unwrap_or_else(|| "unavailable".to_string());
 
-        let diagnostics = vec![
+        let mut diagnostics = vec![
             Diagnostic {
                 object: None,
                 code: "status.summary".into(),
@@ -538,6 +538,11 @@ impl Application {
                 message: "STATUS memory usage: not tracked by this build".into(),
             },
         ];
+        // The extra measured statistics (current space, per-layout counts, tracked
+        // modes, session counts) live beside the other read-only reports.
+        diagnostics.extend(crate::app_reports_ext::status_extended(
+            self, session, command, &drawing,
+        ));
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: None,

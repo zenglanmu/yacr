@@ -365,6 +365,13 @@ impl Application {
     }
 
     /// `TIME`: read-only document/clock report.
+    ///
+    /// One line per AutoCAD `TIME` field. Only the fields this build really has a
+    /// source for are valued: the current UTC clock and the document's stored
+    /// revision/entity/table state. Creation time, last update, the elapsed
+    /// command time and the elapsed timer are not tracked anywhere in `cad-db` or
+    /// in the session, so each names itself as `time.not_tracked` instead of
+    /// printing a fabricated date, a zero or a plausible duration.
     fn time_report(&self, command: &Command) -> CadResult<CommandOutcome> {
         require_none_payload(command, "TIME")?;
         let drawing = document_drawing(self, command)?;
@@ -373,16 +380,48 @@ impl Application {
                 object: None,
                 code: "time.document".into(),
                 message: format!(
-                    "TIME: document {} revision {} entities {}",
+                    "TIME: document {} database {} revision {} entities {}",
                     command.document.0,
+                    drawing.id().0,
                     drawing.revision().0,
                     drawing.entity_count()
                 ),
             },
             Diagnostic {
                 object: None,
+                code: "time.tracked".into(),
+                message: "TIME: tracked by this build: the current UTC clock (no local-offset \
+                           source), the document id, its revision and its entity/table counts"
+                    .into(),
+            },
+            // One line per unmodelled AutoCAD TIME field, each named.
+            Diagnostic {
+                object: None,
                 code: "time.not_tracked".into(),
-                message: "TIME: drawing creation/edit timestamps are not tracked by this database"
+                message: "time.not_tracked: drawing creation time (this database stores no \
+                          timestamps)"
+                    .into(),
+            },
+            Diagnostic {
+                object: None,
+                code: "time.not_tracked".into(),
+                message: "time.not_tracked: drawing last-update time (this database stores no \
+                          timestamps; the revision counter is the only change evidence)"
+                    .into(),
+            },
+            Diagnostic {
+                object: None,
+                code: "time.not_tracked".into(),
+                message:
+                    "time.not_tracked: elapsed command time (no per-command timer exists; the \
+                          session records no start/stop instants)"
+                        .into(),
+            },
+            Diagnostic {
+                object: None,
+                code: "time.not_tracked".into(),
+                message: "time.not_tracked: elapsed timer and timer on/off state (no elapsed-time \
+                          accumulator exists in this build)"
                     .into(),
             },
             Diagnostic {

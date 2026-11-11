@@ -279,3 +279,57 @@ fn xlist_lists_block_definitions_and_declares_xdata_loss() {
     assert_eq!(revision(&app), before);
     assert!(!app.can_undo(&DocumentId(1)));
 }
+
+#[test]
+fn time_names_every_untracked_field_and_reports_only_real_values() {
+    let (mut app, mut session) = app_with_blocks();
+    let before = revision(&app);
+    let outcome = app
+        .execute(&mut session, command(CommandId::Time, CommandPayload::None))
+        .expect("TIME is admitted");
+
+    let document = report(&outcome, "time.document");
+    assert!(
+        document.message.contains("database"),
+        "{}",
+        document.message
+    );
+    assert!(
+        document.message.contains("entities "),
+        "{}",
+        document.message
+    );
+    assert!(
+        report(&outcome, "time.tracked").message.contains("tracked"),
+        "the report names what it can measure"
+    );
+    // The clock is real; creation/last update/elapsed command/elapsed timer are
+    // each named `time.not_tracked` rather than printed as a made-up value.
+    assert!(report(&outcome, "time.utc").message.contains("current UTC"));
+    let untracked: Vec<&str> = outcome
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "time.not_tracked")
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+    assert_eq!(untracked.len(), 4, "{untracked:?}");
+    for field in [
+        "creation time",
+        "last-update time",
+        "elapsed command time",
+        "elapsed timer",
+    ] {
+        assert!(
+            untracked.iter().any(|message| message.contains(field)),
+            "missing {field}: {untracked:?}"
+        );
+    }
+    assert!(report(&outcome, "time.uptime_not_tracked")
+        .message
+        .contains("uptime"));
+    assert!(report(&outcome, "time.local_not_tracked")
+        .message
+        .contains("local-time"));
+    assert_eq!(revision(&app), before);
+    assert!(!app.can_undo(&DocumentId(1)));
+}

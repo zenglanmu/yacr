@@ -249,3 +249,137 @@ impl Application {
         Ok(report_outcome(diagnostics))
     }
 }
+
+/// The extended half of `STATUS`: the document/session statistics this build
+/// really stores, stated as facts and never as guesses.
+///
+/// `STATUS`'s handler lives in `app_drawing::inquiry`; this function owns only
+/// the additional report lines (the caller appends them to its own
+/// `status.summary`/`status.layers`/… set) so the two modules stay inside the
+/// code-size limit and the arithmetic exists exactly once.
+///
+/// What is reported here is **measured**, not modelled-by-assumption:
+///
+/// * `status.current_space` — the session's active space, resolved through the
+///   drawing's own layout/block tables (an unresolved row is named, not hidden);
+/// * `status.space_usage` — entity counts per paper-space layout plus the count
+///   of block-definition rows, from one walk over the drawing;
+/// * `status.layer_usage` — how many distinct layers actually carry entities,
+///   against the layer-table size;
+/// * `status.modes` — the stored `PDMODE`/`PDSIZE`/`LTSCALE`, the retained
+///   measurement kind, the recorded backend preference and the real undo/redo
+///   availability;
+/// * `status.selection` — selection/hidden/temporary-override/named-group/named
+///   view counts (all session state, none of it drawing data).
+///
+/// Everything AutoCAD's `STATUS` reports that this build does not track stays a
+/// `status.not_tracked` line in the caller (limits/base point, creation/edit
+/// time, memory); nothing here invents a substitute value.
+pub(crate) fn status_extended(
+    app: &Application,
+    session: &SessionState,
+    command: &Command,
+    drawing: &cad_db::DrawingDatabase,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::with_capacity(5);
+
+    let current_space = match &session.active_space {
+        SpaceId::Model => "Model".to_string(),
+        SpaceId::Paper(layout) => format!("Paper({})", layout_label(drawing, *layout)),
+        SpaceId::Block(block) => format!("Block({})", block_label(drawing, *block)),
+    };
+    let units = app
+        .workspace
+        .documents
+        .get(&command.document)
+        .map(|document| format!("{:?}", document.units.source))
+        .unwrap_or_else(|| "unavailable".to_string());
+    diagnostics.push(diagnostic(
+        "status.current_space",
+        format!("STATUS current space={current_space} units={units}"),
+    ));
+
+    let mut paper_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut block_rows = 0usize;
+    let mut used_layers: std::collections::BTreeSet<LayerId> = std::collections::BTreeSet::new();
+    for entity in drawing.entities() {
+        used_layers.insert(entity.layer);
+        match entity.space {
+            SpaceId::Model => {}
+            SpaceId::Paper(layout) => {
+                *paper_counts
+                    .entry(layout_label(drawing, layout))
+                    .or_default() += 1;
+            }
+            SpaceId::Block(_) => block_rows += 1,
+        }
+    }
+    let paper_total: usize = paper_counts.values().sum();
+    let layouts = if paper_counts.is_empty() {
+        "no paper-space entities".to_string()
+    } else {
+        paper_counts
+            .iter()
+            .map(|(name, count)| format!("{name}={count}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    diagnostics.push(diagnostic(
+        "status.space_usage",
+        format!(
+            "STATUS paper-space entities={paper_total} ({layouts}); block-definition rows={block_rows}"
+        ),
+    ));
+
+    let layer_rows = drawing.layers().count();
+    diagnostics.push(diagnostic(
+        "status.layer_usage",
+        format!(
+            "STATUS layers carrying entities={} of {layer_rows} layer row(s)",
+            used_layers.len()
+        ),
+    ));
+
+    diagnostics.push(diagnostic(
+        "status.modes",
+        format!(
+            "STATUS pdmode={} pdsize={} ltscale={} measurement={} backend={:?} undo={} redo={}",
+            drawing.point_display_mode(),
+            drawing.point_display_size(),
+            drawing.linetype_scale(),
+            session.selected_measurement_kind().key(),
+            session.backend,
+            app.can_undo(&command.document),
+            app.can_redo(&command.document)
+        ),
+    ));
+
+    diagnostics.push(diagnostic(
+        "status.selection",
+        format!(
+            "STATUS selection={} hidden={} layer_overrides={} groups={} named_views={}",
+            session.selection.len(),
+            session.hidden_entities.len(),
+            session.layer_overrides.len(),
+            session.groups.len(),
+            session.view_states.len()
+        ),
+    ));
+    diagnostics
+}
+
+/// A layout's display name, or its id when the table row is missing.
+fn layout_label(drawing: &cad_db::DrawingDatabase, layout: LayoutId) -> String {
+    drawing
+        .layout(layout)
+        .map(|row| row.name.clone())
+        .unwrap_or_else(|| format!("layout#{}", layout.0))
+}
+
+/// A block definition's name, or its id when the table row is missing.
+fn block_label(drawing: &cad_db::DrawingDatabase, block: BlockId) -> String {
+    drawing
+        .block_name(block)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("block#{}", block.0))
+}

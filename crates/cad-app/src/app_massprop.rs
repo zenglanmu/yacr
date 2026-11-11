@@ -12,6 +12,17 @@ use cad_geometry::{measure_bulged_ring_area, polyline_length, AreaError};
 
 use crate::app_measure_object::geometry_kind;
 
+// The sampled closed-SPLINE and HATCH-loop region arithmetic lives in a sibling
+// module (this file is at the code-size ceiling). `#[path]` keeps it a sibling
+// file rather than a directory.
+#[path = "app_massprop_regions.rs"]
+mod regions;
+
+// The `MEASUREGEOM` half (option routing plus the `RADIUS` report) is the other
+// sibling: same reason, and the same `impl Application` funnel.
+#[path = "app_massprop_measuregeom.rs"]
+mod measuregeom;
+
 // --- MASSPROP (2026-11-07) ------------------------------------------------
 //
 // The contract (input, supported kinds, every refusal, the report shape and
@@ -31,6 +42,13 @@ struct MassRegion {
     /// The region's own plane normal (unit) and one point on that plane.
     normal: Point3,
     plane_point: Point3,
+    /// Extra per-object diagnostics, emitted right after `massprop.object`.
+    ///
+    /// Only the sampled/loop-derived kinds carry notes: a closed SPLINE's values
+    /// come from an adaptive sample ring, and an imported HATCH's boundary may be
+    /// a sampled approximation. The exact analytic kinds (circle, full ellipse,
+    /// closed bulged polyline) leave this empty.
+    notes: Vec<(&'static str, String)>,
 }
 
 impl Application {
@@ -113,15 +131,11 @@ impl Application {
                     format_point(region.centroid),
                 ),
             });
-            if region.perimeter.1 {
+            for (code, message) in &region.notes {
                 diagnostics.push(Diagnostic {
                     object: Some(ObjectId(entity.0)),
-                    code: "massprop.approx_ellipse_perimeter".into(),
-                    message: format!(
-                        "MASSPROP: entity {} perimeter is Ramanujan's second approximation of the \
-                         complete elliptic integral; it is not an exact value",
-                        entity.0
-                    ),
+                    code: (*code).into(),
+                    message: message.clone(),
                 });
             }
         }
@@ -234,6 +248,7 @@ impl Application {
                     centroid: *center,
                     normal,
                     plane_point: *center,
+                    notes: Vec::new(),
                 })
             }
             SemanticGeometry::Ellipse {
@@ -280,8 +295,8 @@ impl Application {
                 let major_unit = camera::normalize3(*major_axis).ok_or_else(|| {
                     mass_degenerate(entity, "the ellipse's major axis has no direction")
                 })?;
-                let minor_unit = camera::normalize3(camera::cross(normal, major_unit))
-                    .ok_or_else(|| {
+                let minor_unit =
+                    camera::normalize3(camera::cross(normal, major_unit)).ok_or_else(|| {
                         mass_degenerate(
                             entity,
                             "the ellipse's normal and major axis do not define a plane basis",
@@ -298,8 +313,9 @@ impl Application {
                 // Ramanujan's second approximation for a full ellipse. This is
                 // explicitly approximate (no elliptic integral in this build).
                 let h = ((major - minor) / (major + minor)).powi(2);
-                let perimeter =
-                    std::f64::consts::PI * (major + minor) * (1.0 + 3.0 * h / (10.0 + (4.0 - 3.0 * h).sqrt()));
+                let perimeter = std::f64::consts::PI
+                    * (major + minor)
+                    * (1.0 + 3.0 * h / (10.0 + (4.0 - 3.0 * h).sqrt()));
                 if !perimeter.is_finite() {
                     return Err(mass_degenerate(
                         entity,
@@ -328,6 +344,16 @@ impl Application {
                     centroid: *center,
                     normal,
                     plane_point: *center,
+                    // The perimeter above is Ramanujan's second approximation, so the
+                    // ellipse — and only the ellipse — carries this note.
+                    notes: vec![(
+                        "massprop.approx_ellipse_perimeter",
+                        format!(
+                            "MASSPROP: entity {} perimeter is Ramanujan's second approximation of \
+                             the complete elliptic integral; it is not an exact value",
+                            entity.id.0
+                        ),
+                    )],
                 })
             }
             SemanticGeometry::Polyline {
@@ -372,12 +398,13 @@ impl Application {
                     .ok_or_else(|| {
                         mass_degenerate(entity, "the closed polyline has no finite perimeter")
                     })?;
-                let centroid = bulged_ring_centroid(ring.plane, &flat, bulges).ok_or_else(|| {
-                    mass_degenerate(
-                        entity,
-                        "the closed polyline's centroid could not be derived",
-                    )
-                })?;
+                let centroid =
+                    bulged_ring_centroid(ring.plane, &flat, bulges).ok_or_else(|| {
+                        mass_degenerate(
+                            entity,
+                            "the closed polyline's centroid could not be derived",
+                        )
+                    })?;
                 let (min, max) = bulged_ring_bounds(points, bulges, ring.plane);
                 Ok(MassRegion {
                     kind: "closed polyline",
@@ -388,15 +415,34 @@ impl Application {
                     centroid,
                     normal,
                     plane_point: ring.plane.origin,
+                    notes: Vec::new(),
                 })
             }
             SemanticGeometry::Arc { .. } => Err(CadError::InvalidInput(format!(
                 "massprop.arc: entity {} is an ARC (an open curve); MASSPROP needs a closed region",
                 entity.id.0
             ))),
+            SemanticGeometry::Spline {
+                degree,
+                knots,
+                control_points,
+                weights,
+            } => regions::mass_spline_region(
+                entity,
+                *degree,
+                knots,
+                control_points,
+                weights,
+                self.measurement.tolerance.computation_world,
+            ),
+            SemanticGeometry::Hatch(hatch) => regions::mass_hatch_region(
+                entity,
+                hatch,
+                self.measurement.tolerance.computation_world,
+            ),
             other => Err(CadError::Unsupported(format!(
-                "massprop.unsupported_kind: MASSPROP measures closed CIRCLE, full ELLIPSE or closed \
-                 POLYLINE; entity {} is {}",
+                "massprop.unsupported_kind: MASSPROP measures closed CIRCLE, full ELLIPSE, closed \
+                 POLYLINE, closed SPLINE or a HATCH region; entity {} is {}",
                 entity.id.0,
                 geometry_kind(other)
             ))),
@@ -430,162 +476,6 @@ impl Application {
             }
         }
         Ok(())
-    }
-
-    /// `MEASUREGEOM`: route the option that reached the command layer.
-    ///
-    /// The four tool options (`DISTANCE`/`ANGLE`/`AREA`/`POLYLINE`) never travel
-    /// this far: the session turns them into the existing `BeginMeasurement`
-    /// requests. `RADIUS` is the read-only report and `VOLUME` the explicit
-    /// not-implemented refusal. Full contract:
-    /// [`crate::command_id::measuregeom`].
-    pub(crate) fn measure_geom(
-        &mut self,
-        session: &mut SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        match command.payload {
-            CommandPayload::MeasureGeom(MeasureGeomOption::Radius) => {
-                self.measure_geom_radius(session, command)
-            }
-            CommandPayload::MeasureGeom(MeasureGeomOption::Volume) => Err(CadError::Unsupported(
-                "measuregeom.volume_unsupported: MEASUREGEOM VOLUME is not implemented (this build \
-                 has no 3D-solid or volume model); no value is reported"
-                    .into(),
-            )),
-            CommandPayload::MeasureGeom(
-                option @ (MeasureGeomOption::Distance
-                | MeasureGeomOption::Angle
-                | MeasureGeomOption::Area
-                | MeasureGeomOption::Polyline),
-            ) => Err(CadError::InvalidInput(format!(
-                "measuregeom.invalid_payload: {option:?} starts the corresponding measurement tool \
-                 in the session and has no command-layer report"
-            ))),
-            CommandPayload::None => Err(CadError::InvalidInput(
-                "measuregeom.needs_option: MEASUREGEOM needs one of DISTANCE, ANGLE, AREA, \
-                 POLYLINE, RADIUS or VOLUME"
-                    .into(),
-            )),
-            _ => Err(CadError::InvalidInput(
-                "measuregeom.invalid_payload: MEASUREGEOM takes its option as a \
-                 CommandPayload::MeasureGeom value".into(),
-            )),
-        }
-    }
-
-    /// `MEASUREGEOM RADIUS`: report the one selected ARC/CIRCLE's radius family.
-    fn measure_geom_radius(
-        &mut self,
-        session: &mut SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        let references = session.selection.refs();
-        match references {
-            [] => {
-                return Err(CadError::InvalidInput(
-                    "measuregeom.radius.selection_empty: MEASUREGEOM RADIUS needs exactly one \
-                     selected ARC or CIRCLE"
-                        .into(),
-                ));
-            }
-            [_] => {}
-            many => {
-                return Err(CadError::InvalidInput(format!(
-                    "measuregeom.radius.selection_multiple: MEASUREGEOM RADIUS measures one \
-                     ARC/CIRCLE, got {} selected; nothing was measured",
-                    many.len()
-                )));
-            }
-        }
-        let reference = &references[0];
-        if reference.document != command.document {
-            return Err(CadError::InvalidInput(format!(
-                "measuregeom.radius.target_missing: the selected ref for entity {} belongs to \
-                 another document",
-                reference.entity.0
-            )));
-        }
-        if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
-            return Err(CadError::Unsupported(
-                "measuregeom.radius.not_addressable: block-instance members and sub-elements have \
-                 no addressable entity identity"
-                    .into(),
-            ));
-        }
-        let entity = {
-            let document = self
-                .workspace
-                .documents
-                .get(&command.document)
-                .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-            document
-                .drawing
-                .entity(reference.entity)
-                .cloned()
-                .ok_or_else(|| {
-                    CadError::InvalidInput(format!(
-                        "measuregeom.radius.target_missing: entity {} does not exist in this \
-                         drawing",
-                        reference.entity.0
-                    ))
-                })?
-        };
-        let (arc_length, center, radius) = match &entity.geometry {
-            SemanticGeometry::Circle {
-                center,
-                normal: _,
-                radius,
-            } => {
-                validate_radius_entity(&entity, *center, *radius)?;
-                (None, *center, *radius)
-            }
-            SemanticGeometry::Arc {
-                center,
-                normal: _,
-                radius,
-                start: _,
-                sweep,
-            } => {
-                validate_radius_entity(&entity, *center, *radius)?;
-                if !sweep.is_finite() {
-                    return Err(CadError::InvalidInput(format!(
-                        "measuregeom.radius.degenerate: entity {} has a non-finite sweep",
-                        entity.id.0
-                    )));
-                }
-                (Some(radius * sweep.abs()), *center, *radius)
-            }
-            other => {
-                return Err(CadError::Unsupported(format!(
-                    "measuregeom.radius.not_arc_circle: MEASUREGEOM RADIUS measures one ARC or \
-                     CIRCLE; entity {} is {}",
-                    entity.id.0,
-                    geometry_kind(other)
-                )));
-            }
-        };
-        let diameter = 2.0 * radius;
-        let circumference = std::f64::consts::TAU * radius;
-        let arc_note = arc_length
-            .map(|length| format!(" arc_length={length:.6}"))
-            .unwrap_or_default();
-        Ok(CommandOutcome {
-            objects: Vec::new(),
-            changes: None,
-            diagnostics: vec![Diagnostic {
-                object: Some(ObjectId(entity.id.0)),
-                code: "measuregeom.radius".into(),
-                message: format!(
-                    "MEASUREGEOM RADIUS: entity {} centre={} radius={radius:.6} diameter={diameter:.6} \
-                     circumference={circumference:.6}{arc_note}",
-                    entity.id.0,
-                    format_point(center),
-                ),
-            }],
-            measurement: None,
-            point_report: None,
-        })
     }
 }
 
@@ -866,23 +756,6 @@ fn mass_degenerate(entity: &cad_db::DbEntity, reason: &str) -> CadError {
         "massprop.degenerate: entity {} cannot be measured: {reason}",
         entity.id.0
     ))
-}
-
-fn validate_radius_entity(entity: &cad_db::DbEntity, center: Point3, radius: f64) -> CadResult<()> {
-    if !camera::is_finite_point(center) {
-        return Err(CadError::InvalidInput(format!(
-            "measuregeom.radius.degenerate: entity {} has a non-finite centre",
-            entity.id.0
-        )));
-    }
-    if !radius.is_finite() || radius <= 0.0 {
-        return Err(CadError::InvalidInput(format!(
-            "measuregeom.radius.degenerate: entity {} has radius {radius}, which is not a positive \
-             finite length",
-            entity.id.0
-        )));
-    }
-    Ok(())
 }
 
 /// Map one [`AreaError`] from the bulge-aware ring measurement to a **MASSPROP**

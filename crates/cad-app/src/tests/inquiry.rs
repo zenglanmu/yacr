@@ -912,3 +912,58 @@ fn fs_is_allowed_in_viewer_mode() {
         .is_ok());
     assert_eq!(viewer.selection.len(), 3);
 }
+
+#[test]
+fn status_reports_the_current_space_tracked_modes_and_session_counts() {
+    let (mut app, mut session, document) = status_fixture();
+    session.selection = SelectionSet::from_refs([model_ref(document, EntityId(1))]);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(CommandId::Status, CommandPayload::None),
+        )
+        .expect("STATUS is admitted");
+
+    let space = diagnostic(&outcome, "status.current_space")[0];
+    assert!(space.contains("space=Model"), "{space}");
+    assert!(space.contains("units="), "{space}");
+
+    let usage = diagnostic(&outcome, "status.space_usage")[0];
+    assert!(usage.contains("paper-space entities=1"), "{usage}");
+    assert!(usage.contains("Layout1=1"), "the layout is named: {usage}");
+    assert!(usage.contains("block-definition rows=1"), "{usage}");
+
+    // Only layer 0 carries entities in the fixture; the table has five rows.
+    let layer_usage = diagnostic(&outcome, "status.layer_usage")[0];
+    assert!(
+        layer_usage.contains("layers carrying entities=1 of 5"),
+        "{layer_usage}"
+    );
+
+    let modes = diagnostic(&outcome, "status.modes")[0];
+    assert!(modes.contains("pdmode="), "{modes}");
+    assert!(modes.contains("pdsize="), "{modes}");
+    assert!(modes.contains("ltscale="), "{modes}");
+    assert!(modes.contains("measurement=distance"), "{modes}");
+    assert!(modes.contains("backend="), "{modes}");
+    assert!(modes.contains("undo=false"), "{modes}");
+    assert!(modes.contains("redo=false"), "{modes}");
+
+    let selection = diagnostic(&outcome, "status.selection")[0];
+    assert!(selection.contains("selection=1"), "{selection}");
+    assert!(selection.contains("hidden=0"), "{selection}");
+}
+
+#[test]
+fn status_resolves_a_paper_space_current_space_through_the_layout_table() {
+    let (mut app, mut session, _document) = status_fixture();
+    session.active_space = SpaceId::Paper(LayoutId(7));
+    let outcome = app
+        .execute(
+            &mut session,
+            command(CommandId::Status, CommandPayload::None),
+        )
+        .expect("STATUS reports a paper space session");
+    let space = diagnostic(&outcome, "status.current_space")[0];
+    assert!(space.contains("space=Paper(Layout1)"), "{space}");
+}
