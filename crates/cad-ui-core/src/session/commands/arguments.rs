@@ -686,11 +686,12 @@ pub const DASH_LAYER_SELECTOR: &str = "-LAYER";
 ///   spaces, so `NEW A B` is one layer named `A B`. A layer name may not contain
 ///   a comma (the database refuses one), which is what makes the list
 ///   unambiguous;
-/// * `MAKE` / `SET` take the trimmed remainder as the name;
-/// * `RENAME` takes the first whitespace-delimited token as the old name and the
-///   trimmed remainder as the new one;
-/// * `COLOR` / `LTYPE` / `LWEIGHT` / `PLOT` take one value token (no spaces)
-///   followed by the name list.
+/// * `MAKE` / `SET` take the trimmed remainder as the name (a single fully
+///   quoted token is unquoted);
+/// * `RENAME` takes the first token as the old name and the remainder as the
+///   new one; either side may be quoted (`RENAME "OLD NAME" "NEW NAME"`);
+/// * `COLOR` / `LTYPE` / `LWEIGHT` / `PLOT` take one value token followed by the
+///   name list; the value may be quoted (`LTYPE "My Style" WALLS`).
 ///
 /// `COLOR`'s value token is passed through **verbatim**: the command layer
 /// rewrites a bare AutoCAD ACI number (`3`) to the layer grammar's `aci:3` form
@@ -713,11 +714,13 @@ pub fn parse_dash_layer_argument(argument: &str) -> Option<DashLayerOps> {
         "MAKE" | "M" => Some(DashLayerOps::Make(single_name(rest)?)),
         "SET" | "S" => Some(DashLayerOps::Set(single_name(rest)?)),
         "RENAME" | "R" => {
-            let (old, new) = split_value_and_rest(rest)?;
-            Some(DashLayerOps::Rename {
-                old: old.to_string(),
-                new: new.to_string(),
-            })
+            let tokens = split_quoted_tokens(rest)?;
+            if tokens.len() < 2 || tokens[0].is_empty() {
+                return None;
+            }
+            let old = tokens[0].clone();
+            let new = tokens[1..].join(" ");
+            (!new.is_empty()).then_some(DashLayerOps::Rename { old, new })
         }
         "DELETE" | "D" => Some(DashLayerOps::Delete(parse_layer_name_list(rest)?)),
         "ON" => Some(DashLayerOps::On(parse_layer_name_list(rest)?)),
@@ -727,31 +730,31 @@ pub fn parse_dash_layer_argument(argument: &str) -> Option<DashLayerOps> {
         "LOCK" | "LO" => Some(DashLayerOps::Lock(parse_layer_name_list(rest)?)),
         "UNLOCK" | "U" => Some(DashLayerOps::Unlock(parse_layer_name_list(rest)?)),
         "COLOR" | "C" => {
-            let (value, names) = split_value_and_rest(rest)?;
+            let (value, names) = split_quoted_value_and_rest(rest)?;
             Some(DashLayerOps::Color {
-                value: value.to_string(),
-                layers: parse_layer_name_list(names)?,
+                value,
+                layers: parse_layer_name_list(&names)?,
             })
         }
         "LTYPE" | "L" => {
-            let (name, names) = split_value_and_rest(rest)?;
+            let (name, names) = split_quoted_value_and_rest(rest)?;
             Some(DashLayerOps::Linetype {
-                name: name.to_string(),
-                layers: parse_layer_name_list(names)?,
+                name,
+                layers: parse_layer_name_list(&names)?,
             })
         }
         "LWEIGHT" | "LW" => {
-            let (value, names) = split_value_and_rest(rest)?;
+            let (value, names) = split_quoted_value_and_rest(rest)?;
             Some(DashLayerOps::Lineweight {
-                value: value.to_string(),
-                layers: parse_layer_name_list(names)?,
+                value,
+                layers: parse_layer_name_list(&names)?,
             })
         }
         "PLOT" | "P" => {
-            let (value, names) = split_value_and_rest(rest)?;
+            let (value, names) = split_quoted_value_and_rest(rest)?;
             Some(DashLayerOps::Plot {
-                plottable: parse_plottable_value(value)?,
-                layers: parse_layer_name_list(names)?,
+                plottable: parse_plottable_value(&value)?,
+                layers: parse_layer_name_list(&names)?,
             })
         }
         _ => None,
@@ -782,18 +785,36 @@ fn split_keyword(text: &str) -> (&str, &str) {
 }
 
 /// One trimmed non-empty name (the whole remainder, spaces allowed).
+///
+/// A single fully quoted token (`SET "A B"`) is unquoted here; an unquoted
+/// remainder (`SET A B`) is taken verbatim as the one name, exactly as before.
 fn single_name(rest: &str) -> Option<String> {
     let name = rest.trim();
-    (!name.is_empty()).then(|| name.to_string())
+    if name.is_empty() {
+        return None;
+    }
+    if name.starts_with('"') {
+        let tokens = split_quoted_tokens(name)?;
+        if tokens.len() == 1 {
+            return (!tokens[0].is_empty()).then(|| tokens[0].clone());
+        }
+    }
+    Some(name.to_string())
 }
 
-/// Split one whitespace-delimited value token from the non-empty remainder.
-fn split_value_and_rest(rest: &str) -> Option<(&str, &str)> {
-    let rest = rest.trim();
-    let end = rest.find([' ', '\t'])?;
-    let value = &rest[..end];
-    let names = rest[end..].trim();
-    (!value.is_empty() && !names.is_empty()).then_some((value, names))
+/// Split one (optionally quoted) value token from the non-empty name list.
+///
+/// `LTYPE "My Style" WALLS` works because the quoted value keeps its space;
+/// unquoted values keep the historical one-whitespace-token rule. The remainder
+/// is rejoined with single spaces and handed to the comma-list parser.
+fn split_quoted_value_and_rest(rest: &str) -> Option<(String, String)> {
+    let tokens = split_quoted_tokens(rest.trim())?;
+    if tokens.len() < 2 || tokens[0].is_empty() {
+        return None;
+    }
+    let value = tokens[0].clone();
+    let names = tokens[1..].join(" ");
+    (!names.is_empty()).then_some((value, names))
 }
 
 /// One comma-separated layer-name list; entries trimmed, empty entries refused.

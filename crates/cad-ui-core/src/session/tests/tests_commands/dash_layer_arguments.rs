@@ -96,6 +96,11 @@ fn every_documented_option_parses_with_its_short_alias() {
         parse_dash_layer_argument("s  a b  "),
         Some(DashLayerOps::Set("a b".into()))
     );
+    assert_eq!(
+        parse_dash_layer_argument("SET \"A B\""),
+        Some(DashLayerOps::Set("A B".into())),
+        "one fully quoted name is unquoted, not stored with quotes"
+    );
 
     // RENAME: first token is the old name, the trimmed remainder the new one.
     assert_eq!(
@@ -111,6 +116,14 @@ fn every_documented_option_parses_with_its_short_alias() {
             old: "old".into(),
             new: "new walls".into(),
         })
+    );
+    assert_eq!(
+        parse_dash_layer_argument("RENAME \"OLD NAME\" \"NEW NAME\""),
+        Some(DashLayerOps::Rename {
+            old: "OLD NAME".into(),
+            new: "NEW NAME".into(),
+        }),
+        "quoted names keep their spaces"
     );
 
     // Value + list forms.
@@ -142,6 +155,14 @@ fn every_documented_option_parses_with_its_short_alias() {
             name: "dashed".into(),
             layers: names(&["walls", "dims"]),
         })
+    );
+    assert_eq!(
+        parse_dash_layer_argument("LTYPE \"My Style\" WALLS,DIMS"),
+        Some(DashLayerOps::Linetype {
+            name: "My Style".into(),
+            layers: names(&["WALLS", "DIMS"]),
+        }),
+        "a quoted value may contain spaces"
     );
     assert_eq!(
         parse_dash_layer_argument("LWEIGHT 35 WALLS"),

@@ -580,6 +580,24 @@ fn color_accepts_a_bare_aci_and_refuses_bylayer() {
 }
 
 #[test]
+fn color_accepts_the_standard_names() {
+    let (mut app, mut session) = application_with_document();
+    let walls = layer_id(&app, "WALLS").unwrap();
+    dash(
+        &mut app,
+        &mut session,
+        DashLayerOps::Color {
+            value: "red".into(),
+            layers: names(&["WALLS"]),
+        },
+    )
+    .expect("AutoCAD's -LAYER Color prompt accepts the standard names");
+    let color = attributes(&app, walls).color;
+    assert_eq!(color.aci, Some(1), "red is ACI 1");
+    assert_eq!(color.rgb, crate::property_value::rgb_for_aci(1).unwrap());
+}
+
+#[test]
 fn ltype_requires_an_existing_table_entry() {
     let (mut app, mut session) = app_with_linetype();
     let walls = layer_id(&app, "WALLS").unwrap();

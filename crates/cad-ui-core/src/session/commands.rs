@@ -812,15 +812,13 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 ///   `REVERSE`/`R` ([`parse_torient_argument`]);
 /// * [`TCASE_SELECTOR`] (`TCASE`): one case mode ([`parse_tcase_argument`]);
 /// * [`DIMSPACE_SELECTOR`] (`DIMSPACE`): one non-negative finite spacing (`0`
-///   aligns), or no argument for Auto
-///   ([`super::dim_arguments::parse_dimspace_argument`]).
+///   aligns) or Auto ([`super::dim_arguments::parse_dimspace_argument`]).
 ///
 /// PEDIT/HATCHEDIT/MEASUREGEOM take one declared option; the text batch takes
 /// `<H> <V>`, a factor, an edge word, a numbering run or a shape; the layer
-/// batch takes the layer-state/laywalk/ltscale/layerpmode grammars and
-/// `-LAYER`'s write options ([`parse_dash_layer_argument`]). PEDIT, HATCHEDIT,
-/// LAYERSTATE and the layer-batch forms refuse a bare selector by name (never
-/// default an option); see the parsers re-exported from `super::commands`.
+/// batch takes its layer-state/laywalk/ltscale/layerpmode grammars and
+/// `-LAYER`'s write options ([`parse_dash_layer_argument`]); a bare selector is
+/// refused by name, never defaulted.
 pub const ARGUMENT_SELECTORS: &[&str] = &[
     ARGUMENT_SELECTOR,
     SNAPUNIT_SELECTOR,
