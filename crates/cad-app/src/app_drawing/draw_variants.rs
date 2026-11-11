@@ -1,10 +1,21 @@
-//! The 2026-11-07 draw variants: WIPEOUT and `POLYGON CIRCUMSCRIBED`.
+//! The 2026-11-07 draw variants: WIPEOUT, `POLYGON CIRCUMSCRIBED`, and the
+//! **authored-geometry** builders of PLINE/ELLIPSE/SPLINE.
 //!
 //! Split out of `drawing_create.rs` (which is at the file-size ceiling) so both
 //! commands keep their full contracts next to each other. The methods are inherent
 //! methods on [`Application`] in this same crate, so the dispatch in
 //! `drawing_create::drawing_command` and the shared `commit_new_entity` funnel are
 //! unchanged.
+//!
+//! The three builders at the bottom ([`authored_polyline_geometry`],
+//! [`authored_ellipse_geometry`], [`authored_spline_geometry`]) are the single
+//! validation point for the **programmatic** `CommandPayload::Geometry` arm of
+//! PLINE, ELLIPSE and SPLINE. They author the shapes the *interactive* capture
+//! cannot express yet (bulged/closed polylines, ellipse arcs and rotated ellipses,
+//! CV splines of degree 2/3) while refusing — never silently rewriting — every
+//! input outside the modeled 2D domain, with a stable `<selector>.<reason>` code
+//! and no write. The click-capture arms of the same commands are untouched: they
+//! keep their own fixed construction (see `drawing_create`).
 
 use super::*;
 use crate::command_payload::{UtilityPayload, WipeoutPayload};
@@ -258,7 +269,8 @@ impl Application {
     /// Only this circumscribed construction and the existing inscribed
     /// [`Self::create_polygon`] are authored; AutoCAD's `Edge` branch and a numeric
     /// radius that rotates the ring by the snap rotation angle remain **NOT
-    /// IMPLEMENTED**.
+    /// IMPLEMENTED** — no payload field or session channel can request either, so
+    /// both keep their documented refusal-free absence (see `create_polygon`).
     pub(crate) fn create_polygon_circumscribed(
         &mut self,
         session: &SessionState,
@@ -275,6 +287,20 @@ impl Application {
         let tangent_point = *points.get(1).ok_or_else(|| {
             CadError::InvalidInput("CreatePolygonCircumscribed needs a tangent-circle point".into())
         })?;
+        // The construction is exactly two picks. A longer list would be silently
+        // dropped before this guard existed, which is a fabricated success for a
+        // caller who passed more input than the command reads.
+        if points.len() > 2 {
+            return Err(draw_refusal(
+                "polygoncircumscribed",
+                "payload_length",
+                format!(
+                    "the circumscribed construction takes exactly two picks (centre and \
+                     tangent-circle point), got {}",
+                    points.len()
+                ),
+            ));
+        }
         let vertices = crate::draw_tool::circumscribed_polygon_vertices(
             center,
             tangent_point,
@@ -287,6 +313,571 @@ impl Application {
         };
         self.commit_new_entity(session, command, geometry, "create circumscribed polygon")
     }
+
+    /// Insert an ELLIPSE by the axis-endpoint method as one entity.
+    ///
+    /// Payload choice: `Points([p1, p2, p3])` — the two endpoints of the first
+    /// axis and the third pick that gives the other half-axis distance, exactly
+    /// as clicked (the construction input, like `CreateCircle`/`CreateRectangle`).
+    /// The geometry is built by [`crate::draw_tool::ellipse_parameters`] — the
+    /// single construction/validation point shared with the preview — which
+    /// stores the **longer** semi-axis as `major_axis` (`ratio <= 1`) and refuses
+    /// a non-finite, degenerate (coincident first-axis endpoints, or a third pick
+    /// on the first axis) or non-coplanar triple. The click path authors the full
+    /// ellipse (`start = 0`, `sweep = 2π`) on the work-plane `+Z` normal. More than
+    /// three picks is refused (`ellipse.payload_length`): the construction is
+    /// exactly three, and a longer list used to be silently truncated into a full
+    /// ellipse.
+    ///
+    /// The programmatic payload `Geometry(SemanticGeometry::Ellipse { center,
+    /// normal, major_axis, ratio, start, sweep })` authors the **full modeled
+    /// ellipse family** through [`authored_ellipse_geometry`], the single
+    /// validation point:
+    ///
+    /// * **arc mode** — any `start`/`sweep` with `0 < |sweep| < 2π` is an ellipse
+    ///   arc (a negative sweep is the clockwise direction), the same parameters the
+    ///   DXF ELLIPSE entity and the renderer already read;
+    /// * **rotation about the major axis** — representable **faithfully**: DXF
+    ///   expresses a rotation `R` about the major axis as the tilted `normal`
+    ///   (rotated by `R` about `major_axis`) plus the projected ratio
+    ///   `ratio · cos R`, and the orthographic projection of that tilted ellipse is
+    ///   exactly the `+Z` ellipse with the same major axis and `ratio · cos R`
+    ///   (verified in the domain and pinned by
+    ///   `tests/drawing/ellipse.rs::ellipse_rotation_about_the_major_axis_is_the_projection_rule`).
+    ///   So the rotated ellipse is stored as its own frame, never squashed into a
+    ///   fabricated flat ellipse; `R = 90°` collapses the minor axis and is refused
+    ///   as `ellipse.ratio` / `ellipse.sweep` semantics rather than stored.
+    ///
+    /// Every authored refusal (`ellipse.<reason>`) is listed on
+    /// [`authored_ellipse_geometry`] and happens before a transaction is opened.
+    /// The ellipse is committed through the shared [`Self::commit_new_entity`]
+    /// funnel, so it is one entity, one transaction and one undo step, with the
+    /// active-layer check intact.
+    pub(crate) fn create_ellipse(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let geometry = match &command.payload {
+            CommandPayload::Points(points) => {
+                let p1 = *points
+                    .first()
+                    .ok_or_else(|| CadError::InvalidInput("CreateEllipse needs p1".into()))?;
+                let p2 = *points
+                    .get(1)
+                    .ok_or_else(|| CadError::InvalidInput("CreateEllipse needs p2".into()))?;
+                let p3 = *points
+                    .get(2)
+                    .ok_or_else(|| CadError::InvalidInput("CreateEllipse needs p3".into()))?;
+                if points.len() > 3 {
+                    return Err(CadError::InvalidInput(format!(
+                        "ellipse.payload_length: the axis-endpoint construction takes exactly \
+                         three picks (two axis endpoints and one other-axis point); an ellipse \
+                         arc needs the stored start/sweep through a Geometry(Ellipse) payload, \
+                         got {} picks",
+                        points.len()
+                    )));
+                }
+                let frame = crate::draw_tool::ellipse_parameters(p1, p2, p3)?;
+                SemanticGeometry::Ellipse {
+                    center: frame.center,
+                    // The axis-endpoint method is a work-plane construction; a full
+                    // ellipse uses +Z, never a fabricated tilt.
+                    normal: Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 1.0,
+                    },
+                    major_axis: frame.major_axis,
+                    ratio: frame.ratio,
+                    start: 0.0,
+                    sweep: std::f64::consts::TAU,
+                }
+            }
+            CommandPayload::Geometry(geometry) => match geometry.as_ref() {
+                SemanticGeometry::Ellipse {
+                    center,
+                    normal,
+                    major_axis,
+                    ratio,
+                    start,
+                    sweep,
+                } => authored_ellipse_geometry(
+                    *center,
+                    *normal,
+                    *major_axis,
+                    *ratio,
+                    *start,
+                    *sweep,
+                )?,
+                other => {
+                    return Err(CadError::InvalidInput(format!(
+                        "CreateEllipse needs an Ellipse geometry, got {}",
+                        geometry_kind(other)
+                    )));
+                }
+            },
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "CreateEllipse needs a Points([p1, p2, p3]) or Geometry(Ellipse) payload"
+                        .into(),
+                ));
+            }
+        };
+        self.commit_new_entity(session, command, geometry, "create ellipse")
+    }
+
+    /// Draw a SPLINE: the fit-point (interpolating) method or the **CV method**.
+    ///
+    /// The click-capture payload `Points(fit_points)` — the ordered fit points the
+    /// user clicked (the construction input, like `CreateCircle`/`CreatePolygon`) —
+    /// is delegated to [`crate::draw_tool::spline_control_points`], the pure geometry
+    /// core, so the handler never reimplements it: fewer than four fit points, a
+    /// non-finite or non-coplanar `+Z` point, a mismatched payload, and every
+    /// degenerate-chord / numerically singular input the core raises are explicit
+    /// refusals that create nothing. The stored spline is degree 3 with clamped chord
+    /// knots and unit weights (fit points do **not** round-trip: the domain has no
+    /// fit-point field).
+    ///
+    /// The programmatic payload `Geometry(SemanticGeometry::Spline { degree, knots,
+    /// control_points, weights })` authors the **CV (control vertex) method** through
+    /// [`authored_spline_geometry`], the single validation point: the picked control
+    /// points are stored **verbatim** (not interpolated into fit points), with
+    /// **degree 2 or 3**, and the knot vector/weights as given (empty vectors are the
+    /// documented clamped-uniform / all-ones shorthands; the structural relations are
+    /// enforced by the database's one write validator).
+    ///
+    /// Deliberate gaps, refused by absence rather than by a fabricated entity:
+    /// **`Close`** (a periodic closed spline needs a closed flag the domain does not
+    /// model), **`Tangency`** (start/end tangent picks), the **`Knots`**
+    /// parameterization prompt (the fit path is chord, documented) and **`Object`**
+    /// (convert an object into a spline) have no payload field and no session
+    /// parameter in this build, so none can be requested.
+    ///
+    /// Both arms are committed through the shared [`Self::commit_new_entity`]
+    /// funnel: one entity, one transaction, one undo step, active-layer check
+    /// intact.
+    pub(crate) fn create_spline(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let geometry = match &command.payload {
+            CommandPayload::Points(fit_points) => {
+                let (knots, control_points) = crate::draw_tool::spline_control_points(fit_points)?;
+                let weights = vec![1.0; control_points.len()];
+                SemanticGeometry::Spline {
+                    degree: cad_geometry::FIT_SPLINE_DEGREE,
+                    knots,
+                    control_points,
+                    weights,
+                }
+            }
+            CommandPayload::Geometry(geometry) => match geometry.as_ref() {
+                SemanticGeometry::Spline {
+                    degree,
+                    knots,
+                    control_points,
+                    weights,
+                } => authored_spline_geometry(
+                    *degree,
+                    knots.clone(),
+                    control_points.clone(),
+                    weights.clone(),
+                )?,
+                other => {
+                    return Err(CadError::InvalidInput(format!(
+                        "CreateSpline needs a Spline geometry, got {}",
+                        geometry_kind(other)
+                    )));
+                }
+            },
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "CreateSpline needs a Points(fit_points) or Geometry(Spline) payload".into(),
+                ));
+            }
+        };
+        self.commit_new_entity(session, command, geometry, "create spline")
+    }
+}
+
+/// A refused **authored** (programmatic) draw payload: the calling selector plus a
+/// stable reason code.
+///
+/// The create commands' click-capture arms keep their older prose refusals (their
+/// messages are pinned by tests); every new authored-geometry refusal uses this
+/// shape so a caller can branch on `<selector>.<reason>` without parsing a
+/// sentence. Nothing is written, no revision is bumped and no history entry is
+/// recorded — the builders run before any transaction is opened.
+fn draw_refusal(selector: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
+    CadError::InvalidInput(format!("{selector}.{code}: {detail}"))
+}
+
+/// The smallest world separation between two authored polyline vertices that still
+/// counts as a real chord.
+///
+/// Mirrors `drawing_create::MIN_POLYLINE_VERTEX_SEPARATION` (module-private there)
+/// so the click-capture and authored paths agree about what "the same point" means;
+/// a deliberately tiny relative-free epsilon, so only an exactly-degenerate pair is
+/// refused.
+const MIN_AUTHORED_VERTEX_SEPARATION: f64 = 1e-12;
+
+/// The smallest `|bulge|` that is a real arc segment rather than a stored zero.
+///
+/// The same threshold `polyline_curve::PolylineCurve` and the offset/break paths use
+/// to decide "straight", so a polyline authored here cannot disagree with the
+/// readers that consume it.
+const MIN_AUTHORED_BULGE: f64 = 1e-9;
+
+/// Build the polyline a **programmatic** `PLINE` payload authors: arc segments
+/// (stored as bulges) and a closed ring, on top of the click path's straight
+/// segments.
+///
+/// The domain has modeled both since the import path was written —
+/// `SemanticGeometry::Polyline { points, bulges, closed }` is one entity with one
+/// bulge per vertex and an implicit closing segment — so this is the command layer
+/// catching up with the model, not a new field. `bulges[i]` is the **tan(θ/4)** of
+/// the segment from `points[i]` to the next vertex (`> 0` counter-clockwise about
+/// `+Z`, `< 0` clockwise, `0` straight); a closed ring takes the segment from the
+/// last vertex back to the first as its last bulge.
+///
+/// Documented normalisations (lossless, never a shape change):
+///
+/// * a `closed` ring whose last vertex repeats the first drops that redundant
+///   vertex (and its bulge) — the stored convention is the **implicit ring**, the
+///   one `polyline_curve::PolylineCurve` and the WIPEOUT/BOUNDARY creators already
+///   assume, and the repeated vertex carries no geometry;
+/// * an **empty** bulge list means "every segment straight" and is filled with one
+///   `0.0` per vertex, and an open polyline may give one bulge per **segment**
+///   (`n - 1`), in which case the trailing vertex — which has no outgoing segment —
+///   receives the documented `0.0`.
+///
+/// Explicit refusals that create nothing (stable `<selector>.<reason>` codes, never
+/// a silent fix-up or projection):
+///
+/// * `pline.too_few_points` — fewer than two vertices;
+/// * `pline.invalid_point` — a non-finite vertex;
+/// * `pline.non_finite_bulge` — a non-finite bulge;
+/// * `pline.closed_too_few_vertices` — a closed ring with fewer than three
+///   vertices (two vertices would be a doubled segment enclosing nothing);
+/// * `pline.bulge_count` — a bulge list that is neither `n`, `n - 1` (open) nor
+///   empty;
+/// * `pline.degenerate` — fewer than two **distinct** vertices;
+/// * `pline.bulged_non_planar` (`Unsupported`) — a bulged polyline off one `+Z`
+///   plane: the arc segments are resolved on the work plane, so a tilted ring
+///   cannot be stored faithfully;
+/// * `pline.degenerate_bulge` — a non-zero bulge on a zero-length chord (the arc
+///   has no endpoints to run between).
+///
+/// Deliberate gaps, refused by absence rather than by a fabricated value: **POLYLINE
+/// WIDTH is not modeled** (`SemanticGeometry::Polyline` has no width and this build
+/// does not invent one — `pline.width_unsupported` is the code a future width
+/// channel must use), and **`Undo` of the last vertex** is a capture-state-machine
+/// step, not a command payload, so it cannot be requested here (see the PLINE
+/// handler).
+pub(super) fn authored_polyline_geometry(
+    mut points: Vec<Point3>,
+    mut bulges: Vec<f64>,
+    closed: bool,
+) -> CadResult<SemanticGeometry> {
+    if points.len() < 2 {
+        return Err(draw_refusal(
+            "pline",
+            "too_few_points",
+            format!(
+                "an authored polyline needs at least two vertices, got {}",
+                points.len()
+            ),
+        ));
+    }
+    if !points.iter().all(|point| is_finite_point(*point)) {
+        return Err(draw_refusal(
+            "pline",
+            "invalid_point",
+            "every authored polyline vertex must be finite",
+        ));
+    }
+    if !bulges.iter().all(|bulge| bulge.is_finite()) {
+        return Err(draw_refusal(
+            "pline",
+            "non_finite_bulge",
+            "every authored polyline bulge must be finite",
+        ));
+    }
+    if closed {
+        let last = *points.last().expect("checked non-empty");
+        if distance(points[0], last) <= MIN_AUTHORED_VERTEX_SEPARATION {
+            points.pop();
+            if bulges.len() > points.len() {
+                bulges.pop();
+            }
+        }
+        if points.len() < 3 {
+            return Err(draw_refusal(
+                "pline",
+                "closed_too_few_vertices",
+                format!(
+                    "a closed polyline needs at least three vertices, got {}",
+                    points.len()
+                ),
+            ));
+        }
+    }
+    let segments = if closed {
+        points.len()
+    } else {
+        points.len() - 1
+    };
+    if bulges.is_empty() {
+        bulges = vec![0.0; points.len()];
+    } else if bulges.len() == segments && bulges.len() < points.len() {
+        // One bulge per **segment** on an open polyline: the trailing vertex has no
+        // outgoing segment, so its documented bulge is the straight `0.0`.
+        bulges.push(0.0);
+    }
+    if bulges.len() != points.len() {
+        return Err(draw_refusal(
+            "pline",
+            "bulge_count",
+            format!(
+                "an authored polyline with {} vertices (closed = {closed}) takes one bulge per \
+                 vertex or per segment ({segments}), got {}; a closed polyline's implicit closing \
+                 segment owns the last bulge",
+                points.len(),
+                bulges.len()
+            ),
+        ));
+    }
+    if !points
+        .iter()
+        .any(|point| distance(points[0], *point) > MIN_AUTHORED_VERTEX_SEPARATION)
+    {
+        return Err(draw_refusal(
+            "pline",
+            "degenerate",
+            "an authored polyline needs at least two distinct vertices",
+        ));
+    }
+    if bulges.iter().any(|bulge| bulge.abs() > MIN_AUTHORED_BULGE) {
+        // A bulge is resolved as a circular arc on the work plane (the same
+        // `bulge_arc_geometry(.., +Z)` every reader uses), so an off-plane ring has
+        // no faithful arc segment and is refused rather than flattened.
+        if !cad_geometry::is_xy_parallel(&points) {
+            return Err(CadError::Unsupported(
+                "pline.bulged_non_planar: a bulged polyline must lie in one +Z plane; the arc \
+                 segments are resolved on the work plane"
+                    .into(),
+            ));
+        }
+        for segment in 0..segments {
+            let chord = distance(points[segment], points[(segment + 1) % points.len()]);
+            if bulges[segment].abs() > MIN_AUTHORED_BULGE && chord <= MIN_AUTHORED_VERTEX_SEPARATION
+            {
+                return Err(draw_refusal(
+                    "pline",
+                    "degenerate_bulge",
+                    format!("segment {segment} carries a bulge but its chord has zero length"),
+                ));
+            }
+        }
+    }
+    Ok(SemanticGeometry::Polyline {
+        points,
+        bulges,
+        closed,
+    })
+}
+
+/// Build the ellipse a **programmatic** `ELLIPSE` payload authors: an **ellipse
+/// arc** (`start`/`sweep` shorter than one turn) and an ellipse whose plane is
+/// **rotated about its major axis**.
+///
+/// Both are already in the model, which is why this command can author them without
+/// a new field: `SemanticGeometry::Ellipse { center, normal, major_axis, ratio,
+/// start, sweep }` is the DXF ELLIPSE definition, and DXF expresses a rotation `R`
+/// about the major axis exactly as a tilted `normal` (rotated by `R` about
+/// `major_axis`) plus the projected `ratio' = ratio · cos R`. **Verified against
+/// the domain representation** (pinned by
+/// `tests/drawing/ellipse.rs::ellipse_rotation_about_the_major_axis_is_the_projection_rule`):
+/// for the frame above, the orthographic projection of the tilted ellipse onto the
+/// `+Z` plane is the ellipse with `+Z` normal, the same `major_axis` and
+/// `ratio · cos R` — so the rotated 3D ellipse and its documented 2D projection are
+/// one representable family, not an approximation. `R = 90°` collapses the minor
+/// axis (`ratio · cos R = 0`) and is refused, exactly as AutoCAD's rotation prompt
+/// degenerates to a segment there.
+///
+/// `start`/`sweep` are the stored parameter angles in radians: `0`/`2π` is the full
+/// ellipse (the click path's only construction), any `|sweep| < 2π` is an ellipse
+/// arc, and a **negative** sweep is the clockwise arc (AutoCAD's direction choice).
+///
+/// Explicit refusals that create nothing (`ellipse.<reason>`):
+///
+/// * `ellipse.invalid_frame` — a non-finite centre/normal/major axis, or a
+///   zero-length `normal` (the plane would be undefined);
+/// * `ellipse.axis` — a collapsed `major_axis`;
+/// * `ellipse.ratio` — a non-finite or non-positive `ratio`, or one **greater than
+///   one**: the create path keeps the DXF-legal invariant that the stored major axis
+///   is the longer semi-axis (what [`crate::draw_tool::ellipse_parameters`] always
+///   produces); swapping the axes is the caller's step, never a silent rewrite here;
+/// * `ellipse.frame` — a `normal` parallel to `major_axis` (ambiguous plane);
+/// * `ellipse.sweep` — a non-finite, zero, or larger-than-one-turn sweep (an ellipse
+///   arc covers at most one full turn; `|sweep| == 2π` is the full ellipse).
+pub(super) fn authored_ellipse_geometry(
+    center: Point3,
+    normal: Point3,
+    major_axis: Point3,
+    ratio: f64,
+    start: f64,
+    sweep: f64,
+) -> CadResult<SemanticGeometry> {
+    if !is_finite_point(center) || !is_finite_point(normal) || !is_finite_point(major_axis) {
+        return Err(draw_refusal(
+            "ellipse",
+            "invalid_frame",
+            "the centre, normal and major axis must be finite",
+        ));
+    }
+    let normal_length = cad_geometry::length(normal);
+    if !normal_length.is_finite() || normal_length <= MIN_AUTHORED_VERTEX_SEPARATION {
+        return Err(draw_refusal(
+            "ellipse",
+            "invalid_frame",
+            "the ellipse normal must have a non-zero, finite length",
+        ));
+    }
+    let major_length = cad_geometry::length(major_axis);
+    if !major_length.is_finite() || major_length <= MIN_AUTHORED_VERTEX_SEPARATION {
+        return Err(draw_refusal(
+            "ellipse",
+            "axis",
+            "the ellipse major axis must have a non-zero, finite length",
+        ));
+    }
+    if !ratio.is_finite() || ratio <= 0.0 || ratio > 1.0 {
+        return Err(draw_refusal(
+            "ellipse",
+            "ratio",
+            format!(
+                "the ellipse ratio must be finite and in (0, 1] (the stored major axis is the \
+                 longer semi-axis), got {ratio}"
+            ),
+        ));
+    }
+    // The plane is undefined when the extrusion is parallel to the major axis.
+    let cross = cad_geometry::cross(normal, major_axis);
+    if !cross.x.is_finite() || !cross.y.is_finite() || !cross.z.is_finite() {
+        return Err(draw_refusal(
+            "ellipse",
+            "invalid_frame",
+            "the ellipse frame cross product must be finite",
+        ));
+    }
+    if cad_geometry::length(cross) <= 1e-9 * normal_length * major_length {
+        return Err(draw_refusal(
+            "ellipse",
+            "frame",
+            "the ellipse normal must not be parallel to its major axis",
+        ));
+    }
+    if !start.is_finite() || !sweep.is_finite() {
+        return Err(draw_refusal(
+            "ellipse",
+            "sweep",
+            "the ellipse start angle and sweep must be finite",
+        ));
+    }
+    let tau = std::f64::consts::TAU;
+    if sweep.abs() <= MIN_AUTHORED_BULGE {
+        return Err(draw_refusal(
+            "ellipse",
+            "sweep",
+            "the ellipse sweep must be non-zero; a zero sweep is a point, not an arc",
+        ));
+    }
+    if sweep.abs() > tau + 1e-9 {
+        return Err(draw_refusal(
+            "ellipse",
+            "sweep",
+            format!("an ellipse arc covers at most one full turn (|sweep| <= 2π), got |{sweep}|"),
+        ));
+    }
+    Ok(SemanticGeometry::Ellipse {
+        center,
+        normal,
+        major_axis,
+        ratio,
+        start,
+        sweep,
+    })
+}
+
+/// Build the spline a **programmatic** `SPLINE` payload authors: the **CV (control
+/// vertex) method** with an explicit **degree 2 or 3**.
+///
+/// The click path interpolates fit points into a degree-3 clamped spline
+/// ([`crate::draw_tool::spline_control_points`]); the CV method stores the control
+/// points the user picked **verbatim**, which is exactly what
+/// `SemanticGeometry::Spline { degree, knots, control_points, weights }` is. The
+/// knot vector and the weights are therefore taken as given: an empty `knots` (the
+/// sanctioned clamped-uniform shorthand) and an empty `weights` (all ones) are
+/// accepted, and the structural relations (`knots.len() == n + degree + 1`,
+/// `weights.len() == n`, non-decreasing knots, positive finite weights) are enforced
+/// by the database's one write validator
+/// ([`cad_db::validate_geometry`]) — the same rule for every writer, surfaced
+/// unchanged as this command's error. Nothing is written on any of them.
+///
+/// Degree policy: **2 or 3 only**
+/// (`spline.degree`). Both are what AutoCAD 2026's `Degree` prompt offers for a CV
+/// spline; degree 1 is a polyline's job (`PLINE`), and a higher degree has no
+/// prompt in the modeled domain. At least `degree + 1` control points are required
+/// (`spline.control_points`) and every one must be finite (`spline.invalid_point`) —
+/// stated here rather than left to the database so the refusal names the selector.
+///
+/// Deliberate gaps, refused by absence: **`Close` is not modeled** —
+/// `SemanticGeometry::Spline` has no closed flag (a periodic spline needs wrapped
+/// knots *and* the DXF `70` bit 1, and inventing the second is exactly the
+/// fabricated state this build forbids), so a closed CV spline cannot be requested
+/// and no stable code exists to refuse one; likewise **`Tangency`**, the **`Knots`**
+/// parameterization prompt (the fit path is chord, documented) and **`Object`**
+/// (convert an object to a spline) have no payload field or session channel.
+pub(super) fn authored_spline_geometry(
+    degree: u32,
+    knots: Vec<f64>,
+    control_points: Vec<Point3>,
+    weights: Vec<f64>,
+) -> CadResult<SemanticGeometry> {
+    if degree != 2 && degree != 3 {
+        return Err(draw_refusal(
+            "spline",
+            "degree",
+            format!("a CV spline is degree 2 or 3, got {degree}"),
+        ));
+    }
+    if control_points.len() < degree as usize + 1 {
+        return Err(draw_refusal(
+            "spline",
+            "control_points",
+            format!(
+                "a degree-{degree} spline needs at least {} control points, got {}",
+                degree as usize + 1,
+                control_points.len()
+            ),
+        ));
+    }
+    if !control_points.iter().all(|point| is_finite_point(*point)) {
+        return Err(draw_refusal(
+            "spline",
+            "invalid_point",
+            "every spline control point must be finite",
+        ));
+    }
+    Ok(SemanticGeometry::Spline {
+        degree,
+        knots,
+        control_points,
+        weights,
+    })
 }
 
 /// The smallest XY distance (world units) between two consecutive WIPEOUT

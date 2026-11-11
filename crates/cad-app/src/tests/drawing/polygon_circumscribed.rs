@@ -292,3 +292,28 @@ fn create_polygon_circumscribed_undo_removes_the_ring() {
 fn create_polygon_circumscribed_is_work_only() {
     assert!(CommandId::CreatePolygonCircumscribed.requires_work_mode());
 }
+
+#[test]
+fn create_polygon_circumscribed_refuses_a_third_pick_instead_of_dropping_it() {
+    // The circumscribed construction is exactly two picks (centre + tangent-circle
+    // point). A longer list used to be silently truncated into a tangent ring that
+    // ignored the extra input.
+    let (mut app, mut session) = drawing_app();
+    let rev = revision(&app);
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreatePolygonCircumscribed,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(2.0, 0.0), point(2.0, 2.0)]),
+    )
+    .unwrap_err();
+    match &err {
+        CadError::InvalidInput(message) => assert!(
+            message.starts_with("polygoncircumscribed.payload_length"),
+            "the extra pick must be refused by name: {message}"
+        ),
+        other => panic!("expected an InvalidInput refusal, got {other:?}"),
+    }
+    assert_eq!(revision(&app), rev);
+    assert!(!app.can_undo(&DocumentId(1)));
+}

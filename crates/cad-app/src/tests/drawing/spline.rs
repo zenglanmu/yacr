@@ -252,24 +252,17 @@ fn spline_refuses_non_finite_non_coplanar_and_wrong_payload_without_change() {
         assert!(!app.can_undo(&DocumentId(1)), "{label}");
     }
 
-    // A pre-built `Spline` geometry payload is refused: SPLINE's payload is the
-    // raw fit points, never a second source of truth.
+    // A pre-built geometry of another kind is refused: the fit-point arm takes raw
+    // fit points, and a mismatched geometry is never coerced into a spline.
     let (mut app, mut session) = drawing_app();
     let rev = revision(&app);
     let err = execute(
         &mut app,
         &mut session,
         CommandId::CreateSpline,
-        CommandPayload::Geometry(Box::new(SemanticGeometry::Spline {
-            degree: 3,
-            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-            control_points: vec![
-                point(0.0, 0.0),
-                point(1.0, 0.0),
-                point(2.0, 0.0),
-                point(3.0, 0.0),
-            ],
-            weights: vec![1.0; 4],
+        CommandPayload::Geometry(Box::new(SemanticGeometry::Line {
+            start: point(0.0, 0.0),
+            end: point(1.0, 0.0),
         })),
     )
     .unwrap_err();
@@ -332,6 +325,248 @@ fn create_spline_on_a_missing_layer_is_refused_by_the_shared_funnel() {
     )
     .unwrap_err();
     assert!(matches!(err, CadError::InvalidInput(_)));
+    assert_eq!(revision(&app), rev);
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+// ---------------------------------------------------------------------------
+// The CV (control vertex) method: a programmatic `Geometry(Spline)` payload
+// stores the picked control points verbatim with an explicit degree 2 or 3.
+// ---------------------------------------------------------------------------
+
+/// The stored `(degree, knots, control_points, weights)` of a created spline.
+type StoredSpline = (u32, Vec<f64>, Vec<Point3>, Vec<f64>);
+
+/// Execute one `Geometry(Spline)` payload and return the stored spline.
+fn execute_cv_spline(
+    app: &mut Application,
+    session: &mut SessionState,
+    degree: u32,
+    knots: Vec<f64>,
+    control_points: Vec<Point3>,
+    weights: Vec<f64>,
+) -> CadResult<StoredSpline> {
+    let outcome = execute(
+        app,
+        session,
+        CommandId::CreateSpline,
+        CommandPayload::Geometry(Box::new(SemanticGeometry::Spline {
+            degree,
+            knots,
+            control_points,
+            weights,
+        })),
+    )?;
+    Ok(spline_parts(app, outcome.objects[0]))
+}
+
+#[test]
+fn create_spline_cv_method_stores_the_control_points_verbatim() {
+    // The CV method is the other half of AutoCAD's SPLINE: the picked points are
+    // CONTROL points, not fit points, so they are stored exactly as given (the curve
+    // does not interpolate them). One entity, one transaction, one undo step.
+    let (mut app, mut session) = drawing_app();
+    let before = revision(&app);
+    let control_points = vec![
+        point(0.0, 0.0),
+        point(1.0, 3.0),
+        point(3.0, 3.0),
+        point(4.0, 0.0),
+    ];
+    let (degree, knots, stored, weights) = execute_cv_spline(
+        &mut app,
+        &mut session,
+        3,
+        Vec::new(),
+        control_points.clone(),
+        Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(degree, 3);
+    assert_eq!(stored, control_points, "control points are stored verbatim");
+    assert!(knots.is_empty(), "the clamped-uniform shorthand is kept");
+    assert!(weights.is_empty(), "the all-ones shorthand is kept");
+    let cs = &app.history[&DocumentId(1)];
+    assert_eq!(cs.undo_depth(), 1, "one undo step");
+    assert!(revision(&app).0 > before.0, "one revision bump");
+
+    // One undo removes it exactly.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entities()
+            .filter(|entity| entity.object.type_key == "AcDbSpline")
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn create_spline_cv_method_degree_three_respects_an_explicit_knot_vector() {
+    // An explicit (clamped) knot vector is stored as given and evaluates back to the
+    // end control points at t = 0 / t = 1 — the standard B-spline endpoint
+    // property, which proves the command stored a real NURBS definition rather than
+    // re-interpolating the points.
+    let (mut app, mut session) = drawing_app();
+    let control_points = vec![
+        point(0.0, 0.0),
+        point(1.0, 3.0),
+        point(3.0, 3.0),
+        point(4.0, 1.0),
+        point(5.0, 0.0),
+    ];
+    let knots = vec![0.0, 0.0, 0.0, 0.0, 0.4, 1.0, 1.0, 1.0, 1.0];
+    let (degree, stored_knots, stored, weights) = execute_cv_spline(
+        &mut app,
+        &mut session,
+        3,
+        knots.clone(),
+        control_points.clone(),
+        vec![1.0; control_points.len()],
+    )
+    .unwrap();
+    assert_eq!(degree, 3);
+    assert_eq!(stored_knots, knots, "the knot vector is stored as given");
+    assert_eq!(stored, control_points);
+    assert_eq!(weights, vec![1.0; control_points.len()]);
+
+    let curve =
+        NurbsCurve::new(3, stored.clone(), stored_knots, weights).expect("a valid stored spline");
+    assert!(separation(curve.evaluate(0.0), control_points[0]) < 1e-9);
+    assert!(separation(curve.evaluate(1.0), control_points[4]) < 1e-9);
+    // A CV spline does NOT interpolate its interior control points (unlike the
+    // fit-point method): the curve at a mid knot is elsewhere.
+    let mid = curve.evaluate(0.5);
+    assert!(
+        control_points.iter().all(|cp| separation(mid, *cp) > 1e-6),
+        "a CV spline does not pass through its control polygon: {mid:?}"
+    );
+}
+
+#[test]
+fn create_spline_cv_method_accepts_degree_two() {
+    // Degree 2 is the other value AutoCAD 2026's Degree prompt offers.
+    let (mut app, mut session) = drawing_app();
+    let control_points = vec![point(0.0, 0.0), point(2.0, 2.0), point(4.0, 0.0)];
+    let (degree, knots, stored, _weights) = execute_cv_spline(
+        &mut app,
+        &mut session,
+        2,
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        control_points.clone(),
+        Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(degree, 2);
+    assert_eq!(stored, control_points);
+    assert_eq!(knots.len(), control_points.len() + 3);
+}
+
+#[test]
+fn create_spline_cv_method_refuses_unsupported_degrees_and_short_lists() {
+    // Stable `spline.<reason>` refusals, none of which writes.
+    let cases: &[(&str, &str, u32, Vec<Point3>)] = &[
+        (
+            "degree 1 (a polyline's job)",
+            "spline.degree",
+            1,
+            vec![point(0.0, 0.0), point(1.0, 0.0)],
+        ),
+        (
+            "degree 4 (no prompt in the modeled domain)",
+            "spline.degree",
+            4,
+            vec![
+                point(0.0, 0.0),
+                point(1.0, 0.0),
+                point(2.0, 0.0),
+                point(3.0, 0.0),
+                point(4.0, 0.0),
+            ],
+        ),
+        (
+            "degree 3 with three control points",
+            "spline.control_points",
+            3,
+            vec![point(0.0, 0.0), point(1.0, 0.0), point(2.0, 0.0)],
+        ),
+        (
+            "non-finite control point",
+            "spline.invalid_point",
+            2,
+            vec![point(0.0, 0.0), point(f64::NAN, 1.0), point(2.0, 0.0)],
+        ),
+    ];
+    for (label, code, degree, control_points) in cases {
+        let (mut app, mut session) = drawing_app();
+        let rev = revision(&app);
+        let err = execute(
+            &mut app,
+            &mut session,
+            CommandId::CreateSpline,
+            CommandPayload::Geometry(Box::new(SemanticGeometry::Spline {
+                degree: *degree,
+                knots: Vec::new(),
+                control_points: control_points.clone(),
+                weights: Vec::new(),
+            })),
+        )
+        .unwrap_err();
+        match &err {
+            CadError::InvalidInput(message) => assert!(
+                message.starts_with(code),
+                "{label}: expected {code}, got {message}"
+            ),
+            other => panic!("{label}: expected an InvalidInput refusal, got {other:?}"),
+        }
+        assert_eq!(revision(&app), rev, "{label}: refusal must not write");
+        assert!(!app.can_undo(&DocumentId(1)), "{label}");
+    }
+}
+
+#[test]
+fn create_spline_cv_method_surfaces_the_database_knot_relation_refusal() {
+    // The structural NURBS relations (`knots.len() == n + degree + 1`,
+    // `weights.len() == n`) stay the database write validator's single rule; the
+    // command never pads or repairs them, so the refusal propagates and nothing is
+    // written.
+    let (mut app, mut session) = drawing_app();
+    let rev = revision(&app);
+    let control_points = vec![
+        point(0.0, 0.0),
+        point(1.0, 1.0),
+        point(2.0, 0.0),
+        point(3.0, 1.0),
+    ];
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateSpline,
+        CommandPayload::Geometry(Box::new(SemanticGeometry::Spline {
+            degree: 3,
+            // A degree-3 spline with 4 control points needs 8 knots, not 5.
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0],
+            control_points,
+            weights: vec![1.0; 4],
+        })),
+    )
+    .unwrap_err();
+    let message = match &err {
+        CadError::InvalidInput(message) => message.clone(),
+        CadError::Invariant(message) => message.clone(),
+        other => panic!("expected the database knot relation refusal, got {other:?}"),
+    };
+    assert!(
+        message.contains("spline.knot_count"),
+        "the stable database code must survive: {message}"
+    );
     assert_eq!(revision(&app), rev);
     assert!(!app.can_undo(&DocumentId(1)));
 }

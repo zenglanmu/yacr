@@ -1,4 +1,9 @@
 use super::text_policy::{has_line_break, single_line_newline_error};
+// The authored-geometry validators of PLINE live next to the draw variants so
+// `drawing_create` stays inside the file-size limit; they are the single validation
+// point of the programmatic `Geometry` payload arm. ELLIPSE/SPLINE live there too
+// (`create_ellipse` / `create_spline`).
+use super::draw_variants::authored_polyline_geometry;
 use super::*;
 
 impl Application {
@@ -342,12 +347,33 @@ impl Application {
         self.commit_new_entity(session, command, geometry, "create circle")
     }
 
-    /// Insert an ARC through three points into model space.
+    /// Insert an ARC into model space.
     ///
-    /// Accepts `Points([start, through, end])` (the UI path) or a fully formed
-    /// `Geometry(SemanticGeometry::Arc { .. })` (the programmatic path). The
-    /// circumcircle is a work-plane `+Z` construction; collinear, coincident or
-    /// non-finite points are an explicit refusal that creates nothing.
+    /// The click-capture payload `Points([start, through, end])` (the UI path)
+    /// builds the circumcircle through three points; the circumcircle is a
+    /// work-plane `+Z` construction and collinear, coincident or non-finite points
+    /// are an explicit refusal that creates nothing. More than three picks is
+    /// refused (`arc.payload_length`): the construction is exactly three, and a
+    /// longer list used to be silently truncated into a different arc.
+    ///
+    /// The programmatic payload `Geometry(SemanticGeometry::Arc { center, normal,
+    /// radius, start, sweep })` authors **any** arc of the modeled domain, because
+    /// every AutoCAD construction collapses into that one stored tuple: three-point
+    /// (`start`/`sweep` from the circumcircle), **Start-Center-End** (radius = the
+    /// start↔centre distance, sweep from the two parameter angles),
+    /// **Start-Center-Angle** (the sweep *is* the angle) and
+    /// **Start-End-Angle/Direction** (a negative `sweep` is the clockwise
+    /// direction) are all expressible as `center`/`radius`/`start`/`sweep`, and a
+    /// tilted `normal` is stored verbatim. The database's validated write path owns
+    /// the degenerate-frame refusals (non-finite or zero normal, non-positive
+    /// radius, zero sweep), so the command adds no second rule for them.
+    ///
+    /// Deliberate gap: **`Continue` from the last arc** needs a stored "last arc"
+    /// in the session, and this build has no such state (`SessionState` carries no
+    /// previous-arc frame), so it cannot be requested and is not fabricated from the
+    /// selection. The construction *methods* above exist as geometry, not as
+    /// interactive keyword prompts: the capture state machine in `draw_tool` is
+    /// fixed at three picks, and no payload field selects a different prompt order.
     pub(crate) fn create_arc(
         &mut self,
         session: &SessionState,
@@ -364,6 +390,13 @@ impl Application {
                 let end = *points
                     .get(2)
                     .ok_or_else(|| CadError::InvalidInput("CreateArc needs an end point".into()))?;
+                if points.len() > 3 {
+                    return Err(CadError::InvalidInput(format!(
+                        "arc.payload_length: the three-point construction takes exactly three \
+                         picks (start, on-arc, end), got {}",
+                        points.len()
+                    )));
+                }
                 let parameters = crate::draw_tool::arc_parameters(start, through, end)?;
                 SemanticGeometry::Arc {
                     center: parameters.center,
@@ -409,16 +442,28 @@ impl Application {
         self.commit_new_entity(session, command, geometry, "create arc")
     }
 
-    /// Insert an open LWPOLYLINE through the payload points into model space.
+    /// Insert an LWPOLYLINE through the payload points into model space.
     ///
-    /// Accepts `Points(points)` (the UI/capture path) or a fully formed
-    /// `Geometry(SemanticGeometry::Polyline { .. })` (the programmatic path,
-    /// mirroring `CreateLine`/`CreateArc`). The honest subset is straight
-    /// segments only: one zero bulge per vertex and `closed == false`. Fewer
-    /// than two points, any non-finite point, or fewer than two **distinct**
-    /// vertices (for example all points identical) is an explicit refusal that
-    /// creates nothing — a programmatic closed polyline or one carrying bulges
-    /// is refused rather than silently rewritten to the supported subset.
+    /// The click-capture payload `Points(points)` authors an **open, straight-segment**
+    /// polyline (one zero bulge per vertex, `closed == false`): fewer than two
+    /// points, any non-finite point, or fewer than two **distinct** vertices (for
+    /// example all points identical) is an explicit refusal that creates nothing.
+    ///
+    /// The programmatic payload `Geometry(SemanticGeometry::Polyline { points,
+    /// bulges, closed })` authors the **full modeled polyline**: arc segments with
+    /// the stored bulges and a closed ring, through
+    /// [`authored_polyline_geometry`] — the single validation point, which documents
+    /// every normalisation and every `pline.<reason>` refusal. So PLINE now covers
+    /// AutoCAD's straight segments, its `Arc` segment mode (stored as bulge, exactly
+    /// as the domain and the DXF round trip model it) and its `Close` option.
+    ///
+    /// Deliberate gaps, refused by absence rather than by a fabricated value:
+    /// **`Width`** is not modeled (`SemanticGeometry::Polyline` has no width and this
+    /// build does not add one; `pline.width_unsupported` is the code a future width
+    /// channel must use, and no caller can request a width today), and **`Undo` of
+    /// the last vertex** is a step of the interactive capture state machine
+    /// (`draw_tool`), not a command payload, so it neither exists nor can be
+    /// requested here.
     pub(crate) fn create_polyline(
         &mut self,
         session: &SessionState,
@@ -431,16 +476,7 @@ impl Application {
                     points,
                     bulges,
                     closed,
-                } => {
-                    if *closed || bulges.iter().any(|bulge| bulge.abs() > 0.0) {
-                        return Err(CadError::InvalidInput(
-                            "CreatePolyline authors neither arc segments (bulges) nor closed \
-                             polylines"
-                                .into(),
-                        ));
-                    }
-                    polyline_geometry(points.clone())?
-                }
+                } => authored_polyline_geometry(points.clone(), bulges.clone(), *closed)?,
                 other => {
                     return Err(CadError::InvalidInput(format!(
                         "CreatePolyline needs a Polyline geometry, got {}",
@@ -474,7 +510,19 @@ impl Application {
     /// construction/validation point, and committed through the shared
     /// [`Self::commit_new_entity`] funnel so the rectangle is one entity, one
     /// transaction and one undo step, with the active-layer check (a missing layer
-    /// is refused there) intact.
+    /// is refused there) intact. More than two corners is refused
+    /// (`rectangle.payload_length`) instead of being silently truncated.
+    ///
+    /// Deliberate gaps, refused by absence rather than by a fabricated shape:
+    /// **`Fillet`** and **`Chamfer`** would need per-corner radii/distances,
+    /// **`Rotation`** an angle, and **`Area`/`Dimensions`** a size, and the payload
+    /// is the two clicked corners — there is no payload field, session parameter or
+    /// typed channel that carries any of them (the session tool-parameter store has
+    /// no RECTANG entry), so none can be requested. They are also not silently
+    /// approximated: a rotated or filleted rectangle must be authored as a closed
+    /// polyline with the matching vertices/bulges (PLINE), where the model can
+    /// represent it. **`Width`** stays unmodeled for the same reason it is unmodeled
+    /// for PLINE: `SemanticGeometry::Polyline` has no width.
     pub(crate) fn create_rectangle(
         &mut self,
         session: &SessionState,
@@ -491,62 +539,14 @@ impl Application {
         let corner2 = *points.get(1).ok_or_else(|| {
             CadError::InvalidInput("CreateRectangle needs a second corner point".into())
         })?;
+        if points.len() > 2 {
+            return Err(CadError::InvalidInput(format!(
+                "rectangle.payload_length: RECTANG takes exactly two opposite corners, got {}",
+                points.len()
+            )));
+        }
         let geometry = rectangle_geometry(corner1, corner2)?;
         self.commit_new_entity(session, command, geometry, "create rectangle")
-    }
-
-    /// Insert a full ELLIPSE by the axis-endpoint method as one entity.
-    ///
-    /// Payload choice: `Points([p1, p2, p3])` — the two endpoints of the first
-    /// axis and the third pick that gives the other half-axis distance, exactly
-    /// as clicked (the construction input, like `CreateCircle`/`CreateRectangle`;
-    /// a pre-built `SemanticGeometry::Ellipse` arm would be a second source of
-    /// truth for a caller who already holds the geometry).
-    ///
-    /// The geometry is built by [`crate::draw_tool::ellipse_parameters`] — the
-    /// single construction/validation point shared with the preview — which
-    /// stores the **longer** semi-axis as `major_axis` (`ratio <= 1`) and refuses
-    /// a non-finite, degenerate (coincident first-axis endpoints, or a third pick
-    /// on the first axis) or non-coplanar triple. The ellipse is committed through
-    /// the shared [`Self::commit_new_entity`] funnel, so it is one entity, one
-    /// transaction and one undo step, with the active-layer check intact. Only a
-    /// full ellipse is authored (`start = 0`, `sweep = 2π`); the centre method and
-    /// ellipse arcs are NOT IMPLEMENTED.
-    pub(crate) fn create_ellipse(
-        &mut self,
-        session: &SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        let CommandPayload::Points(points) = &command.payload else {
-            return Err(CadError::InvalidInput(
-                "CreateEllipse needs a Points([p1, p2, p3]) payload".into(),
-            ));
-        };
-        let p1 = *points
-            .first()
-            .ok_or_else(|| CadError::InvalidInput("CreateEllipse needs p1".into()))?;
-        let p2 = *points
-            .get(1)
-            .ok_or_else(|| CadError::InvalidInput("CreateEllipse needs p2".into()))?;
-        let p3 = *points
-            .get(2)
-            .ok_or_else(|| CadError::InvalidInput("CreateEllipse needs p3".into()))?;
-        let frame = crate::draw_tool::ellipse_parameters(p1, p2, p3)?;
-        let geometry = SemanticGeometry::Ellipse {
-            center: frame.center,
-            // The axis-endpoint method is a work-plane construction; a full
-            // ellipse uses +Z, never a fabricated tilt.
-            normal: Point3 {
-                x: 0.0,
-                y: 0.0,
-                z: 1.0,
-            },
-            major_axis: frame.major_axis,
-            ratio: frame.ratio,
-            start: 0.0,
-            sweep: std::f64::consts::TAU,
-        };
-        self.commit_new_entity(session, command, geometry, "create ellipse")
     }
 
     /// Insert a closed regular POLYGON inscribed in the circle through the two
@@ -565,9 +565,19 @@ impl Application {
     /// `2π/n` about `+Z`, and refuses a non-finite, zero-radius, non-coplanar or
     /// out-of-range input. The polygon is committed through the shared
     /// [`Self::commit_new_entity`] funnel, so it is one entity, one transaction
-    /// and one undo step, with the active-layer check intact. Only the inscribed
-    /// (AutoCAD default) construction is authored; the `Edge` branch and the
-    /// circumscribed mode are NOT IMPLEMENTED.
+    /// and one undo step, with the active-layer check intact. More than two picks is
+    /// refused (`polygon.payload_length`) instead of being silently truncated.
+    ///
+    /// Deliberate gaps, refused by absence rather than by a fabricated ring:
+    /// AutoCAD's **`Edge`** method takes the two endpoints of one edge, which is
+    /// indistinguishable from the inscribed construction's centre + radius point on
+    /// a two-pick payload — selecting it needs a mode field that neither the payload
+    /// nor the session carries, so the ring it would produce cannot be requested
+    /// (and must not be guessed). A **numeric radius** rotating the ring by the snap
+    /// rotation angle has no channel either: a typed radius is not a point, and the
+    /// session tool-parameter store's only POLYGON entry is the side count. The
+    /// circumscribed sibling is its own selector
+    /// ([`Self::create_polygon_circumscribed`]).
     pub(crate) fn create_polygon(
         &mut self,
         session: &SessionState,
@@ -584,6 +594,13 @@ impl Application {
         let radius_point = *points
             .get(1)
             .ok_or_else(|| CadError::InvalidInput("CreatePolygon needs a radius point".into()))?;
+        if points.len() > 2 {
+            return Err(CadError::InvalidInput(format!(
+                "polygon.payload_length: the inscribed construction takes exactly two picks \
+                 (centre and radius point), got {}",
+                points.len()
+            )));
+        }
         let vertices =
             crate::draw_tool::polygon_vertices(center, radius_point, session.polygon_sides())?;
         let geometry = SemanticGeometry::Polyline {
@@ -594,20 +611,26 @@ impl Application {
         self.commit_new_entity(session, command, geometry, "create polygon")
     }
 
-    /// Place a single POINT into model space on the session's active layer.
+    /// Place one or more POINTs into model space on the session's active layer.
     ///
-    /// Payload choice: `Points([position])` — the construction input, exactly as
-    /// clicked (like `CreateCircle`/`CreateRectangle`/`CreatePolygon`). Only a
-    /// single point is accepted; a `Geometry` payload or a point list of any other
-    /// length is an explicit refusal that changes nothing. The point is committed
-    /// through the shared [`Self::commit_new_entity`] funnel, so it is one entity,
-    /// one transaction and one undo step, with the active-layer check intact.
+    /// Payload choice: `Points(positions)` — the construction input, exactly as
+    /// clicked (like `CreateCircle`/`CreateRectangle`/`CreatePolygon`). A
+    /// **single** pick is the ordinary POINT; a list of several picks is AutoCAD's
+    /// **`Multiple`** placement and stores one `AcDbPoint` per position in the
+    /// **same** transaction and the **same** undo step, so the whole run is
+    /// all-or-nothing (one non-finite position refuses the batch and writes
+    /// nothing). The interactive capture is still one pick per command
+    /// (`DrawToolKind::Point`'s fixed arity lives in `draw_tool`, outside this
+    /// handler); the repeated-placement contract is the payload's.
     ///
-    /// A single point has **no** coplanarity constraint — it is trivially coplanar
-    /// on the `+Z` plane through itself — so the ADR's "non-coplanar `+Z`" refusal
-    /// is vacuous here rather than a fabricated constraint. AutoCAD documents one
-    /// `Specify a point`; repeat-until-Enter placement is NOT IMPLEMENTED (its
-    /// behaviour is unverified).
+    /// Stable refusals that change nothing: `point.payload_length` for an empty
+    /// list, `point.invalid_point` for a non-finite position, and the shared
+    /// funnel's active-layer check. A `Geometry` payload is refused: POINT's payload
+    /// is the raw click(s), never a second source of truth.
+    ///
+    /// A point has **no** coplanarity constraint — it is trivially coplanar on the
+    /// `+Z` plane through itself — so the ADR's "non-coplanar `+Z`" refusal is
+    /// vacuous here rather than a fabricated constraint.
     pub(crate) fn create_point(
         &mut self,
         session: &SessionState,
@@ -615,63 +638,24 @@ impl Application {
     ) -> CadResult<CommandOutcome> {
         let CommandPayload::Points(points) = &command.payload else {
             return Err(CadError::InvalidInput(
-                "CreatePoint needs a Points([position]) payload".into(),
+                "CreatePoint needs a Points([position, ...]) payload".into(),
             ));
         };
-        if points.len() != 1 {
-            return Err(CadError::InvalidInput(format!(
-                "CreatePoint places exactly one point, got {}",
-                points.len()
-            )));
-        }
-        let position = points[0];
-        if !is_finite_point(position) {
+        if points.is_empty() {
             return Err(CadError::InvalidInput(
-                "CreatePoint position must be finite".into(),
+                "point.payload_length: CreatePoint needs at least one position".into(),
             ));
         }
-        self.commit_new_entity(
-            session,
-            command,
-            SemanticGeometry::Point(position),
-            "create point",
-        )
-    }
-
-    /// Draw a fit-point SPLINE as one `SemanticGeometry::Spline` entity.
-    ///
-    /// Payload choice: `Points(fit_points)` — the ordered fit points the user
-    /// clicked (the construction input, like `CreateCircle`/`CreatePolygon`; a
-    /// pre-built `Spline` geometry would be a second source of truth for a caller
-    /// who already holds the geometry). The interpolation is delegated to
-    /// [`crate::draw_tool::spline_control_points`], the pure geometry core, so the
-    /// handler never reimplements it: fewer than four fit points, a non-finite or
-    /// non-coplanar `+Z` point, a mismatched payload, and every degenerate-chord /
-    /// numerically singular input the core raises are explicit refusals that
-    /// create nothing. The stored spline is degree 3 with clamped chord knots and
-    /// unit weights (fit points do **not** round-trip: the domain has no fit-point
-    /// field). It is committed through the shared [`Self::commit_new_entity`]
-    /// funnel: one entity, one transaction, one undo step, active-layer check
-    /// intact.
-    pub(crate) fn create_spline(
-        &mut self,
-        session: &SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        let CommandPayload::Points(fit_points) = &command.payload else {
+        if !points.iter().all(|position| is_finite_point(*position)) {
             return Err(CadError::InvalidInput(
-                "CreateSpline needs a Points(fit_points) payload".into(),
+                "point.invalid_point: every CreatePoint position must be finite".into(),
             ));
-        };
-        let (knots, control_points) = crate::draw_tool::spline_control_points(fit_points)?;
-        let weights = vec![1.0; control_points.len()];
-        let geometry = SemanticGeometry::Spline {
-            degree: cad_geometry::FIT_SPLINE_DEGREE,
-            knots,
-            control_points,
-            weights,
-        };
-        self.commit_new_entity(session, command, geometry, "create spline")
+        }
+        let geometries = points
+            .iter()
+            .map(|position| SemanticGeometry::Point(*position))
+            .collect();
+        self.commit_new_entities(session, command, geometries, "create point")
     }
 
     /// Insert one single-line TEXT into model space on the session's active layer

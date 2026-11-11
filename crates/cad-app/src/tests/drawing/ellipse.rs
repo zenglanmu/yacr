@@ -219,9 +219,9 @@ fn create_ellipse_refuses_degenerate_and_non_finite_picks_without_change() {
 
 #[test]
 fn create_ellipse_refuses_an_incomplete_pick_list_and_a_wrong_payload() {
-    // Fewer than three picks, and a non-`Points` payload, are explicit refusals
-    // (ELLIPSE's payload is the construction input, like CIRCLE/RECTANG — never a
-    // pre-built geometry).
+    // Fewer than three picks, and a payload of the wrong kind, are explicit
+    // refusals. ELLIPSE's click payload is the axis-endpoint construction input, and
+    // a pre-built geometry of another kind is never coerced into an ellipse.
     let (mut app, mut session) = drawing_app();
     let rev = revision(&app);
     for picks in [
@@ -241,19 +241,344 @@ fn create_ellipse_refuses_an_incomplete_pick_list_and_a_wrong_payload() {
         &mut app,
         &mut session,
         CommandId::CreateEllipse,
-        CommandPayload::Geometry(Box::new(SemanticGeometry::Ellipse {
-            center: point(0.0, 0.0),
-            normal: p3(0.0, 0.0, 1.0),
-            major_axis: point(3.0, 0.0),
-            ratio: 0.5,
-            start: 0.0,
-            sweep: std::f64::consts::TAU,
+        CommandPayload::Geometry(Box::new(SemanticGeometry::Line {
+            start: point(0.0, 0.0),
+            end: point(1.0, 0.0),
         })),
     )
     .unwrap_err();
     assert!(matches!(err, CadError::InvalidInput(_)));
     assert_eq!(revision(&app), rev);
     assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn create_ellipse_refuses_a_fourth_or_fifth_pick_instead_of_dropping_it() {
+    // The axis-endpoint construction is exactly three picks. A longer list used to
+    // be silently truncated into a full ellipse; it is now refused by name, because
+    // "an arc was asked for but a full ellipse was drawn" is a fabricated success.
+    let (mut app, mut session) = drawing_app();
+    let rev = revision(&app);
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateEllipse,
+        CommandPayload::Points(vec![
+            point(-2.0, 0.0),
+            point(2.0, 0.0),
+            point(0.0, 1.0),
+            point(1.0, 1.0),
+        ]),
+    )
+    .unwrap_err();
+    match &err {
+        CadError::InvalidInput(message) => assert!(
+            message.starts_with("ellipse.payload_length"),
+            "the extra pick must be refused by name: {message}"
+        ),
+        other => panic!("expected an InvalidInput refusal, got {other:?}"),
+    }
+    assert_eq!(revision(&app), rev);
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+/// Run one `Geometry(Ellipse)` payload and return the stored
+/// `(center, normal, major_axis, ratio, start, sweep)`.
+fn execute_ellipse_geometry(
+    app: &mut Application,
+    session: &mut SessionState,
+    geometry: SemanticGeometry,
+) -> CadResult<(Point3, Point3, Point3, f64, f64, f64)> {
+    let outcome = execute(
+        app,
+        session,
+        CommandId::CreateEllipse,
+        CommandPayload::Geometry(Box::new(geometry)),
+    )?;
+    let (center, normal, major_axis, ratio, start, sweep) =
+        ellipse_frame_full(app, outcome.objects[0]);
+    Ok((center, normal, major_axis, ratio, start, sweep))
+}
+
+/// Like [`ellipse_frame`] but also returns the stored normal (an authored ellipse
+/// may legitimately be off the `+Z` plane — that is the rotation frame).
+fn ellipse_frame_full(
+    app: &Application,
+    object: ObjectId,
+) -> (Point3, Point3, Point3, f64, f64, f64) {
+    let entity = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(object.0))
+        .expect("the ellipse entity");
+    assert_eq!(entity.layer, LayerId(0));
+    assert_eq!(entity.space, SpaceId::Model);
+    assert_eq!(entity.object.type_key, "AcDbEllipse");
+    match &entity.geometry {
+        SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => (*center, *normal, *major_axis, *ratio, *start, *sweep),
+        other => panic!("expected an ellipse, got {other:?}"),
+    }
+}
+
+#[test]
+fn create_ellipse_arc_mode_stores_the_requested_parameter_span() {
+    // ELLIPSE arc mode: the same stored frame as the full ellipse, with a `start`
+    // and a `sweep` shorter than one turn. A negative sweep is the clockwise
+    // direction and is stored verbatim (never normalised away).
+    let (mut app, mut session) = drawing_app();
+    let before = revision(&app);
+    let (center, normal, major_axis, ratio, start, sweep) = execute_ellipse_geometry(
+        &mut app,
+        &mut session,
+        SemanticGeometry::Ellipse {
+            center: point(1.0, 2.0),
+            normal: p3(0.0, 0.0, 1.0),
+            major_axis: point(4.0, 0.0),
+            ratio: 0.5,
+            start: std::f64::consts::FRAC_PI_4,
+            sweep: std::f64::consts::FRAC_PI_2,
+        },
+    )
+    .unwrap();
+    assert_eq!(center, point(1.0, 2.0));
+    assert_eq!(normal, p3(0.0, 0.0, 1.0));
+    assert_eq!(major_axis, point(4.0, 0.0));
+    assert_close(ratio, 0.5);
+    assert_close(start, std::f64::consts::FRAC_PI_4);
+    assert_close(sweep, std::f64::consts::FRAC_PI_2);
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1, "one undo step");
+    assert!(revision(&app).0 > before.0, "one revision bump");
+
+    // The clockwise arc keeps its sign.
+    let (.., start, sweep) = execute_ellipse_geometry(
+        &mut app,
+        &mut session,
+        SemanticGeometry::Ellipse {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            major_axis: point(2.0, 0.0),
+            ratio: 0.25,
+            start: 0.0,
+            sweep: -std::f64::consts::FRAC_PI_3,
+        },
+    )
+    .unwrap();
+    assert_close(start, 0.0);
+    assert_close(sweep, -std::f64::consts::FRAC_PI_3);
+}
+
+#[test]
+fn ellipse_rotation_about_the_major_axis_is_the_projection_rule() {
+    // Rotation `R` about the major axis: DXF stores the rotated ellipse as a tilted
+    // extrusion plus the projected ratio, so the *orthographic projection* of the
+    // tilted ellipse onto the `+Z` plane must be exactly the `+Z` ellipse with the
+    // same major axis and `ratio · cos R`. This pins the claim the command
+    // documents (the rotated frame is representable, not squashed):
+    // it samples the stored tilted ellipse and compares it with the projected one.
+    let ratio = 0.6;
+    let major = 3.0;
+    let rotation = 0.7_f64; // radians about the major (+X) axis
+    let (mut app, mut session) = drawing_app();
+    let stored = execute_ellipse_geometry(
+        &mut app,
+        &mut session,
+        SemanticGeometry::Ellipse {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, rotation.sin(), rotation.cos()),
+            major_axis: point(major, 0.0),
+            // The tilted frame keeps the same minor/major relation in 3D; the
+            // projection is what shortens it.
+            ratio,
+            start: 0.0,
+            sweep: std::f64::consts::TAU,
+        },
+    )
+    .unwrap();
+    let (center, normal, major_axis, stored_ratio, ..) = stored;
+    assert_close(stored_ratio, ratio);
+    assert_close(normal.y, rotation.sin());
+    assert_close(normal.z, rotation.cos());
+
+    // 3D points of the stored (tilted) ellipse, and their `+Z` projection.
+    let minor_dir = {
+        // cross(normal, major_axis) normalised: the ellipse's own minor direction.
+        let cross = (
+            normal.y * major_axis.z - normal.z * major_axis.y,
+            normal.z * major_axis.x - normal.x * major_axis.z,
+            normal.x * major_axis.y - normal.y * major_axis.x,
+        );
+        let len = (cross.0 * cross.0 + cross.1 * cross.1 + cross.2 * cross.2).sqrt();
+        (cross.0 / len, cross.1 / len, cross.2 / len)
+    };
+    let minor = major * ratio;
+    let projected_ratio = ratio * rotation.cos();
+    let mut tilted_off_plane = false;
+    for step in 0..16 {
+        let t = std::f64::consts::TAU * step as f64 / 16.0;
+        let (sin, cos) = t.sin_cos();
+        let point_3d = (
+            center.x + major_axis.x * cos + minor_dir.0 * minor * sin,
+            center.y + major_axis.y * cos + minor_dir.1 * minor * sin,
+            center.z + major_axis.z * cos + minor_dir.2 * minor * sin,
+        );
+        // The projected ellipse: +Z normal, same major axis, ratio · cos R.
+        let expected = (
+            center.x + major * cos,
+            center.y + major * projected_ratio * sin,
+        );
+        // Orthographic projection onto the +Z plane drops z; x/y must be the flat
+        // ellipse with the shortened minor axis.
+        assert_close(point_3d.0, expected.0);
+        assert_close(point_3d.1, expected.1);
+        if point_3d.2.abs() > 1e-9 {
+            tilted_off_plane = true;
+        }
+    }
+    assert!(
+        tilted_off_plane,
+        "the rotated ellipse really leaves the +Z plane (it is not pre-flattened)"
+    );
+}
+
+#[test]
+fn create_ellipse_refuses_an_unrepresentable_authored_frame_without_change() {
+    // Every authored refusal is named `ellipse.<reason>` and writes nothing.
+    let cases: &[(&str, &str, SemanticGeometry)] = &[
+        (
+            "ratio above one (the stored major axis must be the longer semi-axis)",
+            "ellipse.ratio",
+            SemanticGeometry::Ellipse {
+                center: point(0.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                major_axis: point(2.0, 0.0),
+                ratio: 2.0,
+                start: 0.0,
+                sweep: std::f64::consts::TAU,
+            },
+        ),
+        (
+            "zero ratio (rotated by 90° about the major axis)",
+            "ellipse.ratio",
+            SemanticGeometry::Ellipse {
+                center: point(0.0, 0.0),
+                normal: p3(0.0, 1.0, 0.0),
+                major_axis: point(2.0, 0.0),
+                ratio: 0.0,
+                start: 0.0,
+                sweep: std::f64::consts::TAU,
+            },
+        ),
+        (
+            "zero sweep",
+            "ellipse.sweep",
+            SemanticGeometry::Ellipse {
+                center: point(0.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                major_axis: point(2.0, 0.0),
+                ratio: 0.5,
+                start: 0.0,
+                sweep: 0.0,
+            },
+        ),
+        (
+            "sweep beyond one turn",
+            "ellipse.sweep",
+            SemanticGeometry::Ellipse {
+                center: point(0.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                major_axis: point(2.0, 0.0),
+                ratio: 0.5,
+                start: 0.0,
+                sweep: 5.0 * std::f64::consts::PI,
+            },
+        ),
+        (
+            "non-finite start",
+            "ellipse.sweep",
+            SemanticGeometry::Ellipse {
+                center: point(0.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                major_axis: point(2.0, 0.0),
+                ratio: 0.5,
+                start: f64::NAN,
+                sweep: 1.0,
+            },
+        ),
+        (
+            "normal parallel to the major axis",
+            "ellipse.frame",
+            SemanticGeometry::Ellipse {
+                center: point(0.0, 0.0),
+                normal: p3(1.0, 0.0, 0.0),
+                major_axis: point(2.0, 0.0),
+                ratio: 0.5,
+                start: 0.0,
+                sweep: 1.0,
+            },
+        ),
+        (
+            "collapsed major axis",
+            "ellipse.axis",
+            SemanticGeometry::Ellipse {
+                center: point(0.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                major_axis: point(0.0, 0.0),
+                ratio: 0.5,
+                start: 0.0,
+                sweep: 1.0,
+            },
+        ),
+        (
+            "zero-length normal",
+            "ellipse.invalid_frame",
+            SemanticGeometry::Ellipse {
+                center: point(0.0, 0.0),
+                normal: point(0.0, 0.0),
+                major_axis: point(2.0, 0.0),
+                ratio: 0.5,
+                start: 0.0,
+                sweep: 1.0,
+            },
+        ),
+        (
+            "non-finite centre",
+            "ellipse.invalid_frame",
+            SemanticGeometry::Ellipse {
+                center: p3(0.0, f64::INFINITY, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                major_axis: point(2.0, 0.0),
+                ratio: 0.5,
+                start: 0.0,
+                sweep: 1.0,
+            },
+        ),
+    ];
+    for (label, code, geometry) in cases {
+        let (mut app, mut session) = drawing_app();
+        let rev = revision(&app);
+        let err = execute(
+            &mut app,
+            &mut session,
+            CommandId::CreateEllipse,
+            CommandPayload::Geometry(Box::new(geometry.clone())),
+        )
+        .unwrap_err();
+        match &err {
+            CadError::InvalidInput(message) => assert!(
+                message.starts_with(code),
+                "{label}: expected {code}, got {message}"
+            ),
+            other => panic!("{label}: expected an InvalidInput refusal, got {other:?}"),
+        }
+        assert_eq!(revision(&app), rev, "{label}: refusal must not write");
+        assert!(!app.can_undo(&DocumentId(1)), "{label}");
+    }
 }
 
 #[test]

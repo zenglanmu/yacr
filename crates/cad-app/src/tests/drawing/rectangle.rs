@@ -282,3 +282,28 @@ fn create_rectangle_on_a_missing_layer_is_refused_by_the_shared_funnel() {
     assert_eq!(revision(&app), rev);
     assert!(!app.can_undo(&DocumentId(1)));
 }
+
+#[test]
+fn create_rectangle_refuses_a_third_corner_instead_of_dropping_it() {
+    // The construction is exactly two opposite corners. A longer click list used to be
+    // silently truncated into the first two, which is a fabricated rectangle for a
+    // caller who passed more input (for example a rotation or dimension pick).
+    let (mut app, mut session) = drawing_app();
+    let rev = revision(&app);
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateRectangle,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(4.0, 3.0), point(9.0, 9.0)]),
+    )
+    .unwrap_err();
+    match &err {
+        CadError::InvalidInput(message) => assert!(
+            message.starts_with("rectangle.payload_length"),
+            "the extra corner must be refused by name: {message}"
+        ),
+        other => panic!("expected an InvalidInput refusal, got {other:?}"),
+    }
+    assert_eq!(revision(&app), rev);
+    assert!(!app.can_undo(&DocumentId(1)));
+}

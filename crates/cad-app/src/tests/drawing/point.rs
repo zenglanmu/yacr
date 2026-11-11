@@ -1,10 +1,14 @@
 //! POINT create-command contract tests (ADR 0015 decision A/E, P3c).
 //!
-//! The single click becomes **one `SemanticGeometry::Point`** in one transaction
-//! and one undo step, with explicit refusals (a non-finite position, a mismatched
-//! payload, a missing active layer) that change nothing. A single point has no
-//! coplanarity constraint, so the ADR's "non-coplanar `+Z`" refusal is vacuous
-//! here; the last test documents that rather than fabricating a constraint.
+//! Each click becomes **one `SemanticGeometry::Point`** in one transaction and one
+//! undo step, with explicit refusals (a non-finite position, an empty point list, a
+//! mismatched payload, a missing active layer) that change nothing. A point has no
+//! coplanarity constraint, so the ADR's "non-coplanar `+Z`" refusal is vacuous here;
+//! the last test documents that rather than fabricating a constraint.
+//!
+//! A **multiple** pick list is AutoCAD's `POINT` → `Multiple` repeated placement: it
+//! stores one `AcDbPoint` per pick in the **same** transaction and the **same** undo
+//! step, and refuses the whole batch if any position is non-finite.
 
 use super::*;
 
@@ -85,7 +89,7 @@ fn create_point_refuses_non_finite_and_wrong_payload_without_change() {
     )
     .unwrap_err();
     assert!(matches!(err, CadError::InvalidInput(_)), "{err:?}");
-    // An empty point list.
+    // An empty point list: `Multiple` repeats a placement, it does not place none.
     let err = execute(
         &mut app,
         &mut session,
@@ -93,16 +97,13 @@ fn create_point_refuses_non_finite_and_wrong_payload_without_change() {
         CommandPayload::Points(Vec::new()),
     )
     .unwrap_err();
-    assert!(matches!(err, CadError::InvalidInput(_)), "{err:?}");
-    // More than one point (POINT places exactly one).
-    let err = execute(
-        &mut app,
-        &mut session,
-        CommandId::CreatePoint,
-        CommandPayload::Points(vec![point(0.0, 0.0), point(1.0, 1.0)]),
-    )
-    .unwrap_err();
-    assert!(matches!(err, CadError::InvalidInput(_)), "{err:?}");
+    match &err {
+        CadError::InvalidInput(message) => assert!(
+            message.starts_with("point.payload_length"),
+            "the empty list must be refused by name: {message}"
+        ),
+        other => panic!("expected an InvalidInput refusal, got {other:?}"),
+    }
     // A pre-built geometry payload is refused: POINT's payload is the raw click
     // (like CIRCLE/RECTANG/POLYGON), never a second source of truth.
     let err = execute(
@@ -115,6 +116,105 @@ fn create_point_refuses_non_finite_and_wrong_payload_without_change() {
     assert!(matches!(err, CadError::InvalidInput(_)), "{err:?}");
     assert_eq!(revision(&app), rev, "a refused point must not write");
     assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn create_point_multiple_places_every_pick_in_one_transaction_and_one_undo_step() {
+    // POINT `Multiple`: a repeated placement run is ONE command, so it stores one
+    // `AcDbPoint` per pick in one transaction and one undo step — never one history
+    // entry per point, and never a partial run.
+    let (mut app, mut session) = drawing_app();
+    let before = revision(&app);
+    let positions = vec![point(1.0, 2.0), point(-3.5, 0.25), p3(0.0, 7.0, 4.0)];
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreatePoint,
+        CommandPayload::Points(positions.clone()),
+    )
+    .unwrap();
+    assert_eq!(
+        outcome.objects.len(),
+        positions.len(),
+        "one entity per repeated pick"
+    );
+    let cs = outcome.changes.expect("change set");
+    assert_eq!(cs.before, before);
+    assert_eq!(cs.after.0, before.0 + 1, "exactly one revision bump");
+    assert_eq!(
+        cs.changes.len(),
+        positions.len(),
+        "one batch of inserts in one transaction"
+    );
+    for (object, position) in outcome.objects.iter().zip(positions.iter()) {
+        assert_point(&app, *object, *position);
+    }
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1, "one undo step");
+
+    // One undo removes the whole run; one redo restores it.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    for object in &outcome.objects {
+        assert!(app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(object.0))
+            .is_none());
+    }
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    for (object, position) in outcome.objects.iter().zip(positions.iter()) {
+        assert_point(&app, *object, *position);
+    }
+}
+
+#[test]
+fn create_point_multiple_is_all_or_nothing_with_a_non_finite_pick() {
+    // A repeated run with one bad position writes NOTHING: the batch is refused
+    // before the transaction opens, never partially committed.
+    let (mut app, mut session) = drawing_app();
+    let rev = revision(&app);
+    let before_count = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entities()
+        .count();
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreatePoint,
+        CommandPayload::Points(vec![
+            point(0.0, 0.0),
+            point(f64::INFINITY, 1.0),
+            point(2.0, 2.0),
+        ]),
+    )
+    .unwrap_err();
+    match &err {
+        CadError::InvalidInput(message) => assert!(
+            message.starts_with("point.invalid_point"),
+            "the batch refusal must be named: {message}"
+        ),
+        other => panic!("expected an InvalidInput refusal, got {other:?}"),
+    }
+    assert_eq!(revision(&app), rev, "a refused batch must not write");
+    assert!(!app.can_undo(&DocumentId(1)));
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entities()
+            .count(),
+        before_count,
+        "no point of the refused batch was stored"
+    );
 }
 
 #[test]

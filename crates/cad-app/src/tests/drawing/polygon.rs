@@ -225,3 +225,29 @@ fn create_polygon_on_a_missing_layer_is_refused_by_the_shared_funnel() {
     assert_eq!(revision(&app), rev);
     assert!(!app.can_undo(&DocumentId(1)));
 }
+
+#[test]
+fn create_polygon_refuses_a_third_pick_instead_of_dropping_it() {
+    // The inscribed construction is exactly two picks (centre + radius point). A
+    // longer list used to be silently truncated; a third pick can only be an option
+    // this build does not model (an edge endpoint, a numeric radius), so it is
+    // refused by name rather than reinterpreted or dropped.
+    let (mut app, mut session) = drawing_app();
+    let rev = revision(&app);
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreatePolygon,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(2.0, 0.0), point(2.0, 2.0)]),
+    )
+    .unwrap_err();
+    match &err {
+        CadError::InvalidInput(message) => assert!(
+            message.starts_with("polygon.payload_length"),
+            "the extra pick must be refused by name: {message}"
+        ),
+        other => panic!("expected an InvalidInput refusal, got {other:?}"),
+    }
+    assert_eq!(revision(&app), rev);
+    assert!(!app.can_undo(&DocumentId(1)));
+}

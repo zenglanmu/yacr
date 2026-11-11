@@ -432,3 +432,138 @@ fn circle_options_refuse_viewer_mode_without_writing() {
         assert!(!app.can_undo(&DocumentId(1)), "{label}: no undo entry");
     }
 }
+
+// ---------------------------------------------------------------------------
+// ARC: the alternate construction methods and the payload-length contract. ARC
+// shares the circumcircle helper with `CIRCLE 3P`, so its tests live here.
+// ---------------------------------------------------------------------------
+
+/// The stored `(center, normal, radius, start, sweep)` of one created arc.
+fn stored_arc(app: &Application, object: ObjectId) -> (Point3, Point3, f64, f64, f64) {
+    let entity = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(object.0))
+        .expect("the created arc");
+    assert_eq!(entity.layer, LayerId(0));
+    assert_eq!(entity.space, SpaceId::Model);
+    assert_eq!(entity.object.type_key, "AcDbArc");
+    match &entity.geometry {
+        SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } => (*center, *normal, *radius, *start, *sweep),
+        other => panic!("expected an arc, got {other:?}"),
+    }
+}
+
+#[test]
+fn create_arc_refuses_a_fourth_pick_instead_of_dropping_it() {
+    // The three-point construction is exactly three picks. A longer list (for example
+    // a start/end angle pair appended to the axis picks) used to be silently
+    // truncated into a different arc.
+    let (mut app, mut session) = drawing_app();
+    let rev = revision(&app);
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateArc,
+        CommandPayload::Points(vec![
+            point(0.0, 0.0),
+            point(1.0, 1.0),
+            point(2.0, 0.0),
+            point(3.0, 1.0),
+        ]),
+    )
+    .unwrap_err();
+    match &err {
+        CadError::InvalidInput(message) => assert!(
+            message.starts_with("arc.payload_length"),
+            "the extra pick must be refused by name: {message}"
+        ),
+        other => panic!("expected an InvalidInput refusal, got {other:?}"),
+    }
+    assert_eq!(revision(&app), rev);
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn create_arc_authored_start_center_end_matches_the_stored_arc_tuple() {
+    // Every AutoCAD construction collapses into the one stored tuple, so a
+    // Start-Center-End arc is authored as the programmatic `Geometry(Arc)` payload:
+    // centre, radius = |start − centre|, and the sweep that runs start → end in the
+    // chosen direction. This pins that contract end to end (one entity, one undo
+    // step) for the construction the three-pick capture cannot express.
+    let (mut app, mut session) = drawing_app();
+    let before = revision(&app);
+    let center = point(0.0, 0.0);
+    let start_point = point(2.0, 0.0);
+    let end_point = point(0.0, 2.0);
+    let radius = 2.0;
+    let start = 0.0_f64;
+    let sweep = std::f64::consts::FRAC_PI_2;
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateArc,
+        CommandPayload::Geometry(Box::new(SemanticGeometry::Arc {
+            center,
+            normal: p3(0.0, 0.0, 1.0),
+            radius,
+            start,
+            sweep,
+        })),
+    )
+    .unwrap();
+    let (stored_center, stored_normal, stored_radius, stored_start, stored_sweep) =
+        stored_arc(&app, outcome.objects[0]);
+    assert_point_close(stored_center, center);
+    assert_eq!(stored_normal, p3(0.0, 0.0, 1.0));
+    assert_close(stored_radius, radius);
+    assert_close(stored_start, start);
+    assert_close(stored_sweep, sweep);
+    // The stored arc's endpoints are the picked start/end points.
+    assert_point_close(
+        point(
+            stored_center.x + stored_radius * stored_start.cos(),
+            stored_center.y + stored_radius * stored_start.sin(),
+        ),
+        start_point,
+    );
+    assert_point_close(
+        point(
+            stored_center.x + stored_radius * (stored_start + stored_sweep).cos(),
+            stored_center.y + stored_radius * (stored_start + stored_sweep).sin(),
+        ),
+        end_point,
+    );
+    assert!(revision(&app).0 > before.0);
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1);
+}
+
+#[test]
+fn create_arc_authored_start_end_direction_keeps_a_negative_sweep() {
+    // The clockwise direction (Start-End-Angle/Direction with the other turning
+    // sense) is the negative sweep; it is stored verbatim, never normalised to a
+    // counter-clockwise arc.
+    let (mut app, mut session) = drawing_app();
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateArc,
+        CommandPayload::Geometry(Box::new(SemanticGeometry::Arc {
+            center: point(1.0, 1.0),
+            normal: p3(0.0, 0.0, 1.0),
+            radius: 3.0,
+            start: std::f64::consts::FRAC_PI_2,
+            sweep: -std::f64::consts::FRAC_PI_4,
+        })),
+    )
+    .unwrap();
+    let (_, _, radius, start, sweep) = stored_arc(&app, outcome.objects[0]);
+    assert_close(radius, 3.0);
+    assert_close(start, std::f64::consts::FRAC_PI_2);
+    assert_close(sweep, -std::f64::consts::FRAC_PI_4);
+}
