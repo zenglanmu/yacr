@@ -504,6 +504,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
+| `-LAYER` | 实现（2026-11-11） | 裸命令/`?` 仍是只读图层表报告；写形式一行一个选项：`NEW\|N`、`MAKE\|M`、`SET\|S`、`RENAME\|R`、`DELETE\|D`、`ON`/`OFF`、`FREEZE\|F`/`THAW\|T`、`LOCK\|LO`/`UNLOCK\|U`、`COLOR\|C`（ACI 数字/七个标准色名/`aci:N`/`#RRGGBB`/`rgb:…`）、`LTYPE\|L`、`LWEIGHT\|LW`、`PLOT\|P`；名单逗号分隔，含空格的值/名称可加双引号；整行原子、一条事务/一步撤销（多行 patch 同一 `DrawingUndoRecord`）；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝，裸报告 Viewer-legal | 逐选项交互重提示属全局范围；多行 patch 仍按 `cad-db` 的 setter 规则每改一行升一次 revision；当前层选择/删除回落是会话状态，不进入层表撤销步；`?` 支持 `*`/`?` 通配符过滤，无匹配报 `layer.no_match` |
 | `LAYMCH` / `-LAYMCH` | 部分实现 | 选择式：第一个选中对象的图层为目标，其余对象移入该层（一条事务/一步撤销）；目标层锁定由 `cad-db` 拒绝 | 无 AutoCAD 的交互 `Select objects`；空选择、<2 个对象、非模型空间/块实例/子图元、任何 payload 按名拒绝 |
 | `LAYMRG` / `-LAYMRG` | 部分实现 | 选择式：把选中对象所在层上的所有实体（模型/图纸/块内）重写到当前层（一条事务/一步撤销），再删除每个源层行 | **声明式偏离**：源层来自选择、目标是当前层，无交互 source/target 提示；当前层与 `0` 层不能作源；层行删除不可撤销（撤销只恢复实体） |
 | `LAYDEL` / `-LAYDEL` | 部分实现 | 选择式：删除选中对象所在层的**模型空间**实体（一条事务/一步撤销），再删除层行 | 图纸空间/块内实体不删除，因此仍有成员的层按 `laydel.layer_in_use` 拒绝；当前层/`0` 层拒绝；层行删除不可撤销 |

@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **67** |
-| 部分实现（有写明的界） | **756** |
+| 完整实现 | **68** |
+| 部分实现（有写明的界） | **755** |
 | **已实现合计（完整 + 部分）** | **823** |
 | 未实现 | **158** |
 
@@ -89,7 +89,9 @@
 > **本轮 100 条（Wave 9–12）已交付**：2D 真实编辑/别名/路由/报告 + 3D/文件扩展的诚实拒绝；全部结论仅 Linux 编译 + 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
 > **2026-11-09 增补（P1 晋升批）**：按 AutoCAD 2026 ENU 帮助页逐条核对后，`ALIGN`、`BREAK`、`DIVIDE`、`SELECTSIMILAR`、`MATCHPROP`、`SETBYLAYER`、`LIST`、`DIMSPACE`、`TORIENT` 九条从**部分实现**晋升为**完整实现**：补齐 1/3 对点 ALIGN（3 对点为平面刚性、不缩放）、椭圆 BREAK、全曲线 DIVIDE + 块对齐、SELECTSIMILAR 默认「图层+类型」与 `Name`/`Object style`、MATCHPROP 的 Text/Dimension/Hatch 特殊组、SETBYLAYER 透明度与 Include blocks、LIST 的纸空间/块空间与样式名、DIMSPACE 的 Auto=2×文字高度/`0` 对齐/角度标注、TORIENT Reverse（本项目扩展）。`LENGTHEN` 补了近端语义、开放多段线/椭圆弧/开放样条与 DY，但**开放样条延长**仍是具名拒绝，故保留**部分实现**。三处实现偏差已按官方语义修正：ALIGN 三对点禁缩放、SELECTSIMILAR 默认集、DIMSPACE Auto 公式。计入 **423 已实现（59 完整 + 364 部分）/ 558 未实现**；全部结论仍只覆盖 Linux 编译与契约测试，GUI/GPU/像素 NOT VERIFIED。
 >
-> **823 已实现（67 完整 + 756 部分）/ 158 未实现**；无未保存修改提示，无多文档。
+> **2026-11-11 增补（Wave 25）**：`-LAYER` 从只读报告晋升为**完整实现**（一行一个选项的写形式：`NEW/N`、`MAKE/M`、`SET/S`、`RENAME/R`、`DELETE/D`、`ON`/`OFF`、`FREEZE/F`/`THAW/T`、`LOCK/LO`/`UNLOCK/U`、`COLOR/C`、`LTYPE/L`、`LWEIGHT/LW`、`PLOT|P`；名单逗号分隔，含空格的值/名称可用双引号；整行原子、一条事务/一步撤销；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝，裸命令/`?` 仍 Viewer-legal）；`ZOOM` 补齐 `OBJECT`/`nX`/图纸空间 `nXP`，仅 `DYNAMIC` 仍具名未实现；DWG 保存选择器在写入前提示实验性/新文件/不覆盖源图（`save.picker_waiting_dwg`）。计入 **823 已实现（68 完整 + 755 部分）/ 158 未实现**；全部结论仅 Linux 编译 + 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
+>
+> **823 已实现（68 完整 + 755 部分）/ 158 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -232,7 +234,7 @@
 | `-INSERTCONTENT` | 部分实现 | 具名拒绝（`-insertcontent.unsupported: this build has no content-palette insertion model`）。 |
 | `-INTERFERE` | 部分实现 | 具名拒绝（`-interfere.unsupported: 3D solids are not modeled, so interference has nothing to compute`）。 |
 | `-LAYDEL` | 部分实现 | `LAYDEL` 的别名，同一实现；实体与层行同一事务/一步撤销。 |
-| `-LAYER` | 部分实现 | 只读图层表报告（名称/可见/off/frozen/locked/当前层，`layer.entry`）；图层增删改名/开关/冻结/锁定等写形式未实现（`layer.report_only`）。 |
+| `-LAYER` | 已实现 | 裸命令/`? [pattern]` 为只读图层表报告（名称/可见/off/frozen/locked/当前层，`layer.entry`；`*`/`?` 通配符过滤，无匹配报 `layer.no_match`）；写形式一行一个选项（大小写不敏感）：`NEW/N`、`MAKE/M`、`SET/S`、`RENAME/R`、`DELETE/D`、`ON`/`OFF`、`FREEZE/F`/`THAW/T`、`LOCK/LO`/`UNLOCK/U`、`COLOR/C`（ACI 数字/七个标准色名/`aci:N`/`#RRGGBB`/`rgb:…`）、`LTYPE/L`、`LWEIGHT/LW`、`PLOT/P Y/N`；名单逗号分隔，含空格的值/名称可用双引号；整行原子（先解析全部名称与值再发布候选库），一条事务/一步撤销（多行 patch 同一 `DrawingUndoRecord`），无变化为 `layer.unchanged` 且不升修订；`MAKE`/`SET` 复用当前层规则（locked/frozen/off 先拒绝），`OFF`/`FREEZE` 对当前层按 `layer.current_*` 拒绝；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝。逐选项交互重提示属全局范围。 |
 | `-LAYMCH` | 部分实现 | `LAYMCH` 的别名，同一实现 |
 | `-LAYMRG` | 部分实现 | `LAYMRG` 的别名，同一实现；实体与层行同一事务/一步撤销。 |
 | `-LINETYPE` | 部分实现 | `LINETYPE` 的别名（同一 `CommandId`/路径）；`LIST` 只读、`SET` 复用 `SETENTITYPROPERTY` |
@@ -1482,7 +1484,7 @@
 | 462 | `LAYCUR` | 部分实现 | Changes the layer property of selected objects to the current layer. | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
 | 463 | `-LAYDEL` | 部分实现 | At the Command prompt, deletes all objects on a layer and purges the layer. | `LAYDEL` 的命令行拼写；实体与层行同一事务/一步撤销。 |
 | 464 | `LAYDEL` | 部分实现 | Deletes all objects on a layer and purges the layer. | 选择式：删除选中对象所在层的模型空间实体 + 层行，同一事务/一步撤销；当前层/0 层/仍有图纸或块内实体的层拒绝（图纸/块内实体仍未纳入） |
-| 465 | `-LAYER` | 部分实现 | Manages layers and layer properties. | 只读图层表报告（名称/可见/off/frozen/locked/当前层，`layer.entry`）；图层增删改名/开关/冻结/锁定等写形式未实现（`layer.report_only`）。 |
+| 465 | `-LAYER` | 已实现 | Manages layers and layer properties. | 裸命令/`? [pattern]` 为只读图层表报告（名称/可见/off/frozen/locked/当前层，`layer.entry`；`*`/`?` 通配符过滤，无匹配报 `layer.no_match`）；写形式一行一个选项（大小写不敏感）：`NEW/N`、`MAKE/M`、`SET/S`、`RENAME/R`、`DELETE/D`、`ON`/`OFF`、`FREEZE/F`/`THAW/T`、`LOCK/LO`/`UNLOCK/U`、`COLOR/C`（ACI 数字/七个标准色名/`aci:N`/`#RRGGBB`/`rgb:…`）、`LTYPE/L`、`LWEIGHT/LW`、`PLOT/P Y/N`；名单逗号分隔，含空格的值/名称可用双引号；整行原子、一条事务/一步撤销；`MAKE`/`SET` 与 `OFF`/`FREEZE` 复用当前层可见性规则；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝。逐选项交互重提示属全局范围。 |
 | 466 | `LAYER` | 已实现 | Manages layers and layer properties. | chrome 本地选择子：打开图层面板 |
 | 467 | `LAYERCLOSE` | 已实现 | Closes the Layer Properties Manager. | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
 | 468 | `LAYERP` | 部分实现 | Undoes the last change or set of changes made to layer settings. | 会话内有界 16 步；不持久化 |
