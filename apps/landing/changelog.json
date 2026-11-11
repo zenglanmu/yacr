@@ -2,6 +2,52 @@
   "generatedFrom": "docs/release-notes",
   "releases": [
     {
+      "version": "v0.1.10",
+      "title": "yacr v0.1.10",
+      "date": "2026-11-11",
+      "url": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.10",
+      "sections": [
+        {
+          "heading": "主题 / Theme",
+          "items": [
+            "标题栏与移动端顶栏新增 sun/moon 切换：深色/浅色即时生效、写入本地偏好并在重启后保持；cad_status.theme 是唯一权威（dom-canvas 的本地缓存不会覆盖原生宿主）。",
+            "浅色主题有完整的界面配色（功能区、面板、状态栏、对话框）。CAD 画布保留图纸里的颜色，浅色背景下近白线条/圆弧/网格/文字改用黑色；饱和色可能仍偏浅——这是显示映射的已知边界，不是自动反色。",
+            "未做：跟随系统主题、浅色主题下的出图/导出背景。"
+          ]
+        },
+        {
+          "heading": "最近图纸 / Recent drawings",
+          "items": [
+            "开始面板列出最近 10 个成功打开的图纸（最新在前、按路径去重），点击即可重开；打开与另存的文件选择器从上次打开图纸的目录开始。",
+            "只有成功打开才记录；失败/取消不记录。Web 载体显式拒绝并返回空列表，不伪造历史。",
+            "紧凑布局（窄窗口/移动端）仍不显示开始面板，因此最近图纸只在桌面宽布局可见。"
+          ]
+        },
+        {
+          "heading": "右侧导航坞 / Right navigation dock",
+          "items": [
+            "ViewCube 与导航栏停靠在绘图区右缘，朝向来自宿主真实相机（3D/2D、正交/透视），随视图实时更新；立方体隐藏时导航栏仍在，2D 视口下也可用。",
+            "NAVBAR、NAVVCUBE、NAVVCUBEDISPLAY 0-3、DISPLAYVIEWCUBEIN2D/3D 都是真实的持久化设置，命令行、界面按钮与 preference.json 三处一致。",
+            "未做：罗盘与边/角目标、切换动画、NAVVCUBE PROPERTIES 对话框（仍按名拒绝）。"
+          ]
+        },
+        {
+          "heading": "修复 / Fixes",
+          "items": [
+            "背景色变化（例如切换主题）现在立即重绘，不再等到下一次平移/缩放才生效。",
+            "NAVBAR/NAVVCUBE/NAVVCUBEDISPLAY/DISPLAYVIEWCUBEIN2D/DISPLAYVIEWCUBEIN3D 这五个界面设置选择子能通过命令门禁真正入队（此前在入队前被拒绝）。"
+          ]
+        },
+        {
+          "heading": "错误报告 / Error reporting",
+          "items": [
+            "运行期错误弹出可复制的详情（消息、位置、堆栈），支持历史前后切换；React 渲染崩溃后弹窗仍然存活，状态栏红字可点开同一条详情。",
+            "浏览器版 wasm panic 走同一个弹窗上报；属性面板默认宽度 220 → 280px（上限 460px）。"
+          ]
+        }
+      ]
+    },
+    {
       "version": "v0.1.9",
       "title": "yacr v0.1.9",
       "date": "2026-11-10",
