@@ -8,7 +8,10 @@
 use super::*;
 
 /// Build a drawing with layer 0 plus the given entities/blocks.
-fn build(entities: Vec<DbEntity>, blocks: Vec<BlockDefinition>) -> (Application, SessionState) {
+pub(super) fn build(
+    entities: Vec<DbEntity>,
+    blocks: Vec<BlockDefinition>,
+) -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -63,7 +66,7 @@ fn ent_in(id: u128, space: SpaceId, geometry: SemanticGeometry, order: i64) -> D
 ///
 /// The viewport is `Viewport::new` (the default plan camera, scale 1), so this
 /// uses the same `world_to_screen` the host uses when it builds the payload.
-fn window(a: Point3, b: Point3) -> [[f64; 2]; 2] {
+pub(super) fn window(a: Point3, b: Point3) -> [[f64; 2]; 2] {
     let vp = Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]);
     let size = vp.logical_size;
     let to_logical = |world: Point3| {
@@ -74,7 +77,7 @@ fn window(a: Point3, b: Point3) -> [[f64; 2]; 2] {
     [to_logical(a), to_logical(b)]
 }
 
-fn stretch(
+pub(super) fn stretch(
     app: &mut Application,
     session: &mut SessionState,
     rect: [[f64; 2]; 2],
@@ -93,20 +96,20 @@ fn stretch(
     )
 }
 
-fn entity_count(app: &Application) -> usize {
+pub(super) fn entity_count(app: &Application) -> usize {
     app.workspace.documents[&DocumentId(1)]
         .drawing
         .entity_count()
 }
 
-fn undo_depth(app: &Application) -> usize {
+pub(super) fn undo_depth(app: &Application) -> usize {
     app.history
         .get(&DocumentId(1))
         .map(|history| history.undo_depth())
         .unwrap_or(0)
 }
 
-fn geometry_of(app: &Application, id: u128) -> SemanticGeometry {
+pub(super) fn geometry_of(app: &Application, id: u128) -> SemanticGeometry {
     app.workspace.documents[&DocumentId(1)]
         .drawing
         .entity(EntityId(id))
@@ -115,7 +118,7 @@ fn geometry_of(app: &Application, id: u128) -> SemanticGeometry {
         .clone()
 }
 
-fn line_of(app: &Application, id: u128) -> (Point3, Point3) {
+pub(super) fn line_of(app: &Application, id: u128) -> (Point3, Point3) {
     match geometry_of(app, id) {
         SemanticGeometry::Line { start, end } => (start, end),
         other => panic!("expected a line, got {other:?}"),
@@ -154,15 +157,15 @@ fn insert_transform(app: &Application, id: u128) -> Transform3 {
     }
 }
 
-fn near(a: Point3, b: Point3) -> bool {
+pub(super) fn near(a: Point3, b: Point3) -> bool {
     (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9 && (a.z - b.z).abs() < 1e-9
 }
 
-fn line(id: u128, start: Point3, end: Point3, order: i64) -> DbEntity {
+pub(super) fn line(id: u128, start: Point3, end: Point3, order: i64) -> DbEntity {
     ent(id, SemanticGeometry::Line { start, end }, order)
 }
 
-fn has_code(outcome: &CommandOutcome, code: &str) -> bool {
+pub(super) fn has_code(outcome: &CommandOutcome, code: &str) -> bool {
     outcome.diagnostics.iter().any(|d| d.code == code)
 }
 

@@ -172,9 +172,9 @@ pub(super) fn stretched_geometry(
         SemanticGeometry::Dimension(dimension) => {
             stretched_dimension(dimension, &inside, &shift).ok_or("dimension_unchanged")
         }
-        // The plan only ever routes the four kinds above (plus DIMENSION) into
-        // `Stretch`; anything else here would be a planning defect, reported
-        // rather than guessed.
+        // The plan only ever routes the kinds above (LINE, POLYLINE, SPLINE, ARC
+        // and DIMENSION) into `Stretch`; anything else here would be a planning
+        // defect, reported rather than guessed.
         _ => Err("not_stretchable"),
     }
 }

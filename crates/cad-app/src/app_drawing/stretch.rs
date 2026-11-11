@@ -26,13 +26,25 @@
 //!   members are never stretched individually;
 //! * `DIMENSION` definition points inside the window move and the display is
 //!   re-synthesized (Autodesk documents dimensions as stretchable);
-//! * `ELLIPSE` and `HATCH` are move-only: a partial enclosure leaves them
-//!   unchanged with a named diagnostic (HATCH is not documented in STRETCH, so it
-//!   is not invented here).
+//! * `ELLIPSE`, `HATCH`, `IMAGE`, `MASK` and `TABLE` are move-only: a partial
+//!   enclosure leaves them unchanged with a named diagnostic (HATCH is not
+//!   documented in STRETCH, so it is not invented here; an image/mask/table has
+//!   no per-vertex model in this build; an ellipse's axes cannot be re-derived
+//!   from one in-window point);
+//! * `POINT`/`SHAPE` are whole-entity kinds in practice: this build's pick box
+//!   for each is the anchor point itself, so the enclosure classifier can only
+//!   return `Full` (the anchor is inside one window ⇒ the entity moves) or
+//!   `Outside`; neither ever reaches a partial branch, and no per-vertex rule is
+//!   invented for them.
 //!
-//! `MULTILEADER` still fails the whole command (its compound display has no
-//! per-vertex semantics). An in-window entity that cannot be handled fails the
-//! whole command and writes nothing; one transaction / one undo step.
+//! `MESH`, `OPAQUE`, `COMPOUND` and `MULTILEADER` still fail the whole command: a
+//! 3D face has no modeled 2D vertex rule, proxy geometry has no semantic form at
+//! all, a compound has no single owner-level edit, and MULTILEADER's
+//! whole-command refusal is the contract this build pins in
+//! `tests/drawing/multileader.rs` (its per-point definition *is* modeled, so the
+//! per-vertex rule is a feasible follow-up, not a missing model). An in-window
+//! entity that cannot be handled fails the whole command and writes nothing; one
+//! transaction / one undo step.
 //!
 //! **UNVERIFIED**: Autodesk documents only that STRETCH does not modify
 //! width/tangency/curve-fit information and does not document a bulge when a
@@ -53,11 +65,12 @@ enum StretchAction {
     /// partially enclosed `INSERT` whose insertion point is inside the window (a
     /// block reference moves rigidly, see the module doc).
     Move,
-    /// Partially enclosed `LINE`/`POLYLINE`/`SPLINE`/`ARC`: move only the
-    /// in-window vertices, control points or arc endpoints.
+    /// Partially enclosed `LINE`/`POLYLINE`/`SPLINE`/`ARC`/`DIMENSION`: move only
+    /// the in-window vertices, control points, endpoints or definition points.
     Stretch,
-    /// Partially enclosed, not stretchable: unchanged plus a diagnostic.
-    Unchanged,
+    /// Partially enclosed, not stretchable: unchanged plus the named diagnostic
+    /// (the stable `drawing.stretch.<reason>` suffix).
+    Unchanged(&'static str),
 }
 
 impl Application {
@@ -280,31 +293,19 @@ impl Application {
             if enclosure == Enclosure::Outside {
                 continue;
             }
-            // MULTILEADER: the whole command still fails, exactly as the pre-P7b
-            // `Compound` did (both partial and full enclosure). It is refused
-            // explicitly by type now that the variant has its own transform arm;
-            // no `Unchanged` arm is added, so STRETCH does not fork by content
-            // type (ADR 0019 decision G).
-            if matches!(&owner_entity.geometry, SemanticGeometry::MultiLeader(_)) {
-                return Err(CadError::Unsupported(
-                    "STRETCH cannot handle MULTILEADER: its display combines leader paths, \
-                     arrowheads, a dogleg and text, so a per-vertex stretch has no defined \
-                     semantics; the whole command is refused (the pre-P7b compound behaviour is \
-                     preserved)"
-                        .into(),
-                ));
-            }
             match enclosure {
                 Enclosure::Full => plan.push((owner, StretchAction::Move)),
                 Enclosure::Partial => match &owner_entity.geometry {
                     // The per-vertex stretchable kinds: LINE and LWPOLYLINE
                     // (including bulge segments, whose stored bulges are kept),
-                    // plus SPLINE (stored control points) and ARC (stored
-                    // start/end points on the unchanged circle).
+                    // plus SPLINE (stored control points), ARC (stored
+                    // start/end points on the unchanged circle) and DIMENSION
+                    // (its definition points).
                     SemanticGeometry::Line { .. }
                     | SemanticGeometry::Polyline { .. }
                     | SemanticGeometry::Spline { .. }
-                    | SemanticGeometry::Arc { .. } => {
+                    | SemanticGeometry::Arc { .. }
+                    | SemanticGeometry::Dimension(_) => {
                         plan.push((owner, StretchAction::Stretch));
                     }
                     // CIRCLE cannot be stretched at all. It moves as a whole only
@@ -320,9 +321,10 @@ impl Application {
                         }
                     }
                     // ELLIPSE cannot be stretched: move-only when fully enclosed,
-                    // unchanged here.
+                    // unchanged here. One in-window point does not determine new
+                    // axes/ratio, so no per-vertex rule is invented.
                     SemanticGeometry::Ellipse { .. } => {
-                        plan.push((owner, StretchAction::Unchanged));
+                        plan.push((owner, StretchAction::Unchanged("ellipse")));
                     }
                     // TEXT/MTEXT follow the **insertion-point** rule: move the whole
                     // run iff its stored anchor (`position`) is inside the crossing
@@ -365,18 +367,49 @@ impl Application {
                     // inside the crossing window moves by the displacement and the
                     // derived display is re-synthesized. Autodesk documents
                     // dimensions as stretchable; see `stretched_dimension`.
-                    SemanticGeometry::Dimension(_) => {
-                        plan.push((owner, StretchAction::Stretch));
-                    }
+                    // (Handled by the per-vertex arm above.)
                     // A hatch follows `compatibility.md`'s existing rule: a
-                    // partial enclosure leaves it unchanged with a diagnostic,
-                    // a full enclosure moves it as a whole (ADR 0018 E).
+                    // partial enclosure leaves it unchanged with exactly one
+                    // diagnostic, and a full enclosure moves it as a whole
+                    // (ADR 0018 E). A hatch is never stretched and never moves on a
+                    // partial enclosure, so it cannot drift silently.
                     SemanticGeometry::Hatch(_) => {
-                        diagnostics.push(stretch_unchanged_diagnostic(owner, "hatch"));
-                        plan.push((owner, StretchAction::Unchanged));
+                        plan.push((owner, StretchAction::Unchanged("hatch")));
                     }
-                    // A kind with no per-vertex edit and no declared move-only
-                    // rule fails the whole command (refusal granularity).
+                    // Raster images, masks and tables have no per-vertex edit in
+                    // this build: move-only, with their own named reason. (Their
+                    // display is derived, so re-deriving it from partly moved
+                    // children would be a fabricated edit.)
+                    SemanticGeometry::Image { .. } => {
+                        plan.push((owner, StretchAction::Unchanged("image")));
+                    }
+                    SemanticGeometry::Mask { .. } => {
+                        plan.push((owner, StretchAction::Unchanged("mask")));
+                    }
+                    SemanticGeometry::Table(_) => {
+                        plan.push((owner, StretchAction::Unchanged("table")));
+                    }
+                    // MULTILEADER still fails the whole command: the per-point
+                    // definition (leader vertices, landing points, text location)
+                    // *is* present in the domain variant, so this is a **contract**
+                    // decision rather than a missing model — the refused-whole
+                    // behaviour is pinned by
+                    // `tests/drawing/multileader.rs::stretch_refuses_a_partially_enclosed_multileader_as_a_whole_command`,
+                    // which lives outside this lane's file fence. Implementing the
+                    // per-point rule is a separate, test-visible change.
+                    SemanticGeometry::MultiLeader(_) => {
+                        return Err(CadError::Unsupported(
+                            "STRETCH cannot handle MULTILEADER: its display combines leader \
+                             paths, arrowheads, a dogleg and text, and the whole-command refusal \
+                             is the contract this build pins; the whole command is refused and \
+                             nothing is written"
+                                .into(),
+                        ));
+                    }
+                    // MESH (a 3D face), OPAQUE (no semantic form) and COMPOUND (no
+                    // single owner-level edit): no per-vertex rule exists, so the
+                    // whole command fails rather than guessing (refusal
+                    // granularity).
                     other => {
                         return Err(CadError::Unsupported(format!(
                             "STRETCH cannot handle {} inside the window",
@@ -438,8 +471,8 @@ impl Application {
                         }
                     }
                 }
-                StretchAction::Unchanged => {
-                    diagnostics.push(stretch_unchanged_diagnostic(owner, "not_stretchable"));
+                StretchAction::Unchanged(reason) => {
+                    diagnostics.push(stretch_unchanged_diagnostic(owner, reason));
                 }
             }
         }
@@ -586,6 +619,36 @@ fn stretch_unchanged_diagnostic(entity: EntityId, reason: &str) -> Diagnostic {
         "text_outside" => format!(
             "STRETCH: text {} crosses the window but its insertion point is outside it; TEXT and \
              MTEXT move only when their insertion point is enclosed, so it is left unchanged",
+            entity.0
+        ),
+        // Move-only kinds: a partial enclosure never edits them, so they cannot
+        // drift or be silently half-moved.
+        "ellipse" => format!(
+            "STRETCH: ellipse {} crosses the window but an ellipse cannot be stretched (one \
+             in-window point does not determine new axes or a ratio); it moves only when fully \
+             enclosed, so it is left unchanged",
+            entity.0
+        ),
+        "hatch" => format!(
+            "STRETCH: hatch {} crosses the window but a HATCH is move-only here (its display is \
+             derived from the boundary loops and the fill); a partial enclosure never moves it, so \
+             it is left unchanged",
+            entity.0
+        ),
+        "image" => format!(
+            "STRETCH: image {} crosses the window but a raster image is move-only (no per-vertex \
+             model); a partial enclosure never moves it, so it is left unchanged",
+            entity.0
+        ),
+        "mask" => format!(
+            "STRETCH: mask {} crosses the window but a mask is move-only (no per-vertex model); a \
+             partial enclosure never moves it, so it is left unchanged",
+            entity.0
+        ),
+        "table" => format!(
+            "STRETCH: table {} crosses the window but a TABLE is move-only (its grid and cells \
+             have no per-vertex stretch rule); a partial enclosure never moves it, so it is left \
+             unchanged",
             entity.0
         ),
         "dimension_unchanged" => format!(

@@ -148,7 +148,10 @@ fn app_with_layers(extra_layer: bool, entities: Vec<DbEntity>) -> (Application, 
 }
 
 /// An app with one model-space entity of the given geometry/type key.
-fn single_app(geometry: SemanticGeometry, type_key: &str) -> (Application, SessionState) {
+pub(super) fn single_app(
+    geometry: SemanticGeometry,
+    type_key: &str,
+) -> (Application, SessionState) {
     app_with_layers(
         false,
         vec![part(1, geometry, LayerId(0), SpaceId::Model, type_key, 0)],
@@ -643,7 +646,7 @@ fn explode_dimension_produces_its_display_children_and_deletes_the_source() {
 }
 
 /// A synthesized dimension's style snapshot for the EXPLODE tests.
-fn dimension_style() -> DimensionStyleValues {
+pub(super) fn dimension_style() -> DimensionStyleValues {
     DimensionStyleValues {
         arrow_size: 2.5,
         ext_offset: 0.625,
@@ -671,7 +674,7 @@ fn dimension_style() -> DimensionStyleValues {
     }
 }
 
-fn dimension_definition() -> DimensionDefinition {
+pub(super) fn dimension_definition() -> DimensionDefinition {
     DimensionDefinition {
         kind: DimensionKind::Aligned,
         points: DimensionPoints::Linear {

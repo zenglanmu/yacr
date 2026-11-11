@@ -1,10 +1,12 @@
 //! Parametric cut resolution shared by TRIM and EXTEND.
 //!
-//! One abstraction over two parameter domains: a LINE uses its own `t ∈ [0, 1]`
-//! span, and an ARC uses `u ∈ [0, 1]` across its own **signed** sweep (a CIRCLE
-//! is an arc with `|sweep| == TAU`, whose parameter space is periodic). TRIM and
-//! EXTEND both convert every boundary intersection into that parameter, so there
-//! is exactly one cut algorithm per domain instead of one per geometry pair.
+//! One abstraction over the parameter domains: a LINE uses its own `t ∈ [0, 1]`
+//! span, an ARC uses `u ∈ [0, 1]` across its own **signed** sweep (a CIRCLE is an
+//! arc with `|sweep| == TAU`, whose parameter space is periodic), and an ELLIPSE
+//! uses `u ∈ [0, 1]` across its own eccentric-angle sweep (a full ELLIPSE is
+//! periodic in exactly the same sense). TRIM and EXTEND both convert every
+//! boundary intersection into that parameter, so there is exactly one cut
+//! algorithm per domain instead of one per geometry pair.
 //!
 //! Cut points come from [`cad_geometry::GeometryEngine::intersect_local`], the
 //! same analytic conic intersection object-snap uses; a bulged LWPOLYLINE
@@ -22,8 +24,9 @@
 //! never a fabricated containment.
 //!
 //! Two bounds keep the result predictable: a periodic target needs two distinct
-//! cuts to leave an arc, and an ARC extends at most **half a turn** (beyond that
-//! the crossing is the opposite end's neighbour reached the long way round).
+//! cuts to leave an arc, and an ARC/ELLIPSE extends at most (but not including) a
+//! **full turn** — the far end follows the target's own signed sweep, so a result
+//! that reached a whole turn would be the closed curve, which has no ends.
 //!
 //! The pick itself is **projected** onto the target ([`TargetCurve::project_param`]):
 //! the desktop host resolves the target with its own pickbox and passes the raw
@@ -32,17 +35,25 @@
 //! to lie on the curve would refuse the very pick the host already resolved. The
 //! only pick refusals left are the genuinely ambiguous ones: a projection that
 //! falls **outside** the target's own span (never silently clamped — that would
-//! decide which piece to keep for the user) and a pick with no radial direction at
-//! all on an ARC/CIRCLE (it lies on the target's own axis).
+//! decide which piece to keep for the user) and a pick with no in-plane direction
+//! at all on an ARC/CIRCLE/ELLIPSE (it lies on the target's own axis or centre).
 //!
 //! Everything here resolves to plain data: the command mutates only after a plan
 //! succeeds, and a plan-level refusal changes nothing.
 
 use super::helpers::normalize_signed;
 use super::trim_boundary::{note_approximation, BoundarySet};
+// The cut-resolution helpers live in the sibling `trim_cuts` module (same
+// behaviour); `norm_tau` is re-exported because BREAK imports it from here.
+pub(super) use super::trim_cuts::norm_tau;
+use super::trim_cuts::{
+    collect_cuts, line_probe, pair_has_no_unique_crossing, periodic_piece, target_frame,
+};
 use super::trim_spline::SplineTarget;
 use super::*;
-use cad_geometry::{add, dot, length, scale, sub, DefaultGeometryEngine, GeometryEngine};
+use cad_geometry::{
+    add, cross, dot, length, normalize, scale, sub, DefaultGeometryEngine, GeometryEngine,
+};
 
 const TAU: f64 = std::f64::consts::TAU;
 
@@ -133,9 +144,26 @@ pub(crate) enum TargetCurve {
         start: f64,
         sweep: f64,
     },
+    /// `u ∈ [0, 1]` from `start` to `start + sweep` on the ellipse
+    /// `(center, normal, major_axis, ratio)`: the point at angle `θ` is
+    /// `center + cos θ·major_axis + sin θ·minor`, with the domain's own minor
+    /// vector `cross(normal_unit, major_unit)·|major_axis|·|ratio|`. A full
+    /// ellipse is `sweep == ±TAU`.
+    ///
+    /// TRIM/EXTEND build this variant (see [`Self::new_trim_extend`]); the other
+    /// [`TargetCurve`] users keep their own kind list, so adding it here cannot
+    /// silently widen BREAK/DIVIDE/LENGTHEN/TREX/EXTRIM.
+    Ellipse {
+        center: Point3,
+        normal: Point3,
+        major_axis: Point3,
+        ratio: f64,
+        start: f64,
+        sweep: f64,
+    },
     /// `u ∈ [0, 1]` across the raw knot domain, from `knots[degree]` to
     /// `knots[n]`. Only TRIM builds this variant; EXTEND refuses a SPLINE by name
-    /// before reaching [`Self::new`] (see
+    /// before reaching [`Self::build`] (see
     /// [`super::trim_spline::no_continuation_semantics`]).
     Spline(SplineTarget),
 }
@@ -148,10 +176,39 @@ impl TargetCurve {
     ///
     /// An ARC whose sweep exceeds one full turn is refused: it has no single
     /// periodic period, so its cuts would fold at the wrong place.
+    ///
+    /// An ELLIPSE is **not** accepted here: this constructor is the shared one for
+    /// every [`TargetCurve`] consumer (BREAK/DIVIDE/LENGTHEN/TREX/EXTRIM), and
+    /// widening their kind list is not part of this lane. TRIM/EXTEND use
+    /// [`Self::new_trim_extend`].
     pub(crate) fn new(
         geometry: &SemanticGeometry,
         command: &str,
         supported: &str,
+    ) -> CadResult<Self> {
+        Self::build(geometry, command, supported, false)
+    }
+
+    /// The TRIM/EXTEND constructor: [`Self::new`] **plus** an `ELLIPSE` (and
+    /// elliptical arc) target.
+    ///
+    /// An ellipse is a genuinely parameterised conic in this domain
+    /// (`center`/`normal`/`major_axis`/`ratio`/`start`/`sweep`), so a cut is a
+    /// parameter value and the kept piece is the same ellipse with a new
+    /// `start`/`sweep` — no refit, no polyline, no new variant.
+    pub(crate) fn new_trim_extend(
+        geometry: &SemanticGeometry,
+        command: &str,
+        supported: &str,
+    ) -> CadResult<Self> {
+        Self::build(geometry, command, supported, true)
+    }
+
+    fn build(
+        geometry: &SemanticGeometry,
+        command: &str,
+        supported: &str,
+        accept_ellipse: bool,
     ) -> CadResult<Self> {
         match geometry {
             SemanticGeometry::Line { start, end } => Ok(Self::Line {
@@ -191,6 +248,34 @@ impl TargetCurve {
                 start: 0.0,
                 sweep: TAU,
             }),
+            SemanticGeometry::Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                start,
+                sweep,
+            } if accept_ellipse => {
+                if !sweep.is_finite() || sweep.abs() > TAU + 1e-9 {
+                    return Err(CadError::Unsupported(format!(
+                        "{command} target ELLIPSE sweep must be at most one full turn, got {sweep}"
+                    )));
+                }
+                if ellipse_frame(*normal, *major_axis, *ratio).is_none() {
+                    return Err(CadError::Unsupported(format!(
+                        "{command} target ELLIPSE is degenerate: its stored major axis or ratio \
+                         has no parameterisation"
+                    )));
+                }
+                Ok(Self::Ellipse {
+                    center: *center,
+                    normal: *normal,
+                    major_axis: *major_axis,
+                    ratio: *ratio,
+                    start: *start,
+                    sweep: *sweep,
+                })
+            }
             SemanticGeometry::Spline {
                 degree,
                 knots,
@@ -210,12 +295,14 @@ impl TargetCurve {
     }
 
     /// A short lowercase label for plan-level messages ("line", "arc", "circle",
-    /// "spline").
+    /// "ellipse", "spline").
     pub(super) fn label(&self) -> &'static str {
         match self {
             Self::Line { .. } => "line",
             Self::Arc { .. } if self.is_periodic() => "circle",
             Self::Arc { .. } => "arc",
+            Self::Ellipse { .. } if self.is_periodic() => "ellipse",
+            Self::Ellipse { .. } => "elliptical arc",
             Self::Spline(_) => "spline",
         }
     }
@@ -226,15 +313,33 @@ impl TargetCurve {
     /// so a closed spline is treated as the open curve its knot domain describes
     /// (its seam is its start/end, not a wrap).
     pub(super) fn is_periodic(&self) -> bool {
-        matches!(self, Self::Arc { sweep, .. } if sweep.abs() >= TAU - 1e-9)
+        matches!(
+            self,
+            Self::Arc { sweep, .. } | Self::Ellipse { sweep, .. }
+                if sweep.abs() >= TAU - 1e-9
+        )
     }
 
     /// The target's world length (chord for a line, arc length for an arc, a
-    /// sampled polyline length for a spline).
+    /// sampled chord length for a spline or an ellipse).
     pub(super) fn length(&self) -> f64 {
         match self {
             Self::Line { start, end } => length(sub(*end, *start)),
             Self::Arc { radius, sweep, .. } => radius * sweep.abs(),
+            // Sampled: an ellipse has no closed-form arc length. It is used only
+            // for the parameter tolerance and the degenerate-span guard, never
+            // reported as a measurement.
+            Self::Ellipse { .. } => {
+                const SEGMENTS: usize = 256;
+                let mut total = 0.0;
+                let mut previous = self.point_at(0.0);
+                for index in 1..=SEGMENTS {
+                    let point = self.point_at(index as f64 / SEGMENTS as f64);
+                    total += length(sub(point, previous));
+                    previous = point;
+                }
+                total
+            }
             Self::Spline(spline) => spline.length(),
         }
     }
@@ -259,14 +364,30 @@ impl TargetCurve {
                 start: *start,
                 sweep: *sweep,
             },
+            Self::Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                start,
+                sweep,
+            } => SemanticGeometry::Ellipse {
+                center: *center,
+                normal: *normal,
+                major_axis: *major_axis,
+                ratio: *ratio,
+                start: *start,
+                sweep: *sweep,
+            },
             // The shorthand-expanded form, so the intersector never has to decide
             // what `knots: []` means: that decision is made once, by the target.
             Self::Spline(spline) => spline.geometry(),
         }
     }
 
-    /// The point at parameter `u` (extrapolated outside `[0, 1]` for a LINE/ARC; a
-    /// SPLINE has no continuation, so it is clamped to the knot domain).
+    /// The point at parameter `u` (extrapolated outside `[0, 1]` for a LINE/ARC/
+    /// ELLIPSE; a SPLINE has no continuation, so it is clamped to the knot
+    /// domain).
     pub(crate) fn point_at(&self, u: f64) -> Point3 {
         match self {
             Self::Line { start, end } => add(*start, scale(sub(*end, *start), u)),
@@ -285,6 +406,21 @@ impl TargetCurve {
                         scale(ax, radius * angle.cos()),
                         scale(ay, radius * angle.sin()),
                     ),
+                )
+            }
+            Self::Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                start,
+                sweep,
+            } => {
+                let angle = start + sweep * u;
+                let minor = ellipse_minor(*normal, *major_axis, *ratio);
+                add(
+                    *center,
+                    add(scale(*major_axis, angle.cos()), scale(minor, angle.sin())),
                 )
             }
             Self::Spline(spline) => spline.point_at(u),
@@ -336,6 +472,33 @@ impl TargetCurve {
                 };
                 Some(raw / sweep)
             }
+            Self::Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                start,
+                sweep,
+            } => {
+                if sweep.abs() <= 1e-12 {
+                    return None;
+                }
+                let normal = normalize(*normal);
+                let v = sub(p, *center);
+                if dot(v, normal).abs() > tol {
+                    return None;
+                }
+                let (major_len, minor_unit, minor_len) =
+                    ellipse_frame(normal, *major_axis, *ratio)?;
+                let major_unit = scale(*major_axis, 1.0 / major_len);
+                let angle = (dot(v, minor_unit) / minor_len).atan2(dot(v, major_unit) / major_len);
+                let raw = if *sweep >= 0.0 {
+                    norm_tau(angle - start)
+                } else {
+                    -norm_tau(start - angle)
+                };
+                Some(raw / sweep)
+            }
             Self::Spline(spline) => spline.param_of(p, tol),
         }
     }
@@ -353,14 +516,17 @@ impl TargetCurve {
     ///   center)` in the target's own plane, i.e. the angle of the in-plane part of
     ///   `pick − center` (its normal component changes the distance, never the
     ///   direction);
+    /// * ELLIPSE: the same in-plane direction read in the ellipse's own
+    ///   `(major, minor)` frame (`atan2` of the two normalised components), which
+    ///   is exactly the eccentric angle the ellipse is parameterised by;
     /// * SPLINE: the nearest point of the curve (the only projection it has). No
     ///   distance bound applies, for the same reason it applies to neither of the
     ///   other two: the pick was already resolved onto this entity by the host.
     ///
     /// The result is **not** clamped or range filtered; [`target_frame`] checks it
     /// against the target's own span. `None` is the one case with no projection at
-    /// all: a degenerate target, or an ARC/CIRCLE pick on the target's own axis
-    /// (a **zero** radial direction).
+    /// all: a degenerate target, or an ARC/CIRCLE/ELLIPSE pick with a **zero**
+    /// in-plane direction (it lies on the target's axis / centre).
     pub(super) fn project_param(&self, pick: Point3, tol: f64) -> Option<f64> {
         match self {
             Self::Line { start, end } => {
@@ -397,6 +563,38 @@ impl TargetCurve {
                 };
                 Some(raw / sweep)
             }
+            Self::Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                start,
+                sweep,
+            } => {
+                if sweep.abs() <= 1e-12 {
+                    return None;
+                }
+                let (major_len, minor_unit, minor_len) =
+                    ellipse_frame(*normal, *major_axis, *ratio)?;
+                let major_unit = scale(*major_axis, 1.0 / major_len);
+                let v = sub(pick, *center);
+                let (major_component, minor_component) = (
+                    dot(v, major_unit) / major_len,
+                    dot(v, minor_unit) / minor_len,
+                );
+                // At the centre there is no in-plane direction to project along:
+                // refuse rather than invent an angle from noise.
+                if major_component.hypot(minor_component) <= tol {
+                    return None;
+                }
+                let angle = minor_component.atan2(major_component);
+                let raw = if *sweep >= 0.0 {
+                    norm_tau(angle - start)
+                } else {
+                    -norm_tau(start - angle)
+                };
+                Some(raw / sweep)
+            }
             Self::Spline(spline) => spline.project_param(pick, tol),
         }
     }
@@ -409,13 +607,13 @@ impl TargetCurve {
     pub(super) fn period(&self) -> Option<f64> {
         match self {
             Self::Line { .. } | Self::Spline(_) => None,
-            Self::Arc { sweep, .. } => Some(TAU / sweep.abs()),
+            Self::Arc { sweep, .. } | Self::Ellipse { sweep, .. } => Some(TAU / sweep.abs()),
         }
     }
 
     /// Rebuild the target as the piece `[u0, u0 + fraction]` of its own span.
     ///
-    /// An arc reuses the target's centre/normal/radius and recomputes
+    /// An arc or an ellipse reuses the target's centre/normal/axes and recomputes
     /// `start`/`sweep`, so the sweep sign is preserved. A spline becomes the exact
     /// sub-curve of the source on that span (same degree, same weights, both ends
     /// clamped); a span that cannot keep `degree + 1` control points is refused by
@@ -439,17 +637,32 @@ impl TargetCurve {
                 start: normalize_signed(start + sweep * u0),
                 sweep: sweep * fraction,
             }),
+            Self::Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                start,
+                sweep,
+            } => Ok(SemanticGeometry::Ellipse {
+                center: *center,
+                normal: *normal,
+                major_axis: *major_axis,
+                ratio: *ratio,
+                start: normalize_signed(start + sweep * u0),
+                sweep: sweep * fraction,
+            }),
             Self::Spline(spline) => spline.with_span(u0, fraction),
         }
     }
 }
 
-/// Resolve the trim cuts for a LINE/ARC/CIRCLE target.
+/// Resolve the trim cuts for a LINE/ARC/CIRCLE/ELLIPSE/SPLINE target.
 ///
 /// The cuts are ordered in the target's own parameter; the piece containing the
 /// **projection** of `pick` is kept. A target with no cut that lies wholly inside
-/// a closed boundary is deleted — including a CIRCLE, which has no ends whose
-/// parameter range could stand in for the rule.
+/// a closed boundary is deleted — including a CIRCLE/ELLIPSE, which has no ends
+/// whose parameter range could stand in for the rule.
 ///
 /// A SPLINE boundary only ever contributes sampled cuts; it is deliberately
 /// absent from the containment test (no closed flag, no boundary plane), so a
@@ -551,17 +764,18 @@ pub(crate) fn plan_trim(
     })
 }
 
-/// Resolve where to extend a LINE/ARC target to the nearest boundary crossing
-/// beyond the picked end.
+/// Resolve where to extend a LINE/ARC/ELLIPSE target to the nearest boundary
+/// crossing beyond the picked end.
 ///
 /// The **projection** of the pick onto the target selects the nearer end (in the
 /// target's own parameter), so "which end did I click" is answered by where the
 /// click lands on the curve rather than by its distance to the curve; the target
 /// only ever grows: a boundary that touches or crosses the current span is an
-/// explicit refusal, as is "nothing lies ahead". An ARC is bounded to **less
-/// than half a turn** of travel: a crossing that is only reachable by sweeping
-/// most of the circle is the *opposite* end's neighbour reached the long way
-/// round, so it is refused by name instead of silently unfolding the arc.
+/// explicit refusal, as is "nothing lies ahead". An ARC or an ELLIPSE is bounded
+/// to **less than one full turn** of travel: the target runs along its own
+/// circle/ellipse, so a crossing is reachable from the picked end only within one
+/// turn, and a result that reached a whole turn would be the closed curve, which
+/// has no ends (it is refused by name instead of silently closing the target).
 /// `Err(reason)` carries those cases to the caller before any mutation.
 pub(crate) fn plan_extend(
     curve: &TargetCurve,
@@ -590,6 +804,22 @@ pub(crate) fn plan_extend(
             center: *center,
             normal: *normal,
             radius: *radius,
+        },
+        // An elliptical target extends along its own ellipse: the probe is the
+        // closed ellipse (the same stored frame, one full turn).
+        TargetCurve::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            ..
+        } => SemanticGeometry::Ellipse {
+            center: *center,
+            normal: *normal,
+            major_axis: *major_axis,
+            ratio: *ratio,
+            start: 0.0,
+            sweep: TAU,
         },
         TargetCurve::Spline(_) => return Err(super::trim_spline::no_continuation_semantics()),
     };
@@ -649,18 +879,21 @@ pub(crate) fn plan_extend(
     let Some(u) = chosen else {
         return Err("EXTEND found no intersection between the target and the boundary".into());
     };
-    // An arc only turns one way; cap the travel at half a turn so the result
-    // cannot unfold into an almost-complete circle (see the doc above).
-    if let TargetCurve::Arc { sweep, .. } = curve {
+    // An arc/ellipse only turns one way; cap the travel at one full turn so the
+    // result can never close on itself (a closed curve has no ends; see the doc
+    // above). Beyond one turn the same crossing is reached by wrapping, so the
+    // cap is exactly the parameter period.
+    if let TargetCurve::Arc { sweep, .. } | TargetCurve::Ellipse { sweep, .. } = curve {
         let travel = if grow_end {
             (u - 1.0) * sweep.abs()
         } else {
             -u * sweep.abs()
         };
-        if !travel.is_finite() || travel >= std::f64::consts::PI {
+        if !travel.is_finite() || travel >= TAU - 1e-9 {
             return Err(format!(
-                "EXTEND refused: the nearest boundary ahead is {travel:.4} rad away, which is \
-                 half a turn or more on the target's own circle"
+                "EXTEND refused: the nearest boundary ahead is {travel:.4} rad away, which is a \
+                 full turn or more on the target's own curve (the result would be the closed \
+                 curve, which has no ends)"
             ));
         }
     }
@@ -680,8 +913,8 @@ pub(crate) fn plan_extend(
         }
         // Same-sign sweep extension: the far end moves by `u` (a fraction of the
         // target's own sweep), the near end by `1 - u`; `u` is outside `[0, 1]`
-        // on the grow side, so the arc only ever gets longer.
-        TargetCurve::Arc { .. } => {
+        // on the grow side, so the arc/ellipse only ever gets longer.
+        TargetCurve::Arc { .. } | TargetCurve::Ellipse { .. } => {
             if grow_end {
                 curve.with_span(0.0, u)?
             } else {
@@ -693,199 +926,50 @@ pub(crate) fn plan_extend(
     Ok(ExtendResolution { geometry, notes })
 }
 
-/// The target's world length, its parameter tolerance (one world tolerance
-/// expressed in parameter units) and the projected pick parameter.
+/// The ellipse's **minor** semi-axis vector: `cross(normal_unit, major_unit) ·
+/// |major_axis| · |ratio|`, exactly the domain's own rule (`minor =
+/// cross(normal, major_axis)`), so the parameterisation here is the one the
+/// tessellator and the object-snap code use.
 ///
-/// The pick is **projected** onto the target ([`TargetCurve::project_param`]),
-/// not required to lie on it: the host resolves the target with its own pickbox
-/// and passes the raw click, so a near miss is still a pick of this entity. The
-/// only refusals here are the genuinely ambiguous ones — a degenerate target, a
-/// pick with no radial direction at all (an ARC/CIRCLE pick on the target's axis)
-/// and a projection that falls **outside** the target's own span. The last one is
-/// refused by name instead of being clamped to the nearest end, because clamping
-/// would silently decide which piece to keep for the user.
+/// A degenerate frame (a non-finite/zero major axis, a non-positive ratio, or a
+/// normal parallel to the major axis) yields the zero vector; every caller runs
+/// [`ellipse_frame`] first, which refuses that case.
+fn ellipse_minor(normal: Point3, major_axis: Point3, ratio: f64) -> Point3 {
+    match ellipse_frame(normal, major_axis, ratio) {
+        Some((_, minor_unit, minor_len)) => scale(minor_unit, minor_len),
+        None => Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    }
+}
+
+/// The ellipse frame as `(major length, minor unit vector, minor length)`, or
+/// `None` when the stored definition has no parameterisation.
 ///
-/// Boundary hits are deliberately *not* checked this way: under the engine's
-/// sampled fallback a hit may legitimately be slightly off the radius.
-fn target_frame(
-    command: &str,
-    curve: &TargetCurve,
-    pick: Point3,
-    tol: f64,
-) -> Result<(f64, f64, f64), String> {
-    let span_len = curve.length();
-    if !span_len.is_finite() || span_len <= tol {
-        return Err(format!("{command} target is degenerate (zero length)"));
+/// The checks are the ones a real ellipse needs: a positive finite major axis, a
+/// positive finite ratio, a finite normal that is not parallel to the major axis
+/// (`cross` must not vanish) and a finite minor length. Nothing is clamped and no
+/// axis is invented.
+fn ellipse_frame(normal: Point3, major_axis: Point3, ratio: f64) -> Option<(f64, Point3, f64)> {
+    let major_len = length(major_axis);
+    if !major_len.is_finite() || major_len <= 1e-12 || !ratio.is_finite() || ratio <= 0.0 {
+        return None;
     }
-    let param_tol = (tol / span_len).max(1e-12);
-    let label = curve.label();
-    let Some(u_pick) = curve.project_param(pick, tol) else {
-        return Err(format!(
-            "{command} pick point is degenerate for the target {label}: it lies on the target's \
-             own axis and has no radial direction to project onto the {label}"
-        ));
-    };
-    if !u_pick.is_finite() || u_pick < -param_tol || u_pick > 1.0 + param_tol {
-        return Err(format!(
-            "{command} pick projects outside the target {label} (parameter {u_pick:.9}, \
-             the target spans [0, 1])"
-        ));
+    let normal_unit = normalize(normal);
+    if !normal_unit.x.is_finite() || !normal_unit.y.is_finite() || !normal_unit.z.is_finite() {
+        return None;
     }
-    Ok((span_len, param_tol, u_pick.clamp(0.0, 1.0)))
-}
-
-/// Every interior cut parameter on the target, sorted and de-duplicated.
-fn collect_cuts(
-    curve: &TargetCurve,
-    boundaries: &BoundarySet,
-    policy: &TolerancePolicy,
-    tol: f64,
-    param_tol: f64,
-    command: &str,
-    notes: &mut Vec<String>,
-) -> Result<Vec<f64>, String> {
-    let engine = DefaultGeometryEngine;
-    let probe = curve.geometry();
-    let periodic = curve.is_periodic();
-    let mut cuts: Vec<f64> = Vec::new();
-    for primitive in boundaries.primitives() {
-        if pair_has_no_unique_crossing(curve, primitive, tol) {
-            continue;
-        }
-        let hits = engine
-            .intersect_local(&probe, primitive, policy)
-            .map_err(|error| {
-                format!("{command} could not resolve a boundary intersection: {error}")
-            })?;
-        let mut used = false;
-        for hit in hits {
-            let Some(u) = curve.param_of(hit, tol) else {
-                continue;
-            };
-            // A periodic target has no ends, so every cut is interior; the seam
-            // is folded onto `u == 0`.
-            let u = if periodic {
-                u.rem_euclid(1.0)
-            } else {
-                if u <= param_tol || u >= 1.0 - param_tol {
-                    continue;
-                }
-                u
-            };
-            // On a periodic parameter space the seam is a single point: two
-            // crossings at `u ≈ 0` and `u ≈ 1⁻` are the *same* cut, so the
-            // distance must wrap (otherwise an honest "too few cuts" refusal turns
-            // into a nearly-complete arc).
-            let duplicate = cuts.iter().any(|seen| {
-                let distance = (seen - u).abs();
-                let distance = if periodic {
-                    distance.min(1.0 - distance)
-                } else {
-                    distance
-                };
-                distance <= param_tol * 2.0
-            });
-            if duplicate {
-                continue;
-            }
-            cuts.push(u);
-            used = true;
-        }
-        // Report the approximation only for a pair that really produced a cut:
-        // a non-analytic pair that misses the target says nothing about this one.
-        if used {
-            note_approximation(&probe, primitive, policy, command, notes);
-        }
+    let major_unit = scale(major_axis, 1.0 / major_len);
+    let minor = cross(normal_unit, major_unit);
+    let minor_unit_len = length(minor);
+    if !minor_unit_len.is_finite() || minor_unit_len <= 1e-9 {
+        return None;
     }
-    cuts.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
-    Ok(cuts)
-}
-
-/// The periodic piece of `[0, 1)` that contains `u_pick`, as `(start, length)`.
-fn periodic_piece(cuts: &[f64], u_pick: f64) -> (f64, f64) {
-    let count = cuts.len();
-    let next = cuts.iter().position(|cut| *cut > u_pick);
-    let (u0, u1) = match next {
-        Some(0) | None => (cuts[count - 1], cuts[0]),
-        Some(index) => (cuts[index - 1], cuts[index]),
-    };
-    let fraction = if u1 > u0 { u1 - u0 } else { u1 + 1.0 - u0 };
-    (u0, fraction)
-}
-
-/// Whether the pair overlaps instead of crossing: a LINE target cut by a
-/// parallel/collinear LINE boundary has no unique crossing point, so the
-/// analytic "intersection" would be an arbitrary point on the overlap.
-fn pair_has_no_unique_crossing(
-    curve: &TargetCurve,
-    primitive: &SemanticGeometry,
-    tol: f64,
-) -> bool {
-    let TargetCurve::Line { start, end } = curve else {
-        return false;
-    };
-    let SemanticGeometry::Line {
-        start: other_start,
-        end: other_end,
-    } = primitive
-    else {
-        return false;
-    };
-    !matches!(
-        cad_geometry::infinite_line_intersection(*start, *end, *other_start, *other_end, tol),
-        cad_geometry::LineIntersection::Point(_)
-    )
-}
-
-/// A segment on the target's own infinite line that contains every boundary.
-///
-/// Reach justification (the probe must not miss a far boundary, so it is
-/// deliberately generous). Every crossing of the infinite target line with a
-/// boundary lies inside that boundary's bounding box, and for any point `p` of the
-/// box `|p − a| ≤ diag/2 + |box_center − mid| + len/2` (and the same from `b`).
-/// `reach = (|box_center − mid| + diag + len)·1.5 + 1.0` covers that bound with at
-/// least one world unit to spare, which is far larger than the ≤ `0.1` chord by
-/// which `BoundsAccumulator`'s coarse sampling can under-estimate a bulge apex.
-/// Overshooting is harmless: only the nearest crossing beyond the picked end is
-/// kept.
-fn line_probe(
-    curve: &TargetCurve,
-    boundaries: &BoundarySet,
-    tol: f64,
-) -> Result<SemanticGeometry, String> {
-    let TargetCurve::Line { start, end } = curve else {
-        return Err("EXTEND line probe needs a LINE target".into());
-    };
-    let (a, b) = (*start, *end);
-    let direction = sub(b, a);
-    let len = length(direction);
-    if !len.is_finite() || len <= tol {
-        return Err("EXTEND target is degenerate (zero length)".into());
+    let minor_len = major_len * ratio;
+    if !minor_len.is_finite() || minor_len <= 0.0 {
+        return None;
     }
-    let unit = scale(direction, 1.0 / len);
-    let mut bounds = cad_geometry::BoundsAccumulator::new();
-    for primitive in boundaries.primitives() {
-        bounds.add_geometry(primitive);
-    }
-    let Some(bounds) = bounds.finish() else {
-        return Err("EXTEND boundary has no finite extent to extend to".into());
-    };
-    let box_center = scale(add(bounds.min, bounds.max), 0.5);
-    let diagonal = length(sub(bounds.max, bounds.min));
-    let midpoint = scale(add(a, b), 0.5);
-    let reach = (length(sub(box_center, midpoint)) + diagonal + len) * 1.5 + 1.0;
-    Ok(SemanticGeometry::Line {
-        start: sub(a, scale(unit, reach)),
-        end: add(b, scale(unit, reach)),
-    })
-}
-
-/// Angle normalised into `[0, TAU)`.
-pub(super) fn norm_tau(angle: f64) -> f64 {
-    let value = angle % TAU;
-    if value < 0.0 {
-        value + TAU
-    } else {
-        value
-    }
+    Some((major_len, scale(minor, 1.0 / minor_unit_len), minor_len))
 }

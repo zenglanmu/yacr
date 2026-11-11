@@ -53,20 +53,22 @@ impl Application {
         self.offset_entities_with_options(command, &options)
     }
 
-    /// Trim one LINE/ARC/CIRCLE target against a supported boundary set (plus a
-    /// SPLINE target, see below).
+    /// Trim one LINE/ARC/CIRCLE/ELLIPSE target against a supported boundary set
+    /// (plus a SPLINE target, see below).
     ///
-    /// Supported subset: the target may be a LINE, an ARC, a CIRCLE or a SPLINE, and
-    /// every boundary may be a LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE (straight or
-    /// bulged) or SPLINE, in any mix. The target is cut at the intersections with
-    /// the boundary and the piece containing the **projection** of `pick_point` is
-    /// kept — the pick is projected onto the target ([`TargetCurve::project_param`])
-    /// because the host resolves the target with its own pickbox, so a click a few
-    /// pixels off the curve is still a pick of this entity. A LINE keeps the
-    /// sub-segment, an ARC keeps a shorter arc with the same centre/normal/radius
-    /// and the same sweep sign, a CIRCLE becomes the one ARC between the two cuts
-    /// that bracket the pick. A LINE with no cut that lies wholly inside a closed
-    /// boundary is deleted.
+    /// Supported subset: the target may be a LINE, an ARC, a CIRCLE, an ELLIPSE
+    /// (or an elliptical arc) or a SPLINE, and every boundary may be a LINE, ARC,
+    /// CIRCLE, ELLIPSE, LWPOLYLINE (straight or bulged) or SPLINE, in any mix. The
+    /// target is cut at the intersections with the boundary and the piece
+    /// containing the **projection** of `pick_point` is kept — the pick is
+    /// projected onto the target ([`TargetCurve::project_param`]) because the host
+    /// resolves the target with its own pickbox, so a click a few pixels off the
+    /// curve is still a pick of this entity. A LINE keeps the sub-segment, an ARC
+    /// keeps a shorter arc with the same centre/normal/radius and the same sweep
+    /// sign, an ELLIPSE keeps the elliptical arc between the two cuts around the
+    /// pick (same stored frame and ratio), and a CIRCLE/full ELLIPSE becomes the
+    /// one arc between the two cuts that bracket the pick. A LINE with no cut that
+    /// lies wholly inside a closed boundary is deleted.
     ///
     /// A SPLINE target is replaced by an **exact B-spline sub-curve** of itself (see
     /// `super::trim_spline`): same degree, same weights, both ends clamped, never a
@@ -81,11 +83,12 @@ impl Application {
     /// flag and no boundary plane), so a target wholly inside a closed spline is
     /// refused explicitly (`Unsupported`) rather than deleted.
     ///
-    /// INSERT/Opaque/Mesh **targets**, INSERT/Opaque/Mesh boundaries, degenerate
-    /// input, a pick whose projection falls outside the target's span, a pick with
-    /// no radial direction on an ARC/CIRCLE (it lies on the target's axis) and
-    /// intersection-free cases are explicit refusals that change
-    /// nothing; the whole command is one transaction and one undo step.
+    /// INSERT/Opaque/Mesh/Polyline/Hatch **targets** (each refused by name, see
+    /// [`trim_target_gap`]), INSERT/Opaque/Mesh boundaries, degenerate input, a
+    /// pick whose projection falls outside the target's span, a pick with no radial
+    /// direction on an ARC/CIRCLE/ELLIPSE (it lies on the target's axis) and
+    /// intersection-free cases are explicit refusals that change nothing; the whole
+    /// command is one transaction and one undo step.
     pub(crate) fn trim_entity(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let CommandPayload::Trim {
             target,
@@ -131,10 +134,16 @@ impl Application {
             .ok_or_else(|| {
                 CadError::InvalidInput(format!("trim target {} does not exist", target.entity.0))
             })?;
-        let curve = TargetCurve::new(
+        // The kinds TRIM cannot cut are named here, before the shared constructor,
+        // so the refusal states *that kind's* missing model instead of a generic
+        // "not supported" string.
+        if let Some(error) = trim_target_gap(&target_entity.geometry) {
+            return Err(error);
+        }
+        let curve = TargetCurve::new_trim_extend(
             &target_entity.geometry,
             "TRIM",
-            "a LINE, ARC, CIRCLE or SPLINE",
+            "a LINE, ARC, CIRCLE, ELLIPSE or SPLINE",
         )?;
         let mut boundaries = BoundarySet::default();
         for reference in boundary {
@@ -238,22 +247,28 @@ impl Application {
         })
     }
 
-    /// Extend one LINE/ARC target to the nearest boundary crossing ahead.
+    /// Extend one LINE/ARC/ELLIPSE target to the nearest boundary crossing ahead.
     ///
-    /// The supported subset is narrower than TRIM's: the target may be a LINE or an
-    /// ARC and every boundary may be a LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE
-    /// (straight or bulged) or SPLINE, in any mix. A SPLINE boundary is sampled, so
-    /// a cut it contributes always adds an approximation note (`drawing.extend`). The
-    /// pick is projected onto the target and that projection chooses the end to
-    /// grow. A LINE's picked endpoint moves along its own infinite line; an ARC's
-    /// picked end moves along its own circle and keeps the sweep's sign, so both only
-    /// ever get longer. A CIRCLE target has no end and is refused, as are SPLINE
+    /// The target may be a LINE, an ARC, an ELLIPSE or an elliptical arc, and every
+    /// boundary may be a LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE (straight or bulged)
+    /// or SPLINE, in any mix. A SPLINE boundary is sampled, so a cut it contributes
+    /// always adds an approximation note (`drawing.extend`). The pick is projected
+    /// onto the target and that projection chooses the end to grow. A LINE's picked
+    /// endpoint moves along its own infinite line; an ARC's or an ELLIPSE's picked
+    /// end moves along its own circle/ellipse and keeps the sweep's sign, so they
+    /// only ever get longer — up to (but not including) a **full turn**, where the
+    /// target would close on itself and have no ends left (2026-11-11: the earlier
+    /// half-turn cap is gone, because a crossing more than half a turn away is still
+    /// mathematically defined on the target's own curve).
+    ///
+    /// A CIRCLE or a full ELLIPSE target has no end and is refused, as are SPLINE
     /// targets (**no continuation semantics**: moving an end of a NURBS curve changes
     /// its knot vector, and therefore its parameterisation, and no extrapolation
-    /// policy exists — see `super::trim_spline::no_continuation_semantics`),
-    /// unsupported boundaries, a pick whose projection falls outside the target's
-    /// span, a target that already touches or reaches the boundary, and a boundary
-    /// that never lies ahead.
+    /// policy exists — see `super::trim_spline::no_continuation_semantics`), the
+    /// named target gaps ([`extend_target_gap`]: INSERT/HATCH/POLYLINE/MESH/OPAQUE/
+    /// COMPOUND), unsupported boundaries, a pick whose projection falls outside the
+    /// target's span, a target that already touches or reaches the boundary, and a
+    /// boundary that never lies ahead.
     pub(crate) fn extend_entity(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let CommandPayload::Extend {
             target,
@@ -299,7 +314,7 @@ impl Application {
             .ok_or_else(|| {
                 CadError::InvalidInput(format!("extend target {} does not exist", target.entity.0))
             })?;
-        // A SPLINE target is refused here, before `TargetCurve::new`, because the
+        // A SPLINE target is refused here, before `TargetCurve::build`, because the
         // reason is not "unsupported kind": EXTEND has no continuation semantics for
         // a NURBS curve (see `super::trim_spline::no_continuation_semantics`).
         if let SemanticGeometry::Spline { .. } = &target_entity.geometry {
@@ -307,10 +322,18 @@ impl Application {
                 super::trim_spline::no_continuation_semantics(),
             ));
         }
-        let curve = TargetCurve::new(&target_entity.geometry, "EXTEND", "a LINE or ARC")?;
+        if let Some(error) = extend_target_gap(&target_entity.geometry) {
+            return Err(error);
+        }
+        let curve = TargetCurve::new_trim_extend(
+            &target_entity.geometry,
+            "EXTEND",
+            "a LINE, ARC, ELLIPSE, CIRCLE or SPLINE",
+        )?;
         if curve.is_periodic() {
             return Err(CadError::Unsupported(format!(
-                "EXTEND target {} is closed and has no endpoint; only LINE and ARC are supported",
+                "EXTEND target {} is closed and has no endpoint; only LINE, ARC and ELLIPTICAL \
+                 ARC are supported",
                 geometry_kind(&target_entity.geometry)
             )));
         }
@@ -774,4 +797,87 @@ pub(super) fn offset_arc_with_distance(
         },
         requested,
     ))
+}
+
+/// The named TRIM **target** gaps: the kinds the shared [`TargetCurve`] cannot
+/// parameterise are refused with a kind-specific `trim.target_<kind>` reason
+/// instead of the constructor's generic "not supported" string.
+///
+/// `None` means "this is a target kind TRIM models" (LINE, ARC, CIRCLE, ELLIPSE,
+/// SPLINE), so the caller proceeds to the shared planner. Every arm here is a
+/// **capability gap**, not bad input: the caller has already resolved the entity,
+/// and the refusal writes nothing.
+fn trim_target_gap(geometry: &SemanticGeometry) -> Option<CadError> {
+    let reason = match geometry {
+        SemanticGeometry::Insert { .. } => {
+            "trim.target_insert: TRIM cannot trim an INSERT target (AcDbBlockReference): a block \
+             reference stores a placement, not cuttable geometry, and editing the block \
+             definition is not a TRIM; only directly addressable LINE, ARC, CIRCLE, ELLIPSE or \
+             SPLINE targets are supported"
+        }
+        SemanticGeometry::Hatch(_) => {
+            "trim.target_hatch: TRIM cannot trim a HATCH target: a hatch's display is derived \
+             from its boundary loops and fill, so there is no source curve to cut; only LINE, \
+             ARC, CIRCLE, ELLIPSE or SPLINE targets are supported"
+        }
+        SemanticGeometry::Polyline { .. } => {
+            "trim.target_polyline: TRIM cannot trim a POLYLINE target in this build: a \
+             multi-segment target can be cut on more than one segment, and the surviving \
+             remainder is not a single sub-curve the database can store in place; trim its \
+             LINE/ARC segments separately (EXPLODE first) instead"
+        }
+        SemanticGeometry::Mesh(_) => {
+            "trim.target_mesh: TRIM cannot trim a MESH target: a 3D face has no modeled 2D curve \
+             parameterisation; only LINE, ARC, CIRCLE, ELLIPSE or SPLINE targets are supported"
+        }
+        SemanticGeometry::Opaque { .. } => {
+            "trim.target_opaque: TRIM cannot trim opaque/proxy geometry: it has no semantic form \
+             to cut; only LINE, ARC, CIRCLE, ELLIPSE or SPLINE targets are supported"
+        }
+        SemanticGeometry::Compound(_) => {
+            "trim.target_compound: TRIM cannot trim a Compound target: it has no single \
+             owner-level curve to cut; only LINE, ARC, CIRCLE, ELLIPSE or SPLINE targets are \
+             supported"
+        }
+        _ => return None,
+    };
+    Some(CadError::Unsupported(reason.into()))
+}
+
+/// The named EXTEND **target** gaps (see [`trim_target_gap`]); a SPLINE target has
+/// its own continuation-semantics refusal before this check, and a CIRCLE/full
+/// ELLIPSE is refused by the closed-target rule.
+fn extend_target_gap(geometry: &SemanticGeometry) -> Option<CadError> {
+    let reason = match geometry {
+        SemanticGeometry::Insert { .. } => {
+            "extend.target_insert: EXTEND cannot extend an INSERT target (AcDbBlockReference): a \
+             block reference stores a placement, not an open curve with ends; only LINE, ARC \
+             and elliptical-arc targets are supported"
+        }
+        SemanticGeometry::Hatch(_) => {
+            "extend.target_hatch: EXTEND cannot extend a HATCH target: a hatch's display is \
+             derived from its boundary loops and fill, so there is no source curve with ends; \
+             only LINE, ARC and elliptical-arc targets are supported"
+        }
+        SemanticGeometry::Polyline { .. } => {
+            "extend.target_polyline: EXTEND cannot extend a POLYLINE target in this build: which \
+             end grows would have to be resolved against a multi-segment parameterisation that \
+             is not modeled here; only LINE, ARC and elliptical-arc targets are supported"
+        }
+        SemanticGeometry::Mesh(_) => {
+            "extend.target_mesh: EXTEND cannot extend a MESH target: a 3D face has no modeled 2D \
+             curve parameterisation; only LINE, ARC and elliptical-arc targets are supported"
+        }
+        SemanticGeometry::Opaque { .. } => {
+            "extend.target_opaque: EXTEND cannot extend opaque/proxy geometry: it has no \
+             semantic form to extend; only LINE, ARC and elliptical-arc targets are supported"
+        }
+        SemanticGeometry::Compound(_) => {
+            "extend.target_compound: EXTEND cannot extend a Compound target: it has no single \
+             owner-level curve with ends; only LINE, ARC and elliptical-arc targets are \
+             supported"
+        }
+        _ => return None,
+    };
+    Some(CadError::Unsupported(reason.into()))
 }

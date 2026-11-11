@@ -15,9 +15,11 @@
 //! full-turn ARC/ELLIPSE, closed LWPOLYLINE) uses `i / count` so the seam is
 //! never duplicated.
 //!
-//! The placement maths are our **declared** rules (AutoCAD's exact base-point and
-//! polar-placement rules are unverified); they are documented here and pinned by
-//! the contract tests.
+//! The placement maths are our **declared** rules (AutoCAD's exact base-point
+//! placement is unverified); they are documented here and pinned by the contract
+//! tests. The one rule that deliberately follows AutoCAD's documented semantics is
+//! ARRAYPOLAR's fill/items relationship (`fill / (items − 1)` over a partial fill,
+//! `fill / items` over a full turn — see [`Application::array_polar`]).
 //!
 //! Every input is validated before any write, so a refusal changes nothing (the
 //! database transaction is all-or-nothing and no history is recorded).
@@ -40,15 +42,28 @@ pub const MAX_ARRAY_ENTITIES: usize = 100_000;
 /// centre and is refused rather than fabricating an angle.
 const MIN_ARRAY_RADIUS: f64 = 1e-12;
 
+/// A full turn in the prompt unit (degrees). `|fillAngle| == 360` is ARRAYPOLAR's
+/// full-circle default, and it is the one fill that divides by `items` instead of
+/// `items − 1` (see [`Application::array_polar`]).
+const FULL_TURN_DEGREES: f64 = 360.0;
+
 impl Application {
     /// ARRAYRECT: insert independent copies of the selection on a rectangular grid.
     ///
     /// Our declared geometry rule (AutoCAD's exact rule is unverified): the base
     /// point is the selection's **bounding-box lower-left**, and cell `(row,
     /// column)` translates the source by `(column·columnSpacing, row·rowSpacing)`
-    /// — spacing is the **distance between base points**, and the array grows **up
-    /// and to the right**. (The offsets are measured between base points, so the
-    /// numeric result is independent of where the declared base sits.)
+    /// — spacing is the **distance between base points**, and a positive spacing
+    /// grows the array **up and to the right**. (The offsets are measured between
+    /// base points, so the numeric result is independent of where the declared
+    /// base sits.)
+    ///
+    /// **Signed spacing** (`-ARRAY`'s negative spacing): a negative `rowSpacing`
+    /// (resp. `columnSpacing`) arrays **downward** (respectively to the left),
+    /// because the cell offset *is* `row · rowSpacing`. Nothing is mirrored and
+    /// the source's own cell stays `(0, 0)`, so the sign only selects the
+    /// direction of growth. Zero spacing is legal (the cells coincide) and is
+    /// reported by the ordinary copy count, never hidden.
     ///
     /// **Copy count** (ADR 0016 decision D): `rows × columns` is the total
     /// **including the source object**, which stays where it is and is not
@@ -56,10 +71,18 @@ impl Application {
     /// own cell `(0, 0)` is skipped. A 1×1 "array" therefore produces **0 copies**;
     /// that is an explicit diagnostic, never a silent success.
     ///
-    /// Refusals (nothing written): non-integer or `< 1` rows/columns; non-finite or
-    /// negative spacing; an empty selection; source geometry that cannot be
-    /// translated (the existing `Unsupported` surface); and a total produced copy
-    /// count above [`MAX_ARRAY_ENTITIES`].
+    /// **NOT IMPLEMENTED — `Levels` (the Z direction) and the rotated grid
+    /// (`ANGLE`)**: the session tool-parameter channel this build exposes carries
+    /// neither an array level count nor a grid angle (the frozen
+    /// `ToolParameter` vocabulary has `ArrayRows`/`ArrayColumns`/spacings only),
+    /// so an ARRAYRECT is always **one level** on an **axis-aligned** grid. There
+    /// is no implicit rotation and no invented second store: a request that would
+    /// need either option cannot be expressed, so nothing is silently approximated.
+    ///
+    /// Refusals (nothing written): non-integer or `< 1` rows/columns; non-finite
+    /// spacing; an empty selection; source geometry that cannot be translated (the
+    /// existing `Unsupported` surface); and a total produced copy count above
+    /// [`MAX_ARRAY_ENTITIES`].
     pub(crate) fn array_rect(
         &mut self,
         session: &SessionState,
@@ -193,13 +216,19 @@ impl Application {
 
     /// ARRAYPOLAR: insert independent copies of the selection around `center`.
     ///
-    /// Our declared, **unverified** placement rule (the contract tests pin it):
-    /// item `i` (`i` in `0..items`) is placed at angle `i·fillAngle / items`,
-    /// measured counter-clockwise from the base point's direction (the base point
-    /// is the selection's **bounding-box lower-left**). With `rotateItems = true`
-    /// each copy is **rotated about the centre** by that angle; with `false` each
-    /// copy is **translated only** to its angular position, its own orientation
-    /// unchanged.
+    /// **Angular placement** (AutoCAD's documented `Fill`/`Items` relationship):
+    /// the fill angle spans the first and the last item, so the step between
+    /// consecutive items is `fillAngle / (items − 1)` and item `i` sits at
+    /// `i · step` counter-clockwise from the base point's direction (the base
+    /// point is the selection's **bounding-box lower-left**). A **full turn**
+    /// (`|fillAngle| == 360`) is the one exception: it closes on itself, so the
+    /// step is `fillAngle / items` and the last item never duplicates the
+    /// source's own position. This is pinned numerically by the contract tests
+    /// (`180° / 3 items` ⇒ `0°/90°/180°`, `360° / 4 items` ⇒ `0°/90°/180°/270°`).
+    /// With `rotateItems = true` each copy is **rotated about the centre** by its
+    /// own angle; with `false` each copy is **translated only** to its angular
+    /// position, its own orientation unchanged. The step rule is the same in both
+    /// cases: `rotateItems` decides orientation only, never position.
     ///
     /// **Copy count** (ADR 0016 decision D): `items` is the total **including the
     /// source object**, which sits at its own direction and is not duplicated, so
@@ -265,6 +294,16 @@ impl Application {
         }
         let base_angle = dy.atan2(dx);
         let fill_radians = fill_angle.to_radians();
+        // `fillAngle / (items - 1)` over a partial fill, `fillAngle / items` over a
+        // full turn (see the method doc). `items` is validated `>= 1`; a 1-item
+        // array has already returned above when it produces no copies, so the
+        // divisor can only be 1 or more here.
+        let full_turn = (fill_angle.abs() - FULL_TURN_DEGREES).abs() <= 1e-9;
+        let step_divisor = if full_turn {
+            items
+        } else {
+            (items - 1.0).max(1.0)
+        };
 
         // `items` includes the source's own position (item 0), so the copies are
         // one fewer per source.
@@ -308,7 +347,7 @@ impl Application {
         // Item 0 (angle offset 0) is the source's own position and is skipped, so
         // `items − 1` copies are inserted.
         for item in 1..items as usize {
-            let delta = item as f64 * fill_radians / items;
+            let delta = item as f64 * fill_radians / step_divisor;
             let transform = if rotate_items {
                 rotation_transform(center, delta)
             } else {
@@ -674,10 +713,12 @@ fn array_count(session: &SessionState, parameter: ToolParameter, command: &str) 
     }
 }
 
-/// The row/column spacing of a session parameter: finite and **not negative**.
+/// The row/column spacing of a session parameter: finite (either sign).
 ///
-/// The channel accepts any finite spacing (including negative); the command
-/// refuses a negative spacing rather than inventing the unverified reversal.
+/// The channel accepts any finite spacing; this command accepts the sign too,
+/// because the cell offset *is* `row · rowSpacing` / `column · columnSpacing`, so
+/// a negative spacing arrays in the negative direction (down / left) without
+/// mirroring or a second code path. Only a non-finite value is refused.
 fn array_spacing(
     session: &SessionState,
     parameter: ToolParameter,
@@ -687,12 +728,6 @@ fn array_spacing(
     if !value.is_finite() {
         return Err(CadError::InvalidInput(format!(
             "{command} parameter '{}' must be finite, got {value}",
-            parameter.key()
-        )));
-    }
-    if value < 0.0 {
-        return Err(CadError::InvalidInput(format!(
-            "{command} parameter '{}' must not be negative, got {value}",
             parameter.key()
         )));
     }

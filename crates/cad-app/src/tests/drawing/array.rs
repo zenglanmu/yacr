@@ -1,8 +1,9 @@
 //! ARRAYRECT / ARRAYPOLAR edit-command contract tests (ADR 0016 decision D).
 //!
 //! Pins our declared geometry rules (spacing = the distance between base points,
-//! growth up/right; polar placement with/without item rotation), the explicit
-//! refusal set, and the one-transaction/one-undo-step N-copies shape.
+//! growth in the sign's direction; polar placement with/without item rotation), the
+//! ARRAYPOLAR fill/items step (first-to-last item, full turn divides by items), the
+//! explicit refusal set, and the one-transaction/one-undo-step N-copies shape.
 
 use super::*;
 
@@ -300,40 +301,48 @@ fn array_count_at_cap_is_accepted_and_cap_plus_one_is_refused() {
 }
 
 #[test]
-fn array_rect_refuses_negative_spacing_and_changes_nothing() {
-    // The channel accepts any finite spacing (including negative); the command is
-    // what refuses the unverified reversal.
+fn array_rect_negative_spacing_arrays_in_the_negative_direction() {
+    // `-ARRAY`'s negative spacing arrays the opposite way: the cell offset *is*
+    // `row · rowSpacing` / `column · columnSpacing`, so a negative value needs no
+    // separate code path and never mirrors the source.
     let (mut app, mut session) = one_line_app();
-    session
-        .set_tool_parameter(ToolParameter::ArrayRowSpacing, ToolValue::Number(-1.0))
-        .expect("the channel accepts a finite negative spacing");
-    let before = revision(&app);
-    let error = execute(
+    set_number(&mut session, ToolParameter::ArrayRows, 2.0);
+    set_number(&mut session, ToolParameter::ArrayColumns, 2.0);
+    set_number(&mut session, ToolParameter::ArrayRowSpacing, -5.0);
+    set_number(&mut session, ToolParameter::ArrayColumnSpacing, -10.0);
+    execute(
         &mut app,
         &mut session,
         CommandId::ArrayRectangular,
         array_rect_payload(vec![ref_of(1)]),
     )
-    .expect_err("negative spacing is refused");
-    assert!(matches!(error, CadError::InvalidInput(_)), "{error:?}");
-    assert_eq!(revision(&app), before);
-    assert_eq!(entity_count(&app), 1);
-    assert_eq!(undo_depth(&app), 0);
+    .unwrap();
+    let mut expected: Vec<(Point3, Point3)> = vec![line_at(point(0.0, 0.0), point(2.0, 0.0))];
+    for (row, column) in [(0usize, 1usize), (1, 0), (1, 1)] {
+        let dx = column as f64 * -10.0;
+        let dy = row as f64 * -5.0;
+        expected.push(line_at(point(dx, dy), point(dx + 2.0, dy)));
+    }
+    expected.sort_by(|a, b| {
+        (a.0.x, a.0.y, a.1.x, a.1.y)
+            .partial_cmp(&(b.0.x, b.0.y, b.1.x, b.1.y))
+            .unwrap()
+    });
+    assert_eq!(
+        all_lines(&app),
+        expected,
+        "a negative spacing arrays down/left without mirroring the source"
+    );
 
-    // The column spacing is refused too.
-    let (mut app, mut session) = one_line_app();
-    session
-        .set_tool_parameter(ToolParameter::ArrayColumnSpacing, ToolValue::Number(-2.5))
-        .expect("the channel accepts a finite negative spacing");
-    let error = execute(
-        &mut app,
-        &mut session,
-        CommandId::ArrayRectangular,
-        array_rect_payload(vec![ref_of(1)]),
-    )
-    .expect_err("negative column spacing is refused");
-    assert!(matches!(error, CadError::InvalidInput(_)), "{error:?}");
-    assert_eq!(entity_count(&app), 1);
+    // The channel still refuses a non-finite spacing, so the command's own
+    // finite check can only be reached through a bypassed store.
+    assert!(
+        session_refuses(
+            ToolParameter::ArrayColumnSpacing,
+            ToolValue::Number(f64::INFINITY)
+        ),
+        "a non-finite spacing has no direction"
+    );
 }
 
 #[test]
@@ -515,22 +524,20 @@ fn array_polar_with_item_rotation_rotates_each_copy_about_the_centre() {
     );
 }
 
-/// Our declared, **unverified** ARRAYPOLAR step rule (ADR 0016 decision D): item
-/// `i` (`i` in `0..items`) sits at `i * fillAngle / items` from the base point's
-/// direction — the fill is divided into `items` **steps**, not `items - 1`.
+/// The ARRAYPOLAR fill/items rule (2026-11-11 completion): the fill angle spans the
+/// first and the last item, so the step is `fillAngle / (items - 1)` over a partial
+/// fill and `fillAngle / items` over a **full turn** (which closes on itself and
+/// must not duplicate the source's own position).
 ///
-/// This **diverges** from AutoCAD, which spans a partial fill between the first
-/// and last item (`fill / (items - 1)`); AutoCAD's exact rule is unverified, so
-/// the divergence is a **declared choice**, not an oversight. It is pinned here
-/// numerically so a reader sees the choice.
+/// This replaces the earlier declared rule (`fill / items` for every fill), which
+/// diverged from AutoCAD on a partial fill: `180° / 3 items` was `0°/60°/120°` and
+/// is now the documented `0°/90°/180°`.
 #[test]
-fn array_polar_partial_fill_angle_pins_the_declared_step_rule() {
+fn array_polar_fill_angle_spans_the_first_and_last_item() {
     // Base point = bounding-box lower-left (0,0); centre (-10,0) => base direction
     // +x, radius 10. The copies are translate-only (rotateItems defaults off).
     //
-    // items = 3, fillAngle = 180:
-    //   ours    (180 / 3): offsets 0°, 60°, 120°
-    //   AutoCAD (180 / 2): offsets 0°, 90°, 180°
+    // items = 3, fillAngle = 180: step = 180 / (3 - 1) = 90 => 0°, 90°, 180°.
     let (mut app, mut session) = one_line_app();
     set_number(&mut session, ToolParameter::ArrayItems, 3.0);
     set_number(&mut session, ToolParameter::ArrayFillAngle, 180.0);
@@ -552,8 +559,8 @@ fn array_polar_partial_fill_angle_pins_the_declared_step_rule() {
     let expected = {
         let mut lines = vec![
             line_at(point(0.0, 0.0), point(2.0, 0.0)), // retained source (item 0)
-            copy(60.0),                                // item 1: 1 * 180 / 3
-            copy(120.0),                               // item 2: 2 * 180 / 3
+            copy(90.0),                                // item 1: 1 * 180 / 2
+            copy(180.0),                               // item 2: 2 * 180 / 2
         ];
         lines.sort_by(|a, b| {
             (a.0.x, a.0.y, a.1.x, a.1.y)
@@ -564,20 +571,26 @@ fn array_polar_partial_fill_angle_pins_the_declared_step_rule() {
     };
     assert!(
         lines_near(&all_lines(&app), &expected),
-        "our rule divides the fill by items (0°/60°/120°): {:?}",
+        "a partial fill spans first-to-last (0°/90°/180°): {:?}",
         all_lines(&app)
     );
-    // The divergence, made explicit: no copy sits at 90° (AutoCAD's span rule would
-    // place item 1 at (-10, 10)).
+    // The last item lands at the fill angle: no copy sits at 60° (the old rule) and
+    // no copy is missing at 90°.
+    assert!(
+        all_lines(&app)
+            .iter()
+            .any(|(s, _)| (s.x + 10.0).abs() < 1e-9 && (s.y - 10.0).abs() < 1e-9),
+        "an item sits at 90° (the fill is divided by items - 1)"
+    );
     assert!(
         !all_lines(&app)
             .iter()
-            .any(|(s, _)| (s.x + 10.0).abs() < 1e-9 && (s.y - 10.0).abs() < 1e-9),
-        "no copy at 90°: the fill is divided by items, not items - 1"
+            .any(|(s, _)| (s.x + 5.0).abs() < 1e-6 && (s.y - 8.660_254).abs() < 1e-6),
+        "no copy sits at 60°"
     );
 
-    // Full-circle case (the declared default): fillAngle = 360, items = 4 =>
-    // 0°, 90°, 180°, 270° (360 / 4).
+    // Full circle (the declared default): fillAngle = 360, items = 4 =>
+    // 0°, 90°, 180°, 270° (360 / 4, because a full turn closes on itself).
     let (mut app, mut session) = one_line_app();
     set_number(&mut session, ToolParameter::ArrayItems, 4.0);
     set_number(&mut session, ToolParameter::ArrayFillAngle, 360.0);
@@ -607,6 +620,67 @@ fn array_polar_partial_fill_angle_pins_the_declared_step_rule() {
         "full circle: 0°/90°/180°/270° (360/4): {:?}",
         all_lines(&app)
     );
+}
+
+#[test]
+fn array_polar_two_item_partial_fill_places_the_second_item_on_the_fill_angle() {
+    // items = 2 over a 90° fill: the single copy sits exactly on the fill angle
+    // (90 / (2 - 1) = 90°), which is the clearest witness of the first-to-last rule.
+    let (mut app, mut session) = one_line_app();
+    set_number(&mut session, ToolParameter::ArrayItems, 2.0);
+    set_number(&mut session, ToolParameter::ArrayFillAngle, 90.0);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::ArrayPolar,
+        array_polar_payload(vec![ref_of(1)], point(-10.0, 0.0)),
+    )
+    .unwrap();
+    assert_eq!(outcome.objects.len(), 1, "items - 1 = one copy");
+    let expected = {
+        let mut lines = vec![
+            line_at(point(0.0, 0.0), point(2.0, 0.0)),
+            line_at(point(-10.0, 10.0), point(-8.0, 10.0)),
+        ];
+        lines.sort_by(|a, b| {
+            (a.0.x, a.0.y, a.1.x, a.1.y)
+                .partial_cmp(&(b.0.x, b.0.y, b.1.x, b.1.y))
+                .unwrap()
+        });
+        lines
+    };
+    assert!(
+        lines_near(&all_lines(&app), &expected),
+        "the second of two items sits on the fill angle: {:?}",
+        all_lines(&app)
+    );
+}
+
+#[test]
+fn array_polar_negative_fill_angle_walks_the_other_way_with_the_same_step() {
+    // -90° over 2 items: one copy at -90° (below the base direction), same
+    // first-to-last step, mirrored direction.
+    let (mut app, mut session) = one_line_app();
+    set_number(&mut session, ToolParameter::ArrayItems, 2.0);
+    set_number(&mut session, ToolParameter::ArrayFillAngle, -90.0);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::ArrayPolar,
+        array_polar_payload(vec![ref_of(1)], point(-10.0, 0.0)),
+    )
+    .unwrap();
+    assert!(
+        all_lines(&app).iter().any(|(s, e)| {
+            (s.x + 10.0).abs() < 1e-9
+                && (s.y + 10.0).abs() < 1e-9
+                && (e.x + 8.0).abs() < 1e-9
+                && (e.y + 10.0).abs() < 1e-9
+        }),
+        "the copy sits at -90°: {:?}",
+        all_lines(&app)
+    );
+    assert_eq!(entity_count(&app), 2, "source + one copy");
 }
 
 #[test]

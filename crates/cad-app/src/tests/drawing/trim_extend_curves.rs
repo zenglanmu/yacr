@@ -14,7 +14,7 @@ use super::*;
 const TAU: f64 = std::f64::consts::TAU;
 
 /// A one-layer model-space document holding exactly `entities`.
-fn app_of(mut entities: Vec<DbEntity>) -> Application {
+pub(super) fn app_of(mut entities: Vec<DbEntity>) -> Application {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -70,13 +70,13 @@ fn arc(id: u128, center: Point3, radius: f64, start: f64, sweep: f64, order: i64
     )
 }
 
-fn line(id: u128, start: Point3, end: Point3, order: i64) -> DbEntity {
+pub(super) fn line(id: u128, start: Point3, end: Point3, order: i64) -> DbEntity {
     ent(id, SemanticGeometry::Line { start, end }, order)
 }
 
 /// Everything a refusal must leave byte-identical: the revision, the entity count
 /// and the debug form (all stored fields, including geometry) of every entity.
-fn snapshot(app: &Application) -> (Revision, usize, String) {
+pub(super) fn snapshot(app: &Application) -> (Revision, usize, String) {
     let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
     (
         drawing.revision(),
@@ -85,7 +85,7 @@ fn snapshot(app: &Application) -> (Revision, usize, String) {
     )
 }
 
-fn geometry_of(app: &Application, id: u128) -> SemanticGeometry {
+pub(super) fn geometry_of(app: &Application, id: u128) -> SemanticGeometry {
     app.workspace.documents[&DocumentId(1)]
         .drawing
         .entity(EntityId(id))
@@ -115,25 +115,25 @@ fn expect_arc(app: &Application, id: u128) -> (Point3, f64, f64, f64) {
     }
 }
 
-fn near(actual: f64, expected: f64) -> bool {
+pub(super) fn near(actual: f64, expected: f64) -> bool {
     (actual - expected).abs() <= 1e-9
 }
 
 /// Angles are equal modulo `TAU` (the arc parameter is only defined up to a full
 /// turn, and TRIM re-normalises `start`).
-fn angle_near(actual: f64, expected: f64) -> bool {
+pub(super) fn angle_near(actual: f64, expected: f64) -> bool {
     let delta = (actual - expected).rem_euclid(TAU);
     delta.min(TAU - delta) <= 1e-9
 }
 
-fn undo_depth(app: &Application) -> usize {
+pub(super) fn undo_depth(app: &Application) -> usize {
     app.history
         .get(&DocumentId(1))
         .map(|history| history.undo_depth())
         .unwrap_or(0)
 }
 
-fn trim(
+pub(super) fn trim(
     app: &mut Application,
     target: u128,
     boundaries: &[u128],
@@ -152,7 +152,7 @@ fn trim(
     )
 }
 
-fn extend(
+pub(super) fn extend(
     app: &mut Application,
     target: u128,
     boundaries: &[u128],
@@ -678,20 +678,30 @@ fn extend_arc_negative_sweep_grows_the_start_clockwise() {
 }
 
 #[test]
-fn extend_arc_refuses_a_boundary_only_reachable_the_long_way_round() {
-    // The crossing sits just *behind* the start (angle -0.1 rad). The end can only
-    // reach it by sweeping 354 degrees, so the half-turn bound refuses instead of
-    // unfolding the arc into almost a full circle.
+fn extend_arc_grows_past_half_a_turn_to_the_nearest_crossing() {
+    // The crossing sits just *behind* the start (angle -0.1 rad). Reaching it from
+    // the picked end is a 354-degree sweep, which is **mathematically defined** on
+    // the arc's own circle and storable as a signed sweep (< one full turn), so the
+    // 2026-11-11 rule extends the arc instead of refusing at half a turn. (The old
+    // half-turn cap is gone; only a full turn is refused, see the cap in
+    // `plan_extend`.)
     let mut app = app_of(vec![
         arc(1, point(0.0, 0.0), 5.0, 0.0, PI / 2.0, 0),
         line(2, at(4.5, -0.1), at(5.5, -0.1), 1),
     ]);
-    let before = snapshot(&app);
-    let err = extend(&mut app, 1, &[2], at(5.0, 1.2)).unwrap_err();
-    assert!(matches!(err, CadError::InvalidInput(_)), "{err:?}");
-    assert!(err.to_string().contains("half a turn"), "{err:?}");
-    assert_eq!(snapshot(&app), before);
-    assert_eq!(undo_depth(&app), 0);
+    extend(&mut app, 1, &[2], at(5.0, 1.2)).unwrap();
+    let (center, radius, start, sweep) = expect_arc(&app, 1);
+    assert_eq!(center, point(0.0, 0.0), "the centre is unchanged");
+    assert!(near(radius, 5.0), "the radius is unchanged: {radius}");
+    assert!(angle_near(start, 0.0), "the start stays at 0: {start}");
+    // The end now reaches the crossing at -0.1 rad, so the signed sweep grows from
+    // PI/2 to a full turn minus 0.1 rad.
+    assert!(
+        near(sweep, TAU - 0.1),
+        "the sweep grows to the far crossing: {sweep}"
+    );
+    assert!(sweep < TAU, "the result is still a storable arc: {sweep}");
+    assert_eq!(undo_depth(&app), 1, "one undo step");
 }
 
 #[test]

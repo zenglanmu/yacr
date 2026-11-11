@@ -71,6 +71,11 @@
 //! NOT IMPLEMENTED: exploding more than one level at once, `EXPLMODE`, colour /
 //! linetype / lineweight changes, associative-array decomposition, attribute
 //! semantics, and a 2D-solid arrow representation (arrows stay `MESH`).
+//!
+//! **`EXPMODE`**: this build's session model has no `EXPMODE` switch at all (the
+//! parameter channel carries no such value), so there is nothing to honour: every
+//! EXPLODE is the one-level decomposition described above, and no implicit
+//! polyline/arc/insert policy is selected on the user's behalf.
 
 use super::*;
 
