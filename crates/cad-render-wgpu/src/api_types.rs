@@ -320,6 +320,36 @@ impl RenderTarget {
     }
 }
 
+/// Whether this frame's canvas clear colour counts as a **light background**.
+///
+/// The input is the frame's clear colour in **linear** RGBA, the space
+/// [`RenderTarget::clear_color`] already sanitises and the same value the colour
+/// attachment clears to (a host passes
+/// `ViewBackground::resolve(...).to_linear_rgba()` here). This is a *display*
+/// decision only: it never changes a stored entity colour, the display
+/// representation or the scene cache — the frame's `light.a` uniform word
+/// carries the answer to the shaders, which flip only near-white ink.
+///
+/// The rule, documented exactly: Rec. 709 luminance
+/// `0.2126 * r + 0.7152 * g + 0.0722 * b` over the **linear** RGB channels, and
+/// the background is light when that luminance is **greater than 0.5**. Every
+/// channel must be finite; a NaN or infinite channel yields `false` (never a
+/// light background), matching [`RenderTarget::clear_color`]'s refusal to let a
+/// bad caller poison the clear. Alpha is ignored.
+///
+/// Consequences: black `[0, 0, 0, 1]` → `false`; white `[1, 1, 1, 1]` → `true`;
+/// linear mid-grey `[0.5, 0.5, 0.5, 1]` → `false` (its luminance is exactly
+/// `0.5`, and the comparison is strict), so only a background brighter than
+/// mid-grey counts as light.
+pub fn background_is_light(clear_color: [f32; 4]) -> bool {
+    let [r, g, b, _a] = clear_color;
+    if !(r.is_finite() && g.is_finite() && b.is_finite()) {
+        return false;
+    }
+    let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    luminance > 0.5
+}
+
 /// Microsecond timings of the last [`Renderer::commit_upload`] call (diagnostics
 /// only). Purely observational: it changes no commit semantics.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

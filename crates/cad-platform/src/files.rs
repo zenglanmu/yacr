@@ -117,6 +117,26 @@ pub trait PlatformFiles {
     /// this only after a **successful** install, never at attempt time.
     fn set_source(&self, target: Option<&FileTarget>);
 
+    /// Remember (`Some`) or clear (`None`) the last reopened/opened target, so
+    /// the next open chooser can start in its directory.
+    ///
+    /// The core calls this only after a **successful** open (and once at startup
+    /// with the newest durable recent entry), never for a failed or cancelled
+    /// interaction. A platform with no chooser, or one that cannot reopen a
+    /// past target (Android), keeps the default no-op.
+    fn set_recent_target(&self, _target: Option<&FileTarget>) {}
+
+    /// A human-facing location for `target` (the parent directory on a desktop).
+    ///
+    /// This is the one platform-specific path derivation the shared host needs
+    /// to store a recent entry: the host never parses an opaque handle itself.
+    /// `None` means the platform has no such location (Android's SAF URI, the
+    /// web's download handle) and the recent row stays location-less rather than
+    /// inventing one.
+    fn recent_location(&self, _target: &FileTarget) -> Option<String> {
+        None
+    }
+
     /// Drain every completed interaction since the last call.
     fn poll(&self) -> Vec<FileEvent>;
 }
@@ -210,4 +230,53 @@ pub struct HostCapabilities {
     /// calling thread (headless/CLI-style). Passed in; the core carries no
     /// `cfg`.
     pub import_worker: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The minimum implementation: every optional recent-drawings method keeps
+    /// its default.
+    struct NullFiles;
+
+    impl PlatformFiles for NullFiles {
+        fn begin_open(&self) -> CadResult<()> {
+            Ok(())
+        }
+        fn begin_open_target(&self, _target: &FileTarget) -> CadResult<()> {
+            Ok(())
+        }
+        fn begin_save(&self, _purpose: SavePurpose, _default_name: &str) -> CadResult<()> {
+            Ok(())
+        }
+        fn write_atomic(&self, _target: &FileTarget, _bytes: &[u8]) -> CadResult<()> {
+            Ok(())
+        }
+        fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
+            false
+        }
+        fn set_source(&self, _target: Option<&FileTarget>) {}
+        fn poll(&self) -> Vec<FileEvent> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn the_recent_hint_methods_are_no_ops_by_default() {
+        let files = NullFiles;
+        let target = FileTarget::from_path("/tmp/plan.dwg");
+        // A platform that does not model the hint accepts it and remembers
+        // nothing; neither call can fabricate a location.
+        files.set_recent_target(Some(&target));
+        files.set_recent_target(None);
+        assert_eq!(files.recent_location(&target), None);
+        assert_eq!(
+            files.recent_location(&FileTarget {
+                display_name: "uri".into(),
+                opaque: "content://provider/document/1".into(),
+            }),
+            None
+        );
+    }
 }

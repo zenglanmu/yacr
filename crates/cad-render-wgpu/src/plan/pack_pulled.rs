@@ -159,7 +159,8 @@ pub(crate) fn chunk_transform_column(projection: FrameProjection, origin: [f64; 
 /// The five pulled-camera columns: the three origin-independent columns of the
 /// per-chunk transform, a fourth whose `x` carries the world units per pixel
 /// (the AA line SDF ramp width; `yzw` reserved), and a fifth whose `rgb` is the
-/// frame's unit vector toward the light in world space (`a` reserved 0).
+/// frame's unit vector toward the light in world space (`a` = the frame's
+/// light-background ink flag; the pick shaders ignore it).
 pub(crate) fn pulled_camera_columns(projection: FrameProjection, light: [f32; 4]) -> [[f32; 4]; 5] {
     let m = projection.batch_matrix_f64([0.0, 0.0, 0.0]);
     [

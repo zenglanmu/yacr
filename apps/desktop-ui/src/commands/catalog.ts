@@ -421,6 +421,14 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // `cad_command`, so it is not a name this catalog may offer for typing.
   { id: 'SWITCH2D3D', labelKey: 'ribbon.command.view_switch2d3d', icon: 'view', group: 'view' },
   { id: 'PROJECTION', labelKey: 'view.projection', icon: 'axes', group: 'view' },
+  // Navigation chrome: these are real host setting selectors now (NAVBAR/
+  // NAVVCUBE toggles, and the three ViewCube sysvars). They need no document —
+  // they write the user's preference — so they are not document-scoped.
+  { id: 'NAVBAR', labelKey: 'draw.kind.navbar', icon: 'view', group: 'view' },
+  { id: 'NAVVCUBE', labelKey: 'draw.kind.navvcube', icon: 'view', group: 'view' },
+  { id: 'NAVVCUBEDISPLAY', labelKey: 'draw.kind.navvcubedisplay', icon: 'settings', group: 'view' },
+  { id: 'DISPLAYVIEWCUBEIN2D', labelKey: 'draw.kind.displayviewcubein2d', icon: 'settings', group: 'view' },
+  { id: 'DISPLAYVIEWCUBEIN3D', labelKey: 'draw.kind.displayviewcubein3d', icon: 'settings', group: 'view' },
   { id: 'GRID', labelKey: 'overlay.grid', icon: 'grid', group: 'view' },
   { id: 'SNAP', labelKey: 'status.toggle.snap', icon: 'snap', group: 'view' },
   { id: 'ORTHO', labelKey: 'status.toggle.ortho', icon: 'angle', group: 'view' },

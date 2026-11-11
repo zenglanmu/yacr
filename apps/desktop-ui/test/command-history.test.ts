@@ -213,7 +213,9 @@ test('the desktop history panel is an upward popup over the drawing, not a row o
   assert.match(panel, /height:\s*min\(40vh, 340px\)/, 'the expanded history has a fixed height');
   assert.match(panel, /border:\s*1px solid var\(--line-soft\)/, 'it keeps the chrome border');
   assert.match(panel, /box-shadow:/, 'a floating panel carries an edge cue');
-  assert.match(panel, /box-shadow:[^;]*rgba\(0, 0, 0, /, 'the shared shadow step, not a new one');
+  // The step is themed through the one shadow token (`--shadow-rgb`), so the
+  // light chrome re-derives it without a second literal shadow.
+  assert.match(panel, /box-shadow:[^;]*rgba\(var\(--shadow-rgb\), /, 'the shared shadow step, not a new one');
   assert.match(panel, /overflow:\s*hidden/, 'the head stays pinned and the list scrolls');
   // The old in-flow shape is gone: a top margin is exactly what used to push the
   // status bar off-screen.
@@ -235,7 +237,7 @@ test('the desktop history panel is an upward popup over the drawing, not a row o
   assert.ok(css.includes('.history-panel::after'), 'the popup carries the drawer\'s bottom fade');
   const fade = block('.history-panel::after');
   assert.match(fade, /pointer-events:\s*none/, 'the fade never swallows a scroll');
-  assert.match(fade, /linear-gradient\(to bottom, rgba\(43, 51, 63, 0\) 0%, var\(--chrome-3\) 100%\)/, 'the drawer pattern');
+  assert.match(fade, /linear-gradient\(to bottom, var\(--chrome-3-0\) 0%, var\(--chrome-3\) 100%\)/, 'the drawer pattern');
   assert.match(fade, /opacity:\s*0/, 'hidden until there is something below');
   assert.ok(css.includes(".history-panel[data-more-below='true']::after { opacity: 1; }"), 'the cue is data-driven');
   // The component sets that attribute from the scroller's own geometry.

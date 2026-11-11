@@ -26,6 +26,39 @@ export interface CadCamera {
   readonly scale: number;
 }
 
+/**
+ * The authoritative 3D/2D view orientation (`cad_status.view`), used by the
+ * ViewCube. Every value is the host camera's own state, never a UI guess: a
+ * host that cannot report a finite basis sends `null` and the cube refuses to
+ * rotate rather than fabricating an orientation.
+ *
+ * The block is also carried on the per-frame volatile event (a free orbit
+ * changes it every frame), so it must not re-render the shell tree.
+ */
+export interface CadViewOrientation {
+  /** `"2d"` or `"3d"` — the host's real view mode. */
+  readonly mode: '2d' | '3d';
+  /** `"orthographic"` or `"perspective"`. */
+  readonly projection: 'orthographic' | 'perspective';
+  readonly eye: WorldPoint;
+  readonly target: WorldPoint;
+  readonly up: WorldPoint;
+}
+
+/**
+ * The host's navigation-chrome switches (`cad_status.navigation`): AutoCAD's
+ * `NAVVCUBEDISPLAY` bit code plus the two `DISPLAYVIEWCUBEIN2D/3D` registry
+ * gates and the navbar visibility. Always host truth — the chrome only hides
+ * or shows from these values.
+ */
+export interface CadNavigationSettings {
+  readonly navbarVisible: boolean;
+  /** `0..=3`: 1 = 3D styles, 2 = 2D styles, 3 = both (AutoCAD bit code). */
+  readonly viewCubeDisplay: number;
+  readonly viewCubeIn2d: boolean;
+  readonly viewCubeIn3d: boolean;
+}
+
 /** Live import progress; present only while an import is genuinely running. */
 export interface CadImportProgress {
   /** Stable machine key of the latest phase, or `null` before the first tick. */
@@ -248,6 +281,26 @@ export interface CadStatus {
   readonly backend: string | null;
   readonly adapter: string | null;
   readonly camera: CadCamera | null;
+  /**
+   * The host's persisted UI theme (`"dark"` or `"light"`).
+   *
+   * Optional only for a recorded pre-theme payload; the readers default to
+   * `"dark"` (the historical chrome). The host remains the authority: a theme
+   * toggle is a real setting write, and the chrome follows this value.
+   */
+  readonly theme?: string;
+  /**
+   * The real view orientation for the ViewCube, or `null` when the host has no
+   * authoritative camera (no document, or a non-finite basis). Optional for an
+   * older host; absent means "cannot report" and disables cube rotation.
+   */
+  readonly view?: CadViewOrientation | null;
+  /**
+   * The host's navigation-chrome switches, or absent on an older host (the
+   * readers then apply the AutoCAD defaults: navbar on, ViewCube display 3,
+   * 2D gate off, 3D gate on).
+   */
+  readonly navigation?: CadNavigationSettings;
   readonly selection: CadSelection;
   readonly tool?: CadTool | null;
   readonly hoverPreview?: boolean;
@@ -357,6 +410,44 @@ function isCamera(value: unknown): value is CadCamera {
   return Array.isArray(camera.center) && camera.center.length === 2
     && camera.center.every(Number.isFinite)
     && typeof camera.scale === 'number' && Number.isFinite(camera.scale) && camera.scale > 0;
+}
+
+/**
+ * Parse the ViewCube orientation block. `null` is the host's honest "no
+ * authoritative camera"; a present block must carry a real finite basis and one
+ * of the two documented modes/projections.
+ */
+export function parseCadViewOrientation(value: unknown): CadViewOrientation | null {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  const view = value as Record<string, unknown>;
+  if ((view.mode !== '2d' && view.mode !== '3d')
+    || (view.projection !== 'orthographic' && view.projection !== 'perspective')
+    || !isWorldPoint(view.eye)
+    || !isWorldPoint(view.target)
+    || !isWorldPoint(view.up)) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  return value as CadViewOrientation;
+}
+
+/** Parse the navigation switches: both real booleans and a 0..3 bit code. */
+export function parseCadNavigation(value: unknown): CadNavigationSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  const navigation = value as Record<string, unknown>;
+  const display = navigation.viewCubeDisplay;
+  if (typeof navigation.navbarVisible !== 'boolean'
+    || typeof navigation.viewCubeIn2d !== 'boolean'
+    || typeof navigation.viewCubeIn3d !== 'boolean'
+    || typeof display !== 'number' || !Number.isInteger(display)
+    || display < 0 || display > 3) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  return value as CadNavigationSettings;
 }
 
 /** Whether `value` is one well-formed `layouts[]` row. */
@@ -541,6 +632,17 @@ export function parseCadStatus(value: unknown): CadStatus {
   if (status.performance !== undefined && status.performance !== null) {
     parsePerformance(status.performance);
   }
+  // The UI theme is optional for a recorded pre-theme payload; a present value
+  // must be one of the two documented names (never a free-form CSS token).
+  if (status.theme !== undefined && status.theme !== 'dark' && status.theme !== 'light') {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  // The ViewCube orientation is optional (`null`/absent when the host cannot
+  // report one), but a present block must be a real finite camera basis.
+  if (status.view !== undefined) parseCadViewOrientation(status.view);
+  // The navigation switches are optional for an older host, but a present block
+  // must be complete: a partial block would hide a real host state.
+  if (status.navigation !== undefined) parseCadNavigation(status.navigation);
   // The cursor's world coordinate is required: `null` (no reliable 2D cursor) or
   // exactly three finite numbers. Anything else is rejected outright — a
   // malformed point (a string, a 2-element array, a NaN) is never rendered as a

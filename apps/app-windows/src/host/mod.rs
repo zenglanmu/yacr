@@ -41,6 +41,7 @@ mod fonts;
 mod init;
 mod layers;
 mod popup;
+mod recent;
 mod release;
 mod tick;
 
@@ -262,6 +263,11 @@ fn register_seams(
     cad_desktop_shell::state::configure_release_opener(
         shared,
         Arc::new(release::WindowsReleaseOpener),
+    );
+    // Recent drawings are a host file capability on the main-thread session.
+    cad_desktop_shell::state::configure_recent_host(
+        shared,
+        recent::AppRecentHost::new(app.clone()),
     );
 }
 

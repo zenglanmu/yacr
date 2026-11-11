@@ -119,7 +119,8 @@ pub enum FileChooserOutcome {
 }
 
 /// A dependency-injected chooser, `Send + Sync` so it can run on the worker.
-pub type FileChooser = Arc<dyn Fn(&WindowsOpenDialogLabels) -> FileChooserOutcome + Send + Sync>;
+pub type FileChooser =
+    Arc<dyn Fn(&WindowsOpenDialogLabels, Option<&Path>) -> FileChooserOutcome + Send + Sync>;
 
 /// The single-flight open state, guarded by one mutex so admission and the
 /// terminal hand-off cannot interleave.
@@ -156,6 +157,10 @@ pub struct ReactFiles {
     chooser: FileChooser,
     state: Arc<Mutex<OpenState>>,
     source: Arc<Mutex<Option<PathBuf>>>,
+    /// The directory the next open chooser starts in, derived from the last
+    /// successfully opened/reopened target (and the newest durable recent entry
+    /// at startup). `None` means no hint.
+    recent_dir: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl ReactFiles {
@@ -172,6 +177,7 @@ impl ReactFiles {
             chooser,
             state: Arc::new(Mutex::new(OpenState::new())),
             source: Arc::new(Mutex::new(None)),
+            recent_dir: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -209,8 +215,11 @@ impl PlatformFiles for ReactFiles {
         let chooser = self.chooser.clone();
         let labels = self.labels.clone();
         let state = self.state.clone();
+        // Start in the last successfully opened target's parent (a real
+        // directory) when one is known.
+        let recent_dir = self.recent_dir.lock().unwrap().clone();
         self.spawn("react-open-chooser", move || {
-            let event = match chooser(&labels) {
+            let event = match chooser(&labels, recent_dir.as_deref()) {
                 FileChooserOutcome::Path(path) => match std::fs::read(&path) {
                     Ok(bytes) => FileEvent::Opened {
                         target: FileTarget::from_path(&path.to_string_lossy()),
@@ -288,6 +297,14 @@ impl PlatformFiles for ReactFiles {
 
     fn set_source(&self, target: Option<&FileTarget>) {
         *self.source.lock().unwrap() = target.map(|target| PathBuf::from(&target.opaque));
+    }
+
+    fn set_recent_target(&self, target: Option<&FileTarget>) {
+        *self.recent_dir.lock().unwrap() = target.and_then(recent_directory);
+    }
+
+    fn recent_location(&self, target: &FileTarget) -> Option<String> {
+        recent_directory(target).map(|directory| directory.to_string_lossy().into_owned())
     }
 
     fn poll(&self) -> Vec<FileEvent> {
@@ -523,6 +540,23 @@ impl Drop for Apartment {
     }
 }
 
+/// The parent directory of a successfully-opened target, when it is a real
+/// directory.
+///
+/// Windows' opaque handle is an absolute filesystem path, so the parent is the
+/// directory the chooser should start in. A scheme handle or a missing parent
+/// yields `None`, never a bogus folder.
+fn recent_directory(target: &FileTarget) -> Option<PathBuf> {
+    if target.opaque.is_empty() || target.opaque.contains("://") {
+        return None;
+    }
+    let parent = Path::new(&target.opaque).parent()?;
+    if parent.as_os_str().is_empty() || !parent.is_dir() {
+        return None;
+    }
+    Some(parent.to_path_buf())
+}
+
 /// The real native open chooser (COM `IFileOpenDialog`).
 ///
 /// Runs on a worker thread with its own STA. The dialog has no owner HWND: the
@@ -530,14 +564,14 @@ impl Drop for Apartment {
 /// modal to the Tauri window (it still appears in the foreground because the
 /// calling process owns it). Failures are explicit and localized; a user
 /// cancellation is [`FileChooserOutcome::Cancelled`], never a failure.
-fn native_choose(labels: &WindowsOpenDialogLabels) -> FileChooserOutcome {
+fn native_choose(labels: &WindowsOpenDialogLabels, initial: Option<&Path>) -> FileChooserOutcome {
     use windows::core::{HRESULT, PCWSTR};
     use windows::Win32::Foundation::ERROR_CANCELLED;
     use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
     use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
     use windows::Win32::UI::Shell::{
-        FileOpenDialog, IFileOpenDialog, IShellItem, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM,
-        SIGDN_FILESYSPATH,
+        FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
+        FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH,
     };
 
     let _apartment = match Apartment::new() {
@@ -568,6 +602,26 @@ fn native_choose(labels: &WindowsOpenDialogLabels) -> FileChooserOutcome {
     };
     if let Err(error) = configure {
         return FileChooserOutcome::Failed(labels.picker_failed(&error.to_string()));
+    }
+
+    // Start in the remembered directory when it still exists. `SetFolder`
+    // navigates the dialog there; `SetDefaultFolder` is honoured by some shell
+    // versions. A hint that cannot be resolved is a convenience loss, never a
+    // reason to fail the open.
+    if let Some(directory) = initial {
+        if directory.is_dir() {
+            let path = wide(&directory.to_string_lossy());
+            let bind: Option<&windows::Win32::System::Com::IBindCtx> = None;
+            if let Ok(folder) = unsafe {
+                SHCreateItemFromParsingName::<_, _, IShellItem>(
+                    PCWSTR::from_raw(path.as_ptr()),
+                    bind,
+                )
+            } {
+                let _ = unsafe { dialog.SetFolder(&folder) };
+                let _ = unsafe { dialog.SetDefaultFolder(&folder) };
+            }
+        }
     }
 
     match unsafe { dialog.Show(None) } {
@@ -655,7 +709,7 @@ mod tests {
         let path = temp_path("opened.dwg");
         let payload = b"not-a-real-dwg-but-real-bytes";
         std::fs::write(&path, payload).unwrap();
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
         files
             .begin_open_target(&FileTarget::from_path(&path.to_string_lossy()))
             .unwrap();
@@ -674,7 +728,7 @@ mod tests {
     fn missing_target_reports_an_error_event() {
         let path = temp_path("missing.dwg");
         let _ = std::fs::remove_file(&path);
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
         files
             .begin_open_target(&FileTarget::from_path(&path.to_string_lossy()))
             .unwrap();
@@ -689,7 +743,7 @@ mod tests {
 
     #[test]
     fn cancelled_chooser_is_a_cancel_not_a_success() {
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
         files.begin_open().unwrap();
         match wait_event(&files).as_slice() {
             [FileEvent::Cancelled { purpose }] => assert_eq!(*purpose, FilePurpose::Open),
@@ -699,7 +753,7 @@ mod tests {
 
     #[test]
     fn failed_chooser_reports_its_localized_reason() {
-        let files = files_with(Arc::new(|labels| {
+        let files = files_with(Arc::new(|labels, _| {
             FileChooserOutcome::Failed(labels.picker_failed("dialog down"))
         }));
         files.begin_open().unwrap();
@@ -716,7 +770,7 @@ mod tests {
         let missing = temp_path("queued-missing.dwg");
         let _ = std::fs::remove_file(&missing);
         let target = FileTarget::from_path(&missing.to_string_lossy());
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
 
         files.begin_open_target(&target).unwrap();
         assert!(
@@ -762,7 +816,7 @@ mod tests {
         let missing = temp_path("bounded.dwg");
         let _ = std::fs::remove_file(&missing);
         let target = FileTarget::from_path(&missing.to_string_lossy());
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
 
         files.begin_open_target(&target).unwrap();
         for _ in 0..16 {
@@ -781,7 +835,7 @@ mod tests {
         let other = temp_path("other.dwg");
         std::fs::write(&source, b"a").unwrap();
         std::fs::write(&other, b"b").unwrap();
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
         assert!(!files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
         files.set_source(Some(&FileTarget::from_path(&source.to_string_lossy())));
         assert!(files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
@@ -794,7 +848,7 @@ mod tests {
 
     #[test]
     fn save_and_write_are_explicitly_unsupported() {
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
         assert!(matches!(
             files.begin_save(SavePurpose::Plot, "out.svg"),
             Err(CadError::Unsupported(_))

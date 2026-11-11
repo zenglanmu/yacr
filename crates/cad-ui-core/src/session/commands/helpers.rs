@@ -37,6 +37,30 @@ pub fn typed_command_argument(text: &str) -> Option<(&'static str, &str)> {
         .then_some((selector, argument))
 }
 
+/// Split a typed line into a shell appearance/navigation selector and its
+/// non-empty argument (`NAVVCUBE ON`, `NAVVCUBEDISPLAY 3`,
+/// `DISPLAYVIEWCUBEIN2D OFF`, …).
+///
+/// These five names are settings selectors rather than `CommandId` dispatches,
+/// so they are deliberately **not** in [`ARGUMENT_SELECTORS`]: the session's
+/// shell-settings intercept resolves the raw line before the drawing-argument
+/// path ever sees it. The wire gate ([`crate::shell::check_command`]) still has
+/// to admit the line before the queue is touched, and this is the one helper
+/// that answers "is this an admitted shell argument form?" for it.
+pub fn shell_setting_argument(text: &str) -> Option<(&'static str, &str)> {
+    let trimmed = text.trim();
+    let split = trimmed.find([' ', '\t'])?;
+    let (name, rest) = trimmed.split_at(split);
+    let argument = rest.trim_start_matches([' ', '\t']).trim_end();
+    if argument.is_empty() {
+        return None;
+    }
+    let selector = canonical_command_name(name)?;
+    SHELL_SETTING_SELECTORS
+        .contains(&selector)
+        .then_some((selector, argument))
+}
+
 /// AutoCAD's `ZOOM n` / `ZOOM ALL`: the first argument-taking selector.
 ///
 /// A positive factor reuses the `ZOOMIN`/`ZOOMOUT` step path (anchored at the
@@ -105,6 +129,48 @@ pub const HATCHEDIT_SELECTOR: &str = "HATCHEDIT";
 /// an explicit not-implemented refusal. Full contract:
 /// [`cad_app::command_id::measuregeom`].
 pub const MEASUREGEOM_SELECTOR: &str = "MEASUREGEOM";
+
+/// The `NAVBAR` selector: the shell navigation-bar visibility switch.
+///
+/// A **settings write**, not a CAD command: no `CommandId` exists for it and
+/// [`normalize_command`] therefore returns `None`. It is admitted by
+/// [`canonical_command_name`] (and advertised by [`admissible_names`]) because
+/// `CadSession::command` resolves it before the command table and applies the
+/// root `navbarVisible` preference through the host's validated settings path.
+/// `NAVBAR` toggles; `NAVBAR ON|OFF|1|0` sets the value.
+pub const NAVBAR_SELECTOR: &str = "NAVBAR";
+
+/// The `NAVVCUBE` selector: the current view class's ViewCube visibility.
+///
+/// `NAVVCUBE` toggles the bit of the **current** view class (bit 1 = 3D, bit 2 =
+/// 2D) in the root `navvcubeDisplay` preference; `NAVVCUBE ON|OFF|1|0`
+/// sets/clears it. `NAVVCUBE PROPERTIES` is refused explicitly because this build
+/// has no ViewCube settings dialog.
+pub const NAVVCUBE_SELECTOR: &str = "NAVVCUBE";
+
+/// The `NAVVCUBEDISPLAY` selector: write the two-bit ViewCube class mask.
+///
+/// Takes `0..=3`; the bare form is an explicit `needs_value` refusal.
+pub const NAVVCUBEDISPLAY_SELECTOR: &str = "NAVVCUBEDISPLAY";
+
+/// The `DISPLAYVIEWCUBEIN2D` selector: the ViewCube's 2D-view visibility.
+pub const DISPLAYVIEWCUBEIN2D_SELECTOR: &str = "DISPLAYVIEWCUBEIN2D";
+
+/// The `DISPLAYVIEWCUBEIN3D` selector: the ViewCube's 3D-view visibility.
+pub const DISPLAYVIEWCUBEIN3D_SELECTOR: &str = "DISPLAYVIEWCUBEIN3D";
+
+/// The five shell settings selectors (`NAVBAR`, `NAVVCUBE`, `NAVVCUBEDISPLAY`,
+/// `DISPLAYVIEWCUBEIN2D`, `DISPLAYVIEWCUBEIN3D`).
+///
+/// They are admitted names **without** a [`CommandId`]: the command table must
+/// not grow a settings-write arm, and `EXPECTED_COMMAND_COUNT` must not change.
+pub const SHELL_SETTING_SELECTORS: [&str; 5] = [
+    NAVBAR_SELECTOR,
+    NAVVCUBE_SELECTOR,
+    NAVVCUBEDISPLAY_SELECTOR,
+    DISPLAYVIEWCUBEIN2D_SELECTOR,
+    DISPLAYVIEWCUBEIN3D_SELECTOR,
+];
 
 /// The `SPACE <argument>` selector: switch the active drawing space.
 ///
@@ -180,6 +246,12 @@ pub fn canonical_command_name(text: &str) -> Option<&'static str> {
     if let Some(name) = table_name(ZOOM_STEP_SELECTORS, &key) {
         return Some(name);
     }
+    if let Some(name) = SHELL_SETTING_SELECTORS
+        .into_iter()
+        .find(|selector| *selector == key)
+    {
+        return Some(name);
+    }
     COMMAND_ALIASES
         .iter()
         .find(|(alias, _)| *alias == key)
@@ -241,6 +313,11 @@ pub fn admissible_names() -> Vec<&'static str> {
     }
     for (name, _) in ZOOM_STEP_SELECTORS {
         if !names.contains(name) {
+            names.push(name);
+        }
+    }
+    for name in SHELL_SETTING_SELECTORS {
+        if !names.contains(&name) {
             names.push(name);
         }
     }

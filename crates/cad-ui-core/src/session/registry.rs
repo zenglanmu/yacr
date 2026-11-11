@@ -31,7 +31,8 @@
 //! ```
 //!
 //! * **groups** — `shared` (served by both transports) or `tauri_only` (desktop
-//!   only: `cad_status`, `probe_status`, `probe_input`); `wasm_export` marks a row
+//!   only: `cad_status`, `probe_status`, `probe_input`, `cad_recent_files`,
+//!   `cad_open_recent`); `wasm_export` marks a row
 //!   that is *also* a direct wasm export (`probe_input`, `cad_status`). The wasm
 //!   export list is informational for the generated name sets; those functions are
 //!   declared next to the wasm binding, because only that crate knows the export
@@ -51,10 +52,10 @@
 //!   exactly like a bare return, and the reject path is unreachable for a row
 //!   whose body cannot fail.
 //! * **body** — the `wire::*` call. This is the only place a shared wire command
-//!   body is written for either transport. The three `tauri_only` rows carry an
+//!   body is written for either transport. The five `tauri_only` rows carry an
 //!   empty body: their implementations read host state (`Shared`, the probe
-//!   tracker) that this crate deliberately does not name, so those wrappers stay
-//!   in the desktop emitter.
+//!   tracker, the file capability) that this crate deliberately does not name, so
+//!   those wrappers stay in the desktop emitter.
 
 /// The JSON value type a generated argument struct uses.
 ///
@@ -84,6 +85,12 @@ macro_rules! cad_wire_registry {
             @row(shared, sink, CommandArgs, cad_command, { arg(req, command, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::command(sink, &command) })
             @row(shared, pure, NoArgs, cad_command_aliases, { }, ::std::vec::Vec<$crate::session::wire::CadCommandAlias>, { ::std::result::Result::Ok($crate::session::wire::aliases()) })
             @row(tauri_only wasm_export, host, NoArgs, cad_status, { }, $crate::session::WireStatus<'static>, { })
+            // Host file capabilities: the recent-drawings list and a reopen of one
+            // row. They are not drawing commands (absent from `cad_commands`) and
+            // a browser carrier refuses them by name; both bodies stay in the
+            // desktop emitter because they read the host's own file capability.
+            @row(tauri_only, host, NoArgs, cad_recent_files, { }, $crate::session::CadRecentFiles, { })
+            @row(tauri_only, host, OpenRecentArgs, cad_open_recent, { arg(req, opaque, ::std::string::String) arg(req, display_name, ::std::string::String) }, $crate::session::wire::CadCommandAck, { })
             @row(shared, pure, NoArgs, cad_commands, { }, ::std::vec::Vec<&'static str>, { ::std::result::Result::Ok($crate::session::wire::commands()) })
             @row(shared, pure, NoArgs, cad_app_version, { }, ::std::string::String, { ::std::result::Result::Ok($crate::app_version().to_string()) })
             @row(shared, sink, ToolParameterArgs, cad_set_tool_parameter, { arg(req, parameter, String) arg(opt, number, ::std::option::Option<f64>) arg(opt, flag, ::std::option::Option<bool>) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_tool_parameter(sink, &parameter, number, flag) })

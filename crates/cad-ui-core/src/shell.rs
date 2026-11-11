@@ -21,8 +21,8 @@ use web_time::Instant;
 
 use crate::protocol::{InputTracker, ProbeInput, ProbeStatus};
 use crate::session::{
-    canonical_command_name, typed_command_argument, unsupported_command_reason, unsupported_status,
-    CadPopup, CadStatus,
+    canonical_command_name, shell_setting_argument, typed_command_argument,
+    unsupported_command_reason, unsupported_status, CadPopup, CadStatus,
 };
 
 /// Bounded main-thread CAD command queue capacity (admission only, not completion).
@@ -261,16 +261,20 @@ pub fn bind_allowed(ready: bool, failed_generation: Option<u64>, owner_generatio
 /// mode, then the bound.
 ///
 /// Returns the **normalized line to store** — the canonical selector, or
-/// `"<SELECTOR> <argument>"` for the one argument form — so the queue never
-/// carries an alias. Shared by [`admit_command`] and
+/// `"<SELECTOR> <argument>"` for an argument form — so the queue never carries
+/// an alias. Shared by [`admit_command`] and
 /// [`crate::session::wire::command`], so the desktop queue and a synchronous sink
 /// answer identically.
 ///
-/// The one argument form is `ZOOM <argument>` (AutoCAD's `ZOOM n` / `ZOOM ALL`):
-/// it is admitted by its base selector and queued **with** the argument, because
-/// the session — not this gate — validates the value (`0`, `-1`, `abc`, `2 3`
-/// are refused there with a reason recorded for `cad_status.error`). `LINE 2`
-/// stays an unsupported name: no other selector takes an argument.
+/// Argument forms are admitted by their base selector and queued **with** the
+/// argument, because the session — not this gate — validates the value (`ZOOM
+/// 0`, `SETVAR PDMODE abc` and `NAVVCUBEDISPLAY 7` are refused there with a
+/// reason recorded for `cad_status.error`). The drawing argument forms are
+/// [`crate::session::ARGUMENT_SELECTORS`]; the five appearance/navigation
+/// selectors (`NAVBAR`, `NAVVCUBE`, `NAVVCUBEDISPLAY`, `DISPLAYVIEWCUBEIN2D`,
+/// `DISPLAYVIEWCUBEIN3D`) are settings writes, so they come from their own
+/// table ([`shell_setting_argument`]). A name outside both stays unsupported
+/// (`LINE 2`).
 pub fn check_command(
     cad_mode: bool,
     modal_open: bool,
@@ -286,6 +290,15 @@ pub fn check_command(
     let queued = if let Some(normalized) = canonical_command_name(command) {
         normalized.to_string()
     } else if let Some((selector, argument)) = typed_command_argument(command) {
+        format!("{selector} {argument}")
+    } else if let Some((selector, argument)) = shell_setting_argument(command) {
+        // The five appearance/navigation selectors are settings writes, not
+        // `CommandId` dispatches, so they are not drawing-argument selectors —
+        // but a typed `NAVVCUBEDISPLAY 3` / `DISPLAYVIEWCUBEIN2D OFF` is a real
+        // line the session resolves. Without this branch the gate refused the
+        // line before the queue existed, so the selectors worked only when
+        // driven straight into `CadSession::command` (the host unit tests) and
+        // never from the command line or a ribbon button on a real host.
         format!("{selector} {argument}")
     } else {
         return Err(unsupported_command_reason(command));
@@ -304,8 +317,7 @@ pub fn check_command(
 /// A name outside the command vocabulary is refused with a stable reason before
 /// the queue is touched; a disabled CAD session and a full queue are refused
 /// explicitly. The canonical selector is stored, so the queue never carries an
-/// alias. See [`check_command`] for the exact gate order and the one argument
-/// form.
+/// alias. See [`check_command`] for the exact gate order and the argument forms.
 pub fn admit_command(state: &mut ShellState, command: &str) -> Result<(), String> {
     let queued = check_command(
         state.cad_mode,
@@ -450,6 +462,9 @@ mod tests {
             popup: None,
             grip_drag: false,
             performance: None,
+            theme: "dark".into(),
+            view: None,
+            navigation: crate::session::CadNavigation::default(),
         }
     }
 

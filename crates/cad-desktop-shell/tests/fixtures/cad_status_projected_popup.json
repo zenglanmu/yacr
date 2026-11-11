@@ -50,5 +50,13 @@
   "snapGridEnabled": false,
   "snapKind": null,
   "snapSpacing": 10.0,
-  "tool": null
+  "tool": null,
+  "theme": "dark",
+  "navigation": {
+    "navbarVisible": true,
+    "viewCubeDisplay": 3,
+    "viewCubeIn2d": true,
+    "viewCubeIn3d": true
+  },
+  "view": null
 }

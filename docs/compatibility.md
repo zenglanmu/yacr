@@ -1668,11 +1668,11 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `MKSHAPE` | **部分实现（具名拒绝）**：`mkshape.unsupported: this build has no SHX shape compiler` | 不写库/不升修订/不入历史 |
 | `MOVEBAK` | **部分实现（具名拒绝）**：`movebak.unsupported: the backup-folder location is owned by the host filesystem` | 不写库/不升修订/不入历史 |
 | `MSLIDE` | **部分实现（具名拒绝）**：`mslide.unsupported: this build has no slide (SLD) writer` | 不写库/不升修订/不入历史 |
-| `NAVBAR` | **部分实现（具名拒绝）**：`navbar.unsupported: this build has no 3D navigation/ViewCube model` | 不写库/不升修订/不入历史 |
+| `NAVBAR` | **部分实现**：真实设置写入 `NAVBAR [ON\|OFF]`（持久化导航栏可见性）；无 AutoCAD 完整导航工具集（SteeringWheels/ShowMotion/3Dconnexion） | 仅写 `preference.json` 根键 `navbarVisible`；不写库/不升修订/不入历史 |
 | `NAVSMOTION` | **部分实现（具名拒绝）**：`navsmotion.unsupported: this build has no 3D navigation/ViewCube model` | 不写库/不升修订/不入历史 |
 | `NAVSMOTIONCLOSE` | **部分实现（具名拒绝）**：`navsmotionclose.unsupported: this build has no 3D navigation/ViewCube model` | 不写库/不升修订/不入历史 |
 | `NAVSWHEEL` | **部分实现（具名拒绝）**：`navswheel.unsupported: this build has no 3D navigation/ViewCube model` | 不写库/不升修订/不入历史 |
-| `NAVVCUBE` | **部分实现（具名拒绝）**：`navvcube.unsupported: this build has no 3D navigation/ViewCube model` | 不写库/不升修订/不入历史 |
+| `NAVVCUBE` | **部分实现**：真实设置写入 `NAVVCUBE [ON\|OFF]`（按当前 2D/3D 视图类别切 `navvcubeDisplay` 位）；`PROPERTIES` 具名拒绝 `navvcube.properties_not_implemented`；无罗盘/边角目标/动画 | 仅写 `preference.json` 根键；不写库/不升修订/不入历史 |
 | `NEWSHEETSET` | **部分实现（具名拒绝）**：`newsheetset.unsupported: this build has no sheet-set model` | 不写库/不升修订/不入历史 |
 | `NEWSHOT` | **部分实现（具名拒绝）**：`newshot.unsupported: this build has no ShowMotion named-view/motion model` | 不写库/不升修订/不入历史 |
 | `OLECONVERT` | **部分实现（具名拒绝）**：`oleconvert.unsupported: this build has no OLE object storage model` | 不写库/不升修订/不入历史 |

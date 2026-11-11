@@ -1,6 +1,7 @@
 //! Unit tests.
 
 use super::*;
+use crate::renderer_impl::light_with_background_flag;
 
 #[test]
 fn uninitialized_renderer_reports_no_active_backend() {
@@ -317,6 +318,53 @@ fn the_frame_input_carries_the_clear_colour_the_renderer_uses() {
     // clear with a NaN or an out-of-range channel.
     let target = RenderTarget::new(8, 8).with_clear_color([f32::NAN, -1.0, 2.0, 0.5]);
     assert_eq!(target.clear_color(), [0.0, 0.0, 1.0, 0.5]);
+}
+
+#[test]
+fn background_lightness_rule_is_linear_luminance_strictly_above_half() {
+    // Black is dark; pure white is light.
+    assert!(!background_is_light([0.0, 0.0, 0.0, 1.0]));
+    assert!(background_is_light([1.0, 1.0, 1.0, 1.0]));
+    // Linear mid-grey is exactly the 0.5 boundary and the comparison is strict,
+    // so it is documented as *not* light.
+    assert!(!background_is_light([0.5, 0.5, 0.5, 1.0]));
+    // Just above the boundary is light.
+    assert!(background_is_light([0.51, 0.51, 0.51, 1.0]));
+    // Rec. 709 weights: a pure-green background is lighter than pure red/blue.
+    assert!(background_is_light([0.0, 0.75, 0.0, 1.0]));
+    assert!(!background_is_light([1.0, 0.0, 0.0, 1.0]));
+    // Alpha is irrelevant to the decision.
+    assert!(background_is_light([1.0, 1.0, 1.0, 0.0]));
+}
+
+#[test]
+fn background_lightness_rejects_non_finite_channels() {
+    // A bad caller can never make the ink flip engage: NaN/inf is "not light".
+    assert!(!background_is_light([f32::NAN, 1.0, 1.0, 1.0]));
+    assert!(!background_is_light([1.0, f32::NAN, 1.0, 1.0]));
+    assert!(!background_is_light([1.0, 1.0, f32::NAN, 1.0]));
+    assert!(!background_is_light([f32::INFINITY, 1.0, 1.0, 1.0]));
+    assert!(!background_is_light([1.0, f32::NEG_INFINITY, 1.0, 1.0]));
+}
+
+#[test]
+fn the_light_uniform_gets_the_background_flag_without_moving_rgb() {
+    let light = [0.25, -0.5, 1.0, 0.0];
+    // Black background: the reserved word stays 0 and the direction is verbatim.
+    assert_eq!(
+        light_with_background_flag(light, [0.0, 0.0, 0.0, 1.0]),
+        [0.25, -0.5, 1.0, 0.0]
+    );
+    // White background: only `.a` flips to 1.
+    assert_eq!(
+        light_with_background_flag(light, [1.0, 1.0, 1.0, 1.0]),
+        [0.25, -0.5, 1.0, 1.0]
+    );
+    // Whatever the incoming reserved word was, it is replaced (never carried).
+    assert_eq!(
+        light_with_background_flag([0.0, 0.0, 1.0, 7.0], [1.0, 1.0, 1.0, 1.0]),
+        [0.0, 0.0, 1.0, 1.0]
+    );
 }
 
 #[test]

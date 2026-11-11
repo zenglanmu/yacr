@@ -288,6 +288,8 @@ fn register_seams(
     let mut state = lock(shared);
     state.telemetry = Some(Arc::new(AppTelemetry(telemetry.clone())));
     state.popup_host = Some(Arc::new(crate::popup::AndroidPopupHost::new(app.clone())));
+    // Recent drawings are host file data on the same owner-thread session.
+    state.recent_host = Some(crate::recent::AndroidRecentHost::new(app.clone()));
 }
 
 /// Ask the tick to stop and release the presenter (idempotent).

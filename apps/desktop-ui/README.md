@@ -31,6 +31,7 @@ npm run dev     # http://127.0.0.1:1420
 | `src/fonts/` | 字体报告投影：严格 `cad_fonts` 解析（不把坏载荷折成空成功）、loaded/failed/unresolved 只读分组与 `FONTS` 本地选择器 |
 | `src/popup/` | 弹窗状态、布局度量与文字编辑接线 |
 | `src/options/` | 选项模型 |
+| `src/theme/` | 主题：`data-theme` 唯一写入、首帧缓存（`yacr.theme`）、跟随宿主 `cad_status.theme` 的 hook 与 `cad_set_setting` 写入 |
 | `src/components/` | 区域组件与共享控件（TSX） |
 | `src/stacking-regression/` | 层序回归夹具，不是产品开关 |
 | `src/App.tsx` | 单一 React 树的状态编排与接线，不按本次整理拆分 |
@@ -45,7 +46,7 @@ npm run dev     # http://127.0.0.1:1420
 ## 区域栈（自上而下）
 
 `标题/QAT · 功能区 · 图纸标签 · 工作区（CAD 分区 + 浮动面板层：属性/图层/诊断/外部引用/字体，
-默认贴左 | 导航栏）· 模型/布局标签 · 命令行 · 状态栏`
+默认贴左 | 导航列：ViewCube + 图标栏）· 模型/布局标签 · 命令行 · 状态栏`
 
 左侧栏只剩开始页。五个面板（属性/图层/诊断/外部引用/字体）都由同一个
 `components/PaletteWindow.tsx` 包成**非模态浮窗**，默认贴在绘图区左缘，可拖动、可调宽；
@@ -61,8 +62,9 @@ CAD 分区矩形，也不会触发宿主重排或重绘原生表面。
 宽度是唯一判据：`src/layout/use-layout-mode.ts` 订阅 `matchMedia('(max-width: 1024px)')`，
 它是 `data-layout` 的**唯一写入者**，把结果写到 `document.documentElement`（即 `<html>`）上；
 `main.shell` 不再携带该属性，所有紧凑样式都用 `:root[data-layout="mobile"]` 守卫。窗口实时改变宽度即切换，
-不重新加载文档，也不重建 `<Workspace />`（它在两种布局里处于同一位置；左侧开始栏、浮动面板层与
-导航栏在 `mobile.css` 里隐藏而非卸载，因此 CAD 会话不会被重挂）。
+不重新加载文档，也不重建 `<Workspace />`（它在两种布局里处于同一位置；左侧开始栏与浮动面板层在
+`mobile.css` 里隐藏而非卸载，因此 CAD 会话不会被重挂）。导航列在紧凑布局保留：ViewCube 始终可见，
+图标栏默认收起（本地 chevron 展开），列宽不变，所以展开/收起不会移动 CAD 分区矩形。
 
 **为什么是 1024**：布局只按屏幕宽度选（产品决定），而 1024 CSS px 是最后一个“手机/平板”而不是
 “桌面窗口”的宽度——手机竖屏 390、手机横屏（2400×1080 类屏幕约 914）、平板两个方向（≤1024）都拿到
@@ -70,9 +72,9 @@ CAD 分区矩形，也不会触发宿主重排或重绘原生表面。
 
 | 区域 | 桌面 | 紧凑 |
 |---|---|---|
-| 顶部 | 标题/QAT · 功能区 · 图纸标签 | `.mobile-topbar`：菜单按钮（44×44，`aria-expanded`/`aria-controls`）+ 图纸名 |
+| 顶部 | 标题/QAT · 功能区 · 图纸标签 | `.mobile-topbar`：菜单按钮（44×44，`aria-expanded`/`aria-controls`）+ 图纸名 + 主题开关（44×44） |
 | 工具 | 92px 功能区 | 抽屉式覆盖层（同一 React 树）：标签 chip 行（横向滚动，固定不滚走）+ 触摸网格（正文滚动，底部渐隐 + 细滚动条）；高度 ≤ `68dvh` 且始终给图纸留下 ≥132px；关闭方式 = 背景点击 / Escape / 执行后 |
-| 中部 | 浮动面板层（默认贴左、可拖动/调宽） | CAD 分区铺满剩余高度（`100dvh` 里减掉两条 bar） |
+| 中部 | 浮动面板层（默认贴左、可拖动/调宽）+ 导航列 | CAD 分区铺满剩余高度（`100dvh` 里减掉两条 bar）；导航列保留（ViewCube 常驻，图标栏默认收起） |
 | 底部 | 命令行 + 状态栏 | `.mobile-commandbar`：输入、发送、消息（含错误）、向上展开的候选/历史 sheet（≤45dvh） |
 
 抽屉与命令栏都不重写规则：抽屉用 `RIBBON_TABS` + `offeredPanels`/`offeredItems` + `runItem`/
@@ -104,7 +106,8 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 | 工作区 | `Workspace.tsx` |
 | 浮动面板容器 | `PaletteWindow.tsx`（唯一容器：拖动、调宽、层级与几何存储；几何规则在 `src/layout/palette-window.ts`） |
 | 开始页 / 属性 / 图层 / 文件信息 / 诊断（性能）/ 外部引用 / 字体管理器 | `StartPanel.tsx`、`PropertiesDock.tsx`、`LayersPalette.tsx`、`FileInfoPalette.tsx`（静态文件信息）、`DiagnosticsPalette.tsx`（动态性能诊断；两者数据契约见 `docs/file-info-panel.md`）、`ReferencesPanel.tsx`、`FontsPanel.tsx` |
-| 导航栏 | `NavRail.tsx` |
+| 导航列（ViewCube + 图标栏） | `NavigationDock.tsx`（固定宽度右缘列）、`ViewCube.tsx` + `viewcube.css`（六面 + Home；CSS 3D 由宿主相机基算出）、`NavRail.tsx`（可收起；桌面跟宿主 `NAVBAR`，紧凑布局本地展开） |
+| 主题开关 | `ThemeToggle.tsx`（标题/QAT 行与紧凑顶栏共用；写入 `cad_set_setting`，不本地翻转） |
 | 模型 / 布局标签 | `LayoutTabs.tsx` |
 | 命令行 | `CommandLine.tsx`（桌面停靠区），控制器在 `src/commands/use-command-line.ts`；历史日志见 `src/commands/command-history.ts` |
 | 状态栏 | `StatusBar.tsx` |

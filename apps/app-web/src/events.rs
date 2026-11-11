@@ -141,6 +141,7 @@ impl EventHub {
             emitted.extend(self.bus.push(CadEventKind::CursorChanged {
                 cursor_world: status.cursor_world,
                 frame_count: status.frame_count,
+                view: status.view.clone(),
             }));
         }
         if semantic {
@@ -393,7 +394,8 @@ mod tests {
             &events[0].kind,
             CadEventKind::CursorChanged {
                 cursor_world: Some([1.0, -2.5, 0.0]),
-                frame_count: 21
+                frame_count: 21,
+                ..
             }
         ));
         let json = serde_json::to_value(&events[0]).expect("serializes");

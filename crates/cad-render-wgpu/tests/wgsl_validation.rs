@@ -99,6 +99,79 @@ fn image_shader_is_valid_wgsl() {
         .expect("image shader must validate");
 }
 
+/// The light-background ink flip is a **display-time** transform: the seven
+/// colour shaders must apply it and the image / id-pass / mask shaders must not.
+/// Pinned by source contract because the rule is deliberately textual and the
+/// uniform word it keys off (`light.a`) travels through every pipeline.
+#[test]
+fn only_the_seven_colour_shaders_carry_the_light_background_ink_flip() {
+    let with_flip = [
+        ("line.wgsl", include_str!("../shaders/line.wgsl")),
+        (
+            "line_instanced.wgsl",
+            include_str!("../shaders/line_instanced.wgsl"),
+        ),
+        (
+            "line_pulled.wgsl",
+            include_str!("../shaders/line_pulled.wgsl"),
+        ),
+        ("arc.wgsl", include_str!("../shaders/arc.wgsl")),
+        ("mesh.wgsl", include_str!("../shaders/mesh.wgsl")),
+        (
+            "mesh_merged.wgsl",
+            include_str!("../shaders/mesh_merged.wgsl"),
+        ),
+        (
+            "mesh_pulled.wgsl",
+            include_str!("../shaders/mesh_pulled.wgsl"),
+        ),
+    ];
+    for (name, source) in with_flip {
+        assert!(
+            source.contains("fn ink_for_background"),
+            "{name}: missing the light-background ink transform"
+        );
+        assert!(
+            source.contains("camera.light.a > 0.5"),
+            "{name}: the transform must key off the per-frame light.a flag"
+        );
+        assert!(
+            source.contains("min(rgb.r, min(rgb.g, rgb.b)) >= 0.75"),
+            "{name}: only near-white ink (min channel >= 0.75) may flip"
+        );
+        // The transform is applied to the final colour, alpha preserved.
+        assert!(
+            source.contains("vec4<f32>(ink_for_background("),
+            "{name}: the transform must wrap the final RGB, keeping alpha"
+        );
+    }
+    let without_flip = [
+        ("image.wgsl", include_str!("../shaders/image.wgsl")),
+        ("mask.wgsl", include_str!("../shaders/mask.wgsl")),
+        ("pick_arc.wgsl", include_str!("../shaders/pick_arc.wgsl")),
+        (
+            "pick_image.wgsl",
+            include_str!("../shaders/pick_image.wgsl"),
+        ),
+        ("pick_line.wgsl", include_str!("../shaders/pick_line.wgsl")),
+        (
+            "pick_line_instanced.wgsl",
+            include_str!("../shaders/pick_line_instanced.wgsl"),
+        ),
+        ("pick_mesh.wgsl", include_str!("../shaders/pick_mesh.wgsl")),
+        (
+            "pick_mesh_merged.wgsl",
+            include_str!("../shaders/pick_mesh_merged.wgsl"),
+        ),
+    ];
+    for (name, source) in without_flip {
+        assert!(
+            !source.contains("ink_for_background"),
+            "{name}: images, masks and the id pass must not apply the ink flip"
+        );
+    }
+}
+
 /// The id-pass shaders are *assembled*: `shaders/pick_*.wgsl` provide the
 /// uniform, the vertex stage and `fs_key`, and a generated fragment tail declares
 /// the entry point for the active id-target format. Validating the file alone

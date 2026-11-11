@@ -59,6 +59,14 @@ export interface ShellValue {
   readonly documentOpen: boolean;
   /** Whether a drawing is actually on screen (the layout fact). */
   readonly documentVisible: boolean;
+  /**
+   * Whether the compact (≤1024 CSS px) layout is active.
+   *
+   * The same value `App` derives from `useLayoutMode()`. Regions read it instead
+   * of subscribing to the media query a second time; the compact stylesheet is
+   * still the only place the breakpoint is written down.
+   */
+  readonly mobile: boolean;
   /** Whether this carrier renders the desktop palettes. */
   readonly palettesAvailable: boolean;
   /** Whether the host reports a live dialog. */

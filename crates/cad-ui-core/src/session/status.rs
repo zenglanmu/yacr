@@ -280,6 +280,8 @@ pub struct CadPopup {
     pub modal: bool,
 }
 
+pub use super::status_view::{CadNavigation, CadViewOrientation};
+
 /// The `cad_status` snapshot consumed by the frontend.
 ///
 /// The field set is the frozen frontend contract: every key is always present,
@@ -469,6 +471,22 @@ pub struct CadStatus {
     /// sampler — and is **never** a fabricated zero. The consumer renders an em
     /// dash for each absent metric instead of inventing a measurement.
     pub performance: Option<CadPerformance>,
+    /// The host's UI theme (`"dark"` | `"light"`), always present.
+    ///
+    /// This is the persisted host preference
+    /// ([`cad_host::CadSettingKey::Theme`]) projected verbatim, never a UI-side
+    /// default: applying a theme also sets the model/paper canvas backgrounds,
+    /// so the chrome and the canvas cannot disagree.
+    pub theme: String,
+    /// The current view orientation (see [`CadViewOrientation`]), or `null`.
+    ///
+    /// Host truth from the authoritative viewport camera. `null` means "no
+    /// authoritative camera or a non-finite basis" (no document, or a camera the
+    /// host would not render) — never a fabricated orientation.
+    pub view: Option<CadViewOrientation>,
+    /// The host's real navigation/ViewCube switches (see [`CadNavigation`]);
+    /// always present, never `null`.
+    pub navigation: CadNavigation,
 }
 
 /// A `cad_status` snapshot that advertises no CAD capability (probe mode or a
@@ -530,6 +548,12 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         // No host sampler produced metrics for a probe/unsupported snapshot:
         // explicit `None`, never an invented zero.
         performance: None,
+        // No host preference was read for a probe/unsupported snapshot: the
+        // documented theme default is reported rather than an empty string.
+        theme: cad_host::THEME_VALUES[0].to_string(),
+        // …and no session camera exists, so there is no orientation to report.
+        view: None,
+        navigation: CadNavigation::default(),
     }
 }
 
@@ -892,6 +916,9 @@ pub(super) fn assemble_status(
     grip_drag: bool,
     layouts: Vec<CadLayoutTab>,
     active_space: CadActiveSpace,
+    theme: String,
+    view: Option<CadViewOrientation>,
+    navigation: CadNavigation,
 ) -> CadStatus {
     CadStatus {
         document_label: has_document.then_some(label),
@@ -937,5 +964,11 @@ pub(super) fn assemble_status(
         // The session owns no sampler: the host projects its live metrics onto
         // this field on the snapshot it returns (never inferred here).
         performance: None,
+        // The host's persisted theme and navigation switches, carried verbatim.
+        theme,
+        // The authoritative viewport orientation, or `null` when there is no
+        // trustworthy camera basis.
+        view,
+        navigation,
     }
 }

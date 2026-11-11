@@ -264,6 +264,26 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   SETVAR: Object.freeze({
     parse: (argument: string) => /^[A-Za-z][A-Za-z0-9_]*(?:[ \t]+.+)?$/.test(argument.trim()),
   }),
+  // Navigation-chrome settings. The five names are host setting selectors, not
+  // drawing commands: `NAVBAR`/`NAVVCUBE` take On/Off, the display sysvar takes
+  // the AutoCAD 0..3 bit code, and the two registry gates take On/Off. The host
+  // remains the semantic authority; this only admits the line shape.
+  NAVBAR: Object.freeze({
+    parse: (argument: string) => ['ON', 'OFF', '1', '0'].includes(argument.trim().toUpperCase()),
+  }),
+  NAVVCUBE: Object.freeze({
+    parse: (argument: string) => ['ON', 'OFF', '1', '0', 'PROPERTIES']
+      .includes(argument.trim().toUpperCase()),
+  }),
+  NAVVCUBEDISPLAY: Object.freeze({
+    parse: (argument: string) => /^[0-3]$/.test(argument.trim()),
+  }),
+  DISPLAYVIEWCUBEIN2D: Object.freeze({
+    parse: (argument: string) => ['ON', 'OFF', '1', '0'].includes(argument.trim().toUpperCase()),
+  }),
+  DISPLAYVIEWCUBEIN3D: Object.freeze({
+    parse: (argument: string) => ['ON', 'OFF', '1', '0'].includes(argument.trim().toUpperCase()),
+  }),
   MREDO: Object.freeze({
     parse: (argument: string) => /^[0-9]+$/.test(argument.trim())
       && Number.parseInt(argument.trim(), 10) > 0,

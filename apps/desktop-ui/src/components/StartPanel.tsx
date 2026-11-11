@@ -9,6 +9,9 @@ import { Icon } from '../icons.tsx';
 import { Button } from './primitives.tsx';
 import { unavailableReasonKey } from '../commands/commands.ts';
 import { useI18n, useShell } from '../context.ts';
+import { useRecentFiles } from '../files/recent.ts';
+import type { RecentFileEntry } from '../files/recent.ts';
+import '../files/recent.css';
 
 export function StartPanel() {
   const { t } = useI18n();
@@ -26,6 +29,15 @@ export function StartPanel() {
   );
   const canOpen = shell.canCommand('OPEN');
   const canNew = shell.canCommand('NEW');
+  // Recent drawings: the host lists them; this panel only renders the answer.
+  // A row is disabled while a load runs or while OPEN is not admitted, and its
+  // title is the same refusal sentence the Open button uses.
+  const recent = useRecentFiles();
+  const recentDisabled = shell.loading || !canOpen;
+  const openRefusal = refusal('OPEN', 'file.open');
+  const openRecent = (entry: RecentFileEntry) => {
+    if (!recentDisabled) recent.open(entry);
+  };
   return (
     <section className="palette start-panel" aria-label={t('start.title')}>
       <header className="palette__head">
@@ -64,12 +76,63 @@ export function StartPanel() {
             {t('start.new_drawing')}
           </Button>
         </div>
-        <h3 className="start-panel__section">{t('start.recent')}</h3>
-        <div className="start-panel__empty">
-          <Icon name="drawing" size={20} />
-          <p>{t('start.recent_empty')}</p>
-          <p className="start-panel__note">{t('start.recent_unavailable')}</p>
-        </div>
+        <section className="recent-files" aria-labelledby="start-recent-heading">
+          <h3 id="start-recent-heading" className="start-panel__section">{t('start.recent')}</h3>
+          {recent.openError ? (
+            <p className="recent-files__error" role="alert">
+              {t('start.recent_failed', { name: recent.openError.name, reason: recent.openError.reason })}
+            </p>
+          ) : null}
+          {recent.state.kind === 'loading' ? (
+            <div className="recent-files__state recent-files__state--loading" role="status" aria-busy="true">
+              <Icon name="spinner" size={16} className="spin" />
+              <span className="sr-only">{t('start.recent')}</span>
+            </div>
+          ) : recent.state.kind === 'unsupported' ? (
+            <div className="recent-files__state">
+              <Icon name="info" size={16} />
+              <p>{t('start.recent_unavailable')}</p>
+            </div>
+          ) : recent.state.kind === 'failed' ? (
+            <div className="recent-files__state recent-files__state--error" role="alert">
+              <Icon name="alert" size={16} />
+              <p>{t('start.recent_failed', { name: t('start.recent'), reason: recent.state.reason })}</p>
+            </div>
+          ) : recent.state.entries.length === 0 ? (
+            <div className="recent-files__state">
+              <Icon name="drawing" size={20} />
+              <p>{t('start.recent_empty')}</p>
+            </div>
+          ) : (
+            <ul className="recent-files__list">
+              {recent.state.entries.map((entry, index) => {
+                const openLabel = t('start.recent_open', { name: entry.displayName });
+                return (
+                  <li key={`${index}:${entry.opaque}`}>
+                    <button
+                      type="button"
+                      className="recent-files__row"
+                      disabled={recentDisabled}
+                      aria-label={openLabel}
+                      title={recentDisabled ? openRefusal : openLabel}
+                      onClick={() => openRecent(entry)}
+                    >
+                      <span className="recent-files__icon" aria-hidden="true">
+                        <Icon name="drawing" size={16} />
+                      </span>
+                      <span className="recent-files__text">
+                        <span className="recent-files__name">{entry.displayName}</span>
+                        {entry.location ? (
+                          <span className="recent-files__path" title={entry.location}>{entry.location}</span>
+                        ) : null}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
       </div>
     </section>
   );

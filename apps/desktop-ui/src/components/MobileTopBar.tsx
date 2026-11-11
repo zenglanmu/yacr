@@ -14,6 +14,7 @@
 // slides.
 import React from 'react';
 import { Icon } from '../icons.tsx';
+import { ThemeToggle } from './ThemeToggle.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { importProgressView } from '../cad/cad-status.ts';
 import type { CadImportProgress } from '../cad/cad-status.ts';
@@ -50,6 +51,9 @@ export function MobileTopBar({ menuOpen, onMenu, drawerId }: MobileTopBarProps) 
         <Icon name="menu" size={22} />
       </button>
       <span className="mobile-topbar__title" title={label}>{label}</span>
+      {/* The compact title row replaces the desktop title bar, so it carries the
+          same theme switch (44px via `mobile.css`). */}
+      <ThemeToggle />
       {running ? (
         <span
           className={['mobile-topbar__progress', progress && progress.determinate ? '' : 'is-indeterminate'].filter(Boolean).join(' ')}

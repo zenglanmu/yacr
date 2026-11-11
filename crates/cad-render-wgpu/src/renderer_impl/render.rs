@@ -17,6 +17,8 @@ impl Renderer {
                     .unwrap_or_else(|| "device lost; rebuild required".into()),
             ));
         }
+        // `light.a` = light-background ink flag; `rgb` stays the light direction.
+        let light = light_with_background_flag(light, target.clear_color());
         // Remember the view this frame used: `pick_at` re-runs the same
         // projection for the id pass, so a pick always matches the frame the user
         // is looking at.
@@ -90,12 +92,7 @@ impl Renderer {
             self.preserve_color_on_restart = false;
             self.draw_plan_rebuilds += 1;
         }
-        let frame_key = FrameKey {
-            camera_matrix,
-            camera_position,
-            target_size: self.target_size,
-            texture_revision: self.texture_revision,
-        };
+        let frame_key = self.frame_key(camera_matrix, camera_position, target.clear_color());
         progressive_restarts += self.restart_progressive_frame(frame_key, camera_position);
         // Cloned so the shared uniform arena can be mutated (grown/filled) while
         // this frame is encoded without fighting the borrow checker over `self`.

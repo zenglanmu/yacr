@@ -37,7 +37,8 @@ struct PullCamera {
     // ramp width on the pulled line pipeline), yzw reserved.
     c3: vec4<f32>,
     // rgb = unit vector toward the light, in world space (the same space as the
-    // vertex normal); a = reserved 0.
+    // vertex normal); a = 1 when the frame's clear colour is light (the
+    // ink-flip flag, see `background_is_light`), else 0.
     light: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: PullCamera;
@@ -119,6 +120,20 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VsOut {
     return out;
 }
 
+// --- light-background ink flip ---------------------------------------------
+// `camera.light.a` is the frame's light-background flag (1 when the canvas
+// clear colour is light; see `background_is_light`). Only *near-white* ink —
+// every channel at least 0.75 — is flipped to black, so default ACI-7 geometry
+// stays visible on a white theme. Saturated colours are deliberately untouched:
+// e.g. yellow ink stays yellow and may be unreadable on white (explicit
+// limitation). Pick/mask/image shaders never apply this transform.
+fn ink_for_background(rgb: vec3<f32>) -> vec3<f32> {
+    if (camera.light.a > 0.5 && min(rgb.r, min(rgb.g, rgb.b)) >= 0.75) {
+        return vec3<f32>(0.0);
+    }
+    return rgb;
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
@@ -134,5 +149,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (flags_ctl.enabled != 0u && (flag_bits(in.key) & FLAG_HIDDEN) != 0u) {
         discard;
     }
-    return flag_tint(vec4<f32>(lit, 1.0), in.key);
+    let shaded = flag_tint(vec4<f32>(lit, 1.0), in.key);
+    return vec4<f32>(ink_for_background(shaded.rgb), shaded.a);
 }

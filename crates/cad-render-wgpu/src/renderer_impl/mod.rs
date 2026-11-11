@@ -12,6 +12,7 @@ use std::time::Instant;
 use web_time::Instant;
 
 mod alloc;
+pub(crate) mod background_ink;
 mod device;
 mod encode;
 mod fallback;
@@ -49,4 +50,5 @@ pub(crate) use alloc::{
     pulled_capacity_fits, pulled_capacity_verdict, pulled_payload_bytes, pulled_skip_state,
     PulledAllocationError, PulledAllocationVerdict,
 };
+pub(crate) use background_ink::light_with_background_flag;
 pub(crate) use types::{prefix_outcome, CheckpointFacts, IncomingResources, PrefixOutcome};

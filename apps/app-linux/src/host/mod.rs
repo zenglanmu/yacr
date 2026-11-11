@@ -60,6 +60,7 @@ mod plugins;
 mod popup;
 mod postload;
 mod presenter;
+mod recent;
 mod release;
 mod surface;
 mod telemetry;
@@ -392,5 +393,12 @@ pub(crate) fn register_seams(
     cad_desktop_shell::state::configure_release_opener(
         shared,
         Arc::new(release::XdgOpenReleaseOpener),
+    );
+    // Recent drawings: the durable list is on the main-thread CAD session, so the
+    // shared commands reach it through this seam (a plain clone; no shell lock is
+    // held across the main-thread hop).
+    cad_desktop_shell::state::configure_recent_host(
+        shared,
+        recent::AppRecentHost::new(app.clone()),
     );
 }

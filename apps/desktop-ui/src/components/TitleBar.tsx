@@ -4,6 +4,7 @@ import React from 'react';
 import { Button, IconButton } from './primitives.tsx';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
+import { ThemeToggle } from './ThemeToggle.tsx';
 import { unavailableReasonKey } from '../commands/commands.ts';
 import { useI18n, useShell } from '../context.ts';
 import type { Locale } from '../i18n.ts';
@@ -76,6 +77,8 @@ export function TitleBar() {
       <span className="titlebar__brand">{brand}</span>
 
       <div className="titlebar__spacer" />
+
+      <ThemeToggle />
 
       <label className="field-inline">
         <Icon name="language" size={15} />

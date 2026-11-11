@@ -4,8 +4,11 @@ use super::*;
 /// (16) + `vec4<u32> key_flags` (16) + `vec4<f32>` light (16) in
 /// `shaders/{line,mesh,image,line_instanced,mesh_merged}.wgsl`. `key_flags.x` is
 /// the batch's renderer pick key and `.y` its [`INSTANCE_FLAG_*`] bitfield;
-/// `light.rgb` is the frame's unit vector *toward* the light in world space
-/// (`.a` reserved 0). The uniform is 16-byte aligned, so the struct is 112 bytes.
+/// `light.rgb` is the frame's unit vector *toward* the light in world space and
+/// `light.a` is the frame's **light-background** flag (`1` when the clear colour
+/// is light, see [`background_is_light`]; `0` otherwise — the ink-flip flag the
+/// colour shaders read). The uniform is 16-byte aligned, so the struct is 112
+/// bytes.
 pub(crate) const UNIFORM_STRUCT_BYTES: u32 = 112;
 
 /// Bytes of the selection-flags control uniform (`enabled` + row width + two
@@ -449,7 +452,7 @@ pub(crate) fn pack_positions(vectors: &[[f32; 3]]) -> Vec<u8> {
 /// Pack one per-batch uniform: `mat4x4<f32>` transform, `vec4<f32>` tint,
 /// `vec4<u32> key_flags` (x = renderer pick key, y = [`INSTANCE_FLAG_*`] bits)
 /// and `vec4<f32>` light (`rgb` = unit vector toward the light in world space,
-/// `a` reserved 0).
+/// `a` = the frame's light-background ink flag, see [`background_is_light`]).
 ///
 /// `light` is a per-frame constant, but it travels in every slot because all
 /// shaders share one uniform layout (see [`UNIFORM_STRUCT_BYTES`]).

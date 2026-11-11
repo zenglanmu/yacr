@@ -1,4 +1,4 @@
-//! The Wave 17-24 named-refusal registry (200 AutoCAD 2026 names).
+//! The Wave 17-24 named-refusal registry (197 AutoCAD 2026 names).
 //!
 //! Every name in this batch describes a feature with no model or API in this
 //! build: action macros, palettes, OLE/hyperlinks, LISP, 3D lights/materials/
@@ -225,11 +225,9 @@ refusal_names! {
     Mkshape => "MKSHAPE" => "mkshape.unsupported: this build has no SHX shape compiler",
     Movebak => "MOVEBAK" => "movebak.unsupported: the backup-folder location is owned by the host filesystem",
     Mslide => "MSLIDE" => "mslide.unsupported: this build has no slide (SLD) writer",
-    Navbar => "NAVBAR" => "navbar.unsupported: this build has no 3D navigation/ViewCube model",
     Navsmotion => "NAVSMOTION" => "navsmotion.unsupported: this build has no 3D navigation/ViewCube model",
     Navsmotionclose => "NAVSMOTIONCLOSE" => "navsmotionclose.unsupported: this build has no 3D navigation/ViewCube model",
     Navswheel => "NAVSWHEEL" => "navswheel.unsupported: this build has no 3D navigation/ViewCube model",
-    Navvcube => "NAVVCUBE" => "navvcube.unsupported: this build has no 3D navigation/ViewCube model",
     Newsheetset => "NEWSHEETSET" => "newsheetset.unsupported: this build has no sheet-set model",
     Newshot => "NEWSHOT" => "newshot.unsupported: this build has no ShowMotion named-view/motion model",
     Oleconvert => "OLECONVERT" => "oleconvert.unsupported: this build has no OLE object storage model",

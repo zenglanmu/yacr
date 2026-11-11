@@ -24,6 +24,11 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
         aperture_size: 12,
         gpu_budget_percent: 90,
         wgpu_backend: "dx12".to_string(),
+        theme: "light".to_string(),
+        navbar_visible: false,
+        navvcube_display: 2,
+        view_cube_in_2d: false,
+        view_cube_in_3d: true,
         fonts_dir: Some("/tmp/yacr-fonts".to_string()),
     };
     let wire = serde_json::to_value(&settings).expect("settings serialize");
@@ -48,11 +53,16 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "apertureSize": 12,
             "gpuBudgetPercent": 90,
             "wgpu_backend": "dx12",
+            "theme": "light",
+            "navbarVisible": false,
+            "navvcubeDisplay": 2,
+            "viewCubeIn2d": false,
+            "viewCubeIn3d": true,
             "fontsDir": "/tmp/yacr-fonts",
         })
     );
-    // Exactly the nineteen documented fields; no unrelated Options fields.
-    assert_eq!(wire.as_object().expect("object").len(), 19);
+    // Exactly the twenty-four documented fields; no unrelated Options fields.
+    assert_eq!(wire.as_object().expect("object").len(), 24);
     // The backend choice keeps the shared snake_case key on the snapshot wire
     // (`settings.wgpu_backend` in the UI), never camelCased into `wgpuBackend`.
     assert!(

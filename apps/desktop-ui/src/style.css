@@ -73,9 +73,107 @@
      collapsed. One token for both, so the two states cannot drift apart and the
      partition rect stays identical across collapse/expand. */
   --ribbon-bar-h: 26px;
-  /* The docked right-edge navigation rail's width. The update banner uses it to
-     stay inside the drawing area, so both surfaces read one number. */
-  --navrail-w: 34px;
+  /* The docked right-edge navigation column's width (the ViewCube above the icon
+     rail). The update banner uses it to stay inside the drawing area, so both
+     surfaces read one number. It is reserved whether the rail is expanded or
+     collapsed, so the CAD partition rect never changes. */
+  --navrail-w: 56px;
+
+  /* Elevation and backdrop ink. One RGB triple per family means the light theme
+     re-derives every existing shadow/scrim without touching a component rule. */
+  --shadow-rgb: 0, 0, 0;
+  --scrim-overlay: rgba(8, 11, 15, .55);
+  --scrim-drawer: rgba(8, 11, 15, .45);
+  --scrim-sheet: rgba(8, 11, 15, .48);
+  --swatch-edge: rgba(0, 0, 0, .35);
+  /* Zero-alpha counterparts for gradient stops. A gradient stop cannot take a
+     zero-alpha custom property, so these are complete `rgba(...)` values. */
+  --chrome-0: rgba(59, 68, 83, 0);
+  --chrome-3-0: rgba(43, 51, 63, 0);
+  --accent-hover: #3a8ce0;
+  --on-text: #fff;
+  --brand-from: #4f6b93;
+  --brand-to: #33496b;
+  --brand-ink: #eaf1ff;
+  /* ViewCube face shading: the same cube reads as a solid body in both themes
+     because the six faces step around its own tokens rather than borrowing a
+     gradient that would invert when the surface does. */
+  --cube-top: #4c5766;
+  --cube-front: #404b5a;
+  --cube-right: #37414e;
+  --cube-left: #303a46;
+  --cube-back: #3a4452;
+  --cube-bottom: #2b333f;
+}
+
+/* Light chrome. Only token values change here, so every rule in this file and
+ * in `mobile.css` stays theme-agnostic. Contrast targets: text/dim on `--chrome`
+ * stay at or above 7:1, muted at ~5:1, and white `--on-text` on `--on` at ~5:1;
+ * `--danger`/`--ok` are the darker light-surface forms of the same hues. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --canvas: #f7f9fc;
+  --chrome: #eef2f7;
+  --chrome-2: #e4e9f1;
+  --chrome-3: #d8dfe9;
+  --panel: #f7f9fc;
+  --field: #ffffff;
+  --hover: #dbe3ee;
+  --pressed: #c7d1df;
+
+  --stripe: #f2f5f9;
+  --row-hover: #e7edf5;
+  --well: #ffffff;
+  --well-hi: #f3f7fc;
+
+  /* Lines */
+  --line: #c2cbd8;
+  --line-soft: #9da9b9;
+
+  /* Text */
+  --text: #17202b;
+  --text-dim: #333f4e;
+  --text-muted: #566272;
+  --text-disabled: #7d8794;
+
+  /* Accent + state */
+  --accent: #1163c7;
+  --accent-text: #0b4f9e;
+  --accent-strong: #1659a8;
+  --on: #1a64bd;
+  --on-text: #ffffff;
+  --focus: #0d5fc0;
+  --danger: #b42318;
+  --ok: #126b43;
+
+  /* Elevation is a blue-grey ink, not pure black: a black shadow under a light
+     surface reads as a smudge, while the same alpha over a dark surface reads as
+     depth. Backdrops are lighter for the same reason. */
+  --shadow-rgb: 31, 42, 58;
+  --scrim-overlay: rgba(15, 23, 42, .42);
+  --scrim-drawer: rgba(15, 23, 42, .32);
+  --scrim-sheet: rgba(15, 23, 42, .34);
+  --swatch-edge: rgba(0, 0, 0, .3);
+  --chrome-0: rgba(238, 242, 247, 0);
+  --chrome-3-0: rgba(216, 223, 233, 0);
+  --accent-hover: #124f96;
+  --brand-from: #3f5f86;
+  --brand-to: #2a4364;
+  --brand-ink: #f2f7ff;
+  /* The ViewCube's six faces keep the dark ladder's *relative* order
+     (top > front > back > right > left > bottom) while staying lighter than the
+     dock for the top/front pair. The right/left/bottom steps are deeper than a
+     literal inversion would give: at the dock's own `--chrome-3` value they
+     visually merge with the panel, which is why the stage also carries a soft
+     ink shadow. */
+  --cube-top: #ffffff;
+  --cube-front: #edf3fa;
+  --cube-back: #e2eaf4;
+  --cube-right: #ccd8e7;
+  --cube-left: #bccadb;
+  --cube-bottom: #adbed2;
 }
 
 * { box-sizing: border-box; }
@@ -138,14 +236,14 @@ button, input, select { font: inherit; color: inherit; }
 .ui-button--sm { height: 20px; padding: 0 6px; }
 .ui-button--xs { height: 18px; padding: 0 5px; font-size: 11px; }
 .ui-button--lg { height: 32px; padding: 0 14px; font-size: 13px; }
-.ui-button--solid { background: var(--accent-strong); color: #fff; }
-.ui-button--solid:hover:not(:disabled) { background: #3a8ce0; color: #fff; }
+.ui-button--solid { background: var(--accent-strong); color: var(--on-text); }
+.ui-button--solid:hover:not(:disabled) { background: var(--accent-hover); color: var(--on-text); }
 .ui-button--solid:disabled { background: var(--field); color: var(--text-disabled); }
 .ui-button--chip {
   border-color: var(--line-soft); background: var(--field);
   padding: 0 9px; color: var(--text-dim);
 }
-.ui-button--chip.is-on { background: var(--on); border-color: var(--on); color: #fff; }
+.ui-button--chip.is-on { background: var(--on); border-color: var(--on); color: var(--on-text); }
 .ui-button.is-active { background: var(--pressed); color: var(--text); }
 .ui-icon-button { width: 24px; padding: 0; justify-content: center; }
 .ui-icon-button.ui-button--sm { width: 20px; }
@@ -163,8 +261,8 @@ button, input, select { font: inherit; color: inherit; }
   display: grid; place-items: center;
   width: 26px; height: 24px; padding: 0;
   border: 1px solid transparent; border-radius: var(--radius);
-  background: linear-gradient(180deg, #4f6b93, #33496b);
-  color: #eaf1ff; cursor: pointer;
+  background: linear-gradient(180deg, var(--brand-from), var(--brand-to));
+  color: var(--brand-ink); cursor: pointer;
   transition: filter var(--t-fast), box-shadow var(--t-fast);
 }
 .app-mark:hover { filter: brightness(1.12); }
@@ -269,10 +367,10 @@ button, input, select { font: inherit; color: inherit; }
      `--chrome`; a gradient stop cannot take a zero-alpha custom property. */
   background-color: var(--chrome);
   background-image:
-    linear-gradient(var(--chrome), rgba(59, 68, 83, 0)),
-    linear-gradient(rgba(59, 68, 83, 0), var(--chrome)),
-    radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, .34), rgba(0, 0, 0, 0)),
-    radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, .34), rgba(0, 0, 0, 0));
+    linear-gradient(var(--chrome), var(--chrome-0)),
+    linear-gradient(var(--chrome-0), var(--chrome)),
+    radial-gradient(farthest-side at 50% 0, rgba(var(--shadow-rgb), .34), rgba(var(--shadow-rgb), 0)),
+    radial-gradient(farthest-side at 50% 100%, rgba(var(--shadow-rgb), .34), rgba(var(--shadow-rgb), 0));
   background-position: 0 0, 0 100%, 0 0, 0 100%;
   background-size: 100% 26px, 100% 26px, 100% 12px, 100% 12px;
   background-repeat: no-repeat;
@@ -282,7 +380,7 @@ button, input, select { font: inherit; color: inherit; }
   /* Downward-biased elevation: the shadow is inset and pushed down, so it lands
      under the surface instead of climbing over the bar above a dropdown or
      bleeding sideways over the sibling surface a flyout abuts. */
-  box-shadow: 0 12px 22px -10px rgba(0, 0, 0, .45);
+  box-shadow: 0 12px 22px -10px rgba(var(--shadow-rgb), .45);
   animation: fade var(--t-fast) both;
 }
 /* A level can be taller than its budget (the Draw flyout is 23 rows in a 481px
@@ -307,8 +405,8 @@ button, input, select { font: inherit; color: inherit; }
    horizontally by the blur-minus-inset keeps every shadow pixel on the far side.
    The parent's border and padding stay at their own value, and a flyout that
    flipped to the left gets the mirror image instead of the same bias. */
-.ribbon-menu[data-side='right'] { box-shadow: 12px 12px 22px -10px rgba(0, 0, 0, .45); }
-.ribbon-menu[data-side='left'] { box-shadow: -12px 12px 22px -10px rgba(0, 0, 0, .45); }
+.ribbon-menu[data-side='right'] { box-shadow: 12px 12px 22px -10px rgba(var(--shadow-rgb), .45); }
+.ribbon-menu[data-side='left'] { box-shadow: -12px 12px 22px -10px rgba(var(--shadow-rgb), .45); }
 /* The first frame exists only to be measured; it must never be seen. */
 .ribbon-menu.is-unplaced { visibility: hidden; }
 .ribbon-menu__caption {
@@ -484,7 +582,7 @@ button, input, select { font: inherit; color: inherit; }
   display: flex; flex-direction: column; gap: 1px;
   padding: 3px;
   background: var(--chrome-2); border: 1px solid var(--line-soft); border-radius: var(--radius);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, .35);
+  box-shadow: 0 6px 16px rgba(var(--shadow-rgb), .35);
   animation: rise var(--t-fast) both;
 }
 .ribbon-menu-item {
@@ -614,7 +712,7 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--chrome-3);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .45);
+  box-shadow: 0 12px 30px rgba(var(--shadow-rgb), .45);
   pointer-events: auto;
   animation: rise var(--t-fast) both;
 }
@@ -1220,22 +1318,41 @@ button, input, select { font: inherit; color: inherit; }
 .layers__form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 
 /* Navigation rail -------------------------------------------------------- */
-.navrail {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  width: var(--navrail-w); padding: 6px 0;
+/* Docked in a fixed-width right-edge column: the ViewCube above, the icon rail
+   below. The width is reserved in both rail states, so collapsing the rail shows
+   fewer rows without moving the CAD partition rect (no host resize, no surface
+   re-present). The dock owns the opaque fill and the left border; the rail is an
+   inner column so the cube's own stylesheet only has to draw the cube. */
+.navdock {
+  flex: 0 0 var(--navrail-w);
+  display: flex; flex-direction: column;
+  width: var(--navrail-w); min-height: 0;
   background: var(--chrome-3); border-left: 1px solid var(--line);
 }
+.navrail {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  flex: 1 1 auto; width: 100%; min-height: 0; padding: 2px 0 6px;
+  background: var(--chrome-3);
+  overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: none;
+}
+.navrail::-webkit-scrollbar { display: none; }
 .navrail__button {
-  display: grid; place-items: center;
-  width: 26px; height: 26px;
+  display: grid; place-items: center; flex: none;
+  width: 30px; height: 30px;
   border: 1px solid transparent; border-radius: var(--radius);
   background: transparent; color: var(--text-dim); cursor: pointer;
-  transition: background var(--t-fast), color var(--t-fast);
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
 }
 .navrail__button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.navrail__button:active:not(:disabled) { background: var(--pressed); }
 .navrail__button:disabled { color: var(--text-disabled); cursor: not-allowed; }
-.navrail__button.is-on { background: var(--on); color: #fff; }
-.navrail__rule { width: 18px; height: 1px; margin: 5px 0; background: var(--line-soft); }
+.navrail__button.is-on { background: var(--on); color: var(--on-text); }
+/* The collapse affordance is the one control that is always present: it wears
+   the rail's normal button face but never the ON fill, because it is a state
+   switch, not a toggle for a palette. */
+.navrail__toggle { width: 32px; height: 28px; color: var(--text-muted); }
+.navrail__rule { width: 20px; height: 1px; margin: 4px 0; background: var(--line-soft); }
 
 /* Layout tabs ------------------------------------------------------------ */
 /* The strip is the host's real layout list, so it may be longer than the
@@ -1313,7 +1430,7 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--chrome-3); border: 1px solid var(--line-soft); border-radius: var(--radius);
   max-height: 176px; overflow: auto;
   overscroll-behavior: contain;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, .45);
+  box-shadow: 0 12px 28px rgba(var(--shadow-rgb), .45);
   animation: rise var(--t-fast) both;
 }
 .completions__title { padding: 3px 8px; color: var(--text-muted); font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase; }
@@ -1355,7 +1472,7 @@ button, input, select { font: inherit; color: inherit; }
   /* It floats over an unpainted CAD partition, so it needs its own edge cue: the
      chrome's own shadow step, the same one the mobile sheet and the shortcut menu
      use. */
-  box-shadow: 0 12px 28px rgba(0, 0, 0, .45);
+  box-shadow: 0 12px 28px rgba(var(--shadow-rgb), .45);
   overflow: hidden;
   animation: rise var(--t-fast) both;
 }
@@ -1421,7 +1538,7 @@ button, input, select { font: inherit; color: inherit; }
   position: absolute; left: 1px; right: 1px; bottom: 1px;
   height: 20px;
   border-radius: 0 0 var(--radius) var(--radius);
-  background: linear-gradient(to bottom, rgba(43, 51, 63, 0) 0%, var(--chrome-3) 100%);
+  background: linear-gradient(to bottom, var(--chrome-3-0) 0%, var(--chrome-3) 100%);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--t-fast);
@@ -1608,7 +1725,7 @@ button, input, select { font: inherit; color: inherit; }
   transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
 }
 .status-toggle:hover:not(:disabled) { background: var(--hover); color: var(--text); }
-.status-toggle.is-on { background: var(--on); border-color: var(--on); color: #fff; }
+.status-toggle.is-on { background: var(--on); border-color: var(--on); color: var(--on-text); }
 .status-toggle.is-disabled, .status-toggle:disabled { color: var(--text-disabled); cursor: not-allowed; }
 /* Active-tool parameter stepper: the same chip surface as .status-toggle, with
    an inline label, a live value and two square step buttons. Present only for a
@@ -1689,7 +1806,7 @@ button, input, select { font: inherit; color: inherit; }
 .status-choices__choice:disabled { color: var(--text-disabled); cursor: not-allowed; pointer-events: none; }
 /* The code in force: the same accent an ON chip uses, so the current pattern reads
    at a glance and the chosen segment is the row's only loud element. */
-.status-choices__choice.is-selected { background: var(--on); color: #fff; }
+.status-choices__choice.is-selected { background: var(--on); color: var(--on-text); }
 /* Inert row (the pattern name under a solid/user-defined fill): scope is muted too,
    so a greyed row never looks like the fill it is currently drawing. */
 .status-choices.is-inactive .status-choices__label,
@@ -1753,7 +1870,7 @@ button, input, select { font: inherit; color: inherit; }
   padding: 4px;
   background: var(--chrome-2);
   border: 1px solid var(--line-soft); border-radius: var(--radius);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, .42);
+  box-shadow: 0 10px 26px rgba(var(--shadow-rgb), .42);
   animation: fade var(--t-fast) both;
 }
 /* The first frame exists only to be measured; it must never be seen. */
@@ -1770,7 +1887,7 @@ button, input, select { font: inherit; color: inherit; }
 .status-grid__choice:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
 /* The code in force: the same accent an ON chip (and the segmented chooser) uses,
    so the cell the MTEXT currently anchors to is the panel's only loud element. */
-.status-grid__choice.is-selected { background: var(--on); color: #fff; }
+.status-grid__choice.is-selected { background: var(--on); color: var(--on-text); }
 .status-grid__choice:disabled { color: var(--text-disabled); cursor: not-allowed; }
 .status-grid__choice.is-selected:disabled {
   background: transparent; color: var(--text-muted);
@@ -1851,7 +1968,7 @@ button, input, select { font: inherit; color: inherit; }
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgba(8, 11, 15, .55);
+  background: var(--scrim-overlay);
 }
 .popup-dialog { display: flex; flex-direction: column; }
 
@@ -1867,7 +1984,7 @@ button, input, select { font: inherit; color: inherit; }
   height: min(72dvh, 620px);
   max-height: calc(100vh - 32px);
   max-height: calc(100dvh - 32px);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+  box-shadow: 0 18px 48px rgba(var(--shadow-rgb), .45);
 }
 .error-report__head { border-bottom: 1px solid var(--line); }
 .error-report__title { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
@@ -1946,7 +2063,7 @@ button, input, select { font: inherit; color: inherit; }
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
   overflow: hidden;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+  box-shadow: 0 18px 48px rgba(var(--shadow-rgb), .45);
   animation: fade var(--t-med) both;
 }
 /* The host's own notice carries a longer explanation than a one-line refusal, so
@@ -2014,7 +2131,7 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--chrome-2);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+  box-shadow: 0 18px 48px rgba(var(--shadow-rgb), .45);
   pointer-events: auto;
   animation: notice-rise var(--t-med) both;
 }
@@ -2140,7 +2257,7 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--chrome-2);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, .42);
+  box-shadow: 0 10px 26px rgba(var(--shadow-rgb), .42);
   /* Quiet, no bounce: a menu is a direct answer to a press, not an entrance. */
   animation: fade var(--t-fast) both;
 }
@@ -2219,7 +2336,7 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--chrome-2);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, .42);
+  box-shadow: 0 10px 26px rgba(var(--shadow-rgb), .42);
   animation: fade var(--t-fast) both;
 }
 /* The first frame exists only to be measured; it must never be seen. */
@@ -2250,7 +2367,7 @@ button, input, select { font: inherit; color: inherit; }
 .color-chooser__grid { display: grid; grid-template-columns: repeat(15, 1fr); gap: 2px; }
 .color-chooser__swatch {
   aspect-ratio: 1; width: 100%; padding: 0;
-  border: 1px solid rgba(0, 0, 0, .35); border-radius: 2px;
+  border: 1px solid var(--swatch-edge); border-radius: 2px;
   cursor: pointer;
   transition: box-shadow var(--t-fast);
 }

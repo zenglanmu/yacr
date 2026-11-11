@@ -107,7 +107,8 @@ pub enum FileChooserOutcome {
 }
 
 /// A dependency-injected chooser, `Send + Sync` so it can run on the worker.
-pub type FileChooser = Arc<dyn Fn(&UseOpenDialogLabels) -> FileChooserOutcome + Send + Sync>;
+pub type FileChooser =
+    Arc<dyn Fn(&UseOpenDialogLabels, Option<&Path>) -> FileChooserOutcome + Send + Sync>;
 
 /// The single-flight file-interaction state, guarded by one mutex so admission
 /// and the terminal hand-off cannot interleave.
@@ -148,6 +149,10 @@ pub struct ReactFiles {
     save_chooser: Option<SaveChooser>,
     state: Arc<Mutex<FileState>>,
     source: Arc<Mutex<Option<PathBuf>>>,
+    /// The directory the next open chooser starts in, derived from the last
+    /// successfully opened/reopened target (and the newest durable recent entry
+    /// at startup). `None` means no hint.
+    recent_dir: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl ReactFiles {
@@ -190,6 +195,7 @@ impl ReactFiles {
             save_chooser,
             state: Arc::new(Mutex::new(FileState::new())),
             source: Arc::new(Mutex::new(None)),
+            recent_dir: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -227,8 +233,11 @@ impl PlatformFiles for ReactFiles {
         let chooser = self.chooser.clone();
         let labels = self.labels.clone();
         let state = self.state.clone();
+        // The chooser's starting directory is the last successfully opened
+        // target's parent (a real directory) or unset.
+        let recent_dir = self.recent_dir.lock().unwrap().clone();
         self.spawn("react-open-chooser", move || {
-            let event = match chooser(&labels) {
+            let event = match chooser(&labels, recent_dir.as_deref()) {
                 FileChooserOutcome::Path(path) => match std::fs::read(&path) {
                     Ok(bytes) => FileEvent::Opened {
                         target: FileTarget::from_path(&path.to_string_lossy()),
@@ -331,6 +340,14 @@ impl PlatformFiles for ReactFiles {
 
     fn set_source(&self, target: Option<&FileTarget>) {
         *self.source.lock().unwrap() = target.map(|target| PathBuf::from(&target.opaque));
+    }
+
+    fn set_recent_target(&self, target: Option<&FileTarget>) {
+        *self.recent_dir.lock().unwrap() = target.and_then(recent_directory);
+    }
+
+    fn recent_location(&self, target: &FileTarget) -> Option<String> {
+        recent_directory(target).map(|directory| directory.to_string_lossy().into_owned())
     }
 
     fn poll(&self) -> Vec<FileEvent> {
@@ -592,8 +609,25 @@ fn case_insensitive_glob(extension: &str) -> String {
     glob
 }
 
+/// The parent directory of a successfully-opened target, when it is a real
+/// directory.
+///
+/// This is the desktop's `recent_location`/chooser-hint derivation: the opaque
+/// handle is a filesystem path here. A scheme handle (`content://…`) or a path
+/// whose parent is absent/not a directory yields `None`, never a bogus folder.
+fn recent_directory(target: &FileTarget) -> Option<PathBuf> {
+    if target.opaque.is_empty() || target.opaque.contains("://") {
+        return None;
+    }
+    let parent = Path::new(&target.opaque).parent()?;
+    if parent.as_os_str().is_empty() || !parent.is_dir() {
+        return None;
+    }
+    Some(parent.to_path_buf())
+}
+
 /// The real native open chooser (XDG desktop portal via `ashpd`).
-fn portal_choose(labels: &UseOpenDialogLabels) -> FileChooserOutcome {
+fn portal_choose(labels: &UseOpenDialogLabels, initial: Option<&Path>) -> FileChooserOutcome {
     use ashpd::desktop::file_chooser::{FileFilter, SelectedFiles};
     use ashpd::desktop::ResponseError;
 
@@ -602,14 +636,19 @@ fn portal_choose(labels: &UseOpenDialogLabels) -> FileChooserOutcome {
         for extension in OPEN_EXTENSIONS {
             filter = filter.glob(&case_insensitive_glob(extension));
         }
-        SelectedFiles::open_file()
+        let mut request = SelectedFiles::open_file()
             .title(labels.picker_title.as_str())
             .modal(true)
             .multiple(false)
-            .filter(filter)
-            .send()
-            .await?
-            .response()
+            .filter(filter);
+        // Start in the last opened drawing's directory when the platform has
+        // one. `current_folder` is part of the same portal request; a portal
+        // that rejects the hint fails this chooser explicitly rather than
+        // silently opening somewhere else.
+        if let Some(directory) = initial {
+            request = request.current_folder(directory)?;
+        }
+        request.send().await?.response()
     });
     match result {
         Ok(files) => match files.uris().first() {

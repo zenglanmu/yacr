@@ -415,6 +415,8 @@ function Shell() {
     // Per-frame volatile fields go to their leaf stores, not React state.
     setCursor: volatileStatusStore.setCursor,
     setFps: volatileStatusStore.setFrameRate,
+    // `CadStatus['view']` is optional; normalize "not reported" to the store's null.
+    setView: view => volatileStatusStore.setView(view ?? null),
     pump: () => framesRef.current?.pump(),
   });
 
@@ -770,6 +772,7 @@ function Shell() {
     cadReady,
     documentLabel,
     documentOpen,
+    mobile,
     // Whether a drawing is actually on screen (the layout fact). Equal to
     // `documentOpen` on every `native-below` host; on `dom-canvas` the live session
     // supplies it, and it only drives layout and the status-bar state word.
@@ -931,13 +934,10 @@ function Shell() {
         <main className={['shell', cleanScreen ? 'is-clean' : ''].filter(Boolean).join(' ')}>
           {/* Compact layout: the top bar (menu + drawing name) and the drawer it
               opens. The drawer is a fixed overlay, so it costs the drawing no
-              height. The start panel, the floating palette layer, the nav rail,
-              the tab strips and the status bar are desktop chrome: they stay
-              mounted for the desktop layout only, and
-              `.workspace__left`/`.palette-layer`/`.navrail` are hidden by CSS on
-              mobile rather than unmounted — `<Workspace />` keeps its position in
-              this tree, so a live breakpoint crossing never remounts the CAD
-              session. */}
+              height. The start column and the palette layer are desktop chrome:
+              they stay mounted and are hidden by CSS on mobile, so a breakpoint
+              crossing never remounts the CAD session. The navigation dock stays
+              on both layouts (the cube is the compact 3D cue). */}
           {mobile ? (
             <>
               <MobileTopBar menuOpen={mobileDrawer.open} onMenu={toggleMobileDrawer} drawerId={MOBILE_DRAWER_ID} />

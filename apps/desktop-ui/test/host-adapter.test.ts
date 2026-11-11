@@ -16,6 +16,8 @@ import {
   WEB_FAILURE_COMMAND,
   WEB_INPUT_COMMAND,
   WEB_OPEN_EXTENSIONS,
+  WEB_OPEN_RECENT_COMMAND,
+  WEB_RECENT_FILES_COMMAND,
   WEB_SESSION_COMMAND,
   WEB_UNAVAILABLE_PREFIX,
   createWebAdapter,
@@ -388,6 +390,38 @@ test('a name the carrier does not serve keeps the session\'s unsupported-runtime
     return true;
   });
   assert.deepEqual(fake.calls, [['invoke', 'cad_something_new', '{}']]);
+});
+
+test('recent drawings are refused on the browser route, never forwarded to the session', async () => {
+  const fake = fakeModule();
+  const adapter = createWebAdapter(fake.module);
+  // The list is the contract's explicit unsupported answer: a page cannot
+  // reopen a past file without a new gesture, and an empty *supported* list
+  // would read as "nothing was ever opened".
+  assert.deepEqual(await adapter.invoke(WEB_RECENT_FILES_COMMAND, {}), {
+    supported: false,
+    entries: [],
+    reason: 'unsupported-runtime: cad_recent_files',
+  });
+  // The reopen has no answer shape at all, so it refuses by name.
+  await assert.rejects(adapter.invoke(WEB_OPEN_RECENT_COMMAND, { opaque: 'x', displayName: 'x.dwg' }), error => {
+    assert.equal(error.message, 'unsupported-runtime: cad_open_recent');
+    return true;
+  });
+  // Neither name reached the wasm session's `invoke`.
+  assert.deepEqual(fake.calls, []);
+});
+
+test('the two recent-drawings names are not shell-only and never route to a native host from dom-canvas', () => {
+  // They are host file capabilities, but a browser/dom-canvas carrier has no
+  // persistent handle: routing them to Tauri would answer a supported list (or
+  // start an open) that this carrier cannot honour. They must stay adapter
+  // commands, so they are deliberately absent from the shell-only list.
+  for (const command of [WEB_RECENT_FILES_COMMAND, WEB_OPEN_RECENT_COMMAND]) {
+    assert.ok(!SHELL_ONLY_COMMANDS.includes(command), `${command} must not be shell-only`);
+    assert.equal(invokeRoute('tauri', command, true, 'dom-canvas'), 'web', `${command} on dom-canvas`);
+    assert.equal(invokeRoute('tauri', command, true, 'native-below'), 'tauri', `${command} on native-below`);
+  }
 });
 
 test('probe_input feeds the session export with the ProbeInput body, not the envelope', async () => {
