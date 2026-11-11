@@ -19,11 +19,14 @@ import { HOST_NAMES, readCatalog, readModule } from './helpers.ts';
 
 const ROUTER = [
   '-UNITS', '-LAYER', 'LAYERSTATESAVE', 'NEWVIEW', '-SCALELISTEDIT',
-  'LWEIGHT', '-LWEIGHT', 'COLOR', '-COLOR', 'HELP', 'CLASSICINSERT',
-  'CLASSICGROUP', 'GOTOSTART', 'COPYHIST', 'TRANSPARENCY',
+  'LWEIGHT', '-LWEIGHT', 'COLOR', '-COLOR', 'HELP',
+  'GOTOSTART', 'COPYHIST', 'TRANSPARENCY',
 ];
 
 const CHROME = ['DSETTINGS', 'QUICKPROPERTIES', 'CLASSICLAYER', 'COMMANDLINE', 'COMMANDLINEHIDE',
+  // The classic panels are chrome-local selectors now: they read status rows and
+  // arm/list only real commands.
+  'CLASSICINSERT', 'CLASSICGROUP',
   // Moved out of the Wave 10 router list when the interface wave made them
   // chrome-local (they set the chrome's own visibility, never CAD state).
   'FILETAB', 'FILETABCLOSE', 'HIDEPALETTES', 'SHOWPALETTES', 'RIBBONCLOSE'];
@@ -93,11 +96,13 @@ test('the chrome-local selectors open the existing surfaces', () => {
   assert.equal(localSelectorFor('CLASSICLAYER', 'mobile').kind, 'refused');
   assert.deepEqual(localSelectorFor('COMMANDLINE', 'desktop'), { kind: 'commandLine', value: true });
   assert.deepEqual(localSelectorFor('COMMANDLINEHIDE', 'desktop'), { kind: 'commandLine', value: false });
+  assert.deepEqual(localSelectorFor('CLASSICINSERT', 'desktop'), { kind: 'classicPanel', panel: 'insert' });
+  assert.deepEqual(localSelectorFor('CLASSICGROUP', 'desktop'), { kind: 'classicPanel', panel: 'group' });
 });
 
 test('the reports and refusals state their honest boundaries', async () => {
   const en = await readCatalog('en');
-  for (const id of ['HELP', 'CLASSICINSERT', 'CLASSICGROUP', 'GOTOSTART', 'TRANSPARENCY']) {
+  for (const id of ['HELP', 'GOTOSTART', 'TRANSPARENCY']) {
     assert.match(en[`${labelSlug(id)}.hint`], /Named refusal/i, `${id} must say it is a refusal`);
   }
   for (const id of ['-LAYER', 'LAYERSTATESAVE', 'NEWVIEW', '-SCALELISTEDIT', 'COPYHIST',

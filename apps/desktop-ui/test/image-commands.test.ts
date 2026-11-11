@@ -106,7 +106,6 @@ test('the still-missing image names stay named refusals', async () => {
     'draw.kind.imageapp.hint',
     'draw.kind.imageasyncwait.hint',
     'draw.kind.imageedit.hint',
-    'draw.kind.classicimage.hint',
   ]) {
     assert.equal(typeof en[key], 'string', key);
     assert.equal(/refusal/i.test(en[key]), true, `${key}: ${en[key]}`);

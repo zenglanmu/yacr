@@ -43,9 +43,10 @@ use super::dim_arguments::{
     DIMSTYLE_SELECTOR, DIMTEDIT_SELECTOR, QDIM_SELECTOR,
 };
 use super::{
-    CadSession, ARGUMENT_SELECTOR, HATCHEDIT_SELECTOR, JUSTIFYTEXT_SELECTOR, PDMODE_SELECTOR,
-    PDSIZE_SELECTOR, PEDIT_SELECTOR, SNAPUNIT_SELECTOR, SPACE_SELECTOR, TCASE_SELECTOR,
-    TCIRCLE_SELECTOR, TCOUNT_SELECTOR, TEXTALIGN_SELECTOR, TORIENT_SELECTOR, TSCALE_SELECTOR,
+    CadSession, ALIASEDIT_SELECTOR, ARGUMENT_SELECTOR, HATCHEDIT_SELECTOR, JUSTIFYTEXT_SELECTOR,
+    PDMODE_SELECTOR, PDSIZE_SELECTOR, PEDIT_SELECTOR, REDEFINE_SELECTOR, SNAPUNIT_SELECTOR,
+    SPACE_SELECTOR, TCASE_SELECTOR, TCIRCLE_SELECTOR, TCOUNT_SELECTOR, TEXTALIGN_SELECTOR,
+    TORIENT_SELECTOR, TSCALE_SELECTOR, UNDEFINE_SELECTOR,
 };
 
 impl CadSession {
@@ -218,6 +219,17 @@ impl CadSession {
             | super::commands::PTYPE_SELECTOR
             | super::commands::REVCLOUDPROPERTIES_SELECTOR
             | super::commands::SPACETRANS_SELECTOR => self.paper_argument(selector, argument, text),
+
+            // The session-only vocabulary controls. `CadSession::command`
+            // intercepts them before this dispatch, so this arm only keeps the
+            // typed path total (a direct `argument_command` call is still
+            // answered by the same handler, never by a fabricated default).
+            UNDEFINE_SELECTOR | REDEFINE_SELECTOR | ALIASEDIT_SELECTOR => {
+                match self.vocabulary_command(text) {
+                    Some(outcome) => outcome,
+                    None => self.refuse_argument(super::unsupported_command_reason(text)),
+                }
+            }
 
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);

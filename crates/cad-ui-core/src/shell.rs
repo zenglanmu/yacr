@@ -22,7 +22,8 @@ use web_time::Instant;
 use crate::protocol::{InputTracker, ProbeInput, ProbeStatus};
 use crate::session::{
     canonical_command_name, shell_setting_argument, typed_command_argument,
-    unsupported_command_reason, unsupported_status, CadPopup, CadStatus,
+    unsupported_command_reason, unsupported_status, CadPopup, CadStatus, ARGUMENT_SELECTORS,
+    SHELL_SETTING_SELECTORS,
 };
 
 /// Bounded main-thread CAD command queue capacity (admission only, not completion).
@@ -125,6 +126,15 @@ pub struct ShellState {
     pub cad_ready: bool,
     /// Bounded main-thread CAD command queue (admission only; not completion).
     pub cad_commands: Vec<String>,
+    /// Owner-tick mirror of the session's runtime `ALIASEDIT ADD` rows.
+    ///
+    /// The session is `!Send` and the IPC thread admits commands before the
+    /// owner tick applies them, so the gate needs its own copy of the rows to
+    /// admit a user-defined alias and normalize it to the canonical target before
+    /// it reaches [`Self::cad_commands`]. The tick refreshes it from
+    /// `CadSession::runtime_command_aliases`; empty means "the build's static
+    /// alias table only".
+    pub command_aliases: Vec<(String, String)>,
     /// Bounded ordered main-thread CAD input queue.
     pub cad_inputs: Vec<ProbeInput>,
     /// Bounded per-input IPC receive time (`seq -> Instant`), for the env-gated
@@ -169,6 +179,7 @@ impl ShellState {
             cad_mode,
             cad_ready: false,
             cad_commands: Vec::new(),
+            command_aliases: Vec::new(),
             cad_inputs: Vec::new(),
             cad_input_recv: Vec::new(),
             cad_status: if cad_mode {
@@ -281,13 +292,38 @@ pub fn check_command(
     pending: usize,
     command: &str,
 ) -> Result<String, String> {
+    check_command_with_aliases(cad_mode, modal_open, pending, command, &[])
+}
+
+/// [`check_command`] with the session's runtime alias rows.
+///
+/// The rows are `(ALIAS, CANONICAL_TARGET)` pairs from `ALIASEDIT ADD` (uppercased
+/// alias, canonical target). They are consulted **before** the static tables so a
+/// runtime alias really shadows a built-in selector, exactly like the session's
+/// own resolution. The queued line is always the canonical target — the queue
+/// never carries an alias, matching the static names it already normalizes.
+///
+/// A disabled name (`UNDEFINE`) needs no special case here: it is still a static
+/// name, so the gate admits it and the session refuses it at dispatch with
+/// `command.undefined: <NAME>` (the frontend may keep offering the name). Only a
+/// **new** runtime alias spelling needs this hook, because the static gate would
+/// otherwise refuse it as unknown before the session could resolve it.
+pub fn check_command_with_aliases(
+    cad_mode: bool,
+    modal_open: bool,
+    pending: usize,
+    command: &str,
+    aliases: &[(String, String)],
+) -> Result<String, String> {
     // The modal gate comes first: while a popup owns input, *every* CAD command
     // is refused by name (even one the router would otherwise reject), and the
     // refusal never depends on the UI having stopped forwarding.
     if modal_open {
         return Err(POPUP_MODAL_OPEN.into());
     }
-    let queued = if let Some(normalized) = canonical_command_name(command) {
+    let queued = if let Some(normalized) = runtime_alias_line(command, aliases) {
+        normalized
+    } else if let Some(normalized) = canonical_command_name(command) {
         normalized.to_string()
     } else if let Some((selector, argument)) = typed_command_argument(command) {
         format!("{selector} {argument}")
@@ -312,6 +348,34 @@ pub fn check_command(
     Ok(queued)
 }
 
+/// Normalize a runtime-alias line to its canonical target, if one applies.
+///
+/// Two shapes are supported, mirroring the static gate: a name-only alias
+/// (`QQ` → `FIT`) and an alias whose target takes a typed argument
+/// (`Z2 2` → `ZOOM 2`, only when the target is a real argument selector). An
+/// alias whose target is name-only keeps the static refusal for `QQ 2`, never a
+/// fabricated argument.
+fn runtime_alias_line(command: &str, aliases: &[(String, String)]) -> Option<String> {
+    if aliases.is_empty() {
+        return None;
+    }
+    let trimmed = command.trim();
+    let key = trimmed.to_ascii_uppercase();
+    if let Some((_, target)) = aliases.iter().find(|(alias, _)| *alias == key) {
+        return Some(target.clone());
+    }
+    let split = trimmed.find([' ', '\t'])?;
+    let name = trimmed[..split].to_ascii_uppercase();
+    let argument = trimmed[split..].trim();
+    if argument.is_empty() {
+        return None;
+    }
+    let (_, target) = aliases.iter().find(|(alias, _)| *alias == name)?;
+    let target = target.as_str();
+    (ARGUMENT_SELECTORS.contains(&target) || SHELL_SETTING_SELECTORS.contains(&target))
+        .then(|| format!("{target} {argument}"))
+}
+
 /// Admit a command into the bounded main-thread queue (unknown refused first).
 ///
 /// A name outside the command vocabulary is refused with a stable reason before
@@ -319,11 +383,12 @@ pub fn check_command(
 /// explicitly. The canonical selector is stored, so the queue never carries an
 /// alias. See [`check_command`] for the exact gate order and the argument forms.
 pub fn admit_command(state: &mut ShellState, command: &str) -> Result<(), String> {
-    let queued = check_command(
+    let queued = check_command_with_aliases(
         state.cad_mode,
         modal_gate_open(state),
         state.cad_commands.len(),
         command,
+        &state.command_aliases,
     )?;
     state.cad_commands.push(queued);
     Ok(())
@@ -446,6 +511,9 @@ mod tests {
             layouts: Vec::new(),
             active_space: CadActiveSpace::Model,
             references: Vec::new(),
+            blocks: Vec::new(),
+            groups: Vec::new(),
+            images: Vec::new(),
             tool: None,
             hover_preview: false,
             snap_enabled: false,

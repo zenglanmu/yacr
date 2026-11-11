@@ -606,7 +606,8 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             .as_ref()
             .map(|session| session.snapshot(backend, adapter, 0))
     });
-    let settings = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.settings()));
+    // Owner-thread mirrors for the IPC reads: settings + runtime aliases.
+    let settings = CAD.with(|c| c.borrow().as_ref().map(|session| session.owner_mirror()));
     let layers = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.layers()));
     let fonts = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.fonts()));
     {
@@ -614,8 +615,9 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         if let Some(snapshot) = &snapshot {
             state.shell.cad_status = Some(snapshot.clone());
         }
-        if let Some(settings) = settings {
+        if let Some((settings, command_aliases)) = settings {
             state.cad_settings = Some(settings);
+            state.shell.command_aliases = command_aliases;
         }
         if let Some(layers) = layers {
             // A projection error is mirrored as the error itself, never replaced by

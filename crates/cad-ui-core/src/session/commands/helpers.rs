@@ -172,6 +172,56 @@ pub const SHELL_SETTING_SELECTORS: [&str; 5] = [
     DISPLAYVIEWCUBEIN3D_SELECTOR,
 ];
 
+/// `UNDEFINE <name>`: disable one built-in command **for this session**.
+///
+/// A session-only vocabulary control (AutoCAD's `UNDEFINE`), not a drawing
+/// command: there is no [`CommandId`], nothing is written to the drawing and no
+/// `cad-history` entry is recorded. The typed argument is resolved against the
+/// static vocabulary, so `UNDEFINE LINE` disables `LINE` and every alias whose
+/// target is `LINE`. The essential commands ([`ESSENTIAL_COMMANDS`]) cannot be
+/// undefined and are refused with `redefine.essential`.
+pub const UNDEFINE_SELECTOR: &str = "UNDEFINE";
+
+/// `REDEFINE <name>`: re-enable a built-in command disabled by `UNDEFINE`.
+///
+/// The counterpart of [`UNDEFINE_SELECTOR`]; session-only, no drawing effect. A
+/// name that is not currently disabled is a named `redefine.not_undefined`
+/// refusal, never a silent success.
+pub const REDEFINE_SELECTOR: &str = "REDEFINE";
+
+/// `ALIASEDIT`: the real runtime alias table (`ADD`/`REMOVE`/`LIST`).
+///
+/// The name itself is already a canonical `COMMAND_TABLE` selector (the existing
+/// read-only `AliasEdit` report). `CadSession` intercepts the typed forms
+/// `ALIASEDIT ADD <alias> <target>`, `ALIASEDIT REMOVE <alias>` and
+/// `ALIASEDIT LIST` (bare `ALIASEDIT` is `LIST`) before the `CommandId` dispatch,
+/// because the runtime rows are session state the application layer does not
+/// hold. Session-only: no `acad.pgp` file is read or written.
+pub const ALIASEDIT_SELECTOR: &str = "ALIASEDIT";
+
+/// The selectors that exist only in the session's own resolution layer.
+///
+/// They are admitted names ([`canonical_command_name`] and
+/// [`admissible_names`]) without a [`CommandId`], exactly like the shell
+/// settings selectors: `CadSession::command` resolves and applies them before
+/// the command table, so `normalize_command` keeps returning `None`.
+pub const SESSION_SELECTORS: &[&str] = &[UNDEFINE_SELECTOR, REDEFINE_SELECTOR];
+
+/// The commands `UNDEFINE` may never disable (AutoCAD's essential set).
+///
+/// Disabling these would remove the user's only way to recover (`REDEFINE`), to
+/// undo the session change (`UNDEFINE`/`ALIASEDIT`), or to leave/reach a document
+/// (`OPEN`/`SAVE`/`CANCEL`). Both `UNDEFINE` and `REDEFINE` refuse them with the
+/// stable `redefine.essential` code, and `ALIASEDIT ADD` refuses to shadow them.
+pub const ESSENTIAL_COMMANDS: &[&str] = &[
+    ALIASEDIT_SELECTOR,
+    "CANCEL",
+    "OPEN",
+    REDEFINE_SELECTOR,
+    "SAVE",
+    UNDEFINE_SELECTOR,
+];
+
 /// The `SPACE <argument>` selector: switch the active drawing space.
 ///
 /// This is the same [`CommandId::SwitchSpace`] command the IPC/panel path uses;
@@ -229,9 +279,15 @@ pub fn alias_pairs() -> Vec<(&'static str, &'static str)> {
 /// `None` when the name maps to no admitted command.
 ///
 /// Covers [`COMMAND_TABLE`], the interaction-only [`MEASUREMENT_SELECTORS`] /
-/// [`ZOOM_STEP_SELECTORS`] and [`COMMAND_ALIASES`]. Names are matched
-/// case-insensitively after trimming surrounding whitespace; internal whitespace
-/// is significant (multi-word selectors keep one space).
+/// [`ZOOM_STEP_SELECTORS`], [`SHELL_SETTING_SELECTORS`], the session-only
+/// [`SESSION_SELECTORS`] (`UNDEFINE`/`REDEFINE`) and [`COMMAND_ALIASES`]. Names are
+/// matched case-insensitively after trimming surrounding whitespace; internal
+/// whitespace is significant (multi-word selectors keep one space).
+///
+/// This is the **static** vocabulary: the session's runtime alias/undefined
+/// tables are consulted first by `CadSession::command` (a runtime alias may
+/// shadow any non-essential name, and a disabled name never dispatches), so this
+/// function must stay free of session state.
 pub fn canonical_command_name(text: &str) -> Option<&'static str> {
     let key = text.trim().to_ascii_uppercase();
     if let Some(name) = table_name(COMMAND_TABLE, &key) {
@@ -248,6 +304,13 @@ pub fn canonical_command_name(text: &str) -> Option<&'static str> {
     }
     if let Some(name) = SHELL_SETTING_SELECTORS
         .into_iter()
+        .find(|selector| *selector == key)
+    {
+        return Some(name);
+    }
+    if let Some(name) = SESSION_SELECTORS
+        .iter()
+        .copied()
         .find(|selector| *selector == key)
     {
         return Some(name);
@@ -297,9 +360,10 @@ pub fn unsupported_command_reason(text: &str) -> String {
 /// instead of keeping a hand-written mirror that drifts.
 ///
 /// Canonical [`COMMAND_TABLE`] selectors come first, then the interaction-only
-/// selectors ([`MEASUREMENT_SELECTORS`], [`ZOOM_STEP_SELECTORS`]), then every
-/// alias that is not already canonical. Order is stable, so a frontend may sort
-/// it for display without losing the canonical-first grouping.
+/// selectors ([`MEASUREMENT_SELECTORS`], [`ZOOM_STEP_SELECTORS`]), then the
+/// shell-settings and session-only selectors, then every alias that is not
+/// already canonical. Order is stable, so a frontend may sort it for display
+/// without losing the canonical-first grouping.
 pub fn admissible_names() -> Vec<&'static str> {
     let mut names: Vec<&'static str> = COMMAND_TABLE
         .iter()
@@ -318,6 +382,11 @@ pub fn admissible_names() -> Vec<&'static str> {
     }
     for name in SHELL_SETTING_SELECTORS {
         if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    for name in SESSION_SELECTORS {
+        if !names.contains(name) {
             names.push(name);
         }
     }

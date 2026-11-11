@@ -15,10 +15,16 @@
 //! abbreviations **for the commands this build already implements only**: an
 //! alias is admitted only when its target is a real selector, so `MA`
 //! (`MATCHPROP`) is present now that MATCHPROP exists (and was absent while the
-//! command itself was absent). There is no `acad.pgp` file parsing and no
-//! user-defined alias support; this table is the whole (curated) subset, and
-//! every row is contract-tested to canonicalise onto a `COMMAND_TABLE` name, to
-//! be unique, and to collide with no canonical name.
+//! command itself was absent). There is no `acad.pgp` file parsing; this table is
+//! the whole (curated) shipped subset, and every row is contract-tested to
+//! canonicalise onto a `COMMAND_TABLE` name, to be unique, and to collide with no
+//! canonical name.
+//!
+//! Runtime aliases are **session state**, not rows here: `CadSession` owns the
+//! `ALIASEDIT ADD|REMOVE|LIST` command-line forms (`crates/cad-ui-core`), which
+//! shadow these rows and the canonical selectors for the lifetime of the session
+//! and are never written back to a file. `ALIASEDIT`'s payload-path report below
+//! therefore still describes this build table only.
 //!
 //! There is no `SNAP` alias row. AutoCAD's `SNAP` is **grid snap** (F9), a real
 //! selector of its own (`CommandId::ToggleSnapGrid`, with the `SNAPUNIT` spacing

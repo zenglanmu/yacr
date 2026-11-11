@@ -6,6 +6,7 @@
 
 mod alias_table;
 mod annot_arguments;
+mod classic_status;
 mod command_vocabulary;
 mod command_vocabulary_clipboard;
 mod command_vocabulary_inquiry;
@@ -43,6 +44,7 @@ mod text_batch;
 mod utility_arguments;
 mod view_arguments;
 mod view_status;
+mod vocabulary_control;
 mod xref_status;
 mod zoom_argument;
 mod zoom_object_xp;

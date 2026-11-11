@@ -293,6 +293,7 @@ impl Shared {
                 layer_writes: &mut self.cad_layer_writes,
             },
         )
+        .with_runtime_aliases(&self.shell.command_aliases)
     }
 
     /// The [`cad_ui_core::session::ControlReads`] the desktop serves.

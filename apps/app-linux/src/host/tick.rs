@@ -786,16 +786,16 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 .map(|session| session.snapshot(backend, adapter, 0))
         });
         super::performance::attach(&mut snapshot, shared);
-        // Same mirroring discipline as the status: the settings snapshot is
-        // derived on the owner thread and cloned for the worker-thread IPC read.
-        let settings = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.settings()));
+        // Owner-thread mirrors for the IPC reads: settings + runtime aliases.
+        let settings = CAD.with(|c| c.borrow().as_ref().map(|session| session.owner_mirror()));
         {
             let mut state = lock(shared);
             if let Some(snapshot) = &snapshot {
                 state.shell.cad_status = Some(snapshot.clone());
             }
-            if let Some(settings) = settings {
+            if let Some((settings, command_aliases)) = settings {
                 state.cad_settings = Some(settings);
+                state.shell.command_aliases = command_aliases;
             }
         }
         // Hand the importer's records to the pass and install a settled derived

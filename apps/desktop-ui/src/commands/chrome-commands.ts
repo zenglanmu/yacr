@@ -73,6 +73,15 @@ export const PMTOGGLE_COMMAND = 'PMTOGGLE';
 /** The typed word that opens the classic external-references panel. */
 export const CLASSICXREF_COMMAND = 'CLASSICXREF';
 
+/** The typed word that opens the classic block-insertion panel. */
+export const CLASSICINSERT_COMMAND = 'CLASSICINSERT';
+
+/** The typed word that opens the classic session-group panel. */
+export const CLASSICGROUP_COMMAND = 'CLASSICGROUP';
+
+/** The typed word that opens the classic raster-image panel. */
+export const CLASSICIMAGE_COMMAND = 'CLASSICIMAGE';
+
 /** The typed word that shows the drawing-tab strip (a set, never a toggle). */
 export const FILETAB_COMMAND = 'FILETAB';
 
@@ -207,6 +216,21 @@ export function isClassicXRefCommand(text: unknown): boolean {
   return normalized(text) === CLASSICXREF_COMMAND;
 }
 
+/** Whether typed text is the bare `CLASSICINSERT` selector. */
+export function isClassicInsertCommand(text: unknown): boolean {
+  return normalized(text) === CLASSICINSERT_COMMAND;
+}
+
+/** Whether typed text is the bare `CLASSICGROUP` selector. */
+export function isClassicGroupCommand(text: unknown): boolean {
+  return normalized(text) === CLASSICGROUP_COMMAND;
+}
+
+/** Whether typed text is the bare `CLASSICIMAGE` selector. */
+export function isClassicImageCommand(text: unknown): boolean {
+  return normalized(text) === CLASSICIMAGE_COMMAND;
+}
+
 /** Whether typed text is the bare `FILETAB` selector. */
 export function isFileTabCommand(text: unknown): boolean {
   return normalized(text) === FILETAB_COMMAND;
@@ -317,6 +341,9 @@ export const CHROME_COMMANDS: readonly ChromeCommandSelector[] = Object.freeze([
   { name: SHOWPALETTES_COMMAND, matches: isShowPalettesCommand },
   { name: PMTOGGLE_COMMAND, matches: isPmToggleCommand },
   { name: CLASSICXREF_COMMAND, matches: isClassicXRefCommand },
+  { name: CLASSICINSERT_COMMAND, matches: isClassicInsertCommand },
+  { name: CLASSICGROUP_COMMAND, matches: isClassicGroupCommand },
+  { name: CLASSICIMAGE_COMMAND, matches: isClassicImageCommand },
   { name: FILETAB_COMMAND, matches: isFileTabCommand },
   { name: FILETABCLOSE_COMMAND, matches: isFileTabCloseCommand },
   { name: QVDRAWING_COMMAND, matches: isQuickViewDrawingCommand },

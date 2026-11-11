@@ -57,6 +57,11 @@ impl CadSession {
         if !SHELL_SETTING_SELECTORS.contains(&selector) {
             return None;
         }
+        // `UNDEFINE NAVBAR` (or any shell setting) disables its argument form too:
+        // the disabled selector behaves as an unknown command.
+        if self.overrides.borrow().is_undefined(selector) {
+            return Some(self.refuse_undefined(selector));
+        }
         Some(self.apply_shell_setting(selector, argument))
     }
 

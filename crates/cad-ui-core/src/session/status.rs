@@ -189,7 +189,11 @@ impl CadSelection {
     }
 }
 
+mod classic;
 mod tool_params;
+pub use self::classic::{
+    CadBlockStatus, CadGroupMember, CadGroupStatus, CadImageClipStatus, CadImageStatus,
+};
 pub use self::tool_params::CadToolParams;
 
 /// The active interactive tool, projected from `cad_app`'s real capture state.
@@ -347,6 +351,12 @@ pub struct CadStatus {
     /// reference that could not be loaded stays visible with its real status
     /// and reason instead of being dropped.
     pub references: Vec<CadReferenceStatus>,
+    /// One row per authoritative block definition; always present, never `null`.
+    pub blocks: Vec<CadBlockStatus>,
+    /// One row per **session-only** entity group; always present, never `null`.
+    pub groups: Vec<CadGroupStatus>,
+    /// One row per raster `IMAGE` entity in any space; always present, never `null`.
+    pub images: Vec<CadImageStatus>,
     /// The active draw/measurement tool, or `null` when no capture is active.
     pub tool: Option<CadTool>,
     /// Whether idle pointer movement previews (tints) the entity under the
@@ -518,6 +528,9 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         // A session without a document declares no xrefs: the honest empty
         // block, never an omitted key.
         references: Vec::new(),
+        blocks: Vec::new(),
+        groups: Vec::new(),
+        images: Vec::new(),
         tool: None,
         hover_preview: false,
         snap_enabled: false,
@@ -940,6 +953,9 @@ pub(super) fn assemble_status(
         // The session owns the drawing: `CadSession::snapshot` projects the
         // authoritative references onto this field (never inferred here).
         references: Vec::new(),
+        blocks: Vec::new(),
+        groups: Vec::new(),
+        images: Vec::new(),
         tool,
         hover_preview,
         snap_enabled,

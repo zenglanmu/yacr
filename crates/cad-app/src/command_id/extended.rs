@@ -190,7 +190,8 @@ pub enum ExtendedCommandId {
     SysVarDialog,
     /// `VTOPTIONS`: view-transition settings are not tracked.
     ViewTransitionOptions,
-    /// `ALIASEDIT`: read-only list of the canonical alias table.
+    /// `ALIASEDIT`: read-only list of the build's canonical alias table (runtime
+    /// editing is the session-only `ALIASEDIT ADD|REMOVE|LIST` command line).
     AliasEdit,
     /// `WHOHAS`: single-document build report.
     WhoHas,

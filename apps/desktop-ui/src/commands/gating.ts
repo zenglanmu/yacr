@@ -248,8 +248,6 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'COLOR',
   '-COLOR',
   'HELP',
-  'CLASSICINSERT',
-  'CLASSICGROUP',
   'GOTOSTART',
   'COPYHIST',
   'TRANSPARENCY',
@@ -388,7 +386,6 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'IMAGEAPP',
   'IMAGEASYNCWAIT',
   'IMAGEEDIT',
-  'CLASSICIMAGE',
   'PDFATTACH',
   '-PDFATTACH',
   'PDFCLIP',
@@ -889,6 +886,9 @@ export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze([
   // `WORKSPACE`/`WSSAVE`/`WSSETTINGS` drive the in-memory workspace presets.
   'RIBBON', 'RIBBONCLOSE', 'HIDEPALETTES', 'SHOWPALETTES',
   'PMTOGGLE', 'CLASSICXREF',
+  // The classic block/group/image panels: each reads the status projection the
+  // host already publishes and arms or lists only authoritative data.
+  'CLASSICINSERT', 'CLASSICGROUP', 'CLASSICIMAGE',
   'FILETAB', 'FILETABCLOSE',
   'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE',
   'QUICKCALC',

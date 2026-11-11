@@ -24,6 +24,7 @@ mod admission;
 mod annot_arguments;
 mod bytes;
 mod command_log;
+mod command_overrides;
 mod commands;
 mod diagnostics;
 mod dim_arguments;
@@ -103,6 +104,10 @@ pub use self::bytes::BytesDocument;
 pub use self::command_log::{
     CadCommandLogEntry, CadCommandLogKind, CadCommandLogPoint, CadMeasurementEcho,
 };
+pub use self::command_overrides::MAX_ALIAS_LEN;
+use self::command_overrides::{
+    alias_accepts_argument, runtime_alias_argument, CommandOverrides, RuntimeResolution,
+};
 pub use self::commands::{
     admissible_names, alias_pairs, canonical_command_name, command_name,
     invalid_dash_layer_argument_reason, invalid_layerpmode_argument_reason,
@@ -117,11 +122,13 @@ pub use self::commands::{
     parse_snap_unit_argument, parse_view_argument, parse_viewgo_argument, parse_vpoint_argument,
     parse_zoom_argument, shell_setting_argument, typed_command_argument,
     unsupported_command_reason, zoom_step_factor, LayerStateOption, Point3Input, ViewOption,
-    ZoomArgument, ARGUMENT_SELECTOR, ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE,
-    DASH_LAYER_SELECTOR, HATCHEDIT_SELECTOR, LAYERPMODE_SELECTOR, LAYERSTATE_SELECTOR,
-    LAYWALK_SELECTOR, LTSCALE_SELECTOR, MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR,
-    PEDIT_SELECTOR, REFUSAL_TABLE, SNAPUNIT_SELECTOR, SPACE_SELECTOR, VIEWGO_SELECTOR,
-    VIEW_SELECTOR, VPOINT_SELECTOR, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
+    ZoomArgument, ALIASEDIT_SELECTOR, ARGUMENT_SELECTOR, ARGUMENT_SELECTORS, COMMAND_ALIASES,
+    COMMAND_TABLE, DASH_LAYER_SELECTOR, ESSENTIAL_COMMANDS, HATCHEDIT_SELECTOR,
+    LAYERPMODE_SELECTOR, LAYERSTATE_SELECTOR, LAYWALK_SELECTOR, LTSCALE_SELECTOR,
+    MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR, PEDIT_SELECTOR, REDEFINE_SELECTOR,
+    REFUSAL_TABLE, SESSION_SELECTORS, SHELL_SETTING_SELECTORS, SNAPUNIT_SELECTOR, SPACE_SELECTOR,
+    UNDEFINE_SELECTOR, VIEWGO_SELECTOR, VIEW_SELECTOR, VPOINT_SELECTOR, ZOOM_IN_FACTOR,
+    ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
 pub use self::draw2_arguments::invalid_draw2_argument_reason;
 pub use self::events::{
@@ -145,8 +152,9 @@ pub use self::settings::{
     SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 pub use self::status::{
-    unsupported_status, CadActiveSpace, CadCamera, CadImportProgress, CadLayoutTab, CadNavigation,
-    CadPopup, CadReferenceStatus, CadSelection, CadSelectionRow, CadStatus, CadTool, CadToolParams,
+    unsupported_status, CadActiveSpace, CadBlockStatus, CadCamera, CadGroupMember, CadGroupStatus,
+    CadImageClipStatus, CadImageStatus, CadImportProgress, CadLayoutTab, CadNavigation, CadPopup,
+    CadReferenceStatus, CadSelection, CadSelectionRow, CadStatus, CadTool, CadToolParams,
     CadViewOrientation,
 };
 pub use self::text_batch::*;
@@ -201,6 +209,10 @@ pub struct CadSession {
     /// no pointer id), so a release can be classified as a click or as the end
     /// of a navigation gesture (see [`plan_input`]).
     press: RefCell<Option<PointerPress>>,
+    /// Session-only command-vocabulary overrides (`UNDEFINE`/`REDEFINE` and the
+    /// runtime `ALIASEDIT` rows). Consulted **before** the static tables by
+    /// [`CadSession::command`]; no drawing, preference or `cad-history` state.
+    overrides: RefCell<CommandOverrides>,
 }
 
 impl CadSession {
@@ -241,6 +253,7 @@ impl CadSession {
             pending: RefCell::new(VecDeque::new()),
             frames: Cell::new(0),
             press: RefCell::new(None),
+            overrides: RefCell::new(CommandOverrides::default()),
         }
     }
 
@@ -252,6 +265,17 @@ impl CadSession {
     /// Diagnostics from reading the startup config/preference files.
     pub fn startup_diagnostics(&self) -> Vec<String> {
         self.core.startup_diagnostics()
+    }
+
+    /// The owner-tick mirror the IPC-thread reads need: effective settings plus
+    /// the runtime `ALIASEDIT ADD` rows.
+    ///
+    /// The session is `!Send`, so a native host's IPC thread cannot read it. One
+    /// call keeps the two mirrors a single read (no second authority) and lets a
+    /// host's tick mirror both in one statement; `dom-canvas` hosts read the
+    /// session directly and never need this.
+    pub fn owner_mirror(&self) -> (CadSettings, Vec<(String, String)>) {
+        (self.settings(), self.runtime_command_aliases())
     }
 
     /// The host's real recent-drawings list (newest first, possibly empty).
@@ -363,6 +387,21 @@ impl CadSession {
     /// nothing; a selector with **no** argument keeps the name-only payload refusal
     /// below.
     pub fn command(&self, text: &str) -> Result<(), String> {
+        // Session-only vocabulary control (`UNDEFINE`/`REDEFINE`/`ALIASEDIT`)
+        // comes first: it changes how names resolve for the rest of the session
+        // and must never be routed through the static command table.
+        if let Some(outcome) = self.vocabulary_command(text) {
+            return outcome;
+        }
+        // The runtime override tables are consulted **before** the static ones:
+        // a runtime alias shadows a built-in selector of the same spelling, and a
+        // name disabled by `UNDEFINE` behaves as an unknown command (a stable
+        // `command.undefined` refusal, no dispatch at all).
+        let text: &str = match self.overrides.borrow().resolve(text) {
+            RuntimeResolution::Alias(target) => target,
+            RuntimeResolution::Undefined(name) => return self.refuse_undefined(&name),
+            RuntimeResolution::Static => text,
+        };
         // The five shell appearance/navigation selectors (`NAVBAR`, `NAVVCUBE`,
         // `NAVVCUBEDISPLAY`, `DISPLAYVIEWCUBEIN2D`, `DISPLAYVIEWCUBEIN3D`) are
         // real settings writes, not `CommandId` dispatches. They are resolved and
@@ -378,7 +417,23 @@ impl CadSession {
             // spacing, `PDMODE`/`PDSIZE` write the drawing header. The base name is
             // what gets admitted; `argument_command` validates the argument.
             if let Some((selector, argument)) = typed_command_argument(text) {
+                if self.overrides.borrow().is_undefined(selector) {
+                    return self.refuse_undefined(selector);
+                }
                 return self.argument_command(selector, argument, text);
+            }
+            // A typed line whose **base name** is a runtime alias: substitute the
+            // target and keep the argument, exactly like the shell gate does for a
+            // statically admitted selector.
+            if let Some((alias, argument)) = runtime_alias_argument(text) {
+                if let Some(target) = self.overrides.borrow().alias_target(alias) {
+                    if self.overrides.borrow().is_undefined(target) {
+                        return self.refuse_undefined(alias);
+                    }
+                    if alias_accepts_argument(target) {
+                        return self.argument_command(target, argument, text);
+                    }
+                }
             }
             return Err(unsupported_command_reason(text));
         };

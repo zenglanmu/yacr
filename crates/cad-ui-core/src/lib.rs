@@ -48,11 +48,12 @@ pub use session::{
     parse_laywalk_argument, parse_ltscale_argument, parse_tcase_argument, parse_tcircle_argument,
     parse_tcount_argument, parse_textalign_argument, parse_torient_argument, parse_tscale_argument,
     parse_zoom_argument, typed_command_argument, unsupported_command_reason, unsupported_status,
-    BytesDocument, CadActiveSpace, CadCamera, CadCommandLogEntry, CadCommandLogKind, CadLayer,
-    CadLayers, CadLayoutTab, CadMeasurementEcho, CadReferenceStatus, CadSelection, CadSelectionRow,
-    CadSession, CadSettingKey, CadSettingValue, CadSettings, CadStatus, LayerStateOption,
-    TorientArgument, ZoomArgument, ARGUMENT_SELECTOR, COMMAND_ALIASES, COMMAND_TABLE,
-    SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
+    BytesDocument, CadActiveSpace, CadBlockStatus, CadCamera, CadCommandLogEntry,
+    CadCommandLogKind, CadGroupMember, CadGroupStatus, CadImageClipStatus, CadImageStatus,
+    CadLayer, CadLayers, CadLayoutTab, CadMeasurementEcho, CadReferenceStatus, CadSelection,
+    CadSelectionRow, CadSession, CadSettingKey, CadSettingValue, CadSettings, CadStatus,
+    LayerStateOption, TorientArgument, ZoomArgument, ARGUMENT_SELECTOR, COMMAND_ALIASES,
+    COMMAND_TABLE, SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 pub use shell::{
     admit_command, bind_allowed, clear_host_error, note_host_error, projected_status,

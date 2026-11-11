@@ -160,6 +160,10 @@ impl AdmissionTarget for DirectSink<'_> {
         self.applied(outcome)
     }
 
+    fn runtime_aliases(&self) -> Vec<(String, String)> {
+        self.session.runtime_command_aliases()
+    }
+
     fn tool_parameter(&mut self, parameter: ToolParameter, value: ToolValue) -> Result<(), String> {
         let outcome = self.session.set_tool_parameter(parameter, value);
         self.applied(outcome)

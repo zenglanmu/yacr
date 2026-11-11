@@ -51,7 +51,7 @@ use std::collections::VecDeque;
 use cad_app::{StandardView, ToolParameter, ToolValue};
 
 use crate::popup::PopupAck;
-use crate::shell::check_command;
+use crate::shell::check_command_with_aliases;
 
 use super::admission::{
     check_layer_write, check_selected_property, check_selected_text, check_setting,
@@ -165,6 +165,17 @@ pub trait AdmissionTarget {
     /// ([`crate::shell::check_command`] produced it: the canonical selector, or
     /// `"<SELECTOR> <argument>"`).
     fn command(&mut self, normalized: String) -> Result<(), String>;
+
+    /// The session's runtime `ALIASEDIT ADD` rows (`ALIAS` → canonical target).
+    ///
+    /// The shared gate consults these before the static tables so a user-defined
+    /// alias is admitted and normalized instead of being refused as an unknown
+    /// name. A synchronous sink reads the live session; the desktop queue sink
+    /// reads its owner-tick mirror. The default (no runtime rows) is the honest
+    /// answer for a target that has no session view.
+    fn runtime_aliases(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
 
     /// Store or apply one typed tool parameter.
     fn tool_parameter(&mut self, parameter: ToolParameter, value: ToolValue) -> Result<(), String>;
@@ -281,6 +292,10 @@ pub struct QueueSink<'a> {
     cad_mode: bool,
     modal_open: bool,
     queues: QueueFamily<'a>,
+    /// Owner-tick mirror of the session's runtime alias rows. Empty until the
+    /// first tick (or on a host that never mirrors them); the static gate then
+    /// answers, which is the pre-`ALIASEDIT` behaviour.
+    runtime_aliases: &'a [(String, String)],
 }
 
 impl<'a> QueueSink<'a> {
@@ -290,7 +305,14 @@ impl<'a> QueueSink<'a> {
             cad_mode,
             modal_open,
             queues,
+            runtime_aliases: &[],
         }
+    }
+
+    /// Attach the owner-tick mirror of the session's runtime alias rows.
+    pub fn with_runtime_aliases(mut self, aliases: &'a [(String, String)]) -> Self {
+        self.runtime_aliases = aliases;
+        self
     }
 }
 
@@ -319,6 +341,10 @@ impl AdmissionTarget for QueueSink<'_> {
     fn command(&mut self, normalized: String) -> Result<(), String> {
         self.queues.commands.push(normalized);
         Ok(())
+    }
+
+    fn runtime_aliases(&self) -> Vec<(String, String)> {
+        self.runtime_aliases.to_vec()
     }
 
     fn tool_parameter(&mut self, parameter: ToolParameter, value: ToolValue) -> Result<(), String> {
@@ -423,11 +449,13 @@ pub fn aliases() -> Vec<CadCommandAlias> {
 /// An unknown name is refused immediately (never queued). The one argument form
 /// is admitted by its base selector (see [`crate::shell::check_command`]).
 pub fn command(target: &mut dyn AdmissionTarget, text: &str) -> Result<CadCommandAck, String> {
-    let normalized = check_command(
+    let aliases = target.runtime_aliases();
+    let normalized = check_command_with_aliases(
         target.cad_mode(),
         target.modal_open(),
         target.pending(Channel::Command),
         text,
+        &aliases,
     )?;
     target.command(normalized)?;
     Ok(CadCommandAck::accepted())

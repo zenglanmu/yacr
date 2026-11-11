@@ -203,6 +203,58 @@ export interface CadReferenceStatus {
   readonly depth: number;
 }
 
+/** One drawing block definition (`cad_status.blocks[]`). */
+export interface CadBlockStatus {
+  /** The stored table name, or `null` for a definition without metadata. */
+  readonly name: string | null;
+  /** The definition's real member count. */
+  readonly memberCount: number;
+  /** The stored insertion base point, or `null` when the block has no metadata. */
+  readonly basePoint: WorldPoint | null;
+}
+
+/** One captured member reference of a session group. */
+export interface CadGroupMember {
+  /** The entity id as a decimal string (a `u128` never loses precision). */
+  readonly entityId: string;
+  /** The nested INSERT chain, root first; empty for a top-level entity. */
+  readonly instancePath: readonly string[];
+}
+
+/** One session-only entity group (`cad_status.groups[]`). */
+export interface CadGroupStatus {
+  readonly name: string;
+  readonly memberCount: number;
+  /** The captured references, in capture order. */
+  readonly members: readonly CadGroupMember[];
+}
+
+/** One image clip boundary summary (`cad_status.images[].clip`). */
+export interface CadImageClipStatus {
+  /** Stored vertex count; `2` is the rectangle form. */
+  readonly vertexCount: number;
+  /** Whether the boundary keeps the inside (`true`) or the outside (`false`). */
+  readonly inside: boolean;
+}
+
+/** One raster IMAGE entity (`cad_status.images[]`). */
+export interface CadImageStatus {
+  /** The entity id as a decimal string. */
+  readonly id: string;
+  /** Stable space key (`model`, `paper`, `block`). */
+  readonly space: 'model' | 'paper' | 'block';
+  /** The layout/block id for paper/block space, `null` for model space. */
+  readonly spaceId: number | null;
+  /** The logical resource key stored on the entity, if any. */
+  readonly file: string | null;
+  /** Pixel size `[width, height]` as stored. */
+  readonly pixels: readonly [number, number];
+  /** The entity's stored visibility flag. */
+  readonly visible: boolean;
+  /** The stored clip summary, or `null` when the image is unclipped. */
+  readonly clip: CadImageClipStatus | null;
+}
+
 /**
  * The host's carrier profile (`cad_status.hostProfile`), one always-present
  * nested object on the current wire.
@@ -342,6 +394,12 @@ export interface CadStatus {
   readonly activeSpace?: CadActiveSpace;
   /** External references of the open drawing; absent means `[]`. */
   readonly references?: readonly CadReferenceStatus[];
+  /** Drawing block definitions; absent means `[]`. */
+  readonly blocks?: readonly CadBlockStatus[];
+  /** Session-only entity groups; absent means `[]`. */
+  readonly groups?: readonly CadGroupStatus[];
+  /** Raster IMAGE entities in every space; absent means `[]`. */
+  readonly images?: readonly CadImageStatus[];
   /**
    * Host-reported performance metrics, or `null`/absent when the host does not
    * publish them. Absence is an explicit "not measured", never a fabricated
@@ -363,6 +421,21 @@ export function activeSpaceOf(status: Partial<CadStatus> | null | undefined): Ca
 /** The open drawing's external references; an omission is an empty list. */
 export function referencesOf(status: Partial<CadStatus> | null | undefined): readonly CadReferenceStatus[] {
   return status?.references ?? [];
+}
+
+/** The drawing's block definitions; an omission is an empty list. */
+export function blocksOf(status: Partial<CadStatus> | null | undefined): readonly CadBlockStatus[] {
+  return status?.blocks ?? [];
+}
+
+/** The session's entity groups; an omission is an empty list. */
+export function groupsOf(status: Partial<CadStatus> | null | undefined): readonly CadGroupStatus[] {
+  return status?.groups ?? [];
+}
+
+/** The drawing's raster IMAGE entities; an omission is an empty list. */
+export function imagesOf(status: Partial<CadStatus> | null | undefined): readonly CadImageStatus[] {
+  return status?.images ?? [];
 }
 
 // Phase keys the backend reports (`cad_app::import_phase_key`). A phase outside
@@ -473,6 +546,61 @@ function isReferenceStatus(value: unknown): boolean {
     && (reference.reason === null || typeof reference.reason === 'string')
     && typeof reference.overlay === 'boolean'
     && nonNegativeInteger(reference.depth);
+}
+
+/** Whether `value` is one well-formed `blocks[]` row. */
+function isBlockStatus(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const block = value as Record<string, unknown>;
+  return (block.name === null || typeof block.name === 'string')
+    && nonNegativeInteger(block.memberCount)
+    && (block.basePoint === null || isWorldPoint(block.basePoint));
+}
+
+/** Whether `value` is one well-formed group member row. */
+function isGroupMember(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const member = value as Record<string, unknown>;
+  return typeof member.entityId === 'string'
+    && Array.isArray(member.instancePath)
+    && member.instancePath.every((id: unknown) => typeof id === 'string');
+}
+
+/** Whether `value` is one well-formed `groups[]` row. */
+function isGroupStatus(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const group = value as Record<string, unknown>;
+  return typeof group.name === 'string'
+    && nonNegativeInteger(group.memberCount)
+    && Array.isArray(group.members)
+    && group.members.every(isGroupMember)
+    && group.members.length === group.memberCount;
+}
+
+/** Whether `value` is one well-formed image pixel pair. */
+function isPixelSize(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 2 && value.every(Number.isFinite);
+}
+
+/** Whether `value` is one well-formed image clip summary. */
+function isImageClip(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const clip = value as Record<string, unknown>;
+  return nonNegativeInteger(clip.vertexCount) && typeof clip.inside === 'boolean';
+}
+
+/** Whether `value` is one well-formed `images[]` row. */
+function isImageStatus(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const image = value as Record<string, unknown>;
+  const space = image.space;
+  return typeof image.id === 'string'
+    && (space === 'model' || space === 'paper' || space === 'block')
+    && (image.spaceId === null || nonNegativeInteger(image.spaceId))
+    && (image.file === null || typeof image.file === 'string')
+    && isPixelSize(image.pixels)
+    && typeof image.visible === 'boolean'
+    && (image.clip === null || isImageClip(image.clip));
 }
 
 /** The keys a `cad_status.performance` block must carry when it is present. */
@@ -624,6 +752,18 @@ export function parseCadStatus(value: unknown): CadStatus {
   }
   if (status.references !== undefined
     && (!Array.isArray(status.references) || !status.references.every(isReferenceStatus))) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  if (status.blocks !== undefined
+    && (!Array.isArray(status.blocks) || !status.blocks.every(isBlockStatus))) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  if (status.groups !== undefined
+    && (!Array.isArray(status.groups) || !status.groups.every(isGroupStatus))) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  if (status.images !== undefined
+    && (!Array.isArray(status.images) || !status.images.every(isImageStatus))) {
     throw Error('CAD_STATUS_INVALID');
   }
   // Performance metrics are optional (an older host, or a carrier that publishes

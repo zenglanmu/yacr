@@ -175,7 +175,7 @@ test('the command catalog lists exactly the router-refused dead affordances, and
   // read-only Font Manager and owns its report (`cad_fonts`), never a router line.
   assert.equal(isLocalChromeCommand('resources'), true, 'the selector is case-insensitive');
   assert.equal(isLocalChromeCommand('fonts'), true, 'the selector is case-insensitive');
-  assert.deepEqual([...LOCAL_CHROME_COMMANDS].sort(), ['-TOOLBAR', 'ABOUT', 'CLASSICLAYER', 'CLASSICXREF', 'CLEANSCREENOFF', 'CLEANSCREENON', 'COMMANDLINE', 'COMMANDLINEHIDE', 'DSETTINGS', 'FILETAB', 'FILETABCLOSE', 'FONTS', 'HIDEPALETTES', 'LAYER', 'LAYERCLOSE', 'PMTOGGLE', 'PROPERTIES', 'PROPERTIESCLOSE', 'QCCLOSE', 'QUICKCALC', 'QUICKPROPERTIES', 'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE', 'RESOURCES', 'RIBBON', 'RIBBONCLOSE', 'SHOWPALETTES', 'TOOLBAR', 'UPDATETHUMBSNOW', 'WORKSPACE', 'WSSAVE', 'WSSETTINGS']);
+  assert.deepEqual([...LOCAL_CHROME_COMMANDS].sort(), ['-TOOLBAR', 'ABOUT', 'CLASSICGROUP', 'CLASSICIMAGE', 'CLASSICINSERT', 'CLASSICLAYER', 'CLASSICXREF', 'CLEANSCREENOFF', 'CLEANSCREENON', 'COMMANDLINE', 'COMMANDLINEHIDE', 'DSETTINGS', 'FILETAB', 'FILETABCLOSE', 'FONTS', 'HIDEPALETTES', 'LAYER', 'LAYERCLOSE', 'PMTOGGLE', 'PROPERTIES', 'PROPERTIESCLOSE', 'QCCLOSE', 'QUICKCALC', 'QUICKPROPERTIES', 'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE', 'RESOURCES', 'RIBBON', 'RIBBONCLOSE', 'SHOWPALETTES', 'TOOLBAR', 'UPDATETHUMBSNOW', 'WORKSPACE', 'WSSAVE', 'WSSETTINGS']);
   // `PLINE` is now a real (draw) selector, so it is neither reserved nor dead:
   // `ANGLE` (not an AutoCAD command) stays absent from the catalog and refused.
   assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('ANGLE'), false, 'ANGLE');
@@ -620,7 +620,7 @@ test('every chrome-local selector is admitted without the host vocabulary and ha
   // that same state, PROPERTIESCLOSE closes the properties window and LAYERCLOSE
   // closes the layers palette. All nine are answered by the chrome before the
   // router and none needs a document.
-  assert.deepEqual([...LOCAL_CHROME_COMMANDS].sort(), ['-TOOLBAR', 'ABOUT', 'CLASSICLAYER', 'CLASSICXREF', 'CLEANSCREENOFF', 'CLEANSCREENON', 'COMMANDLINE', 'COMMANDLINEHIDE', 'DSETTINGS', 'FILETAB', 'FILETABCLOSE', 'FONTS', 'HIDEPALETTES', 'LAYER', 'LAYERCLOSE', 'PMTOGGLE', 'PROPERTIES', 'PROPERTIESCLOSE', 'QCCLOSE', 'QUICKCALC', 'QUICKPROPERTIES', 'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE', 'RESOURCES', 'RIBBON', 'RIBBONCLOSE', 'SHOWPALETTES', 'TOOLBAR', 'UPDATETHUMBSNOW', 'WORKSPACE', 'WSSAVE', 'WSSETTINGS']);
+  assert.deepEqual([...LOCAL_CHROME_COMMANDS].sort(), ['-TOOLBAR', 'ABOUT', 'CLASSICGROUP', 'CLASSICIMAGE', 'CLASSICINSERT', 'CLASSICLAYER', 'CLASSICXREF', 'CLEANSCREENOFF', 'CLEANSCREENON', 'COMMANDLINE', 'COMMANDLINEHIDE', 'DSETTINGS', 'FILETAB', 'FILETABCLOSE', 'FONTS', 'HIDEPALETTES', 'LAYER', 'LAYERCLOSE', 'PMTOGGLE', 'PROPERTIES', 'PROPERTIESCLOSE', 'QCCLOSE', 'QUICKCALC', 'QUICKPROPERTIES', 'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE', 'RESOURCES', 'RIBBON', 'RIBBONCLOSE', 'SHOWPALETTES', 'TOOLBAR', 'UPDATETHUMBSNOW', 'WORKSPACE', 'WSSAVE', 'WSSETTINGS']);
   for (const id of LOCAL_CHROME_COMMANDS) {
     assert.equal(isLocalChromeCommand(id), true, id);
     assert.equal(isLocalChromeCommand(id.toLowerCase()), true, id);

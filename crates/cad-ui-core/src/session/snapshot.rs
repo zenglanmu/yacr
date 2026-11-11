@@ -149,6 +149,60 @@ impl CadSession {
                     .collect()
             })
             .unwrap_or_default();
+        // The classic-panel projections: authoritative block definitions (with
+        // stored metadata when present), the session's own group store, and the
+        // IMAGE entities in every space. No document means honest empty lists.
+        let blocks: Vec<CadBlockStatus> = drawing
+            .as_deref()
+            .map(|database| {
+                database
+                    .blocks()
+                    .map(|definition| {
+                        CadBlockStatus::from_definition(
+                            definition,
+                            database.block_metadata(definition.id),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let groups: Vec<CadGroupStatus> = self
+            .core
+            .controller
+            .borrow()
+            .session
+            .groups
+            .groups()
+            .map(CadGroupStatus::from_group)
+            .collect();
+        let images: Vec<CadImageStatus> = drawing
+            .as_deref()
+            .map(|database| {
+                database
+                    .entities()
+                    .filter_map(|entity| {
+                        let cad_domain::SemanticGeometry::Image {
+                            pixels,
+                            file,
+                            clip,
+                            visible,
+                            ..
+                        } = &entity.geometry
+                        else {
+                            return None;
+                        };
+                        Some(CadImageStatus::from_entity(
+                            entity.id,
+                            &entity.space,
+                            file,
+                            *pixels,
+                            *visible,
+                            clip.as_ref(),
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let entity_count = drawing
             .as_ref()
             .map(|database| database.entity_count() as u64);
@@ -260,6 +314,9 @@ impl CadSession {
         // The authoritative xref rows projected above: always carried, never
         // omitted, and empty for a document that declares none.
         status.references = references;
+        status.blocks = blocks;
+        status.groups = groups;
+        status.images = images;
         // The real bounded command echo (observational only). Cleared by the host
         // on a verified document replacement, so this never mixes drawings.
         status.command_log = self

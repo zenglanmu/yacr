@@ -76,6 +76,7 @@ setCommandCatalog(HOST_NAMES);
 
 const WAVE = [
   'RIBBON', 'RIBBONCLOSE', 'HIDEPALETTES', 'SHOWPALETTES', 'PMTOGGLE', 'CLASSICXREF',
+  'CLASSICINSERT', 'CLASSICGROUP', 'CLASSICIMAGE',
   'FILETAB', 'FILETABCLOSE',
   'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE', 'QUICKCALC',
   'WORKSPACE', 'WSSAVE', 'WSSETTINGS',
@@ -97,11 +98,12 @@ async function iconNames() {
 }
 
 test('the selector table is append-only and every row matches exactly one word', () => {
-  assert.equal(CHROME_COMMANDS.length, 30);
+  assert.equal(CHROME_COMMANDS.length, 33);
   assert.deepEqual([...CHROME_COMMAND_NAMES], [
     'ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE', 'DSETTINGS',
     'QUICKPROPERTIES', 'CLASSICLAYER', 'COMMANDLINE', 'COMMANDLINEHIDE',
     'RIBBON', 'RIBBONCLOSE', 'HIDEPALETTES', 'SHOWPALETTES', 'PMTOGGLE', 'CLASSICXREF',
+    'CLASSICINSERT', 'CLASSICGROUP', 'CLASSICIMAGE',
     'FILETAB', 'FILETABCLOSE',
     'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE', 'QUICKCALC',
     'WORKSPACE', 'WSSAVE', 'WSSETTINGS',
@@ -129,6 +131,9 @@ test('every word resolves to a chrome-local result on desktop and mobile', () =>
     SHOWPALETTES: { kind: 'paletteChrome', value: true },
     PMTOGGLE: { kind: 'paletteToggle' },
     CLASSICXREF: { kind: 'classicXref' },
+    CLASSICINSERT: { kind: 'classicPanel', panel: 'insert' },
+    CLASSICGROUP: { kind: 'classicPanel', panel: 'group' },
+    CLASSICIMAGE: { kind: 'classicPanel', panel: 'image' },
     FILETAB: { kind: 'fileTabs', value: true },
     FILETABCLOSE: { kind: 'fileTabs', value: false },
     QVDRAWING: { kind: 'quickView', panel: 'drawings' },

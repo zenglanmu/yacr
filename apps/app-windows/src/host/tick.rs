@@ -787,14 +787,17 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 .as_ref()
                 .map(|session| session.snapshot(backend, adapter, 0))
         });
-        let settings = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.settings()));
+        // The settings snapshot and the runtime `ALIASEDIT` rows are owner-thread
+        // mirrors for the IPC reads (the command gate admits user aliases from them).
+        let settings = CAD.with(|c| c.borrow().as_ref().map(|session| session.owner_mirror()));
         {
             let mut state = lock(shared);
             if let Some(snapshot) = &snapshot {
                 state.shell.cad_status = Some(snapshot.clone());
             }
-            if let Some(settings) = settings {
+            if let Some((settings, command_aliases)) = settings {
                 state.cad_settings = Some(settings);
+                state.shell.command_aliases = command_aliases;
             }
         }
         // One cad-event flush per owner tick, outside the `Some(snapshot)` arm:

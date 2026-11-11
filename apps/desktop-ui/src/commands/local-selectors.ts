@@ -29,6 +29,9 @@ import { isFontsCommand } from '../fonts/fonts.ts';
 import {
   dashToolbarVisibility,
   isAboutCommand,
+  isClassicGroupCommand,
+  isClassicImageCommand,
+  isClassicInsertCommand,
   isClassicLayerCommand,
   isClassicXRefCommand,
   isCleanScreenOffCommand,
@@ -58,7 +61,7 @@ import {
   isWorkspaceSaveCommand,
   isWorkspaceSettingsCommand,
 } from './chrome-commands.ts';
-import type { QuickViewKind, WorkspaceDialogMode } from '../chrome/surfaces.ts';
+import type { ClassicPanelKind, QuickViewKind, WorkspaceDialogMode } from '../chrome/surfaces.ts';
 
 /** One selector's destination. `refused` names the panel the layout cannot show. */
 export type LocalSelectorResult =
@@ -84,6 +87,8 @@ export type LocalSelectorResult =
   | { readonly kind: 'paletteToggle' }
   /** Open (or re-focus) the classic external-references panel (`CLASSICXREF`). */
   | { readonly kind: 'classicXref' }
+  /** Open one classic block/group/image panel (`CLASSICINSERT`/`GROUP`/`IMAGE`). */
+  | { readonly kind: 'classicPanel'; readonly panel: ClassicPanelKind }
   /** Set the drawing-tab strip's visibility (FILETAB shows, FILETABCLOSE hides). */
   | { readonly kind: 'fileTabs'; readonly value: boolean }
   /** Open one Quick View panel (a repeat open re-focuses it). */
@@ -142,6 +147,9 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
   if (isShowPalettesCommand(text)) return { kind: 'paletteChrome', value: true };
   if (isPmToggleCommand(text)) return { kind: 'paletteToggle' };
   if (isClassicXRefCommand(text)) return { kind: 'classicXref' };
+  if (isClassicInsertCommand(text)) return { kind: 'classicPanel', panel: 'insert' };
+  if (isClassicGroupCommand(text)) return { kind: 'classicPanel', panel: 'group' };
+  if (isClassicImageCommand(text)) return { kind: 'classicPanel', panel: 'image' };
   if (isQuickViewDrawingCommand(text)) return { kind: 'quickView', panel: 'drawings' };
   if (isQuickViewDrawingCloseCommand(text)) return { kind: 'quickViewClose', panel: 'drawings' };
   if (isQuickViewLayoutCommand(text)) return { kind: 'quickView', panel: 'layouts' };
@@ -218,6 +226,8 @@ export interface LocalSelectorHost {
   readonly togglePaletteChrome: () => void;
   /** Open (or re-focus) the classic external-references panel (`CLASSICXREF`). */
   readonly openClassicXref: () => void;
+  /** Open one classic block/group/image panel (a repeat open re-focuses it). */
+  readonly openClassicPanel: (panel: ClassicPanelKind) => void;
   /** Open one Quick View panel (a repeat open re-focuses it). */
   readonly setQuickView: (panel: QuickViewKind) => void;
   /** Close one Quick View panel (`QVDRAWINGCLOSE`/`QVLAYOUTCLOSE`; idempotent). */
@@ -265,6 +275,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     setPaletteChrome,
     togglePaletteChrome,
     openClassicXref,
+    openClassicPanel,
     setQuickView,
     closeQuickView,
     refreshQuickView,
@@ -299,6 +310,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'paletteChrome': setPaletteChrome(result.value); break;
       case 'paletteToggle': togglePaletteChrome(); break;
       case 'classicXref': openClassicXref(); break;
+      case 'classicPanel': openClassicPanel(result.panel); break;
       case 'quickView': setQuickView(result.panel); break;
       case 'quickViewClose': closeQuickView(result.panel); break;
       case 'updateThumbs': refreshQuickView(); break;
@@ -328,6 +340,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     setPaletteChrome,
     togglePaletteChrome,
     openClassicXref,
+    openClassicPanel,
     setQuickView,
     closeQuickView,
     refreshQuickView,

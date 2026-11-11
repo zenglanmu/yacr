@@ -172,4 +172,12 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     MLEADERALIGN_SELECTOR,
     MLEADEREDIT_SELECTOR,
     TOLERANCE_SELECTOR,
+    // The session-only vocabulary controls (2026-11-12): `UNDEFINE <name>`,
+    // `REDEFINE <name>` and `ALIASEDIT ADD|REMOVE|LIST`. They carry no
+    // `CommandId`; `CadSession` resolves and applies them before the command
+    // table. This row exists so the shell gate admits the typed line and queues
+    // it verbatim.
+    UNDEFINE_SELECTOR,
+    REDEFINE_SELECTOR,
+    ALIASEDIT_SELECTOR,
 ];

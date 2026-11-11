@@ -17,6 +17,9 @@
 /** The two Quick View panels. */
 export type QuickViewKind = 'drawings' | 'layouts';
 
+/** The three classic block/group/image panels. */
+export type ClassicPanelKind = 'insert' | 'group' | 'image';
+
 /** Which workspace dialog `WSSAVE`/`WSSETTINGS` opened. */
 export type WorkspaceDialogMode = 'settings' | 'save';
 
@@ -28,6 +31,8 @@ export interface ChromeSurfaceState {
   readonly quickCalc: boolean;
   /** The classic external-references panel (`CLASSICXREF`); non-modal. */
   readonly classicXref: boolean;
+  /** The open classic insert/group/image panel, or `null`; non-modal. */
+  readonly classicPanel: ClassicPanelKind | null;
   readonly workspaceSelector: boolean;
   readonly workspaceSettings: WorkspaceDialogMode | null;
 }
@@ -37,6 +42,7 @@ const CLOSED: ChromeSurfaceState = Object.freeze({
   quickViewRevision: 0,
   quickCalc: false,
   classicXref: false,
+  classicPanel: null,
   workspaceSelector: false,
   workspaceSettings: null,
 });
@@ -109,6 +115,17 @@ export function openClassicXref(): void {
 export function closeClassicXref(): void {
   if (!state.classicXref) return;
   publish({ ...state, classicXref: false });
+}
+
+/** Open one classic panel; a repeat open re-focuses it and closes the others. */
+export function openClassicPanel(panel: ClassicPanelKind): void {
+  publish({ ...CLOSED, classicPanel: panel, quickViewRevision: state.quickViewRevision });
+}
+
+/** Close the open classic panel; already closed is a success. */
+export function closeClassicPanel(): void {
+  if (state.classicPanel === null) return;
+  publish({ ...state, classicPanel: null });
 }
 
 /** Open the workspace selector (a floating panel). */

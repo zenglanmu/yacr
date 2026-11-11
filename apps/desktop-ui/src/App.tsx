@@ -67,7 +67,7 @@ import { appliedWorkspace } from './chrome/workspaces.ts';
 import { DEFAULT_CHROME_VISIBILITY, paletteChrome, withFileTabs, withRibbon } from './chrome/visibility.ts';
 import {
   closeQuickCalc,
-  closeQuickView,
+  closeQuickView, openClassicPanel,
   openClassicXref,
   openQuickCalc,
   openQuickView,
@@ -487,7 +487,7 @@ function Shell() {
       if (!value) closeAllPalettes();
     },
     togglePaletteChrome: () => { if (chromeVisibility.palettes) closeAllPalettes(); setChromeVisibility(paletteChrome(!chromeVisibility.palettes)); },
-    openClassicXref,
+    openClassicPanel, openClassicXref,
     setQuickView: (panel) => openQuickView(panel),
     closeQuickView: (panel) => closeQuickView(panel),
     refreshQuickView,
