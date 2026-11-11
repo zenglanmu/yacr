@@ -150,7 +150,15 @@ impl Application {
     /// The selection is read at apply time. `COPY` inserts translated clones;
     /// `MOVE`/`ROTATE`/`SCALE` transform in place. Every mode delegates to the
     /// existing command, so its supported-kind rules and its single
-    /// transaction/undo step are exactly the ordinary command's.
+    /// transaction/undo step are exactly the ordinary command's. The
+    /// **base point** is carried by the payload (`ROTATE`/`SCALE` take `base`;
+    /// `MOVE`/`COPY` take the base-relative displacement), and each accepted
+    /// invocation is one undo step — the AutoCAD in-command `Undo` is the global
+    /// `UNDO` step, and there is no interactive option loop/gizmo in this build.
+    ///
+    /// Every number is validated here **before** the delegated command opens a
+    /// transaction, so a bad value is a stable `mocoro.*` refusal that writes
+    /// nothing and records no history (never an underlying generic message).
     pub(crate) fn mocoro(
         &mut self,
         session: &SessionState,
@@ -162,6 +170,7 @@ impl Application {
                 "MOCORO needs a Mocoro(operation) payload",
             ));
         };
+        validate_mocoro(*operation)?;
         let refs = session.selection.refs().to_vec();
         if refs.is_empty() {
             return Err(refusal(
@@ -169,7 +178,7 @@ impl Application {
                 "MOCORO needs at least one selected entity",
             ));
         }
-        match operation {
+        let mut outcome = match operation {
             MocoroCommand::Move { delta } => {
                 let id = CommandId::MoveEntities;
                 self.move_entities(&rerouted(
@@ -216,7 +225,19 @@ impl Application {
                     },
                 ))
             }
-        }
+        }?;
+        outcome.diagnostics.insert(
+            0,
+            Diagnostic {
+                object: None,
+                code: "drawing.mocoro".into(),
+                message: format!(
+                    "MOCORO {}: one transaction / one undo step over the current selection",
+                    mocoro_label(*operation)
+                ),
+            },
+        );
+        Ok(outcome)
     }
 
     /// `LINETYPE LIST` / `LINETYPE SET <name>`.
@@ -290,4 +311,57 @@ impl Application {
             }
         }
     }
+}
+
+/// The stable mode name MOCORO reports in its attribution diagnostic.
+fn mocoro_label(operation: MocoroCommand) -> &'static str {
+    match operation {
+        MocoroCommand::Move { .. } => "MOVE",
+        MocoroCommand::Copy { .. } => "COPY",
+        MocoroCommand::Rotate { .. } => "ROTATE",
+        MocoroCommand::Scale { .. } => "SCALE",
+    }
+}
+
+/// Validate every MOCORO number before the delegated command can write.
+fn validate_mocoro(operation: MocoroCommand) -> CadResult<()> {
+    match operation {
+        MocoroCommand::Move { delta } | MocoroCommand::Copy { delta } => {
+            if !is_finite_point(delta) {
+                return Err(refusal(
+                    "mocoro.invalid_delta",
+                    format!("the MOCORO displacement must be finite, got {delta:?}"),
+                ));
+            }
+        }
+        MocoroCommand::Rotate { base, degrees } => {
+            if !is_finite_point(base) {
+                return Err(refusal(
+                    "mocoro.invalid_base",
+                    format!("the MOCORO base point must be finite, got {base:?}"),
+                ));
+            }
+            if !degrees.is_finite() {
+                return Err(refusal(
+                    "mocoro.invalid_angle",
+                    format!("the MOCORO rotation must be a finite angle, got {degrees}"),
+                ));
+            }
+        }
+        MocoroCommand::Scale { base, factor } => {
+            if !is_finite_point(base) {
+                return Err(refusal(
+                    "mocoro.invalid_base",
+                    format!("the MOCORO base point must be finite, got {base:?}"),
+                ));
+            }
+            if !factor.is_finite() || factor <= 0.0 {
+                return Err(refusal(
+                    "mocoro.invalid_factor",
+                    format!("the MOCORO scale factor must be finite and positive, got {factor}"),
+                ));
+            }
+        }
+    }
+    Ok(())
 }

@@ -304,6 +304,10 @@ mod divide;
 mod draw2_batch;
 mod ellipse;
 mod explode;
+// The imported-content (picture-branch DIMENSION / spline-path MULTILEADER)
+// decomposition tests, split out of `explode` so both files stay inside the
+// code-size limit.
+mod explode_imported;
 mod explode_insert;
 mod explode_self_reference;
 mod fillet_curves;
@@ -328,6 +332,7 @@ mod lengthen;
 mod match_prop;
 mod mirror_curves;
 mod mleader_create;
+mod modify_batch;
 mod modify_extra;
 // OVERKILL (Delete Duplicate Objects) contract tests.
 mod mtext;
@@ -352,6 +357,9 @@ mod spline;
 mod stretch;
 mod stretch_curves;
 mod stretch_insert;
+// The move-only 2D kinds (HATCH / IMAGE / MASK / TABLE / ELLIPSE), split out of
+// `stretch` so both files stay inside the code-size limit.
+mod stretch_kinds;
 mod stretch_polygon;
 mod table;
 mod table_edit;
@@ -361,6 +369,9 @@ mod text_edit;
 mod text_front;
 mod transform;
 mod trim_extend_curves;
+// The ELLIPSE targets and the named target-kind refusals, split out of
+// `trim_extend_curves` so both files stay inside the code-size limit.
 mod trim_spline_boundary;
 mod trim_spline_target;
+mod trim_targets;
 mod wipeout;

@@ -11,6 +11,7 @@
 
 use std::collections::BTreeSet;
 
+use super::helpers::distance;
 use super::trim_boundary::{collect_boundaries, BoundarySet};
 use super::trim_curves::{
     cut_tolerance, plan_extend, plan_trim, PlanRefusal, TargetCurve, TrimPlan,
@@ -30,6 +31,66 @@ fn skipped(code: &str, entity: EntityId, detail: &str) -> Diagnostic {
         object: Some(ObjectId(entity.0)),
         code: code.into(),
         message: format!("{code}: entity {} skipped: {detail}", entity.0),
+    }
+}
+
+/// The exact `PEDITACCEPT` conversion MPEDIT applies to a batch selection.
+///
+/// A LINE becomes its two endpoints; an ARC of the `+Z` plane becomes one bulge
+/// segment (start point → end point). SPLINE tessellation and every other kind
+/// stay PEDIT's single-object `convert` answer, never a silent approximation
+/// here. The error text is the per-object skip reason.
+fn convert_mpedit_object(geometry: &SemanticGeometry) -> Result<SemanticGeometry, String> {
+    match geometry {
+        SemanticGeometry::Line { start, end } => {
+            if distance(*start, *end) <= 1e-9 {
+                return Err("the LINE has no length".into());
+            }
+            Ok(SemanticGeometry::Polyline {
+                points: vec![*start, *end],
+                bulges: vec![0.0],
+                closed: false,
+            })
+        }
+        SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } => {
+            let radius = radius.abs();
+            if radius <= 1e-9 || !sweep.is_finite() || sweep.abs() <= 1e-12 {
+                return Err("the ARC has no radius or sweep".into());
+            }
+            if normal.z < 1.0 - 1e-9 {
+                return Err("an ARC outside the +Z plane cannot become a bulged polyline".into());
+            }
+            let Some(bulge) = cad_geometry::arc_sweep_to_bulge(*sweep) else {
+                return Err(
+                    "an ARC of one full turn or more cannot be one polyline bulge segment".into(),
+                );
+            };
+            Ok(SemanticGeometry::Polyline {
+                points: vec![
+                    arc_endpoint(*center, *normal, radius, *start),
+                    arc_endpoint(*center, *normal, radius, start + sweep),
+                ],
+                bulges: vec![bulge],
+                closed: false,
+            })
+        }
+        other => Err(format!("{} is not an LWPOLYLINE", class_name(other))),
+    }
+}
+
+/// The point at `angle` on an arc in its own plane.
+fn arc_endpoint(center: Point3, normal: Point3, radius: f64, angle: f64) -> Point3 {
+    let (axis_x, axis_y, _) = cad_geometry::arbitrary_axis(normal);
+    Point3 {
+        x: center.x + radius * (axis_x.x * angle.cos() + axis_y.x * angle.sin()),
+        y: center.y + radius * (axis_x.y * angle.cos() + axis_y.y * angle.sin()),
+        z: center.z + radius * (axis_x.z * angle.cos() + axis_y.z * angle.sin()),
     }
 }
 
@@ -292,29 +353,59 @@ impl Application {
         self.commit_curve_changes(document_id, changes, diagnostics, "extrim")
     }
 
-    /// `MPEDIT CLOSE|OPEN|REVERSE` over every selected LWPOLYLINE.
+    /// `MPEDIT`: one typed polyline option over **every** selected object.
+    ///
+    /// `CLOSE` / `OPEN` / `REVERSE` are applied per selected polyline in one
+    /// transaction / one undo step. `convert` (the `PEDITACCEPT` answer) first
+    /// turns every selected LINE/ARC into an exact polyline — a LINE is its two
+    /// endpoints, an ARC of the `+Z` plane is one bulge segment — so MPEDIT also
+    /// performs AutoCAD's "Object selected is not a polyline. Do you want it to
+    /// turn into one?" conversion for a batch.
+    ///
+    /// Every other PEDIT option (`JOIN`, `FIT`, `SPLINE`, `DECURVE`, `WIDTH`,
+    /// `LTYPE GEN`, `UNDO`) delegates to [`Self::pedit`] and therefore keeps
+    /// exactly PEDIT's single-object planners, selection rules and refusals: a
+    /// heterogeneous batch has no defined meaning for them, so a mismatch is a
+    /// named refusal from `pedit`, never a silent partial edit. Objects that need
+    /// no change are reported one by one (`mpedit.unchanged`) and write nothing.
     pub(crate) fn mpedit(
         &mut self,
         session: &SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        let option = match &command.payload {
+        let request = match &command.payload {
             CommandPayload::Draw2(payload) => match **payload {
-                Draw2Payload::Mpedit(option) => option,
+                Draw2Payload::Mpedit(option) => PeditEditCommand {
+                    option: match option {
+                        PeditOption::Close => PeditEditOption::Close,
+                        PeditOption::Open => PeditEditOption::Open,
+                        PeditOption::Reverse => PeditEditOption::Reverse,
+                    },
+                    convert: false,
+                },
                 _ => {
                     return Err(refusal(
                         "mpedit.payload",
-                        "MPEDIT needs a Draw2::Mpedit(PeditOption) payload",
+                        "MPEDIT needs a Draw2::Mpedit(PeditOption) or PeditEdit payload",
                     ));
                 }
             },
+            CommandPayload::PeditEdit(request) => *request,
             _ => {
                 return Err(refusal(
                     "mpedit.payload",
-                    "MPEDIT needs a Draw2::Mpedit(PeditOption) payload",
+                    "MPEDIT needs a Draw2::Mpedit(PeditOption) or PeditEdit payload",
                 ));
             }
         };
+        if !matches!(
+            request.option,
+            PeditEditOption::Close | PeditEditOption::Open | PeditEditOption::Reverse
+        ) {
+            // `JOIN`/`FIT`/`SPLINE`/`DECURVE`/`WIDTH`/`LTYPE GEN`/`UNDO` are
+            // PEDIT's own plans; reuse them verbatim (one transaction there).
+            return self.pedit(session, command);
+        }
         let refs = session.selection.refs();
         if refs.is_empty() {
             return Err(refusal(
@@ -327,69 +418,90 @@ impl Application {
         let mut changes = Vec::new();
         entities.sort_by_key(|entity| (entity.draw_order, entity.id.0));
         for entity in entities {
-            let (points, bulges, closed) = match &entity.geometry {
+            // `convert` expands a LINE/ARC into the exact polyline form; an
+            // unconverted object that is not a polyline is skipped by name.
+            let mut converted = false;
+            let source = match &entity.geometry {
+                SemanticGeometry::Polyline { .. } => entity.geometry.clone(),
+                other if request.convert => match convert_mpedit_object(other) {
+                    Ok(geometry) => {
+                        converted = true;
+                        geometry
+                    }
+                    Err(reason) => {
+                        diagnostics.push(skipped("mpedit.skipped", entity.id, &reason));
+                        continue;
+                    }
+                },
+                other => {
+                    diagnostics.push(skipped(
+                        "mpedit.skipped",
+                        entity.id,
+                        &format!(
+                            "{} is not an LWPOLYLINE (pass convert = true to turn it into one)",
+                            class_name(other)
+                        ),
+                    ));
+                    continue;
+                }
+            };
+            let (points, bulges, closed) = match &source {
                 SemanticGeometry::Polyline {
                     points,
                     bulges,
                     closed,
                 } => (points.clone(), bulges.clone(), *closed),
-                other => {
-                    diagnostics.push(skipped(
-                        "mpedit.skipped",
-                        entity.id,
-                        &format!("{} is not an LWPOLYLINE", class_name(other)),
-                    ));
-                    continue;
-                }
+                other => unreachable!("MPEDIT source is always a polyline, got {other:?}"),
             };
-            let geometry = match option {
-                PeditOption::Close => {
+            let mut unchanged: Option<&str> = None;
+            let geometry = match request.option {
+                PeditEditOption::Close => {
                     if closed {
-                        diagnostics.push(skipped("mpedit.unchanged", entity.id, "already closed"));
-                        continue;
-                    }
-                    if points.len() < 3 {
+                        unchanged = Some("already closed");
+                        source.clone()
+                    } else if points.len() < 3 {
                         diagnostics.push(skipped(
                             "mpedit.skipped",
                             entity.id,
                             "fewer than three vertices cannot form a closed ring",
                         ));
                         continue;
-                    }
-                    SemanticGeometry::Polyline {
-                        points,
-                        bulges,
-                        closed: true,
-                    }
-                }
-                PeditOption::Open => {
-                    if !closed {
-                        diagnostics.push(skipped("mpedit.unchanged", entity.id, "already open"));
-                        continue;
-                    }
-                    SemanticGeometry::Polyline {
-                        points,
-                        bulges,
-                        closed: false,
-                    }
-                }
-                PeditOption::Reverse => {
-                    match super::modify_extra::reverse_geometry(&entity.geometry) {
-                        Ok(geometry) => geometry,
-                        Err(error) => {
-                            diagnostics.push(skipped(
-                                "mpedit.skipped",
-                                entity.id,
-                                &error.to_string(),
-                            ));
-                            continue;
+                    } else {
+                        SemanticGeometry::Polyline {
+                            points,
+                            bulges,
+                            closed: true,
                         }
                     }
                 }
+                PeditEditOption::Open => {
+                    if !closed {
+                        unchanged = Some("already open");
+                        source.clone()
+                    } else {
+                        SemanticGeometry::Polyline {
+                            points,
+                            bulges,
+                            closed: false,
+                        }
+                    }
+                }
+                PeditEditOption::Reverse => match super::modify_extra::reverse_geometry(&source) {
+                    Ok(geometry) => geometry,
+                    Err(error) => {
+                        diagnostics.push(skipped("mpedit.skipped", entity.id, &error.to_string()));
+                        continue;
+                    }
+                },
+                _ => unreachable!("only CLOSE/OPEN/REVERSE reach the batch path"),
             };
-            changes.push(CurveChange::Replace(entity, geometry));
+            if converted || geometry != entity.geometry {
+                changes.push(CurveChange::Replace(entity, geometry));
+            } else if let Some(reason) = unchanged {
+                diagnostics.push(skipped("mpedit.unchanged", entity.id, reason));
+            }
         }
-        self.commit_curve_changes(document_id, changes, diagnostics, "mpedit")
+        self.commit_curve_changes_inner(document_id, changes, diagnostics, "mpedit", true)
     }
 
     /// `DRAWORDER FRONT|BACK|ABOVE|BELOW` over the current selection.
@@ -717,6 +829,20 @@ impl Application {
         diagnostics: Vec<Diagnostic>,
         label: &str,
     ) -> CadResult<CommandOutcome> {
+        self.commit_curve_changes_inner(document_id, changes, diagnostics, label, false)
+    }
+
+    /// The one batch-commit funnel, with an option to re-derive the entity's
+    /// `type_key` from the replacement geometry (needed when a command converts
+    /// a LINE/ARC into a POLYLINE, which is what MPEDIT's `convert` answer does).
+    fn commit_curve_changes_inner(
+        &mut self,
+        document_id: DocumentId,
+        changes: Vec<CurveChange>,
+        diagnostics: Vec<Diagnostic>,
+        label: &str,
+        retype: bool,
+    ) -> CadResult<CommandOutcome> {
         if changes.is_empty() {
             let mut diagnostics = diagnostics;
             diagnostics.push(Diagnostic {
@@ -749,6 +875,9 @@ impl Application {
                     CurveChange::Replace(before, geometry) => {
                         let mut after = before.clone();
                         after.geometry = geometry.clone();
+                        if retype {
+                            after.object.type_key = class_name(geometry).to_string();
+                        }
                         staged.update_entity(after)?;
                     }
                     CurveChange::Delete(before, _) => staged.delete_entity(before.id)?,

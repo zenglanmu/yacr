@@ -343,3 +343,92 @@ fn offset_collapse_refusal_still_fires_under_a_gap_type() {
         assert_eq!(undo_depth(&app), 0, "no history");
     }
 }
+
+#[test]
+fn offset_closed_square_gap_types_fill_all_four_wrap_corners() {
+    // A closed 8 × 8 square offset 2 outward. Every convex corner is a real gap:
+    // the offset edges do not meet, so both gap types insert one segment per
+    // corner (8 vertices, closed) in one transaction / one undo step. This is the
+    // closed-ring branch of the gap-type path (the open right-angle cases above
+    // only exercise the non-wrapping branch).
+    for gap in [OffsetGapType::Fillet, OffsetGapType::Chamfer] {
+        let mut app = build(vec![polyline(
+            1,
+            vec![
+                point(0.0, 0.0),
+                point(8.0, 0.0),
+                point(8.0, 8.0),
+                point(0.0, 8.0),
+            ],
+            vec![0.0; 4],
+            true,
+        )]);
+        let before = revision(&app);
+        let outcome = app
+            .offset_entities_with_options(
+                &command_for(point(-2.0, -2.0)),
+                &offset_options(gap, point(-2.0, -2.0)),
+            )
+            .unwrap();
+        let SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed,
+        } = offset_polyline_geometry(&app, &outcome)
+        else {
+            panic!("expected a polyline");
+        };
+        assert!(closed, "{gap:?} keeps the ring closed");
+        assert_eq!(points.len(), 8, "{gap:?}: two vertices per wrap corner");
+        assert_eq!(bulges.len(), 8);
+        assert_eq!(revision(&app).0, before.0 + 1, "{gap:?}: one revision bump");
+        assert_eq!(undo_depth(&app), 1, "{gap:?}: one undo step");
+        assert_points(
+            &points,
+            &[
+                (-2.0, 0.0),
+                (0.0, -2.0),
+                (8.0, -2.0),
+                (10.0, 0.0),
+                (10.0, 8.0),
+                (8.0, 10.0),
+                (0.0, 10.0),
+                (-2.0, 8.0),
+            ],
+        );
+        let vertices = [
+            point(0.0, 0.0),
+            point(8.0, 0.0),
+            point(8.0, 8.0),
+            point(0.0, 8.0),
+        ];
+        for (joint, vertex) in vertices.iter().enumerate() {
+            let edge = joint * 2;
+            match gap {
+                OffsetGapType::Fillet => {
+                    assert!(bulges[edge].abs() > 1e-9, "{gap:?} fills edge {edge}");
+                    match cad_geometry::bulge_arc_geometry(
+                        points[edge],
+                        points[edge + 1],
+                        bulges[edge],
+                        Point3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 1.0,
+                        },
+                    ) {
+                        Some(SemanticGeometry::Arc { center, radius, .. }) => {
+                            assert!(near(center, *vertex), "{center:?} vs {vertex:?}");
+                            assert!((radius - 2.0).abs() < 1e-9, "radius {radius}");
+                        }
+                        other => panic!("expected the gap fillet arc, got {other:?}"),
+                    }
+                }
+                OffsetGapType::Chamfer => {
+                    assert_eq!(bulges[edge], 0.0, "{gap:?} fills edge {edge} straight");
+                }
+                OffsetGapType::Sharp => unreachable!(),
+            }
+        }
+    }
+}

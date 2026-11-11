@@ -12,7 +12,9 @@
 use super::super::helpers::{self, distance, normalize_signed};
 use super::super::*;
 use super::corner_curve::{plan_fillet_curve_curve, positive_z_normal, RoundCurve};
-use cad_geometry::{infinite_line_intersection, LineIntersection};
+use super::corner_ellipse::{plan_fillet_with_ellipse, EllipseCurve};
+use super::corner_line_curve::{plan_fillet_line_curve, PlanArgs};
+use cad_geometry::{cross, infinite_line_intersection, length, normalize, scale, LineIntersection};
 
 /// Map the shared two-line planner's result onto this module's plan type.
 fn from_edit(edit: helpers::TwoLineEdit) -> TwoLinePlan {
@@ -55,6 +57,12 @@ pub(super) enum GeometryUpdate {
         start: f64,
         sweep: f64,
     },
+    /// Rewrite an ELLIPSE's parametric start angle and sweep (the trimmed pick
+    /// side); `center`/`normal`/`major_axis`/`ratio` are preserved.
+    Ellipse {
+        start: f64,
+        sweep: f64,
+    },
 }
 
 /// The resolved edit: optional updates for the two picks plus the optional new
@@ -82,6 +90,7 @@ pub(super) enum Curve {
         start: f64,
         sweep: f64,
     },
+    Ellipse(EllipseCurve),
 }
 
 impl Curve {
@@ -90,6 +99,7 @@ impl Curve {
             Self::Line { .. } => "LINE",
             Self::Circle { .. } => "CIRCLE",
             Self::Arc { .. } => "ARC",
+            Self::Ellipse(_) => "ELLIPSE",
         }
     }
 }
@@ -158,7 +168,12 @@ pub(super) fn pt(x: f64, y: f64, z: f64) -> Point3 {
 }
 
 /// A finite, non-degenerate unit XY direction.
-fn unit_xy(from: Point3, to: Point3, tol: f64, command: &str) -> Result<(f64, f64), String> {
+pub(super) fn unit_xy(
+    from: Point3,
+    to: Point3,
+    tol: f64,
+    command: &str,
+) -> Result<(f64, f64), String> {
     let dx = to.x - from.x;
     let dy = to.y - from.y;
     let len = dx.hypot(dy);
@@ -312,7 +327,18 @@ pub(super) fn plan_chamfer_two_line(
                 );
             }
             if angle_radians == 0.0 {
-                (distance, 0.0)
+                if distance > tol {
+                    // A zero angle with a positive length would lay the "chamfer"
+                    // along the first object (second distance 0), i.e. duplicate
+                    // the picked edge instead of cutting a distinct one. Not
+                    // documented by AutoCAD, so this build refuses by name.
+                    return Err(
+                        "CHAMFER.angle_zero: a zero angle with a positive distance would lie \
+                         along the first object and cut no distinct edge"
+                            .into(),
+                    );
+                }
+                (0.0, 0.0)
             } else {
                 // The angle is measured from the first object; the chamfer line
                 // from `t1` at angle α meets the second arm at
@@ -394,6 +420,11 @@ pub(super) fn plan_fillet_two_line(
 ) -> Result<TwoLinePlan, String> {
     if !radius.is_finite() || radius < 0.0 {
         return Err("FILLET.radius_negative: the radius must be finite and non-negative".into());
+    }
+    // ELLIPSE participants use the numeric one-parameter tangent search; every
+    // other pair keeps the exact analytic construction below.
+    if matches!(first, Curve::Ellipse(_)) || matches!(second, Curve::Ellipse(_)) {
+        return plan_fillet_with_ellipse(first, pick_first, second, pick_second, radius, trim, tol);
     }
     match (first, second) {
         (Curve::Line { start: a1, end: a2 }, Curve::Line { start: b1, end: b2 }) => {
@@ -600,7 +631,7 @@ pub(super) fn arc(center: Point3, radius: f64, start: f64, sweep: f64) -> Semant
 
 /// Keep the endpoint of `segment` on the pick side of `target` and move the other
 /// endpoint onto `target`.
-fn retarget_pick_side(
+pub(super) fn retarget_pick_side(
     segment: (Point3, Point3),
     pick: Point3,
     target: Point3,
@@ -690,200 +721,6 @@ fn plan_parallel_fillet(input: &TwoLineInput, trim: bool, tol: f64) -> Result<Tw
         second,
         inserted: Some(arc(centre, effective_radius, start, std::f64::consts::PI)),
     })
-}
-
-/// The argument bundle of one line↔circle/arc fillet plan.
-struct PlanArgs {
-    line: (Point3, Point3),
-    line_pick: Point3,
-    center: Point3,
-    circle_radius: f64,
-    /// `Some((start, sweep))` when the curve target is a finite ARC.
-    arc: Option<(f64, f64)>,
-    curve_pick: Point3,
-    radius: f64,
-    trim: bool,
-    tol: f64,
-    /// Whether the retargeted line is the caller's first pick.
-    line_is_first: bool,
-}
-
-fn single_line_plan(update: GeometryUpdate, line_is_first: bool) -> TwoLinePlan {
-    if line_is_first {
-        TwoLinePlan {
-            first: Some(update),
-            second: None,
-            inserted: None,
-        }
-    } else {
-        TwoLinePlan {
-            first: None,
-            second: Some(update),
-            inserted: None,
-        }
-    }
-}
-
-/// Plan FILLET of one line and one circle (or arc).
-///
-/// The arc centre is the intersection of the line offset by `R` (on the circle's
-/// side) with the circle of radius `r + R` about the circle centre; the tangent
-/// points are the perpendicular foot on the line and the point at ratio
-/// `r / (r + R)` toward the circle centre. A circle is never trimmed.
-fn plan_fillet_line_curve(args: PlanArgs) -> Result<TwoLinePlan, String> {
-    let PlanArgs {
-        line: (a, b),
-        line_pick,
-        center,
-        circle_radius,
-        arc: arc_target,
-        curve_pick,
-        radius,
-        trim,
-        tol,
-        line_is_first,
-    } = args;
-    if !circle_radius.is_finite() || circle_radius <= tol {
-        return Err("FILLET.degenerate_circle: the picked circle has no radius".into());
-    }
-    let z_tol = 1e-9 * (1.0 + a.z.abs() + b.z.abs() + center.z.abs());
-    if (a.z - center.z).abs() > z_tol || (b.z - center.z).abs() > z_tol {
-        return Err("FILLET.not_coplanar: the line and the circle are not coplanar (+Z)".into());
-    }
-    let (ux, uy) = unit_xy(a, b, tol, "FILLET")?;
-    let (nx, ny) = (-uy, ux);
-    if radius == 0.0 {
-        if !trim {
-            return Err(
-                "FILLET.trim_off_no_arc: with trim off the R=0 sharp corner creates nothing".into(),
-            );
-        }
-        // Sharp corner: trim the line to its nearest intersection with the circle.
-        let best = line_circle_intersections(a, (ux, uy), center, circle_radius)
-            .into_iter()
-            .min_by(|p, q| {
-                distance(*p, line_pick)
-                    .partial_cmp(&distance(*q, line_pick))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .ok_or_else(|| {
-                "FILLET.line_does_not_meet_circle: the line does not intersect the circle"
-                    .to_string()
-            })?;
-        let update = retarget_pick_side((a, b), line_pick, best, tol, "FILLET")?;
-        return Ok(single_line_plan(update, line_is_first));
-    }
-    // The fillet lies on the side of the line the circle is on; when the line
-    // crosses the circle the pick side decides (declared).
-    let centre_side = (center.x - a.x) * nx + (center.y - a.y) * ny;
-    let side = if centre_side.abs() > circle_radius {
-        centre_side.signum()
-    } else {
-        let pick_side = (line_pick.x - a.x) * nx + (line_pick.y - a.y) * ny;
-        if pick_side.abs() <= tol {
-            return Err(
-                "FILLET.degenerate_side: the line pick does not select a side of the circle".into(),
-            );
-        }
-        pick_side.signum()
-    };
-    let reach = circle_radius + radius;
-    let offset = pt(a.x + nx * side * radius, a.y + ny * side * radius, a.z);
-    let wx = offset.x - center.x;
-    let wy = offset.y - center.y;
-    let half_b = wx * ux + wy * uy;
-    let discriminant = half_b * half_b - (wx * wx + wy * wy - reach * reach);
-    if !discriminant.is_finite() || discriminant < 0.0 {
-        return Err(
-            "FILLET.no_tangent_arc: no arc of this radius is tangent to both objects".into(),
-        );
-    }
-    let root = discriminant.sqrt();
-    let mut best: Option<(f64, Point3, Point3, Point3, f64, f64)> = None;
-    for parameter in [-half_b - root, -half_b + root] {
-        let arc_centre = pt(
-            offset.x + ux * parameter,
-            offset.y + uy * parameter,
-            offset.z,
-        );
-        let t_line = pt(
-            arc_centre.x - nx * side * radius,
-            arc_centre.y - ny * side * radius,
-            a.z,
-        );
-        let ratio = circle_radius / reach;
-        let t_curve = pt(
-            center.x + (arc_centre.x - center.x) * ratio,
-            center.y + (arc_centre.y - center.y) * ratio,
-            center.z,
-        );
-        let start = (t_line.y - arc_centre.y).atan2(t_line.x - arc_centre.x);
-        let end = (t_curve.y - arc_centre.y).atan2(t_curve.x - arc_centre.x);
-        let sweep = normalize_signed(end - start);
-        if !sweep.is_finite() || sweep.abs() <= 1e-12 {
-            continue;
-        }
-        let score = distance(t_line, line_pick) + distance(t_curve, curve_pick);
-        if best
-            .as_ref()
-            .is_none_or(|(best_score, ..)| score < *best_score)
-        {
-            best = Some((score, arc_centre, t_line, t_curve, start, sweep));
-        }
-    }
-    let Some((_, arc_centre, t_line, t_curve, start, sweep)) = best else {
-        return Err("FILLET.no_tangent_arc: no usable tangent arc was found".into());
-    };
-    let line_update = if trim {
-        Some(retarget_pick_side(
-            (a, b),
-            line_pick,
-            t_line,
-            tol,
-            "FILLET",
-        )?)
-    } else {
-        None
-    };
-    let arc_update = match (arc_target, trim) {
-        (Some((arc_start, arc_sweep)), true) => Some(trim_arc_to(
-            center, arc_start, arc_sweep, t_curve, curve_pick, tol,
-        )?),
-        _ => None,
-    };
-    let inserted = arc(arc_centre, radius, start, sweep);
-    Ok(match line_is_first {
-        true => TwoLinePlan {
-            first: line_update,
-            second: arc_update,
-            inserted: Some(inserted),
-        },
-        false => TwoLinePlan {
-            first: arc_update,
-            second: line_update,
-            inserted: Some(inserted),
-        },
-    })
-}
-
-/// Intersections of the infinite line `(origin, dir)` with a circle.
-fn line_circle_intersections(
-    origin: Point3,
-    dir: (f64, f64),
-    center: Point3,
-    radius: f64,
-) -> Vec<Point3> {
-    let (wx, wy) = (origin.x - center.x, origin.y - center.y);
-    let half_b = wx * dir.0 + wy * dir.1;
-    let discriminant = half_b * half_b - (wx * wx + wy * wy - radius * radius);
-    if !discriminant.is_finite() || discriminant < 0.0 {
-        return Vec::new();
-    }
-    let root = discriminant.sqrt();
-    [-half_b - root, -half_b + root]
-        .into_iter()
-        .map(|t| pt(origin.x + dir.0 * t, origin.y + dir.1 * t, origin.z))
-        .collect()
 }
 
 /// The along-arc distance from `start` to `point` in the sweep's direction.
@@ -981,10 +818,60 @@ pub(super) fn fillet_curve(geometry: &SemanticGeometry) -> CadResult<Curve> {
                 sweep: *sweep,
             })
         }
+        SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => {
+            positive_z_normal(normal, "ELLIPSE")?;
+            let major_len = length(*major_axis);
+            if !is_finite_point(*center)
+                || !major_len.is_finite()
+                || major_len <= 1e-9
+                || !ratio.is_finite()
+                || ratio.abs() <= 1e-9
+                || !start.is_finite()
+                || !sweep.is_finite()
+                || sweep.abs() <= 1e-12
+                || sweep.abs() > std::f64::consts::TAU + 1e-9
+            {
+                return Err(CadError::Unsupported(
+                    "FILLET.degenerate_ellipse: the picked ELLIPSE has no finite, storable \
+                     parametric span"
+                        .into(),
+                ));
+            }
+            if major_axis.z.abs() > 1e-9 * major_len {
+                return Err(CadError::Unsupported(
+                    "FILLET.unsupported_plane: the ELLIPSE major axis is not in the +Z work \
+                     plane"
+                        .into(),
+                ));
+            }
+            let major = scale(*major_axis, 1.0 / major_len);
+            let minor = normalize(cross(*normal, major));
+            if !is_finite_point(minor) || length(minor) <= 1e-9 {
+                return Err(CadError::Unsupported(
+                    "FILLET.degenerate_ellipse: the picked ELLIPSE has no usable minor axis".into(),
+                ));
+            }
+            Ok(Curve::Ellipse(EllipseCurve {
+                center: *center,
+                major,
+                minor,
+                a: major_len,
+                b: major_len * ratio.abs(),
+                start: *start,
+                sweep: *sweep,
+            }))
+        }
         other => Err(CadError::Unsupported(format!(
-            "FILLET needs a LINE, CIRCLE or ARC pick in the two-object form (a 2D polyline is \
-             the separate FILLET POLYLINE command); {} is not supported (ellipse, elliptical \
-             arc and spline fillets are NOT IMPLEMENTED)",
+            "FILLET.unsupported_pair: {} is not a supported FILLET participant (LINE, CIRCLE, \
+             ARC and ELLIPSE are; a 2D polyline is the separate FILLET POLYLINE command, and \
+             SPLINE needs a control-frame edit this build does not model)",
             class_name(other)
         ))),
     }

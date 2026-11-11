@@ -461,16 +461,21 @@ fn fillet_curve_refusals_are_named_and_write_nothing() {
         "radius_zero",
     );
 
-    // A genuinely unsupported participant still names the pair.
+    // A genuinely unsupported participant still names the pair: a SPLINE has no
+    // control-frame trim in this build, so it stays a named refusal (ELLIPSE is
+    // implemented and has its own contracts below).
     let (mut app, mut session) = curve_app(
         circle(point(0.0, 0.0), 5.0),
-        SemanticGeometry::Ellipse {
-            center: point(10.0, 0.0),
-            normal: p3(0.0, 0.0, 1.0),
-            major_axis: p3(5.0, 0.0, 0.0),
-            ratio: 0.5,
-            start: 0.0,
-            sweep: std::f64::consts::TAU,
+        SemanticGeometry::Spline {
+            degree: 3,
+            knots: Vec::new(),
+            control_points: vec![
+                p3(6.0, 0.0, 0.0),
+                p3(8.0, 2.0, 0.0),
+                p3(10.0, 0.0, 0.0),
+                p3(12.0, 2.0, 0.0),
+            ],
+            weights: Vec::new(),
         },
     );
     set_number(&mut session, ToolParameter::FilletRadius, 2.0);
@@ -483,6 +488,10 @@ fn fillet_curve_refusals_are_named_and_write_nothing() {
     )
     .unwrap_err();
     assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
+    assert!(
+        error.to_string().contains("FILLET.unsupported_pair"),
+        "{error} must name FILLET.unsupported_pair"
+    );
     assert_eq!(revision(&app), rev);
     assert!(app
         .history
@@ -635,5 +644,357 @@ fn fillet_curve_trim_off_still_refuses_a_tangent_outside_the_picked_arc() {
             point_at(point(10.0, 0.0), 5.0, 45.0f64.to_radians()),
         ),
         "FILLET.tangent_outside_arc",
+    );
+}
+
+// ELLIPSE participants (numeric tangent search in `corner_ellipse.rs`).
+fn ellipse(
+    center: Point3,
+    major_axis: Point3,
+    ratio: f64,
+    start: f64,
+    sweep: f64,
+) -> SemanticGeometry {
+    SemanticGeometry::Ellipse {
+        center,
+        normal: p3(0.0, 0.0, 1.0),
+        major_axis,
+        ratio,
+        start,
+        sweep,
+    }
+}
+
+/// `(center, start, sweep)` of a stored ELLIPSE.
+fn ellipse_data(app: &Application, entity: u128) -> (Point3, f64, f64) {
+    match stored_geometry(app, entity) {
+        SemanticGeometry::Ellipse {
+            center,
+            start,
+            sweep,
+            ..
+        } => (center, start, sweep),
+        other => panic!("expected an ELLIPSE, got {other:?}"),
+    }
+}
+
+/// The point at parametric angle `theta` of the test ellipse `a = 5`, `b = 2.5`.
+fn ellipse_point(center: Point3, theta: f64) -> Point3 {
+    point(center.x + 5.0 * theta.cos(), center.y + 2.5 * theta.sin())
+}
+
+#[test]
+fn fillet_ellipse_line_trims_both_and_inserts_the_tangent_arc() {
+    // Ellipse a = 5, b = 2.5 about the origin and the line y = 4. A radius
+    // 0.75 fillet is tangent at the ellipse's top (0, 2.5) and at (0, 4): the
+    // centre is (0, 3.25), 0.75 from both.
+    let (mut app, mut session) = curve_app(
+        ellipse(
+            point(0.0, 0.0),
+            p3(5.0, 0.0, 0.0),
+            0.5,
+            0.0,
+            std::f64::consts::TAU,
+        ),
+        SemanticGeometry::Line {
+            start: point(-10.0, 4.0),
+            end: point(10.0, 4.0),
+        },
+    );
+    set_number(&mut session, ToolParameter::FilletRadius, 0.75);
+    let rev = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::FilletLines,
+        fillet(1, 2, ellipse_point(point(0.0, 0.0), 1.2), point(3.0, 4.0)),
+    )
+    .expect("an ellipse/line fillet is supported");
+    assert_eq!(outcome.objects.len(), 3, "trimmed ellipse + line + new arc");
+    assert_eq!(revision(&app).0, rev.0 + 1, "exactly one revision bump");
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1);
+
+    // The elliptical arc is trimmed at its top (π/2), keeping the pick side
+    // [0, π/2]; the stored axes are untouched.
+    let (center, start, sweep) = ellipse_data(&app, 1);
+    assert_point_near(center, point(0.0, 0.0));
+    assert_angle_near(start, 0.0);
+    assert_angle_near(sweep, std::f64::consts::FRAC_PI_2);
+
+    // The line keeps its pick side (right) and is trimmed to the tangent point.
+    let line = stored_geometry(&app, 2);
+    let SemanticGeometry::Line { start, end } = line else {
+        panic!("expected the trimmed LINE, got {line:?}");
+    };
+    assert_point_near(start, point(0.0, 4.0));
+    assert_point_near(end, point(10.0, 4.0));
+
+    // The inserted arc is the radius-0.75 circle about (0, 3.25).
+    let (arc_center, radius, arc_start, arc_sweep) = arc_data(&app, outcome.objects[2].0);
+    assert_point_near(arc_center, point(0.0, 3.25));
+    assert!((radius - 0.75).abs() < 1e-9, "{radius}");
+    assert_point_near(point_at(arc_center, radius, arc_start), point(0.0, 2.5));
+    assert_point_near(
+        point_at(arc_center, radius, arc_start + arc_sweep),
+        point(0.0, 4.0),
+    );
+
+    // One undo restores the full ellipse and the untouched line.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    let (_, start, sweep) = ellipse_data(&app, 1);
+    assert_angle_near(start, 0.0);
+    assert_angle_near(sweep, std::f64::consts::TAU);
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 0);
+}
+
+#[test]
+fn fillet_ellipse_circle_keeps_the_circle_whole_and_trims_the_ellipse() {
+    // The tangent construction is symmetric: the radius-3.25 fillet is centred
+    // at (0, 5.75), tangent to the ellipse top (0, 2.5) and the circle bottom
+    // (0, 9). A circle participant is never trimmed.
+    let (mut app, mut session) = curve_app(
+        ellipse(
+            point(0.0, 0.0),
+            p3(5.0, 0.0, 0.0),
+            0.5,
+            0.0,
+            std::f64::consts::TAU,
+        ),
+        circle(point(0.0, 10.0), 1.0),
+    );
+    set_number(&mut session, ToolParameter::FilletRadius, 3.25);
+    let circle_before = db_entity(&app, 2);
+    let rev = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::FilletLines,
+        fillet(1, 2, ellipse_point(point(0.0, 0.0), 1.2), point(0.0, 9.0)),
+    )
+    .expect("an ellipse/circle fillet is supported");
+    assert_eq!(outcome.objects.len(), 2, "trimmed ellipse + new arc");
+    assert_eq!(revision(&app).0, rev.0 + 1, "exactly one revision bump");
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1);
+
+    let circle_after = db_entity(&app, 2);
+    assert_eq!(
+        circle_after.geometry, circle_before.geometry,
+        "a CIRCLE participant is never trimmed"
+    );
+    assert_eq!(circle_after.object.revision, circle_before.object.revision);
+
+    let (_, start, sweep) = ellipse_data(&app, 1);
+    assert_angle_near(start, 0.0);
+    assert_angle_near(sweep, std::f64::consts::FRAC_PI_2);
+
+    let (arc_center, radius, arc_start, arc_sweep) = arc_data(&app, outcome.objects[1].0);
+    assert_point_near(arc_center, point(0.0, 5.75));
+    assert!((radius - 3.25).abs() < 1e-9, "{radius}");
+    assert_point_near(point_at(arc_center, radius, arc_start), point(0.0, 2.5));
+    assert_point_near(
+        point_at(arc_center, radius, arc_start + arc_sweep),
+        point(0.0, 9.0),
+    );
+}
+
+#[test]
+fn fillet_two_ellipses_trims_both_parametric_spans() {
+    // Two full ellipses centred (0, 0) and (0, 9): the radius-3 fillet at
+    // (0, 5.5) is tangent to the first's top (0, 2.5) and the second's bottom
+    // (0, 8.5). Both ellipses are trimmed by rewriting `start`/`sweep`.
+    let (mut app, mut session) = curve_app(
+        ellipse(
+            point(0.0, 0.0),
+            p3(5.0, 0.0, 0.0),
+            0.5,
+            0.0,
+            std::f64::consts::TAU,
+        ),
+        ellipse(
+            point(0.0, 9.0),
+            p3(1.0, 0.0, 0.0),
+            0.5,
+            0.0,
+            std::f64::consts::TAU,
+        ),
+    );
+    set_number(&mut session, ToolParameter::FilletRadius, 3.0);
+    let rev = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::FilletLines,
+        fillet(
+            1,
+            2,
+            ellipse_point(point(0.0, 0.0), 1.2),
+            point(0.362_357_6, 8.533_978_5),
+        ),
+    )
+    .expect("an ellipse/ellipse fillet is supported");
+    assert_eq!(outcome.objects.len(), 3, "both trims + the inserted arc");
+    assert_eq!(revision(&app).0, rev.0 + 1, "exactly one revision bump");
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1);
+
+    let (_, start, sweep) = ellipse_data(&app, 1);
+    assert_angle_near(start, 0.0);
+    assert_angle_near(sweep, std::f64::consts::FRAC_PI_2);
+
+    // The second pick is after the bottom tangent along its sweep, so the kept
+    // span runs from the bottom (3π/2) back to the start (2π).
+    let (_, start, sweep) = ellipse_data(&app, 2);
+    assert_angle_near(start, 3.0 * std::f64::consts::FRAC_PI_2);
+    assert_angle_near(sweep, std::f64::consts::FRAC_PI_2);
+
+    let (arc_center, radius, arc_start, arc_sweep) = arc_data(&app, outcome.objects[2].0);
+    assert_point_near(arc_center, point(0.0, 5.5));
+    assert!((radius - 3.0).abs() < 1e-9, "{radius}");
+    assert_point_near(point_at(arc_center, radius, arc_start), point(0.0, 2.5));
+    assert_point_near(
+        point_at(arc_center, radius, arc_start + arc_sweep),
+        point(0.0, 8.5),
+    );
+}
+
+#[test]
+fn fillet_ellipse_line_trim_off_leaves_both_objects_untouched() {
+    let (mut app, mut session) = curve_app(
+        ellipse(
+            point(0.0, 0.0),
+            p3(5.0, 0.0, 0.0),
+            0.5,
+            0.0,
+            std::f64::consts::TAU,
+        ),
+        SemanticGeometry::Line {
+            start: point(-10.0, 4.0),
+            end: point(10.0, 4.0),
+        },
+    );
+    set_number(&mut session, ToolParameter::FilletRadius, 0.75);
+    session.drafting_extras.corner_modes_mut().set_trim(false);
+    let ellipse_before = db_entity(&app, 1);
+    let line_before = db_entity(&app, 2);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::FilletLines,
+        fillet(1, 2, ellipse_point(point(0.0, 0.0), 1.2), point(3.0, 4.0)),
+    )
+    .expect("trim-off ellipse fillet is supported");
+    assert_eq!(outcome.objects.len(), 1, "only the joining ARC is created");
+    assert_eq!(db_entity(&app, 1).geometry, ellipse_before.geometry);
+    assert_eq!(db_entity(&app, 2).geometry, line_before.geometry);
+    assert_eq!(
+        db_entity(&app, 1).object.revision,
+        ellipse_before.object.revision
+    );
+    assert_eq!(
+        db_entity(&app, 2).object.revision,
+        line_before.object.revision
+    );
+    let (arc_center, radius, _, _) = arc_data(&app, outcome.objects[0].0);
+    assert_point_near(arc_center, point(0.0, 3.25));
+    assert!((radius - 0.75).abs() < 1e-9);
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1);
+}
+
+#[test]
+fn fillet_ellipse_refusals_are_named_and_write_nothing() {
+    // R = 0 has no sharp-corner form for an ellipse participant.
+    let (mut app, mut session) = curve_app(
+        ellipse(
+            point(0.0, 0.0),
+            p3(5.0, 0.0, 0.0),
+            0.5,
+            0.0,
+            std::f64::consts::TAU,
+        ),
+        SemanticGeometry::Line {
+            start: point(-10.0, 4.0),
+            end: point(10.0, 4.0),
+        },
+    );
+    set_number(&mut session, ToolParameter::FilletRadius, 0.0);
+    assert_refused(
+        &mut app,
+        &mut session,
+        fillet(1, 2, ellipse_point(point(0.0, 0.0), 1.2), point(3.0, 4.0)),
+        "FILLET.radius_zero",
+    );
+
+    // A tilted ellipse is not on the +Z work plane.
+    let (mut app, mut session) = curve_app(
+        SemanticGeometry::Ellipse {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, 1.0, 0.0),
+            major_axis: p3(5.0, 0.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            sweep: std::f64::consts::TAU,
+        },
+        SemanticGeometry::Line {
+            start: point(-10.0, 4.0),
+            end: point(10.0, 4.0),
+        },
+    );
+    set_number(&mut session, ToolParameter::FilletRadius, 0.75);
+    assert_unsupported(
+        &mut app,
+        &mut session,
+        fillet(1, 2, ellipse_point(point(0.0, 0.0), 1.2), point(3.0, 4.0)),
+        "FILLET.unsupported_plane",
+    );
+
+    // The required tangency is at the ellipse top, outside a short elliptical
+    // arc span: no candidate exists, so the named no-tangent refusal wins.
+    let (mut app, mut session) = curve_app(
+        ellipse(point(0.0, 0.0), p3(5.0, 0.0, 0.0), 0.5, 0.0, 0.6),
+        SemanticGeometry::Line {
+            start: point(-10.0, 4.0),
+            end: point(10.0, 4.0),
+        },
+    );
+    set_number(&mut session, ToolParameter::FilletRadius, 0.75);
+    assert_refused(
+        &mut app,
+        &mut session,
+        fillet(1, 2, ellipse_point(point(0.0, 0.0), 0.3), point(3.0, 4.0)),
+        "FILLET.no_tangent_arc",
+    );
+
+    // A SPLINE participant has no control-frame trim: stable named pair refusal.
+    let (mut app, mut session) = curve_app(
+        ellipse(
+            point(0.0, 0.0),
+            p3(5.0, 0.0, 0.0),
+            0.5,
+            0.0,
+            std::f64::consts::TAU,
+        ),
+        SemanticGeometry::Spline {
+            degree: 3,
+            knots: Vec::new(),
+            control_points: vec![
+                p3(6.0, 0.0, 0.0),
+                p3(8.0, 2.0, 0.0),
+                p3(10.0, 0.0, 0.0),
+                p3(12.0, 2.0, 0.0),
+            ],
+            weights: Vec::new(),
+        },
+    );
+    set_number(&mut session, ToolParameter::FilletRadius, 2.0);
+    assert_unsupported(
+        &mut app,
+        &mut session,
+        fillet(1, 2, ellipse_point(point(0.0, 0.0), 1.2), point(8.0, 2.0)),
+        "FILLET.unsupported_pair",
     );
 }

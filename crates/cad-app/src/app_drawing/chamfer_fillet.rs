@@ -46,37 +46,51 @@
 //!   `gap / 2`. The tangent points are the perpendicular feet of that centre. The
 //!   centre's position **along** the lines is our declared rule: the average of
 //!   the two pick projections, so the arc lands between the picks.
-//! * Accepted objects: **2D polylines, lines, circles, arcs**. A selected circle
-//!   is **never trimmed**: the fillet meets it tangentially and the circle stays
-//!   whole. An arc is trimmed to the tangent point on its pick side. Circle↔circle,
-//!   circle↔arc and arc↔arc are the **curve↔curve** form: the fillet centre is an
-//!   intersection of the two offset circles (external `r + R` / internal
-//!   `|r − R|` tangency), and the created ARC is the **minor arc** between the
-//!   tangent points — its signed sweep is the short way round (`|sweep| ≤ π`, with
-//!   the sign following the solution arrangement), not a forced counter-clockwise
-//!   sweep. The candidate nearest the two picks wins (AutoCAD's multi-solution
-//!   cycling is NOT IMPLEMENTED); an exact score tie keeps the first candidate in
-//!   loop order, and the offset-circle intersections are ordered `−u_y` first
-//!   (`+Y` for a `+X` baseline), so the winner is deterministic. A chosen tangent
-//!   outside a picked ARC is refused (`FILLET.tangent_outside_arc`) even with trim
-//!   off, and a circle/arc whose stored `normal` is not `+Z` is refused
-//!   (`FILLET.unsupported_plane`). `R = 0`, concentric curves, non-coplanar curves
-//!   and a radius with no real tangency are named refusals before any write.
-//!   Ellipses, elliptical arcs, splines and every pair outside those six forms are
-//!   explicit named `Unsupported` refusals in this build.
+//! * Accepted objects: **lines, circles, arcs and ellipses/elliptical arcs**. A
+//!   selected circle is **never trimmed**: the fillet meets it tangentially and
+//!   the circle stays whole. An arc is trimmed to the tangent point on its pick
+//!   side. Circle↔circle, circle↔arc and arc↔arc are the **curve↔curve** form: the
+//!   fillet centre is an intersection of the two offset circles (external
+//!   `r + R` / internal `|r − R|` tangency), and the created ARC is the **minor
+//!   arc** between the tangent points — its signed sweep is the short way round
+//!   (`|sweep| ≤ π`, with the sign following the solution arrangement), not a
+//!   forced counter-clockwise sweep. The candidate nearest the two picks wins
+//!   (AutoCAD's multi-solution cycling is NOT IMPLEMENTED); an exact score tie
+//!   keeps the first candidate in loop order, and the offset-circle intersections
+//!   are ordered `−u_y` first (`+Y` for a `+X` baseline), so the winner is
+//!   deterministic. A chosen tangent outside a picked ARC is refused
+//!   (`FILLET.tangent_outside_arc`) even with trim off, and a circle/arc/ellipse
+//!   whose stored `normal` is not `+Z` is refused (`FILLET.unsupported_plane`).
+//!   `R = 0`, concentric curves, non-coplanar curves and a radius with no real
+//!   tangency are named refusals before any write.
+//! * **ELLIPSE participants** (ELLIPSE ↔ LINE/CIRCLE/ARC/ELLIPSE) are the numeric
+//!   form: the fillet centre is the one-parameter family `P(θ) ± R·n(θ)` and a
+//!   root of `distance(centre, other) − R` is a circle tangent to both. Roots are
+//!   bracketed on a dense parameter scan (sign changes and tangential minima) and
+//!   bisected/refined, so the construction is numeric but deterministic; the
+//!   nearest-pick candidate wins and the elliptical arc is trimmed by rewriting
+//!   its parametric `start`/`sweep` (never re-approximated). `R = 0` on an ellipse
+//!   is refused (`FILLET.radius_zero`; only line/line and line/circle implement the
+//!   sharp-corner form). SPLINE remains an explicit named `Unsupported` refusal
+//!   (`FILLET.unsupported_pair`) because the model has no control-frame trim.
 //! * A negative radius is not documented and is refused
 //!   (`fillet.radius_negative`).
 //!
 //! Every accepted invocation commits in **one transaction / one undo step**. All
 //! refusals are resolved before the first write, so a refusal changes nothing.
-//! The pure planners live in the private [`corner_geometry`] (line forms) and
-//! [`corner_curve`] (curve↔curve form) submodules, both declared with an explicit
-//! `#[path]` so the shared `app_drawing/mod.rs` needs no edit.
+//! The pure planners live in the private [`corner_geometry`] (line forms),
+//! [`corner_curve`] (curve↔curve form), [`corner_line_curve`] (line↔circle/arc)
+//! and [`corner_ellipse`] (ellipse numeric form) submodules, all declared with an
+//! explicit `#[path]` so the shared `app_drawing/mod.rs` needs no edit.
 
 #[path = "corner_curve.rs"]
 mod corner_curve;
+#[path = "corner_ellipse.rs"]
+mod corner_ellipse;
 #[path = "corner_geometry.rs"]
 mod corner_geometry;
+#[path = "corner_line_curve.rs"]
+mod corner_line_curve;
 
 use super::helpers::corner_tolerance;
 use super::*;
@@ -377,6 +391,23 @@ fn apply_update(
             center,
             normal,
             radius,
+            start,
+            sweep,
+        },
+        (
+            GeometryUpdate::Ellipse { start, sweep },
+            SemanticGeometry::Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                ..
+            },
+        ) => SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
             start,
             sweep,
         },

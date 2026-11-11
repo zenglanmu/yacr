@@ -74,6 +74,7 @@ impl RoundCurve {
                 arc: Some((start, sweep)),
             }),
             Curve::Line { .. } => None,
+            Curve::Ellipse(_) => None,
         }
     }
 }
