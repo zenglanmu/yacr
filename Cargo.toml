@@ -39,7 +39,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 # True MSRV floor, not a preference: `cadmpeg-ir`/`cadmpeg-codec-step`/
 # `cadmpeg-tessellate` 0.6.11 declare `rust-version = "1.88"` and `rvt` 0.17.0
