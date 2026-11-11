@@ -653,6 +653,7 @@
   "save.dwg_exported_experimental": "Saved experimental DWG to {path}; a NEW file was written and the source drawing was not modified. DWG export is experimental, lossy and incomplete, and it is not verified against AutoCAD or any vendor.",
   "save.dwg_exported_partial": "Saved experimental DWG to {path} (partial: {converted} converted, {dropped} dropped); a NEW file was written and the source drawing was not modified. DWG export is experimental, lossy and incomplete, and it is not verified against AutoCAD or any vendor.",
   "save.picker_waiting": "Choose where to save the DXF",
+  "save.picker_waiting_dwg": "Choose a NEW file for the experimental DWG copy; the opened source drawing is never overwritten. DWG export is incomplete, so keep the original file.",
   "save.no_extension": "The file name has no .dxf extension",
   "save.unknown_format": "Unsupported save format '{ext}'; use .dxf",
   "web.download_failed": "Browser download failed: {error}",

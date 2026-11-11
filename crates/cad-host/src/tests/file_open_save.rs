@@ -524,7 +524,10 @@ fn save_on_a_dwg_source_suggests_a_new_export_name() {
     assert_ne!(calls[0].1, "plan.dwg", "the source name is never suggested");
     let status = core.last_status().unwrap();
     let (key, _) = catalog(&status);
-    assert_eq!(key, "save.picker_waiting");
+    assert_eq!(
+        key, "save.picker_waiting_dwg",
+        "the DWG picker must warn before the write that the copy is experimental and the source is kept"
+    );
 }
 
 #[test]
