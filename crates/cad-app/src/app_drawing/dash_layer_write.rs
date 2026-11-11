@@ -79,6 +79,15 @@ impl Application {
         let mut deleted_active: Option<(String, LayerId)> = None;
 
         match ops {
+            // The list form is the Viewer-legal report, never a write. Reaching
+            // here means a caller bypassed the session router; refuse by name.
+            DashLayerOps::List { .. } => {
+                return Err(CadError::InvalidInput(
+                    "dashlayer.payload: -LAYER ? is the read-only table report and cannot be \
+                     dispatched as a write"
+                        .into(),
+                ))
+            }
             DashLayerOps::New(names) => {
                 for name in names {
                     let id = create_layer_on(&mut candidate, name, transaction)?;

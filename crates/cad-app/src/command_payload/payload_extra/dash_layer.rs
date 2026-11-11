@@ -33,6 +33,13 @@
 /// value token followed by the name list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DashLayerOps {
+    /// `? [pattern]`: the **read-only** table report, optionally filtered by an
+    /// AutoCAD layer-name wildcard (`*` matches any run, `?` one character,
+    /// case-insensitive). This is the one variant that does **not** write; it
+    /// is dispatched through the Viewer-legal
+    /// `CommandId::Extended(ExtendedCommandId::DashLayer)` report, not the
+    /// Work-only carrier.
+    List { pattern: Option<String> },
     /// `NEW n1[,n2...]` / `N`: create each named layer.
     New(Vec<String>),
     /// `MAKE name` / `M`: create the layer when it is missing, then make it the

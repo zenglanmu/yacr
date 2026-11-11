@@ -56,6 +56,74 @@ fn dash_layer_reports_the_real_table_without_writing() {
 }
 
 #[test]
+fn dash_layer_question_filters_by_cad_wildcard() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::DashLayer,
+        CommandPayload::DashLayer(crate::DashLayerOps::List {
+            pattern: Some("w*".into()),
+        }),
+    )
+    .expect("-LAYER ? <pattern> is the read-only report");
+    let entries: Vec<_> = outcome
+        .diagnostics
+        .iter()
+        .filter(|row| row.code == "layer.entry")
+        .collect();
+    assert!(
+        entries.iter().any(|row| row.message.contains("'WALLS'")),
+        "case-insensitive wildcard matches WALLS: {entries:?}"
+    );
+    assert!(
+        !entries.iter().any(|row| row.message.contains("'0'")),
+        "the filter excludes non-matching rows: {entries:?}"
+    );
+    assert!(!outcome
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "layer.no_match"));
+    assert_eq!(revision(&app), before);
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn dash_layer_question_with_no_match_reports_by_name() {
+    let (mut app, mut session) = application_with_document();
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::DashLayer,
+        CommandPayload::DashLayer(crate::DashLayerOps::List {
+            pattern: Some("zzz*".into()),
+        }),
+    )
+    .expect("an empty report is not an error");
+    assert!(!outcome
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "layer.entry"));
+    assert!(row(&outcome, "layer.no_match").message.contains("zzz*"));
+}
+
+#[test]
+fn dash_layer_list_cannot_ride_the_write_carrier() {
+    let (mut app, mut session) = application_with_document();
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::SetLayerProperty,
+                CommandPayload::DashLayer(crate::DashLayerOps::List { pattern: None }),
+            ),
+        )
+        .expect_err("the list form is the report, not a write");
+    assert!(format!("{error}").contains("dashlayer.payload"), "{error}");
+}
+
+#[test]
 fn layerstatesave_routes_the_owning_payload_and_reports_without_it() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);

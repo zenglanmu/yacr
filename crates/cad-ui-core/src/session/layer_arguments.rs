@@ -12,7 +12,7 @@
 //! Kept in its own module only to keep `session/mod.rs` inside the file-size
 //! budget (the `point_style` / `pedit` split pattern).
 
-use cad_app::{CommandId, CommandPayload, ExtendedCommandId, LayerStateCommand};
+use cad_app::{CommandId, CommandPayload, DashLayerOps, ExtendedCommandId, LayerStateCommand};
 
 use super::commands::{parse_dash_layer_argument, DASH_LAYER_SELECTOR};
 use super::diagnostics::cad_error_text;
@@ -87,21 +87,19 @@ impl CadSession {
     /// Work-only `SetLayerProperty` carrier (see [`cad_app::DashLayerOps`] for
     /// why). A malformed argument is refused before IPC and changes nothing.
     pub(super) fn dash_layer_argument(&self, argument: &str, text: &str) -> Result<(), String> {
-        if argument.trim() == "?" {
-            return self.dispatch_typed_argument(
-                DASH_LAYER_SELECTOR,
-                CommandId::Extended(ExtendedCommandId::DashLayer),
-                CommandPayload::None,
-            );
-        }
         let Some(ops) = parse_dash_layer_argument(argument) else {
             return self.refuse_argument(invalid_dash_layer_argument_reason(text));
         };
-        self.dispatch_typed_argument(
-            DASH_LAYER_SELECTOR,
-            CommandId::SetLayerProperty,
-            CommandPayload::DashLayer(ops),
-        )
+        // `? [pattern]` is the Viewer-legal report; every other variant writes
+        // through the Work-only carrier.
+        let (id, payload) = match ops {
+            DashLayerOps::List { .. } => (
+                CommandId::Extended(ExtendedCommandId::DashLayer),
+                CommandPayload::DashLayer(ops),
+            ),
+            _ => (CommandId::SetLayerProperty, CommandPayload::DashLayer(ops)),
+        };
+        self.dispatch_typed_argument(DASH_LAYER_SELECTOR, id, payload)
     }
 
     /// Echo the admitted selector (never the typed argument) and dispatch one

@@ -222,11 +222,20 @@ fn a_space_belongs_to_a_name_and_only_a_comma_separates_the_list() {
 
 #[test]
 fn the_parser_refuses_unknown_options_and_missing_operands() {
+    // `?` is the read-only report, with an optional wildcard filter.
+    assert_eq!(
+        parse_dash_layer_argument("?"),
+        Some(DashLayerOps::List { pattern: None })
+    );
+    assert_eq!(
+        parse_dash_layer_argument("? W*"),
+        Some(DashLayerOps::List {
+            pattern: Some("W*".into()),
+        })
+    );
     for refused in [
         "",
         "   ",
-        "?",
-        "? WALLS",
         "BOGUS WALLS",
         "NEW",
         "N ",
@@ -261,11 +270,18 @@ fn the_parser_refuses_unknown_options_and_missing_operands() {
 }
 
 #[test]
-fn the_reports_spelling_is_not_a_write_option() {
-    // `?` is the read-only report and is handled before the parser; the parser
-    // itself never turns it into an op.
-    assert_eq!(parse_dash_layer_argument("?"), None);
-    assert_eq!(parse_dash_layer_argument("? WALLS"), None);
+fn the_reports_spelling_is_a_report_not_a_write_option() {
+    // `?` parses to the one read-only List variant; every other variant writes.
+    assert_eq!(
+        parse_dash_layer_argument("?"),
+        Some(DashLayerOps::List { pattern: None })
+    );
+    assert_eq!(
+        parse_dash_layer_argument("? WALLS"),
+        Some(DashLayerOps::List {
+            pattern: Some("WALLS".into()),
+        })
+    );
     // The bare selector is not an argument form at all.
     assert_eq!(typed_command_argument("-LAYER"), None);
     assert_eq!(
@@ -353,7 +369,10 @@ fn a_typed_write_reaches_the_command_layer_and_the_report_stays_read_only() {
     // A malformed option is refused by name before IPC, with the grammar spelled
     // out and nothing changed.
     let error = session.command("-LAYER BOGUS WALLS").unwrap_err();
-    assert!(error.contains("-LAYER takes one option"), "{error}");
+    assert!(
+        error.contains("-LAYER takes ? [wildcard] or one option"),
+        "{error}"
+    );
     let layer_names_after_refusal: Vec<String> = {
         let controller = session.core.controller.borrow();
         let drawing = controller.drawing().expect("a drawing is open");

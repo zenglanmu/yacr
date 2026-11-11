@@ -670,7 +670,8 @@ pub fn invalid_multiple_argument_reason(text: &str) -> String {
 /// parser; every write option does.
 pub const DASH_LAYER_SELECTOR: &str = "-LAYER";
 
-/// Parse the write argument of a `-LAYER` selector.
+/// Parse the argument of a `-LAYER` selector: `? [pattern]` (the read-only
+/// report, optional AutoCAD name wildcard) or one write option.
 ///
 /// One option per typed line. Keywords are case-insensitive and the documented
 /// short aliases are `N` (NEW), `M` (MAKE), `S` (SET), `R` (RENAME), `D`
@@ -708,6 +709,14 @@ pub const DASH_LAYER_SELECTOR: &str = "-LAYER";
 /// [`invalid_dash_layer_argument_reason`]. Nothing is defaulted.
 pub fn parse_dash_layer_argument(argument: &str) -> Option<DashLayerOps> {
     let text = argument.trim();
+    // `?` is the read-only table report, optionally followed by one layer-name
+    // wildcard filter (`*` any run, `?` one character, case-insensitive).
+    if let Some(rest) = text.strip_prefix('?') {
+        let pattern = rest.trim();
+        return Some(DashLayerOps::List {
+            pattern: (!pattern.is_empty()).then(|| pattern.to_string()),
+        });
+    }
     let (keyword, rest) = split_keyword(text);
     match keyword.to_ascii_uppercase().as_str() {
         "NEW" | "N" => Some(DashLayerOps::New(parse_layer_name_list(rest)?)),
@@ -768,10 +777,10 @@ pub fn parse_dash_layer_argument(argument: &str) -> Option<DashLayerOps> {
 /// defaulted option.
 pub fn invalid_dash_layer_argument_reason(text: &str) -> String {
     format!(
-        "unsupported CAD command: {} (-LAYER takes one option: NEW|N, MAKE|M, SET|S, RENAME|R \
-         <old> <new>, DELETE|D, ON, OFF, FREEZE|F, THAW|T, LOCK|LO, UNLOCK|U, COLOR|C <value>, \
-         LTYPE|L <name>, LWEIGHT|LW <value> or PLOT|P Y|N, followed by comma-separated layer \
-         names; a bare -LAYER or -LAYER ? reports the table)",
+        "unsupported CAD command: {} (-LAYER takes ? [wildcard] or one option: NEW|N, MAKE|M, \
+         SET|S, RENAME|R <old> <new>, DELETE|D, ON, OFF, FREEZE|F, THAW|T, LOCK|LO, UNLOCK|U, \
+         COLOR|C <value>, LTYPE|L <name>, LWEIGHT|LW <value> or PLOT|P Y|N, followed by \
+         comma-separated layer names; a bare -LAYER or -LAYER ? reports the table)",
         text.trim()
     )
 }
