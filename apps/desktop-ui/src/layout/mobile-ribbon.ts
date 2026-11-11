@@ -35,6 +35,24 @@ export const MOBILE_HIDDEN_ACTIONS: readonly string[] = Object.freeze([
   SHELL_ACTIONS.commandLine,
 ]);
 
+/**
+ * Chrome-local commands the mobile layout does not offer.
+ *
+ * `RIBBON*`, `HIDEPALETTES`/`SHOWPALETTES`, `FILETAB*` and `TOOLBAR`/
+ * `-TOOLBAR` set the visibility of desktop chrome regions the compact layout
+ * never renders; `WORKSPACE*` edits that same desktop state. Offering them on a
+ * phone would be a button that paints nothing, which is exactly the rule this
+ * module exists to apply. `QUICKCALC`, `QVLAYOUT` and the Quick View panels stay
+ * usable and are not in this list.
+ */
+export const MOBILE_HIDDEN_COMMANDS: readonly string[] = Object.freeze([
+  'RIBBON', 'RIBBONCLOSE',
+  'HIDEPALETTES', 'SHOWPALETTES',
+  'FILETAB', 'FILETABCLOSE',
+  'TOOLBAR', '-TOOLBAR',
+  'WORKSPACE', 'WSSAVE', 'WSSETTINGS',
+]);
+
 /** One titled group of the drawer: a desktop ribbon panel, minus dropped items. */
 export interface MobileRibbonSection {
   readonly id: string;
@@ -44,7 +62,9 @@ export interface MobileRibbonSection {
 
 /** Whether `item` survives the mobile reduction (see the module comment). */
 function mobileItem(item: RibbonItem): boolean {
-  return !(typeof item.action === 'string' && MOBILE_HIDDEN_ACTIONS.includes(item.action));
+  if (typeof item.action === 'string' && MOBILE_HIDDEN_ACTIONS.includes(item.action)) return false;
+  if (typeof item.command === 'string' && MOBILE_HIDDEN_COMMANDS.includes(item.command)) return false;
+  return true;
 }
 
 /**

@@ -16,6 +16,7 @@ import { DRAW_MODIFY_ITEMS, HOME_MODIFY_ITEMS } from './ribbon-modify.ts';
 import { LAYER_PANEL_ITEMS } from './layers-panel.ts';
 import { ANNOTATE_TEXT_COMMAND_ITEMS } from './annotate-text-commands.ts';
 import { CIRCLE_ITEM, HATCHEDIT_ITEM, MEASUREGEOM_ITEM, POLYGON_ITEM } from './variants.ts';
+import { INTERFACE_PANEL } from './ribbon-interface.ts';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({
@@ -917,6 +918,10 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'clean', labelKey: 'status.clean_screen', icon: 'cleanScreen', action: 'cleanScreen' },
         ],
       },
+      // The 2026-11-12 interface panel: the chrome-owned visibility words and the
+      // workspace/calculator/Quick View entries. Command tokens, never actions,
+      // so the ribbon and the command line share one local admission path.
+      INTERFACE_PANEL,
     ],
   },
 ]);

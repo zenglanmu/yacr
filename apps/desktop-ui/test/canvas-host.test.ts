@@ -305,7 +305,10 @@ function codeLines(source) {
 }
 
 test('native-below never imports or loads the wasm module', async () => {
-  const app = await readModule('App.tsx');
+  // The transport effect is its own hook (`cad/use-canvas-transport.ts`); the
+  // shell keeps the lane and the carrier decision. Both are the shipped source
+  // under test here.
+  const app = `${await readModule('App.tsx')}\n${await readModule('cad/use-canvas-transport.ts')}`;
   const transport = await readModule('cad/canvas-host.ts');
   const shipped = await readAppSource();
 
@@ -356,7 +359,7 @@ test('native-below never imports or loads the wasm module', async () => {
 });
 
 test('one input lane serves both carriers, and the transport builds no second one', async () => {
-  const app = await readModule('App.tsx');
+  const app = `${await readModule('App.tsx')}\n${await readModule('cad/use-canvas-transport.ts')}`;
   // One lane, one transport, one probe_input call site: none can exist twice, and
   // `dom-canvas` is no exception any more - it forwards the same events to the
   // session's own `probe_input` through the adapter.
@@ -536,7 +539,10 @@ test('the build script generates the bootstrap module with the explicit wasm URL
 });
 
 test('.native-input is the only element with pointer listeners', async () => {
-  const app = await readModule('App.tsx');
+  // The transport effect is its own hook (`cad/use-canvas-transport.ts`); the
+  // shell keeps the lane and the carrier decision. Both are the shipped source
+  // under test here.
+  const app = `${await readModule('App.tsx')}\n${await readModule('cad/use-canvas-transport.ts')}`;
   const transport = await readModule('cad/canvas-host.ts');
   const workspace = await readModule('components/Workspace.tsx');
 

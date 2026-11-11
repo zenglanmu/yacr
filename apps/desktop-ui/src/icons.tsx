@@ -244,6 +244,9 @@ const P = {
   drawing: <><rect x="4" y="5" width="16" height="14" rx="1" /><path d="M4 16l4-4 3 3 3-4 6 6" /></>,
   alert: <><path d="M12 4 21 20H3z" /><path d="M12 10v5M12 17.6h.01" /></>,
   spinner: <><path d="M12 4a8 8 0 1 1-8 8" /></>,
+  // Quick View refresh: the conventional circular arrow. It marks the one
+  // in-place preview refresh (`UPDATETHUMBSNOW`) rather than a router command.
+  refresh: <><path d="M20 11a8 8 0 1 0-2.3 6.3" /><path d="M20 4v7h-7" /></>,
   check: <><path d="M5 13l4.5 4.5L19 7" /></>,
   dot: <><circle cx="12" cy="12" r="2.5" /></>,
   // Layer visibility (Layers palette): an eye for "on", and the same eye dimmed

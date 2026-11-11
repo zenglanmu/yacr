@@ -5,6 +5,7 @@ import { createContext, useContext } from 'react';
 import type { Dispatch, RefCallback, SetStateAction } from 'react';
 import type { CommandHistoryEntry } from './commands/command-history.ts';
 import type { Locale, Translator } from './i18n.ts';
+import type { ChromeVisibility } from './chrome/visibility.ts';
 
 /**
  * A host-derived block (`cad_status`, an import progress, a popup payload).
@@ -122,6 +123,10 @@ export interface ShellValue {
   readonly setRibbonCollapsed: Dispatch<SetStateAction<boolean>>;
   readonly cleanScreen: boolean;
   readonly setCleanScreen: Dispatch<SetStateAction<boolean>>;
+  /** The explicit ribbon / palette-layer / drawing-tab visibility flags. */
+  readonly chromeVisibility: ChromeVisibility;
+  /** Whether the title row's quick-access toolbar strip is painted (`TOOLBAR`). */
+  readonly toolbarVisible: boolean;
   /** Whether the static File info palette is open. */
   readonly fileInfoOpen: boolean;
   readonly setFileInfoOpen: Dispatch<SetStateAction<boolean>>;

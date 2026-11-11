@@ -2495,3 +2495,226 @@ button, input, select { font: inherit; color: inherit; }
 }
 .fileinfo__close,
 .diagnostics__close { margin-top: 8px; }
+
+/* Chrome-local surfaces --------------------------------------------------- */
+/* Quick View, the workspace selector and the two dialogs. They read the same
+   surface tokens as the palettes and the popup layer: one fill step per plane,
+   one hairline, one radius, one rise. */
+
+.chrome-dialog-overlay { z-index: 63; }
+
+/* Quick View: a bottom-right float over the drawing, above the status bar. It
+   is non-modal, so there is no scrim and the drawing stays visible around it. */
+.quick-view {
+  position: fixed;
+  right: 16px;
+  bottom: 38px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(52vh, 460px);
+  background: var(--chrome-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 44px rgba(var(--shadow-rgb), .4);
+  animation: rise var(--t-med) both;
+  outline: none;
+}
+.quick-view__head {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 30px; padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome-3);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.quick-view__title {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-width: 0; font-size: 12px; font-weight: 600; color: var(--text);
+}
+.quick-view__title .icon { color: var(--accent-text); }
+.quick-view__updated {
+  margin-left: auto; color: var(--ok); font-size: 10.5px; letter-spacing: .2px;
+  animation: fade var(--t-med) both;
+}
+.quick-view__head > .ui-icon-button:first-of-type { margin-left: auto; }
+.quick-view__updated + .ui-icon-button { margin-left: 0; }
+.quick-view__subtitle {
+  margin: 0; padding: 9px 12px 2px;
+  color: var(--text-dim); font-size: 11px; line-height: 1.45;
+}
+.quick-view__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px; padding: 10px 12px;
+  overflow: auto; min-height: 0;
+}
+.quick-view__card {
+  display: flex; flex-direction: column; align-items: stretch; gap: 5px;
+  min-width: 0; padding: 7px;
+  text-align: left;
+  background: var(--chrome-3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast), transform var(--t-fast);
+}
+.quick-view__card:hover:not(:disabled) { border-color: var(--accent-text); transform: translateY(-1px); }
+.quick-view__card:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.quick-view__card.is-active { border-color: var(--accent-text); }
+.quick-view__card.is-unsupported { opacity: .55; cursor: not-allowed; }
+.quick-view__preview {
+  display: block; overflow: hidden;
+  height: 72px;
+  background:
+    linear-gradient(180deg, transparent 0 70%, var(--field) 70% 100%),
+    var(--field);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  color: var(--accent-text);
+}
+.quick-view__preview svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.4; }
+.quick-view__name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; font-weight: 600;
+}
+.quick-view__meta { color: var(--text-muted); font-size: 10.5px; }
+.quick-view__badge {
+  align-self: flex-start;
+  padding: 1px 6px; border: 1px solid var(--accent-text); border-radius: 999px;
+  color: var(--accent-text); font-size: 9.5px; letter-spacing: .3px; text-transform: uppercase;
+}
+.quick-view__badge.is-muted { border-color: var(--line-soft); color: var(--text-muted); text-transform: none; letter-spacing: 0; }
+.quick-view__empty {
+  margin: 0; padding: 22px 12px;
+  color: var(--text-muted); font-size: 11.5px; text-align: center;
+}
+.quick-view__foot {
+  padding: 7px 12px 9px;
+  border-top: 1px solid var(--line);
+  color: var(--text-muted); font-size: 10.5px; line-height: 1.4;
+}
+
+/* Workspace selector: a top-left float under the ribbon. */
+.workspace-panel {
+  position: fixed;
+  left: 16px;
+  top: 64px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: min(340px, calc(100vw - 32px));
+  max-height: min(60vh, 520px);
+  background: var(--chrome-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 44px rgba(var(--shadow-rgb), .4);
+  animation: rise var(--t-med) both;
+  outline: none;
+}
+.workspace-panel__head {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 30px; padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome-3);
+}
+.workspace-panel__title {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-right: auto; font-size: 12px; font-weight: 600; color: var(--text);
+}
+.workspace-panel__title .icon { color: var(--accent-text); }
+.workspace-panel__hint {
+  margin: 0; padding: 9px 12px 4px;
+  color: var(--text-dim); font-size: 11px; line-height: 1.45;
+}
+.workspace-panel__list { margin: 0; padding: 6px 8px 8px; list-style: none; overflow: auto; min-height: 0; }
+.workspace-panel__row + .workspace-panel__row { margin-top: 2px; }
+.workspace-panel__choice {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: 30px; padding: 4px 8px;
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius);
+  color: var(--text); text-align: left; cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.workspace-panel__choice:hover { background: var(--field); }
+.workspace-panel__choice:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.workspace-panel__choice.is-current { background: var(--field); border-color: var(--line-soft); }
+.workspace-panel__choice .icon { color: var(--text-muted); }
+.workspace-panel__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
+.workspace-panel__badge {
+  flex: 0 0 auto; padding: 1px 6px; border: 1px solid var(--accent-text); border-radius: 999px;
+  color: var(--accent-text); font-size: 9.5px; letter-spacing: .2px;
+}
+.workspace-panel__badge.is-muted { border-color: var(--line-soft); color: var(--text-muted); }
+.workspace-panel__foot {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--chrome-3);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+/* QuickCalc: the display is the expression field; the keypad is a 4-column grid. */
+.quickcalc { display: flex; flex-direction: column; gap: 9px; }
+.quickcalc__display {
+  width: 100%; height: 44px; padding: 0 10px;
+  background: var(--field);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-mono); font-size: 18px; letter-spacing: .4px;
+  text-align: right;
+}
+.quickcalc__display:focus { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); outline: none; }
+.quickcalc__meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 16px;
+  font-family: var(--font-mono); font-size: 10.5px;
+}
+.quickcalc__preview { color: var(--accent-text); }
+.quickcalc__preview.is-empty { visibility: hidden; }
+.quickcalc__error { color: var(--danger); }
+.quickcalc__memory { color: var(--text-muted); }
+.quickcalc__memory.is-active { color: var(--accent-text); }
+.quickcalc__keys {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px;
+}
+.quickcalc__key {
+  height: 32px;
+  background: var(--chrome-3);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-mono); font-size: 12.5px;
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.quickcalc__key:hover { background: var(--field); border-color: var(--line); }
+.quickcalc__key:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.quickcalc__key.is-action { color: var(--accent-text); }
+.quickcalc__key.is-equals { background: var(--accent); border-color: var(--accent); color: var(--on-text); }
+.quickcalc__copied { margin: 0 auto 0 0; color: var(--ok); font-size: 10.5px; }
+.quickcalc__copy-failed { margin: 0 auto 0 0; color: var(--danger); font-size: 10.5px; }
+
+/* Workspace settings: a plain list under one save form. */
+.workspace-settings { display: flex; flex-direction: column; gap: 7px; }
+.workspace-settings + .workspace-settings { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.workspace-settings__heading {
+  margin: 0; color: var(--text-muted); font-size: 10.5px; font-weight: 500;
+  letter-spacing: .5px; text-transform: uppercase;
+}
+.workspace-settings__form { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px; }
+.workspace-settings__field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 180px; min-width: 0; }
+.workspace-settings__field.is-narrow { flex: 0 0 112px; }
+.workspace-settings__field > span { color: var(--text-dim); font-size: 10.5px; }
+.workspace-settings__ok { margin: 0; color: var(--ok); font-size: 10.5px; }
+.workspace-settings__error { margin: 0; color: var(--danger); font-size: 10.5px; line-height: 1.4; }
+.workspace-settings__list { margin: 0; padding: 0; list-style: none; border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: hidden; }
+.workspace-settings__row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
+.workspace-settings__row + .workspace-settings__row { border-top: 1px solid var(--line); }
+.workspace-settings__identity { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.workspace-settings__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 11.5px; }
+.workspace-settings__width { color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; }
+.workspace-settings__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; flex: 0 0 auto; }
+.workspace-settings__confirm { color: var(--text-dim); font-size: 10.5px; }
+.workspace-settings__empty { margin: 2px 0 0; color: var(--text-muted); font-size: 10.5px; }
+.workspace-settings__note { margin: 0 auto 0 0; color: var(--text-muted); font-size: 10.5px; line-height: 1.4; }

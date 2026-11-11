@@ -11,11 +11,9 @@ import type { Locale } from './i18n.ts';
 import { bindProbeInput, createInputLane, createSuspendGate } from './cad/input.ts';
 import type { InputLane, ProbeInputBinding, SuspendGate } from './cad/input.ts';
 import { rectFromElement } from './cad/metrics.ts';
-import { CANVAS_STEP_MODULE, canvasModuleUrl, createCanvasTransport, loadCanvasModule, watchCanvasRect } from './cad/canvas-host.ts';
-import type { CanvasFailure, CanvasTransport } from './cad/canvas-host.ts';
-import { createFrameLoop } from './cad/frame-loop.ts';
 import type { FrameLoop } from './cad/frame-loop.ts';
-import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
+import { canvasSessionFromShell, palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
+import { useCanvasTransport } from './cad/use-canvas-transport.ts';
 import { queueCadCommand } from './cad/cad-command.ts';
 import { useDwgSaveConfirm } from './components/use-dwg-save-confirm.tsx';
 import { useCadEvents } from './cad/use-cad-events.ts';
@@ -64,6 +62,20 @@ import { openOptionsDialog } from './options/open-options.ts';
 import { useLocalSelectors } from './commands/local-selectors.ts';
 import { setSelectedProperty } from './properties/properties.ts';
 import { textEditOpenError } from './popup/popup-textedit.ts';
+import { useWorkspaceSnapshot, useChromeSurfaceState } from './chrome/use-chrome-store.ts';
+import { appliedWorkspace } from './chrome/workspaces.ts';
+import { DEFAULT_CHROME_VISIBILITY, paletteChrome, withFileTabs, withRibbon } from './chrome/visibility.ts';
+import {
+  closeQuickCalc,
+  closeQuickView,
+  openQuickCalc,
+  openQuickView,
+  openWorkspaceSelector,
+  openWorkspaceSettings,
+  refreshQuickView,
+} from './chrome/surfaces.ts';
+import { ChromeSurfaces } from './components/ChromeSurfaces.tsx';
+import { applyPaletteWidthPreset } from './components/PaletteWindow.tsx';
 
 /** The options `submitCommand` accepts from a region (`fromInput` keeps a draft). */
 interface SubmitOptions { readonly fromInput?: boolean; }
@@ -88,6 +100,26 @@ function Shell() {
   const [ribbonTab, setRibbonTab] = useState('home');
   const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
   const [cleanScreen, setCleanScreen] = useState(false);
+  // The finer-grained chrome visibility (ribbon / palette layer / drawing tabs)
+  // and the quick-access toolbar strip. `CLEANSCREENON/OFF` keep their own state;
+  // these are the explicit show/hide words (`RIBBON`, `HIDEPALETTES`, `FILETAB`,
+  // `TOOLBAR`), and a workspace preset stores an immutable snapshot of the first
+  // value.
+  const [chromeVisibility, setChromeVisibility] = useState(DEFAULT_CHROME_VISIBILITY);
+  const [toolbarVisible, setToolbarVisible] = useState(true);
+  // The workspace presets are an external session store, not React state: the
+  // selector and the settings dialog read the same source.
+  const workspaceState = useWorkspaceSnapshot();
+  // The open chrome-local surfaces. While one is open it owns Escape (its own
+  // listener closes it), so the shell's global handler stands down.
+  const chromeSurfaces = useChromeSurfaceState();
+
+  // Close every palette window. `HIDEPALETTES` and a workspace preset with
+  // palettes hidden both mean "no palette is open behind the layer".
+  const closeAllPalettes = useCallback(() => {
+    setPropertiesOpen(false); setLayersOpen(false); setFileInfoOpen(false);
+    setDiagnosticsOpen(false); setReferencesOpen(false); setFontsOpen(false);
+  }, []);
   const [fileInfoOpen, setFileInfoOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [referencesOpen, setReferencesOpen] = useState(false);
@@ -177,6 +209,19 @@ function Shell() {
     setMobileDrawer(state => mobileDrawerNext(state, 'close'));
   }, [mobile]);
 
+  // A workspace apply is the one event that rewrites the chrome's visibility and
+  // panel widths. It is driven by `applyRevision`, not by `currentId`: saving or
+  // renaming a preset must not repaint the running chrome, and re-applying the
+  // current preset must.
+  useEffect(() => {
+    if (workspaceState.applyRevision === 0) return;
+    const preset = appliedWorkspace();
+    if (!preset) return;
+    setChromeVisibility(preset.visibility);
+    applyPaletteWidthPreset(preset.panelWidth);
+    if (!preset.visibility.palettes) closeAllPalettes();
+  }, [workspaceState.applyRevision, closeAllPalettes]);
+
   const submitting = useRef(false);
   // The text-step submit has its own in-flight guard: it must not block a
   // command (or be blocked by one), and a second Enter while the first is still
@@ -187,12 +232,6 @@ function Shell() {
   const submittingSelectedText = useRef(false);
   const laneRef = useRef<InputLane | null>(null);
   const bindingRef = useRef<ProbeInputBinding | null>(null);
-  // The `dom-canvas` transport (`null` on every other carrier) and the wasm
-  // session's most recent status. The raw status stays a ref: the chrome reads the
-  // **host's** `cad_status`, which is where the relayed identity arrives, and the
-  // session's own numbers are never painted directly.
-  const transportRef = useRef<CanvasTransport | null>(null);
-  const canvasStatusRef = useRef<Record<string, unknown> | null>(null);
   // The page carrier's frame pump (`cad/frame-loop.ts`), `null` on every other
   // carrier: `frame()` is a `dom-canvas` export and there is nothing to drive on
   // `native-below` (that host's own loop is already running).
@@ -301,82 +340,11 @@ function Shell() {
     return () => { lane.dispose(); laneRef.current = null; };
   }, [inputLaneReady]);
 
-  // The `dom-canvas` transport (ADR 0024 D1/D2/D3). The wasm session is the single
-  // pixel carrier **and** the single camera owner, so this component only measures
-  // the partition, hands the module a size and drives its frames; the camera,
-  // the tools and every click belong to the shared input lane. `.native-input`
-  // stays the single input surface: the `<canvas>` receives no listener and no
-  // state.
-  //
-  // A module that cannot load (missing artifact, CSP without
-  // `'wasm-unsafe-eval'`, broken instantiation) never reaches the session, so it
-  // has no status of its own: the module-load step is classified here and reported
-  // to the host. One failed report, one refusal - never a blank canvas and never a
-  // retry loop.
-  useEffect(() => {
-    if (surfaceMode !== SURFACE_MODE_DOM_CANVAS || !surfaceNode) return undefined;
-    let cancelled = false;
-    let transport: CanvasTransport | null = null;
-    let frames: FrameLoop | null = null;
-    let stopWatching: (() => void) | null = null;
-    // The one channel that publishes *this* session's drawing identity to the
-    // host. The native shell must not hold document state of its own (iron rule
-    // 8), so the identity travels one way only: the session reports it, the host
-    // stores the relay, the chrome reads the relay back (`status.canvasSession`).
-    // Every send is deduplicated against the previous one, so a gesture that does
-    // not change the reported payload never reaches the host, and this effect —
-    // which only exists on `dom-canvas` — is the only caller: a `native-below`
-    // host never sends a session report at all.
-    const reporter = createCanvasSessionReporter(report => {
-      void invoke('canvas_session_status', { ...canvasSessionPayload(report) })
-        .catch(reason => setError(String(reason)));
-    });
-    const fail = (failure: CanvasFailure) => {
-      // The host owns the refusal: it maps the step to its stable marker line and
-      // exit code (`webgl2` -> `yacr: unsupported-runtime: webgl2`, exit code 6).
-      // This side forwards the machine-readable step and the session's own detail
-      // only; it never invents user-facing copy (the i18n catalog owns every word).
-      void invoke('canvas_runtime_failed', { step: failure.step, detail: failure.detail })
-        .catch(reason => setError(String(reason)));
-    };
-    void loadCanvasModule(canvasModuleUrl()).then(module => {
-      if (cancelled) return;
-      const created = createCanvasTransport({
-        module,
-        element: surfaceNode,
-        rect: rectFromElement(surfaceNode, window.devicePixelRatio || 1),
-        onFailure: fail,
-        onStatus: next => {
-          canvasStatusRef.current = next;
-          reporter.report(next);
-          // The first answered call is what makes the session live; the pointer
-          // lane and the frame pump both wait for exactly this fact.
-          setCanvasLive(true);
-        },
-      });
-      transport = created;
-      transportRef.current = created;
-      frames = createFrameLoop({ module });
-      framesRef.current = frames;
-      stopWatching = watchCanvasRect(surfaceNode, rect => {
-        created.update(rect);
-        frames?.pump();
-      });
-      frames.pump();
-    }).catch(error => {
-      if (cancelled) return;
-      fail({ step: CANVAS_STEP_MODULE, detail: String(error), marker: null });
-    });
-    return () => {
-      cancelled = true;
-      stopWatching?.();
-      frames?.dispose();
-      if (framesRef.current === frames) framesRef.current = null;
-      transport?.dispose();
-      if (transportRef.current === transport) transportRef.current = null;
-      setCanvasLive(false);
-    };
-  }, [surfaceMode, surfaceNode]);
+  // The `dom-canvas` transport (ADR 0024 D1/D2/D3), in its own hook so this
+  // composition file stays inside the code gate. It creates exactly one wasm
+  // transport per page-carrier mount and disposes it on unmount; every other
+  // carrier is a no-op.
+  useCanvasTransport({ surfaceMode, surfaceNode, framesRef, setCanvasLive, setError });
 
   // Bind (and re-bind) the input lane to the CAD partition element. The binding
   // reports the partition rect immediately, and re-reports it on every resize,
@@ -508,6 +476,25 @@ function Shell() {
     closeProperties: () => setPropertiesOpen(false),
     closeLayers: () => setLayersOpen(false),
     setCommandLineOpen: (value: boolean) => setCommandLineOpen(value),
+    setRibbonVisible: (value: boolean) => setChromeVisibility(current => withRibbon(current, value)),
+    setFileTabsVisible: (value: boolean) => setChromeVisibility(current => withFileTabs(current, value)),
+    setPaletteChrome: (value: boolean) => {
+      setChromeVisibility(paletteChrome(value));
+      // A hidden palette layer must not keep windows "open" behind it: closing
+      // them makes SHOWPALETTES restore the chrome, never a stale stack of
+      // invisible windows.
+      if (!value) closeAllPalettes();
+    },
+    setQuickView: (panel) => openQuickView(panel),
+    closeQuickView: (panel) => closeQuickView(panel),
+    refreshQuickView,
+    setQuickCalc: (open: boolean) => {
+      if (open) openQuickCalc();
+      else closeQuickCalc();
+    },
+    setToolbarVisible: (value: boolean) => setToolbarVisible(value),
+    openWorkspace: openWorkspaceSelector,
+    openWorkspaceSettings,
     reportError: setError,
   });
 
@@ -624,6 +611,10 @@ function Shell() {
       // from its own root (it survives an App crash), so it is not part of
       // `popupOpen`; both gate the shell's shortcuts the same way.
       if (popupOpen || isErrorReportVisible()) return;
+      // A modal chrome dialog owns every key; a floating panel owns only Escape.
+      if (chromeSurfaces.quickCalc || chromeSurfaces.workspaceSettings !== null) return;
+      if (event.key === 'Escape'
+        && (chromeSurfaces.quickView !== null || chromeSurfaces.workspaceSelector)) return;
       if (dwgSavePending()) return; // the DWG save confirmation owns Escape
       // Ctrl+0 is both the app's clean-screen toggle and WebKit's zoom reset.
       // Handle it before the `defaultPrevented` check: the webview-default guard
@@ -710,7 +701,7 @@ function Shell() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [popupOpen, submitCommand, toolActive, gripDragActive, textStep, canCommand, layout, t]);
+  }, [popupOpen, submitCommand, toolActive, gripDragActive, textStep, canCommand, layout, t, chromeSurfaces]);
 
   // Feed the CAD shortcut-menu hook the state slices the chrome already has. It
   // is a ref, not a dependency, so polling never re-installs the guards below.
@@ -843,6 +834,8 @@ function Shell() {
     setRibbonCollapsed,
     cleanScreen,
     setCleanScreen,
+    chromeVisibility,
+    toolbarVisible,
     fileInfoOpen, setFileInfoOpen, diagnosticsOpen, setDiagnosticsOpen,
     referencesOpen,
     setReferencesOpen,
@@ -943,8 +936,8 @@ function Shell() {
               <MobileRibbonDrawer open={mobileDrawer.open} onClose={closeMobileDrawer} />
             </>
           ) : cleanScreen ? null : <TitleBar />}
-          {mobile || cleanScreen ? null : <Ribbon />}
-          {mobile || cleanScreen ? null : <DocTabs />}
+          {mobile || cleanScreen || !chromeVisibility.ribbon ? null : <Ribbon />}
+          {mobile || cleanScreen || !chromeVisibility.fileTabs ? null : <DocTabs />}
           <Workspace />
           {mobile || cleanScreen ? null : <LayoutTabs />}
           {/* One bottom component per layout: the docked command line below the
@@ -953,6 +946,10 @@ function Shell() {
           {mobile ? <MobileCommandBar /> : commandLineOpen ? <CommandLine /> : null}
           {mobile ? null : <StatusBar />}
         </main>
+        {/* The chrome-local surfaces: Quick View panels, QuickCalc, the workspace
+            selector and the workspace settings dialog. One renderer for every
+            entry point (typed word, ribbon, or a panel's own refresh). */}
+        <ChromeSurfaces />
         {/* The compact References sheet: the same panel the desktop shows in its
             palette window, as a bottom sheet because the compact layout hides the
             palette layer. It reads the same `cad_status.references` rows and adds

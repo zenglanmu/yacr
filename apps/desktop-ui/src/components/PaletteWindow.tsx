@@ -52,6 +52,9 @@ interface WindowState {
 const STATES = new Map<string, WindowState>();
 const LISTENERS = new Set<() => void>();
 let nextZ = PALETTE_Z_BASE;
+// The width the last workspace preset asked for, applied to every existing window
+// and every window created afterwards. `null` keeps the responsive default.
+let presetWidth: number | null = null;
 
 function notify(): void {
   for (const listener of [...LISTENERS]) listener();
@@ -66,8 +69,9 @@ function stateOf(windowKey: string, initialIndex: number): WindowState {
   const existing = STATES.get(windowKey);
   if (existing) return existing;
   const index = Number.isFinite(initialIndex) ? Math.max(0, Math.floor(initialIndex)) : 0;
+  const geometry = defaultPaletteGeometry(index);
   const created: WindowState = {
-    geometry: defaultPaletteGeometry(index),
+    geometry: presetWidth === null ? geometry : { ...geometry, width: presetWidth },
     // Properties (index 0) starts on top; the cascade already keeps every header
     // visible, and a press raises the pressed window above all of them.
     z: PALETTE_Z_BASE - index,
@@ -122,6 +126,33 @@ function raise(windowKey: string, initialIndex: number): void {
 }
 
 type DragMode = 'move' | 'resize';
+
+/**
+ * Apply a workspace preset's panel width to every palette window.
+ *
+ * The width is stored as the default for windows created later too, which is
+ * what makes a preset survive its own palettes being closed and reopened. The
+ * value is clamped at render time by `clampGeometry`, so an over-wide preset on
+ * a narrow drawing is narrowed rather than clipped.
+ */
+export function applyPaletteWidthPreset(width: number): void {
+  if (!Number.isFinite(width) || width <= 0) return;
+  presetWidth = Math.round(width);
+  for (const [key, state] of STATES) {
+    STATES.set(key, {
+      ...state,
+      geometry: { ...state.geometry, width: presetWidth },
+      touched: true,
+      sized: true,
+    });
+  }
+  notify();
+}
+
+/** Clear the preset width (tests; a fresh document starts responsive again). */
+export function clearPaletteWidthPreset(): void {
+  presetWidth = null;
+}
 
 interface DragSession {
   readonly mode: DragMode;

@@ -55,24 +55,26 @@ export function TitleBar() {
         <Icon name="app" size={20} />
       </button>
 
-      <div className="qat" role="toolbar" aria-label={t('qat.label')}>
-        {qat.map(item => {
-          const enabled = Boolean(item.action) && shell.canCommand(item.id);
-          return (
-            <IconButton
-              key={item.id}
-              icon={item.icon}
-              label={t(item.labelKey)}
-              size="sm"
-              disabled={!enabled}
-              title={enabled ? t(item.labelKey) : `${t(item.labelKey)} — ${refusal(item)}`}
-              onClick={item.action}
-            />
-          );
-        })}
-        <span className="qat__rule" aria-hidden="true" />
-        <IconButton icon="chevronDown" label={t('qat.customize')} size="sm" disabled />
-      </div>
+      {shell.toolbarVisible ? (
+        <div className="qat" role="toolbar" aria-label={t('qat.label')}>
+          {qat.map(item => {
+            const enabled = Boolean(item.action) && shell.canCommand(item.id);
+            return (
+              <IconButton
+                key={item.id}
+                icon={item.icon}
+                label={t(item.labelKey)}
+                size="sm"
+                disabled={!enabled}
+                title={enabled ? t(item.labelKey) : `${t(item.labelKey)} — ${refusal(item)}`}
+                onClick={item.action}
+              />
+            );
+          })}
+          <span className="qat__rule" aria-hidden="true" />
+          <IconButton icon="chevronDown" label={t('qat.customize')} size="sm" disabled />
+        </div>
+      ) : null}
 
       <span className="titlebar__brand">{brand}</span>
 

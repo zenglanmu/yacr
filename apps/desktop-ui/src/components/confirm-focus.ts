@@ -21,7 +21,8 @@ const FOCUSABLE = [
 /** The refs the confirmation owns; structural so a mutable `useRef` fits. */
 export interface ConfirmFocusRefs {
   readonly dialog: { readonly current: HTMLDivElement | null };
-  readonly initial: { readonly current: HTMLButtonElement | null };
+  /** The element focused on open (a button, or the calculator's expression field). */
+  readonly initial: { readonly current: HTMLElement | null };
 }
 
 /**
@@ -47,7 +48,10 @@ export function useConfirmDialogFocus({ dialog, initial }: ConfirmFocusRefs, onC
         }
       }
     };
-  }, [initial]);
+  // The two refs are stable `useRef` objects, so the ref object itself never
+  // changes identity; depending on it would re-focus and re-capture the restore
+  // target on every render (which loses focus restoration on unmount).
+  }, []);
 
   useEffect(() => {
     const node = dialog.current;

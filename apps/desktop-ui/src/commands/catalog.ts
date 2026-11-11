@@ -13,6 +13,7 @@ export interface CommandCatalogEntry {
 }
 
 import { EXTENDED_COMMAND_CATALOG } from './catalog-extended.ts';
+import { INTERFACE_COMMAND_CATALOG } from './catalog-interface.ts';
 import { REFUSAL_COMMAND_CATALOG } from './catalog-refusals.ts';
 
 /**
@@ -993,4 +994,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'DGNLAYERS', labelKey: 'draw.kind.dgnlayers', icon: 'layers', group: 'properties' },
   { id: 'DGNADJUST', labelKey: 'draw.kind.dgnadjust', icon: 'settings', group: 'properties' },
 
+  // The 2026-11-12 interface wave (chrome-owned UI selectors) lives in its own
+  // sibling module. Appended last so no shipped catalog row moves.
+  ...INTERFACE_COMMAND_CATALOG,
 ]);

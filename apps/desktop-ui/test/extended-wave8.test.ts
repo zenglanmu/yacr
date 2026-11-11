@@ -1,8 +1,8 @@
 // The 2026-11-09 Wave 8 batch of command-line names.
 //
 // Ten names are wired into the chrome so the command line can complete them:
-// two **session tokens** (ELEV, UCSICON) and eight **named refusals** (UCS
-// through RIBBON). The Rust lane is the behaviour authority; this suite pins
+// two **session tokens** (ELEV, UCSICON) and seven **named refusals** (UCS
+// through MENU). RIBBON moved to the chrome-local interface wave. This suite pins
 // only the user-facing surface: one catalog row each, real label and hint keys
 // in both catalogs, membership in the host vocabulary mirror, and the "needs an
 // open drawing" rule with no capability gate.
@@ -18,7 +18,7 @@ import { HOST_NAMES, readCatalog, readModule } from './helpers.ts';
 const SESSION = ['ELEV', 'UCSICON'];
 
 const REFUSALS = [
-  'UCS', 'UCSMAN', 'TABLET', 'TASKBAR', 'REINIT', 'SYSWINDOWS', 'MENU', 'RIBBON',
+  'UCS', 'UCSMAN', 'TABLET', 'TASKBAR', 'REINIT', 'SYSWINDOWS', 'MENU',
 ];
 
 const BATCH = [...SESSION, ...REFUSALS];
@@ -74,7 +74,7 @@ test('the two session tokens state their read-only boundaries', async () => {
   }
 });
 
-test('the eight refusals say they are named refusals and promise no effect', async () => {
+test('the seven refusals say they are named refusals and promise no effect', async () => {
   const en = await readCatalog('en');
   const zh = await readCatalog('zh-CN');
   for (const id of REFUSALS) {

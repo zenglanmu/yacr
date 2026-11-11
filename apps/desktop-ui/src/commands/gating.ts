@@ -205,11 +205,13 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'DCDIAMETER', 'DCDISPLAY', 'DCFORM', 'DCHORIZONTAL', 'DCLINEAR',
 
   // The 2026-11-09 Wave 8 batch: two session tokens (ELEV/UCSICON) and eight
-  // stable refusals (UCS through RIBBON). They are payload-free and read only
+  // stable refusals (UCS through MENU). They are payload-free and read only
   // the session or answer, so the start page disables them with the catalog's
   // own "no drawing is open" sentence; none takes a capability gate.
+  // RIBBON is deliberately absent: it is chrome-local now (`RIBBON` shows the
+  // ribbon), so it is answered before the router and never document-scoped.
   'ELEV', 'UCSICON', 'UCS', 'UCSMAN', 'TABLET', 'TASKBAR', 'REINIT',
-  'SYSWINDOWS', 'MENU', 'RIBBON',
+  'SYSWINDOWS', 'MENU',
 
   'ARRAY',
   '-ARRAY',
@@ -248,11 +250,6 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'HELP',
   'CLASSICINSERT',
   'CLASSICGROUP',
-  'FILETAB',
-  'FILETABCLOSE',
-  'HIDEPALETTES',
-  'SHOWPALETTES',
-  'RIBBONCLOSE',
   'GOTOSTART',
   'COPYHIST',
   'TRANSPARENCY',
@@ -884,4 +881,19 @@ export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze([
   'CLASSICLAYER',
   'COMMANDLINE',
   'COMMANDLINEHIDE',
+  // The 2026-11-12 interface wave: every name is chrome-owned and reaches no
+  // router selector. `RIBBON`/`RIBBONCLOSE`, `FILETAB`/`FILETABCLOSE` and
+  // `HIDEPALETTES`/`SHOWPALETTES` set the chrome's own visibility value (an
+  // explicit set, never a toggle); the Quick View pairs open/close a floating
+  // panel (a repeat close is a success); `QUICKCALC` opens the calculator; and
+  // `WORKSPACE`/`WSSAVE`/`WSSETTINGS` drive the in-memory workspace presets.
+  'RIBBON', 'RIBBONCLOSE', 'HIDEPALETTES', 'SHOWPALETTES',
+  'FILETAB', 'FILETABCLOSE',
+  'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE',
+  'QUICKCALC',
+  // `QCCLOSE` is the calculator's idempotent close word;
+  // `UPDATETHUMBSNOW` recomputes the Quick View preview cards in place (no file
+  // writes); `TOOLBAR`/`-TOOLBAR` set the quick-access strip's visibility.
+  'QCCLOSE', 'UPDATETHUMBSNOW', 'TOOLBAR', '-TOOLBAR',
+  'WORKSPACE', 'WSSAVE', 'WSSETTINGS',
 ]);

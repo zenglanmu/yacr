@@ -200,7 +200,8 @@ test('the wire body never carries a fabricated or null count', () => {
 });
 
 test('the app publishes the session report from the dom-canvas effect only', async () => {
-  const app = await readModule('App.tsx');
+  // The effect is its own hook; the shell mounts it. Both are the shipped source.
+  const app = `${await readModule('App.tsx')}\n${await readModule('cad/use-canvas-transport.ts')}`;
   // Exactly one IPC call site in the whole package: no second transport, no
   // second status channel, and no region component talking to this command.
   const all = await readAppSource();
@@ -208,13 +209,15 @@ test('the app publishes the session report from the dom-canvas effect only', asy
   assert.equal(app.split('createCanvasTransport(').length - 1, 1);
   assert.ok(app.includes('createCanvasSessionReporter('));
   assert.ok(app.includes('reporter.report(next);'));
-  // The existing ref stays the one place the raw status is kept.
-  assert.ok(app.includes('canvasStatusRef.current = next;'));
+  // The hook hands the raw status to the reporter only; no chrome state keeps a
+  // second copy of it.
+  assert.ok(app.includes('reporter.report(next);'));
+  assert.equal(app.includes('canvasStatusRef.current = next;'), false);
   // The `dom-canvas` guard precedes the report, and the effect returns before it
   // otherwise: a `native-below` mount never reaches the publish path.
   const guard = app.indexOf('if (surfaceMode !== SURFACE_MODE_DOM_CANVAS || !surfaceNode) return undefined;');
   assert.ok(guard > 0, 'the dom-canvas effect guard must exist');
-  assert.ok(guard < app.indexOf('canvas_session_status'), 'the guard must precede the report');
+  assert.ok(guard < app.indexOf("invoke('canvas_session_status'"), 'the guard must precede the report');
   // The typed payload object is still the only body: TS satisfies the loose IPC
   // argument type by spreading it (or passing it directly).
   assert.match(app, /invoke\('canvas_session_status', (?:\{ \.\.\.canvasSessionPayload\(report\) \}|canvasSessionPayload\(report\))\)/);
@@ -281,7 +284,7 @@ test('the palettes are what the carrier reports, not what it is called', async (
   const workspace = await readModule('components/Workspace.tsx');
   // The carrier rule is one helper (`palettesOffered` in `surface.mjs`), asked by
   // the panels, the status bar and the nav rail alike.
-  assert.ok(workspace.includes('const palettesAvailable = palettesOffered(shell);'));
+  assert.ok(workspace.includes('const palettesAvailable = palettesOffered(shell)'));
   assert.ok(workspace.includes("import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../cad/surface.ts';"));
   assert.ok(workspace.includes('const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;'));
   assert.ok(workspace.includes('const showFileInfo = palettesAvailable && Boolean(shell.fileInfoOpen);'));

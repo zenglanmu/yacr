@@ -44,8 +44,8 @@ export const EXTENDED_COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.f
   { id: 'DCLINEAR', labelKey: 'draw.kind.dclinear', icon: 'dimlinear', group: 'annotate' },
 
   // The 2026-11-09 Wave 8 batch: two session tokens (ELEV, UCSICON) and eight
-  // stable named refusals (UCS through RIBBON). Appended last so no shipped row
-  // moves.
+  // stable named refusals (UCS through MENU; RIBBON moved to the interface wave
+  // because it is chrome-local now). Appended last so no shipped row moves.
   { id: 'ELEV', labelKey: 'draw.kind.elev', icon: 'settings', group: 'view' },
   { id: 'UCSICON', labelKey: 'draw.kind.ucsicon', icon: 'axes', group: 'view' },
   { id: 'UCS', labelKey: 'draw.kind.ucs', icon: 'axes', group: 'view' },
@@ -55,7 +55,6 @@ export const EXTENDED_COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.f
   { id: 'REINIT', labelKey: 'draw.kind.reinit', icon: 'settings', group: 'view' },
   { id: 'SYSWINDOWS', labelKey: 'draw.kind.syswindows', icon: 'app', group: 'view' },
   { id: 'MENU', labelKey: 'draw.kind.menu', icon: 'menu', group: 'view' },
-  { id: 'RIBBON', labelKey: 'draw.kind.ribbon', icon: 'menu', group: 'view' },
 
   // The 2026-11-09 Wave 9 batch: 2D draw/modify routes, real edits, aliases and
   // stable named refusals. Appended last so no shipped row moves.
@@ -99,11 +98,6 @@ export const EXTENDED_COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.f
   { id: 'HELP', labelKey: 'draw.kind.help', icon: 'info', group: 'view' },
   { id: 'CLASSICINSERT', labelKey: 'draw.kind.classicinsert', icon: 'copy', group: 'draw' },
   { id: 'CLASSICGROUP', labelKey: 'draw.kind.classicgroup', icon: 'selectAll', group: 'modify' },
-  { id: 'FILETAB', labelKey: 'draw.kind.filetab', icon: 'app', group: 'view' },
-  { id: 'FILETABCLOSE', labelKey: 'draw.kind.filetabclose', icon: 'app', group: 'view' },
-  { id: 'HIDEPALETTES', labelKey: 'draw.kind.hidepalettes', icon: 'eyeOff', group: 'view' },
-  { id: 'SHOWPALETTES', labelKey: 'draw.kind.showpalettes', icon: 'eye', group: 'view' },
-  { id: 'RIBBONCLOSE', labelKey: 'draw.kind.ribbonclose', icon: 'menu', group: 'view' },
   { id: 'GOTOSTART', labelKey: 'draw.kind.gotostart', icon: 'start', group: 'file' },
   { id: 'COPYHIST', labelKey: 'draw.kind.copyhist', icon: 'copy', group: 'properties' },
   { id: 'TRANSPARENCY', labelKey: 'draw.kind.transparency', icon: 'eye', group: 'properties' },

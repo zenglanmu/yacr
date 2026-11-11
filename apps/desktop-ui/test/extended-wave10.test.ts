@@ -20,11 +20,13 @@ import { HOST_NAMES, readCatalog, readModule } from './helpers.ts';
 const ROUTER = [
   '-UNITS', '-LAYER', 'LAYERSTATESAVE', 'NEWVIEW', '-SCALELISTEDIT',
   'LWEIGHT', '-LWEIGHT', 'COLOR', '-COLOR', 'HELP', 'CLASSICINSERT',
-  'CLASSICGROUP', 'FILETAB', 'FILETABCLOSE', 'HIDEPALETTES', 'SHOWPALETTES',
-  'RIBBONCLOSE', 'GOTOSTART', 'COPYHIST', 'TRANSPARENCY',
+  'CLASSICGROUP', 'GOTOSTART', 'COPYHIST', 'TRANSPARENCY',
 ];
 
-const CHROME = ['DSETTINGS', 'QUICKPROPERTIES', 'CLASSICLAYER', 'COMMANDLINE', 'COMMANDLINEHIDE'];
+const CHROME = ['DSETTINGS', 'QUICKPROPERTIES', 'CLASSICLAYER', 'COMMANDLINE', 'COMMANDLINEHIDE',
+  // Moved out of the Wave 10 router list when the interface wave made them
+  // chrome-local (they set the chrome's own visibility, never CAD state).
+  'FILETAB', 'FILETABCLOSE', 'HIDEPALETTES', 'SHOWPALETTES', 'RIBBONCLOSE'];
 
 const BATCH = [...ROUTER, ...CHROME];
 
@@ -73,7 +75,7 @@ test('the router names are in the vocabulary and need an open drawing', () => {
   }
 });
 
-test('the five chrome-local names bypass the router but are admitted', () => {
+test('the chrome-local names bypass the router but are admitted', () => {
   for (const id of CHROME) {
     assert.equal(LOCAL_CHROME_COMMANDS.includes(id), true, `${id} must be chrome-local`);
     assert.equal(DOCUMENT_SCOPED_COMMANDS.includes(id), false, `${id} is not document-scoped`);
@@ -95,8 +97,7 @@ test('the chrome-local selectors open the existing surfaces', () => {
 
 test('the reports and refusals state their honest boundaries', async () => {
   const en = await readCatalog('en');
-  for (const id of ['HELP', 'CLASSICINSERT', 'CLASSICGROUP', 'FILETAB', 'FILETABCLOSE',
-    'HIDEPALETTES', 'SHOWPALETTES', 'RIBBONCLOSE', 'GOTOSTART', 'TRANSPARENCY']) {
+  for (const id of ['HELP', 'CLASSICINSERT', 'CLASSICGROUP', 'GOTOSTART', 'TRANSPARENCY']) {
     assert.match(en[`${labelSlug(id)}.hint`], /Named refusal/i, `${id} must say it is a refusal`);
   }
   for (const id of ['-LAYER', 'LAYERSTATESAVE', 'NEWVIEW', '-SCALELISTEDIT', 'COPYHIST',

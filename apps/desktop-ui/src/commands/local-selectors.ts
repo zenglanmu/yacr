@@ -27,6 +27,7 @@ import { isPropertiesCommand } from '../properties/properties.ts';
 import { isResourcesCommand } from '../references/references.ts';
 import { isFontsCommand } from '../fonts/fonts.ts';
 import {
+  dashToolbarVisibility,
   isAboutCommand,
   isClassicLayerCommand,
   isCleanScreenOffCommand,
@@ -34,10 +35,28 @@ import {
   isCommandLineCommand,
   isCommandLineHideCommand,
   isDSettingsCommand,
+  isFileTabCloseCommand,
+  isFileTabCommand,
+  isHidePalettesCommand,
   isLayerCloseCommand,
   isPropertiesCloseCommand,
+  isQuickCalcCloseCommand,
+  isQuickCalcCommand,
   isQuickPropertiesCommand,
+  isQuickViewDrawingCloseCommand,
+  isQuickViewDrawingCommand,
+  isQuickViewLayoutCloseCommand,
+  isQuickViewLayoutCommand,
+  isRibbonCloseCommand,
+  isRibbonCommand,
+  isShowPalettesCommand,
+  isToolbarCommand,
+  isUpdateThumbsNowCommand,
+  isWorkspaceCommand,
+  isWorkspaceSaveCommand,
+  isWorkspaceSettingsCommand,
 } from './chrome-commands.ts';
+import type { QuickViewKind, WorkspaceDialogMode } from '../chrome/surfaces.ts';
 
 /** One selector's destination. `refused` names the panel the layout cannot show. */
 export type LocalSelectorResult =
@@ -55,6 +74,26 @@ export type LocalSelectorResult =
   | { readonly kind: 'layersClose' }
   /** Set the command line's visibility (COMMANDLINE shows, COMMANDLINEHIDE hides). */
   | { readonly kind: 'commandLine'; readonly value: boolean }
+  /** Set the ribbon's visibility (RIBBON shows, RIBBONCLOSE hides). */
+  | { readonly kind: 'ribbon'; readonly value: boolean }
+  /** Set ribbon + palettes + drawing tabs together (HIDEPALETTES/SHOWPALETTES). */
+  | { readonly kind: 'paletteChrome'; readonly value: boolean }
+  /** Set the drawing-tab strip's visibility (FILETAB shows, FILETABCLOSE hides). */
+  | { readonly kind: 'fileTabs'; readonly value: boolean }
+  /** Open one Quick View panel (a repeat open re-focuses it). */
+  | { readonly kind: 'quickView'; readonly panel: QuickViewKind }
+  /** Close one Quick View panel; already closed is a success, not a refusal. */
+  | { readonly kind: 'quickViewClose'; readonly panel: QuickViewKind }
+  /** Refresh the Quick View preview cards now (no file writes). */
+  | { readonly kind: 'updateThumbs' }
+  /** Open (`true`) or close (`false`) the QuickCalc dialog. */
+  | { readonly kind: 'quickCalc'; readonly value: boolean }
+  /** Set the quick-access toolbar strip's visibility (TOOLBAR shows, -TOOLBAR HIDE hides). */
+  | { readonly kind: 'toolbar'; readonly value: boolean }
+  /** Open the workspace selector. */
+  | { readonly kind: 'workspace' }
+  /** Open the workspace settings dialog in list or save-current mode. */
+  | { readonly kind: 'workspaceSettings'; readonly mode: WorkspaceDialogMode }
   | { readonly kind: 'refused'; readonly panelKey: string };
 
 /** The panel labels the layout refusal names. */
@@ -77,12 +116,38 @@ export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
  * properties window and is resolved last: it is layout-independent because
  * closing an already-closed window is a valid no-op on every layout;
  * `LAYERCLOSE` closes the layers palette right after it for the same reason.
+ *
+ * The UI-visibility and window selectors (`RIBBON*`, `FILETAB*`,
+ * `HIDEPALETTES`/`SHOWPALETTES`, `TOOLBAR`/`-TOOLBAR`, the two Quick View
+ * pairs, `QUICKCALC`/`QCCLOSE`, `UPDATETHUMBSNOW`, `WORKSPACE*`) only set chrome
+ * state or open a chrome-owned surface, so none of them depends on the layout or
+ * on a document.
  */
 export function localSelectorFor(text: string, layout: LayoutMode): LocalSelectorResult | null {
   if (isOptionsCommand(text)) return { kind: 'options' };
   if (isDSettingsCommand(text)) return { kind: 'options' };
   if (isCommandLineCommand(text)) return { kind: 'commandLine', value: true };
   if (isCommandLineHideCommand(text)) return { kind: 'commandLine', value: false };
+  if (isRibbonCommand(text)) return { kind: 'ribbon', value: true };
+  if (isRibbonCloseCommand(text)) return { kind: 'ribbon', value: false };
+  if (isFileTabCommand(text)) return { kind: 'fileTabs', value: true };
+  if (isFileTabCloseCommand(text)) return { kind: 'fileTabs', value: false };
+  if (isHidePalettesCommand(text)) return { kind: 'paletteChrome', value: false };
+  if (isShowPalettesCommand(text)) return { kind: 'paletteChrome', value: true };
+  if (isQuickViewDrawingCommand(text)) return { kind: 'quickView', panel: 'drawings' };
+  if (isQuickViewDrawingCloseCommand(text)) return { kind: 'quickViewClose', panel: 'drawings' };
+  if (isQuickViewLayoutCommand(text)) return { kind: 'quickView', panel: 'layouts' };
+  if (isQuickViewLayoutCloseCommand(text)) return { kind: 'quickViewClose', panel: 'layouts' };
+  if (isQuickCalcCommand(text)) return { kind: 'quickCalc', value: true };
+  if (isQuickCalcCloseCommand(text)) return { kind: 'quickCalc', value: false };
+  if (isUpdateThumbsNowCommand(text)) return { kind: 'updateThumbs' };
+  // `-TOOLBAR SHOW|HIDE` first: its bare form is a different word (`TOOLBAR`).
+  const toolbar = dashToolbarVisibility(text);
+  if (toolbar !== null) return { kind: 'toolbar', value: toolbar };
+  if (isToolbarCommand(text)) return { kind: 'toolbar', value: true };
+  if (isWorkspaceCommand(text)) return { kind: 'workspace' };
+  if (isWorkspaceSaveCommand(text)) return { kind: 'workspaceSettings', mode: 'save' };
+  if (isWorkspaceSettingsCommand(text)) return { kind: 'workspaceSettings', mode: 'settings' };
   if (isResourcesCommand(text)) return { kind: 'resources' };
   if (isFontsCommand(text)) return { kind: 'fonts' };
   if (isPropertiesCommand(text)) {
@@ -135,6 +200,26 @@ export interface LocalSelectorHost {
   readonly closeLayers: () => void;
   /** Set the command line's visibility (`COMMANDLINE`/`COMMANDLINEHIDE`). */
   readonly setCommandLineOpen: (value: boolean) => void;
+  /** Set the ribbon's visibility (`RIBBON`/`RIBBONCLOSE`; a set, never a toggle). */
+  readonly setRibbonVisible: (value: boolean) => void;
+  /** Set the drawing-tab strip's visibility (`FILETAB`/`FILETABCLOSE`). */
+  readonly setFileTabsVisible: (value: boolean) => void;
+  /** Set ribbon + palettes + drawing tabs together (`HIDEPALETTES`/`SHOWPALETTES`). */
+  readonly setPaletteChrome: (value: boolean) => void;
+  /** Open one Quick View panel (a repeat open re-focuses it). */
+  readonly setQuickView: (panel: QuickViewKind) => void;
+  /** Close one Quick View panel (`QVDRAWINGCLOSE`/`QVLAYOUTCLOSE`; idempotent). */
+  readonly closeQuickView: (panel: QuickViewKind) => void;
+  /** Recompute the Quick View preview cards now (`UPDATETHUMBSNOW`; no file writes). */
+  readonly refreshQuickView: () => void;
+  /** Open (`true`) or close (`false`) the QuickCalc dialog (`QUICKCALC`/`QCCLOSE`). */
+  readonly setQuickCalc: (open: boolean) => void;
+  /** Set the quick-access toolbar strip's visibility (`TOOLBAR`/`-TOOLBAR`). */
+  readonly setToolbarVisible: (value: boolean) => void;
+  /** Open the workspace selector. */
+  readonly openWorkspace: () => void;
+  /** Open the workspace settings dialog (`WSSETTINGS` lists, `WSSAVE` saves). */
+  readonly openWorkspaceSettings: (mode: WorkspaceDialogMode) => void;
   /** Put a refusal sentence on the chrome's one error line. */
   readonly reportError: (message: string) => void;
 }
@@ -163,6 +248,16 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     closeProperties,
     closeLayers,
     setCommandLineOpen,
+    setRibbonVisible,
+    setFileTabsVisible,
+    setPaletteChrome,
+    setQuickView,
+    closeQuickView,
+    refreshQuickView,
+    setQuickCalc,
+    setToolbarVisible,
+    openWorkspace,
+    openWorkspaceSettings,
     reportError,
   } = host;
   return useCallback((text: string, fromInput: boolean): boolean => {
@@ -185,6 +280,16 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'propertiesClose': closeProperties(); break;
       case 'layersClose': closeLayers(); break;
       case 'commandLine': setCommandLineOpen(result.value); break;
+      case 'ribbon': setRibbonVisible(result.value); break;
+      case 'fileTabs': setFileTabsVisible(result.value); break;
+      case 'paletteChrome': setPaletteChrome(result.value); break;
+      case 'quickView': setQuickView(result.panel); break;
+      case 'quickViewClose': closeQuickView(result.panel); break;
+      case 'updateThumbs': refreshQuickView(); break;
+      case 'quickCalc': setQuickCalc(result.value); break;
+      case 'toolbar': setToolbarVisible(result.value); break;
+      case 'workspace': openWorkspace(); break;
+      case 'workspaceSettings': openWorkspaceSettings(result.mode); break;
     }
     return true;
   }, [
@@ -202,6 +307,16 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     closeProperties,
     closeLayers,
     setCommandLineOpen,
+    setRibbonVisible,
+    setFileTabsVisible,
+    setPaletteChrome,
+    setQuickView,
+    closeQuickView,
+    refreshQuickView,
+    setQuickCalc,
+    setToolbarVisible,
+    openWorkspace,
+    openWorkspaceSettings,
     reportError,
   ]);
 }

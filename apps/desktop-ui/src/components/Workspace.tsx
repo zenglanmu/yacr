@@ -44,7 +44,13 @@ export function Workspace() {
   // rule is `palettesOffered`, the same helper the nav rail and the status bar
   // ask, so the panels and their toggles can never disagree. An absent flag (older
   // chrome state) keeps them, as today.
-  const palettesAvailable = palettesOffered(shell);
+  //
+  // `HIDEPALETTES` hides the layer, but an explicitly opened palette is a request
+  // to see it: a window flag that is set is never allowed to paint nothing.
+  const palettesRequested = Boolean(shell.propertiesOpen || shell.layersOpen
+    || shell.fileInfoOpen || shell.diagnosticsOpen || shell.referencesOpen || shell.fontsOpen);
+  const palettesAvailable = palettesOffered(shell)
+    && (shell.chromeVisibility.palettes || palettesRequested);
   // The inspector is only meaningful with a drawing open; on the start screen the
   // start panel owns the left column. Off by default so the startup partition
   // geometry is unchanged until the user opens it.

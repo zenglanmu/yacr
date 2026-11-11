@@ -124,11 +124,17 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
     ['audit', 'about', 'options', 'plugins'],
   );
   // The View tab keeps its `palettes` panel only because STATUS is a router
-  // command; the palette toggles and the chrome-collapse switch are dropped.
-  assert.deepEqual(mobileRibbonSections('view').map(section => section.id), ['view3d', 'standard', 'navigate', 'viewstate', 'display', 'palettes']);
+  // command; the palette toggles, the chrome-collapse switches and the
+  // workspace words are dropped from the interface panel, leaving the two
+  // surfaces a phone can really use (the layout overview and QuickCalc).
+  assert.deepEqual(mobileRibbonSections('view').map(section => section.id), ['view3d', 'standard', 'navigate', 'viewstate', 'display', 'palettes', 'interface']);
   assert.deepEqual(
-    mobileRibbonSections('view').at(-1).items.map(item => item.id),
+    mobileRibbonSections('view').find(section => section.id === 'palettes').items.map(item => item.id),
     ['STATUS'],
+  );
+  assert.deepEqual(
+    mobileRibbonSections('view').find(section => section.id === 'interface').items.map(item => item.id),
+    ['QVLAYOUT', 'QUICKCALC'],
   );
   // An unknown tab id resolves like `ribbonTab` (Home), never to an empty drawer.
   assert.deepEqual(mobileRibbonSections('nope').map(section => section.id), ['clipboard', 'draw', 'modify', 'properties', 'navigate']);
@@ -180,12 +186,12 @@ test('App renders the compact regions on mobile only and keeps the desktop regio
   assert.ok(app.includes('<MobileRibbonDrawer open={mobileDrawer.open}'));
   assert.ok(app.includes('{mobile ? <MobileCommandBar /> : commandLineOpen ? <CommandLine /> : null}'));
   // Desktop regions are gated on the compact layout, not rendered alongside it.
-  for (const region of ['<Ribbon />', '<DocTabs />', '<LayoutTabs />', '<StatusBar />']) {
-    assert.ok(
-      app.includes(`{mobile || cleanScreen ? null : ${region}}`) || app.includes(`{mobile ? null : ${region}}`),
-      `${region} is desktop-only`,
-    );
-  }
+  // The ribbon and the drawing tabs carry the finer-grained chrome visibility on
+  // top of the layout/clean-screen gates; LayoutTabs and the status bar keep the
+  // layout-only gate.
+  assert.ok(app.includes('{mobile || cleanScreen || !chromeVisibility.ribbon ? null : <Ribbon />}'));
+  assert.ok(app.includes('{mobile || cleanScreen || !chromeVisibility.fileTabs ? null : <DocTabs />}'));
+  assert.ok(app.includes('{mobile || cleanScreen ? null : <LayoutTabs />}'));
   assert.ok(app.includes('{mobile ? null : <StatusBar />}'));
   // One CAD partition in the tree, at the same position in both layouts: the
   // session must never be remounted by a breakpoint crossing.
