@@ -17,6 +17,7 @@ AD
   `nX`（视口中心相对倍率）与图纸空间 `nXP`（`2XP` ⇒ `VPSCALE 1:2`、`1/50XP` ⇒ `VPSCALE 1:50`，
   走已有 Work-only `VPSCALE` 写路径，一条事务/一步撤销；模型空间 `zoom.xp.requires_paper`）。
   **`ZOOM DYNAMIC` 仍具名未实现**（`zoom.dynamic_not_implemented`），没有伪装成交互缩放。
+- **UI 接线**：View → navigate 集群新增 `ZOOM OBJECT` 按钮（`selectAll` 图标；hint 说明“先选择对象、仅 2D、模型空间块成员/选中块按插入展开”）。`ZOOM nX`/`nXP` 保持命令行形式（AutoCAD 也没有独立按钮）；`ZOOM DYNAMIC` 不提供按钮。
 - **DWG 保存前提示**：`request_save` 的 `.dwg` 源仍在选择器里建议 `<stem>-export.dwg`，且新增
   `save.picker_waiting_dwg` 在**写入前**说明“实验性、写新文件、绝不覆盖源图纸”；成功后仍用
   `save.dwg_exported_experimental` / `_partial` 再次标注。平台 device+inode/SAF URI/归一化路径守卫
