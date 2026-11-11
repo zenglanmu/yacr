@@ -1,5 +1,104 @@
 AD
 
+## 2026-11-11 修复 Linux GTK 子表面的第二条取整路径（Flatpak 5K/scale=2 下 CAD 区透出桌面）
+
+- **现象（用户真机，Flatpak v0.1.10，Linux Wayland）**：宿主报错
+  `cad present failed: present_texture failed: native texture rejected: native texture 3851x1645
+  does not match the 3852x1644 surface; refusing to stretch it`，CAD 区不完整、可见桌面。
+- **根因（既有缺陷，不是本次合并丢失修复）**：Linux GTK 宿主的物理尺寸来自
+  `drawing_area allocation × buffer scale`，而渲染 target 来自
+  `round(rect.width × scale) × round(rect.height × scale)`（`physical_content_size`）。
+  GTK 只分配整数逻辑像素、接受的 DOM rect 可以是分数，两条取整路径可差 1 物理像素。报告数字
+  正好是 `1926×822` 逻辑 allocation × 2 = **3852×1644**，对
+  `round(1925.6×2) × round(822.5×2)` = **3851×1645**。Windows/macOS/Android 早已只用
+  `physical_content_size`（Windows 2026-10-23 / 2026-11-09 两次修复即此规则），Linux 自
+  2026-10-17 原生 Wayland 宿主落地起一直保留这条第二取整路径；v0.1.10 的右侧导航坞把分区宽度
+  改成 56px 后，这台 5K/scale=2 机器落到了两条取整不一致的组合上，才暴露出来。
+- **修复**：`GtkOverlayOwner::apply_layout` 接收并保存
+  `cad_ui_core::layout::physical_content_size(rect, scale)`（GPU init 使用）；每帧
+  `host::tick` 用同一函数从 `last_rect × 当前 scale` 重算并 `resize_to`，`frame_cad` 仍用同一
+  rect/scale，故 `texture == surface` 按构造成立。`--probe` 标记帧仍可用 allocation×scale
+  （它直接画 surface，没有纹理相等约束），方法名改为 `probe_surface_size` 以示区别。
+- **契约测试**：`apps/app-linux/src/gtk_bridge/tests.rs::the_surface_size_is_the_dom_rect_times_scale_not_the_gtk_allocation`
+  用报告数字钉住 `allocation×scale = 3852×1644` 与 `physical_content_size = 3851×1645`，并断言
+  与 `render_target_size` 同值；`cad-ui-core` 既有
+  `insets_derived_child_size_can_disagree_with_the_render_target` 仍覆盖同一类。
+- **已运行**：`cargo check -p app-linux --all-targets --locked`、`cargo clippy -p app-linux
+  --all-targets --locked -- -D warnings`、`cargo test -p app-linux gtk_bridge`（14 passed）、
+  `cargo test -p cad-ui-core layout`（34 passed）、`cargo fmt -p app-linux`。
+- **NOT RUN / NOT VERIFIED**：本机当前无显示（tty），未在真实 5K/scale=2 Flatpak 或任何真实
+  GPU 上复跑视觉/像素；Windows/macOS/Android 运行时未重测。`[probe] geometry` 新增
+  `dom_physical=WxH` 字段，复测时应与 `native_surface=WxH` 完全相等。
+
+## 2026-11-11 Windows：`wgpu_backend=vulkan` 在 DirectComposition 上静默透明
+
+- **现象**：Windows v0.1.10 启动页/打开图纸时 CAD 区整块透明、透出桌面；同机 v0.1.9 正常。
+- **根因（用户真机确认）**：该机持久偏好 `preference.json` 里 `wgpu_backend=vulkan`（历史实验值）。
+  Windows 生产呈现走 **DirectComposition visual**，而 wgpu-hal 30 的
+  `SurfaceTargetUnsafe::CompositionVisual` **只有 DX12 后端实现**；Vulkan 策略下 presenter
+  构造/呈现**不报错但内容永不合成**。改成 `auto` 或 `dx12` 后立即正常。这不是 v0.1.10 合并回归：
+  Windows 呈现路径自 `8889cf5d`（已包含在 v0.1.10）未改，是持久偏好与合成后端的组合。
+- **修复**：`ProbeBackendPolicy::for_composition_visual()`（纯规则，所有 target 可测）：
+  `auto|dx12 → dx12`；`vulkan|metal → ProbeError::CompositionBackendUnsupported`（点名策略，
+  Display 明确 “DirectComposition / DX12-only / use 'auto' or 'dx12'”）。`composition.rs` 在
+  建 instance 前先做该映射，并在有效策略与请求不同时打印
+  `[probe] backend-policy: requested=… effective=… (DirectComposition is DX12-only)`；随后
+  `[probe] backend-policy wgpu_backend=dx12 (dx12 only)` 是**有效**策略。
+- **契约测试**：`cad-render-wgpu::native_presenter::tests::a_composition_visual_requires_dx12_and_refuses_vulkan_by_name`。
+  已运行：`cargo test -p cad-render-wgpu --lib native_presenter`（34 passed）、
+  `cargo clippy -p cad-render-wgpu --all-targets -- -D warnings`、
+  `cargo check -p cad-render-wgpu --target x86_64-pc-windows-msvc`（PASS）。
+- **NOT VERIFIED**：新的显式拒绝尚未在真 Windows 上跑过（只有编译 + 契约）；用户真机证据是
+  “auto/dx12 正常、vulkan 透明”，没有对应的 `[probe]` 行或截图。Options 仍会列出 `vulkan`
+  （Windows 上现在得到明确错误而不是透明），按平台过滤是可选的后续 UX。
+
+## 2026-11-11 右侧导航坞改为浮动覆盖（不再从 CAD 分区扣宽度）
+
+- **改动**：`.navdock` 从 flex 子项改为 `.workspace` 内 `position:absolute; top:0; right:0;
+  bottom:0; width:var(--navrail-w); z-index:5` 的浮动 chrome；`.workspace__canvas` 独占整行
+  （减去开始面板），CAD 分区 rect 不再减 56px。dock 保持不透明（`--chrome-3` + 左边框）、整列
+  正常命中（无 `pointer-events:none`），移动端同样浮动。`z-index:5` 在 CAD 载体之上、
+  `.palette-layer`(10) 与更新横幅(9) 之下，所以浮动面板仍可拖到 dock 上方（与改动前一致，
+  右缘缩放手柄不会被遮挡）。更新横幅继续用 `inset: 0 var(--navrail-w) 0 0` 避开 dock。
+- **不替代尺寸权威修复**：dock 不再参与 rect 计算只减少一个宽度项；CSS 分数 rect 与
+  GTK/DPR 取整仍可能不一致，`physical_content_size` 单一权威（本文件上一条）继续生效。
+- **验证**：`apps/desktop-ui` `npm test` **1494 passed / 0 failed**（含 `tsc --noEmit`）、
+  `npm run build` 成功；`test/navigation-dock.test.ts` 3/3（断言 absolute/inset/无 `flex:`/
+  无 `pointer-events`、`--navrail-w`、`.workspace` relative+transparent、`.workspace__canvas`
+  `flex:1 1 auto`、dock 低于 palette/高于 CAD 载体、DOM 顺序在 canvas 之后）。
+- **NOT RUN**：本环境无显示，未做真实窗口的视觉/像素判读；浮动 dock 覆盖 CAD 的观感、点击
+  命中与 palettes 覆盖关系都只有 CSS/契约事实，没有实机证据。
+
+## 2026-11-11 CI：新增 linux-host-smoke（真实 Wayland 宿主 + 软件 Vulkan）与纯契约测试
+
+- **为什么**：CI 之前只做编译/静态契约，**不跑 Rust 测试、不运行宿主**，所以两类“CAD 区透明”
+  都不会被拦：纹理尺寸 ≠ surface（presenter 拒绝每一帧）和 Windows `vulkan` + DirectComposition
+  静默不出图。
+- **新增 required job** `.github/workflows/core.yml#linux-host-smoke`（ubuntu-latest）：
+  - 安装 GTK/WebKitGTK + `weston` + `mesa-vulkan-drivers` / `libgl1-mesa-dri`；
+  - `npm ci && npm test && npm run build` → `cargo build --release -p app-linux --bin yacr
+    --features tauri/custom-protocol`；
+  - 纯契约：`cargo test -p cad-ui-core --lib layout`、`-p app-linux --lib`、
+    `-p cad-render-wgpu --lib native_presenter`；
+  - `python3 scripts/test-host-smoke-check.py`（gate 自测）→
+    `bash scripts/host-smoke-linux.sh`：Weston **headless** + lavapipe 下打开
+    `fixtures/dwg/synthetic-four-lines.dwg`，`scripts/host-smoke-check.py` 检查
+    ≥1 `cad-frame presented` 且 `complete=current_scene`、无
+    `cad present failed`/`refusing to stretch`/`native texture rejected`/
+    `does not match the DOM CAD rect`/bind/session/presenter 失败、**最后一条 settled**
+    geometry 的 `dom_physical == native_surface`，并交叉校验最后一帧 `size=` 与该 surface。
+    允许布局切换的瞬时中间值，只拒绝持久不一致。
+  - `scripts/check-workflows.py` 把 `linux-host-smoke` 列入 `REQUIRED_JOBS`（命令片段缺失即门禁失败）。
+- **本机验证（真实运行）**：Weston 14 headless + lavapipe（llvmpipe）两轮分别 **1793 / 1165 帧**，
+  `complete=current_scene`，`dom_physical == native_surface == 最后一帧 size = 960x489`，
+  零拒绝标记；`scripts/host-smoke-linux.sh --timeout 20` **PASS**；checker 自测 **10 cases PASS**；
+  `check-workflows.py` / `test-linux-workflow.py` **PASS**。
+- **证据边界**：CI 的合成器/GPU 是 headless Weston + **软件 Vulkan**，只证明
+  **present/几何契约**，不证明真实 GPU、像素、性能或 Windows 运行时。Windows 的
+  `vulkan`+DComp 拒绝仍只有编译 + 纯契约证据，没有 Windows CI 运行。
+- **NOT RUN**：workflow 尚未在 GitHub Actions 真实跑过；首次 run 以实际结果为准（失败时上传
+  `linux-host-smoke` evidence artifact）。
+
 ## 2026-11-11 发布 v0.1.10（主题切换、最近图纸、右侧导航坞）
 
 - **版本**：workspace `Cargo.toml`、`Cargo.lock`（35 个成员）、四个 `tauri.conf.json`、
@@ -61,7 +160,8 @@ AD
   **近白**（min 通道 ≥0.75）翻成黑；`image/pick/mask` 不动，存储颜色/场景缓存不变。饱和色在
   白底可能仍偏浅——这是明确的显示映射边界，不是“自动反色”。
 - **右侧导航坞**：`--navrail-w` 34→56px；`NavigationDock` 在绘图区右缘纵向渲染 `ViewCube` +
-  `NavRail`（仍是 edge-docked DOM chrome，不跨 native surface 浮动）。ViewCube 订阅
+  `NavRail`（当时仍是 edge-docked DOM chrome，不跨 native surface 浮动；**2026-11-11 后续改为
+  浮动覆盖，见上方“导航坞浮动”条目**）。ViewCube 订阅
   `volatileStatusStore.getView()`，朝向来自宿主真实相机（`cad_status.view`，2D/3D +
   orthographic/perspective + eye/target/up），随 `cursor-changed` 逐帧更新而不重渲染 shell；
   `view = null` 显示显式“朝向不可用”且不旋转。六个面（FRT/BCK/LFT/RGT/TOP/BOT 三字标签，

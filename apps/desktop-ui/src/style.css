@@ -1,8 +1,9 @@
 /* yacr desktop shell — AutoCAD-style dark chrome.
  *
  * Region stack, top to bottom:
- *   title/QAT · ribbon · drawing tabs · workspace (palettes | CAD partition |
- *   nav rail) · model/layout tabs · command line · status bar.
+ *   title/QAT · ribbon · drawing tabs · workspace (start panel | CAD partition,
+ *   with the navigation dock floating over the partition's right edge) ·
+ *   model/layout tabs · command line · status bar.
  *
  * The central CAD partition is painted by one of two **host-reported** carriers
  * (ADR 0024 D1): `native-below` composites a native surface under this DOM tree,
@@ -11,12 +12,16 @@
  * `.native-input` must be transparent inside the partition rect: the renderer's
  * own clear colour is the drawing backdrop. `.native-input` therefore paints
  * nothing and holds no children; the chrome regions carry their own opaque
- * fills, and nothing floats across the partition. Consequence: the partition is
- * unpainted by the webview, so between window map and the first native CAD frame
- * the desktop may briefly show through. That is accepted on purpose - the
- * renderer's own clear colour is the intended backdrop, and re-adding a DOM fill
- * here would hide the surface again. The `dom-canvas` carrier is the mirror
- * case: the canvas paints the partition, so it stays unpainted by CSS too.
+ * fills, and the one piece of chrome painted *over* the partition is the opaque
+ * right-edge navigation dock (`.navdock`: an absolute overlay with its own fill
+ * and left border, so the drawing stays visible everywhere it does not cover).
+ * The dock sits below `.palette-layer`, so a floating palette window still
+ * paints over it. Consequence: the partition is unpainted by the webview, so
+ * between window map and the first native CAD frame the desktop may briefly show
+ * through. That is accepted on purpose - the renderer's own clear colour is the
+ * intended backdrop, and re-adding a DOM fill here would hide the surface again.
+ * The `dom-canvas` carrier is the mirror case: the canvas paints the partition,
+ * so it stays unpainted by CSS too.
  */
 
 :root {
@@ -636,7 +641,8 @@ button, input, select { font: inherit; color: inherit; }
   min-height: 0; min-width: 0;
   /* Transparent: this row spans the native CAD partition, and an opaque fill
      here hides the surface composited below the DOM (the WP2 inversion bug).
-     Docked palettes and the nav rail keep their own opaque fills below. */
+     The floating palette windows and the right-edge dock (`--navrail-w`) keep
+     their own opaque fills; nothing in this row may gain one. */
   background: transparent;
 }
 /* The start screen's column only: no palette lives here any more, so this width
@@ -647,6 +653,8 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--chrome-3); border-right: 1px solid var(--line);
 }
 .workspace__left.is-open { display: flex; width: 300px; }
+/* The drawing area: every pixel the row has, left column aside. The navigation
+   dock is an absolute overlay above it, so it never takes width from here. */
 .workspace__canvas { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; background: transparent; }
 /* The in-DOM pixel carrier of a `surfaceMode: dom-canvas` host (ADR 0024 D3).
  * It must overlay the exact `.native-input` rect so both carriers are sized from
@@ -1318,15 +1326,25 @@ button, input, select { font: inherit; color: inherit; }
 .layers__form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 
 /* Navigation rail -------------------------------------------------------- */
-/* Docked in a fixed-width right-edge column: the ViewCube above, the icon rail
-   below. The width is reserved in both rail states, so collapsing the rail shows
-   fewer rows without moving the CAD partition rect (no host resize, no surface
-   re-present). The dock owns the opaque fill and the left border; the rail is an
-   inner column so the cube's own stylesheet only has to draw the cube. */
+/* A floating dock at the right edge of `.workspace`: the ViewCube above, the
+   icon rail below. It is absolutely positioned and out of flow, so it reserves
+   no width — the CAD partition rect (`.workspace__canvas` → `.native-input`)
+   spans the whole row and the host's native surface is sized from that. The
+   column is opaque chrome painted over the drawing, with the left border as its
+   edge. `z-index: 5` puts it above the CAD carriers (`.native-input`, the
+   `dom-canvas` node) but below `.palette-layer` (`10`) and the update banner
+   layer (`9`) — a floating palette can still be dragged or resized over the
+   dock, exactly as before, so its right-edge grip is never hidden. The whole
+   column — its empty background included — is hit-testable DOM: no
+   `pointer-events: none`, so a press there lands on the dock rather than falling
+   through to the CAD surface. The rail is an inner column so the cube's own
+   stylesheet only has to draw the cube. */
 .navdock {
-  flex: 0 0 var(--navrail-w);
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: var(--navrail-w);
+  z-index: 5;
   display: flex; flex-direction: column;
-  width: var(--navrail-w); min-height: 0;
+  min-height: 0;
   background: var(--chrome-3); border-left: 1px solid var(--line);
 }
 .navrail {
@@ -2102,10 +2120,12 @@ button, input, select { font: inherit; color: inherit; }
    dialog: no backdrop, no focus trap, no global key handler. It is a card in a
    pointer-transparent layer docked above the status bar (inside the workspace,
    so the host's native CAD surface rect never changes).
-   Stacking: the layer sits at `9`, i.e. above the CAD carrier but *below*
-   `.palette-layer` (`10`). A palette dragged over the bottom-right corner
-   therefore covers the banner instead of the banner covering the palette, and
-   the portalled popup/notice layers (60/62) always paint above both. */
+   Stacking: the layer sits at `9`, i.e. above the CAD carrier and the dock
+   (`5`), but *below* `.palette-layer` (`10`). A palette dragged over the
+   bottom-right corner therefore covers the banner instead of the banner covering
+   the palette, and the portalled popup/notice layers (60/62) always paint above
+   both. Its right inset is the dock width (`--navrail-w`) so the banner never
+   slides under the floating dock. */
 .update-notice-layer {
   position: absolute;
   inset: 0 var(--navrail-w) 0 0;

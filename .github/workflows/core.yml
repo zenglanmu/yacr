@@ -9,6 +9,10 @@ name: CI
 #   core-quality  : fmt, clippy (incl. the Tauri app-linux host), React (Vite)
 #                   test + build, architecture boundaries, fixture/workflow/
 #                   migration contracts, workspace host debug compilation (required)
+#   linux-host-smoke: real headless GTK/Wayland host (Weston + software Vulkan)
+#                   presenting a fixture; the `[probe]` log gate rejects a
+#                   refused/stretched CAD surface or a persistent size mismatch
+#                   (required; presentation/geometry only, NOT GPU/pixel evidence)
 #   wasm-check    : full-workspace wasm --lib check + a separate app-web check (required)
 #   i18n-contracts: bilingual catalog parity + no hardcoded chrome literals (required)
 #   android-check : aarch64 `app-android` (real Tauri Android host) compile check,
@@ -123,6 +127,71 @@ jobs:
         run: node --test scripts/test-web-pixels.mjs
       - name: Workspace host debug compilation (including test code)
         run: cargo check --workspace --all-targets --locked
+
+  linux-host-smoke:
+    name: linux-host-smoke (headless Wayland + software Vulkan)
+    # Runs the REAL GTK/Wayland `native-below` host against a committed fixture
+    # under Weston's headless backend with a software Vulkan adapter, then gates
+    # the host's stable `[probe]` lines. This is the runtime guard for the
+    # failure class where the native surface and the render target disagree
+    # (persistent `TextureInvalid` -> a transparent CAD region): compile/static
+    # checks cannot see it. Software rendering is labelled: this proves
+    # presentation/geometry, NOT GPU, pixel, performance or real-device behaviour.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Cache cargo (registry / git / target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-linux-host-smoke-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-linux-host-smoke-
+            ${{ runner.os }}-cargo-core-quality-
+      - name: Install native + headless compositor prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkgconf libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev \
+            weston mesa-vulkan-drivers libgl1-mesa-dri
+      - name: Test and build the React frontend (apps/desktop-ui)
+        working-directory: apps/desktop-ui
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Build the release host (embedded UI)
+        # `tauri::generate_context!` embeds `apps/desktop-ui/dist`, so the
+        # frontend build above must finish first.
+        run: cargo build --release -p app-linux --bin yacr --features tauri/custom-protocol --locked
+      - name: Host render contract tests (size authority + composition backend)
+        # These run on Linux for every target's pure rules: the GTK host's
+        # `[probe] geometry` decision and the Windows DirectComposition policy.
+        run: |
+          cargo test -p cad-ui-core --lib layout --locked
+          cargo test -p app-linux --lib --locked
+          cargo test -p cad-render-wgpu --lib native_presenter --locked
+      - name: Log gate self-test (the checker can actually fail)
+        run: python3 scripts/test-host-smoke-check.py
+      - name: Headless host smoke (real Wayland surface + presented frames)
+        run: bash scripts/host-smoke-linux.sh --evidence "$RUNNER_TEMP/yacr-host-smoke"
+      - name: Upload host smoke evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-host-smoke
+          path: ${{ runner.temp }}/yacr-host-smoke
 
   wasm-check:
     name: wasm-check

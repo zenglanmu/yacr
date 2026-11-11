@@ -70,14 +70,12 @@
 }
 
 /* The navigation dock is the exception: the ViewCube and the rail are the
-   compact layout's navigation affordances too, so the dock keeps its reserved
-   width. The rail itself starts collapsed (local chevron in `NavRail.tsx`) and
-   the cube stays visible in both rail states, so opening the rail changes what
-   the column shows, never how much drawing the user gets. */
-:root[data-layout="mobile"] .navdock {
-  flex-basis: var(--navrail-w);
-  width: var(--navrail-w);
-}
+   compact layout's navigation affordances too, so the dock stays visible. It is
+   the same absolute overlay as on the desktop (`style.css`) — pinned to the
+   right edge over the drawing, taking no width from it — so nothing here has to
+   re-reserve space. The rail itself starts collapsed (local chevron in
+   `NavRail.tsx`) and the cube stays visible in both rail states, so opening the
+   rail changes what the column shows, never how much drawing the user gets. */
 :root[data-layout="mobile"] .navrail {
   display: flex;
   gap: 4px;

@@ -15,7 +15,8 @@ use cad_ui_core::shell::{bind_allowed, clear_host_error, note_host_error, HostEr
 use cad_ui_core::unsupported_status;
 
 use super::admission::{
-    cad_present_admission, layout_needs_revalidate, BindStep, CadPresentAdmission,
+    cad_present_admission, cad_render_geometry, layout_needs_revalidate, BindStep,
+    CadPresentAdmission,
 };
 use super::dom::run_dom_diag;
 use super::options::{frame_interval, ANIMATION_STEP};
@@ -239,7 +240,10 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                     .window
                     .as_ref()
                     .and_then(|window| window.scale_factor().ok())
-                    .unwrap_or(1.0);
+                    .unwrap_or(1.0)
+                    .max(0.1);
+                // One rounding, shared with the render target (not the GTK allocation).
+                let physical = cad_ui_core::layout::physical_content_size(&rect, scale);
                 CAD_ENV.with(|cell| {
                     if let Some(env) = cell.borrow().as_ref() {
                         env.surface.set_metrics(surface_metrics(&rect, scale));
@@ -247,7 +251,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 });
                 BRIDGE.with(|cell| {
                     if let Some(owner) = cell.borrow_mut().as_mut() {
-                        owner.apply_layout(margins);
+                        owner.apply_layout(margins, physical);
                     }
                 });
                 let geometry =
@@ -263,7 +267,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 // the margin-receiving container, the drawing area + its
                 // translated origin, the integer scale and the physical extent.
                 eprintln!(
-                    "[probe] geometry top={}x{} container={:.0}x{:.0} container_xy=({},{}) dom={}x{} dom_xy=({},{}) drawing_area={}x{} origin=({},{}) scale={} native_surface={}x{} margins top={} bottom={} start={} end={} revalidated={}",
+                    "[probe] geometry top={}x{} container={:.0}x{:.0} container_xy=({},{}) dom={}x{} dom_xy=({},{}) drawing_area={}x{} origin=({},{}) scale={} dom_physical={}x{} native_surface={}x{} margins top={} bottom={} start={} end={} revalidated={}",
                     top.map(|s| s.width).unwrap_or(0),
                     top.map(|s| s.height).unwrap_or(0),
                     bounds.0,
@@ -285,6 +289,8 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                     geometry.and_then(|g| g.origin).map(|o| o.0).unwrap_or(-1),
                     geometry.and_then(|g| g.origin).map(|o| o.1).unwrap_or(-1),
                     geometry.map(|g| g.scale).unwrap_or(0),
+                    physical.0,
+                    physical.1,
                     surface.map(|s| s.0).unwrap_or(0),
                     surface.map(|s| s.1).unwrap_or(0),
                     margins.top,
@@ -584,20 +590,14 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
     // ---- GPU work, without holding the shared lock ----
     let surface = BRIDGE.with(|cell| cell.borrow().as_ref().and_then(|o| o.surface_size()));
     if cad_mode {
-        let (logical, scale, dom_rect) = {
+        let (logical, scale, dom_rect, physical) = {
             let rect = lock(shared).shell.input.last_rect();
             let scale = lock(shared)
                 .window
                 .as_ref()
                 .and_then(|window| window.scale_factor().ok())
-                .unwrap_or(1.0)
-                .max(0.1);
-            (
-                rect.map(|rect| [f64::from(rect.width), f64::from(rect.height)])
-                    .unwrap_or([0.0, 0.0]),
-                scale,
-                rect.map(|rect| (rect.x, rect.y, rect.width, rect.height)),
-            )
+                .unwrap_or(1.0);
+            cad_render_geometry(rect, scale)
         };
         // Draw one CAD frame through the bound render session (main thread, no
         // shared lock held across the engine/GPU work).
@@ -647,7 +647,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                         ));
                     }
                 }
-                let (w, h) = owner.desired_size();
+                let (w, h) = physical;
                 if w == 0 || h == 0 {
                     return Ok(None);
                 }
@@ -957,7 +957,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             if owner.failure().is_some() {
                 return None;
             }
-            let (w, h) = owner.desired_size();
+            let (w, h) = owner.probe_surface_size();
             if w == 0 || h == 0 {
                 return None;
             }

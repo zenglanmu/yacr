@@ -96,6 +96,13 @@ pub struct GtkOverlayOwner {
     drawing_area: gtk::DrawingArea,
     presenter: Option<SurfaceProbePresenter>,
     size: (u32, u32),
+    /// The physical size the CAD child surface must be at GPU init, derived from
+    /// the **accepted DOM CAD rect** by
+    /// `cad_ui_core::layout::physical_content_size` (the render session's own
+    /// formula). The per-frame size is recomputed from the same authority in the
+    /// tick. `None` until a layout is accepted; GPU init then waits instead of
+    /// guessing from the GTK allocation.
+    planned_size: Option<(u32, u32)>,
     /// Explicit lifecycle state; GPU init is only allowed from
     /// [`BridgeState::AwaitingMap`] / [`BridgeState::Suspended`].
     state: BridgeState,

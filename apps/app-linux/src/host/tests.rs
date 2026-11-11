@@ -1,4 +1,6 @@
-use super::admission::{cad_present_admission, layout_needs_revalidate, CadPresentAdmission};
+use super::admission::{
+    cad_present_admission, cad_render_geometry, layout_needs_revalidate, CadPresentAdmission,
+};
 use super::options::start_maximized;
 use super::postload::{
     label_file_name, pan_report_matches_run, parse_pan_report, parse_pan_run_id,
@@ -489,6 +491,32 @@ fn postload_pan_step_is_bounded_and_never_fakes_a_pass() {
         postload_pan_step(P::Failed, true, true, true, true, true, true),
         A::None
     );
+}
+
+#[test]
+fn the_tick_geometry_uses_the_render_size_authority_not_the_gtk_allocation() {
+    // Reported 5K/scale=2 Flatpak failure: a fractional CAD rect inside an
+    // integral GTK allocation. The tick must hand the surface the same physical
+    // size the render session allocates (3851x1645), not `allocation × scale`
+    // (3852x1644), or the presenter refuses every frame and the CAD region
+    // stays transparent.
+    let rect = cad_ui_core::layout::CadMetrics {
+        x: 0.4,
+        y: 0.6,
+        width: 1925.6,
+        height: 822.5,
+        dpr: 2.0,
+        sequence: 1,
+    };
+    let (logical, scale, dom, physical) = cad_render_geometry(Some(rect), 2.0);
+    assert_eq!(logical, [f64::from(1925.6_f32), f64::from(822.5_f32)]);
+    assert_eq!(scale, 2.0);
+    assert_eq!(dom, Some((0.4, 0.6, 1925.6, 822.5)));
+    assert_eq!(physical, (3851, 1645));
+    // No rect is an explicit wait (`0x0`), never a guessed size.
+    assert_eq!(cad_render_geometry(None, 2.0).3, (0, 0));
+    // A degenerate scale is clamped here exactly as the render path uses it.
+    assert_eq!(cad_render_geometry(Some(rect), 0.0).1, 0.1);
 }
 
 #[test]

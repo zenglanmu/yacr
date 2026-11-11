@@ -17,9 +17,8 @@ use raw_window_handle::{
 };
 
 use super::native::{
-    apply_input_passthrough, checked_physical_size, classify_native, drawing_area_matches_dom,
-    init_allowed, panic_payload_message, pending_reason_changed, wayland_buffer_scale,
-    NativeStatus,
+    apply_input_passthrough, classify_native, drawing_area_matches_dom, init_allowed,
+    panic_payload_message, pending_reason_changed, wayland_buffer_scale, NativeStatus,
 };
 use super::{BridgeState, GtkOverlayOwner, OVERLAYS, REPARENT_DONE};
 
@@ -121,6 +120,7 @@ impl GtkOverlayOwner {
             drawing_area,
             presenter: None,
             size: (0, 0),
+            planned_size: None,
             state: BridgeState::AwaitingMap,
             generation: 0,
             native: None,
@@ -136,11 +136,24 @@ impl GtkOverlayOwner {
     /// Apply the React CAD rect as drawing-area insets (logical px == CSS px)
     /// and mark the layout confirmed so GPU init may proceed. A rect that only
     /// shifts still updates the insets.
-    pub fn apply_layout(&mut self, margins: cad_ui_core::layout::ViewportInsets) {
+    ///
+    /// `physical_size` is the **single size authority** for the CAD child
+    /// surface: `cad_ui_core::layout::physical_content_size(&rect, scale)`, the
+    /// same formula the render session uses for its render target. It is passed
+    /// in rather than re-derived here so there is exactly one rounding
+    /// (`round(width × scale)`); deriving it from the GTK allocation is a second
+    /// rounding path that differs by one physical pixel at a fractional rect
+    /// (5K/scale=2), which the presenter refuses to stretch.
+    pub fn apply_layout(
+        &mut self,
+        margins: cad_ui_core::layout::ViewportInsets,
+        physical_size: (u32, u32),
+    ) {
         assert!(
             gtk::is_initialized_main_thread(),
             "gtk bridge apply_layout must run on the GTK main thread"
         );
+        self.planned_size = Some(physical_size);
         self.drawing_area.set_margin_top(margins.top);
         self.drawing_area.set_margin_bottom(margins.bottom);
         self.drawing_area.set_margin_start(margins.start);
@@ -163,8 +176,14 @@ impl GtkOverlayOwner {
         // again per frame in `resize_to`.
         self.sync_wayland_layout();
         eprintln!(
-            "[probe] bridge layout: margins top={} bottom={} start={} end={} origin={:?}",
-            margins.top, margins.bottom, margins.start, margins.end, origin
+            "[probe] bridge layout: margins top={} bottom={} start={} end={} origin={:?} physical={}x{}",
+            margins.top,
+            margins.bottom,
+            margins.start,
+            margins.end,
+            origin,
+            physical_size.0,
+            physical_size.1
         );
     }
 
@@ -324,15 +343,17 @@ impl GtkOverlayOwner {
         if alloc_w <= 0 || alloc_h <= 0 {
             return None;
         }
-        // Single checked logical × integer-scale rule for both backends: an
-        // overflow is an explicit failure, never a wrapping/saturating success.
-        let (phys_w, phys_h) = match checked_physical_size(alloc_w, alloc_h, scale) {
-            Ok(size) => size,
-            Err(error) => {
-                self.state = BridgeState::Failed(error.clone());
-                eprintln!("[probe] bridge size FAILED (terminal): {error}");
-                return Some(Err(error));
-            }
+        // The CAD child surface is sized from the accepted DOM rect (the single
+        // size authority stored by `apply_layout`), **never** from
+        // `allocation × scale`. GTK allocates integral logical pixels while the
+        // accepted rect may be fractional (a 5K/scale=2 host), so the
+        // allocation-derived size is a second rounding path that can differ from
+        // `round(width × scale)` by one physical pixel — the presenter then
+        // refuses every frame (`TextureInvalid`) and the CAD region stays
+        // transparent. A confirmed layout without a stored size is a state bug:
+        // wait explicitly instead of guessing.
+        let Some((phys_w, phys_h)) = self.planned_size else {
+            return self.defer("accepted layout has no physical size yet");
         };
 
         // Backend dispatch: the Wayland path owns an app-owned child

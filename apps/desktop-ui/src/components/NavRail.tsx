@@ -1,6 +1,7 @@
-// Navigation rail: a slim vertical toolbar docked at the right edge of the CAD
-// partition (DOM chrome at the canvas edge — never a floating overlay across the
-// drawing area, which the host's native compositing does not support).
+// Navigation rail: a slim vertical toolbar at the right edge of the CAD
+// partition (DOM chrome inside the floating dock column — the dock is an opaque
+// overlay that paints over the drawing area's right edge, never a transparent
+// hit-through layer; see `NavigationDock.tsx`).
 //
 // The rail is collapsible. On the desktop its expanded state is the host's
 // `NAVBAR` setting (`cad_status.navigation.navbarVisible`), so the chevron is a
@@ -8,7 +9,7 @@
 // off only a slim chevron remains, titled with the catalog's own "the navigation
 // bar is off" sentence. On the compact layout the rail starts collapsed even
 // when the host's navbar is on, and the chevron expands it locally — the dock's
-// width never changes, so the drawing area does not move.
+// width never changes, so the drawing area's rect does not move either.
 import React, { useLayoutEffect, useState } from 'react';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';

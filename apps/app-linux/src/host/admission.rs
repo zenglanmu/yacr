@@ -51,3 +51,33 @@ pub(super) fn layout_needs_revalidate(
 ) -> bool {
     generation_revalidate || last_bounds != Some(bounds)
 }
+
+/// `(logical, scale, DOM rect, physical surface size)` — the tick's render
+/// geometry, resolved from one rect so the four values cannot drift apart.
+type CadRenderGeometry = ([f64; 2], f64, Option<(f32, f32, f32, f32)>, (u32, u32));
+
+/// The tick's render geometry from the latest DOM rect and window scale.
+///
+/// The logical size, the DOM rect for the drawing-area guard and the **physical
+/// surface size** all come from the same rect; the physical size is
+/// `cad_ui_core::layout::physical_content_size`, the render session's own
+/// formula. Sizing the surface from the GTK allocation instead is a second
+/// rounding path that differs by one physical pixel at a fractional rect
+/// (5K/scale=2), and the presenter then refuses every frame. The scale is
+/// clamped once here, the same value the render path uses. A missing rect reports
+/// zero sizes so the host waits.
+pub(super) fn cad_render_geometry(
+    rect: Option<cad_ui_core::layout::CadMetrics>,
+    scale: f64,
+) -> CadRenderGeometry {
+    let scale = scale.max(0.1);
+    match rect {
+        Some(rect) => (
+            [f64::from(rect.width), f64::from(rect.height)],
+            scale,
+            Some((rect.x, rect.y, rect.width, rect.height)),
+            cad_ui_core::layout::physical_content_size(&rect, scale),
+        ),
+        None => ([0.0, 0.0], scale, None, (0, 0)),
+    }
+}

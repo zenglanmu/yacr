@@ -489,38 +489,6 @@ pub(super) fn wayland_buffer_scale(scale_factor: i32) -> i32 {
     scale_factor.max(1)
 }
 
-/// The single checked rule for a physical surface size: logical allocation ×
-/// integer buffer scale.
-///
-/// A non-positive logical size, a scale below 1, or an `i32`/`u32` overflow is an
-/// explicit `Err` — never a wrapping or saturating "success". Used by both GPU
-/// init and [`GtkOverlayOwner::desired_size`].
-pub(super) fn checked_physical_size(
-    logical_w: i32,
-    logical_h: i32,
-    scale: i32,
-) -> Result<(u32, u32), String> {
-    if logical_w <= 0 || logical_h <= 0 {
-        return Err(format!(
-            "logical size {logical_w}x{logical_h} must be positive"
-        ));
-    }
-    if scale < 1 {
-        return Err(format!("buffer scale {scale} must be >= 1"));
-    }
-    let width = logical_w
-        .checked_mul(scale)
-        .ok_or_else(|| format!("logical width {logical_w} × scale {scale} overflows i32"))?;
-    let height = logical_h
-        .checked_mul(scale)
-        .ok_or_else(|| format!("logical height {logical_h} × scale {scale} overflows i32"))?;
-    let width =
-        u32::try_from(width).map_err(|_| format!("physical width {width} does not fit in u32"))?;
-    let height = u32::try_from(height)
-        .map_err(|_| format!("physical height {height} does not fit in u32"))?;
-    Ok((width, height))
-}
-
 /// Whether the native drawing area occupies exactly the React DOM CAD rect.
 ///
 /// The DOM rect is relative to the margin-receiving container (the overlay), so

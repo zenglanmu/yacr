@@ -121,11 +121,13 @@ cargo check --workspace --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 ```
 
-CI 分层：`.github/workflows/core.yml`（core-quality/wasm-check/i18n-contracts/android-check）与
-`.github/workflows/build.yml`（linux-app/windows-check/macos-check/shader-validation/web-build/
-web-smoke/web-deploy + 5 个 event-gated release job）。`check-workflows.py` 及其 `scripts/test-*.py`
-契约（linux/web-deploy/package/fetch-fonts/android-host/macos-host/ui-migration-guards）也是门禁的
-一部分，清单以 workflow 与实际脚本为准。
+CI 分层：`.github/workflows/core.yml`（core-quality/linux-host-smoke/wasm-check/i18n-contracts/
+android-check）与 `.github/workflows/build.yml`（linux-app/windows-check/macos-check/
+shader-validation/web-build/web-smoke/web-deploy + 5 个 event-gated release job）。`linux-host-smoke`
+在 Weston headless + 软件 Vulkan 下跑真实 `native-below` 宿主，日志 gate 拒绝 present 拒绝/纹理与
+表面尺寸不一致/零帧（**仅呈现/几何证据**，不是 GPU/像素/性能验收）。`check-workflows.py` 及其
+`scripts/test-*.py` 契约（linux/web-deploy/package/fetch-fonts/android-host/macos-host/
+ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 workflow 与实际脚本为准。
 
 **顺序陷阱**：`npm run build` 必须在 Rust 宿主编译之前，`tauri::generate_context!` 内嵌
 `apps/desktop-ui/dist`；Android 的 `cargo check -p app-android --target aarch64-linux-android`

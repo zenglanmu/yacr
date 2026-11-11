@@ -43,6 +43,20 @@ impl SurfaceProbePresenter {
         gpu_time: crate::gpu_time::GpuTimeConfig,
         backend_policy: ProbeBackendPolicy,
     ) -> Result<Self, ProbeError> {
+        // DirectComposition is a DX12-only wgpu surface target: `auto` means
+        // DX12 here and an explicit Vulkan policy is refused by name instead of
+        // building a surface that never composites (a transparent CAD region
+        // observed on a real Windows host). See
+        // `ProbeBackendPolicy::for_composition_visual`.
+        let requested = backend_policy;
+        let backend_policy = backend_policy.for_composition_visual()?;
+        if requested != backend_policy {
+            eprintln!(
+                "[probe] backend-policy: requested={} effective={} (DirectComposition is DX12-only)",
+                requested.as_token(),
+                backend_policy.as_token(),
+            );
+        }
         backend_policy.ensure_supported()?;
         let preferred_names = DEFAULT_PREFERRED_ADAPTER_NAMES
             .iter()

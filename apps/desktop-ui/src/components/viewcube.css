@@ -3,12 +3,12 @@
  *
  * Geometry: 36px faces in a 56px dock column. A rotated cube projects wider than
  * its face (an isometric pose is ~1.4x), so the resting face stays at 36px: the
- * on-screen cube is ~50px across and the whole silhouette fits the reserved
- * column instead of painting over the drawing. The cube is six absolutely
- * positioned `<button>` faces on a `preserve-3d` parent; the parent's inline
- * `matrix3d(...)` comes from the host camera basis, so this file only defines the
- * rest pose of each face. No floating overlay, no pointer-events tricks: the
- * whole control is ordinary DOM in the right-edge column.
+ * on-screen cube is ~50px across and the whole silhouette stays inside the dock
+ * column instead of spilling past its opaque edge over the drawing. The cube is
+ * six absolutely positioned `<button>` faces on a `preserve-3d` parent; the
+ * parent's inline `matrix3d(...)` comes from the host camera basis, so this file
+ * only defines the rest pose of each face. No pointer-events tricks: the whole
+ * control is ordinary hit-testable DOM inside the dock column.
  *
  * Projection: an orthographic host gets `perspective: none`, a perspective host
  * gets a mild perspective. That keeps the cube's depth cue equal to the drawing's

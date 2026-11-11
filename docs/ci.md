@@ -62,6 +62,7 @@
 | Job | Workflow | Runner | 门禁 |
 |---|---|---|---|
 | `core-quality` | core.yml | `ubuntu-latest` | fmt + clippy(exclude android/web) + 架构/fixture/workflow/迁移契约 + **代码文件 ≤1000 行**（`check-file-size.py`）+ **命令名/别名文档一致性**（`check-command-docs.py` + 自测 `test-check-command-docs.py`）+ 全目标 debug 编译；并安装 GTK/WebKitGTK 前置 + 构建 React 前端（`npm test`/`npm run build`） |
+| `linux-host-smoke` | core.yml | `ubuntu-latest` | 真实 GTK/Wayland `native-below` 宿主在 **Weston headless + 软件 Vulkan（lavapipe）** 下打开 fixture；`scripts/host-smoke-check.py` 拒绝 `cad present failed` / `refusing to stretch` / 纹理与 surface 尺寸不一致 / 零帧 / 非 `current_scene` 帧，并跑尺寸权威与 DirectComposition 的纯契约测试。**仅呈现/几何证据**，不是 GPU/像素/性能/真机验收 |
 | `wasm-check` | core.yml | `ubuntu-latest` | 全 workspace wasm `--lib` 检查 + 单独 `app-web` 检查 |
 | `i18n-contracts` | core.yml | `ubuntu-latest` | `python3 scripts/check-i18n.py`（双语目录 / key / 占位符 / Rust + React 静态 key / 硬编码 CJK 扫描） |
 | `shader-validation` | build.yml | `ubuntu-latest` | 离线 WGSL 解析/校验（naga，无需 GPU），失败红灯 |
@@ -188,12 +189,15 @@ git config core.hooksPath .githooks
 
 ## 本层 NOT RUN（明确未运行）
 
-- `core-quality` / `wasm-check` / `i18n-contracts` / `shader-validation` / `linux-app` /
-  `windows-check` / `macos-check` / `android-check` / `web-build` / `web-smoke` / `web-deploy`：
-  workflow 已定义，结果以真实 job 为准并写入 `docs/validation*.md`。
+- `core-quality` / `linux-host-smoke` / `wasm-check` / `i18n-contracts` / `shader-validation` /
+  `linux-app` / `windows-check` / `macos-check` / `android-check` / `web-build` / `web-smoke` /
+  `web-deploy`：workflow 已定义，结果以真实 job 为准并写入 `docs/validation*.md`。
 - **Windows 视觉/运行时**：CI **没有**也不应有 Windows 运行验收（`windows-check` 只编译）；
   spike-1/4/5 由用户在真 Windows 自测（`docs/windows-app.md`），CI 不得冒充。
 - **Linux X11/XWayland**：宿主显式拒绝（exit 4），CI 的 `linux-app` 只做编译/测试，不运行 GUI。
+  `linux-host-smoke` 运行的是 **Wayland `native-below`** 宿主，但合成器是 Weston headless、GPU 是
+  软件 Vulkan（lavapipe），因此只证明“surface 配置与渲染 target 一致、帧真的 present、日志无拒绝”，
+  **不是**真实 GPU、像素、性能或真机验收。
 - 5 个 release job：已在 GitHub Actions 真实运行两次（`v0.1.3` run `41304110619`：
   Linux/Windows/macOS/web ✅、Android 两个 job 因 `-lnativewindow` ❌；`v0.1.4` run `41307807752`：
   五个 release job + `web-deploy` 全部 ✅）。它们只产出 workflow artifact，不发布商店；签名在

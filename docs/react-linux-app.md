@@ -309,6 +309,15 @@ error-boundary **之外**的最小 chrome 壳上，正文渲染失败时仍可�
   `probe_input` 的 `resize`；序号单调递增。窗口 resize、DPR 变化、ribbon 展开/折叠、面板停靠、
   命令历史展开、清屏切换都会重报，宿主 `LayoutTracker` 据此保持一致，**滚轮缩放才会锚定光标**。
 - 坐标区分 **CSS / canvas-local / world / physical** 四类，配合 DPR 与 metrics revision。
+- **子表面物理尺寸权威**：只来自
+  `cad_ui_core::layout::physical_content_size(rect, scale)`（渲染 target 用同一函数，故
+  `texture == surface` 按构造成立）；**不**用 GTK allocation × buffer scale ——GTK 只分配整数
+  逻辑像素而接受的 rect 可以是分数，5K/scale=2 下两条取整会差 1 物理像素，presenter 会拒绝每
+  一帧、CAD 区透出桌面。`[probe] geometry` 行同时打印 `dom_physical` 与实际 `native_surface`，
+  两者必须相等。
+- **右侧导航坞是浮动 chrome**（2026-11-11）：`.navdock` 绝对定位覆盖在分区右缘
+  （`--navrail-w`），不占分区宽度，`.workspace__canvas` 独占整行；dock 不透明、整列可命中；
+  z-index 在 CAD 载体之上、`.palette-layer` 之下，浮动面板仍可盖住它。
 
 ### 合成回归夹具（不是产品开关）
 

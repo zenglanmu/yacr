@@ -244,6 +244,38 @@ fn dx12_policy_support_is_explicit_per_target() {
     }
 }
 
+/// A DirectComposition visual is a DX12-only surface target in wgpu-hal 30.
+/// `auto` must therefore resolve to DX12 on that path, and an explicit Vulkan
+/// policy must be refused by name — on a real Windows host it produced a
+/// surface that never composited, i.e. a fully transparent CAD region with no
+/// present error.
+#[test]
+fn a_composition_visual_requires_dx12_and_refuses_vulkan_by_name() {
+    assert_eq!(
+        ProbeBackendPolicy::Auto.for_composition_visual(),
+        Ok(ProbeBackendPolicy::Dx12)
+    );
+    assert_eq!(
+        ProbeBackendPolicy::Dx12.for_composition_visual(),
+        Ok(ProbeBackendPolicy::Dx12)
+    );
+    for policy in [ProbeBackendPolicy::Vulkan, ProbeBackendPolicy::Metal] {
+        let error = policy
+            .for_composition_visual()
+            .expect_err("a non-DX12 policy cannot address a visual");
+        assert_eq!(
+            error,
+            ProbeError::CompositionBackendUnsupported {
+                policy: policy.as_token()
+            }
+        );
+        let text = error.to_string();
+        assert!(text.contains("DirectComposition"), "{text}");
+        assert!(text.contains("DX12-only"), "{text}");
+        assert!(text.contains("use 'auto' or 'dx12'"), "{text}");
+    }
+}
+
 /// Probe-only override: a CPU/software adapter is eligible, but hardware still
 /// ranks strictly above it — even though the CPU adapter carries the preferred
 /// name.

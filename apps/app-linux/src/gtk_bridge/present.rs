@@ -6,8 +6,8 @@ use cad_render_wgpu::{NativeTextureKey, ProbeError, ProbeFrameStats};
 use gtk::prelude::*;
 
 use super::native::{
-    apply_input_passthrough, checked_physical_size, log_gpu_memory_refusal, render_error_class,
-    wayland_buffer_scale, GPU_MEMORY_CLASS,
+    apply_input_passthrough, log_gpu_memory_refusal, render_error_class, wayland_buffer_scale,
+    GPU_MEMORY_CLASS,
 };
 use super::{BridgeState, CadFrameObservation, FrameCadStages, GtkOverlayOwner, LayoutGeometry};
 
@@ -304,6 +304,30 @@ impl GtkOverlayOwner {
         Some((width as f32, height as f32))
     }
 
+    /// The GTK allocation's physical size (`allocation × integer buffer scale`).
+    ///
+    /// **Probe-marker path only** (`--probe`, a fake open): that path draws a
+    /// synthetic marker directly on the surface, so no CAD texture is compared
+    /// against it. A real `--open` CAD frame must instead be sized from the
+    /// accepted DOM rect (see the tick's `physical`), because the allocation is a
+    /// second rounding path that can differ by one physical pixel and the
+    /// presenter refuses to stretch a mismatched texture.
+    ///
+    /// A non-positive allocation or an `i64`→`u32` overflow reports `0x0` (the
+    /// caller skips), never a wrapping value.
+    pub fn probe_surface_size(&self) -> (u32, u32) {
+        let scale = i64::from(wayland_buffer_scale(self.drawing_area.scale_factor()));
+        let width = i64::from(self.drawing_area.allocated_width());
+        let height = i64::from(self.drawing_area.allocated_height());
+        if width <= 0 || height <= 0 {
+            return (0, 0);
+        }
+        (
+            u32::try_from(width * scale).unwrap_or(0),
+            u32::try_from(height * scale).unwrap_or(0),
+        )
+    }
+
     /// Logical geometry snapshot for the bounded geometry telemetry (overlay /
     /// drawing-area allocation, translated origin, integer scale).
     pub fn layout_geometry(&self) -> LayoutGeometry {
@@ -321,26 +345,6 @@ impl GtkOverlayOwner {
                 .drawing_area
                 .translate_coordinates(&self.top_level, 0, 0),
             scale: wayland_buffer_scale(self.drawing_area.scale_factor()),
-        }
-    }
-
-    /// Current physical size the surface should be (allocation × integer scale).
-    ///
-    /// Uses the same checked rule as GPU init; an invalid/overflowing size is
-    /// reported as `0x0` (the host skips the frame) with an explicit log — never a
-    /// wrapping or saturating fake value.
-    pub fn desired_size(&self) -> (u32, u32) {
-        let scale = wayland_buffer_scale(self.drawing_area.scale_factor());
-        match checked_physical_size(
-            self.drawing_area.allocated_width(),
-            self.drawing_area.allocated_height(),
-            scale,
-        ) {
-            Ok(size) => size,
-            Err(error) => {
-                eprintln!("[probe] bridge desired_size invalid: {error}; reporting 0x0");
-                (0, 0)
-            }
         }
     }
 

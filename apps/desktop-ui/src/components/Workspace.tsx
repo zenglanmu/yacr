@@ -7,8 +7,12 @@
 // (an absolute overlay that takes no layout space). Opening, closing, dragging
 // or resizing a palette therefore never changes the `.native-input` rect, so the
 // host gets no resize report and never re-presents/re-renders the CAD surface.
-// The navigation dock (ViewCube above the icon rail) stays docked at the right
-// edge; its width is reserved whether or not the rail is expanded.
+// The navigation dock (ViewCube above the icon rail) is docked at the right edge
+// as an absolute overlay: it sits inside this row but takes no flex space, so
+// `.workspace__canvas` owns the full row and the 56px column of chrome
+// (`--navrail-w`) is simply painted over the CAD surface. It stays after
+// `.workspace__canvas` in DOM order, so keyboard focus still reaches the CAD
+// input first.
 //
 // A `dom-canvas` host (ADR 0024 D3) carries its pixels inside this tree instead:
 // an empty, input-transparent `<canvas>` fills the same rect and paints under

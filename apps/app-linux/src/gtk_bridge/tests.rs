@@ -1,7 +1,7 @@
 use super::native::{
-    checked_physical_size, drawing_area_matches_dom, gpu_memory_refusal_line, init_allowed,
-    panic_payload_message, pending_prerequisite, pending_reason_changed, render_error_class,
-    wayland_buffer_scale, webview_target_size, WebviewSkip, GPU_MEMORY_CLASS,
+    drawing_area_matches_dom, gpu_memory_refusal_line, init_allowed, panic_payload_message,
+    pending_prerequisite, pending_reason_changed, render_error_class, wayland_buffer_scale,
+    webview_target_size, WebviewSkip, GPU_MEMORY_CLASS,
 };
 use super::BridgeState;
 
@@ -108,32 +108,48 @@ fn drawing_area_matches_dom_within_one_logical_pixel() {
 }
 
 #[test]
-fn desired_physical_size_is_allocation_times_scale() {
-    // Pure check of the size rule used for the raw surface (no GTK needed).
-    let alloc = (960i32, 600i32);
-    for scale in [1i32, 2i32] {
-        assert_eq!(
-            checked_physical_size(alloc.0, alloc.1, scale),
-            Ok((960 * scale as u32, 600 * scale as u32))
-        );
-    }
-}
-
-#[test]
-fn checked_physical_size_rejects_non_positive_and_bad_scale() {
-    assert!(checked_physical_size(0, 600, 1).is_err());
-    assert!(checked_physical_size(960, -1, 1).is_err());
-    assert!(checked_physical_size(960, 600, 0).is_err());
-    assert!(checked_physical_size(960, 600, -2).is_err());
-}
-
-#[test]
-fn checked_physical_size_overflow_is_explicit() {
-    // A wrapping multiply would have produced a bogus but "valid-looking"
-    // size; it must be an explicit error instead.
-    let overflow = checked_physical_size(i32::MAX, 1, 2);
-    assert!(overflow.is_err());
-    assert!(overflow.unwrap_err().contains("overflows i32"));
+fn the_surface_size_is_the_dom_rect_times_scale_not_the_gtk_allocation() {
+    // Regression fence for the reported 5K/scale=2 flatpak failure
+    // (`native texture 3851x1645 does not match the 3852x1644 surface`). A
+    // fractional CAD rect inside an integral GTK allocation makes the two
+    // rounding paths disagree by one physical pixel:
+    //
+    //   allocation × scale = (1926×2, 822×2) = 3852x1644
+    //   round(rect × scale)                  = 3851x1645
+    //
+    // The render session uses the second value, so the child surface must too;
+    // deriving it from the allocation made the presenter refuse every frame
+    // (`TextureInvalid`), leaving the CAD region transparent.
+    use cad_ui_core::layout::{insets_from, physical_content_size, CadMetrics};
+    let rect = CadMetrics {
+        x: 0.4,
+        y: 0.6,
+        width: 1925.6,
+        height: 822.5,
+        dpr: 2.0,
+        sequence: 1,
+    };
+    let insets = insets_from(&rect, 1926.0, 823.0);
+    let allocation = (
+        1926 - insets.start - insets.end,
+        823 - insets.top - insets.bottom,
+    );
+    assert_eq!(allocation, (1926, 822));
+    assert_eq!(
+        (allocation.0 as u32 * 2, allocation.1 as u32 * 2),
+        (3852, 1644)
+    );
+    assert_eq!(physical_content_size(&rect, 2.0), (3851, 1645));
+    // The host stores exactly this value (`apply_layout`) and the render session
+    // allocates its target with the same formula, so texture == surface by
+    // construction instead of "equal for integral sizes".
+    assert_eq!(
+        physical_content_size(&rect, 2.0),
+        cad_engine::render::render_target_size(
+            [f64::from(rect.width), f64::from(rect.height)],
+            2.0
+        )
+    );
 }
 
 #[test]
@@ -246,15 +262,6 @@ fn a_gpu_memory_refusal_line_is_stable_and_spells_absent_fields_none() {
 }
 
 #[test]
-fn zero_allocation_is_rejected_by_the_size_helper() {
-    // A zero/negative allocation must never produce a surface size; the helper
-    // rejects it explicitly (and `desired_size` reports 0x0 so the host skips).
-    assert!(checked_physical_size(0, 0, 1).is_err());
-    assert!(checked_physical_size(0, 600, 1).is_err());
-    assert!(checked_physical_size(960, 0, 2).is_err());
-}
-
-#[test]
 fn deferral_is_logged_once_per_reason_change() {
     // A persistently pending Wayland global/selection is logged once, and a
     // changed reason logs again.
@@ -272,19 +279,4 @@ fn wayland_buffer_scale_is_at_least_one() {
     assert_eq!(wayland_buffer_scale(1), 1);
     assert_eq!(wayland_buffer_scale(0), 1);
     assert_eq!(wayland_buffer_scale(-3), 1);
-}
-
-#[test]
-fn wayland_physical_size_is_allocation_times_scale() {
-    // The app-owned child surface's physical size is the CAD allocation times
-    // the integer scale (the same rule as the X11 native child), so the
-    // render extent stays bounded to the CAD rect.
-    let alloc = (640i32, 480i32);
-    for scale in [1i32, 2i32] {
-        let factor = wayland_buffer_scale(scale) as u32;
-        assert_eq!(
-            ((alloc.0 as u32) * factor, (alloc.1 as u32) * factor),
-            (640 * scale as u32, 480 * scale as u32)
-        );
-    }
 }

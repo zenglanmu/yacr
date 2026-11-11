@@ -132,6 +132,29 @@ impl ProbeBackendPolicy {
             })
         }
     }
+
+    /// The effective policy for a **DirectComposition visual** surface target
+    /// (Windows).
+    ///
+    /// [`wgpu::SurfaceTargetUnsafe::CompositionVisual`] is implemented by
+    /// wgpu-hal's DX12 backend alone. `auto` therefore selects DX12 on this path
+    /// — the platform's production backend, not a silent fallback from an
+    /// explicit choice — `dx12` stays as requested, and an explicit `vulkan` is
+    /// refused by name. On a real Windows host a Vulkan policy built a surface
+    /// that never composited under the transparent top-level window, so the CAD
+    /// region stayed transparent with **no** present error; this guard turns
+    /// that into a visible failure instead.
+    ///
+    /// The pure rule lives here (not in the Windows-only constructor) so every
+    /// target's test suite pins it.
+    pub fn for_composition_visual(self) -> Result<Self, ProbeError> {
+        match self {
+            Self::Auto | Self::Dx12 => Ok(Self::Dx12),
+            Self::Vulkan | Self::Metal => Err(ProbeError::CompositionBackendUnsupported {
+                policy: self.as_token(),
+            }),
+        }
+    }
 }
 
 /// Marker-offset wrapping range. The probe wraps offsets into `[0, 1)`.
@@ -353,6 +376,12 @@ pub enum ProbeError {
     /// The requested [`ProbeBackendPolicy`] cannot work on this target (DX12
     /// outside Windows). Nothing was tried; there is no fallback backend.
     UnsupportedBackendPolicy { policy: &'static str },
+    /// An explicit backend policy cannot address a **DirectComposition visual**
+    /// (Windows): `SurfaceTargetUnsafe::CompositionVisual` is implemented by
+    /// wgpu-hal's DX12 backend only, so a Vulkan policy can build a surface that
+    /// never composites under the transparent top-level window. Nothing is
+    /// presented (an explicit refusal, never a transparent CAD region).
+    CompositionBackendUnsupported { policy: &'static str },
     /// `Adapter::request_device` failed.
     DeviceRequest(String),
     /// The surface reported no supported texture format.
@@ -404,6 +433,12 @@ impl std::fmt::Display for ProbeError {
             ProbeError::UnsupportedBackendPolicy { policy } => write!(
                 f,
                 "probe backend policy '{policy}' is not supported on this target; nothing was tried (use 'auto' or 'vulkan')"
+            ),
+            ProbeError::CompositionBackendUnsupported { policy } => write!(
+                f,
+                "probe backend policy '{policy}' cannot present through DirectComposition \
+                 (the visual surface target is DX12-only on Windows); nothing was tried \
+                 (use 'auto' or 'dx12')"
             ),
             ProbeError::DeviceRequest(message) => {
                 write!(f, "wgpu device request failed: {message}")

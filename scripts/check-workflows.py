@@ -11,7 +11,9 @@ checks:
     gate instead of drifting into an empty success. The required jobs are the
     genuine compile/check gates that survive the UI replacement:
     ``core-quality``, ``wasm-check``, ``i18n-contracts``, ``shader-validation``,
-    ``linux-app``, ``windows-check``, ``macos-check``, ``android-check``;
+    ``linux-app``, ``windows-check``, ``macos-check``, ``android-check``; plus
+    ``linux-host-smoke``, the headless Wayland runtime gate over the real host
+    (presentation/geometry only; software Vulkan);
   * the four release packaging jobs (``linux-release``, ``windows-release``,
     ``macos-release``, ``android-release``) are declared,
     call their real entry point, and keep the ``v*`` tag / manual-dispatch event
@@ -129,6 +131,20 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     ),
     "shader-validation": (
         "cargo test -p cad-render-wgpu --test wgsl_validation --locked",
+    ),
+    "linux-host-smoke": (
+        # The real host runs (not just compiles) under a headless compositor.
+        "scripts/host-smoke-linux.sh",
+        "scripts/test-host-smoke-check.py",
+        "weston",
+        "mesa-vulkan-drivers",
+        # The embedded UI must exist before the release host compiles.
+        "apps/desktop-ui",
+        "npm run build",
+        "cargo build --release -p app-linux --bin yacr --features tauri/custom-protocol",
+        # Pure contract tests for the two failure classes this gate exists for.
+        "cargo test -p app-linux --lib",
+        "cargo test -p cad-render-wgpu --lib native_presenter",
     ),
     "android-check": (
         # The **real** Android host (a Tauri 2 WebView carrier around the wasm

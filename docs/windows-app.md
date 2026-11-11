@@ -19,9 +19,14 @@ Wine 只承担 smoke/诊断级；**任何 Wine 像素/截图结论必须写
 - 渲染器：`cad-render-wgpu::SurfaceProbePresenter`，从宿主自建的 **DirectComposition visual**
   构造（`SurfaceTargetUnsafe::CompositionVisual` → `CreateSwapChainForComposition`，**不是**
   HWND-targeted swapchain，见 §2.2）——**无整幅回读、单 presenter**。后端由持久偏好 `wgpu_backend`（`auto|vulkan|dx12`，缺失/
-  空/未知 = `auto`）在**每次 presenter 构造**时决定一次：`dx12` = 仅 DX12，`vulkan` = 仅 Vulkan
-  （历史行为），`auto` = 两者且同层 Vulkan 优先；当前 target 不支持的策略（如 Linux 上的 `dx12`）
-  **显式失败**（`ProbeError::UnsupportedBackendPolicy`，点名策略），**无静默回退**。
+  空/未知 = `auto`）在**每次 presenter 构造**时决定一次。`SurfaceTargetUnsafe::CompositionVisual`
+  在 wgpu-hal 30 里**只有 DX12 后端实现**：因此这条合成路径上 `auto` = **DX12**（不是
+  Vulkan 优先），`dx12` = 仅 DX12，显式 `vulkan` 会**点名失败**
+  （`ProbeError::CompositionBackendUnsupported`：directcomposition visual 是 DX12-only，用
+  `auto` 或 `dx12`），**无静默回退**。真 Windows 上曾观察到 `wgpu_backend=vulkan` 时 presenter
+  构造“成功”但内容永不合成，CAD 区整块透明且无 present 错误；该拒绝就是把这种静默透明变成可见
+  失败。其它 target 不支持的策略（如 Linux 上的 `dx12`）仍是
+  `ProbeError::UnsupportedBackendPolicy`。
 
 ---
 
