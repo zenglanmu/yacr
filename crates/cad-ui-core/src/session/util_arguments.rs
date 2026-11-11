@@ -13,6 +13,7 @@
 //! stored phantom.
 
 use cad_app::{CommandId, CommandPayload, ToolParameter, ToolValue};
+use cad_host::{CadSettingKey, CadSettingValue};
 
 use super::commands::{
     invalid_mredo_argument_reason, invalid_multiple_argument_reason, invalid_purge_argument_reason,
@@ -21,11 +22,24 @@ use super::commands::{
     parse_sysvar_toggle, MREDO_SELECTOR, MULTIPLE_SELECTOR, PURGE_SELECTOR, RENAME_SELECTOR,
     SETVAR_SELECTOR,
 };
+use super::shell_settings::parse_display_mask;
 use super::CadSession;
 
 /// The closed set of variables `SETVAR` reports or writes.
 const MODELLED_VARIABLES: &[&str] = &[
     "PDMODE", "PDSIZE", "SNAPUNIT", "LTSCALE", "GRID", "SNAP", "ORTHO", "TEXTSIZE",
+];
+
+/// The three shell settings `SETVAR` can **write** but not read.
+///
+/// They are persisted host preferences (`navvcubeDisplay`,
+/// `viewCubeIn2d`, `viewCubeIn3d`), not session/drawing sysvars, so
+/// `SETVAR <name>` (the report form) stays explicitly unmodelled: it returns a
+/// clear "use the setter" refusal rather than a fabricated value.
+const WRITE_ONLY_VARIABLES: &[&str] = &[
+    "NAVVCUBEDISPLAY",
+    "DISPLAYVIEWCUBEIN2D",
+    "DISPLAYVIEWCUBEIN3D",
 ];
 
 impl CadSession {
@@ -109,19 +123,29 @@ impl CadSession {
             ));
         };
         let name = name.to_ascii_uppercase();
-        if !MODELLED_VARIABLES.contains(&name.as_str()) {
-            return self.refuse_argument(format!(
-                "setvar.unknown_variable: SETVAR does not model '{name}'; the closed set is {}",
-                MODELLED_VARIABLES.join(", ")
-            ));
-        }
         match value {
-            None => self.dispatch_typed_argument(
-                SETVAR_SELECTOR,
-                CommandId::SetVar,
-                CommandPayload::SetVar(name),
-            ),
+            // The write form is routed first: the three write-only shell
+            // settings are writable even though their report form is refused.
             Some(value) => self.setvar_write(&name, &value),
+            None => {
+                if WRITE_ONLY_VARIABLES.contains(&name.as_str()) {
+                    return self.refuse_argument(format!(
+                        "setvar.write_only_variable: {name} is a persisted shell setting; \
+                         use `{name} <value>`"
+                    ));
+                }
+                if !MODELLED_VARIABLES.contains(&name.as_str()) {
+                    return self.refuse_argument(format!(
+                        "setvar.unknown_variable: SETVAR does not model '{name}'; the closed set is {}",
+                        MODELLED_VARIABLES.join(", ")
+                    ));
+                }
+                self.dispatch_typed_argument(
+                    SETVAR_SELECTOR,
+                    CommandId::SetVar,
+                    CommandPayload::SetVar(name),
+                )
+            }
         }
     }
 
@@ -216,6 +240,32 @@ impl CadSession {
                         Err(text)
                     }
                 }
+            }
+            // The three persisted shell settings write through the same
+            // validated/persisted settings path the `NAVVCUBEDISPLAY`
+            // `DISPLAYVIEWCUBEIN2D` / `DISPLAYVIEWCUBEIN3D` selectors use. The
+            // report form stays unmodelled (see `WRITE_ONLY_VARIABLES`), so this
+            // never invents a read value.
+            "NAVVCUBEDISPLAY" => {
+                let Some(display) = parse_display_mask(value) else {
+                    return invalid("0, 1, 2 or 3");
+                };
+                self.write_shell_setting(
+                    SETVAR_SELECTOR,
+                    CadSettingKey::NavvcubeDisplay,
+                    CadSettingValue::Number(display),
+                )
+            }
+            "DISPLAYVIEWCUBEIN2D" | "DISPLAYVIEWCUBEIN3D" => {
+                let Some(enabled) = parse_sysvar_toggle(value) else {
+                    return invalid("ON, OFF, 1 or 0");
+                };
+                let key = if name == "DISPLAYVIEWCUBEIN2D" {
+                    CadSettingKey::ViewCubeIn2d
+                } else {
+                    CadSettingKey::ViewCubeIn3d
+                };
+                self.write_shell_setting(SETVAR_SELECTOR, key, CadSettingValue::Bool(enabled))
             }
             _ => self.refuse_argument(format!("setvar.unknown_variable: '{name}'")),
         }

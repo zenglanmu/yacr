@@ -1,9 +1,10 @@
 //! Typed settings wire surface for the Options dialog.
 //!
-//! The session exposes the same closed eighteen-key surface the host persists; it
-//! adds no second validation and no raw-JSON entry point. A UI writes one typed
-//! key/value pair, the host validates it against the closed table, persists the
-//! matching preference leaf and applies it to the live scene/session.
+//! The session exposes the same closed twenty-three-key surface the host
+//! persists; it adds no second validation and no raw-JSON entry point. A UI
+//! writes one typed key/value pair, the host validates it against the closed
+//! table, persists the matching preference leaf and applies it to the live
+//! scene/session.
 
 use serde::{Deserialize, Serialize};
 
@@ -19,11 +20,12 @@ pub use cad_host::{
 ///
 /// A flat camelCase wire object (like the status/session types). `fontsDir` is
 /// read-only display data sourced from the host's `--fonts-dir`; the other
-/// eighteen fields correspond one-to-one with [`CadSettingKey`], the two
+/// twenty-two fields correspond one-to-one with [`CadSettingKey`], the two
 /// backgrounds as canonical `#rrggbb` strings, the crosshair and the GPU memory
 /// budget as integer percentages, the pickbox/aperture as integer pixel counts,
-/// the snap spacing as a real number of drawing units and the graphics backend as
-/// one of `auto`/`vulkan`/`dx12`.
+/// the snap spacing as a real number of drawing units, the graphics backend as
+/// one of `auto`/`vulkan`/`dx12`, the theme as `dark`/`light` and the
+/// navigation/ViewCube switches as their host-owned values.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadSettings {
@@ -71,6 +73,20 @@ pub struct CadSettings {
     /// apart. Takes effect on the next presenter construction.
     #[serde(rename = "wgpu_backend")]
     pub wgpu_backend: String,
+    /// UI theme: `"dark"` (default) or `"light"`
+    /// (root `preference.json` leaf `theme`).
+    pub theme: String,
+    /// Navigation-bar visibility (root leaf `navbarVisible`, default `true`).
+    pub navbar_visible: bool,
+    /// ViewCube display bitmask `0..=3` (root leaf `navvcubeDisplay`, default
+    /// `3`). Bit 1 is the 3D view class, bit 2 the 2D view class.
+    pub navvcube_display: u32,
+    /// ViewCube visibility in 2D views (root leaf `viewCubeIn2d`, default
+    /// `true`).
+    pub view_cube_in_2d: bool,
+    /// ViewCube visibility in 3D views (root leaf `viewCubeIn3d`, default
+    /// `true`).
+    pub view_cube_in_3d: bool,
     /// Read-only: the configured CAD font directory, or `null` when unset.
     pub fonts_dir: Option<String>,
 }
@@ -96,6 +112,11 @@ impl From<HostSettings> for CadSettings {
             aperture_size: value.aperture_size,
             gpu_budget_percent: value.gpu_budget_percent,
             wgpu_backend: value.wgpu_backend,
+            theme: value.theme,
+            navbar_visible: value.navbar_visible,
+            navvcube_display: value.navvcube_display,
+            view_cube_in_2d: value.view_cube_in_2d,
+            view_cube_in_3d: value.view_cube_in_3d,
             fonts_dir: value.fonts_dir,
         }
     }

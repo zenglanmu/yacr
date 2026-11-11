@@ -8,14 +8,26 @@
 //! `SNAPUNIT` spacing), the persisted 2D left-drag input scheme, the renderer
 //! backend preference (`wgpu_backend`, read by the next presenter construction),
 //! the GPU memory budget percentage the renderer lane reads
-//! (`view.gpuBudget.percent`) and the read-only `--fonts-dir` display value.
+//! (`view.gpuBudget.percent`), the five host-owned appearance/navigation leaves
+//! (`theme`, `navbarVisible`, `navvcubeDisplay`, `viewCubeIn2d`,
+//! `viewCubeIn3d`) and the read-only `--fonts-dir` display value.
 //! Every write goes through the same validated store/persistence path as
-//! [`HostCore::apply_user_preference_json`] — the backend leaf is merged into the
-//! same durable preference document, see [`merge_wgpu_backend_into_preference`];
-//! no raw JSON is accepted from a UI.
+//! [`HostCore::apply_user_preference_json`] — the backend leaf and the five
+//! appearance/navigation leaves are merged into the same durable preference
+//! document (see [`merge_wgpu_backend_into_preference`] and
+//! [`crate::settings_root::merge_root_preferences_into_preference`]); no raw JSON
+//! is accepted from a UI.
 use super::*;
 
 use cad_app::viewer_config::HexColor;
+
+use crate::settings_root::RootPreferences;
+pub(crate) use crate::settings_root::{
+    merge_wgpu_backend_into_preference, wgpu_backend_from_preference, without_wgpu_backend,
+};
+pub use crate::settings_root::{
+    normalize_wgpu_backend, WGPU_BACKEND_PREFERENCE_KEY, WGPU_BACKEND_VALUES,
+};
 
 /// A key outside the closed writable set. Stable, locale-neutral error code.
 pub const SETTINGS_UNKNOWN_KEY: &str = "settings.unknown_key";
@@ -32,106 +44,6 @@ pub const SETTINGS_INVALID_PLOT_FORMAT: &str = "settings.invalid_plot_format";
 /// snapshot nor the Options dialog reports a value that would disappear on the
 /// next start.
 pub const SETTINGS_NOT_PERSISTED: &str = "settings.not_persisted";
-
-/// The durable preference key of the renderer backend choice.
-///
-/// It is a **root-level** leaf of the host preference document (`preference.json`)
-/// with exactly this spelling — the same key the UI writes and the hosts' late
-/// presenter construction reads. Unlike the other settings it is not camelCased
-/// into the `ViewerConfig` schema: it is renderer state, so the host owns it.
-pub const WGPU_BACKEND_PREFERENCE_KEY: &str = "wgpu_backend";
-
-/// The closed set of renderer backend tokens, `auto` first (the default).
-///
-/// These are the wire values of the `wgpu_backend` preference *and* of
-/// `CadSettingValue::Text` for [`CadSettingKey::WgpuBackend`]: the Options dialog,
-/// the durable preference and the renderer policy parse the same three strings,
-/// so a new spelling would have to be added in all three places at once.
-pub const WGPU_BACKEND_VALUES: [&str; 3] = ["auto", "vulkan", "dx12"];
-
-/// Normalize a raw durable value to the closed set; absent/unknown → `auto`.
-pub fn normalize_wgpu_backend(raw: Option<&str>) -> &'static str {
-    let Some(raw) = raw else {
-        return WGPU_BACKEND_VALUES[0];
-    };
-    WGPU_BACKEND_VALUES
-        .into_iter()
-        .find(|candidate| *candidate == raw)
-        .unwrap_or(WGPU_BACKEND_VALUES[0])
-}
-
-/// Extract the `wgpu_backend` leaf from a durable preference document.
-///
-/// The root key is canonical; a nested `ui.wgpu_backend` is tolerated so a
-/// projection that nests it cannot silently disable the setting. A non-string or
-/// an unknown token yields `None` (the caller falls back to `auto`), never an
-/// invented value.
-pub(crate) fn wgpu_backend_from_preference(text: &str) -> Option<String> {
-    let document: serde_json::Value = serde_json::from_str(text).ok()?;
-    let raw = document
-        .get(WGPU_BACKEND_PREFERENCE_KEY)
-        .or_else(|| {
-            document
-                .get("ui")
-                .and_then(|ui| ui.get(WGPU_BACKEND_PREFERENCE_KEY))
-        })
-        .and_then(serde_json::Value::as_str)?;
-    WGPU_BACKEND_VALUES.contains(&raw).then(|| raw.to_string())
-}
-
-/// Remove the renderer backend leaf from a durable preference document.
-///
-/// The store's allowed-path validation is strict: one leaf outside the host
-/// allowances rejects the whole patch. The backend choice is the one leaf the
-/// `ViewerConfig` schema cannot express, so it is captured separately
-/// ([`wgpu_backend_from_preference`]) and stripped here before the rest of the
-/// document is applied — every other leaf is passed through unchanged. Text that
-/// is not valid JSON is returned as-is so the store reports its own parse error
-/// instead of this helper inventing one.
-pub(crate) fn without_wgpu_backend(text: &str) -> String {
-    let Ok(mut document) = serde_json::from_str::<serde_json::Value>(text) else {
-        return text.to_string();
-    };
-    if let Some(object) = document.as_object_mut() {
-        object.remove(WGPU_BACKEND_PREFERENCE_KEY);
-        if let Some(ui) = object.get_mut("ui").and_then(|ui| ui.as_object_mut()) {
-            ui.remove(WGPU_BACKEND_PREFERENCE_KEY);
-        }
-    }
-    serde_json::to_string(&document).unwrap_or_else(|_| text.to_string())
-}
-
-/// Merge the renderer backend choice into the projected preference document.
-///
-/// `projected` is the store's allowed-leaf projection (exactly what the host
-/// persists). The backend leaf is added at the root — or removed when the choice
-/// is `None` — so every preference write keeps the one leaf the schema cannot
-/// express. A projection that is not a JSON object is an explicit error, never a
-/// silently rewritten file.
-pub(crate) fn merge_wgpu_backend_into_preference(
-    projected: &str,
-    backend: Option<&str>,
-) -> CadResult<String> {
-    let mut document: serde_json::Value = serde_json::from_str(projected).map_err(|error| {
-        CadError::InvalidInput(format!("preference projection is not JSON: {error}"))
-    })?;
-    let object = document.as_object_mut().ok_or_else(|| {
-        CadError::InvalidInput("preference projection is not a JSON object".into())
-    })?;
-    match backend {
-        Some(token) => {
-            object.insert(
-                WGPU_BACKEND_PREFERENCE_KEY.to_string(),
-                serde_json::Value::String(token.to_string()),
-            );
-        }
-        None => {
-            object.remove(WGPU_BACKEND_PREFERENCE_KEY);
-        }
-    }
-    serde_json::to_string(&document)
-        .map_err(|error| CadError::InvalidInput(format!("preference write is not JSON: {error}")))
-}
 
 /// The closed set of settings the Options dialog may write.
 ///
@@ -166,11 +78,23 @@ pub enum CadSettingKey {
     GpuBudgetPercent,
     /// Renderer graphics backend (`auto`/`vulkan`/`dx12`).
     WgpuBackend,
+    /// UI theme (`dark`/`light`): a root preference leaf that also selects the
+    /// model/paper canvas backgrounds.
+    Theme,
+    /// Navigation-bar visibility (root `navbarVisible` leaf).
+    NavbarVisible,
+    /// ViewCube display bitmask `0..=3` (root `navvcubeDisplay` leaf):
+    /// bit 1 = the 3D view class, bit 2 = the 2D view class.
+    NavvcubeDisplay,
+    /// ViewCube visibility in 2D views (root `viewCubeIn2d` leaf).
+    ViewCubeIn2d,
+    /// ViewCube visibility in 3D views (root `viewCubeIn3d` leaf).
+    ViewCubeIn3d,
 }
 
 impl CadSettingKey {
     /// Every writable key, in a stable order.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 23] = [
         Self::Grid,
         Self::Axes,
         Self::SelectionHighlight,
@@ -189,15 +113,21 @@ impl CadSettingKey {
         Self::ApertureSize,
         Self::GpuBudgetPercent,
         Self::WgpuBackend,
+        Self::Theme,
+        Self::NavbarVisible,
+        Self::NavvcubeDisplay,
+        Self::ViewCubeIn2d,
+        Self::ViewCubeIn3d,
     ];
 
     /// The stable camelCase wire key (also the `cad_set_setting` key).
     ///
-    /// Every key but [`Self::WgpuBackend`] and [`Self::GpuBudgetPercent`] is the
-    /// final segment of a camelCase `ViewerConfig` path; the backend choice is a
-    /// root-level renderer preference, so its wire key, its `cad_set_setting` key
-    /// and its persisted key are the identical `wgpu_backend`; the GPU budget is
-    /// persisted under `view.gpuBudget.percent`, whose leaf is `percent`.
+    /// Every key but [`Self::WgpuBackend`], [`Self::GpuBudgetPercent`] and the
+    /// five [`ROOT_PREFERENCE_KEYS`] leaves is the final segment of a camelCase
+    /// `ViewerConfig` path. The backend and the appearance/navigation keys are
+    /// root-level host preferences, so their wire key, `cad_set_setting` key and
+    /// persisted key are identical; the GPU budget is persisted under
+    /// `view.gpuBudget.percent`, whose leaf is `percent`.
     pub fn key(self) -> &'static str {
         match self {
             Self::Grid => "grid",
@@ -218,6 +148,11 @@ impl CadSettingKey {
             Self::ApertureSize => "apertureSize",
             Self::GpuBudgetPercent => "gpuBudgetPercent",
             Self::WgpuBackend => WGPU_BACKEND_PREFERENCE_KEY,
+            Self::Theme => "theme",
+            Self::NavbarVisible => "navbarVisible",
+            Self::NavvcubeDisplay => "navvcubeDisplay",
+            Self::ViewCubeIn2d => "viewCubeIn2d",
+            Self::ViewCubeIn3d => "viewCubeIn3d",
         }
     }
 
@@ -249,6 +184,18 @@ impl CadSettingKey {
                 CadSettingValue::Text(token) if WGPU_BACKEND_VALUES.contains(&token.as_str()) => {
                     Ok(())
                 }
+                _ => Err(SETTINGS_INVALID_VALUE),
+            },
+            // The UI theme is one of the two tokens this build draws. An unknown
+            // token is refused, never normalized to the default.
+            Self::Theme => match value {
+                CadSettingValue::Text(token) if THEME_VALUES.contains(&token.as_str()) => Ok(()),
+                _ => Err(SETTINGS_INVALID_VALUE),
+            },
+            // The ViewCube display bitmask is exactly `0..=3` (bit 1 = 3D class,
+            // bit 2 = 2D class). Out of range is refused, never clamped.
+            Self::NavvcubeDisplay => match value {
+                CadSettingValue::Number(display) if *display <= 3 => Ok(()),
                 _ => Err(SETTINGS_INVALID_VALUE),
             },
             Self::PlotFormat => match value {
@@ -314,7 +261,10 @@ impl CadSettingKey {
             | Self::HoverPreview
             | Self::GridSnapEnabled
             | Self::OrthoEnabled
-            | Self::LeftDragPans => match value {
+            | Self::LeftDragPans
+            | Self::NavbarVisible
+            | Self::ViewCubeIn2d
+            | Self::ViewCubeIn3d => match value {
                 CadSettingValue::Bool(_) => Ok(()),
                 CadSettingValue::Text(_)
                 | CadSettingValue::Number(_)
@@ -382,6 +332,21 @@ pub struct HostSettings {
     /// the user never chose one. Takes effect on the next presenter
     /// construction (the renderer backend cannot change inside a live surface).
     pub wgpu_backend: String,
+    /// UI theme: one of [`THEME_VALUES`], `"dark"` when the user never chose one.
+    /// Applying a theme also writes the model/paper canvas backgrounds
+    /// ([`THEME_DARK_BACKGROUND`] / [`THEME_LIGHT_BACKGROUND`]).
+    pub theme: String,
+    /// Navigation-bar visibility (root `navbarVisible` leaf, default `true`).
+    pub navbar_visible: bool,
+    /// ViewCube display bitmask `0..=3` (root `navvcubeDisplay` leaf, default
+    /// `3` = both view classes). Bit 1 is the 3D class, bit 2 the 2D class.
+    pub navvcube_display: u32,
+    /// ViewCube visibility in 2D views (root `viewCubeIn2d` leaf, default
+    /// `true`).
+    pub view_cube_in_2d: bool,
+    /// ViewCube visibility in 3D views (root `viewCubeIn3d` leaf, default
+    /// `true`).
+    pub view_cube_in_3d: bool,
     pub fonts_dir: Option<String>,
 }
 
@@ -454,6 +419,17 @@ impl HostCore {
             aperture_size,
             gpu_budget_percent,
             wgpu_backend: normalize_wgpu_backend(self.wgpu_backend.borrow().as_deref()).to_string(),
+            // The five host-owned appearance/navigation leaves live outside the
+            // `ViewerConfig` schema; the documented defaults apply when the user
+            // never chose one.
+            theme: {
+                let preferences = self.root_preferences.borrow();
+                preferences.theme().to_string()
+            },
+            navbar_visible: self.root_preferences.borrow().navbar_visible(),
+            navvcube_display: self.root_preferences.borrow().navvcube_display(),
+            view_cube_in_2d: self.root_preferences.borrow().view_cube_in_2d(),
+            view_cube_in_3d: self.root_preferences.borrow().view_cube_in_3d(),
             fonts_dir: self
                 .options
                 .fonts_dir
@@ -543,6 +519,17 @@ impl HostCore {
             CadSettingKey::ApertureSize => self.apply_pixel_size("aperture", &value),
             CadSettingKey::GpuBudgetPercent => self.apply_gpu_budget_percent(&value),
             CadSettingKey::WgpuBackend => self.apply_wgpu_backend(&value),
+            CadSettingKey::Theme => self.apply_theme(&value),
+            CadSettingKey::NavbarVisible => {
+                self.apply_root_flag(&value, |preferences| &mut preferences.navbar_visible)
+            }
+            CadSettingKey::NavvcubeDisplay => self.apply_navvcube_display(&value),
+            CadSettingKey::ViewCubeIn2d => {
+                self.apply_root_flag(&value, |preferences| &mut preferences.view_cube_in_2d)
+            }
+            CadSettingKey::ViewCubeIn3d => {
+                self.apply_root_flag(&value, |preferences| &mut preferences.view_cube_in_3d)
+            }
         }
     }
 
@@ -577,7 +564,11 @@ impl HostCore {
     /// the same colour the store parses back; the write path republishes the
     /// render inputs through `sync_render`, so the active space's next frame
     /// clears to the new colour without reopening the document.
-    fn apply_background_preference(&self, leaf: &str, value: &CadSettingValue) -> CadResult<()> {
+    pub(crate) fn apply_background_preference(
+        &self,
+        leaf: &str,
+        value: &CadSettingValue,
+    ) -> CadResult<()> {
         let CadSettingValue::Text(text) = value else {
             return Err(CadError::InvalidInput(SETTINGS_INVALID_VALUE.into()));
         };
@@ -826,7 +817,7 @@ impl HostCore {
 /// catalog copy; the store's own reason follows for diagnostics. The caller has
 /// already rolled the in-memory change back, so no layer can report a value that
 /// would disappear on the next start.
-fn preference_persist_refusal(error: &CadError) -> CadError {
+pub(crate) fn preference_persist_refusal(error: &CadError) -> CadError {
     CadError::Unsupported(format!(
         "{SETTINGS_NOT_PERSISTED}: {}",
         store_error_reason(error)
@@ -923,17 +914,27 @@ impl HostCore {
         self.require_config_idle()?;
         let previous = self.viewer_config.borrow().user_preference_json();
         let previous_backend = self.wgpu_backend.borrow().clone();
+        let previous_root = self.root_preferences.borrow().clone();
+        let previous_recent = self.recent_files.borrow().clone();
         self.viewer_config.borrow_mut().clear_user_preference();
         // The renderer backend choice is a user preference too, even though it
         // is not a `ViewerConfig` leaf: a real clear resets it to the `auto`
-        // default and removes the leaf from the durable document.
+        // default and removes the leaf from the durable document. The five
+        // appearance/navigation leaves are reset the same way (documented
+        // defaults; no stale leaf survives). Recent drawings are user data, not
+        // a setting, but a real clear drops them too: the `recentFiles` leaf is
+        // removed with the rest.
         *self.wgpu_backend.borrow_mut() = None;
+        *self.root_preferences.borrow_mut() = RootPreferences::default();
+        self.recent_files.borrow_mut().clear();
         self.clear_gestures();
         self.config_dirty.set(true);
         self.full_dirty.set(true);
         if let Err(error) = self.persist_preference() {
             self.rollback_user_preference(&previous);
             *self.wgpu_backend.borrow_mut() = previous_backend;
+            *self.root_preferences.borrow_mut() = previous_root;
+            *self.recent_files.borrow_mut() = previous_recent;
             return Err(preference_persist_refusal(&error));
         }
         self.sync_render()

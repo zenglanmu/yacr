@@ -11,7 +11,7 @@
 // publish a semantic status immediately and skip the per-frame churn.
 import { formatWorldCursor } from './coords.ts';
 import type { WorldCursorReadout } from './coords.ts';
-import type { CadStatus } from './cad-status.ts';
+import type { CadStatus, CadViewOrientation } from './cad-status.ts';
 
 /** The per-frame slice consumed by leaf components, not by the shell tree. */
 export interface VolatileStatus {
@@ -19,6 +19,8 @@ export interface VolatileStatus {
   readonly cursor: WorldCursorReadout;
   /** The rolling frame-rate reading (`null` while unknown/stale). */
   readonly fps: number | null;
+  /** The host's live view orientation for the ViewCube, or `null`. */
+  readonly view: CadViewOrientation | null;
 }
 
 /** A minimal external store (`useSyncExternalStore` contract). */
@@ -28,11 +30,29 @@ export interface VolatileStatusStore {
   getCursor(): WorldCursorReadout;
   /** The FPS slice; stable while only the cursor changes (a selector). */
   getFrameRate(): number | null;
+  /** The view slice; stable while only the cursor/FPS change (a selector). */
+  getView(): CadViewOrientation | null;
   subscribe(listener: () => void): () => void;
   /** Publish a new cursor; notifies only when the rendered text changes. */
   setCursor(cursorWorld: CadStatus['cursorWorld']): void;
   /** Publish an FPS reading; notifies only when the number changes. */
   setFrameRate(fps: number | null): void;
+  /** Publish a view orientation; notifies only when the basis changes. */
+  setView(view: CadViewOrientation | null): void;
+}
+
+/** Value equality for the finite values of a view basis. */
+export function sameViewOrientation(
+  previous: CadViewOrientation | null,
+  next: CadViewOrientation | null,
+): boolean {
+  if (previous === next) return true;
+  if (previous === null || next === null) return false;
+  return previous.mode === next.mode
+    && previous.projection === next.projection
+    && sameJsonValue(previous.eye, next.eye)
+    && sameJsonValue(previous.target, next.target)
+    && sameJsonValue(previous.up, next.up);
 }
 
 /** The one store the shell and its leaf readers share. */
@@ -40,6 +60,7 @@ export function createVolatileStatusStore(): VolatileStatusStore {
   let snapshot: VolatileStatus = {
     cursor: formatWorldCursor(null),
     fps: null,
+    view: null,
   };
   const listeners = new Set<() => void>();
   const notify = (): void => {
@@ -52,6 +73,7 @@ export function createVolatileStatusStore(): VolatileStatusStore {
     // diagnostics row and an FPS-only frame does not re-render the status bar.
     getCursor: () => snapshot.cursor,
     getFrameRate: () => snapshot.fps,
+    getView: () => snapshot.view,
     subscribe(listener: () => void): () => void {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -66,6 +88,11 @@ export function createVolatileStatusStore(): VolatileStatusStore {
     setFrameRate(fps: number | null): void {
       if (Object.is(fps, snapshot.fps)) return;
       snapshot = { ...snapshot, fps };
+      notify();
+    },
+    setView(view: CadViewOrientation | null): void {
+      if (sameViewOrientation(snapshot.view, view)) return;
+      snapshot = { ...snapshot, view };
       notify();
     },
   };
@@ -115,7 +142,7 @@ export function sameStatusIgnoringVolatile(
   const nextKeys = Object.keys(next);
   if (previousKeys.length !== nextKeys.length) return false;
   for (const key of previousKeys) {
-    if (key === 'frameCount' || key === 'cursorWorld') continue;
+    if (key === 'frameCount' || key === 'cursorWorld' || key === 'view') continue;
     if (!(key in next)) return false;
     if (!sameJsonValue((previous as unknown as Record<string, unknown>)[key], (next as unknown as Record<string, unknown>)[key])) {
       return false;

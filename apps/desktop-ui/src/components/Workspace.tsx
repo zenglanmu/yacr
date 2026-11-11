@@ -7,14 +7,15 @@
 // (an absolute overlay that takes no layout space). Opening, closing, dragging
 // or resizing a palette therefore never changes the `.native-input` rect, so the
 // host gets no resize report and never re-presents/re-renders the CAD surface.
-// The navigation rail stays docked at the right edge.
+// The navigation dock (ViewCube above the icon rail) stays docked at the right
+// edge; its width is reserved whether or not the rail is expanded.
 //
 // A `dom-canvas` host (ADR 0024 D3) carries its pixels inside this tree instead:
 // an empty, input-transparent `<canvas>` fills the same rect and paints under
 // `.native-input` by DOM order. It is a pixel surface only - no listeners, no
 // document state - so `.native-input` stays the single input funnel.
 import React from 'react';
-import { NavRail } from './NavRail.tsx';
+import { NavigationDock } from './NavigationDock.tsx';
 import { StartPanel } from './StartPanel.tsx';
 import { PaletteWindow } from './PaletteWindow.tsx';
 import { LayersPalette } from './LayersPalette.tsx';
@@ -133,7 +134,7 @@ export function Workspace() {
           ) : null}
         </div>
       </div>
-      <NavRail />
+      <NavigationDock />
       <PluginNoticeHost />
       <HostNoticeHost />
       <UpdateNoticeHost />

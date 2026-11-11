@@ -3,6 +3,7 @@ package io.github.zenglanmu.yacr
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
@@ -108,7 +109,7 @@ class DocumentPicker(private val activity: MainActivity) {
   // ---------------------------------------------------------------------------
 
   /** Launches the SAF open picker (`ACTION_OPEN_DOCUMENT`), replacing the slot. */
-  fun documentLaunchOpen() {
+  fun documentLaunchOpen(initialUri: String?) {
     resetSlot(save = false)
     val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
       addCategory(Intent.CATEGORY_OPENABLE)
@@ -116,9 +117,45 @@ class DocumentPicker(private val activity: MainActivity) {
       // `application/octet-stream`, and a MIME filter would grey those files out.
       type = "*/*"
       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+      // Start in the last opened drawing's folder when the host remembered one.
+      // The extra is ignored by a provider without folder support, never an error.
+      initialDocumentUri(initialUri)?.let { putExtra(DocumentsContract.EXTRA_INITIAL_URI, it) }
     }
-    Log.i(TAG, "document picker: launch open (ACTION_OPEN_DOCUMENT, */*)")
+    Log.i(TAG, "document picker: launch open (ACTION_OPEN_DOCUMENT, */*, initial=$initialUri)")
     launch(intent)
+  }
+
+  /**
+   * The picker's starting SAF document URI derived from the last opened document.
+   *
+   * Android opens the containing folder of an initial *document* URI. When the
+   * document id is a path (`dir/name`), the parent document URI is used so the
+   * picker lands in the folder; otherwise the document URI itself is the best
+   * available hint (the system still shows its folder). A non-`content:` URI is
+   * not a SAF document and yields null: no invented location.
+   */
+  private fun initialDocumentUri(raw: String?): Uri? {
+    if (raw.isNullOrBlank()) return null
+    val uri = try {
+      Uri.parse(raw)
+    } catch (_: Exception) {
+      return null
+    }
+    if (uri.scheme?.lowercase() != "content") return null
+    return try {
+      val documentId = DocumentsContract.getDocumentId(uri)
+      val parentId = documentId.substringBeforeLast('/', missingDelimiterValue = "")
+      val authority = uri.authority
+      if (parentId.isEmpty() || authority == null) {
+        uri
+      } else {
+        DocumentsContract.buildDocumentUri(authority, parentId)
+      }
+    } catch (_: Exception) {
+      // A provider whose id is not a document id: the document URI is still a
+      // valid initial hint, so keep it rather than dropping the whole gesture.
+      uri
+    }
   }
 
   /** Launches the SAF create-document picker (`ACTION_CREATE_DOCUMENT`). */

@@ -109,6 +109,9 @@ fn blank_status_reports_no_document_capabilities() {
         // No document: no paper tabs and the honest model space.
         Vec::new(),
         CadActiveSpace::Model,
+        "dark".into(),
+        None,
+        CadNavigation::default(),
     );
     assert_eq!(status.document_label, None);
     assert_eq!(status.entity_count, None);
@@ -238,6 +241,9 @@ fn document_status_reports_counts_and_camera() {
         true,
         Vec::new(),
         CadActiveSpace::Model,
+        "dark".into(),
+        None,
+        CadNavigation::default(),
     );
     assert_eq!(status.document_label.as_deref(), Some("fixture.dwg"));
     assert_eq!(status.entity_count, Some(3));
@@ -401,6 +407,9 @@ fn the_status_carries_the_grip_drag_flag_on_the_wire_in_both_states() {
         true,
         Vec::new(),
         CadActiveSpace::Model,
+        "dark".into(),
+        None,
+        CadNavigation::default(),
     );
     assert!(dragging.grip_drag);
     let names = super::super::tests_text::wire_field_names(&dragging);

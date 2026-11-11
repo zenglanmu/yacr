@@ -1,0 +1,93 @@
+/* Recent drawings on the start panel.
+ *
+ * Component-scoped on purpose: the start panel owns this list, and these rules
+ * use the shared theme tokens (`--row-hover`, `--pressed`, `--field`, `--line-soft`,
+ * `--focus`, `--danger`, `--accent-text`) so dark and light need no second copy.
+ * A row is at least 44px high in every layout: the compact layout has no hover,
+ * and the same row is the touch target there. Long names/paths ellipsize; the
+ * button title (and the path's own title) keeps the full text.
+ */
+.recent-files { display: flex; flex-direction: column; }
+
+/* Loading / unsupported / empty / load-failure share one frame and one height,
+   so a state change does not nudge the actions above or the drawing below. */
+.recent-files__state {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 64px;
+  padding: 14px 12px;
+  border: 1px dashed var(--line-soft); border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 11.5px; line-height: 1.45;
+}
+.recent-files__state > .icon { flex: none; }
+.recent-files__state p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.recent-files__state--loading { align-items: center; justify-content: center; }
+.recent-files__state--loading > .icon { color: var(--accent); }
+.recent-files__state--error {
+  border-style: solid;
+  border-left: 2px solid var(--danger);
+  background: var(--field);
+  color: var(--danger);
+}
+
+.recent-files__list {
+  display: flex; flex-direction: column; gap: 2px;
+  margin: 0; padding: 0;
+  list-style: none;
+}
+.recent-files__row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center; gap: 8px;
+  width: 100%; min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid transparent; border-radius: var(--radius);
+  background: transparent; color: var(--text);
+  text-align: left; cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.recent-files__row:hover:not(:disabled) {
+  background: var(--row-hover);
+  border-color: var(--line-soft);
+}
+.recent-files__row:active:not(:disabled) { background: var(--pressed); }
+.recent-files__row:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.recent-files__row:disabled { color: var(--text-disabled); cursor: not-allowed; }
+.recent-files__icon { display: grid; place-items: center; color: var(--text-muted); }
+.recent-files__row:hover:not(:disabled) .recent-files__icon { color: var(--accent-text); }
+.recent-files__row:disabled .recent-files__icon { color: var(--text-disabled); }
+.recent-files__text {
+  display: flex; flex-direction: column; gap: 1px;
+  justify-content: center;
+  min-height: 26px;
+  min-width: 0;
+}
+.recent-files__name {
+  color: var(--text);
+  font-size: 12px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* A held row (a load is running, or OPEN is not admitted) keeps its *name*
+   legible: `--text-disabled` lands at ~2.7:1 on the light panel's grey, where the
+   same token is ~5:1 in the dark theme, so the light start panel would show an
+   all-but-unreadable filename. The dim icon and the missing hover/press still
+   say "not now"; the name stays readable because it is the row's content. */
+.recent-files__row:disabled .recent-files__name { color: var(--text-muted); }
+.recent-files__path {
+  color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* A reopen refusal: one inline row above the list, worded by the catalog's
+   `start.recent_failed` (the real name and the host's reason, not a generic
+   sentence). The list itself is unchanged, so the failed row stays clickable. */
+.recent-files__error {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  background: var(--field);
+  border-left: 2px solid var(--danger);
+  color: var(--danger);
+  font-size: 11px; line-height: 1.4;
+  overflow-wrap: anywhere;
+}

@@ -814,6 +814,7 @@ dependencies = [
  "cad-platform",
  "cad-representation",
  "cad-resources",
+ "serde",
  "serde_json",
  "web-time",
 ]

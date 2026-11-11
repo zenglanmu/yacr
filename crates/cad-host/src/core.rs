@@ -403,6 +403,23 @@ pub struct HostCore {
     /// drop it, and the host's presenter construction — which reads the same
     /// preference file — sees exactly what the Options dialog wrote.
     pub(crate) wgpu_backend: Rc<RefCell<Option<String>>>,
+    /// The five host-owned appearance/navigation preferences (`theme`,
+    /// `navbarVisible`, `navvcubeDisplay`, `viewCubeIn2d`, `viewCubeIn3d`).
+    ///
+    /// Like [`Self::wgpu_backend`] they are root-level `preference.json` leaves
+    /// outside the `ViewerConfig` schema; the host re-emits them on every
+    /// preference write (`HostCore::persist_preference`) so an unrelated write
+    /// can never drop them. `None` = the user never chose one, which is the
+    /// documented default.
+    pub(crate) root_preferences: Rc<RefCell<crate::settings_root::RootPreferences>>,
+    /// The durable recent-drawings list (root `recentFiles` array).
+    ///
+    /// User data, not an Options setting: it is outside the `ViewerConfig`
+    /// schema and [`crate::HOST_ALLOWED_PATHS_JSON`], seeded from the preference
+    /// document at startup and re-emitted on every preference write so an
+    /// unrelated setting change cannot drop it. One entry is recorded only after
+    /// a **successful** open; a real clear drops the leaf.
+    pub(crate) recent_files: Rc<RefCell<Vec<crate::recent::RecentEntry>>>,
     /// The bounded P3 request queue. Admission/identity/ordering live in the
     /// engine; the host only drives it through `dispatch_immediate`.
     pub(crate) queue: Rc<RequestQueue>,

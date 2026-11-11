@@ -133,11 +133,41 @@ test('the frame union parses every modelled type and ignores an unknown one', ()
   );
   assert.deepEqual(
     parseCadEventFrame({ ...base, type: 'cursor-changed', cursorWorld: [1, 2.5, -3], frameCount: 42 }),
-    { revision: 3, type: 'cursor-changed', cursorWorld: [1, 2.5, -3], frameCount: 42 },
+    { revision: 3, type: 'cursor-changed', cursorWorld: [1, 2.5, -3], frameCount: 42, view: null },
   );
   assert.deepEqual(
     parseCadEventFrame({ ...base, type: 'cursor-changed', cursorWorld: null, frameCount: 0 }),
-    { revision: 3, type: 'cursor-changed', cursorWorld: null, frameCount: 0 },
+    { revision: 3, type: 'cursor-changed', cursorWorld: null, frameCount: 0, view: null },
+  );
+  // The ViewCube basis travels on the same volatile frame, so an orbit can
+  // update the cube without a full status/shell pass.
+  assert.deepEqual(
+    parseCadEventFrame({
+      ...base,
+      type: 'cursor-changed',
+      cursorWorld: null,
+      frameCount: 7,
+      view: {
+        mode: '3d',
+        projection: 'perspective',
+        eye: [1, 2, 3],
+        target: [0, 0, 0],
+        up: [0, 1, 0],
+      },
+    }),
+    {
+      revision: 3,
+      type: 'cursor-changed',
+      cursorWorld: null,
+      frameCount: 7,
+      view: {
+        mode: '3d',
+        projection: 'perspective',
+        eye: [1, 2, 3],
+        target: [0, 0, 0],
+        up: [0, 1, 0],
+      },
+    },
   );
   // A newer host may add a frame: the type is ignored, and this build keeps going.
   assert.equal(parseCadEventFrame({ revision: 4, type: 'layer-changed', layer: '0' }), null);
@@ -162,6 +192,10 @@ test('the frame union parses every modelled type and ignores an unknown one', ()
     { revision: 1, type: 'cursor-changed', cursorWorld: [1, 2, 3], frameCount: -1 },
     { revision: 1, type: 'cursor-changed', cursorWorld: [1, 2, 3], frameCount: 1.5 },
     { revision: 1, type: 'cursor-changed', cursorWorld: [1, 2, 3] },
+    // A partial/typed-wrong orientation block is a contract violation: the cube
+    // must never rotate from a guessed basis.
+    { revision: 1, type: 'cursor-changed', cursorWorld: null, frameCount: 1, view: { mode: '2d' } },
+    { revision: 1, type: 'cursor-changed', cursorWorld: null, frameCount: 1, view: { mode: '3d', projection: 'perspective', eye: [1, 2], target: [0, 0, 0], up: [0, 1, 0] } },
   ]) {
     assert.throws(() => parseCadEventFrame(bad), /CAD_EVENT_INVALID|CAD_STATUS_INVALID/);
   }
@@ -488,7 +522,7 @@ test('cursor-changed drives only the leaf stores, never the shell, carrier or pu
   const end = hook.indexOf("if (frame.type === 'vendor-pending')", start);
   assert.ok(end > start, 'the branch precedes the vendor handler');
   const branch = hook.slice(start, end);
-  assert.match(branch, /publishVolatile\(frame\.cursorWorld, frame\.frameCount, !document\.hidden\)/);
+  assert.match(branch, /publishVolatile\(frame\.cursorWorld, frame\.frameCount, !document\.hidden, frame\.view\)/);
   assert.ok(branch.includes('return;'), 'the branch returns before the pump check');
   for (const forbidden of ['setStatus(', 'observeCarrier', 'connect(', 'pump(']) {
     assert.ok(!branch.includes(forbidden), `cursor-changed must not call ${forbidden}`);

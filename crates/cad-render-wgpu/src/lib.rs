@@ -815,7 +815,8 @@ pub struct Renderer {
     /// Camera position of the most recent color frame (transparent ordering).
     last_camera_position: Option<[f32; 3]>,
     /// Light vector (`rgb` = unit toward the light, world space) of the most
-    /// recent color frame, so the id pass writes the same uniform layout.
+    /// recent color frame, so the id pass writes the same uniform layout. `a` is
+    /// the frame's light-background ink flag (the pick shaders ignore it).
     last_light: [f32; 4],
     /// Active id-target format (see [`IdTargetFormat`]).
     id_format: IdTargetFormat,

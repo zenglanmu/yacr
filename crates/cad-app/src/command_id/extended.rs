@@ -976,7 +976,7 @@ pub enum ExtendedCommandId {
     /// `DGNADJUST`: no DGN underlay adjustment model.
     DgnAdjust,
 
-    // Waves 17-24: 200 named refusals (action macros, palettes, OLE/hyperlinks,
+    // Waves 17-24: 197 named refusals (action macros, palettes, OLE/hyperlinks,
     // LISP, lights/materials/constraints, data extraction, DWF/DGN underlays,
     // markup, GIS, compare, sheet sets). The selectors, reasons and variant set
     // live in `refusal_names.rs`; every one is Viewer-legal and writes nothing.

@@ -42,6 +42,7 @@ mod fonts;
 mod init;
 mod layers;
 mod popup;
+mod recent;
 mod release;
 mod tick;
 
@@ -256,6 +257,11 @@ fn register_seams(
     // Shell capability, not document state: hand the fixed release URL to the OS.
     // Installed after the shell lock is released, like the seams above.
     cad_desktop_shell::state::configure_release_opener(shared, Arc::new(release::MacReleaseOpener));
+    // Recent drawings are a host file capability on the main-thread session.
+    cad_desktop_shell::state::configure_recent_host(
+        shared,
+        recent::AppRecentHost::new(app.clone()),
+    );
 }
 
 /// Ask the tick to stop and release the presenter (idempotent).

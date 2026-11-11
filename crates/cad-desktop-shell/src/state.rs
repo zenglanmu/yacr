@@ -34,8 +34,8 @@ use cad_ui_core::popup::PopupAck;
 use cad_ui_core::protocol::InputKind;
 use cad_ui_core::session::events::EventBus;
 use cad_ui_core::session::{
-    CadFonts, CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CadSettings, CadStatus,
-    QueueFamily, QueueReads, QueueSink,
+    CadFonts, CadLayerWrite, CadLayers, CadRecentFiles, CadSettingKey, CadSettingValue,
+    CadSettings, CadStatus, QueueFamily, QueueReads, QueueSink,
 };
 use cad_ui_core::shell::{modal_gate_open, ShellState};
 
@@ -75,6 +75,29 @@ pub trait ShellPopupHost: Send + Sync {
 
     /// Close the open popup (idempotent) and clear the modal gate.
     fn close(&self, shared: &Arc<Mutex<Shared>>) -> Result<(), String>;
+}
+
+/// The platform side of the recent-drawings commands.
+///
+/// Recent drawings are a **host file capability** (the durable list and the
+/// reopen gesture), not CAD document data: the `CadSession` is `!Send` and owned
+/// by the owner thread, so the shared command layer cannot read it directly. A
+/// host installs one seam that knows how to marshal the two calls onto its
+/// session thread; a host that installs none refuses by name
+/// (`unsupported-runtime: cad_recent_files`), never with an empty list that
+/// would look like "no recent drawings".
+///
+/// Implementations must not hold their own lock while waiting on the session
+/// thread and must not lock [`Shared`] while holding a lock of their own; the
+/// commands clone the seam out of `Shared` and release the lock before calling.
+pub trait ShellRecentHost: Send + Sync {
+    /// The real durable list, newest first (possibly empty).
+    fn list(&self) -> Result<CadRecentFiles, String>;
+
+    /// Start reopening one recorded entry by its opaque handle. `display_name`
+    /// is the caller's row label; the host revalidates the handle against its
+    /// own list and uses the stored name.
+    fn open_recent(&self, opaque: &str, display_name: &str) -> Result<(), String>;
 }
 
 /// State shared with the IPC commands: deliberately **GPU-free and
@@ -177,6 +200,11 @@ pub struct Shared {
     /// then refuses with its stable `unsupported-runtime` marker instead of a
     /// fabricated acknowledgement.
     pub release_opener: Option<Arc<dyn crate::release::ShellReleaseOpener>>,
+    /// The platform recent-drawings seam (see [`ShellRecentHost`]). `None`
+    /// before the host registers one; the two commands then refuse by name
+    /// (`unsupported-runtime: cad_recent_files`) instead of answering an empty
+    /// list that would look like "nothing was ever opened".
+    pub recent_host: Option<Arc<dyn ShellRecentHost>>,
     /// The WebView vendor-decoding pass (pending → records → apply). Host
     /// transport state, not document state: it carries a token and bounded
     /// diagnostics, never geometry or a second `cad-db`.
@@ -230,6 +258,7 @@ impl Shared {
             telemetry: None,
             popup_host: None,
             release_opener: None,
+            recent_host: None,
             vendor: crate::vendor::VendorStore::default(),
             vendor_pending_representations: None,
             vendor_representations_clear: false,
@@ -299,6 +328,15 @@ pub fn configure_release_opener(
     opener: Arc<dyn crate::release::ShellReleaseOpener>,
 ) {
     lock(shared).release_opener = Some(opener);
+}
+
+/// Install the recent-drawings platform seam (see [`ShellRecentHost`]).
+///
+/// Mirrors `configure_release_opener`: a host with a native session that owns a
+/// durable recent list calls this once during startup; a host that never does
+/// keeps the named refusal instead of an empty supported list.
+pub fn configure_recent_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn ShellRecentHost>) {
+    lock(shared).recent_host = Some(host);
 }
 
 /// Lock [`Shared`], recovering the guard from a poisoned mutex.

@@ -791,11 +791,11 @@
 | `MULTIPLE` | 部分实现 | 设置会话 `MultipleRepeat` 标志；本宿主无重复循环，报告 `multiple.repeat_not_implemented`，不伪造重复 |
 | `MVIEW` | 部分实现 | 活动图纸空间创建矩形视口（四角 clip、unit scale、`-paper_center` 平移），一条事务/一步撤销；无多边形/非矩形。 |
 | `MVSETUP` | 部分实现 | 具名拒绝（`mvsetup.unsupported`）：无视口组模型。 |
-| `NAVBAR` | 部分实现 | 具名拒绝（`navbar.unsupported: this build has no 3D navigation/ViewCube model`）。 |
+| `NAVBAR` | 部分实现 | 真实设置写入 `NAVBAR [ON\|OFF]`（持久化导航栏可见性）；无 SteeringWheels/ShowMotion/3Dconnexion。 |
 | `NAVSMOTION` | 部分实现 | 具名拒绝（`navsmotion.unsupported: this build has no 3D navigation/ViewCube model`）。 |
 | `NAVSMOTIONCLOSE` | 部分实现 | 具名拒绝（`navsmotionclose.unsupported: this build has no 3D navigation/ViewCube model`）。 |
 | `NAVSWHEEL` | 部分实现 | 具名拒绝（`navswheel.unsupported: this build has no 3D navigation/ViewCube model`）。 |
-| `NAVVCUBE` | 部分实现 | 具名拒绝（`navvcube.unsupported: this build has no 3D navigation/ViewCube model`）。 |
+| `NAVVCUBE` | 部分实现 | 真实设置写入 `NAVVCUBE [ON\|OFF]`（按当前 2D/3D 视图类别切显示位）；`PROPERTIES` 具名拒绝；无罗盘/边角目标/动画。 |
 | `NCOPY` | 部分实现 | 真实编辑：选中块参照成员按世界变换复制到模型空间；一条事务/一步撤销；无嵌套选择界面。 |
 | `NETLOAD` | 部分实现 | 具名拒绝（`netload.unsupported: no .NET application loader model`）。 |
 | `NEW` | 已实现 | — |
@@ -901,7 +901,7 @@
 | `SELECTCOUNT` | 部分实现 | 只读统计与第一个选中对象五特性相同的模型空间对象数；不改选择/无事务 |
 | `SELECTSIMILAR` | 已实现 | 对象类型强制；默认**图层+类型**；Color/Linetype/Lineweight/Name/Object style 独立开关；透明**不**参与；`Name` 按**根块参照名**匹配展开成员；模型/图纸空间各自匹配；只读 |
 | `SETBYLAYER` | 已实现 | 颜色/线型/线宽/透明度复位随层；Include blocks 递归块成员；锁定图层拒绝；材质/命名打印样式属未建模的全局范围（AutoCAD 的 SETBYLAYER 本就不含文字/标注/填充样式） |
-| `SETVAR` | 部分实现 | 读/写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`；写复用既有命令路径；未知/越界按名拒绝 |
+| `SETVAR` | 部分实现 | 读/写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`；写复用既有命令路径；另可写 `NAVVCUBEDISPLAY/DISPLAYVIEWCUBEIN2D/DISPLAYVIEWCUBEIN3D`（主机外观设置，读形式为 `setvar.write_only_variable`）；未知/越界按名拒绝 |
 | `SHOWPALETTES` | 部分实现 | 具名拒绝（`showpalettes.unsupported`）：选项板 chrome 由宿主负责。 |
 | `SIGVALIDATE` | 部分实现 | 具名拒绝（`sigvalidate.unsupported`）：无数字签名模型。 |
 | `SKETCH` | 部分实现 | 仅 `CommandPayload::Points`：一条活动层开放 LWPOLYLINE；两点以上且有限；一条事务/一步撤销；交互式定时采样 NOT IMPLEMENTED |
@@ -1596,11 +1596,11 @@
 | 576 | `MULTIPLE` | 部分实现 | Repeats the next command until canceled. | 设置会话 `MultipleRepeat` 标志；本宿主无重复循环，报告 `multiple.repeat_not_implemented`，不伪造重复 |
 | 577 | `MVIEW` | 部分实现 | Creates and controls layout viewports. | 活动图纸空间创建矩形视口（四角 clip、unit scale、`-paper_center` 平移），一条事务/一步撤销；无多边形/非矩形。 |
 | 578 | `MVSETUP` | 部分实现 | Sets up the specifications of a drawing. | 具名拒绝（`mvsetup.unsupported`）：无视口组模型。 |
-| 579 | `NAVBAR` | 部分实现 | Provides access to viewing tools from a unified interface. | 具名拒绝（`navbar.unsupported: this build has no 3D navigation/ViewCube model`）。 |
+| 579 | `NAVBAR` | 部分实现 | Provides access to viewing tools from a unified interface. | 真实设置写入 `NAVBAR [ON\|OFF]`（持久化导航栏可见性）；无 SteeringWheels/ShowMotion/3Dconnexion。 |
 | 580 | `NAVSMOTION` | 部分实现 | Provides an on-screen display for creating and playing back cinematic camera animations for design review, presentation, and bookmark-style navigation. | 具名拒绝（`navsmotion.unsupported: this build has no 3D navigation/ViewCube model`）。 |
 | 581 | `NAVSMOTIONCLOSE` | 部分实现 | Closes the ShowMotion interface where you can navigate within a drawing by selecting a named view. | 具名拒绝（`navsmotionclose.unsupported: this build has no 3D navigation/ViewCube model`）。 |
 | 582 | `NAVSWHEEL` | 部分实现 | Provides access to enhanced navigation tools that are quickly accessible from the cursor. | 具名拒绝（`navswheel.unsupported: this build has no 3D navigation/ViewCube model`）。 |
-| 583 | `NAVVCUBE` | 部分实现 | Indicates the current viewing direction. Dragging or clicking the ViewCube rotates the scene. | 具名拒绝（`navvcube.unsupported: this build has no 3D navigation/ViewCube model`）。 |
+| 583 | `NAVVCUBE` | 部分实现 | Indicates the current viewing direction. Dragging or clicking the ViewCube rotates the scene. | 真实设置写入 `NAVVCUBE [ON\|OFF]`（按当前 2D/3D 视图类别切显示位）；`PROPERTIES` 具名拒绝；无罗盘/边角目标/动画。 |
 | 584 | `NCOPY` | 部分实现 | Copies objects that are contained in an xref, block, or DGN underlay. | 真实编辑：选中块参照成员按世界变换复制到模型空间；一条事务/一步撤销；无嵌套选择界面。 |
 | 585 | `NETLOAD` | 部分实现 | Loads a .NET application. | 具名拒绝（`netload.unsupported: no .NET application loader model`）。 |
 | 586 | `NEW` | 已实现 | Starts a new drawing. | — |
@@ -1802,7 +1802,7 @@
 | 782 | `SELECTCOUNT` | 部分实现 | Finds all objects within the current count that match the properties of the selected objects, and then adds them to the selection set. | 只读统计与第一个选中对象五特性相同的模型空间对象数；不改选择/无事务 |
 | 783 | `SELECTSIMILAR` | 已实现 | Finds all objects within the current drawing that match the properties of selected objects, and then adds them to the selection set. | 对象类型强制；默认**图层+类型**；Color/Linetype/Lineweight/Name/Object style 独立开关；透明**不**参与；`Name` 按**根块参照名**匹配展开成员；模型/图纸空间各自匹配；只读 |
 | 784 | `SETBYLAYER` | 已实现 | Changes the property overrides of selected objects to ByLayer. | 颜色/线型/线宽/透明度复位随层；Include blocks 递归块成员；锁定图层拒绝；材质/命名打印样式属未建模的全局范围（AutoCAD 的 SETBYLAYER 本就不含文字/标注/填充样式） |
-| 785 | `SETVAR` | 部分实现 | Lists or changes the values of system variables. | 读/写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`；写复用既有命令路径；未知/越界按名拒绝 |
+| 785 | `SETVAR` | 部分实现 | Lists or changes the values of system variables. | 读/写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`；写复用既有命令路径；另可写 `NAVVCUBEDISPLAY/DISPLAYVIEWCUBEIN2D/DISPLAYVIEWCUBEIN3D`（主机外观设置，读形式为 `setvar.write_only_variable`）；未知/越界按名拒绝 |
 | 786 | `-SHADEMODE` | 未实现 | Provides simple shading for 3D solids and surfaces. | — |
 | 787 | `SHADEMODE` | 未实现 | Controls the display of 3D objects. | — |
 | 788 | `SHAPE` | 未实现 | Inserts a shape from a shape file (SHX file) that has been loaded using LOAD. | — |

@@ -1,5 +1,136 @@
 AD
 
+## 2026-11-11 主题切换 + 右侧 ViewCube/navibar + AutoCAD 导航变量
+
+- **主题（dark/light）**：`theme` 是 `preference.json` 根键（`crates/cad-host/src/settings_root.rs`），
+  与 `navbarVisible`/`navvcubeDisplay`/`viewCubeIn2d`/`viewCubeIn3d` 同一套提取/剥离/合并路径；
+  `CadSettingKey::Theme` 只接受 `dark|light`，并**一次性**把 model+paper 背景写成 `#ffffff` /
+  `#000000`（任一背景写失败即整体回滚，不出现半套主题）。`CadStatus.theme` 是权威，React
+  `src/theme/theme.ts` 只做 `data-theme` 映射与首屏 localStorage 镜像；标题栏/移动端顶栏的
+  sun/moon 按钮写 `cad_set_setting`，失败不改本地状态。`dom-canvas`（内存设置）在首个状态后
+  只回放一次缓存的已确认主题，原生宿主绝不被本地缓存覆盖。
+- **浅色画布与墨水**：`style.css` 增加完整的 `:root[data-theme="light"]` token 覆盖（chrome/panel/
+  field/text/line/accent/focus/danger/ok/阴影），暗色保持原值。CAD 画布仍由宿主清屏色决定；
+  `cad-render-wgpu::background_is_light`（线性 Rec.709 亮度 >0.5）把每帧 `light.a` 置为墨水标志，
+  `line/line_instanced/line_pulled/arc/mesh/mesh_merged/mesh_pulled` 七个片元着色器只把
+  **近白**（min 通道 ≥0.75）翻成黑；`image/pick/mask` 不动，存储颜色/场景缓存不变。饱和色在
+  白底可能仍偏浅——这是明确的显示映射边界，不是“自动反色”。
+- **右侧导航坞**：`--navrail-w` 34→56px；`NavigationDock` 在绘图区右缘纵向渲染 `ViewCube` +
+  `NavRail`（仍是 edge-docked DOM chrome，不跨 native surface 浮动）。ViewCube 订阅
+  `volatileStatusStore.getView()`，朝向来自宿主真实相机（`cad_status.view`，2D/3D +
+  orthographic/perspective + eye/target/up），随 `cursor-changed` 逐帧更新而不重渲染 shell；
+  `view = null` 显示显式“朝向不可用”且不旋转。六个面（FRT/BCK/LFT/RGT/TOP/BOT 三字标签，
+  aria/title 用完整本地化名称）+ Home 复用 `runStandardView` 与
+  `hostProfile.standardViews` 准入；边/角区域未实现并在 title 说明。
+- **面标签轴修正**：宿主世界约定是 **Z 向上、FRONT = −Y**；CSS 立方体是 front=+Z/top=−Y。
+  `viewCubeMatrix` 现应用世界→面标签置换，**FRONT 视图为恒等矩阵**，TOP 视图显示 TOP 面，
+  等轴测同时显示 TOP/FRT/RGT；`test/viewcube.test.ts` 固定这三个姿态（identity/top/right）。
+- **AutoCAD 变量与命令**：`NAVVCUBEDISPLAY` 是 0–3 位码（1=3D 类、2=2D 类、3=两者，默认 3），
+  `DISPLAYVIEWCUBEIN2D/3D` 是 0/1（默认 On）；显示 = 位码 × 对应门 × 当前 2D/3D 视图类
+  （本构建只实现 wireframe 视觉样式，故用真实 `view_mode` 作为样式类并在文档里写明）。
+  `NAVBAR [ON|OFF]`、`NAVVCUBE [ON|OFF]` 是真实持久化设置写入（后者按当前类切位）；
+  `NAVVCUBEDISPLAY/DISPLAYVIEWCUBEIN2D/DISPLAYVIEWCUBEIN3D <value>` 与
+  `SETVAR <name> <value>` 均可写，`SETVAR <name>` 读形式明确为 `setvar.write_only_variable`；
+  `NAVVCUBE PROPERTIES` 具名拒绝 `navvcube.properties_not_implemented`。两个旧的 NAVBAR/
+  NAVVCUBE 具名拒绝已从 refusal 表移除（refusal 197 条），命令计数 231 不变。
+- **移动端**：ViewCube 与 navibar 都不再被 `display:none`；navibar 在 compact 宽度**默认收起**，
+  展开为本地 UI 状态（桌面折叠状态跟随宿主 `navbarVisible`/`NAVBAR`），收起不改变绘图区宽度。
+- **最近文件**：宿主侧见上一条 handoff；默认打开目录由
+  `PlatformFiles::set_recent_target` 提供（Linux ashpd `.current_folder`；Windows
+  `SetFolder/SetDefaultFolder`；macOS `setDirectoryURL:`；Android `EXTRA_INITIAL_URI`），
+  StartPanel 的最近列表由 `cad_recent_files`/`cad_open_recent` 驱动。
+- **已运行（本机）**：`cargo test -p cad-ui-core --locked`（527 passed, 1 ignored）、
+  `cargo test -p cad-host --locked`（308 passed）、`cargo test -p cad-app --locked`
+  （2327 passed, 3 ignored）、`cargo test -p cad-platform --locked`、`cargo test -p
+  cad-desktop-shell --locked`（含更新后的 `cad_status` wire goldens，4 passed）、
+  `cargo test -p cad-render-wgpu --test wgsl_validation --locked`（12 passed）、
+  `--test headless_render --locked -- --test-threads=1`（54 passed，真 GPU）、
+  `--lib light`（7 passed）、`cargo test -p cad-engine --locked`（128 passed, 15 ignored）、
+  `cargo clippy -p cad-host -p cad-ui-core -p cad-render-wgpu -p cad-platform -p
+  cad-desktop-shell -p cad-app --all-targets -- -D warnings`、`cargo fmt --all -- --check`、
+  `(cd apps/desktop-ui && npm test)` **1493 passed**、`npm run build`、
+  `check-architecture`/`check-file-size`（1000 行）/`check-command-docs`/`check-i18n`/
+  `check-tauri-capabilities`、`cargo check -p app-linux --all-targets`、
+  `cargo check -p app-web --target wasm32-unknown-unknown`。
+- **视觉证据（软件渲染）**：`/tmp/opencode/yacr-cube-review2/` 的 headless Chromium +
+  SwiftShader harness（真实 `viewCubeMatrix()` + 构建后的 CSS）覆盖 front/back/left/right/top/
+  bottom/isometric × dark/light × orthographic/perspective、隐藏/不可用/紧凑折叠/展开与
+  StartPanel 七种状态。核对到：各正交视图显示正确面标签（TOP 面为 TOP、FRONT 为 FRT）、
+  等轴测 TOP/FRT/RGT、无溢出/镜像，浅色下右侧面加深 + stage 阴影后与导航坞可区分；
+  StartPanel 路径对比度与加载 spinner 已提高到可读。**该 harness 不是真宿主/GPU/像素证据**；
+  `cubeBox` 在 90° 姿态下的 `getBoundingClientRect` 高度为 0 是 CSS 3D 平面投影的测量伪影，
+  截图可见面完整。
+- **真实宿主交互验证（Linux Wayland `native-below`，Vulkan Quadro P620，真实窗口）**：
+  指针/键盘是内核 evdev 注入（`ydotool`，绝对定位 + `accel-profile=flat`），截图是 Mutter
+  ScreenCast 真实合成帧，不是 DOM 合成事件。
+  - 主题：标题栏 sun/moon 按钮双向点击后**画布同帧重绘**（dark：清屏 `#000000` + 近白墨水；
+    light：`#ffffff` + 近黑墨水），桌面宽布局与 compact 布局都取到对应 token
+    （ribbon `#eef2f7`/`#3b4453`、status `#d8dfe9`/`#2b333f`）。
+  - 变量/命令：真实命令行依次执行 `NAVVCUBEDISPLAY 0`（立方体消失）→ `3`（恢复）、
+    `DISPLAYVIEWCUBEIN2D OFF/ON`、`DISPLAYVIEWCUBEIN3D OFF/ON`、`NAVVCUBE OFF/ON` 均即时生效，
+    `preference.json` 相应根键同步；`SWITCH2D3D` 后立方体在 3D 类仍显示。
+  - 最近文件：`CLOSE` 后 StartPanel 列出已记录条目（同一 fixture 的相对/绝对两条），点击行
+    真实重开图纸。
+  - 证据帧：`/tmp/opencode/desktop-dark.png`、`desktop-light.png`、`max-start.png`、
+    `max-reopen.png`、`nvd0.png`、`cube-back.png`、`cube-2d-off.png`、`cube3d-off.png`。
+- **真实宿主暴露并修复的两个缺陷（均有回归栅栏）**：
+  1. **背景色变化不重绘**：`FrameKey` 漏了帧清屏色，而只有 progressive 循环的**第一页**才清
+     颜色目标；背景单改后 key 不变、cursor 停在末尾，页面只 `Load` 旧颜色且不再绘制，
+     `dirty` 被静默清掉——主题要等到下一次平移/缩放才生效。修法：`FrameKey` 增加
+     `clear_color`（`renderer_state.rs::Renderer::frame_key`），背景变化即重启页走查。
+     栅栏：`tests/headless_render/background_repaint.rs`（同相机只改 clear colour，回读角像素
+     必须跟着变；去掉 `clear_color` 时该用例实测失败）。
+  2. **命令门禁拒绝五个 shell 选择器**：`check_command` 只承认 `ARGUMENT_SELECTORS` 的绘图参数
+     形式，`NAVVCUBEDISPLAY 0` / `NAVVCUBE ON` / `DISPLAYVIEWCUBEIN2D OFF` 在真正入队前就被
+     `unsupported CAD command: …` 拒绝——会话单元测试直连 `CadSession::command`，所以从未覆盖
+     这条路径。修法：`shell_setting_argument()`（`session/commands/helpers.rs`）+ 门禁分支
+     （`shell.rs`）。栅栏：`tests_commands/shell_settings.rs` 的
+     `the_wire_gate_admits_the_five_selectors_with_their_typed_arguments`。
+- **NOT RUN / 边界**：WebKitGTK 之外的 Android/Windows/macOS 运行时与像素、Linux ashpd
+  `current_folder` 的真实 DBus 会话、Android SAF 重开、全 workspace 测试均 **NOT RUN**；
+  Windows/macOS/Android 仅有源码/编译层结论。
+- **已知缺口**：compact 布局下 `.workspace__left`（StartPanel）是 `display:none`（既有决定，
+  非本轮引入），因此窄窗口/移动端看不到最近文件列表；移动端入口目前只有功能区菜单。
+- **明确未实现（后续）**：ViewCube 罗盘、边/角目标、动画、`NAVVCUBE PROPERTIES` 对话框；
+  recent 列表的失效清理/缩略图；OS 主题跟随；浅色主题下的出图/导出背景；饱和真彩色的
+  可读性映射。
+
+## 2026-11-10 最近文件（start panel）：宿主持久化 + 重开 + 载体拒绝
+
+- **契约**：`cad_recent_files` → `{supported, entries:[{displayName,opaque,location,openedAtMs}], reason}`
+  （camelCase）；`cad_open_recent {opaque, displayName}` 在平台 open 启动后 resolve。二者都是
+  **宿主文件能力**，不是绘图命令：不在 `cad_commands`、不可命令行输入、也不是
+  `SHELL_ONLY_COMMANDS`（`dom-canvas`/浏览器一律由 web adapter 拒绝）。
+- **持久化**：`crates/cad-host/src/recent.rs` 拥有根级 `recentFiles` 数组（cap 10、按 `opaque`
+  去重、最新在前）。它**不在** `ROOT_PREFERENCE_KEYS`/`ViewerConfig`/`HOST_ALLOWED_PATHS_JSON`：
+  启动时从 preference 提取、写入前剥离、每次偏好写回合并、真实 clear 删除叶子。数组里任意一行
+  不合法即整表不可信 → 空列表（不猜测部分行）；文档缺失/非数组同样是空列表。
+- **记录时机**：仅成功 open（同步 `deliver_open` 与异步 `poll_loading` 发布点）各记一次；
+  failed/cancelled/被取消/被取代的投递不记。`location` 来自
+  `PlatformFiles::recent_location`（桌面父目录；Android 为 `None`）；持久化失败回滚该行并通过
+  `post-commit state sync failed` 状态报错，不把已打开的文档改判为失败。
+- **选择器起点**：`set_recent_target` 记住最近成功目标；Linux `ashpd .current_folder`、Windows
+  `SHCreateItemFromParsingName` + `SetFolder/SetDefaultFolder`、macOS `NSOpenPanel
+  setDirectoryURL:`、Android `DocumentsContract.EXTRA_INITIAL_URI`（Kotlin 从最近 document URI
+  推导父 document URI）。平台类型全部留在 `apps/app-*`。
+- **命令接线**：registry 新增两条 `tauri_only` 行（`cad_recent_files`/`cad_open_recent`），
+  `cad-desktop-shell` 新增 `ShellRecentHost` seam，各 native 宿主把调用 marshal 到持有
+  `CadSession` 的主线程；没有 seam 时以 `unsupported-runtime: <command>` 拒绝。Web adapter 对
+  `cad_recent_files` 返回 `{supported:false, entries:[], reason:"unsupported-runtime:
+  cad_recent_files"}`，对 `cad_open_recent` 直接以该名字拒绝，二者都不转发给 wasm session。
+- **已运行**：`cargo test -p cad-host --locked`（含 9 条 recent 契约）、
+  `cargo test -p cad-platform --locked`、`(cd apps/desktop-ui && npm test)` **1,493 passed**、
+  `cargo check -p app-linux --all-targets --locked`、`cargo check -p app-web --target
+  wasm32-unknown-unknown --locked`、`python3 scripts/check-architecture.py`、
+  `python3 scripts/check-file-size.py`、`cargo fmt --all -- --check`。
+- **跨 lane 未绿**：`cargo test -p cad-desktop-shell --locked` 的
+  `wire_goldens::cad_status_wire_matches_the_pinned_fixtures` 仍失败——fixture 缺另一 lane
+  新增的 `navigation`/`theme`/`layouts`/`references`/`view` 字段；本 lane 新增的
+  `the_registered_command_set_equals_the_pre_migration_set` 通过，未改该 fixture。
+- **NOT RUN / 边界**：Windows/macOS/Android 的 chooser 与 seam 仅源码/编译层（无对应实机、
+  无跨平台编译证据）；Linux 的 ashpd `current_folder` 未在有 DBus 的真实会话中运行；真实
+  GPU/像素、真机验收均 **NOT RUN**。
+
 ## 2026-11-10 发布 v0.1.9（多格式导入、表格/图像、ARRAYPATH/FILLET、wasm 体积）
 
 - **版本**：`Cargo.toml` workspace 版本、`Cargo.lock`（35 个 workspace 成员）、四个
@@ -37,6 +168,7 @@ AD
   "$REPO_ROOT/scripts/build-canvas-wasm.sh"`）与 `app_web_bg.wasm` 产物。
 - **NOT VERIFIED**：未做真机/真实 GPU/像素验收；Windows/macOS/Android 仅编译与打包证据；
   `web-smoke` 是 Chromium + SwiftShader 软件渲染；发布成功不代表运行时验收。
+
 
 ## 2026-11-10 DOM 全局错误弹窗 + wasm panic 上报 + 属性面板宽度
 

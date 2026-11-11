@@ -38,6 +38,11 @@ fn snapshot_with_snap_spacing(snap_spacing: f64) -> CadSettings {
         aperture_size: 12,
         gpu_budget_percent: 90,
         wgpu_backend: "auto".to_string(),
+        theme: "dark".to_string(),
+        navbar_visible: true,
+        navvcube_display: 3,
+        view_cube_in_2d: true,
+        view_cube_in_3d: true,
         fonts_dir: None,
     }
 }

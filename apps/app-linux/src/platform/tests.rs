@@ -32,7 +32,7 @@ fn files_with_save(chooser: FileChooser, save_chooser: SaveChooser) -> ReactFile
 }
 
 fn cancelled_open() -> FileChooser {
-    Arc::new(|_| FileChooserOutcome::Cancelled)
+    Arc::new(|_, _| FileChooserOutcome::Cancelled)
 }
 
 /// What an injected save chooser saw: the purpose and suggested file name.
@@ -57,7 +57,7 @@ fn recording_save_path(path: PathBuf) -> (SaveChooser, SaveCall) {
 fn blocking_chooser() -> (FileChooser, std::sync::mpsc::Sender<()>) {
     let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
     let release_rx = Mutex::new(release_rx);
-    let chooser: FileChooser = Arc::new(move |_| {
+    let chooser: FileChooser = Arc::new(move |_, _| {
         // A released or dropped sender both unblock; tests send exactly once.
         let _ = release_rx.lock().unwrap().recv();
         FileChooserOutcome::Cancelled
@@ -181,7 +181,7 @@ fn cancelled_chooser_is_a_cancel_not_a_success() {
 
 #[test]
 fn failed_chooser_reports_its_localized_reason() {
-    let files = files_with(Arc::new(|labels| {
+    let files = files_with(Arc::new(|labels, _| {
         FileChooserOutcome::Failed(labels.picker_failed("portal down"))
     }));
     files.begin_open().unwrap();
@@ -645,4 +645,41 @@ fn open_chooser_globs_cover_the_importer_set() {
     assert_eq!(case_insensitive_glob("obj"), "*.[oO][bB][jJ]");
     assert_eq!(case_insensitive_glob("coff"), "*.[cC][oO][fF][fF]");
     assert_eq!(case_insensitive_glob("stp"), "*.[sS][tT][pP]");
+}
+
+/// The recent hint is the drawing's parent directory (a real one), and the next
+/// open chooser receives it. A target whose parent is not a directory clears the
+/// hint instead of inventing one.
+#[test]
+fn the_recent_location_is_the_parent_directory_and_feeds_the_chooser() {
+    let directory = temp_path("recent-dir");
+    std::fs::create_dir_all(&directory).unwrap();
+    let drawing = directory.join("plan.dwg");
+    std::fs::write(&drawing, b"not read by this test").unwrap();
+
+    let seen: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
+    let recorded = seen.clone();
+    let chooser: FileChooser = Arc::new(move |_, initial| {
+        *recorded.lock().unwrap() = initial.map(Path::to_path_buf);
+        FileChooserOutcome::Cancelled
+    });
+    let files = files_with(chooser);
+    let target = FileTarget::from_path(&drawing.to_string_lossy());
+
+    assert_eq!(
+        files.recent_location(&target),
+        Some(directory.to_string_lossy().into_owned())
+    );
+    files.set_recent_target(Some(&target));
+    files.begin_open().unwrap();
+    let _ = wait_event(&files);
+    assert_eq!(seen.lock().unwrap().as_deref(), Some(directory.as_path()));
+
+    // A stale path is not a directory: the hint clears, no fabricated folder.
+    files.set_recent_target(Some(&FileTarget::from_path("/nonexistent/dir/plan.dwg")));
+    files.begin_open().unwrap();
+    let _ = wait_event(&files);
+    assert_eq!(*seen.lock().unwrap(), None);
+
+    let _ = std::fs::remove_dir_all(&directory);
 }

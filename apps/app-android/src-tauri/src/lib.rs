@@ -43,6 +43,8 @@ pub mod report;
 #[cfg(target_os = "android")]
 pub mod host;
 #[cfg(target_os = "android")]
+pub mod recent;
+#[cfg(target_os = "android")]
 pub mod saf;
 #[cfg(target_os = "android")]
 pub mod surface;

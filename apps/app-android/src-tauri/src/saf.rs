@@ -5,7 +5,7 @@
 //! exposes the interaction through five **instance** methods:
 //!
 //! ```text
-//! documentLaunchOpen(): void
+//! documentLaunchOpen(String?): void
 //! documentLaunchSave(String): void
 //! documentReadUri(String): void   // starts a worker read; poll the snapshot
 //! documentWriteUri(String, byte[]): void
@@ -93,9 +93,32 @@ pub(crate) fn capture(env: &mut JNIEnv, this: &JObject) {
 }
 
 /// Launch the SAF open-document picker (`ACTION_OPEN_DOCUMENT`).
-pub(crate) fn launch_open() -> Result<(), String> {
+///
+/// `initial_uri` is the last successfully opened/reopened document URI; Kotlin
+/// turns it into `EXTRA_INITIAL_URI` so the picker starts in that document's
+/// folder. `None` (a first open) leaves the picker at the provider default.
+pub(crate) fn launch_open(initial_uri: Option<&str>) -> Result<(), String> {
     let outcome = with_env(|env, activity| {
-        env.call_method(activity, "documentLaunchOpen", "()V", &[])?;
+        match initial_uri {
+            Some(uri) => {
+                let uri_obj = env.new_string(uri)?;
+                env.call_method(
+                    activity,
+                    "documentLaunchOpen",
+                    "(Ljava/lang/String;)V",
+                    &[JValue::Object(uri_obj.as_ref())],
+                )?;
+            }
+            None => {
+                let null = JObject::null();
+                env.call_method(
+                    activity,
+                    "documentLaunchOpen",
+                    "(Ljava/lang/String;)V",
+                    &[JValue::Object(&null)],
+                )?;
+            }
+        }
         Ok(())
     });
     if let Err(error) = &outcome {

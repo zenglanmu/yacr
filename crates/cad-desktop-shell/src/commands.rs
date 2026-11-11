@@ -34,7 +34,9 @@
 use std::sync::{Arc, Mutex};
 
 use cad_ui_core::protocol::{InputKind, ProbeInput, ProbeInputAck, ProbeStatus};
-use cad_ui_core::session::{wire, CadFonts, CadLayers, CadSettings, HostProfile, WireStatus};
+use cad_ui_core::session::{
+    wire, CadFonts, CadLayers, CadRecentFiles, CadSettings, HostProfile, WireStatus,
+};
 use cad_ui_core::shell::{modal_gate_open, queue_cad_input, POPUP_MODAL_OPEN};
 
 use crate::popup::DesktopPopupTarget;
@@ -227,6 +229,71 @@ pub fn cad_layers_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadLayers, String>
 /// session.
 pub fn cad_fonts_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadFonts, String> {
     wire::fonts(&lock(shared).queue_reads())
+}
+
+/// `cad_recent_files` command: the host's real recent-drawings list.
+///
+/// A host file capability, not CAD document data, so the body lives here and is
+/// served by the host's [`crate::state::ShellRecentHost`] seam (the session is
+/// `!Send` and owned by the owner thread). A host without the seam refuses with
+/// the same stable marker the browser adapter uses
+/// (`unsupported-runtime: cad_recent_files`); it never answers an empty list
+/// that would read as "nothing was ever opened".
+#[tauri::command]
+pub fn cad_recent_files(shared: tauri::State<'_, ProbeShared>) -> Result<CadRecentFiles, String> {
+    cad_recent_files_impl(&shared.0)
+}
+
+/// Command body of [`cad_recent_files`], without the Tauri state wrapper.
+pub fn cad_recent_files_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadRecentFiles, String> {
+    // Clone the seam and release the shell lock before the (possibly blocking)
+    // main-thread hop, per the `Shared` lock-order contract.
+    let host = lock(shared).recent_host.clone();
+    match host {
+        Some(host) => host.list(),
+        None => Err(format!(
+            "unsupported-runtime: {}",
+            cad_ui_core::session::RECENT_FILES_COMMAND
+        )),
+    }
+}
+
+/// `cad_open_recent` command: start reopening one recorded recent drawing.
+///
+/// Arguments are exactly `{ opaque, displayName }`. The host revalidates the
+/// opaque handle against its own durable list (a crafted handle is refused, not
+/// opened) and starts the ordinary platform open; a real failure (missing file,
+/// revoked grant) rejects unchanged. Resolving means the platform open was
+/// **started**; the document outcome still arrives through `cad_status`.
+#[tauri::command]
+pub fn cad_open_recent(
+    shared: tauri::State<'_, ProbeShared>,
+    opaque: String,
+    display_name: String,
+) -> Result<CadCommandAck, String> {
+    cad_open_recent_impl(&shared.0, &opaque, &display_name)
+}
+
+/// Command body of [`cad_open_recent`], without the Tauri state wrapper.
+pub fn cad_open_recent_impl(
+    shared: &Arc<Mutex<Shared>>,
+    opaque: &str,
+    display_name: &str,
+) -> Result<CadCommandAck, String> {
+    let host = lock(shared).recent_host.clone();
+    let Some(host) = host else {
+        return Err(format!(
+            "unsupported-runtime: {}",
+            cad_ui_core::session::OPEN_RECENT_COMMAND
+        ));
+    };
+    if opaque.trim().is_empty() {
+        return Err(
+            "recent.invalid_payload: the recent row has no file handle to reopen".to_string(),
+        );
+    }
+    host.open_recent(opaque, display_name)?;
+    Ok(CadCommandAck::accepted())
 }
 
 /// Command body of `cad_create_layer`, without the Tauri state wrapper.

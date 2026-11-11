@@ -17,9 +17,13 @@ cad-platform.workspace = true
 cad-representation.workspace = true
 cad-diagnostics.workspace = true
 cad-resources.workspace = true
-# Durable preference document surgery for the one leaf that is not part of the
-# `ViewerConfig` schema (`wgpu_backend`, see `settings.rs`). No version change:
-# the workspace already pins the same serde_json.
+# The recent-drawings row is a typed wire shape (`camelCase`) that is persisted
+# verbatim in the preference document, so the crate needs the derive itself.
+serde.workspace = true
+# Durable preference document surgery for the leaves that are not part of the
+# `ViewerConfig` schema (`wgpu_backend`, the root UI preferences and the
+# `recentFiles` array). No version change: the workspace already pins the same
+# serde_json.
 serde_json.workspace = true
 # `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web-time`
 # re-exports std elsewhere (no-op off wasm). See `src/lib.rs`/`src/core.rs`.

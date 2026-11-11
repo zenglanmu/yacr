@@ -7,12 +7,14 @@
  * the breakpoint lives in one place (`layout-mode.ts`), so the stylesheet and the
  * hook cannot drift apart.
  *
- * Composition: one top bar (menu + drawing name), the CAD partition filling
- * everything between the bars, and one bottom command bar. The desktop palette
- * layer, the nav rail, the ribbon band, the drawing/layout tab strips and the
- * status bar are not rendered on mobile; the chrome inside `<Workspace />` (the
- * start column, the palette layer and the nav rail) stays *mounted* and is hidden
- * below, which is what lets a live breakpoint crossing keep the CAD session alive.
+ * Composition: one top bar (menu + drawing name + theme), the CAD partition and
+ * the right-edge navigation dock between the bars, and one bottom command bar.
+ * The desktop palette layer, the ribbon band, the drawing/layout tab strips and
+ * the status bar are not rendered on mobile; the chrome inside `<Workspace />`
+ * (the start column and the palette layer) stays *mounted* and is hidden below,
+ * which is what lets a live breakpoint crossing keep the CAD session alive. The
+ * dock stays visible: the ViewCube is the compact 3D orientation cue and the icon
+ * rail starts collapsed, with its own chevron to expand it.
  *
  * Safe areas: the two bars pad themselves with `env(safe-area-inset-*)`, so a
  * notched phone does not put a control under the cutout or the gesture bar.
@@ -63,10 +65,32 @@
    that desktop chrome: the compact layout keeps its own bottom sheets
    (`.references-layer` / `.fonts-layer`) instead of these windows. */
 :root[data-layout="mobile"] .workspace__left,
-:root[data-layout="mobile"] .palette-layer,
-:root[data-layout="mobile"] .navrail {
+:root[data-layout="mobile"] .palette-layer {
   display: none;
 }
+
+/* The navigation dock is the exception: the ViewCube and the rail are the
+   compact layout's navigation affordances too, so the dock keeps its reserved
+   width. The rail itself starts collapsed (local chevron in `NavRail.tsx`) and
+   the cube stays visible in both rail states, so opening the rail changes what
+   the column shows, never how much drawing the user gets. */
+:root[data-layout="mobile"] .navdock {
+  flex-basis: var(--navrail-w);
+  width: var(--navrail-w);
+}
+:root[data-layout="mobile"] .navrail {
+  display: flex;
+  gap: 4px;
+  padding: 2px 0 6px;
+}
+:root[data-layout="mobile"] .navrail__button,
+:root[data-layout="mobile"] .navrail__toggle {
+  width: 44px;
+  height: 44px;
+}
+:root[data-layout="mobile"] .navrail__rule { width: 24px; margin: 3px 0; }
+:root[data-layout="mobile"] .viewcube { padding: 4px 0; }
+:root[data-layout="mobile"] .viewcube__home { width: 44px; height: 44px; }
 
 /* Top bar ---------------------------------------------------------------- */
 .mobile-topbar {
@@ -115,6 +139,13 @@
   font-weight: 600;
   letter-spacing: .2px;
 }
+/* The theme switch is the second control in the bar; 44px so it is a comfortable
+   touch target and never squeezes the title row below the minimum. */
+.mobile-topbar .ui-icon-button {
+  flex: none;
+  width: 44px;
+  height: 44px;
+}
 /* Import progress: 2px, pinned to the bar's lower edge, so it costs no width and
    no height. Determinate fills to the host's own ratio; indeterminate slides. */
 .mobile-topbar__progress {
@@ -158,7 +189,7 @@
   max-height: var(--mobile-drawer-h);
   background: var(--chrome);
   border-bottom: 1px solid var(--line-soft);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, .45);
+  box-shadow: 0 14px 34px rgba(var(--shadow-rgb), .45);
   animation: mobile-drop var(--t-med) both;
 }
 /* The bottom fade: the body is a scroller, and a row sliced off at the panel edge
@@ -174,7 +205,7 @@
   right: 0;
   bottom: 0;
   height: var(--mobile-drawer-fade);
-  background: linear-gradient(to bottom, rgba(59, 68, 83, 0) 0%, var(--chrome) 50%, var(--chrome) 100%);
+  background: linear-gradient(to bottom, var(--chrome-0) 0%, var(--chrome) 50%, var(--chrome) 100%);
   pointer-events: none;
 }
 .mobile-drawer:focus { outline: none; }
@@ -183,7 +214,7 @@
   min-height: 0;
   padding: 0;
   border: 0;
-  background: rgba(8, 11, 15, .45);
+  background: var(--scrim-drawer);
   cursor: default;
   animation: fade var(--t-med) both;
 }
@@ -257,7 +288,7 @@
 .mobile-drawer__space-chip.is-active {
   background: var(--on);
   border-color: var(--on);
-  color: #fff;
+  color: var(--on-text);
 }
 .mobile-drawer__space-chip.is-action { color: var(--accent-text); }
 .mobile-drawer__space-chip.is-disabled { border-style: dashed; color: var(--text-muted); cursor: not-allowed; }
@@ -302,7 +333,7 @@
 .mobile-drawer__tab.is-active {
   background: var(--on);
   border-color: var(--on);
-  color: #fff;
+  color: var(--on-text);
 }
 /* The scroller. `overflow-y: auto` alone is not enough to read as one: the body
    therefore also keeps a thin styled scrollbar (Chromium/WebKit/Gecko all honour
@@ -326,7 +357,7 @@
      gives. It costs no layout and is not scroll-position dependent (an overlay
      scrollbar on Linux/Android only appears *while* scrolling, so the resting
      state needs a cue of its own). */
-  box-shadow: inset 0 calc(-1 * var(--mobile-drawer-fade)) 14px calc(-1 * var(--mobile-drawer-fade)) rgba(0, 0, 0, .38);
+  box-shadow: inset 0 calc(-1 * var(--mobile-drawer-fade)) 14px calc(-1 * var(--mobile-drawer-fade)) rgba(var(--shadow-rgb), .38);
 }
 .mobile-drawer__body::-webkit-scrollbar { width: 8px; }
 .mobile-drawer__body::-webkit-scrollbar-track { background: transparent; }
@@ -567,7 +598,7 @@
   background: var(--chrome);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, .45);
+  box-shadow: 0 12px 28px rgba(var(--shadow-rgb), .45);
   overflow: hidden;
   animation: rise var(--t-fast) both;
 }
@@ -670,7 +701,7 @@
   position: absolute;
   inset: 0;
   border: 0;
-  background: rgba(0, 0, 0, .48);
+  background: var(--scrim-sheet);
 }
 :root[data-layout="mobile"] .references--floating,
 :root[data-layout="mobile"] .fonts--floating {
@@ -682,7 +713,7 @@
   border-radius: 8px 8px 0 0;
   border: 1px solid var(--line-soft);
   border-bottom: 0;
-  box-shadow: 0 -12px 34px rgba(0, 0, 0, .48);
+  box-shadow: 0 -12px 34px rgba(var(--shadow-rgb), .48);
   padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px));
   animation: mobile-rise var(--t-med) both;
 }
@@ -793,7 +824,7 @@
   border: 1px solid var(--line-soft);
   border-bottom: 0;
   border-radius: 8px 8px 0 0;
-  box-shadow: 0 -12px 34px rgba(0, 0, 0, .48);
+  box-shadow: 0 -12px 34px rgba(var(--shadow-rgb), .48);
   padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px));
   animation: mobile-rise var(--t-med) both;
 }

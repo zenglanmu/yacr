@@ -17,8 +17,8 @@
 // wasm export. `host/invoke.ts` is the only module that imports
 // `@tauri-apps/api`, and it hands this module a plain `listenJson` callback.
 
-import { parseCadStatus } from './cad-status.ts';
-import type { CadPopup, CadStatus, Invoke } from './cad-status.ts';
+import { parseCadStatus, parseCadViewOrientation } from './cad-status.ts';
+import type { CadPopup, CadStatus, CadViewOrientation, Invoke } from './cad-status.ts';
 import { withTransportCapabilities } from '../host/transport-capabilities.ts';
 
 /** The first retry delay of a broken transport (`500 ms * 2^n`). */
@@ -38,7 +38,7 @@ export const CAD_EVENT_NAME = 'cad_event';
  */
 export type CadEventFrame =
   | { readonly revision: number; readonly type: 'status-changed'; readonly status: CadStatus }
-  | { readonly revision: number; readonly type: 'cursor-changed'; readonly cursorWorld: [number, number, number] | null; readonly frameCount: number }
+  | { readonly revision: number; readonly type: 'cursor-changed'; readonly cursorWorld: [number, number, number] | null; readonly frameCount: number; readonly view: CadViewOrientation | null }
   | { readonly revision: number; readonly type: 'command-admitted'; readonly command: string }
   | { readonly revision: number; readonly type: 'command-rejected'; readonly command: string; readonly code: string }
   | { readonly revision: number; readonly type: 'selection-changed'; readonly count: number; readonly empty: boolean }
@@ -168,6 +168,7 @@ export function parseCadEvent(value: unknown): ParsedCadEvent {
           type,
           cursorWorld: cursorWorld as [number, number, number] | null,
           frameCount: record.frameCount,
+          view: parseCadViewOrientation(record.view ?? null),
         },
       };
     }

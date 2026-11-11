@@ -175,6 +175,19 @@ export const WEB_FAILURE_COMMAND = 'canvas_runtime_failed';
 export const WEB_OPEN_RELEASE_COMMAND = 'cad_open_release_page';
 
 /**
+ * The two recent-drawings commands.
+ *
+ * They are **host file capabilities**: a page cannot reopen a past file without
+ * a new user gesture (no persistent handle, no grant), so this carrier tracks no
+ * recents. `cad_recent_files` therefore answers the contract's explicit
+ * unsupported shape (never an empty *supported* list, which would read as
+ * "nothing was ever opened") and `cad_open_recent` refuses by name. Neither is
+ * forwarded to the wasm session, which owns no filesystem either.
+ */
+export const WEB_RECENT_FILES_COMMAND = 'cad_recent_files';
+export const WEB_OPEN_RECENT_COMMAND = 'cad_open_recent';
+
+/**
  * The three vendor-pass commands (`vendor/vendor-pass.ts`).
  *
  * The carrier-neutral state machine is `cad_ui_core::session::vendor`; on this
@@ -774,6 +787,20 @@ export function createWebAdapter(source: WebShellSource, deps: WebAdapterDeps = 
           // An action this transport performs (like `OPEN`), not a question for
           // the session: a page has no shell to hand the URL to.
           return openReleasePage(deps);
+        case WEB_RECENT_FILES_COMMAND:
+          // A browser cannot reopen a past file without a fresh user gesture, so
+          // this carrier tracks no recents. The contract's unsupported answer is
+          // returned as-is — never an empty *supported* list, and never forwarded
+          // to a wasm session that owns no filesystem either.
+          return {
+            supported: false,
+            entries: [],
+            reason: `unsupported-runtime: ${WEB_RECENT_FILES_COMMAND}`
+          };
+        case WEB_OPEN_RECENT_COMMAND:
+          // There is no recorded handle this page could reopen, so the named
+          // refusal is the whole answer (no fabricated acknowledgement).
+          throw new Error(`unsupported-runtime: ${WEB_OPEN_RECENT_COMMAND}`);
         case WEB_VENDOR_RECORDS_COMMAND:
         case WEB_VENDOR_APPLY_COMMAND:
         case WEB_VENDOR_STATUS_COMMAND:

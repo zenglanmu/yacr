@@ -227,6 +227,13 @@ impl HostCore {
         self.files.set_source(Some(&target));
         *self.drawing_path.borrow_mut() = Some(PathBuf::from(&target.opaque));
         *self.source_target.borrow_mut() = Some(target.clone());
+        // A successful install is the only place a recent row is recorded (a
+        // failed/cancelled delivery above returns before this point). A
+        // persistence failure is a real status error, never a fake success and
+        // never a reason to hide the opened document.
+        if let Err(error) = self.record_recent_success(&target) {
+            self.note_post_commit_error(&error);
+        }
         self.controller.borrow_mut().fit()?;
         self.controller.borrow_mut().cancel_tool()?;
         // Resource installation is NON-FATAL for presentation (mirroring the
@@ -441,11 +448,19 @@ impl HostCore {
         // grading so it is not erased within this tick.
         let mut resource_error: Option<String> = None;
         if opened {
+            // A published import is a real successful open: record it exactly
+            // like the synchronous deliver, before any fallible post-step (a fit
+            // or resource failure must not lose the row). A persistence failure
+            // is surfaced as a post-commit status error, not as a failed open.
+            if let Some(target) = self.open_target.borrow().clone() {
+                if let Err(error) = self.record_recent_success(&target) {
+                    self.note_post_commit_error(&error);
+                }
+            }
             self.controller.borrow_mut().fit()?;
             self.controller.borrow_mut().cancel_tool()?;
-            // Arm the corruption guard only now that the open succeeded, against
-            // the real delivered target (its opaque handle, not a path derived
-            // from the display name).
+            // Arm the corruption guard against the real delivered target (its
+            // opaque handle, not a path derived from the display name).
             if let Some(target) = self.open_target.borrow_mut().take() {
                 self.files.set_source(Some(&target));
                 *self.drawing_path.borrow_mut() = Some(PathBuf::from(&target.opaque));

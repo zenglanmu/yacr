@@ -37,9 +37,11 @@ mod p4_trace;
 mod point_style;
 mod properties;
 mod queue;
+mod recent_files;
 mod render_batch;
 mod select;
 mod settings;
+mod settings_appearance;
 mod settings_backend;
 mod settings_drafting;
 mod settings_gpu;
@@ -57,13 +59,20 @@ mod zoom_window;
 struct FakeFiles {
     events: RefCell<Vec<FileEvent>>,
     source: RefCell<Option<FileTarget>>,
+    /// The target the last `set_recent_target` saw (host-hint contract).
+    recent_target: RefCell<Option<FileTarget>>,
+    /// The location hint `recent_location` answers, set by a test.
+    location_hint: RefCell<Option<String>>,
+    /// The target the last `begin_open_target` saw.
+    opened_target: RefCell<Option<FileTarget>>,
 }
 
 impl PlatformFiles for FakeFiles {
     fn begin_open(&self) -> CadResult<()> {
         Ok(())
     }
-    fn begin_open_target(&self, _target: &FileTarget) -> CadResult<()> {
+    fn begin_open_target(&self, target: &FileTarget) -> CadResult<()> {
+        *self.opened_target.borrow_mut() = Some(target.clone());
         Ok(())
     }
     fn begin_save(&self, _purpose: SavePurpose, _default_name: &str) -> CadResult<()> {
@@ -77,6 +86,12 @@ impl PlatformFiles for FakeFiles {
     }
     fn set_source(&self, target: Option<&FileTarget>) {
         *self.source.borrow_mut() = target.cloned();
+    }
+    fn set_recent_target(&self, target: Option<&FileTarget>) {
+        *self.recent_target.borrow_mut() = target.cloned();
+    }
+    fn recent_location(&self, _target: &FileTarget) -> Option<String> {
+        self.location_hint.borrow().clone()
     }
     fn poll(&self) -> Vec<FileEvent> {
         std::mem::take(&mut *self.events.borrow_mut())

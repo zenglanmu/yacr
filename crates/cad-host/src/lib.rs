@@ -62,17 +62,25 @@ mod input;
 mod open;
 mod p4;
 pub mod policy;
+mod recent;
 mod save;
 mod settings;
+mod settings_root;
 mod state;
 
 pub use command_log::{
     CommandLogEntry, CommandLogKind, CommandLogMeasurement, CommandLogPoint, COMMAND_LOG_CAPACITY,
 };
+pub use recent::{
+    recent_files_from_preference, RecentEntry, RECENT_FILES_CAP, RECENT_FILES_PREFERENCE_KEY,
+};
 pub use settings::{
     normalize_wgpu_backend, CadSettingKey, CadSettingValue, HostSettings,
     SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE, SETTINGS_NOT_PERSISTED,
     SETTINGS_UNKNOWN_KEY, WGPU_BACKEND_PREFERENCE_KEY, WGPU_BACKEND_VALUES,
+};
+pub use settings_root::{
+    ROOT_PREFERENCE_KEYS, THEME_DARK_BACKGROUND, THEME_LIGHT_BACKGROUND, THEME_VALUES,
 };
 #[cfg(test)]
 mod tests;
@@ -225,6 +233,8 @@ impl HostCore {
             hover_now: Rc::new(Instant::now),
             startup_diagnostics: Rc::new(RefCell::new(Vec::new())),
             wgpu_backend: Rc::new(RefCell::new(None)),
+            root_preferences: Rc::new(RefCell::new(settings_root::RootPreferences::default())),
+            recent_files: Rc::new(RefCell::new(Vec::new())),
             queue: Rc::new(RequestQueue::new()),
             request_waker: Rc::new(RefCell::new(None)),
             document_epoch: Rc::new(Cell::new(0)),
@@ -863,11 +873,26 @@ impl HostCore {
                 // cannot carry it: capture it here (unknown/absent -> `auto`) so
                 // the settings snapshot reports it and every later write keeps it.
                 *self.wgpu_backend.borrow_mut() = settings::wgpu_backend_from_preference(&text);
+                // The five appearance/navigation leaves are root preferences
+                // outside the `ViewerConfig` schema for the same reason: capture
+                // them here (absent/malformed -> documented default) so the
+                // settings snapshot reports them and every later write keeps
+                // them, then strip them before the store's allowed-path check.
+                *self.root_preferences.borrow_mut() =
+                    settings_root::root_preferences_from_preference(&text);
+                // Recent drawings are user data in the same document: the array
+                // is captured before the strict allowed-path projection strips
+                // it, so the list survives every later preference write.
+                *self.recent_files.borrow_mut() = recent::recent_files_from_preference(&text);
                 // The document is already durable: a store that cannot
                 // *re-persist* its normalized projection must not make the
                 // loaded values disappear (`load_user_preference` applies them
                 // in memory; only runtime writes demand durability).
-                match self.load_user_preference(&settings::without_wgpu_backend(&text)) {
+                match self.load_user_preference(&recent::without_recent_files(
+                    &settings_root::without_root_preferences(&settings::without_wgpu_backend(
+                        &text,
+                    )),
+                )) {
                     Ok(()) => {
                         if let Err(error) = self.persist_preference() {
                             diagnostics
@@ -886,6 +911,9 @@ impl HostCore {
         // sit in the config store: `CadStatus.snap_enabled`/`hover_preview` read
         // `SessionState`, whose constructor defaults both switches on.
         self.seed_session_interaction();
+        // The newest durable recent entry also seeds the next open chooser's
+        // starting directory. An empty list leaves the platform hint unset.
+        self.seed_recent_target();
         // The pickbox/aperture are config-derived rather than session switches,
         // so the same startup pass installs the persisted policy on the live
         // session (the next interaction would derive it anyway; doing it here
@@ -898,16 +926,23 @@ impl HostCore {
 
     /// Write the store's allowed projection of the user preference.
     ///
-    /// The renderer backend choice sits outside the `ViewerConfig` schema, so it
-    /// is merged back into the projected document here — every preference write
-    /// (a setting, a startup re-persist, a clear) therefore keeps exactly one
-    /// root `wgpu_backend` leaf and never drops it.
+    /// The renderer backend choice, the five appearance/navigation leaves and the
+    /// recent-drawings array sit outside the `ViewerConfig` schema, so they are
+    /// merged back into the projected document here — every preference write (a
+    /// setting, a startup re-persist, a clear) therefore keeps exactly those root
+    /// leaves and never drops them.
     fn persist_preference(&self) -> CadResult<()> {
         let projected = self.viewer_config.borrow().projected_user_preference_json();
         let merged = settings::merge_wgpu_backend_into_preference(
             &projected,
             self.wgpu_backend.borrow().as_deref(),
         )?;
+        let merged = settings_root::merge_root_preferences_into_preference(
+            &merged,
+            &self.root_preferences.borrow(),
+        )?;
+        let merged =
+            recent::merge_recent_files_into_preference(&merged, &self.recent_files.borrow())?;
         self.config_store.persist_preference(&merged)
     }
 

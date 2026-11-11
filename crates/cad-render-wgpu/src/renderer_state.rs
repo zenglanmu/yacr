@@ -88,12 +88,22 @@ pub(crate) struct ProgressiveFrame {
 /// which reset `progressive_frame`. So comparing this key is equivalent to the
 /// previous full-matrix `transforms` comparison, without materialising or
 /// comparing a per-batch matrix.
+///
+/// [`Self::clear_color`] is part of the identity because the target colour is
+/// only written on a page that **clears** (the first page of a cycle). Without
+/// it, a background-only change (the UI theme's model/paper colour) kept the key
+/// equal, so the walk stayed at its finished cursor, the page loaded the
+/// retained colour instead of clearing, and the presented frame kept the old
+/// background until some later camera change restarted the cycle. The theme
+/// would then only appear after a pan/zoom — the real-host defect this field
+/// fences.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct FrameKey {
     pub(crate) camera_matrix: [f32; 16],
     pub(crate) camera_position: [f32; 3],
     pub(crate) target_size: (u32, u32),
     pub(crate) texture_revision: u64,
+    pub(crate) clear_color: [f32; 4],
 }
 
 impl PreparedUpload {
@@ -132,5 +142,29 @@ impl PreparedUpload {
         self.bytes += piece.bytes;
         self.elapsed_ms += piece.elapsed_ms;
         Ok(())
+    }
+}
+
+impl Renderer {
+    /// The frame-plan identity for one render call.
+    ///
+    /// Everything a cached page plan depends on lives here; `clear_color` is the
+    /// theme's model/paper background, and it belongs in the identity because
+    /// **only a cycle's first page clears the colour target**. A background-only
+    /// change must therefore restart the walk (a new key), or the finished frame
+    /// keeps the old colour until a camera move forces a restart.
+    pub(super) fn frame_key(
+        &self,
+        camera_matrix: [f32; 16],
+        camera_position: [f32; 3],
+        clear_color: [f32; 4],
+    ) -> FrameKey {
+        FrameKey {
+            camera_matrix,
+            camera_position,
+            target_size: self.target_size,
+            texture_revision: self.texture_revision,
+            clear_color,
+        }
     }
 }

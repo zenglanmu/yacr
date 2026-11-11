@@ -1,0 +1,151 @@
+/* ViewCube — the docked orientation control (its CSS only; the dock frame and
+ * the rail live in `style.css`).
+ *
+ * Geometry: 36px faces in a 56px dock column. A rotated cube projects wider than
+ * its face (an isometric pose is ~1.4x), so the resting face stays at 36px: the
+ * on-screen cube is ~50px across and the whole silhouette fits the reserved
+ * column instead of painting over the drawing. The cube is six absolutely
+ * positioned `<button>` faces on a `preserve-3d` parent; the parent's inline
+ * `matrix3d(...)` comes from the host camera basis, so this file only defines the
+ * rest pose of each face. No floating overlay, no pointer-events tricks: the
+ * whole control is ordinary DOM in the right-edge column.
+ *
+ * Projection: an orthographic host gets `perspective: none`, a perspective host
+ * gets a mild perspective. That keeps the cube's depth cue equal to the drawing's
+ * own (a parallel-projected model should not be shown through a perspective lens).
+ *
+ * Colour comes from the shared tokens, so the light theme needs no rule here.
+ */
+.viewcube {
+  --viewcube-size: 34px;
+  --viewcube-half: 17px;
+  /* The stage is one dock-width tall: the rotated silhouette is centred here so
+     its corners never cross into the drawing area. */
+  --viewcube-stage: 56px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  padding: 6px 0 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.viewcube__stage {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: var(--viewcube-stage);
+  perspective: 420px;
+  perspective-origin: 50% 50%;
+  touch-action: manipulation;
+}
+.viewcube__stage[data-projection="orthographic"] { perspective: none; }
+
+.viewcube__cube {
+  position: relative;
+  width: var(--viewcube-size);
+  height: var(--viewcube-size);
+  transform-style: preserve-3d;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+/* One face. The short painted label is 8.5px bold; the full name is the
+ * button's accessible name/tooltip. `backface-visibility` keeps a rear face from
+ * painting through the front of a partly transparent-looking cube. Each face
+ * takes its own light step (`--cube-*`), so the body reads as solid volume.
+ *
+ * The label is `--text`, not `--text-dim`: at ~9.5px the glyph is small, and on
+ * the lightest face (`--cube-top`, the face-on TOP view) `--text-dim` only
+ * reaches ~4.5:1 in the dark theme. The face fills carry the volume, so the
+ * brightest ink on them costs nothing. */
+.viewcube__face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  width: var(--viewcube-size);
+  height: var(--viewcube-size);
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  background: var(--cube-front);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  line-height: 1;
+  cursor: pointer;
+  backface-visibility: hidden;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.viewcube__face:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--accent);
+  /* The fill alone is not a reliable hover cue: on the dark theme's `--cube-top`
+     (the face-on TOP view) `--hover` and the face fill are the same value, so the
+     accent had only a 1px border to show. A second, shadow-only ring makes the
+     hovered face unambiguous on every face in both themes without moving layout. */
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.viewcube__face:active:not(:disabled) { background: var(--pressed); }
+.viewcube__face:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+/* The six rest poses. CSS `+y` points down, so `rotateX(90deg)` brings the
+ * local +z normal to the top of the screen. The face-light steps are what make
+ * the projected hexagon read as a cube rather than a flat outline. */
+.viewcube__face--front { transform: translateZ(var(--viewcube-half)); background: var(--cube-front); }
+.viewcube__face--back { transform: rotateY(180deg) translateZ(var(--viewcube-half)); background: var(--cube-back); }
+.viewcube__face--right { transform: rotateY(90deg) translateZ(var(--viewcube-half)); background: var(--cube-right); }
+.viewcube__face--left { transform: rotateY(-90deg) translateZ(var(--viewcube-half)); background: var(--cube-left); }
+.viewcube__face--top { transform: rotateX(90deg) translateZ(var(--viewcube-half)); background: var(--cube-top); }
+.viewcube__face--bottom { transform: rotateX(-90deg) translateZ(var(--viewcube-half)); background: var(--cube-bottom); }
+
+/* Label orientation is the face's own, not the camera's: every label reads
+   upright when its face is face-on. The bottom face's rest pose leaves its text
+   inverted, which the hosted BOTTOM basis exposes (the other five are upright),
+   so only that label carries a half-turn — the face transforms and the host
+   matrix are untouched. */
+.viewcube__label { display: block; }
+.viewcube__face--bottom .viewcube__label { transform: rotate(180deg); }
+
+/* Home/isometric target under the cube: a real button, 24px on the desktop dock
+ * (the compact stylesheet grows it to the 44px touch minimum). */
+.viewcube__home {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.viewcube__home:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.viewcube__home:active:not(:disabled) { background: var(--pressed); }
+.viewcube__home:disabled { color: var(--text-disabled); cursor: not-allowed; }
+
+/* The host's honest "no authoritative camera": a static, non-rotating frame. The
+ * full sentence is the title and the accessible name; nothing here guesses an
+ * orientation. */
+.viewcube__unavailable {
+  display: grid;
+  place-items: center;
+  width: var(--viewcube-size);
+  height: var(--viewcube-size);
+  border: 1px dashed var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--text-muted);
+}

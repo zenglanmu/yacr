@@ -13,6 +13,7 @@ import { isStackingRegression } from './stacking-regression/state.ts';
 import { installGlobalErrorCapture } from './errors/install-global-capture.ts';
 import { mountErrorReportHost } from './errors/mount-error-report-host.tsx';
 import { reportRenderError } from './errors/root-error-reporting.ts';
+import { applyTheme, initialTheme } from './theme/theme.ts';
 
 // Capture before anything renders, so an import-time failure (including the wasm
 // session's panic log) is already visible. The error dialog gets its own root:
@@ -20,6 +21,11 @@ import { reportRenderError } from './errors/root-error-reporting.ts';
 // crash would have taken down with it.
 installGlobalErrorCapture();
 mountErrorReportHost();
+
+// First paint: the cached, host-confirmed theme is already on `<html>` before the
+// first React render, so a light-theme restart never flashes dark chrome. The
+// host's first `cad_status` remains the authority and replaces this value.
+applyTheme(initialTheme());
 
 createRoot(document.getElementById('root') as HTMLElement, {
   // An uncaught render error takes the tree down, so it opens the global dialog.

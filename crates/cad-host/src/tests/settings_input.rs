@@ -16,7 +16,7 @@ fn the_left_drag_pans_key_is_in_the_closed_table() {
     let key = CadSettingKey::LeftDragPans;
     assert_eq!(
         CadSettingKey::ALL.len(),
-        18,
+        23,
         "one writable key per contract"
     );
     assert_eq!(

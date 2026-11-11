@@ -22,6 +22,7 @@ use cad_scene::{ImageBatch, RenderBatch, RenderTopology, SceneDelta};
 
 use std::sync::Arc;
 
+mod background_repaint;
 mod image_adjust;
 mod images_and_culling;
 mod masks;

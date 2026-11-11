@@ -8,6 +8,8 @@ cad_delete_layer
 cad_fonts
 cad_layers
 cad_open_popup
+cad_open_recent
+cad_recent_files
 cad_rename_layer
 cad_restore_layers
 cad_set_active_layer

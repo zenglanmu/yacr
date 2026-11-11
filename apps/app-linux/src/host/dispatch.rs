@@ -413,8 +413,9 @@ mod tests {
     fn the_dom_canvas_carrier_advertises_no_vocabulary() {
         // Defence in depth: the chrome now asks the wasm session as soon as the
         // carrier is reported, but a caller that still asks this host must not get
-        // a catalogue of commands this carrier refuses (every desktop name is in
-        // `NATIVE_SESSION_COMMANDS`). Empty is the honest answer - the same shape
+        // a catalogue of commands this carrier refuses (every native CAD name is in
+        // `NATIVE_SESSION_COMMANDS`; the host-file commands answer their own
+        // capability instead). Empty is the honest answer - the same shape
         // a browser or an Android WebView receives.
         assert!(command_vocabulary(SurfaceMode::DomCanvas).is_empty());
         assert!(command_aliases(SurfaceMode::DomCanvas).is_empty());

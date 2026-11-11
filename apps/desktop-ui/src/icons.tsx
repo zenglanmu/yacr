@@ -226,6 +226,13 @@ const P = {
   terminal: <><rect x="3.5" y="5" width="17" height="14" rx="1" /><path d="M7 10l3 2-3 2M12.5 14h4" /></>,
   palette: <><rect x="4" y="5" width="16" height="14" rx="1" /><path d="M10 5v14" /></>,
   language: <><circle cx="12" cy="12" r="8" /><path d="M4 12h16M12 4a12 12 0 0 1 0 16 12 12 0 0 1 0-16z" /></>,
+  // Theme switch: a sun and a moon on the same 24px grid, one ray/disc stroke
+  // weight so the toggle does not jump in optical size when it changes target.
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2.6v2.4M12 19v2.4M2.6 12H5M19 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M18.7 5.3 17 7M7 17l-1.7 1.7" /></>,
+  moon: <><path d="M20.4 14.7A8.6 8.6 0 0 1 9.3 3.6a8.6 8.6 0 1 0 11.1 11.1z" /></>,
+  // ViewCube Home: the conventional house outline, distinct from `view` (the
+  // axonometric cube) so the target and the orientation glyph cannot be confused.
+  home: <><path d="M4 11 12 4l8 7" /><path d="M6 10v10h12V10" /><path d="M10 20v-5h4v5" /></>,
   // Plot / print: a page feeding through a body with the output tray below, the
   // conventional printer silhouette (Plot and Publish tab of the Options dialog).
   printer: <><path d="M7 8V4h10v4" /><rect x="4" y="8" width="16" height="8" rx="1" /><path d="M7 16h10v4H7z" /></>,

@@ -54,6 +54,8 @@ export interface CadEventHandlers {
   readonly setCursor: (cursorWorld: CadStatus['cursorWorld']) => void;
   /** Per-frame FPS slice: the diagnostics leaf store, not the shell tree. */
   readonly setFps: (fps: number | null) => void;
+  /** Per-frame view-orientation slice: the ViewCube leaf store, not the shell. */
+  readonly setView: (view: CadStatus['view'] | null) => void;
   readonly pump: () => void;
 }
 
@@ -90,8 +92,10 @@ export function useCadEvents(handlers: CadEventHandlers): void {
       cursorWorld: CadStatus['cursorWorld'],
       frameCount: number,
       active: boolean,
+      view: CadStatus['view'] | null,
     ): void => {
       live.current.setCursor(cursorWorld);
+      live.current.setView(view);
       live.current.setFps(sampler.sample(frameCount, performance.now(), active));
       clearTimeout(staleTimer);
       if (active) staleTimer = setTimeout(resetFps, 5000);
@@ -109,6 +113,7 @@ export function useCadEvents(handlers: CadEventHandlers): void {
         next.cursorWorld,
         next.frameCount,
         Boolean(next && !next.error && !document.hidden),
+        next.view ?? null,
       );
       // Everything else is semantic state: apply it immediately, and skip the
       // full-shell re-render for a frame that differs only in the volatile pair.
@@ -134,7 +139,7 @@ export function useCadEvents(handlers: CadEventHandlers): void {
       if (frame.type === 'cursor-changed') {
         // Volatile-only cadence: leaf stores and the stale timer, nothing else.
         // It never touches the shell status, the carrier route or the frame pump.
-        publishVolatile(frame.cursorWorld, frame.frameCount, !document.hidden);
+        publishVolatile(frame.cursorWorld, frame.frameCount, !document.hidden, frame.view);
         return;
       }
       if (frame.type === 'vendor-pending') {

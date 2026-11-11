@@ -148,6 +148,7 @@ pub fn flush_events_current<C: Serialize>(
             emitted.extend(state.events.push_quiet(CadEventKind::CursorChanged {
                 cursor_world: status.cursor_world,
                 frame_count: status.frame_count,
+                view: status.view.clone(),
             }));
         }
         if semantic {
@@ -282,7 +283,8 @@ mod tests {
             &events[0].kind,
             CadEventKind::CursorChanged {
                 cursor_world: Some([1.5, -2.0, 0.0]),
-                frame_count: 9
+                frame_count: 9,
+                ..
             }
         ));
         assert_eq!(events[0].revision, 2);

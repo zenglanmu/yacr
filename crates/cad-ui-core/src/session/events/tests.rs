@@ -576,12 +576,45 @@ fn volatile_fields_do_not_make_a_status_semantically_different() {
 }
 
 #[test]
+fn an_orbit_is_a_volatile_view_change_not_a_semantic_status_change() {
+    let mut previous = status();
+    previous.view = Some(CadViewOrientation {
+        mode: "3d".to_string(),
+        projection: "perspective".to_string(),
+        eye: [0.0, -10.0, 5.0],
+        target: [0.0, 0.0, 0.0],
+        up: [0.0, 0.0, 1.0],
+    });
+    let mut orbited = previous.clone();
+    orbited.view = Some(CadViewOrientation {
+        mode: "3d".to_string(),
+        projection: "perspective".to_string(),
+        eye: [10.0, 0.0, 5.0],
+        target: [0.0, 0.0, 0.0],
+        up: [0.0, 0.0, 1.0],
+    });
+    // The orbit must not re-render the whole shell...
+    assert!(same_status_ignoring_volatile(&previous, &orbited));
+    assert!(derive_batch(Some(&previous), &orbited).is_empty());
+    // ...but it must reach the consumer through the volatile frame.
+    assert!(cursor_changed(&previous, &orbited));
+
+    // A missing view is just as volatile: a document close/open transition
+    // carries the basis change through the same frame.
+    let mut no_view = previous.clone();
+    no_view.view = None;
+    assert!(same_status_ignoring_volatile(&previous, &no_view));
+    assert!(cursor_changed(&previous, &no_view));
+}
+
+#[test]
 fn a_cursor_changed_event_has_the_frozen_field_names_and_tag() {
     let event = CadEvent {
         revision: 17,
         kind: CadEventKind::CursorChanged {
             cursor_world: Some([1.0, 2.0, 0.5]),
             frame_count: 42,
+            view: None,
         },
     };
     assert_eq!(
@@ -591,6 +624,7 @@ fn a_cursor_changed_event_has_the_frozen_field_names_and_tag() {
             "type": "cursor-changed",
             "cursorWorld": [1.0, 2.0, 0.5],
             "frameCount": 42,
+            "view": null,
         })
     );
     let absent = CadEvent {
@@ -598,6 +632,7 @@ fn a_cursor_changed_event_has_the_frozen_field_names_and_tag() {
         kind: CadEventKind::CursorChanged {
             cursor_world: None,
             frame_count: 43,
+            view: None,
         },
     };
     assert_eq!(
@@ -607,6 +642,39 @@ fn a_cursor_changed_event_has_the_frozen_field_names_and_tag() {
             "type": "cursor-changed",
             "cursorWorld": null,
             "frameCount": 43,
+            "view": null,
+        })
+    );
+
+    // An orbit rides the same frame with the real orientation.
+    let orbited = CadEvent {
+        revision: 19,
+        kind: CadEventKind::CursorChanged {
+            cursor_world: None,
+            frame_count: 44,
+            view: Some(CadViewOrientation {
+                mode: "3d".to_string(),
+                projection: "perspective".to_string(),
+                eye: [1.0, 2.0, 3.0],
+                target: [0.0, 0.0, 0.0],
+                up: [0.0, 0.0, 1.0],
+            }),
+        },
+    };
+    assert_eq!(
+        serde_json::to_value(&orbited).expect("serializes"),
+        serde_json::json!({
+            "revision": 19,
+            "type": "cursor-changed",
+            "cursorWorld": null,
+            "frameCount": 44,
+            "view": {
+                "mode": "3d",
+                "projection": "perspective",
+                "eye": [1.0, 2.0, 3.0],
+                "target": [0.0, 0.0, 0.0],
+                "up": [0.0, 0.0, 1.0],
+            },
         })
     );
 }

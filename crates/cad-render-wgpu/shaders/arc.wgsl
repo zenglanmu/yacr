@@ -21,7 +21,8 @@ struct Camera {
     // z = world units per pixel (bitcast f32; the SDF ramp width), w reserved.
     key_flags: vec4<u32>,
     // rgb = unit vector toward the light, in world space (the same space as
-    // `world_normal`); a = reserved 0. It is a per-frame camera property: the
+    // `world_normal`); a = 1 when the frame's clear colour is light (the
+    // ink-flip flag, see `background_is_light`), else 0. It is a per-frame camera property: the
     // 2D view keeps world +Z, the 3D view uses the reversed view direction.
     light: vec4<f32>,
 };
@@ -171,6 +172,20 @@ fn conic_distance(in: VsOut) -> f32 {
     return select(d_endpoint, abs(d_ring), inside);
 }
 
+// --- light-background ink flip ---------------------------------------------
+// `camera.light.a` is the frame's light-background flag (1 when the canvas
+// clear colour is light; see `background_is_light`). Only *near-white* ink —
+// every channel at least 0.75 — is flipped to black, so default ACI-7 geometry
+// stays visible on a white theme. Saturated colours are deliberately untouched:
+// e.g. yellow ink stays yellow and may be unreadable on white (explicit
+// limitation). Pick/mask/image shaders never apply this transform.
+fn ink_for_background(rgb: vec3<f32>) -> vec3<f32> {
+    if (camera.light.a > 0.5 && min(rgb.r, min(rgb.g, rgb.b)) >= 0.75) {
+        return vec3<f32>(0.0);
+    }
+    return rgb;
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let d = conic_distance(in);
@@ -204,5 +219,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (flags_ctl.enabled != 0u && (flag_bits(key) & FLAG_HIDDEN) != 0u) {
         discard;
     }
-    return flag_tint(vec4<f32>(in.color.rgb, in.color.a * coverage), key);
+    let shaded = flag_tint(vec4<f32>(in.color.rgb, in.color.a * coverage), key);
+    return vec4<f32>(ink_for_background(shaded.rgb), shaded.a);
 }

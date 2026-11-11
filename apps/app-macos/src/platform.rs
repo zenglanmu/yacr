@@ -115,7 +115,8 @@ pub enum FileChooserOutcome {
 }
 
 /// A dependency-injected chooser, `Send + Sync` so it can run on the worker.
-pub type FileChooser = Arc<dyn Fn(&MacosOpenDialogLabels) -> FileChooserOutcome + Send + Sync>;
+pub type FileChooser =
+    Arc<dyn Fn(&MacosOpenDialogLabels, Option<&Path>) -> FileChooserOutcome + Send + Sync>;
 
 /// The single-flight open state, guarded by one mutex so admission and the
 /// terminal hand-off cannot interleave.
@@ -152,6 +153,10 @@ pub struct ReactFiles {
     chooser: FileChooser,
     state: Arc<Mutex<OpenState>>,
     source: Arc<Mutex<Option<PathBuf>>>,
+    /// The directory the next open chooser starts in, derived from the last
+    /// successfully opened/reopened target (and the newest durable recent entry
+    /// at startup). `None` means no hint.
+    recent_dir: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl ReactFiles {
@@ -162,7 +167,11 @@ impl ReactFiles {
     pub fn new(locale: &str, app: tauri::AppHandle) -> CadResult<Self> {
         Self::with_chooser(
             locale,
-            Arc::new(move |labels: &MacosOpenDialogLabels| native_choose(&app, labels)),
+            Arc::new(
+                move |labels: &MacosOpenDialogLabels, initial: Option<&Path>| {
+                    native_choose(&app, labels, initial)
+                },
+            ),
         )
     }
 
@@ -177,6 +186,7 @@ impl ReactFiles {
             chooser,
             state: Arc::new(Mutex::new(OpenState::new())),
             source: Arc::new(Mutex::new(None)),
+            recent_dir: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -214,8 +224,11 @@ impl PlatformFiles for ReactFiles {
         let chooser = self.chooser.clone();
         let labels = self.labels.clone();
         let state = self.state.clone();
+        // Start in the last successfully opened target's parent (a real
+        // directory) when one is known.
+        let recent_dir = self.recent_dir.lock().unwrap().clone();
         self.spawn("react-open-chooser", move || {
-            let event = match chooser(&labels) {
+            let event = match chooser(&labels, recent_dir.as_deref()) {
                 FileChooserOutcome::Path(path) => match std::fs::read(&path) {
                     Ok(bytes) => FileEvent::Opened {
                         target: FileTarget::from_path(&path.to_string_lossy()),
@@ -293,6 +306,14 @@ impl PlatformFiles for ReactFiles {
 
     fn set_source(&self, target: Option<&FileTarget>) {
         *self.source.lock().unwrap() = target.map(|target| PathBuf::from(&target.opaque));
+    }
+
+    fn set_recent_target(&self, target: Option<&FileTarget>) {
+        *self.recent_dir.lock().unwrap() = target.and_then(recent_directory);
+    }
+
+    fn recent_location(&self, target: &FileTarget) -> Option<String> {
+        recent_directory(target).map(|directory| directory.to_string_lossy().into_owned())
     }
 
     fn poll(&self) -> Vec<FileEvent> {
@@ -502,6 +523,23 @@ fn read_failure(path: &Path, error: std::io::Error) -> String {
     }
 }
 
+/// The parent directory of a successfully-opened target, when it is a real
+/// directory.
+///
+/// The macOS opaque handle is an absolute filesystem path, so the parent is the
+/// directory the panel should start in. A scheme handle or a missing parent
+/// yields `None`, never a bogus folder.
+fn recent_directory(target: &FileTarget) -> Option<PathBuf> {
+    if target.opaque.is_empty() || target.opaque.contains("://") {
+        return None;
+    }
+    let parent = Path::new(&target.opaque).parent()?;
+    if parent.as_os_str().is_empty() || !parent.is_dir() {
+        return None;
+    }
+    Some(parent.to_path_buf())
+}
+
 /// The real native open chooser (in-process AppKit `NSOpenPanel`).
 ///
 /// Runs on the single-flight worker; the panel itself is created inside a
@@ -513,13 +551,18 @@ fn read_failure(path: &Path, error: std::io::Error) -> String {
 /// OK with a resolved local path is [`FileChooserOutcome::Path`], any non-OK
 /// response is [`FileChooserOutcome::Cancelled`] — and every other failure is a
 /// localized [`FileChooserOutcome::Failed`], never a synthetic success.
-fn native_choose(app: &tauri::AppHandle, labels: &MacosOpenDialogLabels) -> FileChooserOutcome {
+fn native_choose(
+    app: &tauri::AppHandle,
+    labels: &MacosOpenDialogLabels,
+    initial: Option<&Path>,
+) -> FileChooserOutcome {
     let (outcome_tx, outcome_rx) = std::sync::mpsc::sync_channel::<FileChooserOutcome>(1);
     let main_labels = labels.clone();
+    let initial = initial.map(Path::to_path_buf);
     let dispatched = app.run_on_main_thread(move || {
         // Capacity 1 means this send never blocks, even when the worker has
         // already gone away; a dropped receiver is not an error worth reporting.
-        let _ = outcome_tx.send(show_open_panel(&main_labels));
+        let _ = outcome_tx.send(show_open_panel(&main_labels, initial.as_deref()));
     });
     if let Err(error) = dispatched {
         return FileChooserOutcome::Failed(labels.picker_failed(&error.to_string()));
@@ -537,9 +580,9 @@ fn native_choose(app: &tauri::AppHandle, labels: &MacosOpenDialogLabels) -> File
 /// only result crosses back through the channel.
 #[allow(deprecated)] // `setAllowedFileTypes:` is deprecated but still the only
                      // extension filter available without UTType bindings.
-fn show_open_panel(labels: &MacosOpenDialogLabels) -> FileChooserOutcome {
+fn show_open_panel(labels: &MacosOpenDialogLabels, initial: Option<&Path>) -> FileChooserOutcome {
     use objc2_app_kit::{NSModalResponseOK, NSOpenPanel};
-    use objc2_foundation::{NSArray, NSString};
+    use objc2_foundation::{NSArray, NSString, NSURL};
 
     let mtm = match objc2::MainThreadMarker::new() {
         Some(mtm) => mtm,
@@ -557,6 +600,14 @@ fn show_open_panel(labels: &MacosOpenDialogLabels) -> FileChooserOutcome {
 
     let title = NSString::from_str(&labels.picker_title);
     panel.setTitle(Some(&title));
+    // Start in the remembered drawing's directory when it still exists. The
+    // panel API takes a file URL and only navigates to a real directory; a
+    // stale hint is ignored (a convenience loss, never a failed open).
+    if let Some(directory) = initial.filter(|directory| directory.is_dir()) {
+        let path = NSString::from_str(&directory.to_string_lossy());
+        let url = NSURL::fileURLWithPath(&path);
+        panel.setDirectoryURL(Some(&url));
+    }
     let filter = NSString::from_str(&labels.picker_filter);
     panel.setMessage(Some(&filter));
 
@@ -613,7 +664,7 @@ mod tests {
     fn blocking_chooser() -> (FileChooser, std::sync::mpsc::Sender<()>) {
         let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
         let release_rx = Mutex::new(release_rx);
-        let chooser: FileChooser = Arc::new(move |_| {
+        let chooser: FileChooser = Arc::new(move |_, _| {
             // A released or dropped sender both unblock; tests send exactly once.
             let _ = release_rx.lock().unwrap().recv();
             FileChooserOutcome::Cancelled
@@ -638,7 +689,7 @@ mod tests {
         let path = temp_path("opened.dwg");
         let payload = b"not-a-real-dwg-but-real-bytes";
         std::fs::write(&path, payload).unwrap();
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
         files
             .begin_open_target(&FileTarget::from_path(&path.to_string_lossy()))
             .unwrap();
@@ -657,7 +708,7 @@ mod tests {
     fn missing_target_reports_an_error_event() {
         let path = temp_path("missing.dwg");
         let _ = std::fs::remove_file(&path);
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
         files
             .begin_open_target(&FileTarget::from_path(&path.to_string_lossy()))
             .unwrap();
@@ -672,7 +723,7 @@ mod tests {
 
     #[test]
     fn cancelled_chooser_is_a_cancel_not_a_success() {
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
         files.begin_open().unwrap();
         match wait_event(&files).as_slice() {
             [FileEvent::Cancelled { purpose }] => assert_eq!(*purpose, FilePurpose::Open),
@@ -682,7 +733,7 @@ mod tests {
 
     #[test]
     fn failed_chooser_reports_its_localized_reason() {
-        let files = files_with(Arc::new(|labels| {
+        let files = files_with(Arc::new(|labels, _| {
             FileChooserOutcome::Failed(labels.picker_failed("dialog down"))
         }));
         files.begin_open().unwrap();
@@ -699,7 +750,7 @@ mod tests {
         let missing = temp_path("queued-missing.dwg");
         let _ = std::fs::remove_file(&missing);
         let target = FileTarget::from_path(&missing.to_string_lossy());
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
 
         files.begin_open_target(&target).unwrap();
         assert!(
@@ -745,7 +796,7 @@ mod tests {
         let missing = temp_path("bounded.dwg");
         let _ = std::fs::remove_file(&missing);
         let target = FileTarget::from_path(&missing.to_string_lossy());
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
 
         files.begin_open_target(&target).unwrap();
         for _ in 0..16 {
@@ -764,7 +815,7 @@ mod tests {
         let other = temp_path("other.dwg");
         std::fs::write(&source, b"a").unwrap();
         std::fs::write(&other, b"b").unwrap();
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
         assert!(!files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
         files.set_source(Some(&FileTarget::from_path(&source.to_string_lossy())));
         assert!(files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
@@ -777,7 +828,7 @@ mod tests {
 
     #[test]
     fn save_and_write_are_explicitly_unsupported() {
-        let files = files_with(Arc::new(|_| FileChooserOutcome::Cancelled));
+        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
         assert!(matches!(
             files.begin_save(SavePurpose::Plot, "out.svg"),
             Err(CadError::Unsupported(_))
