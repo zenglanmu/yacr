@@ -684,7 +684,7 @@ mod tests {
     fn blocking_chooser() -> (FileChooser, std::sync::mpsc::Sender<()>) {
         let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
         let release_rx = Mutex::new(release_rx);
-        let chooser: FileChooser = Arc::new(move |_| {
+        let chooser: FileChooser = Arc::new(move |_, _| {
             // A released or dropped sender both unblock; tests send exactly once.
             let _ = release_rx.lock().unwrap().recv();
             FileChooserOutcome::Cancelled
