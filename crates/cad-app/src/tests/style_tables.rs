@@ -663,7 +663,7 @@ fn rename_block_is_one_undo_step_and_undo_restores_the_name() {
 #[test]
 fn a_written_table_command_is_refused_in_viewer_mode() {
     let (mut app, mut session) = style_app();
-    let _ = session.switch_mode(AppMode::Viewer).unwrap();
+    session.switch_mode(AppMode::Viewer).unwrap();
     let start = revision(&app);
     let error = style_command(
         &mut app,

@@ -426,7 +426,10 @@ fn alignspace_and_vpsync_refuse_a_viewer_session() {
             point(30.0, 20.0),
         ]),
     );
-    assert!(matches!(align, Err(CadError::PermissionDenied)), "{align:?}");
+    assert!(
+        matches!(align, Err(CadError::PermissionDenied)),
+        "{align:?}"
+    );
     let sync = extended(
         &mut app,
         &mut session,

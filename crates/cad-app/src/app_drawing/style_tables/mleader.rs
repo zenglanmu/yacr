@@ -205,7 +205,7 @@ impl Application {
                     fields::apply_mleader_style_field(&mut after, field, value, |text| {
                         drawing.style_by_name(text).is_some()
                     })
-                    .map_err(|reason| CadError::InvalidInput(reason))?;
+                    .map_err(CadError::InvalidInput)?;
                 }
                 if after == before {
                     return Ok(report_outcome(vec![diagnostic(

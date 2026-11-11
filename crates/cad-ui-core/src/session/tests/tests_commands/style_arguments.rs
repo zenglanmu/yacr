@@ -10,7 +10,6 @@ use super::super::super::commands::{
     invalid_style_argument_reason, parse_mleader_style_argument, parse_text_style_argument,
     typed_command_argument, DASH_STYLE_SELECTOR, MLEADERSTYLE_SELECTOR, STYLE_SELECTOR,
 };
-use super::super::super::*;
 
 #[test]
 fn the_three_selectors_are_admitted_argument_forms_and_bare_forms_stay_reports() {

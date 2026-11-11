@@ -996,7 +996,7 @@
 | `VIEWPLOTDETAILS` | 部分实现 | 具名拒绝（`viewplotdetails.unsupported`）：无打印详细信息模型。 |
 | `VIEWRES` | 部分实现 | 整数 `1..=1000` 仅存会话 token；越界 `viewres.out_of_range`；渲染器消费/像素效果 NOT IMPLEMENTED / NOT VERIFIED |
 | `VPCLIP` | 部分实现 | 矩形 + **多边形 clip 真实写入**（N 点、共面/自交校验）；representation 仅接受 3/4 点 clip ⇒ 多边形按 `*.polygon_not_renderable` 诚实报告，不伪称可渲染 |
-| `VPLAYER` | 已实现 | `VPLAYER FREEZE|THAW <layer,...> [<index>]` 写单视口 `layer_overrides`（全局层表不动），bare 为只读报告；命令行 grammar 已接；一条事务/一步撤销 |
+| `VPLAYER` | 已实现 | `VPLAYER FREEZE/THAW <layer,...> [<index>]` 写单视口 `layer_overrides`（全局层表不动），bare 为只读报告；命令行 grammar 已接；一条事务/一步撤销 |
 | `VPMAX` | 已实现 | 真实最大化编辑态：保存相机+视图模式+工作平面+空间的 `ViewSnapshot`，`VPMIN` 位级恢复；一次一个视口；无宿主差异化渲染（无像素证据） |
 | `VPMIN` | 部分实现 | 恢复会话标记；空状态 `vpmin.nothing_to_restore` |
 | `VPOINT` | 部分实现 | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；零/非有限向量拒绝；不改模型；向量形式进入 3D 透视 |
@@ -1975,7 +1975,7 @@
 | 935 | `VISUALSTYLESCLOSE` | 未实现 | Closes the Visual Styles Manager. | — |
 | 936 | `VLISP` | 未实现 | Displays the AutoLISP development environment. | — |
 | 937 | `VPCLIP` | 部分实现 | Redefines a layout viewport object while retaining its properties. | 矩形 + **多边形 clip 真实写入**（N 点、共面/自交校验）；representation 仅接受 3/4 点 clip ⇒ 多边形按 `*.polygon_not_renderable` 诚实报告，不伪称可渲染 |
-| 938 | `VPLAYER` | 已实现 | Sets layer visibility within viewports. | `VPLAYER FREEZE|THAW <layer,...> [<index>]` 写单视口 `layer_overrides`（全局层表不动），bare 为只读报告；命令行 grammar 已接；一条事务/一步撤销 |
+| 938 | `VPLAYER` | 已实现 | Sets layer visibility within viewports. | `VPLAYER FREEZE/THAW <layer,...> [<index>]` 写单视口 `layer_overrides`（全局层表不动），bare 为只读报告；命令行 grammar 已接；一条事务/一步撤销 |
 | 939 | `VPMAX` | 已实现 | Expands the current layout viewport for editing. | 真实最大化编辑态：保存相机+视图模式+工作平面+空间的 `ViewSnapshot`，`VPMIN` 位级恢复；一次一个视口；无宿主差异化渲染（无像素证据） |
 | 940 | `VPMIN` | 部分实现 | Restores the current layout viewport. | 恢复会话标记；空状态 `vpmin.nothing_to_restore` |
 | 941 | `VPOINT` | 部分实现 | Sets the viewing direction for a 3D visualization of the drawing. | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；零/非有限向量拒绝；不改模型；向量形式进入 3D 透视 |

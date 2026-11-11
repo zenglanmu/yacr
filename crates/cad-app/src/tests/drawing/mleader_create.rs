@@ -545,7 +545,8 @@ fn leader_option_plan_names_the_point_limit_and_the_annotation_type() {
         "{error:?}"
     );
     assert!(check_annotation_type(MLeaderContent::Text).is_ok());
-    for content in [MLeaderContent::None] {
+    {
+        let content = MLeaderContent::None;
         let error = check_annotation_type(content).unwrap_err();
         assert!(
             matches!(error, CadError::Unsupported(ref message)
