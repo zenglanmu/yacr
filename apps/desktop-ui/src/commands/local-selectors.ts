@@ -30,6 +30,7 @@ import {
   dashToolbarVisibility,
   isAboutCommand,
   isClassicLayerCommand,
+  isClassicXRefCommand,
   isCleanScreenOffCommand,
   isCleanScreenOnCommand,
   isCommandLineCommand,
@@ -39,6 +40,7 @@ import {
   isFileTabCommand,
   isHidePalettesCommand,
   isLayerCloseCommand,
+  isPmToggleCommand,
   isPropertiesCloseCommand,
   isQuickCalcCloseCommand,
   isQuickCalcCommand,
@@ -78,6 +80,10 @@ export type LocalSelectorResult =
   | { readonly kind: 'ribbon'; readonly value: boolean }
   /** Set ribbon + palettes + drawing tabs together (HIDEPALETTES/SHOWPALETTES). */
   | { readonly kind: 'paletteChrome'; readonly value: boolean }
+  /** Flip that same palette-chrome state (`PMTOGGLE`; two calls restore it). */
+  | { readonly kind: 'paletteToggle' }
+  /** Open (or re-focus) the classic external-references panel (`CLASSICXREF`). */
+  | { readonly kind: 'classicXref' }
   /** Set the drawing-tab strip's visibility (FILETAB shows, FILETABCLOSE hides). */
   | { readonly kind: 'fileTabs'; readonly value: boolean }
   /** Open one Quick View panel (a repeat open re-focuses it). */
@@ -134,6 +140,8 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
   if (isFileTabCloseCommand(text)) return { kind: 'fileTabs', value: false };
   if (isHidePalettesCommand(text)) return { kind: 'paletteChrome', value: false };
   if (isShowPalettesCommand(text)) return { kind: 'paletteChrome', value: true };
+  if (isPmToggleCommand(text)) return { kind: 'paletteToggle' };
+  if (isClassicXRefCommand(text)) return { kind: 'classicXref' };
   if (isQuickViewDrawingCommand(text)) return { kind: 'quickView', panel: 'drawings' };
   if (isQuickViewDrawingCloseCommand(text)) return { kind: 'quickViewClose', panel: 'drawings' };
   if (isQuickViewLayoutCommand(text)) return { kind: 'quickView', panel: 'layouts' };
@@ -206,6 +214,10 @@ export interface LocalSelectorHost {
   readonly setFileTabsVisible: (value: boolean) => void;
   /** Set ribbon + palettes + drawing tabs together (`HIDEPALETTES`/`SHOWPALETTES`). */
   readonly setPaletteChrome: (value: boolean) => void;
+  /** Flip that same palette-chrome state (`PMTOGGLE`). */
+  readonly togglePaletteChrome: () => void;
+  /** Open (or re-focus) the classic external-references panel (`CLASSICXREF`). */
+  readonly openClassicXref: () => void;
   /** Open one Quick View panel (a repeat open re-focuses it). */
   readonly setQuickView: (panel: QuickViewKind) => void;
   /** Close one Quick View panel (`QVDRAWINGCLOSE`/`QVLAYOUTCLOSE`; idempotent). */
@@ -251,6 +263,8 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     setRibbonVisible,
     setFileTabsVisible,
     setPaletteChrome,
+    togglePaletteChrome,
+    openClassicXref,
     setQuickView,
     closeQuickView,
     refreshQuickView,
@@ -283,6 +297,8 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'ribbon': setRibbonVisible(result.value); break;
       case 'fileTabs': setFileTabsVisible(result.value); break;
       case 'paletteChrome': setPaletteChrome(result.value); break;
+      case 'paletteToggle': togglePaletteChrome(); break;
+      case 'classicXref': openClassicXref(); break;
       case 'quickView': setQuickView(result.panel); break;
       case 'quickViewClose': closeQuickView(result.panel); break;
       case 'updateThumbs': refreshQuickView(); break;
@@ -310,6 +326,8 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     setRibbonVisible,
     setFileTabsVisible,
     setPaletteChrome,
+    togglePaletteChrome,
+    openClassicXref,
     setQuickView,
     closeQuickView,
     refreshQuickView,

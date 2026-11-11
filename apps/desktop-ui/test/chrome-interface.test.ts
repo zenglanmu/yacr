@@ -75,7 +75,8 @@ import { HOST_NAMES, readCatalog, readModule } from './helpers.ts';
 setCommandCatalog(HOST_NAMES);
 
 const WAVE = [
-  'RIBBON', 'RIBBONCLOSE', 'HIDEPALETTES', 'SHOWPALETTES', 'FILETAB', 'FILETABCLOSE',
+  'RIBBON', 'RIBBONCLOSE', 'HIDEPALETTES', 'SHOWPALETTES', 'PMTOGGLE', 'CLASSICXREF',
+  'FILETAB', 'FILETABCLOSE',
   'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE', 'QUICKCALC',
   'WORKSPACE', 'WSSAVE', 'WSSETTINGS',
   'QCCLOSE', 'UPDATETHUMBSNOW', 'TOOLBAR', '-TOOLBAR',
@@ -96,11 +97,12 @@ async function iconNames() {
 }
 
 test('the selector table is append-only and every row matches exactly one word', () => {
-  assert.equal(CHROME_COMMANDS.length, 28);
+  assert.equal(CHROME_COMMANDS.length, 30);
   assert.deepEqual([...CHROME_COMMAND_NAMES], [
     'ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE', 'DSETTINGS',
     'QUICKPROPERTIES', 'CLASSICLAYER', 'COMMANDLINE', 'COMMANDLINEHIDE',
-    'RIBBON', 'RIBBONCLOSE', 'HIDEPALETTES', 'SHOWPALETTES', 'FILETAB', 'FILETABCLOSE',
+    'RIBBON', 'RIBBONCLOSE', 'HIDEPALETTES', 'SHOWPALETTES', 'PMTOGGLE', 'CLASSICXREF',
+    'FILETAB', 'FILETABCLOSE',
     'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE', 'QUICKCALC',
     'WORKSPACE', 'WSSAVE', 'WSSETTINGS',
     'QCCLOSE', 'UPDATETHUMBSNOW', 'TOOLBAR', '-TOOLBAR',
@@ -125,6 +127,8 @@ test('every word resolves to a chrome-local result on desktop and mobile', () =>
     RIBBONCLOSE: { kind: 'ribbon', value: false },
     HIDEPALETTES: { kind: 'paletteChrome', value: false },
     SHOWPALETTES: { kind: 'paletteChrome', value: true },
+    PMTOGGLE: { kind: 'paletteToggle' },
+    CLASSICXREF: { kind: 'classicXref' },
     FILETAB: { kind: 'fileTabs', value: true },
     FILETABCLOSE: { kind: 'fileTabs', value: false },
     QVDRAWING: { kind: 'quickView', panel: 'drawings' },
@@ -227,6 +231,10 @@ test('visibility is one value and every word is an explicit set, never a toggle'
   assert.deepEqual(localSelectorFor('FILETABCLOSE', 'desktop'), { kind: 'fileTabs', value: false });
   assert.deepEqual(localSelectorFor('HIDEPALETTES', 'desktop'), { kind: 'paletteChrome', value: false });
   assert.deepEqual(localSelectorFor('SHOWPALETTES', 'desktop'), { kind: 'paletteChrome', value: true });
+  // PMTOGGLE flips the same value; the selector itself carries no value, and
+  // the shell reads the current chrome state when it runs.
+  assert.deepEqual(localSelectorFor('PMTOGGLE', 'desktop'), { kind: 'paletteToggle' });
+  assert.deepEqual(localSelectorFor('CLASSICXREF', 'desktop'), { kind: 'classicXref' });
 });
 
 test('the shell wires the visibility value, the toolbar strip and the palette close', async () => {

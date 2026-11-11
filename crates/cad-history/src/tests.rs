@@ -32,6 +32,9 @@ fn drawing_record(id: u128) -> DrawingUndoRecord {
         patches: vec![drawing_patch(EntityId(id), None, Some(entity(id, 0.0)))],
         block_patches: Vec::new(),
         layer_patches: Vec::new(),
+        style_patches: Vec::new(),
+        dim_style_patches: Vec::new(),
+        mleader_style_patches: Vec::new(),
         layout_patches: Vec::new(),
         merge_key: None,
     }
@@ -82,6 +85,9 @@ fn merge_key_coalesces_records() {
         )],
         block_patches: Vec::new(),
         layer_patches: Vec::new(),
+        style_patches: Vec::new(),
+        dim_style_patches: Vec::new(),
+        mleader_style_patches: Vec::new(),
         layout_patches: Vec::new(),
         merge_key: Some("drag-1".into()),
     };
@@ -104,6 +110,9 @@ fn coalesced_creation_and_deletion_remove_the_entry() {
             patches: vec![drawing_patch(EntityId(5), None, Some(entity(5, 1.0)))],
             block_patches: Vec::new(),
             layer_patches: Vec::new(),
+            style_patches: Vec::new(),
+            dim_style_patches: Vec::new(),
+            mleader_style_patches: Vec::new(),
             layout_patches: Vec::new(),
             merge_key: Some("edit".into()),
         })
@@ -115,6 +124,9 @@ fn coalesced_creation_and_deletion_remove_the_entry() {
             patches: vec![drawing_patch(EntityId(5), Some(entity(5, 1.0)), None)],
             block_patches: Vec::new(),
             layer_patches: Vec::new(),
+            style_patches: Vec::new(),
+            dim_style_patches: Vec::new(),
+            mleader_style_patches: Vec::new(),
             layout_patches: Vec::new(),
             merge_key: Some("edit".into()),
         })
@@ -134,6 +146,9 @@ fn empty_record_is_rejected() {
         patches: Vec::new(),
         block_patches: Vec::new(),
         layer_patches: Vec::new(),
+        style_patches: Vec::new(),
+        dim_style_patches: Vec::new(),
+        mleader_style_patches: Vec::new(),
         layout_patches: Vec::new(),
         merge_key: None,
     });
@@ -315,6 +330,9 @@ fn block_only_record_is_accepted_and_round_trips() {
         patches: Vec::new(),
         block_patches: vec![block_patch(3, None, Some(block_row(3, "B1", &[1, 2])))],
         layer_patches: Vec::new(),
+        style_patches: Vec::new(),
+        dim_style_patches: Vec::new(),
+        mleader_style_patches: Vec::new(),
         layout_patches: Vec::new(),
         merge_key: None,
     };
@@ -386,6 +404,9 @@ fn merge_key_with_block_patches_is_refused_without_touching_history() {
         patches: Vec::new(),
         block_patches: vec![block_patch(3, None, Some(block_row(3, "B1", &[1])))],
         layer_patches: Vec::new(),
+        style_patches: Vec::new(),
+        dim_style_patches: Vec::new(),
+        mleader_style_patches: Vec::new(),
         layout_patches: Vec::new(),
         merge_key: Some("drag".into()),
     };
@@ -457,6 +478,9 @@ fn layer_only_record_is_accepted_and_round_trips() {
             Some(layer_row(3, "WALLS", false)),
             Some(layer_row(3, "WALLS", true)),
         )],
+        style_patches: Vec::new(),
+        dim_style_patches: Vec::new(),
+        mleader_style_patches: Vec::new(),
         layout_patches: Vec::new(),
         merge_key: None,
     };
@@ -564,6 +588,9 @@ fn layout_only_record_is_accepted_and_round_trips() {
         patches: Vec::new(),
         block_patches: Vec::new(),
         layer_patches: Vec::new(),
+        style_patches: Vec::new(),
+        dim_style_patches: Vec::new(),
+        mleader_style_patches: Vec::new(),
         layout_patches: vec![layout_patch(
             LayoutId(7),
             None,

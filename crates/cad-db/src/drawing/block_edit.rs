@@ -54,6 +54,7 @@ use cad_domain::*;
 
 use super::layer_patch::{validate_layer_batch, LayerRow};
 use super::layout_edit::{validate_layout_batch, LayoutRow};
+use super::style_edit::StyleTableChanges;
 use super::{DrawingDatabase, EntityDisplayState};
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
 use crate::entity::DbEntity;
@@ -209,6 +210,7 @@ impl DrawingDatabase {
             display,
             &[],
             &[],
+            StyleTableChanges::default(),
         )
     }
 
@@ -233,6 +235,7 @@ impl DrawingDatabase {
         display: &[(EntityId, EntityDisplayState)],
         layer_changes: &[(LayerId, Option<LayerRow>)],
         layout_changes: &[(LayoutId, Option<LayoutRow>)],
+        style_changes: StyleTableChanges<'_>,
     ) -> CadResult<ChangeSet> {
         let before = self.revision;
         if block_changes.is_empty()
@@ -240,6 +243,7 @@ impl DrawingDatabase {
             && display.is_empty()
             && layer_changes.is_empty()
             && layout_changes.is_empty()
+            && style_changes.is_empty()
         {
             // Nothing staged: no revision bump, no fabricated change.
             return Ok(ChangeSet {
@@ -367,6 +371,15 @@ impl DrawingDatabase {
             }
         }
 
+        // Phase 1b': the style tables (name uniqueness, deletes and references).
+        // They are independent of entity identity; validating here keeps the
+        // whole batch all-or-nothing.
+        if !style_changes.is_empty() {
+            // The batch validators live in `style_edit` and are reused by the
+            // public entry, so this path cannot drift from it.
+            self.validate_style_batches_for_combined(style_changes)?;
+        }
+
         // Phase 1d: the insert-only bounds fast path.
         //
         // Insertion is monotone, so a batch that only adds model-space rows can
@@ -384,6 +397,12 @@ impl DrawingDatabase {
 
         // Phase 2: mutate. The batch is known-valid; keep the caller's order.
         let mut ordered = Vec::with_capacity(changes.len());
+
+        // 2a-pre: style-table upserts. They do not affect entity identity, but
+        // they are applied before the entity batch so a record that restores a
+        // style and a text row in one revision never exposes a dangling style
+        // name in between.
+        self.install_style_batches(style_changes);
 
         // 2a: layout creates/updates **first**, so an entity restored in the
         // same record already has its layout row when it lands.
@@ -495,9 +514,14 @@ impl DrawingDatabase {
         // layout edits are not geometry changes, but they raise the revision, so
         // the memo is invalidated explicitly (the same defensive rule
         // `layer_edit`/`layout_edit` use).
+        // 2i: style-table deletes last, after every upsert above (a rename is one
+        // update, never delete+create, so this order only matters for a batch
+        // that frees a name and stages it in the same table).
+        self.remove_style_batches(style_changes);
+
         let after = Revision(before.0 + 1);
         self.revision = after;
-        if !layer_changes.is_empty() || !layout_changes.is_empty() {
+        if !layer_changes.is_empty() || !layout_changes.is_empty() || !style_changes.is_empty() {
             self.invalidate_bounds_cache();
         }
         if let Some(bounds) = incremental_bounds {

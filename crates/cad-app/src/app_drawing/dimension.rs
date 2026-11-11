@@ -175,23 +175,15 @@ impl Application {
         // style manager; creation resolves the one stored style). The resolved
         // snapshot bakes `DIMSCALE` into the sizes and resolves the text style.
         let document_id = command.document;
-        let style = {
+        let (style_name, style) = {
             let document = self
                 .workspace
                 .documents
                 .get(&document_id)
                 .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-            document
-                .drawing
-                .resolve_dim_style("Standard")
-                .ok_or_else(|| {
-                    CadError::InvalidInput(
-                        "the drawing has no 'Standard' dimension style to create with".into(),
-                    )
-                })?
+            super::helpers::current_dim_style(document.drawing.as_ref(), session)?
         };
-        let dimension =
-            DimensionGeometry::synthesized(definition, "Standard".to_string(), style, None)?;
+        let dimension = DimensionGeometry::synthesized(definition, style_name, style, None)?;
         // A zero measurement is a degenerate dimension: the chosen direction
         // projects the two distinct origins onto the same point. Refuse rather
         // than store a dimension that measures nothing.
@@ -313,23 +305,15 @@ impl Application {
             },
         };
         let document_id = command.document;
-        let style = {
+        let (style_name, style) = {
             let document = self
                 .workspace
                 .documents
                 .get(&document_id)
                 .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-            document
-                .drawing
-                .resolve_dim_style("Standard")
-                .ok_or_else(|| {
-                    CadError::InvalidInput(
-                        "the drawing has no 'Standard' dimension style to create with".into(),
-                    )
-                })?
+            super::helpers::current_dim_style(document.drawing.as_ref(), session)?
         };
-        let dimension =
-            DimensionGeometry::synthesized(definition, "Standard".to_string(), style, None)?;
+        let dimension = DimensionGeometry::synthesized(definition, style_name, style, None)?;
         // The chosen angle projects the two distinct origins onto the same point:
         // refuse rather than store a dimension that measures nothing.
         if dimension.measurement() <= MIN_DIMENSION_EXTENT {
@@ -564,7 +548,7 @@ impl Application {
         }
         let location = input.location;
         let document_id = command.document;
-        let (definition, style) = {
+        let (definition, style_name, style) = {
             let document = self
                 .workspace
                 .documents
@@ -582,18 +566,11 @@ impl Application {
                 })?;
             let frame = resolve_arc_or_circle(&entity.geometry, name)?;
             let definition = radial_definition(kind, &frame, location, name)?;
-            let style = document
-                .drawing
-                .resolve_dim_style("Standard")
-                .ok_or_else(|| {
-                    CadError::InvalidInput(
-                        "the drawing has no 'Standard' dimension style to create with".into(),
-                    )
-                })?;
-            (definition, style)
+            let (style_name, style) =
+                super::helpers::current_dim_style(document.drawing.as_ref(), session)?;
+            (definition, style_name, style)
         };
-        let dimension =
-            DimensionGeometry::synthesized(definition, "Standard".to_string(), style, None)?;
+        let dimension = DimensionGeometry::synthesized(definition, style_name, style, None)?;
         if dimension.measurement() <= MIN_DIMENSION_EXTENT {
             return Err(CadError::InvalidInput(format!(
                 "{name} is degenerate: the measured radius is zero"
@@ -705,14 +682,8 @@ impl Application {
                 })?;
             let frame = resolve_arc_or_circle(&entity.geometry, "DIMCENTER")?;
             check_circle_frame(&frame, "DIMCENTER")?;
-            let dimcen = document
-                .drawing
-                .resolve_dim_style("Standard")
-                .ok_or_else(|| {
-                    CadError::InvalidInput(
-                        "the drawing has no 'Standard' dimension style to create with".into(),
-                    )
-                })?
+            let dimcen = super::helpers::current_dim_style(document.drawing.as_ref(), session)?
+                .1
                 .center_mark;
             (frame, dimcen)
         };

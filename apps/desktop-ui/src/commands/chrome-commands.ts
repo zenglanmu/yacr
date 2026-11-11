@@ -67,6 +67,12 @@ export const HIDEPALETTES_COMMAND = 'HIDEPALETTES';
 /** The typed word that restores ribbon + palettes + drawing tabs. */
 export const SHOWPALETTES_COMMAND = 'SHOWPALETTES';
 
+/** The typed word that toggles the palette-chrome state (`PMTOGGLE`). */
+export const PMTOGGLE_COMMAND = 'PMTOGGLE';
+
+/** The typed word that opens the classic external-references panel. */
+export const CLASSICXREF_COMMAND = 'CLASSICXREF';
+
 /** The typed word that shows the drawing-tab strip (a set, never a toggle). */
 export const FILETAB_COMMAND = 'FILETAB';
 
@@ -191,6 +197,16 @@ export function isShowPalettesCommand(text: unknown): boolean {
   return normalized(text) === SHOWPALETTES_COMMAND;
 }
 
+/** Whether typed text is the bare `PMTOGGLE` selector. */
+export function isPmToggleCommand(text: unknown): boolean {
+  return normalized(text) === PMTOGGLE_COMMAND;
+}
+
+/** Whether typed text is the bare `CLASSICXREF` selector. */
+export function isClassicXRefCommand(text: unknown): boolean {
+  return normalized(text) === CLASSICXREF_COMMAND;
+}
+
 /** Whether typed text is the bare `FILETAB` selector. */
 export function isFileTabCommand(text: unknown): boolean {
   return normalized(text) === FILETAB_COMMAND;
@@ -299,6 +315,8 @@ export const CHROME_COMMANDS: readonly ChromeCommandSelector[] = Object.freeze([
   { name: RIBBONCLOSE_COMMAND, matches: isRibbonCloseCommand },
   { name: HIDEPALETTES_COMMAND, matches: isHidePalettesCommand },
   { name: SHOWPALETTES_COMMAND, matches: isShowPalettesCommand },
+  { name: PMTOGGLE_COMMAND, matches: isPmToggleCommand },
+  { name: CLASSICXREF_COMMAND, matches: isClassicXRefCommand },
   { name: FILETAB_COMMAND, matches: isFileTabCommand },
   { name: FILETABCLOSE_COMMAND, matches: isFileTabCloseCommand },
   { name: QVDRAWING_COMMAND, matches: isQuickViewDrawingCommand },

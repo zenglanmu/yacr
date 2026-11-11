@@ -64,6 +64,25 @@ pub(super) fn is_multiline_text_source(entity: &DbEntity) -> bool {
 /// the documented `StyleId(0)` entry (ADR 0019 F.1).
 pub(super) const TEXT_STYLE_NAME: &str = "Standard";
 
+/// Resolve the session's current DIMSTYLE row for a create command.
+///
+/// The name comes from [`SessionState::current_dim_style_name`] (`DIMSTYLE SET`
+/// writes it; the default is `Standard`). An absent row is a named refusal —
+/// creation never falls back to another style, so a `SET` to a deleted row
+/// fails loudly instead of silently using `Standard`.
+pub(super) fn current_dim_style(
+    drawing: &DrawingDatabase,
+    session: &SessionState,
+) -> CadResult<(String, cad_domain::DimensionStyleValues)> {
+    let name = session.current_dim_style_name();
+    let style = drawing.resolve_dim_style(name).ok_or_else(|| {
+        CadError::InvalidInput(format!(
+            "dimstyle.missing: the drawing has no dimension style named '{name}' to create with"
+        ))
+    })?;
+    Ok((name.to_string(), style))
+}
+
 /// Resolve the `(style, font)` pair a **created** text entity stores.
 ///
 /// The single style path for both text-creation commands: `Standard` by name,
@@ -72,8 +91,20 @@ pub(super) const TEXT_STYLE_NAME: &str = "Standard";
 /// convention). Nothing is invented: a drawing without the style stores what the
 /// fallback actually is.
 pub(super) fn resolve_created_text_style(drawing: &DrawingDatabase) -> (StyleId, Option<String>) {
+    resolve_created_text_style_named(drawing, TEXT_STYLE_NAME)
+}
+
+/// Resolve `(style, font)` for a **named** current text style.
+///
+/// Used by the table-write tests to pin that a renamed/created row resolves; an
+/// unresolvable name keeps the documented `StyleId(0)` fallback, exactly like the
+/// constant path.
+pub(super) fn resolve_created_text_style_named(
+    drawing: &DrawingDatabase,
+    name: &str,
+) -> (StyleId, Option<String>) {
     let resolved = drawing
-        .style_by_name(TEXT_STYLE_NAME)
+        .style_by_name(name)
         .or_else(|| drawing.style(StyleId(0)));
     (
         resolved.map(|style| style.id).unwrap_or(StyleId(0)),
@@ -595,6 +626,9 @@ pub(crate) fn apply_drawing_patches(
     block_patches: &[cad_db::BlockPatch],
     layer_patches: &[cad_db::LayerPatch],
     layout_patches: &[cad_db::LayoutPatch],
+    style_patches: &[cad_db::StylePatch],
+    dim_style_patches: &[cad_db::DimStylePatch],
+    mleader_style_patches: &[cad_db::MLeaderStylePatch],
     forward: bool,
 ) -> CadResult<ChangeSet> {
     let changes: Vec<(EntityId, Option<DbEntity>)> = patches
@@ -663,7 +697,47 @@ pub(crate) fn apply_drawing_patches(
             state.clone().map(|state| (patch.id, Some(state)))
         })
         .collect();
-    drawing.apply_drawing_changes_with_blocks_display_layers_and_layouts(
+    let style_changes: Vec<(StyleId, Option<cad_db::Style>)> = style_patches
+        .iter()
+        .map(|p| {
+            (
+                p.id,
+                if forward {
+                    p.after.clone()
+                } else {
+                    p.before.clone()
+                },
+            )
+        })
+        .collect();
+    let dim_style_changes: Vec<(DimStyleId, Option<cad_db::DimStyle>)> = dim_style_patches
+        .iter()
+        .map(|p| {
+            (
+                p.id,
+                if forward {
+                    p.after.clone()
+                } else {
+                    p.before.clone()
+                },
+            )
+        })
+        .collect();
+    let mleader_style_changes: Vec<(MLeaderStyleId, Option<cad_db::MLeaderStyle>)> =
+        mleader_style_patches
+            .iter()
+            .map(|p| {
+                (
+                    p.id,
+                    if forward {
+                        p.after.clone()
+                    } else {
+                        p.before.clone()
+                    },
+                )
+            })
+            .collect();
+    drawing.apply_drawing_changes_with_blocks_display_layers_and_layouts_and_styles(
         reason,
         transaction,
         &block_changes,
@@ -671,6 +745,11 @@ pub(crate) fn apply_drawing_patches(
         &display,
         &layer_changes,
         &layout_changes,
+        cad_db::StyleTableChanges {
+            styles: &style_changes,
+            dim_styles: &dim_style_changes,
+            mleader_styles: &mleader_style_changes,
+        },
     )
 }
 

@@ -1,10 +1,12 @@
 //! Wave 5 **named refusals** over the attribute and xref surfaces.
 //!
-//! Twenty-three AutoCAD 2026 names describe features this build has no model or
+//! Twenty-two AutoCAD 2026 names describe features this build has no model or
 //! API for: block attributes (definition, editing, import/export, extraction,
 //! redefinition, synchronisation, global edit), entity XDATA, xref bind/insert,
-//! external-reference/underlay attachment, an xref editing session and a
-//! separate classic xref palette.
+//! external-reference/underlay attachment and an xref editing session.
+//!
+//! (`CLASSICXREF` graduated out of this batch: it is a real read-only xref
+//! report plus the chrome-local classic panel.)
 //!
 //! Each name is admitted by the vocabulary and then refused with
 //! `CadError::Unsupported` carrying a **stable** reason string. A refusal writes
@@ -86,9 +88,6 @@ fn reason(ext: ExtendedCommandId) -> String {
             "-attach.unsupported: this build does not attach external references or underlays"
         }
         ExtendedCommandId::XOpen => "xopen.unsupported: this build has no xref editing session",
-        ExtendedCommandId::ClassicXRef => {
-            "classicxref.unsupported: there is no separate xref palette; use the RESOURCES panel"
-        }
         other => {
             return format!(
                 "{}: this command is not a Wave 5 refusal",

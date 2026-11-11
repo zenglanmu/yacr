@@ -6,7 +6,8 @@
 //! [`crate::command_id::dimension_edit`]. In short:
 //!
 //! * `DIMSTYLE LIST`/`CURRENT` are read-only reports of the stored DIMSTYLE
-//!   table; `DIMSTYLE SET` is a named refusal because `cad-db` has no
+//!   table; `DIMSTYLE SET` writes the session's current style and the write forms
+//!   are post-import table writes (one transaction / one undo step);
 //!   post-import style-table write API.
 //! * `DIMTEDIT`/`DIMEDIT`/`DIMOVERRIDE` reuse the existing
 //!   [`DimensionGeometry`] entity: they rebuild it through the shared synthesis
@@ -320,87 +321,6 @@ fn batch_payload<'a>(command: &'a Command, name: &str) -> CadResult<&'a Dimensio
 }
 
 impl Application {
-    /// `DIMSTYLE` / `-DIMSTYLE`: report the stored DIMSTYLE table or refuse the
-    /// style-table write this build does not have.
-    pub(crate) fn dimstyle_command(&mut self, command: &Command) -> CadResult<CommandOutcome> {
-        let request = match batch_payload(command, "dimstyle")? {
-            DimensionBatchPayload::Style(style) => style.clone(),
-            _ => {
-                return Err(invalid(
-                    "dimstyle.payload",
-                    "DIMSTYLE takes LIST, CURRENT or SET <name>",
-                ))
-            }
-        };
-        let drawing = drawing_of(self, command)?;
-        match request {
-            DimStyleCommand::List => {
-                let mut diagnostics = Vec::new();
-                for style in drawing.dim_styles() {
-                    diagnostics.push(Diagnostic {
-                        object: None,
-                        code: "dimstyle.entry".into(),
-                        message: format!(
-                            "DIMSTYLE: {} (id {}, text height {}, arrow size {}, DIMDLI {})",
-                            style.name,
-                            style.id.0,
-                            style.text_height,
-                            style.arrow_size,
-                            style.dim_line_increment
-                        ),
-                    });
-                }
-                if diagnostics.is_empty() {
-                    diagnostics.push(Diagnostic {
-                        object: None,
-                        code: "dimstyle.empty".into(),
-                        message: "DIMSTYLE: the drawing stores no dimension styles".into(),
-                    });
-                }
-                Ok(report_outcome(diagnostics))
-            }
-            DimStyleCommand::Current => {
-                // Creation resolves `Standard` (ADR 0017 B.3); there is no
-                // session "current style" variable in this build.
-                let diagnostic = match drawing.dim_style_by_name("Standard") {
-                    Some(style) => Diagnostic {
-                        object: None,
-                        code: "dimstyle.current".into(),
-                        message: format!(
-                            "DIMSTYLE CURRENT: Standard (id {}); dimension creation resolves this \
-                             style (ADR 0017 B.3)",
-                            style.id.0
-                        ),
-                    },
-                    None => Diagnostic {
-                        object: None,
-                        code: "dimstyle.current_missing".into(),
-                        message:
-                            "DIMSTYLE CURRENT: the drawing has no 'Standard' dimension style; \
-                                  creation would refuse (nothing was changed)"
-                                .into(),
-                    },
-                };
-                Ok(report_outcome(vec![diagnostic]))
-            }
-            DimStyleCommand::Set(name) => {
-                if drawing.dim_style_by_name(&name).is_none() {
-                    return Err(invalid(
-                        "dimstyle.unknown",
-                        format!("the drawing has no dimension style named '{name}'"),
-                    ));
-                }
-                Err(unsupported(
-                    "dimstyle.set_unavailable",
-                    "this build has no post-import dim-style table write API \
-                     (DrawingDatabase exposes read-only dim_styles()/dim_style_by_name(); only \
-                     DrawingDatabaseBuilder::insert_dim_style can add a row), so DIMSTYLE SET \
-                     changes nothing",
-                ))
-            }
-        }
-    }
-
     /// `DIMTEDIT`: move/justify/rotate/home the text of exactly one selected
     /// dimension.
     ///
@@ -777,6 +697,9 @@ impl Application {
                 patches,
                 block_patches: Vec::new(),
                 layer_patches: Vec::new(),
+                style_patches: Vec::new(),
+                dim_style_patches: Vec::new(),
+                mleader_style_patches: Vec::new(),
                 layout_patches: Vec::new(),
                 merge_key: None,
             },

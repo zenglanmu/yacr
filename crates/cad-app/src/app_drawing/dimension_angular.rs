@@ -49,7 +49,7 @@ impl Application {
                 "DIMANGULAR needs a DimAngular(input) payload".into(),
             ));
         };
-        let (definition, style) = match input.as_ref() {
+        let (definition, style_name, style) = match input.as_ref() {
             AngularDimensionInput::ThreePoint {
                 vertex,
                 first,
@@ -63,8 +63,14 @@ impl Application {
                     *location,
                     "DIMANGULAR",
                 )?;
-                let style = self.current_dim_style(command.document)?;
-                (definition, style)
+                let document = self
+                    .workspace
+                    .documents
+                    .get(&command.document)
+                    .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+                let (style_name, style) =
+                    super::helpers::current_dim_style(document.drawing.as_ref(), session)?;
+                (definition, style_name, style)
             }
             AngularDimensionInput::TwoLine {
                 first,
@@ -84,19 +90,12 @@ impl Application {
                 let line1 = resolve_plan_line(document, first, "DIMANGULAR")?;
                 let line2 = resolve_plan_line(document, second, "DIMANGULAR")?;
                 let definition = angular_two_line_definition(&line1, &line2, *location)?;
-                let style = document
-                    .drawing
-                    .resolve_dim_style("Standard")
-                    .ok_or_else(|| {
-                        CadError::InvalidInput(
-                            "the drawing has no 'Standard' dimension style to create with".into(),
-                        )
-                    })?;
-                (definition, style)
+                let (style_name, style) =
+                    super::helpers::current_dim_style(document.drawing.as_ref(), session)?;
+                (definition, style_name, style)
             }
         };
-        let dimension =
-            DimensionGeometry::synthesized(definition, "Standard".to_string(), style, None)?;
+        let dimension = DimensionGeometry::synthesized(definition, style_name, style, None)?;
         if dimension.measurement() <= MIN_ANGULAR_EXTENT {
             return Err(CadError::InvalidInput(
                 "DIMANGULAR is degenerate: the selected angle measures zero".into(),
@@ -108,21 +107,6 @@ impl Application {
             SemanticGeometry::Dimension(Box::new(dimension)),
             "create dimangular",
         )
-    }
-
-    /// The resolved `Standard` style snapshot for a create command (ADR 0017 B.3).
-    fn current_dim_style(&self, document_id: DocumentId) -> CadResult<DimensionStyleValues> {
-        self.workspace
-            .documents
-            .get(&document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
-            .drawing
-            .resolve_dim_style("Standard")
-            .ok_or_else(|| {
-                CadError::InvalidInput(
-                    "the drawing has no 'Standard' dimension style to create with".into(),
-                )
-            })
     }
 }
 

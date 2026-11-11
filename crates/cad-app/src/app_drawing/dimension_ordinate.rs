@@ -92,20 +92,15 @@ impl Application {
                 z: 1.0,
             },
         };
-        let style = self
-            .workspace
-            .documents
-            .get(&command.document)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
-            .drawing
-            .resolve_dim_style("Standard")
-            .ok_or_else(|| {
-                CadError::InvalidInput(
-                    "the drawing has no 'Standard' dimension style to create with".into(),
-                )
-            })?;
-        let dimension =
-            DimensionGeometry::synthesized(definition, "Standard".to_string(), style, None)?;
+        let (style_name, style) = {
+            let document = self
+                .workspace
+                .documents
+                .get(&command.document)
+                .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+            super::helpers::current_dim_style(document.drawing.as_ref(), session)?
+        };
+        let dimension = DimensionGeometry::synthesized(definition, style_name, style, None)?;
         self.commit_new_entity(
             session,
             command,

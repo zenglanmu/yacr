@@ -221,10 +221,42 @@ impl Application {
                 );
                 self.layer_command(session, &inner)
             }
-            kind => Err(CadError::Unsupported(format!(
+            // The three style tables now have a post-import write API, so their
+            // rename is the same one-transaction/one-undo path the commands use.
+            NamedObjectKind::Style => self.apply_style_table_op(
+                session,
+                command,
+                crate::command_payload::StyleTableKind::TextStyle,
+                crate::command_payload::StyleTableOp::Rename {
+                    old: rename.old.clone(),
+                    new: rename.new.clone(),
+                },
+            ),
+            NamedObjectKind::DimStyle => self.apply_style_table_op(
+                session,
+                command,
+                crate::command_payload::StyleTableKind::DimStyle,
+                crate::command_payload::StyleTableOp::Rename {
+                    old: rename.old.clone(),
+                    new: rename.new.clone(),
+                },
+            ),
+            NamedObjectKind::MLeaderStyle => self.apply_style_table_op(
+                session,
+                command,
+                crate::command_payload::StyleTableKind::MLeaderStyle,
+                crate::command_payload::StyleTableOp::Rename {
+                    old: rename.old.clone(),
+                    new: rename.new.clone(),
+                },
+            ),
+            NamedObjectKind::Block => {
+                self.rename_block_command(session, command, &rename.old, &rename.new)
+            }
+            NamedObjectKind::Linetype => Err(CadError::Unsupported(format!(
                 "rename.{}.unsupported: this build has no rename API for {}; nothing changed",
-                kind_key(kind),
-                kind_label(kind)
+                kind_key(rename.kind),
+                kind_label(rename.kind)
             ))),
         }
     }
@@ -566,6 +598,8 @@ fn kind_label(kind: NamedObjectKind) -> &'static str {
         NamedObjectKind::Block => "BLOCK",
         NamedObjectKind::Style => "STYLE",
         NamedObjectKind::Linetype => "LINETYPE",
+        NamedObjectKind::DimStyle => "DIMSTYLE",
+        NamedObjectKind::MLeaderStyle => "MLEADERSTYLE",
     }
 }
 
@@ -575,6 +609,8 @@ fn kind_key(kind: NamedObjectKind) -> &'static str {
         NamedObjectKind::Block => "block",
         NamedObjectKind::Style => "style",
         NamedObjectKind::Linetype => "linetype",
+        NamedObjectKind::DimStyle => "dimstyle",
+        NamedObjectKind::MLeaderStyle => "mleaderstyle",
     }
 }
 

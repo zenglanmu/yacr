@@ -1,10 +1,10 @@
 //! Wave 9 report/refusal contracts: `UNITS`, `DIM`, the `TXTEXP` explosion and
 //! the stable named refusals around them.
 //!
-//! `UNITS` and `DIM` are read-only reports; `TXTEXP` is a real 2D edit (font
-//! outlines to polylines, one transaction / one undo step); the rest are stable
-//! named refusals. A refusal never writes the drawing, bumps the revision or
-//! records history, so both non-writing classes stay Viewer-legal.
+//! `UNITS`, `DIM` and `SPACETRANS` are read-only reports; `TXTEXP` is a real 2D
+//! edit (font outlines to polylines, one transaction / one undo step); the rest
+//! are stable named refusals. A refusal never writes the drawing, bumps the
+//! revision or records history, so every non-writing class stays Viewer-legal.
 
 use super::*;
 use crate::app_extended_w9_reports::text_explode::install_outline_fonts;
@@ -69,7 +69,7 @@ fn dim_lists_the_implemented_dimension_selectors_without_creating_one() {
     assert_eq!(revision(&app), before);
 }
 
-const REFUSALS: [(ExtendedCommandId, &str); 3] = [
+const REFUSALS: [(ExtendedCommandId, &str); 2] = [
     (
         ExtendedCommandId::DimExport,
         "dimex.unsupported: dimension-style export files are not modeled",
@@ -77,10 +77,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 3] = [
     (
         ExtendedCommandId::DimImport,
         "dimim.unsupported: dimension-style import files are not modeled",
-    ),
-    (
-        ExtendedCommandId::SpaceTrans,
-        "spacetrans.unsupported: no model/paper distance-conversion API",
     ),
 ];
 
@@ -110,11 +106,7 @@ fn wave9_reports_and_refusals_are_viewer_legal() {
         execute(&mut app, &mut session, ext)
             .unwrap_or_else(|error| panic!("{ext:?} is Viewer-legal: {error:?}"));
     }
-    for ext in [
-        ExtendedCommandId::DimExport,
-        ExtendedCommandId::DimImport,
-        ExtendedCommandId::SpaceTrans,
-    ] {
+    for ext in [ExtendedCommandId::DimExport, ExtendedCommandId::DimImport] {
         let (mut app, mut session) = application_with_document();
         session
             .switch_mode(AppMode::Viewer)
@@ -128,6 +120,96 @@ fn wave9_reports_and_refusals_are_viewer_legal() {
             other => panic!("{ext:?} must reach its named refusal, got {other:?}"),
         }
     }
+}
+
+#[test]
+fn spacetrans_converts_a_model_distance_to_paper_for_the_active_viewport() {
+    let (mut app, mut session) = application_with_layouts();
+    session.active_space = SpaceId::Paper(LayoutId(1));
+    let before = revision(&app);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SpaceTrans),
+                CommandPayload::SpaceTrans(100.0),
+            ),
+        )
+        .expect("SPACETRANS is admitted in a paper layout");
+    let row = outcome
+        .diagnostics
+        .iter()
+        .find(|row| row.code == "spacetrans.converted")
+        .expect("the conversion is reported");
+    assert!(
+        row.message.contains("100 model unit(s) = 1 paper unit(s)"),
+        "{}",
+        row.message
+    );
+    assert!(row.message.contains("model→paper"), "{}", row.message);
+    let factor = outcome
+        .diagnostics
+        .iter()
+        .find(|row| row.code == "spacetrans.factor")
+        .expect("the direction/factor is reported");
+    assert!(factor.message.contains("0.01"), "{}", factor.message);
+    assert!(
+        factor.message.contains("100 model unit(s) per paper unit"),
+        "{}",
+        factor.message
+    );
+    assert_eq!(revision(&app), before, "SPACETRANS writes no drawing");
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn spacetrans_refuses_model_space_and_an_unresolvable_viewport() {
+    let (mut app, mut session) = application_with_document();
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SpaceTrans),
+                CommandPayload::SpaceTrans(10.0),
+            ),
+        )
+        .expect_err("model space has no viewport conversion");
+    assert!(
+        error.to_string().contains("spacetrans.model_space"),
+        "{error}"
+    );
+
+    let (mut app, mut session) = application_with_layouts();
+    session.active_space = SpaceId::Paper(LayoutId(2));
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SpaceTrans),
+                CommandPayload::SpaceTrans(10.0),
+            ),
+        )
+        .expect_err("an unresolved viewport is refused by name");
+    assert!(
+        error
+            .to_string()
+            .contains("spacetrans.unsupported_viewport"),
+        "{error}"
+    );
+
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SpaceTrans),
+                CommandPayload::SpaceTrans(-1.0),
+            ),
+        )
+        .expect_err("a non-positive distance is refused");
+    assert!(
+        error.to_string().contains("spacetrans.invalid_distance"),
+        "{error}"
+    );
 }
 
 // ---------------------------------------------------------------------------

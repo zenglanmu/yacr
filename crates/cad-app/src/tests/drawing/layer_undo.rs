@@ -97,6 +97,9 @@ fn layer_patch_undo_and_redo_restore_attributes_in_one_revision_each() {
                 Some(before_row.clone()),
                 Some(after_row.clone()),
             )],
+            style_patches: Vec::new(),
+            dim_style_patches: Vec::new(),
+            mleader_style_patches: Vec::new(),
             layout_patches: Vec::new(),
             merge_key: None,
         })

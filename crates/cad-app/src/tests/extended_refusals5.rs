@@ -1,7 +1,7 @@
 //! Wave 5 named-refusal contracts: `ATTDEF`, `-ATTDEF`, `ATTEDIT`, `-ATTEDIT`,
 //! `ATTIPEDIT`, `ATTIN`, `ATTOUT`, `ATTEXT`, `-ATTEXT`, `EATTEDIT`, `EATTEXT`,
 //! `-EATTEXT`, `ATTREDEF`, `ATTSYNC`, `GATTE`, `XDATA`, `XBIND`, `-XBIND`,
-//! `XATTACH`, `ATTACH`, `-ATTACH`, `XOPEN`, `CLASSICXREF`.
+//! `XATTACH`, `ATTACH`, `-ATTACH`, `XOPEN`.
 //!
 //! Each name is admitted by the vocabulary and refused with
 //! `CadError::Unsupported` carrying a **stable** reason. A refusal must write
@@ -10,7 +10,7 @@
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 23] = [
+const REFUSALS: [(ExtendedCommandId, &str); 22] = [
     (
         ExtendedCommandId::AttDef,
         "attdef.unsupported: this build has no block-attribute model",
@@ -98,10 +98,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 23] = [
     (
         ExtendedCommandId::XOpen,
         "xopen.unsupported: this build has no xref editing session",
-    ),
-    (
-        ExtendedCommandId::ClassicXRef,
-        "classicxref.unsupported: there is no separate xref palette; use the RESOURCES panel",
     ),
 ];
 

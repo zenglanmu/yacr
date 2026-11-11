@@ -180,7 +180,7 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'EXTERNALREFERENCESCLOSE', 'ATTDEF', '-ATTDEF', 'ATTEDIT', '-ATTEDIT',
   'ATTIPEDIT', 'ATTIN', 'ATTOUT', 'ATTEXT', '-ATTEXT', 'EATTEDIT', 'EATTEXT',
   '-EATTEXT', 'ATTREDEF', 'ATTSYNC', 'GATTE', 'XDATA', 'XBIND', '-XBIND',
-  'XATTACH', 'ATTACH', '-ATTACH', 'XOPEN', 'CLASSICXREF',
+  'XATTACH', 'ATTACH', '-ATTACH', 'XOPEN',
 
   // The 2026-11-09 Wave 6 batch: the drawing-log token, the three read-only
   // file/plot/export reports and the twenty-four named refusals all read the
@@ -888,6 +888,7 @@ export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze([
   // panel (a repeat close is a success); `QUICKCALC` opens the calculator; and
   // `WORKSPACE`/`WSSAVE`/`WSSETTINGS` drive the in-memory workspace presets.
   'RIBBON', 'RIBBONCLOSE', 'HIDEPALETTES', 'SHOWPALETTES',
+  'PMTOGGLE', 'CLASSICXREF',
   'FILETAB', 'FILETABCLOSE',
   'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE',
   'QUICKCALC',

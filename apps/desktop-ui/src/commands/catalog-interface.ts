@@ -32,6 +32,9 @@ export const INTERFACE_COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.
   // drawing tabs as one explicit state; SHOWPALETTES restores all three.
   { id: 'HIDEPALETTES', labelKey: 'draw.kind.hidepalettes', icon: 'eyeOff', group: 'view' },
   { id: 'SHOWPALETTES', labelKey: 'draw.kind.showpalettes', icon: 'eye', group: 'view' },
+  // PMTOGGLE flips the same value between the show and hide states; two calls
+  // restore the original state, and hiding closes the open palette windows.
+  { id: 'PMTOGGLE', labelKey: 'draw.kind.pmtoggle', icon: 'eye', group: 'view' },
   // Drawing-tab strip visibility. The single-document build still has the strip
   // (Start + the open drawing), so this is a real show/hide pair.
   { id: 'FILETAB', labelKey: 'draw.kind.filetab', icon: 'app', group: 'view' },

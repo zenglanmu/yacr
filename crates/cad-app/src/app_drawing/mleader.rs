@@ -42,11 +42,9 @@ use crate::app_drawing::annot_batch::leader::{
 };
 use cad_domain::{MLeaderPathType, MultiLeaderGeometry, MultiLeaderParts};
 
-/// The multileader style `MLEADER` creation resolves by name (ADR 0019 D).
-///
-/// There is no style selector in the capture, so `Standard` is the one name the
-/// command reads; the table always carries it (the builder pins it).
-const MLEADER_STYLE_NAME: &str = "Standard";
+// `MLEADERSTYLE SET <name>` writes `SessionState::current_mleader_style`, so
+// creation reads the session name (default `Standard`, which the builder pins).
+// A missing row is a named refusal rather than a silent fallback.
 
 impl Application {
     /// Insert one multileader into model space on the active layer.
@@ -111,12 +109,13 @@ impl Application {
                 .get(&command.document)
                 .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
             let drawing = document.drawing.as_ref();
+            let style_name_query = session.current_mleader_style_name();
             let row = drawing
-                .mleader_style_by_name(MLEADER_STYLE_NAME)
+                .mleader_style_by_name(style_name_query)
                 .ok_or_else(|| {
                     CadError::InvalidInput(format!(
                         "mleader.style_missing: the drawing has no MLEADERSTYLE named \
-                         '{MLEADER_STYLE_NAME}'"
+                         '{style_name_query}'"
                     ))
                 })?;
             // Store the row's own name, not the constant, so a source row with a
@@ -124,10 +123,10 @@ impl Application {
             // written MLEADERSTYLE record).
             let style_name = row.name.clone();
             let resolution = drawing
-                .resolve_mleader_style(MLEADER_STYLE_NAME)
+                .resolve_mleader_style(style_name_query)
                 .ok_or_else(|| {
                     CadError::InvalidInput(format!(
-                        "mleader.style_missing: the MLEADERSTYLE '{MLEADER_STYLE_NAME}' did not \
+                        "mleader.style_missing: the MLEADERSTYLE '{style_name_query}' did not \
                          resolve"
                     ))
                 })?;

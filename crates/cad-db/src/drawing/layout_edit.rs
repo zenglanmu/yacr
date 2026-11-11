@@ -395,6 +395,7 @@ impl DrawingDatabase {
             &display,
             layer_changes,
             layout_changes,
+            super::style_edit::StyleTableChanges::default(),
         )
     }
 

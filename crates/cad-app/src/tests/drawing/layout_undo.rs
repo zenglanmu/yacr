@@ -114,6 +114,9 @@ fn layout_patch_undo_and_redo_restore_row_and_plot_settings_in_one_revision_each
             patches: Vec::new(),
             block_patches: Vec::new(),
             layer_patches: Vec::new(),
+            style_patches: Vec::new(),
+            dim_style_patches: Vec::new(),
+            mleader_style_patches: Vec::new(),
             layout_patches: vec![layout_patch(LayoutId(2), None, Some(created.clone()))],
             merge_key: None,
         })

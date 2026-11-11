@@ -7,12 +7,14 @@
 import React from 'react';
 import { useChromeSurfaceState } from '../chrome/use-chrome-store.ts';
 import {
+  closeClassicXref,
   closeQuickCalc,
   closeQuickView,
   closeWorkspaceSelector,
   closeWorkspaceSettings,
 } from '../chrome/surfaces.ts';
 import { QuickViewPanel } from './QuickViewPanel.tsx';
+import { ClassicXrefPanel } from './ClassicXrefPanel.tsx';
 import { QuickCalcDialog } from './QuickCalcDialog.tsx';
 import { WorkspaceSelector, WorkspaceSettingsDialog } from './WorkspaceSurfaces.tsx';
 
@@ -28,6 +30,7 @@ export function ChromeSurfaces() {
         />
       ) : null}
       {state.quickCalc ? <QuickCalcDialog onClose={closeQuickCalc} /> : null}
+      {state.classicXref ? <ClassicXrefPanel onClose={closeClassicXref} /> : null}
       {state.workspaceSelector ? <WorkspaceSelector onClose={closeWorkspaceSelector} /> : null}
       {state.workspaceSettings !== null ? (
         <WorkspaceSettingsDialog

@@ -39,44 +39,122 @@ fn count_code(outcome: &CommandOutcome, code: &str) -> usize {
 }
 
 #[test]
-fn sysvarmonitor_reports_the_setvar_closed_set_only() {
+fn sysvarmonitor_adds_lists_and_reports_a_real_change() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);
-    let outcome = execute(&mut app, &mut session, ExtendedCommandId::SysVarMonitor)
-        .expect("SYSVARMONITOR is admitted");
-    assert!(outcome.changes.is_none());
-
-    // Exactly the eight modelled variables, in the documented report order.
-    assert_eq!(count_code(&outcome, "sysvarmonitor.value"), 8);
-    let rows: Vec<&str> = outcome
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.code == "sysvarmonitor.value")
-        .map(|diagnostic| diagnostic.message.as_str())
-        .collect();
-    for name in [
-        "PDMODE", "PDSIZE", "SNAPUNIT", "LTSCALE", "GRID", "SNAP", "ORTHO", "TEXTSIZE",
-    ] {
-        assert!(
-            rows.iter().any(|row| row.contains(name)),
-            "SYSVARMONITOR must report {name}"
-        );
-    }
-    assert!(diagnostic(&outcome, "sysvarmonitor.summary")
+    let added = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SysVarMonitor),
+                CommandPayload::SysVarMonitor(SysVarMonitorAction::Add("SNAPUNIT".into())),
+            ),
+        )
+        .expect("SYSVARMONITOR ADD is admitted");
+    assert!(added.changes.is_none());
+    assert!(diagnostic(&added, "sysvarmonitor.added")
         .message
-        .contains("not modeled"));
+        .contains("SNAPUNIT = 10"));
+
+    // The bare selector is the LIST form. Nothing changed yet.
+    let first = execute(&mut app, &mut session, ExtendedCommandId::SysVarMonitor)
+        .expect("SYSVARMONITOR is admitted");
+    assert_eq!(count_code(&first, "sysvarmonitor.value"), 1);
+    assert!(diagnostic(&first, "sysvarmonitor.value")
+        .message
+        .contains("unchanged since the snapshot"));
+
+    // A real session-value change is reported against the snapshot.
+    app.execute(
+        &mut session,
+        command(CommandId::SetSnapSpacing, CommandPayload::SnapSpacing(25.0)),
+    )
+    .expect("SNAPUNIT writes the session spacing");
+    let changed = execute(&mut app, &mut session, ExtendedCommandId::SysVarMonitor)
+        .expect("SYSVARMONITOR is admitted");
+    let row = diagnostic(&changed, "sysvarmonitor.changed");
+    assert!(row.message.contains("from 10 to 25"), "{}", row.message);
+    assert!(diagnostic(&changed, "sysvarmonitor.summary")
+        .message
+        .contains("1 change(s)"));
+
+    // The snapshot was updated, so the next query is the unchanged row again.
+    let stable = execute(&mut app, &mut session, ExtendedCommandId::SysVarMonitor)
+        .expect("SYSVARMONITOR is admitted");
+    assert_eq!(count_code(&stable, "sysvarmonitor.changed"), 0);
+    assert_eq!(count_code(&stable, "sysvarmonitor.value"), 1);
+
+    let removed = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SysVarMonitor),
+                CommandPayload::SysVarMonitor(SysVarMonitorAction::Remove("SNAPUNIT".into())),
+            ),
+        )
+        .expect("SYSVARMONITOR REMOVE is admitted");
+    assert!(diagnostic(&removed, "sysvarmonitor.removed")
+        .message
+        .contains("no longer monitored"));
+
+    let empty = execute(&mut app, &mut session, ExtendedCommandId::SysVarMonitor)
+        .expect("SYSVARMONITOR is admitted");
+    assert!(diagnostic(&empty, "sysvarmonitor.no_variables")
+        .message
+        .contains("no variables are monitored"));
     assert_eq!(revision(&app), before, "SYSVARMONITOR writes no drawing");
     assert!(!app.can_undo(&DocumentId(1)));
 }
 
 #[test]
-fn sysvdlg_reads_the_same_set_and_names_the_missing_dialog() {
+fn sysvarmonitor_refuses_an_unknown_variable_by_name() {
+    let (mut app, mut session) = application_with_document();
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SysVarMonitor),
+                CommandPayload::SysVarMonitor(SysVarMonitorAction::Add("PLOTSTYLE".into())),
+            ),
+        )
+        .expect_err("an unmodelled name is refused");
+    assert!(
+        error.to_string().contains("sysvarmonitor.unknown_variable"),
+        "{error}"
+    );
+    let refused = app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::SysVarMonitor),
+            CommandPayload::Points(vec![point(1.0, 2.0)]),
+        ),
+    );
+    assert!(refused.is_err(), "SYSVARMONITOR rejects another payload");
+}
+
+#[test]
+fn sysvdlg_lists_every_exposed_variable_and_marks_the_rest_not_tracked() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);
     let outcome = execute(&mut app, &mut session, ExtendedCommandId::SysVarDialog)
         .expect("SYSVDLG is admitted");
     assert_eq!(count_code(&outcome, "sysvdlg.value"), 8);
     assert_eq!(count_code(&outcome, "sysvarmonitor.value"), 0);
+    for name in [
+        "PDMODE", "PDSIZE", "SNAPUNIT", "LTSCALE", "GRID", "SNAP", "ORTHO", "TEXTSIZE",
+    ] {
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "sysvdlg.value"
+                    && diagnostic.message.contains(name)),
+            "SYSVDLG must report {name}"
+        );
+    }
+    assert!(diagnostic(&outcome, "sysvdlg.not_tracked")
+        .message
+        .contains("not tracked"));
     assert!(diagnostic(&outcome, "sysvdlg.dialog_not_implemented")
         .message
         .contains("no system-variable dialog"));

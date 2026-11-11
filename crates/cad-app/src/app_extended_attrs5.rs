@@ -7,15 +7,17 @@
 //! `BATTMAN` and `BATTORDER` are read-only listings of the drawing's block
 //! definitions, reusing the same `drawing.blocks()` access `XLIST`/`BLOCK?` read;
 //! both add a `*.attributes_not_modeled` diagnostic because the block table has
-//! no attribute rows to list. `XREF`/`-XREF`/`EXTERNALREFERENCES` report the
-//! import-time external-reference provenance through
+//! no attribute rows to list. `XREF`/`-XREF`/`EXTERNALREFERENCES`/`CLASSICXREF`
+//! report the import-time external-reference provenance through
 //! `drawing.external_references()` — the database **does** expose that
 //! enumeration, so no `xref.not_modeled` fallback is reachable; a drawing with no
-//! xrefs reports zero rows rather than inventing any. `EXTERNALREFERENCESCLOSE`
-//! is a named no-op because this build has no palette to close.
+//! xrefs reports zero rows rather than inventing any. `CLASSICXREF` additionally
+//! names attach/detach/reload as unsupported; its panel is a chrome surface.
+//! `EXTERNALREFERENCESCLOSE` is a named no-op because this build has no palette
+//! to close.
 //!
 //! None of these opens a transaction, bumps the revision, records a
-//! `cad-history` entry or publishes a `ChangeSet`; all seven are Viewer-legal.
+//! `cad-history` entry or publishes a `ChangeSet`; all eight are Viewer-legal.
 
 use super::*;
 use crate::app_reports_ext::{diagnostic, report_outcome};
@@ -43,6 +45,7 @@ impl Application {
                 self.xref_report(command, XrefReport::ExternalReferences)
             }
             ExtendedCommandId::ExternalReferencesClose => self.externalreferences_close(command),
+            ExtendedCommandId::ClassicXRef => self.xref_report(command, XrefReport::ClassicXRef),
             other => Err(CadError::Invariant(format!(
                 "not a Wave 5 attribute/xref command: {other:?}"
             ))),
@@ -177,6 +180,21 @@ impl Application {
                     .into(),
             ));
         }
+        if matches!(report, XrefReport::ClassicXRef) {
+            for (code, action) in [
+                ("classicxref.attach_unsupported", "attaching"),
+                ("classicxref.detach_unsupported", "detaching"),
+                ("classicxref.reload_unsupported", "reloading"),
+            ] {
+                diagnostics.push(diagnostic(
+                    code,
+                    format!(
+                        "CLASSICXREF: {action} an external reference is NOT IMPLEMENTED in this \
+                         build; the classic panel lists the existing rows and changes nothing"
+                    ),
+                ));
+            }
+        }
         Ok(report_outcome(diagnostics))
     }
 
@@ -249,6 +267,9 @@ enum XrefReport {
     DashXRef,
     /// `EXTERNALREFERENCES`: `externalreferences.entry` / `.summary`.
     ExternalReferences,
+    /// `CLASSICXREF`: `classicxref.entry` / `.summary` plus explicit
+    /// attach/detach/reload refusals; the UI panel is a chrome surface.
+    ClassicXRef,
 }
 
 impl XrefReport {
@@ -257,6 +278,7 @@ impl XrefReport {
             Self::XRef => "XREF",
             Self::DashXRef => "-XREF",
             Self::ExternalReferences => "EXTERNALREFERENCES",
+            Self::ClassicXRef => "CLASSICXREF",
         }
     }
 
@@ -265,6 +287,7 @@ impl XrefReport {
             Self::XRef => "xref.entry",
             Self::DashXRef => "-xref.entry",
             Self::ExternalReferences => "externalreferences.entry",
+            Self::ClassicXRef => "classicxref.entry",
         }
     }
 
@@ -273,6 +296,7 @@ impl XrefReport {
             Self::XRef => "xref.summary",
             Self::DashXRef => "-xref.summary",
             Self::ExternalReferences => "externalreferences.summary",
+            Self::ClassicXRef => "classicxref.summary",
         }
     }
 }

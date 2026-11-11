@@ -281,28 +281,13 @@ fn array_without_a_payload_reports_the_two_planners_and_writes_nothing() {
     assert_eq!(revision(&app), before);
 }
 
-const REFUSALS: [(ExtendedCommandId, &str); 5] = [
-    (
-        ExtendedCommandId::MLeaderAlign,
-        "mleaderalign.unsupported: no multileader alignment model",
-    ),
-    (
-        ExtendedCommandId::MLeaderEdit,
-        "mleaderedit.unsupported: no add/remove leader-line API",
-    ),
-    (
-        ExtendedCommandId::MLeaderCollect,
-        "mleadercollect.unsupported: no multileader collection/table model",
-    ),
-    (
-        ExtendedCommandId::Tolerance,
-        "tolerance.unsupported: no feature-control-frame (tolerance) object model",
-    ),
-    (
-        ExtendedCommandId::DimArc,
-        "dimarc.unsupported: the dimension domain has no arc-length kind",
-    ),
-];
+// `MLEADERALIGN`/`MLEADEREDIT`/`MLEADERCOLLECT`/`TOLERANCE` graduated to real
+// entity writes on 2026-11-12 (`app_drawing::mleader_edit`,
+// `app_drawing::tolerance`); their contracts live in `tests::extended_w9_mleader`.
+const REFUSALS: [(ExtendedCommandId, &str); 1] = [(
+    ExtendedCommandId::DimArc,
+    "dimarc.unsupported: the dimension domain has no arc-length kind",
+)];
 
 #[test]
 fn wave9_draw_refusals_answer_with_their_exact_stable_reason() {

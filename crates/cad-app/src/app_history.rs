@@ -39,6 +39,9 @@ impl Application {
             &record.block_patches,
             &record.layer_patches,
             &record.layout_patches,
+            &record.style_patches,
+            &record.dim_style_patches,
+            &record.mleader_style_patches,
             false,
         ) {
             Ok(changes) => changes,
@@ -86,6 +89,9 @@ impl Application {
             &record.block_patches,
             &record.layer_patches,
             &record.layout_patches,
+            &record.style_patches,
+            &record.dim_style_patches,
+            &record.mleader_style_patches,
             true,
         ) {
             Ok(changes) => changes,

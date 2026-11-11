@@ -225,10 +225,29 @@ fn rename_layer_succeeds_and_refuses_duplicate_unknown_and_illegal_names() {
 #[test]
 fn rename_of_a_kind_without_an_api_is_a_named_refusal() {
     let (mut app, mut session) = app_with_purge_fixture();
-    for kind in [
-        NamedObjectKind::Block,
-        NamedObjectKind::Style,
-        NamedObjectKind::Linetype,
+    // LINETYPE still has no write API: the refusal is named, not silent.
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::Rename,
+        CommandPayload::Rename(RenameCommand {
+            kind: NamedObjectKind::Linetype,
+            old: "A".into(),
+            new: "B".into(),
+        }),
+    )
+    .expect_err("no rename API");
+    assert!(
+        error.to_string().contains("rename.linetype.unsupported"),
+        "{error}"
+    );
+
+    // The writable kinds address a row; an unknown name is their own refusal.
+    for (kind, code) in [
+        (NamedObjectKind::Block, "block.unknown"),
+        (NamedObjectKind::Style, "style.unknown"),
+        (NamedObjectKind::DimStyle, "dimstyle.unknown"),
+        (NamedObjectKind::MLeaderStyle, "mleaderstyle.unknown"),
     ] {
         let error = execute(
             &mut app,
@@ -240,8 +259,8 @@ fn rename_of_a_kind_without_an_api_is_a_named_refusal() {
                 new: "B".into(),
             }),
         )
-        .expect_err("no rename API");
-        assert!(error.to_string().contains("unsupported"), "{error}");
+        .expect_err("unknown row");
+        assert!(error.to_string().contains(code), "{kind:?}: {error}");
     }
 }
 

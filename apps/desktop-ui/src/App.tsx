@@ -68,6 +68,7 @@ import { DEFAULT_CHROME_VISIBILITY, paletteChrome, withFileTabs, withRibbon } fr
 import {
   closeQuickCalc,
   closeQuickView,
+  openClassicXref,
   openQuickCalc,
   openQuickView,
   openWorkspaceSelector,
@@ -485,6 +486,8 @@ function Shell() {
       // invisible windows.
       if (!value) closeAllPalettes();
     },
+    togglePaletteChrome: () => { if (chromeVisibility.palettes) closeAllPalettes(); setChromeVisibility(paletteChrome(!chromeVisibility.palettes)); },
+    openClassicXref,
     setQuickView: (panel) => openQuickView(panel),
     closeQuickView: (panel) => closeQuickView(panel),
     refreshQuickView,

@@ -125,7 +125,7 @@ fn style_and_dash_style_list_the_same_table_under_their_own_codes() {
     assert!(entry.message.contains("Note"), "{}", entry.message);
     assert!(diagnostic(&style, "style.summary")
         .message
-        .contains("creating or modifying text styles is NOT IMPLEMENTED"));
+        .contains("write forms are NEW/RENAME/DELETE/SET"));
     assert_eq!(count_code(&style, "-style.entry"), 0);
 
     let dash =
@@ -152,7 +152,7 @@ fn mleaderstyle_lists_the_standard_row_read_only() {
         .contains("Standard"));
     assert!(diagnostic(&outcome, "mleaderstyle.summary")
         .message
-        .contains("creating, modifying or setting a current style is NOT IMPLEMENTED"));
+        .contains("SET makes"));
     assert_eq!(revision(&app), before);
 }
 

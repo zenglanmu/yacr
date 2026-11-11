@@ -260,6 +260,33 @@ fn xref_reports_real_provenance_under_its_own_codes() {
 }
 
 #[test]
+fn classicxref_lists_the_same_rows_and_names_the_unsupported_actions() {
+    let (mut app, mut session) = application_with_xrefs();
+    let before = revision(&app);
+    let outcome = execute(&mut app, &mut session, ExtendedCommandId::ClassicXRef)
+        .expect("CLASSICXREF is admitted");
+    assert!(outcome.changes.is_none());
+    assert_eq!(count_code(&outcome, "classicxref.entry"), 2);
+    assert!(diagnostic(&outcome, "classicxref.entry")
+        .message
+        .contains("XREF-A"));
+    assert!(diagnostic(&outcome, "classicxref.summary")
+        .message
+        .contains("2 external reference(s)"));
+    assert!(diagnostic(&outcome, "classicxref.attach_unsupported")
+        .message
+        .contains("attaching"));
+    assert!(diagnostic(&outcome, "classicxref.detach_unsupported")
+        .message
+        .contains("detaching"));
+    assert!(diagnostic(&outcome, "classicxref.reload_unsupported")
+        .message
+        .contains("reloading"));
+    assert_eq!(revision(&app), before, "CLASSICXREF writes nothing");
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
 fn xref_on_a_drawing_without_references_reports_zero_rows() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);

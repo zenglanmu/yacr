@@ -98,17 +98,14 @@ impl Application {
             ));
         }
         let drawing = drawing_of(self, command)?;
-        let style = drawing.resolve_dim_style("Standard").ok_or_else(|| {
-            invalid(
-                "qdim.no_style",
-                "the drawing has no 'Standard' dimension style to create with",
-            )
-        })?;
+        let (_, style) = super::helpers::current_dim_style(drawing.as_ref(), session)?;
         let spacing = style.dim_line_increment;
         if !spacing.is_finite() || spacing <= QDIM_EPS {
             return Err(invalid(
                 "qdim.bad_spacing",
-                format!("the Standard style's DIMDLI must be finite and positive, got {spacing}"),
+                format!(
+                    "the current dimension style's DIMDLI must be finite and positive, got                      {spacing}"
+                ),
             ));
         }
         let increment = request.increment.unwrap_or(spacing);

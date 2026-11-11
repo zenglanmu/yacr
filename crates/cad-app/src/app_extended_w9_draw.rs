@@ -735,16 +735,6 @@ fn nearest_ends(a: OpenEnds, b: OpenEnds) -> CadResult<(Point3, Point3, Point3, 
 
 fn reason(ext: ExtendedCommandId) -> String {
     let text = match ext {
-        ExtendedCommandId::MLeaderAlign => {
-            "mleaderalign.unsupported: no multileader alignment model"
-        }
-        ExtendedCommandId::MLeaderEdit => "mleaderedit.unsupported: no add/remove leader-line API",
-        ExtendedCommandId::MLeaderCollect => {
-            "mleadercollect.unsupported: no multileader collection/table model"
-        }
-        ExtendedCommandId::Tolerance => {
-            "tolerance.unsupported: no feature-control-frame (tolerance) object model"
-        }
         ExtendedCommandId::DimArc => {
             "dimarc.unsupported: the dimension domain has no arc-length kind"
         }

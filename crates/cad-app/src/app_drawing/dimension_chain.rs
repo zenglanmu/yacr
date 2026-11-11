@@ -144,22 +144,16 @@ impl Application {
             )));
         }
         let document_id = command.document;
-        let (base, style) = {
+        let (base, style_name, style) = {
             let document = self
                 .workspace
                 .documents
                 .get(&document_id)
                 .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
             let base = resolve_chain_base(document.drawing.as_ref(), &input.base, name)?;
-            let style = document
-                .drawing
-                .resolve_dim_style("Standard")
-                .ok_or_else(|| {
-                    CadError::InvalidInput(
-                        "the drawing has no 'Standard' dimension style to create with".into(),
-                    )
-                })?;
-            (base, style)
+            let (style_name, style) =
+                super::helpers::current_dim_style(document.drawing.as_ref(), session)?;
+            (base, style_name, style)
         };
         check_chain_plane(&base, &input.points, name)?;
         let definitions = match kind {
@@ -176,7 +170,7 @@ impl Application {
             dimensions.push(SemanticGeometry::Dimension(Box::new(
                 DimensionGeometry::synthesized(
                     definition,
-                    "Standard".to_string(),
+                    style_name.clone(),
                     style.clone(),
                     None,
                 )?,

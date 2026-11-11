@@ -12,13 +12,20 @@
 //!
 //! The remaining names describe features with no model or API here and are
 //! refused with a stable `CadError::Unsupported` reason: dimension-style
-//! export/import files (`DIMEX`, `DIMIM`), the model/paper distance converter
-//! (`SPACETRANS`) and field updates (`UPDATEFIELD`). A refusal writes nothing,
-//! bumps no revision and records no `cad-history` entry.
+//! export/import files (`DIMEX`, `DIMIM`) and field updates (`UPDATEFIELD`). A
+//! refusal writes nothing, bumps no revision and records no `cad-history` entry.
+//!
+//! `SPACETRANS <distance>` is a real read-only conversion: the typed distance is
+//! read as a **model-space** length and converted to paper units for the active
+//! layout viewport through the same exact `viewport_transform` the display and
+//! measurement paths use. The inverse direction is reported too, and a
+//! model-space session or an unresolved viewport is refused by name.
 
 use super::*;
+use crate::app_layout::{layout_viewports, paper_writes::target_viewport_index};
 use crate::app_reports_ext::{diagnostic, report_outcome};
-use crate::app_utility::require_none_payload;
+use crate::app_utility::{document_drawing, require_none_payload};
+use cad_representation::{viewport_transform, ViewportState};
 
 #[path = "app_extended_w9_text_explode.rs"]
 pub(crate) mod text_explode;
@@ -61,8 +68,79 @@ impl Application {
         if matches!(ext, ExtendedCommandId::TextExplode) {
             return self.text_explode(session, command);
         }
+        if matches!(ext, ExtendedCommandId::SpaceTrans) {
+            return self.space_trans(session, command);
+        }
         require_none_payload(command, ext.selector())?;
         Err(CadError::Unsupported(reason(ext)))
+    }
+
+    /// `SPACETRANS <distance>`: convert a model-space distance to paper units for
+    /// the active layout viewport (and report the inverse direction).
+    ///
+    /// The viewport is the same "active viewport" every paper command uses
+    /// ([`target_viewport_index`]): an explicit index when one exists, the
+    /// `VPMAX`-maximized viewport of this layout, else viewport `0`. The exact
+    /// `paper_per_model` factor comes from [`viewport_transform`]; a viewport the
+    /// representation layer cannot resolve is refused by name, never guessed.
+    fn space_trans(&self, session: &SessionState, command: &Command) -> CadResult<CommandOutcome> {
+        let CommandPayload::SpaceTrans(distance) = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "spacetrans.invalid_payload: SPACETRANS needs `<distance>`".into(),
+            ));
+        };
+        let distance = *distance;
+        if !distance.is_finite() || distance <= 0.0 {
+            return Err(CadError::InvalidInput(format!(
+                "spacetrans.invalid_distance: SPACETRANS needs one finite positive distance, got \
+                 {distance}"
+            )));
+        }
+        let layout_id = match &session.active_space {
+            SpaceId::Paper(layout_id) => *layout_id,
+            _ => {
+                return Err(CadError::Unsupported(
+                    "spacetrans.model_space: SPACETRANS needs an active paper layout with a \
+                     viewport; switch to a layout first"
+                        .into(),
+                ))
+            }
+        };
+        let drawing = document_drawing(self, command)?;
+        let viewports = layout_viewports(&drawing, layout_id)?;
+        let index = target_viewport_index(session, layout_id, None, &viewports, "spacetrans")?;
+        let transform = match viewport_transform(&viewports[index]) {
+            ViewportState::Supported(transform) => *transform,
+            ViewportState::Unsupported(why) => {
+                return Err(CadError::Unsupported(format!(
+                    "spacetrans.unsupported_viewport: layout {} viewport {index} cannot be \
+                     resolved: {why}",
+                    layout_id.0
+                )))
+            }
+        };
+        let paper = distance * transform.paper_per_model;
+        let model = distance / transform.paper_per_model;
+        Ok(report_outcome(vec![
+            diagnostic(
+                "spacetrans.converted",
+                format!(
+                    "SPACETRANS: {distance} model unit(s) = {paper} paper unit(s) in layout {} \
+                     viewport {index} (direction model→paper)",
+                    layout_id.0
+                ),
+            ),
+            diagnostic(
+                "spacetrans.factor",
+                format!(
+                    "SPACETRANS: factor {} paper unit(s) per model unit ({} model unit(s) per \
+                     paper unit); model→paper multiplies by that factor, paper→model divides by \
+                     it, so the same {distance} read as paper unit(s) = {model} model unit(s)",
+                    transform.paper_per_model,
+                    1.0 / transform.paper_per_model
+                ),
+            ),
+        ]))
     }
 }
 
@@ -73,9 +151,6 @@ fn reason(ext: ExtendedCommandId) -> String {
         }
         ExtendedCommandId::DimImport => {
             "dimim.unsupported: dimension-style import files are not modeled"
-        }
-        ExtendedCommandId::SpaceTrans => {
-            "spacetrans.unsupported: no model/paper distance-conversion API"
         }
         ExtendedCommandId::UpdateField => "updatefield.unsupported: fields are not modeled",
         other => {

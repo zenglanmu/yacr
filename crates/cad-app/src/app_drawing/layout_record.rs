@@ -56,6 +56,9 @@ impl Application {
                 block_patches: Vec::new(),
                 layer_patches: Vec::new(),
                 layout_patches,
+                style_patches: Vec::new(),
+                dim_style_patches: Vec::new(),
+                mleader_style_patches: Vec::new(),
                 merge_key: None,
             },
         )

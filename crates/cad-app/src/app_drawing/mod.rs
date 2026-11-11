@@ -47,6 +47,7 @@ mod dimension_edit;
 mod dimension_ordinate;
 mod dimension_qdim;
 mod dimension_space;
+mod dimension_style;
 mod divide;
 mod drawing_create;
 // The 2026-11-07 draw variants (WIPEOUT, POLYGON CIRCUMSCRIBED): split out of

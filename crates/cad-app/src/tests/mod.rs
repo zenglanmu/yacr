@@ -174,6 +174,7 @@ fn application_with_layouts() -> (Application, SessionState) {
 
 mod area_object;
 mod audit;
+mod chrome_commands;
 mod cjk_baseline;
 mod commands;
 mod dash_layer_writes;
@@ -208,6 +209,8 @@ mod extended_session8;
 // The 2026-11-09 Wave 9 extended-command contracts.
 mod extended_w9_alias;
 mod extended_w9_draw;
+// The 2026-11-12 MLEDIT/MULTILEADER/TOLERANCE real-edit contracts.
+mod extended_w9_mleader;
 mod extended_w9_reports;
 // The 2026-11-09 Wave 10 extended-command contracts.
 mod extended_w10;
@@ -251,6 +254,7 @@ mod select_filter;
 mod select_similar;
 // SSX Express-Tool selection-filter contracts.
 mod ssx;
+mod style_tables;
 mod text_commands;
 mod txt2mtxt;
 mod utility;

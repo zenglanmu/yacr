@@ -25,11 +25,13 @@ impl Application {
         match ext {
             ExtendedCommandId::Mspace => self.mspace(session, command),
             ExtendedCommandId::Pspace => self.pspace(session, command),
-            ExtendedCommandId::TextStyle => self.text_style_report(command, TextStyleReport::Style),
-            ExtendedCommandId::DashStyle => {
-                self.text_style_report(command, TextStyleReport::DashStyle)
+            ExtendedCommandId::TextStyle => {
+                self.text_style_report(session, command, TextStyleReport::Style)
             }
-            ExtendedCommandId::MLeaderStyleList => self.mleader_style_report(command),
+            ExtendedCommandId::DashStyle => {
+                self.text_style_report(session, command, TextStyleReport::DashStyle)
+            }
+            ExtendedCommandId::MLeaderStyleList => self.mleader_style_report(session, command),
             ExtendedCommandId::BlockList => self.block_list_report(command),
             ExtendedCommandId::DimReassoc => {
                 self.non_associative_report(command, "DIMREASSOC", "dimreassoc.non_associative")
@@ -97,16 +99,34 @@ impl Application {
         Ok(outcome)
     }
 
-    /// `STYLE` / `-STYLE`: read-only list of the drawing's text styles.
+    /// `STYLE` / `-STYLE`: the read-only list, or a typed table write.
     ///
-    /// The drawing's style table is the authority (`drawing.styles()`); creation
-    /// and editing are NOT IMPLEMENTED.
+    /// A bare selector (or the `-STYLE` alias) lists the drawing's style table —
+    /// the authority (`drawing.styles()`). A typed payload
+    /// (`NEW`/`RENAME`/`DELETE`/`SET`) goes to the shared post-import writer
+    /// ([`Application::style_table_command`]), one transaction / one undo step.
     fn text_style_report(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+        report: TextStyleReport,
+    ) -> CadResult<CommandOutcome> {
+        match &command.payload {
+            CommandPayload::None => self.list_text_styles(command, report),
+            CommandPayload::StyleTable(_) => self.style_table_command(session, command),
+            _ => Err(CadError::InvalidInput(format!(
+                "{} takes no payload or its typed style-table form",
+                report.selector()
+            ))),
+        }
+    }
+
+    /// The read-only text-style list.
+    fn list_text_styles(
         &self,
         command: &Command,
         report: TextStyleReport,
     ) -> CadResult<CommandOutcome> {
-        require_none_payload(command, report.selector())?;
         let drawing = document_drawing(self, command)?;
         let mut diagnostics = Vec::new();
         let mut count = 0usize;
@@ -126,17 +146,35 @@ impl Application {
         diagnostics.push(diagnostic(
             report.summary_code(),
             format!(
-                "{}: {count} text style(s) from the drawing's style table; creating or \
-                 modifying text styles is NOT IMPLEMENTED",
+                "{}: {count} text style(s) from the drawing's style table; write forms are \
+                 NEW/RENAME/DELETE/SET (post-import table writes, one undo step each)",
                 report.selector()
             ),
         ));
         Ok(report_outcome(diagnostics))
     }
 
-    /// `MLEADERSTYLE`: read-only list of the drawing's multileader styles.
-    fn mleader_style_report(&self, command: &Command) -> CadResult<CommandOutcome> {
-        require_none_payload(command, "MLEADERSTYLE")?;
+    /// `MLEADERSTYLE`: the read-only list, or a typed table/session write.
+    ///
+    /// `SET <name>` writes the session's current multileader style (creation
+    /// reads it); `NEW`/`RENAME`/`DELETE`/`MODIFY` write the table through the
+    /// shared post-import writer.
+    fn mleader_style_report(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        match &command.payload {
+            CommandPayload::None => self.list_mleader_styles(command),
+            CommandPayload::StyleTable(_) => self.style_table_command(session, command),
+            _ => Err(CadError::InvalidInput(
+                "MLEADERSTYLE takes no payload or its typed style-table form".into(),
+            )),
+        }
+    }
+
+    /// The read-only multileader-style list.
+    fn list_mleader_styles(&self, command: &Command) -> CadResult<CommandOutcome> {
         let drawing = document_drawing(self, command)?;
         let mut diagnostics = Vec::new();
         let mut count = 0usize;
@@ -158,8 +196,8 @@ impl Application {
         diagnostics.push(diagnostic(
             "mleaderstyle.summary",
             format!(
-                "MLEADERSTYLE: {count} multileader style(s) from the drawing's table; creating, \
-                 modifying or setting a current style is NOT IMPLEMENTED"
+                "MLEADERSTYLE: {count} multileader style(s) from the drawing's table; SET makes \
+                 one current, and NEW/RENAME/DELETE/MODIFY write the table (one undo step each)"
             ),
         ));
         Ok(report_outcome(diagnostics))

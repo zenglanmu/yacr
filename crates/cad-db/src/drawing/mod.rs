@@ -29,6 +29,7 @@ mod layout_edit;
 mod linetype_scale;
 mod lock;
 mod point_style;
+mod style_edit;
 mod transaction;
 
 #[cfg(test)]
@@ -40,6 +41,9 @@ pub use layer_edit::{DEFAULT_LAYER_NAME, ILLEGAL_LAYER_NAME_CHARS};
 pub use layer_inherit::LayerScope;
 pub use layer_patch::{LayerPatch, LayerRow};
 pub use layout_edit::{LayoutPatch, LayoutRow, ILLEGAL_LAYOUT_NAME_CHARS, MAX_LAYOUT_NAME_CHARS};
+pub use style_edit::{
+    DimStylePatch, MLeaderStylePatch, StylePatch, StyleTableChanges, DEFAULT_DIM_STYLE_NAME,
+};
 pub use transaction::DrawingTransaction;
 
 pub(crate) use bounds::BoundsCache;
@@ -193,6 +197,14 @@ pub struct DrawingDatabase {
     /// it is never rewound by a delete, so a deleted layout id is never reused
     /// and `LayoutId(0)` (the reserved synthetic model row) is never allocated.
     pub(crate) next_layout_id: u128,
+    /// Next text-style id to hand out. Monotonic like the layer allocator:
+    /// initialised by the builder from `max(existing) + 1`, bumped by every
+    /// installed row (including an undo restore), never rewound by a delete.
+    pub(crate) next_style_id: u128,
+    /// Next dimension-style id to hand out (same monotonic rule).
+    pub(crate) next_dim_style_id: u128,
+    /// Next multileader-style id to hand out (same monotonic rule).
+    pub(crate) next_mleader_style_id: u128,
     /// External-reference metadata/provenance, keyed by the xref block name.
     ///
     /// Import-only, like every other table: it is populated by

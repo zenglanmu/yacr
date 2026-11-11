@@ -64,27 +64,62 @@ pub fn parse_dimspace_argument(argument: &str) -> Option<f64> {
     super::commands::parse_signed_decimal(text).filter(|value| *value >= 0.0)
 }
 
-/// Parse `DIMSTYLE LIST|CURRENT|SET <name>`.
+/// Parse `DIMSTYLE <option>`.
 ///
-/// The three words are case-insensitive. `SET` requires a non-empty name
-/// (spaces allowed, so a style name is carried verbatim); `LIST`/`CURRENT` admit
-/// no extra tokens. No abbreviation and no default option are admitted.
+/// | form | meaning |
+/// |---|---|
+/// | `LIST` / `CURRENT` | the read-only reports (no extra token) |
+/// | `SET <name>` | make the row current (session state; creation reads it) |
+/// | `NEW <name> [<base>]` | create a row, optionally copying an existing one |
+/// | `RENAME <old> <new>` | rename a row |
+/// | `DELETE <name>` | delete a row |
+/// | `MODIFY <name> <field> <value> [<field> <value> …]` | write stored variables |
+///
+/// The option words are ASCII case-insensitive. Names are one token (quote a
+/// name containing spaces); `MODIFY` requires at least one pair and an even
+/// token count after the name. No abbreviation and no default option are
+/// admitted — the parser only splits, the application owns the field grammar.
 pub fn parse_dimstyle_argument(argument: &str) -> Option<DimStyleCommand> {
+    // `SET <name>` keeps the original "name is the rest of the line" rule, so
+    // both `SET My Style` and `SET "My Style"` address the same row. The other
+    // forms are tokenised (a quoted name keeps its spaces there too).
     let trimmed = argument.trim();
-    let (word, rest) = match trimmed.split_once(char::is_whitespace) {
-        Some((word, rest)) => (word, rest.trim()),
-        None => (trimmed, ""),
-    };
-    if word.eq_ignore_ascii_case("LIST") && rest.is_empty() {
-        return Some(DimStyleCommand::List);
+    if let Some(rest) = trimmed
+        .strip_prefix("SET ")
+        .or_else(|| trimmed.strip_prefix("set "))
+    {
+        let name = rest.trim();
+        return (!name.is_empty()).then(|| DimStyleCommand::Set(name.to_string()));
     }
-    if word.eq_ignore_ascii_case("CURRENT") && rest.is_empty() {
-        return Some(DimStyleCommand::Current);
+    let tokens = super::commands::split_quoted_tokens(argument)?;
+    let word = tokens.first()?.to_ascii_uppercase();
+    match word.as_str() {
+        "LIST" if tokens.len() == 1 => Some(DimStyleCommand::List),
+        "CURRENT" if tokens.len() == 1 => Some(DimStyleCommand::Current),
+        "SET" if tokens.len() == 2 => Some(DimStyleCommand::Set(tokens[1].clone())),
+        "NEW" if tokens.len() == 2 || tokens.len() == 3 => Some(DimStyleCommand::New {
+            name: tokens[1].clone(),
+            from: tokens.get(2).cloned(),
+        }),
+        "RENAME" if tokens.len() == 3 => Some(DimStyleCommand::Rename {
+            old: tokens[1].clone(),
+            new: tokens[2].clone(),
+        }),
+        "DELETE" | "DEL" if tokens.len() == 2 => Some(DimStyleCommand::Delete(tokens[1].clone())),
+        "MODIFY" | "SETVAR" if tokens.len() >= 4 && (tokens.len() - 2) % 2 == 0 => {
+            let mut assignments = Vec::new();
+            let mut index = 2;
+            while index + 1 < tokens.len() {
+                assignments.push((tokens[index].clone(), tokens[index + 1].clone()));
+                index += 2;
+            }
+            Some(DimStyleCommand::Modify {
+                name: tokens[1].clone(),
+                assignments,
+            })
+        }
+        _ => None,
     }
-    if word.eq_ignore_ascii_case("SET") && !rest.is_empty() {
-        return Some(DimStyleCommand::Set(rest.to_string()));
-    }
-    None
 }
 
 /// Parse `DIMTEDIT MOVE <x> <y>|LEFT|RIGHT|CENTER|HOME|ANGLE <degrees>`.

@@ -2,8 +2,9 @@
 //
 // Thirty names are wired into the chrome so the command line can complete them:
 // one **session token** (ATTDISP), six **read-only reports** (BATTMAN,
-// BATTORDER, XREF, -XREF, EXTERNALREFERENCES, EXTERNALREFERENCESCLOSE) and
-// twenty-three **named refusals** (ATTDEF through CLASSICXREF). The Rust lane is
+// BATTORDER, XREF, -XREF, EXTERNALREFERENCES, EXTERNALREFERENCESCLOSE),
+// twenty-two **named refusals** (ATTDEF through XOPEN) and one **chrome-local
+// panel** (CLASSICXREF). The Rust lane is
 // the behaviour authority; this suite pins only the user-facing surface: one
 // catalog row each, real label and hint keys in both catalogs, membership in the
 // host vocabulary mirror, and the "needs an open drawing" rule with no capability
@@ -14,7 +15,9 @@ import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import {
   admitCommandText, isSupportedCommand, setCommandCatalog,
 } from '../src/commands/commands.ts';
-import { CAPABILITY_GATES, DOCUMENT_SCOPED_COMMANDS } from '../src/commands/gating.ts';
+import {
+  CAPABILITY_GATES, DOCUMENT_SCOPED_COMMANDS, LOCAL_CHROME_COMMANDS,
+} from '../src/commands/gating.ts';
 import { HOST_NAMES, readCatalog, readModule } from './helpers.ts';
 
 const TOKEN = ['ATTDISP'];
@@ -28,10 +31,12 @@ const REFUSALS = [
   'ATTDEF', '-ATTDEF', 'ATTEDIT', '-ATTEDIT', 'ATTIPEDIT', 'ATTIN', 'ATTOUT',
   'ATTEXT', '-ATTEXT', 'EATTEDIT', 'EATTEXT', '-EATTEXT', 'ATTREDEF', 'ATTSYNC',
   'GATTE', 'XDATA', 'XBIND', '-XBIND', 'XATTACH', 'ATTACH', '-ATTACH', 'XOPEN',
-  'CLASSICXREF',
 ];
 
-const BATCH = [...TOKEN, ...REPORTS, ...REFUSALS];
+/** `CLASSICXREF` is answered by the chrome before the router. */
+const LOCAL = ['CLASSICXREF'];
+
+const BATCH = [...TOKEN, ...REPORTS, ...REFUSALS, ...LOCAL];
 
 const DOC = { documentLabel: 'drawing.dwg', loading: false };
 const NO_DOC = { documentLabel: null, loading: false };
@@ -65,7 +70,11 @@ test('every Wave 5 command is catalogued exactly once with real label and hint k
       assert.equal(typeof catalog[`${row.labelKey}.hint`], 'string', `${locale} missing ${row.labelKey}.hint`);
     }
     assert.equal(HOST_NAMES.includes(id), true, `${id} must be in the vocabulary mirror`);
-    assert.equal(DOCUMENT_SCOPED_COMMANDS.includes(id), true, `${id} needs an open drawing`);
+    if (LOCAL.includes(id)) {
+      assert.equal(LOCAL_CHROME_COMMANDS.includes(id), true, `${id} is chrome-local`);
+    } else {
+      assert.equal(DOCUMENT_SCOPED_COMMANDS.includes(id), true, `${id} needs an open drawing`);
+    }
     // No file I/O is involved, so no capability boolean may gate these names.
     assert.equal(CAPABILITY_GATES[id], undefined, `${id} must not carry a capability gate`);
   }
@@ -83,7 +92,7 @@ test('the token and the six reports state their read-only, not-modeled boundarie
   }
 });
 
-test('the twenty-three refusals say they are named refusals and promise no effect', async () => {
+test('the twenty-two refusals say they are named refusals and promise no effect', async () => {
   const en = await readCatalog('en');
   const zh = await readCatalog('zh-CN');
   for (const id of REFUSALS) {
@@ -101,9 +110,13 @@ test('the Wave 5 names are advertised and admitted with a drawing', () => {
   }
 });
 
-test('the Wave 5 names are disabled on the start page with the no-document sentence', () => {
+test('the Wave 5 router names are disabled on the start page; CLASSICXREF is chrome-local', () => {
   for (const id of BATCH) {
     const admission = admitCommandText(id, { status: NO_DOC });
+    if (LOCAL.includes(id)) {
+      assert.equal(admission.kind, 'admitted', `${id} needs no drawing`);
+      continue;
+    }
     assert.equal(admission.kind, 'unavailable', id);
     assert.equal(admission.reasonKey, 'plot.no_document', `${id} says a drawing must be open`);
   }

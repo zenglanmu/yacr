@@ -17,10 +17,11 @@ use cad_host::{CadSettingKey, CadSettingValue};
 
 use super::commands::{
     invalid_mredo_argument_reason, invalid_multiple_argument_reason, invalid_purge_argument_reason,
-    invalid_rename_argument_reason, invalid_setvar_value_reason, parse_mredo_argument,
-    parse_multiple_argument, parse_purge_argument, parse_rename_argument, parse_setvar_argument,
-    parse_sysvar_toggle, MREDO_SELECTOR, MULTIPLE_SELECTOR, PURGE_SELECTOR, RENAME_SELECTOR,
-    SETVAR_SELECTOR,
+    invalid_rename_argument_reason, invalid_setvar_value_reason,
+    invalid_sysvarmonitor_argument_reason, parse_mredo_argument, parse_multiple_argument,
+    parse_purge_argument, parse_rename_argument, parse_setvar_argument, parse_sysvar_toggle,
+    parse_sysvarmonitor_argument, MREDO_SELECTOR, MULTIPLE_SELECTOR, PURGE_SELECTOR,
+    RENAME_SELECTOR, SETVAR_SELECTOR, SYSVARMONITOR_SELECTOR,
 };
 use super::shell_settings::parse_display_mask;
 use super::CadSession;
@@ -56,6 +57,7 @@ impl CadSession {
             SETVAR_SELECTOR => self.setvar_argument(argument, text),
             MREDO_SELECTOR => self.mredo_argument(argument, text),
             MULTIPLE_SELECTOR => self.multiple_argument(argument, text),
+            SYSVARMONITOR_SELECTOR => self.sysvarmonitor_argument(argument, text),
             _ => self.refuse_argument(format!("unsupported utility selector: {selector}")),
         }
     }
@@ -111,6 +113,18 @@ impl CadSession {
             MULTIPLE_SELECTOR,
             CommandId::Multiple,
             CommandPayload::Multiple(Some(canonical.to_string())),
+        )
+    }
+
+    /// `SYSVARMONITOR ADD|REMOVE|LIST [<name>]`: one session watch-set action.
+    fn sysvarmonitor_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some(action) = parse_sysvarmonitor_argument(argument) else {
+            return self.refuse_argument(invalid_sysvarmonitor_argument_reason(text));
+        };
+        self.dispatch_typed_argument(
+            SYSVARMONITOR_SELECTOR,
+            CommandId::Extended(cad_app::ExtendedCommandId::SysVarMonitor),
+            CommandPayload::SysVarMonitor(action),
         )
     }
 

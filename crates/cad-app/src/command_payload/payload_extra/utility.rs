@@ -156,3 +156,19 @@ pub enum UtilityPayload {
     TextMask(TextMaskOptions),
     Txt2MText(Txt2MTextOptions),
 }
+
+/// One `SYSVARMONITOR` action: watch, stop watching, or query the watch set.
+///
+/// `List(None)` is the bare `SYSVARMONITOR`/`SYSVARMONITOR LIST` form and lists
+/// every monitored variable; `List(Some(name))` lists one. `Add`/`Remove` carry
+/// the modelled variable name verbatim; the application validates it against the
+/// documented `SETVAR` closed set and refuses an unknown name by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SysVarMonitorAction {
+    /// Start watching `name` (an idempotent repeat keeps the existing snapshot).
+    Add(String),
+    /// Stop watching `name`; removing an unmonitored name is a reported no-op.
+    Remove(String),
+    /// List the watched values; `Some(name)` narrows the list to one variable.
+    List(Option<String>),
+}

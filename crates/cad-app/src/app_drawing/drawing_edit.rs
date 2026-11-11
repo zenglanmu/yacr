@@ -122,15 +122,7 @@ impl Application {
         self.publish_candidate(
             document_id,
             candidate,
-            DrawingUndoRecord {
-                transaction: change_set.transaction,
-                label: "move entities".into(),
-                patches,
-                block_patches: Vec::new(),
-                layer_patches: Vec::new(),
-                layout_patches: Vec::new(),
-                merge_key: None,
-            },
+            DrawingUndoRecord::entity_only(change_set.transaction, "move entities", patches),
         )?;
 
         Ok(CommandOutcome {
@@ -265,15 +257,7 @@ impl Application {
         self.publish_candidate(
             document_id,
             candidate,
-            DrawingUndoRecord {
-                transaction: change_set.transaction,
-                label: "erase entities".into(),
-                patches,
-                block_patches: Vec::new(),
-                layer_patches: Vec::new(),
-                layout_patches: Vec::new(),
-                merge_key: None,
-            },
+            DrawingUndoRecord::entity_only(change_set.transaction, "erase entities", patches),
         )?;
 
         Ok((Some(Arc::new(change_set)), diagnostics, deleted))
@@ -463,15 +447,7 @@ impl Application {
         self.publish_candidate(
             document_id,
             candidate,
-            DrawingUndoRecord {
-                transaction: change_set.transaction,
-                label: "copy entities".into(),
-                patches,
-                block_patches: Vec::new(),
-                layer_patches: Vec::new(),
-                layout_patches: Vec::new(),
-                merge_key: None,
-            },
+            DrawingUndoRecord::entity_only(change_set.transaction, "copy entities", patches),
         )?;
 
         Ok(CommandOutcome {
@@ -848,15 +824,7 @@ impl Application {
         self.publish_candidate(
             document_id,
             candidate,
-            DrawingUndoRecord {
-                transaction: change_set.transaction,
-                label: "offset entity".into(),
-                patches,
-                block_patches: Vec::new(),
-                layer_patches: Vec::new(),
-                layout_patches: Vec::new(),
-                merge_key: None,
-            },
+            DrawingUndoRecord::entity_only(change_set.transaction, "offset entity", patches),
         )?;
 
         Ok(CommandOutcome {

@@ -93,6 +93,36 @@ pub fn layout_patch(
     cad_db::LayoutPatch { id, before, after }
 }
 
+/// Build a reversible text-style-table patch from the before/after rows.
+///
+/// `None` on either side means the row did not exist (a create) / no longer
+/// exists (a delete).
+pub fn style_patch(
+    id: StyleId,
+    before: Option<cad_db::Style>,
+    after: Option<cad_db::Style>,
+) -> cad_db::StylePatch {
+    cad_db::StylePatch { id, before, after }
+}
+
+/// Build a reversible dimension-style-table patch from the before/after rows.
+pub fn dim_style_patch(
+    id: DimStyleId,
+    before: Option<cad_db::DimStyle>,
+    after: Option<cad_db::DimStyle>,
+) -> cad_db::DimStylePatch {
+    cad_db::DimStylePatch { id, before, after }
+}
+
+/// Build a reversible multileader-style-table patch from the before/after rows.
+pub fn mleader_style_patch(
+    id: MLeaderStyleId,
+    before: Option<cad_db::MLeaderStyle>,
+    after: Option<cad_db::MLeaderStyle>,
+) -> cad_db::MLeaderStylePatch {
+    cad_db::MLeaderStylePatch { id, before, after }
+}
+
 /// A reversible batch of drawing-entity changes.
 ///
 /// The patches carry the full before/after [`DbEntity`]; `transaction` is the
@@ -123,6 +153,16 @@ pub struct DrawingUndoRecord {
     /// both, and the database applies layout upserts first and layout deletes
     /// last.
     pub layout_patches: Vec<cad_db::LayoutPatch>,
+    /// Reversible text-style-table rows committed together with the other
+    /// batches as one revision. A style-only record (create, rename, delete,
+    /// modify) carries these and no entity patch.
+    pub style_patches: Vec<cad_db::StylePatch>,
+    /// Reversible dimension-style-table rows (same atomic rule). A text-style
+    /// rename that retargets `DIMTXSTY` carries the dim-style rows here too, so
+    /// the cascade is one revision.
+    pub dim_style_patches: Vec<cad_db::DimStylePatch>,
+    /// Reversible multileader-style-table rows (same atomic rule).
+    pub mleader_style_patches: Vec<cad_db::MLeaderStylePatch>,
     /// Records with an equal merge key may be coalesced (e.g. a drag). The
     /// drawing commands in `cad-app` deliberately pass `None` so each user
     /// action is exactly one undo step.
@@ -130,11 +170,36 @@ pub struct DrawingUndoRecord {
 }
 
 impl DrawingUndoRecord {
+    /// An entity-patch-only record: the common shape, with every table batch
+    /// empty. Callers that write a table use the struct literal so a new batch
+    /// cannot be forgotten silently.
+    pub fn entity_only(
+        transaction: TransactionId,
+        label: impl Into<String>,
+        patches: Vec<DrawingPatch>,
+    ) -> Self {
+        DrawingUndoRecord {
+            transaction,
+            label: label.into(),
+            patches,
+            block_patches: Vec::new(),
+            layer_patches: Vec::new(),
+            layout_patches: Vec::new(),
+            style_patches: Vec::new(),
+            dim_style_patches: Vec::new(),
+            mleader_style_patches: Vec::new(),
+            merge_key: None,
+        }
+    }
+
     fn validate(&self) -> CadResult<()> {
         if self.patches.is_empty()
             && self.block_patches.is_empty()
             && self.layer_patches.is_empty()
             && self.layout_patches.is_empty()
+            && self.style_patches.is_empty()
+            && self.dim_style_patches.is_empty()
+            && self.mleader_style_patches.is_empty()
         {
             return Err(CadError::InvalidInput(
                 "a drawing undo record needs at least one patch, block patch, layer patch or \
@@ -149,7 +214,10 @@ impl DrawingUndoRecord {
         if self.merge_key.is_some()
             && (!self.block_patches.is_empty()
                 || !self.layer_patches.is_empty()
-                || !self.layout_patches.is_empty())
+                || !self.layout_patches.is_empty()
+                || !self.style_patches.is_empty()
+                || !self.dim_style_patches.is_empty()
+                || !self.mleader_style_patches.is_empty())
         {
             return Err(CadError::InvalidInput(
                 "a drawing undo record with block, layer or layout patches cannot be merged".into(),
@@ -191,6 +259,45 @@ impl DrawingUndoRecord {
             if patch.before.is_none() && patch.after.is_none() {
                 return Err(CadError::InvalidInput(
                     "a layout patch needs a before or after state".into(),
+                ));
+            }
+        }
+        let mut style_ids = HashSet::new();
+        for patch in &self.style_patches {
+            if !style_ids.insert(patch.id) {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record cannot contain duplicate style ids".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "a style patch needs a before or after state".into(),
+                ));
+            }
+        }
+        let mut dim_style_ids = HashSet::new();
+        for patch in &self.dim_style_patches {
+            if !dim_style_ids.insert(patch.id) {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record cannot contain duplicate dim style ids".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "a dim style patch needs a before or after state".into(),
+                ));
+            }
+        }
+        let mut mleader_style_ids = HashSet::new();
+        for patch in &self.mleader_style_patches {
+            if !mleader_style_ids.insert(patch.id) {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record cannot contain duplicate multileader style ids".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "a multileader style patch needs a before or after state".into(),
                 ));
             }
         }
@@ -263,6 +370,34 @@ impl DrawingUndoRecord {
                 if let Some(plot) = &row.plot {
                     bytes += plot.paper_size_name.len();
                 }
+            }
+        }
+        for p in &self.style_patches {
+            bytes += std::mem::size_of::<cad_db::StylePatch>();
+            for row in p.before.iter().chain(p.after.iter()) {
+                bytes += std::mem::size_of::<cad_db::Style>() + row.name.len();
+                bytes += row
+                    .resource_keys
+                    .iter()
+                    .map(|key| key.len() + std::mem::size_of::<String>())
+                    .sum::<usize>();
+            }
+        }
+        for p in &self.dim_style_patches {
+            bytes += std::mem::size_of::<cad_db::DimStylePatch>();
+            for row in p.before.iter().chain(p.after.iter()) {
+                bytes += std::mem::size_of::<cad_db::DimStyle>()
+                    + row.name.len()
+                    + row.text_style_name.len()
+                    + row.postfix.len();
+            }
+        }
+        for p in &self.mleader_style_patches {
+            bytes += std::mem::size_of::<cad_db::MLeaderStylePatch>();
+            for row in p.before.iter().chain(p.after.iter()) {
+                bytes += std::mem::size_of::<cad_db::MLeaderStyle>()
+                    + row.name.len()
+                    + row.text_style_name.len();
             }
         }
         bytes

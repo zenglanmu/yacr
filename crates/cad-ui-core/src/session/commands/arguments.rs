@@ -10,6 +10,7 @@
 
 use cad_app::{
     DashLayerOps, NamedObjectKind, PeditOption, PurgeTarget, RenameCommand, StandardView,
+    SysVarMonitorAction,
 };
 
 /// AutoCAD's `LAYERSTATE <option>`: the bounded named layer-state store.
@@ -548,6 +549,9 @@ pub const RENAME_SELECTOR: &str = "RENAME";
 /// `SETVAR <name> [<value>]`: report or write one modelled variable.
 pub const SETVAR_SELECTOR: &str = "SETVAR";
 
+/// `SYSVARMONITOR ADD|REMOVE|LIST <name>`: the session watch set.
+pub const SYSVARMONITOR_SELECTOR: &str = "SYSVARMONITOR";
+
 /// `MREDO [n]`: apply up to `n` existing redo records.
 pub const MREDO_SELECTOR: &str = "MREDO";
 
@@ -590,6 +594,8 @@ pub fn parse_rename_argument(argument: &str) -> Option<RenameCommand> {
         "BLOCK" => NamedObjectKind::Block,
         "STYLE" => NamedObjectKind::Style,
         "LINETYPE" => NamedObjectKind::Linetype,
+        "DIMSTYLE" => NamedObjectKind::DimStyle,
+        "MLEADERSTYLE" => NamedObjectKind::MLeaderStyle,
         _ => return None,
     };
     if tokens[1].is_empty() || tokens[2].is_empty() {
@@ -605,8 +611,8 @@ pub fn parse_rename_argument(argument: &str) -> Option<RenameCommand> {
 /// The stable refusal for a `RENAME` argument outside its grammar.
 pub fn invalid_rename_argument_reason(text: &str) -> String {
     format!(
-        "invalid RENAME argument: '{text}' (expected <kind> <old> <new> with LAYER, BLOCK, STYLE \
-         or LINETYPE; quote names that contain spaces)"
+        "invalid RENAME argument: '{text}' (expected <kind> <old> <new> with LAYER, BLOCK, STYLE, \
+         LINETYPE, DIMSTYLE or MLEADERSTYLE; quote names that contain spaces)"
     )
 }
 
@@ -656,6 +662,35 @@ pub fn invalid_mredo_argument_reason(text: &str) -> String {
 pub fn parse_multiple_argument(argument: &str) -> Option<String> {
     let text = argument.trim();
     (!text.is_empty()).then(|| text.to_string())
+}
+
+/// Parse the argument of a `SYSVARMONITOR` selector.
+///
+/// The grammar is `ADD <name>`, `REMOVE <name>` or `LIST [<name>]`; the bare
+/// selector is the `LIST` form and carries no payload, so it never reaches this
+/// parser. The name is one non-empty token. The **modelled** name set and every
+/// semantic refusal belong to the application, which owns the closed set.
+pub fn parse_sysvarmonitor_argument(argument: &str) -> Option<SysVarMonitorAction> {
+    let mut parts = argument.split_whitespace();
+    let verb = parts.next()?.to_ascii_uppercase();
+    let name = parts.next().map(str::to_string);
+    if parts.next().is_some() {
+        return None;
+    }
+    match verb.as_str() {
+        "ADD" => name.map(SysVarMonitorAction::Add),
+        "REMOVE" => name.map(SysVarMonitorAction::Remove),
+        "LIST" => Some(SysVarMonitorAction::List(name)),
+        _ => None,
+    }
+}
+
+/// The stable refusal for a `SYSVARMONITOR` argument outside its grammar.
+pub fn invalid_sysvarmonitor_argument_reason(text: &str) -> String {
+    format!(
+        "invalid SYSVARMONITOR argument: '{text}' (expected `ADD <name>`, `REMOVE <name>` or \
+         `LIST [<name>]`)"
+    )
 }
 
 /// The stable refusal for a `MULTIPLE` argument outside its grammar.
@@ -873,7 +908,7 @@ pub fn invalid_setvar_value_reason(name: &str, value: &str, expected: &str) -> S
 /// An unbalanced quote is refused (`None`). Empty unquoted runs are ignored; an
 /// explicitly quoted empty token (`""`) is preserved as an empty string so the
 /// caller can refuse it by name.
-fn split_quoted_tokens(text: &str) -> Option<Vec<String>> {
+pub(crate) fn split_quoted_tokens(text: &str) -> Option<Vec<String>> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut quoted = false;

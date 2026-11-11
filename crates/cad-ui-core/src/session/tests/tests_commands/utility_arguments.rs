@@ -141,3 +141,35 @@ fn mredo_and_multiple_validate_their_typed_arguments() {
     assert!(error.contains("multiple.unknown_command"), "{error}");
     session.command("MULTIPLE LINE").expect("LINE is admitted");
 }
+
+#[test]
+fn sysvarmonitor_typed_forms_add_remove_and_list_one_or_all() {
+    let session = fresh_session();
+    session
+        .command("SYSVARMONITOR ADD SNAPUNIT")
+        .expect("ADD is admitted");
+    let shown = session.snapshot(None, None, 0);
+    assert_eq!(
+        shown
+            .command_log
+            .iter()
+            .filter(|entry| entry.command.as_deref() == Some("SYSVARMONITOR"))
+            .count(),
+        1,
+        "the typed line echoes its canonical selector"
+    );
+    session
+        .command("SYSVARMONITOR LIST SNAPUNIT")
+        .expect("LIST <name> is admitted");
+    session
+        .command("SYSVARMONITOR LIST")
+        .expect("bare LIST is admitted");
+    session
+        .command("SYSVARMONITOR REMOVE SNAPUNIT")
+        .expect("REMOVE is admitted");
+
+    let error = session.command("SYSVARMONITOR ADD").unwrap_err();
+    assert!(error.contains("invalid SYSVARMONITOR"), "{error}");
+    let error = session.command("SYSVARMONITOR ADD NOT_A_VAR").unwrap_err();
+    assert!(error.contains("sysvarmonitor.unknown_variable"), "{error}");
+}

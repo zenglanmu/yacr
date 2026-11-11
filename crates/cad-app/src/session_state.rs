@@ -3,10 +3,12 @@
 
 use cad_db::MeasurementRecord;
 use cad_domain::*;
+mod accessors;
 mod drafting_extras;
 mod draw_plan;
 mod erase_snapshot;
 mod modify_options;
+mod sysvar_monitor;
 mod toggles;
 mod view_extras;
 use crate::draw_tool::{
@@ -25,6 +27,7 @@ use crate::{AppMode, CommandId};
 pub use drafting_extras::{ChamferMethod, DraftingExtras, IsoPlane, WipeoutFrames};
 pub use erase_snapshot::{EraseEntry, EraseSnapshot};
 pub use modify_options::ModifyOptions;
+pub use sysvar_monitor::SysVarMonitor;
 pub use view_extras::{ViewExtras, VisualStyleToken};
 
 /// One entity captured into the in-process clipboard: the row plus the
@@ -101,6 +104,14 @@ pub struct SessionState {
     /// required to have; a create naming a layer the database does not contain
     /// is an explicit `InvalidInput` rather than a silent fallback.
     pub active_layer: LayerId,
+    /// The session's current **dimension style name** (`DIMSTYLE SET <name>`).
+    ///
+    /// Creation resolves this row's values through
+    /// [`cad_db::DrawingDatabase::resolve_dim_style`]; an absent row is a named
+    /// refusal (`dimstyle.missing`), never a fallback to another style.
+    pub current_dim_style: String,
+    /// The session's current **multileader style name** (`MLEADERSTYLE SET`).
+    pub current_mleader_style: String,
     /// The session-scoped typed tool parameters (ADR 0016 decision A).
     ///
     /// Session/display state only — **never** a persisted config. The general
@@ -228,6 +239,8 @@ pub struct SessionState {
     /// persisted to the drawing, history or preferences. See
     /// [`crate::ml_style`] for the cap and the exact refusals.
     pub ml_styles: crate::MultilineStyleStore,
+    /// `SYSVARMONITOR`'s session-only watch set (never drawing data).
+    pub sysvar_monitor: SysVarMonitor,
     /// The `MULTIPLE` repeat request, if one is armed.
     ///
     /// Session state only. This host has no command repeat loop, so the flag is
@@ -273,6 +286,8 @@ impl SessionState {
             generation: 0,
             backend: BackendChoice::Auto,
             active_layer: LayerId(0),
+            current_dim_style: "Standard".to_string(),
+            current_mleader_style: "Standard".to_string(),
             tool_parameters: ToolParameterStore::defaults(),
             snap_enabled: true,
             // The display grid starts hidden: AutoCAD-style grid chrome is an
@@ -292,23 +307,9 @@ impl SessionState {
             clipboard_base: None,
             last_erase: None,
             multiple: None,
+            sysvar_monitor: SysVarMonitor::default(),
             ml_styles: crate::MultilineStyleStore::default(),
         }
-    }
-
-    /// The session-only maximized layout viewport (`VPMAX`), if any.
-    pub fn maximized_viewport(&self) -> Option<LayoutViewportRef> {
-        self.maximized_viewport
-    }
-
-    /// Set the maximized viewport marker. Session state only.
-    pub fn set_maximized_viewport(&mut self, viewport: LayoutViewportRef) {
-        self.maximized_viewport = Some(viewport);
-    }
-
-    /// Clear the maximized viewport marker (`VPMIN`). Session state only.
-    pub fn clear_maximized_viewport(&mut self) {
-        self.maximized_viewport = None;
     }
 
     /// The previous captured point of the active capture, for `ORTHO`.

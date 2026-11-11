@@ -292,17 +292,17 @@ fn dimstyle_reports_are_read_only_and_set_is_a_named_capability_refusal() {
     assert!(out.diagnostics[0].message.contains("Standard"));
     assert!(out.changes.is_none());
 
-    let error = execute(
+    // `SET` is now a real session write (creation resolves the row); it still
+    // changes no revision and records no undo step.
+    let outcome = execute(
         &mut app,
         &mut session,
         CommandId::DimStyle,
         style_payload(DimStyleCommand::Set("Standard".into())),
     )
-    .unwrap_err();
-    assert!(
-        format!("{error}").contains("dimstyle.set_unavailable"),
-        "{error}"
-    );
+    .expect("DIMSTYLE SET resolves the stored row");
+    assert!(outcome.diagnostics.iter().any(|d| d.code == "dimstyle.set"));
+    assert_eq!(session.current_dim_style_name(), "Standard");
     assert_eq!(revision(&app), before);
 
     let error = execute(

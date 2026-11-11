@@ -412,7 +412,10 @@ fn alignspace_and_vpsync_refuse_a_viewer_session() {
         .switch_mode(AppMode::Viewer)
         .expect("Viewer is legal");
     let before = revision(&app);
-    let align = refusal_text(extended(
+    // Both selectors are declared Work-only, so the session authorization gate
+    // refuses a Viewer before the handler runs: `PermissionDenied`, never a
+    // handler-level `*.work_mode_required` string.
+    let align = extended(
         &mut app,
         &mut session,
         ExtendedCommandId::AlignSpace,
@@ -422,15 +425,15 @@ fn alignspace_and_vpsync_refuse_a_viewer_session() {
             point(1100.0, 500.0),
             point(30.0, 20.0),
         ]),
-    ));
-    assert!(align.contains("alignspace.work_mode_required"), "{align}");
-    let sync = refusal_text(extended(
+    );
+    assert!(matches!(align, Err(CadError::PermissionDenied)), "{align:?}");
+    let sync = extended(
         &mut app,
         &mut session,
         ExtendedCommandId::VpSync,
         CommandPayload::None,
-    ));
-    assert!(sync.contains("vpsync.work_mode_required"), "{sync}");
+    );
+    assert!(matches!(sync, Err(CadError::PermissionDenied)), "{sync:?}");
     assert_eq!(revision(&app), before);
     assert!(!app.can_undo(&DocumentId(1)));
 }

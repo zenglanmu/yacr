@@ -56,6 +56,8 @@ mod app_extended_refusals;
 mod app_extended_refusal_names;
 mod app_extended_reports2;
 mod app_extended_session2;
+// The session-only SYSVARMONITOR watch set.
+mod app_extended_sysvar;
 // The Wave 3 extended-command handlers (reports/session and refusals).
 mod app_extended_refusals3;
 mod app_extended_reports3;
@@ -424,23 +426,25 @@ pub use layout_payload::{LayoutPayload, PaperSetup};
 pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 
 pub use command_payload::{
-    AngularDimensionInput, AnnotationBatchPayload, CommandPayload, DashLayerOps, DimEditCommand,
-    DimJogLineCommand, DimOverrideCommand, DimStyleCommand, DimTextEditCommand,
-    DimensionBatchPayload, DimensionChainCommand, FilterExpression, FilterLogic, FilterRequest,
-    GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder, HatchEditOption,
-    HatchOriginCommand, ImageAdjustCommand, ImageAttachCommand, ImageClipCommand, JoinMode,
-    JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand,
-    MatchPropSettings, MeasureGeomOption, MirrorOptions, MocoroCommand, NamedObjectKind,
-    OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis, OrdinateDimensionCommand,
-    PeditEditCommand, PeditEditOption, PeditOption, PeditVertexAction, PeditVertexCommand,
-    PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest, RadialDimensionCommand,
-    RenameCommand, RevCloudStyle, RevisionCloudMode, RevisionCloudOptions,
+    AddSelectedCommand, AngularDimensionInput, AnnotationBatchPayload, CommandPayload,
+    DashLayerOps, DimEditCommand, DimJogLineCommand, DimOverrideCommand, DimStyleCommand,
+    DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand, FilterExpression,
+    FilterLogic, FilterRequest, GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder,
+    HatchEditOption, HatchOriginCommand, ImageAdjustCommand, ImageAttachCommand, ImageClipCommand,
+    JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand,
+    MInsertCommand, MLeaderAlignCommand, MLeaderAlignMode, MLeaderEditAction, MLeaderEditCommand,
+    MatchPropSettings, MeasureGeomOption, MirrorOptions, MlEditCommand, MlEditMode, MocoroCommand,
+    NamedObjectKind, OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis,
+    OrdinateDimensionCommand, PeditEditCommand, PeditEditOption, PeditOption, PeditVertexAction,
+    PeditVertexCommand, PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest,
+    RadialDimensionCommand, RenameCommand, RevCloudStyle, RevisionCloudMode, RevisionCloudOptions,
     RotatedLinearDimensionCommand, SelectSimilarSettings, SelectionApply, SelectionOperator,
     SelectionPredicate, SelectionProperty, SelectionScope, SelectionToolPayload,
-    SetByLayerSettings, StretchPolygonCommand, TCircleCommand, TCountCommand, TableCreateCommand,
+    SetByLayerSettings, ShapeCommand, StretchPolygonCommand, StyleTableCommand, StyleTableKind,
+    StyleTableOp, SysVarMonitorAction, TCircleCommand, TCountCommand, TableCreateCommand,
     TableEditCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode,
-    TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand, TwoLineCommand,
-    Txt2MTextOptions, UtilityPayload, VPointInput, ViewCommand, WipeoutPayload,
+    TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand, ToleranceCommand,
+    TwoLineCommand, Txt2MTextOptions, UtilityPayload, VPointInput, ViewCommand, WipeoutPayload,
 };
 
 pub use app_audit::AuditRequest;

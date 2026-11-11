@@ -26,6 +26,8 @@ export interface ChromeSurfaceState {
   /** Bumped by every `UPDATETHUMBSNOW`, so an open panel recomputes its cards. */
   readonly quickViewRevision: number;
   readonly quickCalc: boolean;
+  /** The classic external-references panel (`CLASSICXREF`); non-modal. */
+  readonly classicXref: boolean;
   readonly workspaceSelector: boolean;
   readonly workspaceSettings: WorkspaceDialogMode | null;
 }
@@ -34,6 +36,7 @@ const CLOSED: ChromeSurfaceState = Object.freeze({
   quickView: null,
   quickViewRevision: 0,
   quickCalc: false,
+  classicXref: false,
   workspaceSelector: false,
   workspaceSettings: null,
 });
@@ -95,6 +98,17 @@ export function openQuickCalc(): void {
 export function closeQuickCalc(): void {
   if (!state.quickCalc) return;
   publish({ ...state, quickCalc: false });
+}
+
+/** Open the classic external-references panel; a repeat open re-focuses it. */
+export function openClassicXref(): void {
+  publish({ ...CLOSED, classicXref: true, quickViewRevision: state.quickViewRevision });
+}
+
+/** Close the classic xref panel; already closed is a success. */
+export function closeClassicXref(): void {
+  if (!state.classicXref) return;
+  publish({ ...state, classicXref: false });
 }
 
 /** Open the workspace selector (a floating panel). */

@@ -307,6 +307,24 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   SETVAR: Object.freeze({
     parse: (argument: string) => /^[A-Za-z][A-Za-z0-9_]*(?:[ \t]+.+)?$/.test(argument.trim()),
   }),
+  /**
+   * `SYSVARMONITOR ADD|REMOVE [<name>]` / `LIST [<name>]`: the session watch set.
+   * Only the line shape is checked here; the modelled name set and the stable
+   * `sysvarmonitor.*` refusals belong to the host.
+   */
+  SYSVARMONITOR: Object.freeze({
+    parse: (argument: string) => {
+      const parts = tokens(argument);
+      const word = (parts[0] ?? '').toUpperCase();
+      if (word === 'LIST') return parts.length <= 2;
+      if (word !== 'ADD' && word !== 'REMOVE') return false;
+      return parts.length === 2;
+    },
+  }),
+  /** `SPACETRANS <distance>`: one positive plain decimal model distance. */
+  SPACETRANS: Object.freeze({
+    parse: isPositiveDecimal,
+  }),
   // Navigation-chrome settings. The five names are host setting selectors, not
   // drawing commands: `NAVBAR`/`NAVVCUBE` take On/Off, the display sysvar takes
   // the AutoCAD 0..3 bit code, and the two registry gates take On/Off. The host

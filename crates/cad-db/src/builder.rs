@@ -69,6 +69,9 @@ impl DrawingDatabaseBuilder {
                 next_block_id: 1,
                 next_layer_id: 1,
                 next_layout_id: 1,
+                next_style_id: 1,
+                next_dim_style_id: 1,
+                next_mleader_style_id: 1,
                 external_references: BTreeMap::new(),
                 bounds_cache: Default::default(),
             },
@@ -669,6 +672,27 @@ impl DrawingDatabaseBuilder {
         // allocator.
         let max_layout = self.database.layouts.keys().map(|l| l.0).max().unwrap_or(0);
         self.database.next_layout_id = max_layout.saturating_add(1).max(1);
+        // The three style tables allocate the same way: from the largest imported
+        // id, so a first post-import create cannot collide and a deleted id is
+        // never handed out again.
+        let max_style = self.database.styles.keys().map(|s| s.0).max().unwrap_or(0);
+        self.database.next_style_id = max_style.saturating_add(1);
+        let max_dim_style = self
+            .database
+            .dim_styles
+            .keys()
+            .map(|s| s.0)
+            .max()
+            .unwrap_or(0);
+        self.database.next_dim_style_id = max_dim_style.saturating_add(1);
+        let max_mleader_style = self
+            .database
+            .mleader_styles
+            .keys()
+            .map(|s| s.0)
+            .max()
+            .unwrap_or(0);
+        self.database.next_mleader_style_id = max_mleader_style.saturating_add(1);
         Ok(self.database)
     }
 }
