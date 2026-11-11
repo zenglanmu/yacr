@@ -1786,3 +1786,22 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `REVCLOUDPROPERTIES` | **完整实现** | `REVCLOUDPROPERTIES <arc-length>` 写 token，REVCLOUD 真实消费 | 仅会话状态，不持久化 DWG |
 | `QUICKCALC`/`QVDRAWING`/`QVLAYOUT`/`WORKSPACE`/`WSSAVE`/`WSSETTINGS`/`TOOLBAR` | **完整实现** | chrome 本地选择子/面板/对话框；不进入 `cad_command` | 会话内存工作空间；无跨重启持久化 |
 | `RIBBON`/`RIBBONCLOSE`/`HIDEPALETTES`/`SHOWPALETTES`/`FILETAB`/`FILETABCLOSE` | **完整实现** | chrome 可见性设置（set，不 toggle）；单文档文件标签 | 视觉/像素 NOT VERIFIED |
+
+### Wave 26 续（2026-11-12，样式表 / 引线编辑 / 系统变量）
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `STYLE`/`-STYLE` | **完整实现** | `NEW`/`RENAME`/`DELETE`/`SET`（FONT/KEYS/ADDKEY/REMOVEKEY）/`?`；一条 style-table patch/一步撤销 | 域 `Style` 只有 name/resource_keys；无“当前文字样式”会话变量；修改不回写既有文字 |
+| `DIMSTYLE` | **完整实现** | `LIST`/`CURRENT`/`SET`/`NEW`/`RENAME`/`DELETE`/`MODIFY`；一条 patch/一步撤销；`Standard` 不可删、被引用不可改删 | `MODIFY` 不级联已烘焙标注快照（无 DIMREGEN） |
+| `MLEADERSTYLE` | **完整实现** | `?`/`LIST`/`SET`/`NEW`/`RENAME`/`DELETE`/`MODIFY`；一条 patch/一步撤销；新引线使用当前样式 | 既有引线保留烘焙快照；`Standard` 不可删 |
+| `RENAME` | 部分实现 | LAYER/STYLE/DIMSTYLE/MLEADERSTYLE/BLOCK 真实写 | `LINETYPE` 无 rename API（具名拒绝）；块删除仍不可用 |
+| `MLEDIT`/`-MLEDIT` | 部分实现 | 两独立 LINE 的 MERGE/CLOSED/CROSS/TEE 清理、OPEN 断开、BREAK 带移除；一条事务 | 无 `AcDbMline` 顶点/join/cap/fill 模型；四种清理拼写归并为一种可表示操作 |
+| `MLEADERALIGN` | 部分实现 | LEFT/RIGHT/CENTER + 等距纵排；箭头锚定，其余平移 | 无 distribute/column 选项；有保留断点的引线拒绝 |
+| `MLEADEREDIT` | 部分实现 | ADD 根 0 一条线 / REMOVE 一条（不可清空） | 无逐线覆盖/箭头编辑；不可见路径样式拒绝 |
+| `MLEADERCOLLECT` | 部分实现 | ≥2 条合并为一条（根/线拼接、文本 `\P`、首样式/平面、根落点重定向），删除源 | 样式/覆盖掩码/平面必须一致；无堆叠文本/分栏/关联性 |
+| `TOLERANCE` | 部分实现 | `TOLERANCE <x> <y> <text>` 生成边框+分隔线+每格 TEXT | 独立实体非 `AcDbFcf`；轴对齐；格宽/行高为估计；≤6 格 |
+| `CLASSICXREF` | 部分实现 | 只读 xref 报告 + chrome 面板（真实 `cad_status.references`） | attach/detach/reload 仍按名拒绝；面板不写库 |
+| `PMTOGGLE` | **完整实现** | 切换选项板可见性（与 HIDEPALETTES/SHOWPALETTES 同状态） | chrome 本地选择子，不进入 `cad_command` |
+| `SYSVARMONITOR` | 部分实现 | ADD/REMOVE/LIST + 查询时快照变化检测 | 无后台通知；会话状态不持久化；仅 SETVAR 闭集变量 |
+| `SYSVDLG` | 部分实现 | 只读报告所有已暴露变量 + `sysvdlg.not_tracked` | 无编辑/保存/恢复对话框 |
+| `SPACETRANS` | **完整实现** | `SPACETRANS <distance>` 模型↔图纸换算并报告方向/因子 | 活动视口 = VPMAX 视口否则 index 0；无逐视口选择 |

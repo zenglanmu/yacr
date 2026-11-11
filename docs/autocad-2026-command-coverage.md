@@ -245,7 +245,7 @@
 | `-LWEIGHT` | 部分实现 | 同一线宽显示报告的命令行拼写。 |
 | `-MARKUPASSIST` | 部分实现 | 具名拒绝（`-markupassist.unsupported: this build has no collaboration markup/trace model`）。 |
 | `-MARKUPIMPORT` | 部分实现 | 具名拒绝（`-markupimport.unsupported: this build has no collaboration markup/trace model`）。 |
-| `-MLEDIT` | 部分实现 | 具名拒绝（`-mlinedit.unsupported`）：MLEDIT 的命令行拼写。 |
+| `-MLEDIT` | 部分实现 | `MLEDIT` 的命令行拼写，同一实现与边界 |
 | `-MTEXT` | 部分实现 | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获）；无第二实现 |
 | `-OBJECTSCALE` | 部分实现 | 具名拒绝（`-objectscale.unsupported`）：同一具名拒绝的命令行拼写。 |
 | `-OVERKILL` | 部分实现 | `OVERKILL` 的别名，同一去重实现 |
@@ -262,7 +262,7 @@
 | `-PURGE` | 部分实现 | `PURGE` 的别名，同一实现 |
 | `-RENAME` | 部分实现 | `RENAME` 的别名，同一实现；图层重命名一条事务/一步撤销。 |
 | `-SCALELISTEDIT` | 部分实现 | 只读报告真实 `ACAD_SCALELIST`（`scalelistedit.entry`）；创建/编辑/删除/排序比例未实现（`scalelistedit.write_unsupported`）。 |
-| `-STYLE` | 部分实现 | 与 `STYLE` 相同的只读文字样式列表，使用 `-style.*` 诊断码；编辑未实现。 |
+| `-STYLE` | 已实现 | `STYLE` 的命令行拼写，同一 grammar/写入路径与边界 |
 | `-TABLE` | 部分实现 | 真实创建（与 `TABLE` 同实现）：`-TABLE <rows> <cols> <col_width> <row_height> <x> <y>`，+X/+Z、空单元格/Standard、一条事务/一步撤销；无对话框。
 | `-UNITS` | 部分实现 | 只读报告固定单位显示规则（`-units.*` 诊断码）；Units 对话框/逐图纸单位表未实现。 |
 | `-VIEW` | 部分实现 | `VIEW` 的别名，同一实现 |
@@ -426,7 +426,7 @@
 | `CLASSICIMAGE` | 部分实现 | 具名拒绝（`classicimage.unsupported: no image manager; use IMAGE`）。 |
 | `CLASSICINSERT` | 部分实现 | 具名拒绝（`classicinsert.unsupported`）：无经典插入对话框；请用 INSERT。 |
 | `CLASSICLAYER` | 部分实现 | chrome 本地选择子：打开现有图层面板；紧凑布局像 LAYER 一样拒绝。 |
-| `CLASSICXREF` | 部分实现 | 具名拒绝（`classicxref.unsupported`）：无独立外部参照选项板；请用 RESOURCES 面板。 |
+| `CLASSICXREF` | 部分实现 | 真实只读外部参照报告 + chrome 面板（`cad_status.references` 的 name/status/reason），行聚焦/关闭/Esc；attach/detach/reload 仍按名拒绝 |
 | `CLEANSCREENOFF` | 部分实现 | chrome 本地选择子：显式退出 clean-screen；只恢复 chrome 可见性，不重开各面板 |
 | `CLEANSCREENON` | 部分实现 | chrome 本地选择子：显式进入 clean-screen；只隐藏 chrome，不记录各面板的独立开关 |
 | `CLIP` | 部分实现 | 具名拒绝（`clip.unsupported`）：无图像/外部参照裁剪模型。 |
@@ -553,7 +553,7 @@
 | `DIMREGEN` | 部分实现 | payload-free；本构建非关联，`dimregen.non_associative` 且不改变任何状态 |
 | `DIMROTATED` | 部分实现 | 三点拾取（两尺寸界线原点 + 尺寸线位置）；尺寸线角度来自会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | `DIMSPACE` | 已实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
-| `DIMSTYLE` | 部分实现 | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 按 `dimstyle.set_unavailable` 拒绝（无 post-import 样式表写 API）；未知名称拒绝 |
+| `DIMSTYLE` | 已实现 | `LIST`/`CURRENT`/`SET <name>`/`NEW`/`RENAME`/`DELETE`/`MODIFY <field> <value>`；一条 dim-style patch/一步撤销；`Standard` 不可删、被标注引用的行不可改删；`MODIFY` 不回写已烘焙的标注快照（无 DIMREGEN 级联） |
 | `DIMTEDIT` | 部分实现 | `MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`（`ROTATE`→`ANGLE`）；Left/Right/Center 同时移动锚点并设置字形级 `h_align`（仅线性/对齐/半径/直径）；Angle 固定文字中心、`0` 复位；一条事务/一步撤销；角/坐标标注的 justify 与 Oblique 未实现 |
 | `DIST` | 已实现 | — |
 | `DISTANTLIGHT` | 部分实现 | 具名拒绝（`distantlight.unsupported: 3D light objects are not modeled`）。 |
@@ -776,11 +776,11 @@
 | `MKLTYPE` | 部分实现 | 具名拒绝（`mkltype.unsupported: this build has no .lin definition-file writer`）。 |
 | `MKSHAPE` | 部分实现 | 具名拒绝（`mkshape.unsupported: this build has no SHX shape compiler`）。 |
 | `MLEADER` | 部分实现 | 引线路径类型直线/样条（样式表决定）、注释文本；2 顶点样条不可弯折（报告）；无 dogleg/attachment/角度约束覆盖 |
-| `MLEADERALIGN` | 部分实现 | 具名拒绝（`mleaderalign.unsupported`）：无多重引线对齐模型。 |
-| `MLEADERCOLLECT` | 部分实现 | 具名拒绝（`mleadercollect.unsupported`）：无多重引线收集/表格模型。 |
-| `MLEADEREDIT` | 部分实现 | 具名拒绝（`mleaderedit.unsupported`）：无增删引线 API。 |
-| `MLEADERSTYLE` | 部分实现 | 只读列出多重引线样式；创建/修改/设当前样式未实现。 |
-| `MLEDIT` | 部分实现 | 具名拒绝（`mlinedit.unsupported`）：无多线连接/封口编辑模型。 |
+| `MLEADERALIGN` | 部分实现 | `LEFT/RIGHT/CENTER [spacing]` 对齐多条 MULTILEADER 的文字 X 或等距纵排；箭头锚定，其余顶点/根落点平移；一条事务；无 distribute/column 选项 |
+| `MLEADERCOLLECT` | 部分实现 | 合并 ≥2 MULTILEADER 为一条（根/线拼接、文本以 `\P` 连接、首样式/平面保留、根落点重定向），删除源；一条事务；要求样式/覆盖掩码/平面一致且无保留数据 |
+| `MLEADEREDIT` | 部分实现 | `ADD <x> <y>` 给根 0 增加一条引线（箭头到既有 dogleg 顶点）；`REMOVE <index>` 删除一条（不可清空根）；一条事务；无逐线覆盖/箭头编辑 |
+| `MLEADERSTYLE` | 已实现 | `?`/`LIST`/`SET`/`NEW`/`RENAME`/`DELETE`/`MODIFY`；一条 mleader-style patch/一步撤销；`Standard` 不可删；新 MLEADER 解析当前样式；既有引线保留烘焙快照 |
+| `MLEDIT` | 部分实现 | 两独立 LINE 的可表示子集：`MERGE/CLOSED/CROSS/TEE` 清理（把各自最近端点 trim/extend 到交点）、`OPEN` 在交点断开、`BREAK` 移除两条平行线之间的带；一条事务；导入的 `AcDbMline` 复合体按名拒绝；无 join/cap/fill/顶点模型（`mledit.residual`） |
 | `MLINE` | 部分实现 | 恰好两条平行 `LINE`；无 join/cap/多段基线 |
 | `MLSTYLE` | 部分实现 | 会话内最多 16 个命名样式，喂 MLINE；不持久化 |
 | `MOCORO` | 部分实现 | `MOVE`→`COPY`→`ROTATE`→`SCALE` 链式复用既有变换漏斗；写入前预校验全部数值；一条事务/一步撤销；无命令内 `Undo`/交互 gizmo（全局 `UNDO` 等价） |
@@ -883,7 +883,7 @@
 | `REGENAUTO` | 部分实现 | 会话令牌 `regenauto`；本构建无自动重生成开关，需显式 REGEN。 |
 | `REGION` | 部分实现 | 具名拒绝（`region.unsupported`）：无面域几何模型。 |
 | `REINIT` | 部分实现 | 具名拒绝（`reinit.unsupported`）：本构建无设备/数字化仪初始化模型。 |
-| `RENAME` | 部分实现 | `RENAME <kind> <old> <new>`；仅 LAYER 有重命名 API，其余 kind 按名拒绝；图层重命名一条事务/一步撤销 |
+| `RENAME` | 部分实现 | `RENAME <kind> <old> <new>`：`LAYER`/`STYLE`/`DIMSTYLE`/`MLEADERSTYLE`/`BLOCK` 真实写；一条表 patch/一步撤销；`LINETYPE` 仍无 rename API（具名拒绝） |
 | `RESETBLOCK` | 部分实现 | 具名拒绝（`resetblock.unsupported`）：本构建无动态块参数重置 API。 |
 | `REVCLOUD` | 部分实现 | `Object`/`Rectangular`/`Polygonal`/`Freehand`/`Arc Length`/`Style`/`Modify`；弧长按 payload → 会话 `REVCLOUDPROPERTIES` token → 5% 替代顺序；`Calligraphy` 未建模 |
 | `REVCLOUDPROPERTIES` | 已实现 | `REVCLOUDPROPERTIES <arc-length>`（有限 > 0）写会话 token，`REVCLOUD` 真实消费并改变弧长；bare 为只读报告 |
@@ -914,7 +914,7 @@
 | `SLICE` | 部分实现 | 具名拒绝（`slice.unsupported: no 3D slicing model`）。 |
 | `SNAP` | 已实现 | — |
 | `SOLID` | 部分实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（`AcDbSolid`）；DXF 导出写 polyface mesh，不是 SOLID 记录 |
-| `SPACETRANS` | 部分实现 | 具名拒绝（`spacetrans.unsupported`）：无模型/图纸距离换算 API。 |
+| `SPACETRANS` | 已实现 | `SPACETRANS <distance>` 用活动视口 `model_to_paper` 因子做模型↔图纸换算并报告方向/因子；模型空间/无视口按名拒绝 |
 | `SPELL` | 部分实现 | 具名拒绝（`spell.unsupported`）：无拼写检查词典/模型。 |
 | `SPHERE` | 部分实现 | 具名拒绝（`sphere.unsupported: 3D solid primitives are not implemented`）。 |
 | `SPLINE` | 已实现 | fit 点法 + **CV 法**（degree 2/3，显式或简写 knots/weights）；`Close`/`Tangency`/`Knots` 参数化/`Object` 未建模 |
@@ -923,7 +923,7 @@
 | `STATUS` | 部分实现 | 图形/数据库/修订/实体/图层/块/样式/布局/范围/模式；本轮新增 **current_space/space_usage/layer_usage/modes/selection**；创建/编辑时间、内存、limits/base 明确 `status.not_tracked` |
 | `STLOUT` | 部分实现 | 具名拒绝（`stlout.unsupported: STL export is not implemented`）。 |
 | `STRETCH` | 部分实现 | 交叉矩形与多边形/lasso payload；**IMAGE/MASK/TABLE 新增移动型分类**；圆按圆心、块/文字按插入点；`MULTILEADER` 整命令拒绝；多边形/lasso 交互捕获未接线 |
-| `STYLE` | 部分实现 | 只读列出图形的文字样式；创建/修改文字样式未实现。 |
+| `STYLE` | 已实现 | `NEW <name> [<base>]`/`RENAME <old> <new>`/`DELETE <name>`/`SET <name> <FONT/KEYS/ADDKEY/REMOVEKEY> <value>`/`?`；一条 style-table patch/一步撤销；域 `Style` 只有 name/resource_keys，故只可写这两类字段；无“当前文字样式”会话变量 |
 | `STYLESMANAGER` | 部分实现 | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |
 | `SUBTRACT` | 部分实现 | 具名拒绝（`subtract.unsupported: no 3D boolean model`）。 |
 | `SUPERHATCH` | 部分实现 | 具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 |
@@ -938,8 +938,8 @@
 | `SURFTRIM` | 部分实现 | 具名拒绝（`surftrim.unsupported: surface trimming is not implemented`）。 |
 | `SURFUNTRIM` | 部分实现 | 具名拒绝（`surfuntrim.unsupported: surface untrimming is not implemented`）。 |
 | `SWEEP` | 部分实现 | 具名拒绝（`sweep.unsupported: 3D sweep is not implemented`）。 |
-| `SYSVARMONITOR` | 部分实现 | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
-| `SYSVDLG` | 部分实现 | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
+| `SYSVARMONITOR` | 部分实现 | `ADD/REMOVE <name>`、`LIST [<name>]`、bare=LIST；会话监视集 + 查询时快照变化检测；无后台通知、不持久化；仅 SETVAR 闭集变量 |
+| `SYSVDLG` | 部分实现 | 只读报告所有已暴露的会话变量当前值 + `sysvdlg.not_tracked`；无编辑/保存/恢复对话框 |
 | `SYSWINDOWS` | 部分实现 | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
 | `TABLE` | 部分实现 | **导入的 ACAD_TABLE 已建模**：行/列/单元格/合并/文字/边框，可 MOVE/ROTATE/SCALE（相似变换；+Z 表格文字随旋转）、可拾取/显示、FIND 逐单元格报告/替换、真实 DXF 导出（块内表格带 INSERT 变换）；导入文字高度/样式按 `cell→row→base→TableStyle` 解析；创建真实：`TABLE <rows> <cols> <col_width> <row_height> <x> <y>`（空单元格/Standard、+X/+Z、一条事务/一步撤销）；单元格块/字段内容、边框颜色/线宽/填充、对齐/逐格旋转、TABLESTYLE 名称不往返均为声明损失；无对话框/单元格样式/创建时合并。
 | `TABLEDIT` | 部分实现 | 真实单元格文本编辑：`TABLEDIT <row> <col> [text]`（1-based；选中一个表格；剩余整行作为文本，空文本清除），FIND 可见；一条事务/一步撤销；无样式/合并/块内容编辑。
@@ -964,7 +964,7 @@
 | `TIME` | 部分实现 | 真实 UTC/文档/修订/计数 + 4 个显式 `time.not_tracked`（创建、最后更新、命令耗时、计时器）；未跟踪值不杜撰 |
 | `TINSERT` | 部分实现 | **无块进入单元格的创建**（`tinsert.unsupported`）；导入的单元格块内容未建模。
 | `TJUST` | 部分实现 | `JUSTIFYTEXT` 的别名，同一语法与实现 |
-| `TOLERANCE` | 部分实现 | 具名拒绝（`tolerance.unsupported`）：无特征控制框（公差）对象模型。 |
+| `TOLERANCE` | 部分实现 | `TOLERANCE <x> <y> <text>`（`|` 分格）→ 闭合边框 LWPOLYLINE + 分隔 LINE + 每格 TEXT，活动图层，一条事务；是独立实体而非单个 `AcDbFcf`；轴对齐、格宽/行高为声明估计、≤6 格 |
 | `TORIENT` | 已实现 | 裸命令 Most Readable、`TORIENT <角度>` 绝对旋转、`TORIENT REVERSE|R` 再加 180°（**本项目扩展**，AutoCAD 2026 无此选项）；只改 TEXT/MTEXT 的 rotation，位置不变；ATTDEF/带属性块因无属性模型不适用（全局范围） |
 | `TORUS` | 部分实现 | 具名拒绝（`torus.unsupported: 3D solid primitives are not implemented`）。 |
 | `TRANSPARENCY` | 部分实现 | 具名拒绝（`transparency.unsupported`）：未建模图像透明度。 |
@@ -1038,6 +1038,7 @@
 | `WSSETTINGS` | 已实现 | chrome 工作空间设置面：列出/重命名/删除/设为当前 |
 | `TOOLBAR` | 已实现 | chrome 本地选择子：显示快速访问工具栏 |
 | `-TOOLBAR` | 已实现 | chrome 本地选择子：`-TOOLBAR [SHOW|HIDE]` 设置快速访问工具栏可见性 |
+| `PMTOGGLE` | 已实现 | chrome 本地选择子：切换与 HIDEPALETTES/SHOWPALETTES 相同的选项板可见性状态（幂等；关闭打开的选项板） |
 | 1 | `3DALIGN` | 部分实现 | Aligns objects with other objects in 2D and 3D. | 具名拒绝（`3dalign.unsupported: 3D alignment is not modeled; use the 2D ALIGN path`）。 |
 | 2 | `3DARRAY` | 部分实现 | Creates nonassociative, 3D rectangular or polar arrays. | 具名拒绝（`3darray.unsupported: 3D arrays are not modeled; use ARRAY/ARRAYRECT/ARRAYPOLAR`）。 |
 | 3 | `3DCLIP` | 部分实现 | Opens the Adjust Clipping Planes window, where you can specify what portions of a 3D model to display. | 具名拒绝（`3dclip.unsupported: no 3D clipping-plane model`）。 |
@@ -1209,7 +1210,7 @@
 | 169 | `CLASSICIMAGE` | 部分实现 | Manages referenced image files in the current drawing. | 具名拒绝（`classicimage.unsupported: no image manager; use IMAGE`）。 |
 | 170 | `CLASSICINSERT` | 部分实现 | Inserts a block or drawing into the current drawing using the classic version of the INSERT command. | 具名拒绝（`classicinsert.unsupported`）：无经典插入对话框；请用 INSERT。 |
 | 171 | `CLASSICLAYER` | 部分实现 | Opens the legacy Layer Properties Manager. | chrome 本地选择子：打开现有图层面板；紧凑布局像 LAYER 一样拒绝。 |
-| 172 | `CLASSICXREF` | 部分实现 | Manages referenced drawing files in the current drawing. | 具名拒绝（`classicxref.unsupported`）：无独立外部参照选项板；请用 RESOURCES 面板。 |
+| 172 | `CLASSICXREF` | 部分实现 | Manages referenced drawing files in the current drawing. | 真实只读外部参照报告 + chrome 面板（`cad_status.references` 的 name/status/reason），行聚焦/关闭/Esc；attach/detach/reload 仍按名拒绝 |
 | 173 | `CLEANSCREENOFF` | 部分实现 | Restores the state of the display before CLEANSCREENON was used. | chrome 本地选择子：显式退出 clean-screen；只恢复 chrome 可见性，不重开各面板 |
 | 174 | `CLEANSCREENON` | 部分实现 | Clears the screen of toolbars and dockable windows, excluding the command window. | chrome 本地选择子：显式进入 clean-screen；只隐藏 chrome，不记录各面板的独立开关 |
 | 175 | `CLIP` | 部分实现 | Crops selected objects such as blocks, external references, images, viewports, and underlays to a specified boundary. | 具名拒绝（`clip.unsupported`）：无图像/外部参照裁剪模型。 |
@@ -1345,7 +1346,7 @@
 | 305 | `DIMROTATED` | 部分实现 | Creates a rotated linear dimension. | 三点拾取（两尺寸界线原点 + 尺寸线位置）；角度为会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | 306 | `DIMSPACE` | 已实现 | Adjusts the spacing between linear dimensions or angular dimensions. | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | 307 | `-DIMSTYLE` | 部分实现 | At the Command prompt, creates and modifies dimension styles. | `DIMSTYLE` 的别名，同一实现 |
-| 308 | `DIMSTYLE` | 部分实现 | Creates and modifies dimension styles. | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 按 `dimstyle.set_unavailable` 拒绝（无 post-import 样式表写 API）；未知名称拒绝 |
+| 308 | `DIMSTYLE` | 已实现 | Creates and modifies dimension styles. | `LIST`/`CURRENT`/`SET <name>`/`NEW`/`RENAME`/`DELETE`/`MODIFY <field> <value>`；一条 dim-style patch/一步撤销；`Standard` 不可删、被标注引用的行不可改删；`MODIFY` 不回写已烘焙的标注快照（无 DIMREGEN 级联） |
 | 309 | `DIMTEDIT` | 部分实现 | Moves and rotates dimension text and relocates the dimension line. | `MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 同时移动锚点并设置字形级 `h_align`（仅线性/对齐/半径/直径）；Angle 固定文字中心，`0` 复位；一条事务/一步撤销；角/坐标标注 justify 与 Oblique 未实现 |
 | 310 | `DIST` | 已实现 | Measures the distance and angle between two points. | — |
 | 311 | `DISTANTLIGHT` | 部分实现 | Creates a distant light. | 具名拒绝（`distantlight.unsupported: 3D light objects are not modeled`）。 |
@@ -1593,12 +1594,12 @@
 | 553 | `MKLTYPE` | 部分实现 | Creates a linetype definition based on selected objects and stores them in a specified linetype definition (LIN) file. | 具名拒绝（`mkltype.unsupported: this build has no .lin definition-file writer`）。 |
 | 554 | `MKSHAPE` | 部分实现 | Creates a shape definition based on selected objects. | 具名拒绝（`mkshape.unsupported: this build has no SHX shape compiler`）。 |
 | 555 | `MLEADER` | 部分实现 | Creates a multileader object. | 引线路径类型直线/样条（样式表决定）、注释文本；2 顶点样条不可弯折（报告）；无 dogleg/attachment/角度约束覆盖 |
-| 556 | `MLEADERALIGN` | 部分实现 | Aligns and spaces selected multileader objects. | 具名拒绝（`mleaderalign.unsupported`）：无多重引线对齐模型。 |
-| 557 | `MLEADERCOLLECT` | 部分实现 | Organizes selected multileaders that contain blocks into rows or columns, and displays the result with a single leader. | 具名拒绝（`mleadercollect.unsupported`）：无多重引线收集/表格模型。 |
-| 558 | `MLEADEREDIT` | 部分实现 | Adds leader lines to, or removes leader lines from, a multileader object. | 具名拒绝（`mleaderedit.unsupported`）：无增删引线 API。 |
-| 559 | `MLEADERSTYLE` | 部分实现 | Creates and modifies multileader styles. | 只读列出多重引线样式（`mleaderstyle.entry`/`mleaderstyle.summary`）；编辑未实现。 |
-| 560 | `-MLEDIT` | 部分实现 | Edits multiline intersections, breaks, and vertices. | 具名拒绝（`-mlinedit.unsupported`）：MLEDIT 的命令行拼写。 |
-| 561 | `MLEDIT` | 部分实现 | Edits multiline intersections, breaks, and vertices. | 具名拒绝（`mlinedit.unsupported`）：无多线连接/封口编辑模型。 |
+| 556 | `MLEADERALIGN` | 部分实现 | Aligns and spaces selected multileader objects. | `LEFT/RIGHT/CENTER [spacing]` 对齐多条 MULTILEADER 的文字 X 或等距纵排；箭头锚定，其余顶点/根落点平移；一条事务；无 distribute/column 选项 |
+| 557 | `MLEADERCOLLECT` | 部分实现 | Organizes selected multileaders that contain blocks into rows or columns, and displays the result with a single leader. | 合并 ≥2 MULTILEADER 为一条（根/线拼接、文本以 `\P` 连接、首样式/平面保留、根落点重定向），删除源；一条事务；要求样式/覆盖掩码/平面一致且无保留数据 |
+| 558 | `MLEADEREDIT` | 部分实现 | Adds leader lines to, or removes leader lines from, a multileader object. | `ADD <x> <y>` 给根 0 增加一条引线（箭头到既有 dogleg 顶点）；`REMOVE <index>` 删除一条（不可清空根）；一条事务；无逐线覆盖/箭头编辑 |
+| 559 | `MLEADERSTYLE` | 已实现 | Creates and modifies multileader styles. | `?`/`LIST`/`SET`/`NEW`/`RENAME`/`DELETE`/`MODIFY`；一条 mleader-style patch/一步撤销；`Standard` 不可删；新 MLEADER 解析当前样式；既有引线保留烘焙快照 |
+| 560 | `-MLEDIT` | 部分实现 | Edits multiline intersections, breaks, and vertices. | `MLEDIT` 的命令行拼写，同一实现与边界 |
+| 561 | `MLEDIT` | 部分实现 | Edits multiline intersections, breaks, and vertices. | 两独立 LINE 的可表示子集：`MERGE/CLOSED/CROSS/TEE` 清理（把各自最近端点 trim/extend 到交点）、`OPEN` 在交点断开、`BREAK` 移除两条平行线之间的带；一条事务；导入的 `AcDbMline` 复合体按名拒绝；无 join/cap/fill/顶点模型（`mledit.residual`） |
 | 562 | `MLINE` | 部分实现 | Creates multiple parallel lines. | 恰好两条平行 `LINE`；无 join/cap/多段基线 |
 | 563 | `MLSTYLE` | 部分实现 | Creates, modifies, and manages multiline styles. | 会话内最多 16 个命名样式，喂 MLINE；不持久化 |
 | 564 | `MOCORO` | 部分实现 | Moves, copies, rotates, and scales selected objects with a single command. | `MOVE|COPY dx dy`、`ROTATE bx by degrees`、`SCALE bx by factor` 作用于当前选择；委托既有 MOVE/COPY/ROTATE/SCALE 路径；COPY 一条事务/一步撤销，其余原地变换；无交互 gizmo |
@@ -1689,7 +1690,7 @@
 | 649 | `PLOTSTYLE` | 部分实现 | Controls the named plot styles that are attached to the current layout and can be assigned to objects. | 具名拒绝（`plotstyle.unsupported`）：命名打印样式未实现（无 CTB/STB 表）。 |
 | 650 | `PLOTTERMANAGER` | 部分实现 | Displays the Plotter Manager, where you can add or edit a plotter configuration. | 具名拒绝（`plottermanager.unsupported`）：本构建无绘图仪配置模型。 |
 | 651 | `PLT2DWG` | 部分实现 | Imports legacy HPGL files into the current drawing, retaining all colors. | 具名拒绝（`plt2dwg.unsupported: HPGL (PLT) import is not implemented`）。 |
-| 652 | `PMTOGGLE` | 未实现 | Controls whether the Performance Recorder is turned on or off. | — |
+| 652 | `PMTOGGLE` | 已实现 | Controls whether the Performance Recorder is turned on or off. | chrome 本地选择子：切换与 HIDEPALETTES/SHOWPALETTES 相同的选项板可见性状态（幂等；关闭打开的选项板） |
 | 653 | `PNGOUT` | 部分实现 | Saves selected objects to a file in a Portable Network Graphics format. | 具名拒绝（`pngout.unsupported: raster PNG export is not implemented; use PLOT for vector SVG/PDF`）。 |
 | 654 | `POINT` | 已实现 | Creates a point object. | 单点 + **payload 多点 `Multiple`**（n 个 `AcDbPoint`，一条事务/一步撤销）；交互重复捕获（Exact(1)）未接线 |
 | 655 | `-POINTCLOUDATTACH` | 未实现 | Inserts a point cloud file into the current drawing from the Command prompt. | — |
@@ -1766,7 +1767,7 @@
 | 726 | `REGION` | 部分实现 | Converts objects that enclose an area into a 2D region object. | 具名拒绝（`region.unsupported`）：无面域几何模型。 |
 | 727 | `REINIT` | 部分实现 | Reinitializes the digitizer, digitizer input/output port, and program parameters file. | 具名拒绝（`reinit.unsupported`）：本构建无设备/数字化仪初始化模型。 |
 | 728 | `-RENAME` | 部分实现 | Changes the names assigned to named objects from the Command prompt. | `RENAME` 的命令行拼写；图层重命名一条事务/一步撤销。 |
-| 729 | `RENAME` | 部分实现 | Changes the names assigned to items such as layers and dimension styles. | `RENAME <kind> <old> <new>`；仅 LAYER 有重命名 API，其余 kind 按名拒绝；图层重命名一条事务/一步撤销 |
+| 729 | `RENAME` | 部分实现 | Changes the names assigned to items such as layers and dimension styles. | `RENAME <kind> <old> <new>`：`LAYER`/`STYLE`/`DIMSTYLE`/`MLEADERSTYLE`/`BLOCK` 真实写；一条表 patch/一步撤销；`LINETYPE` 仍无 rename API（具名拒绝） |
 | 730 | `-RENDER` | 未实现 | Creates a photorealistic or realistically shaded image of a 3D solid or surface model from the Command prompt. | — |
 | 731 | `RENDER` | 未实现 | Creates a photorealistic or realistically shaded image of a 3D solid or surface model. | — |
 | 732 | `RENDERCROP` | 未实现 | Renders a specified rectangular area, called a crop window, within a viewport. | — |
@@ -1847,7 +1848,7 @@
 | 807 | `SOLIDEDIT` | 未实现 | Edits faces and edges of 3D solid objects. | — |
 | 808 | `SOLPROF` | 未实现 | Creates 2D profile images of 3D solids for display in a layout viewport. | — |
 | 809 | `SOLVIEW` | 未实现 | Creates orthographic views, layers, and layout viewports automatically for 3D solids. | — |
-| 810 | `SPACETRANS` | 部分实现 | Calculates equivalent model space and paper space distances in a layout. | 具名拒绝（`spacetrans.unsupported`）：无模型/图纸距离换算 API。 |
+| 810 | `SPACETRANS` | 已实现 | Calculates equivalent model space and paper space distances in a layout. | `SPACETRANS <distance>` 用活动视口 `model_to_paper` 因子做模型↔图纸换算并报告方向/因子；模型空间/无视口按名拒绝 |
 | 811 | `SPELL` | 部分实现 | Checks spelling in a drawing. | 具名拒绝（`spell.unsupported`）：无拼写检查词典/模型。 |
 | 812 | `SPHERE` | 部分实现 | Creates a 3D solid sphere. | 具名拒绝（`sphere.unsupported: 3D solid primitives are not implemented`）。 |
 | 813 | `SPLINE` | 已实现 | Creates a smooth curve that passes through or near a set of fit points, or that is defined by the vertices in a control frame. | fit 点法 + **CV 法**（degree 2/3，显式或简写 knots/weights）；`Close`/`Tangency`/`Knots` 参数化/`Object` 未建模 |
@@ -1858,8 +1859,8 @@
 | 818 | `STATUS` | 部分实现 | Displays drawing statistics, modes, and extents. | 图形/数据库/修订/实体/图层/块/样式/布局/范围/模式；本轮新增 **current_space/space_usage/layer_usage/modes/selection**；创建/编辑时间、内存、limits/base 明确 `status.not_tracked` |
 | 819 | `STLOUT` | 部分实现 | Stores 3D solids and watertight meshes in a format that can be used with stereolithography apparatus. | 具名拒绝（`stlout.unsupported: STL export is not implemented`）。 |
 | 820 | `STRETCH` | 部分实现 | Stretches objects crossed by a selection window or polygon. | 交叉矩形与多边形/lasso payload；**IMAGE/MASK/TABLE 新增移动型分类**；圆按圆心、块/文字按插入点；`MULTILEADER` 整命令拒绝；多边形/lasso 交互捕获未接线 |
-| 821 | `-STYLE` | 部分实现 | Creates, modifies, or specifies text styles. | 同一只读文字样式列表，使用 `-style.entry`/`-style.summary`；独立选择子，非别名。 |
-| 822 | `STYLE` | 部分实现 | Creates, modifies, or specifies text styles. | 只读列出文字样式表（`style.entry`/`style.summary`）；创建或修改未实现。 |
+| 821 | `-STYLE` | 已实现 | Creates, modifies, or specifies text styles. | `STYLE` 的命令行拼写，同一 grammar/写入路径与边界 |
+| 822 | `STYLE` | 已实现 | Creates, modifies, or specifies text styles. | `NEW <name> [<base>]`/`RENAME <old> <new>`/`DELETE <name>`/`SET <name> <FONT/KEYS/ADDKEY/REMOVEKEY> <value>`/`?`；一条 style-table patch/一步撤销；域 `Style` 只有 name/resource_keys，故只可写这两类字段；无“当前文字样式”会话变量 |
 | 823 | `STYLESMANAGER` | 部分实现 | Displays the Plot Style Manager, where you can revise plot style tables. | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |
 | 824 | `SUBTRACT` | 部分实现 | Creates as a new object by subtracting one overlapping region or 3D solid from another. | 具名拒绝（`subtract.unsupported: no 3D boolean model`）。 |
 | 825 | `SUNPROPERTIES` | 未实现 | Displays the Sun Properties palette. | — |
@@ -1876,8 +1877,8 @@
 | 836 | `SURFTRIM` | 部分实现 | Trims portions of a surface where it meets another surface or type of geometry. | 具名拒绝（`surftrim.unsupported: surface trimming is not implemented`）。 |
 | 837 | `SURFUNTRIM` | 部分实现 | Replaces surface areas removed by the SURFTRIM command. | 具名拒绝（`surfuntrim.unsupported: surface untrimming is not implemented`）。 |
 | 838 | `SWEEP` | 部分实现 | Creates a 3D solid or 3D surface by sweeping a 2D object or subobject along an open or closed path. | 具名拒绝（`sweep.unsupported: 3D sweep is not implemented`）。 |
-| 839 | `SYSVARMONITOR` | 部分实现 | Monitors a list of system variables and sends notifications when there are changes to any one in the list. | 只读：列出 SETVAR 闭集 8 个变量的当前值；不监视变化、不杜撰闭集外变量。 |
-| 840 | `SYSVDLG` | 部分实现 | Allows you to view, edit, save, and restore system variable settings. | 只读：同一 8 个变量 + `sysvdlg.dialog_not_implemented`；本构建无设置对话框。 |
+| 839 | `SYSVARMONITOR` | 部分实现 | Monitors a list of system variables and sends notifications when there are changes to any one in the list. | `ADD/REMOVE <name>`、`LIST [<name>]`、bare=LIST；会话监视集 + 查询时快照变化检测；无后台通知、不持久化；仅 SETVAR 闭集变量 |
+| 840 | `SYSVDLG` | 部分实现 | Allows you to view, edit, save, and restore system variable settings. | 只读报告所有已暴露的会话变量当前值 + `sysvdlg.not_tracked`；无编辑/保存/恢复对话框 |
 | 841 | `SYSWINDOWS` | 部分实现 | Arranges windows and icons when the application window is shared with external applications. | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
 | 842 | `-TABLE` | 部分实现 | Creates an empty table object. | `TABLE` 的命令行拼写；同一真实创建实现。
 | 843 | `TABLE` | 部分实现 | Creates an empty table object. | **导入模型 + 真实创建**：`TABLE <rows> <cols> <col_width> <row_height> <x> <y>` 创建空表格（Standard、+X/+Z、一条事务/一步撤销）；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐单元格、真实 DXF 导出；无对话框/创建时合并/单元格样式。
@@ -1905,7 +1906,7 @@
 | 865 | `TIME` | 部分实现 | Displays the date and time statistics of a drawing. | 真实 UTC/文档/修订/计数 + 4 个显式 `time.not_tracked`（创建、最后更新、命令耗时、计时器）；未跟踪值不杜撰 |
 | 866 | `TINSERT` | 部分实现 | Inserts a block in a table cell. | **无块进入单元格的创建**（`tinsert.unsupported`）；导入的单元格块内容未建模。
 | 867 | `TJUST` | 部分实现 | Changes the justification point of a text object without moving the text. Works with text, mtext, and attribute definition objects. | `JUSTIFYTEXT` 的别名，同一语法与实现 |
-| 868 | `TOLERANCE` | 部分实现 | Creates geometric tolerances contained in a feature control frame. | 具名拒绝（`tolerance.unsupported`）：无特征控制框（公差）对象模型。 |
+| 868 | `TOLERANCE` | 部分实现 | Creates geometric tolerances contained in a feature control frame. | `TOLERANCE <x> <y> <text>`（`|` 分格）→ 闭合边框 LWPOLYLINE + 分隔 LINE + 每格 TEXT，活动图层，一条事务；是独立实体而非单个 `AcDbFcf`；轴对齐、格宽/行高为声明估计、≤6 格 |
 | 869 | `-TOOLBAR` | 已实现 | Displays, hides, and customizes toolbars from the Command prompt. | chrome 本地选择子：`-TOOLBAR [SHOW|HIDE]` 设置快速访问工具栏可见性 |
 | 870 | `TOOLBAR` | 已实现 | Displays, hides, and customizes toolbars. | chrome 本地选择子：显示快速访问工具栏 |
 | 871 | `TOOLPALETTES` | 未实现 | Opens the Tool Palettes window. | — |
