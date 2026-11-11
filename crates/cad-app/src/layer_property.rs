@@ -141,6 +141,45 @@ pub(crate) enum LayerPropertyValue {
     Transparency(f32),
 }
 
+/// Normalise the **command-line** spelling of a layer colour value.
+///
+/// AutoCAD's `-LAYER Color` prompt takes a bare ACI number (`-LAYER COLOR 3
+/// WALLS`) or one of the seven standard colour names; this build's layer colour
+/// grammar writes those as `aci:N`. A bare all-digit value that fits `0..=255`
+/// and the seven AutoCAD colour names are rewritten here; everything else is
+/// returned verbatim so [`parse`] refuses it **by name** (`0` and `256` are
+/// symbolic and stay `aci:0` / `aci:256`, which [`parse`] rejects with the
+/// documented range reason).
+///
+/// The rewrite is the *spelling* only: the resulting string still goes through
+/// the one [`parse`] grammar, so `COLOR 3`, `COLOR red` and `COLOR aci:3` are
+/// the same write and no second colour table exists. `BLACK` is deliberately
+/// **not** mapped: AutoCAD's ACI 7 is white-on-dark/black-on-light, so a
+/// separate black index would be a guess.
+pub fn normalize_color_input(value: &str) -> String {
+    let value = value.trim();
+    let named = match value.to_ascii_lowercase().as_str() {
+        "red" => Some(1),
+        "yellow" => Some(2),
+        "green" => Some(3),
+        "cyan" => Some(4),
+        "blue" => Some(5),
+        "magenta" => Some(6),
+        "white" => Some(7),
+        _ => None,
+    };
+    if let Some(index) = named {
+        return format!("aci:{index}");
+    }
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return value.to_string();
+    }
+    match value.parse::<u16>() {
+        Ok(index) if index <= 255 => format!("aci:{index}"),
+        _ => value.to_string(),
+    }
+}
+
 /// Parse one `(key, value)` pair against `database`.
 ///
 /// Refusals carry a stable code and change nothing:

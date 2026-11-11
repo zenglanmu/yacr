@@ -8,7 +8,9 @@
 //! `ARGUMENT_SELECTORS` in the parent module is the admission list; an argument
 //! parser only ever sees text for a selector that list already admitted.
 
-use cad_app::{NamedObjectKind, PeditOption, PurgeTarget, RenameCommand, StandardView};
+use cad_app::{
+    DashLayerOps, NamedObjectKind, PeditOption, PurgeTarget, RenameCommand, StandardView,
+};
 
 /// AutoCAD's `LAYERSTATE <option>`: the bounded named layer-state store.
 pub const LAYERSTATE_SELECTOR: &str = "LAYERSTATE";
@@ -120,6 +122,20 @@ pub enum ZoomArgument {
     /// [`cad_app::CommandPayload::ZoomAt`]. The zoom is anchored at the
     /// **viewport centre**, exactly like those cursor-less button steps.
     Factor(f64),
+    /// `nX`: a positive finite **relative factor** (`2X`, `0.5X`). It is the
+    /// same scale operation as [`ZoomArgument::Factor`] and rides the same
+    /// [`cad_app::CommandPayload::ZoomAt`] payload; the suffix is only the
+    /// AutoCAD spelling. `> 1` zooms in, `< 1` zooms out.
+    Relative(f64),
+    /// `nXP` / `a/bXP`: the **paper-space viewport scale**, written as a
+    /// paper-to-drawing ratio. `2XP` becomes `VPSCALE 1:2` and `1/50XP` (or
+    /// `1:50XP`) becomes `VPSCALE 1:50`; the ratio is routed through the
+    /// existing Work-only `VPSCALE` write path, never through the Viewer-legal
+    /// `ZOOM` command.
+    PaperScale { paper: f64, drawing: f64 },
+    /// `OBJECT`: frame the current **selection**. The selection is the whole
+    /// input — there is no payload point and no interactive object pick.
+    Object,
     /// `ALL` (the written-out spelling) or `EXTENTS`: frame the whole drawing,
     /// i.e. the [`cad_app::CommandId::FitDrawing`] path.
     Fit,
@@ -136,9 +152,9 @@ pub enum ZoomArgument {
     Previous,
 }
 
-/// Parse the argument of a `ZOOM` selector: a positive decimal factor, or
-/// `ALL` / `EXTENTS` / `WINDOW` / `PREVIOUS` (case-insensitive, surrounding
-/// whitespace ignored).
+/// Parse the argument of a `ZOOM` selector: a positive decimal factor, `nX`,
+/// `nXP`, or `ALL` / `EXTENTS` / `WINDOW` / `PREVIOUS` / `OBJECT`
+/// (case-insensitive, surrounding whitespace ignored).
 ///
 /// The numeric grammar is deliberately narrow — ASCII digits with at most one
 /// `.` that has digits on **both** sides (`2`, `0.5`, `1.25`, `2.0`). Signs
@@ -147,9 +163,13 @@ pub enum ZoomArgument {
 /// [`invalid_zoom_argument_reason`]. Nothing is clamped and no default factor is
 /// invented.
 ///
-/// The two word arguments are the **full** spellings only: no `W`/`P`
+/// The word arguments are the **full** spellings only: no `W`/`P`/`O`
 /// abbreviation is admitted (this router never guesses at a partial word), and
 /// `ZOOM EXTENTS` is still resolved earlier by the pre-existing alias onto `FIT`.
+///
+/// `ZOOM DYNAMIC` is deliberately **outside** this grammar. It is a named,
+/// unimplemented gap (`zoom.dynamic_not_implemented`) and must never be parsed
+/// into a different form.
 pub fn parse_zoom_argument(argument: &str) -> Option<ZoomArgument> {
     let key = argument.trim();
     if key.eq_ignore_ascii_case("ALL") || key.eq_ignore_ascii_case("EXTENTS") {
@@ -161,7 +181,41 @@ pub fn parse_zoom_argument(argument: &str) -> Option<ZoomArgument> {
     if key.eq_ignore_ascii_case("PREVIOUS") {
         return Some(ZoomArgument::Previous);
     }
+    if key.eq_ignore_ascii_case("OBJECT") {
+        return Some(ZoomArgument::Object);
+    }
+    let upper = key.to_ascii_uppercase();
+    // `nXP` / `a/bXP` / `a:bXP`: the paper-to-drawing ratio.
+    if upper.ends_with("XP") {
+        return parse_paper_scale(&key[..key.len() - 2]);
+    }
+    // `nX`: the relative factor.
+    if upper.ends_with('X') {
+        return parse_positive_decimal(&key[..key.len() - 1]).map(ZoomArgument::Relative);
+    }
     parse_positive_decimal(key).map(ZoomArgument::Factor)
+}
+
+/// Parse the body of an `nXP` argument into its paper-to-drawing ratio.
+///
+/// A bare factor (`2XP`) is `1:2` (one paper unit is two drawing units); a
+/// ratio may use `/` or `:` (`1/50XP`, `1:50XP`). Every component is the same
+/// positive plain decimal [`parse_positive_decimal`] accepts, so signs, zero,
+/// exponents and embedded spaces are refused here.
+fn parse_paper_scale(body: &str) -> Option<ZoomArgument> {
+    let body = body.trim();
+    if body.is_empty() {
+        return None;
+    }
+    if let Some((paper, drawing)) = body.split_once(['/', ':']) {
+        let paper = parse_positive_decimal(paper)?;
+        let drawing = parse_positive_decimal(drawing)?;
+        return Some(ZoomArgument::PaperScale { paper, drawing });
+    }
+    parse_positive_decimal(body).map(|drawing| ZoomArgument::PaperScale {
+        paper: 1.0,
+        drawing,
+    })
 }
 
 /// Parse the argument of a `PEDIT` selector: one declared v1 polyline option.
@@ -324,8 +378,8 @@ pub fn parse_layerpmode_argument(argument: &str) -> Option<bool> {
 /// grammar is spelled out, so a refusal is never a silent ignore or a clamp.
 pub fn invalid_zoom_argument_reason(text: &str) -> String {
     format!(
-        "unsupported CAD command: {} (ZOOM needs a positive factor, ALL, EXTENTS, WINDOW or \
-         PREVIOUS)",
+        "unsupported CAD command: {} (ZOOM needs a positive factor, ALL, EXTENTS, WINDOW, \
+         PREVIOUS, OBJECT, nX or nXP; ZOOM DYNAMIC is not implemented)",
         text.trim()
     )
 }
@@ -607,6 +661,195 @@ pub fn parse_multiple_argument(argument: &str) -> Option<String> {
 /// The stable refusal for a `MULTIPLE` argument outside its grammar.
 pub fn invalid_multiple_argument_reason(text: &str) -> String {
     format!("invalid MULTIPLE argument: '{text}' (expected one command name)")
+}
+
+/// AutoCAD's `-LAYER <option> …`: the command-line layer editor's write forms.
+///
+/// The bare selector and `-LAYER ?` keep the **read-only report** (admitted as
+/// the extended `DashLayer` command and Viewer-legal), so `?` never reaches this
+/// parser; every write option does.
+pub const DASH_LAYER_SELECTOR: &str = "-LAYER";
+
+/// Parse the argument of a `-LAYER` selector: `? [pattern]` (the read-only
+/// report, optional AutoCAD name wildcard) or one write option.
+///
+/// One option per typed line. Keywords are case-insensitive and the documented
+/// short aliases are `N` (NEW), `M` (MAKE), `S` (SET), `R` (RENAME), `D`
+/// (DELETE), `C` (COLOR), `L` (LTYPE), `LW` (LWEIGHT), `P` (PLOT) plus AutoCAD's
+/// `F` (FREEZE), `T` (THAW), `LO` (LOCK) and `U` (UNLOCK). `ON` and `OFF` are
+/// the full spellings (AutoCAD's own `-LAYER` prompt words).
+///
+/// Shape:
+///
+/// * name lists (`NEW`, `DELETE`, `ON`, `OFF`, `FREEZE`, `THAW`, `LOCK`,
+///   `UNLOCK`) are **comma-separated**; each entry is trimmed and must be
+///   non-empty. A space is **not** a list separator: a layer name may contain
+///   spaces, so `NEW A B` is one layer named `A B`. A layer name may not contain
+///   a comma (the database refuses one), which is what makes the list
+///   unambiguous;
+/// * `MAKE` / `SET` take the trimmed remainder as the name (a single fully
+///   quoted token is unquoted);
+/// * `RENAME` takes the first token as the old name and the remainder as the
+///   new one; either side may be quoted (`RENAME "OLD NAME" "NEW NAME"`);
+/// * `COLOR` / `LTYPE` / `LWEIGHT` / `PLOT` take one value token followed by the
+///   name list; the value may be quoted (`LTYPE "My Style" WALLS`).
+///
+/// `COLOR`'s value token is passed through **verbatim**: the command layer
+/// rewrites a bare AutoCAD ACI number (`3`) to the layer grammar's `aci:3` form
+/// (`cad_app::layer_property::normalize_color_input`) and then parses every colour
+/// with that one grammar, which owns the ranges, the `BYLAYER` refusal and the
+/// linetype-free `#RRGGBB` / `r,g,b` forms.
+///
+/// `PLOT` accepts `Y`/`N` (the command-line spelling) and the layer grammar's
+/// flag words (`TRUE`/`FALSE`/`1`/`0`, case-insensitive).
+///
+/// A missing operand, an empty list entry, an unknown keyword, a second
+/// whitespace token where one value is expected and everything else return
+/// `None`; the caller turns that into
+/// [`invalid_dash_layer_argument_reason`]. Nothing is defaulted.
+pub fn parse_dash_layer_argument(argument: &str) -> Option<DashLayerOps> {
+    let text = argument.trim();
+    // `?` is the read-only table report, optionally followed by one layer-name
+    // wildcard filter (`*` any run, `?` one character, case-insensitive).
+    if let Some(rest) = text.strip_prefix('?') {
+        let pattern = rest.trim();
+        return Some(DashLayerOps::List {
+            pattern: (!pattern.is_empty()).then(|| pattern.to_string()),
+        });
+    }
+    let (keyword, rest) = split_keyword(text);
+    match keyword.to_ascii_uppercase().as_str() {
+        "NEW" | "N" => Some(DashLayerOps::New(parse_layer_name_list(rest)?)),
+        "MAKE" | "M" => Some(DashLayerOps::Make(single_name(rest)?)),
+        "SET" | "S" => Some(DashLayerOps::Set(single_name(rest)?)),
+        "RENAME" | "R" => {
+            let tokens = split_quoted_tokens(rest)?;
+            if tokens.len() < 2 || tokens[0].is_empty() {
+                return None;
+            }
+            let old = tokens[0].clone();
+            let new = tokens[1..].join(" ");
+            (!new.is_empty()).then_some(DashLayerOps::Rename { old, new })
+        }
+        "DELETE" | "D" => Some(DashLayerOps::Delete(parse_layer_name_list(rest)?)),
+        "ON" => Some(DashLayerOps::On(parse_layer_name_list(rest)?)),
+        "OFF" => Some(DashLayerOps::Off(parse_layer_name_list(rest)?)),
+        "FREEZE" | "F" => Some(DashLayerOps::Freeze(parse_layer_name_list(rest)?)),
+        "THAW" | "T" => Some(DashLayerOps::Thaw(parse_layer_name_list(rest)?)),
+        "LOCK" | "LO" => Some(DashLayerOps::Lock(parse_layer_name_list(rest)?)),
+        "UNLOCK" | "U" => Some(DashLayerOps::Unlock(parse_layer_name_list(rest)?)),
+        "COLOR" | "C" => {
+            let (value, names) = split_quoted_value_and_rest(rest)?;
+            Some(DashLayerOps::Color {
+                value,
+                layers: parse_layer_name_list(&names)?,
+            })
+        }
+        "LTYPE" | "L" => {
+            let (name, names) = split_quoted_value_and_rest(rest)?;
+            Some(DashLayerOps::Linetype {
+                name,
+                layers: parse_layer_name_list(&names)?,
+            })
+        }
+        "LWEIGHT" | "LW" => {
+            let (value, names) = split_quoted_value_and_rest(rest)?;
+            Some(DashLayerOps::Lineweight {
+                value,
+                layers: parse_layer_name_list(&names)?,
+            })
+        }
+        "PLOT" | "P" => {
+            let (value, names) = split_quoted_value_and_rest(rest)?;
+            Some(DashLayerOps::Plot {
+                plottable: parse_plottable_value(&value)?,
+                layers: parse_layer_name_list(&names)?,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The stable refusal for a `-LAYER` write argument outside the grammar.
+///
+/// The typed line is echoed and the accepted options plus the comma-separated
+/// list rule are spelled out, so a refusal is never a silent ignore or a
+/// defaulted option.
+pub fn invalid_dash_layer_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (-LAYER takes ? [wildcard] or one option: NEW|N, MAKE|M, \
+         SET|S, RENAME|R <old> <new>, DELETE|D, ON, OFF, FREEZE|F, THAW|T, LOCK|LO, UNLOCK|U, \
+         COLOR|C <value>, LTYPE|L <name>, LWEIGHT|LW <value> or PLOT|P Y|N, followed by \
+         comma-separated layer names; a bare -LAYER or -LAYER ? reports the table)",
+        text.trim()
+    )
+}
+
+/// Split the keyword from the trimmed remainder of a line.
+fn split_keyword(text: &str) -> (&str, &str) {
+    match text.find([' ', '\t']) {
+        Some(index) => (&text[..index], text[index..].trim()),
+        None => (text, ""),
+    }
+}
+
+/// One trimmed non-empty name (the whole remainder, spaces allowed).
+///
+/// A single fully quoted token (`SET "A B"`) is unquoted here; an unquoted
+/// remainder (`SET A B`) is taken verbatim as the one name, exactly as before.
+fn single_name(rest: &str) -> Option<String> {
+    let name = rest.trim();
+    if name.is_empty() {
+        return None;
+    }
+    if name.starts_with('"') {
+        let tokens = split_quoted_tokens(name)?;
+        if tokens.len() == 1 {
+            return (!tokens[0].is_empty()).then(|| tokens[0].clone());
+        }
+    }
+    Some(name.to_string())
+}
+
+/// Split one (optionally quoted) value token from the non-empty name list.
+///
+/// `LTYPE "My Style" WALLS` works because the quoted value keeps its space;
+/// unquoted values keep the historical one-whitespace-token rule. The remainder
+/// is rejoined with single spaces and handed to the comma-list parser.
+fn split_quoted_value_and_rest(rest: &str) -> Option<(String, String)> {
+    let tokens = split_quoted_tokens(rest.trim())?;
+    if tokens.len() < 2 || tokens[0].is_empty() {
+        return None;
+    }
+    let value = tokens[0].clone();
+    let names = tokens[1..].join(" ");
+    (!names.is_empty()).then_some((value, names))
+}
+
+/// One comma-separated layer-name list; entries trimmed, empty entries refused.
+fn parse_layer_name_list(text: &str) -> Option<Vec<String>> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let mut names = Vec::new();
+    for part in text.split(',') {
+        let name = part.trim();
+        if name.is_empty() {
+            return None;
+        }
+        names.push(name.to_string());
+    }
+    Some(names)
+}
+
+/// The `PLOT` flag: `Y`/`N` plus the layer grammar's flag words.
+fn parse_plottable_value(value: &str) -> Option<bool> {
+    match value.to_ascii_uppercase().as_str() {
+        "Y" | "YES" | "TRUE" | "1" => Some(true),
+        "N" | "NO" | "FALSE" | "0" => Some(false),
+        _ => None,
+    }
 }
 
 /// Parse a boolean sysvar value used by `SETVAR GRID|SNAP|ORTHO`: `ON`/`OFF`,

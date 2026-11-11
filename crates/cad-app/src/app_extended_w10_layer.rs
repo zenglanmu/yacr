@@ -1,8 +1,12 @@
 //! Wave 10 **layer / view / scale-list reports** for the extended batch.
 //!
 //! `-LAYER` reports the drawing's real layer table (name, visibility, off,
-//! frozen, locked and the session current layer) and refuses every mutation: this
-//! build has no command-line layer editor.
+//! frozen, locked and the session current layer). Bare `-LAYER` / `-LAYER ?`
+//! only report; the **write** forms (`NEW`, `MAKE`, `SET`, `RENAME`, `DELETE`,
+//! `ON`/`OFF`/`FREEZE`/`THAW`/`LOCK`/`UNLOCK`, `COLOR`/`LTYPE`/`LWEIGHT`/`PLOT`)
+//! are typed options of the same selector and ride the Work-only
+//! [`crate::CommandId::SetLayerProperty`] carrier
+//! (`app_drawing::dash_layer_write`), so the report stays Viewer-legal.
 //!
 //! `LAYERSTATESAVE` and `NEWVIEW` are thin routes: with the owning typed payload
 //! (`LayerState` / `View`) they call the existing session store, so there is one
@@ -40,16 +44,38 @@ impl Application {
         }
     }
 
-    /// `-LAYER`: read-only table report; no mutation form is admitted.
+    /// `-LAYER` / `-LAYER ?`: read-only table report.
+    ///
+    /// The write forms are typed **options** of this selector
+    /// (`CommandPayload::DashLayer`) and never reach this method: a bare
+    /// selector or `?` is a report, an option line is a Work-only write.
     fn dash_layer_report(
         &self,
         session: &SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        require_none_payload(command, "-LAYER")?;
+        // `?` may carry one AutoCAD name wildcard; the bare selector and a bare
+        // `?` list the whole table. Every other payload is a write and must not
+        // reach the Viewer-legal report.
+        let pattern = match &command.payload {
+            CommandPayload::None => None,
+            CommandPayload::DashLayer(crate::DashLayerOps::List { pattern }) => pattern.as_deref(),
+            _ => return Err(CadError::InvalidInput(
+                "dashlayer.payload: -LAYER ? takes no payload except a List { pattern } report; \
+                     the write options ride the Work-only carrier"
+                    .into(),
+            )),
+        };
         let drawing = document_drawing(self, command)?;
         let mut rows = Vec::new();
+        let mut matched = 0usize;
         for layer in drawing.layers() {
+            if let Some(pattern) = pattern {
+                if !layer_name_matches(pattern, &layer.name) {
+                    continue;
+                }
+            }
+            matched += 1;
             let attributes = drawing.layer_attributes(layer.id);
             let current = if layer.id == session.active_layer {
                 " [current]"
@@ -70,11 +96,20 @@ impl Application {
                 ),
             ));
         }
+        if let Some(pattern) = pattern {
+            if matched == 0 {
+                rows.push(diagnostic(
+                    "layer.no_match",
+                    format!("-LAYER: no layer name matches the wildcard '{pattern}'"),
+                ));
+            }
+        }
         rows.push(diagnostic(
             "layer.report_only",
-            "-LAYER: read-only table report; creating/deleting/renaming layers, on/off/freeze/\
-             thaw/lock/unlock and per-viewport settings are NOT IMPLEMENTED here (use the \
-             dedicated LAYER* commands and the layer panel)"
+            "-LAYER: read-only table report; add one option on the same line to write — NEW, MAKE, \
+             SET, RENAME, DELETE, ON, OFF, FREEZE, THAW, LOCK, UNLOCK, COLOR, LTYPE, LWEIGHT or \
+             PLOT (Work mode, comma-separated layer names). Per-viewport settings, plot styles \
+             and layer states have their own commands"
                 .into(),
         ));
         Ok(report_outcome(rows))
@@ -161,4 +196,36 @@ fn document_drawing<'a>(app: &'a Application, command: &Command) -> CadResult<&'
         .get(&command.document)
         .map(|document| document.drawing.as_ref())
         .ok_or_else(|| CadError::InvalidInput("document not open".into()))
+}
+
+/// AutoCAD's layer-name wildcard for `-LAYER ? <pattern>`: `*` matches any run,
+/// `?` exactly one character, case-insensitive. No other metacharacter is
+/// special, and the match is anchored at both ends (the whole name must match),
+/// which is the only rule this report needs.
+fn layer_name_matches(pattern: &str, name: &str) -> bool {
+    let pattern: Vec<char> = pattern.to_lowercase().chars().collect();
+    let name: Vec<char> = name.to_lowercase().chars().collect();
+    let (mut pi, mut ni) = (0usize, 0usize);
+    let mut star: Option<usize> = None;
+    let mut mark = 0usize;
+    while ni < name.len() {
+        if pi < pattern.len() && (pattern[pi] == '?' || pattern[pi] == name[ni]) {
+            pi += 1;
+            ni += 1;
+        } else if pi < pattern.len() && pattern[pi] == '*' {
+            star = Some(pi);
+            mark = ni;
+            pi += 1;
+        } else if let Some(star_at) = star {
+            pi = star_at + 1;
+            mark += 1;
+            ni = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < pattern.len() && pattern[pi] == '*' {
+        pi += 1;
+    }
+    pi == pattern.len()
 }

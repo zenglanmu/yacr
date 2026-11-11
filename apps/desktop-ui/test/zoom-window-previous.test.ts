@@ -1,11 +1,12 @@
-// `ZOOM WINDOW` / `ZOOM PREVIOUS`: the two **argument forms** of the `ZOOM`
-// selector (2026-10-28).
+// `ZOOM WINDOW` / `ZOOM PREVIOUS` (and `ZOOM OBJECT`): the **argument forms** of
+// the `ZOOM` selector (2026-10-28; `OBJECT` wired into the ribbon 2026-11-11).
 //
 // The contract these lock, in the chrome's own terms:
 //
 //   * they are **not** commands: the host adds no `CommandId` and advertises no
-//     `ZOOM WINDOW` / `ZOOM PREVIOUS` name, so the words live in exactly one
-//     place — the `ARGUMENT_COMMANDS.ZOOM` grammar, beside `ALL`/`EXTENTS`;
+//     `ZOOM WINDOW` / `ZOOM PREVIOUS` / `ZOOM OBJECT` name, so the words live in
+//     exactly one place — the `ARGUMENT_COMMANDS.ZOOM` grammar, beside
+//     `ALL`/`EXTENTS`;
 //   * they dispatch the **full line** on `cad_command` (never a fabricated
 //     `ZOOM`, never a second IPC), so what the test asserts is the exact string
 //     the host receives;
@@ -13,8 +14,9 @@
 //     no local enable path and no display-catalog row (a row would be the second
 //     name list the command line must not need);
 //   * the tooltips state the honest limits instead of promising AutoCAD parity:
-//     two corners and 2D only (a 3D view refuses the form by name), and one
-//     discrete view step back, with pan/wheel/orbit deliberately not recorded.
+//     two corners and 2D only (a 3D view refuses the form by name), the selection
+//     as the framed subject (so it needs one), and one discrete view step back,
+//     with pan/wheel/orbit deliberately not recorded.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HOST_NAMES, readCatalog, readModule } from './helpers.ts';
@@ -32,9 +34,9 @@ import { offeredItems, RIBBON_TABS, ribbonCommandIds } from '../src/ribbon/ribbo
 
 setCommandCatalog(HOST_NAMES);
 
-// The formed selectors, spelled once: every assertion below reads this pair, so a
+// The formed selectors, spelled once: every assertion below reads this list, so a
 // re-spelling in the model or a stray lowercase variant fails here.
-const ZOOM_FORMS = ['ZOOM WINDOW', 'ZOOM PREVIOUS'];
+const ZOOM_FORMS = ['ZOOM WINDOW', 'ZOOM OBJECT', 'ZOOM PREVIOUS'];
 
 // A drawing is open and every navigation capability is available, so the only
 // reason an admission could fail here is the command line itself.
@@ -57,7 +59,7 @@ function iconNames(source) {
   return new Set([...map[1].matchAll(/\n\s*([A-Za-z][A-Za-z0-9]*):/g)].map(match => match[1]));
 }
 
-test('the two zoom forms are grammar on ZOOM, not names the host advertises', () => {
+test('the zoom argument forms are grammar on ZOOM, not names the host advertises', () => {
   for (const line of ZOOM_FORMS) {
     const split = splitCommandText(line);
     // The base name is `ZOOM` and the word is its argument: that is the whole
@@ -72,14 +74,19 @@ test('the two zoom forms are grammar on ZOOM, not names the host advertises', ()
   }
   // The argument-taking selectors are unchanged: this feature adds words to the
   // existing `ZOOM` grammar, never a fifth selector row.
-  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE', 'SPACE', 'TORIENT', 'TCASE', 'PEDIT', 'HATCHEDIT', 'MEASUREGEOM', 'JUSTIFYTEXT', 'TJUST', 'TSCALE', 'TEXTALIGN', 'TCOUNT', 'TCIRCLE', 'LTSCALE', 'LAYERPMODE', 'LAYERSTATE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'FIND', '-FIND', 'PURGE', 'RENAME', 'SETVAR', 'NAVBAR', 'NAVVCUBE', 'NAVVCUBEDISPLAY', 'DISPLAYVIEWCUBEIN2D', 'DISPLAYVIEWCUBEIN3D', 'MREDO', 'MULTIPLE', 'DONUT', 'SOLID', 'HELIX', 'MLINE', 'MLSTYLE', 'TREX', 'MPEDIT', 'DRAWORDER', 'VIEW', 'VIEWGO', 'VPOINT', 'PAN', '-PAN', 'TRACE', 'MOCORO', 'VIEWRES', 'VSCURRENT', 'LINETYPE', '-LINETYPE', 'LAYOUT', 'LAYOUTMERGE', 'LAYOUTWIZARD', 'PAGESETUP', '-PAGESETUP', 'PSETUPIN', '-PSETUPIN', 'MVIEW', 'VPORTS', 'VPCLIP', 'VPSCALE', 'LAYVPI', '-VPORTS', 'DIMSTYLE', '-DIMSTYLE', 'DIMTEDIT', 'DIMEDIT', 'DIMOVERRIDE', 'DIMJOGLINE', 'GROUP', '-GROUP', 'UNGROUP', 'GROUPEDIT', 'QLEADER', 'LEADER', 'TEXTFIT', 'HATCHSETORIGIN', 'ARRAYPATH', 'IMAGEATTACH', 'IMAGECLIP', 'IMAGEADJUST', '-IMAGEADJUST', 'TABLE', '-TABLE', 'TABLEDIT']);
+  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE', 'SPACE', 'TORIENT', 'TCASE', 'PEDIT', 'HATCHEDIT', 'MEASUREGEOM', 'JUSTIFYTEXT', 'TJUST', 'TSCALE', 'TEXTALIGN', 'TCOUNT', 'TCIRCLE', 'LTSCALE', 'LAYERPMODE', 'LAYERSTATE', 'LAYWALK', '-LAYER', 'QSELECT', 'FILTER', 'GETSEL', 'FIND', '-FIND', 'PURGE', 'RENAME', 'SETVAR', 'NAVBAR', 'NAVVCUBE', 'NAVVCUBEDISPLAY', 'DISPLAYVIEWCUBEIN2D', 'DISPLAYVIEWCUBEIN3D', 'MREDO', 'MULTIPLE', 'DONUT', 'SOLID', 'HELIX', 'MLINE', 'MLSTYLE', 'TREX', 'MPEDIT', 'DRAWORDER', 'VIEW', 'VIEWGO', 'VPOINT', 'PAN', '-PAN', 'TRACE', 'MOCORO', 'VIEWRES', 'VSCURRENT', 'LINETYPE', '-LINETYPE', 'LAYOUT', 'LAYOUTMERGE', 'LAYOUTWIZARD', 'PAGESETUP', '-PAGESETUP', 'PSETUPIN', '-PSETUPIN', 'MVIEW', 'VPORTS', 'VPCLIP', 'VPSCALE', 'LAYVPI', '-VPORTS', 'DIMSTYLE', '-DIMSTYLE', 'DIMTEDIT', 'DIMEDIT', 'DIMOVERRIDE', 'DIMJOGLINE', 'GROUP', '-GROUP', 'UNGROUP', 'GROUPEDIT', 'QLEADER', 'LEADER', 'TEXTFIT', 'HATCHSETORIGIN', 'ARRAYPATH', 'IMAGEATTACH', 'IMAGECLIP', 'IMAGEADJUST', '-IMAGEADJUST', 'TABLE', '-TABLE', 'TABLEDIT']);
 
   // The numeric/`ALL`/`EXTENTS` grammar still answers exactly as it did, and a
   // *different* word is still refused (the match is the word, not a prefix).
-  for (const admitted of ['2', '0.5', 'ALL', 'EXTENTS', 'WINDOW', 'PREVIOUS']) {
+  for (const admitted of ['2', '0.5', 'ALL', 'EXTENTS', 'WINDOW', 'OBJECT', 'PREVIOUS']) {
     assert.equal(ARGUMENT_COMMANDS.ZOOM.parse(admitted), true, admitted);
   }
-  for (const refused of ['0', '2 3', 'WINDOWS', 'PREVIOUSLY', 'PREV', 'WIN']) {
+  for (const refused of ['0', '2 3', 'WINDOWS', 'OBJECTS', 'PREVIOUSLY', 'PREV', 'WIN']) {
+    assert.equal(ARGUMENT_COMMANDS.ZOOM.parse(refused), false, refused);
+  }
+  // `DYNAMIC` is the one AutoCAD Zoom word that is a named gap, so it must stay
+  // unadmitted: no button, no line, no silent default.
+  for (const refused of ['DYNAMIC', 'DYN']) {
     assert.equal(ARGUMENT_COMMANDS.ZOOM.parse(refused), false, refused);
   }
 });
@@ -113,7 +120,7 @@ test('the form is enabled exactly when ZOOM is admitted, and disabled otherwise'
   for (const line of ZOOM_FORMS) assert.equal(admitCommandText(line, { status: loaded }).kind, 'admitted', line);
 });
 
-test('ZOOM WINDOW / ZOOM PREVIOUS reach cad_command as exactly those lines', async () => {
+test('ZOOM WINDOW / ZOOM OBJECT / ZOOM PREVIOUS reach cad_command as exactly those lines', async () => {
   for (const line of ZOOM_FORMS) {
     const calls = [];
     const result = await queueCadCommand(
@@ -134,16 +141,17 @@ test('ZOOM WINDOW / ZOOM PREVIOUS reach cad_command as exactly those lines', asy
   assert.equal(refused.kind, 'unsupported');
 });
 
-test('both entries sit in the View navigate cluster and name themselves honestly', async () => {
+test('every entry sits in the View navigate cluster and names itself honestly', async () => {
   const panel = viewNavigatePanel();
   const byId = Object.fromEntries(panel.items.map(item => [item.id, item]));
   assert.deepEqual(
     panel.items.map(item => item.id),
-    ['ZOOMIN', 'ZOOMOUT', 'ZOOM WINDOW', 'PAN', 'FIT', 'ZOOM PREVIOUS', 'RESETVIEW'],
+    ['ZOOMIN', 'ZOOMOUT', 'ZOOM WINDOW', 'ZOOM OBJECT', 'PAN', 'FIT', 'ZOOM PREVIOUS', 'RESETVIEW'],
   );
   const iconNames_ = iconNames(await readModule('icons.tsx'));
   const expected = {
     'ZOOM WINDOW': { labelKey: 'toolbar.zoom_window', icon: 'zoomWindow', hintKey: 'toolbar.zoom_window.hint' },
+    'ZOOM OBJECT': { labelKey: 'toolbar.zoom_object', icon: 'selectAll', hintKey: 'toolbar.zoom_object.hint' },
     'ZOOM PREVIOUS': { labelKey: 'toolbar.zoom_previous', icon: 'zoomPrevious', hintKey: 'toolbar.zoom_previous.hint' },
   };
   for (const line of ZOOM_FORMS) {
@@ -167,6 +175,24 @@ test('both entries sit in the View navigate cluster and name themselves honestly
     assert.equal(offeredItems(panel.items, false).some(entry => entry.id === line), true, line);
     assert.equal(ribbonCommandIds().includes(line), true, line);
   }
+  // The three argument forms are *different* subjects, so they must not collapse
+  // onto one glyph or one label: object framing is its own affordance next to the
+  // two-corner window and the discrete step back.
+  const glyphs = ZOOM_FORMS.map(line => byId[line].icon);
+  const labels = ZOOM_FORMS.map(line => byId[line].labelKey);
+  assert.equal(new Set(glyphs).size, ZOOM_FORMS.length, 'each zoom form keeps its own glyph');
+  assert.equal(new Set(labels).size, ZOOM_FORMS.length, 'each zoom form keeps its own label key');
+  // `ZOOM OBJECT` sits next to `ZOOM WINDOW` (AutoCAD's Zoom pairs Object with
+  // Window) — the placement is the affordance, not a decoration.
+  assert.equal(
+    panel.items.findIndex(item => item.id === 'ZOOM OBJECT'),
+    panel.items.findIndex(item => item.id === 'ZOOM WINDOW') + 1,
+  );
+  // AutoCAD keeps the factor forms (`nX`/`nXP`) on the command line, and
+  // `ZOOM DYNAMIC` is an explicit named gap: no button may claim either.
+  for (const unoffered of ['ZOOM 2X', 'ZOOM 2XP', 'ZOOM DYNAMIC', 'ZOOM X']) {
+    assert.equal(panel.items.some(item => item.id === unoffered), false, `${unoffered} gets no button`);
+  }
   // `shell.canCommand('ZOOM WINDOW')` is the only gate: the renderer dispatches
   // through the shared funnel, never through a local branch on the word.
   const ribbon = await readModule('components/Ribbon.tsx');
@@ -174,10 +200,16 @@ test('both entries sit in the View navigate cluster and name themselves honestly
   assert.equal(ribbon.includes('ZOOM WINDOW'), false, 'the component never spells the argument form itself');
 });
 
-test('the tooltips state the limits: two corners and 2D only; discrete steps only', async () => {
+test('the tooltips state the limits: two corners / the selection / 2D only; discrete steps only', async () => {
   const zh = await readCatalog('zh-CN');
   const en = await readCatalog('en');
-  for (const key of ['toolbar.zoom_previous', 'toolbar.zoom_window.hint', 'toolbar.zoom_previous.hint']) {
+  for (const key of [
+    'toolbar.zoom_previous',
+    'toolbar.zoom_object',
+    'toolbar.zoom_window.hint',
+    'toolbar.zoom_object.hint',
+    'toolbar.zoom_previous.hint',
+  ]) {
     assert.equal(typeof zh[key], 'string', `zh-CN missing ${key}`);
     assert.equal(typeof en[key], 'string', `en missing ${key}`);
     assert.ok(zh[key].trim().length > 0, `zh-CN ${key} is empty`);
@@ -190,6 +222,20 @@ test('the tooltips state the limits: two corners and 2D only; discrete steps onl
   assert.match(zh['toolbar.zoom_window.hint'], /两个角点/);
   assert.match(zh['toolbar.zoom_window.hint'], /二维/);
   assert.match(zh['toolbar.zoom_window.hint'], /三维/);
+  // The object form: the selection is the framed subject, so it needs one; 2D
+  // only, refused by a 3D view; and in model space the block members and a
+  // selected block come along through the insert. No parity claim about the
+  // AutoCAD dialog's extra options.
+  assert.match(en['toolbar.zoom_object.hint'], /current selection/i);
+  assert.match(en['toolbar.zoom_object.hint'], /one or more objects/i);
+  assert.match(en['toolbar.zoom_object.hint'], /2D only/i);
+  assert.match(en['toolbar.zoom_object.hint'], /3D/);
+  assert.match(en['toolbar.zoom_object.hint'], /block/i);
+  assert.match(zh['toolbar.zoom_object.hint'], /选择/);
+  assert.match(zh['toolbar.zoom_object.hint'], /一个或多个对象/);
+  assert.match(zh['toolbar.zoom_object.hint'], /二维/);
+  assert.match(zh['toolbar.zoom_object.hint'], /三维/);
+  assert.match(zh['toolbar.zoom_object.hint'], /块/);
   // The previous form: one discrete view back, and what is **not** a step. No
   // parity promise: pan/wheel/orbit are named as unrecorded.
   assert.match(en['toolbar.zoom_previous.hint'], /last recorded view/i);
@@ -200,10 +246,11 @@ test('the tooltips state the limits: two corners and 2D only; discrete steps onl
   assert.match(zh['toolbar.zoom_previous.hint'], /平移/);
   assert.match(zh['toolbar.zoom_previous.hint'], /环绕/);
   assert.match(zh['toolbar.zoom_previous.hint'], /不记/);
-  // Two different facts are worded twice, not once: the window limit is not the
-  // previous limit.
-  assert.notEqual(en['toolbar.zoom_window.hint'], en['toolbar.zoom_previous.hint']);
-  assert.notEqual(zh['toolbar.zoom_window.hint'], zh['toolbar.zoom_previous.hint']);
+  // Three different facts are worded three times, not once: the window limit is
+  // not the object limit and neither is the previous limit.
+  const hints = ['toolbar.zoom_window.hint', 'toolbar.zoom_object.hint', 'toolbar.zoom_previous.hint'];
+  assert.equal(new Set(hints.map(key => en[key])).size, hints.length, 'en hints stay distinct');
+  assert.equal(new Set(hints.map(key => zh[key])).size, hints.length, 'zh hints stay distinct');
   // The model points at those keys, and the renderer shows them as the enabled
   // tooltip (`hint`), so the copy is reachable — not a dead catalog row.
   for (const line of ZOOM_FORMS) {

@@ -98,6 +98,40 @@ AD
   `vulkan`+DComp 拒绝仍只有编译 + 纯契约证据，没有 Windows CI 运行。
 - **NOT RUN**：workflow 尚未在 GitHub Actions 真实跑过；首次 run 以实际结果为准（失败时上传
   `linux-host-smoke` evidence artifact）。
+## 2026-11-11 命令补齐：`-LAYER` 写形式、`ZOOM` OBJECT/nX/nXP、DWG 保存前提示
+
+- **`-LAYER`（部分 → 完整）**：一行一个选项的写形式（`NEW/N`、`MAKE/M`、`SET/S`、`RENAME/R`、
+  `DELETE/D`、`ON`/`OFF`、`FREEZE/F`/`THAW/T`、`LOCK/LO`/`UNLOCK/U`、`COLOR/C`、`LTYPE/L`、
+  `LWEIGHT/LW`、`PLOT/P`）；名单逗号分隔，含空格的值/名称可加双引号；`COLOR` 接受 ACI 数字、
+  七个标准色名、`aci:N`、`#RRGGBB`、`rgb:…`。整行先解析全部名称/值再发布候选库（全有或全无），
+  一条事务/一步撤销（多行 patch 同一 `DrawingUndoRecord`）；无变化 `layer.unchanged` 不升修订；
+  `MAKE`/`SET` 与 `OFF`/`FREEZE` 复用当前层可见性规则。裸命令/`?` 仍是只读报告（Viewer-legal）；
+  写形式经已有 Work-only `SetLayerProperty` 载体（`CommandPayload::DashLayer`），不新增 `CommandId`，
+  Viewer 拒绝。逐选项交互重提示属全局范围；多行 patch 仍按 `cad-db` setter 规则每改一行升一次
+  revision。
+- **`ZOOM`（缩小边界）**：新增 `OBJECT`（当前选择包围盒；模型空间经 `drawing_pick_items` +
+  `pick_world_bounds` 展开块成员/选中 INSERT，图纸空间只接受可直接寻址的布局实体；空选择/无界/
+  3D/跨文档/不可寻址逐条 `zoom.object.*` 拒绝；FIT margin `1.05`，记一步 `ZOOM PREVIOUS`）、
+  `nX`（视口中心相对倍率）与图纸空间 `nXP`（`2XP` ⇒ `VPSCALE 1:2`、`1/50XP` ⇒ `VPSCALE 1:50`，
+  走已有 Work-only `VPSCALE` 写路径，一条事务/一步撤销；模型空间 `zoom.xp.requires_paper`）。
+  **`ZOOM DYNAMIC` 仍具名未实现**（`zoom.dynamic_not_implemented`），没有伪装成交互缩放。
+- **UI 接线**：View → navigate 集群新增 `ZOOM OBJECT` 按钮（`selectAll` 图标；hint 说明“先选择对象、仅 2D、模型空间块成员/选中块按插入展开”）。`ZOOM nX`/`nXP` 保持命令行形式（AutoCAD 也没有独立按钮）；`ZOOM DYNAMIC` 不提供按钮。
+- **DWG 保存前提示**：`request_save` 的 `.dwg` 源仍在选择器里建议 `<stem>-export.dwg`，且新增
+  `save.picker_waiting_dwg` 在**写入前**说明“实验性、写新文件、绝不覆盖源图纸”；成功后仍用
+  `save.dwg_exported_experimental` / `_partial` 再次标注。平台 device+inode/SAF URI/归一化路径守卫
+  不变；真实 DWG/AutoCAD 兼容性仍 **NOT VERIFIED**。
+- **提交**：`7388423d`（保存前提示）、`69a601d1`（ZOOM）、`564c480f`（文档）、`eae2d94c`（`-LAYER`）、
+  `dc72700c`（引号值与标准色名）。
+- **已运行（Linux 本机）**：`cargo test -p cad-app -p cad-ui-core -p cad-host --locked` →
+  cad-app lib 2355 passed（3 ignored）、cad-ui-core 541 passed（1 ignored）、cad-host 308 passed，
+  0 failed；`(cd apps/desktop-ui && npm test)` **1496 passed / 0 failed**；
+  `cargo fmt --all -- --check`、`cargo clippy -p cad-app -p cad-ui-core -p cad-host --all-targets
+  --locked -- -D warnings`、`check-i18n.py`、`check-file-size.py`（`commands.rs` 1000 行）、
+  `check-architecture.py`、`check-command-docs.py`、`check-fixture-manifest.py`、
+  `check-tauri-capabilities.py` 全部 PASS。
+- **NOT RUN / 边界**：真实 GUI/GPU/像素、真实鼠标/键盘、Windows/macOS/Android/Web 运行时与真机
+  一律 **NOT RUN / NOT VERIFIED**；本轮的“完成”只是命令路径 + 契约测试 + 文档口径，不是
+  AutoCAD 行为等价验收。
 
 ## 2026-11-11 发布 v0.1.10（主题切换、最近图纸、右侧导航坞）
 

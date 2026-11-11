@@ -49,12 +49,18 @@ test('a typed argument is split off the base name, with one space/tab or many', 
   assert.deepEqual(splitCommandText(null), { name: '', argument: null, text: '' });
 });
 
-test('the local grammar mirrors the host: a positive decimal, ALL or EXTENTS', () => {
+test('the local grammar mirrors the host: factor, ALL/EXTENTS, WINDOW, PREVIOUS, OBJECT, nX, nXP', () => {
   const { parse } = ARGUMENT_COMMANDS.ZOOM;
-  for (const admitted of ['2', '0.5', '1.25', '2.0', 'ALL', 'EXTENTS']) {
+  for (const admitted of [
+    '2', '0.5', '1.25', '2.0', 'ALL', 'EXTENTS', 'WINDOW', 'PREVIOUS', 'OBJECT',
+    '2X', '0.5X', '2x', 'object', '2XP', '0.5XP', '2xp', '1/50XP', '1:50XP',
+  ]) {
     assert.equal(parse(admitted), true, admitted);
   }
-  for (const refused of ['0', '0.0', '-1', '+2', 'abc', '2 3', '.5', '2.', '1e3', 'NaN', '']) {
+  for (const refused of [
+    '0', '0.0', '-1', '+2', 'abc', '2 3', '.5', '2.', '1e3', 'NaN', '',
+    '0X', '-2X', 'X', '0XP', '-2XP', 'XP', '/XP', '1/XP', '2//50XP', 'DYNAMIC',
+  ]) {
     assert.equal(parse(refused), false, refused);
   }
   // The table is explicit: `ZOOM`, `SNAPUNIT` and the two POINT display sysvars
@@ -62,7 +68,7 @@ test('the local grammar mirrors the host: a positive decimal, ALL or EXTENTS', (
   // is a positive decimal spacing only — `ALL`/`EXTENTS` mean nothing there; the
   // sysvars take one plain decimal, zero/negative included, and are covered in
   // `point-display-sysvar.test.ts`).
-  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE', 'SPACE', 'TORIENT', 'TCASE', 'PEDIT', 'HATCHEDIT', 'MEASUREGEOM', 'JUSTIFYTEXT', 'TJUST', 'TSCALE', 'TEXTALIGN', 'TCOUNT', 'TCIRCLE', 'LTSCALE', 'LAYERPMODE', 'LAYERSTATE', 'LAYWALK', 'QSELECT', 'FILTER', 'GETSEL', 'FIND', '-FIND', 'PURGE', 'RENAME', 'SETVAR', 'NAVBAR', 'NAVVCUBE', 'NAVVCUBEDISPLAY', 'DISPLAYVIEWCUBEIN2D', 'DISPLAYVIEWCUBEIN3D', 'MREDO', 'MULTIPLE', 'DONUT', 'SOLID', 'HELIX', 'MLINE', 'MLSTYLE', 'TREX', 'MPEDIT', 'DRAWORDER', 'VIEW', 'VIEWGO', 'VPOINT', 'PAN', '-PAN', 'TRACE', 'MOCORO', 'VIEWRES', 'VSCURRENT', 'LINETYPE', '-LINETYPE', 'LAYOUT', 'LAYOUTMERGE', 'LAYOUTWIZARD', 'PAGESETUP', '-PAGESETUP', 'PSETUPIN', '-PSETUPIN', 'MVIEW', 'VPORTS', 'VPCLIP', 'VPSCALE', 'LAYVPI', '-VPORTS', 'DIMSTYLE', '-DIMSTYLE', 'DIMTEDIT', 'DIMEDIT', 'DIMOVERRIDE', 'DIMJOGLINE', 'GROUP', '-GROUP', 'UNGROUP', 'GROUPEDIT', 'QLEADER', 'LEADER', 'TEXTFIT', 'HATCHSETORIGIN', 'ARRAYPATH', 'IMAGEATTACH', 'IMAGECLIP', 'IMAGEADJUST', '-IMAGEADJUST', 'TABLE', '-TABLE', 'TABLEDIT']);
+  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE', 'SPACE', 'TORIENT', 'TCASE', 'PEDIT', 'HATCHEDIT', 'MEASUREGEOM', 'JUSTIFYTEXT', 'TJUST', 'TSCALE', 'TEXTALIGN', 'TCOUNT', 'TCIRCLE', 'LTSCALE', 'LAYERPMODE', 'LAYERSTATE', 'LAYWALK', '-LAYER', 'QSELECT', 'FILTER', 'GETSEL', 'FIND', '-FIND', 'PURGE', 'RENAME', 'SETVAR', 'NAVBAR', 'NAVVCUBE', 'NAVVCUBEDISPLAY', 'DISPLAYVIEWCUBEIN2D', 'DISPLAYVIEWCUBEIN3D', 'MREDO', 'MULTIPLE', 'DONUT', 'SOLID', 'HELIX', 'MLINE', 'MLSTYLE', 'TREX', 'MPEDIT', 'DRAWORDER', 'VIEW', 'VIEWGO', 'VPOINT', 'PAN', '-PAN', 'TRACE', 'MOCORO', 'VIEWRES', 'VSCURRENT', 'LINETYPE', '-LINETYPE', 'LAYOUT', 'LAYOUTMERGE', 'LAYOUTWIZARD', 'PAGESETUP', '-PAGESETUP', 'PSETUPIN', '-PSETUPIN', 'MVIEW', 'VPORTS', 'VPCLIP', 'VPSCALE', 'LAYVPI', '-VPORTS', 'DIMSTYLE', '-DIMSTYLE', 'DIMTEDIT', 'DIMEDIT', 'DIMOVERRIDE', 'DIMJOGLINE', 'GROUP', '-GROUP', 'UNGROUP', 'GROUPEDIT', 'QLEADER', 'LEADER', 'TEXTFIT', 'HATCHSETORIGIN', 'ARRAYPATH', 'IMAGEATTACH', 'IMAGECLIP', 'IMAGEADJUST', '-IMAGEADJUST', 'TABLE', '-TABLE', 'TABLEDIT']);
 
 
   const snapUnit = ARGUMENT_COMMANDS.SNAPUNIT.parse;
@@ -88,8 +94,27 @@ test('ZOOM with a factor / ALL / EXTENTS is admitted and keeps the full line', (
   assert.equal(admitCommandText('zoom   2', { status: loaded }).command, 'ZOOM   2');
 });
 
+test('ZOOM OBJECT, nX and nXP are admitted and keep the full line', () => {
+  for (const typed of [
+    'ZOOM OBJECT', 'zoom object', 'ZOOM 2X', 'ZOOM 0.5X', 'zoom 2x',
+    'ZOOM 2XP', 'ZOOM 1/50XP', 'ZOOM 1:50XP', '  ZOOM OBJECT  ',
+  ]) {
+    const admission = admitCommandText(typed, { status: loaded });
+    assert.equal(admission.kind, 'admitted', typed);
+    assert.equal(admission.reasonKey, null, typed);
+    assert.equal(admission.command, splitCommandText(typed).text, typed);
+  }
+  // `DYNAMIC` is a named gap, not a grammar form.
+  const dynamic = admitCommandText('ZOOM DYNAMIC', { status: loaded });
+  assert.equal(dynamic.kind, 'unsupported');
+  assert.equal(dynamic.reasonKey, UNSUPPORTED_KEY);
+});
+
 test('an out-of-grammar or name-only-argument line is explicitly unsupported', () => {
-  for (const typed of ['ZOOM 0', 'ZOOM -1', 'ZOOM abc', 'ZOOM 2 3', 'LINE 2']) {
+  for (const typed of [
+    'ZOOM 0', 'ZOOM -1', 'ZOOM abc', 'ZOOM 2 3', 'ZOOM 0X', 'ZOOM 0XP',
+    'ZOOM 2//50XP', 'ZOOM DYNAMIC', 'LINE 2',
+  ]) {
     const admission = admitCommandText(typed, { status: loaded });
     assert.equal(admission.kind, 'unsupported', typed);
     assert.equal(admission.reasonKey, UNSUPPORTED_KEY, typed);

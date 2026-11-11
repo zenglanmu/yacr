@@ -304,7 +304,7 @@ impl Application {
                 Ok(CommandOutcome::none())
             }
             CommandId::Pan => self.pan(&command),
-            CommandId::Zoom => self.zoom(&command),
+            CommandId::Zoom => self.zoom(session, &command),
             CommandId::OpenDrawing
             | CommandId::NewDrawing
             | CommandId::CloseDrawing
@@ -857,26 +857,32 @@ impl Application {
         Ok(CommandOutcome::none())
     }
 
-    /// Zoom the view.
-    ///
-    /// Four payloads are accepted, all view-only:
+    /// Zoom the view: five payloads are accepted, all view-only.
     /// * [`CommandPayload::ZoomAt`] — a factor plus the logical cursor to anchor
-    ///   (the real zoom-to-cursor path used by both 2D and 3D).
+    ///   (the real zoom-to-cursor path used by both 2D and 3D, and the typed
+    ///   `ZOOM n` / `ZOOM nX` form anchored at the viewport centre).
     /// * [`CommandPayload::Points`] — the legacy factor-only zoom (no cursor),
     ///   retained for direct callers and the CLI.
     /// * [`CommandPayload::ZoomWindow`] — `ZOOM WINDOW`, the exact two-corner fit
     ///   (2D orthographic only; see [`Application::zoom_window`]).
     /// * [`CommandPayload::ZoomPrevious`] — `ZOOM PREVIOUS`, the discrete view
     ///   stack (see [`Application::zoom_previous`]).
+    /// * [`CommandPayload::ZoomObject`] — `ZOOM OBJECT`, the selection bounds fit
+    ///   (2D orthographic only; see [`Application::zoom_object`]).
     ///
-    /// Every arm is a discrete view change except the two new ones' refusals: the
-    /// factors record one `ZOOM PREVIOUS` step in `zoom_at`; the window and the
-    /// previous restore record their own.
-    pub(crate) fn zoom(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+    /// Every arm is a discrete view change except the new ones' refusals: the
+    /// factors record one `ZOOM PREVIOUS` step in `zoom_at`; the window, object
+    /// and previous restore record their own.
+    pub(crate) fn zoom(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
         match &command.payload {
             CommandPayload::ZoomAt { factor, cursor } => self.zoom_at(command, *factor, *cursor),
             CommandPayload::ZoomWindow { .. } => self.zoom_window(command),
             CommandPayload::ZoomPrevious => self.zoom_previous(command),
+            CommandPayload::ZoomObject => self.zoom_object(session, command),
             CommandPayload::Points(points) => {
                 let factor = points
                     .first()
@@ -887,8 +893,8 @@ impl Application {
                 self.zoom_at(command, factor, [size[0] * 0.5, size[1] * 0.5])
             }
             _ => Err(CadError::InvalidInput(
-                "Zoom needs a factor, a { factor, cursor } payload, a ZOOM WINDOW rectangle or \
-                 ZOOM PREVIOUS"
+                "Zoom needs a factor, a { factor, cursor } payload, a ZOOM WINDOW rectangle, ZOOM \
+                 OBJECT or ZOOM PREVIOUS"
                     .into(),
             )),
         }
@@ -908,7 +914,7 @@ impl Application {
     ) -> CadResult<CommandOutcome> {
         if factor <= 0.0 || !factor.is_finite() {
             return Err(CadError::InvalidInput(
-                "Zoom factor must be positive and finite".into(),
+                "zoom.factor.invalid: the zoom factor must be positive and finite".into(),
             ));
         }
         let viewport = self.viewport_mut(command)?;

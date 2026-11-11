@@ -842,6 +842,24 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
             command: 'ZOOM WINDOW',
             hintKey: 'toolbar.zoom_window.hint',
           },
+          // `ZOOM OBJECT` is the third framing form of the same selector: the
+          // selection is the argument, so the dispatch token is again the full
+          // line and admission is again `ARGUMENT_COMMANDS.ZOOM` — no new name,
+          // no local enable path. It sits beside `ZOOM WINDOW` because the two
+          // are the pair AutoCAD's Zoom offers as Object/Window: one frames a
+          // rectangle the user draws, the other frames what is already picked.
+          // AutoCAD's `nX`/`nXP` stay command-line-only (they take a factor, not
+          // a click), and `ZOOM DYNAMIC` is an explicit named gap with no button.
+          // The glyph is the chrome's existing selection mark: `fit` is already
+          // in this cluster for the whole drawing and `zoomWindow` is right
+          // above, so the selection brackets are what distinguishes this one.
+          {
+            id: 'ZOOM OBJECT',
+            labelKey: 'toolbar.zoom_object',
+            icon: 'selectAll',
+            command: 'ZOOM OBJECT',
+            hintKey: 'toolbar.zoom_object.hint',
+          },
           { id: 'PAN', labelKey: 'toolbar.pan', icon: 'pan', command: 'PAN' },
           { id: 'FIT', labelKey: 'toolbar.fit', icon: 'fit', command: 'FIT' },
           // `ZOOM PREVIOUS` closes the camera-restoring pair with RESETVIEW: it

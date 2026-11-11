@@ -176,6 +176,7 @@ mod area_object;
 mod audit;
 mod cjk_baseline;
 mod commands;
+mod dash_layer_writes;
 mod drafting_toggles;
 mod drawing;
 mod drawing_space;
@@ -256,5 +257,6 @@ mod utility;
 mod view_batch;
 
 mod view_camera;
+mod zoom_object;
 mod zoom_previous;
 mod zoom_window;

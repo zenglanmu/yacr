@@ -76,9 +76,14 @@ impl HostCore {
     /// whole download in the same gesture as the click.
     fn finish_or_wait_save(&self, purpose: SavePurpose) -> CadResult<()> {
         if self.save_pending.get() {
+            // The picker-waiting line is the pre-write warning the user sees
+            // while choosing a target. A DWG save gets its own wording because
+            // it is an experimental export that must go to a NEW file; reusing
+            // the DXF line would hide both facts until after the write.
             let waiting = match purpose {
                 SavePurpose::Plot => "plot.picker_waiting",
-                SavePurpose::SaveDxf | SavePurpose::SaveDwg => "save.picker_waiting",
+                SavePurpose::SaveDxf => "save.picker_waiting",
+                SavePurpose::SaveDwg => "save.picker_waiting_dwg",
             };
             self.set_catalog_status(waiting, &[])?;
             return Ok(());

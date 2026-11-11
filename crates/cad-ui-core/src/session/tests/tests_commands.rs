@@ -9,6 +9,7 @@ mod annot_arguments;
 mod command_vocabulary;
 mod command_vocabulary_clipboard;
 mod command_vocabulary_inquiry;
+mod dash_layer_arguments;
 mod dimension_arguments;
 mod draw2_arguments;
 mod extended_vocabulary;
@@ -39,6 +40,7 @@ mod view_arguments;
 mod view_status;
 mod xref_status;
 mod zoom_argument;
+mod zoom_object_xp;
 mod zoom_window_previous;
 
 /// A committed synthetic, writer-produced AC1032 DWG with four LINE

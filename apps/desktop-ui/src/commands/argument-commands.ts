@@ -15,6 +15,32 @@ function isPositiveDecimal(text: string): boolean {
 }
 
 /**
+ * Whether `text` is one `ZOOM` argument from the host's grammar: a positive
+ * decimal factor, `ALL`/`EXTENTS`, `WINDOW`, `PREVIOUS`, `OBJECT`, `nX`, or
+ * `nXP` / `a/bXP` / `a:bXP`.
+ *
+ * This is the local **syntax** gate only. The host resolves the selection for
+ * `OBJECT`, validates the factor and the 2D view, and routes `nXP` through the
+ * Work-only `VPSCALE` write (a model-space `nXP` is refused there). `DYNAMIC`
+ * is deliberately absent: it is a named unimplemented gap.
+ */
+function isZoomArgument(text: string): boolean {
+  const key = text.trim();
+  const upper = key.toUpperCase();
+  if (['ALL', 'EXTENTS', 'WINDOW', 'PREVIOUS', 'OBJECT'].includes(upper)) return true;
+  if (isPositiveDecimal(key)) return true;
+  if (upper.endsWith('XP')) {
+    const body = key.slice(0, -2);
+    const ratio = body.split(/[/:]/);
+    return ratio.length === 1
+      ? isPositiveDecimal(ratio[0])
+      : ratio.length === 2 && isPositiveDecimal(ratio[0]) && isPositiveDecimal(ratio[1]);
+  }
+  if (upper.endsWith('X')) return isPositiveDecimal(key.slice(0, -1));
+  return false;
+}
+
+/**
  * Whether `text` is a plain decimal number, sign and zero included (`3`, `2.5`,
  * `0`, `-5`).
  *
@@ -83,26 +109,27 @@ function isPositiveSignedDecimal(text: string): boolean {
 export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.freeze({
   ZOOM: Object.freeze({
     /**
-     * `ZOOM WINDOW` and `ZOOM PREVIOUS` (2026-10-28) are **argument forms of the
-     * `ZOOM` selector**, not commands of their own: the host adds no `CommandId`
-     * and advertises no extra name, so the word is grammar here exactly like
-     * `ALL`/`EXTENTS` are, and the line still travels as one `cad_command`
-     * (`"ZOOM WINDOW"`). They are word alternatives in the same grammar as the
-     * decimal factor, so no word can ever be read as one (`isPositiveDecimal`
-     * already refuses letters) and no new selector row is needed.
+     * `ZOOM WINDOW`, `ZOOM PREVIOUS`, `ZOOM OBJECT`, `ZOOM nX` and `ZOOM nXP`
+     * are **argument forms of the `ZOOM` selector**, not commands of their own:
+     * the host adds no `CommandId` and advertises no extra name, so the words
+     * are grammar here exactly like `ALL`/`EXTENTS` are, and the line still
+     * travels as one `cad_command` (`"ZOOM OBJECT"`). They are alternatives in
+     * the same grammar as the decimal factor, so no word can ever be read as one
+     * (`isPositiveDecimal` already refuses letters) and no new selector row is
+     * needed.
      *
-     * This table is the *only* place the two words are listed for admission: the
+     * This table is the *only* place the words are listed for admission: the
      * command line admits them through the ordinary base-name path
      * (`splitCommandText` reads `ZOOM` + `WINDOW`), and the ribbon's
-     * `shell.canCommand('ZOOM WINDOW')` is that same call — so the button is
+     * `shell.canCommand('ZOOM OBJECT')` is that same call — so the button is
      * enabled iff `ZOOM` itself is admitted, with no second name list and no
      * `HOST_NAMES` entry the host does not publish. Semantics stay the host's:
-     * a 3D view refuses `WINDOW` by name, and `PREVIOUS` with no recorded step is
-     * refused there too.
+     * a 3D view refuses `WINDOW`/`OBJECT` by name, `PREVIOUS` with no recorded
+     * step is a diagnostic, `OBJECT` needs a selection, and `nXP` requires an
+     * active paper layout (it is a Work-only `VPSCALE` write). `DYNAMIC` is not
+     * admitted anywhere: it is a named unimplemented gap.
      */
-    parse: (argument: string) => argument === 'ALL' || argument === 'EXTENTS'
-      || argument === 'WINDOW' || argument === 'PREVIOUS'
-      || isPositiveDecimal(argument),
+    parse: isZoomArgument,
   }),
   SNAPUNIT: Object.freeze({
     parse: isPositiveDecimal,
@@ -236,6 +263,22 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       const names = argument.split(',').map(name => name.trim());
       return names.length > 0 && names.every(name => name.length > 0);
     },
+  }),
+  /**
+   * `-LAYER <option> …` (AutoCAD's command-line layer editor): the typed write
+   * forms `NEW|N`, `MAKE|M`, `SET|S`, `RENAME|R old new`, `DELETE|D`, `ON`,
+   * `OFF`, `FREEZE|F`, `THAW|T`, `LOCK|LO`, `UNLOCK|U`, `COLOR|C <value>`,
+   * `LTYPE|L <name>`, `LWEIGHT|LW <value>` and `PLOT|P Y|N`, each followed by
+   * comma-separated layer names. The bare selector and `?` stay the read-only
+   * table report.
+   *
+   * Only the presence of a non-empty argument is checked here: the grammar, the
+   * name resolution and every refusal belong to the Rust parser and the command
+   * layer (the host re-validates the whole line), so the chrome must not reject
+   * a line it cannot judge — e.g. a layer name containing spaces.
+   */
+  '-LAYER': Object.freeze({
+    parse: (argument: string) => argument.trim().length > 0,
   }),
   QSELECT: Object.freeze({
     parse: (argument: string) => isPropertyFilter(argument),

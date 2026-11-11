@@ -133,9 +133,10 @@ test('the View tab navigation cluster holds only router command tokens', () => {
   // selectors, so none may be a local `action` (which would bypass the shared
   // admission) and none may carry a typed payload the name-only funnel refuses.
   //
-  // `ZOOM WINDOW` / `ZOOM PREVIOUS` (2026-10-28) join the same cluster as the two
-  // **argument forms** of `ZOOM`: their dispatch token is the full line
-  // (`'ZOOM WINDOW'`, `'ZOOM PREVIOUS'`), which the router resolves as one
+  // `ZOOM WINDOW` / `ZOOM OBJECT` / `ZOOM PREVIOUS` (2026-10-28, object form
+  // wired 2026-11-11) join the same cluster as the three **argument forms** of
+  // `ZOOM`: their dispatch token is the full line (`'ZOOM WINDOW'`,
+  // `'ZOOM OBJECT'`, `'ZOOM PREVIOUS'`), which the router resolves as one
   // selector plus its word argument. They still ride `cad_command` — the same
   // funnel as every neighbour — and they add no name the host advertises, so the
   // command-string assertion below is the full line, not the item id.
@@ -143,7 +144,7 @@ test('the View tab navigation cluster holds only router command tokens', () => {
   assert.ok(navigate, 'the View tab keeps its navigate panel');
   assert.deepEqual(
     navigate.items.map(item => item.id),
-    ['ZOOMIN', 'ZOOMOUT', 'ZOOM WINDOW', 'PAN', 'FIT', 'ZOOM PREVIOUS', 'RESETVIEW'],
+    ['ZOOMIN', 'ZOOMOUT', 'ZOOM WINDOW', 'ZOOM OBJECT', 'PAN', 'FIT', 'ZOOM PREVIOUS', 'RESETVIEW'],
   );
   for (const item of navigate.items) {
     assert.equal(item.command, item.id, `${item.id} keeps its own selector`);

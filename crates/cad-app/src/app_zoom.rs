@@ -39,6 +39,7 @@ use super::*;
 
 use cad_db::{BoundsAccumulator, DrawingDatabase};
 use cad_representation::{viewport_transform, ViewportState};
+use cad_spatial::pick_world_bounds;
 
 /// The `FIT` breathing-room factor around the framed bounds (see the module
 /// docs). Kept at the historical value so existing framing is unchanged.
@@ -407,6 +408,200 @@ impl Application {
         }
         let (centre, scale) = Self::framing_rect(min, max, size, WINDOW_MARGIN);
         let framed = Self::plan_camera(centre, scale, camera.eye.z);
+        viewport.push_view_snapshot();
+        viewport.camera = framed;
+        viewport.view_mode = ViewMode2d3d::TwoD { saved: framed };
+        Ok(CommandOutcome::none())
+    }
+
+    /// The world rectangle covered by the current **selection**, in paper or
+    /// model space.
+    ///
+    /// Model space resolves the selection through [`drawing_pick_items`], so a
+    /// selected block member is framed at its accumulated `INSERT` transform and
+    /// a selected `INSERT` itself frames every expanded member it owns. Paper
+    /// space only accepts directly addressable layout entities: an instance-path
+    /// member has no independent paper object, so its bounds are never invented.
+    ///
+    /// Every refusal is named and happens before anything moves.
+    fn selected_object_bounds(
+        &self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<(Point3, Point3)> {
+        let references = session.selection.refs();
+        if references.is_empty() {
+            return Err(CadError::InvalidInput(
+                "zoom.object.empty_selection: ZOOM OBJECT frames the current selection; select \
+                 one or more objects first"
+                    .into(),
+            ));
+        }
+        let document = self
+            .workspace
+            .documents
+            .get(&command.document)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let no_bounds = || {
+            CadError::InvalidInput(
+                "zoom.object.no_bounds: the selection has no finite world bounds; nothing changed"
+                    .into(),
+            )
+        };
+        let mut acc = BoundsAccumulator::new();
+        let mut any_bounds = false;
+        match &session.active_space {
+            SpaceId::Model => {
+                let items = drawing_pick_items(&document.drawing, command.document);
+                for reference in references {
+                    if reference.document != command.document {
+                        return Err(CadError::InvalidInput(format!(
+                            "zoom.object.foreign_ref: the selected ref for entity {} belongs to \
+                             another document",
+                            reference.entity.0
+                        )));
+                    }
+                    if reference.sub_element.is_some() {
+                        return Err(CadError::Unsupported(
+                            "zoom.object.not_addressable: sub-elements have no addressable object \
+                             with its own bounds"
+                                .into(),
+                        ));
+                    }
+                    let selected_is_insert =
+                        document
+                            .drawing
+                            .entity(reference.entity)
+                            .is_some_and(|entity| {
+                                matches!(entity.geometry, SemanticGeometry::Insert { .. })
+                            });
+                    let mut matched = false;
+                    for item in &items {
+                        let exact = item.source.document == reference.document
+                            && item.source.entity == reference.entity
+                            && item.source.instance == reference.instance;
+                        // Selecting an INSERT itself expands to every member of
+                        // that placement (the scan never pushes the INSERT as an
+                        // item, exactly like picking).
+                        let member_of_selected_insert = selected_is_insert
+                            && reference.instance.0.is_empty()
+                            && item.source.instance.0.first() == Some(&reference.entity);
+                        if !(exact || member_of_selected_insert) {
+                            continue;
+                        }
+                        matched = true;
+                        if let Some((min, max)) = pick_world_bounds(&item.geometry, &item.transform)
+                        {
+                            acc.add_point(min);
+                            acc.add_point(max);
+                            any_bounds = true;
+                        }
+                    }
+                    if !matched {
+                        return Err(CadError::InvalidInput(format!(
+                            "zoom.object.target_missing: the selected ref for entity {} has no \
+                             pickable geometry in this drawing",
+                            reference.entity.0
+                        )));
+                    }
+                }
+            }
+            SpaceId::Paper(layout) => {
+                if document.drawing.layout(*layout).is_none() {
+                    return Err(CadError::InvalidInput(format!(
+                        "zoom.object.target_missing: active layout {} is not in this drawing",
+                        layout.0
+                    )));
+                }
+                for reference in references {
+                    if reference.document != command.document {
+                        return Err(CadError::InvalidInput(format!(
+                            "zoom.object.foreign_ref: the selected ref for entity {} belongs to \
+                             another document",
+                            reference.entity.0
+                        )));
+                    }
+                    if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
+                        return Err(CadError::Unsupported(
+                            "zoom.object.not_addressable: paper space has no independent bounds \
+                             for a block-instance member or a sub-element"
+                                .into(),
+                        ));
+                    }
+                    let entity = document.drawing.entity(reference.entity).ok_or_else(|| {
+                        CadError::InvalidInput(format!(
+                            "zoom.object.target_missing: selected entity {} is not in this drawing",
+                            reference.entity.0
+                        ))
+                    })?;
+                    if entity.space != SpaceId::Paper(*layout) {
+                        return Err(CadError::InvalidInput(format!(
+                            "zoom.object.not_addressable: selected entity {} is not a paper-space \
+                             entity of the active layout",
+                            reference.entity.0
+                        )));
+                    }
+                    acc.add_geometry(&entity.geometry);
+                    any_bounds = true;
+                }
+            }
+            // A block-definition space is only reached through an INSERT and
+            // has no independent observation rectangle to frame.
+            SpaceId::Block(_) => {
+                return Err(CadError::Unsupported(
+                    "zoom.object.not_addressable: block-definition space has no viewport framing"
+                        .into(),
+                ));
+            }
+        }
+        if !any_bounds {
+            return Err(no_bounds());
+        }
+        acc.finish().ok_or_else(no_bounds)
+    }
+
+    /// `ZOOM OBJECT`: frame the current **selection** with the `FIT` margin.
+    ///
+    /// The selection is the whole input (there is no payload point and no
+    /// interactive pick), resolved by [`Self::selected_object_bounds`]. Like
+    /// `ZOOM WINDOW` this is a plan statement, so a 3D/perspective view refuses
+    /// **by name** (`zoom.object.requires_2d`) instead of faking a perspective
+    /// fit. A real object zoom records one `ZOOM PREVIOUS` step first; a refusal
+    /// moves nothing and records nothing.
+    pub(crate) fn zoom_object(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        if !matches!(command.payload, CommandPayload::ZoomObject) {
+            return Err(CadError::InvalidInput(
+                "zoom.object.invalid_payload: ZOOM OBJECT takes no payload; the selection is the \
+                 input"
+                    .into(),
+            ));
+        }
+        {
+            let viewport = self
+                .workspace
+                .viewports
+                .get(&command.viewport)
+                .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
+            if viewport.view_mode.kind() != ProjectionKind::TwoD
+                || !viewport.camera.projection.is_orthographic()
+            {
+                return Err(CadError::InvalidInput(
+                    "zoom.object.requires_2d: ZOOM OBJECT is only defined in the 2D plan view; a \
+                     perspective view has no object frame (switch back to 2D first)"
+                        .into(),
+                ));
+            }
+        }
+        let (min, max) = self.selected_object_bounds(session, command)?;
+        let viewport = self.viewport_mut(command)?;
+        // The declared margin is the existing FIT breathing room (`1.05`): an
+        // object frame is a fit of the selection's bounds, not a second rule.
+        let (centre, scale) = Self::framing_rect(min, max, viewport.logical_size, FIT_MARGIN);
+        let framed = Self::plan_camera(centre, scale, viewport.camera.eye.z);
         viewport.push_view_snapshot();
         viewport.camera = framed;
         viewport.view_mode = ViewMode2d3d::TwoD { saved: framed };

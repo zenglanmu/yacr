@@ -404,7 +404,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   若打开源是 `.dwg`（或用户选择 `.dwg` 目标），则写入**实验性 DWG 导出**（上游
   `acadrust::DwgWriter`）：有损、不完整、**不是**原地回写，默认建议新文件名 `<stem>-export.dwg`，
   且**绝不覆盖被打开的源文件**（平台 device+inode/SAF URI 守卫 + 宿主归一化路径/名回退守卫）；
-  成功状态明确标注 experimental 与“源图纸未修改”。**证据只有合成的 acadrust self-roundtrip
+  **写入前的选择器提示**（`save.picker_waiting_dwg`，2026-11-11）就说明“实验性、写新文件、不覆盖源图纸”，
+  不把这条边界留到写完之后才说；成功状态再次明确标注 experimental 与“源图纸未修改”。**证据只有合成的 acadrust self-roundtrip
   （writer→reader），AutoCAD/vendor 兼容性 NOT VERIFIED**。`PLOT` 为矢量 SVG/PDF。真实图纸上的
   导出兼容性**未验证**。逐类：LWPOLYLINE（平面的）/ELLIPSE/POINT 为精确映射；**SPLINE 记为
   `Converted`**（`DxfSpline`，几何保留，**closed/periodic 标志不携带**）；Shape/Image/Mask/Opaque
@@ -503,6 +504,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
+| `-LAYER` | 实现（2026-11-11） | 裸命令/`?` 仍是只读图层表报告；写形式一行一个选项：`NEW\|N`、`MAKE\|M`、`SET\|S`、`RENAME\|R`、`DELETE\|D`、`ON`/`OFF`、`FREEZE\|F`/`THAW\|T`、`LOCK\|LO`/`UNLOCK\|U`、`COLOR\|C`（ACI 数字/七个标准色名/`aci:N`/`#RRGGBB`/`rgb:…`）、`LTYPE\|L`、`LWEIGHT\|LW`、`PLOT\|P`；名单逗号分隔，含空格的值/名称可加双引号；整行原子、一条事务/一步撤销（多行 patch 同一 `DrawingUndoRecord`）；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝，裸报告 Viewer-legal | 逐选项交互重提示属全局范围；多行 patch 仍按 `cad-db` 的 setter 规则每改一行升一次 revision；当前层选择/删除回落是会话状态，不进入层表撤销步；`?` 支持 `*`/`?` 通配符过滤，无匹配报 `layer.no_match` |
 | `LAYMCH` / `-LAYMCH` | 部分实现 | 选择式：第一个选中对象的图层为目标，其余对象移入该层（一条事务/一步撤销）；目标层锁定由 `cad-db` 拒绝 | 无 AutoCAD 的交互 `Select objects`；空选择、<2 个对象、非模型空间/块实例/子图元、任何 payload 按名拒绝 |
 | `LAYMRG` / `-LAYMRG` | 部分实现 | 选择式：把选中对象所在层上的所有实体（模型/图纸/块内）重写到当前层（一条事务/一步撤销），再删除每个源层行 | **声明式偏离**：源层来自选择、目标是当前层，无交互 source/target 提示；当前层与 `0` 层不能作源；层行删除不可撤销（撤销只恢复实体） |
 | `LAYDEL` / `-LAYDEL` | 部分实现 | 选择式：删除选中对象所在层的**模型空间**实体（一条事务/一步撤销），再删除层行 | 图纸空间/块内实体不删除，因此仍有成员的层按 `laydel.layer_in_use` 拒绝；当前层/`0` 层拒绝；层行删除不可撤销 |
@@ -700,6 +702,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 ## 三维
 
 - **缩放与视图历史（2026-10-28）**：`ZOOM WINDOW`（两角框选，**仅 2D 正交**——3D 按名拒绝 `zoom.window.requires_2d`；另一捕获或模态 pan 占着指针时 `zoom.window.capture_busy`；退化/非有限矩形**不派发**；拟合 margin **`1.0`**、`FIT` 是 **`1.05`**（**我们的选择**）、同一条较紧轴规则；`view_mode` 保持 2D、**不进历史、不 bump `session.generation`**）与 `ZOOM PREVIOUS`（**每视口**一条上限 **16** 的**离散**视图栈，最旧丢弃；快照 = camera + view_mode + work_plane；在 FIT/`ALL`/`EXTENTS`/`ZOOM <factor>`/`ZOOMIN`/`ZOOMOUT`/旧 `Points`/`ZOOM WINDOW`/`STANDARDVIEW`（2D 下 plan 是 no-op）/`SWITCH2D3D`/`PROJECTION`/`RESETVIEW` **之前**记录；**pan、滚轮缩放、orbit 拖动不记录**——**声明的偏离**；空栈 ⇒ 非错误诊断 `zoom.previous.empty`）。两者都是 `ZOOM` 的**参数写法**（只认全词，`ZOOM W`/`ZOOM PREV` 拒绝；不新增选择子）。**证据边界**：只有契约测试（`cad-app` / `cad-ui-core` / `cad-host`），**无 GUI/像素/真实按键证据**。
+- **`ZOOM OBJECT` / `nX` / `nXP`（2026-11-11）**：`OBJECT` 以当前选择为输入，模型空间经 `drawing_pick_items` + `pick_world_bounds`（块成员/选中 INSERT 展开）、图纸空间只接受可直接寻址的布局实体，空选择/无界/3D/跨文档/不可寻址逐条具名拒绝，成功时用同一条 rect→camera 规则与 FIT margin `1.05`；`nX` 是视口中心的相对倍率；`nXP` 是**图纸空间视口比例**（`2XP` ⇒ `VPSCALE 1:2`），实际写入复用已有 Work-only `VPSCALE` 路径（一条事务/一步撤销），模型空间拒绝 `zoom.xp.requires_paper`。**`ZOOM DYNAMIC` 仍是具名未实现**（`zoom.dynamic_not_implemented`），不伪装成交互缩放。UI：View → navigate 提供 `ZOOM OBJECT` 按钮（`selectAll` 图标）；`nX`/`nXP` 仅命令行。证据只有 Linux 编译 + 契约测试；GUI/像素/真实鼠标 **NOT VERIFIED**。
 - 观察（轨道/标准视图/正交-透视）：相机/投影/标准视图/轨道命令与宿主接线齐全
   （`crates/cad-app/src/camera/` → `cad-host/src/state.rs` 的 `ViewSnapshot` →
   `cad-engine` 按 `view_mode` 选 `render`(2D)/`render_3d`(`Camera3d`)）。

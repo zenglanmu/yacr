@@ -177,9 +177,8 @@ pub enum CommandPayload {
     /// extent on either axis is `zoom.window.degenerate_rect` — both are
     /// `InvalidInput` before any camera change, never a clamped fit.
     ///
-    /// **2D orthographic only**: in a 3D observation the command refuses by name
-    /// (`zoom.window.requires_2d`) rather than faking a perspective fit. View-only
-    /// (allowed in Viewer mode): no write, revision bump, history or generation bump.
+    /// **2D orthographic only**: a 3D observation refuses by name
+    /// (`zoom.window.requires_2d`); view-only, no write/revision/history/generation.
     ZoomWindow {
         rect_logical: [[f64; 2]; 2],
     },
@@ -194,6 +193,7 @@ pub enum CommandPayload {
     /// reports the `zoom.previous.empty` diagnostic. View-only; no database
     /// write, no history entry, no generation bump.
     ZoomPrevious,
+    ZoomObject,
     /// Target mode for [`CommandId::SetMode`] (audit U02).
     Mode(AppMode),
     /// The session grid-snap spacing for [`CommandId::SetSnapSpacing`] (the typed
@@ -549,32 +549,28 @@ pub enum CommandPayload {
     /// (`off`, `frozen`, `locked`, `plottable`, `color`, `linetype`,
     /// `lineweight`, `transparency`).
     ///
-    /// `layer` addresses the row by **name** with the same rule as
-    /// [`CommandPayload::RenameLayer`] (exact match first, then a unique
+    /// `layer` addresses the row by **name** (exact match first, then a unique
     /// case-insensitive one; unknown and ambiguous names are distinct refusals).
     /// `key` is one of [`crate::layer_property::SUPPORTED_KEYS`] and `value`
-    /// follows that key's documented grammar ([`crate::layer_property`], which
-    /// also fixes the units: `lineweight` is **1/100 mm**, `transparency` is
-    /// **percent transparent**). `plotstyle` is a known key that is **refused as
-    /// not implemented**, and `name` / `visible` are refused because they belong
-    /// to `RENAMELAYER` and to the derived `visible == !(off || frozen)` rule.
+    /// follows that key's grammar (units fixed there: `lineweight` is **1/100
+    /// mm**, `transparency` is **percent transparent**). `plotstyle` is a known
+    /// key that is **refused as not implemented**; `name` / `visible` are refused
+    /// because they belong to `RENAMELAYER` and to the derived
+    /// `visible == !(off || frozen)` rule.
     ///
-    /// One attribute per command: the value is parsed, resolved against the
-    /// drawing's own tables (a linetype name must exist) and applied to a
-    /// **candidate** attribute set before anything is published, so a refused
-    /// value changes no attribute, bumps no revision and records no undo entry
-    /// (layer edits are **not** undoable — same as create/rename/delete).
-    ///
-    /// `off` / `frozen` are the only keys with a behaviour beyond storage: the
-    /// database recomputes `Layer::visible` from the pair in the same mutation,
-    /// so turning one on hides the layer through the existing visibility path and
-    /// clearing the last of the two shows it again. `locked`, `plottable`, the
-    /// colour, the linetype, the lineweight and the transparency are stored only.
+    /// The value is parsed and applied to a **candidate** attribute set before
+    /// anything is published, so a refusal changes nothing and a real write
+    /// records exactly one layer-table undo step. `off` / `frozen` additionally
+    /// recompute `Layer::visible` in the same mutation; every other key is stored.
     SetLayerProperty {
         layer: String,
         key: String,
         value: String,
     },
+    /// The typed `-LAYER <option> …` write line (AutoCAD's command-line layer
+    /// editor). See [`DashLayerOps`]; it rides this Work-only carrier because
+    /// `ExtendedCommandId::DashLayer` is the read-only report.
+    DashLayer(DashLayerOps),
     /// DIMRADIUS/DIMDIAMETER: the picked arc/circle (`target`) plus the
     /// dimension-line location (`location`, ADR 0017 decision C, P5d). The kind
     /// (radius vs diameter) comes from the [`CommandId`]; the handler resolves the

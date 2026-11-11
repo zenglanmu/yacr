@@ -12,7 +12,7 @@ import {
   admitCommandText, isSupportedCommand, setCommandCatalog,
 } from '../src/commands/commands.ts';
 import {
-  CAPABILITY_GATES, DOCUMENT_SCOPED_COMMANDS, LOCAL_CHROME_COMMANDS,
+  ARGUMENT_COMMANDS, CAPABILITY_GATES, DOCUMENT_SCOPED_COMMANDS, LOCAL_CHROME_COMMANDS,
 } from '../src/commands/gating.ts';
 import { localSelectorFor } from '../src/commands/local-selectors.ts';
 import { HOST_NAMES, readCatalog, readModule } from './helpers.ts';
@@ -103,4 +103,34 @@ test('the reports and refusals state their honest boundaries', async () => {
     'LWEIGHT', 'COLOR', '-UNITS']) {
     assert.match(en[`${labelSlug(id)}.hint`], /Read-only|report/i, `${id} must say it is a report: ${en[`${labelSlug(id)}.hint`]}`);
   }
+});
+
+test('-LAYER is an argument-taking selector whose write forms stay the host\'s call', () => {
+  const spec = ARGUMENT_COMMANDS['-LAYER'];
+  assert.ok(spec, '-LAYER must be admitted with a typed argument');
+  // The chrome only requires a non-empty argument: the grammar, name resolution
+  // and every refusal live in the Rust parser / command layer, so a layer name
+  // with a space must not be rejected locally.
+  for (const admitted of [
+    '?', 'NEW WALLS', 'N WALLS,DIMS', 'MAKE A B', 'M WALLS', 'SET WALLS', 'S WALLS',
+    'RENAME OLD NEW', 'R OLD NEW WALLS', 'DELETE WALLS', 'D WALLS,DIMS', 'ON WALLS',
+    'OFF WALLS', 'FREEZE WALLS', 'F WALLS', 'THAW WALLS', 'T WALLS', 'LOCK WALLS',
+    'LO WALLS', 'UNLOCK WALLS', 'U WALLS', 'COLOR 3 WALLS', 'C 255,0,0 WALLS',
+    'LTYPE DASHED WALLS', 'L DASHED WALLS', 'LWEIGHT 35 WALLS', 'LW ByLayer WALLS',
+    'PLOT N WALLS', 'P Y WALLS', 'BOGUS WALLS',
+  ]) {
+    assert.equal(spec.parse(admitted), true, admitted);
+  }
+  for (const refused of ['', '   ', '\t']) {
+    assert.equal(spec.parse(refused), false, JSON.stringify(refused));
+  }
+  // The command line admits the full line with the base-selector gate and the
+  // host receives the typed argument for its own validation.
+  assert.deepEqual(admitCommandText('-LAYER NEW WALLS', { status: DOC }), {
+    kind: 'admitted', command: '-LAYER NEW WALLS', reasonKey: null,
+  });
+  // The bare selector keeps its name-only (report) path.
+  assert.deepEqual(admitCommandText('-LAYER', { status: DOC }), {
+    kind: 'admitted', command: '-LAYER', reasonKey: null,
+  });
 });
