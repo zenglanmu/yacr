@@ -802,8 +802,8 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 /// second IPC for it. Every other selector stays name-only, so `LINE 2` is the
 /// ordinary unsupported-name refusal.
 ///
-/// * [`ARGUMENT_SELECTOR`] (`ZOOM`): a positive factor or
-///   `ALL`/`EXTENTS`/`WINDOW`/`PREVIOUS` ([`parse_zoom_argument`]);
+/// * [`ARGUMENT_SELECTOR`] (`ZOOM`): a positive factor, `nX`, `nXP` or
+///   `ALL`/`EXTENTS`/`WINDOW`/`PREVIOUS`/`OBJECT` ([`parse_zoom_argument`]);
 /// * [`SNAPUNIT_SELECTOR`] / [`PDMODE_SELECTOR`] / [`PDSIZE_SELECTOR`]: one
 ///   positive spacing / one integer / one signed decimal, in that order;
 /// * [`SPACE_SELECTOR`] (`SPACE`): `MODEL`, `#<u128>` or a layout display name,

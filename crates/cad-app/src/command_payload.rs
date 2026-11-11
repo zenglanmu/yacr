@@ -177,9 +177,8 @@ pub enum CommandPayload {
     /// extent on either axis is `zoom.window.degenerate_rect` — both are
     /// `InvalidInput` before any camera change, never a clamped fit.
     ///
-    /// **2D orthographic only**: in a 3D observation the command refuses by name
-    /// (`zoom.window.requires_2d`) rather than faking a perspective fit. View-only
-    /// (allowed in Viewer mode): no write, revision bump, history or generation bump.
+    /// **2D orthographic only**: a 3D observation refuses by name
+    /// (`zoom.window.requires_2d`); view-only, no write/revision/history/generation.
     ZoomWindow {
         rect_logical: [[f64; 2]; 2],
     },
@@ -194,6 +193,7 @@ pub enum CommandPayload {
     /// reports the `zoom.previous.empty` diagnostic. View-only; no database
     /// write, no history entry, no generation bump.
     ZoomPrevious,
+    ZoomObject,
     /// Target mode for [`CommandId::SetMode`] (audit U02).
     Mode(AppMode),
     /// The session grid-snap spacing for [`CommandId::SetSnapSpacing`] (the typed

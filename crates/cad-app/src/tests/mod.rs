@@ -256,5 +256,6 @@ mod utility;
 mod view_batch;
 
 mod view_camera;
+mod zoom_object;
 mod zoom_previous;
 mod zoom_window;

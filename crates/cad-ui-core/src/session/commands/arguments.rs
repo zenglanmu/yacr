@@ -120,6 +120,20 @@ pub enum ZoomArgument {
     /// [`cad_app::CommandPayload::ZoomAt`]. The zoom is anchored at the
     /// **viewport centre**, exactly like those cursor-less button steps.
     Factor(f64),
+    /// `nX`: a positive finite **relative factor** (`2X`, `0.5X`). It is the
+    /// same scale operation as [`ZoomArgument::Factor`] and rides the same
+    /// [`cad_app::CommandPayload::ZoomAt`] payload; the suffix is only the
+    /// AutoCAD spelling. `> 1` zooms in, `< 1` zooms out.
+    Relative(f64),
+    /// `nXP` / `a/bXP`: the **paper-space viewport scale**, written as a
+    /// paper-to-drawing ratio. `2XP` becomes `VPSCALE 1:2` and `1/50XP` (or
+    /// `1:50XP`) becomes `VPSCALE 1:50`; the ratio is routed through the
+    /// existing Work-only `VPSCALE` write path, never through the Viewer-legal
+    /// `ZOOM` command.
+    PaperScale { paper: f64, drawing: f64 },
+    /// `OBJECT`: frame the current **selection**. The selection is the whole
+    /// input — there is no payload point and no interactive object pick.
+    Object,
     /// `ALL` (the written-out spelling) or `EXTENTS`: frame the whole drawing,
     /// i.e. the [`cad_app::CommandId::FitDrawing`] path.
     Fit,
@@ -136,9 +150,9 @@ pub enum ZoomArgument {
     Previous,
 }
 
-/// Parse the argument of a `ZOOM` selector: a positive decimal factor, or
-/// `ALL` / `EXTENTS` / `WINDOW` / `PREVIOUS` (case-insensitive, surrounding
-/// whitespace ignored).
+/// Parse the argument of a `ZOOM` selector: a positive decimal factor, `nX`,
+/// `nXP`, or `ALL` / `EXTENTS` / `WINDOW` / `PREVIOUS` / `OBJECT`
+/// (case-insensitive, surrounding whitespace ignored).
 ///
 /// The numeric grammar is deliberately narrow — ASCII digits with at most one
 /// `.` that has digits on **both** sides (`2`, `0.5`, `1.25`, `2.0`). Signs
@@ -147,9 +161,13 @@ pub enum ZoomArgument {
 /// [`invalid_zoom_argument_reason`]. Nothing is clamped and no default factor is
 /// invented.
 ///
-/// The two word arguments are the **full** spellings only: no `W`/`P`
+/// The word arguments are the **full** spellings only: no `W`/`P`/`O`
 /// abbreviation is admitted (this router never guesses at a partial word), and
 /// `ZOOM EXTENTS` is still resolved earlier by the pre-existing alias onto `FIT`.
+///
+/// `ZOOM DYNAMIC` is deliberately **outside** this grammar. It is a named,
+/// unimplemented gap (`zoom.dynamic_not_implemented`) and must never be parsed
+/// into a different form.
 pub fn parse_zoom_argument(argument: &str) -> Option<ZoomArgument> {
     let key = argument.trim();
     if key.eq_ignore_ascii_case("ALL") || key.eq_ignore_ascii_case("EXTENTS") {
@@ -161,7 +179,41 @@ pub fn parse_zoom_argument(argument: &str) -> Option<ZoomArgument> {
     if key.eq_ignore_ascii_case("PREVIOUS") {
         return Some(ZoomArgument::Previous);
     }
+    if key.eq_ignore_ascii_case("OBJECT") {
+        return Some(ZoomArgument::Object);
+    }
+    let upper = key.to_ascii_uppercase();
+    // `nXP` / `a/bXP` / `a:bXP`: the paper-to-drawing ratio.
+    if upper.ends_with("XP") {
+        return parse_paper_scale(&key[..key.len() - 2]);
+    }
+    // `nX`: the relative factor.
+    if upper.ends_with('X') {
+        return parse_positive_decimal(&key[..key.len() - 1]).map(ZoomArgument::Relative);
+    }
     parse_positive_decimal(key).map(ZoomArgument::Factor)
+}
+
+/// Parse the body of an `nXP` argument into its paper-to-drawing ratio.
+///
+/// A bare factor (`2XP`) is `1:2` (one paper unit is two drawing units); a
+/// ratio may use `/` or `:` (`1/50XP`, `1:50XP`). Every component is the same
+/// positive plain decimal [`parse_positive_decimal`] accepts, so signs, zero,
+/// exponents and embedded spaces are refused here.
+fn parse_paper_scale(body: &str) -> Option<ZoomArgument> {
+    let body = body.trim();
+    if body.is_empty() {
+        return None;
+    }
+    if let Some((paper, drawing)) = body.split_once(['/', ':']) {
+        let paper = parse_positive_decimal(paper)?;
+        let drawing = parse_positive_decimal(drawing)?;
+        return Some(ZoomArgument::PaperScale { paper, drawing });
+    }
+    parse_positive_decimal(body).map(|drawing| ZoomArgument::PaperScale {
+        paper: 1.0,
+        drawing,
+    })
 }
 
 /// Parse the argument of a `PEDIT` selector: one declared v1 polyline option.
@@ -324,8 +376,8 @@ pub fn parse_layerpmode_argument(argument: &str) -> Option<bool> {
 /// grammar is spelled out, so a refusal is never a silent ignore or a clamp.
 pub fn invalid_zoom_argument_reason(text: &str) -> String {
     format!(
-        "unsupported CAD command: {} (ZOOM needs a positive factor, ALL, EXTENTS, WINDOW or \
-         PREVIOUS)",
+        "unsupported CAD command: {} (ZOOM needs a positive factor, ALL, EXTENTS, WINDOW, \
+         PREVIOUS, OBJECT, nX or nXP; ZOOM DYNAMIC is not implemented)",
         text.trim()
     )
 }

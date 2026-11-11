@@ -39,6 +39,7 @@ mod view_arguments;
 mod view_status;
 mod xref_status;
 mod zoom_argument;
+mod zoom_object_xp;
 mod zoom_window_previous;
 
 /// A committed synthetic, writer-produced AC1032 DWG with four LINE

@@ -169,7 +169,9 @@ fn an_argument_outside_the_grammar_is_refused_without_moving_the_camera() {
             .command(text)
             .expect_err(&format!("{text:?} must be refused"));
         assert!(
-            error.contains("ZOOM needs a positive factor, ALL, EXTENTS, WINDOW or PREVIOUS"),
+            error.contains(
+                "ZOOM needs a positive factor, ALL, EXTENTS, WINDOW, PREVIOUS, OBJECT, nX or nXP"
+            ),
             "{text:?} must carry the named reason, got {error:?}"
         );
         assert!(
@@ -203,7 +205,49 @@ fn the_argument_grammar_is_exactly_the_documented_one() {
     assert_eq!(parse_zoom_argument("ALL"), Some(ZoomArgument::Fit));
     assert_eq!(parse_zoom_argument("all"), Some(ZoomArgument::Fit));
     assert_eq!(parse_zoom_argument("EXTENTS"), Some(ZoomArgument::Fit));
-    for refused in ["0", "0.0", "-1", "+2", "abc", "2 3", ".5", "2.", "1e3", ""] {
+    assert_eq!(parse_zoom_argument("OBJECT"), Some(ZoomArgument::Object));
+    assert_eq!(parse_zoom_argument("object"), Some(ZoomArgument::Object));
+    assert_eq!(
+        parse_zoom_argument("  Object  "),
+        Some(ZoomArgument::Object)
+    );
+    assert_eq!(parse_zoom_argument("2X"), Some(ZoomArgument::Relative(2.0)));
+    assert_eq!(
+        parse_zoom_argument("0.5x"),
+        Some(ZoomArgument::Relative(0.5))
+    );
+    assert_eq!(
+        parse_zoom_argument("2XP"),
+        Some(ZoomArgument::PaperScale {
+            paper: 1.0,
+            drawing: 2.0,
+        })
+    );
+    assert_eq!(
+        parse_zoom_argument("2xp"),
+        Some(ZoomArgument::PaperScale {
+            paper: 1.0,
+            drawing: 2.0,
+        })
+    );
+    assert_eq!(
+        parse_zoom_argument("1/50XP"),
+        Some(ZoomArgument::PaperScale {
+            paper: 1.0,
+            drawing: 50.0,
+        })
+    );
+    assert_eq!(
+        parse_zoom_argument("1:50XP"),
+        Some(ZoomArgument::PaperScale {
+            paper: 1.0,
+            drawing: 50.0,
+        })
+    );
+    for refused in [
+        "0", "0.0", "-1", "+2", "abc", "2 3", ".5", "2.", "1e3", "", "O", "DYNAMIC", "0X", "-2X",
+        "X", "0XP", "-2XP", "XP", "/XP", "1/XP", "2//50XP",
+    ] {
         assert_eq!(parse_zoom_argument(refused), None, "{refused:?}");
     }
 
