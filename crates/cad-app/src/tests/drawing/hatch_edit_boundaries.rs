@@ -283,3 +283,64 @@ fn hatchedit_boundary_edits_require_exactly_one_hatch_and_one_boundary() {
     assert_eq!(revision(&app), revision_before);
     assert_eq!(undo_depth(&app), undo_before);
 }
+
+// ---------------------------------------------------------------------------
+// Boundary-source refusals (the shared HATCHSETBOUNDARY projection)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn hatchedit_boundary_edits_refuse_an_open_or_off_plane_source_writing_nothing() {
+    // An open polyline is not a closed region: the shared projection refuses it
+    // before the domain constructor sees a loop.
+    let (mut app, mut session) = hatch_app(vec![
+        square(1, 0.0, 10.0, 0.0),
+        (
+            2,
+            SemanticGeometry::Polyline {
+                points: vec![p3(20.0, 0.0, 0.0), p3(30.0, 0.0, 0.0), p3(30.0, 5.0, 0.0)],
+                bulges: vec![0.0; 3],
+                closed: false,
+            },
+        ),
+    ]);
+    let id = run(&mut app, &mut session, &[1]).expect("HATCH").objects[0].0;
+    let loops_before = stored_hatch(&app, id).loops().len();
+    let revision_before = revision(&app);
+    let undo_before = undo_depth(&app);
+    let error = edit_selection(
+        &mut app,
+        &mut session,
+        &[id, 2],
+        HatchEditOption::AddBoundaries,
+    )
+    .expect_err("an open polyline is not a boundary");
+    assert!(
+        format!("{error:?}").contains("hatchsetboundary.not_closed"),
+        "{error:?}"
+    );
+    assert_eq!(revision(&app), revision_before);
+    assert_eq!(undo_depth(&app), undo_before);
+    assert_eq!(stored_hatch(&app, id).loops().len(), loops_before);
+
+    // A closed square on another elevation cannot be flattened onto the hatch
+    // plane, so it is refused by name instead of being projected.
+    let (mut app, mut session) =
+        hatch_app(vec![square(1, 0.0, 10.0, 0.0), square(2, 20.0, 30.0, 5.0)]);
+    let id = run(&mut app, &mut session, &[1]).expect("HATCH").objects[0].0;
+    let revision_before = revision(&app);
+    let undo_before = undo_depth(&app);
+    let error = edit_selection(
+        &mut app,
+        &mut session,
+        &[id, 2],
+        HatchEditOption::AddBoundaries,
+    )
+    .expect_err("an off-plane source is not a boundary");
+    assert!(
+        format!("{error:?}").contains("hatchsetboundary.non_planar"),
+        "{error:?}"
+    );
+    assert_eq!(revision(&app), revision_before);
+    assert_eq!(undo_depth(&app), undo_before);
+    assert_eq!(stored_hatch(&app, id).loops().len(), 1);
+}

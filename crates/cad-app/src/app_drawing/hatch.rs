@@ -53,14 +53,20 @@
 //! generated line geometry remains **our implementation** (ADR U-1), not a
 //! documented AutoCAD formula.
 //!
-//! Pattern type code `2` selects one of the **predefined** patterns from the
-//! small hand-transcribed table in `cad_domain::hatch::patterns` (`ANSI31`,
-//! `ANSI32`, `ANSI37`) by its **1-based** index (`hatchPattern`). Spacing is the
-//! pattern scale (`HPSCALE`), angle the hatch-level rotation and the double flag
-//! the perpendicular second family; the definition rows come from the table, so
-//! these are **our transcribed values, not vendor-verified**, and `.pat` file
-//! loading is NOT IMPLEMENTED. An index outside the table is refused **by name**
-//! — never clamped onto a neighbouring pattern.
+//! Pattern type code `2` selects one of the **predefined** patterns by its
+//! **1-based** index (`hatchPattern`). The implemented library is the three
+//! hand-transcribed `.pat` patterns (`ANSI31`, `ANSI32`, `ANSI37`), stored as
+//! AutoCAD `.pat` definition text and parsed by
+//! `super::hatch_pattern::PatternLibrary` — the same loader, name resolution
+//! and index resolution a user pattern file goes through. Spacing is the pattern
+//! scale (`HPSCALE`), angle the hatch-level rotation and the double flag the
+//! perpendicular second family; the definition rows come from the library, so
+//! these are **our transcribed values, not vendor-verified**. An index outside
+//! the library is refused **by name** — never clamped onto a neighbouring
+//! pattern. A user `acad.pat`/`acadiso.pat` file is parsed and resolvable by
+//! name, but this build has no pattern-name/file tool parameter (`hatchPattern`
+//! is a closed 1-based index), so a user entry cannot yet be selected from the
+//! command line (declared; nothing is approximated).
 //!
 //! Pattern type code `3` creates a two-colour **gradient** fill from its own
 //! channel (`hatchGradientKind` Linear/Spherical, `hatchGradientAngle` in

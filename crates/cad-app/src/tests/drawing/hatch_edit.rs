@@ -825,3 +825,65 @@ fn hatchedit_global_capability_refusals_are_named_and_write_nothing() {
     assert_eq!(revision(&app), revision_before);
     assert_eq!(undo_depth(&app), undo_before);
 }
+
+// ---------------------------------------------------------------------------
+// PATTERNTYPE CUSTOM (DXF group 76 = 2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn hatchedit_pattern_type_custom_writes_group_76_two_and_keeps_the_fill() {
+    // A custom (76=2) pattern is a named user pattern from a `.pat` library; the
+    // edit only rewrites the stored pattern type, so the definition rows, scale
+    // and angle of the current fill must survive unchanged.
+    let (mut app, mut session) = hatch_app(vec![square(1, 0.0, 10.0, 0.0)]);
+    let id = pattern_hatch(&mut app, &mut session);
+    assert_eq!(
+        the_hatch(&app).pattern_type(),
+        HatchPatternType::UserDefined,
+        "the creation path starts at 76=0"
+    );
+    let before = pattern(the_hatch(&app)).clone();
+    let revision_before = revision(&app);
+    let undo_before = undo_depth(&app);
+
+    let out = edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::PatternType(HatchPatternType::Custom),
+    )
+    .expect("PATTERNTYPE CUSTOM");
+    assert_eq!(out.objects, vec![ObjectId(id)]);
+    assert_eq!(revision(&app).0, revision_before.0 + 1, "one revision");
+    assert_eq!(undo_depth(&app), undo_before + 1, "one undo step");
+    assert_eq!(the_hatch(&app).pattern_type(), HatchPatternType::Custom);
+    assert_eq!(
+        pattern(the_hatch(&app)),
+        &before,
+        "the fill (rows, scale, angle, double) is preserved"
+    );
+
+    // Repeating the same value is the named no-op, and UNDO restores 76=0.
+    let out = edit(
+        &mut app,
+        &mut session,
+        id,
+        HatchEditOption::PatternType(HatchPatternType::Custom),
+    )
+    .unwrap();
+    assert_eq!(out.diagnostics[0].code, "hatchedit.unchanged");
+    assert_eq!(undo_depth(&app), undo_before + 1);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(
+        the_hatch(&app).pattern_type(),
+        HatchPatternType::UserDefined,
+        "one undo restores the previously stored group 76"
+    );
+}

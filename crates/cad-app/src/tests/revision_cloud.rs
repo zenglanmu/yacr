@@ -2,8 +2,9 @@
 //! Style and Modify.
 //!
 //! Pinned here: the declared constant-chord arc rule, outward arc sign, the
-//! deterministic 5 %-of-bbox-diagonal default, one transaction / one undo step,
-//! and every named refusal writing nothing.
+//! Arc Length precedence (payload value, then the session
+//! `REVCLOUDPROPERTIES` token, then the declared 5 %-of-diagonal surrogate), one
+//! transaction / one undo step, and every named refusal writing nothing.
 
 use super::*;
 use crate::command_payload::{
@@ -217,8 +218,12 @@ fn revcloud_object_uses_the_explicit_chord_and_undo_restores_the_source() {
 }
 
 #[test]
-fn revcloud_default_arc_length_is_five_percent_of_the_path_diagonal() {
+fn revcloud_default_arc_length_uses_the_session_revcloud_token() {
+    // AutoCAD's precedence: no explicit `Arc Length` on the command, so the
+    // stored `REVCLOUDPROPERTIES` token (default 15, set to 0.5 here so the
+    // 4x3 rectangle resolves to 28 arcs) supplies the chord.
     let (mut app, mut session) = application_with_document();
+    session.drafting_extras.set_revcloud_arc_length(0.5);
     let created = execute(
         &mut app,
         &mut session,
@@ -227,19 +232,94 @@ fn revcloud_default_arc_length_is_five_percent_of_the_path_diagonal() {
     )
     .unwrap();
     select(&mut app, &mut session, &[created.objects[0].0]);
-    execute(
+    let outcome = execute(
         &mut app,
         &mut session,
         CommandId::RevisionCloud,
         object_payload(),
     )
-    .expect("the bare Object form uses the default chord");
+    .expect("the bare Object form reads the session arc-length token");
+    let (points, _, closed) = stored_polyline(&app, created.objects[0].0);
+    let chord: f64 = 0.5;
+    assert!(closed);
+    assert_eq!(points.len(), (14.0 / chord).ceil() as usize);
+    assert_chord(&points, true, chord);
+    assert!(
+        outcome.diagnostics[0]
+            .message
+            .contains("session REVCLOUDPROPERTIES arc-length token"),
+        "the diagnostic names the token as the chord source: {}",
+        outcome.diagnostics[0].message
+    );
+}
+
+#[test]
+fn revcloud_explicit_arc_length_overrides_the_session_token() {
+    let (mut app, mut session) = application_with_document();
+    session.drafting_extras.set_revcloud_arc_length(0.5);
+    let created = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateRectangle,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(4.0, 3.0)]),
+    )
+    .unwrap();
+    select(&mut app, &mut session, &[created.objects[0].0]);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::RevisionCloud,
+        cloud_payload(RevisionCloudOptions {
+            mode: RevisionCloudMode::Object,
+            arc_length: Some(1.0),
+        }),
+    )
+    .expect("the payload Arc Length wins over the stored token");
+    let (points, _, _) = stored_polyline(&app, created.objects[0].0);
+    assert_chord(&points, true, 1.0);
+    assert!(
+        outcome.diagnostics[0]
+            .message
+            .contains("explicit Arc Length"),
+        "the diagnostic names the payload as the chord source: {}",
+        outcome.diagnostics[0].message
+    );
+}
+
+#[test]
+fn revcloud_unusable_session_token_falls_back_to_five_percent_of_the_diagonal() {
+    // A zero token cannot name an arc length; the declared surrogate applies and
+    // the diagnostic says so instead of silently using 0.
+    let (mut app, mut session) = application_with_document();
+    session.drafting_extras.set_revcloud_arc_length(0.0);
+    let created = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateRectangle,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(4.0, 3.0)]),
+    )
+    .unwrap();
+    select(&mut app, &mut session, &[created.objects[0].0]);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::RevisionCloud,
+        object_payload(),
+    )
+    .expect("an unusable token falls back to the path diagonal");
     let (points, _, closed) = stored_polyline(&app, created.objects[0].0);
     let diagonal: f64 = 5.0;
     let chord: f64 = diagonal * 0.05;
     assert!(closed);
     assert_eq!(points.len(), (14.0 / chord).ceil() as usize);
     assert_chord(&points, true, chord);
+    assert!(
+        outcome.diagnostics[0]
+            .message
+            .contains("5% of the path diagonal"),
+        "the diagnostic names the surrogate: {}",
+        outcome.diagnostics[0].message
+    );
 }
 
 #[test]

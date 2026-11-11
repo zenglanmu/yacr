@@ -9,7 +9,12 @@
 //! * **Rectangular** — two opposite corners, optionally reversing the arc side.
 //! * **Polygonal** — a vertex run; `closed` closes the ring.
 //! * **Freehand** — a point run; `closed` closes the ring.
-//! * **Arc Length** — the approximate **chord** length of every arc.
+//! * **Arc Length** — the approximate **chord** length of every arc. The value
+//!   is resolved in AutoCAD's order: the command's own `Arc Length` value (the
+//!   payload field) wins; otherwise the session arc-length token
+//!   (`DraftingExtras::revcloud_arc_length`, the same token
+//!   `REVCLOUDPROPERTIES` reports, default 15); only when that token is unusable
+//!   (non-finite or `<= 0`) does the declared surrogate apply.
 //! * **Style** — `Normal` is the stored style (a named no-op); `Calligraphy` is
 //!   a named refusal because the model has no style field.
 //! * **Modify** — inserts the supplied points on the cloud path and opens the
@@ -25,10 +30,12 @@
 //! on a counter-clockwise closed ring = bows outward) and is negated by the
 //! documented `reverse` flag.
 //!
-//! `arc_length = None` uses the declared first-cloud default:
+//! When neither the payload nor the session token supplies a usable length,
 //! [`DEFAULT_ARC_LENGTH_FRACTION`] (5 %) of the source path's bounding-box
-//! diagonal. This build has no viewport in the command layer, so the path
-//! diagonal is the deterministic surrogate for AutoCAD's view-diagonal rule.
+//! diagonal is the declared fallback. This build has no viewport in the command
+//! layer, so the path diagonal is the deterministic surrogate for AutoCAD's
+//! view-diagonal rule. Every diagnostic names which of the three sources was
+//! used, so a cloud never silently mixes conventions.
 //!
 //! ## Result and write discipline
 //!
@@ -45,6 +52,17 @@
 //! `revcloud.invalid_arc_length`, `revcloud.degenerate`, `revcloud.not_planar`,
 //! `revcloud.too_many_vertices`, `revcloud.modify_open` and
 //! `revcloud.style_unsupported`.
+//!
+//! ## Calligraphy (declared capability gap)
+//!
+//! AutoCAD's `Calligraphy` style is a **brush-stroke rendering** of the cloud
+//! arcs: the stroke width/shape varies along each arc. This build's cloud is a
+//! `SemanticGeometry::Polyline` whose only per-segment shape parameter is the
+//! bulge (one circular arc), so there is no field that could carry a
+//! calligraphic stroke. Rather than fake the style (e.g. by alternating bulge
+//! magnitudes, which would be a different geometry, not the vendor style),
+//! `REVCLOUD STYLE CALLIGRAPHY` stays an `Unsupported` refusal under
+//! `revcloud.style_unsupported` and writes nothing.
 
 use super::*;
 use crate::command_payload::{
@@ -107,8 +125,42 @@ fn options(command: &Command) -> CadResult<RevisionCloudOptions> {
     }
 }
 
-/// Validate the explicit chord and apply the deterministic default.
-fn chord_length(explicit: Option<f64>, diagonal: f64) -> CadResult<f64> {
+/// Where the chord length of one cloud came from (echoed by the diagnostics).
+///
+/// The precedence is AutoCAD's: the command's own `Arc Length` prompt (the
+/// payload field) wins, then the stored `REVCLOUDPROPERTIES` arc-length token
+/// (`DraftingExtras::revcloud_arc_length`, the session value the
+/// `REVCLOUDPROPERTIES` report reads), and only when the token is unusable
+/// (non-finite or `<= 0`) does the declared deterministic surrogate apply —
+/// [`DEFAULT_ARC_LENGTH_FRACTION`] of the source path's bounding-box diagonal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChordSource {
+    /// The `Arc Length` value carried by this command's payload.
+    Explicit,
+    /// The session `REVCLOUDPROPERTIES` arc-length token.
+    SessionToken,
+    /// The declared 5 %-of-diagonal surrogate (the token was unusable).
+    PathDiagonal,
+}
+
+impl ChordSource {
+    /// The locale-neutral label the diagnostics echo.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Explicit => "explicit Arc Length",
+            Self::SessionToken => "session REVCLOUDPROPERTIES arc-length token",
+            Self::PathDiagonal => "5% of the path diagonal (declared surrogate)",
+        }
+    }
+}
+
+/// Validate the explicit chord, then the session token, then the deterministic
+/// fallback ([`ChordSource`] for the precedence).
+fn chord_length(
+    explicit: Option<f64>,
+    session_token: f64,
+    diagonal: f64,
+) -> CadResult<(f64, ChordSource)> {
     if let Some(value) = explicit {
         if !value.is_finite() || value <= 0.0 {
             return Err(invalid(
@@ -116,7 +168,13 @@ fn chord_length(explicit: Option<f64>, diagonal: f64) -> CadResult<f64> {
                 format!("Arc Length must be finite and strictly positive, got {value}"),
             ));
         }
-        return Ok(value);
+        return Ok((value, ChordSource::Explicit));
+    }
+    // The stored token is the documented default for a new cloud. A corrupt
+    // token (non-finite / non-positive) is not a refusal of the whole command:
+    // the declared diagonal surrogate takes over and the diagnostic names it.
+    if session_token.is_finite() && session_token > 0.0 {
+        return Ok((session_token, ChordSource::SessionToken));
     }
     if !diagonal.is_finite() || diagonal <= 0.0 {
         return Err(invalid(
@@ -124,7 +182,24 @@ fn chord_length(explicit: Option<f64>, diagonal: f64) -> CadResult<f64> {
             "the source path has no positive bounding-box diagonal for the default Arc Length",
         ));
     }
-    Ok((diagonal * DEFAULT_ARC_LENGTH_FRACTION).max(1e-9))
+    Ok((
+        (diagonal * DEFAULT_ARC_LENGTH_FRACTION).max(1e-9),
+        ChordSource::PathDiagonal,
+    ))
+}
+
+/// Validate the explicit `Arc Length` value alone (the `Style` form stores no
+/// geometry, so it only needs the payload validation the build forms share).
+fn validate_explicit_chord(explicit: Option<f64>) -> CadResult<()> {
+    if let Some(value) = explicit {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(invalid(
+                "invalid_arc_length",
+                format!("Arc Length must be finite and strictly positive, got {value}"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The world-space diagonal of the path's axis-aligned bounding box.
@@ -561,11 +636,12 @@ impl Application {
         command: &Command,
     ) -> CadResult<CommandOutcome> {
         let options = options(command)?;
+        // The stored `REVCLOUDPROPERTIES` token is read once here and threaded to
+        // every build path; the field's own `Arc Length` overrides it.
+        let session_token = session.drafting_extras.revcloud_arc_length();
         match &options.mode {
             RevisionCloudMode::Style(style) => {
-                if options.arc_length.is_some() {
-                    chord_length(options.arc_length, 1.0)?;
-                }
+                validate_explicit_chord(options.arc_length)?;
                 match style {
                     RevCloudStyle::Normal => Ok(CommandOutcome {
                         objects: Vec::new(),
@@ -582,8 +658,11 @@ impl Application {
                     }),
                     RevCloudStyle::Calligraphy => Err(unsupported(
                         "style_unsupported",
-                        "REVCLOUD Style Calligraphy: the model has no revision-cloud style field, \
-                         so the calligraphy visual style cannot be stored (Normal is always used)",
+                        "REVCLOUD Style Calligraphy: the calligraphy style is a brush-stroke \
+                         rendering of the arcs, and this build's cloud is a polyline whose only \
+                         per-segment shape parameter is the bulge (one circular arc); no stored \
+                         field can carry the style, so the command is refused instead of being \
+                         drawn as Normal (Normal remains the only cloud style)",
                     )),
                 }
             }
@@ -627,7 +706,11 @@ impl Application {
                         z,
                     },
                 ];
-                let chord = chord_length(options.arc_length, bounding_diagonal(&points))?;
+                let (chord, source) = chord_length(
+                    options.arc_length,
+                    session_token,
+                    bounding_diagonal(&points),
+                )?;
                 let geometry = resample_cloud(points, true, chord, *reverse)?;
                 let mut outcome =
                     self.commit_new_entity(session, command, geometry, "revision cloud")?;
@@ -635,8 +718,9 @@ impl Application {
                     object: outcome.objects.first().copied(),
                     code: "revcloud.applied".into(),
                     message: format!(
-                        "REVCLOUD Rectangular: built a closed cloud with chord {chord} and reverse \
-                         {reverse}"
+                        "REVCLOUD Rectangular: built a closed cloud with chord {chord} from the \
+                         {} and reverse {reverse}",
+                        source.label()
                     ),
                 });
                 Ok(outcome)
@@ -652,7 +736,8 @@ impl Application {
                 reverse,
             } => {
                 validate_build_points(points)?;
-                let chord = chord_length(options.arc_length, bounding_diagonal(points))?;
+                let (chord, source) =
+                    chord_length(options.arc_length, session_token, bounding_diagonal(points))?;
                 let geometry = resample_cloud(points.clone(), *closed, chord, *reverse)?;
                 let mut outcome =
                     self.commit_new_entity(session, command, geometry, "revision cloud")?;
@@ -660,9 +745,11 @@ impl Application {
                     object: outcome.objects.first().copied(),
                     code: "revcloud.applied".into(),
                     message: format!(
-                        "REVCLOUD {}: built a {} cloud with chord {chord} and reverse {reverse}",
+                        "REVCLOUD {}: built a {} cloud with chord {chord} from the {} and reverse \
+                         {reverse}",
                         if *closed { "closed path" } else { "open path" },
-                        if *closed { "closed" } else { "open" }
+                        if *closed { "closed" } else { "open" },
+                        source.label()
                     ),
                 });
                 Ok(outcome)
@@ -671,7 +758,14 @@ impl Application {
                 target,
                 add_points,
                 erase_side,
-            } => self.revcloud_modify(command, target, add_points, *erase_side, &options),
+            } => self.revcloud_modify(
+                command,
+                target,
+                add_points,
+                *erase_side,
+                &options,
+                session_token,
+            ),
         }
     }
 
@@ -763,7 +857,11 @@ impl Application {
                 ),
             ));
         }
-        let chord = chord_length(options.arc_length, source_diagonal(&entity))?;
+        let (chord, source) = chord_length(
+            options.arc_length,
+            session.drafting_extras.revcloud_arc_length(),
+            source_diagonal(&entity),
+        )?;
         let (points, closed) = flatten_source(&entity, chord)?;
         let geometry = resample_cloud(points, closed, chord, false)?;
         let edges = match &geometry {
@@ -778,8 +876,9 @@ impl Application {
             "revcloud",
             format!(
                 "REVCLOUD Object: converted the selected path into a {} cloud with {edges} \
-                 arc(s) of chord {chord}",
-                if closed { "closed" } else { "open" }
+                 arc(s) of chord {chord} from the {}",
+                if closed { "closed" } else { "open" },
+                source.label()
             ),
         )
     }
@@ -792,6 +891,7 @@ impl Application {
         add_points: &[Point3],
         erase_side: Point3,
         options: &RevisionCloudOptions,
+        session_token: f64,
     ) -> CadResult<CommandOutcome> {
         if target.document != command.document {
             return Err(invalid(
@@ -850,7 +950,8 @@ impl Application {
         if !is_finite_point(erase_side) {
             return Err(invalid("degenerate", "the erase-side pick is not finite"));
         }
-        let chord = chord_length(options.arc_length, source_diagonal(&entity))?;
+        let (chord, source) =
+            chord_length(options.arc_length, session_token, source_diagonal(&entity))?;
         let (mut points, closed) = flatten_source(&entity, chord)?;
         if !closed {
             return Err(invalid(
@@ -881,8 +982,9 @@ impl Application {
             "revcloud",
             format!(
                 "REVCLOUD Modify: inserted {} point(s) and erased the arc nearest the pick, \
-                 leaving an open {edges}-vertex cloud with chord {chord}",
-                add_points.len()
+                 leaving an open {edges}-vertex cloud with chord {chord} from the {}",
+                add_points.len(),
+                source.label()
             ),
         )
     }

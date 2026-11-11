@@ -1,4 +1,5 @@
-//! The HATCH typed channel, fill synthesis and the summary diagnostic.
+//! The HATCH typed channel, the `.pat` pattern library, fill synthesis and the
+//! summary diagnostic.
 //!
 //! Split out of `hatch.rs` to keep every file under the 1000-line gate; the
 //! command itself (`create_hatch`) lives in the parent module and owns the
@@ -6,15 +7,35 @@
 //! from the session ([`SessionState::tool_parameter`]), validated, and turned into
 //! the domain [`HatchFill`] / [`HatchPatternType`] pair, and the diagnostic echoes
 //! what was actually written.
+//!
+//! ## Pattern library
+//!
+//! [`super::hatch_pattern::PatternLibrary`] is the single reader of AutoCAD
+//! `.pat` definition text (name headers,
+//! `angle, base-x, base-y, delta-x, delta-y [, dash …]` rows, `;` comments). The
+//! three built-in patterns are themselves `.pat` text
+//! (`super::hatch_pattern::BUILTIN_PATTERN_TEXT`, our ADR U-1 transcription),
+//! parsed once per process, so every predefined HATCH runs through the loader and
+//! the by-name / by-index resolution a user pattern would use. A user `acad.pat`
+//! / `acadiso.pat` file is parsed by the same `PatternLibrary::parse` and
+//! resolved by name (`PatternLibrary::resolve`).
+//!
+//! **Declared boundary**: this build has no pattern-name or pattern-file tool
+//! parameter — `hatchPattern` is a closed **1-based index** channel over the
+//! implemented library — so a user `.pat` entry cannot yet be *selected* from
+//! the command line. The loader, the parser refusals
+//! (`hatch.pattern_file_*`) and the name resolution
+//! (`hatch.pattern_missing`) are complete and exercised; wiring a name-entry
+//! prompt (or extending the channel) is the remaining step, and until it exists
+//! no user pattern is silently accepted or approximated.
 
 use super::*;
 
 use super::hatch_stitch::STITCH_TOLERANCE;
 
-use cad_domain::hatch::{
-    predefined_pattern_by_index, predefined_patterns, GradientDef, GradientKind, GradientStop,
-    PredefinedPattern,
-};
+use super::hatch_pattern::{PatternDefinition, PatternLibrary};
+
+use cad_domain::hatch::{GradientDef, GradientKind, GradientStop};
 
 use crate::draw_tool::{
     ToolParameter, HATCH_GRADIENT_DEFAULT_ACI_A, HATCH_GRADIENT_DEFAULT_ACI_B,
@@ -38,7 +59,8 @@ const GRADIENT_SHIFT: f64 = 0.0;
 
 /// The pattern name written for a created user-defined pattern.
 ///
-/// There is no pattern table and no `.pat` parser, so this is an opaque,
+/// A user-defined fill synthesizes its one definition row from spacing/angle/
+/// double, so it has no name in any pattern library; this is an opaque,
 /// locale-neutral identity (ADR U-11: what AutoCAD prefers when a `76=0` hatch
 /// carries both a name and definition rows is unverified). The definition rows
 /// are the authoritative data.
@@ -185,17 +207,15 @@ impl HatchParameters {
     }
 
     /// The predefined pattern the `hatchPattern` index names, or `None` when the
-    /// index is not an implemented table entry.
+    /// index is not an implemented library entry.
     ///
-    /// The channel already bounds the index to `1..=table.len()`, but the command
-    /// re-resolves it (defence in depth) and refuses by name in [`Self::fill`];
-    /// nothing is clamped onto a neighbouring pattern.
-    fn predefined(&self) -> Option<&'static PredefinedPattern> {
-        let index = self.pattern_index;
-        if !index.is_finite() || index.fract() != 0.0 || index < 1.0 {
-            return None;
-        }
-        predefined_pattern_by_index(index as usize)
+    /// The channel already bounds the index to `1..=library length`, but the
+    /// command re-resolves it (defence in depth) and refuses by name in
+    /// [`Self::fill`]; nothing is clamped onto a neighbouring pattern.
+    fn predefined(&self) -> Option<&'static PatternDefinition> {
+        PatternLibrary::builtin()
+            .pattern_at_index(self.pattern_index)
+            .ok()
     }
 
     /// The two-colour gradient definition and its validation.
@@ -283,8 +303,8 @@ impl HatchParameters {
     /// fixtures (a solid pattern has no user-defined definition rows). A
     /// user-defined fill records `UserDefined` (`76=0`) and carries the
     /// synthesized definition rows. A predefined fill (pattern type code `2`)
-    /// records `Predefined` (`76=1`) and carries the rows of the hand-transcribed
-    /// table entry the index names. A gradient fill (pattern type code `3`) also
+    /// records `Predefined` (`76=1`) and carries the rows of the parsed `.pat`
+    /// library entry the index names. A gradient fill (pattern type code `3`) also
     /// records `Predefined` (`76=1`): a gradient HATCH is written as a solid fill
     /// plus the 450-470 block, so it has no definition rows (an **unverified**
     /// vendor convention, declared).
@@ -304,21 +324,12 @@ impl HatchParameters {
         }
         if self.pattern_type == HATCH_PATTERN_TYPE_PREDEFINED {
             self.scale_and_angle()?;
-            let Some(predefined) = self.predefined() else {
-                let names = predefined_patterns()
-                    .iter()
-                    .map(|pattern| pattern.name)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                return Err(CadError::InvalidInput(format!(
-                    "HATCH pattern index {} is not in the implemented predefined set (1..={}: \
-                     {names})",
-                    self.pattern_index,
-                    predefined_patterns().len()
-                )));
-            };
+            // The index is resolved against the parsed `.pat` library; an index
+            // outside it is refused by name (with the implemented set listed) and
+            // never clamped onto a neighbouring pattern.
+            let definition = PatternLibrary::builtin().pattern_at_index(self.pattern_index)?;
             let pattern =
-                predefined.to_hatch_pattern(self.spacing, self.angle_degrees, self.double);
+                definition.to_hatch_pattern(self.spacing, self.angle_degrees, self.double);
             return Ok((HatchFill::Pattern(pattern), HatchPatternType::Predefined));
         }
         if self.pattern_type != HATCH_PATTERN_TYPE_USER_DEFINED {
@@ -464,7 +475,7 @@ pub(super) fn hatch_diagnostic(
         // claiming a user-defined one.
         let name = parameters
             .predefined()
-            .map(|pattern| pattern.name)
+            .map(|definition| definition.name())
             .unwrap_or("<unresolved>");
         format!(
             "predefined pattern {name} (scale {}, angle {} deg, double {})",

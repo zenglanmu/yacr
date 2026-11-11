@@ -69,6 +69,8 @@ mod hatch_edit;
 mod hatch_edit_boundaries;
 mod hatch_internal_point;
 mod hatch_parameters;
+// The AutoCAD `.pat` pattern library (HATCH predefined/custom definitions).
+mod hatch_pattern;
 mod hatch_stitch;
 mod hatch_utilities;
 mod helpers;
@@ -138,6 +140,9 @@ mod text_params;
 pub(crate) use text_params::{mtext_attachment_align, text_rotation_radians};
 mod trim_boundary;
 mod trim_curves;
+// The cut-resolution helpers, split out of `trim_curves` so both files stay
+// inside the code-size limit.
+mod trim_cuts;
 mod trim_extend;
 mod trim_spline;
 

@@ -5,9 +5,20 @@
 //! (stored type key `AcDbWipeout`, `inverted: false`, the first vertex not
 //! repeated) in one transaction / one undo step on the active layer. Every
 //! refusal (`wipeout.*`) happens before the transaction and changes nothing.
-//! The declared v1 limits — no `Frames` model, no `Polyline`/`Erase Polyline`
-//! option, no self-intersection rejection, no picking — are documented in
-//! [`crate::command_id::draw_variants::WipeoutCommand`].
+//!
+//! Also pinned here: the `Polyline` (+ `Erase Polyline Yes/No`) conversion and
+//! the `WIPEOUTFRAME` (`Frames ON|OFF|Display but not plot`) option, which is
+//! **session/drawing-wide display state**: it records no database write, no
+//! revision and no undo entry. The frame's *visibility* is a renderer concern —
+//! the display build draws the frame for `ON`/`DISPLAY`, and the vector-plot
+//! build only for `ON` — and that mapping is pinned by the `cad-representation`
+//! and `cad-host` tests, not here. This crate's tests therefore prove the token
+//! write/read path and the no-write discipline only; they are **not** a pixel or
+//! plotting acceptance of the frame itself.
+//!
+//! Still declared limits: no picking an existing wipeout, no `FRAME` system
+//! variable command, and self-intersection is not rejected (the ring is stored as
+//! given and filled even-odd; only a zero net area is refused).
 
 use super::*;
 
@@ -487,4 +498,90 @@ fn wipeout_polyline_refuses_open_and_non_polyline_targets_without_writing() {
         "{message}"
     );
     assert_eq!(revision(&app), before);
+}
+
+#[test]
+fn wipeout_frames_are_display_state_and_leave_a_created_mask_untouched() {
+    // The frame flag is drawing-wide display state, not entity data: a mask
+    // created while frames are OFF stores exactly the same ring/inversion, and
+    // the token survives the write unchanged.
+    let (mut app, mut session) = drawing_app();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Wipeout,
+        wipeout_payload(WipeoutPayload::Frames(crate::WipeoutFrames::Off)),
+    )
+    .expect("Frames OFF");
+    let before = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Wipeout,
+        CommandPayload::Points(square()),
+    )
+    .expect("a mask is created with frames hidden");
+    assert_eq!(revision(&app).0, before.0 + 1, "only the mask write bumps");
+    assert_mask(&app, outcome.objects[0], &square());
+    assert_eq!(
+        session.drafting_extras.wipeout_frames(),
+        crate::WipeoutFrames::Off,
+        "creating a mask does not reset WIPEOUTFRAME"
+    );
+    // A mask carries no per-entity frame flag, so the display decision can only
+    // come from the session token (the renderer wiring lives outside this crate).
+    let entity = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(outcome.objects[0].0))
+        .expect("the mask");
+    assert!(
+        matches!(
+            entity.geometry,
+            SemanticGeometry::Mask {
+                inverted: false,
+                ..
+            }
+        ),
+        "the stored mask is the only frame-related datum this crate owns"
+    );
+}
+
+/// The current undo depth (0 when the drawing has no history yet).
+fn wipeout_undo_depth(app: &Application) -> usize {
+    app.history
+        .get(&DocumentId(1))
+        .map(|history| history.undo_depth())
+        .unwrap_or(0)
+}
+
+#[test]
+fn wipeout_refuses_another_utility_payload_and_keeps_the_frames_token() {
+    // A Utility payload that is not WIPEOUT's own is refused by name before any
+    // write, and the session frame token is untouched by the refusal.
+    let (mut app, mut session) = drawing_app();
+    session
+        .drafting_extras
+        .set_wipeout_frames(crate::WipeoutFrames::DisplayNotPlot);
+    let before = revision(&app);
+    let undo_before = wipeout_undo_depth(&app);
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::Wipeout,
+        CommandPayload::Annotation(Box::new(AnnotationBatchPayload::Utility(Box::new(
+            UtilityPayload::TextMask(crate::TextMaskOptions::default()),
+        )))),
+    )
+    .unwrap_err();
+    let CadError::InvalidInput(message) = err else {
+        panic!("expected an InvalidInput refusal, got {err:?}");
+    };
+    assert!(message.contains("wipeout.payload"), "{message}");
+    assert_eq!(revision(&app), before);
+    assert_eq!(wipeout_undo_depth(&app), undo_before);
+    assert_eq!(
+        session.drafting_extras.wipeout_frames(),
+        crate::WipeoutFrames::DisplayNotPlot,
+        "a refused WIPEOUT never rewrites the frame token"
+    );
 }

@@ -15,6 +15,8 @@
 //! leaves the database revision, the history depth and the ID allocator untouched.
 //! The long-form contracts live in `crate::command_id::hatch_generate_boundary`
 //! and `crate::command_id::hatch_to_back`.
+//!
+//! The AutoCAD `.pat` pattern library lives in [`super::hatch_pattern`].
 
 use super::*;
 
