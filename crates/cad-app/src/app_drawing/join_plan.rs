@@ -6,9 +6,15 @@ use super::{
     angle_tolerance, chain_pieces, invalid, join_tolerance, piece_from_geometry, unsupported,
 };
 use crate::command_payload::{JoinMode, JoinOptions};
-use cad_geometry::{add, clamped_uniform_knots, dot, length, scale, sub};
+use cad_geometry::{add, dot, length, scale, sub};
 
 const TAU: f64 = std::f64::consts::TAU;
+
+// The SPLINE source chain lives in its own file (code-size limit); it is a
+// private helper module of this planner.
+#[path = "join_spline.rs"]
+mod spline_chain;
+use spline_chain::{plan_splines, SplineCurve};
 
 /// One inclusive span along the common line (world units from the reference
 /// origin).
@@ -109,155 +115,6 @@ impl Joined {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct SplineCurve {
-    degree: u32,
-    knots: Vec<f64>,
-    control_points: Vec<Point3>,
-    weights: Vec<f64>,
-}
-
-impl SplineCurve {
-    /// Expand the sanctioned empty-knot/empty-weight shorthand to the stored
-    /// clamped-uniform form.
-    fn from_geometry(
-        degree: u32,
-        knots: &[f64],
-        control_points: &[Point3],
-        weights: &[f64],
-    ) -> CadResult<Self> {
-        let n = control_points.len();
-        let degree = degree.max(1).min(n.saturating_sub(1) as u32);
-        if n < degree as usize + 1 {
-            return Err(invalid(
-                "join.degenerate",
-                "a SPLINE has too few control points",
-            ));
-        }
-        let knots = if knots.is_empty() {
-            clamped_uniform_knots(n, degree as usize)
-        } else {
-            knots.to_vec()
-        };
-        let weights = if weights.is_empty() {
-            vec![1.0; n]
-        } else {
-            weights.to_vec()
-        };
-        Ok(SplineCurve {
-            degree,
-            knots,
-            control_points: control_points.to_vec(),
-            weights,
-        })
-    }
-
-    fn geometry(self) -> SemanticGeometry {
-        SemanticGeometry::Spline {
-            degree: self.degree,
-            knots: self.knots,
-            control_points: self.control_points,
-            weights: self.weights,
-        }
-    }
-
-    fn head(&self) -> Point3 {
-        self.control_points[0]
-    }
-
-    fn tail(&self) -> Point3 {
-        *self.control_points.last().expect("validated non-empty")
-    }
-
-    /// Reverse the curve: reversed control points/weights and mirrored knots.
-    fn reversed(self) -> Self {
-        let mut control_points = self.control_points;
-        let mut weights = self.weights;
-        control_points.reverse();
-        weights.reverse();
-        let knots = self.knots;
-        let sum = knots[0] + knots[knots.len() - 1];
-        let knots = knots.iter().rev().map(|knot| sum - knot).collect();
-        SplineCurve {
-            degree: self.degree,
-            knots,
-            control_points,
-            weights,
-        }
-    }
-
-    /// Exact C0 concatenation: `U = U1 ++ shift(U2)[p+1..]` and
-    /// `P = P1 ++ P2`, so the join knot has multiplicity `p + 1` and the
-    /// control points stay the stored ones.
-    fn concat(mut self, other: SplineCurve) -> CadResult<Self> {
-        if self.degree != other.degree {
-            return Err(unsupported(
-                "join.spline_degree",
-                format!(
-                    "SPLINE degrees {} and {} cannot be one curve",
-                    self.degree, other.degree
-                ),
-            ));
-        }
-        let p = self.degree as usize;
-        let total = self.control_points.len() + other.control_points.len();
-        if self.knots.len() != self.control_points.len() + p + 1
-            || other.knots.len() != other.control_points.len() + p + 1
-        {
-            return Err(unsupported(
-                "join.spline_clamped",
-                "a source SPLINE does not have a clamped knot vector to concatenate",
-            ));
-        }
-        let first = self.knots[0];
-        let first_end = self.knots[self.control_points.len()];
-        let other_start = other.knots[0];
-        let other_end = other.knots[other.control_points.len()];
-        if first_end <= first || other_end <= other_start {
-            return Err(invalid(
-                "join.degenerate",
-                "a SPLINE has an empty knot domain",
-            ));
-        }
-        if self.knots[self.control_points.len()..]
-            .iter()
-            .any(|knot| (knot - first_end).abs() > 1e-12)
-            || other.knots[..=p]
-                .iter()
-                .any(|knot| (knot - other_start).abs() > 1e-12)
-        {
-            return Err(unsupported(
-                "join.spline_clamped",
-                "a source SPLINE is not clamped at the junction end",
-            ));
-        }
-        // Normalise both pieces onto [0, 1] and [1, 2].
-        let span = first_end - first;
-        let mut knots: Vec<f64> = self
-            .knots
-            .iter()
-            .map(|knot| (knot - first) / span)
-            .collect();
-        let other_span = other_end - other_start;
-        let shifted: Vec<f64> = other.knots[p + 1..]
-            .iter()
-            .map(|knot| 1.0 + (knot - other_start) / other_span)
-            .collect();
-        knots.extend(shifted);
-        debug_assert_eq!(knots.len(), total + p + 1);
-        let mut control_points = std::mem::take(&mut self.control_points);
-        control_points.extend(other.control_points);
-        let mut weights = std::mem::take(&mut self.weights);
-        weights.extend(other.weights);
-        Ok(SplineCurve {
-            degree: self.degree,
-            knots,
-            control_points,
-            weights,
-        })
-    }
-}
-
 /// Resolve the one merged geometry from the sources, or refuse by name.
 pub(super) fn plan_join(sources: &[DbEntity], options: JoinOptions) -> CadResult<Joined> {
     for source in sources {
@@ -348,10 +205,33 @@ fn plan_source_object(sources: &[DbEntity], close: bool) -> CadResult<Joined> {
             plan_ellipses(&ellipse_list(sources), close)
         }
         SemanticGeometry::Spline { .. } => {
-            ensure_all(sources, |geometry| {
-                matches!(geometry, SemanticGeometry::Spline { .. })
-            })?;
-            plan_splines(sources, close)
+            // AutoCAD's SPLINE source accepts lines and arcs as well: a source
+            // SPLINE plus any LINE/ARC (or elliptical arc) that touches it welds
+            // into one exact rational SPLINE through `nurbs::plan_mixed_weld`.
+            // A pure SPLINE selection keeps the exact C0 concatenation.
+            let all_spline = sources
+                .iter()
+                .all(|source| matches!(source.geometry, SemanticGeometry::Spline { .. }));
+            if all_spline {
+                return plan_splines(sources, close);
+            }
+            let weldable = sources.iter().all(|source| {
+                matches!(
+                    source.geometry,
+                    SemanticGeometry::Spline { .. }
+                        | SemanticGeometry::Line { .. }
+                        | SemanticGeometry::Arc { .. }
+                        | SemanticGeometry::Ellipse { .. }
+                )
+            });
+            if !weldable {
+                return Err(invalid(
+                    "join.mixed_kinds",
+                    "a SPLINE source joins LINEs, ARCs, elliptical arcs and SPLINEs; a POLYLINE \
+                     pick is not part of that set (convert it or use JOIN MULTIPLE)",
+                ));
+            }
+            super::nurbs::plan_mixed_weld(sources, close)
         }
         other => Err(unsupported(
             "join.unsupported",
@@ -913,79 +793,6 @@ fn plan_polyline_sources(sources: &[DbEntity], close: bool) -> CadResult<Joined>
         bulges,
         closed,
     })
-}
-
-/// Plan a SPLINE merge: contiguous end-to-end, any plane, exact C0
-/// concatenation for equal degrees.
-fn plan_splines(sources: &[DbEntity], close: bool) -> CadResult<Joined> {
-    if close {
-        return Err(unsupported(
-            "join.close_spline",
-            "JOIN CLOSE on SPLINEs is not implemented (the SPLINE model has no closed flag)",
-        ));
-    }
-    let mut pieces: Vec<SplineCurve> = Vec::with_capacity(sources.len());
-    for source in sources {
-        let SemanticGeometry::Spline {
-            degree,
-            knots,
-            control_points,
-            weights,
-        } = &source.geometry
-        else {
-            return Err(invalid(
-                "join.mixed_kinds",
-                "a SPLINE source takes SPLINEs only",
-            ));
-        };
-        pieces.push(SplineCurve::from_geometry(
-            *degree,
-            knots,
-            control_points,
-            weights,
-        )?);
-    }
-    let tol = join_tolerance();
-    let mut current = pieces.remove(0);
-    while !pieces.is_empty() {
-        let head = current.head();
-        let tail = current.tail();
-        let mut matched = false;
-        for index in 0..pieces.len() {
-            let piece = &pieces[index];
-            if distance(piece.head(), tail) <= tol {
-                let piece = pieces.remove(index);
-                current = current.concat(piece)?;
-                matched = true;
-                break;
-            }
-            if distance(piece.tail(), tail) <= tol {
-                let piece = pieces.remove(index).reversed();
-                current = current.concat(piece)?;
-                matched = true;
-                break;
-            }
-            if distance(piece.tail(), head) <= tol {
-                let piece = pieces.remove(index);
-                current = piece.concat(current)?;
-                matched = true;
-                break;
-            }
-            if distance(piece.head(), head) <= tol {
-                let piece = pieces.remove(index).reversed();
-                current = piece.concat(current)?;
-                matched = true;
-                break;
-            }
-        }
-        if !matched {
-            return Err(invalid(
-                "join.not_contiguous",
-                "a selected SPLINE does not touch the current spline; JOIN does not bridge gaps",
-            ));
-        }
-    }
-    Ok(Joined::Spline(current))
 }
 
 /// Normalise an angle into `[0, 2π)`.

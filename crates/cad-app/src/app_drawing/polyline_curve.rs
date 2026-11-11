@@ -526,6 +526,46 @@ impl PolylineCurve {
         }
         Ok((self.sub_curve(0.0, u)?, self.sub_curve(u, n)?))
     }
+
+    /// Insert one vertex on segment `segment` at its local parameter `t`,
+    /// **without changing the curve's shape** (`PEDIT Edit vertex` → `Insert`).
+    ///
+    /// The inserted vertex is the exact point of the existing segment at `t`,
+    /// and a bulged segment is split into the two sub-arcs of the same circle
+    /// (`sub_bulge`), so a straight or bulged polyline keeps its geometry
+    /// exactly. `t` must be strictly inside the segment; inserting on an
+    /// existing vertex is refused by name.
+    pub(super) fn insert_vertex_at(
+        &self,
+        segment: usize,
+        t: f64,
+    ) -> CadResult<(Vec<Point3>, Vec<f64>)> {
+        if segment >= self.segment_count() {
+            return Err(polyline_refusal(
+                self.prefix,
+                "vertex_out_of_range",
+                format!(
+                    "segment {segment} does not exist (the polyline has {} segments)",
+                    self.segment_count()
+                ),
+            ));
+        }
+        if !t.is_finite() || t <= 1e-9 || t >= 1.0 - 1e-9 {
+            return Err(polyline_refusal(
+                self.prefix,
+                "vertex_insert_at_vertex",
+                "the insert point coincides with an existing vertex of the segment",
+            ));
+        }
+        let point = self.point_on_segment(segment, t)?;
+        let bulge = self.bulge_at(segment);
+        let mut points = self.points.clone();
+        let mut bulges = self.bulges.clone();
+        points.insert(segment + 1, point);
+        bulges[segment] = sub_bulge(bulge, 0.0, t);
+        bulges.insert(segment + 1, sub_bulge(bulge, t, 1.0));
+        Ok((points, bulges))
+    }
 }
 
 /// The bulge of the sub-arc `[lo, hi]` of a segment with `bulge`.

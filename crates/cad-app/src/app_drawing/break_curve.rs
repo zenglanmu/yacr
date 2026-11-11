@@ -3,7 +3,8 @@
 //!
 //! AutoCAD's two-point `BREAK` takes an entity pick (which is also the first
 //! break point) and a second break point. This build supports **LINE**, **ARC**,
-//! **CIRCLE**, **ELLIPSE** (full ellipse), **SPLINE** and **LWPOLYLINE** targets.
+//! **CIRCLE**, **ELLIPSE** (full ellipse and elliptical arc), **SPLINE** and
+//! **LWPOLYLINE** targets.
 //! The **second** point may be off the object: it is projected to the nearest
 //! point of the target curve before splitting (the first point is the entity
 //! pick and must still project inside an open target's own span).
@@ -28,7 +29,12 @@
 //! * a periodic target (a full CIRCLE or a full ELLIPSE) normalises both
 //!   parameters into `[0, 1)` and keeps the **one** complement starting at `u2`
 //!   and wrapping through the seam. The stored entity therefore becomes an ARC
-//!   or an elliptical arc; a partial ELLIPSE is `break.elliptical_arc_unsupported`;
+//!   or an elliptical arc;
+//! * a **partial ELLIPSE** (an elliptical arc) is an open target with its own
+//!   `u ∈ [0, 1]` along `start → start + sweep`; the two complementary
+//!   elliptical arcs `[0, u1]` and `[u2, 1]` are kept. The **first** pick must
+//!   project inside the arc's own sweep (`break.pick_outside_span`), the second
+//!   is projected/clamped, exactly like an ARC;
 //! * a LWPOLYLINE uses its own segment parameter `u ∈ [0, segments]` (each
 //!   segment spans one unit). An **open** polyline keeps `[0, u1]` and
 //!   `[u2, segments]`, preserving the bulge of every split segment. A **closed**
@@ -48,7 +54,6 @@
 //! | `break.pick_outside_span` | the **first** pick projects outside `[0, 1]` on an open analytic target (the second is projected/clamped) |
 //! | `break.zero_span` | the two parameters are the same (nothing to remove) |
 //! | `break.whole_curve` | the span covers the whole curve (the object would vanish) |
-//! | `break.elliptical_arc_unsupported` | the target is a partial ELLIPSE (BREAK on an elliptical arc is not documented) |
 //! | `break.degenerate_piece` | `with_span` cannot keep a well-formed piece (e.g. too few SPLINE control points) |
 //! | `break.bulged_segment` | a non-planar polyline carries a bulge (no circular arc exists) |
 //!
@@ -548,16 +553,18 @@ fn closed_polyline_pieces(
     Ok(vec![curve.sub_curve(second, kept_end)?])
 }
 
-/// Resolve the kept piece of a **full** ELLIPSE.
+/// Resolve the kept piece(s) of an ELLIPSE or an elliptical arc.
 ///
-/// AutoCAD's BREAK removes the forward (CCW) span from the first pick to the
-/// second and keeps the complementary span. This build stores that piece as one
-/// [`SemanticGeometry::Ellipse`] elliptical arc in the original entity (type key
-/// `AcDbEllipse`, `start = start + sweep·u₂`, `sweep = sweep·(1 − (u₂ − u₁))`).
+/// AutoCAD's BREAK removes the forward (sweep-direction) span from the first
+/// pick to the second and keeps the complement:
 ///
-/// An **elliptical arc** target (a partial `Ellipse`) has no documented BREAK
-/// semantics, so it is refused by name (`break.elliptical_arc_unsupported`)
-/// instead of inventing a split.
+/// * a **full** ELLIPSE has no ends, so the complement is one elliptical arc in
+///   the original entity (type key `AcDbEllipse`, `start = start + sweep·u₂`,
+///   `sweep = sweep·(1 − (u₂ − u₁))`);
+/// * a **partial ELLIPSE** (an elliptical arc) is an open target: the kept
+///   pieces are `[0, u₁]` and `[u₂, 1]` along its own sweep, exactly the ARC
+///   rule. The first pick must project inside the arc's own span; the second is
+///   projected/clamped onto it.
 #[allow(clippy::too_many_arguments)]
 fn ellipse_pieces(
     center: Point3,
@@ -577,22 +584,26 @@ fn ellipse_pieces(
             "the BREAK target ELLIPSE is degenerate (zero sweep)",
         ));
     }
-    if sweep.abs() < TAU - 1e-9 {
-        return Err(CadError::Unsupported(
-            "break.elliptical_arc_unsupported: AutoCAD does not document BREAK on an elliptical \
-             arc, so this build refuses the partial ELLIPSE instead of inventing a split; a full \
-             ELLIPSE is supported"
-                .into(),
+    if sweep.abs() > TAU + 1e-9 {
+        return Err(refusal(
+            "break.projection_failed",
+            format!(
+                "the BREAK target ELLIPSE sweeps more than one full turn ({sweep}); its \
+                 parameter has no single period"
+            ),
         ));
     }
-    let param_tol = (tol / (TAU * cad_geometry::length(major).max(tol))).max(1e-12);
-    let u_a = ellipse_pick_param(center, major, minor, first, tol).ok_or_else(|| {
+    // The angular pick tolerance is expressed in the target's own `u` units, so
+    // it is the world tolerance over one unit of parameter (the arc length of the
+    // full sweep at the major radius).
+    let param_tol = (tol / (sweep.abs() * cad_geometry::length(major).max(tol))).max(1e-12);
+    let angle_a = ellipse_pick_param(center, major, minor, first, tol).ok_or_else(|| {
         refusal(
             "break.projection_failed",
             "the first BREAK pick has no projection onto the ellipse",
         )
     })?;
-    let u_b = ellipse_pick_param(center, major, minor, second, tol).ok_or_else(|| {
+    let angle_b = ellipse_pick_param(center, major, minor, second, tol).ok_or_else(|| {
         refusal(
             "break.projection_failed",
             "the second BREAK pick has no projection onto the ellipse",
@@ -601,14 +612,75 @@ fn ellipse_pieces(
     // Fold each raw eccentric angle onto the ellipse's own parameter period in
     // its sweep direction (the stored `start` and sweep sign matter).
     let normalised = |angle: f64| {
-        if sweep >= 0.0 {
-            norm_tau(angle - start) / TAU
+        let delta = if sweep >= 0.0 {
+            norm_tau(angle - start)
         } else {
-            norm_tau(start - angle) / TAU
-        }
+            norm_tau(start - angle)
+        };
+        delta / sweep.abs()
     };
-    let u_a = normalised(u_a);
-    let u_b = normalised(u_b);
+    let u_a = normalised(angle_a);
+    let u_b = normalised(angle_b);
+    if sweep.abs() < TAU - 1e-9 {
+        // A partial ELLIPSE is an open elliptical arc: the first pick must lie on
+        // the arc's own sweep, the second is projected/clamped onto it.
+        if !u_a.is_finite() || u_a < -param_tol || u_a > 1.0 + param_tol {
+            return Err(refusal(
+                "break.pick_outside_span",
+                format!(
+                    "the first BREAK pick projects outside the elliptical arc (parameter \
+                     {u_a:.9}, the target spans [0, 1])"
+                ),
+            ));
+        }
+        if !u_b.is_finite() {
+            return Err(refusal(
+                "break.projection_failed",
+                "the second BREAK pick projected to a non-finite parameter",
+            ));
+        }
+        let u1 = u_a.clamp(0.0, 1.0).min(u_b.clamp(0.0, 1.0));
+        let u2 = u_a.clamp(0.0, 1.0).max(u_b.clamp(0.0, 1.0));
+        if u2 - u1 <= param_tol {
+            return Err(refusal(
+                "break.zero_span",
+                "the two BREAK picks project to the same point; there is no span to remove",
+            ));
+        }
+        if u1 <= param_tol && u2 >= 1.0 - param_tol {
+            return Err(refusal(
+                "break.whole_curve",
+                "the two BREAK picks span the whole target; BREAK does not delete the object \
+                 (use ERASE)",
+            ));
+        }
+        let mut pieces = Vec::with_capacity(2);
+        if u1 > param_tol {
+            pieces.push(SemanticGeometry::Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                start,
+                sweep: sweep * u1,
+            });
+        }
+        if u2 < 1.0 - param_tol {
+            pieces.push(SemanticGeometry::Ellipse {
+                center,
+                normal,
+                major_axis,
+                ratio,
+                start: start + sweep * u2,
+                sweep: sweep * (1.0 - u2),
+            });
+        }
+        return Ok(pieces);
+    }
+    // A full ELLIPSE is periodic: both parameters wrap into one period and the
+    // kept piece is the complement wrapping through the seam.
+    let u_a = u_a.rem_euclid(1.0);
+    let u_b = u_b.rem_euclid(1.0);
     let (u1, u2) = if u_a <= u_b { (u_a, u_b) } else { (u_b, u_a) };
     let removed = u2 - u1;
     if removed <= param_tol {
@@ -694,247 +766,7 @@ fn ellipse_pick_param(
     Some(qy.atan2(qx))
 }
 
-/// A `BREAKATPOINT` refusal.
-fn at_point_refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
-    CadError::InvalidInput(format!("{code}: {detail}"))
-}
-
-impl Application {
-    /// `BREAKATPOINT`: split one object into two at a single point.
-    ///
-    /// Supported targets are LINE, ARC and an **open** LWPOLYLINE. AutoCAD's
-    /// BREAKATPOINT refuses closed objects, and so does this build: a CIRCLE or a
-    /// closed polyline is `breakatpoint.closed`; a SPLINE is
-    /// `breakatpoint.spline_unsupported`; every other kind is
-    /// `breakatpoint.unsupported`. The break point is **projected** onto the
-    /// target (the host resolved the entity with its pickbox), so a click a few
-    /// pixels off the curve is still valid.
-    ///
-    /// The source entity is retained as the first piece (same id/layer/space/
-    /// draw order/display state); the second piece is a fresh-id entity copying
-    /// the source's display attributes. One transaction / one undo step.
-    pub(crate) fn break_at_point(&mut self, command: &Command) -> CadResult<CommandOutcome> {
-        let CommandPayload::BreakAtPoint { target, point } = &command.payload else {
-            return Err(at_point_refusal(
-                "breakatpoint.payload",
-                "BREAKATPOINT needs a BreakAtPoint { target, point } payload",
-            ));
-        };
-        if !is_finite_point(*point) {
-            return Err(at_point_refusal(
-                "breakatpoint.invalid_point",
-                "the break point must be finite",
-            ));
-        }
-        if !target.instance.0.is_empty() || target.sub_element.is_some() {
-            return Err(at_point_refusal(
-                "breakatpoint.not_addressable",
-                format!(
-                    "target {} is a block-instance member or sub-element; only directly \
-                     addressable model-space entities can be split",
-                    target.entity.0
-                ),
-            ));
-        }
-        if target.document != command.document {
-            return Err(at_point_refusal(
-                "breakatpoint.target_missing",
-                "the target belongs to another document",
-            ));
-        }
-
-        let document_id = command.document;
-        let tol = cut_tolerance();
-        let document = self
-            .workspace
-            .documents
-            .get_mut(&document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let before = document
-            .drawing
-            .entity(target.entity)
-            .cloned()
-            .ok_or_else(|| {
-                at_point_refusal(
-                    "breakatpoint.target_missing",
-                    format!("target {} does not exist", target.entity.0),
-                )
-            })?;
-        if before.space != SpaceId::Model {
-            return Err(at_point_refusal(
-                "breakatpoint.not_addressable",
-                format!(
-                    "target {} is not a model-space entity; only model space is supported",
-                    before.id.0
-                ),
-            ));
-        }
-
-        let (first, second) = match &before.geometry {
-            SemanticGeometry::Circle { .. } => {
-                return Err(at_point_refusal(
-                    "breakatpoint.closed",
-                    "BREAKATPOINT does not split a closed object such as a CIRCLE",
-                ));
-            }
-            SemanticGeometry::Polyline {
-                points,
-                bulges,
-                closed,
-            } => {
-                if *closed {
-                    return Err(at_point_refusal(
-                        "breakatpoint.closed",
-                        "BREAKATPOINT does not split a closed polyline",
-                    ));
-                }
-                let curve = PolylineCurve::new(points, bulges, false, "breakatpoint")?;
-                curve.split_at_point(*point, tol)?
-            }
-            SemanticGeometry::Spline { .. } => {
-                return Err(CadError::Unsupported(
-                    "breakatpoint.spline_unsupported: BREAKATPOINT does not split a SPLINE; \
-                     only LINE, ARC and an open LWPOLYLINE are supported"
-                        .into(),
-                ));
-            }
-            SemanticGeometry::Line { .. } | SemanticGeometry::Arc { .. } => {
-                curve_split_at_point(&before.geometry, *point, tol)?
-            }
-            other => {
-                return Err(CadError::Unsupported(format!(
-                    "breakatpoint.unsupported: {} is not LINE, ARC or an open LWPOLYLINE; \
-                     BREAKATPOINT changes nothing",
-                    class_name(other)
-                )));
-            }
-        };
-
-        let source_id = before.id;
-        let source_display = document.drawing.entity_display_state(source_id);
-        let mut candidate = document.drawing.as_ref().clone();
-        let drawing = &mut candidate;
-        let new_id = drawing.allocate_entity_id();
-        let new_display = cad_db::EntityDisplayState {
-            attributes: source_display.attributes.clone(),
-            visibility: Default::default(),
-        };
-        let transaction = next_transaction_id();
-        let change_set = {
-            let mut staged = drawing.begin_drawing_transaction("break at point", transaction)?;
-            let mut after = before.clone();
-            after.geometry = first;
-            after.object.type_key = class_name(&after.geometry).to_string();
-            staged.update_entity(after)?;
-            let entity = DbEntity {
-                object: DbObject {
-                    id: ObjectId(new_id.0),
-                    type_key: class_name(&second).to_string(),
-                    revision: Revision(0),
-                    source_handle: None,
-                },
-                id: new_id,
-                layer: before.layer,
-                space: before.space.clone(),
-                geometry: second,
-                draw_order: before.draw_order,
-            };
-            staged.insert_entity(entity)?;
-            staged.update_entity_display_state(new_id, &new_display)?;
-            staged.commit()?
-        };
-
-        let stored_first = drawing
-            .entity(source_id)
-            .cloned()
-            .ok_or_else(|| CadError::Invariant("split entity vanished after commit".into()))?;
-        let stored_second = drawing.entity(new_id).cloned().ok_or_else(|| {
-            CadError::Invariant("inserted split piece vanished after commit".into())
-        })?;
-        let mut second_patch = drawing_patch(new_id, None, Some(stored_second));
-        second_patch.after_state = Some(new_display);
-        let patches = vec![
-            drawing_patch(source_id, Some(before), Some(stored_first)),
-            second_patch,
-        ];
-        self.publish_candidate(
-            document_id,
-            candidate,
-            DrawingUndoRecord {
-                transaction: change_set.transaction,
-                label: "break at point".into(),
-                patches,
-                block_patches: Vec::new(),
-                layer_patches: Vec::new(),
-                layout_patches: Vec::new(),
-                merge_key: None,
-            },
-        )?;
-
-        Ok(CommandOutcome {
-            objects: vec![ObjectId(source_id.0), ObjectId(new_id.0)],
-            changes: Some(Arc::new(change_set)),
-            diagnostics: vec![Diagnostic {
-                object: Some(ObjectId(source_id.0)),
-                code: "breakatpoint.applied".into(),
-                message: format!(
-                    "BREAKATPOINT: split entity {} into two pieces at the projected point",
-                    source_id.0
-                ),
-            }],
-            measurement: None,
-            point_report: None,
-        })
-    }
-}
-
-/// Split a LINE or ARC at the projection of `point` (one parameter on the
-/// target's own span).
-fn curve_split_at_point(
-    geometry: &SemanticGeometry,
-    point: Point3,
-    tol: f64,
-) -> CadResult<(SemanticGeometry, SemanticGeometry)> {
-    let curve = TargetCurve::new(geometry, "BREAKATPOINT", "LINE, ARC or open LWPOLYLINE")?;
-    let Some(u) = curve.project_param(point, tol) else {
-        return Err(at_point_refusal(
-            "breakatpoint.projection_failed",
-            format!("the point has no projection onto the {}", curve.label()),
-        ));
-    };
-    let span = curve.length();
-    if !span.is_finite() || span <= tol {
-        return Err(at_point_refusal(
-            "breakatpoint.projection_failed",
-            format!("the {} is degenerate (zero length)", curve.label()),
-        ));
-    }
-    let param_tol = (tol / span).max(1e-12);
-    if !u.is_finite() || u < -param_tol || u > 1.0 + param_tol {
-        return Err(at_point_refusal(
-            "breakatpoint.point_outside_span",
-            format!(
-                "the point projects outside the {} (parameter {u:.9}, the target spans [0, 1])",
-                curve.label()
-            ),
-        ));
-    }
-    let u = u.clamp(0.0, 1.0);
-    if u <= param_tol || u >= 1.0 - param_tol {
-        return Err(at_point_refusal(
-            "breakatpoint.point_at_endpoint",
-            format!(
-                "the break point coincides with an endpoint of the {}; there is no interior \
-                 split to make",
-                curve.label()
-            ),
-        ));
-    }
-    let first = curve
-        .with_span(0.0, u)
-        .map_err(|reason| at_point_refusal("breakatpoint.degenerate_piece", reason))?;
-    let second = curve
-        .with_span(u, 1.0 - u)
-        .map_err(|reason| at_point_refusal("breakatpoint.degenerate_piece", reason))?;
-    Ok((first, second))
-}
+// The `BREAKATPOINT` single-point split lives in its own file (code-size limit);
+// it is a private helper module of this file, not a second command surface.
+#[path = "break_at_point.rs"]
+mod at_point;

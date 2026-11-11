@@ -9,7 +9,9 @@
 //! exactly one transaction / one undo step.
 
 use super::*;
-use crate::command_payload::{PeditEditCommand, PeditEditOption};
+use crate::command_payload::{
+    PeditEditCommand, PeditEditOption, PeditVertexAction, PeditVertexCommand,
+};
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
 use cad_geometry::{arbitrary_axis, bulge_arc_geometry, clamped_uniform_knots, NurbsCurve};
 
@@ -615,6 +617,296 @@ fn viewer_mode_is_refused_before_anything_is_read_or_written() {
     assert!(matches!(error, CadError::PermissionDenied), "{error:?}");
     assert_wrote_nothing(&app, rev);
     assert_eq!(geometry(&app, 1), open_bulged());
+}
+
+// --- Edit vertex sub-menu ----------------------------------------------------
+
+fn vertex_action(action: PeditVertexAction) -> PeditEditOption {
+    PeditEditOption::Vertex(PeditVertexCommand { action })
+}
+
+#[test]
+fn edit_vertex_next_and_previous_are_read_only_reports() {
+    let (mut app, mut session) = build(vec![ent(1, open_bulged(), 0)], AppMode::Work);
+    select(&mut session, &[1]);
+    let rev = revision(&app);
+
+    let outcome = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Next { from: 0 }),
+    )
+    .expect("NEXT reports the following vertex");
+    assert!(outcome.changes.is_none(), "NEXT writes no transaction");
+    assert_eq!(outcome.diagnostics[0].code, "pedit.vertex_report");
+    assert!(
+        outcome.diagnostics[0].message.contains("vertex 1 of 3"),
+        "{}",
+        outcome.diagnostics[0].message
+    );
+    assert_eq!(revision(&app), rev, "NEXT bumps no revision");
+    assert_eq!(undo_depth(&app), 0, "NEXT records no undo entry");
+
+    let outcome = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Previous { from: 1 }),
+    )
+    .expect("PREVIOUS reports the preceding vertex");
+    assert!(outcome.changes.is_none());
+    assert!(outcome.diagnostics[0].message.contains("vertex 0 of 3"));
+    assert_eq!(geometry(&app, 1), open_bulged());
+}
+
+#[test]
+fn edit_vertex_insert_splits_the_bulged_segment_without_changing_the_shape() {
+    // The arc midpoint of segment 0 (bulge 0.75) is an exact point of the curve;
+    // inserting there splits the arc into two half-arcs of the same circle, so
+    // each new bulge is tan(θ/8) = tan(atan(0.75)/2) = 1/3.
+    let half_bulge = (0.75_f64.atan() / 2.0).tan();
+    let midpoint = segment_midpoints(&open_bulged())[0];
+    let (mut app, mut session) = build(vec![ent(1, open_bulged(), 0)], AppMode::Work);
+    select(&mut session, &[1]);
+    let rev = revision(&app);
+
+    pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Insert {
+            after: 0,
+            point: midpoint,
+        }),
+    )
+    .expect("INSERT on the arc midpoint succeeds");
+
+    let SemanticGeometry::Polyline {
+        points,
+        bulges,
+        closed,
+    } = geometry(&app, 1)
+    else {
+        panic!("the entity must stay a polyline");
+    };
+    assert!(!closed);
+    assert_eq!(points.len(), 4, "one vertex was inserted");
+    assert_point_close(points[1], midpoint, "the inserted vertex is on the curve");
+    assert_eq!(points[0], p3(0.0, 0.0, 0.0));
+    assert_eq!(points[2], p3(4.0, 0.0, 0.0));
+    assert_eq!(points[3], p3(4.0, 4.0, 0.0));
+    // The projected midpoint's local parameter is exact only to rounding, so the
+    // half-arc bulges match tan(θ/8) within a small epsilon.
+    assert!(
+        (bulges[0] - half_bulge).abs() < 1e-6,
+        "first half-arc: {} vs {half_bulge}",
+        bulges[0]
+    );
+    assert!(
+        (bulges[1] - half_bulge).abs() < 1e-6,
+        "second half-arc: {} vs {half_bulge}",
+        bulges[1]
+    );
+    // The stored `polyline` is normalised to one bulge per real segment before the
+    // insert, so the trailing no-segment storage slot is dropped.
+    assert_eq!(&bulges[2..], &[-0.5], "later segment bulges are untouched");
+    assert_eq!(revision(&app).0, rev.0 + 1, "one transaction");
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+}
+
+#[test]
+fn edit_vertex_move_changes_one_vertex_and_keeps_the_bulges() {
+    let (mut app, mut session) = build(vec![ent(1, open_bulged(), 0)], AppMode::Work);
+    select(&mut session, &[1]);
+
+    pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Move {
+            vertex: 1,
+            point: p3(5.0, 1.0, 0.0),
+        }),
+    )
+    .expect("MOVE succeeds");
+
+    let SemanticGeometry::Polyline { points, bulges, .. } = geometry(&app, 1) else {
+        panic!("the entity must stay a polyline");
+    };
+    assert_eq!(points[1], p3(5.0, 1.0, 0.0));
+    assert_eq!(
+        bulges,
+        vec![0.75, -0.5, 0.25],
+        "the segment bulges are kept"
+    );
+    assert_eq!(undo_depth(&app), 1);
+
+    // Moving a vertex onto its neighbour would collapse a segment: named refusal.
+    let rev = revision(&app);
+    let error = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Move {
+            vertex: 0,
+            point: p3(5.0, 1.0, 0.0),
+        }),
+    )
+    .unwrap_err();
+    assert_invalid(error, "pedit.vertex_coincident");
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn edit_vertex_straighten_removes_the_interior_vertices() {
+    let (mut app, mut session) = build(vec![ent(1, open_bulged(), 0)], AppMode::Work);
+    select(&mut session, &[1]);
+
+    pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Straighten { first: 0, last: 2 }),
+    )
+    .expect("STRAIGHTEN succeeds");
+
+    let SemanticGeometry::Polyline { points, bulges, .. } = geometry(&app, 1) else {
+        panic!("the entity must stay a polyline");
+    };
+    assert_eq!(points, vec![p3(0.0, 0.0, 0.0), p3(4.0, 4.0, 0.0)]);
+    assert_eq!(
+        bulges.len(),
+        points.len(),
+        "the one-slot-per-vertex storage layout is preserved"
+    );
+    assert_eq!(bulges[0], 0.0, "the merged segment is straight");
+    assert_eq!(undo_depth(&app), 1);
+
+    // A straight segment with no interior vertex is the named no-op.
+    let rev = revision(&app);
+    let outcome = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Straighten { first: 0, last: 1 }),
+    )
+    .expect("STRAIGHTEN on a straight segment is a no-op");
+    assert!(outcome.changes.is_none());
+    assert_eq!(outcome.diagnostics[0].code, "pedit.vertex_already_straight");
+    assert_eq!(revision(&app), rev);
+}
+
+#[test]
+fn edit_vertex_refuses_out_of_range_and_off_curve_requests_by_name() {
+    let (mut app, mut session) = build(vec![ent(1, open_bulged(), 0)], AppMode::Work);
+    select(&mut session, &[1]);
+    let rev = revision(&app);
+
+    let error = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Next { from: 3 }),
+    )
+    .unwrap_err();
+    assert_invalid(error, "pedit.vertex_out_of_range");
+    let error = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Insert {
+            after: 0,
+            // Well away from segment 0, closer to segment 1's arc.
+            point: p3(4.5, 3.0, 0.0),
+        }),
+    )
+    .unwrap_err();
+    assert_invalid(error, "pedit.vertex_insert_off_segment");
+    let error = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Straighten { first: 1, last: 1 }),
+    )
+    .unwrap_err();
+    assert_invalid(error, "pedit.vertex_range");
+    assert_wrote_nothing(&app, rev);
+    assert_eq!(geometry(&app, 1), open_bulged());
+}
+
+#[test]
+fn edit_vertex_tangent_and_width_are_named_capability_refusals() {
+    let (mut app, mut session) = build(vec![ent(1, open_bulged(), 0)], AppMode::Work);
+    select(&mut session, &[1]);
+    let rev = revision(&app);
+
+    let error = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Tangent {
+            vertex: 1,
+            angle_degrees: 30.0,
+        }),
+    )
+    .unwrap_err();
+    assert_unsupported(error, "pedit.vertex_tangent_unsupported");
+    let error = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Width),
+    )
+    .unwrap_err();
+    assert_unsupported(error, "pedit.vertex_width_unsupported");
+    assert_wrote_nothing(&app, rev);
+    assert_eq!(geometry(&app, 1), open_bulged());
+}
+
+// --- JOIN across SPLINE picks ------------------------------------------------
+
+fn touching_spline() -> SemanticGeometry {
+    SemanticGeometry::Spline {
+        degree: 3,
+        knots: clamped_uniform_knots(4, 3),
+        control_points: vec![
+            p3(4.0, 0.0, 0.0),
+            p3(5.0, 2.0, 0.0),
+            p3(7.0, 2.0, 0.0),
+            p3(9.0, 0.0, 0.0),
+        ],
+        weights: vec![1.0; 4],
+    }
+}
+
+#[test]
+fn join_tessellates_a_touching_spline_pick_and_reports_it() {
+    let (mut app, mut session) = build(
+        vec![ent(1, open_two_vertices(), 0), ent(2, touching_spline(), 1)],
+        AppMode::Work,
+    );
+    select(&mut session, &[1, 2]);
+
+    let outcome = pedit_edit(&mut app, &mut session, PeditEditOption::Join)
+        .expect("a touching SPLINE pick is tessellated and welded");
+    assert!(
+        outcome.diagnostics[0].message.contains("tessellated"),
+        "the approximating path is reported: {}",
+        outcome.diagnostics[0].message
+    );
+
+    let SemanticGeometry::Polyline { points, bulges, .. } = geometry(&app, 1) else {
+        panic!("the welded result is a polyline");
+    };
+    assert_eq!(points[0], p3(0.0, 0.0, 0.0));
+    assert_point_close(points[1], p3(4.0, 0.0, 0.0), "the junction vertex");
+    assert!(
+        points.len() > 3,
+        "the tessellated spline contributes vertices"
+    );
+    let last = *points.last().expect("a welded polyline has points");
+    assert_point_close(last, p3(9.0, 0.0, 0.0), "the spline's far end");
+    assert_eq!(bulges.len(), points.len() - 1);
+    assert!(bulges.iter().all(|bulge| bulge.abs() <= 1e-12));
+    assert_eq!(entity_count(&app), 1);
+    assert_eq!(undo_depth(&app), 1);
+}
+
+fn entity_count(app: &Application) -> usize {
+    app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entities()
+        .count()
 }
 
 #[path = "pedit_extended.rs"]

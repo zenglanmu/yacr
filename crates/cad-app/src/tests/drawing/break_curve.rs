@@ -437,7 +437,79 @@ fn ellipse_break_turns_the_full_ellipse_into_one_elliptical_arc_complement() {
 }
 
 #[test]
-fn an_elliptical_arc_target_is_refused_by_name() {
+fn an_elliptical_arc_target_keeps_the_two_complementary_arcs() {
+    // A quarter ellipse from eccentric angle 0 to π/2 (major 5, ratio 0.5 ⇒
+    // minor 2.5). The picks project to u = 1/3 and u = 1/2 of the arc's own
+    // sweep, so the removed span is [1/3, 1/2] and the kept pieces are
+    // [0, 1/3] (sweep π/6) and [1/2, 1] (start π/4, sweep π/4).
+    let source = part(
+        1,
+        SemanticGeometry::Ellipse {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            major_axis: p3(5.0, 0.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            sweep: std::f64::consts::FRAC_PI_2,
+        },
+        LayerId(0),
+        SpaceId::Model,
+        "AcDbEllipse",
+        0,
+    );
+    let (mut app, mut session) = app_with(vec![source]);
+    let outcome = break_at(
+        &mut app,
+        &mut session,
+        1,
+        point(5.0 * (std::f64::consts::PI / 6.0).cos(), 2.5 * 0.5),
+        point(
+            5.0 * (std::f64::consts::PI / 4.0).cos(),
+            2.5 * (std::f64::consts::PI / 4.0).sin(),
+        ),
+    )
+    .expect("the elliptical arc breaks into two arcs");
+    assert_eq!(outcome.objects.len(), 2, "two kept pieces");
+    assert_eq!(
+        outcome.objects[0],
+        ObjectId(1),
+        "the source stays the first piece"
+    );
+    assert_eq!(entity_count(&app), 2, "two elliptical arcs");
+
+    let first = entity(&app, 1);
+    assert_eq!(first.object.type_key, "AcDbEllipse");
+    match &first.geometry {
+        SemanticGeometry::Ellipse { start, sweep, .. } => {
+            assert!(near(*start, 0.0), "first piece starts at the arc start");
+            assert!(
+                near(*sweep, std::f64::consts::FRAC_PI_2 / 3.0),
+                "first piece keeps [0, 1/3], got {sweep}"
+            );
+        }
+        other => panic!("expected the first kept elliptical arc, got {other:?}"),
+    }
+
+    let second = entity(&app, outcome.objects[1].0);
+    assert_eq!(second.object.type_key, "AcDbEllipse");
+    match &second.geometry {
+        SemanticGeometry::Ellipse { start, sweep, .. } => {
+            assert!(
+                near(*start, std::f64::consts::FRAC_PI_4),
+                "second piece starts at u2, got {start}"
+            );
+            assert!(
+                near(*sweep, std::f64::consts::FRAC_PI_4),
+                "second piece keeps [1/2, 1], got {sweep}"
+            );
+        }
+        other => panic!("expected the second kept elliptical arc, got {other:?}"),
+    }
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+}
+
+#[test]
+fn an_elliptical_arc_pick_outside_its_sweep_is_refused_by_name() {
     let source = part(
         1,
         SemanticGeometry::Ellipse {
@@ -455,11 +527,12 @@ fn an_elliptical_arc_target_is_refused_by_name() {
     );
     let (mut app, mut session) = app_with(vec![source]);
     let before_revision = revision(&app);
-    let error = break_at(&mut app, &mut session, 1, point(5.0, 0.0), point(0.0, 2.5))
-        .expect_err("a partial ellipse has no documented BREAK semantics");
+    // Eccentric angle π is u = 2, outside the quarter arc's own [0, 1] span.
+    let error = break_at(&mut app, &mut session, 1, point(-5.0, 0.0), point(0.0, 2.5))
+        .expect_err("a pick outside the elliptical arc's sweep is refused");
     assert!(
-        refusal_message(error).contains("break.elliptical_arc_unsupported"),
-        "expected the named elliptical-arc refusal"
+        refusal_message(error).contains("break.pick_outside_span"),
+        "expected the named outside-span refusal"
     );
     assert_unchanged(&app, before_revision, 1);
 }

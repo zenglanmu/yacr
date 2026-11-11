@@ -530,7 +530,7 @@ fn width_ltype_gen_and_edit_vertex_are_named_refusals() {
     .unwrap_err();
     assert_unsupported(error, "pedit.ltype_gen_unsupported");
     let error = pedit_edit(&mut app, &mut session, PeditEditOption::EditVertex).unwrap_err();
-    assert_unsupported(error, "pedit.edit_vertex_unsupported");
+    assert_unsupported(error, "pedit.edit_vertex_needs_action");
     assert_wrote_nothing(&app, rev);
 }
 

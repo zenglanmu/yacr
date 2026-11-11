@@ -981,3 +981,8 @@ fn a_non_coplanar_polyline_source_is_an_unsupported_3d_boundary() {
     assert_eq!(revision(&app), before);
     assert_eq!(undo_depth(&app), 0);
 }
+
+// The source-object SPLINE (mixed LINE/ARC continuation) contract lives in its
+// own file (code-size limit); it is a private helper module of these tests.
+#[path = "join_spline_source.rs"]
+mod spline_source;

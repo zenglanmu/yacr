@@ -972,3 +972,8 @@ fn the_block_option_refuses_an_invalid_or_unknown_name_without_writing() {
         assert_eq!(undo_depth(&app), 0, "{label}: no transaction");
     }
 }
+
+// The elliptical-arc (partial ELLIPSE) division contract lives in its own file
+// (code-size limit); it is a private helper module of the DIVIDE tests.
+#[path = "divide_ellipse.rs"]
+mod ellipse;

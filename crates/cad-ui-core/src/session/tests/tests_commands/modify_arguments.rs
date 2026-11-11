@@ -39,12 +39,71 @@ fn corner_modes(session: &CadSession) -> cad_app::ChamferMethod {
 
 #[test]
 fn pedit_full_option_line_routes_the_edit_payload() {
-    use cad_app::{PeditEditCommand, PeditEditOption};
+    use cad_app::{PeditEditCommand, PeditEditOption, PeditVertexAction, PeditVertexCommand};
 
     for (argument, option) in [
         ("JOIN", PeditEditOption::Join),
         ("J", PeditEditOption::Join),
         ("EDIT", PeditEditOption::EditVertex),
+        (
+            "EDIT NEXT 2",
+            PeditEditOption::Vertex(PeditVertexCommand {
+                action: PeditVertexAction::Next { from: 2 },
+            }),
+        ),
+        (
+            "EDIT PREVIOUS 1",
+            PeditEditOption::Vertex(PeditVertexCommand {
+                action: PeditVertexAction::Previous { from: 1 },
+            }),
+        ),
+        (
+            "EDIT MOVE 1 2.5 -3",
+            PeditEditOption::Vertex(PeditVertexCommand {
+                action: PeditVertexAction::Move {
+                    vertex: 1,
+                    point: cad_domain::Point3 {
+                        x: 2.5,
+                        y: -3.0,
+                        z: 0.0,
+                    },
+                },
+            }),
+        ),
+        (
+            "EDIT INSERT 0 4 1 2",
+            PeditEditOption::Vertex(PeditVertexCommand {
+                action: PeditVertexAction::Insert {
+                    after: 0,
+                    point: cad_domain::Point3 {
+                        x: 4.0,
+                        y: 1.0,
+                        z: 2.0,
+                    },
+                },
+            }),
+        ),
+        (
+            "EDIT STRAIGHTEN 0 3",
+            PeditEditOption::Vertex(PeditVertexCommand {
+                action: PeditVertexAction::Straighten { first: 0, last: 3 },
+            }),
+        ),
+        (
+            "EDIT TANGENT 2 45",
+            PeditEditOption::Vertex(PeditVertexCommand {
+                action: PeditVertexAction::Tangent {
+                    vertex: 2,
+                    angle_degrees: 45.0,
+                },
+            }),
+        ),
+        (
+            "EDIT WIDTH",
+            PeditEditOption::Vertex(PeditVertexCommand {
+                action: PeditVertexAction::Width,
+            }),
+        ),
         ("FIT", PeditEditOption::Fit),
         ("DECURVE", PeditEditOption::Decurve),
         ("UNDO", PeditEditOption::Undo),
@@ -87,6 +146,14 @@ fn pedit_full_option_line_routes_the_edit_payload() {
         "WIDTH",
         "LTYPE MAYBE",
         "CLOSE OPEN",
+        // A malformed `Edit vertex` sub-menu is refused, never defaulted.
+        "EDIT NEXT",
+        "EDIT NEXT x",
+        "EDIT MOVE 1 2",
+        "EDIT INSERT 0 1 2 3 4",
+        "EDIT STRAIGHTEN 0",
+        "EDIT TANGENT 1",
+        "EDIT BOGUS",
     ] {
         assert_eq!(parse_pedit_edit_argument(refused), None, "{refused:?}");
     }

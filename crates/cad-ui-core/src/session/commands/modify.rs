@@ -8,7 +8,8 @@
 //! unknown word is never silently ignored or defaulted.
 
 use cad_app::{
-    ChamferMethod, JoinMode, JoinOptions, PeditEditCommand, PeditEditOption, SelectionProperty,
+    ChamferMethod, JoinMode, JoinOptions, PeditEditCommand, PeditEditOption, PeditVertexAction,
+    PeditVertexCommand, SelectionProperty,
 };
 
 /// `JOIN [MULTIPLE] [CLOSE]`: the AutoCAD 2026 join sub-options.
@@ -155,6 +156,9 @@ fn parse_pedit_option(tokens: &[&str]) -> Option<PeditEditOption> {
         "OPEN" | "O" if arity == 0 => Some(PeditEditOption::Open),
         "JOIN" | "J" if arity == 0 => Some(PeditEditOption::Join),
         "EDIT" | "E" if arity == 0 => Some(PeditEditOption::EditVertex),
+        "EDIT" | "E" => Some(PeditEditOption::Vertex(PeditVertexCommand {
+            action: parse_pedit_vertex(tokens.get(1..)?)?,
+        })),
         "FIT" | "F" if arity == 0 => Some(PeditEditOption::Fit),
         "DECURVE" | "D" if arity == 0 => Some(PeditEditOption::Decurve),
         "REVERSE" | "R" if arity == 0 => Some(PeditEditOption::Reverse),
@@ -184,6 +188,60 @@ fn parse_pedit_option(tokens: &[&str]) -> Option<PeditEditOption> {
             },
             _ => None,
         },
+        _ => None,
+    }
+}
+
+/// Parse the sub-menu of `PEDIT EDIT`: `NEXT|PREVIOUS <i>`,
+/// `INSERT|MOVE <i> <x> <y> [z]`, `STRAIGHTEN <first> <last>`,
+/// `TANGENT <i> <degrees>` and `WIDTH`.
+///
+/// Every index is a 0-based vertex/segment index; coordinates are drawing units.
+/// A malformed sub-menu returns `None` (the caller's stable refusal), never a
+/// defaulted action.
+fn parse_pedit_vertex(tokens: &[&str]) -> Option<PeditVertexAction> {
+    use cad_domain::Point3;
+    let keyword = tokens.first()?.to_ascii_uppercase();
+    let args = &tokens[1..];
+    let index = |token: &str| -> Option<usize> {
+        if token.is_empty() || !token.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        token.parse().ok()
+    };
+    let point = |args: &[&str]| -> Option<Point3> {
+        let x = super::parse_signed_decimal(args.first()?)?;
+        let y = super::parse_signed_decimal(args.get(1)?)?;
+        let z = match args.get(2) {
+            Some(token) => super::parse_signed_decimal(token)?,
+            None => 0.0,
+        };
+        (args.len() <= 3).then_some(Point3 { x, y, z })
+    };
+    match keyword.as_str() {
+        "NEXT" | "N" if args.len() == 1 => Some(PeditVertexAction::Next {
+            from: index(args[0])?,
+        }),
+        "PREVIOUS" | "PREV" | "P" if args.len() == 1 => Some(PeditVertexAction::Previous {
+            from: index(args[0])?,
+        }),
+        "INSERT" | "I" if (3..=4).contains(&args.len()) => Some(PeditVertexAction::Insert {
+            after: index(args[0])?,
+            point: point(&args[1..])?,
+        }),
+        "MOVE" | "M" if (3..=4).contains(&args.len()) => Some(PeditVertexAction::Move {
+            vertex: index(args[0])?,
+            point: point(&args[1..])?,
+        }),
+        "STRAIGHTEN" | "S" if args.len() == 2 => Some(PeditVertexAction::Straighten {
+            first: index(args[0])?,
+            last: index(args[1])?,
+        }),
+        "TANGENT" | "T" if args.len() == 2 => Some(PeditVertexAction::Tangent {
+            vertex: index(args[0])?,
+            angle_degrees: super::parse_signed_decimal(args[1])?,
+        }),
+        "WIDTH" | "W" if args.is_empty() => Some(PeditVertexAction::Width),
         _ => None,
     }
 }

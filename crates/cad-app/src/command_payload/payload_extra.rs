@@ -718,8 +718,14 @@ pub enum PeditEditOption {
     Join,
     /// `WIDTH <w>`: named capability refusal (no per-polyline width field).
     Width(f64),
-    /// `EDIT` / `E`: named capability refusal (no vertex-edit sub-menu channel).
+    /// `EDIT` / `E` with no sub-menu action: named refusal. The sub-menu itself
+    /// is the [`PeditVertexCommand`] form (`PEDIT EDIT NEXT|PREVIOUS|INSERT|
+    /// MOVE|STRAIGHTEN|TANGENT|WIDTH`); a bare `EDIT` names no action, and this
+    /// build has no interactive vertex marker prompt.
     EditVertex,
+    /// `EDIT <sub-menu action>`: one typed `Edit vertex` operation. Full
+    /// contract: [`PeditVertexAction`].
+    Vertex(PeditVertexCommand),
     /// `FIT` / `F`: replace the segments with a tangent-continuous arc chain
     /// through every vertex (open polylines only).
     Fit,
@@ -738,6 +744,48 @@ pub enum PeditEditOption {
     /// `UNDO` / `U`: apply the document undo step (this build has no
     /// in-command PEDIT option stack).
     Undo,
+}
+
+/// One `PEDIT Edit vertex` sub-menu action.
+///
+/// AutoCAD's `Edit vertex` sub-menu is interactive: a marked vertex moves with
+/// `Next`/`Previous` and every action applies to the mark. This build has no
+/// in-command marker state, so the typed form **names the vertex (and point)
+/// explicitly** — one action per command line, applied to the stored vertex
+/// list in one transaction. Indices are 0-based into the stored vertex array.
+///
+/// `Tangent` and `Width` act on data this build does not model (a stored fit
+/// tangent, a per-segment width); they are stable named refusals and write
+/// nothing, exactly like `PEDIT WIDTH`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PeditVertexAction {
+    /// `NEXT <from>`: report the vertex after `from` (wraps on a closed ring).
+    Next { from: usize },
+    /// `PREVIOUS <from>`: report the vertex before `from` (wraps on a closed
+    /// ring).
+    Previous { from: usize },
+    /// `INSERT <after> <x> <y> [z]`: insert a vertex on the segment that starts
+    /// at vertex `after`, at the projection of the typed point. The curve's
+    /// shape is preserved exactly (a bulged segment splits into two arcs of the
+    /// same circle); a point that projects onto another segment is refused.
+    Insert { after: usize, point: Point3 },
+    /// `MOVE <vertex> <x> <y> [z]`: move one vertex to the typed point; the
+    /// segment bulges are kept (a bulge is defined by its two endpoints).
+    Move { vertex: usize, point: Point3 },
+    /// `STRAIGHTEN <first> <last>`: remove the vertices strictly between
+    /// `first` and `last` and make `first → last` a straight segment.
+    Straighten { first: usize, last: usize },
+    /// `TANGENT <vertex> <degrees>`: named capability refusal (no stored
+    /// fit-tangent field on a polyline).
+    Tangent { vertex: usize, angle_degrees: f64 },
+    /// `WIDTH`: named capability refusal (no per-segment width field).
+    Width,
+}
+
+/// The typed `PEDIT Edit vertex` request (see [`PeditVertexAction`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PeditVertexCommand {
+    pub action: PeditVertexAction,
 }
 
 /// The input of one full `PEDIT <option>` invocation.

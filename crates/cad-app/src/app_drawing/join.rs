@@ -10,7 +10,7 @@
 //! | ARC | ARCs only | same centre/normal/radius, same direction; **gaps allowed**; smallest covering sweep | ARC, or CIRCLE with `Close` when one full turn is covered |
 //! | ELLIPSE (elliptical arc) | ELLIPSEs only | same centre/normal/major axis/ratio; **gaps allowed** | ELLIPSE; `Close` requires a full turn |
 //! | POLYLINE | LINEs, ARCs, open POLYLINEs | contiguous end-to-end, coplanar (+Z plane) | POLYLINE |
-//! | SPLINE | SPLINEs only | contiguous end-to-end, any plane (non-coplanar allowed), same degree, clamped | SPLINE (exact C0 concatenation) |
+//! | SPLINE | LINEs, ARCs, elliptical arcs, SPLINEs | contiguous end-to-end, any plane, exact rational weld | SPLINE |
 //!
 //! `JOIN MULTIPLE` classifies the whole selection instead:
 //!

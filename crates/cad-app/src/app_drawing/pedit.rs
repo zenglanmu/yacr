@@ -15,6 +15,10 @@
 //! | `FIT` | one open or closed polyline | tangent-continuous arc segments through every vertex |
 //! | `SPLINE` | one open or closed polyline | the vertices as a clamped B-spline control frame |
 //! | `DECURVE` | one polyline or a PEDIT-generated SPLINE | removes bulges / restores the (open or closed) control frame |
+//! | `EDIT NEXT <i>` / `EDIT PREVIOUS <i>` | one polyline | read-only vertex report (the marker move is the whole effect) |
+//! | `EDIT INSERT <seg> <x> <y> [z]` | one polyline | one vertex inserted on the named segment; the curve's shape is preserved exactly |
+//! | `EDIT MOVE <i> <x> <y> [z]` | one polyline | the named vertex moves; segment bulges are kept |
+//! | `EDIT STRAIGHTEN <first> <last>` | one polyline | the interior vertices are removed and the merged segment is straight |
 //! | `UNDO` | no selection needed | applies the document undo step |
 //!
 //! ## `FIT`
@@ -76,8 +80,33 @@
 //! [`super::join::join_tolerance`]); this build has no fuzz-distance prompt, so
 //! there is no gap bridging. LINEs and ARCs become polyline segments (an ARC
 //! becomes one bulge, so it must lie in the +Z plane), open POLYLINEs are
-//! appended/reversed as needed. Closed sources, a closed base, another layer or
-//! another space are named refusals.
+//! appended/reversed as needed, and a **SPLINE** pick is tessellated with the
+//! same declared tolerance as the `PEDITACCEPT` conversion (control extent·1e-4,
+//! 8–4096 segments) before it is chained — the only approximating path, reported
+//! in the JOIN label. Closed sources, a closed base, another layer or another
+//! space are named refusals.
+//!
+//! ## `Edit vertex`
+//!
+//! AutoCAD's sub-menu is interactive: a marked vertex moves with Next/Previous
+//! and every action applies to the mark. This build has no in-command marker
+//! state, so the typed form names the vertex (and point) explicitly
+//! ([`crate::command_payload::PeditVertexAction`]): one action per command line.
+//!
+//! * `NEXT`/`PREVIOUS <i>` report the neighbouring vertex (wrapping on a closed
+//!   ring, staying on the end vertex for an open one) as the named no-op
+//!   `pedit.vertex_report`: no transaction, no revision bump;
+//! * `INSERT <seg> <x> <y> [z]` inserts the projection of the typed point on the
+//!   named segment. Only an **on-curve** insert is exact (a bulged segment splits
+//!   into two sub-arcs of the same circle); a point that projects onto another
+//!   segment is refused (`pedit.vertex_insert_off_segment`), never clamped;
+//! * `MOVE <i> <x> <y> [z]` moves one vertex and keeps the adjacent segment
+//!   bulges (a bulge is defined by its endpoints); a move onto a neighbour or off
+//!   the +Z plane of a bulged polyline is refused;
+//! * `STRAIGHTEN <first> <last>` removes the vertices strictly between the two
+//!   and makes `first → last` straight;
+//! * `TANGENT` and `WIDTH` report on data this build does not model (a stored fit
+//!   tangent, a per-segment width) and are stable named refusals.
 //!
 //! ## `PEDITACCEPT` conversion
 //!
@@ -97,18 +126,26 @@
 //! `pedit.fit_tangent`, `pedit.fit_closure`, `pedit.spline_precision`,
 //! `pedit.decurve_spline`,
 //! `pedit.width_invalid`, `pedit.width_unsupported`,
-//! `pedit.ltype_gen_unsupported`, `pedit.edit_vertex_unsupported`,
-//! `pedit.undo_empty`, plus the `pedit.join.*` chain refusals. `WIDTH` and
-//! `LTYPE GEN` are capability gaps (the entity model has no width or
-//! linetype-generation field); `Edit vertex` has no sub-menu channel.
+//! `pedit.ltype_gen_unsupported`, `pedit.edit_vertex_needs_action`,
+//! `pedit.vertex_out_of_range`, `pedit.vertex_invalid_point`,
+//! `pedit.vertex_projection_failed`, `pedit.vertex_insert_off_segment`,
+//! `pedit.vertex_coincident`, `pedit.vertex_range`, `pedit.vertex_plane`,
+//! `pedit.vertex_tangent_unsupported`, `pedit.vertex_width_unsupported`,
+//! `pedit.undo_empty`, plus the `pedit.join.*` chain refusals. `WIDTH`,
+//! `LTYPE GEN` and the vertex `TANGENT`/`WIDTH` actions are capability gaps (the
+//! entity model has no width, `plinegen` or fit-tangent field).
 //!
 //! Every real change is **one transaction / one undo step**. A named no-op
-//! (`pedit.already_closed`, `pedit.already_open`, `pedit.already_decurved`)
-//! opens no transaction and bumps no revision.
+//! (`pedit.already_closed`, `pedit.already_open`, `pedit.already_decurved`,
+//! `pedit.vertex_report`, `pedit.vertex_unchanged`,
+//! `pedit.vertex_already_straight`) opens no transaction and bumps no revision.
 
-use super::join::PolylinePiece;
+use super::join::{join_tolerance, PolylinePiece};
+use super::polyline_curve::PolylineCurve;
 use super::*;
-use crate::command_payload::{PeditEditCommand, PeditEditOption};
+use crate::command_payload::{
+    PeditEditCommand, PeditEditOption, PeditVertexAction, PeditVertexCommand,
+};
 use crate::PeditOption;
 use cad_geometry::clamped_uniform_knots;
 
@@ -178,10 +215,11 @@ fn join_pieces(
     command: &Command,
     base: &DbEntity,
     refs: &[SelectionRef],
-) -> CadResult<(PolylinePiece, Vec<DbEntity>)> {
+) -> CadResult<(PolylinePiece, Vec<DbEntity>, usize)> {
     let mut pieces = Vec::new();
     let mut deleted = Vec::new();
     let mut seen = vec![base.id];
+    let mut tessellated = 0;
     for reference in refs.iter().skip(1) {
         if reference.document != command.document {
             return Err(invalid(
@@ -229,10 +267,15 @@ fn join_pieces(
                 format!("entity {} is in another space", entity.id.0),
             ));
         }
-        pieces.push(super::join::piece_from_geometry(
-            &entity.geometry,
-            "pedit.join",
-        )?);
+        // A SPLINE has no exact polyline form: tessellate it with the declared
+        // `PEDITACCEPT` tolerance before chaining (the one approximating path).
+        let geometry = if matches!(entity.geometry, SemanticGeometry::Spline { .. }) {
+            tessellated += 1;
+            convert_to_polyline(&entity.geometry)?
+        } else {
+            entity.geometry.clone()
+        };
+        pieces.push(super::join::piece_from_geometry(&geometry, "pedit.join")?);
         deleted.push(entity);
     }
     if deleted.is_empty() {
@@ -246,7 +289,7 @@ fn join_pieces(
     all.push(base_piece);
     all.extend(pieces);
     let chain = super::join::chain_pieces(all, "pedit.join")?;
-    Ok((chain, deleted))
+    Ok((chain, deleted, tessellated))
 }
 
 impl Application {
@@ -416,11 +459,13 @@ impl Application {
             }
             PeditEditOption::EditVertex => {
                 return Err(unsupported(
-                    "edit_vertex_unsupported",
-                    "PEDIT Edit vertex needs an interactive Next/Previous/Break sub-menu; this \
-                     build has no in-command sub-menu channel",
+                    "edit_vertex_needs_action",
+                    "PEDIT EDIT names no sub-menu action; type PEDIT EDIT NEXT <i> | PREVIOUS <i> | \
+                     INSERT <segment> <x> <y> [z] | MOVE <vertex> <x> <y> [z] | \
+                     STRAIGHTEN <first> <last> | TANGENT <vertex> <deg> | WIDTH",
                 ));
             }
+            PeditEditOption::Vertex(request) => plan_vertex(geometry, request),
             PeditEditOption::Undo => unreachable!("UNDO is handled before the drawing borrow"),
         }?;
 
@@ -618,14 +663,20 @@ fn plan_join(
             "PEDIT JOIN needs an open base polyline; a closed polyline has no free end",
         ));
     }
-    let (chain, deleted) = join_pieces(drawing, command, base, refs)?;
+    let (chain, deleted, tessellated) = join_pieces(drawing, command, base, refs)?;
+    let mut label = format!("JOIN ({} objects welded)", deleted.len());
+    if tessellated > 0 {
+        label.push_str(&format!(
+            ", {tessellated} SPLINE pick(s) tessellated to polyline segments"
+        ));
+    }
     Ok(Plan::Write {
         geometry: SemanticGeometry::Polyline {
             points: chain.points,
             bulges: chain.bulges,
             closed: false,
         },
-        label: format!("JOIN ({} objects welded)", deleted.len()),
+        label,
         deleted,
     })
 }
@@ -781,3 +832,9 @@ fn plan_decurve(geometry: SemanticGeometry) -> CadResult<Plan> {
         )),
     }
 }
+
+// The `Edit vertex` sub-menu planner lives in its own file (code-size limit); it
+// is a private helper module of this option surface.
+#[path = "pedit_vertex.rs"]
+mod vertex;
+use vertex::plan_vertex;
