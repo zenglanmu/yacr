@@ -2115,6 +2115,50 @@ button, input, select { font: inherit; color: inherit; }
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 
+/* Experimental-DWG save confirmation -------------------------------------- */
+/* The pre-picker caution raised by the chrome itself when SAVE targets a `.dwg`
+   source. It is a confirmation, not a host notice: two actions, focus starts on
+   Cancel, and Escape cancels. The card reads the same dialog family values as
+   the notices (surface, line, radius, elevation, motion) so it cannot drift
+   into a second visual language. It sits above the host popup layer (60) and
+   below the one-shot notices (62). */
+.popup-overlay.dwg-save-confirm-overlay { z-index: 61; }
+.dwg-save-confirm {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  background: var(--chrome-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(var(--shadow-rgb), .45);
+  animation: fade var(--t-med) both;
+}
+.dwg-save-confirm__head { border-bottom: 1px solid var(--line); }
+.dwg-save-confirm__title { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+/* Experimental is a degraded path, not a failure: the accent carries the
+   caution the way the GPU fallback notice does, never the danger red. */
+.dwg-save-confirm__title .icon { color: var(--accent-text); }
+.dwg-save-confirm__body { gap: 0; }
+.dwg-save-confirm__row { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.dwg-save-confirm__mark {
+  flex: 0 0 auto;
+  display: grid; place-items: center;
+  width: 36px; height: 36px;
+  background: var(--field);
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--accent-text);
+}
+.dwg-save-confirm__message {
+  margin: 0; min-width: 0; max-width: 52ch;
+  color: var(--text-dim);
+  font-size: 12px; line-height: 1.55;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.dwg-save-confirm__footer { flex-wrap: wrap; }
+
 /* In-app update banner ---------------------------------------------------- */
 /* A new release is news, not a blocker. Unlike the notices above this is not a
    dialog: no backdrop, no focus trap, no global key handler. It is a card in a

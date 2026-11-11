@@ -17,6 +17,7 @@ import { createFrameLoop } from './cad/frame-loop.ts';
 import type { FrameLoop } from './cad/frame-loop.ts';
 import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
 import { queueCadCommand } from './cad/cad-command.ts';
+import { useDwgSaveConfirm } from './components/use-dwg-save-confirm.tsx';
 import { useCadEvents } from './cad/use-cad-events.ts';
 import { pluginCommand, requestProperties, showPluginNotice } from './plugins/host.ts';
 import { volatileStatusStore } from './cad/status-cadence.ts';
@@ -37,7 +38,7 @@ import type { CommandMessage } from './commands/command-message.ts';
 import { useCommandHistory } from './commands/use-command-history.ts';
 import { acceleratorDispatch } from './commands/accelerators.ts';
 import { useHostVocabulary } from './commands/use-host-vocabulary.ts';
-import type { ContextMenuModel } from './commands/context-menu.ts';
+import type { ContextMenuState } from './commands/context-menu.ts';
 import type { PopupKind, PopupPayload } from './popup/popup.ts';
 import { I18nContext, ShellContext } from './context.ts';
 import type { I18nValue, ShellValue } from './context.ts';
@@ -66,14 +67,6 @@ import { textEditOpenError } from './popup/popup-textedit.ts';
 
 /** The options `submitCommand` accepts from a region (`fromInput` keeps a draft). */
 interface SubmitOptions { readonly fromInput?: boolean; }
-
-/** The CAD shortcut menu while one is open (`null` when closed). */
-interface ContextMenuState {
-  readonly point: { readonly x: number; readonly y: number };
-  readonly rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null;
-  readonly menu: ContextMenuModel;
-}
-
 /** The single UI document: one in-DOM overlay tree; the host owns the modal gate. */
 export function App() {
   return <Shell />;
@@ -518,7 +511,8 @@ function Shell() {
     reportError: setError,
   });
 
-  const submitCommand = useCallback(async (text: string, options: SubmitOptions = {}) => {
+  const { beforeDispatch: confirmDwgSave, dialog: dwgSaveDialog, isPending: dwgSavePending } = useDwgSaveConfirm();
+  const submitCommand = useCallback(async (text: string, options: SubmitOptions = {}, dwgSaveConfirmed = false) => {
     // Chrome-local selectors are answered before the in-flight guard; a router
     // line falls through unchanged (`commands/local-selectors.ts`).
     if (runLocalSelector(text, options.fromInput === true)) return;
@@ -540,6 +534,10 @@ function Shell() {
       if (vocabularyRef.current) {
         try { await vocabularyRef.current; } catch { /* reported by the loader */ }
       }
+      // A `.dwg` source must confirm before the picker; the hook only asks on an
+      // admitted line, and `dwgSaveConfirmed` is the proceed path's one bypass.
+      if (!dwgSaveConfirmed
+        && await confirmDwgSave(text, status, documentLabel, vocabularyRef, () => { void submitCommand(text, options, true); })) return;
       const result = await queueCadCommand(invoke, text, status, false,
         command => pluginCommand(command, status?.selection ?? null),
       );
@@ -561,7 +559,7 @@ function Shell() {
       submitting.current = false;
       setPending(false);
     }
-  }, [runLocalSelector, status, commandHistory.appendCommand]);
+  }, [runLocalSelector, status, commandHistory.appendCommand, documentLabel]);
 
   // The terminal text step (ADR 0019 A.1): one `cad_set_tool_text`, never a
   // `cad_command`. The result is returned to the command line so the draft can
@@ -626,6 +624,7 @@ function Shell() {
       // from its own root (it survives an App crash), so it is not part of
       // `popupOpen`; both gate the shell's shortcuts the same way.
       if (popupOpen || isErrorReportVisible()) return;
+      if (dwgSavePending()) return; // the DWG save confirmation owns Escape
       // Ctrl+0 is both the app's clean-screen toggle and WebKit's zoom reset.
       // Handle it before the `defaultPrevented` check: the webview-default guard
       // also prevents the browser action, and listener order must not decide
@@ -994,6 +993,7 @@ function Shell() {
           />
         ) : null}
         {popupOpen ? <PopupOverlay popup={status?.popup} payload={popupPayload} /> : null}
+        {dwgSaveDialog}
       </ShellContext.Provider>
     </I18nContext.Provider>
   );

@@ -838,6 +838,11 @@
 :root[data-layout="mobile"] .plugin-properties__footer .ui-button { font-size: 13px; }
 :root[data-layout="mobile"] .plugin-notice__message,
 :root[data-layout="mobile"] .host-notice__message { font-size: 13px; }
+/* The DWG save confirmation is the same dialog family: its two actions are the
+   sheet's only controls, so both get a finger-sized height and the caution text
+   steps up to the compact reading size. */
+:root[data-layout="mobile"] .dwg-save-confirm__footer .ui-button { height: 44px; }
+:root[data-layout="mobile"] .dwg-save-confirm__message { font-size: 13px; }
 /* The shortcut menu is measured and clamped by `placeContextMenu`, so it only
    needs to fit the viewport and to offer a finger-sized row. */
 :root[data-layout="mobile"] .context-menu {

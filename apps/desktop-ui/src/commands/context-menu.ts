@@ -52,6 +52,18 @@ export interface ContextMenuModel {
   readonly sections: ContextMenuSection[];
 }
 
+/**
+ * The open shortcut menu's shell state: the press in viewport CSS px, the CAD
+ * partition rect it was reported against (for the overlay's own conversion), and
+ * the model. Lives here beside the model it wraps so `App.tsx` stays under the
+ * file-size ceiling.
+ */
+export interface ContextMenuState {
+  readonly point: { readonly x: number; readonly y: number };
+  readonly rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null;
+  readonly menu: ContextMenuModel;
+}
+
 export interface BuildContextMenuInput {
   readonly selection?: ContextMenuSelection | null;
   readonly tool?: object | null;
