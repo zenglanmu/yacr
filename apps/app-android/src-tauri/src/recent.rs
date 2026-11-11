@@ -82,9 +82,10 @@ fn list_on_owner_thread() -> Result<CadRecentFiles, String> {
 }
 
 fn open_on_owner_thread(opaque: &str, display_name: &str) -> Result<(), String> {
-    CAD.with(|cad| match cad.borrow().as_ref() {
-        Some(session) => Some(session.open_recent(opaque, display_name)),
-        None => None,
+    CAD.with(|cad| {
+        cad.borrow()
+            .as_ref()
+            .map(|session| session.open_recent(opaque, display_name))
     })
     .unwrap_or_else(|| Err(format!("unsupported-runtime: {OPEN_RECENT_COMMAND}")))
 }
