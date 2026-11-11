@@ -75,7 +75,7 @@ cad-domain → cad-db/dependencies/history → geometry/kernel-adapter/represent
 
 ## 构建与门禁
 
-工具链 **1.99.0**（`rust-toolchain.toml`），`Cargo.lock` 必须 `--locked`；`cargo` 不在 PATH 时
+工具链 **1.99.1**（`rust-toolchain.toml`），`Cargo.lock` 必须 `--locked`；`cargo` 不在 PATH 时
 加 `$HOME/.cargo/bin`。
 
 `plugins/tch` 是天正插件（`tangent-ts`，<https://github.com/zenglanmu/tangent-ts>）的 **git

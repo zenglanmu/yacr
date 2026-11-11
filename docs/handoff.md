@@ -1,5 +1,33 @@
 AD
 
+## 2026-11-11 工具链 1.99.0 → 1.99.1（最新 stable；cadmpeg 保持 0.6.11）
+
+- **结论**：`cadmpeg-ir`/`-codec-step`/`-tessellate` 0.6.11 在 1.99.1 上无告警、无改动即可编译；
+  它们的 `rust-version = "1.88"` 是**下限**，从不封顶编译器，因此“为升级工具链而抽走 cadmpeg 代码”
+  在技术上没有必要。crates.io 索引里 `cadmpeg-*` 最新版本就是 **0.6.11**（`0.6.8/0.6.10/0.6.11`，
+  全部声明 1.88），本轮**没有**可升级的 cadmpeg 版本，`Cargo.lock` 未改。
+- **改动**：`rust-toolchain.toml` `1.99.0 → 1.99.1`；CI 引脚 `dtolnay/rust-toolchain@1.99.1`
+  （`core.yml` 4 处 + 头部 action-pins 注释，`build.yml` 9 处）；`README.md`、`README.zh-CN.md`、
+  `AGENTS.md`、`docs/build.md`、`docs/ci.md` 锁定工具版本表、`Cargo.toml` 中 cadmpeg/MSRV 注释里的
+  工具链字面量同步。workspace `rust-version = "1.88"`（真实 MSRV 下限）**未改**；历史证据文档
+  （`docs/validation*.md`、`docs/batch-draw2-*.md`、`.slim/**`、本文件旧条目）保持原样。
+- **已运行（rustc/cargo 1.99.1，全部 rc=0）**：`cargo fmt --all -- --check`、
+  `cargo check --workspace --all-targets --locked`、`cargo clippy --workspace --exclude app-android
+  --exclude app-web --all-targets --locked -- -D warnings`、
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`、
+  `cargo test -p cad-import-step --locked`（13 passed）；
+  `cargo test --workspace --locked -- --test-threads=1`（128 个 test binary，**6099 passed /
+  0 failed / 39 ignored**，退出码 0；39 ignored 全部是 `#[ignore]` 标记者——真实夹具/GPU/性能类
+  （`commit_real_fixture`、`pick_index_real_fixture`、`pick_parity`、`gpu_capabilities`、
+  `perf_baseline`、`render_perf`、`sdf_arcs`、`fixtures_generate` 等）——外加 1 个
+  `cad_import_core` doctest；没有失败或跳过。）
+- **已知非错误输出**：wasm `--lib` 检查仍报既有 dead-code `warning`（`cad-render-wgpu`/
+  `cad-engine`/`cad-cli-tools`/`app-web`，仅 wasm 目标裁剪导致），不是本轮引入，也不是门禁失败。
+- **NOT RUN**：Python 门禁与 `npm test`
+  （本轮只改版本字面量与工具链文件，未触及代码路径、i18n 与 workflow 结构）；
+  Windows/macOS/Android 宿主仍只有编译门禁，1.99.1 的 CI 实跑需下次 push 才能确认。
+  无用户可见变化。
+
 ## 2026-11-11 发布 v0.1.11（命令补齐 + 显示修复 + 浮动导航坞）
 
 - **版本**：workspace `Cargo.toml`、`Cargo.lock`（35 成员）、四个 `tauri.conf.json`、Flatpak

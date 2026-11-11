@@ -138,7 +138,7 @@ dispatch 的 publisher 里。publisher 全绿只代表 **artifact 上传成功**
 
 | 工具 | 锁定值 | 来源 |
 |---|---|---|
-| Rust | `1.99.0` | `rust-toolchain.toml` |
+| Rust | `1.99.1` | `rust-toolchain.toml` |
 | Node | 见 workflow `NODE_VERSION` | React 前端构建/测试、Playwright、wrangler |
 | wasm-bindgen CLI | `0.2.129`（预编译 musl release，SHA-256 固定） | `scripts/lib/wasm-toolchain.sh` 的 pin + `Cargo.lock` |
 | binaryen (`wasm-opt`) | `version_120`（GitHub release，SHA-256 固定） | `scripts/lib/wasm-toolchain.sh` 的 pin；Cloudflare Pages 单文件 25 MiB 上限 |

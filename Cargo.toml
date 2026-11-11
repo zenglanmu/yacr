@@ -45,7 +45,7 @@ edition = "2021"
 # `cadmpeg-tessellate` 0.6.11 declare `rust-version = "1.88"` and `rvt` 0.17.0
 # declares `1.87`, so no lower workspace claim can be honest. Every crate takes
 # this single value via `rust-version.workspace = true`; do not re-declare it per
-# crate. The pinned toolchain (`rust-toolchain.toml`, 1.99.0) is unrelated.
+# crate. The pinned toolchain (`rust-toolchain.toml`, 1.99.1) is unrelated.
 rust-version = "1.88"
 license = "Apache-2.0 OR MIT"
 authors = ["yacr contributors"]

@@ -106,7 +106,7 @@ Wayland**（宿主自建 app-owned `wl_surface` + `wl_subsurface`，经 `apps/ap
 
 ## 源码编译与运行
 
-工具链 **1.99.0**（`rust-toolchain.toml`），`Cargo.lock` 已锁定；若 `PATH` 无 cargo，加上 `$HOME/.cargo/bin`。
+工具链 **1.99.1**（`rust-toolchain.toml`），`Cargo.lock` 已锁定；若 `PATH` 无 cargo，加上 `$HOME/.cargo/bin`。
 
 ### Linux 桌面宿主（主开发目标）
 

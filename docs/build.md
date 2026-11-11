@@ -1,6 +1,6 @@
 # 构建与平台入口
 
-工具链 1.99.0（`rust-toolchain.toml`）、`Cargo.lock` 已锁定。若 `PATH` 无 cargo，加入
+工具链 1.99.1（`rust-toolchain.toml`）、`Cargo.lock` 已锁定。若 `PATH` 无 cargo，加入
 `$HOME/.cargo/bin`。
 
 `plugins/tch` 是天正插件（`tangent-ts`，<https://github.com/zenglanmu/tangent-ts>）的 git

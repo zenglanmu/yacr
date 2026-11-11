@@ -138,7 +138,7 @@ fallback**. See ADR 0010 and ADR 0011.
 
 ## Build from source
 
-Toolchain **1.99.0** (`rust-toolchain.toml`) with a pinned `Cargo.lock`; if `cargo` is not on your
+Toolchain **1.99.1** (`rust-toolchain.toml`) with a pinned `Cargo.lock`; if `cargo` is not on your
 `PATH`, add `$HOME/.cargo/bin`.
 
 ### Linux desktop host (primary development target)
