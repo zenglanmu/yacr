@@ -597,8 +597,8 @@ class MainActivity : TauriActivity() {
   // ---------------------------------------------------------------------------
 
   /** Launches `ACTION_OPEN_DOCUMENT` and arms the slot for the picked document. */
-  fun documentLaunchOpen() {
-    documentPicker.documentLaunchOpen()
+  fun documentLaunchOpen(initialUri: String?) {
+    documentPicker.documentLaunchOpen(initialUri)
   }
 
   /** Launches `ACTION_CREATE_DOCUMENT` with `defaultName` as the suggested title. */

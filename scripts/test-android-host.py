@@ -463,7 +463,7 @@ def check_document_picker_wiring() -> list[str]:
     """The Kotlin half of the SAF document contract (open + save/export).
 
     The native host drives Kotlin through instance JNI on `MainActivity`:
-    `documentLaunchOpen()`, `documentLaunchSave(defaultName)`,
+    `documentLaunchOpen(initialUri)`, `documentLaunchSave(defaultName)`,
     `documentReadUri(uri)`, `documentWriteUri(uri, bytes)` and
     `documentSnapshot()`. `DocumentPicker.kt` must own the picker/read plumbing so
     the Activity keeps holding no document state (iron rule 8), and the picker must
@@ -539,7 +539,7 @@ def check_document_picker_wiring() -> list[str]:
 
     # The five JNI entry points are on the Activity (that is what Rust calls).
     for signature in (
-        "fun documentLaunchOpen()",
+        "fun documentLaunchOpen(initialUri: String?)",
         "fun documentLaunchSave(defaultName: String)",
         "fun documentReadUri(uri: String)",
         "fun documentWriteUri(uri: String, bytes: ByteArray)",
@@ -548,7 +548,7 @@ def check_document_picker_wiring() -> list[str]:
         if signature not in activity:
             problems.append(f"MainActivity.kt: Rust-facing document entry point missing: `{signature}`")
     for delegation in (
-        "documentPicker.documentLaunchOpen()",
+        "documentPicker.documentLaunchOpen(initialUri)",
         "documentPicker.documentLaunchSave(defaultName)",
         "documentPicker.documentReadUri(uri)",
         "documentPicker.documentWriteUri(uri, bytes)",
@@ -614,7 +614,7 @@ def check_document_picker_wiring() -> list[str]:
             "-keepclassmembers class io.github.zenglanmu.yacr.MainActivity block"
         )
     for descriptor in (
-        "void documentLaunchOpen();",
+        "void documentLaunchOpen(java.lang.String);",
         "void documentLaunchSave(java.lang.String);",
         "void documentReadUri(java.lang.String);",
         "void documentWriteUri(java.lang.String, byte[]);",

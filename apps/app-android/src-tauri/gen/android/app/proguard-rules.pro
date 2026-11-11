@@ -24,7 +24,7 @@
 # not rename, inline away, or remove them; without this block a release APK
 # fails at runtime with NoSuchMethodError even though the debug build works.
 -keepclassmembers class io.github.zenglanmu.yacr.MainActivity {
-    public void documentLaunchOpen();
+    public void documentLaunchOpen(java.lang.String);
     public void documentLaunchSave(java.lang.String);
     public void documentReadUri(java.lang.String);
     public void documentWriteUri(java.lang.String, byte[]);
