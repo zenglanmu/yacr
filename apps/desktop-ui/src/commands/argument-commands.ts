@@ -264,6 +264,22 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return names.length > 0 && names.every(name => name.length > 0);
     },
   }),
+  /**
+   * `-LAYER <option> …` (AutoCAD's command-line layer editor): the typed write
+   * forms `NEW|N`, `MAKE|M`, `SET|S`, `RENAME|R old new`, `DELETE|D`, `ON`,
+   * `OFF`, `FREEZE|F`, `THAW|T`, `LOCK|LO`, `UNLOCK|U`, `COLOR|C <value>`,
+   * `LTYPE|L <name>`, `LWEIGHT|LW <value>` and `PLOT|P Y|N`, each followed by
+   * comma-separated layer names. The bare selector and `?` stay the read-only
+   * table report.
+   *
+   * Only the presence of a non-empty argument is checked here: the grammar, the
+   * name resolution and every refusal belong to the Rust parser and the command
+   * layer (the host re-validates the whole line), so the chrome must not reject
+   * a line it cannot judge — e.g. a layer name containing spaces.
+   */
+  '-LAYER': Object.freeze({
+    parse: (argument: string) => argument.trim().length > 0,
+  }),
   QSELECT: Object.freeze({
     parse: (argument: string) => isPropertyFilter(argument),
   }),

@@ -78,6 +78,9 @@ mod insert_block;
 mod join;
 mod layer_commands;
 mod layer_edit;
+// The typed `-LAYER <option> …` write line (one option per line), split out so
+// both layer modules stay inside the code-size limit.
+mod dash_layer_write;
 mod layer_extended;
 mod layer_record;
 mod layout_record;

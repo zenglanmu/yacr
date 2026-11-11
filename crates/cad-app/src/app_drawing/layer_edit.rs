@@ -55,12 +55,25 @@ impl Application {
     ///
     /// The ordinary dispatch records exactly one layer patch per command; the
     /// no-history variant ([`Self::layer_command_without_history`]) is the legacy
-    /// `PURGE` reuse and publishes without a history entry.
+    /// `PURGE` reuse and publishes without a history entry. The typed `-LAYER`
+    /// line rides this Work-only carrier too and takes its own whole-line path
+    /// ([`Self::dash_layer_write`]).
     pub(crate) fn layer_command(
         &mut self,
         session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
+        if matches!(command.payload, CommandPayload::DashLayer(_)) {
+            // The typed line has exactly one documented carrier (see
+            // `DashLayerOps`): refuse a mismatched id instead of silently running
+            // the write under another command's name.
+            if command.id != CommandId::SetLayerProperty {
+                return Err(CadError::InvalidInput(
+                    "a DashLayer payload rides CommandId::SetLayerProperty only".into(),
+                ));
+            }
+            return self.dash_layer_write(session, command);
+        }
         self.layer_command_recording(session, command, true)
     }
 
@@ -343,7 +356,7 @@ impl Application {
 /// attribute set exists, so the stored attributes, `Layer::visible`, the
 /// revision, the session and the history are all untouched. `name` is the row's
 /// own stored spelling, so the message names the layer the user sees.
-fn ensure_current_layer_stays_visible(
+pub(super) fn ensure_current_layer_stays_visible(
     session: &SessionState,
     id: LayerId,
     name: &str,
@@ -374,10 +387,23 @@ fn ensure_current_layer_stays_visible(
 /// with the same rule, so the two can never disagree. Unknown and ambiguous names
 /// are distinct explicit refusals and neither changes any state.
 pub(super) fn resolve_layer(database: &DrawingDatabase, name: &str) -> CadResult<LayerId> {
+    lookup_layer(database, name)?.ok_or_else(|| {
+        CadError::InvalidInput(format!("layer.unknown: no drawing layer named '{name}'"))
+    })
+}
+
+/// Resolve a name with the one rule above, but answer `None` when the drawing
+/// simply does not have it.
+///
+/// `-LAYER MAKE` needs "unknown" as a **decision** (create the layer) rather
+/// than a refusal, and asking through this shared body is what keeps the
+/// exact-then-unique case-insensitive rule in one place: an **ambiguous** name is
+/// still a refusal, so `MAKE` can never create a layer that shadows two rows.
+pub(super) fn lookup_layer(database: &DrawingDatabase, name: &str) -> CadResult<Option<LayerId>> {
     let mut exact = database.layers().filter(|layer| layer.name == name);
     if let Some(layer) = exact.next() {
         if exact.next().is_none() {
-            return Ok(layer.id);
+            return Ok(Some(layer.id));
         }
         return Err(CadError::InvalidInput(format!(
             "layer.ambiguous_name: more than one drawing layer is named '{name}'"
@@ -390,10 +416,8 @@ pub(super) fn resolve_layer(database: &DrawingDatabase, name: &str) -> CadResult
         .map(|layer| layer.id)
         .collect();
     match matches.as_slice() {
-        [only] => Ok(*only),
-        [] => Err(CadError::InvalidInput(format!(
-            "layer.unknown: no drawing layer named '{name}'"
-        ))),
+        [only] => Ok(Some(*only)),
+        [] => Ok(None),
         _ => Err(CadError::InvalidInput(format!(
             "layer.ambiguous_name: {} drawing layers match '{name}' case-insensitively",
             matches.len()

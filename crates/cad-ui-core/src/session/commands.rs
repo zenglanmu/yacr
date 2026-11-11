@@ -797,10 +797,10 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 
 /// The selectors that accept a **typed argument** on the command line.
 ///
-/// An argument is admitted by its base selector and then validated against that
-/// selector's own grammar; it is **not** a new [`CommandId`] and there is no
-/// second IPC for it. Every other selector stays name-only, so `LINE 2` is the
-/// ordinary unsupported-name refusal.
+/// An argument is admitted by its base selector and then validated against its
+/// own grammar; it is **not** a new [`CommandId`] and there is no second IPC.
+/// Every other selector stays name-only, so `LINE 2` is the ordinary
+/// unsupported-name refusal.
 ///
 /// * [`ARGUMENT_SELECTOR`] (`ZOOM`): a positive factor, `nX`, `nXP` or
 ///   `ALL`/`EXTENTS`/`WINDOW`/`PREVIOUS`/`OBJECT` ([`parse_zoom_argument`]);
@@ -812,16 +812,15 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 ///   `REVERSE`/`R` ([`parse_torient_argument`]);
 /// * [`TCASE_SELECTOR`] (`TCASE`): one case mode ([`parse_tcase_argument`]);
 /// * [`DIMSPACE_SELECTOR`] (`DIMSPACE`): one non-negative finite spacing (`0`
-///   aligns), or no
-///   argument for Auto
-///   ([`super::dim_arguments::parse_dimspace_argument`]);
+///   aligns), or no argument for Auto
+///   ([`super::dim_arguments::parse_dimspace_argument`]).
 ///
 /// PEDIT/HATCHEDIT/MEASUREGEOM take one declared option; the text batch takes
 /// `<H> <V>`, a factor, an edge word, a numbering run or a shape; the layer
-/// batch takes the layer-state/laywalk/ltscale/layerpmode grammars. PEDIT,
-/// HATCHEDIT, LAYERSTATE and the layer-batch forms refuse a bare selector by
-/// name (never default an option); see the parsers re-exported from
-/// `super::commands`.
+/// batch takes the layer-state/laywalk/ltscale/layerpmode grammars and
+/// `-LAYER`'s write options ([`parse_dash_layer_argument`]). PEDIT, HATCHEDIT,
+/// LAYERSTATE and the layer-batch forms refuse a bare selector by name (never
+/// default an option); see the parsers re-exported from `super::commands`.
 pub const ARGUMENT_SELECTORS: &[&str] = &[
     ARGUMENT_SELECTOR,
     SNAPUNIT_SELECTOR,
@@ -850,6 +849,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     LAYWALK_SELECTOR,
     LTSCALE_SELECTOR,
     LAYERPMODE_SELECTOR,
+    // `-LAYER`'s write forms; the bare selector and `?` stay the read-only
+    // report of the extended `DashLayer` command.
+    DASH_LAYER_SELECTOR,
     QSELECT_SELECTOR,
     FILTER_SELECTOR,
     GETSEL_SELECTOR,

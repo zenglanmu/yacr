@@ -8,7 +8,9 @@
 //! `ARGUMENT_SELECTORS` in the parent module is the admission list; an argument
 //! parser only ever sees text for a selector that list already admitted.
 
-use cad_app::{NamedObjectKind, PeditOption, PurgeTarget, RenameCommand, StandardView};
+use cad_app::{
+    DashLayerOps, NamedObjectKind, PeditOption, PurgeTarget, RenameCommand, StandardView,
+};
 
 /// AutoCAD's `LAYERSTATE <option>`: the bounded named layer-state store.
 pub const LAYERSTATE_SELECTOR: &str = "LAYERSTATE";
@@ -659,6 +661,165 @@ pub fn parse_multiple_argument(argument: &str) -> Option<String> {
 /// The stable refusal for a `MULTIPLE` argument outside its grammar.
 pub fn invalid_multiple_argument_reason(text: &str) -> String {
     format!("invalid MULTIPLE argument: '{text}' (expected one command name)")
+}
+
+/// AutoCAD's `-LAYER <option> …`: the command-line layer editor's write forms.
+///
+/// The bare selector and `-LAYER ?` keep the **read-only report** (admitted as
+/// the extended `DashLayer` command and Viewer-legal), so `?` never reaches this
+/// parser; every write option does.
+pub const DASH_LAYER_SELECTOR: &str = "-LAYER";
+
+/// Parse the write argument of a `-LAYER` selector.
+///
+/// One option per typed line. Keywords are case-insensitive and the documented
+/// short aliases are `N` (NEW), `M` (MAKE), `S` (SET), `R` (RENAME), `D`
+/// (DELETE), `C` (COLOR), `L` (LTYPE), `LW` (LWEIGHT), `P` (PLOT) plus AutoCAD's
+/// `F` (FREEZE), `T` (THAW), `LO` (LOCK) and `U` (UNLOCK). `ON` and `OFF` are
+/// the full spellings (AutoCAD's own `-LAYER` prompt words).
+///
+/// Shape:
+///
+/// * name lists (`NEW`, `DELETE`, `ON`, `OFF`, `FREEZE`, `THAW`, `LOCK`,
+///   `UNLOCK`) are **comma-separated**; each entry is trimmed and must be
+///   non-empty. A space is **not** a list separator: a layer name may contain
+///   spaces, so `NEW A B` is one layer named `A B`. A layer name may not contain
+///   a comma (the database refuses one), which is what makes the list
+///   unambiguous;
+/// * `MAKE` / `SET` take the trimmed remainder as the name;
+/// * `RENAME` takes the first whitespace-delimited token as the old name and the
+///   trimmed remainder as the new one;
+/// * `COLOR` / `LTYPE` / `LWEIGHT` / `PLOT` take one value token (no spaces)
+///   followed by the name list.
+///
+/// `COLOR`'s value token is passed through **verbatim**: the command layer
+/// rewrites a bare AutoCAD ACI number (`3`) to the layer grammar's `aci:3` form
+/// (`cad_app::layer_property::normalize_color_input`) and then parses every colour
+/// with that one grammar, which owns the ranges, the `BYLAYER` refusal and the
+/// linetype-free `#RRGGBB` / `r,g,b` forms.
+///
+/// `PLOT` accepts `Y`/`N` (the command-line spelling) and the layer grammar's
+/// flag words (`TRUE`/`FALSE`/`1`/`0`, case-insensitive).
+///
+/// A missing operand, an empty list entry, an unknown keyword, a second
+/// whitespace token where one value is expected and everything else return
+/// `None`; the caller turns that into
+/// [`invalid_dash_layer_argument_reason`]. Nothing is defaulted.
+pub fn parse_dash_layer_argument(argument: &str) -> Option<DashLayerOps> {
+    let text = argument.trim();
+    let (keyword, rest) = split_keyword(text);
+    match keyword.to_ascii_uppercase().as_str() {
+        "NEW" | "N" => Some(DashLayerOps::New(parse_layer_name_list(rest)?)),
+        "MAKE" | "M" => Some(DashLayerOps::Make(single_name(rest)?)),
+        "SET" | "S" => Some(DashLayerOps::Set(single_name(rest)?)),
+        "RENAME" | "R" => {
+            let (old, new) = split_value_and_rest(rest)?;
+            Some(DashLayerOps::Rename {
+                old: old.to_string(),
+                new: new.to_string(),
+            })
+        }
+        "DELETE" | "D" => Some(DashLayerOps::Delete(parse_layer_name_list(rest)?)),
+        "ON" => Some(DashLayerOps::On(parse_layer_name_list(rest)?)),
+        "OFF" => Some(DashLayerOps::Off(parse_layer_name_list(rest)?)),
+        "FREEZE" | "F" => Some(DashLayerOps::Freeze(parse_layer_name_list(rest)?)),
+        "THAW" | "T" => Some(DashLayerOps::Thaw(parse_layer_name_list(rest)?)),
+        "LOCK" | "LO" => Some(DashLayerOps::Lock(parse_layer_name_list(rest)?)),
+        "UNLOCK" | "U" => Some(DashLayerOps::Unlock(parse_layer_name_list(rest)?)),
+        "COLOR" | "C" => {
+            let (value, names) = split_value_and_rest(rest)?;
+            Some(DashLayerOps::Color {
+                value: value.to_string(),
+                layers: parse_layer_name_list(names)?,
+            })
+        }
+        "LTYPE" | "L" => {
+            let (name, names) = split_value_and_rest(rest)?;
+            Some(DashLayerOps::Linetype {
+                name: name.to_string(),
+                layers: parse_layer_name_list(names)?,
+            })
+        }
+        "LWEIGHT" | "LW" => {
+            let (value, names) = split_value_and_rest(rest)?;
+            Some(DashLayerOps::Lineweight {
+                value: value.to_string(),
+                layers: parse_layer_name_list(names)?,
+            })
+        }
+        "PLOT" | "P" => {
+            let (value, names) = split_value_and_rest(rest)?;
+            Some(DashLayerOps::Plot {
+                plottable: parse_plottable_value(value)?,
+                layers: parse_layer_name_list(names)?,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The stable refusal for a `-LAYER` write argument outside the grammar.
+///
+/// The typed line is echoed and the accepted options plus the comma-separated
+/// list rule are spelled out, so a refusal is never a silent ignore or a
+/// defaulted option.
+pub fn invalid_dash_layer_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (-LAYER takes one option: NEW|N, MAKE|M, SET|S, RENAME|R \
+         <old> <new>, DELETE|D, ON, OFF, FREEZE|F, THAW|T, LOCK|LO, UNLOCK|U, COLOR|C <value>, \
+         LTYPE|L <name>, LWEIGHT|LW <value> or PLOT|P Y|N, followed by comma-separated layer \
+         names; a bare -LAYER or -LAYER ? reports the table)",
+        text.trim()
+    )
+}
+
+/// Split the keyword from the trimmed remainder of a line.
+fn split_keyword(text: &str) -> (&str, &str) {
+    match text.find([' ', '\t']) {
+        Some(index) => (&text[..index], text[index..].trim()),
+        None => (text, ""),
+    }
+}
+
+/// One trimmed non-empty name (the whole remainder, spaces allowed).
+fn single_name(rest: &str) -> Option<String> {
+    let name = rest.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Split one whitespace-delimited value token from the non-empty remainder.
+fn split_value_and_rest(rest: &str) -> Option<(&str, &str)> {
+    let rest = rest.trim();
+    let end = rest.find([' ', '\t'])?;
+    let value = &rest[..end];
+    let names = rest[end..].trim();
+    (!value.is_empty() && !names.is_empty()).then_some((value, names))
+}
+
+/// One comma-separated layer-name list; entries trimmed, empty entries refused.
+fn parse_layer_name_list(text: &str) -> Option<Vec<String>> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let mut names = Vec::new();
+    for part in text.split(',') {
+        let name = part.trim();
+        if name.is_empty() {
+            return None;
+        }
+        names.push(name.to_string());
+    }
+    Some(names)
+}
+
+/// The `PLOT` flag: `Y`/`N` plus the layer grammar's flag words.
+fn parse_plottable_value(value: &str) -> Option<bool> {
+    match value.to_ascii_uppercase().as_str() {
+        "Y" | "YES" | "TRUE" | "1" => Some(true),
+        "N" | "NO" | "FALSE" | "0" => Some(false),
+        _ => None,
+    }
 }
 
 /// Parse a boolean sysvar value used by `SETVAR GRID|SNAP|ORTHO`: `ON`/`OFF`,

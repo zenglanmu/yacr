@@ -45,9 +45,12 @@ fn dash_layer_reports_the_real_table_without_writing() {
         .diagnostics
         .iter()
         .any(|row| row.code == "layer.entry" && row.message.contains("'0'")));
-    assert!(row(&outcome, "layer.report_only")
-        .message
-        .contains("NOT IMPLEMENTED"));
+    let report = row(&outcome, "layer.report_only");
+    assert!(
+        report.message.contains("read-only") && report.message.contains("NEW"),
+        "the report names the options that write: {}",
+        report.message
+    );
     assert_eq!(revision(&app), before);
     assert!(!app.can_undo(&DocumentId(1)));
 }

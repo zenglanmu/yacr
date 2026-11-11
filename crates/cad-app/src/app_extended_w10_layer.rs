@@ -1,8 +1,12 @@
 //! Wave 10 **layer / view / scale-list reports** for the extended batch.
 //!
 //! `-LAYER` reports the drawing's real layer table (name, visibility, off,
-//! frozen, locked and the session current layer) and refuses every mutation: this
-//! build has no command-line layer editor.
+//! frozen, locked and the session current layer). Bare `-LAYER` / `-LAYER ?`
+//! only report; the **write** forms (`NEW`, `MAKE`, `SET`, `RENAME`, `DELETE`,
+//! `ON`/`OFF`/`FREEZE`/`THAW`/`LOCK`/`UNLOCK`, `COLOR`/`LTYPE`/`LWEIGHT`/`PLOT`)
+//! are typed options of the same selector and ride the Work-only
+//! [`crate::CommandId::SetLayerProperty`] carrier
+//! (`app_drawing::dash_layer_write`), so the report stays Viewer-legal.
 //!
 //! `LAYERSTATESAVE` and `NEWVIEW` are thin routes: with the owning typed payload
 //! (`LayerState` / `View`) they call the existing session store, so there is one
@@ -40,7 +44,11 @@ impl Application {
         }
     }
 
-    /// `-LAYER`: read-only table report; no mutation form is admitted.
+    /// `-LAYER` / `-LAYER ?`: read-only table report.
+    ///
+    /// The write forms are typed **options** of this selector
+    /// (`CommandPayload::DashLayer`) and never reach this method: a bare
+    /// selector or `?` is a report, an option line is a Work-only write.
     fn dash_layer_report(
         &self,
         session: &SessionState,
@@ -72,9 +80,10 @@ impl Application {
         }
         rows.push(diagnostic(
             "layer.report_only",
-            "-LAYER: read-only table report; creating/deleting/renaming layers, on/off/freeze/\
-             thaw/lock/unlock and per-viewport settings are NOT IMPLEMENTED here (use the \
-             dedicated LAYER* commands and the layer panel)"
+            "-LAYER: read-only table report; add one option on the same line to write — NEW, MAKE, \
+             SET, RENAME, DELETE, ON, OFF, FREEZE, THAW, LOCK, UNLOCK, COLOR, LTYPE, LWEIGHT or \
+             PLOT (Work mode, comma-separated layer names). Per-viewport settings, plot styles \
+             and layer states have their own commands"
                 .into(),
         ));
         Ok(report_outcome(rows))

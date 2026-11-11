@@ -100,18 +100,20 @@ pub use self::command_log::{
 };
 pub use self::commands::{
     admissible_names, alias_pairs, canonical_command_name, command_name,
-    invalid_layerpmode_argument_reason, invalid_layerstate_argument_reason,
-    invalid_laywalk_argument_reason, invalid_ltscale_argument_reason,
-    invalid_pdmode_argument_reason, invalid_pdsize_argument_reason, invalid_pedit_argument_reason,
+    invalid_dash_layer_argument_reason, invalid_layerpmode_argument_reason,
+    invalid_layerstate_argument_reason, invalid_laywalk_argument_reason,
+    invalid_ltscale_argument_reason, invalid_pdmode_argument_reason,
+    invalid_pdsize_argument_reason, invalid_pedit_argument_reason,
     invalid_snap_unit_argument_reason, invalid_view_argument_reason,
     invalid_viewgo_argument_reason, invalid_vpoint_argument_reason, invalid_zoom_argument_reason,
-    measurement_selector_kind, normalize_command, parse_layerpmode_argument,
-    parse_layerstate_argument, parse_laywalk_argument, parse_ltscale_argument,
-    parse_pdmode_argument, parse_pdsize_argument, parse_pedit_argument, parse_snap_unit_argument,
-    parse_view_argument, parse_viewgo_argument, parse_vpoint_argument, parse_zoom_argument,
-    shell_setting_argument, typed_command_argument, unsupported_command_reason, zoom_step_factor,
-    LayerStateOption, Point3Input, ViewOption, ZoomArgument, ARGUMENT_SELECTOR, ARGUMENT_SELECTORS,
-    COMMAND_ALIASES, COMMAND_TABLE, HATCHEDIT_SELECTOR, LAYERPMODE_SELECTOR, LAYERSTATE_SELECTOR,
+    measurement_selector_kind, normalize_command, parse_dash_layer_argument,
+    parse_layerpmode_argument, parse_layerstate_argument, parse_laywalk_argument,
+    parse_ltscale_argument, parse_pdmode_argument, parse_pdsize_argument, parse_pedit_argument,
+    parse_snap_unit_argument, parse_view_argument, parse_viewgo_argument, parse_vpoint_argument,
+    parse_zoom_argument, shell_setting_argument, typed_command_argument,
+    unsupported_command_reason, zoom_step_factor, LayerStateOption, Point3Input, ViewOption,
+    ZoomArgument, ARGUMENT_SELECTOR, ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE,
+    DASH_LAYER_SELECTOR, HATCHEDIT_SELECTOR, LAYERPMODE_SELECTOR, LAYERSTATE_SELECTOR,
     LAYWALK_SELECTOR, LTSCALE_SELECTOR, MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR,
     PEDIT_SELECTOR, REFUSAL_TABLE, SNAPUNIT_SELECTOR, SPACE_SELECTOR, VIEWGO_SELECTOR,
     VIEW_SELECTOR, VPOINT_SELECTOR, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
@@ -351,9 +353,10 @@ impl CadSession {
     /// The typed selector argument forms are listed in [`ARGUMENT_SELECTORS`]
     /// (`ZOOM`, `SNAPUNIT`, `PDMODE`/`PDSIZE`, `SPACE`, `TORIENT`/`TCASE`, `PEDIT`,
     /// `HATCHEDIT`, `MEASUREGEOM`, `LAYERSTATE`, `LAYWALK`, `LTSCALE`, `IMAGEATTACH`,
-    /// `IMAGECLIP`, `LAYERPMODE`). An argument outside a selector's grammar is refused with a
-    /// stable reason, recorded for `cad_status.error`, and changes nothing; a
-    /// selector with **no** argument keeps the name-only payload refusal below.
+    /// `IMAGECLIP`, `LAYERPMODE`, `-LAYER`). An argument outside a selector's grammar
+    /// is refused with a stable reason, recorded for `cad_status.error`, and changes
+    /// nothing; a selector with **no** argument keeps the name-only payload refusal
+    /// below.
     pub fn command(&self, text: &str) -> Result<(), String> {
         // The five shell appearance/navigation selectors (`NAVBAR`, `NAVVCUBE`,
         // `NAVVCUBEDISPLAY`, `DISPLAYVIEWCUBEIN2D`, `DISPLAYVIEWCUBEIN3D`) are

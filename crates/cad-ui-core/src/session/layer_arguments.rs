@@ -12,14 +12,16 @@
 //! Kept in its own module only to keep `session/mod.rs` inside the file-size
 //! budget (the `point_style` / `pedit` split pattern).
 
-use cad_app::{CommandId, CommandPayload, LayerStateCommand};
+use cad_app::{CommandId, CommandPayload, ExtendedCommandId, LayerStateCommand};
 
+use super::commands::{parse_dash_layer_argument, DASH_LAYER_SELECTOR};
 use super::diagnostics::cad_error_text;
 use super::{
-    invalid_layerpmode_argument_reason, invalid_layerstate_argument_reason,
-    invalid_laywalk_argument_reason, invalid_ltscale_argument_reason, parse_layerpmode_argument,
-    parse_layerstate_argument, parse_laywalk_argument, parse_ltscale_argument, CadSession,
-    LAYERPMODE_SELECTOR, LAYERSTATE_SELECTOR, LAYWALK_SELECTOR, LTSCALE_SELECTOR,
+    invalid_dash_layer_argument_reason, invalid_layerpmode_argument_reason,
+    invalid_layerstate_argument_reason, invalid_laywalk_argument_reason,
+    invalid_ltscale_argument_reason, parse_layerpmode_argument, parse_layerstate_argument,
+    parse_laywalk_argument, parse_ltscale_argument, CadSession, LAYERPMODE_SELECTOR,
+    LAYERSTATE_SELECTOR, LAYWALK_SELECTOR, LTSCALE_SELECTOR,
 };
 
 impl CadSession {
@@ -74,6 +76,31 @@ impl CadSession {
             LAYERPMODE_SELECTOR,
             CommandId::LayerPmode,
             CommandPayload::LayerPmode(enabled),
+        )
+    }
+
+    /// Apply one typed `-LAYER <option> …` line.
+    ///
+    /// The bare selector never reaches here (it is the read-only report). `?` is
+    /// the explicit report spelling: it dispatches the extended `DashLayer`
+    /// command, which stays Viewer-legal, while every write option rides the
+    /// Work-only `SetLayerProperty` carrier (see [`cad_app::DashLayerOps`] for
+    /// why). A malformed argument is refused before IPC and changes nothing.
+    pub(super) fn dash_layer_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        if argument.trim() == "?" {
+            return self.dispatch_typed_argument(
+                DASH_LAYER_SELECTOR,
+                CommandId::Extended(ExtendedCommandId::DashLayer),
+                CommandPayload::None,
+            );
+        }
+        let Some(ops) = parse_dash_layer_argument(argument) else {
+            return self.refuse_argument(invalid_dash_layer_argument_reason(text));
+        };
+        self.dispatch_typed_argument(
+            DASH_LAYER_SELECTOR,
+            CommandId::SetLayerProperty,
+            CommandPayload::DashLayer(ops),
         )
     }
 

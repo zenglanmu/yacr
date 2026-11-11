@@ -9,6 +9,7 @@ mod annot_arguments;
 mod command_vocabulary;
 mod command_vocabulary_clipboard;
 mod command_vocabulary_inquiry;
+mod dash_layer_arguments;
 mod dimension_arguments;
 mod draw2_arguments;
 mod extended_vocabulary;

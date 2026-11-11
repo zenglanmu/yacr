@@ -100,6 +100,9 @@ impl CadSession {
             super::commands::LAYWALK_SELECTOR => self.layer_walk_argument(argument, text),
             super::commands::LTSCALE_SELECTOR => self.linetype_scale_argument(argument, text),
             super::commands::LAYERPMODE_SELECTOR => self.layer_pmode_argument(argument, text),
+            // `-LAYER NEW …` / `MAKE` / `ON` … : the command-line layer editor's
+            // one-option-per-line write forms (`?` stays the read-only report).
+            super::commands::DASH_LAYER_SELECTOR => self.dash_layer_argument(argument, text),
             // The 2026-11-07 selection/filter batch: all five are typed argument
             // forms of canonical selectors, never new commands.
             QSELECT_SELECTOR | FILTER_SELECTOR | GETSEL_SELECTOR => {
