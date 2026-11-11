@@ -1,5 +1,50 @@
 AD
 
+## 2026-11-11 发布 v0.1.10（主题切换、最近图纸、右侧导航坞）
+
+- **版本**：workspace `Cargo.toml`、`Cargo.lock`（35 个成员）、四个 `tauri.conf.json`、
+  Flatpak metainfo 全部 `0.1.9` → `0.1.10`；README 命令计数未变（823 = 67 完整 + 756 部分）。
+  发布说明：`docs/release-notes/v0.1.10.md`。
+- **tag / run**：`v0.1.10`（`dc9cf778`）→ `CI build layers` run
+  [`42959255569`](https://github.com/zenglanmu/yacr/actions/runs/42959255569) **11/11 job 绿**
+  （四个 release + linux/windows/macos check + shader + web-build/web-smoke/web-deploy）。
+- **发布**：`publish-release.yml` run
+  [`42965887685`](https://github.com/zenglanmu/yacr/actions/runs/42965887685) 绿 → Release
+  <https://github.com/zenglanmu/yacr/releases/tag/v0.1.10>（非 draft / 非 prerelease），notes 来自
+  `docs/release-notes/v0.1.10.md`（在该文件的分支 `release-notes-v0.1.10` 上 dispatch）。
+- **artifact（大小从 Release API 核对）**：`yacr-0.1.10-linux-x86_64.flatpak` **111,603,792 B**
+  + `.sha256` + `.flatpak.gpg`（仓库 GPG 签名）；`yacr-0.1.10-windows-x86_64.zip`
+  **105,630,803 B** + `.sha256`（**unsigned**：未配置 PFX，artifact 名 `yacr-windows-release-unsigned`）；
+  `yacr-0.1.10-macos-universal.tar.gz` **150,206,682 B** + `.sha256`（ad-hoc、未公证）；
+  `app-universal-release.apk` **112,248,289 B** + `.sha256`（仓库自签名 keystore）；
+  `SIGNING.txt` 记录本版签名状态。合计 457.5 MiB。
+- **合并后被全量门禁抓到、在 tag 前修掉的缺陷（各自独立提交）**：
+  1. clippy `manual_map`：四个 native 宿主的 recent reopen 辅助函数；
+  2. `app-android` 的 `mod saf_state;` 声明在 `platform.rs`，文件却在 `src/saf_state.rs` →
+     `cargo check --workspace --all-targets` E0583（`android-check` 默认关闭，lane 未暴露）；
+  3. `app-web` 的 dom-canvas registry 断言仍只列 3 个 tauri_only 行，实为 5 行
+     （新增 `cad_recent_files`/`cad_open_recent`）；
+  4. `windows-check` E0593：注入的 `FileChooser` 闭包少了 `Option<&Path>` 参数；
+  5. `android-release` Kotlin 编译失败：`saf::launch_open` 已按 `(Ljava/lang/String;)V` 调用，
+     `MainActivity.documentLaunchOpen()` 却仍无参；同步改 R8 keep 描述符与 `test-android-host.py`。
+- **已运行**：`cargo fmt --all -- --check`、`clippy --workspace --exclude app-android --exclude
+  app-web --all-targets -D warnings`、全部 python/workflow/packaging 契约、`cargo check
+  --workspace --all-targets`、`cargo check --workspace --lib --target wasm32-unknown-unknown`、
+  `cargo check -p app-web --target wasm32-unknown-unknown`、`cargo test --workspace --
+  --test-threads=1`（**6056 passed / 0 failed / 128 suites**）、前端 `npm test` **1494 passed** +
+  `npm run build`；跨目标：`cargo check -p app-windows --all-targets --target
+  x86_64-pc-windows-msvc`、`cargo check -p app-android --all-targets --target
+  aarch64-linux-android`、`gradlew :app:compileUniversalReleaseKotlin`。
+- **落地页**：`downloads.json` 指向已发布 v0.1.10（R2 自定义域 + GitHub fallback），
+  `changelog.json` 由 notes 重生成，`site.yml` 默认 `release_tag=v0.1.10`；`site.yml` run
+  [`42966423262`](https://github.com/zenglanmu/yacr/actions/runs/42966423262) 完成 R2 镜像 +
+  Pages 部署。线上复核：`/downloads.json` = `v0.1.10`（四个 size/sha256 与 Release 一致）、
+  `/changelog.json` 首版 `v0.1.10`、页面含 `v0.1.10`；R2 HEAD
+  `releases/v0.1.10/yacr-0.1.10-linux-x86_64.flatpak` 111,603,792 B、
+  `app-universal-release.apk` 112,248,289 B。
+- **NOT VERIFIED**：未做真机/真实 GPU/像素验收；Windows 包未签名、macOS 未公证；`web-smoke` 是
+  Chromium + SwiftShader 软件渲染；发布、打包与落地页部署成功都不是运行时验收。
+
 ## 2026-11-11 主题切换 + 右侧 ViewCube/navibar + AutoCAD 导航变量
 
 - **主题（dark/light）**：`theme` 是 `preference.json` 根键（`crates/cad-host/src/settings_root.rs`），
