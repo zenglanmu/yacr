@@ -26,10 +26,10 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **96** |
-| 部分实现（有写明的界） | **741** |
-| **已实现合计（完整 + 部分）** | **837** |
-| 未实现 | **144** |
+| 完整实现 | **105** |
+| 部分实现（有写明的界） | **735** |
+| **已实现合计（完整 + 部分）** | **840** |
+| 未实现 | **141** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -91,11 +91,11 @@
 >
 > **2026-11-11 增补（Wave 25）**：`-LAYER` 从只读报告晋升为**完整实现**（一行一个选项的写形式：`NEW/N`、`MAKE/M`、`SET/S`、`RENAME/R`、`DELETE/D`、`ON`/`OFF`、`FREEZE/F`/`THAW/T`、`LOCK/LO`/`UNLOCK/U`、`COLOR/C`、`LTYPE/L`、`LWEIGHT/LW`、`PLOT|P`；名单逗号分隔，含空格的值/名称可用双引号；整行原子、一条事务/一步撤销；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝，裸命令/`?` 仍 Viewer-legal）；`ZOOM` 补齐 `OBJECT`/`nX`/图纸空间 `nXP`（View → navigate 增加 `ZOOM OBJECT` 按钮；`nX`/`nXP` 仅命令行），仅 `DYNAMIC` 仍具名未实现；DWG 保存选择器在写入前提示实验性/新文件/不覆盖源图（`save.picker_waiting_dwg`）。计入 **823 已实现（68 完整 + 755 部分）/ 158 未实现**；全部结论仅 Linux 编译 + 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
 
-> **2026-11-12 增补（Wave 26，目标 100 条）**：本轮已推进 **78 个命令名**（其中 18 个是之前未实现的 chrome/QuickView/QuickCalc 名字，2 个是 `SHAPE`/`SHP2BLK`）。真实 2D：编辑/绘制 `OFFSET`（闭合环 gap）、`FILLET`（椭圆对）、`MPEDIT`（LINE/ARC→POLYLINE）、`MOCORO`（预校验）、`BREAK`（椭圆弧）、`DIVIDE`（椭圆弧等弧长）、`JOIN`（SPLINE 源混合焊接）、`PEDIT`（顶点子菜单）、`PLINE`（bulge+Close）、`ELLIPSE`（弧+旋转）、`SPLINE`（CV/degree）、`POINT`（Multiple payload）、`TRIM`/`EXTEND`（椭圆/椭圆弧）、`ARRAYRECT`（有符号间距）、`ARRAYPOLAR`（AutoCAD fill 规则）、`HATCH`（`.pat` 解析）、`HATCHEDIT`（CUSTOM/边界）；标注/文字 `TXTEXP`、`ARCTEXT`、`QLEADER`/`LEADER`/`MLEADER`（引线选项）、`TEXTMASK`/`TEXTUNMASK`、`TEXTALIGN`、`TEXTFIT`、`TXT2MTXT`；布局/视口 `VPLAYER`、`MVSETUP`、`PSBSCALE`、`PSTSCALE`、`VPMAX`（真实相机快照/恢复）、`ALIGNSPACE`、`VPSYNC`、`VPCLIP`/`MVIEW`（多边形写入）、`LAYVPI`；查询 `MASSPROP`（闭合样条/填充环）、`MEASUREGEOM`（RADIUS 弧/圆）、`STATUS`/`TIME`；命令/块/图像 `SHAPE`、`SHP2BLK`、`MINSERT`、`ADDSELECTED`、`IMAGECLIP`（多边形）；会话/UI `APERTURE`（真实拾取孔径）、`PTYPE`、`REVCLOUDPROPERTIES`，以及 `RIBBON`/`RIBBONCLOSE`/`HIDEPALETTES`/`SHOWPALETTES`/`FILETAB`/`FILETABCLOSE`/`QVDRAWING(+CLOSE)`/`QVLAYOUT(+CLOSE)`/`QUICKCALC`/`QCCLOSE`/`UPDATETHUMBSNOW`/`WORKSPACE`/`WSSAVE`/`WSSETTINGS`/`TOOLBAR`/`-TOOLBAR`（chrome 本地选择子）。
+> **2026-11-12 增补（Wave 26，目标 100 条）**：本轮已推进 **100 个命令名**（其中 18 个是之前未实现的 chrome/QuickView/QuickCalc 名字，2 个是 `SHAPE`/`SHP2BLK`）。真实 2D：编辑/绘制 `OFFSET`（闭合环 gap）、`FILLET`（椭圆对）、`MPEDIT`（LINE/ARC→POLYLINE）、`MOCORO`（预校验）、`BREAK`（椭圆弧）、`DIVIDE`（椭圆弧等弧长）、`JOIN`（SPLINE 源混合焊接）、`PEDIT`（顶点子菜单）、`PLINE`（bulge+Close）、`ELLIPSE`（弧+旋转）、`SPLINE`（CV/degree）、`POINT`（Multiple payload）、`TRIM`/`EXTEND`（椭圆/椭圆弧）、`ARRAYRECT`（有符号间距）、`ARRAYPOLAR`（AutoCAD fill 规则）、`HATCH`（`.pat` 解析）、`HATCHEDIT`（CUSTOM/边界）；标注/文字 `TXTEXP`、`ARCTEXT`、`QLEADER`/`LEADER`/`MLEADER`（引线选项）、`TEXTMASK`/`TEXTUNMASK`、`TEXTALIGN`、`TEXTFIT`、`TXT2MTXT`；布局/视口 `VPLAYER`、`MVSETUP`、`PSBSCALE`、`PSTSCALE`、`VPMAX`（真实相机快照/恢复）、`ALIGNSPACE`、`VPSYNC`、`VPCLIP`/`MVIEW`（多边形写入）、`LAYVPI`；查询 `MASSPROP`（闭合样条/填充环）、`MEASUREGEOM`（RADIUS 弧/圆）、`STATUS`/`TIME`；命令/块/图像 `SHAPE`、`SHP2BLK`、`MINSERT`、`ADDSELECTED`、`IMAGECLIP`（多边形）；会话/UI `APERTURE`（真实拾取孔径）、`PTYPE`、`REVCLOUDPROPERTIES`，以及 `RIBBON`/`RIBBONCLOSE`/`HIDEPALETTES`/`SHOWPALETTES`/`FILETAB`/`FILETABCLOSE`/`QVDRAWING(+CLOSE)`/`QVLAYOUT(+CLOSE)`/`QUICKCALC`/`QCCLOSE`/`UPDATETHUMBSNOW`/`WORKSPACE`/`WSSAVE`/`WSSETTINGS`/`TOOLBAR`/`-TOOLBAR`（chrome 本地选择子）。
 >
-> **不得读成完整**：多边形视口/图像 clip 数据真实但当前表示层只接受 3/4 点 clip（`*.polygon_not_renderable`，按 partial 计）；`MVSETUP` 是简单等分网格而非 AutoCAD Standard 配置；`PSBSCALE`/`PSTSCALE` 为单方向/单视口声明规则；`TRIM` 的 POLYLINE/INSERT/HATCH 目标与 `EXTEND` 的 SPLINE 目标仍具名拒绝；`HATCH` 自定义图案无命令行选择通道；`TEXTALIGN` 分布/斜排、`TEXTFIT` 真实宽度拉伸、`TXT2MTXT` UNIFORM 行距、`PEDIT`/`PLINE` 宽度仍受域限制；`SHAPE` 按 name 只建行不解析；`MINSERT`/`ARRAYPOLAR`/`ARRAYRECT` 非关联。证据仅 Linux 编译 + 契约测试，GUI/GPU/像素/真机 NOT VERIFIED；Windows/macOS/Android/Web NOT VERIFIED。计入 **837 已实现（96 完整 + 741 部分）/ 144 未实现**。
+> **不得读成完整**：多边形视口/图像 clip 数据真实但当前表示层只接受 3/4 点 clip（`*.polygon_not_renderable`，按 partial 计）；`MVSETUP` 是简单等分网格而非 AutoCAD Standard 配置；`PSBSCALE`/`PSTSCALE` 为单方向/单视口声明规则；`TRIM` 的 POLYLINE/INSERT/HATCH 目标与 `EXTEND` 的 SPLINE 目标仍具名拒绝；`HATCH` 自定义图案无命令行选择通道；`TEXTALIGN` 分布/斜排、`TEXTFIT` 真实宽度拉伸、`TXT2MTXT` UNIFORM 行距、`PEDIT`/`PLINE` 宽度仍受域限制；`SHAPE` 按 name 只建行不解析；`MINSERT`/`ARRAYPOLAR`/`ARRAYRECT` 非关联。证据仅 Linux 编译 + 契约测试，GUI/GPU/像素/真机 NOT VERIFIED；Windows/macOS/Android/Web NOT VERIFIED。计入 **840 已实现（105 完整 + 735 部分）/ 141 未实现**。
 >
-> **837 已实现（96 完整 + 741 部分）/ 144 未实现**；无未保存修改提示，无多文档。
+> **840 已实现（105 完整 + 735 部分）/ 141 未实现**；无未保存修改提示，无多文档。
 
 ### 纪律
 
@@ -312,7 +312,7 @@
 | `ADCNAVIGATE` | 部分实现 | 具名拒绝（`adcnavigate.unsupported: this build has no DesignCenter content palette`）。 |
 | `ADDSELECTED` | 部分实现 | `ADDSELECTED <x> <y>` 按选中类型/属性新建一个实体（LINE/CIRCLE/POINT/TEXT/MTEXT），保留图层/颜色/线型/线宽/透明度；ARC/POLYLINE/INSERT 等按名拒绝 |
 | `ADJUST` | 部分实现 | 具名拒绝（`adjust.unsupported: this build has no underlay/image fade-contrast-monochrome model`）。 |
-| `ALIASEDIT` | 部分实现 | 只读：逐行列出规范 `COMMAND_ALIASES`；创建/修改/删除别名未实现。 |
+| `ALIASEDIT` | 部分实现 | `ADD <alias> <target>`/`REMOVE <alias>`/`LIST`/bare；运行时别名先于静态表解析（可遮蔽内建），仅删除运行时行；无交互对话框（声明），会话状态不持久化 |
 | `ALIGN` | 已实现 | 1 对点移动、2 对点平移+旋转+可选均匀缩放、3 对点平面**刚性**（旋转+平移，不缩放）；退化/非共面/非全等/镜像按名拒绝；3 对点的 3D 平面旋转属全局范围 |
 | `ALIGNSPACE` | 部分实现 | `model_a paper_a model_b paper_b` 4 坐标→均匀 `paper_per_model` + 平移，真实写 `model_to_paper`；CLI 尚无 4 坐标拼写；旋转对报告 `rotation_ignored` |
 | `AMECONVERT` | 部分实现 | 具名拒绝（`ameconvert.unsupported: this build has no AME solid model`）。 |
@@ -422,9 +422,9 @@
 | `CHSPACE` | 部分实现 | 具名拒绝（`chspace.unsupported`）：模型/图纸空间之间移动实体未实现。 |
 | `CHURLS` | 部分实现 | 具名拒绝（`churls.unsupported: this build has no hyperlink storage model`）。 |
 | `CIRCLE` | 已实现 | — |
-| `CLASSICGROUP` | 部分实现 | 具名拒绝（`classicgroup.unsupported`）：无经典编组对话框；请用 GROUP。 |
-| `CLASSICIMAGE` | 部分实现 | 具名拒绝（`classicimage.unsupported: no image manager; use IMAGE`）。 |
-| `CLASSICINSERT` | 部分实现 | 具名拒绝（`classicinsert.unsupported`）：无经典插入对话框；请用 INSERT。 |
+| `CLASSICGROUP` | 部分实现 | chrome 面板：列出会话 `EntityGroups` 与成员数，行聚焦/展开成员引用/关闭；“按组选择成员”因无宿主替换选择路径而禁用 |
+| `CLASSICIMAGE` | 部分实现 | chrome 面板：只读列出 IMAGE 实体（id/空间/file key/pixels/可见/clip 摘要），行聚焦/关闭；attach/clip/adjust 仍是独立命令 |
+| `CLASSICINSERT` | 已实现 | chrome 面板：列出真实块定义（名称/成员数/基点），插入动作走既有 `INSERT` 点位+名称流程（面板在宿主确认文字步后提交块名）；无块元数据的定义不可插入（不伪造基点） |
 | `CLASSICLAYER` | 部分实现 | chrome 本地选择子：打开现有图层面板；紧凑布局像 LAYER 一样拒绝。 |
 | `CLASSICXREF` | 部分实现 | 真实只读外部参照报告 + chrome 面板（`cad_status.references` 的 name/status/reason），行聚焦/关闭/Esc；attach/detach/reload 仍按名拒绝 |
 | `CLEANSCREENOFF` | 部分实现 | chrome 本地选择子：显式退出 clean-screen；只恢复 chrome 可见性，不重开各面板 |
@@ -1039,6 +1039,8 @@
 | `TOOLBAR` | 已实现 | chrome 本地选择子：显示快速访问工具栏 |
 | `-TOOLBAR` | 已实现 | chrome 本地选择子：`-TOOLBAR [SHOW|HIDE]` 设置快速访问工具栏可见性 |
 | `PMTOGGLE` | 已实现 | chrome 本地选择子：切换与 HIDEPALETTES/SHOWPALETTES 相同的选项板可见性状态（幂等；关闭打开的选项板） |
+| `REDEFINE` | 已实现 | `REDEFINE <name>` 重新启用被 `UNDEFINE` 禁用的内建命令；未知/从未定义按名拒绝；essential 命令双向拒绝；会话状态不写图 |
+| `UNDEFINE` | 已实现 | `UNDEFINE <name>` 会话内禁用内建命令；被禁用名按 `command.undefined: <NAME>` 拒绝且不派发；静态/运行时别名指向禁用目标时同样禁用；不写图 |
 | 1 | `3DALIGN` | 部分实现 | Aligns objects with other objects in 2D and 3D. | 具名拒绝（`3dalign.unsupported: 3D alignment is not modeled; use the 2D ALIGN path`）。 |
 | 2 | `3DARRAY` | 部分实现 | Creates nonassociative, 3D rectangular or polar arrays. | 具名拒绝（`3darray.unsupported: 3D arrays are not modeled; use ARRAY/ARRAYRECT/ARRAYPOLAR`）。 |
 | 3 | `3DCLIP` | 部分实现 | Opens the Adjust Clipping Planes window, where you can specify what portions of a 3D model to display. | 具名拒绝（`3dclip.unsupported: no 3D clipping-plane model`）。 |
@@ -1084,7 +1086,7 @@
 | 43 | `ADCNAVIGATE` | 部分实现 | Loads a specified drawing file, folder, or network path in the DesignCenter Folders tab. | 具名拒绝（`adcnavigate.unsupported: this build has no DesignCenter content palette`）。 |
 | 44 | `ADDSELECTED` | 部分实现 | Creates a new object of the same type and general properties as a selected object, but with different geometric values. | `ADDSELECTED <x> <y>` 按选中类型/属性新建一个实体（LINE/CIRCLE/POINT/TEXT/MTEXT），保留图层/颜色/线型/线宽/透明度；ARC/POLYLINE/INSERT 等按名拒绝 |
 | 45 | `ADJUST` | 部分实现 | Adjusts the fade, contrast and monochrome settings of the selected underlay (DWF, DWFx, PDF, or DGN), or image. | 具名拒绝（`adjust.unsupported: this build has no underlay/image fade-contrast-monochrome model`）。 |
-| 46 | `ALIASEDIT` | 部分实现 | Creates, modifies, and deletes AutoCAD command aliases. | 只读：逐行列出规范 `COMMAND_ALIASES`；创建/修改/删除别名未实现。 |
+| 46 | `ALIASEDIT` | 部分实现 | Creates, modifies, and deletes AutoCAD command aliases. | `ADD <alias> <target>`/`REMOVE <alias>`/`LIST`/bare；运行时别名先于静态表解析（可遮蔽内建），仅删除运行时行；无交互对话框（声明），会话状态不持久化 |
 | 47 | `ALIGN` | 已实现 | Aligns objects with other objects in 2D and 3D. | 1 对点移动、2 对点平移+旋转+可选均匀缩放、3 对点平面**刚性**（旋转+平移，不缩放）；退化/非共面/非全等/镜像按名拒绝；3 对点的 3D 平面旋转属全局范围 |
 | 48 | `ALIGNSPACE` | 部分实现 | Adjusts the pan and zoom factor of a view in a layout viewport based on the alignment points specified in model space and paper space. | `model_a paper_a model_b paper_b` 4 坐标→均匀 `paper_per_model` + 平移，真实写 `model_to_paper`；CLI 尚无 4 坐标拼写；旋转对报告 `rotation_ignored` |
 | 49 | `AMECONVERT` | 部分实现 | Converts AME solid models to AutoCAD solid objects. | 具名拒绝（`ameconvert.unsupported: this build has no AME solid model`）。 |
@@ -1206,9 +1208,9 @@
 | 165 | `CHSPACE` | 部分实现 | On a layout, transfers selected objects between model space and paper space. | 具名拒绝（`chspace.unsupported`）：模型/图纸空间之间移动实体未实现。 |
 | 166 | `CHURLS` | 部分实现 | Provides a method to edit a previously attached URL for selected objects. | 具名拒绝（`churls.unsupported: this build has no hyperlink storage model`）。 |
 | 167 | `CIRCLE` | 已实现 | Creates a circle. | — |
-| 168 | `CLASSICGROUP` | 部分实现 | Opens the legacy Object Grouping dialog box. | 具名拒绝（`classicgroup.unsupported`）：无经典编组对话框；请用 GROUP。 |
-| 169 | `CLASSICIMAGE` | 部分实现 | Manages referenced image files in the current drawing. | 具名拒绝（`classicimage.unsupported: no image manager; use IMAGE`）。 |
-| 170 | `CLASSICINSERT` | 部分实现 | Inserts a block or drawing into the current drawing using the classic version of the INSERT command. | 具名拒绝（`classicinsert.unsupported`）：无经典插入对话框；请用 INSERT。 |
+| 168 | `CLASSICGROUP` | 部分实现 | Opens the legacy Object Grouping dialog box. | chrome 面板：列出会话 `EntityGroups` 与成员数，行聚焦/展开成员引用/关闭；“按组选择成员”因无宿主替换选择路径而禁用 |
+| 169 | `CLASSICIMAGE` | 部分实现 | Manages referenced image files in the current drawing. | chrome 面板：只读列出 IMAGE 实体（id/空间/file key/pixels/可见/clip 摘要），行聚焦/关闭；attach/clip/adjust 仍是独立命令 |
+| 170 | `CLASSICINSERT` | 已实现 | Inserts a block or drawing into the current drawing using the classic version of the INSERT command. | chrome 面板：列出真实块定义（名称/成员数/基点），插入动作走既有 `INSERT` 点位+名称流程（面板在宿主确认文字步后提交块名）；无块元数据的定义不可插入（不伪造基点） |
 | 171 | `CLASSICLAYER` | 部分实现 | Opens the legacy Layer Properties Manager. | chrome 本地选择子：打开现有图层面板；紧凑布局像 LAYER 一样拒绝。 |
 | 172 | `CLASSICXREF` | 部分实现 | Manages referenced drawing files in the current drawing. | 真实只读外部参照报告 + chrome 面板（`cad_status.references` 的 name/status/reason），行聚焦/关闭/Esc；attach/detach/reload 仍按名拒绝 |
 | 173 | `CLEANSCREENOFF` | 部分实现 | Restores the state of the display before CLEANSCREENON was used. | chrome 本地选择子：显式退出 clean-screen；只恢复 chrome 可见性，不重开各面板 |
@@ -1750,7 +1752,7 @@
 | 709 | `RECOVER` | 未实现 | Repairs and then opens a damaged drawing file. | — |
 | 710 | `RECOVERALL` | 未实现 | Repairs a damaged drawing file along with all attached xrefs. | — |
 | 711 | `RECTANG` | 已实现 | Creates a rectangular polyline. | 两角→闭合四顶点 LWPOLYLINE；`payload_length` 守卫；`Fillet`/`Chamfer`/`Rotation`/`Area` 无输入通道（payload 仅两角），矩形可由 `PLINE` 表达 |
-| 712 | `REDEFINE` | 未实现 | Restores AutoCAD internal commands overridden by UNDEFINE. | — |
+| 712 | `REDEFINE` | 已实现 | Restores AutoCAD internal commands overridden by UNDEFINE. | `REDEFINE <name>` 重新启用被 `UNDEFINE` 禁用的内建命令；未知/从未定义按名拒绝；essential 命令双向拒绝；会话状态不写图 |
 | 713 | `REDIR` | 未实现 | Redefines hard-coded paths in xrefs, images, shapes, styles, and rtext. | — |
 | 714 | `REDIRMODE` | 未实现 | Sets options for the REDIR Express Tool by specifying which object types are included. | — |
 | 715 | `REDO` | 已实现 | Reverses the effects of previous UNDO or U command. | — |
@@ -1934,7 +1936,7 @@
 | 893 | `UCSICON` | 部分实现 | Controls the visibility, placement, appearance, and selectability of the UCS icon. | 会话开关（默认关）：翻转 `ucsicon`；不渲染任何 UCS 图标。 |
 | 894 | `UCSMAN` | 部分实现 | Manages UCS definitions. | 具名拒绝（`ucsman.unsupported`）：本构建无 UCS 模型。 |
 | 895 | `ULAYERS` | 未实现 | Controls the display of layers in a DWF, DWFx, PDF, or DGN underlay. | — |
-| 896 | `UNDEFINE` | 未实现 | Allows an application-defined command to override an internal command. | — |
+| 896 | `UNDEFINE` | 已实现 | Allows an application-defined command to override an internal command. | `UNDEFINE <name>` 会话内禁用内建命令；被禁用名按 `command.undefined: <NAME>` 拒绝且不派发；静态/运行时别名指向禁用目标时同样禁用；不写图 |
 | 897 | `UNDO` | 已实现 | Reverses the effect of commands. | — |
 | 898 | `UNGROUP` | 部分实现 | Disassociates the objects from a group. | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
 | 899 | `UNION` | 部分实现 | Combines two or more 3D solids, surfaces, or 2D regions into a single, composite 3D solid, surface, or region. | 具名拒绝（`union.unsupported: no 3D boolean model`）。 |

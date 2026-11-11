@@ -1805,3 +1805,14 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `SYSVARMONITOR` | 部分实现 | ADD/REMOVE/LIST + 查询时快照变化检测 | 无后台通知；会话状态不持久化；仅 SETVAR 闭集变量 |
 | `SYSVDLG` | 部分实现 | 只读报告所有已暴露变量 + `sysvdlg.not_tracked` | 无编辑/保存/恢复对话框 |
 | `SPACETRANS` | **完整实现** | `SPACETRANS <distance>` 模型↔图纸换算并报告方向/因子 | 活动视口 = VPMAX 视口否则 index 0；无逐视口选择 |
+
+### Wave 26 续（2026-11-12，classic 面板 / 命令词表控制）
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `CLASSICINSERT` | **完整实现** | chrome 面板列出真实块定义（名称/成员数/基点）；Insert 走既有 `INSERT` 点位+名称流程 | 无块元数据的定义不可插入；无直接 payload 插入路径 |
+| `CLASSICGROUP` | 部分实现 | chrome 面板列出会话 `EntityGroups`/成员数/成员引用 | “按组选择成员”仅禁用提示（无宿主替换选择路径）；会话组不是 DWG 对象 |
+| `CLASSICIMAGE` | 部分实现 | chrome 面板只读列出 IMAGE 实体（id/空间/file key/pixels/可见/clip 摘要） | attach/clip/adjust 是独立命令；面板不写库 |
+| `REDEFINE` | **完整实现** | 重新启用被 `UNDEFINE` 禁用的内建命令；essential 双向拒绝 | 会话状态；不持久化 DWG |
+| `UNDEFINE` | **完整实现** | 会话内禁用内建命令；`command.undefined: <NAME>`；别名指向禁用目标亦禁用 | 会话状态；不持久化 DWG |
+| `ALIASEDIT` | 部分实现 | `ADD`/`REMOVE`/`LIST`；运行时别名先于静态表解析并遮蔽内建；仅删除运行时行 | 无交互对话框；会话状态不持久化；原生宿主同一 pre-tick 批次内新增并使用需等下一 tick |
