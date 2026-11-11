@@ -1,5 +1,29 @@
 AD
 
+## 2026-11-11 发布 v0.1.11（命令补齐 + 显示修复 + 浮动导航坞）
+
+- **版本**：workspace `Cargo.toml`、`Cargo.lock`（35 成员）、四个 `tauri.conf.json`、Flatpak
+  metainfo 全部 `0.1.10` → `0.1.11`（commit `a08ff7f4`）。
+- **tag / run**：`v0.1.11`（annotated，指向 `a08ff7f4`）→ `CI build layers` run
+  [`43010598580`](https://github.com/zenglanmu/yacr/actions/runs/43010598580) **11/11 job 绿**
+  （四个 release + linux/windows/macos check + shader + web-build/web-smoke/web-deploy）。
+- **发布**：`publish-release` run
+  [`43023654191`](https://github.com/zenglanmu/yacr/actions/runs/43023654191) 绿 →
+  <https://github.com/zenglanmu/yacr/releases/tag/v0.1.11>（非 draft / 非 prerelease；首次用
+  自动生成 notes，随后用 `docs/release-notes/v0.1.11.md` 覆盖）。
+- **artifact（Release API 核对）**：`yacr-0.1.11-linux-x86_64.flatpak` **112,224,776 B**
+  + `.sha256` + `.flatpak.gpg`；`yacr-0.1.11-windows-x86_64.zip` **105,674,331 B** +
+  `.sha256`（unsigned）；`yacr-0.1.11-macos-universal.tar.gz` **150,290,275 B** + `.sha256`
+  （ad-hoc、未公证）；`app-universal-release.apk` **112,293,345 B** + `.sha256`。合计约 457 MiB。
+- **命令数**：README 中英与落地页统一为 **823/981（68 完整 + 755 部分）**；落地页此前仍写
+  223/981（50+173），本轮修正。
+- **落地页（提交侧）**：`downloads.json` → v0.1.11（R2 自定义域 + GitHub fallback，真实
+  size/sha256）；`changelog.json` 由 notes 生成；`site.yml` 默认 `release_tag=v0.1.11`；
+  `index.html` 版本/下载链接/size fallback、`docs/landing-site.md`、
+  `scripts/test-landing-site.py` 同步。`python3 scripts/test-landing-site.py` PASS。
+- **待办 / NOT RUN**：`site.yml` 尚未 dispatch；R2 镜像、Pages 部署与线上 `/downloads.json`、
+  `/changelog.json`、R2 HEAD 复核尚未进行；Windows/macOS/Android/真机/GPU/像素仍未验收。
+
 ## 2026-11-11 修复 Linux GTK 子表面的第二条取整路径（Flatpak 5K/scale=2 下 CAD 区透出桌面）
 
 - **现象（用户真机，Flatpak v0.1.10，Linux Wayland）**：宿主报错
