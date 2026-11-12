@@ -1,5 +1,41 @@
 AD
 
+## 2026-11-13 发布 v0.1.12（官方命令清单收尾 + 真实 2D 升级 + CI 字体解耦）
+
+- **CI 修复（先于发版）**：`core-quality` 在干净检出上编译失败，根因是 `cad-app` 测试用
+  `include_bytes!` 指向被 gitignore 的打包产物 `apps/app-android/font-assets/complex.shx`（不是下载失败）。
+  commit `6aada282` 新增 `tests::font_fixture`：`complex.shx` 改为**运行时**按显式目录 → 生成 bundle →
+  共享缓存查找，缺面时显式跳过并打印 staging 命令；`core-quality` 只编译、不跑 Rust 测试，因此不再
+  下载字体。`fetch-fonts.sh` 同时降并发 12→6、重试 3→5 + 抖动、空响应体按失败处理。
+- **版本**：workspace `Cargo.toml`、`Cargo.lock`（35 成员）、四个 `tauri.conf.json`、Flatpak
+  metainfo 全部 `0.1.11` → `0.1.12`（commit `7df66a06`）。
+- **tag / run**：`v0.1.12`（annotated，指向 `7df66a06`）→ `CI build layers` run
+  [`43264539950`](https://github.com/zenglanmu/yacr/actions/runs/43264539950) **11/11 job 绿**
+  （linux/windows/macos check + 四个 release + shader + web-build/web-smoke/web-deploy）。
+- **发布**：`publish-release` run
+  [`43274688545`](https://github.com/zenglanmu/yacr/actions/runs/43274688545) 绿 →
+  <https://github.com/zenglanmu/yacr/releases/tag/v0.1.12>（非 draft / 非 prerelease；自动生成 notes
+  后用 `docs/release-notes/v0.1.12.md` 覆盖）。
+- **artifact（Release API 核对）**：`yacr-0.1.12-linux-x86_64.flatpak` **113,189,968 B**
+  + `.sha256` + `.flatpak.gpg`（GPG 签名）；`yacr-0.1.12-windows-x86_64.zip` **107,269,717 B**
+  + `.sha256`（unsigned，来自 `yacr-windows-release-unsigned`）；`yacr-0.1.12-macos-universal.tar.gz`
+  **151,988,558 B** + `.sha256`（ad-hoc、未公证）；`app-universal-release.apk` **113,993,249 B**
+  + `.sha256`（仓库自签名，v2/v3 verified）。合计 486,441,492 B（≈464 MiB）。
+- **命令数**：官方 981 条全部有明确状态：**979 已实现（107 完整 + 872 部分）/ 2 同名不同义
+  （MEASURE、TRACE）**；README 中英、落地页与 changelog 同步。覆盖率条按 107/872/2 重新配比
+  （2px 下限，比例不失真）。
+- **落地页（提交侧）**：commit `1c4b3087`；`downloads.json` → v0.1.12（R2 自定义域 + GitHub
+  fallback，真实 size/sha256）；`changelog.json` 由 notes 生成；`site.yml` 默认 `release_tag=v0.1.12`；
+  `index.html` 版本/下载链接/size/SHA fallback、`docs/landing-site.md`、`scripts/test-landing-site.py`
+  同步。
+- **落地页部署**：`site.yml` run
+  [`43275480945`](https://github.com/zenglanmu/yacr/actions/runs/43275480945) 绿（R2 镜像 + Pages）。
+  线上复核：`/downloads.json` = v0.1.12（四个 size 合计 486,441,492）；`/changelog.json` 首版
+  v0.1.12（2026-11-13）；页面含 v0.1.12；R2 HEAD `releases/v0.1.12/yacr-0.1.12-linux-x86_64.flatpak`
+  **200 / 113,189,968 B**，APK **200 / 113,993,249 B**。
+- **NOT VERIFIED**：Windows/macOS/Android 真机、真实 GPU、像素与性能仍未验收；发布、打包、
+  上传与落地页部署成功都不是运行时验收。
+
 ## 2026-11-12 真实 2D 升级（3b）：EXTEND 开放 SPLINE
 
 - **行为**：`EXTEND` 接受开放 SPLINE 目标。拾取投影选近端，沿该端**切线**做直线尾段延伸：
