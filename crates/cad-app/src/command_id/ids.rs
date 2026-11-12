@@ -771,9 +771,10 @@ pub enum CommandId {
     /// `TSCALE` (Work-only): scale the selected Text/MText glyph height and wrap
     /// width. Full contract: [`crate::command_id::text_batch::TextScaleCommand`].
     TextScale,
-    /// `TEXTALIGN` (Work-only): move the selected Text/MText to one common edge
-    /// or centre. Full contract:
-    /// [`crate::command_id::text_batch::TextAlignCommand`].
+    /// `TEXTALIGN` (Work-only): move the selected Text/MText to one common
+    /// alignment edge/centre (15 modes) or distribute them with equal gaps. Full
+    /// contract: [`crate::command_id::text_batch::TextAlignCommand`] /
+    /// [`crate::command_id::text_batch::TextAlignSpacingCommand`].
     TextAlignEdges,
     /// `TCOUNT` (Work-only): replace the selected text with a numbered run. Full
     /// contract: [`crate::command_id::text_batch::TCountCommand`].

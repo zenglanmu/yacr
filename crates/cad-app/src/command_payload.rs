@@ -786,6 +786,11 @@ pub enum CommandPayload {
     /// edge/centre using estimated extents. Full contract:
     /// [`crate::command_id::text_batch::TextAlignCommand`].
     TextAlignEdges(TextAlignCommand),
+    /// `TEXTALIGN DISTRIBUTE [X|Y]` (Work-only): even gap distribution; also
+    /// carries the three named unsupported spacing options, which are refused
+    /// before any transaction. Full contract:
+    /// [`crate::command_id::text_batch::TextAlignSpacingCommand`].
+    TextAlignSpacing(TextAlignSpacingCommand),
     /// `TCOUNT <start> <step> [prefix] [suffix]` (Work-only): number the selected
     /// text in reading order. Full contract:
     /// [`crate::command_id::text_batch::TCountCommand`].

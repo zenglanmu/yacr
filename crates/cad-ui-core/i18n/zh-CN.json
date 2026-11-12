@@ -1238,7 +1238,7 @@
   "draw.kind.tscale": "文字倍率缩放",
   "draw.kind.tscale.hint": "选择文字或多行文字；键入 TSCALE <正数倍率> 缩放字高与多行文字换行宽度（与 SCALETEXT 同一规则），一次撤销",
   "draw.kind.textalign": "文字对齐线",
-  "draw.kind.textalign.hint": "至少选择两个文字/多行文字；键入 TEXTALIGN LEFT|RIGHT|CENTER|TOP|MIDDLE|BOTTOM 对齐到公共边或中心。范围为估算值（字高 × 字符数），忽略旋转",
+  "draw.kind.textalign.hint": "至少选择两个文字/多行文字；键入 TEXTALIGN LEFT|RIGHT|CENTER|TOP|MIDDLE|BOTTOM 或 TOPLEFT|TOPCENTER|TOPRIGHT|MIDDLELEFT|MIDDLECENTER|MIDDLERIGHT|BOTTOMLEFT|BOTTOMCENTER|BOTTOMRIGHT 对齐到公共边或中心；TEXTALIGN DISTRIBUTE [X|Y] 按估算外框等间距分布（首尾固定，至少三个目标）。范围为估算值（字高 × 字符数），忽略旋转；SETSPACING/CURRENTVERTICAL/CURRENTHORIZONTAL 未实现并会具名拒绝",
   "draw.kind.tcount": "文字编号",
   "draw.kind.tcount.hint": "选择文字或多行文字；键入 TCOUNT <起始> <步长> [前缀] [后缀] 按从上到下、从左到右编号；AutoCAD 的逐项对话框模式未实现",
   "draw.kind.tcircle": "文字边界",

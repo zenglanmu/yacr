@@ -1238,7 +1238,7 @@
   "draw.kind.tscale": "Scale Text Factor",
   "draw.kind.tscale.hint": "Select Text/MText, then type TSCALE <positive factor> to scale the glyph height and the MTEXT wrap width (the same rule as SCALETEXT), in one undo step",
   "draw.kind.textalign": "Align Text Line",
-  "draw.kind.textalign.hint": "Select at least two Text/MText objects, then type TEXTALIGN LEFT|RIGHT|CENTER|TOP|MIDDLE|BOTTOM to align them to a common edge or centre. Extents are estimated (height x character count) and rotation is ignored",
+  "draw.kind.textalign.hint": "Select at least two Text/MText objects, then type TEXTALIGN LEFT|RIGHT|CENTER|TOP|MIDDLE|BOTTOM or TOPLEFT|TOPCENTER|TOPRIGHT|MIDDLELEFT|MIDDLECENTER|MIDDLERIGHT|BOTTOMLEFT|BOTTOMCENTER|BOTTOMRIGHT to align them to a common edge or centre; TEXTALIGN DISTRIBUTE [X|Y] spaces them evenly by estimated extent (first and last fixed, at least three objects). Extents are estimated (height x character count) and rotation is ignored; SETSPACING/CURRENTVERTICAL/CURRENTHORIZONTAL are not implemented and are refused by name",
   "draw.kind.tcount": "Number Text",
   "draw.kind.tcount.hint": "Select Text/MText, then type TCOUNT <start> <step> [prefix] [suffix] to number them top-to-bottom, left-to-right. AutoCAD's per-item dialog modes are not implemented",
   "draw.kind.tcircle": "Text Boundary",

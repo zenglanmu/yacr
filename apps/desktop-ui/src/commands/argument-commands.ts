@@ -231,8 +231,27 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     parse: isPositiveDecimal,
   }),
   TEXTALIGN: Object.freeze({
-    parse: (argument: string) => ['LEFT', 'RIGHT', 'CENTER', 'TOP', 'MIDDLE', 'BOTTOM']
-      .includes(argument.trim().toUpperCase()),
+    // The 15 alignment spellings (the original six single-axis words plus
+    // AutoCAD 2026's nine combined TEXTALIGNMODE words), `DISTRIBUTE` with the
+    // default Y axis or an explicit X|Y, and the three spacing words the host
+    // accepts and then refuses by code. Admission is local; the host is the
+    // write authority and every refusal comes from the session.
+    parse: (argument: string) => {
+      const parts = argument.trim().toUpperCase().split(/\s+/).filter(part => part.length > 0);
+      if (parts.length === 1) {
+        const keyword = parts[0];
+        return [
+          'LEFT', 'RIGHT', 'CENTER', 'TOP', 'MIDDLE', 'BOTTOM',
+          'TOPLEFT', 'TOPCENTER', 'TOPRIGHT',
+          'MIDDLELEFT', 'MIDDLECENTER', 'MIDDLERIGHT',
+          'BOTTOMLEFT', 'BOTTOMCENTER', 'BOTTOMRIGHT',
+          'DISTRIBUTE', 'SETSPACING', 'CURRENTVERTICAL', 'CURRENTHORIZONTAL',
+        ].includes(keyword);
+      }
+      return parts.length === 2
+        && parts[0] === 'DISTRIBUTE'
+        && ['X', 'Y'].includes(parts[1]);
+    },
   }),
   TCOUNT: Object.freeze({
     parse: (argument: string) => {

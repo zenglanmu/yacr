@@ -445,7 +445,8 @@ pub use command_payload::{
     SelectionPredicate, SelectionProperty, SelectionScope, SelectionToolPayload,
     SetByLayerSettings, ShapeCommand, StretchPolygonCommand, StyleTableCommand, StyleTableKind,
     StyleTableOp, SysVarMonitorAction, TCircleCommand, TCountCommand, TableCreateCommand,
-    TableEditCommand, TextAlignCommand, TextAlignEdge, TextBoundaryShape, TextCaseMode,
+    TableEditCommand, TextAlignAxis, TextAlignCommand, TextAlignEdge, TextAlignSpacing,
+    TextAlignSpacingCommand, TextBoundaryShape, TextCaseMode,
     TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand, ToleranceCommand,
     TwoLineCommand, Txt2MTextOptions, UtilityPayload, VPointInput, ViewCommand, WipeoutPayload,
 };

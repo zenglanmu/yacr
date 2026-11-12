@@ -90,7 +90,7 @@ fn tscale_accepts_one_positive_decimal() {
 }
 
 #[test]
-fn textalign_accepts_only_the_six_full_edge_words() {
+fn textalign_accepts_the_fifteen_alignment_words() {
     use cad_app::TextAlignEdge;
 
     for (argument, expected) in [
@@ -100,6 +100,15 @@ fn textalign_accepts_only_the_six_full_edge_words() {
         ("TOP", TextAlignEdge::Top),
         ("middle", TextAlignEdge::Middle),
         ("BOTTOM", TextAlignEdge::Bottom),
+        ("TOPLEFT", TextAlignEdge::TopLeft),
+        ("topcenter", TextAlignEdge::TopCenter),
+        ("TopRight", TextAlignEdge::TopRight),
+        ("MIDDLELEFT", TextAlignEdge::MiddleLeft),
+        ("middlecenter", TextAlignEdge::MiddleCenter),
+        ("MIDDLERIGHT", TextAlignEdge::MiddleRight),
+        ("BOTTOMLEFT", TextAlignEdge::BottomLeft),
+        ("bottomcenter", TextAlignEdge::BottomCenter),
+        ("BOTTOMRIGHT", TextAlignEdge::BottomRight),
     ] {
         assert_eq!(
             parse_textalign_argument(argument),
@@ -107,16 +116,77 @@ fn textalign_accepts_only_the_six_full_edge_words() {
             "{argument}"
         );
     }
-    for refused in ["", "L", "C", "T", "CENTRE", "TOP LEFT"] {
+    for refused in [
+        "",
+        "L",
+        "C",
+        "T",
+        "CENTRE",
+        "TOP LEFT",
+        "TOP-LEFT",
+        "MIDDLE CENTER",
+        "BOTTOM_RIGHT",
+    ] {
         assert_eq!(parse_textalign_argument(refused), None, "{refused:?}");
     }
     assert_eq!(
-        typed_command_argument("TEXTALIGN LEFT"),
-        Some(("TEXTALIGN", "LEFT"))
+        typed_command_argument("TEXTALIGN TOPLEFT"),
+        Some(("TEXTALIGN", "TOPLEFT"))
     );
     assert_eq!(typed_command_argument("TEXTALIGN"), None);
     assert!(CommandId::TextAlignEdges.requires_work_mode());
     assert_eq!(command_name(CommandId::TextAlignEdges), Some("TEXTALIGN"));
+    let reason = invalid_textalign_argument_reason("TEXTALIGN TOP LEFT");
+    assert!(reason.contains("BOTTOMRIGHT"), "{reason}");
+    assert!(reason.contains("DISTRIBUTE [X|Y]"), "{reason}");
+}
+
+#[test]
+fn textalign_parses_distribute_and_the_named_spacing_refusals() {
+    use cad_app::{TextAlignAxis, TextAlignSpacing};
+
+    assert_eq!(
+        parse_textalign_spacing_argument("DISTRIBUTE"),
+        Some(TextAlignSpacing::Distribute(TextAlignAxis::Y)),
+        "the default axis is Y"
+    );
+    assert_eq!(
+        parse_textalign_spacing_argument("distribute x"),
+        Some(TextAlignSpacing::Distribute(TextAlignAxis::X))
+    );
+    assert_eq!(
+        parse_textalign_spacing_argument("Distribute Y"),
+        Some(TextAlignSpacing::Distribute(TextAlignAxis::Y))
+    );
+    assert_eq!(
+        parse_textalign_spacing_argument("SETSPACING"),
+        Some(TextAlignSpacing::SetSpacing)
+    );
+    assert_eq!(
+        parse_textalign_spacing_argument("currentvertical"),
+        Some(TextAlignSpacing::CurrentVertical)
+    );
+    assert_eq!(
+        parse_textalign_spacing_argument("CURRENTHORIZONTAL"),
+        Some(TextAlignSpacing::CurrentHorizontal)
+    );
+    for refused in [
+        "",
+        "DISTRIBUTE Z",
+        "DISTRIBUTE X Y",
+        "SET SPACING",
+        "DISTRIBUT",
+    ] {
+        assert_eq!(
+            parse_textalign_spacing_argument(refused),
+            None,
+            "{refused:?}"
+        );
+    }
+    assert_eq!(
+        typed_command_argument("TEXTALIGN DISTRIBUTE X"),
+        Some(("TEXTALIGN", "DISTRIBUTE X"))
+    );
 }
 
 #[test]

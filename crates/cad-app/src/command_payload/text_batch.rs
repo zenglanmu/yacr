@@ -7,7 +7,9 @@
 
 use cad_domain::{TextAlignH, TextAlignV};
 
-pub use crate::command_id::text_batch::{TextAlignEdge, TextBoundaryShape};
+pub use crate::command_id::text_batch::{
+    TextAlignAxis, TextAlignEdge, TextAlignSpacing, TextBoundaryShape,
+};
 
 /// `JUSTIFYTEXT` / `TJUST`: the requested alignment pair. Both fields are
 /// mandatory (the typed grammar requires `<H> <V>`); nothing else about the text
@@ -29,6 +31,13 @@ pub struct TextScaleCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextAlignCommand {
     pub edge: TextAlignEdge,
+}
+
+/// `TEXTALIGN DISTRIBUTE [X|Y]` / the named spacing options: the spacing mode
+/// the selected texts are laid out with (only `Distribute` writes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextAlignSpacingCommand {
+    pub spacing: TextAlignSpacing,
 }
 
 /// `TCOUNT`: the numbering run and its uniform affixes.

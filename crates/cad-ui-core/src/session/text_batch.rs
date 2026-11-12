@@ -1,6 +1,7 @@
 //! The typed argument forms of the 2026-11-07 2D text batch:
-//! `JUSTIFYTEXT <H> <V>`, `TSCALE <factor>`, `TEXTALIGN <edge>`,
-//! `TCOUNT <start> <step> [prefix] [suffix]` and `TCIRCLE <shape>`.
+//! `JUSTIFYTEXT <H> <V>`, `TSCALE <factor>`, `TEXTALIGN <mode>` /
+//! `TEXTALIGN DISTRIBUTE [X|Y]`, `TCOUNT <start> <step> [prefix] [suffix]` and
+//! `TCIRCLE <shape>`.
 //!
 //! Each is an **argument form of its base selector**, not a command of its own:
 //! there is no second IPC and no second write path. The selection is still the
@@ -22,8 +23,9 @@
 //! so they are not in this module or in `ARGUMENT_SELECTORS`.
 
 use cad_app::{
-    CommandId, CommandPayload, JustifyTextCommand, TCircleCommand, TCountCommand, TextAlignCommand,
-    TextAlignEdge, TextBoundaryShape, TextScaleCommand,
+    CommandId, CommandPayload, JustifyTextCommand, TCircleCommand, TCountCommand, TextAlignAxis,
+    TextAlignCommand, TextAlignEdge, TextAlignSpacing, TextAlignSpacingCommand, TextBoundaryShape,
+    TextScaleCommand,
 };
 use cad_domain::{TextAlignH, TextAlignV};
 
@@ -90,27 +92,61 @@ pub fn parse_tscale_argument(argument: &str) -> Option<f64> {
     super::commands::parse_positive_decimal(argument.trim())
 }
 
-/// Parse `TEXTALIGN <edge>`: one of the six full edge words.
+/// Parse `TEXTALIGN <mode>`: the 15 full alignment words.
 ///
-/// No abbreviation is admitted: the host grammar does not guess at a partial
-/// word, so `L`/`C`/`T` are refused rather than mapped.
+/// Single-axis: `LEFT`, `RIGHT`, `CENTER`, `TOP`, `MIDDLE`, `BOTTOM`. Combined
+/// (AutoCAD 2026 `TEXTALIGNMODE`): `TOPLEFT`, `TOPCENTER`, `TOPRIGHT`,
+/// `MIDDLELEFT`, `MIDDLECENTER`, `MIDDLERIGHT`, `BOTTOMLEFT`, `BOTTOMCENTER`,
+/// `BOTTOMRIGHT`. No abbreviation is admitted: the host grammar does not guess
+/// at a partial word, so `L`/`C`/`T`/`TOP-LEFT` are refused rather than mapped.
 pub fn parse_textalign_argument(argument: &str) -> Option<TextAlignEdge> {
-    let key = argument.trim();
-    if key.eq_ignore_ascii_case("LEFT") {
-        Some(TextAlignEdge::Left)
-    } else if key.eq_ignore_ascii_case("RIGHT") {
-        Some(TextAlignEdge::Right)
-    } else if key.eq_ignore_ascii_case("CENTER") {
-        Some(TextAlignEdge::Center)
-    } else if key.eq_ignore_ascii_case("TOP") {
-        Some(TextAlignEdge::Top)
-    } else if key.eq_ignore_ascii_case("MIDDLE") {
-        Some(TextAlignEdge::Middle)
-    } else if key.eq_ignore_ascii_case("BOTTOM") {
-        Some(TextAlignEdge::Bottom)
-    } else {
-        None
+    let upper = argument.trim().to_ascii_uppercase();
+    Some(match upper.as_str() {
+        "LEFT" => TextAlignEdge::Left,
+        "RIGHT" => TextAlignEdge::Right,
+        "CENTER" => TextAlignEdge::Center,
+        "TOP" => TextAlignEdge::Top,
+        "MIDDLE" => TextAlignEdge::Middle,
+        "BOTTOM" => TextAlignEdge::Bottom,
+        "TOPLEFT" => TextAlignEdge::TopLeft,
+        "TOPCENTER" => TextAlignEdge::TopCenter,
+        "TOPRIGHT" => TextAlignEdge::TopRight,
+        "MIDDLELEFT" => TextAlignEdge::MiddleLeft,
+        "MIDDLECENTER" => TextAlignEdge::MiddleCenter,
+        "MIDDLERIGHT" => TextAlignEdge::MiddleRight,
+        "BOTTOMLEFT" => TextAlignEdge::BottomLeft,
+        "BOTTOMCENTER" => TextAlignEdge::BottomCenter,
+        "BOTTOMRIGHT" => TextAlignEdge::BottomRight,
+        _ => return None,
+    })
+}
+
+/// Parse `TEXTALIGN <spacing option>`.
+///
+/// * `DISTRIBUTE` (the default axis is Y) or `DISTRIBUTE X` / `DISTRIBUTE Y`;
+/// * `SETSPACING`, `CURRENTVERTICAL`, `CURRENTHORIZONTAL` — parsed so the host
+///   can answer with its own stable refusal code (they write nothing).
+///
+/// Any other shape is `None` and becomes the stable invalid-argument refusal.
+pub fn parse_textalign_spacing_argument(argument: &str) -> Option<TextAlignSpacing> {
+    let tokens: Vec<&str> = argument.split_whitespace().collect();
+    if tokens.len() == 1 {
+        return match tokens[0].to_ascii_uppercase().as_str() {
+            "DISTRIBUTE" => Some(TextAlignSpacing::Distribute(TextAlignAxis::Y)),
+            "SETSPACING" => Some(TextAlignSpacing::SetSpacing),
+            "CURRENTVERTICAL" => Some(TextAlignSpacing::CurrentVertical),
+            "CURRENTHORIZONTAL" => Some(TextAlignSpacing::CurrentHorizontal),
+            _ => None,
+        };
     }
+    if tokens.len() == 2 && tokens[0].eq_ignore_ascii_case("DISTRIBUTE") {
+        return match tokens[1].to_ascii_uppercase().as_str() {
+            "X" => Some(TextAlignSpacing::Distribute(TextAlignAxis::X)),
+            "Y" => Some(TextAlignSpacing::Distribute(TextAlignAxis::Y)),
+            _ => None,
+        };
+    }
+    None
 }
 
 /// Parse `TCOUNT <start> <step> [prefix] [suffix]`.
@@ -175,7 +211,9 @@ pub fn invalid_tscale_argument_reason(text: &str) -> String {
 /// Stable refusal for a `TEXTALIGN` argument outside the grammar.
 pub fn invalid_textalign_argument_reason(text: &str) -> String {
     format!(
-        "unsupported CAD command: {} (TEXTALIGN needs LEFT, RIGHT, CENTER, TOP, MIDDLE or BOTTOM)",
+        "unsupported CAD command: {} (TEXTALIGN needs LEFT|RIGHT|CENTER|TOP|MIDDLE|BOTTOM|\
+         TOPLEFT|TOPCENTER|TOPRIGHT|MIDDLELEFT|MIDDLECENTER|MIDDLERIGHT|BOTTOMLEFT|\
+         BOTTOMCENTER|BOTTOMRIGHT, or DISTRIBUTE [X|Y])",
         text.trim()
     )
 }
@@ -240,14 +278,21 @@ impl CadSession {
     }
 
     fn textalign_argument(&self, argument: &str, text: &str) -> Result<(), String> {
-        let Some(edge) = super::parse_textalign_argument(argument) else {
-            return self.refuse_argument(super::invalid_textalign_argument_reason(text));
-        };
-        self.text_batch_dispatch(
-            TEXTALIGN_SELECTOR,
-            CommandId::TextAlignEdges,
-            CommandPayload::TextAlignEdges(TextAlignCommand { edge }),
-        )
+        if let Some(edge) = super::parse_textalign_argument(argument) {
+            return self.text_batch_dispatch(
+                TEXTALIGN_SELECTOR,
+                CommandId::TextAlignEdges,
+                CommandPayload::TextAlignEdges(TextAlignCommand { edge }),
+            );
+        }
+        if let Some(spacing) = super::parse_textalign_spacing_argument(argument) {
+            return self.text_batch_dispatch(
+                TEXTALIGN_SELECTOR,
+                CommandId::TextAlignEdges,
+                CommandPayload::TextAlignSpacing(TextAlignSpacingCommand { spacing }),
+            );
+        }
+        self.refuse_argument(super::invalid_textalign_argument_reason(text))
     }
 
     fn tcount_argument(&self, argument: &str, text: &str) -> Result<(), String> {

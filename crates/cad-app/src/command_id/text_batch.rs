@@ -106,7 +106,15 @@ pub struct JustifyTextCommand;
 /// `Unsupported` (a mixed selection is never partially scaled). Work-only.
 pub struct TextScaleCommand;
 
-/// The six edges `TEXTALIGN <edge>` accepts.
+/// The alignment modes `TEXTALIGN <mode>` accepts.
+///
+/// The first six are the single-axis words this build already shipped (kept for
+/// compatibility with existing callers and lines); the nine combined words are
+/// AutoCAD 2026's `TEXTALIGNMODE` family. Together they are the 15 admitted
+/// spellings (`TEXTALIGN LEFT|RIGHT|CENTER|TOP|MIDDLE|BOTTOM|TOPLEFT|TOPCENTER|
+/// TOPRIGHT|MIDDLELEFT|MIDDLECENTER|MIDDLERIGHT|BOTTOMLEFT|BOTTOMCENTER|
+/// BOTTOMRIGHT`). The host parses them case-insensitively; no abbreviation is
+/// admitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextAlignEdge {
     Left,
@@ -115,25 +123,69 @@ pub enum TextAlignEdge {
     Top,
     Middle,
     Bottom,
+    TopLeft,
+    TopCenter,
+    TopRight,
+    MiddleLeft,
+    MiddleCenter,
+    MiddleRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
 }
 
-/// `TEXTALIGN LEFT|RIGHT|CENTER|TOP|MIDDLE|BOTTOM`: bring the selected Text/MText
-/// to one common horizontal (LEFT/RIGHT/CENTER) or vertical (TOP/MIDDLE/BOTTOM)
-/// line.
+/// The axis of `TEXTALIGN DISTRIBUTE [X|Y]` (the default is `Y`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlignAxis {
+    X,
+    Y,
+}
+
+/// The `TEXTALIGN` spacing options.
+///
+/// `Distribute` is implemented. `SetSpacing` / `CurrentVertical` /
+/// `CurrentHorizontal` are **accepted by the typed grammar and refused by the
+/// application** with their own stable codes (never a silent default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlignSpacing {
+    Distribute(TextAlignAxis),
+    SetSpacing,
+    CurrentVertical,
+    CurrentHorizontal,
+}
+
+/// `TEXTALIGN <mode>`: bring the selected Text/MText to one common alignment
+/// edge/centre measured from the **estimated** extents.
 ///
 /// Payload is [`crate::CommandPayload::TextAlignEdges`]. A bare `TEXTALIGN` is
 /// the named `textalign.needs_argument` refusal; any other word is refused by
 /// the session parser before IPC.
 ///
+/// ## Alignment modes (15 admitted spellings)
+///
+/// * single-axis, kept from the original six: `LEFT`, `RIGHT`, `CENTER` (X only)
+///   and `TOP`, `MIDDLE`, `BOTTOM` (Y only);
+/// * combined, AutoCAD 2026's nine `TEXTALIGNMODE` variants: `TOPLEFT`,
+///   `TOPCENTER`, `TOPRIGHT`, `MIDDLELEFT`, `MIDDLECENTER`, `MIDDLERIGHT`,
+///   `BOTTOMLEFT`, `BOTTOMCENTER`, `BOTTOMRIGHT`.
+///
 /// ## Rule (estimated extents)
 ///
 /// For every selected Text/MText the **estimated** bounds are computed first
-/// (see the module docs). The common value is the extreme of the named edge over
-/// the whole selection — `LEFT` → the minimum left edge, `RIGHT` → the maximum
-/// right edge, `TOP` → the maximum top edge, `BOTTOM` → the minimum bottom edge;
-/// `CENTER`/`MIDDLE` → the centre of the union box. Each entity's `position` is
-/// then shifted **only on the affected axis** so its own named edge (or centre)
-/// lands on that common value; the other coordinate is untouched.
+/// (see the module docs). The **union bounding box** of those extents is the
+/// reference frame. A single-axis mode uses one extreme of that frame — `LEFT`
+/// → the minimum left edge, `RIGHT` → the maximum right edge, `TOP` → the maximum
+/// top edge, `BOTTOM` → the minimum bottom edge; `CENTER`/`MIDDLE` → the frame
+/// centre — and shifts each entity **only on that axis**. A combined mode uses
+/// the named horizontal extreme/centre **and** the named vertical
+/// extreme/centre of the same frame and shifts each entity on **both** axes so
+/// its own bounds edge/centre matches.
+///
+/// This is the deterministic non-interactive form of AutoCAD's base-object plus
+/// second-point alignment vector: AutoCAD picks a base object and a direction;
+/// this build instead uses the whole selection's union box, so no pick step and
+/// no invented base object exists. Only reference points move — text content,
+/// height, rotation, justification, style and width are untouched.
 ///
 /// Because extents are estimated (`height × char_count` and `height`), the
 /// aligned result is the best available approximation, not a glyph-accurate
@@ -150,11 +202,64 @@ pub enum TextAlignEdge {
 /// * `textalign.degenerate` — a stored height that is non-finite/non-positive;
 /// * a non-text selection refuses the **whole** command with the shared
 ///   `Unsupported` (never a partial alignment);
-/// * `textalign.unchanged` — every target already sits on the common line; a
+/// * `textalign.unchanged` — every target already sits on the common line(s); a
 ///   success with no transaction.
 ///
-/// One transaction / one undo step; the affected axis only. Work-only.
+/// One transaction / one undo step. Work-only.
 pub struct TextAlignCommand;
+
+/// `TEXTALIGN DISTRIBUTE [X|Y]`: even **gap** spacing along one axis.
+///
+/// Payload is [`crate::CommandPayload::TextAlignSpacing`] carrying
+/// [`TextAlignSpacing::Distribute`]. The typed grammar is `DISTRIBUTE` (Y by
+/// default) or `DISTRIBUTE X` / `DISTRIBUTE Y`; the axis word is optional and
+/// case-insensitive.
+///
+/// ## Rule (gap-based, estimated extents)
+///
+/// * The selection is read in **reading order**: for `Y`, top-to-bottom
+///   (descending `max_y`) then left-to-right (ascending `min_x`); for `X`,
+///   left-to-right (ascending `min_x`) then top-to-bottom (descending `max_y`).
+///   Equal keys break on the entity id, so the order never depends on selection
+///   order.
+/// * The **first and last** extents in that order stay fixed. Their free span is
+///   the distance from the first leading edge to the last trailing edge minus
+///   the sum of all extents; dividing it by `count - 1` gives the common **gap
+///   between consecutive extents**. Each interior text is shifted so the gap
+///   before and after it equals that value. This is gap distribution, **not**
+///   centre distribution (texts of different widths/heights keep their size).
+/// * A selection that already has equal gaps stages nothing
+///   (`textalign.unchanged`, no transaction).
+/// * An overlapping selection can yield a negative gap (the interiors overlap by
+///   the same amount); the rule is still deterministic.
+///
+/// ## Refusals
+///
+/// * `textalign.needs_selection` — empty selection;
+/// * `textalign.distribute_needs_three` — fewer than **three** Text/MText
+///   targets (with two there is no interior text to distribute);
+/// * `textalign.degenerate` — a non-finite/non-positive stored height or a
+///   non-finite gap;
+/// * `textalign.not_addressable` / `textalign.target_missing` — as above;
+/// * a non-text selection refuses the whole command (`Unsupported`);
+/// * `textalign.unchanged` — already evenly spaced; no transaction.
+///
+/// One transaction / one undo step. Work-only.
+pub struct TextAlignSpacingCommand;
+
+/// The three named spacing refusals of `TEXTALIGN` (documented, never faked).
+///
+/// The typed grammar admits `SETSPACING`, `CURRENTVERTICAL` and
+/// `CURRENTHORIZONTAL` so the host can answer with its own stable code:
+///
+/// * `textalign.set_spacing_unsupported` — `TEXTALIGN SETSPACING` needs a
+///   numeric spacing value and a per-object base it does not model;
+/// * `textalign.current_vertical_unsupported` — `CURRENTVERTICAL`;
+/// * `textalign.current_horizontal_unsupported` — `CURRENTHORIZONTAL`.
+///
+/// Every one writes nothing (no revision bump, no undo entry). Only `DISTRIBUTE`
+/// is implemented.
+pub struct TextAlignUnsupportedSpacingCommand;
 
 /// `TCOUNT <start> <step> [prefix] [suffix]`: replace each selected Text/MText
 /// string with `<prefix><number><suffix>`.
