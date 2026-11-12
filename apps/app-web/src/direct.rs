@@ -426,6 +426,12 @@ pub(crate) fn without_session(name: &str) -> Result<Value, String> {
         "cad_commands" => Ok(serde_json::json!(wire::commands())),
         "cad_command_aliases" => Ok(serde_json::json!(wire::aliases())),
         "cad_app_version" => Ok(serde_json::json!(cad_ui_core::app_version())),
+        // The secondary-development API descriptor is a compile-time contract, not
+        // document state: a page that has not started its session must still be
+        // able to learn what this build supports (and what it explicitly refuses).
+        "cad_api_status" => wire::api_status().and_then(|status| {
+            serde_json::to_value(status).map_err(|error| format!("api.descriptor_invalid: {error}"))
+        }),
         known if is_wire_command(known) => {
             Err(format!("{UNSUPPORTED_RUNTIME}: {known}: {NO_SESSION}"))
         }

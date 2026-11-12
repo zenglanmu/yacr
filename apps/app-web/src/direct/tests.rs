@@ -426,6 +426,37 @@ fn the_crate_version_is_served_with_and_without_a_live_session() {
     assert_eq!(invoked["value"], expected);
 }
 
+/// The secondary-development API descriptor is a compile-time contract, not
+/// document state: a page whose canvas session has not started must still learn
+/// what this build supports (and what it explicitly refuses) — never a false
+/// `NO_SESSION`.
+#[test]
+fn the_plugin_api_descriptor_is_served_with_and_without_a_live_session() {
+    let expected = serde_json::to_value(
+        cad_ui_core::session::wire::api_status().expect("the descriptor parses"),
+    )
+    .expect("the descriptor serialises");
+    assert_eq!(expected["apiVersion"], serde_json::json!(1));
+
+    let without = without_session("cad_api_status").expect("served without a session");
+    assert_eq!(without, expected);
+
+    // Live session: the generated `dom-canvas` dispatch arm answers the same value.
+    let session = session();
+    let mut sink = DirectSink::new(&session);
+    let reads = DirectReads::new(&session);
+    let mut popups = NoPopups;
+    let with = dispatch("cad_api_status", "{}", &mut sink, &reads, &mut popups)
+        .expect("served by a live session");
+    assert_eq!(with, expected);
+    assert_eq!(with, without);
+
+    // And through the native entry with no page session.
+    let invoked: Value = serde_json::from_str(&invoke("cad_api_status", "{}")).expect("valid JSON");
+    assert_eq!(invoked["ok"], Value::Bool(true));
+    assert_eq!(invoked["value"], expected);
+}
+
 #[test]
 fn the_wire_command_set_is_the_registrys_shared_set() {
     // Both lists are generated from the one registry (`SHARED_WIRE_COMMAND_NAMES`
