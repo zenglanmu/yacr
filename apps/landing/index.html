@@ -272,7 +272,7 @@
         <div class="wrap">
           <div class="stat-grid">
             <div class="stat">
-              <p class="stat-value"><span>823</span><span class="stat-slash">/</span><span>981</span></p>
+              <p class="stat-value"><span>979</span><span class="stat-slash">/</span><span>981</span></p>
               <p class="stat-label">
                 <span class="lang--zh">条命令有实现路径</span><span class="lang--en" lang="en">commands with an implementation path</span>
               </p>
@@ -380,7 +380,7 @@
 
         <ul class="showcase-metrics reveal">
           <li class="shot-metric">
-            <p class="shot-metric-value"><span>823</span><span class="metric-sep">/</span><span>981</span></p>
+            <p class="shot-metric-value"><span>979</span><span class="metric-sep">/</span><span>981</span></p>
             <p class="shot-metric-label"><span class="lang--zh">条命令有实现路径</span><span class="lang--en" lang="en">commands with an implementation path</span></p>
           </li>
           <li class="shot-metric">
@@ -574,24 +574,24 @@
             </div>
             <h3><span class="lang--zh">命令覆盖</span><span class="lang--en" lang="en">Command coverage</span></h3>
             <p>
-              <span class="lang--zh">823 条有实现路径（68 完整 + 755 部分），158 条未实现。未支持的选项按名拒绝，不静默成功。</span>
-              <span class="lang--en" lang="en">823 commands have an implementation path (68 complete + 755 partial); 158 are not implemented. Unsupported options are rejected by name, never silently accepted.</span>
+              <span class="lang--zh">979 条有实现路径（107 完整 + 872 部分），其余 2 条按同名不同义不计入（MEASURE / TRACE）。未支持的选项按名拒绝，不静默成功。</span>
+              <span class="lang--en" lang="en">979 commands have an implementation path (107 complete + 872 partial); the other 2 are counted as same-name-different-meaning (MEASURE, TRACE). Unsupported options are rejected by name, never silently accepted.</span>
             </p>
             <div class="coverage">
               <div class="coverage-top">
-                <span class="coverage-big">823</span>
+                <span class="coverage-big">979</span>
                 <span class="coverage-of">/ 981</span>
                 <span class="coverage-scale">
                   <span class="lang--zh">清单计数 · 非兼容率</span><span class="lang--en" lang="en">list count · not compatibility</span>
                 </span>
               </div>
-              <div class="coverage-bar" role="img" data-aria-zh="981 条命令：68 条完整、755 条部分、158 条未实现" data-aria-en="981 commands: 68 complete, 755 partial, 158 not implemented">
+              <div class="coverage-bar" role="img" data-aria-zh="981 条命令：107 条完整、872 条部分、2 条未实现（同名不同义）" data-aria-en="981 commands: 107 complete, 872 partial, 2 not implemented (same name, different meaning)">
                 <span class="seg seg--full"></span><span class="seg seg--partial"></span><span class="seg seg--none"></span>
               </div>
               <ul class="coverage-legend">
-                <li><span class="swatch swatch--full" aria-hidden="true"></span><strong>68</strong><span class="lang--zh">完整</span><span class="lang--en" lang="en">complete</span></li>
-                <li><span class="swatch swatch--partial" aria-hidden="true"></span><strong>755</strong><span class="lang--zh">部分</span><span class="lang--en" lang="en">partial</span></li>
-                <li><span class="swatch swatch--none" aria-hidden="true"></span><strong>158</strong><span class="lang--zh">未实现</span><span class="lang--en" lang="en">not implemented</span></li>
+                <li><span class="swatch swatch--full" aria-hidden="true"></span><strong>107</strong><span class="lang--zh">完整</span><span class="lang--en" lang="en">complete</span></li>
+                <li><span class="swatch swatch--partial" aria-hidden="true"></span><strong>872</strong><span class="lang--zh">部分</span><span class="lang--en" lang="en">partial</span></li>
+                <li><span class="swatch swatch--none" aria-hidden="true"></span><strong>2</strong><span class="lang--zh">未实现</span><span class="lang--en" lang="en">not implemented</span></li>
               </ul>
             </div>
           </article>
@@ -1275,13 +1275,13 @@
 
             <details>
               <summary>
-                <span class="faq-q"><span class="lang--zh">命令覆盖 223/981 是什么？</span><span class="lang--en" lang="en">What does 223/981 command coverage mean?</span></span>
+                <span class="faq-q"><span class="lang--zh">命令覆盖 979/981 是什么？</span><span class="lang--en" lang="en">What does 979/981 command coverage mean?</span></span>
                 <span class="faq-icon" aria-hidden="true"></span>
               </summary>
               <div class="faq-a">
                 <p>
-                  <span class="lang--zh">它是命令清单的计数：981 条命令中 823 条有实现路径（68 完整 + 755 部分），158 条未实现。它不是 AutoCAD 兼容率；未支持的选项会按名称拒绝，不会静默成功。</span>
-                  <span class="lang--en" lang="en">It is a count of the command list: of 981 commands, 223 have an implementation path (50 complete + 173 partial) and 758 are not implemented. It is not an AutoCAD compatibility rate. Unsupported options are rejected by name, never silently accepted.</span>
+                  <span class="lang--zh">它是命令清单的计数：981 条命令中 979 条有实现路径（107 完整 + 872 部分），其余 2 条（MEASURE / TRACE）按同名不同义不计入。它不是 AutoCAD 兼容率；未支持的选项会按名称拒绝，不会静默成功。</span>
+                  <span class="lang--en" lang="en">It is a count of the command list: of 981 commands, 979 have an implementation path (107 complete + 872 partial); the other 2 (MEASURE, TRACE) are counted as same-name-different-meaning. It is not an AutoCAD compatibility rate. Unsupported options are rejected by name, never silently accepted.</span>
                 </p>
               </div>
             </details>

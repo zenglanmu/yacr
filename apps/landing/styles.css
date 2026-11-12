@@ -1123,14 +1123,22 @@ html[data-lang="en"] .lang--en { display: inline !important; }
   border: 1px solid var(--line-strong);
   background: rgba(8, 21, 29, 0.03);
 }
-.seg { display: block; height: 100%; }
-.seg--full { width: 5.096%; background: var(--cyan-deep); }
+/* 981 commands: 107 complete = 10.907238%, 872 partial = 88.888889%,
+   2 not implemented = 0.203873%. The three widths sum to exactly 100.000000%,
+   so the bar keeps its 1px frame with no gap and no overflow. 2/981 is
+   sub-pixel at card widths (~0.7-1.1px), so that sliver keeps a 2px floor and
+   the other two absorb the extra 2px through the default flex shrink (~0.2%
+   worst case) instead of the proportion being inflated. Do not set
+   `flex-shrink: 0` here: it would push the floor outside the frame. */
+.seg { display: block; flex: 0 1 auto; height: 100%; }
+.seg--full { width: 10.907238%; background: var(--cyan-deep); }
 .seg--partial {
-  width: 17.635%;
+  width: 88.888889%;
   background: repeating-linear-gradient(135deg, var(--cyan-2) 0 2px, rgba(100, 182, 206, 0.22) 2px 5px);
 }
 .seg--none {
-  width: 77.269%;
+  width: 0.203873%;
+  min-width: 2px;
   background: repeating-linear-gradient(90deg, rgba(8, 21, 29, 0.17) 0 1px, transparent 1px 9px);
 }
 .coverage-legend {
