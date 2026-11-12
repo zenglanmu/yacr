@@ -329,6 +329,13 @@ impl Application {
             // AUDIT is the detect-only drawing audit: it reads every stored entity
             // through `cad_db::validate_entity` and repairs nothing.
             CommandId::AuditDrawing => self.audit_drawing(session, &command),
+            // Wave 27: the read-only AutoCAD 2026 report commands. Each one reads
+            // the open document and writes nothing (no transaction, revision bump
+            // or undo entry), so Viewer mode admits all four.
+            CommandId::RecoverDrawing
+            | CommandId::RecoverAllDrawings
+            | CommandId::PurgeAecData
+            | CommandId::ShowUrls => self.recovery_report(&command),
             CommandId::SwitchBackend => {
                 if let CommandPayload::Backend(choice) = command.payload {
                     session.backend = choice;

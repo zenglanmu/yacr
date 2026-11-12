@@ -103,6 +103,9 @@ mod app_layout_geometry;
 mod app_layout_layvpi;
 mod app_layout_names;
 mod app_layout_session;
+// The Wave 27 read-only AutoCAD 2026 reports (`RECOVER`, `RECOVERALL`,
+// `PURGEAECDATA`, `SHOWURLS`).
+mod app_recovery;
 mod app_reports;
 mod app_reports_ext;
 mod app_utility;

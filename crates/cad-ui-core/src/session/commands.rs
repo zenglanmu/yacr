@@ -81,6 +81,12 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("DIAGNOSTICS", CommandId::Diagnostics),
     // AUDIT (AutoCAD 2026) is the **detect-only** drawing audit: it reports every stored entity that fails `cad_db::validate_entity` and repairs nothing (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). Read-only, so Viewer mode admits it.
     ("AUDIT", CommandId::AuditDrawing),
+    // The Wave 27 read-only AutoCAD 2026 reports: each reads the open document (or names the boundary where there is nothing to read) and writes nothing, so Viewer mode admits all four. RECOVER scans every stored entity like AUDIT and names the disk-level DWG salvage it does not implement; RECOVERALL is the same scan for this build's single open document.
+    ("RECOVER", CommandId::RecoverDrawing),
+    ("RECOVERALL", CommandId::RecoverAllDrawings),
+    // PURGEAECDATA has nothing to purge (no AEC objects are modelled) and SHOWURLS has nothing to list (no hyperlink data is retained); both report that boundary rather than an empty success.
+    ("PURGEAECDATA", CommandId::PurgeAecData),
+    ("SHOWURLS", CommandId::ShowUrls),
     ("SWITCHBACKEND", CommandId::SwitchBackend),
     ("SWITCH2D3D", CommandId::Switch2d3d),
     ("STANDARDVIEW", CommandId::StandardView),

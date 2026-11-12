@@ -975,6 +975,14 @@ pub enum CommandId {
     /// `LINETYPE` (Viewer-legal for `LIST`; `SET` re-authorizes work mode):
     /// list the drawing's linetypes or set one on the selection.
     Linetype,
+    /// `RECOVER`: read-only entity scan of the open document; repairs nothing. Contract: [`crate::app_recovery`].
+    RecoverDrawing,
+    /// `RECOVERALL`: the same single-document scan; no multi-document/xref batch. Contract: [`crate::app_recovery`].
+    RecoverAllDrawings,
+    /// `PURGEAECDATA`: reports that no AEC objects are modelled, so nothing is purged. Contract: [`crate::app_recovery`].
+    PurgeAecData,
+    /// `SHOWURLS`: reports that hyperlink/URL data is not retained; invents no rows. Contract: [`crate::app_recovery`].
+    ShowUrls,
     /// The sustained extended-command wrapper batch (payload-free 2D/session/
     /// report commands). Contract: [`crate::command_id::extended`].
     Extended(ExtendedCommandId),

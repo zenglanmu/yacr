@@ -250,6 +250,8 @@ mod pedit;
 mod plan_view;
 mod point_display_style;
 mod revision_cloud;
+// The Wave 27 read-only recovery/AEC/URL report contracts.
+mod recovery;
 mod select_filter;
 mod select_similar;
 // SSX Express-Tool selection-filter contracts.
