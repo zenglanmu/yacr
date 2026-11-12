@@ -279,6 +279,12 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // entities and repairs nothing, so its own label says "Audit" and the
           // report text (from Rust) states that no repair was performed.
           { id: 'audit', labelKey: 'audit.title', icon: 'diagnostics', command: 'AUDIT' },
+          // RECOVER is the recovery report's File entry: it sits beside AUDIT
+          // because it is the same kind of surface (a read-only report the router
+          // produces, never a chrome action). The other two new reports
+          // (RECOVERALL, PURGEAECDATA) stay command-line/catalog only, so this
+          // panel gains one row rather than three.
+          { id: 'recover', labelKey: 'draw.kind.recover', icon: 'diagnostics', command: 'RECOVER' },
           { id: 'clean', labelKey: 'status.clean_screen', icon: 'cleanScreen', action: 'cleanScreen', variants: [
             // The typed-word selectors live beside the toggle that shares their
             // state: `clean-on` enters clean screen explicitly (`CLEANSCREENON`),

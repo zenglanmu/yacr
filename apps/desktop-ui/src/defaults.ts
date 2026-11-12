@@ -17,7 +17,8 @@
 // is handed to the single shortcut-menu hook below — which builds the menu model
 // the app renders as an in-DOM overlay.
 import { buildContextMenu } from './commands/context-menu.ts';
-import type { ContextMenuModel, ContextMenuSelection } from './commands/context-menu.ts';
+import type { ContextMenuModel, ContextMenuSelection, ContextMenuState } from './commands/context-menu.ts';
+import type { CadStatus } from './cad/cad-status.ts';
 import { pointerPosition } from './cad/metrics.ts';
 import type { LocalPoint } from './cad/metrics.ts';
 
@@ -130,6 +131,51 @@ export function cadContextMenuRequest(detail: CadContextMenuDetail = {}): Contex
     canFit: detail.canFit === true,
     hasDocument: detail.hasDocument === true,
   });
+}
+
+/** The live facts a CAD right-click turns into the overlay's state. */
+export interface CadContextMenuFacts {
+  /** The latest `cad_status`, or `null` before the first answer. */
+  readonly status: CadStatus | null;
+  /** The command line's own history (newest last); there is no second log. */
+  readonly history: readonly string[];
+  /** The CAD partition element, or `null` while it is not mounted. */
+  readonly node: Element | null;
+}
+
+/**
+ * The overlay state for one CAD right-click.
+ *
+ * This is the app's callback body, kept here so `App.tsx` stays inside the code
+ * gate: the hook reports its point relative to the partition, and the overlay is
+ * viewport-fixed, so the partition rect is what converts it. `repeat` reads the
+ * command line's own newest history entry, and `canFit`/`hasDocument` are the
+ * same host facts the command-line admission rule uses. A missing node keeps the
+ * press at its own coordinates (the menu still opens) instead of dropping it.
+ */
+export function cadContextMenuState(
+  detail: CadContextMenuDetail,
+  { status, history, node }: CadContextMenuFacts,
+): ContextMenuState {
+  const bounds = node && typeof node.getBoundingClientRect === 'function'
+    ? node.getBoundingClientRect()
+    : null;
+  const point = detail.point ?? { x: 0, y: 0 };
+  return {
+    point: {
+      x: (bounds?.left ?? 0) + point.x,
+      y: (bounds?.top ?? 0) + point.y,
+    },
+    rect: bounds
+      ? { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height }
+      : null,
+    menu: cadContextMenuRequest({
+      ...detail,
+      lastCommand: history.at(-1) ?? null,
+      canFit: status?.canFit === true,
+      hasDocument: (status?.documentLabel ?? null) !== null,
+    }),
+  };
 }
 
 /**

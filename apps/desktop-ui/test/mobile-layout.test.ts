@@ -116,12 +116,13 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
   // The Home tab keeps its tool panels and drops the two palette-only ones.
   assert.deepEqual(mobileRibbonSections('home').map(section => section.id), ['clipboard', 'draw', 'modify', 'properties', 'navigate']);
   // The File tab keeps both panels: the utilities cluster still offers Audit,
-  // About, Options and the direct Plugins page after its palette and chrome
-  // switches are gone. Plugins is a dialog entry, so the compact layout keeps it too.
+  // the recovery report, About, Options and the direct Plugins page after its
+  // palette and chrome switches are gone. Plugins is a dialog entry, so the
+  // compact layout keeps it too.
   assert.deepEqual(mobileRibbonSections('file').map(section => section.id), ['file', 'utilities']);
   assert.deepEqual(
     mobileRibbonSections('file').at(-1).items.map(item => item.id),
-    ['audit', 'about', 'options', 'plugins'],
+    ['audit', 'recover', 'about', 'options', 'plugins'],
   );
   // The View tab keeps its `palettes` panel only because STATUS is a router
   // command; the palette toggles, the chrome-collapse switches and the

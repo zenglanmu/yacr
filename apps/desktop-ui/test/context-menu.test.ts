@@ -275,7 +275,10 @@ test('App mounts the overlay, dispatches through the shared funnel and closes on
   assert.equal((appModule.match(/useLocalSelectors\(/g) ?? []).length, 1, 'the local selector is reused, not duplicated');
   assert.equal((selectors.match(/isPropertiesCommand\(/g) ?? []).length, 1, 'one selector rule, one table');
   // Repeat reads the command line's own history — there is no second history.
-  assert.match(app, /lastCommand: historyRef\.current\.at\(-1\) \?\? null/);
+  // The detail→overlay conversion (partition rect, `repeat`, `canFit`) lives in
+  // `defaults.ts` beside the menu model; the app only supplies the live facts.
+  assert.match(app, /lastCommand: history\.at\(-1\) \?\? null/);
+  assert.match(app, /cadContextMenuState\(detail, \{/);
   // The state is still the one hook from `defaults.mjs`.
   assert.match(app, /onContextMenu: detail => \{/);
   assert.match(app, /cadContextMenuRequest\(\{/);

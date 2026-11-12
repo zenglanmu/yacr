@@ -89,6 +89,12 @@ export const HOST_NAMES = [
   // `COMMAND_TABLE`; this mirror stands in for the loaded `cad_commands`
   // vocabulary and never proves the host advertises the name.
   'AUDIT',
+  // The 2026-11-12 file-report batch: RECOVER/RECOVERALL report the recovery
+  // pass and PURGEAECDATA reports the drawing's AEC proxy data. Each is a
+  // read-only report selector the Rust lane adds to `COMMAND_TABLE`; as with
+  // AUDIT, this mirror stands in for the loaded `cad_commands` vocabulary and
+  // never proves the host advertises the names.
+  'RECOVER', 'RECOVERALL', 'PURGEAECDATA',
   // Inquiry commands: read-only/Viewer-legal; FS is the Express direct-touch grower.
   'LIST',
   'STATUS',

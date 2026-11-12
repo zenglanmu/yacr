@@ -43,6 +43,8 @@ import {
   isFileTabCommand,
   isHidePalettesCommand,
   isLayerCloseCommand,
+  isPerfAnalyzerCloseCommand,
+  isPerfAnalyzerCommand,
   isPmToggleCommand,
   isPropertiesCloseCommand,
   isQuickCalcCloseCommand,
@@ -56,10 +58,14 @@ import {
   isRibbonCommand,
   isShowPalettesCommand,
   isToolbarCommand,
+  isToolPalettesCloseCommand,
+  isToolPalettesCommand,
   isUpdateThumbsNowCommand,
   isWorkspaceCommand,
   isWorkspaceSaveCommand,
   isWorkspaceSettingsCommand,
+  TOOL_PALETTES_BLOCKS_TAB,
+  toolPalettesTab,
 } from './chrome-commands.ts';
 import type { ClassicPanelKind, QuickViewKind, WorkspaceDialogMode } from '../chrome/surfaces.ts';
 
@@ -105,6 +111,14 @@ export type LocalSelectorResult =
   | { readonly kind: 'workspace' }
   /** Open the workspace settings dialog in list or save-current mode. */
   | { readonly kind: 'workspaceSettings'; readonly mode: WorkspaceDialogMode }
+  /** Open (or re-focus) the Tool Palettes float (`TOOLPALETTES`). */
+  | { readonly kind: 'toolPalettes' }
+  /** Close the Tool Palettes float; already closed is a success. */
+  | { readonly kind: 'toolPalettesClose' }
+  /** Show one Tool Palettes tab (`TPNAVIGATE <tab>`); the dispatch refuses any but Blocks. */
+  | { readonly kind: 'toolPalettesTab'; readonly tab: string }
+  /** Open (`true`) or close (`false`) the Performance Analyzer float. */
+  | { readonly kind: 'performanceAnalyzer'; readonly value: boolean }
   | { readonly kind: 'refused'; readonly panelKey: string };
 
 /** The panel labels the layout refusal names. */
@@ -112,6 +126,18 @@ export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
   properties: 'properties.panel',
   layers: 'layers.panel',
 });
+
+/**
+ * The refusal sentence for a `TPNAVIGATE` tab, or `null` when it opens the panel.
+ *
+ * This build's Tool Palettes has exactly one tab, Blocks. Any other name (and
+ * the bare word, which names no tab) is answered with a clear sentence instead
+ * of a silent success or a router line.
+ */
+export function toolPalettesTabRefusalKey(tab: string): string | null {
+  if (tab === TOOL_PALETTES_BLOCKS_TAB) return null;
+  return tab === '' ? 'toolpalettes.refusal.no_tab' : 'toolpalettes.refusal.only_blocks';
+}
 
 /**
  * Resolve typed text to the chrome-local surface it opens, or `null` when the
@@ -132,7 +158,9 @@ export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
  * `HIDEPALETTES`/`SHOWPALETTES`, `TOOLBAR`/`-TOOLBAR`, the two Quick View
  * pairs, `QUICKCALC`/`QCCLOSE`, `UPDATETHUMBSNOW`, `WORKSPACE*`) only set chrome
  * state or open a chrome-owned surface, so none of them depends on the layout or
- * on a document.
+ * on a document. `TOOLPALETTES*`, `TPNAVIGATE` and `PERFANALYZER*` are the same
+ * kind of word: a chrome float and its idempotent close, and a tab name that is
+ * answered (and, for any tab but Blocks, refused in words) locally.
  */
 export function localSelectorFor(text: string, layout: LayoutMode): LocalSelectorResult | null {
   if (isOptionsCommand(text)) return { kind: 'options' };
@@ -191,6 +219,16 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
   if (isCleanScreenOffCommand(text)) return { kind: 'cleanScreen', value: false };
   if (isPropertiesCloseCommand(text)) return { kind: 'propertiesClose' };
   if (isLayerCloseCommand(text)) return { kind: 'layersClose' };
+  // The two chrome floats own no shell state and need no document, so they are
+  // layout-independent like the closes above; a close on any layout is a
+  // success. `TPNAVIGATE` keeps every tab name local (the dispatch refuses the
+  // ones this build does not have), so no `TPNAVIGATE …` line reaches the router.
+  if (isToolPalettesCommand(text)) return { kind: 'toolPalettes' };
+  if (isToolPalettesCloseCommand(text)) return { kind: 'toolPalettesClose' };
+  const tab = toolPalettesTab(text);
+  if (tab !== null) return { kind: 'toolPalettesTab', tab };
+  if (isPerfAnalyzerCommand(text)) return { kind: 'performanceAnalyzer', value: true };
+  if (isPerfAnalyzerCloseCommand(text)) return { kind: 'performanceAnalyzer', value: false };
   return null;
 }
 
@@ -242,6 +280,12 @@ export interface LocalSelectorHost {
   readonly openWorkspace: () => void;
   /** Open the workspace settings dialog (`WSSETTINGS` lists, `WSSAVE` saves). */
   readonly openWorkspaceSettings: (mode: WorkspaceDialogMode) => void;
+  /** Open (or re-focus) the Tool Palettes float (`TOOLPALETTES`, `TPNAVIGATE Blocks`). */
+  readonly openToolPalettes: () => void;
+  /** Close the Tool Palettes float (`TOOLPALETTESCLOSE`; a no-op when already closed). */
+  readonly closeToolPalettes: () => void;
+  /** Open (`true`) or close (`false`) the Performance Analyzer float. */
+  readonly setPerformanceAnalyzer: (open: boolean) => void;
   /** Put a refusal sentence on the chrome's one error line. */
   readonly reportError: (message: string) => void;
 }
@@ -283,6 +327,9 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     setToolbarVisible,
     openWorkspace,
     openWorkspaceSettings,
+    openToolPalettes,
+    closeToolPalettes,
+    setPerformanceAnalyzer,
     reportError,
   } = host;
   return useCallback((text: string, fromInput: boolean): boolean => {
@@ -318,6 +365,17 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'toolbar': setToolbarVisible(result.value); break;
       case 'workspace': openWorkspace(); break;
       case 'workspaceSettings': openWorkspaceSettings(result.mode); break;
+      case 'toolPalettes': openToolPalettes(); break;
+      case 'toolPalettesClose': closeToolPalettes(); break;
+      case 'toolPalettesTab': {
+        // Only the Blocks tab exists: that name opens (or re-focuses) the float,
+        // and any other name is a refusal sentence — never a router line.
+        const refusal = toolPalettesTabRefusalKey(result.tab);
+        if (refusal === null) openToolPalettes();
+        else reportError(translate(refusal, result.tab === '' ? {} : { tab: result.tab }));
+        break;
+      }
+      case 'performanceAnalyzer': setPerformanceAnalyzer(result.value); break;
     }
     return true;
   }, [
@@ -348,6 +406,9 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     setToolbarVisible,
     openWorkspace,
     openWorkspaceSettings,
+    openToolPalettes,
+    closeToolPalettes,
+    setPerformanceAnalyzer,
     reportError,
   ]);
 }

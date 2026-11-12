@@ -36,6 +36,16 @@ export interface ChromeSurfaceState {
   readonly classicPanel: ClassicPanelKind | null;
   readonly workspaceSelector: boolean;
   readonly workspaceSettings: WorkspaceDialogMode | null;
+  /** The Tool Palettes float (`TOOLPALETTES`/`TPNAVIGATE Blocks`); non-modal. */
+  readonly toolPalettes: boolean;
+  /**
+   * Bumped by every open request (`TOOLPALETTES`, `TPNAVIGATE Blocks`), so an
+   * already-open panel takes the keyboard on the second request too instead of
+   * silently staying where it is.
+   */
+  readonly toolPalettesFocus: number;
+  /** The Performance Analyzer float (`PERFANALYZER`); non-modal. */
+  readonly performanceAnalyzer: boolean;
 }
 
 const CLOSED: ChromeSurfaceState = Object.freeze({
@@ -46,6 +56,9 @@ const CLOSED: ChromeSurfaceState = Object.freeze({
   classicPanel: null,
   workspaceSelector: false,
   workspaceSettings: null,
+  toolPalettes: false,
+  toolPalettesFocus: 0,
+  performanceAnalyzer: false,
 });
 
 let state: ChromeSurfaceState = CLOSED;
@@ -149,6 +162,40 @@ export function openWorkspaceSettings(mode: WorkspaceDialogMode = 'settings'): v
 export function closeWorkspaceSettings(): void {
   if (state.workspaceSettings === null) return;
   publish({ ...state, workspaceSettings: null });
+}
+
+/**
+ * Open (or re-focus) the Tool Palettes float, closing the other floats.
+ *
+ * `TOOLPALETTES` and `TPNAVIGATE Blocks` are the same request: this build has
+ * exactly one tab (Blocks), so "open on Blocks" and "switch to Blocks" are one
+ * state — the panel is already on its only tab, and a repeat word is never a
+ * silent nothing.
+ */
+export function openToolPalettes(): void {
+  publish({
+    ...CLOSED,
+    toolPalettes: true,
+    toolPalettesFocus: state.toolPalettesFocus + 1,
+    quickViewRevision: state.quickViewRevision,
+  });
+}
+
+/** Close the Tool Palettes float; already closed is a success. */
+export function closeToolPalettes(): void {
+  if (!state.toolPalettes) return;
+  publish({ ...state, toolPalettes: false });
+}
+
+/** Open the Performance Analyzer float, closing the other floats. */
+export function openPerformanceAnalyzer(): void {
+  publish({ ...CLOSED, performanceAnalyzer: true, quickViewRevision: state.quickViewRevision });
+}
+
+/** Close the Performance Analyzer float; already closed is a success. */
+export function closePerformanceAnalyzer(): void {
+  if (!state.performanceAnalyzer) return;
+  publish({ ...state, performanceAnalyzer: false });
 }
 
 /** Reset the store. Contract tests call this between cases. */

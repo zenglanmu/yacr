@@ -7,7 +7,7 @@
 // command line uses. The pending row is dropped when the flow is cancelled or
 // another tool owns the pointer.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { closeClassicPanel } from '../chrome/surfaces.ts';
+import { closeClassicPanel, closeToolPalettes } from '../chrome/surfaces.ts';
 import type { CadStatus } from '../cad/cad-status.ts';
 
 interface ToolTextResult {
@@ -33,7 +33,11 @@ export function useInsertBlock({
   const [revision, setRevision] = useState(0);
 
   const insertBlockByName = useCallback((name: string) => {
+    // Both block surfaces arm this one flow; only one of them can be open (the
+    // surfaces store closes the others on open), so closing both is a no-op for
+    // whichever panel is not there.
     closeClassicPanel();
+    closeToolPalettes();
     pending.current = { name, armed: false, ticks: 0 };
     setRevision(tick => tick + 1);
     submitCommand('INSERT');

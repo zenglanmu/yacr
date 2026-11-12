@@ -29,7 +29,7 @@ import { awaitingToolText, setToolText } from './tools/text.ts';
 import { setSelectedText } from './tools/textedit.ts';
 import { submitStandardView } from './cad/view3d.ts';
 import { isErrorReportVisible } from './errors/error-report.ts';
-import { bindBrowserDefaults, cadContextMenuRequest, isTextEntryTarget } from './defaults.ts';
+import { bindBrowserDefaults, cadContextMenuState, isTextEntryTarget } from './defaults.ts';
 import { admitCommandText, toolCommandForKey } from './commands/commands.ts';
 import { commandMessageFor } from './commands/command-message.ts';
 import type { CommandMessage } from './commands/command-message.ts';
@@ -66,11 +66,15 @@ import { useWorkspaceSnapshot, useChromeSurfaceState } from './chrome/use-chrome
 import { appliedWorkspace } from './chrome/workspaces.ts';
 import { DEFAULT_CHROME_VISIBILITY, paletteChrome, withFileTabs, withRibbon } from './chrome/visibility.ts';
 import {
+  closePerformanceAnalyzer,
   closeQuickCalc,
   closeQuickView, openClassicPanel,
   openClassicXref,
+  openPerformanceAnalyzer,
   openQuickCalc,
   openQuickView,
+  openToolPalettes,
+  closeToolPalettes,
   openWorkspaceSelector,
   openWorkspaceSettings,
   refreshQuickView,
@@ -498,6 +502,8 @@ function Shell() {
     setToolbarVisible: (value: boolean) => setToolbarVisible(value),
     openWorkspace: openWorkspaceSelector,
     openWorkspaceSettings,
+    openToolPalettes, closeToolPalettes,
+    setPerformanceAnalyzer: (open: boolean) => { if (open) openPerformanceAnalyzer(); else closePerformanceAnalyzer(); },
     reportError: setError,
   });
 
@@ -617,7 +623,8 @@ function Shell() {
       // A modal chrome dialog owns every key; a floating panel owns only Escape.
       if (chromeSurfaces.quickCalc || chromeSurfaces.workspaceSettings !== null) return;
       if (event.key === 'Escape'
-        && (chromeSurfaces.quickView !== null || chromeSurfaces.workspaceSelector)) return;
+        && (chromeSurfaces.quickView !== null || chromeSurfaces.workspaceSelector
+          || chromeSurfaces.toolPalettes || chromeSurfaces.performanceAnalyzer)) return;
       if (dwgSavePending()) return; // the DWG save confirmation owns Escape
       // Ctrl+0 is both the app's clean-screen toggle and WebKit's zoom reset.
       // Handle it before the `defaultPrevented` check: the webview-default guard
@@ -729,29 +736,13 @@ function Shell() {
         return { selection: current?.selection ?? null, tool: current?.tool ?? null };
       },
       // The hook reports the point relative to the partition; the overlay is
-      // viewport-fixed, so the partition rect is what converts it. `repeat` reads
-      // the command line's own newest history entry, and `canFit`/`hasDocument`
-      // are the host facts the command-line admission rule already uses.
+      // viewport-fixed, so the partition rect is what converts it, and `repeat`
+      // reads the command line's own newest history entry. The conversion itself
+      // lives in `defaults.ts` beside the menu model it wraps.
       onContextMenu: detail => {
-        const node = surfaceNodeRef.current;
-        const bounds = node ? node.getBoundingClientRect() : null;
-        const current = statusRef.current;
-        const point = detail.point ?? { x: 0, y: 0 };
-        setContextMenu({
-          point: {
-            x: (bounds?.left ?? 0) + point.x,
-            y: (bounds?.top ?? 0) + point.y,
-          },
-          rect: bounds
-            ? { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height }
-            : null,
-          menu: cadContextMenuRequest({
-            ...detail,
-            lastCommand: historyRef.current.at(-1) ?? null,
-            canFit: current?.canFit === true,
-            hasDocument: (current?.documentLabel ?? null) !== null,
-          }),
-        });
+        setContextMenu(cadContextMenuState(detail, {
+          status: statusRef.current, history: historyRef.current, node: surfaceNodeRef.current,
+        }));
       },
     });
     return () => guard.dispose();

@@ -163,4 +163,16 @@ export const EXTENDED_COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.f
   { id: 'VBAUNLOAD', labelKey: 'draw.kind.vbaunload', icon: 'terminal', group: 'properties' },
   { id: 'SCRIPT', labelKey: 'draw.kind.script', icon: 'terminal', group: 'properties' },
 
+  // The 2026-11-12 file-report batch: three **real** read-only report selectors
+  // (the Rust router answers each with what its pass found; nothing is repaired,
+  // purged or written). They are listed in the File group, which is the tab that
+  // owns recovery/purge utilities, and they are **not** refusals: the host
+  // vocabulary alone decides whether they are advertised. Appended last so no
+  // shipped row moves. The glyphs are the recovery/report family (`diagnostics`),
+  // the batch-open mark (`open`) and the removal mark PURGE already uses
+  // (`erase`).
+  { id: 'RECOVER', labelKey: 'draw.kind.recover', icon: 'diagnostics', group: 'file' },
+  { id: 'RECOVERALL', labelKey: 'draw.kind.recoverall', icon: 'open', group: 'file' },
+  { id: 'PURGEAECDATA', labelKey: 'draw.kind.purgeaecdata', icon: 'erase', group: 'file' },
+
 ]);

@@ -3,18 +3,21 @@
 //
 // Fourteen visibility/window words in the first wave (`RIBBON`…`WSSETTINGS`) and
 // three more in the amendment (`QCCLOSE`, `UPDATETHUMBSNOW`, `TOOLBAR`/
-// `-TOOLBAR`). The suite pins the selector table, the resolution kinds, the
-// catalog/ribbon/i18n surface, the visibility value (a set, never a toggle), the
-// Quick View projection, the calculator arithmetic/memory, and the in-memory
-// workspace store. No React DOM is rendered: the stores and models are pure.
+// `-TOOLBAR`). The two floats `TOOLPALETTES`/`PERFANALYZER`, their close words
+// and the `TPNAVIGATE` tab word are the same kind of chrome-local selector. The
+// suite pins the selector table, the resolution kinds, the catalog/ribbon/i18n
+// surface, the visibility value (a set, never a toggle), the Quick View
+// projection, the calculator arithmetic/memory, and the in-memory workspace
+// store. No React DOM is rendered: the stores and models are pure.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CHROME_COMMAND_NAMES,
   CHROME_COMMANDS,
   dashToolbarVisibility,
+  toolPalettesTab,
 } from '../src/commands/chrome-commands.ts';
-import { localSelectorFor } from '../src/commands/local-selectors.ts';
+import { localSelectorFor, toolPalettesTabRefusalKey } from '../src/commands/local-selectors.ts';
 import {
   admitCommandText,
   isLocalChromeCommand,
@@ -61,10 +64,14 @@ import {
 } from '../src/chrome/workspaces.ts';
 import {
   chromeSurfaceSnapshot,
+  closePerformanceAnalyzer,
   closeQuickCalc,
   closeQuickView,
+  closeToolPalettes,
+  openPerformanceAnalyzer,
   openQuickCalc,
   openQuickView,
+  openToolPalettes,
   openWorkspaceSelector,
   openWorkspaceSettings,
   refreshQuickView,
@@ -81,7 +88,13 @@ const WAVE = [
   'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE', 'QUICKCALC',
   'WORKSPACE', 'WSSAVE', 'WSSETTINGS',
   'QCCLOSE', 'UPDATETHUMBSNOW', 'TOOLBAR', '-TOOLBAR',
+  'TOOLPALETTES', 'TOOLPALETTESCLOSE', 'TPNAVIGATE', 'PERFANALYZER', 'PERFANALYZERCLOSE',
 ];
+
+// `TPNAVIGATE` is the second declared argument-taking row (`-TOOLBAR` is the
+// first): its grammar is a tab name, so the "bare word only" loop skips it and
+// the explicit block below pins its own rule.
+const EXACT_WORD_WAVE = WAVE.filter(name => name !== 'TPNAVIGATE');
 
 const CATALOG_SLUG = {
   '-TOOLBAR': 'draw.kind.dashtoolbar',
@@ -97,8 +110,8 @@ async function iconNames() {
   return new Set([...map[1].matchAll(/\n\s*([A-Za-z][A-Za-z0-9]*):/g)].map(match => match[1]));
 }
 
-test('the selector table is append-only and every row matches exactly one word', () => {
-  assert.equal(CHROME_COMMANDS.length, 33);
+test('the selector table is append-only and every row matches its documented word or argument', () => {
+  assert.equal(CHROME_COMMANDS.length, 38);
   assert.deepEqual([...CHROME_COMMAND_NAMES], [
     'ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE', 'DSETTINGS',
     'QUICKPROPERTIES', 'CLASSICLAYER', 'COMMANDLINE', 'COMMANDLINEHIDE',
@@ -108,19 +121,31 @@ test('the selector table is append-only and every row matches exactly one word',
     'QVDRAWING', 'QVDRAWINGCLOSE', 'QVLAYOUT', 'QVLAYOUTCLOSE', 'QUICKCALC',
     'WORKSPACE', 'WSSAVE', 'WSSETTINGS',
     'QCCLOSE', 'UPDATETHUMBSNOW', 'TOOLBAR', '-TOOLBAR',
+    'TOOLPALETTES', 'TOOLPALETTESCLOSE', 'TPNAVIGATE', 'PERFANALYZER', 'PERFANALYZERCLOSE',
   ]);
-  for (const name of WAVE) {
+  for (const name of EXACT_WORD_WAVE) {
     const row = CHROME_COMMANDS.find(selector => selector.name === name);
     assert.ok(row, `${name} must have a row`);
     assert.equal(row.matches(name.toLowerCase()), true, `${name} is case-insensitive`);
     assert.equal(row.matches(`  ${name}  `), true, `${name} is trimmed`);
     assert.equal(row.matches(`${name} 1`), false, `${name} is the bare word`);
   }
-  // `-TOOLBAR` is the one argument-taking row; any other argument is not it.
+  // `-TOOLBAR` is the one show/hide row; any other argument is not it.
   assert.equal(dashToolbarVisibility('-TOOLBAR'), true);
   assert.equal(dashToolbarVisibility('-toolbar show'), true);
   assert.equal(dashToolbarVisibility('-TOOLBAR HIDE'), false);
   assert.equal(dashToolbarVisibility('-TOOLBAR TOGGLE'), null);
+  // `TPNAVIGATE` is the tab row: the bare word is the empty tab (still the
+  // chrome's line) and any single word is an argument, never a router line.
+  const navigate = CHROME_COMMANDS.find(selector => selector.name === 'TPNAVIGATE');
+  assert.ok(navigate, 'TPNAVIGATE must have a row');
+  assert.equal(navigate.matches('tpnavigate blocks'), true);
+  assert.equal(navigate.matches('  TPNAVIGATE Blocks  '), true);
+  assert.equal(navigate.matches('TPNAVIGATE'), true);
+  assert.equal(navigate.matches('TPNAVIGATE2 Blocks'), false, 'a longer word is not this row');
+  assert.equal(toolPalettesTab('TPNAVIGATE  Blocks '), 'BLOCKS', 'the tab is trimmed and upper-cased');
+  assert.equal(toolPalettesTab('TPNAVIGATE'), '');
+  assert.equal(toolPalettesTab('TOOLPALETTES'), null);
 });
 
 test('every word resolves to a chrome-local result on desktop and mobile', () => {
@@ -147,6 +172,13 @@ test('every word resolves to a chrome-local result on desktop and mobile', () =>
     WORKSPACE: { kind: 'workspace' },
     WSSAVE: { kind: 'workspaceSettings', mode: 'save' },
     WSSETTINGS: { kind: 'workspaceSettings', mode: 'settings' },
+    TOOLPALETTES: { kind: 'toolPalettes' },
+    TOOLPALETTESCLOSE: { kind: 'toolPalettesClose' },
+    // The bare word names no tab: it is still answered here (and refused in
+    // words by the dispatch), never forwarded as a router line.
+    TPNAVIGATE: { kind: 'toolPalettesTab', tab: '' },
+    PERFANALYZER: { kind: 'performanceAnalyzer', value: true },
+    PERFANALYZERCLOSE: { kind: 'performanceAnalyzer', value: false },
   };
   for (const [word, result] of Object.entries(expected)) {
     assert.deepEqual(localSelectorFor(word, 'desktop'), result, word);
@@ -158,6 +190,19 @@ test('every word resolves to a chrome-local result on desktop and mobile', () =>
   // A near miss is a router line, not a silent toggle.
   assert.equal(localSelectorFor('-TOOLBAR TOGGLE', 'desktop'), null);
   assert.equal(localSelectorFor('RIBBONS', 'desktop'), null);
+
+  // TPNAVIGATE only knows the Blocks tab. That name opens the panel; every other
+  // name (and the bare word) carries a refusal sentence key instead — and all of
+  // them resolve locally, so none can fall through to `cad_command`.
+  assert.deepEqual(localSelectorFor('TPNAVIGATE Blocks', 'desktop'), { kind: 'toolPalettesTab', tab: 'BLOCKS' });
+  assert.deepEqual(localSelectorFor('tpnavigate bLoCkS', 'mobile'), { kind: 'toolPalettesTab', tab: 'BLOCKS' });
+  assert.equal(toolPalettesTabRefusalKey('BLOCKS'), null, 'Blocks is the tab that exists');
+  for (const tab of ['TOOLS', 'PATTERNS', '']) {
+    assert.deepEqual(localSelectorFor(`TPNAVIGATE ${tab}`.trim(), 'desktop'), { kind: 'toolPalettesTab', tab });
+    assert.ok(toolPalettesTabRefusalKey(tab), `${tab || '(bare)'} must be refused in words`);
+  }
+  assert.equal(toolPalettesTabRefusalKey(''), 'toolpalettes.refusal.no_tab');
+  assert.equal(toolPalettesTabRefusalKey('TOOLS'), 'toolpalettes.refusal.only_blocks');
 });
 
 test('every selector is admitted by the chrome with no document and no vocabulary', async () => {
@@ -328,6 +373,29 @@ test('the surfaces store opens, refreshes and closes idempotently', () => {
   assert.equal(chromeSurfaceSnapshot().workspaceSettings, 'save');
   openWorkspaceSettings('settings');
   assert.equal(chromeSurfaceSnapshot().workspaceSettings, 'settings');
+
+  // The two new floats: one chrome float at a time, and every close is
+  // idempotent success (a second `…CLOSE` is a no-op, never a refusal).
+  resetChromeSurfaces();
+  openToolPalettes();
+  assert.equal(chromeSurfaceSnapshot().toolPalettes, true);
+  assert.equal(chromeSurfaceSnapshot().performanceAnalyzer, false);
+  openPerformanceAnalyzer();
+  assert.equal(chromeSurfaceSnapshot().toolPalettes, false, 'a second float closes the first');
+  assert.equal(chromeSurfaceSnapshot().performanceAnalyzer, true);
+  closeToolPalettes();
+  assert.equal(chromeSurfaceSnapshot().performanceAnalyzer, true, 'closing the other float changes nothing');
+  closePerformanceAnalyzer();
+  closePerformanceAnalyzer();
+  assert.equal(chromeSurfaceSnapshot().performanceAnalyzer, false, 'PERFANALYZERCLOSE is idempotent');
+  openToolPalettes();
+  openQuickCalc();
+  assert.equal(chromeSurfaceSnapshot().toolPalettes, false, 'the calculator float closes it too');
+  closeQuickCalc();
+  openToolPalettes();
+  closeToolPalettes();
+  closeToolPalettes();
+  assert.equal(chromeSurfaceSnapshot().toolPalettes, false, 'TOOLPALETTESCLOSE is idempotent');
   resetChromeSurfaces();
 });
 

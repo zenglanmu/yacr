@@ -897,4 +897,10 @@ export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze([
   // writes); `TOOLBAR`/`-TOOLBAR` set the quick-access strip's visibility.
   'QCCLOSE', 'UPDATETHUMBSNOW', 'TOOLBAR', '-TOOLBAR',
   'WORKSPACE', 'WSSAVE', 'WSSETTINGS',
+  // The 2026-11-12 floats: `TOOLPALETTES`/`TOOLPALETTESCLOSE` and
+  // `PERFANALYZER`/`PERFANALYZERCLOSE` open/close one chrome-owned panel each (a
+  // repeat close is a success), and `TPNAVIGATE` names a Tool Palettes tab. Every
+  // name is answered before `cad_command`; a tab this build does not have is
+  // refused in words, never forwarded as a command.
+  'TOOLPALETTES', 'TOOLPALETTESCLOSE', 'TPNAVIGATE', 'PERFANALYZER', 'PERFANALYZERCLOSE',
 ]);

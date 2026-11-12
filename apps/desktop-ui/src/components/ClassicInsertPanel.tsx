@@ -10,15 +10,19 @@
 // line uses. A block without stored metadata cannot be addressed by INSERT, so
 // its action stays disabled with the stable reason.
 //
+// The rows themselves live in `BlockList.tsx`, shared with the Tool Palettes'
+// Blocks tab: both surfaces list the same definitions and arm the same flow, so
+// they word every row and every refusal identically.
+//
 // The panel is non-modal: no backdrop and no focus trap. It takes the keyboard
 // on open, closes on Escape and restores the previous focus.
-import React, { useRef, useState } from 'react';
+import React from 'react';
 import { Icon } from '../icons.tsx';
 import { IconButton } from './primitives.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { blockRows } from '../classic/classic-rows.ts';
-import type { BlockRow } from '../classic/classic-rows.ts';
 import { useSurfacePanelFocus } from './surface-focus.ts';
+import { BlockList } from './BlockList.tsx';
 
 interface ClassicInsertPanelProps {
   readonly onClose: () => void;
@@ -26,68 +30,10 @@ interface ClassicInsertPanelProps {
   readonly onInsert: (name: string) => void;
 }
 
-function formatPoint(point: readonly [number, number, number]): string {
-  return point.map(value => (Number.isInteger(value) ? String(value) : value.toFixed(6))).join(', ');
-}
-
-function BlockRowView({
-  row,
-  focused,
-  reason,
-  onFocus,
-  onInsert,
-}: {
-  readonly row: BlockRow;
-  readonly focused: boolean;
-  readonly reason: string | null;
-  readonly onFocus: () => void;
-  readonly onInsert: () => void;
-}) {
-  const { t } = useI18n();
-  const rowRef = useRef<HTMLLIElement | null>(null);
-  const name = row.name ?? t('classicinsert.unnamed');
-  return (
-    <li
-      ref={rowRef}
-      tabIndex={-1}
-      className={['references__row', 'is-muted', focused ? 'is-focused' : ''].filter(Boolean).join(' ')}
-      aria-current={focused ? 'true' : undefined}
-    >
-      <div className="references__head">
-        <span className="references__name" title={name}>{name}</span>
-        <button
-          type="button"
-          className="quick-view__badge is-muted"
-          onClick={() => { onFocus(); rowRef.current?.focus({ preventScroll: true }); }}
-        >
-          {t('classicinsert.focus')}
-        </button>
-        <button
-          type="button"
-          disabled={reason !== null}
-          title={reason ?? t('classicinsert.action.insert')}
-          onClick={() => { onFocus(); onInsert(); }}
-        >
-          {t('classicinsert.action.insert')}
-        </button>
-      </div>
-      <p className="references__meta">
-        <span>{t('classicinsert.memberCount', { count: row.memberCount })}</span>
-        {row.basePoint === null ? null : (
-          <span>{t('classicinsert.basePoint')}: <code>{formatPoint(row.basePoint)}</code></span>
-        )}
-        <span>{focused ? t('classicinsert.focused') : ''}</span>
-      </p>
-      {row.insertable ? null : <p className="references__hint">{t('classicinsert.refusal.no_metadata')}</p>}
-    </li>
-  );
-}
-
 export function ClassicInsertPanel({ onClose, onInsert }: ClassicInsertPanelProps) {
   const { t } = useI18n();
   const shell = useShell();
   const { panelRef } = useSurfacePanelFocus(onClose);
-  const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const rows = blockRows(shell.status);
   const loading = Boolean(shell.status?.loading);
   const documentOpen = Boolean(shell.status?.documentLabel) && !loading;
@@ -111,28 +57,13 @@ export function ClassicInsertPanel({ onClose, onInsert }: ClassicInsertPanelProp
       {rows.length === 0 ? (
         <p className="quick-view__empty">{t('classicinsert.empty')}</p>
       ) : (
-        <div className="quick-view__grid">
-          <ul className="references__list">
-            {rows.map((row, index) => {
-              const key = `${row.name ?? ''}:${row.memberCount}:${index}`;
-              const reason = !documentOpen
-                ? t('classicinsert.refusal.no_document')
-                : loading || toolActive
-                  ? t('classicinsert.refusal.busy')
-                  : row.insertable ? null : t('classicinsert.refusal.no_metadata');
-              return (
-                <BlockRowView
-                  key={key}
-                  row={row}
-                  focused={focusedKey === key}
-                  reason={reason}
-                  onFocus={() => setFocusedKey(key)}
-                  onInsert={() => { if (row.name !== null) onInsert(row.name); }}
-                />
-              );
-            })}
-          </ul>
-        </div>
+        <BlockList
+          rows={rows}
+          documentOpen={documentOpen}
+          loading={loading}
+          toolActive={toolActive}
+          onInsert={onInsert}
+        />
       )}
     </aside>
   );

@@ -12,8 +12,10 @@ import { useInsertBlock } from '../classic/use-insert-block.ts';
 import {
   closeClassicPanel,
   closeClassicXref,
+  closePerformanceAnalyzer,
   closeQuickCalc,
   closeQuickView,
+  closeToolPalettes,
   closeWorkspaceSelector,
   closeWorkspaceSettings,
 } from '../chrome/surfaces.ts';
@@ -22,6 +24,8 @@ import { ClassicXrefPanel } from './ClassicXrefPanel.tsx';
 import { ClassicInsertPanel } from './ClassicInsertPanel.tsx';
 import { ClassicGroupPanel } from './ClassicGroupPanel.tsx';
 import { ClassicImagePanel } from './ClassicImagePanel.tsx';
+import { ToolPalettesPanel } from './ToolPalettesPanel.tsx';
+import { PerformanceAnalyzerPanel } from './PerformanceAnalyzerPanel.tsx';
 import { QuickCalcDialog } from './QuickCalcDialog.tsx';
 import { WorkspaceSelector, WorkspaceSettingsDialog } from './WorkspaceSurfaces.tsx';
 
@@ -55,6 +59,16 @@ export function ChromeSurfaces() {
       ) : null}
       {state.classicPanel === 'image' ? (
         <ClassicImagePanel onClose={closeClassicPanel} />
+      ) : null}
+      {state.toolPalettes ? (
+        <ToolPalettesPanel
+          focusRevision={state.toolPalettesFocus}
+          onClose={closeToolPalettes}
+          onInsert={insertBlock}
+        />
+      ) : null}
+      {state.performanceAnalyzer ? (
+        <PerformanceAnalyzerPanel onClose={closePerformanceAnalyzer} />
       ) : null}
       {state.workspaceSelector ? <WorkspaceSelector onClose={closeWorkspaceSelector} /> : null}
       {state.workspaceSettings !== null ? (

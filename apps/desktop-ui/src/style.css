@@ -2596,6 +2596,36 @@ button, input, select { font: inherit; color: inherit; }
   color: var(--text-muted); font-size: 10.5px; line-height: 1.4;
 }
 
+/* Two body shapes the newer floats add inside the same shell: the Tool Palettes'
+   one-tab strip, and the Performance Analyzer's key/value sections. They reuse
+   the head/subtitle/foot tokens above, so a float still reads as one family. */
+.quick-view__tabs {
+  display: flex; gap: 2px; padding: 8px 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.quick-view__tab {
+  position: relative;
+  padding: 4px 10px 6px;
+  background: none; border: 0; border-radius: var(--radius) var(--radius) 0 0;
+  color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .2px;
+  cursor: pointer;
+}
+.quick-view__tab.is-active { color: var(--text); background: var(--chrome-3); }
+.quick-view__tab.is-active::after {
+  content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 1px;
+  background: var(--accent-text);
+}
+.quick-view__tab:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.quick-view__body { display: block; padding: 10px 12px 4px; overflow: auto; min-height: 0; }
+.quick-view__body .kv { grid-template-columns: 108px minmax(0, 1fr); gap: 4px 10px; }
+.quick-view__body .kv dd.is-muted { color: var(--text-dim); font-style: italic; }
+.quick-view__section {
+  margin: 10px 0 5px; color: var(--text-muted);
+  font-size: 10px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase;
+}
+.quick-view__section:first-child { margin-top: 0; }
+.quick-view__note { margin: 8px 0 0; color: var(--text-muted); font-size: 10.5px; line-height: 1.45; }
+
 /* Workspace selector: a top-left float under the ribbon. */
 .workspace-panel {
   position: fixed;

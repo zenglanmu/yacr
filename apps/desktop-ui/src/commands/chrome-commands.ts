@@ -24,6 +24,14 @@
 // closed window is an idempotent success, never a refusal. `LAYERCLOSE` is its
 // layers-palette twin: the palette's close control and the typed word close the
 // same window, and a second close is still a success.
+//
+// `TOOLPALETTES` and `PERFANALYZER` open one chrome-owned float each, and their
+// `…CLOSE` twins close it (again: an idempotent success). `TPNAVIGATE <tab>` is
+// the second declared argument-taking row (after `-TOOLBAR`): its documented
+// grammar is a tab name, so `TPNAVIGATE Blocks` and `TPNAVIGATE <anything>` are
+// **both** answered here. Only the Blocks tab exists in this build; another tab
+// is therefore refused in words by the dispatch table — never forwarded to the
+// router, which knows no `TPNAVIGATE` selector at all.
 
 /** The typed word that opens the existing About dialog. */
 export const ABOUT_COMMAND = 'ABOUT';
@@ -124,6 +132,23 @@ export const WSSAVE_COMMAND = 'WSSAVE';
 /** The typed word that opens the workspace settings dialog. */
 export const WSSETTINGS_COMMAND = 'WSSETTINGS';
 
+/** The typed word that opens the Tool Palettes float. */
+export const TOOLPALETTES_COMMAND = 'TOOLPALETTES';
+
+/** The typed word that closes the Tool Palettes float (a no-op when already closed). */
+export const TOOLPALETTESCLOSE_COMMAND = 'TOOLPALETTESCLOSE';
+
+/** The typed word that focuses one Tool Palettes tab (`TPNAVIGATE Blocks`). */
+export const TPNAVIGATE_COMMAND = 'TPNAVIGATE';
+
+/** The one tab this build's Tool Palettes has, upper-cased like every typed word. */
+export const TOOL_PALETTES_BLOCKS_TAB = 'BLOCKS';
+
+/** The typed word that opens the Performance Analyzer float. */
+export const PERFANALYZER_COMMAND = 'PERFANALYZER';
+
+/** The typed word that closes the Performance Analyzer float (a no-op when already closed). */
+export const PERFANALYZERCLOSE_COMMAND = 'PERFANALYZERCLOSE';
 
 /** One chrome-local selector: its canonical word and how typed text matches it. */
 export interface ChromeCommandSelector {
@@ -296,6 +321,47 @@ export function isToolbarCommand(text: unknown): boolean {
   return normalized(text) === TOOLBAR_COMMAND;
 }
 
+/** Whether typed text is the bare `TOOLPALETTES` selector. */
+export function isToolPalettesCommand(text: unknown): boolean {
+  return normalized(text) === TOOLPALETTES_COMMAND;
+}
+
+/** Whether typed text is the bare `TOOLPALETTESCLOSE` selector. */
+export function isToolPalettesCloseCommand(text: unknown): boolean {
+  return normalized(text) === TOOLPALETTESCLOSE_COMMAND;
+}
+
+/**
+ * The tab name a `TPNAVIGATE` line carries, upper-cased, or `null` when the line
+ * is not that form.
+ *
+ * The grammar is `TPNAVIGATE [tab]`, so **both** the bare word (an empty tab)
+ * and any argument are this selector: the chrome answers them (the bare word and
+ * an unknown tab are refused in words), and neither can fall through to the
+ * router as a command. `TPNAVIGATE2` is a different word, not an argument.
+ */
+export function toolPalettesTab(text: unknown): string | null {
+  const line = normalized(text).replace(/\s+/g, ' ');
+  if (line === TPNAVIGATE_COMMAND) return '';
+  if (line.startsWith(`${TPNAVIGATE_COMMAND} `)) return line.slice(TPNAVIGATE_COMMAND.length + 1);
+  return null;
+}
+
+/** Whether typed text is a `TPNAVIGATE [tab]` line (the bare word included). */
+export function isToolPalettesNavigateCommand(text: unknown): boolean {
+  return toolPalettesTab(text) !== null;
+}
+
+/** Whether typed text is the bare `PERFANALYZER` selector. */
+export function isPerfAnalyzerCommand(text: unknown): boolean {
+  return normalized(text) === PERFANALYZER_COMMAND;
+}
+
+/** Whether typed text is the bare `PERFANALYZERCLOSE` selector. */
+export function isPerfAnalyzerCloseCommand(text: unknown): boolean {
+  return normalized(text) === PERFANALYZERCLOSE_COMMAND;
+}
+
 /**
  * The visibility `-TOOLBAR` asks for, or `null` when the line is not that form.
  *
@@ -358,6 +424,13 @@ export const CHROME_COMMANDS: readonly ChromeCommandSelector[] = Object.freeze([
   { name: UPDATETHUMBSNOW_COMMAND, matches: isUpdateThumbsNowCommand },
   { name: TOOLBAR_COMMAND, matches: isToolbarCommand },
   { name: DASH_TOOLBAR_COMMAND, matches: isDashToolbarCommand },
+  // The two chrome floats and their idempotent close words, then the
+  // argument-taking tab navigator. Appended last: no shipped row moves.
+  { name: TOOLPALETTES_COMMAND, matches: isToolPalettesCommand },
+  { name: TOOLPALETTESCLOSE_COMMAND, matches: isToolPalettesCloseCommand },
+  { name: TPNAVIGATE_COMMAND, matches: isToolPalettesNavigateCommand },
+  { name: PERFANALYZER_COMMAND, matches: isPerfAnalyzerCommand },
+  { name: PERFANALYZERCLOSE_COMMAND, matches: isPerfAnalyzerCloseCommand },
 ]);
 
 /** The bare names of [`CHROME_COMMANDS`], for exhaustive admission tests. */

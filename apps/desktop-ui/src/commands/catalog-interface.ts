@@ -1,16 +1,18 @@
 // The 2026-11-12 interface wave: the chrome-owned UI selectors.
 //
-// All eighteen names are **chrome-local** (`LOCAL_CHROME_COMMANDS`): the command
-// line answers them before `cad_command`, and the ribbon entries dispatch the
-// same words through the same local selector table. None reaches the router and
-// none needs a document. The first fourteen are the interface wave; `QCCLOSE`,
-// `UPDATETHUMBSNOW`, `TOOLBAR` and `-TOOLBAR` are its amendment.
+// All twenty-three names are **chrome-local** (`LOCAL_CHROME_COMMANDS`): the
+// command line answers them before `cad_command`, and the ribbon entries dispatch
+// the same words through the same local selector table. None reaches the router
+// and none needs a document. The first fourteen are the interface wave; `QCCLOSE`,
+// `UPDATETHUMBSNOW`, `TOOLBAR` and `-TOOLBAR` are its amendment, and
+// `TOOLPALETTES*`/`TPNAVIGATE`/`PERFANALYZER*` are the two floats it opens.
 //
 // They are appended last so no shipped catalog row moves. The rows reuse the
 // existing glyphs: `menu`/`app` for the ribbon, toolbar and tab chrome,
 // `eye`/`eyeOff` for the show/hide pair, `drawing`/`layers` for the two Quick
 // View panels, `close` for their close words, `refresh` for the preview refresh,
-// and `settings`/`save` for the calculator and workspace run.
+// `settings`/`save` for the calculator and workspace run, `palette` for the Tool
+// Palettes and `diagnostics` for the Performance Analyzer.
 //
 // The old Wave 8/10 rows for RIBBON, FILETAB, FILETABCLOSE, HIDEPALETTES,
 // SHOWPALETTES and RIBBONCLOSE were removed from their batches and are
@@ -56,4 +58,18 @@ export const INTERFACE_COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.
   { id: 'WORKSPACE', labelKey: 'draw.kind.workspace', icon: 'app', group: 'view' },
   { id: 'WSSAVE', labelKey: 'draw.kind.wssave', icon: 'save', group: 'view' },
   { id: 'WSSETTINGS', labelKey: 'draw.kind.wssettings', icon: 'settings', group: 'view' },
+  // The Tool Palettes float (`TOOLPALETTES`, `TOOLPALETTESCLOSE`) and its tab
+  // word (`TPNAVIGATE Blocks`). The panel has exactly one tab and lists the
+  // drawing's own block definitions through the classic insert flow; the glyph is
+  // the palette mark, and the close word reuses `close` like every other
+  // idempotent close.
+  { id: 'TOOLPALETTES', labelKey: 'draw.kind.toolpalettes', icon: 'palette', group: 'view' },
+  { id: 'TOOLPALETTESCLOSE', labelKey: 'draw.kind.toolpalettesclose', icon: 'close', group: 'view' },
+  { id: 'TPNAVIGATE', labelKey: 'draw.kind.tpnavigate', icon: 'palette', group: 'view' },
+  // The Performance Analyzer float (`PERFANALYZER`, `PERFANALYZERCLOSE`): a
+  // read-only view of `cad_status.performance` plus the real drawing/session
+  // counts. It samples nothing and writes nothing; the `diagnostics` glyph is the
+  // same report family the Diagnostics palette uses.
+  { id: 'PERFANALYZER', labelKey: 'draw.kind.perfanalyzer', icon: 'diagnostics', group: 'view' },
+  { id: 'PERFANALYZERCLOSE', labelKey: 'draw.kind.perfanalyzerclose', icon: 'close', group: 'view' },
 ]);
