@@ -11,6 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { POPUP_KEYS } from '../src/popup/popup.ts';
+import { LANDING_PAGE_URL } from '../src/update/config.ts';
 import { readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');
@@ -97,6 +98,34 @@ test('AboutDialog carries no hardcoded CJK copy and no inline dialog keys', asyn
   const source = await readModule('components/AboutDialog.tsx');
   assert.doesNotMatch(source, /[\u3400-\u4dbf\u4e00-\u9fff]/);
   assert.doesNotMatch(source, /'(dialog\.|file\.about)/, 'dialog copy comes through POPUP_KEYS');
+});
+
+test('the project-site row has catalog copy and one POPUP_KEYS entry per action', () => {
+  for (const key of ['dialog.about.landing', 'dialog.about.open_landing']) {
+    assert.equal(typeof en[key], 'string', `en catalog is missing ${key}`);
+    assert.equal(typeof zh[key], 'string', `zh-CN catalog is missing ${key}`);
+    assert.deepEqual(placeholders(en[key]), placeholders(zh[key]), `${key} placeholders drift`);
+  }
+  assert.equal(POPUP_KEYS.landing, 'dialog.about.landing');
+  assert.equal(POPUP_KEYS.openLanding, 'dialog.about.open_landing');
+});
+
+test('About shows the landing page with an open action and a copy fallback', async () => {
+  assert.equal(LANDING_PAGE_URL, 'https://yacr.pages.dev');
+  const source = await readModule('components/AboutDialog.tsx');
+  assert.match(source, /\{t\(POPUP_KEYS\.landing\)\}/);
+  assert.match(source, /\{t\(POPUP_KEYS\.openLanding\)\}/);
+  assert.match(source, /<code style=\{LANDING_URL\}>\{LANDING_PAGE_URL\}<\/code>/, 'the URL is shown as a code well');
+  assert.match(source, /handleOpenLanding/);
+  assert.match(source, /handleCopyLanding/);
+  assert.match(source, /writeClipboardText\(LANDING_PAGE_URL\)/);
+  // The open action reuses the one URL opener; no second IPC command.
+  assert.match(source, /openReleasePage\(\)/);
+  assert.match(source, /t\('update\.open\.failed'\)/);
+  assert.match(source, /t\('update\.copy\.copied'\)/);
+  assert.match(source, /t\('update\.copy\.failed'\)/);
+  // The update answer is still the only polite live region on the card.
+  assert.equal((source.match(/role="status"/g) ?? []).length, 1);
 });
 
 test('the platform-acceptance and maturity sentences are gone from both intros', () => {

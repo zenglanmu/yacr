@@ -75,6 +75,10 @@ export const POPUP_KEYS = Object.freeze({
   updateUnavailable: 'dialog.about.update_unavailable',
   updateUnsupported: 'dialog.about.update_unsupported',
   openDownload: 'dialog.about.open_download',
+  // The project-site row under the contact paragraph. Declared here with the
+  // dialog's other copy so no key literal is repeated in the component.
+  landing: 'dialog.about.landing',
+  openLanding: 'dialog.about.open_landing',
 });
 
 /**

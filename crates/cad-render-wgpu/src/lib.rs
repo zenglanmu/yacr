@@ -547,9 +547,10 @@ pub struct Renderer {
     target: Option<wgpu::Texture>,
     target_view: Option<wgpu::TextureView>,
     depth_view: Option<wgpu::TextureView>,
-    /// The **base** scene target: persistent drawing + reference grid. It is
-    /// never cleared by a transient overlay update; only a base/flag cycle
-    /// touches it.
+    /// The **base** scene target: the persistent drawing itself (entities,
+    /// raster images, wipeout masks). The reference grid/axes are overlay
+    /// batches (`base_end..`), not part of this target. It is never cleared by
+    /// a transient overlay update; only a base/flag cycle touches it.
     ///
     /// The presented frame is the overlay target below, composited as
     /// `copy(base) + overlay` on every render.

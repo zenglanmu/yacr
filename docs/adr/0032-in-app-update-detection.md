@@ -51,8 +51,10 @@
 - `ShellReleaseOpener` 是平台 seam（与 `ShellTelemetry`/`ShellPopupHost` 同构），实现只在
   `apps/app-*`：
   - Linux `xdg-open`；Windows `cmd /C start`；macOS `open`（均为 std 进程，spawn 后即 ack）。
-  - Android 暂不实现：`release_opener = None`，命令返回稳定
-    `unsupported-runtime: cad_open_release_page` 拒绝；不是静默成功。
+  - Android ~~暂不实现~~：**2026-11-12 起已接线**（见 §7 修正）：`AndroidReleaseOpener` 经
+    `MainActivity.openExternalUrl` 把 `Intent.ACTION_VIEW` 交给系统浏览器，投到 UI 线程并有界
+    等待 2 s；拒绝返回 `false` → `update.open_url_failed`。原始决策的 `release_opener = None` →
+    稳定 `unsupported-runtime: cad_open_release_page` 拒绝仍是**从不安装 opener 的载体**的行为。
   - Web（无 Tauri bridge）由 `web-adapter` 执行 `window.open(..., '_blank', 'noopener,noreferrer')`；
     被拦截时返回 `update.popup_blocked`。
 - 命令进入 `SHELL_ONLY_COMMANDS`：在有 bridge 的 `dom-canvas`（X11/XWayland）也走 Tauri，
@@ -91,7 +93,9 @@
 - 未知版本格式、网络失败、超时、超大响应、宿主命令拒绝：都映射为不可用/不支持并保持沉默，
   不产生“已是最新”结论。
 - 打不开浏览器：显式失败 + 复制链接，不假装跳转成功。
-- Android 没有 opener：稳定拒绝，不用 `window.open` 假装。
+- ~~Android 没有 opener：稳定拒绝，不用 `window.open` 假装。~~ **2026-11-12 起 Android 已安装
+  `ACTION_VIEW` opener**（见 §7）；从不安装 opener 的载体仍稳定拒绝，且任何载体都不用
+  `window.open` 假装原生打开。
 
 ## 5. 拒绝的替代方案
 
@@ -109,6 +113,21 @@
 
 - 已运行（Linux）：`cad-ui-core`/`cad-desktop-shell`/`app-web` 契约测试、`app-web` wasm 编译、
   `app-linux` 宿主编译、前端 `tsc` + `node --test`。
-- **NOT VERIFIED**：Windows/macOS/Android/Web 的真实网络、CSP 生效、`localStorage`、外部浏览器
+- **NOT VERIFIED**：Windows/macOS/Web 的真实网络、CSP 生效、`localStorage`、外部浏览器
   打开；任何打包产物对 `yacr.pages.dev` 的 CORS/边缘缓存行为；真实机器上的提示视觉。
+- **2026-11-12 更正**：Android 的外部打开**已接线**（`ACTION_VIEW`，见 §7），因此上面把 Android
+  与「外部浏览器打开」并列写进 NOT VERIFIED 的原始表述不再指「未实现」；Android 的设备运行与真实
+  浏览器交接**仍然 NOT VERIFIED**。
 - 本 ADR 不涉及 GPU/像素/性能结论。
+
+## 7. Amendment 2026-11-12
+
+- Android 现在安装真实的 `ShellReleaseOpener`：`apps/app-android/src-tauri/src/release.rs`
+  调用 `MainActivity.openExternalUrl(String): Boolean`，Kotlin 侧把
+  `Intent(Intent.ACTION_VIEW, Uri.parse(url))` 投到 UI 线程（`runOnUiThread` +
+  `CountDownLatch`，有界 2 s）；`isFinishing`/`isDestroyed`、无浏览器 activity、异常、超时都返回
+  `false`，共享命令包装为 `update.open_url_failed`，不是静默成功。
+- 不变量不变：URL 仍是共享编译期常量，命令**不接受** URL 参数；没有新 IPC 命令；**没有新
+  Kotlin→Rust JNI 符号**（新增的是 Rust→Kotlin 实例方法）。
+- 证据：Android host 合同测试（源码结构 + 冻结符号计数）与宿主编译；**设备/模拟器运行、真实
+  浏览器交接、无浏览器设备的拒绝路径 NOT VERIFIED**。

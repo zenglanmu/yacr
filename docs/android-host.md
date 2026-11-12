@@ -57,6 +57,7 @@
 | 出图 | **不支持** | `canPlot = false`；没有 SVG/PDF 导出 |
 | 文件身份 | **SAF URI，不伪造** | 身份 = `content://` opaque 句柄 + `OpenableColumns.DISPLAY_NAME`（缺列时回退 URI 末段）；没有 `--open` 启动参数。`content://` 目标**没有**文件系统目录，sidecar xref/栅格不可用：`xref_options_for` 对含 `://` 的句柄返回 `None`，引用按不可用报告，不派生假根目录 |
 | 外部「打开方式」 | **已接（设备 NOT RUN）** | `bundle.fileAssociations`（`dwg`；mime 含 `application/octet-stream`）由 tauri-build 在构建期注入 manifest 的 VIEW intent-filter；`MainActivity` 冷启动（`onCreate`）与热启动（`onNewIntent` + `setIntent`，`singleTask`）都投递到同一个读槽 |
+| 外部 URL（`cad_open_release_page`） | **已接（设备 NOT VERIFIED）** | 共享固定 landing/download URL（`cad_desktop_shell::release::RELEASE_PAGE_URL`，无调用方参数、无第二份常量）→ `AndroidReleaseOpener` → `MainActivity.openExternalUrl` → `Intent.ACTION_VIEW`；Kotlin 侧投到 UI 线程并有界等待 2 s，无浏览器 activity / `isFinishing` / `isDestroyed` / 异常 / 超时 → 显式失败（`update.open_url_failed`），绝不静默成功。**没有新 Kotlin→Rust JNI 符号**（新增的是 Rust→Kotlin 实例方法，冻结的 `native*` 仍为四个） |
 | 导入线程 | **同步（tick 线程）** | `importWorker = false`：DWG 在 tick 线程同步导入；极大图纸会阻塞渲染，属**已记录限制**，不是挂起或假成功 |
 | 初始文档 | **共享核心空白 `untitled` 图纸** | `HostOptions::start_blank = true`；不是共享核心内置 demo 图纸。外部打开到达后由共享打开漏斗替换 |
 | 弹窗宿主 | **已接（in-DOM）** | `AndroidPopupHost`：弹窗是 React 树内的覆盖层，无原生窗口；`open`/`close` 经 `cad_desktop_shell::popup` 的状态机与模态门，主线程跳转有界（5 s）。Options / About / text-edit 可用；`textEdit` 载荷取当前 `CadSession` 选区（无选区 → 共享 `popup.no_text_selection` 拒绝）。设备运行 **NOT VERIFIED** |
@@ -92,9 +93,11 @@ React chrome），`setZOrderMediaOverlay(false)` 一并固定。
 
 - `Long` 只是不透明原生 handle；Kotlin **不**持有 CAD 状态、不做坐标/命令逻辑。
 
-**反向（Rust → Kotlin）的 5 个实例方法**：`src/saf.rs` 按精确名字/描述符调用
-`io.github.zenglanmu.yacr.MainActivity` 上的实例方法（`Java_io_github_zenglanmu_yacr_MainActivity_document*`），这也是
-`proguard-rules.pro` 必须固定它们的原因。
+**反向（Rust → Kotlin）的 6 个实例方法**：`src/saf.rs`（`document*`）与 `src/release.rs`
+（`openExternalUrl`）按精确名字/描述符调用
+`io.github.zenglanmu.yacr.MainActivity` 上的实例方法（`Java_io_github_zenglanmu_yacr_MainActivity_document*` /
+`..._openExternalUrl`），这也是 `proguard-rules.pro` 必须固定它们的原因。这些方法**不**增加
+Kotlin→Rust 符号：冻结的 `native*` 仍为上面四个。
 
 | 方法 | 职责 |
 |---|---|
@@ -103,6 +106,7 @@ React chrome），`setZOrderMediaOverlay(false)` 一并固定。
 | `documentReadUri(String)` | 启动 Kotlin worker 读；槽立即进入 `LOADING` |
 | `documentWriteUri(String, byte[])` | 同步截断写入；失败抛 `IOException`，调用方报真实错误 |
 | `documentSnapshot()` | 返回 `[Int state, String? uri, String? name, String? error, ByteArray? bytes]` |
+| `openExternalUrl(String) -> Boolean` | `Intent.ACTION_VIEW` 打开固定下载页；投到 UI 线程并有界等待 2 s；拒绝（无浏览器 / finishing / 异常 / 超时）返回 `false`，Rust 报 `update.open_url_failed` |
 
 `documentSnapshot()` 的状态码与 Kotlin `DocumentPicker.STATE_*` 一一对应：
 

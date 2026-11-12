@@ -7,9 +7,11 @@
 //!
 //! * the opener is a platform seam ([`ShellReleaseOpener`]) installed by each
 //!   concrete host in `apps/app-*`, so this crate stays free of platform I/O;
-//! * a carrier with no opener (today: Android) keeps
+//! * every current native carrier installs one — Linux/Windows/macOS through
+//!   `xdg-open`/`start`/`open`, Android through an `ACTION_VIEW` intent on the
+//!   Activity — while a carrier that never installs one keeps
 //!   [`Shared::release_opener`](crate::state::Shared::release_opener) as `None`
-//!   and the command refuses with a stable `unsupported-runtime` marker instead of
+//!   and the command refuses with the stable `unsupported-runtime` marker instead of
 //!   pretending a browser opened;
 //! * an opener failure is a real `update.open_url_failed` error, never swallowed.
 //!

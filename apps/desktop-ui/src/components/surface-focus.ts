@@ -1,15 +1,16 @@
-// Focus/Escape mechanics for the two **non-modal** chrome panels.
+// Focus/Escape mechanics for the **non-modal** chrome panels.
 //
-// The Quick View panels and the workspace selector float over the drawing but do
-// not block it: there is no backdrop and no focus trap. They still owe the
-// keyboard two things a dialog owes: focus lands on the first card when the
-// panel opens, Escape closes it, and the element that opened it gets the
-// keyboard back when it goes away. The drawing card is the one exception: choosing
-// "the current drawing" focuses the CAD partition instead, because that is what
-// the card means.
+// The Quick View panels, QuickCalc, the classic block/xref panels and the
+// workspace selector float over the drawing but do not block it: there is no
+// backdrop and no focus trap. They still owe the keyboard two things a dialog
+// owes: focus lands inside the panel when it opens, Escape closes it, and the
+// element that opened it gets the keyboard back when it goes away. The drawing
+// card is the one exception: choosing "the current drawing" focuses the CAD
+// partition instead, because that is what the card means.
 //
-// The modal dialogs (QuickCalc, workspace settings) use `confirm-focus.ts`
-// instead: they do have a trap, and Escape is the same single close.
+// The modal dialogs (workspace settings, the DWG save confirmation) use
+// `confirm-focus.ts` instead: they do have a trap, and Escape is the same single
+// close.
 import { useEffect, useRef } from 'react';
 
 const FOCUSABLE = [

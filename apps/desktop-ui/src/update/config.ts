@@ -16,6 +16,14 @@ export const RELEASE_MANIFEST_URL = 'https://yacr.pages.dev/downloads.json';
 // Must equal RELEASE_PAGE_URL in crates/cad-desktop-shell/src/release.rs
 export const RELEASE_PAGE_URL = 'https://yacr.pages.dev/#download';
 
+// The project landing page About shows ("Project site"). It is the same site as
+// RELEASE_PAGE_URL without the `#download` deep link: the About row names the
+// project, not the download section. The native shell's
+// `cad_open_release_page` opens the anchored page, so the About "open" action
+// reuses that capability and falls back to copying this URL — see
+// `components/AboutDialog.tsx`.
+export const LANDING_PAGE_URL = 'https://yacr.pages.dev';
+
 /** One manifest read per day; a throttled startup does not fetch at all. */
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 

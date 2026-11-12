@@ -21,7 +21,7 @@ const FOCUSABLE = [
 /** The refs the confirmation owns; structural so a mutable `useRef` fits. */
 export interface ConfirmFocusRefs {
   readonly dialog: { readonly current: HTMLDivElement | null };
-  /** The element focused on open (a button, or the calculator's expression field). */
+  /** The element focused on open (a button, e.g. the safe Cancel answer). */
   readonly initial: { readonly current: HTMLElement | null };
 }
 

@@ -4,7 +4,9 @@ import android.content.res.AssetManager
 import android.content.res.Configuration
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
+import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
@@ -16,6 +18,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 import org.json.JSONArray
 
@@ -104,6 +109,11 @@ class MainActivity : TauriActivity() {
     private const val MAX_ATTEMPTS = 40
     /** Bounded wait for React to mount its shell before a layout snapshot is logged. */
     private const val MAX_LOG_ATTEMPTS = 25
+    /**
+     * Bounded wait for the UI thread to answer a Rust-initiated external-URL
+     * hand-off. Expiry is a failure, not a silent success.
+     */
+    private const val URL_OPEN_TIMEOUT_SECONDS = 2L
 
     /** Asset directory the extracted font package lives in (generated at build time). */
     private const val FONT_ASSET_DIR = "fonts"
@@ -624,4 +634,56 @@ class MainActivity : TauriActivity() {
    * Terminal states (OK / CANCELLED / FAILED) are consumed by this call.
    */
   fun documentSnapshot(): Array<Any?> = documentPicker.documentSnapshot()
+
+  // ---------------------------------------------------------------------------
+  // Rust -> Kotlin external-URL contract (fixed landing/download page)
+  //
+  // Reached by exact name from `src/release.rs` (instance JNI:
+  // `Java_io_github_zenglanmu_yacr_MainActivity_openExternalUrl`). It adds **no**
+  // Kotlin -> Rust symbol: the frozen four `native*` externals above stay four.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Hand [url] to the system browser (`ACTION_VIEW`).
+   *
+   * Rust reaches this through JNI from a non-UI thread, so the activity operation is
+   * marshalled onto the UI thread and the caller waits for its answer. Returns false
+   * when the system rejected the intent (no browser activity, activity finishing,
+   * or the bounded wait expired); the Rust opener turns false into an explicit error,
+   * never a silent success.
+   */
+  fun openExternalUrl(url: String): Boolean {
+    if (Looper.myLooper() == Looper.getMainLooper()) return openExternalUrlOnUiThread(url)
+    val answer = AtomicBoolean(false)
+    val done = CountDownLatch(1)
+    runOnUiThread {
+      answer.set(openExternalUrlOnUiThread(url))
+      done.countDown()
+    }
+    return try {
+      if (done.await(URL_OPEN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) answer.get() else false
+    } catch (interrupted: InterruptedException) {
+      Thread.currentThread().interrupt()
+      false
+    }
+  }
+
+  /**
+   * The UI-thread half of [openExternalUrl]: refuses a finishing activity, hands the
+   * URL to `ACTION_VIEW`, and never throws across JNI.
+   */
+  private fun openExternalUrlOnUiThread(url: String): Boolean {
+    if (isFinishing || isDestroyed) {
+      Log.w(TAG, "open-url: activity is finishing; refusing to open $url")
+      return false
+    }
+    return try {
+      startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+      Log.i(TAG, "open-url: handed $url to the system browser")
+      true
+    } catch (error: Exception) {
+      Log.e(TAG, "yacr: open-url: failed for $url: ${error.message}")
+      false
+    }
+  }
 }

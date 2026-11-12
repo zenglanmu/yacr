@@ -23,6 +23,9 @@
 //!   `SurfaceProbePresenter` lifecycle (Vulkan only, no GLES/software fallback);
 //! * [`saf`] — the Storage Access Framework JNI bridge (Android only): the
 //!   Activity `document*` methods behind the platform file contracts;
+//! * [`release`] — the fixed landing/download page opener: the shared
+//!   `ShellReleaseOpener` seam implemented with `MainActivity.openExternalUrl`
+//!   (`Intent.ACTION_VIEW`, no caller-supplied URL, no new Kotlin→Rust symbol);
 //! * [`policy`] — the target-independent, unit-tested refusal markers, capability
 //!   set and JNI symbol names;
 //! * [`input`] — the partition-local → canvas coordinate mapping for pointer/wheel
@@ -44,6 +47,8 @@ pub mod report;
 pub mod host;
 #[cfg(target_os = "android")]
 pub mod recent;
+#[cfg(target_os = "android")]
+pub mod release;
 #[cfg(target_os = "android")]
 pub mod saf;
 #[cfg(target_os = "android")]

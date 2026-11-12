@@ -24,7 +24,7 @@ npm run dev     # http://127.0.0.1:1420
 | `src/tools/` | 工具参数、开放步骤、文字输入与文字编辑 |
 | `src/commands/` | 命令目录与准入、命令历史（`command-history.ts` 纯规则：命令/拒绝两类条目的有界日志 + `use-command-history.ts` 状态）、命令窗口合流（`command-window.ts`：把宿主 `commandLog` 的输出挂到对应输入行上，弹窗是唯一记录）、消息行文案（`command-message.ts`，行与历史共用同一句）、右键菜单模型、命令行控制器（`command-line-model.ts` 纯规则 + `use-command-line.ts` 状态） |
 | `src/ribbon/` | 功能区模型与溢出计算 |
-| `src/layout/` | 宽度布局开关（`matchMedia`，断点 1024 CSS px）、移动端抽屉状态与功能区折叠、共享拒绝句（按原因键折叠）、浮动面板几何（`palette-window.ts`，纯函数） |
+| `src/layout/` | 宽度布局开关（`matchMedia`，断点 1024 CSS px）、移动端抽屉状态与功能区折叠、共享拒绝句（按原因键折叠）、浮动面板几何（`palette-window.ts`，纯函数）、QuickCalc 浮窗几何（`quick-calc-window.ts`，纯函数，视口坐标） |
 | `src/layers/` | 图层投影、属性与标签 |
 | `src/properties/` | 实体属性投影、显示模型与标签 |
 | `src/references/` | 外部引用投影（宿主状态码、稳定原因码）与 `RESOURCES` 本地选择器 |
@@ -52,6 +52,11 @@ npm run dev     # http://127.0.0.1:1420
 `components/PaletteWindow.tsx` 包成**非模态浮窗**，默认贴在绘图区左缘，可拖动、可调宽；
 它们位于 `.native-input` 之后的绝对定位层里，**不占布局空间**，所以开关/移动/调宽都不会改变
 CAD 分区矩形，也不会触发宿主重排或重绘原生表面。
+
+`QUICKCALC` 是同一类**非模态**浮窗，但坐标空间是视口：`components/QuickCalcDialog.tsx`
+portal 到 `document.body`，`position: fixed`，标题栏拖动、位置在会话内保留，无遮罩、不占布局
+空间，因此不阻塞 CAD 分区。基础/科学两种宽度与 clamp 在 `src/layout/quick-calc-window.ts`
+（纯函数）；科学函数由 `src/chrome/quick-calc.ts` 的真实引擎实现，不放占位键。
 
 `FONTS` 是本地选择器，打开与图层/外部引用同一层的只读字体管理器（`FontsPanel.tsx`）：它只展示
 `cad_fonts` 报告的面，不注册、不删除、不重载；`available:false` 显示宿主命名原因，空列表是

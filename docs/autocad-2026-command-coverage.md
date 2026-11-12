@@ -1030,8 +1030,8 @@
 | `QVDRAWINGCLOSE` | 已实现 | chrome 本地选择子：关闭 Quick View Drawings（幂等成功） |
 | `QVLAYOUT` | 已实现 | chrome 面板：列出真实布局，点击派发 `SPACE #<id>`/`MODEL` 并关闭 |
 | `QVLAYOUTCLOSE` | 已实现 | chrome 本地选择子：关闭 Quick View Layouts（幂等成功） |
-| `QUICKCALC` | 已实现 | chrome 对话框计算器：+ − × ÷、括号、小数、正负号、清除/退格、M+/MR/MC、复制结果、键盘输入、Esc 关闭；无伪工程函数 |
-| `QCCLOSE` | 已实现 | 关闭 QUICKCALC 对话框（幂等成功） |
+| `QUICKCALC` | 已实现 | chrome 非模态可拖动浮窗计算器：+ − × ÷、括号、小数、正负号、清除/退格、M+/MR/MC、复制结果、键盘输入、Esc 关闭；科学模式含三角/反三角/`ln`/`log`/`sqrt`/`abs`/幂/平方/倒数/`π`/`e` 与 DEG/RAD；无伪工程键，域错误不编造数值 |
+| `QCCLOSE` | 已实现 | 关闭 QUICKCALC 浮窗（幂等成功） |
 | `UPDATETHUMBSNOW` | 已实现 | 立即刷新 Quick View 预览卡（重算预览状态并显示瞬时“已更新”；不做文件写） |
 | `WORKSPACE` | 已实现 | chrome 工作空间选择器：功能区/选项板/文件标签可见性与面板宽度预设（内置 Drafting & Annotation） |
 | `WSSAVE` | 已实现 | 把当前 UI 状态保存为命名工作空间（会话内存，不落盘） |
@@ -1729,7 +1729,7 @@
 | 686 | `PUSHTODOCSCLOSE` | 未实现 | Closes the Push to Autodesk Docs palette. | — |
 | 687 | `PUSHTODOCSOPEN` | 未实现 | Opens the Push to Autodesk Docs palette where you can select AutoCAD layouts to upload as PDFs to Autodesk Docs. | — |
 | 688 | `PYRAMID` | 部分实现 | Creates a 3D solid pyramid. | 具名拒绝（`pyramid.unsupported: 3D solid primitives are not implemented`）。 |
-| 689 | `QCCLOSE` | 已实现 | Closes the QuickCalc calculator. | 关闭 QUICKCALC 对话框（幂等成功） |
+| 689 | `QCCLOSE` | 已实现 | Closes the QuickCalc calculator. | 关闭 QUICKCALC 浮窗（幂等成功） |
 | 690 | `QDIM` | 已实现 | Creates a series of dimensions quickly from selected objects. | `Continuous`/`Staggered`/`Baseline`/`Ordinate`/`Radius`/`Diameter` + `Datum Point`/`Edit`/`Settings`；Staggered 步长 = `DIMDLI`（声明）；Ordinate 基准默认 `(0,0,0)`；不支持项逐条 `qdim.skipped`；一条事务/一步撤销；角度不是 QDIM 模式 |
 | 691 | `QLATTACH` | 部分实现 | Attaches a leader line to an mtext, tolerance, or block reference object. | 具名拒绝（`qlattach.unsupported`）：无 QLEADER 注释附着模型。 |
 | 692 | `QLATTACHSET` | 部分实现 | Globally attaches leader lines to mtext, tolerance, or block reference objects. | 具名拒绝（`qlattachset.unsupported`）：无 QLEADER 注释附着模型。 |
@@ -1740,7 +1740,7 @@
 | 697 | `QSAVE` | 部分实现 | Saves the current drawing using the specified default file format. | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
 | 698 | `QSELECT` | 部分实现 | Creates a selection set based on filtering criteria. | `Equals`/`Not Equal`/`>`/`<`/`>=`/`<=`/通配符/`Select All`；整图（当前空间）或当前选择；`Include`/`Exclude`/`Append`；嵌套块不参与；只读；**分类/自定义对象特性未建模**，属性集为基础子集 |
 | 699 | `QTEXT` | 部分实现 | Controls the display and plotting of text and attribute objects. | 会话令牌 `qtext`；仍按几何绘制文字，不显示占位框。 |
-| 700 | `QUICKCALC` | 已实现 | Opens the QuickCalc calculator. | chrome 对话框计算器：+ − × ÷、括号、小数、正负号、清除/退格、M+/MR/MC、复制结果、键盘输入、Esc 关闭；无伪工程函数 |
+| 700 | `QUICKCALC` | 已实现 | Opens the QuickCalc calculator. | chrome 非模态可拖动浮窗计算器：四则 + 括号/小数/正负号/清除/退格/M+/MR/MC/复制/键盘输入/Esc；科学模式含三角/反三角/对数/开方/幂/平方/倒数/π/e 与 DEG/RAD；无伪工程键，域错误不编造数值 |
 | 701 | `QUICKCUI` | 未实现 | Displays the Customize User Interface Editor in a collapsed state. | — |
 | 702 | `QUICKPROPERTIES` | 部分实现 | Displays quick property data for selected objects. | chrome 本地选择子：打开现有特性面板；紧凑布局像 PROPERTIES 一样拒绝。 |
 | 703 | `QUIT` | 部分实现 | Exits the program. | 具名拒绝（`quit.unsupported`）：应用退出由宿主负责。 |

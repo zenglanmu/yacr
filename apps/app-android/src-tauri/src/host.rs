@@ -423,6 +423,14 @@ pub fn run() {
         Some(Arc::new(crate::plugin_store::AndroidPluginStore)),
         true,
     );
+    // The fixed landing/download page is opened through the system browser: the
+    // shared `cad_open_release_page` command hands its compile-time URL to this
+    // seam, which marshals `Intent.ACTION_VIEW` through the Kotlin Activity. A
+    // rejection is an explicit `update.open_url_failed`, never a silent success.
+    cad_desktop_shell::state::configure_release_opener(
+        &shared,
+        Arc::new(crate::release::AndroidReleaseOpener),
+    );
     let telemetry = new_render_telemetry();
 
     let setup_shared = shared.clone();

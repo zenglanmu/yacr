@@ -279,10 +279,15 @@ fn read_bytes(
 
 /// Run `f` with the captured JNI environment and Activity.
 ///
+/// Shared by the SAF bridge and the release-page opener
+/// ([`crate::release::AndroidReleaseOpener`]): both reach the same captured
+/// `MainActivity` by method name, so the capture and the thread/frame/exception
+/// discipline live in one place.
+///
 /// Mirrors the blueprint: reuse the thread's environment when attached, otherwise
 /// attach permanently; one bounded local frame; a pending Java exception is
 /// cleared before the error leaves this module.
-fn with_env<R, F>(f: F) -> Result<R, String>
+pub(crate) fn with_env<R, F>(f: F) -> Result<R, String>
 where
     F: for<'local> FnOnce(&mut JNIEnv<'local>, &JObject<'local>) -> jni::errors::Result<R>,
 {

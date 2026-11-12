@@ -1784,7 +1784,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `APERTURE` | **完整实现** | `APERTURE <n>` 写会话孔径，snap/候选拾取真实使用 | `PICKBOX` 保持独立；未显式设置时配置默认值不变 |
 | `PTYPE` | **完整实现** | `PTYPE <code> [size]` 委托 PDMODE/PDSIZE 头部写入 | 两次 header 写、无 header undo 补丁 |
 | `REVCLOUDPROPERTIES` | **完整实现** | `REVCLOUDPROPERTIES <arc-length>` 写 token，REVCLOUD 真实消费 | 仅会话状态，不持久化 DWG |
-| `QUICKCALC`/`QVDRAWING`/`QVLAYOUT`/`WORKSPACE`/`WSSAVE`/`WSSETTINGS`/`TOOLBAR` | **完整实现** | chrome 本地选择子/面板/对话框；不进入 `cad_command` | 会话内存工作空间；无跨重启持久化 |
+| `QUICKCALC`/`QVDRAWING`/`QVLAYOUT`/`WORKSPACE`/`WSSAVE`/`WSSETTINGS`/`TOOLBAR` | **完整实现** | chrome 本地选择子/面板/浮窗/对话框；不进入 `cad_command` | 会话内存工作空间；无跨重启持久化 |
 | `RIBBON`/`RIBBONCLOSE`/`HIDEPALETTES`/`SHOWPALETTES`/`FILETAB`/`FILETABCLOSE` | **完整实现** | chrome 可见性设置（set，不 toggle）；单文档文件标签 | 视觉/像素 NOT VERIFIED |
 
 ### Wave 26 续（2026-11-12，样式表 / 引线编辑 / 系统变量）

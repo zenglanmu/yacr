@@ -1,5 +1,40 @@
 AD
 
+## 2026-11-12 QUICKCALC 改为非模态可拖动浮窗 + 科学计算；About 增加落地页地址
+
+- **QUICKCALC 载体**：`components/QuickCalcDialog.tsx` 不再是 `.popup-overlay` 模态（无遮罩、
+  无 `aria-modal`、无 focus trap），改为 portal 到 body 的视口固定浮窗；标题栏拖动、沿用
+  `palette-window.ts` 的 clamp、位置在会话内保留；Escape/焦点恢复走 `useSurfacePanelFocus`。
+  新几何模块 `layout/quick-calc-window.ts`（纯函数）：基础 384 / 科学 473，视口窄时按
+  `100vw - 16px` 收缩。数字键盘 `7 8 9 / 4 5 6 / 1 2 3 / ± 0 .` 在两种模式下都不移动。
+- **科学计算**：`chrome/quick-calc.ts` 新增 `^`（右结合，`-2^2 = -4`）、`pi`/`e`、
+  `sin/cos/tan/asin/acos/atan/ln/log/sqrt/abs`、平方/倒数、DEG/RAD；除零、`sqrt(-1)`、`ln(0)`、
+  `asin(2)`、90° 正切与非有限值一律 `null`，不产生伪数值。
+- **About**：联系信息下新增“项目主页 / `https://yacr.pages.dev`”行（打开 + 复制）；打开复用
+  `cad_open_release_page`（固定 URL、无调用方参数），Android 同日实现 `ACTION_VIEW` opener。
+  展示常量 `LANDING_PAGE_URL` 只用于文案与复制，没有新增 IPC 或第二个打开 URL。
+- **证据**：`apps/desktop-ui` `npm test` = 1542 passed（含新增引擎 13、浮窗 11、About 合同）；
+  `tsc --noEmit`、`check-i18n.py`（2858 keys）、`check-file-size.py`、`check-architecture.py`、
+  `cargo fmt --all -- --check` 均通过。浏览器/真机视觉与触控拖动 **NOT RUN**。
+
+## 2026-11-12 Android 安装 `ShellReleaseOpener`：固定下载页经 `ACTION_VIEW` 交给系统浏览器
+
+- **改动**：`apps/app-android/src-tauri/src/release.rs`（新，Android only）实现共享
+  `cad_desktop_shell::release::ShellReleaseOpener`，`open_url` 经 `crate::saf::with_env`
+  （与 SAF 共用的 `JavaVM`/Activity 捕获）调用 `MainActivity.openExternalUrl(String): Boolean`；
+  Kotlin 侧把 `Intent(ACTION_VIEW, Uri.parse(url))` **投到 UI 线程**（`runOnUiThread` +
+  `CountDownLatch`，有界 2 s），`isFinishing || isDestroyed`、无浏览器 activity、异常、超时一律
+  返回 `false` → Rust 显式错误 → 共享命令包装为 `update.open_url_failed: ...`。
+  `host::run` 用 `configure_release_opener(&shared, Arc::new(crate::release::AndroidReleaseOpener))`
+  安装 seam。
+- **不变量**：URL 仍是共享编译期常量 `RELEASE_PAGE_URL`，**无调用方参数、无第二份 URL 常量**；
+  **没有新 IPC 命令**；**没有新 Kotlin→Rust JNI 符号**（新增的是 Rust→Kotlin 实例方法，冻结的四个
+  `native*` 仍是四个，`contract.rs` 计数门禁钉住）。平台类型（`jni`）仍只在 `apps/app-android`。
+- **证据**：`cargo test -p app-android --locked`（host 编译的源码结构合同，含本次新增的 wiring/四符号
+  计数断言，51 passed）、宿主编译/clippy、`cargo check -p app-android --target aarch64-linux-android`
+  与 `./gradlew :app:compileUniversalDebugKotlin --offline` 均通过——这些只是**编译**证据；
+  **设备/模拟器运行、真实浏览器交接、无浏览器设备的拒绝路径一律 NOT VERIFIED**（本机无 Android 设备）。
+
 ## 2026-11-12 Flatpak 5K/scale=2 启动崩溃：CAD 子表面 buffer 尺寸不是 buffer_scale 的整数倍
 
 - **报告**：`flatpak run io.github.zenglanmu.yacr`（`flatpak info` 版本 0.1.7；运行日志已含

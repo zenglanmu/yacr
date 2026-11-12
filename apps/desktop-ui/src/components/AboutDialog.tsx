@@ -24,7 +24,7 @@ import { POPUP_KEYS, aboutVersionText } from '../popup/popup.ts';
 import type { PopupView } from '../popup/popup.ts';
 import { DIALOG_BODY, DIALOG_CONTENT, DIALOG_FOOT } from '../popup/popup-layout.ts';
 import { writeClipboardText } from '../clipboard.ts';
-import { RELEASE_PAGE_URL } from '../update/config.ts';
+import { RELEASE_PAGE_URL, LANDING_PAGE_URL } from '../update/config.ts';
 import {
   forceUpdateCheck,
   openReleasePage,
@@ -97,6 +97,37 @@ const UPDATE_URL: CSSProperties = {
   userSelect: 'text',
 };
 
+// --- Project site row -----------------------------------------------------
+// One compact line under the contact paragraph: the label, the URL in the same
+// monospace well as the download fallback, and the two chip actions. It wraps
+// instead of widening the card, so the row survives the 520px About window and
+// a long translation.
+const LANDING_ROW: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: '6px 8px',
+  paddingTop: 10,
+  borderTop: '1px solid var(--line)',
+};
+
+const LANDING_LABEL: CSSProperties = {
+  flex: '0 0 auto',
+  color: 'var(--text-dim)',
+  fontSize: 11,
+  letterSpacing: '.2px',
+};
+
+/** The URL well: the update fallback's code style, inline in the row. */
+const LANDING_URL: CSSProperties = {
+  ...UPDATE_URL,
+  display: 'inline-block',
+  flex: '1 1 160px',
+  minWidth: 0,
+};
+
+const LANDING_FAILURE: CSSProperties = { ...UPDATE_HINT, flexBasis: '100%' };
+
 const COPY_STATE: CSSProperties = {
   fontSize: 10.5,
   lineHeight: 1.4,
@@ -123,6 +154,11 @@ export function AboutDialog({ view, onClose, failure }: AboutDialogProps) {
   const [opening, setOpening] = useState(false);
   const [openFailed, setOpenFailed] = useState(false);
   const [copyState, setCopyState] = useState<CopyState>('idle');
+  // The project-site row keeps its own transient state: a failure to open the
+  // site is not an update-check answer and must not touch the update line.
+  const [landingOpening, setLandingOpening] = useState(false);
+  const [landingOpenFailed, setLandingOpenFailed] = useState(false);
+  const [landingCopy, setLandingCopy] = useState<CopyState>('idle');
 
   // A new store answer starts a new proposition: the previous open refusal (and
   // its "copied" line) no longer describes what is on screen.
@@ -179,6 +215,38 @@ export function AboutDialog({ view, onClose, failure }: AboutDialogProps) {
       setCopyState(copied ? 'copied' : 'failed');
     } catch {
       setCopyState('failed');
+    }
+  }
+
+  async function handleOpenLanding(): Promise<void> {
+    if (landingOpening) return;
+    setLandingOpening(true);
+    try {
+      // No second IPC: the shell's fixed `cad_open_release_page` target is this
+      // same landing page at its `#download` anchor, so the site opens (just
+      // scrolled to downloads) and a refusal is reported honestly.
+      const result = await openReleasePage();
+      if (result.ok) {
+        setLandingOpenFailed(false);
+      } else {
+        setLandingOpenFailed(true);
+        setLandingCopy('idle');
+      }
+    } catch {
+      // A rejecting caller is a failed open, never a success.
+      setLandingOpenFailed(true);
+      setLandingCopy('idle');
+    } finally {
+      setLandingOpening(false);
+    }
+  }
+
+  async function handleCopyLanding(): Promise<void> {
+    try {
+      const copied = await writeClipboardText(LANDING_PAGE_URL);
+      setLandingCopy(copied ? 'copied' : 'failed');
+    } catch {
+      setLandingCopy('failed');
     }
   }
 
@@ -258,6 +326,40 @@ export function AboutDialog({ view, onClose, failure }: AboutDialogProps) {
             <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 11.5, lineHeight: 1.45 }}>
               {t(POPUP_KEYS.contact)}
             </p>
+          </div>
+          <div style={LANDING_ROW}>
+            <span style={LANDING_LABEL}>{t(POPUP_KEYS.landing)}</span>
+            <code style={LANDING_URL}>{LANDING_PAGE_URL}</code>
+            <div style={UPDATE_ACTIONS}>
+              <Button
+                variant="chip"
+                size="sm"
+                icon="launcher"
+                iconSize={14}
+                disabled={landingOpening}
+                onClick={() => { void handleOpenLanding(); }}
+              >
+                {t(POPUP_KEYS.openLanding)}
+              </Button>
+              <Button
+                variant="chip"
+                size="sm"
+                icon="copy"
+                iconSize={14}
+                onClick={() => { void handleCopyLanding(); }}
+              >
+                {t('update.copy')}
+              </Button>
+              {landingCopy === 'copied' ? (
+                <span style={COPY_STATE_OK}>{t('update.copy.copied')}</span>
+              ) : null}
+              {landingCopy === 'failed' ? (
+                <span style={COPY_STATE_FAILED}>{t('update.copy.failed')}</span>
+              ) : null}
+            </div>
+            {landingOpenFailed ? (
+              <p style={LANDING_FAILURE}>{t('update.open.failed')}</p>
+            ) : null}
           </div>
         </div>
       </div>

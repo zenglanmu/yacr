@@ -1,9 +1,10 @@
 //! The transient-overlay compositing path: draw-order lists, per-batch uniform
 //! slots, the base→overlay copy and the overlay render pass.
 //!
-//! The base scene (persistent drawing + reference grid) owns the base colour and
-//! depth targets. The transient overlay (cursor crosshair/pickbox, snap hints,
-//! previews, sub-element highlight) is never part of the base page plan: on every
+//! The base scene (the persistent drawing: entities, images, wipeout masks) owns
+//! the base colour and depth targets. The transient overlay (reference grid/axes,
+//! cursor crosshair/pickbox, snap hints, previews, sub-element highlight) is never
+//! part of the base page plan: on every
 //! render the base colour is copied into the presented overlay colour and the
 //! overlay batches are drawn on top with an independently cleared depth. This is
 //! what keeps a suffix commit from clearing or re-paging the base and keeps the

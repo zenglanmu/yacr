@@ -6,10 +6,11 @@
 // `components/ChromeSurfaces.tsx` is the only renderer, the shell never grows a
 // dozen `useState` pairs, and `local-selectors.ts` stays a pure dispatch table.
 //
-// Opening a panel closes the other floating panel (two QV panels at once would
-// cover the same drawing area), and opening a modal closes every floating panel
-// behind it. Closing is idempotent: closing an already-closed surface is a
-// success, exactly like `PROPERTIESCLOSE`/`LAYERCLOSE`.
+// Opening one of these surfaces closes the others: only one chrome float is
+// ever open (two Quick View panels would cover the same drawing area, and
+// QuickCalc opens where they sit). Closing is idempotent: closing an
+// already-closed surface is a success, exactly like
+// `PROPERTIESCLOSE`/`LAYERCLOSE`.
 //
 // No CAD state is read or written here; `ChromeSurfaces` reads `cad_status` from
 // the shell context for its own data.
@@ -95,7 +96,7 @@ export function closeQuickView(kind?: QuickViewKind): void {
   publish({ ...state, quickView: null });
 }
 
-/** Open the QuickCalc dialog (a modal). */
+/** Open the QuickCalc float; non-modal, draggable, one at a time. */
 export function openQuickCalc(): void {
   publish({ ...CLOSED, quickCalc: true, quickViewRevision: state.quickViewRevision });
 }

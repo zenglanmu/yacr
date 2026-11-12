@@ -40,6 +40,11 @@ const SAF: &str = include_str!("saf.rs");
 const HOST: &str = include_str!("host.rs");
 /// The popup seam (toolkit-neutral `PopupOps` + the Android marshalling half).
 const POPUP: &str = include_str!("popup.rs");
+/// The Android release-page opener (Android only).
+const RELEASE: &str = include_str!("release.rs");
+/// The committed Kotlin Activity the JNI bridges call into (Android only).
+const MAIN_ACTIVITY: &str =
+    include_str!("../gen/android/app/src/main/java/io/github/zenglanmu/yacr/MainActivity.kt");
 
 /// The slice of `source` between the `start` anchor and the next `end` anchor.
 ///
@@ -355,5 +360,53 @@ fn the_popup_seam_is_registered_and_routes_through_the_shared_lifecycle() {
     assert!(
         POPUP.contains("return Err(OFF_OWNER_THREAD.to_string())"),
         "an off-loop-thread read must refuse explicitly"
+    );
+}
+
+#[test]
+fn the_release_page_opener_is_wired_through_the_activity_without_a_new_native_symbol() {
+    // The shared command's opener is installed during startup, like every other
+    // seam; a carrier that skipped it would keep refusing with
+    // `unsupported-runtime: cad_open_release_page`.
+    assert!(
+        HOST.contains("configure_release_opener"),
+        "the Android host must install the shared release opener"
+    );
+    assert!(
+        HOST.contains("AndroidReleaseOpener"),
+        "the installed opener must be crate::release::AndroidReleaseOpener"
+    );
+
+    // The seam implements the shared trait and reaches the Activity method by name.
+    assert!(
+        RELEASE.contains("impl ShellReleaseOpener for AndroidReleaseOpener"),
+        "the Android opener must implement the shared platform trait"
+    );
+    assert!(
+        RELEASE.contains("openExternalUrl"),
+        "the opener must call MainActivity.openExternalUrl"
+    );
+    // The URL is the shared compile-time constant, never a caller-supplied value.
+    assert!(
+        RELEASE.contains("crate::saf::with_env"),
+        "the opener must use the captured JavaVM/Activity bridge"
+    );
+
+    // Kotlin: the method exists and hands the URL to the system browser.
+    assert!(
+        MAIN_ACTIVITY.contains("fun openExternalUrl("),
+        "MainActivity must expose openExternalUrl"
+    );
+    assert!(
+        MAIN_ACTIVITY.contains("Intent.ACTION_VIEW"),
+        "MainActivity must hand the URL to ACTION_VIEW"
+    );
+
+    // The frozen Kotlin -> Rust contract stays four symbols: this method is
+    // Rust -> Kotlin only.
+    let frozen_native = MAIN_ACTIVITY.matches("private external fun native").count();
+    assert_eq!(
+        frozen_native, 4,
+        "the frozen Kotlin->Rust contract must stay exactly four native symbols"
     );
 }
