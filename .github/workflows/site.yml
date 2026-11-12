@@ -13,8 +13,8 @@ name: Landing site
 # Order matters: R2 first (it rewrites `apps/landing/downloads.json` with the
 # real CDN base/hashes), Pages second (it uploads the rewritten manifest).
 # `upload_downloads: false` skips the mirror and deploys the committed
-# `downloads.json` as-is (currently the v0.1.11 R2 manifest) — useful for
-# copy/layout fixes without re-uploading 396 MB. Set cdnBase to null in that
+# `downloads.json` as-is (currently the v0.1.12 R2 manifest) — useful for
+# copy/layout fixes without re-uploading 464 MB. Set cdnBase to null in that
 # file if you want the GitHub fallback instead.
 #
 # Required repository secrets:
@@ -31,7 +31,7 @@ on:
       release_tag:
         description: "Release tag to mirror to R2"
         required: true
-        default: "v0.1.11"
+        default: "v0.1.12"
         type: string
       upload_downloads:
         description: "Mirror release assets to R2 and rewrite downloads.json"

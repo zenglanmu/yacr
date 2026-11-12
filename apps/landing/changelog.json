@@ -2,6 +2,61 @@
   "generatedFrom": "docs/release-notes",
   "releases": [
     {
+      "version": "v0.1.12",
+      "title": "yacr v0.1.12",
+      "date": "2026-11-13",
+      "url": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.12",
+      "sections": [
+        {
+          "heading": "命令覆盖 / Command coverage",
+          "items": [
+            "官方 981 条命令名全部有明确状态：979 条有实现路径（107 完整 + 872 部分）；MEASURE / TRACE 两条按同名不同义不计入。未支持的选项仍按名拒绝，不静默成功。",
+            "Wave 26–28 把 300 个命令名落到可运行路径；随后补齐真实 2D 升级：TRIM 支持 LWPOLYLINE（精确 bulge 子弧）、EXTEND 开放 SPLINE 沿端点切线延长、PLINE/PEDIT 统一宽度与宽笔画渲染、TEXTFIT 写入真实宽度因子、TEXTALIGN 15 种对齐与 DISTRIBUTE、HATCHEDIT 按内置图案名选择、XCLIP 显示裁剪、REFEDIT 有界块内编辑。"
+          ]
+        },
+        {
+          "heading": "绘制与编辑 / Draw and edit",
+          "items": [
+            "ELLIPSE 弧/旋转、SPLINE CV/degree、PLINE bulge/Close、POINT Multiple、椭圆 TRIM/EXTEND/BREAK/FILLET、JOIN 样条焊接、PEDIT 顶点子菜单、MPEDIT、MOCORO 预校验、ARRAYPOLAR 按 AutoCAD fill 规则。",
+            "SHAPE/SHP2BLK、MINSERT、ADDSELECTED、多边形 VPCLIP/MVIEW/IMAGECLIP 写入；多边形 clip 在当前表示层仍按 *.polygon_not_renderable 具名拒绝（计部分实现）。",
+            "STYLE/-STYLE/DIMSTYLE/MLEADERSTYLE 表写入；REDEFINE/UNDEFINE/ALIASEDIT 会话内命令词表控制。"
+          ]
+        },
+        {
+          "heading": "文字与标注 / Text and annotation",
+          "items": [
+            "真实 TXTEXP/ARCTEXT（用显示字体引擎出轮廓）、TEXTMASK/TEXTUNMASK、TEXTALIGN、TEXTFIT、TXT2MTXT 高度/换行；QLEADER/LEADER/MLEADER 引线选项与 MLEADEREDIT/MLEDIT；TOLERANCE 特征框。"
+          ]
+        },
+        {
+          "heading": "布局、查询与恢复 / Layout, inquiry, recovery",
+          "items": [
+            "VPLAYER、MVSETUP、PSBSCALE、PSTSCALE、VPMAX（真实相机快照/恢复）、ALIGNSPACE、VPSYNC。",
+            "MASSPROP 支持闭合样条/填充环，STATUS/TIME/MEASUREGEOM RADIUS 补全；RECOVER/RECOVERALL/PURGEAECDATA/SHOWURLS 为只读报告（磁盘 DWG 修复与 AEC 模型仍显式未建模）。"
+          ]
+        },
+        {
+          "heading": "界面 / UI",
+          "items": [
+            "工具选项板（Blocks 页）、性能分析器、Quick View/QuickCalc/工作空间、经典 INSERT/GROUP/IMAGE 面板；QuickCalc 变为可拖动浮窗并增加科学模式（幂/三角/对数/DEG-RAD），错误返回 null 而不是伪造值。",
+            "Android 的 About/更新页可用系统浏览器打开。"
+          ]
+        },
+        {
+          "heading": "显示 / Display",
+          "items": [
+            "Linux 分数缩放/5K：以 WebView 上报的 dpr 作为 CSS→设备权威，原生 CAD 子表面按整数 buffer scale 对齐；修复 wl_surface invalid_size 与 CAD 区透出桌面。"
+          ]
+        },
+        {
+          "heading": "工具链 / Toolchain",
+          "items": [
+            "Rust 固定到 1.99.1。"
+          ]
+        }
+      ]
+    },
+    {
       "version": "v0.1.11",
       "title": "yacr v0.1.11",
       "date": "2026-11-11",

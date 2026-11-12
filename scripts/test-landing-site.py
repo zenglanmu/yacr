@@ -24,14 +24,14 @@ BUILD_CHANGELOG = ROOT / "scripts" / "build-landing-changelog.py"
 CHANGELOG = LANDING / "changelog.json"
 HEADERS = LANDING / "_headers"
 
-RELEASE = "v0.1.11"
-GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.11/"
-CDN_BASE = "https://dl-yacr.snakeheartgo.top/releases/v0.1.11"
+RELEASE = "v0.1.12"
+GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.12/"
+CDN_BASE = "https://dl-yacr.snakeheartgo.top/releases/v0.1.12"
 KNOWN_ASSETS = {
-    "linux": ("yacr-0.1.11-linux-x86_64.flatpak", 112224776),
-    "windows": ("yacr-0.1.11-windows-x86_64.zip", 105674331),
-    "macos": ("yacr-0.1.11-macos-universal.tar.gz", 150290275),
-    "android": ("app-universal-release.apk", 112293345),
+    "linux": ("yacr-0.1.12-linux-x86_64.flatpak", 113189968),
+    "windows": ("yacr-0.1.12-windows-x86_64.zip", 107269717),
+    "macos": ("yacr-0.1.12-macos-universal.tar.gz", 151988558),
+    "android": ("app-universal-release.apk", 113993249),
 }
 
 # The page shows one genuine product screenshot; the asset must exist, be a PNG
