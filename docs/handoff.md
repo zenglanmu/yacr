@@ -1,5 +1,34 @@
 AD
 
+## 2026-11-13 TypeScript 二次开发 API 骨架（ADR 0034）
+
+- **新增**：`packages/cad-plugin-api`（`@yacr/plugin-api`）——AutoCAD .NET 命名空间镜像
+  （ApplicationServices / DatabaseServices / EditorInput / Runtime / Geometry / Colors）+ 参考
+  客户端 + manifest 解析；`apps/desktop-ui/src/plugin-api` 宿主 adapter（描述符校验、载体合并、
+  `api.adapter-missing` 拒绝）；`cad-ui-core` 的 `cad_api_status` 共享命令与
+  `crates/cad-ui-core/api/plugin-api.json` 单一权威。作者文档 `docs/plugin-api.md`。
+- **语义**：能力四类拒绝——`pending` → `api.pending: <ns>.<op>`；显式 `unsupported` →
+  `unsupported-runtime: cad_api.<ns>.<op>`；宿主表里**没有**该行 → `api.descriptor_missing:
+  <ns>.<op>`；`callVoid` 必须拿到 `{accepted:true}`。客户端在触达 wire **之前**门控。
+  **本轮 20 行全部 `pending`**（描述符只列宿主操作；Geometry/Colors/manifest 是包内特性，没有
+  行）——插件不能读写文档、不能注册可派发命令（显式拒绝，不是占位成功）。事务：嵌套 commit 是
+  保存点（`CommitResult{applied:false,revision:null,created:[]}`，不伪造 revision）、`abort` 仅本地、
+  `expectedRevision` 必填、commit 信封带 `document`、insert 只接受 Line/Circle/Arc 且带 layer 名 +
+  space；`handle` 可空（只作 `source_handle` 出处），图层/块按名字标识，`getObject` 按 `typeName`
+  解码。
+- **载体**：`cad_api_status` 为 shared+pure，两个载体同一份 JSON；Web 在会话启动前也应答
+  （`apps/app-web/src/direct.rs::without_session`），不报假 `no live CAD session`。
+- **边界**：插件仍是同权 ES module，不是沙箱；无热重载、无 Worker/签名；M2–M5 见 ADR 0034。
+- **证据**：包 `tsc --noEmit` + node 45/45（含 20 行逐行契约、包边界导入扫描）；desktop-ui
+  `tsc --noEmit` + `test/plugin-api` 与 `host-adapter` 合计 60/60（含 supported⊆adapter 实现门禁）；
+  **`npm test` 整条**（app + 契约包 + `plugins/tch` 三处 typecheck，再加全部 node 套件）
+  **1630/1630**——初始化 `plugins/tch` submodule 后跑通，此前 11 个失败全部来自该 submodule 未初始化；
+  `cargo test -p cad-ui-core --test plugin_api_status` 6/6、`--lib session::api` 5/5、`wire_goldens`
+  4/4、`cargo test -p app-web` 122/122；`cargo check`（cad-ui-core / cad-desktop-shell / app-web
+  wasm）、`fmt --check`、`check-file-size` / `check-i18n` / `check-architecture` /
+  `check-command-docs` 通过。
+  **NOT RUN**：真实 GUI 加载插件、GUI/GPU/像素/真机、Windows/macOS/Android/Web 运行。
+
 ## 2026-11-12 真实 2D 升级（3b）：EXTEND 开放 SPLINE
 
 - **行为**：`EXTEND` 接受开放 SPLINE 目标。拾取投影选近端，沿该端**切线**做直线尾段延伸：
