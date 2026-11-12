@@ -1816,3 +1816,120 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `REDEFINE` | **完整实现** | 重新启用被 `UNDEFINE` 禁用的内建命令；essential 双向拒绝 | 会话状态；不持久化 DWG |
 | `UNDEFINE` | **完整实现** | 会话内禁用内建命令；`command.undefined: <NAME>`；别名指向禁用目标亦禁用 | 会话状态；不持久化 DWG |
 | `ALIASEDIT` | 部分实现 | `ADD`/`REMOVE`/`LIST`；运行时别名先于静态表解析并遮蔽内建；仅删除运行时行 | 无交互对话框；会话状态不持久化；原生宿主同一 pre-tick 批次内新增并使用需等下一 tick |
+## Wave 27 边界更新（2026-11-12）
+
+> 以下条目**取代正文中同名命令的旧界**。证据仅 Linux 编译 + Rust 契约测试 + React 单测；
+> GUI/GPU/像素/真机 NOT VERIFIED，Windows/macOS/Android/Web NOT VERIFIED。
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `RECOVER` | 部分实现 | 只读：当前文档逐实体 `validate_entity`，`recover.summary` + 每个无效实体 `recover.invalid_entity`（ASCII 安全） | 磁盘 DWG 修复/重新打开是宿主文件 I/O + importer 级 salvage，未建模（`recover.file_level_not_modeled`）；不写库/不升修订/不入历史 |
+| `RECOVERALL` | 部分实现 | 同上单文档扫描 | 本构建单文档、无 xref 批处理（`recoverall.single_document`） |
+| `PURGEAECDATA` | 部分实现 | 只读能力报告：无 AEC 对象模型，无数据可清理（`purgeaecdata.no_aec_model`） | 不导入/不代理 AEC 对象；不写库 |
+| `SHOWURLS` | 部分实现 | 只读：报告数据库不保留超链接/URL（`showurls.not_retained`） | 无 hyperlink 存储；不虚构 URL 行、不编辑 |
+| `TOOLPALETTES` | 部分实现 | chrome 本地非模态浮窗；Blocks 页列出真实块定义并启动既有 INSERT/`cad_set_tool_text` 流程 | 只有 Blocks 页；无工具/命令工具内容；不进入 `cad_command`；视觉/像素 NOT VERIFIED |
+| `TOOLPALETTESCLOSE` | **完整实现** | chrome 本地选择子：关闭浮窗（幂等） | chrome 本地，不进入 `cad_command` |
+| `TPNAVIGATE` | 部分实现 | `TPNAVIGATE Blocks`（大小写/空白不敏感）打开或聚焦 Blocks 页并取得键盘 | 其它页名与裸词走 `toolpalettes.refusal.*` 错误行；不转发 `cad_command` |
+| `PERFANALYZER` | 部分实现 | chrome 本地非模态面板：只读 `cad_status.performance`（CPU/RSS/GPU/VRAM）与文档/会话计数；null 显示 N/A | 无命令录制/采样/历史；所有数值来自宿主，缺失即 N/A；视觉/像素 NOT VERIFIED |
+| `PERFANALYZERCLOSE` | **完整实现** | chrome 本地选择子：关闭面板（幂等） | chrome 本地，不进入 `cad_command` |
+
+### Wave 27 具名拒绝（91 条）
+
+> 以下 91 个名字只提供诚实命令路径（`CadError::Unsupported` + 稳定原因串），不是可用功能：
+> 本构建没有 3D 实体/曲面/剖切、点云、render/灯光/视觉样式/视图基、云共享、图纸集、
+> 外部参照比较、部分打开、块/外部参照 clip 边界或 clipboard 特殊粘贴模型。全部 Viewer-legal：
+> 不写库、不升修订、不入历史。唯一权威是 `docs/autocad-2026-command-coverage.md`；此表只复述原因串。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `PCEXTRACTCENTERLINE` | **部分实现（具名拒绝）**：`pcextractcenterline.unsupported: no point-cloud extraction model` | 不写库/不升修订/不入历史 |
+| `PCEXTRACTCORNER` | **部分实现（具名拒绝）**：`pcextractcorner.unsupported: no point-cloud extraction model` | 不写库/不升修订/不入历史 |
+| `PCEXTRACTEDGE` | **部分实现（具名拒绝）**：`pcextractedge.unsupported: no point-cloud extraction model` | 不写库/不升修订/不入历史 |
+| `PCEXTRACTSECTION` | **部分实现（具名拒绝）**：`pcextractsection.unsupported: no point-cloud extraction model` | 不写库/不升修订/不入历史 |
+| `PFACE` | **部分实现（具名拒绝）**：`pface.unsupported: no 3DFACE/mesh entity model` | 不写库/不升修订/不入历史 |
+| `PLANESURF` | **部分实现（具名拒绝）**：`planesurf.unsupported: no planar-surface entity model` | 不写库/不升修订/不入历史 |
+| `PROJECTGEOMETRY` | **部分实现（具名拒绝）**：`projectgeometry.unsupported: no 3D solid edge/geometry projection model` | 不写库/不升修订/不入历史 |
+| `TABSURF` | **部分实现（具名拒绝）**：`tabsurf.unsupported: no 3D surface (NURBS) model` | 不写库/不升修订/不入历史 |
+| `REVSURF` | **部分实现（具名拒绝）**：`revsurf.unsupported: no 3D surface (NURBS) model` | 不写库/不升修订/不入历史 |
+| `RULESURF` | **部分实现（具名拒绝）**：`rulesurf.unsupported: no 3D surface (NURBS) model` | 不写库/不升修订/不入历史 |
+| `XEDGES` | **部分实现（具名拒绝）**：`xedges.unsupported: no 3D solid/surface wireframe extraction model` | 不写库/不升修订/不入历史 |
+| `SECTION` | **部分实现（具名拒绝）**：`section.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
+| `SECTIONPLANE` | **部分实现（具名拒绝）**：`sectionplane.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
+| `SECTIONPLANEJOG` | **部分实现（具名拒绝）**：`sectionplanejog.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
+| `SECTIONPLANESETTINGS` | **部分实现（具名拒绝）**：`sectionplanesettings.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
+| `SECTIONPLANETOBLOCK` | **部分实现（具名拒绝）**：`sectionplanetoblock.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
+| `SECTIONSPINNERS` | **部分实现（具名拒绝）**：`sectionspinners.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
+| `SOLIDEDIT` | **部分实现（具名拒绝）**：`solidedit.unsupported: no 3D solid-history/brep model` | 不写库/不升修订/不入历史 |
+| `SOLPROF` | **部分实现（具名拒绝）**：`solprof.unsupported: no 3D solid-to-2D drawing view model` | 不写库/不升修订/不入历史 |
+| `SOLVIEW` | **部分实现（具名拒绝）**：`solview.unsupported: no 3D solid-to-2D drawing view model` | 不写库/不升修订/不入历史 |
+| `SOLDRAW` | **部分实现（具名拒绝）**：`soldraw.unsupported: no 3D solid-to-2D drawing view model` | 不写库/不升修订/不入历史 |
+| `-POINTCLOUDATTACH` | **部分实现（具名拒绝）**：`-pointcloudattach.unsupported: no point-cloud attachment/crop/style model` | 不写库/不升修订/不入历史 |
+| `POINTCLOUDATTACH` | **部分实现（具名拒绝）**：`pointcloudattach.unsupported: no point-cloud attachment/crop/style model` | 不写库/不升修订/不入历史 |
+| `POINTCLOUDCOLORMAP` | **部分实现（具名拒绝）**：`pointcloudcolormap.unsupported: no point-cloud attachment/crop/style model` | 不写库/不升修订/不入历史 |
+| `POINTCLOUDCROP` | **部分实现（具名拒绝）**：`pointcloudcrop.unsupported: no point-cloud attachment/crop/style model` | 不写库/不升修订/不入历史 |
+| `POINTCLOUDCROPSTATE` | **部分实现（具名拒绝）**：`pointcloudcropstate.unsupported: no point-cloud attachment/crop/style model` | 不写库/不升修订/不入历史 |
+| `-POINTCLOUDMANAGER` | **部分实现（具名拒绝）**：`-pointcloudmanager.unsupported: no point-cloud attachment/crop/style model` | 不写库/不升修订/不入历史 |
+| `POINTCLOUDMANAGER` | **部分实现（具名拒绝）**：`pointcloudmanager.unsupported: no point-cloud attachment/crop/style model` | 不写库/不升修订/不入历史 |
+| `POINTCLOUDMANAGERCLOSE` | **部分实现（具名拒绝）**：`pointcloudmanagerclose.unsupported: no point-cloud attachment/crop/style model` | 不写库/不升修订/不入历史 |
+| `POINTCLOUDSTYLIZE` | **部分实现（具名拒绝）**：`pointcloudstylize.unsupported: no point-cloud attachment/crop/style model` | 不写库/不升修订/不入历史 |
+| `POINTCLOUDUNCROP` | **部分实现（具名拒绝）**：`pointclouduncrop.unsupported: no point-cloud attachment/crop/style model` | 不写库/不升修订/不入历史 |
+| `-RENDER` | **部分实现（具名拒绝）**：`-render.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDER` | **部分实现（具名拒绝）**：`render.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDERCROP` | **部分实现（具名拒绝）**：`rendercrop.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDERENVIRONMENT` | **部分实现（具名拒绝）**：`renderenvironment.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDERENVIRONMENTCLOSE` | **部分实现（具名拒绝）**：`renderenvironmentclose.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDEREXPOSURE` | **部分实现（具名拒绝）**：`renderexposure.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDEREXPOSURECLOSE` | **部分实现（具名拒绝）**：`renderexposureclose.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDERONLINE` | **部分实现（具名拒绝）**：`renderonline.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDERPRESETS` | **部分实现（具名拒绝）**：`renderpresets.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDERPRESETSCLOSE` | **部分实现（具名拒绝）**：`renderpresetsclose.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDERWIN` | **部分实现（具名拒绝）**：`renderwin.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDERWINDOW` | **部分实现（具名拒绝）**：`renderwindow.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RENDERWINDOWCLOSE` | **部分实现（具名拒绝）**：`renderwindowclose.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RPREF` | **部分实现（具名拒绝）**：`rpref.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `RPREFCLOSE` | **部分实现（具名拒绝）**：`rprefclose.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `SHOWRENDERGALLERY` | **部分实现（具名拒绝）**：`showrendergallery.unsupported: no render engine; only the 2D viewport renderer exists` | 不写库/不升修订/不入历史 |
+| `-VISUALSTYLES` | **部分实现（具名拒绝）**：`-visualstyles.unsupported: no visual-style/3D display model; VSCURRENT owns the 2D display token` | 不写库/不升修订/不入历史 |
+| `VISUALSTYLES` | **部分实现（具名拒绝）**：`visualstyles.unsupported: no visual-style/3D display model; VSCURRENT owns the 2D display token` | 不写库/不升修订/不入历史 |
+| `VISUALSTYLESCLOSE` | **部分实现（具名拒绝）**：`visualstylesclose.unsupported: no visual-style/3D display model; VSCURRENT owns the 2D display token` | 不写库/不升修订/不入历史 |
+| `POINTLIGHT` | **部分实现（具名拒绝）**：`pointlight.unsupported: no 3D light model` | 不写库/不升修订/不入历史 |
+| `SPOTLIGHT` | **部分实现（具名拒绝）**：`spotlight.unsupported: no 3D light model` | 不写库/不升修订/不入历史 |
+| `WEBLIGHT` | **部分实现（具名拒绝）**：`weblight.unsupported: no 3D light model` | 不写库/不升修订/不入历史 |
+| `TARGETPOINT` | **部分实现（具名拒绝）**：`targetpoint.unsupported: no 3D light model` | 不写库/不升修订/不入历史 |
+| `SUNPROPERTIES` | **部分实现（具名拒绝）**：`sunproperties.unsupported: no sun/sky lighting model` | 不写库/不升修订/不入历史 |
+| `SUNPROPERTIESCLOSE` | **部分实现（具名拒绝）**：`sunpropertiesclose.unsupported: no sun/sky lighting model` | 不写库/不升修订/不入历史 |
+| `-SHADEMODE` | **部分实现（具名拒绝）**：`-shademode.unsupported: no 3D shaded display mode; VSCURRENT owns the 2D display token` | 不写库/不升修订/不入历史 |
+| `SHADEMODE` | **部分实现（具名拒绝）**：`shademode.unsupported: no 3D shaded display mode; VSCURRENT owns the 2D display token` | 不写库/不升修订/不入历史 |
+| `VIEWBASE` | **部分实现（具名拒绝）**：`viewbase.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWCOMPONENT` | **部分实现（具名拒绝）**：`viewcomponent.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWDETAIL` | **部分实现（具名拒绝）**：`viewdetail.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWDETAILSTYLE` | **部分实现（具名拒绝）**：`viewdetailstyle.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWEDIT` | **部分实现（具名拒绝）**：`viewedit.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWPROJ` | **部分实现（具名拒绝）**：`viewproj.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWSECTION` | **部分实现（具名拒绝）**：`viewsection.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWSECTIONSTYLE` | **部分实现（具名拒绝）**：`viewsectionstyle.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWSETPROJ` | **部分实现（具名拒绝）**：`viewsetproj.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWSKETCHCLOSE` | **部分实现（具名拒绝）**：`viewsketchclose.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWSTD` | **部分实现（具名拒绝）**：`viewstd.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWSYMBOLSKETCH` | **部分实现（具名拒绝）**：`viewsymbolsketch.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `VIEWUPDATE` | **部分实现（具名拒绝）**：`viewupdate.unsupported: no 3D model-to-drawing base/detail/section view model` | 不写库/不升修订/不入历史 |
+| `SHARE` | **部分实现（具名拒绝）**：`share.unsupported: no Autodesk cloud sharing/view model` | 不写库/不升修订/不入历史 |
+| `SHAREDVIEWS` | **部分实现（具名拒绝）**：`sharedviews.unsupported: no Autodesk cloud sharing/view model` | 不写库/不升修订/不入历史 |
+| `SHAREDVIEWSCLOSE` | **部分实现（具名拒绝）**：`sharedviewsclose.unsupported: no Autodesk cloud sharing/view model` | 不写库/不升修订/不入历史 |
+| `-SHAREVIEW` | **部分实现（具名拒绝）**：`-shareview.unsupported: no Autodesk cloud sharing/view model` | 不写库/不升修订/不入历史 |
+| `SHAREVIEW` | **部分实现（具名拒绝）**：`shareview.unsupported: no Autodesk cloud sharing/view model` | 不写库/不升修订/不入历史 |
+| `PUSHTODOCSOPEN` | **部分实现（具名拒绝）**：`pushtodocsopen.unsupported: no Autodesk Docs connector model` | 不写库/不升修订/不入历史 |
+| `PUSHTODOCSCLOSE` | **部分实现（具名拒绝）**：`pushtodocsclose.unsupported: no Autodesk Docs connector model` | 不写库/不升修订/不入历史 |
+| `SHEETSET` | **部分实现（具名拒绝）**：`sheetset.unsupported: no sheet-set (DST) model` | 不写库/不升修订/不入历史 |
+| `OPENSHEETSET` | **部分实现（具名拒绝）**：`opensheetset.unsupported: no sheet-set (DST) model` | 不写库/不升修订/不入历史 |
+| `SHEETSETHIDE` | **部分实现（具名拒绝）**：`sheetsethide.unsupported: no sheet-set (DST) model` | 不写库/不升修订/不入历史 |
+| `XCOMPARE` | **部分实现（具名拒绝）**：`xcompare.unsupported: no xref comparison/diff model` | 不写库/不升修订/不入历史 |
+| `XCOMPARECLOSE` | **部分实现（具名拒绝）**：`xcompareclose.unsupported: no xref comparison/diff model` | 不写库/不升修订/不入历史 |
+| `XCOMPARERCNEXT` | **部分实现（具名拒绝）**：`xcomparercnext.unsupported: no xref comparison/diff model` | 不写库/不升修订/不入历史 |
+| `XCOMPARERCPREV` | **部分实现（具名拒绝）**：`xcomparercprev.unsupported: no xref comparison/diff model` | 不写库/不升修订/不入历史 |
+| `PARTIALOPEN` | **部分实现（具名拒绝）**：`partialopen.unsupported: no partial layer-index open/load model` | 不写库/不升修订/不入历史 |
+| `PARTIALOAD` | **部分实现（具名拒绝）**：`partiaload.unsupported: no partial layer-index open/load model` | 不写库/不升修订/不入历史 |
+| `SHELL` | **部分实现（具名拒绝）**：`shell.unsupported: the host owns process spawning; this command layer has no OS shell` | 不写库/不升修订/不入历史 |
+| `SECURITYOPTIONS` | **部分实现（具名拒绝）**：`securityoptions.unsupported: no security/executable-trust settings model` | 不写库/不升修订/不入历史 |
+| `XCLIP` | **部分实现（具名拒绝）**：`xclip.unsupported: no block/xref clip-boundary model; IMAGECLIP clips raster images only` | 不写库/不升修订/不入历史 |
+| `PASTESPEC` | **部分实现（具名拒绝）**：`pastespec.unsupported: clipboard special-paste (OLE/format selection) is not modeled; use PASTECLIP or PASTEBLOCK` | 不写库/不升修订/不入历史 |

@@ -1,5 +1,46 @@
 AD
 
+## 2026-11-12 Wave 27：100 个命令名（4 只读报告 + 5 chrome 面板 + 91 具名拒绝）
+
+- **计数**：官方 981 条从 **840 已实现（105 完整 + 735 部分）/ 141 未实现** 推进到
+  **940 已实现（107 完整 + 833 部分）/ 41 未实现**。本轮恰好 100 个名字；`EDGESURF`
+  不是本轮（Wave 15 已登记），`TRACE` 仍按同名不同义不计入。
+- **真实只读报告（4）**：`RECOVER`/`RECOVERALL` 对当前文档逐实体跑
+  `cad_db::validate_entity`（detect-only AUDIT 半边），输 `recover.summary` + 每个无效实体
+  `recover.invalid_entity`（ASCII 安全）；`RECOVER` 另报 `recover.file_level_not_modeled`
+  （磁盘 DWG 修复/重新打开由宿主负责，本层未建模），`RECOVERALL` 另报
+  `recoverall.single_document`（单文档、无 xref 批处理）。`PURGEAECDATA` 只读报告
+  `purgeaecdata.no_aec_model`（本构建无 AEC 对象）；`SHOWURLS` 只读报告
+  `showurls.not_retained`（数据库不保留超链接）。四者均不写库/不升修订/不入历史，Viewer-legal。
+- **chrome 本地选择子（5）**：`TOOLPALETTES`/`TOOLPALETTESCLOSE`（非模态工具选项板，仅 Blocks
+  页列出真实 `cad_status.blocks` 并走既有 INSERT 流程）、`TPNAVIGATE Blocks`（仅接受 Blocks，
+  其它页名/裸词走错误行，绝不转发 `cad_command`）、`PERFANALYZER`/`PERFANALYZERCLOSE`
+  （只读 `cad_status.performance` + 文档/会话计数；null 显示 N/A，不伪造 0，无采样/录制）。
+  `PERFANALYZER`/`TOOLPALETTES` 打开会关闭其它浮窗；两个 close 幂等。File 目录新增
+  `RECOVER`/`RECOVERALL`/`PURGEAECDATA` 入口，ribbon 仅 RECOVER（File ▸ Utilities，与 AUDIT 同组）。
+- **具名拒绝（91）**：3D 实体/曲面/剖切/点云（`SECTION*`、`SURF*`、`SOLIDEDIT`、
+  `SOLPROF/SOLVIEW/SOLDRAW`、`PFACE/PLANESURF/PROJECTGEOMETRY`、`PCEXTRACT*`、
+  `POINTCLOUD*`、`XEDGES`）、render/灯光/视觉样式/视图基（`RENDER*`、`RPREF*`、
+  `-RENDER`、`VISUALSTYLES*`、`SHADEMODE`、`POINTLIGHT/SPOTLIGHT/WEBLIGHT/TARGETPOINT`、
+  `SUNPROPERTIES*`、`VIEWBASE`…`VIEWUPDATE`）、云/协作/图纸集/比较/部分打开
+  （`SHARE*`、`PUSHTODOCS*`、`SHEETSET`、`OPENSHEETSET`、`SHEETSETHIDE`、`XCOMPARE*`、
+  `PARTIALOPEN/PARTIALOAD`、`SHELL`、`SECURITYOPTIONS`）、以及 `XCLIP`（无块/xref clip
+  边界模型；`IMAGECLIP` 只裁栅格）与 `PASTESPEC`（无 OLE/格式选择）。统一
+  `CadError::Unsupported` + `<selector>.unsupported: …` 稳定原因串；不写库/不升修订/不入历史。
+- **不变量**：没有第二份命令漏斗（拒绝全走 `RefusalId` 数据表，新增名不需要 dispatch 分支）；
+  没有 acadrust 补丁（`docs/acadrust-patches.md` 台账不变）；没有 DWG 写路径；报告命令不返回
+  错误、也不伪造计数。`COMMAND_TABLE` + `REFUSAL_TABLE` 长度契约现在为 236 + 288 选择子。
+- **证据**：`cargo fmt --all -- --check`、`cargo check --workspace --all-targets --locked`、
+  `cargo test -p cad-app`（2623 tests）、`cargo test -p cad-ui-core`（585）+
+  `cargo test -p cad-desktop-shell`（78，含 wire goldens）、
+  `cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`、
+  `(cd apps/desktop-ui && npm test)`（1552 tests）、`npm run build`、`check-architecture.py`、
+  `check-i18n.py`（2899 keys）、`check-command-docs.py`、`check-file-size.py`、
+  `check-tauri-capabilities.py`、`check-fixture-manifest.py` 全部通过。
+- **NOT RUN**：`cargo test --workspace` 全量、wasm32 全量 check、任何 GUI/GPU/像素/真机或浏览器
+  视觉运行；Windows/macOS/Android/Web 运行结论 NOT VERIFIED。React 面板只做了静态审查 + 单测，
+  未截图、未做布局/像素对比。
+
 ## 2026-11-12 QUICKCALC 改为非模态可拖动浮窗 + 科学计算；About 增加落地页地址
 
 - **QUICKCALC 载体**：`components/QuickCalcDialog.tsx` 不再是 `.popup-overlay` 模态（无遮罩、
