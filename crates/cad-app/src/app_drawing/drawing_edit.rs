@@ -855,7 +855,7 @@ fn plan_offset(
     match geometry {
         SemanticGeometry::Line { start, end } => {
             let (geometry, applied) =
-                super::trim_extend::offset_line_with_distance(*start, *end, side_point, distance)?;
+                super::offset_fixed::offset_line_with_distance(*start, *end, side_point, distance)?;
             Ok((
                 geometry,
                 applied,
@@ -867,7 +867,7 @@ fn plan_offset(
             normal,
             radius,
         } => {
-            let (geometry, applied) = super::trim_extend::offset_circle_with_distance(
+            let (geometry, applied) = super::offset_fixed::offset_circle_with_distance(
                 *center, *normal, *radius, side_point, distance,
             )?;
             Ok((
@@ -883,7 +883,7 @@ fn plan_offset(
             start,
             sweep,
         } => {
-            let (geometry, applied) = super::trim_extend::offset_arc_with_distance(
+            let (geometry, applied) = super::offset_fixed::offset_arc_with_distance(
                 *center, *normal, *radius, *start, *sweep, side_point, distance,
             )?;
             Ok((

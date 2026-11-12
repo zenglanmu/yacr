@@ -1,5 +1,5 @@
-//! The LWPOLYLINE parameter model shared by BREAK, BREAKATPOINT, DIVIDE and
-//! LENGTHEN.
+//! The LWPOLYLINE parameter model shared by BREAK, BREAKATPOINT, DIVIDE, LENGTHEN
+//! and TRIM.
 //!
 //! Split out of `divide.rs` so every module stays inside the code-size limit.
 //! The parameter is `u ∈ [0, segments]`, one unit per segment.
@@ -226,6 +226,37 @@ impl PolylineCurve {
         (0..self.segment_count())
             .map(|segment| self.segment_length(segment))
             .sum()
+    }
+
+    /// One segment as the analytic geometry it really is: a LINE, or the exact
+    /// ARC of a bulge (`bulge_arc_geometry`, the same construction
+    /// [`Self::point_on_segment`] and [`Self::segment_length`] use).
+    ///
+    /// `None` for a segment whose two vertices coincide. A bulge too shallow to
+    /// carry an arc is the chord, exactly like the boundary collector reads it, so
+    /// a straight segment is never reported as an arc.
+    pub(super) fn segment_geometry(&self, segment: usize) -> Option<SemanticGeometry> {
+        let (a, b) = self.endpoints(segment);
+        if distance(a, b) <= 1e-12 {
+            return None;
+        }
+        let bulge = self.bulge_at(segment);
+        if bulge.abs() <= 1e-9 {
+            return Some(SemanticGeometry::Line { start: a, end: b });
+        }
+        Some(
+            bulge_arc_geometry(
+                a,
+                b,
+                bulge,
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
+            )
+            .unwrap_or(SemanticGeometry::Line { start: a, end: b }),
+        )
     }
 
     /// The exact arc length of one segment.

@@ -115,6 +115,8 @@
 > **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
 > GUI/GPU/像素/真机 NOT VERIFIED。
 
+> **2026-11-12 增补（Wave 29，真实 2D 升级，无新命令名）**：`TRIM` 新增 **LWPOLYLINE 目标**（开放/闭合；bulge 还原为精确 ARC 后求交，保留拾取投影所在窗口，子弧 bulge 精确保留；一条事务/一步撤销；EXTEND 的 POLYLINE 目标仍按名拒绝）。该升级不改变 981 条状态总计，仍计入 **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 契约测试，GUI/GPU/像素 NOT VERIFIED。
+
 ### 纪律
 
 - 2D 优先；3D/实体/约束/表格/外部参照/点云/渲染/发布类命令不在本 100 条内。
@@ -1095,7 +1097,7 @@
 | `TRAYSETTINGS` | 部分实现 | 会话令牌（默认 ON）；无状态栏托盘 UI。 |
 | `TREESTAT` | 部分实现 | 显式 `treestat.not_tracked`；不造假计数 |
 | `TREX` | 部分实现 | `TREX TRIM\ |
-| `TRIM` | 部分实现 | 目标 LINE/ARC/CIRCLE/SPLINE/**ELLIPSE（含椭圆弧）**；边界折线/样条采样；**INSERT/HATCH/POLYLINE/MESH/OPAQUE/COMPOUND 目标按名拒绝** |
+| `TRIM` | 部分实现 | 目标 LINE/ARC/CIRCLE/SPLINE/**ELLIPSE（含椭圆弧）**/**LWPOLYLINE（开放/闭合，bulge 保留为精确子弧）**；拾取投影所在的段保留（本项目 TRIM 语义，见 `docs/drawing-edit.md` §3）；边界折线/样条采样；**INSERT/HATCH/MESH/OPAQUE/COMPOUND 目标与 EXTEND 的 POLYLINE 目标按名拒绝** |
 | `TSCALE` | 部分实现 | `TSCALE <factor>`；复用 SCALETEXT 的唯一 `scaled_text` 规则（height + MText `wrap_width`）；factor=1 为 `tscale.unchanged` 且不开事务 |
 | `TXT2MTXT` | 部分实现 | COMBINE/SEPARATE/ORDER/word-wrap；**每个源文字高度以 `\H` 保留**、保留首个已存 wrap 宽度；`UNIFORM` 行距无字段 |
 | `TXTEXP` | 已实现 | 字体轮廓→每个轮廓一条 `LWPOLYLINE`（闭合 sfnt 环闭合、SHX 笔画开放），删除源 TEXT/MTEXT，一条事务/一步撤销；字体引擎由宿主安装；MTEXT 宽度换行未应用（声明） |
@@ -2085,7 +2087,7 @@
 | 884 | `TRAYSETTINGS` | 部分实现 | Controls the display of icons and notifications in the status bar tray. | 会话令牌（默认 ON）；无状态栏托盘 UI。 |
 | 885 | `TREESTAT` | 部分实现 | Displays information about the drawing's current spatial index. | 显式 `treestat.not_tracked`；不造假计数 |
 | 886 | `TREX` | 部分实现 | Combines the TRIM and EXTEND commands. | `TREX TRIM\|EXTEND`；选择集为边界，复用 `plan_trim`/`plan_extend`；无边界提示 |
-| 887 | `TRIM` | 部分实现 | Trims objects to meet the edges of other objects. | 目标 LINE/ARC/CIRCLE/SPLINE/**ELLIPSE（含椭圆弧）**；边界折线/样条采样；**INSERT/HATCH/POLYLINE/MESH/OPAQUE/COMPOUND 目标按名拒绝** |
+| 887 | `TRIM` | 部分实现 | Trims objects to meet the edges of other objects. | 目标 LINE/ARC/CIRCLE/SPLINE/**ELLIPSE（含椭圆弧）**/**LWPOLYLINE（开放/闭合，bulge 保留为精确子弧）**；拾取投影所在的段保留（本项目 TRIM 语义，见 `docs/drawing-edit.md` §3）；边界折线/样条采样；**INSERT/HATCH/MESH/OPAQUE/COMPOUND 目标与 EXTEND 的 POLYLINE 目标按名拒绝** |
 | 888 | `TSCALE` | 部分实现 | Scales text, mtext, attributes, and attribute definitions. | `TSCALE <factor>`；复用 SCALETEXT 的唯一 `scaled_text` 规则（height + MText `wrap_width`）；factor=1 为 `tscale.unchanged` 且不开事务 |
 | 889 | `TXT2MTXT` | 部分实现 | Converts or combines single-line or multiline text objects into one or more multiline text objects. | COMBINE/SEPARATE/ORDER/word-wrap；**每个源文字高度以 `\H` 保留**、保留首个已存 wrap 宽度；`UNIFORM` 行距无字段 |
 | 890 | `TXTEXP` | 已实现 | Explodes text or mtext objects into polyline objects. | 字体轮廓→每个轮廓一条 `LWPOLYLINE`（闭合 sfnt 环闭合、SHX 笔画开放），删除源 TEXT/MTEXT，一条事务/一步撤销；字体引擎由宿主安装；MTEXT 宽度换行未应用（声明） |
@@ -2293,7 +2295,7 @@
 | `ROTATE` | 实现 | 绕基点旋转（相似变换）；选择含 `MultiLeader` 时**仍可旋转**（缩放则整命令失败，见 `SCALE`） |
 | `SCALE` | 实现 | **均匀**缩放；非均匀拒绝；`MultiLeader`/`TEXT` 等按类拒绝 |
 | `MIRROR` | 部分 | 镜像并**新增副本**（保留原件）；含 `Arc`/`Ellipse`（含椭圆弧）；**拒绝 `Text`**（平面文字无法表达真反射）与 `MultiLeader` |
-| `TRIM` | 部分 | 目标 `LINE`/`ARC`/`CIRCLE`/`SPLINE`；边界含 `LINE`/`ARC`/`CIRCLE`/`ELLIPSE`/`LWPOLYLINE`（含 bulge）/`SPLINE`（**采样**，附诊断）；拒绝 `INSERT`/`Opaque`/`Mesh` 目标、无交点/投影出域 |
+| `TRIM` | 部分 | 目标 LINE/ARC/CIRCLE/SPLINE/**ELLIPSE（含椭圆弧）**/**LWPOLYLINE（开放/闭合，bulge 保留为精确子弧）**；拾取投影所在的段保留（本项目 TRIM 语义，见 `docs/drawing-edit.md` §3）；边界折线/样条采样；**INSERT/HATCH/MESH/OPAQUE/COMPOUND 目标与 EXTEND 的 POLYLINE 目标按名拒绝** |
 | `EXTEND` | 部分 | 目标 **`LINE` 或 `ARC`**（弧延伸上限半圈）；**`SPLINE` 目标显式拒绝**（NURBS 端点移动会改参数化，无外推策略）；`CIRCLE` 目标拒绝 |
 | `BREAK` | 部分 | 两点打断：**第一次拾取实体同时是第一断点**，第二点确定移除区间；`LINE`/`ARC`/`CIRCLE`/`SPLINE` 走同一 `TargetCurve` 精确子曲线；`CIRCLE` 变 `ARC`（补集），源实体保留为第一段、第二段新 id，一条事务/一步撤销。**按名拒绝**：`LWPOLYLINE`/其它种类、两点同参数（`break.zero_span`）、整条曲线（`break.whole_curve`）、拾取投影出界（`break.pick_outside_span`）、块成员/子元素、非模型空间。**无 `F` 第一点覆盖、无多段打断** |
 | `DIVIDE` | 部分 | **选择式**：恰好 1 条 `LINE`/`ARC`/`CIRCLE`/**直线段** `LWPOLYLINE`，按**等弧长**放置 `POINT`；开放曲线 `N−1` 个、闭合曲线 `N` 个（含起始参数）；`divideSegments` 2–1024；源保留、一条事务/一步撤销。**按名拒绝**：`SPLINE`/椭圆/含 bulge 折线（`divide.bulged_segment`）/非有限或零长/选择数≠1 |

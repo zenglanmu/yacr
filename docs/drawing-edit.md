@@ -100,14 +100,14 @@ impl<'a> DrawingTransaction<'a> {
 通用解析裁剪（任意曲线对任意边界）仍是大型计算几何；当前实现一个**明确子集**并用
 `Unsupported`/`InvalidInput` 与诊断标注，绝不假装完整：
 
-- 目标：**LINE / ARC / CIRCLE**（EXTEND 只接受 LINE / ARC——圆没有端点）。
+- 目标：**LINE / ARC / CIRCLE**；TRIM 另支持 **ELLIPSE / SPLINE / LWPOLYLINE**（EXTEND 只接受 LINE / ARC / 椭圆弧——圆没有端点，样条与折线没有外推策略）。
 - 边界：**LINE / ARC / CIRCLE / ELLIPSE / LWPOLYLINE**（直线段或带 bulge 的弧段），可任意混用。
   LWPOLYLINE 的 bulge 段经 `cad_geometry::bulge_arc_geometry` 还原为解析 ARC 后求交，
   切点来自 `GeometryEngine::intersect_local`（与对象捕捉同一个解析圆锥曲线求交）；只有
   ARC×ELLIPSE、ELLIPSE×ELLIPSE 这类引擎不解析的组合退回其采样近似。
 - 裁剪语义：切点按目标自身参数排序（LINE 用 `t ∈ [0,1]`，ARC/CIRCLE 用自身 sweep 上的
   `u ∈ [0,1]`，一个周期参数域一套算法），保留含拾取点**投影**的那一段（见下方拾取语义）。ARC 复用原
-  圆心/法向/半径并重算 `start`/`sweep`，**保留原 sweep 符号**；CIRCLE 变成一段 ARC，
+  圆心/法向/半径并重算 `start`/`sweep`，**保留原 sweep 符号**；LWPOLYLINE 是分段链，同样保留含投影落点的那个窗口（切点按每段自身 LINE/ARC 参数收集，闭合折线需要两个切点），顶点与 bulge 精确保留、原顶点顺序与方向不变，原地替换、不产生新实体；CIRCLE 变成一段 ARC，
   需要至少两个切点（周期参数域上“恰好一个切点”仍拒绝）；完全落在闭合边界内的目标
   整体删除（含 CIRCLE）。**内侧判定按边界自身平面**：闭合折线先做平面距离检查，再在
   该折线自己的平面坐标系里做射线判定，且要求严格内缩超过容差（删除是破坏性操作，

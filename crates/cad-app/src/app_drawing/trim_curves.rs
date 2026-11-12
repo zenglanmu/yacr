@@ -18,6 +18,13 @@
 //! [`TrimResolution::notes`]/[`ExtendResolution::notes`] rather than presented as
 //! exact (see `trim_boundary::note_approximation`).
 //!
+//! A POLYLINE **target** is the one supported kind that is not a single
+//! [`TargetCurve`]: it is a chain of LINE/ARC segments, so TRIM resolves it with
+//! the shared polyline parameter model (`super::trim_polyline`, the same one
+//! BREAK/DIVIDE use) and keeps the one window containing the pick, like every
+//! other target here. EXTEND still refuses a POLYLINE by name
+//! (`extend.target_polyline`): no polyline continuation policy exists.
+//!
 //! A SPLINE boundary does not take part in the closed-boundary delete rule: a
 //! spline carries no closed flag and no boundary plane, so no sound inside test
 //! exists. That combination is an explicit `Unsupported` refusal ([`PlanRefusal`]),

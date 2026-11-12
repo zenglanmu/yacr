@@ -1,5 +1,22 @@
 AD
 
+## 2026-11-12 真实 2D 升级（1/5）：TRIM 支持 LWPOLYLINE 目标
+
+- **行为**：`TRIM` 的 `SemanticGeometry::Polyline` 目标真实可用（开放/闭合）。每个线段按其真实几何
+  （LINE 或 bulge ARC）参与求交，保留**拾取点投影所在的窗口**（与 `docs/drawing-edit.md` §3 的
+  既有 TRIM 契约一致），其余丢弃；开放折线原地替换为保留窗口的单条折线，闭合折线需两条切点，
+  拾取窗口变为一段开放折线。顶点顺序/方向保持，弧段以 `tan(sweep/4)` 求精确子 bulge，绝不压成弦。
+  一条事务/一步撤销；`TrimPlan` 仍是 `Delete | Replace`，没有多实体写入旁路。
+- **拒绝码**：`trim.polyline_no_intersection`、`trim.polyline_pick_outside`、`trim.polyline_degenerate`、
+  `trim.polyline_nonplanar_bulge`；闭合折线单切点复用共享的 `InvalidInput`。宽度拒绝
+  `trim.polyline_width_unsupported` 预留（当前折线无宽度字段，不可达）。移除了
+  `trim.target_polyline`；`extend.target_polyline` 保留并改为准确措辞（折线无 EXTEND）。
+- **边界**：`EXTEND` 的 LWPOLYLINE 目标仍具名拒绝；折线仍无宽度语义；GUI/像素/GPU 未验证。
+- **证据**：`cargo test -p cad-app --locked`（2573 passed）、`cargo test -p cad-app trim`（110）、
+  `cargo clippy -p cad-app --all-targets -D warnings`、workspace `cargo check`/clippy、fmt、
+  `check-file-size`/`check-command-docs`/`check-i18n`/`check-architecture` 全过。
+  **NOT RUN**：`cargo test --workspace` 全量、wasm check、任何 GUI/GPU/像素/真机。
+
 ## 2026-11-12 Wave 28：最后 39 个官方命令名（具名拒绝）——官方清单收尾
 
 - **计数**：从 **940 已实现（107 完整 + 833 部分）/ 41 未实现** 推进到
