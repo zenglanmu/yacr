@@ -81,6 +81,7 @@ fn rand_polyline(rng: &mut XorShift, span: f64) -> SemanticGeometry {
         points,
         bulges,
         closed: rng.unit() < 0.3,
+        width: 0.0,
     }
 }
 
@@ -330,6 +331,7 @@ fn indexed_pick_agrees_at_the_predicate_tolerance_floor() {
             points: vec![p(1.0, 1.0, 0.0), p(5.0, 1.0, 0.0), p(9.0, 3.0, 0.0)],
             bulges: vec![0.5, -0.25, 0.0],
             closed: false,
+            width: 0.0,
         },
         1,
     ))

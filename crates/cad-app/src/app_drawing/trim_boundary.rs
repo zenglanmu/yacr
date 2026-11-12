@@ -252,6 +252,7 @@ pub(crate) fn collect_boundaries(
             points,
             bulges,
             closed,
+            ..
         } => {
             if points.len() < 2 {
                 return Ok(());

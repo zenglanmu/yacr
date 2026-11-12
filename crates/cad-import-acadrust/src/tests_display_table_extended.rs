@@ -836,6 +836,7 @@ fn extended_aec_arch_draws_each_proxy_profile_as_a_polyline_partial() {
         points,
         bulges,
         closed,
+        ..
     } = &children[0]
     else {
         panic!("expected a polyline, got {:?}", children[0]);

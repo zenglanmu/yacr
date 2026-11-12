@@ -722,6 +722,7 @@ fn tcircle_rectangle_is_a_closed_four_vertex_polyline() {
         points,
         bulges,
         closed,
+        ..
     } = &boundary.geometry
     else {
         panic!("expected a Polyline");

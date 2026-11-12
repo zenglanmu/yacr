@@ -399,6 +399,7 @@ fn index_local_bounds(geometry: &SemanticGeometry) -> Option<(Point3, Point3)> {
             points,
             bulges,
             closed,
+            ..
         } => {
             if points.is_empty() {
                 return None;

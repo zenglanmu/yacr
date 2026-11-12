@@ -100,6 +100,7 @@ impl Application {
                 points,
                 bulges,
                 closed,
+                ..
             } => {
                 if *closed {
                     return Err(at_point_refusal(

@@ -64,6 +64,7 @@ impl Application {
                 points: points.clone(),
                 bulges: vec![0.0; points.len()],
                 closed: false,
+                width: 0.0,
             },
             "create sketch polyline",
         )
@@ -140,6 +141,7 @@ impl Application {
                 bulges: vec![0.0; points.len()],
                 points,
                 closed: true,
+                width: 0.0,
             },
             "create trace band",
         )

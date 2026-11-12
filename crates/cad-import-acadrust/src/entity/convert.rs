@@ -72,12 +72,21 @@ impl<'a> ImporterBuilder<'a> {
                 );
                 let raw_bulges: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
                 let bulges = polyline_ocs_bulges(normal, &raw_bulges);
-                let completeness = polyline_completeness(normal, pl.vertices.len(), &bulges);
+                let has_taper = pl
+                    .vertices
+                    .iter()
+                    .any(|v| v.start_width.abs() > 1e-12 || v.end_width.abs() > 1e-12);
+                let (width, width_reason) = polyline_uniform_width(pl.constant_width, has_taper);
+                let mut completeness = polyline_completeness(normal, pl.vertices.len(), &bulges);
+                if let Some(reason) = width_reason {
+                    completeness = completeness.combine(Completeness::Partial(vec![reason.into()]));
+                }
                 (
                     SemanticGeometry::Polyline {
                         points,
                         bulges,
                         closed: pl.is_closed,
+                        width,
                     },
                     completeness,
                 )
@@ -92,12 +101,28 @@ impl<'a> ImporterBuilder<'a> {
                 let raw_bulges: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
                 let bulges = polyline_ocs_bulges(normal, &raw_bulges);
                 let closed = pl.flags.bits() & 1 != 0;
-                let completeness = polyline_completeness(normal, pl.vertices.len(), &bulges);
+                // The 2D POLYLINE header carries a default start/end width pair;
+                // it is a uniform width only when the two are equal and no vertex
+                // overrides it. Anything else is a taper and keeps 0 + a partial
+                // diagnostic rather than an invented uniform value.
+                let header_uniform = (pl.start_width - pl.end_width).abs() <= 1e-12;
+                let vertex_taper = pl
+                    .vertices
+                    .iter()
+                    .any(|v| v.start_width.abs() > 1e-12 || v.end_width.abs() > 1e-12);
+                let constant = if header_uniform { pl.start_width } else { 0.0 };
+                let (width, width_reason) =
+                    polyline_uniform_width(constant, !header_uniform || vertex_taper);
+                let mut completeness = polyline_completeness(normal, pl.vertices.len(), &bulges);
+                if let Some(reason) = width_reason {
+                    completeness = completeness.combine(Completeness::Partial(vec![reason.into()]));
+                }
                 (
                     SemanticGeometry::Polyline {
                         points,
                         bulges,
                         closed,
+                        width,
                     },
                     completeness,
                 )
@@ -109,6 +134,7 @@ impl<'a> ImporterBuilder<'a> {
                         points,
                         bulges: Vec::new(),
                         closed: pl.flags.closed,
+                        width: 0.0,
                     },
                     Completeness::Complete,
                 )

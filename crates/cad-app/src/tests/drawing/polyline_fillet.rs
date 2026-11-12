@@ -15,6 +15,7 @@ fn polyline_geometry(points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> Sem
         points,
         bulges,
         closed,
+        width: 0.0,
     }
 }
 
@@ -119,6 +120,7 @@ fn stored_polyline(app: &Application, entity: u128) -> (Vec<Point3>, Vec<f64>, b
             points,
             bulges,
             closed,
+            ..
         } => (points.clone(), bulges.clone(), *closed),
         other => panic!("expected an LWPOLYLINE, got {other:?}"),
     }

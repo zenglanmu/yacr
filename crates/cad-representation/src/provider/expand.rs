@@ -347,6 +347,34 @@ impl ProviderRegistry {
                     }
                 }
                 primitive => {
+                    // A wide polyline stroke is a filled triangle band, so the
+                    // arc-length dash subdivision the `Lines` path performs does
+                    // not apply. It is drawn solid and reported here instead of
+                    // silently dropping the pattern.
+                    if matches!(&primitive, DisplayPrimitive::Mesh(_))
+                        && matches!(
+                            &entity.geometry,
+                            SemanticGeometry::Polyline { width, .. }
+                                if width.is_finite() && *width > 0.0
+                        )
+                        && !own_linetype.is_continuous()
+                    {
+                        out.completeness = weaker_completeness(
+                            &out.completeness,
+                            &Completeness::Partial(vec![
+                                "a wide polyline stroke is drawn solid: dash subdivision of a \
+                                 filled band is not implemented"
+                                    .into(),
+                            ]),
+                        );
+                        out.diagnostics.push(Diagnostic {
+                            object: Some(ObjectId(entity.id.0)),
+                            code: "representation.polyline_width_dashes".into(),
+                            message: "the wide polyline stroke ignores its dash pattern; it is \
+                                      drawn solid"
+                                .into(),
+                        });
+                    }
                     // Every primitive is transformed first, so the clip
                     // rectangle (already in world space) and the geometry share
                     // one coordinate system.

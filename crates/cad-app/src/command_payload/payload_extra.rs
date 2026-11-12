@@ -737,7 +737,9 @@ pub enum PeditEditOption {
     /// `JOIN` / `J`: weld touching LINEs, ARCs and open polylines into the base
     /// polyline (touch-only; no fuzz distance in this build).
     Join,
-    /// `WIDTH <w>`: named capability refusal (no per-polyline width field).
+    /// `WIDTH <w>`: set the **uniform** polyline width (centred on the
+    /// vertices; `0` = hairline) on every selected polyline, in one
+    /// transaction. Full contract: [`crate::command_id::pedit`].
     Width(f64),
     /// `EDIT` / `E` with no sub-menu action: named refusal. The sub-menu itself
     /// is the [`PeditVertexCommand`] form (`PEDIT EDIT NEXT|PREVIOUS|INSERT|

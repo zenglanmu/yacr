@@ -131,6 +131,7 @@ fn polyline_of(app: &Application, id: u128) -> (Vec<Point3>, Vec<f64>, bool) {
             points,
             bulges,
             closed,
+            ..
         } => (points, bulges, closed),
         other => panic!("expected a polyline, got {other:?}"),
     }
@@ -276,6 +277,7 @@ fn stretch_moves_exactly_the_polyline_vertices_inside_the_window() {
                 ],
                 bulges: vec![0.0; 4],
                 closed: false,
+                width: 0.0,
             },
             0,
         )],
@@ -314,6 +316,7 @@ fn stretch_moves_a_bulge_polyline_vertex_and_preserves_the_bulge_value() {
                 points: vec![point(0.0, 0.0), point(4.0, 0.0), point(8.0, 0.0)],
                 bulges: vec![0.5, 0.0, 0.0],
                 closed: false,
+                width: 0.0,
             },
             0,
         )],
@@ -363,6 +366,7 @@ fn stretch_bulge_polyline_conservative_bounds_rule_pins_partial_and_full() {
         points: vec![point(0.0, 0.0), point(2.0, 0.0), point(5.0, 0.0)],
         bulges: vec![1.0, 0.0, 0.0],
         closed: false,
+        width: 0.0,
     };
 
     // (a) Both bulge endpoints are inside the window, but the arc bows outside it

@@ -733,6 +733,7 @@ impl HatchGeometry {
                     .collect(),
                 bulges: loop_.bulges.clone(),
                 closed: true,
+                width: 0.0,
             })
             .collect()
     }
@@ -768,6 +769,7 @@ impl HatchGeometry {
                                 points: line.iter().map(|p| self.plane.to_world(*p)).collect(),
                                 bulges: Vec::new(),
                                 closed: false,
+                                width: 0.0,
                             });
                         }
                     }

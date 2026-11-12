@@ -250,6 +250,7 @@ impl GeometryEngine for DefaultGeometryEngine {
                 points,
                 bulges,
                 closed,
+                width,
             } => {
                 let has_bulge = bulges.iter().any(|b| b.abs() > 1e-12);
                 if is_uniform(t) || !has_bulge {
@@ -265,6 +266,13 @@ impl GeometryEngine for DefaultGeometryEngine {
                             bulges.clone()
                         },
                         closed: *closed,
+                        // The width is a physical distance, so a scaled copy
+                        // (SCALE/INSERT) scales it. `max_scale` is the exact
+                        // uniform factor for a similarity; a non-uniform scale
+                        // of a **straight** polyline has no single-width image,
+                        // so the upper-bound factor keeps the stroke visible
+                        // (the anisotropic band is outside the v1 uniform model).
+                        width: *width * t.max_scale(),
                     }
                 } else {
                     // A non-uniform scale turns every bulge arc into an
@@ -685,6 +693,7 @@ impl DefaultGeometryEngine {
                 points: Vec::new(),
                 bulges: Vec::new(),
                 closed,
+                width: 0.0,
             });
         }
         let plane_normal = polyline_plane_normal(points);

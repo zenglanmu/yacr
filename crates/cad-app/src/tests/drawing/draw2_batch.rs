@@ -353,6 +353,7 @@ fn helix_builds_a_flat_spiral_with_the_requested_turns() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert_eq!(points.len(), 2 * 64 + 1, "64 segments per turn");
             assert_eq!(bulges.len(), points.len());
@@ -714,6 +715,7 @@ fn mpedit_closes_every_selected_polyline_and_skips_the_line() {
                 points: vec![p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), p3(4.0, 4.0, 0.0)],
                 bulges: vec![0.0; 3],
                 closed: false,
+                width: 0.0,
             },
             0,
         ),
@@ -723,6 +725,7 @@ fn mpedit_closes_every_selected_polyline_and_skips_the_line() {
                 points: vec![p3(10.0, 0.0, 0.0), p3(14.0, 0.0, 0.0), p3(14.0, 4.0, 0.0)],
                 bulges: vec![0.0; 3],
                 closed: false,
+                width: 0.0,
             },
             1,
         ),

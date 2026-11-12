@@ -547,6 +547,16 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     labelKey: 'status.tool_parameter.lengthen_value',
     hintKey: 'status.tool_parameter.lengthen_value.hint',
   },
+  // PLINE's **uniform** width, centred on the vertices (the host stores one
+  // width per polyline; per-vertex start/end taper is not modeled). It is a real
+  // length, so it steps by 0.5 and may also be typed — the host accepts any
+  // finite value `>= 0`, and `0` is the valid hairline draw, not an absence.
+  polylineWidth: {
+    kind: 'number', statusKey: 'polylineWidth', step: 0.5,
+    offered: finiteAtLeast(0), typed: true,
+    labelKey: 'status.tool_parameter.polyline_width',
+    hintKey: 'status.tool_parameter.polyline_width.hint',
+  },
 });
 
 /** Which parameters belong to an active tool, and the command that gates them. */
@@ -581,6 +591,11 @@ export type ToolParameterMap = Readonly<Record<string, ToolParameterOwner>>;
  */
 export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   'draw.polygon': { command: 'POLYGON', keys: ['polygonSides'] },
+  // PLINE reads the one `polylineWidth` value when it builds the polyline, so it
+  // owns the row. RECTANG does **not** consume the parameter in the host (its
+  // captured rectangle is always hairline), so it deliberately has no row here —
+  // adding one would offer a control whose value the command ignores.
+  'draw.polyline': { command: 'PLINE', keys: ['polylineWidth'] },
   // The fill kind first, then the rows that kind scopes (the predefined pattern,
   // then the whole gradient), then the pattern-only rows and the style last. Only
   // one group is in effect at a time, but every row stays visible: a scoped row is

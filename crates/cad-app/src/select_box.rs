@@ -347,6 +347,7 @@ fn classify_world(geometry: &SemanticGeometry, rect: Rect) -> Option<MatchPath> 
             points,
             bulges,
             closed,
+            ..
         } => {
             if points.len() < 2 {
                 return None;

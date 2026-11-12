@@ -913,6 +913,8 @@
   "status.tool_text.too_long": "文字超过 1024 个字符上限",
   "status.tool_parameter.polygon_sides": "正多边形边数",
   "status.tool_parameter.polygon_sides.hint": "正多边形工具的边数，取值范围 3 到 1024",
+  "status.tool_parameter.polyline_width": "多段线宽度",
+  "status.tool_parameter.polyline_width.hint": "多段线的均匀宽度，以顶点为中心（0 表示细线）；暂不支持逐段变宽",
   "status.tool_parameter.fillet_radius": "圆角半径",
   "status.tool_parameter.fillet_radius.hint": "圆角工具的半径，不小于 0",
   "status.tool_parameter.chamfer_distance_a": "倒角距离 A",

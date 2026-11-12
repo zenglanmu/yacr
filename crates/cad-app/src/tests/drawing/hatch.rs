@@ -72,6 +72,7 @@ pub(super) fn square(id: u128, min: f64, max: f64, z: f64) -> (u128, SemanticGeo
             ],
             bulges: vec![0.0; 4],
             closed: true,
+            width: 0.0,
         },
     )
 }
@@ -440,6 +441,7 @@ fn a_polyline_with_bulges_is_one_loop_with_its_bulges_preserved() {
         points: vec![p3(-5.0, 0.0, 0.0), p3(5.0, 0.0, 0.0), p3(0.0, 5.0, 0.0)],
         bulges: vec![1.0, 0.0, 0.0],
         closed: true,
+        width: 0.0,
     };
     let (mut app, mut session) = hatch_app(vec![(1, bulged)]);
     run(&mut app, &mut session, &[1]).expect("HATCH succeeds");
@@ -481,6 +483,7 @@ fn unsupported_boundary_kinds_are_refused_by_name() {
             points: vec![point(0.0, 0.0), point(5.0, 0.0), point(5.0, 5.0)],
             bulges: vec![0.0; 3],
             closed: false,
+            width: 0.0,
         },
     )]);
     assert_refused(&mut app, &mut session, &[1], "open polyline");
@@ -556,6 +559,7 @@ fn the_creation_path_boundary_defects_refuse_the_whole_command() {
         ],
         bulges: vec![0.0; 4],
         closed: true,
+        width: 0.0,
     };
     let (mut app, mut session) = hatch_app(vec![(1, bowtie)]);
     assert_refused(&mut app, &mut session, &[1], "self-intersecting");
@@ -596,6 +600,7 @@ fn the_creation_path_boundary_defects_refuse_the_whole_command() {
             points: vec![point(0.0, 0.0), point(1.0, 0.0), point(2.0, 0.0)],
             bulges: vec![0.0; 3],
             closed: true,
+            width: 0.0,
         },
     )]);
     assert_refused(&mut app, &mut session, &[1], "degenerate");
@@ -780,6 +785,7 @@ fn a_clockwise_z_flat_polyline_keeps_the_plane_and_the_bulge_side() {
         points,
         bulges: vec![-bulge; 4],
         closed: true,
+        width: 0.0,
     };
     let (mut app, mut session) = hatch_app(vec![(1, boundary)]);
     run(&mut app, &mut session, &[1]).expect("HATCH succeeds");

@@ -32,7 +32,7 @@ impl Application {
     ///   repeated at the end;
     /// * [`WipeoutPayload::Polyline`] — `Polyline` → `Erase Polyline [Yes/No]`.
     ///   The target must be a closed `LWPOLYLINE` whose every segment is straight
-    ///   (zero width is the only width the model has), and `erase` deletes it in
+    ///   (its uniform width is irrelevant to the mask boundary), and `erase` deletes it in
     ///   the same transaction;
     /// * [`WipeoutPayload::Frames`] — `Frames ON|OFF|Display but not plot`.
     ///   This is session/drawing-wide state (`WIPEOUTFRAME` 1/0/2) applied to
@@ -141,6 +141,7 @@ impl Application {
                 points,
                 bulges,
                 closed,
+                ..
             } => {
                 if !closed {
                     return Err(CadError::InvalidInput(
@@ -150,7 +151,7 @@ impl Application {
                 if bulges.iter().any(|bulge| bulge.abs() > 1e-9) {
                     return Err(CadError::Unsupported(
                         "wipeout.polyline_bulged: the Polyline option needs straight segments \
-                         only; zero width is the only width this build models"
+                         only; per-vertex taper is not modeled"
                             .into(),
                     ));
                 }
@@ -313,6 +314,7 @@ impl Application {
             bulges: vec![0.0; vertices.len()],
             points: vertices,
             closed: true,
+            width: 0.0,
         };
         self.commit_new_entity(session, command, geometry, "create circumscribed polygon")
     }
@@ -571,19 +573,27 @@ const MIN_AUTHORED_BULGE: f64 = 1e-9;
 ///   plane: the arc segments are resolved on the work plane, so a tilted ring
 ///   cannot be stored faithfully;
 /// * `pline.degenerate_bulge` — a non-zero bulge on a zero-length chord (the arc
-///   has no endpoints to run between).
+///   has no endpoints to run between);
+/// * `pline.width_invalid` — a negative or non-finite uniform width.
 ///
-/// Deliberate gaps, refused by absence rather than by a fabricated value: **POLYLINE
-/// WIDTH is not modeled** (`SemanticGeometry::Polyline` has no width and this build
-/// does not invent one — `pline.width_unsupported` is the code a future width
-/// channel must use), and **`Undo` of the last vertex** is a capture-state-machine
-/// step, not a command payload, so it cannot be requested here (see the PLINE
-/// handler).
+/// The uniform `width` is stored on the created polyline (`0.0` = hairline,
+/// AutoCAD's constant LWPOLYLINE width). Per-vertex start/end taper is not
+/// modeled and is never invented from a single number. Deliberate remaining gap:
+/// **`Undo` of the last vertex** is a capture-state-machine step, not a command
+/// payload, so it cannot be requested here (see the PLINE handler).
 pub(super) fn authored_polyline_geometry(
     mut points: Vec<Point3>,
     mut bulges: Vec<f64>,
     closed: bool,
+    width: f64,
 ) -> CadResult<SemanticGeometry> {
+    if !width.is_finite() || width < 0.0 {
+        return Err(draw_refusal(
+            "pline",
+            "width_invalid",
+            format!("an authored polyline width must be finite and >= 0, got {width}"),
+        ));
+    }
     if points.len() < 2 {
         return Err(draw_refusal(
             "pline",
@@ -689,6 +699,7 @@ pub(super) fn authored_polyline_geometry(
         points,
         bulges,
         closed,
+        width,
     })
 }
 

@@ -805,6 +805,7 @@ impl Application {
                 points,
                 bulges,
                 closed,
+                ..
             } => (points.clone(), bulges.clone(), *closed),
             other => {
                 return Err(CadError::Unsupported(refusal(
@@ -842,6 +843,7 @@ impl Application {
                 points: plan.points.clone(),
                 bulges: plan.bulges.clone(),
                 closed: plan.closed,
+                width: 0.0,
             };
             let change_set = {
                 let mut staged = candidate.begin_drawing_transaction(spec.label(), transaction)?;

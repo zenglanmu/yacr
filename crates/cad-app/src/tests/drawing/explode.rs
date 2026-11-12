@@ -44,6 +44,7 @@ fn polyline(points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> SemanticGeom
         points,
         bulges,
         closed,
+        width: 0.0,
     }
 }
 

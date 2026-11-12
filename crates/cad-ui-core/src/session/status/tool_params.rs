@@ -102,4 +102,9 @@ pub struct CadToolParams {
     /// The DIMROTATED dimension-line angle in **degrees** (the domain stores
     /// radians), projected only while a DIMROTATED capture is active.
     pub dim_rotation: Option<f64>,
+    /// The PLINE **uniform** width in world units, centred on the vertices
+    /// (`0` is the hairline draw), projected only while a PLINE capture is
+    /// active; `null` for every other tool. Per-vertex start/end taper is not
+    /// modeled, so this is one value per polyline.
+    pub polyline_width: Option<f64>,
 }

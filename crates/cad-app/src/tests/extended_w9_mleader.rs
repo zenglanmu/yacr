@@ -758,6 +758,7 @@ fn tolerance_creates_a_frame_with_dividers_and_cell_texts() {
                 points,
                 closed,
                 bulges,
+                ..
             } => Some((points.clone(), *closed, bulges.clone())),
             _ => None,
         })

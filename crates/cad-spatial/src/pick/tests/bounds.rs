@@ -85,11 +85,13 @@ fn allocation_free_pick_bounds_match_the_vec_reference() {
             points: vec![p(1.0, 2.0, 3.0), p(-2.0, 4.0, 0.0)],
             bulges: vec![0.0],
             closed: false,
+            width: 0.0,
         },
         SemanticGeometry::Polyline {
             points: vec![p(1.0, 2.0, 3.0), p(-2.0, 4.0, 0.0)],
             bulges: vec![1.0],
             closed: false,
+            width: 0.0,
         },
         SemanticGeometry::Mask {
             boundary: vec![p(1.0, 2.0, 3.0), p(-2.0, 4.0, 0.0)],
@@ -119,6 +121,7 @@ fn allocation_free_pick_bounds_match_the_vec_reference() {
             points: vec![p(f64::NAN, 0.0, 0.0)],
             bulges: vec![],
             closed: false,
+            width: 0.0,
         },
         SemanticGeometry::Mesh(Mesh {
             vertices: vec![p(0.0, 0.0, 0.0)],
@@ -218,6 +221,7 @@ fn bounded_compound_cull_skips_children_and_shared_placements_reuse_local_bounds
             points: vec![p(100.0, -2.0, 5.0), p(100.0, 2.0, 5.0)],
             bulges: vec![0.0],
             closed: false,
+            width: 0.0,
         },
         SemanticGeometry::Circle {
             center: p(100.0, 0.0, 10.0),
@@ -248,6 +252,7 @@ fn bounded_compound_cull_skips_children_and_shared_placements_reuse_local_bounds
             points: vec![p(-1.0, 0.0, 2.0), p(1.0, 0.0, 2.0)],
             bulges: vec![0.0],
             closed: false,
+            width: 0.0,
         }]),
         SemanticGeometry::Circle {
             center: p(0.0, 0.0, 4.0),
@@ -295,6 +300,7 @@ fn cached_compound_picks_match_unculled_shared_nested_and_mixed_reports() {
             points: vec![p(-1.0, 0.0, 2.0), p(1.0, 0.0, 2.0)],
             bulges: vec![0.0],
             closed: false,
+            width: 0.0,
         },
     ])]);
     let mut displaced = Transform3::identity();
@@ -410,6 +416,7 @@ fn conservative_bounds_keep_tolerance_hits_and_fall_back_for_bulged_polylines() 
         points: vec![p(100.0, 0.0, 0.0), p(101.0, 0.0, 0.0)],
         bulges: vec![1.0],
         closed: false,
+        width: 0.0,
     };
     assert!(local_pick_bounds(&bulged).is_none());
     assert!(local_pick_bounds(&SemanticGeometry::Opaque {
@@ -520,6 +527,7 @@ fn bulge_pick_bounds_use_the_analytic_centre_side() {
             ],
             bulges: vec![case.bulge],
             closed: false,
+            width: 0.0,
         };
         let (min, max) = pick_world_bounds(&geometry, &Transform3::default())
             .expect("a bulged polyline has a conservative bound");

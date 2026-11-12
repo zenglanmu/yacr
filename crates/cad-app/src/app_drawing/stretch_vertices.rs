@@ -56,6 +56,7 @@ pub(super) fn stretched_geometry(
             points,
             bulges,
             closed,
+            ..
         } => {
             let new_points: Vec<Point3> = points
                 .iter()
@@ -75,6 +76,7 @@ pub(super) fn stretched_geometry(
                 // UNVERIFIED: the stored bulge values are preserved as-is.
                 bulges: bulges.clone(),
                 closed: *closed,
+                width: 0.0,
             })
         }
         SemanticGeometry::Spline {

@@ -752,10 +752,12 @@ fn transform_child(
             points,
             bulges,
             closed,
+            ..
         } => SemanticGeometry::Polyline {
             points: points.iter().map(|point| p(*point)).collect(),
             bulges: bulges.clone(),
             closed: *closed,
+            width: 0.0,
         },
         SemanticGeometry::Circle {
             center,

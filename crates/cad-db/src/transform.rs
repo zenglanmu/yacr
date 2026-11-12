@@ -104,6 +104,7 @@ pub fn transform_geometry(
             points,
             bulges,
             closed,
+            ..
         } => {
             if bulges.iter().any(|b| b.abs() > 1e-12) {
                 require_similarity(transform, "polyline with bulge segments")?;
@@ -114,12 +115,14 @@ pub fn transform_geometry(
                     points: points.iter().map(|p| transform.apply_point(*p)).collect(),
                     bulges,
                     closed: *closed,
+                    width: 0.0,
                 }
             } else {
                 SemanticGeometry::Polyline {
                     points: points.iter().map(|p| transform.apply_point(*p)).collect(),
                     bulges: bulges.clone(),
                     closed: *closed,
+                    width: 0.0,
                 }
             }
         }

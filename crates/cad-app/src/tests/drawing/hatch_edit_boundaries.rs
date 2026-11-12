@@ -300,6 +300,7 @@ fn hatchedit_boundary_edits_refuse_an_open_or_off_plane_source_writing_nothing()
                 points: vec![p3(20.0, 0.0, 0.0), p3(30.0, 0.0, 0.0), p3(30.0, 5.0, 0.0)],
                 bulges: vec![0.0; 3],
                 closed: false,
+                width: 0.0,
             },
         ),
     ]);

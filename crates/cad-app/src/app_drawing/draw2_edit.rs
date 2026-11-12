@@ -50,6 +50,7 @@ fn convert_mpedit_object(geometry: &SemanticGeometry) -> Result<SemanticGeometry
                 points: vec![*start, *end],
                 bulges: vec![0.0],
                 closed: false,
+                width: 0.0,
             })
         }
         SemanticGeometry::Arc {
@@ -78,6 +79,7 @@ fn convert_mpedit_object(geometry: &SemanticGeometry) -> Result<SemanticGeometry
                 ],
                 bulges: vec![bulge],
                 closed: false,
+                width: 0.0,
             })
         }
         other => Err(format!("{} is not an LWPOLYLINE", class_name(other))),
@@ -450,6 +452,7 @@ impl Application {
                     points,
                     bulges,
                     closed,
+                    ..
                 } => (points.clone(), bulges.clone(), *closed),
                 other => unreachable!("MPEDIT source is always a polyline, got {other:?}"),
             };
@@ -471,6 +474,7 @@ impl Application {
                             points,
                             bulges,
                             closed: true,
+                            width: 0.0,
                         }
                     }
                 }
@@ -483,6 +487,7 @@ impl Application {
                             points,
                             bulges,
                             closed: false,
+                            width: 0.0,
                         }
                     }
                 }

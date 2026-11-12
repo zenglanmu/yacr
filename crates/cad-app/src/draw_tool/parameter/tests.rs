@@ -617,8 +617,8 @@ fn text_rotation_and_mtext_attachment_are_appended_after_the_gradient_members() 
             .validate(parameter.default_value())
             .unwrap_or_else(|error| panic!("{key} default refused: {error}"));
     }
-    assert_eq!(ToolParameter::COUNT, 34);
-    assert_eq!(ToolParameter::ALL.len(), 34);
+    assert_eq!(ToolParameter::COUNT, 35);
+    assert_eq!(ToolParameter::ALL.len(), 35);
     assert_eq!(
         ToolParameter::TextRotation.default_value(),
         ToolValue::Number(TEXT_DEFAULT_ROTATION_DEGREES)
@@ -726,5 +726,42 @@ fn dim_rotation_is_any_finite_degrees_value_and_never_wraps() {
     assert_eq!(
         ToolParameter::from_key("dimRotation"),
         Some(ToolParameter::DimRotation)
+    );
+}
+
+#[test]
+fn polyline_width_is_a_finite_non_negative_number_appended_last() {
+    // PLINE's width joined the frozen vocabulary last, so no earlier slot moved.
+    assert_eq!(ToolParameter::PolylineWidth.key(), "polylineWidth");
+    assert_eq!(
+        ToolParameter::from_key("polylineWidth"),
+        Some(ToolParameter::PolylineWidth)
+    );
+    assert_eq!(ToolParameter::PolylineWidth.index(), 34);
+    assert_eq!(ToolParameter::PolylineWidth.kind(), ToolValueKind::Number);
+    assert_eq!(
+        ToolParameter::PolylineWidth.default_value(),
+        ToolValue::Number(0.0)
+    );
+    // The hairline default and a real stroke are both accepted...
+    for accepted in [0.0, 0.25, 1.5, 1e6] {
+        ToolParameter::PolylineWidth
+            .validate(ToolValue::Number(accepted))
+            .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
+    }
+    // ...while a negative, non-finite or wrong-kind value is refused by name.
+    for refused in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_refusal_names_parameter(
+            ToolParameter::PolylineWidth
+                .validate(ToolValue::Number(refused))
+                .unwrap_err(),
+            "polylineWidth",
+        );
+    }
+    assert_refusal_names_parameter(
+        ToolParameter::PolylineWidth
+            .validate(ToolValue::Flag(true))
+            .unwrap_err(),
+        "polylineWidth",
     );
 }

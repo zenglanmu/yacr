@@ -157,6 +157,7 @@ fn polyline(id: u128, points: Vec<Point3>, bulges: Vec<f64>, closed: bool, order
             points,
             bulges,
             closed,
+            width: 0.0,
         },
         order,
     )
@@ -169,6 +170,7 @@ fn expect_polyline(app: &Application, id: u128) -> (Vec<Point3>, Vec<f64>, bool)
             points,
             bulges,
             closed,
+            ..
         } => (points, bulges, closed),
         other => panic!("expected a POLYLINE, got {other:?}"),
     }
@@ -594,6 +596,7 @@ fn extend_refuses_a_polyline_target_by_name() {
                 points: vec![point(0.0, 0.0), point(5.0, 0.0)],
                 bulges: vec![0.0],
                 closed: false,
+                width: 0.0,
             },
             0,
         ),

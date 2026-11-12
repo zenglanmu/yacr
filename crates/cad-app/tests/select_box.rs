@@ -557,6 +557,7 @@ fn crossing_a_bulge_polyline_or_spline_falls_back_to_aabb() {
         points: vec![point(5.0, 0.0), point(5.0, 10.0)],
         bulges: vec![1.0],
         closed: false,
+        width: 0.0,
     };
     assert_eq!(
         crossing_precision(bulged),

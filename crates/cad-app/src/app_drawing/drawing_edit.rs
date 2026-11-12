@@ -896,6 +896,7 @@ fn plan_offset(
             points,
             bulges,
             closed,
+            ..
         } => {
             let (geometry, applied) = match distance {
                 Some(_) => offset_polyline_with_distance(

@@ -529,6 +529,7 @@ fn offset_bulged_polyline_is_one_transaction_and_one_undo_step() {
             points: source_points,
             bulges: source_bulges,
             closed,
+            ..
         } => {
             assert_eq!(source_points.len(), 3);
             assert_eq!(source_bulges[0], quarter_bulge());
@@ -664,6 +665,7 @@ fn offset_bulged_polyline_result_round_trips_through_the_dxf_export() {
             points,
             bulges,
             closed: true,
+            width: 0.0,
         },
         0,
     );

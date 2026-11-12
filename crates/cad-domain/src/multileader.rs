@@ -920,6 +920,7 @@ fn path_geometry(points: &[Point3], path_type: MLeaderPathType) -> Option<Semant
             points: points.to_vec(),
             bulges: Vec::new(),
             closed: false,
+            width: 0.0,
         }),
         MLeaderPathType::Spline => {
             let degree = 3.min(points.len().saturating_sub(1).max(1)) as u32;

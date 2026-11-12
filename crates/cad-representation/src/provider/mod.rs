@@ -5,6 +5,7 @@ mod default;
 mod expand;
 mod image;
 mod registry;
+mod stroke;
 
 pub use clip::{block_clip_rect, BlockClipRejection, WorldRect};
 pub use default::DefaultRepresentationProvider;

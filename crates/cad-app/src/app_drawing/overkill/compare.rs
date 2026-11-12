@@ -59,11 +59,13 @@ pub(super) fn same_duplicate_geometry(
                 points: a_points,
                 bulges: a_bulges,
                 closed: a_closed,
+                ..
             },
             SemanticGeometry::Polyline {
                 points: b_points,
                 bulges: b_bulges,
                 closed: b_closed,
+                ..
             },
         ) => {
             if a_closed != b_closed || a_points.len() != b_points.len() {

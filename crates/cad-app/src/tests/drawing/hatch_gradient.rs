@@ -33,6 +33,7 @@ fn rect(id: u128, x0: f64, x1: f64, y0: f64, y1: f64, z: f64) -> (u128, Semantic
             points: vec![p3(x0, y0, z), p3(x1, y0, z), p3(x1, y1, z), p3(x0, y1, z)],
             bulges: vec![0.0; 4],
             closed: true,
+            width: 0.0,
         },
     )
 }

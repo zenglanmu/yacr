@@ -877,13 +877,13 @@
 | `PDFIMPORT` | 部分实现 | 具名拒绝（`pdfimport.unsupported: PDF geometry import is not implemented`）。 |
 | `PDFLAYERS` | 部分实现 | 具名拒绝（`pdflayers.unsupported: no PDF underlay layer model`）。 |
 | `PDFSHXTEXT` | 部分实现 | 具名拒绝（`pdfshxtext.unsupported: PDF SHX text conversion is not implemented`）。 |
-| `PEDIT` | 部分实现 | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；本轮新增 **Edit vertex 子菜单**（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN；TANGENT/WIDTH 拒绝）；`Width`/`Ltype gen` 未建模 |
+|  `PEDIT` | 部分实现 | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；Edit vertex 子菜单（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN）；**`WIDTH <w>` 真实**：对多选多段线写统一宽度（0=细线），一条事务/一步撤销；每段锥形宽度（DXF 40/41）未建模（`pedit.vertex_width_unsupported`）；`Ltype gen` 未建模 |
 | `PERFANALYZER` | 部分实现 | chrome 本地选择子：非模态性能面板，只读显示宿主 `cad_status.performance` 与文档/会话计数；缺失指标显示 N/A（不伪造 0），无命令录制/采样。 |
 | `PERFANALYZERCLOSE` | 已实现 | chrome 本地选择子：关闭性能分析浮窗（幂等成功）。 |
 | `PFACE` | 部分实现 | 具名拒绝（`pface.unsupported: no 3DFACE/mesh entity model`）。 |
 | `PLAN` | 部分实现 | payload-free 选择子：Top/plan 2D 视图；无 UCS/World/Current 选项（本构建无 UCS 模型） |
 | `PLANESURF` | 部分实现 | 具名拒绝（`planesurf.unsupported: no planar-surface entity model`）。 |
-| `PLINE` | 已实现 | `Geometry(Polyline)` 现在接受 **bulge 弧段**与 **Close**（含隐式闭合段），逐位保留顶点/凸度；`Width`/交互逐顶点 `Undo` 未建模（全局范围） |
+|  `PLINE` | 已实现 | `Geometry(Polyline)` 接受 bulge 弧段与 Close；**统一宽度**由 `polylineWidth` 工具参数或 `Geometry(Polyline)` 自带 `width` 写入（0=细线），表示层按 ±w/2 实心带宽绘制；逐段 start/end 锥形宽度未建模；交互逐顶点 Undo 未建模 |
 | `PLOT` | 部分实现 | 仅矢量 SVG/PDF；无 CTB/STB、无批量多布局 |
 | `PLOTSTAMP` | 部分实现 | 具名拒绝（`plotstamp.unsupported`）：本构建无打印戳记模型。 |
 | `PLOTSTYLE` | 部分实现 | 具名拒绝（`plotstyle.unsupported`）：命名打印样式未实现（无 CTB/STB 表）。 |
@@ -1839,13 +1839,13 @@
 | 634 | `PDFLAYERS` | 部分实现 | Controls the display of layers in a PDF underlay. | 具名拒绝（`pdflayers.unsupported: no PDF underlay layer model`）。 |
 | 635 | `-PDFSHXTEXT` | 部分实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects from the command line. | 具名拒绝（`-pdfshxtext.unsupported: PDF SHX text conversion is not implemented`）。 |
 | 636 | `PDFSHXTEXT` | 部分实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects. | 具名拒绝（`pdfshxtext.unsupported: PDF SHX text conversion is not implemented`）。 |
-| 637 | `PEDIT` | 部分实现 | Edits polylines, objects to be joined to polylines, and related objects. | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；本轮新增 **Edit vertex 子菜单**（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN；TANGENT/WIDTH 拒绝）；`Width`/`Ltype gen` 未建模 |
+|  637 | `PEDIT` | 部分实现 | Edits polylines, objects to be joined to polylines, and related objects. | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；Edit vertex 子菜单（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN）；**`WIDTH <w>` 真实**：对多选多段线写统一宽度（0=细线），一条事务/一步撤销；每段锥形宽度（DXF 40/41）未建模（`pedit.vertex_width_unsupported`）；`Ltype gen` 未建模 |
 | 638 | `PERFANALYZER` | 部分实现 | Opens the Performance Analyzer palette from which you can diagnose operations in AutoCAD that seem slow or unresponsive. | chrome 本地选择子：非模态性能面板，只读显示宿主 `cad_status.performance` 与文档/会话计数；缺失指标显示 N/A（不伪造 0），无命令录制/采样。 |
 | 639 | `PERFANALYZERCLOSE` | 已实现 | Closes the Performance Analyzer palette. | chrome 本地选择子：关闭性能分析浮窗（幂等成功）。 |
 | 640 | `PFACE` | 部分实现 | Creates a 3D polyface mesh, vertex by vertex. | 具名拒绝（`pface.unsupported: no 3DFACE/mesh entity model`）。 |
 | 641 | `PLAN` | 部分实现 | Displays an orthographic view of the XY plane of a specified user coordinate system. | payload-free 选择子：Top/plan 2D 视图；无 UCS/World/Current 选项（本构建无 UCS 模型） |
 | 642 | `PLANESURF` | 部分实现 | Creates a planar surface. | 具名拒绝（`planesurf.unsupported: no planar-surface entity model`）。 |
-| 643 | `PLINE` | 已实现 | Creates a 2D polyline, a single object that is composed of line and arc segments. | `Geometry(Polyline)` 现在接受 **bulge 弧段**与 **Close**（含隐式闭合段），逐位保留顶点/凸度；`Width`/交互逐顶点 `Undo` 未建模（全局范围） |
+|  643 | `PLINE` | 已实现 | Creates a 2D polyline, a single object that is composed of line and arc segments. | `Geometry(Polyline)` 接受 bulge 弧段与 Close；**统一宽度**由 `polylineWidth` 工具参数或 `Geometry(Polyline)` 自带 `width` 写入（0=细线），表示层按 ±w/2 实心带宽绘制；逐段 start/end 锥形宽度未建模；交互逐顶点 Undo 未建模 |
 | 644 | `-PLOT` | 部分实现 | Plots a drawing to a plotter, printer, or file in the command line. | 具名拒绝（`-plot.unsupported`）：请用 PLOT；本构建只有一条矢量出图路径；命令行拼写。 |
 | 645 | `PLOT` | 部分实现 | Plots a drawing to a plotter, printer, or file. | 仅矢量 SVG/PDF；无 CTB/STB、无批量多布局 |
 | 646 | `-PLOTSTAMP` | 部分实现 | Places a plot stamp on a specified corner of each drawing and logs it to a file. | 具名拒绝（`-plotstamp.unsupported`）：本构建无打印戳记模型；命令行拼写。 |
@@ -2254,7 +2254,7 @@
 | `LINE` | 实现 | 两点；退化/共线/非有限拒绝 |
 | `CIRCLE` | 实现 | 圆心 + 半径点；**`2P`/`3P`/`D` 已实现（2026-11-01，多词 canonical）**：`CIRCLE 2P` 直径两端点、`CIRCLE 3P` 三点外接圆（复用 `arc_parameters`）、`CIRCLE D` 圆心 + **直径距离**（半径 = 距离/2）；三者都产一个 `Circle`，活动图层/模型空间，一条事务/一步撤销 |
 | `ARC` | 实现 | **三点弧**；无 起点-圆心-端点 / 起点-圆心-角 / 连续弧 |
-| `PLINE` | 实现 | 只产**开放 LWPOLYLINE**、**每段 bulge=0**；无弧段/`Close`/`Width`/`Length`/`Undo` |
+|  `PLINE` | 实现 | `Geometry(Polyline)` 接受 bulge 弧段与 Close；**统一宽度**由 `polylineWidth` 工具参数或 `Geometry(Polyline)` 自带 `width` 写入（0=细线），表示层按 ±w/2 实心带宽绘制；逐段 start/end 锥形宽度未建模；交互逐顶点 Undo 未建模 |
 | `RECTANG` | 实现 | 两对角点 → 闭合 4 顶点 LWPOLYLINE；无 `Chamfer`/`Fillet`/`Width`/`Elevation`/`Rotation`/`Area` |
 | `POLYGON` | 实现 | **内接于圆**、边数 3–1024；无 `Edge` 分支、**无外切模式** |
 | `ELLIPSE` | 实现 | 轴端点法**整椭圆**；无 `Arc`/`Center` 法/`Rotation`/`Isocircle` |

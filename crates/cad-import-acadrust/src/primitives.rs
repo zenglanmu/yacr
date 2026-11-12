@@ -13,6 +13,7 @@ pub(crate) fn polyline_semantics(points: Vec<Point3>, closed: bool) -> SemanticG
         points,
         bulges: Vec::new(),
         closed,
+        width: 0.0,
     }
 }
 

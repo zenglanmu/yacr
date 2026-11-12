@@ -206,6 +206,7 @@ fn frame_geometries(
         ],
         bulges: vec![0.0; 4],
         closed: true,
+        width: 0.0,
     });
     // One internal divider per compartment boundary.
     let mut x = origin.x;

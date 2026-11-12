@@ -30,6 +30,7 @@ pub(super) fn plan_vertex(
         mut points,
         bulges,
         closed,
+        width,
     } = geometry
     else {
         return Err(unsupported(
@@ -84,6 +85,7 @@ pub(super) fn plan_vertex(
                     points: inserted_points,
                     bulges: inserted_bulges,
                     closed,
+                    width,
                 },
                 label: format!(
                     "Edit vertex INSERT (one vertex on segment {after}, shape preserved)"
@@ -152,6 +154,7 @@ pub(super) fn plan_vertex(
                     points,
                     bulges,
                     closed,
+                    width,
                 },
                 label: format!("Edit vertex MOVE (vertex {vertex})"),
                 deleted: Vec::new(),
@@ -191,6 +194,7 @@ pub(super) fn plan_vertex(
                     points: kept_points,
                     bulges: kept_bulges,
                     closed,
+                    width,
                 },
                 label: format!(
                     "Edit vertex STRAIGHTEN ({first} → {last}: {} interior vertex/vertices \
@@ -224,8 +228,8 @@ pub(super) fn plan_vertex(
         }
         PeditVertexAction::Width => Err(unsupported(
             "vertex_width_unsupported",
-            "this build has no per-polyline (or per-segment) width field; PEDIT EDIT WIDTH is a \
-             named capability gap",
+            "this build stores one uniform polyline width; the per-vertex start/end taper modeled \
+             by PEDIT EDIT WIDTH is not represented, so the action is a named capability gap",
         )),
     }
 }

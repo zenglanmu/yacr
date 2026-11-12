@@ -235,6 +235,7 @@ fn trim_deletes_a_line_fully_inside_a_closed_boundary() {
             ],
             bulges: vec![0.0, 0.0, 0.0, 0.0],
             closed: true,
+            width: 0.0,
         },
         1,
     ))

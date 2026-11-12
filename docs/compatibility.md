@@ -2007,3 +2007,9 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
 | `TEXTFIT` | 部分实现 | 只改存储 `SemanticGeometry::Text.width_factor`（DXF group 41）；字高/位置/justification/旋转/内容/样式逐位保留；因子 = `target_width / 批量估算宽度`，逐实体诊断 `textfit.estimated_width`；空串/非正目标/退化因子具名拒绝；一条事务/一步撤销；表示层 shaping、bounds/pick 均按因子拉伸 | 因子来自 `height × 字符数` 估算（非真实字形度量），渲染宽度只在估算精度内等于目标；MTEXT 无 group 41 导出通道；ATTRIB/ATTDEF/RTEXT/表格/标注派生文字保持 1.0；仅导入 TEXT group 41 |
+### 2026-11-12 PLINE / PEDIT 统一宽度
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `PLINE` | 已实现 | `Geometry(Polyline)` 与捕获路径共享一个统一 `width`：捕获读 `polylineWidth` 工具参数（默认 0=细线），程序化 payload 自带 `width`；表示层以中心线 ±w/2 生成实心带宽（斜接，超过 4×半宽转斜切；开放端平头；闭合环回绕），并参与 XCLIP 矩形裁剪；相似变换缩放宽度 | 无逐段 start/end 锥形宽度（DXF 40/41）；宽虚线仍画实心并报告 `representation.polyline_width_dashes`；SPLINE/DECURVE 后宽度归 0；OFFSET/BREAK/JOIN/STRETCH/FILLET/LENGTHEN 派生折线仍从 0 开始 |
+| `PEDIT` | 部分实现 | `WIDTH <w>` 对多选写统一宽度（0 复位细线），一条事务/一步撤销；CLOSE/OPEN/REVERSE/FIT/顶点编辑保留宽度；非法值 `pedit.width_invalid`，无变化 `pedit.width_unchanged` | 每段锥形宽度（`pedit.vertex_width_unsupported`）；`Ltype gen`；SPLINE 实体无宽度字段 |

@@ -144,6 +144,7 @@ fn committed_dxf_bulges_bow_to_the_side_their_sign_encodes() {
                 points,
                 bulges,
                 closed,
+                ..
             } = &entity.geometry
             else {
                 continue;
@@ -184,6 +185,7 @@ fn committed_dxf_bulges_bow_to_the_side_their_sign_encodes() {
                     points: vec![a, b],
                     bulges: vec![bulge],
                     closed: false,
+                    width: 0.0,
                 };
                 let samples: Vec<[f64; 2]> = tessellate_geometry(&segment, params)
                     .iter()

@@ -600,6 +600,7 @@ fn lengthen_geometry(
             points,
             bulges,
             closed,
+            ..
         } => lengthen_polyline(points, bulges, *closed, settings, pick),
         SemanticGeometry::Ellipse {
             center,

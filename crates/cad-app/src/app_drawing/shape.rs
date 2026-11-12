@@ -381,6 +381,7 @@ impl Application {
                         points: points.clone(),
                         bulges: Vec::new(),
                         closed: *closed,
+                        width: 0.0,
                     },
                     draw_order: index as i64,
                 });

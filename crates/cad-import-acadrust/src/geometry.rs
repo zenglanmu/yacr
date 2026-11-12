@@ -352,6 +352,32 @@ pub(crate) fn text_ocs_placement(normal: Point3, position: Point3, rotation: f64
     }
 }
 
+/// The **uniform** width of a 2D polyline, from its constant width and its
+/// per-vertex taper flags.
+///
+/// `0.0` is the hairline default. A finite non-negative constant width (DXF
+/// group 43 for LWPOLYLINE, or the 2D POLYLINE header default) is stored as the
+/// domain's single uniform `width`; the per-vertex start/end widths (DXF groups
+/// 40/41) describe a **taper**, which this model does not represent. Such a file
+/// keeps the uniform value (`0` when there is none) and reports the second return
+/// value as a partial diagnostic: no taper is invented, and no average is
+/// silently substituted.
+pub(crate) fn polyline_uniform_width(
+    constant_width: f64,
+    has_taper: bool,
+) -> (f64, Option<&'static str>) {
+    if !constant_width.is_finite() || constant_width < 0.0 {
+        return (
+            0.0,
+            Some("polyline constant width is negative or non-finite; stored as 0 (hairline)"),
+        );
+    }
+    let reason = has_taper.then_some(
+        "per-vertex start/end width (DXF 40/41) taper is not modeled; the constant width is kept",
+    );
+    (constant_width, reason)
+}
+
 /// Completeness of a 2D polyline whose vertices were mapped to WCS.
 ///
 /// A tilted extrusion is exact for straight segments (the vertices carry the

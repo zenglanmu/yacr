@@ -372,6 +372,7 @@ fn is_closed_candidate_geometry(geometry: &SemanticGeometry) -> bool {
             points,
             bulges,
             closed,
+            ..
         } => {
             *closed
                 && points.len() >= 3

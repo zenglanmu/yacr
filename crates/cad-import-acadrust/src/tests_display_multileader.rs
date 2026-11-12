@@ -143,6 +143,7 @@ fn migrated_straight_multileader_display_matches_the_pre_p7b_polyline() {
             points: leader,
             bulges,
             closed,
+            ..
         } => {
             assert_eq!(
                 leader,

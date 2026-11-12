@@ -171,6 +171,7 @@ fn bulge_arc_after_line_segment_is_continuous() {
         points: vec![p(0.0, 0.0), p(1.0, 0.0), p(3.0, 0.0)],
         bulges: vec![0.0, 1.0, 0.0],
         closed: false,
+        width: 0.0,
     };
     let pts = tessellate_geometry(&poly, TessellationParams::default());
     for w in pts.windows(2) {
@@ -194,6 +195,7 @@ fn closed_polyline_all_bulges_are_continuous() {
         points: vec![p(0.0, 0.0), p(2.0, 0.0), p(2.0, 2.0)],
         bulges: vec![0.5, 0.5, 0.5],
         closed: true,
+        width: 0.0,
     };
     let pts = tessellate_geometry(&poly, TessellationParams::default());
     assert!(pts.len() > 4);
@@ -211,6 +213,7 @@ fn tilted_bulge_arc_stays_in_the_polyline_plane() {
         points: vec![pz(0.0, 5.0, 0.0), pz(2.0, 5.0, 0.0), pz(2.0, 5.0, 2.0)],
         bulges: vec![0.5, 0.0, 0.0],
         closed: false,
+        width: 0.0,
     };
     let pts = tessellate_geometry(&poly, TessellationParams::default());
     assert!(pts.len() > 3);

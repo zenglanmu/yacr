@@ -1,5 +1,27 @@
 AD
 
+## 2026-11-12 真实 2D 升级（5c）：PLINE / PEDIT 统一宽度
+
+- **存储**：`SemanticGeometry::Polyline` 新增 `width: f64`（0=细线，有限且 ≥0；
+  `cad-db` 校验 `polyline.width`）。PLINE 捕获读 `polylineWidth` 工具参数（默认 0），程序化
+  `Geometry(Polyline)` 自带宽度；PEDIT `WIDTH <w>` 对多选写统一宽度，一条事务/一步撤销。
+- **渲染**：新 `provider/stroke.rs` 把中心线（含 bulge 弧）按 ±w/2 生成实心带宽网格：斜接
+  （超过 4×半宽转斜切）、开放端平头、闭合环回绕；宽度 0 保持原 `Lines` 路径逐字节不变；
+  XCLIP 矩形裁剪仍作用于带宽。宽虚线仍画实心并报 `representation.polyline_width_dashes`。
+- **贯通**：相似变换缩放宽度（MOVE/COPY/SCALE 不再清零）；REVERSE/TRIM/PEDIT CLOSE/OPEN/FIT/
+  顶点编辑保留宽度；DXF LWPOLYLINE group 43 导入/导出；逐段 40/41 锥形宽度报告为 partial。
+- **UI**：React 增加 `polylineWidth` 数值控件（0 允许）、`draw.polyline` 映射与双语
+  `status.tool_parameter.polyline_width*`；宿主 `cad_status.tool.params.polylineWidth` 已投影
+  （非 PLINE 为 null）。
+- **边界**：无逐段锥形宽度（`pedit.vertex_width_unsupported`）；SPLINE/DECURVE 后宽度归 0；
+  OFFSET/BREAK/JOIN/STRETCH/FILLET/LENGTHEN 派生折线仍从 0 开始；非平面 POLYLINE3D 不导出宽度；
+  bounds/pick/snap/measure 仍按中心线（AutoCAD 语义）。
+- **证据**：`cargo test -p cad-domain`、`-p cad-db`（260）、`-p cad-representation`（271）、
+  `-p cad-app`（2613）、`-p cad-ui-core`（593）、`-p cad-import-acadrust`（383）、
+  `-p cad-desktop-shell`、`-p cad-geometry`、workspace check/clippy、fmt、
+  `(cd apps/desktop-ui && npm test)`（1561）、`check-i18n`（2903 keys）/`check-command-docs`/
+  `check-file-size`/`check-architecture` 全过。**NOT RUN**：全量 workspace 测试、wasm、GPU/像素/真机。
+
 ## 2026-11-12 真实 2D 升级（5b）：TEXTFIT 改为真实宽度因子
 
 - **行为**：`TEXTFIT` 不再改字高，改为写 `SemanticGeometry::Text.width_factor`（DXF group 41）：

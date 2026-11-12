@@ -663,6 +663,7 @@ fn drawing_validate_geometry_covers_supported_kinds() {
             points: vec![point(0.0, 0.0), point(1.0, 0.0)],
             bulges: vec![0.0, 0.0],
             closed: false,
+            width: 0.0,
         },
         SemanticGeometry::Circle {
             center: point(0.0, 0.0),

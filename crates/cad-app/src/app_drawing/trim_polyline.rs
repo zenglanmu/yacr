@@ -33,10 +33,10 @@
 //! host resolved the entity with its own pickbox), and only a projection beyond an
 //! open polyline's own ends is refused, never silently clamped.
 //!
-//! `SemanticGeometry::Polyline` stores no segment widths, so a wide polyline cannot
-//! reach TRIM today and no width refusal is emitted; a future width field must add
-//! the reserved `trim.polyline_width_unsupported` refusal here instead of trimming
-//! a wide polyline as its centreline.
+//! The shared curve model is centreline-only, so the caller (`trim_extend`) copies
+//! the target's **uniform** `width` onto the kept piece: trimming a wide polyline
+//! keeps its stroke instead of dropping it. Per-vertex taper is not modeled, so
+//! there is nothing finer to preserve.
 
 use super::polyline_curve::PolylineCurve;
 use super::trim_boundary::{note_approximation, BoundarySet};

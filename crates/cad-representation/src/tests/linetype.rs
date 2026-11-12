@@ -293,6 +293,7 @@ fn curve_dashes_by_arc_length_not_chord_count() {
             points,
             bulges: Vec::new(),
             closed: false,
+            width: 0.0,
         },
         draw_order: 0,
     };

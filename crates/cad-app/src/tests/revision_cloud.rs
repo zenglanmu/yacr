@@ -115,6 +115,7 @@ fn stored_polyline(app: &Application, entity: u128) -> (Vec<Point3>, Vec<f64>, b
             points,
             bulges,
             closed,
+            ..
         } => (points.clone(), bulges.clone(), *closed),
         other => panic!("expected an LWPOLYLINE, got {other:?}"),
     }
@@ -385,6 +386,7 @@ fn revcloud_object_converts_a_circle_and_accepts_an_open_polyline() {
             points: vec![point(10.0, 0.0), point(13.0, 0.0), point(13.0, 3.0)],
             bulges: vec![0.0; 3],
             closed: false,
+            width: 0.0,
         },
     );
     let (mut app, mut session) = app_with_entities(vec![circle, open]);

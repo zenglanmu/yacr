@@ -170,6 +170,7 @@ fn bulge_survives_non_uniform_scaling_as_an_elliptical_arc() {
         points: vec![p(0.0, 0.0), p(2.0, 0.0)],
         bulges: vec![1.0, 0.0],
         closed: false,
+        width: 0.0,
     };
     let out = DefaultGeometryEngine
         .transform(&poly, &non_uniform(2.0, 1.0))
@@ -222,6 +223,7 @@ fn reflection_flips_bulge_side() {
         points: vec![p(0.0, 0.0), p(2.0, 0.0)],
         bulges: vec![1.0, 0.0],
         closed: false,
+        width: 0.0,
     };
     let mut m = Transform3::identity().matrix;
     m[1][1] = -1.0;
@@ -388,6 +390,7 @@ fn bulge_polyline_fallback_keeps_the_genuine_crossings() {
         points: vec![p(-4.0, -2.0), p(4.0, -2.0)],
         bulges: vec![-1.0],
         closed: false,
+        width: 0.0,
     };
     let hits = DefaultGeometryEngine
         .intersect_local(&polyline, &circle, &TolerancePolicy::default())

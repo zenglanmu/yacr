@@ -271,6 +271,7 @@ fn explode_source(
             points,
             bulges,
             closed,
+            ..
         } => explode_polyline(source, points, bulges, *closed, out),
         SemanticGeometry::Insert { block, transform } => {
             explode_insert(drawing, &source.space, *block, transform, out)
@@ -732,6 +733,7 @@ fn explode_multileader(
                 points,
                 bulges,
                 closed,
+                ..
             } => {
                 for geometry in polyline_segments(points, bulges, *closed)? {
                     push_display_child(

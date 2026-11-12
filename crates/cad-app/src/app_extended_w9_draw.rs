@@ -448,6 +448,7 @@ impl Application {
             points: zig,
             bulges: Vec::new(),
             closed: false,
+            width: 0.0,
         };
         let mut outcome =
             self.commit_new_entities(session, command, vec![polyline], "breakline")?;

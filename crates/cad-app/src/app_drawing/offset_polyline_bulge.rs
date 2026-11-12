@@ -284,6 +284,7 @@ pub(super) fn offset_polyline_with_arcs(
         points: out,
         bulges: out_bulges,
         closed,
+        width: 0.0,
     };
     if closed {
         super::offset_polyline::require_no_closed_self_intersection(&geometry, normal, tol)?;

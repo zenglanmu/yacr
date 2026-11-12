@@ -278,6 +278,7 @@ pub(super) fn boundary_shapes(sources: &[DbEntity]) -> CadResult<Vec<BoundarySha
                 points,
                 bulges,
                 closed,
+                ..
             } => {
                 if !*closed {
                     return Err(CadError::InvalidInput(format!(

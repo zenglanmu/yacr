@@ -433,6 +433,7 @@ fn trim_accepts_a_mixed_line_arc_and_bulged_polyline_boundary_set() {
                 points: vec![point(8.0, -1.0), point(8.0, 1.0)],
                 bulges: vec![0.5],
                 closed: false,
+                width: 0.0,
             },
             3,
         ),
@@ -456,6 +457,7 @@ fn trim_reports_no_approximation_note_when_every_cut_is_analytic() {
                 points: vec![point(8.0, -1.0), point(8.0, 1.0)],
                 bulges: vec![0.5],
                 closed: false,
+                width: 0.0,
             },
             2,
         ),
@@ -639,6 +641,7 @@ fn extend_accepts_a_bulged_polyline_boundary() {
                 points: vec![point(20.0, -5.0), point(20.0, 5.0)],
                 bulges: vec![0.5],
                 closed: false,
+                width: 0.0,
             },
             1,
         ),
@@ -737,6 +740,7 @@ fn trim_deletes_a_circle_wholly_inside_a_closed_boundary() {
                 ],
                 bulges: vec![0.0, 0.0, 0.0, 0.0],
                 closed: true,
+                width: 0.0,
             },
             1,
         ),
@@ -815,6 +819,7 @@ fn trim_delete_rule_covers_a_closed_bulged_polyline() {
                 ],
                 bulges: vec![0.0, 0.5, 0.0, 0.0],
                 closed: true,
+                width: 0.0,
             },
             1,
         ),
@@ -844,6 +849,7 @@ fn trim_delete_rule_respects_the_boundary_plane() {
         ],
         bulges: vec![0.0, 0.0, 0.0, 0.0],
         closed: true,
+        width: 0.0,
     };
 
     let mut app = app_of(vec![

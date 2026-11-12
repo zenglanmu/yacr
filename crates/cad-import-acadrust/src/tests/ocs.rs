@@ -313,3 +313,87 @@ fn minus_z_ellipse_keeps_its_normal() {
 }
 
 // ---- B22: paper-space viewport → four corners + full transform ----
+
+// ---- Uniform polyline width (DXF group 43 / per-vertex 40-41) ----
+
+fn width_vertex(x: f64, y: f64, start_width: f64, end_width: f64) -> acadrust::entities::LwVertex {
+    acadrust::entities::LwVertex {
+        location: acadrust::types::Vector2::new(x, y),
+        bulge: 0.0,
+        start_width,
+        end_width,
+        vertex_id: 0,
+    }
+}
+
+#[test]
+fn lwpolyline_constant_width_is_imported_as_the_uniform_width() {
+    let mut pl = acadrust::entities::LwPolyline::new();
+    pl.constant_width = 0.75;
+    pl.add_vertex(width_vertex(0.0, 0.0, 0.0, 0.0));
+    pl.add_vertex(width_vertex(4.0, 0.0, 0.0, 0.0));
+    let (geometry, completeness) = convert_entity(EntityType::LwPolyline(pl));
+    match geometry {
+        SemanticGeometry::Polyline { width, .. } => assert!((width - 0.75).abs() < 1e-12),
+        other => panic!("expected a polyline, got {other:?}"),
+    }
+    assert_eq!(completeness, Completeness::Complete);
+}
+
+#[test]
+fn per_vertex_taper_is_reported_and_never_invented() {
+    // DXF groups 40/41 taper the stroke; the domain models one uniform width,
+    // so the import keeps 0 (there is no constant width here) and reports the
+    // partial result instead of averaging or picking a vertex width.
+    let mut pl = acadrust::entities::LwPolyline::new();
+    pl.constant_width = 0.0;
+    pl.add_vertex(width_vertex(0.0, 0.0, 0.1, 0.2));
+    pl.add_vertex(width_vertex(4.0, 0.0, 0.3, 0.4));
+    let (geometry, completeness) = convert_entity(EntityType::LwPolyline(pl));
+    match geometry {
+        SemanticGeometry::Polyline { width, .. } => assert_eq!(width, 0.0),
+        other => panic!("expected a polyline, got {other:?}"),
+    }
+    match completeness {
+        Completeness::Partial(reasons) => assert!(
+            reasons.iter().any(|reason| reason.contains("taper")),
+            "the taper is named: {reasons:?}"
+        ),
+        other => panic!("tapered width must be Partial, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_uniform_two_d_polyline_header_width_is_imported_and_a_taper_is_not() {
+    let mut uniform = acadrust::entities::Polyline2D::new();
+    uniform.start_width = 0.4;
+    uniform.end_width = 0.4;
+    uniform.add_vertex(acadrust::entities::Vertex2D::from_point(
+        acadrust::types::Vector2::new(0.0, 0.0),
+    ));
+    uniform.add_vertex(acadrust::entities::Vertex2D::from_point(
+        acadrust::types::Vector2::new(4.0, 0.0),
+    ));
+    let (geometry, completeness) = convert_entity(EntityType::Polyline2D(uniform));
+    match geometry {
+        SemanticGeometry::Polyline { width, .. } => assert!((width - 0.4).abs() < 1e-12),
+        other => panic!("expected a polyline, got {other:?}"),
+    }
+    assert_eq!(completeness, Completeness::Complete);
+
+    let mut tapered = acadrust::entities::Polyline2D::new();
+    tapered.start_width = 0.4;
+    tapered.end_width = 0.1;
+    tapered.add_vertex(acadrust::entities::Vertex2D::from_point(
+        acadrust::types::Vector2::new(0.0, 0.0),
+    ));
+    tapered.add_vertex(acadrust::entities::Vertex2D::from_point(
+        acadrust::types::Vector2::new(4.0, 0.0),
+    ));
+    let (geometry, completeness) = convert_entity(EntityType::Polyline2D(tapered));
+    match geometry {
+        SemanticGeometry::Polyline { width, .. } => assert_eq!(width, 0.0),
+        other => panic!("expected a polyline, got {other:?}"),
+    }
+    assert!(matches!(completeness, Completeness::Partial(_)));
+}

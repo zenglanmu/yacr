@@ -87,7 +87,9 @@ pub enum DrawIntent {
     Arc { points: [Point3; 3] },
     /// Insert an open polyline through `points` (at least two), on the active
     /// layer. Always `closed == false`, one zero bulge per vertex (straight
-    /// segments only); see [`DrawToolKind::Polyline`] for the honest subset.
+    /// segments only); the uniform width comes from the `polylineWidth` tool
+    /// parameter at creation. See [`DrawToolKind::Polyline`] for the honest
+    /// subset.
     Polyline { points: Vec<Point3> },
     /// `WIPEOUT`: insert a closed polygon mask whose **implicit ring** is
     /// `points` (at least three, in capture order).

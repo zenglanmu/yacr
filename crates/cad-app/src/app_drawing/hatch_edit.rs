@@ -572,6 +572,7 @@ impl Application {
                                     points,
                                     bulges,
                                     closed: true,
+                                    width: 0.0,
                                 },
                                 draw_order: base_order,
                             },

@@ -24,6 +24,7 @@ fn stored_ring(app: &Application, object: ObjectId) -> (Vec<Point3>, Vec<f64>, b
             points,
             bulges,
             closed,
+            ..
         } => (points.clone(), bulges.clone(), *closed),
         other => panic!("expected a polyline, got {other:?}"),
     }

@@ -214,6 +214,7 @@ fn geometry_summary(database: &cad_db::DrawingDatabase, geometry: &SemanticGeome
             points,
             bulges,
             closed,
+            ..
         } => format!(
             "polyline vertices={} bulges={} closed={closed}",
             points.len(),

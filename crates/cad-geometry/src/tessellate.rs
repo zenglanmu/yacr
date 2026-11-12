@@ -14,6 +14,7 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
             points,
             bulges,
             closed,
+            ..
         } => polyline_with_bulges(points, bulges, *closed, params),
         G::Circle {
             center,

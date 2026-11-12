@@ -411,6 +411,7 @@ fn dense_bulge_polyline(segments: usize, bulge: f64) -> SemanticGeometry {
         points,
         bulges,
         closed: false,
+        width: 0.0,
     }
 }
 
@@ -488,6 +489,7 @@ fn fallback_chord_never_drops_below_the_computation_tolerance() {
         points: vec![p(1.0, 2.0)],
         bulges: Vec::new(),
         closed: false,
+        width: 0.0,
     };
     let params = fallback_tessellation_params(&point, &policy);
     assert_eq!(params.tolerance, 1e-7);

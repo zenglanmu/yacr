@@ -5,8 +5,7 @@
 //! `LAYOUTWIZARD`, `VPORTS`, `VPCLIP RECT`, `VPSCALE`) are exercised end to end.
 //! Every write is one revision, one `ChangeSet` and one undo step; the round
 //! trips assert undo/redo and the status projection. `LAYVPI` freezes real
-//! per-viewport layer overrides in every viewport of the active layout and
-//! never writes the global layer table.
+//! per-viewport layer overrides; the global layer table is never written.
 
 use super::*;
 use cad_db::{DrawingDatabaseBuilder, Layer, Layout, PaperViewport, Scale};
@@ -77,6 +76,7 @@ fn paper_entity(id: u128, layout: u128) -> cad_db::DbEntity {
             points: vec![point(0.0, 0.0), point(10.0, 0.0)],
             bulges: Vec::new(),
             closed: false,
+            width: 0.0,
         },
         draw_order: id as i64,
     }

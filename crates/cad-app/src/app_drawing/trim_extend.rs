@@ -181,8 +181,9 @@ impl Application {
                 points,
                 bulges,
                 closed,
+                width,
             } => {
-                let resolution = plan_trim_polyline(
+                let mut resolution = plan_trim_polyline(
                     points,
                     bulges,
                     *closed,
@@ -197,6 +198,14 @@ impl Application {
                 // EXTEND; the one capability gap (closed-SPLINE containment) stays
                 // `Unsupported`.
                 .map_err(|reason| reason.into_cad_error())?;
+                // TRIM keeps the clicked piece of the same entity, so it keeps
+                // the polyline's uniform width (the shared curve model emits a
+                // centreline-only geometry).
+                if let TrimPlan::Replace(SemanticGeometry::Polyline { width: kept, .. }) =
+                    &mut resolution.plan
+                {
+                    *kept = *width;
+                }
                 (
                     resolution.plan,
                     resolution.notes,

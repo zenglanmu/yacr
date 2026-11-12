@@ -452,6 +452,7 @@ fn division_points(
             points,
             bulges,
             closed,
+            ..
         } => {
             if points.iter().any(|point| !is_finite_point(*point)) {
                 return Err(refusal(
@@ -589,6 +590,7 @@ pub(super) fn path_distribution(
             points,
             bulges,
             closed,
+            ..
         } => {
             if points.iter().any(|point| !is_finite_point(*point)) {
                 return Err(refusal(

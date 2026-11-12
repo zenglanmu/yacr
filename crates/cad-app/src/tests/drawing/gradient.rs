@@ -34,6 +34,7 @@ fn tilted_square(id: u128) -> (u128, SemanticGeometry) {
             ],
             bulges: vec![0.0; 4],
             closed: true,
+            width: 0.0,
         },
     )
 }
@@ -113,6 +114,7 @@ fn an_open_polyline_is_refused_with_the_gradient_prefix() {
             points: vec![p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), p3(4.0, 4.0, 0.0)],
             bulges: vec![0.0; 3],
             closed: false,
+            width: 0.0,
         },
     )]);
     select(&mut session, &[1]);

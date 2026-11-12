@@ -21,7 +21,9 @@ pub enum DrawToolKind {
     ///   neighbour with a straight segment (`bulges = [0.0; n]`); the `Arc`
     ///   sub-command is not offered;
     /// * no `Close` — the created polyline is always `closed = false`;
-    /// * no `Width` / `Halfwidth` — no per-segment start/end width is authored;
+    /// * no `Width` / `Halfwidth` **capture step** — the created polyline takes
+    ///   one uniform width from the `polylineWidth` tool parameter (default `0`,
+    ///   the hairline draw); per-segment start/end taper is not modeled;
     /// * no `Undo` at a vertex prompt — the capture is all-or-nothing (cancel
     ///   discards it, Enter confirms it), and there is no vertex-level undo;
     /// * no 3D / OCS input — like LINE/CIRCLE/ARC this is the flat work-plane

@@ -521,6 +521,7 @@ impl PolylineCurve {
             points,
             bulges,
             closed: false,
+            width: 0.0,
         })
     }
 

@@ -425,6 +425,14 @@ pub enum SemanticGeometry {
         points: Vec<Point3>,
         bulges: Vec<f64>,
         closed: bool,
+        /// Uniform polyline width in world units, centred on the vertices
+        /// (DXF group 43). `0` is the hairline draw; `> 0` is a wide stroke
+        /// offset by +/-`width / 2`. Bounds/picking/measurement stay
+        /// centreline-based. Per-vertex start/end taper (groups 40/41) is not
+        /// modeled; an import reports it as partial, never as an invented taper.
+        /// Derived-new-polyline commands (OFFSET/BREAK/JOIN/STRETCH/FILLET/
+        /// LENGTHEN) are not yet wired to propagate the width in v1.
+        width: f64,
     },
     Circle {
         center: Point3,

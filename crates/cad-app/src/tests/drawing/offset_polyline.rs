@@ -30,6 +30,7 @@ pub(super) fn polyline_app(points: Vec<Point3>, bulges: Vec<f64>, closed: bool) 
             points,
             bulges,
             closed,
+            width: 0.0,
         },
         0,
     ))
@@ -67,6 +68,7 @@ pub(super) fn created_polyline(
             points,
             bulges,
             closed,
+            ..
         } => (points.clone(), bulges.clone(), *closed),
         other => panic!("expected a polyline, got {other:?}"),
     }

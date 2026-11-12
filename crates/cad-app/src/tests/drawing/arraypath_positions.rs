@@ -222,6 +222,7 @@ fn arraypath_a_bulged_polyline_mid_point_and_tangent_are_exact() {
                 points: vec![point(0.0, 0.0), point(20.0, 0.0)],
                 bulges: vec![1.0],
                 closed: false,
+                width: 0.0,
             },
         ),
         (

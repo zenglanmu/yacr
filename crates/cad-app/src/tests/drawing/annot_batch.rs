@@ -132,6 +132,7 @@ fn annot_app() -> (Application, SessionState) {
                 .collect(),
             bulges: Vec::new(),
             closed: true,
+            width: 0.0,
         },
         5,
     ))
@@ -142,6 +143,7 @@ fn annot_app() -> (Application, SessionState) {
             points: vec![p3(20.0, 0.0, 0.0), p3(21.0, 0.0, 0.0), p3(21.0, 1.0, 0.0)],
             bulges: Vec::new(),
             closed: false,
+            width: 0.0,
         },
         6,
     ))
@@ -695,6 +697,7 @@ fn hatch_set_boundary_refuses_open_missing_and_non_planar_inputs() {
                 .collect(),
             bulges: Vec::new(),
             closed: true,
+            width: 0.0,
         },
         1,
     ))

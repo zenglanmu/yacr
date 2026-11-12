@@ -97,6 +97,7 @@ fn one_internal_point_creates_one_closed_rectangle_polyline() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert_eq!(points.len(), 4, "the rectangle keeps four vertices");
             assert_eq!(bulges, &vec![0.0; 4], "straight ring stays straight");
@@ -141,6 +142,7 @@ fn nested_boundaries_become_one_polyline_per_loop() {
                 points,
                 bulges,
                 closed,
+                ..
             } => {
                 assert_eq!(points.len(), 4);
                 assert_eq!(bulges, &vec![0.0; 4]);

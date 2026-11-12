@@ -523,6 +523,7 @@ fn extend_accepts_a_straight_lwpolyline_boundary() {
             points: vec![point(20.0, -5.0), point(20.0, 5.0), point(25.0, 5.0)],
             bulges: vec![0.0, 0.0],
             closed: false,
+            width: 0.0,
         },
         1,
     );

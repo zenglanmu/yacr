@@ -158,6 +158,7 @@ fn polyline(app: &Application, id: u128) -> (Vec<Point3>, Vec<f64>, bool, LayerI
             points,
             bulges,
             closed,
+            ..
         } => (points, bulges, closed, row.layer, row.space),
         other => panic!("entity {id} is not a polyline: {other:?}"),
     }

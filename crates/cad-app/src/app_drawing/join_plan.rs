@@ -109,6 +109,7 @@ impl Joined {
                 points,
                 bulges,
                 closed,
+                width: 0.0,
             },
             Joined::Spline(curve) => curve.geometry(),
             Joined::Raw(geometry) => geometry,

@@ -64,6 +64,7 @@ fn polyline(id: u128, points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> ca
             points,
             bulges,
             closed,
+            width: 0.0,
         },
     )
 }

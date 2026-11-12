@@ -344,6 +344,7 @@ fn txtexp_explodes_text_into_closed_outline_polylines_in_one_undo_step() {
             points,
             bulges,
             closed,
+            ..
         } = &row.geometry
         else {
             panic!("TXTEXP produces polylines, got {:?}", row.geometry);

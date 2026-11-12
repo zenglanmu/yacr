@@ -43,6 +43,7 @@ fn app_with_bounds(mode: AppMode) -> (Application, SessionState) {
             ],
             bulges: vec![0.0; 4],
             closed: true,
+            width: 0.0,
         },
         draw_order: 0,
     })

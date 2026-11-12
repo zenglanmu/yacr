@@ -35,6 +35,7 @@ fn create_polyline_inserts_one_open_polyline_and_one_undo_step() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert_eq!(points, &captured, "payload points inserted unchanged");
             assert_eq!(bulges.len(), captured.len(), "one bulge per captured point");
@@ -93,6 +94,7 @@ fn create_polyline_two_points_carry_one_bulge_each_and_stay_open() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert_eq!(points, &vec![point(0.0, 0.0), point(3.0, 4.0)]);
             assert_eq!(bulges, &vec![0.0, 0.0]);
@@ -207,6 +209,7 @@ fn execute_polyline_geometry(
             points,
             bulges,
             closed,
+            width: 0.0,
         })),
     )?;
     Ok(stored_polyline(app, outcome.objects[0]))
@@ -226,6 +229,7 @@ fn stored_polyline(app: &Application, object: ObjectId) -> (Vec<Point3>, Vec<f64
             points,
             bulges,
             closed,
+            ..
         } => (points.clone(), bulges.clone(), *closed),
         other => panic!("expected a polyline, got {other:?}"),
     }
@@ -452,6 +456,7 @@ fn create_polyline_refuses_unrepresentable_authored_polylines_without_change() {
                 points: points.clone(),
                 bulges: bulges.clone(),
                 closed: *closed,
+                width: 0.0,
             })),
         )
         .unwrap_err();
@@ -494,4 +499,103 @@ fn create_polyline_straight_geometry_payload_still_authors_the_click_shape() {
     assert_eq!(stored_points, points);
     assert_eq!(stored_bulges, vec![0.0; points.len()]);
     assert!(!closed);
+}
+
+#[test]
+fn create_polyline_reads_the_polyline_width_tool_parameter() {
+    let (mut app, mut session) = drawing_app();
+    session
+        .set_tool_parameter(ToolParameter::PolylineWidth, ToolValue::Number(1.5))
+        .expect("1.5 is a valid uniform width");
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreatePolyline,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(4.0, 0.0), point(4.0, 3.0)]),
+    )
+    .unwrap();
+    let entity = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(outcome.objects[0].0))
+        .expect("new entity");
+    match &entity.geometry {
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed,
+            width,
+        } => {
+            assert_eq!(width, &1.5, "the captured PLINE stores the parameter width");
+            assert_eq!(points.len(), 3);
+            assert_eq!(bulges.len(), 3);
+            assert!(!closed);
+        }
+        other => panic!("expected a polyline, got {other:?}"),
+    }
+
+    // A zero parameter is the hairline default and stays exactly that.
+    session
+        .set_tool_parameter(ToolParameter::PolylineWidth, ToolValue::Number(0.0))
+        .unwrap();
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreatePolyline,
+        CommandPayload::Points(vec![point(0.0, 0.0), point(2.0, 0.0)]),
+    )
+    .unwrap();
+    let SemanticGeometry::Polyline { width, .. } = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(outcome.objects[0].0))
+        .expect("new entity")
+        .geometry
+        .clone()
+    else {
+        panic!("expected a polyline");
+    };
+    assert_eq!(width, 0.0);
+}
+
+#[test]
+fn create_polyline_programmatic_payload_carries_its_uniform_width() {
+    let (mut app, mut session) = drawing_app();
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreatePolyline,
+        CommandPayload::Geometry(Box::new(SemanticGeometry::Polyline {
+            points: vec![point(0.0, 0.0), point(4.0, 0.0)],
+            bulges: vec![0.0, 0.0],
+            closed: false,
+            width: 2.25,
+        })),
+    )
+    .unwrap();
+    let SemanticGeometry::Polyline { width, .. } = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(outcome.objects[0].0))
+        .expect("new entity")
+        .geometry
+        .clone()
+    else {
+        panic!("expected a polyline");
+    };
+    assert_eq!(width, 2.25, "the Geometry payload width is preserved");
+
+    // A negative payload width is refused by the authored-polyline validator.
+    let rev = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreatePolyline,
+        CommandPayload::Geometry(Box::new(SemanticGeometry::Polyline {
+            points: vec![point(0.0, 0.0), point(4.0, 0.0)],
+            bulges: vec![0.0, 0.0],
+            closed: false,
+            width: -1.0,
+        })),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("pline.width_invalid"), "{error}");
+    assert_eq!(revision(&app), rev);
 }

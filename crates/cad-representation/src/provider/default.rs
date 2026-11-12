@@ -805,6 +805,49 @@ impl DefaultRepresentationProvider {
                     });
                 }
             }
+            // A polyline with a real uniform width is drawn as a filled stroke
+            // band (see `super::stroke`). Width `0.0` keeps the byte-identical
+            // centreline `Lines` path below; a degenerate band falls back to it
+            // too, so a wide polyline can never disappear.
+            SemanticGeometry::Polyline { width, .. } if width.is_finite() && *width > 0.0 => {
+                match super::stroke::wide_polyline_mesh(
+                    geometry,
+                    chord_tessellation_params(context),
+                    *width,
+                ) {
+                    Some(mesh) => push_mesh_fragment(
+                        entity,
+                        mesh,
+                        source,
+                        geometry_source,
+                        &mut representation,
+                    ),
+                    None => {
+                        representation.completeness = weaker_completeness(
+                            &representation.completeness,
+                            &Completeness::Partial(vec![
+                                "polyline width stroke is degenerate; drawn as its centreline"
+                                    .into(),
+                            ]),
+                        );
+                        representation.diagnostics.push(Diagnostic {
+                            object: Some(ObjectId(entity.id.0)),
+                            code: "representation.polyline_stroke_degenerate".into(),
+                            message: "the wide polyline centreline has fewer than two distinct \
+                                      finite vertices; the centreline is kept"
+                                .into(),
+                        });
+                        push_chord_fragment(
+                            entity,
+                            geometry,
+                            context,
+                            source,
+                            geometry_source,
+                            &mut representation,
+                        );
+                    }
+                }
+            }
             other => push_chord_fragment(
                 entity,
                 other,
@@ -816,6 +859,51 @@ impl DefaultRepresentationProvider {
         }
         Ok(representation)
     }
+}
+
+/// Push one prepared triangle mesh (for example a wide polyline stroke band)
+/// with the same pre-expansion style placeholders every provider fragment
+/// carries.
+///
+/// The placeholders are resolved by `expand_entity` (ByLayer/ByBlock and layer
+/// style), so the stroke follows the entity's resolved colour, lineweight,
+/// linetype and alpha exactly like the centreline path. The mesh reaches the
+/// clip stage as [`DisplayPrimitive::Mesh`], which `emit_clipped` cuts with
+/// `clip_mesh_to_rect`, so an `XCLIP` rectangle clips the stroke too.
+fn push_mesh_fragment(
+    entity: &DbEntity,
+    mesh: Mesh,
+    source: SelectionRef,
+    geometry_source: GeometrySource,
+    representation: &mut DisplayRepresentation,
+) {
+    if mesh.triangles.is_empty() {
+        representation.completeness = weaker_completeness(
+            &representation.completeness,
+            &Completeness::Partial(vec!["the wide polyline stroke produced no triangles".into()]),
+        );
+        representation.diagnostics.push(Diagnostic {
+            object: Some(ObjectId(entity.id.0)),
+            code: "representation.polyline_stroke_empty".into(),
+            message: "the wide polyline stroke produced no triangles".into(),
+        });
+        return;
+    }
+    representation.fragments.push(DisplayFragment {
+        source,
+        geometry_source,
+        precision: Precision::Analytic,
+        alpha: 1.0,
+        draw_order: entity.draw_order,
+        color: DEFAULT_RENDER_COLOR,
+        color_unresolved: true,
+        lineweight: DEFAULT_LINEWEIGHT_MM,
+        lineweight_unresolved: true,
+        linetype: LinetypePattern::continuous(),
+        linetype_unresolved: true,
+        linetype_scale: 1.0,
+        primitive: DisplayPrimitive::Mesh(Arc::new(mesh)),
+    });
 }
 
 /// Tessellate a curve-like entity into a chord polyline and push it as a

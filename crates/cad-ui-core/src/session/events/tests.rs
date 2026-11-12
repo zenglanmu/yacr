@@ -530,6 +530,7 @@ fn cad_tool(key: &str, points: usize) -> super::super::status::CadTool {
             lengthen_value: None,
             scale_text_factor: None,
             dim_rotation: None,
+            polyline_width: None,
         },
     }
 }

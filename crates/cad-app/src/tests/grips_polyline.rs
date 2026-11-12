@@ -24,6 +24,7 @@ fn polyline(points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> SemanticGeom
         points,
         bulges,
         closed,
+        width: 0.0,
     }
 }
 
@@ -258,6 +259,7 @@ fn a_closed_polyline_vertex_drag_keeps_it_closed() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert!(closed, "the closed flag is untouched");
             assert_eq!(points[2], p3(6.0, 6.0, 0.0));

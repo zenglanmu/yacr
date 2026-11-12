@@ -458,26 +458,29 @@ impl Application {
     /// AutoCAD's straight segments, its `Arc` segment mode (stored as bulge, exactly
     /// as the domain and the DXF round trip model it) and its `Close` option.
     ///
-    /// Deliberate gaps, refused by absence rather than by a fabricated value:
-    /// **`Width`** is not modeled (`SemanticGeometry::Polyline` has no width and this
-    /// build does not add one; `pline.width_unsupported` is the code a future width
-    /// channel must use, and no caller can request a width today), and **`Undo` of
-    /// the last vertex** is a step of the interactive capture state machine
-    /// (`draw_tool`), not a command payload, so it neither exists nor can be
-    /// requested here.
+    /// `Width` is the **uniform** polyline width (`0` = hairline). The click
+    /// capture reads it from the `polylineWidth` tool parameter (default `0`);
+    /// the programmatic payload carries it as `SemanticGeometry::Polyline::width`.
+    /// Per-vertex start/end taper is not modeled and is never invented from a
+    /// single number. **`Undo` of the last vertex** remains a step of the
+    /// interactive capture state machine (`draw_tool`), not a command payload,
+    /// so it neither exists nor can be requested here.
     pub(crate) fn create_polyline(
         &mut self,
         session: &SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
         let geometry = match &command.payload {
-            CommandPayload::Points(points) => polyline_geometry(points.clone())?,
+            CommandPayload::Points(points) => {
+                polyline_geometry(points.clone(), polyline_width_from_session(session)?)?
+            }
             CommandPayload::Geometry(geometry) => match geometry.as_ref() {
                 SemanticGeometry::Polyline {
                     points,
                     bulges,
                     closed,
-                } => authored_polyline_geometry(points.clone(), bulges.clone(), *closed)?,
+                    width,
+                } => authored_polyline_geometry(points.clone(), bulges.clone(), *closed, *width)?,
                 other => {
                     return Err(CadError::InvalidInput(format!(
                         "CreatePolyline needs a Polyline geometry, got {}",
@@ -522,8 +525,8 @@ impl Application {
     /// no RECTANG entry), so none can be requested. They are also not silently
     /// approximated: a rotated or filleted rectangle must be authored as a closed
     /// polyline with the matching vertices/bulges (PLINE), where the model can
-    /// represent it. **`Width`** stays unmodeled for the same reason it is unmodeled
-    /// for PLINE: `SemanticGeometry::Polyline` has no width.
+    /// represent it. `Width` is not part of the RECTANG capture: author a closed
+    /// PLINE with the `polylineWidth` parameter to get a wide rectangle outline.
     pub(crate) fn create_rectangle(
         &mut self,
         session: &SessionState,
@@ -608,6 +611,7 @@ impl Application {
             bulges: vec![0.0; vertices.len()],
             points: vertices,
             closed: true,
+            width: 0.0,
         };
         self.commit_new_entity(session, command, geometry, "create polygon")
     }
@@ -784,7 +788,7 @@ const MIN_POLYLINE_VERTEX_SEPARATION: f64 = 1e-12;
 /// UI and programmatic paths cannot drift. Refuses explicitly (never a silent
 /// fix-up) when there are fewer than two points, any point is non-finite, or
 /// fewer than two vertices are distinct.
-fn polyline_geometry(points: Vec<Point3>) -> CadResult<SemanticGeometry> {
+fn polyline_geometry(points: Vec<Point3>, width: f64) -> CadResult<SemanticGeometry> {
     if points.len() < 2 {
         return Err(CadError::InvalidInput(
             "CreatePolyline needs at least two points".into(),
@@ -804,12 +808,41 @@ fn polyline_geometry(points: Vec<Point3>) -> CadResult<SemanticGeometry> {
             "CreatePolyline needs at least two distinct points".into(),
         ));
     }
+    if !width.is_finite() || width < 0.0 {
+        return Err(CadError::InvalidInput(
+            "polyline.width_invalid: CreatePolyline needs a finite non-negative width".into(),
+        ));
+    }
     let bulges = vec![0.0; points.len()];
     Ok(SemanticGeometry::Polyline {
         points,
         bulges,
         closed: false,
+        width,
     })
+}
+
+/// The typed `polylineWidth` tool parameter as the uniform PLINE width.
+///
+/// The channel already refuses a negative/non-finite set, so this re-checks the
+/// value it reads (a session default or a future wiring bug must never store an
+/// unrepresentable width) and names `polyline.width_invalid` otherwise.
+fn polyline_width_from_session(session: &SessionState) -> CadResult<f64> {
+    let width = session
+        .tool_parameter(ToolParameter::PolylineWidth)
+        .number()
+        .ok_or_else(|| {
+            CadError::InvalidInput(
+                "polyline.width_invalid: the polylineWidth parameter must be a number".into(),
+            )
+        })?;
+    if !width.is_finite() || width < 0.0 {
+        return Err(CadError::InvalidInput(format!(
+            "polyline.width_invalid: the polylineWidth parameter must be finite and >= 0, got \
+             {width}"
+        )));
+    }
+    Ok(width)
 }
 
 /// The minimum width/height (world units) for a rectangle to have any area.
@@ -892,5 +925,6 @@ fn rectangle_geometry(corner1: Point3, corner2: Point3) -> CadResult<SemanticGeo
         bulges: vec![0.0; points.len()],
         points,
         closed: true,
+        width: 0.0,
     })
 }

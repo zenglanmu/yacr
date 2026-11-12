@@ -268,6 +268,7 @@ pub(super) fn grip_app() -> (Application, SessionState) {
             points: vec![p3(0.0, 0.0, 1.0), p3(10.0, 0.0, 1.0), p3(10.0, 5.0, 1.0)],
             bulges: POLYLINE_BULGES.to_vec(),
             closed: false,
+            width: 0.0,
         },
         6,
     ))
@@ -465,6 +466,7 @@ pub(super) fn polyline_parts(app: &Application, entity: u128) -> (Vec<Point3>, V
             points,
             bulges,
             closed,
+            ..
         } => (points, bulges, closed),
         other => panic!("entity {entity} is not a POLYLINE: {other:?}"),
     }

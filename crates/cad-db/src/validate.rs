@@ -48,10 +48,21 @@ pub const REASON_SPLINE_KNOT_ORDER: &str = "spline.knot_order";
 /// non-finite values cannot mean "normal" and must not be stored silently.
 pub const REASON_TEXT_WIDTH_FACTOR: &str = "text.width_factor";
 
+/// Stable reason code: a polyline width is negative or non-finite.
+///
+/// The polyline width is a **uniform stroke width** centred on the vertices
+/// (`0.0` = hairline/default draw). It is a physical distance: a negative or
+/// non-finite value can never be drawn, and the representation layer's
+/// +/-`width / 2` offset would produce an inverted or NaN band. The field is
+/// therefore refused here, never clamped, so a stored value is always finite
+/// and `>= 0`.
+pub const REASON_POLYLINE_WIDTH: &str = "polyline.width";
+
 /// Validate a [`SemanticGeometry`] before it is written.
 ///
 /// Rejects non-finite coordinates and degenerate/unsupported-for-write cases:
-/// a zero-length line, a polyline with fewer than two points, a non-positive
+/// a zero-length line, a polyline with fewer than two points or a negative /
+/// non-finite uniform width ([`REASON_POLYLINE_WIDTH`]), a non-positive
 /// circle/arc radius, a collapsed ellipse axis, a spline with too few control
 /// points or an inconsistent knot/weight definition, a mesh with out-of-range or
 /// repeated triangle indices, a text run with a non-positive height, and a
@@ -91,7 +102,12 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                 return Err(degenerate("line is zero length"));
             }
         }
-        SemanticGeometry::Polyline { points, bulges, .. } => {
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            width,
+            ..
+        } => {
             if points.len() < 2 {
                 return Err(degenerate("polyline has fewer than two points"));
             }
@@ -100,6 +116,16 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             }
             if !bulges.iter().all(|b| b.is_finite()) {
                 return Err(degenerate("polyline has a non-finite bulge"));
+            }
+            // The width is a physical distance centred on the vertices: it must
+            // be finite and non-negative (`0.0` is the hairline default). This
+            // is a range existence check, so the refusal names the stable code
+            // and the offending value rather than clamping it.
+            if !width.is_finite() || *width < 0.0 {
+                return Err(degenerate_reason(
+                    REASON_POLYLINE_WIDTH,
+                    &format!("polyline width must be finite and >= 0, got {width}"),
+                ));
             }
         }
         SemanticGeometry::Circle {
@@ -775,7 +801,8 @@ mod tests {
         assert!(validate_geometry(&SemanticGeometry::Polyline {
             points: vec![p(0.0, 0.0)],
             bulges: Vec::new(),
-            closed: false
+            closed: false,
+            width: 0.0,
         })
         .is_err());
         // A stored wrap boundary must be usable; `None` means "no wrap".
@@ -820,6 +847,28 @@ mod tests {
             let message = error.to_string();
             assert!(
                 message.contains(REASON_TEXT_WIDTH_FACTOR),
+                "the refusal must carry the stable reason: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn polyline_width_defaults_to_hairline_and_rejects_bad_values() {
+        let polyline = |width| SemanticGeometry::Polyline {
+            points: vec![p(0.0, 0.0), p(1.0, 0.0)],
+            bulges: vec![0.0, 0.0],
+            closed: false,
+            width,
+        };
+        // `0.0` is the hairline default; a positive uniform width is a real
+        // stroke and both are representable.
+        assert!(validate_geometry(&polyline(0.0)).is_ok());
+        assert!(validate_geometry(&polyline(0.75)).is_ok());
+        for bad in [-1.0, f64::NAN, f64::INFINITY] {
+            let error = validate_geometry(&polyline(bad)).expect_err("rejected");
+            let message = error.to_string();
+            assert!(
+                message.contains(REASON_POLYLINE_WIDTH),
                 "the refusal must carry the stable reason: {message}"
             );
         }

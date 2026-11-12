@@ -145,6 +145,7 @@ fn absurd_vertex_count_is_rejected_before_emitting() {
                 points: vec![Point3::default(); 1_000],
                 bulges: Vec::new(),
                 closed: false,
+                width: 0.0,
             }])
         }
     }

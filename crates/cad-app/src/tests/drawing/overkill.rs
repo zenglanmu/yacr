@@ -414,6 +414,7 @@ fn overkill_optimizes_polyline_segments_and_duplicate_standalone_segments() {
                     ],
                     bulges: vec![0.0; 4],
                     closed: false,
+                    width: 0.0,
                 },
                 0,
             ),
@@ -476,6 +477,7 @@ fn overkill_reports_a_per_segment_bulge_layout_without_guessing() {
             // Per-segment layout (n - 1 entries): not rewritten, reported.
             bulges: vec![0.5, 0.5],
             closed: false,
+            width: 0.0,
         },
         0,
     )]);

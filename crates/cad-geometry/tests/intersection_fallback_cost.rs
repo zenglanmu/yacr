@@ -34,6 +34,7 @@ fn probe(scale: f64) -> (SemanticGeometry, SemanticGeometry) {
         points: vec![p(-4.0 * scale, -2.0 * scale), p(4.0 * scale, -2.0 * scale)],
         bulges: vec![-1.0],
         closed: false,
+        width: 0.0,
     };
     (circle, polyline)
 }

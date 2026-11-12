@@ -41,6 +41,7 @@ fn polyline_geometry(points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> Sem
         points,
         bulges,
         closed,
+        width: 0.0,
     }
 }
 

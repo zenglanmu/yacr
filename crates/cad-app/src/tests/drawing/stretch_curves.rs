@@ -127,6 +127,7 @@ fn polyline_of(app: &Application, id: u128) -> (Vec<Point3>, Vec<f64>, bool) {
             points,
             bulges,
             closed,
+            ..
         } => (points, bulges, closed),
         other => panic!("expected a polyline, got {other:?}"),
     }
@@ -840,6 +841,7 @@ fn stretch_regression_line_polyline_and_circle_behaviour_is_unchanged() {
             points: vec![point(0.0, 3.0), point(4.0, 3.0), point(8.0, 0.0)],
             bulges: vec![0.5, 0.0, 0.0],
             closed: false,
+            width: 0.0,
         },
         0,
     )]);

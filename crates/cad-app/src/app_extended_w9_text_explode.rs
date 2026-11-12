@@ -324,6 +324,7 @@ fn outline_text_entity(
                 points,
                 bulges: Vec::new(),
                 closed,
+                width: 0.0,
             },
             layer: source.layer,
             space: source.space.clone(),

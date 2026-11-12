@@ -493,6 +493,7 @@ impl Application {
                     points,
                     bulges,
                     closed,
+                    ..
                 } = &candidate.working.geometry
                 else {
                     continue;
@@ -516,6 +517,7 @@ impl Application {
                     points: new_points,
                     bulges: new_bulges,
                     closed: *closed,
+                    width: 0.0,
                 };
                 candidate.updated = true;
                 counts.polylines_optimized += 1;
@@ -671,6 +673,7 @@ impl Application {
                         points,
                         bulges,
                         closed,
+                        ..
                     } = &polyline.working.geometry
                     else {
                         return false;

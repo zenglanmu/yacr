@@ -350,10 +350,12 @@ fn flatten_geometry(geometry: &SemanticGeometry) -> CadResult<SemanticGeometry> 
             points,
             bulges,
             closed,
+            ..
         } => Ok(SemanticGeometry::Polyline {
             points: points.iter().map(|point| flat(*point)).collect(),
             bulges: bulges.clone(),
             closed: *closed,
+            width: 0.0,
         }),
         SemanticGeometry::Circle {
             center,

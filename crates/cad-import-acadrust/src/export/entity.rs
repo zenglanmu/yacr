@@ -412,7 +412,8 @@ fn emit_leaf(
             points,
             bulges,
             closed,
-        } => emit_polyline(doc, entity, points, bulges, *closed, ctx, acc)?,
+            width,
+        } => emit_polyline(doc, entity, points, bulges, *closed, *width, ctx, acc)?,
         SemanticGeometry::Circle {
             center,
             normal,
@@ -768,6 +769,7 @@ fn emit_polyline(
     points: &[Point3],
     bulges: &[f64],
     closed: bool,
+    width: f64,
     ctx: &EntityContext,
     acc: &mut ExportAccumulator,
 ) -> CadResult<()> {
@@ -782,6 +784,10 @@ fn emit_polyline(
         lw.elevation = z0;
         lw.normal = Vector3::UNIT_Z;
         lw.is_closed = closed;
+        // DXF group 43 (constant width). `0` is the writer's own "omit" state,
+        // so a hairline polyline writes exactly the pre-width file. Per-vertex
+        // 40/41 start/end widths stay 0: the domain models no taper.
+        lw.constant_width = width;
         lw.vertices = points
             .iter()
             .enumerate()
@@ -805,10 +811,21 @@ fn emit_polyline(
         poly.flags.closed = closed;
         poly.common = common;
         acc.push(EntityType::Polyline3D(poly), ctx)?;
+        let mut reasons = reasons;
         if has_bulge {
-            let mut reasons = reasons;
             reasons.push("non-planar polyline bulges linearized to straight segments".into());
+        }
+        if width > 0.0 {
+            // A POLYLINE3D has no constant-width group; keep the width in the
+            // domain and report the export gap instead of dropping it silently.
+            reasons
+                .push("uniform polyline width is not exported for a non-planar POLYLINE3D".into());
+        }
+        if has_bulge {
             acc.record(object, "polyline_bulge", MappingOutcome::Converted(reasons));
+        } else if width > 0.0 {
+            // The width is the only lossy part: POLYLINE3D has no width group.
+            acc.record(object, "polyline", MappingOutcome::Converted(reasons));
         } else {
             acc.record(
                 object,

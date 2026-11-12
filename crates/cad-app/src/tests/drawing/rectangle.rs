@@ -40,6 +40,7 @@ fn assert_closed_rectangle(
             points,
             bulges,
             closed,
+            ..
         } => {
             assert_eq!(points, &expected_outline(corner1, corner2));
             assert_eq!(bulges.len(), 4, "one bulge per vertex");
@@ -252,6 +253,7 @@ fn create_rectangle_refuses_a_missing_corner_and_a_wrong_payload() {
             ],
             bulges: vec![0.0; 4],
             closed: true,
+            width: 0.0,
         })),
     )
     .unwrap_err();

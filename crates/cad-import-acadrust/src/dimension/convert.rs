@@ -343,6 +343,7 @@ impl ImporterBuilder<'_> {
             points: points.clone(),
             bulges: Vec::new(),
             closed: false,
+            width: 0.0,
         }];
         if l.arrow_enabled {
             let style = self.dim_style_values(&l.dimension_style);

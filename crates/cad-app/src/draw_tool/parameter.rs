@@ -302,11 +302,19 @@ pub enum ToolParameter {
     /// local tangent direction at its division point; when `false` (the default)
     /// every block keeps rotation 0. Uniform scale stays 1.
     DivideAlignBlock,
+    /// PLINE uniform width in world units, centred on the vertices (AutoCAD's
+    /// constant LWPOLYLINE width, DXF group 43). `0` (the default) is the
+    /// hairline draw; a finite value `> 0` makes the created polyline a wide
+    /// stroke. The value is read by `CreatePolyline`'s `Points` (capture) path;
+    /// a programmatic `Geometry(Polyline)` payload carries its own `width`
+    /// field instead. Per-vertex start/end taper is not modeled, so this one
+    /// number always means a single uniform width.
+    PolylineWidth,
 }
 
 impl ToolParameter {
     /// Every member, in a fixed order (the key round-trip uses it).
-    pub const ALL: [ToolParameter; 34] = [
+    pub const ALL: [ToolParameter; 35] = [
         ToolParameter::PolygonSides,
         ToolParameter::FilletRadius,
         ToolParameter::ChamferDistanceA,
@@ -351,10 +359,13 @@ impl ToolParameter {
         // DIVIDE's block-align flag is appended after every pre-existing member
         // for the same index-stability reason.
         ToolParameter::DivideAlignBlock,
+        // PLINE's uniform width is appended last for the same index-stability
+        // reason.
+        ToolParameter::PolylineWidth,
     ];
 
     /// Number of members (the store's fixed width).
-    pub const COUNT: usize = 34;
+    pub const COUNT: usize = 35;
 
     /// The dense index of this member in [`Self::ALL`] (the store's slot).
     pub fn index(self) -> usize {
@@ -395,6 +406,7 @@ impl ToolParameter {
             Self::BreakFirstPoint => 31,
             Self::DivideUseBlock => 32,
             Self::DivideAlignBlock => 33,
+            Self::PolylineWidth => 34,
         }
     }
 
@@ -439,6 +451,7 @@ impl ToolParameter {
             Self::BreakFirstPoint => "breakFirstPoint",
             Self::DivideUseBlock => "divideUseBlock",
             Self::DivideAlignBlock => "divideAlignBlock",
+            Self::PolylineWidth => "polylineWidth",
         }
     }
 
@@ -519,6 +532,9 @@ impl ToolParameter {
     ///   deliberate alternative.
     /// * `DivideAlignBlock` **false** — inserted blocks keep rotation 0; the
     ///   aligned form is the deliberate alternative.
+    /// * `PolylineWidth` **0** — the hairline PLINE default, exactly the width
+    ///   every captured polyline stored before the parameter existed (and a
+    ///   *valid* value, so the default can never limp into a forced refusal).
     ///
     /// Note the fill-angle range (ADR 0016 decision A): the legal values are
     /// `0 < |angle| <= 360`, so the full-circle **default 360 is re-settable** (a
@@ -560,6 +576,7 @@ impl ToolParameter {
             Self::BreakFirstPoint => ToolValue::Flag(false),
             Self::DivideUseBlock => ToolValue::Flag(false),
             Self::DivideAlignBlock => ToolValue::Flag(false),
+            Self::PolylineWidth => ToolValue::Number(0.0),
         }
     }
 
@@ -668,6 +685,10 @@ impl ToolParameter {
             (Self::ScaleTextFactor, ToolValue::Number(number)) => {
                 finite_greater_than(self, number, 0.0)
             }
+            // PLINE width: finite and non-negative. Zero is the hairline default
+            // and a positive value is a real stroke; a negative or non-finite
+            // width is refused here, never clamped.
+            (Self::PolylineWidth, ToolValue::Number(number)) => finite_at_least(self, number, 0.0),
             // DIMROTATED's angle: any **finite** degrees value, no implicit wrap
             // and no normalisation (a negative angle is a legal rotation the other
             // way). NaN/±∞ are refused by name.

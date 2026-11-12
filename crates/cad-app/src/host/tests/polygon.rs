@@ -152,6 +152,7 @@ fn polygon_capture_confirms_one_entity_and_maps_the_exact_two_points() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert_eq!(points.len(), 5);
             assert_eq!(bulges, &vec![0.0; 5]);
@@ -222,6 +223,7 @@ fn polygon_circumscribed_capture_maps_the_tangent_point_and_commits_the_tangent_
         points,
         bulges,
         closed,
+        ..
     } = &entity.geometry
     else {
         panic!("expected a polyline, got {:?}", entity.geometry);

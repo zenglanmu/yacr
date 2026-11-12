@@ -161,6 +161,7 @@ pub(super) fn offset_straight_with_gap(
         points: out,
         bulges: out_bulges,
         closed,
+        width: 0.0,
     };
     if closed {
         require_no_closed_self_intersection(&geometry, normal, tol)?;
@@ -375,6 +376,7 @@ pub(super) fn gapped_arc_ring(
         points: out,
         bulges: out_bulges,
         closed,
+        width: 0.0,
     };
     if closed {
         super::offset_polyline::require_no_closed_self_intersection(&geometry, normal, tol)?;

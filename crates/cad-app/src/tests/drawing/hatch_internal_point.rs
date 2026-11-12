@@ -250,6 +250,7 @@ fn open_polylines_and_ellipse_arcs_are_ignored_not_refused() {
         points: vec![point(1.0, 1.0), point(9.0, 1.0), point(9.0, 9.0)],
         bulges: vec![0.0; 3],
         closed: false,
+        width: 0.0,
     };
     let ellipse_arc = SemanticGeometry::Ellipse {
         center: point(5.0, 5.0),
@@ -277,6 +278,7 @@ fn open_polylines_and_ellipse_arcs_are_ignored_not_refused() {
         points: vec![point(1.0, 1.0), point(9.0, 1.0), point(9.0, 9.0)],
         bulges: vec![0.0; 3],
         closed: false,
+        width: 0.0,
     };
     let (mut app, mut session) = point_app(vec![(1, LayerId(0), open_only)]);
     assert_point_refused(

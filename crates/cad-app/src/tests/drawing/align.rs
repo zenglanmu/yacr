@@ -36,6 +36,7 @@ fn align_app() -> (Application, SessionState) {
             ],
             bulges: vec![0.0; 4],
             closed: true,
+            width: 0.0,
         },
         1,
     ))

@@ -46,6 +46,7 @@ fn small_2d() -> DrawingDatabase {
             points: vec![p(0.0, 10.0, 0.0), p(4.0, 10.0, 0.0), p(4.0, 14.0, 0.0)],
             bulges: vec![0.0; 3],
             closed: true,
+            width: 0.0,
         },
     ])
 }

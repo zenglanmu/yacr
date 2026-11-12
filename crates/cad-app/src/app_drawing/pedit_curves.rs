@@ -39,6 +39,7 @@ pub(super) fn convert_to_polyline(geometry: &SemanticGeometry) -> CadResult<Sema
                 points: vec![*start, *end],
                 bulges: vec![0.0],
                 closed: false,
+                width: 0.0,
             })
         }
         SemanticGeometry::Arc {
@@ -77,6 +78,7 @@ pub(super) fn convert_to_polyline(geometry: &SemanticGeometry) -> CadResult<Sema
                 ],
                 bulges: vec![bulge],
                 closed: false,
+                width: 0.0,
             })
         }
         SemanticGeometry::Spline {
@@ -114,6 +116,7 @@ pub(super) fn convert_to_polyline(geometry: &SemanticGeometry) -> CadResult<Sema
                 points: samples,
                 bulges: vec![0.0; segments],
                 closed: false,
+                width: 0.0,
             })
         }
         other => Err(unsupported(

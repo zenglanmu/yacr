@@ -677,6 +677,7 @@ fn open_polyline_break_keeps_the_two_complementary_chains() {
             ],
             bulges: vec![0.0; 3],
             closed: false,
+            width: 0.0,
         },
         LayerId(0),
         SpaceId::Model,
@@ -695,6 +696,7 @@ fn open_polyline_break_keeps_the_two_complementary_chains() {
             points,
             bulges,
             closed: false,
+            ..
         } => {
             assert_eq!(points.len(), 2);
             assert!(near(points[0].x, 0.0) && near(points[1].x, 2.0));
@@ -708,6 +710,7 @@ fn open_polyline_break_keeps_the_two_complementary_chains() {
             points,
             bulges,
             closed: false,
+            ..
         } => {
             assert_eq!(points.len(), 3);
             assert!(near(points[0].x, 4.0) && near(points[0].y, 2.0));
@@ -740,6 +743,7 @@ fn polyline_break_splits_a_bulged_segment_and_keeps_both_bulges() {
             points: vec![point(0.0, 0.0), point(4.0, 0.0), point(4.0, 4.0)],
             bulges: vec![0.5, 0.0],
             closed: false,
+            width: 0.0,
         },
         LayerId(0),
         SpaceId::Model,
@@ -774,6 +778,7 @@ fn polyline_break_splits_a_bulged_segment_and_keeps_both_bulges() {
             points,
             bulges,
             closed: false,
+            ..
         } => {
             assert_eq!(points.len(), 2);
             assert!(near(points[1].x, midpoint.x) && near(points[1].y, midpoint.y));
@@ -807,6 +812,7 @@ fn closed_polyline_break_becomes_one_open_polyline_starting_at_the_second_pick()
             ],
             bulges: vec![0.0; 4],
             closed: true,
+            width: 0.0,
         },
         LayerId(0),
         SpaceId::Model,
@@ -825,6 +831,7 @@ fn closed_polyline_break_becomes_one_open_polyline_starting_at_the_second_pick()
             points,
             bulges,
             closed: false,
+            ..
         } => {
             assert_eq!(points.len(), 3, "(2,0) -> (4,0) -> (4,2)");
             assert!(near(points[0].x, 2.0) && near(points[0].y, 0.0));
@@ -934,6 +941,7 @@ fn a_non_planar_bulged_polyline_break_is_refused_by_name() {
             points: vec![point(0.0, 0.0), point(4.0, 0.0), p3(4.0, 4.0, 1.0)],
             bulges: vec![0.5, 0.0],
             closed: false,
+            width: 0.0,
         },
         LayerId(0),
         SpaceId::Model,

@@ -299,6 +299,7 @@ fn multi_ring_hatch_fill_flows_through_the_mesh_path() {
             points: ring.iter().map(|p| to_world(*p)).collect(),
             bulges: Vec::new(),
             closed: true,
+            width: 0.0,
         });
     }
     children.push(SemanticGeometry::Mesh(Mesh {

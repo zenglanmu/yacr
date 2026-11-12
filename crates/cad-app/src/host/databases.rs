@@ -94,6 +94,7 @@ pub fn demo_database() -> DrawingDatabase {
             points: vec![p(500.0, 500.0), p(1500.0, 500.0), p(1500.0, 1000.0)],
             bulges: vec![0.0, 1.0, 0.0],
             closed: false,
+            width: 0.0,
         },
         LayerId(0),
         5,

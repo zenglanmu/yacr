@@ -381,6 +381,7 @@ fn boundary_polyline(
         points,
         bulges,
         closed: true,
+        width: 0.0,
     })
 }
 

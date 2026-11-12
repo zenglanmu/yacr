@@ -102,6 +102,7 @@ fn sketch_commits_one_open_polyline_and_one_undo_step() {
         points,
         bulges,
         closed,
+        ..
     } = one_geometry(&app)
     else {
         panic!("SKETCH must store one LWPOLYLINE");
@@ -154,6 +155,7 @@ fn trace_commits_a_closed_four_vertex_band_and_one_undo_step() {
         points,
         closed,
         bulges,
+        ..
     } = one_geometry(&app)
     else {
         panic!("TRACE must store one LWPOLYLINE");

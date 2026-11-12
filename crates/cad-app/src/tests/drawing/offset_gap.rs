@@ -47,6 +47,7 @@ fn polyline(id: u128, points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> Db
             points,
             bulges,
             closed,
+            width: 0.0,
         },
         0,
     )
@@ -128,6 +129,7 @@ fn offset_right_angle_sharp_keeps_the_single_miter_vertex() {
         points,
         bulges,
         closed,
+        ..
     } = offset_polyline_geometry(&app, &outcome)
     else {
         panic!("expected a polyline");
@@ -153,6 +155,7 @@ fn offset_right_angle_chamfer_adds_the_gap_line() {
         points,
         bulges,
         closed,
+        ..
     } = offset_polyline_geometry(&app, &outcome)
     else {
         panic!("expected a polyline");
@@ -182,6 +185,7 @@ fn offset_right_angle_fillet_adds_the_tangent_arc() {
         points,
         bulges,
         closed,
+        ..
     } = offset_polyline_geometry(&app, &outcome)
     else {
         panic!("expected a polyline");
@@ -274,6 +278,7 @@ fn offset_fillet_keeps_the_source_arc_and_adds_one_fillet_at_the_joint() {
         points,
         bulges,
         closed,
+        ..
     } = offset_polyline_geometry(&app, &outcome)
     else {
         panic!("expected a polyline");
@@ -374,6 +379,7 @@ fn offset_closed_square_gap_types_fill_all_four_wrap_corners() {
             points,
             bulges,
             closed,
+            ..
         } = offset_polyline_geometry(&app, &outcome)
         else {
             panic!("expected a polyline");

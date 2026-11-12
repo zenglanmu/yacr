@@ -12,6 +12,7 @@ fn fit_writes_tangent_continuous_arcs_through_every_vertex() {
         points: points.clone(),
         bulges: vec![0.0, 0.0],
         closed: false,
+        width: 0.0,
     };
     let (mut app, mut session) = build(vec![ent(1, fixture, 9)], AppMode::Work);
     select(&mut session, &[1]);
@@ -23,6 +24,7 @@ fn fit_writes_tangent_continuous_arcs_through_every_vertex() {
         points: fitted_points,
         bulges,
         closed,
+        ..
     } = geometry(&app, 1)
     else {
         panic!("FIT keeps the entity a POLYLINE");
@@ -64,6 +66,7 @@ fn fit_writes_tangent_continuous_arcs_through_every_vertex() {
             points,
             bulges: vec![0.0, 0.0],
             closed: false,
+            width: 0.0,
         }
     );
 }
@@ -82,6 +85,7 @@ fn fit_writes_a_closed_tangent_continuous_ring() {
         points: points.clone(),
         bulges: vec![0.0; 4],
         closed: true,
+        width: 0.0,
     };
     let (mut app, mut session) = build(vec![ent(1, fixture, 3)], AppMode::Work);
     select(&mut session, &[1]);
@@ -92,6 +96,7 @@ fn fit_writes_a_closed_tangent_continuous_ring() {
         points: fitted_points,
         bulges,
         closed,
+        ..
     } = geometry(&app, 1)
     else {
         panic!("FIT keeps the entity a POLYLINE");
@@ -136,6 +141,7 @@ fn fit_writes_a_closed_tangent_continuous_ring() {
             points,
             bulges: vec![0.0; 4],
             closed: true,
+            width: 0.0,
         },
         "the closed fit round-trips through DECURVE"
     );
@@ -158,6 +164,7 @@ fn fit_writes_a_closed_ring_for_an_odd_vertex_count() {
                 points,
                 bulges: vec![0.0; 3],
                 closed: true,
+                width: 0.0,
             },
             0,
         )],
@@ -193,6 +200,7 @@ fn fit_refuses_a_closed_ring_whose_turns_cannot_close_and_a_half_turn_corner() {
                 ],
                 bulges: vec![0.0; 4],
                 closed: true,
+                width: 0.0,
             },
             0,
         )],
@@ -212,6 +220,7 @@ fn fit_refuses_a_closed_ring_whose_turns_cannot_close_and_a_half_turn_corner() {
                 points: vec![p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), p3(4.0, 4.0, 0.0)],
                 bulges: vec![0.0, 0.0],
                 closed: false,
+                width: 0.0,
             },
             0,
         )],
@@ -241,6 +250,7 @@ fn spline_stores_the_vertices_as_a_clamped_control_frame() {
                 points: points.clone(),
                 bulges: vec![0.0, 0.0, 0.0],
                 closed: false,
+                width: 0.0,
             },
             0,
         )],
@@ -288,6 +298,7 @@ fn spline_stores_the_vertices_as_a_clamped_control_frame() {
             points,
             bulges: vec![0.0, 0.0, 0.0],
             closed: false,
+            width: 0.0,
         }
     );
     assert_eq!(
@@ -312,6 +323,7 @@ fn spline_stores_a_closed_polyline_as_a_repeated_closed_control_frame() {
                 points: points.clone(),
                 bulges: vec![0.0; 4],
                 closed: true,
+                width: 0.0,
             },
             0,
         )],
@@ -363,6 +375,7 @@ fn spline_stores_a_closed_polyline_as_a_repeated_closed_control_frame() {
             points,
             bulges: vec![0.0; 4],
             closed: true,
+            width: 0.0,
         },
         "DECURVE restores the closed frame"
     );
@@ -398,6 +411,7 @@ fn decurve_clears_the_fit_bulges_and_keeps_the_frame() {
             points,
             bulges: vec![0.0, 0.0, 0.0, 0.0],
             closed: true,
+            width: 0.0,
         }
     );
     assert_eq!(undo_depth(&app), 1);
@@ -439,6 +453,7 @@ fn join_welds_touching_line_arc_and_polyline_into_the_base() {
         points,
         bulges,
         closed,
+        ..
     } = after.geometry
     else {
         panic!("the base stays a POLYLINE");
@@ -513,15 +528,11 @@ fn join_refuses_a_gap_a_closed_base_and_a_closed_source() {
 // --- capability refusals and conversion --------------------------------------
 
 #[test]
-fn width_ltype_gen_and_edit_vertex_are_named_refusals() {
+fn ltype_gen_and_edit_vertex_are_named_refusals() {
     let (mut app, mut session) = build(vec![ent(1, open_bulged(), 0)], AppMode::Work);
     select(&mut session, &[1]);
     let rev = revision(&app);
 
-    let error = pedit_edit(&mut app, &mut session, PeditEditOption::Width(1.5)).unwrap_err();
-    assert_unsupported(error, "pedit.width_unsupported");
-    let error = pedit_edit(&mut app, &mut session, PeditEditOption::Width(-1.0)).unwrap_err();
-    assert_invalid(error, "pedit.width_invalid");
     let error = pedit_edit(
         &mut app,
         &mut session,
@@ -553,6 +564,7 @@ fn the_peditaccept_answer_converts_a_line_then_applies_the_option() {
             points: vec![p3(10.0, 0.0, 0.0), p3(0.0, 0.0, 0.0)],
             bulges: vec![0.0],
             closed: false,
+            width: 0.0,
         }
     );
     assert_eq!(undo_depth(&app), 1);
@@ -648,4 +660,190 @@ fn join_prepends_and_reverses_picks_at_either_end_of_the_base() {
     }
     assert_eq!(bulges, vec![0.0; 4]);
     assert_eq!(undo_depth(&app), 1);
+}
+
+// --- WIDTH (uniform polyline width) ------------------------------------------
+
+/// One straight segment carrying a uniform width.
+fn wide_piece(start: Point3, end: Point3, width: f64) -> SemanticGeometry {
+    SemanticGeometry::Polyline {
+        points: vec![start, end],
+        bulges: vec![0.0],
+        closed: false,
+        width,
+    }
+}
+
+#[test]
+fn width_sets_every_selected_polyline_in_one_transaction_and_one_undo() {
+    let first = wide_piece(p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), 0.0);
+    let second = wide_piece(p3(0.0, 1.0, 0.0), p3(4.0, 1.0, 0.0), 0.0);
+    let (mut app, mut session) = build(
+        vec![ent(1, first.clone(), 0), ent(2, second.clone(), 1)],
+        AppMode::Work,
+    );
+    select(&mut session, &[1, 2]);
+    let rev = revision(&app);
+
+    let outcome =
+        pedit_edit(&mut app, &mut session, PeditEditOption::Width(1.25)).expect("WIDTH writes");
+    assert_eq!(
+        outcome.objects.len(),
+        2,
+        "every selected polyline is written"
+    );
+    assert_eq!(
+        outcome.changes.expect("one change set").changes.len(),
+        2,
+        "both entity writes are staged in one change set"
+    );
+    assert_ne!(revision(&app), rev, "the revision bumped once");
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+
+    // Only the width changed: points, bulges and the closed flag are preserved.
+    for (id, fixture) in [(1u128, first), (2u128, second)] {
+        let SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed,
+            width,
+        } = geometry(&app, id)
+        else {
+            panic!("WIDTH keeps the entity a POLYLINE");
+        };
+        let SemanticGeometry::Polyline {
+            points: expected_points,
+            bulges: expected_bulges,
+            closed: expected_closed,
+            ..
+        } = fixture
+        else {
+            panic!("fixture is a polyline");
+        };
+        assert_eq!(points, expected_points);
+        assert_eq!(bulges, expected_bulges);
+        assert_eq!(closed, expected_closed);
+        assert_eq!(width, 1.25);
+    }
+
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .unwrap();
+    for id in [1u128, 2u128] {
+        let SemanticGeometry::Polyline { width, .. } = geometry(&app, id) else {
+            panic!("undo keeps the polyline");
+        };
+        assert_eq!(width, 0.0, "one undo restores the whole selection");
+    }
+}
+
+#[test]
+fn width_zero_resets_a_wide_polyline_to_hairline() {
+    let fixture = wide_piece(p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), 2.0);
+    let (mut app, mut session) = build(vec![ent(1, fixture, 0)], AppMode::Work);
+    select(&mut session, &[1]);
+
+    pedit_edit(&mut app, &mut session, PeditEditOption::Width(0.0)).expect("zero resets");
+    let SemanticGeometry::Polyline {
+        points,
+        bulges,
+        closed,
+        width,
+    } = geometry(&app, 1)
+    else {
+        panic!("WIDTH keeps the entity a POLYLINE");
+    };
+    assert_eq!(width, 0.0, "0.0 is the hairline width");
+    assert_eq!(points, vec![p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0)]);
+    assert_eq!(bulges, vec![0.0]);
+    assert!(!closed);
+    assert_eq!(undo_depth(&app), 1);
+
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .unwrap();
+    let SemanticGeometry::Polyline { width, .. } = geometry(&app, 1) else {
+        panic!("undo keeps the polyline");
+    };
+    assert_eq!(width, 2.0);
+}
+
+#[test]
+fn width_refuses_bad_values_and_non_polyline_selections_without_writing() {
+    let (mut app, mut session) = build(
+        vec![ent(
+            1,
+            wide_piece(p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), 0.0),
+            0,
+        )],
+        AppMode::Work,
+    );
+    select(&mut session, &[1]);
+    let rev = revision(&app);
+    for bad in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let error = pedit_edit(&mut app, &mut session, PeditEditOption::Width(bad)).unwrap_err();
+        assert_invalid(error, "pedit.width_invalid");
+    }
+    assert_wrote_nothing(&app, rev);
+
+    // A non-polyline is refused unless PEDITACCEPT converts the single pick.
+    let (mut app, mut session) = build(vec![ent(1, line(), 0)], AppMode::Work);
+    select(&mut session, &[1]);
+    let rev = revision(&app);
+    let error = pedit_edit(&mut app, &mut session, PeditEditOption::Width(0.5)).unwrap_err();
+    assert_unsupported(error, "pedit.not_polyline");
+    assert_wrote_nothing(&app, rev);
+
+    pedit_edit_with(&mut app, &mut session, PeditEditOption::Width(0.5), true)
+        .expect("convert = true turns the LINE into a polyline with a width");
+    let after = entity(&app, 1);
+    assert_eq!(after.object.type_key, "AcDbPolyline");
+    let SemanticGeometry::Polyline { width, .. } = after.geometry else {
+        panic!("the converted entity is a polyline");
+    };
+    assert_eq!(width, 0.5);
+}
+
+#[test]
+fn width_is_a_named_no_op_when_every_selection_already_has_it() {
+    let (mut app, mut session) = build(
+        vec![
+            ent(1, wide_piece(p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), 0.5), 0),
+            ent(2, wide_piece(p3(0.0, 1.0, 0.0), p3(4.0, 1.0, 0.0), 0.5), 1),
+        ],
+        AppMode::Work,
+    );
+    select(&mut session, &[1, 2]);
+    let rev = revision(&app);
+    let outcome =
+        pedit_edit(&mut app, &mut session, PeditEditOption::Width(0.5)).expect("no-op succeeds");
+    assert!(outcome.changes.is_none(), "a no-op opens no transaction");
+    assert!(outcome.objects.is_empty());
+    assert_eq!(outcome.diagnostics[0].code, "pedit.width_unchanged");
+    assert_wrote_nothing(&app, rev);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn the_other_pedit_options_keep_the_uniform_width() {
+    // A wide polyline edited by CLOSE/REVERSE keeps its stroke: those options
+    // only rewrite points/bulges/closed, never the width.
+    let wide = SemanticGeometry::Polyline {
+        points: vec![p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), p3(4.0, 4.0, 0.0)],
+        bulges: vec![0.0; 3],
+        closed: false,
+        width: 1.5,
+    };
+    let (mut app, mut session) = build(vec![ent(1, wide, 0)], AppMode::Work);
+    select(&mut session, &[1]);
+    pedit_edit(&mut app, &mut session, PeditEditOption::Close).expect("CLOSE succeeds");
+    let SemanticGeometry::Polyline { width, closed, .. } = geometry(&app, 1) else {
+        panic!("CLOSE keeps the polyline");
+    };
+    assert!(closed);
+    assert_eq!(width, 1.5, "CLOSE preserves the uniform width");
+
+    pedit_edit(&mut app, &mut session, PeditEditOption::Reverse).expect("REVERSE succeeds");
+    let SemanticGeometry::Polyline { width, .. } = geometry(&app, 1) else {
+        panic!("REVERSE keeps the polyline");
+    };
+    assert_eq!(width, 1.5, "REVERSE preserves the uniform width");
 }

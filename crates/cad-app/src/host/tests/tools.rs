@@ -330,6 +330,7 @@ fn polyline_capture_confirms_one_open_polyline_and_maps_the_exact_points() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert_eq!(points, &captured.to_vec());
             assert_eq!(bulges, &vec![0.0, 0.0, 0.0]);
@@ -424,6 +425,7 @@ fn rectang_capture_confirms_one_closed_rectangle_and_maps_the_exact_corners() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert_eq!(
                 points,

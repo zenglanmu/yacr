@@ -158,6 +158,7 @@ impl Application {
                 points,
                 bulges,
                 closed,
+                ..
             } => {
                 let curve = PolylineCurve::new(points, bulges, *closed, "break")?;
                 let Some(u_a) = curve.project_param(*first, tol)? else {

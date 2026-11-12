@@ -279,6 +279,7 @@ pub(crate) fn boundary_loop(
             points,
             bulges,
             closed: true,
+            ..
         } => {
             if points.len() < 3 {
                 return Err(invalid(

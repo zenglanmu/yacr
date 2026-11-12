@@ -39,6 +39,7 @@ const view = (status, gate = admitted, pending = null) => toolParameterViews(sta
 const first = (status, gate = admitted, pending = null) => view(status, gate, pending)[0];
 
 const polygon = sides => ({ tool: { key: 'draw.polygon', points: 1, ready: false, params: { sides } } });
+const polyline = width => ({ tool: { key: 'draw.polyline', points: 1, ready: false, params: { polylineWidth: width } } });
 const fillet = radius => ({ tool: { key: 'draw.fillet', points: 0, ready: false, params: { filletRadius: radius } } });
 const fillAngle = degrees => ({ tool: { key: 'draw.arraypolar', points: 0, ready: false, params: { arrayFillAngle: degrees } } });
 const align = flag => ({ tool: { key: 'draw.align', points: 0, ready: false, params: { alignScale: flag } } });
@@ -85,6 +86,10 @@ test('the per-tool map and the spec table stay consistent', () => {
   // ten parameters, and TEXT/MTEXT share the height and rotation while MTEXT alone
   // owns the attachment.
   assert.deepEqual(TOOL_PARAMETERS['draw.polygon'], { command: 'POLYGON', keys: ['polygonSides'] });
+  // PLINE owns the one uniform width it reads at creation; RECTANG does not consume
+  // the parameter in the host, so it has no row (no control the command ignores).
+  assert.deepEqual(TOOL_PARAMETERS['draw.polyline'], { command: 'PLINE', keys: ['polylineWidth'] });
+  assert.equal(TOOL_PARAMETERS['draw.rectang'], undefined);
   assert.deepEqual(TOOL_PARAMETERS['draw.hatch'], {
     command: 'HATCH',
     keys: [
@@ -156,7 +161,7 @@ test('the per-tool map and the spec table stay consistent', () => {
     'chamferDistanceB', 'dimRotation', 'divideAlignBlock', 'divideSegments', 'divideUseBlock', 'filletRadius', 'hatchAngle',
     'hatchDouble', 'hatchGradientAngle', 'hatchGradientColorA', 'hatchGradientColorB',
     'hatchGradientKind', 'hatchPattern', 'hatchPatternType', 'hatchSpacing', 'hatchStyle',
-    'lengthenMode', 'lengthenValue', 'mtextAttachment', 'polygonSides', 'scaleTextFactor',
+    'lengthenMode', 'lengthenValue', 'mtextAttachment', 'polygonSides', 'polylineWidth', 'scaleTextFactor',
     'textHeight', 'textRotation',
   ]);
   assert.equal(TOOL_PARAMETER_SPECS.alignScale.kind, 'flag');
@@ -590,6 +595,58 @@ test('the removed cad_set_polygon_sides name appears nowhere in the UI source', 
   assert.ok(!source.includes('polygonSidesPending'));
   // The one general channel is what remains.
   assert.ok(source.includes("export const TOOL_PARAMETER_COMMAND = 'cad_set_tool_parameter';"));
+});
+
+test('the PLINE uniform width is a non-negative length offered only for PLINE', () => {
+  // A real length: 0 is the valid hairline and every finite value >= 0 is
+  // offered; a negative or non-finite value never reaches the stepper.
+  const spec = TOOL_PARAMETER_SPECS.polylineWidth;
+  assert.equal(spec.kind, 'number');
+  assert.equal(spec.statusKey, 'polylineWidth');
+  assert.equal(spec.step, 0.5);
+  assert.equal(spec.typed, true);
+  for (const accepted of [0, 0.1, 0.25, 1.5, 1e6]) assert.equal(spec.offered(accepted), true, `${accepted}`);
+  for (const refused of [-0.5, -1, NaN, Infinity, -Infinity]) assert.equal(spec.offered(refused), false, `${refused}`);
+  assert.equal(spec.labelKey, 'status.tool_parameter.polyline_width');
+  assert.equal(spec.hintKey, 'status.tool_parameter.polyline_width.hint');
+
+  // The label/hint exist in both catalogs and state the uniform-width,
+  // hairline-zero and no-taper contract.
+  for (const [locale, label, hint] of [
+    [zh, '多段线宽度', /以顶点为中心/],
+    [en, 'Polyline width', /centred on the vertices/],
+  ]) {
+    assert.equal(typeof locale['status.tool_parameter.polyline_width'], 'string');
+    assert.equal(locale['status.tool_parameter.polyline_width'], label);
+    const text = locale['status.tool_parameter.polyline_width.hint'];
+    assert.equal(typeof text, 'string');
+    assert.ok(text.trim().length > 0);
+    assert.match(text, hint);
+    assert.match(text, /0/);
+  }
+  assert.match(zh['status.tool_parameter.polyline_width.hint'], /逐段变宽/);
+  assert.match(en['status.tool_parameter.polyline_width.hint'], /taper is not implemented/);
+
+  // The row renders only while PLINE is the active tool with a projected value.
+  const row = first(polyline(1.5));
+  assert.equal(row.key, 'polylineWidth');
+  assert.equal(row.value, 1.5);
+  assert.equal(row.increment, 2);
+  assert.equal(row.decrement, 1);
+  const atZero = first(polyline(0));
+  assert.equal(atZero.canDecrement, false, 'a negative width is never offered');
+  assert.equal(atZero.canIncrement, true);
+  // RECTANG and every other tool that does not own the key render nothing, even
+  // if a host projected a stale value.
+  for (const status of [
+    { tool: { key: 'draw.rectang', points: 1, params: { polylineWidth: 1.5 } } },
+    { tool: { key: 'draw.line', points: 1, params: { polylineWidth: 1.5 } } },
+    { tool: { key: 'draw.polyline', points: 1, params: {} } },
+    { tool: { key: 'draw.polyline', points: 1, params: { polylineWidth: -1 } } },
+    { tool: { key: 'draw.polyline', points: 1, params: { polylineWidth: NaN } } },
+  ]) {
+    assert.deepEqual(view(status), []);
+  }
 });
 
 test('the tool-parameter catalog keys exist in both locales with matching placeholders', () => {

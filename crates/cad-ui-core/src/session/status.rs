@@ -795,6 +795,12 @@ pub(super) fn cad_tool(
                     ToolParameter::DimRotation,
                     preview.kind == DrawToolKind::DimRotated,
                 ),
+                // PLINE reads one uniform width when it builds the polyline, so
+                // only that capture projects it (null for every other draw kind).
+                polyline_width: number(
+                    ToolParameter::PolylineWidth,
+                    preview.kind == DrawToolKind::Polyline,
+                ),
             },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
@@ -843,6 +849,7 @@ pub(super) fn cad_tool(
                 lengthen_value: None,
                 scale_text_factor: None,
                 dim_rotation: None,
+                polyline_width: None,
             },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,

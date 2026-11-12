@@ -140,6 +140,7 @@ pub(crate) fn piece_from_geometry(
             points,
             bulges,
             closed,
+            ..
         } => {
             if *closed {
                 return Err(invalid(

@@ -491,6 +491,7 @@ fn square_geometry(min: f64, max: f64) -> SemanticGeometry {
         ],
         bulges: vec![0.0; 4],
         closed: true,
+        width: 0.0,
     }
 }
 
@@ -725,6 +726,7 @@ fn hatchedit_recreate_boundary_inserts_one_closed_polyline_per_loop() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert!(*closed);
             assert_eq!(points.len(), 4);

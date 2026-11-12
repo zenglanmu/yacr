@@ -22,6 +22,7 @@ fn assert_closed_polygon(app: &Application, object: ObjectId, sides: u32) -> Ent
             points,
             bulges,
             closed,
+            ..
         } => {
             assert_eq!(points.len(), sides as usize, "one vertex per side");
             assert_eq!(bulges.len(), points.len(), "one bulge per vertex");
@@ -195,6 +196,7 @@ fn create_polygon_refuses_a_missing_pick_and_a_wrong_payload() {
             ],
             bulges: vec![0.0; 4],
             closed: true,
+            width: 0.0,
         })),
     )
     .unwrap_err();

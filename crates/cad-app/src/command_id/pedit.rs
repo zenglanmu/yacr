@@ -2,8 +2,9 @@
 //!
 //! The variant itself keeps a compact doc and links here; the implementation
 //! lives in `app_drawing::pedit`. This is a **declared v1 subset**, not a port of
-//! the whole command: exactly the three options below are implemented, and every
-//! other AutoCAD `PEDIT` surface is refused by name.
+//! the whole command: the core options below are implemented (the full typed
+//! option table lives in `app_drawing::pedit`), and every other AutoCAD `PEDIT`
+//! surface is refused by name.
 //!
 //! ## Why an option argument (and not an option prompt)
 //!
@@ -23,7 +24,9 @@
 //! ## Input
 //!
 //! The current session selection is the whole input: **exactly one** directly
-//! addressable model-space `LWPOLYLINE` (`SemanticGeometry::Polyline`).
+//! addressable model-space `LWPOLYLINE` (`SemanticGeometry::Polyline`) for every
+//! option except `WIDTH`, which accepts **one or more** selected polylines (its
+//! contract is "set this uniform width on each of them, in one transaction").
 //!
 //! * `pedit.selection` — none or more than one selected entity (AutoCAD's
 //!   `Multiple` mode and its "Select polyline" prompt are NOT IMPLEMENTED);
@@ -33,13 +36,14 @@
 //!   (`Unsupported`; the line/arc conversion prompt `PEDITACCEPT` is NOT
 //!   IMPLEMENTED).
 //!
-//! ## The three implemented options
+//! ## The core implemented options
 //!
 //! | option | precondition | write | already in that state |
 //! | --- | --- | --- | --- |
 //! | `CLOSE` (`C`) | open, at least 3 vertices | `closed = true` | `pedit.already_closed`, no transaction |
 //! | `OPEN` (`O`) | closed | `closed = false` | `pedit.already_open`, no transaction |
 //! | `REVERSE` (`R`) | any polyline (open or closed) | the `REVERSE` geometry rule | — (a reverse always changes the stored order) |
+//! | `WIDTH <w>` | one or more polylines; finite `w >= 0` | `width = w` on every selected polyline | `pedit.width_unchanged`, no transaction |
 //!
 //! `CLOSE` refuses an open polyline with fewer than three vertices
 //! (`pedit.too_few_vertices`): two points cannot form a closed ring. `OPEN`
@@ -54,21 +58,42 @@
 //! See [`crate::command_id::reverse`] for the full mapping, including the unused
 //! trailing entry of an open per-vertex bulge array.
 //!
+//! ## `WIDTH`
+//!
+//! The typed width is the entity model's **uniform** polyline width, centred on
+//! the vertices (AutoCAD's constant LWPOLYLINE width, DXF group 43): `0` is the
+//! hairline/default draw and a positive value is a real wide stroke. `WIDTH`
+//! only rewrites that one field, so every selected polyline keeps its id, type
+//! key, layer, space, draw order, points, bulges and closed flag.
+//!
+//! A negative or non-finite value is `pedit.width_invalid` and writes nothing.
+//! Per-vertex start/end width **taper** (AutoCAD's `Edit vertex` `WIDTH`
+//! sub-option) is a different model and stays a named capability refusal
+//! (`pedit.vertex_width_unsupported`); a uniform `WIDTH` never fabricates a
+//! taper.
+//!
 //! ## The write
 //!
 //! `CLOSE`, `OPEN` and `REVERSE` each stage **one** `update_entity` in **one**
-//! transaction / one undo step through the shared publish path. The entity keeps
-//! its id, type key, layer, space and draw order; only `points`/`bulges`/
-//! `closed` change. A no-op and every refusal open no transaction, so no
+//! transaction / one undo step through the shared publish path. `WIDTH` stages
+//! **one** `update_entity` per selected polyline but all in the **same**
+//! transaction, so undoing it is one step. The entity keeps its id, type key,
+//! layer, space and draw order; only `points`/`bulges`/`closed` change (and, for
+//! `WIDTH`, only `width`). A no-op and every refusal open no transaction, so no
 //! revision is bumped and no undo entry is recorded.
 //!
 //! ## NOT IMPLEMENTED (named, not implied)
 //!
 //! * `Join` — no polyline join in this build (the separate `JOIN` command has
 //!   its own LINE/ARC subset).
-//! * `Width` / `Halfwidth` — there is no per-segment width model, and no
-//!   thickness model either.
+//! * `Halfwidth` and per-segment start/end **taper** — the entity model stores
+//!   one uniform width (`WIDTH` above); the `Edit vertex` `WIDTH` sub-option
+//!   stays `pedit.vertex_width_unsupported`, and there is no thickness model
+//!   either.
 //! * `Fit`, `Spline`, `Decurve` — no fit/spline conversion for polylines.
+//!   `FIT` keeps the uniform width; `SPLINE` stores an `AcDbSpline`, which has no
+//!   width field, so a later `DECURVE` restores the frame at width `0` (declared
+//!   divergence, not a silent width edit).
 //! * `Ltype gen` — no linetype-generation flag in the entity model.
 //! * `Undo` — the session `UNDO` command is the undo authority; `PEDIT`'s
 //!   in-command option stack is not modelled.

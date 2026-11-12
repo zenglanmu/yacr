@@ -317,6 +317,7 @@ fn geometry_hits_polygon(
             points,
             bulges,
             closed,
+            ..
         } => {
             if points.is_empty() {
                 return false;

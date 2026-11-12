@@ -83,5 +83,8 @@ pub(crate) fn authorizing_command(parameter: ToolParameter) -> CommandId {
         ToolParameter::BreakFirstPoint => CommandId::Break,
         ToolParameter::DivideUseBlock => CommandId::Divide,
         ToolParameter::DivideAlignBlock => CommandId::Divide,
+        // PLINE's uniform width belongs to the polyline create command, so a
+        // Viewer-mode set is refused exactly like every other create parameter.
+        ToolParameter::PolylineWidth => CommandId::CreatePolyline,
     }
 }

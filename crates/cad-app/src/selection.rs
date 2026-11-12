@@ -659,6 +659,7 @@ fn geometry_property_rows(geometry: &SemanticGeometry) -> Vec<PropertyRow> {
             points,
             bulges,
             closed,
+            ..
         } => vec![
             PropertyRow::new("vertices", points.len().to_string()),
             PropertyRow::new("closed", closed.to_string()),

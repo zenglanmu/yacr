@@ -164,6 +164,7 @@ fn breakline_creates_one_open_polyline_with_the_declared_symbol() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert_eq!(points.len(), 7, "start, five symbol points, end");
             assert!(bulges.is_empty());

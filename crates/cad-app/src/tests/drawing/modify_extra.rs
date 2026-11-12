@@ -107,6 +107,7 @@ fn open_bulged(bulges_per_vertex: bool) -> SemanticGeometry {
         points,
         bulges,
         closed: false,
+        width: 0.0,
     }
 }
 
@@ -120,6 +121,7 @@ fn closed_bulged() -> SemanticGeometry {
         ],
         bulges: vec![0.5, -0.25, 0.75, -0.125],
         closed: true,
+        width: 0.0,
     }
 }
 
@@ -145,6 +147,7 @@ fn segment_midpoints(geometry: &SemanticGeometry) -> Vec<Point3> {
         points,
         bulges,
         closed,
+        ..
     } = geometry
     else {
         panic!("expected a polyline");
@@ -389,6 +392,7 @@ fn closed_rectangle() -> SemanticGeometry {
         ],
         bulges: vec![0.0; 4],
         closed: true,
+        width: 0.0,
     }
 }
 
@@ -646,6 +650,7 @@ fn breakatpoint_splits_an_open_bulged_polyline_on_a_segment() {
         points: vec![p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), p3(4.0, 4.0, 0.0)],
         bulges: vec![0.5, 0.0, 0.0],
         closed: false,
+        width: 0.0,
     };
     let (mut app, mut session) = build(vec![ent(1, arc_part, 0)], AppMode::Work);
     // Resolve the first segment's arc midpoint exactly as the split does.
@@ -679,6 +684,7 @@ fn breakatpoint_splits_an_open_bulged_polyline_on_a_segment() {
         points: first_points,
         bulges: first_bulges,
         closed: false,
+        ..
     } = geometry(&app, 1)
     else {
         panic!("first piece is an open polyline");
@@ -687,6 +693,7 @@ fn breakatpoint_splits_an_open_bulged_polyline_on_a_segment() {
         points: second_points,
         bulges: second_bulges,
         closed: false,
+        ..
     } = geometry(&app, new_id.0)
     else {
         panic!("second piece is an open polyline");

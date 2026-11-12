@@ -100,6 +100,7 @@ fn application_with_bounds(min: Point3, max: Point3) -> (Application, SessionSta
             ],
             bulges: Vec::new(),
             closed: true,
+            width: 0.0,
         },
         draw_order: 0,
     })

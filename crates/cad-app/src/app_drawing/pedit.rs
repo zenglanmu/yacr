@@ -15,6 +15,7 @@
 //! | `FIT` | one open or closed polyline | tangent-continuous arc segments through every vertex |
 //! | `SPLINE` | one open or closed polyline | the vertices as a clamped B-spline control frame |
 //! | `DECURVE` | one polyline or a PEDIT-generated SPLINE | removes bulges / restores the (open or closed) control frame |
+//! | `WIDTH <w>` | one or more polylines | the uniform `width` (centred on the vertices; `0` = hairline) |
 //! | `EDIT NEXT <i>` / `EDIT PREVIOUS <i>` | one polyline | read-only vertex report (the marker move is the whole effect) |
 //! | `EDIT INSERT <seg> <x> <y> [z]` | one polyline | one vertex inserted on the named segment; the curve's shape is preserved exactly |
 //! | `EDIT MOVE <i> <x> <y> [z]` | one polyline | the named vertex moves; segment bulges are kept |
@@ -106,7 +107,9 @@
 //! * `STRAIGHTEN <first> <last>` removes the vertices strictly between the two
 //!   and makes `first → last` straight;
 //! * `TANGENT` and `WIDTH` report on data this build does not model (a stored fit
-//!   tangent, a per-segment width) and are stable named refusals.
+//!   tangent, a per-segment width) and are stable named refusals; `WIDTH`
+//!   writes the polyline's **uniform** width, while the `Edit vertex` `WIDTH`
+//!   action (per-segment taper) stays refused because that model is absent.
 //!
 //! ## `PEDITACCEPT` conversion
 //!
@@ -125,19 +128,20 @@
 //! `pedit.too_few_vertices`, `pedit.fit_plane`, `pedit.fit_degenerate`,
 //! `pedit.fit_tangent`, `pedit.fit_closure`, `pedit.spline_precision`,
 //! `pedit.decurve_spline`,
-//! `pedit.width_invalid`, `pedit.width_unsupported`,
-//! `pedit.ltype_gen_unsupported`, `pedit.edit_vertex_needs_action`,
+//! `pedit.width_invalid`, `pedit.ltype_gen_unsupported`,
+//! `pedit.edit_vertex_needs_action`,
 //! `pedit.vertex_out_of_range`, `pedit.vertex_invalid_point`,
 //! `pedit.vertex_projection_failed`, `pedit.vertex_insert_off_segment`,
 //! `pedit.vertex_coincident`, `pedit.vertex_range`, `pedit.vertex_plane`,
 //! `pedit.vertex_tangent_unsupported`, `pedit.vertex_width_unsupported`,
-//! `pedit.undo_empty`, plus the `pedit.join.*` chain refusals. `WIDTH`,
-//! `LTYPE GEN` and the vertex `TANGENT`/`WIDTH` actions are capability gaps (the
-//! entity model has no width, `plinegen` or fit-tangent field).
+//! `pedit.undo_empty`, plus the `pedit.join.*` chain refusals. `LTYPE GEN` and
+//! the vertex `TANGENT`/`WIDTH` actions remain capability gaps (`plinegen`,
+//! per-vertex fit tangent and per-vertex start/end taper are not modelled); the
+//! command-level `WIDTH` writes the uniform width the entity model now stores.
 //!
 //! Every real change is **one transaction / one undo step**. A named no-op
 //! (`pedit.already_closed`, `pedit.already_open`, `pedit.already_decurved`,
-//! `pedit.vertex_report`, `pedit.vertex_unchanged`,
+//! `pedit.width_unchanged`, `pedit.vertex_report`, `pedit.vertex_unchanged`,
 //! `pedit.vertex_already_straight`) opens no transaction and bumps no revision.
 
 use super::join::{join_tolerance, PolylinePiece};
@@ -154,6 +158,11 @@ use cad_geometry::clamped_uniform_knots;
 // private helper of THIS module, not a second option surface.
 #[path = "pedit_curves.rs"]
 mod curves;
+// The multi-selection `WIDTH` write lives in its own file so this module stays
+// inside the code-size limit; it is a private helper of PEDIT, not an option
+// surface.
+#[path = "pedit_width.rs"]
+mod width;
 use curves::{
     convert_to_polyline, fit_bulges, fit_bulges_closed, pedit_spline_restore, reverse_spline,
 };
@@ -329,6 +338,13 @@ impl Application {
         }
 
         let references = session.selection.refs().to_vec();
+        // `WIDTH` is the one PEDIT option with a **multi-selection** contract:
+        // AutoCAD applies the typed uniform width to every selected polyline.
+        // It stages all the updates in one transaction / one undo step, so it is
+        // handled before the exactly-one-selection rule below.
+        if let PeditEditOption::Width(width) = request.option {
+            return self.pedit_width(command, &references, width, request.convert);
+        }
         let joining = matches!(request.option, PeditEditOption::Join);
         if joining {
             if references.len() < 2 {
@@ -438,18 +454,8 @@ impl Application {
             PeditEditOption::Fit => plan_fit(geometry),
             PeditEditOption::Spline { precision } => plan_spline(geometry, precision),
             PeditEditOption::Decurve => plan_decurve(geometry),
-            PeditEditOption::Width(width) => {
-                if !width.is_finite() || width < 0.0 {
-                    return Err(invalid(
-                        "width_invalid",
-                        "PEDIT WIDTH needs a finite non-negative width",
-                    ));
-                }
-                return Err(unsupported(
-                    "width_unsupported",
-                    "this build has no per-polyline (or per-segment) width field; PEDIT WIDTH \
-                     is a named capability gap",
-                ));
+            PeditEditOption::Width(_) => {
+                unreachable!("WIDTH is handled before the single-entity plan")
             }
             PeditEditOption::LtypeGen { .. } => {
                 return Err(unsupported(
@@ -568,6 +574,7 @@ fn plan_close_open(geometry: SemanticGeometry, close: bool, id: EntityId) -> Cad
         points,
         bulges,
         closed,
+        width,
     } = geometry
     else {
         return Err(unsupported("not_polyline", "CLOSE/OPEN needs a POLYLINE"));
@@ -596,6 +603,7 @@ fn plan_close_open(geometry: SemanticGeometry, close: bool, id: EntityId) -> Cad
                 points,
                 bulges,
                 closed: true,
+                width,
             },
             label: "CLOSE (closed = true)".into(),
             deleted: Vec::new(),
@@ -615,6 +623,7 @@ fn plan_close_open(geometry: SemanticGeometry, close: bool, id: EntityId) -> Cad
                 points,
                 bulges,
                 closed: false,
+                width,
             },
             label: "OPEN (closed = false)".into(),
             deleted: Vec::new(),
@@ -654,7 +663,7 @@ fn plan_join(
     base: &DbEntity,
     refs: &[SelectionRef],
 ) -> CadResult<Plan> {
-    let SemanticGeometry::Polyline { closed, .. } = &base.geometry else {
+    let SemanticGeometry::Polyline { closed, width, .. } = &base.geometry else {
         return Err(unsupported(
             "not_polyline",
             "PEDIT JOIN needs the base selection to be a POLYLINE",
@@ -678,6 +687,7 @@ fn plan_join(
             points: chain.points,
             bulges: chain.bulges,
             closed: false,
+            width: *width,
         },
         label,
         deleted,
@@ -689,6 +699,7 @@ fn plan_fit(geometry: SemanticGeometry) -> CadResult<Plan> {
         points,
         closed,
         bulges,
+        width,
     } = geometry
     else {
         return Err(unsupported("not_polyline", "FIT needs a POLYLINE"));
@@ -713,6 +724,7 @@ fn plan_fit(geometry: SemanticGeometry) -> CadResult<Plan> {
             points,
             bulges: fitted,
             closed,
+            width,
         },
         label: if closed {
             "FIT (closed tangent-continuous arc ring)".into()
@@ -730,12 +742,7 @@ fn plan_spline(geometry: SemanticGeometry, precision: u8) -> CadResult<Plan> {
             format!("PEDIT SPLINE precision must be 0..=99, got {precision}"),
         ));
     }
-    let SemanticGeometry::Polyline {
-        points,
-        closed,
-        bulges: _,
-    } = geometry
-    else {
+    let SemanticGeometry::Polyline { points, closed, .. } = geometry else {
         return Err(unsupported("not_polyline", "SPLINE needs a POLYLINE"));
     };
     let minimum = if closed { 3 } else { 2 };
@@ -780,6 +787,7 @@ fn plan_decurve(geometry: SemanticGeometry) -> CadResult<Plan> {
             points,
             mut bulges,
             closed,
+            ..
         } => {
             if bulges.iter().all(|bulge| bulge.abs() <= 1e-12) {
                 return Ok(Plan::Noop {
@@ -795,6 +803,7 @@ fn plan_decurve(geometry: SemanticGeometry) -> CadResult<Plan> {
                     points,
                     bulges,
                     closed,
+                    width: 0.0,
                 },
                 label: "DECURVE (bulges cleared, frame restored)".into(),
                 deleted: Vec::new(),
@@ -821,6 +830,7 @@ fn plan_decurve(geometry: SemanticGeometry) -> CadResult<Plan> {
                     points,
                     bulges,
                     closed,
+                    width: 0.0,
                 },
                 label: "DECURVE (SPLINE control frame restored)".into(),
                 deleted: Vec::new(),

@@ -255,6 +255,7 @@ impl Application {
                 points,
                 bulges,
                 closed,
+                ..
             } => {
                 if !*closed {
                     return Err(CadError::InvalidInput(format!(

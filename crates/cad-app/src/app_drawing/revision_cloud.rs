@@ -370,6 +370,7 @@ fn resample_cloud(
         bulges: vec![sign * REVCLOUD_BULGE; sampled.len()],
         points: sampled,
         closed,
+        width: 0.0,
     })
 }
 
@@ -390,6 +391,7 @@ fn flatten_source(entity: &DbEntity, chord: f64) -> CadResult<(Vec<Point3>, bool
             points,
             bulges,
             closed,
+            ..
         } => {
             let straight = bulges
                 .iter()
@@ -571,6 +573,7 @@ fn erase_nearest_segment(
         points: out_points,
         bulges: out_bulges,
         closed: false,
+        width: 0.0,
     })
 }
 

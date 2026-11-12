@@ -215,6 +215,7 @@ fn polyline_source_welds_a_touching_line_and_arc() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert!(!closed);
             assert_eq!(points.len(), 3);
@@ -357,6 +358,7 @@ fn multiple_mode_welds_line_plus_arc_into_a_polyline() {
             points,
             bulges,
             closed,
+            ..
         } => {
             assert!(!closed);
             assert_eq!(points.len(), 3);

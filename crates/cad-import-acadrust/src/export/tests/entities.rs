@@ -31,6 +31,7 @@ fn z_constant_polyline_keeps_bulges_as_an_exact_lwpolyline() {
         points: vec![p(0.0, 0.0, 2.0), p(5.0, 0.0, 2.0), p(5.0, 5.0, 2.0)],
         bulges: vec![0.0, 0.5, 0.0],
         closed: false,
+        width: 0.0,
     });
     match &read_entities(&bytes)[0] {
         EntityType::LwPolyline(poly) => {
@@ -49,6 +50,7 @@ fn non_planar_polyline_maps_to_polyline3d_and_drops_bulges_explicitly() {
         points: vec![p(0.0, 0.0, 0.0), p(5.0, 0.0, 3.0), p(5.0, 5.0, 6.0)],
         bulges: vec![0.0, 0.5, 0.0],
         closed: false,
+        width: 0.0,
     });
     match &read_entities(&bytes)[0] {
         EntityType::Polyline3D(poly) => assert_eq!(poly.vertices.len(), 3),
@@ -667,11 +669,13 @@ fn tilted_circle_and_bulge_polyline_round_trip_through_ocs() {
                     points: pa,
                     bulges: ba,
                     closed: closed_a,
+                    ..
                 },
                 SemanticGeometry::Polyline {
                     points: pb,
                     bulges: bb,
                     closed: closed_b,
+                    ..
                 },
             ) => {
                 assert_eq!(closed_a, closed_b);
@@ -741,5 +745,73 @@ fn a_tessellated_acis_solid_exports_as_a_polyface_mesh_not_a_3dsolid() {
         conversion.message.contains("original SAT/SAB source"),
         "the conversion must state the lost 3DSOLID round trip: {}",
         conversion.message
+    );
+}
+
+#[test]
+fn constant_width_polyline_writes_group_43_and_round_trips() {
+    let (bytes, report) = export_one(SemanticGeometry::Polyline {
+        points: vec![p(0.0, 0.0, 0.0), p(5.0, 0.0, 0.0)],
+        bulges: vec![0.0, 0.0],
+        closed: false,
+        width: 1.75,
+    });
+    match &read_entities(&bytes)[0] {
+        EntityType::LwPolyline(poly) => {
+            assert!(
+                (poly.constant_width - 1.75).abs() < 1e-12,
+                "DXF group 43 carries the uniform width"
+            );
+            assert!(
+                poly.vertices
+                    .iter()
+                    .all(|vertex| vertex.start_width == 0.0 && vertex.end_width == 0.0),
+                "per-vertex taper is never invented"
+            );
+        }
+        other => panic!("expected LWPOLYLINE, got {other:?}"),
+    }
+    assert_eq!(report.counts.exact, 1);
+    assert_eq!(report.completeness, Completeness::Complete);
+
+    // Writer + our reader: the constant width survives the round trip.
+    let imported = import_bytes(&bytes);
+    let geometry = imported
+        .entities()
+        .next()
+        .map(|entity| &entity.geometry)
+        .expect("one imported entity");
+    match geometry {
+        SemanticGeometry::Polyline { width, .. } => assert!((width - 1.75).abs() < 1e-12),
+        other => panic!("expected a polyline, got {other:?}"),
+    }
+}
+
+#[test]
+fn non_planar_polyline_width_is_reported_as_an_export_gap() {
+    let (bytes, report) = export_one(SemanticGeometry::Polyline {
+        points: vec![p(0.0, 0.0, 0.0), p(5.0, 0.0, 3.0)],
+        bulges: vec![0.0, 0.0],
+        closed: false,
+        width: 1.0,
+    });
+    assert!(matches!(
+        &read_entities(&bytes)[0],
+        EntityType::Polyline3D(_)
+    ));
+    assert_eq!(
+        report.counts.converted, 1,
+        "dropping the width is a lossy conversion, not an exact mapping"
+    );
+    assert!(
+        report
+            .entries
+            .iter()
+            .any(|entry| entry.code.contains("polyline")
+                && entry
+                    .message
+                    .contains("uniform polyline width is not exported")),
+        "the export gap is named: {:?}",
+        report.entries
     );
 }

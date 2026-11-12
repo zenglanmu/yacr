@@ -241,6 +241,7 @@ pub(super) fn offset_polyline_with_distance(
         points: out,
         bulges: bulges.to_vec(),
         closed,
+        width: 0.0,
     };
     if closed {
         require_no_closed_self_intersection(&geometry, normal, tol)?;
@@ -863,6 +864,7 @@ mod self_intersection_tests {
             ],
             bulges: Vec::new(),
             closed: true,
+            width: 0.0,
         };
         let error = require_no_closed_self_intersection(
             &geometry,

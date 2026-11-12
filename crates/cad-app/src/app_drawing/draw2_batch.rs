@@ -191,6 +191,7 @@ impl Application {
                 bulges: vec![0.0; points.len()],
                 points,
                 closed: false,
+                width: 0.0,
             },
             "create helix",
         )

@@ -90,6 +90,7 @@ fn snap_centre_and_apex_follow_the_analytic_arc() {
             ],
             bulges: vec![case.bulge],
             closed: false,
+            width: 0.0,
         };
         let target = SnapTarget::new(geometry, source(), SpaceId::Model, Precision::Analytic);
         let tol = 1e-9 * (1.0 + case.radius + case.center[0].abs() + case.center[1].abs());

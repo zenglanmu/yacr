@@ -913,6 +913,8 @@
   "status.tool_text.too_long": "The text exceeds the 1024-character limit",
   "status.tool_parameter.polygon_sides": "Polygon sides",
   "status.tool_parameter.polygon_sides.hint": "Sides of the polygon tool; choose between 3 and 1024",
+  "status.tool_parameter.polyline_width": "Polyline width",
+  "status.tool_parameter.polyline_width.hint": "Uniform width of the polyline, centred on the vertices (0 draws the hairline); per-segment taper is not implemented",
   "status.tool_parameter.fillet_radius": "Fillet radius",
   "status.tool_parameter.fillet_radius.hint": "Radius of the fillet tool; 0 or greater",
   "status.tool_parameter.chamfer_distance_a": "Chamfer distance A",

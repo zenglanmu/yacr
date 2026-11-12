@@ -234,6 +234,7 @@ fn vendor_pick_children(primitives: &[VendorPrimitive]) -> Vec<SemanticGeometry>
                     points: points.clone(),
                     bulges: Vec::new(),
                     closed: false,
+                    width: 0.0,
                 });
             }
             VendorPrimitive::Segments(points)

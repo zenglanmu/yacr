@@ -154,6 +154,7 @@ fn straight_piece(start: Point3, end: Point3) -> SemanticGeometry {
         points: vec![start, end],
         bulges: vec![0.0],
         closed: false,
+        width: 0.0,
     }
 }
 
@@ -179,6 +180,7 @@ fn open_bulged() -> SemanticGeometry {
         points: vec![p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0), p3(4.0, 4.0, 0.0)],
         bulges: vec![0.75, -0.5, 0.25],
         closed: false,
+        width: 0.0,
     }
 }
 
@@ -192,6 +194,7 @@ fn closed_bulged() -> SemanticGeometry {
         ],
         bulges: vec![0.5, -0.25, 0.75, -0.125],
         closed: true,
+        width: 0.0,
     }
 }
 
@@ -200,6 +203,7 @@ fn open_two_vertices() -> SemanticGeometry {
         points: vec![p3(0.0, 0.0, 0.0), p3(4.0, 0.0, 0.0)],
         bulges: vec![0.0, 0.0],
         closed: false,
+        width: 0.0,
     }
 }
 
@@ -216,6 +220,7 @@ fn segment_midpoints(geometry: &SemanticGeometry) -> Vec<Point3> {
         points,
         bulges,
         closed,
+        ..
     } = geometry
     else {
         panic!("expected a polyline");
@@ -305,6 +310,7 @@ fn close_flips_an_open_polyline_in_one_undo_and_preserves_everything_else() {
         points,
         bulges,
         closed,
+        ..
     } = &after.geometry
     else {
         panic!("the entity must stay a polyline");
@@ -377,6 +383,7 @@ fn open_flips_a_closed_polyline_in_one_undo_and_preserves_everything_else() {
         points,
         bulges,
         closed,
+        ..
     } = &after.geometry
     else {
         panic!("the entity must stay a polyline");
@@ -429,6 +436,7 @@ fn reverse_reuses_the_reverse_rule_on_an_open_bulged_polyline() {
         points,
         bulges,
         closed,
+        ..
     } = &reversed
     else {
         panic!("the entity must stay a polyline");
@@ -469,6 +477,7 @@ fn reverse_supports_a_closed_bulged_polyline() {
         points,
         bulges,
         closed,
+        ..
     } = &reversed
     else {
         panic!("the entity must stay a polyline");
@@ -683,6 +692,7 @@ fn edit_vertex_insert_splits_the_bulged_segment_without_changing_the_shape() {
         points,
         bulges,
         closed,
+        ..
     } = geometry(&app, 1)
     else {
         panic!("the entity must stay a polyline");

@@ -488,6 +488,7 @@ fn apply_polyline(
                 points: new_points,
                 bulges: bulges.to_vec(),
                 closed,
+                width: 0.0,
             })
         }
         GripKind::Endpoint
@@ -844,6 +845,7 @@ pub fn apply_grip(
             points,
             bulges,
             closed,
+            ..
         } => apply_polyline(points, bulges, *closed, id, to),
         SemanticGeometry::Spline {
             degree,

@@ -96,6 +96,7 @@ fn open_polyline(points: Vec<(f64, f64)>) -> SemanticGeometry {
         points: points.into_iter().map(|(x, y)| p3(x, y, 0.0)).collect(),
         bulges: Vec::new(),
         closed: false,
+        width: 0.0,
     }
 }
 
@@ -109,6 +110,7 @@ fn closed_square(side: f64) -> SemanticGeometry {
         ],
         bulges: vec![0.0; 4],
         closed: true,
+        width: 0.0,
     }
 }
 

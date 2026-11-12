@@ -291,6 +291,7 @@ pub(crate) fn reverse_geometry(geometry: &SemanticGeometry) -> CadResult<Semanti
             points,
             bulges,
             closed,
+            width,
         } => {
             let n = points.len();
             let segments = if *closed { n } else { n.saturating_sub(1) };
@@ -325,6 +326,7 @@ pub(crate) fn reverse_geometry(geometry: &SemanticGeometry) -> CadResult<Semanti
                 points: reversed_points,
                 bulges: reversed_bulges,
                 closed: *closed,
+                width: *width,
             })
         }
         SemanticGeometry::Spline {

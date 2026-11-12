@@ -49,6 +49,7 @@ fn straight_fixture() -> HostController {
                 points: vec![p(0.0, 0.0), p(4.0, 0.0), p(4.0, 3.0)],
                 bulges: vec![0.0, 0.0, 0.0],
                 closed: true,
+                width: 0.0,
             },
             0,
         ))
@@ -82,6 +83,7 @@ fn bulge_fixture() -> HostController {
                 points: vec![p(0.0, 0.0), p(2.0, 0.0)],
                 bulges: vec![1.0],
                 closed: false,
+                width: 0.0,
             },
             0,
         ))

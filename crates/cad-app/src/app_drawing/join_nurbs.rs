@@ -665,6 +665,7 @@ pub(super) fn plan_mixed_weld(sources: &[DbEntity], close: bool) -> CadResult<Jo
                 points,
                 bulges,
                 closed,
+                ..
             } => polyline_spans(points, bulges, *closed)?,
             SemanticGeometry::Spline {
                 degree,

@@ -233,6 +233,7 @@ fn set_document_extent(app: &mut Application, min: Point3, max: Point3) {
             points: vec![min, max],
             bulges: Vec::new(),
             closed: false,
+            width: 0.0,
         },
         draw_order: 0,
     })

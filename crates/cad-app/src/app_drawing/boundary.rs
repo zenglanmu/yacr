@@ -95,6 +95,7 @@ impl Application {
                 points,
                 bulges,
                 closed: true,
+                width: 0.0,
             });
         }
         if geometries.is_empty() {

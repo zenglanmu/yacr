@@ -139,10 +139,11 @@ pub enum CommandId {
     /// work plane. The three points must be non-collinear and finite; a
     /// degenerate input is an explicit refusal that changes nothing. Work-only.
     CreateArc,
-    /// Draw an open LWPOLYLINE through the payload points (at least two, all
-    /// finite and not all identical) on the active layer. Straight segments
-    /// only (one zero bulge per vertex, `closed == false`); fewer than two
-    /// distinct points is an explicit refusal that changes nothing. Work-only.
+    /// Draw an open LWPOLYLINE through the payload points (at least two, finite,
+    /// not all identical) on the active layer. `Points` authors straight segments
+    /// (`closed == false`) with the **uniform width** from the `polylineWidth` tool
+    /// parameter (default `0`, hairline); `Geometry(Polyline)` preserves the
+    /// payload's bulges, closed flag and `width`; per-vertex taper is not modeled. Work-only.
     CreatePolyline,
     /// `WIPEOUT`: closed polygon mask; see [`crate::command_id::draw_variants`].
     Wipeout,
@@ -745,7 +746,8 @@ pub enum CommandId {
     MeasureGeom,
     /// `REVERSE`: see [`crate::command_id::reverse`].
     Reverse,
-    /// `PEDIT` (Work-only): one declared v1 polyline option; see
+    /// `PEDIT` (Work-only): the typed polyline options, including the uniform
+    /// `WIDTH` write and the fit/spline/join/vertex subset; see
     /// [`crate::command_id::pedit`].
     Pedit,
     /// `OOPS`: see [`crate::command_id::oops`].

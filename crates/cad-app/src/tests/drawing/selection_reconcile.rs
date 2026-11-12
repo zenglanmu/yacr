@@ -84,6 +84,7 @@ fn erase_of_one_selected_entity_of_two_leaves_the_other_selected() {
             ],
             bulges: vec![0.0, 0.0, 0.0, 0.0],
             closed: true,
+            width: 0.0,
         },
         1,
     ))

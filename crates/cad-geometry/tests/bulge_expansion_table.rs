@@ -33,6 +33,7 @@ fn display_samples(case: &bulge_cases::Case, params: TessellationParams) -> Vec<
         points: vec![p(case.p0[0], case.p0[1]), p(case.p1[0], case.p1[1])],
         bulges: vec![case.bulge],
         closed: false,
+        width: 0.0,
     };
     flat(&tessellate_geometry(&geometry, params))
 }

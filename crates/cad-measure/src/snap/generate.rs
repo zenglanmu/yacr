@@ -23,6 +23,7 @@ pub(super) fn generate(
             points,
             bulges,
             closed,
+            ..
         } => polyline_candidates(points, bulges, *closed, probe, out, prefix),
         G::Circle {
             center,
