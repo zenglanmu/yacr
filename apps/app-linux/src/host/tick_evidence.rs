@@ -44,3 +44,61 @@ pub(super) fn log_status_line(state: &Shared, last_timings: Option<ProbeStageTim
         state.shell.status.error,
     );
 }
+
+/// Emit the bounded `[probe] geometry` evidence line for an accepted layout.
+///
+/// Split out of `tick` (same reason as [`log_status_line`]): the tick stays a
+/// reader of the loop's control flow. Every geometry is named explicitly so a
+/// text-scale/page-zoom drift (CSS vs GTK logical vs device) is a number in the
+/// log instead of a stretched CAD surface: the DOM CAD rect in **CSS px**, the
+/// margin-receiving container in **GTK logical px**, the drawing area + its
+/// translated origin, the GDK integer scale, the WebView `dpr` (CSS→device,
+/// page zoom included), the CSS→GTK `ratio` and the physical extent.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn log_layout_geometry(
+    top: Option<tauri::PhysicalSize<u32>>,
+    container: (f32, f32),
+    geometry: Option<crate::gtk_bridge::LayoutGeometry>,
+    rect: cad_ui_core::layout::CadMetrics,
+    ratio: f64,
+    physical: (u32, u32),
+    surface: Option<(u32, u32)>,
+    margins: cad_ui_core::layout::ViewportInsets,
+    revalidate: bool,
+) {
+    eprintln!(
+        "[probe] geometry top={}x{} container={:.0}x{:.0} container_xy=({},{}) dom={}x{} dom_xy=({},{}) drawing_area={}x{} origin=({},{}) scale={} dpr={} ratio={:.3} dom_physical={}x{} native_surface={}x{} margins top={} bottom={} start={} end={} revalidated={}",
+        top.map(|s| s.width).unwrap_or(0),
+        top.map(|s| s.height).unwrap_or(0),
+        container.0,
+        container.1,
+        geometry
+            .and_then(|g| g.container_origin)
+            .map(|o| o.0)
+            .unwrap_or(-1),
+        geometry
+            .and_then(|g| g.container_origin)
+            .map(|o| o.1)
+            .unwrap_or(-1),
+        rect.width,
+        rect.height,
+        rect.x,
+        rect.y,
+        geometry.map(|g| g.drawing_area.0).unwrap_or(0),
+        geometry.map(|g| g.drawing_area.1).unwrap_or(0),
+        geometry.and_then(|g| g.origin).map(|o| o.0).unwrap_or(-1),
+        geometry.and_then(|g| g.origin).map(|o| o.1).unwrap_or(-1),
+        geometry.map(|g| g.scale).unwrap_or(0),
+        rect.dpr,
+        ratio,
+        physical.0,
+        physical.1,
+        surface.map(|s| s.0).unwrap_or(0),
+        surface.map(|s| s.1).unwrap_or(0),
+        margins.top,
+        margins.bottom,
+        margins.start,
+        margins.end,
+        revalidate,
+    );
+}

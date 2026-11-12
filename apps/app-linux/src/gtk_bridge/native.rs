@@ -489,6 +489,31 @@ pub(super) fn wayland_buffer_scale(scale_factor: i32) -> i32 {
     scale_factor.max(1)
 }
 
+/// Grow a physical buffer size to the next integer multiple of `buffer_scale`.
+///
+/// A Wayland surface's buffer size is in device pixels and must be an integer
+/// multiple of the surface's `buffer_scale`; otherwise the compositor raises
+/// `wl_surface` error 2 (`invalid_size`: "Buffer size (WxH) must be an integer
+/// multiple of the buffer_scale (N)"). That is a **protocol error on the
+/// connection**, not a per-frame failure: the display and the process die with
+/// it. The single CAD size authority (`round(rect × scale)`) produces odd sizes
+/// at a 2× output (3963×1645), so the child buffer is grown to the next
+/// multiple.
+///
+/// Growth (never shrink) keeps the CAD rect fully covered; the added strip is
+/// below `buffer_scale` device pixels (≤ 0.5 logical px at 2×), the same order
+/// as the already-integer drawing-area allocation and the integer
+/// `wl_subsurface.set_position` origin. A zero axis stays zero (the caller
+/// waits), and a scale below 1 is treated as 1.
+pub(crate) fn wayland_aligned_buffer_size(size: (u32, u32), buffer_scale: i32) -> (u32, u32) {
+    let scale = u32::try_from(buffer_scale.max(1)).unwrap_or(1);
+    if scale == 1 || size.0 == 0 || size.1 == 0 {
+        return size;
+    }
+    let align = |value: u32| value.saturating_add(scale - 1) / scale * scale;
+    (align(size.0), align(size.1))
+}
+
 /// Whether the native drawing area occupies exactly the React DOM CAD rect.
 ///
 /// The DOM rect is relative to the margin-receiving container (the overlay), so

@@ -216,6 +216,13 @@ impl GtkOverlayOwner {
             .translate_coordinates(&self.top_level, 0, 0)
     }
 
+    /// The integer buffer scale the Wayland child surface uses. GTK3 reports an
+    /// integer scale factor and it is never below 1. This is the authority for
+    /// the buffer-size alignment, not a separately derived window value.
+    pub(crate) fn buffer_scale(&self) -> i32 {
+        wayland_buffer_scale(self.drawing_area.scale_factor())
+    }
+
     /// The margin-receiving container's (the overlay's) origin in the toplevel.
     pub fn container_origin(&self) -> Option<(i32, i32)> {
         self.overlay.translate_coordinates(&self.top_level, 0, 0)
@@ -339,7 +346,7 @@ impl GtkOverlayOwner {
         }
         let alloc_w = self.drawing_area.allocated_width();
         let alloc_h = self.drawing_area.allocated_height();
-        let scale = wayland_buffer_scale(self.drawing_area.scale_factor());
+        let scale = self.buffer_scale();
         if alloc_w <= 0 || alloc_h <= 0 {
             return None;
         }
@@ -713,7 +720,7 @@ impl GtkOverlayOwner {
         if self.wayland.is_none() {
             return;
         }
-        let scale = wayland_buffer_scale(self.drawing_area.scale_factor());
+        let scale = self.buffer_scale();
         let Some((x, y)) = self
             .drawing_area
             .translate_coordinates(&self.top_level, 0, 0)

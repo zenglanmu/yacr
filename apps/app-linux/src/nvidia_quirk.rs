@@ -1,19 +1,21 @@
 //! NVIDIA + Wayland workaround for WebKitGTK 2.54.x explicit-sync crashes.
 //!
-//! **Symptom**: on a real 5K/`scale=2` NVIDIA Wayland host the Flatpak
-//! (`org.gnome.Platform//51`) dies at startup or when the window moves to the
-//! 2× output with
+//! **Status (2026-11-12)**: this workaround targets a **separate, upstream**
+//! WebKitGTK/NVIDIA defect. It is **not** the cause of the reported 2026-11-12
+//! real-machine startup crash: that run's `wl_display.error` named
+//! `wl_surface` error 2 (`invalid_size`) for an odd 3963x1645 CAD child buffer at
+//! `buffer_scale = 2`, i.e. **yacr's own** surface (see `docs/handoff.md`
+//! 2026-11-12 and `wayland_aligned_buffer_size`). Both
+//! `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1`
+//! left that crash unchanged, as expected — neither touches our surface.
 //!
-//! ```text
-//! Gdk-Message: ... Error 71 (Protocol error) dispatching to Wayland display
-//! ```
-//!
-//! **Root cause**: the runtime currently ships **WebKitGTK 2.54.1** (verified in
-//! the sandbox via `webkit_get_major_version`). Its DMA-BUF renderer enables
-//! Wayland explicit sync (`wp_linux_drm_syncobj`) but commits buffers without a
-//! `set_acquire_point`; Mutter rejects that commit with
-//! `wl_display.error(..., 4, no_acquire_point)` and GDK aborts the client. Host
-//! WebKitGTK 2.52.6 does not reproduce it. Upstream: WebKit bug 280210.
+//! **Upstream defect this quirk addresses** (research, not measured here): on
+//! GPU/explicit-sync-capable NVIDIA Wayland hosts, WebKitGTK 2.54.1's DMA-BUF
+//! renderer can make GDK create a GL surface mid-frame and then finish the same
+//! frame with a `wl_shm` commit; Mutter rejects it with
+//! `wl_display.error(..., 4, no_acquire_point)` and GDK aborts the client.
+//! Upstream: WebKit bugs 280210 and 324551; fixed in WebKitGTK **2.54.2**
+//! (the GNOME 51 runtime used here still ships 2.54.1, `so.0.24.4`).
 //!
 //! **Why this is explicit and narrow**: the workaround only runs when the
 //! resolved backend is native Wayland, an NVIDIA driver is actually present, and
@@ -24,9 +26,9 @@
 //! are untouched. `WEBKIT_DISABLE_DMABUF_RENDERER=1` remains the documented
 //! fallback if the user wants it.
 //!
-//! This is a workaround for a confirmed trigger, **not** a claim that the
-//! `scale=1`→`scale=2` 5K setup is verified: it is still pending a re-run on the
-//! failing real machine (see `docs/flatpak.md` §6).
+//! This is a workaround for a confirmed upstream trigger, **not** a claim that
+//! the `scale=1`→`scale=2` 5K setup is verified: its effectiveness on the real
+//! failing machine is still **NOT VERIFIED** (see `docs/flatpak.md` §6).
 
 use crate::backend::ResolvedBackend;
 

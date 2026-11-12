@@ -1,7 +1,7 @@
 use super::native::{
     drawing_area_matches_dom, gpu_memory_refusal_line, init_allowed, panic_payload_message,
-    pending_prerequisite, pending_reason_changed, render_error_class, wayland_buffer_scale,
-    webview_target_size, WebviewSkip, GPU_MEMORY_CLASS,
+    pending_prerequisite, pending_reason_changed, render_error_class, wayland_aligned_buffer_size,
+    wayland_buffer_scale, webview_target_size, WebviewSkip, GPU_MEMORY_CLASS,
 };
 use super::BridgeState;
 
@@ -279,4 +279,27 @@ fn wayland_buffer_scale_is_at_least_one() {
     assert_eq!(wayland_buffer_scale(1), 1);
     assert_eq!(wayland_buffer_scale(0), 1);
     assert_eq!(wayland_buffer_scale(-3), 1);
+}
+
+#[test]
+fn wayland_buffer_size_is_grown_to_the_buffer_scale_multiple() {
+    // The exact protocol error from the 5K/scale=2 run:
+    //   wl_surface#49 error 2: "Buffer size (3963x1645) must be an integer
+    //   multiple of the buffer_scale (2)."
+    assert_eq!(wayland_aligned_buffer_size((3963, 1645), 2), (3964, 1646));
+    assert_eq!(wayland_aligned_buffer_size((3851, 1645), 2), (3852, 1646));
+    // Already legal: unchanged (never shrink, never move a multiple).
+    assert_eq!(wayland_aligned_buffer_size((3964, 1646), 2), (3964, 1646));
+    assert_eq!(wayland_aligned_buffer_size((1926, 823), 1), (1926, 823));
+    assert_eq!(wayland_aligned_buffer_size((1012, 690), 3), (1014, 690));
+    // Degenerate inputs stay explicit: a zero axis means "wait", and a scale
+    // below one is one.
+    assert_eq!(wayland_aligned_buffer_size((0, 900), 2), (0, 900));
+    assert_eq!(wayland_aligned_buffer_size((3963, 1645), 0), (3963, 1645));
+    assert_eq!(wayland_aligned_buffer_size((3963, 1645), -3), (3963, 1645));
+    // Saturating: never wraps at the top of the range.
+    assert_eq!(
+        wayland_aligned_buffer_size((u32::MAX, 1), 2),
+        (u32::MAX - 1, 2)
+    );
 }

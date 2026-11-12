@@ -1,5 +1,95 @@
 AD
 
+## 2026-11-12 Flatpak 5K/scale=2 启动崩溃：CAD 子表面 buffer 尺寸不是 buffer_scale 的整数倍
+
+- **报告**：`flatpak run io.github.zenglanmu.yacr`（`flatpak info` 版本 0.1.7；运行日志已含
+  2026-11-11 引入的 `dom_physical` / `physical=` 字段，因此不是更早的二进制）在
+  RTX 3070 Laptop + GNOME/Mutter Wayland + 5K/`scale=2` 上启动约 1 s 后退出，末行为
+  `Gdk-Message: ... Error flushing display: 协议错误`，探针
+  `bridge wayland FAILED (terminal, released): wayland display error (errno 71)`。
+- **根因（报告者真机 `WAYLAND_DEBUG=1` 日志）**：
+  `wl_display#1.error(wl_surface#49, 2, "Buffer size (3963x1645) must be an integer multiple of the buffer_scale (2).")`
+  —— `wl_surface` error 2 = `invalid_size`。真机 dom 1981.6x822.6，
+  `round(1981.6×2)×round(822.6×2)` = **3963×1645**（奇数），而 CAD 子表面 `buffer_scale=2`。
+  这是**整条连接的协议错误**（不是每帧失败）：`physical_content_size` 的“单一尺寸权威”保证
+  render target == 子表面，但 Wayland 还要求 buffer 尺寸是 buffer_scale 的整数倍；两条约束在
+  奇数尺寸上冲突。
+- **排除项**：不是 WebKit 显式同步。报告者 A/B 里 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 与
+  `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1` **仍然崩溃**（两者都不碰 yacr 的子表面），
+  `__NV_DISABLE_EXPLICIT_SYNC=1` 护栏也没有改变它。`docs/flatpak.md` §6 与
+  `nvidia_quirk.rs` 的原“no_acquire_point”归因已更正：WebKitGTK 2.54.1（运行时
+  `so.0.24.4`）的 280210/324551 是**独立的**上游缺陷（2.54.2 已修），其实效仍 NOT VERIFIED。
+- **修复**：`wayland_aligned_buffer_size` 把物理尺寸**向上**取整到整数 buffer scale 的倍数，
+  再由该物理尺寸反推逻辑尺寸（`physical / scale`）传给 render session，使
+  `render_target_size(logical, scale) == 子表面尺寸` 仍按构造成立；buffer scale 来自 GTK
+  `drawing_area.scale_factor()`（即 shim 真正设置的值）。向上取整保证 CAD 矩形被完全覆盖，
+  多出的条带 < 1 个 buffer scale 设备像素（2× 时 ≤ 0.5 逻辑像素），与已有的整数 GTK
+  allocation、整数 `wl_subsurface.set_position` 同一量级；scale=1 时完全无变化。
+  文件：`gtk_bridge/native.rs`、`gtk_bridge/owner.rs`（`buffer_scale()`）、
+  `host/admission.rs`（`cad_surface_geometry`/`aligned_metrics`/`aligned_surface_metrics`/
+  `cad_frame_geometry`/`window_scale`/`bridge_buffer_scale`）、`host/tick.rs`（三处取数去重，
+  992 行）、`gtk_bridge/tests.rs`、`host/tests.rs`。
+- **第二层缺陷（崩溃修复后暴露的显示回归，本机已复现）**：用户机器的
+  `gsettings get org.gnome.desktop.interface text-scaling-factor` = **1.25**。GTK3 把它映射为
+  `gtk-xft-dpi`，WebKitGTK 再把它变成 **pageZoom 1.25**（`platform/gtk` 的 `fontDPI()/96`），
+  于是 `window.devicePixelRatio = 2 × 1.25 = 2.5`、CSS 视口 = GTK 容器 / 1.25
+  （用户 5K：CSS 1981.6，GTK 2477；WebViewCSS 视口与容器比例 1.25）。宿主此前用 **GDK 的整数
+  scale `2`** 去换算 CSS 矩形，原生 CAD 表面只有 DOM 洞的 **1/1.25 = 80%**，左上对齐、右下透出
+  桌面。本机 `text-scaling-factor=1.25`（GDK scale 1）复现：修复前
+  `dom_physical=1482x542`（容器 1853），修复后 `dom_physical=1853x677`、`margins end=0`、
+  `dpr=1.25 ratio=1.250`；恢复 `1.0` 后仍有 `dom=1853x750 native_surface=1853x750`（无回归）。
+- **修复**：`rect.dpr`（前端上报的 `window.devicePixelRatio`，含 page zoom）成为 CSS→**device**
+  的唯一权威；`css_to_gtk = dpr / GDK 整数 scale` 用于 GTK 边距、drawing-area 守卫与子表面原点；
+  布局校验的参考视口改为 **CSS 视口 = 容器 / ratio**（不再把 GTK 容器当 CSS 视口）；物理尺寸仍按
+  整数 buffer scale 向上对齐。`dpr == GDK scale` 时数值与之前完全相同。文件：
+  `host/admission.rs`（`css_to_gtk`/`gtk_rect`/`gtk_margins`/`cad_surface_geometry`/`cad_render_geometry`）、
+  `host/tick.rs`、`host/tick_evidence.rs`（geometry 行拆出并新增 `dpr=`/`ratio=`）、`host/dom.rs`
+  （DOM diag 新增 `dpr`/`viewport`）、`host/tests.rs`。
+- **同一缺陷的两个后续坑（真机 + 本机都复现）**：
+  1. **CAD 全透明、`frames=0`**：第一版 dpr 修复用已经取整的 CSS insets 再乘 ratio
+     （`scale_insets`），二次取整后 drawing area 比 `round(rect × ratio)` 少 1 个逻辑像素
+     （真机 1027 vs 1028.25，本机 676 vs 677.25），超过 drawing-area↔DOM 守卫的 1 px 容差 →
+     帧路径在 `resize_to` 之前返回 Err，表面停在首个临时布局（真机 4204×2058）且从不 present。
+     修复：GTK 边距与守卫改用**同一个取整后的 GTK 矩形**（`gtk_rect` + `gtk_margins`），
+     尾随 inset 吸收余数。
+  2. **顶部 1 物理像素缝隙**：DOM 洞顶部是小数（dpr 2.5 下 GTK 逻辑 218.5），最近取整得到 219，
+     218.5–219 这条缝透出桌面。修复：`gtk_rect` 改为**覆盖**小数洞——前缘 `floor`、后缘 `ceil`
+     （加 1e-3 逻辑像素 epsilon，避免 `1981.6×1.25 = 2477.0000458` 这类 f32 误差多出 1 px），
+     物理尺寸 = 覆盖后的 GTK 矩形 × GDK 整数 scale（仍按 buffer_scale 对齐），
+     `logical = physical / dpr`，render target == 子表面仍按构造成立。代价：每轴最多多 1 个
+     GTK 逻辑像素（压在 opaque chrome 下面）且 CAD 内容最多大约 0.1%，不可见；换来四条边无缝隙。
+  `cad present failed: …` 现在会**在终端打印一次**（按消息去重）——这次就是靠本机 A/B 的
+  `frames=0` 才定位到的。
+- **已运行（本机 scale=1 + 单测 + 无头宿主 + text-scaling A/B）**：
+  `cargo fmt -p app-linux -- --check` rc=0；`cargo test -p app-linux --lib --locked`
+  **189 passed / 0 failed / 0 ignored**（含用户真机数值 1981.6×822.6@dpr2.5 → 4954×2058、
+  本机 1482.4×541.8@dpr1.25 → 1853×678、覆盖小数洞、`render_target_size == physical`、
+  各 ratio 下 `gtk_margins` 与守卫一致）；
+  `cargo check -p app-linux --all-targets --locked` rc=0；
+  `cargo clippy -p app-linux --all-targets --locked -- -D warnings` rc=0；
+  `python3 scripts/check-file-size.py` rc=0；`python3 scripts/check-architecture.py` rc=0；
+  `cargo build --release -p app-linux --bin yacr --features tauri/custom-protocol --locked` rc=0；
+  `bash scripts/host-smoke-linux.sh`（Weston + lavapipe）rc=0：
+  **`frames=1780 complete=1780 geometry=3 settled=2 last_frame=960x489` → PASS**。
+  本机 `text-scaling-factor` A/B（跑完已恢复 1.0）：`1.25` →
+  `dpr=1.25 ratio=1.250 dom_physical=1853x678 native_surface=1853x678 margins top=218 bottom=107
+  start=0 end=0`、**frames=984**；`1.0` → `dom=1853x750 native_surface=1853x750`、**frames=605**。
+  该 smoke/A-B 是呈现/几何证据（scale=1、软件 Vulkan 或无头宿主），不是真机/GPU/像素结论。
+- **安装陷阱（已实测）**：`flatpak remove` 后直接 `flatpak install` 装回的是旧 **0.1.7**
+  （commit `2be5f57`，Nov 9，`yacr-origin` remote），于是 CAD 完全消失并报
+  `native texture 3851x1645 does not match the 3852x1644 surface`（9222139c 之前的按 GTK
+  allocation 取尺寸）。新产物是 `target/release/dist/yacr-0.1.11-linux-x86_64.flatpak`，
+  必须**显式安装该文件**（`--reinstall`），不要用 remote 的默认版本。
+- **真机复测（2026-11-12，用户报告 PASS）**：重装含本轮修复的 bundle 后，5K/`scale=2`
+  （RTX 3070 Laptop、`text-scaling-factor=1.25`）不再崩溃、CAD 填满 DOM 洞、顶部缝隙消失。
+  用户报告通过，**无 agent 抓帧/像素/性能证据**，也**未附本轮日志**；下次真机运行应按
+  `dpr=2.5 ratio=1.250 dom_physical=4954x2058 native_surface=4954x2058
+  margins top=218 bottom=107 start=0 end=0` 与持续增长的 `frames` 核对。
+- **仍未验证**：分数缩放显示器本身（GTK3 只给整数 scale，WebKitGTK 2.54 不走
+  `wp_fractional_scale`，本修复按 dpr 处理 page zoom，不宣称分数缩放已验收）；真实 GPU 像素/
+  性能；input→pixel 在 text-scale 下的精度；WebKit 2.54.2+ 运行时升级后的上游缺陷复测。
+- 用户可见面只保留状态标签，证据边界留在本文件与 `docs/flatpak.md`/`docs/react-linux-app.md`。
+
 ## 2026-11-11 工具链 1.99.0 → 1.99.1（最新 stable；cadmpeg 保持 0.6.11）
 
 - **结论**：`cadmpeg-ir`/`-codec-step`/`-tessellate` 0.6.11 在 1.99.1 上无告警、无改动即可编译；

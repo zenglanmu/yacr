@@ -9,13 +9,14 @@ use cad_engine::render::{BackendPreference, RenderSessionHandle};
 use cad_host::HostPlatform;
 use cad_platform::HostCapabilities;
 use cad_render_wgpu::ProbeStageTimings;
-use cad_ui_core::layout::{surface_metrics, LayoutError};
+use cad_ui_core::layout::LayoutError;
 use cad_ui_core::session::CadSession;
 use cad_ui_core::shell::{bind_allowed, clear_host_error, note_host_error, HostErrorKind};
 use cad_ui_core::unsupported_status;
 
 use super::admission::{
-    cad_present_admission, cad_render_geometry, layout_needs_revalidate, BindStep,
+    aligned_surface_metrics, bridge_buffer_scale, cad_frame_geometry, cad_present_admission,
+    cad_surface_geometry, css_to_gtk, gtk_margins, gtk_rect, layout_needs_revalidate, BindStep,
     CadPresentAdmission,
 };
 use super::dom::run_dom_diag;
@@ -26,6 +27,7 @@ use super::telemetry::{
     cad_frame_log_state, frame_completeness_label, log_gpu_memory, log_render_diagnostics,
     opt_telemetry_u128, opt_telemetry_u64, CadFrameLogState, CAD_STAGE_SLOW_US,
 };
+use super::tick_evidence::log_layout_geometry;
 use super::{
     apply_gpu_budget_percent, lock, lock_telemetry, RenderTelemetry, Shared, BRIDGE, CAD, CAD_ENV,
 };
@@ -211,24 +213,36 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
     // accept a fake empty layout (zero bounds) and never disturb a confirmed one.
     let last_rect = lock(shared).shell.input.last_rect();
     if let (Some(bounds), Some(rect)) = (container_bounds, last_rect) {
+        // The container is GTK logical (the geometry the margins are applied
+        // in); the frontend rect is CSS. WebKitGTK folds GTK text scaling into
+        // `devicePixelRatio`, so the CSS viewport is `container / ratio` and the
+        // layout tracker must be fed CSS bounds — otherwise a text-scale change
+        // looks like a CSS viewport change (or hides one).
+        let parent_scale = bridge_buffer_scale();
+        let ratio = css_to_gtk(f64::from(rect.dpr), parent_scale);
+        let gtk = gtk_rect(&rect, ratio);
+        let css_bounds = (
+            (f64::from(bounds.0) / ratio) as f32,
+            (f64::from(bounds.1) / ratio) as f32,
+        );
         let (revalidate, decision) = {
             let mut state = lock(shared);
             // Re-validate the cached rect when a GPU generation changed **or** the
             // margin-receiving container bounds changed — the latter even without a
             // new DOM sequence (the container resized under an unchanged rect).
             let revalidate =
-                layout_needs_revalidate(state.layout_revalidate, state.layout_bounds, bounds);
+                layout_needs_revalidate(state.layout_revalidate, state.layout_bounds, css_bounds);
             state.layout_revalidate = false;
             let decision = if revalidate {
-                state.layout.revalidate(&rect, bounds.0, bounds.1)
+                state.layout.revalidate(&rect, css_bounds.0, css_bounds.1)
             } else {
-                state.layout.accept(&rect, bounds.0, bounds.1)
+                state.layout.accept(&rect, css_bounds.0, css_bounds.1)
             };
             (revalidate, decision)
         };
         match decision {
-            Ok(margins) => {
-                lock(shared).layout_bounds = Some(bounds);
+            Ok(_css_margins) => {
+                lock(shared).layout_bounds = Some(css_bounds);
                 // Keep the CAD surface source in sync with the accepted DOM
                 // rect. The host `tick` re-reads this surface every cycle
                 // (`HostCore::tick` -> `metrics`), so `viewport.logical_size`
@@ -236,19 +250,22 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 // at the creation-time size made `Camera::zoom_at` anchor off
                 // the cursor after any DOM-rect change (window resize, panel
                 // toggle, DPR change).
-                let scale = lock(shared)
-                    .window
-                    .as_ref()
-                    .and_then(|window| window.scale_factor().ok())
-                    .unwrap_or(1.0)
-                    .max(0.1);
-                // One rounding, shared with the render target (not the GTK allocation).
-                let physical = cad_ui_core::layout::physical_content_size(&rect, scale);
+                // One rounding shared with the render target (at the WebView's
+                // dpr, i.e. including page zoom), then grown to a legal Wayland
+                // buffer size (`wl_surface` error 2 otherwise).
+                let (logical, physical) = cad_surface_geometry(&rect, parent_scale);
                 CAD_ENV.with(|cell| {
                     if let Some(env) = cell.borrow().as_ref() {
-                        env.surface.set_metrics(surface_metrics(&rect, scale));
+                        env.surface.set_metrics(aligned_surface_metrics(
+                            rect,
+                            logical,
+                            f64::from(rect.dpr),
+                        ));
                     }
                 });
+                // GTK margins are GTK logical px, derived from the same converted
+                // rect the frame path's drawing-area guard compares against.
+                let margins = gtk_margins(bounds, gtk);
                 BRIDGE.with(|cell| {
                     if let Some(owner) = cell.borrow_mut().as_mut() {
                         owner.apply_layout(margins, physical);
@@ -262,42 +279,9 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                     .window
                     .as_ref()
                     .and_then(|window| window.inner_size().ok());
-                // Distinguish every geometry explicitly (evidence only; emitted
-                // only on a layout change, never per frame): the DOM CAD rect,
-                // the margin-receiving container, the drawing area + its
-                // translated origin, the integer scale and the physical extent.
-                eprintln!(
-                    "[probe] geometry top={}x{} container={:.0}x{:.0} container_xy=({},{}) dom={}x{} dom_xy=({},{}) drawing_area={}x{} origin=({},{}) scale={} dom_physical={}x{} native_surface={}x{} margins top={} bottom={} start={} end={} revalidated={}",
-                    top.map(|s| s.width).unwrap_or(0),
-                    top.map(|s| s.height).unwrap_or(0),
-                    bounds.0,
-                    bounds.1,
-                    geometry
-                        .and_then(|g| g.container_origin)
-                        .map(|o| o.0)
-                        .unwrap_or(-1),
-                    geometry
-                        .and_then(|g| g.container_origin)
-                        .map(|o| o.1)
-                        .unwrap_or(-1),
-                    rect.width,
-                    rect.height,
-                    rect.x,
-                    rect.y,
-                    geometry.map(|g| g.drawing_area.0).unwrap_or(0),
-                    geometry.map(|g| g.drawing_area.1).unwrap_or(0),
-                    geometry.and_then(|g| g.origin).map(|o| o.0).unwrap_or(-1),
-                    geometry.and_then(|g| g.origin).map(|o| o.1).unwrap_or(-1),
-                    geometry.map(|g| g.scale).unwrap_or(0),
-                    physical.0,
-                    physical.1,
-                    surface.map(|s| s.0).unwrap_or(0),
-                    surface.map(|s| s.1).unwrap_or(0),
-                    margins.top,
-                    margins.bottom,
-                    margins.start,
-                    margins.end,
-                    revalidate,
+                // Evidence only; emitted on a layout change, never per frame.
+                log_layout_geometry(
+                    top, bounds, geometry, rect, ratio, physical, surface, margins, revalidate,
                 );
             }
             Err(LayoutError::StaleSequence) => {}
@@ -320,18 +304,20 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
     if cad_mode && CAD.with(|cell| cell.borrow().is_none()) {
         let rect = lock(shared).shell.input.last_rect();
         if let Some(rect) = rect {
-            let scale = lock(shared)
-                .window
-                .as_ref()
-                .and_then(|window| window.scale_factor().ok())
-                .unwrap_or(1.0)
-                .max(0.1);
+            // Same aligned geometry as the accepted-layout path (WebView dpr,
+            // legal Wayland buffer): a Wayland buffer must be a multiple of the
+            // integer buffer scale.
+            let (logical, _physical) = cad_surface_geometry(&rect, bridge_buffer_scale());
             let created = CAD_ENV.with(|cell| {
                 let env = cell.borrow();
                 let env = env.as_ref()?;
                 // The surface must report before `CadSession::new` (the open
                 // funnel validates canvas metrics against it).
-                env.surface.set_metrics(surface_metrics(&rect, scale));
+                env.surface.set_metrics(aligned_surface_metrics(
+                    rect,
+                    logical,
+                    f64::from(rect.dpr),
+                ));
                 let platform = HostPlatform {
                     files: env.files.clone(),
                     config_store: env.config.clone(),
@@ -592,12 +578,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
     if cad_mode {
         let (logical, scale, dom_rect, physical) = {
             let rect = lock(shared).shell.input.last_rect();
-            let scale = lock(shared)
-                .window
-                .as_ref()
-                .and_then(|window| window.scale_factor().ok())
-                .unwrap_or(1.0);
-            cad_render_geometry(rect, scale)
+            cad_frame_geometry(rect)
         };
         // Draw one CAD frame through the bound render session (main thread, no
         // shared lock held across the engine/GPU work).
@@ -685,11 +666,17 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             Some(Ok(None)) => {}
             Some(Err(error)) => {
                 let mut state = lock(shared);
-                note_host_error(
-                    &mut state.shell,
-                    HostErrorKind::Present,
-                    format!("cad present failed: {error}"),
-                );
+                let message = format!("cad present failed: {error}");
+                let changed = state
+                    .shell
+                    .cad_host_error
+                    .as_ref()
+                    .is_none_or(|previous| previous.text != message);
+                note_host_error(&mut state.shell, HostErrorKind::Present, message.clone());
+                drop(state);
+                if changed {
+                    eprintln!("[probe] {message}");
+                }
             }
             None => {}
         }

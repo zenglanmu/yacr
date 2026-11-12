@@ -149,7 +149,22 @@ bundle 是未签名的，CI summary 会明确写 `UNSIGNED`。
 
 ## 6. 已知崩溃：NVIDIA + Wayland + 运行时 WebKitGTK 2.54.1 显式同步
 
-- **现象**：真机 5K/`scale=2` NVIDIA Wayland 宿主机上，启动时或窗口移动到 2×（5K）输出时，
+> **2026-11-12 更正（报告者真机 `WAYLAND_DEBUG=1` 日志）**：这次报告的真机崩溃**不是**下面这条
+> WebKit 显式同步缺陷。日志里的协议错误是
+> `wl_display#1.error(wl_surface#49, 2, "Buffer size (3963x1645) must be an integer multiple of the buffer_scale (2).")`
+> —— `wl_surface` error 2 = `invalid_size`，属于 **yacr 自己的 CAD 子表面**：真机 dom 为
+> 1981.6x822.6，`round(1981.6×2)×round(822.6×2)` = **3963×1645**（奇数），而子表面
+> `buffer_scale=2`。协议错误会杀死整条 Wayland 连接，所以不是每帧失败，也不受 WebKit/NVIDIA
+> 变量影响：报告者 A/B 里 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 与
+> `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1` **仍然崩溃**。修复是让 CAD 子表面物理尺寸向上对齐到
+> 整数 buffer scale 的倍数，并由该值反推逻辑尺寸（render target == 子表面），见
+> `docs/handoff.md` 2026-11-12。
+>
+> 下面这条 WebKitGTK 2.54.1（运行时 `libwebkit2gtk-4.1.so.0.24.4`）显式同步缺陷仍然存在
+> （上游 280210 / 324551，2.54.2 已修），但它是**独立的**上游问题；本次真机日志不能证明它，
+> `__NV_DISABLE_EXPLICIT_SYNC=1` 护栏对它的实效仍是 **NOT VERIFIED**，不得写成“真机崩溃已修复”。
+
+- **现象（原归因，未在真机证实；2026-11-12 日志证明本次崩溃不是它）**：真机 5K/`scale=2` NVIDIA Wayland 宿主机上，启动时或窗口移动到 2×（5K）输出时，
   GDK 打印 `Gdk-Message: ... Error 71 (Protocol error) dispatching to Wayland display`
   （中文环境为“协议错误”），客户端被杀、应用退出。
 - **原因**：`org.gnome.Platform//51` 当前携带 **WebKitGTK 2.54.1**（2026-11-05 沙箱内
@@ -157,9 +172,13 @@ bundle 是未签名的，CI summary 会明确写 `UNSIGNED`。
   （`wp_linux_drm_syncobj`），但提交时没有设置 acquire point；Mutter 以
   `wl_display.error(..., 4, no_acquire_point)` 拒绝该提交。宿主 WebKitGTK **2.52.6** 不复现。
   上游：WebKit bug 280210。
-- **立即可用的命令**（优先保留 DMA-BUF/加速）：
+- **立即可用的命令**（优先保留 DMA-BUF/加速；只针对上面这条**独立的** WebKit 缺陷，2026-11-12
+  报告者 A/B 说明它们不改变 yacr 自己的 `invalid_size` 崩溃）：
   - 首选：`flatpak run --env=__NV_DISABLE_EXPLICIT_SYNC=1 io.github.zenglanmu.yacr --open <dwg>`
   - 回退：`flatpak run --env=WEBKIT_DISABLE_DMABUF_RENDERER=1 io.github.zenglanmu.yacr --open <dwg>`
+  - 上游源码路径（WebKitGTK 2.54.x）更干净的回退是 `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1`
+    （`WEBKIT_DISABLE_DMABUF_RENDERER=1` 在 2.54 可能只剩 `<video>` 可见）；**本机未验证**，
+    不作为默认规避。
 - **应用内护栏**：`apps/app-linux/src/nvidia_quirk.rs` 在 GTK/WebKit/EGL 初始化前，仅当
   `resolved == Wayland`、检测到 NVIDIA 驱动（读 `/proc/driver/nvidia/version`，沙箱内可见）且用户
   未设置四个覆盖变量（`WEBKIT_DISABLE_DMABUF_RENDERER`、`__NV_DISABLE_EXPLICIT_SYNC`、

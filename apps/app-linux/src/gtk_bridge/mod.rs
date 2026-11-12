@@ -56,6 +56,8 @@ mod stacking_regression;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use native::wayland_aligned_buffer_size;
+
 use native::NativeHandles;
 
 // Unchanged external surface (`crate::gtk_bridge::…` still resolves).

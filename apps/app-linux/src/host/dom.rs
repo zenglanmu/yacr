@@ -50,6 +50,12 @@ const DOM_DIAG_JS: &str = r#"
       readyState: document.readyState,
       href: location.href,
       title: document.title,
+      // CSS↔device ratio and the CSS viewport. The native CAD host maps the
+      // reported CAD rect (CSS px) to a Wayland surface; when the CSS viewport
+      // is smaller than the GTK allocation (fractional scaling / GTK text
+      // scaling applied as page zoom) these are the numbers that say why.
+      dpr: window.devicePixelRatio,
+      viewport: [window.innerWidth, window.innerHeight],
       bodyTextLen: (document.body && document.body.innerText || '').length,
       buttons: document.querySelectorAll('button').length,
       inputs: document.querySelectorAll('input').length,

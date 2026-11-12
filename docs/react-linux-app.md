@@ -560,7 +560,26 @@ fixture 几何直接透出生产 DOM 视口、无蒙层；About in-DOM 覆盖层
   yacr 侧的 presenter → child `wl_surface` → GTK parent 释放顺序未变（见 ADR 0011）。边界：仅本机
   GNOME/Mutter + P620 + `scale=1` 的 18 次有界运行，**无** ASAN/valgrind 全量退出审计；该子进程 abort
   不改变 yacr 退出状态，但上游同类报告出现过运行期 SIGSEGV，**不得**写成“无害”。
-- **仍未运行 / 未支持**：**DPR>1/分数缩放**（只测 `scale=1`）、GTK **toplevel**
+- **Wayland buffer 尺寸约束（2026-11-12）**：`wl_surface.set_buffer_scale(n)` 要求 buffer 尺寸是 `n`
+  的整数倍；违反是 `wl_surface` error 2（`invalid_size`），并且**杀死整条连接**（不是每帧失败）。
+  `physical_content_size` 在 5K/`scale=2` 上会得到奇数（真机 3963×1645），所以 CAD 子表面物理尺寸
+  现在向上对齐到整数 buffer scale 的倍数，再由该物理尺寸反推逻辑尺寸，使 render target 与子表面
+  仍然相等（单一尺寸权威不变）。
+- **CSS 视口 ≠ GTK 逻辑像素（2026-11-12）**：GTK3 的 `text-scaling-factor`（用户机 = 1.25）会被
+  WebKitGTK 转成 **page zoom**（`fontDPI/96`），因此 `window.devicePixelRatio` 是
+  `GDK 整数 scale × text-scale`（用户 5K：2×1.25 = 2.5），CSS 视口 = GTK 容器 / 1.25。
+  宿主现在用前端上报的 `dpr` 作为 CSS→device 的唯一权威，并用 `dpr / GDK scale` 换算 GTK 边距、
+  drawing-area 守卫与子表面原点；物理尺寸仍按整数 buffer scale 向上对齐。**GTK 边距与守卫必须来自
+  同一个覆盖后的 GTK 矩形**（前缘 `floor`、后缘 `ceil` + 1e-3 逻辑像素 epsilon，尾随 inset 吸收
+  余数）：最近取整会在小数边上留下 1 物理像素缝隙，二次取整则会让 allocation 少 1 px、守卫失败、
+  CAD 全透明（`frames=0`）。本机 `text-scaling-factor` 1.25 的 A/B 已复现并验证
+  （`dom_physical=1853x678`、`native_surface=1853x678`、`margins top=218`、frames 正常）；
+  真机 5K/`scale=2` 复测 **用户报告 PASS（2026-11-12）**，无 agent 抓帧/像素证据。GTK3 只提供
+  整数 scale，
+  WebKitGTK 2.54 不使用 `wp_fractional_scale_v1`，因此**分数显示缩放本身**仍未验收；本修复处理的是
+  page zoom / text scaling 造成的 dpr 差异。详见 `docs/handoff.md` 2026-11-12。
+- **仍未运行 / 未支持**：**DPR>1/分数缩放**（只测 `scale=1`；5K 报告已定位并修代码，但真机复测
+  NOT RUN）、GTK **toplevel**
   替换、GPU 设备丢失、vendor 广度、几何/像素精度、性能/60fps、跨平台、打包、vendor/golden。
   **不得**据此宣称“完整原生 Wayland CAD 支持”。
 - **DOM-on-top 迁移（WP1–WP4）已落地并提交**（2026-10-22/23）：`cad-ui-core` popup/launch/admission、
