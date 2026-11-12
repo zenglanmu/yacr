@@ -1933,3 +1933,50 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `SECURITYOPTIONS` | **部分实现（具名拒绝）**：`securityoptions.unsupported: no security/executable-trust settings model` | 不写库/不升修订/不入历史 |
 | `XCLIP` | **部分实现（具名拒绝）**：`xclip.unsupported: no block/xref clip-boundary model; IMAGECLIP clips raster images only` | 不写库/不升修订/不入历史 |
 | `PASTESPEC` | **部分实现（具名拒绝）**：`pastespec.unsupported: clipboard special-paste (OLE/format selection) is not modeled; use PASTECLIP or PASTEBLOCK` | 不写库/不升修订/不入历史 |
+## Wave 28 边界更新（2026-11-12，官方名收尾：39 条具名拒绝）
+
+> 以下 39 个名字只提供诚实命令路径（`CadError::Unsupported` + 稳定原因串），不是可用功能。
+> 官方 981 条至此**没有未实现的可用命令名**；仅 `MEASURE`/`TRACE` 因同名不同义不计入。
+> 全部 Viewer-legal：不写库、不升修订、不入历史。
+
+| 命令 | 结果 | 明示未实现 / 证据边界 |
+| --- | --- | --- |
+| `OPENFROMWEBMOBILE` | **部分实现（具名拒绝）**：`openfromwebmobile.unsupported: no Autodesk Account (web/mobile) file-exchange model` | 不写库/不升修订/不入历史 |
+| `-PARAMETERS` | **部分实现（具名拒绝）**：`-parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented` | 不写库/不升修订/不入历史 |
+| `PARAMETERS` | **部分实现（具名拒绝）**：`parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented` | 不写库/不升修订/不入历史 |
+| `PARAMETERSCLOSE` | **部分实现（具名拒绝）**：`parametersclose.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented` | 不写库/不升修订/不入历史 |
+| `-PARTIALOAD` | **部分实现（具名拒绝）**：`-partiaload.unsupported: no partial layer-index open/load model` | 不写库/不升修订/不入历史 |
+| `PASTEASHYPERLINK` | **部分实现（具名拒绝）**：`pasteashyperlink.unsupported: no hyperlink storage model` | 不写库/不升修订/不入历史 |
+| `PSOUT` | **部分实现（具名拒绝）**：`psout.unsupported: PostScript output is not implemented; use PLOT for SVG/PDF` | 不写库/不升修订/不入历史 |
+| `QUICKCUI` | **部分实现（具名拒绝）**：`quickcui.unsupported: no CUI (menu-customization) model` | 不写库/不升修订/不入历史 |
+| `REDIR` | **部分实现（具名拒绝）**：`redir.unsupported: no xref/image path-redirection model` | 不写库/不升修订/不入历史 |
+| `REDIRMODE` | **部分实现（具名拒绝）**：`redirmode.unsupported: no xref/image path-redirection model` | 不写库/不升修订/不入历史 |
+| `REFCLOSE` | **部分实现（具名拒绝）**：`refclose.unsupported: no in-place block/xref editing session` | 不写库/不升修订/不入历史 |
+| `-REFEDIT` | **部分实现（具名拒绝）**：`-refedit.unsupported: no in-place block/xref editing session` | 不写库/不升修订/不入历史 |
+| `REFEDIT` | **部分实现（具名拒绝）**：`refedit.unsupported: no in-place block/xref editing session` | 不写库/不升修订/不入历史 |
+| `REFSET` | **部分实现（具名拒绝）**：`refset.unsupported: no in-place block/xref editing session` | 不写库/不升修订/不入历史 |
+| `REPURLS` | **部分实现（具名拒绝）**：`repurls.unsupported: no hyperlink storage model` | 不写库/不升修订/不入历史 |
+| `RESUME` | **部分实现（具名拒绝）**：`resume.unsupported: no script-file engine` | 不写库/不升修订/不入历史 |
+| `RSCRIPT` | **部分实现（具名拒绝）**：`rscript.unsupported: no script-file engine` | 不写库/不升修订/不入历史 |
+| `SCRIPTCALL` | **部分实现（具名拒绝）**：`scriptcall.unsupported: no script-file engine` | 不写库/不升修订/不入历史 |
+| `RTUCS` | **部分实现（具名拒绝）**：`rtucs.unsupported: no dynamic UCS model` | 不写库/不升修订/不入历史 |
+| `SAVEIMG` | **部分实现（具名拒绝）**：`saveimg.unsupported: raster image export is host-owned; this command layer has no file handle (use PLOT PNG)` | 不写库/不升修订/不入历史 |
+| `SAVETOWEBMOBILE` | **部分实现（具名拒绝）**：`savetowebmobile.unsupported: no Autodesk Account (web/mobile) file-exchange model` | 不写库/不升修订/不入历史 |
+| `STANDARDS` | **部分实现（具名拒绝）**：`standards.unsupported: no CAD standards (DWS) model` | 不写库/不升修订/不入历史 |
+| `TRACEBACK` | **部分实现（具名拒绝）**：`traceback.unsupported: no collaboration trace model` | 不写库/不升修订/不入历史 |
+| `TRACEEDIT` | **部分实现（具名拒绝）**：`traceedit.unsupported: no collaboration trace model` | 不写库/不升修订/不入历史 |
+| `TRACEFRONT` | **部分实现（具名拒绝）**：`tracefront.unsupported: no collaboration trace model` | 不写库/不升修订/不入历史 |
+| `TRACEPALETTECLOSE` | **部分实现（具名拒绝）**：`tracepaletteclose.unsupported: no collaboration trace model` | 不写库/不升修订/不入历史 |
+| `TRACEPALETTEOPEN` | **部分实现（具名拒绝）**：`tracepaletteopen.unsupported: no collaboration trace model` | 不写库/不升修订/不入历史 |
+| `TRACEVIEW` | **部分实现（具名拒绝）**：`traceview.unsupported: no collaboration trace model` | 不写库/不升修订/不入历史 |
+| `ULAYERS` | **部分实现（具名拒绝）**：`ulayers.unsupported: no DWF/PDF/DGN underlay layer-display model` | 不写库/不升修订/不入历史 |
+| `VBAMAN` | **部分实现（具名拒绝）**：`vbaman.unsupported: no VBA runtime/IDE` | 不写库/不升修订/不入历史 |
+| `VBAPREF` | **部分实现（具名拒绝）**：`vbapref.unsupported: no VBA runtime/IDE` | 不写库/不升修订/不入历史 |
+| `VBASTMT` | **部分实现（具名拒绝）**：`vbastmt.unsupported: no VBA runtime/IDE` | 不写库/不升修订/不入历史 |
+| `VIEWPLAY` | **部分实现（具名拒绝）**：`viewplay.unsupported: no named-view animation model` | 不写库/不升修订/不入历史 |
+| `VLISP` | **部分实现（具名拒绝）**：`vlisp.unsupported: no AutoLISP runtime/IDE` | 不写库/不升修订/不入历史 |
+| `VSLIDE` | **部分实现（具名拒绝）**：`vslide.unsupported: no slide (.sld) format model` | 不写库/不升修订/不入历史 |
+| `VSSAVE` | **部分实现（具名拒绝）**：`vssave.unsupported: no slide (.sld) format model` | 不写库/不升修订/不入历史 |
+| `WALKFLYSETTINGS` | **部分实现（具名拒绝）**：`walkflysettings.unsupported: no 3D walk/fly navigation model` | 不写库/不升修订/不入历史 |
+| `WEBLOAD` | **部分实现（具名拒绝）**：`webload.unsupported: no JavaScript/web-load runtime` | 不写库/不升修订/不入历史 |
+| `WMFOPTS` | **部分实现（具名拒绝）**：`wmfopts.unsupported: no Windows metafile import model (WMFIN is not implemented)` | 不写库/不升修订/不入历史 |

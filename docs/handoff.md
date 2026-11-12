@@ -1,5 +1,32 @@
 AD
 
+## 2026-11-12 Wave 28：最后 39 个官方命令名（具名拒绝）——官方清单收尾
+
+- **计数**：从 **940 已实现（107 完整 + 833 部分）/ 41 未实现** 推进到
+  **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**。官方 981 条中已无
+  「未实现」的可用命令名；仅 `MEASURE`（本项目是测量入口）与 `TRACE`（本项目是旧式宽线带）
+  按同名不同义不计入，其官方语义仍无对应实现。
+- **39 个具名拒绝**：Parameters Manager（`PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE`）、
+  in-place 参照编辑（`REFEDIT`/`-REFEDIT`/`REFSET`/`REFCLOSE`）、协作追踪
+  （`TRACEBACK`/`TRACEEDIT`/`TRACEFRONT`/`TRACEPALETTEOPEN`/`TRACEPALETTECLOSE`/`TRACEVIEW`）、
+  脚本引擎（`RESUME`/`RSCRIPT`/`SCRIPTCALL`）、VBA/LISP/slide
+  （`VBAMAN`/`VBAPREF`/`VBASTMT`/`VLISP`/`VSLIDE`/`VSSAVE`）、云文件交换
+  （`OPENFROMWEBMOBILE`/`SAVETOWEBMOBILE`）、`PSOUT`/`SAVEIMG`/`WMFOPTS`/`ULAYERS`/
+  `REDIR`/`REDIRMODE`/`REPURLS`/`PASTEASHYPERLINK`/`STANDARDS`/`QUICKCUI`/`RTUCS`/
+  `VIEWPLAY`/`WALKFLYSETTINGS`/`WEBLOAD`/`-PARTIALOAD`。统一
+  `CadError::Unsupported` + `<selector>.unsupported: …` 稳定原因串；Viewer-legal，
+  不写库/不升修订/不入历史。
+- **结构**：仍走数据驱动 `RefusalId`（无需 dispatch 分支）。`REFUSAL_TABLE` 与
+  `RefusalId::ALL` 现为 **327** 行（197 既有 + 91 Wave 27 + 39 Wave 28）；
+  `COMMAND_TABLE` 236 行。`docs/autocad-2026-command-coverage.md` 的 981 行逐条状态、
+  索引表与总计已同步；`docs/compatibility.md` 增加 Wave 28 边界表。
+- **证据**：`cargo fmt --all -- --check`、`cargo check --workspace --all-targets --locked`、
+  `cargo test -p cad-app extended_refusal_names`、`cargo test -p cad-ui-core command_vocabulary`、
+  `check-command-docs.py`、`check-i18n.py`（2899 keys）、`check-file-size.py` 全部通过。
+  本轮无 React 改动。
+- **NOT RUN**：`cargo test --workspace` 全量、wasm check、任何 GUI/GPU/像素/真机；
+  Windows/macOS/Android/Web NOT VERIFIED。本轮 39 个名字都**不是可用功能**，只是诚实拒绝路径。
+
 ## 2026-11-12 Wave 27：100 个命令名（4 只读报告 + 5 chrome 面板 + 91 具名拒绝）
 
 - **计数**：官方 981 条从 **840 已实现（105 完整 + 735 部分）/ 141 未实现** 推进到
