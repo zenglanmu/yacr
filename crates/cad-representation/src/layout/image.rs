@@ -65,7 +65,7 @@ pub fn clip_image_quad_to_rect(
 /// Hodgman against the four axis-aligned half-planes then yields the exact
 /// intersection. An empty result means the polygon lies fully outside the
 /// window — an exact omission.
-pub(super) fn clip_image_polygon_to_rect(
+pub(crate) fn clip_image_polygon_to_rect(
     mut polygon: Vec<ImageVertex>,
     center: [f64; 2],
     half: [f64; 2],
@@ -197,7 +197,7 @@ pub(super) fn image_quad_inside(transform: &Transform3, center: [f64; 2], half: 
 /// edge cross products is a reflex vertex. The renderer fan-triangulates a clip
 /// polygon assuming convexity, so only a convex polygon may be intersected with
 /// the viewport rectangle by half-plane clipping.
-pub(super) fn image_polygon_is_convex(polygon: &[ImageVertex]) -> bool {
+pub(crate) fn image_polygon_is_convex(polygon: &[ImageVertex]) -> bool {
     let n = polygon.len();
     if n < 3 {
         return true;

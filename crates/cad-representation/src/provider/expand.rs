@@ -1,7 +1,9 @@
+use crate::layout::{clip_image_polygon_to_rect, image_polygon_is_convex};
 use crate::*;
 
 use cad_db::LayerScope;
 
+use super::clip::{block_clip_rect, rejection_code, rejection_message, WorldRect};
 use super::default::chord_tessellation_params;
 use super::registry::ProviderRegistry;
 
@@ -33,6 +35,11 @@ impl ProviderRegistry {
         // scale: a `ByBlock` child inherits both.
         parent_linetype: Option<(&LinetypePattern, f32)>,
         global_lt_scale: f64,
+        // The world-space rectangle inherited from a containing INSERT's
+        // `XCLIP` boundary (`None` when nothing clips this branch). A block
+        // member is clipped by its own INSERT's rectangle, intersected with
+        // every ancestor's, exactly like nested viewport cuts.
+        inherited_clip: Option<WorldRect>,
         stack: &mut Vec<BlockId>,
         out: &mut DisplayRepresentation,
     ) -> CadResult<()> {
@@ -125,33 +132,74 @@ impl ProviderRegistry {
                         continue;
                     }
                     let composed = transform.matrix_mul(&insert);
-                    let mut child_path = path.clone();
-                    child_path.0.push(entity.id);
-                    stack.push(block);
-                    // The children inherit this INSERT's **effective** layer, so
-                    // a layer-`0` INSERT passes the outer block's layer one
-                    // level further down (the chained rule).
-                    let child_layers = layers.child_scope(effective_layer);
-                    for child in database.block_entities(block) {
-                        self.expand_entity(
-                            database,
-                            child,
-                            context,
-                            &composed,
-                            &child_path,
-                            depth + 1,
-                            own_alpha,
-                            child_draw_order,
-                            child_layers,
-                            Some(own_color),
-                            Some(own_lineweight),
-                            Some((&own_linetype, linetype_scale)),
-                            global_lt_scale,
-                            stack,
-                            out,
-                        )?;
+                    // The clip is stored on the INSERT in **block-local** space,
+                    // so it is mapped through the same composed transform as the
+                    // children. A nested clip intersects with the inherited one;
+                    // a boundary this build cannot render exactly is reported and
+                    // leaves the branch clipped by its ancestors only.
+                    let mut empty_clip = false;
+                    let child_clip = match attributes.clip.as_ref() {
+                        None => inherited_clip,
+                        Some(stored) => match block_clip_rect(stored, &composed) {
+                            Ok(Some(rect)) => match inherited_clip {
+                                None => Some(rect),
+                                // An empty intersection means nothing of this
+                                // instance can be inside both boundaries: the
+                                // children are omitted exactly (like a fully
+                                // outside line), never drawn unclipped.
+                                Some(outer) => match outer.intersect(&rect) {
+                                    Some(intersection) => Some(intersection),
+                                    None => {
+                                        empty_clip = true;
+                                        None
+                                    }
+                                },
+                            },
+                            Ok(None) => inherited_clip,
+                            Err(rejection) => {
+                                report_xclip(
+                                    out,
+                                    entity,
+                                    rejection_code(rejection),
+                                    rejection_message(rejection),
+                                );
+                                inherited_clip
+                            }
+                        },
+                    };
+                    if !empty_clip {
+                        let mut child_path = path.clone();
+                        child_path.0.push(entity.id);
+                        stack.push(block);
+                        // The children inherit this INSERT's **effective** layer,
+                        // so a layer-`0` INSERT passes the outer block's layer one
+                        // level further down (the chained rule).
+                        let child_layers = layers.child_scope(effective_layer);
+                        // The owning INSERT of the fragment is the entity whose
+                        // `attributes` were read above; every child of this loop
+                        // belongs to the same instance path.
+                        for child in database.block_entities(block) {
+                            self.expand_entity(
+                                database,
+                                child,
+                                context,
+                                &composed,
+                                &child_path,
+                                depth + 1,
+                                own_alpha,
+                                child_draw_order,
+                                child_layers,
+                                Some(own_color),
+                                Some(own_lineweight),
+                                Some((&own_linetype, linetype_scale)),
+                                global_lt_scale,
+                                child_clip,
+                                stack,
+                                out,
+                            )?;
+                        }
+                        stack.pop();
                     }
-                    stack.pop();
                 }
                 DisplayPrimitive::Lines(points) => {
                     emit_polyline(
@@ -170,6 +218,7 @@ impl ProviderRegistry {
                         linetype_unresolved,
                         linetype_scale,
                         draw_order,
+                        inherited_clip,
                         context.packed_line_segments,
                         global_lt_scale,
                         out,
@@ -204,21 +253,74 @@ impl ProviderRegistry {
                     if eligible {
                         let mut source = fragment.source;
                         source.instance = path.clone();
-                        out.fragments.push(DisplayFragment {
-                            source,
-                            geometry_source: attributes.geometry_source.clone(),
-                            precision: Precision::Analytic,
-                            alpha: own_alpha,
-                            color: own_color,
-                            color_unresolved,
-                            lineweight: own_lineweight,
-                            lineweight_unresolved,
-                            linetype: own_linetype.clone(),
-                            linetype_unresolved,
-                            linetype_scale,
-                            draw_order,
-                            primitive: DisplayPrimitive::Conic(transformed),
-                        });
+                        match inherited_clip {
+                            None => out.fragments.push(DisplayFragment {
+                                source,
+                                geometry_source: attributes.geometry_source.clone(),
+                                precision: Precision::Analytic,
+                                alpha: own_alpha,
+                                color: own_color,
+                                color_unresolved,
+                                lineweight: own_lineweight,
+                                lineweight_unresolved,
+                                linetype: own_linetype.clone(),
+                                linetype_unresolved,
+                                linetype_scale,
+                                draw_order,
+                                primitive: DisplayPrimitive::Conic(transformed),
+                            }),
+                            Some(rect) => {
+                                // Analytic slicing: the visible parameter
+                                // intervals stay circles/arcs, never chords.
+                                let (center, half) = rect.center_half();
+                                match crate::layout::clip_conic_to_rect(&transformed, center, half)
+                                {
+                                    Ok(pieces) => {
+                                        for piece in pieces {
+                                            out.fragments.push(DisplayFragment {
+                                                source: source.clone(),
+                                                geometry_source: attributes.geometry_source.clone(),
+                                                precision: Precision::Analytic,
+                                                alpha: own_alpha,
+                                                color: own_color,
+                                                color_unresolved,
+                                                lineweight: own_lineweight,
+                                                lineweight_unresolved,
+                                                linetype: own_linetype.clone(),
+                                                linetype_unresolved,
+                                                linetype_scale,
+                                                draw_order,
+                                                primitive: DisplayPrimitive::Conic(Arc::new(piece)),
+                                            });
+                                        }
+                                    }
+                                    Err(_) => {
+                                        report_xclip(
+                                            out,
+                                            entity,
+                                            "representation.xclip_conic_unclippable",
+                                            "the conic parameters are not finite, so the analytic \
+                                             conic is kept unclipped",
+                                        );
+                                        out.fragments.push(DisplayFragment {
+                                            source,
+                                            geometry_source: attributes.geometry_source.clone(),
+                                            precision: Precision::Analytic,
+                                            alpha: own_alpha,
+                                            color: own_color,
+                                            color_unresolved,
+                                            lineweight: own_lineweight,
+                                            lineweight_unresolved,
+                                            linetype: own_linetype.clone(),
+                                            linetype_unresolved,
+                                            linetype_scale,
+                                            draw_order,
+                                            primitive: DisplayPrimitive::Conic(transformed),
+                                        });
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         let points = conic.tessellate(chord_tessellation_params(context));
                         emit_polyline(
@@ -237,6 +339,7 @@ impl ProviderRegistry {
                             linetype_unresolved,
                             linetype_scale,
                             draw_order,
+                            inherited_clip,
                             context.packed_line_segments,
                             global_lt_scale,
                             out,
@@ -244,28 +347,195 @@ impl ProviderRegistry {
                     }
                 }
                 primitive => {
-                    let mut source = fragment.source;
-                    source.instance = path.clone();
-                    out.fragments.push(DisplayFragment {
-                        source,
-                        geometry_source: attributes.geometry_source.clone(),
-                        precision: precision_for_source(&attributes.geometry_source),
-                        alpha: own_alpha,
-                        color: own_color,
-                        color_unresolved,
-                        lineweight: own_lineweight,
-                        lineweight_unresolved,
-                        linetype: own_linetype.clone(),
-                        linetype_unresolved,
-                        linetype_scale,
-                        draw_order,
-                        primitive: primitive.transformed(transform),
-                    });
+                    // Every primitive is transformed first, so the clip
+                    // rectangle (already in world space) and the geometry share
+                    // one coordinate system.
+                    let primitive = primitive.transformed(transform);
+                    let emit = |primitive: DisplayPrimitive, out: &mut DisplayRepresentation| {
+                        let mut source = fragment.source.clone();
+                        source.instance = path.clone();
+                        out.fragments.push(DisplayFragment {
+                            source,
+                            geometry_source: attributes.geometry_source.clone(),
+                            precision: precision_for_source(&attributes.geometry_source),
+                            alpha: own_alpha,
+                            color: own_color,
+                            color_unresolved,
+                            lineweight: own_lineweight,
+                            lineweight_unresolved,
+                            linetype: own_linetype.clone(),
+                            linetype_unresolved,
+                            linetype_scale,
+                            draw_order,
+                            primitive,
+                        });
+                    };
+                    match inherited_clip {
+                        None => emit(primitive, out),
+                        Some(rect) => {
+                            emit_clipped(entity, primitive, rect, &emit, out);
+                        }
+                    }
                 }
             }
         }
         Ok(())
     }
+}
+
+/// Emit one already-transformed primitive through the rectangle clip.
+///
+/// Lines and conics are handled by their own arms (they keep their analytic or
+/// tessellated representation); this helper covers meshes, images, text and
+/// masks. A primitive with no exact clip path is **kept** and reported, never
+/// dropped or silently drawn as clipped.
+fn emit_clipped(
+    entity: &DbEntity,
+    primitive: DisplayPrimitive,
+    rect: WorldRect,
+    emit: &dyn Fn(DisplayPrimitive, &mut DisplayRepresentation),
+    out: &mut DisplayRepresentation,
+) {
+    let (center, half) = rect.center_half();
+    match primitive {
+        DisplayPrimitive::Mesh(mesh) => match clip_mesh_to_rect(&mesh, center, half) {
+            Ok(Some(clipped)) => emit(DisplayPrimitive::Mesh(Arc::new(clipped)), out),
+            Ok(None) => {}
+            Err(_) => {
+                report_xclip(
+                    out,
+                    entity,
+                    "representation.xclip_mesh_unclippable",
+                    "the mesh cannot be clipped exactly (missing index or non-finite vertex), so \
+                     it is kept unclipped",
+                );
+                emit(DisplayPrimitive::Mesh(mesh), out);
+            }
+        },
+        DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+            match clip_mesh_to_rect(&mesh, center, half) {
+                Ok(Some(clipped)) => {
+                    emit(
+                        DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(clipped)),
+                        out,
+                    );
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    report_xclip(
+                        out,
+                        entity,
+                        "representation.xclip_mesh_unclippable",
+                        "the mesh cannot be clipped exactly (missing index or non-finite \
+                         vertex), so it is kept unclipped",
+                    );
+                    emit(DisplayPrimitive::MeshWithoutEdgeOverlay(mesh), out);
+                }
+            }
+        }
+        DisplayPrimitive::Image {
+            resource,
+            transform,
+            clip,
+            adjust,
+        } => match clip {
+            Some(polygon) => {
+                if image_polygon_is_convex(&polygon) {
+                    let clipped = clip_image_polygon_to_rect(polygon.to_vec(), center, half);
+                    if clipped.len() >= 3 {
+                        emit(
+                            DisplayPrimitive::Image {
+                                resource,
+                                transform,
+                                clip: Some(Arc::from(clipped.into_boxed_slice())),
+                                adjust,
+                            },
+                            out,
+                        );
+                    }
+                } else {
+                    report_xclip(
+                        out,
+                        entity,
+                        "representation.xclip_image_unclippable",
+                        "the image's own clip polygon is not convex, so it cannot be intersected \
+                         with the block clip; the image is kept unclipped",
+                    );
+                    emit(
+                        DisplayPrimitive::Image {
+                            resource,
+                            transform,
+                            clip: Some(polygon),
+                            adjust,
+                        },
+                        out,
+                    );
+                }
+            }
+            None => match clip_image_quad_to_rect(&transform, center, half) {
+                Ok(vertices) if vertices.len() >= 3 => emit(
+                    DisplayPrimitive::Image {
+                        resource,
+                        transform,
+                        clip: Some(Arc::from(vertices.into_boxed_slice())),
+                        adjust,
+                    },
+                    out,
+                ),
+                Ok(_) => {}
+                Err(_) => {
+                    report_xclip(
+                        out,
+                        entity,
+                        "representation.xclip_image_unclippable",
+                        "the image transform maps the quad to a non-finite position, so the \
+                         image is kept unclipped",
+                    );
+                    emit(
+                        DisplayPrimitive::Image {
+                            resource,
+                            transform,
+                            clip: None,
+                            adjust,
+                        },
+                        out,
+                    );
+                }
+            },
+        },
+        // Text needs a shaped font outline and a mask is an erase region with
+        // its own fill rule; neither has an exact rectangle cut here.
+        other => {
+            let name = match &other {
+                DisplayPrimitive::Text { .. } => "text",
+                DisplayPrimitive::Mask { .. } => "mask",
+                _ => "primitive",
+            };
+            report_xclip(
+                out,
+                entity,
+                "representation.xclip_primitive_unsupported",
+                &format!(
+                    "{name} geometry has no exact block-clip path, so it is kept and drawn \
+                     unclipped"
+                ),
+            );
+            emit(other, out);
+        }
+    }
+}
+
+/// Record one `XCLIP` degradation: a `Partial` completeness plus a diagnostic.
+fn report_xclip(out: &mut DisplayRepresentation, entity: &DbEntity, code: &str, message: &str) {
+    out.completeness = weaker_completeness(
+        &out.completeness,
+        &Completeness::Partial(vec![message.to_string()]),
+    );
+    out.diagnostics.push(Diagnostic {
+        object: Some(ObjectId(entity.id.0)),
+        code: code.into(),
+        message: message.to_string(),
+    });
 }
 
 /// The dash pattern a layer's linetype **name** resolves to in this drawing.
@@ -315,6 +585,10 @@ fn emit_polyline(
     // Inherited display order (see `expand_entity`): the INSERT's order for a
     // block's children, the entity's own at the root.
     draw_order: i64,
+    // World rectangle of the containing INSERT's `XCLIP` boundary, if any. The
+    // polyline is clipped **after** dash subdivision so a dash crossing the
+    // boundary is cut exactly and a fully outside dash disappears.
+    clip: Option<WorldRect>,
     packed_configured: bool,
     global_lt_scale: f64,
     out: &mut DisplayRepresentation,
@@ -356,6 +630,10 @@ fn emit_polyline(
             message: format!("linetype dashes fell back to continuous: {reason}"),
         });
     }
+    let runs = match clip {
+        Some(rect) => clip_polyline_runs(runs, rect, packed),
+        None => runs,
+    };
     let runs = if packed {
         // Preserve all segments (including corners) but avoid duplicating paths
         // and styles once per dash. Bound each packed fragment so downstream GPU
@@ -412,4 +690,25 @@ fn emit_polyline(
             },
         });
     }
+}
+
+/// Clip every run of a polyline bundle to `rect`.
+///
+/// A packed bundle is a flat list of independent endpoint pairs (`LineSegments`
+/// semantics), so each pair is clipped on its own; an unpacked run is one
+/// continuous polyline and is clipped as a whole so the surviving pieces stay
+/// joined.
+fn clip_polyline_runs(runs: Vec<Vec<Point3>>, rect: WorldRect, packed: bool) -> Vec<Vec<Point3>> {
+    let (center, half) = rect.center_half();
+    let mut out = Vec::new();
+    for run in runs {
+        if packed {
+            for pair in run.as_chunks::<2>().0 {
+                out.extend(clip_polyline_to_rect(pair, center, half));
+            }
+        } else {
+            out.extend(clip_polyline_to_rect(&run, center, half));
+        }
+    }
+    out
 }

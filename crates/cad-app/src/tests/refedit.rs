@@ -268,6 +268,7 @@ fn refedit_preserves_member_display_attributes() {
         .unwrap();
     }
     let attributes = EntityRenderAttributes {
+        clip: None,
         color: EntityColor::Explicit([12, 34, 56]),
         ..Default::default()
     };

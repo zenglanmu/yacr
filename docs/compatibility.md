@@ -1997,3 +1997,8 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
 | `TEXTALIGN` | 部分实现 | 接受 15 个对齐拼写（原 6 个单轴 + `TOPLEFT/TOPCENTER/TOPRIGHT/MIDDLELEFT/MIDDLECENTER/MIDDLERIGHT/BOTTOMLEFT/BOTTOMCENTER/BOTTOMRIGHT`）；组合模式按选择并集包围盒在两轴对齐；`DISTRIBUTE [X|Y]`（默认 Y）按阅读序做等间隙分布，首尾固定、至少 3 个目标；只移动参照点（内容/字高/旋转/justification 不变），一条事务/一步撤销 | 无交互 base-object + second-point 步骤（用并集包围盒作为确定性替代）；`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 解析后具名拒绝；没有 oblique 选项（AutoCAD 也无）；宽高为 `height × 字符数` 估算 |
+### 2026-11-12 XCLIP（display-only 块参照裁剪）
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `XCLIP` | 部分实现 | `RECT <minx> <miny> <maxx> <maxy>` / `POLY <x1> <y1> ...` / `ON` / `OFF` / `DELETE` / `?`，作用于一个直接可寻址的模型空间 INSERT；边界以**块局部坐标**存于 `EntityRenderAttributes.clip`（一条事务/一步撤销，STYLE 变更失效）；表示层在块展开时按 INSERT 变换映射为世界轴对齐矩形，用既有精确裁剪器裁 LINE/ARC/圆/MESH/IMAGE，嵌套 clip 取交集，完全在外时不产生 fragment | **display-only**：拾取/选择/ZOOM 范围仍按未裁剪几何；无 DXF/DWG 持久化（导入不填、导出丢弃）；仅 0/90/180/270 世界旋转可渲染（其它 `xclip.rotation_not_renderable`）；多边形只存不渲染（`xclip.polygon_not_renderable`）；`INVERT` 拒绝；TEXT/MASK 保留并报告 `representation.xclip_primitive_unsupported`；`XCLIP ?` 只报告当前选中的一个 INSERT |

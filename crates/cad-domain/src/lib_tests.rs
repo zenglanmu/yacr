@@ -169,4 +169,47 @@ mod tests {
             other => panic!("expected Image, got {other:?}"),
         }
     }
+
+    #[test]
+    fn transform3_inverse_round_trips_an_affine_map() {
+        let transform =
+            Transform3::translation(point(5.0, -2.0, 3.0)).matrix_mul(&Transform3::scale(2.0));
+        let inverse = transform.inverse().expect("a non-singular affine map");
+        let p = point(1.5, 7.0, -4.0);
+        let round_trip = inverse.apply_point(transform.apply_point(p));
+        assert!((round_trip.x - p.x).abs() < 1e-12);
+        assert!((round_trip.y - p.y).abs() < 1e-12);
+        assert!((round_trip.z - p.z).abs() < 1e-12);
+
+        assert_eq!(
+            Transform3::identity().inverse(),
+            Some(Transform3::identity())
+        );
+        assert!(
+            Transform3::scale(0.0).inverse().is_none(),
+            "a singular map has no inverse"
+        );
+        let mut non_affine = Transform3::identity().matrix;
+        non_affine[3][0] = 1.0;
+        assert!(
+            Transform3 { matrix: non_affine }.inverse().is_none(),
+            "only affine transforms are invertible here"
+        );
+    }
+
+    #[test]
+    fn block_clip_distinguishes_rectangles_and_switches() {
+        let mut clip = BlockClip {
+            vertices: vec![[0.0, 0.0], [1.0, 2.0]],
+            inside: true,
+            visible: true,
+        };
+        assert!(clip.is_rect());
+        assert!(clip.is_active());
+        clip.visible = false;
+        assert!(!clip.is_active(), "XCLIP OFF stores but does not cut");
+        clip.visible = true;
+        clip.vertices.push([0.5, 3.0]);
+        assert!(!clip.is_rect(), "three points are a polygon");
+    }
 }

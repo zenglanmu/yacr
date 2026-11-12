@@ -566,6 +566,7 @@ export const HOST_NAMES = [
   '-IMAGE',
   'IMAGEATTACH',
   'IMAGECLIP',
+  'XCLIP',
   'IMAGEADJUST',
   '-IMAGEADJUST',
   'IMAGEQUALITY',

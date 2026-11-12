@@ -162,6 +162,7 @@ fn match_app_with_source_and_locked(
 /// (set by the fixture), the other four here.
 fn source_attributes() -> EntityRenderAttributes {
     EntityRenderAttributes {
+        clip: None,
         transparency: EntityTransparency::Explicit(0.5),
         color: EntityColor::Explicit([255, 0, 0]),
         lineweight: EntityLineWeight::Explicit(0.35),
@@ -179,6 +180,7 @@ fn source_attributes() -> EntityRenderAttributes {
 /// separate Settings toggle).
 fn destination_attributes() -> EntityRenderAttributes {
     EntityRenderAttributes {
+        clip: None,
         linetype: EntityLineType::Explicit {
             name: "CONTINUOUS".into(),
             pattern: LinetypePattern::continuous(),
@@ -194,6 +196,7 @@ fn destination_attributes() -> EntityRenderAttributes {
 /// linetype scale.
 fn painted_attributes(scale: f64) -> EntityRenderAttributes {
     EntityRenderAttributes {
+        clip: None,
         transparency: EntityTransparency::Explicit(0.5),
         color: EntityColor::Explicit([255, 0, 0]),
         lineweight: EntityLineWeight::Explicit(0.35),
@@ -450,6 +453,7 @@ fn a_source_value_no_destination_can_accept_is_refused_by_name() {
     // destination could not accept it. The refusal names the source entity **and**
     // the property and keeps the parser's own `property.*` code.
     let (mut app, mut session) = match_app_with_source(EntityRenderAttributes {
+        clip: None,
         transparency: EntityTransparency::Explicit(1.5),
         ..source_attributes()
     });
@@ -597,6 +601,7 @@ fn settings_subset_writes_only_the_toggled_properties() {
     assert_eq!(
         stored_attributes(&app, 2),
         EntityRenderAttributes {
+            clip: None,
             color: EntityColor::Explicit([255, 0, 0]),
             ..destination_attributes()
         }
@@ -649,6 +654,7 @@ fn linetype_scale_is_a_separate_toggle() {
     assert_eq!(
         stored_attributes(&app, 2),
         EntityRenderAttributes {
+            clip: None,
             linetype: EntityLineType::Explicit {
                 name: "CONTINUOUS".into(),
                 pattern: LinetypePattern::continuous(),
@@ -664,6 +670,7 @@ fn linetype_scale_is_a_separate_toggle() {
 #[test]
 fn an_unwritable_untoggled_source_value_does_not_refuse() {
     let (mut app, mut session) = match_app_with_source(EntityRenderAttributes {
+        clip: None,
         transparency: EntityTransparency::Explicit(1.5),
         ..source_attributes()
     });

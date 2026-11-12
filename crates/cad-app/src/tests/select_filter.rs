@@ -98,6 +98,7 @@ fn filter_app() -> (Application, SessionState) {
     b.set_entity_render_attributes(
         LINE_RED,
         EntityRenderAttributes {
+            clip: None,
             color: EntityColor::Explicit([255, 0, 0]),
             lineweight: EntityLineWeight::Explicit(0.50),
             transparency: EntityTransparency::Explicit(0.75),
@@ -116,6 +117,7 @@ fn filter_app() -> (Application, SessionState) {
     b.set_entity_render_attributes(
         LINE_PLAIN,
         EntityRenderAttributes {
+            clip: None,
             lineweight: EntityLineWeight::Explicit(0.25),
             transparency: EntityTransparency::Explicit(1.0),
             ..EntityRenderAttributes::default()
@@ -140,6 +142,7 @@ fn filter_app() -> (Application, SessionState) {
     b.set_entity_render_attributes(
         CIRCLE,
         EntityRenderAttributes {
+            clip: None,
             lineweight: EntityLineWeight::Explicit(0.50),
             transparency: EntityTransparency::Explicit(0.5),
             ..EntityRenderAttributes::default()
@@ -475,6 +478,7 @@ fn selectcount_counts_by_the_template_signature_and_is_read_only() {
             .update_entity_display(
                 EntityId(20),
                 EntityRenderAttributes {
+                    clip: None,
                     color: EntityColor::Explicit([255, 0, 0]),
                     ..EntityRenderAttributes::default()
                 },

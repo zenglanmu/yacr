@@ -100,6 +100,9 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::Tolerance
                 | ExtendedCommandId::MlEdit
                 | ExtendedCommandId::DashMlEdit
+                // XCLIP writes one INSERT display attribute (the block-local
+                // clip boundary) through the display-transaction path.
+                | ExtendedCommandId::Xclip
         );
         assert_eq!(
             variant.requires_work_mode(),

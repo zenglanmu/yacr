@@ -253,6 +253,7 @@ impl Importer for RvtImporter {
                 object,
                 placed.mesh,
                 EntityRenderAttributes {
+                    clip: None,
                     color: placed
                         .color
                         .map_or(EntityColor::ByLayer, EntityColor::Explicit),

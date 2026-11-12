@@ -134,6 +134,9 @@ impl CadSession {
             | IMAGECLIP_SELECTOR
             | IMAGEADJUST_SELECTOR
             | DASH_IMAGEADJUST_SELECTOR => self.image_argument(selector, argument, text),
+            // `XCLIP <RECT|POLY|ON|OFF|DELETE|INVERT|?>`: the block-local clip
+            // boundary/switch rides the existing INSERT selection.
+            super::commands::XCLIP_SELECTOR => self.xclip_argument(argument, text),
             // The table typed forms: `TABLE`/`-TABLE` creation and `TABLEDIT`.
             TABLE_SELECTOR | DASH_TABLE_SELECTOR | TABLEDIT_SELECTOR => {
                 self.table_argument(selector, argument, text)

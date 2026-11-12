@@ -2268,6 +2268,8 @@
   "draw.kind.imageattach.hint": "IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>: place one image; the host resolves the texture from the drawing directory and reloads image resources after this command (unresolved keys appear in the image report).",
   "draw.kind.imageclip": "Clip raster image",
   "draw.kind.imageclip.hint": "IMAGECLIP <minx> <miny> <maxx> <maxy> or OFF: set or clear a pixel-space rectangle on the one selected image; X is along u, Y along v (bottom-up, y=0 is the bottom edge).",
+  "draw.kind.xclip": "Clip block reference (XCLIP)",
+  "draw.kind.xclip.hint": "XCLIP RECT <minx> <miny> <maxx> <maxy>, XCLIP POLY <x1> <y1> <x2> <y2> <x3> <y3> …, ON, OFF, DELETE or ?: a display-only clip on exactly one selected block reference; RECT/POLY coordinates are block-local. Rectangular clips render (rotations limited to 0/90/180/270 degrees); polygon boundaries are stored but not rendered, INVERT is not implemented, nothing is persisted to DXF/DWG, and picking/bounds ignore the clip.",
   "draw.kind.imageadjust": "Adjust image display",
   "draw.kind.imageadjust.hint": "IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR] or RESET: set the display transfer of the one selected image (percentages 0-100; neutral is 50/50/0). An omitted MONO/COLOR keeps the current mode; RESET restores 50/50/0/colour. The renderer applies monochrome, then contrast, then brightness, then fade toward the background (a declared approximation).",
   "draw.kind.dashimageadjust": "Adjust image display, command-line spelling",

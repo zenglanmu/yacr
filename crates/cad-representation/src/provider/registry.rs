@@ -198,6 +198,7 @@ impl ProviderRegistry {
             None,
             None,
             database.linetype_scale(),
+            None,
             &mut stack,
             &mut out,
         )?;

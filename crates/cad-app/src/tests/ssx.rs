@@ -123,6 +123,7 @@ fn app_with(extra: Vec<DbEntity>) -> (Application, SessionState) {
         .set_entity_render_attributes(
             LINE_RED,
             EntityRenderAttributes {
+                clip: None,
                 color: EntityColor::Explicit([255, 0, 0]),
                 linetype: EntityLineType::Explicit {
                     name: "DASHED".into(),

@@ -942,6 +942,10 @@ pub enum CommandPayload {
     /// `ADDSELECTED <x> <y>`: a new entity of the single selected entity's type
     /// and general properties at the typed point (Work-only).
     AddSelected(Box<AddSelectedCommand>),
+    /// `XCLIP RECT|POLY|ON|OFF|DELETE|INVERT|?`: the selected INSERT's
+    /// display-only block clip boundary, stored in block-local space (Work-only);
+    /// contract in [`crate::app_drawing::xclip_edit`].
+    XClip(Box<XClipCommand>),
     /// `MLEDIT` / `-MLEDIT <option> …`: the two-LINE subset of multiline editing
     /// (Work-only). The current selection is the object input: exactly two
     /// `LINE`s. Contract: [`crate::app_drawing::mledit`].

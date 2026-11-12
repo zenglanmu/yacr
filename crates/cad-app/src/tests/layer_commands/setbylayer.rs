@@ -9,6 +9,7 @@ use cad_domain::BlockId;
 
 fn explicit_display() -> EntityRenderAttributes {
     EntityRenderAttributes {
+        clip: None,
         color: EntityColor::Explicit([255, 0, 0]),
         linetype: EntityLineType::Explicit {
             name: "DASHED".into(),
@@ -284,6 +285,7 @@ fn setbylayer_resets_transparency_only_changes() {
         vec![(
             EntityId(1),
             EntityRenderAttributes {
+                clip: None,
                 transparency: EntityTransparency::Explicit(0.5),
                 ..EntityRenderAttributes::default()
             },

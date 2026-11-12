@@ -1,7 +1,8 @@
-//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (323 AutoCAD 2026
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (322 AutoCAD 2026
 //! names: 197 existing + 91 Wave 27 + 39 Wave 28 − 4 graduated to real
 //! commands: `REFEDIT`, `-REFEDIT`, `REFSET` and `REFCLOSE` are now the bounded
-//! in-place block-edit session in [`crate::app_refedit`]).
+//! in-place block-edit session in [`crate::app_refedit`]; `XCLIP` also graduated
+//! to a real display-only block-reference clip).
 //!
 //! Every name in this batch describes a feature with no model or API in this
 //! build: action macros, palettes, OLE/hyperlinks, LISP, 3D lights/materials/
@@ -24,7 +25,7 @@
 macro_rules! refusal_names {
     ($($variant:ident => $name:literal => $reason:literal),+ $(,)?) => {
         /// One named-refusal command (197 existing + 91 Wave 27 + 39 Wave 28 − 4
-        /// graduated to real commands = 323).
+        /// graduated to real commands − `XCLIP` graduated to a real display clip = 322).
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum RefusalId {
             $($variant),+
@@ -336,7 +337,6 @@ refusal_names! {
     Partiaload => "PARTIALOAD" => "partiaload.unsupported: no partial layer-index open/load model",
     Shell => "SHELL" => "shell.unsupported: the host owns process spawning; this command layer has no OS shell",
     Securityoptions => "SECURITYOPTIONS" => "securityoptions.unsupported: no security/executable-trust settings model",
-    Xclip => "XCLIP" => "xclip.unsupported: no block/xref clip-boundary model; IMAGECLIP clips raster images only",
     Pastespec => "PASTESPEC" => "pastespec.unsupported: clipboard special-paste (OLE/format selection) is not modeled; use PASTECLIP or PASTEBLOCK",
     Openfromwebmobile => "OPENFROMWEBMOBILE" => "openfromwebmobile.unsupported: no Autodesk Account (web/mobile) file-exchange model",
     DashParameters => "-PARAMETERS" => "-parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented",

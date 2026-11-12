@@ -27,6 +27,7 @@ mod kernel_mesh;
 mod layer_zero_inheritance;
 mod linetype;
 mod mask;
+mod xclip;
 
 fn entity(id: u128, geometry: SemanticGeometry) -> DbEntity {
     DbEntity {
@@ -108,6 +109,7 @@ fn empty_db() -> DrawingDatabaseBuilder {
 
 fn attrs(transparency: EntityTransparency, source: GeometrySource) -> EntityRenderAttributes {
     EntityRenderAttributes {
+        clip: None,
         transparency,
         color: cad_db::EntityColor::ByLayer,
         lineweight: cad_db::EntityLineWeight::ByLayer,
@@ -122,6 +124,7 @@ fn attrs_styled(
     lineweight: cad_db::EntityLineWeight,
 ) -> EntityRenderAttributes {
     EntityRenderAttributes {
+        clip: None,
         transparency: EntityTransparency::Explicit(1.0),
         color,
         lineweight,
@@ -213,6 +216,7 @@ fn tessellate(exchange: SolidExchange) -> cad_kernel_adapter::TessellationResult
 
 fn attrs_linetype(linetype: EntityLineType) -> EntityRenderAttributes {
     EntityRenderAttributes {
+        clip: None,
         transparency: EntityTransparency::Explicit(1.0),
         color: cad_db::EntityColor::Explicit([255, 255, 255]),
         lineweight: cad_db::EntityLineWeight::ByLayer,
@@ -335,6 +339,7 @@ fn text_entity(id: u128, height: f64) -> DbEntity {
 
 fn annotative_attributes(annotative: bool) -> cad_db::EntityRenderAttributes {
     cad_db::EntityRenderAttributes {
+        clip: None,
         annotative: cad_db::AnnotativeAttributes {
             annotative,
             overrides: Vec::new(),

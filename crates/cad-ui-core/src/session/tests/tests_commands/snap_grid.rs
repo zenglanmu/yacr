@@ -266,6 +266,7 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             // `IMAGEADJUST`/`-IMAGEADJUST`).
             "IMAGEATTACH",
             "IMAGECLIP",
+            "XCLIP",
             "IMAGEADJUST",
             "-IMAGEADJUST",
             // The table typed forms (`TABLE`, `-TABLE`, `TABLEDIT`).

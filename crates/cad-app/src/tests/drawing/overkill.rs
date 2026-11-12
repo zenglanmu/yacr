@@ -254,6 +254,7 @@ fn overkill_ignore_layer_and_ignore_color_are_honoured() {
             .set_entity_render_attributes(
                 EntityId(2),
                 EntityRenderAttributes {
+                    clip: None,
                     color: EntityColor::Explicit([255, 0, 0]),
                     ..EntityRenderAttributes::default()
                 },

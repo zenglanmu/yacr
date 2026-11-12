@@ -86,6 +86,7 @@ fn set_all_by_layer(builder: &mut DrawingDatabaseBuilder, id: u128) {
         .set_entity_render_attributes(
             EntityId(id),
             EntityRenderAttributes {
+                clip: None,
                 transparency: EntityTransparency::ByLayer,
                 color: cad_db::EntityColor::ByLayer,
                 lineweight: EntityLineWeight::ByLayer,

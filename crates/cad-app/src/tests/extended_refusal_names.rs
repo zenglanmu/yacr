@@ -1,5 +1,6 @@
 //! Contract for the data-driven named refusals: 197 + 91 Wave 27 + 39 Wave 28
-//! minus the four graduated in-place block-edit names = 323.
+//! minus the four graduated in-place block-edit names, minus `XCLIP` (now a real
+//! display clip) = 322.
 //!
 //! Every selector in [`RefusalId::ALL`] must reach its stable
 //! `<selector>.unsupported: ...` reason, write nothing, bump no revision,
@@ -18,9 +19,9 @@ fn every_wave17_refusal_refuses_with_its_stable_reason() {
     let before = revision(&app);
     assert_eq!(
         RefusalId::ALL.len(),
-        323,
-        "197 existing + 91 Wave 27 + 39 Wave 28 - 4 graduated to real commands = 323 named \
-         refusals"
+        322,
+        "197 existing + 91 Wave 27 + 39 Wave 28 - 4 graduated to real commands - XCLIP = 322 \
+         named refusals"
     );
     for &name in RefusalId::ALL {
         let ext = ExtendedCommandId::Refusal(name);

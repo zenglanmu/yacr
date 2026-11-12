@@ -52,6 +52,7 @@ fn dashdot() -> LinetypePattern {
 /// (= 60 % transparent).
 fn explicit_attributes(color: [u8; 3]) -> EntityRenderAttributes {
     EntityRenderAttributes {
+        clip: None,
         transparency: EntityTransparency::Explicit(0.4),
         color: EntityColor::Explicit(color),
         lineweight: EntityLineWeight::Explicit(0.35),
@@ -290,6 +291,7 @@ fn a_value_no_grammar_can_express_is_shown_but_not_offered_as_editable() {
     b.set_entity_render_attributes(
         EntityId(1),
         EntityRenderAttributes {
+            clip: None,
             // An out-of-range stored opacity is legal display state (the scene
             // sanitises it) but has no writable form: the row projects
             // `opacity:1.5`, which the grammar refuses.
@@ -342,6 +344,7 @@ fn a_nameless_linetype_pattern_has_no_row_instead_of_a_fabricated_blank() {
     b.set_entity_render_attributes(
         EntityId(1),
         EntityRenderAttributes {
+            clip: None,
             // An imported name-less pattern: no string the grammar accepts.
             linetype: EntityLineType::Explicit {
                 name: String::new(),

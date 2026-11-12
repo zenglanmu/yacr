@@ -460,6 +460,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MINSERT", CommandId::Extended(ExtendedCommandId::MInsert)),
     // SHP2BLK converts the selected SHAPE rows into per-glyph block definitions of their outline polylines plus one INSERT at each original position, deleting the sources in one transaction (Work-only).
     ("SHP2BLK", CommandId::Extended(ExtendedCommandId::Shp2Blk)),
+    // XCLIP stores or toggles a display-only rectangular clip boundary on the one selected INSERT; the boundary is block-local so it follows move/rotate/scale (Work-only, one undo step).
+    ("XCLIP", CommandId::Extended(ExtendedCommandId::Xclip)),
     ("BLOCKREPLACE", CommandId::Extended(ExtendedCommandId::BlockReplace)),
     ("BREPLACE", CommandId::Extended(ExtendedCommandId::BReplace)),
     ("-BREPLACE", CommandId::Extended(ExtendedCommandId::DashBReplace)),
@@ -852,6 +854,9 @@ pub use shape_block::*;
 // The raster-image grammars (`IMAGEATTACH`, `IMAGECLIP`).
 mod image;
 pub use image::*;
+
+mod xclip;
+pub use xclip::*;
 
 mod table;
 pub use table::*;

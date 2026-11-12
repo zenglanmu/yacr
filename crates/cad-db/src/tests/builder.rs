@@ -188,6 +188,7 @@ fn render_attributes_round_trip_through_the_database() {
     b.set_entity_render_attributes(
         EntityId(1),
         EntityRenderAttributes {
+            clip: None,
             transparency: EntityTransparency::Explicit(0.5),
             color: EntityColor::Explicit([10, 20, 30]),
             lineweight: EntityLineWeight::Explicit(0.35),
@@ -233,6 +234,7 @@ fn byblock_color_and_lineweight_stay_symbolic() {
     b.set_entity_render_attributes(
         EntityId(1),
         EntityRenderAttributes {
+            clip: None,
             transparency: EntityTransparency::ByBlock,
             color: EntityColor::ByBlock,
             lineweight: EntityLineWeight::ByBlock,
@@ -369,6 +371,7 @@ fn a_stored_entity_linetype_scale_round_trips_with_either_provenance() {
     // `ByLayer` is the case that used to lose the factor: the variant is
     // symbolic and carries no scale of its own.
     let by_layer = db_with_attributes(EntityRenderAttributes {
+        clip: None,
         linetype: EntityLineType::ByLayer,
         linetype_scale: 2.5,
         ..Default::default()
@@ -385,6 +388,7 @@ fn a_stored_entity_linetype_scale_round_trips_with_either_provenance() {
         scale: 2.5,
     };
     let explicit_db = db_with_attributes(EntityRenderAttributes {
+        clip: None,
         linetype: explicit.clone(),
         linetype_scale: 2.5,
         ..Default::default()
@@ -421,6 +425,7 @@ fn a_non_finite_or_non_positive_linetype_scale_sanitises_to_the_identity() {
     // Storage is verbatim (the fact is preserved as read); sanitising happens
     // where the factor is consumed.
     let db = db_with_attributes(EntityRenderAttributes {
+        clip: None,
         linetype_scale: f64::NAN,
         ..Default::default()
     });

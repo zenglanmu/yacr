@@ -51,6 +51,7 @@ fn set_transparency(
         .set_entity_render_attributes(
             EntityId(id),
             EntityRenderAttributes {
+                clip: None,
                 transparency,
                 ..Default::default()
             },

@@ -265,6 +265,7 @@ fn list_includes_canonical_non_bylayer_display_properties() {
         .set_entity_render_attributes(
             EntityId(1),
             cad_db::EntityRenderAttributes {
+                clip: None,
                 color: cad_db::EntityColor::Explicit([255, 0, 0]),
                 linetype: cad_db::EntityLineType::ByLayer,
                 lineweight: cad_db::EntityLineWeight::Explicit(0.35),
@@ -340,6 +341,7 @@ fn list_reports_paper_and_block_space_with_every_modelled_display_property() {
         .set_entity_render_attributes(
             EntityId(4),
             cad_db::EntityRenderAttributes {
+                clip: None,
                 linetype_scale: 2.5,
                 transparency: cad_db::EntityTransparency::Explicit(0.25),
                 ..Default::default()

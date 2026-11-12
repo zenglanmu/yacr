@@ -318,6 +318,7 @@ fn a_style_colour_update_keeps_the_resident_base_and_recolours_the_batch() {
         .update_entity_display(
             EntityId(2),
             EntityRenderAttributes {
+                clip: None,
                 color: EntityColor::Explicit([255, 0, 0]),
                 ..EntityRenderAttributes::default()
             },
@@ -414,6 +415,7 @@ fn a_style_linetype_change_that_changes_the_footprint_falls_back_to_a_full_rebui
     // makes the linetype change subdivide the entity into more batches — the
     // negative case: STYLE is admissible by mask, the footprint is not.
     let translucent = EntityRenderAttributes {
+        clip: None,
         transparency: EntityTransparency::Explicit(0.5),
         ..EntityRenderAttributes::default()
     };
@@ -449,6 +451,7 @@ fn a_style_linetype_change_that_changes_the_footprint_falls_back_to_a_full_rebui
         .update_entity_display(
             EntityId(1),
             EntityRenderAttributes {
+                clip: None,
                 transparency: EntityTransparency::Explicit(0.5),
                 linetype: EntityLineType::Explicit {
                     name: "DASHED".into(),

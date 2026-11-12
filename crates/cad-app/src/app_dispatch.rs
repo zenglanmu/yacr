@@ -484,6 +484,9 @@ impl Application {
             | ExtendedCommandId::DgnClip
             | ExtendedCommandId::DgnLayers
             | ExtendedCommandId::DgnAdjust => self.extended_w16_refusals(command, ext)?,
+            // XCLIP stores a display-only block-reference clip boundary on one
+            // selected INSERT (Work-only, one transaction / one undo step).
+            ExtendedCommandId::Xclip => self.xclip_edit(session, command)?,
             // Waves 17-24: the data-driven named refusals (see `RefusalId`).
             ExtendedCommandId::Refusal(name) => self.extended_refusal_named(command, name)?,
         };

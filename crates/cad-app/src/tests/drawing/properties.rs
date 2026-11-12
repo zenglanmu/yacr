@@ -273,6 +273,7 @@ fn rewriting_the_displayed_percentage_is_a_no_op() {
     // the stored float need not equal the exact percent-derived float. The no-op
     // rule compares the displayed percentage.
     let attributes = EntityRenderAttributes {
+        clip: None,
         transparency: EntityTransparency::Explicit(1.0 - 140.0 / 255.0),
         ..EntityRenderAttributes::default()
     };
@@ -492,6 +493,7 @@ fn linetype_edit_preserves_an_existing_scale() {
     // The entity's own linetype scale is an entity value, not a table value, so
     // switching the named linetype keeps it.
     let attributes = EntityRenderAttributes {
+        clip: None,
         linetype: EntityLineType::Explicit {
             name: "CONTINUOUS".into(),
             pattern: LinetypePattern::continuous(),

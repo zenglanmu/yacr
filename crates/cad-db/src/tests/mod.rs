@@ -7,6 +7,7 @@ mod block_edit;
 mod bounds;
 mod builder;
 mod drawing;
+mod drawing_clip;
 mod drawing_display;
 mod layer_attributes;
 mod layer_inherit;

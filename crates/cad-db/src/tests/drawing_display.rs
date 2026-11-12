@@ -23,6 +23,7 @@ fn drawing_display_update_is_one_bump_and_a_style_mask() {
     let mut db = writable_db_with_line();
     let before = db.revision();
     let attributes = EntityRenderAttributes {
+        clip: None,
         color: EntityColor::Explicit([1, 2, 3]),
         ..EntityRenderAttributes::default()
     };
@@ -64,6 +65,7 @@ fn drawing_display_update_rollback_leaves_the_attributes_untouched() {
         tx.update_entity_display(
             EntityId(1),
             EntityRenderAttributes {
+                clip: None,
                 color: EntityColor::Explicit([9, 9, 9]),
                 ..EntityRenderAttributes::default()
             },
@@ -160,6 +162,7 @@ fn display_state_db() -> DrawingDatabase {
 fn captured_display_state() -> EntityDisplayState {
     EntityDisplayState {
         attributes: EntityRenderAttributes {
+            clip: None,
             color: EntityColor::Explicit([7, 8, 9]),
             ..EntityRenderAttributes::default()
         },
@@ -242,6 +245,7 @@ fn drawing_display_state_for_an_updated_entity_merges_into_one_update() {
     let before = db.revision();
     let state = EntityDisplayState {
         attributes: EntityRenderAttributes {
+            clip: None,
             color: EntityColor::Explicit([1, 2, 3]),
             ..EntityRenderAttributes::default()
         },
@@ -281,6 +285,7 @@ fn drawing_display_state_naming_a_missing_block_is_refused_unchanged() {
     let before_revision = db.revision();
     let state = EntityDisplayState {
         attributes: EntityRenderAttributes {
+            clip: None,
             color: EntityColor::Explicit([4, 5, 6]),
             ..EntityRenderAttributes::default()
         },
@@ -325,6 +330,7 @@ fn drawing_display_state_naming_a_missing_visibility_state_is_refused_unchanged(
     let before_attributes = db.entity_render_attributes(EntityId(1));
     let state = EntityDisplayState {
         attributes: EntityRenderAttributes {
+            clip: None,
             color: EntityColor::Explicit([4, 5, 6]),
             ..EntityRenderAttributes::default()
         },
@@ -373,6 +379,7 @@ fn drawing_display_state_with_resolvable_references_is_fully_applied() {
     let before_revision = db.revision();
     let state = EntityDisplayState {
         attributes: EntityRenderAttributes {
+            clip: None,
             color: EntityColor::Explicit([3, 2, 1]),
             ..EntityRenderAttributes::default()
         },

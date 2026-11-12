@@ -89,6 +89,7 @@ impl MeshImport {
             object,
             mesh,
             EntityRenderAttributes {
+                clip: None,
                 color,
                 ..Default::default()
             },
@@ -260,6 +261,7 @@ mod tests {
                 object,
                 triangle(),
                 EntityRenderAttributes {
+                    clip: None,
                     color: EntityColor::Explicit([10, 20, 30]),
                     transparency: EntityTransparency::Explicit(0.5),
                     ..Default::default()

@@ -300,6 +300,16 @@ pub struct EntityRenderAttributes {
     pub geometry_source: GeometrySource,
     /// Annotative scaling state (§3.2). Defaults to non-annotative.
     pub annotative: AnnotativeAttributes,
+    /// Display-only block-reference clip boundary (`XCLIP`).
+    ///
+    /// Stored in the **block definition's local space** (see
+    /// [`cad_domain::BlockClip`]) so the clip follows the reference through
+    /// move/rotate/scale; the representation layer maps it into world space at
+    /// expansion time. `None` means "no clip boundary", which is also what an
+    /// `XCLIP DELETE` writes. This carrier is transaction/undo aware: a write
+    /// stages it through `update_entity_display`, so it bumps one revision and
+    /// carries `ChangeMask::STYLE` exactly like the style attributes above.
+    pub clip: Option<BlockClip>,
 }
 
 impl Default for EntityRenderAttributes {
@@ -312,6 +322,7 @@ impl Default for EntityRenderAttributes {
             linetype_scale: 1.0,
             geometry_source: GeometrySource::Analytic,
             annotative: AnnotativeAttributes::default(),
+            clip: None,
         }
     }
 }

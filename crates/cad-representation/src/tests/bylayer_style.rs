@@ -76,6 +76,7 @@ fn set_style(
         .set_entity_render_attributes(
             EntityId(id),
             EntityRenderAttributes {
+                clip: None,
                 transparency: EntityTransparency::Explicit(1.0),
                 color: cad_db::EntityColor::Explicit([1, 2, 3]),
                 lineweight,
@@ -98,6 +99,7 @@ fn set_style_with_scale(
         .set_entity_render_attributes(
             EntityId(id),
             EntityRenderAttributes {
+                clip: None,
                 transparency: EntityTransparency::Explicit(1.0),
                 color: cad_db::EntityColor::Explicit([1, 2, 3]),
                 lineweight: EntityLineWeight::ByLayer,
@@ -314,6 +316,7 @@ fn explicit_linetype_and_lineweight_are_untouched_by_the_layer_table() {
     b.set_entity_render_attributes(
         EntityId(24),
         EntityRenderAttributes {
+            clip: None,
             transparency: EntityTransparency::Explicit(1.0),
             color: cad_db::EntityColor::Explicit([1, 2, 3]),
             lineweight: EntityLineWeight::Explicit(0.13),

@@ -89,6 +89,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // The raster-image and table typed forms; grammars live in the sibling modules.
     IMAGEATTACH_SELECTOR,
     IMAGECLIP_SELECTOR,
+    // `XCLIP RECT|POLY|ON|OFF|DELETE|INVERT|?`: block-local clip grammar in
+    // `commands::xclip`; the command layer owns the semantic refusals.
+    XCLIP_SELECTOR,
     IMAGEADJUST_SELECTOR,
     DASH_IMAGEADJUST_SELECTOR,
     TABLE_SELECTOR,

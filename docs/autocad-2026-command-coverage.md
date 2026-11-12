@@ -1168,7 +1168,7 @@
 | `WMFOUT` | 部分实现 | 具名拒绝（`wmfout.unsupported: Windows metafile export is not implemented`）。 |
 | `XATTACH` | 部分实现 | 具名拒绝（`xattach.unsupported`）：不把外部图纸作为外部参照附着。 |
 | `XBIND` | 部分实现 | 具名拒绝（`xbind.unsupported`）：本构建无外部参照绑定/插入模型。 |
-| `XCLIP` | 部分实现 | 具名拒绝（`xclip.unsupported: no block/xref clip-boundary model; IMAGECLIP clips raster images only`）。 |
+|  `XCLIP` | 部分实现 | 真实（display-only）：`XCLIP RECT|POLY|ON|OFF|DELETE|?`（一个直接可寻址的模型空间 INSERT；RECT/POLY 为块局部坐标）；clip 存于 INSERT 的 `EntityRenderAttributes`（一条事务/一步撤销），表示层在块展开时映射为世界轴对齐矩形并精确裁剪 LINE/ARC/圆/MESH/IMAGE（TEXT/MASK 保留并报告）；矩形仅 0/90/180/270 世界旋转可渲染，其它旋转 `xclip.rotation_not_renderable`；多边形存而报告 `xclip.polygon_not_renderable`，INVERT 拒绝；拾取/范围仍按未裁剪几何；无 DXF/DWG 持久化。 |
 | `XCOMPARE` | 部分实现 | 具名拒绝（`xcompare.unsupported: no xref comparison/diff model`）。 |
 | `XCOMPARECLOSE` | 部分实现 | 具名拒绝（`xcompareclose.unsupported: no xref comparison/diff model`）。 |
 | `XCOMPARERCNEXT` | 部分实现 | 具名拒绝（`xcomparercnext.unsupported: no xref comparison/diff model`）。 |
@@ -2169,7 +2169,7 @@
 | 964 | `XATTACH` | 部分实现 | Attaches selected DWG files as external references (xrefs). | 具名拒绝（`xattach.unsupported`）：本构建不把外部图纸作为外部参照附着。 |
 | 965 | `-XBIND` | 部分实现 | Binds one or more definitions of named objects in an xref to the current drawing. | 具名拒绝（`-xbind.unsupported`）：本构建无外部参照绑定/插入模型。 |
 | 966 | `XBIND` | 部分实现 | Binds one or more definitions of named objects in an xref to the current drawing. | 具名拒绝（`xbind.unsupported`）：本构建无外部参照绑定/插入模型。 |
-| 967 | `XCLIP` | 部分实现 | Crops the display of a selected external reference or block reference to a specified boundary. | 具名拒绝（`xclip.unsupported: no block/xref clip-boundary model; IMAGECLIP clips raster images only`）。 |
+|  967 | `XCLIP` | 部分实现 | Crops the display of a selected external reference or block reference to a specified boundary. | 真实（display-only）：`XCLIP RECT|POLY|ON|OFF|DELETE|?`（一个直接可寻址的模型空间 INSERT；RECT/POLY 为块局部坐标）；clip 存于 INSERT 的 `EntityRenderAttributes`（一条事务/一步撤销），表示层在块展开时映射为世界轴对齐矩形并精确裁剪 LINE/ARC/圆/MESH/IMAGE（TEXT/MASK 保留并报告）；矩形仅 0/90/180/270 世界旋转可渲染，其它旋转 `xclip.rotation_not_renderable`；多边形存而报告 `xclip.polygon_not_renderable`，INVERT 拒绝；拾取/范围仍按未裁剪几何；无 DXF/DWG 持久化。 |
 | 968 | `XCOMPARE` | 部分实现 | Compares an attached xref with the latest state of the referenced drawing file, highlighting the differences with color within revision clouds. | 具名拒绝（`xcompare.unsupported: no xref comparison/diff model`）。 |
 | 969 | `XCOMPARECLOSE` | 部分实现 | Closes the Xref Compare toolbar and ends the comparison. | 具名拒绝（`xcompareclose.unsupported: no xref comparison/diff model`）。 |
 | 970 | `XCOMPARERCNEXT` | 部分实现 | Zooms to the next change set of the xref comparison result. | 具名拒绝（`xcomparercnext.unsupported: no xref comparison/diff model`）。 |

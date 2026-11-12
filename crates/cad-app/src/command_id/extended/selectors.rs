@@ -409,6 +409,7 @@ impl ExtendedCommandId {
             Self::DgnLayers => "DGNLAYERS",
             Self::DgnAdjust => "DGNADJUST",
             Self::Shp2Blk => "SHP2BLK",
+            Self::Xclip => "XCLIP",
             Self::Refusal(name) => name.selector(),
         }
     }
@@ -814,6 +815,7 @@ impl ExtendedCommandId {
         Self::DgnLayers,
         Self::DgnAdjust,
         Self::Shp2Blk,
+        Self::Xclip,
     ];
 }
 
@@ -893,6 +895,9 @@ impl ExtendedCommandId {
                 | Self::Shp2Blk
                 | Self::MInsert
                 | Self::AddSelected
+                // XCLIP writes one INSERT display attribute (the clip
+                // boundary) through the display-transaction path.
+                | Self::Xclip
         )
     }
 }

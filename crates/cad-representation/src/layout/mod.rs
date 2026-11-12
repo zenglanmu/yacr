@@ -72,6 +72,7 @@ pub use clip::{
     clip_conic_to_rect, clip_mesh_to_rect, clip_polygon_to_rect, clip_polyline_to_rect,
 };
 pub use image::clip_image_quad_to_rect;
+pub(crate) use image::{clip_image_polygon_to_rect, image_polygon_is_convex};
 pub use selection::{
     enumerate_layouts, ClipRefusal, LayoutDescriptor, SpaceSelection, ViewportState,
     ViewportUnsupported,

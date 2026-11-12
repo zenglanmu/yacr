@@ -2268,6 +2268,8 @@
   "draw.kind.imageattach.hint": "IMAGEATTACH <文件> <x> <y> <宽_像素> <高_像素> <每像素单位>：放置一个图像；纹理由宿主从图形所在目录解析，并在该命令后重新加载图像资源（未解析的键会出现在图像报告中）。",
   "draw.kind.imageclip": "裁剪栅格图像",
   "draw.kind.imageclip.hint": "IMAGECLIP <minx> <miny> <maxx> <maxy> 或 OFF：为选中的单个图像设置或清除像素空间矩形裁剪；X 沿 u，Y 沿 v（自下而上，y=0 为底边）。",
+  "draw.kind.xclip": "裁剪块参照（XCLIP）",
+  "draw.kind.xclip.hint": "XCLIP RECT <minx> <miny> <maxx> <maxy>、XCLIP POLY <x1> <y1> <x2> <y2> <x3> <y3> …、ON、OFF、DELETE 或 ?：对选中的单个块参照做仅显示裁剪；RECT/POLY 坐标为块内坐标。矩形裁剪可渲染（旋转仅限 0/90/180/270 度）；多边形边界会保存但不渲染，未实现 INVERT，不写入 DXF/DWG，拾取/边界忽略该裁剪。",
   "draw.kind.imageadjust": "调整图像显示",
   "draw.kind.imageadjust.hint": "IMAGEADJUST <亮度> <对比度> <淡出> [MONO|COLOR] 或 RESET：设置选中单个图像的显示传递（百分比 0-100；中性为 50/50/0）。省略 MONO/COLOR 保持当前模式；RESET 恢复 50/50/0/彩色。渲染按 单色 → 对比度 → 亮度 → 向背景淡出 的顺序应用（声明为近似）。",
   "draw.kind.dashimageadjust": "调整图像显示（命令行拼写）",

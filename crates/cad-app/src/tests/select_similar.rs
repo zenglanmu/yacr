@@ -100,6 +100,7 @@ fn two_lines_and_a_circle() -> (Application, SessionState, Vec<EntityId>, Entity
 
 fn base_attributes() -> EntityRenderAttributes {
     EntityRenderAttributes {
+        clip: None,
         transparency: EntityTransparency::Explicit(0.5),
         color: EntityColor::Explicit([255, 0, 0]),
         lineweight: EntityLineWeight::Explicit(0.35),
@@ -236,6 +237,7 @@ fn similar_app() -> (Application, SessionState) {
         (
             line_entity(4, LayerId(0), SpaceId::Model, 3.0),
             EntityRenderAttributes {
+                clip: None,
                 color: EntityColor::Explicit([0, 0, 255]),
                 ..base_attributes()
             },
@@ -243,6 +245,7 @@ fn similar_app() -> (Application, SessionState) {
         (
             line_entity(5, LayerId(0), SpaceId::Model, 4.0),
             EntityRenderAttributes {
+                clip: None,
                 lineweight: EntityLineWeight::Explicit(0.70),
                 ..base_attributes()
             },
@@ -254,6 +257,7 @@ fn similar_app() -> (Application, SessionState) {
         (
             line_entity(7, LayerId(0), SpaceId::Model, 5.0),
             EntityRenderAttributes {
+                clip: None,
                 linetype: EntityLineType::Explicit {
                     name: "CONTINUOUS".into(),
                     pattern: LinetypePattern::continuous(),
@@ -265,6 +269,7 @@ fn similar_app() -> (Application, SessionState) {
         (
             line_entity(8, LayerId(0), SpaceId::Model, 6.0),
             EntityRenderAttributes {
+                clip: None,
                 transparency: EntityTransparency::ByLayer,
                 ..base_attributes()
             },

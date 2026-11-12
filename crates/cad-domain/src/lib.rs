@@ -1,12 +1,14 @@
 //! Platform-independent identities and semantic contracts.
 use std::fmt;
 
+mod block_clip;
 mod dimension;
 mod dimension_synthesis;
 pub mod hatch;
 pub mod hatch_entity;
 mod multileader;
 pub mod table_entity;
+pub use block_clip::BlockClip;
 pub use hatch_entity::*;
 pub use multileader::*;
 pub use table_entity::*;
@@ -766,6 +768,62 @@ impl Transform3 {
         m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
             - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
             + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    }
+
+    /// The affine inverse, or `None` when it does not exist.
+    ///
+    /// Only affine transforms are invertible here: the last matrix row must be
+    /// exactly `[0, 0, 0, 1]`, the 3x3 linear part must be non-singular, and
+    /// every result entry must be finite. A singular, non-affine or non-finite
+    /// transform returns `None` instead of an invented matrix, so callers that
+    /// need a defined inverse (mapping a world point back into a block's own
+    /// space, for example) must handle the refusal explicitly.
+    pub fn inverse(&self) -> Option<Transform3> {
+        let m = &self.matrix;
+        if m[3] != [0.0, 0.0, 0.0, 1.0] {
+            return None;
+        }
+        let (a, b, c) = (m[0][0], m[0][1], m[0][2]);
+        let (d, e, f) = (m[1][0], m[1][1], m[1][2]);
+        let (g, h, i) = (m[2][0], m[2][1], m[2][2]);
+        let det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+        if !det.is_finite() || det.abs() <= 1e-300 {
+            return None;
+        }
+        let inv_det = 1.0 / det;
+        let linear = [
+            [
+                (e * i - f * h) * inv_det,
+                (c * h - b * i) * inv_det,
+                (b * f - c * e) * inv_det,
+            ],
+            [
+                (f * g - d * i) * inv_det,
+                (a * i - c * g) * inv_det,
+                (c * d - a * f) * inv_det,
+            ],
+            [
+                (d * h - e * g) * inv_det,
+                (b * g - a * h) * inv_det,
+                (a * e - b * d) * inv_det,
+            ],
+        ];
+        let translation = [m[0][3], m[1][3], m[2][3]];
+        let mut out = [[0.0f64; 4]; 4];
+        for (row, values) in linear.iter().enumerate() {
+            out[row][..3].copy_from_slice(values);
+            out[row][3] = -(values[0] * translation[0]
+                + values[1] * translation[1]
+                + values[2] * translation[2]);
+        }
+        out[3][3] = 1.0;
+        let inverse = Transform3 { matrix: out };
+        inverse
+            .matrix
+            .iter()
+            .flatten()
+            .all(|value| value.is_finite())
+            .then_some(inverse)
     }
 
     /// Whether the 3x3 linear part is a similarity (uniform scale + rotation +

@@ -408,6 +408,7 @@ fn build_rectangle_with_color() -> (Application, SessionState) {
         .set_entity_render_attributes(
             EntityId(1),
             cad_db::EntityRenderAttributes {
+                clip: None,
                 color: cad_db::EntityColor::Explicit([12, 34, 56]),
                 ..Default::default()
             },

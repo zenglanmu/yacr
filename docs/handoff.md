@@ -1,5 +1,28 @@
 AD
 
+## 2026-11-12 真实 2D 升级（5/5）：XCLIP display-only 块参照裁剪
+
+- **存储**：新增 `cad_domain::BlockClip { vertices, inside, visible }`，挂在
+  `cad_db::EntityRenderAttributes.clip`（已有事务/撤销/`ChangeMask::STYLE`/删除清理）。边界以
+  **块局部坐标**保存，因此 INSERT 移动/旋转/缩放时自动跟随；命令一条事务/一步撤销。
+- **渲染**：`cad-representation` 在块展开时用组合变换把边界映射到世界空间，只接受轴对齐 XY
+  矩形（0/90/180/270 旋转通过），与继承 clip 取交集；LINE/ARC/圆/MESH/IMAGE 用既有精确裁剪器
+  裁剪（圆保持解析），TEXT/MASK 保留并报 `representation.xclip_primitive_unsupported`，降级时
+  `Completeness::Partial` 并出诊断。完全在外的实例不产生 fragment。
+- **命令**：`XCLIP RECT|POLY|ON|OFF|DELETE|?`（一个模型空间 INSERT，Work-only）；`ON/OFF` 只改
+  `visible`，`DELETE` 清空；`POLY` 存而报告不可渲染；`INVERT` 拒绝而不是存成不可见；
+  非轴对齐旋转 `xclip.rotation_not_renderable`；所有拒绝在写入前、零事务。
+- **注册**：`XCLIP` 离开 `RefusalId`（323→322），成为 `ExtendedCommandId::Xclip`；
+  `extended.rs` 的模块文档迁到 `command_id/extended.md`（`include_str!`）以守住 1000 行门禁。
+- **UI**：React 增加 `ARGUMENT_COMMANDS.XCLIP` 语法准入、catalog 行、双语 `draw.kind.xclip*`；
+  不复制语义（排序、世界映射、多边形可渲染性都由宿主判定）。
+- **边界**：display-only——拾取/选择/ZOOM 范围仍看到未裁剪几何；无 DXF/DWG 持久化；多边形只存
+  不渲染；INVERT 未实现；`XCLIP ?` 只报告当前选中的一个 INSERT。
+- **证据**：`cargo test -p cad-db`（258）、`-p cad-representation`（264）、`-p cad-app`（2602）、
+  `-p cad-ui-core`（592）、workspace check/clippy、fmt、`(cd apps/desktop-ui && npm test)`（1560）、
+  `check-i18n`（2901 keys）/`check-command-docs`/`check-file-size`/`check-architecture` 全过。
+  **NOT RUN**：全量 workspace 测试、wasm、GPU/像素/真机。
+
 ## 2026-11-12 真实 2D 升级（4/5）：TEXTALIGN 15 种对齐 + DISTRIBUTE
 
 - **行为**：`TEXTALIGN` 现接受 15 个拼写（原 6 个单轴 + 9 个组合 `TOPLEFT`…`BOTTOMRIGHT`），

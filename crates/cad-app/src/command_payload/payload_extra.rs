@@ -10,12 +10,14 @@ mod hatch_edit_payload;
 mod image;
 mod qdim_payload;
 mod table;
+mod xclip;
 
 pub use dash_layer::*;
 pub use hatch_edit_payload::*;
 pub use image::*;
 pub use qdim_payload::*;
 pub use table::*;
+pub use xclip::*;
 
 mod utility;
 pub use utility::*;

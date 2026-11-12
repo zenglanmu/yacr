@@ -972,6 +972,8 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: '-IMAGE', labelKey: 'draw.kind.dashimage', icon: 'reference', group: 'file' },
   { id: 'IMAGEATTACH', labelKey: 'draw.kind.imageattach', icon: 'reference', group: 'file' },
   { id: 'IMAGECLIP', labelKey: 'draw.kind.imageclip', icon: 'trim', group: 'modify' },
+  // XCLIP (2026-11-12): a display-only block-reference clip, stored in block-local space (Work-only).
+  { id: 'XCLIP', labelKey: 'draw.kind.xclip', icon: 'trim', group: 'modify' },
   { id: 'IMAGEADJUST', labelKey: 'draw.kind.imageadjust', icon: 'settings', group: 'properties' },
   { id: '-IMAGEADJUST', labelKey: 'draw.kind.dashimageadjust', icon: 'settings', group: 'properties' },
   { id: 'IMAGEQUALITY', labelKey: 'draw.kind.imagequality', icon: 'settings', group: 'properties' },
@@ -993,8 +995,6 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'DGNCLIP', labelKey: 'draw.kind.dgnclip', icon: 'trim', group: 'modify' },
   { id: 'DGNLAYERS', labelKey: 'draw.kind.dgnlayers', icon: 'layers', group: 'properties' },
   { id: 'DGNADJUST', labelKey: 'draw.kind.dgnadjust', icon: 'settings', group: 'properties' },
-
-  // The 2026-11-12 interface wave (chrome-owned UI selectors) lives in its own
-  // sibling module. Appended last so no shipped catalog row moves.
+  // The 2026-11-12 interface wave (chrome-owned UI selectors), appended last so no row moves.
   ...INTERFACE_COMMAND_CATALOG,
 ]);

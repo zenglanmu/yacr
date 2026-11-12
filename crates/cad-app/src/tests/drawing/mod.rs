@@ -165,6 +165,7 @@ fn non_default_attributes() -> cad_db::EntityRenderAttributes {
         LinetypePattern,
     };
     EntityRenderAttributes {
+        clip: None,
         transparency: EntityTransparency::Explicit(0.5),
         color: EntityColor::Explicit([10, 20, 30]),
         lineweight: EntityLineWeight::Explicit(0.7),
@@ -325,6 +326,7 @@ mod hatch_stitch;
 mod hatch_utilities;
 mod image;
 mod image_adjust;
+mod xclip;
 // The polygonal IMAGECLIP mode (world-space boundary → pixel-space N-gon).
 mod image_clip_polygon;
 mod insert_block;

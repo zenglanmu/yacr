@@ -46,6 +46,7 @@ mod utility_arguments;
 mod view_arguments;
 mod view_status;
 mod vocabulary_control;
+mod xclip;
 mod xref_status;
 mod zoom_argument;
 mod zoom_object_xp;

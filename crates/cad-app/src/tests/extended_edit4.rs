@@ -410,6 +410,7 @@ fn cdorder_rewrites_draw_order_by_colour_index_in_one_step() {
         b.set_entity_render_attributes(
             EntityId(id),
             EntityRenderAttributes {
+                clip: None,
                 color: EntityColor::Explicit(rgb),
                 ..EntityRenderAttributes::default()
             },
@@ -589,6 +590,7 @@ fn change_and_chprop_move_to_the_current_layer_and_reset_to_bylayer() {
         b.set_entity_render_attributes(
             EntityId(1),
             EntityRenderAttributes {
+                clip: None,
                 color: EntityColor::Explicit([255, 0, 0]),
                 lineweight: EntityLineWeight::Explicit(0.5),
                 ..EntityRenderAttributes::default()

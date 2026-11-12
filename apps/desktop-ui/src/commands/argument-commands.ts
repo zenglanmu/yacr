@@ -688,6 +688,19 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     },
   }),
   /**
+   * `XCLIP RECT <minx> <miny> <maxx> <maxy>`, `XCLIP POLY <x1> <y1> …`,
+   * `XCLIP ON|OFF|DELETE|INVERT` or `XCLIP ?`: the **display-only**
+   * block-reference clip on exactly one selected INSERT. Every coordinate is
+   * **block-local**; the host owns the rectangle ordering
+   * (`xclip.degenerate_rect`), polygon validity, the axis-aligned world mapping
+   * (`xclip.rotation_not_renderable` / `.non_xy_plane`) and the declared render
+   * limits (`INVERT` and polygon boundaries are refused/reported there), so this
+   * predicate checks only the token shape. A bare `XCLIP` stays name-only.
+   */
+  XCLIP: Object.freeze({
+    parse: isXclipArgument,
+  }),
+  /**
    * `IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` or
    * `IMAGEADJUST RESET`: the display transfer of the one selected image. The
    * three percentages are plain integers (the host owns the `0..=100` range and
@@ -878,6 +891,38 @@ function isImageAdjustArgument(argument: string): boolean {
   if (parts.length === 3) return true;
   const word = parts[3].toUpperCase();
   return word === 'MONO' || word === 'COLOR';
+}
+
+/**
+ * `XCLIP RECT <minx> <miny> <maxx> <maxy>`, `XCLIP POLY <x1> <y1> …`,
+ * `XCLIP ON|OFF|DELETE|INVERT` or `XCLIP ?`.
+ *
+ * This is the local **syntax** gate only: `RECT` takes exactly four signed
+ * decimals, `POLY` an even count of at least six signed decimals (three point
+ * pairs), and the four switch words plus `?` stand alone. Coordinates are
+ * block-local; rectangle ordering, polygon validity, the axis-aligned world
+ * mapping and every declared render limit stay the host's
+ * (`xclip.*` refusals), so nothing is rejected or clamped here for semantics.
+ */
+function isXclipArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  const head = parts[0];
+  if (!head) return false;
+  if (head === '?') return parts.length === 1;
+  const word = head.toUpperCase();
+  if (word === 'ON' || word === 'OFF' || word === 'DELETE' || word === 'INVERT') {
+    return parts.length === 1;
+  }
+  const coordinates = parts.slice(1);
+  if (word === 'RECT') {
+    return coordinates.length === 4 && coordinates.every(isSignedDecimal);
+  }
+  if (word === 'POLY') {
+    return coordinates.length >= 6
+      && coordinates.length % 2 === 0
+      && coordinates.every(isSignedDecimal);
+  }
+  return false;
 }
 
 /** The four property words `QSELECT`/`FILTER` accept. */

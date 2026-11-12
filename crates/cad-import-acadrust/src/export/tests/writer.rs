@@ -130,6 +130,7 @@ fn by_layer_transparency_is_written_symbolically() {
         .set_entity_render_attributes(
             EntityId(1),
             EntityRenderAttributes {
+                clip: None,
                 transparency: EntityTransparency::ByLayer,
                 ..Default::default()
             },
@@ -189,6 +190,7 @@ fn transparency_and_linetype_scale_are_written() {
         .set_entity_render_attributes(
             EntityId(1),
             EntityRenderAttributes {
+                clip: None,
                 transparency: EntityTransparency::Explicit(0.5),
                 color: cad_db::EntityColor::ByLayer,
                 lineweight: cad_db::EntityLineWeight::ByLayer,
@@ -255,6 +257,7 @@ fn by_layer_colour_is_written_symbolically_and_keeps_the_layer_colour() {
         .set_entity_render_attributes(
             EntityId(1),
             EntityRenderAttributes {
+                clip: None,
                 transparency: EntityTransparency::Explicit(1.0),
                 color: cad_db::EntityColor::ByLayer,
                 ..Default::default()
@@ -339,6 +342,7 @@ fn by_layer_linetype_and_lineweight_are_written_symbolically() {
         .set_entity_render_attributes(
             EntityId(1),
             EntityRenderAttributes {
+                clip: None,
                 transparency: EntityTransparency::Explicit(1.0),
                 color: cad_db::EntityColor::Explicit([1, 2, 3]),
                 lineweight: cad_db::EntityLineWeight::ByLayer,

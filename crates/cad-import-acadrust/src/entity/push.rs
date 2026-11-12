@@ -191,6 +191,7 @@ impl<'a> ImporterBuilder<'a> {
             });
         }
         let attributes = EntityRenderAttributes {
+            clip: None,
             transparency: resolve_entity_transparency(common.transparency),
             color: resolve_entity_color(common.color),
             lineweight: resolve_entity_lineweight(common.line_weight),
