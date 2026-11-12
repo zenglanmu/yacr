@@ -123,6 +123,69 @@ reason when the status is `failed`.
 that failed stays visible in `faces` with its real status; nothing is silently
 dropped, and nothing is retried on read.
 
+## `cad_api_status`
+
+The plugin / secondary-development API **capability descriptor**: which
+**host-served** operations this build offers, and which it merely reserves. It
+answers one pure value and touches no document, no session state and no host
+resource.
+
+```json
+{
+  "apiVersion": 1,
+  "namespaces": ["ApplicationServices", "DatabaseServices", "EditorInput", "Runtime", "Geometry", "Colors"],
+  "operations": [
+    {
+      "namespace": "DatabaseServices",
+      "operation": "transaction.commit",
+      "status": "pending",
+      "reason": "api.pending: DatabaseServices.transaction.commit"
+    },
+    {
+      "namespace": "EditorInput",
+      "operation": "editor.getPoint",
+      "status": "pending",
+      "reason": "api.pending: EditorInput.editor.getPoint"
+    },
+    {
+      "namespace": "Runtime",
+      "operation": "runtime.registerCommand",
+      "status": "pending",
+      "reason": "api.pending: Runtime.runtime.registerCommand"
+    }
+  ]
+}
+```
+
+The full row list is `crates/cad-ui-core/api/plugin-api.json` — the one authority
+this command parses; do not transcribe it into a client. It has **20 rows, all
+`pending`**: a row exists only for an operation the host answers over the wire, and
+this build answers none. The pure value helpers (`Geometry`, `Colors`) and the
+manifest parser are package features in `packages/cad-plugin-api`, not host
+capabilities, so they have no row and are available regardless of the table.
+
+`status` is one of three stable lowercase labels:
+
+| status | meaning | `reason` |
+| --- | --- | --- |
+| `supported` | implemented in this build | omitted entirely |
+| `pending` | reserved by the contract, not implemented in this build | required, always `api.pending: <Namespace>.<operation>` |
+| `unsupported` | deliberately not offered | required, a named marker |
+
+A `supported` row has no `reason` key at all (not `null`), and a `pending` or
+`unsupported` row always carries one — a capability is never advertised as an
+empty success.
+
+**In this build every row is `pending`** — no `supported` row exists, because no
+host operation is served yet. A client therefore refuses any gated call by name
+(`api.pending: <Namespace>.<operation>`), and pure package features (Geometry,
+Colors, manifest parsing) never consult this table at all. The command advertises
+the contract; it does not implement the document read/write operations.
+
+`cad_api_status` is a `shared` command: `native-below` and `dom-canvas` carriers
+serve the identical answer from the same registry row. It is **not** a CAD
+command — it is absent from `cad_commands` and cannot be typed as a selector.
+
 ## `cad_plugin_*` (vendor plugin registry, native shell only)
 
 These five commands belong to the **shell**, not to a CAD document. They are not

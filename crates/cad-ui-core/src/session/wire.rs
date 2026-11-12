@@ -58,6 +58,7 @@ use super::admission::{
     check_standard_view, check_tool_parameter, check_tool_text, parse_layer_property_write,
     parse_property_write, parse_standard_view, parse_tool_parameter,
 };
+use super::api::CadApiStatus;
 use super::commands::{admissible_names, alias_pairs};
 use super::fonts::CadFonts;
 use super::layers::{CadLayerWrite, CadLayers};
@@ -431,6 +432,15 @@ impl ControlReads for QueueReads<'_> {
 /// `cad_commands`: every selector the router admits (`admissible_names`).
 pub fn commands() -> Vec<&'static str> {
     admissible_names()
+}
+
+/// `cad_api_status`: the plugin API capability descriptor.
+///
+/// Delegates to [`super::api::status`], which parses the one checked-in document
+/// (`api/plugin-api.json`) and pins its version. Pure: no host state, no document
+/// read, identical answer on both transports.
+pub fn api_status() -> Result<CadApiStatus, String> {
+    super::api::status()
 }
 
 /// `cad_command_aliases`: the alias table the chrome offers (`alias_pairs`).
