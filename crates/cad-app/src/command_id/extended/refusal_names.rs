@@ -1,12 +1,15 @@
-//! The Wave 17-24 + Wave 27 named-refusal registry (288 AutoCAD 2026 names:
-//! 197 existing + 91 Wave 27).
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (327 AutoCAD 2026
+//! names: 197 existing + 91 Wave 27 + 39 Wave 28).
 //!
 //! Every name in this batch describes a feature with no model or API in this
 //! build: action macros, palettes, OLE/hyperlinks, LISP, 3D lights/materials/
 //! constraints, data extraction, DWF/DGN underlays, markup and the geographic
 //! toolset. Wave 27 adds the 3D solid/surface/section/drawing-view, point-cloud,
 //! render/visual-style/lighting, cloud share/Docs/sheet-set, partial-open,
-//! shell/security, xref-compare and clipboard special-paste names. Each is
+//! shell/security, xref-compare and clipboard special-paste names. Wave 28 adds
+//! the dynamic-block parameter, partial-layer-load, xref/image redirection and
+//! in-place refedit, script/Resume, trace/collaboration, VBA/VLISP, slide,
+//! walk-fly, DWS standards, WMF and web/mobile file-exchange names. Each is
 //! admitted by the vocabulary and then refused with
 //! `CadError::Unsupported` carrying the stable reason below. A refusal writes
 //! nothing, bumps no revision and records no history entry: it is an honest
@@ -18,7 +21,7 @@
 
 macro_rules! refusal_names {
     ($($variant:ident => $name:literal => $reason:literal),+ $(,)?) => {
-        /// One named-refusal command (197 existing + 91 Wave 27 = 288).
+        /// One named-refusal command (197 existing + 91 Wave 27 + 39 Wave 28 = 327).
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum RefusalId {
             $($variant),+
@@ -35,7 +38,7 @@ macro_rules! refusal_names {
                 match self { $(Self::$variant => $reason),+ }
             }
 
-            /// Every named refusal (Wave 17-24 then Wave 27), in declaration order.
+            /// Every named refusal (Wave 17-24, Wave 27, then Wave 28), in declaration order.
             pub const ALL: &'static [RefusalId] = &[$(RefusalId::$variant),+];
         }
     };
@@ -331,4 +334,43 @@ refusal_names! {
     Securityoptions => "SECURITYOPTIONS" => "securityoptions.unsupported: no security/executable-trust settings model",
     Xclip => "XCLIP" => "xclip.unsupported: no block/xref clip-boundary model; IMAGECLIP clips raster images only",
     Pastespec => "PASTESPEC" => "pastespec.unsupported: clipboard special-paste (OLE/format selection) is not modeled; use PASTECLIP or PASTEBLOCK",
+    Openfromwebmobile => "OPENFROMWEBMOBILE" => "openfromwebmobile.unsupported: no Autodesk Account (web/mobile) file-exchange model",
+    DashParameters => "-PARAMETERS" => "-parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented",
+    Parameters => "PARAMETERS" => "parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented",
+    Parametersclose => "PARAMETERSCLOSE" => "parametersclose.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented",
+    DashPartiaload => "-PARTIALOAD" => "-partiaload.unsupported: no partial layer-index open/load model",
+    Pasteashyperlink => "PASTEASHYPERLINK" => "pasteashyperlink.unsupported: no hyperlink storage model",
+    Psout => "PSOUT" => "psout.unsupported: PostScript output is not implemented; use PLOT for SVG/PDF",
+    Quickcui => "QUICKCUI" => "quickcui.unsupported: no CUI (menu-customization) model",
+    Redir => "REDIR" => "redir.unsupported: no xref/image path-redirection model",
+    Redirmode => "REDIRMODE" => "redirmode.unsupported: no xref/image path-redirection model",
+    Refclose => "REFCLOSE" => "refclose.unsupported: no in-place block/xref editing session",
+    DashRefedit => "-REFEDIT" => "-refedit.unsupported: no in-place block/xref editing session",
+    Refedit => "REFEDIT" => "refedit.unsupported: no in-place block/xref editing session",
+    Refset => "REFSET" => "refset.unsupported: no in-place block/xref editing session",
+    Repurls => "REPURLS" => "repurls.unsupported: no hyperlink storage model",
+    Resume => "RESUME" => "resume.unsupported: no script-file engine",
+    Rscript => "RSCRIPT" => "rscript.unsupported: no script-file engine",
+    Scriptcall => "SCRIPTCALL" => "scriptcall.unsupported: no script-file engine",
+    Rtucs => "RTUCS" => "rtucs.unsupported: no dynamic UCS model",
+    Saveimg => "SAVEIMG" => "saveimg.unsupported: raster image export is host-owned; this command layer has no file handle (use PLOT PNG)",
+    Savetowebmobile => "SAVETOWEBMOBILE" => "savetowebmobile.unsupported: no Autodesk Account (web/mobile) file-exchange model",
+    Standards => "STANDARDS" => "standards.unsupported: no CAD standards (DWS) model",
+    Traceback => "TRACEBACK" => "traceback.unsupported: no collaboration trace model",
+    Traceedit => "TRACEEDIT" => "traceedit.unsupported: no collaboration trace model",
+    Tracefront => "TRACEFRONT" => "tracefront.unsupported: no collaboration trace model",
+    Tracepaletteclose => "TRACEPALETTECLOSE" => "tracepaletteclose.unsupported: no collaboration trace model",
+    Tracepaletteopen => "TRACEPALETTEOPEN" => "tracepaletteopen.unsupported: no collaboration trace model",
+    Traceview => "TRACEVIEW" => "traceview.unsupported: no collaboration trace model",
+    Ulayers => "ULAYERS" => "ulayers.unsupported: no DWF/PDF/DGN underlay layer-display model",
+    Vbaman => "VBAMAN" => "vbaman.unsupported: no VBA runtime/IDE",
+    Vbapref => "VBAPREF" => "vbapref.unsupported: no VBA runtime/IDE",
+    Vbastmt => "VBASTMT" => "vbastmt.unsupported: no VBA runtime/IDE",
+    Viewplay => "VIEWPLAY" => "viewplay.unsupported: no named-view animation model",
+    Vlisp => "VLISP" => "vlisp.unsupported: no AutoLISP runtime/IDE",
+    Vslide => "VSLIDE" => "vslide.unsupported: no slide (.sld) format model",
+    Vssave => "VSSAVE" => "vssave.unsupported: no slide (.sld) format model",
+    Walkflysettings => "WALKFLYSETTINGS" => "walkflysettings.unsupported: no 3D walk/fly navigation model",
+    Webload => "WEBLOAD" => "webload.unsupported: no JavaScript/web-load runtime",
+    Wmfopts => "WMFOPTS" => "wmfopts.unsupported: no Windows metafile import model (WMFIN is not implemented)",
 }

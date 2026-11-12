@@ -1,4 +1,4 @@
-//! Contract for the data-driven named refusals: 197 existing + 91 Wave 27 = 288.
+//! Contract for the data-driven named refusals: 288 Wave 27 + 39 Wave 28 = 327.
 //!
 //! Every selector in [`RefusalId::ALL`] must reach its stable
 //! `<selector>.unsupported: ...` reason, write nothing, bump no revision,
@@ -17,8 +17,8 @@ fn every_wave17_refusal_refuses_with_its_stable_reason() {
     let before = revision(&app);
     assert_eq!(
         RefusalId::ALL.len(),
-        288,
-        "197 existing + 91 Wave 27 = 288 named refusals"
+        327,
+        "288 Wave 27 + 39 Wave 28 = 327 named refusals"
     );
     for &name in RefusalId::ALL {
         let ext = ExtendedCommandId::Refusal(name);
