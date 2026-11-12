@@ -35,6 +35,10 @@
   `FONT_CACHE_DIR`（默认 `${XDG_CACHE_HOME:-$HOME/.cache}/yacr/fonts`），重复打包与两个 Web
   bundle 复用同一份；`FORCE=1` 强制刷新，显式空值关闭缓存。Web 运行时的同源 `fonts/`
   就是 `scripts/deploy-cloudflare-pages.sh` 用该脚本组装并上传到项目 Pages CDN 的包。
+  `cad-app` 的 SHX 契约测试（`TXTEXP`/`SHP2BLK`）**运行时**才从上述生成目录或缓存读取
+  `complex.shx`（不再 `include_bytes!`，否则 clean clone 无法编译）；缺面时显式跳过并打印
+  staging 命令。`core-quality` 只做编译、不跑 Rust 测试，因此不在 CI 下载字体；要在本地跑
+  这两条 SHX 契约，先执行 `FONTS=complex.shx bash scripts/fetch-fonts.sh apps/app-android/font-assets`。
 - QCAD 的编译字体 `.cxf` 未提交也不支持；引擎只处理 SHX 与 sfnt/WOFF1。
 
 ## 各宿主的加载路径

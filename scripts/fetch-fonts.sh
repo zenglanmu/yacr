@@ -22,7 +22,7 @@
 #   FONT_FALLBACK_BASE_URL  second source tried when the primary fails
 #                           (default: raw.githubusercontent.com; reachable from
 #                           GitHub Actions, where jsDelivr throttles shared IPs)
-#   FONT_RETRIES            attempts per source before falling back (default: 3)
+#   FONT_RETRIES            attempts per source before falling back (default: 5)
 #   FONTS                   optional space-separated subset (same as positional args)
 #   FORCE                   1 to re-download files that already exist (and refresh
 #                           the cache entry)
@@ -43,7 +43,7 @@ DEST="${1:?usage: scripts/fetch-fonts.sh <DEST> [FONTS...]}"
 shift || true
 export FONT_BASE_URL="${FONT_BASE_URL:-https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts}"
 export FONT_FALLBACK_BASE_URL="${FONT_FALLBACK_BASE_URL:-https://raw.githubusercontent.com/mlightcad/cad-data/main/fonts}"
-export FONT_RETRIES="${FONT_RETRIES:-3}"
+export FONT_RETRIES="${FONT_RETRIES:-5}"
 # `-` (not `:-`): an explicitly empty FONT_CACHE_DIR disables the shared cache.
 FONT_CACHE_DIR="${FONT_CACHE_DIR-${XDG_CACHE_HOME:-$HOME/.cache}/yacr/fonts}"
 export FONT_CACHE_DIR
@@ -71,6 +71,7 @@ mkdir -p "$DEST"
 import concurrent.futures
 import json
 import os
+import random
 import sys
 import tempfile
 import time
@@ -104,11 +105,19 @@ def fetch(path: str):
         for attempt in range(retries):
             try:
                 with urllib.request.urlopen(request, timeout=60) as response:
-                    return response.read(), base
+                    blob = response.read()
+                if not blob:
+                    # A zero-length body is worse than a loud failure (an empty
+                    # cached face would be reused forever), so fail this attempt:
+                    # the retry and the fallback source still get their chance.
+                    raise RuntimeError("empty response body")
+                return blob, base
             except Exception as exc:  # noqa: BLE001 - reported below, never hidden
                 errors.append(f"{url}: {exc}")
                 if attempt + 1 < retries:
-                    time.sleep(0.5 * (2**attempt))
+                    # Exponential backoff plus jitter so parallel workers do not
+                    # retry in lockstep against a throttling shared IP.
+                    time.sleep(0.5 * (2**attempt) + random.uniform(0, 0.5))
     raise RuntimeError("; ".join(errors))
 
 
@@ -188,7 +197,9 @@ sources = {}
 from_cache = 0
 already_staged = 0
 downloaded = 0
-with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+# Six workers (not a dozen): a wider burst from one runner IP trips the CDN's
+# per-IP throttling and turns a healthy catalogue into retry noise.
+with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
     for name, size, status, detail in pool.map(download, entries):
         total += size
         if status == "FAIL":

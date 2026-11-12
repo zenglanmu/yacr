@@ -216,9 +216,12 @@ fn spacetrans_refuses_model_space_and_an_unresolvable_viewport() {
 // TXTEXP
 // ---------------------------------------------------------------------------
 
-/// The repository's open font, installed once per process into the TXTEXP outline
-/// hook (the carrier's role in production). No fallback chain is set, so a text
-/// whose font key has no face really is unavailable.
+/// The repository's committed open font plus, when this checkout staged it, the
+/// third-party `complex.shx` face, installed once per process into the TXTEXP
+/// outline hook (the carrier's role in production). `complex.shx` is not
+/// committed (`docs/fonts.md`), so it is read at run time; without it the SHX
+/// case skips loudly instead of failing to compile. No fallback chain is set, so
+/// a text whose font key has no face really is unavailable.
 fn outline_fonts() {
     let mut engine = FontEngine::new();
     engine
@@ -229,16 +232,22 @@ fn outline_fonts() {
         .unwrap();
     // An SHX shape font draws pen linework, not filled contours, so it exercises
     // the open-stroke arm of the same path.
-    engine
-        .register(
-            "complex.shx",
-            Arc::from(
-                include_bytes!("../../../../apps/app-android/font-assets/complex.shx").as_slice(),
-            ),
-        )
-        .unwrap();
+    match super::font_fixture::shx_face("complex.shx") {
+        Some(face) => {
+            engine
+                .register("complex.shx", Arc::from(face.as_slice()))
+                .unwrap();
+        }
+        None => eprintln!("{}", super::font_fixture::missing_face_hint("complex.shx")),
+    }
     // The first installation wins; every TXTEXP test installs the same engine.
     install_outline_fonts(Arc::new(engine));
+}
+
+/// Whether the installed hook really carries the SHX face the SHX case needs.
+fn shx_font_available() -> bool {
+    crate::app_extended_w9_reports::text_explode::outline_fonts()
+        .is_some_and(|fonts| fonts.contains("complex.shx"))
 }
 
 fn text_entity(id: u128, content: &str, font: Option<&str>, type_key: &str) -> DbEntity {
@@ -472,6 +481,13 @@ fn txtexp_is_work_only() {
 #[test]
 fn txtexp_keeps_shx_pen_strokes_as_open_polylines() {
     outline_fonts();
+    if !shx_font_available() {
+        eprintln!(
+            "txtexp_keeps_shx_pen_strokes_as_open_polylines: {}",
+            super::font_fixture::missing_face_hint("complex.shx")
+        );
+        return;
+    }
     let (mut app, mut session) =
         app_with(vec![text_entity(1, "HI", Some("complex.shx"), "AcDbText")]);
     select(&mut session, &[1]);

@@ -6,10 +6,13 @@
 //! selected rows into per-glyph outline block definitions plus one INSERT at each
 //! original position, deleting the sources in one transaction.
 //!
-//! The outline engine is the process-wide font hook `TXTEXP` uses. The tests
-//! install the repository's open faces (`osifont.ttf` + `complex.shx`, the same
-//! engine `tests::extended_w9_reports` installs, because the first installation
-//! wins) and address a shape code that `complex.shx` really contains.
+//! The outline engine is the process-wide font hook `TXTEXP` uses. The committed
+//! `osifont.ttf` is always registered; `complex.shx` is third-party and not
+//! committed (see `docs/fonts.md`), so it is read at run time through
+//! `tests::font_fixture` and a checkout that never staged it skips the SHX cases
+//! with an explicit message. Both modules install the same face set because the
+//! first installation wins, and the SHX cases address a code `complex.shx`
+//! really contains.
 
 use super::*;
 use crate::command_payload::ShapeCommand;
@@ -27,15 +30,21 @@ fn install_outline_engine() {
             Arc::from(include_bytes!("../../../../../fonts/osifont.ttf").as_slice()),
         )
         .unwrap();
-    engine
-        .register(
-            "complex.shx",
-            Arc::from(
-                include_bytes!("../../../../../apps/app-android/font-assets/complex.shx")
-                    .as_slice(),
-            ),
-        )
-        .unwrap();
+    match crate::tests::font_fixture::shx_face("complex.shx") {
+        Some(face) => {
+            engine
+                .register("complex.shx", Arc::from(face.as_slice()))
+                .unwrap();
+        }
+        None => {
+            // Never silent: the osifont-only engine is installed and the skip is
+            // printed with the staging command.
+            eprintln!(
+                "{}",
+                crate::tests::font_fixture::missing_face_hint("complex.shx")
+            );
+        }
+    }
     let _ = crate::app_extended_w9_reports::text_explode::install_outline_fonts(Arc::new(engine));
 }
 
@@ -309,6 +318,10 @@ fn shp2blk_defines_one_outline_block_and_places_every_insert() {
     if !shape_font_available() {
         // No SHX face in the process-wide hook: the command's honest
         // `shp2blk.font_unavailable` path is the only reachable one.
+        eprintln!(
+            "shp2blk_defines_one_outline_block_and_places_every_insert: {}",
+            crate::tests::font_fixture::missing_face_hint("complex.shx")
+        );
         let (mut app, mut session) = shape_app(Some("complex.shx"));
         let id = insert_shape(
             &mut app,
@@ -415,6 +428,10 @@ fn shp2blk_defines_one_outline_block_and_places_every_insert() {
 fn shp2blk_generated_names_do_not_overwrite_an_existing_block() {
     install_outline_engine();
     if !shape_font_available() {
+        eprintln!(
+            "shp2blk_generated_names_do_not_overwrite_an_existing_block: {}",
+            crate::tests::font_fixture::missing_face_hint("complex.shx")
+        );
         return;
     }
     let (mut app, mut session) = shape_app(Some("complex.shx"));

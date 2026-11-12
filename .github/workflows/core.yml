@@ -125,6 +125,11 @@ jobs:
         # scripts/test-web-pixels.mjs is the one web-era test kept because it is a
         # pure node zlib PNG decoder with no web-shell/wasm/browser dependency.
         run: node --test scripts/test-web-pixels.mjs
+      # No font download here: core-quality only compiles (`cargo check
+      # --all-targets`), it does not run Rust tests. The cad-app SHX contract
+      # tests resolve `complex.shx` at run time and skip loudly when this
+      # checkout never staged it (see crates/cad-app/src/tests/font_fixture.rs),
+      # so a clean clone compiles without network access.
       - name: Workspace host debug compilation (including test code)
         run: cargo check --workspace --all-targets --locked
 
