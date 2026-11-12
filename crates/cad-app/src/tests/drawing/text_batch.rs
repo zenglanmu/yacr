@@ -46,6 +46,7 @@ fn text_entity(
             h_align,
             v_align,
             wrap_width: None,
+            width_factor: 1.0,
         },
         draw_order: order,
     }

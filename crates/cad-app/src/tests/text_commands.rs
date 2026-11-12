@@ -43,6 +43,7 @@ fn text_entity(
             h_align: TextAlignH::Center,
             v_align: TextAlignV::Middle,
             wrap_width: None,
+            width_factor: 1.0,
         },
         draw_order: order,
     }
@@ -265,6 +266,7 @@ fn torient_most_readable_changes_only_rotation_and_is_one_undo_step() {
         h_align,
         v_align,
         wrap_width,
+        width_factor,
     } = &after.geometry
     else {
         panic!("expected Text");
@@ -279,6 +281,7 @@ fn torient_most_readable_changes_only_rotation_and_is_one_undo_step() {
         h_align: before_h,
         v_align: before_v,
         wrap_width: before_wrap,
+        width_factor: before_factor,
     } = &before.geometry
     else {
         panic!("expected Text");
@@ -292,6 +295,7 @@ fn torient_most_readable_changes_only_rotation_and_is_one_undo_step() {
     assert_eq!(h_align, before_h);
     assert_eq!(v_align, before_v);
     assert_eq!(wrap_width, before_wrap);
+    assert_eq!(width_factor, before_factor, "the width factor is untouched");
     assert_eq!(after.layer, LayerId(7), "layer is preserved");
     assert_eq!(after.draw_order, 4, "draw order is preserved");
     assert_eq!(after.object.type_key, "AcDbText");
@@ -730,6 +734,7 @@ fn txt2mtxt_sorts_top_down_then_left_right_and_joins_raw_strings() {
         h_align,
         v_align,
         wrap_width,
+        width_factor,
     } = &combined.geometry
     else {
         panic!("expected Text geometry");
@@ -748,6 +753,7 @@ fn txt2mtxt_sorts_top_down_then_left_right_and_joins_raw_strings() {
         h_align: b_h,
         v_align: b_v,
         wrap_width: b_wrap,
+        width_factor: b_factor,
         ..
     } = &b.geometry
     else {
@@ -761,6 +767,7 @@ fn txt2mtxt_sorts_top_down_then_left_right_and_joins_raw_strings() {
     assert_eq!(h_align, b_h);
     assert_eq!(v_align, b_v);
     assert_eq!(wrap_width, b_wrap, "None stays None; no width is invented");
+    assert_eq!(width_factor, b_factor, "the neutral factor is preserved");
     assert_eq!(combined.layer, LayerId(7), "first source's layer");
     assert_eq!(combined.draw_order, 7, "first source's draw order");
     // All sources are gone, in the same transaction.

@@ -129,6 +129,7 @@ fn create_mtext_stores_one_acdbmtext_with_paragraph_breaks_in_one_transaction() 
             h_align,
             v_align,
             wrap_width,
+            width_factor,
         } => {
             assert_eq!(text, "a\\Pb", "`\\n` is stored as `\\P`");
             assert_eq!(*position, p3(1.0, 2.0, 0.0));
@@ -137,6 +138,7 @@ fn create_mtext_stores_one_acdbmtext_with_paragraph_breaks_in_one_transaction() 
             assert_eq!(*h_align, TextAlignH::Center);
             assert_eq!(*v_align, TextAlignV::Middle);
             assert_eq!(*wrap_width, Some(WIDTH), "the width is the wrap boundary");
+            assert_eq!(*width_factor, 1.0, "a new MTEXT is not stretched");
             // No STYLE table entry: the documented `StyleId(0)` fallback and no
             // fabricated font key.
             assert_eq!(*style, StyleId(0));

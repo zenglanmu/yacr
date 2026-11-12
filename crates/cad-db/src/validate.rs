@@ -43,6 +43,11 @@ pub const REASON_SPLINE_WEIGHT_COUNT: &str = "spline.weight_count";
 /// parameter domain is not a subdivision of one interval.
 pub const REASON_SPLINE_KNOT_ORDER: &str = "spline.knot_order";
 
+/// Stable reason code: a text width factor is not finite and strictly positive.
+/// Layout multiplies glyph advances by the stored factor, so zero, negative and
+/// non-finite values cannot mean "normal" and must not be stored silently.
+pub const REASON_TEXT_WIDTH_FACTOR: &str = "text.width_factor";
+
 /// Validate a [`SemanticGeometry`] before it is written.
 ///
 /// Rejects non-finite coordinates and degenerate/unsupported-for-write cases:
@@ -285,6 +290,7 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             height,
             rotation,
             wrap_width,
+            width_factor,
             ..
         } => {
             if !finite(*position) {
@@ -295,6 +301,14 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             }
             if !rotation.is_finite() {
                 return Err(degenerate("text rotation is non-finite"));
+            }
+            // The width factor multiplies every glyph advance and glyph x, so a
+            // zero/negative/non-finite value is not a representable stretch.
+            if !width_factor.is_finite() || *width_factor <= 0.0 {
+                return Err(degenerate_reason(
+                    REASON_TEXT_WIDTH_FACTOR,
+                    &format!("text width factor must be positive and finite, got {width_factor}"),
+                ));
             }
             // A stored boundary must be usable: zero/negative/non-finite would
             // silently degrade to "no wrap" at layout, so reject it here instead.
@@ -775,12 +789,40 @@ mod tests {
             h_align: cad_domain::TextAlignH::Left,
             v_align: cad_domain::TextAlignV::Baseline,
             wrap_width,
+            width_factor: 1.0,
         };
         assert!(validate_geometry(&text(None)).is_ok());
         assert!(validate_geometry(&text(Some(4.0))).is_ok());
         assert!(validate_geometry(&text(Some(0.0))).is_err());
         assert!(validate_geometry(&text(Some(-1.0))).is_err());
         assert!(validate_geometry(&text(Some(f64::NAN))).is_err());
+    }
+
+    #[test]
+    fn text_width_factor_must_be_positive_and_finite() {
+        let text = |width_factor| SemanticGeometry::Text {
+            text: "A".into(),
+            position: p(0.0, 0.0),
+            style: cad_domain::StyleId(0),
+            height: 2.5,
+            rotation: 0.0,
+            font: None,
+            h_align: cad_domain::TextAlignH::Left,
+            v_align: cad_domain::TextAlignV::Baseline,
+            wrap_width: None,
+            width_factor,
+        };
+        // The neutral factor and a genuine stretch are both representable.
+        assert!(validate_geometry(&text(1.0)).is_ok());
+        assert!(validate_geometry(&text(2.5)).is_ok());
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let error = validate_geometry(&text(bad)).expect_err("rejected");
+            let message = error.to_string();
+            assert!(
+                message.contains(REASON_TEXT_WIDTH_FACTOR),
+                "the refusal must carry the stable reason: {message}"
+            );
+        }
     }
 
     #[test]

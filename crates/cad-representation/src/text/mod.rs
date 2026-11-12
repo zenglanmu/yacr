@@ -92,4 +92,6 @@ pub mod text_issue {
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod width_factor_tests;
+#[cfg(test)]
 mod wrap_tests;

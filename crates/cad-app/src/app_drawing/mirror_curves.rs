@@ -120,6 +120,7 @@ pub(super) fn mirror_geometry_with_options(
             h_align,
             v_align,
             wrap_width,
+            width_factor,
         } => mirror_text(
             text,
             *position,
@@ -130,6 +131,7 @@ pub(super) fn mirror_geometry_with_options(
             *h_align,
             *v_align,
             *wrap_width,
+            *width_factor,
             transform,
             mirrortext,
         ),
@@ -160,6 +162,7 @@ fn mirror_text(
     h_align: TextAlignH,
     v_align: TextAlignV,
     wrap_width: Option<f64>,
+    width_factor: f64,
     transform: &Transform3,
     mirrortext: bool,
 ) -> CadResult<SemanticGeometry> {
@@ -188,6 +191,7 @@ fn mirror_text(
         h_align,
         v_align,
         wrap_width,
+        width_factor,
     })
 }
 

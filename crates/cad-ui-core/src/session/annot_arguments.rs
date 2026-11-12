@@ -41,7 +41,8 @@ pub const QLEADER_SELECTOR: &str = "QLEADER";
 /// `LEADER <arrow x,y> <landing x,y> <text>` (legacy name, maps to MULTILEADER).
 pub const LEADER_SELECTOR: &str = "LEADER";
 
-/// `TEXTFIT <target width>`: adjust only the estimated glyph height.
+/// `TEXTFIT <target width>`: stretch only the horizontal width factor under the
+/// batch's estimated width.
 pub const TEXTFIT_SELECTOR: &str = "TEXTFIT";
 
 /// `HATCHSETORIGIN <x> <y>`: modelled so the missing-field refusal can be named.

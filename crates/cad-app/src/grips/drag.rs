@@ -602,6 +602,7 @@ type TextParts<'a> = (
     TextAlignH,
     TextAlignV,
     Option<f64>,
+    f64,
 );
 
 /// The `TEXT`/`MTEXT` drag rule: the stored insertion point, every other field
@@ -619,7 +620,18 @@ type TextParts<'a> = (
 /// IMPLEMENTED**: this rule never rewrites one of those fields, so dragging the
 /// insertion point cannot change how the run is attached, turned or sized.
 fn apply_text(text: TextParts<'_>, id: &GripId, to: Point3) -> CadResult<SemanticGeometry> {
-    let (content, position, style, height, rotation, font, h_align, v_align, wrap_width) = text;
+    let (
+        content,
+        position,
+        style,
+        height,
+        rotation,
+        font,
+        h_align,
+        v_align,
+        wrap_width,
+        width_factor,
+    ) = text;
     match (id.kind, id.index) {
         (GripKind::Insertion, 0) => {
             finite_target(to)?;
@@ -638,6 +650,7 @@ fn apply_text(text: TextParts<'_>, id: &GripId, to: Point3) -> CadResult<Semanti
                 h_align,
                 v_align,
                 wrap_width,
+                width_factor,
             })
         }
         (GripKind::Insertion, index) => Err(stale_handle(format!(
@@ -848,6 +861,7 @@ pub fn apply_grip(
             h_align,
             v_align,
             wrap_width,
+            width_factor,
         } => apply_text(
             (
                 text.as_str(),
@@ -859,6 +873,7 @@ pub fn apply_grip(
                 *h_align,
                 *v_align,
                 *wrap_width,
+                *width_factor,
             ),
             id,
             to,

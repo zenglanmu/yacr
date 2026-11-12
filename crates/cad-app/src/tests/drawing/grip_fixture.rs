@@ -307,6 +307,7 @@ pub(super) fn grip_app() -> (Application, SessionState) {
             h_align: TextAlignH::Center,
             v_align: TextAlignV::Middle,
             wrap_width: Some(TEXT_WRAP),
+            width_factor: 1.0,
         },
         9,
     );
@@ -510,6 +511,7 @@ pub(super) fn text_parts(
     TextAlignH,
     TextAlignV,
     Option<f64>,
+    f64,
 ) {
     match geometry_of(app, entity) {
         SemanticGeometry::Text {
@@ -522,8 +524,18 @@ pub(super) fn text_parts(
             h_align,
             v_align,
             wrap_width,
+            width_factor,
         } => (
-            text, position, style, height, rotation, font, h_align, v_align, wrap_width,
+            text,
+            position,
+            style,
+            height,
+            rotation,
+            font,
+            h_align,
+            v_align,
+            wrap_width,
+            width_factor,
         ),
         other => panic!("entity {entity} is not a TEXT: {other:?}"),
     }

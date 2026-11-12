@@ -338,6 +338,7 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
             h_align,
             v_align,
             wrap_width,
+            width_factor,
         } => {
             let mtext = entity.object.type_key.eq_ignore_ascii_case("AcDbMText");
             let stored = if mtext {
@@ -357,6 +358,7 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
                 h_align: *h_align,
                 v_align: *v_align,
                 wrap_width: *wrap_width,
+                width_factor: *width_factor,
             };
         }
         SemanticGeometry::MultiLeader(leader) => {

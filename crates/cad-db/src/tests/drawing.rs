@@ -713,6 +713,7 @@ fn drawing_validate_geometry_covers_supported_kinds() {
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
             wrap_width: None,
+            width_factor: 1.0,
         },
         SemanticGeometry::Insert {
             block: BlockId(0),

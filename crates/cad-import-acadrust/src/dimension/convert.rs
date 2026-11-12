@@ -32,6 +32,7 @@ impl ImporterBuilder<'_> {
             v_align: TextAlignV::Middle,
             // Dimension text has no source width boundary.
             wrap_width: None,
+            width_factor: 1.0,
         }
     }
 
@@ -385,6 +386,7 @@ fn place_dimension_member(
         h_align,
         v_align,
         wrap_width,
+        width_factor,
     } = geometry
     {
         let scale = transform.max_scale();
@@ -409,6 +411,8 @@ fn place_dimension_member(
             // Keep the boundary on the same footing as `height`: it is a
             // world-space length, so the placement scale applies to it.
             wrap_width: wrap_width.map(|width| width * scale),
+            // A dimensionless stretch is unchanged by the placement scale.
+            width_factor,
         });
     }
     cad_db::transform_geometry(&geometry, transform).ok()

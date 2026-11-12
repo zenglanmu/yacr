@@ -37,6 +37,7 @@ fn plain(position: Point3) -> SemanticGeometry {
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
         wrap_width: None,
+        width_factor: 1.0,
     }
 }
 
@@ -61,6 +62,7 @@ fn mtext_like() -> SemanticGeometry {
         h_align: TextAlignH::Center,
         v_align: TextAlignV::Middle,
         wrap_width: Some(MTEXT_WRAP),
+        width_factor: 1.0,
     }
 }
 
@@ -79,6 +81,7 @@ fn assert_untouched(actual: &SemanticGeometry, before: &SemanticGeometry) {
         h_align,
         v_align,
         wrap_width,
+        width_factor,
     } = actual
     else {
         panic!("expected a TEXT, got {actual:?}");
@@ -93,6 +96,7 @@ fn assert_untouched(actual: &SemanticGeometry, before: &SemanticGeometry) {
         h_align: expected_h,
         v_align: expected_v,
         wrap_width: expected_wrap,
+        width_factor: expected_width,
     } = before
     else {
         panic!("the reference geometry is not a TEXT: {before:?}");
@@ -112,6 +116,11 @@ fn assert_untouched(actual: &SemanticGeometry, before: &SemanticGeometry) {
     assert_eq!(font, expected_font, "the font key is bit-identical");
     assert_eq!(*h_align, *expected_h, "h_align is bit-identical");
     assert_eq!(*v_align, *expected_v, "v_align is bit-identical");
+    assert_eq!(
+        width_factor.to_bits(),
+        expected_width.to_bits(),
+        "the width factor is bit-identical"
+    );
     match (wrap_width, expected_wrap) {
         (Some(actual), Some(expected)) => assert_eq!(
             actual.to_bits(),
@@ -173,6 +182,7 @@ fn mtext_ish_text_exposes_the_same_single_insertion_grip() {
         h_align: TextAlignH::Right,
         v_align: TextAlignV::Top,
         wrap_width: Some(MTEXT_WRAP),
+        width_factor: 1.0,
     };
     let grips = grips_for_entity(&ent(73, right_top));
     assert_eq!(grips.len(), 1);
@@ -227,6 +237,7 @@ fn dragging_an_mtext_ish_text_keeps_wrap_width_and_every_other_field() {
         h_align,
         v_align,
         wrap_width,
+        width_factor,
     } = original
     else {
         panic!("the fixture is a TEXT");
@@ -243,6 +254,7 @@ fn dragging_an_mtext_ish_text_keeps_wrap_width_and_every_other_field() {
             h_align,
             v_align,
             wrap_width,
+            width_factor,
         },
         "only `position` changed"
     );
@@ -263,6 +275,7 @@ fn a_text_drag_keeps_wrap_width_none_and_some_apart() {
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
             wrap_width: wrap,
+            width_factor: 1.0,
         };
         let dragged = apply_grip(
             &original,

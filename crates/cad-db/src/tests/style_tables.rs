@@ -40,6 +40,7 @@ fn text_entity(id: u128, style_id: StyleId) -> DbEntity {
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
             wrap_width: None,
+            width_factor: 1.0,
         },
         draw_order: id as i64,
     }

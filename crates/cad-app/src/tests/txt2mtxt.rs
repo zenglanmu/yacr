@@ -40,6 +40,7 @@ fn text_entity(
             h_align: TextAlignH::Center,
             v_align: TextAlignV::Middle,
             wrap_width: None,
+            width_factor: 1.0,
         },
         draw_order: order,
     }

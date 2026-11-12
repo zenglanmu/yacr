@@ -98,6 +98,7 @@ fn text_geometry(type_key_font: Option<&str>) -> SemanticGeometry {
         h_align: cad_domain::TextAlignH::Left,
         v_align: cad_domain::TextAlignV::Baseline,
         wrap_width: None,
+        width_factor: 1.0,
     }
 }
 

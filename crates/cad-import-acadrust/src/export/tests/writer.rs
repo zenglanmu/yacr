@@ -87,6 +87,7 @@ fn dangling_style_id_is_substituted_and_reported_as_a_conversion() {
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
         wrap_width: None,
+        width_factor: 1.0,
     });
     assert_eq!(report.counts.exact, 0, "a substituted style is not exact");
     assert_eq!(report.counts.converted, 1);
@@ -410,6 +411,7 @@ fn aligned_text_writes_the_alignment_point_and_round_trips() {
         h_align: TextAlignH::Center,
         v_align: TextAlignV::Middle,
         wrap_width: None,
+        width_factor: 1.0,
     });
     assert_eq!(report.counts.exact, 1);
     match &read_entities(&bytes)[0] {
@@ -446,6 +448,7 @@ fn mtext_writes_the_attachment_point() {
         h_align: TextAlignH::Right,
         v_align: TextAlignV::Top,
         wrap_width: None,
+        width_factor: 1.0,
     });
     match &read_entities(&bytes)[0] {
         EntityType::MText(mtext) => {

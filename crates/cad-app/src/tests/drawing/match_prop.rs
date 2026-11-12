@@ -732,6 +732,7 @@ fn text_geometry(text: &str, style: StyleId, height: f64, font: Option<&str>) ->
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
         wrap_width: None,
+        width_factor: 1.0,
     }
 }
 

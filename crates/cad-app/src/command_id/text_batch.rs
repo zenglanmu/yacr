@@ -31,7 +31,9 @@
 //! `estimate_text_bounds` (in `crate::app_drawing::text_batch`) is the single
 //! estimate:
 //!
-//! * width = `height × text.chars().count()`, height = `height` (world units);
+//! * width = `height × text.chars().count() × width_factor`, height = `height`
+//!   (world units); the width factor (DXF TEXT group 41) stretches the run exactly
+//!   as the representation layer multiplies glyph advances;
 //! * the anchor follows the stored alignment: `Left` puts `position.x` on the
 //!   left edge, `Center` on the centre, `Right` on the right edge;
 //!   `Baseline`/`Bottom` put `position.y` on the bottom edge, `Middle` on the

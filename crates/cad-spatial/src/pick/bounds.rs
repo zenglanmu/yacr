@@ -504,16 +504,22 @@ fn index_local_bounds(geometry: &SemanticGeometry) -> Option<(Point3, Point3)> {
             position,
             height,
             text,
+            width_factor,
             ..
         } => {
             let h = height.abs().max(1e-9);
+            let factor = if width_factor.is_finite() && *width_factor > 0.0 {
+                *width_factor
+            } else {
+                1.0
+            };
             if !include_bound_point(&mut bounds, *position) {
                 return None;
             }
             if !include_bound_point(
                 &mut bounds,
                 Point3 {
-                    x: position.x + h * text.chars().count() as f64,
+                    x: position.x + h * text.chars().count() as f64 * factor,
                     y: position.y + h,
                     z: position.z,
                 },

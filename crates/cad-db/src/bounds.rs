@@ -108,13 +108,19 @@ impl BoundsAccumulator {
                 position,
                 height,
                 text,
+                width_factor,
                 ..
             } => {
                 let p = transform.apply_point(*position);
                 let h = height.abs().max(1e-9) * transform_scale(transform);
+                let factor = if width_factor.is_finite() && *width_factor > 0.0 {
+                    *width_factor
+                } else {
+                    1.0
+                };
                 self.add_point(p);
                 self.add_point(Point3 {
-                    x: p.x + h * text.chars().count() as f64,
+                    x: p.x + h * text.chars().count() as f64 * factor,
                     y: p.y + h,
                     z: p.z,
                 });

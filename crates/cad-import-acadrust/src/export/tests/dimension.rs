@@ -467,6 +467,7 @@ fn picture_branch_display_round_trips_member_for_member() {
             h_align: TextAlignH::Center,
             v_align: TextAlignV::Middle,
             wrap_width: None,
+            width_factor: 1.0,
         },
     ];
     let dimension = DimensionGeometry::from_picture(

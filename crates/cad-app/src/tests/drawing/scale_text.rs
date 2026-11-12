@@ -21,6 +21,7 @@ fn text_geometry(height: f64, wrap_width: Option<f64>) -> SemanticGeometry {
         h_align: TextAlignH::Center,
         v_align: TextAlignV::Middle,
         wrap_width,
+        width_factor: 1.0,
     }
 }
 

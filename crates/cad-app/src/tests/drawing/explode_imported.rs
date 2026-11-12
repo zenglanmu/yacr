@@ -34,6 +34,7 @@ fn explode_picture_branch_dimension_produces_every_display_member() {
             h_align: TextAlignH::Center,
             v_align: TextAlignV::Baseline,
             wrap_width: None,
+            width_factor: 1.0,
         },
     ];
     let dimension = DimensionGeometry::from_picture(

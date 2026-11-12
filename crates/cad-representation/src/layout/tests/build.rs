@@ -673,6 +673,7 @@ fn paper_build_dedups_repeated_clip_diagnostics() {
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
             wrap_width: None,
+            width_factor: 1.0,
         },
         0,
     ))

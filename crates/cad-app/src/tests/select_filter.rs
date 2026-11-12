@@ -55,6 +55,7 @@ fn text(value: &str, x: f64) -> SemanticGeometry {
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
         wrap_width: None,
+        width_factor: 1.0,
     }
 }
 

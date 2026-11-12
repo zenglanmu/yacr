@@ -266,6 +266,7 @@ fn text_entity(id: u128, content: &str, font: Option<&str>, type_key: &str) -> D
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
             wrap_width: None,
+            width_factor: 1.0,
         },
         draw_order: id as i64,
     }

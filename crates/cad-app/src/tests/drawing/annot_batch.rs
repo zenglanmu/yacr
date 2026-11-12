@@ -8,7 +8,7 @@
 //!   row changes;
 //! * create/list/delete/duplicate/unknown, UNGROUP and every GROUPEDIT arm;
 //! * QLEADER/LEADER create exactly one MULTILEADER in one undo step;
-//! * TEXTFIT changes only the glyph height under the declared estimate and
+//! * TEXTFIT changes only the horizontal width factor under the declared estimate and
 //!   refuses an empty selection, a non-text and a bad width;
 //! * HATCHSETBOUNDARY rebuilds the loops in one transaction or refuses by name;
 //! * HATCHSETORIGIN names the missing origin field and writes nothing;
@@ -57,6 +57,7 @@ fn text(id: u128, text: &str, height: f64) -> DbEntity {
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
             wrap_width: None,
+            width_factor: 1.0,
         },
         0,
     )
@@ -508,7 +509,7 @@ fn qleader_and_leader_create_one_multileader_in_one_undo_step() {
 }
 
 #[test]
-fn textfit_changes_only_the_glyph_height_under_the_estimate() {
+fn textfit_changes_only_the_width_factor_under_the_estimate() {
     let (mut app, mut session) = annot_app();
     select(&mut session, &[GROUP_TEXT]);
     let out = execute(
@@ -528,6 +529,7 @@ fn textfit_changes_only_the_glyph_height_under_the_estimate() {
         .unwrap();
     let SemanticGeometry::Text {
         height,
+        width_factor,
         text,
         position,
         rotation,
@@ -536,7 +538,8 @@ fn textfit_changes_only_the_glyph_height_under_the_estimate() {
     else {
         panic!("expected text");
     };
-    assert_eq!(*height, 3.0, "12 / 4 characters");
+    assert_eq!(*height, 2.0, "the glyph height is unchanged");
+    assert_eq!(*width_factor, 1.5, "12 / (height 2 × 4 characters)");
     assert_eq!(text, "ABCD");
     assert_eq!(*position, point(0.0, 0.0));
     assert_eq!(*rotation, 0.0);
@@ -552,10 +555,16 @@ fn textfit_changes_only_the_glyph_height_under_the_estimate() {
         .drawing
         .entity(EntityId(GROUP_TEXT))
         .unwrap();
-    let SemanticGeometry::Text { height, .. } = &restored.geometry else {
+    let SemanticGeometry::Text {
+        height,
+        width_factor,
+        ..
+    } = &restored.geometry
+    else {
         panic!("expected text");
     };
     assert_eq!(*height, 2.0);
+    assert_eq!(*width_factor, 1.0, "undo restores the stored width factor");
     assert_eq!(undo_depth(&app), 0);
 }
 

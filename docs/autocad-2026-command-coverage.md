@@ -1072,7 +1072,7 @@
 | `TEXT` | 已实现 | — |
 |  `TEXTALIGN` | 部分实现 | 15 个对齐拼写（6 个单轴 + 9 个组合，`TEXTALIGN TOPLEFT` 等）按选择并集包围盒在两轴对齐；`DISTRIBUTE [X|Y]` 按阅读序等间隙分布（首尾固定、≥3 个目标，`textalign.distribute_needs_three`）；`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 解析后具名拒绝；只移动参照点，不改内容/字高/旋转/对齐；一条事务/一步撤销；宽高仍为估算值。 |
 | `TEXTEDIT` | 部分实现 | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
-| `TEXTFIT` | 部分实现 | TEXT/MTEXT 高度拟合到目标宽度，其余字段逐位保留；真实字形宽度拉伸未实现（域无 width factor） |
+|  `TEXTFIT` | 部分实现 | 真实：改存储宽度因子（DXF group 41），字高/位置/justification/旋转/内容/样式不变；因子 = `target_width / 批量估算宽度`（`height × 字符数`，含对齐），逐实体输出 `textfit.estimated_width` 诊断；空字符串/非正目标具名拒绝；一条事务/一步撤销。MTEXT 导出无 group 41 通道（报告导出缺口）；ATTRIB/ATTDEF/RTEXT/表格/标注派生文字仍为 1.0。 |
 | `TEXTMASK` | 部分实现 | 偏移（默认 0.35）/Wipeout 遮罩/`*TEXTMASK-*` 会话组/重跑替换/组上限/有限边界守卫；`3dface`/`solid` 遮罩类型无实体模型，按名拒绝 |
 | `TEXTSCR` | 部分实现 | 置会话 `text_screen`=true；无文本屏幕窗口、不显示提示历史。 |
 | `TEXTTOFRONT` | 部分实现 | 选择式；仅模型空间 Text/MultiLeader/Dimension 上移到所有非合格对象之前；其它选中对象逐条诊断跳过；图纸空间/块内不重排；“全图文字”形式与 Draw Order 对话框未实现 |
@@ -2059,7 +2059,7 @@
 | 854 | `TEXT` | 已实现 | Creates a single-line text object. | — |
 |  855 | `TEXTALIGN` | 部分实现 | Aligns multiple text objects vertically, horizontally, or obliquely. | 15 个对齐拼写（6 个单轴 + 9 个组合，`TEXTALIGN TOPLEFT` 等）按选择并集包围盒在两轴对齐；`DISTRIBUTE [X|Y]` 按阅读序等间隙分布（首尾固定、≥3 个目标，`textalign.distribute_needs_three`）；`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 解析后具名拒绝；只移动参照点，不改内容/字高/旋转/对齐；一条事务/一步撤销；宽高仍为估算值。 |
 | 856 | `TEXTEDIT` | 部分实现 | Edits a selected multiline or single-line text object, or the text in a dimension object. | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
-| 857 | `TEXTFIT` | 部分实现 | Expands or compresses the width of text objects based on new starting and ending points. | TEXT/MTEXT 高度拟合到目标宽度，其余字段逐位保留；真实字形宽度拉伸未实现（域无 width factor） |
+|  857 | `TEXTFIT` | 部分实现 | Expands or compresses the width of text objects based on new starting and ending points. | 真实：改存储宽度因子（DXF group 41），字高/位置/justification/旋转/内容/样式不变；因子 = `target_width / 批量估算宽度`（`height × 字符数`，含对齐），逐实体输出 `textfit.estimated_width` 诊断；空字符串/非正目标具名拒绝；一条事务/一步撤销。MTEXT 导出无 group 41 通道（报告导出缺口）；ATTRIB/ATTDEF/RTEXT/表格/标注派生文字仍为 1.0。 |
 | 858 | `TEXTMASK` | 部分实现 | Creates a blank area behind selected text or mtext objects. | 偏移（默认 0.35）/Wipeout 遮罩/`*TEXTMASK-*` 会话组/重跑替换/组上限/有限边界守卫；`3dface`/`solid` 遮罩类型无实体模型，按名拒绝 |
 | 859 | `TEXTSCR` | 部分实现 | Opens a text window that displays a history of prompts and command line entries for the current session. | 置会话 `text_screen`=true；无文本屏幕窗口、不显示提示历史。 |
 | 860 | `TEXTTOFRONT` | 部分实现 | Brings text, leaders, and dimensions in front of all other objects in the drawing. | 以**当前选择**为输入（偏离 AutoCAD 的 Select objects 提示）；仅可寻址模型空间 Text/MultiLeader/Dimension 参与，其它选中对象逐条 `texttofront.skipped` 跳过；以所有非合格模型空间对象的最大 draw order 为基线，按相对顺序连续上移（一条事务/一步撤销）；已在前方时 `texttofront.unchanged` 不建事务；图纸空间/块内 draw order 不重排；AutoCAD 的“全图文字”形式与 Draw Order 对话框未实现 |

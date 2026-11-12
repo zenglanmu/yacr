@@ -362,6 +362,7 @@ fn text_and_mask_are_kept_and_reported() {
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
         wrap_width: None,
+        width_factor: 1.0,
     };
     b.insert_entity(text).unwrap();
     let mut mask = line_entity(12, SpaceId::Block(BlockId(1)), p(0.0, 0.0), p(0.0, 0.0));

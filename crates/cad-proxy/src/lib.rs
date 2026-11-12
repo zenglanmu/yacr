@@ -191,6 +191,8 @@ impl ProxyRecordDecoder for KnownOpcodeDecoder {
                     v_align: TextAlignV::Baseline,
                     // Proxy text records carry no width boundary.
                     wrap_width: None,
+                    // Proxy text records carry no width stretch.
+                    width_factor: cad_domain::DEFAULT_TEXT_WIDTH_FACTOR,
                 }])
             }
             other => Err(CadError::Unsupported(format!(

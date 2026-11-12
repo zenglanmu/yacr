@@ -36,6 +36,7 @@ fn text_entity(id: u128) -> DbEntity {
             h_align: TextAlignH::Center,
             v_align: TextAlignV::Middle,
             wrap_width: Some(3.0),
+            width_factor: 1.5,
         },
         draw_order: 1,
     }
@@ -53,11 +54,13 @@ fn stored_text(db: &DrawingDatabase) -> (String, Point3, f64, f64, Option<f64>) 
             h_align,
             v_align,
             wrap_width,
+            width_factor,
         } => {
             assert_eq!(*style, StyleId(7), "the style identity is preserved");
             assert_eq!(font.as_deref(), Some("arial.ttf"), "the font is preserved");
             assert_eq!(*h_align, TextAlignH::Center, "alignment is preserved");
             assert_eq!(*v_align, TextAlignV::Middle, "alignment is preserved");
+            assert_eq!(*width_factor, 1.5, "the width factor is preserved");
             (text.clone(), *position, *height, *rotation, *wrap_width)
         }
         other => panic!("expected text, got {other:?}"),

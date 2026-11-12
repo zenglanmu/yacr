@@ -30,6 +30,7 @@ fn text() -> SemanticGeometry {
         h_align: TextAlignH::Center,
         v_align: TextAlignV::Middle,
         wrap_width: Some(4.0),
+        width_factor: 1.5,
     }
 }
 
@@ -84,6 +85,7 @@ fn translation_rotation_and_uniform_scale_agree_across_both_faces() {
             h_align: write_h,
             v_align: write_v,
             wrap_width: write_wrap,
+            width_factor: write_factor,
         } = &write
         else {
             panic!("{label}: the write face must return Text, got {write:?}");
@@ -98,6 +100,7 @@ fn translation_rotation_and_uniform_scale_agree_across_both_faces() {
             h_align: snap_h,
             v_align: snap_v,
             wrap_width: snap_wrap,
+            width_factor: snap_factor,
         } = &snap
         else {
             panic!("{label}: the snap face must return Text, got {snap:?}");
@@ -111,6 +114,11 @@ fn translation_rotation_and_uniform_scale_agree_across_both_faces() {
         assert_eq!(write_h, snap_h, "{label}: horizontal alignment");
         assert_eq!(write_v, snap_v, "{label}: vertical alignment");
         assert_eq!(write_wrap, snap_wrap, "{label}: wrap boundary");
+        assert_eq!(write_factor, snap_factor, "{label}: width factor");
+        assert_eq!(
+            *write_factor, 1.5,
+            "{label}: a similarity keeps the dimensionless width factor"
+        );
         // The parity is not vacuous: the source really moved/scaled.
         assert!(
             (*write_height - 2.5 * scale_of(&transform)).abs() < 1e-12,

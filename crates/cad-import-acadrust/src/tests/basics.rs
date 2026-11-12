@@ -237,6 +237,7 @@ fn display_support_separates_drawn_from_unrendered() {
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
         wrap_width: None,
+        width_factor: 1.0,
     };
     // Text is a supported entity whose drawing depends on a host font, so it
     // is Unverified rather than Unsupported (audit B20 still holds: no claim

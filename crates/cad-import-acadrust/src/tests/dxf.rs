@@ -237,3 +237,87 @@ fn construct_lines_import_as_partial_capabilities_not_verified() {
         "no construct-line reason in {reasons:?}"
     );
 }
+
+#[test]
+fn dxf_text_group_41_becomes_the_stored_width_factor() {
+    let dxf = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n\
+               0\nSECTION\n2\nENTITIES\n\
+               0\nTEXT\n5\n10\n8\n0\n\
+               10\n1.0\n20\n2.0\n30\n0.0\n\
+               40\n2.5\n1\nHELLO\n41\n2.5\n7\nStandard\n\
+               0\nENDSEC\n0\nEOF\n";
+    let request = ImportRequest {
+        document: DocumentId(1),
+        database: DatabaseId(1),
+        bytes: Arc::from(dxf.as_bytes()),
+        limits: ImportLimits::default(),
+        generation: 0,
+        xref: None,
+    };
+    let drawing = AcadrustImporter::default()
+        .import(&request, &|| false)
+        .expect("the DXF imports");
+    let text = drawing
+        .database
+        .entities()
+        .find_map(|entity| match &entity.geometry {
+            SemanticGeometry::Text {
+                text, width_factor, ..
+            } => Some((text.clone(), *width_factor)),
+            _ => None,
+        })
+        .expect("the TEXT is imported");
+    assert_eq!(text.0, "HELLO");
+    assert_eq!(text.1, 2.5, "DXF group 41 is stored as the width factor");
+}
+
+#[test]
+fn degenerate_dxf_text_width_factor_is_reported_and_neutralized() {
+    let dxf = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n\
+               0\nSECTION\n2\nENTITIES\n\
+               0\nTEXT\n5\n10\n8\n0\n\
+               10\n1.0\n20\n2.0\n30\n0.0\n\
+               40\n2.5\n1\nHELLO\n41\n0.0\n7\nStandard\n\
+               0\nENDSEC\n0\nEOF\n";
+    let request = ImportRequest {
+        document: DocumentId(1),
+        database: DatabaseId(1),
+        bytes: Arc::from(dxf.as_bytes()),
+        limits: ImportLimits::default(),
+        generation: 0,
+        xref: None,
+    };
+    let drawing = AcadrustImporter::default()
+        .import(&request, &|| false)
+        .expect("the DXF imports");
+    let factor = drawing
+        .database
+        .entities()
+        .find_map(|entity| match &entity.geometry {
+            SemanticGeometry::Text { width_factor, .. } => Some(*width_factor),
+            _ => None,
+        })
+        .expect("the TEXT is imported");
+    assert_eq!(
+        factor,
+        cad_domain::DEFAULT_TEXT_WIDTH_FACTOR,
+        "a zero factor cannot be stored and falls back to neutral"
+    );
+    // The value is reported through the deduplicated `import.text_partial`
+    // diagnostic; the per-class capability is Partial rather than Verified.
+    assert!(
+        drawing.report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "import.text_partial"
+                && diagnostic.message.contains("width factor (group 41)")
+        }),
+        "the degenerate factor is named: {:?}",
+        drawing.report.diagnostics
+    );
+    let capability = drawing
+        .report
+        .capabilities
+        .iter()
+        .find(|capability| capability.type_key == "AcDbText")
+        .expect("the TEXT capability is recorded");
+    assert_eq!(capability.semantic, SupportStatus::Partial);
+}

@@ -130,6 +130,32 @@ impl<'a> ImporterBuilder<'a> {
                 // extrusion mirrors both (see `text_ocs_placement`).
                 let (position, rotation) =
                     text_ocs_placement(p3(t.normal), p3(position), t.rotation);
+                // DXF group 41 is the horizontal width scale. A zero, negative
+                // or non-finite value cannot be stored (the write validator
+                // rejects it), so it is reported and falls back to the neutral
+                // factor instead of being silently kept or dropped.
+                let (width_factor, width_completeness) =
+                    match text_width_factor_from_dxf(t.width_factor) {
+                        Some(factor) => (factor, Completeness::Complete),
+                        None => {
+                            let reason = "text.width_factor_degenerate";
+                            if self.reported_reasons.insert(reason.to_string()) {
+                                self.diagnostics.push(Diagnostic {
+                                    object: None,
+                                    code: "import.text_partial".into(),
+                                    message: format!(
+                                        "the TEXT width factor (group 41) is {0}, which cannot \
+                                         be stored; the neutral factor {1} is used instead",
+                                        t.width_factor, DEFAULT_TEXT_WIDTH_FACTOR
+                                    ),
+                                });
+                            }
+                            (
+                                DEFAULT_TEXT_WIDTH_FACTOR,
+                                Completeness::Partial(vec![reason.into()]),
+                            )
+                        }
+                    };
                 (
                     SemanticGeometry::Text {
                         text: t.value.clone(),
@@ -142,8 +168,9 @@ impl<'a> ImporterBuilder<'a> {
                         v_align,
                         // DXF TEXT has no width boundary.
                         wrap_width: None,
+                        width_factor,
                     },
-                    Completeness::Complete,
+                    width_completeness,
                 )
             }
             EntityType::MText(t) => {
@@ -177,6 +204,8 @@ impl<'a> ImporterBuilder<'a> {
                         // dropped by this importer; only MLEADER populates the
                         // wrap boundary for now.
                         wrap_width: None,
+                        // MTEXT has no width-factor group; the factor is neutral.
+                        width_factor: DEFAULT_TEXT_WIDTH_FACTOR,
                     },
                     Completeness::Partial(
                         MTEXT_UNMODELLED.iter().map(|r| (*r).to_string()).collect(),

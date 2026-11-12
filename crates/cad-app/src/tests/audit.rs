@@ -287,6 +287,7 @@ fn audit_fix_yes_normalizes_fixable_fields_atomically() {
                 h_align: TextAlignH::Left,
                 v_align: TextAlignV::Baseline,
                 wrap_width: Some(0.0),
+                width_factor: 1.0,
             },
         )
     };

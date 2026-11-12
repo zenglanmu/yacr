@@ -31,6 +31,7 @@ impl<'a> ImporterBuilder<'a> {
                     v_align: TextAlignV::Baseline,
                     // RTEXT carries no width boundary.
                     wrap_width: None,
+                    width_factor: 1.0,
                 };
                 let unhandled = rtext_unhandled_flags(d.flags);
                 let normal = p3(d.normal);
@@ -68,6 +69,7 @@ impl<'a> ImporterBuilder<'a> {
                     v_align: TextAlignV::Baseline,
                     // Arc-aligned text carries no width boundary.
                     wrap_width: None,
+                    width_factor: 1.0,
                 },
                 Completeness::Partial(vec![
                     "arc-aligned placement approximated as linear text".into()
@@ -102,6 +104,7 @@ impl<'a> ImporterBuilder<'a> {
                         h_align: TextAlignH::Center,
                         v_align: TextAlignV::Middle,
                         wrap_width: None,
+                        width_factor: 1.0,
                     });
                 }
                 if d.mtext_visible {
@@ -119,6 +122,7 @@ impl<'a> ImporterBuilder<'a> {
                             // Embedded MTEXT keeps its width boundary dropped in
                             // this build; only MLEADER populates it.
                             wrap_width: None,
+                            width_factor: 1.0,
                         });
                     }
                 }
@@ -225,6 +229,7 @@ impl<'a> ImporterBuilder<'a> {
             v_align: TextAlignV::Baseline,
             // ATTRIB/ATTDEF text has no width boundary.
             wrap_width: None,
+            width_factor: 1.0,
         }
     }
 }

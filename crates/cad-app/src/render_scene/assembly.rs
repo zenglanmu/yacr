@@ -466,6 +466,7 @@ fn append_vendor_fragments(
                 h_align,
                 v_align,
                 None,
+                1.0,
             );
             match shaped {
                 Ok(shaped) => {

@@ -95,6 +95,7 @@ fn text_geometry(height: f64, wrap_width: Option<f64>) -> SemanticGeometry {
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
         wrap_width,
+        width_factor: 1.0,
     }
 }
 

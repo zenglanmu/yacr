@@ -147,6 +147,8 @@ impl Application {
             h_align: *h_align,
             v_align: *v_align,
             wrap_width,
+            // A newly created MTEXT has no horizontal stretch.
+            width_factor: cad_domain::DEFAULT_TEXT_WIDTH_FACTOR,
         };
         let mut outcome = self.commit_new_entity_typed(
             session,

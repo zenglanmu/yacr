@@ -396,6 +396,25 @@ pub fn wrap_width_from_dxf(width: f64) -> Option<f64> {
     }
 }
 
+/// The neutral horizontal width factor: glyph advances are not stretched.
+pub const DEFAULT_TEXT_WIDTH_FACTOR: f64 = 1.0;
+
+/// Sanitize a DXF TEXT width scale (group 41) into the
+/// [`SemanticGeometry::Text::width_factor`] representation.
+///
+/// A usable factor is finite and strictly positive; every other value carries
+/// no stretch and yields `None` so the caller can report the degenerate input
+/// instead of silently storing it (the storage invariant is enforced by
+/// `cad-db`'s geometry validation). The CAD-neutral default is
+/// [`DEFAULT_TEXT_WIDTH_FACTOR`].
+pub fn text_width_factor_from_dxf(factor: f64) -> Option<f64> {
+    if factor.is_finite() && factor > 0.0 {
+        Some(factor)
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SemanticGeometry {
     Line {
@@ -466,6 +485,14 @@ pub enum SemanticGeometry {
         /// paragraphs are laid out exactly as written. Build it with
         /// [`wrap_width_from_dxf`] so the sanitization rule stays in one place.
         wrap_width: Option<f64>,
+        /// Horizontal width scale (DXF TEXT group 41): every glyph advance and
+        /// glyph x coordinate is multiplied by this factor, so the rendered
+        /// width stretches while the height and justification are unchanged.
+        ///
+        /// Must be finite and strictly positive. [`DEFAULT_TEXT_WIDTH_FACTOR`]
+        /// (`1.0`) means "not stretched"; [`text_width_factor_from_dxf`] is the
+        /// one sanitization rule for imported values.
+        width_factor: f64,
     },
     /// A SHAPE entity: one glyph of a compiled SHX shape font, referenced by
     /// shape code (or, when `code` is 0, by `shape_name`). `font` is the style's

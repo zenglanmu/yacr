@@ -581,6 +581,7 @@ fn text_without_font_is_explicitly_unknown() {
             h_align: cad_domain::TextAlignH::Left,
             v_align: cad_domain::TextAlignV::Baseline,
             wrap_width: None,
+            width_factor: 1.0,
         },
         LayerId(0),
     ))
@@ -778,6 +779,7 @@ fn text_geometry(text: &str) -> SemanticGeometry {
         h_align: cad_domain::TextAlignH::Left,
         v_align: cad_domain::TextAlignV::Baseline,
         wrap_width: None,
+        width_factor: 1.0,
     }
 }
 

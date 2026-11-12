@@ -280,6 +280,7 @@ pub fn transform_geometry(
             h_align,
             v_align,
             wrap_width,
+            width_factor,
         } => {
             require_similarity(transform, "text")?;
             require_orientation_preserving(transform, "text")?;
@@ -295,6 +296,8 @@ pub fn transform_geometry(
                 // The boundary is a world-space length, so a similarity scales
                 // it with the text instead of dropping it.
                 wrap_width: wrap_width.map(|width| width * uniform_scale(transform)),
+                // The width factor is dimensionless, so a similarity keeps it.
+                width_factor: *width_factor,
             }
         }
         // A NURBS curve is affinely invariant: the affine image of the curve is

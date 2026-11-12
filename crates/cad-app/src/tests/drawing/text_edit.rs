@@ -24,6 +24,7 @@ fn text_geometry(text: &str) -> SemanticGeometry {
         h_align: TextAlignH::Right,
         v_align: TextAlignV::Top,
         wrap_width: None,
+        width_factor: 1.0,
     }
 }
 

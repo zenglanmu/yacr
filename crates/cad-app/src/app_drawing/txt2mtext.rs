@@ -348,6 +348,8 @@ fn plan_replacements(
             } else {
                 None
             },
+            // The folded MTEXT carries no per-source horizontal stretch.
+            width_factor: 1.0,
         };
         replacements.push(mtext_entity(candidate, first, geometry));
     } else {

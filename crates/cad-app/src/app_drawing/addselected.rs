@@ -148,6 +148,7 @@ impl Application {
                 h_align,
                 v_align,
                 wrap_width,
+                width_factor,
                 ..
             } => SemanticGeometry::Text {
                 text: text.clone(),
@@ -159,6 +160,7 @@ impl Application {
                 h_align: *h_align,
                 v_align: *v_align,
                 wrap_width: *wrap_width,
+                width_factor: *width_factor,
             },
             other => {
                 return Err(unsupported(

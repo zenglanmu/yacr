@@ -860,6 +860,7 @@ impl MultiLeaderGeometry {
             h_align: self.text.h_align(),
             v_align: self.text.v_align(),
             wrap_width: crate::wrap_width_from_dxf(self.text.width),
+            width_factor: crate::DEFAULT_TEXT_WIDTH_FACTOR,
         }
     }
 

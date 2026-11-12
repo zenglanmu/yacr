@@ -44,10 +44,11 @@ pub(super) fn kind_name(geometry: &SemanticGeometry) -> &'static str {
 /// The **estimated** world-space box of one text entity.
 ///
 /// This is the single extents authority of the batch: width is
-/// `height × text.chars().count()` and height is `height` (world units); the
-/// anchor follows `h_align`/`v_align`; `z` is the insertion `z`. The box is
-/// axis-aligned and **ignores rotation** — a declared estimate, never a glyph
-/// metric.
+/// `height × text.chars().count() × width_factor` and height is `height` (world
+/// units); the anchor follows `h_align`/`v_align`; `z` is the insertion `z`. The
+/// box is axis-aligned and **ignores rotation** — a declared estimate, never a
+/// glyph metric. The width factor multiplies the whole estimated run, matching
+/// the representation layer's glyph-advance stretch.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct EstimatedTextBounds {
     pub min_x: f64,
@@ -115,6 +116,7 @@ pub(crate) fn estimate_text_bounds(
         height,
         h_align,
         v_align,
+        width_factor,
         ..
     } = &entity.geometry
     else {
@@ -138,7 +140,16 @@ pub(crate) fn estimate_text_bounds(
             ),
         ));
     }
-    let width = *height * text.chars().count() as f64;
+    if !width_factor.is_finite() || *width_factor <= 0.0 {
+        return Err(refusal(
+            &format!("{prefix}.degenerate"),
+            format!(
+                "the text entity {} has the degenerate stored width factor {width_factor}",
+                entity.id.0
+            ),
+        ));
+    }
+    let width = *height * text.chars().count() as f64 * width_factor;
     let (left, right) = match h_align {
         TextAlignH::Left => (position.x, position.x + width),
         TextAlignH::Center => (position.x - width * 0.5, position.x + width * 0.5),

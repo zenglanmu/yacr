@@ -2002,3 +2002,8 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
 | `XCLIP` | 部分实现 | `RECT <minx> <miny> <maxx> <maxy>` / `POLY <x1> <y1> ...` / `ON` / `OFF` / `DELETE` / `?`，作用于一个直接可寻址的模型空间 INSERT；边界以**块局部坐标**存于 `EntityRenderAttributes.clip`（一条事务/一步撤销，STYLE 变更失效）；表示层在块展开时按 INSERT 变换映射为世界轴对齐矩形，用既有精确裁剪器裁 LINE/ARC/圆/MESH/IMAGE，嵌套 clip 取交集，完全在外时不产生 fragment | **display-only**：拾取/选择/ZOOM 范围仍按未裁剪几何；无 DXF/DWG 持久化（导入不填、导出丢弃）；仅 0/90/180/270 世界旋转可渲染（其它 `xclip.rotation_not_renderable`）；多边形只存不渲染（`xclip.polygon_not_renderable`）；`INVERT` 拒绝；TEXT/MASK 保留并报告 `representation.xclip_primitive_unsupported`；`XCLIP ?` 只报告当前选中的一个 INSERT |
+### 2026-11-12 TEXTFIT 真实宽度因子（group 41）
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `TEXTFIT` | 部分实现 | 只改存储 `SemanticGeometry::Text.width_factor`（DXF group 41）；字高/位置/justification/旋转/内容/样式逐位保留；因子 = `target_width / 批量估算宽度`，逐实体诊断 `textfit.estimated_width`；空串/非正目标/退化因子具名拒绝；一条事务/一步撤销；表示层 shaping、bounds/pick 均按因子拉伸 | 因子来自 `height × 字符数` 估算（非真实字形度量），渲染宽度只在估算精度内等于目标；MTEXT 无 group 41 导出通道；ATTRIB/ATTDEF/RTEXT/表格/标注派生文字保持 1.0；仅导入 TEXT group 41 |

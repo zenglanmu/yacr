@@ -428,7 +428,7 @@ fn text_insertion_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
     let (mut app, mut session) = grip_app();
     let revision = revision_of(&app);
     let before = geometry_of(&app, TEXT);
-    let (content, position, style, height, rotation, font, h_align, v_align, wrap_width) =
+    let (content, position, style, height, rotation, font, h_align, v_align, wrap_width, factor) =
         text_parts(&app, TEXT);
     assert_eq!(position, TEXT_AT, "the fixture stores the documented point");
 
@@ -461,6 +461,7 @@ fn text_insertion_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
         h_after,
         v_after,
         wrap_after,
+        factor_after,
     ) = text_parts(&app, TEXT);
     assert_eq!(
         position_after, target,
@@ -477,6 +478,11 @@ fn text_insertion_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
         wrap_after.map(f64::to_bits),
         wrap_width.map(f64::to_bits),
         "the wrap boundary (Some here, so it must survive)"
+    );
+    assert_eq!(
+        factor_after.to_bits(),
+        factor.to_bits(),
+        "the width factor is untouched"
     );
 
     // Undo restores the stored geometry exactly (same `f64` bits, not a

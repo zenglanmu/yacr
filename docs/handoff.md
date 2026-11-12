@@ -1,5 +1,21 @@
 AD
 
+## 2026-11-12 真实 2D 升级（5b）：TEXTFIT 改为真实宽度因子
+
+- **行为**：`TEXTFIT` 不再改字高，改为写 `SemanticGeometry::Text.width_factor`（DXF group 41）：
+  `factor = target_width / estimated_unstretched_width`，字高/位置/justification/旋转/内容/
+  样式逐位保留；空字符串（`textfit.empty_text`）、非正目标（`textfit.bad_width`）、退化因子
+  （`textfit.degenerate`）具名拒绝；一条事务/一步撤销；逐实体输出 `textfit.estimated_width`。
+- **贯通**：表示层 shaping（`TextRun.width_factor`）、bounds/pick/ZOOM、批量估算、DXF TEXT
+  group 41 导入与导出都使用存储因子；域校验在 cad-db（`text.width_factor`）。
+- **边界（精确）**：因子来自 `height × 字符数` 的声明估算（忽略旋转/真实字形度量），渲染宽度
+  只在估算精度内等于目标；MTEXT 无 group 41 导出通道（非 1.0 时报告导出缺口）；
+  ATTRIB/ATTDEF/RTEXT/表格/标注派生文字仍为 1.0；只导入 acadrust TEXT group 41。
+- **证据**：`cargo test -p cad-domain`、`-p cad-representation`（266）、`-p cad-app`（2605）、
+  `-p cad-ui-core`（592）、`-p cad-import-acadrust`（378）、`-p cad-db -p cad-geometry -p cad-spatial`、
+  workspace check/clippy、fmt、`check-file-size`/`check-architecture` 全过。
+  **NOT RUN**：全量 workspace 测试、wasm、GUI/GPU/像素/真机。
+
 ## 2026-11-12 真实 2D 升级（5/5）：XCLIP display-only 块参照裁剪
 
 - **存储**：新增 `cad_domain::BlockClip { vertices, inside, visible }`，挂在

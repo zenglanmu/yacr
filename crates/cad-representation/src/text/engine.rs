@@ -213,6 +213,9 @@ impl FontEngine {
     /// `wrap_width` is an optional width boundary in world units: `Some(w)`
     /// wraps each `\P` paragraph so no line exceeds `w` (except a single
     /// unbreakable token); `None` keeps the written line breaks only.
+    /// `width_factor` is the entity/style horizontal stretch (DXF TEXT group
+    /// 41): every glyph advance and glyph x is multiplied by it. It must be
+    /// finite and positive; `1.0` means "not stretched".
     #[allow(clippy::too_many_arguments)]
     pub fn shape(
         &self,
@@ -224,6 +227,7 @@ impl FontEngine {
         h_align: TextAlignH,
         v_align: TextAlignV,
         wrap_width: Option<f64>,
+        width_factor: f64,
     ) -> CadResult<ShapedText> {
         self.shape_with(
             Some(font_key),
@@ -234,6 +238,7 @@ impl FontEngine {
             h_align,
             v_align,
             wrap_width,
+            width_factor,
         )
     }
 
@@ -243,8 +248,8 @@ impl FontEngine {
     /// registered fallback chain, exactly like a requested-but-unavailable font
     /// (the sanctioned fallback mechanism). When the chain holds no usable face
     /// the caller gets `ResourceMissing` and keeps the unshaped placeholder
-    /// instead of showing fabricated glyphs. `wrap_width` behaves as in
-    /// [`shape`](Self::shape).
+    /// instead of showing fabricated glyphs. `wrap_width` and `width_factor`
+    /// behave as in [`shape`](Self::shape).
     #[allow(clippy::too_many_arguments)]
     pub fn shape_unstyled(
         &self,
@@ -255,9 +260,18 @@ impl FontEngine {
         h_align: TextAlignH,
         v_align: TextAlignV,
         wrap_width: Option<f64>,
+        width_factor: f64,
     ) -> CadResult<ShapedText> {
         self.shape_with(
-            None, raw, origin, height, rotation, h_align, v_align, wrap_width,
+            None,
+            raw,
+            origin,
+            height,
+            rotation,
+            h_align,
+            v_align,
+            wrap_width,
+            width_factor,
         )
     }
 
@@ -272,6 +286,7 @@ impl FontEngine {
         h_align: TextAlignH,
         v_align: TextAlignV,
         wrap_width: Option<f64>,
+        width_factor: f64,
     ) -> CadResult<ShapedText> {
         let size = height.abs();
         if !size.is_finite() || size <= 0.0 {
@@ -279,11 +294,26 @@ impl FontEngine {
                 "text height must be a positive finite value".into(),
             ));
         }
+        if !width_factor.is_finite() || width_factor <= 0.0 {
+            return Err(CadError::InvalidInput(
+                "text width factor must be a positive finite value".into(),
+            ));
+        }
         if !self.has_usable_face(font_key) {
             return Err(self.chain_error(font_key));
         }
 
-        let parsed = parse_mtext(raw, size);
+        let mut parsed = parse_mtext(raw, size);
+        // DXF TEXT group 41 stretches the whole run. MTEXT inline `\W` codes
+        // are per-run overrides; the entity factor composes with them rather
+        // than replacing them.
+        if width_factor != 1.0 {
+            for line in &mut parsed.lines {
+                for run in &mut line.runs {
+                    run.width_factor *= width_factor;
+                }
+            }
+        }
         let mut issues = parsed.issues.clone();
         match font_key {
             Some(key) if !self.contains(key) => issues.push(TextFormatIssue::new(
@@ -411,7 +441,7 @@ impl FontEngine {
     ) -> CadResult<Vec<Vec<Point3>>> {
         Ok(self
             .shape(
-                font_key, text, origin, height, rotation, h_align, v_align, None,
+                font_key, text, origin, height, rotation, h_align, v_align, None, 1.0,
             )?
             .outlines)
     }

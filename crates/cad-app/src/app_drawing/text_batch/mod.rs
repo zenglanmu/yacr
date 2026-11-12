@@ -35,5 +35,4 @@ mod align_count;
 // TCIRCLE, TEXTMASK and TEXTUNMASK.
 mod geometry;
 
-#[cfg(test)]
 pub(crate) use shared::estimate_text_bounds;

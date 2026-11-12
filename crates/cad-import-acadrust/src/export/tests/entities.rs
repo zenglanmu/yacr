@@ -166,6 +166,7 @@ fn single_line_text_is_exact_and_newline_text_becomes_mtext() {
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
         wrap_width: None,
+        width_factor: 1.0,
     });
     assert!(matches!(&read_entities(&bytes)[0], EntityType::Text(_)));
     assert_eq!(report.counts.exact, 1);
@@ -180,6 +181,7 @@ fn single_line_text_is_exact_and_newline_text_becomes_mtext() {
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
         wrap_width: None,
+        width_factor: 1.0,
     });
     assert!(matches!(&read_entities(&bytes)[0], EntityType::MText(_)));
     assert_eq!(report.counts.converted, 1);
@@ -187,6 +189,42 @@ fn single_line_text_is_exact_and_newline_text_becomes_mtext() {
         .entries
         .iter()
         .any(|e| e.code == "export.converted.text_mtext"));
+}
+
+#[test]
+fn single_line_text_writes_the_width_factor_group_41() {
+    let (bytes, report) = export_one(SemanticGeometry::Text {
+        text: "HELLO".into(),
+        position: p(1.0, 2.0, 0.0),
+        style: StyleId(0),
+        height: 2.5,
+        rotation: 0.0,
+        font: None,
+        h_align: TextAlignH::Left,
+        v_align: TextAlignV::Baseline,
+        wrap_width: None,
+        width_factor: 2.5,
+    });
+    assert_eq!(report.counts.exact, 1);
+    match &read_entities(&bytes)[0] {
+        EntityType::Text(text) => {
+            assert_eq!(
+                text.width_factor, 2.5,
+                "the stored factor is written back as DXF group 41"
+            );
+        }
+        other => panic!("expected TEXT, got {other:?}"),
+    }
+    // The internal round trip reads the same factor back.
+    let reimported = import_bytes(&bytes);
+    let factor = reimported
+        .entities()
+        .find_map(|entity| match &entity.geometry {
+            SemanticGeometry::Text { width_factor, .. } => Some(*width_factor),
+            _ => None,
+        })
+        .expect("text reimports");
+    assert_eq!(factor, 2.5);
 }
 
 /// Export one `Text` geometry under an explicit source `type_key`.
@@ -209,6 +247,7 @@ fn export_text_as(type_key: &str, text: &str, wrap_width: Option<f64>) -> (Vec<u
             // type-key MTEXT stays `Exact`; baseline would report one.
             v_align: TextAlignV::Top,
             wrap_width,
+            width_factor: 1.0,
         },
     )
 }

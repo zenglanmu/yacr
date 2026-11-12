@@ -231,6 +231,7 @@ fn frame_geometries(
             // The cell is already sized from the declared width estimate; an
             // explicit wrap boundary would only risk wrapping a cell that fits.
             wrap_width: None,
+            width_factor: 1.0,
         });
         cell_left += *width;
     }

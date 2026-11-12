@@ -584,6 +584,7 @@ fn emit_leaf(
             h_align,
             v_align,
             wrap_width,
+            width_factor,
         } => {
             let style_name = ctx
                 .database
@@ -610,6 +611,13 @@ fn emit_leaf(
                 || text.contains("\\p")
                 || text.contains('\n');
             if is_mtext {
+                if *width_factor != 1.0 {
+                    reasons.push(
+                        "MTEXT has no width-factor group (DXF 41 is its reference-rectangle \
+                         width here); the horizontal text stretch is not exported"
+                            .into(),
+                    );
+                }
                 let mut mtext = MText::new();
                 // Verbatim: DXF MTEXT wants the raw `\P` paragraph mark, so the
                 // value is never rewritten to newlines here.
@@ -656,6 +664,9 @@ fn emit_leaf(
                 dxf_text.insertion_point = v3(*position);
                 dxf_text.height = *height;
                 dxf_text.rotation = *rotation;
+                // DXF TEXT group 41 is the horizontal width scale; the stored
+                // factor is written verbatim (the neutral 1.0 round-trips).
+                dxf_text.width_factor = *width_factor;
                 dxf_text.style = style_name;
                 dxf_text.horizontal_alignment = map_h_align(*h_align);
                 dxf_text.vertical_alignment = map_v_align(*v_align);

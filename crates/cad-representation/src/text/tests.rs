@@ -258,6 +258,7 @@ fn bundled_osifont_sfnt_glyphs_fill_faces_and_preserve_even_odd_holes() {
             TextAlignH::Left,
             TextAlignV::Baseline,
             None,
+            1.0,
         )
         .unwrap();
     assert!(
@@ -322,6 +323,7 @@ fn bundled_osifont_sfnt_glyphs_fill_faces_and_preserve_even_odd_holes() {
             TextAlignH::Center,
             TextAlignV::Middle,
             None,
+            1.0,
         )
         .unwrap();
     assert!(
@@ -435,6 +437,7 @@ fn outlines_a_real_shx_when_provided() {
             TextAlignH::Left,
             TextAlignV::Baseline,
             None,
+            1.0,
         )
         .unwrap();
     let polys = shaped.polylines;
@@ -849,6 +852,7 @@ fn shapes_mtext_runs_and_reports_approximations_when_font_provided() {
             TextAlignH::Left,
             TextAlignV::Baseline,
             None,
+            1.0,
         )
         .unwrap();
     // Two paragraphs plus a stacked-fraction run.
@@ -884,6 +888,7 @@ fn shapes_mtext_runs_and_reports_approximations_when_font_provided() {
             TextAlignH::Left,
             TextAlignV::Baseline,
             None,
+            1.0,
         )
         .unwrap();
     let plain = engine
@@ -943,6 +948,7 @@ fn committed_noto_cjk_cff_face_outlines_chinese_glyphs() {
             TextAlignH::Left,
             TextAlignV::Baseline,
             None,
+            1.0,
         )
         .expect("CJK text must shape through the committed face");
     assert!(shaped.has_renderable_content, "CJK run must be renderable");

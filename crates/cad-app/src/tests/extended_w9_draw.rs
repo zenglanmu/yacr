@@ -73,6 +73,7 @@ fn text_at(id: u128, content: &str, position: Point3) -> DbEntity {
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
             wrap_width: None,
+            width_factor: 1.0,
         },
         draw_order: id as i64,
     }

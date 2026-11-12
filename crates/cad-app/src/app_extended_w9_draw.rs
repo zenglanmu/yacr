@@ -283,6 +283,7 @@ impl Application {
                     h_align: TextAlignH::Center,
                     v_align: TextAlignV::Baseline,
                     wrap_width: None,
+                    width_factor: 1.0,
                 },
                 layer: first.layer,
                 space: first.space.clone(),

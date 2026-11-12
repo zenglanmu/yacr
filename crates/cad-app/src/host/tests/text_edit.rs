@@ -36,6 +36,7 @@ fn text_fixture() -> HostController {
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
             wrap_width: None,
+            width_factor: 1.0,
         },
         draw_order: 0,
     })
@@ -329,6 +330,7 @@ fn mtext_geometry(text: &str) -> SemanticGeometry {
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
         wrap_width: None,
+        width_factor: 1.0,
     }
 }
 
@@ -455,6 +457,7 @@ fn mixed_text_fixture() -> HostController {
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
             wrap_width: None,
+            width_factor: 1.0,
         },
         4,
     ))

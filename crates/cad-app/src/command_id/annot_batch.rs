@@ -102,27 +102,30 @@
 //! # `TEXTFIT`
 //!
 //! `TEXTFIT <target width>` acts on the current selection of directly
-//! addressable model-space `Text`/`MText` entities. The domain stores **no
-//! width-factor field**, so this command adjusts **only the glyph `height`** and
-//! uses the one declared estimate this batch shares with the 2D text batch:
+//! addressable model-space `Text`/`MText` entities. It changes **only** the
+//! stored horizontal width factor (DXF TEXT group 41) and uses the one declared
+//! estimate this batch shares with the 2D text batch:
 //!
 //! ```text
-//! estimated width = height × text.chars().count()
-//! new height      = target_width / text.chars().count()
+//! estimated unstretched width = height × text.chars().count()
+//! new width factor            = target_width / estimated unstretched width
 //! ```
 //!
-//! The height is therefore correct **for the estimate**, not for real glyph
-//! metrics; the box is axis-aligned and ignores rotation. AutoCAD's true width
-//! stretch (the width factor, group 41) is **NOT IMPLEMENTED**, and the command
-//! never claims it. Text with an empty string has no width estimate and is the
-//! named `textfit.empty_text` refusal.
+//! Height, position, justification, rotation, content and style are copied
+//! unchanged; only the factor moves, so the rendered advance is stretched. The
+//! result is exact **for the estimate**, not for real glyph metrics (the box is
+//! axis-aligned and ignores rotation): every written entity carries a
+//! `textfit.estimated_width` diagnostic naming the estimate and the factor,
+//! plus the batch-level `textfit.applied`. Text with an empty string has no
+//! width estimate and is the named `textfit.empty_text` refusal rather than an
+//! invented factor.
 //!
 //! Refusals (nothing written, no transaction): `textfit.needs_width` (a bare
 //! selector), `textfit.payload`, a non-finite or non-positive target
 //! (`textfit.bad_width`), `textfit.selection` (empty), `textfit.not_addressable`
 //! (another document, a block member or a sub-element), `textfit.target_missing`,
 //! `textfit.not_text` (a whole-command refusal, as in `SCALETEXT`) and
-//! `textfit.empty_text`. A selection that already stores the fitted height is
+//! `textfit.empty_text`. A selection that already stores the fitted factor is
 //! `textfit.unchanged` with no transaction. A real run updates every changed
 //! entity in **one transaction / one undo step**. Work-only.
 //!

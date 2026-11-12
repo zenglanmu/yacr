@@ -28,6 +28,7 @@
 use crate::dimension_synthesis::{add, is_finite_point, length, line_between, normalize, scale};
 use crate::{
     CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV, Transform3,
+    DEFAULT_TEXT_WIDTH_FACTOR,
 };
 
 /// Similarity tolerance for the table transform (the same ratio rule every
@@ -571,6 +572,8 @@ impl TableGeometry {
                         // Table cell text is placed at a fixed cell centre; the
                         // cell width is not a text wrap boundary.
                         wrap_width: None,
+                        // Table cells do not stretch their text.
+                        width_factor: DEFAULT_TEXT_WIDTH_FACTOR,
                     });
                 }
                 x += width;

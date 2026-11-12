@@ -768,6 +768,7 @@ impl Application {
             v_align: TextAlignV::Baseline,
             // Single-line TEXT creation has no width prompt.
             wrap_width: None,
+            width_factor: 1.0,
         };
         self.commit_new_entity(session, command, geometry, "create text")
     }
