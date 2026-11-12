@@ -527,7 +527,7 @@
   "draw.kind.gradient": "渐变色填充",
   "draw.kind.gradient.hint": "请选择至少一个位于 +Z 平面的闭合边界（圆、完整椭圆、闭合多段线，或首尾相接成闭合环的 LINE/ARC 边），然后运行 {command}：它会在一个撤销步内创建一个使用会话渐变参数的填充（默认双色线性）。没有实时预览、没有 -GRADIENT 选项提示，也不处理 .pat。",
   "draw.kind.hatchedit": "编辑填充",
-  "draw.kind.hatchedit.hint": "请选中恰好一个模型空间填充（ADDBOUNDARIES/REMOVEBOUNDARIES 还需选中边界实体），然后键入选项：{command} 支持 ANGLE <角度>、SCALE <比例>、SOLID、GRADIENT、ADDBOUNDARIES 与 REMOVEBOUNDARIES（其余选中的闭合实体转为环，或删除与之匹配的已存环；一步撤销）。图案名、颜色、特性、绘图次序与关联性均未实现。",
+  "draw.kind.hatchedit.hint": "请选中恰好一个模型空间填充（ADDBOUNDARIES/REMOVEBOUNDARIES 还需选中边界实体），然后键入选项：{command} 支持 PATTERN <内置图案名>、ANGLE <角度>、SCALE <比例>、SOLID、GRADIENT、ADDBOUNDARIES 与 REMOVEBOUNDARIES（其余选中的闭合实体转为环，或删除与之匹配的已存环；一步撤销）。任意用户 .pat 图案文件、颜色、特性、绘图次序与关联性均未实现。",
   "draw.kind.hatchedit.solid": "填充改为实体",
   "draw.kind.hatchedit.gradient": "填充改为渐变",
   "draw.kind.hatchedit.angle": "设置填充角度",

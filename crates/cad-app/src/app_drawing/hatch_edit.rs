@@ -13,6 +13,15 @@
 //! * `STYLE IGNORE|OUTER|NORMAL` — the DXF group 75 island-detection style;
 //! * `ANGLE` / `SCALE` / `PATTERNTYPE` — the pattern properties (pattern fill
 //!   only for angle/scale);
+//! * `PATTERN <name>` — replace the fill with the named built-in `.pat` library
+//!   pattern, keeping the hatch's stored pattern angle/scale/`double` and
+//!   recording DXF group 76 as `Predefined` (`1`, what the HATCH creation path
+//!   writes for the same library name). Pattern fill only: a solid/gradient fill
+//!   is `hatchedit.pattern_requires_pattern`. The name set is the one
+//!   [`super::hatch_pattern::PatternLibrary`] table (the `.pat` loader pinned to
+//!   `cad_domain::hatch::predefined_patterns`), matched ASCII
+//!   case-insensitively; an unknown name is `hatchedit.unknown_pattern` and a
+//!   missing name is `hatchedit.needs_pattern_name`;
 //! * `SOLID` / `GRADIENT` — the fill variant;
 //! * `COLOR <aci>` / `COLOR BYLAYER` — the entity display colour;
 //! * `TRANSPARENCY <percent>` / `TRANSPARENCY BYLAYER` — the entity opacity
@@ -28,7 +37,12 @@
 //! Named refusals (global scope, before the selection is read): `ORIGIN`
 //! (`hatchedit.missing_field`: no pattern-origin field), `ASSOCIATE` /
 //! `DISASSOCIATE` (`hatchedit.no_association`) and `ANNOTATIVE`
-//! (`hatchedit.annotative_unsupported`).
+//! (`hatchedit.annotative_unsupported`). `PATTERN <name>` resolves its name
+//! against the built-in `.pat` library there too: an empty name is
+//! `hatchedit.needs_pattern_name`, an unknown name is
+//! `hatchedit.unknown_pattern` (with the accepted names), and both write
+//! nothing. A Solid/Gradient fill is the per-target
+//! `hatchedit.pattern_requires_pattern` refusal.
 //!
 //! `ADDBOUNDARIES` / `REMOVEBOUNDARIES` use the pre-selection model: the
 //! selection must hold exactly **one** hatch (the target) plus one or more
@@ -54,6 +68,8 @@
 
 use super::*;
 
+use super::hatch_edit_labels::option_label;
+use super::hatch_edit_pattern_name::resolve_builtin_pattern;
 use super::hatch_parameters::default_gradient;
 use super::hatch_utilities::loop_world_ring;
 use crate::{HatchDrawOrder, HatchEditOption};
@@ -91,57 +107,6 @@ fn unchanged(option: &HatchEditOption) -> CommandOutcome {
         }],
         measurement: None,
         point_report: None,
-    }
-}
-
-fn option_label(option: &HatchEditOption) -> String {
-    match option {
-        HatchEditOption::Angle(degrees) => format!("ANGLE {degrees}"),
-        HatchEditOption::Scale(factor) => format!("SCALE {factor}"),
-        HatchEditOption::PatternType(pattern_type) => {
-            format!("PATTERNTYPE {}", pattern_type_label(*pattern_type))
-        }
-        HatchEditOption::Style(style) => format!("STYLE {}", style_label(*style)),
-        HatchEditOption::DrawOrder(order) => format!("DRAWORDER {}", draw_order_label(*order)),
-        HatchEditOption::Solid => "SOLID".into(),
-        HatchEditOption::Gradient => "GRADIENT".into(),
-        HatchEditOption::RecreateBoundary => "RECREATEBOUNDARY".into(),
-        HatchEditOption::SeparateHatches => "SEPARATE".into(),
-        HatchEditOption::Color(aci) => format!("COLOR {aci}"),
-        HatchEditOption::ColorByLayer => "COLOR BYLAYER".into(),
-        HatchEditOption::Transparency(percent) => format!("TRANSPARENCY {percent}"),
-        HatchEditOption::TransparencyByLayer => "TRANSPARENCY BYLAYER".into(),
-        HatchEditOption::Layer(name) => format!("LAYER {name}"),
-        HatchEditOption::Origin => "ORIGIN".into(),
-        HatchEditOption::Associate => "ASSOCIATE".into(),
-        HatchEditOption::Disassociate => "DISASSOCIATE".into(),
-        HatchEditOption::Annotative => "ANNOTATIVE".into(),
-        HatchEditOption::AddBoundaries => "ADDBOUNDARIES".into(),
-        HatchEditOption::RemoveBoundaries => "REMOVEBOUNDARIES".into(),
-    }
-}
-
-fn pattern_type_label(pattern_type: HatchPatternType) -> &'static str {
-    match pattern_type {
-        HatchPatternType::UserDefined => "USER",
-        HatchPatternType::Predefined => "PREDEFINED",
-        HatchPatternType::Custom => "CUSTOM",
-    }
-}
-
-fn style_label(style: HatchStyle) -> &'static str {
-    match style {
-        HatchStyle::Normal => "NORMAL",
-        HatchStyle::Outer => "OUTER",
-        HatchStyle::Ignore => "IGNORE",
-    }
-}
-
-fn draw_order_label(order: HatchDrawOrder) -> &'static str {
-    match order {
-        HatchDrawOrder::BehindAll => "BEHIND",
-        HatchDrawOrder::InFrontOfAll => "FRONT",
-        HatchDrawOrder::BehindBoundary => "BOUNDARY",
     }
 }
 
@@ -193,7 +158,10 @@ impl Application {
     /// (`hatchedit.duplicate`), a ref that is not directly addressable
     /// model-space (`hatchedit.not_addressable`), another geometry kind
     /// (`hatchedit.not_hatch`), ANGLE/SCALE on a Solid/Gradient fill
-    /// (`hatchedit.not_pattern`), a bad angle/scale/colour/transparency/layer
+    /// (`hatchedit.not_pattern`), PATTERN on a Solid/Gradient fill
+    /// (`hatchedit.pattern_requires_pattern`), an empty/unknown pattern name
+    /// (`hatchedit.needs_pattern_name`/`unknown_pattern`), a bad
+    /// angle/scale/colour/transparency/layer
     /// (`hatchedit.angle`/`scale`/`color`/`transparency`/`unknown_layer`) and
     /// the global capability refusals listed in the module docs.
     pub(crate) fn hatch_edit(
@@ -254,6 +222,12 @@ impl Application {
             }
             _ => {}
         }
+        // The `PATTERN <name>` library lookup is global: an unknown (or missing)
+        // name is refused before the selection is read and opens no transaction.
+        let pattern_definition = match &option {
+            HatchEditOption::Pattern(name) => Some(resolve_builtin_pattern(name)?),
+            _ => None,
+        };
 
         let references = session.selection.refs();
         if references.is_empty() {
@@ -357,6 +331,43 @@ impl Application {
                             &target.hatch,
                             HatchFill::Pattern(changed),
                             target.hatch.pattern_type(),
+                        ),
+                    );
+                }
+            }
+            HatchEditOption::Pattern(_) => {
+                let definition =
+                    pattern_definition.expect("the pattern name was resolved before the selection");
+                for target in &targets {
+                    let HatchFill::Pattern(pattern) = target.hatch.fill() else {
+                        return Err(unsupported(
+                            "pattern_requires_pattern",
+                            format!(
+                                "HATCHEDIT PATTERN applies to a pattern fill only; entity {} \
+                                 stores {}",
+                                target.entity.id.0,
+                                fill_kind(target.hatch.fill())
+                            ),
+                        ));
+                    };
+                    // The library entry supplies the name and the definition rows
+                    // only: the hatch keeps its stored angle (already radians),
+                    // scale and `HPDOUBLE` flag exactly.
+                    let replaced = definition.to_hatch_pattern_radians(
+                        pattern.scale,
+                        pattern.angle,
+                        pattern.double,
+                    );
+                    if pattern == &replaced {
+                        continue;
+                    }
+                    push_geometry_change(
+                        &mut changes,
+                        target,
+                        rebuild(
+                            &target.hatch,
+                            HatchFill::Pattern(replaced),
+                            HatchPatternType::Predefined,
                         ),
                     );
                 }

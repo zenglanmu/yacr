@@ -1,7 +1,7 @@
 // HATCHEDIT (AutoCAD 2026) affordance contracts: the typed v1 subset.
 //
 // `HATCHEDIT` is one canonical selector whose option is typed (`ANGLE`,
-// `SCALE`, `SOLID`, `GRADIENT`), so the chrome must:
+// `SCALE`, `PATTERN`, `SOLID`, `GRADIENT`), so the chrome must:
 //   * carry one catalog row and one hatch-family split button on Annotate;
 //   * admit the option forms through `ARGUMENT_COMMANDS.HATCHEDIT` (never a
 //     second name list and never a fabricated `HATCHEDIT SOLID` vocabulary row);
@@ -89,6 +89,9 @@ test('HATCHEDIT option forms are argument grammar, not extra command names', () 
     'HATCHEDIT ANGLE -22.5',
     'HATCHEDIT SCALE 2',
     'HATCHEDIT SCALE 0.5',
+    'HATCHEDIT PATTERN ANSI31',
+    'HATCHEDIT PATTERN nosuchname',
+    'hatchedit pattern ansi31',
     'HATCHEDIT ADDBOUNDARIES',
     'HATCHEDIT REMOVEBOUNDARIES',
     'hatchedit angle 30',
@@ -101,6 +104,14 @@ test('HATCHEDIT option forms are argument grammar, not extra command names', () 
   assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('gradient'), true);
   assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('ANGLE 45'), true);
   assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('SCALE 2'), true);
+  assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('PATTERN ANSI31'), true);
+  assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('pattern ansi31'), true);
+  assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('PATTERN nosuchname'), true);
+  assert.equal(
+    ARGUMENT_COMMANDS.HATCHEDIT.parse('PATTERN ANSI 31'),
+    false,
+    'a pattern name is one token',
+  );
   assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('ADDBOUNDARIES'), true);
   assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse('REMOVEBOUNDARIES'), true);
   for (const argument of [
@@ -121,13 +132,19 @@ test('HATCHEDIT option forms are argument grammar, not extra command names', () 
   ]) {
     assert.equal(ARGUMENT_COMMANDS.HATCHEDIT.parse(argument), false, argument);
   }
-  for (const argument of ['PATTERN', 'SCALE 0', 'ANGLE 1e3']) {
+  for (const argument of ['PATTERN', 'PATTERN ANSI 31', 'SCALE 0', 'ANGLE 1e3']) {
     assert.equal(
       admitCommandText(`HATCHEDIT ${argument}`, { status: loaded }).kind,
       'unsupported',
       argument,
     );
   }
+  // An unknown name is still admitted locally: the name list lives in the host,
+  // which answers with `hatchedit.unknown_pattern` rather than the chrome
+  // inventing a second vocabulary.
+  const unknownPattern = admitCommandText('HATCHEDIT PATTERN NOSUCHNAME', { status: loaded });
+  assert.equal(unknownPattern.kind, 'admitted');
+  assert.equal(unknownPattern.command, 'HATCHEDIT PATTERN NOSUCHNAME');
 
   // A bare HATCHEDIT is admitted by base name: the host answers with its
   // explicit `hatchedit.needs_option` refusal, never a defaulted option.
@@ -177,9 +194,10 @@ test('HATCHEDIT copy names the implemented forms and the unimplemented dialog fi
   assert.match(en['draw.kind.hatchedit.hint'], /SCALE/);
   assert.match(en['draw.kind.hatchedit.hint'], /SOLID/);
   assert.match(en['draw.kind.hatchedit.hint'], /GRADIENT/);
-  assert.match(en['draw.kind.hatchedit.hint'], /Pattern/);
+  assert.match(en['draw.kind.hatchedit.hint'], /PATTERN <built-in name>/);
   assert.match(en['draw.kind.hatchedit.hint'], /Properties/);
   assert.match(en['draw.kind.hatchedit.hint'], /associativity/i);
+  assert.match(en['draw.kind.hatchedit.hint'], /\.pat/);
   assert.match(en['draw.kind.hatchedit.hint'], /not implemented/i);
   assert.match(en['draw.kind.hatchedit.hint'], /\{command\}/);
 });

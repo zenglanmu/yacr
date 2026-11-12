@@ -1980,3 +1980,8 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `WALKFLYSETTINGS` | **部分实现（具名拒绝）**：`walkflysettings.unsupported: no 3D walk/fly navigation model` | 不写库/不升修订/不入历史 |
 | `WEBLOAD` | **部分实现（具名拒绝）**：`webload.unsupported: no JavaScript/web-load runtime` | 不写库/不升修订/不入历史 |
 | `WMFOPTS` | **部分实现（具名拒绝）**：`wmfopts.unsupported: no Windows metafile import model (WMFIN is not implemented)` | 不写库/不升修订/不入历史 |
+### 2026-11-12 HATCHEDIT 图案名（Wave 29b）
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `HATCHEDIT` | 部分实现 | 新增 `PATTERN <name>`：按名称从现有 `.pat` 库替换图案填充，保留 hatch 的 angle/scale/double，一条事务/一步撤销 | 任意用户 `.pat` 图案文件需宿主文件 I/O；未知名/缺名/实心/渐变分别 `hatchedit.unknown_pattern`/`needs_pattern_name`/`pattern_requires_pattern`；无交互对话框 |

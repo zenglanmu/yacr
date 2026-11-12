@@ -1,5 +1,24 @@
 AD
 
+## 2026-11-12 真实 2D 升级（2/5）：HATCHEDIT 图案名通道
+
+- **行为**：`HATCHEDIT PATTERN <name>` 从现有 `.pat` 派生库按名称替换图案填充；保留 hatch 的
+  angle/scale/double 与环/样式/种子/平面/显示属性；一条事务/一步撤销。名称集合以
+  `cad_domain` 的库为唯一权威（解析器契约测试遍历全部名称），解析器不复制名单。
+- **拒绝**：`hatchedit.needs_pattern_name`（cad-ui-core 预 IPC 与 cad-app 双侧）、
+  `hatchedit.unknown_pattern`（列出库中名称）、`hatchedit.pattern_requires_pattern`
+  （实心/渐变不静默转换）；写入前拒绝、零事务。
+- **UI**：`apps/desktop-ui/src/commands/argument-commands.ts` 的 HATCHEDIT 本地准入已放行
+  `PATTERN <单 token>`（不复制名称表，未知名称交宿主判定）；`draw.kind.hatchedit.hint`
+  中英双语更新为“内置图案名可用、任意用户 .pat 未接入”。
+- **边界**：任意用户 `.pat` 文件仍需宿主文件 I/O（`hatch.pattern_file_*` 仍不可达）；
+  无交互 Hatch Edit 对话框；GUI/像素/GPU 未验证。
+- **证据**：`cargo test -p cad-app hatch`（135）、`cargo test -p cad-app --locked`（2573）、
+  `cargo test -p cad-ui-core hatchedit`、workspace `cargo check`/clippy、fmt、
+  `(cd apps/desktop-ui && npm test)`（1552）、`check-i18n`（2899 keys）、
+  `check-command-docs`/`check-file-size`/`check-architecture` 全过。
+  **NOT RUN**：全量 workspace 测试、wasm、GUI/GPU/像素/真机。
+
 ## 2026-11-12 真实 2D 升级（1/5）：TRIM 支持 LWPOLYLINE 目标
 
 - **行为**：`TRIM` 的 `SemanticGeometry::Polyline` 目标真实可用（开放/闭合）。每个线段按其真实几何

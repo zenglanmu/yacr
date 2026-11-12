@@ -1,15 +1,17 @@
 //! `HATCHEDIT` (AutoCAD 2026) vocabulary: the typed option subset.
 //!
-//! Pins the argument grammar (`STYLE`, `ANGLE`, `SCALE`, `PATTERNTYPE`, `SOLID`,
-//! `GRADIENT`, `COLOR`, `TRANSPARENCY`, `LAYER`, `DRAWORDER`,
-//! `RECREATEBOUNDARY`, `SEPARATE` plus the named-refusal forms), the stable
-//! invalid-argument refusal, the Work-only capability and the one-canonical-
-//! selector rule (the option words are grammar, not names).
+//! Pins the argument grammar (`STYLE`, `ANGLE`, `SCALE`, `PATTERN`,
+//! `PATTERNTYPE`, `SOLID`, `GRADIENT`, `COLOR`, `TRANSPARENCY`, `LAYER`,
+//! `DRAWORDER`, `RECREATEBOUNDARY`, `SEPARATE` plus the named-refusal forms),
+//! the stable invalid-argument refusal, the two `PATTERN` name refusals, the
+//! Work-only capability and the one-canonical-selector rule (the option words
+//! are grammar, not names).
 
 use super::super::super::*;
 use super::super::test_support::*;
 
 use cad_app::{HatchDrawOrder, HatchEditOption};
+use cad_domain::hatch::predefined_patterns;
 use cad_domain::{HatchPatternType, HatchStyle};
 
 #[test]
@@ -25,6 +27,8 @@ fn hatchedit_is_the_declared_work_only_typed_subset() {
         ("scale 0.5", HatchEditOption::Scale(0.5)),
         ("STYLE OUTER", HatchEditOption::Style(HatchStyle::Outer)),
         ("style ignore", HatchEditOption::Style(HatchStyle::Ignore)),
+        ("PATTERN ANSI31", HatchEditOption::Pattern("ANSI31".into())),
+        ("pattern ansi31", HatchEditOption::Pattern("ansi31".into())),
         (
             "PATTERNTYPE PREDEFINED",
             HatchEditOption::PatternType(HatchPatternType::Predefined),
@@ -55,18 +59,18 @@ fn hatchedit_is_the_declared_work_only_typed_subset() {
         ("ADDBOUNDARIES", HatchEditOption::AddBoundaries),
         ("REMOVEBOUNDARIES", HatchEditOption::RemoveBoundaries),
     ] {
-        assert_eq!(
-            parse_hatchedit_argument(argument),
-            Some(option),
-            "{argument}"
-        );
+        assert_eq!(parse_hatchedit_argument(argument), Ok(option), "{argument}");
     }
     // No other AutoCAD dialog field, option stack, missing value, zero/negative
-    // scale, out-of-range colour/transparency, exponent or garbage.
+    // scale, out-of-range colour/transparency, exponent or garbage. A bare
+    // `PATTERN` and an unknown name are **not** malformed: they have named
+    // refusals of their own (checked below).
     for refused in [
         "",
-        "PATTERN",
         "PROPERTIES",
+        "PATTERN?",
+        "PATTERNLIST",
+        "PATTERN ANSI 31",
         "COLOR",
         "COLOR 0",
         "COLOR 256",
@@ -90,11 +94,24 @@ fn hatchedit_is_the_declared_work_only_typed_subset() {
         "SOLID 1",
         "GRADIENT X",
     ] {
-        assert_eq!(parse_hatchedit_argument(refused), None, "{refused:?}");
+        assert_eq!(
+            parse_hatchedit_argument(refused),
+            Err(HatchEditArgumentError::Malformed),
+            "{refused:?}"
+        );
     }
+    assert_eq!(
+        parse_hatchedit_argument("PATTERN"),
+        Err(HatchEditArgumentError::MissingPatternName)
+    );
+    assert_eq!(
+        parse_hatchedit_argument("pattern nosuchname"),
+        Err(HatchEditArgumentError::UnknownPattern("nosuchname".into()))
+    );
     // The refusal names the implemented forms and the named refusals.
-    let reason = invalid_hatchedit_argument_reason("HATCHEDIT PATTERN");
+    let reason = invalid_hatchedit_argument_reason("HATCHEDIT WAT");
     assert!(reason.contains("STYLE"), "{reason}");
+    assert!(reason.contains("PATTERN"), "{reason}");
     assert!(reason.contains("COLOR"), "{reason}");
     assert!(reason.contains("RECREATEBOUNDARY"), "{reason}");
     assert!(reason.contains("named refusals"), "{reason}");
@@ -106,6 +123,10 @@ fn hatchedit_is_the_declared_work_only_typed_subset() {
     assert_eq!(
         typed_command_argument("HATCHEDIT STYLE OUTER"),
         Some(("HATCHEDIT", "STYLE OUTER"))
+    );
+    assert_eq!(
+        typed_command_argument("HATCHEDIT PATTERN ANSI31"),
+        Some(("HATCHEDIT", "PATTERN ANSI31"))
     );
     assert_eq!(
         typed_command_argument("HATCHEDIT"),
@@ -124,9 +145,55 @@ fn hatchedit_is_the_declared_work_only_typed_subset() {
     let error = session.command("HATCHEDIT").unwrap_err();
     assert!(error.contains("hatchedit.needs_option"), "{error}");
     let error = session.command("HATCHEDIT PATTERN").unwrap_err();
-    assert!(error.contains("HATCHEDIT needs"), "{error}");
+    assert!(error.contains("hatchedit.needs_pattern_name"), "{error}");
+    assert!(
+        !error.contains("hatchedit.selection"),
+        "the missing name is refused before IPC: {error}"
+    );
+    let error = session.command("HATCHEDIT PATTERN NOSUCH").unwrap_err();
+    assert!(error.contains("hatchedit.unknown_pattern"), "{error}");
+    assert!(error.contains("NOSUCH"), "{error}");
+    assert!(
+        !error.contains("hatchedit.selection"),
+        "the unknown name is refused before IPC: {error}"
+    );
+    let error = session.command("HATCHEDIT PATTERN ANSI31").unwrap_err();
+    assert!(error.contains("hatchedit.selection"), "{error}");
     let error = session.command("HATCHEDIT ANGLE 45").unwrap_err();
     assert!(error.contains("hatchedit.selection"), "{error}");
     let error = session.command("HATCHEDIT SCALE 0").unwrap_err();
     assert!(error.contains("HATCHEDIT needs"), "{error}");
+}
+
+/// The documented name channel and the parser agree, and the accepted-name list
+/// comes from the domain table (no second list in `cad-ui-core`).
+#[test]
+fn hatchedit_pattern_names_come_from_the_domain_library() {
+    let library = predefined_patterns();
+    assert!(!library.is_empty(), "the built-in library is not empty");
+    for pattern in library {
+        // The canonical spelling and any mixed case are both admitted as grammar.
+        assert_eq!(
+            parse_hatchedit_argument(&format!("PATTERN {}", pattern.name)),
+            Ok(HatchEditOption::Pattern(pattern.name.into())),
+            "{}",
+            pattern.name
+        );
+        assert_eq!(
+            parse_hatchedit_argument(&format!("pattern {}", pattern.name.to_lowercase())),
+            Ok(HatchEditOption::Pattern(pattern.name.to_lowercase())),
+            "{}",
+            pattern.name
+        );
+    }
+    // The unknown-name refusal lists exactly the names the domain table holds,
+    // so the two cannot drift apart.
+    let reason = unknown_pattern_reason("NOPE");
+    assert!(
+        reason.starts_with("hatchedit.unknown_pattern: 'NOPE'"),
+        "{reason}"
+    );
+    for pattern in library {
+        assert!(reason.contains(pattern.name), "{reason}");
+    }
 }

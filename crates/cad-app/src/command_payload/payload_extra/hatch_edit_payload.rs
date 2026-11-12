@@ -34,6 +34,16 @@ pub enum HatchEditOption {
     Scale(f64),
     /// `PATTERNTYPE USER|PREDEFINED|CUSTOM`: set DXF group 76.
     PatternType(HatchPatternType),
+    /// `PATTERN <name>`: replace the fill with the named built-in `.pat`
+    /// library pattern, keeping the hatch's stored pattern angle/scale/`double`
+    /// and recording the fill as a predefined pattern (`76=1`).
+    ///
+    /// A pattern fill is required (a solid/gradient fill is
+    /// `hatchedit.pattern_requires_pattern`), the name is matched
+    /// case-insensitively against the one library table, and an unknown name is
+    /// `hatchedit.unknown_pattern`. A user `acad.pat`/`acadiso.pat` entry is not
+    /// selectable yet (host file I/O).
+    Pattern(String),
     /// `STYLE IGNORE|OUTER|NORMAL`: set the island-detection style (group 75).
     Style(HatchStyle),
     /// `DRAWORDER BEHIND|FRONT|BOUNDARY`: rewrite the stored draw order.

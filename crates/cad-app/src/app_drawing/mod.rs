@@ -68,6 +68,8 @@ mod hatch;
 mod hatch_boundary;
 mod hatch_edit;
 mod hatch_edit_boundaries;
+mod hatch_edit_labels;
+mod hatch_edit_pattern_name;
 mod hatch_internal_point;
 mod hatch_parameters;
 // The AutoCAD `.pat` pattern library (HATCH predefined/custom definitions).
@@ -109,6 +111,9 @@ mod mstretch;
 mod mtext_create;
 mod offset_polyline;
 mod offset_polyline_bulge;
+// OFFSET with an explicit fixed distance (the bare `Through` planner plus the
+// requested distance), split out of `trim_extend` where it had drifted.
+mod offset_fixed;
 // The `OFFSETGAPTYPE` fillet/chamfer fill geometry, split out so both offset
 // arms stay inside the code-size limit.
 mod offset_gap;
@@ -159,6 +164,7 @@ mod trim_curves;
 // inside the code-size limit.
 mod trim_cuts;
 mod trim_extend;
+mod trim_polyline;
 mod trim_spline;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};

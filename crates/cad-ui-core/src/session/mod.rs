@@ -136,7 +136,10 @@ pub use self::events::{
     CanvasJson, EventBus, EventSink, StatusFrame, EVENT_RING_CAPACITY,
 };
 pub use self::fonts::{CadFont, CadFonts};
-pub use self::hatchedit::{invalid_hatchedit_argument_reason, parse_hatchedit_argument};
+pub use self::hatchedit::{
+    invalid_hatchedit_argument_reason, needs_pattern_name_reason, parse_hatchedit_argument,
+    unknown_pattern_reason, HatchEditArgumentError,
+};
 pub use self::layers::{CadLayer, CadLayerColor, CadLayerWrite, CadLayers};
 pub use self::performance::CadPerformance;
 pub use self::profile::{

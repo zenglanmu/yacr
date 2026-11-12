@@ -527,7 +527,7 @@
   "draw.kind.gradient": "Gradient",
   "draw.kind.gradient.hint": "Select at least one closed boundary (a circle, a full ellipse, a closed polyline, or LINE/ARC edges forming a closed loop) on the +Z plane, then run {command}: it creates one hatch with the session gradient fill (two-colour linear by default) in one undo step. There is no live preview, no -GRADIENT option prompt and no .pat handling.",
   "draw.kind.hatchedit": "Edit hatch",
-  "draw.kind.hatchedit.hint": "Select exactly one model-space hatch (plus boundary entities for ADDBOUNDARIES/REMOVEBOUNDARIES), then type the option: {command} implements ANGLE <degrees>, SCALE <factor>, SOLID, GRADIENT, ADDBOUNDARIES and REMOVEBOUNDARIES (the other selected closed entities become loops, or the stored loops matching them are removed, in one undo step). Pattern name, Color, Properties, Draw order and associativity are not implemented.",
+  "draw.kind.hatchedit.hint": "Select exactly one model-space hatch (plus boundary entities for ADDBOUNDARIES/REMOVEBOUNDARIES), then type the option: {command} implements PATTERN <built-in name>, ANGLE <degrees>, SCALE <factor>, SOLID, GRADIENT, ADDBOUNDARIES and REMOVEBOUNDARIES (the other selected closed entities become loops, or the stored loops matching them are removed, in one undo step). Arbitrary user .pat files, Color, Properties, Draw order and associativity are not implemented.",
   "draw.kind.hatchedit.solid": "Make hatch solid",
   "draw.kind.hatchedit.gradient": "Make hatch gradient",
   "draw.kind.hatchedit.angle": "Set hatch angle",

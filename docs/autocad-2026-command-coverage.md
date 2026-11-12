@@ -117,6 +117,8 @@
 
 > **2026-11-12 增补（Wave 29，真实 2D 升级，无新命令名）**：`TRIM` 新增 **LWPOLYLINE 目标**（开放/闭合；bulge 还原为精确 ARC 后求交，保留拾取投影所在窗口，子弧 bulge 精确保留；一条事务/一步撤销；EXTEND 的 POLYLINE 目标仍按名拒绝）。该升级不改变 981 条状态总计，仍计入 **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 契约测试，GUI/GPU/像素 NOT VERIFIED。
 
+> **2026-11-12 增补（Wave 29b）**：`HATCHEDIT` 新增 **`PATTERN <内置图案名>`**（按名称从现有 `.pat` 库取图案，保留 hatch 的角度/比例/double；未知名 `hatchedit.unknown_pattern`、缺名 `hatchedit.needs_pattern_name`、实心/渐变 `hatchedit.pattern_requires_pattern` 均具名拒绝；一条事务/一步撤销）。任意用户 `.pat` 图案文件仍需宿主文件 I/O，未接入。不影响 981 条状态总计。
+
 ### 纪律
 
 - 2D 优先；3D/实体/约束/表格/外部参照/点云/渲染/发布类命令不在本 100 条内。
@@ -681,7 +683,7 @@
 | `GROUP` | 部分实现 | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
 | `GROUPEDIT` | 部分实现 | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；单次会话变更；不写实体/数据库 |
 | `HATCH` | 部分实现 | 整实体闭合边界 + LINE/ARC 边链；**本轮新增 `.pat` 解析器/名称解析**（内置三项同源解析）；自定义图案仍无命令行选择通道（`hatchPattern` 闭集 1..=3）；无关联性/实时预览 |
-| `HATCHEDIT` | 部分实现 | 多目标；`Style`/`PatternType`（含 **CUSTOM 76=2**）/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate`/**Add-Remove Boundaries**；`Origin`/`Associate`/`Annotative` 未建模 |
+|  `HATCHEDIT` | 部分实现 | 多目标；`Style`/`PatternType`（含 **CUSTOM 76=2**）/**`PATTERN <内置图案名>`**（现有 `.pat` 库；任意用户 `.pat` 文件需宿主 I/O）/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate`/**Add-Remove Boundaries**；`Origin`/`Associate`/`Annotative` 未建模 |
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 预选择 hatch；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；无关联/无选项提示 |
 | `HATCHSETBOUNDARY` | 部分实现 | 恰好一个 hatch + 一条闭合 Polyline/Circle/完整 Ellipse，共面性校验；用 `HatchGeometry::new` 重建、丢弃旧种子；失败 `hatchsetboundary.rebuild_failed` |
 | `HATCHSETORIGIN` | 部分实现 | 恒按 `hatchsetorigin.missing_field` 拒绝（`HatchGeometry` 无图案原点字段）；不写入 |
@@ -1616,7 +1618,7 @@
 | 413 | `-HATCH` | 部分实现 | Uses command prompts to fill an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | `HATCH` 的命令行拼写；同一实现与边界。 |
 | 414 | `HATCH` | 部分实现 | Fills an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | 整实体闭合边界 + LINE/ARC 边链；**本轮新增 `.pat` 解析器/名称解析**（内置三项同源解析）；自定义图案仍无命令行选择通道（`hatchPattern` 闭集 1..=3）；无关联性/实时预览 |
 | 415 | `-HATCHEDIT` | 部分实现 | From the Command prompt, modifies existing hatches or fills. | `HATCHEDIT` 的命令行拼写；同一实现与边界。 |
-| 416 | `HATCHEDIT` | 部分实现 | Modifies an existing hatch or fill. | 多目标；`Style`/`PatternType`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder Behind\\|Front`/`Recreate Boundary`/`Separate Hatches`；`Add Boundaries`/`Remove Boundaries` 真实（一个 hatch + 其余选择为边界，按 points+bulges 匹配移除），一条事务/一步撤销；Origin 无字段、Associate/Annotative 无模型、Boundary draw order 拒绝 |
+|  416 | `HATCHEDIT` | 部分实现 | Modifies an existing hatch or fill. | 多目标；`Style`/`PatternType`/**`PATTERN <内置图案名>`**（按名称取现有 `.pat` 库，保留角度/比例/double；任意用户 `.pat` 文件未接入）/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder Behind|Front`/`Recreate Boundary`/`Separate Hatches`；`Add Boundaries`/`Remove Boundaries` 真实（一个 hatch + 其余选择为边界，按 points+bulges 匹配移除），一条事务/一步撤销；Origin 无字段、Associate/Annotative 无模型、Boundary draw order 拒绝 |
 | 417 | `HATCHGENERATEBOUNDARY` | 部分实现 | Creates a non-associated polyline around a selected hatch. | 预选择输入（不弹 Select objects 选项）；每个 hatch loop 生成一条同层同空间的非关联闭合多段线（含内岛、保留 bulge）；源 hatch 保留；无关联性 |
 | 418 | `HATCHSETBOUNDARY` | 部分实现 | Redefines a selected hatch or fill to conform to a different closed boundary. | 恰好一个 hatch + 一条闭合 Polyline/Circle/完整 Ellipse，共面性校验；用 `HatchGeometry::new` 重建、丢弃旧种子；失败 `hatchsetboundary.rebuild_failed` |
 | 419 | `HATCHSETORIGIN` | 部分实现 | Controls the starting location of hatch pattern generation for a selected hatch. | 恒按 `hatchsetorigin.missing_field` 拒绝（`HatchGeometry` 无图案原点字段）；不写入 |

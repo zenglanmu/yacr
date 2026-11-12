@@ -15,13 +15,15 @@
 //! `acad.pat`/`acadiso.pat` file goes through the same [`PatternLibrary::parse`]
 //! and [`PatternLibrary::resolve`].
 //!
-//! **Declared boundary**: this build has no pattern-name or pattern-file tool
-//! parameter (`hatchPattern` is a closed **1-based index** over the implemented
-//! library), so a user `.pat` entry cannot yet be *selected* from the command
-//! line. The loader, the parse refusals (`hatch.pattern_file_*`) and the by-name
-//! resolution (`hatch.pattern_missing`) are complete and exercised; wiring a
-//! name-entry prompt (or extending the channel) is the remaining step. Until then
-//! no user pattern is silently accepted, approximated or clamped onto a built-in.
+//! **Declared boundary**: the HATCH tool parameter `hatchPattern` is a closed
+//! **1-based index** over the implemented library, and `HATCHEDIT PATTERN
+//! <name>` selects a **built-in** name from it. A user `.pat` entry cannot yet
+//! be *selected*: it needs host file I/O (there is no pattern-file parameter or
+//! session library), so the loader, the parse refusals
+//! (`hatch.pattern_file_*`) and the by-name resolution
+//! (`hatch.pattern_missing`) are complete and exercised but only the built-in
+//! library is reachable from the command line. Until that channel exists no user
+//! pattern is silently accepted, approximated or clamped onto a built-in.
 //!
 //! Split into its own file to keep every code file inside the 1000-line gate.
 
@@ -122,9 +124,25 @@ impl PatternDefinition {
         angle_deg: f64,
         double: bool,
     ) -> HatchPattern {
+        self.to_hatch_pattern_radians(scale, angle_deg.to_radians(), double)
+    }
+
+    /// Build the domain pattern from an **already-stored** angle in radians.
+    ///
+    /// `HATCHEDIT PATTERN` keeps the hatch's stored group 52 verbatim, so the
+    /// degrees → radians conversion of the creation path must not be applied
+    /// twice (a round trip through `to_degrees` is not guaranteed bit-identical,
+    /// which would also defeat the "repeating the same edit changes nothing"
+    /// contract). Everything else matches [`Self::to_hatch_pattern`].
+    pub(super) fn to_hatch_pattern_radians(
+        &self,
+        scale: f64,
+        angle_radians: f64,
+        double: bool,
+    ) -> HatchPattern {
         HatchPattern {
             name: self.name.clone(),
-            angle: angle_deg.to_radians(),
+            angle: angle_radians,
             scale,
             double,
             lines: self

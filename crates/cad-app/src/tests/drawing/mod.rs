@@ -317,6 +317,7 @@ mod grip_fixture;
 mod hatch;
 mod hatch_edit;
 mod hatch_edit_boundaries;
+mod hatch_edit_pattern;
 mod hatch_gradient;
 mod hatch_internal_point;
 mod hatch_predefined;

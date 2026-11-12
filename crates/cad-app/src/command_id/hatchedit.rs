@@ -29,6 +29,7 @@
 //! | `STYLE IGNORE/OUTER/NORMAL` | set the DXF group 75 island style |
 //! | `ANGLE <degrees>` | set the pattern angle (pattern fill only) |
 //! | `SCALE <factor>` | set the pattern scale > 0 (pattern fill only) |
+//! | `PATTERN <name>` | replace the fill with that built-in `.pat` pattern (pattern fill only) |
 //! | `PATTERNTYPE USER/PREDEFINED/CUSTOM` | set DXF group 76 |
 //! | `SOLID` / `GRADIENT` | replace the fill with the solid / default linear ramp |
 //! | `COLOR <aci>` / `COLOR BYLAYER` | set the entity display colour |
@@ -53,8 +54,18 @@
 //! * `ANNOTATIVE` — `hatchedit.annotative_unsupported`: no annotative-scale
 //!   model.
 //!
-//! These refusals are answered before the selection is read, and none of them
-//! opens a transaction.
+//! `PATTERN <name>` has three named refusals of its own, all writing nothing:
+//! an empty name is `hatchedit.needs_pattern_name`, a name the built-in `.pat`
+//! library does not hold is `hatchedit.unknown_pattern` (the message lists every
+//! accepted name), and a Solid/Gradient fill is
+//! `hatchedit.pattern_requires_pattern` — a solid is never silently converted
+//! into a pattern. The two name refusals are also answered **before IPC** by
+//! `cad-ui-core` (the grammar validates the name against
+//! `cad_domain::hatch::predefined_patterns`, the one library table) and before
+//! the selection is read; the fill refusal is per target, after it is resolved.
+//!
+//! The global refusals above are answered before the selection is read, and
+//! none of them opens a transaction.
 //!
 //! ## Boundary edits (pre-selection model)
 //!
@@ -80,11 +91,16 @@
 //!
 //! ## Rebuild
 //!
-//! ANGLE/SCALE/PATTERNTYPE/STYLE and SOLID/GRADIENT keep the stored loops,
-//! plane, seeds, pixel size and every property the option does not name, and
-//! rebuild the display through the domain constructor
+//! ANGLE/SCALE/PATTERN/PATTERNTYPE/STYLE and SOLID/GRADIENT keep the stored
+//! loops, plane, seeds, pixel size and every property the option does not name,
+//! and rebuild the display through the domain constructor
 //! (`HatchGeometry::from_import` / `with_style_and_fill`) — never by hand-editing
-//! the display. `RECREATEBOUNDARY` writes non-associative closed polylines on the
+//! the display. `PATTERN <name>` takes the name and definition rows from the
+//! built-in library entry while keeping the hatch's stored pattern angle
+//! (radians, verbatim), scale and `HPDOUBLE`, and records the fill as
+//! `Predefined` (`76=1`, the classification the HATCH creation path writes for
+//! the same name); `PATTERNTYPE` can still override the stored group 76
+//! afterwards. `RECREATEBOUNDARY` writes non-associative closed polylines on the
 //! hatch's layer/space; `SEPARATE` keeps the first loop in the original entity and
 //! inserts one hatch per remaining loop (nested-island semantics are not
 //! preserved — declared). Colour/transparency are entity display attributes;
@@ -97,6 +113,8 @@
 //!
 //! ## NOT IMPLEMENTED
 //!
-//! Pattern origin, association/disassociation, annotative scaling, draw order
-//! relative to a boundary, a per-loop pattern origin and the interactive dialog.
+//! Pattern origin, selecting a name from a user `acad.pat`/`acadiso.pat` file
+//! (needs host file I/O; only the built-in library is reachable),
+//! association/disassociation, annotative scaling, draw order relative to a
+//! boundary, a per-loop pattern origin and the interactive dialog.
 //! Work-only (Viewer mode refuses it at the command layer).

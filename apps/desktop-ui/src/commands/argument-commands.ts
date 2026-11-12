@@ -180,13 +180,16 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   /**
    * `HATCHEDIT <option>` (AutoCAD 2026) is the typed v1 hatch edit. The
    * implemented forms are `ANGLE <degrees>` (one finite signed decimal),
-   * `SCALE <factor>` (one finite decimal > 0), `SOLID`, `GRADIENT`,
-   * `ADDBOUNDARIES` and `REMOVEBOUNDARIES` (the other selected closed entities
-   * become loops, or the stored loops matching them are removed; one undo
-   * step). The bare `HATCHEDIT` is admitted by the base name and refused by the
-   * host with `hatchedit.needs_option`; every other AutoCAD dialog field
-   * (`Pattern`, `Color`, `Properties`, `Draw order`, associativity) is NOT
-   * IMPLEMENTED and is refused locally.
+   * `SCALE <factor>` (one finite decimal > 0), `PATTERN <name>` (one token, the
+   * built-in `.pat` pattern name), `SOLID`, `GRADIENT`, `ADDBOUNDARIES` and
+   * `REMOVEBOUNDARIES` (the other selected closed entities become loops, or the
+   * stored loops matching them are removed; one undo step). The bare
+   * `HATCHEDIT` is admitted by the base name and refused by the host with
+   * `hatchedit.needs_option`; every other AutoCAD dialog field (`Color`,
+   * `Properties`, `Draw order`, associativity) is NOT IMPLEMENTED and is
+   * refused locally. `PATTERN` admits any non-empty single token and forwards
+   * the name: this file carries no pattern-name list, so the host stays the
+   * semantic authority (an unknown name is its `hatchedit.unknown_pattern`).
    */
   HATCHEDIT: Object.freeze({
     parse: (argument: string) => {
@@ -198,6 +201,9 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       }
       if (word === 'ANGLE') return rest.length === 1 && isSignedDecimal(rest[0]);
       if (word === 'SCALE') return rest.length === 1 && isPositiveSignedDecimal(rest[0]);
+      // The name itself is not validated here (no second name list): one
+      // non-empty token is admissible, the host answers for the name.
+      if (word === 'PATTERN') return rest.length === 1;
       return false;
     },
   }),
