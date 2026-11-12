@@ -286,7 +286,7 @@
 | `-PSETUPIN` | 部分实现 | 同一图纸内页面设置复制的命令行拼写；一条事务/一步撤销。 |
 | `-PUBLISH` | 部分实现 | 具名拒绝（`-publish.unsupported`）：本构建无批量发布模型；命令行拼写。 |
 | `-PURGE` | 部分实现 | `PURGE` 的别名，同一实现 |
-| `-REFEDIT` | 部分实现 | 具名拒绝（`-refedit.unsupported: no in-place block/xref editing session`）。 |
+|  `-REFEDIT` | 部分实现 | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
 | `-RENAME` | 部分实现 | `RENAME` 的别名，同一实现；图层重命名一条事务/一步撤销。 |
 | `-RENDER` | 部分实现 | 具名拒绝（`-render.unsupported: no render engine; only the 2D viewport renderer exists`）。 |
 | `-SCALELISTEDIT` | 部分实现 | 只读报告真实 `ACAD_SCALELIST`（`scalelistedit.entry`）；创建/编辑/删除/排序比例未实现（`scalelistedit.write_unsupported`）。 |
@@ -943,9 +943,9 @@
 | `REDO` | 已实现 | — |
 | `REDRAW` | 部分实现 | 当前视口刷新（session generation）；不改相机、不写库、不进 `ZOOM PREVIOUS` |
 | `REDRAWALL` | 部分实现 | 所有视口刷新；同 REDRAW 的只读边界 |
-| `REFCLOSE` | 部分实现 | 具名拒绝（`refclose.unsupported: no in-place block/xref editing session`）。 |
-| `REFEDIT` | 部分实现 | 具名拒绝（`refedit.unsupported: no in-place block/xref editing session`）。 |
-| `REFSET` | 部分实现 | 具名拒绝（`refset.unsupported: no in-place block/xref editing session`）。 |
+|  `REFCLOSE` | 部分实现 | 真实：`REFCLOSE SAVE|DISCARD`（裸命令 `refclose.needs_option`）；SAVE 逆变换写回块定义并删除克隆（一条事务/一步撤销），DISCARD 删除克隆且块定义不变。 |
+|  `REFEDIT` | 部分实现 | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
+|  `REFSET` | 部分实现 | 真实：`REFSET ADD|REMOVE`（裸命令=ADD）把当前选择加入/移出 in-place 块编辑工作集；会话状态，不写图；无活动会话 `refedit.no_session`、空选择 `refedit.selection_empty`；自引用实例拒绝。 |
 | `REGEN` | 部分实现 | 推进当前视口 regeneration stamp，重建派生显示缓存；不写库 |
 | `REGEN3` | 部分实现 | `REGEN` 的别名（同一 `CommandId`/路径），无第二套实现；不修复 3D 实体显示异常 |
 | `REGENALL` | 部分实现 | 所有视口 regeneration；不写库 |
@@ -1920,10 +1920,10 @@
 | 715 | `REDO` | 已实现 | Reverses the effects of previous UNDO or U command. | — |
 | 716 | `REDRAW` | 部分实现 | Refreshes the display in the current viewport. | 当前视口刷新（session generation）；不改相机、不写库、不进 `ZOOM PREVIOUS` |
 | 717 | `REDRAWALL` | 部分实现 | Refreshes the display in all viewports. | 所有视口刷新；同 REDRAW 的只读边界 |
-| 718 | `REFCLOSE` | 部分实现 | Saves back or discards changes made during in-place editing of a reference, either an xref or a block definition. | 具名拒绝（`refclose.unsupported: no in-place block/xref editing session`）。 |
-| 719 | `-REFEDIT` | 部分实现 | Edits an xref or a block definition directly within the current drawing. | 具名拒绝（`-refedit.unsupported: no in-place block/xref editing session`）。 |
-| 720 | `REFEDIT` | 部分实现 | Edits an xref or a block definition directly within the current drawing. | 具名拒绝（`refedit.unsupported: no in-place block/xref editing session`）。 |
-| 721 | `REFSET` | 部分实现 | Adds or removes objects from a working set during in-place editing of a reference, either an xref or a block definition. | 具名拒绝（`refset.unsupported: no in-place block/xref editing session`）。 |
+|  718 | `REFCLOSE` | 部分实现 | Saves back or discards changes made during in-place editing of a reference, either an xref or a block definition. | 真实：`REFCLOSE SAVE|DISCARD`（裸命令 `refclose.needs_option`）；SAVE 逆变换写回块定义并删除克隆（一条事务/一步撤销），DISCARD 删除克隆且块定义不变。 |
+|  719 | `-REFEDIT` | 部分实现 | Edits an xref or a block definition directly within the current drawing. | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
+|  720 | `REFEDIT` | 部分实现 | Edits an xref or a block definition directly within the current drawing. | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
+|  721 | `REFSET` | 部分实现 | Adds or removes objects from a working set during in-place editing of a reference, either an xref or a block definition. | 真实：`REFSET ADD|REMOVE`（裸命令=ADD）把当前选择加入/移出 in-place 块编辑工作集；会话状态，不写图；无活动会话 `refedit.no_session`、空选择 `refedit.selection_empty`；自引用实例拒绝。 |
 | 722 | `REGEN` | 部分实现 | Regenerates the drawing from within the current viewport. | 推进当前视口 regeneration stamp，重建派生显示缓存；不写库 |
 | 723 | `REGEN3` | 部分实现 | Regenerates the views in a drawing to repair anomalies in the display of 3D solids and surfaces. | `REGEN` 的别名（同一 `CommandId`/路径），无第二套实现；不修复 3D 实体显示异常 |
 | 724 | `REGENALL` | 部分实现 | Regenerates the entire drawing and refreshes all viewports. | 所有视口 regeneration；不写库 |

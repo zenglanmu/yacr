@@ -1,5 +1,23 @@
 AD
 
+## 2026-11-12 真实 2D 升级（3/5）：REFEDIT / REFSET / REFCLOSE 有界 in-place 块编辑
+
+- **行为**：`REFEDIT`/`-REFEDIT` 要求恰好一个相似变换（均匀缩放+旋转+平移、非镜像）的模型空间
+  INSERT；把**可见**块成员按 INSERT 变换克隆到模型空间（新 id，一条事务），源 INSERT 加入会话
+  隐藏集，选择改为克隆。`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 用相似逆变换把
+  工作集写回块定义（成员更新/新增宿主对象/移出成员删除）并删除克隆；`DISCARD` 删除克隆、块定义
+  不变。块表仍是唯一权威（`apply_drawing_changes_with_blocks`），一条事务/一步撤销。
+- **注册**：四个名字离开 `RefusalId`（327→323），成为真实 `CommandId`，`COMMAND_TABLE` 236→240；
+  `REFSET`/`REFCLOSE` 选项在 cad-ui-core 预校验（`refset.invalid_option`/`refclose.invalid_option`）。
+- **边界**：无参照淡显/锁定；动态可见性隐藏成员不提取；成员图层/绘图次序不回写；SAVE 只在应用层
+  被 `refedit.save_blocked` 阻止（宿主可绕过）；ADD 的宿主对象是移动进块（同 id）；嵌套参照只支持
+  一层；会话状态不可撤销，但撤销删光克隆会清理会话并恢复源可见性。
+- **UI**：命令行为主；`REFSET`/`REFCLOSE` 本地准入只校验选项词，不复制语义。
+- **证据**：`cargo test -p cad-app refedit`（15）、`cargo test -p cad-app --locked`（2594）、
+  `cargo test -p cad-ui-core --locked`（588）、workspace check/clippy、fmt、
+  `check-command-docs`/`check-i18n`/`check-file-size`/`check-architecture` 全过。
+  **NOT RUN**：全量 workspace 测试、wasm、GUI/GPU/像素/真机。
+
 ## 2026-11-12 真实 2D 升级（2/5）：HATCHEDIT 图案名通道
 
 - **行为**：`HATCHEDIT PATTERN <name>` 从现有 `.pat` 派生库按名称替换图案填充；保留 hatch 的
