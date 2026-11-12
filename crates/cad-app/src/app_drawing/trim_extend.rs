@@ -1,3 +1,4 @@
+use super::extend_spline::plan_extend_spline;
 use super::trim_boundary::{collect_boundaries, BoundarySet};
 use super::trim_curves::{cut_tolerance, plan_extend, plan_trim, TargetCurve, TrimPlan};
 use super::trim_polyline::plan_trim_polyline;
@@ -299,25 +300,31 @@ impl Application {
         })
     }
 
-    /// Extend one LINE/ARC/ELLIPSE target to the nearest boundary crossing ahead.
+    /// Extend one LINE/ARC/ELLIPSE/open SPLINE target to the nearest boundary
+    /// crossing ahead.
     ///
-    /// The target may be a LINE, an ARC, an ELLIPSE or an elliptical arc, and every
-    /// boundary may be a LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE (straight or bulged)
-    /// or SPLINE, in any mix. A SPLINE boundary is sampled, so a cut it contributes
-    /// always adds an approximation note (`drawing.extend`). The pick is projected
-    /// onto the target and that projection chooses the end to grow. A LINE's picked
-    /// endpoint moves along its own infinite line; an ARC's or an ELLIPSE's picked
-    /// end moves along its own circle/ellipse and keeps the sweep's sign, so they
-    /// only ever get longer — up to (but not including) a **full turn**, where the
-    /// target would close on itself and have no ends left (2026-11-11: the earlier
-    /// half-turn cap is gone, because a crossing more than half a turn away is still
-    /// mathematically defined on the target's own curve).
+    /// The target may be a LINE, an ARC, an ELLIPSE, an elliptical arc or an **open**
+    /// SPLINE, and every boundary may be a LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE
+    /// (straight or bulged) or SPLINE, in any mix. A SPLINE boundary is sampled, so a
+    /// cut it contributes always adds an approximation note (`drawing.extend`). The
+    /// pick is projected onto the target and that projection chooses the end to grow.
+    /// A LINE's picked endpoint moves along its own infinite line; an ARC's or an
+    /// ELLIPSE's picked end moves along its own circle/ellipse and keeps the sweep's
+    /// sign, so they only ever get longer — up to (but not including) a **full turn**,
+    /// where the target would close on itself and have no ends left (2026-11-11: the
+    /// earlier half-turn cap is gone, because a crossing more than half a turn away is
+    /// still mathematically defined on the target's own curve).
     ///
-    /// A CIRCLE or a full ELLIPSE target has no end and is refused, as are SPLINE
-    /// targets (**no continuation semantics**: moving an end of a NURBS curve changes
-    /// its knot vector, and therefore its parameterisation, and no extrapolation
-    /// policy exists — see `super::trim_spline::no_continuation_semantics`), the
-    /// named target gaps ([`extend_target_gap`]: INSERT/HATCH/POLYLINE/MESH/OPAQUE/
+    /// A **SPLINE** target now has one declared continuation rule
+    /// (`super::extend_spline`): the picked end grows along its own **end tangent**
+    /// as a straight tangent tail, appended as one extra clamped knot span with the
+    /// source control points/weights/degree preserved (C0/G1 at the joint, never a
+    /// refit). A closed *frame* (first control point == last), an unclamped end, a
+    /// degenerate tangent, a boundary through the end and "nothing crosses the
+    /// tangent ray ahead" are named refusals that change nothing.
+    ///
+    /// A CIRCLE or a full ELLIPSE target has no end and is refused, as are the named
+    /// target gaps ([`extend_target_gap`]: INSERT/HATCH/POLYLINE/MESH/OPAQUE/
     /// COMPOUND), unsupported boundaries, a pick whose projection falls outside the
     /// target's span, a target that already touches or reaches the boundary, and a
     /// boundary that never lies ahead.
@@ -366,14 +373,6 @@ impl Application {
             .ok_or_else(|| {
                 CadError::InvalidInput(format!("extend target {} does not exist", target.entity.0))
             })?;
-        // A SPLINE target is refused here, before `TargetCurve::build`, because the
-        // reason is not "unsupported kind": EXTEND has no continuation semantics for
-        // a NURBS curve (see `super::trim_spline::no_continuation_semantics`).
-        if let SemanticGeometry::Spline { .. } = &target_entity.geometry {
-            return Err(CadError::Unsupported(
-                super::trim_spline::no_continuation_semantics(),
-            ));
-        }
         if let Some(error) = extend_target_gap(&target_entity.geometry) {
             return Err(error);
         }
@@ -384,8 +383,8 @@ impl Application {
         )?;
         if curve.is_periodic() {
             return Err(CadError::Unsupported(format!(
-                "EXTEND target {} is closed and has no endpoint; only LINE, ARC and ELLIPTICAL \
-                 ARC are supported",
+                "EXTEND target {} is closed and has no endpoint; only LINE, ARC, ELLIPTICAL \
+                 ARC and an open SPLINE are supported",
                 geometry_kind(&target_entity.geometry)
             )));
         }
@@ -410,9 +409,18 @@ impl Application {
             ));
         }
 
-        let resolution = match plan_extend(&curve, *pick_point, &boundaries, &policy, tol) {
-            Ok(resolution) => resolution,
-            Err(reason) => return Err(CadError::InvalidInput(reason)),
+        // A SPLINE target has its own continuation rule (end-tangent ray), so it is
+        // planned by `extend_spline`; every other kind keeps the shared
+        // parameter-window plan.
+        let resolution = match &curve {
+            TargetCurve::Spline(spline) => {
+                plan_extend_spline(spline, *pick_point, &boundaries, &policy, tol)
+                    .map_err(|reason| reason.into_cad_error())?
+            }
+            _ => match plan_extend(&curve, *pick_point, &boundaries, &policy, tol) {
+                Ok(resolution) => resolution,
+                Err(reason) => return Err(CadError::InvalidInput(reason)),
+            },
         };
         // Cuts the engine could only approximate are reported, never hidden.
         let notes = resolution.notes;
@@ -831,9 +839,9 @@ fn trim_target_gap(geometry: &SemanticGeometry) -> Option<CadError> {
     Some(CadError::Unsupported(reason.into()))
 }
 
-/// The named EXTEND **target** gaps (see [`trim_target_gap`]); a SPLINE target has
-/// its own continuation-semantics refusal before this check, and a CIRCLE/full
-/// ELLIPSE is refused by the closed-target rule.
+/// The named EXTEND **target** gaps (see [`trim_target_gap`]); an open SPLINE is a
+/// supported target (its own tangent rule lives in `super::extend_spline`), and a
+/// CIRCLE/full ELLIPSE is refused by the closed-target rule instead.
 fn extend_target_gap(geometry: &SemanticGeometry) -> Option<CadError> {
     let reason = match geometry {
         SemanticGeometry::Insert { .. } => {

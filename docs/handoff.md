@@ -1,5 +1,20 @@
 AD
 
+## 2026-11-12 真实 2D 升级（3b）：EXTEND 开放 SPLINE
+
+- **行为**：`EXTEND` 接受开放 SPLINE 目标。拾取投影选近端，沿该端**切线**做直线尾段延伸：
+  保留原 degree/weights/控制点，追加 degree+1 个共线控制点与新端节点（同一 C0 拼接规则，
+  C0/G1 于接缝），不重拟合、不改源参数化；交点只取切线射线前方最近命中，边界为 SPLINE 时
+  仍附采样近似诊断；一条事务/一步撤销。
+- **拒绝**：`extend.spline_closed`、`extend.spline_unclamped`、`extend.spline_degenerate_tangent`、
+  `extend.spline_already_at_boundary`、`extend.no_intersection`、`extend.spline_extension_failed`；
+  移除旧的 `no_continuation_semantics`。
+- **边界**：闭合判定用首尾控制点重合（域无 closed 标志）；非钳制端点不自动重钳制；只查切线射线；
+  非共面边界与未命中不可区分；无任意长度上限。
+- **证据**：`cargo test -p cad-app extend`（284）、`cargo test -p cad-app --locked`（2619）、
+  clippy/fmt、`check-file-size`/`check-command-docs`/`check-i18n`/`check-architecture` 全过。
+  **NOT RUN**：全量 workspace 测试、wasm、GUI/GPU/像素/真机。
+
 ## 2026-11-12 真实 2D 升级（5c）：PLINE / PEDIT 统一宽度
 
 - **存储**：`SemanticGeometry::Polyline` 新增 `width: f64`（0=细线，有限且 ≥0；

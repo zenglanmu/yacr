@@ -59,6 +59,9 @@ mod draw2_batch;
 mod draw2_edit;
 mod drawing_edit;
 mod drawing_transform;
+// SPLINE EXTEND: one declared tangent-continuation rule (TRIM of a SPLINE lives
+// in `trim_spline`; this is the continuation half, not a second trim model).
+mod extend_spline;
 // The 2026-11-07 extras batch write paths (SKETCH/TRACE/MOCORO/LINETYPE).
 mod explode;
 mod extras_batch;

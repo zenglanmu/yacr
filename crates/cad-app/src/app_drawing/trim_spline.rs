@@ -35,16 +35,20 @@
 //!   expanded ([`cad_geometry::expand_spline_source`]);
 //! * a kept span too short for `degree + 1` control points (the parameter
 //!   tolerance case, [`cad_geometry::sub_curve`]);
-//! * weight arithmetic that is not representable, instead of normalising it;
-//! * EXTEND, which has no continuation semantics at all
-//!   ([`no_continuation_semantics`]): moving an end of a NURBS curve would change
-//!   its knot vector, and therefore its parameterisation, and no extrapolation
-//!   policy exists.
+//! * weight arithmetic that is not representable, instead of normalising it.
+//!
+//! # EXTEND
+//!
+//! EXTEND of an open SPLINE is **not** refused any more: it has one declared
+//! continuation rule, planned by `super::extend_spline` (straight tangent
+//! continuation, appended as one extra clamped span). This module owns the target
+//! model both commands share; see that module for the rule and its refusals.
 //!
 //! A spline target is **not** periodic here: `SemanticGeometry::Spline` carries no
 //! closed flag, so a closed spline is treated as an open curve and its seam is
 //! simply its start/end (same reasoning as the containment refusal in
-//! `super::trim_curves`).
+//! `super::trim_curves`). EXTEND detects a closed **frame** (first control point ==
+//! last) itself and refuses it by name (`extend.spline_closed`).
 
 use super::*;
 use cad_geometry::{nearest_point_parameter, NurbsCurve, TessellationParams};
@@ -123,6 +127,13 @@ impl SplineTarget {
     /// The target's world length (a sampled polyline length; see the constant).
     pub(super) fn length(&self) -> f64 {
         self.length
+    }
+
+    /// The validated source curve, for the EXTEND tangent-continuation planner
+    /// (`super::extend_spline`): it needs the control polygon, the knots and the
+    /// end derivative, all of which live on the curve itself.
+    pub(super) fn curve(&self) -> &NurbsCurve {
+        &self.curve
     }
 
     /// The expanded geometry the cuts are resolved against.
@@ -237,19 +248,6 @@ impl SplineTarget {
         let (t_min, t_max) = self.curve.domain();
         (native - t_min) / (t_max - t_min)
     }
-}
-
-/// Why EXTEND refuses a SPLINE target.
-///
-/// Shared by the command (which refuses before any work) and the plan (which
-/// cannot be reached with a spline, but must still answer by name), so there is
-/// exactly one wording.
-pub(super) fn no_continuation_semantics() -> String {
-    "EXTEND target AcDbSpline has no continuation semantics: a NURBS curve is defined by its \
-     knot vector, so moving an end would change the knot vector and therefore the \
-     parameterisation of the whole curve, and no extrapolation policy exists; the target is \
-     refused rather than extended by approximation"
-        .into()
 }
 
 /// The target's polyline length, sampled adaptively at

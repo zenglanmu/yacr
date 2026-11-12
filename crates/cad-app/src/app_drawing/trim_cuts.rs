@@ -38,7 +38,6 @@ pub(super) fn target_frame(
     if !span_len.is_finite() || span_len <= tol {
         return Err(format!("{command} target is degenerate (zero length)"));
     }
-    let param_tol = (tol / span_len).max(1e-12);
     let label = curve.label();
     let Some(u_pick) = curve.project_param(pick, tol) else {
         return Err(format!(
@@ -46,6 +45,26 @@ pub(super) fn target_frame(
              own axis and has no radial direction to project onto the {label}"
         ));
     };
+    pick_frame(command, label, span_len, u_pick, tol)
+}
+
+/// The pick half of [`target_frame`]: the parameter tolerance and the
+/// **out-of-span** refusal, shared by every target kind whose projection is not
+/// inherently bounded (a LINE projects onto its infinite line; a SPLINE projects
+/// onto the nearest point of its own domain, so it never leaves `[0, 1]`).
+///
+/// `span_len` must already be finite and above `tol`; `u_pick` is **not** clamped
+/// by the caller — a projection outside the target's own span is refused by name,
+/// never snapped to the nearest end (that would decide which piece to keep for the
+/// user).
+pub(super) fn pick_frame(
+    command: &str,
+    label: &str,
+    span_len: f64,
+    u_pick: f64,
+    tol: f64,
+) -> Result<(f64, f64, f64), String> {
+    let param_tol = (tol / span_len).max(1e-12);
     if !u_pick.is_finite() || u_pick < -param_tol || u_pick > 1.0 + param_tol {
         return Err(format!(
             "{command} pick projects outside the target {label} (parameter {u_pick:.9}, \

@@ -381,6 +381,7 @@ mod trim_extend_curves;
 // The ELLIPSE targets and the named target-kind refusals, split out of
 // `trim_extend_curves` so both files stay inside the code-size limit.
 mod trim_spline_boundary;
+mod trim_spline_extend;
 mod trim_spline_target;
 mod trim_targets;
 mod wipeout;

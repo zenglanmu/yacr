@@ -628,7 +628,7 @@
 | `EXPORTTOAUTOCAD` | 部分实现 | 具名拒绝（`exporttoautocad.unsupported: exporting to another AutoCAD version is not implemented`）。 |
 | `EXPRESSMENU` | 部分实现 | 具名拒绝（`expressmenu.unsupported: this build has no Express Tools menu/library loader`）。 |
 | `EXPRESSTOOLS` | 部分实现 | 具名拒绝（`expresstools.unsupported: this build has no Express Tools menu/library loader`）。 |
-| `EXTEND` | 部分实现 | 目标 LINE/ARC/**ELLIPSE（含椭圆弧）**；弧可超过半圈（至整圈前）；`SPLINE` 目标与 `CIRCLE`/整椭圆按名拒绝；折线/INSERT/HATCH 等目标按名拒绝 |
+|  `EXTEND` | 部分实现 | 目标 LINE/ARC/**ELLIPSE（含椭圆弧）**/**开放 SPLINE（沿端点切线直线延伸：追加 degree+1 共线控制点与新端节点，C0/G1，不重拟合、不改源参数化）**；弧可超过半圈（至整圈前）；闭合样条/非钳制端点/无前方交点/非共面边界具名拒绝；CIRCLE/整椭圆/折线/INSERT/HATCH 目标按名拒绝 |
 | `EXTERNALREFERENCES` | 部分实现 | 只读：外部参照导入溯源报告（`externalreferences.entry`/`.summary`）；无选项板（`.palette_not_implemented`）。 |
 | `EXTERNALREFERENCESCLOSE` | 部分实现 | 具名 no-op（`externalreferences.close_not_implemented`）：无外部参照选项板可关闭。 |
 | `EXTRIM` | 部分实现 | 第一个选中为边界，其余为被裁对象；复用 trim 规划；不支持边界/目标按名拒绝 |
@@ -1558,7 +1558,7 @@
 | 353 | `EXPORTTOAUTOCAD` | 部分实现 | Creates a version of a drawing file that can be opened in products such as AutoCAD and previous releases of a toolset. | 具名拒绝（`exporttoautocad.unsupported: exporting to another AutoCAD version is not implemented`）。 |
 | 354 | `EXPRESSMENU` | 部分实现 | Loads the AutoCAD Express Tools menu and displays the Express menu on the menu bar. | 具名拒绝（`expressmenu.unsupported: this build has no Express Tools menu/library loader`）。 |
 | 355 | `EXPRESSTOOLS` | 部分实现 | Loads the AutoCAD Express Tools libraries, places the Express folder in the search path, and loads and places the Express menu on the menu bar. | 具名拒绝（`expresstools.unsupported: this build has no Express Tools menu/library loader`）。 |
-| 356 | `EXTEND` | 部分实现 | Extends objects to meet the edges of other objects. | 目标 LINE/ARC/**ELLIPSE（含椭圆弧）**；弧可超过半圈（至整圈前）；`SPLINE` 目标与 `CIRCLE`/整椭圆按名拒绝；折线/INSERT/HATCH 等目标按名拒绝 |
+|  356 | `EXTEND` | 部分实现 | Extends objects to meet the edges of other objects. | 目标 LINE/ARC/**ELLIPSE（含椭圆弧）**/**开放 SPLINE（沿端点切线直线延伸：追加 degree+1 共线控制点与新端节点，C0/G1，不重拟合、不改源参数化）**；弧可超过半圈（至整圈前）；闭合样条/非钳制端点/无前方交点/非共面边界具名拒绝；CIRCLE/整椭圆/折线/INSERT/HATCH 目标按名拒绝 |
 | 357 | `EXTERNALREFERENCES` | 部分实现 | Opens the External References palette. | 只读：外部参照导入溯源报告（`externalreferences.entry`/`externalreferences.summary`）；本构建无选项板（`externalreferences.palette_not_implemented`）。 |
 | 358 | `EXTERNALREFERENCESCLOSE` | 部分实现 | Closes the External References palette. | 具名 no-op（`externalreferences.close_not_implemented`）：本构建无外部参照选项板，无窗口可关闭。 |
 | 359 | `EXTRIM` | 部分实现 | Trims all objects at the cutting edge specified by a selected polyline, line, circle, arc, ellipse, text, mtext, or attribute definition. | 第一个选中为边界，其余为被裁对象；复用 trim 规划；不支持边界/目标按名拒绝 |
@@ -2298,7 +2298,7 @@
 | `SCALE` | 实现 | **均匀**缩放；非均匀拒绝；`MultiLeader`/`TEXT` 等按类拒绝 |
 | `MIRROR` | 部分 | 镜像并**新增副本**（保留原件）；含 `Arc`/`Ellipse`（含椭圆弧）；**拒绝 `Text`**（平面文字无法表达真反射）与 `MultiLeader` |
 | `TRIM` | 部分 | 目标 LINE/ARC/CIRCLE/SPLINE/**ELLIPSE（含椭圆弧）**/**LWPOLYLINE（开放/闭合，bulge 保留为精确子弧）**；拾取投影所在的段保留（本项目 TRIM 语义，见 `docs/drawing-edit.md` §3）；边界折线/样条采样；**INSERT/HATCH/MESH/OPAQUE/COMPOUND 目标与 EXTEND 的 POLYLINE 目标按名拒绝** |
-| `EXTEND` | 部分 | 目标 **`LINE` 或 `ARC`**（弧延伸上限半圈）；**`SPLINE` 目标显式拒绝**（NURBS 端点移动会改参数化，无外推策略）；`CIRCLE` 目标拒绝 |
+|  `EXTEND` | 部分 | 目标 LINE/ARC/**ELLIPSE（含椭圆弧）**/**开放 SPLINE（沿端点切线直线延伸：追加 degree+1 共线控制点与新端节点，C0/G1，不重拟合、不改源参数化）**；弧可超过半圈（至整圈前）；闭合样条/非钳制端点/无前方交点/非共面边界具名拒绝；CIRCLE/整椭圆/折线/INSERT/HATCH 目标按名拒绝 |
 | `BREAK` | 部分 | 两点打断：**第一次拾取实体同时是第一断点**，第二点确定移除区间；`LINE`/`ARC`/`CIRCLE`/`SPLINE` 走同一 `TargetCurve` 精确子曲线；`CIRCLE` 变 `ARC`（补集），源实体保留为第一段、第二段新 id，一条事务/一步撤销。**按名拒绝**：`LWPOLYLINE`/其它种类、两点同参数（`break.zero_span`）、整条曲线（`break.whole_curve`）、拾取投影出界（`break.pick_outside_span`）、块成员/子元素、非模型空间。**无 `F` 第一点覆盖、无多段打断** |
 | `DIVIDE` | 部分 | **选择式**：恰好 1 条 `LINE`/`ARC`/`CIRCLE`/**直线段** `LWPOLYLINE`，按**等弧长**放置 `POINT`；开放曲线 `N−1` 个、闭合曲线 `N` 个（含起始参数）；`divideSegments` 2–1024；源保留、一条事务/一步撤销。**按名拒绝**：`SPLINE`/椭圆/含 bulge 折线（`divide.bulged_segment`）/非有限或零长/选择数≠1 |
 | `LENGTHEN` | 部分 | **选择式**：恰好 1 条 `LINE`/`ARC`；`lengthenMode` `0` Delta / `1` Percent / `2` Total + `lengthenValue`，改**末端**长度（`LINE` 的 end、`ARC` 的 sweep），实体 id/图层/空间/draw order/`type_key` 保留；一条事务/一步撤销。**按名拒绝**：`CIRCLE`/`LWPOLYLINE`/`SPLINE`/其它、非正新长度、ARC 超过一整圈、选择数≠1。**只改末端、无逐端拾取**（声明的 v1 偏离） |

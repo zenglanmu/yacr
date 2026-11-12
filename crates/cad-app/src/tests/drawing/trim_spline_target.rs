@@ -474,34 +474,39 @@ fn trim_spline_target_without_a_cut_is_refused_without_change() {
 }
 
 #[test]
-fn extend_spline_target_is_refused_with_the_continuation_reason() {
-    // EXTEND keeps refusing a SPLINE target, but now says *why*: no continuation
-    // semantics (a knot vector, hence a parameterisation, would change) and no
-    // extrapolation policy.
+fn extend_spline_target_grows_along_its_own_end_tangent() {
+    // EXTEND no longer refuses a SPLINE target: the picked end grows along its own
+    // end tangent as a straight tangent tail (`extend_spline`). The quadratic
+    // (2,-2),(5,4),(8,-2) ends at (8,-2) with tangent along (3,-6) ∝ (1,-2), so the
+    // ray meets x = 10 exactly at (10, -6), 2√5 away.
     let mut app = app_of(vec![
         quadratic_spline(1, 0),
-        line(2, point(5.0, -10.0), point(5.0, 10.0), 1),
+        line(2, point(10.0, -10.0), point(10.0, 10.0), 1),
     ]);
     let before = snapshot(&app);
-    let err = extend(&mut app, 1, &[2], point(8.0, -2.0)).unwrap_err();
-    assert!(matches!(err, CadError::Unsupported(_)), "{err:?}");
-    let message = err.to_string();
-    for expected in [
-        "AcDbSpline",
-        "no continuation semantics",
-        "knot vector",
-        "parameterisation",
-        "extrapolation policy",
-    ] {
-        assert!(
-            message.contains(expected),
-            "the EXTEND refusal must name {expected:?}: {message}"
-        );
-    }
-    assert_eq!(snapshot(&app), before, "a refused extend changes nothing");
-    assert_eq!(undo_depth(&app), 0);
+    let outcome = extend(&mut app, 1, &[2], point(7.5, -1.0)).unwrap();
+    assert_eq!(outcome.diagnostics[0].code, "drawing.extend");
+    let (degree, _, control_points, weights) = expect_spline(&app, 1);
+    assert_eq!(degree, 2, "the degree is preserved");
+    assert_eq!(
+        control_points[..3],
+        vec![point(2.0, -2.0), point(5.0, 4.0), point(8.0, -2.0)],
+        "the original control points are retained"
+    );
+    assert_eq!(
+        weights.to_vec(),
+        vec![1.0; control_points.len()],
+        "weights preserved"
+    );
+    let end = control_points.last().expect("non-empty");
+    assert!(
+        near(end.x, 10.0) && near(end.y, -6.0),
+        "the new end is the boundary crossing: {end:?}"
+    );
+    assert_eq!(undo_depth(&app), 1);
+    assert_ne!(snapshot(&app), before, "the extension was written");
 
-    // Mirror check: EXTEND's LINE behaviour is untouched by the new refusal path.
+    // Mirror check: EXTEND's LINE behaviour is untouched by the SPLINE path.
     let mut app = app_of(vec![
         line(1, point(0.0, 0.0), point(4.0, 0.0), 0),
         line(2, point(7.0, -5.0), point(7.0, 5.0), 1),

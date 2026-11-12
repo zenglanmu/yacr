@@ -366,15 +366,15 @@ pub enum CommandId {
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,
-    /// Trim one LINE/ARC/CIRCLE against LINE/ARC/CIRCLE/ELLIPSE/LWPOLYLINE/SPLINE
-    /// boundaries (the honest subset of §3 of `docs/drawing-edit.md`); a SPLINE
-    /// boundary is sampled and reported as approximate, SPLINE targets and other
-    /// kinds are explicit refusals that change nothing. Work-only.
+    /// Trim one LINE/ARC/CIRCLE/ELLIPSE/SPLINE/LWPOLYLINE against
+    /// LINE/ARC/CIRCLE/ELLIPSE/LWPOLYLINE/SPLINE boundaries (the honest subset of
+    /// §3 of `docs/drawing-edit.md`); sampled SPLINE boundaries are reported as
+    /// approximate, every other kind is a named refusal. Work-only.
     TrimEntity,
-    /// Extend one LINE/ARC to the nearest boundary crossing beyond the picked end
-    /// (same boundary subset as TRIM, sampled SPLINE cuts reported as
-    /// approximate); anything else is an explicit refusal that changes nothing.
-    /// Work-only.
+    /// Extend one LINE/ARC/ELLIPSE/open SPLINE to the nearest crossing ahead (same
+    /// boundary subset as TRIM); a SPLINE grows along its end tangent as a straight
+    /// tail (control points/weights/degree kept, C0/G1 joint), and a closed frame,
+    /// unclamped end or degenerate tangent are named refusals. Work-only.
     ExtendEntity,
     /// `BREAK` one LINE/ARC/CIRCLE/SPLINE between two picked points and keep the
     /// complementary piece(s) (Work-only). Payload is

@@ -62,6 +62,12 @@ use cad_geometry::{
     add, cross, dot, length, normalize, scale, sub, DefaultGeometryEngine, GeometryEngine,
 };
 
+/// A SPLINE EXTEND is planned by `super::extend_spline` (tangent continuation), never
+/// by the shared parameter-window planner below; reaching one of its match arms is a
+/// caller bug, and this is its stated reason.
+const SPLINE_EXTEND_IS_PLANNED_ELSEWHERE: &str = "EXTEND of a SPLINE target is planned by \
+     extend_spline (end-tangent continuation), not by the shared parameter-window planner";
+
 const TAU: f64 = std::f64::consts::TAU;
 
 /// The world tolerance the cut predicates use (the computation predicate
@@ -169,17 +175,18 @@ pub(crate) enum TargetCurve {
         sweep: f64,
     },
     /// `u ∈ [0, 1]` across the raw knot domain, from `knots[degree]` to
-    /// `knots[n]`. Only TRIM builds this variant; EXTEND refuses a SPLINE by name
-    /// before reaching [`Self::build`] (see
-    /// [`super::trim_spline::no_continuation_semantics`]).
+    /// `knots[n]`. TRIM builds this variant; EXTEND resolves a SPLINE target with
+    /// its own continuation rule (`super::extend_spline`) and never plans one
+    /// through [`plan_extend`], because "extend" is a tangent ray rather than a
+    /// window of this parameterisation.
     Spline(SplineTarget),
 }
 
 impl TargetCurve {
     /// The supported targets: LINE, ARC and CIRCLE, plus SPLINE (`supported` names
     /// the set in the refusal so TRIM and EXTEND stay honest about their own
-    /// subset). EXTEND refuses a SPLINE before reaching this constructor, because
-    /// its reason is about continuation semantics rather than about a kind list.
+    /// subset). EXTEND builds this variant only for TRIM-style target resolution;
+    /// its SPLINE continuation is planned by `super::extend_spline`.
     ///
     /// An ARC whose sweep exceeds one full turn is refused: it has no single
     /// periodic period, so its cuts would fold at the wrong place.
@@ -797,9 +804,9 @@ pub(crate) fn plan_extend(
     let engine = DefaultGeometryEngine;
     // A line extends along its own infinite line: the probe is a segment long
     // enough to contain every boundary. An arc extends along its own circle, so
-    // the probe is that full circle. A spline has no probe at all: EXTEND refuses
-    // it by name before the plan is reached, and says so here too instead of
-    // inventing a continuation curve.
+    // the probe is that full circle. A spline has no probe in this parameter
+    // model: EXTEND plans it in `super::extend_spline` (end-tangent ray) and the
+    // command never reaches this planner with one.
     let probe = match curve {
         TargetCurve::Line { .. } => line_probe(curve, boundaries, tol)?,
         TargetCurve::Arc {
@@ -828,7 +835,7 @@ pub(crate) fn plan_extend(
             start: 0.0,
             sweep: TAU,
         },
-        TargetCurve::Spline(_) => return Err(super::trim_spline::no_continuation_semantics()),
+        TargetCurve::Spline(_) => return Err(SPLINE_EXTEND_IS_PLANNED_ELSEWHERE.into()),
     };
 
     let period = curve.period();
@@ -928,7 +935,7 @@ pub(crate) fn plan_extend(
                 curve.with_span(u, 1.0 - u)?
             }
         }
-        TargetCurve::Spline(_) => return Err(super::trim_spline::no_continuation_semantics()),
+        TargetCurve::Spline(_) => return Err(SPLINE_EXTEND_IS_PLANNED_ELSEWHERE.into()),
     };
     Ok(ExtendResolution { geometry, notes })
 }

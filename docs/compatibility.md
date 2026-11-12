@@ -2013,3 +2013,8 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | --- | --- | --- | --- |
 | `PLINE` | 已实现 | `Geometry(Polyline)` 与捕获路径共享一个统一 `width`：捕获读 `polylineWidth` 工具参数（默认 0=细线），程序化 payload 自带 `width`；表示层以中心线 ±w/2 生成实心带宽（斜接，超过 4×半宽转斜切；开放端平头；闭合环回绕），并参与 XCLIP 矩形裁剪；相似变换缩放宽度 | 无逐段 start/end 锥形宽度（DXF 40/41）；宽虚线仍画实心并报告 `representation.polyline_width_dashes`；SPLINE/DECURVE 后宽度归 0；OFFSET/BREAK/JOIN/STRETCH/FILLET/LENGTHEN 派生折线仍从 0 开始 |
 | `PEDIT` | 部分实现 | `WIDTH <w>` 对多选写统一宽度（0 复位细线），一条事务/一步撤销；CLOSE/OPEN/REVERSE/FIT/顶点编辑保留宽度；非法值 `pedit.width_invalid`，无变化 `pedit.width_unchanged` | 每段锥形宽度（`pedit.vertex_width_unsupported`）；`Ltype gen`；SPLINE 实体无宽度字段 |
+### 2026-11-12 EXTEND 开放 SPLINE 目标
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `EXTEND` | 部分实现 | 开放 SPLINE 目标沿**拾取端切线的直线尾段**延伸：保留原 degree/weights/控制点，追加 degree+1 个共线控制点与新端节点（C0/G1，与 JOIN 的拼接规则一致），交点取自边界集合、只接受切线射线前方最近命中；一条事务/一步撤销 | 闭合/首尾重合样条 `extend.spline_closed`；非钳制端点 `extend.spline_unclamped`；只查切线射线（内部穿过但不与射线相交的边界不可见）；非共面边界与普通未命中无法区分（`extend.no_intersection`）；无任意长度上限 |
