@@ -27,6 +27,35 @@ pub use basic::*;
 mod style_tables;
 pub use style_tables::*;
 
+/// The direction of one `REFSET ADD|REMOVE` working-set edit.
+///
+/// Session-only: `REFSET` never writes the drawing, it only records which
+/// extracted entities (and which extra host objects) the in-place block edit
+/// owns. [`crate::CommandId::RefSet`] with a [`crate::CommandPayload::None`]
+/// means `Add` (AutoCAD's bare prompt default); the typed `REFSET REMOVE` line
+/// reaches this enum through the argument channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefSetOption {
+    /// Add the current selection to the working set.
+    Add,
+    /// Remove the current selection from the working set.
+    Remove,
+}
+
+/// The disposition of an active in-place block edit (`REFCLOSE SAVE|DISCARD`).
+///
+/// `Save` writes the working set back into the block definition; `Discard`
+/// deletes the extracted model-space clones and leaves the definition untouched.
+/// A bare `REFCLOSE` carries no option and is refused by name
+/// (`refclose.needs_option`), never defaulted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefCloseOption {
+    /// Write the working set back into the block definition.
+    Save,
+    /// Delete the clones and leave the block definition unchanged.
+    Discard,
+}
+
 pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
@@ -782,8 +811,9 @@ pub enum CommandPayload {
     /// width with the shared `SCALETEXT` rule. Full contract:
     /// [`crate::command_id::text_batch::TextScaleCommand`].
     TextScale(TextScaleCommand),
-    /// `TEXTALIGN <edge>` (Work-only): move the selected text to one common
-    /// edge/centre using estimated extents. Full contract:
+    /// `TEXTALIGN <mode>` (Work-only): move the selected text to one common
+    /// alignment edge/centre using estimated extents (the 12 AutoCAD 2026 modes
+    /// plus the original six single-axis spellings). Full contract:
     /// [`crate::command_id::text_batch::TextAlignCommand`].
     TextAlignEdges(TextAlignCommand),
     /// `TEXTALIGN DISTRIBUTE [X|Y]` (Work-only): even gap distribution; also
@@ -930,4 +960,14 @@ pub enum CommandPayload {
     /// separate-entity representation. Contract:
     /// [`crate::app_drawing::tolerance`].
     Tolerance(Box<ToleranceCommand>),
+    /// `REFSET ADD|REMOVE`: add or remove the current selection from the active
+    /// in-place block edit's working set (Work-only, session-only; no drawing
+    /// write). [`crate::CommandPayload::None`] is the bare-selector `Add`.
+    /// Contract: [`crate::app_refedit`].
+    RefSet(RefSetOption),
+    /// `REFCLOSE SAVE|DISCARD`: save the working set back into the block
+    /// definition or discard the extracted clones (Work-only). A bare
+    /// `REFCLOSE` is `CommandPayload::None` and refused by name
+    /// (`refclose.needs_option`). Contract: [`crate::app_refedit`].
+    RefClose(RefCloseOption),
 }

@@ -211,6 +211,9 @@ impl Application {
                 // dangles.
                 let outcome = self.undo(&command)?;
                 self.reconcile_selection(session);
+                // Undoing a REFEDIT removes its extracted clones; the derived
+                // session must not outlive them.
+                self.reconcile_refedit(session);
                 Ok(outcome)
             }
             CommandId::Redo => {
@@ -218,6 +221,7 @@ impl Application {
                 // original edit did.
                 let outcome = self.redo(&command)?;
                 self.reconcile_selection(session);
+                self.reconcile_refedit(session);
                 Ok(outcome)
             }
             CommandId::SwitchProjection => {
@@ -305,16 +309,43 @@ impl Application {
             }
             CommandId::Pan => self.pan(&command),
             CommandId::Zoom => self.zoom(session, &command),
+            // The bounded 2D in-place block-reference edit: REFEDIT/-REFEDIT
+            // extract one INSERT's members, REFSET edits the working set and
+            // REFCLOSE saves or discards. All four are Work-only (see
+            // [`CommandId::requires_work_mode`]) and pre-write refusals name
+            // their `refedit.*`/`refset.*`/`refclose.*` code.
+            CommandId::RefEdit
+            | CommandId::DashRefEdit
+            | CommandId::RefSet
+            | CommandId::RefClose => self.refedit_command(session, &command),
             CommandId::OpenDrawing
             | CommandId::NewDrawing
             | CommandId::CloseDrawing
             | CommandId::PlotDrawing
-            | CommandId::SaveDrawingAs
             | CommandId::CancelLoading => Err(CadError::Unsupported(
                 "file open, new drawing, close drawing, plot export, save-as and cancel are \
                  performed by the platform host, not the application"
                     .into(),
             )),
+            // Save-as is host-owned, but the application is still the place a
+            // caller reaches; while an in-place block edit is active the drawing
+            // must not be saved with the extracted clones and the hidden source
+            // reference. A real host intercepts SAVE before this layer, so the
+            // guard is best-effort there (documented in `crate::app_refedit`).
+            CommandId::SaveDrawingAs => {
+                if session.refedit.is_active() {
+                    return Err(CadError::InvalidInput(
+                        "refedit.save_blocked: SAVE is refused while an in-place block edit is \
+                         active; finish it with REFCLOSE SAVE|DISCARD first"
+                            .into(),
+                    ));
+                }
+                Err(CadError::Unsupported(
+                    "file open, new drawing, close drawing, plot export, save-as and cancel are \
+                     performed by the platform host, not the application"
+                        .into(),
+                ))
+            }
             CommandId::Select => {
                 // Selection is read-only: it stores the picked refs and enters
                 // the Selecting tool state, but never writes the DWG (F05).

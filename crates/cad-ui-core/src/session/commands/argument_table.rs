@@ -172,6 +172,11 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     MLEADERALIGN_SELECTOR,
     MLEADEREDIT_SELECTOR,
     TOLERANCE_SELECTOR,
+    // The 2026-11-12 in-place block-edit option lines: `REFSET ADD|REMOVE` and
+    // `REFCLOSE SAVE|DISCARD`. A bare `REFSET` keeps the application's `ADD`
+    // default; a bare `REFCLOSE` is `refclose.needs_option`.
+    REFSET_SELECTOR,
+    REFCLOSE_SELECTOR,
     // The session-only vocabulary controls (2026-11-12): `UNDEFINE <name>`,
     // `REDEFINE <name>` and `ALIASEDIT ADD|REMOVE|LIST`. They carry no
     // `CommandId`; `CadSession` resolves and applies them before the command

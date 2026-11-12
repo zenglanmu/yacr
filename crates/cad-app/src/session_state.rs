@@ -8,6 +8,9 @@ mod drafting_extras;
 mod draw_plan;
 mod erase_snapshot;
 mod modify_options;
+// The bounded session-only in-place block edit (`REFEDIT`), split out so this
+// file stays inside the code-size ceiling.
+mod refedit;
 mod sysvar_monitor;
 mod toggles;
 mod view_extras;
@@ -27,6 +30,7 @@ use crate::{AppMode, CommandId};
 pub use drafting_extras::{ChamferMethod, DraftingExtras, IsoPlane, WipeoutFrames};
 pub use erase_snapshot::{EraseEntry, EraseSnapshot};
 pub use modify_options::ModifyOptions;
+pub use refedit::{RefEditActive, RefEditMember, RefEditSession};
 pub use sysvar_monitor::SysVarMonitor;
 pub use view_extras::{ViewExtras, VisualStyleToken};
 
@@ -63,6 +67,10 @@ pub struct SessionState {
     /// the shared visibility walk and published to the renderer as
     /// `OverlayInputs.hidden` (`FLAG_HIDDEN`). `UNISOLATEOBJECTS` clears it.
     pub hidden_entities: SelectionSet,
+    /// The bounded session-only in-place block edit (`REFEDIT`), if one is
+    /// active. Session state only: the drawing and its block table stay
+    /// authoritative. Contract: [`crate::app_refedit`].
+    pub refedit: RefEditSession,
     /// The `SSX` Express-Tool selection filter being edited (one value per
     /// criterion). Session editor state only: it is never written to the
     /// drawing, and applying it only replaces [`Self::selection`].
@@ -270,6 +278,7 @@ impl SessionState {
             selection: SelectionSet::new(),
             layer_overrides: LayerOverrideSet::new(),
             hidden_entities: SelectionSet::new(),
+            refedit: RefEditSession::default(),
             ssx_filter: crate::ssx::SsxFilter::default(),
             layer_history: LayerOverrideHistory::new(),
             layer_states: LayerStates::new(),
@@ -432,20 +441,6 @@ impl SessionState {
         Ok(())
     }
 
-    /// **Test-only**: store a parameter value without validation.
-    ///
-    /// This exists so a contract test can reach a command's own defensive
-    /// re-validation of a value the typed channel would already have refused
-    /// (today: a HATCH predefined pattern index past the implemented table).
-    /// It is `#[cfg(test)]`, so no wire request, host or UI path can inject an
-    /// unvalidated value.
-    /// **Test-only**: store a parameter value without validation.
-    ///
-    /// This exists so a contract test can reach a command's own defensive
-    /// re-validation of a value the typed channel would already have refused
-    /// (today: a HATCH predefined pattern index past the implemented table).
-    /// It is `#[cfg(test)]`, so no wire request, host or UI path can inject an
-    /// unvalidated value.
     /// The last ERASE snapshot, if any (`OOPS`'s whole input).
     pub(crate) fn last_erase(&self) -> Option<&EraseSnapshot> {
         self.last_erase.as_ref()

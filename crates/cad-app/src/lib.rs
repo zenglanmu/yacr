@@ -106,6 +106,8 @@ mod app_layout_session;
 // The Wave 27 read-only AutoCAD 2026 reports (`RECOVER`, `RECOVERALL`,
 // `PURGEAECDATA`, `SHOWURLS`).
 mod app_recovery;
+// The bounded 2D in-place block-reference edit (`REFEDIT`/`REFSET`/`REFCLOSE`).
+mod app_refedit;
 mod app_reports;
 mod app_reports_ext;
 mod app_utility;
@@ -187,7 +189,8 @@ mod session_state;
 
 pub use session_state::{
     BackendChoice, ChamferMethod, ClipboardEntry, IsoPlane, LayoutViewportRef, ModifyOptions,
-    MultipleRepeat, SessionState, ViewExtras, VisualStyleToken, WipeoutFrames,
+    MultipleRepeat, RefEditActive, RefEditMember, RefEditSession, SessionState, ViewExtras,
+    VisualStyleToken, WipeoutFrames,
 };
 
 #[cfg(test)]
@@ -440,13 +443,13 @@ pub use command_payload::{
     NamedObjectKind, OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis,
     OrdinateDimensionCommand, PeditEditCommand, PeditEditOption, PeditOption, PeditVertexAction,
     PeditVertexCommand, PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest,
-    RadialDimensionCommand, RenameCommand, RevCloudStyle, RevisionCloudMode, RevisionCloudOptions,
-    RotatedLinearDimensionCommand, SelectSimilarSettings, SelectionApply, SelectionOperator,
-    SelectionPredicate, SelectionProperty, SelectionScope, SelectionToolPayload,
-    SetByLayerSettings, ShapeCommand, StretchPolygonCommand, StyleTableCommand, StyleTableKind,
-    StyleTableOp, SysVarMonitorAction, TCircleCommand, TCountCommand, TableCreateCommand,
-    TableEditCommand, TextAlignAxis, TextAlignCommand, TextAlignEdge, TextAlignSpacing,
-    TextAlignSpacingCommand, TextBoundaryShape, TextCaseMode,
+    RadialDimensionCommand, RefCloseOption, RefSetOption, RenameCommand, RevCloudStyle,
+    RevisionCloudMode, RevisionCloudOptions, RotatedLinearDimensionCommand, SelectSimilarSettings,
+    SelectionApply, SelectionOperator, SelectionPredicate, SelectionProperty, SelectionScope,
+    SelectionToolPayload, SetByLayerSettings, ShapeCommand, StretchPolygonCommand,
+    StyleTableCommand, StyleTableKind, StyleTableOp, SysVarMonitorAction, TCircleCommand,
+    TCountCommand, TableCreateCommand, TableEditCommand, TextAlignAxis, TextAlignCommand,
+    TextAlignEdge, TextAlignSpacing, TextAlignSpacingCommand, TextBoundaryShape, TextCaseMode,
     TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand, ToleranceCommand,
     TwoLineCommand, Txt2MTextOptions, UtilityPayload, VPointInput, ViewCommand, WipeoutPayload,
 };

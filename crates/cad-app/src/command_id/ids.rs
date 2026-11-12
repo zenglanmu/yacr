@@ -984,6 +984,14 @@ pub enum CommandId {
     PurgeAecData,
     /// `SHOWURLS`: reports that hyperlink/URL data is not retained; invents no rows. Contract: [`crate::app_recovery`].
     ShowUrls,
+    /// `REFEDIT` (Work-only): begin the bounded in-place block-reference edit session. Contract: [`crate::app_refedit`].
+    RefEdit,
+    /// `-REFEDIT`: the command-line spelling of the same begin.
+    DashRefEdit,
+    /// `REFSET ADD|REMOVE` (Work-only): edit the in-place working set. Contract: [`crate::app_refedit`].
+    RefSet,
+    /// `REFCLOSE SAVE|DISCARD` (Work-only): save or discard the in-place edit. Contract: [`crate::app_refedit`].
+    RefClose,
     /// The sustained extended-command wrapper batch (payload-free 2D/session/
     /// report commands). Contract: [`crate::command_id::extended`].
     Extended(ExtendedCommandId),

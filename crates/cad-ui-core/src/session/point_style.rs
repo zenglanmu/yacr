@@ -211,6 +211,11 @@ impl CadSession {
             // typed argument grammar/dispatch was missing.
             OVERKILL_SELECTOR | REVCLOUD_SELECTOR | WIPEOUT_SELECTOR | TEXTMASK_SELECTOR
             | TXT2MTXT_SELECTOR => self.payload_option_argument(selector, argument, text),
+            // The bounded in-place block edit's option lines: `REFSET ADD|REMOVE`
+            // and `REFCLOSE SAVE|DISCARD` (case-insensitive). A bare `REFSET` is
+            // the application's ADD default; a bare `REFCLOSE` needs an option.
+            super::commands::REFSET_SELECTOR => self.refset_argument(argument, text),
+            super::commands::REFCLOSE_SELECTOR => self.refclose_argument(argument, text),
             // The paper-space/session/point-style typed forms: `VPLAYER`,
             // `MVSETUP`, `APERTURE`, `PTYPE` and `REVCLOUDPROPERTIES`.
             super::commands::VPLAYER_SELECTOR

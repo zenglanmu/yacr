@@ -1,5 +1,6 @@
-//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal vocabulary rows (327 rows:
-//! 197 existing + 91 Wave 27 + 39 Wave 28).
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal vocabulary rows (323 rows:
+//! 197 existing + 91 Wave 27 + 39 Wave 28 − 4 graduated to real commands
+//! (`REFEDIT`, `-REFEDIT`, `REFSET`, `REFCLOSE`).
 //!
 //! Kept in a sibling table (not `COMMAND_TABLE`) so `commands.rs` stays inside
 //! the 1000-line code gate. `normalize_command`, `canonical_command_name`,
@@ -308,10 +309,6 @@ pub const REFUSAL_TABLE: &[(&str, CommandId)] = &[
     ("QUICKCUI", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Quickcui))),
     ("REDIR", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Redir))),
     ("REDIRMODE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Redirmode))),
-    ("REFCLOSE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Refclose))),
-    ("-REFEDIT", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::DashRefedit))),
-    ("REFEDIT", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Refedit))),
-    ("REFSET", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Refset))),
     ("REPURLS", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Repurls))),
     ("RESUME", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Resume))),
     ("RSCRIPT", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Rscript))),

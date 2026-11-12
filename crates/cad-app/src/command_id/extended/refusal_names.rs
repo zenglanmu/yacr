@@ -1,5 +1,7 @@
-//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (327 AutoCAD 2026
-//! names: 197 existing + 91 Wave 27 + 39 Wave 28).
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (323 AutoCAD 2026
+//! names: 197 existing + 91 Wave 27 + 39 Wave 28 − 4 graduated to real
+//! commands: `REFEDIT`, `-REFEDIT`, `REFSET` and `REFCLOSE` are now the bounded
+//! in-place block-edit session in [`crate::app_refedit`]).
 //!
 //! Every name in this batch describes a feature with no model or API in this
 //! build: action macros, palettes, OLE/hyperlinks, LISP, 3D lights/materials/
@@ -21,7 +23,8 @@
 
 macro_rules! refusal_names {
     ($($variant:ident => $name:literal => $reason:literal),+ $(,)?) => {
-        /// One named-refusal command (197 existing + 91 Wave 27 + 39 Wave 28 = 327).
+        /// One named-refusal command (197 existing + 91 Wave 27 + 39 Wave 28 − 4
+        /// graduated to real commands = 323).
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum RefusalId {
             $($variant),+
@@ -38,7 +41,8 @@ macro_rules! refusal_names {
                 match self { $(Self::$variant => $reason),+ }
             }
 
-            /// Every named refusal (Wave 17-24, Wave 27, then Wave 28), in declaration order.
+            /// Every named refusal (Wave 17-24, Wave 27, then Wave 28 minus the four
+            /// graduated in-place block-edit names), in declaration order.
             pub const ALL: &'static [RefusalId] = &[$(RefusalId::$variant),+];
         }
     };
@@ -344,10 +348,6 @@ refusal_names! {
     Quickcui => "QUICKCUI" => "quickcui.unsupported: no CUI (menu-customization) model",
     Redir => "REDIR" => "redir.unsupported: no xref/image path-redirection model",
     Redirmode => "REDIRMODE" => "redirmode.unsupported: no xref/image path-redirection model",
-    Refclose => "REFCLOSE" => "refclose.unsupported: no in-place block/xref editing session",
-    DashRefedit => "-REFEDIT" => "-refedit.unsupported: no in-place block/xref editing session",
-    Refedit => "REFEDIT" => "refedit.unsupported: no in-place block/xref editing session",
-    Refset => "REFSET" => "refset.unsupported: no in-place block/xref editing session",
     Repurls => "REPURLS" => "repurls.unsupported: no hyperlink storage model",
     Resume => "RESUME" => "resume.unsupported: no script-file engine",
     Rscript => "RSCRIPT" => "rscript.unsupported: no script-file engine",

@@ -30,6 +30,7 @@ mod paper_arguments;
 mod payload_options;
 mod pedit;
 mod point_style;
+mod refedit_arguments;
 mod select_filter;
 mod shape_block_arguments;
 mod shell_settings;

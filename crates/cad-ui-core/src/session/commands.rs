@@ -448,6 +448,15 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CHANGE", CommandId::Extended(ExtendedCommandId::Change)),
     ("CHPROP", CommandId::Extended(ExtendedCommandId::ChProp)),
     ("BSCALE", CommandId::Extended(ExtendedCommandId::BScale)),
+    // The bounded 2D in-place block-reference edit (2026-11-12; these four used
+    // to be stable named refusals and are now real Work-only commands):
+    // REFEDIT/-REFEDIT begin, REFSET edits the working set, REFCLOSE saves or
+    // discards. `REFSET ADD|REMOVE` and `REFCLOSE SAVE|DISCARD` are typed
+    // argument forms of the two selectors below.
+    ("REFEDIT", CommandId::RefEdit),
+    ("-REFEDIT", CommandId::DashRefEdit),
+    ("REFSET", CommandId::RefSet),
+    ("REFCLOSE", CommandId::RefClose),
     ("MINSERT", CommandId::Extended(ExtendedCommandId::MInsert)),
     // SHP2BLK converts the selected SHAPE rows into per-glyph block definitions of their outline polylines plus one INSERT at each original position, deleting the sources in one transaction (Work-only).
     ("SHP2BLK", CommandId::Extended(ExtendedCommandId::Shp2Blk)),

@@ -132,6 +132,25 @@ pub const HATCHEDIT_SELECTOR: &str = "HATCHEDIT";
 /// [`cad_app::command_id::measuregeom`].
 pub const MEASUREGEOM_SELECTOR: &str = "MEASUREGEOM";
 
+/// The `REFSET <option>` selector: the in-place block edit's working set.
+///
+/// An **argument form of the canonical `REFSET` selector**, not a new command.
+/// The grammar is `ADD` / `REMOVE`, case-insensitive; a bare `REFSET` is the
+/// application's `ADD` default and an unknown option is the stable
+/// `refset.invalid_option` refusal before any dispatch. The current selection is
+/// the whole input; the command only edits session state (no drawing write).
+/// Contract: [`cad_app::app_refedit`].
+pub const REFSET_SELECTOR: &str = "REFSET";
+
+/// The `REFCLOSE <option>` selector: close the in-place block edit.
+///
+/// An **argument form of the canonical `REFCLOSE` selector**, not a new command.
+/// The grammar is `SAVE` / `DISCARD`, case-insensitive; a bare `REFCLOSE` is the
+/// application's `refclose.needs_option` refusal and an unknown option is the
+/// stable `refclose.invalid_option` refusal before any dispatch. Contract:
+/// [`cad_app::app_refedit`].
+pub const REFCLOSE_SELECTOR: &str = "REFCLOSE";
+
 /// The `NAVBAR` selector: the shell navigation-bar visibility switch.
 ///
 /// A **settings write**, not a CAD command: no `CommandId` exists for it and

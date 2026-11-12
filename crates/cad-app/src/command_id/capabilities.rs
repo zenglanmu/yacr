@@ -201,6 +201,13 @@ impl CommandId {
                 | Self::Trace
                 | Self::Mocoro
                 | Self::MStretch
+                // The bounded in-place block edit: REFEDIT extracts block members
+                // into model space and REFCLOSE writes the block definition back,
+                // so every one of the four is a Work-only drawing write.
+                | Self::RefEdit
+                | Self::DashRefEdit
+                | Self::RefSet
+                | Self::RefClose
         )
     }
 }

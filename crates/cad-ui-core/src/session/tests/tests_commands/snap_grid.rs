@@ -341,6 +341,9 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "MLEADERALIGN",
             "MLEADEREDIT",
             "TOLERANCE",
+            // The 2026-11-12 in-place block-edit option lines.
+            "REFSET",
+            "REFCLOSE",
             // The 2026-11-12 session-only vocabulary controls.
             "UNDEFINE",
             "REDEFINE",

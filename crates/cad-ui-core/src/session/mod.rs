@@ -49,6 +49,8 @@ mod point_style;
 mod profile;
 mod recent;
 mod reference_status;
+// The typed `REFSET ADD|REMOVE` / `REFCLOSE SAVE|DISCARD` option lines.
+mod refedit_arguments;
 pub mod registry;
 mod select_filter;
 mod settings;
@@ -146,6 +148,10 @@ pub use self::profile::{
     wire_status_json, DocumentOwner, HostProfile, HostSurfaceMode, WireStatus,
 };
 pub use self::recent::{CadRecentFiles, OPEN_RECENT_COMMAND, RECENT_FILES_COMMAND};
+pub use self::refedit_arguments::{
+    invalid_refclose_option_reason, invalid_refset_option_reason, parse_refclose_option,
+    parse_refset_option,
+};
 pub use self::registry::{
     SHARED_WIRE_COMMAND_NAMES, TAURI_ONLY_WIRE_COMMAND_NAMES, WASM_EXPORT_WIRE_COMMAND_NAMES,
     WIRE_COMMAND_NAMES,

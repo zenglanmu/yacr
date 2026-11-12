@@ -241,6 +241,12 @@ command_selector_contract! {
 
     Sketch => "SKETCH", Trace => "TRACE", Mocoro => "MOCORO", MStretch => "MSTRETCH",
     ViewRes => "VIEWRES", VisualStyle => "VSCURRENT", Linetype => "LINETYPE",
+
+    // The bounded 2D in-place block-reference edit (2026-11-12): REFEDIT and
+    // -REFEDIT begin a session, REFSET edits its working set and REFCLOSE saves
+    // or discards. All four are Work-only; the last two also have typed option
+    // argument forms (`REFSET ADD|REMOVE`, `REFCLOSE SAVE|DISCARD`).
+    RefEdit => "REFEDIT", DashRefEdit => "-REFEDIT", RefSet => "REFSET", RefClose => "REFCLOSE",
 }
 
 #[test]
@@ -254,7 +260,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 236,
+        EXPECTED_COMMAND_COUNT, 240,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

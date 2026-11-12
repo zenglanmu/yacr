@@ -249,6 +249,7 @@ mod model_space;
 mod pedit;
 mod plan_view;
 mod point_display_style;
+mod refedit;
 mod revision_cloud;
 // The Wave 27 read-only recovery/AEC/URL report contracts.
 mod recovery;
