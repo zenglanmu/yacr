@@ -1,5 +1,21 @@
 AD
 
+## 2026-11-12 真实 2D 升级（4/5）：TEXTALIGN 15 种对齐 + DISTRIBUTE
+
+- **行为**：`TEXTALIGN` 现接受 15 个拼写（原 6 个单轴 + 9 个组合 `TOPLEFT`…`BOTTOMRIGHT`），
+  组合模式按选中文字的**并集包围盒**在两轴把对应边/中心对齐；新增 `TEXTALIGN DISTRIBUTE [X|Y]`
+  （默认 Y）：按阅读序保持首尾、把内部文字调整为**等间隙**（至少 3 个目标，否则
+  `textalign.distribute_needs_three`）。只移动参照点：内容/字高/旋转/justification 不变；
+  一条事务/一步撤销。`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 可键入但具名拒绝；
+  AutoCAD 没有 oblique 选项，因此不发明。
+- **UI**：React `argument-commands.ts` 本地准入与 cad-ui-core 解析器同步；i18n hint 双语更新。
+- **边界**：无交互 base-object/second-point 步骤（并集包围盒是确定性替代）；宽高仍按
+  `height × 字符数` 估算、忽略旋转；分布为间隙式，重叠选择会产生负间隙（文档化）。
+- **证据**：`cargo test -p cad-app textalign`（13）、`cargo test -p cad-app --locked`（2594）、
+  `cargo test -p cad-ui-core --locked`（588）、`(cd apps/desktop-ui && npm test)`（1557）、
+  workspace check/clippy、fmt、`check-i18n`/`check-command-docs`/`check-file-size` 全过。
+  **NOT RUN**：全量 workspace 测试、wasm、GUI/GPU/像素/真机。
+
 ## 2026-11-12 真实 2D 升级（3/5）：REFEDIT / REFSET / REFCLOSE 有界 in-place 块编辑
 
 - **行为**：`REFEDIT`/`-REFEDIT` 要求恰好一个相似变换（均匀缩放+旋转+平移、非镜像）的模型空间

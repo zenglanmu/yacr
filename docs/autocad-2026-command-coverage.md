@@ -1070,7 +1070,7 @@
 | `TCIRCLE` | 部分实现 | `TCIRCLE CIRCLE\ |
 | `TCOUNT` | 部分实现 | `TCOUNT <start> <step> [prefix] [suffix]`；按上→下/左→右顺序把每个选中 Text/MText 替换为 `prefix+编号+suffix`；`step` 必须 >0；AutoCAD 的逐项前缀/后缀对话框模式未实现 |
 | `TEXT` | 已实现 | — |
-| `TEXTALIGN` | 部分实现 | LEFT/RIGHT/CENTER/TOP/MIDDLE/BOTTOM 六边缘真实写入；`DISTRIBUTION`/`SPACING`/`OBLIQUE` 无 grammar |
+|  `TEXTALIGN` | 部分实现 | 15 个对齐拼写（6 个单轴 + 9 个组合，`TEXTALIGN TOPLEFT` 等）按选择并集包围盒在两轴对齐；`DISTRIBUTE [X|Y]` 按阅读序等间隙分布（首尾固定、≥3 个目标，`textalign.distribute_needs_three`）；`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 解析后具名拒绝；只移动参照点，不改内容/字高/旋转/对齐；一条事务/一步撤销；宽高仍为估算值。 |
 | `TEXTEDIT` | 部分实现 | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
 | `TEXTFIT` | 部分实现 | TEXT/MTEXT 高度拟合到目标宽度，其余字段逐位保留；真实字形宽度拉伸未实现（域无 width factor） |
 | `TEXTMASK` | 部分实现 | 偏移（默认 0.35）/Wipeout 遮罩/`*TEXTMASK-*` 会话组/重跑替换/组上限/有限边界守卫；`3dface`/`solid` 遮罩类型无实体模型，按名拒绝 |
@@ -2057,7 +2057,7 @@
 | 852 | `TCIRCLE` | 部分实现 | Creates a circle, a slot, or a rectangle around each selected text or mtext object. | `TCIRCLE CIRCLE\|RECTANGLE`；用**估算**文字外框（宽 = `height × 字符数`、高 = `height`、忽略旋转）在文字所在图层建 `Circle` 或闭合 `Polyline`；保留文字；无关联性 |
 | 853 | `TCOUNT` | 部分实现 | Adds sequential numbering to text and mtext objects as a prefix, suffix, or replacement text. | `TCOUNT <start> <step> [prefix] [suffix]`；按上→下/左→右顺序把每个选中 Text/MText 替换为 `prefix+编号+suffix`；`step` 必须 >0；AutoCAD 的逐项前缀/后缀对话框模式未实现 |
 | 854 | `TEXT` | 已实现 | Creates a single-line text object. | — |
-| 855 | `TEXTALIGN` | 部分实现 | Aligns multiple text objects vertically, horizontally, or obliquely. | `TEXTALIGN LEFT\|RIGHT\|CENTER\|TOP\|MIDDLE\|BOTTOM`；把选中文字 `position` 对齐到共同边/中心；宽/高为**估算**值（无字形外框 API）；<2 个目标拒绝 |
+|  855 | `TEXTALIGN` | 部分实现 | Aligns multiple text objects vertically, horizontally, or obliquely. | 15 个对齐拼写（6 个单轴 + 9 个组合，`TEXTALIGN TOPLEFT` 等）按选择并集包围盒在两轴对齐；`DISTRIBUTE [X|Y]` 按阅读序等间隙分布（首尾固定、≥3 个目标，`textalign.distribute_needs_three`）；`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 解析后具名拒绝；只移动参照点，不改内容/字高/旋转/对齐；一条事务/一步撤销；宽高仍为估算值。 |
 | 856 | `TEXTEDIT` | 部分实现 | Edits a selected multiline or single-line text object, or the text in a dimension object. | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
 | 857 | `TEXTFIT` | 部分实现 | Expands or compresses the width of text objects based on new starting and ending points. | TEXT/MTEXT 高度拟合到目标宽度，其余字段逐位保留；真实字形宽度拉伸未实现（域无 width factor） |
 | 858 | `TEXTMASK` | 部分实现 | Creates a blank area behind selected text or mtext objects. | 偏移（默认 0.35）/Wipeout 遮罩/`*TEXTMASK-*` 会话组/重跑替换/组上限/有限边界守卫；`3dface`/`solid` 遮罩类型无实体模型，按名拒绝 |

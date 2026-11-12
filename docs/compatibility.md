@@ -1992,3 +1992,8 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `REFEDIT`/`-REFEDIT` | 部分实现 | 仅接受一个直接可寻址、相似变换（均匀缩放+旋转+平移、非镜像）的模型空间 INSERT；把**可见**块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 进入会话隐藏集；选择变为克隆。`refedit.selection`/`not_insert`/`non_uniform`/`active`/`block_missing` 等具名拒绝 | 无参照淡显/锁定（其他宿主对象仍可选）；隐藏的动态可见性成员不提取、不修改；只在应用层阻止 QSAVE；会话状态不可撤销（撤销删光克隆会清理会话并恢复源可见性） |
 | `REFSET` | 部分实现 | `ADD|REMOVE`（裸=ADD）把当前选择加入/移出工作集；会话状态、不写图；`refedit.no_session`/`selection_empty` 拒绝；自引用块实例拒绝 | 无交互拾取提示；ADD 的宿主对象在 SAVE 时是**移动**进块（同 id），不是复制 |
 | `REFCLOSE` | 部分实现 | `SAVE` 逆变换把工作集写回块定义（成员更新/新增/移出删除）并删除克隆，`DISCARD` 删除克隆且块定义不变；一条事务/一步撤销；`refclose.needs_option` 拒绝裸命令 | 成员图层/绘图次序不回写（仅几何）；嵌套参照只支持一个层级；无参照文件回写（本构建无 xref 编辑） |
+### 2026-11-12 TEXTALIGN 15 模式 + DISTRIBUTE
+
+| 命令 | 状态 | 当前行为 | 剩余边界 |
+| --- | --- | --- | --- |
+| `TEXTALIGN` | 部分实现 | 接受 15 个对齐拼写（原 6 个单轴 + `TOPLEFT/TOPCENTER/TOPRIGHT/MIDDLELEFT/MIDDLECENTER/MIDDLERIGHT/BOTTOMLEFT/BOTTOMCENTER/BOTTOMRIGHT`）；组合模式按选择并集包围盒在两轴对齐；`DISTRIBUTE [X|Y]`（默认 Y）按阅读序做等间隙分布，首尾固定、至少 3 个目标；只移动参照点（内容/字高/旋转/justification 不变），一条事务/一步撤销 | 无交互 base-object + second-point 步骤（用并集包围盒作为确定性替代）；`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 解析后具名拒绝；没有 oblique 选项（AutoCAD 也无）；宽高为 `height × 字符数` 估算 |
