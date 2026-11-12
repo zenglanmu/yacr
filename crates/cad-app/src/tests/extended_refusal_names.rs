@@ -1,4 +1,4 @@
-//! Waves 17-24 contracts: the 197 data-driven named refusals.
+//! Contract for the data-driven named refusals: 197 existing + 91 Wave 27 = 288.
 //!
 //! Every selector in [`RefusalId::ALL`] must reach its stable
 //! `<selector>.unsupported: ...` reason, write nothing, bump no revision,
@@ -15,7 +15,11 @@ fn revision(app: &Application) -> Revision {
 fn every_wave17_refusal_refuses_with_its_stable_reason() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);
-    assert_eq!(RefusalId::ALL.len(), 197, "the batch is 197 names");
+    assert_eq!(
+        RefusalId::ALL.len(),
+        288,
+        "197 existing + 91 Wave 27 = 288 named refusals"
+    );
     for &name in RefusalId::ALL {
         let ext = ExtendedCommandId::Refusal(name);
         let selector = name.selector();

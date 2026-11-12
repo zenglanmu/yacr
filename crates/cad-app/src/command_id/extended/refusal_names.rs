@@ -1,9 +1,13 @@
-//! The Wave 17-24 named-refusal registry (197 AutoCAD 2026 names).
+//! The Wave 17-24 + Wave 27 named-refusal registry (288 AutoCAD 2026 names:
+//! 197 existing + 91 Wave 27).
 //!
 //! Every name in this batch describes a feature with no model or API in this
 //! build: action macros, palettes, OLE/hyperlinks, LISP, 3D lights/materials/
 //! constraints, data extraction, DWF/DGN underlays, markup and the geographic
-//! toolset. Each is admitted by the vocabulary and then refused with
+//! toolset. Wave 27 adds the 3D solid/surface/section/drawing-view, point-cloud,
+//! render/visual-style/lighting, cloud share/Docs/sheet-set, partial-open,
+//! shell/security, xref-compare and clipboard special-paste names. Each is
+//! admitted by the vocabulary and then refused with
 //! `CadError::Unsupported` carrying the stable reason below. A refusal writes
 //! nothing, bumps no revision and records no history entry: it is an honest
 //! partial implementation (command path exists, feature is absent), never a
@@ -14,7 +18,7 @@
 
 macro_rules! refusal_names {
     ($($variant:ident => $name:literal => $reason:literal),+ $(,)?) => {
-        /// One named-refusal command from the Wave 17-24 batch.
+        /// One named-refusal command (197 existing + 91 Wave 27 = 288).
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum RefusalId {
             $($variant),+
@@ -31,7 +35,7 @@ macro_rules! refusal_names {
                 match self { $(Self::$variant => $reason),+ }
             }
 
-            /// Every Wave 17-24 refusal, in declaration order.
+            /// Every named refusal (Wave 17-24 then Wave 27), in declaration order.
             pub const ALL: &'static [RefusalId] = &[$(RefusalId::$variant),+];
         }
     };
@@ -236,4 +240,95 @@ refusal_names! {
     Olereset => "OLERESET" => "olereset.unsupported: this build has no OLE object storage model",
     Olescale => "OLESCALE" => "olescale.unsupported: this build has no OLE object storage model",
     Opendwfmarkup => "OPENDWFMARKUP" => "opendwfmarkup.unsupported: this build has no DWF markup model",
+    Pcextractcenterline => "PCEXTRACTCENTERLINE" => "pcextractcenterline.unsupported: no point-cloud extraction model",
+    Pcextractcorner => "PCEXTRACTCORNER" => "pcextractcorner.unsupported: no point-cloud extraction model",
+    Pcextractedge => "PCEXTRACTEDGE" => "pcextractedge.unsupported: no point-cloud extraction model",
+    Pcextractsection => "PCEXTRACTSECTION" => "pcextractsection.unsupported: no point-cloud extraction model",
+    Pface => "PFACE" => "pface.unsupported: no 3DFACE/mesh entity model",
+    Planesurf => "PLANESURF" => "planesurf.unsupported: no planar-surface entity model",
+    Projectgeometry => "PROJECTGEOMETRY" => "projectgeometry.unsupported: no 3D solid edge/geometry projection model",
+    Tabsurf => "TABSURF" => "tabsurf.unsupported: no 3D surface (NURBS) model",
+    Revsurf => "REVSURF" => "revsurf.unsupported: no 3D surface (NURBS) model",
+    Rulesurf => "RULESURF" => "rulesurf.unsupported: no 3D surface (NURBS) model",
+    Xedges => "XEDGES" => "xedges.unsupported: no 3D solid/surface wireframe extraction model",
+    Section => "SECTION" => "section.unsupported: no 3D section-plane model",
+    Sectionplane => "SECTIONPLANE" => "sectionplane.unsupported: no 3D section-plane model",
+    Sectionplanejog => "SECTIONPLANEJOG" => "sectionplanejog.unsupported: no 3D section-plane model",
+    Sectionplanesettings => "SECTIONPLANESETTINGS" => "sectionplanesettings.unsupported: no 3D section-plane model",
+    Sectionplanetoblock => "SECTIONPLANETOBLOCK" => "sectionplanetoblock.unsupported: no 3D section-plane model",
+    Sectionspinners => "SECTIONSPINNERS" => "sectionspinners.unsupported: no 3D section-plane model",
+    Solidedit => "SOLIDEDIT" => "solidedit.unsupported: no 3D solid-history/brep model",
+    Solprof => "SOLPROF" => "solprof.unsupported: no 3D solid-to-2D drawing view model",
+    Solview => "SOLVIEW" => "solview.unsupported: no 3D solid-to-2D drawing view model",
+    Soldraw => "SOLDRAW" => "soldraw.unsupported: no 3D solid-to-2D drawing view model",
+    DashPointcloudattach => "-POINTCLOUDATTACH" => "-pointcloudattach.unsupported: no point-cloud attachment/crop/style model",
+    Pointcloudattach => "POINTCLOUDATTACH" => "pointcloudattach.unsupported: no point-cloud attachment/crop/style model",
+    Pointcloudcolormap => "POINTCLOUDCOLORMAP" => "pointcloudcolormap.unsupported: no point-cloud attachment/crop/style model",
+    Pointcloudcrop => "POINTCLOUDCROP" => "pointcloudcrop.unsupported: no point-cloud attachment/crop/style model",
+    Pointcloudcropstate => "POINTCLOUDCROPSTATE" => "pointcloudcropstate.unsupported: no point-cloud attachment/crop/style model",
+    DashPointcloudmanager => "-POINTCLOUDMANAGER" => "-pointcloudmanager.unsupported: no point-cloud attachment/crop/style model",
+    Pointcloudmanager => "POINTCLOUDMANAGER" => "pointcloudmanager.unsupported: no point-cloud attachment/crop/style model",
+    Pointcloudmanagerclose => "POINTCLOUDMANAGERCLOSE" => "pointcloudmanagerclose.unsupported: no point-cloud attachment/crop/style model",
+    Pointcloudstylize => "POINTCLOUDSTYLIZE" => "pointcloudstylize.unsupported: no point-cloud attachment/crop/style model",
+    Pointclouduncrop => "POINTCLOUDUNCROP" => "pointclouduncrop.unsupported: no point-cloud attachment/crop/style model",
+    DashRender => "-RENDER" => "-render.unsupported: no render engine; only the 2D viewport renderer exists",
+    Render => "RENDER" => "render.unsupported: no render engine; only the 2D viewport renderer exists",
+    Rendercrop => "RENDERCROP" => "rendercrop.unsupported: no render engine; only the 2D viewport renderer exists",
+    Renderenvironment => "RENDERENVIRONMENT" => "renderenvironment.unsupported: no render engine; only the 2D viewport renderer exists",
+    Renderenvironmentclose => "RENDERENVIRONMENTCLOSE" => "renderenvironmentclose.unsupported: no render engine; only the 2D viewport renderer exists",
+    Renderexposure => "RENDEREXPOSURE" => "renderexposure.unsupported: no render engine; only the 2D viewport renderer exists",
+    Renderexposureclose => "RENDEREXPOSURECLOSE" => "renderexposureclose.unsupported: no render engine; only the 2D viewport renderer exists",
+    Renderonline => "RENDERONLINE" => "renderonline.unsupported: no render engine; only the 2D viewport renderer exists",
+    Renderpresets => "RENDERPRESETS" => "renderpresets.unsupported: no render engine; only the 2D viewport renderer exists",
+    Renderpresetsclose => "RENDERPRESETSCLOSE" => "renderpresetsclose.unsupported: no render engine; only the 2D viewport renderer exists",
+    Renderwin => "RENDERWIN" => "renderwin.unsupported: no render engine; only the 2D viewport renderer exists",
+    Renderwindow => "RENDERWINDOW" => "renderwindow.unsupported: no render engine; only the 2D viewport renderer exists",
+    Renderwindowclose => "RENDERWINDOWCLOSE" => "renderwindowclose.unsupported: no render engine; only the 2D viewport renderer exists",
+    Rpref => "RPREF" => "rpref.unsupported: no render engine; only the 2D viewport renderer exists",
+    Rprefclose => "RPREFCLOSE" => "rprefclose.unsupported: no render engine; only the 2D viewport renderer exists",
+    Showrendergallery => "SHOWRENDERGALLERY" => "showrendergallery.unsupported: no render engine; only the 2D viewport renderer exists",
+    DashVisualstyles => "-VISUALSTYLES" => "-visualstyles.unsupported: no visual-style/3D display model; VSCURRENT owns the 2D display token",
+    Visualstyles => "VISUALSTYLES" => "visualstyles.unsupported: no visual-style/3D display model; VSCURRENT owns the 2D display token",
+    Visualstylesclose => "VISUALSTYLESCLOSE" => "visualstylesclose.unsupported: no visual-style/3D display model; VSCURRENT owns the 2D display token",
+    Pointlight => "POINTLIGHT" => "pointlight.unsupported: no 3D light model",
+    Spotlight => "SPOTLIGHT" => "spotlight.unsupported: no 3D light model",
+    Weblight => "WEBLIGHT" => "weblight.unsupported: no 3D light model",
+    Targetpoint => "TARGETPOINT" => "targetpoint.unsupported: no 3D light model",
+    Sunproperties => "SUNPROPERTIES" => "sunproperties.unsupported: no sun/sky lighting model",
+    Sunpropertiesclose => "SUNPROPERTIESCLOSE" => "sunpropertiesclose.unsupported: no sun/sky lighting model",
+    DashShademode => "-SHADEMODE" => "-shademode.unsupported: no 3D shaded display mode; VSCURRENT owns the 2D display token",
+    Shademode => "SHADEMODE" => "shademode.unsupported: no 3D shaded display mode; VSCURRENT owns the 2D display token",
+    Viewbase => "VIEWBASE" => "viewbase.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewcomponent => "VIEWCOMPONENT" => "viewcomponent.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewdetail => "VIEWDETAIL" => "viewdetail.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewdetailstyle => "VIEWDETAILSTYLE" => "viewdetailstyle.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewedit => "VIEWEDIT" => "viewedit.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewproj => "VIEWPROJ" => "viewproj.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewsection => "VIEWSECTION" => "viewsection.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewsectionstyle => "VIEWSECTIONSTYLE" => "viewsectionstyle.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewsetproj => "VIEWSETPROJ" => "viewsetproj.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewsketchclose => "VIEWSKETCHCLOSE" => "viewsketchclose.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewstd => "VIEWSTD" => "viewstd.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewsymbolsketch => "VIEWSYMBOLSKETCH" => "viewsymbolsketch.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Viewupdate => "VIEWUPDATE" => "viewupdate.unsupported: no 3D model-to-drawing base/detail/section view model",
+    Share => "SHARE" => "share.unsupported: no Autodesk cloud sharing/view model",
+    Sharedviews => "SHAREDVIEWS" => "sharedviews.unsupported: no Autodesk cloud sharing/view model",
+    Sharedviewsclose => "SHAREDVIEWSCLOSE" => "sharedviewsclose.unsupported: no Autodesk cloud sharing/view model",
+    DashShareview => "-SHAREVIEW" => "-shareview.unsupported: no Autodesk cloud sharing/view model",
+    Shareview => "SHAREVIEW" => "shareview.unsupported: no Autodesk cloud sharing/view model",
+    Pushtodocsopen => "PUSHTODOCSOPEN" => "pushtodocsopen.unsupported: no Autodesk Docs connector model",
+    Pushtodocsclose => "PUSHTODOCSCLOSE" => "pushtodocsclose.unsupported: no Autodesk Docs connector model",
+    Sheetset => "SHEETSET" => "sheetset.unsupported: no sheet-set (DST) model",
+    Opensheetset => "OPENSHEETSET" => "opensheetset.unsupported: no sheet-set (DST) model",
+    Sheetsethide => "SHEETSETHIDE" => "sheetsethide.unsupported: no sheet-set (DST) model",
+    Xcompare => "XCOMPARE" => "xcompare.unsupported: no xref comparison/diff model",
+    Xcompareclose => "XCOMPARECLOSE" => "xcompareclose.unsupported: no xref comparison/diff model",
+    Xcomparercnext => "XCOMPARERCNEXT" => "xcomparercnext.unsupported: no xref comparison/diff model",
+    Xcomparercprev => "XCOMPARERCPREV" => "xcomparercprev.unsupported: no xref comparison/diff model",
+    Partialopen => "PARTIALOPEN" => "partialopen.unsupported: no partial layer-index open/load model",
+    Partiaload => "PARTIALOAD" => "partiaload.unsupported: no partial layer-index open/load model",
+    Shell => "SHELL" => "shell.unsupported: the host owns process spawning; this command layer has no OS shell",
+    Securityoptions => "SECURITYOPTIONS" => "securityoptions.unsupported: no security/executable-trust settings model",
+    Xclip => "XCLIP" => "xclip.unsupported: no block/xref clip-boundary model; IMAGECLIP clips raster images only",
+    Pastespec => "PASTESPEC" => "pastespec.unsupported: clipboard special-paste (OLE/format selection) is not modeled; use PASTECLIP or PASTEBLOCK",
 }
