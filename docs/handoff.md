@@ -1,5 +1,21 @@
 AD
 
+## 2026-11-13 插件 API M2.2：文档列表与 revision
+
+- **新增读取**（同一 `cad_api_call` / `CadApiSnapshot`，无新命令、无队列）：
+  `documentManager.documents` → `{documents:[descriptor...]}`（0 或 1；无图时 `[]`），
+  `database.revision`（参数 `{database}`）→ `{revision}`。拒绝：`cad_waiting`（无快照）、
+  `cad_api.no_document`、`api.invalid_argument: database`；未知操作仍先拒绝。
+- **客户端**：`documents()` 解码列表；新增 `Database.revision(): Promise<number>`（每次实时读，
+  不缓存、不从开图时的 `version` 推导，因为它是 `expectedRevision` 的比较基准）。能力表
+  **21 行 = 18 pending + 3 supported**，JSON 与包内表逐行一致，Rust 断言按名字钉住三项。
+- **边界**：符号表、选择、编辑器提示、事务、命令派发仍 pending；镜像滞后一个 owner tick；
+  Windows/macOS/Android 未运行。
+- **证据**：`cargo test -p cad-ui-core --lib session::api` 21、`-p app-web` 123、
+  `plugin_api_status` 6/6、`fmt`、`check-architecture` / `check-file-size` / `check-i18n` 通过；包 node 53/53、
+  desktop-ui plugin-api+host-adapter 70/70、`npm test` 整条 **1648/1648**。
+  **NOT RUN**：真实 GUI 读取、GUI/GPU/像素/真机、Windows/macOS/Android/Web 运行。
+
 ## 2026-11-13 插件 API M2.1：`cad_api_call` + 活动文档只读
 
 - **新增**：共享 wire 命令 `cad_api_call`（`reads` 车道，args `{namespace,operation,parameters?}`，
