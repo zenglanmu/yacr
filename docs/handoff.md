@@ -1,5 +1,54 @@
 AD
 
+## 2026-11-13 多格式导入接入 SketchUp（`.skp`）预览 lane
+
+- **改动**（`cad-import-skp` 本体由另一条 lane 实现，本轮**未改**其公共面）：
+  - 检测：`cad-import-core::detect` 新增 `DrawingFormat::Skp`（在 `Rvt` 之后）、`label()` 分支、
+    `looks_like_skp` 与 `detect_format` 分支。SKP 是**最先**探测的一项：定长 32 字节签名
+    （`FF FE FF 0E` + UTF-16LE `SketchUp Model`），比 OLE/`AC10xx` 嗅探便宜，且没有别的格式以
+    `FF FE FF` 开头；头只回答“是 SketchUp 模型”，release 由适配器回答。
+  - 派发：`cad-app` 新增 `cad-import-skp` 依赖、`FormatImporter::skp` 字段与
+    `DrawingFormat::Skp => self.skp.import_with_progress(...)`（进度转发与 RVT 臂一致）；
+    `UNSUPPORTED_INPUT` 现在点名 SketchUp（`.skp`）。
+  - 选择器/扩展名：`apps/desktop-ui/src/host/web-adapter.ts`（`WEB_OPEN_EXTENSIONS`、门与文档注释）、
+    `app-linux`/`app-windows`/`app-macos` 的 `OPEN_EXTENSIONS` 与三条契约测试、
+    `cad-diagnostics::DOCUMENT_EXTENSIONS` 与裸 token 脱敏测试都加入 `.skp`；Android SAF 不对
+    扩展名做枚举，无改动。
+  - i18n：`linux/windows/macos.picker_filter` 的 zh-CN/en 各加 `SKP`（试运行预览），无新键。
+  - 文档：`docs/compatibility.md`（标题、嗅探链、新增 SKP 能力行、crate 测试清单、外部 corpus
+    证据边界）、`docs/architecture.md:53`（crate 与嗅探列表）、`THIRD_PARTY_NOTICES.md`
+    （`skpwright 0.6.0` GPL-3.0-only 条目 + AGPLv3 §13 组合说明）、`README.md`（导入句/格式 bullet，
+    只保留状态标签）、`docs/adr/0033-multi-format-import.md` 新增 D8 SKP（原 D8/D9 顺延为
+    D9/D10，交叉引用同步），新增 `fixtures/skp/SOURCE.md`（仅外部夹具，未加入
+    `fixtures/manifest`）。
+- **测试（已运行，本轮实测）**：
+  - `cargo test -p cad-import-core --locked`：**20 passed**（含 3 条 SKP 检测：32 字节头 → `Skp`、
+    错误类型串不命中、31 字节截断不命中）。
+  - `cargo test -p cad-app import --locked`：lib **21 passed**（含新增 dispatcher 两条：头 + garbage
+    走到 SKP lane 得到 `import.skp.parse_failed` 而非 `UNSUPPORTED_INPUT`；三个版本的头不被
+    RVT/STEP/IFC/OBJ/STL/PLY/OFF lane 认领）。
+  - `cargo test -p cad-import-skp --locked`：**19 passed**（release 上限、材质、三角化、可见性
+    裁剪、显式拒绝等；本机重跑确认）。
+  - `cargo test -p cad-diagnostics --locked`：**15 passed**；`cargo test -p app-linux platform
+    --locked`：**27 passed**。
+  - `cargo check -p cad-app --all-targets --locked`、`cargo check -p cad-import-skp --target
+    wasm32-unknown-unknown --locked`：通过（wasm 侧无平台依赖，`miniz_oxide` 是纯 Rust）。
+  - 门禁：`check-architecture` / `check-file-size` / `check-i18n` / `check-fixture-manifest`、
+    `cargo fmt --all -- --check`、`(cd apps/desktop-ui && npx tsc --noEmit)` 全部通过。
+  - 真实语料（外部，未提交，见 `fixtures/skp/SOURCE.md`）：全语料 **763** 个 `.skp` ⇒ **728 成功、
+    25 `import.skp.edge_only_geometry`、10 `import.skp.no_geometry`、0 失败 / 0 panic**；box
+    1 实体/12 三角、house 64/1440、face-with-hole 1/8、instance-scaled 3/36；theater-2017
+    1246 实体/96,333 三角与 theater-2026 1246/96,344 的面积 **1020.981869 m²** 一致（相对差
+    5e-14）。三角化策略：耳切 + 面积校验，失败回退 even-odd（带洞面直接 even-odd），两者都失败
+    才丢弃并记 `import.skp.faces_dropped`。
+- **NOT RUN**：全量 workspace 门禁与全量测试（`cargo test --workspace`）、`cargo clippy`、
+  Windows/macOS/Android 载体的编译与运行、真实 GUI/GPU/像素/真机；没有真实 Revit/STEP/IFC
+  样本对照。`YACR_TEST_SKP`/`YACR_TEST_SKP_2026` 未设置时相关用例跳过，**跳过不是已运行证据**。
+- **证据边界**：`.skp` 是**预览**通道（三角形 + 实例变换 + tag + 材质颜色/不透明度），不是测量源
+  （`measure` 恒 `Unsupported`，成功导入恒 `Partial`）；2021–2025 只有容器等价（`Unverified`，
+  无观测样本）；只有边/曲线的文件显式拒绝 `import.skp.edge_only_geometry`，不是空成功。外部
+  corpus 数字是有界扫描，不是 golden 回归、性能或产品验收；平台表与其它平台验收状态不变。
+
 ## 2026-11-13 合并 `ts-api` 工作树（插件 API M2 系列进入 `main`）
 
 - **范围**：`ts-api` 工作树的 12 个提交（`76806671`…`1a4e8d9e`）合入 `main`（`merge/ts-api` 分支，

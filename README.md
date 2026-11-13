@@ -3,17 +3,17 @@
 [English](README.md) | [中文](README.zh-CN.md)
 
 yacr is a cross-platform open-source CAD project. A shared Rust core handles CAD documents
-(DWG/DXF, plus mesh, STEP, IFC and Revit import), geometry, commands and rendering; React + Tauri
-provides the UI, and wgpu draws the scene. The same document and rendering pipeline is intended for
-Linux (native Wayland or X11/`dom-canvas`), Windows, macOS, Android and the web.
+(DWG/DXF, plus mesh, STEP, IFC, Revit and SketchUp import), geometry, commands and rendering;
+React + Tauri provides the UI, and wgpu draws the scene. The same document and rendering pipeline
+is intended for Linux (native Wayland or X11/`dom-canvas`), Windows, macOS, Android and the web.
 
 **Website:** <https://yacr.pages.dev/> · **Web app:** <https://yacr-examples.pages.dev/>
 
 yacr is under active development, and **preview builds are available now** — Linux Flatpak, Windows
 zip, macOS tarball, Android APK, and a browser build. It opens DWG/DXF, imports mesh/STEP/IFC files
-for display and previews Revit projects, views 2D/3D drawings with wgpu, measures, and has an
-implementation path for 979 of 981 commands (107 complete, 872 partial); the remaining two names
-(MEASURE, TRACE) are counted as same-name-different-meaning, and unsupported options are
+for display, previews Revit projects and SketchUp models, views 2D/3D drawings with wgpu, measures,
+and has an implementation path for 979 of 981 commands (107 complete, 872 partial); the remaining
+two names (MEASURE, TRACE) are counted as same-name-different-meaning, and unsupported options are
 rejected by name instead of silently succeeding. It is **not yet a production CAD system**;
 per-platform status and evidence boundaries are in `docs/handoff.md` and `docs/compatibility.md`.
 
@@ -105,7 +105,9 @@ fallback**. See ADR 0010 and ADR 0011.
     asynchronous import, progress and cancellation: DWG / DXF (ASCII and binary) as CAD data; OBJ,
     STL, PLY / OFF, STEP (AP203/214/242) and IFC (2X3/4/4X3) as **display-and-pick meshes** (no
     measurement, `Partial` where the source loses information); Revit projects (`.rvt`/`.rte`) as a
-    **bounding-box preview** only. Revit families (`.rfa`/`.rft`) are refused by name.
+    **bounding-box preview** only, and SketchUp models (`.skp`) as a **triangle preview** (instances,
+    tags and material colours; no edges, textures or measurement). Revit families (`.rfa`/`.rft`) are
+    refused by name.
   - **View**: model space and supported layout switching; layer hide/show, search and restore;
     entity selection, highlight and basic properties.
   - **Navigate**: pan, zoom, fit, reset; **2D and 3D observation** (orbit, standard views,

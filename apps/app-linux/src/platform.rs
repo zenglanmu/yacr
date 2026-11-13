@@ -588,9 +588,11 @@ fn read_failure(path: &Path, error: std::io::Error) -> String {
 /// diagnostic, which is far more useful than the file being unselectable and the
 /// user only seeing a generic "not a drawing". They are deliberately *not* in any
 /// "supported formats" copy (see `README.md` / the i18n filter labels).
+/// `.skp` is the SketchUp preview lane (triangles only, never a measurement
+/// source; an edge-only model is refused by name, not by the picker).
 const OPEN_EXTENSIONS: &[&str] = &[
     "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte", "rfa",
-    "rft",
+    "rft", "skp",
 ];
 
 /// `"obj"` → `"*.[oO][bB][jJ]"`.

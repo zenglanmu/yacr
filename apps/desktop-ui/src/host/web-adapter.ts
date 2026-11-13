@@ -243,12 +243,16 @@ export const WEB_HOST_COMMANDS: readonly string[] = [WEB_OPEN_COMMAND];
  * diagnostic, which beats an unexplained "not a drawing" from this gate. They are
  * deliberately *not* in any "supported formats" copy.
  *
+ * `.skp` is the SketchUp preview lane (`cad-import-skp`): triangle preview
+ * geometry, never a measurement source, refusals by name
+ * (`import.skp.edge_only_geometry` for an edge-only model).
+ *
  * Used **after** the picker returns, never as an `accept` filter (see
  * [`pickDrawingFile`]).
  */
 export const WEB_OPEN_EXTENSIONS: readonly string[] = Object.freeze([
   '.dwg', '.dxf', '.obj', '.stl', '.ply', '.off', '.coff',
-  '.step', '.stp', '.ifc', '.rvt', '.rte', '.rfa', '.rft',
+  '.step', '.stp', '.ifc', '.rvt', '.rte', '.rfa', '.rft', '.skp',
 ]);
 
 /** The stable prefix of every module-unavailable failure. */

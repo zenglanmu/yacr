@@ -6,8 +6,8 @@
 //! progress, report or cancellation policy is duplicated here, so the adapters
 //! remain the single place each format's behaviour is defined.
 //!
-//! `ImportRequest::xref` is DWG-only. OBJ, STL, PLY, OFF, STEP, IFC and RVT
-//! imports ignore it; those formats have no CAD external references, and
+//! `ImportRequest::xref` is DWG-only. OBJ, STL, PLY, OFF, STEP, IFC, RVT and
+//! SKP imports ignore it; those formats have no CAD external references, and
 //! reporting otherwise would invent a resolution that never happened.
 
 use cad_domain::{CadError, CadResult};
@@ -19,6 +19,7 @@ use cad_import_ifc::IfcImporter;
 use cad_import_mesh::{OffImporter, PlyImporter};
 use cad_import_obj::ObjImporter;
 use cad_import_rvt::RvtImporter;
+use cad_import_skp::SkpImporter;
 use cad_import_step::StepImporter;
 use cad_import_stl::StlImporter;
 
@@ -30,7 +31,7 @@ pub use cad_import_core::{ImportLimits, ImportPhase, ImportProgress, ImportReque
 pub const UNSUPPORTED_INPUT: &str = "input is not a supported drawing: expected a DWG \
      signature, an ASCII/binary DXF section stream, an ISO 10303-21 STEP or IFC file, an \
      OLE compound file from Autodesk Revit (.rvt/.rte; .rfa/.rft families carry no geometry), \
-     a Wavefront OBJ file, an STL file, a PLY file, or an OFF/COFF file";
+     a SketchUp model (.skp), a Wavefront OBJ file, an STL file, a PLY file, or an OFF/COFF file";
 
 /// Sniff-and-delegate importer used by every carrier.
 #[derive(Default)]
@@ -43,6 +44,7 @@ pub struct FormatImporter {
     ply: PlyImporter,
     off: OffImporter,
     rvt: RvtImporter,
+    skp: SkpImporter,
 }
 
 impl FormatImporter {
@@ -83,6 +85,11 @@ impl Importer for FormatImporter {
             // adapter reads the streams and refuses `.rfa`/`.rft` by name.
             // glTF is never a user-visible format and is never detected here.
             DrawingFormat::Rvt => self.rvt.import_with_progress(request, cancelled, progress),
+            // The `.skp` header tells the containers apart but not the release;
+            // the SKP adapter maps the release to a status ceiling, refuses
+            // edge-only files by name, and is always `Partial`/`Unsupported` for
+            // measurement.
+            DrawingFormat::Skp => self.skp.import_with_progress(request, cancelled, progress),
             DrawingFormat::Unknown => Err(CadError::CorruptData(UNSUPPORTED_INPUT.into())),
         }
     }
@@ -171,6 +178,84 @@ mod tests {
                 "the RVT lane must answer: {message}"
             ),
             other => panic!("expected Unsupported, got {other:?}"),
+        }
+    }
+
+    /// The fixed `.skp` header the dispatcher must route on: the document type
+    /// record, a version record and the 16-byte model GUID.
+    fn skp_header(version: &str) -> Vec<u8> {
+        fn record(text: &str) -> Vec<u8> {
+            let mut bytes = vec![0xFF, 0xFE, 0xFF, text.encode_utf16().count() as u8];
+            for unit in text.encode_utf16() {
+                bytes.extend_from_slice(&unit.to_le_bytes());
+            }
+            bytes
+        }
+        let mut bytes = record("SketchUp Model");
+        bytes.extend_from_slice(&record(version));
+        bytes.extend_from_slice(&[0u8; 16]);
+        bytes
+    }
+
+    #[test]
+    fn sketchup_is_routed_to_the_skp_importer_and_fails_honestly() {
+        // A valid `.skp` header followed by garbage is the SKP lane's problem:
+        // the parser must answer `import.skp.parse_failed`, not the generic
+        // `UNSUPPORTED_INPUT` (which would prove detection never reached it).
+        let mut bytes = skp_header("{17.3.116}");
+        bytes.extend_from_slice(b"this is not an MFC CArchive object stream");
+        assert_eq!(detect_format(&bytes), DrawingFormat::Skp);
+        let error = match FormatImporter::new().import(&request(bytes), &|| false) {
+            Ok(_) => panic!("a header plus garbage is not an importable model"),
+            Err(error) => error,
+        };
+        match error {
+            CadError::CorruptData(message) => {
+                assert!(
+                    message.contains(cad_import_skp::PARSE_FAILED),
+                    "the SKP lane must answer: {message}"
+                );
+                assert_ne!(message, UNSUPPORTED_INPUT);
+            }
+            other => panic!("expected CorruptData, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sketchup_bytes_are_not_mistaken_for_another_format() {
+        // A 32-byte-valid header must not be read as OLE, AC10xx, DXF, STL, PLY,
+        // OFF or OBJ: the SKP lane owns these bytes, so its own refusal (not a
+        // neighbouring importer's) is what a caller sees.
+        for version in ["{3.0.0}", "{17.3.116}", "{26.0.0}"] {
+            let bytes = skp_header(version);
+            assert_eq!(
+                detect_format(&bytes),
+                DrawingFormat::Skp,
+                "version {version} must be detected as SKP"
+            );
+            let error = match FormatImporter::new().import(&request(bytes), &|| false) {
+                Ok(_) => panic!("a header-only model has no geometry"),
+                Err(error) => error,
+            };
+            let message = match error {
+                CadError::CorruptData(message) => message,
+                CadError::Unsupported(message) => message,
+                other => panic!("expected a format-specific refusal, got {other:?}"),
+            };
+            assert!(
+                message.starts_with("import.skp."),
+                "version {version} must be answered by the SKP lane: {message}"
+            );
+            assert!(
+                !message.contains("import.rvt.")
+                    && !message.contains("import.step.")
+                    && !message.contains("import.ifc.")
+                    && !message.contains("import.obj.")
+                    && !message.contains("import.stl.")
+                    && !message.contains("import.ply.")
+                    && !message.contains("import.off."),
+                "version {version} leaked to a neighbouring lane: {message}"
+            );
         }
     }
 

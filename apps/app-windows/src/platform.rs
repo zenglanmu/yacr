@@ -48,9 +48,11 @@ const KEY_PICKER_FAILED: &str = "windows.picker_failed";
 /// with a precise `import.rvt.family_no_geometry` diagnostic, which is more
 /// useful than the file being unselectable. They are deliberately *not* in any
 /// "supported formats" copy (see `README.md` / the i18n filter labels).
+/// `.skp` is the SketchUp preview lane (triangles only, never a measurement
+/// source; an edge-only model is refused by name, not by the picker).
 const OPEN_EXTENSIONS: &[&str] = &[
     "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte", "rfa",
-    "rft",
+    "rft", "skp",
 ];
 
 /// The COM `COMDLG_FILTERSPEC` pattern (`"*.dwg;*.dxf;…"`).
@@ -955,14 +957,15 @@ mod tests {
     /// The COM filter must offer every extension the dispatcher can read.
     ///
     /// `.rfa`/`.rft` are listed on purpose (the importer refuses families by
-    /// name); this test asserts presence only, never "supported".
+    /// name), and `.skp` is the SketchUp preview lane; this test asserts presence
+    /// only, never "supported".
     #[test]
     fn open_filter_spec_lists_the_importer_set() {
         let spec = open_filter_spec();
         let patterns: Vec<&str> = spec.split(';').collect();
         for extension in [
             "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
-            "rfa", "rft",
+            "rfa", "rft", "skp",
         ] {
             let pattern = format!("*.{extension}");
             assert!(

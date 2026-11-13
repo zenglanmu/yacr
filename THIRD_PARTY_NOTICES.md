@@ -33,6 +33,14 @@
   **MIT OR Apache-2.0**，上游 <https://github.com/gltf-rs/gltf>。仅由 `cad-import-rvt`
   依赖，用于读取 `rvt` 生成的**内部**单缓冲 GLB（不是用户可见格式）；`default-features =
   false` 并只启用 `utils`/`names`，因此不引入 `image` 及其编解码依赖；未修改上游源码。
+- skpwright 0.6.0：SketchUp（`.skp`）的 clean-room 读取器，**GPL-3.0-only**，上游
+  <https://github.com/hew3d/skpwright>。仅由 `cad-import-skp` 依赖；版本在 workspace 中
+  **精确固定**（`=0.6.0`），未启用额外 feature，上游源码**未修改**（未打补丁、未复制其源码）；
+  它只有**一个**依赖 `miniz_oxide`（纯 Rust），本仓库的导入 lane 也是纯 Rust、无平台依赖。
+  它是 **preview** 读取器：只输出三角形、实例变换、tag 与材质颜色/不透明度；不导入边/曲线、
+  纹理图像与 UV、场景、剖切面、标注，本仓库不把其输出用于测量。主仓许可是 **AGPL-3.0**，
+  可与 GPL-3.0 代码组合（AGPLv3 §13）；**skpwright 部分对下游仍按 GPLv3 分发**，不因组合而
+  改许可。其唯一传递依赖的实际版本见 Cargo.lock，分发前需做完整依赖审计。
 - MiniCAD：轻量开源 2D/3D CAD，仅作为功能与实现参考；未复制其源码，也不是构建或运行时依赖。
 - wgpu / Tauri / GTK：桌面 UI 与渲染技术方向。wgpu 仅由 `cad-render-wgpu` 依赖；桌面宿主使用
   Tauri 2（WebView）+ GTK3/WebKitGTK 4.1 + 原生 GTK/wgpu CAD 分区。

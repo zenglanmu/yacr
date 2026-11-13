@@ -22,6 +22,7 @@ cad-import-mesh.workspace = true
 cad-import-step.workspace = true
 cad-import-ifc.workspace = true
 cad-import-rvt.workspace = true
+cad-import-skp.workspace = true
 cad-representation.workspace = true
 cad-scene.workspace = true
 cad-query.workspace = true

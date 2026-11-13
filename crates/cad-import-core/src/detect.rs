@@ -28,6 +28,11 @@ pub enum DrawingFormat {
     /// family/family template (`.rfa`/`.rft`). The RVT adapter tells them
     /// apart from their streams and refuses families by name.
     Rvt,
+    /// A SketchUp model (`.skp`), in either container the reader models: the
+    /// MFC `CArchive` stream of releases 3–8 and 2013–2020, or the ZIP/tagged
+    /// record container of 2026 and 2027. The SKP adapter refuses a release it
+    /// cannot place, and refuses edge-only files by name.
+    Skp,
     Unknown,
 }
 
@@ -44,6 +49,7 @@ impl DrawingFormat {
             DrawingFormat::Ply => "PLY (Polygon File Format)",
             DrawingFormat::Off => "OFF (Object File Format)",
             DrawingFormat::Rvt => "Autodesk Revit",
+            DrawingFormat::Skp => "SketchUp (.skp)",
             DrawingFormat::Unknown => "unknown",
         }
     }
@@ -53,8 +59,14 @@ impl DrawingFormat {
 ///
 /// Order matters only for readability: a DWG signature can never be a DXF
 /// section stream, and neither starts with an ISO 10303-21 exchange header.
+///
+/// The SKP probe runs first because it is a fixed 32-byte signature — cheaper
+/// than the OLE/CFB and `AC10xx` sniffs — and no other format starts with
+/// `FF FE FF`, so putting it first cannot shadow an arm.
 pub fn detect_format(bytes: &[u8]) -> DrawingFormat {
-    if looks_like_ole(bytes) {
+    if looks_like_skp(bytes) {
+        DrawingFormat::Skp
+    } else if looks_like_ole(bytes) {
         DrawingFormat::Rvt
     } else if looks_like_dwg(bytes) {
         DrawingFormat::Dwg
@@ -119,6 +131,34 @@ fn looks_like_step(bytes: &[u8]) -> bool {
         .trim_start_matches('\u{feff}')
         .trim_start()
         .starts_with("ISO-10303-21;")
+}
+
+/// The fixed 32-byte `.skp` header: a `FF FE FF <len:u8>` UTF-16LE string
+/// record whose text is always the document type `SketchUp Model`.
+///
+/// The `.skp` header is two such string records (document type, then version),
+/// then a 16-byte per-model GUID. Only the first record is the signature: it is
+/// 14 code units, so the marker plus the text is exactly 32 bytes. The version
+/// record is deliberately **not** part of the probe — which release a file is
+/// (and whether it is `Verified` or `Unverified`) is the adapter's answer, not
+/// detection's. Both containers (the MFC stream and the ZIP/tagged-record one)
+/// start with this same record.
+fn looks_like_skp(bytes: &[u8]) -> bool {
+    const DOCUMENT_TYPE: &str = "SketchUp Model";
+    const HEADER_LEN: usize = 4 + DOCUMENT_TYPE.len() * 2;
+    if bytes.len() < HEADER_LEN {
+        return false;
+    }
+    if bytes[..4] != [0xFF, 0xFE, 0xFF, DOCUMENT_TYPE.len() as u8] {
+        return false;
+    }
+    DOCUMENT_TYPE
+        .encode_utf16()
+        .enumerate()
+        .all(|(index, unit)| {
+            let at = 4 + index * 2;
+            bytes[at..at + 2] == unit.to_le_bytes()
+        })
 }
 
 /// The OLE/CFB magic that every `.rvt`, `.rte`, `.rfa` and `.rft` starts with.
@@ -278,6 +318,57 @@ mod tests {
         bytes[80..84].copy_from_slice(&1u32.to_le_bytes());
         bytes.extend_from_slice(&[0u8; 50]);
         assert_eq!(detect_format(&bytes), DrawingFormat::Stl);
+    }
+
+    /// The fixed `.skp` header: the document type record, a version record and
+    /// the 16-byte model GUID (the signature is only the first record).
+    fn skp_header(document_type: &str) -> Vec<u8> {
+        fn record(text: &str) -> Vec<u8> {
+            let mut bytes = vec![0xFF, 0xFE, 0xFF, text.encode_utf16().count() as u8];
+            for unit in text.encode_utf16() {
+                bytes.extend_from_slice(&unit.to_le_bytes());
+            }
+            bytes
+        }
+        let mut bytes = record(document_type);
+        bytes.extend_from_slice(&record("{17.3.116}"));
+        bytes.extend_from_slice(&[0u8; 16]);
+        bytes
+    }
+
+    #[test]
+    fn sketchup_header_is_skp() {
+        assert_eq!(
+            detect_format(&skp_header("SketchUp Model")),
+            DrawingFormat::Skp
+        );
+        // The signature is the record itself, so trailing container bytes do
+        // not change the answer.
+        assert_eq!(
+            detect_format(&[skp_header("SketchUp Model"), vec![0u8; 64]].concat()),
+            DrawingFormat::Skp
+        );
+    }
+
+    #[test]
+    fn a_sketchup_header_with_a_wrong_document_type_is_not_skp() {
+        assert_eq!(
+            detect_format(&skp_header("SketchUp LayOut")),
+            DrawingFormat::Unknown
+        );
+        assert_eq!(
+            detect_format(&skp_header("Sketchup Model")),
+            DrawingFormat::Unknown
+        );
+    }
+
+    #[test]
+    fn a_truncated_sketchup_header_is_not_skp() {
+        let bytes = skp_header("SketchUp Model");
+        // 31 bytes: the marker and 13½ code units are not the signature.
+        assert_eq!(detect_format(&bytes[..31]), DrawingFormat::Unknown);
+        // The first four bytes alone are not enough either.
+        assert_eq!(detect_format(&bytes[..4]), DrawingFormat::Unknown);
     }
 
     #[test]

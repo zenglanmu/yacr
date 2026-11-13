@@ -30,6 +30,7 @@ fn bare_import_format_tokens_are_redacted() {
         "house.rte",
         "family.rfa",
         "family.rft",
+        "model.skp",
     ] {
         let redacted = redact_text(&format!("import failed: {name}"));
         assert!(!redacted.contains(name), "{name} leaked into {redacted}");

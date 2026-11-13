@@ -695,6 +695,7 @@ dependencies = [
  "cad-import-mesh",
  "cad-import-obj",
  "cad-import-rvt",
+ "cad-import-skp",
  "cad-import-step",
  "cad-import-stl",
  "cad-measure",
@@ -895,6 +896,17 @@ dependencies = [
  "gltf",
  "rvt",
  "serde_json",
+ "web-time",
+]
+
+[[package]]
+name = "cad-import-skp"
+version = "0.1.12"
+dependencies = [
+ "cad-db",
+ "cad-domain",
+ "cad-import-core",
+ "skpwright",
  "web-time",
 ]
 
@@ -4874,6 +4886,15 @@ name = "siphasher"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
+
+[[package]]
+name = "skpwright"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7bc4bf681b4039e70134a32ba837ed7a67f315b1ad4d3b6715c82f822ecdfbc"
+dependencies = [
+ "miniz_oxide 0.9.1",
+]
 
 [[package]]
 name = "slab"

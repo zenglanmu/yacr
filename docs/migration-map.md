@@ -16,8 +16,8 @@
 时必须核对实际存在的路径，文档路径不作为 API 证明。若需精确对齐锁定 commit，需另行
 按该 SHA 取归档。
 上游许可：**GPL-3.0**（`LICENSE`）。本项目 `LICENSE` 为 **AGPL-3.0**；GPL-3.0 代码可
-并入 AGPL-3.0 项目，但 `Cargo.toml` 的 `license = "Apache-2.0 OR MIT"` 字段与 LICENSE
-不一致，须在采用任何上游代码前修正（见文末“许可风险”）。
+并入 AGPL-3.0 项目（AGPLv3 §13）。`Cargo.toml` 的许可字段曾陈旧地写作
+`Apache-2.0 OR MIT`，已于 2026-11-13 统一为 `AGPL-3.0-only`（见文末“许可风险”）。
 
 候选路径均以锁定 commit 的实际文件为准，文档路径不作为 API 证明。
 
@@ -47,10 +47,13 @@
 
 每项采用后记录 commit/文件/函数 → 目标文件 → 依赖适配 → 保留行为 → 差异 → 测试。
 
-## 许可风险（须维护者确认）
+## 许可风险（2026-11-13 已收敛）
 
-- `LICENSE`（AGPL-3.0）与 `Cargo.toml` `license = "Apache-2.0 OR MIT"` 冲突。
-- 若采用 GPL-3.0 上游代码，必须统一为 AGPL-3.0（或去掉冲突声明），并在
-  `THIRD_PARTY_NOTICES.md` 记录文件、版权与许可。
+- ~~`LICENSE`（AGPL-3.0）与 `Cargo.toml` `license = "Apache-2.0 OR MIT"` 冲突。~~
+  已统一：`Cargo.toml` 的 `workspace.package.license` 改为 `AGPL-3.0-only`，与 `LICENSE`、
+  `README.md`、Flatpak `project_license` 及 `plugins/tch`（AGPL-3.0-only）一致。
+- AGPL-3.0 与 GPL-3.0 代码可由 AGPLv3 §13 组合，因此 GPL-3.0 上游（含 GPL-3.0-**only** 依赖，
+  如 `skpwright`）可直接采用；被组合部分对下游仍按 GPLv3 授权。
+- 采用任何第三方代码时仍需在 `THIRD_PARTY_NOTICES.md` 记录文件、版权与许可。
 - 当前各 workstream 以上游为**行为参考、独立实现**，未复制源码；即便如此，
   许可证一致性仍应在发布前解决。

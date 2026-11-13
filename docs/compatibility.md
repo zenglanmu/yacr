@@ -64,20 +64,23 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | 布局 / 视口 | 实现(矩形裁剪/比例；矩形 VPCLIP 边界实体可证明为轴对齐矩形时按其矩形裁剪；`tab_order` 顺序 + LAYOUT 显示名) | 复杂/非矩形裁剪标记部分 | **实现（活动空间渲染已接线；`CadStatus.layouts`/`activeSpace` + `LayoutTabs`/`SPACE`，2026-11-02）** | 部分（真正不支持的布局页签可见但禁用，只显示稳定原因码） | 纸空间测量显式禁用 |
 | **XREF（外部参照）** | **部分（仅导入期只读解析，2026-11-02）** | **实现：acadrust `BlockRecord` 的 xref 标志/`xref_path` + `INSERT`；无独立 `Xref` 对象；无 `XREF` 命令/ATTACH/DETACH/RELOAD/BIND/编辑** | **加载成功的模型空间内容合并进宿主 xref 块后按普通块绘制；未加载状态显式缺席，不画假内容** | 合并成员随普通实体拾取；无 xref 专用拾取 | 不支持 |
 
-### 网格/实体格式（OBJ / STL / PLY / OFF / STEP / IFC / RVT，2026-11-10）
+### 网格/实体格式（OBJ / STL / PLY / OFF / STEP / IFC / RVT / SKP，2026-11-13）
 
 `cad_app::import::FormatImporter` 在进入适配器前做一次保守格式嗅探
-（`cad-import-core::detect_format`：OLE/CFB 魔数 `D0 CF 11 E0 A1 B1 1A E1` ⇒ `Rvt` → DWG
+（`cad-import-core::detect_format`：SKP 固定 32 字节头 `FF FE FF 0E` + UTF-16LE
+`SketchUp Model`（**最先**探测：定长签名比 OLE/`AC10xx` 便宜，且没有别的格式以 `FF FE FF`
+开头）⇒ `Skp` → OLE/CFB 魔数 `D0 CF 11 E0 A1 B1 1A E1` ⇒ `Rvt` → DWG
 签名 → ASCII/二进制 DXF 段流 → ISO 10303-21（`FILE_SCHEMA` 为 IFC ⇒ `Ifc`，否则 `Step`）→
 STL → PLY → OFF → OBJ，否则 `Unknown` 显式拒绝）。OLE 魔数只能说明“复合文档”，
-项目/模板与家族/家族模板由 RVT 适配器按流区分（见下），检测层不按扩展名猜。
+项目/模板与家族/家族模板由 RVT 适配器按流区分（见下），检测层不按扩展名猜；SKP 头也只说明
+“SketchUp 模型”，release 与可读性由 SKP 适配器回答（`import.skp.version_unsupported`）。
 IFC 与 STEP 共用 Part 21 容器，但 IFC 有独立 schema 与独立导入 lane：dispatcher 按
 `FILE_SCHEMA` 把 IFC 交给 `cad-import-ifc`，**不会**把 IFC 交给 STEP 适配器，cadmpeg 也完全
 不接触 IFC（STEP 适配器对 IFC 仍按名拒绝 `import.step.ifc_schema_refused`）。
 OBJ/STL/PLY/OFF/STEP/IFC 都只产生**中性网格**，入库走共享的 `cad-import-core::MeshImport`，因此
 这些源的能力行一致：绘制/拾取 `Verified`，测量 `Unsupported`（网格不是 MEASURE 目标；
-STEP/IFC 的精确 B-rep 也没有暴露给域）。**RVT 是例外**：它是预览路径，绘制/拾取的上限由
-`rvt` 的 release 状态决定，测量恒为 `Unsupported`（见下表）。
+STEP/IFC 的精确 B-rep 也没有暴露给域）。**RVT 与 SKP 是例外**：它们都是预览路径，绘制/拾取的上限由
+`rvt`/`skpwright` 的 release 状态决定，测量恒为 `Unsupported`（见下表）。
 
 | 格式 | 读取 | 语义 | 绘制 | 拾取 | 测量 | 明确边界 |
 |---|---|---|---|---|---|---|
@@ -88,16 +91,24 @@ STEP/IFC 的精确 B-rep 也没有暴露给域）。**RVT 是例外**：它是�
 | ISO 10303-21 STEP（AP203/AP214/AP242） | **实现（`cadmpeg-codec-step` 0.6.11 解码，`cadmpeg-tessellate` 逐面三角化）** | 中性网格（**精确 B-rep 不进入域**，只保留面片） | 实现（每个 body 一个 `DbEntity`；同一 body 被多个 occurrence 实例化时每个实例一个实体；occurrence 定位后写入模型空间） | 实现 | 不支持（网格不是 MEASURE 目标，精确 B-rep 未暴露） | **面片化成功即显示 `Verified`，但拒绝面真实存在**：参考样本 NIST `nist-ctc05` AP242 156 面中 155 面成功、1 面拒绝（`a wrapping loop bounds a strip with no far side`），ABC AP214 样本 25 面中 22 面成功、3 面拒绝；因此导入通常为 `Partial`。每个拒绝面 → `import.step.face_refused` + `Partial`；全部面被拒 → `Unsupported`（`import.step.no_tessellated_faces`），**不是空成功**；无 B-rep 面（如只有 AP242 面片化几何）→ `import.step.no_brep_faces`。**单位**：`cadmpeg-ir` 只存规范**毫米**且不暴露 STEP 声明的源单位，因此报告毫米并记 `import.step.units_canonicalised`；若解码报告出现 `geometry.document-length-unit-unresolved`，回退 `UnitContext::drawing_units()` 并记 `import.step.units_unknown`（不假设毫米）。**装配定位**：`Model::occurrences`（`Occurrence::transform` 沿 `OccurrenceParent` 复合 + `Occurrence::scale`）与 `ProductDefinition::bodies`；解码报告出现未解析/歧义 placement 且文件有多个 body 时按名拒绝 `import.step.assembly_placement_unsupported`，**绝不**把各 body 堆在原点；body 有定义但无 occurrence 的多 body 文件同样拒绝；`Body::transform`（独立 `MAPPED_ITEM` 的 world 放置）只在 occurrence 为恒等时应用，两者同时出现按名拒绝（避免重复定位）。n-gon 由 tessellator 自行三角化；解码 loss 逐条以 `import.step.loss.<code>` 传播并保留严重度（warning/error → `Partial`）；其他诊断：`import.step.face_empty`、`import.step.degenerate_triangle`、`import.step.normals_dropped`、`import.step.empty_body`、`import.step.face_unattributed`、`import.step.body_uninstantiated`。无外部参照；`vendor_records` 为空 |
 | IFC（IFC2X3 / IFC4 / IFC4X3） | **实现（`ifc-lite-core` + `ifc-lite-geometry` 28.2.0，MPL-2.0，精确固定版本）** | 中性网格（精确 B-rep/参数化体不进入域，只保留三角面片） | 实现（每个有几何的 product 一个 `DbEntity`；placement 链由路由器烘焙为世界坐标；`IfcOpeningElement` 只作为 cutter，不入库） | 实现 | 不支持（网格不是 MEASURE 目标，精确 B-rep 未暴露） | **单位**：路由器按 IFC 项目声明的长度单位把坐标与 placement 缩放为**米**；数据库存米，显示按可表示的声明单位（mm/m/in/ft）换算，其他声明单位显示为米；无 `IfcUnitAssignment`/单位链解析失败 → `UnitContext::drawing_units()` + `import.ifc.units_unknown` + `Partial`，**绝不假设毫米**；声明了不可用的转换因子 → 按名拒绝 `import.ifc.units_refused`。**定位**：`process_element*` 沿 `IfcLocalPlacement` 烘焙世界坐标（合成 IFC2X3 夹具固定两面墙 x 0..4 m / 6..10 m，不堆原点）。**洞口/CSG**：`process_element_with_voids` + `IfcRelVoidsElement` 做布尔裁剪（合成墙 12→32 三角），CSG 失败逐条 `import.ifc.csg_failure` + `Partial`；被路由器丢弃的 representation item 按类型汇总为 `import.ifc.item_unsupported` + `Partial`；NURBS/复杂 CSG 是 best-effort。单个 product 网格失败 → `import.ifc.element_failed`；空 product → `import.ifc.element_empty`；全部 product 失败 → `Unsupported`（`import.ifc.all_elements_failed`），**不是空成功**；无几何 product → `CorruptData`（`import.ifc.no_geometry_products`）；没有 `IfcRelVoidsElement` 宿主的孤立 opening 不绘制并记 `import.ifc.opening_without_host` + `Partial`。`IfcStyledItem` 颜色/材质不导入（`import.ifc.style_not_imported` + `Partial`，回退 `ByLayer`）。无外部参照（`XrefOptions` 仅 DWG）；`vendor_records` 为空；**无 IFC 导出**，不暴露 glTF |
 | Autodesk Revit 项目/项目模板（`.rvt` / `.rte`，OLE/CFB） | **预览实现（`rvt` 0.17.0，Apache-2.0，精确固定版本；RVT → 内部 glTF → 中性网格）** | 中性网格（每个 glTF node/mesh 实例一个 `DbEntity`；**预览几何**，不保留 Revit 语义/参数） | 实现，但**受 `rvt` 的 release 状态上限约束**（`verified`→`Verified`、`partial`→`Partial`、`experimental`/未知→`Unverified`；当前没有任何项目 release 是 `verified`） | 同左（与绘制同一上限） | 不支持（网格不是 MEASURE 目标；`rvt` 自己的文档明确禁止把输出用于测量/协调） | **几何保真度**：Revit 2008–2023 的构件体是**包围盒**（在可读的连接处切分），2024/2025 为 `partial`，2026/2027 为 `experimental`。`.rfa`/`.rft` 家族/家族模板只有元数据、预览图与类型，**没有家族几何** → 按名拒绝 `import.rvt.family_no_geometry`（按字节判定：`PartAtom` 带 `<A:family>` 类型表即为家族；否则有 `ProjectInformation` 流判为项目；两者都读不到时按项目解码，没有几何再由 `import.rvt.no_geometry` 拒绝；不看扩展名）。**单位**：`rvt` 在 glTF 根节点用 `0.3048` 把英尺坐标缩放到米并转成 +Y up（`src/ifc/gltf.rs:242`），因此入库坐标是**米、+Z up**（`UnitContext::from_meter()`），记 `import.rvt.units_metres`；不假设 Revit 显示单位或毫米。**定位**：逐节点应用 `parent_world * local`（`transform.matrix()` 是列主序）；合成双节点 GLB 断言世界包围盒 x∈[-1.5,-0.5] 与 [0.5,1.5] 不重叠，**不堆在原点**。**颜色/透明度（2026-11-10）**：以 glTF 材质的 `pbrMetallicRoughness.baseColorFactor` 为准（`rvt` 按 Revit 类别、图层颜色 RE-53、单一材质类型 RE-82 合成材质）；它是**线性**值，按 IEC 61966-2-1 传函转回 sRGB 存入 `EntityColor::Explicit`（正是 `rvt` `colour_material` 线性化的逆运算，合成夹具断言字节级往返）；alpha 仅在 `alphaMode=BLEND` 且 `a<1.0` 时存 `EntityTransparency::Explicit(opacity)`（`1.0` 为不透明），`a=1.0` 不写多余显式值；顶点未带材质 → `ByLayer`（保持原行为，不发明颜色）；非有限/越界 `baseColorFactor`、以及同一 node 合并的多 primitive 材质不一致 → 保持 `ByLayer` 并记 `import.rvt.material_ignored`；`material` 索引越界由 glTF 校验直接拒绝整份 GLB（`import.rvt.invalid_glb`），不会 panic 也不会静默降级。**纹理不存在是设计边界，不是缺陷**：`rvt` 0.17.0 不导出任何纹理（`GltfDocument` 无 images/textures/samplers，也无 `TEXCOORD_0`），且 `Mesh` 只有逐顶点 `colors`、没有 UV 通道，所以纹理既不可得也不可表示。**诚实通道**：每个成功导入永远是 `Completeness::Partial`（`import.rvt.preview_geometry`）；release 状态、`confidence`（level/score/has_geometry）、`source_coverage`（status/fractions，未测时保持 unset/空）、`rvt` 跳过记录、未读流、unsupported features、export notes 全部落成稳定诊断；没有几何 → `Unsupported`（`import.rvt.no_geometry`），**不是空成功**；release 没有 reader → `import.rvt.release_unsupported`；非 Revit 的 OLE → `CorruptData`（`import.rvt.not_a_revit_file`）。glTF 是**内部实现细节**：不在检测/选择器出现，不是用户格式，也没有能力行。无外部参照（`XrefOptions` 仅 DWG）；`vendor_records` 为空 |
+| SketchUp 模型（`.skp`；stream 容器 3–8/2013–2020，ZIP/tagged-record 容器 2026/2027） | **预览实现（`skpwright` 0.6.0，GPL-3.0-only，纯 Rust、单一依赖 `miniz_oxide`，workspace 中精确固定版本）** | 中性网格（每个 geometry run 实例一个 `DbEntity`；三角形 + 组合后的实例世界变换 + tag 扁平化 + 材质颜色/不透明度；**预览几何**，不保留 SketchUp 语义） | 实现，但**受 release 状态上限约束**（3–8、2013–2020、2026、2027 = `Verified`；2021–2025 只按容器等价读、无观测样本 ⇒ `Unverified`；其余按名拒绝 `import.skp.version_unsupported`） | 同左（与绘制同一上限） | 不支持（网格不是 MEASURE 目标；预览三角形没有任何 CAD 语义） | **许可**：`skpwright` `=0.6.0` 是 **GPL-3.0-only**；主仓 AGPL-3.0（AGPLv3 §13）可与 GPL-3.0 组合，GPL 部分对下游仍按 GPLv3 分发（见 `THIRD_PARTY_NOTICES.md`）。**读取**：三角形、实例/组件世界变换、tag（图层）扁平成 layer 0 但**遵守可见性**（隐藏实例/隐藏面/不可见图层被裁剪并计数）、材质颜色 + 不透明度（**纹理只取平均色**，不采样图像、不放 UV）。**不导入**：边/曲线、纹理图像与 UV、场景（scenes/pages）、剖切面、标注、动态组件属性。**三角化**：先**耳切**（ear clipping）并做面积校验；失败回退 **even-odd**（带洞的面直接走 even-odd）；两者都失败才丢弃该面并记 `import.skp.faces_dropped`（绝不近似）。**单位**：`skpwright` 已把存储的英寸与节点平移换算为**米**，入库 `UnitContext::from_meter()`、`+Z` up，记 `import.skp.units_metres`。**拒绝**：几何只有边/曲线 → `import.skp.edge_only_geometry`（显式拒绝，**不是空成功**）；没有可视面 → `import.skp.no_geometry`；头缺失/截断 → `CorruptData`（`import.skp.not_a_sketchup_file`）；头匹配但解析失败 → `CorruptData`（`import.skp.parse_failed`）；超限 → 命名真实计数的 `InvalidInput`（`import.skp.limits_exceeded`）。每个成功导入恒 `Completeness::Partial`（`import.skp.preview_geometry`），2021–2025 另记 `import.skp.version_unverified`。无外部参照（`XrefOptions` 仅 DWG）；`vendor_records` 为空 |
 
 证据边界：以上只有**合成夹具 + cadmpeg 上游测试夹具 + crate 契约测试**
-（`cargo test -p cad-import-obj` / `-p cad-import-stl` / `-p cad-import-mesh` / `-p cad-import-step` / `-p cad-import-ifc` / `-p cad-import-rvt`），
+（`cargo test -p cad-import-obj` / `-p cad-import-stl` / `-p cad-import-mesh` / `-p cad-import-step` / `-p cad-import-ifc` / `-p cad-import-rvt` / `-p cad-import-skp`），
 没有真实厂商 STEP/IFC 样本对照，也不构成产品验收或跨平台运行证据。NIST/ABC 的数字来自上游 spike
 的有界样本扫描，不是本仓库的 golden 回归。IFC 的 9 个 buildingSMART 样本（IFC2X3/4/4X3，
 127–6,393 实体）只是库选型 spike 的本地有界实验，文件未提交、未做 golden 回归；`YACR_TEST_IFC`
 未设置时的跳过**不是已运行证据**。IFC 的 CSG/NURBS 高级几何是 best-effort，真实文件不能按
 “全部几何成功”理解。RVT 只有 `rvt` 上游的**元数据脚手架**（0 几何，断言显式拒绝）与本仓库
 合成的双节点 GLB（unit-2 定位契约）与合成材质 GLB（unit-2 颜色/透明度契约）；**没有任何真实 Revit 模型**，所以真实 RVT 几何/包围盒/
-定位/单位在真文件上的行为是 **NOT VERIFIED**，不能由这些夹具推论。
+定位/单位在真文件上的行为是 **NOT VERIFIED**，不能由这些夹具推论。SKP 的契约测试是
+`cargo test -p cad-import-skp`（19 条），**真实文件证据来自外部 corpus**（`skpwright` 的语料，
+未提交、不可再分发）：全语料 763 个 `.skp` ⇒ 728 成功、25 `import.skp.edge_only_geometry`、
+10 `import.skp.no_geometry`、0 失败 / 0 panic；box 1 实体/12 三角、house 64/1440、
+face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三角、theater-2026
+1246/96,344，面积 **1020.981869 m²** 一致（相对差 5e-14）。`YACR_TEST_SKP`/`YACR_TEST_SKP_2026`
+未设置时的跳过**不是已运行证据**；这些数字是有界语料扫描，不是 golden 回归，也不是产品验收、
+性能或跨平台证据（见 `fixtures/skp/SOURCE.md`）。
 
 ### 测量命令与 §3.3 的逐条对应（2026-10-26 对账补齐）
 

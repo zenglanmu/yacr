@@ -21,6 +21,7 @@ members = [
     "crates/cad-import-step",
     "crates/cad-import-ifc",
     "crates/cad-import-rvt",
+    "crates/cad-import-skp",
     "crates/cad-resources",
     "crates/cad-query",
     "crates/cad-app",
@@ -47,7 +48,12 @@ edition = "2021"
 # this single value via `rust-version.workspace = true`; do not re-declare it per
 # crate. The pinned toolchain (`rust-toolchain.toml`, 1.99.1) is unrelated.
 rust-version = "1.88"
-license = "Apache-2.0 OR MIT"
+# Must match `LICENSE` (AGPL-3.0). The previous `Apache-2.0 OR MIT` here was a
+# stale field contradicting the repository licence; every crate inherits this
+# value via `license.workspace = true`. AGPL-3.0 may combine with GPL-3.0 code
+# (AGPLv3 §13), which is what permits GPL-3.0-only dependencies such as
+# `skpwright`.
+license = "AGPL-3.0-only"
 authors = ["yacr contributors"]
 repository = "https://example.invalid/yacr"
 
@@ -72,6 +78,7 @@ cad-import-mesh = { path = "crates/cad-import-mesh" }
 cad-import-step = { path = "crates/cad-import-step" }
 cad-import-ifc = { path = "crates/cad-import-ifc" }
 cad-import-rvt = { path = "crates/cad-import-rvt" }
+cad-import-skp = { path = "crates/cad-import-skp" }
 cad-resources = { path = "crates/cad-resources" }
 cad-query = { path = "crates/cad-query" }
 cad-app = { path = "crates/cad-app" }
@@ -152,6 +159,17 @@ ifc-lite-geometry = "=28.2.0"
 # `image` importer, which this lane never needs, and keeps `utils`/`names`.
 rvt = "=0.17.0"
 gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names"] }
+
+# SketchUp `.skp` reader (`cad-import-skp`). **GPL-3.0-only**, pure Rust with a
+# single `miniz_oxide` dependency (sha-free, wasm-safe). The workspace licence is
+# AGPL-3.0, which may combine with GPL-3.0 code (AGPLv3 §13); the GPL part stays
+# GPLv3 for downstream consumers — see `THIRD_PARTY_NOTICES.md`.
+# Pinned exactly: pre-1.0, one maintainer, first release 2026-07, and the
+# 2021-2025 release range is inferred from container equivalence (no observed
+# sample), so a caret range must not float across a format-claim change.
+# It is a **preview** reader: triangles only (no edge geometry), no UV/texture
+# sampling, no measurement semantics.
+skpwright = "=0.6.0"
 
 # Portable wall clock. `std::time::Instant::now()` panics on
 # wasm32-unknown-unknown ("time not implemented"); `web-time` re-exports std on

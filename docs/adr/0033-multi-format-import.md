@@ -161,7 +161,7 @@ ASCII 与二进制同一路径；缺失/零/非有限法向由三角形几何重
   [0.5,1.5] 不重叠——忽略节点变换（全堆原点）或忽略父子复合（-1 与 +0.5）都会失败。法向用
   逆转置矩阵并归一化。
 - **glTF 是实现细节**：不加入检测（`detect_format` 只认 `.rvt`/`.rte` 的 OLE 魔数）、不在
-  文件选择器出现、不是用户格式、没有能力行；`D8` 的“拒绝 glTF”仍成立。
+  文件选择器出现、不是用户格式、没有能力行；`D9` 的“拒绝 glTF”仍成立。
 - **颜色与透明度（2026-11-10，只做颜色，不做纹理）**：只读
   `pbrMetallicRoughness.baseColorFactor`（glTF **线性** RGBA）。RGB 按 IEC 61966-2-1 传函
   （`c ≤ 0.0031308` 线性段，否则 `1.055·c^(1/2.4) − 0.055`）转回 sRGB 字节写入
@@ -181,7 +181,61 @@ ASCII 与二进制同一路径；缺失/零/非有限法向由三角形几何重
   `synthetic-materials.glb` 证明材质颜色/alpha 与 `ByLayer` 回退）。**没有真实 Revit 模型**，
   真实文件的几何/包围盒/定位/单位/颜色行为 **NOT VERIFIED**，不能由这些夹具推论。
 
-### D8 明确拒绝的能力
+### D8 SKP：`skpwright` 0.6.0，**GPL-3.0-only**，定位为 **preview**
+
+**已实现**（2026-11-13）为 `crates/cad-import-skp`。本节记录代码的真实 API、单位结论与状态
+映射；若与代码不一致，以代码与契约测试为准。
+
+- **库与许可**：`skpwright` **0.6.0**，**GPL-3.0-only**，纯 Rust，**只有一个依赖**
+  `miniz_oxide`（纯 Rust，无平台依赖），上游 <https://github.com/hew3d/skpwright>。workspace 中
+  **精确固定**（`=0.6.0`），未启用额外 feature，只由 `cad-import-skp` 依赖；**未修改上游源码、
+  无 Cargo patch**。主仓许可是 **AGPL-3.0**，依 AGPLv3 §13 可与 GPL-3.0 代码组合；**GPL 部分
+  对下游仍按 GPLv3 分发**，不因组合而改许可（见 `THIRD_PARTY_NOTICES.md`）。固定版本的理由与
+  `rvt` 相同：pre-1.0、单一维护者，且 2021–2025 的结论依赖容器等价，caret range 不能悄悄浮动
+  到改变格式声明的新版本。
+- **容器与 release**：`skpwright` 读两种容器——release **3–8 与 2013–2020** 的 MFC `CArchive`
+  stream，以及 **2026/2027** 的 ZIP/tagged-record 容器。**2021–2025** 与 2026 同容器，但
+  **没有观测样本**，只按容器等价读。检测只认固定 32 字节头（`FF FE FF 0E` + UTF-16LE
+  `SketchUp Model`），且是 dispatcher 里**最先**探测的一项；头只说明“这是 SketchUp 模型”，
+  release 与可读性由适配器回答，检测层不看扩展名。
+- **单位（已确定，不是 `units_unknown`）**：`.skp` 存储 f64 **英寸**；`skpwright` 把几何与
+  节点平移都换算成**米**。入库 `UnitContext::from_meter()`，坐标是**米、+Z up**，记
+  `import.skp.units_metres`。不假设 SketchUp 的显示单位或毫米。
+- **状态上限（不是“已支持”）**：`ceiling_for(version, container)`：stream 容器的 3–8 与
+  13–20（2013–2020）⇒ `Verified`，ZIP 容器的 26/27（2026/2027）⇒ `Verified`；9–12 与 21–25
+  ⇒ `Unverified`；其余（含无法解析的版本串、`Container::Unknown`）⇒ `Unsupported`，导入直接
+  拒绝 `import.skp.version_unsupported`。该上限**同时限制** read/semantic/render/pick 四行；
+  **measure 恒为 `Unsupported`**。每个成功导入恒为 `Completeness::Partial` +
+  `import.skp.preview_geometry`；`Unverified` 的 release 另记 `import.skp.version_unverified`。
+- **读什么**：每个 geometry run 实例一个 `DbEntity`，三角形顶点已是世界坐标（实例/组件变换
+  按行主序组合后应用），tag（图层）**扁平成 layer 0** 但**遵守可见性**（隐藏实例、隐藏面与
+  不可见图层被裁剪并计数，`import.skp.hidden_pruned`），材质读**颜色 + 不透明度**；**纹理只取
+  平均色**（`import.skp.textures_not_sampled`），不采样图像、不放 UV。
+- **三角化**：先**耳切**（ear clipping）并做面积校验；失败回退 **even-odd**（带洞的面直接走
+  even-odd）；**两者都失败**才丢弃该面并记 `import.skp.faces_dropped`（不近似、不静默）。
+- **拒绝码**：头缺失/截断 → `CorruptData(import.skp.not_a_sketchup_file)`；头匹配但解析失败 →
+  `CorruptData(import.skp.parse_failed)`；release 无 reader → `Unsupported(import.skp.version_unsupported)`；
+  没有可视面 → `Unsupported(import.skp.no_geometry)`；**几何只有边/曲线** →
+  `Unsupported(import.skp.edge_only_geometry)`（SketchUp 的线/曲线工作无法用三角形表达，
+  显式拒绝，**不是空成功**）；超限 → 命名真实计数的 `InvalidInput(import.skp.limits_exceeded)`。
+- **wasm**：导入 lane 是纯 Rust、无平台依赖（`miniz_oxide` 亦为纯 Rust），因此 `dom-canvas`
+  的 wasm 会话可以链接它；本轮实跑 `cargo check -p cad-import-skp --target
+  wasm32-unknown-unknown --locked` **通过**（编译证据，不是 Web 运行/像素证据）。
+- **明确非目标**：边/曲线、纹理图像与 UV 放置、场景（scenes/pages）、剖切面、标注、
+  动态组件属性，以及任何 SketchUp 语义/参数、DWG 回写与测量。它们不在后续“补齐”清单里，
+  属于本 ADR 的有意边界。
+- **证据**：19 条 crate 契约测试（`cargo test -p cad-import-skp`：release 上限、版本串解析、
+  材质颜色/不透明度/平均色回退/`ByLayer`、四边形→两三角、带洞面、镜像实例翻转绕向、平移实例、
+  隐藏 tag/面裁剪、继承材质只涂未着色面、退化面/越界环索引/零长法向的显式拒绝、真实模型的
+  env-gated 契约、两种容器同模型一致、非 SketchUp 文件按名拒绝）。**外部 corpus**（`skpwright`
+  的语料，未提交、不可再分发）：全语料 **763** 个 `.skp` ⇒ **728 成功、25
+  `import.skp.edge_only_geometry`、10 `import.skp.no_geometry`、0 失败 / 0 panic**；box 1 实体/
+  12 三角、house 64/1440、face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/
+  96,333 三角与 theater-2026 1246/96,344 的**面积 1020.981869 m² 一致**（相对差 5e-14，
+  容器不同而几何不变）。`YACR_TEST_SKP`/`YACR_TEST_SKP_2026` 未设置即跳过，**跳过不是已运行
+  证据**；corpus 数字是有界扫描，不是 golden 回归、性能或产品验收。
+
+### D9 明确拒绝的能力
 
 | 格式/方向 | 理由 |
 |---|---|
@@ -194,7 +248,7 @@ ASCII 与二进制同一路径；缺失/零/非有限法向由三角形几何重
 
 拒绝必须以稳定标记呈现（`unsupported-runtime:` / `import.*` 诊断），不得空白画布或静默回退。
 
-### D9 失败与限额建模
+### D10 失败与限额建模
 
 - 解析器的 refusal/loss 一律转成诊断（稳定码）+ `Partial`/`Unsupported`，禁止静默丢弃。
 - 超限（`max_file_bytes`、`max_mesh_faces`）返回 `InvalidInput` 并给出实际计数，禁止截断后
@@ -207,6 +261,9 @@ ASCII 与二进制同一路径；缺失/零/非有限法向由三角形几何重
   `gltf`/`gltf-json`/`gltf-derive`（MIT OR Apache-2.0）与 AGPL-3.0 主仓兼容。
 - `ifc-lite-*` 是 **MPL-2.0**：文件级 copyleft，与 AGPL-3.0 组合可行；若修改其文件必须披露
   修改。升级策略同其它第三方解析器：只改适配层。
+- `skpwright` 是 **GPL-3.0-only**：主仓 **AGPL-3.0** 可与 GPL-3.0 代码组合（AGPLv3 §13），
+  但 **GPL 部分对下游仍按 GPLv3 分发**，组合不改变其许可。这是本 ADR 唯一引入的强 copyleft
+  依赖；若要移除，只能整条删除 `cad-import-skp`，不得把其代码复制进 MIT/Apache 风格的 crate。
 - 新增依赖必须记入 `THIRD_PARTY_NOTICES.md`。`[patch.crates-io]` 仍只允许 `acadrust`
   （ADR-0031），本 ADR 不引入任何 patch。
 
@@ -219,13 +276,19 @@ ASCII 与二进制同一路径；缺失/零/非有限法向由三角形几何重
   材质颜色/alpha/`ByLayer` 回退）。`.rfa` 拒绝另由测试在内存中构造的家族形状 CFB 覆盖。
 - 契约测试覆盖：正常解析、n-gon、缺法向、退化面、超限、损坏输入、取消、显式拒绝路径、
   以及 `validate_geometry` 前的网格不变量（法向/颜色为空或与顶点数相等）。
+- SKP 的 19 条契约测试在 crate 内（无提交夹具）；**真实文件证据是外部 corpus**（`skpwright`
+  的 763 个 `.skp`，未提交、不可再分发，见 `fixtures/skp/SOURCE.md`）：728 成功、25
+  `edge_only_geometry`、10 `no_geometry`、0 失败/0 panic。`YACR_TEST_SKP`/`YACR_TEST_SKP_2026`
+  未设置即跳过，**跳过不是已运行证据**。
 - 真实模型兼容性、性能、GPU/像素证据均 **NOT RUN**，不得由合成 fixture 推论。RVT 没有任何
-  真实 Revit 模型，真实文件的几何/包围盒/定位/单位行为 **NOT VERIFIED**。
+  真实 Revit 模型，真实文件的几何/包围盒/定位/单位行为 **NOT VERIFIED**；SKP 的 corpus 结论
+  是有界扫描，不构成 golden 回归、性能或产品验收。
 
 ## 5. 后果
 
 - 正面：新增格式不再触碰 DWG 解析器；契约、派发与能力记账集中一处；每个解析器可独立替换。
 - 负面/成本：多 crate 与多依赖；STEP/IFC 只能显示不能测量；RVT 只有包围盒级 preview；
+  SKP 只有三角形 preview，且引入 **GPL-3.0-only** 依赖（`skpwright`），对下游分发有许可约束；
   网格格式的材质/单位/精确几何均为已知缺口。
 - 待办（不在本 ADR 完成）：
   - **跟进项 A —— `Mesh.face_sources` 由 STEP/IFC 源面填充（仅数据层）**：两个适配器现在只写

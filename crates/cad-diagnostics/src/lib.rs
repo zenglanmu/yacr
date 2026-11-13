@@ -250,7 +250,7 @@ pub fn hex(hash: &[u8; 32]) -> String {
 /// refuses by name); the second is the shipped non-drawing document types.
 const DOCUMENT_EXTENSIONS: &[&str] = &[
     ".dwg", ".dxf", ".obj", ".stl", ".ply", ".off", ".coff", ".step", ".stp", ".ifc", ".rvt",
-    ".rte", ".rfa", ".rft", ".json", ".sat", ".sab", ".shx", ".ttf",
+    ".rte", ".rfa", ".rft", ".skp", ".json", ".sat", ".sab", ".shx", ".ttf",
 ];
 
 /// Replace absolute/relative path-like tokens with `«redacted»`.

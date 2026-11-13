@@ -629,12 +629,13 @@ fn wgpu_backend_preference_reads_the_durable_store() {
 ///
 /// `.rfa`/`.rft` are selectable **on purpose**: the importer's
 /// `import.rvt.family_no_geometry` refusal is more useful than a file the user
-/// cannot pick at all. No test here asserts the old DWG/DXF-only list.
+/// cannot pick at all. `.skp` is the SketchUp preview lane. No test here asserts
+/// the old DWG/DXF-only list.
 #[test]
 fn open_chooser_globs_cover_the_importer_set() {
     for extension in [
         "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
-        "rfa", "rft",
+        "rfa", "rft", "skp",
     ] {
         assert!(
             OPEN_EXTENSIONS.contains(&extension),
@@ -645,6 +646,7 @@ fn open_chooser_globs_cover_the_importer_set() {
     assert_eq!(case_insensitive_glob("obj"), "*.[oO][bB][jJ]");
     assert_eq!(case_insensitive_glob("coff"), "*.[cC][oO][fF][fF]");
     assert_eq!(case_insensitive_glob("stp"), "*.[sS][tT][pP]");
+    assert_eq!(case_insensitive_glob("skp"), "*.[sS][kK][pP]");
 }
 
 /// The recent hint is the drawing's parent directory (a real one), and the next

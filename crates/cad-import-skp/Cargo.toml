@@ -1,0 +1,21 @@
+[package]
+name = "cad-import-skp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "SketchUp (.skp) preview adapter: skpwright -> neutral mesh."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-import-core.workspace = true
+# GPL-3.0-only, pinned exactly. `skpwright` owns the container decode and the
+# materialized run meshes (metres); this crate owns the scene walk, visibility
+# pruning, face triangulation and the database adapter.
+skpwright.workspace = true
+# `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web_time` uses
+# `Performance.now()` there and re-exports std elsewhere.
+web-time.workspace = true
