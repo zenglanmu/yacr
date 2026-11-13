@@ -14,14 +14,15 @@
 // wire, so they have no row and are available unconditionally. Advertising them
 // in the descriptor would claim host state that does not exist.
 //
-// Exactly one row is `supported` in this build — the reflected
-// `documentManager.mdiActiveDocument` read, which the host serves over
-// `cad_api_call` — and the other 19 are `pending`: the table is an honest
-// reservation list, not an availability list. It is deliberately complete rather
-// than aspirational — an operation that exists here but is `pending` is refused by
-// name, an operation the host marks `unsupported` is refused by name, and an
-// operation the host does not name at all is refused as `api.descriptor_missing`.
-// There is no silent "maybe" state and no empty-success path.
+// Three rows are `supported` in this build — the reflected document reads
+// (`documentManager.mdiActiveDocument`, `documentManager.documents`) and the
+// database revision read, all served over `cad_api_call` — and the other 18 are
+// `pending`: the table is an honest reservation list, not an availability list. It
+// is deliberately complete rather than aspirational — an operation that exists here
+// but is `pending` is refused by name, an operation the host marks `unsupported` is
+// refused by name, and an operation the host does not name at all is refused as
+// `api.descriptor_missing`. There is no silent "maybe" state and no empty-success
+// path.
 
 /** Wire/API generation. A host and this package must agree exactly. */
 export const API_VERSION = 1;
@@ -68,7 +69,7 @@ export const API_NAMESPACES: readonly CadApiNamespace[] = [
 ];
 
 /**
- * The v1 capability table: 20 host operations, 19 `pending` and one `supported`.
+ * The v1 capability table: 21 host operations, 18 `pending` and three `supported`.
  *
  * Do not flip a row to `supported` here without the host side landing first (and
  * a `case` in the WebView adapter) — the contract test will catch the JSON drift,
@@ -84,11 +85,12 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
     operation: 'documentManager.mdiActiveDocument',
     status: 'supported',
   },
+  // The reflected document list: the same descriptor the active read reports, as
+  // `{ documents: [...] }` (0 or 1 today). Served, so no `reason`.
   {
     namespace: 'ApplicationServices',
     operation: 'documentManager.documents',
-    status: 'pending',
-    reason: pendingReason('ApplicationServices', 'documentManager.documents'),
+    status: 'supported',
   },
   {
     namespace: 'ApplicationServices',
@@ -107,6 +109,13 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
     operation: 'database.symbolTables',
     status: 'pending',
     reason: pendingReason('DatabaseServices', 'database.symbolTables'),
+  },
+  // The revision a commit's `expectedRevision` is compared against. Read from the
+  // host every call (`{ database: id }` -> `{ revision }`), never cached.
+  {
+    namespace: 'DatabaseServices',
+    operation: 'database.revision',
+    status: 'supported',
   },
   {
     namespace: 'DatabaseServices',

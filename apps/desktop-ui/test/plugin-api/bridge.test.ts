@@ -54,7 +54,7 @@ test('hostInfo() calls cad_api_status once and merges the status snapshot', asyn
   assert.equal(info.apiVersion, 1);
   assert.equal(info.carrier, 'dom-canvas');
   assert.equal(info.documentOwner, 'wasm');
-  assert.equal(info.operations.length, 20);
+  assert.equal(info.operations.length, 21);
 });
 
 test('hostInfo() reports unknown/none before any status is observed', async () => {
@@ -92,16 +92,18 @@ test('a malformed host answer is refused with the cad_api_status prefix', async 
   );
 });
 
-test('this build implements exactly the one served read', () => {
+test('this build implements exactly the three served reads', () => {
   assert.deepEqual(IMPLEMENTED_OPERATIONS, [
     'ApplicationServices.documentManager.mdiActiveDocument',
+    'ApplicationServices.documentManager.documents',
+    'DatabaseServices.database.revision',
   ]);
 });
 
 test('every supported descriptor row has an adapter implementation', async () => {
   // The one rule that keeps the descriptor honest: a row may only be
-  // `supported` if this adapter can actually serve it. It has exactly one row to
-  // check today and goes red the moment another row flips without a `case` in
+  // `supported` if this adapter can actually serve it. It has three rows to check
+  // today and goes red the moment another row flips without a `case` in
   // `bridge.ts` - which is exactly when it must be caught.
   const contract = JSON.parse(await readFile(CONTRACT_URL, 'utf8'));
   const supportedRows = contract.operations.filter((row) => row.status === 'supported');
@@ -138,6 +140,51 @@ test('the served read forwards to cad_api_call and returns the host value', asyn
       namespace: 'ApplicationServices',
       operation: 'documentManager.mdiActiveDocument',
       parameters: {},
+    },
+  ]);
+});
+
+test('the served document list forwards to cad_api_call unchanged', async () => {
+  const listValue = {
+    documents: [
+      { id: '42', name: 'Drawing1', isReadOnly: false, database: { id: '7', version: '15' } },
+    ],
+  };
+  const { invoke, args } = countingInvoke((command) =>
+    command === 'cad_api_status' ? payload : { ok: true, value: listValue },
+  );
+  const bridge = createCadHostBridge({ invoke, status: () => statusWith('native-below', 'native') });
+  const result = await bridge.request({
+    namespace: 'ApplicationServices',
+    operation: 'documentManager.documents',
+    parameters: {},
+  });
+  assert.deepEqual(result, listValue);
+  assert.deepEqual(args, [
+    {
+      namespace: 'ApplicationServices',
+      operation: 'documentManager.documents',
+      parameters: {},
+    },
+  ]);
+});
+
+test('the served revision forwards with its database parameter', async () => {
+  const { invoke, args } = countingInvoke((command) =>
+    command === 'cad_api_status' ? payload : { ok: true, value: { revision: 12 } },
+  );
+  const bridge = createCadHostBridge({ invoke, status: () => statusWith('native-below', 'native') });
+  const result = await bridge.request({
+    namespace: 'DatabaseServices',
+    operation: 'database.revision',
+    parameters: { database: '7' },
+  });
+  assert.deepEqual(result, { revision: 12 });
+  assert.deepEqual(args, [
+    {
+      namespace: 'DatabaseServices',
+      operation: 'database.revision',
+      parameters: { database: '7' },
     },
   ]);
 });
@@ -268,7 +315,7 @@ test('openPluginApi assembles the client from the real contract JSON', async () 
   const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
 
   assert.deepEqual(commands, ['cad_api_status'], 'one snapshot call per session');
-  assert.equal(session.host.operations.length, 20);
+  assert.equal(session.host.operations.length, 21);
   assert.equal(session.host.carrier, 'native-below');
 
   // Pure, always-local operations work without touching the host.
@@ -276,11 +323,8 @@ test('openPluginApi assembles the client from the real contract JSON', async () 
   assert.deepEqual(commands, ['cad_api_status'], 'pure calls never reach the wire');
 
   // A still-pending operation is refused by the package's capability gate.
-  await assert.rejects(session.api.application.documentManager.documents(), (error) => {
-    assert.equal(
-      codeOf(error),
-      'api.pending: ApplicationServices.documentManager.documents',
-    );
+  await assert.rejects(session.api.editor.getPoint(), (error) => {
+    assert.equal(codeOf(error), 'api.pending: EditorInput.editor.getPoint');
     return true;
   });
 });
@@ -317,6 +361,73 @@ test('the served read assembles a Document end to end', async () => {
     return true;
   });
   assert.deepEqual(commands, ['cad_api_status', 'cad_api_call'], 'one read, no other traffic');
+});
+
+test('the served document list assembles documents end to end', async () => {
+  const { invoke } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (request.operation === 'documentManager.documents') {
+      return {
+        ok: true,
+        value: {
+          documents: [
+            {
+              id: '42',
+              name: 'Drawing1',
+              isReadOnly: false,
+              database: { id: '7', version: '15' },
+            },
+          ],
+        },
+      };
+    }
+    if (request.operation === 'database.revision') return { ok: true, value: { revision: 15 } };
+    return { ok: false, error: `unsupported-runtime: cad_api.${request.operation}` };
+  });
+  const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
+
+  const documents = await session.api.application.documentManager.documents();
+  assert.equal(documents.length, 1);
+  assert.equal(documents[0].name, 'Drawing1');
+  assert.equal(documents[0].database.id, '7');
+
+  // The document's database is the same capability-gated client: the revision read
+  // is served, the symbol tables are still pending.
+  assert.equal(await documents[0].database.revision(), 15);
+  await assert.rejects(documents[0].database.symbolTables, (error) => {
+    assert.equal(codeOf(error), 'api.pending: DatabaseServices.database.symbolTables');
+    return true;
+  });
+  assert.equal(await documents[0].database.revision(), 15);
+});
+
+test('the served revision read returns the host number', async () => {
+  const { invoke, args } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (request.operation === 'documentManager.mdiActiveDocument') {
+      return {
+        ok: true,
+        value: {
+          document: {
+            id: '42',
+            name: 'Drawing1',
+            isReadOnly: false,
+            database: { id: '7', version: '15' },
+          },
+        },
+      };
+    }
+    return { ok: true, value: { revision: 12 } };
+  });
+  const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
+  const active = await session.api.application.documentManager.mdiActiveDocument();
+  if (active === null) throw new Error('expected a document');
+  assert.equal(await active.database.revision(), 12);
+  assert.deepEqual(args.at(-1), {
+    namespace: 'DatabaseServices',
+    operation: 'database.revision',
+    parameters: { database: '7' },
+  });
 });
 
 test('the served read resolves null when no document is open', async () => {

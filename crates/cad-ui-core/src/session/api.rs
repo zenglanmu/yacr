@@ -211,10 +211,14 @@ mod tests {
                 );
             }
         }
-        // One operation is served in this build: the reflected active-document
-        // read (M2.3). Pure value helpers and the manifest parser are package
-        // features, not descriptor rows, so they never appear here.
-        assert_eq!(supported, 1, "this build serves exactly one host operation");
+        // Three operations are served in this build: the two reflected document
+        // reads and the database revision (M2.2/M2.3). Pure value helpers and the
+        // manifest parser are package features, not descriptor rows, so they never
+        // appear here.
+        assert_eq!(
+            supported, 3,
+            "this build serves exactly three host operations"
+        );
     }
 
     #[test]

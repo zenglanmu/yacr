@@ -51,11 +51,11 @@ function assertRejected(value, detail) {
   );
 }
 
-test('the shipped contract parses with 20 rows at apiVersion 1', () => {
+test('the shipped contract parses with 21 rows at apiVersion 1', () => {
   assert.equal(payload.apiVersion, 1);
-  assert.equal(payload.operations.length, 20);
+  assert.equal(payload.operations.length, 21);
   assert.deepEqual(payload.namespaces, API_NAMESPACES);
-  assert.equal(new Set(payload.operations.map((row) => `${row.namespace}.${row.operation}`)).size, 20);
+  assert.equal(new Set(payload.operations.map((row) => `${row.namespace}.${row.operation}`)).size, 21);
   // The descriptor lists host-served operations only. Exactly one is served in
   // this build; widening the set means landing the host operation and the adapter
   // `case` first (bridge.test.ts enforces the second half).
@@ -63,11 +63,15 @@ test('the shipped contract parses with 20 rows at apiVersion 1', () => {
     payload.operations
       .filter((row) => row.status !== 'pending')
       .map((row) => `${row.namespace}.${row.operation}`),
-    ['ApplicationServices.documentManager.mdiActiveDocument'],
+    [
+      'ApplicationServices.documentManager.mdiActiveDocument',
+      'ApplicationServices.documentManager.documents',
+      'DatabaseServices.database.revision',
+    ],
   );
   assert.equal(
     payload.operations.filter((row) => row.status === 'pending').length,
-    19,
+    18,
     'every other row is still pending',
   );
 });
@@ -109,12 +113,12 @@ test('an unknown status is rejected rather than treated as supported', () => {
 test('a pending row must carry its reason and it must be the canonical one', () => {
   // Row 0 is the one served read, so the pending cases pick a pending row by name.
   const missing = copy();
-  const missingIndex = rowIndex(missing, 'ApplicationServices', 'documentManager.documents');
+  const missingIndex = rowIndex(missing, 'ApplicationServices', 'document.lock');
   delete missing.operations[missingIndex].reason;
   assertRejected(missing, 'no reason');
 
   const wrong = copy();
-  const wrongIndex = rowIndex(wrong, 'ApplicationServices', 'documentManager.documents');
+  const wrongIndex = rowIndex(wrong, 'ApplicationServices', 'document.lock');
   wrong.operations[wrongIndex].reason = 'api.pending: DatabaseServices.transaction.commit';
   assertRejected(wrong, 'wrong pending reason');
 });

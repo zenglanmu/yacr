@@ -137,11 +137,6 @@ test('every gated v1 call refuses with its exact pending code and no request', a
   const spy = spyBridge(API_OPERATIONS);
   const api = await createCadApi(spy.bridge);
 
-  await expectRejectCode(
-    () => api.application.documentManager.documents(),
-    'api.pending: ApplicationServices.documentManager.documents',
-  );
-
   const editorCalls: readonly (readonly [string, () => Promise<unknown>])[] = [
     ['editor.getPoint', () => api.editor.getPoint()],
     ['editor.getEntity', () => api.editor.getEntity()],
@@ -332,6 +327,99 @@ test('a cad_waiting refusal reaches the caller unchanged', async () => {
     () => api.application.documentManager.mdiActiveDocument(),
     'cad_waiting',
   );
+});
+
+test('the served document list calls the bridge and decodes every descriptor', async () => {
+  const spy = spyBridge(API_OPERATIONS, () => ({
+    documents: [
+      { id: '42', name: 'Drawing1', isReadOnly: false, database: { id: '7', version: '15' } },
+    ],
+  }));
+  const api = await createCadApi(spy.bridge);
+  const documents = await api.application.documentManager.documents();
+  assert.equal(documents.length, 1);
+  const document = documents[0];
+  assert.equal(document.name, 'Drawing1');
+  assert.equal(document.isReadOnly, false);
+  assert.equal(document.database.id, '7');
+  assert.equal(document.database.version, '15');
+  assert.deepEqual(spy.calls, [
+    {
+      namespace: 'ApplicationServices',
+      operation: 'documentManager.documents',
+      parameters: {},
+    },
+  ]);
+});
+
+test('an empty document list is the real "no document open" answer', async () => {
+  const spy = spyBridge(API_OPERATIONS, () => ({ documents: [] }));
+  const api = await createCadApi(spy.bridge);
+  assert.deepEqual(await api.application.documentManager.documents(), []);
+  assert.equal(spy.calls.length, 1);
+});
+
+test('a malformed document list is refused field by field', async () => {
+  const cases: readonly (readonly [unknown, string])[] = [
+    [{}, 'api.invalid_argument: bridge.answer.documents'],
+    [{ documents: null }, 'api.invalid_argument: bridge.answer.documents'],
+    [{ documents: 5 }, 'api.invalid_argument: bridge.answer.documents'],
+    [{ documents: [7] }, 'api.invalid_argument: bridge.answer.documents'],
+    [
+      { documents: [{ name: 'x', isReadOnly: false, database: { id: '7', version: '1' } }] },
+      'api.invalid_argument: bridge.answer.documents.id',
+    ],
+    [
+      { documents: [{ id: '1', name: 'x', isReadOnly: false }] },
+      'api.invalid_argument: bridge.answer.documents.database',
+    ],
+    [
+      { documents: [{ id: '1', name: 'x', isReadOnly: false, database: { id: '7' } }] },
+      'api.invalid_argument: bridge.answer.documents.database.version',
+    ],
+  ];
+  for (const [answer, code] of cases) {
+    const api = await createCadApi(spyBridge(API_OPERATIONS, () => answer).bridge);
+    await expectRejectCode(() => api.application.documentManager.documents(), code);
+  }
+});
+
+test('the served revision read sends the database id and returns a number', async () => {
+  const spy = spyBridge(API_OPERATIONS, (request) => {
+    assert.equal(request.operation, 'database.revision');
+    return { revision: 12 };
+  });
+  const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
+  const database = createDatabase(wire, { id: '7', version: '15' });
+  assert.equal(await database.revision(), 12);
+  assert.deepEqual(spy.calls, [
+    {
+      namespace: 'DatabaseServices',
+      operation: 'database.revision',
+      parameters: { database: '7' },
+    },
+  ]);
+});
+
+test('a malformed revision answer is refused, never coerced', async () => {
+  const answers: readonly unknown[] = [
+    {},
+    { revision: '12' },
+    { revision: -1 },
+    { revision: 1.5 },
+    { revision: Number.POSITIVE_INFINITY },
+    { revision: Number.NaN },
+    { revision: null },
+  ];
+  for (const answer of answers) {
+    const spy = spyBridge(API_OPERATIONS, () => answer);
+    const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
+    const database = createDatabase(wire, { id: '7', version: '15' });
+    await expectRejectCode(
+      () => database.revision(),
+      'api.invalid_argument: bridge.answer.revision',
+    );
+  }
 });
 
 test('a descriptor that serves document operations owes a document owner', async () => {

@@ -11,19 +11,19 @@
 // `documents()` are methods, `await` them, and a refusal is a rejection — never a
 // silent `null`.
 //
-// `documents()` has no wire decoder yet (its row is still `pending`), so it is
-// gated and refuses by name. `mdiActiveDocument()` is the first operation this
-// build actually serves: it gates the row, calls the host, and decodes
-// `{ document: null | { id, name, isReadOnly, database: { id, version } } }`.
-// A malformed answer is `api.invalid_argument: bridge.answer.document.*`; it is
-// never coerced into a document or into `null`.
+// Both document reads are served by this build: `mdiActiveDocument()` decodes
+// `{ document: null | descriptor }` and `documents()` decodes
+// `{ documents: [descriptor] }` (0 or 1 today; an empty list is the honest "no
+// document is open"). A descriptor is
+// `{ id, name, isReadOnly, database: { id, version } }`. A malformed answer is
+// `api.invalid_argument: bridge.answer.document.*` / `.documents.*`; it is never
+// coerced into a document, an empty list, or `null`.
 
-import { unsupportedReason } from './abi.ts';
 import { createDatabase } from './database-services.ts';
 import type { Database } from './database-services.ts';
 import { createEditor } from './editor-input.ts';
 import type { Editor } from './editor-input.ts';
-import { CadApiError, invalidArgument } from './errors.ts';
+import { invalidArgument } from './errors.ts';
 import type { CadApiWire } from './internal/capability.ts';
 import { isRecord, requireAnswerObject } from './internal/capability.ts';
 import { TransactionManager } from './transaction.ts';
@@ -45,7 +45,14 @@ export interface DocumentManager {
    * unchanged.
    */
   mdiActiveDocument(): Promise<Document | null>;
-  /** Every open document. Still gated on a `pending` row, so it refuses by name. */
+  /**
+   * Every open document.
+   *
+   * Gated on `ApplicationServices.documentManager.documents` (served by
+   * `cad_api_call` in this build). An empty list is a real answer — the document
+   * manager exists and holds no document — not a placeholder; a host with no
+   * snapshot yet refuses with `cad_waiting` instead.
+   */
   documents(): Promise<readonly Document[]>;
   /**
    * Run a callback in application context.
@@ -91,38 +98,30 @@ function requireText(value: unknown, field: string): string {
 }
 
 /**
- * Decode the `mdiActiveDocument` payload's `document` member.
+ * Decode one document descriptor.
  *
- * Every failure names the field (`bridge.answer.document.id`, and so on) so a host bug is
- * diagnosable from the rejection alone; nothing is defaulted and nothing is cast.
+ * `prefix` is the wire path the value came from, so every failure names the field
+ * (`bridge.answer.document.id`, `bridge.answer.documents.database.id`, ...) and a
+ * host bug is diagnosable from the rejection alone. Nothing is defaulted and
+ * nothing is cast.
  */
-function decodeDocumentDescriptor(value: unknown): DocumentDescriptor {
-  if (!isRecord(value)) throw invalidArgument('bridge.answer.document');
-  const id = requireText(value['id'], 'bridge.answer.document.id');
-  const name = requireText(value['name'], 'bridge.answer.document.name');
+function decodeDocumentDescriptor(value: unknown, prefix: string): DocumentDescriptor {
+  if (!isRecord(value)) throw invalidArgument(prefix);
+  const id = requireText(value['id'], `${prefix}.id`);
+  const name = requireText(value['name'], `${prefix}.name`);
   const isReadOnly = value['isReadOnly'];
-  if (typeof isReadOnly !== 'boolean') {
-    throw invalidArgument('bridge.answer.document.isReadOnly');
-  }
+  if (typeof isReadOnly !== 'boolean') throw invalidArgument(`${prefix}.isReadOnly`);
   const database = value['database'];
-  if (!isRecord(database)) throw invalidArgument('bridge.answer.document.database');
+  if (!isRecord(database)) throw invalidArgument(`${prefix}.database`);
   return {
     id,
     name,
     isReadOnly,
     database: {
-      id: requireText(database['id'], 'bridge.answer.document.database.id'),
-      version: requireText(database['version'], 'bridge.answer.document.database.version'),
+      id: requireText(database['id'], `${prefix}.database.id`),
+      version: requireText(database['version'], `${prefix}.database.version`),
     },
   };
-}
-
-/** A supported `documents` row needs a list decoder this client does not have yet. */
-function noDocumentListDecoder(): CadApiError {
-  return new CadApiError(
-    unsupportedReason('ApplicationServices', 'documentManager.documents'),
-    'this client has no document-list decoder yet; only the active document is served',
-  );
 }
 
 /**
@@ -155,9 +154,9 @@ export function createDocument(wire: CadApiWire, descriptor: DocumentDescriptor)
 /**
  * Build the document manager for one host snapshot.
  *
- * `mdiActiveDocument()` is the one operation this build serves: gate, call, decode.
- * `documents()` gates too, but its row is `pending`, so it refuses by name and the
- * host is never asked.
+ * Both reads are served in this build: gate, call, decode. A refusal
+ * (`cad_waiting`, `unsupported-runtime: ...`) or a malformed answer propagates; an
+ * empty document list is the real "no document is open" answer.
  */
 export function createDocumentManager(wire: CadApiWire): DocumentManager {
   return {
@@ -171,11 +170,16 @@ export function createDocumentManager(wire: CadApiWire): DocumentManager {
       const document = record['document'];
       if (document === undefined) throw invalidArgument('bridge.answer.document');
       if (document === null) return null;
-      return createDocument(wire, decodeDocumentDescriptor(document));
+      return createDocument(wire, decodeDocumentDescriptor(document, 'bridge.answer.document'));
     },
     async documents(): Promise<readonly Document[]> {
-      wire.assertSupported('ApplicationServices', 'documentManager.documents');
-      throw noDocumentListDecoder();
+      const answer = await wire.call('ApplicationServices', 'documentManager.documents', {});
+      const record = requireAnswerObject(answer, 'bridge.answer');
+      const list = record['documents'];
+      if (!Array.isArray(list)) throw invalidArgument('bridge.answer.documents');
+      return list.map((entry) =>
+        createDocument(wire, decodeDocumentDescriptor(entry, 'bridge.answer.documents')),
+      );
     },
     async executeInApplicationContext<T>(work: () => T | Promise<T>): Promise<T> {
       if (typeof work !== 'function') throw invalidArgument('work');

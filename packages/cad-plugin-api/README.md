@@ -75,17 +75,19 @@ silent success. Host failures arrive as `CadApiError`; branch on `code`, not mes
 
 ## v1 status
 
-**The descriptor is 20 rows: one `supported`, 19 `pending`.** The one served
-operation is the reflected active-document read,
-`ApplicationServices.documentManager.mdiActiveDocument` (over `cad_api_call`): it
-resolves the open `Document`, or `null` when the manager holds none. Everything else
-is still a reservation — no write path, no prompts, no command dispatch.
+**The descriptor is 21 rows: three `supported`, 18 `pending`.** The served
+operations are reflected reads over `cad_api_call`:
+`documentManager.mdiActiveDocument` (the open `Document`, or `null`),
+`documentManager.documents` (0 or 1 `Document`, `[]` when none is open) and
+`database.revision` (`{ database: id }` -> the current revision number). Everything
+else is still a reservation — no write path, no prompts, no command dispatch.
 
 | Descriptor rows | v1 |
 | --- | --- |
-| `ApplicationServices.documentManager.mdiActiveDocument` (1) | `supported` — reflected read over `cad_api_call` |
-| `ApplicationServices.documentManager.documents`, `document.lock` (2) | `pending` — no list/lock path yet |
-| `DatabaseServices` (7) | `pending` — no object read/write path yet |
+| `ApplicationServices.documentManager.mdiActiveDocument`, `.documents` (2) | `supported` — reflected document reads |
+| `ApplicationServices.document.lock` (1) | `pending` — no lock path yet |
+| `DatabaseServices.database.revision` (1) | `supported` — current revision, read every call |
+| `DatabaseServices` (7 more) | `pending` — no object read/write or symbol-table path yet |
 | `EditorInput` (9) | `pending` — no interactive prompt path yet |
 | `Runtime.runtime.registerCommand` (1) | `pending` — no chrome-local admission path yet |
 
@@ -93,13 +95,15 @@ is still a reservation — no write path, no prompts, no command dispatch.
 promises**, not AutoCAD's properties: the value crosses an asynchronous wire, and a
 synchronous accessor could only be honest by serving a stale cache. A host with no
 snapshot yet refuses with `cad_waiting`, and that rejection reaches the plugin as-is.
+`Database.revision()` is likewise read from the host on every call — it is the value
+`expectedRevision` is compared against, so it is never cached.
 
 ## Transactions
 
 `startTransaction({ expectedRevision })` is synchronous: the host is not asked to
 open a transaction, so edits buffer client-side. `expectedRevision` is **required**
 for the outermost transaction — an omitted precondition would be silent
-last-writer-wins, so the caller reads the current revision first. Only the outermost
+last-writer-wins, so the caller reads `database.revision()` first. Only the outermost
 `commit()` crosses the wire, as one request carrying
 `{ document, transactionId, expectedRevision, edits }`; it resolves
 `{ applied: true, revision, created }` with the host's new revision and the ids it

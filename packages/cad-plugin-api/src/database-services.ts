@@ -245,6 +245,16 @@ export interface Database {
   readonly id: string;
   readonly version: string;
   getObjectId(handle: Handle): Promise<ObjectId | null>;
+  /**
+   * The database's current revision, read from the host.
+   *
+   * Gated on `DatabaseServices.database.revision` (served by `cad_api_call` in
+   * this build) and sent with `{ database: id }`. This is the value a commit's
+   * `expectedRevision` is compared against, so it is read from the host every call
+   * — never cached, and never derived from the `version` this proxy was built
+   * with (that string is the snapshot the document was opened at).
+   */
+  revision(): Promise<number>;
   readonly symbolTables: Promise<SymbolTables>;
   /** The current layer's **name**. */
   readonly clayer: Promise<string>;
@@ -565,6 +575,22 @@ export function createDatabase(wire: CadApiWire, descriptor: DatabaseDescriptor)
       if (id === null) return null;
       if (typeof id !== 'string') throw invalidArgument('bridge.answer.objectId');
       return objectId(id);
+    },
+    async revision(): Promise<number> {
+      const answer = await wire.call('DatabaseServices', 'database.revision', {
+        database: databaseId,
+      });
+      const record = requireAnswerObject(answer, 'bridge.answer');
+      const revision = record['revision'];
+      if (
+        typeof revision !== 'number' ||
+        !Number.isFinite(revision) ||
+        !Number.isInteger(revision) ||
+        revision < 0
+      ) {
+        throw invalidArgument('bridge.answer.revision');
+      }
+      return revision;
     },
     get symbolTables(): Promise<SymbolTables> {
       return loadSnapshot().then(({ blockTable, layerTable }) => ({ blockTable, layerTable }));

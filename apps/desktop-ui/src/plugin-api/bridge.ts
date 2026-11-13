@@ -7,12 +7,15 @@
 // answer comes from the host's own table, and every refusal is the host's or the
 // adapter's name for a call it cannot serve.
 //
-// # One implemented operation
+// # The implemented operations
 //
-// `ApplicationServices.documentManager.mdiActiveDocument` is the first reflected
-// read (M2.3). It forwards to the shared `cad_api_call` command and hands the
-// reply's `value` back **unshaped**: the client package decodes it, so this layer
-// never invents a document and never rewrites a field name.
+// Three reflected reads are wired (M2.2/M2.3):
+// `ApplicationServices.documentManager.mdiActiveDocument`,
+// `ApplicationServices.documentManager.documents` and
+// `DatabaseServices.database.revision`. Each forwards to the shared `cad_api_call`
+// command and hands the reply's `value` back **unshaped**: the client package
+// decodes it, so this layer never invents a document or a revision and never
+// rewrites a field name.
 //
 // Every other request - including a `supported` row this adapter has not wired -
 // is refused locally as `api.adapter-missing: <namespace>.<operation>` and the
@@ -55,6 +58,8 @@ export interface CadBridgeDeps {
  */
 export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'ApplicationServices.documentManager.mdiActiveDocument',
+  'ApplicationServices.documentManager.documents',
+  'DatabaseServices.database.revision',
 ];
 
 /** The one local refusal code for a request this adapter cannot serve. */
@@ -150,14 +155,13 @@ export function createCadHostBridge(deps: CadBridgeDeps): CadHostBridge {
     },
     async request<Result>(request: CadApiRequest): Promise<Result> {
       requireWellFormedRequest(request);
-      switch (request.operation) {
-        case 'documentManager.mdiActiveDocument':
-          // The namespace is part of the identity: a request that names another
-          // namespace is not this operation, and the host must not be asked to
-          // sort that out.
-          if (request.namespace !== 'ApplicationServices') {
-            throw adapterMissing(request.namespace, request.operation);
-          }
+      // The label is `namespace.operation`, exactly the descriptor's spelling: a
+      // request that names another namespace is not this operation, and the host
+      // must not be asked to sort that out.
+      switch (`${request.namespace}.${request.operation}`) {
+        case 'ApplicationServices.documentManager.mdiActiveDocument':
+        case 'ApplicationServices.documentManager.documents':
+        case 'DatabaseServices.database.revision':
           return (await callHost(deps, request)) as Result;
         default:
           throw adapterMissing(request.namespace, request.operation);
