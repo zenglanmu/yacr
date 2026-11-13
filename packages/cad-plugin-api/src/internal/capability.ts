@@ -5,6 +5,11 @@
 // call — so no other module needs to remember the rule, and a refusal never
 // reaches the host (which is what the capability suite counts).
 //
+// The wire has two lanes over the same gate: `call`/`callVoid` ask the read
+// bridge, `submit` asks the mutating bridge (queue + reported outcome). A read
+// operation names one row; which lane it uses is the client's decision, not the
+// descriptor's.
+//
 // This module is internal: it is imported by concrete modules and by the tests,
 // never re-exported from `src/index.ts` (see `test/surface.test.ts`).
 //
@@ -50,6 +55,17 @@ export interface CadApiWire {
     operation: string,
     parameters?: Readonly<Record<string, unknown>>,
   ): Promise<void>;
+  /**
+   * Gate, **submit**, and require a non-null answer (the mutating lane).
+   *
+   * Same gate, different lane: the carrier queues the request and resolves the
+   * host's reported outcome, so a mutation never resolves before it happened.
+   */
+  submit(
+    namespace: CadApiNamespace,
+    operation: string,
+    parameters?: Readonly<Record<string, unknown>>,
+  ): Promise<unknown>;
 }
 
 /** Plain (non-array) object narrowing: the one gate every decoded answer passes. */
@@ -163,6 +179,21 @@ export function createWire(host: CadApiHostInfo, bridge: CadHostBridge): CadApiW
       let answer: unknown;
       try {
         answer = await bridge.request<unknown>({ namespace, operation, parameters });
+      } catch (failure) {
+        throw errorFromBridgeFailure(failure);
+      }
+      if (answer === undefined || answer === null) throw invalidArgument('bridge.answer');
+      return answer;
+    },
+    async submit(
+      namespace: CadApiNamespace,
+      operation: string,
+      parameters: Readonly<Record<string, unknown>> = {},
+    ): Promise<unknown> {
+      assertOperationSupported(host, namespace, operation);
+      let answer: unknown;
+      try {
+        answer = await bridge.mutate<unknown>({ namespace, operation, parameters });
       } catch (failure) {
         throw errorFromBridgeFailure(failure);
       }

@@ -75,13 +75,15 @@ silent success. Host failures arrive as `CadApiError`; branch on `code`, not mes
 
 ## v1 status
 
-**The descriptor is 21 rows: four `supported`, 17 `pending`.** The served
-operations are reflected reads over `cad_api_call`:
+**The descriptor is 18 rows: five `supported`, 13 `pending`.** Four served
+operations are reflected reads over `cad_api_call` —
 `documentManager.mdiActiveDocument` (the open `Document`, or `null`),
 `documentManager.documents` (0 or 1 `Document`, `[]` when none is open),
 `database.symbolTables` (the block/layer projection plus the active layer name) and
-`database.revision` (`{ database: id }` -> the current revision number). Everything
-else is still a reservation — no write path, no prompts, no command dispatch.
+`database.revision` (`{ database: id }` -> the current revision number) — and one is
+a **mutation**: `transaction.commit`, queued through the carrier's submit/poll lane.
+Everything else is still a reservation — no object read path, no prompts, no command
+dispatch.
 
 | Descriptor rows | v1 |
 | --- | --- |
@@ -89,9 +91,14 @@ else is still a reservation — no write path, no prompts, no command dispatch.
 | `ApplicationServices.document.lock` (1) | `pending` — no lock path yet |
 | `DatabaseServices.database.symbolTables` (1) | `supported` — block/layer tables and `clayer`, one cached read |
 | `DatabaseServices.database.revision` (1) | `supported` — current revision, read every call |
-| `DatabaseServices` (6 more) | `pending` — no object read or write path yet |
+| `DatabaseServices.transaction.commit` (1) | `supported` — the one mutating operation, over the submit/poll lane |
+| `DatabaseServices` (2 more) | `pending` — `database.getObjectId`, `transaction.getObject` |
 | `EditorInput` (9) | `pending` — no interactive prompt path yet |
 | `Runtime.runtime.registerCommand` (1) | `pending` — no chrome-local admission path yet |
+
+`transaction.start`, `transaction.addNewlyCreated` and `transaction.abort` have **no
+row**: they are this client's own bookkeeping (the host mints no transaction handle),
+so advertising them would promise a host round-trip that does not exist.
 
 `DocumentManager.mdiActiveDocument()` and `documents()` are **methods returning
 promises**, not AutoCAD's properties: the value crosses an asynchronous wire, and a
@@ -102,14 +109,15 @@ snapshot yet refuses with `cad_waiting`, and that rejection reaches the plugin a
 
 ## Transactions
 
-`startTransaction({ expectedRevision })` is synchronous: the host is not asked to
-open a transaction, so edits buffer client-side. `expectedRevision` is **required**
-for the outermost transaction — an omitted precondition would be silent
-last-writer-wins, so the caller reads `database.revision()` first. Only the outermost
-`commit()` crosses the wire, as one request carrying
-`{ document, transactionId, expectedRevision, edits }`; it resolves
-`{ applied: true, revision, created }` with the host's new revision and the ids it
-actually created.
+`startTransaction({ expectedRevision })` is synchronous and **client-local**: the
+host is not asked to open a transaction, so edits buffer client-side.
+`expectedRevision` is **required** for the outermost transaction — an omitted
+precondition would be silent last-writer-wins, so the caller reads
+`database.revision()` first. Only the outermost `commit()` crosses the wire, over the
+**mutating lane** (`CadHostBridge.mutate`, i.e. submit + poll), as one request
+carrying `{ document, transactionId, expectedRevision, edits }`; it resolves only
+after the host reported the outcome, as `{ applied: true, revision, created }` with
+the host's new revision and the ids it actually created.
 
 - Nesting is strictly LIFO for `commit`/`abort` (`api.transaction.nesting_order`), at
   most 8 deep (`api.transaction.nesting_limit`), and a transaction closes once
@@ -117,9 +125,10 @@ actually created.
 - A nested commit is a savepoint release: it merges into the parent, applies nothing
   and reports `{ applied: false, revision: null, created: [] }` — no revision is
   invented. A nested abort discards its own buffer.
-- `abort()` is **local only** in v1: the host never minted a transaction handle, so
-  nothing remote is rolled back. A future `transaction.start` that mints a host id
-  turns abort into a wire call.
+- `startTransaction`, `addNewlyCreatedDBObject` and `abort()` are **local**: they are
+  not gated and never touch the wire, because the host never minted a transaction
+  handle. A future host-minted transaction would add capability rows and wire calls
+  back to them.
 - `expectedRevision` is optimistic concurrency: a stale value is rejected by the host
   as `api.revision-conflict` (`details.actualRevision` when the host supplies one).
 - Creates are a closed set (`Line`/`Circle`/`Arc`, a layer **name** and the active

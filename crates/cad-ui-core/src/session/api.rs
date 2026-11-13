@@ -211,13 +211,14 @@ mod tests {
                 );
             }
         }
-        // Four operations are served in this build: the two reflected document
-        // reads, the symbol-table projection and the database revision (M2.2/M2.3).
-        // Pure value helpers and the manifest parser are package features, not
-        // descriptor rows, so they never appear here.
+        // Five operations are served in this build: the two reflected document
+        // reads, the symbol-table projection, the database revision (the read lane)
+        // and the transactional commit (the mutating lane). Pure value helpers and
+        // the manifest parser are package features, not descriptor rows, so they
+        // never appear here.
         assert_eq!(
-            supported, 4,
-            "this build serves exactly four host operations"
+            supported, 5,
+            "this build serves exactly five host operations"
         );
     }
 

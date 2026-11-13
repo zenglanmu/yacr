@@ -33,7 +33,10 @@ const DOCUMENT = 'doc-1';
 
 interface FakeBridge {
   readonly bridge: CadHostBridge;
+  /** Read-lane requests, in order. */
   readonly calls: CadApiRequest[];
+  /** Mutating-lane requests, in order. */
+  readonly mutations: CadApiRequest[];
 }
 
 function databaseOperations(): readonly CadApiOperation[] {
@@ -44,12 +47,14 @@ function databaseOperations(): readonly CadApiOperation[] {
   }));
 }
 
-function hostInfo(): CadApiHostInfo {
+function hostInfo(
+  operations: readonly CadApiOperation[] = databaseOperations(),
+): CadApiHostInfo {
   return {
     apiVersion: 1,
     carrier: 'native-below',
     documentOwner: 'native',
-    operations: databaseOperations(),
+    operations,
   };
 }
 
@@ -57,6 +62,7 @@ function fakeBridge(
   answer: (request: CadApiRequest) => unknown = () => ({ revision: 1, created: [] }),
 ): FakeBridge {
   const calls: CadApiRequest[] = [];
+  const mutations: CadApiRequest[] = [];
   const bridge: CadHostBridge = {
     async hostInfo(): Promise<CadApiHostInfo> {
       return hostInfo();
@@ -65,12 +71,19 @@ function fakeBridge(
       calls.push(request);
       return answer(request) as Result;
     },
+    async mutate<Result>(request: CadApiRequest): Promise<Result> {
+      mutations.push(request);
+      return answer(request) as Result;
+    },
   };
-  return { bridge, calls };
+  return { bridge, calls, mutations };
 }
 
-function managerFor(fake: FakeBridge): TransactionManager {
-  return new TransactionManager(createWire(hostInfo(), fake.bridge), DOCUMENT);
+function managerFor(
+  fake: FakeBridge,
+  operations: readonly CadApiOperation[] = databaseOperations(),
+): TransactionManager {
+  return new TransactionManager(createWire(hostInfo(operations), fake.bridge), DOCUMENT);
 }
 
 function renderError(error: unknown): string {
@@ -139,7 +152,7 @@ test('a nested commit is a savepoint release and only the outer one applies', as
   assert.equal(outer.depth, 1);
   assert.equal(inner.depth, 2);
   await expectRejectCode(() => outer.commit(), 'api.transaction.nesting_order');
-  assert.equal(fake.calls.length, 0, 'a refused nesting order must not reach the host');
+  assert.equal(fake.mutations.length, 0, 'a refused nesting order must not reach the host');
 
   // Reads and buffered writes are allowed at any depth (LIFO gates closes only).
   const line = await inner.getObject(objectId('1F'), 'read');
@@ -155,12 +168,13 @@ test('a nested commit is a savepoint release and only the outer one applies', as
   assert.deepEqual(nested, { applied: false, revision: null, created: [] });
   assert.equal(manager.depth, 1);
   assert.equal(fake.calls.length, 1, 'only the inner read reached the host so far');
+  assert.equal(fake.mutations.length, 0, 'a savepoint release is client-local');
 
   const committed = await outer.commit();
   assert.deepEqual(committed, { applied: true, revision: 5, created: ['2A'] });
   assert.equal(manager.depth, 0);
 
-  const commitRequest = fake.calls[1];
+  const commitRequest = fake.mutations[0];
   assert.equal(commitRequest.namespace, 'DatabaseServices');
   assert.equal(commitRequest.operation, 'transaction.commit');
   const parameters = parametersOf(commitRequest);
@@ -190,11 +204,11 @@ test('an aborted inner transaction contributes no edits to the outer commit', as
   );
   await inner.abort();
   assert.equal(manager.depth, 1);
-  assert.equal(fake.calls.length, 0, 'abort is local: nothing crosses the wire');
+  assert.equal(fake.mutations.length, 0, 'abort is local: nothing crosses the wire');
 
   await outer.commit();
-  assert.equal(fake.calls.length, 1);
-  assert.deepEqual(parametersOf(fake.calls[0])['edits'], []);
+  assert.equal(fake.mutations.length, 1);
+  assert.deepEqual(parametersOf(fake.mutations[0])['edits'], []);
 });
 
 test('abort is local only, closes the transaction and drops its buffer', async () => {
@@ -208,7 +222,7 @@ test('abort is local only, closes the transaction and drops its buffer', async (
   await transaction.abort();
   assert.equal(transaction.closed, true);
   assert.equal(manager.depth, 0);
-  assert.equal(fake.calls.length, 0, 'no transaction.abort request is ever sent');
+  assert.equal(fake.mutations.length, 0, 'no transaction.abort request is ever sent');
   await expectRejectCode(() => transaction.commit(), 'api.transaction.closed');
   await expectRejectCode(() => transaction.abort(), 'api.transaction.closed');
 });
@@ -222,7 +236,7 @@ test('add === false records nothing', async () => {
     false,
   );
   await transaction.commit();
-  assert.deepEqual(parametersOf(fake.calls[0])['edits'], []);
+  assert.deepEqual(parametersOf(fake.mutations[0])['edits'], []);
 });
 
 test('the creatable-type set is closed', () => {
@@ -399,6 +413,65 @@ test('getObject refuses a missing object and a malformed mode', async () => {
     () => transaction.getObject(objectId('2A'), 'bogus' as never),
     'api.invalid_argument: mode',
   );
+});
+
+test('the outermost commit submits one exact envelope and decodes created', async () => {
+  const fake = fakeBridge(() => ({ revision: 16, created: ['9', '10'] }));
+  const manager = managerFor(fake);
+  const transaction = manager.startTransaction({ expectedRevision: 15 });
+  transaction.addNewlyCreatedDBObject(
+    { typeName: 'Circle', layer: '0', space: 'model', parameters: { radius: 5 } },
+    true,
+  );
+
+  const result = await transaction.commit();
+  assert.deepEqual(result, { applied: true, revision: 16, created: ['9', '10'] });
+  assert.equal(fake.calls.length, 0, 'a commit is never a read');
+  assert.deepEqual(fake.mutations, [
+    {
+      namespace: 'DatabaseServices',
+      operation: 'transaction.commit',
+      parameters: {
+        document: DOCUMENT,
+        transactionId: 'tx-1',
+        expectedRevision: 15,
+        edits: [
+          {
+            kind: 'insert',
+            typeName: 'Circle',
+            layer: '0',
+            space: 'model',
+            parameters: { radius: 5 },
+          },
+        ],
+      },
+    },
+  ]);
+});
+
+test('start, staging and abort are client-local and need no capability row', async () => {
+  const fake = fakeBridge();
+  const manager = managerFor(fake, []);
+  const transaction = manager.startTransaction({ expectedRevision: 1 });
+  transaction.addNewlyCreatedDBObject(
+    { typeName: 'Line', layer: 'A', space: 'model', parameters: {} },
+    true,
+  );
+  await transaction.abort();
+  assert.equal(transaction.closed, true);
+  assert.equal(manager.depth, 0);
+  assert.equal(fake.calls.length, 0);
+  assert.equal(fake.mutations.length, 0);
+
+  // Only the commit needs the host; with no row at all that is the descriptor
+  // mismatch, and the refusal leaves the transaction open.
+  const pending = managerFor(fake, []).startTransaction({ expectedRevision: 1 });
+  await expectRejectCode(
+    () => pending.commit(),
+    'api.descriptor_missing: DatabaseServices.transaction.commit',
+  );
+  assert.equal(pending.closed, false);
+  assert.equal(fake.mutations.length, 0);
 });
 
 test('no public member can push an edit', () => {

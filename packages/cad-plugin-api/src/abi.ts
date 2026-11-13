@@ -14,15 +14,20 @@
 // wire, so they have no row and are available unconditionally. Advertising them
 // in the descriptor would claim host state that does not exist.
 //
-// Four rows are `supported` in this build — the reflected document reads
+// Five rows are `supported` in this build — the reflected document reads
 // (`documentManager.mdiActiveDocument`, `documentManager.documents`), the database
-// revision and the symbol-table projection, all served over `cad_api_call` — and the
-// other 17 are `pending`: the table is an honest reservation list, not an
+// revision and symbol-table projections (all over `cad_api_call`), and the
+// transactional `transaction.commit` (over the mutating `cad_api_submit` lane) —
+// and the other 13 are `pending`: the table is an honest reservation list, not an
 // availability list. It is deliberately complete rather than aspirational — an
 // operation that exists here but is `pending` is refused by name, an operation the
 // host marks `unsupported` is refused by name, and an operation the host does not
 // name at all is refused as `api.descriptor_missing`. There is no silent "maybe"
 // state and no empty-success path.
+//
+// `transaction.start`, `transaction.addNewlyCreated` and `transaction.abort` have
+// **no row**: they are client-local bookkeeping (the host mints no transaction
+// handle), so advertising them would promise a host round-trip that does not exist.
 
 /** Wire/API generation. A host and this package must agree exactly. */
 export const API_VERSION = 1;
@@ -69,7 +74,7 @@ export const API_NAMESPACES: readonly CadApiNamespace[] = [
 ];
 
 /**
- * The v1 capability table: 21 host operations, 17 `pending` and four `supported`.
+ * The v1 capability table: 18 host operations, 13 `pending` and five `supported`.
  *
  * Do not flip a row to `supported` here without the host side landing first (and
  * a `case` in the WebView adapter) — the contract test will catch the JSON drift,
@@ -120,33 +125,17 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
   },
   {
     namespace: 'DatabaseServices',
-    operation: 'transaction.start',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'transaction.start'),
-  },
-  {
-    namespace: 'DatabaseServices',
     operation: 'transaction.getObject',
     status: 'pending',
     reason: pendingReason('DatabaseServices', 'transaction.getObject'),
   },
-  {
-    namespace: 'DatabaseServices',
-    operation: 'transaction.addNewlyCreated',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'transaction.addNewlyCreated'),
-  },
+  // The only mutating operation this build performs: queued over
+  // `cad_api_submit`, answered through `cad_api_poll`. `start`,
+  // `addNewlyCreated` and `abort` are client-local and have no row.
   {
     namespace: 'DatabaseServices',
     operation: 'transaction.commit',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'transaction.commit'),
-  },
-  {
-    namespace: 'DatabaseServices',
-    operation: 'transaction.abort',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'transaction.abort'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',

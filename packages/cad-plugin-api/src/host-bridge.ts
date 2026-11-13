@@ -31,13 +31,24 @@ export interface CadApiRequest {
 }
 
 /**
- * What a carrier implements.
+ * What a carrier implements: two lanes, deliberately separate.
  *
- * `request` may reject with a `CadApiError` or with a plain `{ code, message,
- * details }` object (the shaped JSON a Rust host sends); both are mapped to
- * `CadApiError` with the same code. A `null`/`undefined` answer is refused.
+ * `request` is the **read** lane — one synchronous answer reflected from the
+ * host's snapshot. `mutate` is the **write** lane — the host queues the request
+ * and the carrier resolves only once the host reported the outcome (the Tauri /
+ * wasm carriers do that with `cad_api_submit` + `cad_api_poll`; the correlation
+ * id and the polling never leave the carrier).
+ *
+ * Keeping them apart is what makes a commit honest: it cannot resolve before the
+ * host said what happened, and a read can never be mistaken for a write. Both may
+ * reject with a `CadApiError` or with a plain `{ code, message, details }` object
+ * (the shaped JSON a Rust host sends); both are mapped to `CadApiError` with the
+ * same code. A `null`/`undefined` answer is refused.
  */
 export interface CadHostBridge {
   hostInfo(): Promise<CadApiHostInfo>;
+  /** Read lane: gate, ask the host's reflected snapshot, return its answer. */
   request<Result>(request: CadApiRequest): Promise<Result>;
+  /** Write lane: submit the mutation and resolve the host's reported outcome. */
+  mutate<Result>(request: CadApiRequest): Promise<Result>;
 }

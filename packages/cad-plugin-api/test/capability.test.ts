@@ -33,7 +33,10 @@ import { createWire } from '../src/internal/capability.ts';
 
 interface SpyBridge {
   readonly bridge: CadHostBridge;
+  /** Read-lane requests, in order. */
   readonly calls: CadApiRequest[];
+  /** Mutating-lane requests, in order. */
+  readonly mutations: CadApiRequest[];
 }
 
 function hostInfo(
@@ -62,6 +65,7 @@ function spyBridge(
   } = {},
 ): SpyBridge {
   const calls: CadApiRequest[] = [];
+  const mutations: CadApiRequest[] = [];
   const bridge: CadHostBridge = {
     async hostInfo(): Promise<CadApiHostInfo> {
       return hostInfo(operations, options);
@@ -70,8 +74,12 @@ function spyBridge(
       calls.push(request);
       return answer(request) as Result;
     },
+    async mutate<Result>(request: CadApiRequest): Promise<Result> {
+      mutations.push(request);
+      return answer(request) as Result;
+    },
   };
-  return { bridge, calls };
+  return { bridge, calls, mutations };
 }
 
 function supported(operations: readonly CadApiOperation[]): readonly CadApiOperation[] {
@@ -171,22 +179,19 @@ test('every gated v1 call refuses with its exact pending code and no request', a
     'api.pending: ApplicationServices.document.lock',
   );
 
-  // `startTransaction` is synchronous, so its refusal is thrown, not rejected.
-  const manager = new TransactionManager(wire, 'doc-1');
-  expectSyncCode(
-    () => manager.startTransaction({ expectedRevision: 1 }),
-    'api.pending: DatabaseServices.transaction.start',
-  );
-
+  // Opening a transaction is client-local (no row), so this test has no
+  // transaction call to gate; `transaction.getObject` is covered above by the
+  // database read it would resemble, and the commit lane has its own tests.
   assert.equal(spy.calls.length, 0, `no request may escape on a refusal: ${JSON.stringify(spy.calls)}`);
+  assert.equal(spy.mutations.length, 0);
 });
 
-test('transaction writes refuse by name, while abort stays local', async () => {
-  // `transaction.start` is advertised so a transaction can be opened; every other
-  // DatabaseServices row stays exactly as shipped (`pending`).
-  const operations = withStatus(API_OPERATIONS, 'transaction.start', 'supported');
-  const spy = spyBridge(operations);
-  const wire = createWire(hostInfo(operations), spy.bridge);
+test('opening, staging and aborting a transaction are client-local', async () => {
+  // The host serves no `transaction.start`/`addNewlyCreated`/`abort` row: those
+  // are this client's own bookkeeping. Only `getObject` (still pending) and the
+  // commit (served) ever reach the host.
+  const spy = spyBridge(API_OPERATIONS);
+  const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
   const manager = new TransactionManager(wire, 'doc-1');
   const transaction = manager.startTransaction({ expectedRevision: 1 });
 
@@ -194,25 +199,14 @@ test('transaction writes refuse by name, while abort stays local', async () => {
     () => transaction.getObject(objectId('2A'), 'read'),
     'api.pending: DatabaseServices.transaction.getObject',
   );
-  expectSyncCode(
-    () =>
-      transaction.addNewlyCreatedDBObject(
-        { typeName: 'Line', layer: 'A', space: 'model', parameters: {} },
-        true,
-      ),
-    'api.pending: DatabaseServices.transaction.addNewlyCreated',
+  transaction.addNewlyCreatedDBObject(
+    { typeName: 'Line', layer: 'A', space: 'model', parameters: {} },
+    true,
   );
-  await expectRejectCode(
-    () => transaction.commit(),
-    'api.pending: DatabaseServices.transaction.commit',
-  );
-  assert.equal(transaction.closed, false, 'a gate refusal must not close the transaction');
-
-  // Abort never touches the wire, so a pending `transaction.abort` row does not
-  // block the local rollback.
   await transaction.abort();
   assert.equal(transaction.closed, true);
   assert.equal(spy.calls.length, 0);
+  assert.equal(spy.mutations.length, 0, 'abort is local: nothing is submitted');
 });
 
 test('an operation the host does not name is descriptor_missing, not pending', async () => {
@@ -627,6 +621,7 @@ test('a malformed host snapshot is refused with the offending field', async () =
   const notAnObject: CadHostBridge = {
     hostInfo: async () => null as never,
     request: async <Result>(_request: CadApiRequest): Promise<Result> => ({}) as Result,
+    mutate: async <Result>(_request: CadApiRequest): Promise<Result> => ({}) as Result,
   };
   await expectRejectCode(() => createCadApi(notAnObject), 'api.invalid_argument: hostInfo');
 
@@ -639,6 +634,7 @@ test('a malformed host snapshot is refused with the offending field', async () =
         operations: [{ namespace: 'Nope', operation: 'x.y', status: 'pending', reason: 'r' }],
       }) as never,
     request: async <Result>(_request: CadApiRequest): Promise<Result> => ({}) as Result,
+    mutate: async <Result>(_request: CadApiRequest): Promise<Result> => ({}) as Result,
   };
   await expectRejectCode(
     () => createCadApi(unknownNamespace),

@@ -54,7 +54,7 @@ test('hostInfo() calls cad_api_status once and merges the status snapshot', asyn
   assert.equal(info.apiVersion, 1);
   assert.equal(info.carrier, 'dom-canvas');
   assert.equal(info.documentOwner, 'wasm');
-  assert.equal(info.operations.length, 21);
+  assert.equal(info.operations.length, 18);
 });
 
 test('hostInfo() reports unknown/none before any status is observed', async () => {
@@ -92,20 +92,22 @@ test('a malformed host answer is refused with the cad_api_status prefix', async 
   );
 });
 
-test('this build implements exactly the four served reads', () => {
+test('this build implements exactly the four reads and one mutation', () => {
   assert.deepEqual(IMPLEMENTED_OPERATIONS, [
     'ApplicationServices.documentManager.mdiActiveDocument',
     'ApplicationServices.documentManager.documents',
     'DatabaseServices.database.symbolTables',
     'DatabaseServices.database.revision',
+    'DatabaseServices.transaction.commit',
   ]);
 });
 
 test('every supported descriptor row has an adapter implementation', async () => {
   // The one rule that keeps the descriptor honest: a row may only be
-  // `supported` if this adapter can actually serve it. It has four rows to check
-  // today and goes red the moment another row flips without a `case` in
-  // `bridge.ts` - which is exactly when it must be caught.
+  // `supported` if this adapter can actually serve it. It has five rows to check
+  // today and goes red the moment another row flips without a `case` (or a
+  // mutating implementation) in `bridge.ts` - which is exactly when it must be
+  // caught.
   const contract = JSON.parse(await readFile(CONTRACT_URL, 'utf8'));
   const supportedRows = contract.operations.filter((row) => row.status === 'supported');
   for (const row of supportedRows) {
@@ -228,6 +230,173 @@ test('the served symbol tables forward with their database parameter', async () 
       parameters: { database: '7' },
     },
   ]);
+});
+
+test('mutate submits one correlated request and polls until its outcome appears', async () => {
+  let submitted = null;
+  let polls = 0;
+  const { invoke, commands } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_submit') {
+      submitted = request;
+      return { accepted: true };
+    }
+    if (command === 'cad_api_poll') {
+      polls += 1;
+      // Two empty polls (nothing completed yet), then our outcome.
+      if (polls < 3) return { results: [] };
+      return {
+        results: [
+          { requestId: submitted.requestId, ok: true, value: { revision: 3, created: ['9'] } },
+        ],
+      };
+    }
+    return { ok: false, error: `unsupported-runtime: cad_api.${command}` };
+  });
+  const bridge = createCadHostBridge({
+    invoke,
+    status: () => statusWith('native-below', 'native'),
+    pollDelayMs: 0,
+    maxPolls: 10,
+  });
+
+  const value = await bridge.mutate({
+    namespace: 'DatabaseServices',
+    operation: 'transaction.commit',
+    parameters: { document: 'doc-1' },
+  });
+
+  assert.deepEqual(value, { revision: 3, created: ['9'] });
+  assert.equal(polls, 3, 'empty polls are retried, not answered');
+  assert.deepEqual(commands, ['cad_api_submit', 'cad_api_poll', 'cad_api_poll', 'cad_api_poll']);
+  assert.equal(typeof submitted.requestId, 'string');
+  assert.match(submitted.requestId, /^[A-Za-z0-9._-]{1,64}$/);
+  assert.equal(submitted.namespace, 'DatabaseServices');
+  assert.equal(submitted.operation, 'transaction.commit');
+  assert.deepEqual(submitted.parameters, { document: 'doc-1' });
+});
+
+test('a mutation outcome refusal keeps the host code', async () => {
+  let submitted = null;
+  const { invoke } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_submit') {
+      submitted = request;
+      return { accepted: true };
+    }
+    return {
+      results: [{ requestId: submitted.requestId, ok: false, error: 'api.revision-conflict' }],
+    };
+  });
+  const bridge = createCadHostBridge({
+    invoke,
+    status: () => null,
+    pollDelayMs: 0,
+    maxPolls: 2,
+  });
+  await assert.rejects(
+    bridge.mutate({
+      namespace: 'DatabaseServices',
+      operation: 'transaction.commit',
+      parameters: {},
+    }),
+    (error) => {
+      assert.equal(codeOf(error), 'api.revision-conflict');
+      assert.equal(error.message, 'api.revision-conflict');
+      return true;
+    },
+  );
+});
+
+test('an unanswered submission times out by request id', async () => {
+  const { invoke } = countingInvoke((command) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_submit') return { accepted: true };
+    return { results: [] };
+  });
+  const bridge = createCadHostBridge({
+    invoke,
+    status: () => null,
+    pollDelayMs: 0,
+    maxPolls: 3,
+  });
+  await assert.rejects(
+    bridge.mutate({
+      namespace: 'DatabaseServices',
+      operation: 'transaction.commit',
+      parameters: {},
+    }),
+    (error) => {
+      assert.match(codeOf(error), /^api\.timeout: apir-/u);
+      return true;
+    },
+  );
+});
+
+test('a malformed submit ack or poll answer is api.invalid_argument: bridge.answer', async () => {
+  const answers = [
+    [{ accepted: false }, { results: [] }],
+    [{ ok: 1 }, { results: [] }],
+    [{ accepted: true }, { nope: [] }],
+    [{ accepted: true }, { results: 'none' }],
+    [{ accepted: true }, { results: [7] }],
+  ];
+  for (const [ack, poll] of answers) {
+    const { invoke } = countingInvoke((command) => {
+      if (command === 'cad_api_status') return payload;
+      if (command === 'cad_api_submit') return ack;
+      return poll;
+    });
+    const bridge = createCadHostBridge({ invoke, status: () => null, pollDelayMs: 0, maxPolls: 2 });
+    await assert.rejects(
+      bridge.mutate({
+        namespace: 'DatabaseServices',
+        operation: 'transaction.commit',
+        parameters: {},
+      }),
+      (error) => {
+        assert.equal(codeOf(error), 'api.invalid_argument: bridge.answer');
+        return true;
+      },
+    );
+  }
+});
+
+test('a poll refusal propagates verbatim', async () => {
+  const { invoke } = countingInvoke((command) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_submit') return { accepted: true };
+    throw new Error('unsupported-runtime: cad_api_poll');
+  });
+  const bridge = createCadHostBridge({ invoke, status: () => null, pollDelayMs: 0, maxPolls: 2 });
+  await assert.rejects(
+    bridge.mutate({
+      namespace: 'DatabaseServices',
+      operation: 'transaction.commit',
+      parameters: {},
+    }),
+    (error) => {
+      assert.equal(codeOf(error), 'unsupported-runtime: cad_api_poll');
+      return true;
+    },
+  );
+});
+
+test('a mutation this adapter does not implement is refused locally', async () => {
+  const { invoke, commands } = countingInvoke(payload);
+  const bridge = createCadHostBridge({ invoke, status: () => null });
+  await assert.rejects(
+    bridge.mutate({
+      namespace: 'DatabaseServices',
+      operation: 'transaction.start',
+      parameters: {},
+    }),
+    (error) => {
+      assert.equal(codeOf(error), 'api.adapter-missing: DatabaseServices.transaction.start');
+      return true;
+    },
+  );
+  assert.deepEqual(commands, []);
 });
 
 test('a host refusal becomes the CadApiError code, verbatim', async () => {
@@ -356,7 +525,7 @@ test('openPluginApi assembles the client from the real contract JSON', async () 
   const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
 
   assert.deepEqual(commands, ['cad_api_status'], 'one snapshot call per session');
-  assert.equal(session.host.operations.length, 21);
+  assert.equal(session.host.operations.length, 18);
   assert.equal(session.host.carrier, 'native-below');
 
   // Pure, always-local operations work without touching the host.
@@ -506,6 +675,69 @@ test('the served symbol tables assemble end to end', async () => {
     operation: 'database.symbolTables',
     parameters: { database: '7' },
   });
+});
+
+test('a commit goes through submit + poll and resolves the host outcome', async () => {
+  const documentValue = {
+    document: {
+      id: '42',
+      name: 'Drawing1',
+      isReadOnly: false,
+      database: { id: '7', version: '15' },
+    },
+  };
+  let submitted = null;
+  const { invoke, commands } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_call') return { ok: true, value: documentValue };
+    if (command === 'cad_api_submit') {
+      submitted = request;
+      return { accepted: true };
+    }
+    if (command === 'cad_api_poll') {
+      return {
+        results: [
+          { requestId: submitted.requestId, ok: true, value: { revision: 16, created: ['9'] } },
+        ],
+      };
+    }
+    return { ok: false, error: `unsupported-runtime: cad_api.${command}` };
+  });
+  const session = await openPluginApi({
+    invoke,
+    status: () => statusWith('native-below', 'native'),
+    pollDelayMs: 0,
+    maxPolls: 5,
+  });
+
+  const document = await session.api.application.documentManager.mdiActiveDocument();
+  if (document === null) throw new Error('expected a document');
+  const transaction = document.transactionManager.startTransaction({ expectedRevision: 15 });
+  transaction.addNewlyCreatedDBObject(
+    { typeName: 'Line', layer: '0', space: 'model', parameters: { start: [0, 0, 0] } },
+    true,
+  );
+
+  const result = await transaction.commit();
+  assert.deepEqual(result, { applied: true, revision: 16, created: ['9'] });
+  assert.equal(typeof submitted.requestId, 'string');
+  assert.equal(submitted.namespace, 'DatabaseServices');
+  assert.equal(submitted.operation, 'transaction.commit');
+  assert.deepEqual(submitted.parameters, {
+    document: '42',
+    transactionId: 'tx-1',
+    expectedRevision: 15,
+    edits: [
+      {
+        kind: 'insert',
+        typeName: 'Line',
+        layer: '0',
+        space: 'model',
+        parameters: { start: [0, 0, 0] },
+      },
+    ],
+  });
+  assert.deepEqual(commands, ['cad_api_status', 'cad_api_call', 'cad_api_submit', 'cad_api_poll']);
 });
 
 test('the served revision read returns the host number', async () => {

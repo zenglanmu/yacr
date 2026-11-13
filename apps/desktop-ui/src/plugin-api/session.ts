@@ -42,6 +42,7 @@ export async function openPluginApi(deps: PluginApiDeps): Promise<PluginApiSessi
   const memoized: CadHostBridge = {
     hostInfo: () => host,
     request: <Result>(request: CadApiRequest): Promise<Result> => bridge.request<Result>(request),
+    mutate: <Result>(request: CadApiRequest): Promise<Result> => bridge.mutate<Result>(request),
   };
   const api = await createCadApi(memoized);
   return { api, host: await host };

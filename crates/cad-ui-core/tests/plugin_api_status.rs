@@ -87,8 +87,9 @@ fn pending_rows_carry_a_reason_and_supported_rows_omit_it() {
         }
     }
     assert!(pending > 0, "document/editor operations are pending here");
-    // Four operations are served in this build (M2.2/M2.3: the two reflected
-    // document reads, the symbol-table projection and the database revision). A row
+    // Five operations are served in this build: the reflected document reads, the
+    // symbol-table projection, the database revision (the `cad_api_call` lane) and
+    // the transactional `transaction.commit` (the `cad_api_submit` lane). A row
     // flipping to `supported` without a host implementation and an adapter `case`
     // is a bug, so the set is pinned by name, in descriptor order, rather than by
     // count.
@@ -99,8 +100,9 @@ fn pending_rows_carry_a_reason_and_supported_rows_omit_it() {
             "ApplicationServices.documentManager.documents".to_string(),
             "DatabaseServices.database.symbolTables".to_string(),
             "DatabaseServices.database.revision".to_string(),
+            "DatabaseServices.transaction.commit".to_string(),
         ],
-        "this build serves exactly the reflected document reads, symbol tables and revision"
+        "this build serves exactly the reflected reads and the transactional commit"
     );
 }
 
