@@ -2,9 +2,8 @@
 
 - 状态：**Accepted（2026-11-13，可用的二次开发 API）**。本 ADR 定的是**契约与目录边界**：API
   包、宿主 adapter、能力描述符与显式拒绝语义、只读通道 `cad_api_call`、写/会话通道
-  `cad_api_submit` + `cad_api_poll`，以及插件装载与命令派发。**18 行宿主操作中 8 行已服务**
-  （文档身份/列表、revision、符号表、当前选择、handle→ObjectId、按 id 读实体、事务提交）；
-  其余 10 行是交互式提示与 `document.lock`，仍 `pending`。
+  `cad_api_submit` + `cad_api_poll`、异步提示通道，以及插件装载与命令派发。**17 行宿主操作中
+  16 行已服务**；只剩 `document.lock` 是保留行。
   证据只到 Node 契约测试与 Linux 上的 `cargo check`/`cargo test`；真实 GUI、真机、WebView、
   GPU/像素全部 **NOT VERIFIED**。
 - 日期：2026-11-13。
@@ -112,14 +111,11 @@ tsconfig/vite 别名或裸包名：仓库没有 npm workspace、也没有签入�
 5. 自洽性：`documentOwner: 'none'` 却出现 `supported` 的 `ApplicationServices`/`DatabaseServices`
    行 → 拒绝 `api.descriptor_invalid: documentOwner`（没有文档所有者却声称服务文档操作）。
 
-**本版本状态（诚实表）**：描述符 18 行——**8 行 `supported` + 10 行 `pending`**。
-已服务：`documentManager.mdiActiveDocument`、`documentManager.documents`、
-`database.revision`、`database.symbolTables`、`editor.currentSelection`、
-`database.getObjectId`、`transaction.getObject`、`transaction.commit`。
-仍 `pending`：`document.lock`、`editor.getPoint/getEntity/getSelection/getString/getDouble/
-getInteger/getKeyword/writeMessage/selectAll`。`Runtime.registerCommand` 与事务的
-start/abort/addNewlyCreated 是**客户端本地**操作，没有描述符行。Geometry/Colors/
-`parsePluginManifest` 同样是包内特性。
+**本版本状态（诚实表）**：描述符 17 行——**16 行 `supported` + 1 行 `pending`**
+（仅 `document.lock`）。已服务：文档身份/列表、revision、符号表、当前选择、handle→ObjectId、
+按 id 读实体、事务提交，以及全部七个提示与 `selectAll`。`Runtime.registerCommand`、
+`editor.writeMessage` 与事务的 start/abort/addNewlyCreated 是**客户端本地**操作，没有描述符行；
+Geometry/Colors/`parsePluginManifest` 同样是包内特性。
 
 **理由**：能力来自宿主，TS 端不得单方面宣布支持；把"未实现"建模成稳定拒绝码，插件作者在编译期
 之外还能拿到可解释的运行时错误。
@@ -165,6 +161,22 @@ start/abort/addNewlyCreated 是**客户端本地**操作，没有描述符行。
 **理由**：AutoCAD 的 `ObjectId` 是内存地址、`Handle` 跨图不唯一；直接照搬会产生"跨图 id 冲突"
 与"插件缓存 id 永不失效"两类错误。乐观 revision 是宿主已有的并发契约（`ApiRequest::Commit`
 的 `expected_revision`），复用它而不是新造锁。
+
+### D4b 提示通道：提示在会话侧，回答走既有输入漏斗
+
+`native-below` 的点击只到原生 CAD 表面，WebView 看不到，所以提示**不能**做成纯前端阻塞。
+
+- `HostController` 持有唯一 pending prompt（kind/message/keywords/lastError）；`CadStatus.pendingPrompt`
+  把它投影给 chrome。同一时刻只允许一个提示（第二个提交 → `api.prompt.busy`）。
+- 输入在**工具状态机之前**被拦截：点击 → `world_point`；实体/选择 → 与 `SelectAt` 相同的拾取与
+  发布路径；文本（`cad_set_tool_text`）→ string/double/integer/keyword，点还接受 `x,y[,z]`；
+  Enter → 结束选择或接受默认；Esc → `{status:Cancel}` 并被吞掉（不再传给工具）。
+- 答案通过**已有的** `cad_api_submit`/`cad_api_poll` 车道返回：提交时没有 outcome，用户回答后
+  由 owner tick（原生）或直接 sink（wasm）排空。没有新的 wire 命令、没有事件关联通道。
+- 非法输入**保留**提示并把一句话写进 `pendingPrompt.error`（AutoCAD 的 re-prompt 语义），不把
+  提示变成失败。结果队列满时**拒绝新提示**，绝不丢已完成的答案。
+- chrome 在提示期间把命令行当数据输入：绕过 `admitCommandText`，答案草稿与命令草稿分离，
+  Enter/Escape 映射到 `CONFIRM`/`CANCEL`；退出提示不会留下能被当成命令执行的文本。
 
 ### D5 信任模型：同权 ES module，代理不是沙箱
 
@@ -279,7 +291,7 @@ interface PluginManifest {
 
 | 载体 | `surfaceMode` | `cad_api_status` | 受门控操作 | 说明 |
 |---|---|---|---|---|
-| Linux 原生 Wayland | `native-below` | 由 Tauri wrapper 服务 | 镜像读 + 会话读/提交（owner tick 应用），其余 `pending` 拒绝 | 描述符一致，本轮无运行证据 |
+| Linux 原生 Wayland | `native-below` | 由 Tauri wrapper 服务 | 镜像读 + 会话读/提交 + 提示（owner tick 应用），仅 `document.lock` 拒绝 | 描述符一致，本轮无运行证据 |
 | Linux X11/XWayland | `dom-canvas` | 由 wasm `DirectSink` 服务 | 同上（读实时 `CadSession`） | 同一份 JSON、同一条 wire 名 |
 | Windows / macOS / Android | `native-below` | 生成 wrapper | 同上 | 仅编译/契约，未运行验证 |
 | Web | `dom-canvas` | wasm 会话 | 同上 | Web 没有插件目录；本轮不装插件 |
@@ -336,6 +348,11 @@ interface PluginManifest {
 - 第四轮补充：`documents`/`database.revision` 走同一快照；`cargo test -p cad-ui-core --lib
   session::api` 21、`app-web` 123、`plugin_api_status` 6/6；包 node 53/53、desktop-ui
   plugin-api+host-adapter 70/70、`npm test` 整条 **1648/1648**。
+- 第六轮（提示通道，2026-11-13）已运行：`cargo test -p cad-ui-core --lib session` 579、
+  `-p cad-app --lib` 2636、`-p cad-host --lib` 317、`app-web` 131、`plugin_api_status` 6/6、
+  `cargo check -p app-linux --all-targets`、fmt/architecture/file-size/i18n；包 node 77/77、
+  desktop-ui plugin-api+host-adapter 99/99、chrome `node --test test/*.test.ts` 1577/1577、
+  `npm test` 整条 **1717/1717**。**NOT VERIFIED**：真实 GUI 里点击/键入回答提示（无现场证据）。
 - 第五轮（写通道/实体读/插件装载/命令派发，2026-11-13）已运行：
   `cargo test -p cad-ui-core --lib session` 564、`app-web` **128/128**（双向矩阵含提交、按 id 读、
   create-then-read 回环）、`plugin_api_status` 6/6、`cargo check -p app-linux --all-targets`、
@@ -352,7 +369,7 @@ Windows/macOS/Android/Web 运行、真实 WebView CSP、GPU/像素、插件隔�
   - **M2** 只读操作：**已落地**——文档身份/列表、revision、符号表、当前选择，以及
     handle→ObjectId / 按 id 读实体（后两项走会话通道，不做镜像）。
   - **M3** 事务提交：**已落地**——`expectedRevision`、编辑缓冲、`created` 回填、
-    `api.revision-conflict`、layer/space 解析、`SelectionRef` 映射。仍待解决：
+    `api.revision-conflict`、layer/space 解析、`SelectionRef` 映射。剩余项：
     - `translate`/`delete` 要映射到 `SelectionRef { document, entity, instance, sub_element }`；
       instanced / 子元素引用由宿主侧拒绝（客户端只有 `ObjectId`，没有 instance/sub-element 位）。
     - 宿主 `ApiOutcome.created` 必须回填到 `CommitResult.created`（客户端已校验形状，M3 只需接线）。

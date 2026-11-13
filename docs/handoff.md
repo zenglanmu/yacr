@@ -1,5 +1,26 @@
 AD
 
+## 2026-11-13 插件 API 提示通道：会话侧 pending prompt + 命令行数据模式
+
+- **位置**：`native-below` 的点击只到原生表面，WebView 看不到，所以提示状态在
+  `HostController`（唯一 pending prompt），`CadStatus.pendingPrompt` 投影给 chrome。回答走已有
+  `cad_api_submit`/`cad_api_poll`：提交时无 outcome，用户操作后由 owner tick（原生）或直接 sink
+  （wasm）排空。没有新 wire 命令、没有事件关联。
+- **输入**：在工具状态机**之前**拦截——点击 → `world_point`；实体/选择 → 与 `SelectAt` 相同的
+  拾取/发布；文本（`cad_set_tool_text`）→ string/double/integer/keyword，点接受 `x,y[,z]`；
+  Enter 结束选择/接受默认；Esc → `Cancel` 且被吞掉。非法输入保留提示并写 `pendingPrompt.error`
+  （re-prompt），结果队列满时拒绝**新**提示而不是丢已完成的答案。
+- **chrome**：提示期间命令行是数据输入（绕过 `admitCommandText`，不发 `cad_command`），答案
+  草稿与命令草稿分离；Enter→`CONFIRM`、Esc→`CANCEL`，无提示时 Esc 仍关闭面板。问题内联显示，
+  keywords 为按钮，宿主拒绝语句与插件 `writeMessage` 回显在命令行上方（移动端为浮层）。
+- **能力表**：17 行 = **16 supported / 1 pending**（`document.lock`）；`editor.writeMessage` 改为
+  客户端本地（无 row）。
+- **证据**：`cargo test -p cad-ui-core --lib session` 579、`-p cad-app --lib` 2636、
+  `-p cad-host --lib` 317、`app-web` 131、`plugin_api_status` 6/6；包 node 77/77、
+  desktop-ui plugin-api+host-adapter 99/99、chrome `node --test test/*.test.ts` 1577/1577、
+  `npm test` 整条 **1717/1717**；fmt/architecture/file-size/i18n 通过。`App.tsx` 999 行。
+  **NOT RUN**：真实 GUI 中点击/键入回答提示、真机/WebView、GPU/像素。
+
 ## 2026-11-13 插件 API 可用：写通道、实体读、装载与命令派发
 
 - **写通道**：`cad_api_submit`（桌面入队、`dom-canvas` 同步应用）+ `cad_api_poll`（有界

@@ -1,8 +1,9 @@
 # TypeScript 二次开发 API（`@yacr/plugin-api`）
 
-> 状态：**可用（2026-11-13）**。18 行宿主操作中 **8 行 `supported`**：文档身份/列表、revision、
-> 符号表、当前选择、handle→ObjectId、按 id 读实体、事务提交。插件可以运行、注册命令，并在事务
-> 里创建/移动/删除实体。仍 `pending` 的只有交互式提示（`editor.get*` 等）与 `document.lock`。
+> 状态：**可用（2026-11-13）**。17 行宿主操作中 **16 行 `supported`**：文档身份/列表、revision、
+> 符号表、当前选择、handle→ObjectId、按 id 读实体、事务提交，以及全部七个交互提示与
+> `selectAll`。插件可以运行、注册命令、在事务里创建/移动/删除实体，并等待用户输入。仍 `pending`
+> 的只有 `document.lock`。
 > 包内特性（Geometry/Colors 值构造、manifest 解析、命令注册）不走 wire，不在描述符里。设计依据见
 > [ADR 0034](adr/0034-typescript-plugin-api.md)。
 
@@ -154,12 +155,15 @@ Geometry/Colors 与 manifest 解析**没有行**；它们由包无条件提供�
   `DBText`/`MText`），返回判别联合；未知/缺失标签是
   `api.invalid_argument: bridge.answer.typeName`，没有调用方指定的 `as T`。
 
-## 明确不提供（本轮）
+## 提示与消息
 
-交互式提示（`editor.getPoint/getEntity/getSelection/getString/getDouble/getInteger/getKeyword/
-writeMessage/selectAll`）、`document.lock`、插件安装 UI / 持久化商店、Worker/权限/签名隔离。
-`dom-canvas` 没有插件目录；插件由宿主调用 `loadPluginModule` 装载。插件是**同权 ES module，
-不是沙箱**。
+- 提示是**异步**的：`await editor.getPoint()` 会一直挂起，直到用户点击/键入/取消；宿主在
+  `cad_status.pendingPrompt` 里报告当前问题，chrome 在命令行里显示并把输入当**数据**转发（不是
+  命令）。Esc 取消，非法输入会保留提示并回一句话。
+- `editor.writeMessage` 是客户端本地：写入宿主的消息 sink（命令行回显），不经过 wire。
+- 不支持：`document.lock`（单文档 WebView 没有锁语义）、插件安装 UI / 持久化商店、
+  Worker/权限/签名隔离。`dom-canvas` 没有插件目录；插件由宿主调用 `loadPluginModule` 装载。
+  插件是**同权 ES module，不是沙箱**。
 
 ## 里程碑
 

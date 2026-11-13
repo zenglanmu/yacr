@@ -206,6 +206,23 @@ queue, so it never appears here. Results are bounded at 32 (oldest dropped).
 Both commands are `sink`-lane shared rows: queued on `native-below`, applied
 inline on `dom-canvas`, with one semantics layer in `cad-ui-core`.
 
+## `cad_status.pendingPrompt`
+
+The plugin prompt currently waiting for the user, or `null`. While it is set, the
+typed command line is **answer data** for that prompt (it goes to
+`cad_set_tool_text`, never `cad_command`); the session also consumes the next
+click, Enter (`CONFIRM`) and Escape (`CANCEL`).
+
+```json
+{ "kind": "point", "message": "Specify point:", "keywords": [], "error": null }
+```
+
+`kind` is one of the seven prompt kinds; `keywords` is empty when the prompt takes
+free input; `error` carries the last invalid-input sentence and the prompt stays
+pending (a re-prompt, not a failure). The chrome renders this inline in the command
+line; the answer arrives through `cad_api_poll` as the correlated `requestId`
+outcome.
+
 ## `cad_api_status`
 
 The plugin / secondary-development API **capability descriptor**: which
