@@ -23,14 +23,22 @@ function statusWith(surfaceMode, documentOwner) {
   return { hostProfile: { surfaceMode, documentOwner } };
 }
 
-/** An `invoke` double that records every command and answers `answer`. */
+/**
+ * An `invoke` double that records every command (and its args).
+ *
+ * `answer` is either one value for every command or a `(command, args) => value`
+ * function, which is what the two-command flows below need (`cad_api_status`
+ * then `cad_api_call`).
+ */
 function countingInvoke(answer) {
   const commands = [];
-  const invoke = async (command) => {
+  const args = [];
+  const invoke = async (command, payload) => {
     commands.push(command);
-    return answer;
+    args.push(payload);
+    return typeof answer === 'function' ? answer(command, payload) : answer;
   };
-  return { invoke, commands };
+  return { invoke, commands, args };
 }
 
 /** The stable code of a rejected `CadApiError`. */
@@ -84,14 +92,16 @@ test('a malformed host answer is refused with the cad_api_status prefix', async 
   );
 });
 
-test('no operation is implemented in this build', () => {
-  assert.deepEqual(IMPLEMENTED_OPERATIONS, []);
+test('this build implements exactly the one served read', () => {
+  assert.deepEqual(IMPLEMENTED_OPERATIONS, [
+    'ApplicationServices.documentManager.mdiActiveDocument',
+  ]);
 });
 
 test('every supported descriptor row has an adapter implementation', async () => {
   // The one rule that keeps the descriptor honest: a row may only be
-  // `supported` if this adapter can actually serve it. Vacuously true today
-  // (all 20 rows are pending), and red the moment a row flips without a case in
+  // `supported` if this adapter can actually serve it. It has exactly one row to
+  // check today and goes red the moment another row flips without a `case` in
   // `bridge.ts` - which is exactly when it must be caught.
   const contract = JSON.parse(await readFile(CONTRACT_URL, 'utf8'));
   const supportedRows = contract.operations.filter((row) => row.status === 'supported');
@@ -101,6 +111,105 @@ test('every supported descriptor row has an adapter implementation', async () =>
       `${row.namespace}.${row.operation} is advertised as supported but has no adapter implementation`,
     );
   }
+});
+
+test('the served read forwards to cad_api_call and returns the host value', async () => {
+  const documentValue = {
+    document: {
+      id: '42',
+      name: 'Drawing1',
+      isReadOnly: false,
+      database: { id: '7', version: '15' },
+    },
+  };
+  const { invoke, commands, args } = countingInvoke((command) =>
+    command === 'cad_api_status' ? payload : { ok: true, value: documentValue },
+  );
+  const bridge = createCadHostBridge({ invoke, status: () => statusWith('native-below', 'native') });
+  const result = await bridge.request({
+    namespace: 'ApplicationServices',
+    operation: 'documentManager.mdiActiveDocument',
+    parameters: {},
+  });
+  assert.deepEqual(result, documentValue);
+  assert.deepEqual(commands, ['cad_api_call']);
+  assert.deepEqual(args, [
+    {
+      namespace: 'ApplicationServices',
+      operation: 'documentManager.mdiActiveDocument',
+      parameters: {},
+    },
+  ]);
+});
+
+test('a host refusal becomes the CadApiError code, verbatim', async () => {
+  for (const marker of ['cad_waiting', 'unsupported-runtime: cad_api.ApplicationServices.documentManager.mdiActiveDocument']) {
+    const { invoke } = countingInvoke(() => ({ ok: false, error: marker }));
+    const bridge = createCadHostBridge({ invoke, status: () => null });
+    await assert.rejects(
+      bridge.request({
+        namespace: 'ApplicationServices',
+        operation: 'documentManager.mdiActiveDocument',
+        parameters: {},
+      }),
+      (error) => {
+        assert.equal(codeOf(error), marker);
+        assert.equal(error.message, marker);
+        return true;
+      },
+    );
+  }
+});
+
+test('a malformed or contradictory outcome is api.invalid_argument: bridge.answer', async () => {
+  const outcomes = [
+    null,
+    [],
+    'ok',
+    {},
+    { ok: 'yes', value: {} },
+    { ok: true },
+    { ok: true, error: 'cad_waiting' },
+    { ok: false },
+    { ok: false, error: '' },
+    { ok: false, error: 7 },
+    { ok: false, error: 'cad_waiting', value: {} },
+  ];
+  for (const outcome of outcomes) {
+    const { invoke } = countingInvoke(() => outcome);
+    const bridge = createCadHostBridge({ invoke, status: () => null });
+    await assert.rejects(
+      bridge.request({
+        namespace: 'ApplicationServices',
+        operation: 'documentManager.mdiActiveDocument',
+        parameters: {},
+      }),
+      (error) => {
+        assert.equal(codeOf(error), 'api.invalid_argument: bridge.answer');
+        return true;
+      },
+    );
+  }
+});
+
+test('the served operation is bound to its namespace', async () => {
+  const { invoke, commands } = countingInvoke({ ok: true, value: { document: null } });
+  const bridge = createCadHostBridge({ invoke, status: () => null });
+  await assert.rejects(
+    bridge.request({
+      namespace: 'DatabaseServices',
+      operation: 'documentManager.mdiActiveDocument',
+      parameters: {},
+    }),
+    (error) => {
+      assert.equal(
+        codeOf(error),
+        'api.adapter-missing: DatabaseServices.documentManager.mdiActiveDocument',
+      );
+      return true;
+    },
+  );
+  assert.deepEqual(commands, [], 'the host is never asked about a foreign namespace');
 });
 
 test('a pending row is refused by name and the host is never called', async () => {
@@ -153,7 +262,9 @@ test('a malformed request is api.invalid_argument: request, host untouched', asy
 });
 
 test('openPluginApi assembles the client from the real contract JSON', async () => {
-  const { invoke, commands } = countingInvoke(payload);
+  const { invoke, commands } = countingInvoke((command) =>
+    command === 'cad_api_status' ? payload : { ok: true, value: { document: null } },
+  );
   const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
 
   assert.deepEqual(commands, ['cad_api_status'], 'one snapshot call per session');
@@ -164,17 +275,56 @@ test('openPluginApi assembles the client from the real contract JSON', async () 
   assert.deepEqual(session.api.geometry.point3d(1, 2, 3), { x: 1, y: 2, z: 3 });
   assert.deepEqual(commands, ['cad_api_status'], 'pure calls never reach the wire');
 
-  // A pending operation is refused by the package's capability gate.
-  assert.throws(
-    () => session.api.application.documentManager.mdiActiveDocument,
-    (error) => {
-      assert.equal(
-        codeOf(error),
-        'api.pending: ApplicationServices.documentManager.mdiActiveDocument',
-      );
-      return true;
-    },
+  // A still-pending operation is refused by the package's capability gate.
+  await assert.rejects(session.api.application.documentManager.documents(), (error) => {
+    assert.equal(
+      codeOf(error),
+      'api.pending: ApplicationServices.documentManager.documents',
+    );
+    return true;
+  });
+});
+
+test('the served read assembles a Document end to end', async () => {
+  const { invoke, commands } = countingInvoke((command) =>
+    command === 'cad_api_status'
+      ? payload
+      : {
+          ok: true,
+          value: {
+            document: {
+              id: '42',
+              name: 'Drawing1',
+              isReadOnly: true,
+              database: { id: '7', version: '15' },
+            },
+          },
+        },
   );
+  const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
+
+  const document = await session.api.application.documentManager.mdiActiveDocument();
+  if (document === null) throw new Error('expected the served read to resolve a document');
+  assert.equal(document.name, 'Drawing1');
+  assert.equal(document.isReadOnly, true);
+  assert.equal(document.database.id, '7');
+  assert.equal(document.database.version, '15');
+
+  // The document's own services still come from the capability-gated client, so a
+  // pending row refuses by name even though the document itself is real.
+  await assert.rejects(document.lockDocument(), (error) => {
+    assert.equal(codeOf(error), 'api.pending: ApplicationServices.document.lock');
+    return true;
+  });
+  assert.deepEqual(commands, ['cad_api_status', 'cad_api_call'], 'one read, no other traffic');
+});
+
+test('the served read resolves null when no document is open', async () => {
+  const { invoke } = countingInvoke((command) =>
+    command === 'cad_api_status' ? payload : { ok: true, value: { document: null } },
+  );
+  const session = await openPluginApi({ invoke, status: () => statusWith('dom-canvas', 'wasm') });
+  assert.equal(await session.api.application.documentManager.mdiActiveDocument(), null);
 });
 
 test('the plugin-api modules import no Tauri package and hold no CJK copy', async () => {

@@ -75,18 +75,24 @@ silent success. Host failures arrive as `CadApiError`; branch on `code`, not mes
 
 ## v1 status
 
-**The descriptor is 20 rows, all `pending`.** This build serves no host operation:
-plugins cannot read or write a document, cannot prompt the user, and cannot register
-a dispatchable command. The usable surface today is exactly the package-level
-features: Geometry, Colors, `definePlugin`, `parsePluginManifest`, capability
-inspection. Nothing is claimed and nothing is faked.
+**The descriptor is 20 rows: one `supported`, 19 `pending`.** The one served
+operation is the reflected active-document read,
+`ApplicationServices.documentManager.mdiActiveDocument` (over `cad_api_call`): it
+resolves the open `Document`, or `null` when the manager holds none. Everything else
+is still a reservation — no write path, no prompts, no command dispatch.
 
 | Descriptor rows | v1 |
 | --- | --- |
-| `ApplicationServices` (3) | `pending` — no document snapshot yet |
+| `ApplicationServices.documentManager.mdiActiveDocument` (1) | `supported` — reflected read over `cad_api_call` |
+| `ApplicationServices.documentManager.documents`, `document.lock` (2) | `pending` — no list/lock path yet |
 | `DatabaseServices` (7) | `pending` — no object read/write path yet |
 | `EditorInput` (9) | `pending` — no interactive prompt path yet |
 | `Runtime.runtime.registerCommand` (1) | `pending` — no chrome-local admission path yet |
+
+`DocumentManager.mdiActiveDocument()` and `documents()` are **methods returning
+promises**, not AutoCAD's properties: the value crosses an asynchronous wire, and a
+synchronous accessor could only be honest by serving a stale cache. A host with no
+snapshot yet refuses with `cad_waiting`, and that rejection reaches the plugin as-is.
 
 ## Transactions
 

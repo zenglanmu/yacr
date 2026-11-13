@@ -235,13 +235,14 @@ export interface SymbolTables {
 /**
  * The live database proxy for one document.
  *
- * `handle`/`version` are the host-supplied identity of the database; every other
- * member crosses the wire and is gated. `symbolTables` and `clayer` share one
- * round-trip (see `createDatabase`), because they are two views of the same
- * symbol-table snapshot.
+ * `id`/`version` are the host-supplied identity of the database (`id` is a host
+ * database id, **not** a DXF handle; `version` is its decimal revision string);
+ * every other member crosses the wire and is gated. `symbolTables` and `clayer`
+ * share one round-trip (see `createDatabase`), because they are two views of the
+ * same symbol-table snapshot.
  */
 export interface Database {
-  readonly handle: Handle;
+  readonly id: string;
   readonly version: string;
   getObjectId(handle: Handle): Promise<ObjectId | null>;
   readonly symbolTables: Promise<SymbolTables>;
@@ -251,7 +252,9 @@ export interface Database {
 
 /** The host-supplied identity of a database (no data is derived from it here). */
 export interface DatabaseDescriptor {
-  readonly handle: string;
+  /** The host database id (decimal), not a DXF handle. */
+  readonly id: string;
+  /** The database revision, as the host's decimal string. */
   readonly version: string;
 }
 
@@ -523,8 +526,8 @@ function decodeSymbolTable<RecordType extends SymbolTableRecord>(
  */
 export function createDatabase(wire: CadApiWire, descriptor: DatabaseDescriptor): Database {
   if (typeof descriptor !== 'object' || descriptor === null) throw invalidArgument('descriptor');
-  const databaseHandle = handle(descriptor.handle);
-  if (typeof descriptor.version !== 'string' || descriptor.version.length === 0) {
+  const databaseId = requireIdentifier(descriptor.id, 'descriptor.id');
+  if (typeof descriptor.version !== 'string' || descriptor.version.trim().length === 0) {
     throw invalidArgument('descriptor.version');
   }
 
@@ -534,7 +537,7 @@ export function createDatabase(wire: CadApiWire, descriptor: DatabaseDescriptor)
     if (snapshot !== undefined) return snapshot;
     const pending = (async (): Promise<SymbolTableSnapshot> => {
       const answer = await wire.call('DatabaseServices', 'database.symbolTables', {
-        handle: databaseHandle,
+        database: databaseId,
       });
       const record = requireAnswerObject(answer, 'bridge.answer');
       return {
@@ -551,8 +554,8 @@ export function createDatabase(wire: CadApiWire, descriptor: DatabaseDescriptor)
   };
 
   return {
-    handle: databaseHandle,
-    version: descriptor.version,
+    id: databaseId,
+    version: descriptor.version.trim(),
     async getObjectId(value: Handle): Promise<ObjectId | null> {
       const answer = await wire.call('DatabaseServices', 'database.getObjectId', {
         handle: value,

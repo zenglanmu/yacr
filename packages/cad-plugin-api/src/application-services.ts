@@ -1,28 +1,31 @@
 // The ApplicationServices surface: the application, its documents, and the
 // per-document wiring (database, editor, transaction manager).
 //
-// The synchronous members here (`documentManager.mdiActiveDocument`,
-// `documentManager.documents`) are the ones AutoCAD exposes as properties. They go
-// through the same capability gate as everything else and never start I/O. In this
-// build both rows are `pending`, so reading them refuses by name instead of
-// answering `null`/`[]`: an empty list is a claim about the drawing, and this
-// package has not been told anything about it.
+// # Why the document manager is async
 //
-// A host that advertises one of those rows as `supported` must also give this
-// client a snapshot channel; there is none in the frozen host info yet, so the
-// read refuses with a *client* gap (`unsupported-runtime: cad_api.<ns>.<op>`,
-// message says so) — never with a caller error blaming the plugin for a host gap.
+// AutoCAD exposes `DocumentManager.MdiActiveDocument` as a **property**. Here it
+// is a method returning a `Promise`, because the value comes from the host over an
+// asynchronous wire (`cad_api_call`). A synchronous accessor could only be honest
+// by serving a stale cache, and a stale "which document am I editing" is exactly
+// the kind of answer this package refuses to invent. So: `mdiActiveDocument()` and
+// `documents()` are methods, `await` them, and a refusal is a rejection — never a
+// silent `null`.
 //
-// Everything that fetches data is a `Promise` and is capability-gated.
+// `documents()` has no wire decoder yet (its row is still `pending`), so it is
+// gated and refuses by name. `mdiActiveDocument()` is the first operation this
+// build actually serves: it gates the row, calls the host, and decodes
+// `{ document: null | { id, name, isReadOnly, database: { id, version } } }`.
+// A malformed answer is `api.invalid_argument: bridge.answer.document.*`; it is
+// never coerced into a document or into `null`.
 
 import { unsupportedReason } from './abi.ts';
-import type { CadApiNamespace } from './abi.ts';
 import { createDatabase } from './database-services.ts';
 import type { Database } from './database-services.ts';
 import { createEditor } from './editor-input.ts';
 import type { Editor } from './editor-input.ts';
 import { CadApiError, invalidArgument } from './errors.ts';
 import type { CadApiWire } from './internal/capability.ts';
+import { isRecord, requireAnswerObject } from './internal/capability.ts';
 import { TransactionManager } from './transaction.ts';
 
 /** The application singleton: what a plugin gets from `PluginContext.api`. */
@@ -35,13 +38,15 @@ export interface DocumentManager {
   /**
    * The document the user is working in, or `null` when none is open.
    *
-   * Gated on `ApplicationServices.documentManager.mdiActiveDocument`. A host that
-   * reports it `supported` must also publish a snapshot (not part of v1 host
-   * info); until then the read refuses, because guessing `null` would be a claim.
+   * Gated on `ApplicationServices.documentManager.mdiActiveDocument` (served by
+   * `cad_api_call` in this build). `null` is a real answer — "a document manager
+   * exists and holds no document" — not a placeholder; a host with **no snapshot
+   * yet** refuses with `cad_waiting` instead, and that rejection reaches the caller
+   * unchanged.
    */
-  readonly mdiActiveDocument: Document | null;
-  /** Every open document; gated the same way as `mdiActiveDocument`. */
-  readonly documents: readonly Document[];
+  mdiActiveDocument(): Promise<Document | null>;
+  /** Every open document. Still gated on a `pending` row, so it refuses by name. */
+  documents(): Promise<readonly Document[]>;
   /**
    * Run a callback in application context.
    *
@@ -67,47 +72,78 @@ export interface Document {
  *
  * `id` is what every commit envelope carries (`{ document, transactionId, ... }`),
  * so the manager, the database and the lock call all address the same document.
+ * The database identity is its own `{ id, version }`: a database `id` is a host
+ * id, **not** a DXF handle, and `version` is the host's decimal revision string.
  */
 export interface DocumentDescriptor {
   readonly id: string;
   readonly name: string;
   readonly isReadOnly: boolean;
-  readonly handle: string;
-  readonly version: string;
+  readonly database: {
+    readonly id: string;
+    readonly version: string;
+  };
 }
 
-/** The client-side gap a supported-but-snapshotless document read reports. */
-function noSnapshotChannel(namespace: CadApiNamespace, operation: string): CadApiError {
+function requireText(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) throw invalidArgument(field);
+  return value.trim();
+}
+
+/**
+ * Decode the `mdiActiveDocument` payload's `document` member.
+ *
+ * Every failure names the field (`bridge.answer.document.id`, and so on) so a host bug is
+ * diagnosable from the rejection alone; nothing is defaulted and nothing is cast.
+ */
+function decodeDocumentDescriptor(value: unknown): DocumentDescriptor {
+  if (!isRecord(value)) throw invalidArgument('bridge.answer.document');
+  const id = requireText(value['id'], 'bridge.answer.document.id');
+  const name = requireText(value['name'], 'bridge.answer.document.name');
+  const isReadOnly = value['isReadOnly'];
+  if (typeof isReadOnly !== 'boolean') {
+    throw invalidArgument('bridge.answer.document.isReadOnly');
+  }
+  const database = value['database'];
+  if (!isRecord(database)) throw invalidArgument('bridge.answer.document.database');
+  return {
+    id,
+    name,
+    isReadOnly,
+    database: {
+      id: requireText(database['id'], 'bridge.answer.document.database.id'),
+      version: requireText(database['version'], 'bridge.answer.document.database.version'),
+    },
+  };
+}
+
+/** A supported `documents` row needs a list decoder this client does not have yet. */
+function noDocumentListDecoder(): CadApiError {
   return new CadApiError(
-    unsupportedReason(namespace, operation),
-    'this client has no document snapshot channel yet, so it cannot answer a supported descriptor row',
+    unsupportedReason('ApplicationServices', 'documentManager.documents'),
+    'this client has no document-list decoder yet; only the active document is served',
   );
 }
 
 /**
  * Materialize a document from a host descriptor.
  *
- * Used by the reference client once a host serves a document snapshot; in this
- * build no host does, so nothing in the package calls this on a plugin's behalf.
+ * The document's own `id` names the transaction scope; `database.id` names the
+ * database the `Database` proxy addresses (never a DXF handle).
  */
 export function createDocument(wire: CadApiWire, descriptor: DocumentDescriptor): Document {
   if (typeof descriptor !== 'object' || descriptor === null) throw invalidArgument('descriptor');
-  if (typeof descriptor.id !== 'string' || descriptor.id.trim().length === 0) {
-    throw invalidArgument('descriptor.id');
-  }
-  if (typeof descriptor.name !== 'string' || descriptor.name.trim().length === 0) {
-    throw invalidArgument('descriptor.name');
-  }
+  const documentId = requireText(descriptor.id, 'descriptor.id');
+  const name = requireText(descriptor.name, 'descriptor.name');
   if (typeof descriptor.isReadOnly !== 'boolean') throw invalidArgument('descriptor.isReadOnly');
-  const documentId = descriptor.id.trim();
-  const database = createDatabase(wire, {
-    handle: descriptor.handle,
-    version: descriptor.version,
-  });
+  const database = descriptor.database;
+  if (typeof database !== 'object' || database === null) throw invalidArgument('descriptor.database');
+  const databaseId = requireText(database.id, 'descriptor.database.id');
+  const version = requireText(database.version, 'descriptor.database.version');
   return {
-    name: descriptor.name,
+    name,
     isReadOnly: descriptor.isReadOnly,
-    database,
+    database: createDatabase(wire, { id: databaseId, version }),
     editor: createEditor(wire),
     transactionManager: new TransactionManager(wire, documentId),
     async lockDocument(): Promise<void> {
@@ -119,20 +155,27 @@ export function createDocument(wire: CadApiWire, descriptor: DocumentDescriptor)
 /**
  * Build the document manager for one host snapshot.
  *
- * The getters gate first, so on a `pending` carrier the refusal is the pending
- * code and the host is never asked. When the host claims support the read still
- * has no snapshot to answer from: that gap is reported as this client's
- * `unsupported-runtime` rather than as a plugin argument error.
+ * `mdiActiveDocument()` is the one operation this build serves: gate, call, decode.
+ * `documents()` gates too, but its row is `pending`, so it refuses by name and the
+ * host is never asked.
  */
 export function createDocumentManager(wire: CadApiWire): DocumentManager {
   return {
-    get mdiActiveDocument(): Document | null {
-      wire.assertSupported('ApplicationServices', 'documentManager.mdiActiveDocument');
-      throw noSnapshotChannel('ApplicationServices', 'documentManager.mdiActiveDocument');
+    async mdiActiveDocument(): Promise<Document | null> {
+      const answer = await wire.call(
+        'ApplicationServices',
+        'documentManager.mdiActiveDocument',
+        {},
+      );
+      const record = requireAnswerObject(answer, 'bridge.answer');
+      const document = record['document'];
+      if (document === undefined) throw invalidArgument('bridge.answer.document');
+      if (document === null) return null;
+      return createDocument(wire, decodeDocumentDescriptor(document));
     },
-    get documents(): readonly Document[] {
+    async documents(): Promise<readonly Document[]> {
       wire.assertSupported('ApplicationServices', 'documentManager.documents');
-      throw noSnapshotChannel('ApplicationServices', 'documentManager.documents');
+      throw noDocumentListDecoder();
     },
     async executeInApplicationContext<T>(work: () => T | Promise<T>): Promise<T> {
       if (typeof work !== 'function') throw invalidArgument('work');

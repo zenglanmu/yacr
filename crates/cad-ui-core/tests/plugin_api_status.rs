@@ -66,7 +66,7 @@ fn pending_rows_carry_a_reason_and_supported_rows_omit_it() {
     assert!(!rows.is_empty());
 
     let mut pending = 0;
-    let mut supported = 0;
+    let mut supported: Vec<String> = Vec::new();
     for row in rows {
         match row["status"].as_str().expect("a status string") {
             "pending" => {
@@ -75,20 +75,27 @@ fn pending_rows_carry_a_reason_and_supported_rows_omit_it() {
                 assert!(!reason.is_empty(), "the pending marker is not empty");
             }
             "supported" => {
-                supported += 1;
+                let namespace = row["namespace"].as_str().expect("a namespace string");
+                let operation = row["operation"].as_str().expect("an operation string");
                 assert!(
                     row.get("reason").is_none(),
                     "a supported row omits reason entirely: {row}"
                 );
+                supported.push(format!("{namespace}.{operation}"));
             }
             other => panic!("unexpected status value {other:?}"),
         }
     }
     assert!(pending > 0, "document/editor operations are pending here");
-    // This build serves no host operation: pure value helpers and the manifest
-    // parser are package features, not descriptor rows. A row flipping to
-    // `supported` without a host implementation is a bug.
-    assert_eq!(supported, 0, "this build serves no host operation");
+    // Exactly one operation is served in this build (M2.3, the reflected
+    // active-document read). A row flipping to `supported` without a host
+    // implementation and an adapter `case` is a bug, so the set is pinned by name
+    // rather than by count.
+    assert_eq!(
+        supported,
+        vec!["ApplicationServices.documentManager.mdiActiveDocument".to_string()],
+        "this build serves exactly the reflected active-document read"
+    );
 }
 
 #[test]

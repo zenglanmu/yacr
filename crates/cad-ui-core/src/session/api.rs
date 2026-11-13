@@ -211,9 +211,10 @@ mod tests {
                 );
             }
         }
-        // This build serves no host operation: pure value helpers and the
-        // manifest parser are package features, not descriptor rows.
-        assert_eq!(supported, 0, "this build serves no host operation");
+        // One operation is served in this build: the reflected active-document
+        // read (M2.3). Pure value helpers and the manifest parser are package
+        // features, not descriptor rows, so they never appear here.
+        assert_eq!(supported, 1, "this build serves exactly one host operation");
     }
 
     #[test]

@@ -14,13 +14,14 @@
 // wire, so they have no row and are available unconditionally. Advertising them
 // in the descriptor would claim host state that does not exist.
 //
-// This build serves no host operation, so every row is `pending`: the table is
-// an honest reservation list, not an availability list. It is deliberately
-// complete rather than aspirational — an operation that exists here but is
-// `pending` is refused by name, an operation the host marks `unsupported` is
-// refused by name, and an operation the host does not name at all is refused as
-// `api.descriptor_missing` — there is no silent "maybe" state and no
-// empty-success path.
+// Exactly one row is `supported` in this build — the reflected
+// `documentManager.mdiActiveDocument` read, which the host serves over
+// `cad_api_call` — and the other 19 are `pending`: the table is an honest
+// reservation list, not an availability list. It is deliberately complete rather
+// than aspirational — an operation that exists here but is `pending` is refused by
+// name, an operation the host marks `unsupported` is refused by name, and an
+// operation the host does not name at all is refused as `api.descriptor_missing`.
+// There is no silent "maybe" state and no empty-success path.
 
 /** Wire/API generation. A host and this package must agree exactly. */
 export const API_VERSION = 1;
@@ -67,18 +68,21 @@ export const API_NAMESPACES: readonly CadApiNamespace[] = [
 ];
 
 /**
- * The v1 capability table: 20 host operations, all `pending`.
+ * The v1 capability table: 20 host operations, 19 `pending` and one `supported`.
  *
- * Do not flip a row to `supported` here without the host side landing first —
- * the contract test will catch the JSON drift, but the runtime behaviour is what
- * plugins see. Do not add a row for a package feature either: see the header.
+ * Do not flip a row to `supported` here without the host side landing first (and
+ * a `case` in the WebView adapter) — the contract test will catch the JSON drift,
+ * but the runtime behaviour is what plugins see. Do not add a row for a package
+ * feature either: see the header.
  */
 export const API_OPERATIONS: readonly CadApiOperation[] = [
+  // The first real read: served by `cad_api_call` (docs/commands.md), decoded by
+  // `createDocumentManager`. It is `supported` with no `reason`, exactly like the
+  // shared JSON row.
   {
     namespace: 'ApplicationServices',
     operation: 'documentManager.mdiActiveDocument',
-    status: 'pending',
-    reason: pendingReason('ApplicationServices', 'documentManager.mdiActiveDocument'),
+    status: 'supported',
   },
   {
     namespace: 'ApplicationServices',

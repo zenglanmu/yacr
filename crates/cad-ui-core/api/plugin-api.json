@@ -2,7 +2,7 @@
   "apiVersion": 1,
   "namespaces": ["ApplicationServices", "DatabaseServices", "EditorInput", "Runtime", "Geometry", "Colors"],
   "operations": [
-    { "namespace": "ApplicationServices", "operation": "documentManager.mdiActiveDocument", "status": "pending", "reason": "api.pending: ApplicationServices.documentManager.mdiActiveDocument" },
+    { "namespace": "ApplicationServices", "operation": "documentManager.mdiActiveDocument", "status": "supported" },
     { "namespace": "ApplicationServices", "operation": "documentManager.documents", "status": "pending", "reason": "api.pending: ApplicationServices.documentManager.documents" },
     { "namespace": "ApplicationServices", "operation": "document.lock", "status": "pending", "reason": "api.pending: ApplicationServices.document.lock" },
     { "namespace": "DatabaseServices", "operation": "database.getObjectId", "status": "pending", "reason": "api.pending: DatabaseServices.database.getObjectId" },

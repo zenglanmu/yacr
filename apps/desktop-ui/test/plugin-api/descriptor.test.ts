@@ -56,12 +56,19 @@ test('the shipped contract parses with 20 rows at apiVersion 1', () => {
   assert.equal(payload.operations.length, 20);
   assert.deepEqual(payload.namespaces, API_NAMESPACES);
   assert.equal(new Set(payload.operations.map((row) => `${row.namespace}.${row.operation}`)).size, 20);
-  // The descriptor lists host-served operations only, and this build serves none:
-  // a `supported` row here would promise a host state that does not exist.
+  // The descriptor lists host-served operations only. Exactly one is served in
+  // this build; widening the set means landing the host operation and the adapter
+  // `case` first (bridge.test.ts enforces the second half).
   assert.deepEqual(
-    payload.operations.filter((row) => row.status !== 'pending'),
-    [],
-    'every row is pending in this build',
+    payload.operations
+      .filter((row) => row.status !== 'pending')
+      .map((row) => `${row.namespace}.${row.operation}`),
+    ['ApplicationServices.documentManager.mdiActiveDocument'],
+  );
+  assert.equal(
+    payload.operations.filter((row) => row.status === 'pending').length,
+    19,
+    'every other row is still pending',
   );
 });
 
@@ -100,20 +107,22 @@ test('an unknown status is rejected rather than treated as supported', () => {
 });
 
 test('a pending row must carry its reason and it must be the canonical one', () => {
+  // Row 0 is the one served read, so the pending cases pick a pending row by name.
   const missing = copy();
-  delete missing.operations[0].reason;
+  const missingIndex = rowIndex(missing, 'ApplicationServices', 'documentManager.documents');
+  delete missing.operations[missingIndex].reason;
   assertRejected(missing, 'no reason');
 
   const wrong = copy();
-  wrong.operations[0].reason = 'api.pending: DatabaseServices.transaction.commit';
+  const wrongIndex = rowIndex(wrong, 'ApplicationServices', 'documentManager.documents');
+  wrong.operations[wrongIndex].reason = 'api.pending: DatabaseServices.transaction.commit';
   assertRejected(wrong, 'wrong pending reason');
 });
 
 test('a supported row must not carry a reason', () => {
-  // The shipped table has no supported rows left, so the branch is exercised by
-  // flipping one row: a host that upgrades a row and keeps its reason is broken.
+  // Row 0 is the served read; adding a reason back to it is the breakage this
+  // pins (any other supported row would exercise the same branch).
   const value = copy();
-  value.operations[0].status = 'supported';
   value.operations[0].reason = 'because';
   assertRejected(value, 'carries a reason');
 });

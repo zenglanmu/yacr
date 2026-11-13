@@ -137,12 +137,8 @@ test('every gated v1 call refuses with its exact pending code and no request', a
   const spy = spyBridge(API_OPERATIONS);
   const api = await createCadApi(spy.bridge);
 
-  expectSyncCode(
-    () => api.application.documentManager.mdiActiveDocument,
-    'api.pending: ApplicationServices.documentManager.mdiActiveDocument',
-  );
-  expectSyncCode(
-    () => api.application.documentManager.documents,
+  await expectRejectCode(
+    () => api.application.documentManager.documents(),
     'api.pending: ApplicationServices.documentManager.documents',
   );
 
@@ -163,7 +159,7 @@ test('every gated v1 call refuses with its exact pending code and no request', a
 
   const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
 
-  const database = createDatabase(wire, { handle: '1F', version: 'AC1032' });
+  const database = createDatabase(wire, { id: 'db-1', version: '3' });
   await expectRejectCode(
     () => database.getObjectId(handle('2A')),
     'api.pending: DatabaseServices.database.getObjectId',
@@ -181,8 +177,7 @@ test('every gated v1 call refuses with its exact pending code and no request', a
     id: 'doc-1',
     name: 'drawing.dwg',
     isReadOnly: false,
-    handle: '1F',
-    version: 'AC1032',
+    database: { id: 'db-1', version: '3' },
   });
   await expectRejectCode(
     () => document.lockDocument(),
@@ -261,16 +256,82 @@ test('only an explicit unsupported row produces unsupported-runtime', async () =
   assert.equal(spy.calls.length, 0);
 });
 
-test('a document row claimed supported without a snapshot channel is a client gap', async () => {
-  const operations = withStatus(API_OPERATIONS, 'documentManager.mdiActiveDocument', 'supported');
-  const spy = spyBridge(operations);
+test('the served active-document read calls the bridge and decodes the document', async () => {
+  const spy = spyBridge(API_OPERATIONS, () => ({
+    document: {
+      id: '42',
+      name: 'Drawing1',
+      isReadOnly: false,
+      database: { id: '7', version: '15' },
+    },
+  }));
   const api = await createCadApi(spy.bridge);
-  const error = expectSyncCode(
-    () => api.application.documentManager.mdiActiveDocument,
-    'unsupported-runtime: cad_api.ApplicationServices.documentManager.mdiActiveDocument',
+  const document = await api.application.documentManager.mdiActiveDocument();
+  if (document === null) throw new Error('expected the served read to resolve a document');
+  assert.equal(document.name, 'Drawing1');
+  assert.equal(document.isReadOnly, false);
+  assert.equal(document.database.id, '7');
+  assert.equal(document.database.version, '15');
+  assert.deepEqual(spy.calls, [
+    {
+      namespace: 'ApplicationServices',
+      operation: 'documentManager.mdiActiveDocument',
+      parameters: {},
+    },
+  ]);
+});
+
+test('a document manager with no open document answers null, not a failure', async () => {
+  const spy = spyBridge(API_OPERATIONS, () => ({ document: null }));
+  const api = await createCadApi(spy.bridge);
+  assert.equal(await api.application.documentManager.mdiActiveDocument(), null);
+  assert.equal(spy.calls.length, 1);
+});
+
+test('a malformed document answer is refused field by field', async () => {
+  const cases: readonly (readonly [unknown, string])[] = [
+    [{}, 'api.invalid_argument: bridge.answer.document'],
+    [{ document: 7 }, 'api.invalid_argument: bridge.answer.document'],
+    [
+      { document: { name: 'x', isReadOnly: false, database: { id: '7', version: '1' } } },
+      'api.invalid_argument: bridge.answer.document.id',
+    ],
+    [
+      { document: { id: '42', isReadOnly: false, database: { id: '7', version: '1' } } },
+      'api.invalid_argument: bridge.answer.document.name',
+    ],
+    [
+      { document: { id: '42', name: 'x', isReadOnly: 'no', database: { id: '7', version: '1' } } },
+      'api.invalid_argument: bridge.answer.document.isReadOnly',
+    ],
+    [
+      { document: { id: '42', name: 'x', isReadOnly: false } },
+      'api.invalid_argument: bridge.answer.document.database',
+    ],
+    [
+      { document: { id: '42', name: 'x', isReadOnly: false, database: { version: '1' } } },
+      'api.invalid_argument: bridge.answer.document.database.id',
+    ],
+    [
+      { document: { id: '42', name: 'x', isReadOnly: false, database: { id: '7' } } },
+      'api.invalid_argument: bridge.answer.document.database.version',
+    ],
+  ];
+  for (const [answer, code] of cases) {
+    const api = await createCadApi(spyBridge(API_OPERATIONS, () => answer).bridge);
+    await expectRejectCode(() => api.application.documentManager.mdiActiveDocument(), code);
+  }
+});
+
+test('a cad_waiting refusal reaches the caller unchanged', async () => {
+  const spy = spyBridge(API_OPERATIONS, () => {
+    throw { code: 'cad_waiting', message: 'cad_waiting' };
+  });
+  const api = await createCadApi(spy.bridge);
+  await expectRejectCode(
+    () => api.application.documentManager.mdiActiveDocument(),
+    'cad_waiting',
   );
-  assert.match(error.message, /snapshot channel/, 'the message names the client gap, not the caller');
-  assert.equal(spy.calls.length, 0);
 });
 
 test('a descriptor that serves document operations owes a document owner', async () => {
@@ -357,8 +418,7 @@ test('document.lock is a void operation and needs the same ack', async () => {
     id: 'doc-1',
     name: 'drawing.dwg',
     isReadOnly: false,
-    handle: '1F',
-    version: 'AC1032',
+    database: { id: 'db-1', version: '3' },
   });
   await document.lockDocument();
   assert.deepEqual(spy.calls[0].parameters, { document: 'doc-1' });

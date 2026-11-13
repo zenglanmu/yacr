@@ -54,15 +54,17 @@ function namespaceNames(value: unknown): readonly unknown[] {
   });
 }
 
-test('the table is 20 host operations, all pending', () => {
+test('the table is 20 host operations: 19 pending and one served read', () => {
   assert.equal(API_OPERATIONS.length, 20, 'the v1 descriptor has 20 host-operation rows');
-  for (const row of API_OPERATIONS) {
-    assert.equal(
-      row.status,
-      'pending',
-      `${row.namespace}.${row.operation} must be pending: this build serves no host operation`,
-    );
-  }
+  const supported = API_OPERATIONS.filter((row) => row.status === 'supported').map(
+    (row) => `${row.namespace}.${row.operation}`,
+  );
+  // Exactly one capability is served in this build, and it is this one. Widening
+  // the set is a contract change: the host must serve the operation and the
+  // WebView adapter must implement it first.
+  assert.deepEqual(supported, ['ApplicationServices.documentManager.mdiActiveDocument']);
+  const pending = API_OPERATIONS.filter((row) => row.status === 'pending');
+  assert.equal(pending.length, 19, 'every other host operation is still pending');
 });
 
 test('every capability row carries its canonical reason', () => {
