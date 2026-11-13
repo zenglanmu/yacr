@@ -14,13 +14,14 @@
 // wire, so they have no row and are available unconditionally. Advertising them
 // in the descriptor would claim host state that does not exist.
 //
-// Eight rows are `supported` in this build: the reflected reads
+// Sixteen rows are `supported` in this build: the reflected reads
 // (`documentManager.mdiActiveDocument`, `documentManager.documents`, the database
 // revision and symbol-table projections, the editor's current selection) over
-// `cad_api_call`; and the live-session operations (`database.getObjectId`,
-// `transaction.getObject`, `transaction.commit`) over the mutating
-// `cad_api_submit` lane. The other 10 are `pending`: the table is an honest
-// reservation list, not an availability list. It is deliberately complete rather than aspirational — an
+// `cad_api_call`; the live-session operations (`database.getObjectId`,
+// `transaction.getObject`, `transaction.commit`) and the editor prompts (plus the
+// immediate `selectAll`) over the mutating `cad_api_submit` lane. One row is
+// `pending` (`document.lock`): the table is an honest reservation list, not an
+// availability list. It is deliberately complete rather than aspirational — an
 // operation that exists here but is `pending` is refused by name, an operation the
 // host marks `unsupported` is refused by name, and an operation the host does not
 // name at all is refused as `api.descriptor_missing`. There is no silent "maybe"
@@ -78,7 +79,7 @@ export const API_NAMESPACES: readonly CadApiNamespace[] = [
 ];
 
 /**
- * The v1 capability table: 18 host operations, 10 `pending` and eight `supported`.
+ * The v1 capability table: 17 host operations, one `pending` and 16 `supported`.
  *
  * Do not flip a row to `supported` here without the host side landing first (and
  * a `case` in the WebView adapter) — the contract test will catch the JSON drift,
@@ -145,56 +146,44 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
   {
     namespace: 'EditorInput',
     operation: 'editor.getPoint',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getPoint'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getEntity',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getEntity'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getSelection',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getSelection'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getString',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getString'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getDouble',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getDouble'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getInteger',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getInteger'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getKeyword',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getKeyword'),
+    status: 'supported',
   },
-  {
-    namespace: 'EditorInput',
-    operation: 'editor.writeMessage',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.writeMessage'),
-  },
+  // `editor.writeMessage` has **no row**: it is client-local (the host's message
+  // sink), so advertising it would promise a host round-trip that does not exist.
   {
     namespace: 'EditorInput',
     operation: 'editor.selectAll',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.selectAll'),
+    status: 'supported',
   },
   // The selection the user holds right now, as a reflected read (not a prompt).
   // Served, so no `reason`; the prompt rows above stay pending.

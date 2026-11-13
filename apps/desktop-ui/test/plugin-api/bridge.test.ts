@@ -54,7 +54,7 @@ test('hostInfo() calls cad_api_status once and merges the status snapshot', asyn
   assert.equal(info.apiVersion, 1);
   assert.equal(info.carrier, 'dom-canvas');
   assert.equal(info.documentOwner, 'wasm');
-  assert.equal(info.operations.length, 18);
+  assert.equal(info.operations.length, 17);
 });
 
 test('hostInfo() reports unknown/none before any status is observed', async () => {
@@ -92,7 +92,7 @@ test('a malformed host answer is refused with the cad_api_status prefix', async 
   );
 });
 
-test('this build implements exactly the five reads and three live-session operations', () => {
+test('this build implements every served operation (reads, live session, prompts)', () => {
   assert.deepEqual(IMPLEMENTED_OPERATIONS, [
     'ApplicationServices.documentManager.mdiActiveDocument',
     'ApplicationServices.documentManager.documents',
@@ -101,14 +101,22 @@ test('this build implements exactly the five reads and three live-session operat
     'DatabaseServices.database.getObjectId',
     'DatabaseServices.transaction.getObject',
     'DatabaseServices.transaction.commit',
+    'EditorInput.editor.getPoint',
+    'EditorInput.editor.getEntity',
+    'EditorInput.editor.getSelection',
+    'EditorInput.editor.getString',
+    'EditorInput.editor.getDouble',
+    'EditorInput.editor.getInteger',
+    'EditorInput.editor.getKeyword',
+    'EditorInput.editor.selectAll',
     'EditorInput.editor.currentSelection',
   ]);
 });
 
 test('every supported descriptor row has an adapter implementation', async () => {
   // The one rule that keeps the descriptor honest: a row may only be
-  // `supported` if this adapter can actually serve it. It has eight rows to check
-  // today and goes red the moment another row flips without a `case` (or a
+  // `supported` if this adapter can actually serve it. It has sixteen rows to
+  // check today and goes red the moment another row flips without a `case` (or a
   // mutating implementation) in `bridge.ts` - which is exactly when it must be
   // caught.
   const contract = JSON.parse(await readFile(CONTRACT_URL, 'utf8'));
@@ -543,21 +551,35 @@ test('a malformed request is api.invalid_argument: request, host untouched', asy
 
 test('openPluginApi assembles the client from the real contract JSON', async () => {
   const { invoke, commands } = countingInvoke((command) =>
-    command === 'cad_api_status' ? payload : { ok: true, value: { document: null } },
+    command === 'cad_api_status'
+      ? payload
+      : {
+          ok: true,
+          value: {
+            document: {
+              id: '42',
+              name: 'Drawing1',
+              isReadOnly: false,
+              database: { id: '7', version: '15' },
+            },
+          },
+        },
   );
   const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
 
   assert.deepEqual(commands, ['cad_api_status'], 'one snapshot call per session');
-  assert.equal(session.host.operations.length, 18);
+  assert.equal(session.host.operations.length, 17);
   assert.equal(session.host.carrier, 'native-below');
 
   // Pure, always-local operations work without touching the host.
   assert.deepEqual(session.api.geometry.point3d(1, 2, 3), { x: 1, y: 2, z: 3 });
   assert.deepEqual(commands, ['cad_api_status'], 'pure calls never reach the wire');
 
-  // A still-pending operation is refused by the package's capability gate.
-  await assert.rejects(session.api.editor.getPoint(), (error) => {
-    assert.equal(codeOf(error), 'api.pending: EditorInput.editor.getPoint');
+  // The one still-pending row is refused by the package's capability gate.
+  const document = await session.api.application.documentManager.mdiActiveDocument();
+  if (document === null) throw new Error('expected a document');
+  await assert.rejects(document.lockDocument(), (error) => {
+    assert.equal(codeOf(error), 'api.pending: ApplicationServices.document.lock');
     return true;
   });
 });

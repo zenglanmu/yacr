@@ -87,12 +87,11 @@ fn pending_rows_carry_a_reason_and_supported_rows_omit_it() {
         }
     }
     assert!(pending > 0, "document/editor operations are pending here");
-    // Eight operations are served in this build: the reflected reads (documents,
-    // symbol tables, revision, current selection) over `cad_api_call`, and the
-    // live-session operations (`database.getObjectId`, `transaction.getObject`,
-    // `transaction.commit`) over `cad_api_submit`. A row flipping to `supported`
-    // without a host implementation and an adapter `case` is a bug, so the set is
-    // pinned by name, in descriptor order, rather than by count.
+    // Sixteen operations are served in this build: the reflected reads over
+    // `cad_api_call`; the live-session operations and the editor prompts over
+    // `cad_api_submit`. A row flipping to `supported` without a host
+    // implementation and an adapter `case` is a bug, so the set is pinned by name,
+    // in descriptor order, rather than by count.
     assert_eq!(
         supported,
         vec![
@@ -103,9 +102,17 @@ fn pending_rows_carry_a_reason_and_supported_rows_omit_it() {
             "DatabaseServices.database.revision".to_string(),
             "DatabaseServices.transaction.getObject".to_string(),
             "DatabaseServices.transaction.commit".to_string(),
+            "EditorInput.editor.getPoint".to_string(),
+            "EditorInput.editor.getEntity".to_string(),
+            "EditorInput.editor.getSelection".to_string(),
+            "EditorInput.editor.getString".to_string(),
+            "EditorInput.editor.getDouble".to_string(),
+            "EditorInput.editor.getInteger".to_string(),
+            "EditorInput.editor.getKeyword".to_string(),
+            "EditorInput.editor.selectAll".to_string(),
             "EditorInput.editor.currentSelection".to_string(),
         ],
-        "this build serves exactly the reflected reads and the live-session operations"
+        "this build serves exactly the reflected reads, the live-session operations and the prompts"
     );
 }
 

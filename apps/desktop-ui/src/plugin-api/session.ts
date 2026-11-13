@@ -19,6 +19,7 @@ import type {
 } from '../../../../packages/cad-plugin-api/src/index.ts';
 import { createCadHostBridge } from './bridge.ts';
 import type { CadBridgeDeps } from './bridge.ts';
+import { appendPluginMessage } from './messages.ts';
 
 /**
  * What assembling the client needs: the bridge deps plus the optional host hooks.
@@ -55,6 +56,9 @@ export async function openPluginApi(deps: PluginApiDeps): Promise<PluginApiSessi
   const api = await createCadApi(memoized, {
     onCommandRegister: deps.onCommandRegister,
     onCommandUnregister: deps.onCommandUnregister,
+    // `writeMessage` is client-local: the WebView store is its default sink, so a
+    // plugin message lands somewhere instead of being dropped.
+    onMessage: deps.onMessage ?? appendPluginMessage,
   });
   return { api, host: await host };
 }

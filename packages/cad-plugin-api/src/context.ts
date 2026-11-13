@@ -48,6 +48,14 @@ export interface CadApi {
 export interface CadApiOptions {
   readonly onCommandRegister?: (registration: CommandRegistration) => void;
   readonly onCommandUnregister?: (name: string) => void;
+  /**
+   * Where `editor.writeMessage()` puts its text.
+   *
+   * `writeMessage` is client-local (it has no descriptor row and no wire call), so
+   * a host that does not supply a sink gets a refusal from that method instead of
+   * a silently dropped message.
+   */
+  readonly onMessage?: (text: string) => void;
 }
 
 /** What the host passes to `activate`/`deactivate`. */
@@ -313,7 +321,11 @@ function readOptions(options: CadApiOptions | undefined): CadApiOptions {
   if (onCommandUnregister !== undefined && typeof onCommandUnregister !== 'function') {
     throw invalidArgument('options.onCommandUnregister');
   }
-  return { onCommandRegister, onCommandUnregister };
+  const onMessage = options.onMessage;
+  if (onMessage !== undefined && typeof onMessage !== 'function') {
+    throw invalidArgument('options.onMessage');
+  }
+  return { onCommandRegister, onCommandUnregister, onMessage };
 }
 
 export async function createCadApi(
@@ -340,11 +352,13 @@ export async function createCadApi(
   const host = decodeHostInfo(record);
   refuseContradiction(host);
   const wire = createWire(host, bridge);
+  const hooks = readOptions(options);
+  const editorOptions = { onMessage: hooks.onMessage };
   return {
-    application: createApplication(wire),
-    editor: createEditor(wire),
+    application: createApplication(wire, editorOptions),
+    editor: createEditor(wire, editorOptions),
     geometry: createGeometryLibrary(),
     colors: createColorLibrary(),
-    runtime: createRuntimeNamespace(readOptions(options)),
+    runtime: createRuntimeNamespace(hooks),
   };
 }

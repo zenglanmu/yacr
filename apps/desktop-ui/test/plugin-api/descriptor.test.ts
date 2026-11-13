@@ -51,11 +51,11 @@ function assertRejected(value, detail) {
   );
 }
 
-test('the shipped contract parses with 18 rows at apiVersion 1', () => {
+test('the shipped contract parses with 17 rows at apiVersion 1', () => {
   assert.equal(payload.apiVersion, 1);
-  assert.equal(payload.operations.length, 18);
+  assert.equal(payload.operations.length, 17);
   assert.deepEqual(payload.namespaces, API_NAMESPACES);
-  assert.equal(new Set(payload.operations.map((row) => `${row.namespace}.${row.operation}`)).size, 18);
+  assert.equal(new Set(payload.operations.map((row) => `${row.namespace}.${row.operation}`)).size, 17);
   // The descriptor lists host-served operations only. Six are served in this
   // build; widening the set means landing the host operation and the adapter
   // `case` (or mutating implementation) first — bridge.test.ts enforces that half.
@@ -71,13 +71,23 @@ test('the shipped contract parses with 18 rows at apiVersion 1', () => {
       'DatabaseServices.database.revision',
       'DatabaseServices.transaction.getObject',
       'DatabaseServices.transaction.commit',
+      'EditorInput.editor.getPoint',
+      'EditorInput.editor.getEntity',
+      'EditorInput.editor.getSelection',
+      'EditorInput.editor.getString',
+      'EditorInput.editor.getDouble',
+      'EditorInput.editor.getInteger',
+      'EditorInput.editor.getKeyword',
+      'EditorInput.editor.selectAll',
       'EditorInput.editor.currentSelection',
     ],
   );
-  assert.equal(
-    payload.operations.filter((row) => row.status === 'pending').length,
-    10,
-    'every other row is still pending',
+  assert.deepEqual(
+    payload.operations
+      .filter((row) => row.status === 'pending')
+      .map((row) => `${row.namespace}.${row.operation}`),
+    ['ApplicationServices.document.lock'],
+    'the document lock is the one remaining reservation',
   );
 });
 

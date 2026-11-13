@@ -28,6 +28,9 @@
 // Three live-session operations are wired over the submit lane (M3.2/M3.3):
 // `DatabaseServices.transaction.commit`, `DatabaseServices.database.getObjectId`
 // and `DatabaseServices.transaction.getObject`.
+// The editor prompts and the immediate `selectAll` (P2a) also use that lane: a
+// prompt completes only when the user answers, so it gets a ten-minute wait
+// instead of the five-second machine budget.
 //
 // Every other request - including a `supported` row this adapter has not wired -
 // is refused locally as `api.adapter-missing: <namespace>.<operation>` and the
@@ -61,10 +64,16 @@ export interface CadBridgeDeps {
    */
   readonly pollDelayMs?: number;
   /**
-   * How many `cad_api_poll` calls one mutation may make (default 160, which covers
-   * the 5 s budget at the capped delay). Injected by the tests.
+   * How many `cad_api_poll` calls one mutation may make (by default enough to
+   * cover its timeout at the capped delay). Injected by the tests.
    */
   readonly maxPolls?: number;
+  /**
+   * How long a prompt may stay unanswered (default ten minutes). A prompt waits
+   * for a human, so it does not share the five-second budget of a commit.
+   * Injected by the tests.
+   */
+  readonly promptTimeoutMs?: number;
 }
 
 /**
@@ -84,6 +93,14 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'DatabaseServices.database.getObjectId',
   'DatabaseServices.transaction.getObject',
   'DatabaseServices.transaction.commit',
+  'EditorInput.editor.getPoint',
+  'EditorInput.editor.getEntity',
+  'EditorInput.editor.getSelection',
+  'EditorInput.editor.getString',
+  'EditorInput.editor.getDouble',
+  'EditorInput.editor.getInteger',
+  'EditorInput.editor.getKeyword',
+  'EditorInput.editor.selectAll',
   'EditorInput.editor.currentSelection',
 ];
 
@@ -93,8 +110,33 @@ const DEFAULT_POLL_DELAY_MS = 8;
 const MAX_POLL_DELAY_MS = 32;
 /** Enough polls to cover the budget below at the capped delay. */
 const DEFAULT_MAX_POLLS = 160;
-/** How long a submission may stay unobserved before `api.timeout: <id>`. */
+/** How long a non-prompt submission may stay unobserved before `api.timeout: <id>`. */
 const TOTAL_TIMEOUT_MS = 5000;
+/** How long a prompt may wait for the user (ten minutes). */
+const PROMPT_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * The editor operations that wait for a human.
+ *
+ * `selectAll` is immediate on the host, but it is answered on the same lane as the
+ * prompts and costs nothing to give the same budget; every other operation is a
+ * machine answer that must arrive within {@link TOTAL_TIMEOUT_MS}.
+ */
+const PROMPT_OPERATIONS: readonly string[] = [
+  'editor.getPoint',
+  'editor.getEntity',
+  'editor.getSelection',
+  'editor.getString',
+  'editor.getDouble',
+  'editor.getInteger',
+  'editor.getKeyword',
+  'editor.selectAll',
+];
+
+function timeoutFor(operation: string, deps: CadBridgeDeps): number {
+  if (!PROMPT_OPERATIONS.includes(operation)) return TOTAL_TIMEOUT_MS;
+  return deps.promptTimeoutMs ?? PROMPT_TIMEOUT_MS;
+}
 
 /** The one local refusal code for a request this adapter cannot serve. */
 function adapterMissing(namespace: string, operation: string): CadApiError {
@@ -242,8 +284,10 @@ async function submitAndWait(deps: CadBridgeDeps, request: CadApiRequest): Promi
   requireAccepted(ack);
 
   const baseDelay = deps.pollDelayMs ?? DEFAULT_POLL_DELAY_MS;
-  const maxPolls = deps.maxPolls ?? DEFAULT_MAX_POLLS;
-  const deadline = Date.now() + TOTAL_TIMEOUT_MS;
+  const timeoutMs = timeoutFor(request.operation, deps);
+  const maxPolls =
+    deps.maxPolls ?? Math.max(DEFAULT_MAX_POLLS, Math.ceil(timeoutMs / MAX_POLL_DELAY_MS) + 8);
+  const deadline = Date.now() + timeoutMs;
   let delay = baseDelay;
 
   for (let poll = 0; poll < maxPolls; poll += 1) {

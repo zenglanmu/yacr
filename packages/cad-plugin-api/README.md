@@ -75,7 +75,7 @@ silent success. Host failures arrive as `CadApiError`; branch on `code`, not mes
 
 ## v1 status
 
-**The descriptor is 18 rows: eight `supported`, 10 `pending`.** Five served
+**The descriptor is 17 rows: 16 `supported`, one `pending`.** Five served
 operations are reflected reads over `cad_api_call` —
 `documentManager.mdiActiveDocument` (the open `Document`, or `null`),
 `documentManager.documents` (0 or 1 `Document`, `[]` when none is open),
@@ -85,8 +85,18 @@ operations are reflected reads over `cad_api_call` —
 selected). Three are **live-session** operations over the submit/poll lane, because
 they read the session rather than the reflected snapshot: `database.getObjectId`
 (a handle lookup, `null` when no entity carries it), `transaction.getObject` (one
-entity, decoded by its `typeName`) and `transaction.commit`. Everything else is
-still a reservation: `document.lock`, the nine editor prompts.
+entity, decoded by its `typeName`) and `transaction.commit`. Eight are **editor**
+operations on the same lane: the seven prompts (`getPoint`/`getEntity`/
+`getSelection`/`getString`/`getDouble`/`getInteger`/`getKeyword`) and the immediate
+`selectAll`; a prompt resolves only when the user answers, so the client waits far
+longer for it than for a machine answer. `document.lock` is the one reservation
+left.
+
+`editor.writeMessage` has **no row**: it is client-local. The text goes to the
+host's message sink (`CadApiOptions.onMessage`; the WebView store by default), and
+without a sink the call refuses
+(`unsupported-runtime: cad_api.EditorInput.editor.writeMessage`) instead of
+pretending the message went somewhere.
 
 `Runtime` has **no row at all**: command registration is client-local. `createCadApi`
 takes an optional `onCommandRegister`/`onCommandUnregister` hook pair, and a plugin
@@ -107,8 +117,10 @@ not interpreted: the only dispatch path in this build is a typed command line.
 | `DatabaseServices.database.revision` (1) | `supported` — current revision, read every call |
 | `DatabaseServices.transaction.getObject` (1) | `supported` — live-session entity read, submit lane |
 | `DatabaseServices.transaction.commit` (1) | `supported` — the one mutation, submit lane |
-| `EditorInput.editor.currentSelection` (1) | `supported` — the reflected selection, read without prompting |
-| `EditorInput` (9 more) | `pending` — no interactive prompt path yet |
+| `EditorInput.editor.getPoint`, `getEntity`, `getSelection`, `getString`, `getDouble`, `getInteger`, `getKeyword` (7) | `supported` — prompts, submit lane, long wait |
+| `EditorInput.editor.selectAll` (1) | `supported` — immediate selection, submit lane |
+| `EditorInput.editor.currentSelection` (1) | `supported` — the reflected selection, no prompt |
+| `EditorInput.editor.writeMessage` (0) | client-local — the host message sink |
 | `Runtime` (0) | client-local — commands register through the host hook, no host operation |
 
 `transaction.start`, `transaction.addNewlyCreated` and `transaction.abort` have **no

@@ -54,14 +54,14 @@ function namespaceNames(value: unknown): readonly unknown[] {
   });
 }
 
-test('the table is 18 host operations: 10 pending and eight served', () => {
-  assert.equal(API_OPERATIONS.length, 18, 'the v1 descriptor has 18 host-operation rows');
+test('the table is 17 host operations: one pending and 16 served', () => {
+  assert.equal(API_OPERATIONS.length, 17, 'the v1 descriptor has 17 host-operation rows');
   const supported = API_OPERATIONS.filter((row) => row.status === 'supported').map(
     (row) => `${row.namespace}.${row.operation}`,
   );
-  // Eight capabilities are served in this build, and these are exactly them: five
-  // reflected reads (the `cad_api_call` lane) and three live-session operations
-  // (the `cad_api_submit` lane). Widening the set is a contract change.
+  // Sixteen capabilities are served in this build: the reflected reads (the
+  // `cad_api_call` lane), the live-session operations and the editor prompts (the
+  // `cad_api_submit` lane). Widening the set is a contract change.
   assert.deepEqual(supported, [
     'ApplicationServices.documentManager.mdiActiveDocument',
     'ApplicationServices.documentManager.documents',
@@ -70,10 +70,22 @@ test('the table is 18 host operations: 10 pending and eight served', () => {
     'DatabaseServices.database.revision',
     'DatabaseServices.transaction.getObject',
     'DatabaseServices.transaction.commit',
+    'EditorInput.editor.getPoint',
+    'EditorInput.editor.getEntity',
+    'EditorInput.editor.getSelection',
+    'EditorInput.editor.getString',
+    'EditorInput.editor.getDouble',
+    'EditorInput.editor.getInteger',
+    'EditorInput.editor.getKeyword',
+    'EditorInput.editor.selectAll',
     'EditorInput.editor.currentSelection',
   ]);
   const pending = API_OPERATIONS.filter((row) => row.status === 'pending');
-  assert.equal(pending.length, 10, 'every other host operation is still pending');
+  assert.deepEqual(
+    pending.map((row) => `${row.namespace}.${row.operation}`),
+    ['ApplicationServices.document.lock'],
+    'the document lock is the one remaining reservation',
+  );
 });
 
 test('client-local operations have no descriptor row', () => {
@@ -85,6 +97,7 @@ test('client-local operations have no descriptor row', () => {
     'transaction.addNewlyCreated',
     'transaction.abort',
     'runtime.registerCommand',
+    'editor.writeMessage',
   ]) {
     assert.equal(
       API_OPERATIONS.some((row) => row.operation === operation),

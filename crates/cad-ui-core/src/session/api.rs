@@ -211,15 +211,13 @@ mod tests {
                 );
             }
         }
-        // Eight operations are served in this build: the reflected reads (documents,
-        // symbol tables, revision, current selection) on the read lane, and the
-        // live-session operations (`getObjectId`, `transaction.getObject`,
-        // `transaction.commit`) on the mutating lane. Pure value helpers and the
-        // manifest parser are package features, not descriptor rows, so they never
-        // appear here.
+        // Sixteen operations are served in this build: the reflected reads on the
+        // read lane; the live-session operations and the editor prompts on the
+        // mutating lane. Pure value helpers and the manifest parser are package
+        // features, not descriptor rows, so they never appear here.
         assert_eq!(
-            supported, 8,
-            "this build serves exactly eight host operations"
+            supported, 16,
+            "this build serves exactly sixteen host operations"
         );
     }
 

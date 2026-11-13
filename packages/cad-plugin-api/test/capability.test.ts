@@ -139,40 +139,20 @@ async function expectRejectCode(run: () => Promise<unknown>, code: string): Prom
   return caught;
 }
 
-test('every gated v1 call refuses with its exact pending code and no request', async () => {
+test('the one pending row refuses by name and sends nothing on either lane', async () => {
   const spy = spyBridge(API_OPERATIONS);
-  const api = await createCadApi(spy.bridge);
-
-  const editorCalls: readonly (readonly [string, () => Promise<unknown>])[] = [
-    ['editor.getPoint', () => api.editor.getPoint()],
-    ['editor.getEntity', () => api.editor.getEntity()],
-    ['editor.getSelection', () => api.editor.getSelection()],
-    ['editor.getString', () => api.editor.getString()],
-    ['editor.getDouble', () => api.editor.getDouble()],
-    ['editor.getInteger', () => api.editor.getInteger()],
-    ['editor.getKeyword', () => api.editor.getKeyword({ keywords: ['YES', 'NO'] })],
-    ['editor.writeMessage', () => api.editor.writeMessage('hello')],
-    ['editor.selectAll', () => api.editor.selectAll()],
-  ];
-  for (const [operation, run] of editorCalls) {
-    await expectRejectCode(run, `api.pending: EditorInput.${operation}`);
-  }
-
   const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
-
   const document = createDocument(wire, {
     id: 'doc-1',
     name: 'drawing.dwg',
     isReadOnly: false,
     database: { id: 'db-1', version: '3' },
   });
+
   await expectRejectCode(
     () => document.lockDocument(),
     'api.pending: ApplicationServices.document.lock',
   );
-
-  // Every remaining host operation is served, so the gate above is what this test
-  // is about; opening a transaction is client-local and has no row to gate.
   assert.equal(spy.calls.length, 0, `no request may escape on a refusal: ${JSON.stringify(spy.calls)}`);
   assert.equal(spy.mutations.length, 0);
 });
@@ -667,29 +647,6 @@ test('a malformed host snapshot is refused with the offending field', async () =
   );
 });
 
-test('a void operation must acknowledge with { accepted: true }', async () => {
-  const operations = withStatus(API_OPERATIONS, 'editor.writeMessage', 'supported');
-  const answers: readonly (readonly [unknown, boolean])[] = [
-    [{ accepted: true }, true],
-    [{ accepted: false }, false],
-    [{}, false],
-    [{ ok: 1 }, false],
-    [undefined, false],
-    [null, false],
-    [{ accepted: 'true' }, false],
-  ];
-  for (const [answer, accepted] of answers) {
-    const spy = spyBridge(operations, () => answer);
-    const api = await createCadApi(spy.bridge);
-    if (accepted) {
-      await api.editor.writeMessage('hello');
-      assert.equal(spy.calls.length, 1);
-    } else {
-      await expectRejectCode(() => api.editor.writeMessage('hello'), 'api.invalid_argument: bridge.answer');
-    }
-  }
-});
-
 test('document.lock is a void operation and needs the same ack', async () => {
   const operations = withStatus(API_OPERATIONS, 'document.lock', 'supported');
   const spy = spyBridge(operations, () => ({ accepted: true }));
@@ -714,8 +671,9 @@ test('a supported operation reaches the bridge and its answer is mapped', async 
   const api = await createCadApi(spy.bridge);
   const answer = await api.editor.getString({ message: 'name?' });
   assert.deepEqual(answer, { status: 'Ok', value: 'hello' });
-  assert.equal(spy.calls.length, 1);
-  assert.deepEqual(spy.calls[0].parameters, { message: 'name?' });
+  assert.equal(spy.calls.length, 0, 'a prompt is not a read');
+  assert.equal(spy.mutations.length, 1);
+  assert.deepEqual(spy.mutations[0].parameters, { message: 'name?' });
 });
 
 test('a null answer and an unknown prompt status are refused, never coerced', async () => {

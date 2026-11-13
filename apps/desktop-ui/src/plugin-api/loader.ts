@@ -112,6 +112,8 @@ export async function loadPluginModule(
     status: deps.status,
     pollDelayMs: deps.pollDelayMs,
     maxPolls: deps.maxPolls,
+    promptTimeoutMs: deps.promptTimeoutMs,
+    onMessage: deps.onMessage,
     onCommandRegister: (registration: CommandRegistration): void => {
       const active = context;
       if (active === null) throw loadFailed('command');
