@@ -1,10 +1,15 @@
 // The EditorInput surface: user prompts and picking.
 //
 // Every member is `Promise`-returning, every member is capability-gated before
-// the host is asked, and no member ever invents an answer. In v1 every prompt is
-// `pending`, so a call refuses with `api.pending: EditorInput.editor.<op>`; it
+// the host is asked, and no member ever invents an answer. In v1 every *prompt*
+// is `pending`, so a call refuses with `api.pending: EditorInput.editor.<op>`; it
 // does not resolve `PromptStatus.None` as if the user had pressed Escape, and it
 // does not resolve an empty selection.
+//
+// `currentSelection()` is the one served member: a reflected read of the
+// selection the user has right now (not a prompt). An empty set is a real answer,
+// and a host with no document refuses `cad_api.no_document` — this module never
+// turns either into a fabricated selection.
 //
 // A host answer is validated: an unknown `status` is `api.invalid_argument:
 // bridge.answer`, never coerced into one of the five known states. The one void
@@ -128,6 +133,16 @@ export interface Editor {
   getKeyword(options: PromptKeywordOptions): Promise<PromptResult<string>>;
   writeMessage(message: string): Promise<void>;
   selectAll(filter?: SelectionFilter): Promise<SelectionSet>;
+  /**
+   * The selection the user holds **right now**, without prompting.
+   *
+   * Gated on `EditorInput.editor.currentSelection` (served by `cad_api_call` in
+   * this build). `objectIds` are the host's entity ids in selection order,
+   * deduplicated by the host; an empty set is the real "nothing is selected", and
+   * a host with no document refuses `cad_api.no_document` instead of answering an
+   * empty set. Both answers reach the caller unchanged.
+   */
+  currentSelection(): Promise<SelectionSet>;
 }
 
 type Answer = Readonly<Record<string, unknown>>;
@@ -160,7 +175,14 @@ function toPromptResult<T>(answer: unknown, read: (record: Answer) => T): Prompt
 function readObjectIds(record: Answer): readonly ObjectId[] {
   const value = record['objectIds'];
   if (!Array.isArray(value)) throw invalidArgument('bridge.answer.objectIds');
-  return value.map((id) => objectId(id));
+  return value.map((entry, index) => {
+    // The host sends decimal EntityId strings; anything else is a broken answer,
+    // named by position so the host bug is diagnosable from the rejection.
+    if (typeof entry !== 'string' || entry.trim().length === 0) {
+      throw invalidArgument(`bridge.answer.objectIds[${index}]`);
+    }
+    return objectId(entry);
+  });
 }
 
 function parametersOf(options: unknown, field: string): Readonly<Record<string, unknown>> {
@@ -237,6 +259,10 @@ export function createEditor(wire: CadApiWire): Editor {
     async selectAll(filter?: SelectionFilter): Promise<SelectionSet> {
       const parameters = parametersOf(filter, 'filter');
       const answer = await wire.call('EditorInput', 'editor.selectAll', parameters);
+      return selectionSet(readObjectIds(requireAnswerObject(answer, 'bridge.answer')));
+    },
+    async currentSelection(): Promise<SelectionSet> {
+      const answer = await wire.call('EditorInput', 'editor.currentSelection', {});
       return selectionSet(readObjectIds(requireAnswerObject(answer, 'bridge.answer')));
     },
   };

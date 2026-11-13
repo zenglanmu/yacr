@@ -54,7 +54,7 @@ test('hostInfo() calls cad_api_status once and merges the status snapshot', asyn
   assert.equal(info.apiVersion, 1);
   assert.equal(info.carrier, 'dom-canvas');
   assert.equal(info.documentOwner, 'wasm');
-  assert.equal(info.operations.length, 18);
+  assert.equal(info.operations.length, 19);
 });
 
 test('hostInfo() reports unknown/none before any status is observed', async () => {
@@ -92,19 +92,20 @@ test('a malformed host answer is refused with the cad_api_status prefix', async 
   );
 });
 
-test('this build implements exactly the four reads and one mutation', () => {
+test('this build implements exactly the five reads and one mutation', () => {
   assert.deepEqual(IMPLEMENTED_OPERATIONS, [
     'ApplicationServices.documentManager.mdiActiveDocument',
     'ApplicationServices.documentManager.documents',
     'DatabaseServices.database.symbolTables',
     'DatabaseServices.database.revision',
     'DatabaseServices.transaction.commit',
+    'EditorInput.editor.currentSelection',
   ]);
 });
 
 test('every supported descriptor row has an adapter implementation', async () => {
   // The one rule that keeps the descriptor honest: a row may only be
-  // `supported` if this adapter can actually serve it. It has five rows to check
+  // `supported` if this adapter can actually serve it. It has six rows to check
   // today and goes red the moment another row flips without a `case` (or a
   // mutating implementation) in `bridge.ts` - which is exactly when it must be
   // caught.
@@ -399,6 +400,26 @@ test('a mutation this adapter does not implement is refused locally', async () =
   assert.deepEqual(commands, []);
 });
 
+test('the served current selection forwards to cad_api_call', async () => {
+  const { invoke, args } = countingInvoke((command) =>
+    command === 'cad_api_status' ? payload : { ok: true, value: { objectIds: ['12', '13'] } },
+  );
+  const bridge = createCadHostBridge({ invoke, status: () => statusWith('native-below', 'native') });
+  const result = await bridge.request({
+    namespace: 'EditorInput',
+    operation: 'editor.currentSelection',
+    parameters: {},
+  });
+  assert.deepEqual(result, { objectIds: ['12', '13'] });
+  assert.deepEqual(args, [
+    {
+      namespace: 'EditorInput',
+      operation: 'editor.currentSelection',
+      parameters: {},
+    },
+  ]);
+});
+
 test('a host refusal becomes the CadApiError code, verbatim', async () => {
   for (const marker of ['cad_waiting', 'unsupported-runtime: cad_api.ApplicationServices.documentManager.mdiActiveDocument']) {
     const { invoke } = countingInvoke(() => ({ ok: false, error: marker }));
@@ -525,7 +546,7 @@ test('openPluginApi assembles the client from the real contract JSON', async () 
   const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
 
   assert.deepEqual(commands, ['cad_api_status'], 'one snapshot call per session');
-  assert.equal(session.host.operations.length, 18);
+  assert.equal(session.host.operations.length, 19);
   assert.equal(session.host.carrier, 'native-below');
 
   // Pure, always-local operations work without touching the host.
@@ -675,6 +696,20 @@ test('the served symbol tables assemble end to end', async () => {
     operation: 'database.symbolTables',
     parameters: { database: '7' },
   });
+});
+
+test('the served current selection assembles end to end', async () => {
+  const { invoke, commands } = countingInvoke((command) =>
+    command === 'cad_api_status' ? payload : { ok: true, value: { objectIds: ['12', '13', '12'] } },
+  );
+  const session = await openPluginApi({ invoke, status: () => statusWith('dom-canvas', 'wasm') });
+
+  const selection = await session.api.editor.currentSelection();
+  assert.equal(selection.count, 3);
+  assert.deepEqual(selection.getObjectIds(), ['12', '13', '12']);
+  // The host deduplicates; the client passes the ids through untouched (a repeated
+  // id here is the fake's, and the read never rewrites the answer).
+  assert.deepEqual(commands, ['cad_api_status', 'cad_api_call']);
 });
 
 test('a commit goes through submit + poll and resolves the host outcome', async () => {

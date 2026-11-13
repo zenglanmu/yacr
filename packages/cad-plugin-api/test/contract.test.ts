@@ -54,12 +54,12 @@ function namespaceNames(value: unknown): readonly unknown[] {
   });
 }
 
-test('the table is 18 host operations: 13 pending and five served', () => {
-  assert.equal(API_OPERATIONS.length, 18, 'the v1 descriptor has 18 host-operation rows');
+test('the table is 19 host operations: 13 pending and six served', () => {
+  assert.equal(API_OPERATIONS.length, 19, 'the v1 descriptor has 19 host-operation rows');
   const supported = API_OPERATIONS.filter((row) => row.status === 'supported').map(
     (row) => `${row.namespace}.${row.operation}`,
   );
-  // Five capabilities are served in this build, and these are exactly them: four
+  // Six capabilities are served in this build, and these are exactly them: five
   // reflected reads (the `cad_api_call` lane) and one transactional mutation (the
   // `cad_api_submit` lane). Widening the set is a contract change.
   assert.deepEqual(supported, [
@@ -68,6 +68,7 @@ test('the table is 18 host operations: 13 pending and five served', () => {
     'DatabaseServices.database.symbolTables',
     'DatabaseServices.database.revision',
     'DatabaseServices.transaction.commit',
+    'EditorInput.editor.currentSelection',
   ]);
   const pending = API_OPERATIONS.filter((row) => row.status === 'pending');
   assert.equal(pending.length, 13, 'every other host operation is still pending');

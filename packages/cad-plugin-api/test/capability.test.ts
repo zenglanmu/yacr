@@ -588,6 +588,45 @@ test('a malformed symbol-table answer is refused field by field', async () => {
   }
 });
 
+test('the served current selection is a reflected read of the editor', async () => {
+  const spy = spyBridge(API_OPERATIONS, () => ({ objectIds: ['12', '13'] }));
+  const api = await createCadApi(spy.bridge);
+  const selection = await api.editor.currentSelection();
+  assert.equal(selection.count, 2);
+  assert.deepEqual(selection.getObjectIds(), ['12', '13']);
+  assert.deepEqual(spy.calls, [
+    {
+      namespace: 'EditorInput',
+      operation: 'editor.currentSelection',
+      parameters: {},
+    },
+  ]);
+  assert.equal(spy.mutations.length, 0, 'a selection read is never a mutation');
+});
+
+test('nothing selected is a real empty answer, not a refusal', async () => {
+  const spy = spyBridge(API_OPERATIONS, () => ({ objectIds: [] }));
+  const api = await createCadApi(spy.bridge);
+  const selection = await api.editor.currentSelection();
+  assert.equal(selection.count, 0);
+  assert.deepEqual(selection.getObjectIds(), []);
+});
+
+test('a malformed selection answer is refused field by field', async () => {
+  const cases: readonly (readonly [unknown, string])[] = [
+    [{}, 'api.invalid_argument: bridge.answer.objectIds'],
+    [{ objectIds: 'none' }, 'api.invalid_argument: bridge.answer.objectIds'],
+    [{ objectIds: null }, 'api.invalid_argument: bridge.answer.objectIds'],
+    [{ objectIds: [7] }, 'api.invalid_argument: bridge.answer.objectIds[0]'],
+    [{ objectIds: ['12', ''] }, 'api.invalid_argument: bridge.answer.objectIds[1]'],
+    [{ objectIds: ['12', null] }, 'api.invalid_argument: bridge.answer.objectIds[1]'],
+  ];
+  for (const [answer, code] of cases) {
+    const api = await createCadApi(spyBridge(API_OPERATIONS, () => answer).bridge);
+    await expectRejectCode(() => api.editor.currentSelection(), code);
+  }
+});
+
 test('a descriptor that serves document operations owes a document owner', async () => {
   const operations = withStatus(API_OPERATIONS, 'database.getObjectId', 'supported');
   const contradiction = spyBridge(operations, undefined, { documentOwner: 'none' });

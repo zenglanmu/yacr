@@ -20,10 +20,11 @@
 //
 // # Implemented operations
 //
-// Four reflected reads are wired (M2.2/M2.3):
+// Five reflected reads are wired (M2.2–M2.4):
 // `ApplicationServices.documentManager.mdiActiveDocument`,
 // `ApplicationServices.documentManager.documents`,
-// `DatabaseServices.database.symbolTables` and `DatabaseServices.database.revision`.
+// `DatabaseServices.database.symbolTables`, `DatabaseServices.database.revision`
+// and `EditorInput.editor.currentSelection`.
 // One mutation is wired (M3.2): `DatabaseServices.transaction.commit`.
 //
 // Every other request - including a `supported` row this adapter has not wired -
@@ -79,6 +80,7 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'DatabaseServices.database.symbolTables',
   'DatabaseServices.database.revision',
   'DatabaseServices.transaction.commit',
+  'EditorInput.editor.currentSelection',
 ];
 
 /** First poll delay; doubles per attempt. */
@@ -278,6 +280,7 @@ export function createCadHostBridge(deps: CadBridgeDeps): CadHostBridge {
         case 'ApplicationServices.documentManager.documents':
         case 'DatabaseServices.database.symbolTables':
         case 'DatabaseServices.database.revision':
+        case 'EditorInput.editor.currentSelection':
           return (await callHost(deps, request)) as Result;
         default:
           throw adapterMissing(request.namespace, request.operation);

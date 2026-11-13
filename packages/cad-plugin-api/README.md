@@ -75,15 +75,16 @@ silent success. Host failures arrive as `CadApiError`; branch on `code`, not mes
 
 ## v1 status
 
-**The descriptor is 18 rows: five `supported`, 13 `pending`.** Four served
+**The descriptor is 19 rows: six `supported`, 13 `pending`.** Five served
 operations are reflected reads over `cad_api_call` —
 `documentManager.mdiActiveDocument` (the open `Document`, or `null`),
 `documentManager.documents` (0 or 1 `Document`, `[]` when none is open),
-`database.symbolTables` (the block/layer projection plus the active layer name) and
-`database.revision` (`{ database: id }` -> the current revision number) — and one is
-a **mutation**: `transaction.commit`, queued through the carrier's submit/poll lane.
-Everything else is still a reservation — no object read path, no prompts, no command
-dispatch.
+`database.symbolTables` (the block/layer projection plus the active layer name),
+`database.revision` (`{ database: id }` -> the current revision number) and
+`editor.currentSelection` (the ids the user holds right now, `[]` when nothing is
+selected) — and one is a **mutation**: `transaction.commit`, queued through the
+carrier's submit/poll lane. Everything else is still a reservation — no other object
+read path, no prompts, no command dispatch.
 
 | Descriptor rows | v1 |
 | --- | --- |
@@ -93,7 +94,8 @@ dispatch.
 | `DatabaseServices.database.revision` (1) | `supported` — current revision, read every call |
 | `DatabaseServices.transaction.commit` (1) | `supported` — the one mutating operation, over the submit/poll lane |
 | `DatabaseServices` (2 more) | `pending` — `database.getObjectId`, `transaction.getObject` |
-| `EditorInput` (9) | `pending` — no interactive prompt path yet |
+| `EditorInput.editor.currentSelection` (1) | `supported` — the reflected selection, read without prompting |
+| `EditorInput` (8 more) | `pending` — no interactive prompt path yet |
 | `Runtime.runtime.registerCommand` (1) | `pending` — no chrome-local admission path yet |
 
 `transaction.start`, `transaction.addNewlyCreated` and `transaction.abort` have **no

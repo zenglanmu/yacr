@@ -14,12 +14,12 @@
 // wire, so they have no row and are available unconditionally. Advertising them
 // in the descriptor would claim host state that does not exist.
 //
-// Five rows are `supported` in this build — the reflected document reads
+// Six rows are `supported` in this build — the reflected document reads
 // (`documentManager.mdiActiveDocument`, `documentManager.documents`), the database
-// revision and symbol-table projections (all over `cad_api_call`), and the
-// transactional `transaction.commit` (over the mutating `cad_api_submit` lane) —
-// and the other 13 are `pending`: the table is an honest reservation list, not an
-// availability list. It is deliberately complete rather than aspirational — an
+// revision and symbol-table projections and the editor's current selection (all
+// over `cad_api_call`), and the transactional `transaction.commit` (over the
+// mutating `cad_api_submit` lane) — and the other 13 are `pending`: the table is an
+// honest reservation list, not an availability list. It is deliberately complete rather than aspirational — an
 // operation that exists here but is `pending` is refused by name, an operation the
 // host marks `unsupported` is refused by name, and an operation the host does not
 // name at all is refused as `api.descriptor_missing`. There is no silent "maybe"
@@ -74,7 +74,7 @@ export const API_NAMESPACES: readonly CadApiNamespace[] = [
 ];
 
 /**
- * The v1 capability table: 18 host operations, 13 `pending` and five `supported`.
+ * The v1 capability table: 19 host operations, 13 `pending` and six `supported`.
  *
  * Do not flip a row to `supported` here without the host side landing first (and
  * a `case` in the WebView adapter) — the contract test will catch the JSON drift,
@@ -190,6 +190,13 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
     operation: 'editor.selectAll',
     status: 'pending',
     reason: pendingReason('EditorInput', 'editor.selectAll'),
+  },
+  // The selection the user holds right now, as a reflected read (not a prompt).
+  // Served, so no `reason`; the prompt rows above stay pending.
+  {
+    namespace: 'EditorInput',
+    operation: 'editor.currentSelection',
+    status: 'supported',
   },
   {
     namespace: 'Runtime',
