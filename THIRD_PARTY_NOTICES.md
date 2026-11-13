@@ -24,15 +24,20 @@
   `geometry-predicates`、`nalgebra`）；实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
 - rvt 0.17.0：Autodesk Revit（`.rvt`/`.rte`/`.rfa`/`.rft`）的 clean-room 读取器与
   IFC4/glTF/plan-SVG 导出器，**Apache-2.0**，上游 <https://github.com/DrunkOnJava/rvt-rs>。
-  仅由 `cad-import-rvt` 依赖；版本在 workspace 中**精确固定**（`=0.17.0`），未修改上游源码，
-  也未启用额外 feature。它是 **preview** 读取器：2008–2023 的构件体是包围盒，2024/2025 为
-  `partial`，2026/2027 为 `experimental`，家族文件没有几何；本仓库不把其输出用于测量。
+  仅由 `cad-import-rvt` 依赖；版本在 workspace 中**精确固定**（`=0.17.0`），未启用额外
+  feature。**源码有本地补丁**：上游 0.17.0 的一份完整副本以固定路径 `vendor/rvt` 引入
+  （Apache-2.0 允许修改与再分发），只改 `src/ifc/gltf.rs` 的透明度与材质来源标记；改动、
+  理由、测试与移除条件见 `docs/rvt-patches.md` 与 ADR-0035，补丁文件本身随仓库分发。
+  它是 **preview** 读取器：2008–2023 的构件体是包围盒，2024/2025 为 `partial`，
+  2026/2027 为 `experimental`，家族文件没有几何；本仓库不把其输出用于测量。
   其传递依赖（`cfb`、`earcut`、`quick-xml`、`md-5`、`sha2` 等）的实际版本与许可证见
   Cargo.lock，分发前需做完整依赖审计。
 - gltf 1.4.1（含 `gltf-json` 1.4.1、`gltf-derive` 1.4.1）：glTF 2.0 / GLB 读取器，
   **MIT OR Apache-2.0**，上游 <https://github.com/gltf-rs/gltf>。仅由 `cad-import-rvt`
   依赖，用于读取 `rvt` 生成的**内部**单缓冲 GLB（不是用户可见格式）；`default-features =
-  false` 并只启用 `utils`/`names`，因此不引入 `image` 及其编解码依赖；未修改上游源码。
+  false` 并只启用 `utils`/`names`/`extras`（`extras` 只读 `rvt` 材质的
+  `colourSource`/`alphaSource` 来源字段），因此不引入 `image` 及其编解码依赖；未修改上游
+  源码。
 - skpwright 0.6.0：SketchUp（`.skp`）的 clean-room 读取器，**GPL-3.0-only**，上游
   <https://github.com/hew3d/skpwright>。仅由 `cad-import-skp` 依赖；版本在 workspace 中
   **精确固定**（`=0.6.0`），未启用额外 feature，上游源码**未修改**（未打补丁、未复制其源码）；

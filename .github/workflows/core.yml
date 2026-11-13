@@ -89,6 +89,11 @@ jobs:
         run: cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
       - name: Architecture boundaries
         run: python3 scripts/check-architecture.py
+      - name: Vendored rvt patch (alpha rule unit tests)
+        # `vendor/rvt` is excluded from the workspace (ADR-0035), so the patched
+        # module's own tests need their own run. Its upstream dev-dependencies
+        # are not in this workspace's lock, so the step is not `--locked`.
+        run: bash scripts/test-rvt-patch.sh
       - name: Tauri capability contracts (chrome core-plugin permissions)
         run: python3 scripts/check-tauri-capabilities.py
       - name: Fixture manifest

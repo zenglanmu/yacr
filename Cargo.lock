@@ -4519,8 +4519,6 @@ dependencies = [
 [[package]]
 name = "rvt"
 version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e33df092b78c5409ae42ba951487fef96f09c06a04b4e90343b5fed1a0e878b5"
 dependencies = [
  "anyhow",
  "cfb 0.16.0",

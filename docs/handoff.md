@@ -1,5 +1,49 @@
 AD
 
+## 2026-11-13 RVT 预览透明度：`vendor/rvt` 受控补丁（多材质构件取最透明构件 alpha）
+
+- **合并**：本 worktree 从 `7b809bbd` fast-forward 到 `main` 的 `d0c78c71`（0 冲突），补丁工作
+  在 `feat/rvt-transparency` 分支上进行。
+- **问题（已定位，非猜测）**：上游 `rvt` 0.17.0 的 `ifc::gltf` 在构件类型由多个材质组成
+  （`IfcMaterialConstituentSet` ≥ 2）时把整块预览体退回**类别颜色 + alpha 1**；单材质但颜色未
+  读到时也被过滤掉。本地真实样本（`rmeadvancedsampleproject.rvt`，Revit 2024，仓库外）：
+  6,804 个 mesh 只有 580 个显式不透明度；17 个玻璃门（`Tür - Glas`）与 149 个玻璃灯具
+  （`Glass - Clear, Grey` / `Glass - White, High Luminance`）本应透明/半透明。上游 0.20.0
+  只加了 `extras.colourSource`/`alphaSource` 来源标记，**没有**改选择逻辑（升级不修复）；
+  GLB 里没有多材质关联，工作区侧无法规避。
+- **补丁（`vendor/rvt/src/ifc/gltf.rs`，唯一被改文件）**：① 多材质预览体保留类别颜色，alpha
+  取该构件材质里最不透明的 `1 - transparency`（仅在至少一个材质读到 transparency 时生效）；
+  ② 未按层绘制的层集构件按层材质同样处理；③ 单材质但颜色未读到（或单 profile 颜色未读到）
+  的构件仍取类别颜色，只补上读到的 alpha（`single_material` 过滤条件不变，颜色选取不变）；④ 每个材质写 `extras.colourSource`/`alphaSource`（`"file"`/`"rvt-rs"`），
+  类别材质恒 `rvt-rs`、层带材质恒 `file`；几何/节点/颜色/类别色板/IFC/STEP/release 不变。
+- **导入侧（`cad-import-rvt`）**：`gltf` 启用 `extras` feature；`GlbScene::alpha_chosen` 统计
+  `alphaSource = "rvt-rs"` 的显式不透明度，`import.rvt.alpha_chosen` 稳定诊断报告
+  “整块预览体的不透明度取自最透明构件，不是逐部位材质”。GLB 无 extras（旧 GLB/合成夹具）仍
+  按文件自身 alpha 读取。
+- **策略/门禁**：新增 ADR-0035（`acadrust` 之外的第二个受控补丁例外）与
+  `docs/rvt-patches.md` 台账；`scripts/check-architecture.py` 的 patch 允许名单扩为
+  `acadrust`/`rvt`，逐 crate 要求台账存在且含 workspace 版本（`0.17.0`）；根 `Cargo.toml`
+  加 `[patch.crates-io] rvt = { path = "vendor/rvt" }` 与 `[workspace] exclude =
+  ["vendor/rvt"]`（避免 129k 行上游源码进入本仓 fmt/clippy/行数门禁，也不是通用 vendoring）；
+  `scripts/test-rvt-patch.sh` 跑补丁自己的单元测试；AGENTS.md 铁律 1、THIRD_PARTY_NOTICES、
+  `docs/compatibility.md` 同步。
+- **已运行**：`cargo test --manifest-path vendor/rvt/Cargo.toml --lib ifc::gltf` **4 passed**；
+  `cargo test -p cad-import-rvt --locked` **33 passed**（新增
+  `an_exporter_chosen_opacity_is_stored_and_counted`）；本地真实样本导入
+  `explicit_opacity` 580 → **746**（504 来自文件材质：438 玻璃幕墙嵌板 + 66 单材质灯具；
+  242 为导出器选择：76 房间类别默认 + 166 个多材质预览体），诊断出现
+  `import.rvt.alpha_chosen`；
+  `cad-cli-tools render`（Quadro P620，NVIDIA 580，真实 GPU，离屏）`transparent_batches`
+  580 → **746**、`invisible_batches = 0`；`check-architecture`（新增固定路径/版本/lock 生效
+  检查，四种漂移实测 fail-closed）/ `check-file-size` / `check-fixture-manifest` /
+  `check-workflows`、`cargo fmt`/`clippy`（cad-import-rvt）通过；`bash scripts/test-rvt-patch.sh`
+  断言“4 passed”（删 `mod tests` 会失败）；`python3 scripts/test-ui-migration-guards.py`
+  **23 passed**（新增 5 条 patch 策略契约）。
+- **NOT VERIFIED / 边界**：该固定离屏视角下新增的 166 个透明构件被不透明构件遮挡，前后 PNG
+  **字节相同**——不构成像素证据，只有批次分类与真实样本计数证据；Revit 透明度保真度无第二份
+  样本交叉验证；Windows/macOS/Android/Web 只到编译/契约；未向上游提交 issue/PR（本地无 fork
+  凭据）；全量 `cargo test --workspace` NOT RUN。
+
 ## 2026-11-13 多格式导入接入 SketchUp（`.skp`）预览 lane
 
 - **改动**（`cad-import-skp` 本体由另一条 lane 实现，本轮**未改**其公共面）：

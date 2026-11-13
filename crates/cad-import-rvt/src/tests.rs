@@ -412,6 +412,47 @@ fn linear_base_colours_use_the_srgb_transfer_function() {
 }
 
 #[test]
+fn an_exporter_chosen_opacity_is_stored_and_counted() {
+    // The patched exporter (ADR-0035) draws a body whose type uses several
+    // materials with its most transparent constituent's alpha and marks it
+    // `extras.alphaSource = "rvt-rs"`. The reader still stores the opacity (it
+    // is a real material's, applied to the whole body) but counts it, so the
+    // import report can say the body's opacity was chosen rather than read.
+    let (mut json, bin) = glb_parts(&materials_glb_fixture());
+    json["materials"][1]["extras"] = json!({
+        "colourSource": "rvt-rs",
+        "alphaSource": "rvt-rs",
+    });
+    let scene = read_glb(&rebuild_glb(&json, &bin), &ImportLimits::default(), &|| {
+        false
+    })
+    .expect("the GLB with material extras reads");
+    let blend = placed(&scene, "blend");
+    match blend.opacity {
+        Some(opacity) => assert!((opacity - 0.5).abs() < f32::EPSILON, "{opacity}"),
+        None => panic!("a chosen BLEND opacity must still be stored"),
+    }
+    assert_eq!(scene.alpha_chosen, 1, "one mesh took a chosen opacity");
+
+    // The committed fixture carries no extras: the same alpha is the file's
+    // own, and nothing is counted as chosen.
+    let plain = read_glb(&materials_glb_fixture(), &ImportLimits::default(), &|| {
+        false
+    })
+    .expect("the committed materials GLB reads");
+    assert_eq!(plain.alpha_chosen, 0);
+
+    // A `file` alpha is never reported as chosen.
+    let (mut json, bin) = glb_parts(&materials_glb_fixture());
+    json["materials"][1]["extras"] = json!({"alphaSource": "file"});
+    let file_alpha = read_glb(&rebuild_glb(&json, &bin), &ImportLimits::default(), &|| {
+        false
+    })
+    .expect("the GLB with a file alpha reads");
+    assert_eq!(file_alpha.alpha_chosen, 0);
+}
+
+#[test]
 fn materials_become_srgb_colour_opacity_or_bylayer() {
     let scene = read_glb(&materials_glb_fixture(), &ImportLimits::default(), &|| {
         false

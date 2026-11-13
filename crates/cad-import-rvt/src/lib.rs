@@ -90,6 +90,10 @@ pub const DIAG_EMPTY_NODE: &str = "import.rvt.empty_node";
 /// Diagnostic code: a glTF material could not become a stored colour, so the
 /// affected faces kept the layer colour.
 pub const DIAG_MATERIAL_IGNORED: &str = "import.rvt.material_ignored";
+/// Diagnostic code: an imported mesh's opacity was chosen by the exporter
+/// (`extras.alphaSource = "rvt-rs"`, ADR-0035) — a category default, or the most
+/// transparent constituent of a body drawn whole — not read for one material.
+pub const DIAG_ALPHA_CHOSEN: &str = "import.rvt.alpha_chosen";
 
 /// Stable error code: the intermediate GLB is missing the `glTF` magic.
 pub const EMPTY_GLB: &str = "import.rvt.invalid_glb";
@@ -549,6 +553,22 @@ fn record_scene(import: &mut MeshImport, scene: &GlbScene) {
         );
     }
     record_material_losses(import, &scene.material_losses);
+    if scene.alpha_chosen > 0 {
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_ALPHA_CHOSEN.into(),
+                message: format!(
+                    "{} imported mesh(es) store an opacity the exporter chose \
+                     (`extras.alphaSource = \"rvt-rs\"`), not the body's own single \
+                     material: a category's default alpha, or a body drawn whole (one \
+                     box) taking its most transparent constituent material's opacity",
+                    scene.alpha_chosen
+                ),
+            },
+            None,
+        );
+    }
 }
 
 /// One diagnostic per material-loss reason; all of them leave faces `ByLayer`.

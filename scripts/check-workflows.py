@@ -78,6 +78,9 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "cargo fmt --all -- --check",
         "cargo clippy",
         "check-architecture.py",
+        # The vendored `rvt` patch's own unit tests (`vendor/rvt` is excluded
+        # from the workspace, ADR-0035).
+        "test-rvt-patch.sh",
         # Tauri v2 denies core-plugin commands without a capability file; the
         # chrome only needs the `cad_event` listen/unlisten pair.
         "python3 scripts/check-tauri-capabilities.py",

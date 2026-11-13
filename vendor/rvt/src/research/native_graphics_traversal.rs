@@ -1,0 +1,892 @@
+//! Bounded traversal of saved graphics under the default
+//! 3D context. This selects surface carriers, not regenerated Revit geometry.
+//! Unsupported solid-affecting filters and external instances remain explicit.
+use crate::native_parameters::ObjectGraph;
+use serde::Serialize;
+use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+
+/// Row-major affine matrix, operating on column vectors in saved length units.
+pub type GraphicsTransform = [[f64; 4]; 4];
+const IDENTITY: GraphicsTransform = [
+    [1., 0., 0., 0.],
+    [0., 1., 0., 0.],
+    [0., 0., 1., 0.],
+    [0., 0., 0., 1.],
+];
+#[derive(Debug, Clone, Serialize)]
+pub struct SelectedGraphics {
+    pub object_index: usize,
+    /// None denotes the supplied root graph; Some identifies a resolved symbol graph.
+    pub source_owner_id: Option<u64>,
+    pub world_transform: GraphicsTransform,
+    pub path: Vec<usize>,
+    /// Whether a node on the way here is flagged not visible. Only a
+    /// selection made including hidden branches holds any (RE-318).
+    pub hidden: bool,
+    /// Whether a filter on the way here rejects the context (a detail level,
+    /// a view direction) or holds a condition not read, and was walked
+    /// anyway. Only a selection made including filtered branches holds any
+    /// (RE-318).
+    pub filtered: bool,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct TraversalDiagnostic {
+    pub object_index: usize,
+    pub message: String,
+}
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct GraphicsSelection {
+    pub selected: Vec<SelectedGraphics>,
+    pub diagnostics: Vec<TraversalDiagnostic>,
+    pub excluded_non_surface_branches: usize,
+    pub rejected_filters: usize,
+    pub excluded_visibility_branches: usize,
+    /// Observed converter-profile behavior, not universal Revit semantics.
+    pub profile_observations: Vec<String>,
+}
+/// Select reachable Geometry/GPolyMesh carriers from object zero. Pointer edges
+/// are validated against their serialized source offset and token; token-only
+/// lookup is insufficient for deferred anonymous objects and backreferences.
+///
+/// This and the other `select_graphics*` entry points but
+/// [`select_graphics_pre2023_at_detail`] refuse an `InstanceInfo` with no
+/// `m_GRepId`, as they did before RE-342 (#1436 let every route read it as the
+/// default representation; RE-342 section 9.8 narrowed that to the pre-2023
+/// entry point), and a set `m_bHasScale`. This is research API, outside the
+/// semver promise.
+pub fn select_graphics(graph: &ObjectGraph) -> GraphicsSelection {
+    select_graphics_with_resolver(graph, &|_| None)
+}
+/// Resolve external symbol graphics without merging/rebasing graph-local tokens.
+pub fn select_graphics_with_resolver<'a>(
+    graph: &'a ObjectGraph,
+    resolver: &dyn Fn(u64) -> Option<&'a ObjectGraph>,
+) -> GraphicsSelection {
+    select_graphics_with_resolver_at_detail(graph, resolver, 3)
+}
+/// Select a saved 3D representation at an explicit native detail level1..3.
+/// FamilyComputeHelper's area getter requests1; default GLB export requests3.
+pub fn select_graphics_with_resolver_at_detail<'a>(
+    graph: &'a ObjectGraph,
+    resolver: &dyn Fn(u64) -> Option<&'a ObjectGraph>,
+    detail_level: i64,
+) -> GraphicsSelection {
+    select_graphics_impl(graph, resolver, detail_level, false, false, false)
+}
+/// [`select_graphics_with_resolver_at_detail`] for the graphics of a file of
+/// Revit 2015 to 2022, which no export reads: an `InstanceInfo` with no
+/// `m_GRepId` (exactly `m_Trf`, `m_symbolId` and `m_cda`) is read there as the
+/// default representation, and a set `m_bHasScale` on such an `InstanceInfo`
+/// with a rotation matrix is walked through (RE-342). Every other entry point
+/// refuses both, whatever the schema of the `InstanceInfo`, and the caller
+/// decides by the file's release which one to call. `include_hidden` and
+/// `include_filtered` are as in
+/// [`select_graphics_including_hidden_at_detail`] and
+/// [`select_graphics_including_filtered_at_detail`].
+pub fn select_graphics_pre2023_at_detail<'a>(
+    graph: &'a ObjectGraph,
+    resolver: &dyn Fn(u64) -> Option<&'a ObjectGraph>,
+    detail_level: i64,
+    include_hidden: bool,
+    include_filtered: bool,
+) -> GraphicsSelection {
+    select_graphics_impl(
+        graph,
+        resolver,
+        detail_level,
+        include_hidden,
+        include_filtered,
+        true,
+    )
+}
+/// [`select_graphics_with_resolver_at_detail`], also walking the branches
+/// whose visibility flags hide them, each selected carrier marked
+/// [`SelectedGraphics::hidden`] where one lies on its way (RE-318). Nothing
+/// else about the selection changes.
+pub fn select_graphics_including_hidden_at_detail<'a>(
+    graph: &'a ObjectGraph,
+    resolver: &dyn Fn(u64) -> Option<&'a ObjectGraph>,
+    detail_level: i64,
+) -> GraphicsSelection {
+    select_graphics_impl(graph, resolver, detail_level, true, false, false)
+}
+/// [`select_graphics_including_hidden_at_detail`], also walking the children
+/// of a filter whose conditions reject the context or are not read, each
+/// selected carrier marked [`SelectedGraphics::filtered`] where one lies on
+/// its way (RE-318).
+pub fn select_graphics_including_filtered_at_detail<'a>(
+    graph: &'a ObjectGraph,
+    resolver: &dyn Fn(u64) -> Option<&'a ObjectGraph>,
+    detail_level: i64,
+) -> GraphicsSelection {
+    select_graphics_impl(graph, resolver, detail_level, true, true, false)
+}
+fn select_graphics_impl<'a>(
+    graph: &'a ObjectGraph,
+    resolver: &dyn Fn(u64) -> Option<&'a ObjectGraph>,
+    detail_level: i64,
+    include_hidden: bool,
+    include_filtered: bool,
+    pre2023: bool,
+) -> GraphicsSelection {
+    let mut walk = Walker {
+        graph,
+        edge_indexes: HashMap::from([(graph as *const ObjectGraph as usize, edge_index(graph))]),
+        resolver,
+        detail_level,
+        source_owner_id: None,
+        ancestry: Vec::new(),
+        result: GraphicsSelection::default(),
+        visits: 0,
+        include_hidden,
+        hidden_depth: 0,
+        include_filtered,
+        filtered_depth: 0,
+        pre2023,
+    };
+    if !(1..=3).contains(&detail_level) {
+        walk.fail(0, "detail level must be1,2,or3");
+    } else if graph.objects.is_empty() {
+        walk.fail(0, "empty graphics graph");
+    } else {
+        walk.visit(0, IDENTITY, &mut Vec::new());
+    }
+    walk.result
+}
+type EdgeIndex = HashMap<(usize, usize, u64), Option<usize>>;
+fn edge_index(graph: &ObjectGraph) -> EdgeIndex {
+    let mut index = HashMap::new();
+    for (i, edge) in graph.edges.iter().enumerate() {
+        let key = (
+            edge.source_object_index,
+            edge.pointer_offset,
+            u64::from(edge.pointer_token),
+        );
+        index
+            .entry(key)
+            .and_modify(|v| *v = None)
+            .or_insert(Some(i));
+    }
+    index
+}
+/// The diagnostic of a nested detail-family filter, a branch whose
+/// visibility depends on the view: the mesh without it is mostly the body
+/// (RE-224: on the BIM4LCA office 271 of the 306 such saved meshes are
+/// Revit's body exactly).
+pub const NESTED_DETAIL_FILTER_DIAGNOSTIC: &str =
+    "nested detail-family filter requires view semantics";
+/// The diagnostic of a component reference whose visibility depends on its
+/// owner and the view (RE-224: on RE1 Electrical all 21 such saved meshes
+/// are exact).
+pub const VIEW_COMPONENT_DIAGNOSTIC: &str =
+    "surface-bearing component requires qualified owner/view visibility";
+
+struct Walker<'a, 'r> {
+    edge_indexes: HashMap<usize, EdgeIndex>,
+    graph: &'a ObjectGraph,
+    resolver: &'r dyn Fn(u64) -> Option<&'a ObjectGraph>,
+    source_owner_id: Option<u64>,
+    detail_level: i64,
+    ancestry: Vec<(Option<u64>, usize)>,
+    result: GraphicsSelection,
+    visits: usize,
+    include_hidden: bool,
+    hidden_depth: usize,
+    include_filtered: bool,
+    filtered_depth: usize,
+    /// Whether the graphics are a file of Revit 2015 to 2022's, the only ones
+    /// a set `m_bHasScale` is read in (RE-342).
+    pre2023: bool,
+}
+impl Walker<'_, '_> {
+    fn fail(&mut self, index: usize, message: &str) {
+        self.result.diagnostics.push(TraversalDiagnostic {
+            object_index: index,
+            message: message.into(),
+        });
+    }
+    fn target(&self, source: usize, p: &Value) -> Result<usize, String> {
+        let offset = p["offset"].as_u64().ok_or("missing pointer offset")? as usize;
+        let token = p["pointer_token"].as_u64().ok_or("missing pointer token")?;
+        let edge_slot = self.edge_indexes[&(self.graph as *const ObjectGraph as usize)]
+            .get(&(source, offset, token))
+            .ok_or("unresolved null/external graphics pointer")?;
+        let edge_index = edge_slot.ok_or("ambiguous graphics edge")?;
+        let e = &self.graph.edges[edge_index];
+        let target = self
+            .graph
+            .objects
+            .get(e.target_object_index)
+            .ok_or("edge target out of bounds")?;
+        if e.target_class_tag != target.class_tag
+            || p["class_tag"]
+                .as_u64()
+                .is_some_and(|tag| tag != u64::from(target.class_tag))
+        {
+            return Err("graphics edge class mismatch".into());
+        }
+        Ok(e.target_object_index)
+    }
+    fn children(&self, index: usize) -> Result<Vec<usize>, String> {
+        self.graph.objects[index].fields["m_subNodes"]
+            .as_array()
+            .ok_or("missing graphics children")?
+            .iter()
+            .map(|p| self.target(index, p))
+            .collect()
+    }
+    fn visit(&mut self, index: usize, matrix: GraphicsTransform, path: &mut Vec<usize>) {
+        self.visits += 1;
+        if self.visits > 100_000 || path.len() >= 128 {
+            self.fail(index, "graphics traversal resource limit");
+            return;
+        }
+        if self.ancestry.contains(&(self.source_owner_id, index)) {
+            self.fail(index, "graphics reference cycle");
+            return;
+        }
+        path.push(index);
+        self.ancestry.push((self.source_owner_id, index));
+        let hidden = self.include_hidden
+            && self.graph.objects[index].fields["m_GInfo"]["m_flags"]
+                .as_u64()
+                .is_some_and(|flags| matches!(graphics_visibility(flags), 1 | 3));
+        if hidden {
+            self.hidden_depth += 1;
+        }
+        let result = self.visit_inner(index, matrix, path);
+        if hidden {
+            self.hidden_depth -= 1;
+        }
+        if let Err(message) = result {
+            self.fail(index, &message)
+        }
+        path.pop();
+        self.ancestry.pop();
+    }
+    fn visit_inner(
+        &mut self,
+        index: usize,
+        matrix: GraphicsTransform,
+        path: &mut Vec<usize>,
+    ) -> Result<(), String> {
+        let obj = &self.graph.objects[index];
+        // GGroup native child traversal admits visibility0/2;1/3 are skipped
+        // outside special draw mode7. The default export uses normal mode.
+        if let Some(flags) = obj.fields["m_GInfo"]["m_flags"].as_u64() {
+            if !self.include_hidden && matches!(graphics_visibility(flags), 1 | 3) {
+                self.result.excluded_visibility_branches += 1;
+                return Ok(());
+            }
+        }
+        match obj.class_name.as_str() {
+            "Geometry" | "GPolyMesh" => self.result.selected.push(SelectedGraphics {
+                object_index: index,
+                source_owner_id: self.source_owner_id,
+                world_transform: matrix,
+                path: path.clone(),
+                hidden: self.hidden_depth > 0,
+                filtered: self.filtered_depth > 0,
+            }),
+            "GElement" | "GGroup" | "GFilter" => {
+                let children = self.children(index)?;
+                if obj.class_name == "GFilter" {
+                    if children.is_empty() {
+                        return Ok(());
+                    }
+                    // A light source: a `GImposter` (a transform and a
+                    // rendering asset of scalar properties) with the shape and
+                    // lines that draw it, no part of the fixture's body
+                    // (RE-300). Only a filter of such leaves is one; any
+                    // other child is walked as before.
+                    let classes: Vec<&str> = children
+                        .iter()
+                        .map(|&i| self.graph.objects[i].class_name.as_str())
+                        .collect();
+                    if classes.contains(&"GImposter")
+                        && classes.iter().all(|class| {
+                            matches!(
+                                *class,
+                                "GImposter"
+                                    | "Geometry"
+                                    | "GPolyMesh"
+                                    | "GLine"
+                                    | "GArc"
+                                    | "GEllipse"
+                                    | "GCurve"
+                                    | "GNurbSpline"
+                                    | "GPolyLine"
+                                    | "GPolyline"
+                                    | "GPoint"
+                            )
+                        })
+                    {
+                        self.result.excluded_non_surface_branches += 1;
+                        return Ok(());
+                    }
+                    // Curves are deliberately outside this surface-only selector.
+                    if children
+                        .iter()
+                        .all(|&i| self.only_curves(i, &mut HashSet::new()))
+                    {
+                        self.result.excluded_non_surface_branches += 1;
+                        return Ok(());
+                    }
+                    if obj.fields["m_bIsNestedDetailFamily"].as_bool() == Some(true) {
+                        return Err(NESTED_DETAIL_FILTER_DIAGNOSTIC.into());
+                    }
+                    let conditions = obj.fields["m_oConditions"]
+                        .as_array()
+                        .ok_or("missing filter conditions")?;
+                    let mut unknown = None;
+                    let mut rejected = false;
+                    for p in conditions {
+                        let ci = self.target(index, p)?;
+                        let field = &self.graph.objects[ci].fields;
+                        if self.graph.objects[ci].class_name == "GConditionInt"
+                            && field["m_param"].as_i64() == Some(7)
+                            && field["m_value"].as_i64() == Some(2)
+                            && field["m_comp"].as_i64() == Some(0)
+                        {
+                            let observation="integer parameter7/value2/comparison0 accepted in native runtime; semantic meaning unqualified".to_string();
+                            if !self.result.profile_observations.contains(&observation) {
+                                self.result.profile_observations.push(observation);
+                            }
+                        }
+
+                        match if matches!(
+                            self.graph.objects[ci].class_name.as_str(),
+                            "GConditionDir" | "GConditionCut"
+                        ) {
+                            direction_condition(&self.graph.objects[ci].fields, matrix)
+                        } else {
+                            condition_at_detail(
+                                &self.graph.objects[ci].class_name,
+                                &self.graph.objects[ci].fields,
+                                self.detail_level,
+                            )
+                        } {
+                            Ok(false) if self.include_filtered => rejected = true,
+                            Ok(false) => {
+                                self.result.rejected_filters += 1;
+                                return Ok(());
+                            }
+                            Ok(true) => {}
+                            Err(e) => unknown = Some(e),
+                        }
+                    }
+                    if let Some(e) = unknown {
+                        if !self.include_filtered {
+                            return Err(e);
+                        }
+                        rejected = true;
+                    }
+                    if rejected {
+                        self.filtered_depth += 1;
+                        for child in children {
+                            self.visit(child, matrix, path)
+                        }
+                        self.filtered_depth -= 1;
+                        return Ok(());
+                    }
+                }
+                for child in children {
+                    self.visit(child, matrix, path)
+                }
+            }
+            "GComponentRef" => {
+                // Component visibility depends on serialized symbol and view context.
+                // Curve-only references cannot contribute to this surface export,
+                // independently of that still-unqualified owner/view predicate.
+                let info = self.target(index, &obj.fields["m_instanceInfo"])?;
+                let info_object = &self.graph.objects[info];
+                if info_object.class_name != "InstanceInfo" {
+                    return Err("unsupported component instance-info class".into());
+                }
+                let fields = &info_object.fields;
+                let _transform = read_transform(&fields["m_Trf"])?;
+                if !default_representation(fields, self.pre2023)
+                    || fields["m_cda"]["m_pDoc"]["pointer_token"].as_u64() != Some(1)
+                    || !fields["m_cda"]["m_pDoc"]["class_tag"].is_null()
+                {
+                    return Err("unsupported component representation/document context".into());
+                }
+                let symbol = crate::native_metadata::identifier(&fields["m_symbolId"])
+                    .ok()
+                    .and_then(|id| u64::try_from(id).ok())
+                    .filter(|id| *id > 0)
+                    .ok_or("invalid component owner ID")?;
+                let target = (self.resolver)(symbol).ok_or("missing current component graphics")?;
+                if !target
+                    .objects
+                    .first()
+                    .is_some_and(|o| current_graph_owner_matches(o, symbol))
+                {
+                    return Err("resolved component graphics owner mismatch".into());
+                }
+                let previous = self.graph;
+                self.edge_indexes
+                    .entry(target as *const ObjectGraph as usize)
+                    .or_insert_with(|| edge_index(target));
+                self.graph = target;
+                let curves_only = self.only_curves(0, &mut HashSet::new());
+                self.graph = previous;
+                if curves_only {
+                    self.result.excluded_non_surface_branches += 1;
+                } else {
+                    return Err(VIEW_COMPONENT_DIAGNOSTIC.into());
+                }
+            }
+            "GInstance" => {
+                let has_scale = obj.fields["m_bHasScale"].as_bool();
+                if has_scale != Some(false)
+                    && !(self.pre2023
+                        && has_scale == Some(true)
+                        && self.unscaled_legacy_instance(index, obj))
+                {
+                    return Err("scaled instance mode is not qualified".into());
+                }
+                if obj.fields["m_resolveSymInView"].as_bool() != Some(false) {
+                    return Err("view-resolved instance is unsupported".into());
+                }
+                if obj.fields["m_forbiddenTarget"]["m_targets"].as_u64() != Some(0) {
+                    return Err("instance target restrictions are unsupported".into());
+                }
+                let info = self.target(index, &obj.fields["m_instanceInfo"])?;
+                if self.graph.objects[info].class_name != "InstanceInfo" {
+                    return Err("unsupported instance-info class".into());
+                }
+                let transform = read_transform(&self.graph.objects[info].fields["m_Trf"])?;
+                let embedded_pointer = &obj.fields["m_oEmbeddedSymbolGRep"];
+                if embedded_pointer["pointer_token"].as_u64() == Some(0) {
+                    let info_fields = &self.graph.objects[info].fields;
+                    if !default_representation(info_fields, self.pre2023)
+                        || info_fields["m_cda"]["m_pDoc"]["pointer_token"].as_u64() != Some(1)
+                        || !info_fields["m_cda"]["m_pDoc"]["class_tag"].is_null()
+                    {
+                        return Err(
+                            "external symbol has unsupported representation/document context"
+                                .into(),
+                        );
+                    }
+                    let symbol = crate::native_metadata::identifier(&info_fields["m_symbolId"])
+                        .ok()
+                        .and_then(|id| u64::try_from(id).ok())
+                        .filter(|id| *id > 0)
+                        .ok_or("invalid external symbol id")?;
+                    let target = (self.resolver)(symbol)
+                        .ok_or_else(|| format!("missing current symbol graphics {symbol}"))?;
+                    let root = target
+                        .objects
+                        .first()
+                        .ok_or("empty current symbol graphics")?;
+                    if !current_graph_owner_matches(root, symbol) {
+                        return Err("resolved symbol graphics owner mismatch".into());
+                    }
+                    let previous_graph = self.graph;
+                    let previous_owner = self.source_owner_id;
+                    self.edge_indexes
+                        .entry(target as *const ObjectGraph as usize)
+                        .or_insert_with(|| edge_index(target));
+                    self.graph = target;
+                    self.source_owner_id = Some(symbol);
+                    self.visit(0, multiply(matrix, transform), path);
+                    self.graph = previous_graph;
+                    self.source_owner_id = previous_owner;
+                } else {
+                    let embedded = self.target(index, embedded_pointer)?;
+                    self.visit(embedded, multiply(matrix, transform), path);
+                }
+            }
+            "GLine" | "GArc" | "GEllipse" | "GCurve" | "GNurbSpline" | "GPolyLine"
+            | "GPolyline" | "GPoint" => self.result.excluded_non_surface_branches += 1,
+            other => return Err(format!("unsupported reachable graphics class {other}")),
+        }
+        Ok(())
+    }
+    /// Whether a `GInstance` whose `m_bHasScale` is set names an
+    /// `InstanceInfo` of the older schema (no `m_GRepId`, the three fields
+    /// `default_representation` accepts) whose 3x3 matrix is a rotation, the
+    /// identity included (RE-342). What the flag means on that schema is not
+    /// read, so only a matrix that scales, shears and mirrors nothing passes:
+    /// the flag with a mirror or a scale, and the flag with the later
+    /// `InstanceInfo`, whose `m_GRepId` is present, stay refused. Asked only
+    /// on the pre-2023 route (`Walker::pre2023`): every other walk refuses a
+    /// set flag before it gets here, whatever the schema of the
+    /// `InstanceInfo`.
+    fn unscaled_legacy_instance(
+        &self,
+        index: usize,
+        obj: &crate::native_parameters::GraphObject,
+    ) -> bool {
+        let Ok(info) = self.target(index, &obj.fields["m_instanceInfo"]) else {
+            return false;
+        };
+        let info = &self.graph.objects[info];
+        info.class_name == "InstanceInfo"
+            && info.fields.get("m_GRepId").is_none()
+            && default_representation(&info.fields, self.pre2023)
+            && read_transform(&info.fields["m_Trf"]).is_ok_and(|t| rotation(&t))
+    }
+    fn only_curves(&self, index: usize, seen: &mut HashSet<usize>) -> bool {
+        if seen.len() >= 128 || !seen.insert(index) {
+            return false;
+        }
+        let result = match self.graph.objects[index].class_name.as_str() {
+            "GLine" | "GArc" | "GEllipse" | "GCurve" | "GNurbSpline" | "GPolyLine"
+            | "GPolyline" | "GPoint" => true,
+            "GElement" | "GGroup" | "GFilter" => self
+                .children(index)
+                .is_ok_and(|c| c.iter().all(|&i| self.only_curves(i, seen))),
+            _ => false,
+        };
+        seen.remove(&index);
+        result
+    }
+}
+// The 2023 GElement schema carries its owning element ID in GInfo.tag;
+// 2024+ additionally serializes m_elementId. A present dedicated field must
+// agree; never silently fall back from a malformed or mismatched dedicated ID.
+fn current_graph_owner_matches(root: &crate::native_parameters::GraphObject, id: u64) -> bool {
+    root.class_name == "GElement"
+        && match root.fields.get("m_elementId") {
+            Some(value) => value.as_u64() == Some(id),
+            None => root.fields["m_GInfo"]["m_tag"].as_u64() == Some(id),
+        }
+}
+/// Whether an `InstanceInfo` names the default representation: `m_GRepId` is
+/// 0 on every file of Revit 2023 to 2027 measured. The classes of Revit 2015
+/// to 2022 declare no such field (`InstInfoBase` has `m_Trf` and `m_symbolId`,
+/// `InstanceInfo` `m_cda`, in all 30 sample projects), and on the pre-2023
+/// route (`pre2023`, the graphics of a file of Revit 2015 to 2022, which no
+/// export reads) an object that holds exactly those three is read as the
+/// default one (RE-342 compares those meshes with the same projects' 2023
+/// copies); one that holds anything else is refused. On every other route an
+/// `InstanceInfo` with no `m_GRepId` is refused, as it was before RE-342: the
+/// decoder drops a field flagged transient unread, so a missing key cannot say
+/// whether the class declares one, and nothing measured should rest on it.
+fn default_representation(info: &Value, pre2023: bool) -> bool {
+    match info.get("m_GRepId") {
+        Some(id) => id.as_u64() == Some(0),
+        None => {
+            pre2023
+                && info.as_object().is_some_and(|fields| {
+                    fields.len() == 3
+                        && fields.contains_key("m_Trf")
+                        && fields.contains_key("m_symbolId")
+                        && fields.contains_key("m_cda")
+                })
+        }
+    }
+}
+/// Whether the 3x3 part of `m` is a rotation: orthonormal rows and a
+/// determinant of 1, no scale, shear or mirror, within the tolerance the
+/// instance transforms of the partition readers hold a rotation to
+/// ([`crate::partition_instance_transforms::ROTATION_TOLERANCE`], 1e-9): a
+/// scale of 1 + 1e-7 is not one.
+fn rotation(m: &GraphicsTransform) -> bool {
+    let tolerance = crate::partition_instance_transforms::ROTATION_TOLERANCE;
+    let orthonormal = (0..3).all(|a| {
+        (0..3).all(|b| {
+            let dot: f64 = (0..3).map(|k| m[a][k] * m[b][k]).sum();
+            (dot - f64::from(u8::from(a == b))).abs() <= tolerance
+        })
+    });
+    let determinant = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    orthonormal && (determinant - 1.0).abs() <= tolerance
+}
+fn graphics_visibility(flags: u64) -> u8 {
+    let bits = flags & 0x1e0;
+    if bits == 0 {
+        0
+    } else if bits == 0xe0 {
+        3
+    } else if bits < 0xe0 {
+        if flags & 0x160 == 0x20 { 1 } else { 2 }
+    } else if flags & 0x1a0 == 0x100 {
+        1
+    } else {
+        2
+    }
+}
+fn read_transform(v: &Value) -> Result<GraphicsTransform, String> {
+    let rows = v["m_3x3"]
+        .as_array()
+        .filter(|v| v.len() == 3)
+        .ok_or("missing instance matrix")?;
+    let origin = v["m_or"]
+        .as_array()
+        .filter(|v| v.len() == 3)
+        .ok_or("missing instance translation")?;
+    let mut m = IDENTITY;
+    for i in 0..3 {
+        let row = rows[i]
+            .as_array()
+            .filter(|v| v.len() == 3)
+            .ok_or("invalid instance matrix row")?;
+        for j in 0..3 {
+            m[i][j] = row[j]
+                .as_f64()
+                .filter(|v| v.is_finite())
+                .ok_or("invalid instance coefficient")?;
+        }
+        m[i][3] = origin[i]
+            .as_f64()
+            .filter(|v| v.is_finite())
+            .ok_or("invalid instance translation")?;
+    }
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    if det.abs() < 1e-12 {
+        return Err("singular instance transform".into());
+    }
+    Ok(m)
+}
+fn multiply(a: GraphicsTransform, b: GraphicsTransform) -> GraphicsTransform {
+    let mut result = [[0.; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            result[i][j] = (0..4).map(|k| a[i][k] * b[k][j]).sum();
+        }
+    }
+    result
+}
+// Native default context is view type4. Direction predicates6/7/8 are
+// false before negation in that context;10/11 use pi/2 +/-1e-10 thresholds.
+fn direction_condition(v: &Value, matrix: GraphicsTransform) -> Result<bool, String> {
+    let negate = v["m_negateDirCondition"]
+        .as_bool()
+        .ok_or("missing direction negation")?;
+    let comparison = v["m_comp"].as_i64().ok_or("missing direction comparison")?;
+    if matches!(comparison, 6..=8) {
+        return Ok(negate);
+    }
+    let a = v["m_dir"]
+        .as_array()
+        .filter(|a| a.len() == 3)
+        .ok_or("missing filter direction")?;
+    let mut local = [0.; 3];
+    for i in 0..3 {
+        local[i] = a[i]
+            .as_f64()
+            .filter(|v| v.is_finite())
+            .ok_or("invalid filter direction")?;
+    }
+    let mut world = [0.; 3];
+    for i in 0..3 {
+        world[i] = (0..3).map(|j| matrix[i][j] * local[j]).sum();
+    }
+    let length = world.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if length < 1e-12 {
+        return Err("zero filter direction".into());
+    }
+    let actual = [-0.577350269189625, -0.577350269189627, 0.577350269189626];
+    let answer = match comparison {
+        10 | 11 => {
+            let cosine = (0..3).map(|i| world[i] * actual[i]).sum::<f64>() / length;
+            let angle = cosine.clamp(-1., 1.).acos();
+            if comparison == 10 {
+                angle < 1.5707963266948965
+            } else {
+                angle > 1.5707963268948966
+            }
+        }
+        -1 | 0 | 3 => {
+            let distance = (0..3)
+                .map(|i| (world[i] - actual[i]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            let equal = if distance < 1e-14 {
+                true
+            } else if distance > 1e-6 {
+                false
+            } else {
+                return Err("direction equality inside unqualified native tolerance band".into());
+            };
+            if comparison == 0 { !equal } else { equal }
+        }
+        _ => return Err(format!("unsupported direction comparison {comparison}")),
+    };
+    Ok(answer != negate)
+}
+fn condition_at_detail(class: &str, v: &Value, detail_level: i64) -> Result<bool, String> {
+    if !matches!(
+        class,
+        "GConditionInt"
+            | "GConditionViewType"
+            | "GConditionViewDetailLevel"
+            | "GConditionVModeType"
+    ) {
+        return Err(format!("unsupported solid-affecting condition {class}"));
+    }
+    let kind = v["m_param"]
+        .as_i64()
+        .ok_or("missing integer condition parameter type")?;
+    let saved = v["m_value"]
+        .as_i64()
+        .ok_or("missing integer condition value")?;
+    if kind == 7 && saved == 2 && v["m_comp"].as_i64() == Some(0) {
+        return Ok(true);
+    }
+    // The default geometry dispatch maps parameter type1 to the comparison
+    // value 4. Runtime observations record this context.
+    let actual = match kind {
+        1 => 4,
+        3 => detail_level,
+        6 => 0,
+        _ => {
+            return Err(format!(
+                "unsupported integer condition parameter type {kind}"
+            ));
+        }
+    };
+    match v["m_comp"].as_i64() {
+        Some(-1 | 3) => Ok(saved == actual),
+        Some(0) => Ok(saved != actual),
+        Some(1) => Ok(saved > actual),
+        Some(2) => Ok(saved >= actual),
+        Some(4) => Ok(saved <= actual),
+        Some(5) => Ok(saved < actual),
+        _ => Err("unsupported integer condition comparison".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GraphicsTransform, default_representation, rotation};
+    use serde_json::json;
+
+    fn matrix(m: [[f64; 3]; 3]) -> GraphicsTransform {
+        std::array::from_fn(|i| {
+            std::array::from_fn(|j| {
+                if i < 3 && j < 3 {
+                    m[i][j]
+                } else {
+                    f64::from(u8::from(i == j))
+                }
+            })
+        })
+    }
+
+    #[test]
+    fn a_mirror_is_not_a_rotation() {
+        assert!(!rotation(&matrix([
+            [1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., -1.]
+        ])));
+        assert!(!rotation(&matrix([
+            [0., 1., 0.],
+            [1., 0., 0.],
+            [0., 0., 1.]
+        ])));
+    }
+
+    #[test]
+    fn a_scale_or_a_shear_is_not_a_rotation() {
+        assert!(!rotation(&matrix([
+            [2., 0., 0.],
+            [0., 2., 0.],
+            [0., 0., 2.]
+        ])));
+        assert!(!rotation(&matrix([
+            [1., 1., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]
+        ])));
+    }
+
+    #[test]
+    fn a_scale_a_hair_off_one_is_not_a_rotation() {
+        assert!(!rotation(&matrix([
+            [1.0000001, 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]
+        ])));
+        assert!(!rotation(&matrix([
+            [1.0000001, 0., 0.],
+            [0., 1.0000001, 0.],
+            [0., 0., 1.0000001]
+        ])));
+    }
+
+    #[test]
+    fn a_rotation_off_by_less_than_the_tolerance_is_one() {
+        assert!(rotation(&matrix([
+            [1.0 + 1e-10, 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]
+        ])));
+        assert!(rotation(&matrix([
+            [1.0 - 1e-10, 0., 0.],
+            [0., 1. + 1e-10, 0.],
+            [0., 0., 1.]
+        ])));
+    }
+
+    #[test]
+    fn a_matrix_with_a_value_that_is_not_a_number_is_not_a_rotation() {
+        assert!(!rotation(&matrix([
+            [f64::NAN, 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]
+        ])));
+    }
+
+    #[test]
+    fn the_identity_and_a_turn_are_rotations() {
+        assert!(rotation(&matrix([
+            [1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]
+        ])));
+        assert!(rotation(&matrix([
+            [0., -1., 0.],
+            [1., 0., 0.],
+            [0., 0., 1.]
+        ])));
+        assert!(rotation(&matrix([
+            [0., 1., 0.],
+            [0., 0., 1.],
+            [1., 0., 0.]
+        ])));
+    }
+
+    #[test]
+    fn a_missing_representation_id_is_the_default_only_with_exactly_the_three_fields() {
+        let with = |extra: &[&str]| {
+            let mut info = json!({"m_Trf": {}, "m_symbolId": {}, "m_cda": {}});
+            for key in extra {
+                info[*key] = json!(0);
+            }
+            info
+        };
+        assert!(default_representation(&with(&[]), true));
+        assert!(!default_representation(&with(&["m_other"]), true));
+        assert!(!default_representation(
+            &json!({"m_Trf": {}, "m_cda": {}}),
+            true
+        ));
+        assert!(!default_representation(&json!(null), true));
+    }
+
+    #[test]
+    fn a_missing_representation_id_is_refused_off_the_pre_2023_route() {
+        let exact = json!({"m_Trf": {}, "m_symbolId": {}, "m_cda": {}});
+        assert!(default_representation(&exact, true));
+        assert!(!default_representation(&exact, false));
+    }
+
+    #[test]
+    fn a_representation_id_other_than_zero_is_not_the_default() {
+        for pre2023 in [false, true] {
+            assert!(default_representation(&json!({"m_GRepId": 0}), pre2023));
+            assert!(!default_representation(&json!({"m_GRepId": 1}), pre2023));
+            assert!(!default_representation(&json!({"m_GRepId": null}), pre2023));
+        }
+    }
+}

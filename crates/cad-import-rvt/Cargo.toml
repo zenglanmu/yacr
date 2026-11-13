@@ -19,13 +19,14 @@ rvt.workspace = true
 # Reads the single-buffer GLB `rvt` emits. GLB/glTF is an implementation detail:
 # it is not a user-visible format and is never sniffed by the dispatcher.
 gltf.workspace = true
+# Reads the patched exporter's `extras.alphaSource` provenance (ADR-0035), so a
+# chosen opacity is reported instead of being stored as the file's own.
+serde_json.workspace = true
 # `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web_time` uses
 # `Performance.now()` there and re-exports std elsewhere.
 web-time.workspace = true
 
 [dev-dependencies]
-# Builds malformed/external-buffer glTF JSON documents in unit tests only.
-serde_json = { workspace = true }
 # Builds a family-shaped OLE container in unit tests, so the `.rfa` refusal is
 # exercised by bytes rather than by a path extension.
 cfb = "0.16"

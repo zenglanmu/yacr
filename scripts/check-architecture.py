@@ -23,6 +23,8 @@ Two dependency views are kept deliberately separate:
 """
 from __future__ import annotations
 
+import hashlib
+
 import pathlib
 import sys
 import tomllib
@@ -51,9 +53,27 @@ def _workspace_alias_package(alias: str, workspace_dependencies: dict) -> str:
     return alias
 
 
-def _acadrust_version(workspace_dependencies: dict) -> str | None:
-    """The pinned workspace `acadrust` version string, if it is a version dep."""
-    entry = workspace_dependencies.get("acadrust")
+# The only dependencies a `[patch.crates-io]` entry may name, each with the
+# ledger that must record it (ADR-0031 for acadrust, ADR-0035 for rvt).
+PATCH_LEDGERS = {
+    "acadrust": "docs/acadrust-patches.md",
+    "rvt": "docs/rvt-patches.md",
+}
+# Dependencies whose patch must be a **fixed in-repo source copy** (not a git
+# ref), and the only `path` value accepted. The vendored manifest must keep the
+# pinned version and Cargo.lock must resolve the package from that path: a
+# version drift would otherwise make Cargo ignore the patch ("patch was not
+# used") while the build happily linked the stock crate.
+PATCH_LOCAL_PATHS = {"rvt": "vendor/rvt"}
+# The only files inside the vendored copy that may differ from upstream. Every
+# other file is pinned by `vendor/rvt/SHA256SUMS`, so patching a second upstream
+# file (or dropping one in) fails the gate instead of passing silently.
+PATCH_PATCHED_FILES = {"rvt": {"src/ifc/gltf.rs"}}
+
+
+def _pinned_version(workspace_dependencies: dict, package: str) -> str | None:
+    """The pinned workspace `package` version string, if it is a version dep."""
+    entry = workspace_dependencies.get(package)
     if isinstance(entry, str):
         return entry
     if isinstance(entry, dict):
@@ -65,45 +85,121 @@ def _acadrust_version(workspace_dependencies: dict) -> str | None:
 def check_patch_policy(
     root: pathlib.Path, manifest: dict, workspace_dependencies: dict
 ) -> None:
-    """Allow only a tracked, pinned `[patch.crates-io] acadrust` entry.
+    """Allow only tracked, pinned `[patch.crates-io]` entries from a fixed list.
 
-    The relaxed rule (ADR-0031) is one exception, not general vendoring:
+    The relaxed rule (ADR-0031, extended by ADR-0035) is an exception, not
+    general vendoring:
 
-    * the only patch table may be `[patch.crates-io]`, and its only key must be
-      `acadrust`;
-    * `docs/acadrust-patches.md` must exist and must name the workspace's
-      resolved acadrust version, so a patch cannot exist without a ledger row.
+    * the only patch table may be `[patch.crates-io]`, and every key in it must
+      be one of `PATCH_LEDGERS`;
+    * that dependency's ledger must exist and must name the workspace's
+      resolved version, so a patch cannot exist without a ledger row.
 
-    No patch at all is the current (and normal) state.
+    No patch at all is the normal state; the current exception is `rvt`.
     """
     patch = manifest.get("patch")
     if patch is None:
         return
     assert set(patch) == {"crates-io"}, (
-        "Cargo patch is allowed only as [patch.crates-io] for acadrust "
-        f"(found {sorted(patch)})"
+        "Cargo patch is allowed only as [patch.crates-io] for a dependency in "
+        f"{sorted(PATCH_LEDGERS)} (found {sorted(patch)})"
     )
     entries = patch["crates-io"]
     assert isinstance(entries, dict) and entries, "[patch.crates-io] must not be empty"
-    other = sorted(set(entries) - {"acadrust"})
+    other = sorted(set(entries) - set(PATCH_LEDGERS))
     assert not other, (
-        "Cargo patch is allowed only for acadrust; found "
-        f"{other} in [patch.crates-io]"
+        "Cargo patch is allowed only for "
+        f"{sorted(PATCH_LEDGERS)}; found {other} in [patch.crates-io]"
     )
-    ledger = root / "docs" / "acadrust-patches.md"
-    assert ledger.is_file(), (
-        "an acadrust [patch.crates-io] entry requires docs/acadrust-patches.md "
-        "(the tracked patch ledger, ADR-0031)"
-    )
-    version = _acadrust_version(workspace_dependencies)
-    assert version, (
-        "cannot resolve the workspace acadrust version; an acadrust patch needs "
-        "a pinned version string for the ledger"
-    )
-    assert version in ledger.read_text(encoding="utf-8"), (
-        "docs/acadrust-patches.md must record the patched acadrust version "
-        f"{version!r} (ADR-0031)"
-    )
+    for package, ledger_name in sorted(PATCH_LEDGERS.items()):
+        if package not in entries:
+            continue
+        ledger = root / ledger_name
+        assert ledger.is_file(), (
+            f"a {package} [patch.crates-io] entry requires {ledger_name} "
+            "(the tracked patch ledger)"
+        )
+        version = _pinned_version(workspace_dependencies, package)
+        assert version, (
+            f"cannot resolve the workspace {package} version; a {package} patch "
+            "needs a pinned version string for the ledger"
+        )
+        assert version in ledger.read_text(encoding="utf-8"), (
+            f"{ledger_name} must record the patched {package} version "
+            f"{version!r}"
+        )
+        local = PATCH_LOCAL_PATHS.get(package)
+        if local is None:
+            continue
+        entry = entries[package]
+        assert isinstance(entry, dict) and set(entry) == {"path"}, (
+            f"[patch.crates-io] {package} must be a fixed in-repo path "
+            f'({{ path = "{local}" }}); found {entry!r}'
+        )
+        assert entry["path"] == local, (
+            f"[patch.crates-io] {package} must point at {local!r}; "
+            f"found {entry['path']!r}"
+        )
+        manifest = root / local / "Cargo.toml"
+        assert manifest.is_file(), (
+            f"[patch.crates-io] {package} points at {local!r}, which has no Cargo.toml"
+        )
+        vendored = tomllib.loads(manifest.read_text(encoding="utf-8")).get("package", {})
+        assert vendored.get("name") == package, (
+            f"{local}/Cargo.toml must declare package {package!r}; "
+            f"found {vendored.get('name')!r}"
+        )
+        bare_version = version.lstrip("=^~ ")
+        assert vendored.get("version") == bare_version, (
+            f"{local}/Cargo.toml must keep the pinned version {bare_version!r} so the "
+            f"patch matches the workspace dependency; found {vendored.get('version')!r}"
+        )
+        locked = [
+            package_entry
+            for package_entry in tomllib.loads(
+                (root / "Cargo.lock").read_text(encoding="utf-8")
+            ).get("package", [])
+            if package_entry.get("name") == package
+        ]
+        assert len(locked) == 1, (
+            f"Cargo.lock must contain exactly one {package!r} package; found {len(locked)}"
+        )
+        assert "source" not in locked[0], (
+            f"Cargo.lock still resolves {package} from a source, so the in-repo patch is "
+            "not in effect; update Cargo.lock after changing the pin"
+        )
+        patched = PATCH_PATCHED_FILES.get(package, set())
+        sums = root / local / "SHA256SUMS"
+        assert sums.is_file(), (
+            f"{local}/SHA256SUMS must record every vendored file except the patched "
+            f"{sorted(patched)}, so an unrecorded edit fails closed"
+        )
+        declared: dict[str, str] = {}
+        for line in sums.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            digest, separator, relative = line.partition("  ")
+            assert separator and len(digest) == 64, (
+                f"malformed {local}/SHA256SUMS line: {line!r}"
+            )
+            declared[relative] = digest
+        for relative, digest in declared.items():
+            file = root / local / relative
+            assert file.is_file(), f"{local}/SHA256SUMS records a missing file {relative!r}"
+            assert hashlib.sha256(file.read_bytes()).hexdigest() == digest, (
+                f"{local}/{relative} differs from the recorded upstream copy; only "
+                f"{sorted(patched)} may be patched (ADR-0035)"
+            )
+        present = {
+            file.relative_to(root / local).as_posix()
+            for file in (root / local).rglob("*")
+            if file.is_file()
+        }
+        unrecorded = sorted(present - set(declared) - patched - {sums.name})
+        assert not unrecorded, (
+            f"{local} holds file(s) not recorded in SHA256SUMS: {unrecorded}; record the "
+            "upstream file or add it to the patch's allowed set (ADR-0035)"
+        )
 
 
 def _dependency_names(section: dict, workspace_dependencies: dict) -> set[str]:
@@ -271,7 +367,7 @@ def check(root: pathlib.Path) -> int:
             assert not graph[name], "domain depends on another CAD package"
         if name == "cad-db":
             assert graph[name] <= {"cad-domain"}, "database depends on a higher layer"
-    # Cargo patch policy: only a tracked, pinned acadrust entry may exist.
+    # Cargo patch policy: only a tracked, pinned entry from `PATCH_LEDGERS`.
     # (The pre-check above has already validated it; no patch is the norm.)
     print(f"Architecture OK: {len(packages)} packages, acyclic and core boundaries intact")
     return 0

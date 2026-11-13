@@ -118,6 +118,10 @@ impl MaterialLosses {
 struct MaterialStyle {
     color: [u8; 3],
     opacity: Option<f32>,
+    /// The exporter chose this opacity instead of reading it for the body's own
+    /// single material: a category default, or a body drawn whole taking its
+    /// most transparent constituent material's opacity.
+    alpha_chosen: bool,
 }
 
 /// What one primitive's `material` reference resolved to.
@@ -141,6 +145,12 @@ pub struct GlbScene {
     pub degenerate_triangles: usize,
     pub normals_dropped: usize,
     pub material_losses: MaterialLosses,
+    /// Meshes whose stored opacity the exporter **chose** (`extras.alphaSource =
+    /// "rvt-rs"`, ADR-0035) rather than read for the body's own single material:
+    /// a category's default alpha (e.g. `IFCSPACE` 0.12), or a body drawn whole
+    /// that took its most transparent constituent material's opacity. Reported
+    /// so neither is mistaken for the file's own transparency of that body.
+    pub alpha_chosen: usize,
 }
 
 /// Read a GLB and return every drawable node/mesh instance in world space.
@@ -273,6 +283,9 @@ fn visit_node(
             (false, Some(PrimitiveMaterial::Usable(style))) => Some(style),
             _ => None,
         };
+        if style.is_some_and(|style| style.alpha_chosen) {
+            out.alpha_chosen += 1;
+        }
         out.degenerate_triangles += built.degenerate;
         out.normals_dropped += built.normals_dropped;
         // A node's mesh may carry several primitives. Normals are per vertex:
@@ -463,7 +476,29 @@ fn resolve_material(
         AlphaMode::Blend if alpha < 1.0 => Some(alpha),
         _ => None,
     };
-    PrimitiveMaterial::Usable(MaterialStyle { color, opacity })
+    PrimitiveMaterial::Usable(MaterialStyle {
+        color,
+        opacity,
+        alpha_chosen: opacity.is_some() && alpha_is_chosen(&material),
+    })
+}
+
+/// Whether `rvt` chose this material's alpha instead of reading it.
+///
+/// The patched exporter (ADR-0035) writes `extras.alphaSource`: `"file"` when
+/// the alpha is one minus the material's own Revit transparency, `"rvt-rs"`
+/// when the exporter chose it — a category's default alpha, or the most
+/// transparent constituent applied to a body drawn whole. A GLB without the
+/// field (a synthetic fixture, or a pre-patch `rvt`) is read as the file's own
+/// alpha, which is what this reader assumed before the patch.
+fn alpha_is_chosen(material: &gltf::Material<'_>) -> bool {
+    let Some(raw) = material.extras().as_ref() else {
+        return false;
+    };
+    let Ok(extras) = serde_json::from_str::<serde_json::Value>(raw.get()) else {
+        return false;
+    };
+    extras.get("alphaSource").and_then(|value| value.as_str()) == Some("rvt-rs")
 }
 
 /// Validate a glTF `baseColorFactor` and convert its RGB to stored sRGB.

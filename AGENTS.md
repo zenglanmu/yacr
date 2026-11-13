@@ -22,9 +22,12 @@ ADR 0027。
 
 ## 铁律（违反即返工）
 
-1. 默认不改 acadrust 源码、不加 Cargo patch。确需补丁时**只允许 `acadrust`**，必须固定版本/
-   revision 并在 `docs/acadrust-patches.md` 登记（ADR-0031）；`check-architecture.py` 强制该台账。
-   其它任何 patch 表/键仍拒绝；**当前上游 0.6.8 未修改**（实验性 DWG 导出用上游 `DwgWriter`）。
+1. 默认不改依赖源码、不加 Cargo patch。确需补丁时**只允许 `acadrust` 与 `rvt`**，必须固定
+   版本/revision 或仓库内固定路径，并分别在 `docs/acadrust-patches.md`（ADR-0031）/
+   `docs/rvt-patches.md`（ADR-0035）登记；`check-architecture.py` 强制这两份台账。其它任何
+   patch 表/键仍拒绝。当前状态：上游 `acadrust` 0.6.8 **未修改**（实验性 DWG 导出用上游
+   `DwgWriter`）；`rvt` 0.17.0 以固定路径 `vendor/rvt` 引入，**只改**
+   `src/ifc/gltf.rs` 的透明度/来源标记（多材质预览体取最透明构件 alpha）——台账外不得再改。
 2. 未支持/未验证能力必须显式建模（`Unsupported`/`Partial`/诊断/`pending(...)`）；占位与假数据
    不计完成，**禁止**把失败改成空成功。
 3. 业务层只操作数据库/命令/事务；GPU 提交封装在渲染器内。`cad-db` 是唯一权威，UI 与渲染均为派生。
@@ -51,11 +54,14 @@ ADR 0027。
 ## 分层与边界（`scripts/check-architecture.py` 强制）
 
 唯一依赖：`cad-render-wgpu` → wgpu；`cad-import-acadrust` → acadrust（0.6.8，当前未修改；如需补丁
-只允许 acadrust 且必须在 `docs/acadrust-patches.md` 登记，见 ADR-0031）。
+只允许 acadrust 且必须在 `docs/acadrust-patches.md` 登记，见 ADR-0031）；
+`cad-import-rvt` → rvt（0.17.0，`vendor/rvt` 固定路径补丁：只改 `src/ifc/gltf.rs` 的透明度/
+来源标记，见 ADR-0035 与 `docs/rvt-patches.md`）。
 架构规则：`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层（脚本强制的是 iced 全局禁用
 与逐 crate 的 ban 列表，不正向断言 tauri 唯一性——不要因此绕过该规则）。平台类型
-（`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`；根 `[patch.crates-io]` 只允许单个
-`acadrust` 键且必须在 `docs/acadrust-patches.md` 登记并通过门禁（ADR-0031），其它 patch 一律拒绝。
+（`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`；根 `[patch.crates-io]` 只允许
+`acadrust`/`rvt` 两个键，且各自必须在对应台账登记并通过门禁（ADR-0031/ADR-0035），其它 patch
+一律拒绝。`vendor/rvt` 是 `[workspace] exclude` 的固定源码副本，不是通用 vendoring 区域。
 
 ```
 cad-domain → cad-db/dependencies/history → geometry/kernel-adapter/representation

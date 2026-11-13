@@ -1,0 +1,402 @@
+//! Shared partition ArcWall iteration (RE-15).
+//!
+//! The production walker (`iter_elements`) only scans `Global/Latest`
+//! and therefore cannot see ArcWall instance records, which live in
+//! `Partitions/*`. The IFC exporter previously inlined its own
+//! partition scan; this module is the shared path for IFC export,
+//! diagnostics, CLI counts, and ElemTable linkage.
+// Tracker: D20.
+
+use crate::arc_wall_record::{
+    ArcWallRecord, ArcWallScanStatus, ArcWallTrailer, STANDARD_RECORD_MIN_SIZE,
+};
+use crate::element_record_storeys::elevation_storey_name;
+use crate::ifc::Storey;
+use crate::walker::{WalkerLimitHit, WalkerLimits};
+use crate::{Result, RevitFile};
+use std::collections::BTreeMap;
+
+/// Stable reference to a decoded ArcWall record inside a partition
+/// stream. Suitable as an ElemTable → partition index value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartitionArcWallRef {
+    /// Stream name, e.g. `"Partitions/5"`.
+    pub partition: String,
+    /// Byte offset of the ArcWall tag inside the decompressed
+    /// partition buffer.
+    pub offset: usize,
+}
+
+/// One standard ArcWall recovered from a partition stream, including
+/// optional trailer fields when the singleton trailer region is
+/// present and validates.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartitionArcWall {
+    pub partition: String,
+    pub offset: usize,
+    pub record: ArcWallRecord,
+    pub trailer: Option<ArcWallTrailer>,
+}
+
+impl PartitionArcWall {
+    /// ElemTable-linkable ElementId when the trailer validated.
+    pub fn element_id(&self) -> Option<u32> {
+        self.trailer
+            .as_ref()
+            .and_then(|t| t.element_id)
+            .and_then(crate::ElementId::as_u32)
+    }
+
+    /// Shared type-symbol candidate from the trailer (`+0xfe`).
+    pub fn type_id(&self) -> Option<u32> {
+        self.trailer
+            .as_ref()
+            .and_then(|t| t.type_id)
+            .and_then(crate::ElementId::as_u32)
+    }
+
+    /// Base elevation in feet (trailer `+0xf6`, else core start Z).
+    pub fn base_elevation_feet(&self) -> Option<f64> {
+        self.trailer
+            .as_ref()
+            .and_then(|t| t.base_elevation_feet)
+            .or_else(|| {
+                let z = self.record.start_point().2;
+                z.is_finite().then_some(z)
+            })
+    }
+
+    /// Unconnected height from the core Z delta when present.
+    pub fn height_feet(&self) -> Option<f64> {
+        self.record.height_feet()
+    }
+
+    /// Thickness is not present in the 2023 singleton ArcWall trailer
+    /// (RE-15). Always `None` until a WallType / HostObjAttr width
+    /// join lands.
+    pub fn thickness_feet(&self) -> Option<f64> {
+        None
+    }
+
+    pub fn partition_ref(&self) -> PartitionArcWallRef {
+        PartitionArcWallRef {
+            partition: self.partition.clone(),
+            offset: self.offset,
+        }
+    }
+}
+
+/// Version-scoped scan report across every `Partitions/*` stream.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartitionArcWallScan {
+    pub status: ArcWallScanStatus,
+    pub walls: Vec<PartitionArcWall>,
+    /// Bytes inspected across all partition buffers (after inflate).
+    pub scanned_bytes: usize,
+    /// Present when a [`WalkerLimits`] cap stopped or truncated the scan.
+    pub limit_hit: Option<WalkerLimitHit>,
+}
+
+/// Scan every `Partitions/*` stream for version-gated standard
+/// ArcWall records. Unsupported Revit releases return an empty wall
+/// list with an `UnsupportedVersion` status (no 2023 pattern applied).
+pub fn scan_partition_arc_walls(
+    rf: &mut RevitFile,
+    revit_version: u32,
+) -> Result<PartitionArcWallScan> {
+    scan_partition_arc_walls_with_limits(rf, revit_version, WalkerLimits::default())
+}
+
+/// Same as [`scan_partition_arc_walls`], applying explicit
+/// [`WalkerLimits`] to every partition buffer scan so crafted large
+/// streams cannot force unbounded candidate materialisation.
+///
+/// The file keeps its latest scan (`RevitFile::memoised_arc_wall_scan`): a
+/// repeat call with the same release and limits returns a copy of it, and a
+/// call with other limits scans again.
+pub fn scan_partition_arc_walls_with_limits(
+    rf: &mut RevitFile,
+    revit_version: u32,
+    limits: WalkerLimits,
+) -> Result<PartitionArcWallScan> {
+    Ok(PartitionArcWallScan::clone(
+        &rf.memoised_arc_wall_scan(revit_version, limits),
+    ))
+}
+
+/// The scan [`scan_partition_arc_walls_with_limits`] describes, run in
+/// full.
+pub(crate) fn compute_partition_arc_walls(
+    rf: &mut RevitFile,
+    revit_version: u32,
+    limits: WalkerLimits,
+) -> PartitionArcWallScan {
+    let status = ArcWallRecord::standard_decoder_status(revit_version);
+    if !status.is_supported() {
+        return PartitionArcWallScan {
+            status,
+            walls: Vec::new(),
+            scanned_bytes: 0,
+            limit_hit: None,
+        };
+    }
+
+    let partition_streams = rf.partition_stream_names();
+
+    let mut walls = Vec::new();
+    let mut scanned_bytes = 0usize;
+    let mut limit_hit = None;
+    for partition in partition_streams {
+        if walls.len() >= limits.max_candidates {
+            limit_hit.get_or_insert(WalkerLimitHit::MaxCandidates);
+            break;
+        }
+        let Ok(inflated) = rf.inflated_partition(&partition) else {
+            continue;
+        };
+        let concat = inflated.bytes();
+        if concat.len() < STANDARD_RECORD_MIN_SIZE {
+            continue;
+        }
+        let remaining = limits.max_candidates.saturating_sub(walls.len());
+        let partition_limits = WalkerLimits {
+            max_candidates: remaining,
+            ..limits
+        };
+        let report = ArcWallRecord::scan_standard_for_revit_version_with_limits(
+            revit_version,
+            concat,
+            partition_limits,
+        );
+        scanned_bytes = scanned_bytes.saturating_add(report.scanned_bytes);
+        if let Some(hit) = report.limit_hit {
+            limit_hit.get_or_insert(hit);
+        }
+        for off in report.offsets {
+            let Ok(record) = ArcWallRecord::decode_standard(concat, off) else {
+                continue;
+            };
+            let trailer = ArcWallRecord::decode_trailer(concat, off);
+            walls.push(PartitionArcWall {
+                partition: partition.clone(),
+                offset: off,
+                record,
+                trailer,
+            });
+            if walls.len() >= limits.max_candidates {
+                limit_hit.get_or_insert(WalkerLimitHit::MaxCandidates);
+                break;
+            }
+        }
+        if matches!(
+            limit_hit,
+            Some(WalkerLimitHit::MaxCandidates | WalkerLimitHit::MaxScanBytes)
+        ) {
+            break;
+        }
+    }
+
+    PartitionArcWallScan {
+        status,
+        walls,
+        scanned_bytes,
+        limit_hit,
+    }
+}
+
+/// Convenience wrapper: read BasicFileInfo version, then scan.
+pub fn iter_partition_arc_walls(rf: &mut RevitFile) -> Result<PartitionArcWallScan> {
+    let version = rf.layout_release()?;
+    scan_partition_arc_walls(rf, version)
+}
+
+/// Build ElementId → partition-record index from decoded ArcWalls.
+///
+/// Only walls whose trailer ElementId validated are indexed. Duplicate
+/// ElementIds keep the first occurrence (stable scan order).
+pub fn element_id_partition_index(
+    walls: &[PartitionArcWall],
+) -> BTreeMap<u32, PartitionArcWallRef> {
+    let mut map = BTreeMap::new();
+    for wall in walls {
+        if let Some(id) = wall.element_id() {
+            map.entry(id).or_insert_with(|| wall.partition_ref());
+        }
+    }
+    map
+}
+
+/// Result of deriving storeys from ArcWall elevations, optionally
+/// labelled with partition Level-like display names (RE-15, #86).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArcWallStoreyRecovery {
+    pub storeys: Vec<Storey>,
+    /// Storeys whose name came from a partition Level-like string.
+    pub named_from_partition: usize,
+    /// Storeys that still use the `Elevation … ft` fallback label.
+    pub elevation_fallback: usize,
+    /// Count of building-storey name candidates considered.
+    pub level_name_candidates: usize,
+}
+
+/// Derive IFC building storeys from distinct ArcWall base elevations.
+///
+/// When `level_names` contains confident building-storey labels
+/// (see [`crate::partition_name_candidates::is_building_storey_name`]),
+/// names are applied by ordinal (`Level 1` → lowest elevation, `Roof`
+/// → highest) or by exact count zip. Unmatched storeys keep an
+/// elevation fallback label — never invent a `"Level 1"` placeholder
+/// for the whole model.
+pub fn storeys_from_arc_wall_base_elevations(walls: &[PartitionArcWall]) -> Vec<Storey> {
+    recover_storeys_from_arc_walls(walls, &[]).storeys
+}
+
+/// Like [`storeys_from_arc_wall_base_elevations`], but applies partition
+/// Level-like display names when the match is confident enough.
+pub fn recover_storeys_from_arc_walls(
+    walls: &[PartitionArcWall],
+    level_names: &[String],
+) -> ArcWallStoreyRecovery {
+    let mut elevations: Vec<f64> = walls
+        .iter()
+        .filter_map(PartitionArcWall::base_elevation_feet)
+        .filter(|z| z.is_finite())
+        .collect();
+    elevations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    elevations.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+
+    let filtered: Vec<String> = level_names
+        .iter()
+        .filter(|n| crate::partition_name_candidates::is_building_storey_name(n))
+        .cloned()
+        .collect();
+
+    let mut storeys: Vec<Storey> = elevations
+        .iter()
+        .map(|&elevation_feet| Storey {
+            name: elevation_storey_name(elevation_feet),
+            elevation_feet,
+        })
+        .collect();
+
+    if storeys.is_empty() {
+        return ArcWallStoreyRecovery {
+            storeys,
+            named_from_partition: 0,
+            elevation_fallback: 0,
+            level_name_candidates: filtered.len(),
+        };
+    }
+
+    if filtered.len() == storeys.len() {
+        let ordered = order_building_storey_names(&filtered);
+        for (storey, name) in storeys.iter_mut().zip(ordered) {
+            storey.name = name;
+        }
+    } else {
+        apply_pattern_storey_names(&mut storeys, &filtered);
+    }
+
+    let named_from_partition = storeys
+        .iter()
+        .filter(|s| !s.name.starts_with("Elevation "))
+        .count();
+    let elevation_fallback = storeys.len() - named_from_partition;
+    ArcWallStoreyRecovery {
+        storeys,
+        named_from_partition,
+        elevation_fallback,
+        level_name_candidates: filtered.len(),
+    }
+}
+
+fn parse_level_number(name: &str) -> Option<u32> {
+    let lower = name.trim().to_ascii_lowercase();
+    let rest = lower.strip_prefix("level ")?;
+    let digits: String = rest.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() || digits.len() != rest.chars().filter(|c| !c.is_whitespace()).count() {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// Sort recovered Level display names into building order —
+/// basement, ground, numbered levels, mezzanine, roof — so a name
+/// list can be zipped against an ascending elevation list when (and
+/// only when) the two are the same length.
+pub fn order_building_storey_names(names: &[String]) -> Vec<String> {
+    let mut indexed: Vec<(i32, String)> = names
+        .iter()
+        .map(|name| {
+            let lower = name.to_ascii_lowercase();
+            let rank = if lower == "basement" {
+                -2
+            } else if lower == "ground floor" || lower == "groundfloor" {
+                -1
+            } else if lower == "roof" {
+                10_000
+            } else if let Some(n) = parse_level_number(name) {
+                n as i32
+            } else if lower == "first floor" {
+                1
+            } else if lower == "second floor" {
+                2
+            } else if lower == "third floor" {
+                3
+            } else if lower == "mezzanine" {
+                50
+            } else if lower == "podium" {
+                0
+            } else {
+                100
+            };
+            (rank, name.clone())
+        })
+        .collect();
+    indexed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    indexed.into_iter().map(|(_, name)| name).collect()
+}
+
+fn apply_pattern_storey_names(storeys: &mut [Storey], names: &[String]) {
+    for name in names {
+        let lower = name.to_ascii_lowercase();
+        if lower == "roof" {
+            if let Some(last) = storeys.last_mut() {
+                if last.name.starts_with("Elevation ") {
+                    last.name = name.clone();
+                }
+            }
+            continue;
+        }
+        if lower == "ground floor"
+            || lower == "groundfloor"
+            || lower == "basement"
+            || lower == "podium"
+        {
+            if let Some(first) = storeys.first_mut() {
+                if first.name.starts_with("Elevation ") {
+                    first.name = name.clone();
+                }
+            }
+            continue;
+        }
+        if let Some(n) = parse_level_number(name) {
+            let idx = (n as usize).saturating_sub(1);
+            if let Some(storey) = storeys.get_mut(idx) {
+                if storey.name.starts_with("Elevation ") {
+                    storey.name = name.clone();
+                }
+            }
+        }
+    }
+}
+
+/// Match a wall's base elevation to a storey index (nearest within
+/// 1e-3 ft). Returns `None` when no storeys match.
+pub fn storey_index_for_elevation(storeys: &[Storey], elevation_feet: f64) -> Option<usize> {
+    storeys
+        .iter()
+        .enumerate()
+        .find(|(_, storey)| (storey.elevation_feet - elevation_feet).abs() < 1e-3)
+        .map(|(idx, _)| idx)
+}

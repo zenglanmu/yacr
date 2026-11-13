@@ -24,6 +24,7 @@ Stdlib only. The tests shell out to the guards; they do not import them.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
 import subprocess
@@ -224,6 +225,78 @@ class ArchitectureGuardContract(unittest.TestCase):
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assert_rejected(completed)
         self.assertIn("iced", completed.stderr)
+
+    # ---- `[patch.crates-io]` policy (ADR-0031 / ADR-0035) -----------------
+
+    def write_rvt_patch(
+        self, *, vendored_version: str = "0.17.0", lock_source: bool = False
+    ) -> None:
+        """A workspace whose only patch is the fixed `vendor/rvt` path copy."""
+        members = ", ".join(f'"{member}"' for member in ARCH_MEMBERS)
+        (self.root / "Cargo.toml").write_text(
+            f'[workspace]\nresolver = "2"\nexclude = ["vendor/rvt"]\n'
+            f"members = [{members}]\n\n"
+            '[workspace.dependencies]\nrvt = "=0.17.0"\n\n'
+            '[patch.crates-io]\nrvt = { path = "vendor/rvt" }\n',
+            encoding="utf-8",
+        )
+        docs = self.root / "docs"
+        docs.mkdir(exist_ok=True)
+        (docs / "rvt-patches.md").write_text(
+            "# rvt patch ledger\n\nworkspace pin: `rvt = \"=0.17.0\"`\n",
+            encoding="utf-8",
+        )
+        vendor = self.root / "vendor" / "rvt"
+        (vendor / "src" / "ifc").mkdir(parents=True, exist_ok=True)
+        (vendor / "Cargo.toml").write_text(
+            f'[package]\nname = "rvt"\nversion = "{vendored_version}"\n',
+            encoding="utf-8",
+        )
+        (vendor / "src" / "ifc" / "gltf.rs").write_text("// patched file\n", encoding="utf-8")
+        upstream = vendor / "src" / "lib.rs"
+        upstream.write_text("// upstream file\n", encoding="utf-8")
+        sums = [
+            f"{hashlib.sha256((vendor / relative).read_bytes()).hexdigest()}  {relative}"
+            for relative in ("Cargo.toml", "src/lib.rs")
+        ]
+        (vendor / "SHA256SUMS").write_text("\n".join(sums) + "\n", encoding="utf-8")
+        source = 'source = "registry+https://example.invalid/index"\n' if lock_source else ""
+        (self.root / "Cargo.lock").write_text(
+            'version = 4\n\n[[package]]\nname = "rvt"\nversion = "0.17.0"\n'
+            f"{source}dependencies = []\n",
+            encoding="utf-8",
+        )
+
+    def test_fixed_rvt_path_patch_with_ledger_pins_is_accepted(self) -> None:
+        self.write_rvt_patch()
+        completed = run_guard(ARCHITECTURE_GUARD, self.root)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_vendored_version_drift_is_rejected(self) -> None:
+        # A version mismatch makes Cargo ignore the patch ("patch was not used")
+        # while the build silently links the registry crate.
+        self.write_rvt_patch(vendored_version="0.17.9")
+        self.assert_rejected(run_guard(ARCHITECTURE_GUARD, self.root))
+
+    def test_a_second_modified_vendored_file_is_rejected(self) -> None:
+        self.write_rvt_patch()
+        upstream = self.root / "vendor" / "rvt" / "src" / "lib.rs"
+        upstream.write_text("// upstream file\n// extra edit\n", encoding="utf-8")
+        self.assert_rejected(run_guard(ARCHITECTURE_GUARD, self.root))
+
+    def test_a_lock_still_resolving_the_registry_crate_is_rejected(self) -> None:
+        self.write_rvt_patch(lock_source=True)
+        self.assert_rejected(run_guard(ARCHITECTURE_GUARD, self.root))
+
+    def test_a_patch_key_outside_the_allow_list_is_rejected(self) -> None:
+        self.write_rvt_patch()
+        manifest = self.root / "Cargo.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8") + 'serde = { path = "vendor/serde" }\n',
+            encoding="utf-8",
+        )
+        completed = run_guard(ARCHITECTURE_GUARD, self.root)
+        self.assert_rejected(completed)
 
     def test_inherited_benign_alias_is_accepted(self) -> None:
         # An inherited alias that is not a toolkit must not be over-rejected: with
