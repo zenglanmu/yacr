@@ -1,8 +1,9 @@
 # ADR 0034：TypeScript 二次开发 API（AutoCAD .NET 命名空间镜像 + 宿主代理）
 
-- 状态：**Accepted（2026-11-13，骨架落地）**。本 ADR 定的是**契约与目录边界**：API 包、宿主
-  adapter、`cad_api_status` 能力描述符与显式拒绝语义。**没有任何文档/编辑器操作在本轮实现**，
-  描述符是 **20 行宿主操作、全部 `pending`**（纯值类型与 manifest 解析是包内特性，没有行）。
+- 状态：**Accepted（2026-11-13，骨架 + 第一条只读操作）**。本 ADR 定的是**契约与目录边界**：API
+  包、宿主 adapter、`cad_api_status` 能力描述符与显式拒绝语义，以及 `cad_api_call` 的最小只读
+  通道。**唯一真实实现的宿主操作是 `documentManager.mdiActiveDocument`**（其余 19 行仍
+  `pending`）：事务、编辑器提示、`documents` 列表都还没有实现。
   证据只到 Node 契约测试与 Linux 上的 `cargo check`/`cargo test`；真实 GUI、真机、WebView、
   GPU/像素全部 **NOT VERIFIED**。
 - 日期：2026-11-13。
@@ -110,11 +111,12 @@ tsconfig/vite 别名或裸包名：仓库没有 npm workspace、也没有签入�
 5. 自洽性：`documentOwner: 'none'` 却出现 `supported` 的 `ApplicationServices`/`DatabaseServices`
    行 → 拒绝 `api.descriptor_invalid: documentOwner`（没有文档所有者却声称服务文档操作）。
 
-**本版本状态（诚实表）**：描述符 20 行、**全部 `pending`**——`ApplicationServices`（3）、
-`DatabaseServices`（7）、`EditorInput`（9）、`Runtime.registerCommand`（1）。**当前插件 API
-不能读写文档、不能提示输入，也不能注册可执行命令**；没有任何 `supported` 行，因此也没有任何
-"宿主说过支持"却无实现的可能。Geometry/Colors/`parsePluginManifest` 不是宿主能力，不进表，
-由包无条件提供。这不是遗漏，是描述符明示的下一步。
+**本版本状态（诚实表）**：描述符 20 行——**19 行 `pending` + 1 行 `supported`**
+（`ApplicationServices.documentManager.mdiActiveDocument`）。`ApplicationServices`（3，仅一项已
+服务）、`DatabaseServices`（7）、`EditorInput`（9）、`Runtime.registerCommand`（1）其余全
+`pending`。**插件只能读取"当前文档是谁"；不能枚举 `documents`、不能读实体/符号表、不能提示
+输入、不能注册可执行命令。** Geometry/Colors/`parsePluginManifest` 不是宿主能力，不进表，由包
+无条件提供。这不是遗漏，是描述符明示的下一步。
 
 **理由**：能力来自宿主，TS 端不得单方面宣布支持；把"未实现"建模成稳定拒绝码，插件作者在编译期
 之外还能拿到可解释的运行时错误。
@@ -274,8 +276,8 @@ interface PluginManifest {
 
 | 载体 | `surfaceMode` | `cad_api_status` | 受门控操作 | 说明 |
 |---|---|---|---|---|
-| Linux 原生 Wayland | `native-below` | 由 Tauri wrapper 服务 | 全部 `pending` 拒绝 | 描述符一致，本轮无运行证据 |
-| Linux X11/XWayland | `dom-canvas` | 由 wasm `DirectSink` 服务 | 同上 | 同一份 JSON、同一条 wire 名 |
+| Linux 原生 Wayland | `native-below` | 由 Tauri wrapper 服务 | 仅 `mdiActiveDocument`（owner-tick 镜像），其余 `pending` 拒绝 | 描述符一致，本轮无运行证据 |
+| Linux X11/XWayland | `dom-canvas` | 由 wasm `DirectSink` 服务 | 同上（读实时 `CadSession`） | 同一份 JSON、同一条 wire 名 |
 | Windows / macOS / Android | `native-below` | 生成 wrapper | 同上 | 仅编译/契约，未运行验证 |
 | Web | `dom-canvas` | wasm 会话 | 同上 | Web 没有插件目录；本轮不装插件 |
 
@@ -317,14 +319,27 @@ interface PluginManifest {
 - 门禁：`check-file-size.py`、`check-i18n.py`、`check-architecture.py`、`check-command-docs.py`
   （及其自测）、`cargo fmt --check` 通过。
 
+第三轮（第一条只读操作 `cad_api_call`，2026-11-13）已运行：
+
+- Rust：`cargo test -p cad-ui-core --lib` **607 passed**（含 `session::api_call` 9 项与
+  `tests_wire` 的 snapshot 两种 `None` 语义）、`cargo test -p app-web` **123/123**（矩阵含
+  `cad_api_call` 的成功/未知/无文档/`cad_waiting` 用例）、`wire_goldens` 4/4、
+  `cargo check -p app-linux --all-targets`、`cargo fmt --check`、`check-architecture` /
+  `check-file-size` 通过。
+- TS：包 `tsc` + 48/48（1 行 supported 由名字钉住）、desktop-ui `tsc` + plugin-api/host-adapter
+  66/66、`npm test` 整条 **1639/1639**。
+- **NOT VERIFIED**：Windows/macOS/Android 的 tick 赋值只有同形代码，未在该平台编译/运行；
+  `mdiActiveDocument` 的真实 GUI 读取（镜像最多滞后一个 owner tick）未验证。
+
 **NOT RUN / NOT VERIFIED**：真实 GUI 中加载插件、任何 `supported` 的文档/编辑器操作、命令派发、
 Windows/macOS/Android/Web 运行、真实 WebView CSP、GPU/像素、插件隔离与签名。
 
 ## 7. 后果与未决
 
 - 里程碑（明确、不在本轮）：
-  - **M2** 结构化 wire 车道（如 `cad_api_call`）+ 只读操作（`database.getObjectId`、
-    `database.symbolTables`、`editor.getSelection`）。
+  - **M2** 只读操作：`cad_api_call` 通道与 `documentManager.mdiActiveDocument` **已落地**；
+    剩余 `documentManager.documents`、`database.symbolTables`、`database.revision`、
+    `editor.currentSelection`（继续沿用同一条 `reads` 车道与镜像/实时双实现）。
   - **M3** 事务提交：`expectedRevision`、编辑缓冲、撤销分组、冲突映射。上线前必须解决：
     - `translate`/`delete` 要映射到 `SelectionRef { document, entity, instance, sub_element }`；
       instanced / 子元素引用由宿主侧拒绝（客户端只有 `ObjectId`，没有 instance/sub-element 位）。

@@ -1,5 +1,27 @@
 AD
 
+## 2026-11-13 插件 API M2.1：`cad_api_call` + 活动文档只读
+
+- **新增**：共享 wire 命令 `cad_api_call`（`reads` 车道，args `{namespace,operation,parameters?}`，
+  回 `{ok,value?,error?}`）。唯一真实操作
+  `ApplicationServices.documentManager.mdiActiveDocument` → `{document:{id,name,isReadOnly,
+  database:{id,version}}}` 或 `{document:null}`；其余操作 `unsupported-runtime: cad_api.<ns>.<op>`。
+- **快照语义**：`CadApiSnapshot{document}` 区分"还没有 tick 镜像"（`cad_waiting`）与"会话存在但
+  没有文档"（`ok:true` + `document:null`）；`native-below` 由 4 个原生 tick 镜像
+  `Shared.cad_api_snapshot`，`dom-canvas` 直接读实时 `CadSession`。`cad-db` 仍是唯一权威，
+  镜像只读、不回写。
+- **客户端**：`documentManager.mdiActiveDocument()` / `documents()` 改为 **Promise 方法**（wire 是
+  异步的；同步属性只能靠过期缓存）；`DocumentDescriptor` 的数据库身份改为 `{id,version}`，
+  `Database.id` 取代借用的 `handle` 名。能力表 **19 pending + 1 supported**，由 JSON 与包内表
+  逐行一致并由契约测试按名字钉住；adapter 仅转发该一项，其余仍 `api.adapter-missing` 且不触达
+  invoke。
+- **边界**：`documents` 列表、符号表、revision、编辑器提示、事务、命令派发仍 `pending`；
+  镜像最多滞后一个 owner tick；Windows/macOS/Android 的 tick 赋值未在该平台编译/运行。
+- **证据**：`cargo test -p cad-ui-core --lib` 607、`-p app-web` 123、`wire_goldens` 4/4、
+  `cargo check -p app-linux --all-targets`、`fmt`、`check-architecture` / `check-file-size`；
+  包 node 48/48、desktop-ui plugin-api+host-adapter 66/66、`npm test` 整条 **1639/1639**。
+  **NOT RUN**：真实 GUI 读取、GUI/GPU/像素/真机、Windows/macOS/Android/Web 运行。
+
 ## 2026-11-13 TypeScript 二次开发 API 骨架（ADR 0034）
 
 - **新增**：`packages/cad-plugin-api`（`@yacr/plugin-api`）——AutoCAD .NET 命名空间镜像

@@ -1,9 +1,10 @@
 # TypeScript 二次开发 API（`@yacr/plugin-api`）
 
-> 状态：**骨架（2026-11-13）**。契约、目录、能力协商与拒绝语义已落地；能力表是
-> **20 行、全部 `pending`**——本构建不服务任何宿主操作，插件不能读写文档、不能提示输入、
-> 不能注册可被派发的命令。可用的只有**包内特性**（Geometry/Colors 值构造、manifest 解析），
-> 它们不走 wire，因此不在描述符里。设计依据见
+> 状态：**骨架 + 第一条只读操作（2026-11-13）**。契约、目录、能力协商与拒绝语义已落地；
+> 20 行宿主操作中 **19 行 `pending`、1 行 `supported`**
+> （`ApplicationServices.documentManager.mdiActiveDocument`）。插件只能读取"当前文档是谁"；
+> 枚举文档、读实体/符号表、提示输入、注册可派发命令**仍未实现**。包内特性（Geometry/Colors
+> 值构造、manifest 解析）不走 wire，不在描述符里。设计依据见
 > [ADR 0034](adr/0034-typescript-plugin-api.md)。
 
 AutoCAD 的二次开发事实标准是 .NET API（`Autodesk.AutoCAD.ApplicationServices` /
