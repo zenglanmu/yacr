@@ -25,7 +25,9 @@
 // `ApplicationServices.documentManager.documents`,
 // `DatabaseServices.database.symbolTables`, `DatabaseServices.database.revision`
 // and `EditorInput.editor.currentSelection`.
-// One mutation is wired (M3.2): `DatabaseServices.transaction.commit`.
+// Three live-session operations are wired over the submit lane (M3.2/M3.3):
+// `DatabaseServices.transaction.commit`, `DatabaseServices.database.getObjectId`
+// and `DatabaseServices.transaction.getObject`.
 //
 // Every other request - including a `supported` row this adapter has not wired -
 // is refused locally as `api.adapter-missing: <namespace>.<operation>` and the
@@ -79,6 +81,8 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'ApplicationServices.documentManager.documents',
   'DatabaseServices.database.symbolTables',
   'DatabaseServices.database.revision',
+  'DatabaseServices.database.getObjectId',
+  'DatabaseServices.transaction.getObject',
   'DatabaseServices.transaction.commit',
   'EditorInput.editor.currentSelection',
 ];
@@ -288,6 +292,10 @@ export function createCadHostBridge(deps: CadBridgeDeps): CadHostBridge {
     },
     async mutate<Result>(request: CadApiRequest): Promise<Result> {
       requireWellFormedRequest(request);
+      // Reads of the live session (`getObjectId`, `getObject`) travel this lane
+      // too: the host serves them from the session, so they are queued and polled
+      // exactly like a commit. The label check is the same list, so a supported row
+      // the adapter has not wired still refuses locally.
       if (!IMPLEMENTED_OPERATIONS.includes(`${request.namespace}.${request.operation}`)) {
         throw adapterMissing(request.namespace, request.operation);
       }

@@ -54,24 +54,26 @@ function namespaceNames(value: unknown): readonly unknown[] {
   });
 }
 
-test('the table is 18 host operations: 12 pending and six served', () => {
+test('the table is 18 host operations: 10 pending and eight served', () => {
   assert.equal(API_OPERATIONS.length, 18, 'the v1 descriptor has 18 host-operation rows');
   const supported = API_OPERATIONS.filter((row) => row.status === 'supported').map(
     (row) => `${row.namespace}.${row.operation}`,
   );
-  // Six capabilities are served in this build, and these are exactly them: five
-  // reflected reads (the `cad_api_call` lane) and one transactional mutation (the
-  // `cad_api_submit` lane). Widening the set is a contract change.
+  // Eight capabilities are served in this build, and these are exactly them: five
+  // reflected reads (the `cad_api_call` lane) and three live-session operations
+  // (the `cad_api_submit` lane). Widening the set is a contract change.
   assert.deepEqual(supported, [
     'ApplicationServices.documentManager.mdiActiveDocument',
     'ApplicationServices.documentManager.documents',
+    'DatabaseServices.database.getObjectId',
     'DatabaseServices.database.symbolTables',
     'DatabaseServices.database.revision',
+    'DatabaseServices.transaction.getObject',
     'DatabaseServices.transaction.commit',
     'EditorInput.editor.currentSelection',
   ]);
   const pending = API_OPERATIONS.filter((row) => row.status === 'pending');
-  assert.equal(pending.length, 12, 'every other host operation is still pending');
+  assert.equal(pending.length, 10, 'every other host operation is still pending');
 });
 
 test('client-local operations have no descriptor row', () => {

@@ -16,8 +16,6 @@ import {
   API_OPERATIONS,
   CadApiError,
   createCadApi,
-  handle,
-  objectId,
   parsePluginManifest,
   TransactionManager,
 } from '../src/index.ts';
@@ -162,12 +160,6 @@ test('every gated v1 call refuses with its exact pending code and no request', a
 
   const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
 
-  const database = createDatabase(wire, { id: 'db-1', version: '3' });
-  await expectRejectCode(
-    () => database.getObjectId(handle('2A')),
-    'api.pending: DatabaseServices.database.getObjectId',
-  );
-
   const document = createDocument(wire, {
     id: 'doc-1',
     name: 'drawing.dwg',
@@ -179,26 +171,20 @@ test('every gated v1 call refuses with its exact pending code and no request', a
     'api.pending: ApplicationServices.document.lock',
   );
 
-  // Opening a transaction is client-local (no row), so this test has no
-  // transaction call to gate; `transaction.getObject` is covered above by the
-  // database read it would resemble, and the commit lane has its own tests.
+  // Every remaining host operation is served, so the gate above is what this test
+  // is about; opening a transaction is client-local and has no row to gate.
   assert.equal(spy.calls.length, 0, `no request may escape on a refusal: ${JSON.stringify(spy.calls)}`);
   assert.equal(spy.mutations.length, 0);
 });
 
 test('opening, staging and aborting a transaction are client-local', async () => {
   // The host serves no `transaction.start`/`addNewlyCreated`/`abort` row: those
-  // are this client's own bookkeeping. Only `getObject` (still pending) and the
-  // commit (served) ever reach the host.
+  // are this client's own bookkeeping, so they send nothing on either lane.
   const spy = spyBridge(API_OPERATIONS);
   const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
   const manager = new TransactionManager(wire, 'doc-1');
   const transaction = manager.startTransaction({ expectedRevision: 1 });
 
-  await expectRejectCode(
-    () => transaction.getObject(objectId('2A'), 'read'),
-    'api.pending: DatabaseServices.transaction.getObject',
-  );
   transaction.addNewlyCreatedDBObject(
     { typeName: 'Line', layer: 'A', space: 'model', parameters: {} },
     true,

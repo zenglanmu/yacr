@@ -139,12 +139,19 @@ export interface Arc extends Curve {
   readonly endAngle: number;
 }
 
-/** A lightweight polyline. */
+/**
+ * A lightweight polyline.
+ *
+ * The shape follows the host's `SemanticGeometry::Polyline`: the vertices (in
+ * order), whether it is closed, and its constant `width` (0 when it has none).
+ * There is no vertex count separate from `points.length` — the list is the count.
+ */
 export interface Polyline extends Curve {
   readonly typeName: 'Polyline';
-  readonly numberOfVertices: number;
   readonly points: readonly Point3d[];
-  readonly isClosed: boolean;
+  readonly closed: boolean;
+  /** The constant width, `0` when the polyline has none. */
+  readonly width: number;
 }
 
 /** A single-line text object. */
@@ -248,6 +255,14 @@ export interface SymbolTables {
 export interface Database {
   readonly id: string;
   readonly version: string;
+  /**
+   * The object id whose imported handle matches, or `null` for an unknown handle.
+   *
+   * A **live-session** read: it goes over the submit lane with
+   * `{ database: id, handle }`, because a handle lookup is not part of the
+   * reflected snapshot. `null` is a real answer ("no entity carries that handle"),
+   * not a failure.
+   */
   getObjectId(handle: Handle): Promise<ObjectId | null>;
   /**
    * The database's current revision, read from the host.
@@ -342,8 +357,7 @@ function requireComponent(value: unknown, field: string): number {
  * read has not fixed its own encoding yet, so both are accepted. A two-element
  * array, a fourth element, or a non-finite component is refused by field.
  */
-function requirePoint(record: Readonly<Record<string, unknown>>, field: string): Point3d {
-  const value = record[field];
+function decodePointValue(value: unknown, field: string): Point3d {
   if (Array.isArray(value)) {
     if (value.length !== 3) throw invalidArgument(`bridge.answer.${field}`);
     return point3d(
@@ -358,6 +372,10 @@ function requirePoint(record: Readonly<Record<string, unknown>>, field: string):
     requireComponent(value['y'], `bridge.answer.${field}.y`),
     requireComponent(value['z'], `bridge.answer.${field}.z`),
   );
+}
+
+function requirePoint(record: Readonly<Record<string, unknown>>, field: string): Point3d {
+  return decodePointValue(record[field], field);
 }
 
 function requireEntityColor(
@@ -492,15 +510,19 @@ function decodeArc(record: Readonly<Record<string, unknown>>): Arc {
 }
 
 function decodePolyline(record: Readonly<Record<string, unknown>>): Polyline {
-  const points = requireRecords(record, 'points').map((point, index) =>
-    requirePoint(point, `points[${index}]`),
-  );
+  const raw = record['points'];
+  if (!Array.isArray(raw)) throw invalidArgument('bridge.answer.points');
+  // Each element is decoded by position: the old decoder looked up a field named
+  // `points[i]` *inside* the point record, so no valid payload could decode.
+  const points = raw.map((entry, index) => decodePointValue(entry, `points[${index}]`));
+  const width = requireNumber(record, 'width');
+  if (width < 0) throw invalidArgument('bridge.answer.width');
   return {
     ...decodeEntityFields(record),
     typeName: 'Polyline',
-    numberOfVertices: requireNumber(record, 'numberOfVertices'),
     points,
-    isClosed: requireBoolean(record, 'isClosed'),
+    closed: requireBoolean(record, 'closed'),
+    width,
     length: requireNumber(record, 'length'),
   };
 }
@@ -638,7 +660,10 @@ export function createDatabase(wire: CadApiWire, descriptor: DatabaseDescriptor)
     id: databaseId,
     version: descriptor.version.trim(),
     async getObjectId(value: Handle): Promise<ObjectId | null> {
-      const answer = await wire.call('DatabaseServices', 'database.getObjectId', {
+      // A live-session lookup, so it is a **submit-lane** read: the host answers
+      // from the session, not from the reflected snapshot.
+      const answer = await wire.submit('DatabaseServices', 'database.getObjectId', {
+        database: databaseId,
         handle: value,
       });
       const record = requireAnswerObject(answer, 'bridge.answer');

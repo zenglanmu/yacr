@@ -75,16 +75,18 @@ silent success. Host failures arrive as `CadApiError`; branch on `code`, not mes
 
 ## v1 status
 
-**The descriptor is 18 rows: six `supported`, 12 `pending`.** Five served
+**The descriptor is 18 rows: eight `supported`, 10 `pending`.** Five served
 operations are reflected reads over `cad_api_call` —
 `documentManager.mdiActiveDocument` (the open `Document`, or `null`),
 `documentManager.documents` (0 or 1 `Document`, `[]` when none is open),
 `database.symbolTables` (the block/layer projection plus the active layer name),
 `database.revision` (`{ database: id }` -> the current revision number) and
 `editor.currentSelection` (the ids the user holds right now, `[]` when nothing is
-selected) — and one is a **mutation**: `transaction.commit`, queued through the
-carrier's submit/poll lane. Everything else is still a reservation — no other object
-read path and no prompts.
+selected). Three are **live-session** operations over the submit/poll lane, because
+they read the session rather than the reflected snapshot: `database.getObjectId`
+(a handle lookup, `null` when no entity carries it), `transaction.getObject` (one
+entity, decoded by its `typeName`) and `transaction.commit`. Everything else is
+still a reservation: `document.lock`, the nine editor prompts.
 
 `Runtime` has **no row at all**: command registration is client-local. `createCadApi`
 takes an optional `onCommandRegister`/`onCommandUnregister` hook pair, and a plugin
@@ -100,14 +102,14 @@ not interpreted: the only dispatch path in this build is a typed command line.
 | --- | --- |
 | `ApplicationServices.documentManager.mdiActiveDocument`, `.documents` (2) | `supported` — reflected document reads |
 | `ApplicationServices.document.lock` (1) | `pending` — no lock path yet |
+| `DatabaseServices.database.getObjectId` (1) | `supported` — live-session handle lookup, submit lane |
 | `DatabaseServices.database.symbolTables` (1) | `supported` — block/layer tables and `clayer`, one cached read |
 | `DatabaseServices.database.revision` (1) | `supported` — current revision, read every call |
-| `DatabaseServices.transaction.commit` (1) | `supported` — the one mutating operation, over the submit/poll lane |
-| `DatabaseServices` (2 more) | `pending` — `database.getObjectId`, `transaction.getObject` |
-| `Runtime` (0) | client-local — commands register through the host hook, no host operation |
+| `DatabaseServices.transaction.getObject` (1) | `supported` — live-session entity read, submit lane |
+| `DatabaseServices.transaction.commit` (1) | `supported` — the one mutation, submit lane |
 | `EditorInput.editor.currentSelection` (1) | `supported` — the reflected selection, read without prompting |
-| `EditorInput` (8 more) | `pending` — no interactive prompt path yet |
-| `Runtime.runtime.registerCommand` (1) | `pending` — no chrome-local admission path yet |
+| `EditorInput` (9 more) | `pending` — no interactive prompt path yet |
+| `Runtime` (0) | client-local — commands register through the host hook, no host operation |
 
 `transaction.start`, `transaction.addNewlyCreated` and `transaction.abort` have **no
 row**: they are this client's own bookkeeping (the host mints no transaction handle),

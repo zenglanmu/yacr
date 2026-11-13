@@ -14,12 +14,13 @@
 // wire, so they have no row and are available unconditionally. Advertising them
 // in the descriptor would claim host state that does not exist.
 //
-// Six rows are `supported` in this build — the reflected document reads
-// (`documentManager.mdiActiveDocument`, `documentManager.documents`), the database
-// revision and symbol-table projections and the editor's current selection (all
-// over `cad_api_call`), and the transactional `transaction.commit` (over the
-// mutating `cad_api_submit` lane) — and the other 12 are `pending`: the table is an
-// honest reservation list, not an availability list. It is deliberately complete rather than aspirational — an
+// Eight rows are `supported` in this build: the reflected reads
+// (`documentManager.mdiActiveDocument`, `documentManager.documents`, the database
+// revision and symbol-table projections, the editor's current selection) over
+// `cad_api_call`; and the live-session operations (`database.getObjectId`,
+// `transaction.getObject`, `transaction.commit`) over the mutating
+// `cad_api_submit` lane. The other 10 are `pending`: the table is an honest
+// reservation list, not an availability list. It is deliberately complete rather than aspirational — an
 // operation that exists here but is `pending` is refused by name, an operation the
 // host marks `unsupported` is refused by name, and an operation the host does not
 // name at all is refused as `api.descriptor_missing`. There is no silent "maybe"
@@ -77,7 +78,7 @@ export const API_NAMESPACES: readonly CadApiNamespace[] = [
 ];
 
 /**
- * The v1 capability table: 18 host operations, 12 `pending` and six `supported`.
+ * The v1 capability table: 18 host operations, 10 `pending` and eight `supported`.
  *
  * Do not flip a row to `supported` here without the host side landing first (and
  * a `case` in the WebView adapter) — the contract test will catch the JSON drift,
@@ -106,11 +107,11 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
     status: 'pending',
     reason: pendingReason('ApplicationServices', 'document.lock'),
   },
+  // A handle lookup is a live-session read, so it is served by the submit lane.
   {
     namespace: 'DatabaseServices',
     operation: 'database.getObjectId',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'database.getObjectId'),
+    status: 'supported',
   },
   // The block/layer projection and the active layer name, as one read. Served, so
   // no `reason`; `Database.symbolTables` and `Database.clayer` share one request.
@@ -126,11 +127,12 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
     operation: 'database.revision',
     status: 'supported',
   },
+  // Opening an object reads the live session (submit lane); the entity is decoded
+  // by its `typeName`.
   {
     namespace: 'DatabaseServices',
     operation: 'transaction.getObject',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'transaction.getObject'),
+    status: 'supported',
   },
   // The only mutating operation this build performs: queued over
   // `cad_api_submit`, answered through `cad_api_poll`. `start`,

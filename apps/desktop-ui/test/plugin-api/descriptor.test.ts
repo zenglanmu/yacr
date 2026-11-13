@@ -66,15 +66,17 @@ test('the shipped contract parses with 18 rows at apiVersion 1', () => {
     [
       'ApplicationServices.documentManager.mdiActiveDocument',
       'ApplicationServices.documentManager.documents',
+      'DatabaseServices.database.getObjectId',
       'DatabaseServices.database.symbolTables',
       'DatabaseServices.database.revision',
+      'DatabaseServices.transaction.getObject',
       'DatabaseServices.transaction.commit',
       'EditorInput.editor.currentSelection',
     ],
   );
   assert.equal(
     payload.operations.filter((row) => row.status === 'pending').length,
-    12,
+    10,
     'every other row is still pending',
   );
 });

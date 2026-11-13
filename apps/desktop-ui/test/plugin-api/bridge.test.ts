@@ -92,12 +92,14 @@ test('a malformed host answer is refused with the cad_api_status prefix', async 
   );
 });
 
-test('this build implements exactly the five reads and one mutation', () => {
+test('this build implements exactly the five reads and three live-session operations', () => {
   assert.deepEqual(IMPLEMENTED_OPERATIONS, [
     'ApplicationServices.documentManager.mdiActiveDocument',
     'ApplicationServices.documentManager.documents',
     'DatabaseServices.database.symbolTables',
     'DatabaseServices.database.revision',
+    'DatabaseServices.database.getObjectId',
+    'DatabaseServices.transaction.getObject',
     'DatabaseServices.transaction.commit',
     'EditorInput.editor.currentSelection',
   ]);
@@ -105,7 +107,7 @@ test('this build implements exactly the five reads and one mutation', () => {
 
 test('every supported descriptor row has an adapter implementation', async () => {
   // The one rule that keeps the descriptor honest: a row may only be
-  // `supported` if this adapter can actually serve it. It has six rows to check
+  // `supported` if this adapter can actually serve it. It has eight rows to check
   // today and goes red the moment another row flips without a `case` (or a
   // mutating implementation) in `bridge.ts` - which is exactly when it must be
   // caught.
@@ -622,12 +624,12 @@ test('the served document list assembles documents end to end', async () => {
   assert.equal(documents[0].name, 'Drawing1');
   assert.equal(documents[0].database.id, '7');
 
-  // The document's database is the same capability-gated client: the revision read
-  // is served, but `getObjectId` is still pending and refuses by name without
-  // reaching the host.
+  // The document's services are the same capability-gated client: the revision
+  // read is served, but `document.lock` is still pending and refuses by name
+  // without reaching the host.
   assert.equal(await documents[0].database.revision(), 15);
-  await assert.rejects(documents[0].database.getObjectId('2A'), (error) => {
-    assert.equal(codeOf(error), 'api.pending: DatabaseServices.database.getObjectId');
+  await assert.rejects(documents[0].lockDocument(), (error) => {
+    assert.equal(codeOf(error), 'api.pending: ApplicationServices.document.lock');
     return true;
   });
   assert.equal(await documents[0].database.revision(), 15);
@@ -843,6 +845,76 @@ test('openPluginApi without hooks leaves command registration refused', async ()
       return true;
     },
   );
+});
+
+test('the live-session reads run end to end over submit + poll', async () => {
+  const lineObject = {
+    typeName: 'Line',
+    objectId: '12',
+    handle: '1A',
+    layer: 'WALLS',
+    color: { method: 'byLayer' },
+    linetype: { method: 'byLayer' },
+    startPoint: [0, 0, 0],
+    endPoint: [10, 0, 0],
+    length: 10,
+  };
+  const submitted = [];
+  const { invoke } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_call') {
+      return {
+        ok: true,
+        value: {
+          document: {
+            id: '42',
+            name: 'Drawing1',
+            isReadOnly: false,
+            database: { id: '7', version: '15' },
+          },
+        },
+      };
+    }
+    if (command === 'cad_api_submit') {
+      submitted.push(request);
+      return { accepted: true };
+    }
+    if (command === 'cad_api_poll') {
+      const last = submitted.at(-1);
+      const value = last.operation === 'database.getObjectId'
+        ? { objectId: '12' }
+        : { object: lineObject };
+      return { results: [{ requestId: last.requestId, ok: true, value }] };
+    }
+    return { ok: false, error: `unsupported-runtime: cad_api.${command}` };
+  });
+  const session = await openPluginApi({
+    invoke,
+    status: () => statusWith('native-below', 'native'),
+    pollDelayMs: 0,
+    maxPolls: 3,
+  });
+
+  const document = await session.api.application.documentManager.mdiActiveDocument();
+  if (document === null) throw new Error('expected a document');
+  assert.equal(await document.database.getObjectId('1A'), '12');
+
+  const transaction = document.transactionManager.startTransaction({ expectedRevision: 15 });
+  const object = await transaction.getObject('12', 'read');
+  assert.equal(object.typeName, 'Line');
+  assert.equal(object.layer, 'WALLS');
+
+  assert.deepEqual(submitted.map((entry) => entry.operation), [
+    'database.getObjectId',
+    'transaction.getObject',
+  ]);
+  assert.deepEqual(submitted[0].parameters, { database: '7', handle: '1A' });
+  assert.deepEqual(submitted[1].parameters, {
+    document: '42',
+    transactionId: 'tx-1',
+    objectId: '12',
+    mode: 'read',
+  });
 });
 
 test('the plugin-api modules import no Tauri package and hold no CJK copy', async () => {

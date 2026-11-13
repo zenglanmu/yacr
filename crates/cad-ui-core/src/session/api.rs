@@ -211,14 +211,15 @@ mod tests {
                 );
             }
         }
-        // Six operations are served in this build: the two reflected document
-        // reads, the symbol-table projection, the database revision and the editor's
-        // current selection (the read lane), plus the transactional commit (the
-        // mutating lane). Pure value helpers and the manifest parser are package
-        // features, not descriptor rows, so they never appear here.
+        // Eight operations are served in this build: the reflected reads (documents,
+        // symbol tables, revision, current selection) on the read lane, and the
+        // live-session operations (`getObjectId`, `transaction.getObject`,
+        // `transaction.commit`) on the mutating lane. Pure value helpers and the
+        // manifest parser are package features, not descriptor rows, so they never
+        // appear here.
         assert_eq!(
-            supported, 6,
-            "this build serves exactly six host operations"
+            supported, 8,
+            "this build serves exactly eight host operations"
         );
     }
 

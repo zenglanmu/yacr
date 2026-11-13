@@ -13,6 +13,7 @@ import { test } from 'node:test';
 import {
   API_OPERATIONS,
   CadApiError,
+  handle,
   MAX_TRANSACTION_DEPTH,
   objectId,
   SUPPORTED_NEW_ENTITY_TYPES,
@@ -26,6 +27,7 @@ import type {
   CadHostBridge,
   TransactionOptions,
 } from '../src/index.ts';
+import { createDatabase } from '../src/database-services.ts';
 import { appendEdit } from '../src/transaction.ts';
 import { createWire } from '../src/internal/capability.ts';
 
@@ -124,6 +126,28 @@ function parametersOf(request: CadApiRequest): Readonly<Record<string, unknown>>
   return request.parameters;
 }
 
+/** A host-shaped `Polyline` answer: tuple points, `closed`, constant `width`. */
+function polylineAnswer(): { object: Record<string, unknown> } {
+  return {
+    object: {
+      typeName: 'Polyline',
+      objectId: '31',
+      handle: '1A',
+      layer: 'WALLS',
+      color: { method: 'byAci', aci: 7 },
+      linetype: { method: 'named', name: 'Continuous' },
+      points: [
+        [0, 0, 0],
+        [10, 0, 0],
+        [10, 5, 0],
+      ],
+      closed: true,
+      width: 0.5,
+      length: 20,
+    },
+  };
+}
+
 /** A host-shaped `Line` answer (no `handle`: the entity was created, not imported). */
 function lineAnswer(): unknown {
   return {
@@ -155,6 +179,7 @@ test('a nested commit is a savepoint release and only the outer one applies', as
   assert.equal(fake.mutations.length, 0, 'a refused nesting order must not reach the host');
 
   // Reads and buffered writes are allowed at any depth (LIFO gates closes only).
+  // `getObject` reads the live session, so it is a submit-lane request.
   const line = await inner.getObject(objectId('1F'), 'read');
   assert.equal(line.typeName, 'Line');
   assert.equal(line.handle, null, 'a created entity has no handle and none is invented');
@@ -167,14 +192,22 @@ test('a nested commit is a savepoint release and only the outer one applies', as
   const nested = await inner.commit();
   assert.deepEqual(nested, { applied: false, revision: null, created: [] });
   assert.equal(manager.depth, 1);
-  assert.equal(fake.calls.length, 1, 'only the inner read reached the host so far');
-  assert.equal(fake.mutations.length, 0, 'a savepoint release is client-local');
+  assert.equal(fake.calls.length, 0, 'a live-session read never uses the read lane');
+  assert.equal(fake.mutations.length, 1, 'only the inner getObject reached the host so far');
 
   const committed = await outer.commit();
   assert.deepEqual(committed, { applied: true, revision: 5, created: ['2A'] });
   assert.equal(manager.depth, 0);
 
-  const commitRequest = fake.mutations[0];
+  const getObjectRequest = fake.mutations[0];
+  assert.equal(getObjectRequest.operation, 'transaction.getObject');
+  const getObjectParameters = parametersOf(getObjectRequest);
+  assert.equal(getObjectParameters['document'], DOCUMENT);
+  assert.equal(getObjectParameters['transactionId'], 'tx-2');
+  assert.equal(getObjectParameters['objectId'], '1F');
+  assert.equal(getObjectParameters['mode'], 'read');
+
+  const commitRequest = fake.mutations[1];
   assert.equal(commitRequest.namespace, 'DatabaseServices');
   assert.equal(commitRequest.operation, 'transaction.commit');
   const parameters = parametersOf(commitRequest);
@@ -382,7 +415,9 @@ test('getObject decodes by the host typeName tag and refuses an unknown one', as
   const object = await transaction.getObject(objectId('2A'), 'read');
   assert.equal(object.typeName, 'Line');
   assert.equal(object.objectId, '2A');
-  const parameters = parametersOf(fake.calls[0]);
+  assert.equal(fake.calls.length, 0, 'a live-session read never uses the read lane');
+  const parameters = parametersOf(fake.mutations[0]);
+  assert.equal(parameters['document'], DOCUMENT);
   assert.equal(parameters['transactionId'], 'tx-1');
   assert.equal(parameters['objectId'], '2A');
   assert.equal(parameters['mode'], 'read');
@@ -472,6 +507,115 @@ test('start, staging and abort are client-local and need no capability row', asy
   );
   assert.equal(pending.closed, false);
   assert.equal(fake.mutations.length, 0);
+});
+
+test('getObject decodes a polyline from a realistic payload', async () => {
+  const fake = fakeBridge(polylineAnswer);
+  const manager = managerFor(fake);
+  const transaction = manager.startTransaction({ expectedRevision: 1 });
+  const object = await transaction.getObject(objectId('31'), 'read');
+
+  assert.equal(object.typeName, 'Polyline');
+  if (object.typeName !== 'Polyline') throw new Error('expected a polyline');
+  assert.deepEqual(object.points, [
+    { x: 0, y: 0, z: 0 },
+    { x: 10, y: 0, z: 0 },
+    { x: 10, y: 5, z: 0 },
+  ]);
+  assert.equal(object.closed, true);
+  assert.equal(object.width, 0.5);
+  assert.equal(object.length, 20);
+  assert.equal(object.handle, '1A', 'an imported handle is provenance, kept as sent');
+  assert.deepEqual(object.linetype, { method: 'named', name: 'Continuous' });
+});
+
+test('a malformed polyline answer is refused field by field', async () => {
+  const base = () => polylineAnswer().object;
+  const cases: readonly (readonly [(object: Record<string, unknown>) => void, string])[] = [
+    [
+      (object) => {
+        object['points'] = 'none';
+      },
+      'api.invalid_argument: bridge.answer.points',
+    ],
+    [
+      (object) => {
+        object['points'] = [[0, 0]];
+      },
+      'api.invalid_argument: bridge.answer.points[0]',
+    ],
+    [
+      (object) => {
+        object['points'] = [[0, 0, 0], 'x'];
+      },
+      'api.invalid_argument: bridge.answer.points[1]',
+    ],
+    [
+      (object) => {
+        object['closed'] = 'yes';
+      },
+      'api.invalid_argument: bridge.answer.closed',
+    ],
+    [
+      (object) => {
+        object['width'] = -1;
+      },
+      'api.invalid_argument: bridge.answer.width',
+    ],
+    [
+      (object) => {
+        delete object['width'];
+      },
+      'api.invalid_argument: bridge.answer.width',
+    ],
+  ];
+  for (const [mutate, code] of cases) {
+    const object = base() as Record<string, unknown>;
+    mutate(object);
+    const manager = managerFor(fakeBridge(() => ({ object })));
+    const transaction = manager.startTransaction({ expectedRevision: 1 });
+    await expectRejectCode(() => transaction.getObject(objectId('31'), 'read'), code);
+  }
+});
+
+test('getObjectId reads the live session on the mutating lane', async () => {
+  const fake = fakeBridge(() => ({ objectId: '12' }));
+  const database = createDatabase(createWire(hostInfo(), fake.bridge), {
+    id: '7',
+    version: '15',
+  });
+
+  assert.equal(await database.getObjectId(handle('1A')), '12');
+  assert.equal(fake.calls.length, 0, 'a handle lookup never uses the read lane');
+  assert.deepEqual(fake.mutations, [
+    {
+      namespace: 'DatabaseServices',
+      operation: 'database.getObjectId',
+      parameters: { database: '7', handle: '1A' },
+    },
+  ]);
+});
+
+test('getObjectId answers null for an unknown handle and refuses a malformed answer', async () => {
+  const none = fakeBridge(() => ({ objectId: null }));
+  const database = createDatabase(createWire(hostInfo(), none.bridge), {
+    id: '7',
+    version: '15',
+  });
+  assert.equal(await database.getObjectId(handle('FF')), null);
+
+  const cases: readonly (readonly [unknown, string])[] = [
+    [{}, 'api.invalid_argument: bridge.answer.objectId'],
+    [{ objectId: 7 }, 'api.invalid_argument: bridge.answer.objectId'],
+  ];
+  for (const [answer, code] of cases) {
+    const bad = fakeBridge(() => answer);
+    const badDatabase = createDatabase(createWire(hostInfo(), bad.bridge), {
+      id: '7',
+      version: '15',
+    });
+    await expectRejectCode(() => badDatabase.getObjectId(handle('1A')), code);
+  }
 });
 
 test('no public member can push an edit', () => {

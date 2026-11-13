@@ -15,8 +15,8 @@
 //     **savepoint release**: it merges its edits into the parent and applies
 //     nothing, so it reports `{ applied: false, revision: null, created: [] }` —
 //     there is no revision to report and none is invented. A nested abort throws
-//     its buffer away. Only the outermost commit goes over the wire, as one
-//     **mutating** request (`wire.submit`) carrying
+//     its buffer away. Only the outermost commit **applies** anything, as one
+//     request on the mutating lane (`wire.submit`) carrying
 //     `{ document, transactionId, expectedRevision, edits }`.
 //   * `expectedRevision` is **required**: an omitted precondition would be silent
 //     last-writer-wins, so the caller reads `database.revision()` first and says
@@ -35,10 +35,11 @@
 // own stack and buffers. They therefore have **no capability rows** and are not
 // gated — refusing them would claim a host round-trip that does not exist.
 //
-// Only `commit` (outermost) crosses the wire, over the mutating lane, because it
-// is the one operation that changes the drawing. A future host-minted transaction
-// would add a row and a wire call back to start/abort; until then the local
-// behaviour is the honest one.
+// `getObject` is not local: it reads the **live session**, so it travels on the
+// same mutating (submit/poll) lane, with `document` and `transactionId` in its
+// parameters. `commit` (outermost) is the one operation that *changes* the drawing;
+// a future host-minted transaction would add a row and a wire call back to
+// start/abort; until then the local behaviour is the honest one.
 //
 // Buffers live in a module-local `WeakMap` rather than on the instance: no public
 // member may add edits except `addNewlyCreatedDBObject`, and the manager performs
@@ -271,17 +272,22 @@ export class Transaction {
   /**
    * Open one object inside this transaction, at any depth.
    *
-   * The host's `typeName` tag picks the decoder: the result is a discriminated
-   * union (`Line`/`Circle`/`Arc`/`Polyline`/`DBText`/`MText`), never a
-   * caller-chosen type forced onto an unvalidated answer. `write`/`notify` do not
-   * change the commit payload: edits are recorded explicitly, so opening an
-   * object never implies a write.
+   * Goes over the **mutating** lane (`wire.submit`): the host reads the live
+   * session rather than the reflected snapshot, so the answer is polled like a
+   * mutation. The host's `typeName` tag picks the decoder: the result is a
+   * discriminated union (`Line`/`Circle`/`Arc`/`Polyline`/`DBText`/`MText`), never
+   * a caller-chosen type forced onto an unvalidated answer. `write`/`notify` do not
+   * change the commit payload: edits are recorded explicitly, so opening an object
+   * never implies a write.
    */
   async getObject(id: ObjectId, mode: OpenMode): Promise<DBObject> {
     if (this.#closed) throw closedError(this.#wiring.id);
     const identifier = objectId(id);
     if (mode !== 'read' && mode !== 'write' && mode !== 'notify') throw invalidArgument('mode');
-    const answer = await this.#wiring.wire.call('DatabaseServices', 'transaction.getObject', {
+    // A live-session read: the submit lane, carrying the document the client is
+    // editing as well as the transaction correlation id.
+    const answer = await this.#wiring.wire.submit('DatabaseServices', 'transaction.getObject', {
+      document: this.#wiring.document,
       transactionId: this.#wiring.id,
       objectId: identifier,
       mode,
