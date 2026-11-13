@@ -50,8 +50,8 @@ use cad_engine::render::{BackendPreference, RenderSessionHandle};
 use cad_host::{HostOptions, RequestClock};
 use cad_ui_core::session::wire::{self, CadCommandAck};
 use cad_ui_core::session::{
-    CadLayerWrite, CadLayers, CadSession, CadSettingKey, CadSettingValue, NoPopups, QueueFamily,
-    QueueReads, QueueSink,
+    CadApiOutcome, CadApiSubmission, CadLayerWrite, CadLayers, CadSession, CadSettingKey,
+    CadSettingValue, NoPopups, QueueFamily, QueueReads, QueueSink,
 };
 use cad_ui_core::shell::ShellState;
 use serde_json::Value;
@@ -125,6 +125,10 @@ struct Queues {
     standard_views: VecDeque<StandardView>,
     setting_writes: VecDeque<(CadSettingKey, CadSettingValue)>,
     layer_writes: VecDeque<CadLayerWrite>,
+    /// `cad_api_submit` — the plugin-API mutation queue (`Shared::cad_api_calls`).
+    api_calls: VecDeque<CadApiSubmission>,
+    /// `cad_api_poll` — completed outcomes (`Shared::cad_api_results`).
+    api_results: Vec<CadApiOutcome>,
     cad_mode: bool,
     modal_open: bool,
 }
@@ -140,6 +144,8 @@ impl Queues {
             standard_views: VecDeque::new(),
             setting_writes: VecDeque::new(),
             layer_writes: VecDeque::new(),
+            api_calls: VecDeque::new(),
+            api_results: Vec::new(),
             cad_mode,
             modal_open,
         }
@@ -159,6 +165,8 @@ impl Queues {
                 standard_views: &mut self.standard_views,
                 setting_writes: &mut self.setting_writes,
                 layer_writes: &mut self.layer_writes,
+                api_calls: &mut self.api_calls,
+                api_results: &mut self.api_results,
             },
         )
     }
@@ -173,13 +181,14 @@ impl Queues {
             && self.standard_views.is_empty()
             && self.setting_writes.is_empty()
             && self.layer_writes.is_empty()
+            && self.api_calls.is_empty()
     }
 
     /// The **owner tick**: apply everything queued, in admission order, through the
     /// same `CadSession` funnels the desktop tick uses.
     ///
     /// Returns the first refusal (a real one is never swallowed).
-    fn drain(&self, session: &CadSession) -> Result<(), String> {
+    fn drain(&mut self, session: &CadSession) -> Result<(), String> {
         for command in &self.shell.cad_commands {
             session.command(command)?;
         }
@@ -203,6 +212,12 @@ impl Queues {
         }
         for write in &self.layer_writes {
             write.apply(session)?;
+        }
+        // The plugin-API lane: answered by the session on this thread exactly as
+        // the owner tick's `drain_api_calls` does, then published for the poll.
+        for call in std::mem::take(&mut self.api_calls) {
+            let outcome = session.api_submit(call);
+            cad_ui_core::session::push_api_result(&mut self.api_results, outcome);
         }
         Ok(())
     }

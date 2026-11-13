@@ -58,8 +58,8 @@
 use cad_app::{StandardView, ToolParameter, ToolValue};
 use cad_ui_core::session::wire::{self, AdmissionTarget, ControlReads, PopupTarget};
 use cad_ui_core::session::{
-    CadApiSnapshot, CadFonts, CadLayerWrite, CadLayers, CadSession, CadSettingKey, CadSettingValue,
-    CadSettings,
+    CadApiResults, CadApiSnapshot, CadApiSubmission, CadFonts, CadLayerWrite, CadLayers,
+    CadSession, CadSettingKey, CadSettingValue, CadSettings,
 };
 use serde_json::Value;
 
@@ -200,6 +200,21 @@ impl AdmissionTarget for DirectSink<'_> {
         let outcome = write.apply(self.session);
         self.applied(outcome)
     }
+
+    fn api_submit(&mut self, submission: CadApiSubmission) -> Result<(), String> {
+        // Applied inline: this carrier's session is on the calling thread. The
+        // answer is kept on the session, because the client polls later and the
+        // sink is rebuilt for every dispatch call.
+        let outcome = self.session.api_submit(submission);
+        self.session.push_api_outcome(outcome);
+        Ok(())
+    }
+
+    fn api_results(&mut self) -> Result<CadApiResults, String> {
+        Ok(CadApiResults {
+            results: self.session.take_api_outcomes(),
+        })
+    }
 }
 
 /// The [`ControlReads`] of a host that owns its session on this thread.
@@ -268,7 +283,10 @@ macro_rules! wasm_wire_args_struct {
         wasm_wire_args_struct!(@fields $name [] $($fields)*);
     };
     (@fields $name:ident [$($out:tt)*]) => {
+        // camelCase, exactly like Tauri's default command decoding: the two
+        // transports must accept the same argument object (`requestId`, …).
         #[derive(Debug, serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
         pub struct $name { $($out)* }
     };
     (@fields $name:ident [$($out:tt)*] arg(req, $field:ident, $ty:ty) $($rest:tt)*) => {

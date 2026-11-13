@@ -524,6 +524,12 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 }
             });
         }
+        // Plugin-API mutations are answered on this tick (the IPC thread cannot
+        // touch the `!Send` session); answers wait in `Shared` for the poll.
+        cad_desktop_shell::state::drain_api_calls(shared, |call| {
+            CAD.with(|cell| cad_ui_core::session::api_submit_or_wait(cell.borrow().as_ref(), call))
+        });
+
         // One owner-thread tick (host file/open/save/metrics/preparation + pump).
         let tick_result = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.tick()));
         match tick_result {

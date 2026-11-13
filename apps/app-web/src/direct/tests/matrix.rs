@@ -361,6 +361,26 @@ fn every_wire_command_answers_identically_on_both_paths() {
             r#"{"namespace":"DatabaseServices","operation":"database.symbolTables"}"#,
             LIVE,
         ),
+        // ---- the mutating lane: submit acknowledges, poll answers -----------
+        (
+            "api-submit/accepted",
+            "cad_api_submit",
+            r#"{"requestId":"matrix-1","namespace":"DatabaseServices","operation":"transaction.commit"}"#,
+            LIVE,
+        ),
+        (
+            "api-submit/bad-id",
+            "cad_api_submit",
+            r#"{"requestId":"bad id","namespace":"DatabaseServices","operation":"transaction.commit"}"#,
+            LIVE,
+        ),
+        (
+            "api-submit/missing-id",
+            "cad_api_submit",
+            r#"{"namespace":"DatabaseServices","operation":"transaction.commit"}"#,
+            LIVE,
+        ),
+        ("api-poll/empty", "cad_api_poll", "{}", LIVE),
         (
             "api-call/unknown-operation",
             "cad_api_call",
@@ -857,3 +877,6 @@ fn both_hosts_advertise_the_same_vocabulary() {
         expected_aliases
     );
 }
+
+/// The mutating transport's matrix tests (submit/poll, the commit round trip).
+mod api;

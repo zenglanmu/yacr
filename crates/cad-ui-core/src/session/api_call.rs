@@ -117,6 +117,91 @@ pub fn api_call_unknown(namespace: &str, operation: &str) -> String {
     format!("{API_CALL_UNKNOWN}{namespace}.{operation}")
 }
 
+/// One queued plugin-API **mutation** request (`cad_api_submit`).
+///
+/// The wire carries `requestId`; the submission is owned by whichever queue
+/// answers it (the desktop's owner tick) or by the session that applies it
+/// synchronously (`dom-canvas`). The outcome is polled through
+/// [`CadApiResults`] — this type never carries an answer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CadApiSubmission {
+    /// The caller's correlation id (see [`validate_request_id`]).
+    pub request_id: String,
+    /// The API namespace, e.g. `DatabaseServices`.
+    pub namespace: String,
+    /// The operation inside the namespace, e.g. `transaction.commit`.
+    pub operation: String,
+    /// The operation's argument object (`None` when the caller sent none).
+    pub parameters: Option<Value>,
+}
+
+/// The `cad_api_poll` answer: every completed outcome, FIFO.
+///
+/// An empty list is a valid answer (nothing completed since the last poll).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CadApiResults {
+    /// The drained outcomes, oldest first.
+    pub results: Vec<CadApiOutcome>,
+}
+
+/// Bound on queued submissions a desktop host holds before refusing.
+pub const CAD_API_SUBMIT_CAP: usize = 16;
+
+/// Bound on retained outcomes before the oldest is dropped.
+///
+/// Both carriers apply it (the desktop's shared result queue and the session's
+/// own queue on a synchronous carrier), so an unpolled client cannot grow the
+/// host without limit; the dropped answer is gone, never silently replayed.
+pub const CAD_API_RESULT_CAP: usize = 32;
+
+/// Stable refusal of a submission this carrier's queue cannot accept.
+pub const API_SUBMIT_QUEUE_FULL: &str = "cad_api.queue_full";
+
+/// Stable refusal of a submission whose `requestId` is still queued.
+pub const API_SUBMIT_DUPLICATE: &str = "cad_api.duplicate_request";
+
+/// Stable refusal of an unusable `requestId`.
+pub const API_SUBMIT_INVALID_REQUEST: &str = "cad_api.invalid_request: requestId";
+
+/// The longest accepted request id.
+const REQUEST_ID_MAX_LEN: usize = 64;
+
+/// The one mutating operation this build performs.
+pub const API_CALL_TRANSACTION_COMMIT: &str = "transaction.commit";
+
+/// Stable refusal of a commit whose `expectedRevision` is not the open revision.
+pub const API_CALL_REVISION_CONFLICT: &str = "api.revision-conflict";
+
+/// The stable `api.invalid_argument: <field>` marker.
+pub fn api_call_invalid_argument(field: &str) -> String {
+    format!("api.invalid_argument: {field}")
+}
+
+/// The stable `cad_api.error: <text>` marker for a host-side commit failure.
+pub fn api_call_error(text: impl std::fmt::Display) -> String {
+    format!("cad_api.error: {text}")
+}
+
+/// Whether a submission id is usable: 1..=64 characters from `[A-Za-z0-9._-]`.
+///
+/// The grammar is deliberately narrow: the id travels through an IPC envelope,
+/// a log line and this crate's own result queue, and a client that reuses an id
+/// must be able to recognise its answer exactly. Anything else is refused by
+/// name ([`API_SUBMIT_INVALID_REQUEST`]) rather than normalized.
+pub fn validate_request_id(request_id: &str) -> Result<(), String> {
+    let len = request_id.len();
+    if len == 0 || len > REQUEST_ID_MAX_LEN {
+        return Err(API_SUBMIT_INVALID_REQUEST.to_string());
+    }
+    if !request_id
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(API_SUBMIT_INVALID_REQUEST.to_string());
+    }
+    Ok(())
+}
+
 /// One document as the plugin API reports it (flat, host-side projection).
 ///
 /// Its [`Serialize`] implementation is the **nested** wire object
@@ -256,6 +341,13 @@ pub struct CadApiSymbolTables {
 /// from the JSON, so a caller reads exactly one of them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CadApiOutcome {
+    /// The submission id this answer belongs to, on the `cad_api_submit` lane.
+    ///
+    /// `None` for the synchronous read lane ([`API_CALL_COMMAND`]), so that
+    /// answer's JSON is unchanged; every submit outcome carries the id its
+    /// request supplied.
+    #[serde(rename = "requestId", skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
     /// Whether the call was performed.
     pub ok: bool,
     /// The reflected answer, when `ok`.
@@ -270,6 +362,7 @@ impl CadApiOutcome {
     /// A performed call with its reflected value.
     pub fn value(value: Value) -> Self {
         Self {
+            request_id: None,
             ok: true,
             value: Some(value),
             error: None,
@@ -279,10 +372,22 @@ impl CadApiOutcome {
     /// A call this carrier does not perform, with its stable marker.
     pub fn refusal(error: impl Into<String>) -> Self {
         Self {
+            request_id: None,
             ok: false,
             value: None,
             error: Some(error.into()),
         }
+    }
+
+    /// Attach the submission id this answer belongs to.
+    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
+        self.request_id = Some(request_id.into());
+        self
+    }
+
+    /// The `cad_waiting` answer for one submitted request (no session yet).
+    pub fn waiting(request_id: impl Into<String>) -> Self {
+        Self::refusal(CAD_WAITING).with_request_id(request_id)
     }
 }
 

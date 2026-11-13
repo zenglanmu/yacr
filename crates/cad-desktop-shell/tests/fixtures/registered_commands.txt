@@ -1,5 +1,7 @@
 cad_api_call
+cad_api_poll
 cad_api_status
+cad_api_submit
 cad_app_version
 cad_close_popup
 cad_command
