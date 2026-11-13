@@ -54,6 +54,7 @@ fn snapshot() -> CadApiSnapshot {
     CadApiSnapshot {
         document: Some(document()),
         symbol_tables: Some(Ok(tables())),
+        selection: vec!["12".to_string(), "13".to_string()],
     }
 }
 
@@ -61,6 +62,7 @@ fn no_document_snapshot() -> CadApiSnapshot {
     CadApiSnapshot {
         document: None,
         symbol_tables: None,
+        selection: Vec::new(),
     }
 }
 
@@ -322,6 +324,7 @@ fn the_symbol_tables_relay_a_failed_layer_projection() {
     let refused = CadApiSnapshot {
         document: Some(document()),
         symbol_tables: Some(Err("layer.projection_failed: boom".to_string())),
+        selection: Vec::new(),
     };
     let parameters = json!({ "database": "7" });
     let outcome = dispatch_api_call(
@@ -342,6 +345,7 @@ fn a_snapshot_without_a_projection_is_named() {
     let inconsistent = CadApiSnapshot {
         document: Some(document()),
         symbol_tables: None,
+        selection: Vec::new(),
     };
     let parameters = json!({ "database": "7" });
     let outcome = dispatch_api_call(
@@ -354,12 +358,95 @@ fn a_snapshot_without_a_projection_is_named() {
 }
 
 #[test]
+fn the_current_selection_reports_object_ids_in_selection_order() {
+    let outcome = call(
+        Some(&snapshot()),
+        API_CALL_EDITOR_NAMESPACE,
+        API_CALL_CURRENT_SELECTION,
+    );
+    assert_eq!(outcome.error, None);
+    assert_eq!(value_of(outcome), json!({ "objectIds": ["12", "13"] }));
+}
+
+#[test]
+fn an_empty_selection_is_a_fact_not_a_refusal() {
+    let empty = CadApiSnapshot {
+        selection: Vec::new(),
+        ..snapshot()
+    };
+    let outcome = call(
+        Some(&empty),
+        API_CALL_EDITOR_NAMESPACE,
+        API_CALL_CURRENT_SELECTION,
+    );
+    assert!(outcome.ok, "nothing selected is a fact, not an error");
+    assert_eq!(outcome.error, None);
+    assert_eq!(value_of(outcome), json!({ "objectIds": [] }));
+}
+
+#[test]
+fn the_current_selection_dedupes_instanced_and_sub_element_refs_by_id() {
+    // `SelectionSet` distinguishes refs by (entity, instance, sub-element), so the
+    // same entity can be selected twice. The read cannot express that identity
+    // yet, but it must not drop the ref silently: every selected entity is named
+    // once, first occurrence first.
+    let repeated = CadApiSnapshot {
+        selection: vec![
+            "12".to_string(),
+            "13".to_string(),
+            "12".to_string(),
+            "13".to_string(),
+            "14".to_string(),
+        ],
+        ..snapshot()
+    };
+    let outcome = call(
+        Some(&repeated),
+        API_CALL_EDITOR_NAMESPACE,
+        API_CALL_CURRENT_SELECTION,
+    );
+    assert_eq!(
+        value_of(outcome),
+        json!({ "objectIds": ["12", "13", "14"] })
+    );
+}
+
+#[test]
+fn the_current_selection_without_a_document_is_no_document() {
+    let outcome = call(
+        Some(&no_document_snapshot()),
+        API_CALL_EDITOR_NAMESPACE,
+        API_CALL_CURRENT_SELECTION,
+    );
+    assert_eq!(error_of(outcome), API_CALL_NO_DOCUMENT);
+}
+
+#[test]
+fn the_current_selection_ignores_parameters() {
+    let without = value_of(call(
+        Some(&snapshot()),
+        API_CALL_EDITOR_NAMESPACE,
+        API_CALL_CURRENT_SELECTION,
+    ));
+    for parameters in [json!({}), json!({ "database": "7", "unused": [1, 2] })] {
+        let with = value_of(dispatch_api_call(
+            Some(&snapshot()),
+            API_CALL_EDITOR_NAMESPACE,
+            API_CALL_CURRENT_SELECTION,
+            Some(&parameters),
+        ));
+        assert_eq!(with, without, "this read takes no arguments");
+    }
+}
+
+#[test]
 fn no_snapshot_is_cad_waiting_for_every_served_operation() {
     for (namespace, operation) in [
         (API_CALL_NAMESPACE, API_CALL_MDI_ACTIVE_DOCUMENT),
         (API_CALL_NAMESPACE, API_CALL_DOCUMENTS),
         (API_CALL_DATABASE_NAMESPACE, API_CALL_REVISION),
         (API_CALL_DATABASE_NAMESPACE, API_CALL_SYMBOL_TABLES),
+        (API_CALL_EDITOR_NAMESPACE, API_CALL_CURRENT_SELECTION),
     ] {
         let outcome = call(None, namespace, operation);
         assert_eq!(error_of(outcome), CAD_WAITING, "{namespace}.{operation}");
@@ -374,6 +461,10 @@ fn an_unknown_operation_is_the_stable_refusal() {
         (API_CALL_NAMESPACE, API_CALL_REVISION),
         (API_CALL_DATABASE_NAMESPACE, API_CALL_DOCUMENTS),
         (API_CALL_NAMESPACE, API_CALL_SYMBOL_TABLES),
+        (API_CALL_EDITOR_NAMESPACE, "editor.other"),
+        (API_CALL_EDITOR_NAMESPACE, API_CALL_MDI_ACTIVE_DOCUMENT),
+        (API_CALL_NAMESPACE, API_CALL_CURRENT_SELECTION),
+        (API_CALL_DATABASE_NAMESPACE, API_CALL_CURRENT_SELECTION),
         ("", ""),
         ("", API_CALL_MDI_ACTIVE_DOCUMENT),
     ] {
@@ -439,8 +530,9 @@ fn no_document_answers_a_null_document() {
 
 #[test]
 fn the_snapshot_serializes_as_the_frozen_wire_shape() {
+    let serialized = serde_json::to_value(snapshot()).expect("serializes");
     assert_eq!(
-        serde_json::to_value(snapshot()).expect("serializes"),
+        serialized,
         json!({
             "document": {
                 "id": "1",
@@ -449,6 +541,10 @@ fn the_snapshot_serializes_as_the_frozen_wire_shape() {
                 "database": { "id": "7", "version": "12" },
             }
         })
+    );
+    assert!(
+        serialized.get("selection").is_none(),
+        "the selection projection is served by editor.currentSelection, not the document envelope"
     );
     assert_eq!(
         serde_json::to_value(no_document_snapshot()).expect("serializes"),

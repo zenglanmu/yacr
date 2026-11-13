@@ -238,6 +238,7 @@ fn the_control_reads_are_explicit_before_and_after_a_mirror_exists() {
     let snapshot = CadApiSnapshot {
         document: None,
         symbol_tables: None,
+        selection: Vec::new(),
     };
     let answered = QueueReads::new(None, None, None, Some(&snapshot));
     let outcome = wire::api_call(

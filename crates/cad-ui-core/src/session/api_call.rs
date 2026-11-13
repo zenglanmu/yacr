@@ -3,7 +3,7 @@
 //! # What this is
 //!
 //! [`API_CALL_COMMAND`] (`cad_api_call`) is the plugin API *performing*, not
-//! merely advertising. This wave serves three reflected reads from one snapshot:
+//! merely advertising. This wave serves five reflected reads from one snapshot:
 //!
 //! | namespace.operation | answer |
 //! |---|---|
@@ -11,11 +11,23 @@
 //! | `ApplicationServices.documentManager.documents` | `{ "documents": [ … ] }` (0 or 1) |
 //! | `DatabaseServices.database.revision` (`{ "database": "<id>" }`) | `{ "revision": <number> }` |
 //! | `DatabaseServices.database.symbolTables` (`{ "database": "<id>" }`) | `{ "blockTable": …, "layerTable": …, "clayer": … }` |
+//! | `EditorInput.editor.currentSelection` | `{ "objectIds": [ "<EntityId>", … ] }` |
 //!
 //! Every read is **derived**: the authoritative document stays `cad-db`'s, and
 //! each answer is a projection of the host controller's own fields
-//! ([`cad_app::PluginDocument`]). Nothing here opens a transaction, mutates the
-//! drawing or writes the mirror back.
+//! ([`cad_app::PluginDocument`], its `SelectionSet`). Nothing here opens a
+//! transaction, mutates the drawing or writes the mirror back.
+//!
+//! `editor.currentSelection` has no parameters. Its `objectIds` are the current
+//! selection's `EntityId`s in selection order, as decimal strings. A selection
+//! ref also carries an `InstancePath` and an optional `SubElementId`, but this
+//! read can only name the entity: every selected ref is included (never dropped
+//! silently) and repeated ids are deduplicated, first occurrence first. Instance
+//! and sub-element identity is therefore **not representable** in this read yet —
+//! the list is the distinct `EntityId`s, not the distinct refs.
+//!
+//! The descriptor rows in `api/plugin-api.json` are **not** updated in this wave
+//! (they stay `pending`); the wire answer above is what this build performs.
 //!
 //! # Refusals are explicit
 //!
@@ -28,7 +40,8 @@
 //!   is [`CAD_WAITING`], the shared "ask again after a tick" word. A snapshot
 //!   that exists but holds no document is *not* waiting: the document reads
 //!   answer their real "nothing open" value (`{ "document": null }`,
-//!   `{ "documents": [] }`) and the database read refuses
+//!   `{ "documents": [] }`) and the document-scoped reads (`revision`,
+//!   `symbolTables`, `editor.currentSelection`) refuse
 //!   [`API_CALL_NO_DOCUMENT`];
 //! * a database request (`revision`, `symbolTables`) whose `parameters.database`
 //!   is missing, not a string, or not the snapshot's database id is
@@ -50,10 +63,12 @@
 //!                    "color": { "aci": 7, "rgb": "#ffffff" }, "visible": true,
 //!                    "locked": false, "frozen": false, "linetype": "Continuous" } ] },
 //!   "clayer": "0" }
+//! { "objectIds": [ "12", "13" ] }
 //! ```
 //!
 //! `mdiActiveDocument` is `{ "document": null }` when the document manager exists
-//! but holds no document; `documents` is then `{ "documents": [] }`. The reply
+//! but holds no document; `documents` is then `{ "documents": [] }`. An empty
+//! selection is `{ "objectIds": [] }` — a fact, not a refusal. The reply
 //! envelope is [`CadApiOutcome`]: `ok` plus exactly one of `value`/`error` (the
 //! absent half is omitted, never `null`).
 
@@ -77,6 +92,9 @@ pub const API_CALL_NAMESPACE: &str = "ApplicationServices";
 /// The `DatabaseServices` namespace (database-level reads).
 pub const API_CALL_DATABASE_NAMESPACE: &str = "DatabaseServices";
 
+/// The `EditorInput` namespace (the current selection and editor prompts).
+pub const API_CALL_EDITOR_NAMESPACE: &str = "EditorInput";
+
 /// The reflected read of the active document.
 pub const API_CALL_MDI_ACTIVE_DOCUMENT: &str = "documentManager.mdiActiveDocument";
 
@@ -88,6 +106,9 @@ pub const API_CALL_REVISION: &str = "database.revision";
 
 /// The reflected read of the open database's block and layer symbol tables.
 pub const API_CALL_SYMBOL_TABLES: &str = "database.symbolTables";
+
+/// The reflected read of the current selection's entity ids (no parameters).
+pub const API_CALL_CURRENT_SELECTION: &str = "editor.currentSelection";
 
 /// Stable refusal of a database read while the session holds no document.
 ///
@@ -286,6 +307,19 @@ pub struct CadApiSnapshot {
     /// `DatabaseServices.database.symbolTables`.
     #[serde(skip)]
     pub symbol_tables: Option<Result<CadApiSymbolTables, String>>,
+    /// Every selected ref's `EntityId`, in selection order, as decimal strings.
+    ///
+    /// One entry per selected **ref**, so an entity selected through two distinct
+    /// `InstancePath`s (or two sub-elements) appears twice here; the
+    /// `EditorInput.editor.currentSelection` read deduplicates by id, first
+    /// occurrence first ([`api_call_selection`]), because instance and sub-element
+    /// identity is not representable in that answer yet.
+    ///
+    /// Empty is a real fact (nothing selected), not "waiting", and it says nothing
+    /// about whether a document is open. Not part of the serialized document
+    /// envelope; served by [`API_CALL_CURRENT_SELECTION`].
+    #[serde(skip)]
+    pub selection: Vec<String>,
 }
 
 /// One named block definition, as the symbol-table read reports it.
@@ -417,6 +451,30 @@ pub fn api_call_documents(snapshot: &CadApiSnapshot) -> CadApiOutcome {
     CadApiOutcome::value(json!({ "documents": documents }))
 }
 
+/// Build the `EditorInput.editor.currentSelection` answer.
+///
+/// `objectIds` are the snapshot selection's entity ids, in selection order, as
+/// decimal strings. Duplicates are removed by id (first occurrence wins) so a
+/// selection holding the same entity through two `InstancePath`s or sub-elements
+/// is still included — never dropped — but named once: this read has no field for
+/// that identity yet.
+///
+/// An empty selection is `{ "objectIds": [] }` (a fact). A snapshot without a
+/// document refuses [`API_CALL_NO_DOCUMENT`]: there is no drawing whose selection
+/// could be reported. The read takes no parameters; any supplied are ignored.
+pub fn api_call_selection(snapshot: &CadApiSnapshot) -> CadApiOutcome {
+    if snapshot.document.is_none() {
+        return CadApiOutcome::refusal(API_CALL_NO_DOCUMENT);
+    }
+    let mut object_ids: Vec<&str> = Vec::with_capacity(snapshot.selection.len());
+    for id in &snapshot.selection {
+        if !object_ids.contains(&id.as_str()) {
+            object_ids.push(id.as_str());
+        }
+    }
+    CadApiOutcome::value(json!({ "objectIds": object_ids }))
+}
+
 /// Build the `DatabaseServices.database.revision` answer.
 ///
 /// The requested `parameters.database` must be the snapshot document's database
@@ -513,6 +571,8 @@ enum ServedOperation {
     Revision,
     /// `DatabaseServices.database.symbolTables`
     SymbolTables,
+    /// `EditorInput.editor.currentSelection`
+    CurrentSelection,
 }
 
 /// Resolve a namespaced operation, or `None` when this build does not serve it.
@@ -523,6 +583,9 @@ fn served_operation(namespace: &str, operation: &str) -> Option<ServedOperation>
         (API_CALL_DATABASE_NAMESPACE, API_CALL_REVISION) => Some(ServedOperation::Revision),
         (API_CALL_DATABASE_NAMESPACE, API_CALL_SYMBOL_TABLES) => {
             Some(ServedOperation::SymbolTables)
+        }
+        (API_CALL_EDITOR_NAMESPACE, API_CALL_CURRENT_SELECTION) => {
+            Some(ServedOperation::CurrentSelection)
         }
         _ => None,
     }
@@ -535,11 +598,12 @@ fn served_operation(namespace: &str, operation: &str) -> Option<ServedOperation>
 /// [`CAD_WAITING`] — never a claim about the drawing. `Some(snapshot)` is
 /// answered as a matter of fact, including `snapshot.document == None`:
 /// `mdiActiveDocument` → `{ "document": null }`, `documents` →
-/// `{ "documents": [] }`, and the two database reads → [`API_CALL_NO_DOCUMENT`].
+/// `{ "documents": [] }`, and the document-scoped reads (`revision`,
+/// `symbolTables`, `editor.currentSelection`) → [`API_CALL_NO_DOCUMENT`].
 ///
 /// `parameters` carries the operation's arguments (the database reads require
-/// `{ "database": "<id>" }`). The document reads ignore them, so a caller that
-/// sends none answers exactly as before.
+/// `{ "database": "<id>" }`). The document and selection reads ignore them, so a
+/// caller that sends none answers exactly as before.
 ///
 /// An operation outside the served set is the stable `unsupported-runtime`
 /// refusal **first** — before any snapshot or argument check — because "ask again
@@ -562,6 +626,7 @@ pub fn dispatch_api_call(
         ServedOperation::Documents => api_call_documents(snapshot),
         ServedOperation::Revision => api_call_revision(snapshot, parameters),
         ServedOperation::SymbolTables => api_call_symbol_tables(snapshot, parameters),
+        ServedOperation::CurrentSelection => api_call_selection(snapshot),
     }
 }
 
@@ -574,12 +639,19 @@ impl super::CadSession {
     /// is a read-only projection of the host controller — this never opens a
     /// transaction and never touches `cad-db`'s authority.
     pub fn api_snapshot(&self) -> CadApiSnapshot {
-        let document = self
-            .core
-            .controller
-            .borrow()
-            .plugin_document()
-            .map(CadApiDocument::from);
+        let (document, selection) = {
+            let controller = self.core.controller.borrow();
+            let document = controller.plugin_document().map(CadApiDocument::from);
+            // One decimal entry per selected ref, in selection order. Instance and
+            // sub-element identity stays behind: the read dedupes by entity id.
+            let selection = controller
+                .selection()
+                .refs()
+                .iter()
+                .map(|reference| reference.entity.0.to_string())
+                .collect();
+            (document, selection)
+        };
         // The two halves are built together: no document ⇒ no symbol tables, so
         // the `database.symbolTables` read can tell "nothing open" from "the
         // projection failed" (which is relayed, never replaced by empty tables).
@@ -591,6 +663,7 @@ impl super::CadSession {
         CadApiSnapshot {
             document,
             symbol_tables,
+            selection,
         }
     }
 
