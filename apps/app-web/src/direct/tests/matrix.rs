@@ -306,6 +306,43 @@ fn every_wire_command_answers_identically_on_both_paths() {
             LIVE,
         ),
         ("close-popup/no-host", "cad_close_popup", "{}", LIVE),
+        // ---- cad_api_call (the first reflected plugin-API read) -----------
+        (
+            "api-call/document",
+            "cad_api_call",
+            r#"{"namespace":"ApplicationServices","operation":"documentManager.mdiActiveDocument"}"#,
+            LIVE,
+        ),
+        (
+            "api-call/parameters-ignored",
+            "cad_api_call",
+            r#"{"namespace":"ApplicationServices","operation":"documentManager.mdiActiveDocument","parameters":{"unused":[1,2]}}"#,
+            LIVE,
+        ),
+        (
+            "api-call/unknown-operation",
+            "cad_api_call",
+            r#"{"namespace":"ApplicationServices","operation":"documentManager.notAnOperation"}"#,
+            LIVE,
+        ),
+        (
+            "api-call/unknown-namespace",
+            "cad_api_call",
+            r#"{"namespace":"DatabaseServices","operation":"documentManager.mdiActiveDocument"}"#,
+            LIVE,
+        ),
+        (
+            "api-call/empty-namespace",
+            "cad_api_call",
+            r#"{"namespace":"","operation":"documentManager.mdiActiveDocument"}"#,
+            LIVE,
+        ),
+        (
+            "api-call/missing-arg",
+            "cad_api_call",
+            r#"{"namespace":"ApplicationServices"}"#,
+            LIVE,
+        ),
     ];
 
     let (mut gate_refused, mut applied_ok, mut session_refused) = (0, 0, 0);
@@ -338,9 +375,15 @@ fn the_control_reads_answer_the_same_object_on_both_paths() {
     let settings = session.settings();
     let layers = session.layers();
     let fonts = session.fonts();
+    let api_snapshot = session.api_snapshot();
     let projected = layers.clone().expect("the fixture projects its layers");
     let projected_fonts = fonts.clone().expect("the fixture projects its fonts");
-    let mirrored = QueueReads::new(Some(&settings), Some(&layers), Some(&fonts));
+    let mirrored = QueueReads::new(
+        Some(&settings),
+        Some(&layers),
+        Some(&fonts),
+        Some(&api_snapshot),
+    );
     let direct = DirectReads::new(&session);
 
     assert_eq!(
@@ -355,6 +398,20 @@ fn the_control_reads_answer_the_same_object_on_both_paths() {
         wire::fonts(&mirrored).expect("a mirrored font registry"),
         wire::fonts(&direct).expect("the session's own font registry")
     );
+    assert_eq!(
+        wire::api_call(
+            &mirrored,
+            "ApplicationServices",
+            "documentManager.mdiActiveDocument"
+        )
+        .expect("a mirrored document snapshot"),
+        wire::api_call(
+            &direct,
+            "ApplicationServices",
+            "documentManager.mdiActiveDocument"
+        )
+        .expect("the session's own document snapshot")
+    );
 
     // The dispatcher serves the same JSON for both sources.
     let mut queues = Queues::new(true, false);
@@ -366,6 +423,8 @@ fn the_control_reads_answer_the_same_object_on_both_paths() {
         direct_layers,
         mirrored_fonts,
         direct_fonts,
+        mirrored_document,
+        direct_document,
     ) = {
         let mut sink = queues.sink();
         (
@@ -381,11 +440,28 @@ fn the_control_reads_answer_the_same_object_on_both_paths() {
                 .expect("the mirrored font read"),
             dispatch("cad_fonts", "{}", &mut sink, &direct, &mut popups)
                 .expect("the direct font read"),
+            dispatch(
+                "cad_api_call",
+                r#"{"namespace":"ApplicationServices","operation":"documentManager.mdiActiveDocument"}"#,
+                &mut sink,
+                &mirrored,
+                &mut popups,
+            )
+            .expect("the mirrored document read"),
+            dispatch(
+                "cad_api_call",
+                r#"{"namespace":"ApplicationServices","operation":"documentManager.mdiActiveDocument"}"#,
+                &mut sink,
+                &direct,
+                &mut popups,
+            )
+            .expect("the direct document read"),
         )
     };
     assert_eq!(mirrored_settings, direct_settings);
     assert_eq!(mirrored_layers, direct_layers);
     assert_eq!(mirrored_fonts, direct_fonts);
+    assert_eq!(mirrored_document, direct_document);
     assert_eq!(
         direct_settings,
         serde_json::to_value(&settings).expect("serializes")
@@ -397,6 +473,89 @@ fn the_control_reads_answer_the_same_object_on_both_paths() {
     assert_eq!(
         direct_fonts,
         serde_json::to_value(&projected_fonts).expect("serializes")
+    );
+    // The one served plugin-API operation reports the session's own document.
+    // The reply is the `CadApiOutcome` envelope, so the value lives under `value`.
+    let document = api_snapshot
+        .document
+        .as_ref()
+        .expect("the fixture session holds a document");
+    assert_eq!(direct_document["ok"], serde_json::json!(true));
+    assert_eq!(
+        direct_document["value"]["document"]["id"],
+        serde_json::json!(document.id)
+    );
+    assert_eq!(
+        direct_document["value"]["document"]["name"],
+        serde_json::json!("synthetic-four-lines.dwg")
+    );
+    assert_eq!(
+        direct_document["value"]["document"]["isReadOnly"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        direct_document["value"]["document"]["database"]["id"],
+        serde_json::json!(document.database_id)
+    );
+    assert_eq!(
+        direct_document["value"]["document"]["database"]["version"],
+        serde_json::json!(document.database_version)
+    );
+}
+
+/// A session that exists **without** a document is a fact, not a wait.
+///
+/// `None` at the read seam means "no snapshot yet"; a snapshot whose document is
+/// `None` is answered `{"document": null}` with `ok: true` on both paths.
+#[test]
+fn a_session_without_a_document_answers_a_null_document_on_both_paths() {
+    let session = session();
+    session
+        .command("CLOSE")
+        .expect("CLOSE is the host's own close command");
+    let snapshot = session.api_snapshot();
+    assert!(
+        snapshot.document.is_none(),
+        "the fixture document was really closed"
+    );
+
+    // The desktop's owner tick mirrors exactly this snapshot.
+    let mirrored = QueueReads::new(None, None, None, Some(&snapshot));
+    let direct = DirectReads::new(&session);
+    let mut queues = Queues::new(true, false);
+    let mut popups = NoPopups;
+    let args =
+        r#"{"namespace":"ApplicationServices","operation":"documentManager.mdiActiveDocument"}"#;
+    let (mirror_answer, direct_answer) = {
+        let mut sink = queues.sink();
+        (
+            dispatch("cad_api_call", args, &mut sink, &mirrored, &mut popups)
+                .expect("the mirrored answer"),
+            dispatch("cad_api_call", args, &mut sink, &direct, &mut popups)
+                .expect("the direct answer"),
+        )
+    };
+    assert_eq!(mirror_answer, direct_answer);
+    assert_eq!(mirror_answer["ok"], serde_json::json!(true));
+    assert_eq!(
+        mirror_answer["value"],
+        serde_json::json!({ "document": null })
+    );
+
+    // The shared `wire::*` function answers the same object on both sources.
+    assert_eq!(
+        wire::api_call(
+            &mirrored,
+            "ApplicationServices",
+            "documentManager.mdiActiveDocument"
+        )
+        .expect("the envelope"),
+        wire::api_call(
+            &direct,
+            "ApplicationServices",
+            "documentManager.mdiActiveDocument"
+        )
+        .expect("the envelope")
     );
 }
 
@@ -417,13 +576,27 @@ fn the_mirrorless_read_answers_cad_waiting() {
         wire::fonts(&empty).unwrap_err(),
         cad_ui_core::session::CAD_WAITING
     );
+    // The plugin-API read has the same "no snapshot yet" answer, inside the
+    // outcome envelope — not a fabricated `{"document":null}`.
+    let outcome = wire::api_call(
+        &empty,
+        "ApplicationServices",
+        "documentManager.mdiActiveDocument",
+    )
+    .expect("the envelope is the reply");
+    assert!(!outcome.ok);
+    assert_eq!(outcome.value, None);
+    assert_eq!(
+        outcome.error.as_deref(),
+        Some(cad_ui_core::session::CAD_WAITING)
+    );
 }
 
 /// A mirror refusal is relayed, never replaced by stale rows.
 #[test]
 fn a_mirror_refusal_is_relayed() {
     let refused: Result<CadLayers, String> = Err("layer.projection_failed: boom".to_string());
-    let reads = QueueReads::new(None, Some(&refused), None);
+    let reads = QueueReads::new(None, Some(&refused), None, None);
     assert_eq!(
         wire::layers(&reads).unwrap_err(),
         "layer.projection_failed: boom"

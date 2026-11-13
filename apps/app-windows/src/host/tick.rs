@@ -787,9 +787,14 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 .as_ref()
                 .map(|session| session.snapshot(backend, adapter, 0))
         });
-        // The settings snapshot and the runtime `ALIASEDIT` rows are owner-thread
-        // mirrors for the IPC reads (the command gate admits user aliases from them).
+        // The settings snapshot, the runtime `ALIASEDIT` rows and the reflected
+        // plugin-API snapshot are owner-thread mirrors for the IPC reads (the
+        // command gate admits user aliases from them).
         let settings = CAD.with(|c| c.borrow().as_ref().map(|session| session.owner_mirror()));
+        // `None` = no session yet (`cad_waiting`); a snapshot with no document is
+        // `Some(..)` and answers `{"document": null}`.
+        let api_snapshot =
+            CAD.with(|cell| cell.borrow().as_ref().map(|session| session.api_snapshot()));
         {
             let mut state = lock(shared);
             if let Some(snapshot) = &snapshot {
@@ -799,6 +804,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 state.cad_settings = Some(settings);
                 state.shell.command_aliases = command_aliases;
             }
+            state.cad_api_snapshot = api_snapshot;
         }
         // One cad-event flush per owner tick, outside the `Some(snapshot)` arm:
         // the lazy-session window and a creation failure have no snapshot but

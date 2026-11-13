@@ -59,6 +59,7 @@ use super::admission::{
     parse_property_write, parse_standard_view, parse_tool_parameter,
 };
 use super::api::CadApiStatus;
+use super::api_call::{dispatch_api_call, CadApiOutcome, CadApiSnapshot};
 use super::commands::{admissible_names, alias_pairs};
 use super::fonts::CadFonts;
 use super::layers::{CadLayerWrite, CadLayers};
@@ -201,17 +202,18 @@ pub trait AdmissionTarget {
 }
 
 /// The **read seam** for the control-panel reads (`cad_settings`,
-/// `cad_layers`, `cad_fonts`).
+/// `cad_layers`, `cad_fonts`) and the plugin-API document read (`cad_api_call`).
 ///
 /// These are not sink methods: they are projections, and each host serves them
 /// from the only source it has.
 ///
 /// * Desktop: the owner tick mirrors `CadSession::settings()`/`layers()`/
-///   `fonts()` into `Shared`, because the session is `!Send` and the IPC thread
-///   must never touch it. `None` before the first tick — the read then answers
-///   [`CAD_WAITING`].
+///   `fonts()`/`api_snapshot()` into `Shared`, because the session is `!Send` and
+///   the IPC thread must never touch it. `None` before the first tick — the read
+///   then answers [`CAD_WAITING`].
 /// * `dom-canvas`: the session lives in the same thread as the caller, so the
-///   answer is the session's own `settings()`/`layers()`/`fonts()` call.
+///   answer is the session's own `settings()`/`layers()`/`fonts()`/
+///   `api_snapshot()` call.
 ///
 /// [`layers`] and [`fonts`] keep the desktop's existing `Option<Result<..>>`
 /// shape: `None` means "no snapshot yet" ([`CAD_WAITING`]) while `Some(Err(..))`
@@ -225,6 +227,20 @@ pub trait ControlReads {
 
     /// The read-only font-registry projection, or `None` before any exists.
     fn fonts(&self) -> Option<Result<CadFonts, String>>;
+
+    /// The reflected plugin-API snapshot, or `None` before any exists.
+    ///
+    /// A value (not a temporary): the caller only borrows it for the duration of
+    /// one call, and every host stores it in its own reads struct.
+    ///
+    /// The two `None`s mean different things and must not be conflated:
+    /// `None` here is "the host has **no snapshot yet**" ([`CAD_WAITING`]),
+    /// while a snapshot whose `document` is `None` is the real answer "no
+    /// document is open" (`{ "document": null }`). The trait default is the
+    /// honest "no snapshot" for a target with no session view.
+    fn api_snapshot(&self) -> Option<&CadApiSnapshot> {
+        None
+    }
 }
 
 /// The seam the two popup commands go through.
@@ -393,6 +409,8 @@ pub struct QueueReads<'a> {
     pub layers: Option<&'a Result<CadLayers, String>>,
     /// `Shared::cad_fonts`.
     pub fonts: Option<&'a Result<CadFonts, String>>,
+    /// `Shared::cad_api_snapshot`.
+    pub api_snapshot: Option<&'a CadApiSnapshot>,
 }
 
 impl<'a> QueueReads<'a> {
@@ -401,11 +419,13 @@ impl<'a> QueueReads<'a> {
         settings: Option<&'a CadSettings>,
         layers: Option<&'a Result<CadLayers, String>>,
         fonts: Option<&'a Result<CadFonts, String>>,
+        api_snapshot: Option<&'a CadApiSnapshot>,
     ) -> Self {
         Self {
             settings,
             layers,
             fonts,
+            api_snapshot,
         }
     }
 }
@@ -421,6 +441,10 @@ impl ControlReads for QueueReads<'_> {
 
     fn fonts(&self) -> Option<Result<CadFonts, String>> {
         self.fonts.cloned()
+    }
+
+    fn api_snapshot(&self) -> Option<&CadApiSnapshot> {
+        self.api_snapshot
     }
 }
 
@@ -441,6 +465,26 @@ pub fn commands() -> Vec<&'static str> {
 /// read, identical answer on both transports.
 pub fn api_status() -> Result<CadApiStatus, String> {
     super::api::status()
+}
+
+/// `cad_api_call`: perform one plugin-API operation against the reflected
+/// document snapshot.
+///
+/// Served by the host through [`ControlReads::api_snapshot`]: the desktop reads
+/// its owner-tick mirror (the session is `!Send`), a synchronous carrier reads
+/// the live session. The one served operation and every refusal marker live in
+/// [`super::api_call`]; `parameters` is accepted by the wire command for contract
+/// stability and is unused this wave (the answer is a reflected snapshot).
+pub fn api_call(
+    reads: &dyn ControlReads,
+    namespace: &str,
+    operation: &str,
+) -> Result<CadApiOutcome, String> {
+    Ok(dispatch_api_call(
+        reads.api_snapshot(),
+        namespace,
+        operation,
+    ))
 }
 
 /// `cad_command_aliases`: the alias table the chrome offers (`alias_pairs`).

@@ -1,3 +1,4 @@
+cad_api_call
 cad_api_status
 cad_app_version
 cad_close_popup

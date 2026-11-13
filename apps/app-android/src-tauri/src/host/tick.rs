@@ -610,6 +610,10 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
     let settings = CAD.with(|c| c.borrow().as_ref().map(|session| session.owner_mirror()));
     let layers = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.layers()));
     let fonts = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.fonts()));
+    // `None` = no session yet (`cad_waiting`); a snapshot with no document is
+    // `Some(..)` and answers `{"document": null}`.
+    let api_snapshot =
+        CAD.with(|cell| cell.borrow().as_ref().map(|session| session.api_snapshot()));
     {
         let mut state = lock(shared);
         if let Some(snapshot) = &snapshot {
@@ -629,6 +633,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             // never an invented row.
             state.cad_fonts = Some(fonts);
         }
+        state.cad_api_snapshot = api_snapshot;
     }
     if presented {
         let actual = CAD.with(|cell| {

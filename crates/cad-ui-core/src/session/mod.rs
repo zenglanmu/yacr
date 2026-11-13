@@ -23,6 +23,7 @@
 mod admission;
 mod annot_arguments;
 mod api;
+mod api_call;
 mod bytes;
 mod command_log;
 mod command_overrides;
@@ -107,6 +108,11 @@ pub use self::api::{
     CadApiNamespace, CadApiOperation, CadApiOperationStatus, CadApiStatus, API_STATUS_COMMAND,
     PLUGIN_API_VERSION,
 };
+pub use self::api_call::{
+    api_call_document, api_call_unknown, dispatch_api_call, CadApiDocument, CadApiOutcome,
+    CadApiSnapshot, API_CALL_COMMAND, API_CALL_MDI_ACTIVE_DOCUMENT, API_CALL_NAMESPACE,
+    API_CALL_UNKNOWN,
+};
 pub use self::bytes::BytesDocument;
 pub use self::command_log::{
     CadCommandLogEntry, CadCommandLogKind, CadCommandLogPoint, CadMeasurementEcho,
@@ -174,12 +180,12 @@ pub use self::status::{
 pub use self::text_batch::*;
 pub use self::text_commands::*;
 pub use self::wire::{
-    aliases, api_status, close_popup, command, commands, create_layer, delete_layer, fonts, layers,
-    open_popup, parse_setting_request, rename_layer, restore_layers, set_active_layer,
-    set_layer_property, set_layer_visible, set_selected_property, set_selected_text, set_setting,
-    set_tool_parameter, set_tool_text, settings, standard_view, AdmissionTarget, CadCommandAck,
-    CadCommandAlias, Channel, ControlReads, NoPopups, PopupTarget, QueueFamily, QueueReads,
-    QueueSink, CAD_WAITING, POPUP_HOST_UNAVAILABLE,
+    aliases, api_call, api_status, close_popup, command, commands, create_layer, delete_layer,
+    fonts, layers, open_popup, parse_setting_request, rename_layer, restore_layers,
+    set_active_layer, set_layer_property, set_layer_visible, set_selected_property,
+    set_selected_text, set_setting, set_tool_parameter, set_tool_text, settings, standard_view,
+    AdmissionTarget, CadCommandAck, CadCommandAlias, Channel, ControlReads, NoPopups, PopupTarget,
+    QueueFamily, QueueReads, QueueSink, CAD_WAITING, POPUP_HOST_UNAVAILABLE,
 };
 
 /// Completions drained per poll. The queue's absolute capacity is 256, so this

@@ -6,15 +6,16 @@
 //! * the **queue bound**, enforced through [`AdmissionTarget::pending`] — the one
 //!   refusal a synchronous sink structurally cannot reach, so it has to be pinned
 //!   against the queue sink itself;
-//! * the two control reads: the explicit `cad_waiting` before any mirror exists and
-//!   a relayed mirror refusal (never stale rows).
+//! * the control reads: the explicit `cad_waiting` before any mirror/snapshot
+//!   exists, a relayed mirror refusal (never stale rows), and the
+//!   `{"document": null}` a snapshot without a document must answer.
 //!
 //! The cross-host equivalence proof (queue sink vs. direct sink, every command) is
 //! `apps/app-web/src/direct/tests.rs`, where a real `CadSession` is constructible.
 
 use super::super::wire::{self, AdmissionTarget, CadCommandAck, Channel, QueueFamily, QueueReads};
 use super::super::{
-    CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CAD_LAYER_WRITE_CAP,
+    CadApiSnapshot, CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CAD_LAYER_WRITE_CAP,
     CAD_SELECTED_TEXT_CAP, CAD_TOOL_PARAMETER_CAP,
 };
 use cad_app::{StandardView, ToolValue};
@@ -207,12 +208,36 @@ fn the_control_reads_are_explicit_before_and_after_a_mirror_exists() {
     assert_eq!(wire::layers(&empty).unwrap_err(), wire::CAD_WAITING);
     assert_eq!(wire::fonts(&empty).unwrap_err(), wire::CAD_WAITING);
 
+    // The plugin-API read has the same "no snapshot yet" answer …
+    let waiting = wire::api_call(
+        &empty,
+        "ApplicationServices",
+        "documentManager.mdiActiveDocument",
+    )
+    .expect("the reply envelope");
+    assert!(!waiting.ok);
+    assert_eq!(waiting.value, None);
+    assert_eq!(waiting.error.as_deref(), Some(wire::CAD_WAITING));
+
     let refusal: Result<CadLayers, String> = Err("layer.projection_failed: boom".to_string());
-    let reads = QueueReads::new(None, Some(&refusal), None);
+    let reads = QueueReads::new(None, Some(&refusal), None, None);
     assert_eq!(
         wire::layers(&reads).expect_err("relayed, not replaced"),
         "layer.projection_failed: boom"
     );
+
+    // … and a snapshot that exists without a document is a fact, not a wait.
+    let snapshot = CadApiSnapshot { document: None };
+    let answered = QueueReads::new(None, None, None, Some(&snapshot));
+    let outcome = wire::api_call(
+        &answered,
+        "ApplicationServices",
+        "documentManager.mdiActiveDocument",
+    )
+    .expect("the reply envelope");
+    assert!(outcome.ok);
+    assert_eq!(outcome.error, None);
+    assert_eq!(outcome.value, Some(serde_json::json!({ "document": null })));
 }
 
 /// A host with no popup seam refuses both popup commands with the shared reason and

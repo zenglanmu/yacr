@@ -26,6 +26,7 @@ pub mod layers;
 pub mod measure_tool;
 pub mod ortho;
 pub mod picking;
+pub mod plugin_api;
 pub mod point_report;
 pub mod property_value;
 pub mod recovery;
@@ -159,6 +160,7 @@ pub use picking::{
     drawing_pick_items, filter_by_index, last_pick_stats, pick_at_screen, pick_ray,
     pick_ray_exhaustive, pick_ray_with_index, pick_tolerance, PickIndex, PickStats,
 };
+pub use plugin_api::PluginDocument;
 pub use point_report::{unit_symbol, IdSpace, InputSnap, PointReport};
 pub use recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
 pub use selection::{

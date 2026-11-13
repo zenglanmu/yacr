@@ -773,8 +773,13 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 .map(|session| session.snapshot(backend, adapter, 0))
         });
         super::performance::attach(&mut snapshot, shared);
-        // Owner-thread mirrors for the IPC reads: settings + runtime aliases.
+        // Owner-thread mirrors for the IPC reads: settings + runtime aliases and
+        // the reflected plugin-API snapshot.
         let settings = CAD.with(|c| c.borrow().as_ref().map(|session| session.owner_mirror()));
+        // `None` = no session yet (`cad_waiting`); a snapshot with no document is
+        // `Some(..)` and answers `{"document": null}`.
+        let api_snapshot =
+            CAD.with(|cell| cell.borrow().as_ref().map(|session| session.api_snapshot()));
         {
             let mut state = lock(shared);
             if let Some(snapshot) = &snapshot {
@@ -784,6 +789,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 state.cad_settings = Some(settings);
                 state.shell.command_aliases = command_aliases;
             }
+            state.cad_api_snapshot = api_snapshot;
         }
         // Hand the importer's records to the pass and install a settled derived
         // snapshot on this owner thread (display-only; no `cad-db` write).

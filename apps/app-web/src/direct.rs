@@ -20,9 +20,10 @@
 //!   the calling thread: it **applies** each already-admitted request through the
 //!   `CadSession` method the desktop owner tick would call, and returns the
 //!   session's own refusal verbatim;
-//! * [`DirectReads`] serves `cad_settings`/`cad_layers`/`cad_fonts` from the
-//!   session itself (the desktop serves them from the owner-tick mirror, because
-//!   there the session is `!Send`).
+//! * [`DirectReads`] serves `cad_settings`/`cad_layers`/`cad_fonts`/`cad_api_call`
+//!   (the reflected plugin-API document snapshot) from the session itself (the
+//!   desktop serves them from the owner-tick mirror, because there the session
+//!   is `!Send`).
 //!
 //! Nothing here decides *what* a command means, and nothing here may turn a
 //! refusal into a success: the admission verdict, the gate order, the queue
@@ -57,7 +58,8 @@
 use cad_app::{StandardView, ToolParameter, ToolValue};
 use cad_ui_core::session::wire::{self, AdmissionTarget, ControlReads, PopupTarget};
 use cad_ui_core::session::{
-    CadFonts, CadLayerWrite, CadLayers, CadSession, CadSettingKey, CadSettingValue, CadSettings,
+    CadApiSnapshot, CadFonts, CadLayerWrite, CadLayers, CadSession, CadSettingKey, CadSettingValue,
+    CadSettings,
 };
 use serde_json::Value;
 
@@ -206,13 +208,25 @@ impl AdmissionTarget for DirectSink<'_> {
 /// `None` state (a synchronous carrier has a session whenever it can answer at
 /// all). `layers()`/`fonts()` relay the session's own projection refusal
 /// unchanged.
+///
+/// The plugin-API snapshot is read **once**, when the reads struct is built
+/// (i.e. at the start of one `invoke`): [`ControlReads::api_snapshot`] borrows
+/// from `self`, so the value must live in the struct rather than be a temporary.
+/// That is the same instant the desktop's mirror would be read. A live session
+/// always has a snapshot (it is the document manager); `document: None` inside it
+/// is the real "no document is open".
 pub struct DirectReads<'a> {
     session: &'a CadSession,
+    /// The live session's reflected snapshot (`document: None` = no document).
+    snapshot: CadApiSnapshot,
 }
 
 impl<'a> DirectReads<'a> {
     pub fn new(session: &'a CadSession) -> Self {
-        Self { session }
+        Self {
+            session,
+            snapshot: session.api_snapshot(),
+        }
     }
 }
 
@@ -227,6 +241,10 @@ impl ControlReads for DirectReads<'_> {
 
     fn fonts(&self) -> Option<Result<CadFonts, String>> {
         Some(self.session.fonts())
+    }
+
+    fn api_snapshot(&self) -> Option<&CadApiSnapshot> {
+        Some(&self.snapshot)
     }
 }
 

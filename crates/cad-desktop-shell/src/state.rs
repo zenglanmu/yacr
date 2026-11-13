@@ -186,6 +186,16 @@ pub struct Shared {
     /// `cad_waiting`); `Some(Err(..))` carries the session's own projection
     /// refusal rather than an empty registry.
     pub cad_fonts: Option<Result<CadFonts, String>>,
+    /// Latest reflected plugin-API snapshot mirrored from the owner-thread
+    /// session, so `cad_api_call` never touches the `!Send` session from the IPC
+    /// thread.
+    ///
+    /// `None` means **no snapshot yet** (before the first owner tick): the read
+    /// answers `cad_waiting`. `Some(CadApiSnapshot { document: None })` is the
+    /// real "a session exists but no document is open" state, answered
+    /// `{ "document": null }`. It is a **derived** snapshot of the authoritative
+    /// `cad-db` document (never written back) and never a fabricated document.
+    pub cad_api_snapshot: Option<cad_ui_core::session::CadApiSnapshot>,
     /// The app-side render telemetry seam (see [`ShellTelemetry`]). `None`
     /// before the host registers it and in unit tests; `cad_status` then reports
     /// the same `"-"` token a host with no pulled state would.
@@ -255,6 +265,7 @@ impl Shared {
             cad_layer_writes: VecDeque::new(),
             cad_layers: None,
             cad_fonts: None,
+            cad_api_snapshot: None,
             telemetry: None,
             popup_host: None,
             release_opener: None,
@@ -306,6 +317,7 @@ impl Shared {
             self.cad_settings.as_ref(),
             self.cad_layers.as_ref(),
             self.cad_fonts.as_ref(),
+            self.cad_api_snapshot.as_ref(),
         )
     }
 }

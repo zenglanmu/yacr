@@ -250,9 +250,25 @@ impl Run {
 }
 
 /// The **queue** path: dispatch into [`Queues`], then drain like the owner tick.
+///
+/// The read seam is populated **before** the dispatch, exactly as an owner tick
+/// leaves the desktop's mirror: the same session's own projections stand in for
+/// `Shared::cad_settings`/`cad_layers`/`cad_fonts`/`cad_api_snapshot`. Without
+/// that, a reads command could only ever be compared as `cad_waiting` on this
+/// path and the comparison would prove nothing about the answer.
 fn via_queue(name: &str, args: &str, gates: (bool, bool)) -> Run {
+    let session = session();
     let mut queues = Queues::new(gates.0, gates.1);
-    let reads = QueueReads::default();
+    let settings = session.settings();
+    let layers = session.layers();
+    let fonts = session.fonts();
+    let api_snapshot = session.api_snapshot();
+    let reads = QueueReads::new(
+        Some(&settings),
+        Some(&layers),
+        Some(&fonts),
+        Some(&api_snapshot),
+    );
     let mut popups = NoPopups;
     let result = {
         let mut sink = queues.sink();
@@ -262,7 +278,7 @@ fn via_queue(name: &str, args: &str, gates: (bool, bool)) -> Run {
         Ok(ack) => Run {
             admission: Admission::Admitted,
             ack: Some(ack),
-            applied: queues.drain(&session()),
+            applied: queues.drain(&session),
         },
         Err(error) => {
             assert!(
