@@ -27,7 +27,7 @@ export default definePlugin({
 | `ApplicationServices` | `Application`, `DocumentManager`, `Document` |
 | `DatabaseServices` | `Database`, `Transaction`, `TransactionManager`, object/table descriptions |
 | `EditorInput` | `Editor`, `PromptResult`, `PromptStatus`, `SelectionSet` |
-| `Runtime` | `definePlugin`, `parsePluginManifest`, `PluginContext` |
+| `Runtime` | `definePlugin`, `parsePluginManifest`, `PluginContext`, `api.runtime` (`registerCommand`/`unregisterCommand`), `CommandFlags` |
 | `Geometry` | `Point2d/3d`, `Vector2d/3d`, `Matrix3d`, `Plane` and pure helpers |
 | `Colors` | `Color`, `EntityColor`, `ColorMethod`, `aciToRgb` |
 
@@ -75,7 +75,7 @@ silent success. Host failures arrive as `CadApiError`; branch on `code`, not mes
 
 ## v1 status
 
-**The descriptor is 19 rows: six `supported`, 13 `pending`.** Five served
+**The descriptor is 18 rows: six `supported`, 12 `pending`.** Five served
 operations are reflected reads over `cad_api_call` —
 `documentManager.mdiActiveDocument` (the open `Document`, or `null`),
 `documentManager.documents` (0 or 1 `Document`, `[]` when none is open),
@@ -84,7 +84,17 @@ operations are reflected reads over `cad_api_call` —
 `editor.currentSelection` (the ids the user holds right now, `[]` when nothing is
 selected) — and one is a **mutation**: `transaction.commit`, queued through the
 carrier's submit/poll lane. Everything else is still a reservation — no other object
-read path, no prompts, no command dispatch.
+read path and no prompts.
+
+`Runtime` has **no row at all**: command registration is client-local. `createCadApi`
+takes an optional `onCommandRegister`/`onCommandUnregister` hook pair, and a plugin
+calls `ctx.api.runtime.registerCommand(name, flags, handler)` to hand a command to
+the host's funnel; without the hook the call refuses
+(`unsupported-runtime: cad_api.Runtime.registerCommand`), because there would be
+nowhere to dispatch it. Names use the descriptor's command grammar
+(`[A-Z][A-Z0-9_]{0,31}`); a duplicate is `api.invalid_argument: command.duplicate`, an
+unknown unregister is `api.invalid_argument: command.unknown`. Flags are recorded,
+not interpreted: the only dispatch path in this build is a typed command line.
 
 | Descriptor rows | v1 |
 | --- | --- |
@@ -94,6 +104,7 @@ read path, no prompts, no command dispatch.
 | `DatabaseServices.database.revision` (1) | `supported` — current revision, read every call |
 | `DatabaseServices.transaction.commit` (1) | `supported` — the one mutating operation, over the submit/poll lane |
 | `DatabaseServices` (2 more) | `pending` — `database.getObjectId`, `transaction.getObject` |
+| `Runtime` (0) | client-local — commands register through the host hook, no host operation |
 | `EditorInput.editor.currentSelection` (1) | `supported` — the reflected selection, read without prompting |
 | `EditorInput` (8 more) | `pending` — no interactive prompt path yet |
 | `Runtime.runtime.registerCommand` (1) | `pending` — no chrome-local admission path yet |

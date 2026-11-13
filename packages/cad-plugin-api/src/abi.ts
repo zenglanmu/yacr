@@ -18,7 +18,7 @@
 // (`documentManager.mdiActiveDocument`, `documentManager.documents`), the database
 // revision and symbol-table projections and the editor's current selection (all
 // over `cad_api_call`), and the transactional `transaction.commit` (over the
-// mutating `cad_api_submit` lane) — and the other 13 are `pending`: the table is an
+// mutating `cad_api_submit` lane) — and the other 12 are `pending`: the table is an
 // honest reservation list, not an availability list. It is deliberately complete rather than aspirational — an
 // operation that exists here but is `pending` is refused by name, an operation the
 // host marks `unsupported` is refused by name, and an operation the host does not
@@ -28,6 +28,9 @@
 // `transaction.start`, `transaction.addNewlyCreated` and `transaction.abort` have
 // **no row**: they are client-local bookkeeping (the host mints no transaction
 // handle), so advertising them would promise a host round-trip that does not exist.
+// `Runtime.registerCommand` has none either: command registration is client-local
+// and reported to the host's own funnel hook, which is why the `Runtime` namespace
+// has no host operation at all in this build.
 
 /** Wire/API generation. A host and this package must agree exactly. */
 export const API_VERSION = 1;
@@ -74,7 +77,7 @@ export const API_NAMESPACES: readonly CadApiNamespace[] = [
 ];
 
 /**
- * The v1 capability table: 19 host operations, 13 `pending` and six `supported`.
+ * The v1 capability table: 18 host operations, 12 `pending` and six `supported`.
  *
  * Do not flip a row to `supported` here without the host side landing first (and
  * a `case` in the WebView adapter) — the contract test will catch the JSON drift,
@@ -197,12 +200,6 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
     namespace: 'EditorInput',
     operation: 'editor.currentSelection',
     status: 'supported',
-  },
-  {
-    namespace: 'Runtime',
-    operation: 'runtime.registerCommand',
-    status: 'pending',
-    reason: pendingReason('Runtime', 'runtime.registerCommand'),
   },
 ];
 

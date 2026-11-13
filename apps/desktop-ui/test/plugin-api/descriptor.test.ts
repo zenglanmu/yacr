@@ -51,11 +51,11 @@ function assertRejected(value, detail) {
   );
 }
 
-test('the shipped contract parses with 19 rows at apiVersion 1', () => {
+test('the shipped contract parses with 18 rows at apiVersion 1', () => {
   assert.equal(payload.apiVersion, 1);
-  assert.equal(payload.operations.length, 19);
+  assert.equal(payload.operations.length, 18);
   assert.deepEqual(payload.namespaces, API_NAMESPACES);
-  assert.equal(new Set(payload.operations.map((row) => `${row.namespace}.${row.operation}`)).size, 19);
+  assert.equal(new Set(payload.operations.map((row) => `${row.namespace}.${row.operation}`)).size, 18);
   // The descriptor lists host-served operations only. Six are served in this
   // build; widening the set means landing the host operation and the adapter
   // `case` (or mutating implementation) first — bridge.test.ts enforces that half.
@@ -74,7 +74,7 @@ test('the shipped contract parses with 19 rows at apiVersion 1', () => {
   );
   assert.equal(
     payload.operations.filter((row) => row.status === 'pending').length,
-    13,
+    12,
     'every other row is still pending',
   );
 });

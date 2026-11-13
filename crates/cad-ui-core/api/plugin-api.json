@@ -19,7 +19,6 @@
     { "namespace": "EditorInput", "operation": "editor.getKeyword", "status": "pending", "reason": "api.pending: EditorInput.editor.getKeyword" },
     { "namespace": "EditorInput", "operation": "editor.writeMessage", "status": "pending", "reason": "api.pending: EditorInput.editor.writeMessage" },
     { "namespace": "EditorInput", "operation": "editor.selectAll", "status": "pending", "reason": "api.pending: EditorInput.editor.selectAll" },
-    { "namespace": "EditorInput", "operation": "editor.currentSelection", "status": "supported" },
-    { "namespace": "Runtime", "operation": "runtime.registerCommand", "status": "pending", "reason": "api.pending: Runtime.runtime.registerCommand" }
+    { "namespace": "EditorInput", "operation": "editor.currentSelection", "status": "supported" }
   ]
 }

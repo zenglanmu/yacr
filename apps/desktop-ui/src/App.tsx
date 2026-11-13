@@ -18,6 +18,7 @@ import { queueCadCommand } from './cad/cad-command.ts';
 import { useDwgSaveConfirm } from './components/use-dwg-save-confirm.tsx';
 import { useCadEvents } from './cad/use-cad-events.ts';
 import { pluginCommand, requestProperties, showPluginNotice } from './plugins/host.ts';
+import { pluginCommandFor, runPluginCommand } from './plugin-api/commands.ts';
 import { volatileStatusStore } from './cad/status-cadence.ts';
 import { reconcileToolParameterPending, setToolParameterFlag, setToolParameterNumber, stepToolParameterPending } from './tools/tool-parameters.ts';
 import { requestImportCancel } from './cad/cad-status.ts';
@@ -512,6 +513,13 @@ function Shell() {
     // Chrome-local selectors are answered before the in-flight guard; a router
     // line falls through unchanged (`commands/local-selectors.ts`).
     if (runLocalSelector(text, options.fromInput === true)) return;
+    // A plugin command is additive: answered before admission, failures reported.
+    const pluginRun = pluginCommandFor(text);
+    if (pluginRun) {
+      commandHistory.appendCommand(text);
+      await runPluginCommand(pluginRun.run, pluginRun.name);
+      return;
+    }
     if (submitting.current) return;
     submitting.current = true;
     setPending(true);

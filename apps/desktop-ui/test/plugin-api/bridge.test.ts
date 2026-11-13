@@ -54,7 +54,7 @@ test('hostInfo() calls cad_api_status once and merges the status snapshot', asyn
   assert.equal(info.apiVersion, 1);
   assert.equal(info.carrier, 'dom-canvas');
   assert.equal(info.documentOwner, 'wasm');
-  assert.equal(info.operations.length, 19);
+  assert.equal(info.operations.length, 18);
 });
 
 test('hostInfo() reports unknown/none before any status is observed', async () => {
@@ -546,7 +546,7 @@ test('openPluginApi assembles the client from the real contract JSON', async () 
   const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
 
   assert.deepEqual(commands, ['cad_api_status'], 'one snapshot call per session');
-  assert.equal(session.host.operations.length, 19);
+  assert.equal(session.host.operations.length, 18);
   assert.equal(session.host.carrier, 'native-below');
 
   // Pure, always-local operations work without touching the host.
@@ -810,6 +810,39 @@ test('the served read resolves null when no document is open', async () => {
   );
   const session = await openPluginApi({ invoke, status: () => statusWith('dom-canvas', 'wasm') });
   assert.equal(await session.api.application.documentManager.mdiActiveDocument(), null);
+});
+
+test('openPluginApi installs the command hooks when the caller supplies them', async () => {
+  const registered = [];
+  const removed = [];
+  const { invoke } = countingInvoke(payload);
+  const session = await openPluginApi({
+    invoke,
+    status: () => statusWith('native-below', 'native'),
+    onCommandRegister: (registration) => {
+      registered.push(registration.name);
+    },
+    onCommandUnregister: (name) => {
+      removed.push(name);
+    },
+  });
+
+  session.api.runtime.registerCommand('HELLO', 'modal', () => undefined);
+  assert.deepEqual(registered, ['HELLO']);
+  session.api.runtime.unregisterCommand('HELLO');
+  assert.deepEqual(removed, ['HELLO']);
+});
+
+test('openPluginApi without hooks leaves command registration refused', async () => {
+  const { invoke } = countingInvoke(payload);
+  const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
+  assert.throws(
+    () => session.api.runtime.registerCommand('HELLO', 'modal', () => undefined),
+    (error) => {
+      assert.equal(codeOf(error), 'unsupported-runtime: cad_api.Runtime.registerCommand');
+      return true;
+    },
+  );
 });
 
 test('the plugin-api modules import no Tauri package and hold no CJK copy', async () => {

@@ -25,6 +25,8 @@ import { createGeometryLibrary } from './geometry.ts';
 import type { GeometryLibrary } from './geometry.ts';
 import type { CadApiHostInfo, CadHostBridge } from './host-bridge.ts';
 import { createWire, errorFromBridgeFailure, isRecord } from './internal/capability.ts';
+import { createRuntimeNamespace } from './runtime.ts';
+import type { CommandRegistration, RuntimeNamespace } from './runtime.ts';
 
 /** Everything a plugin may call. */
 export interface CadApi {
@@ -32,6 +34,20 @@ export interface CadApi {
   readonly editor: Editor;
   readonly geometry: GeometryLibrary;
   readonly colors: ColorLibrary;
+  /** Command registration; client-local, reported to the host's hook. */
+  readonly runtime: RuntimeNamespace;
+}
+
+/**
+ * What the host may hand `createCadApi` so a plugin can register commands.
+ *
+ * `onCommandRegister` is the funnel's installation point: without it
+ * `runtime.registerCommand` refuses, because the carrier has nowhere to dispatch
+ * the command. `onCommandUnregister` is its inverse.
+ */
+export interface CadApiOptions {
+  readonly onCommandRegister?: (registration: CommandRegistration) => void;
+  readonly onCommandUnregister?: (name: string) => void;
 }
 
 /** What the host passes to `activate`/`deactivate`. */
@@ -281,7 +297,29 @@ function refuseContradiction(host: CadApiHostInfo): void {
  * available. Every host operation is gated against the host's own table and, in
  * this build, refuses by name (all 20 rows are `pending`).
  */
-export async function createCadApi(bridge: CadHostBridge): Promise<CadApi> {
+/**
+ * Validate the host hooks. Absent hooks are fine (they mean "no funnel").
+ */
+function readOptions(options: CadApiOptions | undefined): CadApiOptions {
+  if (options === undefined) return {};
+  if (typeof options !== 'object' || options === null || Array.isArray(options)) {
+    throw invalidArgument('options');
+  }
+  const onCommandRegister = options.onCommandRegister;
+  if (onCommandRegister !== undefined && typeof onCommandRegister !== 'function') {
+    throw invalidArgument('options.onCommandRegister');
+  }
+  const onCommandUnregister = options.onCommandUnregister;
+  if (onCommandUnregister !== undefined && typeof onCommandUnregister !== 'function') {
+    throw invalidArgument('options.onCommandUnregister');
+  }
+  return { onCommandRegister, onCommandUnregister };
+}
+
+export async function createCadApi(
+  bridge: CadHostBridge,
+  options?: CadApiOptions,
+): Promise<CadApi> {
   if (typeof bridge !== 'object' || bridge === null) throw invalidArgument('bridge');
   if (typeof bridge.hostInfo !== 'function') throw invalidArgument('bridge.hostInfo');
   if (typeof bridge.request !== 'function') throw invalidArgument('bridge.request');
@@ -307,5 +345,6 @@ export async function createCadApi(bridge: CadHostBridge): Promise<CadApi> {
     editor: createEditor(wire),
     geometry: createGeometryLibrary(),
     colors: createColorLibrary(),
+    runtime: createRuntimeNamespace(readOptions(options)),
   };
 }

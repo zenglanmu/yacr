@@ -54,8 +54,8 @@ function namespaceNames(value: unknown): readonly unknown[] {
   });
 }
 
-test('the table is 19 host operations: 13 pending and six served', () => {
-  assert.equal(API_OPERATIONS.length, 19, 'the v1 descriptor has 19 host-operation rows');
+test('the table is 18 host operations: 12 pending and six served', () => {
+  assert.equal(API_OPERATIONS.length, 18, 'the v1 descriptor has 18 host-operation rows');
   const supported = API_OPERATIONS.filter((row) => row.status === 'supported').map(
     (row) => `${row.namespace}.${row.operation}`,
   );
@@ -71,13 +71,19 @@ test('the table is 19 host operations: 13 pending and six served', () => {
     'EditorInput.editor.currentSelection',
   ]);
   const pending = API_OPERATIONS.filter((row) => row.status === 'pending');
-  assert.equal(pending.length, 13, 'every other host operation is still pending');
+  assert.equal(pending.length, 12, 'every other host operation is still pending');
 });
 
-test('client-local transaction steps have no descriptor row', () => {
-  // `start`, `addNewlyCreated` and `abort` never cross the wire, so advertising
-  // them would promise a host round-trip that does not exist.
-  for (const operation of ['transaction.start', 'transaction.addNewlyCreated', 'transaction.abort']) {
+test('client-local operations have no descriptor row', () => {
+  // `start`, `addNewlyCreated` and `abort` never cross the wire, and command
+  // registration is client-local too (it reports to the host's own funnel hook).
+  // Advertising any of them would promise a host round-trip that does not exist.
+  for (const operation of [
+    'transaction.start',
+    'transaction.addNewlyCreated',
+    'transaction.abort',
+    'runtime.registerCommand',
+  ]) {
     assert.equal(
       API_OPERATIONS.some((row) => row.operation === operation),
       false,

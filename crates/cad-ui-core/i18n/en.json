@@ -1300,6 +1300,7 @@
   "vendor.editing.title": "Editing not supported",
   "vendor.editing.unsupported": "The current selection contains a TCH object; {command} cannot edit it yet.",
   "vendor.editing.dismiss": "Dismiss",
+  "plugin.command.failed": "Plugin command {command} failed. See the browser console for details.",
   "vendor.plugin.multi_selection_unsupported": "Plugin properties support a single selection only; several objects are selected.",
   "gpu.pulled.insufficient_vram.title": "Low video memory: renderer fell back",
   "gpu.pulled.insufficient_vram.body": "The drawing's accelerated GPU copy needs more memory than is currently available, so it is drawn with the universal rendering path. Panning and zooming a large drawing may be slower.",
