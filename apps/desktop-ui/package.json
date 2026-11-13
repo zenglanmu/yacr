@@ -10,7 +10,7 @@
     "build:web": "npm run build:plugins && YACR_RUNTIME=web vite build --outDir ../app-web/dist-ui --emptyOutDir",
     "build:android": "npm run build:plugins && YACR_RUNTIME=android vite build --outDir ../app-android/dist --emptyOutDir",
     "build:canvas-wasm": "bash ../../scripts/build-canvas-wasm.sh",
-    "test": "tsc --noEmit && tsc -p ../../plugins/tch/tsconfig.json --noEmit && node --test test/*.test.ts",
+    "test": "tsc --noEmit && tsc -p ../../packages/cad-plugin-api/tsconfig.json --noEmit && tsc -p ../../plugins/tch/tsconfig.json --noEmit && node --test test/*.test.ts test/plugin-api/*.test.ts ../../packages/cad-plugin-api/test/*.test.ts",
     "typecheck": "tsc --noEmit && tsc -p ../../plugins/tch/tsconfig.json --noEmit"
   },
   "dependencies": {

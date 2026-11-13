@@ -123,6 +123,117 @@ reason when the status is `failed`.
 that failed stays visible in `faces` with its real status; nothing is silently
 dropped, and nothing is retried on read.
 
+## `cad_api_call`
+
+Performs **one** plugin-API operation against the host's reflected snapshot. It is
+the *doing* half of the surface; `cad_api_status` (below) is the *advertising*
+half, and the operation must appear there as `supported` before a client sends it.
+
+```json
+{ "namespace": "ApplicationServices", "operation": "documentManager.documents", "parameters": null }
+```
+
+The reply envelope carries `ok` plus **exactly one** of `value` / `error` (the
+absent half is omitted, never `null`):
+
+```json
+{ "ok": true, "value": { "documents": [] } }
+{ "ok": false, "error": "unsupported-runtime: cad_api.EditorInput.editor.getPoint" }
+```
+
+The served operations are the `supported` rows of the descriptor:
+
+| namespace.operation | `value` |
+| --- | --- |
+| `ApplicationServices.documentManager.mdiActiveDocument` | `{ "document": <descriptor> }` or `{ "document": null }` |
+| `ApplicationServices.documentManager.documents` | `{ "documents": [ <descriptor> ] }` — 0 or 1 |
+| `DatabaseServices.database.revision` (`parameters: { "database": "<id>" }`) | `{ "revision": <number> }` |
+
+`<descriptor>` is `{ "id", "name", "isReadOnly", "database": { "id", "version" } }`.
+
+Refusals are explicit and checked in this order:
+
+- any other namespace/operation → `unsupported-runtime: cad_api.<namespace>.<operation>`
+  (checked first, before the snapshot and the arguments);
+- no reflected snapshot yet (the desktop owner-tick mirror has not been populated)
+  → `cad_waiting`, the shared "ask again after a tick" word;
+- `database.revision` whose `parameters.database` is missing, not a string, or not
+  the snapshot's database id → `api.invalid_argument: database`;
+- `database.revision` while the snapshot exists but holds no document →
+  `cad_api.no_document`.
+
+`{ "document": null }` and `{ "documents": [] }` are real answers (no document is
+open), not waits and not failures. Every answer is a **derived** projection of the
+host controller's snapshot: `cad-db` remains the only authority, no transaction is
+opened, and the mirror is never written back. On `native-below` the snapshot lags
+the owner tick by at most one tick; `dom-canvas` reads the live session.
+
+## `cad_api_status`
+
+The plugin / secondary-development API **capability descriptor**: which
+**host-served** operations this build offers, and which it merely reserves. It
+answers one pure value and touches no document, no session state and no host
+resource.
+
+```json
+{
+  "apiVersion": 1,
+  "namespaces": ["ApplicationServices", "DatabaseServices", "EditorInput", "Runtime", "Geometry", "Colors"],
+  "operations": [
+    {
+      "namespace": "DatabaseServices",
+      "operation": "transaction.commit",
+      "status": "pending",
+      "reason": "api.pending: DatabaseServices.transaction.commit"
+    },
+    {
+      "namespace": "EditorInput",
+      "operation": "editor.getPoint",
+      "status": "pending",
+      "reason": "api.pending: EditorInput.editor.getPoint"
+    },
+    {
+      "namespace": "Runtime",
+      "operation": "runtime.registerCommand",
+      "status": "pending",
+      "reason": "api.pending: Runtime.runtime.registerCommand"
+    }
+  ]
+}
+```
+
+The full row list is `crates/cad-ui-core/api/plugin-api.json` — the one authority
+this command parses; do not transcribe it into a client. It has **21 rows: 18
+`pending` + 3 `supported`** (`documentManager.mdiActiveDocument`,
+`documentManager.documents`, `database.revision`). A row exists only for an
+operation the host answers over the wire; the pure value helpers (`Geometry`,
+`Colors`) and the manifest parser are package features in
+`packages/cad-plugin-api`, not host capabilities, so they have no row and are
+available regardless of the table.
+
+`status` is one of three stable lowercase labels:
+
+| status | meaning | `reason` |
+| --- | --- | --- |
+| `supported` | implemented in this build | omitted entirely |
+| `pending` | reserved by the contract, not implemented in this build | required, always `api.pending: <Namespace>.<operation>` |
+| `unsupported` | deliberately not offered | required, a named marker |
+
+A `supported` row has no `reason` key at all (not `null`), and a `pending` or
+`unsupported` row always carries one — a capability is never advertised as an
+empty success.
+
+**In this build 18 of the 21 rows are `pending`** — no other host operation is
+served yet, so a client refuses those by name (`api.pending:
+<Namespace>.<operation>`). The three `supported` rows are served by `cad_api_call`
+(above); pure package features (Geometry, Colors, manifest parsing) never consult
+this table at all. The command advertises the contract; it does not itself read or
+write the document.
+
+`cad_api_status` is a `shared` command: `native-below` and `dom-canvas` carriers
+serve the identical answer from the same registry row. It is **not** a CAD
+command — it is absent from `cad_commands` and cannot be typed as a selector.
+
 ## `cad_plugin_*` (vendor plugin registry, native shell only)
 
 These five commands belong to the **shell**, not to a CAD document. They are not

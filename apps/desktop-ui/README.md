@@ -31,6 +31,7 @@ npm run dev     # http://127.0.0.1:1420
 | `src/fonts/` | 字体报告投影：严格 `cad_fonts` 解析（不把坏载荷折成空成功）、loaded/failed/unresolved 只读分组与 `FONTS` 本地选择器 |
 | `src/popup/` | 弹窗状态、布局度量与文字编辑接线 |
 | `src/options/` | 选项模型 |
+| `src/plugin-api/` | 二次开发 API 的宿主侧适配：校验 `cad_api_status`、组装 `@yacr/plugin-api` 客户端、按名拒绝未实现的 wire 操作；自身不持有语义 |
 | `src/theme/` | 主题：`data-theme` 唯一写入、首帧缓存（`yacr.theme`）、跟随宿主 `cad_status.theme` 的 hook 与 `cad_set_setting` 写入 |
 | `src/components/` | 区域组件与共享控件（TSX） |
 | `src/stacking-regression/` | 层序回归夹具，不是产品开关 |

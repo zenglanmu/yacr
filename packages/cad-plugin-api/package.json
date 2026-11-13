@@ -1,0 +1,14 @@
+{
+  "name": "@yacr/plugin-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Contract and host-agnostic reference client for the YACR secondary-development (plugin) API.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  }
+}

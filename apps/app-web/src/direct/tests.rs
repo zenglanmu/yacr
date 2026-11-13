@@ -250,9 +250,25 @@ impl Run {
 }
 
 /// The **queue** path: dispatch into [`Queues`], then drain like the owner tick.
+///
+/// The read seam is populated **before** the dispatch, exactly as an owner tick
+/// leaves the desktop's mirror: the same session's own projections stand in for
+/// `Shared::cad_settings`/`cad_layers`/`cad_fonts`/`cad_api_snapshot`. Without
+/// that, a reads command could only ever be compared as `cad_waiting` on this
+/// path and the comparison would prove nothing about the answer.
 fn via_queue(name: &str, args: &str, gates: (bool, bool)) -> Run {
+    let session = session();
     let mut queues = Queues::new(gates.0, gates.1);
-    let reads = QueueReads::default();
+    let settings = session.settings();
+    let layers = session.layers();
+    let fonts = session.fonts();
+    let api_snapshot = session.api_snapshot();
+    let reads = QueueReads::new(
+        Some(&settings),
+        Some(&layers),
+        Some(&fonts),
+        Some(&api_snapshot),
+    );
     let mut popups = NoPopups;
     let result = {
         let mut sink = queues.sink();
@@ -262,7 +278,7 @@ fn via_queue(name: &str, args: &str, gates: (bool, bool)) -> Run {
         Ok(ack) => Run {
             admission: Admission::Admitted,
             ack: Some(ack),
-            applied: queues.drain(&session()),
+            applied: queues.drain(&session),
         },
         Err(error) => {
             assert!(
@@ -422,6 +438,37 @@ fn the_crate_version_is_served_with_and_without_a_live_session() {
     // And through the native entry with no page session.
     let invoked: Value =
         serde_json::from_str(&invoke("cad_app_version", "{}")).expect("valid JSON");
+    assert_eq!(invoked["ok"], Value::Bool(true));
+    assert_eq!(invoked["value"], expected);
+}
+
+/// The secondary-development API descriptor is a compile-time contract, not
+/// document state: a page whose canvas session has not started must still learn
+/// what this build supports (and what it explicitly refuses) — never a false
+/// `NO_SESSION`.
+#[test]
+fn the_plugin_api_descriptor_is_served_with_and_without_a_live_session() {
+    let expected = serde_json::to_value(
+        cad_ui_core::session::wire::api_status().expect("the descriptor parses"),
+    )
+    .expect("the descriptor serialises");
+    assert_eq!(expected["apiVersion"], serde_json::json!(1));
+
+    let without = without_session("cad_api_status").expect("served without a session");
+    assert_eq!(without, expected);
+
+    // Live session: the generated `dom-canvas` dispatch arm answers the same value.
+    let session = session();
+    let mut sink = DirectSink::new(&session);
+    let reads = DirectReads::new(&session);
+    let mut popups = NoPopups;
+    let with = dispatch("cad_api_status", "{}", &mut sink, &reads, &mut popups)
+        .expect("served by a live session");
+    assert_eq!(with, expected);
+    assert_eq!(with, without);
+
+    // And through the native entry with no page session.
+    let invoked: Value = serde_json::from_str(&invoke("cad_api_status", "{}")).expect("valid JSON");
     assert_eq!(invoked["ok"], Value::Bool(true));
     assert_eq!(invoked["value"], expected);
 }

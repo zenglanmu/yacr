@@ -1,5 +1,93 @@
 AD
 
+## 2026-11-13 合并 `ts-api` 工作树（插件 API M2 系列进入 `main`）
+
+- **范围**：`ts-api` 工作树的 12 个提交（`76806671`…`1a4e8d9e`）合入 `main`（`merge/ts-api` 分支，
+  `--no-ff`）。唯一冲突是 `docs/handoff.md`：按时间倒序把插件 API 三条（M2.2 / M2.1 / 骨架）排在
+  v0.1.12 发布条目之前，双方条目都完整保留。另一工作树 `revit-texture` 无待合并内容
+  （`7b809bbd` 已是 `main` 祖先）。
+- **合并时补齐（两处分支自身的不一致）**：`docs/commands.md` 的 `cad_api_status` 说明仍写“20 行全
+  pending”，与实现（21 行 = 18 `pending` + 3 `supported`）矛盾，已改正并补上缺失的 `cad_api_call`
+  wire 契约小节（三条只读、拒绝顺序、`cad_waiting` 与“无文档”的区别）；`packages/cad-plugin-api`
+  的 `npm test` 原本裸调 `tsc`（该包无 `node_modules`、无 devDependency、无 lockfile，干净检出必失败），
+  改为只跑 node 套件，README 注明类型检查由 desktop-ui 门禁
+  `tsc -p ../../packages/cad-plugin-api/tsconfig.json --noEmit` 承担。
+- **证据（本轮实跑，均在合并后的树上）**：`cargo check`（cad-ui-core / cad-app / cad-desktop-shell /
+  app-web `--all-targets`、app-linux `--all-targets`、app-web wasm target）；`plugin_api_status` 6、
+  `session::api` 21、`app-web` 123、`cad-desktop-shell` 78；`fmt --check`、`check-architecture` /
+  `check-file-size` / `check-i18n` / `check-command-docs` + 其自测；包 node 53/53、desktop-ui
+  `npm test` **1648/1648**（三次 typecheck 全部执行）、`npm run build` 产出 `dist`。
+  wasm target 的 13 条 warning 均在合并未触碰的文件里（native-only pick 代码），非本轮回归。
+- **NOT RUN**：clippy、workspace 全量测试、`check-tauri-capabilities` / `check-fixture-manifest` /
+  `check-workflows`、android/macos/windows 目标、`npm ci`、真实 GUI/GPU/像素/真机。
+- **边界**：合并只是让 `main` 拥有这份代码与契约证据，不改变任何平台验收状态（见平台表）。
+
+## 2026-11-13 插件 API M2.2：文档列表与 revision
+
+- **新增读取**（同一 `cad_api_call` / `CadApiSnapshot`，无新命令、无队列）：
+  `documentManager.documents` → `{documents:[descriptor...]}`（0 或 1；无图时 `[]`），
+  `database.revision`（参数 `{database}`）→ `{revision}`。拒绝：`cad_waiting`（无快照）、
+  `cad_api.no_document`、`api.invalid_argument: database`；未知操作仍先拒绝。
+- **客户端**：`documents()` 解码列表；新增 `Database.revision(): Promise<number>`（每次实时读，
+  不缓存、不从开图时的 `version` 推导，因为它是 `expectedRevision` 的比较基准）。能力表
+  **21 行 = 18 pending + 3 supported**，JSON 与包内表逐行一致，Rust 断言按名字钉住三项。
+- **边界**：符号表、选择、编辑器提示、事务、命令派发仍 pending；镜像滞后一个 owner tick；
+  Windows/macOS/Android 未运行。
+- **证据**：`cargo test -p cad-ui-core --lib session::api` 21、`-p app-web` 123、
+  `plugin_api_status` 6/6、`fmt`、`check-architecture` / `check-file-size` / `check-i18n` 通过；包 node 53/53、
+  desktop-ui plugin-api+host-adapter 70/70、`npm test` 整条 **1648/1648**。
+  **NOT RUN**：真实 GUI 读取、GUI/GPU/像素/真机、Windows/macOS/Android/Web 运行。
+
+## 2026-11-13 插件 API M2.1：`cad_api_call` + 活动文档只读
+
+- **新增**：共享 wire 命令 `cad_api_call`（`reads` 车道，args `{namespace,operation,parameters?}`，
+  回 `{ok,value?,error?}`）。唯一真实操作
+  `ApplicationServices.documentManager.mdiActiveDocument` → `{document:{id,name,isReadOnly,
+  database:{id,version}}}` 或 `{document:null}`；其余操作 `unsupported-runtime: cad_api.<ns>.<op>`。
+- **快照语义**：`CadApiSnapshot{document}` 区分"还没有 tick 镜像"（`cad_waiting`）与"会话存在但
+  没有文档"（`ok:true` + `document:null`）；`native-below` 由 4 个原生 tick 镜像
+  `Shared.cad_api_snapshot`，`dom-canvas` 直接读实时 `CadSession`。`cad-db` 仍是唯一权威，
+  镜像只读、不回写。
+- **客户端**：`documentManager.mdiActiveDocument()` / `documents()` 改为 **Promise 方法**（wire 是
+  异步的；同步属性只能靠过期缓存）；`DocumentDescriptor` 的数据库身份改为 `{id,version}`，
+  `Database.id` 取代借用的 `handle` 名。能力表 **19 pending + 1 supported**，由 JSON 与包内表
+  逐行一致并由契约测试按名字钉住；adapter 仅转发该一项，其余仍 `api.adapter-missing` 且不触达
+  invoke。
+- **边界**：`documents` 列表、符号表、revision、编辑器提示、事务、命令派发仍 `pending`；
+  镜像最多滞后一个 owner tick；Windows/macOS/Android 的 tick 赋值未在该平台编译/运行。
+- **证据**：`cargo test -p cad-ui-core --lib` 607、`-p app-web` 123、`wire_goldens` 4/4、
+  `cargo check -p app-linux --all-targets`、`fmt`、`check-architecture` / `check-file-size`；
+  包 node 48/48、desktop-ui plugin-api+host-adapter 66/66、`npm test` 整条 **1639/1639**。
+  **NOT RUN**：真实 GUI 读取、GUI/GPU/像素/真机、Windows/macOS/Android/Web 运行。
+
+## 2026-11-13 TypeScript 二次开发 API 骨架（ADR 0034）
+
+- **新增**：`packages/cad-plugin-api`（`@yacr/plugin-api`）——AutoCAD .NET 命名空间镜像
+  （ApplicationServices / DatabaseServices / EditorInput / Runtime / Geometry / Colors）+ 参考
+  客户端 + manifest 解析；`apps/desktop-ui/src/plugin-api` 宿主 adapter（描述符校验、载体合并、
+  `api.adapter-missing` 拒绝）；`cad-ui-core` 的 `cad_api_status` 共享命令与
+  `crates/cad-ui-core/api/plugin-api.json` 单一权威。作者文档 `docs/plugin-api.md`。
+- **语义**：能力四类拒绝——`pending` → `api.pending: <ns>.<op>`；显式 `unsupported` →
+  `unsupported-runtime: cad_api.<ns>.<op>`；宿主表里**没有**该行 → `api.descriptor_missing:
+  <ns>.<op>`；`callVoid` 必须拿到 `{accepted:true}`。客户端在触达 wire **之前**门控。
+  **本轮 20 行全部 `pending`**（描述符只列宿主操作；Geometry/Colors/manifest 是包内特性，没有
+  行）——插件不能读写文档、不能注册可派发命令（显式拒绝，不是占位成功）。事务：嵌套 commit 是
+  保存点（`CommitResult{applied:false,revision:null,created:[]}`，不伪造 revision）、`abort` 仅本地、
+  `expectedRevision` 必填、commit 信封带 `document`、insert 只接受 Line/Circle/Arc 且带 layer 名 +
+  space；`handle` 可空（只作 `source_handle` 出处），图层/块按名字标识，`getObject` 按 `typeName`
+  解码。
+- **载体**：`cad_api_status` 为 shared+pure，两个载体同一份 JSON；Web 在会话启动前也应答
+  （`apps/app-web/src/direct.rs::without_session`），不报假 `no live CAD session`。
+- **边界**：插件仍是同权 ES module，不是沙箱；无热重载、无 Worker/签名；M2–M5 见 ADR 0034。
+- **证据**：包 `tsc --noEmit` + node 45/45（含 20 行逐行契约、包边界导入扫描）；desktop-ui
+  `tsc --noEmit` + `test/plugin-api` 与 `host-adapter` 合计 60/60（含 supported⊆adapter 实现门禁）；
+  **`npm test` 整条**（app + 契约包 + `plugins/tch` 三处 typecheck，再加全部 node 套件）
+  **1630/1630**——初始化 `plugins/tch` submodule 后跑通，此前 11 个失败全部来自该 submodule 未初始化；
+  `cargo test -p cad-ui-core --test plugin_api_status` 6/6、`--lib session::api` 5/5、`wire_goldens`
+  4/4、`cargo test -p app-web` 122/122；`cargo check`（cad-ui-core / cad-desktop-shell / app-web
+  wasm）、`fmt --check`、`check-file-size` / `check-i18n` / `check-architecture` /
+  `check-command-docs` 通过。
+  **NOT RUN**：真实 GUI 加载插件、GUI/GPU/像素/真机、Windows/macOS/Android/Web 运行。
 ## 2026-11-13 发布 v0.1.12（官方命令清单收尾 + 真实 2D 升级 + CI 字体解耦）
 
 - **CI 修复（先于发版）**：`core-quality` 在干净检出上编译失败，根因是 `cad-app` 测试用

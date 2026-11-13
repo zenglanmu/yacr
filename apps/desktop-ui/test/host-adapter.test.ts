@@ -815,8 +815,12 @@ test('the package declares the web and android builds next to the tauri one', as
   // The Android host embeds its own artifact (`apps/app-android/dist`); it must
   // never overwrite the desktop hosts' `dist/`.
   assert.equal(pkg.scripts['build:android'], 'npm run build:plugins && YACR_RUNTIME=android vite build --outDir ../app-android/dist --emptyOutDir');
-  // The test gate stays typecheck (app + plugin) + node tests.
-  assert.equal(pkg.scripts.test, 'tsc --noEmit && tsc -p ../../plugins/tch/tsconfig.json --noEmit && node --test test/*.test.ts');
+  // The test gate stays typecheck (app + the published plugin API package + the
+  // vendor plugin) + node tests (app, host adapter, and the package's own suite).
+  assert.equal(
+    pkg.scripts.test,
+    'tsc --noEmit && tsc -p ../../packages/cad-plugin-api/tsconfig.json --noEmit && tsc -p ../../plugins/tch/tsconfig.json --noEmit && node --test test/*.test.ts test/plugin-api/*.test.ts ../../packages/cad-plugin-api/test/*.test.ts',
+  );
 });
 
 test('vite.config.mjs injects and validates __YACR_RUNTIME__', async () => {
