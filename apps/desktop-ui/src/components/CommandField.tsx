@@ -29,7 +29,13 @@ export function CommandField({ id, className, line, enterKeyHint }: CommandField
   const { t } = useI18n();
   return (
     <>
-      <label className="sr-only" htmlFor={id}>{line.textMode ? t(TEXT_STEP_PROMPT_KEY) : t('command.title')}</label>
+      <label className="sr-only" htmlFor={id}>
+        {line.promptMode
+          // The prompt's own sentence is the field's accessible name while it is
+          // answer data: a screen reader hears the question, not "Command".
+          ? line.promptMessage ?? t('command.title')
+          : line.textMode ? t(TEXT_STEP_PROMPT_KEY) : t('command.title')}
+      </label>
       <input
         id={id}
         ref={line.inputRef}

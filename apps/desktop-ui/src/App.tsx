@@ -6,41 +6,34 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from './host/invoke.ts';
 import { CATALOGS } from './catalogs.ts';
-import { createTranslator, initialLocale, LOCALE_STORAGE_KEY, LOCALES, localeTag, storedLocale, storeLocale } from './i18n.ts';
-import type { Locale } from './i18n.ts';
-import { bindProbeInput, createInputLane, createSuspendGate } from './cad/input.ts';
-import type { InputLane, ProbeInputBinding, SuspendGate } from './cad/input.ts';
+import { createTranslator, initialLocale, LOCALE_STORAGE_KEY, LOCALES, localeTag, storedLocale, storeLocale, type Locale } from './i18n.ts';
+import { bindProbeInput, createInputLane, createSuspendGate, type InputLane, type ProbeInputBinding, type SuspendGate } from './cad/input.ts';
 import { rectFromElement } from './cad/metrics.ts';
 import type { FrameLoop } from './cad/frame-loop.ts';
 import { canvasSessionFromShell, palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
 import { useCanvasTransport } from './cad/use-canvas-transport.ts';
-import { queueCadCommand } from './cad/cad-command.ts';
+import { queueCadCommand, type CadCommandResult } from './cad/cad-command.ts';
 import { useDwgSaveConfirm } from './components/use-dwg-save-confirm.tsx';
 import { useCadEvents } from './cad/use-cad-events.ts';
 import { pluginCommand, requestProperties, showPluginNotice } from './plugins/host.ts';
 import { pluginCommandFor, runPluginCommand } from './plugin-api/commands.ts';
 import { volatileStatusStore } from './cad/status-cadence.ts';
-import { reconcileToolParameterPending, setToolParameterFlag, setToolParameterNumber, stepToolParameterPending } from './tools/tool-parameters.ts';
-import { requestImportCancel } from './cad/cad-status.ts';
+import { reconcileToolParameterPending, setToolParameterFlag, setToolParameterNumber, stepToolParameterPending, type ToolParameterPending } from './tools/tool-parameters.ts';
+import { requestImportCancel, type CadStatus } from './cad/cad-status.ts';
 import { draftingAcceleratorCommand } from './cad/cad.ts';
-import type { CadCommandResult } from './cad/cad-command.ts';
-import type { CadStatus } from './cad/cad-status.ts';
-import type { ToolParameterPending } from './tools/tool-parameters.ts';
 import { awaitingToolText, setToolText } from './tools/text.ts';
 import { setSelectedText } from './tools/textedit.ts';
 import { submitStandardView } from './cad/view3d.ts';
 import { isErrorReportVisible } from './errors/error-report.ts';
 import { bindBrowserDefaults, cadContextMenuState, isTextEntryTarget } from './defaults.ts';
 import { admitCommandText, toolCommandForKey } from './commands/commands.ts';
-import { commandMessageFor } from './commands/command-message.ts';
-import type { CommandMessage } from './commands/command-message.ts';
+import { commandMessageFor, type CommandMessage } from './commands/command-message.ts';
 import { useCommandHistory } from './commands/use-command-history.ts';
 import { acceleratorDispatch } from './commands/accelerators.ts';
 import { useHostVocabulary } from './commands/use-host-vocabulary.ts';
 import type { ContextMenuState } from './commands/context-menu.ts';
-import type { PopupKind, PopupPayload } from './popup/popup.ts';
-import { I18nContext, ShellContext } from './context.ts';
-import type { I18nValue, ShellValue } from './context.ts';
+import { openPopup, type PopupKind, type PopupPayload } from './popup/popup.ts';
+import { I18nContext, ShellContext, type I18nValue, type ShellValue } from './context.ts';
 import { TitleBar } from './components/TitleBar.tsx';
 import { Ribbon } from './components/Ribbon.tsx';
 import { DocTabs } from './components/DocTabs.tsx';
@@ -58,7 +51,6 @@ import { MobileTopBar } from './components/MobileTopBar.tsx';
 import { MOBILE_DRAWER_CLOSED, mobileDrawerNext } from './layout/mobile-drawer.ts';
 import { useLayoutMode } from './layout/use-layout-mode.ts';
 import { createShortcutRunner } from './layout/shell-shortcuts.ts';
-import { openPopup } from './popup/popup.ts';
 import { openOptionsDialog } from './options/open-options.ts';
 import { useLocalSelectors } from './commands/local-selectors.ts';
 import { setSelectedProperty } from './properties/properties.ts';
@@ -446,6 +438,9 @@ function Shell() {
   // as `CANCEL` to drop the drag. Only the Escape gate reads this; nothing else
   // may treat a drag as an active tool.
   const gripDragActive = Boolean(status?.gripDrag);
+  // A pending plugin prompt owns Enter/Escape like a tool does (Enter = its
+  // default or `None`, Escape = cancel), but the tool block stays as it was.
+  const pluginPromptPending = status?.pendingPrompt != null;
 
   // The one open path for every dialog. The host owns admission and the gate;
   // this only keeps the fresh payload for the overlay. `existing: true` means
@@ -572,7 +567,9 @@ function Shell() {
   // Escape and the user's text. A re-entrant submit reports `busy` — an explicit
   // non-answer, never a fabricated acceptance.
   const submitToolText = useCallback(async (text: string) => {
-    if (submittingText.current) return { kind: 'busy' };
+    // `as const` keeps the literal: the shell's `ToolTextAnswerResult` union is
+    // what the command line and the prompt answer both narrow on.
+    if (submittingText.current) return { kind: 'busy' } as const;
     submittingText.current = true;
     try {
       return await setToolText(invoke, text);
@@ -683,6 +680,7 @@ function Shell() {
       const toolCommand = toolCommandForKey(event.key, {
         toolActive,
         gripDragActive,
+        promptPending: pluginPromptPending,
         typing: isTyping(event.target),
         composing: event.isComposing,
         repeat: event.repeat,
@@ -719,7 +717,7 @@ function Shell() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [popupOpen, submitCommand, toolActive, gripDragActive, textStep, canCommand, layout, t, chromeSurfaces]);
+  }, [popupOpen, submitCommand, toolActive, gripDragActive, pluginPromptPending, textStep, canCommand, layout, t, chromeSurfaces]);
 
   // Feed the CAD shortcut-menu hook the state slices the chrome already has. It
   // is a ref, not a dependency, so polling never re-installs the guards below.
@@ -778,6 +776,8 @@ function Shell() {
     // affordance reads as pressed, and clicking it again asks the host to focus
     // the open window rather than create a duplicate.
     popupOpen,
+    // The pending plugin prompt: while non-null the typed line is answer data.
+    pluginPrompt: status?.pendingPrompt ?? null,
     displayedError: displayError,
     errorText: displayError,
     error,

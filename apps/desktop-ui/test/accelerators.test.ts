@@ -266,8 +266,8 @@ test('the shell dispatches the mapped name through submitCommand and prevents th
   assert.equal(block.includes('setHistoryOpen'), false, 'no chrome toggle is run by a document chord');
   // It runs through the one admission the chrome uses everywhere.
   assert.ok(app.includes('[status, pending, catalogNames]'), 'canCommand stays the shared admission');
-  assert.ok(app.includes('}, [popupOpen, submitCommand, toolActive, gripDragActive, textStep, canCommand, layout, t, chromeSurfaces]);'),
-    'the listener re-installs when the accelerator or layout inputs change');
+  assert.ok(app.includes('}, [popupOpen, submitCommand, toolActive, gripDragActive, pluginPromptPending, textStep, canCommand, layout, t, chromeSurfaces]);'),
+    'the listener re-installs when the accelerator, prompt or layout inputs change');
   assert.ok(app.includes('const textStep = awaitingToolText(status);'));
 });
 

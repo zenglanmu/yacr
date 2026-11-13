@@ -215,9 +215,12 @@ test('the Escape wiring keeps the two-step behaviour and never cancels from the 
   assert.ok(commandline.includes("textEscapeAction({ awaitingText: textMode, focused: true }) === 'dismiss'"));
   assert.ok(commandline.includes('event.preventDefault();'));
   assert.ok(commandline.includes('inputRef.current?.blur()'));
-  // It never submits a command (and never CANCEL) itself: the second press is
-  // the global tool handler's job.
-  assert.ok(!/['"]CANCEL['"]/.test(commandline), 'the command line must not cancel the tool itself');
+  // It never submits a command itself, and the text step's first press only
+  // dismisses: the one `CANCEL` the field sends belongs to a pending **plugin
+  // prompt**'s own branch (the host resolves Escape there), never to the tool.
+  const cancelAt = commandline.indexOf("shell.submitCommand('CANCEL')");
+  assert.ok(cancelAt !== -1);
+  assert.ok(commandline.indexOf('if (promptMode) {') < cancelAt, 'only the prompt branch cancels');
   assert.ok(!commandline.includes('shell.runCommand'));
   // The global handler runs after the field's handler, so a prevented press is
   // not also a tool command; a press with no field focused is.
@@ -262,16 +265,19 @@ test('typed characters stay in the field and Enter never also runs a command', a
   assert.ok(commandline.includes('setTextDraft(next)'));
   assert.ok(!commandline.includes("invoke("), 'the view never talks to the host directly');
   assert.ok(!desktop.includes("invoke("), 'the docked region never talks to the host directly');
-  // The text submit and the command submit are two distinct Enter paths, and the
-  // text one sits behind the command branch's `return`.
+  // Three Enter paths in one handler, in one order: the plugin prompt's answer,
+  // the command branch, then the text step — each with its own `return`.
+  const promptPath = commandline.indexOf('if (promptMode) {');
   const commandPath = commandline.indexOf('if (!textMode) {');
-  const textPath = commandline.indexOf("if (event.key === 'Escape') {");
+  const textPath = commandline.indexOf('textEscapeAction({ awaitingText: textMode');
+  assert.ok(promptPath !== -1, 'the prompt answer branch must stay');
   assert.ok(commandPath !== -1, 'the command branch must stay');
+  assert.ok(promptPath < commandPath, 'an answer is routed before any command');
   assert.ok(textPath > commandPath, 'the text branch comes after it');
   assert.ok(commandline.slice(commandPath, textPath).includes('return;'), 'text mode never falls through to a command');
   // Both modes end in the shared Enter rule (IME- and repeat-aware), and the one
-  // submit decides text-vs-command in a single place.
-  assert.equal((commandline.match(/handleCommandKey\(event, submit\);/g) ?? []).length, 2, 'one Enter rule, two modes');
+  // submit decides prompt-vs-text-vs-command in a single place.
+  assert.equal((commandline.match(/handleCommandKey\(event, submit\);/g) ?? []).length, 3, 'one Enter rule, three modes');
   assert.ok(commandline.includes('shell.submitCommand(commandLineSubmitText('), 'the command path is the one funnel');
   // One IPC for the text, from the shell, and nothing queued as a command.
   assert.ok(app.includes('setToolText(invoke, text)'));
@@ -284,8 +290,8 @@ test('typed characters stay in the field and Enter never also runs a command', a
   // Awaiting text never disables the field mid-edit (that would drop focus); the
   // rule is the shared model's, and the controller applies it.
   const model = await readModule('commands/command-line-model.ts');
-  assert.ok(model.includes('return !cadReady || (pending && !textMode);'));
-  assert.ok(commandline.includes('commandLineDisabled({ cadReady: shell.cadReady, pending: shell.pending, textMode })'));
+  assert.ok(model.includes('return !cadReady || (pending && !textMode && !promptMode);'));
+  assert.ok(commandline.includes('commandLineDisabled({ cadReady: shell.cadReady, pending: shell.pending, textMode, promptMode })'));
 });
 
 test('the command line is a text prompt only while the host says so, then returns to command names', async () => {
@@ -300,8 +306,8 @@ test('the command line is a text prompt only while the host says so, then return
   // catalog, through the model's one chooser; the completion list is not offered.
   assert.ok(model.includes("return textMode ? TEXT_PROMPT_KEY : 'command.placeholder';"));
   assert.ok(model.includes('return textMode ? textDraft : command;'));
-  assert.ok(model.includes('return !textMode && focused'));
-  assert.ok(commandline.includes('t(commandLinePlaceholderKey(textMode))'));
+  assert.ok(model.includes('return !textMode && !promptMode && focused'));
+  assert.ok(commandline.includes('t(commandLinePlaceholderKey(textMode, promptMode))'));
   assert.ok(commandline.includes('textStepKey: textMode ? TEXT_STEP_PROMPT_KEY : null'));
   // Leaving the step clears the draft, so the field is a command line again.
   assert.ok(commandline.includes('if (textMode) return;'));

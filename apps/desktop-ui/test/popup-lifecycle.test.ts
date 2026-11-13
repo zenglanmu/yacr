@@ -62,8 +62,8 @@ test('the shell accelerator stands down while the overlay owns Escape', async ()
   const guard = /if \(popupOpen(?:\s*\|\|\s*isErrorReportVisible\(\))?\) return;/.exec(app.slice(shellShortcutAt));
   assert.ok(guard !== null && guard.index < 400,
     'the shell handler must return before any plain-key branch while a popup or the error dialog is open');
-  assert.ok(app.includes('[popupOpen, submitCommand, toolActive, gripDragActive, textStep, canCommand, layout, t, chromeSurfaces]'),
-    'the guard must re-install when the popup, tool, armed-drag, text-step or layout state changes');
+  assert.ok(app.includes('[popupOpen, submitCommand, toolActive, gripDragActive, pluginPromptPending, textStep, canCommand, layout, t, chromeSurfaces]'),
+    'the guard must re-install when the popup, tool, armed-drag, prompt, text-step or layout state changes');
 });
 
 test('reload and renderer crash are wired to the shared lifecycle (triggers 2 and 3)', async () => {

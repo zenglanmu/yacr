@@ -185,7 +185,7 @@ test('the controller owns the command-line rules and both presentations render f
   assert.ok(mobile.includes('<CommandField id="cad-command" className="mobile-commandbar__input" line={line} enterKeyHint="send" />'));
   // The text step's catalog keys are read in the hook, not spelled by a view.
   assert.ok(hook.includes('textStepKey: textMode ? TEXT_STEP_PROMPT_KEY : null'));
-  assert.ok(hook.includes('t(commandLinePlaceholderKey(textMode))'));
+  assert.ok(hook.includes('t(commandLinePlaceholderKey(textMode, promptMode))'));
   assert.ok(desktop.includes('t(line.textStepKey)'));
   // The mobile bar keeps the upward sheet, and it is an overlay in the same tree.
   assert.ok(mobile.includes('className="mobile-sheet"'));

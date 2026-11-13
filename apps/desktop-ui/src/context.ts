@@ -4,6 +4,8 @@
 import { createContext, useContext } from 'react';
 import type { Dispatch, RefCallback, SetStateAction } from 'react';
 import type { CommandHistoryEntry } from './commands/command-history.ts';
+import type { CadPendingPrompt } from './cad/cad-status.ts';
+import type { ToolTextAnswerResult } from './tools/text.ts';
 import type { Locale, Translator } from './i18n.ts';
 import type { ChromeVisibility } from './chrome/visibility.ts';
 
@@ -72,6 +74,15 @@ export interface ShellValue {
   readonly palettesAvailable: boolean;
   /** Whether the host reports a live dialog. */
   readonly popupOpen: boolean;
+  /**
+   * The pending plugin `Editor` prompt, or `null` when none is open.
+   *
+   * While it is non-null the command line is **answer data**: a submitted line
+   * goes to `cad_set_tool_text`, Enter is `CONFIRM`, Escape is `CANCEL`, and no
+   * command admission happens for the line (`commands/plugin-prompt.ts`). The
+   * block is the validated `cad_status.pendingPrompt` — never a chrome guess.
+   */
+  readonly pluginPrompt: CadPendingPrompt | null;
   /** The error the banner shows, or `''`. */
   readonly displayedError: string;
   /** The same banner line (the status bar reads this name). */
@@ -104,7 +115,7 @@ export interface ShellValue {
   /** Submit typed command text through the one funnel. */
   readonly submitCommand: (text: string, options?: ShellRecord) => Promise<void>;
   /** Submit the active text-carrying tool's text. */
-  readonly submitToolText: (text: string) => Promise<ShellRecord>;
+  readonly submitToolText: (text: string) => Promise<ToolTextAnswerResult>;
   /** Apply text to the current single selection. */
   readonly applySelectedText: (text: string) => Promise<ShellRecord>;
   /** Queue one property write for the current selection. */

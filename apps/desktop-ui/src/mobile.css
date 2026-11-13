@@ -531,6 +531,42 @@
   gap: 4px;
 }
 .mobile-commandbar__prompt { flex: none; color: var(--accent-text); }
+/* The mobile echo: the prompt's own sentence (in full), its keyword chips, its
+   invalid-input sentence and the plugin's messages, as one overlay above the bar.
+   Absolutely positioned for the same reason the sheet is: a prompt must never
+   reflow the drawing, and it yields that space to the sheet. */
+.mobile-echo {
+  position: absolute;
+  left: max(8px, env(safe-area-inset-left));
+  right: max(8px, env(safe-area-inset-right));
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 40dvh; overflow-y: auto; overscroll-behavior: contain;
+  padding: 8px;
+  background: var(--chrome); border: 1px solid var(--line-soft); border-radius: var(--radius);
+  box-shadow: 0 12px 28px rgba(var(--shadow-rgb), .45);
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.35;
+  animation: rise var(--t-fast) both;
+}
+/* The question itself: the command line's accent tone, wrapped rather than
+   clipped — on a phone this is the only place the whole sentence fits. */
+.mobile-echo__prompt { margin: 0; color: var(--accent-text); overflow-wrap: anywhere; }
+.mobile-echo__line {
+  margin: 0;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+.mobile-echo__keywords { display: flex; flex-wrap: wrap; gap: 6px; }
+.mobile-echo__keyword {
+  min-height: 32px; padding: 0 12px;
+  border: 1px solid var(--line-soft); border-radius: 999px;
+  background: transparent; color: var(--accent-text);
+  font: inherit; font-size: 12px;
+  cursor: pointer;
+}
+.mobile-echo__keyword:active { background: var(--hover); color: var(--text); }
+.mobile-echo__error { margin: 0; color: var(--danger); font-family: inherit; overflow-wrap: anywhere; }
 /* 16px, not the docked 12px: a smaller field makes iOS Safari zoom the whole
    page on focus, which would break the partition rect the host composites at. */
 .mobile-commandbar__input {
