@@ -92,17 +92,18 @@ test('a malformed host answer is refused with the cad_api_status prefix', async 
   );
 });
 
-test('this build implements exactly the three served reads', () => {
+test('this build implements exactly the four served reads', () => {
   assert.deepEqual(IMPLEMENTED_OPERATIONS, [
     'ApplicationServices.documentManager.mdiActiveDocument',
     'ApplicationServices.documentManager.documents',
+    'DatabaseServices.database.symbolTables',
     'DatabaseServices.database.revision',
   ]);
 });
 
 test('every supported descriptor row has an adapter implementation', async () => {
   // The one rule that keeps the descriptor honest: a row may only be
-  // `supported` if this adapter can actually serve it. It has three rows to check
+  // `supported` if this adapter can actually serve it. It has four rows to check
   // today and goes red the moment another row flips without a `case` in
   // `bridge.ts` - which is exactly when it must be caught.
   const contract = JSON.parse(await readFile(CONTRACT_URL, 'utf8'));
@@ -184,6 +185,46 @@ test('the served revision forwards with its database parameter', async () => {
     {
       namespace: 'DatabaseServices',
       operation: 'database.revision',
+      parameters: { database: '7' },
+    },
+  ]);
+});
+
+test('the served symbol tables forward with their database parameter', async () => {
+  const tablesValue = {
+    blockTable: {
+      name: 'blocks',
+      records: [{ name: 'WALL', isLayout: false, origin: [0, 0, 0] }],
+    },
+    layerTable: {
+      name: 'layers',
+      records: [
+        {
+          name: '0',
+          color: { aci: 7, rgb: '#ffffff' },
+          visible: true,
+          locked: false,
+          frozen: false,
+          linetype: 'Continuous',
+        },
+      ],
+    },
+    clayer: '0',
+  };
+  const { invoke, args } = countingInvoke((command) =>
+    command === 'cad_api_status' ? payload : { ok: true, value: tablesValue },
+  );
+  const bridge = createCadHostBridge({ invoke, status: () => statusWith('native-below', 'native') });
+  const result = await bridge.request({
+    namespace: 'DatabaseServices',
+    operation: 'database.symbolTables',
+    parameters: { database: '7' },
+  });
+  assert.deepEqual(result, tablesValue);
+  assert.deepEqual(args, [
+    {
+      namespace: 'DatabaseServices',
+      operation: 'database.symbolTables',
       parameters: { database: '7' },
     },
   ]);
@@ -392,13 +433,79 @@ test('the served document list assembles documents end to end', async () => {
   assert.equal(documents[0].database.id, '7');
 
   // The document's database is the same capability-gated client: the revision read
-  // is served, the symbol tables are still pending.
+  // is served, but `getObjectId` is still pending and refuses by name without
+  // reaching the host.
   assert.equal(await documents[0].database.revision(), 15);
-  await assert.rejects(documents[0].database.symbolTables, (error) => {
-    assert.equal(codeOf(error), 'api.pending: DatabaseServices.database.symbolTables');
+  await assert.rejects(documents[0].database.getObjectId('2A'), (error) => {
+    assert.equal(codeOf(error), 'api.pending: DatabaseServices.database.getObjectId');
     return true;
   });
   assert.equal(await documents[0].database.revision(), 15);
+});
+
+test('the served symbol tables assemble end to end', async () => {
+  const tablesValue = {
+    blockTable: {
+      name: 'blocks',
+      records: [{ name: 'WALL', isLayout: false, origin: [12, 0, 0] }],
+    },
+    layerTable: {
+      name: 'layers',
+      records: [
+        {
+          name: '0',
+          color: { aci: 7, rgb: '#ffffff' },
+          visible: true,
+          locked: false,
+          frozen: false,
+          linetype: 'Continuous',
+        },
+        {
+          name: 'TRUE_COLOR',
+          color: { aci: null, rgb: '#123abc' },
+          visible: true,
+          locked: false,
+          frozen: false,
+          linetype: 'Continuous',
+        },
+      ],
+    },
+    clayer: '',
+  };
+  const { invoke, args } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (request.operation === 'documentManager.mdiActiveDocument') {
+      return {
+        ok: true,
+        value: {
+          document: {
+            id: '42',
+            name: 'Drawing1',
+            isReadOnly: false,
+            database: { id: '7', version: '15' },
+          },
+        },
+      };
+    }
+    if (request.operation === 'database.symbolTables') return { ok: true, value: tablesValue };
+    return { ok: false, error: `unsupported-runtime: cad_api.${request.operation}` };
+  });
+  const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
+  const document = await session.api.application.documentManager.mdiActiveDocument();
+  if (document === null) throw new Error('expected a document');
+
+  const tables = await document.database.symbolTables;
+  assert.deepEqual(tables.blockTable.names(), ['WALL']);
+  assert.deepEqual(tables.blockTable.record('WALL')?.origin, { x: 12, y: 0, z: 0 });
+  assert.deepEqual(tables.layerTable.names(), ['0', 'TRUE_COLOR']);
+  assert.equal(tables.layerTable.record('TRUE_COLOR')?.color.aci, null);
+  // The active layer name is the host's, including the honest empty string.
+  assert.equal(await document.database.clayer, '');
+  assert.deepEqual(args.at(-1), {
+    namespace: 'DatabaseServices',
+    operation: 'database.symbolTables',
+    parameters: { database: '7' },
+  });
 });
 
 test('the served revision read returns the host number', async () => {

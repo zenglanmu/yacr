@@ -54,21 +54,22 @@ function namespaceNames(value: unknown): readonly unknown[] {
   });
 }
 
-test('the table is 21 host operations: 18 pending and three served reads', () => {
+test('the table is 21 host operations: 17 pending and four served reads', () => {
   assert.equal(API_OPERATIONS.length, 21, 'the v1 descriptor has 21 host-operation rows');
   const supported = API_OPERATIONS.filter((row) => row.status === 'supported').map(
     (row) => `${row.namespace}.${row.operation}`,
   );
-  // Three capabilities are served in this build, and these are exactly them.
+  // Four capabilities are served in this build, and these are exactly them.
   // Widening the set is a contract change: the host must serve the operation and
   // the WebView adapter must implement it first.
   assert.deepEqual(supported, [
     'ApplicationServices.documentManager.mdiActiveDocument',
     'ApplicationServices.documentManager.documents',
+    'DatabaseServices.database.symbolTables',
     'DatabaseServices.database.revision',
   ]);
   const pending = API_OPERATIONS.filter((row) => row.status === 'pending');
-  assert.equal(pending.length, 18, 'every other host operation is still pending');
+  assert.equal(pending.length, 17, 'every other host operation is still pending');
 });
 
 test('every capability row carries its canonical reason', () => {

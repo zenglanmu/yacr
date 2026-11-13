@@ -6,7 +6,7 @@
     { "namespace": "ApplicationServices", "operation": "documentManager.documents", "status": "supported" },
     { "namespace": "ApplicationServices", "operation": "document.lock", "status": "pending", "reason": "api.pending: ApplicationServices.document.lock" },
     { "namespace": "DatabaseServices", "operation": "database.getObjectId", "status": "pending", "reason": "api.pending: DatabaseServices.database.getObjectId" },
-    { "namespace": "DatabaseServices", "operation": "database.symbolTables", "status": "pending", "reason": "api.pending: DatabaseServices.database.symbolTables" },
+    { "namespace": "DatabaseServices", "operation": "database.symbolTables", "status": "supported" },
     { "namespace": "DatabaseServices", "operation": "database.revision", "status": "supported" },
     { "namespace": "DatabaseServices", "operation": "transaction.start", "status": "pending", "reason": "api.pending: DatabaseServices.transaction.start" },
     { "namespace": "DatabaseServices", "operation": "transaction.getObject", "status": "pending", "reason": "api.pending: DatabaseServices.transaction.getObject" },

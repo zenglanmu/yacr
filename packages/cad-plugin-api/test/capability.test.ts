@@ -159,14 +159,6 @@ test('every gated v1 call refuses with its exact pending code and no request', a
     () => database.getObjectId(handle('2A')),
     'api.pending: DatabaseServices.database.getObjectId',
   );
-  await expectRejectCode(
-    () => database.symbolTables,
-    'api.pending: DatabaseServices.database.symbolTables',
-  );
-  await expectRejectCode(
-    () => database.clayer,
-    'api.pending: DatabaseServices.database.symbolTables',
-  );
 
   const document = createDocument(wire, {
     id: 'doc-1',
@@ -419,6 +411,186 @@ test('a malformed revision answer is refused, never coerced', async () => {
       () => database.revision(),
       'api.invalid_argument: bridge.answer.revision',
     );
+  }
+});
+
+interface MutableBlockTable {
+  name: string;
+  records: { name: string; isLayout: unknown; origin: unknown }[];
+}
+
+interface MutableLayerTable {
+  name: string;
+  records: {
+    name: string;
+    color: { aci: unknown; rgb: unknown } | null;
+    visible?: unknown;
+    locked: boolean;
+    frozen: boolean;
+    linetype: string;
+  }[];
+}
+
+interface MutableSymbolTables {
+  blockTable: MutableBlockTable;
+  layerTable: MutableLayerTable;
+  clayer: unknown;
+}
+
+/** The host's real `database.symbolTables` shape: tuple origin, nullable `aci`. */
+function symbolTablesPayload(): MutableSymbolTables {
+  return {
+    blockTable: {
+      name: 'blocks',
+      records: [{ name: 'WALL', isLayout: false, origin: [0, 0, 0] }],
+    },
+    layerTable: {
+      name: 'layers',
+      records: [
+        {
+          name: '0',
+          color: { aci: 7, rgb: '#ffffff' },
+          visible: true,
+          locked: false,
+          frozen: false,
+          linetype: 'Continuous',
+        },
+        {
+          name: 'TRUE_COLOR',
+          color: { aci: null, rgb: '#123abc' },
+          visible: true,
+          locked: false,
+          frozen: false,
+          linetype: 'Continuous',
+        },
+      ],
+    },
+    clayer: '0',
+  };
+}
+
+test('the served symbol-table read decodes blocks, layers and the active layer', async () => {
+  const spy = spyBridge(API_OPERATIONS, () => symbolTablesPayload());
+  const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
+  const database = createDatabase(wire, { id: '7', version: '15' });
+
+  const tables = await database.symbolTables;
+  assert.deepEqual(tables.blockTable.names(), ['WALL']);
+  assert.deepEqual(tables.blockTable.record('WALL')?.origin, { x: 0, y: 0, z: 0 });
+  assert.equal(tables.blockTable.record('WALL')?.isLayout, false);
+  assert.deepEqual(tables.layerTable.names(), ['0', 'TRUE_COLOR']);
+
+  const indexed = tables.layerTable.record('0');
+  assert.equal(indexed?.color.aci, 7);
+  assert.equal(indexed?.color.rgb, '#ffffff');
+  assert.equal(indexed?.visible, true);
+  assert.equal(indexed?.linetype, 'Continuous');
+
+  // A true-colour layer has no palette index; the host says `null` and so does the
+  // client — an invented ACI would be indistinguishable from a real one.
+  const trueColor = tables.layerTable.record('TRUE_COLOR');
+  assert.equal(trueColor?.color.aci, null);
+  assert.equal(trueColor?.color.rgb, '#123abc');
+
+  assert.equal(await database.clayer, '0');
+  assert.deepEqual(spy.calls, [
+    {
+      namespace: 'DatabaseServices',
+      operation: 'database.symbolTables',
+      parameters: { database: '7' },
+    },
+  ]);
+  assert.equal(spy.calls.length, 1, 'clayer and symbolTables share one cached read');
+});
+
+test('an empty clayer is the host\'s honest "no active layer"', async () => {
+  const payload = symbolTablesPayload();
+  payload.clayer = '';
+  const spy = spyBridge(API_OPERATIONS, () => payload);
+  const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
+  const database = createDatabase(wire, { id: '7', version: '15' });
+  assert.equal(await database.clayer, '');
+});
+
+test('a malformed symbol-table answer is refused field by field', async () => {
+  const cases: readonly (readonly [(payload: MutableSymbolTables) => void, string])[] = [
+    [
+      (payload) => {
+        payload.blockTable = undefined as never;
+      },
+      'api.invalid_argument: bridge.answer.blockTable',
+    ],
+    [
+      (payload) => {
+        payload.clayer = undefined;
+      },
+      'api.invalid_argument: bridge.answer.clayer',
+    ],
+    [
+      (payload) => {
+        payload.clayer = 7;
+      },
+      'api.invalid_argument: bridge.answer.clayer',
+    ],
+    [
+      (payload) => {
+        payload.blockTable.records = 'none' as never;
+      },
+      'api.invalid_argument: bridge.answer.records',
+    ],
+    [
+      (payload) => {
+        payload.blockTable.records[0].origin = [0, 0];
+      },
+      'api.invalid_argument: bridge.answer.origin',
+    ],
+    [
+      (payload) => {
+        payload.blockTable.records[0].origin = [0, 'x', 0];
+      },
+      'api.invalid_argument: bridge.answer.origin[1]',
+    ],
+    [
+      (payload) => {
+        payload.layerTable.records[0].color = null;
+      },
+      'api.invalid_argument: bridge.answer.color',
+    ],
+    [
+      (payload) => {
+        const color = payload.layerTable.records[0].color;
+        if (color !== null) color.aci = 'seven';
+      },
+      'api.invalid_argument: bridge.answer.color.aci',
+    ],
+    [
+      (payload) => {
+        const color = payload.layerTable.records[0].color;
+        if (color !== null) color.aci = 1.5;
+      },
+      'api.invalid_argument: bridge.answer.color.aci',
+    ],
+    [
+      (payload) => {
+        const color = payload.layerTable.records[0].color;
+        if (color !== null) color.rgb = 'white';
+      },
+      'api.invalid_argument: bridge.answer.color.rgb',
+    ],
+    [
+      (payload) => {
+        delete payload.layerTable.records[0].visible;
+      },
+      'api.invalid_argument: bridge.answer.visible',
+    ],
+  ];
+  for (const [mutate, code] of cases) {
+    const payload = symbolTablesPayload();
+    mutate(payload);
+    const spy = spyBridge(API_OPERATIONS, () => payload);
+    const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
+    const database = createDatabase(wire, { id: '7', version: '15' });
+    await expectRejectCode(() => database.symbolTables, code);
   }
 });
 

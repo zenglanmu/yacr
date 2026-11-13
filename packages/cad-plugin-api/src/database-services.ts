@@ -31,7 +31,7 @@
 import { invalidArgument } from './errors.ts';
 import type { CadApiWire } from './internal/capability.ts';
 import { isRecord, requireAnswerObject } from './internal/capability.ts';
-import type { EntityColor } from './colors.ts';
+import type { Color, EntityColor } from './colors.ts';
 import type { Point3d } from './geometry.ts';
 import { point3d } from './geometry.ts';
 
@@ -198,7 +198,11 @@ export interface BlockTableRecord extends SymbolTableRecord {
 
 /** A layer definition, identified by name. */
 export interface LayerTableRecord extends SymbolTableRecord {
-  readonly color: EntityColor;
+  /**
+   * The layer's resolved colour. `aci` is `null` for a true-colour layer — the
+   * host reports no palette index there, and this type keeps it that way.
+   */
+  readonly color: Color;
   readonly visible: boolean;
   readonly locked: boolean;
   readonly frozen: boolean;
@@ -256,7 +260,13 @@ export interface Database {
    */
   revision(): Promise<number>;
   readonly symbolTables: Promise<SymbolTables>;
-  /** The current layer's **name**. */
+  /**
+   * The current layer's **name**.
+   *
+   * The host may answer the empty string when its layer projection reports no
+   * active layer: that is an honest "there is none", not a missing name, so it is
+   * passed through rather than invented or refused.
+   */
   readonly clayer: Promise<string>;
 }
 
@@ -319,9 +329,35 @@ function requireRecords(
   return value.map((row) => requireAnswerObject(row, `bridge.answer.${field}`));
 }
 
+function requireComponent(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw invalidArgument(field);
+  return value;
+}
+
+/**
+ * Decode a 3D point.
+ *
+ * The wire uses a three-number array (`[x, y, z]` — the symbol-table `origin`
+ * form) or an explicit `{ x, y, z }` record; both are unambiguous, and the entity
+ * read has not fixed its own encoding yet, so both are accepted. A two-element
+ * array, a fourth element, or a non-finite component is refused by field.
+ */
 function requirePoint(record: Readonly<Record<string, unknown>>, field: string): Point3d {
-  const point = requireRecord(record, field);
-  return point3d(requireNumber(point, 'x'), requireNumber(point, 'y'), requireNumber(point, 'z'));
+  const value = record[field];
+  if (Array.isArray(value)) {
+    if (value.length !== 3) throw invalidArgument(`bridge.answer.${field}`);
+    return point3d(
+      requireComponent(value[0], `bridge.answer.${field}[0]`),
+      requireComponent(value[1], `bridge.answer.${field}[1]`),
+      requireComponent(value[2], `bridge.answer.${field}[2]`),
+    );
+  }
+  if (!isRecord(value)) throw invalidArgument(`bridge.answer.${field}`);
+  return point3d(
+    requireComponent(value['x'], `bridge.answer.${field}.x`),
+    requireComponent(value['y'], `bridge.answer.${field}.y`),
+    requireComponent(value['z'], `bridge.answer.${field}.z`),
+  );
 }
 
 function requireEntityColor(
@@ -344,6 +380,41 @@ function requireEntityColor(
     return { method, rgb };
   }
   throw invalidArgument(`bridge.answer.${field}.method`);
+}
+
+/**
+ * Decode a layer's resolved colour: `{ aci, rgb }`.
+ *
+ * `aci` is a palette index or `null` for a true-colour layer. The host sends
+ * `null` there and this decoder keeps it exactly; an absent `aci` means the same
+ * thing ("no index") and becomes `null` — an invented index would be
+ * indistinguishable from a real one. `rgb` is the host's `#rrggbb`.
+ */
+function requireLayerColor(
+  record: Readonly<Record<string, unknown>>,
+  field: string,
+): Color {
+  const color = requireRecord(record, field);
+  const rawAci = color['aci'];
+  let aci: number | null = null;
+  if (rawAci !== null && rawAci !== undefined) {
+    // The host carries `Option<u8>`; 0..256 is the ACI domain, so anything else
+    // (or a non-integer) is a broken answer rather than a colour.
+    if (
+      typeof rawAci !== 'number' ||
+      !Number.isSafeInteger(rawAci) ||
+      rawAci < 0 ||
+      rawAci > 256
+    ) {
+      throw invalidArgument(`bridge.answer.${field}.aci`);
+    }
+    aci = rawAci;
+  }
+  const rgb = color['rgb'];
+  if (typeof rgb !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(rgb)) {
+    throw invalidArgument(`bridge.answer.${field}.rgb`);
+  }
+  return { aci, rgb };
 }
 
 function requireLinetype(
@@ -488,7 +559,7 @@ export function decodeObject(record: Readonly<Record<string, unknown>>): DBObjec
 function decodeLayerTableRecord(record: Readonly<Record<string, unknown>>): LayerTableRecord {
   return {
     name: requireName(record, 'name'),
-    color: requireEntityColor(record, 'color'),
+    color: requireLayerColor(record, 'color'),
     visible: requireBoolean(record, 'visible'),
     locked: requireBoolean(record, 'locked'),
     frozen: requireBoolean(record, 'frozen'),
@@ -553,7 +624,7 @@ export function createDatabase(wire: CadApiWire, descriptor: DatabaseDescriptor)
       return {
         blockTable: decodeSymbolTable(requireRecord(record, 'blockTable'), decodeBlockTableRecord),
         layerTable: decodeSymbolTable(requireRecord(record, 'layerTable'), decodeLayerTableRecord),
-        clayer: requireName(record, 'clayer'),
+        clayer: requireString(record, 'clayer'),
       };
     })();
     snapshot = pending.catch((failure: unknown) => {

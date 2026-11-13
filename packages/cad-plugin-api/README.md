@@ -75,10 +75,11 @@ silent success. Host failures arrive as `CadApiError`; branch on `code`, not mes
 
 ## v1 status
 
-**The descriptor is 21 rows: three `supported`, 18 `pending`.** The served
+**The descriptor is 21 rows: four `supported`, 17 `pending`.** The served
 operations are reflected reads over `cad_api_call`:
 `documentManager.mdiActiveDocument` (the open `Document`, or `null`),
-`documentManager.documents` (0 or 1 `Document`, `[]` when none is open) and
+`documentManager.documents` (0 or 1 `Document`, `[]` when none is open),
+`database.symbolTables` (the block/layer projection plus the active layer name) and
 `database.revision` (`{ database: id }` -> the current revision number). Everything
 else is still a reservation — no write path, no prompts, no command dispatch.
 
@@ -86,8 +87,9 @@ else is still a reservation — no write path, no prompts, no command dispatch.
 | --- | --- |
 | `ApplicationServices.documentManager.mdiActiveDocument`, `.documents` (2) | `supported` — reflected document reads |
 | `ApplicationServices.document.lock` (1) | `pending` — no lock path yet |
+| `DatabaseServices.database.symbolTables` (1) | `supported` — block/layer tables and `clayer`, one cached read |
 | `DatabaseServices.database.revision` (1) | `supported` — current revision, read every call |
-| `DatabaseServices` (7 more) | `pending` — no object read/write or symbol-table path yet |
+| `DatabaseServices` (6 more) | `pending` — no object read or write path yet |
 | `EditorInput` (9) | `pending` — no interactive prompt path yet |
 | `Runtime.runtime.registerCommand` (1) | `pending` — no chrome-local admission path yet |
 
@@ -130,7 +132,10 @@ actually created.
 `source_handle` provenance only and is `null` for entities created through this API —
 it is never synthesized. Layers and blocks are **keyed by name** with no handle at
 all: `cad-db` layers are `{ id, name, visible }`, and linetype is a symbolic concept,
-so inventing handles would create a second identity system.
+so inventing handles would create a second identity system. A layer's resolved colour
+keeps the host's `aci: null` for a true colour — the `#rrggbb` never implies an index
+— and a `Database.clayer` of `""` is the host's honest "no active layer", passed
+through rather than renamed.
 
 ## Trust model
 

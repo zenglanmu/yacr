@@ -87,18 +87,20 @@ fn pending_rows_carry_a_reason_and_supported_rows_omit_it() {
         }
     }
     assert!(pending > 0, "document/editor operations are pending here");
-    // Three operations are served in this build (M2.2/M2.3: the two reflected
-    // document reads and the database revision). A row flipping to `supported`
-    // without a host implementation and an adapter `case` is a bug, so the set is
-    // pinned by name, in descriptor order, rather than by count.
+    // Four operations are served in this build (M2.2/M2.3: the two reflected
+    // document reads, the symbol-table projection and the database revision). A row
+    // flipping to `supported` without a host implementation and an adapter `case`
+    // is a bug, so the set is pinned by name, in descriptor order, rather than by
+    // count.
     assert_eq!(
         supported,
         vec![
             "ApplicationServices.documentManager.mdiActiveDocument".to_string(),
             "ApplicationServices.documentManager.documents".to_string(),
+            "DatabaseServices.database.symbolTables".to_string(),
             "DatabaseServices.database.revision".to_string(),
         ],
-        "this build serves exactly the reflected document reads and the database revision"
+        "this build serves exactly the reflected document reads, symbol tables and revision"
     );
 }
 

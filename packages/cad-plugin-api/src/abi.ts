@@ -14,15 +14,15 @@
 // wire, so they have no row and are available unconditionally. Advertising them
 // in the descriptor would claim host state that does not exist.
 //
-// Three rows are `supported` in this build — the reflected document reads
-// (`documentManager.mdiActiveDocument`, `documentManager.documents`) and the
-// database revision read, all served over `cad_api_call` — and the other 18 are
-// `pending`: the table is an honest reservation list, not an availability list. It
-// is deliberately complete rather than aspirational — an operation that exists here
-// but is `pending` is refused by name, an operation the host marks `unsupported` is
-// refused by name, and an operation the host does not name at all is refused as
-// `api.descriptor_missing`. There is no silent "maybe" state and no empty-success
-// path.
+// Four rows are `supported` in this build — the reflected document reads
+// (`documentManager.mdiActiveDocument`, `documentManager.documents`), the database
+// revision and the symbol-table projection, all served over `cad_api_call` — and the
+// other 17 are `pending`: the table is an honest reservation list, not an
+// availability list. It is deliberately complete rather than aspirational — an
+// operation that exists here but is `pending` is refused by name, an operation the
+// host marks `unsupported` is refused by name, and an operation the host does not
+// name at all is refused as `api.descriptor_missing`. There is no silent "maybe"
+// state and no empty-success path.
 
 /** Wire/API generation. A host and this package must agree exactly. */
 export const API_VERSION = 1;
@@ -69,7 +69,7 @@ export const API_NAMESPACES: readonly CadApiNamespace[] = [
 ];
 
 /**
- * The v1 capability table: 21 host operations, 18 `pending` and three `supported`.
+ * The v1 capability table: 21 host operations, 17 `pending` and four `supported`.
  *
  * Do not flip a row to `supported` here without the host side landing first (and
  * a `case` in the WebView adapter) — the contract test will catch the JSON drift,
@@ -104,11 +104,12 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
     status: 'pending',
     reason: pendingReason('DatabaseServices', 'database.getObjectId'),
   },
+  // The block/layer projection and the active layer name, as one read. Served, so
+  // no `reason`; `Database.symbolTables` and `Database.clayer` share one request.
   {
     namespace: 'DatabaseServices',
     operation: 'database.symbolTables',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'database.symbolTables'),
+    status: 'supported',
   },
   // The revision a commit's `expectedRevision` is compared against. Read from the
   // host every call (`{ database: id }` -> `{ revision }`), never cached.

@@ -9,13 +9,13 @@
 //
 // # The implemented operations
 //
-// Three reflected reads are wired (M2.2/M2.3):
+// Four reflected reads are wired (M2.2/M2.3):
 // `ApplicationServices.documentManager.mdiActiveDocument`,
-// `ApplicationServices.documentManager.documents` and
-// `DatabaseServices.database.revision`. Each forwards to the shared `cad_api_call`
-// command and hands the reply's `value` back **unshaped**: the client package
-// decodes it, so this layer never invents a document or a revision and never
-// rewrites a field name.
+// `ApplicationServices.documentManager.documents`,
+// `DatabaseServices.database.symbolTables` and `DatabaseServices.database.revision`.
+// Each forwards to the shared `cad_api_call` command and hands the reply's `value`
+// back **unshaped**: the client package decodes it, so this layer never invents a
+// document, a table or a revision and never rewrites a field name.
 //
 // Every other request - including a `supported` row this adapter has not wired -
 // is refused locally as `api.adapter-missing: <namespace>.<operation>` and the
@@ -59,6 +59,7 @@ export interface CadBridgeDeps {
 export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'ApplicationServices.documentManager.mdiActiveDocument',
   'ApplicationServices.documentManager.documents',
+  'DatabaseServices.database.symbolTables',
   'DatabaseServices.database.revision',
 ];
 
@@ -161,6 +162,7 @@ export function createCadHostBridge(deps: CadBridgeDeps): CadHostBridge {
       switch (`${request.namespace}.${request.operation}`) {
         case 'ApplicationServices.documentManager.mdiActiveDocument':
         case 'ApplicationServices.documentManager.documents':
+        case 'DatabaseServices.database.symbolTables':
         case 'DatabaseServices.database.revision':
           return (await callHost(deps, request)) as Result;
         default:
