@@ -1,10 +1,10 @@
 # ADR 0034：TypeScript 二次开发 API（AutoCAD .NET 命名空间镜像 + 宿主代理）
 
-- 状态：**Accepted（2026-11-13，骨架 + 第一条只读操作）**。本 ADR 定的是**契约与目录边界**：API
-  包、宿主 adapter、`cad_api_status` 能力描述符与显式拒绝语义，以及 `cad_api_call` 的最小只读
-  通道。**已真实服务的宿主操作有三项**：`documentManager.mdiActiveDocument`、
-  `documentManager.documents`、`database.revision`；其余 18 行仍 `pending`：事务、编辑器提示、
-  符号表都没有实现。
+- 状态：**Accepted（2026-11-13，可用的二次开发 API）**。本 ADR 定的是**契约与目录边界**：API
+  包、宿主 adapter、能力描述符与显式拒绝语义、只读通道 `cad_api_call`、写/会话通道
+  `cad_api_submit` + `cad_api_poll`，以及插件装载与命令派发。**18 行宿主操作中 8 行已服务**
+  （文档身份/列表、revision、符号表、当前选择、handle→ObjectId、按 id 读实体、事务提交）；
+  其余 10 行是交互式提示与 `document.lock`，仍 `pending`。
   证据只到 Node 契约测试与 Linux 上的 `cargo check`/`cargo test`；真实 GUI、真机、WebView、
   GPU/像素全部 **NOT VERIFIED**。
 - 日期：2026-11-13。
@@ -112,12 +112,14 @@ tsconfig/vite 别名或裸包名：仓库没有 npm workspace、也没有签入�
 5. 自洽性：`documentOwner: 'none'` 却出现 `supported` 的 `ApplicationServices`/`DatabaseServices`
    行 → 拒绝 `api.descriptor_invalid: documentOwner`（没有文档所有者却声称服务文档操作）。
 
-**本版本状态（诚实表）**：描述符 21 行——**18 行 `pending` + 3 行 `supported`**
-（`documentManager.mdiActiveDocument`、`documentManager.documents`、
-`database.revision`）。`ApplicationServices`（3，两项已服务）、`DatabaseServices`（8，一项已
-服务）、`EditorInput`（9）、`Runtime.registerCommand`（1）其余全 `pending`。**插件只能读取
-文档身份、文档列表与当前 revision；不能读实体/符号表、不能提示输入、不能注册可执行命令。** Geometry/Colors/`parsePluginManifest` 不是宿主能力，不进表，由包
-无条件提供。这不是遗漏，是描述符明示的下一步。
+**本版本状态（诚实表）**：描述符 18 行——**8 行 `supported` + 10 行 `pending`**。
+已服务：`documentManager.mdiActiveDocument`、`documentManager.documents`、
+`database.revision`、`database.symbolTables`、`editor.currentSelection`、
+`database.getObjectId`、`transaction.getObject`、`transaction.commit`。
+仍 `pending`：`document.lock`、`editor.getPoint/getEntity/getSelection/getString/getDouble/
+getInteger/getKeyword/writeMessage/selectAll`。`Runtime.registerCommand` 与事务的
+start/abort/addNewlyCreated 是**客户端本地**操作，没有描述符行。Geometry/Colors/
+`parsePluginManifest` 同样是包内特性。
 
 **理由**：能力来自宿主，TS 端不得单方面宣布支持；把"未实现"建模成稳定拒绝码，插件作者在编译期
 之外还能拿到可解释的运行时错误。
@@ -277,7 +279,7 @@ interface PluginManifest {
 
 | 载体 | `surfaceMode` | `cad_api_status` | 受门控操作 | 说明 |
 |---|---|---|---|---|
-| Linux 原生 Wayland | `native-below` | 由 Tauri wrapper 服务 | 三项只读（owner-tick 镜像），其余 `pending` 拒绝 | 描述符一致，本轮无运行证据 |
+| Linux 原生 Wayland | `native-below` | 由 Tauri wrapper 服务 | 镜像读 + 会话读/提交（owner tick 应用），其余 `pending` 拒绝 | 描述符一致，本轮无运行证据 |
 | Linux X11/XWayland | `dom-canvas` | 由 wasm `DirectSink` 服务 | 同上（读实时 `CadSession`） | 同一份 JSON、同一条 wire 名 |
 | Windows / macOS / Android | `native-below` | 生成 wrapper | 同上 | 仅编译/契约，未运行验证 |
 | Web | `dom-canvas` | wasm 会话 | 同上 | Web 没有插件目录；本轮不装插件 |
@@ -334,6 +336,12 @@ interface PluginManifest {
 - 第四轮补充：`documents`/`database.revision` 走同一快照；`cargo test -p cad-ui-core --lib
   session::api` 21、`app-web` 123、`plugin_api_status` 6/6；包 node 53/53、desktop-ui
   plugin-api+host-adapter 70/70、`npm test` 整条 **1648/1648**。
+- 第五轮（写通道/实体读/插件装载/命令派发，2026-11-13）已运行：
+  `cargo test -p cad-ui-core --lib session` 564、`app-web` **128/128**（双向矩阵含提交、按 id 读、
+  create-then-read 回环）、`plugin_api_status` 6/6、`cargo check -p app-linux --all-targets`、
+  fmt/architecture/file-size；包 node **72/72**、desktop-ui plugin-api+host-adapter **96/96**、
+  `npm test` 整条 **1693/1693**。**NOT VERIFIED**：插件装载/命令派发与真实读取都只到
+  Node/cargo 契约，未在真实 GUI/WebView 运行。
 
 **NOT RUN / NOT VERIFIED**：真实 GUI 中加载插件、任何 `supported` 的文档/编辑器操作、命令派发、
 Windows/macOS/Android/Web 运行、真实 WebView CSP、GPU/像素、插件隔离与签名。
@@ -341,10 +349,10 @@ Windows/macOS/Android/Web 运行、真实 WebView CSP、GPU/像素、插件隔�
 ## 7. 后果与未决
 
 - 里程碑（明确、不在本轮）：
-  - **M2** 只读操作：`cad_api_call` 通道与 `documentManager.mdiActiveDocument` / `.documents`、
-    `database.revision` **已落地**；剩余 `database.symbolTables`、`editor.currentSelection`
-    （继续沿用同一条 `reads` 车道与镜像/实时双实现）。
-  - **M3** 事务提交：`expectedRevision`、编辑缓冲、撤销分组、冲突映射。上线前必须解决：
+  - **M2** 只读操作：**已落地**——文档身份/列表、revision、符号表、当前选择，以及
+    handle→ObjectId / 按 id 读实体（后两项走会话通道，不做镜像）。
+  - **M3** 事务提交：**已落地**——`expectedRevision`、编辑缓冲、`created` 回填、
+    `api.revision-conflict`、layer/space 解析、`SelectionRef` 映射。仍待解决：
     - `translate`/`delete` 要映射到 `SelectionRef { document, entity, instance, sub_element }`；
       instanced / 子元素引用由宿主侧拒绝（客户端只有 `ObjectId`，没有 instance/sub-element 位）。
     - 宿主 `ApiOutcome.created` 必须回填到 `CommitResult.created`（客户端已校验形状，M3 只需接线）。

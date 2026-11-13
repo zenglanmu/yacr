@@ -1,5 +1,27 @@
 AD
 
+## 2026-11-13 插件 API 可用：写通道、实体读、装载与命令派发
+
+- **写通道**：`cad_api_submit`（桌面入队、`dom-canvas` 同步应用）+ `cad_api_poll`（有界
+  FIFO，按 `requestId` 关联）。`transaction.commit` 映射到唯一提交路径
+  `HostController::plugin_commit → Application::execute_api`；insert 解析 layer 名与 active
+  space，translate/delete 由十进制 `EntityId` 构造真实 `SelectionRef`；stale revision →
+  `api.revision-conflict`，成功回 `{revision, created}`。`cad-db` 之外没有第二条写路径。
+- **实体读**（会话通道）：`database.getObjectId`（handle 线性扫描，未命中是真实 `null`）、
+  `transaction.getObject`（按宿主 `typeName` 输出客户端形状；无形状的几何显式
+  `unsupported-runtime`）。`decodePolyline` 的字段寻址 bug 已修（此前任何折线都无法解码）。
+- **装载与命令**：包内 `Runtime.registerCommand`（本地，无描述符行）+ 宿主 `loadPluginModule`
+  （URL 或模块、`definePlugin` 校验、版本拒绝、失败回滚、幂等 deactivate）+ `commands.ts`
+  单一命令表；`App` 在宿主准入**之前**查插件命令，插件命令不伪装成 CAD 命令，处理器异常走
+  `plugin.command.failed` 通知而不打断漏斗。
+- **能力表**：18 行 = **8 supported / 10 pending**。仍 pending 的是交互式 `editor.get*/selectAll/
+  writeMessage` 与 `document.lock`；插件安装 UI/持久化商店、Worker/权限/签名隔离未做。
+- **证据**：`cargo test -p cad-ui-core --lib session` 564、`app-web` 128（矩阵含提交、
+  handle 读、create-then-read 回环）、`plugin_api_status` 6/6、`cargo check -p app-linux
+  --all-targets`、fmt/architecture/file-size/i18n；包 node 72/72、desktop-ui
+  plugin-api+host-adapter 96/96、`npm test` 整条 **1693/1693**。
+  **NOT RUN**：真实 GUI 中装载插件/执行插件命令、真机/WebView、GPU/像素。
+
 ## 2026-11-13 合并 `ts-api` 工作树（插件 API M2 系列进入 `main`）
 
 - **范围**：`ts-api` 工作树的 12 个提交（`76806671`…`1a4e8d9e`）合入 `main`（`merge/ts-api` 分支，

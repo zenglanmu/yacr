@@ -168,6 +168,44 @@ host controller's snapshot: `cad-db` remains the only authority, no transaction 
 opened, and the mirror is never written back. On `native-below` the snapshot lags
 the owner tick by at most one tick; `dom-canvas` reads the live session.
 
+## `cad_api_submit`
+
+The mutating side of the plugin API: acknowledge a session-bound request. On
+`native-below` the request is queued for the owner tick (`accepted: true` means
+queued, never completed); on `dom-canvas` it is applied in the same call. The
+answer is never returned here - the caller polls `cad_api_poll` for its
+`requestId`.
+
+```json
+{ "requestId": "apir-1-8f3a", "namespace": "DatabaseServices",
+  "operation": "transaction.commit",
+  "parameters": { "document": "12", "transactionId": "tx-1",
+                  "expectedRevision": 15,
+                  "edits": [ { "kind": "insert", "typeName": "Line", "layer": "0",
+                               "space": "model",
+                               "parameters": { "start": [0,0,0], "end": [10,0,0] } } ] } }
+```
+
+Refusals are stable: `cad_api.invalid_request: requestId`, `cad_api.queue_full`,
+`cad_api.duplicate_request`, and the shared `unsupported-runtime` markers. The
+request id grammar is `[A-Za-z0-9._-]{1,64}`; the queue holds 16 open requests.
+
+## `cad_api_poll`
+
+Drains completed outcomes, in completion order. An empty list is the honest answer
+when nothing finished yet.
+
+```json
+{ "results": [ { "requestId": "apir-1-8f3a", "ok": true,
+                 "value": { "revision": 16, "created": ["42"] } } ] }
+```
+
+A failed operation is `ok: false` with a stable `error` code (for example
+`api.revision-conflict`); a malformed request is refused before it reaches the
+queue, so it never appears here. Results are bounded at 32 (oldest dropped).
+Both commands are `sink`-lane shared rows: queued on `native-below`, applied
+inline on `dom-canvas`, with one semantics layer in `cad-ui-core`.
+
 ## `cad_api_status`
 
 The plugin / secondary-development API **capability descriptor**: which
