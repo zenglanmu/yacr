@@ -468,22 +468,27 @@ pub fn api_status() -> Result<CadApiStatus, String> {
 }
 
 /// `cad_api_call`: perform one plugin-API operation against the reflected
-/// document snapshot.
+/// snapshot.
 ///
 /// Served by the host through [`ControlReads::api_snapshot`]: the desktop reads
 /// its owner-tick mirror (the session is `!Send`), a synchronous carrier reads
-/// the live session. The one served operation and every refusal marker live in
-/// [`super::api_call`]; `parameters` is accepted by the wire command for contract
-/// stability and is unused this wave (the answer is a reflected snapshot).
+/// the live session. The served operations, the argument grammar and every
+/// refusal marker live in [`super::api_call`].
+///
+/// `parameters` is the operation's argument object (`None` when the caller sent
+/// none); only `DatabaseServices.database.revision` reads it, and the document
+/// reads answer identically with or without it.
 pub fn api_call(
     reads: &dyn ControlReads,
     namespace: &str,
     operation: &str,
+    parameters: Option<&serde_json::Value>,
 ) -> Result<CadApiOutcome, String> {
     Ok(dispatch_api_call(
         reads.api_snapshot(),
         namespace,
         operation,
+        parameters,
     ))
 }
 

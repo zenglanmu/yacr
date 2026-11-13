@@ -213,6 +213,7 @@ fn the_control_reads_are_explicit_before_and_after_a_mirror_exists() {
         &empty,
         "ApplicationServices",
         "documentManager.mdiActiveDocument",
+        None,
     )
     .expect("the reply envelope");
     assert!(!waiting.ok);
@@ -233,6 +234,7 @@ fn the_control_reads_are_explicit_before_and_after_a_mirror_exists() {
         &answered,
         "ApplicationServices",
         "documentManager.mdiActiveDocument",
+        None,
     )
     .expect("the reply envelope");
     assert!(outcome.ok);

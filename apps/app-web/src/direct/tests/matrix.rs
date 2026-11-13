@@ -320,6 +320,30 @@ fn every_wire_command_answers_identically_on_both_paths() {
             LIVE,
         ),
         (
+            "api-call/documents",
+            "cad_api_call",
+            r#"{"namespace":"ApplicationServices","operation":"documentManager.documents"}"#,
+            LIVE,
+        ),
+        (
+            "api-call/revision",
+            "cad_api_call",
+            r#"{"namespace":"DatabaseServices","operation":"database.revision","parameters":{"database":"1"}}"#,
+            LIVE,
+        ),
+        (
+            "api-call/revision-mismatch",
+            "cad_api_call",
+            r#"{"namespace":"DatabaseServices","operation":"database.revision","parameters":{"database":"999"}}"#,
+            LIVE,
+        ),
+        (
+            "api-call/revision-missing-parameter",
+            "cad_api_call",
+            r#"{"namespace":"DatabaseServices","operation":"database.revision"}"#,
+            LIVE,
+        ),
+        (
             "api-call/unknown-operation",
             "cad_api_call",
             r#"{"namespace":"ApplicationServices","operation":"documentManager.notAnOperation"}"#,
@@ -402,13 +426,15 @@ fn the_control_reads_answer_the_same_object_on_both_paths() {
         wire::api_call(
             &mirrored,
             "ApplicationServices",
-            "documentManager.mdiActiveDocument"
+            "documentManager.mdiActiveDocument",
+            None
         )
         .expect("a mirrored document snapshot"),
         wire::api_call(
             &direct,
             "ApplicationServices",
-            "documentManager.mdiActiveDocument"
+            "documentManager.mdiActiveDocument",
+            None
         )
         .expect("the session's own document snapshot")
     );
@@ -501,14 +527,55 @@ fn the_control_reads_answer_the_same_object_on_both_paths() {
         direct_document["value"]["document"]["database"]["version"],
         serde_json::json!(document.database_version)
     );
+
+    // The fixture's database id is the one the static matrix revision case
+    // names, so that case really is the "match" one (the mismatch case uses 999).
+    assert_eq!(document.database_id, "1", "the fixture database id");
+
+    // The other two served reads answer the same object on both sources.
+    let documents = |reads: &dyn cad_ui_core::session::ControlReads| {
+        wire::api_call(
+            reads,
+            "ApplicationServices",
+            "documentManager.documents",
+            None,
+        )
+        .expect("the envelope")
+    };
+    let mirrored_documents = documents(&mirrored);
+    assert_eq!(mirrored_documents, documents(&direct));
+    assert_eq!(
+        mirrored_documents.value.expect("a value"),
+        serde_json::json!({ "documents": [ document.wire_value() ] })
+    );
+
+    let revision_parameters = serde_json::json!({ "database": document.database_id });
+    let revision = |reads: &dyn cad_ui_core::session::ControlReads| {
+        wire::api_call(
+            reads,
+            "DatabaseServices",
+            "database.revision",
+            Some(&revision_parameters),
+        )
+        .expect("the envelope")
+    };
+    let mirrored_revision = revision(&mirrored);
+    assert_eq!(mirrored_revision, revision(&direct));
+    assert_eq!(
+        mirrored_revision.value.expect("a value"),
+        serde_json::json!({
+            "revision": document.database_version.parse::<u64>().expect("a decimal revision"),
+        })
+    );
 }
 
 /// A session that exists **without** a document is a fact, not a wait.
 ///
 /// `None` at the read seam means "no snapshot yet"; a snapshot whose document is
-/// `None` is answered `{"document": null}` with `ok: true` on both paths.
+/// `None` answers the real "nothing is open" value for every served read, on both
+/// paths: `{"document": null}`, `{"documents": []}`, and `cad_api.no_document`.
 #[test]
-fn a_session_without_a_document_answers_a_null_document_on_both_paths() {
+fn a_session_without_a_document_answers_facts_on_both_paths() {
     let session = session();
     session
         .command("CLOSE")
@@ -524,39 +591,62 @@ fn a_session_without_a_document_answers_a_null_document_on_both_paths() {
     let direct = DirectReads::new(&session);
     let mut queues = Queues::new(true, false);
     let mut popups = NoPopups;
-    let args =
-        r#"{"namespace":"ApplicationServices","operation":"documentManager.mdiActiveDocument"}"#;
-    let (mirror_answer, direct_answer) = {
-        let mut sink = queues.sink();
-        (
-            dispatch("cad_api_call", args, &mut sink, &mirrored, &mut popups)
-                .expect("the mirrored answer"),
-            dispatch("cad_api_call", args, &mut sink, &direct, &mut popups)
-                .expect("the direct answer"),
-        )
-    };
-    assert_eq!(mirror_answer, direct_answer);
-    assert_eq!(mirror_answer["ok"], serde_json::json!(true));
-    assert_eq!(
-        mirror_answer["value"],
-        serde_json::json!({ "document": null })
-    );
 
-    // The shared `wire::*` function answers the same object on both sources.
-    assert_eq!(
-        wire::api_call(
-            &mirrored,
+    let cases: [(&str, &str, Option<Value>, Value); 3] = [
+        (
             "ApplicationServices",
-            "documentManager.mdiActiveDocument"
-        )
-        .expect("the envelope"),
-        wire::api_call(
-            &direct,
+            "documentManager.mdiActiveDocument",
+            None,
+            serde_json::json!({ "document": null }),
+        ),
+        (
             "ApplicationServices",
-            "documentManager.mdiActiveDocument"
-        )
-        .expect("the envelope")
-    );
+            "documentManager.documents",
+            None,
+            serde_json::json!({ "documents": [] }),
+        ),
+        (
+            "DatabaseServices",
+            "database.revision",
+            Some(serde_json::json!({ "database": "1" })),
+            serde_json::json!(cad_ui_core::session::API_CALL_NO_DOCUMENT),
+        ),
+    ];
+    for (namespace, operation, parameters, expected) in cases {
+        let args = serde_json::json!({
+            "namespace": namespace,
+            "operation": operation,
+            "parameters": &parameters,
+        })
+        .to_string();
+        let (mirror_answer, direct_answer) = {
+            let mut sink = queues.sink();
+            (
+                dispatch("cad_api_call", &args, &mut sink, &mirrored, &mut popups)
+                    .expect("the mirrored answer"),
+                dispatch("cad_api_call", &args, &mut sink, &direct, &mut popups)
+                    .expect("the direct answer"),
+            )
+        };
+        assert_eq!(mirror_answer, direct_answer, "{namespace}.{operation}");
+        let revision = operation == "database.revision";
+        if revision {
+            // A database read has nothing to report: an explicit refusal.
+            assert_eq!(mirror_answer["ok"], serde_json::json!(false));
+            assert_eq!(mirror_answer["error"], expected);
+        } else {
+            assert_eq!(mirror_answer["ok"], serde_json::json!(true));
+            assert_eq!(mirror_answer["value"], expected);
+        }
+
+        // The shared `wire::*` function answers the same object on both sources.
+        assert_eq!(
+            wire::api_call(&mirrored, namespace, operation, parameters.as_ref())
+                .expect("the mirrored envelope"),
+            wire::api_call(&direct, namespace, operation, parameters.as_ref())
+                .expect("the direct envelope")
+        );
+    }
 }
 
 /// Before the first owner tick there is no mirror: the read is the explicit
@@ -582,6 +672,7 @@ fn the_mirrorless_read_answers_cad_waiting() {
         &empty,
         "ApplicationServices",
         "documentManager.mdiActiveDocument",
+        None,
     )
     .expect("the envelope is the reply");
     assert!(!outcome.ok);

@@ -94,10 +94,10 @@ macro_rules! cad_wire_registry {
             @row(shared, pure, NoArgs, cad_commands, { }, ::std::vec::Vec<&'static str>, { ::std::result::Result::Ok($crate::session::wire::commands()) })
             @row(shared, pure, NoArgs, cad_app_version, { }, ::std::string::String, { ::std::result::Result::Ok($crate::app_version().to_string()) })
             @row(shared, pure, NoArgs, cad_api_status, { }, $crate::session::CadApiStatus, { $crate::session::wire::api_status() })
-            // The first plugin-API *operation*: a reflected read of the open
-            // document (or an explicit refusal). `parameters` is part of the
-            // contract's request shape and is deliberately unused this wave.
-            @row(shared, reads, ApiCallArgs, cad_api_call, { arg(req, namespace, String) arg(req, operation, String) arg(opt, parameters, $crate::session::registry::RegistryJsonValue) }, $crate::session::CadApiOutcome, { { let _ = parameters; $crate::session::wire::api_call(reads, &namespace, &operation) } })
+            // The plugin-API operations: reflected reads of the open document /
+            // document list / database revision (or an explicit refusal).
+            // `parameters` is the operation's argument object (optional).
+            @row(shared, reads, ApiCallArgs, cad_api_call, { arg(req, namespace, String) arg(req, operation, String) arg(opt, parameters, ::std::option::Option<$crate::session::registry::RegistryJsonValue>) }, $crate::session::CadApiOutcome, { $crate::session::wire::api_call(reads, &namespace, &operation, parameters.as_ref()) })
             @row(shared, sink, ToolParameterArgs, cad_set_tool_parameter, { arg(req, parameter, String) arg(opt, number, ::std::option::Option<f64>) arg(opt, flag, ::std::option::Option<bool>) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_tool_parameter(sink, &parameter, number, flag) })
             @row(shared, sink, ToolTextArgs, cad_set_tool_text, { arg(req, text, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_tool_text(sink, &text) })
             @row(shared, sink, SelectedTextArgs, cad_set_selected_text, { arg(req, text, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_selected_text(sink, &text) })
