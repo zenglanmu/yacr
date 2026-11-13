@@ -35,6 +35,21 @@ impl super::CadSession {
     /// outcome is **not** queued here — the caller decides where it lives (the
     /// desktop's shared result queue, or [`Self::push_api_outcome`] on a
     /// synchronous carrier).
+    /// Handle one submission; `None` when it started an `EditorInput` prompt.
+    ///
+    /// A prompt's answer arrives on a later [`Self::api_prompt_results`] drain, so
+    /// it must not be published now (a premature answer would race the user's
+    /// click). Every settled operation keeps [`Self::api_submit`]'s shape.
+    pub fn submit_api_call(&self, submission: CadApiSubmission) -> Option<CadApiOutcome> {
+        match self.editor_submit(&submission) {
+            super::api_prompt::EditorSubmit::Settled(outcome) => Some(*outcome),
+            super::api_prompt::EditorSubmit::Started => None,
+            super::api_prompt::EditorSubmit::NotEditor => Some(self.api_submit(submission)),
+        }
+    }
+
+    /// Settle one submission now (never a prompt: prompts go through
+    /// [`Self::submit_api_call`]).
     pub fn api_submit(&self, submission: CadApiSubmission) -> CadApiOutcome {
         let request_id = submission.request_id.clone();
         let outcome = if validate_request_id(&submission.request_id).is_err() {
@@ -62,6 +77,9 @@ impl super::CadSession {
 
     /// Route one already-validated submission to its operation.
     fn dispatch_submission(&self, submission: &CadApiSubmission) -> CadApiOutcome {
+        if let super::api_prompt::EditorSubmit::Settled(outcome) = self.editor_submit(submission) {
+            return *outcome;
+        }
         match (submission.namespace.as_str(), submission.operation.as_str()) {
             (
                 super::api_call::API_CALL_DATABASE_NAMESPACE,
@@ -90,10 +108,10 @@ impl super::CadSession {
 pub fn api_submit_or_wait(
     session: Option<&super::CadSession>,
     submission: CadApiSubmission,
-) -> CadApiOutcome {
+) -> Option<CadApiOutcome> {
     match session {
-        Some(session) => session.api_submit(submission),
-        None => CadApiOutcome::waiting(submission.request_id),
+        Some(session) => session.submit_api_call(submission),
+        None => Some(CadApiOutcome::waiting(submission.request_id)),
     }
 }
 

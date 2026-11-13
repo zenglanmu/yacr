@@ -40,6 +40,7 @@
     "viewCubeIn3d": true
   },
   "orthoEnabled": false,
+  "pendingPrompt": null,
   "performance": null,
   "popup": null,
   "references": [],

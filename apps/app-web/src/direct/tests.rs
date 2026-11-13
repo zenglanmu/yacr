@@ -216,7 +216,11 @@ impl Queues {
         // The plugin-API lane: answered by the session on this thread exactly as
         // the owner tick's `drain_api_calls` does, then published for the poll.
         for call in std::mem::take(&mut self.api_calls) {
-            let outcome = session.api_submit(call);
+            if let Some(outcome) = session.submit_api_call(call) {
+                cad_ui_core::session::push_api_result(&mut self.api_results, outcome);
+            }
+        }
+        for outcome in session.api_prompt_results() {
             cad_ui_core::session::push_api_result(&mut self.api_results, outcome);
         }
         Ok(())

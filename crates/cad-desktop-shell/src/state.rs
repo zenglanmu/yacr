@@ -338,19 +338,18 @@ impl Shared {
     }
 }
 
-/// The owner tick's plugin-API drain: submit every queued mutation, publish the
-/// outcomes.
+/// The owner tick's plugin-API drain: answer queued submissions, publish every
+/// completed prompt, then append both to the shared result queue.
 ///
-/// The queue is taken under the lock (exactly like the other owner-tick drains),
-/// the requests are applied **outside** it through `submit` (the caller owns the
-/// `!Send` session), and the answers are appended under a fresh lock with the
-/// shared bounded/drop-oldest rule. `submit` must answer every request — a host
-/// with no session yet answers `cad_waiting` for it.
+/// The submission queue is taken under the lock (exactly like the other
+/// owner-tick drains) and applied **outside** it on `session` — the `!Send`
+/// owner-thread session. A submission that starts an `Editor` prompt has no
+/// answer yet (the prompt's answer arrives on a later tick through
+/// `CadSession::api_prompt_results`). A host with no session answers
+/// `cad_waiting` for every submission instead of dropping it.
 pub fn drain_api_calls(
     shared: &Arc<Mutex<Shared>>,
-    mut submit: impl FnMut(
-        cad_ui_core::session::CadApiSubmission,
-    ) -> cad_ui_core::session::CadApiOutcome,
+    session: Option<&cad_ui_core::session::CadSession>,
 ) {
     let calls: Vec<cad_ui_core::session::CadApiSubmission> = {
         let mut state = lock(shared);
@@ -358,10 +357,18 @@ pub fn drain_api_calls(
             .into_iter()
             .collect()
     };
-    if calls.is_empty() {
+    let mut outcomes: Vec<cad_ui_core::session::CadApiOutcome> = Vec::new();
+    for call in calls {
+        if let Some(outcome) = cad_ui_core::session::api_submit_or_wait(session, call) {
+            outcomes.push(outcome);
+        }
+    }
+    if let Some(session) = session {
+        outcomes.extend(session.api_prompt_results());
+    }
+    if outcomes.is_empty() {
         return;
     }
-    let outcomes: Vec<_> = calls.into_iter().map(&mut submit).collect();
     let mut state = lock(shared);
     for outcome in outcomes {
         cad_ui_core::session::push_api_result(&mut state.cad_api_results, outcome);

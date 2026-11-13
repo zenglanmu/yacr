@@ -219,11 +219,16 @@ fn the_desktop_submit_queue_refuses_a_duplicate_and_a_full_queue() {
     );
 }
 
-/// The wire args of one `DatabaseServices` submission.
-fn submission_args(request_id: &str, operation: &str, parameters: &serde_json::Value) -> String {
+/// The wire args of one namespaced submission.
+fn submission_args(
+    request_id: &str,
+    namespace: &str,
+    operation: &str,
+    parameters: &serde_json::Value,
+) -> String {
     serde_json::json!({
         "requestId": request_id,
-        "namespace": "DatabaseServices",
+        "namespace": namespace,
         "operation": operation,
         "parameters": parameters,
     })
@@ -236,11 +241,12 @@ fn desktop_submit_poll(
     session: &CadSession,
     reads: &QueueReads<'_>,
     request_id: &str,
+    namespace: &str,
     operation: &str,
     parameters: &serde_json::Value,
 ) -> Value {
     let mut popups = NoPopups;
-    let args = submission_args(request_id, operation, parameters);
+    let args = submission_args(request_id, namespace, operation, parameters);
     let ack = {
         let mut sink = queues.sink();
         dispatch("cad_api_submit", &args, &mut sink, reads, &mut popups)
@@ -263,13 +269,14 @@ fn desktop_submit_poll(
 fn direct_submit_poll(
     session: &CadSession,
     request_id: &str,
+    namespace: &str,
     operation: &str,
     parameters: &serde_json::Value,
 ) -> Value {
     let reads = DirectReads::new(session);
     let mut sink = DirectSink::with_gates(session, true, false);
     let mut popups = NoPopups;
-    let args = submission_args(request_id, operation, parameters);
+    let args = submission_args(request_id, namespace, operation, parameters);
     dispatch("cad_api_submit", &args, &mut sink, &reads, &mut popups)
         .expect("the submission is admitted");
     let poll =
@@ -324,12 +331,14 @@ fn a_create_then_read_round_trip_is_the_same_on_both_paths() {
         &desktop_session,
         &desktop_reads,
         "read-1",
+        "DatabaseServices",
         "transaction.commit",
         &commit_parameters,
     );
     let direct_commit = direct_submit_poll(
         &direct_session,
         "read-1",
+        "DatabaseServices",
         "transaction.commit",
         &commit_parameters,
     );
@@ -350,12 +359,14 @@ fn a_create_then_read_round_trip_is_the_same_on_both_paths() {
         &desktop_session,
         &desktop_reads,
         "read-2",
+        "DatabaseServices",
         "database.getObjectId",
         &handle_parameters,
     );
     let direct_handle = direct_submit_poll(
         &direct_session,
         "read-2",
+        "DatabaseServices",
         "database.getObjectId",
         &handle_parameters,
     );
@@ -378,12 +389,14 @@ fn a_create_then_read_round_trip_is_the_same_on_both_paths() {
         &desktop_session,
         &desktop_reads,
         "read-3",
+        "DatabaseServices",
         "transaction.getObject",
         &object_parameters,
     );
     let direct_object = direct_submit_poll(
         &direct_session,
         "read-3",
+        "DatabaseServices",
         "transaction.getObject",
         &object_parameters,
     );
@@ -406,4 +419,225 @@ fn a_create_then_read_round_trip_is_the_same_on_both_paths() {
         object["linetype"],
         serde_json::json!({ "method": "byLayer" })
     );
+}
+
+/// One poll answer on the desktop queues (the simulated owner tick).
+fn desktop_poll(queues: &mut Queues, reads: &QueueReads<'_>) -> Value {
+    let mut popups = NoPopups;
+    let mut sink = queues.sink();
+    dispatch("cad_api_poll", "{}", &mut sink, reads, &mut popups).expect("the poll answer")
+}
+
+/// `editor.getString` starts a prompt with no answer, is answered by the ordinary
+/// typed-text funnel, and the answer is identical on both carriers.
+#[test]
+fn an_editor_prompt_is_answered_on_both_paths() {
+    let desktop_session = session();
+    let direct_session = session();
+    let desktop_snapshot = desktop_session.api_snapshot();
+    let reads = QueueReads::new(None, None, None, Some(&desktop_snapshot));
+    let mut queues = Queues::new(true, false);
+    let mut popups = NoPopups;
+    let args = submission_args(
+        "prompt-1",
+        "EditorInput",
+        "editor.getString",
+        &serde_json::json!({ "message": "Name:" }),
+    );
+
+    // Desktop: admitted, applied on the owner tick, no answer yet.
+    {
+        let mut sink = queues.sink();
+        dispatch("cad_api_submit", &args, &mut sink, &reads, &mut popups)
+            .expect("the prompt submission is admitted");
+    }
+    queues
+        .drain(&desktop_session)
+        .expect("the owner tick starts the prompt");
+    assert_eq!(
+        desktop_poll(&mut queues, &reads)["results"],
+        serde_json::json!([]),
+        "a started prompt has no answer yet"
+    );
+    let pending = desktop_session
+        .snapshot(None, None, 0)
+        .pending_prompt
+        .expect("the prompt is pending on the desktop session");
+    assert_eq!(pending.message, "Name:");
+
+    // The same submission on `dom-canvas`: applied inline, no answer yet.
+    {
+        let direct_reads = DirectReads::new(&direct_session);
+        let mut direct_sink = DirectSink::with_gates(&direct_session, true, false);
+        dispatch(
+            "cad_api_submit",
+            &args,
+            &mut direct_sink,
+            &direct_reads,
+            &mut popups,
+        )
+        .expect("the direct prompt submission is admitted");
+        let direct_poll = dispatch(
+            "cad_api_poll",
+            "{}",
+            &mut direct_sink,
+            &direct_reads,
+            &mut popups,
+        )
+        .expect("the direct poll answer");
+        assert_eq!(
+            direct_poll["results"],
+            serde_json::json!([]),
+            "a started prompt has no answer yet"
+        );
+    }
+    assert!(
+        direct_session.pending_prompt().is_some(),
+        "the direct prompt is pending"
+    );
+
+    // The user types at the prompt: the ordinary text funnel answers it.
+    desktop_session
+        .set_tool_text("hello")
+        .expect("the typed text is admitted");
+    direct_session
+        .set_tool_text("hello")
+        .expect("the typed text is admitted");
+
+    queues
+        .drain(&desktop_session)
+        .expect("the owner tick publishes the prompt answer");
+    let desktop_answer = desktop_poll(&mut queues, &reads);
+    let direct_answer = {
+        let direct_reads = DirectReads::new(&direct_session);
+        let mut direct_sink = DirectSink::with_gates(&direct_session, true, false);
+        dispatch(
+            "cad_api_poll",
+            "{}",
+            &mut direct_sink,
+            &direct_reads,
+            &mut popups,
+        )
+        .expect("the direct poll answer")
+    };
+    assert_eq!(desktop_answer, direct_answer);
+    let results = desktop_answer["results"].as_array().expect("a result list");
+    assert_eq!(results.len(), 1, "one prompt, one answer");
+    assert_eq!(results[0]["requestId"], serde_json::json!("prompt-1"));
+    assert_eq!(
+        results[0]["value"],
+        serde_json::json!({ "status": "Ok", "value": "hello" })
+    );
+    assert!(
+        desktop_session
+            .snapshot(None, None, 0)
+            .pending_prompt
+            .is_none(),
+        "the prompt is settled"
+    );
+}
+
+/// Esc cancels the prompt on both carriers, and a later poll reports it.
+#[test]
+fn an_escaped_editor_prompt_answers_cancel_on_both_paths() {
+    let desktop_session = session();
+    let direct_session = session();
+    let desktop_snapshot = desktop_session.api_snapshot();
+    let reads = QueueReads::new(None, None, None, Some(&desktop_snapshot));
+    let mut queues = Queues::new(true, false);
+    let mut popups = NoPopups;
+    let args = submission_args(
+        "prompt-2",
+        "EditorInput",
+        "editor.getString",
+        &serde_json::json!({}),
+    );
+    {
+        let mut sink = queues.sink();
+        dispatch("cad_api_submit", &args, &mut sink, &reads, &mut popups)
+            .expect("the prompt submission is admitted");
+    }
+    {
+        let direct_reads = DirectReads::new(&direct_session);
+        let mut direct_sink = DirectSink::with_gates(&direct_session, true, false);
+        dispatch(
+            "cad_api_submit",
+            &args,
+            &mut direct_sink,
+            &direct_reads,
+            &mut popups,
+        )
+        .expect("the direct submission is admitted");
+    }
+    queues
+        .drain(&desktop_session)
+        .expect("the owner tick starts the desktop prompt");
+
+    // Esc (the command the shell sends) is consumed by the prompt.
+    desktop_session
+        .command("CANCEL")
+        .expect("the desktop cancel is admitted");
+    direct_session
+        .command("CANCEL")
+        .expect("the direct cancel is admitted");
+
+    queues
+        .drain(&desktop_session)
+        .expect("the owner tick publishes the cancel");
+    let desktop_answer = desktop_poll(&mut queues, &reads);
+    let direct_answer = {
+        let direct_reads = DirectReads::new(&direct_session);
+        let mut direct_sink = DirectSink::with_gates(&direct_session, true, false);
+        dispatch(
+            "cad_api_poll",
+            "{}",
+            &mut direct_sink,
+            &direct_reads,
+            &mut popups,
+        )
+        .expect("the direct poll answer")
+    };
+    assert_eq!(desktop_answer, direct_answer);
+    assert_eq!(
+        desktop_answer["results"][0]["value"],
+        serde_json::json!({ "status": "Cancel" })
+    );
+}
+
+/// `editor.selectAll` is immediate: one submission, one answer in the same poll.
+#[test]
+fn select_all_answers_immediately_on_both_paths() {
+    let desktop_session = session();
+    let direct_session = session();
+    let desktop_snapshot = desktop_session.api_snapshot();
+    let reads = QueueReads::new(None, None, None, Some(&desktop_snapshot));
+    let mut queues = Queues::new(true, false);
+    let parameters = serde_json::json!({});
+    let desktop_answer = desktop_submit_poll(
+        &mut queues,
+        &desktop_session,
+        &reads,
+        "all-1",
+        "EditorInput",
+        "editor.selectAll",
+        &parameters,
+    );
+    let direct_answer = direct_submit_poll(
+        &direct_session,
+        "all-1",
+        "EditorInput",
+        "editor.selectAll",
+        &parameters,
+    );
+    assert_eq!(desktop_answer, direct_answer);
+    assert_eq!(
+        desktop_answer["ok"],
+        serde_json::json!(true),
+        "selectAll answer: {desktop_answer}"
+    );
+    let ids = desktop_answer["value"]["objectIds"]
+        .as_array()
+        .expect("an id list");
+    assert!(!ids.is_empty(), "the fixture has selectable geometry");
+    assert!(ids.iter().all(|id| id.as_str().is_some()));
 }

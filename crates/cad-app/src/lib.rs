@@ -27,6 +27,7 @@ pub mod measure_tool;
 pub mod ortho;
 pub mod picking;
 pub mod plugin_api;
+pub mod plugin_prompt;
 pub mod point_report;
 pub mod property_value;
 pub mod recovery;

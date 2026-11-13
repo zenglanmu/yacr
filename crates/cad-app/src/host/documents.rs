@@ -39,6 +39,9 @@ impl HostController {
             pending_open_guard: None,
             async_open: None,
             temporary_identity: 0,
+            api_prompt: None,
+            api_prompt_error: None,
+            api_prompt_results: Vec::new(),
             tolerance: TolerancePolicy::default(),
         };
         controller.new_blank_document()?;

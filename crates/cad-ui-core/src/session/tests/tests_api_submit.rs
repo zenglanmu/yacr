@@ -357,7 +357,8 @@ fn a_submission_without_a_session_is_cad_waiting() {
     let outcome = api_submit_or_wait(
         None,
         submission("req-11", "DatabaseServices", "transaction.commit", None),
-    );
+    )
+    .expect("a missing session answers immediately");
     assert!(!outcome.ok);
     assert_eq!(outcome.request_id.as_deref(), Some("req-11"));
     assert_eq!(outcome.error.as_deref(), Some(CAD_WAITING));

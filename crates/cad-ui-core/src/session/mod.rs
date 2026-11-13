@@ -26,6 +26,7 @@ mod api;
 mod api_call;
 mod api_commit;
 mod api_object;
+mod api_prompt;
 mod api_submit;
 mod bytes;
 mod command_log;
@@ -123,6 +124,11 @@ pub use self::api_call::{
     API_CALL_NO_DOCUMENT, API_CALL_REVISION, API_CALL_REVISION_CONFLICT, API_CALL_SYMBOL_TABLES,
     API_CALL_TRANSACTION_COMMIT, API_CALL_UNKNOWN, API_SUBMIT_DUPLICATE,
     API_SUBMIT_INVALID_REQUEST, API_SUBMIT_QUEUE_FULL, CAD_API_RESULT_CAP, CAD_API_SUBMIT_CAP,
+};
+pub use self::api_prompt::{
+    CadPendingPrompt, CadPendingPromptKind, API_CALL_GET_DOUBLE, API_CALL_GET_ENTITY,
+    API_CALL_GET_INTEGER, API_CALL_GET_KEYWORD, API_CALL_GET_POINT, API_CALL_GET_SELECTION,
+    API_CALL_GET_STRING, API_CALL_SELECT_ALL,
 };
 pub use self::api_submit::{api_submit_or_wait, push_api_result};
 pub use self::bytes::BytesDocument;

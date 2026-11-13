@@ -204,16 +204,20 @@ impl AdmissionTarget for DirectSink<'_> {
     fn api_submit(&mut self, submission: CadApiSubmission) -> Result<(), String> {
         // Applied inline: this carrier's session is on the calling thread. The
         // answer is kept on the session, because the client polls later and the
-        // sink is rebuilt for every dispatch call.
-        let outcome = self.session.api_submit(submission);
-        self.session.push_api_outcome(outcome);
+        // sink is rebuilt for every dispatch call. A prompt that just started has
+        // no answer yet; it arrives through `api_prompt_results`.
+        if let Some(outcome) = self.session.submit_api_call(submission) {
+            self.session.push_api_outcome(outcome);
+        }
         Ok(())
     }
 
     fn api_results(&mut self) -> Result<CadApiResults, String> {
-        Ok(CadApiResults {
-            results: self.session.take_api_outcomes(),
-        })
+        // Settled submissions and completed prompts share one FIFO, exactly like
+        // the desktop owner tick's shared queue.
+        let mut results = self.session.take_api_outcomes();
+        results.extend(self.session.api_prompt_results());
+        Ok(CadApiResults { results })
     }
 }
 

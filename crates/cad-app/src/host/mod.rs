@@ -108,15 +108,18 @@ pub struct HostController {
     /// Monotonic counter for a fresh `DocumentIdentity::Temporary` on each new
     /// blank document, so two New operations never share an identity.
     temporary_identity: u128,
+    /// The plugin `Editor` prompt state (see [`crate::plugin_prompt`]).
+    pub api_prompt: Option<crate::plugin_prompt::ApiPrompt>,
+    pub api_prompt_error: Option<String>,
+    pub api_prompt_results: Vec<crate::plugin_prompt::ApiPromptResult>,
     /// The one interaction tolerance policy the live session resolves picks and
     /// snaps with. It is **not** a second tolerance definition: a host derives it
     /// from its effective config via
     /// [`crate::viewer_config::ViewConfig::tolerance_policy`] and installs it with
     /// [`HostController::set_tolerance_policy`]. Left unset it stays
     /// [`TolerancePolicy::default`] (pickbox 3, aperture 12), so historical
-    /// geometry and snapping are unchanged. Once `APERTURE <n>` sets the session
-    /// token explicitly, [`HostController::session_tolerance`] overlays only the
-    /// object-snap aperture from it; the pickbox is never changed here.
+    /// geometry and snapping are unchanged; `APERTURE <n>` overlays only the
+    /// object-snap aperture, never the pickbox.
     tolerance: TolerancePolicy,
 }
 
@@ -156,6 +159,9 @@ impl HostController {
             pending_open_guard: None,
             async_open: None,
             temporary_identity: 0,
+            api_prompt: None,
+            api_prompt_error: None,
+            api_prompt_results: Vec::new(),
             tolerance: TolerancePolicy::default(),
         })
     }
