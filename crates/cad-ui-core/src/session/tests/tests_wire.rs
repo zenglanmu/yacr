@@ -228,7 +228,10 @@ fn the_control_reads_are_explicit_before_and_after_a_mirror_exists() {
     );
 
     // … and a snapshot that exists without a document is a fact, not a wait.
-    let snapshot = CadApiSnapshot { document: None };
+    let snapshot = CadApiSnapshot {
+        document: None,
+        symbol_tables: None,
+    };
     let answered = QueueReads::new(None, None, None, Some(&snapshot));
     let outcome = wire::api_call(
         &answered,

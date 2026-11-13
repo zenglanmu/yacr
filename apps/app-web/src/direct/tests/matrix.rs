@@ -344,6 +344,24 @@ fn every_wire_command_answers_identically_on_both_paths() {
             LIVE,
         ),
         (
+            "api-call/symbol-tables",
+            "cad_api_call",
+            r#"{"namespace":"DatabaseServices","operation":"database.symbolTables","parameters":{"database":"1"}}"#,
+            LIVE,
+        ),
+        (
+            "api-call/symbol-tables-mismatch",
+            "cad_api_call",
+            r#"{"namespace":"DatabaseServices","operation":"database.symbolTables","parameters":{"database":"999"}}"#,
+            LIVE,
+        ),
+        (
+            "api-call/symbol-tables-missing-parameter",
+            "cad_api_call",
+            r#"{"namespace":"DatabaseServices","operation":"database.symbolTables"}"#,
+            LIVE,
+        ),
+        (
             "api-call/unknown-operation",
             "cad_api_call",
             r#"{"namespace":"ApplicationServices","operation":"documentManager.notAnOperation"}"#,
@@ -592,7 +610,7 @@ fn a_session_without_a_document_answers_facts_on_both_paths() {
     let mut queues = Queues::new(true, false);
     let mut popups = NoPopups;
 
-    let cases: [(&str, &str, Option<Value>, Value); 3] = [
+    let cases: [(&str, &str, Option<Value>, Value); 4] = [
         (
             "ApplicationServices",
             "documentManager.mdiActiveDocument",
@@ -608,6 +626,12 @@ fn a_session_without_a_document_answers_facts_on_both_paths() {
         (
             "DatabaseServices",
             "database.revision",
+            Some(serde_json::json!({ "database": "1" })),
+            serde_json::json!(cad_ui_core::session::API_CALL_NO_DOCUMENT),
+        ),
+        (
+            "DatabaseServices",
+            "database.symbolTables",
             Some(serde_json::json!({ "database": "1" })),
             serde_json::json!(cad_ui_core::session::API_CALL_NO_DOCUMENT),
         ),
@@ -629,8 +653,8 @@ fn a_session_without_a_document_answers_facts_on_both_paths() {
             )
         };
         assert_eq!(mirror_answer, direct_answer, "{namespace}.{operation}");
-        let revision = operation == "database.revision";
-        if revision {
+        let database_read = operation.starts_with("database.");
+        if database_read {
             // A database read has nothing to report: an explicit refusal.
             assert_eq!(mirror_answer["ok"], serde_json::json!(false));
             assert_eq!(mirror_answer["error"], expected);
@@ -647,6 +671,90 @@ fn a_session_without_a_document_answers_facts_on_both_paths() {
                 .expect("the direct envelope")
         );
     }
+}
+
+/// The `database.symbolTables` read is the same derived projection on both paths,
+/// and it reports the drawing's real tables (never an invented row).
+#[test]
+fn the_symbol_tables_projection_is_the_same_object_on_both_paths() {
+    let session = session();
+    let snapshot = session.api_snapshot();
+    let database = snapshot
+        .document
+        .as_ref()
+        .expect("the fixture session holds a document")
+        .database_id
+        .clone();
+    let parameters = serde_json::json!({ "database": database });
+    let mirrored = QueueReads::new(None, None, None, Some(&snapshot));
+    let direct = DirectReads::new(&session);
+    let mut queues = Queues::new(true, false);
+    let mut popups = NoPopups;
+    let args = serde_json::json!({
+        "namespace": "DatabaseServices",
+        "operation": "database.symbolTables",
+        "parameters": &parameters,
+    })
+    .to_string();
+    let (mirror_answer, direct_answer) = {
+        let mut sink = queues.sink();
+        (
+            dispatch("cad_api_call", &args, &mut sink, &mirrored, &mut popups)
+                .expect("the mirrored answer"),
+            dispatch("cad_api_call", &args, &mut sink, &direct, &mut popups)
+                .expect("the direct answer"),
+        )
+    };
+    assert_eq!(mirror_answer, direct_answer);
+    assert_eq!(mirror_answer["ok"], serde_json::json!(true));
+
+    let value = &mirror_answer["value"];
+    assert_eq!(value["blockTable"]["name"], serde_json::json!("blocks"));
+    assert_eq!(value["layerTable"]["name"], serde_json::json!("layers"));
+    let blocks = value["blockTable"]["records"]
+        .as_array()
+        .expect("a block record list");
+    assert!(
+        blocks.is_empty(),
+        "the synthetic fixture declares no user blocks (spaces are not blocks)"
+    );
+    for block in blocks {
+        assert_eq!(
+            block["isLayout"],
+            serde_json::json!(false),
+            "cad-db spaces are not blocks"
+        );
+        let origin = block["origin"].as_array().expect("a base point");
+        assert_eq!(origin.len(), 3, "the base point has three numbers");
+        assert!(origin.iter().all(serde_json::Value::is_number));
+        assert!(block["name"].is_string(), "a named block");
+    }
+    let layers = value["layerTable"]["records"]
+        .as_array()
+        .expect("a layer record list");
+    assert!(!layers.is_empty(), "the fixture drawing has a layer table");
+    for layer in layers {
+        assert!(layer["name"].is_string());
+        assert!(layer["visible"].is_boolean());
+        assert!(layer["locked"].is_boolean());
+        assert!(layer["frozen"].is_boolean());
+        assert!(layer["linetype"].is_string());
+        assert!(
+            layer["color"]["aci"].is_number() || layer["color"]["aci"].is_null(),
+            "an ACI index or the honest null of a true colour"
+        );
+        let rgb = layer["color"]["rgb"].as_str().expect("an #rrggbb value");
+        assert!(rgb.starts_with('#'), "{rgb} is an sRGB value");
+        assert_eq!(rgb, rgb.to_lowercase(), "{rgb} is lowercase");
+    }
+    assert!(
+        layers
+            .iter()
+            .any(|layer| layer["name"] == serde_json::json!("0")),
+        "the fixture's layer 0 is listed"
+    );
+    // The active layer is a real row of the same projection.
+    assert_eq!(value["clayer"], serde_json::json!("0"));
 }
 
 /// Before the first owner tick there is no mirror: the read is the explicit

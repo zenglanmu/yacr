@@ -109,10 +109,12 @@ pub use self::api::{
     PLUGIN_API_VERSION,
 };
 pub use self::api_call::{
-    api_call_document, api_call_documents, api_call_revision, api_call_unknown, dispatch_api_call,
-    CadApiDocument, CadApiOutcome, CadApiSnapshot, API_CALL_COMMAND, API_CALL_DATABASE_NAMESPACE,
-    API_CALL_DOCUMENTS, API_CALL_INVALID_ARGUMENT_DATABASE, API_CALL_MDI_ACTIVE_DOCUMENT,
-    API_CALL_NAMESPACE, API_CALL_NO_DOCUMENT, API_CALL_REVISION, API_CALL_UNKNOWN,
+    api_call_document, api_call_documents, api_call_revision, api_call_symbol_tables,
+    api_call_unknown, dispatch_api_call, CadApiBlockRecord, CadApiDocument, CadApiLayerRecord,
+    CadApiOutcome, CadApiSnapshot, CadApiSymbolTables, API_CALL_COMMAND,
+    API_CALL_DATABASE_NAMESPACE, API_CALL_DOCUMENTS, API_CALL_INVALID_ARGUMENT_DATABASE,
+    API_CALL_MDI_ACTIVE_DOCUMENT, API_CALL_NAMESPACE, API_CALL_NO_DOCUMENT, API_CALL_REVISION,
+    API_CALL_SYMBOL_TABLES, API_CALL_UNKNOWN,
 };
 pub use self::bytes::BytesDocument;
 pub use self::command_log::{
