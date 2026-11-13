@@ -84,6 +84,7 @@ fn the_status_is_the_frozen_wire_shape_plus_the_host_profile() {
             "documentOwner": "wasm",
             "palettesAvailable": true,
             "standardViews": [],
+            "orbit": false,
         }),
         "{wire}"
     );
@@ -183,6 +184,7 @@ fn no_session_reports_nothing_invented() {
             "documentOwner": "wasm",
             "palettesAvailable": true,
             "standardViews": [],
+            "orbit": false,
         })
     );
 }

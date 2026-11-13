@@ -1,7 +1,9 @@
 // A single ordered IPC lane. Continuous events may merge only at the tail,
 // never across a discrete gesture boundary. Capacity reserves terminal events.
 import { isReportableRect, metricsKey, pointerPosition, rectFromElement } from './metrics.ts';
-import type { PartitionRect } from './metrics.ts';
+import type { PartitionRect, PointerPositionEvent } from './metrics.ts';
+import { GesturePinch, wheelPinchScale } from './dom-pinch.ts';
+import type { WebKitGestureEvent } from './dom-pinch.ts';
 
 // Upper bound (ms) on how long a coalesced `pointermove` may wait for the
 // animation frame. `requestAnimationFrame` is throttled or suspended in an
@@ -24,6 +26,24 @@ const RESIZE_FLUSH_FALLBACK_MS = 120;
 // schedules exactly one delayed re-send of the then-current rect, so the steady
 // state costs nothing.
 const RESIZE_RECONCILE_DELAY_MS = 1500;
+// How long after `gestureend` a `ctrl`+wheel is still read as part of the same
+// WebKit pinch. WebKit 15+ (macOS Safari/WKWebView) reports one trackpad pinch
+// as **both** the `gesturestart/change/end` sequence and `ctrl`+wheel; the
+// gesture is authoritative, and this tail covers a wheel that arrives just
+// after `gestureend` (the two signals are not ordered). A wheel in that window
+// still cancels the page zoom; it just does not zoom CAD a second time.
+const GESTURE_WHEEL_GUARD_MS = 500;
+
+/**
+ * A monotonic timestamp for the gesture/wheel dedupe window.
+ *
+ * `performance.now()` is the browser's clock; the fallbacks keep the binding
+ * usable in a fake harness (and any non-browser test environment) without
+ * changing behaviour, since only elapsed milliseconds matter.
+ */
+function eventNow(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
 
 /**
  * One queued input message.
@@ -283,6 +303,12 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
   let resizeFallback: number | null = null;
   let reconcileTimer: number | null = null;
   let accepting = true;
+  // WebKit 15+ (macOS) sends a trackpad pinch as **both** the `gesture*`
+  // sequence and `ctrl`+wheel. These two track that overlap so one pinch stays
+  // one CAD zoom: `lastGestureAt` starts at `-Infinity`, so a ctrl+wheel before
+  // any gesture is never mistaken for a pinch echo.
+  let gestureActive = false;
+  let lastGestureAt = Number.NEGATIVE_INFINITY;
   // `button` is the DOM `MouseEvent.button` (0 primary / 1 middle / 2 secondary).
   // It is only meaningful on a press/release, so it rides `pointer_down` and
   // `pointer_up`; a `pointermove` (and a wheel) reports no button change as `-1`,
@@ -293,8 +319,8 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
   // normalization below.
   // Both the pointer handlers and the wheel handler carry a client position, so
   // the shared type is their common base (`PointerEvent`/`WheelEvent` are both
-  // `MouseEvent`s).
-  const position = (event: MouseEvent): { x: number; y: number } => pointerPosition(element, event);
+  // `MouseEvent`s). The WebKit gesture event carries `clientX/clientY` too.
+  const position = (event: PointerPositionEvent): { x: number; y: number } => pointerPosition(element, event);
   // One layout read for a move: the point and the rect that sizes it come from
   // the same `getBoundingClientRect()`. A pointermove must not force layout twice
   // (50–120 events/s), so continuous moves use this instead of `position` plus
@@ -499,18 +525,70 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
   };
   const wheel = (event: Event): void => {
     const wheelEvent = event as WheelEvent;
+    // Unconditional: `ctrl`+wheel is WebView2/Chromium's trackpad-pinch signal,
+    // and letting either shape through zooms the page instead of the drawing.
     wheelEvent.preventDefault();
+    if (wheelEvent.ctrlKey) {
+      // WebKit 15+ reports the same pinch as both a gesture and `ctrl`+wheel;
+      // the gesture is authoritative. The page zoom above is still cancelled,
+      // this sample is just not a second CAD zoom. (WebView2 only sends the
+      // wheel form, and no gesture ever ran, so its path is untouched.)
+      if (gestureActive || eventNow() - lastGestureAt < GESTURE_WHEEL_GUARD_MS) return;
+    }
     if (!accepting) return;
     resize();
     flush();
     // Wheel deltas are normalized to CSS pixels, including line/page modes.
     const factor = wheelEvent.deltaMode === 1 ? 16 : wheelEvent.deltaMode === 2 ? env.innerHeight : 1;
+    const dy = wheelEvent.deltaY * factor;
+    if (wheelEvent.ctrlKey) {
+      // A ctrl-modified wheel is a trackpad pinch on WebView2/Chromium, not a
+      // wheel notch, so it travels as one pinch sample: no midpoint pan and a
+      // purely incremental zoom multiplier. Anchored at the pointer, which the
+      // host applies about the pinch midpoint (`zoom_continuously`). WebView2
+      // quantizes the delta to 120-multiples, so the magnitude is coarse but
+      // the sign (and therefore the zoom direction) is exact.
+      lane.push({ kind: 'pinch', ...position(wheelEvent), dx: 0, dy: 0, scale: wheelPinchScale(dy) });
+      return;
+    }
     lane.push({
       kind: 'wheel',
       ...position(wheelEvent),
       dx: wheelEvent.deltaX * factor,
-      dy: wheelEvent.deltaY * factor,
+      dy,
     });
+  };
+  // The WebKit gesture sequence (WKWebView/Safari) is the other DOM shape of a
+  // trackpad pinch. `defaults.ts` also cancels the page zoom; these listeners
+  // are what turn the gesture into a CAD zoom on a `native-below` carrier.
+  const gesturePinch = new GesturePinch();
+  const gestureStart = (event: Event): void => {
+    event.preventDefault();
+    gestureActive = true;
+    gesturePinch.start((event as unknown as WebKitGestureEvent).scale);
+  };
+  const gestureChange = (event: Event): void => {
+    event.preventDefault();
+    // Every sample keeps the wheel guard closed, not only the first: WebKit may
+    // interleave the two signals for the whole pinch.
+    gestureActive = true;
+    lastGestureAt = eventNow();
+    const gestureEvent = event as unknown as WebKitGestureEvent;
+    // The baseline advances even while the lane is suspended, so resuming does
+    // not apply a cumulative scale that was already consumed.
+    const ratio = gesturePinch.change(gestureEvent.scale);
+    if (ratio === null || !accepting) return;
+    resize();
+    flush();
+    lane.push({ kind: 'pinch', ...position(gestureEvent), dx: 0, dy: 0, scale: ratio });
+  };
+  const gestureEnd = (event: Event): void => {
+    event.preventDefault();
+    gestureActive = false;
+    // Opened here, not closed: the guard stays closed for the tail window so a
+    // wheel belonging to this pinch cannot add a second zoom after it ended.
+    lastGestureAt = eventNow();
+    gesturePinch.end();
   };
   const blur = (): void => { cancel(); lane.push({ kind: 'blur' }); };
   let lastMetrics = '';
@@ -616,6 +694,9 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
     lostpointercapture: cancelled,
     pointerleave: leave,
     wheel,
+    gesturestart: gestureStart,
+    gesturechange: gestureChange,
+    gestureend: gestureEnd,
   };
   for (const [type, handler] of Object.entries(handlers)) element.addEventListener(type, handler, { passive: false });
   env.addEventListener('blur', blur);

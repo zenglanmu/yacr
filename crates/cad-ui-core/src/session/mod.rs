@@ -101,11 +101,12 @@ use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
 use self::status::{assemble_status, cad_tool, document_capabilities};
 
 pub use self::admission::{
-    admit_layer_write, admit_selected_property, admit_selected_text, admit_setting,
-    admit_standard_view, admit_tool_parameter, admit_tool_text, drain_layer_writes,
-    drain_standard_views, parse_layer_property_write, parse_property_write, parse_standard_view,
-    parse_tool_parameter, CAD_LAYER_WRITE_CAP, CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP,
-    CAD_SETTING_CAP, CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
+    admit_layer_write, admit_orbit, admit_selected_property, admit_selected_text, admit_setting,
+    admit_standard_view, admit_tool_parameter, admit_tool_text, drain_layer_writes, drain_orbits,
+    drain_standard_views, parse_layer_property_write, parse_orbit, parse_property_write,
+    parse_standard_view, parse_tool_parameter, CAD_LAYER_WRITE_CAP, CAD_ORBIT_CAP,
+    CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP, CAD_SETTING_CAP, CAD_STANDARD_VIEW_CAP,
+    CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
 };
 pub use self::annot_arguments::*;
 pub use self::api::{
@@ -171,6 +172,7 @@ pub use self::hatchedit::{
     invalid_hatchedit_argument_reason, needs_pattern_name_reason, parse_hatchedit_argument,
     unknown_pattern_reason, HatchEditArgumentError,
 };
+pub use self::input::{native_pinch_input, NativePinch, PinchViewport};
 pub use self::layers::{CadLayer, CadLayerColor, CadLayerWrite, CadLayers};
 pub use self::performance::CadPerformance;
 pub use self::profile::{
@@ -199,11 +201,12 @@ pub use self::text_batch::*;
 pub use self::text_commands::*;
 pub use self::wire::{
     aliases, api_call, api_status, close_popup, command, commands, create_layer, delete_layer,
-    fonts, layers, open_popup, parse_setting_request, rename_layer, restore_layers,
+    fonts, layers, open_popup, orbit, parse_setting_request, rename_layer, restore_layers,
     set_active_layer, set_layer_property, set_layer_visible, set_selected_property,
     set_selected_text, set_setting, set_tool_parameter, set_tool_text, settings, standard_view,
-    AdmissionTarget, CadCommandAck, CadCommandAlias, Channel, ControlReads, NoPopups, PopupTarget,
-    QueueFamily, QueueReads, QueueSink, CAD_WAITING, POPUP_HOST_UNAVAILABLE,
+    AdmissionTarget, CadCommandAck, CadCommandAlias, Channel, ControlReads, NoPopups, OrbitDelta,
+    PopupTarget, QueueFamily, QueueReads, QueueSink, CAD_WAITING, ORBIT_ANGLES_NOT_FINITE,
+    POPUP_HOST_UNAVAILABLE,
 };
 
 /// Completions drained per poll. The queue's absolute capacity is 256, so this
@@ -646,6 +649,24 @@ impl CadSession {
             self.core.record_command(name);
         }
         self.dispatch_payload(CommandId::StandardView, CommandPayload::StandardView(view))
+    }
+
+    /// Orbit the current view by a `(yaw, pitch)` radian delta.
+    ///
+    /// The delta travels as the typed [`CommandPayload::Orbit`] payload — reached
+    /// from the dedicated `cad_orbit` IPC (the WebView ViewCube), never parsed out
+    /// of the name-only `cad_command` funnel. The host application rotates the eye
+    /// about the target (preserving the eye–target distance) and refuses outside
+    /// the three-dimensional view, so a 2D orbit is the host's **real** refusal: it
+    /// is returned here and recorded for `cad_status.error`, with the camera left
+    /// unchanged.
+    pub fn orbit(&self, yaw: f64, pitch: f64) -> Result<(), String> {
+        // Same stable selector echo the router uses for `ORBIT` (a gesture-only
+        // command, so the typed entry is its only non-pointer route).
+        if let Some(name) = command_name(CommandId::Orbit) {
+            self.core.record_command(name);
+        }
+        self.dispatch_payload(CommandId::Orbit, CommandPayload::Orbit { yaw, pitch })
     }
 
     /// Whether a draw/measurement capture currently owns pointer input.

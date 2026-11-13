@@ -109,6 +109,7 @@ macro_rules! cad_wire_registry {
             @row(shared, sink, SelectedTextArgs, cad_set_selected_text, { arg(req, text, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_selected_text(sink, &text) })
             @row(shared, sink, PropertyArgs, cad_set_selected_property, { arg(req, key, String) arg(req, value, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_selected_property(sink, &key, &value) })
             @row(shared, sink, StandardViewArgs, cad_standard_view, { arg(req, view, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::standard_view(sink, &view) })
+            @row(shared, sink, OrbitArgs, cad_orbit, { arg(req, yaw, f64) arg(req, pitch, f64) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::orbit(sink, yaw, pitch) })
             @row(shared, popups, PopupArgs, cad_open_popup, { arg(req, kind, String) }, $crate::popup::PopupAck, { $crate::session::wire::open_popup(popups, &kind) })
             @row(shared, popups, NoArgs, cad_close_popup, { }, $crate::session::wire::CadCommandAck, { $crate::session::wire::close_popup(popups) })
             @row(shared, reads, NoArgs, cad_settings, { }, $crate::session::CadSettings, { $crate::session::wire::settings(reads) })

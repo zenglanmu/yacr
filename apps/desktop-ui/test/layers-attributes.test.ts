@@ -506,7 +506,7 @@ test('the swatch, the marks and the details line are the palette\'s own rows', a
 test('the attribute styles reuse the chrome tokens and keep the resting row 24px', async () => {
   const css = await readModule('style.css');
   const start = css.indexOf('/* Layers palette');
-  const end = css.indexOf('/* Navigation rail');
+  const end = css.indexOf('/* Navigation dock');
   assert.ok(start > 0 && end > start, 'the layers block exists between the palette blocks');
   const block = css.slice(start, end);
 

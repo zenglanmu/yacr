@@ -16,7 +16,10 @@
  * right-edge navigation dock (`.navdock`: an absolute overlay with its own fill
  * and left border, so the drawing stays visible everywhere it does not cover).
  * The dock sits below `.palette-layer`, so a floating palette window still
- * paints over it. Consequence: the partition is unpainted by the webview, so
+ * paints over it; on the compact layout (<= 1024 CSS px) the same dock is a
+ * content-sized card at the drawing's top-right corner rather than a full-height
+ * strip (`mobile.css` owns that geometry). Consequence: the partition is
+ * unpainted by the webview, so
  * between window map and the first native CAD frame the desktop may briefly show
  * through. That is accepted on purpose - the renderer's own clear colour is the
  * intended backdrop, and re-adding a DOM fill here would hide the surface again.
@@ -78,10 +81,12 @@
      collapsed. One token for both, so the two states cannot drift apart and the
      partition rect stays identical across collapse/expand. */
   --ribbon-bar-h: 26px;
-  /* The docked right-edge navigation column's width (the ViewCube above the icon
-     rail). The update banner uses it to stay inside the drawing area, so both
-     surfaces read one number. It is reserved whether the rail is expanded or
-     collapsed, so the CAD partition rect never changes. */
+  /* The docked right-edge navigation column's width (the ViewCube plus its
+     collapse control above the icon rail). The update banner uses it to stay
+     inside the drawing area, so both surfaces read one number. It is reserved
+     whether the rail is expanded or collapsed, so the CAD partition rect never
+     changes. The compact layout reuses it as the *width of one control column*
+     inside the floating dock card, not as a reserved strip. */
   --navrail-w: 56px;
 
   /* Elevation and backdrop ink. One RGB triple per family means the light theme
@@ -1325,20 +1330,24 @@ button, input, select { font: inherit; color: inherit; }
 }
 .layers__form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 
-/* Navigation rail -------------------------------------------------------- */
-/* A floating dock at the right edge of `.workspace`: the ViewCube above, the
-   icon rail below. It is absolutely positioned and out of flow, so it reserves
-   no width — the CAD partition rect (`.workspace__canvas` → `.native-input`)
-   spans the whole row and the host's native surface is sized from that. The
-   column is opaque chrome painted over the drawing, with the left border as its
-   edge. `z-index: 5` puts it above the CAD carriers (`.native-input`, the
-   `dom-canvas` node) but below `.palette-layer` (`10`) and the update banner
-   layer (`9`) — a floating palette can still be dragged or resized over the
-   dock, exactly as before, so its right-edge grip is never hidden. The whole
-   column — its empty background included — is hit-testable DOM: no
-   `pointer-events: none`, so a press there lands on the dock rather than falling
-   through to the CAD surface. The rail is an inner column so the cube's own
-   stylesheet only has to draw the cube. */
+/* Navigation dock -------------------------------------------------------- */
+/* A floating dock at the right edge of `.workspace`. Top to bottom: the head
+   (the ViewCube, then the one collapse/expand control directly under it), then
+   the icon rail. The head is the part that survives both rail states, so the
+   toggle is a real control in both — it is not the rail's first item.
+   The column is absolutely positioned and out of flow, so it reserves no width —
+   the CAD partition rect (`.workspace__canvas` → `.native-input`) spans the
+   whole row and the host's native surface is sized from that. It is opaque chrome
+   painted over the drawing, with the left border as its edge. `z-index: 5` puts
+   it above the CAD carriers (`.native-input`, the `dom-canvas` node) but below
+   `.palette-layer` (`10`) and the update banner layer (`9`) — a floating palette
+   can still be dragged or resized over the dock, exactly as before, so its
+   right-edge grip is never hidden. The whole column — its empty background
+   included — is hit-testable DOM: no `pointer-events: none`, so a press there
+   lands on the dock rather than falling through to the CAD surface.
+   The compact layout turns this same element into a content-sized card pinned to
+   the drawing's top-right corner (`mobile.css`); that is the one place where the
+   dock is *not* a full-height strip. */
 .navdock {
   position: absolute; top: 0; right: 0; bottom: 0;
   width: var(--navrail-w);
@@ -1347,9 +1356,35 @@ button, input, select { font: inherit; color: inherit; }
   min-height: 0;
   background: var(--chrome-3); border-left: 1px solid var(--line);
 }
+/* The head: the cube plus its one control. It adds no divider of its own — the
+   cube's frame line is the boundary between the orientation control and the rows
+   below it, and a second hairline 30px lower would read as a toolbar seam in a
+   56px column. */
+.navdock__head {
+  flex: 0 0 auto;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 2px; min-width: 0; padding: 0 0 4px;
+}
+/* The collapse affordance: the one control present in **both** rail states. It
+   wears the rail's normal button face but never the ON fill, because it is a
+   state switch rather than a toggle for a palette. Up when the rail is open,
+   down when it is folded away: the rail grows and folds along the vertical axis,
+   so up/down reads truthfully where left/right would not. */
+.navdock__toggle {
+  display: grid; place-items: center; flex: none;
+  width: 32px; height: 30px;
+  border: 1px solid transparent; border-radius: var(--radius);
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.navdock__toggle:hover { background: var(--hover); color: var(--text); }
+.navdock__toggle:active { background: var(--pressed); }
+/* The rail renders nothing when it is closed (`NavRail.tsx`), so there is no
+   empty toolbar element to style or focus: the space below the head is the
+   dock's own opaque fill. */
 .navrail {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  flex: 1 1 auto; width: 100%; min-height: 0; padding: 2px 0 6px;
+  flex: 1 1 auto; width: 100%; min-height: 0; padding: 4px 0 6px;
   background: var(--chrome-3);
   overflow-y: auto; overflow-x: hidden;
   scrollbar-width: none;
@@ -1366,10 +1401,6 @@ button, input, select { font: inherit; color: inherit; }
 .navrail__button:active:not(:disabled) { background: var(--pressed); }
 .navrail__button:disabled { color: var(--text-disabled); cursor: not-allowed; }
 .navrail__button.is-on { background: var(--on); color: var(--on-text); }
-/* The collapse affordance is the one control that is always present: it wears
-   the rail's normal button face but never the ON fill, because it is a state
-   switch, not a toggle for a palette. */
-.navrail__toggle { width: 32px; height: 28px; color: var(--text-muted); }
 .navrail__rule { width: 20px; height: 1px; margin: 4px 0; background: var(--line-soft); }
 
 /* Layout tabs ------------------------------------------------------------ */

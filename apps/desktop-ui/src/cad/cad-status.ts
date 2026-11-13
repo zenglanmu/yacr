@@ -10,6 +10,7 @@
 // `CAD_STATUS_INVALID` and is never coerced into a guessed state.
 
 import { parseSelection } from './selection-wire.ts';
+import { parseOrbitCapability } from './host-profile.ts';
 import type { Translator } from '../i18n.ts';
 
 /** The `invoke` callable the shell threads in (Tauri IPC, or a test double). */
@@ -313,6 +314,19 @@ export interface CadHostProfile {
   readonly palettesAvailable?: unknown;
   /** `null` (undeclared) or the authoritative array of view keys. */
   readonly standardViews?: unknown;
+  /**
+   * Whether this carrier can orbit at all (`cad_orbit`).
+   *
+   * `false` is an **affirmative** limitation (the 2D-only `dom-canvas` wasm
+   * session, which has no 3D camera and would answer
+   * `unsupported-runtime: cad_orbit`); `true` is an explicit yes; `null`/absent
+   * is undeclared and keeps the desktop rule (allowed once a 3D drawing is open).
+   * The front-end admission helper (`cad/orbit.ts`) reads exactly this, so a
+   * gesture the carrier cannot honour is disabled with a reason instead of
+   * reaching the transport. Only a real boolean or `null` is accepted; the rule
+   * itself lives in `cad/host-profile.ts` (`parseOrbitCapability`).
+   */
+  readonly orbit?: unknown;
 }
 
 /**
@@ -814,6 +828,8 @@ export function parseCadStatus(value: unknown): CadStatus {
         throw Error('CAD_STATUS_INVALID');
       }
     }
+    // The orbit capability: its own reader validates it (`cad/host-profile.ts`).
+    parseOrbitCapability(profile.orbit);
   }
   // The additive layout/reference blocks: absent is the older-host answer
   // (`[]` / model / `[]`), but a present block is validated strictly so a

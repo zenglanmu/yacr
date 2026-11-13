@@ -184,7 +184,7 @@ fn a_selection_prompt_toggles_clicks_and_enter_finishes_it() {
     );
     assert_eq!(
         core.controller.borrow().selection().refs(),
-        &[expected.clone()],
+        std::slice::from_ref(&expected),
         "the click publishes the selection the way Select does"
     );
 

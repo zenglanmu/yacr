@@ -941,7 +941,7 @@ test('the panel and the model carry no hardcoded CJK', async () => {
 test('the palette styles reuse the chrome tokens and never float over the drawing', async () => {
   const css = await readCss();
   const start = css.indexOf('/* Layers palette');
-  const end = css.indexOf('/* Navigation rail');
+  const end = css.indexOf('/* Navigation dock');
   assert.ok(start > 0 && end > start, 'the layers block exists between the docks');
   const block = css.slice(start, end);
   for (const token of ['var(--hover)', 'var(--field)', 'var(--line-soft)', 'var(--focus)', 'var(--accent)']) {

@@ -56,6 +56,7 @@ mod layers;
 mod locale;
 mod options;
 mod performance;
+mod pinch_intake;
 mod plugins;
 mod popup;
 mod postload;

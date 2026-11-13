@@ -47,6 +47,9 @@ use crate::state::{lock, ProbeShared, Shared};
 pub use cad_ui_core::session::admit_selected_text;
 // Re-exported for the owner tick, which drains the queue with the shared rule.
 pub use cad_ui_core::session::drain_standard_views;
+// Re-exported for the owner tick, which drains the ViewCube orbit queue with the
+// shared rule.
+pub use cad_ui_core::session::drain_orbits;
 // Re-exported for the owner tick, which drains the layer-write queue with the
 // shared rule (the React layer panel's three mutations).
 pub use cad_ui_core::session::drain_layer_writes;

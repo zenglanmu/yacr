@@ -39,12 +39,14 @@
 //! * `hostProfile` — the typed carrier description from
 //!   `cad_ui_core::session::HostProfile::dom_canvas()`:
 //!   `{"surfaceMode":"dom-canvas","documentOwner":"wasm","palettesAvailable":true,
-//!   "standardViews":[]}`. `surfaceMode` is what
+//!   "standardViews":[],"orbit":false}`. `surfaceMode` is what
 //!   `apps/desktop-ui/src/cad/surface.ts` selects the in-DOM canvas path on;
 //!   `palettesAvailable: true` is honest because this carrier **is** the real
 //!   desktop session, so it has the layer table, the selection rows and the
 //!   settings the docked palettes read (`cad_layers`, `cad_setting*` are all
-//!   served here). `standardViews: []` means **declared, none available** — the
+//!   served here). `orbit: false` is the declared orbit refusal: this session is
+//!   2D-only, so the ViewCube never sends `cad_orbit` here (and the session would
+//!   refuse it by name if it did). `standardViews: []` means **declared, none available** — the
 //!   chrome disables the seven view buttons with their own reason; this list is
 //!   now **stale** (the funnel forwards `cad_standard_view` and the session's own
 //!   router would execute it), so enabling them is a separate decision that needs

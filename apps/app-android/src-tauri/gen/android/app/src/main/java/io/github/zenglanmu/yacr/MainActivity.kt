@@ -187,6 +187,7 @@ class MainActivity : TauriActivity() {
     // only the WebView's own background so the page composites through to it; the
     // page keeps its CSS backgrounds and `--yacr-safe-bottom` (published below).
     webView.setBackgroundColor(Color.TRANSPARENT)
+    disableWebViewPageZoom(webView)
     insertCadSurfaceBehind(webView)
     // Whatever was measured before the WebView existed would otherwise be lost.
     pushSafeBottom()
@@ -199,6 +200,27 @@ class MainActivity : TauriActivity() {
         override fun onComplete(requestId: Long) = pushSafeBottom()
       },
     )
+  }
+
+  /**
+   * Turn the WebView's own page zoom off.
+   *
+   * A two-finger pinch on Android WebView scales the **page** by default, which
+   * would resize the DOM rect the native CAD surface is composited under and make
+   * the chrome look like the drawing. The CAD route is the DOM two-contact pinch
+   * the page already implements (`apps/desktop-ui/src/cad/input.ts`, delivered as
+   * `pinch`), so the WebView's zoom affordances stay off: no built-in zoom
+   * controls, no on-screen zoom buttons, and no pinch-driven page scaling.
+   *
+   * This is the Android half of a cross-carrier rule ("a pinch is a CAD zoom, it
+   * never scales the page"); Linux does it natively in `gtk_bridge::pinch`,
+   * Windows/macOS already default to no page zoom. Device behaviour is NOT
+   * VERIFIED here — `scripts/test-android-host.py` pins the three calls.
+   */
+  private fun disableWebViewPageZoom(webView: WebView) {
+    webView.settings.setSupportZoom(false)
+    webView.settings.setBuiltInZoomControls(false)
+    webView.settings.setDisplayZoomControls(false)
   }
 
   /**

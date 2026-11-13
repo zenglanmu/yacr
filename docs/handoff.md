@@ -1,4 +1,80 @@
-AD
+## 2026-11-13 ViewCube 改 canvas 3D + 导航栏重排 + `cad_orbit` + 原生 pinch
+
+- **范围**：右缘导航 dock 重设计（收起/展开移到立方体正下方；移动端收起只剩“立方体 + 一个展开图标”
+  的浮动卡片，不再是一条整屏竖线）；视图立方由 CSS 3D + 六个 DOM 面改为 **2D canvas 软件投影**
+  （背面剔除、画家排序、平面着色、面标签不镜像/不倒置）；立方体拖拽经新 IPC **`cad_orbit`** 真实
+  旋转相机；Linux 触控板 pinch 改为 CAD 缩放而不是页面缩放。
+- **立方体（`apps/desktop-ui`）**：`cad/viewcube.ts` 的 `viewCubeMatrix` 换成
+  `viewCubeBasis()`（返回三条 cube-local 轴在屏幕空间的 `[x, y(down), depth]` 像；FRONT 为恒等，
+  TOP/RIGHT 与旧 `matrix3d` 列一致，退化/非有限 → `null`）。新 `cad/viewcube-canvas.ts`
+  （`projectCube`/`pickFace`/`drawCube`/`readCubePalette`，DOM-free，有单测）、`cad/orbit.ts`
+  （`ORBIT_RADIANS_PER_PIXEL = 0.008`、`yaw = -dx·K`、`pitch = +dy·K`，与 `cad-host` 的
+  `orbit_delta` 完全一致；`OrbitDrag` 每帧合并一次、单请求在飞、被拒即停）。`ViewCube.tsx` 的 canvas
+  是 `aria-hidden` 装饰，六个面仍是 `sr-only` 真实按钮（焦点高亮对应面）；点击面 = 标准视图，
+  拖动 = 轨道；`null` 相机/取不到 2D context 都渲染明确不可用态。尺寸由 `--viewcube-size`（48px）
+  决定，DPR 与 `data-theme` 变化会重读 token 重绘，无 rAF 常驻。
+- **Dock（`apps/desktop-ui`）**：新增 `layout/nav-rail-state.ts`（桌面 = 宿主 `navbarVisible`，
+  toggle 是真 `NAVBAR`；紧凑 = 本地状态、跨断点复位）；`NavigationDock` 结构为
+  `.navdock[data-rail] > .navdock__head(立方体 + toggle) + NavRail(open)`，`NavRail` 变为纯投影
+  （关闭时返回 `null`，不再渲染空 toolbar）。桌面仍是 56px 绝对全高列（分区矩形不变）；紧凑布局
+  同一元素变成 `top/right: 8px` 的内容尺寸卡片（`max-height: min(60dvh, calc(100% - 16px))`，
+  内部滚动），卡片宽度 = `--navrail-w`，开合不改变宽度。
+- **`cad_orbit`（跨载体）**：共享 wire 行 `cad_orbit { yaw, pitch }`（弧度、有限；与
+  `cad_standard_view` 同门禁顺序：模态 → CAD 模式 → 有界队列；`{accepted:true}` 只是**已入队**）。
+  `CadSession::orbit` 派发真实 `CommandId::Orbit` + `CommandPayload::Orbit`，2D 是宿主真实拒绝
+  （`Orbit is only defined in the three-dimensional view`）。`hostProfile.orbit` 三态：
+  `null` = 未声明（`native-below`）、`false` = 已声明不可用（`dom-canvas` 2D-only）。四个桌面 tick
+  与 `app-web` DirectSink 均已接线。
+- **pinch（跨载体）**：Linux 原生手势 + Windows/macOS 的 DOM 信号，两条入口都汇到同一个 `InputKind::Pinch`。根因已核实——WebKitGTK 的触控板 pinch 是 UI 进程
+  `GtkGestureZoom` → `pageScaleFactor`，**不产生 DOM 事件**，`preventDefault()` 无效，也没有
+  `WebKitSettings` 可关；公开的 `WebKitWebView:magnification` 要 2.54（本机 2.52.6）。
+  做法：`gtk_bridge/pinch.rs` 在 webview 创建时按 `pinch_plan(has_magnification, has_private_gesture)`
+  选择：≥2.54 钉 `magnification=1.0`；2.52.6 把私有 `"wk-view-zoom-gesture"` 的 **propagation phase
+  置为 `NONE`**（对象/数据不销毁不释放），再在 widget 的 **`event` 信号**上拦截
+  `GdkEventTouchpadPinch`、取 `scale`/位置并返回 `Stop`（事件到不了 WebKit 的 vfunc）。**实测过两条
+  弯路**：只销毁 signal handlers 仍会被该 controller 消费（`begin=0`）；同 widget 再挂一个 capture-phase
+  `GtkGestureZoom` 也收不到（gesture group 消费），而 `event` 信号先于 vfunc 且 `Stop` 能真正阻止页缩放。
+  增量 scale + 位置进 `Shared::cad_pinches`（cap 64），`host/pinch_intake.rs` 在 tick 里按
+  `rect.dpr/parent_scale` 换成 partition-local CSS px 并**丢弃 partition 外的样本**，追加到同一批
+  `inputs`（DOM 输入优先），`CadSession::handle_inputs` 一次发布。转换/拒绝规则在 `cad-ui-core`
+  （`native_pinch_input`，`sequence = 0`，该路径不经 `InputTracker`）。都不可用时只打
+  `[probe] pinch: gesture_unavailable`，**不**假装已接管。
+  **Windows/macOS（2026-11-14 补）**：两端的 pinch 本来就以 **DOM 信号**到达，不需要原生钩子——
+  Windows 把精确触控板 pinch 转成 `WM_MOUSEWHEEL` + `MK_CONTROL`，Chromium/WebView2 转发为可取消的
+  **`wheel` + `ctrlKey`**（`deltaMode 0`，delta 是 **120 的量化倍数**，不按 log(scale)）；
+  macOS/WKWebView 的 `allowsMagnification` 默认 `false`（页面本就不缩放），但
+  `gesturestart/change/end` 仍派发且可取消，`scale` 是**累计值**。共享前端
+  `cad/dom-pinch.ts` + `cad/input.ts`：`ctrl`+wheel → `scale = exp(-Δy·0.0015)`（与滚轮缩放同标度）；
+  `gesturechange` → 增量比 `scale/previous`；Safari 15+ 同一手势会**同时**发两种信号，所以 gesture
+  期间及 `gestureend` 后 **500ms** 内的 `ctrl`+wheel 直接丢弃（页缩放照旧 `preventDefault`），
+  避免一次 pinch 缩放两次。Android `onWebViewCreate` 关掉 WebView 页缩放（`setSupportZoom(false)` 等），
+  让既有两触点 DOM pinch 走 CAD；macOS 不需要显式关 `allowsMagnification`（平台默认 `false`），
+  Windows 由 wry 默认关 `SetIsPinchZoomEnabled`——两端的 **pinch→CAD 由上面的共享 DOM 路线提供**，
+  真机交付与“一次手势只缩放一次”的顺序仍 **NOT VERIFIED**（`docs/compatibility.md` 已按载体写明）。
+  前端 `defaults.ts` 另加 `gesturestart/change/end` 取消（Chromium/WebView2/Safari 的 DOM 兜底，
+  不是 Linux 的修复）。
+- **测试与门禁（本轮实跑）**：`cargo test -p cad-ui-core` **677 + 1 + 6**（含新
+  `tests_native_pinch` 4、orbit admission/wire/`CadSession::orbit`）；`cad-desktop-shell` 48 + 3 + 6 +
+  12 + 7 + 4；`app-linux --lib` **194**（含 `gtk_bridge::pinch` 4 + intake 越界 1）；`app-web` 套件；`cargo check
+  -p app-linux --all-targets`、`-p app-web --locked` 与 `--target wasm32`；`cargo fmt --check`；
+  `clippy -p cad-ui-core -p cad-desktop-shell -p app-linux -D warnings`。前端
+  `tsc --noEmit` 干净、`npm test` **1612 pass / 0 fail**、`npm run build` 通过。脚本门禁
+  `check-architecture`/`check-file-size`/`check-i18n`/`check-command-docs`(+自测)/
+  `check-fixture-manifest`/`check-tauri-capabilities`/`test-android-host` 全部 exit 0。
+- **pinch 实测（合成手势，真实 Wayland 会话 + 真实 `target/debug/yacr`）**：新增
+  `YACR_PROBE_PINCH` 证据驱动，用合成 `GdkEventTouchpadPinch`（BEGIN/UPDATE×2/END，fingers=2）
+  走真实 GTK 分发 → `event` 信号 → `NativePinch` → tick → `CadSession::handle_inputs`。结果：
+  `visualViewport.scale` **1.0 → 1.0（未变）**，`cad_status.camera.scale` **0.003281 → 0.001641**
+  （≈ 累计 1.25×1.6 = 2.0）。`[probe] pinch: webkit-gesture-neutralised` +
+  `webkit gesture type=GtkGestureZoom phase_after=None` + `own event handler attached` 各一行。
+  这**绕过了内核/libinput/合成器的真实手势源**，所以**真实触控板仍需人工按一次**。
+- **NOT VERIFIED（必须真机/真手势才能升级）**：真实触控板的 pinch 手感与锚点（Linux 原生、Windows
+  WebView2、macOS WKWebView/Safari 15+ 双信号顺序）；立方体拖拽手感、
+  `cad_orbit` 实际入队/应用（只有契约与编译）；移动端卡片的真机截图（只有 CSS 结构与契约测试）；
+  Windows/macOS/Android 运行时；GPU/像素/性能。`tests_input.rs` 972 行、
+  `apps/app-linux/src/host/tick.rs` 1000 行（都在上限内，但已贴边）。
+- **并发说明**：工作树里另有本轮之外的未提交改动（`packaging/`、`.github/workflows/core.yml`、
+  Android manifest/`tauri.conf.json`、`docs/flatpak.md` 等），本轮未触碰、未暂存、未提交。
 
 ## 2026-11-13 OS 文件关联：注册完整支持集（单源 `formats.json` + 跨载体契约）
 
@@ -4787,6 +4863,8 @@ DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`�
   `1.0` = 不缩放）。第二个触点按下时前端发**一次** `pointer_cancel`，pinch 期间不逐指针转发 move/up；
   触点数 <2 时再发一次 `pointer_cancel`。宿主只取消活动工具、按 `dx,dy` 平移、以中点为锚按 `scale`
   缩放，**从不框选或提交捕获**。触控板 pinch 仍是 Ctrl+滚轮（原本已转发）。
+  > **2026-11-13 更正**：这条在 WebKitGTK 上不成立——触控板 pinch 是 UI 进程 `GtkGestureZoom`，
+  > 不产生 DOM `ctrl+wheel`，见本轮「ViewCube 改 canvas 3D + 导航栏重排 + `cad_orbit` + 原生 pinch」。
 - **偏好**：持久化 `interaction.leftDragPans`（默认 false），Options → Drafting 布尔项 “Left-drag pans” /
   「左键拖动平移」。开启后 mouse/pen 的 2D 主键拖拽改为平移。宿主每次派发从有效 viewer config 读取
   （`HostCore::left_drag_pans()`）。

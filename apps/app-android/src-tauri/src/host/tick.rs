@@ -397,6 +397,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         let (
             commands,
             mut standard_views,
+            mut orbits,
             setting_writes,
             mut layer_writes,
             tool_parameters,
@@ -409,6 +410,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             (
                 std::mem::take(&mut state.shell.cad_commands),
                 std::mem::take(&mut state.cad_standard_views),
+                std::mem::take(&mut state.cad_orbits),
                 std::mem::take(&mut state.cad_setting_writes),
                 std::mem::take(&mut state.cad_layer_writes),
                 std::mem::take(&mut state.cad_tool_parameters),
@@ -420,6 +422,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         };
         let queued = commands.len()
             + standard_views.len()
+            + orbits.len()
             + setting_writes.len()
             + layer_writes.len()
             + tool_parameters.len()
@@ -468,6 +471,14 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                         |view| session.standard_view(view),
                     ) {
                         log::warn!("[probe] cad standard view rejected: {error}");
+                    }
+                    // Typed orbit deltas (the ViewCube's `cad_orbit`): applied in
+                    // admission order right after the views, through the session's
+                    // own funnel. A real refusal (2D view) is its own error.
+                    for error in cad_desktop_shell::commands::drain_orbits(&mut orbits, |delta| {
+                        session.orbit(delta.yaw, delta.pitch)
+                    }) {
+                        log::warn!("[probe] cad orbit rejected: {error}");
                     }
                     for (parameter, value) in &tool_parameters {
                         if let Err(error) = session.set_tool_parameter(*parameter, *value) {

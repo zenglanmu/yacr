@@ -31,7 +31,7 @@ use super::tick_evidence::log_layout_geometry;
 use super::{
     apply_gpu_budget_percent, lock, lock_telemetry, RenderTelemetry, Shared, BRIDGE, CAD, CAD_ENV,
 };
-use cad_desktop_shell::commands::drain_standard_views;
+use cad_desktop_shell::commands::{drain_orbits, drain_standard_views};
 
 /// One probe tick. Runs on the main thread. The shared lock is held only for
 /// bookkeeping, never across GPU work.
@@ -417,14 +417,14 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
 
     // ---- CAD commands + ordered inputs (batches copied, lock released) ----
     let cad_log = std::env::var_os("YACR_PROBE_CAD_LOG").is_some();
-    // Telemetry: the latest input sequence in this batch and its IPC-to-drain
-    // age (measured from the Rust `Instant` recorded at admission).
+    // Telemetry: this batch's latest input sequence and its IPC-to-drain age.
     let mut last_input_seq: Option<u64> = None;
     let mut input_age_us: Option<u128> = None;
     if cad_mode {
         let (
             commands,
             mut standard_views,
+            mut orbits,
             setting_writes,
             layer_writes,
             tool_parameters,
@@ -434,9 +434,11 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             inputs,
         ) = {
             let mut state = lock(shared);
+            super::pinch_intake::append_native_pinches(&mut state); // DOM first
             (
                 std::mem::take(&mut state.shell.cad_commands),
                 std::mem::take(&mut state.cad_standard_views),
+                std::mem::take(&mut state.cad_orbits),
                 std::mem::take(&mut state.cad_setting_writes),
                 std::mem::take(&mut state.cad_layer_writes),
                 std::mem::take(&mut state.cad_tool_parameters),
@@ -448,6 +450,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         };
         let queued = commands.len()
             + standard_views.len()
+            + orbits.len()
             + setting_writes.len()
             + layer_writes.len()
             + tool_parameters.len()
@@ -491,22 +494,20 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                             eprintln!("[probe] cad command rejected: {error}");
                         }
                     }
-                    // Typed standard-view requests: each one dispatches the real
-                    // `CommandId::StandardView` + `CommandPayload::StandardView`
-                    // through the session funnel, so the application performs the
-                    // camera transition. They are drained in admission order (the
-                    // last one wins) and every real refusal is the session's own
-                    // error, surfaced through `cad_status.error`.
+                    // Typed standard-view requests: drained in admission order (the
+                    // last one wins); a real refusal is the session's own error.
                     for error in drain_standard_views(&mut standard_views, |view| {
                         session.standard_view(view)
                     }) {
                         eprintln!("[probe] cad standard view rejected: {error}");
                     }
-                    // Typed tool-parameter requests: routed through the one
-                    // session path, applied before this batch's inputs so a
-                    // stepper change takes effect on the same batch. A refusal
-                    // (out of range / wrong kind / Viewer mode) is the session's
-                    // real error, surfaced through `cad_status.error`.
+                    // Typed orbit deltas (the ViewCube's `cad_orbit`), in admission order.
+                    for error in drain_orbits(&mut orbits, |d| session.orbit(d.yaw, d.pitch)) {
+                        eprintln!("[probe] cad orbit rejected: {error}");
+                    }
+                    // Typed tool parameters: applied before this batch's inputs so a
+                    // stepper change takes effect in the same batch; a refusal is its
+                    // own error.
                     for (parameter, value) in &tool_parameters {
                         if let Err(error) = session.set_tool_parameter(*parameter, *value) {
                             eprintln!("[probe] cad tool parameter rejected: {error}");

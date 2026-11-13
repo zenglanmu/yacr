@@ -13,8 +13,10 @@
  * the status bar are not rendered on mobile; the chrome inside `<Workspace />`
  * (the start column and the palette layer) stays *mounted* and is hidden below,
  * which is what lets a live breakpoint crossing keep the CAD session alive. The
- * dock stays visible: the ViewCube is the compact 3D orientation cue and the icon
- * rail starts collapsed, with its own chevron to expand it.
+ * dock stays visible, but as a small floating card at the drawing's top-right
+ * corner: the ViewCube is the compact 3D orientation cue, and one control under
+ * it folds the icon rail out of that card (it starts collapsed). It is never a
+ * full-height strip here — a phone cannot spare 56px of drawing width.
  *
  * Safe areas: the two bars pad themselves with `env(safe-area-inset-*)`, so a
  * notched phone does not put a control under the cutout or the gesture bar.
@@ -69,20 +71,76 @@
   display: none;
 }
 
-/* The navigation dock is the exception: the ViewCube and the rail are the
-   compact layout's navigation affordances too, so the dock stays visible. It is
-   the same absolute overlay as on the desktop (`style.css`) — pinned to the
-   right edge over the drawing, taking no width from it — so nothing here has to
-   re-reserve space. The rail itself starts collapsed (local chevron in
-   `NavRail.tsx`) and the cube stays visible in both rail states, so opening the
-   rail changes what the column shows, never how much drawing the user gets. */
+/* Navigation dock card ---------------------------------------------------- */
+/* On the desktop the dock is a full-height 56px strip of chrome at the drawing's
+   right edge. On a phone that strip costs a fifth of the drawing's width for a
+   handful of icons, so the compact layout turns the **same** element into a
+   small floating card pinned to the drawing's top-right corner:
+ *
+ *   * closed, the card is exactly its head — the ViewCube plus the one expand
+ *     control under it, nothing else. There is no full-height background and no
+ *     left border strip, because nothing is painted that the card does not use;
+ *   * open, it is the same head with the icon rail below it, capped and
+ *     scrollable, so it never buries the drawing.
+ *
+ * Height: two limits, like the drawer. `60dvh` is the design cap (the card may
+ * never take more than 60% of the phone). The second is the exact one:
+ * `.workspace` *is* the drawing row between the top bar and the command bar, so
+ * "the row's height minus the 8px margins" needs no second copy of those bars'
+ * heights. If a carrier cannot resolve the percentage, the `60dvh` declaration
+ * before it stands.
+ *
+ * Width is content-sized (`width: auto`) with `--navrail-w` as the head's own
+ * width: that gives the cube a definite parent for its `width: 100%` canvas
+ * without the card ever being wider than one 44px control column plus padding.
+ * The card is inside `.workspace`, so it cannot paint over either bar, and its
+ * `z-index` is the dock's own (`5`): above the CAD carriers, below the palette
+ * layer and the notices.
+ *
+ * `overflow: hidden` keeps the rail's scrollbar and a pressed button's hover fill
+ * inside the 8px radius; the border is a full 1px frame rather than the desktop
+ * `border-left` edge. */
+:root[data-layout="mobile"] .navdock {
+  top: 8px;
+  right: 8px;
+  bottom: auto;
+  left: auto;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 16px);
+  max-height: 60dvh;
+  max-height: min(60dvh, calc(100% - 16px));
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--chrome-3);
+  box-shadow: 0 10px 26px rgba(var(--shadow-rgb), .45);
+}
+/* The head is the card's definite width. 44px controls plus the 6px they are
+   inset by on each side fill `--navrail-w` exactly, so the card is the same width
+   open and closed — opening the rail never resizes the card under the finger. */
+:root[data-layout="mobile"] .navdock__head {
+  width: var(--navrail-w);
+  gap: 4px;
+  padding: 4px 0 6px;
+}
+:root[data-layout="mobile"] .navdock__toggle {
+  width: 44px;
+  height: 44px;
+}
+/* The rail is a column inside the card, so its own fill is the card's fill: no
+   second paint (the desktop rule's `--chrome-3` survives in `style.css` for the
+   desktop strip and for `metrics.test.ts`). It shrinks inside the capped card and
+   scrolls there. */
 :root[data-layout="mobile"] .navrail {
   display: flex;
+  flex: 1 1 auto;
   gap: 4px;
+  min-height: 0;
   padding: 2px 0 6px;
+  background: transparent;
 }
-:root[data-layout="mobile"] .navrail__button,
-:root[data-layout="mobile"] .navrail__toggle {
+:root[data-layout="mobile"] .navrail__button {
   width: 44px;
   height: 44px;
 }

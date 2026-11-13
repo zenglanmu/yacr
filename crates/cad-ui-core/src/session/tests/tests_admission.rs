@@ -465,3 +465,148 @@ fn settings_admission_is_typed_bounded_and_has_no_modal_gate() {
     )
     .is_err());
 }
+
+#[test]
+fn orbit_wire_angles_must_be_finite() {
+    // The `cad_orbit` wire form has no string shape: `{yaw, pitch}` arrive as
+    // radians and are carried verbatim. The one content rule is finiteness — a
+    // NaN/infinite delta would corrupt the camera instead of orbiting it, so it is
+    // refused with its stable code before any host gate runs.
+    assert_eq!(
+        parse_orbit(0.25, -0.5),
+        Ok(OrbitDelta {
+            yaw: 0.25,
+            pitch: -0.5
+        })
+    );
+    // Zero is a legal delta: it orbits by nothing, it is not a malformed request.
+    assert_eq!(
+        parse_orbit(0.0, 0.0),
+        Ok(OrbitDelta {
+            yaw: 0.0,
+            pitch: 0.0
+        })
+    );
+
+    for (yaw, pitch) in [
+        (f64::NAN, 0.1),
+        (0.1, f64::NAN),
+        (f64::INFINITY, 0.1),
+        (0.1, f64::NEG_INFINITY),
+        (f64::NAN, f64::NAN),
+    ] {
+        assert_eq!(
+            parse_orbit(yaw, pitch).unwrap_err(),
+            ORBIT_ANGLES_NOT_FINITE,
+            "yaw={yaw} pitch={pitch}"
+        );
+    }
+    assert_eq!(
+        ORBIT_ANGLES_NOT_FINITE,
+        "orbit.angles_not_finite: cad_orbit needs finite yaw and pitch"
+    );
+}
+
+#[test]
+fn orbit_admission_is_bounded_and_refuses_probe_mode_and_the_modal_gate() {
+    // The `cad_orbit` ack path: the typed delta is only *queued* for the owner
+    // thread. The gates are the standard-view ones, in the same order: the modal
+    // popup gate first, then a disabled CAD session, then the bound.
+    let delta = OrbitDelta {
+        yaw: 0.3,
+        pitch: 0.2,
+    };
+
+    let mut queue: VecDeque<OrbitDelta> = VecDeque::new();
+    assert_eq!(
+        admit_orbit(&mut queue, false, false, delta).unwrap_err(),
+        "CAD is disabled in probe mode"
+    );
+    assert_eq!(
+        admit_orbit(&mut queue, true, true, delta).unwrap_err(),
+        POPUP_MODAL_OPEN
+    );
+    assert!(queue.is_empty(), "refusals queue nothing");
+
+    admit_orbit(&mut queue, true, false, delta).expect("accepted");
+    assert_eq!(queue.pop_front(), Some(delta));
+
+    for _ in 0..CAD_ORBIT_CAP {
+        admit_orbit(&mut queue, true, false, delta).expect("within capacity");
+    }
+    assert_eq!(queue.len(), CAD_ORBIT_CAP);
+    assert_eq!(
+        admit_orbit(&mut queue, true, false, delta).unwrap_err(),
+        "CAD orbit queue is full"
+    );
+    // The modal gate is checked before the bound, exactly like `admit_command` and
+    // `admit_standard_view`: a full queue behind an open modal reports the modal
+    // reason.
+    assert_eq!(
+        admit_orbit(&mut queue, true, true, delta).unwrap_err(),
+        POPUP_MODAL_OPEN
+    );
+    // The orbit bound is the standard-view bound, not a second invented number.
+    assert_eq!(CAD_ORBIT_CAP, CAD_STANDARD_VIEW_CAP);
+}
+
+#[test]
+fn drained_orbits_apply_in_order_and_collect_refusals() {
+    // Two queued deltas apply in admission order (the last one leaves the camera)
+    // and the queue is emptied. A real refusal is returned, never swallowed, and
+    // does not stop the remaining deltas.
+    let mut queue = VecDeque::from([
+        OrbitDelta {
+            yaw: 0.1,
+            pitch: 0.0,
+        },
+        OrbitDelta {
+            yaw: 0.2,
+            pitch: 0.0,
+        },
+    ]);
+    let mut applied = Vec::new();
+    let refusals = drain_orbits(&mut queue, |delta| {
+        applied.push(delta);
+        Ok(())
+    });
+    assert!(refusals.is_empty(), "{refusals:?}");
+    assert_eq!(
+        applied,
+        vec![
+            OrbitDelta {
+                yaw: 0.1,
+                pitch: 0.0
+            },
+            OrbitDelta {
+                yaw: 0.2,
+                pitch: 0.0
+            }
+        ],
+        "admission order is preserved"
+    );
+    assert!(queue.is_empty(), "everything queued was drained");
+
+    let mut queue = VecDeque::from([
+        OrbitDelta {
+            yaw: 1.0,
+            pitch: 0.0,
+        },
+        OrbitDelta {
+            yaw: 2.0,
+            pitch: 0.0,
+        },
+    ]);
+    let mut applied = Vec::new();
+    let refusals = drain_orbits(&mut queue, |delta| {
+        applied.push(delta);
+        if delta.yaw == 1.0 {
+            Err("orbit.refused: test refusal".into())
+        } else {
+            Ok(())
+        }
+    });
+    assert_eq!(applied.len(), 2, "a refusal does not skip the rest");
+    assert_eq!(refusals, vec!["orbit.refused: test refusal".to_string()]);
+    assert!(queue.is_empty());
+}

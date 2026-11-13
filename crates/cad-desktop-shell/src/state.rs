@@ -35,9 +35,22 @@ use cad_ui_core::protocol::InputKind;
 use cad_ui_core::session::events::EventBus;
 use cad_ui_core::session::{
     CadFonts, CadLayerWrite, CadLayers, CadRecentFiles, CadSettingKey, CadSettingValue,
-    CadSettings, CadStatus, QueueFamily, QueueReads, QueueSink,
+    CadSettings, CadStatus, OrbitDelta, QueueFamily, QueueReads, QueueSink,
 };
 use cad_ui_core::shell::{modal_gate_open, ShellState};
+
+/// Re-exported so a host's tick can name the sample it drains from
+/// [`Shared::cad_pinches`] without depending on the wire module's internals.
+pub use cad_ui_core::session::NativePinch;
+
+/// The bound on [`Shared::cad_pinches`].
+///
+/// A trackpad pinch sample is small and the owner tick drains the queue every
+/// frame, so overflow means the tick is not running (GPU init, a paused window,
+/// a carrier with no native session). The producer then keeps the **newest**
+/// samples and reports the drop once, instead of growing without bound or
+/// silently merging samples (their incremental `scale` cannot be summed).
+pub const NATIVE_PINCH_CAP: usize = 64;
 
 /// The app-side render telemetry, exposed to the command layer through a narrow
 /// object-safe seam.
@@ -160,6 +173,20 @@ pub struct Shared {
     /// Bounded main-thread queue of typed standard-view requests: admitted by
     /// `cad_standard_view` and drained into `CadSession::standard_view`.
     pub cad_standard_views: VecDeque<StandardView>,
+    /// Bounded main-thread queue of typed orbit deltas (the ViewCube's
+    /// `cad_orbit { yaw, pitch }`): admitted by `cad_orbit` and drained into
+    /// `CadSession::orbit`.
+    pub cad_orbits: VecDeque<OrbitDelta>,
+    /// Bounded main-thread queue of **native** trackpad pinch samples
+    /// ([`NativePinch`]): pushed by the carrier's own toolkit gesture (Linux:
+    /// `gtk_bridge::pinch`) and drained by the owner tick, which converts them
+    /// with that tick's own CSS↔toolkit mapping and appends them to the same
+    /// ordered input batch as the DOM inputs.
+    ///
+    /// Bounded at [`NATIVE_PINCH_CAP`]; the producer drops the oldest sample and
+    /// logs once when the queue overflows (a sample is never merged into
+    /// another — the incremental `scale` semantics do not survive summing).
+    pub cad_pinches: VecDeque<NativePinch>,
     /// Bounded main-thread queue of typed settings writes: admitted by
     /// `cad_set_setting` and drained into `CadSession::apply_setting`.
     pub cad_setting_writes: VecDeque<(CadSettingKey, CadSettingValue)>,
@@ -272,6 +299,8 @@ impl Shared {
             cad_selected_texts: Vec::new(),
             cad_selected_properties: Vec::new(),
             cad_standard_views: VecDeque::new(),
+            cad_orbits: VecDeque::new(),
+            cad_pinches: VecDeque::new(),
             cad_setting_writes: VecDeque::new(),
             cad_settings: None,
             cad_layer_writes: VecDeque::new(),
@@ -294,6 +323,20 @@ impl Shared {
         }
     }
 
+    /// Queue one native (toolkit) pinch sample and report whether the oldest was
+    /// dropped to make room.
+    ///
+    /// The caller logs the drop once per distinct state; this method stays a pure
+    /// queue operation so it can be unit-tested without a toolkit.
+    pub fn push_native_pinch(&mut self, pinch: NativePinch) -> bool {
+        let dropped = self.cad_pinches.len() >= NATIVE_PINCH_CAP;
+        if dropped {
+            self.cad_pinches.pop_front();
+        }
+        self.cad_pinches.push_back(pinch);
+        dropped
+    }
+
     /// The **queue sink** over this host's own bounded queues.
     ///
     /// The IPC commands hand this to [`cad_ui_core::session::wire`], which applies
@@ -314,6 +357,7 @@ impl Shared {
                 selected_texts: &mut self.cad_selected_texts,
                 selected_properties: &mut self.cad_selected_properties,
                 standard_views: &mut self.cad_standard_views,
+                orbits: &mut self.cad_orbits,
                 setting_writes: &mut self.cad_setting_writes,
                 layer_writes: &mut self.cad_layer_writes,
                 api_calls: &mut self.cad_api_calls,
@@ -413,4 +457,64 @@ pub fn lock(shared: &Arc<Mutex<Shared>>) -> MutexGuard<'_, Shared> {
     shared
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod pinch_queue_tests {
+    use super::*;
+    use cad_ui_core::launch::LaunchOptions;
+
+    fn shared() -> Shared {
+        Shared::new(LaunchOptions::default())
+    }
+
+    #[test]
+    fn the_pinch_queue_starts_empty_and_keeps_every_sample_in_order() {
+        let mut shared = shared();
+        assert!(shared.cad_pinches.is_empty());
+        for scale in [1.05, 1.10, 0.95] {
+            assert!(
+                !shared.push_native_pinch(NativePinch {
+                    x: 10.0,
+                    y: 20.0,
+                    scale,
+                }),
+                "no drop while the queue is under its bound"
+            );
+        }
+        let scales: Vec<f64> = shared.cad_pinches.iter().map(|pinch| pinch.scale).collect();
+        assert_eq!(scales, vec![1.05, 1.10, 0.95], "FIFO, never reordered");
+    }
+
+    #[test]
+    fn the_pinch_queue_drops_the_oldest_sample_and_reports_it() {
+        let mut shared = shared();
+        for index in 0..NATIVE_PINCH_CAP {
+            assert!(!shared.push_native_pinch(NativePinch {
+                x: index as f64,
+                y: 0.0,
+                scale: 1.0,
+            }));
+        }
+        assert_eq!(shared.cad_pinches.len(), NATIVE_PINCH_CAP);
+        assert!(
+            shared.push_native_pinch(NativePinch {
+                x: -1.0,
+                y: 0.0,
+                scale: 1.0,
+            }),
+            "the producer is told the oldest sample was dropped"
+        );
+        assert_eq!(shared.cad_pinches.len(), NATIVE_PINCH_CAP, "still bounded");
+        assert_eq!(
+            shared.cad_pinches.front().map(|pinch| pinch.x),
+            Some(1.0),
+            "the oldest sample left, the newest stayed"
+        );
+        assert_eq!(
+            shared.cad_pinches.back().map(|pinch| pinch.x),
+            Some(-1.0),
+            "the newest sample is the one just pushed"
+        );
+    }
 }

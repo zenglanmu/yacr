@@ -732,6 +732,21 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   环境 0.25 + 漫反射 0.75，无高光/阴影/环境光）。**纯头灯在等轴测下会退化**：三面相对视线对称
   ⇒ 实测三面同为 `215`；偏移后等轴测为 **204 / 189 / 238**，斜视为三档可辨。
   边界：仍是**显示约定**而非物理光照，两个面在特定方向仍可能接近，反照率/曝光不可分离。
+- **轨道 / 标准视图的载体能力（2026-11-13）**：ViewCube 的轨道请求经专用 typed IPC
+  **`cad_orbit { yaw, pitch }`**（弧度、两者必须有限）投递，与 `cad_standard_view` 同一门禁顺序
+  （模态弹窗 → CAD 模式/probe → 有界队列）、同一 `{accepted:true}` 回执语义（桌面 = 已入队，
+  `dom-canvas` = 已内联应用），走真实 `CommandId::Orbit` + `CommandPayload::Orbit`。
+  载体能力由 `cad_status.hostProfile.orbit` 声明（三态，与 `standardViews` 同形）：
+  `null` = 未声明（历史允许），`false` = 已声明的**不可用**。
+
+  | 载体 | `cad_standard_view` | `cad_orbit` | `hostProfile.orbit` | 拒绝 |
+  |---|---|---|---|---|
+  | `native-below`（Wayland / Windows / macOS / Android） | 支持 | **支持**（仅 3D；2D 是宿主真实拒绝 `Orbit is only defined in the three-dimensional view`） | `null`（未声明 = 历史允许） | 非有限角：`orbit.angles_not_finite: cad_orbit needs finite yaw and pitch`；队列满：`CAD orbit queue is full`；模态：`popup.modal_open`；probe：`CAD is disabled in probe mode` |
+  | `dom-canvas`（X11/XWayland / Web） | 声明 `standardViews: []`（前端禁用七键） | **声明不可用**：`orbit: false`，adapter/front-end 按名拒绝；wasm 会话是 2D-only，若请求到达会话亦为同一真实拒绝 | `false` | 同上（会话侧真实拒绝；载体侧前端显式禁用） |
+
+  **证据边界**：只有编译 + 契约测试（`cad-ui-core` 的 admission/wire/`CadSession::orbit` 测试、
+  `app-web` 双 sink 等价矩阵）。轨道**手感**、ViewCube 交互、真机输入、GPU/像素、性能一律
+  **NOT VERIFIED**；Windows/macOS/Android 只有编译门禁（未构建的平台写 NOT RUN），不得写成已验收。
 - 直接网格（Mesh/3DFACE）：数据、法向、深度、绘制顺序与透明通道已实现；透明合成有
   软件 Vulkan（lavapipe）无头测试。真实 GPU 行为未验收。
 - 底图透明度：importer 读取 acadrust `Transparency`（`ByLayer`/`ByObject`/`ByBlock`）
@@ -742,6 +757,41 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 - ACIS 曲面（显示）：**已接线**——导入期离散为中性网格（容差 = 包围盒对角线的 0.1 %），
   恒 `Partial` 并声明「离散近似不随缩放细化 + 源 ACIS 不保留」；超出子集/原始 SAT/SAB 被拒仍为 `Opaque`
   并带内核具名码。详见「ACIS 实体显示状态」。完整 ACIS/样条面支持仍超出范围。
+
+### 触控板缩放（pinch / trackpad zoom，2026-11-13）
+
+**契约（跨载体，共享层先行）**：两指 pinch 是 **CAD 缩放**，**永不缩放页面**；某载体观察不到该手势
+时必须显式说明，绝不静默缩放页面。共享入口是 `cad-ui-core` 的 `NativePinch` / `PinchViewport` /
+`native_pinch_input`（`crates/cad-ui-core/src/session/input.rs`）：载体上报**自身坐标**，owner tick 用自己的
+布局度量（CSS 矩形原点 + `devicePixelRatio / parent_scale`）换算成 canvas-local CSS px，再交给**同一个**
+`CadSession` pinch 语义（`InputKind::Pinch` 的增量 `scale`）。原生样本经
+`cad-desktop-shell` 的有界队列（`Shared::cad_pinches`，上限 `NATIVE_PINCH_CAP`）由 tick 取出，并**追加在
+该 tick 的 DOM 输入之后**（一次 `handle_inputs` 发布）。`sequence = 0`：该路径不经 `InputTracker`。
+
+DOM 信号路线不需要上述原生队列：WebView2/Chromium 把触控板 pinch 合成为 `wheel` + `ctrlKey`，WKWebView/
+Safari 发 `gesturestart/gesturechange/gestureend`，两者由 `apps/desktop-ui/src/cad/input.ts` 归一成同一条
+`kind:'pinch'`（位置为手势中点、`dx/dy = 0`、`scale` 为**增量**乘数），经唯一的 `probe_input` 漏斗送到
+**已持有** `cad-db` 的会话（`native-below` 的 native 会话或 `dom-canvas` 的 wasm 会话）。Linux/WebKitGTK
+没有 DOM 事件，才走上面的 UI 进程取样路线。
+
+| 载体 | 手势来源 | 页面是否缩放 | pinch → CAD | 证据 |
+|---|---|---|---|---|
+| Linux 原生 Wayland（`native-below`） | WebKitGTK 的 pinch 在 **UI 进程**（`WebKitWebViewBase` 的 `GtkGestureZoom`），**没有 DOM 事件**，`preventDefault()` 也拦不住 | **否**：`gtk_bridge::pinch` 在 webview 创建时接管——2.52.6 把私有 `wk-view-zoom-gesture`（`GtkGestureZoom`）的 **propagation phase 置为 `NONE`**，再在 widget 的 **`event` 信号**上拦截 `GdkEventTouchpadPinch` 并返回 `Stop`（事件到不了 WebKit 的 vfunc，`pageScaleFactor` 不变；对象/数据不销毁不释放）；>= 2.54 走公开 `WebKitWebView:magnification`（钉在 `1.0`） | **是**：`event` 信号取 `scale`/位置 → `NativePinch` → tick → 与 DOM 两接触 pinch 同一会话语义（锚点必须在 partition 内，否则丢弃）。触屏两指是 `GDK_TOUCH_*` 序列、不是 touchpad 事件，仍归 DOM 两接触路径 | 编译 + 契约（`cad-ui-core` 换算/拒绝测试、`pinch_plan` 纯测试、intake 越界丢弃测试）+ **合成 GDK `TOUCHPAD_PINCH` 实测**（真实 Wayland 会话：`visualViewport.scale` 保持 `1.0`，`cad_status.camera.scale` 按累计 `1.25×1.6≈2.0` 变化）；**真实触控板 NOT VERIFIED** |
+| Linux X11/XWayland（`dom-canvas`） | 同上（仍是 WebKitGTK UI 进程手势） | **否**（同样接管/中和） | **否**：该载体没有原生 CAD 会话（铁律 8，`surface_plan().per_frame_tick == false`），所以**不装**原生取样队列；`cad_status` 之前已有的 DOM 两接触路径只覆盖触屏。pinch 因此**不产生 CAD 缩放**，日志明说 | 编译 + 契约；**运行时 NOT VERIFIED** |
+| Windows（`native-below`） | WebView2（Chromium）：OS 把精确式触控板 pinch 翻译为 `WM_MOUSEWHEEL` + `MK_CONTROL`，Chromium 在渲染器侧派发**可取消**的 `wheel`（`ctrlKey === true`、`deltaMode = 0`、delta 为 **120 的整数量化倍数**，不与 log(scale) 成正比） | **否**：wry 已 `SetIsPinchZoomEnabled(false)`；`IsPinchZoomEnabled`/`IsZoomControlEnabled` 只拦页面缩放**应用**，wheel 仍先到渲染器，所以 `apps/desktop-ui/src/defaults.ts` 无条件取消 `ctrl`+wheel 的页面缩放 | 共享 DOM 路线：`ctrl`+wheel（WebView2/Chromium）或 `gesturechange`（WKWebView/Safari）→ `InputKind::Pinch`（与 Linux 原生手势同一会话语义） | 编译 + 契约测试（`test/input.test.ts` / `test/dom-pinch.test.ts`）；真机手势 NOT VERIFIED |
+| macOS（`native-below`） | WKWebView：`gesturestart/gesturechange/gestureend` 仍会触发且**可取消**（`allowsMagnification` 缺省 `false`、wry 未设置 ⇒ 页面永不缩放）；Safari 15+ 对同一次 pinch **也发 `ctrl`+wheel** | **否**：`allowsMagnification` 缺省 `false`（未显式钉住，缺口即此处声明），`apps/desktop-ui/src/defaults.ts` 取消三个 gesture 事件与 `ctrl`+wheel | 共享 DOM 路线：`ctrl`+wheel（WebView2/Chromium）或 `gesturechange`（WKWebView/Safari）→ `InputKind::Pinch`（与 Linux 原生手势同一会话语义）。两种信号同时到达时**手势优先**：共享漏斗在手势进行中与 `gestureend` 后 500 ms（`GESTURE_WHEEL_GUARD_MS`）内丢弃该 `ctrl`+wheel，一次 pinch 只缩放一次 | 编译 + 契约测试（`test/input.test.ts` / `test/dom-pinch.test.ts`）；真机手势 NOT VERIFIED |
+| Android（`native-below`） | Android WebView | **否**：`MainActivity.disableWebViewPageZoom`（`setSupportZoom(false)` + `setBuiltInZoomControls(false)` + `setDisplayZoomControls(false)`），`scripts/test-android-host.py` 钉住这三条 | **是（DOM 路线）**：WebView 把两接触 pinch 作为 DOM 事件交给页面，`apps/desktop-ui/src/cad/input.ts` 的 `pinch` 送到**原生**会话 | Kotlin 静态契约 + 编译；**设备 NOT VERIFIED** |
+| Web / Chromium / Safari | DOM：`ctrl`+wheel（Chromium，以及 Safari 15+/macOS）或 `gesturestart/change/end`（Safari/WKWebView；iOS 只有 gesture） | **否**：`apps/desktop-ui/src/defaults.ts` 取消 `ctrl`+wheel 与三个 gesture 事件；`.native-input` 另加 `touch-action: none` | 共享 DOM 路线：`ctrl`+wheel（WebView2/Chromium）或 `gesturechange`（WKWebView/Safari）→ `InputKind::Pinch`（与 Linux 原生手势同一会话语义；`dom-canvas` 时由 wasm 会话消费）。Safari 15+ 两种信号同时到达时按 `GESTURE_WHEEL_GUARD_MS = 500` 去重（手势期间 + `gestureend` 后 500 ms 丢弃 `ctrl`+wheel） | 纯函数 + 绑定契约（`test/defaults.test.ts` / `test/input.test.ts` / `test/dom-pinch.test.ts`）；浏览器运行时 NOT VERIFIED |
+
+**边界一句话**：本表全部是**实现/契约**级结论——两指 pinch 真的缩放 CAD 且页面不缩放、Android 设备、
+Windows/macOS 手势、任何像素/性能结论都 **NOT VERIFIED**。人工验收路径见 `AGENTS.md`「运行与证据」：
+`bash scripts/run-react-linux.sh --open <dwg>` → 在图纸上两指 pinch → 预期**页面不缩放**、CAD 缩放，
+且启动日志出现一行 `[probe] pinch: …`（`webkit-gesture-neutralised` / `magnification-pinned` /
+`gesture_unavailable`），它说明**实际**装上了哪条路线。
+
+Windows/macOS 的人工验收（本轮 **NOT VERIFIED**，无真机）：在真实宿主里打开一张 DWG，把指针放在图纸上
+两指 pinch，预期**页面不缩放**（不出现缩放指示、`visualViewport.scale` 保持 `1.0`），且 **CAD 缩放**
+（`cad_status.camera.scale` 变化、手势结束后不继续漂移）。
 
 ## 平台
 

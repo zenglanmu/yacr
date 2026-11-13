@@ -16,8 +16,9 @@
 use super::super::wire::{self, AdmissionTarget, CadCommandAck, Channel, QueueFamily, QueueReads};
 use super::super::{
     CadApiOutcome, CadApiSnapshot, CadApiSubmission, CadLayerWrite, CadLayers, CadSettingKey,
-    CadSettingValue, API_SUBMIT_DUPLICATE, API_SUBMIT_INVALID_REQUEST, API_SUBMIT_QUEUE_FULL,
-    CAD_API_SUBMIT_CAP, CAD_LAYER_WRITE_CAP, CAD_SELECTED_TEXT_CAP, CAD_TOOL_PARAMETER_CAP,
+    CadSettingValue, OrbitDelta, API_SUBMIT_DUPLICATE, API_SUBMIT_INVALID_REQUEST,
+    API_SUBMIT_QUEUE_FULL, CAD_API_SUBMIT_CAP, CAD_LAYER_WRITE_CAP, CAD_ORBIT_CAP,
+    CAD_SELECTED_TEXT_CAP, CAD_TOOL_PARAMETER_CAP,
 };
 use cad_app::{StandardView, ToolValue};
 
@@ -28,6 +29,7 @@ struct Queues {
     selected_texts: Vec<String>,
     selected_properties: Vec<(String, String)>,
     standard_views: std::collections::VecDeque<StandardView>,
+    orbits: std::collections::VecDeque<OrbitDelta>,
     setting_writes: std::collections::VecDeque<(CadSettingKey, CadSettingValue)>,
     layer_writes: std::collections::VecDeque<CadLayerWrite>,
     api_calls: std::collections::VecDeque<crate::session::CadApiSubmission>,
@@ -45,6 +47,7 @@ impl Queues {
             selected_texts: Vec::new(),
             selected_properties: Vec::new(),
             standard_views: std::collections::VecDeque::new(),
+            orbits: std::collections::VecDeque::new(),
             setting_writes: std::collections::VecDeque::new(),
             layer_writes: std::collections::VecDeque::new(),
             api_calls: std::collections::VecDeque::new(),
@@ -66,6 +69,7 @@ impl Queues {
                 selected_texts: &mut self.selected_texts,
                 selected_properties: &mut self.selected_properties,
                 standard_views: &mut self.standard_views,
+                orbits: &mut self.orbits,
                 setting_writes: &mut self.setting_writes,
                 layer_writes: &mut self.layer_writes,
                 api_calls: &mut self.api_calls,
@@ -348,4 +352,118 @@ fn a_host_without_popups_refuses_both_popup_commands() {
         wire::close_popup(&mut popups).unwrap_err(),
         wire::POPUP_HOST_UNAVAILABLE
     );
+}
+
+/// `cad_orbit` is one shared row, registered exactly once, right after the
+/// standard views — and the four generated name sets stay in sync.
+#[test]
+fn cad_orbit_is_registered_once_in_the_shared_set() {
+    let names = crate::session::WIRE_COMMAND_NAMES;
+    assert_eq!(
+        names.iter().filter(|name| **name == "cad_orbit").count(),
+        1,
+        "cad_orbit must be registered exactly once"
+    );
+    let position = names
+        .iter()
+        .position(|name| *name == "cad_orbit")
+        .expect("cad_orbit is registered");
+    assert_eq!(
+        names[position - 1],
+        "cad_standard_view",
+        "the orbit row sits immediately after the standard-view row"
+    );
+
+    assert!(crate::session::SHARED_WIRE_COMMAND_NAMES.contains(&"cad_orbit"));
+    assert!(!crate::session::TAURI_ONLY_WIRE_COMMAND_NAMES.contains(&"cad_orbit"));
+    assert!(!crate::session::WASM_EXPORT_WIRE_COMMAND_NAMES.contains(&"cad_orbit"));
+
+    // The generated sets stay in sync: no duplicates anywhere, every shared /
+    // tauri-only / wasm-export name is in the full list, and the shared + tauri-only
+    // rows account for every registered name exactly once.
+    let unique: std::collections::BTreeSet<&str> = names.iter().copied().collect();
+    assert_eq!(unique.len(), names.len(), "a row is registered twice");
+    for set in [
+        crate::session::SHARED_WIRE_COMMAND_NAMES,
+        crate::session::TAURI_ONLY_WIRE_COMMAND_NAMES,
+    ] {
+        for name in set {
+            assert!(unique.contains(name), "{name} is not in the full registry");
+        }
+    }
+    assert_eq!(
+        crate::session::SHARED_WIRE_COMMAND_NAMES.len()
+            + crate::session::TAURI_ONLY_WIRE_COMMAND_NAMES.len(),
+        names.len(),
+        "every row belongs to exactly one transport group"
+    );
+}
+
+/// The orbit channel's gate order and bound, pinned against the queue sink (the one
+/// place a full queue can be reached).
+#[test]
+fn the_orbit_channel_is_gated_bounded_and_carries_the_delta_verbatim() {
+    let mut queues = Queues::new(true, false);
+    {
+        let mut sink = queues.sink();
+        wire::orbit(&mut sink, 0.25, -0.5).expect("admitted");
+        assert_eq!(sink.pending(Channel::Orbit), 1);
+        // The finite check runs before the gate, like the standard view's name parse.
+        assert_eq!(
+            wire::orbit(&mut sink, f64::NAN, 0.0).unwrap_err(),
+            wire::ORBIT_ANGLES_NOT_FINITE
+        );
+        assert_eq!(
+            wire::orbit(&mut sink, 0.0, f64::INFINITY).unwrap_err(),
+            wire::ORBIT_ANGLES_NOT_FINITE
+        );
+        // A refused request never reaches the queue.
+        assert_eq!(sink.pending(Channel::Orbit), 1);
+        while sink.pending(Channel::Orbit) < CAD_ORBIT_CAP {
+            wire::orbit(&mut sink, 0.0, 0.0).expect("within capacity");
+        }
+        assert_eq!(
+            wire::orbit(&mut sink, 0.0, 0.0).expect_err("the queue is full"),
+            "CAD orbit queue is full"
+        );
+    }
+    assert_eq!(queues.orbits.len(), CAD_ORBIT_CAP);
+    assert_eq!(
+        queues.orbits.front(),
+        Some(&OrbitDelta {
+            yaw: 0.25,
+            pitch: -0.5
+        }),
+        "the delta is carried verbatim, no clamp and no normalization"
+    );
+
+    // The modal popup gate wins over probe mode, and over a full queue.
+    let mut modal = Queues::new(false, true);
+    let mut sink = modal.sink();
+    assert_eq!(
+        wire::orbit(&mut sink, 0.1, 0.1).unwrap_err(),
+        "popup.modal_open"
+    );
+    let mut full_modal = Queues::new(true, true);
+    for _ in 0..CAD_ORBIT_CAP {
+        full_modal.orbits.push_back(OrbitDelta {
+            yaw: 0.0,
+            pitch: 0.0,
+        });
+    }
+    let mut sink = full_modal.sink();
+    assert_eq!(
+        wire::orbit(&mut sink, 0.1, 0.1).unwrap_err(),
+        "popup.modal_open",
+        "a full queue behind an open modal reports the modal reason"
+    );
+
+    // With no popup, probe mode is the refusal.
+    let mut probe = Queues::new(false, false);
+    let mut sink = probe.sink();
+    assert_eq!(
+        wire::orbit(&mut sink, 0.1, 0.1).unwrap_err(),
+        "CAD is disabled in probe mode"
+    );
+    assert!(probe.orbits.is_empty(), "a gated refusal queues nothing");
 }

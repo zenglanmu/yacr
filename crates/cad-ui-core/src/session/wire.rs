@@ -54,9 +54,9 @@ use crate::popup::PopupAck;
 use crate::shell::check_command_with_aliases;
 
 use super::admission::{
-    check_layer_write, check_selected_property, check_selected_text, check_setting,
+    check_layer_write, check_orbit, check_selected_property, check_selected_text, check_setting,
     check_standard_view, check_tool_parameter, check_tool_text, parse_layer_property_write,
-    parse_property_write, parse_standard_view, parse_tool_parameter,
+    parse_orbit, parse_property_write, parse_standard_view, parse_tool_parameter,
 };
 use super::api::CadApiStatus;
 use super::api_call::{
@@ -122,6 +122,27 @@ pub struct CadCommandAlias {
     pub command: String,
 }
 
+/// The stable refusal of a `cad_orbit` request whose angles are not finite.
+///
+/// Shared by the wire parser ([`super::admission::parse_orbit`]) and every host, so
+/// a NaN/infinite delta is refused by name instead of corrupting the camera.
+pub const ORBIT_ANGLES_NOT_FINITE: &str =
+    "orbit.angles_not_finite: cad_orbit needs finite yaw and pitch";
+
+/// One typed orbit request: yaw/pitch deltas in radians, both finite.
+///
+/// Reached from the dedicated `cad_orbit` wire command (the WebView ViewCube), never
+/// parsed out of the name-only `cad_command` funnel. It is carried verbatim — no
+/// clamp and no default — because the application's orbit is a relative gesture and
+/// a clamped delta would silently change the requested camera.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OrbitDelta {
+    /// Rotation about world +Z, radians.
+    pub yaw: f64,
+    /// Rotation about the view right axis, radians.
+    pub pitch: f64,
+}
+
 /// The bounded channel an admission is about (used for the queue bound only).
 ///
 /// One variant per queue family member; a host that keeps no queue answers `0`
@@ -140,6 +161,8 @@ pub enum Channel {
     SelectedProperty,
     /// Typed standard views.
     StandardView,
+    /// Typed orbit deltas (the ViewCube's yaw/pitch request).
+    Orbit,
     /// Typed settings writes.
     Setting,
     /// Typed layer writes (visibility, restore, active and the table writes).
@@ -203,6 +226,9 @@ pub trait AdmissionTarget {
 
     /// Store or apply one typed standard view.
     fn standard_view(&mut self, view: StandardView) -> Result<(), String>;
+
+    /// Store or apply one typed orbit delta.
+    fn orbit(&mut self, delta: OrbitDelta) -> Result<(), String>;
 
     /// Store or apply one typed setting.
     fn setting(&mut self, key: CadSettingKey, value: CadSettingValue) -> Result<(), String>;
@@ -321,6 +347,8 @@ pub struct QueueFamily<'a> {
     pub selected_properties: &'a mut Vec<(String, String)>,
     /// `cad_standard_views`.
     pub standard_views: &'a mut VecDeque<StandardView>,
+    /// `cad_orbits`.
+    pub orbits: &'a mut VecDeque<OrbitDelta>,
     /// `cad_setting_writes`.
     pub setting_writes: &'a mut VecDeque<(CadSettingKey, CadSettingValue)>,
     /// `cad_layer_writes`.
@@ -382,6 +410,7 @@ impl AdmissionTarget for QueueSink<'_> {
             Channel::SelectedText => self.queues.selected_texts.len(),
             Channel::SelectedProperty => self.queues.selected_properties.len(),
             Channel::StandardView => self.queues.standard_views.len(),
+            Channel::Orbit => self.queues.orbits.len(),
             Channel::Setting => self.queues.setting_writes.len(),
             Channel::LayerWrite => self.queues.layer_writes.len(),
         }
@@ -418,6 +447,11 @@ impl AdmissionTarget for QueueSink<'_> {
 
     fn standard_view(&mut self, view: StandardView) -> Result<(), String> {
         self.queues.standard_views.push_back(view);
+        Ok(())
+    }
+
+    fn orbit(&mut self, delta: OrbitDelta) -> Result<(), String> {
+        self.queues.orbits.push_back(delta);
         Ok(())
     }
 
@@ -679,6 +713,29 @@ pub fn standard_view(
         target.pending(Channel::StandardView),
     )?;
     target.standard_view(view)?;
+    Ok(CadCommandAck::accepted())
+}
+
+/// `cad_orbit`: admit one typed orbit delta (the ViewCube's yaw/pitch request).
+///
+/// The angles travel as radians and must be finite ([`ORBIT_ANGLES_NOT_FINITE`]);
+/// that content check runs before the gate, exactly like the standard view's name
+/// parse. The gates are then the standard-view ones, in the same order: the modal
+/// popup gate, CAD mode (probe), then the orbit queue bound. Nothing is applied
+/// here: the desktop queues the delta for its owner tick, a synchronous sink applies
+/// it inline, and the 2D refusal is the session's own error.
+pub fn orbit(
+    target: &mut dyn AdmissionTarget,
+    yaw: f64,
+    pitch: f64,
+) -> Result<CadCommandAck, String> {
+    let delta = parse_orbit(yaw, pitch)?;
+    check_orbit(
+        target.cad_mode(),
+        target.modal_open(),
+        target.pending(Channel::Orbit),
+    )?;
+    target.orbit(delta)?;
     Ok(CadCommandAck::accepted())
 }
 

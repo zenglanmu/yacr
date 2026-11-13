@@ -2,7 +2,7 @@
 //!
 //! Every CAD mutation that is not a bare command name has its own typed channel
 //! (`cad_set_tool_parameter`, `cad_set_tool_text`, `cad_set_selected_text`,
-//! `cad_set_selected_property`, `cad_standard_view`, `cad_set_setting`,
+//! `cad_set_selected_property`, `cad_standard_view`, `cad_orbit`, `cad_set_setting`,
 //! `cad_set_layer_visible` / `cad_restore_layers` / `cad_set_active_layer` /
 //! `cad_set_layer_property`). Those channels share one discipline, which lives
 //! here so every host applies it identically:
@@ -32,6 +32,7 @@ use std::collections::VecDeque;
 
 use cad_app::{StandardView, ToolParameter, ToolValue};
 
+use crate::session::wire::{OrbitDelta, ORBIT_ANGLES_NOT_FINITE};
 use crate::session::{CadLayerWrite, CadSettingKey, CadSettingValue};
 use crate::shell::{CAD_COMMAND_CAP, POPUP_MODAL_OPEN};
 
@@ -367,6 +368,79 @@ pub fn drain_standard_views(
     let mut refusals = Vec::new();
     while let Some(view) = queue.pop_front() {
         if let Err(error) = apply(view) {
+            refusals.push(error);
+        }
+    }
+    refusals
+}
+
+/// Bounded capacity of the dedicated orbit queue.
+///
+/// It reuses the standard-view queue's capacity (itself the CAD command queue's)
+/// so every admission shares one bound.
+pub const CAD_ORBIT_CAP: usize = CAD_STANDARD_VIEW_CAP;
+
+/// Parse one `cad_orbit` request into the typed delta.
+///
+/// The wire carries **no string form**: `{yaw, pitch}` arrive as JSON numbers in
+/// radians and are carried verbatim (no clamp, no normalization to a neighbouring
+/// angle). The only content rule is that both angles must be **finite**; a NaN or
+/// an infinity is an explicit refusal with the stable `orbit.angles_not_finite`
+/// code, because a non-finite delta would corrupt the camera rather than orbit it.
+pub fn parse_orbit(yaw: f64, pitch: f64) -> Result<OrbitDelta, String> {
+    if !yaw.is_finite() || !pitch.is_finite() {
+        return Err(ORBIT_ANGLES_NOT_FINITE.to_string());
+    }
+    Ok(OrbitDelta { yaw, pitch })
+}
+
+/// The gate of the orbit channel: the modal popup gate, CAD mode, then the bound
+/// (the same order as [`check_standard_view`]).
+pub(super) fn check_orbit(cad_mode: bool, modal_open: bool, pending: usize) -> Result<(), String> {
+    if modal_open {
+        return Err(POPUP_MODAL_OPEN.into());
+    }
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if pending >= CAD_ORBIT_CAP {
+        return Err("CAD orbit queue is full".into());
+    }
+    Ok(())
+}
+
+/// Admit one typed orbit delta into the bounded main-thread queue.
+///
+/// Modelled exactly on [`admit_standard_view`]: the modal popup gate first, then a
+/// disabled CAD session (probe mode), then the bound. Nothing is applied here — the
+/// owner tick drains the queue through `CadSession::orbit`, so the 3D/2D decision
+/// and any real refusal stay on the main thread and surface through
+/// `cad_status.error`.
+pub fn admit_orbit(
+    queue: &mut VecDeque<OrbitDelta>,
+    cad_mode: bool,
+    modal_open: bool,
+    delta: OrbitDelta,
+) -> Result<(), String> {
+    check_orbit(cad_mode, modal_open, queue.len())?;
+    queue.push_back(delta);
+    Ok(())
+}
+
+/// Drain the orbit queue in admission order, applying each delta.
+///
+/// `apply` is the host session funnel (`CadSession::orbit`), so the real camera
+/// transition — and any real refusal (a 2D view has no orbit) — happens on the
+/// owner thread. Refusals are returned so the caller can log them; the session has
+/// already recorded them for `cad_status.error`, so nothing is swallowed and
+/// nothing is invented.
+pub fn drain_orbits(
+    queue: &mut VecDeque<OrbitDelta>,
+    mut apply: impl FnMut(OrbitDelta) -> Result<(), String>,
+) -> Vec<String> {
+    let mut refusals = Vec::new();
+    while let Some(delta) = queue.pop_front() {
+        if let Err(error) = apply(delta) {
             refusals.push(error);
         }
     }

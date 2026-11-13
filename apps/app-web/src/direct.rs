@@ -191,6 +191,11 @@ impl AdmissionTarget for DirectSink<'_> {
         self.applied(outcome)
     }
 
+    fn orbit(&mut self, delta: wire::OrbitDelta) -> Result<(), String> {
+        let outcome = self.session.orbit(delta.yaw, delta.pitch);
+        self.applied(outcome)
+    }
+
     fn setting(&mut self, key: CadSettingKey, value: CadSettingValue) -> Result<(), String> {
         let outcome = self.session.apply_setting(key, value).map(|_settings| ());
         self.applied(outcome)

@@ -336,6 +336,102 @@ fn pinch_request(input: &ProbeInput, revision: u64) -> Result<InteractionRequest
     })
 }
 
+/// One **native** (carrier-observed) trackpad pinch sample.
+///
+/// This is the carrier-agnostic intake for a pinch that never appears as a DOM
+/// event: a GTK `GtkGestureZoom` sample on Linux, a future toolkit pinch on
+/// another native carrier. It is deliberately **not** a [`ProbeInput`] yet —
+/// the carrier reports toolkit coordinates, and only the owner thread knows the
+/// CAD partition rect and the CSS↔toolkit ratio at that instant.
+///
+/// * `x`,`y` — the pinch anchor in **widget-local GTK logical px** (the widget
+///   that receives the gesture, i.e. the surface the DOM overlay covers).
+/// * `scale` — the **incremental** multiplier for this sample (`> 1.0` zooms
+///   in), the same convention as [`ProbeInput::scale`] for
+///   [`InputKind::Pinch`]. Samples are never merged or summed on this path.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NativePinch {
+    /// Anchor X in widget-local GTK logical px.
+    pub x: f64,
+    /// Anchor Y in widget-local GTK logical px.
+    pub y: f64,
+    /// Incremental zoom multiplier for this sample.
+    pub scale: f64,
+}
+
+/// The CAD partition's mapping from widget-local GTK logical px to CSS px.
+///
+/// `rect_x`/`rect_y` are the partition rect's origin in CSS px (the same rect
+/// the layout tracker accepted), and `ratio` is `devicePixelRatio /
+/// parent_scale` — the host's single CSS→GTK-logical ratio (see the Linux
+/// host's `css_to_gtk`). A carrier that cannot produce this mapping must refuse
+/// the sample rather than guess.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PinchViewport {
+    /// Partition rect origin X, in CSS px.
+    pub rect_x: f64,
+    /// Partition rect origin Y, in CSS px.
+    pub rect_y: f64,
+    /// CSS → widget-logical ratio (`devicePixelRatio / parent_scale`).
+    pub ratio: f64,
+}
+
+/// Refusal the native pinch intake returns when a coordinate is not finite.
+pub const NATIVE_PINCH_NOT_FINITE: &str =
+    "pinch.not_finite: native pinch needs finite x, y and scale";
+/// Refusal for a non-positive incremental scale.
+pub const NATIVE_PINCH_INVALID_SCALE: &str =
+    "pinch.invalid_scale: native pinch scale must be greater than zero";
+/// Refusal for a missing/degenerate CSS↔toolkit ratio.
+pub const NATIVE_PINCH_INVALID_RATIO: &str = "pinch.invalid_ratio";
+
+/// Convert one carrier-observed [`NativePinch`] into the session's wire input.
+///
+/// This is the single shared bridge between a toolkit pinch and the CAD pinch
+/// semantics: the anchor is mapped from widget-local GTK logical px to
+/// canvas-local CSS px with the caller's own metrics — `x_css = x / ratio -
+/// rect_x` (and the same for `y`) — and the sample keeps its incremental
+/// `scale`, so it ends in exactly the [`InteractionRequest::Pinch`] a DOM
+/// two-contact pinch produces.
+///
+/// `sequence` is `0`: this path never touches [`crate::InputTracker`] (only the
+/// wire admission path orders sequences), and [`CadSession::handle_inputs`]
+/// ignores the field — it admits and applies inputs in slice order. Native
+/// samples are appended after the tick's DOM inputs, so their relative order is
+/// the queue order.
+///
+/// Refusals are stable, named strings and **never** a clamp: a broken sample is
+/// surfaced, not silently coerced into a plausible one.
+pub fn native_pinch_input(
+    pinch: &NativePinch,
+    viewport: PinchViewport,
+) -> Result<ProbeInput, String> {
+    if !pinch.x.is_finite() || !pinch.y.is_finite() || !pinch.scale.is_finite() {
+        return Err(NATIVE_PINCH_NOT_FINITE.to_string());
+    }
+    if pinch.scale <= 0.0 {
+        return Err(NATIVE_PINCH_INVALID_SCALE.to_string());
+    }
+    if !viewport.ratio.is_finite() || viewport.ratio <= 0.0 {
+        return Err(NATIVE_PINCH_INVALID_RATIO.to_string());
+    }
+    Ok(ProbeInput {
+        sequence: 0,
+        kind: InputKind::Pinch,
+        x: Some((pinch.x / viewport.ratio - viewport.rect_x) as f32),
+        y: Some((pinch.y / viewport.ratio - viewport.rect_y) as f32),
+        dx: None,
+        dy: None,
+        scale: Some(pinch.scale as f32),
+        width: None,
+        height: None,
+        dpr: None,
+        button: None,
+        shift: None,
+        device: None,
+    })
+}
+
 /// Map one DOM input to a typed interaction request (the stateless mapping).
 ///
 /// `resize` is deliberately refused: the caller applies it through

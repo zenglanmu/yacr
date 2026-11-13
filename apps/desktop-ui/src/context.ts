@@ -6,6 +6,7 @@ import type { Dispatch, RefCallback, SetStateAction } from 'react';
 import type { CommandHistoryEntry } from './commands/command-history.ts';
 import type { CadPendingPrompt } from './cad/cad-status.ts';
 import type { ToolTextAnswerResult } from './tools/text.ts';
+import type { OrbitResult } from './cad/orbit.ts';
 import type { Locale, Translator } from './i18n.ts';
 import type { ChromeVisibility } from './chrome/visibility.ts';
 
@@ -41,9 +42,9 @@ export interface I18nValue {
  *
  * The state members are the app's own UI state; the action members are the one
  * funnel each kind of affordance uses (`runCommand` for the CAD protocol,
- * `runAction` for chrome-only actions, `runStandardView` for the payload-carrying
- * view IPC). Host-derived blocks stay [`ShellStatus`]/[`ShellRecord`]: `cad.mjs`
- * is their single declaration site.
+ * `runAction` for chrome-only actions, `runStandardView`/`runOrbit` for the
+ * payload-carrying view IPCs). Host-derived blocks stay
+ * [`ShellStatus`]/[`ShellRecord`]: `cad.mjs` is their single declaration site.
  */
 export interface ShellValue {
   /** The last `cad_status` answer, or `null` before the first one. */
@@ -166,6 +167,14 @@ export interface ShellValue {
   readonly runCommand: (command: string) => void;
   /** Run one payload-carrying standard view (`cad_standard_view`). */
   readonly runStandardView: (view: string) => void;
+  /**
+   * Run one payload-carrying orbit (`cad_orbit { yaw, pitch }`, radians).
+   *
+   * Admission only, exactly like a standard view: the host applies the rotation
+   * on its own tick and reports the eventual verdict in `cad_status`. A refusal
+   * of the request itself is reported through the error banner.
+   */
+  readonly runOrbit: (yaw: number, pitch: number) => Promise<OrbitResult>;
   /** Ask the host to cancel an in-flight import. */
   readonly cancelImport: () => void;
   /** The active numeric parameter's bounded pending delta, or `null`. */

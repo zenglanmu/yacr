@@ -51,7 +51,7 @@ use cad_host::{HostOptions, RequestClock};
 use cad_ui_core::session::wire::{self, CadCommandAck};
 use cad_ui_core::session::{
     CadApiOutcome, CadApiSubmission, CadLayerWrite, CadLayers, CadSession, CadSettingKey,
-    CadSettingValue, NoPopups, QueueFamily, QueueReads, QueueSink,
+    CadSettingValue, NoPopups, OrbitDelta, QueueFamily, QueueReads, QueueSink,
 };
 use cad_ui_core::shell::ShellState;
 use serde_json::Value;
@@ -123,6 +123,7 @@ struct Queues {
     selected_texts: Vec<String>,
     selected_properties: Vec<(String, String)>,
     standard_views: VecDeque<StandardView>,
+    orbits: VecDeque<OrbitDelta>,
     setting_writes: VecDeque<(CadSettingKey, CadSettingValue)>,
     layer_writes: VecDeque<CadLayerWrite>,
     /// `cad_api_submit` — the plugin-API mutation queue (`Shared::cad_api_calls`).
@@ -142,6 +143,7 @@ impl Queues {
             selected_texts: Vec::new(),
             selected_properties: Vec::new(),
             standard_views: VecDeque::new(),
+            orbits: VecDeque::new(),
             setting_writes: VecDeque::new(),
             layer_writes: VecDeque::new(),
             api_calls: VecDeque::new(),
@@ -163,6 +165,7 @@ impl Queues {
                 selected_texts: &mut self.selected_texts,
                 selected_properties: &mut self.selected_properties,
                 standard_views: &mut self.standard_views,
+                orbits: &mut self.orbits,
                 setting_writes: &mut self.setting_writes,
                 layer_writes: &mut self.layer_writes,
                 api_calls: &mut self.api_calls,
@@ -179,6 +182,7 @@ impl Queues {
             && self.selected_texts.is_empty()
             && self.selected_properties.is_empty()
             && self.standard_views.is_empty()
+            && self.orbits.is_empty()
             && self.setting_writes.is_empty()
             && self.layer_writes.is_empty()
             && self.api_calls.is_empty()
@@ -206,6 +210,9 @@ impl Queues {
         }
         for view in &self.standard_views {
             session.standard_view(*view)?;
+        }
+        for delta in std::mem::take(&mut self.orbits) {
+            session.orbit(delta.yaw, delta.pitch)?;
         }
         for (key, value) in &self.setting_writes {
             session.apply_setting(*key, value.clone())?;
@@ -569,6 +576,9 @@ fn every_argument_struct_maps_to_the_tauri_signature_values() {
     let view: StandardViewArgs = serde_json::from_str(r#"{"view":"top"}"#).expect("decodes");
     assert_eq!(view.view, "top");
 
+    let orbit: OrbitArgs = serde_json::from_str(r#"{"yaw":0.5,"pitch":-0.25}"#).expect("decodes");
+    assert_eq!((orbit.yaw, orbit.pitch), (0.5, -0.25));
+
     let setting: SettingArgs =
         serde_json::from_str(r#"{"key":"snapSpacing","value":2.5}"#).expect("decodes");
     assert_eq!(setting.key, "snapSpacing");
@@ -611,4 +621,81 @@ fn the_acknowledgement_is_the_frozen_wire_object() {
         serde_json::json!({"accepted": true})
     );
     assert!(CadCommandAck::accepted().accepted);
+}
+
+/// The `cad_orbit` lane on both transports.
+///
+/// * **2D**: the gates admit the request and the **session** refuses it (an orbit
+///   is only defined in the three-dimensional view). The desktop sees that refusal
+///   when its owner tick drains the queue, the direct sink sees it in the same
+///   call — the strings must be identical.
+/// * **3D**: the same request is applied on both paths, and the wire answer stays
+///   the frozen `{accepted:true}`.
+///
+/// The camera assertion (an orbit preserves the eye–target distance) lives in
+/// `cad-ui-core`, where the session test helpers can read the viewport camera.
+#[test]
+fn the_orbit_lane_applies_in_3d_and_refuses_outside_it() {
+    // ---- 2D: the session's real refusal, identically on both paths ----------
+    let (desktop, canvas) = compare(
+        "orbit/2d",
+        "cad_orbit",
+        r#"{"yaw":0.3,"pitch":0.2}"#,
+        (true, false),
+    );
+    assert_eq!(desktop.admission, Admission::Admitted);
+    let refusal = desktop
+        .applied
+        .as_ref()
+        .expect_err("a 2D orbit is the host's refusal, never an empty success");
+    assert!(
+        refusal.contains("Orbit is only defined in the three-dimensional view"),
+        "{refusal}"
+    );
+    assert_eq!(desktop.applied, canvas.applied);
+
+    // ---- 3D: the same request is applied on both paths ----------------------
+    let session = session();
+    session
+        .command("SWITCH2D3D")
+        .expect("the host switches to the 3D view");
+
+    // Direct sink: applied inline, answer is the frozen acknowledgement.
+    let mut sink = DirectSink::new(&session);
+    let direct = dispatch(
+        "cad_orbit",
+        r#"{"yaw":0.3,"pitch":0.2}"#,
+        &mut sink,
+        &DirectReads::new(&session),
+        &mut NoPopups,
+    )
+    .expect("a 3D orbit is applied");
+    assert_eq!(direct, serde_json::json!({"accepted": true}));
+    assert!(
+        sink.take_refusal().is_none(),
+        "an applied orbit records no refusal"
+    );
+    assert!(
+        session.snapshot(None, None, 0).error.is_none(),
+        "a real orbit records no session error"
+    );
+
+    // Queue sink: admitted, then applied by the owner-tick drain.
+    let mut queues = Queues::new(true, false);
+    {
+        let mut sink = queues.sink();
+        let ack = dispatch(
+            "cad_orbit",
+            r#"{"yaw":-0.4,"pitch":0.1}"#,
+            &mut sink,
+            &QueueReads::default(),
+            &mut NoPopups,
+        )
+        .expect("the gate admits a 3D orbit");
+        assert_eq!(ack, serde_json::json!({"accepted": true}));
+    }
+    assert_eq!(queues.orbits.len(), 1, "the delta is queued for the tick");
+    queues
+        .drain(&session)
+        .expect("the owner tick applies the queued orbit");
 }

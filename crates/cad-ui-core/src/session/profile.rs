@@ -14,7 +14,8 @@
 //!   "surfaceMode": "native-below",
 //!   "documentOwner": "native",
 //!   "palettesAvailable": true,
-//!   "standardViews": null
+//!   "standardViews": null,
+//!   "orbit": null
 //! }
 //! ```
 //!
@@ -23,6 +24,12 @@
 //! none available** (today's `dom-canvas` behaviour: the seven view buttons are
 //! refused with their own reason). That distinction preserves the current
 //! semantics instead of turning "undeclared" into "none".
+//!
+//! `orbit` follows the same three-state shape. `null` = **not declared** (the
+//! `native-below` answer, historic allow: the ViewCube's `cad_orbit` is admitted);
+//! `false` = **declared unavailable** (the `dom-canvas` 2D-only wasm session, which
+//! refuses `cad_orbit` by name). It is a `bool` rather than a list because an orbit
+//! has no named variants: either the carrier can rotate the 3D camera or it cannot.
 //!
 //! [`WireStatus`] is the envelope that keeps the frozen [`CadStatus`] field set
 //! and **order** intact while appending the profile (and the optional
@@ -91,6 +98,14 @@ pub struct HostProfile {
     /// the previous absence of the key); `[]` declares "none available" (the
     /// `dom-canvas` answer, unchanged from the previous top-level empty array).
     pub standard_views: Option<Vec<String>>,
+    /// The declared orbit capability, or `null` when undeclared.
+    ///
+    /// `null` means **not declared**, preserving the pre-profile semantics where an
+    /// absent key kept the orbit admitted (the `native-below` answer). `Some(false)`
+    /// declares the orbit unavailable (the `dom-canvas` answer: that wasm session is
+    /// 2D-only and refuses `cad_orbit` by name). `Some(true)` is never produced by
+    /// this repository.
+    pub orbit: Option<bool>,
 }
 
 impl HostProfile {
@@ -105,6 +120,8 @@ impl HostProfile {
             // `None` = not declared, preserving the pre-profile semantics where
             // an absent key kept every standard view enabled.
             standard_views: None,
+            // Same three-state shape: undeclared keeps the ViewCube orbit admitted.
+            orbit: None,
         }
     }
 
@@ -117,6 +134,8 @@ impl HostProfile {
             document_owner: DocumentOwner::Wasm,
             palettes_available: true,
             standard_views: Some(Vec::new()),
+            // The wasm session is 2D-only: the orbit is declared unavailable.
+            orbit: Some(false),
         }
     }
 }
@@ -211,6 +230,7 @@ mod tests {
             native.standard_views, None,
             "native leaves views undeclared"
         );
+        assert_eq!(native.orbit, None, "native leaves the orbit undeclared");
 
         let canvas = HostProfile::dom_canvas();
         assert_eq!(canvas.surface_mode, HostSurfaceMode::DomCanvas);
@@ -220,6 +240,11 @@ mod tests {
             canvas.standard_views,
             Some(Vec::new()),
             "dom-canvas declares none, it does not leave them undeclared"
+        );
+        assert_eq!(
+            canvas.orbit,
+            Some(false),
+            "dom-canvas declares the orbit unavailable, it does not leave it undeclared"
         );
     }
 
@@ -233,6 +258,7 @@ mod tests {
                 "documentOwner": "native",
                 "palettesAvailable": true,
                 "standardViews": null,
+                "orbit": null,
             })
         );
         let canvas = HostProfile::dom_canvas();
@@ -243,6 +269,7 @@ mod tests {
                 "documentOwner": "wasm",
                 "palettesAvailable": true,
                 "standardViews": [],
+                "orbit": false,
             })
         );
         let decoded: HostProfile =
@@ -272,7 +299,15 @@ mod tests {
             .find("\"palettesAvailable\"")
             .expect("palettesAvailable");
         let views = json.find("\"standardViews\"").expect("standardViews");
-        assert!(profile < surface && surface < owner && owner < palettes && palettes < views);
+        let orbit = json.find("\"orbit\"").expect("orbit");
+        assert!(
+            profile < surface
+                && surface < owner
+                && owner < palettes
+                && palettes < views
+                && views < orbit,
+            "{json}"
+        );
         // No descriptor reported yet: the key is absent, not `null`.
         assert!(!json.contains("\"canvasSession\""), "{json}");
         status_has_profile(&json, &HostProfile::dom_canvas());

@@ -421,6 +421,26 @@ def check_native_carrier() -> list[str]:
         )
     if "setZOrderOnTop(true)" in kotlin:
         problems.append("MainActivity.kt: an on-top SurfaceView would cover the React chrome")
+    # A trackpad/`SurfaceView` pinch must never scale the page: the CAD zoom is the
+    # DOM two-contact pinch the page already implements. All three WebView zoom
+    # settings stay off, in one named method so this contract can pin them.
+    if "private fun disableWebViewPageZoom(webView: WebView)" not in kotlin:
+        problems.append(
+            "MainActivity.kt: page zoom must be disabled in a named "
+            "'disableWebViewPageZoom(webView: WebView)' method (the DOM pinch is the CAD route)"
+        )
+    for call in (
+        "setSupportZoom(false)",
+        "setBuiltInZoomControls(false)",
+        "setDisplayZoomControls(false)",
+    ):
+        if call not in kotlin:
+            problems.append(f"MainActivity.kt: WebView page zoom must be off: missing '{call}'")
+    if not re.search(r"onWebViewCreate[\s\S]{0,400}disableWebViewPageZoom\(webView\)", kotlin):
+        problems.append(
+            "MainActivity.kt: onWebViewCreate must call disableWebViewPageZoom(webView) "
+            "before the page can be pinched"
+        )
     # Wry calls onWebViewCreate before setContentView(webview), so the surface must be
     # inserted after attach, at index 0 of the WebView's parent, not from the hook.
     if not re.search(r"parent\.addView\(\s*surface,\s*0,", kotlin, re.S):

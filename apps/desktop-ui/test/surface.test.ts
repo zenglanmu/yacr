@@ -97,12 +97,21 @@ test('the workspace mounts the carrier from the helper, never from a local mirro
   assert.ok(!workspace.includes('platform'));
 });
 
-test('the shipped tree has exactly one canvas: the dom-canvas carrier', async () => {
-  // A second canvas anywhere would be a second pixel surface. Prose mentions of
+test('the shipped tree has exactly one pixel carrier canvas', async () => {
+  // A second **pixel carrier** would be a second CAD surface. Prose mentions of
   // ``<canvas>`` (comments/docs) carry no attributes, so only real elements
   // match here; the stacking regression fixture stays canvas-free on purpose.
+  //
+  // The ViewCube's own canvas is not a carrier: it paints the 54px decoration
+  // inside the dock, is `aria-hidden`, holds no label and is never sampled by the
+  // host as a partition. It is therefore asserted by identity, not by count.
   const app = await readAppSource();
-  const elements = [...app.matchAll(/<canvas\s+[a-zA-Z][^>]*>/g)];
-  assert.equal(elements.length, 1);
-  assert.ok(elements[0][0].includes('id="cad-canvas"'));
+  const elements = [...app.matchAll(/<canvas\s+[a-zA-Z][^>]*>/g)].map(match => match[0]);
+  const carriers = elements.filter(element => element.includes('id="cad-canvas"'));
+  assert.equal(carriers.length, 1, 'one dom-canvas carrier');
+  const decorations = elements.filter(element => element.includes('className="viewcube__canvas"'));
+  assert.equal(decorations.length, 1, 'the cube canvas is the only other canvas');
+  assert.ok(decorations[0].includes('aria-hidden="true"'), 'the cube canvas is decoration');
+  assert.ok(!decorations[0].includes('aria-label'), 'the cube canvas owns no accessible name');
+  assert.equal(elements.length, carriers.length + decorations.length, 'no third canvas');
 });

@@ -196,6 +196,29 @@ test('Ctrl+wheel page zoom is blocked; a plain wheel is not', () => {
   assert.deepEqual(seen, ['zoom']);
 });
 
+test('WebKit DOM pinch gestures are cancelled so the page never scales', () => {
+  // The Safari/WKWebView route: `gesturestart`/`gesturechange`/`gestureend` are
+  // the only DOM evidence of a pinch there, and the page must not scale. The CAD
+  // zoom is the host's own (Linux: `gtk_bridge::pinch`); this guard never claims
+  // to produce it.
+  const env = fakeEnvironment();
+  const seen = [];
+  const binding = bindBrowserDefaults(env, { onBlocked: command => seen.push(command) });
+
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+    const event = { scale: 1.1, prevented: 0, preventDefault() { event.prevented++; } };
+    env.emit(type, event);
+    assert.equal(event.prevented, 1, `${type} is prevented`);
+  }
+  assert.deepEqual(seen, ['zoom', 'zoom', 'zoom'], 'each gesture reports the zoom being blocked');
+
+  // A disposer removes every one of them: no listener outlives the binding.
+  binding.dispose();
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend', 'wheel']) {
+    assert.equal(env.handlers.has(type), false, `${type} listener removed`);
+  }
+});
+
 test('a right-click still forwards pointer_down as button 2 and a drag as button 1', () => {
   const env = fakeEnvironment();
   const element = fakeTarget();
@@ -233,7 +256,10 @@ test('a right-click still forwards pointer_down as button 2 and a drag as button
 test('disposing the guards removes every listener', () => {
   const env = fakeEnvironment();
   const guard = bindBrowserDefaults(env, {});
-  assert.deepEqual([...env.handlers.keys()].sort(), ['contextmenu', 'keydown', 'wheel']);
+  assert.deepEqual(
+    [...env.handlers.keys()].sort(),
+    ['contextmenu', 'gesturechange', 'gestureend', 'gesturestart', 'keydown', 'wheel'],
+  );
   guard.dispose();
   assert.equal(env.handlers.size, 0);
 });

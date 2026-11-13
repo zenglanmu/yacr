@@ -1,4 +1,4 @@
-// WebKitGTK defaults the desktop shell must keep away from the CAD session.
+// WebView defaults the desktop shell must keep away from the CAD session.
 //
 // The native CAD surface is deliberately input-transparent (its input region is
 // empty, see `apps/app-linux/src/gtk_bridge/native.rs`), so *every* pointer and
@@ -9,7 +9,17 @@
 // - reload (`Ctrl+R`, `Ctrl+Shift+R`, `F5`), print (`Ctrl+P`) and page zoom
 //   (`Ctrl+=`/`Ctrl++`/`Ctrl+-`/`Ctrl+0`, `Ctrl`+wheel) accelerators. Page zoom
 //   in particular changes the DOM rect/scale the host composites the CAD
-//   surface at, fighting the "drawing area must match the DOM rect" guard.
+//   surface at, fighting the "drawing area must match the DOM rect" guard;
+// - the WebKit DOM pinch gestures (`gesturestart`/`gesturechange`/`gestureend`).
+//
+// Scope of these guards: they are a **DOM** safety net, not the Linux pinch fix.
+// A trackpad pinch reaches this DOM as `Ctrl`+wheel on Chromium/WebView2 and as a
+// WebKit gesture on Safari/WKWebView, so both are cancelled here; WebKitGTK
+// instead handles a trackpad pinch in the **UI process** (`GtkGestureZoom` in
+// `WebKitWebViewBase`) where no DOM event exists and `preventDefault()` cannot
+// reach it. That carrier is handled natively, once, by
+// `apps/app-linux/src/gtk_bridge/pinch.rs`; the CSS `touch-action: none` on
+// `.native-input` covers the touchscreen two-contact path.
 //
 // The command line keeps its native menu (copy/paste must keep working), so
 // text-entry targets are exempt from the context-menu suppression. Everything
@@ -219,14 +229,27 @@ export function bindBrowserDefaults(env: EventTarget, {
     event.preventDefault();
     onBlocked('zoom');
   };
+  // WebKit's DOM pinch route (Safari/WKWebView): the page must never scale, even
+  // though the CAD zoom itself is the host's job. On WebKitGTK these events do
+  // not exist at all — that carrier's pinch is taken over natively.
+  const gesture = (event: Event): void => {
+    event.preventDefault();
+    onBlocked('zoom');
+  };
   env.addEventListener('contextmenu', contextMenu);
   env.addEventListener('keydown', keydown);
   env.addEventListener('wheel', wheel, { passive: false });
+  env.addEventListener('gesturestart', gesture, { passive: false });
+  env.addEventListener('gesturechange', gesture, { passive: false });
+  env.addEventListener('gestureend', gesture);
   return {
     dispose(): void {
       env.removeEventListener('contextmenu', contextMenu);
       env.removeEventListener('keydown', keydown);
       env.removeEventListener('wheel', wheel);
+      env.removeEventListener('gesturestart', gesture);
+      env.removeEventListener('gesturechange', gesture);
+      env.removeEventListener('gestureend', gesture);
     },
   };
 }

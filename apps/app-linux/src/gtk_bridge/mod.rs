@@ -50,6 +50,7 @@ use crate::wayland_surface::WaylandSurface;
 
 mod native;
 mod owner;
+mod pinch;
 mod present;
 mod stacking_regression;
 
@@ -62,6 +63,10 @@ use native::NativeHandles;
 
 // Unchanged external surface (`crate::gtk_bridge::…` still resolves).
 pub use native::{reparent_webview, sync_webview_size};
+// Trackpad pinch: WebKitGTK handles it in the UI process, so the host takes the
+// gesture over (see the module docs for the two routes and their evidence
+// boundary). Installed once, at webview creation.
+pub use pinch::install_pinch_gesture;
 
 thread_local! {
     /// Overlays keyed by Tauri window label; `with_webview` closures must be

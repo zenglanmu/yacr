@@ -571,6 +571,7 @@ mod tests {
                 "documentOwner": "wasm",
                 "palettesAvailable": true,
                 "standardViews": [],
+                "orbit": false,
             }))
         );
         // The old top-level carrier keys are gone, not merely duplicated.

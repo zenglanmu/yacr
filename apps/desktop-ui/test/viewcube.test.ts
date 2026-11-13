@@ -1,4 +1,4 @@
-// Contract tests for the ViewCube's host-derived facts.
+// Contract tests for the ViewCube's host-derived facts and its canvas host.
 //
 // Three contracts, none of them pixels:
 //
@@ -6,20 +6,20 @@
 //     rule is the host's `NAVVCUBEDISPLAY` class bit **and** the matching
 //     `DISPLAYVIEWCUBEIN2D/3D` gate (with a `null` view falling into the 2D
 //     class, exactly like the host's own default);
-//   * the CSS rotation is the host camera basis (identity for the canonical front
-//     view, the known pose for a top/right view), and a degenerate basis returns
-//     `null` — never a guessed orientation;
-//   * the component reads the volatile store (so an orbit does not re-render the
-//     shell), sends the six faces and Home through `runStandardView`, and the
-//     faces are real buttons whose CSS is a `preserve-3d` cube.
+//   * the basis is the host camera in screen space (identity for the canonical
+//     front view, the old `matrix3d` columns for top/right as axis triples), and
+//     a degenerate/non-finite basis returns `null` — never a guessed orientation;
+//   * the component is a 2D canvas plus six hidden real buttons and Home: one
+//     volatile-store subscription (so an orbit does not re-render the shell),
+//     standard views through `runStandardView`, the drag through `runOrbit`.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readModule } from './helpers.ts';
 import {
   DEFAULT_NAVIGATION,
   navigationSettings,
+  viewCubeBasis,
   viewCubeClass,
-  viewCubeMatrix,
   viewCubeVisible,
 } from '../src/cad/viewcube.ts';
 
@@ -31,6 +31,9 @@ const camera = (overrides = {}) => ({
   up: [0, 1, 0],
   ...overrides,
 });
+
+/** The basis axes as plain arrays, so a failure prints the numbers. */
+const axesOf = basis => basis.axes.map(axis => [...axis]);
 
 test('an absent navigation block keeps AutoCAD defaults; a present block is honoured', () => {
   assert.deepEqual(navigationSettings(undefined), DEFAULT_NAVIGATION);
@@ -84,74 +87,97 @@ test('the cube class and the display bit follow the live view mode', () => {
   assert.equal(viewCubeVisible(null, navigationSettings({ navbarVisible: true, viewCubeDisplay: 2, viewCubeIn2d: false, viewCubeIn3d: true })), false);
 });
 
-test('the canonical front view is the identity rotation', () => {
-  // The host's FRONT is eye −Y with +Z up; the local front face (+z) faces the
-  // reader, so the CSS cube needs no rotation.
-  assert.equal(
-    viewCubeMatrix(camera({ eye: [0, -10, 0], up: [0, 0, 1] })),
-    'matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)',
-  );
+test('the canonical front view is the identity basis', () => {
+  // The host's FRONT is eye −Y with +Z up; the cube's front face (+Z local) faces
+  // the reader and no axis is rotated or turned away.
+  const basis = viewCubeBasis(camera({ eye: [0, -10, 0], up: [0, 0, 1] }));
+  assert.deepEqual(axesOf(basis), [[1, 0, 0], [0, 1, 0], [0, 0, 1]]);
+  assert.equal(basis.projection, 'orthographic');
 });
 
 test('top and right views put the host camera basis on screen, with CSS y inverted', () => {
-  // Host TOP (eye +Z, world +Y as the up hint): the top face (local −Y) reaches
-  // the reader; the local +Z/front face projects to the top of the screen.
-  assert.equal(
-    viewCubeMatrix(camera({ eye: [0, 0, 10], up: [0, 1, 0] })),
-    'matrix3d(1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1)',
-  );
-  // Looking from +x: the local +x face (right) faces the viewer.
-  assert.equal(
-    viewCubeMatrix(camera({ eye: [10, 0, 0], up: [0, 0, 1] })),
-    'matrix3d(0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 0, 1)',
-  );
+  // These are the columns the old CSS `matrix3d(...)` produced, now as the images
+  // of the three cube-local axes. TOP: the top face reaches the reader and the
+  // front face projects down the screen ([0, 1, 0]).
+  const top = viewCubeBasis(camera({ eye: [0, 0, 10], up: [0, 1, 0] }));
+  assert.deepEqual(axesOf(top), [[1, 0, 0], [0, 0, -1], [0, 1, 0]]);
+  // RIGHT: looking from +x makes the right face point at the viewer (+depth).
+  const right = viewCubeBasis(camera({ eye: [10, 0, 0], up: [0, 0, 1] }));
+  assert.deepEqual(axesOf(right), [[0, 0, 1], [0, 1, 0], [-1, 0, 0]]);
+  // The host's lens is carried through, not guessed.
+  assert.equal(viewCubeBasis(camera({ projection: 'perspective' })).projection, 'perspective');
+  assert.equal(viewCubeBasis(camera({ projection: 'sideways' })).projection, 'orthographic');
 });
 
-test('a missing or degenerate basis never fabricates a rotation', () => {
-  assert.equal(viewCubeMatrix(null), null);
-  assert.equal(viewCubeMatrix(undefined), null);
+test('a missing or degenerate basis never fabricates an orientation', () => {
+  assert.equal(viewCubeBasis(null), null);
+  assert.equal(viewCubeBasis(undefined), null);
   // eye == target: no direction.
-  assert.equal(viewCubeMatrix(camera({ eye: [0, 0, 0], target: [0, 0, 0] })), null);
+  assert.equal(viewCubeBasis(camera({ eye: [0, 0, 0], target: [0, 0, 0] })), null);
   // up parallel to z: no right vector.
-  assert.equal(viewCubeMatrix(camera({ up: [0, 0, 1] })), null);
+  assert.equal(viewCubeBasis(camera({ up: [0, 0, 1] })), null);
   // A non-finite value is refused (the status validator already rejects it; the
-  // renderer must not turn NaN into a matrix if a test double slips through).
-  assert.equal(viewCubeMatrix(camera({ eye: [Number.NaN, 0, 1] })), null);
+  // renderer must not turn NaN into a basis if a test double slips through).
+  assert.equal(viewCubeBasis(camera({ eye: [Number.NaN, 0, 1] })), null);
 });
 
-test('the component subscribes to the volatile view and sends real standard views', async () => {
+test('the component is a canvas with hidden real faces, Home and an orbit drag', async () => {
   const source = await readModule('components/ViewCube.tsx');
   assert.ok(source.includes('useSyncExternalStore('), 'the orbit lives in the leaf');
   assert.ok(source.includes('volatileStatusStore.subscribe'));
   assert.ok(source.includes('volatileStatusStore.getView'));
-  // Six faces + Home are typed standard-view buttons, not invented camera writes.
-  for (const view of ['top', 'bottom', 'front', 'back', 'left', 'right', 'isometric']) {
-    assert.ok(source.includes(`'${view}'`), `${view} is one of the seven host keys`);
-  }
-  assert.ok(source.includes("shell.runStandardView(face.view)"));
-  assert.ok(source.includes("shell.runStandardView('isometric')"));
-  assert.ok(source.includes('standardViewAvailable(shell, face.view)'), 'shared admission, not a local guess');
-  assert.ok(source.includes('standardViewUnavailableReasonKey'), 'a refusal keeps the shared reason key');
-  assert.ok(source.includes("t('viewcube.standard_only')"), 'the edge/corner limit is stated');
-  assert.ok(source.includes("t('viewcube.orientation_unavailable')"), 'a null view is explicit');
-  assert.ok(source.includes("t(face.labelKey)"), 'faces read their catalog names from the face table');
+  // A 2D canvas, sized in CSS px and scaled by the device pixel ratio.
+  assert.ok(source.includes('className="viewcube__canvas"'));
+  assert.ok(source.includes('aria-hidden="true"'), 'the canvas is decoration');
+  assert.ok(source.includes("getContext('2d')"), 'a real 2D context, with an explicit failure state');
+  assert.ok(source.includes('setTransform(ratio, 0, 0, ratio, 0, 0)'), 'the backing store follows devicePixelRatio');
+  assert.ok(source.includes('ResizeObserver'), 'a size change redraws');
+  assert.ok(source.includes('MutationObserver') && source.includes('THEME_ATTRIBUTE'), 'a theme switch re-reads the tokens');
+  assert.ok(source.includes('readCubePalette'), 'the palette comes from the CSS tokens');
+  assert.ok(source.includes("getPropertyValue('--font-ui')"), 'the label font is the chrome token, not the UA default');
+  assert.equal(source.includes('requestAnimationFrame'), false, 'no permanent animation loop in the component');
+  // Six faces + Home stay real, focusable controls.
+  assert.ok(source.includes('CUBE_FACES.map'), 'the face table is the single source');
+  assert.ok(source.includes('className="sr-only"'), 'the faces are visually hidden, not removed');
   for (const face of ['front', 'back', 'left', 'right', 'top', 'bottom']) {
     assert.ok(source.includes(`'viewcube.face.${face}'`), `${face} has a catalog key`);
   }
+  assert.ok(source.includes('shell.runStandardView(face.view)'), 'a face is a standard view, never a camera write');
+  assert.ok(source.includes("shell.runStandardView('isometric')"));
+  assert.ok(source.includes('standardViewAvailable(shell, face.view)'), 'shared admission, not a local guess');
+  assert.ok(source.includes('standardViewUnavailableReasonKey'), 'a refusal keeps the shared reason key');
+  // The pointer split: a click picks a face, a drag orbits through the coalescer.
+  assert.ok(source.includes('pickFace('), 'a click hit-tests the visible faces');
+  assert.ok(source.includes('new OrbitDrag('), 'a drag goes through the one coalescer');
+  assert.ok(source.includes('orbitDelta('), 'the drag uses the host-mirroring delta');
+  assert.ok(source.includes('orbitAvailable('), 'the carrier/view gate is shared, not local');
+  assert.ok(source.includes('onLostPointerCapture') && source.includes('onPointerCancel'), 'a cancelled gesture ends without a camera move');
+  // The honest states.
+  assert.ok(source.includes("t('viewcube.orientation_unavailable')"), 'a null/degenerate view is explicit');
+  assert.ok(source.includes("t('viewcube.render_unavailable')"), 'a canvas failure is explicit');
+  assert.ok(source.includes("t('viewcube.standard_only')"), 'the edge/corner limit is stated');
+  assert.ok(source.includes("t('viewcube.orbit_hint')"), 'the drag is described');
+  assert.ok(source.includes("'viewcube.orbit_needs_3d'"), 'the 2D refusal has the cube wording');
 });
 
-test('the cube stylesheet is a preserve-3d cube with no floating overlay', async () => {
+test('the cube stylesheet sizes the canvas and is not a floating overlay', async () => {
   const css = await readModule('components/viewcube.css');
-  assert.ok(css.includes('transform-style: preserve-3d'));
-  assert.ok(css.includes('backface-visibility: hidden'));
-  assert.ok(css.includes('perspective:'), 'the stage carries the depth cue');
-  assert.ok(css.includes('[data-projection="orthographic"]'), 'an orthographic host gets no lens');
-  for (const face of ['front', 'back', 'left', 'right', 'top', 'bottom']) {
-    assert.ok(css.includes(`.viewcube__face--${face} { transform:`), `${face} has a rest pose`);
+  assert.ok(css.includes('--viewcube-size: 48px'), 'the cube size is a token');
+  const ruleFor = selector => {
+    const start = css.indexOf(`${selector} {`);
+    assert.ok(start >= 0, `${selector} has a rule`);
+    return css.slice(start, css.indexOf('}', start));
+  };
+  const canvas = ruleFor('.viewcube__canvas');
+  for (const declaration of ['width: 100%', 'height: auto', 'aspect-ratio: 1', 'display: block', 'touch-action: none']) {
+    assert.ok(canvas.includes(declaration), `.viewcube__canvas keeps ${declaration}`);
   }
+  // The size token owns the box: the stage is exactly one cube wide.
+  assert.ok(ruleFor('.viewcube__stage').includes('width: var(--viewcube-size)'));
   assert.equal(/position:\s*fixed/.test(css), false, 'the cube is docked, never a floating overlay');
+  assert.equal(css.includes('.viewcube__face'), false, 'the faces are canvas paint, not DOM faces');
   // Cube styles stay in their own file: the shared sheet only owns the dock frame.
   const style = await readModule('style.css');
-  assert.equal(style.includes('.viewcube__face'), false, 'no cube face rule in style.css');
+  assert.equal(style.includes('.viewcube__canvas'), false, 'no cube canvas rule in style.css');
   assert.ok(style.includes('.navdock'), 'the dock frame lives with the other regions');
 });

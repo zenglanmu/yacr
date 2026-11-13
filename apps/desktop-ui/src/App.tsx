@@ -24,6 +24,7 @@ import { draftingAcceleratorCommand } from './cad/cad.ts';
 import { awaitingToolText, setToolText } from './tools/text.ts';
 import { setSelectedText } from './tools/textedit.ts';
 import { submitStandardView } from './cad/view3d.ts';
+import { submitOrbit } from './cad/orbit.ts';
 import { isErrorReportVisible } from './errors/error-report.ts';
 import { bindBrowserDefaults, cadContextMenuState, isTextEntryTarget } from './defaults.ts';
 import { admitCommandText, toolCommandForKey } from './commands/commands.ts';
@@ -868,10 +869,9 @@ function Shell() {
     // The banner is cleared first, exactly like a command attempt: a refused view
     // used to leave its line up for the rest of the session (a later `FIT` could
     // not clear it), which is the same sticky-error defect from the other side.
-    runStandardView: view => {
-      setError('');
-      void submitStandardView({ invoke, view, t, report: setError });
-    },
+    runStandardView: view => { setError(''); void submitStandardView({ invoke, view, t, report: setError }); },
+    // One coalesced `cad_orbit` per animation frame; only a refusal reaches the banner.
+    runOrbit: (yaw, pitch) => submitOrbit({ invoke, yaw, pitch, t, report: setError }),
     cancelImport: () => { void requestImportCancel(invoke, status); },
     // The active-tool numeric stepper's bounded pending delta (see the reconcile
     // effect above). The view reads it; the stepper's action updates it.

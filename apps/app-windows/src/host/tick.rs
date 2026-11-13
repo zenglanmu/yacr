@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use cad_desktop_shell::commands::drain_standard_views;
+use cad_desktop_shell::commands::{drain_orbits, drain_standard_views};
 use cad_engine::render::{BackendPreference, RenderSessionHandle};
 use cad_host::HostPlatform;
 use cad_platform::HostCapabilities;
@@ -499,6 +499,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         let (
             commands,
             mut standard_views,
+            mut orbits,
             setting_writes,
             layer_writes,
             tool_parameters,
@@ -511,6 +512,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             (
                 std::mem::take(&mut state.shell.cad_commands),
                 std::mem::take(&mut state.cad_standard_views),
+                std::mem::take(&mut state.cad_orbits),
                 std::mem::take(&mut state.cad_setting_writes),
                 std::mem::take(&mut state.cad_layer_writes),
                 std::mem::take(&mut state.cad_tool_parameters),
@@ -522,6 +524,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         };
         let queued = commands.len()
             + standard_views.len()
+            + orbits.len()
             + setting_writes.len()
             + layer_writes.len()
             + tool_parameters.len()
@@ -556,6 +559,14 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                         session.standard_view(view)
                     }) {
                         eprintln!("[probe] cad standard view rejected: {error}");
+                    }
+                    // Typed orbit deltas (the ViewCube's `cad_orbit`): applied in
+                    // admission order right after the views, through the session's
+                    // own funnel. A real refusal (2D view) is its own error.
+                    for error in
+                        drain_orbits(&mut orbits, |delta| session.orbit(delta.yaw, delta.pitch))
+                    {
+                        eprintln!("[probe] cad orbit rejected: {error}");
                     }
                     // Typed tool-parameter requests: applied before this batch's
                     // inputs so a stepper change takes effect in the same batch.

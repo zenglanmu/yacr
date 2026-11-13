@@ -399,6 +399,6 @@ test('the popover reuses the chrome surface and is never clipped by the dock', a
   // The two docked palettes keep their own blocks free of a floating surface.
   const properties = css.slice(css.indexOf('/* Properties palette'), css.indexOf('.start-panel'));
   assert.equal(properties.includes('position: fixed'), false);
-  const layers = css.slice(css.indexOf('/* Layers palette'), css.indexOf('/* Navigation rail'));
+  const layers = css.slice(css.indexOf('/* Layers palette'), css.indexOf('/* Navigation dock'));
   assert.equal(layers.includes('position: fixed'), false);
 });

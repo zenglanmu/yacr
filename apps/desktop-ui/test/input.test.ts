@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bindProbeInput, createInputLane, deviceField, shiftField } from '../src/cad/input.ts';
+import { wheelPinchScale } from '../src/cad/dom-pinch.ts';
 import { readAppSource, readCatalog } from './helpers.ts';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -283,14 +284,21 @@ test('ordinary UI strings use existing bilingual dictionary keys', async () => {
     assert.equal(typeof zh[match[1]], 'string', match[1]);
     assert.equal(typeof en[match[1]], 'string', match[1]);
   }
-  // ADR 0024 D3: the only canvas in the tree is the host-flag-gated
-  // `dom-canvas` carrier. It is a pixel surface - never a wrapper around the
+  // ADR 0024 D3: the only **pixel carrier** canvas is the host-flag-gated
+  // `dom-canvas` one. It is a pixel surface - never a wrapper around the
   // partition and never a text host - so it adds no user-visible string and
-  // keeps `.native-input` the single label/input owner.
-  const canvases = [...source.matchAll(/<canvas\s+[a-zA-Z][^>]*>/g)];
-  assert.equal(canvases.length, 1);
-  assert.ok(!canvases[0][0].includes('aria-label'));
-  assert.ok(!canvases[0][0].includes('{t('));
+  // keeps `.native-input` the single label/input owner. The ViewCube's canvas is
+  // decoration (`aria-hidden`) and is the only other canvas in the tree.
+  const canvases = [...source.matchAll(/<canvas\s+[a-zA-Z][^>]*>/g)].map(match => match[0]);
+  const carriers = canvases.filter(element => element.includes('id="cad-canvas"'));
+  assert.equal(carriers.length, 1);
+  const decorations = canvases.filter(element => element.includes('className="viewcube__canvas"'));
+  assert.equal(decorations.length, 1);
+  assert.equal(canvases.length, carriers.length + decorations.length);
+  for (const canvas of canvases) {
+    assert.ok(!canvas.includes('aria-label'));
+    assert.ok(!canvas.includes('{t('));
+  }
 });
 
 test('CAD rect reports ribbon offset, dynamic footer height and local pointer CSS coordinates', () => {
@@ -806,6 +814,109 @@ test('wheel still reaches the lane when no gesture is active', () => {
   assert.equal(prevented, true);
   assert.deepEqual(inputs.at(-1), { kind: 'wheel', x: 4, y: 5, dx: 0, dy: 3 });
   binding.dispose();
+});
+
+test('a ctrl+wheel pinch is one pinch record, never a wheel, and the page default is blocked', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  let prevented = 0;
+  // WebView2/Chromium synthesize `ctrl`+wheel for a trackpad pinch; a negative
+  // deltaY is the pinch-out (zoom-in) direction.
+  element.emit('wheel', {
+    clientX: 4, clientY: 5, deltaX: 0, deltaY: -100, deltaMode: 0, ctrlKey: true,
+    preventDefault() { prevented++; },
+  });
+  assert.equal(prevented, 1);
+  const pinches = inputs.filter(input => input.kind === 'pinch');
+  assert.equal(pinches.length, 1);
+  assert.equal(inputs.filter(input => input.kind === 'wheel').length, 0);
+  assert.ok(pinches[0].scale > 1);
+  assert.deepEqual(pinches[0], { kind: 'pinch', x: 4, y: 5, dx: 0, dy: 0, scale: wheelPinchScale(-100) });
+  // A plain wheel is untouched by that branch: same record shape and deltas as
+  // before, including the line-mode normalization.
+  element.emit('wheel', {
+    clientX: 6, clientY: 7, deltaX: 1, deltaY: 3, deltaMode: 1, ctrlKey: false,
+    preventDefault() {},
+  });
+  assert.deepEqual(inputs.at(-1), { kind: 'wheel', x: 6, y: 7, dx: 16, dy: 48 });
+  binding.dispose();
+});
+
+test('the WebKit gesture sequence reports incremental pinch scales at the gesture position', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  let prevented = 0;
+  const gesture = (type, clientX, clientY, scale) => ({
+    type, clientX, clientY, scale, preventDefault() { prevented++; },
+  });
+  element.emit('gesturestart', gesture('gesturestart', 10, 20, 1));
+  element.emit('gesturechange', gesture('gesturechange', 10, 20, 1.5));
+  // The second sample is cumulative (2.25×) and must land as another 1.5× step.
+  element.emit('gesturechange', gesture('gesturechange', 30, 40, 2.25));
+  // A repeated scale is no zoom: it must not become a 1× record.
+  element.emit('gesturechange', gesture('gesturechange', 30, 40, 2.25));
+  element.emit('gestureend', gesture('gestureend', 30, 40, 2.25));
+  assert.equal(prevented, 5);
+  const pinches = inputs.filter(input => input.kind === 'pinch');
+  assert.deepEqual(pinches, [
+    { kind: 'pinch', x: 10, y: 20, dx: 0, dy: 0, scale: 1.5 },
+    { kind: 'pinch', x: 30, y: 40, dx: 0, dy: 0, scale: 1.5 },
+  ]);
+  binding.dispose();
+});
+
+test('a ctrl+wheel during or just after a WebKit gesture is dropped, still cancelling the page zoom', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  const gesture = (type, clientX, clientY, scale) => ({
+    type, clientX, clientY, scale, preventDefault() {},
+  });
+  const ctrlWheel = () => {
+    const event = {
+      clientX: 12, clientY: 13, deltaX: 0, deltaY: -120, deltaMode: 0, ctrlKey: true,
+      prevented: 0, preventDefault() { event.prevented++; },
+    };
+    return event;
+  };
+  const pinchScales = () => inputs.filter(input => input.kind === 'pinch').map(input => input.scale);
+  // WebKit 15+ echoes one pinch as `ctrl`+wheel: the gesture is authoritative,
+  // so while it is active the wheel adds no record — but it still cancels the
+  // page default.
+  element.emit('gesturestart', gesture('gesturestart', 10, 20, 1));
+  element.emit('gesturechange', gesture('gesturechange', 10, 20, 1.5));
+  const during = ctrlWheel();
+  element.emit('wheel', during);
+  assert.equal(during.prevented, 1);
+  assert.deepEqual(pinchScales(), [1.5]);
+  assert.equal(inputs.filter(input => input.kind === 'wheel').length, 0);
+  // The 500 ms tail keeps the echo out even when its wheel lands right after
+  // `gestureend` (the two signals have no ordering guarantee).
+  element.emit('gestureend', gesture('gestureend', 10, 20, 1.5));
+  const after = ctrlWheel();
+  element.emit('wheel', after);
+  assert.equal(after.prevented, 1);
+  assert.deepEqual(pinchScales(), [1.5]);
+  // A plain wheel inside the guard window is not a pinch echo: unchanged.
+  element.emit('wheel', { clientX: 4, clientY: 5, deltaX: 0, deltaY: 3, deltaMode: 0, ctrlKey: false, preventDefault() {} });
+  assert.deepEqual(inputs.at(-1), { kind: 'wheel', x: 4, y: 5, dx: 0, dy: 3 });
+  binding.dispose();
+});
+
+test('dispose removes the gesture listeners too', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend', 'wheel']) {
+    assert.equal(element.handlers.has(type), true, `${type} is bound`);
+  }
+  binding.dispose();
+  assert.equal(element.handlers.size, 0);
+  const count = inputs.length;
+  element.emit('gesturechange', { type: 'gesturechange', clientX: 1, clientY: 1, scale: 2, preventDefault() {} });
+  assert.equal(inputs.length, count);
 });
 
 test('a changed partition schedules exactly one delayed reconciliation report', () => {

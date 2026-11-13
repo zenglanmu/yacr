@@ -112,6 +112,9 @@ pub fn init(
     // leave a visible diagnostic.
     if let Some(webview) = child.as_ref() {
         super::popup::install_renderer_crash_hook(webview, shared);
+        // Trackpad pinch is a WebKitGTK **UI-process** gesture, not a DOM event:
+        // take it over here (once, on the live webview) so it becomes a CAD zoom.
+        crate::gtk_bridge::install_pinch_gesture(webview, shared);
     }
 
     // Window events: log geometry (WM-native evidence) and release the surface
@@ -304,6 +307,11 @@ pub fn init(
         // host gate refuses input/commands, closes and proves the gate releases. No
         // effect on a normal run (`YACR_PROBE_POPUP_EVIDENCE` is unset).
         crate::evidence::maybe_spawn_popup_evidence(app.handle());
+        // Env-gated, evidence-only trackpad-pinch driver: injects a synthetic GDK
+        // `TOUCHPAD_PINCH` sequence on the live webview and reports the real page
+        // scale (must stay 1) and the real `cad_status.camera` scale (the CAD
+        // zoom). No effect on a normal run (`YACR_PROBE_PINCH` is unset).
+        crate::evidence::maybe_spawn_pinch(child.as_ref());
         // Env-gated, evidence-only UI-dialogs driver: drives the React chrome
         // through its own Ctrl+1 handler and command field (Ctrl+1 -> Properties,
         // click-select -> populated rows, DIST -> command echo, OPTIONS -> the real

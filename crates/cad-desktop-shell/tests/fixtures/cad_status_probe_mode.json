@@ -23,6 +23,7 @@
   "groups": [],
   "hostProfile": {
     "documentOwner": "native",
+    "orbit": null,
     "palettesAvailable": true,
     "standardViews": null,
     "surfaceMode": "native-below"
