@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Flatpak host-side file-association XML for Yacr (io.github.zenglanmu.yacr).
+
+  This file is installed to /app/share/mime/packages/io.github.zenglanmu.yacr.xml
+  (flatpak only exports `share/mime/packages/*.xml`, and the basename must be the
+  app-id). Flatpak's `mime-database` install trigger runs `update-mime-database`
+  on the host for that directory, so the host compiles this file; the manifest
+  needs no build command for it.
+
+  Derived verbatim from packaging/mime/formats.json ("sharedMimeInfo"), the single
+  authority for OS-level associations. Do not add types here by hand.
+
+  Types that shared-mime-info already ships are deliberately NOT redefined:
+  image/vnd.dwg (dwg), image/vnd.dxf (dxf), model/obj (obj), model/stl (stl) and
+  the application/acad, application/dwg, application/x-dwg,
+  application/autocad_dwg, application/dxf, application/step aliases. The
+  desktop entry / AppStream list them for association purposes; only the types
+  below need definitions.
+
+  Notably the Windows object-code type that shared-mime-info 2.5 attaches to the
+  `coff` name (globs *.o, *.obj) is never redefined or referenced here: the
+  Geomview coloured OFF variant .coff uses application/x-geomview-coff instead.
+-->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="model/step">
+    <comment>STEP CAD model (ISO 10303-21)</comment>
+    <glob pattern="*.step"/>
+    <glob pattern="*.stp"/>
+    <glob pattern="*.STEP"/>
+    <glob pattern="*.STP"/>
+    <alias type="application/step"/>
+    <magic priority="50">
+      <match value="ISO-10303-21;" type="string" offset="0"/>
+    </magic>
+  </mime-type>
+  <mime-type type="model/ply">
+    <comment>PLY 3D model</comment>
+    <glob pattern="*.ply"/>
+    <glob pattern="*.PLY"/>
+    <alias type="application/x-ply"/>
+  </mime-type>
+  <mime-type type="model/off">
+    <comment>OFF 3D model (Geomview Object File Format)</comment>
+    <glob pattern="*.off"/>
+    <glob pattern="*.OFF"/>
+  </mime-type>
+  <mime-type type="application/x-geomview-coff">
+    <comment>COFF 3D model (Geomview Object File Format, colored)</comment>
+    <glob pattern="*.coff"/>
+    <glob pattern="*.COFF"/>
+  </mime-type>
+  <mime-type type="application/x-ifc">
+    <comment>IFC building model (Industry Foundation Classes)</comment>
+    <glob pattern="*.ifc"/>
+    <glob pattern="*.IFC"/>
+    <sub-class-of type="text/plain"/>
+  </mime-type>
+  <mime-type type="application/x-revit">
+    <comment>Revit project</comment>
+    <glob pattern="*.rvt"/>
+    <glob pattern="*.RVT"/>
+  </mime-type>
+  <mime-type type="application/x-revit-template">
+    <comment>Revit project template</comment>
+    <glob pattern="*.rte"/>
+    <glob pattern="*.RTE"/>
+  </mime-type>
+  <mime-type type="application/x-revit-family">
+    <comment>Revit family</comment>
+    <glob pattern="*.rfa"/>
+    <glob pattern="*.RFA"/>
+  </mime-type>
+  <mime-type type="application/x-revit-family-template">
+    <comment>Revit family template</comment>
+    <glob pattern="*.rft"/>
+    <glob pattern="*.RFT"/>
+  </mime-type>
+  <mime-type type="application/vnd.sketchup.skp">
+    <comment>SketchUp model</comment>
+    <glob pattern="*.skp"/>
+    <glob pattern="*.SKP"/>
+  </mime-type>
+</mime-info>

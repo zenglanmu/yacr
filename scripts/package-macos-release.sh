@@ -236,6 +236,12 @@ cat > "${STAGE}/Yacr.app/Contents/Info.plist" <<EOF
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHighResolutionCapable</key><true/>
+  <!--
+    The associated extension set is the single authority in
+    packaging/mime/formats.json; scripts/test-file-associations.py fails when this
+    block drifts from it (every canonical extension exactly once). Yacr is a
+    viewer, never the owner of these types, so every entry stays Viewer/Alternate.
+  -->
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
@@ -243,7 +249,31 @@ cat > "${STAGE}/Yacr.app/Contents/Info.plist" <<EOF
       <key>CFBundleTypeRole</key><string>Viewer</string>
       <key>LSHandlerRank</key><string>Alternate</string>
       <key>CFBundleTypeExtensions</key>
-      <array><string>dwg</string><string>dxf</string></array>
+      <array>
+        <string>dwg</string>
+        <string>dxf</string>
+      </array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>3D model / preview</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>obj</string>
+        <string>stl</string>
+        <string>ply</string>
+        <string>off</string>
+        <string>coff</string>
+        <string>step</string>
+        <string>stp</string>
+        <string>ifc</string>
+        <string>rvt</string>
+        <string>rte</string>
+        <string>rfa</string>
+        <string>rft</string>
+        <string>skp</string>
+      </array>
     </dict>
   </array>
 </dict>

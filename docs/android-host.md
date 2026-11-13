@@ -56,7 +56,7 @@
 | 保存 | **支持（DXF 导出，设备 NOT RUN）** | `SAVE` → Kotlin `ACTION_CREATE_DOCUMENT`（`application/octet-stream`、`EXTRA_TITLE`）；共享保存路径把 **DXF** 字节经 `write_atomic` → `ContentResolver.openOutputStream(uri, "wt")` 写入（SAF 实现是截断写，没有临时文件 + rename）。`canSave = true`。这是**导出一份副本**，不是原地覆盖：打开来源的同一 URI 被 `refuses_source_overwrite` 拒绝。源为 `.dwg` 时经同一共享路径写**实验性 DWG 导出**（上游 `acadrust::DwgWriter`；默认新文件 `<stem>-export.dwg`，SAF URI 守卫拒绝覆盖来源；DWG 仅有合成 self-roundtrip 证据，设备/AutoCAD **NOT VERIFIED**） |
 | 出图 | **不支持** | `canPlot = false`；没有 SVG/PDF 导出 |
 | 文件身份 | **SAF URI，不伪造** | 身份 = `content://` opaque 句柄 + `OpenableColumns.DISPLAY_NAME`（缺列时回退 URI 末段）；没有 `--open` 启动参数。`content://` 目标**没有**文件系统目录，sidecar xref/栅格不可用：`xref_options_for` 对含 `://` 的句柄返回 `None`，引用按不可用报告，不派生假根目录 |
-| 外部「打开方式」 | **已接（设备 NOT RUN）** | `bundle.fileAssociations`（`dwg`；mime 含 `application/octet-stream`）由 tauri-build 在构建期注入 manifest 的 VIEW intent-filter；`MainActivity` 冷启动（`onCreate`）与热启动（`onNewIntent` + `setIntent`，`singleTask`）都投递到同一个读槽 |
+| 外部「打开方式」 | **已接（设备 NOT RUN）** | `bundle.fileAssociations` 由单一权威 `packaging/mime/formats.json` 派生：全部 15 个导入扩展名、21 个 mime 类型，**再加**一条 `application/octet-stream` 通配（共 22 条），每条带 `androidIntentActionFilters: ["view"]`；tauri-build 在构建期注入 manifest 的 VIEW intent-filter（每关联一条 filter、每扩展名一条 `pathPattern`）。`MainActivity` 冷启动（`onCreate`）与热启动（`onNewIntent` + `setIntent`，`singleTask`）都投递到同一个读槽。**关联接线只是编译/manifest 证据，系统是否匹配 NOT VERIFIED** |
 | 外部 URL（`cad_open_release_page`） | **已接（设备 NOT VERIFIED）** | 共享固定 landing/download URL（`cad_desktop_shell::release::RELEASE_PAGE_URL`，无调用方参数、无第二份常量）→ `AndroidReleaseOpener` → `MainActivity.openExternalUrl` → `Intent.ACTION_VIEW`；Kotlin 侧投到 UI 线程并有界等待 2 s，无浏览器 activity / `isFinishing` / `isDestroyed` / 异常 / 超时 → 显式失败（`update.open_url_failed`），绝不静默成功。**没有新 Kotlin→Rust JNI 符号**（新增的是 Rust→Kotlin 实例方法，冻结的 `native*` 仍为四个） |
 | 导入线程 | **同步（tick 线程）** | `importWorker = false`：DWG 在 tick 线程同步导入；极大图纸会阻塞渲染，属**已记录限制**，不是挂起或假成功 |
 | 初始文档 | **共享核心空白 `untitled` 图纸** | `HostOptions::start_blank = true`；不是共享核心内置 demo 图纸。外部打开到达后由共享打开漏斗替换 |
@@ -218,10 +218,24 @@ apps/app-android/
   五个 `document*` 方法的名字与描述符。**这不是预防性规则**：没有它时 release R8 会把
   `documentLaunchOpen` 从 `classes.dex` 移除（Rust 是唯一调用方），运行期必抛 `NoSuchMethodError`；
   该缺陷已在验证中实际捕获。
-- `tauri.conf.json` 的 `bundle.fileAssociations` 声明 `.dwg`（含 `image/vnd.dwg`、`application/acad`、
-  `application/dwg`、`application/x-dwg`、`application/autocad_dwg`、`application/octet-stream`）。
-  `AndroidManifest.xml` 里的 `tauri-file-associations. AUTO-GENERATED` 块由 tauri-build 在构建期注入；
-  **改关联请改配置**，不要手写 manifest。
+- `tauri.conf.json` 的 `bundle.fileAssociations` 从单一权威 `packaging/mime/formats.json` 派生
+  （AGENTS.md 铁律 9），覆盖**全部导入扩展名**：`dwg`、`dxf`、`obj`、`stl`、`ply`、`off`、`coff`、
+  `step`/`stp`、`ifc`、`rvt`、`rte`、`rfa`、`rft`、`skp`。按 `formats.json` 的 mime 表逐条声明 21 条
+  关联（`step`/`stp` 合并进一条），**再加**一条 `application/octet-stream` 通配关联，列出全部 15 个
+  扩展名：内容供应方常把 CAD 文件报成 octet-stream，没有这条「打开方式」永远不匹配。
+  - 每条关联都带 `androidIntentActionFilters: ["view"]`，必须是**小写** `view`：Tauri 原样写成
+    `android.intent.action.VIEW`，大写 `VIEW` 只会生成永不匹配的 filter。
+  - Tauri 为每条关联的每个 mimeType 发一条 `<intent-filter>`，并为每个扩展名再发一条
+    `<data android:pathPattern>`（manifest 文本形如 `.*\.dwg`）；因此 `model/step` 这类多扩展名
+    关联会产生两个 pathPattern。
+  - `mimeType` 在 Android 上**必填**：Tauri 的无 mime 回退会按扩展名猜类型、或发出没有 scheme 的
+    filter，实际永不匹配。任何一条关联漏掉 `mimeType` 都视为契约违规。
+  - `AndroidManifest.xml` 里的 `tauri-file-associations. AUTO-GENERATED` 块由 tauri-build 在构建期
+    注入；**改关联请改配置**，不要手写 manifest（手工改会与 conf 静默漂移）。
+  - 应用内 SAF 选择器仍是 `*/*`（`DocumentPicker.kt`），与这里的系统「打开方式」过滤是两回事。
+  - **证据边界**：上面全部是编译/manifest 证据（conf → 注入后的 manifest 文本），**不是**设备
+    「打开方式」验证——没有真机或模拟器参与，系统是否列出本应用、是否真的匹配某个 `content://`
+    投递一律 **NOT VERIFIED**。
 - Gradle `ndkVersion = "29.0.13846066"`（脚本断言）。`scripts/build-android-ui.sh` 把字体包
   staged 到**生成的** `apps/app-android/font-assets`，Gradle 把该目录作为 assets `srcDir` 打包：
   默认 `WITH_FONTS=1` 是 mlightcad 全量 + 提交包，`WITH_FONTS=0` 只放提交包（离线），
@@ -286,7 +300,9 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 - `javap` 核对 4 个 Kotlin→Rust JNI 导出符号；
 - `python3 scripts/test-android-host.py`：新增断言 `DocumentPicker.kt` 的 SAF 接线（open/save 动作、
   `ContentResolver`、`"wt"`、64 KiB 读、`STATE_* = 0..4`、终态消费）、`MainActivity` 的五个委派方法、
-  `onNewIntent` + `setIntent`、`fileAssociations` 的 dwg mime 集，以及 ProGuard 的五行 keep；
+  `onNewIntent` + `setIntent`、由 `packaging/mime/formats.json` 派生的全量 `fileAssociations` 契约
+  （扩展名并集、逐 mime 扩展名、`application/octet-stream` 通配、`view` 动作、钉住的 DWG mime）、
+  该契约的变异自检，以及 ProGuard 的五行 keep；
 - `python3 scripts/check-file-size.py`、`check-architecture.py`、`check-tauri-capabilities.py`、
   `check-i18n.py` 通过；
 - **release APK 构建并本地签名**（签名仅供本地验证，不是发布流程；**未安装运行**）；R8 release
@@ -327,11 +343,13 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
   `srcDir`（且 `scripts/build-android-ui.sh` 经共享 `scripts/lib/font-package.sh` staged）、透明主题、
   `configChanges` 保留 `orientation|screenSize|smallestScreenSize|uiMode`；
   `check_document_picker_wiring` 另外断言 SAF 打开/另存、五个 `document*` 实例方法、外部
-  `onNewIntent`、`.dwg` 关联 mime 集与 ProGuard keep 行。`check_generated_project_and_ignores` 还断言
+  `onNewIntent`、由 `packaging/mime/formats.json` 派生的全量关联集（扩展名并集恰为规范集、逐 mime
+  的扩展名列表、`application/octet-stream` 通配覆盖全部扩展名、每条关联的 `view` 动作、钉住的 DWG
+  mime）及其变异自检，以及 ProGuard keep 行。`check_generated_project_and_ignores` 还断言
   `gen/android/gradle.properties` 保持 `org.gradle.configuration-cache=false`（见 §6 的 CI 失败原因）。
   **无变异即失败**：把表面改成 on-top、去掉一个
-  JNI 符号、换掉 NDK 版本、改回 `ACTION_GET_CONTENT`、删掉 keep 规则或把配置缓存改回 `=true`
-  都会判红。**注意：这些是静态
+  JNI 符号、换掉 NDK 版本、改回 `ACTION_GET_CONTENT`、删掉一条 mime 关联/少列一个扩展名、
+  把 `view` 写成 `VIEW`、删掉 keep 规则或把配置缓存改回 `=true` 都会判红。**注意：这些是静态
   接线，不是设备/像素/SAF 运行证据。**
 - `cargo test -p app-android --locked`：纯函数与源码结构契约（host target 上运行）。
 - `cargo check -p app-android --target aarch64-linux-android --locked`：真实编译门禁。

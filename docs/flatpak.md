@@ -45,12 +45,46 @@
 | `/app/fonts/` | CAD 字体包（二进制解析 `<exe dir>/fonts`，无需 `--fonts-dir`） |
 | `/app/share/applications/io.github.zenglanmu.yacr.desktop` | 桌面项（`Exec=yacr %F`） |
 | `/app/share/metainfo/io.github.zenglanmu.yacr.metainfo.xml` | AppStream 元数据（AGPL-3.0 / CC0-1.0） |
+| `/app/share/mime/packages/io.github.zenglanmu.yacr.xml` | shared-mime-info 关联定义（只定义非标准类型，host 侧 `update-mime-database` 编译） |
 | `/app/share/icons/hicolor/{scalable,256x256}/apps/io.github.zenglanmu.yacr.{svg,png}` | 图标 |
 
 ### `Exec` 必须是 `%F`
 
 宿主 **拒绝**任何含 `://` 的参数（`LaunchOptions::parse_args` 显式诊断），因此 `Exec=yacr %U`
 会让文件管理器打开失败（收到 `file://…` URI）。`%F` 传普通路径，裸位置参数按 `--open <path>` 处理。
+
+### 文件关联集合
+
+唯一权威是 `packaging/mime/formats.json`（`extensions` / `mimeTypes` / `sharedMimeInfo`）：
+桌面项的 `MimeType=`、AppStream 的 `<mediatype>`、本包安装的
+`/app/share/mime/packages/io.github.zenglanmu.yacr.xml` 都由它派生。
+
+- **不重复定义**（shared-mime-info 已自带，host 数据库权威）：`image/vnd.dwg`（`*.dwg`）、
+  `image/vnd.dxf`（`*.dxf`）、`model/obj`（`*.obj`）、`model/stl`（`*.stl`），以及 DWG/DXF 的
+  别名/旧名 `application/acad`、`application/dwg`、`application/x-dwg`、`application/autocad_dwg`、
+  `application/dxf`。桌面项与元数据里列出它们，只是为了“成为候选”。
+- **本包定义**（`sharedMimeInfo`，按 globs 判别）：`model/step`（`*.step` / `*.stp`，
+  别名 `application/step`；shared-mime-info ≥ 2.5 才有标准类型，故一并放在这里）、
+  `model/ply`（`*.ply`，别名 Cura 的历史名 `application/x-ply`）、`model/off`（`*.off`）、
+  `application/x-geomview-coff`（`*.coff`）、`application/x-ifc`（`*.ifc`，`sub-class-of text/plain`）、
+  四个 Revit 私有类型（`application/x-revit` / `-template` / `-family` / `-family-template`，
+  globs 为 `*.rvt/.rte/.rfa/.rft`）、`application/vnd.sketchup.skp`（`*.skp`）。
+- **`.coff` 绝不能复用 `application/x-coff`**：从 shared-mime-info 2.5 起那是 **Windows 目标代码**
+  （globs `*.o`、`*.obj`）。`.coff` 是 Geomview 的彩色 OFF 变体，故用私有名
+  `application/x-geomview-coff` 自己定义 glob，不碰系统名。
+- **IFC 没有 magic**：IFC 与 STEP 都以 `ISO-10303-21;` 开头，给 IFC 写这条 magic 会把 `.step`
+  文件误判成 IFC；`model/step` 占住该 magic，IFC 只靠 glob 区分。Revit 四个类型同理只有 glob
+  （它们都是 OLE/CFB 容器，magic 分不出项目还是族）；`.skp` 的 UTF-16LE 签名也无法写成紧凑的
+  magic pattern。
+- **关联只让 Yacr 成为候选**：默认应用仍由用户在桌面环境里选择（“打开方式”/默认应用设置），
+  Flatpak 安装不会抢占。检查用 `xdg-mime query filetype <file>`（看类型判定）与
+  `gio open <file>` / `xdg-mime query default <type>`（看默认项是否指向
+  `io.github.zenglanmu.yacr.desktop`）。`update-mime-database` 由 flatpak 的安装触发器在 host
+  侧执行，manifest 里**不需要**也无法在沙箱内跑它。
+- **`Exec=%F` 的代价**：普通路径意味着 **flatpak 的 file-forwarding 不会被启用**，沙箱只按
+  `finish-args` 里声明的 `--filesystem=home` 取文件，**`$HOME` 之外的路径不可读**（打开会失败，
+  不是静默空白）。这是与“图纸同级外部参照必须可见”一起权衡后的**已记录取舍**，不是 bug：
+  改用 file-forwarding（`%U`/`@@`）只会转发被打开的那一个文件，反而丢掉同级 `images/` 参照。
 
 ## 2. 前置条件（实测）
 

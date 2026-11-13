@@ -234,6 +234,17 @@ yacr-<ver>-windows-x86_64/
 所以 Linux/macOS 包的 `bin/` 形态不受影响。契约测试
 `scripts/test-package-windows-release.py` **禁止** `bin/yacr-windows.exe` 回归。
 
+### 5.1 Windows 文件关联：**NOT IMPLEMENTED**（no installer）
+
+发布产物是**可执行文件的 zip**（见上），**没有安装器**，因此 Windows 注册表文件关联
+（`HKCR\.skp` / ProgId / 资源管理器“打开方式”）一律 **NOT IMPLEMENTED**：本轮不接线，也不假装
+已经接线。Tauri 的 `bundle.fileAssociations` 只在**安装器**（NSIS/MSI bundler）阶段写注册表，
+对 zip 产物是 no-op；要真正支持，必须新增 NSIS/MSI bundler 步骤，并让该步骤从
+`packaging/mime/formats.json`（OS 级关联的唯一权威，见 AGENTS.md 铁律 9）派生扩展名/MIME 集合。
+与 macOS（`CFBundleDocumentTypes`）、Linux（`.desktop` + shared-mime-info XML）、Android
+（`bundle.fileAssociations` + 清单 intent-filter）不同，Windows 载体**没有**任何关联声明文件。
+证据边界：本条只描述**未实现**的边界，不是 Windows 关联能力的验收。
+
 **控制台子系统（2026-11-09 起）**：**release** 构建是 GUI 子系统
 （`#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]`），
 双击运行**不再出现控制台窗口**；从终端启动时 `main.rs` 先 `AttachConsole(ATTACH_PARENT_PROCESS)`

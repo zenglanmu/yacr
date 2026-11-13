@@ -31,7 +31,26 @@
   <provides>
     <binary>yacr</binary>
     <mediatype>image/vnd.dwg</mediatype>
+    <mediatype>application/acad</mediatype>
+    <mediatype>application/dwg</mediatype>
+    <mediatype>application/x-dwg</mediatype>
+    <mediatype>application/autocad_dwg</mediatype>
     <mediatype>image/vnd.dxf</mediatype>
+    <mediatype>application/dxf</mediatype>
+    <mediatype>model/obj</mediatype>
+    <mediatype>model/stl</mediatype>
+    <mediatype>model/ply</mediatype>
+    <mediatype>application/x-ply</mediatype>
+    <mediatype>model/off</mediatype>
+    <mediatype>application/x-geomview-coff</mediatype>
+    <mediatype>model/step</mediatype>
+    <mediatype>application/step</mediatype>
+    <mediatype>application/x-ifc</mediatype>
+    <mediatype>application/x-revit</mediatype>
+    <mediatype>application/x-revit-template</mediatype>
+    <mediatype>application/x-revit-family</mediatype>
+    <mediatype>application/x-revit-family-template</mediatype>
+    <mediatype>application/vnd.sketchup.skp</mediatype>
   </provides>
   <categories>
     <category>Graphics</category>

@@ -29,7 +29,9 @@ is the wiring that makes such a run honest:
     `ACTION_CREATE_DOCUMENT` and does every read/write through `ContentResolver`,
     while `MainActivity` exposes the five `document*` instance-JNI entry points Rust
     calls (plus `onNewIntent` for external "Open with"). `bundle.fileAssociations`
-    declares `.dwg` so tauri-build can inject the VIEW intent filters;
+    declares the **full importer set** from `packaging/mime/formats.json` (plus an
+    `application/octet-stream` wildcard) so tauri-build can inject the VIEW intent
+    filters;
   * the refusal contract: marker text, marker first, exit code `6` for `webgl2`;
   * the edge-to-edge gesture-bar inset: the Activity reads `WindowInsets` and
     publishes `--yacr-safe-bottom` on the page, and `mobile.css` is the consumer of
@@ -47,6 +49,7 @@ the Android SDK.
 """
 from __future__ import annotations
 
+import copy
 import json
 import pathlib
 import re
@@ -64,6 +67,20 @@ REFUSAL_RS = SRC_TAURI / "src" / "refusal.rs"
 GEN_ANDROID = SRC_TAURI / "gen" / "android"
 UI_PACKAGE = ROOT / "apps" / "desktop-ui" / "package.json"
 UI_SCRIPT = ROOT / "scripts" / "build-android-ui.sh"
+# The single authority for OS-level file associations (AGENTS.md iron rule 9).
+FORMATS = ROOT / "packaging" / "mime" / "formats.json"
+
+# The DWG provider mime names this carrier has always pinned. They are asserted
+# here *in addition* to the JSON-derived check so that dropping one from
+# `packaging/mime/formats.json` cannot quietly shrink the "Open with" filter set
+# without this file objecting too.
+DWG_MIME_TYPES = (
+    "image/vnd.dwg",
+    "application/acad",
+    "application/dwg",
+    "application/x-dwg",
+    "application/autocad_dwg",
+)
 
 # The shell-only reports `apps/desktop-ui/src/host/invoke.ts` still sends to Tauri on
 # this carrier. They stay registered; the full CAD command set is generated from the
@@ -459,6 +476,178 @@ def check_native_carrier() -> list[str]:
     return problems
 
 
+def _association_extensions(association: dict) -> list[str]:
+    """The association's extensions, normalized the way the manifest pathPatterns use."""
+    return [str(ext).lstrip(".").lower() for ext in association.get("ext") or []]
+
+
+def file_association_problems(associations: list, formats: dict) -> list[str]:
+    """The `bundle.fileAssociations` -> manifest VIEW-filter contract.
+
+    Android's system "Open with" list comes *only* from the intent filters
+    tauri-build injects, so the association set must cover the whole importer
+    surface declared by `packaging/mime/formats.json` (the single authority):
+
+      (a) every canonical extension is declared by some association and nothing
+          else is — an unknown extension would claim files this app cannot import;
+      (b) every canonical mime type carries exactly its canonical extension list.
+          Tauri emits one `<intent-filter>` per (association, mimeType) with one
+          `<data android:pathPattern>` per ext, so a lost ext silently removes a
+          format from the "Open with" list;
+      (c) `application/octet-stream` lists **all** canonical extensions: content
+          providers routinely report CAD files as octet-stream, and without that
+          wildcard those files never match;
+      (d) every association filters on the lowercase `view` action. Tauri writes
+          the value verbatim into `android.intent.action.VIEW`, so a capitalised
+          `VIEW` produces a filter that never fires;
+      (e) the pinned `.dwg` provider mime names survive (see `DWG_MIME_TYPES`).
+
+    `mimeType` is mandatory: Tauri's no-mime fallback infers a type from the
+    extension (or emits a scheme-less filter that never matches), which is the
+    opposite of an honest association. The in-app SAF picker is a different
+    contract and stays `*/*` in `DocumentPicker.kt`; these filters only drive the
+    system file-opened surface.
+    """
+    problems: list[str] = []
+    if not associations:
+        return ["tauri.conf.json: bundle.fileAssociations must declare the importer mime set"]
+
+    canonical = [str(ext).lstrip(".").lower() for ext in formats.get("extensions") or []]
+    declared = formats.get("mimeTypes") or []
+    extras = [str(mime) for mime in formats.get("androidExtraMimeTypes") or []]
+    if not canonical or not declared or not extras:
+        return [
+            f"{FORMATS.relative_to(ROOT)}: extensions, mimeTypes and "
+            "androidExtraMimeTypes must all be non-empty"
+        ]
+    canonical_set = set(canonical)
+
+    by_mime: dict[str, list] = {}
+    for association in associations:
+        mime = association.get("mimeType")
+        if not mime:
+            problems.append(
+                "tauri.conf.json: every file association needs an explicit 'mimeType' "
+                f"(got ext {_association_extensions(association)}); Tauri's no-mime "
+                "fallback emits a filter that never matches"
+            )
+            continue
+        by_mime.setdefault(str(mime), []).append(association)
+
+    # (d) ACTION_VIEW, spelled the way Tauri writes it into the manifest.
+    for association in associations:
+        actions = [str(action) for action in association.get("androidIntentActionFilters") or []]
+        if "view" not in actions:
+            problems.append(
+                "tauri.conf.json: each file association must filter on ACTION_VIEW as the "
+                "lowercase action 'view' (`androidIntentActionFilters: [\"view\"]`); "
+                f"'{association.get('mimeType') or _association_extensions(association)}' "
+                f"has {actions}"
+            )
+
+    # (a) the union of declared extensions is exactly the canonical importer set.
+    covered = {ext for association in associations for ext in _association_extensions(association)}
+    if covered != canonical_set:
+        problems.append(
+            "tauri.conf.json: bundle.fileAssociations must cover exactly the extensions in "
+            f"{FORMATS.relative_to(ROOT)} (missing {sorted(canonical_set - covered)}, "
+            f"unexpected {sorted(covered - canonical_set)})"
+        )
+
+    # (b) every canonical mime type -> exactly its canonical extension list.
+    for entry in declared:
+        mime = str(entry.get("type"))
+        expected = [str(ext).lstrip(".").lower() for ext in entry.get("extensions") or []]
+        matches = by_mime.get(mime) or []
+        if not matches:
+            problems.append(f"tauri.conf.json: the file associations must keep mimeType '{mime}'")
+            continue
+        for association in matches:
+            actual = _association_extensions(association)
+            if actual != expected:
+                problems.append(
+                    f"tauri.conf.json: '{mime}' must declare ext {expected}, got {actual}"
+                )
+
+    # (e) the historical .dwg provider set, asserted independently of the JSON so
+    # that shrinking the JSON itself is caught here too.
+    for mime in DWG_MIME_TYPES:
+        if mime not in by_mime:
+            problems.append(
+                f"tauri.conf.json: the .dwg file associations must keep mimeType '{mime}'"
+            )
+
+    # (c) the extra (wildcard) types must list the whole canonical set.
+    for mime in extras:
+        matches = by_mime.get(mime) or []
+        if not matches:
+            problems.append(
+                f"tauri.conf.json: the '{mime}' wildcard association is required: content "
+                "providers routinely report CAD files as octet-stream, and without it "
+                "'Open with' never matches those files"
+            )
+            continue
+        for association in matches:
+            actual = _association_extensions(association)
+            if sorted(actual) != sorted(canonical):
+                problems.append(
+                    f"tauri.conf.json: the '{mime}' wildcard must list exactly the "
+                    f"{len(canonical)} canonical extensions, got {actual}"
+                )
+    return problems
+
+
+def self_test_file_associations() -> list[str]:
+    """Mutate each clause of `file_association_problems`; every mutation must be reported.
+
+    The real check runs against the committed conf, so a guard that has stopped
+    working would stay green forever. Same pattern as `scripts/test-macos-host.py`.
+    """
+    problems: list[str] = []
+    if not FORMATS.is_file() or not CONF.is_file():
+        return problems  # the real check already reports the missing file
+    formats = json.loads(read(FORMATS))
+    baseline = json.loads(read(CONF)).get("bundle", {}).get("fileAssociations") or []
+    wildcard = (formats.get("androidExtraMimeTypes") or [None])[0]
+
+    def without(mime: str) -> list[dict]:
+        return [association for association in baseline if association.get("mimeType") != mime]
+
+    def with_field(mime: str, field: str, value: object) -> list[dict]:
+        return [
+            {**association, field: value} if association.get("mimeType") == mime else association
+            for association in baseline
+        ]
+
+    mutations: list[tuple[str, list[dict]]] = [
+        # (b)+(e): a canonical type disappears.
+        ("a canonical mime type dropped", without("application/x-ifc")),
+        # (b): a grouped type loses one of its extensions.
+        ("a mime type's extension list shortened", with_field("model/step", "ext", ["step"])),
+        # (d): the schema's action vocabulary is case-sensitive in the manifest.
+        ("a capitalised intent action", with_field("image/vnd.dwg", "androidIntentActionFilters", ["VIEW"])),
+        ("a missing ACTION_VIEW filter", with_field("image/vnd.dwg", "androidIntentActionFilters", [])),
+        # (b): mimeType is mandatory on Android.
+        ("an association without mimeType", with_field("image/vnd.dwg", "mimeType", None)),
+        # (e): the oldest pinned DWG name.
+        ("a pinned .dwg mime type dropped", without("application/autocad_dwg")),
+    ]
+    if wildcard:
+        # (a)+(c): the wildcard carries the canonical set even though every ext is
+        # also named by a type-specific association.
+        mutations.append(("the octet-stream wildcard dropped", without(wildcard)))
+        trimmed = copy.deepcopy(baseline)
+        for association in trimmed:
+            if association.get("mimeType") == wildcard:
+                association["ext"] = _association_extensions(association)[:-1]
+        mutations.append(("the octet-stream wildcard missing an extension", trimmed))
+
+    for label, mutated in mutations:
+        if not file_association_problems(mutated, formats):
+            problems.append(f"self-test: file-association mutation not detected ({label})")
+    return problems
+
+
 def check_document_picker_wiring() -> list[str]:
     """The Kotlin half of the SAF document contract (open + save/export).
 
@@ -567,40 +756,15 @@ def check_document_picker_wiring() -> list[str]:
         )
 
     # fileAssociations -> tauri-build injects the VIEW filters into the manifest.
-    conf = json.loads(read(CONF))
-    associations = conf.get("bundle", {}).get("fileAssociations") or []
-    if not associations:
-        problems.append("tauri.conf.json: bundle.fileAssociations must declare the .dwg association")
+    # The association *set* is derived from the single authority
+    # (`packaging/mime/formats.json`), not from this file: `file_association_problems`
+    # is a pure function so the self-test below can prove it still fails.
+    if not FORMATS.is_file():
+        problems.append(f"missing {FORMATS.relative_to(ROOT)} (file-association authority)")
     else:
-        dwg = [
-            association
-            for association in associations
-            if "dwg" in [str(ext).lstrip(".") for ext in association.get("ext") or []]
-        ]
-        if not dwg:
-            problems.append("tauri.conf.json: bundle.fileAssociations must include ext 'dwg'")
-        for association in dwg:
-            actions = [str(action).lower() for action in association.get("androidIntentActionFilters") or []]
-            if "view" not in actions:
-                problems.append(
-                    "tauri.conf.json: each .dwg association must filter on ACTION_VIEW "
-                    "(`androidIntentActionFilters: [\"view\"]`)"
-                )
-        mime_types = {association.get("mimeType") for association in dwg}
-        for expected in (
-            "image/vnd.dwg",
-            "application/acad",
-            "application/dwg",
-            "application/x-dwg",
-            "application/autocad_dwg",
-            # Providers commonly report .dwg as octet-stream; without this entry the
-            # "Open with" filter would never match those files.
-            "application/octet-stream",
-        ):
-            if expected not in mime_types:
-                problems.append(
-                    f"tauri.conf.json: the .dwg file associations must keep mimeType '{expected}'"
-                )
+        conf = json.loads(read(CONF))
+        associations = conf.get("bundle", {}).get("fileAssociations") or []
+        problems.extend(file_association_problems(associations, json.loads(read(FORMATS))))
 
     # Release R8 obfuscation: the five Java methods are called from Rust by exact
     # name/descriptor, so they must be pinned. This is not theoretical: a release
@@ -678,6 +842,7 @@ def main() -> int:
         check_gesture_bar_inset,
         check_native_carrier,
         check_document_picker_wiring,
+        self_test_file_associations,
         check_generated_project_and_ignores,
     ):
         try:
@@ -691,7 +856,8 @@ def main() -> int:
         return 1
     print("android-host OK: src-tauri layout, conf, Android-only tauri, shell reports, refusal contract, "
           "gesture-bar inset publisher, native SurfaceView/JNI carrier, SAF document picker/read slot, "
-          "dwg file associations, pinned NDK + generated full font package, "
+          "full importer file associations (formats.json + octet-stream wildcard), "
+          "pinned NDK + generated full font package, "
           "deterministic Gradle (configuration cache disabled)")
     return 0
 

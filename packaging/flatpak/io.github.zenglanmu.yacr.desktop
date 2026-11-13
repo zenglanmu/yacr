@@ -8,5 +8,5 @@ Exec=yacr %F
 Icon=io.github.zenglanmu.yacr
 Terminal=false
 Categories=Graphics;Engineering;
-MimeType=image/vnd.dwg;image/vnd.dxf;application/acad;application/dxf;
+MimeType=image/vnd.dwg;application/acad;application/dwg;application/x-dwg;application/autocad_dwg;image/vnd.dxf;application/dxf;model/obj;model/stl;model/ply;application/x-ply;model/off;application/x-geomview-coff;model/step;application/step;application/x-ifc;application/x-revit;application/x-revit-template;application/x-revit-family;application/x-revit-family-template;application/vnd.sketchup.skp;
 Keywords=CAD;DWG;DXF;drawing;measure;annotate;

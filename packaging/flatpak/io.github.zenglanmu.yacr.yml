@@ -47,6 +47,12 @@ modules:
       - cp -a fonts/. /app/fonts/
       - install -Dm644 io.github.zenglanmu.yacr.desktop /app/share/applications/io.github.zenglanmu.yacr.desktop
       - install -Dm644 io.github.zenglanmu.yacr.metainfo.xml /app/share/metainfo/io.github.zenglanmu.yacr.metainfo.xml
+      # File associations: flatpak only exports `share/mime/packages/*.xml` and the
+      # basename must be the app-id. Flatpak's `mime-database` install trigger runs
+      # `update-mime-database` on the host for that directory, so no build command
+      # is needed here (and the host database, not /app, stays authoritative for
+      # dwg/dxf/obj/stl).
+      - install -Dm644 io.github.zenglanmu.yacr.mime.xml /app/share/mime/packages/io.github.zenglanmu.yacr.xml
       - install -Dm644 yacr-icon.svg /app/share/icons/hicolor/scalable/apps/io.github.zenglanmu.yacr.svg
       - install -Dm644 yacr-256.png /app/share/icons/hicolor/256x256/apps/io.github.zenglanmu.yacr.png
     sources:
@@ -57,6 +63,8 @@ modules:
         path: io.github.zenglanmu.yacr.desktop
       - type: file
         path: io.github.zenglanmu.yacr.metainfo.xml
+      - type: file
+        path: io.github.zenglanmu.yacr.mime.xml
       - type: file
         path: ../../assets/yacr-icon.svg
       - type: file

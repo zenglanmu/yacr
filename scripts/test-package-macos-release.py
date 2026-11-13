@@ -12,8 +12,9 @@ that pipeline coherent:
 * the React frontend is built before ``cargo build`` because
   ``tauri::generate_context!`` embeds ``apps/desktop-ui/dist`` at compile time;
 * ``cargo build --release --locked`` for ``cad-cli-tools`` and ``app-macos``;
-* ``Yacr.app`` staging with ``io.github.zenglanmu.yacr``, ``yacr-macos``, dwg/dxf document
-  types and macOS 11.0;
+* ``Yacr.app`` staging with ``io.github.zenglanmu.yacr``, ``yacr-macos``, the full
+  canonical ``CFBundleDocumentTypes`` extension set from
+  ``packaging/mime/formats.json`` and macOS 11.0;
 * Mach-O architecture checks via ``lipo -archs`` and system-only linkage via
   ``otool -L`` (no ``@rpath``/Homebrew dylibs);
 * font assembly through ``scripts/fetch-fonts.sh`` (or committed ``fonts/``
@@ -29,10 +30,14 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts/package-macos-release.sh"
+# Single authority for OS-level associations (AGENTS.md iron rule 9);
+# scripts/test-file-associations.py is the cross-carrier gate over it.
+FORMATS = ROOT / "packaging" / "mime" / "formats.json"
 
 APP_ID = "io.github.zenglanmu.yacr"
 BINARY = "yacr-macos"
@@ -72,7 +77,11 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
         "bundle executable",
         f"<key>CFBundleExecutable</key><string>{BINARY}</string>",
     ),
-    ("document types", "<string>dwg</string><string>dxf</string>"),
+    ("document types", "<key>CFBundleDocumentTypes</key>"),
+    ("viewer role", "<key>CFBundleTypeRole</key><string>Viewer</string>"),
+    ("alternate handler rank", "<key>LSHandlerRank</key><string>Alternate</string>"),
+    ("file-association authority comment", "packaging/mime/formats.json"),
+    ("file-association gate reference", "scripts/test-file-associations.py"),
     ("minimum system version", "<key>LSMinimumSystemVersion</key><string>11.0</string>"),
     ("app icon", "assets/yacr-icon.icns"),
     ("font catalogue assembly", "fetch-fonts.sh"),
@@ -91,7 +100,55 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
 )
 
 
-def check_live_script(text: str) -> list[str]:
+def canonical_extensions() -> list[str]:
+    """The canonical OS-level extension set (single authority, iron rule 9)."""
+    return json.loads(FORMATS.read_text(encoding="utf-8"))["extensions"]
+
+
+PLIST_HEREDOC = 'cat > "${STAGE}/Yacr.app/Contents/Info.plist" <<EOF'
+DOCUMENT_TYPE_KEY = "<key>CFBundleDocumentTypes</key>"
+# One entry per `CFBundleDocumentTypes` dict; the inner `<string>` values are the
+# associated extensions. Parsed instead of substring-matched so a removed or
+# duplicated extension is reported, not silently tolerated.
+EXTENSIONS_ARRAY_RE = re.compile(
+    r"<key>CFBundleTypeExtensions</key>\s*<array>(.*?)</array>", re.S
+)
+
+
+def plist_document_type_extensions(text: str) -> list[str]:
+    """Extensions declared in the heredoc'd ``Info.plist``, in declaration order."""
+    start = text.find(PLIST_HEREDOC)
+    block = text[start:] if start != -1 else text
+    end = block.find("\nEOF\n")
+    if end != -1:
+        block = block[:end]
+    return [
+        extension
+        for array in EXTENSIONS_ARRAY_RE.findall(block)
+        for extension in re.findall(r"<string>([^<]+)</string>", array)
+    ]
+
+
+def check_document_types(text: str, canonical: list[str]) -> list[str]:
+    """Every canonical extension must be associated exactly once."""
+    if PLIST_HEREDOC not in text:
+        return ["missing the Info.plist heredoc"]
+    if DOCUMENT_TYPE_KEY not in text:
+        return ["missing CFBundleDocumentTypes"]
+    problems: list[str] = []
+    declared = plist_document_type_extensions(text)
+    for extension in canonical:
+        if extension not in declared:
+            problems.append(f"document-type extension not associated: {extension!r}")
+    for extension in sorted(set(declared)):
+        if declared.count(extension) > 1:
+            problems.append(
+                f"document-type extension declared more than once: {extension!r}"
+            )
+    return problems
+
+
+def check_live_script(text: str, canonical: list[str] | None = None) -> list[str]:
     problems: list[str] = []
     for label, fragment in REQUIRED_FRAGMENTS:
         if fragment not in text:
@@ -106,6 +163,11 @@ def check_live_script(text: str) -> list[str]:
     cargo = text.find("cargo build --release --locked")
     if build == -1 or cargo == -1 or build > cargo:
         problems.append("the React frontend must be built before cargo build")
+    problems.extend(
+        check_document_types(
+            text, canonical_extensions() if canonical is None else canonical
+        )
+    )
     return problems
 
 
@@ -129,6 +191,36 @@ class PackageMacosReleaseLiveContracts(unittest.TestCase):
         self.assertNotEqual(problems, [])
         self.assertTrue(
             any(APP_ID in problem or "CFBundleIdentifier" in problem for problem in problems)
+        )
+
+    def test_document_types_cover_the_canonical_extension_set(self) -> None:
+        # `packaging/mime/formats.json` is the single authority; the bundle must
+        # associate every canonical extension exactly once.
+        canonical = canonical_extensions()
+        declared = plist_document_type_extensions(self.script)
+        self.assertEqual(sorted(declared), sorted(canonical))
+        self.assertEqual(len(declared), len(set(declared)), "each extension appears once")
+        self.assertEqual(
+            [problem for problem in check_live_script(self.script) if "document-type" in problem],
+            [],
+        )
+
+    def test_missing_document_type_extension_is_reported(self) -> None:
+        mutated = self.script.replace("<string>skp</string>", "")
+        problems = check_live_script(mutated)
+        self.assertTrue(
+            any("'skp'" in problem for problem in problems),
+            f"removed association not reported: {problems}",
+        )
+
+    def test_duplicate_document_type_extension_is_reported(self) -> None:
+        mutated = self.script.replace(
+            "<string>skp</string>", "<string>skp</string>\n        <string>skp</string>"
+        )
+        problems = check_live_script(mutated)
+        self.assertTrue(
+            any("more than once" in problem for problem in problems),
+            f"duplicate association not reported: {problems}",
         )
 
     def test_each_required_fragment_is_required(self) -> None:

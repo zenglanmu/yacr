@@ -1,5 +1,46 @@
 AD
 
+## 2026-11-13 OS 文件关联：注册完整支持集（单源 `formats.json` + 跨载体契约）
+
+- **问题（已核实）**：应用内打开对话框早已含全套（三宿主 `OPEN_EXTENSIONS` 末尾 `rft`/`skp`、
+  i18n 过滤文案、`WEB_OPEN_EXTENSIONS`），但 **OS 级“用 Yacr 打开”** 只注册了 DWG/DXF：Flatpak
+  `.desktop` 的 `MimeType=` 与 AppStream `<mediatype>` 仅有 dwg/dxf；Android
+  `bundle.fileAssociations` 只有 6 条 dwg（manifest 六个 intent-filter）；macOS `Info.plist` 的
+  `CFBundleDocumentTypes` 只有 dwg/dxf；Windows 产物是 zip、无安装器。
+- **单源**：新增 `packaging/mime/formats.json`（15 个扩展 / 21 个 MIME 类型 / 10 个需自带的
+  shared-mime-info 类型 / Android 专用 `application/octet-stream` 通配）。全部载体从它派生，新增
+  `scripts/test-file-associations.py` 逐项比对：三宿主 `OPEN_EXTENSIONS`（含顺序）、
+  `WEB_OPEN_EXTENSIONS`、`.desktop` `MimeType=`、mime XML、metainfo、Android conf + 已提交
+  manifest（pathPattern/mimeType 防陈旧）、macOS plist、Windows 文档边界；已接入 `core-quality`。
+- **Linux/Flatpak**：新增 `packaging/flatpak/io.github.zenglanmu.yacr.mime.xml`，manifest 安装到
+  `/app/share/mime/packages/io.github.zenglanmu.yacr.xml`（flatpak 安装触发器会跑
+  `update-mime-database`，沙箱内无需 build 命令）；`MimeType=` 与 `<mediatype>` 列全 21 个类型。
+  语义要点：`.coff` 用 `application/x-geomview-coff`，**不得**复用 `application/x-coff`
+  （shared-mime-info 2.5 起那是 Windows 目标文件，且其 `*.obj` glob 会抢网格文件）；IFC **不带
+  magic**（IFC 与 STEP 同以 `ISO-10303-21;` 开头，magic 会把 `.step` 误判为 IFC）；Revit 四个类型
+  只用 glob（同为 OLE/CFB，magic 无法区分）；`.skp` 用 de-facto `application/vnd.sketchup.skp`。
+  `Exec=yacr %F` **保持不变**：`--filesystem=home` + 明文路径是既定的同级外部参照取舍，代价是
+  `$HOME` 之外的“打开方式”路径沙箱不可读（`%f` 会走 portal 转发但隐藏同级文件）。
+- **Android**：`bundle.fileAssociations` 6 → **22 条**（21 个类型 + 覆盖全扩展的
+  `application/octet-stream`），由 tauri-build 重新生成已提交 manifest（22 个 intent-filter、
+  38 个 pathPattern），**未手改**；`mimeType` 必填（Tauri 无 mime 的分支不带 scheme，实际永不匹配）。
+- **macOS**：打包脚本写出的 `Info.plist` 分两组（CAD drawing / 3D model preview）覆盖 15 个扩展，
+  `Viewer` + `Alternate`。
+- **Windows**：zip 无安装器 ⇒ 注册表关联 **NOT IMPLEMENTED**（Tauri 的 `fileAssociations` 只在
+  NSIS/MSI 里写注册表），已在 `docs/windows-app.md` §5.1 显式写明，不做无效接线。
+- **证据（本轮实跑）**：`test-file-associations.py` → `OK: 0 mismatches`；`test-package-linux-release.py`
+  **23 tests**、`test-package-macos-release.py` **10 tests**、`test-android-host.py`、
+  `check-workflows.py` 全部通过；`flatpak-builder --user --force-clean` 构建成功，产物内
+  `/app/share/mime/packages/io.github.zenglanmu.yacr.xml` 存在、`.desktop` 的 `MimeType=` 为
+  21 个类型；把该 `share/mime` 编译成 mime DB 后，`xdg-mime query filetype` 对 15 个扩展**全部**
+  返回预期类型（`model/step`、`model/ply`、`model/off`、`application/x-geomview-coff`、
+  `application/x-ifc`、4× `application/x-revit*`、`application/vnd.sketchup.skp`、以及系统自带的
+  `image/vnd.dwg`/`image/vnd.dxf`/`model/obj`/`model/stl`）。
+  **NOT VERIFIED**：真桌面点“打开方式”（默认应用选择、portal 通配匹配）、Android 真机 DocumentsUI、
+  macOS LaunchServices 实际注册；Windows 无安装器不可测。AppStream `appstreamcli validate` NOT RUN。
+- **注意**：工作树同时存在并行 lane 的 `cad_orbit`/ViewCube 改动（`apps/app-linux/src/host/tick.rs`
+  等），本轮未触碰、未提交；`check-file-size.py` 因其把该文件增至 1014 行而失败，与本轮无关。
+
 ## 2026-11-13 合并两个工作树（`revit-texture`：`vendor/rvt` 受控补丁；`ts-api`：插件 API 可用）
 
 - **范围**：`revit-texture` 的 `25da5902`（`vendor/rvt` 0.17.0 固定路径补丁、ADR-0035、

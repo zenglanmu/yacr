@@ -53,7 +53,103 @@
         "androidIntentActionFilters": ["view"]
       },
       {
-        "ext": ["dwg"],
+        "ext": ["dxf"],
+        "mimeType": "image/vnd.dxf",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["dxf"],
+        "mimeType": "application/dxf",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["obj"],
+        "mimeType": "model/obj",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["stl"],
+        "mimeType": "model/stl",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["ply"],
+        "mimeType": "model/ply",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["ply"],
+        "mimeType": "application/x-ply",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["off"],
+        "mimeType": "model/off",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["coff"],
+        "mimeType": "application/x-geomview-coff",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["step", "stp"],
+        "mimeType": "model/step",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["step", "stp"],
+        "mimeType": "application/step",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["ifc"],
+        "mimeType": "application/x-ifc",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["rvt"],
+        "mimeType": "application/x-revit",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["rte"],
+        "mimeType": "application/x-revit-template",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["rfa"],
+        "mimeType": "application/x-revit-family",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["rft"],
+        "mimeType": "application/x-revit-family-template",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["skp"],
+        "mimeType": "application/vnd.sketchup.skp",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": [
+          "dwg",
+          "dxf",
+          "obj",
+          "stl",
+          "ply",
+          "off",
+          "coff",
+          "step",
+          "stp",
+          "ifc",
+          "rvt",
+          "rte",
+          "rfa",
+          "rft",
+          "skp"
+        ],
         "mimeType": "application/octet-stream",
         "androidIntentActionFilters": ["view"]
       }

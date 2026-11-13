@@ -15,7 +15,12 @@ the path coherent:
 * the script builds the frontend, builds the binary **with**
   ``tauri/custom-protocol`` (else it embeds the dev URL), and drives
   ``flatpak-builder`` + ``flatpak build-bundle`` with loud failures;
-* the metainfo declares ``yacr`` and ``image/vnd.dwg``.
+* the metainfo declares ``yacr`` and ``image/vnd.dwg``;
+* the file-association set matches ``packaging/mime/formats.json`` (the single
+  authority): ``MimeType=`` and ``<mediatype>`` list exactly its
+  ``mimeTypes[].type`` values, and the shipped shared-mime-info XML defines
+  exactly its ``sharedMimeInfo`` types (never the Windows ``coff`` object-code
+  type) and is installed at ``/app/share/mime/packages/<app-id>.xml``.
 
 This is a text check: it runs no flatpak/npm/cargo command and makes no network
 access. It is *not* evidence that a bundle was (or can be) built.
@@ -35,10 +40,30 @@ FLATPAK_DIR = ROOT / "packaging/flatpak"
 MANIFEST = FLATPAK_DIR / "io.github.zenglanmu.yacr.yml"
 DESKTOP = FLATPAK_DIR / "io.github.zenglanmu.yacr.desktop"
 METAINFO = FLATPAK_DIR / "io.github.zenglanmu.yacr.metainfo.xml"
+MIME_XML = FLATPAK_DIR / "io.github.zenglanmu.yacr.mime.xml"
+FORMATS = ROOT / "packaging/mime/formats.json"
 
 APP_ID = "io.github.zenglanmu.yacr"
 BINARY = "yacr"
 CJK_FALLBACK = "NotoSansCJKsc-Regular.otf"
+WINDOWS_COFF_TYPE = "application/x-coff"
+
+
+def mime_type_list(formats: dict) -> list[str]:
+    """Distinct ``mimeTypes[].type`` values, in JSON order."""
+    seen: list[str] = []
+    for entry in formats.get("mimeTypes", []):
+        if entry["type"] not in seen:
+            seen.append(entry["type"])
+    return seen
+
+
+def shared_mime_types(formats: dict) -> list[str]:
+    return [entry["type"] for entry in formats.get("sharedMimeInfo", [])]
+
+
+def check_file_present(path: pathlib.Path) -> list[str]:
+    return [] if path.is_file() else [f"missing packaging file: {path}"]
 
 
 def check_manifest(text: str) -> list[str]:
@@ -85,7 +110,7 @@ def check_manifest(text: str) -> list[str]:
     return problems
 
 
-def check_desktop(text: str) -> list[str]:
+def check_desktop(text: str, formats: dict) -> list[str]:
     problems: list[str] = []
     required = (
         "Type=Application",
@@ -104,9 +129,20 @@ def check_desktop(text: str) -> list[str]:
     mime_line = next(
         (line for line in text.splitlines() if line.startswith("MimeType=")), ""
     )
-    for mime in ("image/vnd.dwg", "image/vnd.dxf"):
-        if mime not in mime_line:
-            problems.append(f"MimeType missing {mime}")
+    # The claimed set must equal packaging/mime/formats.json exactly: a missing
+    # type means the desktop environment never offers Yacr, an extra one claims
+    # a format no carrier was verified against.
+    declared = [mime for mime in mime_line[len("MimeType="):].split(";") if mime]
+    expected = mime_type_list(formats)
+    if declared != expected:
+        missing = [mime for mime in expected if mime not in declared]
+        extra = [mime for mime in declared if mime not in expected]
+        problems.append(
+            f"MimeType= must equal formats.json mimeTypes[].type in order"
+            f" (missing={missing}, unexpected={extra}, ordered_match={declared == expected})"
+        )
+    if mime_line and not mime_line.endswith(";"):
+        problems.append("MimeType= list must be ';'-terminated")
     if not text.startswith("[Desktop Entry]"):
         problems.append("desktop entry must start with [Desktop Entry]")
     return problems
@@ -164,7 +200,7 @@ def check_script(text: str) -> list[str]:
     return problems
 
 
-def check_metainfo(text: str) -> list[str]:
+def check_metainfo(text: str, formats: dict) -> list[str]:
     problems: list[str] = []
     required = (
         f"<id>{APP_ID}</id>",
@@ -182,20 +218,67 @@ def check_metainfo(text: str) -> list[str]:
     for fragment in required:
         if fragment not in text:
             problems.append(f"metainfo missing {fragment!r}")
+    # AppStream must advertise the same set as the desktop entry / formats.json.
+    declared = re.findall(r"<mediatype>([^<]+)</mediatype>", text)
+    expected = mime_type_list(formats)
+    if declared != expected:
+        missing = [mime for mime in expected if mime not in declared]
+        extra = [mime for mime in declared if mime not in expected]
+        problems.append(
+            f"<mediatype> list must equal formats.json mimeTypes[].type in order"
+            f" (missing={missing}, unexpected={extra}, ordered_match={declared == expected})"
+        )
+    return problems
+
+
+def check_mime_xml(xml_text: str, manifest_text: str, formats: dict) -> list[str]:
+    """The shipped shared-mime-info XML and how the manifest installs it."""
+    problems: list[str] = []
+    # Only the non-standard types belong here: dwg/dxf/obj/stl and their aliases
+    # already live in the host database and must not be redefined.
+    defined = re.findall(r'<mime-type type="([^"]+)"', xml_text)
+    expected = shared_mime_types(formats)
+    if sorted(defined) != sorted(expected) or len(set(defined)) != len(defined):
+        problems.append(
+            "mime XML must define exactly formats.json sharedMimeInfo types"
+            f" (defined={defined}, expected={expected})"
+        )
+    # shared-mime-info 2.5 assigns the Windows object-code globs (*.o, *.obj) to
+    # this name; a Geomview .coff file must never be typed as object code.
+    if WINDOWS_COFF_TYPE in xml_text:
+        problems.append(
+            f"mime XML must never mention {WINDOWS_COFF_TYPE}"
+            " (Windows object code since shared-mime-info 2.5)"
+        )
+    # flatpak exports only share/mime/packages/*.xml, and the basename must be
+    # the app-id, so the install target is fixed.
+    install = (
+        f"install -Dm644 {MIME_XML.name}"
+        f" /app/share/mime/packages/{APP_ID}.xml"
+    )
+    if install not in manifest_text:
+        problems.append(f"manifest must install the mime XML: {install!r}")
     return problems
 
 
 class PackageLinuxReleaseContracts(unittest.TestCase):
     def setUp(self) -> None:
+        self.formats = json.loads(FORMATS.read_text(encoding="utf-8"))
         self.manifest_text = MANIFEST.read_text(encoding="utf-8")
         self.desktop_text = DESKTOP.read_text(encoding="utf-8")
         self.metainfo_text = METAINFO.read_text(encoding="utf-8")
+        self.mime_xml_text = MIME_XML.read_text(encoding="utf-8")
         self.script_text = SCRIPT.read_text(encoding="utf-8")
 
     def test_flathub_files_exist(self) -> None:
-        for path in (MANIFEST, DESKTOP, METAINFO):
+        for path in (MANIFEST, DESKTOP, METAINFO, MIME_XML):
             with self.subTest(path=path.name):
                 self.assertTrue(path.is_file(), f"missing packaging file: {path}")
+
+    def test_missing_mime_xml_is_reported(self) -> None:
+        self.assertNotEqual(
+            check_file_present(FLATPAK_DIR / "io.github.zenglanmu.yacr.absent.xml"), []
+        )
 
     def test_manifest_declares_the_react_host(self) -> None:
         self.assertEqual(check_manifest(self.manifest_text), [])
@@ -209,14 +292,72 @@ class PackageLinuxReleaseContracts(unittest.TestCase):
         self.assertNotEqual(check_manifest(mutated), [])
 
     def test_desktop_entry_launches_the_host(self) -> None:
-        self.assertEqual(check_desktop(self.desktop_text), [])
+        self.assertEqual(check_desktop(self.desktop_text, self.formats), [])
 
     def test_desktop_entry_rejects_uri_arguments(self) -> None:
         mutated = self.desktop_text.replace("Exec=yacr %F", "Exec=yacr %U")
-        self.assertNotEqual(check_desktop(mutated), [])
+        self.assertNotEqual(check_desktop(mutated, self.formats), [])
+
+    def test_desktop_entry_claims_the_whole_association_set(self) -> None:
+        # Exact set equality (not just "dwg/dxf present"): dropping any claimed
+        # type must fail, and so must claiming a type formats.json does not list.
+        mutated = self.desktop_text.replace(";application/x-ifc;", ";")
+        self.assertNotEqual(check_desktop(mutated, self.formats), [])
+
+    def test_desktop_entry_rejects_an_unlisted_mime_type(self) -> None:
+        mutated = self.desktop_text.replace(
+            "application/vnd.sketchup.skp;", "application/vnd.sketchup.skp;text/x-made-up;"
+        )
+        self.assertNotEqual(check_desktop(mutated, self.formats), [])
 
     def test_metainfo_declares_appstream_identity(self) -> None:
-        self.assertEqual(check_metainfo(self.metainfo_text), [])
+        self.assertEqual(check_metainfo(self.metainfo_text, self.formats), [])
+
+    def test_metainfo_declares_every_media_type(self) -> None:
+        mutated = self.metainfo_text.replace(
+            "<mediatype>application/x-revit-family</mediatype>\n", ""
+        )
+        self.assertNotEqual(check_metainfo(mutated, self.formats), [])
+
+    def test_metainfo_rejects_an_unlisted_media_type(self) -> None:
+        mutated = self.metainfo_text.replace(
+            "<mediatype>application/vnd.sketchup.skp</mediatype>",
+            "<mediatype>application/vnd.sketchup.skp</mediatype>\n"
+            "    <mediatype>text/x-made-up</mediatype>",
+        )
+        self.assertNotEqual(check_metainfo(mutated, self.formats), [])
+
+    def test_mime_xml_defines_only_the_shipped_types(self) -> None:
+        self.assertEqual(
+            check_mime_xml(self.mime_xml_text, self.manifest_text, self.formats), []
+        )
+
+    def test_mime_xml_rejects_a_redefined_standard_type(self) -> None:
+        # dwg/dxf/obj/stl come from the host database and must not be redefined.
+        mutated = self.mime_xml_text.replace(
+            '<mime-type type="model/off">',
+            '<mime-type type="image/vnd.dwg">\n<comment>x</comment>\n</mime-type>\n'
+            '<mime-type type="model/off">',
+        )
+        self.assertNotEqual(
+            check_mime_xml(mutated, self.manifest_text, self.formats), []
+        )
+
+    def test_mime_xml_rejects_the_windows_coff_type(self) -> None:
+        mutated = self.mime_xml_text + f"<!-- {WINDOWS_COFF_TYPE} -->\n"
+        problems = check_mime_xml(mutated, self.manifest_text, self.formats)
+        self.assertTrue(
+            any(WINDOWS_COFF_TYPE in problem for problem in problems), problems
+        )
+
+    def test_mime_xml_must_be_installed_at_the_app_id_path(self) -> None:
+        mutated = self.manifest_text.replace(
+            f"/app/share/mime/packages/{APP_ID}.xml",
+            "/app/share/mime/packages/yacr.xml",
+        )
+        self.assertNotEqual(
+            check_mime_xml(self.mime_xml_text, mutated, self.formats), []
+        )
 
     def test_script_is_a_live_packaging_path(self) -> None:
         self.assertEqual(check_script(self.script_text), [])

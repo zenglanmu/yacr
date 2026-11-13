@@ -1,0 +1,131 @@
+{
+  "$comment": [
+    "Single authority for OS-level file associations (AGENTS.md iron rule 9).",
+    "Everything below is derived from this file: the Linux Flatpak .desktop MimeType",
+    "line, the AppStream <mediatype> list, the shared-mime-info XML the Flatpak ships,",
+    "the Android bundle.fileAssociations, the macOS Info.plist CFBundleDocumentTypes,",
+    "and scripts/test-file-associations.py, which fails when any carrier drifts.",
+    "",
+    "The in-app open pickers keep their own per-platform OPEN_EXTENSIONS arrays (they",
+    "also admit .rfa/.rft so the RVT adapter can refuse family files by name); this",
+    "file must list the same extension set, and the gate compares them.",
+    "",
+    "MIME choices (2026-11-13):",
+    "  * dwg/dxf/obj/stl are standard in shared-mime-info; do not redefine them.",
+    "  * model/step only exists in shared-mime-info >= 2.5, so it is shipped here too.",
+    "  * model/ply and model/off have no standard type; application/x-ply is Cura's",
+    "    legacy name and is kept as an alias.",
+    "  * .coff is a Geomview OFF variant. Never reuse application/x-coff: since",
+    "    shared-mime-info 2.5 that is Windows object code with globs *.o and *.obj.",
+    "  * application/x-ifc matches Bonsai/IfcOpenShell. It carries NO magic here:",
+    "    IFC and STEP both start with `ISO-10303-21;`, and the IFC magic would mistype",
+    "    .step files. The glob is the discriminator.",
+    "  * Revit documents are private types with globs only: all four are OLE/CFB",
+    "    containers, so magic cannot tell a project from a family.",
+    "  * .skp uses the de-facto application/vnd.sketchup.skp with a glob only (the",
+    "    UTF-16LE signature is not expressible as a compact magic pattern).",
+    "  * application/octet-stream is added on Android only: content providers routinely",
+    "    report CAD files as octet-stream, and without it 'Open with' never matches.",
+    "",
+    "Windows is deliberately absent: the release is a zip of executables with no",
+    "installer, and registry associations can only be written by an installer. See",
+    "docs/windows-app.md."
+  ],
+  "extensions": [
+    "dwg",
+    "dxf",
+    "obj",
+    "stl",
+    "ply",
+    "off",
+    "coff",
+    "step",
+    "stp",
+    "ifc",
+    "rvt",
+    "rte",
+    "rfa",
+    "rft",
+    "skp"
+  ],
+  "mimeTypes": [
+    { "type": "image/vnd.dwg", "extensions": ["dwg"] },
+    { "type": "application/acad", "extensions": ["dwg"] },
+    { "type": "application/dwg", "extensions": ["dwg"] },
+    { "type": "application/x-dwg", "extensions": ["dwg"] },
+    { "type": "application/autocad_dwg", "extensions": ["dwg"] },
+    { "type": "image/vnd.dxf", "extensions": ["dxf"] },
+    { "type": "application/dxf", "extensions": ["dxf"] },
+    { "type": "model/obj", "extensions": ["obj"] },
+    { "type": "model/stl", "extensions": ["stl"] },
+    { "type": "model/ply", "extensions": ["ply"] },
+    { "type": "application/x-ply", "extensions": ["ply"] },
+    { "type": "model/off", "extensions": ["off"] },
+    { "type": "application/x-geomview-coff", "extensions": ["coff"] },
+    { "type": "model/step", "extensions": ["step", "stp"] },
+    { "type": "application/step", "extensions": ["step", "stp"] },
+    { "type": "application/x-ifc", "extensions": ["ifc"] },
+    { "type": "application/x-revit", "extensions": ["rvt"] },
+    { "type": "application/x-revit-template", "extensions": ["rte"] },
+    { "type": "application/x-revit-family", "extensions": ["rfa"] },
+    { "type": "application/x-revit-family-template", "extensions": ["rft"] },
+    { "type": "application/vnd.sketchup.skp", "extensions": ["skp"] }
+  ],
+  "androidExtraMimeTypes": ["application/octet-stream"],
+  "sharedMimeInfo": [
+    {
+      "type": "model/step",
+      "comment": "STEP CAD model (ISO 10303-21)",
+      "globs": ["*.step", "*.stp", "*.STEP", "*.STP"],
+      "magic": ["ISO-10303-21;"],
+      "aliases": ["application/step"]
+    },
+    {
+      "type": "model/ply",
+      "comment": "PLY 3D model",
+      "globs": ["*.ply", "*.PLY"],
+      "aliases": ["application/x-ply"]
+    },
+    {
+      "type": "model/off",
+      "comment": "OFF 3D model (Geomview Object File Format)",
+      "globs": ["*.off", "*.OFF"]
+    },
+    {
+      "type": "application/x-geomview-coff",
+      "comment": "COFF 3D model (Geomview Object File Format, colored)",
+      "globs": ["*.coff", "*.COFF"]
+    },
+    {
+      "type": "application/x-ifc",
+      "comment": "IFC building model (Industry Foundation Classes)",
+      "globs": ["*.ifc", "*.IFC"],
+      "subClassOf": "text/plain"
+    },
+    {
+      "type": "application/x-revit",
+      "comment": "Revit project",
+      "globs": ["*.rvt", "*.RVT"]
+    },
+    {
+      "type": "application/x-revit-template",
+      "comment": "Revit project template",
+      "globs": ["*.rte", "*.RTE"]
+    },
+    {
+      "type": "application/x-revit-family",
+      "comment": "Revit family",
+      "globs": ["*.rfa", "*.RFA"]
+    },
+    {
+      "type": "application/x-revit-family-template",
+      "comment": "Revit family template",
+      "globs": ["*.rft", "*.RFT"]
+    },
+    {
+      "type": "application/vnd.sketchup.skp",
+      "comment": "SketchUp model",
+      "globs": ["*.skp", "*.SKP"]
+    }
+  ]
+}
