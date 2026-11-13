@@ -211,13 +211,13 @@ mod tests {
                 );
             }
         }
-        // Three operations are served in this build: the two reflected document
-        // reads and the database revision (M2.2/M2.3). Pure value helpers and the
-        // manifest parser are package features, not descriptor rows, so they never
-        // appear here.
+        // Sixteen operations are served in this build: the reflected reads on the
+        // read lane; the live-session operations and the editor prompts on the
+        // mutating lane. Pure value helpers and the manifest parser are package
+        // features, not descriptor rows, so they never appear here.
         assert_eq!(
-            supported, 3,
-            "this build serves exactly three host operations"
+            supported, 16,
+            "this build serves exactly sixteen host operations"
         );
     }
 

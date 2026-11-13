@@ -14,15 +14,25 @@
 // wire, so they have no row and are available unconditionally. Advertising them
 // in the descriptor would claim host state that does not exist.
 //
-// Three rows are `supported` in this build — the reflected document reads
-// (`documentManager.mdiActiveDocument`, `documentManager.documents`) and the
-// database revision read, all served over `cad_api_call` — and the other 18 are
-// `pending`: the table is an honest reservation list, not an availability list. It
-// is deliberately complete rather than aspirational — an operation that exists here
-// but is `pending` is refused by name, an operation the host marks `unsupported` is
-// refused by name, and an operation the host does not name at all is refused as
-// `api.descriptor_missing`. There is no silent "maybe" state and no empty-success
-// path.
+// Sixteen rows are `supported` in this build: the reflected reads
+// (`documentManager.mdiActiveDocument`, `documentManager.documents`, the database
+// revision and symbol-table projections, the editor's current selection) over
+// `cad_api_call`; the live-session operations (`database.getObjectId`,
+// `transaction.getObject`, `transaction.commit`) and the editor prompts (plus the
+// immediate `selectAll`) over the mutating `cad_api_submit` lane. One row is
+// `pending` (`document.lock`): the table is an honest reservation list, not an
+// availability list. It is deliberately complete rather than aspirational — an
+// operation that exists here but is `pending` is refused by name, an operation the
+// host marks `unsupported` is refused by name, and an operation the host does not
+// name at all is refused as `api.descriptor_missing`. There is no silent "maybe"
+// state and no empty-success path.
+//
+// `transaction.start`, `transaction.addNewlyCreated` and `transaction.abort` have
+// **no row**: they are client-local bookkeeping (the host mints no transaction
+// handle), so advertising them would promise a host round-trip that does not exist.
+// `Runtime.registerCommand` has none either: command registration is client-local
+// and reported to the host's own funnel hook, which is why the `Runtime` namespace
+// has no host operation at all in this build.
 
 /** Wire/API generation. A host and this package must agree exactly. */
 export const API_VERSION = 1;
@@ -69,7 +79,7 @@ export const API_NAMESPACES: readonly CadApiNamespace[] = [
 ];
 
 /**
- * The v1 capability table: 21 host operations, 18 `pending` and three `supported`.
+ * The v1 capability table: 17 host operations, one `pending` and 16 `supported`.
  *
  * Do not flip a row to `supported` here without the host side landing first (and
  * a `case` in the WebView adapter) — the contract test will catch the JSON drift,
@@ -98,17 +108,18 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
     status: 'pending',
     reason: pendingReason('ApplicationServices', 'document.lock'),
   },
+  // A handle lookup is a live-session read, so it is served by the submit lane.
   {
     namespace: 'DatabaseServices',
     operation: 'database.getObjectId',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'database.getObjectId'),
+    status: 'supported',
   },
+  // The block/layer projection and the active layer name, as one read. Served, so
+  // no `reason`; `Database.symbolTables` and `Database.clayer` share one request.
   {
     namespace: 'DatabaseServices',
     operation: 'database.symbolTables',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'database.symbolTables'),
+    status: 'supported',
   },
   // The revision a commit's `expectedRevision` is compared against. Read from the
   // host every call (`{ database: id }` -> `{ revision }`), never cached.
@@ -117,95 +128,69 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
     operation: 'database.revision',
     status: 'supported',
   },
-  {
-    namespace: 'DatabaseServices',
-    operation: 'transaction.start',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'transaction.start'),
-  },
+  // Opening an object reads the live session (submit lane); the entity is decoded
+  // by its `typeName`.
   {
     namespace: 'DatabaseServices',
     operation: 'transaction.getObject',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'transaction.getObject'),
+    status: 'supported',
   },
-  {
-    namespace: 'DatabaseServices',
-    operation: 'transaction.addNewlyCreated',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'transaction.addNewlyCreated'),
-  },
+  // The only mutating operation this build performs: queued over
+  // `cad_api_submit`, answered through `cad_api_poll`. `start`,
+  // `addNewlyCreated` and `abort` are client-local and have no row.
   {
     namespace: 'DatabaseServices',
     operation: 'transaction.commit',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'transaction.commit'),
-  },
-  {
-    namespace: 'DatabaseServices',
-    operation: 'transaction.abort',
-    status: 'pending',
-    reason: pendingReason('DatabaseServices', 'transaction.abort'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getPoint',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getPoint'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getEntity',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getEntity'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getSelection',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getSelection'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getString',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getString'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getDouble',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getDouble'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getInteger',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getInteger'),
+    status: 'supported',
   },
   {
     namespace: 'EditorInput',
     operation: 'editor.getKeyword',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.getKeyword'),
+    status: 'supported',
   },
-  {
-    namespace: 'EditorInput',
-    operation: 'editor.writeMessage',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.writeMessage'),
-  },
+  // `editor.writeMessage` has **no row**: it is client-local (the host's message
+  // sink), so advertising it would promise a host round-trip that does not exist.
   {
     namespace: 'EditorInput',
     operation: 'editor.selectAll',
-    status: 'pending',
-    reason: pendingReason('EditorInput', 'editor.selectAll'),
+    status: 'supported',
   },
+  // The selection the user holds right now, as a reflected read (not a prompt).
+  // Served, so no `reason`; the prompt rows above stay pending.
   {
-    namespace: 'Runtime',
-    operation: 'runtime.registerCommand',
-    status: 'pending',
-    reason: pendingReason('Runtime', 'runtime.registerCommand'),
+    namespace: 'EditorInput',
+    operation: 'editor.currentSelection',
+    status: 'supported',
   },
 ];
 

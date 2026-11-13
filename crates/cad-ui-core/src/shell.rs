@@ -533,6 +533,7 @@ mod tests {
             theme: "dark".into(),
             view: None,
             navigation: crate::session::CadNavigation::default(),
+            pending_prompt: None,
         }
     }
 

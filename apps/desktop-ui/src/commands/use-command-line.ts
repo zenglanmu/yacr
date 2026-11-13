@@ -26,6 +26,15 @@
 // dismisses the field, and the field returns to command-name mode the moment the
 // flag clears. The mode is read from that flag alone — never inferred from the
 // tool key or the captured point count.
+//
+// The pending plugin prompt (`cad_status.pendingPrompt`) is the second such mode,
+// and the stricter one: the line is **answer data**, so it has its own draft,
+// Enter submits it on the same `cad_set_tool_text` channel (an empty line is the
+// plain `CONFIRM`), Escape is `CANCEL`, and no suggestion or command admission is
+// offered while it is open (`commands/plugin-prompt.ts` owns the routing). Its
+// sentence and keywords are the host's own strings and are shown verbatim; a
+// prompt ending for any reason (answered, cancelled, or dropped from a status)
+// clears only the answer draft — the command draft underneath is untouched.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { useI18n, useShell } from '../context.ts';
@@ -33,6 +42,8 @@ import { handleCommandKey } from '../cad/cad-command.ts';
 import { defaultSuggestionIndex } from './commands.ts';
 import type { CommandAlias, CommandSuggestion } from './commands.ts';
 import type { ComposingKeyEvent } from '../components/key-events.ts';
+import { submitPluginPrompt } from './plugin-prompt.ts';
+import type { PluginPromptOutcome } from './plugin-prompt.ts';
 import {
   TEXT_STEP_PROMPT_KEY,
   TEXT_TOO_LONG_KEY,
@@ -61,6 +72,19 @@ export interface CommandLineController {
   readonly textMode: boolean;
   /** The text step's name (`TEXT_STEP_PROMPT_KEY`), or `null` outside it. */
   readonly textStepKey: string | null;
+  /**
+   * Whether a plugin `Editor` prompt owns the line: the draft is **answer
+   * data**, Enter submits it (an empty line is `CONFIRM`) and Escape is `CANCEL`.
+   */
+  readonly promptMode: boolean;
+  /** The pending prompt's own sentence, or `null` outside a prompt. */
+  readonly promptMessage: string | null;
+  /** The pending prompt's accepted options, in the plugin's spelling. */
+  readonly promptKeywords: readonly string[];
+  /** The last invalid-input sentence the host reported, or `null`. */
+  readonly promptError: string | null;
+  /** Answer the prompt with one of its keywords (a chip press). */
+  readonly chooseKeyword: (keyword: string) => void;
   /** The text in the field. */
   readonly value: string;
   /** The placeholder, already translated. */
@@ -113,9 +137,19 @@ export function useCommandLine(): CommandLineController {
   // step's outcome is not state here — a refusal goes straight into the history
   // (see `refuse`), which is the only surface that shows it.
   const [textDraft, setTextDraft] = useState('');
+  // The prompt answer's own draft, for the same reason the text step has one:
+  // the command line's content survives a prompt, and an answer can never be
+  // left in the field to be submitted as a command afterwards.
+  const [promptDraft, setPromptDraft] = useState('');
   const tool = shell.status?.tool ?? null;
   const toolKey = typeof tool?.key === 'string' ? tool.key : null;
   const textMode = awaitingToolText(shell.status);
+  // The pending plugin prompt (`cad_status.pendingPrompt`). It is read, never
+  // inferred: the block is the host's own statement that the next line is answer
+  // data, and the validated block is what `commands/plugin-prompt.ts` routes.
+  const prompt = shell.pluginPrompt;
+  const promptMode = prompt !== null;
+  const promptError = prompt?.error ?? null;
   // The host's prefill for this text step: `TEXTEDIT` sends the selected text so
   // the user edits it instead of retyping; a fresh `TEXT` sends nothing.
   const prefill = textMode ? toolTextPrefill(tool) : null;
@@ -123,6 +157,7 @@ export function useCommandLine(): CommandLineController {
   const suggestions = useMemo(
     () => commandLineSuggestions({
       textMode,
+      promptMode,
       command: shell.command,
       history: shell.history,
       aliases: shell.commandAliases as readonly CommandAlias[],
@@ -130,10 +165,11 @@ export function useCommandLine(): CommandLineController {
     // `shell.commandAliases` is a dependency because it is the row source (module
     // state loaded once at startup): without it a memo from before the table
     // arrived would hide the shorthand rows.
-    [textMode, shell.command, shell.history, shell.commandAliases],
+    [textMode, promptMode, shell.command, shell.history, shell.commandAliases],
   );
   const listOpen = commandLineListOpen({
     textMode,
+    promptMode,
     focused,
     command: shell.command,
     historyOpen: shell.historyOpen,
@@ -150,6 +186,15 @@ export function useCommandLine(): CommandLineController {
     if (textMode) return;
     setTextDraft('');
   }, [textMode]);
+
+  // Leaving the prompt drops the answer draft for the same reason: a prompt that
+  // the host has already answered (or cancelled from the drawing) must not leave
+  // its half-typed answer in a field that is a command line again. The command
+  // draft itself was never touched, so it comes back intact.
+  useEffect(() => {
+    if (promptMode) return;
+    setPromptDraft('');
+  }, [promptMode]);
 
   // A new text step starts with the host's prefill — `TEXTEDIT` puts the current
   // string in the field so the user edits, a fresh `TEXT` starts empty — and
@@ -220,6 +265,10 @@ export function useCommandLine(): CommandLineController {
   }
 
   function submit() {
+    if (promptMode) {
+      sendPromptAnswer(promptDraft);
+      return;
+    }
     if (textMode) {
       submitText();
       return;
@@ -227,7 +276,61 @@ export function useCommandLine(): CommandLineController {
     void shell.submitCommand(commandLineSubmitText({ command: shell.command, highlight, suggestions }));
   }
 
+  /**
+   * One prompt answer, on the lane its intent names (`commands/plugin-prompt.ts`).
+   *
+   * The text channel's own result is mapped exactly like the text step's: an
+   * accepted answer clears the draft, a re-entrant press reports nothing, and a
+   * refusal becomes the one history row (the bound is named instead of the
+   * machine code when the draft was simply too long).
+   */
+  function recordPromptOutcome(result: PluginPromptOutcome) {
+    if (result.kind === 'accepted') {
+      setPromptDraft('');
+      return;
+    }
+    if (result.kind === 'busy' || result.kind === 'ignored') return;
+    refuse(result.kind === 'failed'
+      ? result.error
+      : result.reason === 'too_long'
+        ? t(TEXT_TOO_LONG_KEY, { max: TOOL_TEXT_MAX_LENGTH })
+        : result.error);
+  }
+
+  /**
+   * Send `line` as the pending prompt's answer.
+   *
+   * Nothing here consults the command vocabulary: the typed line is answer data,
+   * so it travels on `cad_set_tool_text`, and an empty line is the ordinary
+   * `CONFIRM` (the host applies its default, or answers `None`).
+   */
+  function sendPromptAnswer(line: string) {
+    void submitPluginPrompt(prompt, line, {
+      confirm: () => shell.submitCommand('CONFIRM'),
+      answer: shell.submitToolText,
+    }).then(recordPromptOutcome);
+  }
+
   function onKeyDown(event: ComposingKeyEvent<HTMLInputElement>) {
+    if (promptMode) {
+      // Escape cancels the prompt itself: the host has no other owner for the
+      // key here, so the shell's panel-closing branch must not also run. The IME
+      // keeps its own Escape while composing.
+      if (event.key === 'Escape') {
+        if (event.isComposing) {
+          event.stopPropagation();
+          return;
+        }
+        event.preventDefault();
+        setPromptDraft('');
+        void shell.submitCommand('CANCEL');
+        return;
+      }
+      // Enter answers the prompt; an IME-composing or held Enter is ignored by
+      // the shared key rule, so it never commits half a composition.
+      handleCommandKey(event, submit);
+      return;
+    }
     if (!textMode) {
       const intent = commandLineNavIntent({
         key: event.key,
@@ -286,13 +389,18 @@ export function useCommandLine(): CommandLineController {
   return {
     textMode,
     textStepKey: textMode ? TEXT_STEP_PROMPT_KEY : null,
-    value: commandLineValue(textMode, shell.command, textDraft),
-    placeholder: t(commandLinePlaceholderKey(textMode)),
-    disabled: commandLineDisabled({ cadReady: shell.cadReady, pending: shell.pending, textMode }),
-    canSubmit: commandLineCanSubmit(textMode, shell.command, draft.empty, draft.tooLong),
-    invalid: textMode && draft.tooLong,
-    autoComplete: textMode ? undefined : 'list',
-    expanded: textMode ? undefined : listOpen && suggestions.length > 0,
+    promptMode,
+    promptMessage: prompt?.message ?? null,
+    promptKeywords: prompt?.keywords ?? [],
+    promptError,
+    chooseKeyword: (keyword: string) => sendPromptAnswer(keyword),
+    value: promptMode ? promptDraft : commandLineValue(textMode, shell.command, textDraft),
+    placeholder: t(commandLinePlaceholderKey(textMode, promptMode)),
+    disabled: commandLineDisabled({ cadReady: shell.cadReady, pending: shell.pending, textMode, promptMode }),
+    canSubmit: commandLineCanSubmit(textMode, shell.command, draft.empty, draft.tooLong, promptMode),
+    invalid: (textMode && draft.tooLong) || (promptMode && promptError !== null),
+    autoComplete: textMode || promptMode ? undefined : 'list',
+    expanded: textMode || promptMode ? undefined : listOpen && suggestions.length > 0,
     activeOptionId,
     focused,
     listOpen,
@@ -306,6 +414,13 @@ export function useCommandLine(): CommandLineController {
     onFocus: () => { setFocused(true); shell.suspendPointer(true); },
     onBlur: () => { setFocused(false); shell.suspendPointer(false); },
     onChange: (next: string) => {
+      // The prompt answer never lands in `shell.command`: the command draft is
+      // untouched while the line belongs to the plugin, so an answered (or
+      // cancelled) prompt cannot leave a command behind.
+      if (promptMode) {
+        setPromptDraft(next);
+        return;
+      }
       if (textMode) {
         setTextDraft(next);
         return;

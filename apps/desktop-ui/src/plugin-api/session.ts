@@ -13,14 +13,23 @@ import { createCadApi } from '../../../../packages/cad-plugin-api/src/index.ts';
 import type {
   CadApi,
   CadApiHostInfo,
+  CadApiOptions,
   CadHostBridge,
   CadApiRequest,
 } from '../../../../packages/cad-plugin-api/src/index.ts';
 import { createCadHostBridge } from './bridge.ts';
 import type { CadBridgeDeps } from './bridge.ts';
+import { appendPluginMessage } from './messages.ts';
 
-/** What assembling the client needs; the same deps the bridge takes. */
-export interface PluginApiDeps extends CadBridgeDeps {}
+/**
+ * What assembling the client needs: the bridge deps plus the optional host hooks.
+ *
+ * The hooks travel straight to `createCadApi`, so a caller that wants plugin
+ * command registration passes `onCommandRegister`/`onCommandUnregister` (the
+ * loader does); a caller that does not gets a client whose `runtime.registerCommand`
+ * refuses.
+ */
+export interface PluginApiDeps extends CadBridgeDeps, CadApiOptions {}
 
 /** The assembled client plus the host snapshot it agrees with. */
 export interface PluginApiSession {
@@ -42,7 +51,14 @@ export async function openPluginApi(deps: PluginApiDeps): Promise<PluginApiSessi
   const memoized: CadHostBridge = {
     hostInfo: () => host,
     request: <Result>(request: CadApiRequest): Promise<Result> => bridge.request<Result>(request),
+    mutate: <Result>(request: CadApiRequest): Promise<Result> => bridge.mutate<Result>(request),
   };
-  const api = await createCadApi(memoized);
+  const api = await createCadApi(memoized, {
+    onCommandRegister: deps.onCommandRegister,
+    onCommandUnregister: deps.onCommandUnregister,
+    // `writeMessage` is client-local: the WebView store is its default sink, so a
+    // plugin message lands somewhere instead of being dropped.
+    onMessage: deps.onMessage ?? appendPluginMessage,
+  });
   return { api, host: await host };
 }

@@ -15,8 +15,9 @@
 
 use super::super::wire::{self, AdmissionTarget, CadCommandAck, Channel, QueueFamily, QueueReads};
 use super::super::{
-    CadApiSnapshot, CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CAD_LAYER_WRITE_CAP,
-    CAD_SELECTED_TEXT_CAP, CAD_TOOL_PARAMETER_CAP,
+    CadApiOutcome, CadApiSnapshot, CadApiSubmission, CadLayerWrite, CadLayers, CadSettingKey,
+    CadSettingValue, API_SUBMIT_DUPLICATE, API_SUBMIT_INVALID_REQUEST, API_SUBMIT_QUEUE_FULL,
+    CAD_API_SUBMIT_CAP, CAD_LAYER_WRITE_CAP, CAD_SELECTED_TEXT_CAP, CAD_TOOL_PARAMETER_CAP,
 };
 use cad_app::{StandardView, ToolValue};
 
@@ -29,6 +30,8 @@ struct Queues {
     standard_views: std::collections::VecDeque<StandardView>,
     setting_writes: std::collections::VecDeque<(CadSettingKey, CadSettingValue)>,
     layer_writes: std::collections::VecDeque<CadLayerWrite>,
+    api_calls: std::collections::VecDeque<crate::session::CadApiSubmission>,
+    api_results: Vec<crate::session::CadApiOutcome>,
     commands: Vec<String>,
     cad_mode: bool,
     modal_open: bool,
@@ -44,6 +47,8 @@ impl Queues {
             standard_views: std::collections::VecDeque::new(),
             setting_writes: std::collections::VecDeque::new(),
             layer_writes: std::collections::VecDeque::new(),
+            api_calls: std::collections::VecDeque::new(),
+            api_results: Vec::new(),
             commands: Vec::new(),
             cad_mode,
             modal_open,
@@ -63,6 +68,8 @@ impl Queues {
                 standard_views: &mut self.standard_views,
                 setting_writes: &mut self.setting_writes,
                 layer_writes: &mut self.layer_writes,
+                api_calls: &mut self.api_calls,
+                api_results: &mut self.api_results,
             },
         )
     }
@@ -228,7 +235,11 @@ fn the_control_reads_are_explicit_before_and_after_a_mirror_exists() {
     );
 
     // … and a snapshot that exists without a document is a fact, not a wait.
-    let snapshot = CadApiSnapshot { document: None };
+    let snapshot = CadApiSnapshot {
+        document: None,
+        symbol_tables: None,
+        selection: Vec::new(),
+    };
     let answered = QueueReads::new(None, None, None, Some(&snapshot));
     let outcome = wire::api_call(
         &answered,
@@ -240,6 +251,88 @@ fn the_control_reads_are_explicit_before_and_after_a_mirror_exists() {
     assert!(outcome.ok);
     assert_eq!(outcome.error, None);
     assert_eq!(outcome.value, Some(serde_json::json!({ "document": null })));
+}
+
+/// One `cad_api_submit` request for the admission tests.
+fn api_submission(request_id: &str) -> CadApiSubmission {
+    CadApiSubmission {
+        request_id: request_id.to_string(),
+        namespace: "DatabaseServices".to_string(),
+        operation: "transaction.commit".to_string(),
+        parameters: None,
+    }
+}
+
+/// A bad request id is refused by the shared grammar before it can enter a queue.
+#[test]
+fn a_bad_request_id_is_refused_before_the_submit_queue() {
+    let mut queues = Queues::new(true, false);
+    for bad in ["", "bad id", "tab\tid"] {
+        let mut sink = queues.sink();
+        assert_eq!(
+            wire::api_submit(&mut sink, api_submission(bad)).unwrap_err(),
+            API_SUBMIT_INVALID_REQUEST,
+            "{bad:?}"
+        );
+    }
+    assert!(queues.api_calls.is_empty(), "nothing was queued");
+}
+
+/// The submit queue is bounded, and a still-open id is refused by name.
+#[test]
+fn the_submit_queue_is_bounded_and_refuses_an_open_id() {
+    let mut queues = Queues::new(true, false);
+    for index in 0..CAD_API_SUBMIT_CAP {
+        let mut sink = queues.sink();
+        wire::api_submit(&mut sink, api_submission(&format!("r{index}"))).expect("accepted");
+    }
+    let mut sink = queues.sink();
+    assert_eq!(
+        wire::api_submit(&mut sink, api_submission("r0")).unwrap_err(),
+        API_SUBMIT_DUPLICATE
+    );
+    assert_eq!(
+        wire::api_submit(&mut sink, api_submission("one-more")).unwrap_err(),
+        API_SUBMIT_QUEUE_FULL
+    );
+    assert_eq!(queues.api_calls.len(), CAD_API_SUBMIT_CAP);
+}
+
+/// A poll drains every completed outcome (FIFO) and then answers an empty list.
+#[test]
+fn the_poll_drains_the_completed_results() {
+    let mut queues = Queues::new(true, false);
+    queues
+        .api_results
+        .push(CadApiOutcome::value(serde_json::json!({ "first": true })).with_request_id("r1"));
+    queues
+        .api_results
+        .push(CadApiOutcome::refusal("cad_api.no_document").with_request_id("r2"));
+    let mut sink = queues.sink();
+    let results = wire::api_poll(&mut sink).expect("the poll answer");
+    assert_eq!(results.results.len(), 2);
+    assert_eq!(results.results[0].request_id.as_deref(), Some("r1"));
+    assert_eq!(results.results[1].request_id.as_deref(), Some("r2"));
+    assert!(queues.api_results.is_empty(), "drained");
+
+    let mut sink = queues.sink();
+    assert!(wire::api_poll(&mut sink)
+        .expect("the empty poll answer")
+        .results
+        .is_empty());
+}
+
+/// The read lane's JSON is unchanged: no `requestId` on a read outcome, and the
+/// submit outcomes always carry it.
+#[test]
+fn a_read_outcome_has_no_request_id_and_a_submit_outcome_has_one() {
+    let read = serde_json::to_value(CadApiOutcome::value(serde_json::json!({ "x": 1 })))
+        .expect("serializes");
+    assert!(read.get("requestId").is_none(), "{read}");
+    let submit =
+        serde_json::to_value(CadApiOutcome::refusal("cad_api.no_document").with_request_id("r1"))
+            .expect("serializes");
+    assert_eq!(submit["requestId"], serde_json::json!("r1"));
 }
 
 /// A host with no popup seam refuses both popup commands with the shared reason and

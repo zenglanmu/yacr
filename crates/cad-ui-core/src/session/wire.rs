@@ -59,7 +59,10 @@ use super::admission::{
     parse_property_write, parse_standard_view, parse_tool_parameter,
 };
 use super::api::CadApiStatus;
-use super::api_call::{dispatch_api_call, CadApiOutcome, CadApiSnapshot};
+use super::api_call::{
+    dispatch_api_call, validate_request_id, CadApiOutcome, CadApiResults, CadApiSnapshot,
+    CadApiSubmission, API_SUBMIT_DUPLICATE, API_SUBMIT_QUEUE_FULL, CAD_API_SUBMIT_CAP,
+};
 use super::commands::{admissible_names, alias_pairs};
 use super::fonts::CadFonts;
 use super::layers::{CadLayerWrite, CadLayers};
@@ -71,6 +74,13 @@ use super::settings::{CadSettingKey, CadSettingValue, CadSettings};
 /// first owner tick) and any other host answer the same word for "no snapshot
 /// yet".
 pub const CAD_WAITING: &str = "cad_waiting";
+
+/// The stable refusal of a sink that has no plugin-API submit lane at all.
+///
+/// The default [`AdmissionTarget`] answers this, so every existing test sink and
+/// every host that predates the mutating transport refuses by name instead of
+/// pretending a request was queued.
+pub const API_SUBMIT_UNAVAILABLE: &str = "unsupported-runtime: cad_api: no submit target";
 
 /// The stable refusal when a host has no modal-popup seam registered.
 ///
@@ -199,6 +209,24 @@ pub trait AdmissionTarget {
 
     /// Store or apply one typed layer write.
     fn layer_write(&mut self, write: CadLayerWrite) -> Result<(), String>;
+
+    /// Queue (desktop) or apply (`dom-canvas`) one plugin-API mutation.
+    ///
+    /// The answer is **not** returned here: the caller polls
+    /// [`Self::api_results`] for the outcome. The default refuses with
+    /// [`API_SUBMIT_UNAVAILABLE`], the honest answer for a sink with no submit
+    /// lane.
+    fn api_submit(&mut self, _submission: CadApiSubmission) -> Result<(), String> {
+        Err(API_SUBMIT_UNAVAILABLE.to_string())
+    }
+
+    /// Drain every completed plugin-API outcome (oldest first).
+    ///
+    /// An empty list is a valid answer. The default refuses with
+    /// [`API_SUBMIT_UNAVAILABLE`].
+    fn api_results(&mut self) -> Result<CadApiResults, String> {
+        Err(API_SUBMIT_UNAVAILABLE.to_string())
+    }
 }
 
 /// The **read seam** for the control-panel reads (`cad_settings`,
@@ -297,6 +325,10 @@ pub struct QueueFamily<'a> {
     pub setting_writes: &'a mut VecDeque<(CadSettingKey, CadSettingValue)>,
     /// `cad_layer_writes`.
     pub layer_writes: &'a mut VecDeque<CadLayerWrite>,
+    /// `cad_api_submit` — queued plugin-API mutations (bounded).
+    pub api_calls: &'a mut VecDeque<CadApiSubmission>,
+    /// `cad_api_poll` — completed plugin-API outcomes, oldest first (bounded).
+    pub api_results: &'a mut Vec<CadApiOutcome>,
 }
 
 /// The **queue sink**: stores into a desktop host's bounded queue family.
@@ -398,6 +430,31 @@ impl AdmissionTarget for QueueSink<'_> {
         self.queues.layer_writes.push_back(write);
         Ok(())
     }
+
+    fn api_submit(&mut self, submission: CadApiSubmission) -> Result<(), String> {
+        // The grammar is the shared rule (`dom-canvas` refuses it too), so a bad
+        // id never enters the owner-tick queue.
+        validate_request_id(&submission.request_id)?;
+        // A repeated id is a caller error regardless of capacity, so it is named
+        // first; the cap then answers "try again after the next tick".
+        if self
+            .queues
+            .api_calls
+            .iter()
+            .any(|queued| queued.request_id == submission.request_id)
+        {
+            return Err(API_SUBMIT_DUPLICATE.to_string());
+        }
+        if self.queues.api_calls.len() >= CAD_API_SUBMIT_CAP {
+            return Err(API_SUBMIT_QUEUE_FULL.to_string());
+        }
+        self.queues.api_calls.push_back(submission);
+        Ok(())
+    }
+
+    fn api_results(&mut self) -> Result<CadApiResults, String> {
+        Ok(super::api_submit::take_results(self.queues.api_results))
+    }
 }
 
 /// The [`ControlReads`] of a desktop host: the owner-tick mirror.
@@ -490,6 +547,33 @@ pub fn api_call(
         operation,
         parameters,
     ))
+}
+
+/// `cad_api_submit`: queue (desktop) or apply (`dom-canvas`) one mutation.
+///
+/// The reply is only the admission acknowledgement
+/// ([`CadCommandAck`]: `{accepted:true}`); the operation's result is polled
+/// through [`api_poll`]. The request-id grammar is the shared rule here, so both carriers
+/// refuse a bad id identically before any queue or session is touched.
+pub fn api_submit(
+    target: &mut dyn AdmissionTarget,
+    submission: CadApiSubmission,
+) -> Result<CadCommandAck, String> {
+    // Probe mode has no CAD session to mutate: refuse with the same word every
+    // other admitted command uses, before the request-id grammar.
+    if !target.cad_mode() {
+        return Err("CAD is disabled in probe mode".to_string());
+    }
+    validate_request_id(&submission.request_id)?;
+    target.api_submit(submission)?;
+    Ok(CadCommandAck::accepted())
+}
+
+/// `cad_api_poll`: drain every completed mutation outcome, oldest first.
+///
+/// Empty is the valid "nothing completed since the last poll" answer.
+pub fn api_poll(target: &mut dyn AdmissionTarget) -> Result<CadApiResults, String> {
+    target.api_results()
 }
 
 /// `cad_command_aliases`: the alias table the chrome offers (`alias_pairs`).

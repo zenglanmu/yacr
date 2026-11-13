@@ -19,6 +19,14 @@
 // region has — the single row, the overlay suggestion list, the history popup and
 // the outside-press focus hand-off.
 //
+// While a plugin `Editor` prompt is pending the row shows that prompt instead of
+// a command: its own sentence in the accent label beside the field, its keywords
+// as chips, and its last invalid-input sentence in the echo strip above the row.
+// The echo strip is also where a plugin's `writeMessage` lines appear. Both are
+// host/plugin strings rendered verbatim, both float over the drawing (the region
+// is the same containing block as the two overlays), and neither is ever a modal
+// or a row that reflows the bar.
+//
 // **No refusal line under the field.** A refused command used to be reported
 // twice: once as a red sentence in this region and once as the same sentence in
 // the history. The history log is the record now — the sentence a submit produced
@@ -33,6 +41,8 @@ import { CommandField } from './CommandField.tsx';
 import { ContextMenu } from './ContextMenu.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { useCommandLine } from '../commands/use-command-line.ts';
+import { usePluginEcho } from '../commands/use-plugin-echo.ts';
+import { PROMPT_KEYWORDS_LABEL_KEY } from '../commands/plugin-prompt.ts';
 import { commandWindowRows } from '../commands/command-window.ts';
 import { unavailableReasonKey } from '../commands/commands.ts';
 import { commandWindowText, entryText, isHistoryCopyChord } from '../commands/history-copy.ts';
@@ -55,6 +65,9 @@ export function CommandLine() {
   const { t } = useI18n();
   const shell = useShell();
   const line = useCommandLine();
+  // The plugin echo (the last `editor.writeMessage` lines) is the region's own
+  // bounded strip; it has exactly one source (`commands/plugin-message-echo.ts`).
+  const echo = usePluginEcho();
   const rootRef = useRef<HTMLDivElement | null>(null);
   // Read once so the hand-off effect depends on the boolean, not on the
   // controller object it is rebuilt into on every render.
@@ -228,17 +241,54 @@ export function CommandLine() {
     setMoreBelow(overflowBelow(node));
   }
 
+  // The echo strip carries two facts, both host/plugin data and never copy the
+  // chrome invents: the pending prompt's last invalid-input sentence (the line
+  // the reader needs right under the question) and the plugin's own messages. It
+  // yields the space it shares with the suggestion list and the history panel, so
+  // the three overlays can never paint on top of each other.
+  const promptError = line.promptError;
+  const showEcho = !line.listOpen && !shell.historyOpen && (echo.length > 0 || promptError !== null);
+
   return (
     <div ref={rootRef} className="region region--cmdline commandline app-region">
       <div className="commandline__row">
         <Icon name={line.textMode ? 'text' : 'terminal'} size={15} className="commandline__prompt" />
         <CommandField id="cad-command" className="commandline__input" line={line} />
-        {line.textMode ? (
+        {line.promptMode ? (
+          // The pending plugin prompt: the plugin's own sentence, in the command
+          // line's accent label — quiet, inline, and the field never moves. It is
+          // deliberately its own class rather than the status bar's tool-step
+          // chip, which is hidden on a narrow window: the question being answered
+          // must not disappear.
+          <span className="commandline__prompt-step" role="status" title={line.promptMessage ?? undefined}>
+            {line.promptMessage}
+          </span>
+        ) : line.textMode ? (
           // The named step, in the shared bounded accent label: it ellipsizes
           // instead of pushing the field, and the field never moves between modes.
           <span className="statusbar__tool-step" title={line.textStepKey ?? undefined}>{line.textStepKey ? t(line.textStepKey) : null}</span>
         ) : null}
-        {line.textMode ? null : (
+        {line.promptKeywords.length > 0 ? (
+          // The prompt's accepted keywords, as chips: a press answers the prompt
+          // with that keyword (the host matches it), and `onMouseDown` keeps the
+          // press from blurring the field so the keyboard stays where it is. The
+          // cluster scrolls sideways instead of wrapping, so the row keeps its
+          // one-line height however many options the plugin declared.
+          <span className="commandline__keywords" role="group" aria-label={t(PROMPT_KEYWORDS_LABEL_KEY)}>
+            {line.promptKeywords.map(keyword => (
+              <button
+                key={keyword}
+                type="button"
+                className="commandline__keyword"
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => line.chooseKeyword(keyword)}
+              >
+                {keyword}
+              </button>
+            ))}
+          </span>
+        ) : null}
+        {line.textMode || line.promptMode ? null : (
           // The history toggle, and **only** the history toggle: it opens the
           // popup above this row and nothing else. It is the one place a refused
           // command is read back from, so pressing it must never clear the record
@@ -260,6 +310,23 @@ export function CommandLine() {
           />
         )}
       </div>
+      {showEcho ? (
+        // The command line's echo area (see `style.css`): the bounded plugin
+        // messages and the prompt's invalid-input sentence. It floats above the
+        // row in the same containing block as the two overlays, so the bar keeps
+        // its height and neither the ribbon nor the status bar ever moves.
+        <div className="commandline__echo" role="log" aria-label={t('command.plugin_echo.label')}>
+          {echo.map((message, index) => (
+            <p key={`plugin-message-${index}`} className="commandline__echo-line">{message}</p>
+          ))}
+          {promptError !== null ? (
+            // The host's own sentence, not a chrome re-wording: it is the answer
+            // to *why* the last input was refused, and it stays while the prompt
+            // is still pending.
+            <p className="commandline__echo-line is-invalid" role="status">{promptError}</p>
+          ) : null}
+        </div>
+      ) : null}
       {line.listOpen ? (
         // An overlay above the row (see `style.css`), the same containing block as
         // the popup: a flow child here would add up to 176px under the input and

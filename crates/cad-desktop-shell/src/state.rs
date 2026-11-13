@@ -196,6 +196,18 @@ pub struct Shared {
     /// `{ "document": null }`. It is a **derived** snapshot of the authoritative
     /// `cad-db` document (never written back) and never a fabricated document.
     pub cad_api_snapshot: Option<cad_ui_core::session::CadApiSnapshot>,
+    /// Bounded main-thread queue of plugin-API **mutation** requests
+    /// (`cad_api_submit`). Admitted by the IPC command and drained by the owner
+    /// tick into `CadSession::api_submit` — the session is `!Send`, so the IPC
+    /// thread never applies a mutation.
+    ///
+    /// Empty is the state, not `None`: nothing queued. The bound is
+    /// `cad_ui_core::session::CAD_API_SUBMIT_CAP`, enforced at admission.
+    pub cad_api_calls: std::collections::VecDeque<cad_ui_core::session::CadApiSubmission>,
+    /// Completed plugin-API mutation outcomes waiting for `cad_api_poll`, oldest
+    /// first. Bounded by `CAD_API_RESULT_CAP` (the oldest is dropped), never a
+    /// second authority: every entry is the answer the session produced.
+    pub cad_api_results: Vec<cad_ui_core::session::CadApiOutcome>,
     /// The app-side render telemetry seam (see [`ShellTelemetry`]). `None`
     /// before the host registers it and in unit tests; `cad_status` then reports
     /// the same `"-"` token a host with no pulled state would.
@@ -266,6 +278,8 @@ impl Shared {
             cad_layers: None,
             cad_fonts: None,
             cad_api_snapshot: None,
+            cad_api_calls: VecDeque::new(),
+            cad_api_results: Vec::new(),
             telemetry: None,
             popup_host: None,
             release_opener: None,
@@ -302,6 +316,8 @@ impl Shared {
                 standard_views: &mut self.cad_standard_views,
                 setting_writes: &mut self.cad_setting_writes,
                 layer_writes: &mut self.cad_layer_writes,
+                api_calls: &mut self.cad_api_calls,
+                api_results: &mut self.cad_api_results,
             },
         )
         .with_runtime_aliases(&self.shell.command_aliases)
@@ -319,6 +335,43 @@ impl Shared {
             self.cad_fonts.as_ref(),
             self.cad_api_snapshot.as_ref(),
         )
+    }
+}
+
+/// The owner tick's plugin-API drain: answer queued submissions, publish every
+/// completed prompt, then append both to the shared result queue.
+///
+/// The submission queue is taken under the lock (exactly like the other
+/// owner-tick drains) and applied **outside** it on `session` — the `!Send`
+/// owner-thread session. A submission that starts an `Editor` prompt has no
+/// answer yet (the prompt's answer arrives on a later tick through
+/// `CadSession::api_prompt_results`). A host with no session answers
+/// `cad_waiting` for every submission instead of dropping it.
+pub fn drain_api_calls(
+    shared: &Arc<Mutex<Shared>>,
+    session: Option<&cad_ui_core::session::CadSession>,
+) {
+    let calls: Vec<cad_ui_core::session::CadApiSubmission> = {
+        let mut state = lock(shared);
+        std::mem::take(&mut state.cad_api_calls)
+            .into_iter()
+            .collect()
+    };
+    let mut outcomes: Vec<cad_ui_core::session::CadApiOutcome> = Vec::new();
+    for call in calls {
+        if let Some(outcome) = cad_ui_core::session::api_submit_or_wait(session, call) {
+            outcomes.push(outcome);
+        }
+    }
+    if let Some(session) = session {
+        outcomes.extend(session.api_prompt_results());
+    }
+    if outcomes.is_empty() {
+        return;
+    }
+    let mut state = lock(shared);
+    for outcome in outcomes {
+        cad_ui_core::session::push_api_result(&mut state.cad_api_results, outcome);
     }
 }
 

@@ -31,7 +31,20 @@ export type { CadApiErrorInit } from './errors.ts';
 export type { CadApiHostInfo, CadApiRequest, CadHostBridge } from './host-bridge.ts';
 
 export { createCadApi, definePlugin, parsePluginManifest } from './context.ts';
-export type { CadApi, CadPlugin, PluginContext, PluginManifest } from './context.ts';
+export type {
+  CadApi,
+  CadApiOptions,
+  CadPlugin,
+  PluginContext,
+  PluginManifest,
+} from './context.ts';
+
+export { CommandFlags } from './runtime.ts';
+export type {
+  CommandHandler,
+  CommandRegistration,
+  RuntimeNamespace,
+} from './runtime.ts';
 
 export {
   addPoints,

@@ -81,6 +81,16 @@ export interface ToolCommandOptions {
    * tool-only, so a drag never sends a `CONFIRM` for a capture that does not exist.
    */
   readonly gripDragActive?: boolean;
+  /**
+   * Whether a **plugin prompt** is pending (`cad_status.pendingPrompt`).
+   *
+   * A prompt is not a tool either (`tool` may stay `null` while one waits for a
+   * point), but the host resolves it from the same interactions: `Enter` applies
+   * the prompt's default (`CONFIRM`) and `Escape` cancels it (`CANCEL`). Both
+   * keys therefore reach the session from the drawing surface too, and only while
+   * the block is really pending — with no prompt, Escape keeps closing panels.
+   */
+  readonly promptPending?: boolean;
   readonly typing?: boolean;
   readonly composing?: boolean;
   readonly repeat?: boolean;
@@ -353,17 +363,24 @@ export function toolLabelKey(toolKey?: unknown): string | null {
  * (`cad_status.tool` is `null`), so it must not enable `CONFIRM` or any other
  * tool-only key. `CANCEL` is the one selector the host needs from the keyboard
  * here — it drops the armed drag as a pure state drop (`reset_grip_gesture`).
+ *
+ * A pending **plugin prompt** widens both keys, because the host reads them as
+ * the prompt's own answers: `Enter` is the default/`None` answer (`CONFIRM`) and
+ * `Escape` cancels the prompt instead of closing a panel. It is deliberately its
+ * own flag rather than a tool: the tool block stays whatever it was while a
+ * plugin waits for a point.
  */
 export function toolCommandForKey(key: string, {
   toolActive = false,
   gripDragActive = false,
+  promptPending = false,
   typing = false,
   composing = false,
   repeat = false,
 }: ToolCommandOptions = {}): 'CONFIRM' | 'CANCEL' | null {
   if (typing || composing || repeat) return null;
-  if (key === 'Escape') return toolActive || gripDragActive ? 'CANCEL' : null;
-  if (!toolActive) return null;
+  if (key === 'Escape') return toolActive || gripDragActive || promptPending ? 'CANCEL' : null;
+  if (!toolActive && !promptPending) return null;
   if (key === 'Enter') return 'CONFIRM';
   return null;
 }

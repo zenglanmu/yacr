@@ -22,7 +22,7 @@
 import { createDatabase } from './database-services.ts';
 import type { Database } from './database-services.ts';
 import { createEditor } from './editor-input.ts';
-import type { Editor } from './editor-input.ts';
+import type { Editor, EditorOptions } from './editor-input.ts';
 import { invalidArgument } from './errors.ts';
 import type { CadApiWire } from './internal/capability.ts';
 import { isRecord, requireAnswerObject } from './internal/capability.ts';
@@ -130,7 +130,11 @@ function decodeDocumentDescriptor(value: unknown, prefix: string): DocumentDescr
  * The document's own `id` names the transaction scope; `database.id` names the
  * database the `Database` proxy addresses (never a DXF handle).
  */
-export function createDocument(wire: CadApiWire, descriptor: DocumentDescriptor): Document {
+export function createDocument(
+  wire: CadApiWire,
+  descriptor: DocumentDescriptor,
+  editorOptions: EditorOptions = {},
+): Document {
   if (typeof descriptor !== 'object' || descriptor === null) throw invalidArgument('descriptor');
   const documentId = requireText(descriptor.id, 'descriptor.id');
   const name = requireText(descriptor.name, 'descriptor.name');
@@ -143,7 +147,7 @@ export function createDocument(wire: CadApiWire, descriptor: DocumentDescriptor)
     name,
     isReadOnly: descriptor.isReadOnly,
     database: createDatabase(wire, { id: databaseId, version }),
-    editor: createEditor(wire),
+    editor: createEditor(wire, editorOptions),
     transactionManager: new TransactionManager(wire, documentId),
     async lockDocument(): Promise<void> {
       await wire.callVoid('ApplicationServices', 'document.lock', { document: documentId });
@@ -158,7 +162,10 @@ export function createDocument(wire: CadApiWire, descriptor: DocumentDescriptor)
  * (`cad_waiting`, `unsupported-runtime: ...`) or a malformed answer propagates; an
  * empty document list is the real "no document is open" answer.
  */
-export function createDocumentManager(wire: CadApiWire): DocumentManager {
+export function createDocumentManager(
+  wire: CadApiWire,
+  editorOptions: EditorOptions = {},
+): DocumentManager {
   return {
     async mdiActiveDocument(): Promise<Document | null> {
       const answer = await wire.call(
@@ -170,7 +177,11 @@ export function createDocumentManager(wire: CadApiWire): DocumentManager {
       const document = record['document'];
       if (document === undefined) throw invalidArgument('bridge.answer.document');
       if (document === null) return null;
-      return createDocument(wire, decodeDocumentDescriptor(document, 'bridge.answer.document'));
+      return createDocument(
+        wire,
+        decodeDocumentDescriptor(document, 'bridge.answer.document'),
+        editorOptions,
+      );
     },
     async documents(): Promise<readonly Document[]> {
       const answer = await wire.call('ApplicationServices', 'documentManager.documents', {});
@@ -178,7 +189,11 @@ export function createDocumentManager(wire: CadApiWire): DocumentManager {
       const list = record['documents'];
       if (!Array.isArray(list)) throw invalidArgument('bridge.answer.documents');
       return list.map((entry) =>
-        createDocument(wire, decodeDocumentDescriptor(entry, 'bridge.answer.documents')),
+        createDocument(
+          wire,
+          decodeDocumentDescriptor(entry, 'bridge.answer.documents'),
+          editorOptions,
+        ),
       );
     },
     async executeInApplicationContext<T>(work: () => T | Promise<T>): Promise<T> {
@@ -189,6 +204,9 @@ export function createDocumentManager(wire: CadApiWire): DocumentManager {
 }
 
 /** Build the application singleton for one host snapshot. */
-export function createApplication(wire: CadApiWire): Application {
-  return { documentManager: createDocumentManager(wire) };
+export function createApplication(
+  wire: CadApiWire,
+  editorOptions: EditorOptions = {},
+): Application {
+  return { documentManager: createDocumentManager(wire, editorOptions) };
 }

@@ -3,18 +3,33 @@
 //! # What this is
 //!
 //! [`API_CALL_COMMAND`] (`cad_api_call`) is the plugin API *performing*, not
-//! merely advertising. This wave serves three reflected reads from one snapshot:
+//! merely advertising. This wave serves five reflected reads from one snapshot:
 //!
 //! | namespace.operation | answer |
 //! |---|---|
 //! | `ApplicationServices.documentManager.mdiActiveDocument` | `{ "document": … or null }` |
 //! | `ApplicationServices.documentManager.documents` | `{ "documents": [ … ] }` (0 or 1) |
 //! | `DatabaseServices.database.revision` (`{ "database": "<id>" }`) | `{ "revision": <number> }` |
+//! | `DatabaseServices.database.symbolTables` (`{ "database": "<id>" }`) | `{ "blockTable": …, "layerTable": …, "clayer": … }` |
+//! | `EditorInput.editor.currentSelection` | `{ "objectIds": [ "<EntityId>", … ] }` |
 //!
 //! Every read is **derived**: the authoritative document stays `cad-db`'s, and
 //! each answer is a projection of the host controller's own fields
-//! ([`cad_app::PluginDocument`]). Nothing here opens a transaction, mutates the
-//! drawing or writes the mirror back.
+//! ([`cad_app::PluginDocument`], its `SelectionSet`). Nothing here opens a
+//! transaction, mutates the drawing or writes the mirror back.
+//!
+//! `editor.currentSelection` has no parameters. Its `objectIds` are the current
+//! selection's `EntityId`s in selection order, as decimal strings. A selection
+//! ref also carries an `InstancePath` and an optional `SubElementId`, but this
+//! read can only name the entity: every selected ref is included (never dropped
+//! silently) and repeated ids are deduplicated, first occurrence first. Instance
+//! and sub-element identity is therefore **not representable** in this read yet —
+//! the list is the distinct `EntityId`s, not the distinct refs.
+//!
+//! The descriptor rows in `api/plugin-api.json` list these five reads as
+//! `supported` (the same JSON is what `cad_api_status` serves); the
+//! interactive prompts and the write lane are served by `cad_api_submit` /
+//! `cad_api_poll`, not here.
 //!
 //! # Refusals are explicit
 //!
@@ -27,10 +42,11 @@
 //!   is [`CAD_WAITING`], the shared "ask again after a tick" word. A snapshot
 //!   that exists but holds no document is *not* waiting: the document reads
 //!   answer their real "nothing open" value (`{ "document": null }`,
-//!   `{ "documents": [] }`) and the database read refuses
+//!   `{ "documents": [] }`) and the document-scoped reads (`revision`,
+//!   `symbolTables`, `editor.currentSelection`) refuse
 //!   [`API_CALL_NO_DOCUMENT`];
-//! * a `database.revision` request whose `parameters.database` is missing, not a
-//!   string, or not the snapshot's database id is
+//! * a database request (`revision`, `symbolTables`) whose `parameters.database`
+//!   is missing, not a string, or not the snapshot's database id is
 //!   [`API_CALL_INVALID_ARGUMENT_DATABASE`].
 //!
 //! An empty namespace or operation is simply an operation that is not served, so
@@ -43,10 +59,18 @@
 //!                 "database": { "id": "<DatabaseId>", "version": "<revision>" } } }
 //! { "documents": [ <the same descriptor> ] }
 //! { "revision": <number> }
+//! { "blockTable": { "name": "blocks", "records": [ { "name": "…", "isLayout": false,
+//!                    "origin": [x, y, z] } ] },
+//!   "layerTable": { "name": "layers", "records": [ { "name": "0",
+//!                    "color": { "aci": 7, "rgb": "#ffffff" }, "visible": true,
+//!                    "locked": false, "frozen": false, "linetype": "Continuous" } ] },
+//!   "clayer": "0" }
+//! { "objectIds": [ "12", "13" ] }
 //! ```
 //!
 //! `mdiActiveDocument` is `{ "document": null }` when the document manager exists
-//! but holds no document; `documents` is then `{ "documents": [] }`. The reply
+//! but holds no document; `documents` is then `{ "documents": [] }`. An empty
+//! selection is `{ "objectIds": [] }` — a fact, not a refusal. The reply
 //! envelope is [`CadApiOutcome`]: `ok` plus exactly one of `value`/`error` (the
 //! absent half is omitted, never `null`).
 
@@ -70,6 +94,9 @@ pub const API_CALL_NAMESPACE: &str = "ApplicationServices";
 /// The `DatabaseServices` namespace (database-level reads).
 pub const API_CALL_DATABASE_NAMESPACE: &str = "DatabaseServices";
 
+/// The `EditorInput` namespace (the current selection and editor prompts).
+pub const API_CALL_EDITOR_NAMESPACE: &str = "EditorInput";
+
 /// The reflected read of the active document.
 pub const API_CALL_MDI_ACTIVE_DOCUMENT: &str = "documentManager.mdiActiveDocument";
 
@@ -78,6 +105,12 @@ pub const API_CALL_DOCUMENTS: &str = "documentManager.documents";
 
 /// The reflected read of the open database's revision.
 pub const API_CALL_REVISION: &str = "database.revision";
+
+/// The reflected read of the open database's block and layer symbol tables.
+pub const API_CALL_SYMBOL_TABLES: &str = "database.symbolTables";
+
+/// The reflected read of the current selection's entity ids (no parameters).
+pub const API_CALL_CURRENT_SELECTION: &str = "editor.currentSelection";
 
 /// Stable refusal of a database read while the session holds no document.
 ///
@@ -95,9 +128,120 @@ pub const API_CALL_INVALID_ARGUMENT_DATABASE: &str = "api.invalid_argument: data
 /// this named refusal rather than a fabricated number.
 const API_CALL_INVALID_SNAPSHOT: &str = "cad_api.invalid_snapshot: databaseVersion";
 
+/// Stable refusal of a snapshot that claims a document but carries no symbol-table
+/// projection (an inconsistent snapshot, only reachable from a hand-built value).
+///
+/// [`CadSession::api_snapshot`] builds both halves together, so this names a
+/// violated invariant instead of fabricating empty tables.
+const API_CALL_INCOMPLETE_SNAPSHOT: &str = "cad_api.incomplete_snapshot: symbolTables";
+
 /// The stable `unsupported-runtime` marker for an unserved API call.
 pub fn api_call_unknown(namespace: &str, operation: &str) -> String {
     format!("{API_CALL_UNKNOWN}{namespace}.{operation}")
+}
+
+/// One queued plugin-API **mutation** request (`cad_api_submit`).
+///
+/// The wire carries `requestId`; the submission is owned by whichever queue
+/// answers it (the desktop's owner tick) or by the session that applies it
+/// synchronously (`dom-canvas`). The outcome is polled through
+/// [`CadApiResults`] — this type never carries an answer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CadApiSubmission {
+    /// The caller's correlation id (see [`validate_request_id`]).
+    pub request_id: String,
+    /// The API namespace, e.g. `DatabaseServices`.
+    pub namespace: String,
+    /// The operation inside the namespace, e.g. `transaction.commit`.
+    pub operation: String,
+    /// The operation's argument object (`None` when the caller sent none).
+    pub parameters: Option<Value>,
+}
+
+/// The `cad_api_poll` answer: every completed outcome, FIFO.
+///
+/// An empty list is a valid answer (nothing completed since the last poll).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CadApiResults {
+    /// The drained outcomes, oldest first.
+    pub results: Vec<CadApiOutcome>,
+}
+
+/// Bound on queued submissions a desktop host holds before refusing.
+pub const CAD_API_SUBMIT_CAP: usize = 16;
+
+/// Bound on retained outcomes before the oldest is dropped.
+///
+/// Both carriers apply it (the desktop's shared result queue and the session's
+/// own queue on a synchronous carrier), so an unpolled client cannot grow the
+/// host without limit; the dropped answer is gone, never silently replayed.
+pub const CAD_API_RESULT_CAP: usize = 32;
+
+/// Stable refusal of a submission this carrier's queue cannot accept.
+pub const API_SUBMIT_QUEUE_FULL: &str = "cad_api.queue_full";
+
+/// Stable refusal of a submission whose `requestId` is still queued.
+pub const API_SUBMIT_DUPLICATE: &str = "cad_api.duplicate_request";
+
+/// Stable refusal of an unusable `requestId`.
+pub const API_SUBMIT_INVALID_REQUEST: &str = "cad_api.invalid_request: requestId";
+
+/// The longest accepted request id.
+const REQUEST_ID_MAX_LEN: usize = 64;
+
+/// The one mutating operation this build performs (submit lane).
+pub const API_CALL_TRANSACTION_COMMIT: &str = "transaction.commit";
+
+/// A handle-to-object lookup (submit lane: it reads the live session).
+pub const API_CALL_GET_OBJECT_ID: &str = "database.getObjectId";
+
+/// The entity read (submit lane: it reads the live session).
+pub const API_CALL_GET_OBJECT: &str = "transaction.getObject";
+
+/// Stable refusal of a commit whose `expectedRevision` is not the open revision.
+pub const API_CALL_REVISION_CONFLICT: &str = "api.revision-conflict";
+
+/// The stable `api.invalid_argument: <field>` marker.
+pub fn api_call_invalid_argument(field: &str) -> String {
+    format!("api.invalid_argument: {field}")
+}
+
+/// The stable `cad_api.error: <text>` marker for a host-side commit failure.
+pub fn api_call_error(text: impl std::fmt::Display) -> String {
+    format!("cad_api.error: {text}")
+}
+
+/// The stable marker for an object id the open database does not hold.
+pub fn api_call_unknown_object(object_id: &str) -> String {
+    format!("cad_api.unknown_object: {object_id}")
+}
+
+/// The stable marker for a **present** object this host cannot serialize.
+///
+/// The detail names the source shape (a geometry variant such as `Hatch`, or a
+/// field such as `linetype`) rather than inventing client fields for it.
+pub fn api_call_unsupported_variant(namespace: &str, operation: &str, variant: &str) -> String {
+    format!("unsupported-runtime: cad_api.{namespace}.{operation}: {variant}")
+}
+
+/// Whether a submission id is usable: 1..=64 characters from `[A-Za-z0-9._-]`.
+///
+/// The grammar is deliberately narrow: the id travels through an IPC envelope,
+/// a log line and this crate's own result queue, and a client that reuses an id
+/// must be able to recognise its answer exactly. Anything else is refused by
+/// name ([`API_SUBMIT_INVALID_REQUEST`]) rather than normalized.
+pub fn validate_request_id(request_id: &str) -> Result<(), String> {
+    let len = request_id.len();
+    if len == 0 || len > REQUEST_ID_MAX_LEN {
+        return Err(API_SUBMIT_INVALID_REQUEST.to_string());
+    }
+    if !request_id
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(API_SUBMIT_INVALID_REQUEST.to_string());
+    }
+    Ok(())
 }
 
 /// One document as the plugin API reports it (flat, host-side projection).
@@ -167,12 +311,83 @@ impl From<cad_app::PluginDocument> for CadApiDocument {
 ///   exists but no document is open") and is answered `{ "document": null }`,
 ///   never as "ask again later".
 ///
-/// The wire shape is exactly `{"document": ...}`; the `Option` serializes `None`
-/// as JSON `null`.
+/// The wire shape of the document half is exactly `{"document": ...}`; the
+/// `Option` serializes `None` as JSON `null`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CadApiSnapshot {
     /// The open document, or `None` when the manager holds no document.
     pub document: Option<CadApiDocument>,
+    /// The document's symbol-table projection, or the projection's own refusal.
+    ///
+    /// `None` exactly when [`Self::document`] is `None`: the session always builds
+    /// both halves together ([`super::CadSession::api_snapshot`]). `Some(Err(..))` relays
+    /// the layer projection's real refusal instead of serving invented rows.
+    ///
+    /// Not part of the serialized snapshot: the document envelope is built by
+    /// [`api_call_document`], and this projection is served by
+    /// `DatabaseServices.database.symbolTables`.
+    #[serde(skip)]
+    pub symbol_tables: Option<Result<CadApiSymbolTables, String>>,
+    /// Every selected ref's `EntityId`, in selection order, as decimal strings.
+    ///
+    /// One entry per selected **ref**, so an entity selected through two distinct
+    /// `InstancePath`s (or two sub-elements) appears twice here; the
+    /// `EditorInput.editor.currentSelection` read deduplicates by id, first
+    /// occurrence first ([`api_call_selection`]), because instance and sub-element
+    /// identity is not representable in that answer yet.
+    ///
+    /// Empty is a real fact (nothing selected), not "waiting", and it says nothing
+    /// about whether a document is open. Not part of the serialized document
+    /// envelope; served by [`API_CALL_CURRENT_SELECTION`].
+    #[serde(skip)]
+    pub selection: Vec<String>,
+}
+
+/// One named block definition, as the symbol-table read reports it.
+///
+/// Only blocks the database carries **metadata** for are listed
+/// ([`cad_db::DrawingDatabase::block_metadata_entries`]); an unnamed block has no
+/// honest name or base point, so it is never invented here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CadApiBlockRecord {
+    /// The block table name.
+    pub name: String,
+    /// The block's insertion base point, in block space.
+    pub origin: [f64; 3],
+}
+
+/// One layer-table row: the stored attributes plus the current visibility.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CadApiLayerRecord {
+    /// The layer name.
+    pub name: String,
+    /// The source ACI index, or `None` for a true-colour layer (wire `null`).
+    pub aci: Option<u8>,
+    /// The resolved sRGB value, lowercase `#rrggbb`.
+    pub rgb: String,
+    /// The visibility the scene honours right now (database flags + overrides).
+    pub visible: bool,
+    /// The stored lock flag.
+    pub locked: bool,
+    /// The stored frozen flag.
+    pub frozen: bool,
+    /// The linetype table entry's name.
+    pub linetype: String,
+}
+
+/// The symbol-table projection of the open document.
+///
+/// A derived read of `cad-db`: the block table comes from the database's named
+/// block metadata and the layer table from the session's own layer projection
+/// (the same rows `cad_layers` serves). Nothing is written back.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CadApiSymbolTables {
+    /// Every named block definition, sorted by name.
+    pub blocks: Vec<CadApiBlockRecord>,
+    /// Every layer row, in the layer-panel's own order.
+    pub layers: Vec<CadApiLayerRecord>,
+    /// The active layer's name (`""` when the projection reports none).
+    pub clayer: String,
 }
 
 /// The reply envelope of one API call.
@@ -181,6 +396,13 @@ pub struct CadApiSnapshot {
 /// from the JSON, so a caller reads exactly one of them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CadApiOutcome {
+    /// The submission id this answer belongs to, on the `cad_api_submit` lane.
+    ///
+    /// `None` for the synchronous read lane ([`API_CALL_COMMAND`]), so that
+    /// answer's JSON is unchanged; every submit outcome carries the id its
+    /// request supplied.
+    #[serde(rename = "requestId", skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
     /// Whether the call was performed.
     pub ok: bool,
     /// The reflected answer, when `ok`.
@@ -195,6 +417,7 @@ impl CadApiOutcome {
     /// A performed call with its reflected value.
     pub fn value(value: Value) -> Self {
         Self {
+            request_id: None,
             ok: true,
             value: Some(value),
             error: None,
@@ -204,10 +427,22 @@ impl CadApiOutcome {
     /// A call this carrier does not perform, with its stable marker.
     pub fn refusal(error: impl Into<String>) -> Self {
         Self {
+            request_id: None,
             ok: false,
             value: None,
             error: Some(error.into()),
         }
+    }
+
+    /// Attach the submission id this answer belongs to.
+    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
+        self.request_id = Some(request_id.into());
+        self
+    }
+
+    /// The `cad_waiting` answer for one submitted request (no session yet).
+    pub fn waiting(request_id: impl Into<String>) -> Self {
+        Self::refusal(CAD_WAITING).with_request_id(request_id)
     }
 }
 
@@ -237,6 +472,30 @@ pub fn api_call_documents(snapshot: &CadApiSnapshot) -> CadApiOutcome {
     CadApiOutcome::value(json!({ "documents": documents }))
 }
 
+/// Build the `EditorInput.editor.currentSelection` answer.
+///
+/// `objectIds` are the snapshot selection's entity ids, in selection order, as
+/// decimal strings. Duplicates are removed by id (first occurrence wins) so a
+/// selection holding the same entity through two `InstancePath`s or sub-elements
+/// is still included — never dropped — but named once: this read has no field for
+/// that identity yet.
+///
+/// An empty selection is `{ "objectIds": [] }` (a fact). A snapshot without a
+/// document refuses [`API_CALL_NO_DOCUMENT`]: there is no drawing whose selection
+/// could be reported. The read takes no parameters; any supplied are ignored.
+pub fn api_call_selection(snapshot: &CadApiSnapshot) -> CadApiOutcome {
+    if snapshot.document.is_none() {
+        return CadApiOutcome::refusal(API_CALL_NO_DOCUMENT);
+    }
+    let mut object_ids: Vec<&str> = Vec::with_capacity(snapshot.selection.len());
+    for id in &snapshot.selection {
+        if !object_ids.contains(&id.as_str()) {
+            object_ids.push(id.as_str());
+        }
+    }
+    CadApiOutcome::value(json!({ "objectIds": object_ids }))
+}
+
 /// Build the `DatabaseServices.database.revision` answer.
 ///
 /// The requested `parameters.database` must be the snapshot document's database
@@ -247,16 +506,80 @@ pub fn api_call_revision(snapshot: &CadApiSnapshot, parameters: Option<&Value>) 
     let Some(document) = snapshot.document.as_ref() else {
         return CadApiOutcome::refusal(API_CALL_NO_DOCUMENT);
     };
-    let requested = parameters
-        .and_then(|parameters| parameters.get("database"))
-        .and_then(Value::as_str);
-    if requested != Some(document.database_id.as_str()) {
+    if requested_database(parameters) != Some(document.database_id.as_str()) {
         return CadApiOutcome::refusal(API_CALL_INVALID_ARGUMENT_DATABASE);
     }
     match document.database_version.parse::<u64>() {
         Ok(revision) => CadApiOutcome::value(json!({ "revision": revision })),
         Err(_) => CadApiOutcome::refusal(API_CALL_INVALID_SNAPSHOT),
     }
+}
+
+/// The `parameters.database` selector, when it is a string.
+fn requested_database(parameters: Option<&Value>) -> Option<&str> {
+    parameters
+        .and_then(|parameters| parameters.get("database"))
+        .and_then(Value::as_str)
+}
+
+/// Build the `DatabaseServices.database.symbolTables` answer.
+///
+/// Same argument rule as [`api_call_revision`] (`parameters.database` must be the
+/// snapshot document's database id). The block table lists the database's named
+/// block definitions (`isLayout` is always `false`: paper/model spaces are not
+/// blocks in `cad-db`), the layer table lists the same rows `cad_layers` serves,
+/// and `clayer` is the projection's active layer. A failed layer projection is
+/// relayed as its own refusal rather than replaced by empty tables.
+pub fn api_call_symbol_tables(
+    snapshot: &CadApiSnapshot,
+    parameters: Option<&Value>,
+) -> CadApiOutcome {
+    let Some(document) = snapshot.document.as_ref() else {
+        return CadApiOutcome::refusal(API_CALL_NO_DOCUMENT);
+    };
+    if requested_database(parameters) != Some(document.database_id.as_str()) {
+        return CadApiOutcome::refusal(API_CALL_INVALID_ARGUMENT_DATABASE);
+    }
+    match snapshot.symbol_tables.as_ref() {
+        Some(Ok(tables)) => CadApiOutcome::value(symbol_tables_value(tables)),
+        Some(Err(reason)) => CadApiOutcome::refusal(reason.clone()),
+        None => CadApiOutcome::refusal(API_CALL_INCOMPLETE_SNAPSHOT),
+    }
+}
+
+/// The frozen `symbolTables` JSON object.
+fn symbol_tables_value(tables: &CadApiSymbolTables) -> Value {
+    let blocks: Vec<Value> = tables
+        .blocks
+        .iter()
+        .map(|record| {
+            json!({
+                "name": record.name,
+                // `cad-db` spaces are not blocks: a metadata block is never a layout.
+                "isLayout": false,
+                "origin": record.origin,
+            })
+        })
+        .collect();
+    let layers: Vec<Value> = tables
+        .layers
+        .iter()
+        .map(|record| {
+            json!({
+                "name": record.name,
+                "color": { "aci": record.aci, "rgb": record.rgb },
+                "visible": record.visible,
+                "locked": record.locked,
+                "frozen": record.frozen,
+                "linetype": record.linetype,
+            })
+        })
+        .collect();
+    json!({
+        "blockTable": { "name": "blocks", "records": blocks },
+        "layerTable": { "name": "layers", "records": layers },
+        "clayer": tables.clayer,
+    })
 }
 
 /// The operations this build serves, resolved from `namespace.operation`.
@@ -267,6 +590,10 @@ enum ServedOperation {
     Documents,
     /// `DatabaseServices.database.revision`
     Revision,
+    /// `DatabaseServices.database.symbolTables`
+    SymbolTables,
+    /// `EditorInput.editor.currentSelection`
+    CurrentSelection,
 }
 
 /// Resolve a namespaced operation, or `None` when this build does not serve it.
@@ -275,6 +602,12 @@ fn served_operation(namespace: &str, operation: &str) -> Option<ServedOperation>
         (API_CALL_NAMESPACE, API_CALL_MDI_ACTIVE_DOCUMENT) => Some(ServedOperation::ActiveDocument),
         (API_CALL_NAMESPACE, API_CALL_DOCUMENTS) => Some(ServedOperation::Documents),
         (API_CALL_DATABASE_NAMESPACE, API_CALL_REVISION) => Some(ServedOperation::Revision),
+        (API_CALL_DATABASE_NAMESPACE, API_CALL_SYMBOL_TABLES) => {
+            Some(ServedOperation::SymbolTables)
+        }
+        (API_CALL_EDITOR_NAMESPACE, API_CALL_CURRENT_SELECTION) => {
+            Some(ServedOperation::CurrentSelection)
+        }
         _ => None,
     }
 }
@@ -286,10 +619,11 @@ fn served_operation(namespace: &str, operation: &str) -> Option<ServedOperation>
 /// [`CAD_WAITING`] — never a claim about the drawing. `Some(snapshot)` is
 /// answered as a matter of fact, including `snapshot.document == None`:
 /// `mdiActiveDocument` → `{ "document": null }`, `documents` →
-/// `{ "documents": [] }`, and `database.revision` → [`API_CALL_NO_DOCUMENT`].
+/// `{ "documents": [] }`, and the document-scoped reads (`revision`,
+/// `symbolTables`, `editor.currentSelection`) → [`API_CALL_NO_DOCUMENT`].
 ///
-/// `parameters` carries the operation's arguments (currently only
-/// `database.revision` reads them). The active-document read ignores them, so a
+/// `parameters` carries the operation's arguments (the database reads require
+/// `{ "database": "<id>" }`). The document and selection reads ignore them, so a
 /// caller that sends none answers exactly as before.
 ///
 /// An operation outside the served set is the stable `unsupported-runtime`
@@ -312,6 +646,8 @@ pub fn dispatch_api_call(
         ServedOperation::ActiveDocument => api_call_document(snapshot.document.clone()),
         ServedOperation::Documents => api_call_documents(snapshot),
         ServedOperation::Revision => api_call_revision(snapshot, parameters),
+        ServedOperation::SymbolTables => api_call_symbol_tables(snapshot, parameters),
+        ServedOperation::CurrentSelection => api_call_selection(snapshot),
     }
 }
 
@@ -324,334 +660,82 @@ impl super::CadSession {
     /// is a read-only projection of the host controller — this never opens a
     /// transaction and never touches `cad-db`'s authority.
     pub fn api_snapshot(&self) -> CadApiSnapshot {
+        let (document, selection) = {
+            let controller = self.core.controller.borrow();
+            let document = controller.plugin_document().map(CadApiDocument::from);
+            // One decimal entry per selected ref, in selection order. Instance and
+            // sub-element identity stays behind: the read dedupes by entity id.
+            let selection = controller
+                .selection()
+                .refs()
+                .iter()
+                .map(|reference| reference.entity.0.to_string())
+                .collect();
+            (document, selection)
+        };
+        // The two halves are built together: no document ⇒ no symbol tables, so
+        // the `database.symbolTables` read can tell "nothing open" from "the
+        // projection failed" (which is relayed, never replaced by empty tables).
+        let symbol_tables = if document.is_some() {
+            Some(self.api_symbol_tables())
+        } else {
+            None
+        };
         CadApiSnapshot {
-            document: self
-                .core
-                .controller
-                .borrow()
-                .plugin_document()
-                .map(CadApiDocument::from),
+            document,
+            symbol_tables,
+            selection,
         }
+    }
+
+    /// The symbol-table projection of the open document (derived, read-only).
+    ///
+    /// Blocks come from the database's own named-block metadata (sorted by name),
+    /// layers from the session's layer projection — the exact rows `cad_layers`
+    /// serves — and `clayer` from that projection's active layer.
+    fn api_symbol_tables(&self) -> Result<CadApiSymbolTables, String> {
+        let blocks = {
+            let controller = self.core.controller.borrow();
+            let Some(drawing) = controller.drawing() else {
+                return Err(API_CALL_NO_DOCUMENT.to_string());
+            };
+            let mut blocks: Vec<CadApiBlockRecord> = drawing
+                .block_metadata_entries()
+                .map(|(_, metadata)| CadApiBlockRecord {
+                    name: metadata.name.clone(),
+                    origin: [
+                        metadata.base_point.x,
+                        metadata.base_point.y,
+                        metadata.base_point.z,
+                    ],
+                })
+                .collect();
+            // Stable table order for the caller; the database itself is keyed by id.
+            blocks.sort_by(|a, b| a.name.cmp(&b.name));
+            blocks
+        };
+        let layers = self.layers()?;
+        Ok(CadApiSymbolTables {
+            blocks,
+            layers: layers
+                .layers
+                .into_iter()
+                .map(|layer| CadApiLayerRecord {
+                    name: layer.name,
+                    aci: layer.color.aci,
+                    rgb: layer.color.rgb,
+                    visible: layer.visible,
+                    locked: layer.locked,
+                    frozen: layer.frozen,
+                    linetype: layer.linetype,
+                })
+                .collect(),
+            // The projection reports no active layer only for an empty projection;
+            // then the honest `clayer` is the empty string, never a invented name.
+            clayer: layers.active.unwrap_or_default(),
+        })
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn document() -> CadApiDocument {
-        CadApiDocument {
-            id: "1".to_string(),
-            name: "plan.dwg".to_string(),
-            is_read_only: false,
-            database_id: "7".to_string(),
-            database_version: "12".to_string(),
-        }
-    }
-
-    fn snapshot() -> CadApiSnapshot {
-        CadApiSnapshot {
-            document: Some(document()),
-        }
-    }
-
-    fn no_document_snapshot() -> CadApiSnapshot {
-        CadApiSnapshot { document: None }
-    }
-
-    /// One call without parameters (the active-document read's shape).
-    fn call(snapshot: Option<&CadApiSnapshot>, namespace: &str, operation: &str) -> CadApiOutcome {
-        dispatch_api_call(snapshot, namespace, operation, None)
-    }
-
-    fn value_of(outcome: CadApiOutcome) -> Value {
-        assert!(outcome.ok, "expected a value, got {outcome:?}");
-        outcome.value.expect("a value")
-    }
-
-    fn error_of(outcome: CadApiOutcome) -> String {
-        assert!(!outcome.ok, "expected a refusal, got {outcome:?}");
-        assert_eq!(outcome.value, None, "a refusal carries no value");
-        outcome.error.expect("a refusal marker")
-    }
-
-    #[test]
-    fn the_active_document_reports_the_nested_wire_shape() {
-        let outcome = call(
-            Some(&snapshot()),
-            API_CALL_NAMESPACE,
-            API_CALL_MDI_ACTIVE_DOCUMENT,
-        );
-        assert_eq!(outcome.error, None);
-        assert_eq!(
-            value_of(outcome),
-            json!({
-                "document": {
-                    "id": "1",
-                    "name": "plan.dwg",
-                    "isReadOnly": false,
-                    "database": { "id": "7", "version": "12" },
-                }
-            })
-        );
-    }
-
-    #[test]
-    fn the_documents_list_reports_the_same_descriptor() {
-        let listed = value_of(call(
-            Some(&snapshot()),
-            API_CALL_NAMESPACE,
-            API_CALL_DOCUMENTS,
-        ));
-        let active = value_of(call(
-            Some(&snapshot()),
-            API_CALL_NAMESPACE,
-            API_CALL_MDI_ACTIVE_DOCUMENT,
-        ));
-        let documents = listed["documents"].as_array().expect("an array");
-        assert_eq!(documents.len(), 1, "this host holds one document");
-        assert_eq!(
-            documents[0], active["document"],
-            "one descriptor shape for both reads"
-        );
-    }
-
-    #[test]
-    fn no_document_reports_an_empty_document_list() {
-        let outcome = call(
-            Some(&no_document_snapshot()),
-            API_CALL_NAMESPACE,
-            API_CALL_DOCUMENTS,
-        );
-        assert!(outcome.ok, "no document is a fact, not a wait");
-        assert_eq!(value_of(outcome), json!({ "documents": [] }));
-    }
-
-    #[test]
-    fn the_revision_matches_the_snapshot_database_id() {
-        let parameters = json!({ "database": "7" });
-        let outcome = dispatch_api_call(
-            Some(&snapshot()),
-            API_CALL_DATABASE_NAMESPACE,
-            API_CALL_REVISION,
-            Some(&parameters),
-        );
-        assert_eq!(outcome.error, None);
-        assert_eq!(value_of(outcome), json!({ "revision": 12 }));
-    }
-
-    #[test]
-    fn the_revision_refuses_a_mismatched_database() {
-        for parameters in [
-            json!({ "database": "999" }),
-            json!({ "database": "" }),
-            json!({ "database": "07" }),
-        ] {
-            let outcome = dispatch_api_call(
-                Some(&snapshot()),
-                API_CALL_DATABASE_NAMESPACE,
-                API_CALL_REVISION,
-                Some(&parameters),
-            );
-            assert_eq!(
-                error_of(outcome),
-                API_CALL_INVALID_ARGUMENT_DATABASE,
-                "parameters {parameters} must not resolve another database"
-            );
-        }
-    }
-
-    #[test]
-    fn the_revision_refuses_missing_or_non_string_arguments() {
-        for parameters in [
-            Value::Null,
-            json!({}),
-            json!({ "other": "7" }),
-            json!({ "database": 7 }),
-            json!({ "database": null }),
-            json!(["7"]),
-        ] {
-            let outcome = dispatch_api_call(
-                Some(&snapshot()),
-                API_CALL_DATABASE_NAMESPACE,
-                API_CALL_REVISION,
-                Some(&parameters),
-            );
-            assert_eq!(
-                error_of(outcome),
-                API_CALL_INVALID_ARGUMENT_DATABASE,
-                "parameters {parameters} must be refused by name"
-            );
-        }
-        // An absent `parameters` object is the same refusal.
-        assert_eq!(
-            error_of(call(
-                Some(&snapshot()),
-                API_CALL_DATABASE_NAMESPACE,
-                API_CALL_REVISION
-            )),
-            API_CALL_INVALID_ARGUMENT_DATABASE
-        );
-    }
-
-    #[test]
-    fn the_revision_without_a_document_is_no_document() {
-        // The no-document fact wins over argument validation: there is no
-        // database to name, so every parameter set gets the same answer.
-        for parameters in [None, Some(json!({ "database": "7" }))] {
-            let outcome = dispatch_api_call(
-                Some(&no_document_snapshot()),
-                API_CALL_DATABASE_NAMESPACE,
-                API_CALL_REVISION,
-                parameters.as_ref(),
-            );
-            assert_eq!(error_of(outcome), API_CALL_NO_DOCUMENT);
-        }
-    }
-
-    #[test]
-    fn the_revision_refuses_an_unparseable_snapshot_version() {
-        // This build always renders the revision decimal; a violated invariant is
-        // a named refusal, never a fabricated number.
-        let broken = CadApiSnapshot {
-            document: Some(CadApiDocument {
-                database_version: "v12".to_string(),
-                ..document()
-            }),
-        };
-        let parameters = json!({ "database": "7" });
-        let outcome = dispatch_api_call(
-            Some(&broken),
-            API_CALL_DATABASE_NAMESPACE,
-            API_CALL_REVISION,
-            Some(&parameters),
-        );
-        assert_eq!(error_of(outcome), API_CALL_INVALID_SNAPSHOT);
-    }
-
-    #[test]
-    fn no_snapshot_is_cad_waiting_for_every_served_operation() {
-        for (namespace, operation) in [
-            (API_CALL_NAMESPACE, API_CALL_MDI_ACTIVE_DOCUMENT),
-            (API_CALL_NAMESPACE, API_CALL_DOCUMENTS),
-            (API_CALL_DATABASE_NAMESPACE, API_CALL_REVISION),
-        ] {
-            let outcome = call(None, namespace, operation);
-            assert_eq!(error_of(outcome), CAD_WAITING, "{namespace}.{operation}");
-        }
-    }
-
-    #[test]
-    fn an_unknown_operation_is_the_stable_refusal() {
-        for (namespace, operation) in [
-            (API_CALL_NAMESPACE, "documentManager.other"),
-            (API_CALL_DATABASE_NAMESPACE, API_CALL_MDI_ACTIVE_DOCUMENT),
-            (API_CALL_NAMESPACE, API_CALL_REVISION),
-            (API_CALL_DATABASE_NAMESPACE, API_CALL_DOCUMENTS),
-            ("", ""),
-            ("", API_CALL_MDI_ACTIVE_DOCUMENT),
-        ] {
-            let outcome = call(Some(&snapshot()), namespace, operation);
-            assert_eq!(
-                error_of(outcome),
-                api_call_unknown(namespace, operation),
-                "{namespace}.{operation} is not served"
-            );
-            assert_eq!(
-                error_of(call(Some(&snapshot()), namespace, operation)),
-                format!("unsupported-runtime: cad_api.{namespace}.{operation}")
-            );
-        }
-    }
-
-    #[test]
-    fn an_unknown_operation_is_refused_before_snapshot_and_arguments() {
-        let parameters = json!({ "database": "nope" });
-        let outcome = dispatch_api_call(None, "EditorInput", "getPoint", Some(&parameters));
-        assert_eq!(
-            error_of(outcome),
-            "unsupported-runtime: cad_api.EditorInput.getPoint",
-            "cad_waiting/argument refusals would promise a later success"
-        );
-    }
-
-    #[test]
-    fn the_active_document_ignores_parameters() {
-        let without = value_of(call(
-            Some(&snapshot()),
-            API_CALL_NAMESPACE,
-            API_CALL_MDI_ACTIVE_DOCUMENT,
-        ));
-        for parameters in [json!({}), json!({ "database": "7", "unused": [1, 2] })] {
-            let with = value_of(dispatch_api_call(
-                Some(&snapshot()),
-                API_CALL_NAMESPACE,
-                API_CALL_MDI_ACTIVE_DOCUMENT,
-                Some(&parameters),
-            ));
-            assert_eq!(with, without, "this read takes no arguments");
-        }
-    }
-
-    #[test]
-    fn no_document_answers_a_null_document() {
-        // A snapshot that exists without a document is a fact, answered as such
-        // (never `cad_waiting`, which would claim the host has nothing to say).
-        let outcome = call(
-            Some(&no_document_snapshot()),
-            API_CALL_NAMESPACE,
-            API_CALL_MDI_ACTIVE_DOCUMENT,
-        );
-        assert!(outcome.ok);
-        assert_eq!(outcome.error, None);
-        assert_eq!(value_of(outcome), json!({ "document": null }));
-        assert_eq!(
-            api_call_document(None).value.expect("a value"),
-            json!({ "document": null })
-        );
-    }
-
-    #[test]
-    fn the_snapshot_serializes_as_the_frozen_wire_shape() {
-        assert_eq!(
-            serde_json::to_value(snapshot()).expect("serializes"),
-            json!({
-                "document": {
-                    "id": "1",
-                    "name": "plan.dwg",
-                    "isReadOnly": false,
-                    "database": { "id": "7", "version": "12" },
-                }
-            })
-        );
-        assert_eq!(
-            serde_json::to_value(no_document_snapshot()).expect("serializes"),
-            json!({ "document": null })
-        );
-    }
-
-    #[test]
-    fn the_read_only_flag_travels_unchanged() {
-        let mut document = document();
-        document.is_read_only = true;
-        let outcome = call(
-            Some(&CadApiSnapshot {
-                document: Some(document),
-            }),
-            API_CALL_NAMESPACE,
-            API_CALL_MDI_ACTIVE_DOCUMENT,
-        );
-        let value = value_of(outcome);
-        assert_eq!(value["document"]["isReadOnly"], json!(true));
-    }
-
-    #[test]
-    fn the_reply_omits_the_absent_half() {
-        let ok = serde_json::to_value(api_call_document(Some(document()))).expect("serializes");
-        assert_eq!(ok["ok"], json!(true));
-        assert!(ok.get("error").is_none(), "the refusal half is omitted");
-        let refused = serde_json::to_value(CadApiOutcome::refusal("x")).expect("serializes");
-        assert_eq!(refused["ok"], json!(false));
-        assert!(refused.get("value").is_none(), "the value half is omitted");
-    }
-}
+mod tests;

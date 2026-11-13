@@ -15,7 +15,8 @@
 //! a fabricated placeholder document.
 
 use crate::host::HostController;
-use crate::AppMode;
+use crate::{ApiOutcome, ApiRequest, ApiTarget, AppMode, EntityEdit};
+use cad_domain::{CadError, CadResult, Revision};
 
 /// One open document as the plugin API reports it.
 ///
@@ -60,11 +61,46 @@ impl HostController {
             database_version: drawing.revision().0.to_string(),
         })
     }
+
+    /// Execute one plugin `transaction.commit` request.
+    ///
+    /// The **one** commit path: [`crate::Application::execute_api`] validates the
+    /// batch on a private candidate, allocates ids, records one undo step and only
+    /// then publishes the new database. Nothing here writes `cad-db` directly and
+    /// there is no second document state.
+    ///
+    /// The caller (the shared wire layer) maps this request's JSON onto
+    /// [`EntityEdit`] values and maps the result back; this method owns the
+    /// target/revision/revision-conflict rules the application enforces.
+    pub fn plugin_commit(
+        &mut self,
+        expected_revision: Revision,
+        edits: Vec<EntityEdit>,
+    ) -> CadResult<ApiOutcome> {
+        let drawing = self
+            .drawing()
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let target = ApiTarget {
+            document: self.document_id,
+            database: drawing.id(),
+            viewport: self.viewport_id,
+        };
+        self.application.execute_api(
+            &mut self.session,
+            target,
+            ApiRequest::Commit {
+                expected_revision,
+                edits,
+            },
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NewEntity;
+    use cad_domain::Point3;
 
     fn controller() -> HostController {
         HostController::with_demo_document([800.0, 600.0]).expect("the demo document opens")
@@ -121,6 +157,50 @@ mod tests {
         let drawing = controller.drawing().expect("a document");
         assert_eq!(after.database_id, drawing.id().0.to_string());
         assert_eq!(after.database_version, drawing.revision().0.to_string());
+    }
+
+    #[test]
+    fn a_plugin_commit_goes_through_the_one_api_path() {
+        let mut controller = controller();
+        let drawing = controller.drawing().expect("a demo document");
+        let layer = drawing
+            .layers()
+            .find(|layer| layer.name == "0")
+            .map(|layer| layer.id)
+            .expect("the demo drawing has layer 0");
+        let expected = drawing.revision();
+        let edits = vec![EntityEdit::Insert {
+            layer,
+            space: controller.active_space(),
+            entity: NewEntity::Line {
+                start: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                end: Point3 {
+                    x: 10.0,
+                    y: 5.0,
+                    z: 0.0,
+                },
+            },
+        }];
+        let outcome = controller
+            .plugin_commit(expected, edits)
+            .expect("the commit applies");
+        assert_eq!(outcome.created.len(), 1, "one insert created one entity");
+        let after = controller.drawing().expect("a document").revision();
+        assert_eq!(after.0, expected.0 + 1, "one commit, one revision");
+    }
+
+    #[test]
+    fn a_stale_plugin_commit_is_the_application_stale_result() {
+        let mut controller = controller();
+        let expected = controller.drawing().expect("a demo document").revision();
+        let error = controller
+            .plugin_commit(Revision(expected.0 + 1), Vec::new())
+            .expect_err("a stale expected revision is refused");
+        assert!(matches!(error, CadError::StaleResult), "{error:?}");
     }
 
     #[test]

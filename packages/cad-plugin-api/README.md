@@ -27,7 +27,7 @@ export default definePlugin({
 | `ApplicationServices` | `Application`, `DocumentManager`, `Document` |
 | `DatabaseServices` | `Database`, `Transaction`, `TransactionManager`, object/table descriptions |
 | `EditorInput` | `Editor`, `PromptResult`, `PromptStatus`, `SelectionSet` |
-| `Runtime` | `definePlugin`, `parsePluginManifest`, `PluginContext` |
+| `Runtime` | `definePlugin`, `parsePluginManifest`, `PluginContext`, `api.runtime` (`registerCommand`/`unregisterCommand`), `CommandFlags` |
 | `Geometry` | `Point2d/3d`, `Vector2d/3d`, `Matrix3d`, `Plane` and pure helpers |
 | `Colors` | `Color`, `EntityColor`, `ColorMethod`, `aciToRgb` |
 
@@ -75,21 +75,57 @@ silent success. Host failures arrive as `CadApiError`; branch on `code`, not mes
 
 ## v1 status
 
-**The descriptor is 21 rows: three `supported`, 18 `pending`.** The served
-operations are reflected reads over `cad_api_call`:
+**The descriptor is 17 rows: 16 `supported`, one `pending`.** Five served
+operations are reflected reads over `cad_api_call` —
 `documentManager.mdiActiveDocument` (the open `Document`, or `null`),
-`documentManager.documents` (0 or 1 `Document`, `[]` when none is open) and
-`database.revision` (`{ database: id }` -> the current revision number). Everything
-else is still a reservation — no write path, no prompts, no command dispatch.
+`documentManager.documents` (0 or 1 `Document`, `[]` when none is open),
+`database.symbolTables` (the block/layer projection plus the active layer name),
+`database.revision` (`{ database: id }` -> the current revision number) and
+`editor.currentSelection` (the ids the user holds right now, `[]` when nothing is
+selected). Three are **live-session** operations over the submit/poll lane, because
+they read the session rather than the reflected snapshot: `database.getObjectId`
+(a handle lookup, `null` when no entity carries it), `transaction.getObject` (one
+entity, decoded by its `typeName`) and `transaction.commit`. Eight are **editor**
+operations on the same lane: the seven prompts (`getPoint`/`getEntity`/
+`getSelection`/`getString`/`getDouble`/`getInteger`/`getKeyword`) and the immediate
+`selectAll`; a prompt resolves only when the user answers, so the client waits far
+longer for it than for a machine answer. `document.lock` is the one reservation
+left.
+
+`editor.writeMessage` has **no row**: it is client-local. The text goes to the
+host's message sink (`CadApiOptions.onMessage`; the WebView store by default), and
+without a sink the call refuses
+(`unsupported-runtime: cad_api.EditorInput.editor.writeMessage`) instead of
+pretending the message went somewhere.
+
+`Runtime` has **no row at all**: command registration is client-local. `createCadApi`
+takes an optional `onCommandRegister`/`onCommandUnregister` hook pair, and a plugin
+calls `ctx.api.runtime.registerCommand(name, flags, handler)` to hand a command to
+the host's funnel; without the hook the call refuses
+(`unsupported-runtime: cad_api.Runtime.registerCommand`), because there would be
+nowhere to dispatch it. Names use the descriptor's command grammar
+(`[A-Z][A-Z0-9_]{0,31}`); a duplicate is `api.invalid_argument: command.duplicate`, an
+unknown unregister is `api.invalid_argument: command.unknown`. Flags are recorded,
+not interpreted: the only dispatch path in this build is a typed command line.
 
 | Descriptor rows | v1 |
 | --- | --- |
 | `ApplicationServices.documentManager.mdiActiveDocument`, `.documents` (2) | `supported` — reflected document reads |
 | `ApplicationServices.document.lock` (1) | `pending` — no lock path yet |
+| `DatabaseServices.database.getObjectId` (1) | `supported` — live-session handle lookup, submit lane |
+| `DatabaseServices.database.symbolTables` (1) | `supported` — block/layer tables and `clayer`, one cached read |
 | `DatabaseServices.database.revision` (1) | `supported` — current revision, read every call |
-| `DatabaseServices` (7 more) | `pending` — no object read/write or symbol-table path yet |
-| `EditorInput` (9) | `pending` — no interactive prompt path yet |
-| `Runtime.runtime.registerCommand` (1) | `pending` — no chrome-local admission path yet |
+| `DatabaseServices.transaction.getObject` (1) | `supported` — live-session entity read, submit lane |
+| `DatabaseServices.transaction.commit` (1) | `supported` — the one mutation, submit lane |
+| `EditorInput.editor.getPoint`, `getEntity`, `getSelection`, `getString`, `getDouble`, `getInteger`, `getKeyword` (7) | `supported` — prompts, submit lane, long wait |
+| `EditorInput.editor.selectAll` (1) | `supported` — immediate selection, submit lane |
+| `EditorInput.editor.currentSelection` (1) | `supported` — the reflected selection, no prompt |
+| `EditorInput.editor.writeMessage` (0) | client-local — the host message sink |
+| `Runtime` (0) | client-local — commands register through the host hook, no host operation |
+
+`transaction.start`, `transaction.addNewlyCreated` and `transaction.abort` have **no
+row**: they are this client's own bookkeeping (the host mints no transaction handle),
+so advertising them would promise a host round-trip that does not exist.
 
 `DocumentManager.mdiActiveDocument()` and `documents()` are **methods returning
 promises**, not AutoCAD's properties: the value crosses an asynchronous wire, and a
@@ -100,14 +136,15 @@ snapshot yet refuses with `cad_waiting`, and that rejection reaches the plugin a
 
 ## Transactions
 
-`startTransaction({ expectedRevision })` is synchronous: the host is not asked to
-open a transaction, so edits buffer client-side. `expectedRevision` is **required**
-for the outermost transaction — an omitted precondition would be silent
-last-writer-wins, so the caller reads `database.revision()` first. Only the outermost
-`commit()` crosses the wire, as one request carrying
-`{ document, transactionId, expectedRevision, edits }`; it resolves
-`{ applied: true, revision, created }` with the host's new revision and the ids it
-actually created.
+`startTransaction({ expectedRevision })` is synchronous and **client-local**: the
+host is not asked to open a transaction, so edits buffer client-side.
+`expectedRevision` is **required** for the outermost transaction — an omitted
+precondition would be silent last-writer-wins, so the caller reads
+`database.revision()` first. Only the outermost `commit()` crosses the wire, over the
+**mutating lane** (`CadHostBridge.mutate`, i.e. submit + poll), as one request
+carrying `{ document, transactionId, expectedRevision, edits }`; it resolves only
+after the host reported the outcome, as `{ applied: true, revision, created }` with
+the host's new revision and the ids it actually created.
 
 - Nesting is strictly LIFO for `commit`/`abort` (`api.transaction.nesting_order`), at
   most 8 deep (`api.transaction.nesting_limit`), and a transaction closes once
@@ -115,9 +152,10 @@ actually created.
 - A nested commit is a savepoint release: it merges into the parent, applies nothing
   and reports `{ applied: false, revision: null, created: [] }` — no revision is
   invented. A nested abort discards its own buffer.
-- `abort()` is **local only** in v1: the host never minted a transaction handle, so
-  nothing remote is rolled back. A future `transaction.start` that mints a host id
-  turns abort into a wire call.
+- `startTransaction`, `addNewlyCreatedDBObject` and `abort()` are **local**: they are
+  not gated and never touch the wire, because the host never minted a transaction
+  handle. A future host-minted transaction would add capability rows and wire calls
+  back to them.
 - `expectedRevision` is optimistic concurrency: a stale value is rejected by the host
   as `api.revision-conflict` (`details.actualRevision` when the host supplies one).
 - Creates are a closed set (`Line`/`Circle`/`Arc`, a layer **name** and the active
@@ -130,7 +168,10 @@ actually created.
 `source_handle` provenance only and is `null` for entities created through this API —
 it is never synthesized. Layers and blocks are **keyed by name** with no handle at
 all: `cad-db` layers are `{ id, name, visible }`, and linetype is a symbolic concept,
-so inventing handles would create a second identity system.
+so inventing handles would create a second identity system. A layer's resolved colour
+keeps the host's `aci: null` for a true colour — the `#rrggbb` never implies an index
+— and a `Database.clayer` of `""` is the host's honest "no active layer", passed
+through rather than renamed.
 
 ## Trust model
 

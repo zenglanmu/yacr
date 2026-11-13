@@ -54,21 +54,57 @@ function namespaceNames(value: unknown): readonly unknown[] {
   });
 }
 
-test('the table is 21 host operations: 18 pending and three served reads', () => {
-  assert.equal(API_OPERATIONS.length, 21, 'the v1 descriptor has 21 host-operation rows');
+test('the table is 17 host operations: one pending and 16 served', () => {
+  assert.equal(API_OPERATIONS.length, 17, 'the v1 descriptor has 17 host-operation rows');
   const supported = API_OPERATIONS.filter((row) => row.status === 'supported').map(
     (row) => `${row.namespace}.${row.operation}`,
   );
-  // Three capabilities are served in this build, and these are exactly them.
-  // Widening the set is a contract change: the host must serve the operation and
-  // the WebView adapter must implement it first.
+  // Sixteen capabilities are served in this build: the reflected reads (the
+  // `cad_api_call` lane), the live-session operations and the editor prompts (the
+  // `cad_api_submit` lane). Widening the set is a contract change.
   assert.deepEqual(supported, [
     'ApplicationServices.documentManager.mdiActiveDocument',
     'ApplicationServices.documentManager.documents',
+    'DatabaseServices.database.getObjectId',
+    'DatabaseServices.database.symbolTables',
     'DatabaseServices.database.revision',
+    'DatabaseServices.transaction.getObject',
+    'DatabaseServices.transaction.commit',
+    'EditorInput.editor.getPoint',
+    'EditorInput.editor.getEntity',
+    'EditorInput.editor.getSelection',
+    'EditorInput.editor.getString',
+    'EditorInput.editor.getDouble',
+    'EditorInput.editor.getInteger',
+    'EditorInput.editor.getKeyword',
+    'EditorInput.editor.selectAll',
+    'EditorInput.editor.currentSelection',
   ]);
   const pending = API_OPERATIONS.filter((row) => row.status === 'pending');
-  assert.equal(pending.length, 18, 'every other host operation is still pending');
+  assert.deepEqual(
+    pending.map((row) => `${row.namespace}.${row.operation}`),
+    ['ApplicationServices.document.lock'],
+    'the document lock is the one remaining reservation',
+  );
+});
+
+test('client-local operations have no descriptor row', () => {
+  // `start`, `addNewlyCreated` and `abort` never cross the wire, and command
+  // registration is client-local too (it reports to the host's own funnel hook).
+  // Advertising any of them would promise a host round-trip that does not exist.
+  for (const operation of [
+    'transaction.start',
+    'transaction.addNewlyCreated',
+    'transaction.abort',
+    'runtime.registerCommand',
+    'editor.writeMessage',
+  ]) {
+    assert.equal(
+      API_OPERATIONS.some((row) => row.operation === operation),
+      false,
+      `${operation} must not be a host operation`,
+    );
+  }
 });
 
 test('every capability row carries its canonical reason', () => {

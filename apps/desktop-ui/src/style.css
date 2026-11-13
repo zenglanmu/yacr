@@ -1432,6 +1432,62 @@ button, input, select { font: inherit; color: inherit; }
 }
 .commandline__input::placeholder { color: var(--text-muted); opacity: 1; }
 .commandline__input:disabled { color: var(--text-disabled); }
+/* The pending plugin prompt's own sentence: the command line's accent label, at
+   the same size as the field. It is **not** the status bar's `.statusbar__tool-step`
+   (which is hidden on a narrow window): the question being answered must stay
+   visible, so this one only ever ellipsizes. */
+.commandline__prompt-step {
+  flex: 0 1 auto; min-width: 0; max-width: 30ch;
+  color: var(--accent-text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The prompt's accepted keywords, as chips. The cluster takes the free space the
+   field leaves (bounded to 46%) and scrolls sideways rather than wrapping, so the
+   row keeps its one-line height however many options the plugin declared; a chip
+   is a real button, so Tab reaches every option and Space answers it. */
+.commandline__keywords {
+  display: flex; align-items: center; gap: 4px;
+  flex: 0 1 auto; min-width: 0; max-width: 46%;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none;
+}
+.commandline__keywords::-webkit-scrollbar { display: none; }
+.commandline__keyword {
+  flex: 0 0 auto;
+  height: 20px; padding: 0 8px;
+  border: 1px solid var(--line-soft); border-radius: 999px;
+  background: transparent; color: var(--accent-text);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1;
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.commandline__keyword:hover { background: var(--hover); color: var(--text); }
+.commandline__keyword:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* The echo area: the bounded plugin `writeMessage` lines and the pending prompt's
+   invalid-input sentence. It floats above the row in the same containing block as
+   the suggestion list and the history popup (the region is `position: relative`),
+   so the bar keeps its constant height and nothing under it reflows. It stands
+   down while either of those overlays owns the space (they share the anchor), and
+   `pointer-events: none` keeps a press on the strip reaching the drawing. */
+.commandline__echo {
+  position: absolute;
+  left: 24px; right: 8px;
+  bottom: calc(100% + 4px);
+  display: flex; flex-direction: column; gap: 1px;
+  max-height: 72px; overflow: hidden;
+  margin: 0; padding: 4px 8px;
+  background: var(--chrome-3); border: 1px solid var(--line-soft); border-radius: var(--radius);
+  box-shadow: 0 12px 28px rgba(var(--shadow-rgb), .45);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.35;
+  pointer-events: none;
+  animation: rise var(--t-fast) both;
+}
+.commandline__echo-line {
+  margin: 0;
+  color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.commandline__echo-line.is-invalid { color: var(--danger); }
 /* The suggestion list floats **above** the input row, in the same containing
    block as the history popup: `left: 24px` clears the prompt icon and `right:
    8px` mirrors the region's padding, so both borders stay inside the window. It

@@ -146,6 +146,16 @@ export type ToolTextSubmitResult =
   | { readonly kind: 'accepted' }
   | { readonly kind: 'failed'; readonly error: string };
 
+/**
+ * What a **guarded** submit of the same channel reports.
+ *
+ * The shell owns an in-flight guard around `cad_set_tool_text` so a second Enter
+ * cannot send the same text twice; a press that hits that guard is `busy` — an
+ * explicit non-answer, never a fabricated acceptance. Both callers of the channel
+ * (the tool's text step and a plugin prompt's answer) read this union.
+ */
+export type ToolTextAnswerResult = ToolTextSubmitResult | { readonly kind: 'busy' };
+
 /** The live limit state of a draft, for the prompt line's warning. */
 export interface TextDraftState {
   readonly length: number;

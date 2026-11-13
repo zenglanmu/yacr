@@ -13,9 +13,16 @@
 
 import { invalidArgument } from './errors.ts';
 
-/** A resolved ACI colour: the index it came from and its `#rrggbb` value. */
+/**
+ * A resolved colour: its `#rrggbb` value and the palette index it came from.
+ *
+ * `aci` is `null` for a **true colour** — a layer whose colour did not come from
+ * the palette — because the host has no index to report and inventing one would
+ * be indistinguishable from a real ACI. A colour built by `colorFromAci` always
+ * carries its index.
+ */
 export interface Color {
-  readonly aci: number;
+  readonly aci: number | null;
   readonly rgb: string;
 }
 

@@ -17,10 +17,19 @@ import { filterCommandSuggestions, splitCommandText, stepHistoryCursor } from '.
 import type { CommandAlias, CommandSuggestion } from './commands.ts';
 import { historyRows } from './command-history.ts';
 import type { CommandHistoryEntry } from './command-history.ts';
+import { PROMPT_ANSWER_PLACEHOLDER_KEY } from './plugin-prompt.ts';
 import { TEXT_PROMPT_KEY } from '../tools/text.ts';
 
-/** The catalog key the field's placeholder comes from. */
-export function commandLinePlaceholderKey(textMode: boolean): string {
+/**
+ * The catalog key the field's placeholder comes from.
+ *
+ * Three modes, in the order they can own the line: a plugin prompt asks for an
+ * **answer** (the prompt's own sentence is the chip beside the field, so the
+ * placeholder only says how to answer), a text step asks for text, and the
+ * ordinary line asks for a command name.
+ */
+export function commandLinePlaceholderKey(textMode: boolean, promptMode: boolean = false): string {
+  if (promptMode) return PROMPT_ANSWER_PLACEHOLDER_KEY;
   return textMode ? TEXT_PROMPT_KEY : 'command.placeholder';
 }
 
@@ -28,7 +37,9 @@ export function commandLinePlaceholderKey(textMode: boolean): string {
  * The text the field displays.
  *
  * A text step keeps its own draft and never mirrors it into `shell.command`, so
- * the command line's content is still there when the tool ends.
+ * the command line's content is still there when the tool ends. A pending plugin
+ * prompt does the same (`use-command-line.ts`), which is what keeps an answer
+ * from ever becoming a command.
  */
 export function commandLineValue(textMode: boolean, command: string, textDraft: string): string {
   return textMode ? textDraft : command;
@@ -38,17 +49,18 @@ export interface CommandLineDisabledInput {
   readonly cadReady: boolean;
   readonly pending: boolean;
   readonly textMode: boolean;
+  readonly promptMode?: boolean;
 }
 
 /**
  * Whether the field is disabled.
  *
- * A queued command disables the field, **except** during a text step: disabling
- * it there would drop focus mid-edit and lose the user's text (the submit guard,
- * not the `disabled` attribute, handles a double Enter).
+ * A queued command disables the field, **except** while the line belongs to a
+ * step: disabling it there would drop focus mid-edit and lose the user's text
+ * (the submit guard, not the `disabled` attribute, handles a double Enter).
  */
-export function commandLineDisabled({ cadReady, pending, textMode }: CommandLineDisabledInput): boolean {
-  return !cadReady || (pending && !textMode);
+export function commandLineDisabled({ cadReady, pending, textMode, promptMode = false }: CommandLineDisabledInput): boolean {
+  return !cadReady || (pending && !textMode && !promptMode);
 }
 
 export interface CommandLineListInput {
@@ -56,16 +68,20 @@ export interface CommandLineListInput {
   readonly focused: boolean;
   readonly command: string;
   readonly historyOpen: boolean;
+  /** Whether a plugin prompt owns the line: then no command row is offered. */
+  readonly promptMode?: boolean;
 }
 
 /**
  * Whether the suggestion list is offered.
  *
  * Only while typing a command name (`focused`, non-empty) and while the history
- * panel is closed — the two lists never compete for the same space.
+ * panel is closed — the two lists never compete for the same space. A pending
+ * plugin prompt is **not** a command draft: the suggestion list stays shut so a
+ * host command can never be chosen into an answer line.
  */
-export function commandLineListOpen({ textMode, focused, command, historyOpen }: CommandLineListInput): boolean {
-  return !textMode && focused && command.trim().length > 0 && !historyOpen;
+export function commandLineListOpen({ textMode, focused, command, historyOpen, promptMode = false }: CommandLineListInput): boolean {
+  return !textMode && !promptMode && focused && command.trim().length > 0 && !historyOpen;
 }
 
 export interface CommandLineSuggestionInput {
@@ -73,11 +89,13 @@ export interface CommandLineSuggestionInput {
   readonly command: string;
   readonly history: readonly string[];
   readonly aliases: readonly CommandAlias[];
+  /** Whether a plugin prompt owns the line: then there are no rows. */
+  readonly promptMode?: boolean;
 }
 
-/** The suggestion rows for the current draft; none during a text step. */
-export function commandLineSuggestions({ textMode, command, history, aliases }: CommandLineSuggestionInput): CommandSuggestion[] {
-  if (textMode) return [];
+/** The suggestion rows for the current draft; none during a text step or a prompt. */
+export function commandLineSuggestions({ textMode, command, history, aliases, promptMode = false }: CommandLineSuggestionInput): CommandSuggestion[] {
+  if (textMode || promptMode) return [];
   return filterCommandSuggestions(command, { history, aliases });
 }
 
@@ -100,8 +118,21 @@ export function commandLineSubmitText({ command, highlight, suggestions }: Comma
   return command;
 }
 
-/** Whether the line has something to send right now. */
-export function commandLineCanSubmit(textMode: boolean, command: string, textEmpty: boolean, textTooLong: boolean): boolean {
+/**
+ * Whether the line has something to send right now.
+ *
+ * A prompt answer always has one: an empty line is Enter with nothing typed,
+ * which the host reads as `CONFIRM`/`None` — so the field's send affordance must
+ * stay live instead of looking disabled on the one key that works.
+ */
+export function commandLineCanSubmit(
+  textMode: boolean,
+  command: string,
+  textEmpty: boolean,
+  textTooLong: boolean,
+  promptMode: boolean = false,
+): boolean {
+  if (promptMode) return true;
   return textMode ? !textEmpty && !textTooLong : command.trim().length > 0;
 }
 

@@ -54,7 +54,7 @@ test('hostInfo() calls cad_api_status once and merges the status snapshot', asyn
   assert.equal(info.apiVersion, 1);
   assert.equal(info.carrier, 'dom-canvas');
   assert.equal(info.documentOwner, 'wasm');
-  assert.equal(info.operations.length, 21);
+  assert.equal(info.operations.length, 17);
 });
 
 test('hostInfo() reports unknown/none before any status is observed', async () => {
@@ -92,19 +92,33 @@ test('a malformed host answer is refused with the cad_api_status prefix', async 
   );
 });
 
-test('this build implements exactly the three served reads', () => {
+test('this build implements every served operation (reads, live session, prompts)', () => {
   assert.deepEqual(IMPLEMENTED_OPERATIONS, [
     'ApplicationServices.documentManager.mdiActiveDocument',
     'ApplicationServices.documentManager.documents',
+    'DatabaseServices.database.symbolTables',
     'DatabaseServices.database.revision',
+    'DatabaseServices.database.getObjectId',
+    'DatabaseServices.transaction.getObject',
+    'DatabaseServices.transaction.commit',
+    'EditorInput.editor.getPoint',
+    'EditorInput.editor.getEntity',
+    'EditorInput.editor.getSelection',
+    'EditorInput.editor.getString',
+    'EditorInput.editor.getDouble',
+    'EditorInput.editor.getInteger',
+    'EditorInput.editor.getKeyword',
+    'EditorInput.editor.selectAll',
+    'EditorInput.editor.currentSelection',
   ]);
 });
 
 test('every supported descriptor row has an adapter implementation', async () => {
   // The one rule that keeps the descriptor honest: a row may only be
-  // `supported` if this adapter can actually serve it. It has three rows to check
-  // today and goes red the moment another row flips without a `case` in
-  // `bridge.ts` - which is exactly when it must be caught.
+  // `supported` if this adapter can actually serve it. It has sixteen rows to
+  // check today and goes red the moment another row flips without a `case` (or a
+  // mutating implementation) in `bridge.ts` - which is exactly when it must be
+  // caught.
   const contract = JSON.parse(await readFile(CONTRACT_URL, 'utf8'));
   const supportedRows = contract.operations.filter((row) => row.status === 'supported');
   for (const row of supportedRows) {
@@ -185,6 +199,233 @@ test('the served revision forwards with its database parameter', async () => {
       namespace: 'DatabaseServices',
       operation: 'database.revision',
       parameters: { database: '7' },
+    },
+  ]);
+});
+
+test('the served symbol tables forward with their database parameter', async () => {
+  const tablesValue = {
+    blockTable: {
+      name: 'blocks',
+      records: [{ name: 'WALL', isLayout: false, origin: [0, 0, 0] }],
+    },
+    layerTable: {
+      name: 'layers',
+      records: [
+        {
+          name: '0',
+          color: { aci: 7, rgb: '#ffffff' },
+          visible: true,
+          locked: false,
+          frozen: false,
+          linetype: 'Continuous',
+        },
+      ],
+    },
+    clayer: '0',
+  };
+  const { invoke, args } = countingInvoke((command) =>
+    command === 'cad_api_status' ? payload : { ok: true, value: tablesValue },
+  );
+  const bridge = createCadHostBridge({ invoke, status: () => statusWith('native-below', 'native') });
+  const result = await bridge.request({
+    namespace: 'DatabaseServices',
+    operation: 'database.symbolTables',
+    parameters: { database: '7' },
+  });
+  assert.deepEqual(result, tablesValue);
+  assert.deepEqual(args, [
+    {
+      namespace: 'DatabaseServices',
+      operation: 'database.symbolTables',
+      parameters: { database: '7' },
+    },
+  ]);
+});
+
+test('mutate submits one correlated request and polls until its outcome appears', async () => {
+  let submitted = null;
+  let polls = 0;
+  const { invoke, commands } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_submit') {
+      submitted = request;
+      return { accepted: true };
+    }
+    if (command === 'cad_api_poll') {
+      polls += 1;
+      // Two empty polls (nothing completed yet), then our outcome.
+      if (polls < 3) return { results: [] };
+      return {
+        results: [
+          { requestId: submitted.requestId, ok: true, value: { revision: 3, created: ['9'] } },
+        ],
+      };
+    }
+    return { ok: false, error: `unsupported-runtime: cad_api.${command}` };
+  });
+  const bridge = createCadHostBridge({
+    invoke,
+    status: () => statusWith('native-below', 'native'),
+    pollDelayMs: 0,
+    maxPolls: 10,
+  });
+
+  const value = await bridge.mutate({
+    namespace: 'DatabaseServices',
+    operation: 'transaction.commit',
+    parameters: { document: 'doc-1' },
+  });
+
+  assert.deepEqual(value, { revision: 3, created: ['9'] });
+  assert.equal(polls, 3, 'empty polls are retried, not answered');
+  assert.deepEqual(commands, ['cad_api_submit', 'cad_api_poll', 'cad_api_poll', 'cad_api_poll']);
+  assert.equal(typeof submitted.requestId, 'string');
+  assert.match(submitted.requestId, /^[A-Za-z0-9._-]{1,64}$/);
+  assert.equal(submitted.namespace, 'DatabaseServices');
+  assert.equal(submitted.operation, 'transaction.commit');
+  assert.deepEqual(submitted.parameters, { document: 'doc-1' });
+});
+
+test('a mutation outcome refusal keeps the host code', async () => {
+  let submitted = null;
+  const { invoke } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_submit') {
+      submitted = request;
+      return { accepted: true };
+    }
+    return {
+      results: [{ requestId: submitted.requestId, ok: false, error: 'api.revision-conflict' }],
+    };
+  });
+  const bridge = createCadHostBridge({
+    invoke,
+    status: () => null,
+    pollDelayMs: 0,
+    maxPolls: 2,
+  });
+  await assert.rejects(
+    bridge.mutate({
+      namespace: 'DatabaseServices',
+      operation: 'transaction.commit',
+      parameters: {},
+    }),
+    (error) => {
+      assert.equal(codeOf(error), 'api.revision-conflict');
+      assert.equal(error.message, 'api.revision-conflict');
+      return true;
+    },
+  );
+});
+
+test('an unanswered submission times out by request id', async () => {
+  const { invoke } = countingInvoke((command) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_submit') return { accepted: true };
+    return { results: [] };
+  });
+  const bridge = createCadHostBridge({
+    invoke,
+    status: () => null,
+    pollDelayMs: 0,
+    maxPolls: 3,
+  });
+  await assert.rejects(
+    bridge.mutate({
+      namespace: 'DatabaseServices',
+      operation: 'transaction.commit',
+      parameters: {},
+    }),
+    (error) => {
+      assert.match(codeOf(error), /^api\.timeout: apir-/u);
+      return true;
+    },
+  );
+});
+
+test('a malformed submit ack or poll answer is api.invalid_argument: bridge.answer', async () => {
+  const answers = [
+    [{ accepted: false }, { results: [] }],
+    [{ ok: 1 }, { results: [] }],
+    [{ accepted: true }, { nope: [] }],
+    [{ accepted: true }, { results: 'none' }],
+    [{ accepted: true }, { results: [7] }],
+  ];
+  for (const [ack, poll] of answers) {
+    const { invoke } = countingInvoke((command) => {
+      if (command === 'cad_api_status') return payload;
+      if (command === 'cad_api_submit') return ack;
+      return poll;
+    });
+    const bridge = createCadHostBridge({ invoke, status: () => null, pollDelayMs: 0, maxPolls: 2 });
+    await assert.rejects(
+      bridge.mutate({
+        namespace: 'DatabaseServices',
+        operation: 'transaction.commit',
+        parameters: {},
+      }),
+      (error) => {
+        assert.equal(codeOf(error), 'api.invalid_argument: bridge.answer');
+        return true;
+      },
+    );
+  }
+});
+
+test('a poll refusal propagates verbatim', async () => {
+  const { invoke } = countingInvoke((command) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_submit') return { accepted: true };
+    throw new Error('unsupported-runtime: cad_api_poll');
+  });
+  const bridge = createCadHostBridge({ invoke, status: () => null, pollDelayMs: 0, maxPolls: 2 });
+  await assert.rejects(
+    bridge.mutate({
+      namespace: 'DatabaseServices',
+      operation: 'transaction.commit',
+      parameters: {},
+    }),
+    (error) => {
+      assert.equal(codeOf(error), 'unsupported-runtime: cad_api_poll');
+      return true;
+    },
+  );
+});
+
+test('a mutation this adapter does not implement is refused locally', async () => {
+  const { invoke, commands } = countingInvoke(payload);
+  const bridge = createCadHostBridge({ invoke, status: () => null });
+  await assert.rejects(
+    bridge.mutate({
+      namespace: 'DatabaseServices',
+      operation: 'transaction.start',
+      parameters: {},
+    }),
+    (error) => {
+      assert.equal(codeOf(error), 'api.adapter-missing: DatabaseServices.transaction.start');
+      return true;
+    },
+  );
+  assert.deepEqual(commands, []);
+});
+
+test('the served current selection forwards to cad_api_call', async () => {
+  const { invoke, args } = countingInvoke((command) =>
+    command === 'cad_api_status' ? payload : { ok: true, value: { objectIds: ['12', '13'] } },
+  );
+  const bridge = createCadHostBridge({ invoke, status: () => statusWith('native-below', 'native') });
+  const result = await bridge.request({
+    namespace: 'EditorInput',
+    operation: 'editor.currentSelection',
+    parameters: {},
+  });
+  assert.deepEqual(result, { objectIds: ['12', '13'] });
+  assert.deepEqual(args, [
+    {
+      namespace: 'EditorInput',
+      operation: 'editor.currentSelection',
+      parameters: {},
     },
   ]);
 });
@@ -310,21 +551,35 @@ test('a malformed request is api.invalid_argument: request, host untouched', asy
 
 test('openPluginApi assembles the client from the real contract JSON', async () => {
   const { invoke, commands } = countingInvoke((command) =>
-    command === 'cad_api_status' ? payload : { ok: true, value: { document: null } },
+    command === 'cad_api_status'
+      ? payload
+      : {
+          ok: true,
+          value: {
+            document: {
+              id: '42',
+              name: 'Drawing1',
+              isReadOnly: false,
+              database: { id: '7', version: '15' },
+            },
+          },
+        },
   );
   const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
 
   assert.deepEqual(commands, ['cad_api_status'], 'one snapshot call per session');
-  assert.equal(session.host.operations.length, 21);
+  assert.equal(session.host.operations.length, 17);
   assert.equal(session.host.carrier, 'native-below');
 
   // Pure, always-local operations work without touching the host.
   assert.deepEqual(session.api.geometry.point3d(1, 2, 3), { x: 1, y: 2, z: 3 });
   assert.deepEqual(commands, ['cad_api_status'], 'pure calls never reach the wire');
 
-  // A still-pending operation is refused by the package's capability gate.
-  await assert.rejects(session.api.editor.getPoint(), (error) => {
-    assert.equal(codeOf(error), 'api.pending: EditorInput.editor.getPoint');
+  // The one still-pending row is refused by the package's capability gate.
+  const document = await session.api.application.documentManager.mdiActiveDocument();
+  if (document === null) throw new Error('expected a document');
+  await assert.rejects(document.lockDocument(), (error) => {
+    assert.equal(codeOf(error), 'api.pending: ApplicationServices.document.lock');
     return true;
   });
 });
@@ -391,14 +646,157 @@ test('the served document list assembles documents end to end', async () => {
   assert.equal(documents[0].name, 'Drawing1');
   assert.equal(documents[0].database.id, '7');
 
-  // The document's database is the same capability-gated client: the revision read
-  // is served, the symbol tables are still pending.
+  // The document's services are the same capability-gated client: the revision
+  // read is served, but `document.lock` is still pending and refuses by name
+  // without reaching the host.
   assert.equal(await documents[0].database.revision(), 15);
-  await assert.rejects(documents[0].database.symbolTables, (error) => {
-    assert.equal(codeOf(error), 'api.pending: DatabaseServices.database.symbolTables');
+  await assert.rejects(documents[0].lockDocument(), (error) => {
+    assert.equal(codeOf(error), 'api.pending: ApplicationServices.document.lock');
     return true;
   });
   assert.equal(await documents[0].database.revision(), 15);
+});
+
+test('the served symbol tables assemble end to end', async () => {
+  const tablesValue = {
+    blockTable: {
+      name: 'blocks',
+      records: [{ name: 'WALL', isLayout: false, origin: [12, 0, 0] }],
+    },
+    layerTable: {
+      name: 'layers',
+      records: [
+        {
+          name: '0',
+          color: { aci: 7, rgb: '#ffffff' },
+          visible: true,
+          locked: false,
+          frozen: false,
+          linetype: 'Continuous',
+        },
+        {
+          name: 'TRUE_COLOR',
+          color: { aci: null, rgb: '#123abc' },
+          visible: true,
+          locked: false,
+          frozen: false,
+          linetype: 'Continuous',
+        },
+      ],
+    },
+    clayer: '',
+  };
+  const { invoke, args } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (request.operation === 'documentManager.mdiActiveDocument') {
+      return {
+        ok: true,
+        value: {
+          document: {
+            id: '42',
+            name: 'Drawing1',
+            isReadOnly: false,
+            database: { id: '7', version: '15' },
+          },
+        },
+      };
+    }
+    if (request.operation === 'database.symbolTables') return { ok: true, value: tablesValue };
+    return { ok: false, error: `unsupported-runtime: cad_api.${request.operation}` };
+  });
+  const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
+  const document = await session.api.application.documentManager.mdiActiveDocument();
+  if (document === null) throw new Error('expected a document');
+
+  const tables = await document.database.symbolTables;
+  assert.deepEqual(tables.blockTable.names(), ['WALL']);
+  assert.deepEqual(tables.blockTable.record('WALL')?.origin, { x: 12, y: 0, z: 0 });
+  assert.deepEqual(tables.layerTable.names(), ['0', 'TRUE_COLOR']);
+  assert.equal(tables.layerTable.record('TRUE_COLOR')?.color.aci, null);
+  // The active layer name is the host's, including the honest empty string.
+  assert.equal(await document.database.clayer, '');
+  assert.deepEqual(args.at(-1), {
+    namespace: 'DatabaseServices',
+    operation: 'database.symbolTables',
+    parameters: { database: '7' },
+  });
+});
+
+test('the served current selection assembles end to end', async () => {
+  const { invoke, commands } = countingInvoke((command) =>
+    command === 'cad_api_status' ? payload : { ok: true, value: { objectIds: ['12', '13', '12'] } },
+  );
+  const session = await openPluginApi({ invoke, status: () => statusWith('dom-canvas', 'wasm') });
+
+  const selection = await session.api.editor.currentSelection();
+  assert.equal(selection.count, 3);
+  assert.deepEqual(selection.getObjectIds(), ['12', '13', '12']);
+  // The host deduplicates; the client passes the ids through untouched (a repeated
+  // id here is the fake's, and the read never rewrites the answer).
+  assert.deepEqual(commands, ['cad_api_status', 'cad_api_call']);
+});
+
+test('a commit goes through submit + poll and resolves the host outcome', async () => {
+  const documentValue = {
+    document: {
+      id: '42',
+      name: 'Drawing1',
+      isReadOnly: false,
+      database: { id: '7', version: '15' },
+    },
+  };
+  let submitted = null;
+  const { invoke, commands } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_call') return { ok: true, value: documentValue };
+    if (command === 'cad_api_submit') {
+      submitted = request;
+      return { accepted: true };
+    }
+    if (command === 'cad_api_poll') {
+      return {
+        results: [
+          { requestId: submitted.requestId, ok: true, value: { revision: 16, created: ['9'] } },
+        ],
+      };
+    }
+    return { ok: false, error: `unsupported-runtime: cad_api.${command}` };
+  });
+  const session = await openPluginApi({
+    invoke,
+    status: () => statusWith('native-below', 'native'),
+    pollDelayMs: 0,
+    maxPolls: 5,
+  });
+
+  const document = await session.api.application.documentManager.mdiActiveDocument();
+  if (document === null) throw new Error('expected a document');
+  const transaction = document.transactionManager.startTransaction({ expectedRevision: 15 });
+  transaction.addNewlyCreatedDBObject(
+    { typeName: 'Line', layer: '0', space: 'model', parameters: { start: [0, 0, 0] } },
+    true,
+  );
+
+  const result = await transaction.commit();
+  assert.deepEqual(result, { applied: true, revision: 16, created: ['9'] });
+  assert.equal(typeof submitted.requestId, 'string');
+  assert.equal(submitted.namespace, 'DatabaseServices');
+  assert.equal(submitted.operation, 'transaction.commit');
+  assert.deepEqual(submitted.parameters, {
+    document: '42',
+    transactionId: 'tx-1',
+    expectedRevision: 15,
+    edits: [
+      {
+        kind: 'insert',
+        typeName: 'Line',
+        layer: '0',
+        space: 'model',
+        parameters: { start: [0, 0, 0] },
+      },
+    ],
+  });
+  assert.deepEqual(commands, ['cad_api_status', 'cad_api_call', 'cad_api_submit', 'cad_api_poll']);
 });
 
 test('the served revision read returns the host number', async () => {
@@ -436,6 +834,109 @@ test('the served read resolves null when no document is open', async () => {
   );
   const session = await openPluginApi({ invoke, status: () => statusWith('dom-canvas', 'wasm') });
   assert.equal(await session.api.application.documentManager.mdiActiveDocument(), null);
+});
+
+test('openPluginApi installs the command hooks when the caller supplies them', async () => {
+  const registered = [];
+  const removed = [];
+  const { invoke } = countingInvoke(payload);
+  const session = await openPluginApi({
+    invoke,
+    status: () => statusWith('native-below', 'native'),
+    onCommandRegister: (registration) => {
+      registered.push(registration.name);
+    },
+    onCommandUnregister: (name) => {
+      removed.push(name);
+    },
+  });
+
+  session.api.runtime.registerCommand('HELLO', 'modal', () => undefined);
+  assert.deepEqual(registered, ['HELLO']);
+  session.api.runtime.unregisterCommand('HELLO');
+  assert.deepEqual(removed, ['HELLO']);
+});
+
+test('openPluginApi without hooks leaves command registration refused', async () => {
+  const { invoke } = countingInvoke(payload);
+  const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
+  assert.throws(
+    () => session.api.runtime.registerCommand('HELLO', 'modal', () => undefined),
+    (error) => {
+      assert.equal(codeOf(error), 'unsupported-runtime: cad_api.Runtime.registerCommand');
+      return true;
+    },
+  );
+});
+
+test('the live-session reads run end to end over submit + poll', async () => {
+  const lineObject = {
+    typeName: 'Line',
+    objectId: '12',
+    handle: '1A',
+    layer: 'WALLS',
+    color: { method: 'byLayer' },
+    linetype: { method: 'byLayer' },
+    startPoint: [0, 0, 0],
+    endPoint: [10, 0, 0],
+    length: 10,
+  };
+  const submitted = [];
+  const { invoke } = countingInvoke((command, request) => {
+    if (command === 'cad_api_status') return payload;
+    if (command === 'cad_api_call') {
+      return {
+        ok: true,
+        value: {
+          document: {
+            id: '42',
+            name: 'Drawing1',
+            isReadOnly: false,
+            database: { id: '7', version: '15' },
+          },
+        },
+      };
+    }
+    if (command === 'cad_api_submit') {
+      submitted.push(request);
+      return { accepted: true };
+    }
+    if (command === 'cad_api_poll') {
+      const last = submitted.at(-1);
+      const value = last.operation === 'database.getObjectId'
+        ? { objectId: '12' }
+        : { object: lineObject };
+      return { results: [{ requestId: last.requestId, ok: true, value }] };
+    }
+    return { ok: false, error: `unsupported-runtime: cad_api.${command}` };
+  });
+  const session = await openPluginApi({
+    invoke,
+    status: () => statusWith('native-below', 'native'),
+    pollDelayMs: 0,
+    maxPolls: 3,
+  });
+
+  const document = await session.api.application.documentManager.mdiActiveDocument();
+  if (document === null) throw new Error('expected a document');
+  assert.equal(await document.database.getObjectId('1A'), '12');
+
+  const transaction = document.transactionManager.startTransaction({ expectedRevision: 15 });
+  const object = await transaction.getObject('12', 'read');
+  assert.equal(object.typeName, 'Line');
+  assert.equal(object.layer, 'WALLS');
+
+  assert.deepEqual(submitted.map((entry) => entry.operation), [
+    'database.getObjectId',
+    'transaction.getObject',
+  ]);
+  assert.deepEqual(submitted[0].parameters, { database: '7', handle: '1A' });
+  assert.deepEqual(submitted[1].parameters, {
+    document: '42',
+    transactionId: 'tx-1',
+    objectId: '12',
+    mode: 'read',
+  });
 });
 
 test('the plugin-api modules import no Tauri package and hold no CJK copy', async () => {

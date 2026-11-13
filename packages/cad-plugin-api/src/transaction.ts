@@ -15,26 +15,31 @@
 //     **savepoint release**: it merges its edits into the parent and applies
 //     nothing, so it reports `{ applied: false, revision: null, created: [] }` —
 //     there is no revision to report and none is invented. A nested abort throws
-//     its buffer away. Only the outermost commit goes over the wire, as one
-//     request carrying `{ document, transactionId, expectedRevision, edits }`.
+//     its buffer away. Only the outermost commit **applies** anything, as one
+//     request on the mutating lane (`wire.submit`) carrying
+//     `{ document, transactionId, expectedRevision, edits }`.
 //   * `expectedRevision` is **required**: an omitted precondition would be silent
-//     last-writer-wins, so the caller must read the current revision first (a read
-//     operation that lands in M2) and say which base it edits.
-//   * the commit is asynchronous because the wire is asynchronous.
+//     last-writer-wins, so the caller reads `database.revision()` first and says
+//     which base it edits.
+//   * the commit is asynchronous because the wire is asynchronous, and it resolves
+//     only after the host reported the outcome — never optimistically.
 //   * optimistic concurrency: the host rejects with `api.revision-conflict` when
 //     `expectedRevision` is stale, and that code (and any `details.actualRevision`
 //     the host supplied) reaches the plugin unchanged.
 //
-// `startTransaction` is synchronous by contract: the host is not asked to open a
-// transaction. The client buffers and the outermost commit carries the whole edit
-// set atomically, so a plugin cannot observe a half-applied transaction. The
-// `transaction.start` capability row still gates whether this carrier serves
-// transactions at all.
+// # What is local and what is not
 //
-// `abort()` is **local only** in this build: the host never minted a transaction
-// handle, so a remote abort would always refuse and leak a stack level. A future
-// `transaction.start` that mints a host id turns abort into a wire call; the
-// descriptor keeps the `transaction.abort` row reserved for exactly that.
+// `transaction.start`, `transaction.addNewlyCreated` and `transaction.abort` are
+// **client-local** operations: the host never mints a transaction handle, so
+// opening, staging into, and discarding a transaction all happen in this module's
+// own stack and buffers. They therefore have **no capability rows** and are not
+// gated — refusing them would claim a host round-trip that does not exist.
+//
+// `getObject` is not local: it reads the **live session**, so it travels on the
+// same mutating (submit/poll) lane, with `document` and `transactionId` in its
+// parameters. `commit` (outermost) is the one operation that *changes* the drawing;
+// a future host-minted transaction would add a row and a wire call back to
+// start/abort; until then the local behaviour is the honest one.
 //
 // Buffers live in a module-local `WeakMap` rather than on the instance: no public
 // member may add edits except `addNewlyCreatedDBObject`, and the manager performs
@@ -267,17 +272,22 @@ export class Transaction {
   /**
    * Open one object inside this transaction, at any depth.
    *
-   * The host's `typeName` tag picks the decoder: the result is a discriminated
-   * union (`Line`/`Circle`/`Arc`/`Polyline`/`DBText`/`MText`), never a
-   * caller-chosen type forced onto an unvalidated answer. `write`/`notify` do not
-   * change the commit payload: edits are recorded explicitly, so opening an
-   * object never implies a write.
+   * Goes over the **mutating** lane (`wire.submit`): the host reads the live
+   * session rather than the reflected snapshot, so the answer is polled like a
+   * mutation. The host's `typeName` tag picks the decoder: the result is a
+   * discriminated union (`Line`/`Circle`/`Arc`/`Polyline`/`DBText`/`MText`), never
+   * a caller-chosen type forced onto an unvalidated answer. `write`/`notify` do not
+   * change the commit payload: edits are recorded explicitly, so opening an object
+   * never implies a write.
    */
   async getObject(id: ObjectId, mode: OpenMode): Promise<DBObject> {
     if (this.#closed) throw closedError(this.#wiring.id);
     const identifier = objectId(id);
     if (mode !== 'read' && mode !== 'write' && mode !== 'notify') throw invalidArgument('mode');
-    const answer = await this.#wiring.wire.call('DatabaseServices', 'transaction.getObject', {
+    // A live-session read: the submit lane, carrying the document the client is
+    // editing as well as the transaction correlation id.
+    const answer = await this.#wiring.wire.submit('DatabaseServices', 'transaction.getObject', {
+      document: this.#wiring.document,
       transactionId: this.#wiring.id,
       objectId: identifier,
       mode,
@@ -294,9 +304,9 @@ export class Transaction {
    * `add === true` buffers the insert; `add === false` records nothing (the object
    * exists only in plugin memory). The type must be in the host's closed set
    * (`Line`/`Circle`/`Arc`), the layer is a layer **name**, and the space must be
-   * the active space (the host refuses a mismatch). Allowed at any depth; the
-   * capability gate still runs first, so a host that does not serve writes refuses
-   * before anything is buffered.
+   * the active space (the host refuses a mismatch). Allowed at any depth and
+   * **client-local**: staging an edit is not a host operation, so nothing is gated
+   * or sent until the outermost commit.
    */
   addNewlyCreatedDBObject(object: NewlyCreatedDBObject, add: boolean): void {
     if (this.#closed) throw closedError(this.#wiring.id);
@@ -316,7 +326,6 @@ export class Transaction {
       throw invalidArgument('parameters');
     }
     if (typeof add !== 'boolean') throw invalidArgument('add');
-    this.#wiring.wire.assertSupported('DatabaseServices', 'transaction.addNewlyCreated');
     if (!add) return;
     appendEdit(this, {
       kind: 'insert',
@@ -351,7 +360,9 @@ export class Transaction {
 
     let answer: unknown;
     try {
-      answer = await wiring.wire.call('DatabaseServices', 'transaction.commit', {
+      // The mutating lane: the host queues and reports, so this resolves only
+      // once the commit actually happened.
+      answer = await wiring.wire.submit('DatabaseServices', 'transaction.commit', {
         document: wiring.document,
         transactionId: wiring.id,
         expectedRevision: wiring.expectedRevision,
@@ -387,8 +398,8 @@ export class Transaction {
    *
    * Local by design in this build — the host never minted a transaction handle, so
    * there is nothing remote to roll back and a remote abort would always refuse.
-   * A future `transaction.start` that mints a host id makes this a wire call (the
-   * descriptor keeps the `transaction.abort` row reserved for it).
+   * It has no capability row; a future host-minted transaction would add one and a
+   * wire call here.
    */
   async abort(): Promise<void> {
     const wiring = this.#wiring;
@@ -433,16 +444,15 @@ export class TransactionManager {
   }
 
   /**
-   * Open a transaction. Synchronous by contract: nothing crosses the wire here.
+   * Open a transaction. Synchronous and **client-local**: nothing crosses the wire.
    *
-   * The outermost call **requires** `expectedRevision`; a nested call inherits the
-   * outer precondition (there is still one commit). The `transaction.start` row
-   * still gates the call, so a carrier that does not serve transactions refuses
-   * with `api.pending: DatabaseServices.transaction.start` rather than handing
-   * back a transaction that could never commit.
+   * The host never mints a transaction handle, so opening one is this module's own
+   * bookkeeping and is not gated (there is no `transaction.start` row to ask
+   * about). The outermost call **requires** `expectedRevision`; a nested call
+   * inherits the outer precondition (there is still one commit). Only `commit`
+   * reaches the host, and only then does the carrier's capability matter.
    */
   startTransaction(options?: TransactionOptions): Transaction {
-    this.#wire.assertSupported('DatabaseServices', 'transaction.start');
     if (this.#stack.length >= MAX_TRANSACTION_DEPTH) {
       throw new CadApiError(
         'api.transaction.nesting_limit',

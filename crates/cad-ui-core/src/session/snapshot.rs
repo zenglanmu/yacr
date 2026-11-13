@@ -303,6 +303,9 @@ impl CadSession {
             theme,
             view,
             navigation,
+            // The controller's own prompt state: a session with a pending plugin
+            // prompt reports it, and the last invalid-input sentence with it.
+            self.pending_prompt(),
         );
         // Real live open progress (running only) from the host snapshot, so the
         // chrome can show a determinate/indeterminate bar without inventing data.

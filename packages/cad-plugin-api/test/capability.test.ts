@@ -16,8 +16,6 @@ import {
   API_OPERATIONS,
   CadApiError,
   createCadApi,
-  handle,
-  objectId,
   parsePluginManifest,
   TransactionManager,
 } from '../src/index.ts';
@@ -33,7 +31,10 @@ import { createWire } from '../src/internal/capability.ts';
 
 interface SpyBridge {
   readonly bridge: CadHostBridge;
+  /** Read-lane requests, in order. */
   readonly calls: CadApiRequest[];
+  /** Mutating-lane requests, in order. */
+  readonly mutations: CadApiRequest[];
 }
 
 function hostInfo(
@@ -62,6 +63,7 @@ function spyBridge(
   } = {},
 ): SpyBridge {
   const calls: CadApiRequest[] = [];
+  const mutations: CadApiRequest[] = [];
   const bridge: CadHostBridge = {
     async hostInfo(): Promise<CadApiHostInfo> {
       return hostInfo(operations, options);
@@ -70,8 +72,12 @@ function spyBridge(
       calls.push(request);
       return answer(request) as Result;
     },
+    async mutate<Result>(request: CadApiRequest): Promise<Result> {
+      mutations.push(request);
+      return answer(request) as Result;
+    },
   };
-  return { bridge, calls };
+  return { bridge, calls, mutations };
 }
 
 function supported(operations: readonly CadApiOperation[]): readonly CadApiOperation[] {
@@ -133,94 +139,40 @@ async function expectRejectCode(run: () => Promise<unknown>, code: string): Prom
   return caught;
 }
 
-test('every gated v1 call refuses with its exact pending code and no request', async () => {
+test('the one pending row refuses by name and sends nothing on either lane', async () => {
   const spy = spyBridge(API_OPERATIONS);
-  const api = await createCadApi(spy.bridge);
-
-  const editorCalls: readonly (readonly [string, () => Promise<unknown>])[] = [
-    ['editor.getPoint', () => api.editor.getPoint()],
-    ['editor.getEntity', () => api.editor.getEntity()],
-    ['editor.getSelection', () => api.editor.getSelection()],
-    ['editor.getString', () => api.editor.getString()],
-    ['editor.getDouble', () => api.editor.getDouble()],
-    ['editor.getInteger', () => api.editor.getInteger()],
-    ['editor.getKeyword', () => api.editor.getKeyword({ keywords: ['YES', 'NO'] })],
-    ['editor.writeMessage', () => api.editor.writeMessage('hello')],
-    ['editor.selectAll', () => api.editor.selectAll()],
-  ];
-  for (const [operation, run] of editorCalls) {
-    await expectRejectCode(run, `api.pending: EditorInput.${operation}`);
-  }
-
   const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
-
-  const database = createDatabase(wire, { id: 'db-1', version: '3' });
-  await expectRejectCode(
-    () => database.getObjectId(handle('2A')),
-    'api.pending: DatabaseServices.database.getObjectId',
-  );
-  await expectRejectCode(
-    () => database.symbolTables,
-    'api.pending: DatabaseServices.database.symbolTables',
-  );
-  await expectRejectCode(
-    () => database.clayer,
-    'api.pending: DatabaseServices.database.symbolTables',
-  );
-
   const document = createDocument(wire, {
     id: 'doc-1',
     name: 'drawing.dwg',
     isReadOnly: false,
     database: { id: 'db-1', version: '3' },
   });
+
   await expectRejectCode(
     () => document.lockDocument(),
     'api.pending: ApplicationServices.document.lock',
   );
-
-  // `startTransaction` is synchronous, so its refusal is thrown, not rejected.
-  const manager = new TransactionManager(wire, 'doc-1');
-  expectSyncCode(
-    () => manager.startTransaction({ expectedRevision: 1 }),
-    'api.pending: DatabaseServices.transaction.start',
-  );
-
   assert.equal(spy.calls.length, 0, `no request may escape on a refusal: ${JSON.stringify(spy.calls)}`);
+  assert.equal(spy.mutations.length, 0);
 });
 
-test('transaction writes refuse by name, while abort stays local', async () => {
-  // `transaction.start` is advertised so a transaction can be opened; every other
-  // DatabaseServices row stays exactly as shipped (`pending`).
-  const operations = withStatus(API_OPERATIONS, 'transaction.start', 'supported');
-  const spy = spyBridge(operations);
-  const wire = createWire(hostInfo(operations), spy.bridge);
+test('opening, staging and aborting a transaction are client-local', async () => {
+  // The host serves no `transaction.start`/`addNewlyCreated`/`abort` row: those
+  // are this client's own bookkeeping, so they send nothing on either lane.
+  const spy = spyBridge(API_OPERATIONS);
+  const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
   const manager = new TransactionManager(wire, 'doc-1');
   const transaction = manager.startTransaction({ expectedRevision: 1 });
 
-  await expectRejectCode(
-    () => transaction.getObject(objectId('2A'), 'read'),
-    'api.pending: DatabaseServices.transaction.getObject',
+  transaction.addNewlyCreatedDBObject(
+    { typeName: 'Line', layer: 'A', space: 'model', parameters: {} },
+    true,
   );
-  expectSyncCode(
-    () =>
-      transaction.addNewlyCreatedDBObject(
-        { typeName: 'Line', layer: 'A', space: 'model', parameters: {} },
-        true,
-      ),
-    'api.pending: DatabaseServices.transaction.addNewlyCreated',
-  );
-  await expectRejectCode(
-    () => transaction.commit(),
-    'api.pending: DatabaseServices.transaction.commit',
-  );
-  assert.equal(transaction.closed, false, 'a gate refusal must not close the transaction');
-
-  // Abort never touches the wire, so a pending `transaction.abort` row does not
-  // block the local rollback.
   await transaction.abort();
   assert.equal(transaction.closed, true);
   assert.equal(spy.calls.length, 0);
+  assert.equal(spy.mutations.length, 0, 'abort is local: nothing is submitted');
 });
 
 test('an operation the host does not name is descriptor_missing, not pending', async () => {
@@ -422,6 +374,225 @@ test('a malformed revision answer is refused, never coerced', async () => {
   }
 });
 
+interface MutableBlockTable {
+  name: string;
+  records: { name: string; isLayout: unknown; origin: unknown }[];
+}
+
+interface MutableLayerTable {
+  name: string;
+  records: {
+    name: string;
+    color: { aci: unknown; rgb: unknown } | null;
+    visible?: unknown;
+    locked: boolean;
+    frozen: boolean;
+    linetype: string;
+  }[];
+}
+
+interface MutableSymbolTables {
+  blockTable: MutableBlockTable;
+  layerTable: MutableLayerTable;
+  clayer: unknown;
+}
+
+/** The host's real `database.symbolTables` shape: tuple origin, nullable `aci`. */
+function symbolTablesPayload(): MutableSymbolTables {
+  return {
+    blockTable: {
+      name: 'blocks',
+      records: [{ name: 'WALL', isLayout: false, origin: [0, 0, 0] }],
+    },
+    layerTable: {
+      name: 'layers',
+      records: [
+        {
+          name: '0',
+          color: { aci: 7, rgb: '#ffffff' },
+          visible: true,
+          locked: false,
+          frozen: false,
+          linetype: 'Continuous',
+        },
+        {
+          name: 'TRUE_COLOR',
+          color: { aci: null, rgb: '#123abc' },
+          visible: true,
+          locked: false,
+          frozen: false,
+          linetype: 'Continuous',
+        },
+      ],
+    },
+    clayer: '0',
+  };
+}
+
+test('the served symbol-table read decodes blocks, layers and the active layer', async () => {
+  const spy = spyBridge(API_OPERATIONS, () => symbolTablesPayload());
+  const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
+  const database = createDatabase(wire, { id: '7', version: '15' });
+
+  const tables = await database.symbolTables;
+  assert.deepEqual(tables.blockTable.names(), ['WALL']);
+  assert.deepEqual(tables.blockTable.record('WALL')?.origin, { x: 0, y: 0, z: 0 });
+  assert.equal(tables.blockTable.record('WALL')?.isLayout, false);
+  assert.deepEqual(tables.layerTable.names(), ['0', 'TRUE_COLOR']);
+
+  const indexed = tables.layerTable.record('0');
+  assert.equal(indexed?.color.aci, 7);
+  assert.equal(indexed?.color.rgb, '#ffffff');
+  assert.equal(indexed?.visible, true);
+  assert.equal(indexed?.linetype, 'Continuous');
+
+  // A true-colour layer has no palette index; the host says `null` and so does the
+  // client — an invented ACI would be indistinguishable from a real one.
+  const trueColor = tables.layerTable.record('TRUE_COLOR');
+  assert.equal(trueColor?.color.aci, null);
+  assert.equal(trueColor?.color.rgb, '#123abc');
+
+  assert.equal(await database.clayer, '0');
+  assert.deepEqual(spy.calls, [
+    {
+      namespace: 'DatabaseServices',
+      operation: 'database.symbolTables',
+      parameters: { database: '7' },
+    },
+  ]);
+  assert.equal(spy.calls.length, 1, 'clayer and symbolTables share one cached read');
+});
+
+test('an empty clayer is the host\'s honest "no active layer"', async () => {
+  const payload = symbolTablesPayload();
+  payload.clayer = '';
+  const spy = spyBridge(API_OPERATIONS, () => payload);
+  const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
+  const database = createDatabase(wire, { id: '7', version: '15' });
+  assert.equal(await database.clayer, '');
+});
+
+test('a malformed symbol-table answer is refused field by field', async () => {
+  const cases: readonly (readonly [(payload: MutableSymbolTables) => void, string])[] = [
+    [
+      (payload) => {
+        payload.blockTable = undefined as never;
+      },
+      'api.invalid_argument: bridge.answer.blockTable',
+    ],
+    [
+      (payload) => {
+        payload.clayer = undefined;
+      },
+      'api.invalid_argument: bridge.answer.clayer',
+    ],
+    [
+      (payload) => {
+        payload.clayer = 7;
+      },
+      'api.invalid_argument: bridge.answer.clayer',
+    ],
+    [
+      (payload) => {
+        payload.blockTable.records = 'none' as never;
+      },
+      'api.invalid_argument: bridge.answer.records',
+    ],
+    [
+      (payload) => {
+        payload.blockTable.records[0].origin = [0, 0];
+      },
+      'api.invalid_argument: bridge.answer.origin',
+    ],
+    [
+      (payload) => {
+        payload.blockTable.records[0].origin = [0, 'x', 0];
+      },
+      'api.invalid_argument: bridge.answer.origin[1]',
+    ],
+    [
+      (payload) => {
+        payload.layerTable.records[0].color = null;
+      },
+      'api.invalid_argument: bridge.answer.color',
+    ],
+    [
+      (payload) => {
+        const color = payload.layerTable.records[0].color;
+        if (color !== null) color.aci = 'seven';
+      },
+      'api.invalid_argument: bridge.answer.color.aci',
+    ],
+    [
+      (payload) => {
+        const color = payload.layerTable.records[0].color;
+        if (color !== null) color.aci = 1.5;
+      },
+      'api.invalid_argument: bridge.answer.color.aci',
+    ],
+    [
+      (payload) => {
+        const color = payload.layerTable.records[0].color;
+        if (color !== null) color.rgb = 'white';
+      },
+      'api.invalid_argument: bridge.answer.color.rgb',
+    ],
+    [
+      (payload) => {
+        delete payload.layerTable.records[0].visible;
+      },
+      'api.invalid_argument: bridge.answer.visible',
+    ],
+  ];
+  for (const [mutate, code] of cases) {
+    const payload = symbolTablesPayload();
+    mutate(payload);
+    const spy = spyBridge(API_OPERATIONS, () => payload);
+    const wire = createWire(hostInfo(API_OPERATIONS), spy.bridge);
+    const database = createDatabase(wire, { id: '7', version: '15' });
+    await expectRejectCode(() => database.symbolTables, code);
+  }
+});
+
+test('the served current selection is a reflected read of the editor', async () => {
+  const spy = spyBridge(API_OPERATIONS, () => ({ objectIds: ['12', '13'] }));
+  const api = await createCadApi(spy.bridge);
+  const selection = await api.editor.currentSelection();
+  assert.equal(selection.count, 2);
+  assert.deepEqual(selection.getObjectIds(), ['12', '13']);
+  assert.deepEqual(spy.calls, [
+    {
+      namespace: 'EditorInput',
+      operation: 'editor.currentSelection',
+      parameters: {},
+    },
+  ]);
+  assert.equal(spy.mutations.length, 0, 'a selection read is never a mutation');
+});
+
+test('nothing selected is a real empty answer, not a refusal', async () => {
+  const spy = spyBridge(API_OPERATIONS, () => ({ objectIds: [] }));
+  const api = await createCadApi(spy.bridge);
+  const selection = await api.editor.currentSelection();
+  assert.equal(selection.count, 0);
+  assert.deepEqual(selection.getObjectIds(), []);
+});
+
+test('a malformed selection answer is refused field by field', async () => {
+  const cases: readonly (readonly [unknown, string])[] = [
+    [{}, 'api.invalid_argument: bridge.answer.objectIds'],
+    [{ objectIds: 'none' }, 'api.invalid_argument: bridge.answer.objectIds'],
+    [{ objectIds: null }, 'api.invalid_argument: bridge.answer.objectIds'],
+    [{ objectIds: [7] }, 'api.invalid_argument: bridge.answer.objectIds[0]'],
+    [{ objectIds: ['12', ''] }, 'api.invalid_argument: bridge.answer.objectIds[1]'],
+    [{ objectIds: ['12', null] }, 'api.invalid_argument: bridge.answer.objectIds[1]'],
+  ];
+  for (const [answer, code] of cases) {
+    const api = await createCadApi(spyBridge(API_OPERATIONS, () => answer).bridge);
+    await expectRejectCode(() => api.editor.currentSelection(), code);
+  }
+});
+
 test('a descriptor that serves document operations owes a document owner', async () => {
   const operations = withStatus(API_OPERATIONS, 'database.getObjectId', 'supported');
   const contradiction = spyBridge(operations, undefined, { documentOwner: 'none' });
@@ -455,6 +626,7 @@ test('a malformed host snapshot is refused with the offending field', async () =
   const notAnObject: CadHostBridge = {
     hostInfo: async () => null as never,
     request: async <Result>(_request: CadApiRequest): Promise<Result> => ({}) as Result,
+    mutate: async <Result>(_request: CadApiRequest): Promise<Result> => ({}) as Result,
   };
   await expectRejectCode(() => createCadApi(notAnObject), 'api.invalid_argument: hostInfo');
 
@@ -467,34 +639,12 @@ test('a malformed host snapshot is refused with the offending field', async () =
         operations: [{ namespace: 'Nope', operation: 'x.y', status: 'pending', reason: 'r' }],
       }) as never,
     request: async <Result>(_request: CadApiRequest): Promise<Result> => ({}) as Result,
+    mutate: async <Result>(_request: CadApiRequest): Promise<Result> => ({}) as Result,
   };
   await expectRejectCode(
     () => createCadApi(unknownNamespace),
     'api.invalid_argument: hostInfo.operations[0].namespace',
   );
-});
-
-test('a void operation must acknowledge with { accepted: true }', async () => {
-  const operations = withStatus(API_OPERATIONS, 'editor.writeMessage', 'supported');
-  const answers: readonly (readonly [unknown, boolean])[] = [
-    [{ accepted: true }, true],
-    [{ accepted: false }, false],
-    [{}, false],
-    [{ ok: 1 }, false],
-    [undefined, false],
-    [null, false],
-    [{ accepted: 'true' }, false],
-  ];
-  for (const [answer, accepted] of answers) {
-    const spy = spyBridge(operations, () => answer);
-    const api = await createCadApi(spy.bridge);
-    if (accepted) {
-      await api.editor.writeMessage('hello');
-      assert.equal(spy.calls.length, 1);
-    } else {
-      await expectRejectCode(() => api.editor.writeMessage('hello'), 'api.invalid_argument: bridge.answer');
-    }
-  }
 });
 
 test('document.lock is a void operation and needs the same ack', async () => {
@@ -521,8 +671,9 @@ test('a supported operation reaches the bridge and its answer is mapped', async 
   const api = await createCadApi(spy.bridge);
   const answer = await api.editor.getString({ message: 'name?' });
   assert.deepEqual(answer, { status: 'Ok', value: 'hello' });
-  assert.equal(spy.calls.length, 1);
-  assert.deepEqual(spy.calls[0].parameters, { message: 'name?' });
+  assert.equal(spy.calls.length, 0, 'a prompt is not a read');
+  assert.equal(spy.mutations.length, 1);
+  assert.deepEqual(spy.mutations[0].parameters, { message: 'name?' });
 });
 
 test('a null answer and an unknown prompt status are refused, never coerced', async () => {

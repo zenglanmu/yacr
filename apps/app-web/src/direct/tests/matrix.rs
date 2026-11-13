@@ -344,6 +344,62 @@ fn every_wire_command_answers_identically_on_both_paths() {
             LIVE,
         ),
         (
+            "api-call/symbol-tables",
+            "cad_api_call",
+            r#"{"namespace":"DatabaseServices","operation":"database.symbolTables","parameters":{"database":"1"}}"#,
+            LIVE,
+        ),
+        (
+            "api-call/symbol-tables-mismatch",
+            "cad_api_call",
+            r#"{"namespace":"DatabaseServices","operation":"database.symbolTables","parameters":{"database":"999"}}"#,
+            LIVE,
+        ),
+        (
+            "api-call/symbol-tables-missing-parameter",
+            "cad_api_call",
+            r#"{"namespace":"DatabaseServices","operation":"database.symbolTables"}"#,
+            LIVE,
+        ),
+        (
+            "api-call/current-selection",
+            "cad_api_call",
+            r#"{"namespace":"EditorInput","operation":"editor.currentSelection"}"#,
+            LIVE,
+        ),
+        (
+            "api-call/current-selection-parameters-ignored",
+            "cad_api_call",
+            r#"{"namespace":"EditorInput","operation":"editor.currentSelection","parameters":{"unused":[1,2]}}"#,
+            LIVE,
+        ),
+        (
+            "api-call/editor-unknown-operation",
+            "cad_api_call",
+            r#"{"namespace":"EditorInput","operation":"editor.notAnOperation"}"#,
+            LIVE,
+        ),
+        // ---- the mutating lane: submit acknowledges, poll answers -----------
+        (
+            "api-submit/accepted",
+            "cad_api_submit",
+            r#"{"requestId":"matrix-1","namespace":"DatabaseServices","operation":"transaction.commit"}"#,
+            LIVE,
+        ),
+        (
+            "api-submit/bad-id",
+            "cad_api_submit",
+            r#"{"requestId":"bad id","namespace":"DatabaseServices","operation":"transaction.commit"}"#,
+            LIVE,
+        ),
+        (
+            "api-submit/missing-id",
+            "cad_api_submit",
+            r#"{"namespace":"DatabaseServices","operation":"transaction.commit"}"#,
+            LIVE,
+        ),
+        ("api-poll/empty", "cad_api_poll", "{}", LIVE),
+        (
             "api-call/unknown-operation",
             "cad_api_call",
             r#"{"namespace":"ApplicationServices","operation":"documentManager.notAnOperation"}"#,
@@ -370,7 +426,9 @@ fn every_wire_command_answers_identically_on_both_paths() {
     ];
 
     let (mut gate_refused, mut applied_ok, mut session_refused) = (0, 0, 0);
-    for (case, name, args, gates) in cases {
+    // The object-read cases live in the mutating lane's module so this file stays
+    // under the physical-line gate; they are driven through the same harness.
+    for (case, name, args, gates) in cases.iter().chain(api::OBJECT_READ_CASES.iter()) {
         let (desktop, _canvas) = compare(case, name, args, *gates);
         match desktop.admission {
             Admission::Refused(_) => gate_refused += 1,
@@ -592,27 +650,44 @@ fn a_session_without_a_document_answers_facts_on_both_paths() {
     let mut queues = Queues::new(true, false);
     let mut popups = NoPopups;
 
-    let cases: [(&str, &str, Option<Value>, Value); 3] = [
+    let cases: [(&str, &str, Option<Value>, bool, Value); 5] = [
         (
             "ApplicationServices",
             "documentManager.mdiActiveDocument",
             None,
+            true,
             serde_json::json!({ "document": null }),
         ),
         (
             "ApplicationServices",
             "documentManager.documents",
             None,
+            true,
             serde_json::json!({ "documents": [] }),
         ),
         (
             "DatabaseServices",
             "database.revision",
             Some(serde_json::json!({ "database": "1" })),
+            false,
+            serde_json::json!(cad_ui_core::session::API_CALL_NO_DOCUMENT),
+        ),
+        (
+            "DatabaseServices",
+            "database.symbolTables",
+            Some(serde_json::json!({ "database": "1" })),
+            false,
+            serde_json::json!(cad_ui_core::session::API_CALL_NO_DOCUMENT),
+        ),
+        (
+            "EditorInput",
+            "editor.currentSelection",
+            None,
+            false,
             serde_json::json!(cad_ui_core::session::API_CALL_NO_DOCUMENT),
         ),
     ];
-    for (namespace, operation, parameters, expected) in cases {
+    for (namespace, operation, parameters, expects_value, expected) in cases {
         let args = serde_json::json!({
             "namespace": namespace,
             "operation": operation,
@@ -629,14 +704,13 @@ fn a_session_without_a_document_answers_facts_on_both_paths() {
             )
         };
         assert_eq!(mirror_answer, direct_answer, "{namespace}.{operation}");
-        let revision = operation == "database.revision";
-        if revision {
-            // A database read has nothing to report: an explicit refusal.
-            assert_eq!(mirror_answer["ok"], serde_json::json!(false));
-            assert_eq!(mirror_answer["error"], expected);
-        } else {
+        if expects_value {
             assert_eq!(mirror_answer["ok"], serde_json::json!(true));
             assert_eq!(mirror_answer["value"], expected);
+        } else {
+            // A document-scoped read has nothing to report: an explicit refusal.
+            assert_eq!(mirror_answer["ok"], serde_json::json!(false));
+            assert_eq!(mirror_answer["error"], expected);
         }
 
         // The shared `wire::*` function answers the same object on both sources.
@@ -645,6 +719,162 @@ fn a_session_without_a_document_answers_facts_on_both_paths() {
                 .expect("the mirrored envelope"),
             wire::api_call(&direct, namespace, operation, parameters.as_ref())
                 .expect("the direct envelope")
+        );
+    }
+}
+
+/// The `database.symbolTables` read is the same derived projection on both paths,
+/// and it reports the drawing's real tables (never an invented row).
+#[test]
+fn the_symbol_tables_projection_is_the_same_object_on_both_paths() {
+    let session = session();
+    let snapshot = session.api_snapshot();
+    let database = snapshot
+        .document
+        .as_ref()
+        .expect("the fixture session holds a document")
+        .database_id
+        .clone();
+    let parameters = serde_json::json!({ "database": database });
+    let mirrored = QueueReads::new(None, None, None, Some(&snapshot));
+    let direct = DirectReads::new(&session);
+    let mut queues = Queues::new(true, false);
+    let mut popups = NoPopups;
+    let args = serde_json::json!({
+        "namespace": "DatabaseServices",
+        "operation": "database.symbolTables",
+        "parameters": &parameters,
+    })
+    .to_string();
+    let (mirror_answer, direct_answer) = {
+        let mut sink = queues.sink();
+        (
+            dispatch("cad_api_call", &args, &mut sink, &mirrored, &mut popups)
+                .expect("the mirrored answer"),
+            dispatch("cad_api_call", &args, &mut sink, &direct, &mut popups)
+                .expect("the direct answer"),
+        )
+    };
+    assert_eq!(mirror_answer, direct_answer);
+    assert_eq!(mirror_answer["ok"], serde_json::json!(true));
+
+    let value = &mirror_answer["value"];
+    assert_eq!(value["blockTable"]["name"], serde_json::json!("blocks"));
+    assert_eq!(value["layerTable"]["name"], serde_json::json!("layers"));
+    let blocks = value["blockTable"]["records"]
+        .as_array()
+        .expect("a block record list");
+    assert!(
+        blocks.is_empty(),
+        "the synthetic fixture declares no user blocks (spaces are not blocks)"
+    );
+    for block in blocks {
+        assert_eq!(
+            block["isLayout"],
+            serde_json::json!(false),
+            "cad-db spaces are not blocks"
+        );
+        let origin = block["origin"].as_array().expect("a base point");
+        assert_eq!(origin.len(), 3, "the base point has three numbers");
+        assert!(origin.iter().all(serde_json::Value::is_number));
+        assert!(block["name"].is_string(), "a named block");
+    }
+    let layers = value["layerTable"]["records"]
+        .as_array()
+        .expect("a layer record list");
+    assert!(!layers.is_empty(), "the fixture drawing has a layer table");
+    for layer in layers {
+        assert!(layer["name"].is_string());
+        assert!(layer["visible"].is_boolean());
+        assert!(layer["locked"].is_boolean());
+        assert!(layer["frozen"].is_boolean());
+        assert!(layer["linetype"].is_string());
+        assert!(
+            layer["color"]["aci"].is_number() || layer["color"]["aci"].is_null(),
+            "an ACI index or the honest null of a true colour"
+        );
+        let rgb = layer["color"]["rgb"].as_str().expect("an #rrggbb value");
+        assert!(rgb.starts_with('#'), "{rgb} is an sRGB value");
+        assert_eq!(rgb, rgb.to_lowercase(), "{rgb} is lowercase");
+    }
+    assert!(
+        layers
+            .iter()
+            .any(|layer| layer["name"] == serde_json::json!("0")),
+        "the fixture's layer 0 is listed"
+    );
+    // The active layer is a real row of the same projection.
+    assert_eq!(value["clayer"], serde_json::json!("0"));
+}
+
+/// The `EditorInput.editor.currentSelection` read is the same ordered object-id
+/// list on both paths: an empty selection is a fact, and `SELECTALL` really fills
+/// the host's selection from the fixture drawing.
+#[test]
+fn the_current_selection_read_is_the_same_object_on_both_paths() {
+    let session = session();
+    let empty_snapshot = session.api_snapshot();
+    assert!(
+        empty_snapshot.selection.is_empty(),
+        "a fresh session selects nothing"
+    );
+
+    let read = |session: &CadSession, snapshot: &cad_ui_core::session::CadApiSnapshot| {
+        let mirrored = QueueReads::new(None, None, None, Some(snapshot));
+        let direct = DirectReads::new(session);
+        let mut queues = Queues::new(true, false);
+        let mut popups = NoPopups;
+        let args = r#"{"namespace":"EditorInput","operation":"editor.currentSelection"}"#;
+        let mut sink = queues.sink();
+        (
+            dispatch("cad_api_call", args, &mut sink, &mirrored, &mut popups)
+                .expect("the mirrored answer"),
+            dispatch("cad_api_call", args, &mut sink, &direct, &mut popups)
+                .expect("the direct answer"),
+        )
+    };
+
+    // Nothing selected: `{"objectIds": []}` on both paths, not a refusal.
+    let (mirror_empty, direct_empty) = read(&session, &empty_snapshot);
+    assert_eq!(mirror_empty, direct_empty);
+    assert_eq!(mirror_empty["ok"], serde_json::json!(true));
+    assert_eq!(
+        mirror_empty["value"],
+        serde_json::json!({ "objectIds": [] })
+    );
+
+    // The real current selection: four fixture lines, in selection order.
+    session
+        .command("SELECTALL")
+        .expect("SELECTALL is a host command");
+    let snapshot = session.api_snapshot();
+    assert_eq!(
+        snapshot.selection.len(),
+        4,
+        "the synthetic fixture holds four lines"
+    );
+    let (mirror, direct) = read(&session, &snapshot);
+    assert_eq!(mirror, direct);
+    assert_eq!(mirror["ok"], serde_json::json!(true));
+    let ids = mirror["value"]["objectIds"]
+        .as_array()
+        .expect("an object-id list");
+    let expected: Vec<Value> = snapshot
+        .selection
+        .iter()
+        .cloned()
+        .map(Value::String)
+        .collect();
+    assert_eq!(ids, &expected, "selection order, decimal strings");
+    for (index, id) in ids.iter().enumerate() {
+        let id = id.as_str().expect("a decimal string");
+        assert!(
+            !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()),
+            "{id} is decimal"
+        );
+        assert!(
+            !ids[..index].contains(&Value::String(id.to_string())),
+            "each selected entity is named once"
         );
     }
 }
@@ -749,3 +979,6 @@ fn both_hosts_advertise_the_same_vocabulary() {
         expected_aliases
     );
 }
+
+/// The mutating transport's matrix tests (submit/poll, the commit round trip).
+mod api;

@@ -24,6 +24,10 @@ mod admission;
 mod annot_arguments;
 mod api;
 mod api_call;
+mod api_commit;
+mod api_object;
+mod api_prompt;
+mod api_submit;
 mod bytes;
 mod command_log;
 mod command_overrides;
@@ -109,11 +113,24 @@ pub use self::api::{
     PLUGIN_API_VERSION,
 };
 pub use self::api_call::{
-    api_call_document, api_call_documents, api_call_revision, api_call_unknown, dispatch_api_call,
-    CadApiDocument, CadApiOutcome, CadApiSnapshot, API_CALL_COMMAND, API_CALL_DATABASE_NAMESPACE,
-    API_CALL_DOCUMENTS, API_CALL_INVALID_ARGUMENT_DATABASE, API_CALL_MDI_ACTIVE_DOCUMENT,
-    API_CALL_NAMESPACE, API_CALL_NO_DOCUMENT, API_CALL_REVISION, API_CALL_UNKNOWN,
+    api_call_document, api_call_documents, api_call_error, api_call_invalid_argument,
+    api_call_revision, api_call_selection, api_call_symbol_tables, api_call_unknown,
+    api_call_unknown_object, api_call_unsupported_variant, dispatch_api_call, validate_request_id,
+    CadApiBlockRecord, CadApiDocument, CadApiLayerRecord, CadApiOutcome, CadApiResults,
+    CadApiSnapshot, CadApiSubmission, CadApiSymbolTables, API_CALL_COMMAND,
+    API_CALL_CURRENT_SELECTION, API_CALL_DATABASE_NAMESPACE, API_CALL_DOCUMENTS,
+    API_CALL_EDITOR_NAMESPACE, API_CALL_GET_OBJECT, API_CALL_GET_OBJECT_ID,
+    API_CALL_INVALID_ARGUMENT_DATABASE, API_CALL_MDI_ACTIVE_DOCUMENT, API_CALL_NAMESPACE,
+    API_CALL_NO_DOCUMENT, API_CALL_REVISION, API_CALL_REVISION_CONFLICT, API_CALL_SYMBOL_TABLES,
+    API_CALL_TRANSACTION_COMMIT, API_CALL_UNKNOWN, API_SUBMIT_DUPLICATE,
+    API_SUBMIT_INVALID_REQUEST, API_SUBMIT_QUEUE_FULL, CAD_API_RESULT_CAP, CAD_API_SUBMIT_CAP,
 };
+pub use self::api_prompt::{
+    CadPendingPrompt, CadPendingPromptKind, API_CALL_GET_DOUBLE, API_CALL_GET_ENTITY,
+    API_CALL_GET_INTEGER, API_CALL_GET_KEYWORD, API_CALL_GET_POINT, API_CALL_GET_SELECTION,
+    API_CALL_GET_STRING, API_CALL_SELECT_ALL,
+};
+pub use self::api_submit::{api_submit_or_wait, push_api_result};
 pub use self::bytes::BytesDocument;
 pub use self::command_log::{
     CadCommandLogEntry, CadCommandLogKind, CadCommandLogPoint, CadMeasurementEcho,
@@ -234,6 +251,14 @@ pub struct CadSession {
     /// runtime `ALIASEDIT` rows). Consulted **before** the static tables by
     /// [`CadSession::command`]; no drawing, preference or `cad-history` state.
     overrides: RefCell<CommandOverrides>,
+    /// Completed plugin-API mutation outcomes, waiting for the poll.
+    ///
+    /// Owned by the session because a synchronous carrier's sink is rebuilt per
+    /// dispatch call, while the answer must survive until the client polls
+    /// (`dom-canvas`). The desktop host does not use this queue: its owner tick
+    /// publishes outcomes into `Shared::cad_api_results` instead. Bounded by
+    /// [`api_call::CAD_API_RESULT_CAP`] (oldest dropped).
+    api_outcomes: RefCell<Vec<api_call::CadApiOutcome>>,
 }
 
 impl CadSession {
@@ -275,6 +300,7 @@ impl CadSession {
             frames: Cell::new(0),
             press: RefCell::new(None),
             overrides: RefCell::new(CommandOverrides::default()),
+            api_outcomes: RefCell::new(Vec::new()),
         }
     }
 

@@ -98,6 +98,12 @@ macro_rules! cad_wire_registry {
             // document list / database revision (or an explicit refusal).
             // `parameters` is the operation's argument object (optional).
             @row(shared, reads, ApiCallArgs, cad_api_call, { arg(req, namespace, String) arg(req, operation, String) arg(opt, parameters, ::std::option::Option<$crate::session::registry::RegistryJsonValue>) }, $crate::session::CadApiOutcome, { $crate::session::wire::api_call(reads, &namespace, &operation, parameters.as_ref()) })
+            // The **mutating** lane: submit acknowledges, poll drains the answers.
+            // `requestId` is the caller's correlation id (the outcome carries it);
+            // the request is applied on the desktop's owner tick and inline on a
+            // synchronous carrier.
+            @row(shared, sink, ApiSubmitArgs, cad_api_submit, { arg(req, request_id, String) arg(req, namespace, String) arg(req, operation, String) arg(opt, parameters, ::std::option::Option<$crate::session::registry::RegistryJsonValue>) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::api_submit(sink, $crate::session::CadApiSubmission { request_id, namespace, operation, parameters }) })
+            @row(shared, sink, NoArgs, cad_api_poll, { }, $crate::session::CadApiResults, { $crate::session::wire::api_poll(sink) })
             @row(shared, sink, ToolParameterArgs, cad_set_tool_parameter, { arg(req, parameter, String) arg(opt, number, ::std::option::Option<f64>) arg(opt, flag, ::std::option::Option<bool>) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_tool_parameter(sink, &parameter, number, flag) })
             @row(shared, sink, ToolTextArgs, cad_set_tool_text, { arg(req, text, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_tool_text(sink, &text) })
             @row(shared, sink, SelectedTextArgs, cad_set_selected_text, { arg(req, text, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_selected_text(sink, &text) })

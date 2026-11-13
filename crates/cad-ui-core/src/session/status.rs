@@ -345,6 +345,7 @@ pub struct CadStatus {
     pub layouts: Vec<CadLayoutTab>,
     /// The session's real active drawing space (model or one paper layout).
     pub active_space: CadActiveSpace,
+    pub pending_prompt: Option<super::api_prompt::CadPendingPrompt>,
     /// One row per authoritative external reference (XREF), in the drawing's
     /// stable reference-name (`BTreeMap`) order; always present, never `null`.
     /// Empty when there is no document or the drawing declares no xrefs. A
@@ -384,9 +385,8 @@ pub struct CadStatus {
     /// Session/display state only; defaults to `false` (AutoCAD's initial `SNAP`
     /// off) and can be flipped with the `SNAP` selector (F9). While on, a captured
     /// point is quantised to the nearest multiple of [`Self::snap_spacing`] in X
-    /// and Y (never Z), before the `ORTHO` constraint. It never changes the
-    /// drawing database, history or a persisted preference, and it is neither
-    /// object snap nor the display grid.
+    /// and Y (never Z), before the `ORTHO` constraint. It never changes the drawing
+    /// database, history or a persisted preference, and it is not object snap.
     pub snap_grid_enabled: bool,
     /// The session grid-snap spacing in drawing units (`SNAPUNIT`).
     ///
@@ -525,6 +525,7 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         // honest space is model space (never an invented "current" tab).
         layouts: Vec::new(),
         active_space: CadActiveSpace::Model,
+        pending_prompt: None,
         // A session without a document declares no xrefs: the honest empty
         // block, never an omitted key.
         references: Vec::new(),
@@ -939,6 +940,7 @@ pub(super) fn assemble_status(
     theme: String,
     view: Option<CadViewOrientation>,
     navigation: CadNavigation,
+    pending_prompt: Option<super::api_prompt::CadPendingPrompt>,
 ) -> CadStatus {
     CadStatus {
         document_label: has_document.then_some(label),
@@ -993,5 +995,6 @@ pub(super) fn assemble_status(
         // trustworthy camera basis.
         view,
         navigation,
+        pending_prompt,
     }
 }

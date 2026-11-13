@@ -594,6 +594,12 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 }
             });
         }
+        // Plugin-API submissions and prompt answers are drained on this tick (the
+        // IPC thread cannot touch the `!Send` session); answers wait for the poll.
+        CAD.with(|cell| {
+            cad_desktop_shell::state::drain_api_calls(shared, cell.borrow().as_ref());
+        });
+
         let inputs_us = inputs_started.elapsed().as_micros();
         // One owner-thread tick (host file/open/save/metrics/preparation + pump).
         let tick_started = Instant::now();

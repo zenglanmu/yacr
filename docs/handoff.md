@@ -1,5 +1,33 @@
 AD
 
+## 2026-11-13 合并两个工作树（`revit-texture`：`vendor/rvt` 受控补丁；`ts-api`：插件 API 可用）
+
+- **范围**：`revit-texture` 的 `25da5902`（`vendor/rvt` 0.17.0 固定路径补丁、ADR-0035、
+  `docs/rvt-patches.md`、门禁允许名单扩为 `{acadrust, rvt}`）fast-forward 进 `main`；`ts-api` 的
+  14 个提交（`1730b9a3`…`7918bcae`：符号表/当前选择/实体读、写通道与 `transaction.commit`、插件装载
+  与命令派发、异步提示通道）以 `--no-ff` 合入。唯一冲突 `docs/handoff.md` 按时间倒序排列：RVT
+  （15:25）→ 提示通道（14:46）→ 插件 API 可用（14:29）→ SKP（12:17），双方条目完整保留。
+- **合并时补齐（分支自身的文档漂移）**：权威表 `crates/cad-ui-core/api/plugin-api.json` 已是
+  **17 行 = 16 `supported` + 1 `pending`（`document.lock`）**，而 `docs/commands.md` 仍写着上一轮的
+  21 行 / 18 pending，且 `cad_api_call` 只列 3 条只读。已按代码改为 5 条只读（活动文档、文档列表、
+  `database.revision`、`database.symbolTables`、`editor.currentSelection`），写明写与交互提示走
+  `cad_api_submit` / `cad_api_poll`，拒绝顺序补上 `cad_api.incomplete_snapshot: symbolTables`；
+  `api_call.rs` 中“描述符行仍为 pending”的过时模块注释同步改正。
+- **证据（本轮实跑，均在合并后的树上）**：`scripts/test-rvt-patch.sh` 4、`cad-import-rvt` 33、
+  `cargo check`（cad-ui-core/cad-app/cad-host/cad-desktop-shell/app-web `--all-targets`、app-linux
+  `--all-targets`、app-web wasm target）、`cad-ui-core --lib session` 579（1 ignored）、
+  `plugin_api_status` 6、`cad-app --lib` 2638（3 ignored）、`cad-host --lib` 317、`app-web` 131、
+  `fmt --check`、`check-architecture`（36 包）/ `check-file-size`（2035 文件）/ `check-fixture-manifest`
+  （45 fixture）/ `check-i18n`（2907 键）/ `check-command-docs` + 自测 / `check-workflows`（16 job）/
+  `test-ui-migration-guards` 23；包 node **77/77**、desktop-ui `npm test` **1717/1717**、
+  `npm run build` 产出 `dist`。
+  wasm target 的 10 条 dead-code warning 均在合并未触碰的 native-only 代码里，非本轮回归。
+  **NOT RUN**：clippy、workspace 全量测试、`check-tauri-capabilities`、workspace 级 wasm 检查、
+  android/macos/windows 目标、真实 GUI/GPU/像素/真机、真实 DWG 用例（`YACR_TEST_DWG` 未设，
+  被跳过的不是已运行证据）。
+- **边界**：合并只让 `main` 拥有这些代码与契约证据。RVT 透明度仍无像素证据（固定离屏视角前后 PNG
+  字节相同），插件 API 仍无真实 GUI 装载/提示证据，平台验收状态不变（见平台表）。
+
 ## 2026-11-13 RVT 预览透明度：`vendor/rvt` 受控补丁（多材质构件取最透明构件 alpha）
 
 - **合并**：本 worktree 从 `7b809bbd` fast-forward 到 `main` 的 `d0c78c71`（0 冲突），补丁工作
@@ -44,6 +72,48 @@ AD
   样本交叉验证；Windows/macOS/Android/Web 只到编译/契约；未向上游提交 issue/PR（本地无 fork
   凭据）；全量 `cargo test --workspace` NOT RUN。
 
+## 2026-11-13 插件 API 提示通道：会话侧 pending prompt + 命令行数据模式
+
+- **位置**：`native-below` 的点击只到原生表面，WebView 看不到，所以提示状态在
+  `HostController`（唯一 pending prompt），`CadStatus.pendingPrompt` 投影给 chrome。回答走已有
+  `cad_api_submit`/`cad_api_poll`：提交时无 outcome，用户操作后由 owner tick（原生）或直接 sink
+  （wasm）排空。没有新 wire 命令、没有事件关联。
+- **输入**：在工具状态机**之前**拦截——点击 → `world_point`；实体/选择 → 与 `SelectAt` 相同的
+  拾取/发布；文本（`cad_set_tool_text`）→ string/double/integer/keyword，点接受 `x,y[,z]`；
+  Enter 结束选择/接受默认；Esc → `Cancel` 且被吞掉。非法输入保留提示并写 `pendingPrompt.error`
+  （re-prompt），结果队列满时拒绝**新**提示而不是丢已完成的答案。
+- **chrome**：提示期间命令行是数据输入（绕过 `admitCommandText`，不发 `cad_command`），答案
+  草稿与命令草稿分离；Enter→`CONFIRM`、Esc→`CANCEL`，无提示时 Esc 仍关闭面板。问题内联显示，
+  keywords 为按钮，宿主拒绝语句与插件 `writeMessage` 回显在命令行上方（移动端为浮层）。
+- **能力表**：17 行 = **16 supported / 1 pending**（`document.lock`）；`editor.writeMessage` 改为
+  客户端本地（无 row）。
+- **证据**：`cargo test -p cad-ui-core --lib session` 579、`-p cad-app --lib` 2636、
+  `-p cad-host --lib` 317、`app-web` 131、`plugin_api_status` 6/6；包 node 77/77、
+  desktop-ui plugin-api+host-adapter 99/99、chrome `node --test test/*.test.ts` 1577/1577、
+  `npm test` 整条 **1717/1717**；fmt/architecture/file-size/i18n 通过。`App.tsx` 999 行。
+  **NOT RUN**：真实 GUI 中点击/键入回答提示、真机/WebView、GPU/像素。
+
+## 2026-11-13 插件 API 可用：写通道、实体读、装载与命令派发
+
+- **写通道**：`cad_api_submit`（桌面入队、`dom-canvas` 同步应用）+ `cad_api_poll`（有界
+  FIFO，按 `requestId` 关联）。`transaction.commit` 映射到唯一提交路径
+  `HostController::plugin_commit → Application::execute_api`；insert 解析 layer 名与 active
+  space，translate/delete 由十进制 `EntityId` 构造真实 `SelectionRef`；stale revision →
+  `api.revision-conflict`，成功回 `{revision, created}`。`cad-db` 之外没有第二条写路径。
+- **实体读**（会话通道）：`database.getObjectId`（handle 线性扫描，未命中是真实 `null`）、
+  `transaction.getObject`（按宿主 `typeName` 输出客户端形状；无形状的几何显式
+  `unsupported-runtime`）。`decodePolyline` 的字段寻址 bug 已修（此前任何折线都无法解码）。
+- **装载与命令**：包内 `Runtime.registerCommand`（本地，无描述符行）+ 宿主 `loadPluginModule`
+  （URL 或模块、`definePlugin` 校验、版本拒绝、失败回滚、幂等 deactivate）+ `commands.ts`
+  单一命令表；`App` 在宿主准入**之前**查插件命令，插件命令不伪装成 CAD 命令，处理器异常走
+  `plugin.command.failed` 通知而不打断漏斗。
+- **能力表**：18 行 = **8 supported / 10 pending**。仍 pending 的是交互式 `editor.get*/selectAll/
+  writeMessage` 与 `document.lock`；插件安装 UI/持久化商店、Worker/权限/签名隔离未做。
+- **证据**：`cargo test -p cad-ui-core --lib session` 564、`app-web` 128（矩阵含提交、
+  handle 读、create-then-read 回环）、`plugin_api_status` 6/6、`cargo check -p app-linux
+  --all-targets`、fmt/architecture/file-size/i18n；包 node 72/72、desktop-ui
+  plugin-api+host-adapter 96/96、`npm test` 整条 **1693/1693**。
+  **NOT RUN**：真实 GUI 中装载插件/执行插件命令、真机/WebView、GPU/像素。
 ## 2026-11-13 多格式导入接入 SketchUp（`.skp`）预览 lane
 
 - **改动**（`cad-import-skp` 本体由另一条 lane 实现，本轮**未改**其公共面）：

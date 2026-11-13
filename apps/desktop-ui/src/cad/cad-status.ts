@@ -145,6 +145,39 @@ export interface CadCommandLogEntry {
   readonly measurement: CadMeasurementEcho | null;
 }
 
+/**
+ * The closed set of values a plugin `Editor` prompt can ask for
+ * (`cad_status.pendingPrompt.kind`, serialized lowercase by the host).
+ */
+export type CadPendingPromptKind =
+  | 'point'
+  | 'entity'
+  | 'selection'
+  | 'string'
+  | 'double'
+  | 'integer'
+  | 'keyword';
+
+/**
+ * The pending plugin `Editor` prompt (`cad_status.pendingPrompt`).
+ *
+ * A prompt is **answer data**, not a command: while one is pending the user's
+ * typed line completes it (`cad_set_tool_text`), Enter is `CONFIRM` and Escape
+ * is `CANCEL`. `message` is the sentence the shell shows (the plugin's own, or
+ * the host's default for the kind), `keywords` the accepted options in the
+ * caller's spelling, and `error` the last invalid-input sentence while the
+ * prompt stays pending (re-prompt semantics).
+ *
+ * `keywords`/`error` are never interpreted here — the host matches the answer,
+ * so this type carries them verbatim.
+ */
+export interface CadPendingPrompt {
+  readonly kind: CadPendingPromptKind;
+  readonly message: string;
+  readonly keywords: readonly string[];
+  readonly error: string | null;
+}
+
 /** The open modal popup of the host (`{ kind, label, modal }`). */
 export interface CadPopup {
   /** Stable popup kind key (`"about"`, `"textEdit"` or `"options"`). */
@@ -370,6 +403,15 @@ export interface CadStatus {
   readonly commandLog?: readonly CadCommandLogEntry[];
   readonly popup?: CadPopup | null;
   /**
+   * The pending plugin `Editor` prompt, or `null`/absent when none is open.
+   *
+   * Additive: an older host sends no field at all, which reads as "no prompt"
+   * (`pendingPromptOf`). When present, `null` is the host's own "nothing is
+   * pending" answer and an object must be well-formed — an unknown `kind` is a
+   * parse refusal, never a coerced prompt.
+   */
+  readonly pendingPrompt?: CadPendingPrompt | null;
+  /**
    * Whether a grip drag is armed (`cad_ui_core::session::CadStatus::grip_drag`).
    *
    * Additive, optional for an older host. It is **not** an active tool: `tool`
@@ -438,6 +480,19 @@ export function imagesOf(status: Partial<CadStatus> | null | undefined): readonl
   return status?.images ?? [];
 }
 
+/**
+ * The pending plugin prompt, or `null` when none is open.
+ *
+ * The one reader for the block: the `native-below` and `dom-canvas` carriers
+ * both report it on `cad_status`, and an older host without the field means "no
+ * prompt" — never a guessed one. The parser has already validated it.
+ */
+export function pendingPromptOf(
+  status: Partial<CadStatus> | null | undefined,
+): CadPendingPrompt | null {
+  return status?.pendingPrompt ?? null;
+}
+
 // Phase keys the backend reports (`cad_app::import_phase_key`). A phase outside
 // this set is a contract violation, not a runtime surprise.
 const IMPORT_PHASES = new Set(['reading', 'parsing', 'tables', 'entities', 'resolving', 'finishing']);
@@ -446,6 +501,11 @@ const IMPORT_PHASES = new Set(['reading', 'parsing', 'tables', 'entities', 'reso
 const REFERENCE_KINDS = new Set([
   'loaded', 'missing', 'browser-unavailable', 'refused-path', 'unloaded', 'cycle',
   'depth-exceeded', 'skipped-overlay', 'unsupported',
+]);
+
+/** The closed plugin-prompt kind set (`cad_ui_core` `pendingPrompt.kind`). */
+const PENDING_PROMPT_KINDS = new Set([
+  'point', 'entity', 'selection', 'string', 'double', 'integer', 'keyword',
 ]);
 
 /** Whether `raw` is a non-negative safe integer (a real count, never a guess). */
@@ -504,6 +564,29 @@ export function parseCadViewOrientation(value: unknown): CadViewOrientation | nu
     throw Error('CAD_STATUS_INVALID');
   }
   return value as CadViewOrientation;
+}
+
+/**
+ * Parse the pending plugin prompt block.
+ *
+ * The block is `null` on the host's own "nothing pending" answer; a present
+ * object must carry a documented `kind`, a string `message`, a string-only
+ * `keywords` list and `error` as a string or `null`. An unknown kind is a
+ * contract violation — the chrome must never guess what an answer means.
+ */
+export function parseCadPendingPrompt(value: unknown): CadPendingPrompt {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  const prompt = value as Record<string, unknown>;
+  if (typeof prompt.kind !== 'string' || !PENDING_PROMPT_KINDS.has(prompt.kind)
+    || typeof prompt.message !== 'string'
+    || !Array.isArray(prompt.keywords)
+    || !prompt.keywords.every((keyword: unknown) => typeof keyword === 'string')
+    || !(prompt.error === null || typeof prompt.error === 'string')) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  return value as CadPendingPrompt;
 }
 
 /** Parse the navigation switches: both real booleans and a 0..3 bit code. */
@@ -780,6 +863,13 @@ export function parseCadStatus(value: unknown): CadStatus {
   // The ViewCube orientation is optional (`null`/absent when the host cannot
   // report one), but a present block must be a real finite camera basis.
   if (status.view !== undefined) parseCadViewOrientation(status.view);
+  // The pending plugin prompt is optional (`null`/absent when none is open), but
+  // a present block must be complete and its kind documented: this block is what
+  // routes the user's next line as *answer data*, so a malformed one is refused
+  // outright rather than coerced into a guessed prompt.
+  if (status.pendingPrompt !== undefined && status.pendingPrompt !== null) {
+    parseCadPendingPrompt(status.pendingPrompt);
+  }
   // The navigation switches are optional for an older host, but a present block
   // must be complete: a partial block would hide a real host state.
   if (status.navigation !== undefined) parseCadNavigation(status.navigation);

@@ -1,9 +1,10 @@
 # TypeScript 二次开发 API（`@yacr/plugin-api`）
 
-> 状态：**骨架 + 三项只读（2026-11-13）**。契约、目录、能力协商与拒绝语义已落地；21 行宿主
-> 操作中 **18 行 `pending`、3 行 `supported`**（活动文档、文档列表、`database.revision`）。
-> 读实体/符号表、提示输入、事务写入、注册可派发命令**仍未实现**。包内特性（Geometry/Colors
-> 值构造、manifest 解析）不走 wire，不在描述符里。设计依据见
+> 状态：**可用（2026-11-13）**。17 行宿主操作中 **16 行 `supported`**：文档身份/列表、revision、
+> 符号表、当前选择、handle→ObjectId、按 id 读实体、事务提交，以及全部七个交互提示与
+> `selectAll`。插件可以运行、注册命令、在事务里创建/移动/删除实体，并等待用户输入。仍 `pending`
+> 的只有 `document.lock`。
+> 包内特性（Geometry/Colors 值构造、manifest 解析、命令注册）不走 wire，不在描述符里。设计依据见
 > [ADR 0034](adr/0034-typescript-plugin-api.md)。
 
 AutoCAD 的二次开发事实标准是 .NET API（`Autodesk.AutoCAD.ApplicationServices` /
@@ -58,21 +59,38 @@ adapter 把描述符与当前 `cad_status` 快照合成 `CadApiHostInfo`：
 ```
 
 ```ts
-import { definePlugin, CadApiError } from '@yacr/plugin-api';
+import { definePlugin, CommandFlags, CadApiError } from '@yacr/plugin-api';
 import type { PluginContext } from '@yacr/plugin-api';
 
 export default definePlugin({
   id: 'my-tools',
   apiVersion: 1,
   async activate(ctx: PluginContext) {
-    // 本构建里读取活动文档本身就会抛 api.pending（不是返回 null）
-    ctx.api.editor.writeMessage('my-tools ready');  // 同样抛 api.pending
+    const doc = await ctx.api.application.documentManager.mdiActiveDocument();
+    if (!doc) return;                       // 没有活动文档是事实，不是错误
+
+    const layers = await doc.database.symbolTables;
+    const revision = await doc.database.revision();
+
+    // 一个事务 = 一次提交；expectedRevision 必填（乐观并发）
+    const tr = doc.transactionManager.startTransaction({ expectedRevision: revision });
+    tr.addNewlyCreatedDBObject({
+      typeName: 'Line', layer: '0', space: 'model',
+      parameters: { start: [0, 0, 0], end: [100, 0, 0] },
+    }, true);
+    const { revision: next, created } = await tr.commit();
+
+    ctx.api.runtime.registerCommand('MYCMD', CommandFlags.modal, async (c) => {
+      const selection = await c.api.editor.currentSelection();
+      // created[0] / selection 里的 ObjectId 都可直接用于 translate/delete
+      void next; void selection;
+    });
   },
 });
 
 // 分支只认 code，不认 message
 try { /* ... */ } catch (error) {
-  if (error instanceof CadApiError && error.code.startsWith('api.pending: ')) { /* 未实现 */ }
+  if (error instanceof CadApiError && error.code === 'api.revision-conflict') { /* 重读 revision */ }
 }
 ```
 
@@ -101,7 +119,7 @@ Geometry/Colors 与 manifest 解析**没有行**；它们由包无条件提供�
 `{ accepted: true }`；`{ accepted: false }`、`{}`、`undefined` 都是
 `api.invalid_argument: bridge.answer`——没有"静默成功"。
 
-## 事务语义（客户端已实现，宿主侧 M3 接线）
+## 事务语义（已接线）
 
 - `startTransaction({ expectedRevision })` **同步**，最外层**必须**给 revision：省略就是隐式
   last-writer-wins，客户端直接 `api.invalid_argument: expectedRevision`。嵌套事务继承外层前置。
@@ -119,8 +137,9 @@ Geometry/Colors 与 manifest 解析**没有行**；它们由包无条件提供�
 - 新建实体是**闭集** `Line`/`Circle`/`Arc`，带 layer **名字**与 active space；同一事务对同一
   `ObjectId` 的第二次 `translate`/`delete` 是 `api.invalid_argument: edits.duplicate`（与宿主
   "一个批次不能重复编辑同一实体"一致，本地先拒）。
-- `commit()` 是 **Promise**；`api.revision-conflict` 原样上抛并在宿主给出时保留
-  `details.actualRevision`（Rust 的 `CadError::StaleResult` 不带实际 revision，M3 再定怎么取）。
+- `commit()` 是 **Promise**（`cad_api_submit` + `cad_api_poll`）：宿主返回 `{ revision, created }`，
+  冲突映射为 `api.revision-conflict`；`details.actualRevision` 目前缺席——Rust 的
+  `CadError::StaleResult` 不带实际 revision，客户端不编造。
 - 客户端**不**自动重试。
 
 ## 身份（不伪造 handle）
@@ -136,18 +155,23 @@ Geometry/Colors 与 manifest 解析**没有行**；它们由包无条件提供�
   `DBText`/`MText`），返回判别联合；未知/缺失标签是
   `api.invalid_argument: bridge.answer.typeName`，没有调用方指定的 `as T`。
 
-## 本轮明确不提供
+## 提示与消息
 
-命令派发（`Runtime.registerCommand` 为 `pending`）、文档读写、编辑器提示、插件安装/加载 UI、
-Worker/权限/签名隔离、`dom-canvas` 的插件持久化。插件是**同权 ES module，不是沙箱**。
+- 提示是**异步**的：`await editor.getPoint()` 会一直挂起，直到用户点击/键入/取消；宿主在
+  `cad_status.pendingPrompt` 里报告当前问题，chrome 在命令行里显示并把输入当**数据**转发（不是
+  命令）。Esc 取消，非法输入会保留提示并回一句话。
+- `editor.writeMessage` 是客户端本地：写入宿主的消息 sink（命令行回显），不经过 wire。
+- 不支持：`document.lock`（单文档 WebView 没有锁语义）、插件安装 UI / 持久化商店、
+  Worker/权限/签名隔离。`dom-canvas` 没有插件目录；插件由宿主调用 `loadPluginModule` 装载。
+  插件是**同权 ES module，不是沙箱**。
 
 ## 里程碑
 
 | | 内容 |
 |---|---|
-| M2 | 结构化 wire 车道 + 只读操作（`database.getObjectId`、`database.symbolTables`、`editor.getSelection`） |
-| M3 | 事务提交：`expectedRevision`、编辑缓冲、撤销分组、冲突映射 |
-| M4 | 插件装载（`plugin.json` + 入口模块）+ `Runtime.registerCommand` 接入 chrome-local 命令漏斗 |
+| M2 | ✅ 只读：文档、revision、符号表、当前选择、handle→ObjectId、按 id 读实体 |
+| M3 | ✅ 事务提交：`expectedRevision`、编辑缓冲、`created`、冲突映射（撤销分组仍是一条记录） |
+| M4 | ✅ 装载（模块/URL）+ `Runtime.registerCommand` → chrome-local 命令漏斗（安装 UI 未做） |
 | M5 | Worker/权限清单/签名隔离 |
 
 ## 证据边界

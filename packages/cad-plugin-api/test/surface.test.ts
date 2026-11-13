@@ -63,6 +63,7 @@ const EXPECTED_EXPORTS: readonly (readonly [string, ExportKind])[] = [
   ['TransactionManager', 'function'],
   ['MAX_TRANSACTION_DEPTH', 'number'],
   ['SUPPORTED_NEW_ENTITY_TYPES', 'object'],
+  ['CommandFlags', 'object'],
   ['PromptStatus', 'object'],
   ['selectionSet', 'function'],
 ];

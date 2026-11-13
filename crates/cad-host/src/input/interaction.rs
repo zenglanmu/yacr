@@ -1,6 +1,7 @@
 //! Interaction request dispatch and coordinate conversion.
 use super::*;
 use cad_app::interaction::PointerPhase;
+use cad_app::plugin_prompt::{ApiPromptInput, ApiPromptKind};
 
 /// Which derived shell state one interaction invalidates.
 ///
@@ -101,6 +102,21 @@ impl HostCore {
             | InteractionRequest::Pinch { .. } => DirtyScope::Navigation,
             _ => DirtyScope::Full,
         };
+        // A pending plugin prompt owns the prompt-bearing inputs: it is answered
+        // here, **before** the tool state machine, and the shared publication tail
+        // below still runs (a selection prompt publishes a selection).
+        // A pending plugin prompt owns the prompt-bearing inputs: it is
+        // answered here, **before** the tool state machine, and the derived
+        // state is published exactly like the normal path's full-dirty tail
+        // (a selection prompt publishes a selection).
+        if let Some(outcome) = self.resolve_api_prompt(&request)? {
+            self.full_dirty.set(true);
+            self.navigation_dirty.set(true);
+            if let Err(error) = self.sync_render() {
+                self.note_post_commit_error(&error);
+            }
+            return Ok(outcome);
+        }
         let outcome = match request {
             InteractionRequest::BeginDraw(kind) => {
                 self.controller.borrow_mut().begin_draw_tool(kind)?;
@@ -247,7 +263,7 @@ impl HostCore {
                 if self.controller.borrow().session.draw_awaiting_text() {
                     return Err(CadError::InvalidInput(
                         "tool.awaiting_text: the active tool needs its text; type it and press \
-                         Enter to submit (Esc dismisses the prompt, Esc again cancels)"
+                     Enter to submit (Esc dismisses the prompt, Esc again cancels)"
                             .into(),
                     ));
                 }
@@ -477,26 +493,101 @@ impl HostCore {
         Ok(InteractionOutcome::Confirmed)
     }
 
-    fn select_at_mode(&self, point: [f64; 2], mode: SelectionMode) -> CadResult<()> {
-        // A click that lands on a grip was already answered by the grip drag: the
-        // session emits `[Pointer Up, SelectAt]` for a click, so a release that
-        // committed a grip drag swallows the fabricated selection here. One shot:
-        // the latch is consumed, and a press resets it (see `pointer_down`), so a
-        // drag that produced no click never swallows a later one.
-        if self.navigation.suppress_click.replace(false) {
-            return Ok(());
+    /// Answer a pending plugin prompt with one interaction, when one is pending.
+    ///
+    /// `Some(outcome)` means the prompt consumed the input (so the tool state
+    /// machine must not also see it); `None` leaves the ordinary path untouched.
+    /// Only the five prompt-bearing requests are intercepted — every pointer,
+    /// scroll, pinch and tool request keeps its existing handling.
+    fn resolve_api_prompt(
+        &self,
+        request: &InteractionRequest,
+    ) -> CadResult<Option<InteractionOutcome>> {
+        let kind = self
+            .controller
+            .borrow()
+            .api_prompt()
+            .map(|prompt| prompt.kind);
+        let Some(kind) = kind else {
+            return Ok(None);
+        };
+        match request {
+            InteractionRequest::CapturePoint(point) => {
+                let point = self.world_point(*point)?;
+                self.controller
+                    .borrow_mut()
+                    .resolve_api_prompt(ApiPromptInput::Point(point));
+                Ok(Some(InteractionOutcome::PointCaptured))
+            }
+            InteractionRequest::SelectAt { point, .. } => {
+                match kind {
+                    ApiPromptKind::Point => {
+                        // An idle click reaches the host as `SelectAt`, so a
+                        // getPoint prompt takes it as the point (the same
+                        // `world_point` conversion the capture path uses).
+                        let world = self.world_point(*point)?;
+                        self.controller
+                            .borrow_mut()
+                            .resolve_api_prompt(ApiPromptInput::Point(world));
+                    }
+                    ApiPromptKind::Entity => {
+                        let logical = self.select_logical(*point)?;
+                        let hit = self.pick_ref_at(logical)?;
+                        self.controller.borrow_mut().resolve_api_prompt(match hit {
+                            Some(reference) => ApiPromptInput::Entity(reference.entity),
+                            None => ApiPromptInput::EntityMiss,
+                        });
+                    }
+                    ApiPromptKind::Selection => {
+                        // The ordinary click-toggle selection, published exactly
+                        // like a non-prompt click.
+                        let logical = self.select_logical(*point)?;
+                        self.select_at_mode(logical, SelectionMode::Toggle)?;
+                        self.controller
+                            .borrow_mut()
+                            .resolve_api_prompt(ApiPromptInput::SelectionChanged);
+                    }
+                    // A click during a text/point prompt is consumed harmlessly.
+                    _ => {
+                        self.controller
+                            .borrow_mut()
+                            .resolve_api_prompt(ApiPromptInput::SelectionChanged);
+                    }
+                }
+                Ok(Some(InteractionOutcome::SelectionUpdated))
+            }
+            InteractionRequest::SetToolText { text } => {
+                self.controller
+                    .borrow_mut()
+                    .resolve_api_prompt(ApiPromptInput::Text(text.clone()));
+                Ok(Some(InteractionOutcome::Confirmed))
+            }
+            InteractionRequest::Confirm => {
+                self.controller
+                    .borrow_mut()
+                    .resolve_api_prompt(ApiPromptInput::Confirm);
+                Ok(Some(InteractionOutcome::Confirmed))
+            }
+            InteractionRequest::Cancel => {
+                // Consumed: the prompt's Esc belongs to the prompt, never to the
+                // tool machine.
+                self.controller
+                    .borrow_mut()
+                    .resolve_api_prompt(ApiPromptInput::Cancel);
+                Ok(Some(InteractionOutcome::Cancelled))
+            }
+            _ => Ok(None),
         }
-        // A `ZOOM WINDOW` capture is waiting for two corners: a bare click is
-        // not one, so it must not select either. The arm is deliberately kept —
-        // the next drag supplies the rectangle.
-        if self.zoom_window_armed() {
-            return Ok(());
-        }
+    }
+
+    /// The source ref under one logical canvas point, through the one pick path.
+    ///
+    /// Shared by the ordinary click selection and a pending plugin prompt's
+    /// entity/selection reads, so they can never disagree about what is under the
+    /// cursor.
+    fn pick_ref_at(&self, point: [f64; 2]) -> CadResult<Option<cad_domain::SelectionRef>> {
         self.metrics()?;
         let c = self.controller.borrow();
-        if !matches!(&c.session.tool, ToolState::Idle | ToolState::Selecting) {
-            return Ok(());
-        }
         let viewport = c
             .application
             .workspace
@@ -522,7 +613,63 @@ impl HostCore {
             // (ADR-0028 D2); `None` is the exact pre-plugin behaviour.
             c.application.vendor_representations.as_deref(),
         )?;
-        let hit = report.hit.map(|hit| hit.source);
+        Ok(report.hit.map(|hit| hit.source))
+    }
+
+    /// One `SelectAt`/`CapturePoint` input as logical canvas coordinates.
+    fn select_logical(&self, point: PointInput) -> CadResult<[f64; 2]> {
+        self.metrics()?;
+        match point {
+            PointInput::CanvasLocal {
+                logical_position,
+                metrics_revision,
+            } => {
+                if metrics_revision != self.metrics_revision.get() {
+                    return Err(CadError::InvalidInput(
+                        "stale canvas metrics revision".into(),
+                    ));
+                }
+                Ok(logical_position)
+            }
+            PointInput::World(point) => {
+                let c = self.controller.borrow();
+                let vp = c
+                    .application
+                    .workspace
+                    .viewports
+                    .get(&c.viewport_id)
+                    .ok_or(CadError::Cancelled)?;
+                vp.camera
+                    .world_to_screen(point, vp.logical_size)
+                    .ok_or_else(|| CadError::InvalidInput("world point cannot be projected".into()))
+            }
+        }
+    }
+
+    fn select_at_mode(&self, point: [f64; 2], mode: SelectionMode) -> CadResult<()> {
+        // A click that lands on a grip was already answered by the grip drag: the
+        // session emits `[Pointer Up, SelectAt]` for a click, so a release that
+        // committed a grip drag swallows the fabricated selection here. One shot:
+        // the latch is consumed, and a press resets it (see `pointer_down`), so a
+        // drag that produced no click never swallows a later one.
+        if self.navigation.suppress_click.replace(false) {
+            return Ok(());
+        }
+        // A `ZOOM WINDOW` capture is waiting for two corners: a bare click is
+        // not one, so it must not select either. The arm is deliberately kept —
+        // the next drag supplies the rectangle.
+        if self.zoom_window_armed() {
+            return Ok(());
+        }
+        self.metrics()?;
+        if !matches!(
+            &self.controller.borrow().session.tool,
+            ToolState::Idle | ToolState::Selecting
+        ) {
+            return Ok(());
+        }
+        let hit = self.pick_ref_at(point)?;
+        let c = self.controller.borrow();
         let mut refs = c.session.selection.refs().to_vec();
         match mode {
             SelectionMode::Replace => refs = hit.into_iter().collect(),

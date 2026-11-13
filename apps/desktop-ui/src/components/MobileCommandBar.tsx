@@ -27,6 +27,8 @@ import { CommandField } from './CommandField.tsx';
 import { ContextMenu } from './ContextMenu.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { useCommandLine } from '../commands/use-command-line.ts';
+import { usePluginEcho } from '../commands/use-plugin-echo.ts';
+import { PROMPT_KEYWORDS_LABEL_KEY } from '../commands/plugin-prompt.ts';
 import { mobileHistoryRows } from '../commands/command-line-model.ts';
 import { unavailableReasonKey } from '../commands/commands.ts';
 import { commandHistoryText, isHistoryCopyChord } from '../commands/history-copy.ts';
@@ -57,7 +59,19 @@ export function MobileCommandBar() {
   // Memoized on the log's identity: the effect below depends on this array, and
   // `mobileHistoryRows` returns a new list on every call.
   const historyRows = useMemo(() => mobileHistoryRows(shell.historyEntries), [shell.historyEntries]);
-  const showHistory = shell.historyOpen && !line.textMode;
+  // The prompt answer is not a command draft, so the history sheet never opens
+  // over a pending prompt: the sheet would offer commands into an answer line.
+  const showHistory = shell.historyOpen && !line.textMode && !line.promptMode;
+  // The plugin echo: the same bounded strip the docked region shows, in the one
+  // overlay this bar opens upward (see `mobile.css`).
+  const echo = usePluginEcho();
+  // The pending plugin prompt's own sentence, in full, in the overlay: a phone
+  // row cannot hold a question without squeezing the field, and a bounded panel
+  // above the bar shows it without reflowing the drawing.
+  const promptMessage = line.promptMode ? line.promptMessage : null;
+  const promptError = line.promptError;
+  const showEcho = !showHistory && !line.listOpen
+    && (promptMessage !== null || echo.length > 0 || promptError !== null);
 
   // Copy state shared with the docked panel. The serialized text is the sheet's
   // own visible order — newest first — never the array's storage order.
@@ -261,11 +275,42 @@ export function MobileCommandBar() {
           )}
         </div>
       ) : null}
+      {showEcho ? (
+        // The mobile echo: the pending prompt's own sentence in full, its keyword
+        // chips, its invalid-input sentence, and the plugin's `writeMessage`
+        // lines. One bounded overlay above the bar, so a prompt never reflows the
+        // drawing; it yields to the suggestion/history sheet, which owns this
+        // space.
+        <div className="mobile-echo" role="log" aria-label={t('command.plugin_echo.label')}>
+          {promptMessage !== null ? (
+            <p className="mobile-echo__prompt" title={promptMessage}>{promptMessage}</p>
+          ) : null}
+          {line.promptKeywords.length > 0 ? (
+            <div className="mobile-echo__keywords" role="group" aria-label={t(PROMPT_KEYWORDS_LABEL_KEY)}>
+              {line.promptKeywords.map(keyword => (
+                <button
+                  key={keyword}
+                  type="button"
+                  className="mobile-echo__keyword"
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={() => line.chooseKeyword(keyword)}
+                >
+                  {keyword}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {promptError !== null ? <p className="mobile-echo__error" role="status">{promptError}</p> : null}
+          {echo.map((message, index) => (
+            <p key={`plugin-message-${index}`} className="mobile-echo__line">{message}</p>
+          ))}
+        </div>
+      ) : null}
       {showHint ? <p className="mobile-commandbar__hint">{t('start.hint')}</p> : null}
       <div className="mobile-commandbar__row">
         <Icon name={line.textMode ? 'text' : 'terminal'} size={16} className="mobile-commandbar__prompt" />
         <CommandField id="cad-command" className="mobile-commandbar__input" line={line} enterKeyHint="send" />
-        {line.textMode ? null : (
+        {line.textMode || line.promptMode ? null : (
           // The history toggle for this presentation: same state, same log, same
           // name ("history"). It opens the sheet above the bar and nothing else.
           <IconButton
