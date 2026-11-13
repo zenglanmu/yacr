@@ -25,6 +25,7 @@ mod annot_arguments;
 mod api;
 mod api_call;
 mod api_commit;
+mod api_object;
 mod api_submit;
 mod bytes;
 mod command_log;
@@ -113,12 +114,14 @@ pub use self::api::{
 pub use self::api_call::{
     api_call_document, api_call_documents, api_call_error, api_call_invalid_argument,
     api_call_revision, api_call_selection, api_call_symbol_tables, api_call_unknown,
-    dispatch_api_call, validate_request_id, CadApiBlockRecord, CadApiDocument, CadApiLayerRecord,
-    CadApiOutcome, CadApiResults, CadApiSnapshot, CadApiSubmission, CadApiSymbolTables,
-    API_CALL_COMMAND, API_CALL_CURRENT_SELECTION, API_CALL_DATABASE_NAMESPACE, API_CALL_DOCUMENTS,
-    API_CALL_EDITOR_NAMESPACE, API_CALL_INVALID_ARGUMENT_DATABASE, API_CALL_MDI_ACTIVE_DOCUMENT,
-    API_CALL_NAMESPACE, API_CALL_NO_DOCUMENT, API_CALL_REVISION, API_CALL_REVISION_CONFLICT,
-    API_CALL_SYMBOL_TABLES, API_CALL_TRANSACTION_COMMIT, API_CALL_UNKNOWN, API_SUBMIT_DUPLICATE,
+    api_call_unknown_object, api_call_unsupported_variant, dispatch_api_call, validate_request_id,
+    CadApiBlockRecord, CadApiDocument, CadApiLayerRecord, CadApiOutcome, CadApiResults,
+    CadApiSnapshot, CadApiSubmission, CadApiSymbolTables, API_CALL_COMMAND,
+    API_CALL_CURRENT_SELECTION, API_CALL_DATABASE_NAMESPACE, API_CALL_DOCUMENTS,
+    API_CALL_EDITOR_NAMESPACE, API_CALL_GET_OBJECT, API_CALL_GET_OBJECT_ID,
+    API_CALL_INVALID_ARGUMENT_DATABASE, API_CALL_MDI_ACTIVE_DOCUMENT, API_CALL_NAMESPACE,
+    API_CALL_NO_DOCUMENT, API_CALL_REVISION, API_CALL_REVISION_CONFLICT, API_CALL_SYMBOL_TABLES,
+    API_CALL_TRANSACTION_COMMIT, API_CALL_UNKNOWN, API_SUBMIT_DUPLICATE,
     API_SUBMIT_INVALID_REQUEST, API_SUBMIT_QUEUE_FULL, CAD_API_RESULT_CAP, CAD_API_SUBMIT_CAP,
 };
 pub use self::api_submit::{api_submit_or_wait, push_api_result};

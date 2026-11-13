@@ -67,6 +67,14 @@ impl super::CadSession {
                 super::api_call::API_CALL_DATABASE_NAMESPACE,
                 super::api_call::API_CALL_TRANSACTION_COMMIT,
             ) => self.commit_outcome(submission.parameters.as_ref()),
+            (
+                super::api_call::API_CALL_DATABASE_NAMESPACE,
+                super::api_call::API_CALL_GET_OBJECT_ID,
+            ) => self.get_object_id_outcome(submission.parameters.as_ref()),
+            (
+                super::api_call::API_CALL_DATABASE_NAMESPACE,
+                super::api_call::API_CALL_GET_OBJECT,
+            ) => self.get_object_outcome(submission.parameters.as_ref()),
             (namespace, operation) => {
                 CadApiOutcome::refusal(api_call_unknown(namespace, operation))
             }

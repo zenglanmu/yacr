@@ -3,6 +3,45 @@
 
 use super::*;
 
+/// The object-read cases of the equivalence matrix.
+///
+/// They live in this module (rather than `matrix.rs`) so that file stays under the
+/// physical-line gate; `every_wire_command_answers_identically_on_both_paths`
+/// chains them into its own run.
+pub(super) const OBJECT_READ_CASES: &[(&str, &str, &str, (bool, bool))] = &[
+    (
+        "api-submit/get-object-id",
+        "cad_api_submit",
+        r#"{"requestId":"matrix-gid","namespace":"DatabaseServices","operation":"database.getObjectId","parameters":{"database":"1","handle":"2F"}}"#,
+        LIVE,
+    ),
+    (
+        "api-submit/get-object",
+        "cad_api_submit",
+        r#"{"requestId":"matrix-go","namespace":"DatabaseServices","operation":"transaction.getObject","parameters":{"document":"1","transactionId":"matrix-tx","objectId":"1","mode":"read"}}"#,
+        LIVE,
+    ),
+    (
+        "api-submit/get-object-bad-handle",
+        "cad_api_submit",
+        r#"{"requestId":"matrix-gid-bad","namespace":"DatabaseServices","operation":"database.getObjectId","parameters":{"database":"1","handle":"ZZ"}}"#,
+        LIVE,
+    ),
+    // The synchronous read lane refuses both live-session reads.
+    (
+        "api-call/get-object-is-not-a-read",
+        "cad_api_call",
+        r#"{"namespace":"DatabaseServices","operation":"transaction.getObject"}"#,
+        LIVE,
+    ),
+    (
+        "api-call/get-object-id-is-not-a-read",
+        "cad_api_call",
+        r#"{"namespace":"DatabaseServices","operation":"database.getObjectId"}"#,
+        LIVE,
+    ),
+];
+
 /// A commit round trip: queued and answered on the desktop's owner tick, applied
 /// inline on `dom-canvas` — the two paths poll the identical outcome.
 #[test]
@@ -177,5 +216,194 @@ fn the_desktop_submit_queue_refuses_a_duplicate_and_a_full_queue() {
     assert_eq!(
         queues.api_calls.len(),
         cad_ui_core::session::CAD_API_SUBMIT_CAP
+    );
+}
+
+/// The wire args of one `DatabaseServices` submission.
+fn submission_args(request_id: &str, operation: &str, parameters: &serde_json::Value) -> String {
+    serde_json::json!({
+        "requestId": request_id,
+        "namespace": "DatabaseServices",
+        "operation": operation,
+        "parameters": parameters,
+    })
+    .to_string()
+}
+
+/// Submit one request on the desktop queues, apply it like the owner tick, poll.
+fn desktop_submit_poll(
+    queues: &mut Queues,
+    session: &CadSession,
+    reads: &QueueReads<'_>,
+    request_id: &str,
+    operation: &str,
+    parameters: &serde_json::Value,
+) -> Value {
+    let mut popups = NoPopups;
+    let args = submission_args(request_id, operation, parameters);
+    let ack = {
+        let mut sink = queues.sink();
+        dispatch("cad_api_submit", &args, &mut sink, reads, &mut popups)
+            .expect("the submission is admitted")
+    };
+    assert_eq!(ack, serde_json::json!({ "accepted": true }));
+    queues
+        .drain(session)
+        .expect("the owner tick applies the request");
+    let poll = {
+        let mut sink = queues.sink();
+        dispatch("cad_api_poll", "{}", &mut sink, reads, &mut popups).expect("the poll answer")
+    };
+    let results = poll["results"].as_array().expect("a result list");
+    assert_eq!(results.len(), 1, "one submission, one answer");
+    results[0].clone()
+}
+
+/// Submit one request on `dom-canvas` (applied inline) and poll it.
+fn direct_submit_poll(
+    session: &CadSession,
+    request_id: &str,
+    operation: &str,
+    parameters: &serde_json::Value,
+) -> Value {
+    let reads = DirectReads::new(session);
+    let mut sink = DirectSink::with_gates(session, true, false);
+    let mut popups = NoPopups;
+    let args = submission_args(request_id, operation, parameters);
+    dispatch("cad_api_submit", &args, &mut sink, &reads, &mut popups)
+        .expect("the submission is admitted");
+    let poll =
+        dispatch("cad_api_poll", "{}", &mut sink, &reads, &mut popups).expect("the poll answer");
+    let results = poll["results"].as_array().expect("a result list");
+    assert_eq!(results.len(), 1, "one submission, one answer");
+    results[0].clone()
+}
+
+/// Create a Line through the commit lane, then read it back: `database.getObjectId`
+/// (a real `null` for an unknown handle) and `transaction.getObject` (the client
+/// object) answer identically on both carriers.
+#[test]
+fn a_create_then_read_round_trip_is_the_same_on_both_paths() {
+    let desktop_session = session();
+    let direct_session = session();
+    let desktop_snapshot = desktop_session.api_snapshot();
+    let direct_snapshot = direct_session.api_snapshot();
+    let document = desktop_snapshot
+        .document
+        .as_ref()
+        .expect("the fixture session holds a document");
+    assert_eq!(
+        direct_snapshot
+            .document
+            .as_ref()
+            .expect("the peer session holds a document")
+            .database_version,
+        document.database_version,
+        "both fixtures start from the same revision"
+    );
+    let revision: u64 = document
+        .database_version
+        .parse()
+        .expect("a decimal revision");
+    let desktop_reads = QueueReads::new(None, None, None, Some(&desktop_snapshot));
+    let mut queues = Queues::new(true, false);
+
+    let commit_parameters = serde_json::json!({
+        "document": document.id,
+        "transactionId": "read-tx",
+        "expectedRevision": revision,
+        "edits": [{
+            "typeName": "Line",
+            "layer": "0",
+            "space": "model",
+            "parameters": { "start": [0.0, 0.0, 0.0], "end": [5.0, 2.0, 0.0] },
+        }],
+    });
+    let desktop_commit = desktop_submit_poll(
+        &mut queues,
+        &desktop_session,
+        &desktop_reads,
+        "read-1",
+        "transaction.commit",
+        &commit_parameters,
+    );
+    let direct_commit = direct_submit_poll(
+        &direct_session,
+        "read-1",
+        "transaction.commit",
+        &commit_parameters,
+    );
+    assert_eq!(desktop_commit, direct_commit);
+    assert_eq!(desktop_commit["ok"], serde_json::json!(true));
+    let created = desktop_commit["value"]["created"][0]
+        .as_str()
+        .expect("a decimal id")
+        .to_string();
+
+    // A handle that cannot exist: the honest `null`, not an error.
+    let handle_parameters = serde_json::json!({
+        "database": document.database_id,
+        "handle": "FFFFFFFFFF",
+    });
+    let desktop_handle = desktop_submit_poll(
+        &mut queues,
+        &desktop_session,
+        &desktop_reads,
+        "read-2",
+        "database.getObjectId",
+        &handle_parameters,
+    );
+    let direct_handle = direct_submit_poll(
+        &direct_session,
+        "read-2",
+        "database.getObjectId",
+        &handle_parameters,
+    );
+    assert_eq!(desktop_handle, direct_handle);
+    assert_eq!(desktop_handle["ok"], serde_json::json!(true));
+    assert_eq!(
+        desktop_handle["value"],
+        serde_json::json!({ "objectId": null })
+    );
+
+    // The created entity reads back as the client's `decodeObject` shape.
+    let object_parameters = serde_json::json!({
+        "document": document.id,
+        "transactionId": "read-tx-2",
+        "objectId": created,
+        "mode": "write",
+    });
+    let desktop_object = desktop_submit_poll(
+        &mut queues,
+        &desktop_session,
+        &desktop_reads,
+        "read-3",
+        "transaction.getObject",
+        &object_parameters,
+    );
+    let direct_object = direct_submit_poll(
+        &direct_session,
+        "read-3",
+        "transaction.getObject",
+        &object_parameters,
+    );
+    assert_eq!(desktop_object, direct_object);
+    assert_eq!(desktop_object["ok"], serde_json::json!(true));
+    let object = &desktop_object["value"]["object"];
+    assert_eq!(object["typeName"], serde_json::json!("Line"));
+    assert_eq!(object["objectId"], serde_json::json!(created));
+    assert_eq!(
+        object["handle"],
+        Value::Null,
+        "a created entity has no handle"
+    );
+    assert_eq!(object["layer"], serde_json::json!("0"));
+    assert_eq!(object["startPoint"], serde_json::json!([0.0, 0.0, 0.0]));
+    assert_eq!(object["endPoint"], serde_json::json!([5.0, 2.0, 0.0]));
+    assert_eq!(object["length"], serde_json::json!((29.0_f64).sqrt()));
+    assert_eq!(object["color"], serde_json::json!({ "method": "byLayer" }));
+    assert_eq!(
+        object["linetype"],
+        serde_json::json!({ "method": "byLayer" })
     );
 }

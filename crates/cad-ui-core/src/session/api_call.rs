@@ -187,8 +187,14 @@ pub const API_SUBMIT_INVALID_REQUEST: &str = "cad_api.invalid_request: requestId
 /// The longest accepted request id.
 const REQUEST_ID_MAX_LEN: usize = 64;
 
-/// The one mutating operation this build performs.
+/// The one mutating operation this build performs (submit lane).
 pub const API_CALL_TRANSACTION_COMMIT: &str = "transaction.commit";
+
+/// A handle-to-object lookup (submit lane: it reads the live session).
+pub const API_CALL_GET_OBJECT_ID: &str = "database.getObjectId";
+
+/// The entity read (submit lane: it reads the live session).
+pub const API_CALL_GET_OBJECT: &str = "transaction.getObject";
 
 /// Stable refusal of a commit whose `expectedRevision` is not the open revision.
 pub const API_CALL_REVISION_CONFLICT: &str = "api.revision-conflict";
@@ -201,6 +207,19 @@ pub fn api_call_invalid_argument(field: &str) -> String {
 /// The stable `cad_api.error: <text>` marker for a host-side commit failure.
 pub fn api_call_error(text: impl std::fmt::Display) -> String {
     format!("cad_api.error: {text}")
+}
+
+/// The stable marker for an object id the open database does not hold.
+pub fn api_call_unknown_object(object_id: &str) -> String {
+    format!("cad_api.unknown_object: {object_id}")
+}
+
+/// The stable marker for a **present** object this host cannot serialize.
+///
+/// The detail names the source shape (a geometry variant such as `Hatch`, or a
+/// field such as `linetype`) rather than inventing client fields for it.
+pub fn api_call_unsupported_variant(namespace: &str, operation: &str, variant: &str) -> String {
+    format!("unsupported-runtime: cad_api.{namespace}.{operation}: {variant}")
 }
 
 /// Whether a submission id is usable: 1..=64 characters from `[A-Za-z0-9._-]`.

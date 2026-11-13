@@ -8,6 +8,7 @@
 mod test_support;
 mod tests_admission;
 mod tests_align;
+mod tests_api_object;
 mod tests_api_submit;
 mod tests_array;
 mod tests_batch;

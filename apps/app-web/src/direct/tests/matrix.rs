@@ -426,7 +426,9 @@ fn every_wire_command_answers_identically_on_both_paths() {
     ];
 
     let (mut gate_refused, mut applied_ok, mut session_refused) = (0, 0, 0);
-    for (case, name, args, gates) in cases {
+    // The object-read cases live in the mutating lane's module so this file stays
+    // under the physical-line gate; they are driven through the same harness.
+    for (case, name, args, gates) in cases.iter().chain(api::OBJECT_READ_CASES.iter()) {
         let (desktop, _canvas) = compare(case, name, args, *gates);
         match desktop.admission {
             Admission::Refused(_) => gate_refused += 1,
