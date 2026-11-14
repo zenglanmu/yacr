@@ -15,6 +15,7 @@ use cad_import_acadrust::AcadrustImporter;
 use cad_import_core::{
     detect_format, DrawingFormat, ImportProgressSink, ImportedDrawing, NoopProgress,
 };
+use cad_import_dgn::DgnImporter;
 use cad_import_ifc::IfcImporter;
 use cad_import_mesh::{OffImporter, PlyImporter};
 use cad_import_obj::ObjImporter;
@@ -29,9 +30,10 @@ pub use cad_import_core::{ImportLimits, ImportPhase, ImportProgress, ImportReque
 
 /// The single user-facing refusal for bytes no supported reader claims.
 pub const UNSUPPORTED_INPUT: &str = "input is not a supported drawing: expected a DWG \
-     signature, an ASCII/binary DXF section stream, an ISO 10303-21 STEP or IFC file, an \
-     OLE compound file from Autodesk Revit (.rvt/.rte; .rfa/.rft families carry no geometry), \
-     a SketchUp model (.skp), a Wavefront OBJ file, an STL file, a PLY file, or an OFF/COFF file";
+     signature, an ASCII/binary DXF section stream, an ISO 10303-21 STEP or IFC file, a Bentley \
+     DGN V7 design file or V8 compound file, an OLE compound file from Autodesk Revit \
+     (.rvt/.rte; .rfa/.rft families carry no geometry), a SketchUp model (.skp), a Wavefront OBJ \
+     file, an STL file, a PLY file, or an OFF/COFF file";
 
 /// Sniff-and-delegate importer used by every carrier.
 #[derive(Default)]
@@ -39,6 +41,7 @@ pub struct FormatImporter {
     acadrust: AcadrustImporter,
     step: StepImporter,
     ifc: IfcImporter,
+    dgn: DgnImporter,
     obj: ObjImporter,
     stl: StlImporter,
     ply: PlyImporter,
@@ -77,14 +80,31 @@ impl Importer for FormatImporter {
             // and importer. Detection separates it by FILE_SCHEMA, so the STEP
             // adapter (and cadmpeg) never sees these bytes.
             DrawingFormat::Ifc => self.ifc.import_with_progress(request, cancelled, progress),
+            // DGN V7 has a fixed header and its own lane.
+            DrawingFormat::Dgn => self.dgn.import_with_progress(request, cancelled, progress),
             DrawingFormat::Obj => self.obj.import_with_progress(request, cancelled, progress),
             DrawingFormat::Stl => self.stl.import_with_progress(request, cancelled, progress),
             DrawingFormat::Ply => self.ply.import_with_progress(request, cancelled, progress),
             DrawingFormat::Off => self.off.import_with_progress(request, cancelled, progress),
-            // The OLE signature cannot tell a project from a family; the RVT
-            // adapter reads the streams and refuses `.rfa`/`.rft` by name.
+            // The OLE signature covers both Revit and DGN V8. `sniff` reads the
+            // compound-file directory for `Dgn~H`; it must run only after the
+            // file-size limit, because it parses that directory. Everything else
+            // goes to the RVT adapter, which refuses families by name.
             // glTF is never a user-visible format and is never detected here.
-            DrawingFormat::Rvt => self.rvt.import_with_progress(request, cancelled, progress),
+            DrawingFormat::Ole => {
+                if request.bytes.len() > request.limits.max_file_bytes {
+                    return Err(CadError::InvalidInput(format!(
+                        "file is {} bytes, over the {} byte import limit",
+                        request.bytes.len(),
+                        request.limits.max_file_bytes
+                    )));
+                }
+                if DgnImporter::sniff(&request.bytes) {
+                    self.dgn.import_with_progress(request, cancelled, progress)
+                } else {
+                    self.rvt.import_with_progress(request, cancelled, progress)
+                }
+            }
             // The `.skp` header tells the containers apart but not the release;
             // the SKP adapter maps the release to a status ceiling, refuses
             // edge-only files by name, and is always `Partial`/`Unsupported` for
@@ -274,6 +294,70 @@ mod tests {
             CadError::CorruptData(message) => assert_eq!(message, UNSUPPORTED_INPUT),
             other => panic!("expected CorruptData, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn dgn_v7_is_routed_to_the_dgn_importer() {
+        let drawing = FormatImporter::new()
+            .import(&request(fixture_at("dgn", "smalltest.dgn")), &|| false)
+            .expect("the dispatcher imports DGN V7");
+        let mut layers: Vec<&str> = drawing
+            .database
+            .layers()
+            .map(|layer| layer.name.as_str())
+            .collect();
+        layers.sort();
+        assert_eq!(layers, ["Level 1", "Level 2"]);
+        assert_eq!(drawing.database.entity_count(), 4);
+    }
+
+    #[test]
+    fn dgn_v8_is_routed_to_the_dgn_importer_not_rvt() {
+        let drawing = FormatImporter::new()
+            .import(&request(fixture_at("dgn", "test_dgnv8.dgn")), &|| false)
+            .expect("the dispatcher imports DGN V8 through the OLE probe");
+        assert!(
+            drawing
+                .database
+                .layers()
+                .any(|layer| layer.name == "Default"),
+            "the DGN level table reached the DGN lane"
+        );
+        assert!(
+            drawing
+                .report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == cad_import_dgn::UNKNOWN_ELEMENT),
+            "the DGN lane's own diagnostics are present"
+        );
+        assert!(
+            drawing
+                .report
+                .diagnostics
+                .iter()
+                .all(|diagnostic| { !diagnostic.code.starts_with("import.rvt.") }),
+            "the V8 fixture must never reach the RVT lane"
+        );
+    }
+
+    #[test]
+    fn ole_sniff_happens_after_the_file_size_limit() {
+        let mut request = request(fixture_at("dgn", "test_dgnv8.dgn"));
+        request.limits.max_file_bytes = 8;
+        let error = FormatImporter::new()
+            .import(&request, &|| false)
+            .err()
+            .expect("the OLE container is over the limit");
+        assert!(
+            matches!(error, CadError::InvalidInput(_)),
+            "the size check must precede the CFB directory sniff: {error:?}"
+        );
+    }
+
+    #[test]
+    fn unsupported_input_names_dgn() {
+        assert!(UNSUPPORTED_INPUT.contains("DGN"));
     }
 
     #[test]

@@ -592,7 +592,7 @@ fn read_failure(path: &Path, error: std::io::Error) -> String {
 /// source; an edge-only model is refused by name, not by the picker).
 const OPEN_EXTENSIONS: &[&str] = &[
     "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte", "rfa",
-    "rft", "skp",
+    "rft", "skp", "dgn",
 ];
 
 /// `"obj"` → `"*.[oO][bB][jJ]"`.

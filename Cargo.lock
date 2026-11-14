@@ -691,6 +691,7 @@ dependencies = [
  "cad-history",
  "cad-import-acadrust",
  "cad-import-core",
+ "cad-import-dgn",
  "cad-import-ifc",
  "cad-import-mesh",
  "cad-import-obj",
@@ -849,6 +850,18 @@ dependencies = [
  "cad-domain",
  "cad-resources",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "cad-import-dgn"
+version = "0.1.13"
+dependencies = [
+ "cad-db",
+ "cad-domain",
+ "cad-import-core",
+ "cadkit-core",
+ "cadkit-dgn",
+ "web-time",
 ]
 
 [[package]]
@@ -1065,6 +1078,29 @@ dependencies = [
  "serde",
  "serde_json",
  "web-time",
+]
+
+[[package]]
+name = "cadkit-core"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3291e338fd653012d09a16c166e166ce8925778d669f74d344186b69d9d70f8"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "cadkit-dgn"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80032e9d2b5795d413b8817d03fc6ec0daa7c3eb5954cd155553bb185385b434"
+dependencies = [
+ "cadkit-core",
+ "encoding_rs",
+ "flate2",
+ "serde",
 ]
 
 [[package]]

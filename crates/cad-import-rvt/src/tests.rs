@@ -179,16 +179,19 @@ fn a_real_revit_project_imports_when_supplied() {
 // ---- Unit 2: GLB -> mesh -------------------------------------------------
 
 #[test]
-fn detection_recognises_the_ole_magic_as_revit() {
+fn detection_recognises_the_ole_magic_as_the_ole_container() {
     assert_eq!(
         detect_format(&fixture("upstream-metadata-scaffold-2024-no-geometry.rvt")),
-        DrawingFormat::Rvt
+        DrawingFormat::Ole
     );
     assert_eq!(
         detect_format(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1rest"),
-        DrawingFormat::Rvt
+        DrawingFormat::Ole
     );
-    assert_eq!(DrawingFormat::Rvt.label(), "Autodesk Revit");
+    assert_eq!(
+        DrawingFormat::Ole.label(),
+        "OLE compound file (Revit or DGN V8)"
+    );
     // The glTF intermediate is never a user-visible format.
     assert_eq!(
         detect_format(b"glTF\x02\x00\x00\x00"),
@@ -690,7 +693,7 @@ fn family_classification_uses_byte_signals() {
 #[test]
 fn a_family_shaped_container_is_refused_by_name() {
     let bytes = family_container();
-    assert_eq!(detect_format(&bytes), DrawingFormat::Rvt);
+    assert_eq!(detect_format(&bytes), DrawingFormat::Ole);
     let error = import_error(&request(bytes));
     match error {
         CadError::Unsupported(message) => {

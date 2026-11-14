@@ -1039,6 +1039,62 @@
         "The baseColorFactor values are rvt's own linearisation of known sRGB bytes; the contract asserts the reader converts them back byte-exactly. No textures are present because rvt emits none and cad_domain::Mesh has no UV channel.",
         "glTF is an implementation detail of the RVT lane, not a user-visible format; this is a unit-2 contract fixture, not CAD compatibility evidence."
       ]
+    },
+    {
+      "id": "public-gdal-dgn-v7-smalltest",
+      "path": "fixtures/dgn/smalltest.dgn",
+      "sha256": "9d9faddb67216f9d56fc9a1027adc1a927c8c13529dfd3416b771b4dc4e9a284",
+      "dwg_version": "DGN V7 (ISFF)",
+      "source": "GDAL autotest/ogr/data/dgn/smalltest.dgn at ccd38119ca19b6b656eed52fc5c83699d4ce89bf",
+      "provenance": {
+        "origin": "OSGeo/gdal (MIT/X11; LICENSE.TXT copied to fixtures/dgn/GDAL-LICENSE.TXT)",
+        "authorization": "public test data redistributed under GDAL's MIT-style licence",
+        "licence": "MIT/X11 (GDAL)"
+      },
+      "authorized": true,
+      "synthetic": false,
+      "entity_types": [
+        "TEXT",
+        "CIRCLE",
+        "POLYLINE",
+        "LINE"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "Four graphics on two levels, no cells and no rasters; pins V7 container decode, UOR/master-unit conversion and TEXT/CIRCLE/POLYLINE/LINE mapping only.",
+        "Not MicroStation acceptance evidence and not a general DGN V7 compatibility claim."
+      ]
+    },
+    {
+      "id": "public-gdal-dgn-v8-test",
+      "path": "fixtures/dgn/test_dgnv8.dgn",
+      "sha256": "8f32f87ce4b16881aa64f5cb9f75c98851833f96fef37ca0ad31aa6bb18d1df0",
+      "dwg_version": "DGN V8 (OLE/CFB)",
+      "source": "GDAL autotest/ogr/data/dgnv8/test_dgnv8.dgn at ccd38119ca19b6b656eed52fc5c83699d4ce89bf",
+      "provenance": {
+        "origin": "OSGeo/gdal (MIT/X11; LICENSE.TXT copied to fixtures/dgn/GDAL-LICENSE.TXT)",
+        "authorization": "public test data redistributed under GDAL's MIT-style licence",
+        "licence": "MIT/X11 (GDAL)"
+      },
+      "authorized": true,
+      "synthetic": false,
+      "entity_types": [
+        "POINT",
+        "LINE",
+        "POLYLINE",
+        "CIRCLE",
+        "ARC",
+        "ELLIPSE",
+        "SPLINE",
+        "TEXT",
+        "INSERT"
+      ],
+      "expected": "success",
+      "known_limits": [
+        "Written by ODA Teigha DGN 4.02, not MicroStation: a 27 KB toy with 35 top-level entities, one shared-cell definition and two unsupported element types.",
+        "Pins V8 CFB/zlib decode, metres, block definitions/insert transform, group flattening and explicit Unknown diagnostics; it does not prove V8i/CONNECT/ORD, level display flags, references, Item Types, dimensions, multiline or raster support.",
+        "test_dgnv8_ref.csv is the ODA reference output and is kept for human comparison only; the importer never reads it."
+      ]
     }
   ],
   "notice": "Synthetic entries are contract fixtures and do not establish CAD compatibility. Authorized, redistributable drawings and their reference images may be committed here with full provenance (the QCAD flange sample in fixtures/dxf/qcad-flange/ records its upstream terms in SOURCE.md); its reference images are human-review aids, not project-generated golden images. Unverified vendor or private user data is not committed, and a committed sample is not general CAD compatibility evidence."

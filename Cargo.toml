@@ -26,6 +26,7 @@ members = [
     "crates/cad-import-mesh",
     "crates/cad-import-step",
     "crates/cad-import-ifc",
+    "crates/cad-import-dgn",
     "crates/cad-import-rvt",
     "crates/cad-import-skp",
     "crates/cad-resources",
@@ -83,6 +84,7 @@ cad-import-stl = { path = "crates/cad-import-stl" }
 cad-import-mesh = { path = "crates/cad-import-mesh" }
 cad-import-step = { path = "crates/cad-import-step" }
 cad-import-ifc = { path = "crates/cad-import-ifc" }
+cad-import-dgn = { path = "crates/cad-import-dgn" }
 cad-import-rvt = { path = "crates/cad-import-rvt" }
 cad-import-skp = { path = "crates/cad-import-skp" }
 cad-resources = { path = "crates/cad-resources" }
@@ -152,6 +154,20 @@ cadmpeg-tessellate = "0.6.11"
 # findings recorded in `crates/cad-import-ifc/src/lib.rs`.
 ifc-lite-core = "=28.2.0"
 ifc-lite-geometry = "=28.2.0"
+
+# MicroStation DGN V7 (ISFF) and V8 (OLE compound file) reader
+# (`cad-import-dgn`). MIT OR Apache-2.0, pure Rust, `unsafe_code = "forbid"`,
+# no platform dependency, so the `dom-canvas` wasm session can link it. Pinned
+# exactly: pre-1.0, one maintainer, 15 releases in 31 days, and each release has
+# changed the decoded format surface (level tables, raster placement, tag
+# attachment), so a caret range would float across a format-claim change.
+# `default-features = false` disables the seed-based V8 writer, which is the
+# only consumer of the optional `cfb` dependency.
+cadkit-dgn = { version = "=0.5.2", default-features = false }
+# Format-neutral document model the DGN reader produces. Kept as a direct
+# dependency because the adapter maps `Document`/`EntityKind`/`Units` and must
+# not rely on a re-export from the reader crate.
+cadkit-core = { version = "=0.5.2" }
 
 # Autodesk Revit reader (`cad-import-rvt`). Apache-2.0, pure Rust, pinned
 # exactly: the crate published 19 releases in six weeks. It is a **preview**

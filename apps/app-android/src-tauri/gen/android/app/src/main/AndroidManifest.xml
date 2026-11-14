@@ -176,6 +176,27 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/x-dgn" />
+                <data android:pathPattern=".*\\.dgn" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="image/vnd.dgn" />
+                <data android:pathPattern=".*\\.dgn" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/dgn" />
+                <data android:pathPattern=".*\\.dgn" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
                 <data android:mimeType="application/octet-stream" />
                 <data android:pathPattern=".*\\.dwg" />
                 <data android:pathPattern=".*\\.dxf" />
@@ -192,6 +213,7 @@
                 <data android:pathPattern=".*\\.rfa" />
                 <data android:pathPattern=".*\\.rft" />
                 <data android:pathPattern=".*\\.skp" />
+                <data android:pathPattern=".*\\.dgn" />
             </intent-filter>
             
             <!-- tauri-file-associations. AUTO-GENERATED. DO NOT REMOVE. -->

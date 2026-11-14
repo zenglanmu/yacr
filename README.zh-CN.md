@@ -2,14 +2,14 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-yacr 是一个跨平台开源 CAD 项目：共享的 Rust 核心负责 CAD 文档（DWG/DXF，以及网格、STEP、IFC
-与 Revit 导入）、几何、命令与渲染，React + Tauri 提供界面，wgpu 负责绘制。同一套文档与渲染管线
+yacr 是一个跨平台开源 CAD 项目：共享的 Rust 核心负责 CAD 文档（DWG/DXF/DGN，以及网格、STEP、
+IFC 与 Revit 导入）、几何、命令与渲染，React + Tauri 提供界面，wgpu 负责绘制。同一套文档与渲染管线
 面向 Linux（Wayland 原生或 X11/`dom-canvas`）、Windows、macOS、Android 与 Web。
 
 **宣传页：** <https://yacr.pages.dev/> · **Web 版：** <https://yacr-examples.pages.dev/>
 
 yacr 处于活跃开发中，**预览版现在即可下载**：Linux Flatpak、Windows zip、macOS tarball、Android APK
-与浏览器版本。它可以打开 DWG/DXF，可导入网格/STEP/IFC 文件用于显示、可预览 Revit 工程，能用 wgpu
+与浏览器版本。它可以打开 DWG/DXF/DGN，可导入网格/STEP/IFC 文件用于显示、可预览 Revit 工程，能用 wgpu
 查看 2D/3D 图纸、做测量，命令清单 981 条中有 979 条有实现路径（107 完整 + 872 部分），其余 2 条
 （MEASURE / TRACE）按同名不同义不计入；未支持的选项按名拒绝，不静默成功。它**还不是生产级 CAD**；
 各平台状态与证据边界见 `docs/handoff.md` 与 `docs/compatibility.md`。
@@ -86,7 +86,9 @@ Wayland**（宿主自建 app-owned `wl_surface` + `wl_subsurface`，经 `apps/ap
   **保真度不一**：不少图元只是近似表示或仍有缺口，逐项状态以
   `docs/compatibility.md`、`docs/dxf-entity-coverage.md` 为准：
   - **打开与解析**：本地图纸走同一派发器与同一语义/数据库转换，异步导入带进度与取消：DWG / DXF
-    （ASCII 与二进制）作为 CAD 数据；OBJ、STL、PLY / OFF、STEP（AP203/214/242）与 IFC（2X3/4/4X3）
+    （ASCII 与二进制）与 Bentley DGN V7/V8 作为 CAD 数据（DGN：level、线/弧/椭圆/样条、文字、
+    共享单元；level 显示标志、references、栅格与 tags 仍是显式缺口，见 `docs/dgn.md`）；
+    OBJ、STL、PLY / OFF、STEP（AP203/214/242）与 IFC（2X3/4/4X3）
     作为**可显示、可拾取的网格**（不可测量；源信息有损处为 `Partial`）；Revit 工程（`.rvt`/`.rte`）
     仅为**包围盒预览**；Revit 族文件（`.rfa`/`.rft`）按名拒绝。
   - **查看**：模型空间与受支持布局切换；图层显隐、搜索、恢复；图元选择、高亮与基本属性。
@@ -308,7 +310,9 @@ GPU 验收。
   合成测试不等于真实 GPU、真机、golden 或性能验收。
 - **明确未支持 / 未实现**（不伪造成功）：
   - 代理图元的厂商 opcode 记录（仅公开缓存记录）；无缓存几何不显示。
-  - 外部内容：PDF/DWF/DGN underlay、OLE2 嵌入对象、CoordinationModel / Navisworks NWD 不加载。
+  - 外部内容：DWG **内部的** PDF/DWF/DGN underlay、OLE2 嵌入对象、CoordinationModel /
+    Navisworks NWD 不加载。（独立 `.dgn` 文档可作为 CAD 数据打开；它自己的 references/栅格仍是
+    缺口，见 `docs/dgn.md`。）
   - ACIS 完整几何内核（3DSOLID/REGION/BODY/SURFACE 仅子集离散）、点云点数据（仅范围盒）。
   - 绘制顺序 `draw_order` 未贯通（=上传顺序）；WIPEOUT 掩码填充未渲染；线宽显式不绘制。
   - 图像不支持编解码器（TIFF/CCITT/EPS）、亮度/对比/淡出、outside/mask 裁剪。

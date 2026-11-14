@@ -64,12 +64,27 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | 布局 / 视口 | 实现(矩形裁剪/比例；矩形 VPCLIP 边界实体可证明为轴对齐矩形时按其矩形裁剪；`tab_order` 顺序 + LAYOUT 显示名) | 复杂/非矩形裁剪标记部分 | **实现（活动空间渲染已接线；`CadStatus.layouts`/`activeSpace` + `LayoutTabs`/`SPACE`，2026-11-02）** | 部分（真正不支持的布局页签可见但禁用，只显示稳定原因码） | 纸空间测量显式禁用 |
 | **XREF（外部参照）** | **部分（仅导入期只读解析，2026-11-02）** | **实现：acadrust `BlockRecord` 的 xref 标志/`xref_path` + `INSERT`；无独立 `Xref` 对象；无 `XREF` 命令/ATTACH/DETACH/RELOAD/BIND/编辑** | **加载成功的模型空间内容合并进宿主 xref 块后按普通块绘制；未加载状态显式缺席，不画假内容** | 合并成员随普通实体拾取；无 xref 专用拾取 | 不支持 |
 
+### Bentley DGN V7 / V8（矢量文档，2026-11-14）
+
+DGN 是**矢量文档** lane（ADR-0033 D11），不是网格预览：level、线型、文字样式、共享单元与
+Line/Polyline/Circle/Arc/Ellipse/Spline/Text/Point 直接进入 `cad-db`。适配器在
+`crates/cad-import-dgn`，依赖 `cadkit-dgn =0.5.2`（MIT OR Apache-2.0，纯 Rust，
+`default-features = false`，读取器自带 CFB 解析，未修改上游、无 patch）。检测：V7 固定魔数；
+V8 是 OLE/CFB，`detect_format` 只返回 `Ole`，`cad_app::import::FormatImporter` 先用
+`cadkit_dgn::sniff` 的 `Dgn~H` 根存储判定 DGN，否则仍走 RVT；不按扩展名猜。
+
+| 格式 | 读取 | 语义 | 绘制 | 拾取 | 测量 | 明确边界 |
+|---|---|---|---|---|---|---|
+| Bentley DGN V7（ISFF）/ V8（OLE-CFB） | **实现（`cadkit-dgn` 0.5.2，reader-only，精确固定）** | **矢量文档**（level→Layer、linetype、text style、shared cell→Block/Insert、Line/Polyline/Circle/Arc/Ellipse/Spline/Text/Point；complex/text-node/cell group 的成员扁平化；layer 只写名称/可见性，cadkit 不解码 level 颜色/线宽/线型，不伪造 `LayerAttributes`） | 实现（精确几何）；Text/Insert 为 `Unverified`（字体/块成员能力） | 实现（精确几何） | Line/Polyline/Circle/Arc/Ellipse/Spline/Point 实现；Text/Insert/Raster/Unknown 不支持 | **单位**：`cadkit` 已把 UOR 转成主单位；按 `meters_per_unit` 精确匹配 m/mm/in/ft，其它值（含 survey foot/Custom）回退 `drawing_units()`，绝不假设毫米。**linetype 的 dash pattern 是 UOR**，按 `dgn.uor_per_master` 缩放到主单位，缺因子退 continuous + 诊断。**明确缺口**：level display/freeze/lock 未解码（全部 level 按可见，`import.dgn.level_symbology_undecoded`；**每个成功导入恒 `Partial`**）；只导入 `Document::model_space()`，其它模型跳过（`import.dgn.model_skipped`）；references/xrefs、Item Types/XAttributes、dimensions/multiline/mesh/solid/surface 未建模（`import.dgn.unknown_element`/`element_not_modelled`）；栅格 `size_px` 已知时写 `SemanticGeometry::Image`（u/v 按每像素，外部 TIF 不加载），未知时 `Opaque`，均记 `import.dgn.raster_not_loaded`；DGN tags 不进入 `cad-db`（`import.dgn.tags_not_stored`）；扩展色 >255 由上游回退 `ByLayer`；缺块 Insert 跳过 + Partial（不伪造空块）；无 DGN 写出。**没有几何/全部元素未知 → `Unsupported(import.dgn.no_geometry / import.dgn.unknown_elements_only)`，不是空成功**。`DGNIMPORT`/`DGNATTACH`/`DGNCLIP`/`DGNLAYERS`/`DGNADJUST`/`DGNEXPORT` 仍是具名拒绝（打开文档 ≠ 合并进当前 DWG）。证据：GDAL MIT/X11 的 V7 `smalltest.dgn` 与 V8 `test_dgnv8.dgn`（ODA Teigha 写出，非 MicroStation）；`YACR_TEST_DGN` 未设置即跳过，跳过不是已运行证据；Linux 真实 GPU 视觉运行（嵌套 Weston + Vulkan Quadro P620，debug）见 `docs/evidence/dgn-linux-gpu/`；Windows/macOS/Android/Web 运行 **NOT VERIFIED**；该视觉证据不是 golden/像素/性能验收。 |
+
 ### 网格/实体格式（OBJ / STL / PLY / OFF / STEP / IFC / RVT / SKP，2026-11-13）
 
 `cad_app::import::FormatImporter` 在进入适配器前做一次保守格式嗅探
 （`cad-import-core::detect_format`：SKP 固定 32 字节头 `FF FE FF 0E` + UTF-16LE
 `SketchUp Model`（**最先**探测：定长签名比 OLE/`AC10xx` 便宜，且没有别的格式以 `FF FE FF`
-开头）⇒ `Skp` → OLE/CFB 魔数 `D0 CF 11 E0 A1 B1 1A E1` ⇒ `Rvt` → DWG
+开头）⇒ `Skp` → DGN V7 固定魔数 ⇒ `Dgn` → OLE/CFB 魔数 `D0 CF 11 E0 A1 B1 1A E1` ⇒ `Ole`
+（`cad_app::import::FormatImporter` 先用 `cadkit_dgn::sniff` 的 `Dgn~H` 根存储判定 DGN V8，
+否则交给 RVT）→ DWG
 签名 → ASCII/二进制 DXF 段流 → ISO 10303-21（`FILE_SCHEMA` 为 IFC ⇒ `Ifc`，否则 `Step`）→
 STL → PLY → OFF → OBJ，否则 `Unknown` 显式拒绝）。OLE 魔数只能说明“复合文档”，
 项目/模板与家族/家族模板由 RVT 适配器按流区分（见下），检测层不按扩展名猜；SKP 头也只说明
@@ -94,8 +109,9 @@ STEP/IFC 的精确 B-rep 也没有暴露给域）。**RVT 与 SKP 是例外**：
 | SketchUp 模型（`.skp`；stream 容器 3–8/2013–2020，ZIP/tagged-record 容器 2026/2027） | **预览实现（`skpwright` 0.6.0，GPL-3.0-only，纯 Rust、单一依赖 `miniz_oxide`，workspace 中精确固定版本）** | 中性网格（每个 geometry run 实例一个 `DbEntity`；三角形 + 组合后的实例世界变换 + tag 扁平化 + 材质颜色/不透明度；**预览几何**，不保留 SketchUp 语义） | 实现，但**受 release 状态上限约束**（3–8、2013–2020、2026、2027 = `Verified`；2021–2025 只按容器等价读、无观测样本 ⇒ `Unverified`；其余按名拒绝 `import.skp.version_unsupported`） | 同左（与绘制同一上限） | 不支持（网格不是 MEASURE 目标；预览三角形没有任何 CAD 语义） | **许可**：`skpwright` `=0.6.0` 是 **GPL-3.0-only**；主仓 AGPL-3.0（AGPLv3 §13）可与 GPL-3.0 组合，GPL 部分对下游仍按 GPLv3 分发（见 `THIRD_PARTY_NOTICES.md`）。**读取**：三角形、实例/组件世界变换、tag（图层）扁平成 layer 0 但**遵守可见性**（隐藏实例/隐藏面/不可见图层被裁剪并计数）、材质颜色 + 不透明度（**纹理只取平均色**，不采样图像、不放 UV）。**不导入**：边/曲线、纹理图像与 UV、场景（scenes/pages）、剖切面、标注、动态组件属性。**三角化**：先**耳切**（ear clipping）并做面积校验；失败回退 **even-odd**（带洞的面直接走 even-odd）；两者都失败才丢弃该面并记 `import.skp.faces_dropped`（绝不近似）。**单位**：`skpwright` 已把存储的英寸与节点平移换算为**米**，入库 `UnitContext::from_meter()`、`+Z` up，记 `import.skp.units_metres`。**拒绝**：几何只有边/曲线 → `import.skp.edge_only_geometry`（显式拒绝，**不是空成功**）；没有可视面 → `import.skp.no_geometry`；头缺失/截断 → `CorruptData`（`import.skp.not_a_sketchup_file`）；头匹配但解析失败 → `CorruptData`（`import.skp.parse_failed`）；超限 → 命名真实计数的 `InvalidInput`（`import.skp.limits_exceeded`）。每个成功导入恒 `Completeness::Partial`（`import.skp.preview_geometry`），2021–2025 另记 `import.skp.version_unverified`。无外部参照（`XrefOptions` 仅 DWG）；`vendor_records` 为空 |
 
 证据边界：以上只有**合成夹具 + cadmpeg 上游测试夹具 + crate 契约测试**
-（`cargo test -p cad-import-obj` / `-p cad-import-stl` / `-p cad-import-mesh` / `-p cad-import-step` / `-p cad-import-ifc` / `-p cad-import-rvt` / `-p cad-import-skp`），
-没有真实厂商 STEP/IFC 样本对照，也不构成产品验收或跨平台运行证据。NIST/ABC 的数字来自上游 spike
+（`cargo test -p cad-import-obj` / `-p cad-import-stl` / `-p cad-import-mesh` / `-p cad-import-step` / `-p cad-import-ifc` / `-p cad-import-rvt` / `-p cad-import-skp` / `-p cad-import-dgn`），
+没有真实厂商 STEP/IFC 样本对照，也不构成产品验收或跨平台运行证据。DGN 只有 GDAL 的 V7 玩具与
+ODA Teigha 写出的 V8 玩具（非 MicroStation），不能按“真实 Bentley 文件已兼容”理解。NIST/ABC 的数字来自上游 spike
 的有界样本扫描，不是本仓库的 golden 回归。IFC 的 9 个 buildingSMART 样本（IFC2X3/4/4X3，
 127–6,393 实体）只是库选型 spike 的本地有界实验，文件未提交、未做 golden 回归；`YACR_TEST_IFC`
 未设置时的跳过**不是已运行证据**。IFC 的 CSG/NURBS 高级几何是 best-effort，真实文件不能按

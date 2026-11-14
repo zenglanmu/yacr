@@ -56,6 +56,9 @@
 
 - 一律映射到 `SemanticGeometry::Mesh`；能力表记 display `Verified`、pick `Verified`、
   measure `Unsupported`。
+- **DGN 是本条的明确例外（见 D11）**：DGN 是带 level、线型、文字与共享单元的矢量 CAD 文档，
+  不能先三角化成网格；它映射到 `cad-db` 的 `Layer`/`Line`/`Polyline`/`Text`/`Insert` 等语义，
+  测量只对精确曲线成立。
 - 单位未知时用 `UnitContext::drawing_units()`，**不得**假设毫米。STEP/IFC 若解析库提供单位则
   显式映射；RVT 沿用其来源语义。
 - 不保留精确 B-rep：`cad-kernel-adapter` 的中性 `BrepData` 目前只有
@@ -255,6 +258,63 @@ ASCII 与二进制同一路径；缺失/零/非有限法向由三角形几何重
   宣称成功。
 - 未知输入只有一条拒绝信息，且必须列出当前真实支持的内容。
 
+### D11 DGN V7/V8：`cadkit-dgn` 0.5.2，**矢量文档 lane**（2026-11-14）
+
+**已实现**为 `crates/cad-import-dgn`。这是 D2 的明确例外：DGN 不是网格格式，而是与 DWG/DXF
+同类的 CAD 文档（level、线型、文字、共享单元、单位）。若把它先三角化成网格，会丢掉
+level/文字/精确曲线与测量语义，等于把“能看”冒充成“能测”。
+
+- **库与许可**：`cadkit-dgn` **`=0.5.2`**（MIT OR Apache-2.0，纯 Rust，`unsafe_code = forbid`，
+  上游自证且本仓库复核可编译到 `wasm32-unknown-unknown`），只由 `cad-import-dgn` 依赖。
+  `default-features = false` 关闭 seed-based V8 writer 与可选 `cfb`；读取器自带 CFB 解析。
+  直接依赖 `cadkit-core = "=0.5.2"` 只为取 `Document`/`EntityKind` 类型。**未修改上游源码、
+  无 Cargo patch、无 vendoring**。crate 很新（2026-10-01 首发、31 天 15 个版本、单一维护者），
+  0.x 允许破坏性变更，因此精确固定；升级必须重新核对本 ADR、`docs/dgn.md` 与契约测试。
+- **检测**：V7 用固定魔数（`08 05 17 00`，或 `b0 09 FE 02` 且 `b0 ∈ {08,C8}`）。V8 是
+  OLE/CFB；CFB 魔数本身不能区分 Revit 与 DGN，`detect_format` 返回 `DrawingFormat::Ole`，
+  `cad_app::import::FormatImporter` 先检查 `max_file_bytes`，再调 `DgnImporter::sniff`
+  （`cadkit_dgn::sniff` 解析 CFB 目录，要求根存储含 `Dgn~H`），是 DGN 才进 DGN lane，否则仍进
+  RVT。**检测层不按扩展名猜**，也不在 `cad-import-core` 里复制 CFB 解析器。
+- **映射**：level → `Layer`（**只写名称/可见性**；cadkit 不解码 level 颜色/线宽/线型，写默认
+  `LayerAttributes` 会伪装成真实数据，故不写）；linetype → `LineType`（cadkit 的 dash pattern
+  是 **UOR**，按 `dgn.uor_per_master` 缩放到主单位，缺因子退 continuous + 诊断）；font →
+  `Style` + `Text.style/font`；shared cell definition → `BlockDefinition`/`BlockMetadata`，
+  instance → `SemanticGeometry::Insert`（缺块则跳过 + `import.dgn.block_missing`，不伪造空块）；
+  Line/LineString/Shape/Circle/Arc/Ellipse/B-spline/Text/Point 映射到同名 `SemanticGeometry`。
+  Complex chain/shape、text node、cell group 的成员**扁平化**为独立实体（`cad-db` 没有 group
+  容器），几何精确、group 编辑语义不保留。
+- **单位**：`cadkit` 已把 UOR 转成首个模型的主单位；按 `units.meters_per_unit` 精确匹配
+  m/mm/in/ft（1.0/0.001/0.0254/0.3048），作为 `UnitContext` 的 source/display（ratio 1.0）；
+  `Unitless`/其它值（含 US survey foot、`Custom`）用 `UnitContext::drawing_units()` 并记诊断。
+  **绝不假设毫米，也不把 survey foot 当国际英尺。**
+- **明确不支持（具名诊断 + `Partial`/`Unsupported`，不静默）**：level display/freeze/lock
+  标志（V7/V8）未解码（全部 level 按可见导入，`import.dgn.level_symbology_undecoded`），因此
+  **每个成功导入恒 `Partial`**；多设计模型/sheet 模型（只导入 `Document::model_space()`，
+  其余 `import.dgn.model_skipped`）；references/xrefs；栅格只保留放置（`size_px` 已知时写
+  `SemanticGeometry::Image`，u/v 按**每像素**除 `size_px`；未知时 `Opaque`；外部 TIF 像素
+  不加载，`import.dgn.raster_not_loaded`，不伪造像素/尺寸）；Item Types/XAttributes 只计数；
+  dimensions/multiline/mesh/solid/surface 元素由 `cadkit` 报 Unknown 或本适配器按
+  `element_not_modelled` 跳过；DGN tags 不进入 `cad-db`（无通用属性表，
+  `import.dgn.tags_not_stored`）；扩展色 >255 上游回退 `ByLayer`；无 DGN 写出。
+  全部元素都未知 → `Unsupported(import.dgn.unknown_elements_only)`；文件没有几何 →
+  `Unsupported(import.dgn.no_geometry)`，**不是空成功**。
+- **能力**：Line/Polyline/Circle/Arc/Ellipse/Spline/Point 的 read/semantic/render/pick/measure
+  按精确几何报告（退化则 `Partial`）；Text/MText 的 render/pick 为 `Unverified`（宿主字体），
+  measure `Unsupported`；Insert 的 render/pick 取块成员最弱值，measure `Unsupported`；
+  Raster/Unknown 的 render/pick/measure `Unsupported`。`read = Verified` 只表示字节被接受。
+- **命令边界**：打开 `.dgn` 文档不等于实现 `DGNIMPORT`/`DGNATTACH`。把 DGN 合并进当前 DWG、
+  DGN 底图/clip/layer/adjust、DGN 导出仍是具名拒绝；需要另一套映射/事务语义。
+- **证据**：提交 GDAL MIT/X11 的 `fixtures/dgn/smalltest.dgn`（V7，4 个图形）与
+  `test_dgnv8.dgn`（V8，27 KB，**ODA Teigha 4.02 写出，不是 MicroStation**）；来源/SHA-256/
+  许可见 `fixtures/dgn/SOURCE.md` 与 `fixtures/manifest`。契约测试证明容器、单位、level、
+  文字、块/插入、group 扁平化与 Unknown 诊断；**不证明** V8i/CONNECT/ORD、真实 MicroStation
+  文件、level 显示标志、references、Item Types、尺寸/多线/网格/实体、栅格像素或字体度量。
+  `YACR_TEST_DGN` 未设置即跳过，**跳过不是已运行证据**；wasm 只证明编译；Windows/macOS/
+  Android 运行一律 **NOT VERIFIED**。
+- **风险**：上游 2026-11-12 仍有 5 个真实 V8 正确性 issue（椭圆 ratio=0、隐藏元素可见、
+  level 名编码、嵌套复合元素、type-11 曲线切线）。本仓库不能打补丁（AGENTS.md 铁律 1）；
+  遇到这些输入只能保留上游 warning / 显式诊断，不得把错误几何说成正确。
+
 ## 3. 兼容性与许可证
 
 - `tobj`（MIT）、`stl_io`（MIT）、`cadmpeg-*`（Apache-2.0）、`rvt`（Apache-2.0）与
@@ -264,6 +324,8 @@ ASCII 与二进制同一路径；缺失/零/非有限法向由三角形几何重
 - `skpwright` 是 **GPL-3.0-only**：主仓 **AGPL-3.0** 可与 GPL-3.0 代码组合（AGPLv3 §13），
   但 **GPL 部分对下游仍按 GPLv3 分发**，组合不改变其许可。这是本 ADR 唯一引入的强 copyleft
   依赖；若要移除，只能整条删除 `cad-import-skp`，不得把其代码复制进 MIT/Apache 风格的 crate。
+- `cadkit-dgn`/`cadkit-core` 0.5.2 是 **MIT OR Apache-2.0**，纯 Rust、无 C 依赖、无
+  `unsafe`；只由 `cad-import-dgn` 依赖，精确固定版本，未修改上游。
 - 新增依赖必须记入 `THIRD_PARTY_NOTICES.md`。`[patch.crates-io]` 仍只允许 `acadrust`
   （ADR-0031），本 ADR 不引入任何 patch。
 

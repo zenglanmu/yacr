@@ -24,6 +24,10 @@
     "    containers, so magic cannot tell a project from a family.",
     "  * .skp uses the de-facto application/vnd.sketchup.skp with a glob only (the",
     "    UTF-16LE signature is not expressible as a compact magic pattern).",
+    "  * .dgn has no compact magic here: V8 is an OLE/CFB container (same story as",
+    "    Revit) and the V7 element header is too short to discriminate. The glob is",
+    "    the discriminator; the importer sniffs bytes instead of trusting the",
+    "    extension.",
     "  * application/octet-stream is added on Android only: content providers routinely",
     "    report CAD files as octet-stream, and without it 'Open with' never matches.",
     "",
@@ -46,7 +50,8 @@
     "rte",
     "rfa",
     "rft",
-    "skp"
+    "skp",
+    "dgn"
   ],
   "mimeTypes": [
     { "type": "image/vnd.dwg", "extensions": ["dwg"] },
@@ -69,7 +74,10 @@
     { "type": "application/x-revit-template", "extensions": ["rte"] },
     { "type": "application/x-revit-family", "extensions": ["rfa"] },
     { "type": "application/x-revit-family-template", "extensions": ["rft"] },
-    { "type": "application/vnd.sketchup.skp", "extensions": ["skp"] }
+    { "type": "application/vnd.sketchup.skp", "extensions": ["skp"] },
+    { "type": "application/x-dgn", "extensions": ["dgn"] },
+    { "type": "image/vnd.dgn", "extensions": ["dgn"] },
+    { "type": "application/dgn", "extensions": ["dgn"] }
   ],
   "androidExtraMimeTypes": ["application/octet-stream"],
   "sharedMimeInfo": [
@@ -126,6 +134,12 @@
       "type": "application/vnd.sketchup.skp",
       "comment": "SketchUp model",
       "globs": ["*.skp", "*.SKP"]
+    },
+    {
+      "type": "application/x-dgn",
+      "comment": "DGN CAD drawing (MicroStation)",
+      "globs": ["*.dgn", "*.DGN"],
+      "aliases": ["image/vnd.dgn", "application/dgn"]
     }
   ]
 }

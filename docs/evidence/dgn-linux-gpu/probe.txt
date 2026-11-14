@@ -1,0 +1,9 @@
+# 2026-11-14 DGN real-GPU run probe excerpt
+# V7: fixtures/dgn/smalltest.dgn
+[probe] bridge wayland presenter ready generation=1 backend=vulkan adapter=Quadro P620 device_type=discrete_gpu present_mode=Mailbox configure_us=11366
+[probe] status backend=Some("vulkan") adapter=Some("Quadro P620") size=1541x685 frames=0 ticks=59 present_mode=Some("Mailbox") stopped=false marker=0.580 stages_us[none] error=None
+[probe] status backend=Some("vulkan") adapter=Some("Quadro P620") size=1841x983 frames=54 ticks=115 present_mode=Some("Mailbox") stopped=false marker=0.140 stages_us[write=0 acquire=68 configure=0 submit=354 scope=4 present=1003 total=1484] error=None
+# V8: fixtures/dgn/test_dgnv8.dgn
+[probe] bridge wayland presenter ready generation=1 backend=vulkan adapter=Quadro P620 device_type=discrete_gpu present_mode=Mailbox configure_us=11148
+[probe] status backend=Some("vulkan") adapter=Some("Quadro P620") size=1541x685 frames=0 ticks=60 present_mode=Some("Mailbox") stopped=false marker=0.590 stages_us[none] error=None
+[probe] status backend=Some("vulkan") adapter=Some("Quadro P620") size=1841x983 frames=54 ticks=115 present_mode=Some("Mailbox") stopped=false marker=0.140 stages_us[write=0 acquire=26 configure=0 submit=131 scope=1 present=779 total=958] error=None

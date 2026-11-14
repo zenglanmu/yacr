@@ -60,7 +60,7 @@ const KEY_PICKER_FAILED: &str = "macos.picker_failed";
 /// source; an edge-only model is refused by name, not by the picker).
 const OPEN_EXTENSIONS: &[&str] = &[
     "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte", "rfa",
-    "rft", "skp",
+    "rft", "skp", "dgn",
 ];
 
 /// The localized labels the native open dialog and open funnel use.
@@ -944,7 +944,7 @@ mod tests {
     fn allowed_file_types_cover_the_importer_set() {
         for extension in [
             "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
-            "rfa", "rft", "skp",
+            "rfa", "rft", "skp", "dgn",
         ] {
             assert!(
                 OPEN_EXTENSIONS.contains(&extension),

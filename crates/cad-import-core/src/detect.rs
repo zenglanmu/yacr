@@ -24,10 +24,16 @@ pub enum DrawingFormat {
     Stl,
     Ply,
     Off,
-    /// An OLE/CFB container: Revit project/project template (`.rvt`/`.rte`) or
-    /// family/family template (`.rfa`/`.rft`). The RVT adapter tells them
-    /// apart from their streams and refuses families by name.
-    Rvt,
+    /// Bentley DGN V7 (ISFF), identified by its fixed design-file header.
+    /// V8 is an OLE compound file and shares [`DrawingFormat::Ole`]; the DGN
+    /// adapter's `sniff` recognizes its `Dgn~H` stream.
+    Dgn,
+    /// An OLE/CFB container with more than one possible owner: a Revit project
+    /// (`.rvt`/`.rte`), a Revit family (`.rfa`/`.rft`) or a MicroStation DGN V8
+    /// file. The dispatcher asks the DGN adapter's `sniff` (which reads the CFB
+    /// directory for `Dgn~H`) and routes to RVT otherwise; each adapter then
+    /// refuses what it cannot read by name.
+    Ole,
     /// A SketchUp model (`.skp`), in either container the reader models: the
     /// MFC `CArchive` stream of releases 3–8 and 2013–2020, or the ZIP/tagged
     /// record container of 2026 and 2027. The SKP adapter refuses a release it
@@ -48,7 +54,8 @@ impl DrawingFormat {
             DrawingFormat::Stl => "STL",
             DrawingFormat::Ply => "PLY (Polygon File Format)",
             DrawingFormat::Off => "OFF (Object File Format)",
-            DrawingFormat::Rvt => "Autodesk Revit",
+            DrawingFormat::Dgn => "Bentley DGN V7 (MicroStation)",
+            DrawingFormat::Ole => "OLE compound file (Revit or DGN V8)",
             DrawingFormat::Skp => "SketchUp (.skp)",
             DrawingFormat::Unknown => "unknown",
         }
@@ -66,8 +73,10 @@ impl DrawingFormat {
 pub fn detect_format(bytes: &[u8]) -> DrawingFormat {
     if looks_like_skp(bytes) {
         DrawingFormat::Skp
+    } else if looks_like_dgn(bytes) {
+        DrawingFormat::Dgn
     } else if looks_like_ole(bytes) {
-        DrawingFormat::Rvt
+        DrawingFormat::Ole
     } else if looks_like_dwg(bytes) {
         DrawingFormat::Dwg
     } else if looks_like_dxf(bytes) {
@@ -161,7 +170,23 @@ fn looks_like_skp(bytes: &[u8]) -> bool {
         })
 }
 
-/// The OLE/CFB magic that every `.rvt`, `.rte`, `.rfa` and `.rft` starts with.
+/// The fixed DGN V7 design-file header.
+///
+/// Two exact 4-byte forms are accepted, both from the published ISFF record
+/// header: a 2D/3D design file starts `08 09 FE 02` / `C8 09 FE 02` (the first
+/// byte encodes dimension) and a cell library starts `08 05 17 00`. This is the
+/// V7 container only; V8 is a CFB and is answered by [`looks_like_ole`] plus the
+/// DGN adapter's own `sniff`.
+fn looks_like_dgn(bytes: &[u8]) -> bool {
+    if bytes.len() < 4 {
+        return false;
+    }
+    bytes[..4] == [0x08, 0x05, 0x17, 0x00]
+        || (bytes[0] == 0x08 || bytes[0] == 0xC8) && bytes[1..4] == [0x09, 0xFE, 0x02]
+}
+
+/// The OLE/CFB magic that every `.rvt`, `.rte`, `.rfa`, `.rft` and DGN V8 file
+/// starts with.
 ///
 /// It is deliberately the container signature only: a family is refused by the
 /// RVT adapter (`import.rvt.family_no_geometry`), not by detection, because the
@@ -372,10 +397,58 @@ mod tests {
     }
 
     #[test]
-    fn ole_magic_is_the_revit_container() {
+    fn v7_design_file_header_is_dgn() {
+        for header in [
+            [0x08, 0x05, 0x17, 0x00],
+            [0x08, 0x09, 0xFE, 0x02],
+            [0xC8, 0x09, 0xFE, 0x02],
+        ] {
+            assert_eq!(
+                detect_format(&header),
+                DrawingFormat::Dgn,
+                "magic {header:02X?} must be DGN"
+            );
+        }
+        // The fixture itself is the committed V7 sample.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/dgn/smalltest.dgn");
+        let bytes = std::fs::read(path).expect("fixture is committed");
+        assert_eq!(detect_format(&bytes), DrawingFormat::Dgn);
+        assert_eq!(DrawingFormat::Dgn.label(), "Bentley DGN V7 (MicroStation)");
+    }
+
+    #[test]
+    fn a_dgn_near_miss_is_not_dgn() {
+        // Six of the seven non-matching bytes of the V7 forms are not enough,
+        // and neither is a truncated header.
+        assert_eq!(detect_format(&[0x08, 0x05, 0x17]), DrawingFormat::Unknown);
+        assert_eq!(
+            detect_format(&[0x08, 0x05, 0x18, 0x00, b'r', b'e', b's', b't']),
+            DrawingFormat::Unknown
+        );
+        assert_eq!(
+            detect_format(&[0x09, 0x09, 0xFE, 0x02, b'r', b'e', b's', b't']),
+            DrawingFormat::Unknown
+        );
+    }
+
+    #[test]
+    fn the_v8_fixture_is_an_ole_container_not_a_dwg() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/dgn/test_dgnv8.dgn");
+        let bytes = std::fs::read(path).expect("fixture is committed");
+        assert_eq!(detect_format(&bytes), DrawingFormat::Ole);
+    }
+
+    #[test]
+    fn ole_magic_is_the_ole_container() {
         assert_eq!(
             detect_format(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1rest"),
-            DrawingFormat::Rvt
+            DrawingFormat::Ole
+        );
+        assert_eq!(
+            DrawingFormat::Ole.label(),
+            "OLE compound file (Revit or DGN V8)"
         );
         // Seven bytes are not enough, and a near-miss is not OLE.
         assert_eq!(detect_format(b"\xD0\xCF\x11\xE0"), DrawingFormat::Unknown);

@@ -249,8 +249,8 @@ pub fn hex(hash: &[u8; 32]) -> String {
 /// open pickers offer, including the Revit family extensions the RVT adapter
 /// refuses by name); the second is the shipped non-drawing document types.
 const DOCUMENT_EXTENSIONS: &[&str] = &[
-    ".dwg", ".dxf", ".obj", ".stl", ".ply", ".off", ".coff", ".step", ".stp", ".ifc", ".rvt",
-    ".rte", ".rfa", ".rft", ".skp", ".json", ".sat", ".sab", ".shx", ".ttf",
+    ".dwg", ".dxf", ".dgn", ".obj", ".stl", ".ply", ".off", ".coff", ".step", ".stp", ".ifc",
+    ".rvt", ".rte", ".rfa", ".rft", ".skp", ".json", ".sat", ".sab", ".shx", ".ttf",
 ];
 
 /// Replace absolute/relative path-like tokens with `«redacted»`.
