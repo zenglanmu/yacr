@@ -14,6 +14,9 @@
 //! - [`popup`]: the shared modal-popup lifecycle (gate mapping and the
 //!   four-trigger clear contract); popups are in-DOM overlays, so it owns no
 //!   window.
+//! - [`probe_log`]: the single presence-based evidence-log gate
+//!   (`YACR_PROBE_CAD_LOG`) every host uses for its `[probe]` diagnostics, so a
+//!   normal session's stderr stays quiet and evidence runs stay unchanged.
 //! - [`release`]: the release-page shell capability (fixed download URL + the
 //!   platform `ShellReleaseOpener` seam; a carrier without an opener refuses by
 //!   name).
@@ -67,6 +70,13 @@ pub mod plugins;
     target_os = "android"
 ))]
 pub mod popup;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
+pub mod probe_log;
 #[cfg(any(
     target_os = "linux",
     target_os = "windows",

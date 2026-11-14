@@ -41,6 +41,30 @@
 - **NOT VERIFIED**：Windows/macOS/Android 真机、真实 GPU、像素与性能仍未验收；发布、打包、签名、
   上传与落地页部署成功都不是运行时验收。
 
+## 2026-11-14 `[probe] status` 1 Hz 证据行改为默认关闭（共享证据门禁）
+
+- **问题**：正常命令行启动（`run-react-linux.sh --open`）后 stderr 每秒一条
+  `[probe] status backend=… frames=… stages_us[…]`，长时间运行刷成噪声。核对后发现：Linux tick 里
+  `cad-frame`/`actual-render`/`pan-wait`/`gpu-memory`/`cad-stages` **都已**在
+  `YACR_PROBE_CAD_LOG` 门禁下，只有这条 1 Hz 汇总行是无条件输出；Windows/macOS/Android 的同名
+  汇总行同样无条件。
+- **改法（跨载体一份契约）**：`cad-desktop-shell` 新增 `probe_log` 模块
+  （`EVIDENCE_LOG_ENV = "YACR_PROBE_CAD_LOG"`、`evidence_log_enabled()`、纯 `env_flag_present` 与
+  存在性单测 `evidence_log_gate_is_presence_based`，语义与 `YACR_PROBE_ALLOW_CPU_ADAPTER` 一致：
+  只看存在、不看取值）。四个宿主的 1 Hz 汇总行都走该门禁：`app-linux`
+  `host/tick_evidence::log_status_line` 与 `app-android` 同名函数提前返回，`app-windows`/`app-macos`
+  tick 的 `telemetry.last_log` 节流条件前加同一判断。`commands::input_trace_enabled` 改为复用该
+  函数（语义不变，去掉第二处字符串）。
+- **证据运行不变**：`scripts/collect-evidence.sh` 与 `scripts/host-smoke-linux.sh` 本来就
+  `YACR_PROBE_CAD_LOG=1`，`[probe] status`/`[probe] geometry`/`[probe] cad-frame` 照旧输出；
+  `host-smoke-check.py` 只解析 geometry/cad-frame 行，不受影响。要看这条汇总行就显式设
+  `YACR_PROBE_CAD_LOG=1`。UI 侧读的是 `probe_status` 命令，不依赖 stderr。
+- **测试与门禁（本轮实跑）**：`cargo test -p cad-desktop-shell`（49 单测含新 1 + 3 + 6 + 12 + 7 + 4
+  golden，全绿）、`cargo check -p app-linux --all-targets`、
+  `clippy -p cad-desktop-shell -p app-linux --all-targets -D warnings`、`cargo fmt --all --check`、
+  `check-architecture.py`、`check-file-size.py`。**未运行**：全量 workspace 测试、任何 GPU/视觉证据
+  重跑。Windows/macOS/Android 的同构改动**仅代码同形**，未编译、未运行（NOT VERIFIED）。
+
 ## 2026-11-13 ViewCube 改 canvas 3D + 导航栏重排 + `cad_orbit` + 原生 pinch
 
 - **范围**：右缘导航 dock 重设计（收起/展开移到立方体正下方；移动端收起只剩“立方体 + 一个展开图标”

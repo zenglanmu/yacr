@@ -682,7 +682,14 @@ fn flush(shared: &Arc<Mutex<Shared>>) {
 }
 
 /// The ~1 Hz evidence line (`adb logcat -s yacr`).
+///
+/// Default-OFF: emitted only when the shared evidence gate (`YACR_PROBE_CAD_LOG`,
+/// see `cad_desktop_shell::probe_log`) is on, so a normal device run's logcat
+/// stays quiet.
 fn log_status_line(state: &Shared, timings: Option<cad_render_wgpu::ProbeStageTimings>) {
+    if !cad_desktop_shell::probe_log::evidence_log_enabled() {
+        return;
+    }
     let stages = timings
         .map(|timings| {
             format!(

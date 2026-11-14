@@ -90,10 +90,13 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         telemetry.last_frame = Some(now);
         state.shell.ticks += 1;
 
-        // Periodic (~1 Hz) status line for evidence.
-        if telemetry
-            .last_log
-            .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1))
+        // Periodic (~1 Hz) status line for evidence. Default-OFF: gated by the
+        // shared `YACR_PROBE_CAD_LOG` evidence switch, so a normal session's
+        // stderr stays quiet.
+        if cad_desktop_shell::probe_log::evidence_log_enabled()
+            && telemetry
+                .last_log
+                .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1))
         {
             telemetry.last_log = Some(now);
             let stages = telemetry

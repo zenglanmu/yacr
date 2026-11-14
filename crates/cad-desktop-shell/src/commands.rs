@@ -432,7 +432,7 @@ pub fn probe_input(shared: tauri::State<'_, ProbeShared>, input: ProbeInput) -> 
 /// adding a second switch: evidence drivers already set it, and normal sessions
 /// keep their stderr free of one line per pointer move.
 fn input_trace_enabled() -> bool {
-    std::env::var_os("YACR_PROBE_CAD_LOG").is_some()
+    crate::probe_log::evidence_log_enabled()
 }
 
 /// Command body of [`probe_input`], without the Tauri state wrapper.
