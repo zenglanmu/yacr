@@ -1,0 +1,21 @@
+[package]
+name = "cad-import-dgn"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "MicroStation DGN V7/V8 adapter: vector entities into the cad-db document model."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-import-core.workspace = true
+# MIT OR Apache-2.0, pinned exactly in the workspace. Pure Rust, no unsafe and
+# no platform dependency; the writer (and its optional `cfb`) is disabled.
+cadkit-dgn.workspace = true
+cadkit-core.workspace = true
+# `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web-time` uses
+# `Performance.now()` there and re-exports std elsewhere.
+web-time.workspace = true

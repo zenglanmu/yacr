@@ -1,3 +1,55 @@
+## 2026-11-14 Bentley DGN V7/V8 矢量文档导入（`cadkit-dgn`）
+
+- **新增 lane**：`crates/cad-import-dgn`。DGN 与 DWG/DXF 同属**矢量 CAD 文档**，映射 level、
+  linetype、text style、shared cell/Insert、Line/Polyline/Circle/Arc/Ellipse/Spline/Text/Point
+  到 `cad-db`，不是网格预览（ADR-0033 D11，D2 的明确例外）。`DGNIMPORT`/`DGNATTACH`/
+  `DGNCLIP`/`DGNLAYERS`/`DGNADJUST`/`DGNEXPORT` 仍是具名拒绝：打开 `.dgn` 文档 ≠ 合并进当前 DWG。
+- **依赖**：`cadkit-dgn`/`cadkit-core` **`=0.5.2`**（MIT OR Apache-2.0，纯 Rust，`unsafe` 禁止，
+  wasm 可编译）；`default-features = false` 关闭 V8 writer 与可选 `cfb`。未修改上游、无 patch、
+  无 vendoring。crate 很新（2026-10-01 首发、单一维护者），因此精确固定；`docs/dgn.md` 记录
+  上游 5 个 open V8 正确性 issue 与本仓库的显式降级。
+- **检测**：V7 固定魔数 ⇒ `DrawingFormat::Dgn`；V8 是 OLE/CFB，`detect_format` 返回
+  `DrawingFormat::Ole`，`cad_app::import::FormatImporter` 在 `max_file_bytes` 检查之后先调
+  `DgnImporter::sniff`（`Dgn~H` 根存储），命中走 DGN，否则仍走 RVT。不按扩展名猜，不在
+  `cad-import-core` 复制 CFB 解析器。
+- **映射/损失**：layer 只写名称/可见性（cadkit 不解码 level 颜色/线宽/线型，不伪造
+  `LayerAttributes`）；linetype dash pattern 是 **UOR**，按 `dgn.uor_per_master` 缩放到主单位；
+  单位按 `meters_per_unit` 精确匹配 m/mm/in/ft，其余回退 drawing units；text style 解析或新建
+  `Standard`，不留悬空 `StyleId`；shared cell 两遍建 `BlockDefinition`/`BlockMetadata`，
+  缺块 Insert 跳过 + Partial；循环/超深块引用也跳过（不会发出递归 `Insert`）；group 成员扁平化
+  （per-child 样式保留，group 编辑语义不保留）。**明确缺口**：level display/freeze/lock 未解码
+  （全部可见，恒 Partial）；只导入 `Document::model_space()`；references/xrefs、Item Types/
+  XAttributes、dimensions/multiline/mesh/solid/surface 未建模；栅格 `size_px` 已知时写
+  `SemanticGeometry::Image`（u/v 每像素，外部 TIF 不加载），未知时 `Opaque`；tags 不进入
+  `cad-db`；扩展色 >255 回退 `ByLayer`；无 DGN 导出。未知元素/无几何是 `Unsupported`，不是
+  空成功。
+- **测试与门禁（本轮实跑）**：`cargo test -p cad-import-dgn` **22 passed**；`cargo test -p
+  cad-import-core detect` **21 passed（2 filtered）**；`cargo test -p cad-app import::tests`
+  **12 passed（2633 filtered）**；`cargo test -p cad-import-rvt` **33 passed**；`cargo check -p
+  app-web --target wasm32-unknown-unknown --locked` **exit 0**（仅既有 warning）；`cargo fmt
+  --all -- --check` exit 0；`cargo clippy -p cad-import-dgn -p cad-import-core -p cad-app
+  --all-targets --locked -- -D warnings` exit 0；`python3 scripts/check-architecture.py`、
+  `check-file-size.py`（手动核对新 crate 最大 660 行；脚本只统计 tracked 文件）、
+  `test-file-associations.py`、`check-fixture-manifest.py`、`check-i18n.py`、
+  `check-tauri-capabilities.py`、`check-command-docs.py` 全部 exit 0；
+  `cargo test -p app-linux open_chooser_globs_cover_the_importer_set` 1 passed；前端
+  `node --test test/host-adapter.test.ts` 36/36。
+- **真实 GPU 视觉运行（2026-11-14，实跑）**：GNOME/Mutter Wayland 会话内启动嵌套 Weston 14
+  （Wayland backend + GL renderer），`target/debug/yacr --open fixtures/dgn/{smalltest,test_dgnv8}.dgn`
+  以 `GDK_BACKEND=wayland`、`WGPU_BACKEND=vulkan`、NVIDIA ICD + `DRI_PRIME=1` 运行。宿主 probe：
+  `backend=vulkan adapter=Quadro P620 device_type=discrete_gpu present_mode=Mailbox`，窗口
+  1841×983，`frames` 持续增长；`bridge wayland` 走的是 **native-below**，不是 X11 `dom-canvas`。
+  V7 截图显示 `Demo Text`/圆/闭合红色折线/线，V8 截图显示 `myTéxt`/弧/椭圆/线/共享单元成员。
+  证据与命令见 `docs/evidence/dgn-linux-gpu/`（`README.md`、`probe.txt`、两张 PNG）。这是**视觉/
+  present 证据**，不是 golden/像素/性能或 Bentley 兼容性验收；debug 构建 + 嵌套合成器各一条边界。
+- **NOT RUN / NOT VERIFIED**：整仓测试、Android/macOS/Windows/app-linux 全量构建；非 Linux 真机；
+  GNOME 原生合成器下不经嵌套 Weston 的运行；golden/像素/性能；`app-macos` 的 allowed-types 测试在
+  Linux 上是 0 个匹配测试（macOS 目标未运行）。
+- **证据边界**：只有 GDAL MIT/X11 的 V7 `smalltest.dgn` 与 V8 `test_dgnv8.dgn`（**ODA Teigha
+  4.02 写出，不是 MicroStation**）；契约测试证明容器/单位/level/文字/块/插入/group 扁平化/
+  UOR 线型缩放/栅格 u-v/Unknown 诊断与写路径，**不证明** V8i/CONNECT/ORD、真实 MicroStation、
+  level 显示标志、references、Item Types、尺寸/多线/网格/实体、栅格像素或字体度量。
+
 ## 2026-11-13 ViewCube 改 canvas 3D + 导航栏重排 + `cad_orbit` + 原生 pinch
 
 - **范围**：右缘导航 dock 重设计（收起/展开移到立方体正下方；移动端收起只剩“立方体 + 一个展开图标”

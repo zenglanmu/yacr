@@ -252,6 +252,7 @@ cat > "${STAGE}/Yacr.app/Contents/Info.plist" <<EOF
       <array>
         <string>dwg</string>
         <string>dxf</string>
+        <string>dgn</string>
       </array>
     </dict>
     <dict>

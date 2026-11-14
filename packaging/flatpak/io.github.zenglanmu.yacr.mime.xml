@@ -81,4 +81,11 @@
     <glob pattern="*.skp"/>
     <glob pattern="*.SKP"/>
   </mime-type>
+  <mime-type type="application/x-dgn">
+    <comment>DGN CAD drawing (MicroStation)</comment>
+    <glob pattern="*.dgn"/>
+    <glob pattern="*.DGN"/>
+    <alias type="image/vnd.dgn"/>
+    <alias type="application/dgn"/>
+  </mime-type>
 </mime-info>

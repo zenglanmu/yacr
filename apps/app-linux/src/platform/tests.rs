@@ -635,7 +635,7 @@ fn wgpu_backend_preference_reads_the_durable_store() {
 fn open_chooser_globs_cover_the_importer_set() {
     for extension in [
         "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
-        "rfa", "rft", "skp",
+        "rfa", "rft", "skp", "dgn",
     ] {
         assert!(
             OPEN_EXTENSIONS.contains(&extension),

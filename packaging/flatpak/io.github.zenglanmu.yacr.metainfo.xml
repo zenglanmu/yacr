@@ -51,6 +51,9 @@
     <mediatype>application/x-revit-family</mediatype>
     <mediatype>application/x-revit-family-template</mediatype>
     <mediatype>application/vnd.sketchup.skp</mediatype>
+    <mediatype>application/x-dgn</mediatype>
+    <mediatype>image/vnd.dgn</mediatype>
+    <mediatype>application/dgn</mediatype>
   </provides>
   <categories>
     <category>Graphics</category>

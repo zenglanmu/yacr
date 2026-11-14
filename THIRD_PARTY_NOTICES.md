@@ -8,6 +8,15 @@
   `wasm32-unknown-unknown` 可编译。
 - stl_io 0.11.0：ASCII/二进制 STL 读取器，MIT，上游 <https://github.com/hmeyer/stl_io>。
   仅由 `cad-import-stl` 依赖；纯 Rust、无传递依赖。
+- cadkit-dgn / cadkit-core 0.5.2：Bentley DGN V7（ISFF）/ V8（OLE-CFB）的 clean-room
+  读取器与中性 `Document` 模型，**MIT OR Apache-2.0**，上游
+  <https://github.com/TNYCL/cadkit>。仅由 `cad-import-dgn` 依赖；版本在 workspace 中
+  **精确固定**（`=0.5.2`），`cadkit-dgn` 关闭默认 `write` feature（不引入 V8 writer 与可选
+  `cfb`）。读取路径是纯 Rust、无 C 依赖、上游 `unsafe_code = forbid`；**未修改上游源码、
+  无 Cargo patch、无 vendoring**。它是 2026-10 才出现的 0.x crate（单一维护者），因此只按
+  `docs/dgn.md` 声明的边界提供**矢量文档导入**，不宣称 V8i/CONNECT/ORD 或真实 MicroStation
+  兼容；其传递依赖（`flate2`/`miniz_oxide`、`encoding_rs`、`serde`/`serde_json`、
+  `thiserror` 等）的实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
 - cadmpeg-codec-step 0.6.11：ISO 10303-21（STEP，AP203/AP214/AP242）Part 21 解码器，
   Apache-2.0，上游 <https://github.com/cadmpeg/cadmpeg>。仅由 `cad-import-step` 依赖；未修改。
 - cadmpeg-ir 0.6.11：cadmpeg 的中立 CAD IR（拓扑、单位、产品/occurrence、loss 报告与

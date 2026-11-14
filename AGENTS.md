@@ -242,7 +242,8 @@ tag 的 Release）；`web-deploy` 也只在该事件下把 `apps/app-web/dist-ui
 ## 文档索引（按需读）
 
 `docs/architecture.md`（边界/不变量）、`docs/core-invariants.md`、`docs/handoff.md`（逐轮交接，
-最新事实优先）、`docs/compatibility.md`（能力表）、`docs/testing-dwg.md`、`docs/react-linux-app.md`、
+最新事实优先）、`docs/compatibility.md`（能力表）、`docs/dgn.md`（DGN V7/V8 导入边界）、
+`docs/testing-dwg.md`、`docs/react-linux-app.md`、
 `docs/android-host.md`、`docs/windows-app.md`、`docs/macos-app.md`、`docs/xref.md`、`docs/ci.md`
 （部分历史条目已过期，以 workflow 与实际代码为准）、`docs/adr/`（0010、0017–0027）。
 `docs/linux-app.md`、`docs/verify-ui.md` 与旧宿主验证记录是历史材料，不得作为当前证据。

@@ -247,11 +247,14 @@ export const WEB_HOST_COMMANDS: readonly string[] = [WEB_OPEN_COMMAND];
  * geometry, never a measurement source, refusals by name
  * (`import.skp.edge_only_geometry` for an edge-only model).
  *
+ * `.dgn` is the MicroStation drawing lane; the importer sniffs the bytes, so a
+ * file that only claims the extension is refused by the importer, not here.
+ *
  * Used **after** the picker returns, never as an `accept` filter (see
  * [`pickDrawingFile`]).
  */
 export const WEB_OPEN_EXTENSIONS: readonly string[] = Object.freeze([
-  '.dwg', '.dxf', '.obj', '.stl', '.ply', '.off', '.coff',
+  '.dwg', '.dxf', '.dgn', '.obj', '.stl', '.ply', '.off', '.coff',
   '.step', '.stp', '.ifc', '.rvt', '.rte', '.rfa', '.rft', '.skp',
 ]);
 

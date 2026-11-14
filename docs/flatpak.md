@@ -68,14 +68,15 @@
   `model/ply`（`*.ply`，别名 Cura 的历史名 `application/x-ply`）、`model/off`（`*.off`）、
   `application/x-geomview-coff`（`*.coff`）、`application/x-ifc`（`*.ifc`，`sub-class-of text/plain`）、
   四个 Revit 私有类型（`application/x-revit` / `-template` / `-family` / `-family-template`，
-  globs 为 `*.rvt/.rte/.rfa/.rft`）、`application/vnd.sketchup.skp`（`*.skp`）。
+  globs 为 `*.rvt/.rte/.rfa/.rft`）、`application/vnd.sketchup.skp`（`*.skp`）、
+  `application/x-dgn`（`*.dgn`，别名 `image/vnd.dgn` / `application/dgn`）。
 - **`.coff` 绝不能复用 `application/x-coff`**：从 shared-mime-info 2.5 起那是 **Windows 目标代码**
   （globs `*.o`、`*.obj`）。`.coff` 是 Geomview 的彩色 OFF 变体，故用私有名
   `application/x-geomview-coff` 自己定义 glob，不碰系统名。
 - **IFC 没有 magic**：IFC 与 STEP 都以 `ISO-10303-21;` 开头，给 IFC 写这条 magic 会把 `.step`
   文件误判成 IFC；`model/step` 占住该 magic，IFC 只靠 glob 区分。Revit 四个类型同理只有 glob
-  （它们都是 OLE/CFB 容器，magic 分不出项目还是族）；`.skp` 的 UTF-16LE 签名也无法写成紧凑的
-  magic pattern。
+  （它们都是 OLE/CFB 容器，magic 分不出项目还是族）；`.dgn` 的 V8 同样是 OLE/CFB、V7 头又太短，
+  所以只有 glob；`.skp` 的 UTF-16LE 签名也无法写成紧凑的 magic pattern。
 - **关联只让 Yacr 成为候选**：默认应用仍由用户在桌面环境里选择（“打开方式”/默认应用设置），
   Flatpak 安装不会抢占。检查用 `xdg-mime query filetype <file>`（看类型判定）与
   `gio open <file>` / `xdg-mime query default <type>`（看默认项是否指向

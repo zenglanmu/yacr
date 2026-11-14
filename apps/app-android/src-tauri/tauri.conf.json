@@ -133,6 +133,21 @@
         "androidIntentActionFilters": ["view"]
       },
       {
+        "ext": ["dgn"],
+        "mimeType": "application/x-dgn",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["dgn"],
+        "mimeType": "image/vnd.dgn",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["dgn"],
+        "mimeType": "application/dgn",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
         "ext": [
           "dwg",
           "dxf",
@@ -148,7 +163,8 @@
           "rte",
           "rfa",
           "rft",
-          "skp"
+          "skp",
+          "dgn"
         ],
         "mimeType": "application/octet-stream",
         "androidIntentActionFilters": ["view"]
