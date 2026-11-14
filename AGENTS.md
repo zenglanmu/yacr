@@ -26,8 +26,9 @@ ADR 0027。
    版本/revision 或仓库内固定路径，并分别在 `docs/acadrust-patches.md`（ADR-0031）/
    `docs/rvt-patches.md`（ADR-0035）登记；`check-architecture.py` 强制这两份台账。其它任何
    patch 表/键仍拒绝。当前状态：上游 `acadrust` 0.6.8 **未修改**（实验性 DWG 导出用上游
-   `DwgWriter`）；`rvt` 0.17.0 以固定路径 `vendor/rvt` 引入，**只改**
-   `src/ifc/gltf.rs` 的透明度/来源标记（多材质预览体取最透明构件 alpha）——台账外不得再改。
+   `DwgWriter`）；`rvt` 0.22.0 以固定路径 `vendor/rvt` 引入，**只改**
+   `src/ifc/gltf.rs` 的透明度选择（多材质预览体取最透明构件 alpha；`extras` 来源标记由上游
+   0.22.0 提供）——台账外不得再改。
 2. 未支持/未验证能力必须显式建模（`Unsupported`/`Partial`/诊断/`pending(...)`）；占位与假数据
    不计完成，**禁止**把失败改成空成功。
 3. 业务层只操作数据库/命令/事务；GPU 提交封装在渲染器内。`cad-db` 是唯一权威，UI 与渲染均为派生。
@@ -55,8 +56,8 @@ ADR 0027。
 
 唯一依赖：`cad-render-wgpu` → wgpu；`cad-import-acadrust` → acadrust（0.6.8，当前未修改；如需补丁
 只允许 acadrust 且必须在 `docs/acadrust-patches.md` 登记，见 ADR-0031）；
-`cad-import-rvt` → rvt（0.17.0，`vendor/rvt` 固定路径补丁：只改 `src/ifc/gltf.rs` 的透明度/
-来源标记，见 ADR-0035 与 `docs/rvt-patches.md`）。
+`cad-import-rvt` → rvt（0.22.0，`vendor/rvt` 固定路径补丁：只改 `src/ifc/gltf.rs` 的透明度
+选择，见 ADR-0035 与 `docs/rvt-patches.md`）。
 架构规则：`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层（脚本强制的是 iced 全局禁用
 与逐 crate 的 ban 列表，不正向断言 tauri 唯一性——不要因此绕过该规则）。平台类型
 （`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`；根 `[patch.crates-io]` 只允许

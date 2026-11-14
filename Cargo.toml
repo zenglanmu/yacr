@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-# `vendor/rvt` is a path-patched copy of the pinned `rvt` 0.17.0 (ADR-0035,
+# `vendor/rvt` is a path-patched copy of the pinned `rvt` 0.22.0 (ADR-0035,
 # `docs/rvt-patches.md`). Cargo makes a path dependency inside the workspace
 # directory a member unless it is excluded; keeping it out of the workspace
 # keeps the upstream crate's own tests, formatting and 1000-line rule out of
@@ -49,7 +49,7 @@ members = [
 version = "0.1.13"
 edition = "2021"
 # True MSRV floor, not a preference: `cadmpeg-ir`/`cadmpeg-codec-step`/
-# `cadmpeg-tessellate` 0.6.11 declare `rust-version = "1.88"` and `rvt` 0.17.0
+# `cadmpeg-tessellate` 0.6.11 declare `rust-version = "1.88"` and `rvt` 0.22.0
 # declares `1.87`, so no lower workspace claim can be honest. Every crate takes
 # this single value via `rust-version.workspace = true`; do not re-declare it per
 # crate. The pinned toolchain (`rust-toolchain.toml`, 1.99.1) is unrelated.
@@ -163,7 +163,7 @@ ifc-lite-geometry = "=28.2.0"
 # glTF is only its internal hand-off format (the crate has no gltf dependency);
 # `gltf` reads that single-buffer GLB. `default-features = false` drops the
 # `image` importer, which this lane never needs, and keeps `utils`/`names`.
-rvt = "=0.17.0"
+rvt = "=0.22.0"
 gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names", "extras"] }
 
 # SketchUp `.skp` reader (`cad-import-skp`). **GPL-3.0-only**, pure Rust with a
@@ -256,7 +256,7 @@ debug = 1
 # Only these two dependencies may be path-patched, each with a tracked ledger
 # row (ADR-0031 for `acadrust`, ADR-0035 for `rvt`); `scripts/check-architecture.py`
 # fails closed on any other key. `vendor/rvt` is a fixed copy of the pinned
-# 0.17.0 source with `src/ifc/gltf.rs` patched (see `docs/rvt-patches.md`);
-# the workspace dependency above still pins `=0.17.0`.
+# 0.22.0 source with `src/ifc/gltf.rs` patched (see `docs/rvt-patches.md`);
+# the workspace dependency above still pins `=0.22.0`.
 [patch.crates-io]
 rvt = { path = "vendor/rvt" }

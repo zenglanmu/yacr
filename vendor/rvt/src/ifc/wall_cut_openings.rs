@@ -25,7 +25,8 @@
 //!
 //! Every step that is not written is counted with its reason.
 
-use super::entities::{IfcEntity, OpeningCut, ProfileDef, PropertySet, PropertyValue};
+use super::entities::{IfcEntity, OpeningCut, ProfileDef, Property, PropertySet, PropertyValue};
+use super::export_content::CUTTER_OPENING_PROPERTY_PREFIX;
 use crate::RevitFile;
 use crate::native_wall_cuts::{self, WallCutKind};
 use std::collections::{BTreeMap, BTreeSet};
@@ -293,6 +294,10 @@ struct Cut {
     up: [f64; 2],
     recess: bool,
     reference_from: usize,
+    /// Whether `Width` is written beside `Height` and `Depth`: the opening a
+    /// door cuts in a second wall takes the two only, since Revit's `Width`
+    /// there is the thickness of the wall the door stands in and this
+    /// outline is not always that to the scorer's tolerance (#1165).
     quantities: bool,
 }
 
@@ -454,11 +459,15 @@ fn door_cut(host: &Host, world: &[f64; 6], door: usize) -> Result<Cut, &'static 
 /// Write each opening the native records of the walls in `entities` name
 /// that Revit's export writes with nothing to fill it (RE-321). A wall,
 /// cutter or box that is not read, or is not as the rules above need it, is
-/// left out and counted by its reason in the result.
+/// left out and counted by its reason in the result. `handoffs` are the
+/// properties the cutters' parameters name in an opening's set (RE-386), each
+/// cutter's given to the openings it cuts as an
+/// [`IfcEntity::CutterOpeningSet`].
 pub(super) fn attach_wall_cut_openings(
     rf: &mut RevitFile,
     entities: &mut Vec<IfcEntity>,
     door_cuts: &BTreeMap<usize, OpeningCut>,
+    handoffs: &BTreeMap<usize, Vec<Property>>,
 ) -> BTreeMap<String, usize> {
     let mut left_out: BTreeMap<String, usize> = BTreeMap::new();
     let mut hosts: BTreeMap<u64, Host> = BTreeMap::new();
@@ -509,9 +518,13 @@ pub(super) fn attach_wall_cut_openings(
     if hosts.is_empty() {
         return left_out;
     }
-    let Ok(steps) = native_wall_cuts::wall_cut_steps(rf, &walls) else {
+    let Ok(mut steps) = native_wall_cuts::wall_cut_steps(rf, &walls) else {
         return left_out;
     };
+    // #1165: a shadow cutout step stands for the cut of the other wall it
+    // names; it is read as that kind of step, with its own flag, so its wall's
+    // opening is written by the same rule as any other wall the cutter reaches.
+    native_wall_cuts::resolve_shadow_steps(&mut steps);
     let mut framed: BTreeSet<u64> = BTreeSet::new();
     let mut rects: BTreeSet<u64> = BTreeSet::new();
     let mut placed: BTreeSet<u64> = BTreeSet::new();
@@ -714,6 +727,42 @@ pub(super) fn attach_wall_cut_openings(
             });
         }
     }
+    // RE-386: Revit's export gives each opening the properties of its
+    // cutter's own sets (revit-ifc's `OpeningUtil.CreateOpening`, CLEANROOM.md
+    // source 5), so a door's `FireExit` is also its second-wall openings'.
+    let cutters: BTreeSet<usize> = openings
+        .iter()
+        .filter_map(|opening| match opening {
+            IfcEntity::WallCutOpening { reference_from, .. } => Some(*reference_from),
+            _ => None,
+        })
+        .collect();
+    let cutter_sets: Vec<IfcEntity> = cutters
+        .into_iter()
+        .filter_map(|cutter| {
+            let properties: Vec<Property> = handoffs
+                .get(&cutter)?
+                .iter()
+                .filter_map(|held| {
+                    Some(Property {
+                        name: held
+                            .name
+                            .strip_prefix(CUTTER_OPENING_PROPERTY_PREFIX)?
+                            .to_string(),
+                        value: held.value.clone(),
+                    })
+                })
+                .collect();
+            (!properties.is_empty()).then(|| IfcEntity::CutterOpeningSet {
+                element: cutter,
+                set: PropertySet {
+                    name: "Pset_OpeningElementCommon".into(),
+                    properties,
+                },
+            })
+        })
+        .collect();
     entities.extend(openings);
+    entities.extend(cutter_sets);
     left_out
 }

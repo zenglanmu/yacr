@@ -54,7 +54,8 @@ impl From<CliExportQualityMode> for ExportQualityMode {
         history record, so two exports of the same file are the same bytes.\n\n\
         Exit status 3: a resource limit kept part of the file from being read, so\n\
         no IFC was written (the diagnostics sidecar, if asked for, lists the\n\
-        streams). Re-run with --large-model, or --allow-partial to write it anyway."
+        streams). Re-run with --large-model, or --allow-partial to write it anyway.\n\
+        A reader that stopped at its work budget is a warning: the IFC is written."
 )]
 struct Args {
     /// Path to a `.rvt` / `.rfa` / `.rte` / `.rft` file.
@@ -85,15 +86,17 @@ struct Args {
     diagnostic_proxies: bool,
     /// Draw every element whose body would be its record's bounding box
     /// (furniture, fixtures, equipment and the rest) from the mesh Revit
-    /// saved for display (#255). Doors and windows are drawn so by default
-    /// on Revit 2023 to 2027, and so are the walls that embed a curtain wall
-    /// where Revit raised their base, on Revit 2024 to 2027 (RE-340). Slower
-    /// on large files.
+    /// saved for display (#255), on any release. This is the default on Revit
+    /// 2023 to 2027, so the switch changes only Revit 2015 to 2022 files
+    /// (RE-342). The walls that embed a curtain wall are drawn so on Revit
+    /// 2024 to 2027 where Revit raised their base (RE-340).
     #[arg(long, conflicts_with_all = ["placeholder", "no_saved_meshes"])]
     saved_meshes: bool,
-    /// Keep doors and windows as their record's bounding box, and the walls
-    /// that embed a curtain wall as their record's body, instead of the mesh
-    /// Revit saved for them.
+    /// Keep every element as its record's bounding box, and the walls that
+    /// embed a curtain wall as their record's body, instead of the mesh Revit
+    /// saved for them. Reading every box's saved graphics takes 1.04 to 1.92 times
+    /// the time and 1.04 to 1.69 times the peak memory of 0.17.0 on Autodesk's
+    /// samples of Revit 2023 to 2027 (#1191, #1694).
     #[arg(long, conflicts_with = "placeholder")]
     no_saved_meshes: bool,
     /// Draw a family instance from its family's own extrusions (the sketch
@@ -255,6 +258,19 @@ fn main() -> std::process::ExitCode {
 
 fn run(args: Args) -> anyhow::Result<()> {
     let timestamp = source_date_epoch()?;
+    let out_path = args.output.clone().unwrap_or_else(|| {
+        let mut p = args.input.clone();
+        p.set_extension("ifc");
+        p
+    });
+    // Before the export, which can take minutes: the IFC would replace the file
+    // it was read from.
+    if rvt::cli::same_file(&out_path, &args.input) {
+        anyhow::bail!(
+            "refusing to overwrite the input {}; pass -o <path>",
+            args.input.display()
+        );
+    }
     let mut rf = RevitFile::open_with_limits(
         &args.input,
         rvt::cli::open_limits(
@@ -280,19 +296,27 @@ fn run(args: Args) -> anyhow::Result<()> {
         }
     }
 
-    let out_path = args.output.clone().unwrap_or_else(|| {
-        let mut p = args.input.clone();
-        p.set_extension("ifc");
-        p
-    });
-
-    if !run.unread.is_empty() {
+    // A reader that stopped at its work budget leaves out what it would have
+    // read, and the export is still written, with this warning (Griffin,
+    // 2026-11-12, "Write it, with a warning").
+    if let Some(stops) = diagnostics.work_budget_stops() {
         eprintln!(
-            "rvt-ifc: {} stream(s) not read whole, so the export is missing what they hold:",
-            run.unread.len()
+            "rvt-ifc: warning: {} reader(s) stopped at a work budget, so the export leaves out what they would have read:",
+            stops.len()
         );
-        for line in rvt::cli::unread_stream_report(&run.unread) {
+        for line in rvt::cli::work_budget_report(stops) {
             eprintln!("{line}");
+        }
+    }
+    if diagnostics.is_partial() {
+        if !run.unread.is_empty() {
+            eprintln!(
+                "rvt-ifc: {} stream(s) not read whole, so the export is missing what they hold:",
+                run.unread.len()
+            );
+            for line in rvt::cli::unread_stream_report(&run.unread) {
+                eprintln!("{line}");
+            }
         }
         if !args.allow_partial {
             if let Some(diagnostics_path) = &args.diagnostics {
@@ -328,7 +352,7 @@ fn run(args: Args) -> anyhow::Result<()> {
             write_step_to(&model, &options, &mut bytes)?;
         }
         let step = String::from_utf8(bytes)?;
-        std::fs::write(&out_path, step.as_bytes())?;
+        write_whole(&out_path, step.as_bytes())?;
         let written = step.len() as u64;
         observed_step = Some(step);
         written
@@ -386,8 +410,8 @@ fn run(args: Args) -> anyhow::Result<()> {
 
 /// The switches that change the model: the document exporter by default,
 /// `--placeholder` or `--diagnostic-proxies` for the others; the saved-graphics
-/// bodies are every boxed one with `--saved-meshes`, none with
-/// `--no-saved-meshes`, and otherwise doors and windows on Revit 2023 to 2027
+/// bodies are every boxed one on any release with `--saved-meshes`, none with
+/// `--no-saved-meshes`, and otherwise every boxed one on Revit 2023 to 2027
 /// and the walls that embed a curtain wall where Revit raised their base on
 /// Revit 2024 to 2027 (RE-340).
 fn export_options(args: &Args) -> ExportOptions {
@@ -1107,10 +1131,25 @@ fn warn_about_export_quality(diagnostics: &ExportDiagnostics) {
     let unexported = diagnostics.confidence.unexported_element_records;
     if unexported > 0 {
         eprintln!(
-            "warning: the IFC is incomplete: {unexported} model element record(s) \
-             use a layout whose ElementId this release cannot locate and were not exported (RE-30)."
+            "warning: {unexported} element record(s) belong to ElementIds the file's element table \
+             does not declare and were not exported (RE-30, RE-35). On the one model compared with \
+             Revit's export of the same save, such records were elements deleted since the file's \
+             last Save As (#1838); if nothing was deleted, the IFC is likely incomplete."
         );
     }
+}
+
+/// `bytes` written beside `path` and renamed when whole, so a failed or killed
+/// run never leaves a truncated file under `path`.
+fn write_whole(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut partial = path.as_os_str().to_owned();
+    partial.push(".partial");
+    let partial = PathBuf::from(partial);
+    let result = std::fs::write(&partial, bytes).and_then(|()| std::fs::rename(&partial, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    result
 }
 
 /// `bytes` as lowercase hex, two digits a byte.

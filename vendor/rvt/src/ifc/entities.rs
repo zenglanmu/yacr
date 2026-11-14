@@ -296,7 +296,8 @@ pub enum IfcEntity {
     /// `OpeningUtil`). Its `Pset_OpeningElementCommon.Reference` is the type
     /// name of the entity at `reference_from`; `recess` says it does not pass
     /// through the wall; `quantities` says its `Qto_OpeningElementBaseQuantities`
-    /// are written.
+    /// holds `Width` too, `Height` and `Depth` being written on every one of
+    /// them.
     WallCutOpening {
         host: usize,
         number: u32,
@@ -311,6 +312,34 @@ pub enum IfcEntity {
         recess: bool,
         quantities: bool,
     },
+    /// A pocket of the edited elevation profile of the wall at `host` against
+    /// the profile's convex hull: the opening Revit's export writes for it
+    /// (#1607, RE-380), tagged with the highest ElementId of the profile's
+    /// lines it follows. Placed as a [`IfcEntity::WallProfileOpening`] is. It
+    /// is not written as it stands: the pass that makes the profile's cut in the
+    /// wall's body turns it into a [`IfcEntity::WallProfileOpening`] once it
+    /// has, so that the openings a wall carries are Revit's.
+    // Tracker: B55.
+    WallProfilePocket {
+        host: usize,
+        tag: String,
+        name: String,
+        outline_feet: Vec<(f64, f64)>,
+        axis_turn_radians: f64,
+        plane_offset_feet: f64,
+        thickness_feet: f64,
+    },
+    /// The properties of `set`, a set IFC4 gives an `IfcOpeningElement`
+    /// (`Pset_OpeningElementCommon`), that the parameters of the building
+    /// element at `element` (an index into `IfcModel::entities`) name: a
+    /// door's `FireExit`. Revit's export gives each opening an element cuts
+    /// in a wall besides the one it fills the properties of its cutter's own
+    /// sets, as revit-ifc's `OpeningUtil.CreateOpening` hands the cutter to
+    /// the opening's property sets (CLEANROOM.md source 5; RE-386). The writer
+    /// adds these to the set of the same name of each
+    /// [`IfcEntity::WallCutOpening`] whose `reference_from` is `element`, and
+    /// writes them nowhere else.
+    CutterOpeningSet { element: usize, set: PropertySet },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -541,6 +570,19 @@ pub enum SolidShape {
         axis_direction: [f64; 3],
         /// Sweep angle in radians. 2π = full rotation (dome /
         /// turned column / sphere-of-revolution).
+        angle_radians: f64,
+    },
+    /// An analytic revolution of a radial/axial profile in its own frame.
+    /// Profile X is radius, profile Y is distance along `axis_direction`.
+    /// IFC places that XY plane at `origin_feet`, with X along
+    /// `radial_direction`, and revolves about local +Y. A nonzero starting
+    /// angle is represented by rotating `radial_direction` before construction.
+    PlacedRevolvedArea {
+        profile: ProfileDef,
+        origin_feet: [f64; 3],
+        axis_direction: [f64; 3],
+        radial_direction: [f64; 3],
+        /// Positive sweep, at most one full turn, in radians.
         angle_radians: f64,
     },
     /// CSG combination of two nested solids. Emits
@@ -1009,6 +1051,8 @@ pub enum ForgeUnit {
     Kilometers,
     Inches,
     Feet,
+    /// US survey feet: 1200/3937 m.
+    UsSurveyFeet,
     Yards,
     Miles,
 
@@ -1040,9 +1084,14 @@ pub enum ForgeUnit {
     // ---- Mass ----
     Kilograms,
     Grams,
+    /// Metric tonnes.
+    Tonnes,
     Pounds,
+    /// US (short) tons.
+    UsTons,
 
     // ---- Time ----
+    Milliseconds,
     Seconds,
     Minutes,
     Hours,
@@ -1151,10 +1200,15 @@ impl ForgeUnit {
             "millimeters" | "mm" => ForgeUnit::Millimeters,
             "centimeters" | "cm" => ForgeUnit::Centimeters,
             "decimeters" | "dm" => ForgeUnit::Decimeters,
-            "meters" | "m" => ForgeUnit::Meters,
+            // Revit's metres-and-centimetres format shows metres.
+            "meters" | "m" | "meterscentimeters" => ForgeUnit::Meters,
             "kilometers" | "km" => ForgeUnit::Kilometers,
-            "inches" | "in" => ForgeUnit::Inches,
-            "feet" | "ft" | "fractionalinches" | "feetandfractionalinches" => ForgeUnit::Feet,
+            // Fractional inches are inches; feet and fractional inches
+            // (`feetFractionalInches`, Revit's default imperial length)
+            // are feet.
+            "inches" | "in" | "fractionalinches" => ForgeUnit::Inches,
+            "feet" | "ft" | "feetfractionalinches" | "feetandfractionalinches" => ForgeUnit::Feet,
+            "ussurveyfeet" => ForgeUnit::UsSurveyFeet,
             "yards" | "yd" => ForgeUnit::Yards,
             "miles" | "mi" => ForgeUnit::Miles,
             "squaremillimeters" => ForgeUnit::SquareMillimeters,
@@ -1174,11 +1228,15 @@ impl ForgeUnit {
             "liters" | "litres" => ForgeUnit::Liters,
             "usgallons" | "gallons" => ForgeUnit::UsGallons,
             "radians" | "rad" => ForgeUnit::Radians,
-            "degrees" | "deg" => ForgeUnit::Degrees,
+            // Degrees, minutes and seconds are a format of degrees.
+            "degrees" | "deg" | "degreesminutes" => ForgeUnit::Degrees,
             "grads" | "gradians" => ForgeUnit::Grads,
             "kilograms" | "kg" => ForgeUnit::Kilograms,
             "grams" | "g" => ForgeUnit::Grams,
+            "tonnes" => ForgeUnit::Tonnes,
+            "ustonnesmass" => ForgeUnit::UsTons,
             "pounds" | "lb" | "lbs" | "poundsmass" => ForgeUnit::Pounds,
+            "milliseconds" | "ms" => ForgeUnit::Milliseconds,
             "seconds" | "s" => ForgeUnit::Seconds,
             "minutes" | "min" => ForgeUnit::Minutes,
             "hours" | "hr" | "h" => ForgeUnit::Hours,
@@ -1230,6 +1288,12 @@ impl ForgeUnit {
                 unit_type: Length,
                 derived_name: "FOOT",
                 factor_to_si: 0.3048,
+                si_base_name: "METRE",
+            }),
+            ForgeUnit::UsSurveyFeet => Some(IfcUnitEmission::ConversionBased {
+                unit_type: Length,
+                derived_name: "US SURVEY FOOT",
+                factor_to_si: 1200.0 / 3937.0,
                 si_base_name: "METRE",
             }),
             ForgeUnit::Yards => Some(IfcUnitEmission::ConversionBased {
@@ -1355,23 +1419,41 @@ impl ForgeUnit {
                 si_base_name: "RADIAN",
             }),
             // Mass
+            // IFC's SI mass unit is the gram, with a prefix: a kilogram is
+            // KILO GRAM, as the IFC's own unit assignment writes it.
             ForgeUnit::Kilograms => Some(IfcUnitEmission::Si {
                 unit_type: Mass,
-                prefix: None,
+                prefix: Some("KILO"),
                 name: "GRAM",
             }),
             ForgeUnit::Grams => Some(IfcUnitEmission::Si {
                 unit_type: Mass,
-                prefix: Some("MILLI"),
+                prefix: None,
+                name: "GRAM",
+            }),
+            ForgeUnit::Tonnes => Some(IfcUnitEmission::Si {
+                unit_type: Mass,
+                prefix: Some("MEGA"),
                 name: "GRAM",
             }),
             ForgeUnit::Pounds => Some(IfcUnitEmission::ConversionBased {
                 unit_type: Mass,
                 derived_name: "POUND",
-                factor_to_si: 0.453_592_37,
+                factor_to_si: 453.592_37,
+                si_base_name: "GRAM",
+            }),
+            ForgeUnit::UsTons => Some(IfcUnitEmission::ConversionBased {
+                unit_type: Mass,
+                derived_name: "SHORT TON",
+                factor_to_si: 907_184.74,
                 si_base_name: "GRAM",
             }),
             // Time
+            ForgeUnit::Milliseconds => Some(IfcUnitEmission::Si {
+                unit_type: Time,
+                prefix: Some("MILLI"),
+                name: "SECOND",
+            }),
             ForgeUnit::Seconds => Some(IfcUnitEmission::Si {
                 unit_type: Time,
                 prefix: None,

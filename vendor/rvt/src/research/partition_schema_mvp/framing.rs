@@ -266,6 +266,19 @@ pub fn beam_axis_from_fields(fields: &[(String, InstanceField)]) -> Option<([f64
     Some((point(BEAM_AXIS_START_FIELDS)?, point(BEAM_AXIS_END_FIELDS)?))
 }
 
+/// The two ends of a beam's location line for its properties
+/// ([`BEAM_LINE_START_FIELDS`], #1697), when the partition MVP gave it one.
+pub fn beam_line_from_fields(fields: &[(String, InstanceField)]) -> Option<([f64; 3], [f64; 3])> {
+    let field = |wanted: &str| {
+        fields.iter().find_map(|(name, value)| match value {
+            InstanceField::Float { value, .. } if name == wanted => Some(*value),
+            _ => None,
+        })
+    };
+    let point = |names: [&str; 3]| Some([field(names[0])?, field(names[1])?, field(names[2])?]);
+    Some((point(BEAM_LINE_START_FIELDS)?, point(BEAM_LINE_END_FIELDS)?))
+}
+
 /// Whether a beam's Cross-Section Rotation ([`BEAM_ROTATION_FIELD`], RE-276)
 /// was read and is exactly 0. A beam whose rotation is unread is not
 /// unrotated.
@@ -324,7 +337,29 @@ pub(super) fn attach_beam_axes(
         };
         let (start, end) = (line.start(), line.end());
         let unrotated = beam_unrotated(&element.fields);
-        let resolves = element_record_bbox(element).is_some_and(|bbox| {
+        let bbox = element_record_bbox(element);
+        // #1697: the line gives the beam's `Length`, `Span`, `Slope` and `Roll`
+        // in Revit's export whether or not a solid along it is drawn (291 of 291
+        // beams with a line in the BIM4LCA office and housing), so a line that
+        // lies inside the record box is kept for them apart from the body's.
+        let inside = bbox.is_some_and(|bbox| {
+            [start, end].iter().all(|p| {
+                (0..3).all(|axis| {
+                    p[axis] >= bbox[axis] - pba::END_TOLERANCE_FEET
+                        && p[axis] <= bbox[axis + 3] + pba::END_TOLERANCE_FEET
+                })
+            })
+        });
+        if inside {
+            for (names, point) in [(BEAM_LINE_START_FIELDS, start), (BEAM_LINE_END_FIELDS, end)] {
+                for (name, value) in names.iter().zip(point) {
+                    element
+                        .fields
+                        .push(((*name).into(), InstanceField::Float { value, size: 8 }));
+                }
+            }
+        }
+        let resolves = bbox.is_some_and(|bbox| {
             pba::beam_body(bbox, start, end).is_some()
                 || (unrotated && pba::beam_body_in_box(bbox, start, end).is_some())
         });
@@ -348,10 +383,14 @@ pub(super) fn attach_beam_axes(
 /// parameter (CLEANROOM.md source 5). A beam whose copies disagree, or whose
 /// record is not read, gets none, nor does one a column cuts (RE-122), which
 /// is not drawn along a line.
+///
+/// The same pass gives every framing element its structural usage in
+/// [`STRUCT_USAGE_FIELD`] (#1841), the `m_structUsage` of its record's root: a
+/// usage whose copies disagree, or whose record is not read, is not given.
 pub(super) fn attach_beam_rotations(rf: &mut RevitFile, products: &mut [DecodedElement]) {
     let beams: BTreeSet<u64> = products
         .iter()
-        .filter(|element| element.class == "StructuralFraming" && !beam_column_cut(element))
+        .filter(|element| element.class == "StructuralFraming")
         .filter_map(|element| element.id)
         .map(u64::from)
         .collect();
@@ -364,6 +403,7 @@ pub(super) fn attach_beam_rotations(rf: &mut RevitFile, products: &mut [DecodedE
         ..Default::default()
     };
     let mut rotations: BTreeMap<u64, Option<f64>> = BTreeMap::new();
+    let mut usages: BTreeMap<u64, Option<u64>> = BTreeMap::new();
     let read = crate::native_document::extract_graphs(rf, &options, |record| {
         let Some(graph) = record.graph.as_ref() else {
             return Ok(());
@@ -373,9 +413,15 @@ pub(super) fn attach_beam_rotations(rf: &mut RevitFile, products: &mut [DecodedE
             .iter()
             .filter(|object| object.class_name == "FamInstCurveDriver")
             .find_map(|object| object.fields.get("m_rotation"))
-            .and_then(serde_json::Value::as_f64)
+            .and_then(crate::graph_value::Fv::as_f64)
             .filter(|rotation| rotation.is_finite());
+        let usage = graph
+            .objects
+            .first()
+            .and_then(|root| root.fields.get("m_structUsage"))
+            .and_then(crate::graph_value::Fv::as_u64);
         crate::native_json::agree(&mut rotations, record.identity.element_id, rotation);
+        crate::native_json::agree(&mut usages, record.identity.element_id, usage);
         Ok(())
     });
     if read.is_err() {
@@ -385,10 +431,28 @@ pub(super) fn attach_beam_rotations(rf: &mut RevitFile, products: &mut [DecodedE
         .iter_mut()
         .filter(|element| element.class == "StructuralFraming")
     {
-        let Some(Some(value)) = element
-            .id
-            .and_then(|id| rotations.get(&u64::from(id)).copied())
-        else {
+        let Some(id) = element.id.map(u64::from) else {
+            continue;
+        };
+        let usage = usages
+            .get(&id)
+            .copied()
+            .flatten()
+            .and_then(|value| i64::try_from(value).ok());
+        if let Some(value) = usage {
+            element.fields.push((
+                STRUCT_USAGE_FIELD.into(),
+                InstanceField::Integer {
+                    value,
+                    signed: false,
+                    size: 4,
+                },
+            ));
+        }
+        if beam_column_cut(element) {
+            continue;
+        }
+        let Some(Some(value)) = rotations.get(&id).copied() else {
             continue;
         };
         element.fields.push((

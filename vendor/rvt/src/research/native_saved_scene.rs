@@ -10,6 +10,103 @@ use anyhow::{Result, ensure};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
+/// The fields of a graphics record's objects that meshing reads, which are the
+/// only ones this pass builds ([`Options::graph_fields`], #1694). The dhat run
+/// of the pass on Autodesk's samples of Revit 2023 put 77% to 87% of its peak in
+/// the decoded nodes, each a map entry with its own key, and the readers below
+/// take a small part of what a graph holds. The names are the `m_` string
+/// literals of every module that reads a graph object on the way from a record
+/// to a mesh (`native_saved_mesh`, `native_graphics_traversal`,
+/// `native_parametric_mesh`, `native_parametric_surface`, `native_empty_faces`,
+/// `partition_instance_transforms` and this one), keys inside a field's value
+/// included, and `m_id`. A decode that keeps a field reads it, and checks it, as
+/// the full decode does, so a graph that is refused is refused for the same
+/// reason; what is left out reads as absent. A reader added to those modules
+/// that takes another field of these graphs must add its name here: CI fails
+/// when the names differ (`tools/ci/saved-graphics-fields.py` holds the `m_`
+/// literals of the seven modules against this list), and Measure's
+/// `ifc.sha256` of the 126 exports moves when it does not, on the routes an
+/// export reads. One reader depends on how many fields an object holds and not
+/// on a name, which that check cannot see: `default_representation` in
+/// `native_graphics_traversal` reads a pre-2023 `InstanceInfo` with no
+/// `m_GRepId` as the default representation only if it holds exactly `m_Trf`,
+/// `m_symbolId` and `m_cda`, so a fourth field a build declares outside this
+/// list would change its reading (RE-342; the 30 sample projects of 2015 to
+/// 2022 declare exactly those three, and no export reads that route).
+pub const SAVED_GRAPHICS_FIELDS: &[&str] = &[
+    "m_3x3",
+    "m_Envelope",
+    "m_GInfo",
+    "m_GRepId",
+    "m_Point1",
+    "m_Point2",
+    "m_Trf",
+    "m_bHasScale",
+    "m_bIsNestedDetailFamily",
+    "m_cda",
+    "m_center",
+    "m_comp",
+    "m_corners",
+    "m_dir",
+    "m_dirVec",
+    "m_elementId",
+    "m_endParams",
+    "m_faceFlags_v9",
+    "m_faceRegions",
+    "m_facetsArr",
+    "m_firstAndLastEdgePnts",
+    "m_flags",
+    "m_forbiddenTarget",
+    "m_halfAngle",
+    "m_id",
+    "m_instanceInfo",
+    "m_interiorEdgePnts",
+    "m_interiorGStyleID",
+    "m_materialID",
+    "m_negateDirCondition",
+    "m_next",
+    "m_nextLoop",
+    "m_normalsArr",
+    "m_normalsFlag",
+    "m_oBackgroundFilling",
+    "m_oConditions",
+    "m_oEmbeddedSymbolGRep",
+    "m_open",
+    "m_or",
+    "m_orientFlag",
+    "m_origin",
+    "m_other",
+    "m_pDoc",
+    "m_pFace",
+    "m_pFaces",
+    "m_pFacetedTopology",
+    "m_pFirstLoop",
+    "m_pGFilling",
+    "m_pProfileCurve",
+    "m_pProfileCurve1",
+    "m_pProfileCurve2",
+    "m_pSurf",
+    "m_param",
+    "m_pointsArr",
+    "m_prev",
+    "m_radius",
+    "m_renderStyleId",
+    "m_resolveSymInView",
+    "m_subNodes",
+    "m_symbolId",
+    "m_tag",
+    "m_targets",
+    "m_value",
+    "m_xLen",
+    "m_xVec",
+    "m_yLen",
+    "m_yVec",
+    "m_zVec",
+];
+/// [`SAVED_GRAPHICS_FIELDS`] for a record of any class.
+fn saved_graphics_fields(_class: &str) -> Option<&'static [&'static str]> {
+    Some(SAVED_GRAPHICS_FIELDS)
+}
 #[derive(Debug, Serialize)]
 pub struct SavedElement {
     pub id: u64,
@@ -247,6 +344,7 @@ fn extract_impl(
     opts.channels = BTreeSet::from([103]);
     // Each element's `source` below carries its record's body digest.
     opts.record_extras = true;
+    opts.graph_fields = Some(saved_graphics_fields);
     let mut records = BTreeMap::<u64, Record>::new();
     let first = native_document::extract_graphs(file, &opts, |r| {
         ensure!(
@@ -323,19 +421,78 @@ fn extract_impl(
         elements,
     })
 }
-/// The decoded graph objects one batch of [`extract_in_batches_with_control`]
-/// may hold, about 95 MiB on the BIM4LCA office (4.8 KiB an object), which
-/// reads its 105 symbols in about eight passes.
-const BATCH_OBJECT_BUDGET: usize = 20_000;
-/// The shared symbols of the first batch; the next ones are sized from the
-/// graph objects the one before decoded for each.
-const FIRST_BATCH_SYMBOLS: usize = 8;
-const MIN_BATCH_SYMBOLS: usize = 4;
-const MAX_BATCH_SYMBOLS: usize = 1024;
+/// The bytes of record body one batch of [`extract_in_batches_with_control`]
+/// may read from the shared symbols its owners name: the 20,000 decoded graph
+/// objects, about 95 MiB on the BIM4LCA office (4.8 KiB an object), that a body
+/// of 80 to 160 bytes an object comes to (#1694). A symbol's bytes are known
+/// before it is decoded and its objects are not, and the symbols sort by id
+/// with the largest last: a batch sized from the one before it, in symbols, held
+/// 3 to 7 times those objects on Autodesk's samples of Revit 2023 and 2024.
+const BATCH_BODY_BUDGET: usize = 2_000_000;
+/// The graph objects of the owners that name nothing that are held at once
+/// while they are meshed: the buffer is meshed and let go when it holds this
+/// many, about 24 MiB at 4.8 KiB an object. At 20,000 (about 95 MiB) it was the
+/// pass's peak on Core Interior, whose walls fill it: 5,000 took 82 MiB off that
+/// file's export and 44 to 46 off the BIM4LCA office's, at no cost in time, since
+/// the owners are read once however often the buffer is meshed (#1694). A file
+/// small enough that its owners never fill it is not moved.
+const OWNER_OBJECT_BUDGET: usize = 5_000;
 /// An owner as a batch is planned: the first shared symbol it names (the
 /// order owners naming the same one together), its id, and the shared symbols
 /// it names itself.
 type Named = (Option<u64>, u64, BTreeSet<u64>);
+/// The bytes of the body of each record of `ids`, the shared symbols the
+/// batches of [`extract_in_batches_with_control`] read, found without building
+/// a graph: with [`Options::graph_classes`] empty each selected record comes
+/// back with its Element base alone. An id with no record has no size.
+fn body_sizes(
+    file: &mut RevitFile,
+    options: &Options,
+    ids: BTreeSet<u64>,
+) -> Result<BTreeMap<u64, usize>> {
+    let mut sizes = BTreeMap::new();
+    // No ids would select every record.
+    if ids.is_empty() {
+        return Ok(sizes);
+    }
+    let mut opts = options.clone();
+    opts.selected_ids = ids;
+    opts.graph_classes = Some(BTreeSet::new());
+    native_document::extract_graphs(file, &opts, |record| {
+        sizes.insert(record.identity.element_id, record.source.body_bytes);
+        Ok(())
+    })?;
+    Ok(sizes)
+}
+/// Where the batch that starts at `named[start]` ends: it takes the owners after
+/// it for as long as the record bodies of the symbols they name, each counted
+/// once however many owners name it, stay within `budget` bytes. A batch holds
+/// at least one owner whatever its symbols weigh, so that the plan always
+/// advances, and the owners that name no symbol, which sort first, are a batch
+/// of their own that reads none. A symbol with no size weighs nothing.
+fn batch_end(named: &[Named], start: usize, sizes: &BTreeMap<u64, usize>, budget: usize) -> usize {
+    let mut symbols = BTreeSet::<u64>::new();
+    let mut bytes = 0usize;
+    let mut end = start;
+    while let Some((_, _, own)) = named.get(end) {
+        let mut added = 0usize;
+        for symbol in own {
+            if !symbols.contains(symbol) {
+                added = added.saturating_add(sizes.get(symbol).copied().unwrap_or(0));
+            }
+        }
+        // The owners that name no symbol sort first and make a batch that
+        // reads none, so that their graphs are gone before any symbol is.
+        let ends_symbol_free = symbols.is_empty() && !own.is_empty();
+        if end > start && (ends_symbol_free || bytes.saturating_add(added) > budget) {
+            break;
+        }
+        symbols.extend(own);
+        bytes = bytes.saturating_add(added);
+        end += 1;
+    }
+    end
+}
 /// Adds to `wanted` the shared symbols named by `ids` that no read has asked
 /// for yet. An id that is an owner is not read again: the references of its
 /// own graph (`owner_references`) are followed instead, once, and so on through
@@ -363,23 +520,55 @@ fn add_references(
         }
     }
 }
+/// Mesh the owners of `buffer`, give each element to `visit` and let the graphs
+/// go.
+fn mesh_buffer(
+    buffer: &mut BTreeMap<u64, Record>,
+    run: &MeshRun<'_>,
+    visit: &mut impl FnMut(SavedElement) -> Result<()>,
+) -> Result<()> {
+    if buffer.is_empty() {
+        return Ok(());
+    }
+    let ids: Vec<u64> = buffer.keys().copied().collect();
+    let no_shared = BTreeMap::new();
+    let elements = mesh_elements(
+        &ids,
+        Records {
+            owners: &*buffer,
+            shared: &no_shared,
+        },
+        run,
+    )?;
+    for element in elements {
+        visit(element)?;
+    }
+    buffer.clear();
+    Ok(())
+}
 /// [`extract_at_detail_with_control`] for a caller that takes each element as
 /// it is meshed and keeps none of the graphs: `visit` receives every element,
 /// in no set order, and the decoded graphs of the shared symbols are freed
 /// before the next ones are read.
 ///
-/// The owners are decoded first and kept until they are meshed. Their symbols,
+/// The owners are read first for what their graphs name. Those that name
+/// nothing (a wall's graph is its own geometry, about 1.6 MiB on the office's
+/// walls that embed a curtain wall, #1429, and a file has hundreds) and that no
+/// owner names are let go, and read again in one further pass that meshes
+/// them a buffer at a time (`OWNER_OBJECT_BUDGET`), first. The others are kept,
+/// as every owner was. Their symbols,
 /// which are shared and which hold the geometry (on the BIM4LCA office 105
 /// symbols hold 99 % of the graph objects of 538 doors and windows), are
 /// decoded a batch at a time, with the owners that name them meshed against
 /// the batch. A batch holds the symbols of owners next to each other by
-/// symbol, as many as hold about 20,000 graph objects (`BATCH_OBJECT_BUDGET`)
-/// by the size of the batch before: only a batch of symbols sizes the next.
-/// The owners that name no symbol of their own (a wall's graph is its own
-/// geometry, about 1.6 MiB on the office's walls that embed a curtain wall,
-/// #1429) are meshed first, in a batch of their own. That batch reads no
-/// symbol of its own, but one that an owner it names names, so an owner that
-/// names only other owners is in it too, and reads those symbols with it.
+/// symbol, as many as hold about `BATCH_BODY_BUDGET` bytes of record body,
+/// which one walk reads for all of them before the first batch is cut (it
+/// builds no graph). The owners that name only other owners are meshed first
+/// among them, in a
+/// batch that reads no symbol of its own but one that an owner it names
+/// names. An owner that names nothing and that another owner names is read
+/// with the batch that needs it, and kept as the others named are, though its
+/// graph is not counted in the batch.
 ///
 /// An owner's graph is freed with its batch, unless another owner names that
 /// owner: its graph is then kept for the mesh of the one that names it. The
@@ -407,21 +596,54 @@ pub fn extract_in_batches_with_control(
     let mut opts = options.clone();
     opts.channels = BTreeSet::from([103]);
     opts.record_extras = true;
-    let mut owners = BTreeMap::<u64, Record>::new();
-    native_document::extract_graphs(file, &opts, |r| {
-        ensure!(
-            owners.insert(r.identity.element_id, r).is_none(),
-            "duplicate current graphics owner"
-        );
-        Ok(())
-    })?;
+    opts.graph_fields = Some(saved_graphics_fields);
+    // The pass walks the partitions once for each batch it reads. It inflates
+    // them as it walks and the handle keeps no copy of them, which at this
+    // stage was 36% to 43% of the largest files' peak resident memory (#1694).
+    // A read that records value sources names each value's place in the
+    // inflated partition, which only a walk of the handle's copy knows
+    // (#1360), so it keeps the copies.
+    if !file.recording_value_sources() {
+        // A read that selects nothing (no class is named "") indexes the
+        // graphics records from the copies while the handle holds them, and
+        // checks every group's records as each read does. Each read below then
+        // inflates only the groups that hold its records: on the largest files
+        // one partition holds nearly every group, and without the index a read
+        // inflates all of it, twice for the first (#1694).
+        let mut index_only = opts.clone();
+        index_only.selected_ids = BTreeSet::new();
+        index_only.selected_classes = BTreeSet::from([String::new()]);
+        index_only.graph_classes = Some(BTreeSet::new());
+        let indexed = native_document::extract_graphs(file, &index_only, |_| Ok(()));
+        opts.uncached_partitions = true;
+        file.release_inflated_partitions();
+        // A file the read refuses is refused by the pass, with the copies let
+        // go as they are when it reads.
+        indexed?;
+    }
     // Everything each owner's graph names. An owner can name another owner,
     // whose own symbols its mesh then reaches, as the one-shot read finds them
     // by reading every record's references.
-    let owner_references: BTreeMap<u64, Vec<u64>> = owners
-        .iter()
-        .map(|(&id, record)| (id, instance_symbols(record)))
-        .collect();
+    let mut owner_references = BTreeMap::<u64, Vec<u64>>::new();
+    let mut owners = BTreeMap::<u64, Record>::new();
+    native_document::extract_graphs(file, &opts, |r| {
+        let id = r.identity.element_id;
+        let references = instance_symbols(&r);
+        let names_something = !references.is_empty();
+        ensure!(
+            owner_references.insert(id, references).is_none(),
+            "duplicate current graphics owner"
+        );
+        // An owner that names nothing is not kept: its graph is its own
+        // geometry (a wall's is about 1.6 MiB, #1429, and a file has hundreds),
+        // and it is read again below and meshed a buffer of them at a time. One
+        // that names a symbol or an owner is kept, as every owner was, for the
+        // batch that meshes it with what it names.
+        if names_something {
+            owners.insert(id, r);
+        }
+        Ok(())
+    })?;
     // The owners another owner names: their graphs stay for the mesh of the one
     // that names them. Every other owner's graph is freed once it is meshed.
     let named_owners: BTreeSet<u64> = owner_references
@@ -430,10 +652,19 @@ pub fn extract_in_batches_with_control(
         .copied()
         .filter(|symbol| owner_references.contains_key(symbol))
         .collect();
-    // Each owner with the symbols it names that are not owners themselves,
-    // ordered so that owners naming the same symbols are next to each other.
+    // The owners that name nothing, and that no owner names: meshed in one
+    // further pass, before the batches.
+    let streamed: BTreeSet<u64> = owner_references
+        .iter()
+        .filter(|(id, references)| references.is_empty() && !named_owners.contains(*id))
+        .map(|(&id, _)| id)
+        .collect();
+    // Each of the other owners with the symbols it names that are not owners
+    // themselves, ordered so that owners naming the same symbols are next to
+    // each other.
     let mut named: Vec<Named> = owner_references
         .iter()
+        .filter(|(id, _)| !streamed.contains(*id))
         .map(|(&id, references)| {
             let symbols: BTreeSet<u64> = references
                 .iter()
@@ -444,7 +675,7 @@ pub fn extract_in_batches_with_control(
         })
         .collect();
     named.sort();
-    let total = named.len() as u64;
+    let total = owner_references.len() as u64;
     // The progress is the one-shot read's, whatever the batches: the graphics
     // are reported read once the owners are, and each owner is reported meshed
     // once, in order, against the same total.
@@ -461,24 +692,44 @@ pub fn extract_in_batches_with_control(
         done: &done,
         total,
     };
-    let mut limit = FIRST_BATCH_SYMBOLS;
+    // The owners that name nothing are read in one pass and meshed a buffer of
+    // about 20,000 graph objects at a time, as they are read.
+    if !streamed.is_empty() {
+        let mut buffer = BTreeMap::<u64, Record>::new();
+        let mut held = 0usize;
+        opts.selected_ids = streamed;
+        native_document::extract_graphs(file, &opts, |r| {
+            held += r.graph.as_ref().map_or(0, |graph| graph.objects.len());
+            ensure!(
+                buffer.insert(r.identity.element_id, r).is_none(),
+                "duplicate current graphics owner"
+            );
+            if held >= OWNER_OBJECT_BUDGET {
+                mesh_buffer(&mut buffer, &run, &mut visit)?;
+                held = 0;
+            }
+            Ok(())
+        })?;
+        mesh_buffer(&mut buffer, &run, &mut visit)?;
+    }
+    // What each shared symbol the batches read weighs in record body, found
+    // before any is decoded: the batches are cut by it (#1694).
+    control.check()?;
+    let sizes = body_sizes(
+        file,
+        &opts,
+        named
+            .iter()
+            .flat_map(|(_, _, own)| own.iter().copied())
+            .collect(),
+    )?;
     let mut next = 0;
     let mut freeing: Option<std::thread::JoinHandle<()>> = None;
     while next < named.len() {
         control.check()?;
-        let mut ids = Vec::new();
-        let mut symbols = BTreeSet::<u64>::new();
-        while let Some((_, id, own)) = named.get(next) {
-            // The owners that name no symbol sort first and make a batch that
-            // reads none, so that their graphs are gone before any symbol is.
-            let ends_symbol_free = symbols.is_empty() && !own.is_empty();
-            if !ids.is_empty() && (ends_symbol_free || symbols.union(own).count() > limit) {
-                break;
-            }
-            ids.push(*id);
-            symbols.extend(own);
-            next += 1;
-        }
+        let end = batch_end(&named, next, &sizes, BATCH_BODY_BUDGET);
+        let ids: Vec<u64> = named[next..end].iter().map(|(_, id, _)| *id).collect();
+        next = end;
         // The last batch's graphs are gone before these are read.
         if let Some(handle) = freeing.take() {
             let _ = handle.join();
@@ -497,6 +748,25 @@ pub fn extract_in_batches_with_control(
             &attempted,
             &mut wanted,
         );
+        // An owner the batch's owners name that names nothing was not kept (an
+        // owner that names something was): it is read now, and kept as it is
+        // named. An owner a symbol names is read with the symbols below.
+        let missing: BTreeSet<u64> = expanded
+            .iter()
+            .copied()
+            .filter(|id| !owners.contains_key(id))
+            .collect();
+        if !missing.is_empty() {
+            control.check()?;
+            opts.selected_ids = missing;
+            native_document::extract_graphs(file, &opts, |r| {
+                ensure!(
+                    owners.insert(r.identity.element_id, r).is_none(),
+                    "duplicate current graphics owner"
+                );
+                Ok(())
+            })?;
+        }
         for depth in 0..=128 {
             if wanted.is_empty() {
                 break;
@@ -530,11 +800,6 @@ pub fn extract_in_batches_with_control(
                 &mut wanted,
             );
         }
-        let objects: usize = shared
-            .values()
-            .filter_map(|record| record.graph.as_ref())
-            .map(|graph| graph.objects.len())
-            .sum();
         let elements = mesh_elements(
             &ids,
             Records {
@@ -545,11 +810,6 @@ pub fn extract_in_batches_with_control(
         )?;
         for element in elements {
             visit(element)?;
-        }
-        // Only a batch of symbols sizes the next one.
-        if !symbols.is_empty() {
-            limit = (BATCH_OBJECT_BUDGET.saturating_mul(shared.len().max(1)) / objects.max(1))
-                .clamp(MIN_BATCH_SYMBOLS, MAX_BATCH_SYMBOLS);
         }
         // The batch's owners are meshed: their graphs go with its symbols,
         // those another owner names excepted.
@@ -568,4 +828,73 @@ pub fn extract_in_batches_with_control(
         }
     }
     Ok(())
+}
+// The batch plan is a pure function of the owners, the symbols' sizes and the
+// budget: the ways it can fail are written first (#1694).
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn owner(id: u64, symbols: &[u64]) -> Named {
+        (
+            symbols.first().copied(),
+            id,
+            symbols.iter().copied().collect(),
+        )
+    }
+
+    fn sizes(entries: &[(u64, usize)]) -> BTreeMap<u64, usize> {
+        entries.iter().copied().collect()
+    }
+
+    #[test]
+    fn an_owner_over_the_budget_is_a_batch_of_its_own() {
+        let named = [owner(10, &[1]), owner(11, &[2])];
+        let weights = sizes(&[(1, 5_000), (2, 5_000)]);
+        assert_eq!(batch_end(&named, 0, &weights, 100), 1);
+        assert_eq!(batch_end(&named, 1, &weights, 100), 2);
+    }
+
+    #[test]
+    fn a_zero_budget_still_advances() {
+        let named = [owner(1, &[1]), owner(2, &[2])];
+        let weights = sizes(&[(1, 1), (2, 1)]);
+        assert_eq!(batch_end(&named, 0, &weights, 0), 1);
+    }
+
+    #[test]
+    fn a_symbol_two_owners_name_weighs_once() {
+        let named = [owner(1, &[7]), owner(2, &[7])];
+        let weights = sizes(&[(7, 600)]);
+        assert_eq!(batch_end(&named, 0, &weights, 700), 2);
+    }
+
+    #[test]
+    fn a_symbol_with_no_size_weighs_nothing() {
+        let named = [owner(1, &[7]), owner(2, &[8]), owner(3, &[9])];
+        assert_eq!(batch_end(&named, 0, &BTreeMap::new(), 0), 3);
+    }
+
+    #[test]
+    fn sizes_that_overflow_do_not_wrap() {
+        let named = [owner(1, &[1]), owner(2, &[2])];
+        let weights = sizes(&[(1, usize::MAX), (2, usize::MAX)]);
+        assert_eq!(batch_end(&named, 0, &weights, usize::MAX - 1), 1);
+    }
+
+    #[test]
+    fn owners_naming_no_symbol_are_a_batch_of_their_own() {
+        let named = [owner(1, &[]), owner(2, &[]), owner(3, &[5])];
+        let weights = sizes(&[(5, 1)]);
+        assert_eq!(batch_end(&named, 0, &weights, 100), 2);
+        assert_eq!(batch_end(&named, 2, &weights, 100), 3);
+    }
+
+    #[test]
+    fn the_budget_is_a_ceiling_the_batch_may_reach() {
+        let named = [owner(1, &[1]), owner(2, &[2]), owner(3, &[3])];
+        let weights = sizes(&[(1, 50), (2, 50), (3, 50)]);
+        assert_eq!(batch_end(&named, 0, &weights, 100), 2);
+        assert_eq!(batch_end(&named, 0, &weights, 99), 1);
+    }
 }

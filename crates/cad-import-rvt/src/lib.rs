@@ -1,6 +1,6 @@
 //! Autodesk Revit (`.rvt` / `.rte`) **preview** import adapter.
 //!
-//! This is a preview path, not a measurement path. [`rvt`] 0.17.0 recovers
+//! This is a preview path, not a measurement path. [`rvt`] 0.22.0 recovers
 //! Revit element records and exports them as glTF; on Revit **2008–2023** an
 //! element's body is its **bounding box** (cut at readable joins), 2024/2025
 //! are `partial`, 2026/2027 are `experimental`, and `.rfa`/`.rft` family files
@@ -50,7 +50,7 @@ use cad_import_core::{
 pub const FAMILY_NO_GEOMETRY: &str = "import.rvt.family_no_geometry";
 /// Stable refusal code: a compound file without the invariant Revit streams.
 pub const NOT_A_REVIT_FILE: &str = "import.rvt.not_a_revit_file";
-/// Stable refusal code: `rvt` 0.17.0 could not open or export the file.
+/// Stable refusal code: `rvt` 0.22.0 could not open or export the file.
 pub const DECODE_FAILED: &str = "import.rvt.decode_failed";
 /// Stable refusal code: a decodable project produced no drawable geometry.
 pub const NO_GEOMETRY: &str = "import.rvt.no_geometry";
@@ -175,7 +175,7 @@ impl Importer for RvtImporter {
         }
         if !decoded.has_geometry {
             return Err(CadError::Unsupported(format!(
-                "{NO_GEOMETRY}: rvt 0.17.0 decoded Revit {} with confidence level {:?} \
+                "{NO_GEOMETRY}: rvt 0.22.0 decoded Revit {} with confidence level {:?} \
                  ({} building element(s), {} with geometry) but produced no drawable body; \
                  this is a metadata/scaffold result, not an empty success",
                 decoded
@@ -215,9 +215,9 @@ impl Importer for RvtImporter {
         let ceiling = ceiling_for(&decoded.release_status);
         if ceiling == SupportStatus::Unsupported {
             // `decode_to_glb` refuses the known `unsupported` value; this also
-            // covers a status word 0.17.0 did not document.
+            // covers a status word 0.22.0 did not document.
             return Err(CadError::Unsupported(format!(
-                "{RELEASE_UNSUPPORTED}: rvt 0.17.0 reports release status {:?}, which this \
+                "{RELEASE_UNSUPPORTED}: rvt 0.22.0 reports release status {:?}, which this \
                  adapter cannot rate above Unsupported",
                 decoded.release_status
             )));
@@ -229,7 +229,7 @@ impl Importer for RvtImporter {
             Diagnostic {
                 object: None,
                 code: DIAG_UNITS_METRES.into(),
-                message: "rvt 0.17.0 writes glTF with one root matrix of 0.3048 that scales its \
+                message: "rvt 0.22.0 writes glTF with one root matrix of 0.3048 that scales its \
                           feet-based body coordinates to metres and swaps to +Y up; this adapter \
                           applies every node's world transform and maps the glTF +Y-up frame to \
                           CAD +Z up, so stored coordinates are metres"
@@ -279,7 +279,7 @@ impl Importer for RvtImporter {
         // always Partial for the reason below.
         let preview_reason = format!(
             "Revit bodies are preview geometry (bounding boxes on Revit 2008-2023, partial on \
-             2024/2025, experimental on 2026/2027); rvt 0.17.0's release status is {:?} and its \
+             2024/2025, experimental on 2026/2027); rvt 0.22.0's release status is {:?} and its \
              documentation says not to rely on the output for measurement or coordination",
             decoded.release_status
         );
@@ -368,7 +368,7 @@ fn record_decode(import: &mut MeshImport, decoded: &RvtDecode) {
             object: None,
             code: DIAG_RELEASE_STATUS.into(),
             message: format!(
-                "Revit release {:?} has rvt 0.17.0 status {:?} (capability {:?}); read, render \
+                "Revit release {:?} has rvt 0.22.0 status {:?} (capability {:?}); read, render \
                  and pick are capped at that status, and measure stays Unsupported",
                 decoded.revit_version, decoded.release_status, decoded.release_capability
             ),
@@ -528,7 +528,7 @@ fn record_scene(import: &mut MeshImport, scene: &GlbScene) {
                 object: None,
                 code: DIAG_PRIMITIVE_MODE_SKIPPED.into(),
                 message: format!(
-                    "{} glTF primitive(s) were not TRIANGLES and were skipped; rvt 0.17.0 only \
+                    "{} glTF primitive(s) were not TRIANGLES and were skipped; rvt 0.22.0 only \
                      emits triangle lists, so this is unexpected input",
                     scene.primitives_skipped
                 ),

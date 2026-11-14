@@ -254,7 +254,7 @@ fn visit_node(
         // material is used only when all of them agree on it. Differing
         // materials keep the layer colour and are counted (`conflicting`):
         // silently applying one primitive's colour to the others would invent
-        // a colour for geometry the source did not give it. `rvt` 0.17.0 emits
+        // a colour for geometry the source did not give it. `rvt` 0.22.0 emits
         // exactly one primitive per mesh, so this only fires on foreign input.
         let mut agreed: Option<PrimitiveMaterial> = None;
         let mut conflict = false;

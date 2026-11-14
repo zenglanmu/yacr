@@ -1,9 +1,9 @@
 //! Bounded traversal of saved graphics under the default
 //! 3D context. This selects surface carriers, not regenerated Revit geometry.
 //! Unsupported solid-affecting filters and external instances remain explicit.
+use crate::graph_value::Fv;
 use crate::native_parameters::ObjectGraph;
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 /// Row-major affine matrix, operating on column vectors in saved length units.
@@ -182,6 +182,22 @@ pub const NESTED_DETAIL_FILTER_DIAGNOSTIC: &str =
 pub const VIEW_COMPONENT_DIAGNOSTIC: &str =
     "surface-bearing component requires qualified owner/view visibility";
 
+/// The calls one curves-only check may make, as many as `Walker::visit`
+/// may (#1833). A node is reached once along each path to it, so a child
+/// shared at every level doubled the calls at each, up to 2^128 within the
+/// depth limit. Over the budget a branch is not curves only: a filter's
+/// children are then walked, under `visit`'s own limit, and a component gets
+/// [`VIEW_COMPONENT_DIAGNOSTIC`].
+const CURVE_CHECK_BUDGET: usize = 100_000;
+
+/// The state of one curves-only check: the current path, which a cycle may
+/// not re-enter, and the calls made so far.
+#[derive(Default)]
+struct CurveWalk {
+    path: HashSet<usize>,
+    calls: usize,
+}
+
 struct Walker<'a, 'r> {
     edge_indexes: HashMap<usize, EdgeIndex>,
     graph: &'a ObjectGraph,
@@ -206,7 +222,7 @@ impl Walker<'_, '_> {
             message: message.into(),
         });
     }
-    fn target(&self, source: usize, p: &Value) -> Result<usize, String> {
+    fn target(&self, source: usize, p: &Fv) -> Result<usize, String> {
         let offset = p["offset"].as_u64().ok_or("missing pointer offset")? as usize;
         let token = p["pointer_token"].as_u64().ok_or("missing pointer token")?;
         let edge_slot = self.edge_indexes[&(self.graph as *const ObjectGraph as usize)]
@@ -275,7 +291,10 @@ impl Walker<'_, '_> {
         // GGroup native child traversal admits visibility0/2;1/3 are skipped
         // outside special draw mode7. The default export uses normal mode.
         if let Some(flags) = obj.fields["m_GInfo"]["m_flags"].as_u64() {
-            if !self.include_hidden && matches!(graphics_visibility(flags), 1 | 3) {
+            if !self.include_hidden
+                && matches!(graphics_visibility(flags), 1 | 3)
+                && !drawn_hidden_instance(&obj.class_name, &obj.fields)
+            {
                 self.result.excluded_visibility_branches += 1;
                 return Ok(());
             }
@@ -289,7 +308,9 @@ impl Walker<'_, '_> {
                 hidden: self.hidden_depth > 0,
                 filtered: self.filtered_depth > 0,
             }),
-            "GElement" | "GGroup" | "GFilter" => {
+            // A `GGTag` is a group of one `GPoint`, a point with a test point for
+            // selecting it: walked as a group, its point is no surface (RE-401).
+            "GElement" | "GGroup" | "GFilter" | "GGTag" => {
                 let children = self.children(index)?;
                 if obj.class_name == "GFilter" {
                     if children.is_empty() {
@@ -326,10 +347,8 @@ impl Walker<'_, '_> {
                         return Ok(());
                     }
                     // Curves are deliberately outside this surface-only selector.
-                    if children
-                        .iter()
-                        .all(|&i| self.only_curves(i, &mut HashSet::new()))
-                    {
+                    let mut walk = CurveWalk::default();
+                    if children.iter().all(|&i| self.only_curves(i, &mut walk)) {
                         self.result.excluded_non_surface_branches += 1;
                         return Ok(());
                     }
@@ -430,7 +449,7 @@ impl Walker<'_, '_> {
                     .entry(target as *const ObjectGraph as usize)
                     .or_insert_with(|| edge_index(target));
                 self.graph = target;
-                let curves_only = self.only_curves(0, &mut HashSet::new());
+                let curves_only = self.only_curves(0, &mut CurveWalk::default());
                 self.graph = previous;
                 if curves_only {
                     self.result.excluded_non_surface_branches += 1;
@@ -450,7 +469,10 @@ impl Walker<'_, '_> {
                 if obj.fields["m_resolveSymInView"].as_bool() != Some(false) {
                     return Err("view-resolved instance is unsupported".into());
                 }
-                if obj.fields["m_forbiddenTarget"]["m_targets"].as_u64() != Some(0) {
+                if obj.fields["m_forbiddenTarget"]["m_targets"].as_u64() != Some(0)
+                    && !drawn_hidden_instance(&obj.class_name, &obj.fields)
+                    && !drawn_visible_instance(&obj.class_name, &obj.fields)
+                {
                     return Err("instance target restrictions are unsupported".into());
                 }
                 let info = self.target(index, &obj.fields["m_instanceInfo"])?;
@@ -499,8 +521,12 @@ impl Walker<'_, '_> {
                     self.visit(embedded, multiply(matrix, transform), path);
                 }
             }
+            // A flip control is a grip drawn in a view: an origin, a base and a
+            // length, and no pointer, so no surface (RE-303, RE-397).
             "GLine" | "GArc" | "GEllipse" | "GCurve" | "GNurbSpline" | "GPolyLine"
-            | "GPolyline" | "GPoint" => self.result.excluded_non_surface_branches += 1,
+            | "GPolyline" | "GPoint" | "GBiFlipControl" => {
+                self.result.excluded_non_surface_branches += 1
+            }
             other => return Err(format!("unsupported reachable graphics class {other}")),
         }
         Ok(())
@@ -529,8 +555,9 @@ impl Walker<'_, '_> {
             && default_representation(&info.fields, self.pre2023)
             && read_transform(&info.fields["m_Trf"]).is_ok_and(|t| rotation(&t))
     }
-    fn only_curves(&self, index: usize, seen: &mut HashSet<usize>) -> bool {
-        if seen.len() >= 128 || !seen.insert(index) {
+    fn only_curves(&self, index: usize, walk: &mut CurveWalk) -> bool {
+        walk.calls += 1;
+        if walk.calls > CURVE_CHECK_BUDGET || walk.path.len() >= 128 || !walk.path.insert(index) {
             return false;
         }
         let result = match self.graph.objects[index].class_name.as_str() {
@@ -538,10 +565,10 @@ impl Walker<'_, '_> {
             | "GPolyline" | "GPoint" => true,
             "GElement" | "GGroup" | "GFilter" => self
                 .children(index)
-                .is_ok_and(|c| c.iter().all(|&i| self.only_curves(i, seen))),
+                .is_ok_and(|c| c.iter().all(|&i| self.only_curves(i, walk))),
             _ => false,
         };
-        seen.remove(&index);
+        walk.path.remove(&index);
         result
     }
 }
@@ -566,7 +593,7 @@ fn current_graph_owner_matches(root: &crate::native_parameters::GraphObject, id:
 /// `InstanceInfo` with no `m_GRepId` is refused, as it was before RE-342: the
 /// decoder drops a field flagged transient unread, so a missing key cannot say
 /// whether the class declares one, and nothing measured should rest on it.
-fn default_representation(info: &Value, pre2023: bool) -> bool {
+fn default_representation(info: &Fv, pre2023: bool) -> bool {
     match info.get("m_GRepId") {
         Some(id) => id.as_u64() == Some(0),
         None => {
@@ -598,6 +625,39 @@ fn rotation(m: &GraphicsTransform) -> bool {
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
     orthonormal && (determinant - 1.0).abs() <= tolerance
 }
+/// The `m_forbiddenTarget.m_targets` of the only restricted instance measured
+/// (RE-397).
+const DRAWN_HIDDEN_INSTANCE_TARGETS: u64 = 53246;
+/// Whether `fields` are those of a `GInstance` flagged hidden in the normal draw
+/// (visibility 1) and forbidden the targets `DRAWN_HIDDEN_INSTANCE_TARGETS`,
+/// which Revit's export draws all the same: the 221 of them in the BIM4LCA
+/// office's 41 railings hold the parts a railing's body has beyond its visible
+/// instance's, and with them the 10 `KAI-4` railings' symbols add up to
+/// Revit's body within 0.2% where the visible instance alone is 0.4 of it.
+/// Every other hidden instance stays skipped and every other target mask stays
+/// refused: no other pair is measured.
+fn drawn_hidden_instance(class_name: &str, fields: &Fv) -> bool {
+    class_name == "GInstance"
+        && fields["m_GInfo"]["m_flags"]
+            .as_u64()
+            .is_some_and(|flags| graphics_visibility(flags) == 1)
+        && fields["m_forbiddenTarget"]["m_targets"].as_u64() == Some(DRAWN_HIDDEN_INSTANCE_TARGETS)
+}
+/// The `m_forbiddenTarget.m_targets` of the one restricted instance that is
+/// visible in the normal draw: the 554 of Autodesk's 2024 samples (appliances,
+/// chairs, pendant lamps, sinks) and the 22 of the BIM4LCA housing's showers
+/// hold it and no other mask (RE-408).
+const DRAWN_VISIBLE_INSTANCE_TARGETS: u64 = 10;
+/// Whether `fields` are those of a `GInstance` visible in the normal draw
+/// (visibility 0) and forbidden the targets `DRAWN_VISIBLE_INSTANCE_TARGETS`.
+/// Every other mask stays refused.
+fn drawn_visible_instance(class_name: &str, fields: &Fv) -> bool {
+    class_name == "GInstance"
+        && fields["m_GInfo"]["m_flags"]
+            .as_u64()
+            .is_some_and(|flags| graphics_visibility(flags) == 0)
+        && fields["m_forbiddenTarget"]["m_targets"].as_u64() == Some(DRAWN_VISIBLE_INSTANCE_TARGETS)
+}
 fn graphics_visibility(flags: u64) -> u8 {
     let bits = flags & 0x1e0;
     if bits == 0 {
@@ -612,7 +672,7 @@ fn graphics_visibility(flags: u64) -> u8 {
         2
     }
 }
-fn read_transform(v: &Value) -> Result<GraphicsTransform, String> {
+fn read_transform(v: &Fv) -> Result<GraphicsTransform, String> {
     let rows = v["m_3x3"]
         .as_array()
         .filter(|v| v.len() == 3)
@@ -657,7 +717,7 @@ fn multiply(a: GraphicsTransform, b: GraphicsTransform) -> GraphicsTransform {
 }
 // Native default context is view type4. Direction predicates6/7/8 are
 // false before negation in that context;10/11 use pi/2 +/-1e-10 thresholds.
-fn direction_condition(v: &Value, matrix: GraphicsTransform) -> Result<bool, String> {
+fn direction_condition(v: &Fv, matrix: GraphicsTransform) -> Result<bool, String> {
     let negate = v["m_negateDirCondition"]
         .as_bool()
         .ok_or("missing direction negation")?;
@@ -713,7 +773,7 @@ fn direction_condition(v: &Value, matrix: GraphicsTransform) -> Result<bool, Str
     };
     Ok(answer != negate)
 }
-fn condition_at_detail(class: &str, v: &Value, detail_level: i64) -> Result<bool, String> {
+fn condition_at_detail(class: &str, v: &Fv, detail_level: i64) -> Result<bool, String> {
     if !matches!(
         class,
         "GConditionInt"
@@ -758,6 +818,7 @@ fn condition_at_detail(class: &str, v: &Value, detail_level: i64) -> Result<bool
 #[cfg(test)]
 mod tests {
     use super::{GraphicsTransform, default_representation, rotation};
+    use crate::graph_value::Fv;
     use serde_json::json;
 
     fn matrix(m: [[f64; 3]; 3]) -> GraphicsTransform {
@@ -863,20 +924,20 @@ mod tests {
             for key in extra {
                 info[*key] = json!(0);
             }
-            info
+            Fv::from_value(&info)
         };
         assert!(default_representation(&with(&[]), true));
         assert!(!default_representation(&with(&["m_other"]), true));
         assert!(!default_representation(
-            &json!({"m_Trf": {}, "m_cda": {}}),
+            &Fv::from_value(&json!({"m_Trf": {}, "m_cda": {}})),
             true
         ));
-        assert!(!default_representation(&json!(null), true));
+        assert!(!default_representation(&Fv::Null, true));
     }
 
     #[test]
     fn a_missing_representation_id_is_refused_off_the_pre_2023_route() {
-        let exact = json!({"m_Trf": {}, "m_symbolId": {}, "m_cda": {}});
+        let exact = Fv::from_value(&json!({"m_Trf": {}, "m_symbolId": {}, "m_cda": {}}));
         assert!(default_representation(&exact, true));
         assert!(!default_representation(&exact, false));
     }
@@ -884,9 +945,10 @@ mod tests {
     #[test]
     fn a_representation_id_other_than_zero_is_not_the_default() {
         for pre2023 in [false, true] {
-            assert!(default_representation(&json!({"m_GRepId": 0}), pre2023));
-            assert!(!default_representation(&json!({"m_GRepId": 1}), pre2023));
-            assert!(!default_representation(&json!({"m_GRepId": null}), pre2023));
+            let with = |id: serde_json::Value| Fv::from_value(&json!({ "m_GRepId": id }));
+            assert!(default_representation(&with(json!(0)), pre2023));
+            assert!(!default_representation(&with(json!(1)), pre2023));
+            assert!(!default_representation(&with(json!(null)), pre2023));
         }
     }
 }

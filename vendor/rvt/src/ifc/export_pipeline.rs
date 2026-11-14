@@ -10,7 +10,9 @@
 //! limit kept unread. What each front end adds on top (writing the file,
 //! refusing an incomplete export, checking the quality mode) stays with it.
 
-use super::saved_meshes::{SavedMeshScope, attach_scoped_with_control, default_scope};
+use super::saved_meshes::{
+    SavedMeshScope, attach_scoped_with_control, default_scope, note_not_offered,
+};
 use super::{
     DiagnosticRvtDocExporter, ExportDiagnostics, ExportQualityMode, IfcModel, PlaceholderExporter,
     RvtDocExporter, leave_out_base_quantities, record_unread_streams, recount_exported,
@@ -41,19 +43,24 @@ pub enum ExportKind {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SavedMeshChoice {
-    /// Doors and windows of Revit 2023 to 2027, the releases whose saved
-    /// graphics are read ([`default_scope`]), and the walls that embed a
-    /// curtain wall where Revit raised their base, on Revit 2024 to 2027, the
-    /// releases whose wall records name what embeds in them (RE-340): `rvt-ifc`
-    /// with no switch.
+    /// Every element whose body would be its record's bounding box, on Revit
+    /// 2023 to 2027, the releases whose saved graphics are read
+    /// ([`default_scope`]), and the walls that embed a curtain wall where
+    /// Revit raised their base, on Revit 2024 to 2027, the releases whose wall
+    /// records name what embeds in them (RE-340): `rvt-ifc` with no switch
+    /// (#1191; doors and windows alone until then).
     #[default]
     Default,
-    /// Every element whose body would be its record's bounding box
-    /// (`rvt-ifc --saved-meshes`). Slower.
+    /// Every element whose body would be its record's bounding box, on every
+    /// release, Revit 2015 to 2022 included (RE-342): `rvt-ifc --saved-meshes`.
     All,
-    /// None: doors and windows keep their record's box, and walls that embed
-    /// a curtain wall their record's body (`rvt-ifc --no-saved-meshes`).
+    /// None: every element keeps its record's box, and walls that embed a
+    /// curtain wall their record's body (`rvt-ifc --no-saved-meshes`).
     Off,
+    /// Doors and windows only, on Revit 2023 to 2027, and the walls that embed a
+    /// curtain wall as for [`Default`](Self::Default): what `Default` was until
+    /// #1191, reading less of the file. No `rvt-ifc` switch selects it.
+    DoorsAndWindows,
 }
 
 /// The `rvt-ifc` switches that change the model. [`Default`] is `rvt-ifc` with
@@ -232,6 +239,10 @@ impl ExportOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ExportNote {
+    /// Standalone family revolutions reconstructed from their saved records.
+    FamilyRevolutions { added: usize },
+    /// An unsupported standalone family was left unchanged.
+    FamilyRevolutionsSkipped { error: String },
     /// Bodies drawn from the saved graphics of `candidates` boxed elements.
     #[non_exhaustive]
     SavedMeshes {
@@ -391,6 +402,7 @@ impl ExportNote {
     pub fn skipped(&self) -> Option<&str> {
         match self {
             Self::SavedMeshesSkipped { error }
+            | Self::FamilyRevolutionsSkipped { error }
             | Self::FamilyExtrusionsSkipped { error }
             | Self::RevitPropertySetsSkipped { error }
             | Self::RevitSetPlacementSkipped { error }
@@ -403,6 +415,13 @@ impl ExportNote {
 impl fmt::Display for ExportNote {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::FamilyRevolutions { added } => write!(
+                f,
+                "{added} standalone family revolution bodies decoded from native records"
+            ),
+            Self::FamilyRevolutionsSkipped { error } => {
+                write!(f, "family revolution bodies unchanged: {error}")
+            }
             Self::SavedMeshes {
                 scope,
                 candidates,
@@ -594,6 +613,24 @@ pub fn run_export_with_limits_and_control(
     limits: WalkerLimits,
     control: &WalkerControl,
 ) -> Result<ExportRun> {
+    // A reader that stops at its work budget in any step is kept with the
+    // file, and the diagnostics report every stop it holds (#1833): a step
+    // that reads back what an earlier export memoised stops nowhere itself.
+    let stops = crate::budget::Notes::open();
+    let run = run_export_steps(rf, options, limits, control);
+    rf.keep_budget_stops(stops.close());
+    let mut run = run?;
+    super::record_work_budget_stops(&mut run.diagnostics, rf.budget_stops());
+    Ok(run)
+}
+
+/// [`run_export_with_limits_and_control`]'s steps.
+fn run_export_steps(
+    rf: &mut RevitFile,
+    options: &ExportOptions,
+    limits: WalkerLimits,
+    control: &WalkerControl,
+) -> Result<ExportRun> {
     if let Some(phase) = &options.phase {
         rf.set_export_phase(phase)?;
     }
@@ -648,8 +685,15 @@ pub fn run_export_with_limits_and_control(
     let scope = match (options.kind, options.saved_meshes) {
         (ExportKind::Placeholder, _) | (_, SavedMeshChoice::Off) => None,
         (_, SavedMeshChoice::All) => Some(SavedMeshScope::All),
-        (_, SavedMeshChoice::Default) if options.family_extrusions => Some(SavedMeshScope::All),
+        (_, SavedMeshChoice::Default | SavedMeshChoice::DoorsAndWindows)
+            if options.family_extrusions =>
+        {
+            Some(SavedMeshScope::All)
+        }
         (_, SavedMeshChoice::Default) => default_scope(rf),
+        (_, SavedMeshChoice::DoorsAndWindows) => {
+            default_scope(rf).map(|_| SavedMeshScope::DoorsAndWindows)
+        }
     };
     if let Some(scope) = scope {
         match attach_scoped_with_control(rf, &mut model, scope, control) {
@@ -680,7 +724,24 @@ pub fn run_export_with_limits_and_control(
                 notes.push(ExportNote::SavedMeshesSkipped {
                     error: error.to_string(),
                 });
+                // #1645: the boxes the pass was to look at keep their body, and say why.
+                if note_not_offered(&mut model, "pass_failed") > 0 {
+                    recount_exported(&mut diagnostics, &model);
+                }
             }
+        }
+    } else if options.kind != ExportKind::Placeholder {
+        // #1645: no pass was offered, so each box says why it is one: the caller
+        // turned the pass off, or the release's saved graphics are not read.
+        let why = if matches!(options.saved_meshes, SavedMeshChoice::Off) {
+            "saved_meshes_off"
+        } else if rf.basic_file_info().is_ok() {
+            "release_outside_2023_to_2027"
+        } else {
+            "release_not_read"
+        };
+        if note_not_offered(&mut model, why) > 0 {
+            recount_exported(&mut diagnostics, &model);
         }
     }
 
@@ -707,6 +768,35 @@ pub fn run_export_with_limits_and_control(
             Err(error) => {
                 control.check()?;
                 notes.push(ExportNote::FamilyExtrusionsSkipped {
+                    error: format!("{error:#}"),
+                });
+            }
+        }
+    }
+
+    // The standalone form has validated geometry but no measured IFC product
+    // category. Modes requiring mapped types must not gain a proxy here.
+    if options.kind == ExportKind::Document && options.mode == ExportQualityMode::Scaffold {
+        match super::family_revolutions::attach(rf, &mut model, control) {
+            Ok(0) => {}
+            Ok(added) => {
+                recount_exported(&mut diagnostics, &model);
+                diagnostics.warnings.retain(|warning| {
+                    warning != "No building elements were exported; output is scaffold-only."
+                });
+                diagnostics.confidence = super::export_confidence_summary(
+                    diagnostics.mode,
+                    &diagnostics.exported,
+                    diagnostics.confidence.has_project_metadata,
+                    0,
+                    diagnostics.warnings.len(),
+                    diagnostics.confidence.unexported_element_records,
+                );
+                notes.push(ExportNote::FamilyRevolutions { added });
+            }
+            Err(error) => {
+                control.check()?;
+                notes.push(ExportNote::FamilyRevolutionsSkipped {
                     error: format!("{error:#}"),
                 });
             }

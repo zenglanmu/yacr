@@ -1,8 +1,8 @@
 //! Tessellation of bounded saved planar and cylindrical BRep faces. No application or vendor runtime.
+use crate::graph_value::Fv;
 use crate::native_parameters::ObjectGraph;
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FaceMesh {
@@ -54,7 +54,7 @@ impl<'a> PointerIndex<'a> {
             lookup: graph.lookup(),
         }
     }
-    fn resolve(&self, source: usize, v: &Value) -> Result<Option<usize>> {
+    fn resolve(&self, source: usize, v: &Fv) -> Result<Option<usize>> {
         let g = self.graph;
         let t = v["pointer_token"]
             .as_u64()
@@ -94,10 +94,10 @@ impl<'a> PointerIndex<'a> {
         Ok(Some(objs[0]))
     }
 }
-pub fn pointer(g: &ObjectGraph, source: usize, v: &Value) -> Result<Option<usize>> {
+pub fn pointer(g: &ObjectGraph, source: usize, v: &Fv) -> Result<Option<usize>> {
     PointerIndex::new(g).resolve(source, v)
 }
-fn point<const N: usize>(v: &Value) -> Result<[f64; N]> {
+fn point<const N: usize>(v: &Fv) -> Result<[f64; N]> {
     let a = v.as_array().context("point array")?;
     ensure!(a.len() == N, "point dimension");
     let mut p = [0.; N];
@@ -161,6 +161,21 @@ fn retain_boundary_points(
     points: &[[f64; 2]],
     boundary_edges: &BTreeSet<(u32, u32)>,
     triangles: &mut Vec<[u32; 3]>,
+    work: &mut u64,
+) -> Result<()> {
+    retain_boundary_points_within(points, boundary_edges, triangles, work, PLANAR_WORK_BUDGET)
+}
+
+/// [`retain_boundary_points`] charging its work to `work`, the face's, and refusing the
+/// face once that is past `budget` (#1748): one unit for each edge of a triangle it
+/// tests against a point, and as many more as there are boundary edges where that edge
+/// has to be tested against all of them.
+fn retain_boundary_points_within(
+    points: &[[f64; 2]],
+    boundary_edges: &BTreeSet<(u32, u32)>,
+    triangles: &mut Vec<[u32; 3]>,
+    work: &mut u64,
+    budget: u64,
 ) -> Result<()> {
     // Which points a triangle uses, kept as splits add them, instead of a
     // search of every triangle for every point.
@@ -185,7 +200,13 @@ fn retain_boundary_points(
                     t[edge].min(t[(edge + 1) % 3]),
                     t[edge].max(t[(edge + 1) % 3]),
                 );
-                let boundary_line = boundary_edges.contains(&edge_key)
+                *work += 1;
+                let on_edge = boundary_edges.contains(&edge_key);
+                if !on_edge {
+                    *work += boundary_edges.len() as u64;
+                }
+                ensure!(*work <= budget, PLANAR_BUDGET_EXCEEDED);
+                let boundary_line = on_edge
                     || boundary_edges.iter().any(|(u, v)| {
                         cross(points[*u as usize], points[*v as usize], points[a]).abs() <= 1e-8
                             && cross(points[*u as usize], points[*v as usize], points[b]).abs()
@@ -216,6 +237,13 @@ fn retain_boundary_points(
                 break;
             }
         }
+        // A ring that repeats its first point as its last (a conduit's end
+        // cap, its two samples 1e-12 ft apart) leaves the copy out of every
+        // triangle: the point is there already, through its twin.
+        if split.is_none() && (0..points.len()).any(|j| j != pi && used[j] && close(points[j], p)) {
+            used[pi] = true;
+            continue;
+        }
         let Some((ti, first, second)) = split else {
             bail!("boundary sample was discarded by triangulation")
         };
@@ -226,9 +254,319 @@ fn retain_boundary_points(
     Ok(())
 }
 
+/// How far the chord between two neighbouring points of a crossing edge may leave
+/// the edge (feet): a quarter of the 0.001 ft bar the scorers hold meshes to (#1706).
+const EDGE_SAGITTA: f64 = 2.5e-4;
+/// The most times a span between two samples is halved. A halving takes off most of a
+/// chord's deviation (a half, not three quarters, where the point found splits a steep
+/// span unevenly), so a smooth edge settles in a dozen; one still above the bound at
+/// the limit never settles.
+const EDGE_REFINEMENT_DEPTH: u32 = 32;
+/// The most points one edge may be given, so that a hostile file cannot ask for more.
+const EDGE_POINT_BUDGET: usize = 100_000;
+
+/// What a crossing edge's refinement may spend: halvings of one span, and points in all.
+struct EdgeLimits {
+    depth: u32,
+    points: usize,
+}
+#[cfg(test)]
+const EDGE_LIMITS: EdgeLimits = EdgeLimits {
+    depth: EDGE_REFINEMENT_DEPTH,
+    points: EDGE_POINT_BUDGET,
+};
+/// The text a crossing edge's refinement is refused with when it would give the edge
+/// more points than its limits allow.
+const EDGE_POINTS_EXCEEDED: &str = "edge refinement point budget exceeded";
+/// How close to the plane (feet) a point solved onto it must lie.
+const EDGE_ON_PLANE: f64 = 1e-9;
+
+/// The parameter an edge's samples run along, `0` for `u` and `1` for `v`, where
+/// the other is constant to 1e-7 along all of them; None where they change both.
+fn isoparametric_axis(samples: &[[f64; 2]]) -> Option<usize> {
+    let (start, end) = (*samples.first()?, *samples.last()?);
+    let axis = if (start[1] - end[1]).abs() < 1e-7 && (start[0] - end[0]).abs() > 1e-7 {
+        0
+    } else if (start[0] - end[0]).abs() < 1e-7 && (start[1] - end[1]).abs() > 1e-7 {
+        1
+    } else {
+        return None;
+    };
+    samples
+        .iter()
+        .all(|uv| (uv[1 - axis] - start[1 - axis]).abs() < 1e-7)
+        .then_some(axis)
+}
+
+/// The unit normal of a plane with the basis `x`, `y`.
+fn unit_normal(x: [f64; 3], y: [f64; 3]) -> Result<[f64; 3]> {
+    let normal = [
+        x[1] * y[2] - x[2] * y[1],
+        x[2] * y[0] - x[0] * y[2],
+        x[0] * y[1] - x[1] * y[0],
+    ];
+    let length = normal.iter().map(|v| v * v).sum::<f64>().sqrt();
+    ensure!(
+        length.is_finite() && length > 1e-12,
+        "singular shared plane basis"
+    );
+    Ok(normal.map(|v| v / length))
+}
+
+fn point_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f64>().sqrt()
+}
+
+/// How far `p` is from the chord `a`-`b`, in space.
+fn distance_to_chord(p: [f64; 3], a: [f64; 3], b: [f64; 3]) -> f64 {
+    let ab: [f64; 3] = std::array::from_fn(|k| b[k] - a[k]);
+    let along = (0..3).map(|k| (p[k] - a[k]) * ab[k]).sum::<f64>();
+    let length = (0..3).map(|k| ab[k] * ab[k]).sum::<f64>();
+    let t = if length > 0. {
+        (along / length).clamp(0., 1.)
+    } else {
+        0.
+    };
+    point_distance(p, std::array::from_fn(|k| a[k] + t * ab[k]))
+}
+
+/// [`refine_crossing_edge_within`] at an edge's own limits, as the tests take it.
+#[cfg(test)]
+fn refine_crossing_edge(
+    evaluate: &dyn Fn([f64; 2]) -> Result<[f64; 3]>,
+    plane_origin: [f64; 3],
+    plane_normal: [f64; 3],
+    samples: &[[f64; 2]],
+) -> Result<Vec<[f64; 2]>> {
+    refine_crossing_edge_within(evaluate, plane_origin, plane_normal, samples, &EDGE_LIMITS)
+}
+
+/// The samples of an edge between a plane and a curved face that runs across both
+/// of the curved face's parameters (a slanted plane through a cylinder: an
+/// ellipse), with the points of the edge itself that keep the chord between
+/// neighbours within [`EDGE_SAGITTA`] of the edge put between them (#1706).
+///
+/// The samples are the graph's, in the curved face's parameters; `evaluate` is
+/// that surface. Between two samples the parameter that changes more is held at
+/// its middle value and the other is solved for, by Newton's method, until the
+/// point of the surface is within [`EDGE_ON_PLANE`] of the plane: a point of the
+/// edge itself. Where it is farther from the chord than the bound it is put
+/// between the samples and each half is looked at in turn, to
+/// [`EDGE_REFINEMENT_DEPTH`] halvings. The chord is judged against the edge and
+/// not against the surface, which a chord leaves by the surface's own curvature
+/// wherever the strips of the curved face are cut finer than that, and an
+/// interval that holds an extremum of the parameter solved for has the edge
+/// outside the samples' own values on both sides. A point that does not reach the
+/// plane, or lies farther from the middle of the chord than the chord is long (the
+/// other branch of the intersection), or a span that is still above the bound after
+/// the last halving, or more points than `limits` allow, is an error: the
+/// edge keeps being refused as it was. The plane's polygon and the cylinder's loop
+/// both take this list (less the points beyond the cylinder's envelope, which both
+/// leave out), so their vertices along the edge are the same.
+fn refine_crossing_edge_within(
+    evaluate: &dyn Fn([f64; 2]) -> Result<[f64; 3]>,
+    plane_origin: [f64; 3],
+    plane_normal: [f64; 3],
+    samples: &[[f64; 2]],
+    limits: &EdgeLimits,
+) -> Result<Vec<[f64; 2]>> {
+    ensure!(samples.len() >= 2, "an edge needs two samples");
+    let signed = |p: [f64; 3]| -> f64 {
+        (0..3)
+            .map(|k| (p[k] - plane_origin[k]) * plane_normal[k])
+            .sum()
+    };
+    let mut out = vec![samples[0]];
+    for pair in samples.windows(2) {
+        bisect_crossing_edge(evaluate, &signed, limits, pair[0], pair[1], 0, &mut out)?;
+        out.push(pair[1]);
+    }
+    Ok(out)
+}
+
+fn bisect_crossing_edge(
+    evaluate: &dyn Fn([f64; 2]) -> Result<[f64; 3]>,
+    signed: &dyn Fn([f64; 3]) -> f64,
+    limits: &EdgeLimits,
+    a: [f64; 2],
+    b: [f64; 2],
+    depth: u32,
+    out: &mut Vec<[f64; 2]>,
+) -> Result<()> {
+    let (point_a, point_b) = (evaluate(a)?, evaluate(b)?);
+    let chord = point_distance(point_a, point_b);
+    ensure!(chord.is_finite(), "edge refinement left the surface");
+    // Two samples closer than the bound hold the edge between them within it.
+    if chord <= EDGE_SAGITTA {
+        return Ok(());
+    }
+    let chord_middle: [f64; 3] = std::array::from_fn(|k| (point_a[k] + point_b[k]) / 2.);
+    let middle = [(a[0] + b[0]) / 2., (a[1] + b[1]) / 2.];
+    // The parameter that changes more is held at its middle value and the other is
+    // solved so that the point is in the plane: the point of the edge there.
+    let solved = usize::from((b[0] - a[0]).abs() >= (b[1] - a[1]).abs());
+    let along = |x: f64| -> [f64; 2] {
+        let mut uv = middle;
+        uv[solved] = x;
+        uv
+    };
+    let height = |x: f64| -> Result<f64> { Ok(signed(evaluate(along(x))?)) };
+    let mut x = middle[solved];
+    let mut reached = false;
+    for _ in 0..30 {
+        let value = height(x)?;
+        if value.abs() <= EDGE_ON_PLANE {
+            reached = true;
+            break;
+        }
+        let step = 1e-6 * (1. + x.abs());
+        let slope = (height(x + step)? - height(x - step)?) / (2. * step);
+        ensure!(
+            slope.is_finite() && slope.abs() > 1e-9,
+            "edge refinement found no slope"
+        );
+        x -= value / slope;
+        ensure!(x.is_finite(), "edge refinement left the parameters");
+    }
+    ensure!(reached, "edge refinement did not reach the plane");
+    let exact = along(x);
+    let point = evaluate(exact)?;
+    // The edge between the samples is no farther from the middle of their chord than
+    // the chord is long; the other branch of the intersection is.
+    ensure!(
+        point_distance(point, chord_middle) <= chord + 1e-6,
+        "edge refinement left its span"
+    );
+    let deviation = distance_to_chord(point, point_a, point_b);
+    ensure!(deviation.is_finite(), "edge refinement left the surface");
+    if deviation <= EDGE_SAGITTA {
+        return Ok(());
+    }
+    ensure!(
+        depth < limits.depth,
+        "edge refinement is still above the bound after {} halvings",
+        limits.depth
+    );
+    ensure!(out.len() < limits.points, EDGE_POINTS_EXCEEDED);
+    bisect_crossing_edge(evaluate, signed, limits, a, exact, depth + 1, out)?;
+    out.push(exact);
+    bisect_crossing_edge(evaluate, signed, limits, exact, b, depth + 1, out)
+}
+
+/// The cylinder side of [`refined_plane_edge`] (#1706): the loop of a cylinder
+/// takes along an edge it shares with a plane, where that edge runs across both
+/// its parameters, the points [`refine_crossing_edge_within`] gives, as the plane's
+/// polygon does. Any other edge is as the graph stores it. `limit` is the most
+/// points the edge may add to its ring, the first not counted: an edge that would
+/// give more is refused as [`CYLINDER_BUDGET_EXCEEDED`] before it is built (#1815).
+/// The ring's budget is below an edge's own [`EDGE_POINT_BUDGET`], so an edge that
+/// runs out of points always refuses the face now, where before #1815 one past
+/// [`EDGE_POINT_BUDGET`] kept its stored samples; the plane that shares it refuses
+/// at [`PLANAR_FACE_POINT_BUDGET`] first, so the element was not drawn either way.
+///
+/// Any other error is not an edge to refuse here: the loop keeps the samples the
+/// graph stored, as it did before, and the plane's side, which does refuse,
+/// decides whether the element is drawn.
+fn refined_curved_edge(
+    g: &ObjectGraph,
+    index: &PointerIndex<'_>,
+    face: usize,
+    edge_index: usize,
+    side: usize,
+    original: &[[f64; 2]],
+    limit: usize,
+) -> Result<Vec<[f64; 2]>> {
+    if isoparametric_axis(original).is_some() {
+        return Ok(original.to_vec());
+    }
+    let edge = &g.objects[edge_index];
+    let faces = edge.fields["m_pFace"]
+        .as_array()
+        .context("edge face pair")?;
+    ensure!(faces.len() == 2, "edge face pair length");
+    let Some(other) = index.resolve(edge_index, &faces[1 - side])? else {
+        return Ok(original.to_vec());
+    };
+    let Some(other_surface) = index.resolve(other, &g.objects[other].fields["m_pSurf"])? else {
+        return Ok(original.to_vec());
+    };
+    let Some(own_surface) = index.resolve(face, &g.objects[face].fields["m_pSurf"])? else {
+        return Ok(original.to_vec());
+    };
+    if g.objects[other_surface].class_name != "Plane"
+        || g.objects[own_surface].class_name != "CylSurf"
+    {
+        return Ok(original.to_vec());
+    }
+    let plane = &g.objects[other_surface];
+    let origin = point::<3>(&plane.fields["m_origin"])?;
+    let normal = unit_normal(
+        point::<3>(&plane.fields["m_xVec"])?,
+        point::<3>(&plane.fields["m_yVec"])?,
+    )?;
+    let cylinder = &g.objects[own_surface];
+    let center = point::<3>(&cylinder.fields["m_center"])?;
+    let x_vec = point::<3>(&cylinder.fields["m_xVec"])?;
+    let y_vec = point::<3>(&cylinder.fields["m_yVec"])?;
+    let z_vec = point::<3>(&cylinder.fields["m_zVec"])?;
+    let radius = cylinder.fields["m_radius"]
+        .as_f64()
+        .context("cylinder radius")?;
+    let evaluate = move |uv: [f64; 2]| -> Result<[f64; 3]> {
+        let (sn, cs) = uv[0].sin_cos();
+        Ok(std::array::from_fn(|k| {
+            center[k] + radius * (cs * x_vec[k] + sn * y_vec[k]) + uv[1] * z_vec[k]
+        }))
+    };
+    let envelope = cylinder_envelope(&cylinder.fields["m_Envelope"]["m_corners"])?;
+    let limits = EdgeLimits {
+        depth: EDGE_REFINEMENT_DEPTH,
+        points: limit.saturating_add(1).min(EDGE_POINT_BUDGET),
+    };
+    let refined = refine_crossing_edge_within(&evaluate, origin, normal, original, &limits)
+        .map_err(|error| {
+            // The ring's points left ran out: its budget is below the edge's own.
+            if limits.points < EDGE_POINT_BUDGET && error.to_string() == EDGE_POINTS_EXCEEDED {
+                anyhow!(CYLINDER_BUDGET_EXCEEDED)
+            } else {
+                error
+            }
+        })?;
+    Ok(within_envelope(refined, original, envelope))
+}
+
+/// The parameter box of a cylinder surface, from its `m_Envelope` corners.
+fn cylinder_envelope(corners: &Fv) -> Result<([f64; 2], [f64; 2])> {
+    let corners = corners.as_array().context("cylinder envelope")?;
+    ensure!(corners.len() == 2, "cylinder envelope bounds");
+    Ok((point::<2>(&corners[0])?, point::<2>(&corners[1])?))
+}
+
+/// The points of a refined crossing edge that a cylinder's loop and the plane's
+/// polygon both take: the samples the graph gave, and the points of the edge
+/// inside the cylinder's envelope. The envelope is made from the samples, so a
+/// point of the edge between two of them can lie a sagitta beyond it, and
+/// `cylinder_face` refuses a loop outside its envelope: both sides leave that
+/// point out, so that they hold one list.
+fn within_envelope(
+    refined: Vec<[f64; 2]>,
+    original: &[[f64; 2]],
+    (low, high): ([f64; 2], [f64; 2]),
+) -> Vec<[f64; 2]> {
+    refined
+        .into_iter()
+        .filter(|uv| {
+            original.contains(uv)
+                || (0..2).all(|k| uv[k] >= low[k] - 1e-9 && uv[k] <= high[k] + 1e-9)
+        })
+        .collect()
+}
+
 // Refine a particular shared edge in its curved surface's parameter domain.
 // The planar side is reconstructed from the same evaluated 3D positions, not
-// from interpolation along the old polygon's chords.
+// from interpolation along the old polygon's chords. `limit` is the most points
+// the edge may add to its ring, the first not counted: an edge that would give
+// more is refused as `planar face budget exceeded` before it is built (#1770).
 fn refined_plane_edge(
     g: &ObjectGraph,
     index: &PointerIndex<'_>,
@@ -236,6 +574,7 @@ fn refined_plane_edge(
     edge_index: usize,
     plane_side: usize,
     original: Vec<[f64; 2]>,
+    limit: usize,
 ) -> Result<Vec<[f64; 2]>> {
     let edge = &g.objects[edge_index];
     let faces = edge.fields["m_pFace"]
@@ -316,19 +655,7 @@ fn refined_plane_edge(
     samples.push(point::<2>(&ends[1]["uv"][other_side])?);
     let start = samples[0];
     let end = *samples.last().unwrap();
-    let axis = if (start[1] - end[1]).abs() < 1e-7 && (start[0] - end[0]).abs() > 1e-7 {
-        0
-    } else if (start[0] - end[0]).abs() < 1e-7 && (start[1] - end[1]).abs() > 1e-7 {
-        1
-    } else {
-        bail!("shared curved edge is not an isoparametric interval")
-    };
-    ensure!(
-        samples
-            .iter()
-            .all(|uv| (uv[1 - axis] - start[1 - axis]).abs() < 1e-7),
-        "shared curved edge changes its fixed parameter"
-    );
+    let axis = isoparametric_axis(&samples);
     let plane_index = index
         .resolve(face, &g.objects[face].fields["m_pSurf"])?
         .context("plane surface missing")?;
@@ -374,6 +701,40 @@ fn refined_plane_edge(
             "shared edge surface samples disagree"
         );
     }
+    let Some(axis) = axis else {
+        // An edge that runs across both parameters of the curved face (a slanted
+        // plane through a cylinder is an ellipse in its parameters) has no grid
+        // line to follow: the polygon takes the points of the edge itself that
+        // keep its chords within the bar of the surface, the same points the
+        // curved face's loop takes (#1706).
+        let normal = unit_normal(x, y)?;
+        let limits = EdgeLimits {
+            depth: EDGE_REFINEMENT_DEPTH,
+            points: limit.saturating_add(1).min(EDGE_POINT_BUDGET),
+        };
+        let mut refined =
+            refine_crossing_edge_within(evaluate.as_ref(), origin, normal, &samples, &limits)
+                .map_err(|error| {
+                    // The face's points left, not the edge's own budget, ran out.
+                    if limits.points < EDGE_POINT_BUDGET
+                        && error.to_string() == EDGE_POINTS_EXCEEDED
+                    {
+                        anyhow!(PLANAR_BUDGET_EXCEEDED)
+                    } else {
+                        error
+                    }
+                })?;
+        if kind == "CylSurf" {
+            // The cylinder's loop leaves out the points beyond its envelope, and so
+            // does the polygon, so that the two hold one list.
+            refined = within_envelope(
+                refined,
+                &samples,
+                cylinder_envelope(&g.objects[other_surface].fields["m_Envelope"]["m_corners"])?,
+            );
+        }
+        return refined.into_iter().map(project).collect();
+    };
     let knots = if axis == 0 { u_values } else { v_values };
     let lo = start[axis].min(end[axis]);
     let hi = start[axis].max(end[axis]);
@@ -386,6 +747,12 @@ fn refined_plane_edge(
     if start[axis] > end[axis] {
         values.reverse();
     }
+    // Each is projected through the other face's surface: the face's points left
+    // are counted before the first is.
+    ensure!(
+        values.len() <= limit.saturating_add(1),
+        PLANAR_BUDGET_EXCEEDED
+    );
     values
         .into_iter()
         .map(|t| {
@@ -408,20 +775,53 @@ fn inside(p: [f64; 2], r: &[[f64; 2]]) -> bool {
     }
     hit
 }
+/// Which side of a plane-to-cylinder edge a loop's samples are refined on (#1706).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EdgeSide {
+    /// The loop of a plane: an edge it shares with a curved face follows that
+    /// face's grid ([`refined_plane_edge`]).
+    Plane,
+    /// The loop of a cylinder: an edge it shares with a plane that crosses it
+    /// takes the points the plane's side takes ([`refined_curved_edge`]).
+    Cylinder,
+}
+/// The trim ring of the cylinder face `face`, its loop `li`, held to
+/// [`CYLINDER_RING_POINT_BUDGET`] points (#1815).
 fn ring(
     g: &ObjectGraph,
     index: &PointerIndex<'_>,
     face: usize,
     li: usize,
 ) -> Result<Vec<[f64; 2]>> {
-    ring_impl(g, index, face, li, false)
+    ring_impl(
+        g,
+        index,
+        face,
+        li,
+        EdgeSide::Cylinder,
+        CYLINDER_RING_POINT_BUDGET,
+    )
 }
+/// The edges' points a ring holds once an edge of `edge` points joins its `held`:
+/// the edge's first is the last of the one before it, so it is not counted. `None`
+/// where that is more than `limit`, or does not fit a `usize`.
+fn ring_points_with(held: usize, edge: usize, limit: usize) -> Option<usize> {
+    held.checked_add(edge.saturating_sub(1))
+        .filter(|total| *total <= limit)
+}
+/// The ring of the loop `li` of `face`, in the surface's parameters. A ring is
+/// bounded as it is built: the edges' points it holds may not pass `limit`, the
+/// points the face's rings may still hold, counted as each edge is read and before
+/// any of its refinement is made, so that the refusal does not wait for the ring to
+/// be built (#1770, #1815). A planar face's rings are refused past it as
+/// [`PLANAR_BUDGET_EXCEEDED`], a cylinder's trim ring as [`CYLINDER_BUDGET_EXCEEDED`].
 fn ring_impl(
     g: &ObjectGraph,
     index: &PointerIndex<'_>,
     face: usize,
     li: usize,
-    refine_plane: bool,
+    refine: EdgeSide,
+    limit: usize,
 ) -> Result<Vec<[f64; 2]>> {
     let l = &g.objects[li];
     ensure!(
@@ -439,6 +839,11 @@ fn ring_impl(
         .context("empty loop")?;
     let mut seen = BTreeSet::new();
     let mut segments = Vec::new();
+    let mut held = 0usize;
+    let exceeded = match refine {
+        EdgeSide::Plane => PLANAR_BUDGET_EXCEEDED,
+        EdgeSide::Cylinder => CYLINDER_BUDGET_EXCEEDED,
+    };
     while cur != li {
         ensure!(seen.insert(cur), "edge chain cycle before loop sentinel");
         let e = &g.objects[cur];
@@ -459,17 +864,31 @@ fn ring_impl(
             .as_array()
             .context("edge endpoints")?;
         ensure!(endpoints.len() == 2, "edge endpoint count");
-        let mut pts = vec![point::<2>(&endpoints[0]["uv"][side])?];
-        for p in e.fields["m_interiorEdgePnts"]
+        let interior = e.fields["m_interiorEdgePnts"]
             .as_array()
-            .context("edge interior points")?
-        {
+            .context("edge interior points")?;
+        // The graph's own points of the edge, ends included, before any is copied.
+        ring_points_with(held, interior.len() + 2, limit).context(exceeded)?;
+        let mut pts = vec![point::<2>(&endpoints[0]["uv"][side])?];
+        for p in interior {
             pts.push(point::<2>(&p["uv"][side])?)
         }
         pts.push(point::<2>(&endpoints[1]["uv"][side])?);
-        if refine_plane {
-            pts = refined_plane_edge(g, index, face, cur, side, pts)?;
-        }
+        pts = match refine {
+            EdgeSide::Plane => refined_plane_edge(g, index, face, cur, side, pts, limit - held)?,
+            EdgeSide::Cylinder => {
+                match refined_curved_edge(g, index, face, cur, side, &pts, limit - held) {
+                    Ok(refined) => refined,
+                    // The ring's points running out is the one error a cylinder's loop
+                    // refuses; any other keeps the samples the graph stored.
+                    Err(error) if error.to_string() == CYLINDER_BUDGET_EXCEEDED => {
+                        return Err(error);
+                    }
+                    Err(_) => pts,
+                }
+            }
+        };
+        held = ring_points_with(held, pts.len(), limit).context(exceeded)?;
         segments.push(pts);
         cur = index
             .resolve(cur, &e.fields["m_next"][side])?
@@ -642,8 +1061,26 @@ fn shared_area_of(a: &[Triangle], b: &[Triangle], work: &mut usize) -> Result<f6
 /// centroid test, because two non-convex tiles can overlap with neither
 /// centroid inside the other, and not by bounding boxes, which say nothing of
 /// a notch. A ring that crosses itself, or more regions or triangle pairs than
-/// the bounds allow, does not tile.
-fn regions_tile(parent: &[[f64; 2]], regions: &[&[[f64; 2]]], tolerance: f64) -> bool {
+/// the bounds allow, does not tile. Testing a region's vertices against the parent
+/// costs the product of their counts, which is charged to `work`, the face's counter
+/// ([`PLANAR_WORK_BUDGET`]): a face past it does not tile (#1770).
+fn regions_tile(
+    parent: &[[f64; 2]],
+    regions: &[&[[f64; 2]]],
+    tolerance: f64,
+    work: &mut u64,
+) -> bool {
+    regions_tile_within(parent, regions, tolerance, work, PLANAR_WORK_BUDGET)
+}
+
+/// [`regions_tile`] with the work it may charge to `face_work` given as `budget`.
+fn regions_tile_within(
+    parent: &[[f64; 2]],
+    regions: &[&[[f64; 2]]],
+    tolerance: f64,
+    face_work: &mut u64,
+    budget: u64,
+) -> bool {
     if regions.len() > 256 {
         return false;
     }
@@ -656,6 +1093,11 @@ fn regions_tile(parent: &[[f64; 2]], regions: &[&[[f64; 2]]], tolerance: f64) ->
     let mut covered = 0.;
     let mut work = 0usize;
     for outline in regions {
+        *face_work =
+            face_work.saturating_add((outline.len() as u64).saturating_mul(parent.len() as u64));
+        if *face_work > budget {
+            return false;
+        }
         if !outline.iter().all(|&p| inside_or_on(p, parent, tolerance)) {
             return false;
         }
@@ -691,7 +1133,8 @@ fn plane_regions_tile(
     index: &PointerIndex<'_>,
     fi: usize,
     plane: usize,
-    regions: &[Value],
+    regions: &[Fv],
+    work: &mut u64,
 ) -> Result<()> {
     let basis = |si: usize| -> Result<[[f64; 3]; 3]> {
         let s = &g.objects[si];
@@ -701,7 +1144,10 @@ fn plane_regions_tile(
             point::<3>(&s.fields["m_yVec"])?,
         ])
     };
-    let single_ring = |face: usize| -> Result<Vec<[f64; 2]>> {
+    // The parent's ring and every region's are earcut and tested against each other,
+    // so together they hold no more points than one planar face may (#1770).
+    let mut left = PLANAR_FACE_POINT_BUDGET;
+    let mut single_ring = |face: usize| -> Result<Vec<[f64; 2]>> {
         let li = index
             .resolve(face, &g.objects[face].fields["m_pFirstLoop"])?
             .context(FACE_REGIONS)?;
@@ -711,7 +1157,9 @@ fn plane_regions_tile(
                 .is_none(),
             FACE_REGIONS
         );
-        ring(g, index, face, li)
+        let ring = ring_impl(g, index, face, li, EdgeSide::Cylinder, left)?;
+        left = left.saturating_sub(ring.len());
+        Ok(ring)
     };
     let parent_basis = basis(plane)?;
     let parent = single_ring(fi)?;
@@ -726,7 +1174,7 @@ fn plane_regions_tile(
             region.class_name == "Face"
                 && region.fields["m_faceRegions"]
                     .as_array()
-                    .is_some_and(Vec::is_empty),
+                    .is_some_and(|items| items.is_empty()),
             FACE_REGIONS
         );
         let si = index
@@ -744,7 +1192,16 @@ fn plane_regions_tile(
         outlines.push(single_ring(ri)?);
     }
     let rings: Vec<&[[f64; 2]]> = outlines.iter().map(Vec::as_slice).collect();
-    ensure!(regions_tile(&parent, &rings, 1e-7), FACE_REGIONS);
+    let tiles = regions_tile(&parent, &rings, 1e-7, work);
+    // A face the budget stopped says so, as every other planar face does.
+    ensure!(
+        tiles,
+        if *work > PLANAR_WORK_BUDGET {
+            PLANAR_BUDGET_EXCEEDED
+        } else {
+            FACE_REGIONS
+        }
+    );
     Ok(())
 }
 /// Returns no mesh for a face with no trimming boundary (an auxiliary surface).
@@ -779,8 +1236,11 @@ fn face_indexed(g: &ObjectGraph, index: &PointerIndex<'_>, fi: usize) -> Result<
         "unsupported surface {}",
         p.class_name
     );
+    // The work of the whole face: the tests of its regions, its outer rings and a
+    // second try after a split share one budget (#1748, #1770).
+    let mut work = 0;
     if !regions.is_empty() {
-        plane_regions_tile(g, index, fi, pi, regions)?;
+        plane_regions_tile(g, index, fi, pi, regions, &mut work)?;
     }
     let origin = point::<3>(&p.fields["m_origin"])?;
     let x = point::<3>(&p.fields["m_xVec"])?;
@@ -801,14 +1261,124 @@ fn face_indexed(g: &ObjectGraph, index: &PointerIndex<'_>, fi: usize) -> Result<
     }
     let mut loops = Vec::new();
     let mut seen = BTreeSet::new();
+    let mut points = 0;
     loop {
         ensure!(seen.insert(li), "loop-list cycle");
-        loops.push(ring_impl(g, index, fi, li, true)?);
+        let ring = ring_impl(
+            g,
+            index,
+            fi,
+            li,
+            EdgeSide::Plane,
+            PLANAR_FACE_POINT_BUDGET - points,
+        )?;
+        points = planar_points_with(points, ring.len()).context(PLANAR_BUDGET_EXCEEDED)?;
+        loops.push(ring);
         match index.resolve(li, &g.objects[li].fields["m_nextLoop"])? {
             Some(next) => li = next,
             None => break,
         }
     }
+    let (vertices, triangles) = match plane_mesh(&loops, orient, origin, x, y, &mut work) {
+        Err(error) if error.to_string().starts_with(AREA_MISMATCH) => {
+            // The outline of two lobes that touch at a vertex is one ring that visits
+            // it twice, which earcut covers a sliver beside (#1732): split, once.
+            match split_pinched_rings(&loops, &mut work, PLANAR_WORK_BUDGET)? {
+                Some(split) => {
+                    plane_mesh(&split, orient, origin, x, y, &mut work).map_err(|second| {
+                        // A face the second try runs out of budget on says so.
+                        if second.to_string().starts_with(PLANAR_BUDGET_EXCEEDED) {
+                            second
+                        } else {
+                            error
+                        }
+                    })?
+                }
+                None => return Err(error),
+            }
+        }
+        other => other?,
+    };
+    let vertex_count = vertices.len();
+    Ok(Some(FaceMesh {
+        face_index: fi,
+        face_tag: f.fields["m_GInfo"]["m_tag"].as_i64().unwrap_or(-1),
+        render_style_id: crate::native_metadata::identifier(&f.fields["m_renderStyleId"])
+            .context("render style id")?,
+        vertices,
+        triangles,
+        normal,
+        normals: vec![normal; vertex_count],
+        analytic_surface: None,
+        trim_uv: Vec::new(),
+    }))
+}
+
+/// The text a planar face is refused with when its triangles do not add up to its rings' area.
+const AREA_MISMATCH: &str = "triangulated area mismatch";
+
+/// The most points all the rings of one planar face may hold (#1748). Earcut,
+/// `retain_boundary_points` and `split_pinched_rings` are super-linear in a face's
+/// points, and a hostile file can give each edge of a ring up to
+/// [`EDGE_POINT_BUDGET`] of them: they are counted as each edge is read, before the
+/// edge is refined, so that no more than the points left are ever made (#1770); the
+/// parent's ring and the regions' rings of a face with regions share one such budget,
+/// the trimmed-cell path has its own budgets. The
+/// largest planar face of the 2023 to 2027 samples, the BIM4LCA models and the
+/// reference models holds 2,308 points (Autodesk's Snowdon Towers Architectural), so
+/// this is 4.3 times it.
+const PLANAR_FACE_POINT_BUDGET: usize = 10_000;
+
+/// The most work one planar face may ask in all (#1748): its outer rings and the
+/// second try after a split share it. It is counted by [`retain_boundary_points_within`]
+/// (for each point earcut left out, every triangle edge is tested against every
+/// boundary edge, so the work grows with the cube of a face's points where a ring has
+/// many collinear ones) and by [`split_pinched_rings`] (every pair of points of a
+/// ring it compares). The most any one call of the first asks of the corpus is
+/// 14,597,894 (the `rme` samples), so this is 17 times it, about two seconds of one
+/// face; no face of the corpus is refused by it.
+const PLANAR_WORK_BUDGET: u64 = 250_000_000;
+
+/// The text a planar face is refused with when its rings hold more points than
+/// [`PLANAR_FACE_POINT_BUDGET`], before any of them is triangulated.
+const PLANAR_BUDGET_EXCEEDED: &str = "planar face budget exceeded";
+
+/// The most points the trim ring of one cylinder face may hold (#1815). Its edges
+/// shared with a plane that crosses it take the points that plane's polygon takes,
+/// and each plane's are held to [`PLANAR_FACE_POINT_BUDGET`]; a cylinder cut by its
+/// two end planes, the column or pipe, needs at most twice that. Without it each
+/// such edge could hold [`EDGE_POINT_BUDGET`] points and a loop of many the sum,
+/// all of which the face's tessellation then walks.
+const CYLINDER_RING_POINT_BUDGET: usize = 2 * PLANAR_FACE_POINT_BUDGET;
+
+/// The text a cylinder face is refused with when its trim ring would hold more
+/// points than [`CYLINDER_RING_POINT_BUDGET`], counted before each edge is refined.
+const CYLINDER_BUDGET_EXCEEDED: &str = "cylinder trim budget exceeded";
+
+/// The points a planar face holds once a ring of `ring` points joins the `points` it
+/// has, or `None` where that is over [`PLANAR_FACE_POINT_BUDGET`] or does not fit a
+/// `usize`.
+fn planar_points_with(points: usize, ring: usize) -> Option<usize> {
+    points
+        .checked_add(ring)
+        .filter(|total| *total <= PLANAR_FACE_POINT_BUDGET)
+}
+
+/// The vertices of a planar face and the triangles on them, by their indices.
+type PlaneMesh = (Vec<[f64; 3]>, Vec<[u32; 3]>);
+
+/// The vertices on the plane (`origin + u x + v y`) and the triangles of a planar face's
+/// rings `loops`, in the plane's own coordinates: every ring at an even nesting depth is
+/// an outer ring and the rings one level in are its holes. The triangles must add up to
+/// the area the rings enclose.
+fn plane_mesh(
+    loops: &[Vec<[f64; 2]>],
+    orient: bool,
+    origin: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+    work: &mut u64,
+) -> Result<PlaneMesh> {
     // A face can contain multiple disconnected outer rings, with nested holes.
     let depths: Vec<_> = loops
         .iter()
@@ -872,7 +1442,7 @@ fn face_indexed(g: &ObjectGraph, index: &PointerIndex<'_>, fi: usize) -> Result<
         earcut_triangles.retain(|t| {
             cross(pts[t[0] as usize], pts[t[1] as usize], pts[t[2] as usize]).abs() > 1e-12
         });
-        retain_boundary_points(&pts, &boundary_edges, &mut earcut_triangles)?;
+        retain_boundary_points(&pts, &boundary_edges, &mut earcut_triangles, work)?;
         let mut sum = 0.;
         let base = vertices.len() as u32;
         for t in &mut earcut_triangles {
@@ -892,7 +1462,7 @@ fn face_indexed(g: &ObjectGraph, index: &PointerIndex<'_>, fi: usize) -> Result<
         }
         ensure!(
             (sum - expected).abs() <= 1e-7 * expected.max(1.),
-            "triangulated area mismatch: {sum} vs {expected}"
+            "{AREA_MISMATCH}: {sum} vs {expected}"
         );
         for uv in pts {
             vertices.push(std::array::from_fn(|k| {
@@ -903,19 +1473,61 @@ fn face_indexed(g: &ObjectGraph, index: &PointerIndex<'_>, fi: usize) -> Result<
     if triangles.is_empty() {
         bail!("no bounded triangles")
     }
-    let vertex_count = vertices.len();
-    Ok(Some(FaceMesh {
-        face_index: fi,
-        face_tag: f.fields["m_GInfo"]["m_tag"].as_i64().unwrap_or(-1),
-        render_style_id: crate::native_metadata::identifier(&f.fields["m_renderStyleId"])
-            .context("render style id")?,
-        vertices,
-        triangles,
-        normal,
-        normals: vec![normal; vertex_count],
-        analytic_surface: None,
-        trim_uv: Vec::new(),
-    }))
+    Ok((vertices, triangles))
+}
+
+/// The rings of `loops` with each that visits a vertex twice split there into the rings
+/// it is made of (the outline of two lobes that touch at a vertex is one such ring), or
+/// `None` when no ring does. A ring of two points has no area and is dropped; a ring
+/// that starts at the shared vertex is turned to start at the next, so that the nesting
+/// test does not read the point where two rings touch (#1732). Each pair of points it
+/// compares is a unit of the face's `work`, so that a ring of many lobes is refused
+/// past `budget` instead of searched in time that grows with the cube of its points
+/// (#1748).
+fn split_pinched_rings(
+    loops: &[Vec<[f64; 2]>],
+    work: &mut u64,
+    budget: u64,
+) -> Result<Option<Vec<Vec<[f64; 2]>>>> {
+    let mut out = Vec::new();
+    let mut split_any = false;
+    for ring in loops {
+        let mut pending = vec![ring.clone()];
+        while let Some(mut ring) = pending.pop() {
+            ring.dedup_by(|a, b| close(*a, *b));
+            while ring.len() > 1 && close(ring[0], ring[ring.len() - 1]) {
+                ring.pop();
+            }
+            let mut twice = None;
+            'search: for i in 0..ring.len() {
+                for j in i + 1..ring.len() {
+                    *work += 1;
+                    ensure!(*work <= budget, PLANAR_BUDGET_EXCEEDED);
+                    if close(ring[i], ring[j]) {
+                        twice = Some((i, j));
+                        break 'search;
+                    }
+                }
+            }
+            let Some((i, j)) = twice else {
+                if ring.len() >= 3 {
+                    out.push(ring);
+                }
+                continue;
+            };
+            split_any = true;
+            let mut lobe = ring[i..j].to_vec();
+            lobe.rotate_left(1);
+            let mut rest = ring[..i].to_vec();
+            rest.extend_from_slice(&ring[j..]);
+            if i == 0 {
+                rest.rotate_left(1);
+            }
+            pending.push(lobe);
+            pending.push(rest);
+        }
+    }
+    Ok(split_any.then_some(out))
 }
 
 /// Tessellate one Face whose saved surface is a bounded cylindrical surface.
@@ -939,7 +1551,7 @@ pub fn cylinder_face(
     ensure!(
         face.fields["m_faceRegions"]
             .as_array()
-            .is_some_and(Vec::is_empty),
+            .is_some_and(|items| items.is_empty()),
         "face regions need subdivision"
     );
     let surface_index = index
@@ -1342,6 +1954,10 @@ fn is_false(value: &bool) -> bool {
 }
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct GraphicsMeshes {
+    /// A successfully decoded face used a null ruled-profile pointer's point.
+    /// Body admission still requires the owning element's measured category.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub has_collapsed_ruled_profile: bool,
     pub primitives: Vec<Primitive>,
     pub diagnostics: Vec<String>,
     pub unbounded_faces: usize,
@@ -1478,6 +2094,9 @@ fn graphics_impl<'a>(
         ..Default::default()
     };
     let mut pointer_indices = BTreeMap::new();
+    // Each owner graph's empty-trim evidence, from one walk of it: the walk
+    // for each unbounded face cost faces × objects (#1833).
+    let mut empty_trims = BTreeMap::new();
     for selected in selection.selected {
         let g = match selected.source_owner_id {
             None => g,
@@ -1505,6 +2124,17 @@ fn graphics_impl<'a>(
                     let fi = index.resolve(oi, ptr)?.context("null geometry face")?;
                     match face_indexed(g, index, fi)? {
                         Some(m) => {
+                            let face = &g.objects[fi];
+                            if let Some(si) = index.resolve(fi, &face.fields["m_pSurf"])? {
+                                let surface = &g.objects[si];
+                                if surface.class_name == "RuledSurf"
+                                    && ["m_pProfileCurve1", "m_pProfileCurve2"].iter().any(|name| {
+                                        surface.fields[*name]["pointer_token"].as_u64() == Some(0)
+                                    })
+                                {
+                                    out.has_collapsed_ruled_profile = true;
+                                }
+                            }
                             let normals = if m.normals.len() == m.vertices.len() {
                                 m.normals.clone()
                             } else {
@@ -1524,7 +2154,12 @@ fn graphics_impl<'a>(
                             })
                         }
                         None => {
-                            if crate::native_empty_faces::is_observed_empty_trim_face(g, fi) {
+                            let empty_trim = empty_trims
+                                .entry(selected.source_owner_id)
+                                .or_insert_with(|| {
+                                    crate::native_empty_faces::EmptyTrimIndex::new(g)
+                                });
+                            if empty_trim.is_observed_empty_trim_face(g, fi) {
                                 out.empty_trim_faces += 1;
                             } else {
                                 out.unbounded_faces += 1;
@@ -1706,9 +2341,23 @@ fn transform(p: &mut Primitive, m: [[f64; 4]; 4]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normals_follow_winding, regions_tile};
+    use super::{
+        EDGE_SAGITTA, EdgeLimits, PLANAR_FACE_POINT_BUDGET, PLANAR_WORK_BUDGET, area, cross,
+        distance_to_chord, isoparametric_axis, normals_follow_winding, planar_points_with,
+        refine_crossing_edge, refine_crossing_edge_within, regions_tile, regions_tile_within,
+        retain_boundary_points_within, ring_points_with, split_pinched_rings, within_envelope,
+    };
+    use anyhow::Result;
+    use std::collections::BTreeSet;
+    use std::f64::consts::{FRAC_PI_2, PI};
 
     const TOLERANCE: f64 = 1e-7;
+
+    // The ring split on a fresh face's work, the real budget.
+    fn split(loops: &[Vec<[f64; 2]>]) -> Option<Vec<Vec<[f64; 2]>>> {
+        let mut work = 0;
+        split_pinched_rings(loops, &mut work, PLANAR_WORK_BUDGET).unwrap()
+    }
 
     // One facet whose winding normal is +z.
     fn follows(normal: [f64; 3]) -> bool {
@@ -1859,7 +2508,47 @@ mod tests {
 
     fn tile(parent: &[[f64; 2]], regions: &[Vec<[f64; 2]>]) -> bool {
         let rings: Vec<&[[f64; 2]]> = regions.iter().map(Vec::as_slice).collect();
-        regions_tile(parent, &rings, TOLERANCE)
+        regions_tile(parent, &rings, TOLERANCE, &mut 0)
+    }
+
+    // How the work of a face's regions can go wrong: counted for each call and not for the
+    // face, so that a second call on its counter is let through; not counted for a
+    // region at all; or a refusal for the budget that cannot be told from a ring that does
+    // not tile (the caller says which by whether the counter is past the budget).
+    #[test]
+    fn the_vertex_tests_of_a_faces_regions_are_charged_to_the_faces_work() {
+        let parent = rect(0., 0., 2., 1.);
+        let regions = [rect(0., 0., 1., 1.), rect(1., 0., 2., 1.)];
+        let rings: Vec<&[[f64; 2]]> = regions.iter().map(Vec::as_slice).collect();
+        // Each region's 4 vertices against the parent's 4: 16 a region, 32 in all.
+        let mut work = 0;
+        assert!(regions_tile_within(
+            &parent, &rings, TOLERANCE, &mut work, 32
+        ));
+        assert_eq!(work, 32);
+        let mut work = 0;
+        assert!(!regions_tile_within(
+            &parent, &rings, TOLERANCE, &mut work, 31
+        ));
+        assert!(work > 31);
+        let mut work = 0;
+        assert!(regions_tile_within(
+            &parent, &rings, TOLERANCE, &mut work, 40
+        ));
+        assert!(!regions_tile_within(
+            &parent, &rings, TOLERANCE, &mut work, 40
+        ));
+        assert!(work > 40);
+        // Regions that do not tile leave the counter within the budget.
+        let left = rect(0., 0., 1., 1.);
+        let twice = [left.as_slice(), left.as_slice()];
+        let mut work = 0;
+        assert!(!regions_tile_within(
+            &parent, &twice, TOLERANCE, &mut work, 100
+        ));
+        assert!(work <= 100);
+        // At the real budget the face tiles, as it does through `tile`.
+        assert!(tile(&parent, &regions));
     }
 
     // A region listed twice and the other half missing: the areas add up to the
@@ -1954,5 +2643,468 @@ mod tests {
             &l_shape(),
             &[rect(0., 0., 2., 1.), rect(0., 1., 1., 2.)]
         ));
+    }
+
+    // A cylinder of radius 2 about the vertical through (10, 20, 5): (u, v) is
+    // the angle and the height above 5.
+    fn cylinder(uv: [f64; 2]) -> Result<[f64; 3]> {
+        Ok([10. + 2. * uv[0].cos(), 20. + 2. * uv[0].sin(), 5. + uv[1]])
+    }
+    // The same of radius 20.
+    fn wide_cylinder(uv: [f64; 2]) -> Result<[f64; 3]> {
+        Ok([10. + 20. * uv[0].cos(), 20. + 20. * uv[0].sin(), 5. + uv[1]])
+    }
+    // The slanted plane z = 5 + 0.5 (x - 10), by a point and a unit normal: it cuts the
+    // cylinder along v = cos u.
+    fn slanted_plane() -> ([f64; 3], [f64; 3]) {
+        let length = (0.25f64 + 1.).sqrt();
+        ([10., 20., 5.], [-0.5 / length, 0., 1. / length])
+    }
+    // The plane z = 5 + 3 (x - 10): it cuts the cylinder along v = 6 cos u, which is
+    // steeper in v than in u over half of every turn, so the parameter solved for there is u.
+    fn steep_plane() -> ([f64; 3], [f64; 3]) {
+        let length = 10f64.sqrt();
+        ([10., 20., 5.], [-3. / length, 0., 1. / length])
+    }
+    fn height_over(plane: ([f64; 3], [f64; 3]), p: [f64; 3]) -> f64 {
+        (0..3)
+            .map(|k| (p[k] - plane.0[k]) * plane.1[k])
+            .sum::<f64>()
+            .abs()
+    }
+    // The cut of the slanted plane across the cylinder from u = 0 to a quarter turn, in
+    // `count` samples.
+    fn cut(count: usize) -> Vec<[f64; 2]> {
+        (0..count)
+            .map(|i| {
+                let u = FRAC_PI_2 * i as f64 / (count - 1) as f64;
+                [u, u.cos()]
+            })
+            .collect()
+    }
+    // A full turn of a cut of height `scale` cos u in `count` samples, with a phase of
+    // 0.37 so that no sample lands on an extremum of the cut.
+    fn turn(count: usize, scale: f64) -> Vec<[f64; 2]> {
+        (0..count)
+            .map(|i| {
+                let u = 2. * PI * (i as f64 + 0.37) / count as f64;
+                [u, scale * u.cos()]
+            })
+            .collect()
+    }
+    // Every point of the true edge between two refined neighbours (v = scale cos u, taken
+    // from the formula and not the solver) is within the bound of the chord that joins them.
+    fn assert_chords_hold_the_edge(refined: &[[f64; 2]], scale: f64) {
+        for pair in refined.windows(2) {
+            let (a, b) = (cylinder(pair[0]).unwrap(), cylinder(pair[1]).unwrap());
+            for step in 0..=400 {
+                let u = pair[0][0] + (pair[1][0] - pair[0][0]) * step as f64 / 400.;
+                let edge = cylinder([u, scale * u.cos()]).unwrap();
+                assert!(
+                    distance_to_chord(edge, a, b) <= EDGE_SAGITTA * 1.05 + 1e-9,
+                    "{pair:?} at u = {u}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sparse_samples_of_a_slanted_cut_gain_points_on_the_cut() {
+        let plane = slanted_plane();
+        let coarse = cut(2);
+        let refined = refine_crossing_edge(&cylinder, plane.0, plane.1, &coarse).unwrap();
+        assert!(refined.len() > 2);
+        for uv in &refined {
+            assert!(height_over(plane, cylinder(*uv).unwrap()) < 1e-8, "{uv:?}");
+        }
+        assert_chords_hold_the_edge(&refined, 1.);
+        // The samples the graph gave are kept, first and last.
+        assert_eq!(refined[0], coarse[0]);
+        assert_eq!(*refined.last().unwrap(), coarse[1]);
+    }
+
+    #[test]
+    fn samples_already_within_the_bound_gain_nothing() {
+        let plane = slanted_plane();
+        let dense = cut(200);
+        assert_eq!(
+            refine_crossing_edge(&cylinder, plane.0, plane.1, &dense).unwrap(),
+            dense
+        );
+        // Two samples closer than the bound hold the edge between them within it.
+        let near = [[2., 2f64.cos()], [2.0001, 2.0001f64.cos()]];
+        assert_eq!(
+            refine_crossing_edge(&cylinder, plane.0, plane.1, &near).unwrap(),
+            near.to_vec()
+        );
+    }
+
+    #[test]
+    fn a_turn_sampled_off_its_extrema_is_refined_where_the_edge_bulges_past_its_samples() {
+        // A sample interval that holds the extremum of v has the edge past both its
+        // samples, so the value solved for lies outside theirs: such an interval is the
+        // rule on a closed ellipse, and a range test on that value refused every one.
+        let plane = slanted_plane();
+        for count in [8, 12, 24, 48] {
+            let samples = turn(count, 1.);
+            let refined = refine_crossing_edge(&cylinder, plane.0, plane.1, &samples).unwrap();
+            assert!(refined.len() > samples.len(), "{count}");
+            for uv in &refined {
+                assert!(height_over(plane, cylinder(*uv).unwrap()) < 1e-8, "{uv:?}");
+            }
+            assert_chords_hold_the_edge(&refined, 1.);
+        }
+    }
+
+    #[test]
+    fn samples_straddling_an_extremum_gain_the_extremum() {
+        let plane = slanted_plane();
+        let samples = [[-PI / 12., (PI / 12.).cos()], [PI / 12., (PI / 12.).cos()]];
+        let refined = refine_crossing_edge(&cylinder, plane.0, plane.1, &samples).unwrap();
+        assert!(
+            refined
+                .iter()
+                .any(|uv| uv[0].abs() < 1e-9 && (uv[1] - 1.).abs() < 1e-9),
+            "{refined:?}"
+        );
+        assert_chords_hold_the_edge(&refined, 1.);
+    }
+
+    #[test]
+    fn a_steep_cut_is_refined_and_holds_the_edge_where_u_is_the_parameter_solved_for() {
+        let plane = steep_plane();
+        for count in [8, 12, 24] {
+            let samples = turn(count, 6.);
+            let refined = refine_crossing_edge(&cylinder, plane.0, plane.1, &samples)
+                .unwrap_or_else(|error| panic!("{count}: {error:#}"));
+            for uv in &refined {
+                assert!(height_over(plane, cylinder(*uv).unwrap()) < 1e-8, "{uv:?}");
+            }
+            assert_chords_hold_the_edge(&refined, 6.);
+        }
+    }
+
+    #[test]
+    fn a_quarter_turn_of_a_wide_cylinder_in_two_samples_is_refined_to_the_bound() {
+        let plane = slanted_plane();
+        let samples = [[0., 10.], [FRAC_PI_2, 0.]];
+        let refined = refine_crossing_edge(&wide_cylinder, plane.0, plane.1, &samples).unwrap();
+        assert!(refined.len() > 100);
+        for uv in &refined {
+            assert!(
+                height_over(plane, wide_cylinder(*uv).unwrap()) < 1e-8,
+                "{uv:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_point_of_the_plane_far_from_the_span_is_refused() {
+        // The plane z = 100 meets the cylinder, a long way above the cut.
+        let error =
+            refine_crossing_edge(&cylinder, [10., 20., 100.], [0., 0., 1.], &cut(2)).unwrap_err();
+        assert!(format!("{error:#}").contains("left its span"), "{error:#}");
+    }
+
+    #[test]
+    fn a_span_still_above_the_bound_at_the_depth_limit_is_refused() {
+        // The sparse quarter turn needs about a dozen halvings; two are not enough.
+        let plane = slanted_plane();
+        let limits = EdgeLimits {
+            depth: 2,
+            points: 1_000,
+        };
+        let error =
+            refine_crossing_edge_within(&cylinder, plane.0, plane.1, &cut(2), &limits).unwrap_err();
+        assert!(format!("{error:#}").contains("2 halvings"), "{error:#}");
+        // With the limits of the rule it is refined.
+        assert!(refine_crossing_edge(&cylinder, plane.0, plane.1, &cut(2)).is_ok());
+    }
+
+    #[test]
+    fn an_edge_that_asks_for_more_points_than_the_budget_is_refused() {
+        let plane = slanted_plane();
+        let limits = EdgeLimits {
+            depth: 32,
+            points: 3,
+        };
+        let error =
+            refine_crossing_edge_within(&cylinder, plane.0, plane.1, &cut(2), &limits).unwrap_err();
+        assert!(format!("{error:#}").contains("point budget"), "{error:#}");
+    }
+
+    #[test]
+    fn a_surface_that_gives_no_point_stops_the_refinement() {
+        let plane = slanted_plane();
+        let broken = |uv: [f64; 2]| -> Result<[f64; 3]> {
+            if uv[0] > 0.7 && uv[0] < 0.8 {
+                anyhow::bail!("no point")
+            }
+            cylinder(uv)
+        };
+        assert!(refine_crossing_edge(&broken, plane.0, plane.1, &cut(2)).is_err());
+    }
+
+    #[test]
+    fn one_sample_is_no_edge_and_a_surface_of_no_numbers_is_refused() {
+        let plane = slanted_plane();
+        assert!(refine_crossing_edge(&cylinder, plane.0, plane.1, &cut(2)[..1]).is_err());
+        let nan = |_: [f64; 2]| -> Result<[f64; 3]> { Ok([f64::NAN; 3]) };
+        assert!(refine_crossing_edge(&nan, plane.0, plane.1, &cut(2)).is_err());
+    }
+
+    #[test]
+    fn a_point_beyond_the_envelope_is_left_out_of_the_list_both_sides_take() {
+        let original = [[0., 0.], [1., 1.]];
+        let refined = vec![[0., 0.], [0.5, 0.4], [0.9, 1.0004], [1., 1.]];
+        // The point at v = 1.0004 is past the envelope's top, 1; the samples stay
+        // wherever they are, and a point inside stays.
+        let kept = within_envelope(refined, &original, ([0., 0.], [1., 1.]));
+        assert_eq!(kept, vec![[0., 0.], [0.5, 0.4], [1., 1.]]);
+        let outside = within_envelope(
+            vec![[0., 0.], [2., 2.]],
+            &[[0., 0.], [2., 2.]],
+            ([0., 0.], [1., 1.]),
+        );
+        assert_eq!(outside, vec![[0., 0.], [2., 2.]]);
+    }
+
+    #[test]
+    fn an_edge_along_one_parameter_is_isoparametric_and_one_across_both_is_not() {
+        assert_eq!(
+            isoparametric_axis(&[[0., 1.], [0.5, 1.], [2., 1.]]),
+            Some(0)
+        );
+        assert_eq!(
+            isoparametric_axis(&[[3., 0.], [3., 0.5], [3., 2.]]),
+            Some(1)
+        );
+        // Both change, the endpoints agree on neither or on both, or a sample
+        // drifts off the constant parameter, and a single sample is no edge.
+        assert_eq!(isoparametric_axis(&cut(5)), None);
+        assert_eq!(isoparametric_axis(&[[0., 1.], [2., 1.], [0., 1.]]), None);
+        assert_eq!(isoparametric_axis(&[[0., 1.], [0.5, 1.1], [2., 1.]]), None);
+        assert_eq!(isoparametric_axis(&[[0., 1.]]), None);
+        assert_eq!(isoparametric_axis(&[]), None);
+    }
+
+    // Two triangles that touch at the crown (1, 1), visited as one ring: the shape of the
+    // outline of the Snowdon sink face of #1732, whose points 10 and 21 are one point.
+    fn lobes() -> Vec<[f64; 2]> {
+        vec![[0., 1.], [0., 0.], [1., 1.], [2., 0.], [2., 1.], [1., 1.]]
+    }
+
+    fn total_area(rings: &[Vec<[f64; 2]>]) -> f64 {
+        rings.iter().map(|ring| area(ring).abs()).sum()
+    }
+
+    #[test]
+    fn a_ring_that_visits_no_vertex_twice_is_not_split() {
+        let square = vec![[0., 0.], [1., 0.], [1., 1.], [0., 1.]];
+        assert!(split(std::slice::from_ref(&square)).is_none());
+        // Repeating the first point to close the ring, or a point twice in a row, is no pinch.
+        let closed = vec![[0., 0.], [1., 0.], [1., 1.], [0., 1.], [0., 0.]];
+        assert!(split(&[closed]).is_none());
+        let doubled = vec![[0., 0.], [1., 0.], [1., 0.], [1., 1.], [0., 1.]];
+        assert!(split(&[doubled]).is_none());
+        assert!(split(&[]).is_none());
+    }
+
+    #[test]
+    fn two_lobes_touching_at_a_vertex_become_two_rings_that_do_not_start_there() {
+        let rings = split(&[lobes()]).unwrap();
+        assert_eq!(rings.len(), 2);
+        assert!(rings.iter().all(|ring| ring.len() >= 3));
+        // Neither starts at the crown, where the nesting test would read a boundary point.
+        assert!(rings.iter().all(|ring| ring[0] != [1., 1.]));
+        // The lobes' areas are the whole ring's.
+        assert!((total_area(&rings) - area(&lobes()).abs()).abs() < 1e-12);
+        assert!((total_area(&rings) - 1.).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_ring_that_starts_at_the_shared_vertex_is_split_too() {
+        let ring = vec![[1., 1.], [0., 1.], [0., 0.], [1., 1.], [2., 0.], [2., 1.]];
+        let rings = split(&[ring]).unwrap();
+        assert_eq!(rings.len(), 2);
+        assert!(
+            rings
+                .iter()
+                .all(|ring| ring.len() >= 3 && ring[0] != [1., 1.])
+        );
+        assert!((total_area(&rings) - 1.).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_spike_out_and_back_leaves_the_ring_without_it() {
+        let ring = vec![[0., 0.], [2., 0.], [2., 2.], [3., 2.], [2., 2.], [0., 2.]];
+        let rings = split(&[ring]).unwrap();
+        assert_eq!(rings.len(), 1);
+        assert_eq!(rings[0].len(), 4);
+        assert!((total_area(&rings) - 4.).abs() < 1e-12);
+    }
+
+    #[test]
+    fn three_lobes_at_one_vertex_become_three_rings() {
+        let ring = vec![
+            [0., 0.],
+            [1., 0.],
+            [1., 1.],
+            [0., 0.],
+            [-1., 0.],
+            [-1., -1.],
+            [0., 0.],
+            [0., 1.],
+            [-1., 1.],
+        ];
+        let rings = split(std::slice::from_ref(&ring)).unwrap();
+        assert_eq!(rings.len(), 3);
+        assert!(
+            rings
+                .iter()
+                .all(|ring| ring.len() == 3 && ring[0] != [0., 0.])
+        );
+        assert!((total_area(&rings) - area(&ring).abs()).abs() < 1e-12);
+        assert!((total_area(&rings) - 1.5).abs() < 1e-12);
+        // Rings that do not pinch pass through beside one that does.
+        let square = vec![[5., 5.], [6., 5.], [6., 6.], [5., 6.]];
+        let both = split(&[square.clone(), lobes()]).unwrap();
+        assert_eq!(both.len(), 3);
+        assert!(both.contains(&square));
+    }
+
+    // How a planar face's point budget can go wrong: one point too many let through at its
+    // edge, a count that wraps round, or a face of many small rings that no one ring shows.
+    #[test]
+    fn a_planar_face_at_the_budget_is_kept_and_one_point_over_is_refused() {
+        let budget = PLANAR_FACE_POINT_BUDGET;
+        assert_eq!(planar_points_with(0, budget), Some(budget));
+        assert_eq!(planar_points_with(budget - 3, 3), Some(budget));
+        assert_eq!(planar_points_with(budget - 3, 4), None);
+        assert_eq!(planar_points_with(0, budget + 1), None);
+        assert_eq!(planar_points_with(0, 0), Some(0));
+    }
+
+    #[test]
+    fn a_count_that_would_wrap_round_is_refused_and_small_rings_add_up() {
+        assert_eq!(planar_points_with(usize::MAX, 1), None);
+        assert_eq!(planar_points_with(usize::MAX - 1, 5), None);
+        let (mut points, mut rings) = (0, 0);
+        while let Some(next) = planar_points_with(points, 4) {
+            points = next;
+            rings += 1;
+        }
+        assert_eq!(rings, PLANAR_FACE_POINT_BUDGET / 4);
+    }
+
+    // How a ring's running count can go wrong: an edge's first point, which is the last of
+    // the edge before it, counted twice; one point too many let through at the limit; an
+    // edge of one point that underflows it; or a count that wraps round.
+    #[test]
+    fn a_ring_is_held_to_its_limit_by_its_edges_points_less_each_first() {
+        let mut held = 0;
+        for _ in 0..3 {
+            held = ring_points_with(held, 4, 9).unwrap();
+        }
+        assert_eq!(held, 9);
+        assert_eq!(ring_points_with(8, 2, 9), Some(9));
+        assert_eq!(ring_points_with(9, 2, 9), None);
+        assert_eq!(ring_points_with(0, 11, 9), None);
+        assert_eq!(ring_points_with(5, 1, 9), Some(5));
+        assert_eq!(ring_points_with(5, 0, 9), Some(5));
+        assert_eq!(ring_points_with(usize::MAX, 2, usize::MAX), None);
+        assert_eq!(ring_points_with(2, usize::MAX, usize::MAX), None);
+    }
+
+    // A face's points, the edges of its rings and the triangles earcut made of them.
+    type Square = (Vec<[f64; 2]>, BTreeSet<(u32, u32)>, Vec<[u32; 3]>);
+
+    // A square whose bottom side holds three points that earcut left out, with the
+    // triangles on its corners only: the points the boundary search has to put back.
+    fn square_with_a_dropped_side() -> Square {
+        let points = vec![
+            [0., 0.],
+            [0.25, 0.],
+            [0.5, 0.],
+            [0.75, 0.],
+            [1., 0.],
+            [1., 1.],
+            [0., 1.],
+        ];
+        let ring = |i: u32| (i.min((i + 1) % 7), i.max((i + 1) % 7));
+        (
+            points,
+            (0..7).map(ring).collect(),
+            vec![[0, 4, 5], [0, 5, 6]],
+        )
+    }
+
+    #[test]
+    fn a_boundary_search_past_its_work_is_refused_and_one_within_it_puts_every_point_back() {
+        let (points, edges, triangles) = square_with_a_dropped_side();
+        // Too little work is refused with the named reason, before a triangle is split.
+        let mut refused = triangles.clone();
+        let error =
+            retain_boundary_points_within(&points, &edges, &mut refused, &mut 0, 5).unwrap_err();
+        assert_eq!(error.to_string(), "planar face budget exceeded");
+        assert_eq!(refused, triangles);
+        // With the budget the face holds, every point is a vertex again and the square's
+        // area is kept.
+        let mut kept = triangles.clone();
+        let mut used = 0;
+        retain_boundary_points_within(&points, &edges, &mut kept, &mut used, PLANAR_WORK_BUDGET)
+            .unwrap();
+        assert!((0..7).all(|i| kept.iter().flatten().any(|v| *v == i)));
+        let total: f64 = kept
+            .iter()
+            .map(|t| {
+                cross(
+                    points[t[0] as usize],
+                    points[t[1] as usize],
+                    points[t[2] as usize],
+                )
+                .abs()
+                    / 2.
+            })
+            .sum();
+        assert!((total - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_work_budget_is_one_faces_and_not_each_calls() {
+        let (points, edges, triangles) = square_with_a_dropped_side();
+        // What one call of the boundary search asks of this square.
+        let mut used = 0;
+        let mut once = triangles.clone();
+        retain_boundary_points_within(&points, &edges, &mut once, &mut used, PLANAR_WORK_BUDGET)
+            .unwrap();
+        assert!(used > 0);
+        // With a budget one call fits in and two do not, the second call of the same face,
+        // on the counter the first left, is refused.
+        let budget = used + used / 2;
+        let mut work = 0;
+        let mut first = triangles.clone();
+        retain_boundary_points_within(&points, &edges, &mut first, &mut work, budget).unwrap();
+        let mut second = triangles.clone();
+        let error = retain_boundary_points_within(&points, &edges, &mut second, &mut work, budget)
+            .unwrap_err();
+        assert_eq!(error.to_string(), "planar face budget exceeded");
+    }
+
+    #[test]
+    fn a_ring_with_a_late_pinch_is_refused_past_the_work_budget_and_split_within_it() {
+        // 30 points of its own, then five lobes that touch at one vertex: the search for
+        // a vertex the ring visits twice compares each of the early points with every
+        // later one before it reaches the pinch.
+        let mut ring: Vec<[f64; 2]> = (0..30).map(|i| [f64::from(i), 0.]).collect();
+        for k in 0..5 {
+            let x = 101. + f64::from(k);
+            ring.extend([[100., 100.], [x, 101.], [x, 102.]]);
+        }
+        let mut work = 0;
+        let error = split_pinched_rings(std::slice::from_ref(&ring), &mut work, 100).unwrap_err();
+        assert_eq!(error.to_string(), "planar face budget exceeded");
+        let rings = split(&[ring]).unwrap();
+        assert_eq!(rings.len(), 5);
     }
 }

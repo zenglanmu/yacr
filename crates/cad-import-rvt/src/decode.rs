@@ -1,6 +1,6 @@
 //! Unit 1: Revit bytes -> the GLB `rvt` emits, plus its honest coverage facts.
 //!
-//! Every API used here was read from the `rvt` **0.17.0** sources, not guessed:
+//! Every API used here was read from the `rvt` **0.22.0** sources, not guessed:
 //!
 //! * `RevitFile::open_bytes_with_limits` (`src/reader.rs:468`) consumes a
 //!   `Vec<u8>` and rejects anything that is not an OLE/CFB container whose
@@ -121,7 +121,7 @@ pub struct RvtDecode {
 ///
 /// A family (`DocumentKind::Family`) and an unsupported release are refusals,
 /// not empty successes. `cancelled` is checked before and after the expensive
-/// `rvt` run; it cannot interrupt inside `run_export` (0.17.0 exposes
+/// `rvt` run; it cannot interrupt inside `run_export` (0.22.0 exposes
 /// cancellation only through its own `WalkerControl`, which has no adapter for
 /// an external `Fn` here).
 /// Streams whose absence is fatal, given what the container turned out to be.
@@ -197,7 +197,7 @@ pub fn decode_to_glb(
             "{RVT_OPEN_LIMITS}: rvt reading {what} needs {size} bytes, over the {limit} byte limit"
         )),
         other => CadError::CorruptData(format!(
-            "{DECODE_FAILED}: rvt 0.17.0 could not export this file: {other}"
+            "{DECODE_FAILED}: rvt 0.22.0 could not export this file: {other}"
         )),
     })?;
     if cancelled() {
@@ -212,7 +212,7 @@ pub fn decode_to_glb(
     let release_capability = release.and_then(|support| support.capability);
     if release_status == "unsupported" {
         return Err(CadError::Unsupported(format!(
-            "{RELEASE_UNSUPPORTED}: rvt 0.17.0 has no element-record reader for Revit release {} \
+            "{RELEASE_UNSUPPORTED}: rvt 0.22.0 has no element-record reader for Revit release {} \
              (supported range 2008..=2027); the file is refused rather than shown as an empty model",
             run.diagnostics
                 .input
@@ -225,7 +225,7 @@ pub fn decode_to_glb(
     let glb = model_to_glb(&run.model);
     if !glb.starts_with(b"glTF") {
         return Err(CadError::Invariant(
-            "rvt 0.17.0's model_to_glb returned bytes without the glTF magic".into(),
+            "rvt 0.22.0's model_to_glb returned bytes without the glTF magic".into(),
         ));
     }
 
@@ -300,7 +300,7 @@ fn map_open_error(error: rvt::Error) -> CadError {
              D0 CF 11 E0 A1 B1 1A E1"
         )),
         other => CadError::CorruptData(format!(
-            "{DECODE_FAILED}: rvt 0.17.0 could not open the container: {other}"
+            "{DECODE_FAILED}: rvt 0.22.0 could not open the container: {other}"
         )),
     }
 }

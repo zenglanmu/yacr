@@ -143,17 +143,23 @@ fn write_step_to_sink<W: std::io::Write>(
 /// `model.entities`; `None` for an entity that is not a building element.
 ///
 /// Fixed from what the element is rather than where it lands in the file
-/// (#400): Revit's own where the file yields it; otherwise one derived
-/// from the document's identity, the element's ElementId (its `Tag`) and which
-/// of the entities sharing that Tag it is, since a slab's further pieces
-/// (#331) or a curtain wall's parts share their element's. An element with no
-/// Tag falls back to its entity type and name. A caller that lists a model's
-/// elements reads their GlobalIds here, so that they are the ones the written
-/// IFC carries.
+/// (#400): Revit's own where the file yields it. A slab's further pieces
+/// (#331) or a curtain wall's parts share their element's `Tag`, and Revit
+/// gives only the first a GlobalId: each further one is derived from that
+/// GlobalId and which of the entities sharing the Tag it is (#1840). Any
+/// other element's is derived from the document's identity, its ElementId
+/// (its `Tag`) and that place. An element with no Tag falls back to its
+/// entity type and name. A caller that lists a model's elements reads their
+/// GlobalIds here, so that they are the ones the written IFC carries.
 pub fn element_global_ids(model: &IfcModel) -> Vec<Option<String>> {
     let document = model.global_ids.document.as_deref().unwrap_or("");
     let mut element_gids: Vec<Option<String>> = vec![None; model.entities.len()];
     let mut element_counts: HashMap<(&str, &str, &str), usize> = HashMap::new();
+    // The Revit GlobalId of the first entity carrying each Tag. The file keeps
+    // it from save to save, where the document's GUID can change between two
+    // saves of one project, which moved every further piece's GlobalId
+    // (#1840).
+    let mut revit_first: HashMap<&str, &str> = HashMap::new();
     for (entity_idx, entity) in model.entities.iter().enumerate() {
         let super::entities::IfcEntity::BuildingElement {
             ifc_type,
@@ -169,14 +175,18 @@ pub fn element_global_ids(model: &IfcModel) -> Vec<Option<String>> {
             None => ("untagged-element", ifc_type.as_str(), name.as_str()),
         };
         let occurrence = element_counts.entry(key).or_default();
-        let element_gid = model
-            .global_ids
-            .elements
-            .get(&entity_idx)
-            .cloned()
-            .unwrap_or_else(|| {
-                stable_guid(document, &[key.0, key.1, key.2, &occurrence.to_string()])
-            });
+        let element_gid = match model.global_ids.elements.get(&entity_idx) {
+            Some(revit) => {
+                if let (0, Some(tag)) = (*occurrence, type_guid.as_deref()) {
+                    revit_first.insert(tag, revit.as_str());
+                }
+                revit.clone()
+            }
+            None => match type_guid.as_deref().and_then(|tag| revit_first.get(tag)) {
+                Some(first) => stable_guid(first, &["piece", &occurrence.to_string()]),
+                None => stable_guid(document, &[key.0, key.1, key.2, &occurrence.to_string()]),
+            },
+        };
         *occurrence += 1;
         element_gids[entity_idx] = Some(element_gid);
     }
@@ -412,7 +422,9 @@ fn type_entity_for(ifc_upper: &str, predefined: Option<&str>) -> Option<(String,
         | "IFCSANITARYTERMINAL"
         | "IFCWASTETERMINAL"
         | "IFCFIRESUPPRESSIONTERMINAL"
-        | "IFCTRANSPORTELEMENT" => pt,
+        | "IFCSOLARDEVICE"
+        | "IFCTRANSPORTELEMENT"
+        | "IFCGEOGRAPHICELEMENT" => pt,
         _ => return None,
     };
     Some((format!("{ifc_upper}TYPE"), tail))
@@ -427,8 +439,9 @@ pub struct TypeObject {
     pub entity: String,
     /// Its `Name`.
     pub name: String,
-    /// Its `Tag`: the ElementId of the type, or of the room an `IfcSpaceType`
-    /// is made for.
+    /// The ElementId of the type, or of the room an `IfcSpaceType` is made for.
+    /// It is the type object's `Tag` as written, except on an `IFCPLATETYPE`,
+    /// which is written with none (#1594).
     pub tag: String,
     /// The property sets it holds, in the order the writer writes them:
     /// `Other` (the category and the family name), `Identity Data` (the type
@@ -494,6 +507,10 @@ pub fn type_objects(model: &IfcModel) -> TypeObjects {
         }
     }
     let mut groups: Vec<TypeObject> = Vec::new();
+    // Each group's place in `groups` by its key: an element found its group
+    // by a scan of every group made so far, quadratic in elements (#1845).
+    type GroupKey = (u32, String, String, Option<String>);
+    let mut group_of: HashMap<GroupKey, usize> = HashMap::new();
     for (entity_idx, entity) in model.entities.iter().enumerate() {
         let IfcEntity::BuildingElement {
             ifc_type,
@@ -546,17 +563,20 @@ pub fn type_objects(model: &IfcModel) -> TypeObjects {
             .and_then(|tag| tag.parse::<u32>().ok())
             .unwrap_or(u32::MAX);
         // Revit writes a type object per entity and predefined type (B73).
-        match groups.iter_mut().find(|group| {
-            group.type_id == *type_id
-                && group.entity == entity_name
-                && group.tail == tail
-                && group.global_id == global_id
-        }) {
-            Some(group) => {
+        let key = (
+            *type_id,
+            entity_name.clone(),
+            tail.clone(),
+            global_id.clone(),
+        );
+        match group_of.get(&key).copied() {
+            Some(index) => {
+                let group = &mut groups[index];
                 group.elements.push(entity_idx);
                 group.first_element = group.first_element.min(element_id);
             }
             None => {
+                group_of.insert(key, groups.len());
                 // Spike 257: Revit's type parameters Category, Family Name
                 // and Type Name, in the sets Revit's export gives a type
                 // object.
@@ -739,7 +759,9 @@ fn revit_ifc_type_entity_name(step_name: &str) -> Option<&'static str> {
         "IFCSANITARYTERMINALTYPE" => "IfcSanitaryTerminalType",
         "IFCWASTETERMINALTYPE" => "IfcWasteTerminalType",
         "IFCFIRESUPPRESSIONTERMINALTYPE" => "IfcFireSuppressionTerminalType",
+        "IFCSOLARDEVICETYPE" => "IfcSolarDeviceType",
         "IFCTRANSPORTELEMENTTYPE" => "IfcTransportElementType",
+        "IFCGEOGRAPHICELEMENTTYPE" => "IfcGeographicElementType",
         "IFCSPACETYPE" => "IfcSpaceType",
         _ => return None,
     })
@@ -868,6 +890,7 @@ fn solid_kind(shape: &SolidShape) -> &'static str {
     match shape {
         SolidShape::ExtrudedArea(_)
         | SolidShape::RevolvedArea { .. }
+        | SolidShape::PlacedRevolvedArea { .. }
         | SolidShape::PlacedExtrusion { .. } => "SweptSolid",
         SolidShape::SweptPath { .. } => "AdvancedSweptSolid",
         SolidShape::FacetedBrep { .. } => "Brep",
@@ -1628,6 +1651,92 @@ impl StepWriter<'_> {
                 );
                 (solid_id, "SweptSolid")
             }
+            SolidShape::PlacedRevolvedArea {
+                profile,
+                origin_feet,
+                axis_direction,
+                radial_direction,
+                angle_radians,
+            } => {
+                // IFC's profile and revolution axis share the Position XY
+                // plane. Local Y is the revolution axis; local X is radial.
+                let unit = |v: [f64; 3]| {
+                    let length = v.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-12);
+                    v.map(|x| x / length)
+                };
+                let y = unit(*axis_direction);
+                let x = unit(*radial_direction);
+                let z = unit([
+                    x[1] * y[2] - x[2] * y[1],
+                    x[2] * y[0] - x[0] * y[2],
+                    x[0] * y[1] - x[1] * y[0],
+                ]);
+                let x = [
+                    y[1] * z[2] - y[2] * z[1],
+                    y[2] * z[0] - y[0] * z[2],
+                    y[0] * z[1] - y[1] * z[0],
+                ];
+                let origin = self.id();
+                self.emit_entity(
+                    origin,
+                    format!(
+                        "IFCCARTESIANPOINT(({:.6},{:.6},{:.6}))",
+                        origin_feet[0] * 0.3048,
+                        origin_feet[1] * 0.3048,
+                        origin_feet[2] * 0.3048
+                    ),
+                );
+                let normal = self.id();
+                self.emit_entity(
+                    normal,
+                    format!("IFCDIRECTION(({:.15},{:.15},{:.15}))", z[0], z[1], z[2]),
+                );
+                let radial = self.id();
+                self.emit_entity(
+                    radial,
+                    format!("IFCDIRECTION(({:.15},{:.15},{:.15}))", x[0], x[1], x[2]),
+                );
+                let position = self.id();
+                self.emit_entity(
+                    position,
+                    format!("IFCAXIS2PLACEMENT3D(#{origin},#{normal},#{radial})"),
+                );
+                let local_origin = self.id();
+                self.emit_entity(local_origin, "IFCCARTESIANPOINT((0.,0.,0.))");
+                let local_axis = self.id();
+                self.emit_entity(local_axis, "IFCDIRECTION((0.,1.,0.))");
+                let axis = self.id();
+                self.emit_entity(
+                    axis,
+                    format!("IFCAXIS1PLACEMENT(#{local_origin},#{local_axis})"),
+                );
+                let profile_origin = self.id();
+                self.emit_entity(profile_origin, "IFCCARTESIANPOINT((0.,0.))");
+                let profile_position = self.id();
+                self.emit_entity(
+                    profile_position,
+                    format!("IFCAXIS2PLACEMENT2D(#{profile_origin},$)"),
+                );
+                let wrapped = Extrusion {
+                    width_feet: 0.0,
+                    depth_feet: 0.0,
+                    height_feet: 0.0,
+                    profile_override: Some(profile.clone()),
+                };
+                let profile = self.emit_profile_def(&wrapped, profile_position);
+                let id = self.id();
+                // Six decimals would turn 2*pi into an almost-closed solid.
+                let angle = if (angle_radians - std::f64::consts::TAU).abs() < 1e-10 {
+                    std::f64::consts::TAU
+                } else {
+                    *angle_radians
+                };
+                self.emit_entity(
+                    id,
+                    format!("IFCREVOLVEDAREASOLID(#{profile},#{position},#{axis},{angle:.15})"),
+                );
+                (id, "SweptSolid")
+            }
             SolidShape::Compound(items) => {
                 // Nested in another solid, the items are one: their union.
                 let union = items.len() > 1;
@@ -1654,22 +1763,34 @@ impl StepWriter<'_> {
                 let rest: Vec<usize> = rest.iter().map(|(id, _)| *id).collect();
                 (self.emit_union(*first, &rest), "CSG")
             }
-            SolidShape::BooleanResult {
-                op,
-                operand_a,
-                operand_b,
-            } => {
-                // Recursively emit operands, then wrap in
-                // IFCBOOLEANRESULT(op, first, second). Nested
-                // booleans compose naturally.
-                let (a_id, _rep_a) = self.emit_solid_shape(operand_a, solid_position, z_axis, true);
-                let (b_id, _rep_b) = self.emit_solid_shape(operand_b, solid_position, z_axis, true);
-                let solid_id = self.id();
-                self.emit_entity(
-                    solid_id,
-                    format!("IFCBOOLEANRESULT({},#{a_id},#{b_id})", op.as_step_keyword()),
-                );
-                (solid_id, "CSG")
+            SolidShape::BooleanResult { .. } => {
+                // Each operand, then IFCBOOLEANRESULT(op, first, second). A
+                // wall's profile cuts nest one level per cut down the first
+                // operand (#1845), so the chain is walked as a loop, writing
+                // in the order recursion did: the innermost first operand,
+                // then each level's second operand and its result.
+                let mut chain = Vec::new();
+                let mut at = shape;
+                while let SolidShape::BooleanResult {
+                    op,
+                    operand_a,
+                    operand_b,
+                } = at
+                {
+                    chain.push((op, operand_b.as_ref()));
+                    at = operand_a.as_ref();
+                }
+                let (mut a_id, _) = self.emit_solid_shape(at, solid_position, z_axis, true);
+                for (op, operand_b) in chain.into_iter().rev() {
+                    let (b_id, _) = self.emit_solid_shape(operand_b, solid_position, z_axis, true);
+                    let solid_id = self.id();
+                    self.emit_entity(
+                        solid_id,
+                        format!("IFCBOOLEANRESULT({},#{a_id},#{b_id})", op.as_step_keyword()),
+                    );
+                    a_id = solid_id;
+                }
+                (a_id, "CSG")
             }
             SolidShape::FacetedBrep {
                 vertices_feet,
@@ -2054,10 +2175,14 @@ impl StepWriter<'_> {
 
     fn emit_header(&mut self, model: &IfcModel) {
         let project = escape(model.project_name.as_deref().unwrap_or("Untitled"));
+        // `escape` makes a string literal safe; this text goes in a comment,
+        // where the file's own PartAtom id or version could end it with `*/`
+        // and write the rest as STEP (#1845).
         let desc = escape(model.description.as_deref().unwrap_or(
             "Produced by rvt-rs (https://github.com/DrunkOnJava/rvt-rs) — \
                  clean-room Apache-2 Revit reader.",
-        ));
+        ))
+        .replace("*/", "* /");
         self.emit_line("ISO-10303-21;");
         self.emit_line("HEADER;");
         self.emit_line("FILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');");
@@ -2074,6 +2199,14 @@ impl StepWriter<'_> {
     fn emit_data(&mut self, model: &IfcModel) {
         self.emit_line("DATA;");
         let document = model.global_ids.document.as_deref().unwrap_or("");
+        // The document's identity seeds only what has no owner entity: the
+        // project, site, building and storey fallbacks, classifications,
+        // materials, systems and types Revit gives no GlobalId. Its
+        // `Unique Document GUID` changes on every save, so a GlobalId seeded
+        // from it moved between two saves of one project (#1854). Anything
+        // that belongs to an entity is seeded from that entity's written
+        // GlobalId instead, with the same key: it holds wherever its owner's
+        // does, and two documents share it only where they share the owner's.
         let gid = |key: &[&str]| stable_guid(document, key);
 
         // Required framework entities (buildingSMART minimum viable).
@@ -2138,16 +2271,17 @@ impl StepWriter<'_> {
         // Root project.
         let project_name = escape(model.project_name.as_deref().unwrap_or("Untitled"));
         let project_desc = escape(model.description.as_deref().unwrap_or("Exported by rvt-rs"));
+        let project_gid = model
+            .global_ids
+            .project
+            .clone()
+            .unwrap_or_else(|| gid(&["project"]));
         let project_id = self.id();
         self.emit_entity(
             project_id,
             format!(
                 "IFCPROJECT('{}',#{owner_hist},'{}',{},$,$,$,(#{geom_ctx}),#{unit_assignment})",
-                model
-                    .global_ids
-                    .project
-                    .clone()
-                    .unwrap_or_else(|| gid(&["project"])),
+                project_gid,
                 project_name,
                 quoted_or_dollar(&project_desc),
             ),
@@ -2173,16 +2307,17 @@ impl StepWriter<'_> {
             site_placement,
             format!("IFCLOCALPLACEMENT($,#{axis_placement})"),
         );
+        let site_gid = model
+            .global_ids
+            .site
+            .clone()
+            .unwrap_or_else(|| gid(&["site"]));
         let site_id = self.id();
         self.emit_entity(
             site_id,
             format!(
                 "IFCSITE('{}',#{owner_hist},'Default Site',$,$,#{site_placement},$,'Default Site',.ELEMENT.,$,$,$,$,$)",
-                model
-                    .global_ids
-                    .site
-                    .clone()
-                    .unwrap_or_else(|| gid(&["site"])),
+                site_gid,
             ),
         );
 
@@ -2191,16 +2326,17 @@ impl StepWriter<'_> {
             building_placement,
             format!("IFCLOCALPLACEMENT(#{site_placement},#{axis_placement})"),
         );
+        let building_gid = model
+            .global_ids
+            .building
+            .clone()
+            .unwrap_or_else(|| gid(&["building"]));
         let building_id = self.id();
         self.emit_entity(
             building_id,
             format!(
                 "IFCBUILDING('{}',#{owner_hist},'Default Building',$,$,#{building_placement},$,'Default Building',.ELEMENT.,$,$,$)",
-                model
-                    .global_ids
-                    .building
-                    .clone()
-                    .unwrap_or_else(|| gid(&["building"])),
+                building_gid,
             ),
         );
 
@@ -2257,7 +2393,7 @@ impl StepWriter<'_> {
             rel_proj_site,
             format!(
                 "IFCRELAGGREGATES('{}',#{owner_hist},$,$,#{project_id},(#{site_id}))",
-                gid(&["aggregates", "project"]),
+                stable_guid(&project_gid, &["aggregates", "project"]),
             ),
         );
         let rel_site_building = self.id();
@@ -2265,7 +2401,7 @@ impl StepWriter<'_> {
             rel_site_building,
             format!(
                 "IFCRELAGGREGATES('{}',#{owner_hist},$,$,#{site_id},(#{building_id}))",
-                gid(&["aggregates", "site"]),
+                stable_guid(&site_gid, &["aggregates", "site"]),
             ),
         );
         // IfcRelAggregates needs at least one related object, so a
@@ -2281,7 +2417,7 @@ impl StepWriter<'_> {
                 rel_building_storey,
                 format!(
                     "IFCRELAGGREGATES('{}',#{owner_hist},$,$,#{building_id},({storey_refs}))",
-                    gid(&["aggregates", "building"]),
+                    stable_guid(&building_gid, &["aggregates", "building"]),
                 ),
             );
         }
@@ -2295,8 +2431,8 @@ impl StepWriter<'_> {
                     owner_hist,
                     storey_id,
                     set,
-                    &gid(&["property-set", &key]),
-                    &gid(&["defines-by-properties", &key]),
+                    &stable_guid(storey_gid, &["property-set", &key]),
+                    &stable_guid(storey_gid, &["defines-by-properties", &key]),
                 );
             }
         }
@@ -2313,8 +2449,8 @@ impl StepWriter<'_> {
                 owner_hist,
                 building_id,
                 &set,
-                &gid(&["property-set", &key]),
-                &gid(&["defines-by-properties", &key]),
+                &stable_guid(&building_gid, &["property-set", &key]),
+                &stable_guid(&building_gid, &["defines-by-properties", &key]),
             );
         }
 
@@ -2452,11 +2588,16 @@ impl StepWriter<'_> {
                 let colour_id = self.id();
                 self.emit_entity(colour_id, format!("IFCCOLOURRGB($,{r:.6},{g:.6},{b:.6})"));
                 let rendering_id = self.id();
-                let transparency = mat.transparency.unwrap_or(0.0);
+                // A colour can be read without its transparency (the two are
+                // separate fields of a decoded material): the optional attribute
+                // is then left unset rather than written as opaque (#1820).
+                let transparency = mat
+                    .transparency
+                    .map_or_else(|| "$".to_string(), |t| format!("{t:.6}"));
                 self.emit_entity(
                     rendering_id,
                     format!(
-                        "IFCSURFACESTYLERENDERING(#{colour_id},{transparency:.6},$,$,$,$,$,$,.FLAT.)"
+                        "IFCSURFACESTYLERENDERING(#{colour_id},{transparency},$,$,$,$,$,$,.FLAT.)"
                     ),
                 );
                 let style_id = self.id();
@@ -3179,8 +3320,20 @@ impl StepWriter<'_> {
                 // states its user-defined type in `ObjectType`. With none
                 // read the element cannot say which, and the writer invents
                 // no value, so its `PredefinedType` is left unset (#1430).
+                //
+                // From 2027 the occurrence of the classes
+                // `category_map::predefined_type_left_out` names states none at
+                // all, as Revit's own export does (#1692, #1716), where its type
+                // objects still state theirs: `type_objects` takes the enumerator
+                // from the element as before, so the types, their GlobalIds and
+                // the property sets that depend on it do not change.
+                let predefined_left_out = super::category_map::predefined_type_left_out(
+                    &ifc_upper,
+                    model.global_ids.revit_version,
+                );
                 let predefined = predefined_type.as_deref().filter(|token| {
-                    !(token.eq_ignore_ascii_case("USERDEFINED") && object_type_quoted == "$")
+                    !predefined_left_out
+                        && !(token.eq_ignore_ascii_case("USERDEFINED") && object_type_quoted == "$")
                 });
                 // RE-93, RE-94: a window's or door's OverallHeight and
                 // OverallWidth are its opening's, which Revit's export writes
@@ -3265,7 +3418,7 @@ impl StepWriter<'_> {
                             rel_id,
                             format!(
                                 "IFCRELASSOCIATESMATERIAL('{}',#{owner_hist},$,$,(#{el_id}),#{usage_id})",
-                                gid(&["material-association", global_id]),
+                                stable_guid(global_id, &["material-association", global_id]),
                             ),
                         );
                         true
@@ -3316,7 +3469,7 @@ impl StepWriter<'_> {
                             rel_id,
                             format!(
                                 "IFCRELASSOCIATESMATERIAL('{}',#{owner_hist},$,$,(#{el_id}),#{usage_id})",
-                                gid(&["material-association", global_id]),
+                                stable_guid(global_id, &["material-association", global_id]),
                             ),
                         );
                             true
@@ -3419,7 +3572,7 @@ impl StepWriter<'_> {
                         let opening_id = self.id();
                         // #400: an opening exists only because the element
                         // filling it does, so its identity is that element's.
-                        let opening_gid = gid(&["opening", global_id]);
+                        let opening_gid = stable_guid(global_id, &["opening", global_id]);
                         // IfcOpeningElement: (GlobalId, OwnerHist, Name,
                         //   Desc, ObjectType, Placement, Rep, Tag,
                         //   PredefinedType). IFC4 adds PredefinedType.
@@ -3459,8 +3612,8 @@ impl StepWriter<'_> {
                                 owner_hist,
                                 opening_id,
                                 &quantities,
-                                &gid(&["property-set", &set_key]),
-                                &gid(&["defines-by-properties", &set_key]),
+                                &stable_guid(&opening_gid, &["property-set", &set_key]),
+                                &stable_guid(&opening_gid, &["defines-by-properties", &set_key]),
                             );
                         }
                         void_fill_triples.push((*h_idx, opening_id, Some(el_id), opening_gid));
@@ -3473,13 +3626,26 @@ impl StepWriter<'_> {
         // geometry below.
         let host_references = super::host_references(model);
 
+        // #1016: whether rvt-rs writes the base quantities at all, which
+        // `--no-base-quantities` stops by emptying every `Qto_` set, as
+        // Revit's export made with "Export base quantities" off holds no
+        // opening quantity either (RE-242).
+        let base_quantities_written = model.entities.iter().any(|entity| match entity {
+            super::entities::IfcEntity::ElementPropertySet { set, .. } => {
+                set.name.starts_with("Qto_") && !set.properties.is_empty()
+            }
+            _ => false,
+        });
+
         // RE-151 (#227): an opening nothing fills, a hole in a floor's sketch.
         // As in Revit's export it is placed in its host's frame, its outline
         // extruded up through the host, and it voids the host without being
         // contained in a storey. #824: so is the opening a face-hosted door
         // or window cuts in its host, numbered among the host's openings.
         // RE-237: either is the host's own geometry, so, as Revit's export
-        // writes it, its Pset_OpeningElementCommon.Reference is the host's.
+        // writes it, its Pset_OpeningElementCommon.Reference is the host's, and
+        // RE-382: so is its Pset_EnvironmentalImpactIndicators.Reference, as on
+        // every other opening Revit's export holds.
         for entity in &model.entities {
             let (host, tag, name, outline_feet, depth_feet, number) = match entity {
                 super::entities::IfcEntity::VoidOpening {
@@ -3558,7 +3724,7 @@ impl StepWriter<'_> {
                 Some(number) => crate::revit_global_ids::hashed_global_id(&format!(
                     "IfcOpeningElement:{number}:{host_gid}"
                 )),
-                None => gid(&["void-opening", host_gid, tag]),
+                None => stable_guid(host_gid, &["void-opening", host_gid, tag]),
             };
             let opening_id = self.id();
             self.emit_entity(
@@ -3570,28 +3736,87 @@ impl StepWriter<'_> {
                 ),
             );
             if let Some(reference) = host_references.get(host) {
-                let set = PropertySet {
-                    name: "Pset_OpeningElementCommon".into(),
-                    properties: vec![super::entities::Property {
-                        name: "Reference".into(),
-                        value: super::entities::PropertyValue::Identifier(reference.clone()),
-                    }],
-                };
-                self.emit_property_set(
-                    owner_hist,
-                    opening_id,
-                    &set,
-                    &gid(&[
-                        "property-set",
-                        opening_gid.as_str(),
-                        "Pset_OpeningElementCommon",
-                    ]),
-                    &gid(&[
-                        "defines-by-properties",
-                        opening_gid.as_str(),
-                        "Pset_OpeningElementCommon",
-                    ]),
-                );
+                for set_name in [
+                    "Pset_OpeningElementCommon",
+                    "Pset_EnvironmentalImpactIndicators",
+                ] {
+                    let set = PropertySet {
+                        name: set_name.into(),
+                        properties: vec![super::entities::Property {
+                            name: "Reference".into(),
+                            value: super::entities::PropertyValue::Identifier(reference.clone()),
+                        }],
+                    };
+                    self.emit_property_set(
+                        owner_hist,
+                        opening_id,
+                        &set,
+                        &stable_guid(
+                            &opening_gid,
+                            &["property-set", opening_gid.as_str(), set_name],
+                        ),
+                        &stable_guid(
+                            &opening_gid,
+                            &["defines-by-properties", opening_gid.as_str(), set_name],
+                        ),
+                    );
+                }
+            }
+            // RE-151, RE-244: Revit's export gives an opening a floor's
+            // sketch makes its `Area`, its outline's, where that outline is
+            // not a rectangle, and its `Width` and `Height` where it is: on
+            // the office as built the 36 such openings are the 5 whose outline
+            // has a notch, whose `Area` this is to 1e-6 m2, and the 31
+            // rectangles, which Revit's export gives no `Area` on. A notched
+            // outline is what is measured; a quadrilateral that is not a
+            // rectangle, and every other kind of unfilled opening, stay
+            // without. So does an outline with a corner that is not a right
+            // angle: an arc of the sketch is chords there, whose polygon is
+            // short of the area Revit takes from the curves themselves.
+            if number.is_none() && base_quantities_written {
+                let area = outline_feet
+                    .iter()
+                    .zip(outline_feet.iter().cycle().skip(1))
+                    .map(|(from, to)| from.0 * to.1 - to.0 * from.1)
+                    .sum::<f64>()
+                    .abs()
+                    / 2.0;
+                // More than four square corners: a rectangle one of whose
+                // edges is two sketch lines has four, and whether Revit calls
+                // that loop a rectangle is not measured.
+                if area > 0.0
+                    && super::export_content::square_corner_count(outline_feet)
+                        .is_some_and(|corners| corners > 4)
+                {
+                    let quantities = PropertySet {
+                        name: "Qto_OpeningElementBaseQuantities".into(),
+                        properties: vec![super::entities::Property {
+                            name: "Area".into(),
+                            value: super::entities::PropertyValue::AreaSquareFeet(area),
+                        }],
+                    };
+                    self.emit_property_set(
+                        owner_hist,
+                        opening_id,
+                        &quantities,
+                        &stable_guid(
+                            &opening_gid,
+                            &[
+                                "property-set",
+                                opening_gid.as_str(),
+                                "Qto_OpeningElementBaseQuantities",
+                            ],
+                        ),
+                        &stable_guid(
+                            &opening_gid,
+                            &[
+                                "defines-by-properties",
+                                opening_gid.as_str(),
+                                "Qto_OpeningElementBaseQuantities",
+                            ],
+                        ),
+                    );
+                }
             }
             void_fill_triples.push((*host, opening_id, None, opening_gid));
         }
@@ -3612,6 +3837,11 @@ impl StepWriter<'_> {
             else {
                 continue;
             };
+            // #1607: a region whose cut is made in its wall's body has no
+            // outline left, and is not written.
+            if outline_feet.len() < 3 {
+                continue;
+            }
             let (Some(Some(host_el_id)), Some(Some(host_placement))) = (
                 entity_index_to_el_id.get(*host),
                 entity_index_to_placement.get(*host),
@@ -3687,7 +3917,7 @@ impl StepWriter<'_> {
                 format!("IFCLOCALPLACEMENT(#{host_placement},#{opening_axis})"),
             );
             let host_gid = el_id_to_gid.get(host_el_id).copied().unwrap_or_default();
-            let opening_gid = gid(&["wall-profile-opening", host_gid, tag]);
+            let opening_gid = stable_guid(host_gid, &["wall-profile-opening", host_gid, tag]);
             let opening_id = self.id();
             self.emit_entity(
                 opening_id,
@@ -3697,6 +3927,75 @@ impl StepWriter<'_> {
                     escape(tag),
                 ),
             );
+            // As Revit's export writes the opening of a wall's own geometry,
+            // its Reference is the wall's type name, in both sets, and none
+            // where the wall has none (RE-381).
+            if let Some(reference) = host_references.get(host) {
+                for set_name in [
+                    "Pset_OpeningElementCommon",
+                    "Pset_EnvironmentalImpactIndicators",
+                ] {
+                    let set = PropertySet {
+                        name: set_name.into(),
+                        properties: vec![super::entities::Property {
+                            name: "Reference".into(),
+                            value: super::entities::PropertyValue::Identifier(reference.clone()),
+                        }],
+                    };
+                    self.emit_property_set(
+                        owner_hist,
+                        opening_id,
+                        &set,
+                        &stable_guid(
+                            &opening_gid,
+                            &["property-set", opening_gid.as_str(), set_name],
+                        ),
+                        &stable_guid(
+                            &opening_gid,
+                            &["defines-by-properties", opening_gid.as_str(), set_name],
+                        ),
+                    );
+                }
+            }
+            // Where the wall has base quantities, its `Area` is the profile's
+            // (Revit's export writes no other quantity on it, RE-381).
+            let profile_area = outline_feet
+                .iter()
+                .zip(outline_feet.iter().cycle().skip(1))
+                .map(|(a, b)| a.0 * b.1 - b.0 * a.1)
+                .sum::<f64>()
+                .abs()
+                / 2.0;
+            if profile_area > 0.0 && wall_widths.contains_key(host) {
+                let quantities = PropertySet {
+                    name: "Qto_OpeningElementBaseQuantities".into(),
+                    properties: vec![super::entities::Property {
+                        name: "Area".into(),
+                        value: super::entities::PropertyValue::AreaSquareFeet(profile_area),
+                    }],
+                };
+                self.emit_property_set(
+                    owner_hist,
+                    opening_id,
+                    &quantities,
+                    &stable_guid(
+                        &opening_gid,
+                        &[
+                            "property-set",
+                            opening_gid.as_str(),
+                            "Qto_OpeningElementBaseQuantities",
+                        ],
+                    ),
+                    &stable_guid(
+                        &opening_gid,
+                        &[
+                            "defines-by-properties",
+                            opening_gid.as_str(),
+                            "Qto_OpeningElementBaseQuantities",
+                        ],
+                    ),
+                );
+            }
             void_fill_triples.push((*host, opening_id, None, opening_gid));
         }
 
@@ -3709,6 +4008,20 @@ impl StepWriter<'_> {
         // of the export: revit-ifc's `OpeningUtil` hashes its number in the
         // wall's openings with the wall's and the cutter's GlobalIds
         // (CLEANROOM.md source 5).
+        // RE-386: and the properties its cutter's parameters name in each set
+        // of an opening (a door's `FireExit`), which revit-ifc's
+        // `OpeningUtil.CreateOpening` hands the opening as it hands the
+        // cutter its own.
+        let mut cutter_properties: BTreeMap<(usize, &str), Vec<super::entities::Property>> =
+            Default::default();
+        for entity in &model.entities {
+            if let super::entities::IfcEntity::CutterOpeningSet { element, set } = entity {
+                cutter_properties
+                    .entry((*element, set.name.as_str()))
+                    .or_default()
+                    .extend(set.properties.iter().cloned());
+            }
+        }
         for entity in &model.entities {
             let super::entities::IfcEntity::WallCutOpening {
                 host,
@@ -3804,7 +4117,7 @@ impl StepWriter<'_> {
                 Some(cutter) if !host_gid.is_empty() => crate::revit_global_ids::hashed_global_id(
                     &format!("Opening:{number}Solid:1{host_gid}{cutter}"),
                 ),
-                _ => gid(&["wall-cut-opening", host_gid, tag]),
+                _ => stable_guid(host_gid, &["wall-cut-opening", host_gid, tag]),
             };
             let opening_id = self.id();
             self.emit_entity(
@@ -3816,33 +4129,55 @@ impl StepWriter<'_> {
                     if *recess { ".RECESS." } else { ".OPENING." },
                 ),
             );
-            if let Some(reference) = host_references.get(reference_from) {
-                for set_name in [
-                    "Pset_OpeningElementCommon",
-                    "Pset_EnvironmentalImpactIndicators",
-                ] {
-                    let set = PropertySet {
-                        name: set_name.into(),
-                        properties: vec![super::entities::Property {
-                            name: "Reference".into(),
-                            value: super::entities::PropertyValue::Identifier(reference.clone()),
-                        }],
-                    };
-                    self.emit_property_set(
-                        owner_hist,
-                        opening_id,
-                        &set,
-                        &gid(&["property-set", opening_gid.as_str(), set_name]),
-                        &gid(&["defines-by-properties", opening_gid.as_str(), set_name]),
-                    );
+            for set_name in [
+                "Pset_OpeningElementCommon",
+                "Pset_EnvironmentalImpactIndicators",
+            ] {
+                let mut properties = Vec::new();
+                if let Some(reference) = host_references.get(reference_from) {
+                    properties.push(super::entities::Property {
+                        name: "Reference".into(),
+                        value: super::entities::PropertyValue::Identifier(reference.clone()),
+                    });
                 }
+                if let Some(named) = cutter_properties.get(&(*reference_from, set_name)) {
+                    properties.extend(named.iter().cloned());
+                }
+                if properties.is_empty() {
+                    continue;
+                }
+                let set = PropertySet {
+                    name: set_name.into(),
+                    properties,
+                };
+                self.emit_property_set(
+                    owner_hist,
+                    opening_id,
+                    &set,
+                    &stable_guid(
+                        &opening_gid,
+                        &["property-set", opening_gid.as_str(), set_name],
+                    ),
+                    &stable_guid(
+                        &opening_gid,
+                        &["defines-by-properties", opening_gid.as_str(), set_name],
+                    ),
+                );
             }
             // RE-321: Revit's `Depth` is the extrusion's depth, and its `Width`
             // and `Height` are the rectangle's extents along the wall and up,
             // which are the right way round on a rectangular opening (not on
             // a door's, RE-244). With base quantities off the wall has none
             // and the opening none either.
-            if *with_quantities && wall_widths.contains_key(host) {
+            // #1165: the opening a door cuts in a second wall is a rectangle
+            // extruded across that wall as the ones above are, and Revit's
+            // export measures it the same way round, not swapped as on a
+            // door's own opening (RE-244): its `Depth` is that extrusion's
+            // extent, the door's width, and its `Height` the outline's. Its
+            // `Width` stays out: Revit's is the thickness of the wall the
+            // door stands in, and the outline here is 0.2 mm wider than that
+            // on two of the four openings read on the BIM4LCA office.
+            if wall_widths.contains_key(host) {
                 let extent = |axis: fn(&(f64, f64)) -> f64| {
                     let low = outline_feet.iter().map(axis).fold(f64::INFINITY, f64::min);
                     let high = outline_feet
@@ -3855,28 +4190,36 @@ impl StepWriter<'_> {
                     name: name.into(),
                     value: super::entities::PropertyValue::PositiveLengthFeet(feet),
                 };
+                let mut properties = Vec::new();
+                if *with_quantities {
+                    properties.push(length("Width", extent(|point| point.0)));
+                }
+                properties.push(length("Height", extent(|point| point.1)));
+                properties.push(length("Depth", *thickness_feet));
                 let quantities = PropertySet {
                     name: "Qto_OpeningElementBaseQuantities".into(),
-                    properties: vec![
-                        length("Width", extent(|point| point.0)),
-                        length("Height", extent(|point| point.1)),
-                        length("Depth", *thickness_feet),
-                    ],
+                    properties,
                 };
                 self.emit_property_set(
                     owner_hist,
                     opening_id,
                     &quantities,
-                    &gid(&[
-                        "property-set",
-                        opening_gid.as_str(),
-                        "Qto_OpeningElementBaseQuantities",
-                    ]),
-                    &gid(&[
-                        "defines-by-properties",
-                        opening_gid.as_str(),
-                        "Qto_OpeningElementBaseQuantities",
-                    ]),
+                    &stable_guid(
+                        &opening_gid,
+                        &[
+                            "property-set",
+                            opening_gid.as_str(),
+                            "Qto_OpeningElementBaseQuantities",
+                        ],
+                    ),
+                    &stable_guid(
+                        &opening_gid,
+                        &[
+                            "defines-by-properties",
+                            opening_gid.as_str(),
+                            "Qto_OpeningElementBaseQuantities",
+                        ],
+                    ),
                 );
             }
             void_fill_triples.push((*host, opening_id, None, opening_gid));
@@ -3908,7 +4251,7 @@ impl StepWriter<'_> {
                 voids_rel,
                 format!(
                     "IFCRELVOIDSELEMENT('{}',#{owner_hist},$,$,#{host_el_id},#{opening_id})",
-                    gid(&["voids", opening_gid]),
+                    stable_guid(opening_gid, &["voids", opening_gid]),
                 ),
             );
             let Some(el_id) = el_id else {
@@ -3919,7 +4262,7 @@ impl StepWriter<'_> {
                 fills_rel,
                 format!(
                     "IFCRELFILLSELEMENT('{}',#{owner_hist},$,$,#{opening_id},#{el_id})",
-                    gid(&["fills", opening_gid]),
+                    stable_guid(opening_gid, &["fills", opening_gid]),
                 ),
             );
         }
@@ -3950,7 +4293,10 @@ impl StepWriter<'_> {
                 rel_id,
                 format!(
                     "IFCRELAGGREGATES('{}',#{owner_hist},$,$,#{whole_el_id},({}))",
-                    gid(&["aggregates", el_id_to_gid[&whole_el_id]]),
+                    stable_guid(
+                        el_id_to_gid[&whole_el_id],
+                        &["aggregates", el_id_to_gid[&whole_el_id]]
+                    ),
                     part_refs.join(","),
                 ),
             );
@@ -4185,7 +4531,10 @@ impl StepWriter<'_> {
                     port,
                     format!(
                         "IFCDISTRIBUTIONPORT('{}',#{owner_hist},'{}','Flow',$,{placement},$,{})",
-                        gid(&["port", &id_text, &index_text]),
+                        el_id_to_gid.get(&element).map_or_else(
+                            || gid(&["port", &id_text, &index_text]),
+                            |owner| stable_guid(owner, &["port", &id_text, &index_text]),
+                        ),
                         port_name(id, index),
                         port_attribute(id, index),
                     ),
@@ -4203,13 +4552,16 @@ impl StepWriter<'_> {
                 rel,
                 format!(
                     "IFCRELCONNECTSPORTS('{}',#{owner_hist},$,$,#{},#{},$)",
-                    gid(&[
-                        "ports",
-                        &a_id.to_string(),
-                        &a_index.to_string(),
-                        &b_id.to_string(),
-                        &b_index.to_string(),
-                    ]),
+                    stable_guid(
+                        el_id_to_gid.get(&a_el).copied().unwrap_or(document),
+                        &[
+                            "ports",
+                            &a_id.to_string(),
+                            &a_index.to_string(),
+                            &b_id.to_string(),
+                            &b_index.to_string(),
+                        ]
+                    ),
                     port_ids[0],
                     port_ids[1],
                 ),
@@ -4246,7 +4598,10 @@ impl StepWriter<'_> {
                 port,
                 format!(
                     "IFCDISTRIBUTIONPORT('{}',#{owner_hist},'{}','Flow',$,{placement},$,{})",
-                    gid(&["port", &id_text, &index_text]),
+                    el_id_to_gid.get(&element_id).map_or_else(
+                        || gid(&["port", &id_text, &index_text]),
+                        |owner| stable_guid(owner, &["port", &id_text, &index_text]),
+                    ),
                     port_name(*id, *index),
                     port_attribute(*id, *index),
                 ),
@@ -4268,7 +4623,10 @@ impl StepWriter<'_> {
                 rel,
                 format!(
                     "IFCRELNESTS('{}',#{owner_hist},'NestedPorts','Flow',#{element},({}))",
-                    gid(&["nested_ports", &id.to_string()]),
+                    stable_guid(
+                        el_id_to_gid.get(&element).copied().unwrap_or(document),
+                        &["nested_ports", &id.to_string()],
+                    ),
                     refs.join(","),
                 ),
             );
@@ -4352,8 +4710,8 @@ impl StepWriter<'_> {
                 owner_hist,
                 *el_id,
                 pset,
-                &gid(&["property-set", &set_key]),
-                &gid(&["defines-by-properties", &set_key]),
+                &stable_guid(el_id_to_gid[el_id], &["property-set", &set_key]),
+                &stable_guid(el_id_to_gid[el_id], &["defines-by-properties", &set_key]),
             );
         }
 
@@ -4479,14 +4837,26 @@ impl StepWriter<'_> {
                     )))
                 }),
             };
+            // A type read for several symbols can leave several type objects of
+            // one entity and Tag with no Revit GlobalId left to give (the BIM4LCA
+            // office at permit has 7 of one mullion type): the first takes the
+            // writer's own, each later one a GlobalId that carries its place in
+            // the list, so that none repeats (IFC4's IfcRoot.UR1, #1667).
             let type_gid = match revit {
                 Some(global_id) if used_gids.insert(global_id.clone()) => global_id,
-                _ => gid(&["type", entity_name, tag]),
+                _ => {
+                    let own = gid(&["type", entity_name, tag]);
+                    if used_gids.insert(own.clone()) {
+                        own
+                    } else {
+                        gid(&["type", entity_name, tag, &index.to_string()])
+                    }
+                }
             };
             let set_ids: Vec<String> = property_sets
                 .iter()
                 .map(|set| {
-                    let set_gid = gid(&["type-pset", &type_gid, &set.name]);
+                    let set_gid = stable_guid(&type_gid, &["type-pset", &type_gid, &set.name]);
                     format!(
                         "#{}",
                         self.emit_bare_property_set(owner_hist, set, &set_gid)
@@ -4507,11 +4877,20 @@ impl StepWriter<'_> {
             } else {
                 "$".into()
             };
+            // #1594: Revit gives an `IfcPlateType` the Tag of one of its plates, the
+            // first of its group in an order of the curtain grid no record holds, so
+            // the panel type's own ElementId (still the type's `tag` here) is a
+            // wrong Tag on every plate type; none is written.
+            let tag_text = if entity_name == "IFCPLATETYPE" {
+                "$".to_string()
+            } else {
+                format!("'{tag}'")
+            };
             let type_el_id = self.id();
             self.emit_entity(
                 type_el_id,
                 format!(
-                    "{entity_name}('{type_gid}',#{owner_hist},{},$,$,({}),$,'{tag}',{element_type},{tail})",
+                    "{entity_name}('{type_gid}',#{owner_hist},{},$,$,({}),$,{tag_text},{element_type},{tail})",
                     quoted_or_dollar(&escape(name)),
                     set_ids.join(","),
                 ),
@@ -4521,7 +4900,7 @@ impl StepWriter<'_> {
                 rel_id,
                 format!(
                     "IFCRELDEFINESBYTYPE('{}',#{owner_hist},$,$,({}),#{type_el_id})",
-                    gid(&["defines-by-type", &type_gid]),
+                    stable_guid(&type_gid, &["defines-by-type", &type_gid]),
                     elements
                         .iter()
                         .filter_map(|index| entity_index_to_el_id[*index])
@@ -4568,7 +4947,7 @@ impl StepWriter<'_> {
                 rel_id,
                 format!(
                     "IFCRELDEFINESBYTYPE('{}',#{owner_hist},$,$,(#{el_id}),#{type_el_id})",
-                    gid(&["defines-by-type", &type_gid]),
+                    stable_guid(&type_gid, &["defines-by-type", &type_gid]),
                 ),
             );
         }
@@ -4583,8 +4962,14 @@ impl StepWriter<'_> {
                 continue;
             }
             let (target_storey, container_gid) = match idx {
-                Some(index) => (storey_ids[index], gid(&["contains", &storey_gids[index]])),
-                None => (building_id, gid(&["contains", "building"])),
+                Some(index) => (
+                    storey_ids[index],
+                    stable_guid(&storey_gids[index], &["contains", &storey_gids[index]]),
+                ),
+                None => (
+                    building_id,
+                    stable_guid(&building_gid, &["contains", "building"]),
+                ),
             };
             let rel_id = self.id();
             let refs_list = element_ids
@@ -4609,8 +4994,14 @@ impl StepWriter<'_> {
                 continue;
             }
             let (parent, rel_gid) = match idx {
-                Some(index) => (storey_ids[index], gid(&["aggregates", &storey_gids[index]])),
-                None => (building_id, gid(&["aggregates", "building", "spaces"])),
+                Some(index) => (
+                    storey_ids[index],
+                    stable_guid(&storey_gids[index], &["aggregates", &storey_gids[index]]),
+                ),
+                None => (
+                    building_id,
+                    stable_guid(&building_gid, &["aggregates", "building", "spaces"]),
+                ),
             };
             let rel_id = self.id();
             let refs_list = space_ids
@@ -4628,7 +5019,10 @@ impl StepWriter<'_> {
             let Some(space_id) = entity_index_to_el_id.get(*space).and_then(|slot| *slot) else {
                 continue;
             };
-            let container_gid = gid(&["contains", el_id_to_gid[&space_id]]);
+            let container_gid = stable_guid(
+                el_id_to_gid[&space_id],
+                &["contains", el_id_to_gid[&space_id]],
+            );
             let refs_list = element_ids
                 .iter()
                 .map(|id| format!("#{id}"))
@@ -4806,16 +5200,19 @@ fn epoch_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
 }
 
 /// The GlobalId of an entity Revit gives none (#400): SHA-256 over a fixed
-/// namespace, the document's identity and `key` (the entity's role and the
-/// identities it derives from), as an RFC 9562 version-8 UUID in IFC's
-/// 22-character form. It depends on nothing about the entity's position in
-/// the file, so it survives changes elsewhere in the model, and the
-/// namespace keeps it apart from GlobalIds other tools derive.
-fn stable_guid(document: &str, key: &[&str]) -> String {
+/// namespace, `seed` and `key` (the entity's role and the identities it
+/// derives from), as an RFC 9562 version-8 UUID in IFC's 22-character form.
+/// `seed` is the GlobalId the writer gives the entity this one belongs to (for
+/// an element's further piece, the element's Revit GlobalId, #1840), or the
+/// document's identity where it belongs to none (#1854). It depends on
+/// nothing about the entity's position in the file, so it survives changes
+/// elsewhere in the model, and the namespace keeps it apart from GlobalIds
+/// other tools derive.
+fn stable_guid(seed: &str, key: &[&str]) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(b"rvt-rs ifc GlobalId v1\0");
-    hasher.update(document.as_bytes());
+    hasher.update(seed.as_bytes());
     for part in key {
         hasher.update([0x1f]);
         hasher.update(part.as_bytes());

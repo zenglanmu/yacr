@@ -21,9 +21,9 @@ output="$(cargo test \
   --locked --lib ifc::gltf "$@" 2>&1)"
 printf '%s\n' "$output"
 
-expected='test result: ok\. 4 passed; 0 failed'
+expected='test result: ok\. 7 passed; 0 failed'
 if ! grep -Eq "$expected" <<<"$output"; then
-  echo "test-rvt-patch: expected 4 passing ifc::gltf tests (ADR-0035); the patch's" >&2
+  echo "test-rvt-patch: expected 7 passing ifc::gltf tests (ADR-0035; 3 upstream, 4 patch); the patch's" >&2
   echo "tests are missing or the run failed. See docs/rvt-patches.md." >&2
   exit 1
 fi

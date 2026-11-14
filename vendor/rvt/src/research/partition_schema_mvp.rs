@@ -234,6 +234,9 @@ pub fn recover_partition_schema_mvp(
         }
         bind_opening_hosts(&out.walls, &mut out.doors);
         bind_opening_hosts(&out.walls, &mut out.windows);
+        // --- Each door and window in the wall its own native record names
+        // (RE-448), as RE-245 does on 2024 to 2027 ---
+        rebind_opening_hosts_to_native(rf, &out.walls, [&mut out.doors, &mut out.windows]);
         // --- The Level parameters each element's own native record names
         // (RE-369) ---
         attach_levels_32(
@@ -980,6 +983,25 @@ pub fn recover_partition_schema_mvp(
     // --- A structural beam's or column's LoadBearing is its category's
     // (RE-285), unless a parameter named for it says otherwise ---
     attach_load_bearing(out.columns.iter_mut().chain(out.products.iter_mut()));
+    // --- A wall's LoadBearing: its Structural box set and its usage
+    // Bearing, from its native record, curtain panel walls included (RE-429) ---
+    attach_wall_load_bearing(
+        rf,
+        revit_version,
+        out.walls.iter_mut().chain(
+            out.products
+                .iter_mut()
+                .filter(|product| product.class == CURTAIN_PANEL_WALL_CLASS),
+        ),
+        &mut wall_reads,
+    );
+    // --- A floor's or stair's LoadBearing from its Structural check box
+    // (RE-429), where no category or parameter named for it gives one ---
+    attach_structural_load_bearing(
+        rf,
+        revit_version,
+        out.slabs.iter_mut().chain(out.products.iter_mut()),
+    );
     Ok(out)
 }
 
@@ -1055,8 +1077,20 @@ fn element_record_decoded(
 ) -> DecodedElement {
     let (cx, cy) = record.plan_centre_feet();
     let (dx, dy, dz) = record.extents_feet();
-    let level_id =
-        crate::element_record_level_refs::unique_level_reference(&record.references, level_ids);
+    // RE-454: a beam's or brace's Level is the one its record's second counted
+    // reference list names where that names any, else the first's (RE-174), the
+    // list its Reference Level is read from: Revit puts it in that Level's
+    // storey. The first list alone gave 63 beams of each BIM4LCA timber office a
+    // storey other than Revit's.
+    let level_list: &[u64] = if class == "StructuralFraming"
+        && !crate::element_record_level_refs::named_levels(&record.second_references, level_ids)
+            .is_empty()
+    {
+        &record.second_references
+    } else {
+        &record.references
+    };
+    let level_id = crate::element_record_level_refs::unique_level_reference(level_list, level_ids);
     let mut fields = vec![
         (
             "m_locationX".into(),
@@ -1129,7 +1163,7 @@ fn element_record_decoded(
     if level_id.is_none() {
         // RE-59: base and top constraint, resolved against the Levels'
         // elevations by `resolve_base_constraint_levels`.
-        let named = crate::element_record_level_refs::named_levels(&record.references, level_ids);
+        let named = crate::element_record_level_refs::named_levels(level_list, level_ids);
         if named.is_empty() {
             // RE-60: what the record names instead, resolved by
             // `resolve_hosted_levels`.
@@ -1153,7 +1187,9 @@ fn element_record_decoded(
                 ));
             }
         }
-        if named.len() == 2 {
+        // A beam or brace that names more than two keeps them too: its
+        // Reference Level is the highest (RE-175, RE-454).
+        if named.len() == 2 || (named.len() > 2 && class == "StructuralFraming") {
             fields.push((
                 crate::element_record_level_refs::CONSTRAINT_LEVELS_FIELD.into(),
                 InstanceField::Vector(

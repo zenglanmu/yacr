@@ -308,6 +308,22 @@ pub const CUT_SOLID_SIZE_FIELDS: [&str; 3] = [
     "m_cut_solid_height",
 ];
 
+/// Field holding the Revit release (its version, 2024) of the file a furniture
+/// or casework element was read from (RE-419): the `NOTDEFINED` its predefined
+/// type defaults to is written on the releases of
+/// [`FURNITURE_DEFAULT_REVIT_VERSIONS`] only.
+pub const FURNITURE_RELEASE_FIELD: &str = "m_furniture_release";
+
+/// Releases whose furniture and casework take `NOTDEFINED` where they have no
+/// predefined type of their own or their type's (RE-419): 2024 (the BIM4LCA
+/// housing and office) and the held-out house and office pairs of 2024, 2025
+/// and 2026 are written it by Revit's export on every such element. The 2022
+/// pair is too, but a 32-bit release does not read the export parameters, so a
+/// 2022 file could not tell an element with an "IFC Predefined Type" from one
+/// without, and none is written there. The two 2027 pairs write none on any
+/// furniture, stair, slab or member.
+pub const FURNITURE_DEFAULT_REVIT_VERSIONS: &[u32] = &[2024, 2025, 2026];
+
 /// Releases a door's or window's cut loop is measured on (RE-215): 2024
 /// (Core Interior) and 2025 (RE1 Architecture, the R2025 models). 2026 and
 /// 2027 (RE-346): Autodesk's samples saved by them cut their walls as their
@@ -556,6 +572,14 @@ pub const SYSTEM_FAMILY_SOURCE: &str = "system_family_by_category";
 // Tracker: B55.
 pub const PROFILE_OPENING_FIELD: &str = "m_profile_opening";
 
+/// The field prefix of the pockets of a wall's edited elevation profile against
+/// its convex hull, the openings Revit's export writes (#1607, RE-380):
+/// `m_profile_pocket_<k>`, the pocket's outline as model-feet points in the
+/// wall's vertical plane, and `m_profile_pocket_<k>_tag`, the highest ElementId
+/// of the profile's lines it follows.
+// Tracker: B55.
+pub const PROFILE_POCKET_FIELD: &str = "m_profile_pocket";
+
 /// The field holding the two ends of the elevation profile the openings of
 /// [`PROFILE_OPENING_FIELD`] are cut from, as model-feet points: the profile's
 /// lowest and highest along its own axis, which are where its edge runs and a
@@ -692,6 +716,13 @@ pub const STAIR_TYPE_FIELD: &str = "m_stair_type";
 /// of the `FamInstCurveDriver` in its native record (W7, RE-276).
 pub const BEAM_ROTATION_FIELD: &str = "m_beam_cross_section_rotation";
 
+/// Field holding a framing instance's structural usage: the `m_structUsage` of
+/// its `FamilyInstance` in its native record (`InsertableInst`, a 4-byte
+/// integer, #1841). Which value is which usage is read from files, not from the
+/// API's enumeration: [`crate::ifc::category_map::HORIZONTAL_BRACING_USAGE`] is the one
+/// observed.
+pub const STRUCT_USAGE_FIELD: &str = "m_struct_usage";
+
 /// Fields holding the first end of a beam's location line, model feet
 /// (RE-49).
 pub const BEAM_AXIS_START_FIELDS: [&str; 3] = [
@@ -706,6 +737,24 @@ pub const BEAM_AXIS_END_FIELDS: [&str; 3] = [
     "m_beam_axis_end_x",
     "m_beam_axis_end_y",
     "m_beam_axis_end_z",
+];
+
+/// Fields holding the first end of a beam's location line for its properties,
+/// model feet (#1697, RE-428): the line of the beam's element data, whenever it
+/// lies inside the beam's record box, whether or not a solid along it is drawn
+/// ([`BEAM_AXIS_START_FIELDS`] is the line of a beam that has one).
+pub const BEAM_LINE_START_FIELDS: [&str; 3] = [
+    "m_beam_line_start_x",
+    "m_beam_line_start_y",
+    "m_beam_line_start_z",
+];
+
+/// Fields holding the second end of a beam's location line for its properties,
+/// model feet (#1697, RE-428).
+pub const BEAM_LINE_END_FIELDS: [&str; 3] = [
+    "m_beam_line_end_x",
+    "m_beam_line_end_y",
+    "m_beam_line_end_z",
 ];
 
 /// Fields holding the first end of a pipe's centreline, model feet (RE-131).
@@ -806,9 +855,10 @@ pub const NATIVE_NAMED_PARAMETER_REVIT_VERSIONS: &[u32] =
 
 /// Releases whose walls' native type Function is measured (RE-185, RE-193;
 /// 2015 to 2023 against the same projects saved by a later release and
-/// against BIMcollab's and modelo_bim's exports, RE-283).
+/// against BIMcollab's and modelo_bim's exports, RE-283; 2026 and 2027
+/// against the same projects' 2025 saves, element by element, #1860).
 pub const WALL_TYPE_FUNCTION_REVIT_VERSIONS: &[u32] = &[
-    2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025,
+    2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027,
 ];
 
 /// Prefix of a field carrying the Yes/No value of a project or shared
@@ -907,6 +957,14 @@ pub const WALL_TOP_JOINED_FIELD: &str = "m_wall_top_joined";
 pub const WALL_TOP_JOIN_RECORD_REVIT_VERSIONS: &[u32] =
     &[2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023];
 
+/// Releases whose walls' `LoadBearing` is written from the Structural box and
+/// usage of their native record (RE-429): the box is set on walls of Revit
+/// 2024 files alone among the models Measure holds, so the rule's true is
+/// measured there, and the walls of the 2018 to 2023 and 2025 to 2027 models it
+/// holds are false in Revit's exports with the box unset. The 2015 to 2023
+/// records are not read for it.
+pub const WALL_LOAD_BEARING_REVIT_VERSIONS: &[u32] = &[2024, 2025, 2026, 2027];
+
 /// Field set on a wall whose native record holds no `JoinToRoofGStep`,
 /// `CutPairGStep` or `WallCutoutGStep`
 /// ([`crate::native_walls::native_walls_and_top_joins`], RE-266): its body
@@ -1000,6 +1058,22 @@ pub const CURTAIN_GRID_WALL_OFFSETS: [usize; 2] = [85, 478];
 /// still lie inside it (RE-62): 0.05 ft places every measured part, and
 /// 0.01 ft misses mullions whose profile reaches past the wall's box.
 pub(super) const CURTAIN_PART_BOX_TOLERANCE_FEET: f64 = 0.05;
+
+/// How far past an element's id its data is searched for the ids of curtain
+/// walls, bytes (#1865, RE-449): the curtain grids of Autodesk's `rac_advanced`
+/// name their wall at four places, the last 1,190 bytes past the id on Revit
+/// 2025 and 1,174 on 2027.
+pub(super) const ELEMENT_DATA_WALL_WINDOW: usize = 1200;
+
+/// How many times a curtain wall's id must lie in that window for the data to
+/// name the wall: the grids measured name it four times, so a coincidence of
+/// eight bytes would have to repeat.
+pub(super) const ELEMENT_DATA_WALL_MIN_COPIES: usize = 2;
+
+/// Field naming the curtain walls a part's reference list names when it names
+/// two or more and no wall could be chosen for it (#1865), so that the part
+/// takes the `IsExternal` they agree on (`attach_curtain_member_is_external`).
+pub const CURTAIN_NAMED_WALLS_FIELD: &str = "m_curtain_walls_named";
 
 /// Field carrying a room's Floor Finish (RE-153).
 pub const ROOM_FLOOR_FINISH_FIELD: &str = "m_room_floor_finish";

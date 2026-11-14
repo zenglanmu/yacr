@@ -1,6 +1,6 @@
 //! Contract tests for the RVT preview lane.
 //!
-//! Unit 1 (`rvt` -> GLB) runs against the upstream `rvt` 0.17.0 scaffold
+//! Unit 1 (`rvt` -> GLB) runs against the upstream `rvt` 0.22.0 scaffold
 //! fixture: Apache-2.0, metadata-only, and honestly **zero** geometry. Unit 2
 //! (GLB -> mesh) runs against a synthetic two-node GLB authored in this
 //! repository; it is the test that proves node world transforms are applied.
