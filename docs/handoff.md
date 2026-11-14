@@ -1,3 +1,46 @@
+## 2026-11-14 发布 v0.1.13（插件 API 可用 + canvas ViewCube/cad_orbit + 跨载体 pinch + SKP 导入 + OS 文件关联）
+
+- **版本**：workspace `Cargo.toml`、`Cargo.lock`（36 处）、四个 `tauri.conf.json`、Flatpak metainfo
+  全部 `0.1.12` → `0.1.13`（commit `9e00f728`；`7600b316` 只把 notes 移出 tag 树）。
+- **tag / run**：`v0.1.13`（annotated，指向 `7600b316`）→ `CI build layers` run
+  [`43543058296`](https://github.com/zenglanmu/yacr/actions/runs/43543058296) **11/11 job 绿**
+  （四个 release + 三个 check + shader + web-build/smoke/deploy）；`CI` run
+  [`43543058229`](https://github.com/zenglanmu/yacr/actions/runs/43543058229) 全绿。
+- **首轮 tag 失败与修正**：第一次 tag（`9e00f728`）把 `docs/release-notes/v0.1.13.md` 提前放进 tag
+  树，`core-quality` 的 `test-landing-site.py` 报 `apps/landing/changelog.json is stale`（changelog
+  由 notes 生成，而 `downloads.json` 只能带出包后的真实尺寸）；同一轮 `macos-release` 在排队阶段被
+  取消（`runner_name` 空、`steps: []`、无构建日志）。按 v0.1.12 的顺序改成“先 tag/出包、后补 notes
+  与落地页”（`7600b316`），重打 tag 后 `macos-release` 正常拿到 runner 并成功。
+- **发布**：`publish-release` run
+  [`43547594928`](https://github.com/zenglanmu/yacr/actions/runs/43547594928) 绿 →
+  <https://github.com/zenglanmu/yacr/releases/tag/v0.1.13>（非 draft / 非 prerelease；自动生成 notes
+  后用 `docs/release-notes/v0.1.13.md` 覆盖）。
+- **artifact（Release API 核对）**：`yacr-0.1.13-linux-x86_64.flatpak` **113,559,224 B**
+  + `.sha256` + `.flatpak.gpg`（GPG 签名）；`yacr-0.1.13-windows-x86_64.zip` **108,573,995 B**
+  + `.sha256`（unsigned，无 `.cer`）；`yacr-0.1.13-macos-universal.tar.gz` **155,080,263 B**
+  + `.sha256`（ad-hoc、未公证）；`app-universal-release.apk` **115,516,961 B**
+  + `.sha256`（仓库自签名，v2/v3 verified）。合计 492,730,443 B（≈470 MiB）。
+- **落地页（提交侧）**：commit `b7a646bd`；`downloads.json` → v0.1.13（R2 自定义域 + GitHub
+  fallback，真实 size/sha256）、`changelog.json` 由 notes 生成、`site.yml` 默认
+  `release_tag=v0.1.13`、`index.html` 版本/尺寸/SHA fallback、`docs/landing-site.md` 与
+  `scripts/test-landing-site.py` 同步；main 上 `CI` run
+  [`43547755289`](https://github.com/zenglanmu/yacr/actions/runs/43547755289) 复验落地页契约通过。
+- **落地页部署**：`site.yml` run
+  [`43547756186`](https://github.com/zenglanmu/yacr/actions/runs/43547756186) 绿。线上复核：
+  `/downloads.json` = v0.1.13，`/changelog.json` 首版 v0.1.13（2026-11-14），页面含 v0.1.13；
+  R2 HEAD `releases/v0.1.13/yacr-0.1.13-linux-x86_64.flatpak` **200 / 113,559,224 B**、
+  `app-universal-release.apk` **200 / 115,516,961 B**。
+- **并发说明**：发布过程中另一条 lane 的 `ed14d147`（`rvt` 0.22.0 补丁 rebase）先进入 main 并随本次
+  推送发布；tag `v0.1.13` 仍指向 `7600b316`（rvt 0.17.0），因此 **tag 产物与 main 当前源码的 `rvt`
+  版本不同**。该 lane 仍有未提交的 `probe_log` 改动留在工作树，本条未触碰、未暂存。
+- **发版前测试（本轮实跑）**：`cargo test --workspace --locked -- --test-threads=1`
+  **6623 passed / 0 failed / 39 ignored**；`apps/desktop-ui` `npm test` **1752 passed** +
+  `npm run build`；`fmt --check`、`clippy -D warnings`（修 `cloned_ref_to_slice_refs`）、
+  `cargo check --workspace --all-targets`、workspace wasm lib、`app-web` 与 wasm target；11 个 python
+  门禁。**未运行**：真实 GUI/GPU/真机；`YACR_TEST_DWG` 未设，DWG 用例被跳过（跳过不是已运行证据）。
+- **NOT VERIFIED**：Windows/macOS/Android 真机、真实 GPU、像素与性能仍未验收；发布、打包、签名、
+  上传与落地页部署成功都不是运行时验收。
+
 ## 2026-11-13 ViewCube 改 canvas 3D + 导航栏重排 + `cad_orbit` + 原生 pinch
 
 - **范围**：右缘导航 dock 重设计（收起/展开移到立方体正下方；移动端收起只剩“立方体 + 一个展开图标”
