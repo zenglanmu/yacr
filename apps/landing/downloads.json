@@ -1,27 +1,27 @@
 {
-  "release": "v0.1.12",
-  "cdnBase": "https://dl-yacr.snakeheartgo.top/releases/v0.1.12",
-  "githubBase": "https://github.com/zenglanmu/yacr/releases/download/v0.1.12/",
+  "release": "v0.1.13",
+  "cdnBase": "https://dl-yacr.snakeheartgo.top/releases/v0.1.13",
+  "githubBase": "https://github.com/zenglanmu/yacr/releases/download/v0.1.13/",
   "assets": {
     "linux": {
-      "file": "yacr-0.1.12-linux-x86_64.flatpak",
-      "size": 113189968,
-      "sha256": "da81e3c39405b287cd7ac6a04873e04ee0c50c912281d04e0f7de4b323e05a78"
+      "file": "yacr-0.1.13-linux-x86_64.flatpak",
+      "size": 113559224,
+      "sha256": "7dc4415ee88827991d0f84fe8036cc0b2c4aeef2d9b52b9c915dc3ee91322298"
     },
     "windows": {
-      "file": "yacr-0.1.12-windows-x86_64.zip",
-      "size": 107269717,
-      "sha256": "37eeca33dabd86325644653d61cd1514610f219153a39bfd80d3590c03bd999b"
+      "file": "yacr-0.1.13-windows-x86_64.zip",
+      "size": 108573995,
+      "sha256": "61637433c037f9a773f84ef8fd86d8515b8180b20ce433b27bfe812e63c91ecc"
     },
     "macos": {
-      "file": "yacr-0.1.12-macos-universal.tar.gz",
-      "size": 151988558,
-      "sha256": "2834d65006677a3baaf9dede71c797a090dad422dedb3768b6ed7621b89a2dac"
+      "file": "yacr-0.1.13-macos-universal.tar.gz",
+      "size": 155080263,
+      "sha256": "797f75012114c6249403bec21358d9f945190b2319ee98e14249c5564dc0c689"
     },
     "android": {
       "file": "app-universal-release.apk",
-      "size": 113993249,
-      "sha256": "605b3f469e48126ca39de625b637b8df0ffb13c00c457f2eede87869454351f9"
+      "size": 115516961,
+      "sha256": "ce196052bdf739f8788678ed618d3c58da552251300a7af0d45622ffd60e1e5d"
     }
   }
 }
