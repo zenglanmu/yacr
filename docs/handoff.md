@@ -22,6 +22,67 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**命令覆盖推进（2026-11-15，本轮）**
+
+覆盖表 `docs/autocad-2026-command-coverage.md` 从 **123 完整 / 856 部分**推进到
+**139 完整 / 840 部分**（本轮净晋升 **16 个命令名**；此前的 16 个见 Wave 30 增补）：
+`HATCHSETORIGIN`、`HATCHTOBACK`、`LTSCALE`、`MASSPROP`、`SOLID`、`DIMANGULAR`、`WIPEOUT`、
+`FIND`、`-FIND`、`COLOR`、`-COLOR`、`IMAGECLIP`、`VPCLIP`、`MVIEW`、`LAYVPI`、`VPSCALE`。
+
+- `HATCHSETORIGIN`：绝对图案原点以首个定义行的合成基点为锚（`absolute_pattern_origin()`），
+  写 `P − 锚`；`HATCHTOBACK` 按 `SpaceId` 逐范围（模型空间/各图纸布局/各块定义）重排。
+- `LTSCALE`：导出写 HEADER `9/$LTSCALE` + `40`，SAVE→OPEN 往返；不可表示值声明并保留默认 1.0。
+- `SOLID`：创建与**导入**的 `SOLID`/`TRACE` 都写真实类记录（组 340 无关；`0/SOLID` vs `0/TRACE`），
+  类溯源经 acadrust 的 `Solid::is_trace`，DXF/DWG 双路径往返测试。
+- `MASSPROP`：新增 `cad-geometry/src/inertia.rs`——Green 公式多边形矩、每段 bulge 的圆缺精确矩
+  （`α<1e-2` 用级数避免抵消）、平行轴合成、精确换标、2×2 对称张量主轴；圆/椭圆/折线/解析填充环精确，
+  样条与被拉直的填充边采样并标注 `exact=false`。体积/质量/密度/3D 惯性、`Add/Subtract`、`.mpr`
+  为全局范围具名拒绝。
+- `DIMANGULAR`：捕获状态机改为逐步语法（`CaptureStep::{Point,Pick,PickOrPoint}` + 实时 `CapturePlan`），
+  首步「拾线或给顶点」决定形式，混用按 `dimangular.capture.mixed` 拒绝；React 步骤提示与 i18n 同步四步。
+- `WIPEOUT`：`WIPEOUTFRAME 0|1|2`（与 `Frames` 选项同一会话令牌，`SETVAR` 可读写）；矢量出图按
+  页面背景 flood，`inverted` 用「页面环 + 边界环」多环 even-odd 补集；既有遮罩**本来就可拾取**
+  （沿边界），`ERASE`/`MOVE`/`SELECTALL`/`QSELECT` 有契约测试。选择/悬停高亮仍缺（引擎如实报
+  `flags.unresolved`），按全局范围保留。
+- `FIND`/`-FIND`：整图遍历（模型空间 + 每个图纸布局，分组报告，跨空间替换一条事务）；所有文字通道
+  （含表格单元格）按**画出来的文本**匹配；部分命中结构化码 `find.mtext_partial_code`、替换被语法重画
+  `find.mtext_replacement_not_literal`；块定义命中只读具名。
+- `COLOR`/`-COLOR`：`<0..=256>`/`BYLAYER`/`BYNAME`/`BYBLOCK` 写会话令牌，**创建漏斗消费该 ACI**
+  （`256` 行逐字节不变）；React 命令行放行，域判定仍在宿主。颜色对话框未建模。
+- `IMAGECLIP`：非凸环耳切成凸片段逐块与图像矩形求交，面积精确、凹口为空、`Complete` 无诊断；
+  凸环字节不变。
+- `VPCLIP`/`MVIEW`：多边形视口裁剪在表示层真实渲染（折线按交点分段、圆锥曲线按参数切分、
+  网格/填充/图像耳切凸窗求交；矩形输出逐字节不变）；导入侧按 DXF 组 340 解析真实多边形边界。
+- `LAYVPI`/`VPSCALE`：新增 **`CVPORT`** 会话系统变量（每布局 0 基索引、命令行 1 基、纯会话状态、
+  `cvport.out_of_range` 不 clamp、`cvport.no_viewports`、`cvport.paper_space_required`）；
+  `LAYVPI` 无索引 = 除当前视口、`VPSCALE`/`VPCLIP` 无索引 = 当前视口。`VPMAX`/`VPMIN` 仍按第一个视口
+  （其助手同时服务 `MVSETUP`/`PSBSCALE`/`PSTSCALE`），作为声明残留。
+
+**门禁（本轮实跑，2026-11-15）**：`cargo fmt --all -- --check`、`cargo clippy --workspace
+--exclude app-android --exclude app-web --all-targets --locked -- -D warnings`、
+`cargo check --workspace --all-targets --locked`、`scripts/check-architecture.py`、
+`check-file-size.py`（2127 文件）、`check-i18n.py`（2926 键）、`check-command-docs.py`（0 mismatch）、
+`check-tauri-capabilities.py`、`check-fixture-manifest.py` 全绿。分契约测试：hatch 165、
+cad-import-acadrust 414、cad-representation 312、cad-ui-core 700、cad-app 2778 lib、
+cad-host 340、`cad-render-wgpu` 全 target（GPU 用例串行 `-- --test-threads=1`）。
+
+**真机 GUI 证据（Linux Wayland + Vulkan `Quadro P620`，`native-below` 生产路径）**：
+`scripts/collect-evidence.sh --backend wayland --no-build --dwg fixtures/dxf/qcad-flange/flange.dxf`
+三轮，均 `NATURAL_EXIT exit=0` + Mutter ScreenCast 合成帧：
+
+- `/tmp/opencode/evidence-round4b/`：`LTSCALE 2.5`、`WIPEOUTFRAME 2`、`WIPEOUTFRAME 9` →
+  `wipeoutframe.out_of_range: … got 9 and nothing was changed`、`QSELECT TYPE = HATCH`（1）→
+  `HATCHSETORIGIN 5 5` + `HATCHTOBACK` + `UNDO`（entityCount 419 稳定）、`QSELECT TYPE = CIRCLE`（18）→
+  `MASSPROP`、`COLOR 3` + `COLOR` 报告、`CVPORT` 在模型空间 →
+  `cvport.paper_space_required`。
+- `/tmp/opencode/evidence-cvport2/`：`LAYOUT SET Layout` → paper、`CVPORT` 报告、`CVPORT 2`、
+  `CVPORT 9` → `cvport.out_of_range: layout 1 has 3 viewport(s); … got 9 and nothing was changed`、
+  `VPSCALE 1:2`、`VPCLIP RECT 10 10 300 200` 均被接受。
+- 边界：GUI 证据只证明命令在真实宿主上被接受/按名拒绝、图面未崩；**数值正确性**由契约测试证明
+  （`cad_status` 无几何通道，报告的正文不进 `status.error`）。`LAYVPI` 的「除当前视口」、
+  `DIMANGULAR` 三点式点击流、`WIPEOUT` 矢量遮罩出图本轮**未在真机点击/出图验证**；
+  Windows/macOS/Android/Web 一律 **NOT VERIFIED**；无像素/GPU 性能结论。
+
 **最近完成（2026-11-13 → 2026-11-15）**
 
 - 3D orbit 灵敏度基础值 0.008 → **0.0035 rad/逻辑像素**，并新增设置
