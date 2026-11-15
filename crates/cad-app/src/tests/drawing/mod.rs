@@ -289,6 +289,7 @@ mod chamfer_fillet;
 mod circle_options;
 mod clipboard;
 mod construction_line;
+mod create_color;
 mod create_draw_order;
 mod create_polyline;
 mod create_trim;

@@ -929,6 +929,10 @@ pub enum CommandPayload {
     /// `0..=2` never reaches this payload: the typed parser refuses it by name
     /// (`wipeoutframe.out_of_range`) before dispatch.
     WipeoutFrame(WipeoutFrames),
+    /// `COLOR <aci>`: the session current-colour ACI the create funnel stamps
+    /// (`0` = ByBlock, `1..=255` = ACI, `256` = ByLayer); the bare selector keeps
+    /// its report. Out of domain and Viewer are refused by the handler.
+    CurrentColor(i16),
     /// `LINETYPE`: `LIST` or `SET <name>`.
     Linetype(crate::LinetypeCommand),
     /// `IMAGEATTACH <file> <x> <y> <w> <h> <scale>`: one real `Image` row (Work-only).

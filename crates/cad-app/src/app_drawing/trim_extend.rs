@@ -17,10 +17,44 @@ struct NewEntityInsert<'a> {
     /// A captured display state (render attributes + dynamic-visibility
     /// membership); only the single-entity OFFSET path captures one.
     display: Option<cad_db::EntityDisplayState>,
+    /// The session `COLOR` colour stamped on the inserted rows; `None` stages no
+    /// display state at all, which is exactly the pre-`COLOR` behaviour (the
+    /// entity keeps the symbolic `ByLayer` default).
+    color: Option<cad_db::EntityColor>,
     /// The stored `type_key` override; `None` = [`class_name`].
     type_key: Option<&'a str>,
     /// The transaction / undo label (also used in refusal messages).
     label: &'a str,
+}
+
+/// The session `COLOR` colour the create funnel stamps on a new entity.
+///
+/// `256` is AutoCAD's ByLayer token and `0` its ByBlock token. ByLayer is the
+/// **absence** of a per-entity override, so it returns `None` and the inserted
+/// row keeps exactly the pre-`COLOR` behaviour; `0` stays symbolic (`ByBlock`)
+/// because the block-reference resolution is the model's, not this funnel's.
+/// `1..=255` resolves through the one ACI table the build owns
+/// ([`crate::property_value::rgb_for_aci`]) — the same table
+/// `SETENTITYPROPERTY color aci:N` writes — so a created entity and a recoloured
+/// one store the identical value and both export the same way.
+///
+/// The token's closed domain is enforced by
+/// [`crate::session_state::DraftingExtras::set_current_color`], so an
+/// unresolvable index here is an invariant violation, never a silent fallback to
+/// ByLayer.
+fn new_entity_color(session: &SessionState) -> CadResult<Option<cad_db::EntityColor>> {
+    match session.drafting_extras.current_color() {
+        256 => Ok(None),
+        0 => Ok(Some(cad_db::EntityColor::ByBlock)),
+        aci => crate::property_value::rgb_for_aci(aci as u16)
+            .map(|rgb| Some(cad_db::EntityColor::Explicit(rgb)))
+            .ok_or_else(|| {
+                CadError::Invariant(format!(
+                    "color.invalid_value: the session COLOR token {aci} is outside the ACI palette \
+                     this build resolves, so a created entity's colour cannot be derived from it"
+                ))
+            }),
+    }
 }
 
 impl Application {
@@ -482,7 +516,8 @@ impl Application {
         })
     }
 
-    /// Shared insert path for LINE/CIRCLE/ARC creation (active layer, model space).
+    /// Shared insert path for LINE/CIRCLE/ARC creation (active layer, model space,
+    /// the session `COLOR` colour).
     pub(super) fn commit_new_entity(
         &mut self,
         session: &SessionState,
@@ -496,6 +531,7 @@ impl Application {
             session.active_layer,
             SpaceId::Model,
             None,
+            new_entity_color(session)?,
             label,
         )
     }
@@ -506,8 +542,9 @@ impl Application {
     /// the analytic entities but cannot express "this `Text` geometry came from
     /// MTEXT" — both would be `AcDbText`. MTEXT creation passes `AcDbMText` here
     /// so the newline policy, the export path and `TEXTEDIT` agree on the same
-    /// entity. Everything else (active layer, model space, one transaction, one
-    /// undo step, all-or-nothing) is the shared funnel.
+    /// entity. Everything else (active layer, model space, the session `COLOR`
+    /// colour, one transaction, one undo step, all-or-nothing) is the shared
+    /// funnel.
     pub(super) fn commit_new_entity_typed(
         &mut self,
         session: &SessionState,
@@ -523,6 +560,7 @@ impl Application {
                 layer: session.active_layer,
                 space: SpaceId::Model,
                 display: None,
+                color: new_entity_color(session)?,
                 type_key: Some(type_key),
                 label,
             },
@@ -535,8 +573,9 @@ impl Application {
     ///
     /// Same single funnel as [`Self::commit_new_entity`]: the layer must exist (a
     /// missing layer is an explicit error), every entity lands in one transaction
-    /// and one undo step, and the whole batch is all-or-nothing. An empty batch is
-    /// an explicit refusal, never a silent empty success.
+    /// and one undo step, the whole batch is all-or-nothing, and every row gets
+    /// the session `COLOR` colour (one token, one batch). An empty batch is an
+    /// explicit refusal, never a silent empty success.
     pub(crate) fn commit_new_entities(
         &mut self,
         session: &SessionState,
@@ -550,6 +589,7 @@ impl Application {
             session.active_layer,
             SpaceId::Model,
             None,
+            new_entity_color(session)?,
             label,
         )
     }
@@ -563,6 +603,11 @@ impl Application {
     /// key instead of re-deriving them. `type_key: None` stamps
     /// [`class_name`]; a batch of more than one entity would be refused, so this
     /// deliberately inserts exactly one.
+    ///
+    /// The session `COLOR` colour is deliberately **not** applied here: this is
+    /// the copy path, and the captured `display` already is the source row's own
+    /// colour. Stamping the current token over it would recolour the copy instead
+    /// of matching the source, which is the opposite of ADDSELECTED's contract.
     // The batch shape is the contract here too: one argument per stored field,
     // so the caller cannot silently drop the type key or the display state.
     #[allow(clippy::too_many_arguments)]
@@ -583,6 +628,7 @@ impl Application {
                 layer,
                 space,
                 display,
+                color: None,
                 type_key,
                 label,
             },
@@ -594,6 +640,8 @@ impl Application {
     ///
     /// A thin wrapper over [`Self::commit_new_entities_in`] for the single-entity
     /// callers; the display state (used by OFFSET) applies to that one entity.
+    // clippy counts `self`: the session's create inputs are exactly these seven.
+    #[allow(clippy::too_many_arguments)]
     fn commit_new_entity_in(
         &mut self,
         command: &Command,
@@ -601,9 +649,10 @@ impl Application {
         layer: LayerId,
         space: SpaceId,
         display: Option<cad_db::EntityDisplayState>,
+        color: Option<cad_db::EntityColor>,
         label: &str,
     ) -> CadResult<CommandOutcome> {
-        self.commit_new_entities_in(command, vec![geometry], layer, space, display, label)
+        self.commit_new_entities_in(command, vec![geometry], layer, space, display, color, label)
     }
 
     /// Insert a batch of new entities into `layer`/`space` in one transaction.
@@ -612,10 +661,14 @@ impl Application {
     /// fallback. A captured display state (captured only by the single-entity
     /// OFFSET path) is restored on the **first** inserted entity after commit and recorded on its patch's
     /// `after_state` so a redo re-applies it; a batch (DIMCENTER) passes `None`.
+    /// `color` is the session `COLOR` value and applies to **every** row (see
+    /// [`Self::insert_new_entities`]).
     ///
     /// Every entity's stored `type_key` is [`class_name`]'s answer; the
     /// type-key-carrying variant [`Self::commit_new_entity_typed`] is what MTEXT
     /// creation uses and every caller here keeps exactly that behaviour.
+    // clippy counts `self`: the session's create inputs are exactly these seven.
+    #[allow(clippy::too_many_arguments)]
     fn commit_new_entities_in(
         &mut self,
         command: &Command,
@@ -623,6 +676,7 @@ impl Application {
         layer: LayerId,
         space: SpaceId,
         display: Option<cad_db::EntityDisplayState>,
+        color: Option<cad_db::EntityColor>,
         label: &str,
     ) -> CadResult<CommandOutcome> {
         self.insert_new_entities(
@@ -632,6 +686,7 @@ impl Application {
                 layer,
                 space,
                 display,
+                color,
                 type_key: None,
                 label,
             },
@@ -645,6 +700,13 @@ impl Application {
     /// `Some(key)` stamps that key instead. The override is refused for a batch —
     /// sharing one key across entities it was not meant for would mis-label them —
     /// so it can only describe a single created entity.
+    ///
+    /// `insert.color` is the session `COLOR` colour. `None` (ByLayer, also the
+    /// default token) stages **no** display state, so the inserted rows are
+    /// byte-identical to what they were before the token had a consumer. A
+    /// concrete colour is staged for **every** inserted row and recorded on that
+    /// row's patch, so an undo removes it with the entity and a redo re-applies it
+    /// exactly like the rest of the row.
     fn insert_new_entities(
         &mut self,
         command: &Command,
@@ -655,6 +717,7 @@ impl Application {
             layer,
             space,
             display,
+            color,
             type_key,
             label,
         } = insert;
@@ -719,15 +782,38 @@ impl Application {
         }
 
         let transaction = next_transaction_id();
+        // One display state per inserted row: the captured OFFSET state applies to
+        // the first (single) entity, the session colour to every row, and
+        // `None` stages nothing at all.
+        let color_state = color.map(|color| {
+            let mut state = cad_db::EntityDisplayState::default();
+            state.attributes.color = color;
+            state
+        });
+        let display_states: Vec<Option<cad_db::EntityDisplayState>> = (0..entities.len())
+            .map(|index| match (&display, &color_state) {
+                (Some(display), Some(color)) if index == 0 => {
+                    let mut merged = display.clone();
+                    merged.attributes.color = color.attributes.color;
+                    Some(merged)
+                }
+                (Some(display), _) if index == 0 => Some(display.clone()),
+                (_, Some(color)) => Some(color.clone()),
+                _ => None,
+            })
+            .collect();
         let change_set = {
             let mut staged = drawing.begin_drawing_transaction(label, transaction)?;
             for entity in &entities {
                 staged.insert_entity(entity.clone())?;
             }
-            // OFFSET copies the source's display state; it is applied after the
-            // insert in the same revision (a batch records none).
-            if let (Some(display), Some(entity)) = (&display, entities.first()) {
-                staged.update_entity_display_state(entity.id, display)?;
+            // OFFSET copies the source's display state and the session `COLOR`
+            // token colours the new rows; both are applied after the insert in the
+            // same revision.
+            for (entity, state) in entities.iter().zip(display_states.iter()) {
+                if let Some(state) = state {
+                    staged.update_entity_display_state(entity.id, state)?;
+                }
             }
             staged.commit()?
         };
@@ -740,8 +826,9 @@ impl Application {
                 after: Some(entity.clone()),
                 before_state: None,
                 // The captured display state applies only to the first (single)
-                // entity; a batch records none.
-                after_state: if index == 0 { display.clone() } else { None },
+                // entity; a batch records none. The session colour is recorded on
+                // every row it was staged for, so a redo restores it exactly.
+                after_state: display_states[index].clone(),
             })
             .collect();
         self.publish_candidate(

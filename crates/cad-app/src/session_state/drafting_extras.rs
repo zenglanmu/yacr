@@ -245,8 +245,13 @@ pub struct DraftingExtras {
     /// `LWEIGHT`: whether lineweights are displayed (AutoCAD `LWDISPLAY`).
     /// This build stores the token but has no renderer consumer.
     lweight_display: bool,
-    /// `COLOR`: the session current-colour ACI (256 = ByLayer). This build
-    /// stores the token but no creation path consumes it.
+    /// `COLOR`: the session current-colour ACI (256 = ByLayer).
+    ///
+    /// The shared create funnel (`cad-app::app_drawing::trim_extend`) reads this
+    /// token for every entity it inserts: `256` leaves the entity's colour
+    /// symbolic (`ByLayer`, exactly the pre-`COLOR` behaviour), `0` stores
+    /// `ByBlock` and `1..=255` stores that ACI's resolved sRGB colour. It is
+    /// session state only — nothing here is written to the drawing.
     current_color: i16,
 }
 
@@ -585,10 +590,30 @@ impl DraftingExtras {
 
     /// The session `COLOR` current-colour ACI (default 256 = ByLayer).
     ///
-    /// No creation path reads this token yet; the handler reports the stored
-    /// value and names the missing colour dialog.
+    /// Every entity the shared create funnel inserts reads this token: `256`
+    /// writes no per-entity override (symbolic `ByLayer`), `0` stores `ByBlock`
+    /// and `1..=255` stores that ACI's sRGB colour. The token is set through the
+    /// `COLOR` command's `CurrentColor` payload; the Select Color dialog is still
+    /// NOT IMPLEMENTED.
     pub fn current_color(&self) -> i16 {
         self.current_color
+    }
+
+    /// Set the session `COLOR` current-colour ACI.
+    ///
+    /// The closed domain is enforced here so the create funnel can never read an
+    /// unrepresentable token: `0` is ByBlock, `1..=255` are the ACI palette
+    /// entries and `256` is ByLayer. Anything else is refused by name
+    /// (`color.invalid_value`), never clamped.
+    pub fn set_current_color(&mut self, aci: i16) -> crate::CadResult<()> {
+        if !(0..=256).contains(&aci) {
+            return Err(crate::CadError::InvalidInput(format!(
+                "color.invalid_value: COLOR needs an ACI in 0..=256 (0 = ByBlock, 1..=255 = ACI, \
+                 256 = ByLayer), got {aci}"
+            )));
+        }
+        self.current_color = aci;
+        Ok(())
     }
 
     /// The stored CHAMFER/FILLET construction modes (session state only).
