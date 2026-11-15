@@ -1534,7 +1534,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `IMAGE` | **部分实现（只读报告）**：列出所有 IMAGE 实体的 id/空间/file key/pixels/visible/clip/origin（`image.entry`/`image.report`，空图 `image.none`）；Viewer-legal | 无 External References 面板/重载/卸载；不写库 |
 | `-IMAGE` | **部分实现（只读报告）**：`-IMAGE` 命令行拼写，`-image.*` 诊断码；无写 | 同上，命令行拼写 |
 | `IMAGEATTACH` | **部分实现（真实写入）**：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>` 创建真实 IMAGE 实体；逻辑 key 规范化（控制符/`..`/绝对路径拒绝），一条事务/一步撤销；宿主在提交后按 key 集变化重载纹理，大小写敏感文件系统逐段不敏感回退 | 无对话框/文件选择器；未解析 key 显示边框并进入宿主图像报告；web carrier 显式拒绝（`unsupported-runtime: images`）；跨载体纹理/GPU 证据 NOT VERIFIED |
-| `IMAGECLIP` | **部分实现（真实写入）**：一个选中 IMAGE + 像素坐标矩形（或 `OFF`），写二顶点 `ImageClip{inside:true}`，一条事务/一步撤销；裁剪多边形与 `[0,pixels]` 求交（全在外→`image.clip_unsupported`），x 沿 u、y 沿 v（自下而上） | 仅矩形 inside 裁剪；非凸/outside 未授权；无交互拖拽 |
+| `IMAGECLIP` | **完整实现（真实写入）**：`<minx> <miny> <maxx> <maxy>` / `POLY <x1> <y1> …` / `OFF`；写 `ImageClip{inside:true}`，一条事务/一步撤销；裁剪多边形与 `[0,pixels]` 求交（全在外→`image.clip_unsupported`），x 沿 u、y 沿 v（自下而上）；非凸环在表示层耳切成凸片段逐块绘制 | **全局范围**：`inside=false`（补集裁剪）未授权；无交互拖拽裁剪顶点；自交/退化按 `image.clip_*` 具名拒绝 |
 | `IMAGEADJUST` | **部分实现（真实写入）**：选中一个 IMAGE，`IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` / `RESET`（0..=100，50/50/0 中性），一条事务/一步撤销；渲染 mono→contrast→brightness→fade-to-background | 无对话框；导出仍整体丢弃图像（含这些参数）为声明损失；跨载体/GPU 像素 NOT VERIFIED |
 | `-IMAGEADJUST` | **部分实现（真实写入）**：选中一个 IMAGE，`-IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` / `RESET`（0..=100，50/50/0 中性），一条事务/一步撤销；渲染 mono→contrast→brightness→fade-to-background | 无对话框；导出仍整体丢弃图像（含这些参数）为声明损失；跨载体/GPU 像素 NOT VERIFIED |
 | `IMAGEQUALITY` | **部分实现（具名拒绝）**：`imagequality.unsupported: no image display-quality model` | 不写库/不升修订/不入历史 |
@@ -1863,7 +1863,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `SHP2BLK` | **完整实现** | 选中 SHAPE → `(font, code)` 块（轮廓多段线）+ 每个源位置 INSERT，删除源 | 需宿主安装字体引擎；块不链接回 SHX 字体 |
 | `MINSERT` | **完整实现** | 矩形 INSERT 阵列（ARRAYRECT 单元规则 + INSERT `T(-base)`），一条事务 | 独立副本（域无 MINSERT 实体，非关联） |
 | `ADDSELECTED` | 部分实现 | 点锚定型 LINE/CIRCLE/POINT/TEXT/MTEXT 新建，保留五项属性 | ARC/POLYLINE/INSERT 等按名拒绝；仅模型空间 |
-| `IMAGECLIP` | 部分实现 | 矩形 + `POLY` N 边形 + `OFF`；世界坐标经 u/v 映射 | 非凸环存储合法但渲染 fan-triangulate（表示层 partial） |
+| `IMAGECLIP` | 完整实现 | 矩形 + `POLY` N 边形 + `OFF`；世界坐标经 u/v 映射；非凸环耳切成凸片段（每片段与图像矩形各自求交），面积精确、凹口为空、`Completeness::Complete` 且无诊断；凸环顶点逐字节不变 | **全局范围**：无交互拖拽裁剪顶点（grip 编辑未建模）、`inside=false`（补集裁剪）未授权；自交/点数不足/零面积按 `image.clip_*` 具名拒绝 |
 | `APERTURE` | **完整实现** | `APERTURE <n>` 写会话孔径，snap/候选拾取真实使用 | `PICKBOX` 保持独立；未显式设置时配置默认值不变 |
 | `PTYPE` | **完整实现** | `PTYPE <code> [size]` 委托 PDMODE/PDSIZE 头部写入 | 两次 header 写、无 header undo 补丁 |
 | `REVCLOUDPROPERTIES` | **完整实现** | `REVCLOUDPROPERTIES <arc-length>` 写 token，REVCLOUD 真实消费 | 仅会话状态，不持久化 DWG |

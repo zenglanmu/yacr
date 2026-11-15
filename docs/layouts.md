@@ -301,7 +301,8 @@ world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_sc
     契约外的防御性输入），保留实体裁剪并显式报 `Partial`，绝不替换/加宽；
   - `viewport.clip_unsupported_primitive`：未展开的 `Instance` 等没有可裁剪几何的
     原语。
-  实体级**非凸**图像裁剪在 provider 侧即拒绝（frame+`Partial`+`image.clip_unsupported`），
+  实体级**非凸**图像裁剪在 provider 侧耳切成凸片段逐块绘制（`Completeness::Complete`，无诊断；
+  只有无法三角化的环才按 `image.clip_*` 具名拒绝），
   不会到达此处。非矩形/非凸视口裁剪在上游 `viewport_transform` 就已显式 `Unsupported`
   （§3），不会到达逐三角裁剪。
 - **打印输出**：无 plot/打印路径。布局绘制是屏幕显示，不是可交付的图纸输出。
