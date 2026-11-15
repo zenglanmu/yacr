@@ -483,6 +483,7 @@ mod tests {
         let record = a4(PlotRotation::None, PlotMargins::default());
         let page = plan_plot(&record, PlotScale::ONE_TO_ONE, PlotTarget::Dpi(254.0)).unwrap();
         let viewport = crate::layout::ViewportTransform {
+            paper_clip: crate::layout::PaperClip::rect([0.0, 0.0], [100.0, 50.0]),
             paper_corners: [
                 Point3 {
                     x: 0.0,

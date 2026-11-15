@@ -131,7 +131,7 @@ fn paper_build_draws_paper_entities_directly() {
 }
 
 #[test]
-fn paper_build_reports_a_rotated_viewport_as_partial_not_a_squared_off_guess() {
+fn paper_build_draws_a_rotated_viewport_as_a_polygon_not_its_envelope() {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -139,12 +139,23 @@ fn paper_build_reports_a_rotated_viewport_as_partial_not_a_squared_off_guess() {
         visible: true,
     })
     .unwrap();
+    // A 45°-rotated paper rectangle (diamond) centred on (50,50) with vertices at
+    // the axis extremes: a horizontal model line at paper y = 10 crosses it for
+    // x in 40..60 only. Its envelope is the whole 0..100 square, so a squared-off
+    // clip would draw 0..100 and prove the approximation.
+    b.insert_entity(model_entity(
+        1,
+        SemanticGeometry::Line {
+            start: p(0.0, 1000.0),
+            end: p(10000.0, 1000.0),
+        },
+        0,
+    ))
+    .unwrap();
     b.insert_layout(cad_db::Layout {
         id: LayoutId(1),
         name: "Rotated".into(),
         viewports: vec![PaperViewport {
-            // A 45°-rotated paper rectangle: four corners, but not axis
-            // aligned, so it must be refused rather than squared off.
             clip: vec![p(50.0, 0.0), p(100.0, 50.0), p(50.0, 100.0), p(0.0, 50.0)],
             model_to_paper: Transform3::scale(100.0),
             completeness: Completeness::Complete,
@@ -155,18 +166,31 @@ fn paper_build_reports_a_rotated_viewport_as_partial_not_a_squared_off_guess() {
     let db = b.finish().unwrap();
     let registry = ProviderRegistry::with_default_provider();
     let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
-    assert!(matches!(rep.completeness, Completeness::Partial(_)));
-    assert!(rep.fragments.is_empty());
-    let diagnostic = rep
+    assert_eq!(
+        rep.completeness,
+        Completeness::Complete,
+        "a rotated rectangle clip is a simple polygon now: {:?}",
+        rep.diagnostics
+    );
+    assert!(!rep
         .diagnostics
         .iter()
-        .find(|d| d.code == "representation.viewport_unsupported")
-        .expect("rotated viewport must be reported");
-    assert!(
-        diagnostic.message.contains(viewport_reason::ROTATED_CLIP),
-        "got {}",
-        diagnostic.message
-    );
+        .any(|d| d.code == "representation.viewport_unsupported"));
+
+    let lines: Vec<_> = rep
+        .fragments
+        .iter()
+        .filter_map(|f| match &f.primitive {
+            DisplayPrimitive::Lines(points) => Some(points.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(lines.len(), 1, "one clipped line: {lines:?}");
+    let points = &lines[0];
+    assert_eq!(points.len(), 2);
+    assert!((points[0].x - 40.0).abs() < 1e-9, "{points:?}");
+    assert!((points[1].x - 60.0).abs() < 1e-9, "{points:?}");
+    assert!((points[0].y - 10.0).abs() < 1e-9, "{points:?}");
 }
 
 #[test]

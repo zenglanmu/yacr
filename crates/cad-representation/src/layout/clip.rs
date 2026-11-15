@@ -5,6 +5,7 @@ use cad_domain::*;
 use crate::ConicSegment;
 
 use super::clip_reason;
+use super::polygon::PaperClip;
 use super::selection::ClipRefusal;
 use super::view::finite_point;
 
@@ -334,9 +335,11 @@ fn clip_segment(a: Point3, b: Point3, min: [f64; 2], max: [f64; 2]) -> Option<(P
 ///
 /// Returns the surviving convex polygon (empty when the input lies fully
 /// outside). Consecutive duplicate vertices are removed so the result can be
-/// fan-triangulated safely. The viewport windows this build accepts are exactly
-/// axis-aligned rectangles (a non-rectangular clip is refused upstream in
-/// [`viewport_transform`]), which is the convex window this routine handles.
+/// fan-triangulated safely. This is the half-plane window of a **rectangular**
+/// viewport clip; a general (possibly concave) clip polygon has no half-plane
+/// representation and is handled by
+/// [`clip_polygon_to_polygon`](super::clip_polygon::clip_polygon_to_polygon),
+/// which intersects with the clip's convex triangulation instead.
 pub fn clip_polygon_to_rect(
     polygon: &[[f64; 2]],
     center: [f64; 2],
@@ -671,4 +674,192 @@ pub fn clip_mesh_to_rect(
         face_sources,
         colors: if has_colors { colors } else { Vec::new() },
     }))
+}
+
+/// Clip every triangle of `mesh` to a simple (possibly concave) clip polygon.
+///
+/// A triangle wholly inside the clip is reused verbatim. Otherwise the clip is
+/// ear-clipped into convex windows and each triangle is intersected with every
+/// window (exact, because the windows partition the clip); the surviving convex
+/// pieces are fan-triangulated with z, normal and sRGB colour interpolated at
+/// the new edge vertices. A concave clip therefore cuts a triangle into exactly
+/// the visible region — several pieces when one triangle is sliced into two
+/// lobes — never its bounding box.
+///
+/// `Ok(None)` means the whole mesh lies outside the clip (an exact omission) and
+/// `Err` means it cannot be clipped exactly, with the same stable codes as
+/// [`clip_mesh_to_rect`].
+pub fn clip_mesh_to_polygon(mesh: &Mesh, clip: &PaperClip) -> Result<Option<Mesh>, ClipRefusal> {
+    let has_normals = mesh.normals.len() == mesh.vertices.len();
+    let has_colors = mesh.colors.len() == mesh.vertices.len();
+    let has_sources = mesh.face_sources.len() == mesh.triangles.len();
+
+    for vertex in &mesh.vertices {
+        if !finite_point(vertex) {
+            return Err(ClipRefusal::new(
+                clip_reason::MESH_UNCLIPPABLE,
+                "mesh has a non-finite vertex; it cannot be clipped exactly",
+            ));
+        }
+    }
+
+    let windows = clip.triangles();
+    let mut vertices: Vec<Point3> = Vec::new();
+    let mut normals: Vec<Point3> = Vec::new();
+    let mut colors: Vec<[u8; 3]> = Vec::new();
+    let mut triangles: Vec<[u32; 3]> = Vec::new();
+    let mut face_sources: Vec<Option<SubElementId>> = Vec::new();
+
+    for (triangle_index, triangle) in mesh.triangles.iter().enumerate() {
+        let indices = [
+            triangle[0] as usize,
+            triangle[1] as usize,
+            triangle[2] as usize,
+        ];
+        if indices.iter().any(|index| *index >= mesh.vertices.len()) {
+            return Err(ClipRefusal::new(
+                clip_reason::MESH_UNCLIPPABLE,
+                format!("mesh triangle {triangle_index} references a missing vertex"),
+            ));
+        }
+        let source = if has_sources {
+            mesh.face_sources[triangle_index].clone()
+        } else {
+            None
+        };
+        let originals = [0usize, 1, 2].map(|k| {
+            let vi = indices[k];
+            ClipVertex {
+                pos: [mesh.vertices[vi].x, mesh.vertices[vi].y],
+                z: mesh.vertices[vi].z,
+                normal: has_normals.then(|| mesh.normals[vi]),
+                color: has_colors.then(|| mesh.colors[vi]),
+            }
+        });
+
+        // A triangle that is wholly inside the clip (inclusive of the boundary,
+        // and with no edge leaving through a concave notch) is reused verbatim.
+        let corners = originals.map(|vertex| vertex.pos);
+        if clip.holds(&corners) {
+            let base = push_clip_vertices(
+                &mut vertices,
+                &mut normals,
+                &mut colors,
+                &originals,
+                has_normals,
+                has_colors,
+            )?;
+            triangles.push([base, base + 1, base + 2]);
+            face_sources.push(source.clone());
+            continue;
+        }
+
+        for window in &windows {
+            let mut polygon = clip_vertices_to_window(originals.to_vec(), window);
+            polygon.dedup_by(|a, b| a.same(b));
+            if polygon.len() >= 2 {
+                let (first, last) = (polygon[0], polygon[polygon.len() - 1]);
+                if first.same(&last) {
+                    polygon.pop();
+                }
+            }
+            if polygon.len() < 3 {
+                // A fully clipped (or degenerate) piece contributes no area.
+                continue;
+            }
+            let base = push_clip_vertices(
+                &mut vertices,
+                &mut normals,
+                &mut colors,
+                &polygon,
+                has_normals,
+                has_colors,
+            )?;
+            for k in 1..polygon.len() - 1 {
+                triangles.push([base, base + k as u32, base + k as u32 + 1]);
+                face_sources.push(source.clone());
+            }
+        }
+    }
+
+    if triangles.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(Mesh {
+        vertices,
+        triangles,
+        normals: if has_normals { normals } else { Vec::new() },
+        face_sources,
+        colors: if has_colors { colors } else { Vec::new() },
+    }))
+}
+
+/// Sutherland–Hodgman clip of a vertex polygon against a **convex**
+/// counter-clockwise window.
+///
+/// New vertices are interpolated along the crossed edge but not snapped onto the
+/// clip line: a general edge has no single coordinate to snap, so a clipped
+/// vertex can sit within rounding error of the boundary. That is inside the
+/// tolerance every later tolerance test uses and never leaks a whole triangle.
+fn clip_vertices_to_window(input: Vec<ClipVertex>, window: &[[f64; 2]]) -> Vec<ClipVertex> {
+    let mut out = input;
+    let count = window.len();
+    for index in 0..count {
+        if out.is_empty() {
+            return out;
+        }
+        out = clip_vertices_to_edge(out, window[index], window[(index + 1) % count]);
+    }
+    out
+}
+
+fn clip_vertices_to_edge(input: Vec<ClipVertex>, a: [f64; 2], b: [f64; 2]) -> Vec<ClipVertex> {
+    if input.is_empty() {
+        return Vec::new();
+    }
+    let side = |p: [f64; 2]| (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+    let count = input.len();
+    let mut out = Vec::with_capacity(count + 1);
+    for index in 0..count {
+        let current = input[index];
+        let previous = input[(index + count - 1) % count];
+        let current_side = side(current.pos);
+        let previous_side = side(previous.pos);
+        if current_side >= 0.0 {
+            if previous_side < 0.0 {
+                out.push(intersect_clip_vertices_line(
+                    previous,
+                    current,
+                    previous_side,
+                    current_side,
+                ));
+            }
+            out.push(current);
+        } else if previous_side >= 0.0 {
+            out.push(intersect_clip_vertices_line(
+                previous,
+                current,
+                previous_side,
+                current_side,
+            ));
+        }
+    }
+    out
+}
+
+/// The vertex where `previous`–`current` meets the clipping line, from the two
+/// signed side values.
+fn intersect_clip_vertices_line(
+    previous: ClipVertex,
+    current: ClipVertex,
+    previous_side: f64,
+    current_side: f64,
+) -> ClipVertex {
+    let denominator = previous_side - current_side;
+    let t = if denominator.abs() > 1e-300 {
+        previous_side / denominator
+    } else {
+        0.0
+    };
+    previous.lerp(&current, t)
 }

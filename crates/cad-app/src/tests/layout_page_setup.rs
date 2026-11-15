@@ -377,7 +377,8 @@ fn mview_appends_a_polygonal_viewport_in_one_undo_step() {
         .expect("MVIEW accepts a polygonal boundary");
     assert_eq!(
         codes(&outcome),
-        vec!["mview.created_polygon", "mview.polygon_not_renderable"]
+        vec!["mview.created_polygon", "mview.no_holes"],
+        "a polygonal boundary is stored and drawn: no not-renderable residual"
     );
     assert_eq!(revision(&app), Revision(start.0 + 1), "one revision");
     assert!(app.can_undo(&DOC), "one undo step");
@@ -389,6 +390,17 @@ fn mview_appends_a_polygonal_viewport_in_one_undo_step() {
     // The paper centre of the polygon's bounding box is the model origin.
     assert_eq!(written[0].model_to_paper.matrix[0][3], -40.0);
     assert_eq!(written[0].model_to_paper.matrix[1][3], -55.0);
+    // The written polygon is a *drawable* viewport, not stored-only data.
+    let layouts = cad_representation::enumerate_layouts(drawing(&app));
+    let layout = layouts
+        .iter()
+        .find(|layout| layout.id == LayoutId(1))
+        .expect("layout is listed");
+    assert!(
+        layout.supported,
+        "the polygonal viewport must resolve: {}",
+        layout.reason
+    );
 
     undo(&mut app, &mut session);
     assert!(viewports(&app).is_empty(), "undo removes the viewport");
@@ -427,6 +439,12 @@ fn mview_refuses_degenerate_polygons_by_name() {
             ],
             "mview.self_intersecting",
         ),
+        // A three-point boundary centred on the paper origin would be stored
+        // with a zero translation and read back as the legacy rectangle.
+        (
+            vec![point(-10.0, -10.0), point(10.0, -10.0), point(0.0, 10.0)],
+            "mview.ambiguous_triangle",
+        ),
         // A paper clip boundary cannot leave the paper plane.
         (
             vec![point(0.0, 0.0), point(10.0, 0.0), p3(0.0, 10.0, 5.0)],
@@ -438,6 +456,50 @@ fn mview_refuses_degenerate_polygons_by_name() {
     }
     assert_eq!(revision(&app), start, "refusals write nothing");
     assert!(!app.can_undo(&DOC));
+}
+
+#[test]
+fn vpclip_refuses_a_three_point_boundary_on_a_translation_free_viewport() {
+    let (mut app, mut session) = fixture(&[(1, "Sheet1")], true);
+    switch_to_sheet(&mut app, &mut session);
+    // A viewport centred on the paper origin stores a zero translation, so a
+    // three-point clip could not be told apart from the legacy rectangle record.
+    app.execute(
+        &mut session,
+        mview(vec![point(-10.0, -10.0), point(10.0, 10.0)]),
+    )
+    .expect("one translation-free viewport");
+    let start = revision(&app);
+    let error = refusal(app.execute(
+        &mut session,
+        command(
+            CommandId::VpClip,
+            layout_payload(LayoutPayload::ClipPolygon {
+                points: vec![point(-5.0, -5.0), point(5.0, -5.0), point(0.0, 8.0)],
+            }),
+        ),
+    ));
+    assert!(error.contains("vpclip.ambiguous_triangle"), "{error}");
+    assert_eq!(revision(&app), start, "the refusal writes nothing");
+    assert_eq!(viewports(&app)[0].clip.len(), 4, "the rectangle is intact");
+
+    // A four-point polygon is unambiguous on the same viewport.
+    app.execute(
+        &mut session,
+        command(
+            CommandId::VpClip,
+            layout_payload(LayoutPayload::ClipPolygon {
+                points: vec![
+                    point(-5.0, -5.0),
+                    point(5.0, -5.0),
+                    point(5.0, 5.0),
+                    point(0.0, 8.0),
+                ],
+            }),
+        ),
+    )
+    .expect("a four-point boundary is unambiguous");
+    assert_eq!(viewports(&app)[0].clip.len(), 4);
 }
 
 #[test]
@@ -469,7 +531,8 @@ fn vpclip_polygon_replaces_the_clip_after_a_mview_and_round_trips() {
         .expect("polygonal VPCLIP rewrites the first viewport clip");
     assert_eq!(
         codes(&outcome),
-        vec!["vpclip.applied_polygon", "vpclip.polygon_not_renderable"]
+        vec!["vpclip.applied_polygon"],
+        "a polygonal clip is drawn: no not-renderable residual"
     );
     assert_eq!(revision(&app), Revision(start.0 + 1), "one revision");
     let clipped = viewports(&app);
@@ -477,6 +540,18 @@ fn vpclip_polygon_replaces_the_clip_after_a_mview_and_round_trips() {
     assert_eq!(
         clipped[0].model_to_paper.matrix[0][0], 1.0,
         "the clip write preserves the transform"
+    );
+    // The rewritten clip resolves in the representation layer: the polygon is
+    // drawable, so nothing is "written but not renderable".
+    let layouts = cad_representation::enumerate_layouts(drawing(&app));
+    let layout = layouts
+        .iter()
+        .find(|layout| layout.id == LayoutId(1))
+        .expect("layout is listed");
+    assert!(
+        layout.supported,
+        "the polygonal clip must resolve: {}",
+        layout.reason
     );
 
     undo(&mut app, &mut session);

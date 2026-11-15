@@ -170,12 +170,35 @@ fn complex_clip_is_refused_with_its_reason() {
 }
 
 #[test]
-fn rotated_four_corner_clip_is_refused() {
-    // A 45°-rotated rectangle: all four corners have x strictly inside the
-    // bounding box, so it cannot be represented as an axis-aligned rect.
+fn rotated_four_corner_clip_is_a_polygon_viewport() {
+    // A 45°-rotated rectangle is still a rectangle in paper space, so it is a
+    // simple polygon and is drawn as one — never squared off onto its envelope.
     let mut vp = four_corner_viewport();
     vp.clip = vec![p(50.0, 0.0), p(100.0, 50.0), p(50.0, 100.0), p(0.0, 50.0)];
-    assert_eq!(unsupported_code(&vp), viewport_reason::ROTATED_CLIP);
+    let ViewportState::Supported(t) = viewport_transform(&vp) else {
+        panic!("a rotated rectangle clip must be supported as a polygon");
+    };
+    assert_eq!(t.paper_clip.as_rect(), None);
+    assert_eq!(
+        t.paper_clip.boundary(),
+        &[[50.0, 0.0], [100.0, 50.0], [50.0, 100.0], [0.0, 50.0]]
+    );
+    // The envelope is reported for zoom extents, but the *clip* is the diamond:
+    // a horizontal line at y = 50 is visible for x in 0..100 and nothing at y = 0
+    // except the single touching vertex.
+    let runs = clip_polyline(&[p(-10.0, 0.0), p(110.0, 0.0)], &t.paper_clip);
+    assert!(
+        runs.iter().all(|run| run.iter().all(|v| v.y.abs() < 1e-9)),
+        "{runs:?}"
+    );
+    assert!(
+        runs.iter()
+            .map(|run| run.last().map(|v| v.x).unwrap_or(0.0)
+                - run.first().map(|v| v.x).unwrap_or(0.0))
+            .sum::<f64>()
+            < 1e-6,
+        "the diamond only touches y = 0 at its apex: {runs:?}"
+    );
 }
 
 #[test]
@@ -220,10 +243,26 @@ fn off_plane_view_direction_is_refused() {
 }
 
 #[test]
-fn legacy_clip_with_transform_translation_is_ambiguous_and_refused() {
+fn three_point_clip_with_a_transform_translation_is_a_triangle() {
+    // The legacy three-point form puts the *model* view centre in `clip[2]` and
+    // therefore requires a translation-free transform. A three-point clip that
+    // carries a translation cannot be that record — its third point is a paper
+    // vertex — so it is the triangle `MVIEW`/`VPCLIP` write.
     let mut vp = simple_viewport();
     vp.model_to_paper = stored_view(100.0, p(1.0, 2.0));
-    assert_eq!(unsupported_code(&vp), viewport_reason::TRANSLATION_MISMATCH);
+    let ViewportState::Supported(t) = viewport_transform(&vp) else {
+        panic!("a three-point polygon clip must be supported");
+    };
+    assert_eq!(
+        t.paper_clip.boundary(),
+        &[[0.0, 0.0], [100.0, 50.0], [10.0, 20.0]]
+    );
+    // The paper centre is the *triangle's* envelope centre, not the legacy
+    // anchor: `model = 100 * paper + (1, 2)`.
+    let paper_center = [(0.0 + 100.0) * 0.5, (0.0 + 50.0) * 0.5];
+    assert_eq!(t.paper_center, paper_center);
+    assert!((t.model_anchor.x - (100.0 * paper_center[0] + 1.0)).abs() < 1e-9);
+    assert!((t.model_anchor.y - (100.0 * paper_center[1] + 2.0)).abs() < 1e-9);
 }
 
 #[test]

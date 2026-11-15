@@ -10,29 +10,32 @@
 //! ## Why this is its own step (audit B22)
 //!
 //! A [`PaperViewport`] stores a clip definition plus one `Transform3` and a
-//! completeness verdict. From those this module reconstructs a **real
-//! four-corner paper rectangle** and a **view transform with a view centre**
-//! (the model point shown at the rectangle centre), then applies that transform
+//! completeness verdict. From those this module reconstructs a **real paper clip
+//! boundary** ([`PaperClip`]) and a **view transform with a view centre** (the
+//! model point shown at the clip envelope's centre), then applies that transform
 //! to model geometry. Anything whose state cannot be reconstructed exactly is
 //! reported as [`ViewportState::Unsupported`] with a stable, machine-readable
 //! reason code rather than drawn at a guessed ratio.
 //!
 //! ## Clip encodings
 //!
-//! Two encodings are accepted; both resolve to the same four paper corners:
+//! Three encodings are accepted; the order below is the disambiguation rule:
 //!
-//! 1. **Four-corner clip (preferred)**: `clip = [c0, c1, c2, c3]` are the four
-//!    paper-space corners of the viewport. The transform is the view transform;
-//!    its view centre is recovered from the geometry. The rectangle must be
-//!    axis-aligned in paper space: a rotated/twisted clip is refused instead of
-//!    being silently squared off.
-//! 2. **Three-point legacy clip**: `clip = [a, b, view_center]`, where `a` and
-//!    `b` are *opposite* paper corners and the third point is the model view
-//!    centre. This is the shape the current importer writes (with adjacent
-//!    corners, which is refused). Kept for callers that already build it so the
-//!    representation API stays source-compatible. A legacy clip whose transform
-//!    also carries a non-zero translation is ambiguous and is refused: the view
-//!    centre belongs in `clip[2]`.
+//! 1. **Three-point legacy clip** (`clip = [a, b, view_center]`, and only with a
+//!    translation-free transform): `a` and `b` are *opposite* paper corners and
+//!    the third point is the **model** view centre. The third point is a model
+//!    point, so the shape only means anything when the transform carries no
+//!    translation; that is the test that tells it apart from a triangle clip.
+//! 2. **Axis-aligned four-corner rectangle**: `clip = [c0, c1, c2, c3]` are the
+//!    four paper corners in rectangle order. This keeps the dedicated half-plane
+//!    clippers and therefore exactly the geometry and diagnostics it always had.
+//! 3. **A general simple polygon** with at least three points — what polygonal
+//!    `MVIEW`/`VPCLIP` write, and what a rotated rectangle or any imported
+//!    non-rectangular boundary resolves to. It is validated as simple
+//!    (non self-intersecting), planar and non-degenerate; a boundary that fails
+//!    is refused by name ([`viewport_reason::POLYGON_SELF_INTERSECTING`],
+//!    [`viewport_reason::POLYGON_NON_PLANAR`],
+//!    [`viewport_reason::POLYGON_DEGENERATE`], [`viewport_reason::CLIP_ARITY`]).
 //!
 //! ## Coordinate convention
 //!
@@ -47,15 +50,25 @@
 //! paper = (model - view_center) * paper_per_model + paper_center
 //! ```
 //!
-//! and its four paper corners are clipped exactly with Liang–Barsky. Line
-//! geometry clips per segment, mesh geometry clips per triangle
-//! (Sutherland–Hodgman, with colour/normal interpolation), an image quad
-//! clips with its texture coordinates interpolated, and an analytic conic
-//! (circle/arc/ellipse) clips to exact parameter intervals — see
-//! [`clip_mesh_to_rect`], [`clip_image_quad_to_rect`] and
-//! [`clip_conic_to_rect`]. A view transform that
-//! is twisted (rotation), sheared, mirrored, non-uniform, off the paper plane or
-//! singular is unsupported here and reported, never applied as an approximation.
+//! ## Clipping each primitive
+//!
+//! An axis-aligned rectangle clips with half-planes: lines per segment
+//! (Liang–Barsky), meshes per triangle (Sutherland–Hodgman with colour/normal
+//! interpolation), images with their texture coordinates interpolated, and
+//! analytic conics to exact parameter intervals — see [`clip_mesh_to_rect`],
+//! [`clip_image_quad_to_rect`] and [`clip_conic_to_rect`].
+//!
+//! Any other simple polygon — concave included — clips with crossings: a line
+//! segment is split at every boundary crossing and each span is kept by the
+//! even-odd point-in-polygon rule, a conic's exact boundary parameters are solved
+//! in closed form, and filled geometry is intersected with the clip's convex
+//! triangulation (so `subject ∩ clip` is exact, never its bounding box). See
+//! [`clip_polyline_to_polygon`], [`clip_conic_to_polygon`],
+//! [`clip_mesh_to_polygon`] and [`clip_polygon_to_polygon`].
+//!
+//! A view transform that is twisted (rotation), sheared, mirrored, non-uniform,
+//! off the paper plane or singular is unsupported here and reported, never
+//! applied as an approximation.
 //!
 //! Paper-space measurement is wired in `cad-measure` through
 //! [`ViewportTransform::paper_to_model`]; this module only provides the single
@@ -63,16 +76,24 @@
 
 mod build;
 mod clip;
+mod clip_polygon;
 mod image;
+mod polygon;
 mod selection;
 mod view;
 
 pub use build::build_paper_space;
 pub use clip::{
-    clip_conic_to_rect, clip_mesh_to_rect, clip_polygon_to_rect, clip_polyline_to_rect,
+    clip_conic_to_rect, clip_mesh_to_polygon, clip_mesh_to_rect, clip_polygon_to_rect,
+    clip_polyline_to_rect,
+};
+pub use clip_polygon::{
+    clip_conic, clip_conic_to_polygon, clip_filled_polygon, clip_mesh, clip_polygon_to_polygon,
+    clip_polyline, clip_polyline_to_polygon,
 };
 pub use image::clip_image_quad_to_rect;
 pub(crate) use image::{clip_image_polygon_to_rect, image_polygon_is_convex};
+pub use polygon::PaperClip;
 pub use selection::{
     enumerate_layouts, ClipRefusal, LayoutDescriptor, SpaceSelection, ViewportState,
     ViewportUnsupported,
@@ -86,16 +107,25 @@ pub use view::{paper_per_model_from_view, viewport_transform, ViewportTransform}
 pub mod viewport_reason {
     /// The importer reported a complex / non-rectangular clip.
     pub const COMPLEX_CLIP: &str = "viewport.complex_clip";
-    /// The clip point count is neither three (legacy) nor four (rectangle).
+    /// The clip has fewer than three points, so it is not a polygon.
     pub const CLIP_ARITY: &str = "viewport.clip_arity";
     /// A clip or transform coordinate is not finite.
     pub const NON_FINITE: &str = "viewport.non_finite";
-    /// The four paper corners do not form an axis-aligned rectangle.
+    /// Historical: the four paper corners did not form an axis-aligned
+    /// rectangle. A rotated rectangle is a simple polygon and is drawn now, so
+    /// this code is **no longer produced**; it is retained so external matchers
+    /// keep compiling.
     pub const ROTATED_CLIP: &str = "viewport.rotated_clip";
     /// The paper rectangle has zero width or height.
     pub const DEGENERATE_RECT: &str = "viewport.degenerate_rect";
     /// A legacy three-point clip stored adjacent (non-opposite) corners.
     pub const ADJACENT_CORNERS: &str = "viewport.adjacent_corners";
+    /// The clip polygon has zero area or a repeated vertex.
+    pub const POLYGON_DEGENERATE: &str = "viewport.polygon_degenerate";
+    /// The clip polygon's edges cross or touch a non-adjacent edge.
+    pub const POLYGON_SELF_INTERSECTING: &str = "viewport.polygon_self_intersecting";
+    /// The clip polygon does not lie on one paper plane.
+    pub const POLYGON_NON_PLANAR: &str = "viewport.polygon_non_planar";
     /// The stored scale is missing, zero or negative.
     pub const SCALE: &str = "viewport.scale";
     /// The view transform carries a twist (in-plane rotation).
@@ -108,7 +138,10 @@ pub mod viewport_reason {
     pub const OFF_PLANE_VIEW: &str = "viewport.off_plane_view";
     /// The viewport uses a perspective projection.
     pub const PERSPECTIVE: &str = "viewport.perspective";
-    /// A legacy three-point clip also carried a non-zero transform translation.
+    /// Historical: a legacy three-point clip also carried a non-zero transform
+    /// translation. Such a clip is a triangle viewport now (the third point is a
+    /// paper vertex, not a model anchor), so this code is **no longer produced**;
+    /// it is retained so external matchers keep compiling.
     pub const TRANSLATION_MISMATCH: &str = "viewport.translation_mismatch";
 }
 

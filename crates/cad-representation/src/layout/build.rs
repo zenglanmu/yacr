@@ -4,15 +4,13 @@ use cad_db::{DbEntity, DrawingDatabase};
 use cad_domain::*;
 
 use crate::{
-    DisplayFragment, DisplayPrimitive, DisplayRepresentation, ImageVertex, ProviderRegistry,
+    DisplayFragment, DisplayPrimitive, DisplayRepresentation, ProviderRegistry,
     RepresentationContext,
 };
 
-use super::clip::{clip_conic_to_rect, clip_mesh_to_rect, clip_polyline_to_rect};
+use super::clip_polygon::{clip_conic, clip_mesh, clip_polyline};
 use super::clip_reason;
-use super::image::{
-    clip_image_polygon_to_rect, clip_image_quad_to_rect, image_polygon_is_convex, image_quad_inside,
-};
+use super::image::{visible_image, ImageRegion};
 use super::selection::{ClipRefusal, ViewportState};
 use super::view::viewport_transform;
 
@@ -246,8 +244,7 @@ pub fn build_paper_space(
         let transform = transform.as_ref();
         let overrides = &layout.viewports[index].layer_overrides;
         let matrix = transform.as_transform3();
-        let center = transform.paper_center;
-        let half = transform.paper_half;
+        let clip = &transform.paper_clip;
         for (layer, rep) in &model_reps {
             if overrides.get(layer) == Some(&true) {
                 continue;
@@ -263,7 +260,7 @@ pub fn build_paper_space(
                         }
                         let mut clipped = Vec::new();
                         for pair in points.as_chunks::<2>().0 {
-                            for run in clip_polyline_to_rect(pair, center, half) {
+                            for run in clip_polyline(pair, clip) {
                                 clipped.extend(run);
                             }
                         }
@@ -277,7 +274,7 @@ pub fn build_paper_space(
                         }
                     }
                     DisplayPrimitive::Lines(points) => {
-                        for run in clip_polyline_to_rect(&points, center, half) {
+                        for run in clip_polyline(&points, clip) {
                             out.fragments.push(fragment_like(
                                 fragment,
                                 DisplayPrimitive::Lines(std::sync::Arc::from(
@@ -289,7 +286,7 @@ pub fn build_paper_space(
                     DisplayPrimitive::Mesh(mesh)
                     | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
                         let overlay = matches!(&fragment.primitive, DisplayPrimitive::Mesh(_));
-                        match clip_mesh_to_rect(&mesh, center, half) {
+                        match clip_mesh(&mesh, clip) {
                             Ok(Some(clipped)) => {
                                 out.fragments.push(fragment_like(
                                     fragment,
@@ -357,76 +354,45 @@ pub fn build_paper_space(
                     DisplayPrimitive::Image {
                         resource,
                         transform: local,
-                        clip,
+                        clip: entity_clip,
                         adjust,
-                    } => match clip_image_quad_to_rect(&local, center, half) {
-                        Ok(vertices) if vertices.is_empty() => {
-                            // Fully outside the window: exact omission.
+                    } => match visible_image(&local, entity_clip.as_deref(), clip) {
+                        // Nothing of the image lies inside the window: an exact
+                        // omission, not a degradation.
+                        Ok(ImageRegion::Empty) => {}
+                        Ok(ImageRegion::Whole { entity }) => {
+                            out.fragments.push(fragment_like(
+                                fragment,
+                                DisplayPrimitive::Image {
+                                    resource,
+                                    transform: local,
+                                    clip: entity,
+                                    adjust,
+                                },
+                            ));
                         }
-                        Ok(vertices) => {
-                            // A clipped textured quad is represented exactly:
-                            // positions plus interpolated UVs, so it is not a
-                            // degradation. A wholly visible image keeps its
-                            // simple unit-square transform. When an entity clip
-                            // and a viewport cut both apply, the two convex
-                            // polygons are intersected so the entity clip is
-                            // never silently widened or dropped; `None` (outer)
-                            // means the intersection is empty — an exact
-                            // omission.
-                            let effective: Option<Option<std::sync::Arc<[ImageVertex]>>> =
-                                if image_quad_inside(&local, center, half) {
-                                    // The whole quad is visible; any entity clip
-                                    // still applies unchanged.
-                                    Some(clip)
-                                } else if let Some(entity_clip) = clip {
-                                    if image_polygon_is_convex(&entity_clip) {
-                                        let intersected = clip_image_polygon_to_rect(
-                                            entity_clip.to_vec(),
-                                            center,
-                                            half,
-                                        );
-                                        if intersected.is_empty() {
-                                            None
-                                        } else {
-                                            Some(Some(std::sync::Arc::from(
-                                                intersected.into_boxed_slice(),
-                                            )))
-                                        }
-                                    } else {
-                                        // A provider handed us a non-convex clip
-                                        // (its primitive contract says convex);
-                                        // half-plane intersection would be wrong,
-                                        // so keep the entity clip and report the
-                                        // limitation rather than widen or drop it.
-                                        let refusal = ClipRefusal::new(
-                                            clip_reason::IMAGE_INTERSECTION_UNSUPPORTED,
-                                            "a non-convex image clip cannot be intersected with the viewport window exactly; the entity clip is kept unclipped",
-                                        );
-                                        report_clip_degradation(
-                                            &mut out,
-                                            &mut clip_seen,
-                                            &refusal,
-                                            layout_id,
-                                            index,
-                                        );
-                                        Some(Some(entity_clip))
-                                    }
-                                } else {
-                                    Some(Some(std::sync::Arc::from(vertices.into_boxed_slice())))
-                                };
-                            if let Some(clip) = effective {
+                        Ok(ImageRegion::Pieces(pieces)) => {
+                            // Each piece is one convex, non-degenerate visible
+                            // region carrying its own interpolated UVs, so the
+                            // union over the fragments is exactly the visible
+                            // texture area — also when a concave clip splits one
+                            // image into several pieces.
+                            for piece in pieces {
                                 out.fragments.push(fragment_like(
                                     fragment,
                                     DisplayPrimitive::Image {
-                                        resource,
+                                        resource: resource.clone(),
                                         transform: local,
-                                        clip,
+                                        clip: Some(std::sync::Arc::from(piece.into_boxed_slice())),
                                         adjust,
                                     },
                                 ));
                             }
                         }
                         Err(refusal) => {
+                            // A non-convex entity clip or a non-finite quad: keep
+                            // the original primitive and report, never silently
+                            // widen, drop or fake the region.
                             report_clip_degradation(
                                 &mut out,
                                 &mut clip_seen,
@@ -439,14 +405,14 @@ pub fn build_paper_space(
                                 DisplayPrimitive::Image {
                                     resource,
                                     transform: local,
-                                    clip,
+                                    clip: entity_clip,
                                     adjust,
                                 },
                             ));
                         }
                     },
                     DisplayPrimitive::Conic(conic) => {
-                        match clip_conic_to_rect(&conic, center, half) {
+                        match clip_conic(&conic, clip) {
                             Ok(pieces) => {
                                 for piece in pieces {
                                     out.fragments.push(fragment_like(

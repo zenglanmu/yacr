@@ -87,10 +87,9 @@ pub enum LayoutPayload {
     /// The boundary is stored verbatim in
     /// [`cad_db::PaperViewport::clip`], which is a `Vec<Point3>` polygon and
     /// therefore needs no new database field. The representation lane
-    /// (`cad-representation`) still resolves only three- and four-point clips,
-    /// so the written viewport renders as `viewport_unsupported: clip_arity`
-    /// until that lane learns N-gons; the command reports that residual as
-    /// `vpclip.polygon_not_renderable` instead of claiming a draw.
+    /// (`cad-representation`) resolves the same polygon as its viewport clip and
+    /// limits every primitive to it, concave boundaries included, so the write is
+    /// a drawable viewport and not stored-only data.
     ClipPolygon { points: Vec<Point3> },
     /// `VPSCALE <scale>`: a standard scale name or ratio, resolved against the
     /// drawing's scale table and applied to the **first** viewport.

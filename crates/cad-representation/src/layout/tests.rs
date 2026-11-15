@@ -160,4 +160,5 @@ fn mesh_area(mesh: &Mesh) -> f64 {
 
 mod build;
 mod image;
+mod polygon;
 mod viewport;

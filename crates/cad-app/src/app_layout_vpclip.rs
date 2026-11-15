@@ -5,6 +5,12 @@
 //! stored verbatim through the one `set_layout_viewports` write (one revision,
 //! one undo step).
 //!
+//! The boundary is a **real** viewport clip, not just stored data:
+//! `cad-representation` carries it as a [`cad_representation::layout::PaperClip`]
+//! and limits every primitive (lines, meshes, images, conics) to it, including
+//! concave boundaries. There is no "written but not drawable" residual left for
+//! this command.
+//!
 //! # Refusals (nothing written, no revision, no undo entry)
 //!
 //! * `vpclip.paper_space_required` — the active space is not a paper layout;
@@ -12,15 +18,19 @@
 //!   coordinate, a repeated vertex, or a zero-area boundary;
 //! * `vpclip.non_coplanar` — the points do not lie on one paper plane;
 //! * `vpclip.self_intersecting` — two non-adjacent edges cross or touch;
-//! * `vpclip.no_viewport` — the active layout has no viewport to clip.
+//! * `vpclip.no_viewport` — the active layout has no viewport to clip;
+//! * `vpclip.ambiguous_triangle` — a three-point boundary on a viewport whose
+//!   transform carries no translation, which is exactly the legacy
+//!   `[a, b, view_center]` rectangle record; writing it would store a clip that
+//!   reads back as a rectangle, so the write is refused instead (a four-or-more
+//!   point boundary, or a viewport whose transform is translated, is
+//!   unambiguous).
 //!
 //! # Residual
 //!
-//! `cad-representation::viewport_transform` resolves only three- and
-//! four-point clips, so the written viewport reports
-//! `representation.viewport_unsupported: clip_arity` (a `Partial` layout) until
-//! that lane learns N-gons. The command reports this as
-//! `vpclip.polygon_not_renderable`; it never claims the new boundary is drawn.
+//! This build has no viewport **selection**, so `VPCLIP` clips the first
+//! viewport (reported in `vpclip.applied_polygon`). Viewport **holes** are still
+//! not modeled: one boundary per viewport.
 
 use super::*;
 
@@ -48,6 +58,22 @@ impl Application {
                 layout_id.0
             ))
         })?;
+        // A three-point boundary is only distinguishable from the legacy
+        // `[a, b, view_center]` rectangle record by the transform translation
+        // (see `cad_representation::layout`); refuse rather than store a clip
+        // that would read back as a rectangle.
+        let translation = &viewport.model_to_paper.matrix;
+        let translated = [translation[0][3], translation[1][3], translation[2][3]]
+            .iter()
+            .any(|value| value.abs() > 1e-9);
+        if points.len() == 3 && !translated {
+            return Err(CadError::InvalidInput(format!(
+                "vpclip.ambiguous_triangle: viewport 0 of layout {} has a translation-free \
+                 transform, so a three-point boundary would be read back as the legacy \
+                 [a, b, view_center] rectangle; use four or more points",
+                layout_id.0
+            )));
+        }
         viewport.clip = points.to_vec();
         let before = layout_row(&drawing, layout_id);
         let transaction = next_transaction_id();
@@ -65,29 +91,18 @@ impl Application {
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: Some(Arc::new(change_set)),
-            diagnostics: vec![
-                Diagnostic {
-                    object: None,
-                    code: "vpclip.applied_polygon".into(),
-                    message: format!(
-                        "VPCLIP: replaced the clip of viewport 0 in layout {} with a {}-point \
-                         polygonal boundary; this build has no viewport selection, so the first \
-                         viewport was clipped",
-                        layout_id.0,
-                        points.len()
-                    ),
-                },
-                Diagnostic {
-                    object: None,
-                    code: "vpclip.polygon_not_renderable".into(),
-                    message:
-                        "VPCLIP: the polygonal boundary is real stored viewport geometry, but \
-                              the representation lane resolves only three- and four-point clips, \
-                              so this viewport renders as viewport_unsupported: clip_arity until \
-                              that lane learns N-gons; no draw is claimed here"
-                            .into(),
-                },
-            ],
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "vpclip.applied_polygon".into(),
+                message: format!(
+                    "VPCLIP: replaced the clip of viewport 0 in layout {} with a {}-point \
+                     polygonal boundary; the representation layer clips that viewport to the \
+                     polygon; this build has no viewport selection, so the first viewport was \
+                     clipped",
+                    layout_id.0,
+                    points.len()
+                ),
+            }],
             measurement: None,
             point_report: None,
         })

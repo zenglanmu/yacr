@@ -9,18 +9,25 @@
 //!   (`mview.created_polygon`), stored verbatim as
 //!   [`cad_db::PaperViewport::clip`].
 //!
+//! Both shapes are **drawn**: `cad-representation` resolves a simple polygon
+//! clip (concave boundaries included) and limits every primitive to it, so the
+//! polygonal viewport is a real viewport rather than stored-only data.
+//!
 //! Both follow the importer's paper→model convention with `model_per_paper =
 //! 1.0` and translation `-paper_center`, so the model origin sits at the clip
-//! centre. Degenerate, non-coplanar and self-intersecting polygons are refused
-//! before anything mutates.
+//! envelope's centre. Degenerate, non-coplanar and self-intersecting polygons are
+//! refused before anything mutates.
+//!
+//! A three-point boundary whose envelope centre is the paper origin would be
+//! stored with a zero translation, which is exactly the legacy
+//! `[a, b, view_center]` rectangle record; that one shape is refused
+//! (`mview.ambiguous_triangle`) instead of storing a clip that reads back as a
+//! rectangle.
 //!
 //! # Residual
 //!
-//! `cad-representation` resolves only three- and four-point clips, so a
-//! polygonal viewport renders as `viewport_unsupported: clip_arity` until that
-//! lane learns N-gons. The command says so in `mview.polygon_not_renderable`;
-//! it never claims a draw it cannot produce. Viewport **holes** are still not
-//! modeled (one boundary per viewport).
+//! Viewport **holes** are still not modeled (one boundary per viewport); the
+//! command reports that as `mview.no_holes`.
 
 use super::*;
 
@@ -50,7 +57,7 @@ impl Application {
                     .into(),
             ));
         };
-        let (clip, description, created_code, residual) = match points.as_slice() {
+        let (clip, description, created_code) = match points.as_slice() {
             [min, max] => {
                 if !min.x.is_finite()
                     || !min.y.is_finite()
@@ -89,33 +96,12 @@ impl Application {
                     "the paper rectangle ({}, {})-({}, {})",
                     min.x, min.y, max.x, max.y
                 );
-                let residual = Diagnostic {
-                    object: None,
-                    code: "mview.no_holes".into(),
-                    message: "MVIEW: the created viewport is one four-corner rectangle with no \
-                              holes; viewport holes are NOT IMPLEMENTED"
-                        .into(),
-                };
-                (clip, description, "mview.created", residual)
+                (clip, description, "mview.created")
             }
             _ if points.len() >= 3 => {
                 validate_clip_polygon(points, "mview")?;
                 let description = format!("a {}-point polygonal boundary", points.len());
-                let residual = Diagnostic {
-                    object: None,
-                    code: "mview.polygon_not_renderable".into(),
-                    message: "MVIEW: stored the polygonal clip as real viewport geometry, but the \
-                              representation lane resolves only three- and four-point clips, so \
-                              this viewport renders as viewport_unsupported: clip_arity until \
-                              that lane learns N-gons; no draw is claimed here"
-                        .into(),
-                };
-                (
-                    points.clone(),
-                    description,
-                    "mview.created_polygon",
-                    residual,
-                )
+                (points.clone(), description, "mview.created_polygon")
             }
             _ => {
                 return Err(CadError::InvalidInput(
@@ -133,6 +119,18 @@ impl Application {
                 "mview.invalid_rect: the MVIEW boundary has no finite paper extent".into(),
             )
         })?;
+        // The stored transform translation is `-paper_center`; a three-point
+        // boundary centred on the paper origin would therefore land on the
+        // legacy `[a, b, view_center]` encoding (see
+        // `cad_representation::layout`) and read back as a rectangle.
+        if clip.len() == 3 && paper_center.x.abs() <= 1e-9 && paper_center.y.abs() <= 1e-9 {
+            return Err(CadError::InvalidInput(
+                "mview.ambiguous_triangle: a three-point boundary centred on the paper origin \
+                 would be stored with a zero transform translation, which is the legacy \
+                 [a, b, view_center] rectangle encoding; use four or more points"
+                    .into(),
+            ));
+        }
         let mut matrix = Transform3::identity().matrix;
         matrix[0][0] = 1.0;
         matrix[1][1] = 1.0;
@@ -170,7 +168,14 @@ impl Application {
                         layout_id.0
                     ),
                 },
-                residual,
+                Diagnostic {
+                    object: None,
+                    code: "mview.no_holes".into(),
+                    message: format!(
+                        "MVIEW: viewport {index} is one boundary with no holes; viewport holes \
+                         are NOT IMPLEMENTED"
+                    ),
+                },
             ],
             measurement: None,
             point_report: None,

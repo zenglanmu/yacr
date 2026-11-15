@@ -1,6 +1,7 @@
 use cad_db::PaperViewport;
 use cad_domain::{Completeness, Point3, Transform3};
 
+use super::polygon::{validate_paper_polygon, PaperClip};
 use super::selection::{ViewportState, ViewportUnsupported};
 use super::viewport_reason;
 
@@ -22,14 +23,20 @@ pub fn paper_per_model_from_view(view_height: f64, paper_height: f64) -> Option<
     Some(paper_height / view_height)
 }
 
-/// An exact model→paper mapping for one rectangular viewport.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// An exact model→paper mapping for one viewport.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ViewportTransform {
-    /// The four paper-space corners, counter-clockwise from the minimum corner.
+    /// The exact clip boundary. A rectangular clip is the axis-aligned
+    /// rectangle its four corners describe; any other simple polygon is carried
+    /// verbatim and the four corners below are its envelope.
+    pub paper_clip: PaperClip,
+    /// The four paper-space corners of the clip **envelope**, counter-clockwise
+    /// from the minimum corner.
     pub paper_corners: [Point3; 4],
-    /// Paper-space rectangle centre.
+    /// Paper-space centre of the clip envelope.
     pub paper_center: [f64; 2],
-    /// Paper-space rectangle half-extent (both components strictly positive).
+    /// Paper-space half-extent of the clip envelope (both components strictly
+    /// positive).
     pub paper_half: [f64; 2],
     /// Model-space point that maps to `paper_center` (the view centre).
     pub model_anchor: Point3,
@@ -62,7 +69,7 @@ impl ViewportTransform {
         self.to_paper
     }
 
-    /// The paper-space rectangle as `(min, max)`.
+    /// The clip envelope in paper space as `(min, max)`.
     pub fn paper_bounds(&self) -> ([f64; 2], [f64; 2]) {
         (
             [
@@ -81,12 +88,8 @@ pub(super) fn finite_point(p: &Point3) -> bool {
     p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
 }
 
-/// An axis-aligned paper rectangle recovered from a viewport clip.
-struct PaperRect {
-    corners: [Point3; 4],
-    center: [f64; 2],
-    half: [f64; 2],
-}
+/// An axis-aligned paper rectangle as its `(min, max)` corners.
+type RectBounds = ([f64; 2], [f64; 2]);
 
 fn ordered_rect(min: [f64; 2], max: [f64; 2]) -> [Point3; 4] {
     [
@@ -113,46 +116,69 @@ fn ordered_rect(min: [f64; 2], max: [f64; 2]) -> [Point3; 4] {
     ]
 }
 
-fn rect_from_min_max(min: [f64; 2], max: [f64; 2]) -> PaperRect {
-    let width = max[0] - min[0];
-    let height = max[1] - min[1];
-    PaperRect {
-        corners: ordered_rect(min, max),
-        center: [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5],
-        half: [width * 0.5, height * 0.5],
+/// The four paper corners reported for a clip: the clip's own corners when it is
+/// an axis-aligned rectangle, otherwise the corners of its envelope.
+fn paper_corners_of(clip: &PaperClip) -> [Point3; 4] {
+    if clip.as_rect().is_some() {
+        let boundary = clip.boundary();
+        [boundary[0], boundary[1], boundary[2], boundary[3]].map(|corner| Point3 {
+            x: corner[0],
+            y: corner[1],
+            z: 0.0,
+        })
+    } else {
+        let (min, max) = clip.bounds();
+        ordered_rect(min, max)
     }
 }
 
-/// Interpret a clip as a real four- or three-point paper rectangle.
+/// Interpret a stored clip boundary.
 ///
-/// The returned `Option<Point3>` is `Some` for the legacy three-point form,
-/// where the third point is the explicit model view centre.
-fn parse_paper_clip(clip: &[Point3]) -> Result<(PaperRect, Option<Point3>), ViewportUnsupported> {
-    match clip.len() {
-        4 => Ok((parse_four_corner_clip(clip)?, None)),
-        3 => {
-            let a = clip[0];
-            let b = clip[1];
-            let anchor = clip[2];
-            if !finite_point(&a) || !finite_point(&b) || !finite_point(&anchor) {
-                return Err(ViewportUnsupported::new(
-                    viewport_reason::NON_FINITE,
-                    "viewport clip has non-finite coordinates",
-                ));
-            }
-            Ok((parse_opposite_corners(a, b)?, Some(anchor)))
+/// Three encodings are accepted, and the check order is the disambiguation
+/// rule:
+///
+/// 1. **Three points with a pure-scale (translation-free) transform** — the
+///    legacy `[a, b, view_center]` form. The third point is a *model* point, so
+///    it can only be read from a transform whose translation is zero; that is
+///    exactly what the legacy shape means. Returns `Some(anchor)`.
+/// 2. **Four points forming an axis-aligned rectangle** — the importer's and
+///    `MVIEW`/`VPORTS`'s rectangle encoding. Returns the canonical rectangle.
+/// 3. **Anything else with at least three points** — a general simple polygon,
+///    validated by [`validate_paper_polygon`]. This is the shape polygonal
+///    `MVIEW`/`VPCLIP` write, including a triangle: a three-point clip that
+///    carries a transform translation cannot be the legacy form (whose third
+///    point already pins the view centre), so it is a triangle viewport.
+fn parse_paper_clip(
+    clip: &[Point3],
+    has_translation: bool,
+) -> Result<(PaperClip, Option<Point3>), ViewportUnsupported> {
+    if clip.len() == 3 && !has_translation {
+        let a = clip[0];
+        let b = clip[1];
+        let anchor = clip[2];
+        if !finite_point(&a) || !finite_point(&b) || !finite_point(&anchor) {
+            return Err(ViewportUnsupported::new(
+                viewport_reason::NON_FINITE,
+                "viewport clip has non-finite coordinates",
+            ));
         }
-        n => Err(ViewportUnsupported::new(
-            viewport_reason::CLIP_ARITY,
-            format!(
-                "viewport clip must be four rectangle corners (or three legacy points); found {n}"
-            ),
-        )),
+        let (min, max) = opposite_corners(a, b)?;
+        return Ok((PaperClip::rect(min, max), Some(anchor)));
     }
+    if clip.len() == 4 {
+        // A four-point clip that is not an axis-aligned rectangle is still a
+        // rectangle in paper space — a rotated one — so it falls through to the
+        // general polygon path instead of being squared off or refused.
+        if let Some((min, max)) = parse_four_corner_clip(clip)? {
+            return Ok((PaperClip::rect(min, max), None));
+        }
+    }
+    let boundary = validate_paper_polygon(clip)?;
+    Ok((PaperClip::new(boundary, None), None))
 }
 
-/// Recover a rectangle from two *opposite* corners (legacy three-point form).
-fn parse_opposite_corners(a: Point3, b: Point3) -> Result<PaperRect, ViewportUnsupported> {
+/// Recover the rectangle from two *opposite* corners (legacy three-point form).
+fn opposite_corners(a: Point3, b: Point3) -> Result<RectBounds, ViewportUnsupported> {
     let width = (b.x - a.x).abs();
     let height = (b.y - a.y).abs();
     if width <= 1e-12 && height <= 1e-12 {
@@ -170,14 +196,18 @@ fn parse_opposite_corners(a: Point3, b: Point3) -> Result<PaperRect, ViewportUns
             ),
         ));
     }
-    let min = [a.x.min(b.x), a.y.min(b.y)];
-    let max = [a.x.max(b.x), a.y.max(b.y)];
-    Ok(rect_from_min_max(min, max))
+    Ok(([a.x.min(b.x), a.y.min(b.y)], [a.x.max(b.x), a.y.max(b.y)]))
 }
 
 /// Validate that four points are exactly the corners of an axis-aligned
-/// rectangle. A rotated or twisted clip is refused, never squared off.
-fn parse_four_corner_clip(clip: &[Point3]) -> Result<PaperRect, ViewportUnsupported> {
+/// rectangle and return its `(min, max)`; `Ok(None)` means they are a genuine
+/// (for example rotated) polygon instead.
+///
+/// Every corner must sit on the bounding box, all four corner combinations must
+/// be present, and consecutive corners must share one coordinate: a bow-tie that
+/// only *uses* the four corners is not a rectangle and falls through to the
+/// general polygon validator, which names it as self-intersecting.
+fn parse_four_corner_clip(clip: &[Point3]) -> Result<Option<RectBounds>, ViewportUnsupported> {
     for p in clip {
         if !finite_point(p) {
             return Err(ViewportUnsupported::new(
@@ -208,20 +238,24 @@ fn parse_four_corner_clip(clip: &[Point3]) -> Result<PaperRect, ViewportUnsuppor
         let on_bottom = (p.y - min_y).abs() <= tol;
         let on_top = (p.y - max_y).abs() <= tol;
         if !(on_left || on_right) || !(on_bottom || on_top) {
-            return Err(ViewportUnsupported::new(
-                viewport_reason::ROTATED_CLIP,
-                "viewport paper clip is rotated or twisted; only an axis-aligned rectangle is supported",
-            ));
+            return Ok(None);
         }
         seen[usize::from(on_right) + 2 * usize::from(on_top)] = true;
     }
     if !seen.iter().all(|present| *present) {
-        return Err(ViewportUnsupported::new(
-            viewport_reason::ROTATED_CLIP,
-            "viewport paper clip corners do not form a simple axis-aligned rectangle",
-        ));
+        return Ok(None);
     }
-    Ok(rect_from_min_max([min_x, min_y], [max_x, max_y]))
+    // Walk the boundary: consecutive corners of a rectangle share a coordinate,
+    // so a corner-to-corner diagonal in the sequence is a bow-tie, not a
+    // rectangle.
+    for index in 0..clip.len() {
+        let a = clip[index];
+        let b = clip[(index + 1) % clip.len()];
+        if (a.x - b.x).abs() > tol && (a.y - b.y).abs() > tol {
+            return Ok(None);
+        }
+    }
+    Ok(Some(([min_x, min_y], [max_x, max_y])))
 }
 
 /// The view transform as stored: paper → model, model units per paper unit.
@@ -318,11 +352,13 @@ fn classify_import_reason(reason: &str) -> &'static str {
 /// Interpret a stored viewport exactly, or refuse it with a stable reason.
 ///
 /// See the module documentation for the accepted clip encodings and the
-/// direction convention of `model_to_paper`. Everything else — a complex clip,
-/// a clip with the wrong arity, a rotated paper clip, a degenerate rectangle,
-/// adjacent legacy corners, a missing/zero/negative scale, a twisted, sheared,
-/// mirrored, non-uniform or off-plane view, or non-finite data — is
-/// [`ViewportState::Unsupported`].
+/// direction convention of `model_to_paper`. A three-point legacy clip, an
+/// axis-aligned rectangle and a general simple polygon (concave, rotated or
+/// triangular) are all drawable; everything else — an imported viewport marked
+/// `Partial`, a clip with fewer than three points, a degenerate, self-
+/// intersecting or non-planar polygon, adjacent legacy corners, a
+/// missing/zero/negative scale, a twisted, sheared, mirrored, non-uniform or
+/// off-plane view, or non-finite data — is [`ViewportState::Unsupported`].
 pub fn viewport_transform(viewport: &PaperViewport) -> ViewportState {
     if let Completeness::Partial(reasons) = &viewport.completeness {
         let why = reasons
@@ -335,7 +371,14 @@ pub fn viewport_transform(viewport: &PaperViewport) -> ViewportState {
         ));
     }
 
-    let (rect, legacy_anchor) = match parse_paper_clip(&viewport.clip) {
+    // The three-point legacy encoding stores the view centre in `clip[2]` and
+    // demands a translation-free transform; that is what tells it apart from a
+    // three-point *polygon* clip (see `parse_paper_clip`).
+    let has_translation = viewport.model_to_paper.matrix[0][3].abs() > 1e-9
+        || viewport.model_to_paper.matrix[1][3].abs() > 1e-9
+        || viewport.model_to_paper.matrix[2][3].abs() > 1e-9;
+
+    let (clip, legacy_anchor) = match parse_paper_clip(&viewport.clip, has_translation) {
         Ok(parsed) => parsed,
         Err(why) => return ViewportState::Unsupported(why),
     };
@@ -345,23 +388,13 @@ pub fn viewport_transform(viewport: &PaperViewport) -> ViewportState {
     };
 
     let paper_per_model = 1.0 / stored.model_per_paper;
-    let center = rect.center;
+    let center = clip.center();
 
     let (model_anchor, to_paper, to_model) = match legacy_anchor {
         Some(anchor) => {
-            // Legacy: the view centre lives in clip[2]; a transform translation
-            // as well would make the two sources disagree, so refuse it.
-            let tmax = stored
-                .translation
-                .iter()
-                .fold(0.0f64, |acc, v| acc.max(v.abs()));
-            if tmax > 1e-9 {
-                return ViewportState::Unsupported(ViewportUnsupported::new(
-                    viewport_reason::TRANSLATION_MISMATCH,
-                    "legacy three-point viewport carries a transform translation as well as clip[2]; \
-                     the view centre is ambiguous",
-                ));
-            }
+            // Legacy: the view centre lives in clip[2]. A translation-carrying
+            // transform never reaches this branch (see `has_translation`), which
+            // is exactly why the legacy encoding is unambiguous here.
             let mut matrix = Transform3::identity().matrix;
             matrix[0][0] = paper_per_model;
             matrix[1][1] = paper_per_model;
@@ -372,8 +405,9 @@ pub fn viewport_transform(viewport: &PaperViewport) -> ViewportState {
             (anchor, to_paper, to_model)
         }
         None => {
-            // Four-corner clip: the stored paper→model transform positions the
-            // view; the paper centre maps to the view centre.
+            // A stored clip with a transform: the stored paper→model transform
+            // positions the view; the clip envelope's centre maps to the view
+            // centre (for a rectangle that is exactly the old paper centre).
             let model_per_paper = stored.model_per_paper;
             let tx = stored.translation[0];
             let ty = stored.translation[1];
@@ -399,9 +433,10 @@ pub fn viewport_transform(viewport: &PaperViewport) -> ViewportState {
     };
 
     ViewportState::Supported(Box::new(ViewportTransform {
-        paper_corners: rect.corners,
-        paper_center: rect.center,
-        paper_half: rect.half,
+        paper_corners: paper_corners_of(&clip),
+        paper_center: center,
+        paper_half: clip.half(),
+        paper_clip: clip,
         model_anchor,
         paper_per_model,
         to_paper,

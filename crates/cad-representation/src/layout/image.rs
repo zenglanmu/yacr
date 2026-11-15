@@ -1,22 +1,140 @@
+use std::sync::Arc;
+
 use cad_domain::*;
 
 use crate::ImageVertex;
 
 use super::clip_reason;
+use super::polygon::PaperClip;
 use super::selection::ClipRefusal;
 use super::view::finite_point;
 
-/// Clip an image's unit-square quad, mapped through `transform`, to the paper
-/// rectangle and interpolate the texture coordinates at the new vertices.
+/// The visible part of one image through a viewport clip.
 ///
-/// `Ok(vertices)` is the surviving convex polygon (empty when the image lies
-/// fully outside the window, an exact omission). `Err` means the transform maps
-/// the quad to a non-finite position, so it cannot be clipped.
-pub fn clip_image_quad_to_rect(
+/// A rectangle keeps the single convex result the half-plane clippers produce; a
+/// general (possibly concave) clip can cut one image into several convex pieces,
+/// which the caller emits as several image fragments over the same resource so
+/// the union is exactly the visible region.
+pub(crate) enum ImageRegion {
+    /// Nothing is visible: an exact omission, not a degradation.
+    Empty,
+    /// The whole image is visible; `entity` is the entity clip, unchanged.
+    Whole { entity: Option<Arc<[ImageVertex]>> },
+    /// Convex paper-space pieces, each with interpolated texture coordinates.
+    Pieces(Vec<Vec<ImageVertex>>),
+}
+
+/// Resolve the visible region of one image under `clip`.
+///
+/// `Err` means the region cannot be computed exactly (a non-finite quad, or a
+/// non-convex entity clip that would have to be intersected); the caller keeps
+/// the original primitive and reports the refusal.
+pub(crate) fn visible_image(
     transform: &Transform3,
+    entity: Option<&[ImageVertex]>,
+    clip: &PaperClip,
+) -> Result<ImageRegion, ClipRefusal> {
+    if clip.as_rect().is_some() {
+        return visible_image_to_rect(transform, entity, clip.center(), clip.half());
+    }
+    visible_image_to_polygon(transform, entity, clip)
+}
+
+/// The rectangle path: byte-for-byte the behaviour the half-plane clippers had.
+fn visible_image_to_rect(
+    transform: &Transform3,
+    entity: Option<&[ImageVertex]>,
     center: [f64; 2],
     half: [f64; 2],
-) -> Result<Vec<ImageVertex>, ClipRefusal> {
+) -> Result<ImageRegion, ClipRefusal> {
+    let vertices = clip_image_quad_to_rect(transform, center, half)?;
+    if vertices.is_empty() {
+        return Ok(ImageRegion::Empty);
+    }
+    if image_quad_inside(transform, center, half) {
+        // The whole quad is visible; any entity clip still applies unchanged.
+        return Ok(ImageRegion::Whole {
+            entity: entity.map(Arc::from),
+        });
+    }
+    match entity {
+        Some(entity_clip) => {
+            if !image_polygon_is_convex(entity_clip) {
+                // A provider handed us a non-convex clip (its primitive
+                // contract says convex); half-plane intersection would be
+                // wrong, so report instead of widening or dropping it.
+                return Err(ClipRefusal::new(
+                    clip_reason::IMAGE_INTERSECTION_UNSUPPORTED,
+                    "a non-convex image clip cannot be intersected with the viewport window exactly; the entity clip is kept unclipped",
+                ));
+            }
+            let intersected = clip_image_polygon_to_rect(entity_clip.to_vec(), center, half);
+            if intersected.is_empty() {
+                Ok(ImageRegion::Empty)
+            } else {
+                Ok(ImageRegion::Pieces(vec![intersected]))
+            }
+        }
+        None => Ok(ImageRegion::Pieces(vec![vertices])),
+    }
+}
+
+/// The general-polygon path: trianguate the clip, intersect the (convex) image
+/// region with every convex window, and keep the non-empty pieces.
+fn visible_image_to_polygon(
+    transform: &Transform3,
+    entity: Option<&[ImageVertex]>,
+    clip: &PaperClip,
+) -> Result<ImageRegion, ClipRefusal> {
+    let quad = image_quad(transform)?;
+    let quad_positions: Vec<[f64; 2]> = quad
+        .iter()
+        .map(|vertex| [vertex.position.x, vertex.position.y])
+        .collect();
+    if clip.holds(&quad_positions) {
+        // A concave clip that holds the whole quad cannot bite into it, so the
+        // image needs no cut at all.
+        return Ok(ImageRegion::Whole {
+            entity: entity.map(Arc::from),
+        });
+    }
+    let base = match entity {
+        Some(entity_clip) => {
+            if !image_polygon_is_convex(entity_clip) {
+                return Err(ClipRefusal::new(
+                    clip_reason::IMAGE_INTERSECTION_UNSUPPORTED,
+                    "a non-convex image clip cannot be intersected with the viewport window exactly; the entity clip is kept unclipped",
+                ));
+            }
+            entity_clip.to_vec()
+        }
+        None => quad,
+    };
+    let base_positions: Vec<[f64; 2]> = base
+        .iter()
+        .map(|vertex| [vertex.position.x, vertex.position.y])
+        .collect();
+    if clip.holds(&base_positions) {
+        return Ok(ImageRegion::Whole {
+            entity: entity.map(Arc::from),
+        });
+    }
+    let mut pieces = Vec::new();
+    for window in clip.triangles() {
+        let piece = clip_image_vertices_to_window(base.clone(), &window);
+        if piece.len() >= 3 {
+            pieces.push(piece);
+        }
+    }
+    if pieces.is_empty() {
+        Ok(ImageRegion::Empty)
+    } else {
+        Ok(ImageRegion::Pieces(pieces))
+    }
+}
+
+/// The unit square mapped to paper space, carrying each corner's UV.
+fn image_quad(transform: &Transform3) -> Result<Vec<ImageVertex>, ClipRefusal> {
     let corners = [
         (Point3::default(), [0.0, 0.0]),
         (
@@ -44,7 +162,7 @@ pub fn clip_image_quad_to_rect(
             [0.0, 1.0],
         ),
     ];
-    let mut polygon: Vec<ImageVertex> = Vec::with_capacity(8);
+    let mut polygon: Vec<ImageVertex> = Vec::with_capacity(corners.len());
     for (corner, uv) in corners {
         let position = transform.apply_point(corner);
         if !finite_point(&position) {
@@ -55,7 +173,88 @@ pub fn clip_image_quad_to_rect(
         }
         polygon.push(ImageVertex { position, uv });
     }
-    Ok(clip_image_polygon_to_rect(polygon, center, half))
+    Ok(polygon)
+}
+
+/// Sutherland–Hodgman clip of an image polygon against a **convex**
+/// counter-clockwise window, interpolating UVs (and z) at the new vertices.
+fn clip_image_vertices_to_window(input: Vec<ImageVertex>, window: &[[f64; 2]]) -> Vec<ImageVertex> {
+    let mut out = input;
+    let count = window.len();
+    for index in 0..count {
+        if out.is_empty() {
+            return out;
+        }
+        let a = window[index];
+        let b = window[(index + 1) % count];
+        let side = |p: [f64; 2]| (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+        let n = out.len();
+        let mut clipped = Vec::with_capacity(n + 1);
+        for k in 0..n {
+            let current = out[k];
+            let previous = out[(k + n - 1) % n];
+            let current_side = side([current.position.x, current.position.y]);
+            let previous_side = side([previous.position.x, previous.position.y]);
+            let crossing = |previous: ImageVertex, current: ImageVertex| {
+                let denominator = previous_side - current_side;
+                let t = if denominator.abs() > 1e-300 {
+                    previous_side / denominator
+                } else {
+                    0.0
+                };
+                lerp_image_vertex(previous, current, t)
+            };
+            if current_side >= 0.0 {
+                if previous_side < 0.0 {
+                    clipped.push(crossing(previous, current));
+                }
+                clipped.push(current);
+            } else if previous_side >= 0.0 {
+                clipped.push(crossing(previous, current));
+            }
+        }
+        out = clipped;
+    }
+    out.dedup_by(|a, b| a.position == b.position && a.uv == b.uv);
+    if out.len() >= 2
+        && out[0].position == out[out.len() - 1].position
+        && out[0].uv == out[out.len() - 1].uv
+    {
+        out.pop();
+    }
+    out
+}
+
+fn lerp_image_vertex(a: ImageVertex, b: ImageVertex, t: f64) -> ImageVertex {
+    ImageVertex {
+        position: Point3 {
+            x: a.position.x + (b.position.x - a.position.x) * t,
+            y: a.position.y + (b.position.y - a.position.y) * t,
+            z: a.position.z + (b.position.z - a.position.z) * t,
+        },
+        uv: [
+            a.uv[0] + (b.uv[0] - a.uv[0]) * t,
+            a.uv[1] + (b.uv[1] - a.uv[1]) * t,
+        ],
+    }
+}
+
+/// Clip an image's unit-square quad, mapped through `transform`, to the paper
+/// rectangle and interpolate the texture coordinates at the new vertices.
+///
+/// `Ok(vertices)` is the surviving convex polygon (empty when the image lies
+/// fully outside the window, an exact omission). `Err` means the transform maps
+/// the quad to a non-finite position, so it cannot be clipped.
+pub fn clip_image_quad_to_rect(
+    transform: &Transform3,
+    center: [f64; 2],
+    half: [f64; 2],
+) -> Result<Vec<ImageVertex>, ClipRefusal> {
+    Ok(clip_image_polygon_to_rect(
+        image_quad(transform)?,
+        center,
+        half,
+    ))
 }
 
 /// Clip an image polygon (already in paper coordinates, carrying UVs) to the

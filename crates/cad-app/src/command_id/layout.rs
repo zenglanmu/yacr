@@ -40,13 +40,22 @@
 //! * `VPMAX` / `VPMIN` set and clear one session-only maximized-viewport marker
 //!   naming the active paper layout and its first viewport.
 //!
+//! # Polygonal viewports
+//!
+//! `VPCLIP` also writes a polygonal boundary (`LayoutPayload::ClipPolygon`): the
+//! validated 3+ point simple polygon replaces the first viewport's clip and
+//! `cad-representation` clips that viewport to it — concave boundaries included,
+//! for lines, meshes, images and conics alike. There is no
+//! "written but not renderable" residual.
+//!
 //! # The remaining hard boundary
 //!
-//! Polygonal `VPCLIP` is not modeled. Imported `VPLAYER` data is not parsed:
-//! imported viewports start with no overrides and stay `Partial` when the source
-//! carried per-viewport layer state. Page setup is written by the typed
-//! `PAGESETUP`/`PSETUPIN` forms in [`crate::command_id::extended`]; `MVIEW`
-//! appends one rectangular paper viewport and is documented there.
+//! Viewport **holes** are not modeled (one boundary per viewport). Imported
+//! `VPLAYER` data is not parsed: imported viewports start with no overrides and
+//! stay `Partial` when the source carried per-viewport layer state. Page setup is
+//! written by the typed `PAGESETUP`/`PSETUPIN` forms in
+//! [`crate::command_id::extended`]; `MVIEW` appends one rectangular **or
+//! polygonal** paper viewport and is documented there.
 //!
 //! `-VPORTS` is a spelling alias of `VPORTS`, not a second command: it
 //! normalizes to the same [`crate::CommandId::Vports`] and the same handler.
