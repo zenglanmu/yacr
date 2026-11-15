@@ -1,7 +1,7 @@
 use super::finalize::dedupe_issues;
 use super::model::{
-    MTextProjection, ParsedText, ProjectedChar, StackedFraction, TextColor, TextFormatIssue,
-    TextLine, TextRun,
+    MTextProjection, ParsedText, ProjectedChar, ProjectedOrigin, StackedFraction, TextColor,
+    TextFormatIssue, TextLine, TextRun,
 };
 use super::text_issue;
 
@@ -162,17 +162,33 @@ impl MTextParser {
 
     /// Record one drawn character against the token being parsed.
     fn record_char(&mut self, ch: char) {
+        self.record_char_with(ch, ProjectedOrigin::Literal);
+    }
+
+    /// Record one drawn character and what produced it.
+    fn record_char_with(&mut self, ch: char, origin: ProjectedOrigin) {
         if !self.record {
             return;
         }
         let (start, end) = self.token_span();
-        self.projected.push(ProjectedChar { ch, start, end });
+        self.projected.push(ProjectedChar {
+            ch,
+            start,
+            end,
+            origin,
+        });
     }
 
     /// Draw one character.
     fn emit(&mut self, ch: char) {
         self.buf.push(ch);
         self.record_char(ch);
+    }
+
+    /// Draw one character that a structural token produced.
+    fn emit_with(&mut self, ch: char, origin: ProjectedOrigin) {
+        self.buf.push(ch);
+        self.record_char_with(ch, origin);
     }
 
     /// Draw a literal string; every character shares the token's markup range.
@@ -508,7 +524,7 @@ impl MTextParser {
             Some('I') => {
                 self.pos += 2;
                 for _ in 0..TAB_STEP {
-                    self.emit(' ');
+                    self.emit_with(' ', ProjectedOrigin::Tab);
                 }
             }
             Some('J') => {
@@ -726,7 +742,7 @@ impl MTextParser {
                 self.runs.push(run);
                 if let Some(text) = recorded {
                     for ch in text.chars() {
-                        self.record_char(ch);
+                        self.record_char_with(ch, ProjectedOrigin::Fraction);
                     }
                 }
                 self.issue(

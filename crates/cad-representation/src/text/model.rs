@@ -120,6 +120,26 @@ pub struct ParsedText {
     pub issues: Vec<TextFormatIssue>,
 }
 
+/// What a projected character was produced by, when rewriting the producing
+/// bytes as literal text could lose something the token encodes.
+///
+/// This exists for search/replace: a caller that wants to edit only part of a
+/// token's drawn characters has to know whether the token is plain text (safe to
+/// rewrite) or a structure whose partial form the grammar cannot express.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectedOrigin {
+    /// Ordinary text, or a code whose drawn form *is* literal text (`\Z`,
+    /// the `%%` fallback, a malformed `\S`): rewriting it as text loses nothing.
+    Literal,
+    /// `^I`: a stored tab drawn as [`TAB_STEP`](crate::text::TAB_STEP) spaces.
+    /// The grammar has no "tab plus content" form, so its spaces can only be
+    /// replaced as one unit.
+    Tab,
+    /// `\S…;`: a stacked fraction drawn inline as `num<sep>den`. Replacing only
+    /// part of `num<sep>den` cannot stay a fraction.
+    Fraction,
+}
+
 /// One character of the plain text an MTEXT value draws, with the byte range of
 /// the raw markup that produced it.
 ///
@@ -136,6 +156,8 @@ pub struct ProjectedChar {
     pub start: usize,
     /// Byte offset into the raw string just past the producing markup.
     pub end: usize,
+    /// What produced it; see [`ProjectedOrigin`].
+    pub origin: ProjectedOrigin,
 }
 
 /// The plain text an MTEXT value draws, character by character, with the raw

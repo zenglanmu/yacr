@@ -2,15 +2,17 @@
 //! TEXT, MTEXT and MULTILEADER text.
 //!
 //! Search is a plain **ASCII case-insensitive substring** of what the viewport
-//! draws. For an MTEXT (and a text-bearing MULTILEADER, which stores the same
-//! `\P`/`\f…;` markup) the haystack is the **plain-text projection** of the
-//! stored value, produced by the *same* tokenizer that renders it
-//! ([`cad_representation::mtext_projection`]): formatting runs contribute no
-//! characters, `\P`/`\N`/`^J`/literal newlines are one `'\n'` each, and escapes
-//! (`\~`, `%%d`, `\U+XXXX`, `\S`) contribute the character they draw. A needle
-//! that only exists in the markup (`\fArial|b1;`, `|b1;`) is therefore **not** a
-//! match, and a hit is reported with its plain-text context. A TEXT
-//! (`AcDbText`) keeps the raw-string search: it is stored as one line.
+//! draws. Every `Text` entity is matched on the **plain-text projection** of its
+//! stored value — MTEXT, a text-bearing MULTILEADER (which stores the same
+//! `\P`/`\f…;` markup) and single-line `AcDbText` alike, because
+//! `cad-representation`'s provider shapes all of them through the same
+//! `parse_mtext` (see [`mtext_preview_text`]). The projection is produced by that
+//! *same* tokenizer ([`cad_representation::mtext_projection`]): formatting runs
+//! contribute no characters, `\P`/`\N`/`^J`/literal newlines are one `'\n'`
+//! each, and escapes (`\~`, `%%d`, `\U+XXXX`, `\S`) contribute the character
+//! they draw. A needle that only exists in the markup (`\fArial|b1;`, `|b1;`)
+//! is therefore **not** a match, and a hit is reported with its plain-text
+//! context.
 //!
 //! Each projected character carries the byte range of the markup that produced
 //! it, so a replace can rebuild the markup instead of rewriting the whole
@@ -23,7 +25,15 @@
 //! single inserted string cannot honestly carry two formats, so the format at
 //! the match start wins and no run's codes are rewritten or dropped. The inserted
 //! text is escaped (`\`, `{`, `}` and line breaks), so a replacement cannot
-//! inject markup.
+//! inject control content.
+//!
+//! Two things are refused by name instead of being written approximately:
+//! a match that covers only **part** of a structured code (`\S…;` stacked
+//! fraction, `^I` tab) — `find.mtext_partial_code` — because neither grammar has
+//! a partial form, and a replacement the control-content grammar would draw as
+//! something other than the typed text (`%%d`, `^I`, …) —
+//! `find.mtext_replacement_not_literal`. Replacing **all** of a structure's
+//! drawn text is allowed and stored as literal text.
 //!
 //! A MULTILEADER's string is reached through
 //! [`cad_domain::MultiLeaderGeometry::text`] and replaced with
@@ -40,6 +50,7 @@
 use super::*;
 use cad_domain::{MLeaderContent, SemanticGeometry};
 use cad_representation::mtext_projection;
+use cad_representation::text::ProjectedOrigin;
 use text_policy::{has_line_break, newlines_to_paragraph_breaks};
 
 /// Preview length of one match in the report diagnostic.
@@ -224,13 +235,9 @@ impl FindHit {
 fn find_hits(entity: &DbEntity, needle: &str) -> Vec<FindHit> {
     match &entity.geometry {
         SemanticGeometry::Text { text, .. } => {
-            // MTEXT is matched against what it draws, not against its markup;
-            // a TEXT is one stored line and keeps the raw-string search.
-            let shown = if stores_mtext_markup(entity) {
-                mtext_preview_text(text)
-            } else {
-                text.clone()
-            };
+            // Both MTEXT and single-line TEXT are matched against what they
+            // draw: the viewport parses the same control content for each.
+            let shown = mtext_preview_text(text);
             if contains(&shown, needle) {
                 vec![FindHit::entity_hit(entity, shown)]
             } else {
@@ -339,21 +346,64 @@ fn occurrences(haystack: &str, needle: &str) -> Vec<(usize, usize)> {
     found
 }
 
-/// Whether the entity stores MTEXT control content, i.e. markup the
-/// representation layer parses into formatting runs (`\P`, `\f…;`, `{`/`}`).
+/// Whether the entity is a **multiline** text (`AcDbMText`) rather than a
+/// single-line `AcDbText`.
 ///
-/// Only `AcDbMText` is a multiline text entity; a plain `AcDbText` is one
-/// stored line and is searched verbatim.
+/// Both are parsed by the same engine in the viewport, so both are searched on
+/// their **drawn** text (see [`mtext_preview_text`]); the type key only decides
+/// whether a replacement may store a line break (`text_policy`).
 fn stores_mtext_markup(entity: &DbEntity) -> bool {
     entity.object.type_key.eq_ignore_ascii_case("AcDbMText")
 }
 
-/// The text an MTEXT value draws, for the report and for matching.
+/// The text a stored `Text` value draws, for the report and for matching.
+///
+/// The viewport parses control content for **every** `Text` geometry, not just
+/// MTEXT: `crates/cad-representation/src/provider/default.rs` shapes each one
+/// through `FontEngine::shape`/`shape_unstyled`, and `engine.rs` parses the same
+/// `parse_mtext` for both. An `AcDbText` can therefore store `%%d`, `\~`, `\{`
+/// or even `\P` and draw something other than its raw string, so it is matched
+/// on the projection too.
 fn mtext_preview_text(raw: &str) -> String {
     mtext_projection(raw).text()
 }
 
-/// Replace every occurrence of `needle` in the text an MTEXT value draws, and
+/// The replacement as it must be **drawn**: every line-break form is one
+/// paragraph break (the same CRLF-as-one-break rule as
+/// [`super::text_policy::newlines_to_paragraph_breaks`]), everything else is
+/// literal.
+fn drawn_replacement(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                out.push('\n');
+            }
+            '\n' => out.push('\n'),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// A short, single-line clip of `text` for a diagnostic message.
+fn clip(text: &str) -> String {
+    let mut clipped: String = text.chars().take(PREVIEW_CHARS).collect();
+    if clipped.chars().count() < text.chars().count() {
+        clipped.push('…');
+    }
+    clipped.replace(['\r', '\n'], " ")
+}
+
+/// Stable name of the refusal for an edit that would cover only part of a
+/// structured MTEXT code (a `\S…;` stacked fraction or a `^I` tab).
+const PARTIAL_CODE: &str = "find.mtext_partial_code";
+
+/// Replace every occurrence of `needle` in the text a stored value draws, and
 /// splice the replacement back into the markup.
 ///
 /// The rule: the replacement goes at the **first** matched character's byte
@@ -364,11 +414,30 @@ fn mtext_preview_text(raw: &str) -> String {
 /// matched characters there while leaving that run's own codes in place. One
 /// inserted string cannot honestly carry two formats, so the match start wins;
 /// no run's codes are rewritten, reordered or dropped.
-fn replace_mtext_markup(raw: &str, needle: &str, replacement: &str) -> String {
+///
+/// Replacing **all** the characters one structured code draws (`\S1/2;`'s
+/// `1/2`, `^I`'s four spaces) writes the replacement as literal text: the user
+/// replaced everything that code stood for. Replacing only **part** of them is
+/// refused by name.
+///
+/// # Errors
+///
+/// * `find.mtext_partial_code` ([`PARTIAL_CODE`]) — a match covers only part of
+///   a `\S…;` stacked fraction or a `^I` tab. Neither grammar has a partial form
+///   (`\S` needs one separator between non-empty parts and cannot carry `/`,
+///   `#`, `^` or `;` inside a part; `^I` is exactly four spaces), so rebuilding
+///   one would drop the structure the user did not ask about. Nothing is
+///   written.
+/// * `find.mtext_replacement_not_literal` — the rebuilt value would not draw the
+///   replacement as typed (control content has no literal form for text such as
+///   `%%d`, `^I` or a stray trailing `\`), so the drawn result would differ from
+///   the request. Nothing is written.
+fn replace_mtext_markup(raw: &str, needle: &str, replacement: &str) -> CadResult<String> {
     let projection = mtext_projection(raw);
-    let matches = occurrences(&projection.text(), needle);
+    let text = projection.text();
+    let matches = occurrences(&text, needle);
     if matches.is_empty() {
-        return raw.to_string();
+        return Ok(raw.to_string());
     }
     // Byte offset of every projected character, plus the total length.
     let mut offsets = Vec::with_capacity(projection.chars.len() + 1);
@@ -381,14 +450,15 @@ fn replace_mtext_markup(raw: &str, needle: &str, replacement: &str) -> String {
     let char_index = |byte: usize| offsets.partition_point(|offset| *offset < byte);
     let mut matched = vec![false; projection.chars.len()];
     let mut insertion = vec![false; projection.chars.len()];
-    for (start, end) in matches {
-        let first = char_index(start);
-        let last = char_index(end);
+    for (start, end) in &matches {
+        let first = char_index(*start);
+        let last = char_index(*end);
         insertion[first] = true;
         for flag in &mut matched[first..last] {
             *flag = true;
         }
     }
+
     let inserted = escape_mtext_insertion(replacement);
     let mut out = String::with_capacity(raw.len());
     let mut copied = 0;
@@ -404,8 +474,24 @@ fn replace_mtext_markup(raw: &str, needle: &str, replacement: &str) -> String {
         {
             group_end += 1;
         }
-        let touched = matched[index..group_end].iter().any(|flag| *flag)
-            || insertion[index..group_end].iter().any(|flag| *flag);
+        let covered = matched[index..group_end]
+            .iter()
+            .filter(|flag| **flag)
+            .count();
+        if let Some(structure) = structure_of(projection.chars[index].origin) {
+            if covered != 0 && covered != group_end - index {
+                // Part of a token whose grammar has no partial form: refuse by
+                // name rather than silently dropping the structure it encodes.
+                return Err(CadError::Unsupported(format!(
+                    "{PARTIAL_CODE}: the match covers only part of the control-content code '{}' \
+                     ({structure}) at bytes {start}..{end}; rewriting it would drop that \
+                     structure, so nothing was written — match all of its drawn text, or edit \
+                     the value with TEXTEDIT",
+                    &raw[start..end]
+                )));
+            }
+        }
+        let touched = covered > 0 || insertion[index..group_end].iter().any(|flag| *flag);
         if touched {
             out.push_str(&raw[copied..start]);
             for position in index..group_end {
@@ -421,19 +507,59 @@ fn replace_mtext_markup(raw: &str, needle: &str, replacement: &str) -> String {
         index = group_end;
     }
     out.push_str(&raw[copied..]);
-    out
+
+    // The rebuilt markup must draw exactly the text that was asked for: the
+    // value's grammar has no literal form for everything a replacement can
+    // contain (`%%d`, `^I`, a stray `\`), and drawing something else silently
+    // would be a lie about what was written.
+    let mut expected = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for (start, end) in &matches {
+        expected.push_str(&text[cursor..*start]);
+        expected.push_str(&drawn_replacement(replacement));
+        cursor = *end;
+    }
+    expected.push_str(&text[cursor..]);
+    let drawn = mtext_projection(&out).text();
+    if drawn != expected {
+        return Err(CadError::InvalidInput(format!(
+            "find.mtext_replacement_not_literal: the rebuilt MTEXT markup would draw '{}' where \
+             '{}' was requested; the value's grammar has no literal form for that text, so nothing \
+             was written",
+            clip(&drawn),
+            clip(&expected)
+        )));
+    }
+    Ok(out)
 }
 
-/// Escape text for insertion into MTEXT markup so a replacement cannot inject
-/// a formatting code, and store line breaks the one way the parser reads.
+/// The structure a code encodes, when a partial rewrite of its drawn characters
+/// cannot keep it; `None` for text that can be rewritten literally.
+fn structure_of(origin: ProjectedOrigin) -> Option<&'static str> {
+    match origin {
+        ProjectedOrigin::Literal => None,
+        ProjectedOrigin::Tab => Some("a stored tab, drawn as spaces"),
+        ProjectedOrigin::Fraction => Some("a stacked fraction, drawn inline"),
+    }
+}
+
+/// Escape typed text so it is drawn literally: backslash, grouping braces and
+/// line breaks (as `\P`) cannot reach the parser as control content.
 fn escape_mtext_insertion(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
     for ch in text.chars() {
-        push_mtext_escaped(&mut escaped, ch);
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '{' => escaped.push_str("\\{"),
+            '}' => escaped.push_str("\\}"),
+            other => escaped.push(other),
+        }
     }
     newlines_to_paragraph_breaks(&escaped)
 }
 
+/// Write a projected character back as literal markup. A paragraph break is
+/// already a single `'\n'` here, so it becomes one `\P`.
 fn push_mtext_escaped(out: &mut String, ch: char) {
     match ch {
         '\\' => out.push_str("\\\\"),
@@ -487,17 +613,16 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
             width_factor,
             line_spacing,
         } => {
-            // MTEXT is rebuilt from its formatting runs; a single-line TEXT
-            // keeps the verbatim replacement and refuses a line break.
-            let replaced = if stores_mtext_markup(entity) {
-                replace_mtext_markup(text, needle, replacement)
-            } else if has_line_break(replacement) {
+            // A single-line TEXT still refuses a stored line break
+            // (`text_policy`), but the drawn text is the same projection either
+            // way: the viewport parses `%%d`, `\~`, `\{` and `\P` for every
+            // `Text` geometry, so the replacement is spliced and escaped the
+            // same way it is for MTEXT.
+            if !stores_mtext_markup(entity) && has_line_break(replacement) {
                 return Err(text_policy::single_line_newline_error("FIND"));
-            } else {
-                replace_all(text, needle, replacement)
-            };
+            }
             after.geometry = SemanticGeometry::Text {
-                text: replaced,
+                text: replace_mtext_markup(text, needle, replacement)?,
                 position: *position,
                 style: *style,
                 height: *height,
@@ -513,7 +638,7 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
         }
         SemanticGeometry::MultiLeader(leader) => {
             // A text-bearing multileader stores the same MTEXT markup.
-            let replaced = replace_mtext_markup(&leader.text().string, needle, replacement);
+            let replaced = replace_mtext_markup(&leader.text().string, needle, replacement)?;
             after.geometry = SemanticGeometry::MultiLeader(Box::new(leader.with_text(&replaced)?));
         }
         SemanticGeometry::Table(table) => {

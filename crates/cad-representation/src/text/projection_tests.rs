@@ -53,7 +53,8 @@ fn projection_is_the_drawn_text_with_markup_origins() {
 }
 
 /// A code that draws several characters (`^I` draws four spaces) owns one byte
-/// range shared by all of them: they can only be edited as a unit.
+/// range shared by all of them: they can only be edited as a unit. The origin
+/// says whether a partial rewrite would drop a structure the grammar encodes.
 #[test]
 fn projection_shares_one_range_for_a_multi_character_code() {
     let raw = "a^Ib";
@@ -67,5 +68,25 @@ fn projection_shares_one_range_for_a_multi_character_code() {
     assert_eq!(tabs.len(), super::mtext::TAB_STEP);
     for projected in tabs {
         assert_eq!(&raw[projected.start..projected.end], "^I");
+        assert_eq!(projected.origin, ProjectedOrigin::Tab);
     }
+    // Ordinary text and a literal code are `Literal`: rewriting them as text
+    // loses nothing.
+    assert_eq!(projection.chars[0].origin, ProjectedOrigin::Literal);
+    assert_eq!(projection.chars[5].origin, ProjectedOrigin::Literal);
+    let unknown = mtext_projection("a\\Zx");
+    assert_eq!(unknown.text(), "a\\Zx");
+    assert!(unknown
+        .chars
+        .iter()
+        .all(|projected| projected.origin == ProjectedOrigin::Literal));
+    // A `\S` fraction marks every drawn character it produces.
+    let fraction = mtext_projection("x\\S1/2;y");
+    assert_eq!(fraction.text(), "x1/2y");
+    for projected in &fraction.chars[1..4] {
+        assert_eq!(projected.origin, ProjectedOrigin::Fraction);
+        assert_eq!(&"x\\S1/2;y"[projected.start..projected.end], "\\S1/2;");
+    }
+    assert_eq!(fraction.chars[0].origin, ProjectedOrigin::Literal);
+    assert_eq!(fraction.chars[4].origin, ProjectedOrigin::Literal);
 }

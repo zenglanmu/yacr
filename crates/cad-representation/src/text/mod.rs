@@ -57,8 +57,8 @@ mod sanitize;
 pub use engine::FontEngine;
 pub use layout::LINE_SPACING;
 pub use model::{
-    MTextProjection, ParsedText, ProjectedChar, ShapedText, StackedFraction, TextColor,
-    TextFormatIssue, TextLine, TextRun,
+    MTextProjection, ParsedText, ProjectedChar, ProjectedOrigin, ShapedText, StackedFraction,
+    TextColor, TextFormatIssue, TextLine, TextRun,
 };
 pub use mtext::{mtext_projection, parse_mtext};
 pub use sanitize::sanitize_text;
