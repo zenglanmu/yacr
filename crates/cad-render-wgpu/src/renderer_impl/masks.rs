@@ -66,8 +66,15 @@ impl Renderer {
     /// clip-space position: the mask pass compares depth `Always` and writes no
     /// depth.
     ///
-    /// Masks carry no pick key: they are not pickable geometry, so this does not
-    /// touch the pick table or the key space.
+    /// Masks carry no **GPU** pick key: they are not in the id pass, so this does
+    /// not touch the pick table or the key space. CPU picking is a different
+    /// funnel and *does* hit a mask — `cad-spatial` tests its closed boundary
+    /// ring (`FAMILY_MASK`), which is how a wipeout is selected and erased. The
+    /// consequence here is only visual: the entity-flag path that tints a
+    /// selected entity is keyed by pick key, so a selected mask gets no tint, and
+    /// a highlight overlay drawn in a geometry pass would be repainted by the
+    /// mask pass anyway (it runs last). A selected-mask highlight therefore has to
+    /// be drawn in/after this pass.
     pub fn upload_masks(&mut self, masks: &[MaskBatch]) -> CadResult<()> {
         let device = self
             .device

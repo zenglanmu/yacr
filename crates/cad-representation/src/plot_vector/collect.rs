@@ -22,9 +22,10 @@ struct DeferredMask {
     frame: bool,
     /// The fragment's opacity (a mask erases, so this is the entity's alpha).
     opacity: f32,
-    /// Whether this mask contributes a fill. `false` for an `inverted` mask (the
-    /// complement is not expressible as one ring) — its frame is still emitted.
-    fill: bool,
+    /// Extra even-odd rings for the fill. Empty for a normal mask; one page
+    /// rectangle for an `inverted` mask, whose boundary is then a hole in it (the
+    /// raster complement expressed as a multi-ring path).
+    extra_rings: Vec<Vec<[f64; 2]>>,
     /// The frame's resolved colour and lineweight (the mask fill itself is the
     /// page background, never this colour).
     frame_color: [f32; 3],
@@ -111,9 +112,15 @@ pub fn build_vector_document(
             // polyline after its own fill (`WIPEOUTFRAME` 1 plots the frame; 2
             // does not, because the plot context is built without it).
             //
-            // `inverted` is still not expressible: the complement of an arbitrary
-            // polygon needs a multi-ring even-odd path, and the path model is a
-            // single ring. It is named, never silently dropped.
+            // `inverted` (DXF clip mode Inside) masks everything *outside* its
+            // boundary. The raster renderer paints exactly that by prepending a
+            // covering ring to the boundary and filling both even-odd
+            // (`inverted_mask_fill` in `cad-render-wgpu`), so the path document
+            // does the same with the page rectangle as the covering ring: an area
+            // inside the boundary is covered twice and stays clear, every other
+            // page point is covered once and is flooded. A vector page has no
+            // camera, so the ring is the fixed page (the raster's ring is the
+            // visible rect) — for a plot the visible rect *is* the page.
             DisplayPrimitive::Mask {
                 boundary,
                 inverted,
@@ -128,16 +135,6 @@ pub fn build_vector_document(
                             .to_string(),
                     );
                 } else {
-                    if *inverted {
-                        document.report(
-                            object,
-                            vector_diagnostic::MASK_INVERTED_UNSUPPORTED,
-                            "an inverted wipeout mask fills the complement of its boundary; the \
-                             path model is a single ring, so the fill is not drawn (the frame, \
-                             when enabled, still is)"
-                                .to_string(),
-                        );
-                    }
                     let Some(boundary) = map_points(boundary, &vector_page) else {
                         document.report(
                             object,
@@ -153,7 +150,11 @@ pub fn build_vector_document(
                         boundary,
                         frame: *frame,
                         opacity: fragment.alpha,
-                        fill: !*inverted,
+                        extra_rings: if *inverted {
+                            vec![page_ring(&vector_page)]
+                        } else {
+                            Vec::new()
+                        },
                         frame_color: fragment.color,
                         frame_lineweight: finite_lineweight(fragment.lineweight),
                     });
@@ -166,12 +167,22 @@ pub fn build_vector_document(
     masks.sort_by_key(|mask| mask.draw_order);
     let background = document.background;
     for mask in &masks {
-        if mask.fill {
+        if mask.extra_rings.is_empty() {
             document.paths.push(VectorPath::polygon(
                 mask.boundary.clone(),
                 background,
                 mask.opacity,
             ));
+        } else {
+            // The boundary first, then the covering page ring: under even-odd the
+            // union order is irrelevant, and keeping the entity's own ring first
+            // makes the path's `points` the mask the user drew.
+            let mut rings = Vec::with_capacity(1 + mask.extra_rings.len());
+            rings.push(mask.boundary.clone());
+            rings.extend(mask.extra_rings.iter().cloned());
+            document
+                .paths
+                .push(VectorPath::even_odd_fill(rings, background, mask.opacity));
         }
         if mask.frame {
             push_mask_frame_mapped(
@@ -183,6 +194,19 @@ pub fn build_vector_document(
         }
     }
     Ok(document)
+}
+
+/// The document page as one closed ring, in page millimetres (y-up).
+///
+/// It is the vector counterpart of the raster "covering ring": the even-odd
+/// partner of an inverted mask boundary.
+fn page_ring(page: &VectorPage) -> Vec<[f64; 2]> {
+    vec![
+        [0.0, 0.0],
+        [page.width_mm, 0.0],
+        [page.width_mm, page.height_mm],
+        [0.0, page.height_mm],
+    ]
 }
 
 /// Emit one mask's closed boundary frame from page-space points.

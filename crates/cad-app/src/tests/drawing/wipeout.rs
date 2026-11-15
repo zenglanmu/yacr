@@ -16,12 +16,22 @@
 //! write/read path and the no-write discipline only; they are **not** a pixel or
 //! plotting acceptance of the frame itself.
 //!
-//! Still declared limits: no picking an existing wipeout, `inverted: true`
-//! authoring, and self-intersection is not rejected (the ring is stored as
-//! given and filled even-odd; only a zero net area is refused). The `FRAME`
-//! system variable itself is **not** modelled (it also controls image/xref/PDF
-//! frames, which this build has no display model for); `WIPEOUTFRAME [0|1|2]` is
-//! the modelled spelling and shares this test module's token.
+//! An existing mask is **selectable and editable**: the CPU pick catalogue carries
+//! masks (`cad-spatial` `FAMILY_MASK` tests the closed boundary ring), so a click
+//! on the boundary, `SELECTALL` and box selection yield the wipeout's real ref,
+//! and `ERASE`/`MOVE` act on it through the ordinary entity paths (one
+//! transaction / one undo step). A wipeout is picked by its **edge**, like
+//! AutoCAD — a click in its interior resolves what is underneath. The
+//! selection/hover **highlight** is the one remaining visual gap: it is the
+//! renderer's per-pick-key flags path and the mask pass paints last, so a
+//! selected mask is not tinted (see `cad-render-wgpu`'s `upload_masks`).
+//!
+//! Still declared limits: `inverted: true` authoring, vertex grips / grip
+//! editing, and self-intersection is not rejected (the ring is stored as given
+//! and filled even-odd; only a zero net area is refused). The `FRAME` system
+//! variable itself is **not** modelled (it also controls image/xref/PDF frames,
+//! which this build has no display model for); `WIPEOUTFRAME [0|1|2]` is the
+//! modelled spelling and shares this test module's token.
 
 use super::*;
 
@@ -586,5 +596,218 @@ fn wipeout_refuses_another_utility_payload_and_keeps_the_frames_token() {
         session.drafting_extras.wipeout_frames(),
         crate::WipeoutFrames::DisplayNotPlot,
         "a refused WIPEOUT never rewrites the frame token"
+    );
+}
+
+// --- WIPEOUT hit-testing / selection (2026-11-16) ----------------------------
+
+/// An otherwise **empty** drawing: the pick tests need a mask with no neighbour
+/// geometry, so a hit can only be the mask itself.
+fn empty_app() -> (Application, SessionState) {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([1u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
+/// A top-view camera and screen size that show the square mask `(0,0)-(10,10)`
+/// at one world unit per pixel.
+fn mask_view() -> (crate::camera::Camera, [f64; 2]) {
+    let size = [800.0, 600.0];
+    let camera = crate::camera::Camera {
+        eye: p3(5.0, 5.0, 1000.0),
+        target: p3(5.0, 5.0, 0.0),
+        up: p3(0.0, 1.0, 0.0),
+        projection: crate::camera::Projection::Orthographic { scale: 1.0 },
+    };
+    (camera, size)
+}
+
+/// Pick the mask at one world point through the same funnel a click uses.
+fn pick_mask(app: &Application, world: Point3) -> Option<SelectionRef> {
+    let (camera, size) = mask_view();
+    let logical = camera
+        .world_to_screen(world, size)
+        .expect("the mask is on screen");
+    crate::picking::pick_at_screen(
+        &app.workspace.documents[&DocumentId(1)].drawing,
+        DocumentId(1),
+        &camera,
+        logical,
+        size,
+        &cad_domain::TolerancePolicy::default(),
+        cad_spatial::BackFacePolicy::Cull,
+    )
+    .expect("the pick runs")
+    .hit
+    .map(|hit| hit.source)
+}
+
+fn created_mask(app: &mut Application, session: &mut SessionState) -> EntityId {
+    let outcome = execute(
+        app,
+        session,
+        CommandId::Wipeout,
+        CommandPayload::Points(square()),
+    )
+    .expect("WIPEOUT creates the mask");
+    EntityId(outcome.objects[0].0)
+}
+
+#[test]
+fn a_created_wipeout_is_pickable_on_its_boundary() {
+    // The CPU pick catalogue carries masks and the precise stage tests the
+    // closed boundary ring (`cad-spatial` `FAMILY_MASK`), so a click on the
+    // boundary selects the wipeout — the mask is not a "display-only" object.
+    let (mut app, mut session) = empty_app();
+    let mask = created_mask(&mut app, &mut session);
+
+    // A point on the bottom edge, one on the closing edge, and a vertex.
+    for world in [point(5.0, 0.0), point(0.0, 5.0), point(10.0, 10.0)] {
+        let hit = pick_mask(&app, world).expect("the mask boundary is pickable");
+        assert_eq!(
+            hit.entity, mask,
+            "the mask itself is the hit, not a neighbour"
+        );
+        assert_eq!(hit.document, DocumentId(1));
+        assert!(hit.instance.0.is_empty(), "a direct model-space entity");
+        assert!(hit.sub_element.is_none());
+    }
+
+    // The interior has no analytic outline (a wipeout is picked by its frame or
+    // edge, exactly like AutoCAD), so a click in the middle misses the mask and
+    // resolves whatever is beneath — never a fabricated mask hit.
+    let interior = pick_mask(&app, point(5.0, 5.0));
+    assert!(
+        interior.as_ref().is_none_or(|hit| hit.entity != mask),
+        "a wipeout is not picked through its interior: {interior:?}"
+    );
+}
+
+#[test]
+fn a_selected_wipeout_is_erased_in_one_transaction_and_restored_by_undo() {
+    let (mut app, mut session) = empty_app();
+    let mask = created_mask(&mut app, &mut session);
+    let reference = pick_mask(&app, point(5.0, 0.0)).expect("pickable");
+    session.selection.replace([reference]);
+    assert_eq!(session.selection.len(), 1);
+
+    let before = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::EraseEntities,
+        CommandPayload::None,
+    )
+    .expect("ERASE removes the picked wipeout");
+    let changes = outcome.changes.expect("a change set");
+    assert_eq!(changes.after.0, before.0 + 1, "one revision bump");
+    assert_eq!(changes.changes.len(), 1, "one transaction");
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(mask)
+            .is_none(),
+        "the mask really left the drawing"
+    );
+
+    // One undo restores exactly the same mask ring.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("UNDO restores the erase");
+    assert_mask(&app, ObjectId(mask.0), &square());
+}
+
+#[test]
+fn a_moved_wipeout_keeps_its_ring_shape_in_one_transaction() {
+    // MOVE goes through `cad_db`'s geometry transform, which carries the mask
+    // boundary; the ring keeps its shape and the frame/plot flag is unaffected.
+    let (mut app, mut session) = empty_app();
+    let mask = created_mask(&mut app, &mut session);
+    let reference = SelectionRef {
+        document: DocumentId(1),
+        entity: mask,
+        instance: cad_domain::InstancePath::default(),
+        sub_element: None,
+    };
+    let before = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::MoveEntities,
+        CommandPayload::Move {
+            refs: vec![reference],
+            delta: p3(3.0, 4.0, 0.0),
+        },
+    )
+    .expect("MOVE moves the mask");
+    assert_eq!(
+        outcome.changes.expect("a change set").changes.len(),
+        1,
+        "one transaction"
+    );
+    assert_eq!(revision(&app).0, before.0 + 1);
+    let moved: Vec<Point3> = square()
+        .iter()
+        .map(|p| point(p.x + 3.0, p.y + 4.0))
+        .collect();
+
+    assert_mask(&app, ObjectId(mask.0), &moved);
+
+    // The picking funnel follows the move: the old boundary point no longer hits
+    // this mask, the new one does.
+    assert!(pick_mask(&app, point(5.0, 0.0)).is_none_or(|hit| hit.entity != mask));
+    assert_eq!(
+        pick_mask(&app, point(8.0, 4.0)).map(|hit| hit.entity),
+        Some(mask)
+    );
+}
+
+#[test]
+fn select_all_includes_a_wipeout_mask() {
+    // SELECTALL reads the same pick catalogue as click/box, so the mask is part
+    // of "everything" and is reported with its real entity id.
+    let (mut app, mut session) = empty_app();
+    let mask = created_mask(&mut app, &mut session);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::SelectAll,
+        CommandPayload::None,
+    )
+    .expect("SELECTALL is admitted");
+    assert_eq!(
+        session
+            .selection
+            .refs()
+            .iter()
+            .filter(|reference| reference.entity == mask)
+            .count(),
+        1,
+        "the wipeout appears exactly once in SELECTALL"
     );
 }

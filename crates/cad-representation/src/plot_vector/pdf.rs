@@ -128,6 +128,21 @@ fn quantised_alpha(opacity: f32) -> f32 {
     (clamped * 1000.0).round() / 1000.0
 }
 
+/// Emit one `m`/`l` subpath in millimetres, closing it with `h` when asked.
+fn push_pdf_ring(content: &mut Vec<u8>, ring: &[[f64; 2]], closed: bool) {
+    let Some(first) = ring.first() else {
+        return;
+    };
+    content.extend_from_slice(format!("{} {} m\n", number(first[0]), number(first[1])).as_bytes());
+    for point in &ring[1..] {
+        content
+            .extend_from_slice(format!("{} {} l\n", number(point[0]), number(point[1])).as_bytes());
+    }
+    if closed {
+        content.extend_from_slice(b"h\n");
+    }
+}
+
 fn push_pdf_path(content: &mut Vec<u8>, path: &VectorPath, alphas: &[f32]) {
     let alpha = quantised_alpha(path.opacity);
     if alpha < 1.0 {
@@ -145,14 +160,13 @@ fn push_pdf_path(content: &mut Vec<u8>, path: &VectorPath, alphas: &[f32]) {
     if let Some(fill) = path.fill {
         content.extend_from_slice(format!("{} rg\n", pdf_components(fill)).as_bytes());
     }
-    let first = path.points[0];
-    content.extend_from_slice(format!("{} {} m\n", number(first[0]), number(first[1])).as_bytes());
-    for point in &path.points[1..] {
-        content
-            .extend_from_slice(format!("{} {} l\n", number(point[0]), number(point[1])).as_bytes());
-    }
-    if path.closed {
-        content.extend_from_slice(b"h\n");
+    push_pdf_ring(content, &path.points, path.closed);
+    // Every extra ring is the next subpath of the same path object, so the
+    // even-odd operator below turns a ring inside another one into a hole (an
+    // inverted WIPEOUT's page rectangle minus its boundary). PDF paints all
+    // subpaths of one path with one fill call.
+    for ring in &path.extra_rings {
+        push_pdf_ring(content, ring, true);
     }
     let operator = match (path.fill.is_some(), path.stroke.is_some()) {
         // `f*`/`B*` are the even-odd variants, matching the raster HATCH and

@@ -38,10 +38,17 @@ pub(super) fn validate_document(document: &VectorDocument) -> CadResult<()> {
                 "vector path has neither fill nor stroke".into(),
             ));
         }
-        for point in &path.points {
+        for point in path.points.iter().chain(path.extra_rings.iter().flatten()) {
             if !point[0].is_finite() || !point[1].is_finite() {
                 return Err(CadError::InvalidInput(
                     "vector path has a non-finite coordinate".into(),
+                ));
+            }
+        }
+        for ring in &path.extra_rings {
+            if ring.len() < 3 {
+                return Err(CadError::InvalidInput(
+                    "vector path has a fill ring with fewer than three points".into(),
                 ));
             }
         }

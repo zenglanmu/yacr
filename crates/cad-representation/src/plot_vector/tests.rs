@@ -417,26 +417,110 @@ fn mask_with_frame_plots_the_fill_then_the_closed_boundary() {
     );
 }
 
+/// Even-odd point-in-rings, the rule both writers fill with.
+fn even_odd_contains(rings: &[Vec<[f64; 2]>], point: [f64; 2]) -> bool {
+    let mut inside = false;
+    for ring in rings {
+        let mut crossed = false;
+        for (index, a) in ring.iter().enumerate() {
+            let b = ring[(index + 1) % ring.len()];
+            if (a[1] > point[1]) != (b[1] > point[1]) {
+                let x = a[0] + (point[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0]);
+                if point[0] < x {
+                    crossed = !crossed;
+                }
+            }
+        }
+        if crossed {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// The rings one filled path paints with (its own ring first).
+fn filled_rings(path: &VectorPath) -> Vec<Vec<[f64; 2]>> {
+    std::iter::once(path.points.clone())
+        .chain(path.extra_rings.iter().cloned())
+        .collect()
+}
+
 #[test]
-fn inverted_mask_fill_is_named_but_its_frame_still_plots() {
-    // `inverted` (clip mode Inside) fills the complement; a single-ring path
-    // cannot express that, so the fill is named as unsupported — and the frame,
-    // when it plots, is still real vector geometry.
-    let boundary = vec![paper(0.0, 0.0), paper(10.0, 0.0), paper(10.0, 10.0)];
+fn inverted_mask_floods_the_page_and_leaves_its_boundary_clear() {
+    // `inverted` (clip mode Inside) is the complement: the raster renderer paints
+    // it as one even-odd fill over [covering ring, boundary], so the path document
+    // must do the same — the page rectangle minus the boundary — not just the
+    // frame.
+    let boundary = vec![
+        paper(20.0, 20.0),
+        paper(40.0, 20.0),
+        paper(40.0, 40.0),
+        paper(20.0, 40.0),
+    ];
     let mut fragment = lines(vec![]);
     fragment.primitive = DisplayPrimitive::Mask {
         boundary: Arc::from(boundary.into_boxed_slice()),
         inverted: true,
         frame: true,
     };
-    let document = build_vector_document(&representation(vec![fragment]), &simple_page()).unwrap();
-    assert_eq!(document.paths.len(), 1, "only the frame is drawn");
-    assert_eq!(document.paths[0].fill, None);
+    let mut under = lines(vec![paper(0.0, 5.0), paper(90.0, 5.0)]);
+    under.draw_order = 0;
+    let document =
+        build_vector_document(&representation(vec![under, fragment]), &simple_page()).unwrap();
     assert_eq!(
-        document.diagnostics[0].code,
-        vector_diagnostic::MASK_INVERTED_UNSUPPORTED
+        document.paths.len(),
+        3,
+        "the hidden line, then one fill and one frame"
     );
-    assert!(matches!(document.completeness, Completeness::Partial(_)));
+    let fill = &document.paths[1];
+    assert_eq!(fill.fill, Some(PAPER_BACKGROUND));
+    assert_eq!(
+        fill.extra_rings.len(),
+        1,
+        "the covering page ring is a second ring of the same path"
+    );
+    let rings = filled_rings(fill);
+    // Outside the boundary but on the page: flooded.
+    assert!(
+        even_odd_contains(&rings, [5.0, 5.0]),
+        "the page outside the boundary must be flooded"
+    );
+    assert!(even_odd_contains(&rings, [95.0, 95.0]));
+    // Inside the boundary: covered twice, so it stays clear (the mask shows).
+    assert!(
+        !even_odd_contains(&rings, [30.0, 30.0]),
+        "the boundary interior must stay unflooded"
+    );
+    assert!(
+        document.diagnostics.is_empty(),
+        "an inverted mask is fully represented: {:?}",
+        document.diagnostics
+    );
+
+    // SVG: one `<path>` with both subpaths and the even-odd rule.
+    let svg = String::from_utf8(render_svg(&document).unwrap()).unwrap();
+    let start = svg.find("<path").expect("a multi-ring path");
+    let tag = &svg[start..start + svg[start..].find("/>").unwrap()];
+    assert!(tag.contains("fill=\"#FFFFFF\""), "{tag}");
+    assert!(tag.contains("fill-rule=\"evenodd\""), "{tag}");
+    assert!(tag.contains("stroke=\"none\""), "{tag}");
+    assert_eq!(tag.matches('M').count(), 2, "two subpaths: {tag}");
+    assert_eq!(tag.matches('Z').count(), 2, "both subpaths close: {tag}");
+    // PDF: one fill with two subpaths, painted by the even-odd operator.
+    let pdf = String::from_utf8_lossy(&render_pdf(&document).unwrap()).into_owned();
+    let fill_block = &pdf[..pdf.find("f*\n").expect("an even-odd fill")];
+    assert!(
+        fill_block.contains("20 20 m\n"),
+        "the boundary subpath: {pdf}"
+    );
+    assert!(
+        fill_block.contains("0 0 m\n"),
+        "the page-ring subpath: {pdf}"
+    );
+    assert!(
+        fill_block.rfind("100 100 l\n").is_some(),
+        "the page ring is closed over the page size: {pdf}"
+    );
 }
 
 #[test]
@@ -582,13 +666,15 @@ fn one_to_one_layout() -> cad_db::Layout {
     }
 }
 
-/// The real plot chain: database → `build_paper_space` → vector document → SVG.
+/// Build the real paper-space plot of one model-space mask over a hidden line.
 ///
-/// This is the end-to-end contract the CLI and the desktop `SAVE`/`PLOT` share
-/// (they differ only in who calls it), so the mask flood is proven on the real
-/// paper representation, not only on a synthetic fragment list.
-#[test]
-fn paper_space_plot_floods_a_model_wipeout_after_the_geometry_it_hides() {
+/// The chain is exactly what `cad-cli-tools plot` and the desktop `SAVE`/`PLOT`
+/// run (they differ only in who calls it): `DrawingDatabase → build_paper_space`
+/// (viewport transform applied) `→ plan_plot_for_record → build_vector_document`.
+/// `inverted` selects the two mask modes the importer can produce.
+fn paper_plot_with_mask(
+    inverted: bool,
+) -> (crate::DisplayRepresentation, VectorPage, VectorDocument) {
     use cad_db::{DbEntity, DbObject};
     use cad_domain::{LayerId, ObjectId, Revision, SpaceId};
 
@@ -617,7 +703,7 @@ fn paper_space_plot_floods_a_model_wipeout_after_the_geometry_it_hides() {
             })
             .unwrap();
     };
-    // A line runs through the mask; the mask must hide the part it covers.
+    // A line runs through the mask region; the mask must hide it.
     entity(
         1,
         cad_domain::SemanticGeometry::Line {
@@ -635,7 +721,7 @@ fn paper_space_plot_floods_a_model_wipeout_after_the_geometry_it_hides() {
                 paper(30.0, 30.0),
                 paper(10.0, 30.0),
             ],
-            inverted: false,
+            inverted,
         },
         1,
     );
@@ -653,8 +739,28 @@ fn paper_space_plot_floods_a_model_wipeout_after_the_geometry_it_hides() {
         crate::build_paper_space(&registry, &database, LayoutId(1), &context, &|_| true).unwrap();
 
     let record = a4(PlotRotation::None);
-    let page = crate::plan_plot_for_record(&record, PlotTarget::Dpi(96.0)).unwrap();
-    let document = build_vector_document(&representation, &page).unwrap();
+    let planned = crate::plan_plot_for_record(&record, PlotTarget::Dpi(96.0)).unwrap();
+    let page = VectorPage::from_plot_page(&planned).unwrap();
+    let document = build_vector_document(&representation, &planned).unwrap();
+    (representation, page, document)
+}
+
+/// The unclipped-mask limit stays named (pinned by both paper tests).
+fn assert_unclipped_mask_is_named(representation: &crate::DisplayRepresentation) {
+    assert!(
+        representation
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("cannot be clipped")),
+        "the unclipped-mask limit must stay named: {:?}",
+        representation.diagnostics
+    );
+}
+
+/// The real plot chain, normal mask: the flood covers the mask and nothing else.
+#[test]
+fn paper_space_plot_floods_a_model_wipeout_after_the_geometry_it_hides() {
+    let (representation, page, document) = paper_plot_with_mask(false);
     let svg = String::from_utf8(render_svg(&document).unwrap()).unwrap();
 
     // The line is plotted, then the mask floods over it with the page colour.
@@ -667,8 +773,7 @@ fn paper_space_plot_floods_a_model_wipeout_after_the_geometry_it_hides() {
         "the mask fill must be painted after the geometry it hides:\n{svg}"
     );
     assert!(
-        svg[fill_at..].starts_with("fill=\"#FFFFFF\" fill-rule=\"evenodd\"")
-            || svg[fill_at..].contains("fill-rule=\"evenodd\""),
+        svg[fill_at..].contains("fill-rule=\"evenodd\""),
         "the flood uses the even-odd fill rule:\n{svg}"
     );
     let pdf = String::from_utf8_lossy(&render_pdf(&document).unwrap()).into_owned();
@@ -684,17 +789,76 @@ fn paper_space_plot_floods_a_model_wipeout_after_the_geometry_it_hides() {
         .find(|path| path.fill == Some(PAPER_BACKGROUND))
         .expect("the mask fill path");
     assert_eq!(flooded.points.len(), 4);
-
-    // Declared limit, pinned so it cannot silently disappear: a mask inside a
-    // viewport is not clipped to the viewport window (neither output does that),
-    // and the representation says so instead of pretending the flood is bounded
-    // by the window.
+    assert!(flooded.extra_rings.is_empty(), "a normal mask is one ring");
+    let rings = filled_rings(flooded);
+    // The mask rectangle in *document* millimetres (paper 10..30 both axes).
     assert!(
-        representation
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("cannot be clipped")),
-        "the unclipped-mask limit must stay named: {:?}",
-        representation.diagnostics
+        even_odd_contains(&rings, page.map_paper_point(paper(20.0, 20.0))),
+        "the mask floods"
     );
+    assert!(
+        !even_odd_contains(&rings, page.map_paper_point(paper(35.0, 20.0))),
+        "outside stays clear"
+    );
+
+    assert_unclipped_mask_is_named(&representation);
+}
+
+/// The real plot chain, **inverted** mask (DXF clip mode Inside): the page is
+/// flooded and the boundary interior stays clear — the complement, not the frame
+/// alone.
+#[test]
+fn paper_space_plot_of_an_inverted_wipeout_floods_the_page_minus_the_boundary() {
+    let (representation, page, document) = paper_plot_with_mask(true);
+    let svg = String::from_utf8(render_svg(&document).unwrap()).unwrap();
+
+    // One multi-ring path, not a single polygon and not a bare frame.
+    let path_at = svg
+        .find("<path ")
+        .expect("the inverted flood is a multi-subpath path");
+    let tag = &svg[path_at..path_at + svg[path_at..].find("/>").unwrap()];
+    assert!(tag.contains("fill=\"#FFFFFF\""), "{tag}");
+    assert!(tag.contains("fill-rule=\"evenodd\""), "{tag}");
+    assert_eq!(tag.matches('M').count(), 2, "boundary + page ring: {tag}");
+
+    let pdf = String::from_utf8_lossy(&render_pdf(&document).unwrap()).into_owned();
+    assert!(pdf.contains("f*\n"), "one even-odd fill in the PDF:\n{pdf}");
+
+    let flooded = document
+        .paths
+        .iter()
+        .find(|path| path.fill == Some(PAPER_BACKGROUND))
+        .expect("the inverted mask fill path");
+    assert_eq!(
+        flooded.extra_rings.len(),
+        1,
+        "the covering page ring is a second ring"
+    );
+    let rings = filled_rings(flooded);
+    // The page corners (far outside the boundary) are hidden...
+    assert!(
+        even_odd_contains(&rings, page.map_paper_point(paper(1.0, 1.0))),
+        "the page outside the boundary is flooded"
+    );
+    assert!(
+        even_odd_contains(&rings, page.map_paper_point(paper(200.0, 290.0))),
+        "every page region outside the mask boundary is flooded"
+    );
+    // ...while the boundary interior stays visible (covered twice).
+    assert!(
+        !even_odd_contains(&rings, page.map_paper_point(paper(20.0, 20.0))),
+        "the boundary interior must stay clear"
+    );
+    // The line's covered end (paper x = 20, inside the boundary) sits in the
+    // clear part and its far end (x = 35) in the flooded part: the complement.
+    assert!(!even_odd_contains(
+        &rings,
+        page.map_paper_point(paper(20.0, 20.0))
+    ));
+    assert!(even_odd_contains(
+        &rings,
+        page.map_paper_point(paper(35.0, 20.0))
+    ));
+
+    assert_unclipped_mask_is_named(&representation);
 }

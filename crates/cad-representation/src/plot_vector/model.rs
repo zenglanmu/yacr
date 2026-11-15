@@ -21,12 +21,25 @@ pub const PAPER_BACKGROUND: [f32; 3] = [1.0, 1.0, 1.0];
 /// `fill = Some` paints the interior; `stroke = Some` draws the outline with
 /// `stroke_width_mm`. `opacity` is the resolved per-entity opacity in `[0, 1]`.
 ///
-/// A closed filled path uses the **even-odd** fill rule, matching the raster
-/// fill rule of HATCH and of the WIPEOUT mask (a self-intersecting ring is
-/// stored as given and filled even-odd, never repaired).
+/// ## Fill rule
+///
+/// A closed filled path is filled with the **even-odd** rule, in both writers
+/// (SVG `fill-rule="evenodd"`, PDF `f*`/`B*`). That is the rule the raster
+/// HATCH fill and the WIPEOUT mask pass use, so a self-intersecting ring is
+/// filled exactly as stored and never repaired. It is also what makes a hole
+/// possible: [`Self::points`] is the first ring and every ring in
+/// [`Self::extra_rings`] toggles coverage, so a region under an odd number of
+/// rings is painted and under an even number is left clear.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VectorPath {
+    /// The first ring: the path's own outline (or the polyline itself).
     pub points: Vec<[f64; 2]>,
+    /// Further closed rings painted with the same fill under the even-odd rule.
+    ///
+    /// Empty for a single-ring polygon. An inverted WIPEOUT uses one extra ring
+    /// (the page rectangle) so the boundary becomes a hole in it — the vector
+    /// form of the raster "covering ring + boundary" complement.
+    pub extra_rings: Vec<Vec<[f64; 2]>>,
     pub closed: bool,
     pub fill: Option<[f32; 3]>,
     pub stroke: Option<[f32; 3]>,
@@ -39,6 +52,7 @@ impl VectorPath {
     pub fn polyline(points: Vec<[f64; 2]>, stroke: [f32; 3], width_mm: f64, opacity: f32) -> Self {
         VectorPath {
             points,
+            extra_rings: Vec::new(),
             closed: false,
             fill: None,
             stroke: Some(stroke),
@@ -51,6 +65,41 @@ impl VectorPath {
     pub fn polygon(points: Vec<[f64; 2]>, fill: [f32; 3], opacity: f32) -> Self {
         VectorPath {
             points,
+            extra_rings: Vec::new(),
+            closed: true,
+            fill: Some(fill),
+            stroke: None,
+            stroke_width_mm: 0.0,
+            opacity,
+        }
+    }
+
+    /// A closed fill made of one or more rings under the even-odd rule.
+    ///
+    /// The first ring becomes [`Self::points`]; the rest become
+    /// [`Self::extra_rings`]. A point covered by an odd number of rings is
+    /// painted, an even number stays clear — so a ring inside another one is a
+    /// hole. Order does not matter under even-odd; the first ring is the one the
+    /// caller considers the path's own outline.
+    ///
+    /// An empty `rings` (or a first ring with fewer than three points) is a
+    /// programming error, not a drawable path: it panics in debug builds and
+    /// yields an unfilled, unstroked path in release. Callers validate their
+    /// geometry before building one.
+    pub fn even_odd_fill(rings: Vec<Vec<[f64; 2]>>, fill: [f32; 3], opacity: f32) -> Self {
+        let mut rings = rings;
+        debug_assert!(
+            rings.first().is_some_and(|ring| ring.len() >= 3),
+            "an even-odd fill needs a first ring with at least three points"
+        );
+        let points = if rings.is_empty() {
+            Vec::new()
+        } else {
+            rings.remove(0)
+        };
+        VectorPath {
+            points,
+            extra_rings: rings,
             closed: true,
             fill: Some(fill),
             stroke: None,
