@@ -174,6 +174,10 @@
     FILLET 两次拾取都推进到 `points=2, ready` 并派发 CONFIRM（`/tmp/opencode/evidence-fillet-driver3/`）；
     宿主的证据生命周期在 CONFIRM 后立刻退出，**没有**抓到 `+1` 的 entityCount 快照，故 FILLET 的几何结果只由
     契约测试（78 fillet + 134 trim）证明。
+  - STRETCH 真机（`fixtures/dwg/synthetic-four-lines.dwg`）：`SELECTALL` → 选中 4 个实体；设
+    `stretchWindow=1`（多边形）后 `cad_status.tool.params.stretchWindow` 读回 1，`STRETCH` 以
+    `draw.stretch` 进入捕获（`/tmp/opencode/evidence-stretch/`）。多选/多边形模式的**几何结果**由 56 个
+    stretch 契约测试与 338 个 cad-host 契约测试（含 lasso 全链路）证明——脚本没有完成多点窗口的点击序列。
   - CLIP 真机（`flange.dxf`）：`QSELECT TYPE = INSERT` 没有命中（该图模型空间无 INSERT），`CLIP RECT` 返回
     `clip.no_selection` 具名拒绝（`/tmp/opencode/evidence-clip/`）——证明命令在真机宿主上接线并被拒绝路径覆盖；
     成功写入路径由 64 个 clip 契约测试（含真实图像/块写入、旋转拒绝、非凸拒绝）证明。
