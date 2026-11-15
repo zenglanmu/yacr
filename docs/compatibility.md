@@ -1357,7 +1357,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `NEWVIEW` | **部分实现（载荷路由）**：`View` 载荷转交既有命名视图存储 | 无窗口/名称提示；会话状态不持久化 |
 | `-SCALELISTEDIT` | **部分实现（只读报告）**：真实 `ACAD_SCALELIST` 条目 | 创建/编辑/删除/排序比例未实现 |
 | `LWEIGHT` / `-LWEIGHT` | **部分实现（只读报告）**：会话线宽显示令牌（默认 ON） | 渲染器不消费该标志；LWEIGHT 对话框未实现 |
-| `COLOR` / `-COLOR` | **部分实现（只读报告）**：会话当前颜色 ACI（默认 256=ByLayer） | 无创建路径消费；颜色对话框未实现 |
+| `COLOR` / `-COLOR` | **完整实现**：`<0..=256>` / `BYLAYER` / `BYNAME` / `BYBLOCK` 写会话当前颜色（`color.set`，无库写、无撤销），裸命令报告（`color.report`，默认 256=ByLayer）；**新实体由创建漏斗写入该 ACI**（`256` 行逐字节不变，`0` = ByBlock 符号值，`1..=255` 经 `property_value::rgb_for_aci` 解析），撤销随实体行一起回退 | **全局范围**：无调色板/Select Color 对话框（`src/components/ColorChooser.tsx` 是实体属性选择器，不是会话令牌）；无颜色名表（只接受 ACI 与三个符号词）；`CELTSCALE` 等颜色相关变量不在范围 |
 | `-UNITS` | **部分实现（只读报告）**：固定单位显示规则 | Units 对话框/逐图纸单位表未实现 |
 | `COPYHIST` | **部分实现（只读报告）**：`copyhist.not_tracked` | 会话不存命令历史文本；不复制 |
 | `HELP` / `CLASSICINSERT` / `CLASSICGROUP` | **部分实现（具名拒绝）**：`help.unsupported` / `classicinsert.unsupported` / `classicgroup.unsupported` | 不写库/不升修订/不入历史 |
