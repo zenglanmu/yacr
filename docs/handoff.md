@@ -116,10 +116,10 @@
 > 新 → 旧。标题带日期与主题；每条末尾写证据边界（实跑 / NOT RUN / NOT VERIFIED）。
 > 再往前（`2026-11-12` 及更早）的条目见 `docs/handoff-archive/`。
 
-## 2026-11-15 晋升计划 P4/P5：`LAYDEL`/`LAYTHW`/`RENAME`/`LAYMRG`/`LAYOUTWIZARD`/`LENGTHEN`/`FILLET`/`CLIP`/`CLIPIT`/`STRETCH`/`JOIN` 升为完整实现（真机 GUI 证据）
+## 2026-11-15 晋升计划 P4/P5：`LAYDEL`/`LAYTHW`/`RENAME`/`LAYMRG`/`LAYOUTWIZARD`/`LENGTHEN`/`FILLET`/`CLIP`/`CLIPIT`/`STRETCH`/`JOIN`/`TXT2MTXT` 升为完整实现（真机 GUI 证据）
 
-- **范围**：覆盖清单「部分实现 → 完整实现 晋升计划」的 **14 个命令名**晋升为**完整实现**
-  （总计 **107 → 121 完整 / 872 → 858 部分**，981 条总数不变）：
+- **范围**：覆盖清单「部分实现 → 完整实现 晋升计划」的 **15 个命令名**晋升为**完整实现**
+  （总计 **107 → 122 完整 / 872 → 857 部分**，981 条总数不变）：
   - `LAYDEL`/`-LAYDEL`：删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内**的全部实体
     （单一 `entities` 表按 `layer` 过滤），并剪除各图纸视口该层的 `layer_overrides` 键；选择输入也接受
     **图纸空间顶层实体**（块内成员/子元素按 `laydel.block_space` 拒绝）；实体补丁 + 布局补丁 + 层行
@@ -151,6 +151,10 @@
   - `JOIN`：`Spline` 新增 `closed` 标志（DXF 组 70 bit 1 导入/导出往返，闭合样条按闭环出图），
     `JOIN CLOSE` 的混合 SPLINE 焊接后置位；链端不重合 `join.not_closed`、有间隙 `join.not_contiguous`、
     已闭合对象作源 `join.closed_object`，**不桥接**。TRIM/EXTEND/LENGTHEN 改为读该标志而不是猜首末控制点。
+  - `TXT2MTXT`：MTEXT 新增 `TextLineSpacing { factor, style }`（DXF 组 44/73 导入导出往返，
+    `AtLeast`/`Exactly`），`UNIFORM <factor>`（0.25–4.0，越界具名拒绝）写入该字段并置 `Exactly`；
+    表示层按 `1.2 × factor × 行高` 排布，默认值渲染逐位不变；导入侧
+    `text.line_spacing_style_unsupported` 收窄为退化 factor 的具名原因。
   - `RENAME`/`-RENAME`：`LINETYPE` kind 不再是具名拒绝；改名与层属性/实体属性的线型引用级联在
     `cad-db` 的**单次校验写入**内完成（一次 revision、一次 `ChangeSet`），撤销/重做对称。`Continuous`
     不可改名，创建/删除线型仍不支持。
@@ -177,6 +181,10 @@
     FILLET 两次拾取都推进到 `points=2, ready` 并派发 CONFIRM（`/tmp/opencode/evidence-fillet-driver3/`）；
     宿主的证据生命周期在 CONFIRM 后立刻退出，**没有**抓到 `+1` 的 entityCount 快照，故 FILLET 的几何结果只由
     契约测试（78 fillet + 134 trim）证明。
+  - 文字路径真机冒烟（`fixtures/dxf/qcad-flange/flange.dxf`，本轮改了文字排版）：重建后在真实 Wayland +
+    Vulkan `Quadro P620` 上自然退出 0、带文字的图纸正常渲染、合成帧已抓
+    （`/tmp/opencode/evidence-text-smoke/`）。行距数值正确性由 `cad-representation` 的
+    `line_spacing_tests` 与 44/73 往返测试证明。
   - JOIN 真机冒烟（`fixtures/dwg/synthetic-four-lines.dwg`）：本轮模型改动横跨 `cad-domain` → 宿主，
     重建后在真实 Wayland + Vulkan `Quadro P620` 上自然退出 0、帧渲染正常、合成帧已抓
     （`/tmp/opencode/evidence-join-smoke/`）。闭合焊接的几何由 68 个 join 契约测试 + DXF 往返测试证明。
@@ -201,7 +209,7 @@
 - **测试**：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、
   `layer_commands` **69 passed**、`rename` **15 passed**、`layout` **47 passed**、`layoutwizard` **7 passed**、
   `lengthen` **37 passed**、`fillet` **78 passed**、`chamfer` **33 passed**、`trim` **134 passed**、`clip` **64 passed**、
-  `stretch` **56 passed**、`join` **68 passed**、`cad-host` **338 passed**、`desktop-ui` **1763 passed**、
+  `stretch` **56 passed**、`join` **68 passed**、`txt2` **13 passed**、`cad-host` **338 passed**、`desktop-ui` **1763 passed**、
   整个 `cad-app` **2661 passed / 3 ignored**、`history` 16 passed、`undo` 170 passed、`cad-ui-core
   layout_arguments` 12 passed、`cad-db` 全量（245+13+5）passed、`cad-history` 28 passed；`cargo clippy -p cad-db -p cad-app --all-targets` 干净；
   `cargo fmt` 干净；`check-file-size.py` / `check-i18n.py`（2913 键）/ `check-architecture.py` 通过。
