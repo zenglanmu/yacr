@@ -461,6 +461,10 @@ pub(crate) fn spline_semantics(s: &acadrust::entities::Spline) -> (SemanticGeome
         knots: s.knots.clone(),
         control_points: control_points.clone(),
         weights: s.weights.clone(),
+        // DXF group 70 bit 1: the curve is closed. The control polygon is stored
+        // exactly as read — a closed spline is not "closed" by appending a
+        // duplicate first/last control point.
+        closed: s.flags.closed,
     };
     let n = control_points.len();
     let mut reasons: Vec<String> = Vec::new();

@@ -203,6 +203,10 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             knots,
             control_points,
             weights,
+            // `closed` is metadata about how the curve joins up (group 70 bit 1)
+            // and constrains no structural NURBS relation: a closed spline keeps
+            // the stored control polygon exactly as written.
+            closed: _,
         } => {
             if *degree < 1 {
                 return Err(degenerate("spline degree must be at least 1"));

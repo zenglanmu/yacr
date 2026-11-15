@@ -321,3 +321,92 @@ fn degenerate_dxf_text_width_factor_is_reported_and_neutralized() {
         .expect("the TEXT capability is recorded");
     assert_eq!(capability.semantic, SupportStatus::Partial);
 }
+
+/// A minimal DXF SPLINE record with the given group 70 flags.
+fn dxf_spline_record(flags: i32) -> String {
+    format!(
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n\
+         0\nSECTION\n2\nENTITIES\n\
+         0\nSPLINE\n5\n2F\n8\n0\n\
+         70\n{flags}\n71\n3\n72\n8\n73\n4\n74\n0\n\
+         40\n0.0\n40\n0.0\n40\n0.0\n40\n0.0\n40\n1.0\n40\n1.0\n40\n1.0\n40\n1.0\n\
+         10\n0.0\n20\n0.0\n30\n0.0\n\
+         10\n2.0\n20\n3.0\n30\n0.0\n\
+         10\n5.0\n20\n4.0\n30\n0.0\n\
+         10\n6.0\n20\n0.0\n30\n0.0\n\
+         210\n0.0\n220\n0.0\n230\n1.0\n\
+         0\nENDSEC\n0\nEOF\n"
+    )
+}
+
+fn imported_spline(flags: i32) -> (Vec<Point3>, bool) {
+    let dxf = dxf_spline_record(flags);
+    let request = ImportRequest {
+        document: DocumentId(1),
+        database: DatabaseId(1),
+        bytes: Arc::from(dxf.into_bytes().into_boxed_slice()),
+        limits: ImportLimits::default(),
+        generation: 0,
+        xref: None,
+    };
+    let drawing = AcadrustImporter::default()
+        .import(&request, &|| false)
+        .expect("the DXF imports");
+    let found = drawing
+        .database
+        .entities()
+        .find_map(|entity| match &entity.geometry {
+            SemanticGeometry::Spline {
+                control_points,
+                closed,
+                ..
+            } => Some((control_points.clone(), *closed)),
+            _ => None,
+        })
+        .expect("the SPLINE is imported");
+    found
+}
+
+#[test]
+fn dxf_spline_group_70_bit_1_becomes_the_closed_flag() {
+    let (points, closed) = imported_spline(1);
+    assert!(closed, "group 70 bit 1 is the closed flag");
+    assert_eq!(
+        points,
+        vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0
+            },
+            Point3 {
+                x: 2.0,
+                y: 3.0,
+                z: 0.0
+            },
+            Point3 {
+                x: 5.0,
+                y: 4.0,
+                z: 0.0
+            },
+            Point3 {
+                x: 6.0,
+                y: 0.0,
+                z: 0.0
+            },
+        ],
+        "the closed flag is metadata: the control polygon is stored exactly as read \
+         (no appended first/last point)"
+    );
+}
+
+#[test]
+fn dxf_spline_without_group_70_bit_1_imports_open() {
+    let (points, closed) = imported_spline(0);
+    assert!(!closed, "flags 0 is an open spline");
+    assert_eq!(points.len(), 4);
+    // The other group 70 bits (planar/linear/parameterisation) do not close the
+    // curve: 8 = planar, 36 = planar + chord parameterisation.
+    let (_, planar) = imported_spline(8 | 32);
+    assert!(!planar, "only bit 1 means closed");
+}

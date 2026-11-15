@@ -573,6 +573,7 @@ fn a_linear_spline_is_divided_by_arc_length_not_by_raw_parameter() {
         knots: vec![0.0, 0.0, 1.0, 1.0],
         control_points: vec![point(0.0, 0.0), point(9.0, 0.0)],
         weights: vec![1.0, 1.0],
+        closed: false,
     };
     let source = curve_entity(1, LayerId(0), spline, "AcDbSpline", 0);
     let (mut app, mut session) = app_with(vec![source]);
@@ -601,6 +602,7 @@ fn a_curved_spline_is_accepted_and_places_points_on_the_curve() {
         knots,
         control_points,
         weights: vec![1.0; fit.len()],
+        closed: false,
     };
     let source = curve_entity(1, LayerId(0), spline, "AcDbSpline", 0);
     let (mut app, mut session) = app_with(vec![source]);

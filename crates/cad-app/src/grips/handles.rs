@@ -162,6 +162,7 @@ pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
             knots,
             control_points,
             weights,
+            ..
         } => {
             // A definition this model cannot interpret exposes no handle at all:
             // padding a knot/weight vector would silently rewrite the curve, and

@@ -308,6 +308,7 @@ fn source_spline_knots_and_weights_survive_import() {
             knots,
             control_points,
             weights,
+            ..
         } => {
             assert_eq!(degree, 2);
             assert_eq!(knots, s.knots, "source knots must not be uniformised");

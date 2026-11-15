@@ -388,6 +388,7 @@ fn spline_control_point_grip_drag_is_one_change_one_undo_step_and_undoes_exactly
             knots,
             control_points,
             weights,
+            ..
         } => {
             assert_eq!(degree, 3, "the degree is untouched");
             assert_eq!(

@@ -334,6 +334,7 @@ pub(crate) fn reverse_geometry(geometry: &SemanticGeometry) -> CadResult<Semanti
             knots,
             control_points,
             weights,
+            closed,
         } => {
             let last = knots.len().checked_sub(1).ok_or_else(|| {
                 CadError::InvalidInput("reverse.geometry: spline has an empty knot vector".into())
@@ -350,6 +351,8 @@ pub(crate) fn reverse_geometry(geometry: &SemanticGeometry) -> CadResult<Semanti
                 knots: reversed_knots,
                 control_points: reversed_points,
                 weights: reversed_weights,
+                // Reversing a curve cannot open or close it.
+                closed: *closed,
             })
         }
         other => Err(CadError::Unsupported(format!(

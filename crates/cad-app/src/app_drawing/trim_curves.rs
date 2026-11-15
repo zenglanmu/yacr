@@ -25,10 +25,11 @@
 //! other target here. EXTEND still refuses a POLYLINE by name
 //! (`extend.target_polyline`): no polyline continuation policy exists.
 //!
-//! A SPLINE boundary does not take part in the closed-boundary delete rule: a
-//! spline carries no closed flag and no boundary plane, so no sound inside test
-//! exists. That combination is an explicit `Unsupported` refusal ([`PlanRefusal`]),
-//! never a fabricated containment.
+//! A SPLINE boundary does not take part in the closed-boundary delete rule: TRIM
+//! treats the spline as an open sampled curve (its closed flag is not turned into
+//! a region model) and it has no boundary plane, so no sound inside test exists.
+//! That combination is an explicit `Unsupported` refusal ([`PlanRefusal`]), never a
+//! fabricated containment.
 //!
 //! Two bounds keep the result predictable: a periodic target needs two distinct
 //! cuts to leave an arc, and an ARC/ELLIPSE extends at most (but not including) a
@@ -295,11 +296,13 @@ impl TargetCurve {
                 knots,
                 control_points,
                 weights,
+                closed,
             } => Ok(Self::Spline(SplineTarget::new(
                 *degree,
                 knots,
                 control_points,
                 weights,
+                *closed,
             )?)),
             other => Err(CadError::Unsupported(format!(
                 "{command} target must be {supported}; {} is not supported",
@@ -323,9 +326,10 @@ impl TargetCurve {
 
     /// A full circle has no ends: its parameter space wraps.
     ///
-    /// A SPLINE is never periodic here: the stored geometry carries no closed flag,
-    /// so a closed spline is treated as the open curve its knot domain describes
-    /// (its seam is its start/end, not a wrap).
+    /// A SPLINE is never periodic here: TRIM splits its stored knot domain as an
+    /// open interval, so a closed spline keeps the open seam its knot domain
+    /// describes (its start/end, not a wrap). The stored closed flag is carried
+    /// but not used by this command.
     pub(super) fn is_periodic(&self) -> bool {
         matches!(
             self,
@@ -679,7 +683,8 @@ impl TargetCurve {
 /// whose parameter range could stand in for the rule.
 ///
 /// A SPLINE boundary only ever contributes sampled cuts; it is deliberately
-/// absent from the containment test (no closed flag, no boundary plane), so a
+/// absent from the containment test (an open sampled curve with no boundary
+/// plane — TRIM does not turn the closed flag into a region model), so a
 /// no-cut target with a SPLINE in the boundary set is refused as
 /// [`PlanRefusal::Unsupported`] instead of being deleted or silently treated as
 /// "not inside".

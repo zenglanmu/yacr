@@ -74,6 +74,7 @@ fn quadratic(control_points: [Point3; 3]) -> SemanticGeometry {
         knots: Vec::new(),
         control_points: control_points.to_vec(),
         weights: Vec::new(),
+        closed: false,
     }
 }
 
@@ -146,6 +147,7 @@ fn spline_data(app: &Application, entity: u128) -> (u32, Point3, Point3) {
         knots,
         control_points,
         weights,
+        ..
     } = geometry
     else {
         panic!("expected a SPLINE, got {geometry:?}");
@@ -525,6 +527,7 @@ fn fillet_two_splines_zero_radius_trims_both_to_their_intersection() {
         knots: Vec::new(),
         control_points: vec![p3(0.0, 0.5, 0.0), p3(2.0, 0.5, 0.0)],
         weights: Vec::new(),
+        closed: false,
     };
     let (mut app, mut session) = curve_app(arch(), flat);
     set_number(&mut session, ToolParameter::FilletRadius, 0.0);
@@ -628,6 +631,7 @@ fn fillet_spline_ellipse_zero_radius_trims_both_to_the_intersection() {
         knots: Vec::new(),
         control_points: vec![p3(0.0, 0.5, 0.0), p3(2.0, 0.5, 0.0)],
         weights: Vec::new(),
+        closed: false,
     };
     let (mut app, mut session) = curve_app(
         flat,

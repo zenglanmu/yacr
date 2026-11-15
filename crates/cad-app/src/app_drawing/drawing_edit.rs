@@ -946,6 +946,7 @@ fn plan_offset(
             knots,
             control_points,
             weights,
+            ..
         } => {
             let (geometry, applied) = super::offset_polyline::offset_spline_as_spline(
                 *degree,

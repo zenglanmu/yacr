@@ -99,7 +99,24 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
             knots,
             control_points,
             weights,
-        } => tessellate_spline(control_points, knots, weights, *degree, params),
+            closed,
+        } => {
+            let mut out = tessellate_spline(control_points, knots, weights, *degree, params);
+            // A closed spline (DXF group 70 bit 1) is a loop: the polyline path
+            // must end at its start so every closed-curve consumer (a closed
+            // fill, a pickable outline, a hatch ring) sees the seam it has. The
+            // stored control polygon is untouched — this only closes the
+            // *sampled* path, and a curve that already ends at its start keeps
+            // its exact samples (no duplicated vertex).
+            if *closed {
+                if let Some(first) = out.first().copied() {
+                    if !ends_at(&out, first) {
+                        out.push(first);
+                    }
+                }
+            }
+            out
+        }
         G::Point(p) => vec![*p, *p],
         G::Text {
             position,

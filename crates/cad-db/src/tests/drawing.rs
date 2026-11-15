@@ -702,6 +702,7 @@ fn drawing_validate_geometry_covers_supported_kinds() {
             knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             control_points: vec![point(0.0, 0.0), point(1.0, 1.0), point(2.0, 0.0)],
             weights: vec![1.0, 1.0, 1.0],
+            closed: false,
         },
         SemanticGeometry::Point(point(3.0, 4.0)),
         SemanticGeometry::Text {
@@ -761,6 +762,7 @@ fn drawing_validate_geometry_covers_supported_kinds() {
         knots: vec![0.0],
         control_points: vec![point(0.0, 0.0)],
         weights: Vec::new(),
+        closed: false,
     })
     .is_err());
     assert!(crate::validate_geometry(&SemanticGeometry::Ellipse {

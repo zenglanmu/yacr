@@ -815,3 +815,125 @@ fn non_planar_polyline_width_is_reported_as_an_export_gap() {
         report.entries
     );
 }
+
+// ---------------------------------------------------------------------------
+// SPLINE closed flag (DXF group 70 bit 1) round trip.
+// ---------------------------------------------------------------------------
+
+/// A clamped cubic whose control polygon is stored verbatim (no repeated end
+/// point), so a closed round trip can only be the flag, never a duplicated
+/// control point.
+fn closed_test_spline(closed: bool) -> SemanticGeometry {
+    SemanticGeometry::Spline {
+        degree: 3,
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        control_points: vec![
+            p(0.0, 0.0, 0.0),
+            p(2.0, 3.0, 0.0),
+            p(5.0, 4.0, 0.0),
+            p(6.0, 0.0, 0.0),
+        ],
+        weights: vec![1.0, 1.0, 1.0, 1.0],
+        closed,
+    }
+}
+
+#[test]
+fn closed_spline_writes_group_70_bit_1_and_reimports_closed() {
+    let (bytes, report) = export_one(closed_test_spline(true));
+    // The writer set the bit (acadrust keeps the raw group 70 value in
+    // `dxf_flags` and derives `flags.closed` from bit 1 on read).
+    match &read_entities(&bytes)[0] {
+        EntityType::Spline(spline) => {
+            assert_eq!(spline.dxf_flags & 1, 1, "group 70 bit 1 is the closed flag");
+            assert!(spline.flags.closed);
+            assert_eq!(
+                spline.control_points.len(),
+                4,
+                "a closed spline is written with its stored polygon, not a duplicated end point"
+            );
+        }
+        other => panic!("expected SPLINE, got {other:?}"),
+    }
+    // Only the periodic/planar/linear metadata is reported as not carried.
+    assert_eq!(report.counts.converted, 1);
+    assert!(report.entries.iter().any(|entry| {
+        entry.code == "export.converted.spline"
+            && entry.message.contains("periodic")
+            && !entry.message.contains("closed")
+    }));
+
+    let reimported = import_bytes(&bytes);
+    let spline = reimported
+        .entities()
+        .find_map(|entity| match &entity.geometry {
+            SemanticGeometry::Spline {
+                degree,
+                knots,
+                control_points,
+                weights,
+                closed,
+            } => Some((
+                *degree,
+                knots.clone(),
+                control_points.clone(),
+                weights.clone(),
+                *closed,
+            )),
+            _ => None,
+        })
+        .expect("the export re-imports as a SPLINE");
+    assert_eq!(spline.0, 3);
+    assert_eq!(spline.1, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(
+        spline.2,
+        vec![
+            p(0.0, 0.0, 0.0),
+            p(2.0, 3.0, 0.0),
+            p(5.0, 4.0, 0.0),
+            p(6.0, 0.0, 0.0),
+        ],
+        "the control polygon round-trips verbatim (no appended closing point)"
+    );
+    assert_eq!(
+        spline.3,
+        Vec::<f64>::new(),
+        "unit weights round-trip as the documented all-ones shorthand"
+    );
+    assert!(spline.4, "the closed flag survives the round trip");
+}
+
+#[test]
+fn open_spline_round_trips_unchanged_without_the_closed_bit() {
+    let (bytes, _report) = export_one(closed_test_spline(false));
+    match &read_entities(&bytes)[0] {
+        EntityType::Spline(spline) => {
+            assert_eq!(spline.dxf_flags & 1, 0, "an open spline writes bit 1 clear");
+            assert!(!spline.flags.closed);
+        }
+        other => panic!("expected SPLINE, got {other:?}"),
+    }
+
+    let reimported = import_bytes(&bytes);
+    let spline = reimported
+        .entities()
+        .find_map(|entity| match &entity.geometry {
+            SemanticGeometry::Spline {
+                control_points,
+                closed,
+                ..
+            } => Some((control_points.clone(), *closed)),
+            _ => None,
+        })
+        .expect("the export re-imports as a SPLINE");
+    assert!(!spline.1, "an open spline stays open");
+    assert_eq!(
+        spline.0,
+        vec![
+            p(0.0, 0.0, 0.0),
+            p(2.0, 3.0, 0.0),
+            p(5.0, 4.0, 0.0),
+            p(6.0, 0.0, 0.0),
+        ]
+    );
+}

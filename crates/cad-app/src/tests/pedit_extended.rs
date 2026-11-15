@@ -271,6 +271,7 @@ fn spline_stores_the_vertices_as_a_clamped_control_frame() {
         knots,
         control_points,
         weights,
+        ..
     } = after.geometry
     else {
         panic!("SPLINE stores a B-spline");
@@ -345,6 +346,7 @@ fn spline_stores_a_closed_polyline_as_a_repeated_closed_control_frame() {
         knots,
         control_points,
         weights,
+        ..
     } = after.geometry.clone()
     else {
         panic!("SPLINE stores a B-spline");

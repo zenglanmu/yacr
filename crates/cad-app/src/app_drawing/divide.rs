@@ -498,9 +498,9 @@ const ARRAY_PATH_KINDS: &str = "LINE, ARC, CIRCLE, SPLINE, ELLIPSE or LWPOLYLINE
 ///
 /// CIRCLE, an ARC of exactly one turn, an ELLIPSE (or elliptical arc) of exactly
 /// one turn, and a closed LWPOLYLINE are periodic. A SPLINE is **not** periodic
-/// here: the stored geometry carries no closed flag, so it keeps the open
-/// curve's seam semantics (the same declared rule [`TargetCurve::is_periodic`]
-/// uses for DIVIDE).
+/// here: DIVIDE splits its stored knot domain as an open interval and does not
+/// read the SPLINE closed flag, so it keeps the open curve's seam semantics (the
+/// same declared rule [`TargetCurve::is_periodic`] uses for TRIM).
 fn path_is_periodic(geometry: &SemanticGeometry) -> bool {
     match geometry {
         SemanticGeometry::Circle { .. } => true,

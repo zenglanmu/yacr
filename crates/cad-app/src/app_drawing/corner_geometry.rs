@@ -926,6 +926,7 @@ pub(super) fn fillet_curve(geometry: &SemanticGeometry) -> CadResult<Curve> {
             knots,
             control_points,
             weights,
+            ..
         } => Ok(Curve::Spline(SplineCurve::new(
             *degree,
             knots,

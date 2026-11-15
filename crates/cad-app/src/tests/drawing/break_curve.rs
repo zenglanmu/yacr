@@ -554,6 +554,7 @@ fn spline_break_leaves_two_splines_or_a_named_refusal_that_writes_nothing() {
         knots,
         control_points,
         weights,
+        closed: false,
     };
     let source = spline_entity(1, spline, 0);
     let (mut app, mut session) = app_with(vec![source]);

@@ -453,11 +453,13 @@ impl Application {
     /// enforced by the database's one write validator).
     ///
     /// Deliberate gaps, refused by absence rather than by a fabricated entity:
-    /// **`Close`** (a periodic closed spline needs a closed flag the domain does not
-    /// model), **`Tangency`** (start/end tangent picks), the **`Knots`**
-    /// parameterization prompt (the fit path is chord, documented) and **`Object`**
-    /// (convert an object into a spline) have no payload field and no session
-    /// parameter in this build, so none can be requested.
+    /// **`Close`** (the model carries the closed flag, but the interactive SPLINE
+    /// capture has no closable prompt in this build, so a closed curve is only
+    /// authorable through the programmatic `Geometry` payload), **`Tangency`**
+    /// (start/end tangent picks), the **`Knots`** parameterization prompt (the fit
+    /// path is chord, documented) and **`Object`** (convert an object into a
+    /// spline) have no payload field and no session parameter in this build, so
+    /// none can be requested.
     ///
     /// Both arms are committed through the shared [`Self::commit_new_entity`]
     /// funnel: one entity, one transaction, one undo step, active-layer check
@@ -476,6 +478,9 @@ impl Application {
                     knots,
                     control_points,
                     weights,
+                    // A fit-point capture is an open run; the interactive
+                    // closed option is not wired in this build.
+                    closed: false,
                 }
             }
             CommandPayload::Geometry(geometry) => match geometry.as_ref() {
@@ -484,11 +489,13 @@ impl Application {
                     knots,
                     control_points,
                     weights,
+                    closed,
                 } => authored_spline_geometry(
                     *degree,
                     knots.clone(),
                     control_points.clone(),
                     weights.clone(),
+                    *closed,
                 )?,
                 other => {
                     return Err(CadError::InvalidInput(format!(
@@ -848,18 +855,19 @@ pub(super) fn authored_ellipse_geometry(
 /// (`spline.control_points`) and every one must be finite (`spline.invalid_point`) —
 /// stated here rather than left to the database so the refusal names the selector.
 ///
-/// Deliberate gaps, refused by absence: **`Close` is not modeled** —
-/// `SemanticGeometry::Spline` has no closed flag (a periodic spline needs wrapped
-/// knots *and* the DXF `70` bit 1, and inventing the second is exactly the
-/// fabricated state this build forbids), so a closed CV spline cannot be requested
-/// and no stable code exists to refuse one; likewise **`Tangency`**, the **`Knots`**
-/// parameterization prompt (the fit path is chord, documented) and **`Object`**
-/// (convert an object to a spline) have no payload field or session channel.
+/// Deliberate gaps, refused by absence: the **interactive `Close` prompt** is not
+/// modeled — the model carries the closed flag (DXF group 70 bit 1) and the
+/// programmatic `Geometry` payload can set it, but the click-capture SPLINE flow
+/// has no closable prompt in this build, so a closed CV spline cannot be requested
+/// interactively; likewise **`Tangency`**, the **`Knots`** parameterization prompt
+/// (the fit path is chord, documented) and **`Object`** (convert an object to a
+/// spline) have no payload field or session channel.
 pub(super) fn authored_spline_geometry(
     degree: u32,
     knots: Vec<f64>,
     control_points: Vec<Point3>,
     weights: Vec<f64>,
+    closed: bool,
 ) -> CadResult<SemanticGeometry> {
     if degree != 2 && degree != 3 {
         return Err(draw_refusal(
@@ -891,6 +899,9 @@ pub(super) fn authored_spline_geometry(
         knots,
         control_points,
         weights,
+        // Carried through: the programmatic payload may author a closed CV
+        // spline, and the stored control polygon is used verbatim.
+        closed,
     })
 }
 

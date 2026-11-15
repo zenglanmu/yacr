@@ -296,6 +296,9 @@ impl Mapper<'_> {
                                 .map(|point| domain_point(*point))
                                 .collect(),
                             weights: weights.clone(),
+                            // The DGN element's own closed flag maps to the domain
+                            // flag (the control polygon is stored as read).
+                            closed: *closed,
                         },
                         partial: false,
                         type_key: "DgnSpline",

@@ -27,6 +27,7 @@ fn cubic() -> SemanticGeometry {
             point(4.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0, 1.0],
+        closed: false,
     }
 }
 
@@ -83,6 +84,7 @@ fn refuses_a_knot_vector_one_entry_too_short() {
             point(4.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0, 1.0],
+        closed: false,
     };
     let message = refusal(&geometry);
     assert!(
@@ -113,6 +115,7 @@ fn refuses_a_knot_vector_one_entry_too_long() {
             point(4.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0, 1.0],
+        closed: false,
     };
     let message = refusal(&geometry);
     assert!(
@@ -135,6 +138,7 @@ fn refuses_a_non_empty_weight_vector_that_does_not_match_the_control_points() {
             point(4.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0],
+        closed: false,
     };
     let message = refusal(&geometry);
     assert!(
@@ -161,6 +165,7 @@ fn accepts_an_empty_weight_vector_as_the_documented_all_ones_convention() {
             point(4.0, 0.0),
         ],
         weights: Vec::new(),
+        closed: false,
     };
     crate::validate_geometry(&geometry).expect("empty weights mean all ones");
 }
@@ -183,6 +188,7 @@ fn accepts_an_empty_knot_vector_as_the_documented_clamped_uniform_convention() {
             point(5.0, 1.0),
         ],
         weights: Vec::new(),
+        closed: false,
     };
     crate::validate_geometry(&geometry).expect("empty knots mean clamped uniform");
 
@@ -209,6 +215,7 @@ fn accepts_an_empty_knot_vector_as_the_documented_clamped_uniform_convention() {
             point(5.0, 1.0),
         ],
         weights: Vec::new(),
+        closed: false,
     };
     let mut tx = db
         .begin_drawing_transaction("move control point", TransactionId(2))
@@ -233,6 +240,7 @@ fn the_two_empty_vector_exemptions_do_not_mask_each_other() {
             point(5.0, 1.0),
         ],
         weights: vec![1.0, 1.0],
+        closed: false,
     };
     let message = refusal(&geometry);
     assert!(
@@ -258,6 +266,7 @@ fn the_two_empty_vector_exemptions_do_not_mask_each_other() {
             point(5.0, 1.0),
         ],
         weights: Vec::new(),
+        closed: false,
     };
     let message = refusal(&geometry);
     assert!(
@@ -341,6 +350,7 @@ fn a_multileader_whose_display_is_the_clamped_uniform_spline_is_writable() {
                 knots,
                 control_points,
                 weights,
+                ..
             } => {
                 assert_eq!(*degree, 3);
                 assert!(knots.is_empty(), "the producer form is the shorthand");
@@ -395,6 +405,7 @@ fn refuses_a_knot_vector_that_decreases() {
             point(4.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0, 1.0],
+        closed: false,
     };
     let message = refusal(&geometry);
     assert!(
@@ -413,6 +424,7 @@ fn pre_existing_degree_and_control_point_rules_still_refuse() {
         knots: vec![0.0, 1.0],
         control_points: vec![point(0.0, 0.0)],
         weights: vec![1.0],
+        closed: false,
     };
     let message = refusal(&degree_zero);
     assert!(
@@ -429,6 +441,7 @@ fn pre_existing_degree_and_control_point_rules_still_refuse() {
         knots: vec![0.0, 0.0, 0.0, 0.0, 1.0],
         control_points: vec![point(0.0, 0.0), point(1.0, 1.0)],
         weights: vec![1.0, 1.0],
+        closed: false,
     };
     let message = refusal(&too_few_control_points);
     assert!(
@@ -468,6 +481,7 @@ fn refusal_leaves_the_revision_the_entity_table_and_the_stored_spline_untouched(
                 point(4.0, 0.0),
             ],
             weights: vec![1.0, 1.0, 1.0, 1.0],
+            closed: false,
         },
     ))
     .unwrap();
@@ -492,6 +506,7 @@ fn refusal_leaves_the_revision_the_entity_table_and_the_stored_spline_untouched(
             other => panic!("expected a stored spline, got {other:?}"),
         },
         weights: vec![1.0, 1.0],
+        closed: false,
     };
     let mut tx = db
         .begin_drawing_transaction("bad spline edit", TransactionId(3))
@@ -532,6 +547,7 @@ fn a_valid_spline_round_trips_through_an_update() {
             point(4.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0, 1.0],
+        closed: false,
     };
     let mut tx = db
         .begin_drawing_transaction("move control point", TransactionId(2))

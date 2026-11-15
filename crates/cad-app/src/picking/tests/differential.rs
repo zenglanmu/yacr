@@ -110,6 +110,7 @@ fn rand_spline(rng: &mut XorShift, span: f64) -> SemanticGeometry {
         knots,
         control_points,
         weights,
+        closed: false,
     }
 }
 
@@ -321,6 +322,7 @@ fn indexed_pick_agrees_at_the_predicate_tolerance_floor() {
             knots: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
             control_points: vec![p(0.0, 0.0, 0.0), p(4.0, 6.0, 1.0), p(8.0, -3.0, 2.0)],
             weights: vec![1.0, 1.0, 1.0],
+            closed: false,
         },
         0,
     ))

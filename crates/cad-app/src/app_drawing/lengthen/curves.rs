@@ -8,7 +8,7 @@ use super::super::arc_length::ArcLengthTable;
 use super::super::polyline_curve::PolylineCurve;
 use super::super::trim_curves::cut_tolerance;
 use super::super::trim_spline::SplineTarget;
-use super::spline_extend::{extend_spline, is_closed_frame, outward_tangent};
+use super::spline_extend::{extend_spline, outward_tangent};
 use super::{error_detail, new_line_length, refusal, LengthenMode, LengthenSettings};
 use cad_domain::{CadResult, Point3, SemanticGeometry};
 use cad_geometry::distance;
@@ -430,6 +430,7 @@ pub(super) fn lengthen_spline(
         knots,
         control_points,
         weights,
+        closed,
     } = geometry
     else {
         // Unreachable: the caller dispatches on the SPLINE variant.
@@ -439,7 +440,7 @@ pub(super) fn lengthen_spline(
         ));
     };
     // The shorthand-expanded, validated definition both halves work on.
-    let spline = SplineTarget::new(*degree, knots, control_points, weights)?;
+    let spline = SplineTarget::new(*degree, knots, control_points, weights, *closed)?;
     let old = spline.length();
     if !old.is_finite() || old <= eps {
         return Err(refusal(
@@ -447,14 +448,15 @@ pub(super) fn lengthen_spline(
             "the LENGTHEN target SPLINE has no measurable length",
         ));
     }
-    // A closed frame has no end to move, so it is refused for every mode before
-    // anything is measured or written (the geometry model carries no closed flag).
-    if is_closed_frame(spline.curve(), eps) {
+    // A closed spline has no end to move, so it is refused for every mode before
+    // anything is measured or written. Closedness is the stored flag (with the
+    // documented coincident-endpoint fallback), never re-guessed here.
+    if spline.is_closed(eps) {
         return Err(refusal(
             "lengthen.closed_spline",
             format!(
-                "LENGTHEN does not affect a closed SPLINE: its first and last control points \
-                 coincide, so it has no end to move ({} control points)",
+                "LENGTHEN does not affect a closed SPLINE: it is marked closed and has no end to \
+                 move ({} control points)",
                 control_points.len()
             ),
         ));
@@ -573,6 +575,7 @@ fn spline_length(geometry: &SemanticGeometry) -> CadResult<f64> {
         knots,
         control_points,
         weights,
+        closed,
     } = geometry
     else {
         return Err(refusal(
@@ -580,5 +583,5 @@ fn spline_length(geometry: &SemanticGeometry) -> CadResult<f64> {
             "the LENGTHEN spline solver received a non-SPLINE geometry",
         ));
     };
-    Ok(SplineTarget::new(*degree, knots, control_points, weights)?.length())
+    Ok(SplineTarget::new(*degree, knots, control_points, weights, *closed)?.length())
 }

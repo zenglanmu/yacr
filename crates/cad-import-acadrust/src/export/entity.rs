@@ -492,6 +492,7 @@ fn emit_leaf(
             knots,
             control_points,
             weights,
+            closed,
         } => {
             let (common, mut reasons) = common_for(doc, entity, ctx);
             let mut spline = DxfSpline::new();
@@ -499,14 +500,19 @@ fn emit_leaf(
             spline.knots = knots.clone();
             spline.control_points = control_points.iter().map(|p| v3(*p)).collect();
             spline.weights = weights.clone();
+            // Round-trip the one flag the domain model carries (DXF group 70
+            // bit 1). The control polygon is written exactly as stored: a closed
+            // spline is *not* closed by appending a duplicate first point.
+            spline.flags.closed = *closed;
             spline.normal = Vector3::UNIT_Z;
             spline.common = common;
             acc.push(EntityType::Spline(spline), ctx)?;
-            // The domain model has no closed/periodic flags; the output writes
-            // them false. That is a conversion, not an exact copy.
+            // `periodic`/`planar`/`linear`/`rational` stay derived from the data
+            // (the writer recomputes them from weights and control points); only
+            // `closed` is carried as entity metadata.
             reasons.push(
-                "SPLINE closed/periodic flags are not carried in the domain model; written as \
-                 false"
+                "SPLINE periodic/planar/linear flags are not carried in the domain model; written \
+                 as false"
                     .into(),
             );
             acc.record(object, "spline", MappingOutcome::Converted(reasons));

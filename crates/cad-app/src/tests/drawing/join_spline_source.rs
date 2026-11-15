@@ -28,6 +28,7 @@ fn a_spline_source_welds_a_touching_line_exactly() {
         knots,
         control_points,
         weights,
+        ..
     } = source
     else {
         unreachable!()

@@ -91,9 +91,9 @@ impl Application {
     ///
     /// A SPLINE boundary is **sampled**, not analytic: every cut it contributes
     /// adds a `drawing.trim` diagnostic saying the cut point is approximate. It is
-    /// also excluded from the "wholly inside" delete rule (a spline has no closed
-    /// flag and no boundary plane), so a target wholly inside a closed spline is
-    /// refused explicitly (`Unsupported`) rather than deleted.
+    /// also excluded from the "wholly inside" delete rule (TRIM treats it as an
+    /// open sampled curve with no boundary plane), so a target wholly inside a
+    /// closed spline is refused explicitly (`Unsupported`) rather than deleted.
     ///
     /// INSERT/Opaque/Mesh/Hatch **targets** (each refused by name, see
     /// [`trim_target_gap`]), INSERT/Opaque/Mesh boundaries, degenerate input, a

@@ -41,6 +41,7 @@ fn cubic() -> SemanticGeometry {
             p3(4.0, 0.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0, 1.0],
+        closed: false,
     }
 }
 
@@ -57,6 +58,7 @@ fn rational() -> SemanticGeometry {
             p3(6.0, 4.0, 0.0),
         ],
         weights: vec![1.0, 0.5, 2.0, 1.0],
+        closed: false,
     }
 }
 
@@ -67,6 +69,7 @@ fn spline_parts(geometry: &SemanticGeometry) -> (u32, Vec<f64>, Vec<Point3>, Vec
             knots,
             control_points,
             weights,
+            ..
         } => (
             *degree,
             knots.clone(),
@@ -201,6 +204,7 @@ fn spline_with_the_empty_knot_and_weight_shorthands_keeps_them_empty() {
             p3(5.0, 1.0, 0.0),
         ],
         weights: Vec::new(),
+        closed: false,
     };
     let moved = transform_spline(&source, &rotation_z(0.25));
     let (_, knots, control_points, weights) = spline_parts(&moved);
@@ -238,6 +242,7 @@ fn a_finite_transform_that_overflows_a_control_point_is_refused() {
         knots: vec![0.0, 0.0, 1.0, 2.0],
         control_points: vec![p3(1.0e10, 0.0, 0.0), p3(2.0e10, 0.0, 0.0)],
         weights: vec![1.0, 1.0],
+        closed: false,
     };
     let error = transform_geometry(&source, &Transform3::scale(1.0e300))
         .expect_err("the mapped control point overflows");
@@ -261,6 +266,7 @@ fn an_inconsistent_input_spline_is_still_refused_by_the_existing_validation() {
             p3(4.0, 0.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0], // one weight short
+        closed: false,
     };
     // The pure map only moves points (it is not a validator), so the counts it
     // copies are still wrong…

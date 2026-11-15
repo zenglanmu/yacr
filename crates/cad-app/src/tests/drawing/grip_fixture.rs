@@ -288,6 +288,7 @@ pub(super) fn grip_app() -> (Application, SessionState) {
                 p3(4.0, 0.0, 1.0),
             ],
             weights: vec![1.0; 4],
+            closed: false,
         },
         8,
     ))

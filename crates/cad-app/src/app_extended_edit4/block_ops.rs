@@ -411,11 +411,14 @@ fn flatten_geometry(geometry: &SemanticGeometry) -> CadResult<SemanticGeometry> 
             knots,
             control_points,
             weights,
+            closed,
         } => Ok(SemanticGeometry::Spline {
             degree: *degree,
             knots: knots.clone(),
             control_points: control_points.iter().map(|point| flat(*point)).collect(),
             weights: weights.clone(),
+            // Flattening maps the control polygon, so it keeps the closedness.
+            closed: *closed,
         }),
         SemanticGeometry::Mesh(_) => Err(unsupported(
             "flatten",

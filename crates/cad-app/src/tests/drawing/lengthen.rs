@@ -484,6 +484,7 @@ fn closed_objects_are_refused_and_open_curves_are_supported() {
         knots,
         control_points,
         weights: vec![1.0; fit.len()],
+        closed: false,
     };
     let (mut app, mut session) =
         app_with(vec![curve_entity(1, LayerId(0), spline, "AcDbSpline", 0)]);
@@ -508,6 +509,7 @@ fn spline_trim_keeps_an_exact_sub_curve() {
         knots,
         control_points,
         weights: vec![1.0; fit.len()],
+        closed: false,
     };
     let (mut app, mut session) =
         app_with(vec![curve_entity(1, LayerId(0), spline, "AcDbSpline", 0)]);

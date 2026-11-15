@@ -57,12 +57,12 @@
 //!
 //! **Closed**: the control frame repeats the first vertex at the end
 //! (`P₀ … Pₙ₋₁ P₀`, degree `min(3, n − 1)` for `n` ring vertices) so the curve
-//! starts and ends at `P₀` with a closed control polygon. The SPLINE model has
-//! no closed flag, so exactly this repeated control point is the marker: `DECURVE`
-//! reads a unit-weight, clamped-uniform frame whose ends coincide as the closed
-//! form and restores the closed ring (`n` bulges). An open frame that happens to
-//! end where it starts is therefore read as the closed form — a declared
-//! ambiguity of a model without a periodic flag.
+//! starts and ends at `P₀` with a closed control polygon, and the stored SPLINE
+//! also carries `closed: true` (DXF group 70 bit 1). `DECURVE` restores a closed
+//! ring from the repeated control point of a unit-weight, clamped-uniform frame —
+//! the marker it has always read, so legacy frames written without the flag still
+//! restore; an open frame that happens to end where it starts is read as the
+//! closed form (a declared ambiguity kept for compatibility).
 //!
 //! The stored entity is an exact `AcDbSpline` (the LWPOLYLINE model has no
 //! spline-fit flag); the id, layer, space and draw order are kept and the type
@@ -637,10 +637,11 @@ fn plan_reverse(geometry: SemanticGeometry, _id: EntityId) -> CadResult<Plan> {
         knots,
         control_points,
         weights,
+        closed,
     } = &geometry
     {
         return Ok(Plan::Write {
-            geometry: reverse_spline(*degree, knots, control_points, weights),
+            geometry: reverse_spline(*degree, knots, control_points, weights, *closed),
             label: "REVERSE (SPLINE control frame)".into(),
             deleted: Vec::new(),
         });
@@ -771,6 +772,9 @@ fn plan_spline(geometry: SemanticGeometry, precision: u8) -> CadResult<Plan> {
             knots: clamped_uniform_knots(n, degree as usize),
             control_points,
             weights: vec![1.0; n],
+            // A closed POLYLINE becomes a closed SPLINE: the frame already
+            // repeats the first vertex, and the flag states the same fact.
+            closed,
         },
         label: if closed {
             format!("SPLINE (closed control frame, precision {precision})")
@@ -814,6 +818,7 @@ fn plan_decurve(geometry: SemanticGeometry) -> CadResult<Plan> {
             knots,
             control_points,
             weights,
+            ..
         } => {
             let Some((points, bulges, closed)) =
                 pedit_spline_restore(&degree, &knots, &control_points, &weights)

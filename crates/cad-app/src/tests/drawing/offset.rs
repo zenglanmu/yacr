@@ -906,6 +906,7 @@ fn offset_spline_source_offsets_to_a_spline_and_refuses_a_non_planar_one() {
                 knots: Vec::new(),
                 control_points,
                 weights: Vec::new(),
+                closed: false,
             },
             0,
         ))

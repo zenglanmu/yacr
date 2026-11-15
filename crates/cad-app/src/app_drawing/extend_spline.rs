@@ -36,9 +36,10 @@
 //!
 //! # Refusals (all write nothing)
 //!
-//! * `extend.spline_closed` — first control point == last (the domain model has no
-//!   closed flag, so a closed *frame* is the only signal; a closed curve has no end
-//!   to extend, like a CIRCLE);
+//! * `extend.spline_closed` — the stored SPLINE closed flag is set (or the
+//!   documented legacy case of coincident first/last control points), so a closed
+//!   curve has no end to extend, like a CIRCLE; the flag is read through
+//!   [`super::trim_spline::SplineTarget::is_closed`];
 //! * `extend.spline_unclamped` — the picked end is not clamped
 //!   (multiplicity `degree + 1`), so appending a span would change the existing
 //!   curve instead of only adding a tail; the definition is refused rather than
@@ -82,11 +83,14 @@ pub(crate) fn plan_extend_spline(
 ) -> Result<ExtendResolution, PlanRefusal> {
     let curve = spline.curve();
     let points = curve.control_points();
-    if points.len() >= 2 && distance(points[0], *points.last().expect("checked non-empty")) <= tol {
+    // Closedness comes from the stored flag (with the documented coincident-end
+    // fallback), so a spline closed by the flag but whose polygon does not repeat
+    // its ends is still refused instead of being extended from a seam.
+    if spline.is_closed(tol) {
         return Err(PlanRefusal::Unsupported(format!(
-            "extend.spline_closed: EXTEND cannot extend a closed SPLINE target: its first and \
-             last control points coincide, so the curve has no end to extend ({} control \
-             points); a closed curve is refused rather than opened or extrapolated",
+            "extend.spline_closed: EXTEND cannot extend a closed SPLINE target: it is marked \
+             closed, so the curve has no end to extend ({} control points); a closed curve is \
+             refused rather than opened or extrapolated",
             points.len()
         )));
     }
@@ -181,6 +185,7 @@ pub(crate) fn plan_extend_spline(
             knots: result.knots().to_vec(),
             control_points: result.control_points().to_vec(),
             weights: result.weights().to_vec(),
+            closed: false,
         },
         notes,
     })

@@ -40,6 +40,7 @@ fn cubic() -> SemanticGeometry {
             p3(4.0, 0.0, 0.25),
         ],
         weights: vec![1.0, 1.0, 1.0, 1.0],
+        closed: false,
     }
 }
 
@@ -51,6 +52,7 @@ fn two_point() -> SemanticGeometry {
         knots: vec![0.0, 0.0, 1.0, 1.0],
         control_points: vec![p3(0.0, 0.0, 0.0), p3(2.0, 0.0, 0.0)],
         weights: vec![1.0, 1.0],
+        closed: false,
     }
 }
 
@@ -62,6 +64,7 @@ fn parts(geometry: &SemanticGeometry) -> (u32, Vec<f64>, Vec<Point3>, Vec<f64>) 
             knots,
             control_points,
             weights,
+            ..
         } => (
             *degree,
             knots.clone(),
@@ -137,6 +140,7 @@ fn a_spline_with_more_than_256_control_points_offers_the_first_256_only() {
         knots,
         control_points: control_points.clone(),
         weights: vec![1.0; 300],
+        closed: false,
     };
     let grips = grips_for_entity(&ent(62, geometry.clone()));
     assert_eq!(
@@ -315,6 +319,7 @@ fn a_spline_with_a_weights_length_mismatch_exposes_no_grips() {
             p3(4.0, 0.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0],
+        closed: false,
     };
     let entity = ent(63, geometry.clone());
     assert!(
@@ -354,6 +359,7 @@ fn a_spline_with_a_knots_length_mismatch_exposes_no_grips() {
                 p3(4.0, 0.0, 0.0),
             ],
             weights: vec![1.0; 4],
+            closed: false,
         };
         assert!(
             grips_for_entity(&ent(64, geometry.clone())).is_empty(),
@@ -430,6 +436,7 @@ fn a_spline_control_point_is_hit_in_the_plan_view_at_another_elevation() {
             p3(12.0, 0.0, 5.0),
         ],
         weights: vec![1.0; 4],
+        closed: false,
     };
     let entity: DbEntity = ent(68, geometry);
     let plan = p3(4.2, 0.1, 0.0);

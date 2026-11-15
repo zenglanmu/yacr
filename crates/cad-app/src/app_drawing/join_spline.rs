@@ -58,6 +58,10 @@ impl SplineCurve {
             knots: self.knots,
             control_points: self.control_points,
             weights: self.weights,
+            // The exact C0 concatenation is an open weld; `JOIN CLOSE` on a
+            // SPLINE selection goes through the NURBS weld (`join_nurbs`),
+            // which can mark the one assembled curve closed.
+            closed: false,
         }
     }
 
@@ -160,13 +164,11 @@ impl SplineCurve {
 
 /// Plan a SPLINE merge: contiguous end-to-end, any plane, exact C0
 /// concatenation for equal degrees.
-pub(super) fn plan_splines(sources: &[DbEntity], close: bool) -> CadResult<Joined> {
-    if close {
-        return Err(unsupported(
-            "join.close_spline",
-            "JOIN CLOSE on SPLINEs is not implemented (the SPLINE model has no closed flag)",
-        ));
-    }
+///
+/// This is the **open** weld only. `JOIN CLOSE` on a SPLINE selection is routed
+/// to [`super::super::nurbs::plan_mixed_weld`] by the planner, because closing
+/// needs the domain `closed` flag and the two ends meeting.
+pub(super) fn plan_splines(sources: &[DbEntity]) -> CadResult<Joined> {
     let mut pieces: Vec<SplineCurve> = Vec::with_capacity(sources.len());
     for source in sources {
         let SemanticGeometry::Spline {
@@ -174,6 +176,8 @@ pub(super) fn plan_splines(sources: &[DbEntity], close: bool) -> CadResult<Joine
             knots,
             control_points,
             weights,
+            // Closed sources are refused before planning (`join.closed_object`).
+            closed: _,
         } = &source.geometry
         else {
             return Err(invalid(

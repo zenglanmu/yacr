@@ -84,6 +84,7 @@ pub(super) fn stretched_geometry(
             knots,
             control_points,
             weights,
+            closed,
         } => {
             // A stored definition that is not indexable cannot be edited
             // faithfully: refuse by name instead of staging vectors that no
@@ -118,6 +119,8 @@ pub(super) fn stretched_geometry(
                 knots: knots.clone(),
                 control_points: new_points,
                 weights: weights.clone(),
+                // Moving control points cannot open or close the curve.
+                closed: *closed,
             })
         }
         SemanticGeometry::Arc {

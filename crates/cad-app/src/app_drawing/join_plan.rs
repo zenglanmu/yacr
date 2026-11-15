@@ -164,22 +164,18 @@ fn refuse_unjointable(source: &DbEntity) -> CadResult<()> {
                 source.id.0
             ),
         )),
-        SemanticGeometry::Spline { control_points, .. }
-            if control_points.len() >= 2
-                && distance(
-                    control_points[0],
-                    *control_points.last().expect("checked len"),
-                ) <= tol =>
-        {
-            Err(invalid(
-                "join.closed_object",
-                format!(
-                    "entity {} is a closed SPLINE (coincident endpoints); a closed object \
-                     cannot be joined",
-                    source.id.0
-                ),
-            ))
-        }
+        SemanticGeometry::Spline {
+            closed,
+            control_points,
+            ..
+        } if is_closed_spline(*closed, control_points, tol) => Err(invalid(
+            "join.closed_object",
+            format!(
+                "entity {} is a closed SPLINE (closed flag or coincident endpoints); a closed \
+                 object cannot be joined",
+                source.id.0
+            ),
+        )),
         _ => Ok(()),
     }
 }
@@ -213,8 +209,11 @@ fn plan_source_object(sources: &[DbEntity], close: bool) -> CadResult<Joined> {
             let all_spline = sources
                 .iter()
                 .all(|source| matches!(source.geometry, SemanticGeometry::Spline { .. }));
-            if all_spline {
-                return plan_splines(sources, close);
+            // An open pure-SPLINE selection keeps the exact C0 concatenation.
+            // `Close` needs the NURBS weld below: only it can set the stored
+            // closed flag (and it still refuses a gap by name).
+            if all_spline && !close {
+                return plan_splines(sources);
             }
             let weldable = sources.iter().all(|source| {
                 matches!(
@@ -337,8 +336,8 @@ fn plan_multiple(sources: &[DbEntity], close: bool) -> CadResult<Joined> {
     if all_ellipses {
         return plan_ellipses(&ellipse_list(sources), close);
     }
-    if all_splines {
-        return plan_splines(sources, close);
+    if all_splines && !close {
+        return plan_splines(sources);
     }
     if has_spline || has_ellipse {
         return super::nurbs::plan_mixed_weld(sources, close);

@@ -26,6 +26,7 @@ fn spline_geometry() -> SemanticGeometry {
             point(3.0, 0.0),
         ],
         weights: vec![1.0, 2.0, 2.0, 1.0],
+        closed: false,
     }
 }
 
@@ -41,6 +42,7 @@ fn curve_of(app: &Application, id: u128) -> cad_geometry::NurbsCurve {
             knots,
             control_points,
             weights,
+            ..
         } => cad_geometry::expand_spline_source(degree, &knots, &control_points, &weights)
             .expect("the stored spline must stay valid"),
         other => panic!("expected a SPLINE, got {other:?}"),
@@ -55,6 +57,7 @@ fn parts(geometry: SemanticGeometry) -> (u32, Vec<f64>, Vec<Point3>, Vec<f64>) {
             knots,
             control_points,
             weights,
+            ..
         } => (degree, knots, control_points, weights),
         other => panic!("expected a SPLINE, got {other:?}"),
     }
@@ -300,8 +303,9 @@ fn extend_a_spline_refuses_when_nothing_crosses_the_tangent_ray_ahead() {
 
 #[test]
 fn extend_refuses_a_closed_spline_frame_by_name() {
-    // `SemanticGeometry::Spline` has no closed flag, so a closed frame (first
-    // control point == last) is the only signal; there is no end to extend.
+    // The closed flag is authoritative; this fixture exercises the documented
+    // fallback for a legacy frame whose ends coincide but whose bit is clear —
+    // either way there is no end to extend.
     let mut app = app_of(vec![
         ent(
             1,
@@ -315,6 +319,7 @@ fn extend_refuses_a_closed_spline_frame_by_name() {
                     point(0.0, 0.0),
                 ],
                 weights: Vec::new(),
+                closed: false,
             },
             0,
         ),
@@ -345,6 +350,7 @@ fn extend_a_spline_reports_the_sampled_boundary_diagnostic() {
                 knots: vec![0.0, 0.0, 1.0, 1.0],
                 control_points: vec![point(5.0, -10.0), point(5.0, 10.0)],
                 weights: Vec::new(),
+                closed: false,
             },
             1,
         ),

@@ -373,6 +373,7 @@ impl GeometryEngine for DefaultGeometryEngine {
                 knots,
                 control_points,
                 weights,
+                closed,
             } => G::Spline {
                 degree: *degree,
                 // Source knots and weights are geometry: transforming a spline
@@ -381,6 +382,8 @@ impl GeometryEngine for DefaultGeometryEngine {
                 knots: knots.clone(),
                 control_points: control_points.iter().map(|p| tp(*p)).collect::<Vec<_>>(),
                 weights: weights.clone(),
+                // An affine map preserves whether the curve joins up.
+                closed: *closed,
             },
             G::Point(p) => G::Point(tp(*p)),
             G::Mesh(m) => {

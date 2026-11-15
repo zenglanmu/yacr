@@ -63,7 +63,7 @@ pub(super) fn generate(
             knots,
             control_points,
             weights,
-        } => spline_candidates(control_points, knots, weights, *degree, probe, out, prefix),
+         .. } => spline_candidates(control_points, knots, weights, *degree, probe, out, prefix),
         G::Point(p) => push_point(out, SnapKind::Endpoint, *p, format!("{prefix}point")),
         G::Compound(children) => {
             for (i, child) in children.iter().enumerate() {

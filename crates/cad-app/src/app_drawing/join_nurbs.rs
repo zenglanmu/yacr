@@ -25,8 +25,10 @@
 //!   `POLYLINE`, `SPLINE`) converts exactly; an ellipse is the affine image of
 //!   the circular rational-quadratic construction, so no sampling or refit is
 //!   involved.
-//! * `JOIN CLOSE` on a mixed weld is refused (`join.close_spline`), matching the
-//!   pure-SPLINE mode (the model has no closed spline flag).
+//! * `JOIN CLOSE` welds the contiguous chain and marks the result closed (the
+//!   domain model now carries the SPLINE closed flag, DXF group 70 bit 1). The
+//!   two chain ends must already meet: a gap is refused as `join.not_closed`,
+//!   never bridged with an invented segment.
 //! * Pieces must touch end-to-end (within [`super::join_tolerance`]); JOIN never
 //!   bridges a gap. As in the pure-SPLINE mode the result may be 3D — only the
 //!   POLYLINE result keeps the `join.noncoplanar` scope boundary.
@@ -607,7 +609,11 @@ fn reversed_chain(mut chain: Vec<Span>) -> Vec<Span> {
 /// Interior junctions get knot multiplicity `degree + 1` and keep the shared
 /// endpoint control point on both sides, so the welded curve is exactly the
 /// concatenation of its spans (C0 at the junctions, which is what a weld is).
-fn assemble(spans: &[Span], degree: usize) -> SemanticGeometry {
+///
+/// `closed` only sets the domain flag (DXF group 70 bit 1); the assembled
+/// control polygon is the chain's own, so closing does **not** invent a
+/// duplicate first/last control point.
+fn assemble(spans: &[Span], degree: usize, closed: bool) -> SemanticGeometry {
     let mut control_points = Vec::new();
     let mut weights = Vec::new();
     for span in spans {
@@ -626,22 +632,19 @@ fn assemble(spans: &[Span], degree: usize) -> SemanticGeometry {
         knots,
         control_points,
         weights,
+        closed,
     }
 }
 
-/// Resolve the mixed-type `JOIN MULTIPLE` selection into one exact SPLINE.
+/// Resolve a selection that needs the NURBS weld into one exact SPLINE.
 ///
 /// Called from [`super::plan`]'s MULTIPLE classification when the selection
 /// contains a SPLINE or an ELLIPSE (the all-polyline-family mixes keep their
-/// POLYLINE result).
+/// POLYLINE result), and from the source-object SPLINE branch for every join
+/// (including a pure SPLINE selection) that asks to `Close` — the exact
+/// concatenation path has no closed form, while this weld can set the stored
+/// closed flag.
 pub(super) fn plan_mixed_weld(sources: &[DbEntity], close: bool) -> CadResult<Joined> {
-    if close {
-        return Err(unsupported(
-            "join.close_spline",
-            "JOIN CLOSE on a mixed SPLINE weld is not implemented (the SPLINE model has no \
-             closed flag)",
-        ));
-    }
     let mut chains = Vec::with_capacity(sources.len());
     for source in sources {
         let spans = match &source.geometry {
@@ -672,6 +675,9 @@ pub(super) fn plan_mixed_weld(sources: &[DbEntity], close: bool) -> CadResult<Jo
                 knots,
                 control_points,
                 weights,
+                // A closed source spline is already refused before planning
+                // (`join.closed_object`); its flag does not affect the weld.
+                closed: _,
             } => spline_spans(*degree, knots, control_points, weights)?,
             other => {
                 return Err(unsupported(
@@ -692,7 +698,21 @@ pub(super) fn plan_mixed_weld(sources: &[DbEntity], close: bool) -> CadResult<Jo
         chains.push(spans);
     }
     let chain = chain_spans(chains)?;
+    if close {
+        // JOIN CLOSE never bridges: the chain ends must already meet, and the
+        // assembled control polygon is used as-is (the closed flag is metadata,
+        // not a duplicated endpoint).
+        let head = chain[0].head();
+        let tail = chain.last().expect("a chain has spans").tail();
+        if distance(head, tail) > join_tolerance() {
+            return Err(invalid(
+                "join.not_closed",
+                "JOIN CLOSE needs the welded ends to meet; the selection leaves a gap (JOIN \
+                 never bridges)",
+            ));
+        }
+    }
     let degree = chain.iter().map(Span::degree).max().unwrap_or(1).max(1);
     let elevated: Vec<Span> = chain.iter().map(|span| span.elevated(degree)).collect();
-    Ok(Joined::Raw(assemble(&elevated, degree)))
+    Ok(Joined::Raw(assemble(&elevated, degree, close)))
 }

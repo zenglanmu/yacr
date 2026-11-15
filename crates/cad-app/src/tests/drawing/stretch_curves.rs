@@ -148,6 +148,7 @@ fn spline_of(app: &Application, id: u128) -> (u32, Vec<f64>, Vec<Point3>, Vec<f6
             knots,
             control_points,
             weights,
+            ..
         } => (degree, knots, control_points, weights),
         other => panic!("expected a spline, got {other:?}"),
     }
@@ -181,6 +182,7 @@ fn spline_geometry() -> SemanticGeometry {
             point(6.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0, 1.0],
+        closed: false,
     }
 }
 
@@ -334,6 +336,7 @@ fn stretch_spline_fully_enclosed_with_an_unindexable_definition_refuses_the_comm
             point(6.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0], // one weight short: not indexable
+        closed: false,
     };
     let (mut app, mut session) = build(vec![ent(1, original.clone(), 0)]);
     let before = revision(&app);
@@ -436,6 +439,7 @@ fn a_non_uniform_scale_maps_the_sampled_spline_curve_point_for_point() {
             point(6.0, 4.0),
         ],
         weights: vec![1.0, 0.5, 2.0, 1.0],
+        closed: false,
     };
     // Non-uniform scale + shear: no similarity check would allow this, and a
     // circle/arc/ellipse under it is refused — a spline must not be.
@@ -452,6 +456,7 @@ fn a_non_uniform_scale_maps_the_sampled_spline_curve_point_for_point() {
             knots,
             control_points,
             weights,
+            ..
         } = geometry
         else {
             panic!("expected a spline, got {geometry:?}");
@@ -537,6 +542,7 @@ fn stretch_spline_with_an_unindexable_definition_is_refused_by_name() {
             point(6.0, 0.0),
         ],
         weights: vec![1.0, 1.0, 1.0],
+        closed: false,
     };
     let (mut app, mut session) = build(vec![ent(1, original.clone(), 0)]);
     let before = revision(&app);

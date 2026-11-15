@@ -534,6 +534,7 @@ fn apply_spline(
     knots: &[f64],
     control_points: &[Point3],
     weights: &[f64],
+    closed: bool,
     id: &GripId,
     to: Point3,
 ) -> CadResult<SemanticGeometry> {
@@ -568,8 +569,10 @@ fn apply_spline(
                 knots: knots.to_vec(),
                 control_points: new_points,
                 // Copied verbatim: a control-point drag changes the definition
-                // point only, never the weights or the knot vector.
+                // point only, never the weights, the knot vector or the closed
+                // flag.
                 weights: weights.to_vec(),
+                closed,
             })
         }
         GripKind::Endpoint
@@ -852,7 +855,8 @@ pub fn apply_grip(
             knots,
             control_points,
             weights,
-        } => apply_spline(*degree, knots, control_points, weights, id, to),
+            closed,
+        } => apply_spline(*degree, knots, control_points, weights, *closed, id, to),
         SemanticGeometry::Text {
             text,
             position,

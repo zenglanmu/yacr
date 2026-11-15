@@ -55,6 +55,7 @@ fn migrated_spline_multileader_display_matches_the_pre_p7b_compound() {
             knots,
             control_points,
             weights,
+            ..
         } => {
             assert_eq!(*degree, 3);
             assert!(knots.is_empty());

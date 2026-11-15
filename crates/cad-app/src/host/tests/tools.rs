@@ -914,10 +914,10 @@ fn point_round_trips_through_the_dxf_export_as_one_point() {
 
 #[test]
 fn spline_round_trips_through_the_dxf_export_as_converted() {
-    // ADR 0015 decision F: SPLINE is recorded as `Converted` (the domain has no
-    // closed/periodic flags, so they are written false), **not** `Exact`. The
-    // geometry itself is preserved: the exported SPLINE carries the stored degree,
-    // control points and unit weights.
+    // ADR 0015 decision F: SPLINE is recorded as `Converted` (the domain carries
+    // only the closed flag; periodic/planar/linear are written false), **not**
+    // `Exact`. The geometry itself is preserved: the exported SPLINE carries the
+    // stored degree, control points and unit weights.
     let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
     controller.set_snap_enabled(false);
     controller.new_blank_document().unwrap();
@@ -941,8 +941,8 @@ fn spline_round_trips_through_the_dxf_export_as_converted() {
         report
             .entries
             .iter()
-            .any(|entry| entry.message.contains("closed/periodic")),
-        "the conversion reason names the dropped closed/periodic flags: {:?}",
+            .any(|entry| entry.message.contains("periodic")),
+        "the conversion reason names the dropped periodic/planar/linear flags: {:?}",
         report.entries
     );
 

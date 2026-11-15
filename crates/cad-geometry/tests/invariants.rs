@@ -237,6 +237,7 @@ fn spline_honours_source_knots_instead_of_uniformising() {
         knots,
         control_points: ctrl,
         weights: vec![1.0, 1.0, 1.0],
+        closed: false,
     };
     let pts = tessellate_geometry(&spline, TessellationParams::default());
     let max_y = pts.iter().map(|q| q.y).fold(f64::NEG_INFINITY, f64::max);

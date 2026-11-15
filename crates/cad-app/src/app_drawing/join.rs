@@ -33,11 +33,14 @@
 //! `join.not_contiguous`, `join.layer_mismatch`, `join.space_mismatch`,
 //! `join.sweep_overflow`, `join.degenerate`, `join.not_closed`,
 //! `join.closed_object`, `join.construction_line`, `join.spline_degree`,
-//! `join.spline_clamped`, `join.close_spline`, `join.multiple_spline_mix`,
-//! `join.noncoplanar`.
+//! `join.spline_clamped`, `join.multiple_spline_mix`, `join.noncoplanar`.
 //! A CIRCLE, a closed polyline/spline/ellipse and an XLINE/RAY can never be
 //! joined. Non-coplanar POLYLINE results are refused (`join.noncoplanar`, a 3D
 //! scope boundary); SPLINE joins keep their 3D coordinates.
+//!
+//! `JOIN CLOSE` stores the SPLINE closed flag (DXF group 70 bit 1) on the one
+//! welded curve; the chain ends must already meet, otherwise the write is
+//! refused as `join.not_closed` — a gap is never bridged.
 //!
 //! ## Transaction shape
 //!

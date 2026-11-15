@@ -428,6 +428,7 @@ impl Application {
                 knots,
                 control_points,
                 weights,
+                ..
             } => regions::mass_spline_region(
                 entity,
                 *degree,

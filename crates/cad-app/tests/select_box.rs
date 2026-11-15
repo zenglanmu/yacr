@@ -571,6 +571,7 @@ fn crossing_a_bulge_polyline_or_spline_falls_back_to_aabb() {
         knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
         control_points: vec![point(2.0, 2.0), point(5.0, 8.0), point(8.0, 2.0)],
         weights: vec![1.0, 1.0, 1.0],
+        closed: false,
     };
     assert_eq!(
         crossing_precision(spline),

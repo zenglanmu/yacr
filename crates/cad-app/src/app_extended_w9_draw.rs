@@ -374,6 +374,7 @@ impl Application {
             knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
             control_points: control,
             weights: vec![1.0, 1.0, 1.0, 1.0],
+            closed: false,
         };
         let mut outcome = self.commit_new_entities(session, command, vec![spline], "blend")?;
         outcome.diagnostics.push(diagnostic(

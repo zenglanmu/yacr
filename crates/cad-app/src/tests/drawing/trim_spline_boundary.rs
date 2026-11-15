@@ -15,9 +15,10 @@
 //! `1e-3` world units for the 10-unit shapes below. The assertions use `2e-3`
 //! (`SAMPLE_TOL`), i.e. twice the documented bound, never equality.
 //!
-//! The closed-spline case is deliberately **refused**: `SemanticGeometry::Spline`
-//! carries no closed flag and no boundary plane, so the wholly-inside delete rule
-//! cannot be soundly evaluated for it.
+//! The closed-spline case is deliberately **refused**: TRIM treats a SPLINE
+//! boundary as an open sampled curve (its stored closed flag is not a region
+//! model) and it has no boundary plane, so the wholly-inside delete rule cannot be
+//! soundly evaluated for it.
 
 use super::*;
 
@@ -88,6 +89,7 @@ fn quadratic_spline(id: u128, p0: Point3, p1: Point3, p2: Point3, order: i64) ->
             knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             control_points: vec![p0, p1, p2],
             weights: Vec::new(),
+            closed: false,
         },
         order,
     )
@@ -114,6 +116,7 @@ fn closed_ring_spline(id: u128, corners: &[Point3], order: i64) -> DbEntity {
             knots,
             control_points: control,
             weights: Vec::new(),
+            closed: false,
         },
         order,
     )
@@ -403,9 +406,10 @@ fn a_spline_that_contributes_no_cut_does_not_add_an_approximation_note() {
 #[test]
 fn trim_refuses_closed_spline_containment_instead_of_deleting_the_target() {
     // A closed degree-1 spline ring around the target: the target has no cut and
-    // looks "wholly inside", but a SPLINE has no closed flag and no boundary plane,
-    // so the delete rule cannot be soundly evaluated. The combination is refused by
-    // name (`Unsupported`) — never deleted, never a fabricated containment.
+    // looks "wholly inside", but TRIM treats a SPLINE boundary as an open sampled
+    // curve with no boundary plane, so the delete rule cannot be soundly
+    // evaluated. The combination is refused by name (`Unsupported`) — never
+    // deleted, never a fabricated containment.
     let mut app = app_of(vec![
         line(1, point(2.0, 5.0), point(3.0, 5.0), 0),
         closed_ring_spline(

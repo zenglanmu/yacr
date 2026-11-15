@@ -25,6 +25,7 @@ fn fit_spline() -> SemanticGeometry {
         knots,
         control_points,
         weights: vec![1.0; fit.len()],
+        closed: false,
     }
 }
 
@@ -38,6 +39,7 @@ fn linear_spline() -> SemanticGeometry {
         knots: vec![0.0, 0.0, 1.0, 2.0, 2.0],
         control_points: vec![point(0.0, 0.0), point(3.0, 0.0), point(3.0, 4.0)],
         weights: vec![1.0; 3],
+        closed: false,
     }
 }
 
@@ -54,6 +56,7 @@ fn spline_parts(geometry: &SemanticGeometry) -> (u32, Vec<f64>, Vec<Point3>, Vec
             knots,
             control_points,
             weights,
+            ..
         } => (
             *degree,
             knots.clone(),
@@ -308,6 +311,7 @@ fn a_closed_spline_frame_is_refused_by_name() {
             point(0.0, 0.0),
         ],
         weights: vec![1.0; 5],
+        closed: false,
     };
     for (mode, value) in [(DELTA, 1.0), (DELTA, -1.0), (TOTAL, 20.0)] {
         let (mut app, mut session) = app_with(vec![curve_entity(
@@ -334,6 +338,7 @@ fn spline_degenerate_and_collapsing_requests_are_refused_by_name() {
         knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
         control_points: vec![point(2.0, 2.0); 3],
         weights: vec![1.0; 3],
+        closed: false,
     };
     let (mut app, mut session) = app_with(vec![curve_entity(
         1,
@@ -371,6 +376,7 @@ fn spline_degenerate_and_collapsing_requests_are_refused_by_name() {
         knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
         control_points: vec![point(0.0, 0.0), point(1.0, 1.0), point(1.0, 1.0)],
         weights: vec![1.0; 3],
+        closed: false,
     };
     let (mut app, mut session) = app_with(vec![curve_entity(
         1,
@@ -398,6 +404,7 @@ fn spline_degenerate_and_collapsing_requests_are_refused_by_name() {
             point(3.0, -1.0),
         ],
         weights: vec![1.0; 4],
+        closed: false,
     };
     let (mut app, mut session) = app_with(vec![curve_entity(
         1,

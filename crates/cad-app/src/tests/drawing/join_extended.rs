@@ -275,6 +275,7 @@ fn spline_source_concatenates_contiguous_pieces_exactly() {
             knots,
             control_points,
             weights,
+            ..
         } => {
             assert_eq!(degree, 3);
             assert_eq!(control_points.len(), 8, "both control frames are kept");
@@ -399,6 +400,7 @@ fn evaluate_weld(app: &Application, t: f64) -> Point3 {
             knots,
             control_points,
             weights,
+            ..
         } => NurbsCurve::new(degree as usize, control_points, knots, weights)
             .expect("valid weld")
             .evaluate(t),
@@ -413,6 +415,7 @@ fn spline_cps(app: &Application) -> (u32, Vec<f64>, Vec<Point3>, Vec<f64>) {
             knots,
             control_points,
             weights,
+            ..
         } => (degree, knots, control_points, weights),
         other => panic!("expected one SPLINE, got {other:?}"),
     }
@@ -446,6 +449,7 @@ fn multiple_mode_welds_a_line_and_a_spline_exactly() {
         knots,
         control_points,
         weights,
+        ..
     } = source
     else {
         unreachable!()
@@ -829,40 +833,6 @@ fn multiple_mode_refuses_a_degenerate_ellipse_mix_by_name() {
         assert_eq!(entity_count(&app), 2, "{label}: no partial write");
         assert_eq!(undo_depth(&app), 0, "{label}: no undo entry");
     }
-}
-
-#[test]
-fn multiple_mode_refuses_a_closed_mixed_weld() {
-    // JOIN CLOSE on a mixed weld is refused by name (no closed spline flag).
-    let (mut app, mut session) = app_with(vec![
-        line_entity(1, LayerId(0), line_geometry(0.0, 0.0, 4.0, 0.0), 0),
-        part(
-            2,
-            spline_geometry(
-                vec![
-                    point(4.0, 0.0),
-                    point(5.0, 2.0),
-                    point(7.0, 2.0),
-                    point(0.0, 0.0),
-                ],
-                3,
-            ),
-            LayerId(0),
-            SpaceId::Model,
-            "AcDbSpline",
-            1,
-        ),
-    ]);
-    let before_revision = revision(&app);
-    select(&mut app, &mut session, &[1, 2]);
-    let error = join_with(&mut app, &mut session, true, JoinMode::Multiple).unwrap_err();
-    assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
-    assert!(
-        format!("{error:?}").contains("join.close_spline"),
-        "{error:?}"
-    );
-    assert_eq!(revision(&app), before_revision);
-    assert_eq!(undo_depth(&app), 0);
 }
 
 #[test]

@@ -71,14 +71,14 @@ fn polyline(id: u128, points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> ca
 
 /// A clamped-uniform spline over `control_points` (`weights` empty = all 1).
 fn spline(id: u128, control_points: Vec<Point3>, degree: u32) -> cad_db::DbEntity {
-    let knots = cad_geometry::clamped_uniform_knots(control_points.len(), degree as usize);
     entity(
         id,
         SemanticGeometry::Spline {
             degree,
-            knots,
+            knots: cad_geometry::clamped_uniform_knots(control_points.len(), degree as usize),
             control_points,
             weights: Vec::new(),
+            closed: false,
         },
     )
 }

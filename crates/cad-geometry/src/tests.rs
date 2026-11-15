@@ -387,6 +387,72 @@ fn mask_tessellates_to_a_closed_boundary() {
     assert_eq!(out.first(), out.last());
 }
 
+#[test]
+fn closed_spline_tessellates_to_a_closed_loop() {
+    // DXF group 70 bit 1 is carried as `closed`; the sampled polyline must then
+    // end where it starts, and the extra seam vertex is the *only* difference
+    // from the open tessellation of the same stored control polygon.
+    let control_points = vec![p(0.0, 0.0), p(4.0, 0.0), p(4.0, 4.0), p(0.0, 4.0)];
+    let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    let weights = vec![1.0; 4];
+    let open = SemanticGeometry::Spline {
+        degree: 3,
+        knots: knots.clone(),
+        control_points: control_points.clone(),
+        weights: weights.clone(),
+        closed: false,
+    };
+    let closed = SemanticGeometry::Spline {
+        degree: 3,
+        knots,
+        control_points,
+        weights,
+        closed: true,
+    };
+    let params = TessellationParams::default();
+    let open_pts = tessellate_geometry(&open, params);
+    let closed_pts = tessellate_geometry(&closed, params);
+    assert!(open_pts.len() >= 3);
+    assert_ne!(
+        open_pts.first(),
+        open_pts.last(),
+        "an open spline's path must not be closed by the tessellator"
+    );
+    assert_eq!(
+        closed_pts.first(),
+        closed_pts.last(),
+        "a closed spline's path ends at its start"
+    );
+    assert_eq!(
+        &closed_pts[..closed_pts.len() - 1],
+        &open_pts[..],
+        "only the seam vertex is added: the stored control polygon is untouched"
+    );
+}
+
+#[test]
+fn closed_spline_with_coincident_ends_gains_no_duplicate_vertex() {
+    // Some sources close a spline by repeating the end control point instead of
+    // setting the flag. When the tessellation already ends at its start, the
+    // closed flag must not append a second, coincident seam vertex.
+    let control_points = vec![p(0.0, 0.0), p(4.0, 0.0), p(4.0, 4.0), p(0.0, 0.0)];
+    let spline = SemanticGeometry::Spline {
+        degree: 3,
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        control_points,
+        weights: vec![1.0; 4],
+        closed: true,
+    };
+    let out = tessellate_geometry(&spline, TessellationParams::default());
+    assert!(out.len() >= 3);
+    assert_eq!(out.first(), out.last());
+    assert_ne!(
+        out[out.len() - 1],
+        out[out.len() - 2],
+        "the coincident seam is kept exactly once"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Bounded approximate intersection fallback
 // ---------------------------------------------------------------------------

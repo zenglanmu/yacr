@@ -29,6 +29,7 @@ fn spline_parts(app: &Application, object: ObjectId) -> (u32, Vec<f64>, Vec<Poin
             knots,
             control_points,
             weights,
+            ..
         } => (
             *degree,
             knots.clone(),
@@ -355,6 +356,7 @@ fn execute_cv_spline(
             knots,
             control_points,
             weights,
+            closed: false,
         })),
     )?;
     Ok(spline_parts(app, outcome.objects[0]))
@@ -516,6 +518,7 @@ fn create_spline_cv_method_refuses_unsupported_degrees_and_short_lists() {
                 knots: Vec::new(),
                 control_points: control_points.clone(),
                 weights: Vec::new(),
+                closed: false,
             })),
         )
         .unwrap_err();
@@ -555,6 +558,7 @@ fn create_spline_cv_method_surfaces_the_database_knot_relation_refusal() {
             knots: vec![0.0, 0.0, 0.0, 1.0, 1.0],
             control_points,
             weights: vec![1.0; 4],
+            closed: false,
         })),
     )
     .unwrap_err();

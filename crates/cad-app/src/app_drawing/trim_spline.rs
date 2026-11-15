@@ -44,11 +44,11 @@
 //! continuation, appended as one extra clamped span). This module owns the target
 //! model both commands share; see that module for the rule and its refusals.
 //!
-//! A spline target is **not** periodic here: `SemanticGeometry::Spline` carries no
-//! closed flag, so a closed spline is treated as an open curve and its seam is
-//! simply its start/end (same reasoning as the containment refusal in
-//! `super::trim_curves`). EXTEND detects a closed **frame** (first control point ==
-//! last) itself and refuses it by name (`extend.spline_closed`).
+//! A spline target carries the stored closed flag (DXF group 70 bit 1), so a
+//! closed spline is known to be closed rather than guessed from its endpoints
+//! ([`SplineTarget::is_closed`]). TRIM still splits it as an open curve over its
+//! stored domain, and EXTEND refuses it by name (`extend.spline_closed`) because
+//! it has no end to extend.
 
 use super::*;
 use cad_geometry::{nearest_point_parameter, NurbsCurve, TessellationParams};
@@ -86,6 +86,9 @@ pub(crate) struct SplineTarget {
     /// The same curve as a stored `SemanticGeometry::Spline`, handed to the
     /// intersector so it never has to re-derive the shorthands itself.
     geometry: SemanticGeometry,
+    /// The source's closed flag (DXF group 70 bit 1). Closedness is read through
+    /// [`Self::is_closed`], never inferred at the use site.
+    closed: bool,
     /// Diagonal of the control-polygon box, i.e. the scale the sampled fallback
     /// uses for this same curve.
     extent: f64,
@@ -106,6 +109,7 @@ impl SplineTarget {
         knots: &[f64],
         control_points: &[Point3],
         weights: &[f64],
+        closed: bool,
     ) -> CadResult<Self> {
         let curve = cad_geometry::expand_spline_source(degree, knots, control_points, weights)?;
         let extent = cad_geometry::control_polygon_extent(curve.control_points());
@@ -115,10 +119,12 @@ impl SplineTarget {
             knots: curve.knots().to_vec(),
             control_points: curve.control_points().to_vec(),
             weights: curve.weights().to_vec(),
+            closed,
         };
         Ok(Self {
             curve,
             geometry,
+            closed,
             extent,
             length,
         })
@@ -127,6 +133,17 @@ impl SplineTarget {
     /// The target's world length (a sampled polyline length; see the constant).
     pub(super) fn length(&self) -> f64 {
         self.length
+    }
+
+    /// Whether the target is a closed curve.
+    ///
+    /// The stored closed flag (DXF group 70 bit 1) is authoritative; a legacy
+    /// definition with coincident first/last control points and no flag bit is
+    /// still recognised as closed by [`cad_domain::is_closed_spline`]. A closed
+    /// curve has no free end, so TRIM/EXTEND/LENGTHEN refuse or split it by name
+    /// instead of treating its seam as an ordinary endpoint.
+    pub(super) fn is_closed(&self, tol: f64) -> bool {
+        cad_domain::is_closed_spline(self.closed, self.curve.control_points(), tol)
     }
 
     /// The validated source curve, for the EXTEND tangent-continuation planner
@@ -215,6 +232,9 @@ impl SplineTarget {
             knots: sub.knots,
             control_points: sub.control_points,
             weights: sub.weights,
+            // The kept window is a strict sub-curve of the target, so it is open
+            // even when the target was closed: TRIM never returns the whole loop.
+            closed: false,
         })
     }
 

@@ -452,9 +452,9 @@ fn require_no_vertex_collapse(out: &[Point3], dirs: &[Point3], tol: f64) -> CadR
 // points are the sampled offsets (stored with the `knots: []` clamped-uniform
 // shorthand and `weights: []` all-ones shorthand). The curve interpolates its
 // first and last sample; interior samples are approximated. A full ellipse
-// repeats its first sample at the end, so the result closes visually; the
-// domain has no closed-spline flag, and that is stated here rather than
-// invented in the geometry.
+// repeats its first sample at the end, so the result closes visually. The
+// sampled result is stored open (`closed: false`): closing it is a property of
+// the source ring, not of the sampling, so the flag is not invented here.
 // ---------------------------------------------------------------------------
 
 /// The world sampling tolerance shared by both sampled arms.
@@ -490,6 +490,7 @@ pub(super) fn spline_through_points(points: Vec<Point3>) -> CadResult<SemanticGe
         knots: Vec::new(),
         control_points: points,
         weights: Vec::new(),
+        closed: false,
     })
 }
 

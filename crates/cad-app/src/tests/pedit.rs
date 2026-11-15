@@ -876,6 +876,7 @@ fn touching_spline() -> SemanticGeometry {
             p3(9.0, 0.0, 0.0),
         ],
         weights: vec![1.0; 4],
+        closed: false,
     }
 }
 

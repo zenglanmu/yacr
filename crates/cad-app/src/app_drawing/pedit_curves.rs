@@ -86,6 +86,7 @@ pub(super) fn convert_to_polyline(geometry: &SemanticGeometry) -> CadResult<Sema
             knots,
             control_points,
             weights,
+            ..
         } => {
             if control_points.len() < 2 {
                 return Err(invalid(
@@ -331,6 +332,7 @@ pub(super) fn reverse_spline(
     knots: &[f64],
     control_points: &[Point3],
     weights: &[f64],
+    closed: bool,
 ) -> SemanticGeometry {
     let n = control_points.len();
     let mut points = control_points.to_vec();
@@ -348,6 +350,8 @@ pub(super) fn reverse_spline(
         knots,
         control_points: points,
         weights,
+        // Reversing a curve cannot open or close it.
+        closed,
     }
 }
 
@@ -356,8 +360,10 @@ pub(super) fn reverse_spline(
 ///
 /// Returns `(points, bulges, closed)`. The closed form is checked first: its
 /// control frame repeats the first vertex, so a unit-weight clamped-uniform
-/// frame that ends where it starts is read as the closed ring (the SPLINE model
-/// has no periodic flag — a declared ambiguity, documented in the module docs).
+/// frame that ends where it starts is read as the closed ring. That repeated end
+/// point — not the stored closed flag — is what the restore has to drop, so the
+/// detection stays geometric (a declared ambiguity, documented in the module
+/// docs).
 pub(super) fn pedit_spline_restore(
     degree: &u32,
     knots: &[f64],

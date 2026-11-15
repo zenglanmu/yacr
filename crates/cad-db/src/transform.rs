@@ -316,6 +316,7 @@ pub fn transform_geometry(
             knots,
             control_points,
             weights,
+            closed,
         } => {
             let mapped: Vec<Point3> = control_points
                 .iter()
@@ -335,6 +336,9 @@ pub fn transform_geometry(
                 knots: knots.clone(),
                 control_points: mapped,
                 weights: weights.clone(),
+                // Closedness is a topological fact about the curve, invariant
+                // under any affine map.
+                closed: *closed,
             }
         }
         SemanticGeometry::Shape { .. } => {

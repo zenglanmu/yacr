@@ -242,6 +242,10 @@ impl SplineCurve {
             knots: sub.knots,
             control_points: sub.control_points,
             weights: sub.weights,
+            // FILLET keeps a strict sub-curve of the target (the whole-curve case
+            // returns early), so the kept side is an open curve even when the
+            // source was closed.
+            closed: false,
         })
     }
 }

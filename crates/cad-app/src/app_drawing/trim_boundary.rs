@@ -9,8 +9,9 @@
 //! **plane-aware** inside test, because a tilted outline projects to a real XY
 //! polygon and a flat XY ray cast would delete targets that never touch it.
 //!
-//! A SPLINE boundary deliberately does **not** take part in that delete rule: a
-//! [`SemanticGeometry::Spline`] carries no closed flag and no boundary plane, so
+//! A SPLINE boundary deliberately does **not** take part in that delete rule: TRIM
+//! splits a spline's stored knot domain as an open interval (the closed flag is not
+//! turned into a region model) and a spline boundary has no boundary plane, so
 //! there is no sound closed test to run. A target wholly inside a closed spline is
 //! therefore refused by name instead of being deleted (see `plan_trim`).
 //!
@@ -291,8 +292,9 @@ pub(crate) fn collect_boundaries(
         }
         SemanticGeometry::Spline { .. } => {
             // Accepted as a *sampled* boundary. No `closed_outlines`/`closed_curves`
-            // entry: a spline has no closed flag and no boundary plane, so the
-            // wholly-inside delete rule is refused by name in `plan_trim`.
+            // entry: TRIM treats a spline boundary as an open sampled curve with no
+            // boundary plane, so the wholly-inside delete rule is refused by name in
+            // `plan_trim`.
             set.primitives.push(geometry.clone());
             set.spline_boundaries += 1;
             Ok(())

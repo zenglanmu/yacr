@@ -398,6 +398,7 @@ fn explode_refuses_a_selection_with_nothing_decomposable_and_writes_nothing() {
                 point(2.0, 1.0),
             ],
             weights: vec![1.0; 4],
+            closed: false,
         },
         SemanticGeometry::Shape {
             shape_name: "x".into(),
@@ -451,6 +452,7 @@ fn explode_refuses_a_non_decomposable_child_explicitly_by_kind() {
                 point(2.0, 1.0),
             ],
             weights: vec![1.0; 4],
+            closed: false,
         },
         SemanticGeometry::Shape {
             shape_name: "x".into(),

@@ -1812,7 +1812,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `CHAMFER` | **完整实现** | `Distance`/`Angle`/`Method`/`Trim`；双零 ⇒ 仅延伸相交；`CHAMFER POLYLINE` 全顶点、弧段替换、过短跳过、开口闭合 | `Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离未文档化 ⇒ 具名拒绝；圆弧/圆/样条 AutoCAD 也不接受 |
 | `FILLET` | 完整实现 | 见 2026-11-15 行：任意 2D 平面对 `R>0` 相切弧 + `R=0` 尖角，一条事务/一步撤销 | 仅全局交互范围（`Multiple`/`Undo`/多解循环） |
 | `PEDIT` | 部分实现 | 全选项行；`Join` 接受线/弧/多段线；`Fit`/`Spline` 含闭合环；`Decurve`/`Reverse`/`Undo`；LINE/ARC/SPLINE 转换 | **`Width`/`Ltype gen`/`Edit vertex` 未实现**（多段线无宽度/`plinegen`/顶点子菜单模型）；偶数环无精确弧拟合 ⇒ `pedit.fit_closure` |
-| `JOIN` | 部分实现 | 源对象模式；`Multiple` 把 LINE/ARC/多段线/SPLINE/椭圆弧精确焊接为**有理 B 样条**（椭圆弧 = 圆有理二次的精确仿射像） | `JOIN CLOSE` 的混合 SPLINE 仍拒绝；非共面多段线属 3D 全局范围 |
+| `JOIN` | 完整实现 | 源对象模式；`Multiple` 把 LINE/ARC/多段线/SPLINE/椭圆弧精确焊接为**有理 B 样条**；`JOIN CLOSE` 的混合 SPLINE 焊接后置 `Spline.closed`（DXF 70 bit 1 往返，闭合样条按闭环出图/拾取），一条事务/一步撤销 | 链端不重合 `join.not_closed`、有间隙 `join.not_contiguous`（不桥接）、已闭合对象作源 `join.closed_object`；焊接仍是 C0 拼接（非周期/平滑）；非共面多段线属 3D 全局范围 |
 | `OFFSET` | **完整实现** | `Through`/`Erase`/`Layer`/`Multiple`（单步）/距离；椭圆与椭圆弧→样条；`OFFSETGAPTYPE` Sharp/**Fillet**/**Chamfer** | `OFFSET MULTIPLE` 的多点循环拒绝（单点捕获，属逐选项提示全局范围）；开放折线远端自交未检查（AutoCAD 未文档化） |
 | `STRETCH` | 完整实现 | 交叉矩形、交叉多边形（点击 + `CONFIRM`/回点首顶点闭合）与自由手绘 lasso（拖拽采样、释放闭合、CROSSING 预览）都经工具捕获进入同一 `polygon_window` 规划；even-odd 包含；部分包围逐顶点、完全包围整移；圆按圆心、块/文字按插入点；标注按定义点；一条事务/一步撤销 | `MULTILEADER` 整命令拒绝；环<3 顶点/非有限/零面积/未闭合具名拒绝；仅 2D 平面视图；lasso 采样是原始指针点（不经捕捉/正交） |
 | `MIRROR` | 部分实现 | `MIRRTEXT=0` 可读镜像；`MIRROR ERASE YES/NO`；标注反射后重合成 | **`MIRRTEXT=1` 字形镜像未实现**（文字实体无镜像标志） |

@@ -141,6 +141,7 @@ fn app_with_objects() -> (Application, SessionState) {
                 point(3.0, 0.0),
             ],
             weights: vec![1.0; 4],
+            closed: false,
         },
     ))
     .unwrap();

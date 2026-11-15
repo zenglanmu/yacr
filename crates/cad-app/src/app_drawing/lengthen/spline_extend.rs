@@ -46,9 +46,10 @@
 //!
 //! # Refusals (all write nothing)
 //!
-//! * `lengthen.closed_spline` — first control point == last (the domain model has
-//!   no closed flag, so a closed *frame* is the only signal; a closed curve has no
-//!   end to move, like a CIRCLE);
+//! * `lengthen.closed_spline` — the stored SPLINE closed flag is set (or the
+//!   documented legacy case of coincident first/last control points), so the
+//!   curve has no end to move, like a CIRCLE; see
+//!   [`super::super::trim_spline::SplineTarget::is_closed`];
 //! * `lengthen.spline_unclamped` — the moving end is not clamped (multiplicity
 //!   `degree + 1`), so appending a span would change the existing curve instead of
 //!   adding a tail; the definition is refused rather than silently re-clamped;
@@ -62,19 +63,7 @@
 use super::super::trim_curves::cut_tolerance;
 use super::refusal;
 use cad_domain::{CadResult, Point3, SemanticGeometry};
-use cad_geometry::{add, distance, length, scale, NurbsCurve};
-
-/// Whether the stored SPLINE is a closed **frame** (`first == last` control
-/// point).
-///
-/// `SemanticGeometry::Spline` carries no closed flag (`super::super::trim_spline`),
-/// so this is the only signal a LENGTHEN can read; a closed curve has no end to
-/// move, so it is refused by name instead of being treated as an open curve whose
-/// end happens to sit on its start.
-pub(super) fn is_closed_frame(curve: &NurbsCurve, tol: f64) -> bool {
-    let points = curve.control_points();
-    points.len() >= 2 && distance(points[0], *points.last().expect("non-empty")) <= tol
-}
+use cad_geometry::{add, length, scale, NurbsCurve};
 
 /// The outward unit tangent at the curve's start or end: `−C'(t_min)` for the
 /// start, `+C'(t_max)` for the end (the direction the curve would grow).
@@ -134,6 +123,7 @@ pub(super) fn extend_spline(
         knots: result.knots().to_vec(),
         control_points: result.control_points().to_vec(),
         weights: result.weights().to_vec(),
+        closed: false,
     })
 }
 

@@ -137,6 +137,7 @@ fn spline() -> SemanticGeometry {
             p3(9.0, 2.0, 0.0),
         ],
         weights: vec![1.0, 0.75, 1.25, 1.0],
+        closed: false,
     }
 }
 
@@ -266,6 +267,7 @@ fn reverse_spline_satisfies_new_t_equals_old_one_minus_t() {
         knots,
         control_points,
         weights,
+        ..
     } = original.clone()
     else {
         panic!();
@@ -280,6 +282,7 @@ fn reverse_spline_satisfies_new_t_equals_old_one_minus_t() {
         knots,
         control_points,
         weights,
+        ..
     } = geometry(&app, 1)
     else {
         panic!("the spline must stay a spline");

@@ -929,6 +929,8 @@ fn path_geometry(points: &[Point3], path_type: MLeaderPathType) -> Option<Semant
                 knots: Vec::new(),
                 control_points: points.to_vec(),
                 weights: Vec::new(),
+                // A leader path is an open run from text to arrowhead.
+                closed: false,
             })
         }
     }

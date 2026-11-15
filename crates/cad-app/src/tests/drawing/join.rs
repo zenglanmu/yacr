@@ -184,6 +184,7 @@ fn spline_geometry(control_points: Vec<Point3>, degree: u32) -> SemanticGeometry
         knots: clamped_uniform_knots(n, degree as usize),
         control_points,
         weights: vec![1.0; n],
+        closed: false,
     }
 }
 
@@ -630,3 +631,8 @@ fn viewer_mode_refuses_join() {
 
 #[path = "join_extended.rs"]
 mod extended;
+
+// The `JOIN CLOSE` closed-spline contracts live in their own file (code-size
+// limit); a private helper module of these tests.
+#[path = "join_close.rs"]
+mod close;

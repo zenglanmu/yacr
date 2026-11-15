@@ -77,6 +77,7 @@ fn quadratic_spline(id: u128, order: i64) -> DbEntity {
             knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             control_points: vec![point(2.0, -2.0), point(5.0, 4.0), point(8.0, -2.0)],
             weights: Vec::new(),
+            closed: false,
         },
         order,
     )
@@ -92,6 +93,7 @@ fn quarter_circle_spline(id: u128, order: i64) -> DbEntity {
             knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             control_points: vec![point(1.0, 0.0), point(1.0, 1.0), point(0.0, 1.0)],
             weights: vec![1.0, std::f64::consts::FRAC_1_SQRT_2, 1.0],
+            closed: false,
         },
         order,
     )
@@ -113,6 +115,7 @@ fn shorthand_spline(id: u128, order: i64) -> DbEntity {
                 point(9.0, 0.0),
             ],
             weights: Vec::new(),
+            closed: false,
         },
         order,
     )
@@ -145,6 +148,7 @@ fn expect_spline(app: &Application, id: u128) -> (u32, Vec<f64>, Vec<Point3>, Ve
             knots,
             control_points,
             weights,
+            ..
         } => (degree, knots, control_points, weights),
         other => panic!("the trimmed target must stay a SPLINE, got {other:?}"),
     }

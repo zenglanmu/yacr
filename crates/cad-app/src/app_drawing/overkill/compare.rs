@@ -135,12 +135,14 @@ pub(super) fn same_duplicate_geometry(
                 knots: a_knots,
                 control_points: a_points,
                 weights: a_weights,
+                ..
             },
             SemanticGeometry::Spline {
                 degree: b_degree,
                 knots: b_knots,
                 control_points: b_points,
                 weights: b_weights,
+                ..
             },
         ) => {
             a_degree == b_degree

@@ -519,6 +519,7 @@ fn unsupported_boundary_kinds_are_refused_by_name() {
                 point(3.0, 0.0),
             ],
             weights: vec![1.0; 4],
+            closed: false,
         },
     )]);
     assert_refused(&mut app, &mut session, &[1], "AcDbSpline");
