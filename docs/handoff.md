@@ -116,10 +116,10 @@
 > 新 → 旧。标题带日期与主题；每条末尾写证据边界（实跑 / NOT RUN / NOT VERIFIED）。
 > 再往前（`2026-11-12` 及更早）的条目见 `docs/handoff-archive/`。
 
-## 2026-11-15 晋升计划 P4/P5：`LAYDEL`/`LAYTHW`/`RENAME`/`LAYMRG`/`LAYOUTWIZARD` 升为完整实现（真机 GUI 证据）
+## 2026-11-15 晋升计划 P4/P5：`LAYDEL`/`LAYTHW`/`RENAME`/`LAYMRG`/`LAYOUTWIZARD`/`LENGTHEN`/`FILLET`/`CLIP`/`CLIPIT` 升为完整实现（真机 GUI 证据）
 
-- **范围**：覆盖清单「部分实现 → 完整实现 晋升计划」的 7 个命令名晋升为**完整实现**
-  （总计 **107 → 115 完整 / 872 → 864 部分**，981 条总数不变）：
+- **范围**：覆盖清单「部分实现 → 完整实现 晋升计划」的 **12 个命令名**晋升为**完整实现**
+  （总计 **107 → 119 完整 / 872 → 860 部分**，981 条总数不变）：
   - `LAYDEL`/`-LAYDEL`：删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内**的全部实体
     （单一 `entities` 表按 `layer` 过滤），并剪除各图纸视口该层的 `layer_overrides` 键；选择输入也接受
     **图纸空间顶层实体**（块内成员/子元素按 `laydel.block_space` 拒绝）；实体补丁 + 布局补丁 + 层行
@@ -134,6 +134,16 @@
     等分格视口排列，铺在本次 Authored 纸张上（复用 `VPORTS` 的网格助手），布局行/视口/页面设置一条
     `LayoutPatch`/一步撤销；未知排列/未知键/重复键/缺值具名拒绝且不写；打印设备/打印样式/标题栏逐条
     `layoutwizard.*_not_implemented`（明说未应用）。
+  - `LENGTHEN`：开放样条**延长**改为声明的**端点切线直尾**策略（沿单位端切线追加一个钳制节点段，
+    `degree+1` 个共线等距控制点，尾长恰为增量；原曲线在自身节点域上逐点不变；接缝只 C0/G1、曲率不延续），
+    缩短仍是精确子曲线；闭合/未钳制/切线退化/非正增量具名拒绝。
+  - `FILLET`：`R>0` 覆盖 SPLINE 与 LINE/ARC/CIRCLE/ELLIPSE/SPLINE 的任意组合（SPLINE 用精确 `sub_curve`），
+    `R=0` 覆盖全部平面对（CIRCLE↔CIRCLE 复用 TRIM 的两交点 CIRCLE→ARC 规则把两个圆都切成拾取侧弧；
+    LINE↔ARC 现在也修剪弧，旧实现只动直线）；`Multiple`/`Undo`/多解循环属全局交互范围。
+  - `CLIP`/`CLIPIT`：从具名拒绝改为真实命令，分派到既有 `IMAGECLIP`/`XCLIP` 写路径
+    （`RECT`/`POLY`/`ON`/`OFF`/`DELETE`；`CLIPIT` 用选择里的 `LINE`/`ARC`/`LWPOLYLINE` 建闭合边界），
+    并在写入前按名字拒绝表示层画不出的情形（块多边形裁剪、非凸/自交图像环、旋转/倾斜参照、底图），
+    所以没有"存了但不画"的静默成功；UI 退出拒绝名单并接线键入语法。
   - `RENAME`/`-RENAME`：`LINETYPE` kind 不再是具名拒绝；改名与层属性/实体属性的线型引用级联在
     `cad-db` 的**单次校验写入**内完成（一次 revision、一次 `ChangeSet`），撤销/重做对称。`Continuous`
     不可改名，创建/删除线型仍不支持。
@@ -152,6 +162,17 @@
   - 同图：`LAYOUTWIZARD SheetGui A5 148 210 ARRANGE Four` → 新增布局 `SheetGui`、`viewportCount=4`；
     `UNDO` 移除；`ARRANGE ThreeRight` 按 `layoutwizard.unknown_arrangement` 拒绝且不建布局
     （`/tmp/opencode/evidence-layoutwizard/`）。
+  - 空图纸（`/tmp/opencode/empty.dxf`）：`LINE` 画一条线 → `SELECTALL`（选中 1）→ 设
+    `lengthenMode=0`/`lengthenValue=1.5` → `LENGTHEN` 受理且 `error=null`；`UNDO` 移除该线
+    （`/tmp/opencode/evidence-lengthen/`）。**边界**：`cad_status` 没有几何通道，真机只证"命令在真机宿主上
+    受理且不报错"，长度/控制点的正确性由契约测试钉住。
+  - FILLET 真机：既有 `YACR_PROBE_DRAW_EVIDENCE` 驱动在真机上画出两条线（`entityCount` 4→5→6）、设半径 0.8/0.12、
+    FILLET 两次拾取都推进到 `points=2, ready` 并派发 CONFIRM（`/tmp/opencode/evidence-fillet-driver3/`）；
+    宿主的证据生命周期在 CONFIRM 后立刻退出，**没有**抓到 `+1` 的 entityCount 快照，故 FILLET 的几何结果只由
+    契约测试（78 fillet + 134 trim）证明。
+  - CLIP 真机（`flange.dxf`）：`QSELECT TYPE = INSERT` 没有命中（该图模型空间无 INSERT），`CLIP RECT` 返回
+    `clip.no_selection` 具名拒绝（`/tmp/opencode/evidence-clip/`）——证明命令在真机宿主上接线并被拒绝路径覆盖；
+    成功写入路径由 64 个 clip 契约测试（含真实图像/块写入、旋转拒绝、非凸拒绝）证明。
 - **真机验证抓到两个契约测试没覆盖的真问题（已修）**：
   1. `LAYDEL` 在图纸空间选择时被 `laydel.selection` 拒绝——选择预检写死模型空间。改为命令内自带的
      「模型空间或任一图纸布局的顶层实体」规则（`layer_extended.rs` 本地 helper，不动共享
@@ -165,6 +186,7 @@
      类撤销也一并修复（`erase_undo_restores_an_imported_zero_length_line`）。
 - **测试**：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、
   `layer_commands` **69 passed**、`rename` **15 passed**、`layout` **47 passed**、`layoutwizard` **7 passed**、
+  `lengthen` **37 passed**、`fillet` **78 passed**、`chamfer` **33 passed**、`trim` **134 passed**、`clip` **64 passed**、
   整个 `cad-app` **2661 passed / 3 ignored**、`history` 16 passed、`undo` 170 passed、`cad-ui-core
   layout_arguments` 12 passed、`cad-db` 全量（245+13+5）passed、`cad-history` 28 passed；`cargo clippy -p cad-db -p cad-app --all-targets` 干净；
   `cargo fmt` 干净；`check-file-size.py` / `check-i18n.py`（2913 键）/ `check-architecture.py` 通过。
