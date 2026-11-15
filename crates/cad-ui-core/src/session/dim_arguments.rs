@@ -122,12 +122,15 @@ pub fn parse_dimstyle_argument(argument: &str) -> Option<DimStyleCommand> {
     }
 }
 
-/// Parse `DIMTEDIT MOVE <x> <y>|LEFT|RIGHT|CENTER|HOME|ANGLE <degrees>`.
+/// Parse `DIMTEDIT MOVE <x> <y>|LEFT|RIGHT|CENTER|HOME|ANGLE <degrees>|OBLIQUE
+/// <degrees>`.
 ///
 /// The coordinates/angle use the repository's one signed plain-decimal grammar
 /// (no exponent, no bare `.`/`5.`). No other word, partial spelling or trailing
 /// token is admitted. `ROTATE` is **not** an option of AutoCAD 2026 `DIMTEDIT`
-/// (that is `DIMEDIT`'s Rotate); the orientation option is `ANGLE`.
+/// (that is `DIMEDIT`'s Rotate); the orientation option is `ANGLE`. `OBLIQUE` is
+/// parsed so the command can refuse it by name (the build's text model stores no
+/// glyph oblique angle) instead of the option reading as malformed.
 pub fn parse_dimtedit_argument(argument: &str) -> Option<DimTextEditCommand> {
     let tokens: Vec<&str> = argument.split_whitespace().collect();
     match tokens.as_slice() {
@@ -142,6 +145,11 @@ pub fn parse_dimtedit_argument(argument: &str) -> Option<DimTextEditCommand> {
         [word, degrees] if word.eq_ignore_ascii_case("ANGLE") => Some(DimTextEditCommand::Angle {
             degrees: super::commands::parse_signed_decimal(degrees)?,
         }),
+        [word, degrees] if word.eq_ignore_ascii_case("OBLIQUE") => {
+            Some(DimTextEditCommand::Oblique {
+                degrees: super::commands::parse_signed_decimal(degrees)?,
+            })
+        }
         _ => None,
     }
 }
@@ -231,12 +239,15 @@ fn is_qdim_keyword(token: &str) -> bool {
         || token.eq_ignore_ascii_case("EDIT")
 }
 
-/// Parse `DIMEDIT TEXT <override>|RESET`.
+/// Parse `DIMEDIT TEXT <override>|RESET|HOME|ROTATE <degrees>|OBLIQUE <degrees>`.
 ///
 /// The override is the whole trimmed remainder (spaces allowed, `<>` is the
-/// measurement placeholder); `RESET` admits no extra token. An empty override is
-/// not expressible on the command line: `TEXT` without text is refused by the
-/// grammar, and clearing the override is `RESET`.
+/// measurement placeholder); `RESET` and `HOME` admit no extra token. An empty
+/// override is not expressible on the command line: `TEXT` without text is
+/// refused by the grammar, and clearing the override is `RESET`. `ROTATE` is
+/// this command's rotation option (`DIMTEDIT` has `ANGLE` instead); `OBLIQUE`
+/// (the extension-line oblique angle) is parsed so the command can name the
+/// missing domain field instead of the option reading as malformed.
 pub fn parse_dimedit_argument(argument: &str) -> Option<DimEditCommand> {
     let trimmed = argument.trim();
     let (word, rest) = match trimmed.split_once(char::is_whitespace) {
@@ -246,8 +257,21 @@ pub fn parse_dimedit_argument(argument: &str) -> Option<DimEditCommand> {
     if word.eq_ignore_ascii_case("RESET") && rest.is_empty() {
         return Some(DimEditCommand::Reset);
     }
+    if word.eq_ignore_ascii_case("HOME") && rest.is_empty() {
+        return Some(DimEditCommand::Home);
+    }
     if word.eq_ignore_ascii_case("TEXT") && !rest.is_empty() {
         return Some(DimEditCommand::Text(rest.to_string()));
+    }
+    if word.eq_ignore_ascii_case("ROTATE") {
+        return Some(DimEditCommand::Rotate {
+            degrees: super::commands::parse_signed_decimal(rest)?,
+        });
+    }
+    if word.eq_ignore_ascii_case("OBLIQUE") {
+        return Some(DimEditCommand::Oblique {
+            degrees: super::commands::parse_signed_decimal(rest)?,
+        });
     }
     None
 }

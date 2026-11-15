@@ -30,12 +30,12 @@ use cad_domain::{DimensionStyleValues, TextAlignH};
 const MIN_DIMENSION_EDIT_EXTENT: f64 = 1e-9;
 
 /// A named input refusal for this batch.
-fn invalid(code: &str, detail: impl std::fmt::Display) -> CadError {
+pub(super) fn invalid(code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::InvalidInput(format!("{code}: {detail}"))
 }
 
 /// A named capability-gap refusal for this batch.
-fn unsupported(code: &str, detail: impl std::fmt::Display) -> CadError {
+pub(super) fn unsupported(code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::Unsupported(format!("{code}: {detail}"))
 }
 
@@ -53,9 +53,9 @@ pub(super) fn drawing_of(app: &Application, command: &Command) -> CadResult<Arc<
 }
 
 /// One selected dimension resolved from the session selection.
-struct SelectedDimension {
-    entity: DbEntity,
-    dimension: DimensionGeometry,
+pub(super) struct SelectedDimension {
+    pub(super) entity: DbEntity,
+    pub(super) dimension: DimensionGeometry,
 }
 
 /// The definition-plane Z of a dimension (the Z the text must stay on).
@@ -73,14 +73,20 @@ fn plane_z(points: &DimensionPoints) -> f64 {
 ///
 /// The domain stores an **anchor** (group 11) and, separately, the glyph-level
 /// horizontal alignment ([`DimensionGeometry::text_h_align`]). Justification
-/// moves this anchor to the start (minimum projection), end (maximum
-/// projection) or midpoint of the dimension line, and the caller sets the
-/// matching glyph alignment. For a linear/aligned dimension that is the
-/// first/second extension-line foot; for radius/diameter it is the centre-side/
-/// arc-side end of the radial leader.
+/// moves this anchor to the start, end or midpoint of the dimension's own
+/// "line", and the caller sets the matching glyph alignment:
 ///
-/// Other subtypes (angular, ordinate) have no single straight dimension line in
-/// this model and are refused by name.
+/// * linear/aligned — the two extension-line feet on the dimension line;
+/// * radius/diameter — the centre-side and arc-side ends of the radial leader;
+/// * angular — the start/end/mid angle of the dimension arc (the arc is the
+///   angular subtype's dimension line), read from the stored display so the
+///   anchor is exactly on the drawn arc;
+/// * ordinate — the leader, i.e. the feature end and the leader end, with the
+///   midpoint between them.
+///
+/// The only refused case is a dimension whose stored display carries no arc for
+/// an angular kind (an imported picture-branch dimension): there is nothing to
+/// justify along, so it is a named refusal rather than a guessed anchor.
 fn justify_text_anchor(
     dimension: &DimensionGeometry,
     request: DimTextEditCommand,
@@ -149,15 +155,69 @@ fn justify_text_anchor(
                 ..
             },
         ) => Ok(select(*center, *point_on_arc)),
+        (DimensionKind::Angular2Ln | DimensionKind::Angular3Pt, _) => {
+            angular_justify_anchor(dimension, request)
+        }
+        (
+            DimensionKind::Ordinate { .. },
+            DimensionPoints::Ordinate {
+                feature,
+                leader_end,
+                ..
+            },
+        ) => Ok(select(*feature, *leader_end)),
         (kind, _) => Err(unsupported(
             "dimtedit.justify_unsupported",
             format!(
-                "DIMTEDIT LEFT/RIGHT/CENTER applies to linear, aligned, radius and diameter \
-                 dimensions only; this entity is {}",
+                "DIMTEDIT LEFT/RIGHT/CENTER has no dimension line to justify along on {}",
                 describe_dimension_kind(kind)
             ),
         )),
     }
+}
+
+/// The anchor of an angular dimension's justification, taken from the **drawn**
+/// arc (the angular subtype's dimension line).
+///
+/// The arc's `start` angle is the first bounding ray and `start + sweep` the
+/// second, so LEFT is the arc's start end, RIGHT its end and CENTER the mid
+/// angle; the anchor stays on the arc radius in the dimension plane, exactly
+/// where the synthesis draws the arc. An angular dimension whose display has no
+/// arc (the imported picture branch) is a named refusal.
+fn angular_justify_anchor(
+    dimension: &DimensionGeometry,
+    request: DimTextEditCommand,
+) -> CadResult<Point3> {
+    let arc = dimension.display().iter().find_map(|child| match child {
+        SemanticGeometry::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+            ..
+        } => Some((*center, *radius, *start, *sweep)),
+        _ => None,
+    });
+    let Some((center, radius, start, sweep)) = arc else {
+        return Err(unsupported(
+            "dimtedit.justify_unsupported",
+            format!(
+                "DIMTEDIT LEFT/RIGHT/CENTER has no dimension arc to justify along on {}: its \
+                 stored display is an imported picture, not our synthesis",
+                describe_dimension_kind(dimension.kind())
+            ),
+        ));
+    };
+    let angle = match request {
+        DimTextEditCommand::Left => start,
+        DimTextEditCommand::Right => start + sweep,
+        _ => start + sweep * 0.5,
+    };
+    Ok(Point3 {
+        x: center.x + radius * angle.cos(),
+        y: center.y + radius * angle.sin(),
+        z: center.z,
+    })
 }
 
 /// The stable kind name used by the DIMTEDIT justification refusal.
@@ -252,7 +312,7 @@ fn resolve_dimension(
 
 /// Resolve every selection ref, refusing duplicates and non-dimensions before
 /// anything is staged.
-fn resolve_selected_dimensions(
+pub(super) fn resolve_selected_dimensions(
     drawing: &DrawingDatabase,
     command: &Command,
     references: &[SelectionRef],
@@ -278,7 +338,7 @@ fn resolve_selected_dimensions(
 /// The synthesis places the text centred, so the caller's glyph alignment is
 /// applied afterwards with [`DimensionGeometry::with_text_h_align`]; that only
 /// rewrites the existing `Text` child's `h_align` and never rebuilds the display.
-fn rebuild_dimension(
+pub(super) fn rebuild_dimension(
     dimension: &DimensionGeometry,
     definition: DimensionDefinition,
     style: Option<DimensionStyleValues>,
@@ -306,7 +366,10 @@ fn dimtedit_alignment(dimension: &DimensionGeometry, request: DimTextEditCommand
 }
 
 /// Read a required batch payload.
-fn batch_payload<'a>(command: &'a Command, name: &str) -> CadResult<&'a DimensionBatchPayload> {
+pub(super) fn batch_payload<'a>(
+    command: &'a Command,
+    name: &str,
+) -> CadResult<&'a DimensionBatchPayload> {
     match &command.payload {
         CommandPayload::Dimension(payload) => Ok(payload.as_ref()),
         CommandPayload::None => Err(invalid(
@@ -325,13 +388,15 @@ impl Application {
     /// dimension.
     ///
     /// The documented set is `MOVE <x> <y>`, `LEFT`, `RIGHT`, `CENTER`, `HOME`
-    /// and `ANGLE <degrees>`. Justification is admitted only for linear/aligned,
-    /// radius and diameter dimensions; other kinds are refused by name
-    /// (`dimtedit.justify_unsupported`). `LEFT`/`RIGHT`/`CENTER` move the anchor
-    /// and set the glyph-level horizontal alignment; `MOVE`/`HOME`/`ANGLE`
-    /// preserve the alignment. `ANGLE` follows AutoCAD's UCS-X-axis convention
-    /// and keeps the text centre fixed; `0` restores the derived orientation.
-    /// `HOME` restores the derived position only.
+    /// and `ANGLE <degrees>`, plus `OBLIQUE <degrees>` as a named capability
+    /// refusal. Justification applies to every dimension kind: linear/aligned
+    /// along the dimension line, radius/diameter along the radial leader,
+    /// angular along the dimension arc and ordinate along the leader.
+    /// `LEFT`/`RIGHT`/`CENTER` move the anchor and set the glyph-level
+    /// horizontal alignment; `MOVE`/`HOME`/`ANGLE` preserve the alignment.
+    /// `ANGLE` follows AutoCAD's UCS-X-axis convention and keeps the text centre
+    /// fixed; `0` restores the derived orientation. `HOME` restores the derived
+    /// position only.
     pub(crate) fn dim_text_edit(
         &mut self,
         session: &mut SessionState,
@@ -395,6 +460,14 @@ impl Application {
                 // "derive from the dimension line" sentinel.
                 definition.text_rotation = degrees.to_radians();
             }
+            DimTextEditCommand::Oblique { .. } => {
+                return Err(unsupported(
+                    "dimtedit.oblique_unsupported",
+                    "DIMTEDIT OBLIQUE needs a glyph-level oblique (slant) angle, and this build's \
+                     text model stores none for any text (cad_domain::SemanticGeometry::Text has \
+                     no oblique field); nothing was changed",
+                ))
+            }
         }
         let after = rebuild_dimension(
             &target.dimension,
@@ -427,7 +500,15 @@ impl Application {
         )
     }
 
-    /// `DIMEDIT`: set/reset the text override of every selected dimension.
+    /// `DIMEDIT`: set/reset the text override, restore the derived text
+    /// placement, or set the text rotation of every selected dimension.
+    ///
+    /// The documented options are `TEXT <override>`, `RESET`, `HOME`,
+    /// `ROTATE <degrees>` and `OBLIQUE <degrees>`. `TEXT`/`RESET` write group 1;
+    /// `HOME` restores the group-11 sentinel (the derived position) and `ROTATE`
+    /// writes group 53 (radians from the UCS X axis, `0` = derive). `OBLIQUE`
+    /// (the extension-line oblique angle) is a named capability refusal: the
+    /// dimension entity stores no oblique angle, so nothing is written.
     pub(crate) fn dim_edit(
         &mut self,
         session: &mut SessionState,
@@ -438,7 +519,8 @@ impl Application {
             _ => {
                 return Err(invalid(
                     "dimedit.payload",
-                    "DIMEDIT takes TEXT <override> or RESET",
+                    "DIMEDIT takes TEXT <override>, RESET, HOME, ROTATE <degrees> or OBLIQUE \
+                     <degrees>",
                 ))
             }
         };
@@ -467,19 +549,56 @@ impl Application {
                 ));
             }
         }
+        match &request {
+            DimEditCommand::Oblique { .. } => {
+                return Err(unsupported(
+                    "dimedit.oblique_unsupported",
+                    "DIMEDIT OBLIQUE needs an extension-line oblique angle, and \
+                     cad_domain::DimensionGeometry stores none (the synthesis draws every \
+                     extension line perpendicular to the dimension line); nothing was changed",
+                ))
+            }
+            DimEditCommand::Rotate { degrees } if !degrees.is_finite() => {
+                return Err(invalid(
+                    "dimedit.bad_rotation",
+                    "the text rotation must be finite",
+                ))
+            }
+            _ => {}
+        }
         let drawing = drawing_of(self, command)?;
         let selected = resolve_selected_dimensions(&drawing, command, references, "dimedit")?;
         let override_text = match &request {
             DimEditCommand::Text(text) => Some(text.clone()),
             DimEditCommand::Reset => None,
+            // HOME/ROTATE keep the stored override.
+            _ => None,
         };
         let mut changes = Vec::new();
         for target in selected {
+            let mut definition = target.dimension.definition().clone();
+            match &request {
+                DimEditCommand::Home => {
+                    definition.text_middle = Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    };
+                }
+                DimEditCommand::Rotate { degrees } => {
+                    definition.text_rotation = degrees.to_radians();
+                }
+                _ => {}
+            }
+            let text_override = match &request {
+                DimEditCommand::Text(_) | DimEditCommand::Reset => override_text.clone(),
+                _ => target.dimension.text_override().map(str::to_string),
+            };
             let after = rebuild_dimension(
                 &target.dimension,
-                target.dimension.definition().clone(),
+                definition,
                 None,
-                override_text.clone(),
+                text_override,
                 target.dimension.text_h_align(),
             )
             .map_err(|error| {
@@ -497,8 +616,8 @@ impl Application {
         if changes.is_empty() {
             return Ok(unchanged_outcome(
                 "dimedit.unchanged",
-                "DIMEDIT: every selected dimension already has the requested text override \
-                 (no transaction)",
+                "DIMEDIT: every selected dimension already has the requested text override/\
+                 placement (no transaction)",
             ));
         }
         let count = changes.len();
@@ -507,78 +626,7 @@ impl Application {
             changes,
             "dimedit",
             "dimedit.applied",
-            &format!("DIMEDIT: updated the text override of {count} dimension(s)"),
-        )
-    }
-
-    /// `DIMOVERRIDE`: apply one closed variable to every selected dimension's
-    /// style snapshot.
-    pub(crate) fn dim_override(
-        &mut self,
-        session: &mut SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        let request = match batch_payload(command, "dimoverride")? {
-            DimensionBatchPayload::Override(request) => request.clone(),
-            _ => {
-                return Err(invalid(
-                    "dimoverride.payload",
-                    "DIMOVERRIDE takes <variable> <value>",
-                ))
-            }
-        };
-        let variable = request.variable.trim().to_ascii_uppercase();
-        let references = session.selection.refs();
-        if references.is_empty() {
-            return Err(invalid(
-                "dimoverride.selection",
-                "DIMOVERRIDE needs at least one selected dimension",
-            ));
-        }
-        let drawing = drawing_of(self, command)?;
-        let selected = resolve_selected_dimensions(&drawing, command, references, "dimoverride")?;
-        let mut changes = Vec::new();
-        for target in selected {
-            let mut style = target.dimension.style().clone();
-            apply_dimension_override(&mut style, &variable, &request.value)?;
-            let after = rebuild_dimension(
-                &target.dimension,
-                target.dimension.definition().clone(),
-                Some(style),
-                target.dimension.text_override().map(str::to_string),
-                target.dimension.text_h_align(),
-            )
-            .map_err(|error| {
-                invalid(
-                    "dimoverride.degenerate",
-                    format!("the dimension has no synthesizable display: {error}"),
-                )
-            })?;
-            let mut entity = target.entity.clone();
-            entity.geometry = SemanticGeometry::Dimension(Box::new(after));
-            if entity.geometry != target.entity.geometry {
-                changes.push((target.entity, entity));
-            }
-        }
-        if changes.is_empty() {
-            return Ok(unchanged_outcome(
-                "dimoverride.unchanged",
-                &format!(
-                    "DIMOVERRIDE: every selected dimension already stores {variable} at this value \
-                     (no transaction)"
-                ),
-            ));
-        }
-        let count = changes.len();
-        self.commit_dimension_changes(
-            command,
-            changes,
-            "dimoverride",
-            "dimoverride.applied",
-            &format!(
-                "DIMOVERRIDE: applied {variable} to the entity style snapshot of {count} \
-                 dimension(s); the DIMSTYLE table was not changed"
-            ),
+            &format!("DIMEDIT: updated {count} dimension(s)"),
         )
     }
 
@@ -654,7 +702,7 @@ impl Application {
 
     /// Commit a batch of dimension entity replacements in one transaction / one
     /// undo step and read every stored value back for the undo patches.
-    fn commit_dimension_changes(
+    pub(super) fn commit_dimension_changes(
         &mut self,
         command: &Command,
         changes: Vec<(DbEntity, DbEntity)>,
@@ -730,193 +778,10 @@ fn report_outcome(diagnostics: Vec<Diagnostic>) -> CommandOutcome {
 }
 
 /// A no-op outcome with one named diagnostic.
-fn unchanged_outcome(code: &str, message: &str) -> CommandOutcome {
+pub(super) fn unchanged_outcome(code: &str, message: &str) -> CommandOutcome {
     report_outcome(vec![Diagnostic {
         object: None,
         code: code.into(),
         message: message.into(),
     }])
-}
-
-/// The closed `DIMOVERRIDE` variable set, applied to the entity style snapshot.
-///
-/// Every value is validated (never clamped); a variable the snapshot cannot
-/// carry is a named capability refusal. See
-/// [`crate::command_id::dimension_edit`] for the set and its boundaries.
-fn apply_dimension_override(
-    style: &mut DimensionStyleValues,
-    variable: &str,
-    value: &str,
-) -> CadResult<()> {
-    let value = value.trim();
-    match variable {
-        "DIMTXT" => style.text_height = positive(variable, value)?,
-        "DIMASZ" => style.arrow_size = positive(variable, value)?,
-        "DIMEXO" => style.ext_offset = non_negative(variable, value)?,
-        "DIMEXE" => style.ext_beyond = non_negative(variable, value)?,
-        "DIMGAP" => style.text_gap = non_negative(variable, value)?,
-        "DIMCEN" => style.center_mark = finite(variable, value)?,
-        "DIMDLI" => style.dim_line_increment = positive(variable, value)?,
-        "DIMTAD" => {
-            let code = integer(variable, value)?;
-            if !(0..=4).contains(&code) {
-                return Err(invalid(
-                    "dimoverride.bad_value",
-                    format!("DIMTAD must be 0..=4, got {code}"),
-                ));
-            }
-            style.text_vertical = code;
-        }
-        "DIMTVP" => style.text_vertical_position = finite(variable, value)?,
-        "DIMLFAC" => style.linear_factor = positive(variable, value)?,
-        "DIMDEC" => {
-            let decimals = integer(variable, value)?;
-            if !(0..=8).contains(&decimals) {
-                return Err(invalid(
-                    "dimoverride.bad_value",
-                    format!("DIMDEC must be 0..=8, got {decimals}"),
-                ));
-            }
-            style.decimals = decimals as usize;
-        }
-        "DIMRND" => style.rounding = non_negative(variable, value)?,
-        "DIMPOST" => {
-            if value.is_empty() {
-                return Err(invalid(
-                    "dimoverride.bad_value",
-                    "DIMPOST needs a non-empty template; `<>` renders the bare measurement",
-                ));
-            }
-            style.postfix = value.to_string();
-        }
-        "DIMZIN" => {
-            let bits = integer(variable, value)?;
-            // Bits 1/2 (suppress 0 feet / 0 inches) are declared unimplemented
-            // by the formatter, so only the implementable subset is admitted.
-            if !matches!(bits, 0 | 4 | 8 | 12) {
-                return Err(unsupported(
-                    "dimoverride.unsupported_value",
-                    format!(
-                        "DIMZIN {bits} uses feet/inch zero-suppression bits, which this build \
-                         does not implement; the admitted set is 0, 4, 8, 12"
-                    ),
-                ));
-            }
-            style.zero_suppression = bits;
-        }
-        "DIMSE1" => style.suppress_ext1 = boolean(variable, value)?,
-        "DIMSE2" => style.suppress_ext2 = boolean(variable, value)?,
-        "DIMSD1" => style.suppress_dim1 = boolean(variable, value)?,
-        "DIMSD2" => style.suppress_dim2 = boolean(variable, value)?,
-        "DIMDSEP" => {
-            let code = integer(variable, value)?;
-            let admitted = code == 0 || code == 46 || (32..=126).contains(&code);
-            if !admitted {
-                return Err(invalid(
-                    "dimoverride.bad_value",
-                    format!(
-                        "DIMDSEP must be 0, 46 or a printable ASCII code (32..=126), got {code}"
-                    ),
-                ));
-            }
-            style.decimal_separator = code;
-        }
-        "DIMLUNIT" => {
-            let format = integer(variable, value)?;
-            if format != 2 {
-                return Err(unsupported(
-                    "dimoverride.unsupported_value",
-                    format!(
-                        "DIMLUNIT {format} is a non-decimal unit format; this build renders \
-                         decimal (DIMLUNIT 2) only"
-                    ),
-                ));
-            }
-            style.linear_unit_format = 2;
-        }
-        // Recognised DIMSTYLE variables with no entity-snapshot slot.
-        "DIMSCALE" | "DIMCLRD" | "DIMCLRE" | "DIMCLRT" | "DIMTXSTY" | "DIMJUST" | "DIMATFIT"
-        | "DIMTIX" | "DIMTOFL" | "DIMTIH" | "DIMTOH" | "DIMDLE" | "DIMCONTINUEMODE" => {
-            return Err(unsupported(
-                "dimoverride.unsupported_variable",
-                format!(
-                    "{variable} is not carried by cad_domain::DimensionStyleValues (the entity \
-                     snapshot the synthesis consumes), so it cannot be overridden per dimension"
-                ),
-            ))
-        }
-        _ => {
-            return Err(invalid(
-                "dimoverride.unknown_variable",
-                format!(
-                    "DIMOVERRIDE does not model '{variable}'; the admitted set is DIMTXT, DIMASZ, \
-                     DIMEXO, DIMEXE, DIMGAP, DIMCEN, DIMDLI, DIMTAD, DIMTVP, DIMLFAC, DIMDEC, \
-                     DIMRND, DIMPOST, DIMZIN, DIMSE1, DIMSE2, DIMSD1, DIMSD2, DIMDSEP, DIMLUNIT"
-                ),
-            ))
-        }
-    }
-    Ok(())
-}
-
-fn parse_number(variable: &str, value: &str) -> CadResult<f64> {
-    value.parse::<f64>().map_err(|_| {
-        invalid(
-            "dimoverride.bad_value",
-            format!("{variable} needs a finite number, got '{value}'"),
-        )
-    })
-}
-
-fn finite(variable: &str, value: &str) -> CadResult<f64> {
-    let number = parse_number(variable, value)?;
-    if !number.is_finite() {
-        return Err(invalid(
-            "dimoverride.bad_value",
-            format!("{variable} needs a finite number, got '{value}'"),
-        ));
-    }
-    Ok(number)
-}
-
-fn positive(variable: &str, value: &str) -> CadResult<f64> {
-    let number = finite(variable, value)?;
-    if number <= 0.0 {
-        return Err(invalid(
-            "dimoverride.bad_value",
-            format!("{variable} must be strictly positive, got {number}"),
-        ));
-    }
-    Ok(number)
-}
-
-fn non_negative(variable: &str, value: &str) -> CadResult<f64> {
-    let number = finite(variable, value)?;
-    if number < 0.0 {
-        return Err(invalid(
-            "dimoverride.bad_value",
-            format!("{variable} must be non-negative, got {number}"),
-        ));
-    }
-    Ok(number)
-}
-
-fn integer(variable: &str, value: &str) -> CadResult<i16> {
-    value.parse::<i16>().map_err(|_| {
-        invalid(
-            "dimoverride.bad_value",
-            format!("{variable} needs a whole number in i16, got '{value}'"),
-        )
-    })
-}
-
-fn boolean(variable: &str, value: &str) -> CadResult<bool> {
-    match value.to_ascii_uppercase().as_str() {
-        "ON" | "1" | "TRUE" => Ok(true),
-        "OFF" | "0" | "FALSE" => Ok(false),
-        _ => Err(invalid(
-            "dimoverride.bad_value",
-            format!("{variable} needs ON/OFF (or 1/0), got '{value}'"),
-        )),
-    }
 }

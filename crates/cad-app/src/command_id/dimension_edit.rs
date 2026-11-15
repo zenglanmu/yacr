@@ -41,21 +41,32 @@
 //! * `DIMTEDIT MOVE <x> <y>` sets group 11 (`DimensionDefinition::text_middle`)
 //!   to the typed drawing-plane X/Y. The Z is the dimension's own definition
 //!   plane Z, never typed, so the text stays in plane.
-//! * `DIMTEDIT LEFT|RIGHT|CENTER` justifies the text **along the dimension
-//!   line**, only for linear/aligned, radius and diameter dimensions. The domain
-//!   stores a centered text anchor (group 11) and no per-entity justification
-//!   field, so this build's declared rule is: the anchor moves to the
-//!   start (minimum projection), end (maximum projection) or midpoint of the
-//!   dimension line. For a linear/aligned dimension those are the two
-//!   extension-line feet; for radius/diameter the centre-side and arc-side ends
-//!   of the radial leader. Angular and ordinate dimensions are refused by name
-//!   (`dimtedit.justify_unsupported`, naming the kind).
+//! * `DIMTEDIT LEFT|RIGHT|CENTER` justifies the text **along the subtype's own
+//!   dimension line**, for every kind. The domain stores a text anchor (group 11)
+//!   and no per-entity justification field, so this build's declared rule is: the
+//!   anchor moves to the start, end or midpoint of that line, and the matching
+//!   glyph alignment ([`cad_domain::DimensionGeometry::text_h_align`]) is stored
+//!   with it.
+//!   - linear/aligned: the two extension-line feet on the dimension line;
+//!   - radius/diameter: the centre-side and arc-side ends of the radial leader;
+//!   - angular (two-line and three-point): the drawn dimension **arc** — the
+//!     start angle, the end angle and the mid angle, read from the stored
+//!     display so the anchor is exactly on the arc AutoCAD justifies along;
+//!   - ordinate: the leader, i.e. the feature end and the leader end, with the
+//!     midpoint between them.
+//!
+//!   The one refusal is `dimtedit.justify_unsupported`: an angular dimension
+//!   whose stored display is an imported **picture** has no arc to justify along.
 //! * `DIMTEDIT ANGLE <degrees>` sets group 53
 //!   (`DimensionDefinition::text_rotation`) to the typed angle in radians about
 //!   the UCS X axis; the text centre does not move and `0` restores the derived
 //!   orientation (group 53's `0` is the derive sentinel).
 //! * `DIMTEDIT HOME` restores group 11 to the derive sentinel; the rotation is
 //!   untouched.
+//! * `DIMTEDIT OBLIQUE <degrees>` is parsed and refused by name
+//!   (`dimtedit.oblique_unsupported`): it needs a **glyph-level** oblique (slant)
+//!   angle, and this build's text model stores none for any text (no field on
+//!   [`cad_domain::SemanticGeometry::Text`]), so nothing is written.
 //!
 //! Each real change rebuilds the dimension through the shared
 //! [`cad_domain::DimensionGeometry::synthesized`] from the mutated definition,
@@ -67,11 +78,13 @@
 //! exactly one), `dimtedit.duplicate`, `dimtedit.not_addressable` (block member
 //! or sub-element), `dimtedit.target_missing`, `dimtedit.not_dimension`,
 //! `dimtedit.bad_position`, `dimtedit.bad_rotation`, `dimtedit.degenerate`,
-//! `dimtedit.justify_unsupported`.
+//! `dimtedit.justify_unsupported` (picture-branch angular only),
+//! `dimtedit.oblique_unsupported`.
 //!
-//! **NOT IMPLEMENTED**: glyph-level justification (the centered anchor is the
-//! only text alignment the domain stores), the oblique dimension-line edit and a
-//! `RESET` spelling (use `HOME` for position and `ANGLE 0` for orientation).
+//! **NOT IMPLEMENTED**: glyph-level justification (the stored anchor plus the
+//! glyph `h_align` is the whole alignment model), the glyph oblique (build-wide:
+//! no text in this build carries an oblique angle) and a `RESET` spelling (use
+//! `HOME` for position and `ANGLE 0` for orientation).
 //!
 //! ## Declared display-source consequence
 //!
@@ -97,10 +110,19 @@
 //! The same rebuild/one-transaction discipline as `DIMTEDIT` applies; no change
 //! is `dimedit.unchanged`. Refusals: `dimedit.payload`, `dimedit.selection`,
 //! `dimedit.duplicate`, `dimedit.not_addressable`, `dimedit.target_missing`,
-//! `dimedit.not_dimension`, `dimedit.bad_text`, `dimedit.degenerate`.
+//! `dimedit.not_dimension`, `dimedit.bad_text`, `dimedit.bad_rotation`,
+//! `dimedit.oblique_unsupported`, `dimedit.degenerate`.
 //!
-//! **NOT IMPLEMENTED**: the AutoCAD `Home`/`New`/`Rotate`/`Oblique` extension-line
-//! edits; only the text override is modelled on the entity.
+//! `DIMEDIT HOME` restores the group-11 derive sentinel (the derived text
+//! position) and leaves the rotation and the override alone; `DIMEDIT ROTATE
+//! <degrees>` writes group 53 in radians about the UCS X axis with the text
+//! centre fixed (`0` = derive).
+//!
+//! **NOT IMPLEMENTED**: `DIMEDIT OBLIQUE <degrees>`, the extension-line oblique
+//! (DIMSTYLE group 52). The command is parsed and refused by name:
+//! `cad_domain::DimensionGeometry` stores no oblique angle and the synthesis
+//! draws every extension line perpendicular to the dimension line, so writing one
+//! would invent geometry the entity cannot carry (`dimedit.oblique_unsupported`).
 //!
 //! # `DIMOVERRIDE`
 //!
@@ -111,14 +133,21 @@
 //!
 //! `DIMTXT`, `DIMASZ`, `DIMEXO`, `DIMEXE`, `DIMGAP`, `DIMCEN`, `DIMDLI`,
 //! `DIMTAD`, `DIMTVP`, `DIMLFAC`, `DIMDEC`, `DIMRND`, `DIMPOST`, `DIMZIN`,
-//! `DIMSE1`, `DIMSE2`, `DIMSD1`, `DIMSD2`, `DIMDSEP`, `DIMLUNIT`.
+//! `DIMSE1`, `DIMSE2`, `DIMSD1`, `DIMSD2`, `DIMDSEP`, `DIMLUNIT`, `DIMTXSTY`.
+//!
+//! `DIMTXSTY <name>` resolves a **TEXTSTYLE row of this drawing** and stores its
+//! name/identity/font in the snapshot, so the next synthesis rebuilds the
+//! measurement text with that style (an unknown name is `dimoverride.bad_value`,
+//! never a silent fallback to `Standard`).
 //!
 //! Values are validated, never clamped. `DIMZIN` admits only bit fields whose
 //! feet/inch bits (1/2) are clear (`0`, `4`, `8`, `12`): those bits are declared
 //! unimplemented by the formatter. `DIMLUNIT` admits only `2` (decimal); other
 //! formats are a declared degradation, so they are refused instead of stored.
 //! Variables the `DimStyle` table has but the entity snapshot cannot carry
-//! (`DIMCLRD`/`DIMCLRE`/`DIMCLRT`, `DIMTXSTY`, `DIMJUST`, `DIMATFIT`, …) are
+//! (`DIMCLRD`/`DIMCLRE`/`DIMCLRT` — the dimension display has no per-primitive
+//! colour; `DIMJUST`, `DIMATFIT`, `DIMTIX`, `DIMTOFL`, `DIMTIH`, `DIMTOH` — no
+//! text-fit model; `DIMDLE`, `DIMSCALE` — no snapshot slot) are
 //! `dimoverride.unsupported_variable`; an unrecognised name is
 //! `dimoverride.unknown_variable`; a malformed value is
 //! `dimoverride.bad_value`. All refusals happen before any write.

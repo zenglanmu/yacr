@@ -136,6 +136,12 @@ fn dimtedit_grammar_is_move_justify_home_or_angle() {
         parse_dimtedit_argument("ANGLE -45.5"),
         Some(DimTextEditCommand::Angle { degrees: -45.5 })
     );
+    // OBLIQUE is admitted so the command can refuse the missing glyph-oblique
+    // field by name instead of the option reading as malformed.
+    assert_eq!(
+        parse_dimtedit_argument("oblique 15"),
+        Some(DimTextEditCommand::Oblique { degrees: 15.0 })
+    );
     // Rotate is DIMEDIT's option; DIMTEDIT has Angle instead.
     for bad in [
         "",
@@ -146,6 +152,8 @@ fn dimtedit_grammar_is_move_justify_home_or_angle() {
         "RESET",
         "LEFT 1",
         "HOME 1",
+        "OBLIQUE",
+        "OBLIQUE x",
     ] {
         assert_eq!(parse_dimtedit_argument(bad), None, "{bad:?}");
     }
@@ -200,7 +208,7 @@ fn qdim_grammar_covers_every_documented_mode_and_option() {
 }
 
 #[test]
-fn dimedit_grammar_is_text_override_or_reset() {
+fn dimedit_grammar_is_text_reset_home_rotate_or_oblique() {
     assert_eq!(
         parse_dimedit_argument("TEXT <> mm"),
         Some(DimEditCommand::Text("<> mm".into()))
@@ -210,7 +218,31 @@ fn dimedit_grammar_is_text_override_or_reset() {
         Some(DimEditCommand::Text("done".into()))
     );
     assert_eq!(parse_dimedit_argument("RESET"), Some(DimEditCommand::Reset));
-    for bad in ["", "TEXT", "TEXT   ", "RESET now", "HOME"] {
+    assert_eq!(parse_dimedit_argument("HOME"), Some(DimEditCommand::Home));
+    assert_eq!(
+        parse_dimedit_argument("ROTATE 30"),
+        Some(DimEditCommand::Rotate { degrees: 30.0 })
+    );
+    assert_eq!(
+        parse_dimedit_argument("rotate -12.5"),
+        Some(DimEditCommand::Rotate { degrees: -12.5 })
+    );
+    assert_eq!(
+        parse_dimedit_argument("OBLIQUE 15"),
+        Some(DimEditCommand::Oblique { degrees: 15.0 })
+    );
+    for bad in [
+        "",
+        "TEXT",
+        "TEXT   ",
+        "RESET now",
+        "HOME 1",
+        "ROTATE",
+        "ROTATE x",
+        "ROTATE 1 2",
+        "OBLIQUE",
+        "OBLIQUE x",
+    ] {
         assert_eq!(parse_dimedit_argument(bad), None, "{bad:?}");
     }
 }
@@ -459,4 +491,52 @@ fn typed_dimspace_refuses_bad_spacing_by_name_and_changes_nothing() {
         session.snapshot(None, None, 0).command_log.is_empty(),
         "the refusal happens before the command is recorded"
     );
+}
+
+/// The stored group-53 text rotation of a dimension, in radians.
+fn dimension_text_rotation(session: &CadSession, id: u128) -> f64 {
+    let controller = session.core.controller.borrow();
+    let drawing = controller.drawing().expect("the document");
+    let entity = drawing.entity(EntityId(id)).expect("the dimension entity");
+    match &entity.geometry {
+        SemanticGeometry::Dimension(dimension) => dimension.definition().text_rotation,
+        other => panic!("expected a dimension, got {other:?}"),
+    }
+}
+
+#[test]
+fn typed_dimtedit_oblique_reaches_the_named_refusal_and_writes_nothing() {
+    let session = dimension_session();
+    select(&session, &[701]);
+    let error = session.command("DIMTEDIT OBLIQUE 15").unwrap_err();
+    assert!(error.contains("dimtedit.oblique_unsupported"), "{error}");
+    let controller = session.core.controller.borrow();
+    let drawing = controller.drawing().expect("the document");
+    let revision = drawing
+        .entity(EntityId(701))
+        .expect("the entity")
+        .object
+        .revision;
+    assert_eq!(revision, Revision(0), "the refusal wrote nothing");
+}
+
+#[test]
+fn typed_dimedit_rotates_and_homes_the_text_of_the_selection() {
+    let session = dimension_session();
+    select(&session, &[701]);
+    session
+        .command("DIMEDIT ROTATE 30")
+        .expect("DIMEDIT ROTATE is admitted");
+    let expected = 30f64.to_radians();
+    assert!(
+        (dimension_text_rotation(&session, 701) - expected).abs() < 1e-9,
+        "{:?}",
+        dimension_text_rotation(&session, 701)
+    );
+    session
+        .command("DIMEDIT HOME")
+        .expect("DIMEDIT HOME is admitted");
+    assert_eq!(dimension_text_rotation(&session, 701), expected);
+    let error = session.command("DIMEDIT OBLIQUE 15").unwrap_err();
+    assert!(error.contains("dimedit.oblique_unsupported"), "{error}");
 }
