@@ -1,19 +1,33 @@
-// The clip-family typed-argument grammar (`CLIP`, `XCLIP`) plus the two token
-// helpers the whole table shares, split out of `argument-commands.ts` when the
-// clipping batch pushed that table past the 1000-line code gate.
+// The clip-family typed-argument grammar (`CLIP`, `XCLIP`) plus the shared token
+// helpers, split out of `argument-commands.ts` when the clipping batch pushed
+// that table past the 1000-line code gate.
 //
 // Nothing here decides anything by itself: every predicate is a local **syntax**
 // aid, and the host stays the authority for semantics (rectangle ordering,
 // polygon validity, the world/block-local mapping and every declared render
 // limit).
 //
-// The two helpers are exported so `argument-commands.ts` keeps exactly one
-// definition of "one plain signed decimal" and of whitespace tokenisation; this
-// module never imports from its parent, so the dependency stays one-way.
+// The helpers are exported so the table and its sibling grammar modules keep
+// exactly one definition of "one plain signed decimal", "one integer token" and
+// of whitespace tokenisation; this module never imports from its parent or its
+// siblings, so the dependency stays one-way.
 
 /** Split a typed argument into whitespace-separated tokens. */
 export function tokens(argument: string): readonly string[] {
   return argument.trim().split(/\s+/).filter(part => part.length > 0);
+}
+
+/**
+ * Whether `text` is one integer token: digits only, with an optional explicit
+ * sign (`1`, `0`, `256`, `+030`, `-1`; never `1.0`, `1e3` or `0x1`).
+ *
+ * The **magnitude/range** is never judged here: a token too long for a JS number
+ * is still the integer shape the host parses (and refuses by its own domain), so
+ * it must travel. This is the `COLOR` ACI's shape and the session tokens'
+ * (`WIPEOUTFRAME`) shape, defined once for both.
+ */
+export function isIntegerToken(text: string): boolean {
+  return /^[+-]?[0-9]+$/.test(text);
 }
 
 /**

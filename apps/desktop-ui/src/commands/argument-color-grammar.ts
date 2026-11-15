@@ -12,6 +12,8 @@
 // shape and lets that named refusal speak (the same split `IMAGEADJUST` uses for
 // its percentages, whose `0..=100` range is the host's too).
 
+import { isIntegerToken } from './argument-clip-grammar.ts';
+
 /** The three symbolic words the host admits, matched case-insensitively. */
 const COLOR_SYMBOLS: readonly string[] = Object.freeze(['BYLAYER', 'BYNAME', 'BYBLOCK']);
 
@@ -22,18 +24,17 @@ const COLOR_SYMBOLS: readonly string[] = Object.freeze(['BYLAYER', 'BYNAME', 'BY
  *
  * * one trimmed token — `1 2` is not one value;
  * * `BYLAYER`, `BYNAME` or `BYBLOCK`, any case;
- * * otherwise one integer with an optional explicit sign (`1`, `0`, `256`,
- *   `+030`, `-1`): digits only, so `1.0`, `1e3`, `0x1` and `aci:1` are not
- *   integers here.
+ * * otherwise one integer token ([`isIntegerToken`]: `1`, `0`, `256`, `+030`,
+ *   `-1`), so `1.0`, `1e3`, `0x1` and `aci:1` are not integers here.
  *
  * The domain (`0..=256`) is deliberately **not** checked: an out-of-domain
  * integer is the host's `color.invalid_value` answer, not a local "unsupported",
- * so the line must reach the router. No `Number()` conversion is used either — a
- * digit run too long for a JS number is still the integer shape the host parses
- * (and refuses by domain), so it travels instead of becoming a shape refusal.
+ * so the line must reach the router. No `Number()` conversion is used either, so
+ * a digit run too long for a JS number still travels as the integer shape the
+ * host parses (and refuses by domain) instead of becoming a shape refusal.
  */
 export function isColorArgument(argument: string): boolean {
   const text = argument.trim();
   if (COLOR_SYMBOLS.includes(text.toUpperCase())) return true;
-  return /^[+-]?[0-9]+$/.test(text);
+  return isIntegerToken(text);
 }

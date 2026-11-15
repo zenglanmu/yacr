@@ -12,6 +12,11 @@
 import { isHatchEditArgument } from './argument-hatchedit.ts';
 import { isColorArgument } from './argument-color-grammar.ts';
 import {
+  isApertureArgument,
+  isPtypeArgument,
+  isWipeoutFrameArgument,
+} from './argument-session-grammar.ts';
+import {
   isClipArgument,
   isSignedDecimal,
   isXclipArgument,
@@ -274,6 +279,16 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     // AutoCAD's prompt spelling of the same token, same grammar: `-COLOR 5`.
     parse: isColorArgument,
   }),
+  // The remaining session tokens and session-only vocabulary controls: a bare
+  // name reports or keeps its handler default, and one value is admitted here
+  // with its **domain** left to the host (`wipeoutframe.out_of_range`,
+  // `aperture.*`, `ptype.invalid_argument`, the vocabulary's own refusals).
+  WIPEOUTFRAME: Object.freeze({ parse: isWipeoutFrameArgument }),
+  APERTURE: Object.freeze({ parse: isApertureArgument }),
+  PTYPE: Object.freeze({ parse: isPtypeArgument }),
+  REVCLOUDPROPERTIES: Object.freeze({ parse: isPositiveDecimal }),
+  UNDEFINE: Object.freeze({ parse: isOneName }),
+  REDEFINE: Object.freeze({ parse: isOneName }),
   LAYERSTATE: Object.freeze({
     parse: (argument: string) => {
       const parts = argument.trim().split(/\s+/).filter(part => part.length > 0);
