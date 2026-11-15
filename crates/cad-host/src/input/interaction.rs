@@ -226,11 +226,23 @@ impl HostCore {
             }
             InteractionRequest::CapturePoint(point) => {
                 let point = self.world_point(point)?;
-                let auto_ready = self.controller.borrow_mut().capture_tool_point(point)?;
-                if auto_ready {
-                    return self.confirm_tool();
+                // AutoCAD's "click the first vertex to close the ring" rule for a
+                // crossing polygon: the click that lands on the first vertex is the
+                // close, not another vertex. The aperture is the same pick box every
+                // other pick uses, and the ring itself is validated by the capture
+                // (a refused close leaves it open and changes nothing).
+                if self.close_stretch_ring_at(point)? {
+                    // The ring closed on this click: that is capture state (no
+                    // command ran), so only the derived tool state is republished.
+                    self.full_dirty.set(true);
+                    InteractionOutcome::PointCaptured
+                } else {
+                    let auto_ready = self.controller.borrow_mut().capture_tool_point(point)?;
+                    if auto_ready {
+                        return self.confirm_tool();
+                    }
+                    InteractionOutcome::PointCaptured
                 }
-                InteractionOutcome::PointCaptured
             }
             InteractionRequest::MoveCursor(point) => {
                 // Remember where the pointer is for the renderer's cursor
@@ -266,6 +278,25 @@ impl HostCore {
                      Enter to submit (Esc dismisses the prompt, Esc again cancels)"
                             .into(),
                     ));
+                }
+                // A STRETCH polygon capture closes its crossing-window ring on
+                // `Confirm` instead of committing: the window is not defined until
+                // the ring is closed, so the same key advances the capture. A ring
+                // that is still too small is refused by name (no transaction).
+                if matches!(
+                    self.controller.borrow().session.draw_window_step(),
+                    Some(cad_app::StretchWindowStep::PolygonVertex)
+                ) {
+                    self.controller
+                        .borrow_mut()
+                        .session
+                        .close_draw_window_ring()?;
+                    self.full_dirty.set(true);
+                    self.navigation_dirty.set(true);
+                    if let Err(error) = self.sync_render() {
+                        self.note_post_commit_error(&error);
+                    }
+                    return Ok(InteractionOutcome::PointCaptured);
                 }
                 return self.confirm_tool();
             }
@@ -328,6 +359,7 @@ impl HostCore {
                 // marks the derived state dirty there, exactly like any other
                 // write.
                 let grip_before = self.grip_drag_active();
+                let lasso_before = self.navigation.lasso_gesture.borrow().is_some();
                 if let Err(error) = self.pointer(id, kind, phase, button, position, modifiers) {
                     // A stale/invalid coordinate refuses the request before its
                     // phase runs; a refusal of an `Up`/`Cancel` must still clear
@@ -338,7 +370,14 @@ impl HostCore {
                     }
                     return Err(error);
                 }
-                if grip_before || self.grip_drag_active() {
+                // A lasso gesture feeds the active STRETCH capture, so the published
+                // tool state really changes (the ring a release hands over, or the
+                // waiting state a cancel restores) and the dispatch keeps its
+                // full rebuild. A grip drag stays overlay-only: the moved marker is
+                // itself the preview and no camera or tool state changed.
+                if lasso_before || self.navigation.lasso_gesture.borrow().is_some() {
+                    scope = DirtyScope::Full;
+                } else if grip_before || self.grip_drag_active() {
                     scope = DirtyScope::Overlay;
                 }
                 InteractionOutcome::PointerObserved
@@ -445,6 +484,57 @@ impl HostCore {
             self.note_post_commit_error(&error);
         }
         Ok(outcome)
+    }
+
+    /// Close an open STRETCH polygon ring when the click lands on its first vertex.
+    ///
+    /// Returns whether the click **was** the close. AutoCAD's rule is to click the
+    /// first point again; the aperture is [`TolerancePolicy::pickbox_logical_pixels`]
+    /// — the same pick box every other pick, hover and grip use — so "on the
+    /// vertex" means the same thing everywhere. Nothing is closed while the ring
+    /// has fewer than [`cad_app::STRETCH_MIN_WINDOW_VERTICES`] vertices (a click
+    /// near the first point of a one-vertex ring is just another vertex), and a
+    /// refused close (a zero-area ring) propagates its named error with the ring
+    /// untouched.
+    fn close_stretch_ring_at(&self, point: Point3) -> CadResult<bool> {
+        let (first, vertices) = {
+            let c = self.controller.borrow();
+            (
+                c.session.draw_window_first_vertex(),
+                c.session.draw_window_ring_len(),
+            )
+        };
+        let (Some(first), true) = (first, vertices >= cad_app::STRETCH_MIN_WINDOW_VERTICES) else {
+            return Ok(false);
+        };
+        let (first_logical, click_logical) = {
+            let c = self.controller.borrow();
+            let Some(viewport) = c.application.workspace.viewports.get(&c.viewport_id) else {
+                // No active viewport: nothing to project through, so this click is
+                // not a close (the ordinary capture path reports the real refusal).
+                return Ok(false);
+            };
+            let size = viewport.logical_size;
+            let first = viewport.camera.world_to_screen(first, size);
+            let click = viewport.camera.world_to_screen(point, size);
+            match (first, click) {
+                // A view without a plan mapping cannot answer "the same vertex" and
+                // must not close a ring on a guess.
+                (Some(first), Some(click)) => (first, click),
+                _ => return Ok(false),
+            }
+        };
+        let aperture = self.tolerance_policy().pickbox_logical_pixels;
+        let dx = click_logical[0] - first_logical[0];
+        let dy = click_logical[1] - first_logical[1];
+        if !(dx * dx + dy * dy).sqrt().is_finite() || (dx * dx + dy * dy).sqrt() > aperture {
+            return Ok(false);
+        }
+        self.controller
+            .borrow_mut()
+            .session
+            .close_draw_window_ring()?;
+        Ok(true)
     }
 
     fn confirm_tool(&self) -> CadResult<InteractionOutcome> {

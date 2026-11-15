@@ -288,6 +288,7 @@ fn line_preview(cursor: [f64; 2]) -> cad_app::DrawPreview {
         ready: false,
         point_target: None,
         polygon_sides: None,
+            window_open: false,
         awaiting_text: false,
         text_prefill: None,
     }

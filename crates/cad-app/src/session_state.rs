@@ -664,9 +664,10 @@ impl SessionState {
         // `set_tool_parameter` while the capture still fits): ALIGN's pair count,
         // BREAK's `F` override and LENGTHEN's dynamic mode add or remove picks,
         // while DIVIDE's block option adds the terminal block-name step.
-        let (point_target, text_required) = self.draw_capture_plan(kind);
-        tool.set_point_target(point_target);
-        tool.set_text_required(text_required);
+        let plan = self.draw_capture_plan(kind);
+        tool.set_point_target(plan.point_target);
+        tool.set_text_required(plan.text_required);
+        tool.set_window_mode(plan.window_mode);
         self.tool = ToolState::Drawing(Box::new(DrawCapture {
             tool,
             selection,

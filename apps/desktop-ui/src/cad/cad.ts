@@ -497,6 +497,11 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   'draw.xline': 'tool.prompt.xline.ready',
   'draw.ray': 'tool.prompt.ray.ready',
   'draw.dimcenter': 'tool.prompt.dim.center_ready',
+  // STRETCH's complement is four picks (rectangle) or a closed window ring plus
+  // two displacement picks (polygon/lasso), so once the complement is captured
+  // the shared dimension copy would be false — nothing is dimensioned. This names
+  // the crossing window that is captured instead.
+  'draw.stretch': 'tool.prompt.stretch.ready',
   // TEXT's complement is its point plus its text, so "ready" is only reached
   // between the two states: the shared dimension copy ("Dimension defined; press
   // Enter to confirm") would be false for a text command, and the next step is
@@ -691,6 +696,30 @@ const LENGTHEN_DYNAMIC_STEP_PROMPTS: readonly string[] = Object.freeze([
   'tool.prompt.lengthen.dynamic_new_end',
 ]);
 
+/**
+ * STRETCH's rectangle window: the two crossing-window corners, then the base and
+ * the displacement point (the four picks the rectangle capture always had).
+ */
+const STRETCH_RECT_STEP_PROMPTS: readonly string[] = Object.freeze([
+  'tool.prompt.stretch.window_first',
+  'tool.prompt.stretch.window_second',
+  'tool.prompt.stretch.base',
+  'tool.prompt.stretch.delta',
+]);
+
+/**
+ * STRETCH's two displacement picks once its free-form window ring is **closed**.
+ *
+ * The ring's vertices are not part of the tool's captured point count (they are
+ * the window step, reported through `openEnded`), so the count here selects
+ * base-then-displacement for both the polygon and the lasso — the one thing that
+ * differs between them is how the ring was collected.
+ */
+const STRETCH_RING_STEP_PROMPTS: readonly string[] = Object.freeze([
+  'tool.prompt.stretch.base',
+  'tool.prompt.stretch.delta',
+]);
+
 /** A numeric tool parameter if the host projects one, otherwise `null`. */
 function parameterNumber(tool: CadTool, key: string): number | null {
   const value = tool.params?.[key];
@@ -711,6 +740,12 @@ function parameterFlag(tool: CadTool, key: string): boolean | null {
  * depends on a live session parameter: ALIGN's pair count, BREAK's `F` flag and
  * LENGTHEN's `DY` mode. Every fallback is the host's own default (2 pairs, `F`
  * off, static mode), so a missing or malformed parameter never invents a pick.
+ *
+ * STRETCH is here for a different reason: its `stretchWindow` mode decides whether
+ * the window is two clicked corners or a free-form ring, and while the ring is
+ * still open the tool reports itself open-ended and accepts more vertices. The
+ * ring phase names one repeatable prompt; once it is closed the two displacement
+ * picks are the same for polygon and lasso alike.
  */
 function captureShapeSteps(tool: CadTool): readonly string[] | null {
   if (tool.key === 'draw.align') {
@@ -728,6 +763,18 @@ function captureShapeSteps(tool: CadTool): readonly string[] | null {
     return parameterNumber(tool, 'lengthenMode') === 3
       ? LENGTHEN_DYNAMIC_STEP_PROMPTS
       : LENGTHEN_STATIC_STEP_PROMPTS;
+  }
+  if (tool.key === 'draw.stretch') {
+    // The closed set's `0` (and a missing/malformed value) is the rectangle this
+    // tool always captured; `1` is the polygon and `2` the lasso.
+    const mode = parameterNumber(tool, 'stretchWindow');
+    if (mode !== 1 && mode !== 2) return STRETCH_RECT_STEP_PROMPTS;
+    // An open ring is the window step: every click (polygon) or the one freehand
+    // drag (lasso) belongs to it, so one repeatable sentence names it.
+    if (tool.openEnded === true) {
+      return [mode === 2 ? 'tool.prompt.stretch.lasso_trace' : 'tool.prompt.stretch.polygon_vertex'];
+    }
+    return STRETCH_RING_STEP_PROMPTS;
   }
   return null;
 }

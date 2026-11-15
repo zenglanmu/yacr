@@ -91,7 +91,8 @@ mod zoom_anchor_tests;
 
 pub use cad_app::{VendorRecord, VendorSource};
 pub(crate) use core::{
-    ActiveGuard, BoxGesture, FileAbort, HoverState, NavInner, PendingHover, PendingSave,
+    ActiveGuard, BoxGesture, FileAbort, HoverState, LassoGesture, NavInner, PendingHover,
+    PendingSave,
 };
 pub use core::{HostCore, HostOptions, HostPlatform, RequestClock};
 #[cfg(not(target_arch = "wasm32"))]
@@ -316,6 +317,7 @@ impl HostCore {
         self.navigation.contact_kind.set(None);
         self.navigation.press_modifiers.set(None);
         *self.navigation.box_gesture.borrow_mut() = None;
+        *self.navigation.lasso_gesture.borrow_mut() = None;
         self.navigation.zoom_window_armed.set(false);
         self.reset_grip_gesture();
         self.clear_hover();

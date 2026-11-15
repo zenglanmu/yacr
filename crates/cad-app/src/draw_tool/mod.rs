@@ -22,126 +22,17 @@ use cad_domain::{CadError, CadResult, Point3, SelectionRef};
 
 mod intent;
 mod kind;
+mod preview;
 mod status;
 mod text;
+mod window;
 
 pub use self::intent::{AlignPairSet, DrawIntent};
 pub use self::kind::{DrawToolKind, PointArity};
-
-/// Snapshot of an in-progress draw for the UI preview layer.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DrawPreview {
-    pub kind: DrawToolKind,
-    /// Captured points in order.
-    pub points: Vec<Point3>,
-    /// Entities resolved at capture time, in step order.
-    ///
-    /// Empty for the free-point kinds. For the entity-picking kinds
-    /// ([`DrawToolKind::needs_picked_entities`]) this is one parallel entry per
-    /// captured step, so readiness is honest: a TRIM/EXTEND with two raw points
-    /// but fewer than two resolved entities is **not** confirmable.
-    pub picks: Vec<SelectionRef>,
-    /// Live cursor position, if any; never committed until confirmed.
-    pub cursor: Option<Point3>,
-    /// The entity under the **current cursor** for the pending capture step, or
-    /// `None`.
-    ///
-    /// Resolved through the exact pick path a click uses, only while a step is
-    /// pending, and never fabricated: it is presentation feedback for the
-    /// follow-up highlight wiring, not a commit source.
-    pub candidate: Option<SelectionRef>,
-    /// Captured points still needed before the operation is defined.
-    ///
-    /// This is the *minimum* complement ([`PointArity::minimum`] minus the
-    /// captured count), so it is `0` once the operation can be confirmed. For an
-    /// **open-ended** tool a further point is still accepted while this is `0`;
-    /// the honest projection is [`Self::remaining_points`] (which returns `None`
-    /// there) — this raw count is retained as the legacy numeric field the
-    /// `cad-host`/`cad-engine` wire shape reads.
-    pub remaining: usize,
-    /// Number of selected entities the tool was started with (MOVE needs > 0).
-    pub selection_count: usize,
-    /// Whether the operation can be committed right now.
-    pub ready: bool,
-    /// The capture's point target when it is **not** the kind's static arity, or
-    /// `None`.
-    ///
-    /// The interactive shape of ALIGN/BREAK/LENGTHEN depends on a session tool
-    /// parameter (`alignPairs`, `breakFirstPoint`, `lengthenMode = 3`), so the
-    /// honest complement is the live plan rather than [`DrawToolKind::arity`].
-    /// `None` means the kind's own arity applies.
-    pub point_target: Option<usize>,
-    /// The POLYGON side count for a live POLYGON capture, or `None` for every
-    /// other kind.
-    ///
-    /// The count is the session sysvar (ADR 0015 decision C), injected by the
-    /// session when it builds the preview so the outline tracks the *current*
-    /// value even if it changes mid-capture. It is `None` whenever the active
-    /// tool is not POLYGON, which is the same rule the frozen frontend
-    /// `CadTool.params.sides` projection uses.
-    pub polygon_sides: Option<u32>,
-    /// Whether the capture is a text tool whose point complement is complete and
-    /// whose typed text has not been submitted yet (ADR 0019 decision A.2).
-    ///
-    /// This is the **only** honest source for the frontend's text prompt phase: a
-    /// UI must not infer it from `kind` + `points`, because `ready` alone cannot
-    /// distinguish "missing points" from "missing text". While this is `true` no
-    /// `Confirm` can complete the command — `SetToolText` is the terminal step.
-    pub awaiting_text: bool,
-    /// The **round-trippable current string** of the entity a text tool will
-    /// edit, or `None` (ADR 0020 amendment A).
-    ///
-    /// Only `TEXTEDIT` fills this, and only once its entity pick resolved to a
-    /// single `Text`: it is that entity's stored string, sent so the UI can show
-    /// it for editing instead of making the user retype it. A fresh `TEXT` never
-    /// has a prefill (there is nothing to edit yet), and no non-text tool
-    /// projects one. It is **not** a display row: it is the exact value
-    /// `TEXTEDIT` will replace.
-    pub text_prefill: Option<String>,
-}
-
-impl DrawPreview {
-    /// Whether the captured parameters can be committed right now.
-    ///
-    /// A text tool whose points are complete but whose text has not been
-    /// submitted is **not** confirmable: `SetToolText` is the terminal step
-    /// (ADR 0019 decision A.1), so reporting `true` here would claim a `Confirm`
-    /// that the host refuses.
-    pub fn can_confirm(&self) -> bool {
-        self.ready && !self.awaiting_text
-    }
-
-    /// The capture arity of the tool this preview describes.
-    pub fn arity(&self) -> PointArity {
-        match self.point_target {
-            Some(target) => PointArity::Exact(target),
-            None => self.kind.arity(),
-        }
-    }
-
-    /// Whether this capture is open-ended (accepts points past its minimum).
-    pub fn is_open_ended(&self) -> bool {
-        self.arity().is_open_ended()
-    }
-
-    /// Honest projection of how many more points the capture requires.
-    ///
-    /// `Some(k)` means exactly `k` more points are needed to become confirmable
-    /// (`Some(0)` = the exact complement is complete). `None` means the minimum
-    /// is met on an **open-ended** tool: more points are still accepted up to
-    /// the hard cap and the user finishes with Enter, so there is no fixed
-    /// "remaining" count to report (never a fabricated `0`).
-    pub fn remaining_points(&self) -> Option<usize> {
-        let minimum = self.arity().minimum();
-        if self.points.len() < minimum {
-            Some(minimum - self.points.len())
-        } else if self.arity().is_open_ended() {
-            None
-        } else {
-            Some(0)
-        }
-    }
-}
+pub use self::preview::DrawPreview;
+pub use self::window::{
+    validate_window_ring, StretchWindowMode, StretchWindowStep, STRETCH_MIN_WINDOW_VERTICES,
+};
 
 /// Drawing/editing capture state machine.
 #[derive(Debug, Clone)]
@@ -173,6 +64,19 @@ pub struct DrawTool {
     /// block option). This widens [`DrawToolKind::requires_text`] for one
     /// parameter-selected shape; `false` keeps the kind's own rule.
     text_required: bool,
+    /// How a STRETCH capture collects its crossing window
+    /// ([`StretchWindowMode`]); [`StretchWindowMode::Rect`] for every other kind.
+    window_mode: StretchWindowMode,
+    /// The free-form crossing-window ring of a polygon/lasso STRETCH capture, in
+    /// capture order. Empty in the rectangle mode and for every other kind; the
+    /// two **displacement** points live in `points`, so the ring never shares a
+    /// slot with the base/displacement run.
+    window_ring: Vec<Point3>,
+    /// Whether [`Self::window_ring`] has been closed (by `CONFIRM`, by a click on
+    /// its first vertex, or by the lasso release). `false` while the vertices are
+    /// still being collected; only meaningful when the mode
+    /// [`StretchWindowMode::is_ring`].
+    ring_closed: bool,
 }
 
 impl DrawTool {
@@ -193,6 +97,9 @@ impl DrawTool {
             text_prefill: None,
             point_target: None,
             text_required: false,
+            window_mode: StretchWindowMode::Rect,
+            window_ring: Vec::new(),
+            ring_closed: false,
         }
     }
 
@@ -305,6 +212,13 @@ impl DrawTool {
     /// pair) accepts the free point once the pick is behind it. The refusal is a
     /// machine reason, never a silent drop.
     pub fn push_point(&mut self, point: Point3) -> CadResult<()> {
+        // A STRETCH polygon/lasso capture collects its crossing-window ring
+        // **before** its fixed base/displacement run: every click there is another
+        // boundary vertex (or, for a lasso, refused — a lasso is a drag), so the
+        // ring never consumes a displacement slot.
+        if self.window_open() {
+            return self.push_window_vertex(point);
+        }
         if self.kind.picked_step_count() > 0 {
             // Only a **fixed-arity** kind can be past its complement: an
             // open-ended kind with a leading pick (DIMBASELINE/DIMCONTINUE) keeps
@@ -389,7 +303,13 @@ impl DrawTool {
     /// kind). `None`: the minimum is met on an **open-ended** tool — more points
     /// are still accepted and the capture is finished with Enter, so there is no
     /// fixed count to report (never a fabricated `0`).
+    ///
+    /// An open crossing-window ring is the same shape: the vertex run has no fixed
+    /// complement, so it reports `None` until the ring is closed.
     pub fn remaining(&self) -> Option<usize> {
+        if self.window_open() {
+            return None;
+        }
         let minimum = self.required_points_now();
         if self.points.len() < minimum {
             Some(minimum - self.points.len())
@@ -404,8 +324,13 @@ impl DrawTool {
     ///
     /// The entity-picking kinds additionally require a resolved ref for **every**
     /// entity-pick step, so a radial capture with its pick missed is never
-    /// confirmable even once the location point is captured.
+    /// confirmable even once the location point is captured. A STRETCH capture in
+    /// a ring mode is never confirmable while its ring is still open: the window
+    /// is not defined yet.
     pub fn is_ready(&self) -> bool {
+        if self.window_open() {
+            return false;
+        }
         self.points.len() >= self.required_points_now()
             && (!self.kind.requires_selection() || self.selection_count > 0)
             && self.picks.len() >= self.kind.picked_step_count()
@@ -428,6 +353,10 @@ impl DrawTool {
             // The pure tool never invents a sysvar: the session injects the
             // POLYGON side count when it builds the preview/tool snapshot.
             polygon_sides: None,
+            // A STRETCH polygon/lasso capture reports its open ring so the UI
+            // names the vertex step (and the host knows the window is not
+            // defined yet).
+            window_open: self.window_open(),
             awaiting_text: self.awaiting_text(),
             // Only a text tool can carry a prefill; every other kind reports
             // `None` even if a stale value were ever set.
@@ -455,6 +384,16 @@ impl DrawTool {
                 self.required_points_now(),
                 self.points.len()
             )));
+        }
+        // A polygon/lasso STRETCH capture has no window until its ring is closed:
+        // committing the displacement points of an undefined window would be a
+        // fabricated edit, so it is refused by name.
+        if self.window_mode.is_ring() && !self.ring_closed {
+            return Err(CadError::InvalidInput(
+                "stretch.window.ring_open: close the crossing window's vertex ring (Enter, or a \
+                 click on its first vertex) before committing the stretch"
+                    .into(),
+            ));
         }
         if self.picks.len() < self.kind.picked_step_count() {
             return Err(CadError::InvalidInput(format!(
@@ -852,12 +791,24 @@ impl DrawTool {
             // STRETCH: the two window corners, the base point and the displacement
             // point, exactly as captured (the enclosure classification and the
             // effective translation live in the command layer, so the intent stays
-            // the pure description of what the user clicked).
-            DrawToolKind::Stretch => DrawIntent::Stretch {
-                rect: [self.points[0], self.points[1]],
-                base: self.points[2],
-                delta: self.points[3],
-            },
+            // the pure description of what the user clicked). A polygon/lasso
+            // capture carries its closed ring instead of the two corners and the
+            // same two displacement points; both end in the one crossing-window
+            // planner.
+            DrawToolKind::Stretch => {
+                if self.window_mode.is_ring() {
+                    let ring = self.window_ring.clone();
+                    let base = self.points[0];
+                    let delta = self.points[1];
+                    DrawIntent::StretchPolygon { ring, base, delta }
+                } else {
+                    DrawIntent::Stretch {
+                        rect: [self.points[0], self.points[1]],
+                        base: self.points[2],
+                        delta: self.points[3],
+                    }
+                }
+            }
             // DIMLINEAR/DIMALIGNED: the two origins and the dimension-line
             // location exactly as clicked, in order. The horizontal/vertical
             // decision (DIMLINEAR), the definition construction and every refusal
@@ -983,7 +934,8 @@ pub use parameter::{
     HATCH_PATTERN_TYPE_GRADIENT, HATCH_PATTERN_TYPE_PREDEFINED, HATCH_PATTERN_TYPE_SOLID,
     HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
     LENGTHEN_MODE_DELTA, LENGTHEN_MODE_DYNAMIC, LENGTHEN_MODE_PERCENT, LENGTHEN_MODE_TOTAL,
-    MTEXT_ATTACHMENT_MAX, MTEXT_ATTACHMENT_MIN, MTEXT_ATTACHMENT_TOP_LEFT, TEXT_DEFAULT_HEIGHT,
+    MTEXT_ATTACHMENT_MAX, MTEXT_ATTACHMENT_MIN, MTEXT_ATTACHMENT_TOP_LEFT, STRETCH_WINDOW_LASSO,
+    STRETCH_WINDOW_POLYGON, STRETCH_WINDOW_RECT, TEXT_DEFAULT_HEIGHT,
     TEXT_DEFAULT_ROTATION_DEGREES,
 };
 // Re-exported so the historical `crate::draw_tool::<name>` paths and the public

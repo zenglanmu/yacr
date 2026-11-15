@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **119** |
-| 部分实现（有写明的界） | **860** |
+| 完整实现 | **120** |
+| 部分实现（有写明的界） | **859** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -117,14 +117,14 @@
 >
 > **官方 981 条已无「未实现」的可用命令名**：仅 `MEASURE` 与 `TRACE` 两条按**同名不同义**不计入
 > （本仓库同名命令分别表示测量入口与旧式宽线带），它们的官方语义在本构建仍无对应实现。计入
-> **979 已实现（119 完整 + 860 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
+> **979 已实现（120 完整 + 859 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
 > GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29，真实 2D 升级，无新命令名）**：`TRIM` 新增 **LWPOLYLINE 目标**（开放/闭合；bulge 还原为精确 ARC 后求交，保留拾取投影所在窗口，子弧 bulge 精确保留；一条事务/一步撤销；EXTEND 的 POLYLINE 目标仍按名拒绝）。该升级不改变 981 条状态总计，仍计入 **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 契约测试，GUI/GPU/像素 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29b）**：`HATCHEDIT` 新增 **`PATTERN <内置图案名>`**（按名称从现有 `.pat` 库取图案，保留 hatch 的角度/比例/double；未知名 `hatchedit.unknown_pattern`、缺名 `hatchedit.needs_pattern_name`、实心/渐变 `hatchedit.pattern_requires_pattern` 均具名拒绝；一条事务/一步撤销）。任意用户 `.pat` 图案文件仍需宿主文件 I/O，未接入。不影响 981 条状态总计。
 
-> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD`、`LENGTHEN`、`FILLET`、`CLIP`、`CLIPIT` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LENGTHEN` 的开放样条**延长**按声明的端点切线直尾实现（缩短仍是精确子曲线）⇒ 晋升为**完整实现**；`FILLET` 补齐**SPLINE 对**与**零半径全部平面对**（含 CIRCLE↔CIRCLE 复用 TRIM 的 CIRCLE→ARC 规则）⇒ 晋升为**完整实现**。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。`CLIP`/`CLIPIT` 改为真实命令：分派到既有 `IMAGECLIP`/`XCLIP` 写路径（`RECT`/`POLY`/`ON`/`OFF`/`DELETE`，`CLIPIT` 用选择里的 LINE/ARC/LWPOLYLINE 建闭合边界），并在写入前按名字拒绝表示层画不出的情形（块参照的多边形裁剪、非凸/自交图像多边形、旋转/倾斜参照、底图裁剪）。计入 **979 已实现（119 完整 + 860 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
+> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD`、`LENGTHEN`、`FILLET`、`CLIP`、`CLIPIT` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LENGTHEN` 的开放样条**延长**按声明的端点切线直尾实现（缩短仍是精确子曲线）⇒ 晋升为**完整实现**；`FILLET` 补齐**SPLINE 对**与**零半径全部平面对**（含 CIRCLE↔CIRCLE 复用 TRIM 的 CIRCLE→ARC 规则）⇒ 晋升为**完整实现**。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。`CLIP`/`CLIPIT` 改为真实命令：分派到既有 `IMAGECLIP`/`XCLIP` 写路径（`RECT`/`POLY`/`ON`/`OFF`/`DELETE`，`CLIPIT` 用选择里的 LINE/ARC/LWPOLYLINE 建闭合边界），并在写入前按名字拒绝表示层画不出的情形（块参照的多边形裁剪、非凸/自交图像多边形、旋转/倾斜参照、底图裁剪）。计入 **979 已实现（120 完整 + 859 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
 
 ### 纪律
 
@@ -210,7 +210,8 @@
   **2026-11-15 补齐**：开放样条延长按声明的端点切线直尾实现（增量精确、原曲线逐点不变、接缝 C0/G1），
   `LENGTHEN` 晋升为**完整实现**。
 - P2 **已完成**（2026-11-09）：按严格口径 2 条晋升（`CHAMFER` `OFFSET`）；其余保留 `部分实现`：
-  **2026-11-15 补齐**：`FILLET` 的 SPLINE 对与零半径全部平面对（含 CIRCLE↔CIRCLE）已实现，晋升为**完整实现**。
+  **2026-11-15 补齐**：`FILLET` 的 SPLINE 对与零半径全部平面对（含 CIRCLE↔CIRCLE）已实现，晋升为**完整实现**；
+  `STRETCH` 的多边形/lasso **交互捕获**已接线（`stretchWindow` 参数），也晋升为**完整实现**。
   `JOIN`（`JOIN CLOSE` 混合 SPLINE）、`STRETCH`（多边形/lasso 捕获未接线）、
   `PEDIT`（多段线宽度/`plinegen`/顶点子菜单）、`MIRROR`（`MIRRTEXT=1` 字形镜像）、
   `EXPLODE`（MULTILEADER 未导入内容）、`QSELECT`/`FILTER`（分类/自定义特性）。
@@ -220,7 +221,7 @@
   `TEXTMASK`（`3dface`/`Solid`）、`TXT2MTXT`（强制行距）。
 - P4 **基础完成**（2026-11-10）：`cad-history` 的 `LayerPatch` + 应用器已落地；`LAYDEL`/`-LAYDEL`、`LAYMRG`/`-LAYMRG`、`LAYFRZ`、`LAYLCK`、`LAYULK`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYERSTATE RESTORE` 的图层表写入均纳入 `DrawingUndoRecord`（一条事务/一步撤销）。仍保留图纸空间/块内实体与 Settings 选项边界，故仍为**部分实现**，没有把边界算作完成。
 - P4 **部分推进**（2026-11-15）：`LAYDEL`/`-LAYDEL` 补齐**图纸布局与块定义内实体**（`cad-db` 单一 `entities` 表按 `layer` 过滤）并剪除各图纸视口的该层 `layer_overrides` 键，实体补丁 + 布局补丁 + 层行一条事务/一步撤销 ⇒ 两条晋升为**完整实现**；`laydel.layer_in_use` 拒码随之删除。同一轮 `LAYTHW` 补齐**每个图纸布局/视口的冻结覆盖**（`layer_overrides` 中 `true` 项清除；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销 ⇒ 也晋升为**完整实现**（旧文档「本构建无视口模型」的借口经测试证伪：旧实现下 2 个新测试确实失败）。同一轮 `RENAME`/`-RENAME` 补齐 **`LINETYPE` kind**：改名在 `cad-db` 的单次校验写入内把层属性/实体属性的引用一并级联（一次 revision、一次 `ChangeSet`），撤销/重做对称 ⇒ 两条晋升为**完整实现**；`Continuous` 不可改名、创建/删除线型仍不支持。同一轮 `LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前会留下指向已删层的死键，且 `layout_patches` 硬编码为空），与实体/层行同一条记录 ⇒ 两条晋升为**完整实现**（交互 Settings 属全局范围；目标固定为当前层是声明的偏离）。仍保留 `LAYFRZ`/`LAYLCK`/`LAYULK` 的界（视口级冻结标记 + 嵌套/xref 拾取），故 P4 未整体完成。
-- P5 **部分完成**（2026-11-10）：`cad-db` 布局/视口写 API + `LayoutPatch` 已落地；`LAYOUT` 的 `NEW/RENAME/DELETE`、`LAYOUTMERGE`（升为**已实现**）、`LAYOUTWIZARD` 的布局创建、`VPORTS`/`-VPORTS`、`VPCLIP RECT`、`VPSCALE`、`PAGESETUP`/`-PAGESETUP`、`PSETUPIN`/`-PSETUPIN`、`MVIEW`、`LAYOUTWIZARD` 纸张已真实写入并一条事务/一步撤销。`CLIP`/`CLIPIT` 2026-11-15 从具名拒绝改为真实命令（两条晋升为**完整实现**）。`LAYOUTWIZARD` 2026-11-15 补齐**等分格视口排列**（`ARRANGE`，复用 `VPORTS` 的网格助手并铺在本次 Authored 纸张上）⇒ 晋升为**完整实现**（打印设备/打印样式/标题栏与交互提示属全局范围，逐条具名报告）。仍保留 `MVSETUP`、跨文件页面设置、视口选择与多边形裁剪边界；`VPMAX`/`VPMIN` 仍是会话标记。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
+- P5 **部分完成**（2026-11-10）：`cad-db` 布局/视口写 API + `LayoutPatch` 已落地；`LAYOUT` 的 `NEW/RENAME/DELETE`、`LAYOUTMERGE`（升为**已实现**）、`LAYOUTWIZARD` 的布局创建、`VPORTS`/`-VPORTS`、`VPCLIP RECT`、`VPSCALE`、`PAGESETUP`/`-PAGESETUP`、`PSETUPIN`/`-PSETUPIN`、`MVIEW`、`LAYOUTWIZARD` 纸张已真实写入并一条事务/一步撤销。`CLIP`/`CLIPIT` 2026-11-15 从具名拒绝改为真实命令（两条晋升为**完整实现**）；`STRETCH` 的多边形/lasso 交互捕获接线（晋升为**完整实现**）。`LAYOUTWIZARD` 2026-11-15 补齐**等分格视口排列**（`ARRANGE`，复用 `VPORTS` 的网格助手并铺在本次 Authored 纸张上）⇒ 晋升为**完整实现**（打印设备/打印样式/标题栏与交互提示属全局范围，逐条具名报告）。仍保留 `MVSETUP`、跨文件页面设置、视口选择与多边形裁剪边界；`VPMAX`/`VPMIN` 仍是会话标记。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
 
 ## 已实现 / 部分实现命令索引（按字母序）
 
@@ -1048,7 +1049,7 @@
 | `STANDARDS` | 部分实现 | 具名拒绝（`standards.unsupported: no CAD standards (DWS) model`）。 |
 | `STATUS` | 部分实现 | 图形/数据库/修订/实体/图层/块/样式/布局/范围/模式；本轮新增 **current_space/space_usage/layer_usage/modes/selection**；创建/编辑时间、内存、limits/base 明确 `status.not_tracked` |
 | `STLOUT` | 部分实现 | 具名拒绝（`stlout.unsupported: STL export is not implemented`）。 |
-| `STRETCH` | 部分实现 | 交叉矩形与多边形/lasso payload；**IMAGE/MASK/TABLE 新增移动型分类**；圆按圆心、块/文字按插入点；`MULTILEADER` 整命令拒绝；多边形/lasso 交互捕获未接线 |
+| `STRETCH` | 完整实现 | 交叉矩形、交叉多边形（连续点击、`CONFIRM` 或点回首顶点闭合）与**自由手绘 lasso**（一次拖拽采样、释放闭合并用既有 transient CROSSING 预览）都经工具捕获进入同一条 `StretchPolygon` → `polygon_window` 规划（`stretchWindow` 参数 0/1/2，默认 0）；even-odd 包含、部分包围逐顶点、完全包围整移；圆按圆心、块/文字按插入点；**IMAGE/MASK/TABLE 移动型分类**；环顶点数<3/非有限/零面积/未闭合按名拒绝，取消不写；`MULTILEADER` 整命令拒绝；一条事务/一步撤销 |
 | `STYLE` | 已实现 | `NEW <name> [<base>]`/`RENAME <old> <new>`/`DELETE <name>`/`SET <name> <FONT/KEYS/ADDKEY/REMOVEKEY> <value>`/`?`；一条 style-table patch/一步撤销；域 `Style` 只有 name/resource_keys，故只可写这两类字段；无“当前文字样式”会话变量 |
 | `STYLESMANAGER` | 部分实现 | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |
 | `SUBTRACT` | 部分实现 | 具名拒绝（`subtract.unsupported: no 3D boolean model`）。 |
@@ -2033,7 +2034,7 @@
 | 817 | `STANDARDS` | 部分实现 | Manages the association of standards files with drawings. | 具名拒绝（`standards.unsupported: no CAD standards (DWS) model`）。 |
 | 818 | `STATUS` | 部分实现 | Displays drawing statistics, modes, and extents. | 图形/数据库/修订/实体/图层/块/样式/布局/范围/模式；本轮新增 **current_space/space_usage/layer_usage/modes/selection**；创建/编辑时间、内存、limits/base 明确 `status.not_tracked` |
 | 819 | `STLOUT` | 部分实现 | Stores 3D solids and watertight meshes in a format that can be used with stereolithography apparatus. | 具名拒绝（`stlout.unsupported: STL export is not implemented`）。 |
-| 820 | `STRETCH` | 部分实现 | Stretches objects crossed by a selection window or polygon. | 交叉矩形与多边形/lasso payload；**IMAGE/MASK/TABLE 新增移动型分类**；圆按圆心、块/文字按插入点；`MULTILEADER` 整命令拒绝；多边形/lasso 交互捕获未接线 |
+| 820 | `STRETCH` | 完整实现 | Stretches objects crossed by a selection window or polygon. | 交叉矩形/多边形/自由手绘 lasso 的**交互捕获**都接线到同一 planner（`stretchWindow` 0/1/2）；even-odd 包含；退化/未闭合环具名拒绝；一条事务/一步撤销；`MULTILEADER` 整命令拒绝。 |
 | 821 | `-STYLE` | 已实现 | Creates, modifies, or specifies text styles. | `STYLE` 的命令行拼写，同一 grammar/写入路径与边界 |
 | 822 | `STYLE` | 已实现 | Creates, modifies, or specifies text styles. | `NEW <name> [<base>]`/`RENAME <old> <new>`/`DELETE <name>`/`SET <name> <FONT/KEYS/ADDKEY/REMOVEKEY> <value>`/`?`；一条 style-table patch/一步撤销；域 `Style` 只有 name/resource_keys，故只可写这两类字段；无“当前文字样式”会话变量 |
 | 823 | `STYLESMANAGER` | 部分实现 | Displays the Plot Style Manager, where you can revise plot style tables. | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |

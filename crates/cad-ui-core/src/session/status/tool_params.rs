@@ -107,4 +107,10 @@ pub struct CadToolParams {
     /// active; `null` for every other tool. Per-vertex start/end taper is not
     /// modeled, so this is one value per polyline.
     pub polyline_width: Option<f64>,
+    /// The STRETCH crossing-window mode (`0` rectangle, `1` polygon, `2` lasso),
+    /// projected only while a STRETCH capture is active (the polygon/lasso ring
+    /// wiring); `null` for every other tool. The mode selects the capture's
+    /// **first phase** only — all three hand the same crossing window to the same
+    /// planner.
+    pub stretch_window: Option<f64>,
 }

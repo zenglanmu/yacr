@@ -62,6 +62,84 @@ pub(crate) struct PendingSave {
     pub result: Result<FileTarget, FileAbort>,
 }
 
+/// A live **freehand lasso** drag: the STRETCH crossing-window capture in its
+/// lasso mode ([`cad_app::StretchWindowStep::LassoTrace`]).
+///
+/// Unlike [`BoxGesture`] — a rubber band between two corners — a lasso is the
+/// free-form ring its drag traces, so the gesture records the sampled **path**.
+/// It exists only for the window step of a lasso STRETCH capture: the press that
+/// lands there starts it, every move appends a sample, and the release hands the
+/// whole path to the capture ([`cad_host::HostCore::set_draw_window_ring`] as a
+/// closed ring). A cancel or a multi-touch takeover drops it without committing —
+/// nothing is written, no history is opened, and the capture keeps waiting for its
+/// window.
+#[derive(Debug, Clone)]
+pub(crate) struct LassoGesture {
+    /// The sampled pointer path in canvas logical pixels, in capture order.
+    ///
+    /// The first sample is the press and the last is the release; intermediate
+    /// samples are decimated while dragging so a long freehand trace stays
+    /// bounded without losing the shape (see
+    /// [`LassoGesture::push_sample`]).
+    pub path: Vec<[f64; 2]>,
+}
+
+/// Upper bound on the sampled points one lasso keeps.
+///
+/// A sample is appended only when the pointer moved at least
+/// [`LassoGesture::MIN_SAMPLE_STEP_LOGICAL_PX`], and once the path reaches this
+/// bound every second sample is dropped — so a long trace keeps its shape (the
+/// ring is still closed and follows the hand) instead of growing without bound or
+/// being truncated into a straight chord.
+pub(crate) const LASSO_MAX_SAMPLES: usize = 1024;
+
+impl LassoGesture {
+    /// The minimum logical-pixel movement between two kept samples.
+    ///
+    /// Two logical pixels is below the canvas drag threshold and far finer than
+    /// any hand movement that matters for a crossing window, so the ring follows
+    /// the pointer without recording sub-pixel jitter.
+    pub const MIN_SAMPLE_STEP_LOGICAL_PX: f64 = 2.0;
+
+    /// Start a lasso at its press position.
+    pub fn new(press: [f64; 2]) -> Self {
+        Self { path: vec![press] }
+    }
+
+    /// Append one pointer position if it is a new sample.
+    ///
+    /// A sample closer than [`Self::MIN_SAMPLE_STEP_LOGICAL_PX`] to the last one is
+    /// the same hand position and is skipped; a non-finite position is never
+    /// stored (the capture would refuse it and the ring would be poisoned). At
+    /// [`LASSO_MAX_SAMPLES`] every second sample is dropped, halving the
+    /// resolution instead of truncating the ring.
+    pub fn push_sample(&mut self, point: [f64; 2]) {
+        if !point.iter().all(|value| value.is_finite()) {
+            return;
+        }
+        let Some(last) = self.path.last().copied() else {
+            self.path.push(point);
+            return;
+        };
+        let dx = point[0] - last[0];
+        let dy = point[1] - last[1];
+        if (dx * dx + dy * dy).sqrt() < Self::MIN_SAMPLE_STEP_LOGICAL_PX {
+            return;
+        }
+        if self.path.len() >= LASSO_MAX_SAMPLES {
+            let mut decimated: Vec<[f64; 2]> = self.path.iter().copied().step_by(2).collect();
+            let last = self.path.last().copied();
+            if let Some(last) = last {
+                if decimated.last().copied() != Some(last) {
+                    decimated.push(last);
+                }
+            }
+            self.path = decimated;
+        }
+        self.path.push(point);
+    }
+}
+
 /// A live box-selection drag (ADR 0014 decision B).
 ///
 /// Single-contact only: it is created when a 2D primary-button drag crosses the
@@ -155,6 +233,12 @@ pub(crate) struct NavInner {
     pub press_modifiers: Cell<Option<Modifiers>>,
     /// The live box-selection drag, if a 2D primary drag is in progress.
     pub box_gesture: RefCell<Option<BoxGesture>>,
+    /// The live freehand lasso of a STRETCH crossing-window capture, if its
+    /// polygon/lasso mode is waiting for the ring.
+    ///
+    /// Mutually exclusive with [`Self::box_gesture`]: a lasso press belongs to the
+    /// active capture, so it never also starts a selection box.
+    pub lasso_gesture: RefCell<Option<LassoGesture>>,
     /// The live grip drag, if a press landed on a handle of the selection.
     ///
     /// Armed at press time by the single gesture arbiter (`pointer_down`), so no
@@ -195,6 +279,7 @@ impl Default for NavInner {
             contact_kind: Cell::new(None),
             press_modifiers: Cell::new(None),
             box_gesture: RefCell::new(None),
+            lasso_gesture: RefCell::new(None),
             grip_drag: RefCell::new(None),
             suppress_click: Cell::new(false),
             zoom_window_armed: Cell::new(false),

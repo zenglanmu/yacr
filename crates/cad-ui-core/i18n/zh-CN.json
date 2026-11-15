@@ -2911,5 +2911,17 @@
   "draw.kind.recoverall": "恢复所有图形 (RECOVERALL)",
   "draw.kind.recoverall.hint": "RECOVERALL 报告所有已打开图形的恢复过程。只读：不写入、不修改图形。",
   "draw.kind.purgeaecdata": "清理 AEC 数据 (PURGEAECDATA)",
-  "draw.kind.purgeaecdata.hint": "PURGEAECDATA 报告图形中存储的 AEC 代理数据。只读：不删除任何内容，也不写入图形。"
+  "draw.kind.purgeaecdata.hint": "PURGEAECDATA 报告图形中存储的 AEC 代理数据。只读：不删除任何内容，也不写入图形。",
+  "status.tool_parameter.stretch_window": "拉伸窗口",
+  "status.tool_parameter.stretch_window.hint": "STRETCH 交叉窗口的捕捉方式：两角点的矩形、逐点绘制的多边形（回车或点击第一个顶点闭合），或手绘套索拖动",
+  "status.tool_parameter.stretch_window.rect": "矩形",
+  "status.tool_parameter.stretch_window.polygon": "多边形",
+  "status.tool_parameter.stretch_window.lasso": "套索",
+  "tool.prompt.stretch.window_first": "交叉窗口的第一个角点",
+  "tool.prompt.stretch.window_second": "交叉窗口的对角点",
+  "tool.prompt.stretch.polygon_vertex": "交叉边界的下一个顶点（回车闭合，或点击第一个顶点）",
+  "tool.prompt.stretch.lasso_trace": "拖动鼠标手绘套索，勾出交叉边界",
+  "tool.prompt.stretch.base": "拉伸基点",
+  "tool.prompt.stretch.delta": "位移点",
+  "tool.prompt.stretch.ready": "交叉窗口已捕获，按回车执行拉伸"
 }

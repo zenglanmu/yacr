@@ -25,6 +25,7 @@ fn ellipse_preview_draws_a_closed_bounded_tessellated_curve() {
         point_target: None,
         ready: false,
         polygon_sides: None,
+        window_open: false,
         awaiting_text: false,
         text_prefill: None,
     };

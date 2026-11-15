@@ -988,10 +988,8 @@ pub fn validate_expression(prefix: &str, expression: &FilterExpression) -> CadRe
 /// even-odd **point-in-polygon** predicate on the XY plane (winding-independent).
 /// `base`/`delta` are world points; the effective translation is `delta − base`.
 ///
-/// Capture wiring: this build's `draw_tool` capture state machine only has
-/// fixed-arity point runs (`PointArity::Exact`) and no Enter-terminated vertex
-/// list, so no draw intent produces this payload yet. Hosts/IPC supply it; the
-/// exact capture wiring need is reported with the change rather than half-wired.
+/// Capture wiring: the `draw_tool` STRETCH capture emits this payload in its polygon
+/// (successive `CONFIRM`-closed clicks) and lasso (one freehand drag) modes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StretchPolygonCommand {
     pub polygon_logical: Vec<[f64; 2]>,

@@ -49,6 +49,7 @@ mod settings_gpu;
 mod settings_input;
 mod settings_orbit;
 mod snap_marker;
+mod stretch_lasso;
 mod text_tool;
 mod tolerance;
 mod wipeout_frames;

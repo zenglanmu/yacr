@@ -617,8 +617,9 @@ fn text_rotation_and_mtext_attachment_are_appended_after_the_gradient_members() 
             .validate(parameter.default_value())
             .unwrap_or_else(|error| panic!("{key} default refused: {error}"));
     }
-    assert_eq!(ToolParameter::COUNT, 35);
-    assert_eq!(ToolParameter::ALL.len(), 35);
+    // 36 once STRETCH's crossing-window mode was appended (slot 35).
+    assert_eq!(ToolParameter::COUNT, 36);
+    assert_eq!(ToolParameter::ALL.len(), 36);
     assert_eq!(
         ToolParameter::TextRotation.default_value(),
         ToolValue::Number(TEXT_DEFAULT_ROTATION_DEGREES)

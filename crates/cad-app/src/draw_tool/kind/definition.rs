@@ -324,31 +324,37 @@ pub enum DrawToolKind {
     /// Deliberate subset (NOT IMPLEMENTED for now): 3D alignment and
     /// **non-uniform** scaling.
     Align,
-    /// STRETCH: the two opposite corners of a **crossing window**, then a base
-    /// point and a displacement point (`Exact(4)`, no entity picks; ADR 0016
-    /// decision E).
+    /// STRETCH: a **crossing window**, then a base point and a displacement point
+    /// (`Exact(4)` in the rectangle mode, no entity picks; ADR 0016 decision E).
     ///
     /// The window itself defines the affected set, so this kind
-    /// [`DrawToolKind::requires_selection`] is **false**. The window is always
-    /// treated as **CROSSING** (AutoCAD requires a crossing window; cpolygon and
-    /// lasso selection are NOT IMPLEMENTED). The enclosure classification
-    /// (fully enclosed ⇒ whole-entity move; partially enclosed ⇒ per-vertex
-    /// stretch) is recomputed by the command layer from the rectangle and the
-    /// geometry, never stored here.
+    /// [`DrawToolKind::requires_selection`] is **false**, and it is always treated
+    /// as **CROSSING**. Its shape is selected by the live `stretchWindow` session
+    /// parameter ([`super::super::StretchWindowMode`]):
     ///
-    /// The two window corners are captured as world points (the same free-point
-    /// capture every drawing tool uses); the host maps them back to canvas
-    /// logical corners for the payload's `rect_logical`, which the command maps
-    /// through the orthographic plan view exactly like `BoxSelect`.
+    /// * `Rect` (the default) — the two opposite corners, captured as world points
+    ///   the host maps back to canvas logical corners for the payload's
+    ///   `rect_logical`;
+    /// * `Polygon` — successive boundary clicks; the ring closes on `CONFIRM` or on
+    ///   a click on its first vertex, then the **same two** displacement picks
+    ///   follow. The ring and the displacement points travel as the existing
+    ///   `StretchPolygon` payload;
+    /// * `Lasso` — one freehand drag traces the ring (the host samples the pointer
+    ///   path and hands it over closed), then the same two displacement picks.
     ///
-    /// Deliberate subset (NOT IMPLEMENTED for now): cpolygon/lasso selection,
-    /// the "select an object directly ⇒ move it whole" clause, stretching of
-    /// `TEXT`/`SPLINE`/`ARC`/`HATCH`/`INSERT` (TEXT fails the whole command;
-    /// the others are move-only when fully enclosed and unchanged when
-    /// partially enclosed), 3D, and width/tangency edits (polyline width is not
-    /// modelled). The bulge-preservation rule for a dragged bulge-segment
-    /// endpoint is **UNVERIFIED** (Autodesk does not document it) and is our
-    /// declared choice.
+    /// All three end in the one crossing-window planner, so the enclosure
+    /// classification (fully enclosed ⇒ whole-entity move; partially enclosed ⇒
+    /// per-vertex stretch) is recomputed by the command layer from the window and
+    /// the geometry, never stored here.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): the "select an object directly
+    /// ⇒ move it whole" clause, stretching of
+    /// `SPLINE`/`ARC`/`HATCH`/`INSERT`/`TEXT` beyond the declared per-vertex /
+    /// insertion-point rules (TEXT fails the whole command; HATCH/INSERT are
+    /// move-only when fully enclosed and unchanged when partially enclosed), 3D,
+    /// and width/tangency edits (polyline width is not modelled). The
+    /// bulge-preservation rule for a dragged bulge-segment endpoint is
+    /// **UNVERIFIED** (Autodesk does not document it) and is our declared choice.
     Stretch,
     /// DIMLINEAR: a horizontal/vertical linear dimension through two
     /// extension-line origins plus the dimension-line location (`Exact(3)`, ADR

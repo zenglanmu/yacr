@@ -168,6 +168,17 @@ pub const LENGTHEN_MODE_TOTAL: f64 = 2.0;
 /// end) when this mode is set at tool start.
 pub const LENGTHEN_MODE_DYNAMIC: f64 = 3.0;
 
+/// STRETCH crossing-window mode closed set (`stretchWindow`): the classic
+/// two-corner rectangle (AutoCAD's default, and the shape this build had before
+/// the polygon/lasso wiring).
+pub const STRETCH_WINDOW_RECT: f64 = 0.0;
+/// The **crossing polygon** mode: every click adds a boundary vertex, and the ring
+/// closes on a click on its first vertex or with `CONFIRM`.
+pub const STRETCH_WINDOW_POLYGON: f64 = 1.0;
+/// The **freehand lasso** mode: one drag traces the boundary ring (the host
+/// samples the pointer path) and its release closes it.
+pub const STRETCH_WINDOW_LASSO: f64 = 2.0;
+
 /// A session-scoped tool parameter with a stable machine key (ADR 0016 decision A).
 ///
 /// The member set and the machine keys are the frozen channel vocabulary: the
@@ -310,11 +321,18 @@ pub enum ToolParameter {
     /// field instead. Per-vertex start/end taper is not modeled, so this one
     /// number always means a single uniform width.
     PolylineWidth,
+    /// STRETCH crossing-window mode: a **closed set** — `0` rectangle (two
+    /// opposite corners, AutoCAD's default), `1` polygon (successive boundary
+    /// clicks, closed by a click on the first vertex or `CONFIRM`), `2` lasso (one
+    /// freehand drag whose sampled path is the ring). The mode fixes the capture's
+    /// first phase when the tool starts; all three hand the same crossing window to
+    /// the same planner, so this never selects a second containment rule.
+    StretchWindow,
 }
 
 impl ToolParameter {
     /// Every member, in a fixed order (the key round-trip uses it).
-    pub const ALL: [ToolParameter; 35] = [
+    pub const ALL: [ToolParameter; 36] = [
         ToolParameter::PolygonSides,
         ToolParameter::FilletRadius,
         ToolParameter::ChamferDistanceA,
@@ -359,13 +377,16 @@ impl ToolParameter {
         // DIVIDE's block-align flag is appended after every pre-existing member
         // for the same index-stability reason.
         ToolParameter::DivideAlignBlock,
-        // PLINE's uniform width is appended last for the same index-stability
-        // reason.
+        // PLINE's uniform width is appended after every pre-existing member for
+        // the same index-stability reason.
         ToolParameter::PolylineWidth,
+        // STRETCH's crossing-window mode is appended last for the same
+        // index-stability reason (the frozen slots above never move).
+        ToolParameter::StretchWindow,
     ];
 
     /// Number of members (the store's fixed width).
-    pub const COUNT: usize = 35;
+    pub const COUNT: usize = 36;
 
     /// The dense index of this member in [`Self::ALL`] (the store's slot).
     pub fn index(self) -> usize {
@@ -407,6 +428,7 @@ impl ToolParameter {
             Self::DivideUseBlock => 32,
             Self::DivideAlignBlock => 33,
             Self::PolylineWidth => 34,
+            Self::StretchWindow => 35,
         }
     }
 
@@ -452,6 +474,7 @@ impl ToolParameter {
             Self::DivideUseBlock => "divideUseBlock",
             Self::DivideAlignBlock => "divideAlignBlock",
             Self::PolylineWidth => "polylineWidth",
+            Self::StretchWindow => "stretchWindow",
         }
     }
 
@@ -535,6 +558,9 @@ impl ToolParameter {
     /// * `PolylineWidth` **0** — the hairline PLINE default, exactly the width
     ///   every captured polyline stored before the parameter existed (and a
     ///   *valid* value, so the default can never limp into a forced refusal).
+    /// * `StretchWindow` **0 (rectangle)** — AutoCAD's default two-corner crossing
+    ///   window, exactly the capture this build had before the polygon/lasso
+    ///   wiring (a *valid* closed-set member, so the default is always accepted).
     ///
     /// Note the fill-angle range (ADR 0016 decision A): the legal values are
     /// `0 < |angle| <= 360`, so the full-circle **default 360 is re-settable** (a
@@ -577,6 +603,7 @@ impl ToolParameter {
             Self::DivideUseBlock => ToolValue::Flag(false),
             Self::DivideAlignBlock => ToolValue::Flag(false),
             Self::PolylineWidth => ToolValue::Number(0.0),
+            Self::StretchWindow => ToolValue::Number(STRETCH_WINDOW_RECT),
         }
     }
 
@@ -689,6 +716,19 @@ impl ToolParameter {
             // and a positive value is a real stroke; a negative or non-finite
             // width is refused here, never clamped.
             (Self::PolylineWidth, ToolValue::Number(number)) => finite_at_least(self, number, 0.0),
+            // STRETCH window mode: the three documented shapes, read by name in
+            // the refusal. `3`, a fraction and a negative code are refused, never
+            // clamped onto a neighbouring shape.
+            (Self::StretchWindow, ToolValue::Number(number)) => closed_choice(
+                self,
+                number,
+                &[
+                    STRETCH_WINDOW_RECT,
+                    STRETCH_WINDOW_POLYGON,
+                    STRETCH_WINDOW_LASSO,
+                ],
+                "0 (rectangle), 1 (polygon) or 2 (lasso)",
+            ),
             // DIMROTATED's angle: any **finite** degrees value, no implicit wrap
             // and no normalisation (a negative angle is a legal rotation the other
             // way). NaN/±∞ are refused by name.

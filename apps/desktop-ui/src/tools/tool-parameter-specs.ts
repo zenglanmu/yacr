@@ -557,6 +557,26 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     labelKey: 'status.tool_parameter.polyline_width',
     hintKey: 'status.tool_parameter.polyline_width.hint',
   },
+  // STRETCH's crossing-window capture mode: a **closed set of three codes** —
+  // `0` rectangle (two opposite corners, AutoCAD's default), `1` polygon
+  // (successive boundary clicks, closed by a click on the first vertex or Enter),
+  // `2` lasso (one freehand drag traces the ring). The codes are read **by name**
+  // (a raw 0/1/2 stepper would be a number nobody decodes), the same treatment
+  // ALIGN's pair count and LENGTHEN's modes get. The host fixes the capture's
+  // first phase from this value when the tool starts, and all three end in the
+  // same crossing-window planner, so the chooser selects a *capture shape* and
+  // never a different command.
+  stretchWindow: {
+    kind: 'number', statusKey: 'stretchWindow', step: 1,
+    ...closedSet(0, 1, 2),
+    choiceLabelKeys: Object.freeze({
+      0: 'status.tool_parameter.stretch_window.rect',
+      1: 'status.tool_parameter.stretch_window.polygon',
+      2: 'status.tool_parameter.stretch_window.lasso',
+    }),
+    labelKey: 'status.tool_parameter.stretch_window',
+    hintKey: 'status.tool_parameter.stretch_window.hint',
+  },
 });
 
 /** Which parameters belong to an active tool, and the command that gates them. */
@@ -671,4 +691,9 @@ export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   // the geometry and the angle is the only setting the command reads besides the
   // resolved `Standard` style.
   'draw.dimrotated': { command: 'DIMROTATED', keys: ['dimRotation'] },
+  // STRETCH owns exactly one row: the crossing-window capture mode. The rectangle
+  // is the four-click shape this tool always had; polygon/lasso add a free-form
+  // ring step in front of the same two displacement picks, so the strip's one
+  // control decides how the **window** is captured and nothing else.
+  'draw.stretch': { command: 'STRETCH', keys: ['stretchWindow'] },
 });

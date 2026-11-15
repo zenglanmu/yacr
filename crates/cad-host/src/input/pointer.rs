@@ -132,6 +132,13 @@ impl HostCore {
             // press on a grip must stay a pan.
             if button == Some(PointerButton::Primary) {
                 self.arm_grip_at(point);
+                // A STRETCH crossing-window capture in lasso mode is waiting for
+                // its ring: the press starts the freehand trace (the release hands
+                // it over), so no box selection and no pan competes for it. This is
+                // the same single arbitration point the grip/box decision uses.
+                if self.stretch_lasso_waiting() {
+                    *self.navigation.lasso_gesture.borrow_mut() = Some(LassoGesture::new(point));
+                }
             }
         } else {
             // Hard rule: multi-touch navigation replaces any active tool and
@@ -139,6 +146,7 @@ impl HostCore {
             // gesture and any armed grip drag: the winner is navigation, never a
             // rubber band or a geometry edit.
             self.clear_box_gesture();
+            self.clear_lasso_gesture();
             self.cancel_grip_drag();
             self.disarm_zoom_window();
             self.controller.borrow_mut().cancel_tool()?;
@@ -171,6 +179,7 @@ impl HostCore {
         let contacts = self.navigation.active.borrow().len();
         if contacts >= 2 {
             self.clear_box_gesture();
+            self.clear_lasso_gesture();
             self.navigation.navigating.set(true);
             if let Some(last) = self.navigation.nav_last.get() {
                 let delta = [point[0] - last[0], point[1] - last[1]];
@@ -179,6 +188,14 @@ impl HostCore {
                 }
             }
             self.navigation.nav_last.set(Some(point));
+            return Ok(());
+        }
+        // A live lasso owns the single contact for its whole life: it belongs to
+        // the active STRETCH capture, so it is serviced **before** the capture
+        // early return (that return is exactly the state it runs in). Only the
+        // path grows; the camera never moves and no box gesture starts.
+        if self.navigation.lasso_gesture.borrow().is_some() {
+            self.track_lasso(point);
             return Ok(());
         }
         // A draw/measure capture owns single-contact gestures: the UI delivers
@@ -292,9 +309,16 @@ impl HostCore {
         self.navigation.last.set(None);
         self.navigation.nav_last.set(None);
         let box_gesture = self.navigation.box_gesture.borrow_mut().take();
+        let lasso_gesture = self.navigation.lasso_gesture.borrow_mut().take();
         self.navigation.button.set(None);
         self.navigation.contact_kind.set(None);
         self.navigation.press_modifiers.set(None);
+        // A release that ends a live lasso hands its traced ring to the active
+        // STRETCH capture (which then asks for the base and displacement points).
+        // It is not a click, so nothing selects and no box is finished.
+        if let Some(lasso) = lasso_gesture {
+            return self.finish_lasso_gesture(lasso);
+        }
         // A release that ends an armed grip drag commits exactly one
         // `GripStretch` (or nothing when the handle never moved) and claims the
         // click the session emits right after this release: a click that lands on
@@ -325,6 +349,9 @@ impl HostCore {
         // gesture and no rubber band may remain.
         self.clear_hover();
         self.clear_box_gesture();
+        // A live lasso is dropped, never handed over: nothing was captured, so the
+        // STRETCH capture keeps waiting for its window (a pure state drop).
+        self.clear_lasso_gesture();
         // An armed grip drag is dropped, not committed: nothing was written
         // before the release, so this is a pure state drop.
         self.cancel_grip_drag();
@@ -562,6 +589,12 @@ impl HostCore {
     /// uniformly, the final dash of each edge reaches its corner, and the count
     /// stays bounded — the rectangle is always closed, never truncated.
     pub(crate) fn box_selection_preview(&self) -> Option<BoxSelectionPreview> {
+        // A live STRETCH lasso is the same transient gesture input: its traced path
+        // is the CROSSING boundary the user is drawing, so it goes through the one
+        // rubber-band overlay rather than a second preview channel.
+        if let Some(preview) = self.lasso_preview() {
+            return Some(preview);
+        }
         let gesture = *self.navigation.box_gesture.borrow();
         let gesture = gesture?;
         let c = self.controller.borrow();

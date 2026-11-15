@@ -22,6 +22,7 @@ fn rectang_preview_draws_the_closed_outline_between_the_two_corners() {
         point_target: None,
         ready: false,
         polygon_sides: None,
+        window_open: false,
         awaiting_text: false,
         text_prefill: None,
     };

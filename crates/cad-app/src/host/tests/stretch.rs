@@ -231,3 +231,255 @@ fn stretch_is_work_only_and_refused_in_viewer() {
         .expect_err("STRETCH is Work-only");
     assert!(matches!(error, CadError::PermissionDenied), "{error:?}");
 }
+
+// --- the polygon/lasso crossing window through the real capture path ---------
+
+/// Set the live `stretchWindow` mode through the one parameter channel (the same
+/// entry the UI's capture-mode chooser uses) and start the STRETCH capture.
+fn begin_stretch(controller: &mut HostController, mode: f64) {
+    controller
+        .session
+        .set_tool_parameter(
+            crate::ToolParameter::StretchWindow,
+            crate::ToolValue::Number(mode),
+        )
+        .unwrap();
+    controller.begin_draw_tool(DrawToolKind::Stretch).unwrap();
+}
+
+/// The square crossing ring used by the polygon/lasso captures: it encloses only
+/// the line's `(0,0)` endpoint, so the line stretches to `(0,5)-(10,0)`.
+fn square_ring() -> Vec<Point3> {
+    vec![p(-1.0, -1.0), p(2.0, -1.0), p(2.0, 1.0), p(-1.0, 1.0)]
+}
+
+#[test]
+fn stretch_polygon_capture_reaches_the_command_through_the_tool() {
+    let mut controller = fixture();
+    let revision_before = controller.drawing().unwrap().revision();
+    let undo_before = undo_depth(&controller);
+    begin_stretch(&mut controller, crate::STRETCH_WINDOW_POLYGON);
+
+    // The capture reports its polygon window step, not the rectangle's four picks.
+    assert_eq!(
+        controller.session.draw_window_step(),
+        Some(crate::StretchWindowStep::PolygonVertex)
+    );
+
+    // Successive clicks add boundary vertices; none of them is a displacement
+    // point, so the capture is not ready and no command can be built yet.
+    for vertex in square_ring() {
+        controller.capture_tool_point(vertex).unwrap();
+    }
+    assert_eq!(controller.session.draw_window_ring_len(), 4);
+    assert!(controller.session.draw_window_step().is_some());
+    let preview = controller
+        .session
+        .draw_preview()
+        .expect("the capture is active");
+    assert!(
+        !preview.can_confirm(),
+        "an open ring is not a defined window"
+    );
+    assert!(preview.is_open_ended(), "the ring accepts more vertices");
+    assert!(preview.window_open, "the window step is the ring");
+
+    // CONFIRM closes the ring; only then do the two displacement picks follow.
+    controller.session.close_draw_window_ring().unwrap();
+    assert_eq!(controller.session.draw_window_step(), None);
+    for point in [p(0.0, 0.0), p(0.0, 5.0)] {
+        controller.capture_tool_point(point).unwrap();
+    }
+    // Capture is intent, not a transaction.
+    assert_eq!(controller.drawing().unwrap().revision(), revision_before);
+
+    let intent = controller.session.draw_intent().unwrap();
+    assert_eq!(
+        intent,
+        DrawIntent::StretchPolygon {
+            ring: square_ring(),
+            base: p(0.0, 0.0),
+            delta: p(0.0, 5.0),
+        }
+    );
+    let selection = controller
+        .session
+        .draw_selection_snapshot()
+        .unwrap()
+        .to_vec();
+    let command = controller
+        .command_for_draw_intent(intent, &selection)
+        .unwrap();
+    assert_eq!(command.id, crate::CommandId::StretchEntities);
+    match command.payload {
+        CommandPayload::StretchPolygon(polygon) => {
+            assert_eq!(polygon.base, p(0.0, 0.0));
+            assert_eq!(polygon.delta, p(0.0, 5.0));
+            // The ring travels as canvas logical pixels; mapping it back through
+            // the same plan view recovers the captured world vertices exactly.
+            assert_eq!(polygon.polygon_logical.len(), 4);
+            let viewport = controller
+                .application
+                .workspace
+                .viewports
+                .get(&controller.viewport_id)
+                .unwrap();
+            let size = viewport.logical_size;
+            for (logical, world) in polygon.polygon_logical.iter().zip(square_ring()) {
+                let back = viewport.screen_to_world(*logical, size).unwrap();
+                assert!(
+                    (back.x - world.x).abs() < 1e-9 && (back.y - world.y).abs() < 1e-9,
+                    "{logical:?} -> {back:?}, expected {world:?}"
+                );
+            }
+        }
+        _ => panic!("expected a StretchPolygon payload"),
+    }
+
+    // One transaction / one undo step, and the line really stretched.
+    let outcome = controller.confirm_draw().unwrap();
+    assert_eq!(
+        outcome.objects.len(),
+        1,
+        "the stretched LINE changed in place"
+    );
+    assert_eq!(
+        controller.drawing().unwrap().revision(),
+        Revision(revision_before.0 + 1)
+    );
+    assert_eq!(undo_depth(&controller), undo_before + 1, "one undo step");
+    match controller
+        .drawing()
+        .unwrap()
+        .entity(EntityId(201))
+        .unwrap()
+        .geometry
+        .clone()
+    {
+        SemanticGeometry::Line { start, end } => {
+            assert_eq!(start, p(0.0, 5.0));
+            assert_eq!(end, p(10.0, 0.0));
+        }
+        other => panic!("expected the line, got {other:?}"),
+    }
+}
+
+#[test]
+fn stretch_lasso_capture_reaches_the_same_planner() {
+    let mut controller = fixture();
+    let revision_before = controller.drawing().unwrap().revision();
+    let undo_before = undo_depth(&controller);
+    begin_stretch(&mut controller, crate::STRETCH_WINDOW_LASSO);
+    assert_eq!(
+        controller.session.draw_window_step(),
+        Some(crate::StretchWindowStep::LassoTrace)
+    );
+
+    // A click cannot define a lasso: the capture refuses by name and stores
+    // nothing, so it keeps waiting for the drag.
+    let error = controller.capture_tool_point(p(0.0, 0.0)).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("stretch.window.lasso_needs_drag"),
+        "{error}"
+    );
+    assert_eq!(controller.session.draw_window_ring_len(), 0);
+    assert_eq!(
+        controller.session.draw_window_step(),
+        Some(crate::StretchWindowStep::LassoTrace)
+    );
+
+    // The host hands the traced drag path over as one closed ring (the same
+    // entry the release of a lasso gesture uses).
+    controller
+        .session
+        .set_draw_window_ring(square_ring())
+        .unwrap();
+    assert_eq!(controller.session.draw_window_step(), None);
+    for point in [p(0.0, 0.0), p(0.0, 5.0)] {
+        controller.capture_tool_point(point).unwrap();
+    }
+    assert_eq!(
+        controller.session.draw_intent().unwrap(),
+        DrawIntent::StretchPolygon {
+            ring: square_ring(),
+            base: p(0.0, 0.0),
+            delta: p(0.0, 5.0),
+        }
+    );
+
+    let outcome = controller.confirm_draw().unwrap();
+    assert_eq!(outcome.objects.len(), 1);
+    assert_eq!(
+        controller.drawing().unwrap().revision(),
+        Revision(revision_before.0 + 1)
+    );
+    assert_eq!(undo_depth(&controller), undo_before + 1, "one undo step");
+    match controller
+        .drawing()
+        .unwrap()
+        .entity(EntityId(201))
+        .unwrap()
+        .geometry
+        .clone()
+    {
+        SemanticGeometry::Line { start, end } => {
+            assert_eq!(start, p(0.0, 5.0));
+            assert_eq!(end, p(10.0, 0.0));
+        }
+        other => panic!("expected the line, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_degenerate_ring_is_refused_by_name_and_changes_nothing() {
+    let mut controller = fixture();
+    let revision_before = controller.drawing().unwrap().revision();
+    begin_stretch(&mut controller, crate::STRETCH_WINDOW_LASSO);
+
+    // Two vertices are a line, not a ring: the refusal is named and the capture
+    // stays exactly where it was (still waiting for its lasso).
+    let error = controller
+        .session
+        .set_draw_window_ring(vec![p(0.0, 0.0), p(1.0, 1.0)])
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("stretch.window.too_few_vertices"),
+        "{error}"
+    );
+    assert_eq!(
+        controller.session.draw_window_step(),
+        Some(crate::StretchWindowStep::LassoTrace)
+    );
+    assert_eq!(controller.session.draw_window_ring_len(), 0);
+
+    // Collinear vertices enclose nothing: refused by name too, never stored as a
+    // window that would silently select nothing.
+    let error = controller
+        .session
+        .set_draw_window_ring(vec![p(0.0, 0.0), p(1.0, 0.0), p(2.0, 0.0)])
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("stretch.window.degenerate_ring"),
+        "{error}"
+    );
+
+    // A polygon ring cannot close before it has three vertices either.
+    begin_stretch(&mut controller, crate::STRETCH_WINDOW_POLYGON);
+    controller.capture_tool_point(p(0.0, 0.0)).unwrap();
+    controller.capture_tool_point(p(1.0, 0.0)).unwrap();
+    let error = controller.session.close_draw_window_ring().unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("stretch.window.too_few_vertices"),
+        "{error}"
+    );
+
+    // Nothing was written by any refused capture step.
+    assert_eq!(controller.drawing().unwrap().revision(), revision_before);
+    assert_eq!(undo_depth(&controller), 0);
+}

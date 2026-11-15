@@ -8,6 +8,7 @@ use super::*;
 mod grip_drag;
 mod hover;
 mod interaction;
+mod lasso;
 mod pointer;
 mod queue;
 

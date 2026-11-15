@@ -63,6 +63,7 @@ impl HostCore {
             self.navigation.contact_kind.set(None);
             self.navigation.press_modifiers.set(None);
             *self.navigation.box_gesture.borrow_mut() = None;
+            *self.navigation.lasso_gesture.borrow_mut() = None;
             // A stale `Up`/`Cancel` closes the gesture exactly like the live one:
             // an armed grip drag is dropped (nothing was written). The
             // click-suppression latch is deliberately **not** cleared here: this

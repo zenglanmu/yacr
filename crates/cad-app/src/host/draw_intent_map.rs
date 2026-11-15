@@ -476,6 +476,20 @@ impl HostController {
                     delta,
                 },
             ),
+            // STRETCH inside a crossing polygon/lasso: the closed boundary ring is
+            // mapped back to canvas logical pixels with the same projection the
+            // two-corner window uses, and travels on the existing
+            // `StretchPolygon` payload (one containment rule, one planner). A
+            // degenerate ring is refused by the command layer by name, never
+            // widened or resampled here.
+            DrawIntent::StretchPolygon { ring, base, delta } => (
+                crate::CommandId::StretchEntities,
+                crate::CommandPayload::StretchPolygon(Box::new(crate::StretchPolygonCommand {
+                    polygon_logical: self.world_polygon_to_logical(&ring)?,
+                    base,
+                    delta,
+                })),
+            ),
             // DIMLINEAR/DIMALIGNED: the two captured origins and the
             // dimension-line location travel in click order as `Points` (the
             // construction input the create path already reads, exactly like
@@ -720,6 +734,35 @@ impl HostController {
                 })?;
         }
         Ok(out)
+    }
+
+    /// Map a captured crossing-polygon/lasso ring from world coordinates back to
+    /// canvas logical pixels (the [`crate::StretchPolygonCommand`] convention, the
+    /// same one [`Self::world_rect_to_logical`] uses for the two-corner window).
+    ///
+    /// One projection path only: a perspective/3D view has no plan mapping and is
+    /// an explicit `Unsupported` (3D STRETCH is NOT IMPLEMENTED), and a missing
+    /// viewport is an explicit `InvalidInput`. The ring is never resampled,
+    /// simplified or closed here — the capture already closed it, and the command
+    /// layer owns every degeneracy refusal.
+    fn world_polygon_to_logical(&self, ring: &[Point3]) -> CadResult<Vec<[f64; 2]>> {
+        let viewport = self
+            .application
+            .workspace
+            .viewports
+            .get(&self.viewport_id)
+            .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
+        let size = viewport.logical_size;
+        ring.iter()
+            .map(|world| {
+                viewport
+                    .camera
+                    .world_to_screen(*world, size)
+                    .ok_or_else(|| {
+                        CadError::Unsupported("STRETCH requires the orthographic plan view".into())
+                    })
+            })
+            .collect()
     }
 }
 

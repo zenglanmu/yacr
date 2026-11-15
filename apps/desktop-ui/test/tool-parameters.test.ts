@@ -144,6 +144,12 @@ test('the per-tool map and the spec table stay consistent', () => {
     command: 'BREAK',
     keys: ['breakFirstPoint'],
   });
+  // STRETCH owns the one crossing-window capture-mode row (rectangle, polygon,
+  // lasso); it decides how the window is captured and nothing else.
+  assert.deepEqual(TOOL_PARAMETERS['draw.stretch'], {
+    command: 'STRETCH',
+    keys: ['stretchWindow'],
+  });
   // Every key a tool maps to has a spec, and every spec is reachable through the
   // map — so a later phase only adds a row (the specs already exist).
   const mapped = new Set();
@@ -162,7 +168,7 @@ test('the per-tool map and the spec table stay consistent', () => {
     'hatchDouble', 'hatchGradientAngle', 'hatchGradientColorA', 'hatchGradientColorB',
     'hatchGradientKind', 'hatchPattern', 'hatchPatternType', 'hatchSpacing', 'hatchStyle',
     'lengthenMode', 'lengthenValue', 'mtextAttachment', 'polygonSides', 'polylineWidth', 'scaleTextFactor',
-    'textHeight', 'textRotation',
+    'stretchWindow', 'textHeight', 'textRotation',
   ]);
   assert.equal(TOOL_PARAMETER_SPECS.alignScale.kind, 'flag');
   assert.equal(TOOL_PARAMETER_SPECS.arrayRotateItems.kind, 'flag');

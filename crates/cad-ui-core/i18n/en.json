@@ -2911,5 +2911,17 @@
   "draw.kind.recoverall": "Recover All Drawings (RECOVERALL)",
   "draw.kind.recoverall.hint": "RECOVERALL reports the recovery pass for every open drawing. Read-only: no drawing is written or modified.",
   "draw.kind.purgeaecdata": "Purge AEC Data (PURGEAECDATA)",
-  "draw.kind.purgeaecdata.hint": "PURGEAECDATA reports the AEC proxy data stored in the drawing. Read-only: nothing is deleted and no drawing is written."
+  "draw.kind.purgeaecdata.hint": "PURGEAECDATA reports the AEC proxy data stored in the drawing. Read-only: nothing is deleted and no drawing is written.",
+  "status.tool_parameter.stretch_window": "Stretch window",
+  "status.tool_parameter.stretch_window.hint": "How STRETCH captures its crossing window: a rectangle from two corners, a polygon from successive boundary clicks (Enter or a click on the first vertex closes it), or a freehand lasso drag",
+  "status.tool_parameter.stretch_window.rect": "Rectangle",
+  "status.tool_parameter.stretch_window.polygon": "Polygon",
+  "status.tool_parameter.stretch_window.lasso": "Lasso",
+  "tool.prompt.stretch.window_first": "First corner of the crossing window",
+  "tool.prompt.stretch.window_second": "Opposite corner of the crossing window",
+  "tool.prompt.stretch.polygon_vertex": "Next vertex of the crossing boundary (Enter closes it, or click the first vertex)",
+  "tool.prompt.stretch.lasso_trace": "Drag a freehand lasso to trace the crossing boundary",
+  "tool.prompt.stretch.base": "Base point of the stretch",
+  "tool.prompt.stretch.delta": "Displacement point",
+  "tool.prompt.stretch.ready": "Crossing window captured; press Enter to stretch"
 }

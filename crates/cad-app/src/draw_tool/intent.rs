@@ -291,6 +291,20 @@ pub enum DrawIntent {
         base: Point3,
         delta: Point3,
     },
+    /// STRETCH inside a **crossing polygon or lasso** (ADR 0016 decision E).
+    ///
+    /// `ring` is the closed free-form boundary in **capture order**, as world
+    /// points: the polygon's clicked vertices or the lasso's sampled path (the
+    /// capture closes a repeated first vertex, so the ring is never stored twice).
+    /// `base`/`delta` are the two displacement picks, exactly as captured. The
+    /// containment rule is the same even-odd predicate the rectangle path shares —
+    /// a lasso is the same polygon — and the enclosure classification is
+    /// recomputed by the command layer, never carried here.
+    StretchPolygon {
+        ring: Vec<Point3>,
+        base: Point3,
+        delta: Point3,
+    },
     /// DIMLINEAR: insert a horizontal or vertical linear dimension through the
     /// two extension-line origins `first`/`second` and the dimension-line
     /// location `location`, on the active layer (ADR 0017 decision C, P5c).

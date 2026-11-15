@@ -423,6 +423,7 @@ fn a_candidate_only_tint_is_flags_only_while_the_preview_cursor_is_visual() {
             ready: false,
             point_target: None,
             polygon_sides: None,
+            window_open: false,
             awaiting_text: false,
             text_prefill: None,
         }),

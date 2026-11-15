@@ -24,6 +24,7 @@ fn spline_preview_draws_a_bounded_chord_approximation_of_the_curve() {
         point_target: None,
         ready: true,
         polygon_sides: None,
+        window_open: false,
         awaiting_text: false,
         text_prefill: None,
     };

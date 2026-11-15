@@ -20,6 +20,7 @@ fn preview(kind: DrawToolKind, points: Vec<Point3>, cursor: Option<Point3>) -> D
         point_target: None,
         ready: false,
         polygon_sides: None,
+        window_open: false,
         awaiting_text: false,
         text_prefill: None,
     }

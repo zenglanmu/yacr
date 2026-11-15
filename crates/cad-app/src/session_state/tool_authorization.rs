@@ -86,5 +86,8 @@ pub(crate) fn authorizing_command(parameter: ToolParameter) -> CommandId {
         // PLINE's uniform width belongs to the polyline create command, so a
         // Viewer-mode set is refused exactly like every other create parameter.
         ToolParameter::PolylineWidth => CommandId::CreatePolyline,
+        // STRETCH's crossing-window mode belongs to the STRETCH edit command, so a
+        // Viewer-mode set is refused exactly like every other Work-only parameter.
+        ToolParameter::StretchWindow => CommandId::StretchEntities,
     }
 }

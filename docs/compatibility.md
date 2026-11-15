@@ -1814,7 +1814,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `PEDIT` | 部分实现 | 全选项行；`Join` 接受线/弧/多段线；`Fit`/`Spline` 含闭合环；`Decurve`/`Reverse`/`Undo`；LINE/ARC/SPLINE 转换 | **`Width`/`Ltype gen`/`Edit vertex` 未实现**（多段线无宽度/`plinegen`/顶点子菜单模型）；偶数环无精确弧拟合 ⇒ `pedit.fit_closure` |
 | `JOIN` | 部分实现 | 源对象模式；`Multiple` 把 LINE/ARC/多段线/SPLINE/椭圆弧精确焊接为**有理 B 样条**（椭圆弧 = 圆有理二次的精确仿射像） | `JOIN CLOSE` 的混合 SPLINE 仍拒绝；非共面多段线属 3D 全局范围 |
 | `OFFSET` | **完整实现** | `Through`/`Erase`/`Layer`/`Multiple`（单步）/距离；椭圆与椭圆弧→样条；`OFFSETGAPTYPE` Sharp/**Fillet**/**Chamfer** | `OFFSET MULTIPLE` 的多点循环拒绝（单点捕获，属逐选项提示全局范围）；开放折线远端自交未检查（AutoCAD 未文档化） |
-| `STRETCH` | 部分实现 | 交叉矩形 + 交叉多边形/lasso payload（even-odd 包含）；部分包围逐顶点、完全包围整移；圆按圆心、块/文字按插入点；标注按定义点 | **多边形/lasso 的交互捕获未接线**（只经 API/IPC 可达，工具仍只捕获矩形） |
+| `STRETCH` | 完整实现 | 交叉矩形、交叉多边形（点击 + `CONFIRM`/回点首顶点闭合）与自由手绘 lasso（拖拽采样、释放闭合、CROSSING 预览）都经工具捕获进入同一 `polygon_window` 规划；even-odd 包含；部分包围逐顶点、完全包围整移；圆按圆心、块/文字按插入点；标注按定义点；一条事务/一步撤销 | `MULTILEADER` 整命令拒绝；环<3 顶点/非有限/零面积/未闭合具名拒绝；仅 2D 平面视图；lasso 采样是原始指针点（不经捕捉/正交） |
 | `MIRROR` | 部分实现 | `MIRRTEXT=0` 可读镜像；`MIRROR ERASE YES/NO`；标注反射后重合成 | **`MIRRTEXT=1` 字形镜像未实现**（文字实体无镜像标志） |
 | `EXPLODE` | 部分实现 | 标注→线/弧/箭头网格/文字；多重引线→引线/样条/箭头网格/MTEXT；非均匀块可表示子集；嵌套一层；MINSERT/XREF 拒绝 | **多重引线的背景/分栏/自定义箭头/打断/非默认平面未导入也未产出**；块属性值丢弃（无属性模型） |
 | `QSELECT` | 部分实现 | `Equals`/`Not Equal`/`>`/`<`/`>=`/`<=`/通配符/`Select All`；整图（当前空间）或当前选择；`Include`/`Exclude`/`Append`；嵌套块不参与；只读 | **分类/自定义对象特性未建模**，属性集为基础子集；通配符仅 `*`/`?` |
