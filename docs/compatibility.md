@@ -692,7 +692,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `VIEWRES` | 完整实现 | 整数 `1..=1000`（越界 `viewres.out_of_range`）成为弦分段上限：约束样条、折线 bulge 弧、非 SDF 圆锥的弦回退与宽折线带，`1..=2` 夹到 3 段下限；无库写/无撤销 | 声明：圆/弧/椭圆是解析 SDF，无弦可限，本变量不改变其平滑度；这是显示容差上限，不是平滑度设置；像素效果 NOT VERIFIED |
 | `VSCURRENT` | 部分实现 | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented` | 无渲染器切换（当前渲染器本就是 2D wireframe）；NOT pixel-verified |
 | `REGEN3` | 部分实现 | `REGEN` 的别名（同一 `CommandId`/路径） | 不修复 3D 实体/曲面显示异常（无该能力） |
-| `LINETYPE` / `-LINETYPE` | 部分实现 | `LIST` 只读（Viewer 合法）；`SET <name>` 复用 `SETENTITYPROPERTY`、重新授权工作模式、一条事务/一步撤销 | 未知名 `property.unknown_linetype`；无线型表加载/新建/删除/改名 |
+| `LINETYPE` / `-LINETYPE` | 完整实现 | `LIST`、`SET <name>`、`CREATE <name> <dash>,<gap>,… [DESCRIPTION <text>]`、`DELETE <name>`；两条写命令各一条事务/一步撤销，Viewer 拒绝写入而 `LIST` 仍合法；名称语法/重复/保留名/图案元素（组 49，正划负空、有限、至少一段可见划）与在用引用逐条具名拒绝；`-LINETYPE` 经别名表归一化到同选择子/同解析器/同处理器；导出写全部行、导入可重建（创建行有往返测试） | `DESCRIPTION` 带文本按 `linetype.description_not_modelled` 拒绝（行无描述列，需域字段+导入导出扩展）；`LOAD`（`.lin` 文件）仍 NOT IMPLEMENTED（无文件装载通道，独立命令）；id 分配为 `max(id)+1`（无分配器字段，补丁携带整行故撤销/重做仍精确） |
 
 > **证据边界**：以上 9 条（`TRACE` 除外）只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、
 > 像素、真实 GPU、真机或 vendor-AutoCAD 证据。extras-batch 的前端测试在主仓库合并后运行通过；
