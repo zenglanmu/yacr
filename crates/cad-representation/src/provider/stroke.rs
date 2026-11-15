@@ -125,6 +125,58 @@ pub(crate) fn wide_polyline_mesh(
     (!mesh.triangles.is_empty()).then_some(mesh)
 }
 
+/// The closed outline of the same stroke band [`wide_polyline_mesh`] fills.
+///
+/// `FILL OFF` draws a wide polyline as its outline, and the outline must be the
+/// boundary of the band `FILL ON` fills — not a second, differently-tessellated
+/// stroke. This is why the two share [`dedupe`]/[`plane_normal`]/
+/// [`vertex_offsets`]: the band's left side is walked forward, its right side
+/// backward, and the first vertex closes the loop. For an **open** polyline the
+/// two end caps are therefore the runs between the last left/right vertices, and
+/// for a **closed** one the loop is the two offset rings joined at the seam.
+///
+/// Returns `None` under exactly the conditions [`wide_polyline_mesh`] returns
+/// `None` (fewer than two distinct finite centreline vertices), so the caller's
+/// fallback is the same centreline draw for both modes.
+pub(crate) fn band_outline(
+    geometry: &SemanticGeometry,
+    params: TessellationParams,
+    width: f64,
+) -> Option<Vec<Point3>> {
+    let SemanticGeometry::Polyline {
+        points: vertices,
+        closed,
+        ..
+    } = geometry
+    else {
+        return None;
+    };
+    if !width.is_finite() || width <= 0.0 {
+        return None;
+    }
+    let centerline = dedupe(&tessellate_geometry(geometry, params), *closed);
+    if centerline.len() < 2 {
+        return None;
+    }
+    if !centerline
+        .iter()
+        .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+    {
+        return None;
+    }
+    let normal = plane_normal(vertices, &centerline);
+    let offsets = vertex_offsets(&centerline, *closed, normal, width / 2.0)?;
+    let mut outline = Vec::with_capacity(centerline.len() * 2 + 1);
+    for (point, offset) in centerline.iter().zip(offsets.iter()) {
+        outline.push(add(*point, *offset));
+    }
+    for (point, offset) in centerline.iter().zip(offsets.iter()).rev() {
+        outline.push(add(*point, scale(*offset, -1.0)));
+    }
+    outline.push(outline[0]);
+    Some(outline)
+}
+
 fn add(a: Point3, b: Point3) -> Point3 {
     Point3 {
         x: a.x + b.x,

@@ -31,6 +31,9 @@ use retire::{
     flags_fingerprint, merge_retired_flags, retire_is_hideable, retire_keeps_base,
     RETIRED_COMPACTION_THRESHOLD,
 };
+pub use settings::DisplaySettings;
+#[cfg(test)]
+mod display_mode_tests;
 mod update;
 #[cfg(test)]
 mod update_tests;
@@ -118,11 +121,9 @@ pub struct CadSceneController {
     images: Option<Arc<DecodedImageCache>>,
     /// Derived vendor display snapshot (display-only; never `cad-db` state).
     vendor: Option<Arc<VendorRepresentationStore>>,
-    /// Display `WIPEOUTFRAME` state: whether the base draws each WIPEOUT's
-    /// boundary frame in addition to its fill. It is session state (never
-    /// `cad-db`), so it is part of [`SceneVersion`] instead of the scene
-    /// identity; a flip forces a base rebuild.
-    wipeout_frames: bool,
+    /// Session display tokens (`WIPEOUTFRAME`/`FILL`/`QTEXT`/`VIEWRES`) that
+    /// change the derived primitives; a flip forces a base rebuild.
+    display: DisplaySettings,
     /// Visible POINT positions derived from the displayed drawing
     /// (ADR 0015 decision E). Cached because they can only change when the base
     /// changes; a camera-only overlay rebuild reuses them instead of rescanning
@@ -319,7 +320,7 @@ impl CadSceneController {
                 .vendor
                 .as_ref()
                 .map_or(0, |store| Arc::as_ptr(store) as usize),
-            wipeout_frames: self.wipeout_frames,
+            display: self.display,
         });
         if let Some(db) = doc {
             crate::validate_space(db, space)?;
@@ -397,7 +398,7 @@ impl CadSceneController {
                 self.images.clone(),
                 layers,
                 self.vendor.as_deref(),
-                self.wipeout_frames,
+                self.display,
             )
             .map(|batches| (id, range, batches))
         });
@@ -432,7 +433,7 @@ impl CadSceneController {
                 && old.images == new.images
                 && old.vendor == new.vendor
                 && old.vendor_identity == new.vendor_identity
-                && old.wipeout_frames == new.wipeout_frames
+                && old.display == new.display
                 && self
                     .model_max_order
                     .is_none_or(|order| entity.draw_order > order))
@@ -467,7 +468,7 @@ impl CadSceneController {
                                 layers,
                                 space,
                                 self.vendor.as_deref(),
-                                self.wipeout_frames,
+                                self.display,
                             )?;
                         Ok((delta, EntityBatchIndex::from_ranges(ranges)))
                     }
@@ -514,7 +515,7 @@ impl CadSceneController {
                     self.images.clone(),
                     layers,
                     self.vendor.as_deref(),
-                    self.wipeout_frames,
+                    self.display,
                 )?;
                 if appendable_delta(&delta) {
                     // O(changed): keep the predecessor's prefix `Arc` and push the

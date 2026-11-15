@@ -35,7 +35,8 @@ use cad_scene::RenderBatch;
 use super::entity_index::EntityBatchIndex;
 use super::retire::retire_keeps_base;
 use super::{
-    appendable_delta, assembly, CommitDelta, DrawingEditReceipt, ResidentScene, SceneVersion,
+    appendable_delta, assembly, CommitDelta, DisplaySettings, DrawingEditReceipt, ResidentScene,
+    SceneVersion,
 };
 use crate::layers::LayerOverrideSet;
 use crate::vendor::VendorRepresentationStore;
@@ -120,18 +121,11 @@ pub(super) fn stage_update(
     images: Option<Arc<DecodedImageCache>>,
     layers: &LayerOverrideSet,
     vendor: Option<&VendorRepresentationStore>,
-    wipeout_frames: bool,
+    display: DisplaySettings,
 ) -> Option<Vec<Arc<RenderBatch>>> {
     let entity = doc.entity(id)?;
     let delta = assembly::build_model_entity_scene(
-        doc,
-        entity,
-        stamp,
-        fonts,
-        images,
-        layers,
-        vendor,
-        wipeout_frames,
+        doc, entity, stamp, fonts, images, layers, vendor, display,
     )
     .ok()?;
     if delta.added.len() != range.len() || !appendable_delta(&delta) {

@@ -2,9 +2,18 @@
 //! `VSCURRENT`.
 //!
 //! Both are **session view state only**: no database write, revision bump,
-//! `cad-history` entry or `ChangeSet`. `ViewExtras` is stored on
-//! [`crate::SessionState`] so a host can read the value back; this lane wires no
-//! renderer change, so the values are not pixel- or GPU-verified.
+//! `cad-history` entry or `ChangeSet`.
+//!
+//! * `VIEWRES` is **consumed** by the display build: the percentage becomes a
+//!   ceiling on chord segments per curve
+//!   ([`cad_representation::viewres_segment_ceiling`],
+//!   [`cad_representation::RepresentationContext::curve_segments`]). The ceiling
+//!   is deliberately partial — analytic conics (circles/arcs/ellipses) have no
+//!   chords — so the command reports exactly that.
+//! * `VSCURRENT` stores the one style the renderer implements. It is not a dead
+//!   token: `WIREFRAME` describes what is actually drawn (edges only), and every
+//!   shaded/hidden style is refused by name because no such display model
+//!   exists. No pixel/GPU effect is claimed or verified for either token.
 
 use cad_domain::{CadError, CadResult};
 
@@ -17,9 +26,12 @@ pub const VIEWRES_DEFAULT: u32 = 1000;
 
 /// The visual styles `VSCURRENT` can store.
 ///
-/// Only the 2D wireframe token exists. AutoCAD's `Conceptual`, `Realistic`,
-/// `Shaded`, `Shaded with edges`, `Hidden`, `Sketchy` and the 3D wireframe forms
-/// are **NOT IMPLEMENTED** and are refused by name at the command layer.
+/// Only the 2D wireframe token exists, because 2D wireframe is the only display
+/// mode this build's renderer implements: it draws entity edges, with no
+/// shading, no face fill and no hidden-line removal. AutoCAD's `Conceptual`,
+/// `Realistic`, `Shaded`, `Shaded with edges`, `Hidden`, `Sketchy` and the 3D
+/// wireframe forms are **NOT IMPLEMENTED** and are refused by name at the
+/// command layer — a refusal, never a silent mapping onto `Wireframe`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VisualStyleToken {
     /// 2D wireframe.
@@ -39,6 +51,10 @@ impl VisualStyleToken {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViewExtras {
     /// `VIEWRES` circle-tessellation percentage (`1..=1000`).
+    ///
+    /// Consumed by the display build as a chord-segment ceiling per curve (see
+    /// [`cad_representation::viewres_segment_ceiling`]); the default is
+    /// AutoCAD's modern 1000.
     pub viewres_percent: u32,
     /// `VSCURRENT` visual-style token.
     pub visual_style: VisualStyleToken,

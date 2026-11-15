@@ -1,10 +1,17 @@
-//! Session-only drafting toggles for the extended command batch.
+//! Session display toggles for the extended command batch.
 //!
-//! `QTEXT`, `FILL`, `TFRAMES`, `REGENAUTO` and `ISODRAFT` each flip one flag in
-//! [`SessionState::drafting_extras`]. The commands take no payload, open no
-//! transaction, bump no revision and record no `cad-history` entry. This build
-//! does **not** consume the flags in a renderer, so each outcome says the effect
-//! is NOT IMPLEMENTED and never claims a visual change.
+//! `QTEXT` and `FILL` are **display tokens with real consumers**: the flag each
+//! command flips is pushed into the scene controller
+//! ([`crate::render_scene::DisplaySettings`]) and read by the representation
+//! provider, so the derived display really changes — `FILL OFF` draws filled
+//! hatches/2D solids/wide polylines as outlines and `QTEXT ON` draws shaped text
+//! as a placeholder rectangle. Neither writes `cad-db`: no transaction, no
+//! revision bump, no `cad-history` entry, no `ChangeSet`, no undo step.
+//!
+//! `TFRAMES`, `REGENAUTO` and `ISODRAFT` have no display consumer in this build
+//! (there is no text/grid frame, no automatic-regeneration scheduler and no
+//! isometric cursor/snap model), so those three still store the token and say
+//! exactly that instead of claiming a visual change.
 
 use super::*;
 use crate::app_utility::require_none_payload;
@@ -25,6 +32,10 @@ pub(crate) fn toggle_outcome(code: &str, message: String) -> CommandOutcome {
 
 impl Application {
     /// Toggle one drafting flag (`QTEXT`/`FILL`/`TFRAMES`/`REGENAUTO`/`ISODRAFT`).
+    ///
+    /// The two display tokens report what the display pipeline now does with the
+    /// value; the three without a consumer say their effect is NOT IMPLEMENTED.
+    /// In every case the drawing is untouched.
     pub(crate) fn drafting_toggle(
         &mut self,
         session: &mut SessionState,
@@ -34,16 +45,46 @@ impl Application {
         let name = ext.selector();
         require_none_payload(command, name)?;
         let (code, enabled, behaviour) = match ext {
-            ExtendedCommandId::QText => (
-                "qtext.toggled",
-                session.drafting_extras.toggle_qtext(),
-                "quick-text rectangle display",
-            ),
-            ExtendedCommandId::Fill => (
-                "fill.toggled",
-                session.drafting_extras.toggle_fill(),
-                "solid-fill display",
-            ),
+            ExtendedCommandId::QText => {
+                let enabled = session.drafting_extras.toggle_qtext();
+                let state = if enabled { "ON" } else { "OFF" };
+                let behaviour = if enabled {
+                    "every text entity now draws as the placeholder rectangle of its shaped \
+                     extent (the glyphs are still shaped, so this build claims no redraw-speed \
+                     gain); text with no derivable extent keeps its own draw and reports \
+                     qtext.extent_unknown"
+                } else {
+                    "text entities draw their shaped glyphs again"
+                };
+                return Ok(toggle_outcome(
+                    "qtext.toggled",
+                    format!(
+                        "{name}: quick-text display is now {state} (session state only; the \
+                         drawing was not written): {behaviour}"
+                    ),
+                ));
+            }
+            ExtendedCommandId::Fill => {
+                let enabled = session.drafting_extras.toggle_fill();
+                let state = if enabled { "ON" } else { "OFF" };
+                let behaviour = if enabled {
+                    "filled hatches, 2D solids and wide polylines draw filled again; the stored \
+                     geometry was unchanged throughout"
+                } else {
+                    "filled hatches, 2D solids and wide polylines now draw their outline only \
+                     (hatch boundary loops, the solid's boundary edges, the stroke band's closed \
+                     offset outline); the entity geometry itself is unchanged, and this build \
+                     does not switch a bare kernel/B-rep display mesh, a dimension arrowhead, a \
+                     WIPEOUT mask or an image"
+                };
+                return Ok(toggle_outcome(
+                    "fill.toggled",
+                    format!(
+                        "{name}: solid-fill display is now {state} (session state only; the \
+                         drawing was not written): {behaviour}"
+                    ),
+                ));
+            }
             ExtendedCommandId::TFrames => (
                 "tframes.toggled",
                 session.drafting_extras.toggle_tframes(),

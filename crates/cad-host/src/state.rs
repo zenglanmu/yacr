@@ -1,6 +1,29 @@
 //! Fallible, UI-independent state derivation and dirty update publication.
 use super::*;
 
+/// The session display tokens resolved into the renderer's one settings value.
+///
+/// Every field is **session state**, never drawing data: reading them writes no
+/// `cad-db` row, opens no transaction, bumps no revision or history entry and
+/// produces no `ChangeSet`. `WIPEOUTFRAME` maps its display/plot split here (the
+/// display draws the frame for `ON` and `Display but not plot`; the plot path
+/// resolves its own value), `FILL`/`QTEXT` are the two session toggles their
+/// commands flip, and `VIEWRES` is the validated 1..=1000 percentage the base
+/// build turns into a chord-segment ceiling.
+fn display_settings(session: &cad_app::SessionState) -> cad_app::render_scene::DisplaySettings {
+    cad_app::render_scene::DisplaySettings {
+        wipeout_frames: matches!(
+            session.drafting_extras.wipeout_frames(),
+            cad_app::WipeoutFrames::On | cad_app::WipeoutFrames::DisplayNotPlot
+        ),
+        fill: session.drafting_extras.fill(),
+        qtext: session.drafting_extras.qtext(),
+        curve_segments: Some(cad_representation::viewres_segment_ceiling(
+            session.view_extras.viewres_percent,
+        )),
+    }
+}
+
 impl HostCore {
     pub(crate) fn sync_render(&self) -> CadResult<()> {
         self.sync_render_with_edit(None)
@@ -42,7 +65,7 @@ impl HostCore {
             drawing,
             view,
             layers,
-            wipeout_frames,
+            display,
             selection,
             measurement,
             preview,
@@ -109,7 +132,7 @@ impl HostCore {
                 c.drawing(),
                 view,
                 c.session.layer_overrides.clone(),
-                c.session.drafting_extras.wipeout_frames(),
+                display_settings(&c.session),
                 c.selection().clone(),
                 c.measurement_preview(),
                 c.session.draw_preview(),
@@ -121,15 +144,16 @@ impl HostCore {
         self.render.sync_drawing_with_edit(drawing, edit);
         self.render.apply_view_snapshot(view)?;
         self.render.set_layers(layers);
-        // `WIPEOUTFRAME` is session state with a display consumer: `ON` and
-        // `Display but not plot` draw the boundary frame in the display base,
-        // `OFF` does not. The plot path resolves its own flag (only `ON` plots
-        // the frame), so `Display but not plot` is display-only without a second
-        // session token.
-        self.render.set_wipeout_frames(matches!(
-            wipeout_frames,
-            cad_app::WipeoutFrames::On | cad_app::WipeoutFrames::DisplayNotPlot
-        ));
+        // The session display tokens with a real base consumer. Pushed as one
+        // batch so four tokens cannot schedule four base rebuilds in one sync.
+        //
+        // `WIPEOUTFRAME` maps `ON` and `Display but not plot` to "draw the
+        // boundary frame"; the plot path resolves its own flag (only `ON` plots
+        // it), so `Display but not plot` stays display-only without a second
+        // session token. `FILL`/`QTEXT` are the session flags the commands set,
+        // and `VIEWRES` is the circle-smoothness percentage the display build
+        // turns into its chord-segment ceiling.
+        self.render.set_display_settings(display);
         // Build the overlay inputs with the *final* viewport bounds in one shot.
         // Passing `None` here and then calling `set_viewport_bounds` mutated the
         // overlay input twice per sync, so every idle tick bumped the render

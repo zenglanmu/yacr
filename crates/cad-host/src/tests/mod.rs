@@ -18,6 +18,7 @@ mod box_select;
 mod box_select_edge_cases;
 mod capture_candidate;
 mod compat;
+mod display_modes;
 mod document_lifecycle;
 mod edit_receipt;
 mod engine_config;

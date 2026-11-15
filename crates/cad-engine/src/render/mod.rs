@@ -3,7 +3,8 @@ use cad_app::layers::LayerOverrideSet;
 use cad_app::recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
 use cad_app::render_scene as controller;
 use cad_app::render_scene::{
-    CadSceneController, DecodedImageCache, DrawingEditReceipt, OverlayInputs, SnapHint,
+    CadSceneController, DecodedImageCache, DisplaySettings, DrawingEditReceipt, OverlayInputs,
+    SnapHint,
 };
 use cad_app::vendor::VendorRepresentationStore;
 use cad_app::{Camera, MeasurementPreview, ProjectionKind, SelectionSet};
@@ -42,6 +43,7 @@ pub use runtime::{
 };
 
 mod diagnostics;
+mod session_display;
 mod session_impl;
 pub use diagnostics::{RenderDiagnostics, RenderGateReason};
 
@@ -176,10 +178,10 @@ struct BaseInputIdentity {
     fonts_generation: u64,
     images_generation: u64,
     layers: LayerOverrideSet,
-    /// Display `WIPEOUTFRAME` state: whether each base mask draws its boundary
-    /// frame (`true` for `ON`/`Display but not plot`). Session state, but part of
-    /// this identity because it changes the base geometry.
-    wipeout_frames: bool,
+    /// The session display tokens the base build consumes (`WIPEOUTFRAME`,
+    /// `FILL`, `QTEXT`, `VIEWRES`). Session state, but part of this identity
+    /// because each changes the derived base primitives.
+    display: DisplaySettings,
 }
 
 impl BaseInputIdentity {
@@ -194,7 +196,7 @@ impl BaseInputIdentity {
             fonts_generation: state.fonts_generation,
             images_generation: state.images_generation,
             layers: state.layers.clone(),
-            wipeout_frames: state.wipeout_frames,
+            display: state.display,
         }
     }
 }
@@ -219,9 +221,10 @@ struct State {
     fonts_generation: u64,
     images_generation: u64,
     layers: LayerOverrideSet,
-    /// Display `WIPEOUTFRAME` state, fed to the scene controller. A flip
-    /// rebuilds the base (the mask boundary frame is base geometry).
-    wipeout_frames: bool,
+    /// The session display tokens fed to the scene controller (`WIPEOUTFRAME`,
+    /// `FILL`, `QTEXT`, `VIEWRES`). A flip rebuilds the base, because each
+    /// changes the derived primitives the base is made of.
+    display: DisplaySettings,
     overlays: OverlayInputs,
     overlay_revision: u64,
     /// Monotonic revision of the **scene identity**. Advances only when an input
@@ -317,7 +320,7 @@ impl Default for State {
             fonts_generation: 0,
             images_generation: 0,
             layers: LayerOverrideSet::new(),
-            wipeout_frames: false,
+            display: DisplaySettings::default(),
             overlays: OverlayInputs::default(),
             overlay_revision: 0,
             input_revision: 0,
@@ -641,7 +644,7 @@ fn preparation_input(state: &State) -> PreparationInput {
         images_generation: state.images_generation,
         vendor: state.vendor.clone(),
         layers: state.layers.clone(),
-        wipeout_frames: state.wipeout_frames,
+        display: state.display,
         overlays: state.overlays.clone(),
         edit: state.latest_edit.clone(),
     }
@@ -653,7 +656,7 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
     let input = preparation_input(state);
     let mut candidate = state.controller.clone();
     candidate.set_vendor_representations(input.vendor.clone());
-    candidate.set_wipeout_frames(input.wipeout_frames);
+    candidate.set_display_settings(input.display);
     candidate.prepare_shared_with_overlays_and_images_and_edit(
         input.drawing.clone(),
         input.document,
@@ -675,7 +678,7 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
     let token = state.content_revision;
     let mut candidate = state.controller.clone();
     candidate.set_vendor_representations(state.vendor.clone());
-    candidate.set_wipeout_frames(state.wipeout_frames);
+    candidate.set_display_settings(state.display);
     candidate.prepare_shared_with_overlays_and_images_and_edit(
         state.incoming.borrow().clone(),
         state.view.document,

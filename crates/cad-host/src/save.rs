@@ -386,7 +386,7 @@ impl HostCore {
     /// The representation context for plotting, with the desktop font engine so
     /// text is shaped exactly as the render path shapes it.
     pub(crate) fn plot_context(&self) -> CadResult<cad_representation::RepresentationContext> {
-        let (document, generation, requested, text_needed, wipeout_frames) = {
+        let (document, generation, requested, text_needed, wipeout_frames, fill) = {
             let controller = self.controller.borrow();
             (
                 controller.document_id,
@@ -400,6 +400,7 @@ impl HostCore {
                     .map(|drawing| cad_platform::fonts::needs_text_shaping(drawing.as_ref()))
                     .unwrap_or(false),
                 controller.session.drafting_extras.wipeout_frames(),
+                controller.session.drafting_extras.fill(),
             )
         };
         let mut context = cad_representation::RepresentationContext::new(
@@ -412,6 +413,11 @@ impl HostCore {
         // frame flag set **only for ON** — this is the whole display/plot split,
         // and it never writes the drawing.
         context = context.with_wipeout_frames(wipeout_frames == cad_app::WipeoutFrames::On);
+        // `FILL` governs the display *and* the vector output: `FILL OFF` plots
+        // filled hatches/2D solids/wide polylines as their outline, the same rule
+        // the display base applies. `QTEXT` is deliberately not applied here —
+        // quick text is a screen mode and AutoCAD plots the real text.
+        context = context.with_fill(fill);
         if let Some(engine) = self.load_plot_fonts(&requested, text_needed)? {
             context = context.with_fonts(engine);
         }

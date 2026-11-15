@@ -8,9 +8,15 @@ pub use refusal_names::RefusalId;
 /// One payload-free command in the extended wrapper batches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtendedCommandId {
-    /// `QTEXT`: toggle the session quick-text display flag.
+    /// `QTEXT`: toggle the session quick-text display mode.
+    ///
+    /// Consumed by the display build: shaped text draws as the placeholder
+    /// rectangle of its extent (`crate::render_scene::DisplaySettings::qtext`).
     QText,
-    /// `FILL`: toggle the session solid-fill display flag.
+    /// `FILL`: toggle the session solid-fill display mode.
+    ///
+    /// Consumed by the display build: filled hatches, 2D solids and wide
+    /// polylines draw outline-only (`crate::render_scene::DisplaySettings::fill`).
     Fill,
     /// `TFRAMES`: toggle the session frame-display flag.
     TFrames,

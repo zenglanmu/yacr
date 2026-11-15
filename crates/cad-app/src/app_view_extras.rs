@@ -42,6 +42,16 @@ impl Application {
     /// The range is re-validated here even though the typed parser already
     /// enforces it: a direct IPC caller gets the same named refusal, never a
     /// clamp.
+    ///
+    /// The stored percentage is **consumed**: the display build turns it into a
+    /// ceiling on chord segments per curve
+    /// ([`cad_representation::viewres_segment_ceiling`]), so lowering it really
+    /// coarsens the curves that are chord-tessellated (splines, polyline bulge
+    /// arcs, the chord fallback for a non-SDF conic, the wide-polyline band).
+    /// Two honest limits are reported with the value: circles/arcs/ellipses are
+    /// drawn as analytic conics and have no chords to bound, and the value is a
+    /// ceiling on the display tolerance rather than a smoothness setting, so
+    /// raising it above what the tolerance already asks for changes nothing.
     pub(crate) fn viewres(
         &mut self,
         session: &mut SessionState,
@@ -54,11 +64,17 @@ impl Application {
         };
         let percent = *percent;
         session.view_extras.set_viewres(percent)?;
+        let ceiling = cad_representation::viewres_segment_ceiling(percent);
         Ok(view_outcome(
             "viewres",
             format!(
                 "VIEWRES: circle tessellation set to {percent}% (session state only; the drawing \
-                 was not written)"
+                 was not written) — the display build now caps chord-tessellated curves at \
+                 {ceiling} segment(s) each, so splines, polyline bulge arcs, chord-fallback conics \
+                 and wide-polyline bands follow it; circles, arcs and ellipses are drawn as \
+                 analytic conics and are unaffected, and because the value is a ceiling on the \
+                 display tolerance any value above what the tolerance already needs changes \
+                 nothing"
             ),
         ))
     }
@@ -67,6 +83,13 @@ impl Application {
     ///
     /// Every non-wireframe style is refused by name
     /// (`vscurrent.style_not_implemented`), never silently mapped.
+    ///
+    /// `WIREFRAME` is not a no-op token in disguise: it is the one style this
+    /// build's renderer actually draws (edges only, no shading, no hidden-line
+    /// removal), so storing it states the truth about the display and nothing
+    /// else in `1..=1000`-style range is implied. The other styles need a
+    /// shaded/hidden display model this build does not have, which is why they
+    /// are named refusals rather than tokens.
     pub(crate) fn vscurrent(
         &mut self,
         session: &mut SessionState,
@@ -81,8 +104,10 @@ impl Application {
         Ok(view_outcome(
             "vscurrent",
             format!(
-                "VSCURRENT: visual style set to {} (session token only; no renderer change is \
-                 wired in this build and no pixel effect is verified)",
+                "VSCURRENT: visual style set to {} (session state only; the drawing was not \
+                 written) — 2D wireframe is the only display mode this renderer implements (edges \
+                 only: no shading, no hidden-line removal), so no pixel effect is claimed; every \
+                 shaded/hidden style is refused by name instead of being mapped onto it",
                 session.view_extras.visual_style.name()
             ),
         ))

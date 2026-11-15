@@ -8,7 +8,10 @@
 //! `ELEV` elevation token and the `UCSICON` flag. This is **session state only**:
 //! no database write, revision bump, `cad-history` entry or `ChangeSet`. Most
 //! tokens have no renderer/behaviour consumer, so their handler reports that the
-//! effect is not implemented rather than pretending the drawing changed. Two do:
+//! effect is not implemented rather than pretending the drawing changed. Several
+//! do: `FILL`, `QTEXT` and `WIPEOUTFRAME` reach the derived display through
+//! [`crate::render_scene::DisplaySettings`], `COLOR` reaches every entity the
+//! create funnel inserts, and two are consumed where they are stored:
 //! `APERTURE` is the object-snap aperture
 //! ([`crate::SessionState::interaction_tolerance`], once set explicitly) and
 //! `REVCLOUDPROPERTIES` is the `REVCLOUD` chord token.
@@ -217,7 +220,12 @@ impl CornerModes {
 /// The drafting display flags and session tokens the extended batches own.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DraftingExtras {
+    /// `QTEXT`: draw text as a placeholder rectangle instead of its glyphs.
+    /// Consumed by the display build (`render_scene::DisplaySettings::qtext`).
     qtext: bool,
+    /// `FILL`: draw filled areas filled (`true`, AutoCAD's initial value) or
+    /// outline-only (`false`). Consumed by the display build
+    /// (`render_scene::DisplaySettings::fill`).
     fill: bool,
     tframes: bool,
     regenauto: bool,
@@ -243,7 +251,15 @@ pub struct DraftingExtras {
     ucsicon: bool,
     corner_modes: CornerModes,
     /// `LWEIGHT`: whether lineweights are displayed (AutoCAD `LWDISPLAY`).
-    /// This build stores the token but has no renderer consumer.
+    ///
+    /// **No renderer consumer, and none is possible without a renderer feature:**
+    /// the resolved lineweight reaches the scene batch (`RenderBatch::lineweight`)
+    /// and the GPU batch uniform, but `cad-render-wgpu` rasterizes every line at
+    /// one hairline width and reports `render.lineweight_not_drawn` for every
+    /// non-zero weight (`shaders/line_instanced.wgsl`). `LWDISPLAY` switches
+    /// whether stored widths are drawn on screen, so with no wide-line path there
+    /// is nothing for `ON` or `OFF` to switch — the token is stored and the
+    /// command says exactly that.
     lweight_display: bool,
     /// `COLOR`: the session current-colour ACI (256 = ByLayer).
     ///
@@ -582,8 +598,11 @@ impl DraftingExtras {
 
     /// The session `LWEIGHT` lineweight-display token (default ON).
     ///
-    /// The renderer does not consume this flag in this build; the handler says
-    /// exactly that instead of claiming a visual change.
+    /// The renderer cannot consume this flag in this build: it has no wide-line
+    /// rasterization path, so every line draws at one hairline width and
+    /// `render.lineweight_not_drawn` reports the carried-but-undrawn weights
+    /// (see the `lweight_display` field). The handler says exactly that instead of
+    /// claiming a visual change.
     pub fn lweight_display(&self) -> bool {
         self.lweight_display
     }

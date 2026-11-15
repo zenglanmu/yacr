@@ -1,7 +1,9 @@
 //! Native CPU preparation over immutable inputs, with a bounded latest mailbox.
 use super::*;
 use cad_app::background::LatestTask;
-use cad_app::render_scene::{CadSceneController, DecodedImageCache, OverlayInputs};
+use cad_app::render_scene::{
+    CadSceneController, DecodedImageCache, DisplaySettings, OverlayInputs,
+};
 use cad_app::vendor::VendorRepresentationStore;
 use cad_domain::CadError;
 
@@ -15,7 +17,7 @@ struct InputKey {
     images_generation: u64,
     vendor: Option<u64>,
     layers: u64,
-    wipeout_frames: bool,
+    display: DisplaySettings,
     overlays: u64,
 }
 
@@ -30,9 +32,9 @@ pub(super) struct PreparationInput {
     pub images_generation: u64,
     pub vendor: Option<Arc<VendorRepresentationStore>>,
     pub layers: LayerOverrideSet,
-    /// Display `WIPEOUTFRAME` state for this preparation (see
-    /// [`CadSceneController::set_wipeout_frames`]).
-    pub wipeout_frames: bool,
+    /// Session display tokens for this preparation (see
+    /// [`CadSceneController::set_display_settings`]).
+    pub display: DisplaySettings,
     pub overlays: OverlayInputs,
     /// Latest admitted edit receipt. It is never consumed here: the bounded
     /// latest mailbox may coalesce several overlay submissions, so the receipt
@@ -57,7 +59,7 @@ impl PreparationInput {
             images_generation: self.images_generation,
             vendor: self.vendor.as_ref().map(|store| store.revision()),
             layers: self.layers.fingerprint(),
-            wipeout_frames: self.wipeout_frames,
+            display: self.display,
             overlays: controller::overlay_fingerprint(&self.overlays),
         }
     }
@@ -104,7 +106,7 @@ impl NativePreparation {
                     }
                     fonts_generation = input.fonts_generation;
                     controller.set_vendor_representations(input.vendor.clone());
-                    controller.set_wipeout_frames(input.wipeout_frames);
+                    controller.set_display_settings(input.display);
                     controller.prepare_shared_with_overlays_and_images_and_edit(
                         input.drawing,
                         input.document,
@@ -182,7 +184,7 @@ mod tests {
             images_generation: 0,
             vendor: None,
             layers: LayerOverrideSet::new(),
-            wipeout_frames: false,
+            display: DisplaySettings::default(),
             overlays: OverlayInputs::default(),
             edit: None,
         }

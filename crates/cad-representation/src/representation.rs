@@ -214,6 +214,42 @@ pub struct RepresentationContext {
     /// primitive carries the resolved flag so the renderer/plot consumer never
     /// re-reads session state.
     pub wipeout_frames: bool,
+    /// Whether filled areas are drawn **filled** (`FILL`, AutoCAD's `FILLMODE`).
+    ///
+    /// `true` is AutoCAD's documented initial value and the pre-`FILL` build's
+    /// behaviour: a HATCH draws its solid/gradient fill mesh or its pattern
+    /// lines, a 2D SOLID draws its triangles and a wide polyline draws its
+    /// filled stroke band.
+    ///
+    /// `false` draws the **same area's outline** instead, using only geometry
+    /// the source already carries: the hatch boundary loops, the SOLID's mesh
+    /// boundary edges and the stroke band's closed offset outline. Nothing is
+    /// written to `cad-db` and no shape is changed — only which primitive the
+    /// provider emits. See `provider::display_modes` for the per-primitive
+    /// rule and for what `FILL OFF` deliberately does **not** switch.
+    pub fill: bool,
+    /// Whether text draws as its **placeholder rectangle** (`QTEXT`).
+    ///
+    /// The rectangle is derived from the shaped glyph geometry this build would
+    /// have drawn, so it is an honest placeholder for *this* text at *this*
+    /// height, not an estimate. Text whose extent cannot be derived (no font
+    /// engine, or an unshaped [`DisplayPrimitive::Text`]) is left as it is and
+    /// named in a `qtext.extent_unknown` diagnostic rather than given a
+    /// fabricated box. `QTEXT` is a display mode: no database write, revision,
+    /// history entry or `ChangeSet`, and this build claims no redraw-speed
+    /// benefit from it.
+    pub qtext: bool,
+    /// `VIEWRES`: a **ceiling** on chord segments per curve, or `None` for the
+    /// build's own [`TessellationParams`] default.
+    ///
+    /// This is a real threshold, and a deliberately partial one: circles, arcs
+    /// and ellipses are emitted as analytic [`DisplayPrimitive::Conic`] values
+    /// and are *not* chord-tessellated for the display, so `VIEWRES` cannot
+    /// change them. It does bound every chord path the provider builds —
+    /// splines, polyline bulge arcs, the chord fallback for a conic that cannot
+    /// take the analytic path, and the wide-polyline stroke band. See
+    /// `provider::default::chord_tessellation_params`.
+    pub curve_segments: Option<usize>,
 }
 
 /// The active annotation scale a host applies while building representations.
@@ -249,6 +285,14 @@ impl RepresentationContext {
             conic_stats: None,
             force_chord_conics: false,
             wipeout_frames: false,
+            // AutoCAD's documented `FILLMODE`/`QTEXT` initial values: filled
+            // areas on, quick text off.
+            fill: true,
+            qtext: false,
+            // `None` keeps the build's own tessellation budget, so a caller
+            // that never received a `VIEWRES` value builds exactly the scene it
+            // built before the token was consumed.
+            curve_segments: None,
         }
     }
 
@@ -295,6 +339,35 @@ impl RepresentationContext {
     /// out of the plot without a second flag.
     pub fn with_wipeout_frames(mut self, enabled: bool) -> Self {
         self.wipeout_frames = enabled;
+        self
+    }
+
+    /// Draw filled areas filled (`true`) or outline-only (`false`): `FILL`.
+    ///
+    /// The default is `true`; a caller passes the session `FILL` token straight
+    /// through, so `FILL OFF` reaches the provider as this one flag.
+    pub fn with_fill(mut self, enabled: bool) -> Self {
+        self.fill = enabled;
+        self
+    }
+
+    /// Draw text as its placeholder rectangle: `QTEXT`.
+    ///
+    /// The default is `false` (glyphs as usual). A caller passes the session
+    /// `QTEXT` token straight through.
+    pub fn with_qtext(mut self, enabled: bool) -> Self {
+        self.qtext = enabled;
+        self
+    }
+
+    /// Cap chord segments per curve: `VIEWRES`.
+    ///
+    /// `None` (the default) keeps the build's own tessellation budget; a value
+    /// is the session `VIEWRES` percentage turned into a segment ceiling by
+    /// [`crate::provider::viewres_segment_ceiling`]. Only chord-tessellated
+    /// curves are affected — see [`Self::curve_segments`].
+    pub fn with_curve_segments(mut self, ceiling: Option<usize>) -> Self {
+        self.curve_segments = ceiling;
         self
     }
 }

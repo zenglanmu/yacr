@@ -1,9 +1,18 @@
 //! Extended batch session-toggle contracts: `QTEXT`, `FILL`, `TFRAMES`,
 //! `REGENAUTO`, `ISODRAFT`.
 //!
-//! Each is a payload-free session flag: it flips in place, emits one honest
-//! `*.toggled` diagnostic (the effect is NOT IMPLEMENTED), never writes the
-//! drawing, never bumps the revision and never records an undo step.
+//! Each is a payload-free session flag: it flips in place, emits one
+//! `*.toggled` diagnostic, never writes the drawing, never bumps the revision and
+//! never records an undo step.
+//!
+//! Two of them are **consumed** by the display build (`FILL`, `QTEXT`): their
+//! report names what the derived display now does. The other three (`TFRAMES`,
+//! `REGENAUTO`, `ISODRAFT`) have no consumer in this build and still say their
+//! effect is NOT IMPLEMENTED.
+//!
+//! The display half itself is pinned by `render_scene::display_mode_tests` (the
+//! rebuilt batches) and `cad_host::tests::display_modes` (the session token
+//! reaching the render session); this file pins the command boundary.
 
 use super::*;
 
@@ -62,13 +71,18 @@ fn drafting_toggles_flip_session_flags_without_drawing_writes() {
             format!("{}.toggled", ext.selector().to_ascii_lowercase())
         );
         assert!(
-            diagnostic.message.contains("NOT IMPLEMENTED"),
-            "the toggle states its honest partial: {}",
-            diagnostic.message
-        );
-        assert!(
             diagnostic.message.contains("ON") || diagnostic.message.contains("OFF"),
             "the message states the new state: {}",
+            diagnostic.message
+        );
+        // The three tokens without a consumer must still say so; the two
+        // display tokens must not claim "not implemented" any more.
+        let consumed = matches!(ext, ExtendedCommandId::QText | ExtendedCommandId::Fill);
+        assert_eq!(
+            diagnostic.message.contains("NOT IMPLEMENTED"),
+            !consumed,
+            "{} names its real consumer exactly when it has one: {}",
+            ext.selector(),
             diagnostic.message
         );
     }
@@ -78,6 +92,53 @@ fn drafting_toggles_flip_session_flags_without_drawing_writes() {
         "session toggles never write the drawing"
     );
     assert!(!app.can_undo(&DocumentId(1)), "no undo step is recorded");
+}
+
+/// `FILL OFF` reports the outline-only rule it triggers — and the primitives it
+/// deliberately does not switch.
+#[test]
+fn fill_off_names_the_outline_rule_and_its_declared_boundary() {
+    let (mut app, mut session) = application_with_document();
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Fill),
+        CommandPayload::None,
+    )
+    .expect("FILL is admitted");
+    assert!(
+        !session.drafting_extras.fill(),
+        "FILL started ON and flipped"
+    );
+    let message = &outcome.diagnostics[0].message;
+    assert!(message.contains("outline only"), "{message}");
+    assert!(
+        message.contains("WIPEOUT") && message.contains("image"),
+        "the declared non-switched primitives are named: {message}"
+    );
+}
+
+/// `QTEXT ON` reports the placeholder rule and the display-only boundary.
+#[test]
+fn qtext_names_the_placeholder_and_the_missing_extent_case() {
+    let (mut app, mut session) = application_with_document();
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::QText),
+        CommandPayload::None,
+    )
+    .expect("QTEXT is admitted");
+    assert!(
+        session.drafting_extras.qtext(),
+        "QTEXT started OFF and flipped"
+    );
+    let message = &outcome.diagnostics[0].message;
+    assert!(message.contains("placeholder rectangle"), "{message}");
+    assert!(
+        message.contains("qtext.extent_unknown"),
+        "the case with no derivable extent is named: {message}"
+    );
 }
 
 #[test]

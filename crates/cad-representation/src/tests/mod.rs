@@ -21,6 +21,7 @@ mod bylayer_color;
 mod bylayer_style;
 mod bylayer_transparency;
 mod conic;
+mod display_modes;
 mod dynamic_block;
 mod image;
 mod kernel_mesh;

@@ -9,7 +9,7 @@ use cad_domain::{Completeness, Diagnostic, DocumentId, SceneIdentity, SelectionR
 use cad_representation::SpaceSelection;
 use cad_resources::DecodedImageCache;
 
-use super::{BaseAppend, RenderBatch, ResidentScene, SceneDelta};
+use super::{BaseAppend, DisplaySettings, RenderBatch, ResidentScene, SceneDelta};
 
 /// An appended delta may not grow the resident image/mask sets: the engine's
 /// append path does not re-upload them.
@@ -48,9 +48,10 @@ pub(super) struct SceneVersion {
     /// `cad-db`.
     pub(super) vendor: Option<u64>,
     pub(super) vendor_identity: usize,
-    /// Display `WIPEOUTFRAME` state fed to the representation context. A change
-    /// adds/removes the mask boundary frame, so it must rebuild the base.
-    pub(super) wipeout_frames: bool,
+    /// Session display tokens fed to the representation context (`WIPEOUTFRAME`,
+    /// `FILL`, `QTEXT`, `VIEWRES`). Any change alters the derived primitives, so
+    /// it must rebuild the base.
+    pub(super) display: DisplaySettings,
 }
 
 /// One staged CPU publication: the resident base, its transient overlay and the
