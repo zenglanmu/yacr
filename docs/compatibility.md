@@ -49,7 +49,7 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | DIMENSION（创建） | `DIMLINEAR`/`DIMALIGNED` **实现（P5c）**；`DIMRADIUS`/`DIMDIAMETER` **实现（P5d）**；`DIMANGULAR`/`DIMORDINATE` **实现（P5e）**；`DIMBASELINE`/`DIMCONTINUE` **实现（P5f，2026-10-21 解禁）** | — | **P5c–P5e 实现创建命令**：`DIMLINEAR`/`DIMALIGNED` 为**三点流程**（两尺寸界线原点 + 尺寸线位置）；`DIMRADIUS`/`DIMDIAMETER` 为**实体拾取圆弧/圆 + 尺寸线位置**；`DIMANGULAR` 为**两线拾取 + 标注弧位置**，或**三点（顶点 + 两侧点）+ 标注弧位置**；`DIMORDINATE` 为**特征点 + 引线端点**；`DIMCENTER` **不是** DIMENSION 实体（见绘图辅助行）。`DIMBASELINE`/`DIMCONTINUE` **已实现**：**显式拾取一个基准线性标注**（命令**不持有任何跨命令状态**，因此撤销/删除/切换文档后不存在悬挂引用）、N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DIMDLI` 逐行外推（法向**背离被测几何**，不可定则拒绝），连续链式同偏移**不堆叠**（投影 ≤ 0 拒绝）。**范围**：**仅线性基准**、**不写 `DIMCONTINUEMODE`**、**非关联**、无文字覆盖、无「重复到 Esc」循环（详见下方 DIMENSION 族逐行表）。**不得因为有了实体类型就暗示其余标注种类能创建**（圆弧长/大半径仍是读取侧 `Partial`）；**创建无 spec 授权**（§3.2 只要求"常用 DIMENSION 可见表示"） | — | 不支持 |
 | MESH / PolyfaceMesh | 部分 | 网格契约 | 网格 | 实现 | 不支持 |
 | RASTERIMAGE | 实现(相对路径解析 + PNG/JPEG 解码) | 实现(`SemanticGeometry::Image`) | 实现(GPU 纹理：每键去重/UV 方向/裁剪多边形；缺纹理 frame+`Partial`) | 经边框 | 不支持 |
-| WIPEOUT | 实现(`Mask` 边界 + `inverted`) | 部分 | **非 `inverted`：真遮罩**——无颜色 `Mask` 图元，渲染器**末 pass**（`depth_compare: Always`、不写深度、**clear 颜色**），**凹形用 even-odd 填充**；**`inverted` 亦已渲染**（视口覆盖环 + 边界做 even-odd 补集；正交视口环**精确**、透视下为**宽松估计**）；矢量出图**跳过并具名**；不与更高 `draw_order` 交错（遮罩恒最后） | 经边界 | 不支持 |
+| WIPEOUT | 实现(`Mask` 边界 + `inverted`) | 部分 | **非 `inverted`：真遮罩**——无颜色 `Mask` 图元，渲染器**末 pass**（`depth_compare: Always`、不写深度、**clear 颜色**），**凹形用 even-odd 填充**；**`inverted` 亦已渲染**（视口覆盖环 + 边界做 even-odd 补集；正交视口环**精确**、透视下为**宽松估计**）；矢量出图**按页面背景 flood**（`inverted` 为多环 even-odd 补集）；不与更高 `draw_order` 交错（遮罩恒最后） | 经边界 | 不支持 |
 | EXTENDED(RTEXT/ARCALIGNEDTEXT/GEOPOSITIONMARKER/SECTIONOBJECT/POINTCLOUD) | 实现(基础字段) | 部分 | 基础表示(Text/圆/折线/范围盒) | 部分 | 不支持 |
 | **AEC Arch（AEC_WALL/DOOR/WINDOW/STAIR/SPACE/…，2026-11-03）** | **实现（acadrust 0.6.8 已类型化）**：`ExtendedEntityData::Arch` 携带 `ArchKind`、类名、**proxy-graphics 预览轮廓（世界坐标）**与原始 DWG/DXF 体 | **部分**：只有轮廓是真实的；开洞、3D 体量、类参数、样式/锚点对象未建模 | 每个 ≥2 点轮廓画成**开放折线**（记录无闭合标志，不臆造 `closed`）；无轮廓 ⇒ `Opaque` + 具名 `Partial` | 按折线 | 不支持 |
 | CAMERA / 动态块参数与夹点 / OLEFRAME / LAYOUTPRINTCONFIG / FORMAT / LEGACY / REGISTEREDCLASS | 实现(仅 common 或无语义) | 显式无显示 | 不绘制(`Opaque`/`Unverified`) | — | — |
@@ -1153,7 +1153,7 @@ CAD 分区右键**快捷菜单**已实现（复制/剪切/粘贴/全选/删除/�
 TIFF/CCITT/EPS 等编解码器、亮度/对比/淡出/透明、outside/mask 裁剪显式未支持；
 Web/Android 宿主未接图像加载器；**`draw_order` 已贯通到场景批次**（含 INSERT 继承、合批不跨顺序），
 但**渲染器仍按上传顺序绘制、遮罩恒最后**（opaque mesh 还跨批次拍平，分段交错未实现）；
-**WIPEOUT 掩码已实现**（非 `inverted` 与 `inverted` 都渲染；不与更高 `draw_order` 交错、矢量出图跳过并具名）。**外部内容** PDF/DWF/DGN
+**WIPEOUT 掩码已实现**（非 `inverted` 与 `inverted` 都渲染；不与更高 `draw_order` 交错、矢量出图按页面背景 flood，`inverted` 为多环 even-odd 补集）。**外部内容** PDF/DWF/DGN
 underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、ACIS 全内核（3DSOLID/REGION/
 BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「ACIS 实体显示状态」）、点云点数据（acadrust 0.6.8 仍只暴露元数据/范围，未暴露点数据）均不加载/不实现，显式
 `Partial`/`Unsupported`，不计入完成。代理 opcode 厂商记录仍按用户要求排除（见
@@ -1834,7 +1834,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `DIMTEDIT` | 部分实现 | `MOVE`（新位置）/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 仅线性/对齐/半径/直径；Angle 固定文字中心，`0` 复位；一条事务/一步撤销 | **字形级对齐未实现**（只移动锚点；标注模型无 `h_align`）；无 Oblique |
 | `HATCHEDIT` | 完整实现 | 多目标；`Style`/`PatternType`/`PATTERN <name>`/`PATTERNFILE <path.pat> [<name>]`/`ORIGIN <x> <y>`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate Hatches`/`Add|Remove Boundaries`；一条事务/一步撤销 | 全局范围：`Associate`/`Disassociate`/`Annotative`、`DRAWORDER BOUNDARY`（需边界实体 id 即反应器模型）、逐 loop 图案原点、交互对话框 |
 | `REVCLOUD` | 部分实现 | `Object`/`Rectangular`/`Polygonal`/`Freehand`/`Arc Length`/`Style`/`Modify`；等弦弧（106.26°）；默认弦长 = 源路径 bbox 对角线 5%（声明替代）；一条事务/一步撤销 | **`Calligraphy` 样式未实现**（多段线无样式字段）；`Modify` 用确定性规则替代交互拾取；`RECT/POLY/FREEHAND/MODIFY` 的路径来自唯一选中 LWPOLYLINE |
-| `WIPEOUT` | 部分实现 | `Frames ON/OFF/DISPLAY` 真实：ON = 填充 + 边框（显示与矢量出图边界折线），OFF = 仅填充，DISPLAY = 显示边框、出图不画；边框在 mask fill 之后用 Always-depth 线管线绘制；`Polyline` + `Erase Polyline Yes/No`、自由点串 | `FRAME` 覆盖无命令；遮罩填充在矢量出图仍无背景 flood（边界可出图）；无真实 GPU/像素验收 |
+| `WIPEOUT` | 完整实现 | `Frames ON/OFF/DISPLAY` 与 `WIPEOUTFRAME 0|1|2`（同一会话令牌，`SETVAR` 可读写，越界 `wipeoutframe.out_of_range`）：ON = 填充 + 边框（显示与矢量出图都画边界），OFF = 仅填充，DISPLAY = 显示边框、出图不画；边框在 mask fill 之后以 Always-depth 绘制；`Polyline` + `Erase Polyline Yes/No`、自由点串；**矢量出图按页面背景 flood**（普通遮罩在几何之后按 draw order，`inverted` 为页面环 + 边界环的多环 even-odd 补集，SVG `fill-rule="evenodd"`、PDF `f*`，单环输出与旧版逐字节一致）；已有遮罩**沿边界可拾取**，`SELECTALL`/`QSELECT TYPE WIPEOUT`/`ERASE`/`MOVE`/`HIDEOBJECTS` 走通用实体路径 | **全局范围**：`FRAME` 本身（图像/xref/PDF 边框显示模型不存在）、遮罩选择/悬停高亮（渲染器只解析 GPU pick key，引擎报 `flags.unresolved`）、遮罩顶点 grip 拖拽、`inverted` 仅导入/显示/出图、跨图纸视口窗口不裁剪（`representation.viewport_clip_partial`）；自交按 even-odd 如实填充（只拒零净面积）；无真实 GPU/像素验收（Linux 编译 + 契约测试） |
 | `TEXTMASK` | 部分实现 | 偏移因子（默认 0.35）、`Wipeout` 遮罩、文本+遮罩会话 `GROUP`、重跑替换旧遮罩、`TEXTUNMASK` 按组优先；一条事务/一步撤销 | **`3dface`/`Solid` 遮罩类型未实现**（无对应实体）；`GROUP` 为会话存储（DWG 不落关联记录） |
 | `TXT2MTXT` | 完整实现 | `COMBINE`/`SEPARATE`、`ORDER TOPDOWN/SELECT`、`WRAP`（`wrap_width`）、`UNIFORM <factor>`（0.25–4.0，写入 MTEXT `TextLineSpacing` 且样式 `Exactly`）、源对象在同一事务删除 | `UNIFORM` 之外没有 Settings 对话框（全局范围）；导入的越界 factor 仍渲染（存储契约只要求正且有限）；行距仍以 `1.2×factor×行高` 近似，不是字体真实垂直度量 |
 
