@@ -33,9 +33,13 @@
 //! * `tabledit.payload` / `.no_selection` / `.multiple` / `.not_table` /
 //!   `.out_of_range`.
 //!
-//! `TABLEEXPORT` / `TABLESTYLE` / `TINSERT` / `MATCHCELL` stay named refusals in
-//! `crate::app_extended_w13_refusals` (no CSV writer, no table-style table, no
-//! block-in-cell creation, no cell-style copy surface).
+//! The post-creation table edits live in [`super::table_ops`] (`TABLEDIT
+//! MERGE|UNMERGE`, `MATCHCELL`, `TABLESTYLE`) and share this module's selection
+//! rule and commit funnel. `TABLEEXPORT` is a typed command-line export in
+//! `cad_ui_core::session::table_export` (one CSV file through the host's
+//! user-named-file write channel). `TINSERT` (a block inside a cell) and
+//! `FIELD`/`UPDATEFIELD` stay named refusals: this build has no block-in-cell
+//! and no field model.
 
 use super::*;
 use crate::command_payload::{TableCreateCommand, TableEditCommand};
@@ -62,7 +66,17 @@ impl Application {
         match ext {
             ExtendedCommandId::TableCreate => self.table_create(session, command, false),
             ExtendedCommandId::DashTable => self.table_create(session, command, true),
-            ExtendedCommandId::TableEdit => self.table_edit_cell(session, command),
+            ExtendedCommandId::TableEdit => {
+                // The cell-text form keeps its own payload; the merge forms carry
+                // the shared table payload, so the two never mix.
+                match &command.payload {
+                    CommandPayload::Table(_) => self.table_ops(session, command, ext),
+                    _ => self.table_edit_cell(session, command),
+                }
+            }
+            ExtendedCommandId::MatchCell | ExtendedCommandId::TableStyleList => {
+                self.table_ops(session, command, ext)
+            }
             other => Err(CadError::Invariant(format!(
                 "not a table command: {other:?}"
             ))),
@@ -171,7 +185,10 @@ impl Application {
             message: format!(
                 "{name}: created a {rows} x {cols} table at ({}, {}, {}) with column width \
                  {col_width} and row height {row_height} (total {total_width} x {total_height}); \
-                 all cells are empty with the Standard style and single visible borders",
+                 all cells are empty with the Standard style and single visible borders, and no \
+                 merge spans. Cell text: `TABLEDIT <row> <col> <text>`; merged ranges: \
+                 `TABLEDIT MERGE|UNMERGE`; another style: `TABLESTYLE <name> [<field> <value> ...]` \
+                 (block content and fields stay named refusals)",
                 origin.x, origin.y, origin.z
             ),
         });
@@ -196,63 +213,8 @@ impl Application {
             ));
         };
         let TableEditCommand { row, col, text } = payload.as_ref();
-        let references = session.selection.refs();
-        let reference = match references {
-            [] => {
-                return Err(table_refusal(
-                    "tabledit.no_selection",
-                    "TABLEDIT needs exactly one selected table; nothing is selected",
-                ));
-            }
-            [one] => one,
-            many => {
-                return Err(table_refusal(
-                    "tabledit.multiple",
-                    format!(
-                        "TABLEDIT edits exactly one table; {} entities are selected",
-                        many.len()
-                    ),
-                ));
-            }
-        };
-        if reference.document != command.document
-            || !reference.instance.0.is_empty()
-            || reference.sub_element.is_some()
-        {
-            return Err(table_refusal(
-                "tabledit.not_table",
-                format!(
-                    "entity {} is not a directly addressable table in this document",
-                    reference.entity.0
-                ),
-            ));
-        }
-        let document_id = command.document;
-        let document = self
-            .workspace
-            .documents
-            .get(&document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let mut candidate = document.drawing.as_ref().clone();
-        let before = candidate.entity(reference.entity).cloned().ok_or_else(|| {
-            table_refusal(
-                "tabledit.not_table",
-                format!(
-                    "entity {} does not exist in this drawing",
-                    reference.entity.0
-                ),
-            )
-        })?;
-        let SemanticGeometry::Table(table) = &before.geometry else {
-            return Err(table_refusal(
-                "tabledit.not_table",
-                format!(
-                    "entity {} is a {}, not a table",
-                    before.id.0,
-                    class_name(&before.geometry)
-                ),
-            ));
-        };
+        let selection = select_table(self, session, command, "tabledit")?;
+        let table = &selection.table;
         // The payload is 1-based; the grid is 0-based. Zero is outside the
         // 1-based address space, so it is the same `out_of_range` refusal.
         let row_index = row.checked_sub(1);
@@ -271,12 +233,12 @@ impl Application {
                 objects: Vec::new(),
                 changes: None,
                 diagnostics: vec![Diagnostic {
-                    object: Some(ObjectId(before.id.0)),
+                    object: Some(ObjectId(selection.before.id.0)),
                     code: "tabledit.unchanged".into(),
                     message: format!(
                         "TABLEDIT: cell ({row}, {col}) of table {} already holds `{text}`; nothing \
                          was written",
-                        before.id.0
+                        selection.before.id.0
                     ),
                 }],
                 measurement: None,
@@ -284,50 +246,178 @@ impl Application {
             });
         }
         let updated = table.with_cell_text(row_index, column_index, text)?;
-        let mut after = before.clone();
-        after.geometry = SemanticGeometry::Table(Box::new(updated));
-        let label = "edit table cell";
-        let transaction = next_transaction_id();
-        let change_set = {
-            let mut staged = candidate.begin_drawing_transaction(label, transaction)?;
-            staged.update_entity(after)?;
-            staged.commit()?
-        };
-        let stored = candidate.entity(before.id).cloned().ok_or_else(|| {
-            CadError::Invariant("TABLEDIT: the table vanished after commit".into())
-        })?;
-        self.publish_candidate(
-            document_id,
-            candidate,
-            DrawingUndoRecord {
-                transaction: change_set.transaction,
-                label: label.into(),
-                patches: vec![drawing_patch(before.id, Some(before.clone()), Some(stored))],
-                block_patches: Vec::new(),
-                layer_patches: Vec::new(),
-                style_patches: Vec::new(),
-                dim_style_patches: Vec::new(),
-                mleader_style_patches: Vec::new(),
-                layout_patches: Vec::new(),
-                merge_key: None,
-            },
-        )?;
-        Ok(CommandOutcome {
-            objects: vec![ObjectId(before.id.0)],
-            changes: Some(Arc::new(change_set)),
-            diagnostics: vec![Diagnostic {
-                object: Some(ObjectId(before.id.0)),
-                code: "tabledit.cell".into(),
-                message: format!(
-                    "TABLEDIT: set cell (row {row}, column {col}) of table {} to `{text}`; one \
-                     transaction / one undo step",
-                    before.id.0
-                ),
-            }],
-            measurement: None,
-            point_report: None,
-        })
+        commit_table_geometry(
+            self,
+            command.document,
+            &selection,
+            updated,
+            "edit table cell",
+            "tabledit.cell",
+            format!(
+                "TABLEDIT: set cell (row {row}, column {col}) of table {} to `{text}`; one \
+                 transaction / one undo step",
+                selection.before.id.0
+            ),
+        )
     }
+}
+
+/// The one selected table a table edit addresses, already resolved.
+///
+/// `before` is the stored entity and `table` its definition, both cloned out of
+/// the document so the caller can take `&mut self` for the commit without holding
+/// a borrow of the workspace.
+pub(crate) struct TableSelection {
+    pub before: DbEntity,
+    pub table: TableGeometry,
+}
+
+/// Resolve the pre-selection every table edit shares.
+///
+/// Exactly one selected reference, directly addressable (no block instance, no
+/// sub-element), in the command's document, and existing with a `Table`
+/// geometry. `prefix` is the command's stable code prefix (`tabledit`,
+/// `matchcell`, `tablestyle`), so the same rule answers the same shape of code
+/// for every table command:
+///
+/// * `{prefix}.no_selection` — nothing selected;
+/// * `{prefix}.multiple` — more than one reference;
+/// * `{prefix}.not_table` — a block member, a sub-element, a foreign document or
+///   a non-table geometry.
+pub(crate) fn select_table(
+    app: &Application,
+    session: &SessionState,
+    command: &Command,
+    prefix: &str,
+) -> CadResult<TableSelection> {
+    let references = session.selection.refs();
+    let reference = match references {
+        [] => {
+            return Err(table_refusal(
+                format!("{prefix}.no_selection"),
+                "this command needs exactly one selected table; nothing is selected",
+            ));
+        }
+        [one] => one,
+        many => {
+            return Err(table_refusal(
+                format!("{prefix}.multiple"),
+                format!(
+                    "this command edits exactly one table; {} entities are selected",
+                    many.len()
+                ),
+            ));
+        }
+    };
+    if reference.document != command.document
+        || !reference.instance.0.is_empty()
+        || reference.sub_element.is_some()
+    {
+        return Err(table_refusal(
+            format!("{prefix}.not_table"),
+            format!(
+                "entity {} is not a directly addressable table in this document",
+                reference.entity.0
+            ),
+        ));
+    }
+    let document = app
+        .workspace
+        .documents
+        .get(&command.document)
+        .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+    let before = document
+        .drawing
+        .entity(reference.entity)
+        .cloned()
+        .ok_or_else(|| {
+            table_refusal(
+                format!("{prefix}.not_table"),
+                format!(
+                    "entity {} does not exist in this drawing",
+                    reference.entity.0
+                ),
+            )
+        })?;
+    let table = match &before.geometry {
+        SemanticGeometry::Table(table) => table.as_ref().clone(),
+        other => {
+            return Err(table_refusal(
+                format!("{prefix}.not_table"),
+                format!(
+                    "entity {} is a {}, not a table",
+                    before.id.0,
+                    class_name(other)
+                ),
+            ))
+        }
+    };
+    Ok(TableSelection { before, table })
+}
+
+/// Stage one table definition change: one `update_entity` in one transaction /
+/// one undo step, with the same before/after patches every other edit records.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn commit_table_geometry(
+    app: &mut Application,
+    document_id: DocumentId,
+    selection: &TableSelection,
+    updated: TableGeometry,
+    label: &str,
+    code: &str,
+    message: String,
+) -> CadResult<CommandOutcome> {
+    let mut candidate = {
+        let document = app
+            .workspace
+            .documents
+            .get(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        document.drawing.as_ref().clone()
+    };
+    let mut after = selection.before.clone();
+    after.geometry = SemanticGeometry::Table(Box::new(updated));
+    let transaction = next_transaction_id();
+    let change_set = {
+        let mut staged = candidate.begin_drawing_transaction(label, transaction)?;
+        staged.update_entity(after)?;
+        staged.commit()?
+    };
+    let stored = candidate
+        .entity(selection.before.id)
+        .cloned()
+        .ok_or_else(|| CadError::Invariant(format!("{code}: the table vanished after commit")))?;
+    app.publish_candidate(
+        document_id,
+        candidate,
+        DrawingUndoRecord {
+            transaction: change_set.transaction,
+            label: label.into(),
+            patches: vec![drawing_patch(
+                selection.before.id,
+                Some(selection.before.clone()),
+                Some(stored),
+            )],
+            block_patches: Vec::new(),
+            layer_patches: Vec::new(),
+            style_patches: Vec::new(),
+            dim_style_patches: Vec::new(),
+            mleader_style_patches: Vec::new(),
+            layout_patches: Vec::new(),
+            merge_key: None,
+        },
+    )?;
+    Ok(CommandOutcome {
+        objects: vec![ObjectId(selection.before.id.0)],
+        changes: Some(Arc::new(change_set)),
+        diagnostics: vec![Diagnostic {
+            object: Some(ObjectId(selection.before.id.0)),
+            code: code.into(),
+            message,
+        }],
+        measurement: None,
+        point_report: None,
+    })
 }
 
 /// The empty grid a `TABLE` command creates.
@@ -408,6 +498,9 @@ fn table_out_of_range(row: &u32, col: &u32, table: &TableGeometry) -> CadError {
 }
 
 /// One stable, code-prefixed refusal for a table command.
-fn table_refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
+pub(crate) fn table_refusal(
+    code: impl std::fmt::Display,
+    detail: impl std::fmt::Display,
+) -> CadError {
     CadError::InvalidInput(format!("{code}: {detail}"))
 }

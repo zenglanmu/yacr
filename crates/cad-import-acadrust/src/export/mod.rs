@@ -84,6 +84,8 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     write_units(&mut doc, request, &mut report);
     write_point_display_style(&mut doc, request.database);
     write_linetype_scale(&mut doc, request.database, &mut report);
+    write_header_points(&mut doc, request.database, &mut report);
+    write_scale_list(&mut doc, request.database, &mut report);
     tables::write_tables(&mut doc, request.database, &mut report);
 
     // Colour, lineweight, linetype and transparency **provenance** is preserved
@@ -283,6 +285,143 @@ fn write_linetype_scale(
         return;
     }
     doc.header.linetype_scale = scale;
+}
+
+/// Carry the drawing header's vector values into the output document:
+/// `$INSBASE` (model-space insertion base point), `$LIMMIN` and `$LIMMAX`
+/// (model-space limits).
+///
+/// The database stores these raw and reports `None` until a command writes them
+/// (see `cad_db::drawing::header_geometry`), and the acadrust DXF writer emits
+/// all three variables unconditionally. A stored value is therefore preserved
+/// verbatim — no conversion, no note — exactly like `$LTSCALE`/`$PDMODE`. An
+/// **absent** value leaves the writer's default (origin / a zero-size limit)
+/// instead of inventing a header the database never held; the `BASE`/`LIMITS`
+/// read forms name that absence for the user.
+///
+/// One boundary is declared here rather than hidden: the limits are two
+/// independent header variables, so a half-stored pair (one corner written, the
+/// other never set) still writes both variables and the missing corner is the
+/// DXF default. That state is reported (`export.note.limits_half_stored`) instead
+/// of being called a preserved pair.
+///
+/// The **import** side of this build does not read `$INSBASE`/`$LIMMIN`/`$LIMMAX`
+/// (a separate, still-open read gap), so this function makes a value written in
+/// this build survive SAVE→OPEN; it does not restore a value a source file
+/// carried.
+fn write_header_points(
+    doc: &mut CadDocument,
+    database: &DrawingDatabase,
+    report: &mut ExportReport,
+) {
+    if let Some(base) = database.insertion_base() {
+        doc.header.model_space_insertion_base =
+            acadrust::types::Vector3::new(base.x, base.y, base.z);
+    }
+    if let Some([x, y]) = database.limits_min() {
+        doc.header.model_space_limits_min = acadrust::types::Vector2::new(x, y);
+    }
+    if let Some([x, y]) = database.limits_max() {
+        doc.header.model_space_limits_max = acadrust::types::Vector2::new(x, y);
+    }
+    if database.limits_min().is_some() != database.limits_max().is_some() {
+        report.notes.push(ExportDiagnostic {
+            object: None,
+            code: "export.note.limits_half_stored".into(),
+            message: format!(
+                "the drawing stores only one limits corner (model limits {}); $LIMMIN and $LIMMAX                  are both written, so the missing corner is the DXF default rather than a value                  this database held",
+                database
+                    .model_limits()
+                    .map(|(min, max)| format!("{} {} to {} {}", min[0], min[1], max[0], max[1]))
+                    .unwrap_or_else(|| "incomplete".to_string())
+            ),
+        });
+    }
+}
+
+/// Carry the drawing's named annotation scales (`ACAD_SCALELIST`) into the output
+/// document.
+///
+/// The database owns the table ([`cad_db::DrawingDatabase::scales`], written
+/// after import by `SCALELISTEDIT`), and the acadrust DXF writer emits
+/// `ObjectType::Scale` records and their dictionaries, so a scale created,
+/// renamed or deleted in this build survives SAVE→OPEN. Entries are written in
+/// table-id order under `ACAD_SCALELIST` with AutoCAD's `*A<n>` key spelling, and
+/// every row keeps its name and its raw paper/drawing pair (nothing is
+/// normalised).
+///
+/// Two declared boundaries:
+///
+/// * a row whose ratio this build could not have created (a non-finite component
+///   from a corrupt source) is **not** written and is named in the report
+///   (`export.note.scale_unwritable`) instead of poisoning the OBJECTS section;
+/// * the active annotation scale (`CANNOSCALE`) itself is **not** written,
+///   because the acadrust DXF writer deliberately skips that header variable for
+///   vendor compatibility (see its `$CANNOSCALE` comment). The table round-trips;
+///   the header's current name does not, which is why the importer reports an
+///   unresolvable one by name instead of guessing.
+fn write_scale_list(doc: &mut CadDocument, database: &DrawingDatabase, report: &mut ExportReport) {
+    let mut rows: Vec<&cad_db::Scale> = database.scales().collect();
+    rows.sort_by_key(|row| row.id.0);
+    if rows.is_empty() {
+        return;
+    }
+    let dictionary = match scale_list_dictionary(doc) {
+        Some(handle) => handle,
+        None => {
+            let handle = doc.allocate_handle();
+            let root = doc.header.named_objects_dict_handle;
+            let mut dict = acadrust::objects::Dictionary::new();
+            dict.handle = handle;
+            dict.owner = root;
+            doc.objects
+                .insert(handle, acadrust::objects::ObjectType::Dictionary(dict));
+            if let Some(acadrust::objects::ObjectType::Dictionary(root_dict)) =
+                doc.objects.get_mut(&root)
+            {
+                root_dict.add_entry("ACAD_SCALELIST", handle);
+            }
+            handle
+        }
+    };
+    for (index, row) in rows.into_iter().enumerate() {
+        if !row.is_well_formed() {
+            report.notes.push(ExportDiagnostic {
+                object: None,
+                code: "export.note.scale_unwritable".into(),
+                message: format!(
+                    "annotation scale '{}' has a non-finite ratio ({}/{}), so it is not written to                      ACAD_SCALELIST; the other rows are",
+                    row.name, row.paper_units, row.drawing_units
+                ),
+            });
+            continue;
+        }
+        let handle = doc.allocate_handle();
+        let mut scale =
+            acadrust::objects::Scale::new(&row.name, row.paper_units, row.drawing_units);
+        scale.handle = handle;
+        scale.owner_handle = dictionary;
+        doc.objects
+            .insert(handle, acadrust::objects::ObjectType::Scale(scale));
+        if let Some(acadrust::objects::ObjectType::Dictionary(dict)) =
+            doc.objects.get_mut(&dictionary)
+        {
+            dict.add_entry(format!("*A{}", index + 1), handle);
+        }
+    }
+}
+
+/// The `ACAD_SCALELIST` dictionary handle, when the document already has one.
+fn scale_list_dictionary(doc: &CadDocument) -> Option<acadrust::types::Handle> {
+    let root = doc.header.named_objects_dict_handle;
+    let Some(acadrust::objects::ObjectType::Dictionary(root_dict)) = doc.objects.get(&root) else {
+        return None;
+    };
+    root_dict
+        .entries
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("ACAD_SCALELIST"))
+        .map(|(_, handle)| *handle)
 }
 
 #[cfg(test)]

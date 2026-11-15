@@ -75,13 +75,16 @@ impl Application {
             | ExtendedCommandId::BasePoint
             | ExtendedCommandId::DrawingLimits
             | ExtendedCommandId::ViewPlotDetails => self.extended_refusal(command, ext)?,
-            // The graduated Wave 2 paper-space writes: real per-viewport layer
+            // The graduated Wave 2 paper-space writes (real per-viewport layer
             // visibility, a scaled viewport grid and the two paper-space scale
-            // writes (`app_layout::paper_writes`).
+            // writes — `app_layout::paper_writes`) plus `CHSPACE`, which rewrites
+            // the selected entities' geometry and space through the active
+            // viewport's transform (`app_layout::chspace`).
             ExtendedCommandId::VPlayer
             | ExtendedCommandId::PsbScale
             | ExtendedCommandId::PstScale
-            | ExtendedCommandId::MvSetup => self.extended_paper_write(session, command, ext)?,
+            | ExtendedCommandId::MvSetup
+            | ExtendedCommandId::ChSpace => self.extended_paper_write(session, command, ext)?,
             // Wave 3 reports/session: two space switches plus read-only reports.
             ExtendedCommandId::Mspace
             | ExtendedCommandId::Pspace
@@ -151,8 +154,7 @@ impl Application {
             | ExtendedCommandId::WBlock
             | ExtendedCommandId::DashWBlock
             | ExtendedCommandId::BSave
-            | ExtendedCommandId::BSaveAs
-            | ExtendedCommandId::ChSpace => self.extended_refusal4(command, ext)?,
+            | ExtendedCommandId::BSaveAs => self.extended_refusal4(command, ext)?,
             // Wave 5 session token + attribute/xref reports: ATTDISP flips one
             // session flag; the rest read the block and xref tables this build
             // really stores. All are Viewer-legal.
@@ -387,19 +389,20 @@ impl Application {
             | ExtendedCommandId::DashPageSetupIn
             | ExtendedCommandId::ConvertPoly => self.extended_w13_reports(session, command, ext)?,
             // TABLE / -TABLE create one real table; TABLEDIT edits one selected
-            // table's cell text. Each is one transaction / one undo step.
+            // table's cell text, its merge forms, and the matched cell/table
+            // styles (one transaction / one undo step each).
             ExtendedCommandId::TableCreate
             | ExtendedCommandId::DashTable
-            | ExtendedCommandId::TableEdit => self.table_edit(session, command, ext)?,
+            | ExtendedCommandId::TableEdit
+            | ExtendedCommandId::MatchCell
+            | ExtendedCommandId::TableStyleList => self.table_edit(session, command, ext)?,
             ExtendedCommandId::PlotStyleList
             | ExtendedCommandId::DashPlotStyleList
             | ExtendedCommandId::ConvertPlotStyles
             | ExtendedCommandId::ConvertCtb
             | ExtendedCommandId::ConvertGeneric
             | ExtendedCommandId::TableExport
-            | ExtendedCommandId::TableStyleList
             | ExtendedCommandId::TableInsert
-            | ExtendedCommandId::MatchCell
             | ExtendedCommandId::Field
             | ExtendedCommandId::RText
             | ExtendedCommandId::RTextEdit

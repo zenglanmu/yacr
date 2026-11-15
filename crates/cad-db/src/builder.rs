@@ -59,6 +59,9 @@ impl DrawingDatabaseBuilder {
                 render_attributes: BTreeMap::new(),
                 layer_attributes: BTreeMap::new(),
                 scales: BTreeMap::new(),
+                insertion_base: None,
+                limits_min: None,
+                limits_max: None,
                 dim_styles: BTreeMap::new(),
                 dim_style_ids_by_name: BTreeMap::new(),
                 mleader_styles: BTreeMap::new(),
@@ -72,6 +75,7 @@ impl DrawingDatabaseBuilder {
                 next_style_id: 1,
                 next_dim_style_id: 1,
                 next_mleader_style_id: 1,
+                next_scale_id: 1,
                 external_references: BTreeMap::new(),
                 bounds_cache: Default::default(),
             },
@@ -693,6 +697,10 @@ impl DrawingDatabaseBuilder {
             .max()
             .unwrap_or(0);
         self.database.next_mleader_style_id = max_mleader_style.saturating_add(1);
+        // The annotation-scale table allocates the same way, so a post-import
+        // `SCALELISTEDIT ADD` can never collide with an imported row.
+        let max_scale = self.database.scales.keys().map(|s| s.0).max().unwrap_or(0);
+        self.database.next_scale_id = max_scale.saturating_add(1);
         Ok(self.database)
     }
 }

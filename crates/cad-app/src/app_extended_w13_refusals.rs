@@ -1,6 +1,6 @@
 //! Wave 13 command group: two real viewport-alignment writes and the named
-//! refusals over plot styles, tables, fields, remote text, spelling,
-//! super-hatching and layer translation.
+//! refusals over plot styles, table block content, fields, remote text,
+//! spelling, super-hatching and layer translation.
 //!
 //! `PSETUPIN`/`-PSETUPIN` are no longer refusals: they are page-setup writes in
 //! the sibling report module and are therefore Work-only.
@@ -8,9 +8,13 @@
 //! `ALIGNSPACE` and `VPSYNC` graduated from refusals to real
 //! `set_layout_viewports` writes (one layout patch, one revision, one undo
 //! step); they live in `crate::app_layout::viewport_align` and are Work-only.
-//! Every remaining name here is refused with `CadError::Unsupported` carrying a
-//! stable reason; a refusal writes nothing, bumps no revision and records no
-//! history. All of them are Viewer-legal.
+//! `TABLESTYLE` and `MATCHCELL` are no longer refusals: they are real table
+//! writes in `crate::app_drawing::table_ops`, as is `TABLEDIT`'s merge form.
+//! `TABLEEXPORT` is a typed command-line export (`crate::session::table_export`);
+//! the bare IPC form has no destination path and refuses here by that name.
+//! Every remaining name is refused with `CadError::Unsupported` carrying a stable
+//! reason; a refusal writes nothing, bumps no revision and records no history.
+//! All of them are Viewer-legal.
 
 use super::*;
 use crate::app_utility::require_none_payload;
@@ -50,16 +54,11 @@ fn reason(ext: ExtendedCommandId) -> String {
         }
         ExtendedCommandId::ConvertGeneric => "convert.unsupported: generic object conversion is not implemented",
         ExtendedCommandId::TableExport => {
-            "tableexport.unsupported: no CSV/file writer is implemented"
-        }
-        ExtendedCommandId::TableStyleList => {
-            "tablestyle.unsupported: no table-style table is implemented"
+            "tableexport.needs_path: TABLEEXPORT is a typed command-line export \
+(`TABLEEXPORT <path.csv>`); an IPC invocation carries no destination path, so nothing was written"
         }
         ExtendedCommandId::TableInsert => {
             "tinsert.unsupported: no block-in-cell creation is implemented"
-        }
-        ExtendedCommandId::MatchCell => {
-            "matchcell.unsupported: no cell-style copy surface is implemented"
         }
         ExtendedCommandId::Field => "field.unsupported: fields are not implemented (no field model)",
         ExtendedCommandId::RText => "rtext.unsupported: remote text is not implemented (no RTEXT model)",

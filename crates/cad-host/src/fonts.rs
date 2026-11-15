@@ -38,6 +38,19 @@ pub trait HostResources {
         let _ = path;
         Err(NamedFileError::Unavailable)
     }
+
+    /// Write one **user-named** host file, the write counterpart of
+    /// [`Self::read_named_file`] (`TABLEEXPORT <path.csv>`).
+    ///
+    /// The same rule applies in the other direction: the session owns the typed
+    /// grammar and the bytes, the strategy owns the filesystem, and a runtime
+    /// without one refuses with [`NamedFileError::Unavailable`] rather than
+    /// reporting success for a file nobody wrote. Native hosts override this and
+    /// write atomically through `cad_platform::write_named_file`.
+    fn write_named_file(&self, path: &Path, bytes: &[u8]) -> Result<(), NamedFileError> {
+        let _ = (path, bytes);
+        Err(NamedFileError::Unavailable)
+    }
 }
 
 /// The host status key for a font/image installation failure.
@@ -314,6 +327,16 @@ impl HostResources for DesktopResources {
     /// host and a browser cannot claim them.
     fn read_named_file(&self, path: &Path) -> Result<Arc<[u8]>, NamedFileError> {
         cad_platform::read_named_file(path)
+    }
+
+    /// Write one user-named host file (a `TABLEEXPORT <path.csv>` destination)
+    /// through the platform carrier.
+    ///
+    /// The policy (an existing parent directory, the size bound, an atomic
+    /// temp-file rename) lives in `cad_platform::write_named_file`, so every native
+    /// host writes exactly the same way and a browser cannot claim a write.
+    fn write_named_file(&self, path: &Path, bytes: &[u8]) -> Result<(), NamedFileError> {
+        cad_platform::write_named_file(path, bytes)
     }
 }
 

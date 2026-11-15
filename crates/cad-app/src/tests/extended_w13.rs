@@ -52,7 +52,7 @@ fn convertpoly_reports_the_single_representation() {
         .any(|row| row.code == "convertpoly.single_representation"));
 }
 
-const REFUSALS: [(ExtendedCommandId, &str); 15] = [
+const REFUSALS: [(ExtendedCommandId, &str); 13] = [
     (
         ExtendedCommandId::PlotStyleList,
         "plotstyle.unsupported: named plot styles are not implemented (no CTB/STB table)",
@@ -75,19 +75,12 @@ const REFUSALS: [(ExtendedCommandId, &str); 15] = [
     ),
     (
         ExtendedCommandId::TableExport,
-        "tableexport.unsupported: no CSV/file writer is implemented",
-    ),
-    (
-        ExtendedCommandId::TableStyleList,
-        "tablestyle.unsupported: no table-style table is implemented",
+        "tableexport.needs_path: TABLEEXPORT is a typed command-line export \
+(`TABLEEXPORT <path.csv>`); an IPC invocation carries no destination path, so nothing was written",
     ),
     (
         ExtendedCommandId::TableInsert,
         "tinsert.unsupported: no block-in-cell creation is implemented",
-    ),
-    (
-        ExtendedCommandId::MatchCell,
-        "matchcell.unsupported: no cell-style copy surface is implemented",
     ),
     (
         ExtendedCommandId::Field,

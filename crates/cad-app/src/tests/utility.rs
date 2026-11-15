@@ -592,10 +592,7 @@ fn setvar_reports_cvport_only_inside_a_paper_layout_with_a_viewport() {
         CommandPayload::SetVar("CVPORT".into()),
     )
     .expect_err("model space has no CVPORT");
-    assert!(
-        error.to_string().contains("setvar.not_stored"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("setvar.not_stored"), "{error}");
 }
 
 // ---------------------------------------------------------------------------

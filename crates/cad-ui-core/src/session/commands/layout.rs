@@ -7,7 +7,9 @@
 //!
 //! The grammar is deliberately narrow and documented:
 //!
-//! * `LAYOUT LIST|NEW <name>|RENAME <old> <new>|DELETE <name>|SET <name>`;
+//! * `LAYOUT LIST|NEW <name>|RENAME <old> <new>|DELETE <name>|SET <name>|
+//!   COPY <source> <new-name>`; `LAYOUT TEMPLATE` is a named refusal
+//!   (`layout.template_not_implemented`, no cross-drawing template model);
 //! * `LAYOUTMERGE <source> <target>`;
 //! * `LAYOUTWIZARD <name> [<paper> <width> <height>] [ARRANGE <arrangement>]
 //!   [PLOTDEVICE|PLOTSTYLE|TITLEBLOCK <name>]`;
@@ -58,11 +60,18 @@ pub const VPSCALE_SELECTOR: &str = "VPSCALE";
 pub const LAYVPI_SELECTOR: &str = "LAYVPI";
 
 /// Parse one `LAYOUT <option>` argument.
+///
+/// Grammar: `LIST`, `NEW <name>`, `RENAME <old> <new>`, `DELETE <name>`,
+/// `SET <name>` and `COPY <source> <new-name>`. `TEMPLATE` is a **named refusal**
+/// (`layout.template_not_implemented`): importing a layout from a DWT/DXF
+/// template file needs a cross-drawing template model this build does not have,
+/// so the request is refused before anything is created instead of being mapped
+/// onto `COPY`.
 pub fn parse_layout_argument(argument: &str) -> Result<LayoutPayload, String> {
     let Some((word, rest)) = split_word(argument) else {
         return Err(invalid(
             "layout",
-            "LAYOUT needs LIST, NEW, RENAME, DELETE or SET",
+            "LAYOUT needs LIST, NEW, RENAME, DELETE, SET, COPY or TEMPLATE",
         ));
     };
     match word.to_ascii_uppercase().as_str() {
@@ -76,6 +85,24 @@ pub fn parse_layout_argument(argument: &str) -> Result<LayoutPayload, String> {
         "SET" if !rest.is_empty() => Ok(LayoutPayload::Set {
             name: rest.to_string(),
         }),
+        "COPY" => {
+            let Some((source, name)) = split_word(rest) else {
+                return Err(invalid("layout", "LAYOUT COPY needs <source> <new-name>"));
+            };
+            if source.is_empty() || name.is_empty() {
+                return Err(invalid("layout", "LAYOUT COPY needs <source> <new-name>"));
+            }
+            Ok(LayoutPayload::Copy {
+                source: source.to_string(),
+                name: name.to_string(),
+            })
+        }
+        "TEMPLATE" => Err(
+            "layout.template_not_implemented: LAYOUT TEMPLATE needs a DWT/DXF template file, and \
+             this build has no cross-drawing template import; the current drawing was not \
+             modified (use LAYOUT COPY <source> <new-name> to duplicate a layout of this drawing)"
+                .into(),
+        ),
         "RENAME" => {
             let Some((old, new)) = split_word(rest) else {
                 return Err(invalid("layout", "LAYOUT RENAME needs <old> <new>"));
@@ -90,7 +117,8 @@ pub fn parse_layout_argument(argument: &str) -> Result<LayoutPayload, String> {
         }
         _ => Err(invalid(
             "layout",
-            "LAYOUT needs LIST, NEW <name>, RENAME <old> <new>, DELETE <name> or SET <name>",
+            "LAYOUT needs LIST, NEW <name>, RENAME <old> <new>, DELETE <name>, SET <name> or COPY \
+             <source> <new-name>; TEMPLATE is NOT IMPLEMENTED",
         )),
     }
 }

@@ -1,16 +1,18 @@
 //! Wave 4 **named refusals** for the extended command batch.
 //!
-//! Sixteen AutoCAD 2026 names describe features this build has no model or API
+//! Twelve AutoCAD 2026 names describe features this build has no model or API
 //! for: block scaling/replacement, NURBS editing, block-attribute bursts, Region
-//! geometry, writing a block to a separate drawing file, a block editor and
-//! moving entities between model and paper space.
+//! geometry and writing a block to a separate drawing file.
 //!
 //! `MINSERT`, `ADDSELECTED` and `MLEDIT`/`-MLEDIT` graduated to real entity
 //! writes (2026-11-12); the two-LINE multiline edit lives in
 //! [`crate::app_drawing::mledit`] and is no longer part of this refusal table.
 //! `CLIP` and `CLIPIT` graduated on 2026-11-15: both write the existing
 //! `ImageClip`/`BlockClip` models through [`crate::app_drawing::clip_edit`]
-//! instead of refusing.
+//! instead of refusing. `CHSPACE` graduated on 2026-11-16: it moves entities
+//! between model and paper space through the active viewport's resolved
+//! transform (`crate::app_layout::chspace`), routed through
+//! [`Application::extended_paper_write`] with the other paper-space writes.
 //!
 //! Each name is admitted by the vocabulary and then refused with
 //! `CadError::Unsupported` carrying a **stable** reason string. A refusal writes
@@ -74,9 +76,6 @@ fn reason(ext: ExtendedCommandId) -> String {
         }
         ExtendedCommandId::BSave => "bsave.unsupported: this build has no block editor",
         ExtendedCommandId::BSaveAs => "bsaveas.unsupported: this build has no block editor",
-        ExtendedCommandId::ChSpace => {
-            "chspace.unsupported: moving entities between model and paper space is not implemented"
-        }
         other => {
             return format!(
                 "{}: this command is not a Wave 4 refusal",

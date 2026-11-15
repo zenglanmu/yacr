@@ -1,6 +1,6 @@
 //! Wave 4 named-refusal contracts: `BSCALE`, `BLOCKREPLACE`, `BREPLACE`,
 //! `-BREPLACE`, `SPLINEDIT`, `BURST`, `REGION`, `WBLOCK`, `-WBLOCK`, `BSAVE`,
-//! `BSAVEAS`, `CHSPACE`.
+//! `BSAVEAS`.
 //!
 //! `MINSERT`, `ADDSELECTED` and `MLEDIT`/`-MLEDIT` were refusals in this wave and
 //! graduated to real entity writes on 2026-11-12 (`app_drawing::minsert`,
@@ -12,6 +12,11 @@
 //! existing `ImageClip`/`BlockClip` models (`app_drawing::clip_edit`); their
 //! contract lives in `tests::drawing::clip`.
 //!
+//! `CHSPACE` graduated on 2026-11-16 to a real model↔paper migration
+//! (`app_layout::chspace`, one transaction / one undo step) and is Work-only, so
+//! it is no longer part of this Viewer-legal refusal table; its contract lives in
+//! `tests::layout_chspace`.
+//!
 //! Each name is admitted by the vocabulary and refused with
 //! `CadError::Unsupported` carrying a **stable** reason. A refusal must write
 //! nothing, bump no revision and record no history. These names are
@@ -19,7 +24,7 @@
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 12] = [
+const REFUSALS: [(ExtendedCommandId, &str); 11] = [
     (
         ExtendedCommandId::BScale,
         "bscale.unsupported: BSCALE needs a factor and an insertion reference; use SCALE on the \
@@ -69,10 +74,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 12] = [
     (
         ExtendedCommandId::BSaveAs,
         "bsaveas.unsupported: this build has no block editor",
-    ),
-    (
-        ExtendedCommandId::ChSpace,
-        "chspace.unsupported: moving entities between model and paper space is not implemented",
     ),
 ];
 

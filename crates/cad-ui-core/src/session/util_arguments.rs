@@ -12,7 +12,8 @@
 //! before dispatching, so an unknown command is a named refusal rather than a
 //! stored phantom.
 
-use cad_app::{CommandId, CommandPayload, ToolParameter, ToolValue};
+use cad_app::{CommandId, CommandPayload, ExtendedCommandId, ToolParameter, ToolValue};
+use cad_domain::Point3;
 use cad_host::{CadSettingKey, CadSettingValue};
 
 use super::commands::{
@@ -37,6 +38,17 @@ const MODELLED_VARIABLES: &[&str] = &[
     "ORTHO",
     "TEXTSIZE",
     "WIPEOUTFRAME",
+    // Wave 31: four values whose storage already existed but that `SETVAR` did
+    // not list. Each one writes through its ordinary command (one setter per
+    // value): `CVPORT` is session-only and writes **nothing** to the drawing,
+    // while `INSBASE`/`LIMMIN`/`LIMMAX` are drawing-header values written by
+    // `BASE`/`LIMITS`. The list mirrors the application's
+    // `MODELLED_SYSTEM_VARIABLES` closed set (the reader the reports use), so a
+    // variable is never writable here without being readable there.
+    "CVPORT",
+    "INSBASE",
+    "LIMMIN",
+    "LIMMAX",
 ];
 
 /// The three shell settings `SETVAR` can **write** but not read.
@@ -273,6 +285,77 @@ impl CadSession {
                 }
                 Err(reason) => self.refuse_argument(reason),
             },
+            // `CVPORT` is the session's current-viewport marker: the write goes
+            // through the same command the typed `CVPORT <n>` line uses and the
+            // drawing database is untouched.
+            "CVPORT" => match super::commands::parse_cvport_argument(value) {
+                Ok(payload) => {
+                    self.dispatch_typed_argument(SETVAR_SELECTOR, CommandId::Cvport, payload)
+                }
+                Err(reason) => self.refuse_argument(reason),
+            },
+            // `INSBASE` is the model-space insertion base point, written by the
+            // ordinary `BASE` command (one header mutation, one revision).
+            "INSBASE" => match parse_sysvar_point(value, 2, 3) {
+                Some([x, y, z]) => self.dispatch_typed_argument(
+                    SETVAR_SELECTOR,
+                    CommandId::Extended(ExtendedCommandId::BasePoint),
+                    CommandPayload::Points(vec![Point3 { x, y, z }]),
+                ),
+                _ => invalid("two or three decimals (`<x> <y> [<z>]`)"),
+            },
+            // `LIMMIN`/`LIMMAX` are the two corners of one rectangle: the payload
+            // carries both, so the *unwritten* corner is read from the
+            // authoritative drawing instead of being defaulted here. A drawing
+            // that stores no other corner is refused by name — a half rectangle
+            // is never invented.
+            "LIMMIN" | "LIMMAX" => {
+                let Some([x, y, _]) = parse_sysvar_point(value, 2, 2) else {
+                    return invalid("two decimals (`<x> <y>`)");
+                };
+                let (min, max) = {
+                    let controller = self.core.controller.borrow();
+                    let Some(drawing) = controller.drawing() else {
+                        return self.refuse_argument(
+                            "setvar.no_document: SETVAR LIMMIN/LIMMAX needs an open drawing whose \
+                             other limit corner can be read"
+                                .to_string(),
+                        );
+                    };
+                    (drawing.limits_min(), drawing.limits_max())
+                };
+                let (new_min, new_max) = if name == "LIMMIN" {
+                    let Some(max) = max else {
+                        return self.refuse_argument(format!(
+                            "limits.other_corner_unset: SETVAR LIMMIN writes the minimum corner and                              keeps the stored LIMMAX, but this drawing stores no LIMMAX; set both                              corners with `LIMITS <min_x> <min_y> <max_x> <max_y>` (value {value:?}                              was not applied)"
+                        ));
+                    };
+                    ([x, y], max)
+                } else {
+                    let Some(min) = min else {
+                        return self.refuse_argument(format!(
+                            "limits.other_corner_unset: SETVAR LIMMAX writes the maximum corner and                              keeps the stored LIMMIN, but this drawing stores no LIMMIN; set both                              corners with `LIMITS <min_x> <min_y> <max_x> <max_y>` (value {value:?}                              was not applied)"
+                        ));
+                    };
+                    (min, [x, y])
+                };
+                self.dispatch_typed_argument(
+                    SETVAR_SELECTOR,
+                    CommandId::Extended(ExtendedCommandId::DrawingLimits),
+                    CommandPayload::Points(vec![
+                        Point3 {
+                            x: new_min[0],
+                            y: new_min[1],
+                            z: 0.0,
+                        },
+                        Point3 {
+                            x: new_max[0],
+                            y: new_max[1],
+                            z: 0.0,
+                        },
+                    ]),
+                )
+            }
             // The three persisted shell settings write through the same
             // validated/persisted settings path the `NAVVCUBEDISPLAY`
             // `DISPLAYVIEWCUBEIN2D` / `DISPLAYVIEWCUBEIN3D` selectors use. The
@@ -302,4 +385,37 @@ impl CadSession {
             _ => self.refuse_argument(format!("setvar.unknown_variable: '{name}'")),
         }
     }
+}
+
+/// Parse a `SETVAR` point value: 2 or 3 finite plain decimals.
+///
+/// Components are separated by whitespace **or** a single comma, because both
+/// spellings are natural on a command line (`SETVAR INSBASE 1,2` / `SETVAR
+/// INSBASE 1 2`). An empty component is refused (it would shift the axes).
+/// The count is bounded by the caller; anything else (an exponent, a sign-less
+/// fraction of words, an empty component) is refused, never repaired. A missing
+/// `z` is `0.0` — the only default, and the one DXF itself uses for a 2D point.
+fn parse_sysvar_point(value: &str, min: usize, max: usize) -> Option<[f64; 3]> {
+    let mut components: Vec<&str> = Vec::new();
+    for token in value.split_whitespace() {
+        for component in token.split(',') {
+            if component.is_empty() {
+                // An empty component (`1,,2`) would silently shift the axes.
+                return None;
+            }
+            components.push(component);
+        }
+    }
+    if components.len() < min || components.len() > max {
+        return None;
+    }
+    let mut point = [0.0; 3];
+    for (index, component) in components.iter().enumerate() {
+        let parsed = super::commands::parse_signed_decimal(component)?;
+        if !parsed.is_finite() {
+            return None;
+        }
+        point[index] = parsed;
+    }
+    Some(point)
 }

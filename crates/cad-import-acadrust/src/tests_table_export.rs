@@ -114,11 +114,13 @@ fn table_exports_as_an_acadtable_entity_with_cells_and_merges() {
             .any(|entry| entry.code == "export.converted.table"),
         "{report:?}"
     );
+    // The style object **is** written now; the remaining named loss is the
+    // title/header row styles being approximated by the data-row style.
     assert!(
         report
             .entries
             .iter()
-            .any(|entry| entry.message.contains("TABLESTYLE object is not written")),
+            .any(|entry| entry.message.contains("title/header row styles")),
         "{report:?}"
     );
 
@@ -352,7 +354,7 @@ fn cell_text_height_and_style_survive_export_and_reimport() {
 }
 
 #[test]
-fn a_non_standard_table_style_name_is_reported_as_not_written() {
+fn a_non_standard_table_style_name_round_trips_through_the_style_object() {
     let source = source_table();
     let source = TableGeometry::from_import(TableParts {
         frame: source.frame(),
@@ -363,16 +365,129 @@ fn a_non_standard_table_style_name_is_reported_as_not_written() {
         description: source.description().into(),
     });
     let (bytes, report) = export_one(SemanticGeometry::Table(Box::new(source)));
+    // The name is no longer a declared loss: it rides the TABLESTYLE object.
     assert!(
-        report.entries.iter().any(|entry| entry
+        !report.entries.iter().any(|entry| entry
             .message
-            .contains("the table style name is also not written")),
+            .contains("table style name is also not written")),
         "{report:?}"
     );
     let reimported = import_bytes(&bytes);
-    assert_ne!(
+    assert_eq!(
         imported_table(&reimported).style_name(),
         "MyTableStyle",
-        "the name is not preserved"
+        "the style name is preserved by the TABLESTYLE object"
+    );
+}
+
+/// A table whose style snapshot is not `Standard`: named, tallered, margined,
+/// with a doubled left border and a hidden bottom edge.
+fn styled_table() -> TableGeometry {
+    let mut parts_cell = cell("cell");
+    parts_cell.borders.left = TableBorder {
+        visible: true,
+        double_spacing: 0.25,
+    };
+    parts_cell.borders.bottom = TableBorder::HIDDEN;
+    parts_cell.borders.top = parts_cell.borders.left;
+    parts_cell.borders.right = parts_cell.borders.left;
+    parts_cell.text_height = 3.5;
+    parts_cell.style_name = "Standard".into();
+    let mut style = TableStyleValues::named("Report");
+    style.description = "project report".into();
+    style.horizontal_margin = 0.2;
+    style.vertical_margin = 0.3;
+    style.text_height = 3.5;
+    style.borders.left = TableBorder {
+        visible: true,
+        double_spacing: 0.25,
+    };
+    style.borders.bottom = TableBorder::HIDDEN;
+    style.title_suppressed = true;
+    TableGeometry::from_import_with_style(
+        TableParts {
+            frame: TableFrame::default(),
+            columns: vec![TableColumnGeometry {
+                width: 5.0,
+                name: "Only".into(),
+            }],
+            rows: vec![TableRowGeometry {
+                height: 3.0,
+                cells: vec![parts_cell],
+            }],
+            style_name: "Report".into(),
+            name: String::new(),
+            description: String::new(),
+        },
+        style,
+    )
+}
+
+#[test]
+fn the_table_style_object_round_trips_through_dxf() {
+    let source = styled_table();
+    let (bytes, report) = export_one(SemanticGeometry::Table(Box::new(source.clone())));
+
+    // The written document carries a real TABLESTYLE object with our values.
+    let document = DxfReader::from_reader(Cursor::new(bytes.clone()))
+        .expect("reader")
+        .read()
+        .expect("written DXF parses");
+    let written_style = document
+        .objects
+        .iter()
+        .find_map(|(_, object)| match object {
+            acadrust::objects::ObjectType::TableStyle(style) if style.name == "Report" => {
+                Some(style)
+            }
+            _ => None,
+        })
+        .expect("TABLESTYLE object");
+    // The description has no DXF group in this writer, so it is **not** part of
+    // the round trip; the report says so instead (asserted below).
+    assert!((written_style.horizontal_margin - 0.2).abs() < 1e-9);
+    assert!((written_style.vertical_margin - 0.3).abs() < 1e-9);
+    assert!((written_style.data_row_style.text_height - 3.5).abs() < 1e-9);
+    assert!(written_style.title_suppressed);
+    // The style object's per-edge visibility IS written (groups 284..289 of the
+    // row cell style), so the hidden bottom edge survives there.
+    assert!(written_style.data_row_style.bottom_border.is_invisible);
+    assert!(!written_style.data_row_style.left_border.is_invisible);
+
+    // Re-import resolves the same snapshot onto the entity, so the style name and
+    // its modelled values are a real round trip.
+    let reimported = import_bytes(&bytes);
+    let table = imported_table(&reimported);
+    let style = table.style();
+    assert_eq!(style.name, "Report");
+    // Two style fields have no group in this writer; the description and the
+    // style-border double spacing come back as defaults, and the report names
+    // that explicitly instead of implying a full round trip.
+    assert_eq!(style.description, "");
+    assert!(
+        report.entries.iter().any(|entry| entry
+            .message
+            .contains("the table style description and its double-line border spacing are not")),
+        "{report:?}"
+    );
+    assert!((style.horizontal_margin - 0.2).abs() < 1e-9);
+    assert!((style.vertical_margin - 0.3).abs() < 1e-9);
+    assert!((style.text_height - 3.5).abs() < 1e-9);
+    assert!(style.title_suppressed);
+    assert_eq!(style.borders.bottom, TableBorder::HIDDEN);
+    assert!(style.borders.left.visible);
+    // The cell's own text height survives (it rides the cell CONTENT), and its
+    // border set re-resolves from the style object: the writer emits no per-cell
+    // `GRIDFORMAT`, so an explicit cell override does **not** round-trip and the
+    // report names that instead of implying it does.
+    let cell = table.cell(0, 0).expect("the cell");
+    assert!((cell.text_height - 3.5).abs() < 1e-9);
+    assert_eq!(cell.borders.bottom, TableBorder::HIDDEN);
+    assert_eq!(cell.borders.left.double_spacing, 0.0);
+    assert!(
+        report.entries.iter().any(|entry| entry
+            .message
+            .contains("border visibility and double-line spacing are not written")),
+        "{report:?}"
     );
 }

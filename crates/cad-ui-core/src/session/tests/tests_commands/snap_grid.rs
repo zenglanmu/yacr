@@ -249,6 +249,12 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "RENAME",
             "SETVAR",
             "SYSVARMONITOR",
+            // The annotation-scale table's typed writes (2026-11-16).
+            "SCALELISTEDIT",
+            "-SCALELISTEDIT",
+            // The two vector-header writes (2026-11-16).
+            "BASE",
+            "LIMITS",
             "MREDO",
             "MULTIPLE",
             // The 2026-11-07 draw/modify batch.
@@ -272,10 +278,14 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "CLIP",
             "IMAGEADJUST",
             "-IMAGEADJUST",
-            // The table typed forms (`TABLE`, `-TABLE`, `TABLEDIT`).
+            // The table typed forms (`TABLE`, `-TABLE`, `TABLEDIT`) plus the
+            // post-creation cell/style/export forms.
             "TABLE",
             "-TABLE",
             "TABLEDIT",
+            "MATCHCELL",
+            "TABLESTYLE",
+            "TABLEEXPORT",
             // The 2026-11-07 view batch.
             "VIEW",
             "VIEWGO",

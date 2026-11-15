@@ -63,6 +63,7 @@ mod app_extended_sysvar;
 // The Wave 3 extended-command handlers (reports/session and refusals).
 mod app_extended_refusals3;
 mod app_extended_reports3;
+mod app_extended_scale_list;
 // The Wave 4 extended-command handlers (real selection edits and refusals).
 mod app_extended_edit4;
 mod app_extended_refusals4;
@@ -125,6 +126,7 @@ pub mod view_states;
 pub use api::{
     ApiOutcome, ApiRequest, ApiTarget, EntityEdit, NewEntity, RawCommandTrace, TracedCommandOutcome,
 };
+pub use app_extended_scale_list::ScaleListCommand;
 pub use app_extended_w9_reports::install_outline_fonts;
 pub use app_measure_object::FULL_TURN_TOLERANCE_RADIANS;
 pub use app_zoom::{canonical_logical_rect, FIT_MARGIN, WINDOW_MARGIN};
@@ -461,6 +463,9 @@ pub use command_payload::{
 };
 
 pub use app_audit::AuditRequest;
+pub use app_drawing::table_payload::{
+    TableCellAddress, TablePayload, TableStyleCommand, TableStyleEdge,
+};
 pub use app_drawing::OverkillSettings;
 pub use ssx::{SsxCriterion, SsxCriterionKind, SsxFilter, SsxRequest};
 

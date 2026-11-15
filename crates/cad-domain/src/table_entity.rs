@@ -31,6 +31,12 @@ use crate::{
     TextLineSpacing, Transform3, DEFAULT_TEXT_WIDTH_FACTOR,
 };
 
+pub use style::{TableStyleValues, DEFAULT_TABLE_MARGIN, DEFAULT_TABLE_STYLE_NAME};
+
+mod csv;
+mod edit;
+mod style;
+
 /// Similarity tolerance for the table transform (the same ratio rule every
 /// other similarity-only display entity uses).
 const SIMILARITY_TOLERANCE: f64 = 1e-9;
@@ -202,14 +208,19 @@ pub struct TableParts {
 /// A first-class TABLE entity.
 ///
 /// All fields are private; the only writers are [`Self::new`],
-/// [`Self::from_import`], [`Self::transformed`], [`Self::with_cell_text`] and
-/// [`Self::with_cell_texts`]. `display` is derived from the other fields.
+/// [`Self::from_import`], [`Self::from_import_with_style`],
+/// [`Self::transformed`], [`Self::with_cell_text`], [`Self::with_cell_texts`],
+/// [`Self::with_merge`], [`Self::with_unmerge`], [`Self::with_cell_styles`],
+/// [`Self::with_style_resolved`] and [`Self::with_style_name`]. `display` is
+/// derived from the other fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableGeometry {
     frame: TableFrame,
     columns: Vec<TableColumnGeometry>,
     rows: Vec<TableRowGeometry>,
-    style_name: String,
+    /// The table style snapshot (`TABLESTYLE`): the name plus the data-row
+    /// values the cells inherit.
+    style: TableStyleValues,
     name: String,
     description: String,
     display: Vec<SemanticGeometry>,
@@ -247,11 +258,23 @@ impl TableGeometry {
     /// The importer owns the degradation reasons because only it knows whether
     /// any cell/row/table style supplied the resolved borders.
     pub fn from_import(parts: TableParts) -> Self {
+        let style = TableStyleValues::named(&parts.style_name);
+        Self::from_import_with_style(parts, style)
+    }
+
+    /// Build a table from imported data with the source's resolved table style.
+    ///
+    /// The style name is taken from `style.name`, not from
+    /// [`TableParts::style_name`] — the snapshot is the authority once the
+    /// importer resolved the `TABLESTYLE` object. The cells keep their resolved
+    /// values, so a cell that took its borders/height/style from that object
+    /// still equals it and therefore still counts as inheriting.
+    pub fn from_import_with_style(parts: TableParts, style: TableStyleValues) -> Self {
         let mut geometry = TableGeometry {
             frame: normalize_frame(parts.frame),
             columns: parts.columns,
             rows: parts.rows,
-            style_name: parts.style_name,
+            style,
             name: parts.name,
             description: parts.description,
             display: Vec::new(),
@@ -373,7 +396,7 @@ impl TableGeometry {
             frame,
             columns,
             rows,
-            style_name: self.style_name.clone(),
+            style: self.style.scaled(s),
             name: self.name.clone(),
             description: self.description.clone(),
             display: Vec::new(),
@@ -433,8 +456,14 @@ impl TableGeometry {
         self.rows.get(row).and_then(|row| row.cells.get(column))
     }
 
+    /// The style snapshot the cells inherit from (`TABLESTYLE`).
+    pub fn style(&self) -> &TableStyleValues {
+        &self.style
+    }
+
+    /// The table style name (the `TABLESTYLE` object's name).
     pub fn style_name(&self) -> &str {
-        &self.style_name
+        &self.style.name
     }
 
     pub fn name(&self) -> &str {
@@ -461,6 +490,15 @@ impl TableGeometry {
     /// The derived display: grid lines and cell text.
     pub fn display(&self) -> &[SemanticGeometry] {
         &self.display
+    }
+
+    /// Rebuild the derived display after a definition edit.
+    ///
+    /// Private to the crate's table modules: the public writers call it
+    /// themselves, so no caller can leave a display that disagrees with the
+    /// definition.
+    pub(crate) fn rebuild_display(&mut self) {
+        self.display = self.build_display();
     }
 
     /// Derive the display from `frame + columns + rows`.
@@ -494,25 +532,11 @@ impl TableGeometry {
         };
 
         // Cells covered by a merge anchor (all but the top-left cell). Their
-        // interior edges belong to the merged range and are not drawn. A
-        // malformed span is clamped to the remaining grid: a raw `i32` span near
-        // 2^31 must never drive this loop.
-        let mut covered: std::collections::HashSet<(usize, usize)> =
-            std::collections::HashSet::new();
-        for (row_index, row) in self.rows.iter().enumerate() {
-            for (column_index, cell) in row.cells.iter().enumerate() {
-                let span_w =
-                    clamped_span(cell.merge_width as usize, self.columns.len(), column_index);
-                let span_h = clamped_span(cell.merge_height as usize, self.rows.len(), row_index);
-                for dr in 0..span_h {
-                    for dc in 0..span_w {
-                        if dr != 0 || dc != 0 {
-                            covered.insert((row_index + dr, column_index + dc));
-                        }
-                    }
-                }
-            }
-        }
+        // interior edges belong to the merged range and are not drawn. The one
+        // coverage rule lives in `edit::merge_coverage`, which clamps a malformed
+        // span to the remaining grid: a raw `i32` span near 2^31 must never
+        // drive this loop.
+        let covered = edit::merge_coverage(&self.rows, self.columns.len());
 
         let mut y = 0.0;
         for (row_index, row) in self.rows.iter().enumerate() {
@@ -530,10 +554,8 @@ impl TableGeometry {
                 }
                 // A merge anchor spans its covered columns/rows; clamp the
                 // stored span to the remaining grid.
-                let span_w_cells =
-                    clamped_span(cell.merge_width as usize, self.columns.len(), column_index);
-                let span_h_cells =
-                    clamped_span(cell.merge_height as usize, self.rows.len(), row_index);
+                let span_w_cells = edit::span(cell.merge_width, self.columns.len(), column_index);
+                let span_h_cells = edit::span(cell.merge_height, self.rows.len(), row_index);
                 let span_w: f64 = (0..span_w_cells)
                     .map(|dc| {
                         self.columns
@@ -597,14 +619,6 @@ fn cross(a: Point3, b: Point3) -> Point3 {
         y: a.z * b.x - a.x * b.z,
         z: a.x * b.y - a.y * b.x,
     }
-}
-
-/// Clamp a merge span to the grid cells remaining from `anchor`.
-///
-/// `span` may be an untrusted source value; the result is always at least one
-/// and never points past `extent`.
-fn clamped_span(span: usize, extent: usize, anchor: usize) -> usize {
-    span.max(1).min(extent.saturating_sub(anchor).max(1))
 }
 
 /// Store the frame with unit horizontal/normal directions.

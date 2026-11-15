@@ -71,14 +71,36 @@ impl Application {
         Ok(outcome)
     }
 
-    /// `PSPACE`: switch to the first paper layout through the existing `SPACE`
-    /// path; a drawing with no paper layout is a named no-op.
+    /// `PSPACE`: switch to paper space through the existing `SPACE` path.
+    ///
+    /// From model space this lands on the drawing's first paper layout (id order
+    /// is tab order); a drawing with no paper layout is a named report, not a
+    /// blank success. Already being in a paper layout is a **named no-op**
+    /// (`pspace.noop`): the command's contract is "from model space to paper
+    /// space", so a second PSPACE must not jump to the *first* layout and re-fit
+    /// the camera of the sheet the user is standing on. `MSPACE` has the
+    /// symmetric no-op.
     fn pspace(
         &mut self,
         session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
         require_none_payload(command, "PSPACE")?;
+        if let SpaceId::Paper(current) = session.active_space.clone() {
+            let name = document_drawing(self, command)?
+                .layout(current)
+                .map(|layout| layout.name.clone());
+            let where_ = match name {
+                Some(name) => format!("layout {current:?} ({name:?})"),
+                None => format!("layout {current:?} (which this drawing no longer stores)"),
+            };
+            return Ok(report_outcome(vec![diagnostic(
+                "pspace.noop",
+                format!(
+                    "PSPACE: the session is already in paper space on {where_}; nothing changed"
+                ),
+            )]));
+        }
         let mut target = None;
         if let Some(layout) = document_drawing(self, command)?.layouts().next() {
             target = Some((layout.id, layout.name.clone()));

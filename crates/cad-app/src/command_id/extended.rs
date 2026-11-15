@@ -74,10 +74,15 @@ pub enum ExtendedCommandId {
     AcadInfo,
     /// `PTYPE`: read-only `$PDMODE`/`$PDSIZE` report.
     PointType,
-    /// `SCALELISTEDIT`: read-only paper-size report; the write is unsupported.
+    /// `SCALELISTEDIT`: the drawing's annotation-scale table (`ACAD_SCALELIST`).
+    ///
+    /// The bare selector is the read-only report (rows, active `CANNOSCALE`, the
+    /// first paper layout's page); a `CommandPayload::ScaleList` payload is one
+    /// `ADD`/`RENAME`/`DELETE` write, which is Work-only and refused in Viewer
+    /// mode. Contract: [`crate::app_extended_scale_list`].
     ScaleListEdit,
 
-    // -- Wave 2: named refusals (app_extended_refusals) ----------------------
+    // -- Wave 2: graduated writes + named refusals (app_extended_refusals) ---
     /// `HYPERLINKOPTIONS`: no hyperlink storage model.
     HyperlinkOptions,
     /// `INPUTSEARCHOPTIONS`: input-search settings are not modeled.
@@ -86,9 +91,19 @@ pub enum ExtendedCommandId {
     DashInputSearchOptions,
     /// `SIGVALIDATE`: no digital-signature model.
     SigValidate,
-    /// `BASE`: the drawing stores no insertion base point.
+    /// `BASE [<x> <y> [<z>]]`: report or write the model-space insertion base
+    /// point (`$INSBASE`).
+    ///
+    /// The value is stored by `cad-db` (`drawing::header_geometry`), written back
+    /// as `$INSBASE` by the exporter and readable through `SETVAR INSBASE`. Work
+    /// only (a document mutation); the bare form is the read-only report.
     BasePoint,
-    /// `LIMITS`: no drawing-limits model.
+    /// `LIMITS <min_x> <min_y> <max_x> <max_y>`: report or write the model-space
+    /// limits (`$LIMMIN` / `$LIMMAX`).
+    ///
+    /// Both corners are stored by `cad-db` and exported; `SETVAR LIMMIN`/
+    /// `LIMMAX` write one corner each. Work only; `LIMITS ON|OFF` (LIMCHECK
+    /// enforcement) stays a named refusal because no path clamps a point.
     DrawingLimits,
     /// `VIEWPLOTDETAILS`: no plot-details model.
     ViewPlotDetails,
@@ -506,7 +521,10 @@ pub enum ExtendedCommandId {
     LayerStateSave,
     /// `NEWVIEW`: with a `View::Save` payload it routes to the existing named-view store; otherwise it reports the missing window-name prompt.
     NewView,
-    /// `-SCALELISTEDIT`: read-only scale-list report; the write is NOT IMPLEMENTED.
+    /// `-SCALELISTEDIT`: the command-line spelling of [`Self::ScaleListEdit`].
+    ///
+    /// One handler: the bare form (and `?`) is the report and a `ScaleList`
+    /// payload is the write.
     DashScaleListEdit,
     /// `LWEIGHT`: read-only report of the session lineweight-display token; the LWEIGHT dialog is NOT IMPLEMENTED.
     LineWeight,
@@ -674,15 +692,20 @@ pub enum ExtendedCommandId {
     TableCreate,
     /// `-TABLE`: the command-line spelling of the same table creation (Work-only).
     DashTable,
-    /// `TABLEDIT`: rewrites one selected table's cell text (Work-only).
+    /// `TABLEDIT`: rewrites one selected table's cell text or its merge spans
+    /// (Work-only).
     TableEdit,
-    /// `TABLEEXPORT`: CSV/file table export is NOT IMPLEMENTED (no CSV/file writer).
+    /// `TABLEEXPORT`: writes one table's grid to a CSV file through the host
+    /// file channel (the typed `TABLEEXPORT <path.csv>`); the file is written,
+    /// the drawing is not. An IPC call carries no path and refuses by name.
     TableExport,
-    /// `TABLESTYLE`: named table styles are NOT IMPLEMENTED (no table-style table).
+    /// `TABLESTYLE`: reports or rewrites the selected table's style snapshot and
+    /// re-resolves the cells that inherit it (Work-only).
     TableStyleList,
     /// `TINSERT`: inserting a block in a table cell is NOT IMPLEMENTED (no block-in-cell model).
     TableInsert,
-    /// `MATCHCELL`: copying a cell style is NOT IMPLEMENTED (no cell-style copy surface).
+    /// `MATCHCELL`: copies one selected table cell's style onto other cells
+    /// (Work-only).
     MatchCell,
     /// `FIELD`: fields are NOT IMPLEMENTED (no field model).
     Field,

@@ -164,28 +164,31 @@ impl<'a> ImporterBuilder<'a> {
             });
         }
 
-        let geometry = TableGeometry::from_import(TableParts {
-            frame: TableFrame {
-                origin,
-                horizontal: ux,
-                normal,
+        let geometry = TableGeometry::from_import_with_style(
+            TableParts {
+                frame: TableFrame {
+                    origin,
+                    horizontal: ux,
+                    normal,
+                },
+                columns: t
+                    .columns
+                    .iter()
+                    .map(|c| TableColumnGeometry {
+                        width: c.width,
+                        name: c.name.clone(),
+                    })
+                    .collect(),
+                rows,
+                style_name: t
+                    .table_style_handle
+                    .and_then(|handle| self.style_name_of_object(handle))
+                    .unwrap_or_default(),
+                name: t.name.clone(),
+                description: t.description.clone(),
             },
-            columns: t
-                .columns
-                .iter()
-                .map(|c| TableColumnGeometry {
-                    width: c.width,
-                    name: c.name.clone(),
-                })
-                .collect(),
-            rows,
-            style_name: t
-                .table_style_handle
-                .and_then(|handle| self.style_name_of_object(handle))
-                .unwrap_or_default(),
-            name: t.name.clone(),
-            description: t.description.clone(),
-        });
+            table_style_snapshot(table_style),
+        );
         if geometry.display().is_empty() {
             return (
                 opaque(),
@@ -263,6 +266,42 @@ fn border_view(border: BorderView) -> TableBorder {
         visible: !border.invisible,
         double_spacing: border.double_spacing,
     }
+}
+
+/// The table's `TABLESTYLE` snapshot: the resolved object, or the named default.
+///
+/// The style is stored on the entity (there is no drawing-level table-style
+/// table in this build; the `MLEADERSTYLE` decision of ADR 0019 C/D). Every
+/// field written here is also written back by the exporter, so the snapshot is a
+/// real round-trip and not a display-only copy.
+fn table_style_snapshot(resolved: Option<&acadrust::objects::TableStyle>) -> TableStyleValues {
+    let name = resolved
+        .map(|style| style.name.clone())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_TABLE_STYLE_NAME.to_string());
+    let mut snapshot = TableStyleValues::named(&name);
+    let Some(style) = resolved else {
+        return snapshot;
+    };
+    snapshot.description = style.description.clone();
+    snapshot.horizontal_margin = style.horizontal_margin;
+    snapshot.vertical_margin = style.vertical_margin;
+    snapshot.title_suppressed = style.title_suppressed;
+    snapshot.header_suppressed = style.header_suppressed;
+    let row = &style.data_row_style;
+    if row.text_height.is_finite() && row.text_height > 0.0 {
+        snapshot.text_height = row.text_height;
+    }
+    if !row.text_style_name.is_empty() {
+        snapshot.text_style_name = row.text_style_name.clone();
+    }
+    snapshot.borders = TableCellBorders {
+        top: border_view(BorderView::from_table_border(&row.top_border)),
+        right: border_view(BorderView::from_table_border(&row.right_border)),
+        bottom: border_view(BorderView::from_table_border(&row.bottom_border)),
+        left: border_view(BorderView::from_table_border(&row.left_border)),
+    };
+    snapshot
 }
 
 /// Resolve a cell's effective text height from source levels, in precedence

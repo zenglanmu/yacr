@@ -1,11 +1,14 @@
 //! Wave 10 **session-token reports** for the extended batch.
 //!
 //! `-UNITS`, `LWEIGHT`/`-LWEIGHT` and `COLOR`/`-COLOR` report session tokens.
-//! The drawing header stores no unit-format table and the renderer does not
-//! consume the lineweight-display flag, so those two reports state exactly that
-//! instead of claiming an effect. `COLOR` is the one token a write path reads:
-//! the shared create funnel stamps the current ACI on every entity it inserts
-//! (`256` = ByLayer writes no per-entity override, exactly the pre-`COLOR`
+//! The drawing header stores no unit-format table, and `LWEIGHT` is the one
+//! token here with **no possible consumer**: `LWDISPLAY` would switch whether
+//! stored lineweights are drawn on screen, but `cad-render-wgpu` rasterizes every
+//! line at one hairline width and reports `render.lineweight_not_drawn`, so there
+//! is no wide-line path for `ON`/`OFF` to switch. That report states exactly
+//! that instead of claiming an effect. `COLOR` is the one token a write path
+//! reads: the shared create funnel stamps the current ACI on every entity it
+//! inserts (`256` = ByLayer writes no per-entity override, exactly the pre-`COLOR`
 //! behaviour), so the command's [`CommandPayload::CurrentColor`] payload really
 //! moves it. The Select Color dialog itself is still NOT IMPLEMENTED. None of
 //! these opens a transaction, bumps the revision or records history; the reports
@@ -53,9 +56,12 @@ impl Application {
                 Ok(report_outcome(vec![diagnostic(
                     "lweight.report",
                     format!(
-                        "{name}: session lineweight display is {state}; the renderer does not \
-                         consume this flag in this build, so no lineweight width or display \
-                         change is claimed, and the LWEIGHT dialog is NOT IMPLEMENTED"
+                        "{name}: session lineweight display is {state}; this token is stored but \
+                         has no renderer consumer in this build — every line is rasterized at one \
+                         hairline width (the resolved weight reaches the batch and the GPU uniform \
+                         and is reported as `render.lineweight_not_drawn`), so there is no wide-line \
+                         path for ON or OFF to switch and no lineweight width or display change is \
+                         claimed; the LWEIGHT dialog is NOT IMPLEMENTED"
                     ),
                 )]))
             }

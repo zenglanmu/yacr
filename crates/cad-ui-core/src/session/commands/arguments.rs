@@ -552,6 +552,13 @@ pub const SETVAR_SELECTOR: &str = "SETVAR";
 /// `SYSVARMONITOR ADD|REMOVE|LIST <name>`: the session watch set.
 pub const SYSVARMONITOR_SELECTOR: &str = "SYSVARMONITOR";
 
+/// `SCALELISTEDIT [ADD|RENAME|DELETE|?]`: the drawing's annotation-scale table.
+pub const SCALELIST_SELECTOR: &str = "SCALELISTEDIT";
+
+/// `-SCALELISTEDIT [ADD|RENAME|DELETE|?]`: the command-line spelling of the
+/// same table (`scale_arguments` owns both grammars).
+pub const DASH_SCALELIST_SELECTOR: &str = "-SCALELISTEDIT";
+
 /// `MREDO [n]`: apply up to `n` existing redo records.
 pub const MREDO_SELECTOR: &str = "MREDO";
 

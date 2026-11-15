@@ -20,16 +20,17 @@
 //! `dialog_not_implemented`/`single_document` diagnostic. No value is invented.
 
 use super::*;
-use crate::app_reports_ext::{diagnostic, report_outcome};
-use crate::app_utility::{
-    document_drawing, modelled_system_variable, require_none_payload, MODELLED_SYSTEM_VARIABLES,
+use crate::app_extended_sysvar::{
+    modelled_system_variable, ModelledValue, MODELLED_SYSTEM_VARIABLES,
 };
+use crate::app_reports_ext::{diagnostic, report_outcome};
+use crate::app_utility::{document_drawing, require_none_payload};
 
 impl Application {
     /// Dispatch one Wave 2 read-only report.
     pub(crate) fn extended_report2(
-        &self,
-        session: &SessionState,
+        &mut self,
+        session: &mut SessionState,
         command: &Command,
         ext: ExtendedCommandId,
     ) -> CadResult<CommandOutcome> {
@@ -40,7 +41,10 @@ impl Application {
             ExtendedCommandId::WhoHas => self.who_has_report(command),
             ExtendedCommandId::AcadInfo => self.acad_info_report(command),
             ExtendedCommandId::PointType => self.point_type_report(command),
-            ExtendedCommandId::ScaleListEdit => self.scale_list_report(command),
+            // `SCALELISTEDIT` shares one handler with `-SCALELISTEDIT`: the bare
+            // form is the report, a `ScaleList` payload is the write
+            // (`app_extended_scale_list`).
+            ExtendedCommandId::ScaleListEdit => self.scale_list(session, command, "SCALELISTEDIT"),
             other => Err(CadError::Invariant(format!(
                 "not a Wave 2 report: {other:?}"
             ))),
@@ -61,12 +65,20 @@ impl Application {
         let drawing = document_drawing(self, command)?;
         let mut diagnostics = Vec::with_capacity(MODELLED_SYSTEM_VARIABLES.len() + 3);
         for name in MODELLED_SYSTEM_VARIABLES {
-            let (value, kind) = modelled_system_variable(&drawing, session, name)
+            // The list is exactly the reader's closed set, so a miss is a build
+            // bug; a modelled name that simply has no value right now is
+            // reported as such, never filled with a default.
+            let value = modelled_system_variable(&drawing, session, name)
                 .expect("MODELLED_SYSTEM_VARIABLES is exactly the reader's closed set");
-            diagnostics.push(diagnostic(
-                "sysvdlg.value",
-                format!("SYSVDLG {name} = {value} ({kind})"),
-            ));
+            match value {
+                ModelledValue::Value(value, kind) => diagnostics.push(diagnostic(
+                    "sysvdlg.value",
+                    format!("SYSVDLG {name} = {value} ({kind})"),
+                )),
+                ModelledValue::Absent(reason) => {
+                    diagnostics.push(diagnostic("sysvdlg.not_stored", reason))
+                }
+            }
         }
         diagnostics.push(diagnostic(
             "sysvdlg.summary",
@@ -199,45 +211,5 @@ impl Application {
                 drawing.point_display_size()
             ),
         )]))
-    }
-
-    /// `SCALELISTEDIT`: report the current paper size; the write is unsupported.
-    ///
-    /// The drawing stores a page per layout, not a scale list, so only the first
-    /// paper layout's page is read. Nothing is written.
-    fn scale_list_report(&self, command: &Command) -> CadResult<CommandOutcome> {
-        require_none_payload(command, "SCALELISTEDIT")?;
-        let drawing = document_drawing(self, command)?;
-        let mut diagnostics = Vec::with_capacity(2);
-        match drawing.layouts().next() {
-            Some(layout) => {
-                let page = drawing.plot_settings_for(layout.id);
-                diagnostics.push(diagnostic(
-                    "scalelistedit.summary",
-                    format!(
-                        "SCALELISTEDIT: layout '{}' page {} ({} x {}), scale {}:{}; read-only",
-                        layout.name,
-                        page.paper_size_name,
-                        page.paper_width,
-                        page.paper_height,
-                        page.scale_numerator,
-                        page.scale_denominator
-                    ),
-                ));
-            }
-            None => diagnostics.push(diagnostic(
-                "scalelistedit.summary",
-                "SCALELISTEDIT: this drawing has no paper layout, so there is no page to report; \
-                 the model-space scale list is not modeled"
-                    .into(),
-            )),
-        }
-        diagnostics.push(diagnostic(
-            "scalelistedit.write_unsupported",
-            "SCALELISTEDIT: editing the scale list is NOT IMPLEMENTED — this build has no scale-list \
-             storage, so no scale was added, removed or reset"
-                .into(),
-        ));
-        Ok(report_outcome(diagnostics))
     }
 }

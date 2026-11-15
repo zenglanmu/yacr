@@ -32,6 +32,14 @@ mod mview;
 mod viewport_align;
 #[path = "app_layout_vpclip.rs"]
 mod vpclip;
+// `CHSPACE` (model space <-> the active layout's paper space) is a paper-space
+// write built on this module's viewport helpers, so it is declared here too.
+#[path = "app_layout_chspace.rs"]
+mod chspace;
+// `LAYOUT COPY` (the duplicate form) is another layout-table write; it is split
+// out so this module stays inside the 1000-line code gate.
+#[path = "app_layout_copy.rs"]
+mod copy;
 
 use cad_db::{DrawingDatabase, PaperViewport, PlotRotation};
 use cad_history::{drawing_patch, layout_patch, DrawingUndoRecord};
@@ -217,6 +225,12 @@ impl Application {
                     resolve_layout_name(drawing, name)?.0
                 };
                 self.switch_space_command(session, command, SpaceId::Paper(id))
+            }
+            LayoutPayload::Copy { source, name } => {
+                // The write forms of `LAYOUT` gate themselves: `CommandId::Layout`
+                // stays Viewer-legal because LIST/SET are reads.
+                crate::app_layout::paper_writes::require_work(session)?;
+                self.copy_layout(command, source, name)
             }
             LayoutPayload::Merge { source, target } => {
                 let document_id = command.document;

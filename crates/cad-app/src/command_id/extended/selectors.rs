@@ -872,10 +872,14 @@ impl ExtendedCommandId {
                 | Self::ImageAdjust
                 | Self::DashImageAdjust
                 // TABLE / -TABLE insert one table row; TABLEDIT rewrites one
-                // selected table's cell text.
+                // selected table's cell text (or its merge spans); MATCHCELL
+                // copies a cell style and TABLESTYLE rewrites the table's style
+                // snapshot and re-resolves the inheriting cells.
                 | Self::TableCreate
                 | Self::DashTable
                 | Self::TableEdit
+                | Self::MatchCell
+                | Self::TableStyleList
                 // Wave 26 annotation writes: TXTEXP inserts outline polylines and
                 // deletes the text sources; ARCTEXT inserts per-character TEXT rows
                 // and consumes the selected text entities.
@@ -886,6 +890,9 @@ impl ExtendedCommandId {
                 | Self::MvSetup
                 | Self::PsbScale
                 | Self::PstScale
+                // Wave 28: CHSPACE rewrites the selected entities' geometry and
+                // space in one transaction, so it is a drawing write.
+                | Self::ChSpace
                 // Wave 26 viewport alignment writes one layout patch each.
                 | Self::AlignSpace
                 | Self::VpSync
@@ -901,6 +908,12 @@ impl ExtendedCommandId {
                 | Self::Xclip
                 | Self::Clip
                 | Self::ClipIt
+                // Wave 31: `BASE` and `LIMITS` are the two graduated
+                // vector-header writes (`$INSBASE`, `$LIMMIN`/`$LIMMAX`). Both
+                // are document mutations, so both are Work-only; their bare
+                // forms are the read-only reports (`cad_db::drawing::header_geometry`).
+                | Self::BasePoint
+                | Self::DrawingLimits
         )
     }
 }

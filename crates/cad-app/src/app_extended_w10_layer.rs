@@ -13,7 +13,9 @@
 //! implementation and no second write path. Without that payload they report the
 //! missing dialog/prompt instead of inventing a name.
 //!
-//! `-SCALELISTEDIT` reports the drawing's real `ACAD_SCALELIST` entries;
+//! `-SCALELISTEDIT` shares its handler with `SCALELISTEDIT`
+//! (`app_extended_scale_list`): the bare form reports the drawing's real
+//! `ACAD_SCALELIST` entries and a typed `ADD`/`RENAME`/`DELETE` writes them;
 //! `COPYHIST` reports that no command-history text is stored in the session.
 //! All five are read-only and Viewer-legal (the two routes only store session
 //! state, never drawing rows).
@@ -35,7 +37,12 @@ impl Application {
             ExtendedCommandId::DashLayer => self.dash_layer_report(session, command),
             ExtendedCommandId::LayerStateSave => self.layer_state_save(session, command),
             ExtendedCommandId::NewView => self.new_view(session, command),
-            ExtendedCommandId::DashScaleListEdit => self.dash_scale_list_report(command),
+            // `-SCALELISTEDIT` shares one handler with `SCALELISTEDIT`: the bare
+            // form is the read-only report, a `ScaleList` payload is the
+            // annotation-scale table write (`app_extended_scale_list`).
+            ExtendedCommandId::DashScaleListEdit => {
+                self.scale_list(session, command, "-SCALELISTEDIT")
+            }
             ExtendedCommandId::CopyHist => self.copy_hist_report(command),
             other => Err(CadError::Invariant(format!(
                 "not a Wave 10 layer command: {}",
@@ -150,32 +157,6 @@ impl Application {
                     .into(),
             )]))
         }
-    }
-
-    /// `-SCALELISTEDIT`: read-only report of the real scale table.
-    fn dash_scale_list_report(&self, command: &Command) -> CadResult<CommandOutcome> {
-        require_none_payload(command, "-SCALELISTEDIT")?;
-        let drawing = document_drawing(self, command)?;
-        let mut rows = Vec::new();
-        for scale in drawing.scales() {
-            rows.push(diagnostic(
-                "scalelistedit.entry",
-                format!(
-                    "-SCALELISTEDIT: scale '{}' paper/drawing = {}/{} (factor {})",
-                    scale.name,
-                    scale.paper_units,
-                    scale.drawing_units,
-                    scale.factor()
-                ),
-            ));
-        }
-        rows.push(diagnostic(
-            "scalelistedit.write_unsupported",
-            "-SCALELISTEDIT: creating, editing, deleting or reordering scales is NOT \
-             IMPLEMENTED (no post-import scale-table write API)"
-                .into(),
-        ));
-        Ok(report_outcome(rows))
     }
 
     /// `COPYHIST`: no command-history text is stored in the session.

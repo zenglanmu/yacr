@@ -65,3 +65,62 @@ fn a_file_over_the_bound_is_refused_before_it_is_read() {
         "the bound is named: {error}"
     );
 }
+
+#[test]
+fn a_write_creates_the_file_with_exactly_the_given_bytes() {
+    let dir = temp_dir("write");
+    let path = dir.join("table.csv");
+    write_named_file(&path, b"a,b\r\n").expect("a writable directory");
+    assert_eq!(std::fs::read(&path).expect("written file"), b"a,b\r\n");
+    // The temporary file the atomic write used is gone.
+    let leftovers: Vec<String> = std::fs::read_dir(&dir)
+        .expect("read dir")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains(".tmp-"))
+        .collect();
+    assert!(leftovers.is_empty(), "temporary debris: {leftovers:?}");
+}
+
+#[test]
+fn a_write_replaces_an_existing_file_atomically() {
+    let dir = temp_dir("replace");
+    let path = dir.join("table.csv");
+    std::fs::write(&path, b"old content that is longer\r\n").expect("write fixture");
+    write_named_file(&path, b"new\r\n").expect("overwrite");
+    assert_eq!(std::fs::read(&path).expect("replaced"), b"new\r\n");
+}
+
+#[test]
+fn a_write_never_creates_a_missing_directory() {
+    let dir = temp_dir("nodir");
+    let path = dir.join("absent").join("table.csv");
+    let error = write_named_file(&path, b"x").expect_err("no directory");
+    assert!(
+        matches!(error, NamedFileError::Missing(_)),
+        "expected Missing, got {error:?}"
+    );
+}
+
+#[test]
+fn a_write_to_a_directory_path_is_refused() {
+    let dir = temp_dir("isdir");
+    let error = write_named_file(&dir, b"x").expect_err("a directory is not a file");
+    assert!(
+        matches!(error, NamedFileError::Unreadable(_)),
+        "expected Unreadable, got {error:?}"
+    );
+}
+
+#[test]
+fn the_write_size_bound_is_refused_by_name() {
+    let dir = temp_dir("bound");
+    let path = dir.join("huge.csv");
+    let bytes = vec![0u8; NAMED_FILE_WRITE_MAX_BYTES as usize + 1];
+    let error = write_named_file(&path, &bytes).expect_err("over the bound");
+    assert!(
+        matches!(error, NamedFileError::Unreadable(ref reason) if reason.contains("limit")),
+        "{error:?}"
+    );
+    assert!(!path.exists(), "a refused write creates no file");
+}

@@ -20,9 +20,10 @@
 //!   name, the DIMENSION style name and (in the geometry summary) the INSERT
 //!   block name. Thickness and extrusion are **not modelled** by this build and
 //!   the report says so; 3D data is out of scope build-wide;
-//! * `STATUS` does not track drawing creation/edit time, memory usage, drawing
-//!   limits or the base point (this build has no drawing-header model), and says
-//!   so with explicit `status.not_tracked` diagnostics;
+//! * `STATUS` prints the drawing's stored `$INSBASE`/`$LIMMIN`/`$LIMMAX` values
+//!   (`status.limits_base`) and names an absent one instead of defaulting it; it
+//!   does **not** track drawing creation/edit time or memory usage and says so
+//!   with explicit `status.not_tracked` diagnostics;
 //! * `FS` is an Express tool (command-line only, no ribbon button) and implements
 //!   AutoCAD's default `FSMODE=OFF`: it adds only **directly touching** entities
 //!   — a crossing and a tangent contact both count — never a transitive chain.
@@ -526,12 +527,37 @@ impl Application {
                 code: "status.not_tracked".into(),
                 message: "STATUS drawing creation/edit time: not tracked by this build".into(),
             },
-            Diagnostic {
-                object: None,
-                code: "status.not_tracked".into(),
-                message: "STATUS drawing limits and base point: not tracked by this build (there \
-                          is no drawing-header model)"
-                    .into(),
+            // The two vector header values are real now (`$INSBASE`,
+            // `$LIMMIN`/`$LIMMAX`, written by `BASE`/`LIMITS`), so the report
+            // prints the stored values and names only the ones this database does
+            // not hold — never an origin or a zero rectangle as if it were
+            // stored.
+            match (drawing.insertion_base(), drawing.model_limits()) {
+                (None, None) => Diagnostic {
+                    object: None,
+                    code: "status.not_stored".into(),
+                    message: "STATUS drawing limits and base point: this drawing stores no \
+                              $INSBASE, $LIMMIN or $LIMMAX value (the importer of this build does \
+                              not read them); set them with `BASE`/`LIMITS`. Creation/edit time \
+                              and memory usage stay not tracked."
+                        .into(),
+                },
+                (base, limits) => Diagnostic {
+                    object: None,
+                    code: "status.limits_base".into(),
+                    message: format!(
+                        "STATUS drawing base point={} limits={}",
+                        match base {
+                            Some(base) => format!("({}, {}, {})", base.x, base.y, base.z),
+                            None => "not stored".to_string(),
+                        },
+                        match limits {
+                            Some((min, max)) =>
+                                format!("({}, {}) to ({}, {})", min[0], min[1], max[0], max[1]),
+                            None => "not stored".to_string(),
+                        }
+                    ),
+                },
             },
             Diagnostic {
                 object: None,

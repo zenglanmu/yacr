@@ -933,6 +933,10 @@ pub enum CommandPayload {
     /// single selected table (Work-only). Contract:
     /// [`crate::app_drawing::table_edit`].
     TableEdit(Box<TableEditCommand>),
+    /// `TABLEDIT MERGE|UNMERGE`, `MATCHCELL` and `TABLESTYLE`: the
+    /// post-creation table edits (Work-only). Contract:
+    /// [`crate::app_drawing::table_ops`].
+    Table(Box<crate::app_drawing::table_payload::TablePayload>),
     /// `SHAPE <name-or-code> <x> <y> [size] [rotation_deg]`: one real
     /// `SemanticGeometry::Shape` glyph (Work-only). The extent is the shape's
     /// code into the resolved SHX shape font; contract:
@@ -975,6 +979,14 @@ pub enum CommandPayload {
     /// write). [`crate::CommandPayload::None`] is the bare-selector `Add`.
     /// Contract: [`crate::app_refedit`].
     RefSet(RefSetOption),
+    /// `SCALELISTEDIT` / `-SCALELISTEDIT ADD|RENAME|DELETE`: one annotation-scale
+    /// table write (Work-only; the bare selector keeps the read-only report).
+    ///
+    /// The payload is the typed line's parsed operation — the grammar lives in
+    /// `cad-ui-core` (`session::scale_arguments`), so a typed command line and a
+    /// direct IPC caller reach the same handler. Contract:
+    /// [`crate::app_extended_scale_list`].
+    ScaleList(crate::app_extended_scale_list::ScaleListCommand),
     /// `REFCLOSE SAVE|DISCARD`: save the working set back into the block
     /// definition or discard the extracted clones (Work-only). A bare
     /// `REFCLOSE` is `CommandPayload::None` and refused by name

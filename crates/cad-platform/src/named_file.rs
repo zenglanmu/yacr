@@ -100,5 +100,74 @@ pub fn read_named_file(_path: &Path) -> Result<Arc<[u8]>, NamedFileError> {
     Err(NamedFileError::Unavailable)
 }
 
+/// Largest user-named file this build will **write** (64 MiB).
+///
+/// The tables this build can hold are capped at 100 000 cells, so a real export
+/// is orders of magnitude smaller; the bound exists so a runaway serializer or a
+/// mistyped path (`/dev/full`, a multi-GB target) is refused by name instead of
+/// filling the target.
+pub const NAMED_FILE_WRITE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Write one user-named file on a native host, atomically.
+///
+/// The write goes to a temporary file next to the target and is renamed into
+/// place, so a failure (a full disk, a permission error) never leaves a half
+/// written export where the user expects a complete one — the same discipline the
+/// drawing save funnel's `write_atomic` uses. The parent directory must already
+/// exist: this function never creates a directory tree the user did not name.
+///
+/// `Err(NamedFileError::Unavailable)` on a runtime without a filesystem — never a
+/// silent success, so the caller can name the missing capability instead of
+/// claiming a file was written.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn write_named_file(path: &Path, bytes: &[u8]) -> Result<(), NamedFileError> {
+    if bytes.len() as u64 > NAMED_FILE_WRITE_MAX_BYTES {
+        return Err(NamedFileError::Unreadable(format!(
+            "the export is {} bytes; the limit for a user-named file is \
+             {NAMED_FILE_WRITE_MAX_BYTES}",
+            bytes.len()
+        )));
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    if let Some(parent) = parent {
+        if !parent.is_dir() {
+            return Err(NamedFileError::Missing(format!(
+                "the directory {} does not exist",
+                parent.display()
+            )));
+        }
+    }
+    if path.is_dir() {
+        return Err(NamedFileError::Unreadable(format!(
+            "not a regular file: {}",
+            path.display()
+        )));
+    }
+    let mut temporary = path.as_os_str().to_os_string();
+    temporary.push(format!(".tmp-{}", std::process::id()));
+    let temporary = std::path::PathBuf::from(temporary);
+    std::fs::write(&temporary, bytes).map_err(|error| {
+        NamedFileError::Unreadable(format!("write failed for {}: {error}", temporary.display()))
+    })?;
+    if let Err(error) = std::fs::rename(&temporary, path) {
+        // Leave no debris behind: a rename failure means the target was not
+        // replaced, and the temporary file is this function's own.
+        let _ = std::fs::remove_file(&temporary);
+        return Err(NamedFileError::Unreadable(format!(
+            "rename failed for {}: {error}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// A wasm/browser carrier has no filesystem for a user-named path.
+#[cfg(target_arch = "wasm32")]
+pub fn write_named_file(_path: &Path, _bytes: &[u8]) -> Result<(), NamedFileError> {
+    Err(NamedFileError::Unavailable)
+}
+
 #[cfg(test)]
 mod tests;

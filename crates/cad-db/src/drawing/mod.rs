@@ -22,6 +22,7 @@ mod access;
 mod block_edit;
 mod bounds;
 mod edit;
+mod header_geometry;
 mod layer_edit;
 mod layer_inherit;
 mod layer_patch;
@@ -31,6 +32,7 @@ mod linetype_scale;
 mod lock;
 mod named_delete;
 mod point_style;
+mod scale_edit;
 mod style_edit;
 mod transaction;
 
@@ -44,6 +46,7 @@ pub use layer_inherit::LayerScope;
 pub use layer_patch::{LayerPatch, LayerRow};
 pub use layout_edit::{LayoutPatch, LayoutRow, ILLEGAL_LAYOUT_NAME_CHARS, MAX_LAYOUT_NAME_CHARS};
 pub use linetype_edit::LinetypePatch;
+pub use scale_edit::{ScalePatch, ScaleReferenceCounts};
 pub use style_edit::{
     DimStylePatch, MLeaderStylePatch, StylePatch, StyleTableChanges, DEFAULT_DIM_STYLE_NAME,
 };

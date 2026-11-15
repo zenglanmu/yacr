@@ -686,11 +686,17 @@ fn status_reports_fixture_counts_and_honest_not_tracked_lines() {
 
     let not_tracked = diagnostic(&outcome, "status.not_tracked").join("\n");
     assert!(not_tracked.contains("creation/edit time"), "{not_tracked}");
+    assert!(not_tracked.contains("memory usage"), "{not_tracked}");
+    // The drawing limits and the insertion base point are **stored** header
+    // values now (`BASE`/`LIMITS` write `$INSBASE`/`$LIMMIN`/`$LIMMAX`), so the
+    // report names the absence of a value instead of claiming the model does not
+    // exist. Nothing is defaulted into a value.
+    let not_stored = diagnostic(&outcome, "status.not_stored").join("\n");
+    assert!(not_stored.contains("$INSBASE"), "{not_stored}");
     assert!(
-        not_tracked.contains("limits and base point"),
+        !not_tracked.contains("limits and base point"),
         "{not_tracked}"
     );
-    assert!(not_tracked.contains("memory usage"), "{not_tracked}");
 
     let after = app
         .workspace

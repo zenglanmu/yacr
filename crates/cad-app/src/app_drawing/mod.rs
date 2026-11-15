@@ -146,6 +146,8 @@ pub(crate) mod text_batch;
 mod text_edit;
 // TABLE / -TABLE creation and TABLEDIT cell-text editing (2026-11-10).
 mod table_edit;
+mod table_ops;
+pub mod table_payload;
 // The 2026-11-12 SHAPE family: `SHAPE` glyph creation and the `SHP2BLK`
 // shape→outline-block conversion.
 mod shape;

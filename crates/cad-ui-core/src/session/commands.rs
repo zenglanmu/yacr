@@ -850,6 +850,8 @@ pub use helpers::*;
 mod arguments;
 pub use arguments::*;
 pub(crate) use arguments::{parse_positive_decimal, parse_signed_decimal};
+mod header;
+pub use header::*;
 
 // The selection/filter batch grammars (2026-11-07): `QSELECT`/`FILTER`/`GETSEL`
 // and `-FIND`/`FIND`. Re-exported so `commands::parse_*` paths resolve.

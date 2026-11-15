@@ -269,20 +269,32 @@ fn ptype_reports_the_point_display_style_read_only() {
 }
 
 #[test]
-fn scalelistedit_reports_the_page_and_refuses_the_write() {
+fn scalelistedit_reports_the_page_and_the_real_write_grammar() {
     let (mut app, mut session) = application_with_layouts();
     let before = revision(&app);
     let outcome = execute(&mut app, &mut session, ExtendedCommandId::ScaleListEdit)
         .expect("SCALELISTEDIT is admitted");
     let summary = diagnostic(&outcome, "scalelistedit.summary");
     assert!(summary.message.contains("Sheet1"), "{}", summary.message);
-    assert!(summary.message.contains("read-only"), "{}", summary.message);
+    // The write is real: the report names the grammar instead of claiming the
+    // table cannot be edited. This document has no ACAD_SCALELIST row, and the
+    // report says so rather than inventing one.
     assert!(
-        diagnostic(&outcome, "scalelistedit.write_unsupported")
+        diagnostic(&outcome, "scalelistedit.grammar")
             .message
-            .contains("no scale-list storage"),
-        "the missing write API is named"
+            .contains("ADD <name> <paper_units> <drawing_units>"),
+        "the real write forms are named"
     );
+    assert!(
+        diagnostic(&outcome, "scalelistedit.empty")
+            .message
+            .contains("empty"),
+        "an empty table is named, not fabricated"
+    );
+    assert!(!outcome
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "scalelistedit.write_unsupported"));
     assert_eq!(revision(&app), before);
     assert!(!app.can_undo(&DocumentId(1)));
 }

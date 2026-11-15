@@ -11,9 +11,14 @@
 //! All ten are **Viewer-legal session/report commands**: they open no
 //! transaction, bump no revision and record no `cad-history` entry. Five are
 //! session display toggles (`QTEXT`, `FILL`, `TFRAMES`, `REGENAUTO`,
-//! `ISODRAFT`); their behaviour is not consumed by this build, so the handler
-//! reports an honest partial instead of claiming a visual effect. Five are
-//! read-only reports (`BCOUNT`, `COUNT`, `EDITTIME`, `JULIAN`, `XLIST`).
+//! `ISODRAFT`). Two of them are **consumed**: `FILL` makes filled
+//! hatches/2D solids/wide polylines draw outline-only and `QTEXT` draws shaped
+//! text as a placeholder rectangle, both through
+//! [`crate::render_scene::DisplaySettings`] and the representation provider, so
+//! their handler states the real display change (and never claims a `cad-db`
+//! write). The other three have no consumer in this build and still report an
+//! honest partial. Five are read-only reports (`BCOUNT`, `COUNT`, `EDITTIME`,
+//! `JULIAN`, `XLIST`).
 //!
 //! # Wave 2 (2026-11-09)
 //!
@@ -27,15 +32,19 @@
 //!   IMPLEMENTED.
 //! * **Read-only reports** (`SYSVARMONITOR`, `SYSVDLG`, `VTOPTIONS`,
 //!   `ALIASEDIT`, `WHOHAS`, `ACADINFO`, `PTYPE`, `SCALELISTEDIT`): pure reads of
-//!   data this build really has; anything absent is a named `not_tracked`/
-//!   `write_unsupported` diagnostic, never an invented value.
+//!   data this build really has; anything absent is a named `not_tracked`
+//!   diagnostic, never an invented value. `SCALELISTEDIT`/`-SCALELISTEDIT` also
+//!   carry the annotation-scale table's writes (`ADD`/`RENAME`/`DELETE`, one
+//!   revision each, Work-only), so their report no longer claims the table cannot
+//!   be edited.
 //! * **Named refusals** (`HYPERLINKOPTIONS`, `INPUTSEARCHOPTIONS`,
-//!   `-INPUTSEARCHOPTIONS`, `SIGVALIDATE`, `BASE`, `LIMITS`,
-//!   `VIEWPLOTDETAILS`, `VPLAYER`, `PSBSCALE`, `PSTSCALE`,
-//!   `MVSETUP`): `CadError::Unsupported` with a stable reason string, because
-//!   the feature has no storage model or no API in this build. A refusal writes
-//!   nothing, bumps no revision and records no history. (`MVIEW` graduated to a
-//!   real Wave 13 viewport write and is no longer a refusal.)
+//!   `-INPUTSEARCHOPTIONS`, `SIGVALIDATE`, `VIEWPLOTDETAILS`): `CadError::
+//!   Unsupported` with a stable reason string, because the feature has no storage
+//!   model or no API in this build. A refusal writes nothing, bumps no revision
+//!   and records no history. (`MVIEW` graduated to a real Wave 13 viewport write,
+//!   `VPLAYER`/`PSBSCALE`/`PSTSCALE`/`MVSETUP` to real paper-space writes, and
+//!   `BASE`/`LIMITS` to the two `$INSBASE`/`$LIMMIN`/`$LIMMAX` header writes; none
+//!   of them is a refusal any more.)
 //!
 //! # Wave 3 (2026-11-09)
 //!

@@ -72,6 +72,14 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     RENAME_SELECTOR,
     SETVAR_SELECTOR,
     SYSVARMONITOR_SELECTOR,
+    // `SCALELISTEDIT` / `-SCALELISTEDIT`: the annotation-scale table's typed
+    // writes (`ADD`/`RENAME`/`DELETE`) and the `?` report spelling.
+    SCALELIST_SELECTOR,
+    DASH_SCALELIST_SELECTOR,
+    // `BASE <x> <y> [<z>]` and `LIMITS <min_x> <min_y> <max_x> <max_y>`: the two
+    // vector-header writes. The bare selectors keep their read-only reports.
+    super::header::BASE_SELECTOR,
+    super::header::LIMITS_SELECTOR,
     MREDO_SELECTOR,
     MULTIPLE_SELECTOR,
     // The 2026-11-07 draw/modify batch argument forms.
@@ -101,6 +109,12 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     TABLE_SELECTOR,
     DASH_TABLE_SELECTOR,
     TABLEDIT_SELECTOR,
+    // The post-creation table forms (2026-11-15): the cell-style copy, the style
+    // field list and the CSV export destination. The bare `TABLESTYLE` keeps the
+    // extended report, so only its argument form is listed here.
+    MATCHCELL_SELECTOR,
+    TABLESTYLE_SELECTOR,
+    TABLEEXPORT_SELECTOR,
     VIEW_SELECTOR,
     VIEWGO_SELECTOR,
     VPOINT_SELECTOR,

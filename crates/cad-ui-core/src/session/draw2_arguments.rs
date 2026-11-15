@@ -5,18 +5,20 @@
 //! same `HostCore::command` funnel every other typed form uses. An argument
 //! outside a selector's grammar is refused before IPC with a stable reason.
 
-use cad_app::{CommandId, CommandPayload, ExtendedCommandId};
+use cad_app::{CommandId, CommandPayload, ExtendedCommandId, TablePayload};
 
 use super::commands::{
-    invalid_arraypath_argument_reason, parse_arraypath_argument, parse_clip_argument,
+    invalid_arraypath_argument_reason, invalid_matchcell_argument_reason,
+    invalid_tablestyle_argument_reason, parse_arraypath_argument, parse_clip_argument,
     parse_donut_argument, parse_draworder_argument, parse_helix_argument,
     parse_imageadjust_argument, parse_imageattach_argument, parse_imageclip_argument,
-    parse_mline_argument, parse_mlstyle_argument, parse_mpedit_argument, parse_solid_argument,
-    parse_table_create_argument, parse_tabledit_argument, parse_trex_argument,
+    parse_matchcell_argument, parse_mline_argument, parse_mlstyle_argument, parse_mpedit_argument,
+    parse_solid_argument, parse_table_create_argument, parse_tabledit_argument,
+    parse_tabledit_option_argument, parse_tablestyle_argument, parse_trex_argument,
     parse_xclip_argument, ARRAYPATH_SELECTOR, CLIP_SELECTOR, DASH_IMAGEADJUST_SELECTOR,
     DASH_TABLE_SELECTOR, DONUT_SELECTOR, HELIX_SELECTOR, IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR,
-    MLINE_SELECTOR, MLSTYLE_SELECTOR, MPEDIT_SELECTOR, SOLID_SELECTOR, TABLEDIT_SELECTOR,
-    TABLE_SELECTOR, TREX_SELECTOR, XCLIP_SELECTOR,
+    MATCHCELL_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MPEDIT_SELECTOR, SOLID_SELECTOR,
+    TABLEDIT_SELECTOR, TABLESTYLE_SELECTOR, TABLE_SELECTOR, TREX_SELECTOR, XCLIP_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::CadSession;
@@ -89,8 +91,9 @@ pub(crate) fn invalid_table_argument_reason(selector: &str, text: &str) -> Strin
     format!(
         "{code}: unsupported or malformed {selector} argument in `{}`: the typed forms are \
          `TABLE <rows> <cols> <col_width> <row_height> <x> <y>` (`-TABLE` accepts the same \
-         grammar) and `TABLEDIT <row> <col> [text...]` with a 1-based cell address; nothing was \
-         changed",
+         grammar), `TABLEDIT <row> <col> [text...]` with a 1-based cell address, \
+         `TABLEDIT MERGE <row> <col> <height> <width>` and `TABLEDIT UNMERGE <row> <col>`; \
+         nothing was changed",
         text.trim()
     )
 }
@@ -301,13 +304,23 @@ impl CadSession {
     ) -> Result<(), String> {
         let (id, payload) = match selector {
             TABLEDIT_SELECTOR => {
-                let Some(payload) = parse_tabledit_argument(argument) else {
-                    return self.refuse_argument(invalid_table_argument_reason(selector, text));
-                };
-                (
-                    CommandId::Extended(ExtendedCommandId::TableEdit),
-                    CommandPayload::TableEdit(Box::new(payload)),
-                )
+                // `TABLEDIT MERGE …` / `TABLEDIT UNMERGE …` first: their first
+                // token is a word, so they can never be mistaken for the 1-based
+                // cell address the text form starts with.
+                if let Some(payload) = parse_tabledit_option_argument(argument) {
+                    (
+                        CommandId::Extended(ExtendedCommandId::TableEdit),
+                        CommandPayload::Table(Box::new(payload)),
+                    )
+                } else {
+                    let Some(payload) = parse_tabledit_argument(argument) else {
+                        return self.refuse_argument(invalid_table_argument_reason(selector, text));
+                    };
+                    (
+                        CommandId::Extended(ExtendedCommandId::TableEdit),
+                        CommandPayload::TableEdit(Box::new(payload)),
+                    )
+                }
             }
             _ => {
                 let Some(payload) = parse_table_create_argument(argument) else {
@@ -324,6 +337,54 @@ impl CadSession {
         };
         self.core.record_command(selector);
         match self.core.command(id, payload) {
+            Ok(()) => {
+                *self.error.borrow_mut() = None;
+                Ok(())
+            }
+            Err(error) => {
+                let text = cad_error_text(&error);
+                *self.error.borrow_mut() = Some(text.clone());
+                Err(text)
+            }
+        }
+    }
+
+    /// Apply one typed `MATCHCELL …` line.
+    pub(super) fn matchcell_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some(payload) = parse_matchcell_argument(argument) else {
+            return self.refuse_argument(invalid_matchcell_argument_reason(text));
+        };
+        self.dispatch_table_payload(ExtendedCommandId::MatchCell, MATCHCELL_SELECTOR, payload)
+    }
+
+    /// Apply one typed `TABLESTYLE …` line (the bare selector is the report and
+    /// never reaches this parser).
+    pub(super) fn tablestyle_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some(payload) = parse_tablestyle_argument(argument) else {
+            return self.refuse_argument(invalid_tablestyle_argument_reason(text));
+        };
+        if payload.is_empty() {
+            return self.refuse_argument(invalid_tablestyle_argument_reason(text));
+        }
+        self.dispatch_table_payload(
+            ExtendedCommandId::TableStyleList,
+            TABLESTYLE_SELECTOR,
+            TablePayload::Style(Box::new(payload)),
+        )
+    }
+
+    /// One shared dispatch for the table payloads (`MATCHCELL`, `TABLESTYLE`).
+    fn dispatch_table_payload(
+        &self,
+        ext: ExtendedCommandId,
+        selector: &'static str,
+        payload: TablePayload,
+    ) -> Result<(), String> {
+        self.core.record_command(selector);
+        match self.core.command(
+            CommandId::Extended(ext),
+            CommandPayload::Table(Box::new(payload)),
+        ) {
             Ok(()) => {
                 *self.error.borrow_mut() = None;
                 Ok(())

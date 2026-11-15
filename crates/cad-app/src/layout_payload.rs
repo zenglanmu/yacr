@@ -26,6 +26,20 @@ pub enum LayoutPayload {
     /// `LAYOUT SET <name>`: resolve the paper layout and switch the session's
     /// active space (session state only).
     Set { name: String },
+    /// `LAYOUT COPY <source> <new-name>`: duplicate one paper layout into a new
+    /// row — its **viewports with their clips, `model_to_paper` scales and
+    /// `layer_overrides`**, its stored `PLOTSETTINGS` row (re-keyed to the new
+    /// id) and its paper-space entities (new entity ids, same draw order) — in
+    /// one revision and one undo step.
+    ///
+    /// The geometry is copied verbatim: no viewport, clip or scale is
+    /// re-derived, so a copied sheet frames exactly what the source framed. The
+    /// copy never renames or re-points the source, and the source layout keeps
+    /// every entity it had.
+    ///
+    /// `LAYOUT TEMPLATE` (import a layout from a DWT/DXF template) is **not**
+    /// modelled: it is refused by name before anything is written.
+    Copy { source: String, name: String },
     /// `LAYOUTMERGE <source> <target>`: move every source paper entity into the
     /// target and delete the source layout in one combined revision/undo step.
     Merge { source: String, target: String },

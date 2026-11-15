@@ -72,10 +72,15 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::ImageAdjust
                 | ExtendedCommandId::DashImageAdjust
                 // TABLE / -TABLE insert one table row; TABLEDIT rewrites one
-                // selected table's cell text.
+                // selected table's cell text or its merge spans; MATCHCELL copies
+                // a cell style and TABLESTYLE rewrites the table's style snapshot.
+                // TABLEEXPORT writes a file, never the drawing, so it stays
+                // Viewer-legal like SAVE/PLOT.
                 | ExtendedCommandId::TableCreate
                 | ExtendedCommandId::DashTable
                 | ExtendedCommandId::TableEdit
+                | ExtendedCommandId::MatchCell
+                | ExtendedCommandId::TableStyleList
                 // Wave 26 annotation/paper-space writes that landed before this
                 // contract list was extended (TXTEXP/ARCTEXT insert rows; the
                 // page/paper writes rewrite layout or entity rows).
@@ -106,6 +111,11 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::Xclip
                 | ExtendedCommandId::Clip
                 | ExtendedCommandId::ClipIt
+                // Wave 30/31: the paper-space CHSPACE move and the two
+                // graduated vector-header writes ($INSBASE, $LIMMIN/$LIMMAX).
+                | ExtendedCommandId::ChSpace
+                | ExtendedCommandId::BasePoint
+                | ExtendedCommandId::DrawingLimits
         );
         assert_eq!(
             variant.requires_work_mode(),

@@ -31,13 +31,14 @@ use super::commands::{
     COLOR_SELECTOR, CVPORT_SELECTOR, DASH_COLOR_SELECTOR, DASH_IMAGEADJUST_SELECTOR,
     DASH_TABLE_SELECTOR, DONUT_SELECTOR, DRAWORDER_SELECTOR, FILLET_SELECTOR, FILTER_SELECTOR,
     FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, HELIX_SELECTOR, IMAGEADJUST_SELECTOR,
-    IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR, JOIN_SELECTOR, LINETYPE_SELECTOR, MIRROR_SELECTOR,
-    MLINE_SELECTOR, MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR, MREDO_SELECTOR,
-    MULTIPLE_SELECTOR, OFFSET_SELECTOR, OVERKILL_SELECTOR, PAN_SELECTOR, PURGE_SELECTOR,
-    QSELECT_SELECTOR, RENAME_SELECTOR, REVCLOUD_SELECTOR, SETVAR_SELECTOR, SOLID_SELECTOR,
-    SSX_SELECTOR, SYSVARMONITOR_SELECTOR, TABLEDIT_SELECTOR, TABLE_SELECTOR, TEXTMASK_SELECTOR,
-    TRACE_SELECTOR, TREX_SELECTOR, TXT2MTXT_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR,
-    WIPEOUTFRAME_SELECTOR, WIPEOUT_SELECTOR,
+    IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR, JOIN_SELECTOR, LINETYPE_SELECTOR, MATCHCELL_SELECTOR,
+    MIRROR_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR,
+    MREDO_SELECTOR, MULTIPLE_SELECTOR, OFFSET_SELECTOR, OVERKILL_SELECTOR, PAN_SELECTOR,
+    PURGE_SELECTOR, QSELECT_SELECTOR, RENAME_SELECTOR, REVCLOUD_SELECTOR, SETVAR_SELECTOR,
+    SOLID_SELECTOR, SSX_SELECTOR, SYSVARMONITOR_SELECTOR, TABLEDIT_SELECTOR, TABLEEXPORT_SELECTOR,
+    TABLESTYLE_SELECTOR, TABLE_SELECTOR, TEXTMASK_SELECTOR, TRACE_SELECTOR, TREX_SELECTOR,
+    TXT2MTXT_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR, WIPEOUTFRAME_SELECTOR,
+    WIPEOUT_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::dim_arguments::{
@@ -114,6 +115,15 @@ impl CadSession {
             SSX_SELECTOR => self.ssx_argument(argument, text),
             AUDIT_SELECTOR => self.audit_argument(argument, text),
             FIND_SELECTOR | FIND_REPORT_SELECTOR => self.find_argument(selector, argument, text),
+            // `SCALELISTEDIT` / `-SCALELISTEDIT`: the annotation-scale table's
+            // typed writes and its `?` report spelling, in one grammar.
+            super::commands::SCALELIST_SELECTOR | super::commands::DASH_SCALELIST_SELECTOR => {
+                self.scale_list_argument(selector, argument, text)
+            }
+            // `BASE <x> <y> [<z>]` / `LIMITS <min_x> <min_y> <max_x> <max_y>`: the
+            // two vector-header writes (the bare selectors keep their reports).
+            super::commands::BASE_SELECTOR => self.base_argument(argument, text),
+            super::commands::LIMITS_SELECTOR => self.limits_argument(argument, text),
             // The 2026-11-07 utility/named-object batch.
             PURGE_SELECTOR
             | RENAME_SELECTOR
@@ -143,10 +153,18 @@ impl CadSession {
             // the same image/block clip models. `CLIPIT` takes no argument (its
             // input is the selection), so it never reaches this dispatch.
             super::commands::CLIP_SELECTOR => self.clip_argument(argument, text),
-            // The table typed forms: `TABLE`/`-TABLE` creation and `TABLEDIT`.
+            // The table typed forms: `TABLE`/`-TABLE` creation, `TABLEDIT`'s
+            // cell-text and merge forms, `MATCHCELL`'s style copy and
+            // `TABLESTYLE`'s field list.
             TABLE_SELECTOR | DASH_TABLE_SELECTOR | TABLEDIT_SELECTOR => {
                 self.table_argument(selector, argument, text)
             }
+            MATCHCELL_SELECTOR => self.matchcell_argument(argument, text),
+            TABLESTYLE_SELECTOR => self.tablestyle_argument(argument, text),
+            // `TABLEEXPORT <path.csv>`: the destination rides the typed line; the
+            // session resolves the one selected table and the host writes the
+            // bytes (see `session::table_export`).
+            TABLEEXPORT_SELECTOR => self.table_export_argument(argument, text),
             // The 2026-11-07 view batch: named views and the camera direction.
             // `-VIEW` normalises to `VIEW` before this dispatch, so it lands on
             // the same arm.

@@ -167,6 +167,7 @@ impl Application {
                 .into_iter()
                 .map(|(entity, display)| crate::session_state::EraseEntry { entity, display })
                 .collect(),
+            restored: Vec::new(),
         }));
         Ok(CommandOutcome {
             objects: Vec::new(),

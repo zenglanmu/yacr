@@ -24,7 +24,16 @@
 //! * `PSBSCALE` / `PSTSCALE` scale the **selection** by the active layout
 //!   viewport's paper-space factor: block references get their placement
 //!   transform post-multiplied by a uniform scale about their insertion point,
-//!   text gets its stored glyph height (and wrap width) multiplied. Both are one
+//!   and **every** text-bearing kind this build stores gets its text scaled —
+//!   standalone `TEXT`/`MTEXT` (glyph height and MTEXT wrap width),
+//!   `MULTILEADER` annotation text (height, width boundary and the style
+//!   snapshot's height) and `TABLE` cell text (every cell height and the style
+//!   snapshot's height). `PSBSCALE` owns block references plus the two compound
+//!   annotation objects (`MULTILEADER`/`TABLE`); `PSTSCALE` owns the text kinds
+//!   (`TEXT`/`MTEXT` plus the same two compound objects), so a standalone text
+//!   entity is refused by `PSBSCALE` (`psbscale.not_block`) and a block
+//!   reference by `PSTSCALE` (`pstscale.not_text`) — the two domains never
+//!   overlap and neither silently ignores a selected kind. Both are one
 //!   transaction / one undo step and write nothing else. The factor is **paper
 //!   units per model unit** of that viewport (`0.01` at `1:100`, read from the
 //!   same [`cad_representation::viewport_transform`] the display uses), so a
@@ -56,12 +65,19 @@
 //! ## Work mode
 //!
 //! Every command here writes the drawing, so each write form refuses a Viewer
-//! session with [`CadError::PermissionDenied`]. The extended-command capability
-//! registry still lists these four selectors as Viewer-legal (it lives outside
-//! this lane's files); the in-handler gate is the authority until that registry
-//! is updated.
+//! session with [`CadError::PermissionDenied`] (the bare `VPLAYER` report stays
+//! Viewer-legal). `MVSETUP`/`PSBSCALE`/`PSTSCALE` are also declared Work-only in
+//! the extended capability registry
+//! ([`cad_app::ExtendedCommandId::requires_work_mode`]); the in-handler gate is
+//! kept as the authority for the walk-in case (a payload that reaches the write
+//! form through another route).
 
 use super::*;
+
+#[path = "app_layout_annotation_scale.rs"]
+mod annotation_scale;
+
+use annotation_scale::scaled_annotation_text;
 
 use cad_db::{DbEntity, DrawingDatabase};
 use cad_history::{drawing_patch, DrawingUndoRecord};
@@ -238,7 +254,8 @@ impl Application {
         })
     }
 
-    /// `PSBSCALE`: scale the selected paper-space block references.
+    /// `PSBSCALE`: scale the selected paper-space block references and the
+    /// annotation text of the selected MULTILEADER/TABLE objects.
     pub(crate) fn psb_scale(
         &mut self,
         session: &SessionState,
@@ -253,21 +270,42 @@ impl Application {
         let sources = paper_selection(&drawing, session, command, layout_id, "psbscale")?;
         let mut planned = Vec::with_capacity(sources.len());
         for before in sources {
-            let SemanticGeometry::Insert { block, transform } = &before.geometry else {
-                return Err(CadError::Unsupported(format!(
-                    "psbscale.not_block: PSBSCALE scales block references only; entity {} is {}",
-                    before.id.0,
-                    class_name(&before.geometry)
-                )));
+            let scaled = match &before.geometry {
+                // Post-multiplying by a uniform scale keeps the insertion point
+                // (the transform's translation) fixed and scales the block's
+                // local extents — "scale the reference about its insertion
+                // point".
+                SemanticGeometry::Insert { block, transform } => SemanticGeometry::Insert {
+                    block: *block,
+                    transform: transform.matrix_mul(&Transform3::scale(factor)),
+                },
+                // A multileader or a table is a compound annotation object: its
+                // own text is what the paper-space factor applies to, exactly
+                // like PSTSCALE. Standalone TEXT/MTEXT stays PSTSCALE's
+                // (non-overlapping) domain.
+                SemanticGeometry::MultiLeader(_) | SemanticGeometry::Table(_) => {
+                    scaled_annotation_text(&before.geometry, factor, "psbscale")?.ok_or_else(
+                        || {
+                            CadError::Invariant(format!(
+                                "PSBSCALE: entity {} carries scalable text but the scale table \
+                                 returned none",
+                                before.id.0
+                            ))
+                        },
+                    )?
+                }
+                other => {
+                    return Err(CadError::Unsupported(format!(
+                        "psbscale.not_block: PSBSCALE scales block references and the text of \
+                         MULTILEADER/TABLE objects; entity {} is {} — use PSTSCALE for \
+                         standalone TEXT/MTEXT",
+                        before.id.0,
+                        class_name(other)
+                    )))
+                }
             };
-            // Post-multiplying by a uniform scale keeps the insertion point
-            // (the transform's translation) fixed and scales the block's local
-            // extents — "scale the reference about its insertion point".
             let mut after = before.clone();
-            after.geometry = SemanticGeometry::Insert {
-                block: *block,
-                transform: transform.matrix_mul(&Transform3::scale(factor)),
-            };
+            after.geometry = scaled;
             if after.geometry != before.geometry {
                 planned.push((before, after));
             }
@@ -292,8 +330,9 @@ impl Application {
                 object: None,
                 code: "psbscale.applied".into(),
                 message: format!(
-                    "PSBSCALE: scaled {count} paper-space block reference(s) by the paper/model \
-                     factor {factor} of layout {} viewport {index} (insertion points unchanged)",
+                    "PSBSCALE: scaled {count} paper-space block reference/annotation object(s) by \
+                     the paper/model factor {factor} of layout {} viewport {index} (insertion \
+                     points and grid geometry unchanged)",
                     layout_id.0
                 ),
             }],
@@ -317,78 +356,19 @@ impl Application {
         let sources = paper_selection(&drawing, session, command, layout_id, "pstscale")?;
         let mut planned = Vec::with_capacity(sources.len());
         for before in sources {
-            let SemanticGeometry::Text {
-                text,
-                position,
-                style,
-                height,
-                rotation,
-                font,
-                h_align,
-                v_align,
-                wrap_width,
-                width_factor,
-                line_spacing,
-            } = before.geometry.clone()
-            else {
-                return Err(CadError::Unsupported(format!(
-                    "pstscale.not_text: PSTSCALE scales Text and MText only; entity {} is {}",
-                    before.id.0,
-                    class_name(&before.geometry)
-                )));
-            };
-            if !height.is_finite() || height <= 0.0 {
-                return Err(CadError::InvalidInput(format!(
-                    "pstscale.degenerate: the selected text entity {} has the degenerate stored \
-                     height {height}",
-                    before.id.0
-                )));
-            }
-            if let Some(width) = wrap_width {
-                if !width.is_finite() || width <= 0.0 {
-                    return Err(CadError::InvalidInput(format!(
-                        "pstscale.degenerate: the selected text entity {} has the degenerate \
-                         stored wrap width {width}",
-                        before.id.0
-                    )));
+            let scaled = match scaled_annotation_text(&before.geometry, factor, "pstscale")? {
+                Some(geometry) => geometry,
+                None => {
+                    return Err(CadError::Unsupported(format!(
+                        "pstscale.not_text: PSTSCALE scales Text, MText, MULTILEADER text and \
+                         TABLE cell text; entity {} is {}",
+                        before.id.0,
+                        class_name(&before.geometry)
+                    )))
                 }
-            }
-            let new_height = height * factor;
-            if !new_height.is_finite() || new_height <= 0.0 {
-                return Err(CadError::InvalidInput(format!(
-                    "pstscale.invalid_result: the height {height} x {factor} = {new_height} is \
-                     not a usable dimension"
-                )));
-            }
-            let new_width = match wrap_width {
-                Some(width) => {
-                    let scaled = width * factor;
-                    if !scaled.is_finite() || scaled <= 0.0 {
-                        return Err(CadError::InvalidInput(format!(
-                            "pstscale.invalid_result: the wrap width {width} x {factor} = \
-                             {scaled} is not a usable dimension"
-                        )));
-                    }
-                    Some(scaled)
-                }
-                None => None,
             };
             let mut after = before.clone();
-            after.geometry = SemanticGeometry::Text {
-                text,
-                position,
-                style,
-                height: new_height,
-                rotation,
-                font,
-                h_align,
-                v_align,
-                wrap_width: new_width,
-                // A dimensionless stretch is unchanged by the height scale.
-                width_factor,
-                // Both halves of the line spacing are dimensionless ratios too.
-                line_spacing,
-            };
+            after.geometry = scaled;
             if after.geometry != before.geometry {
                 planned.push((before, after));
             }

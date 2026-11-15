@@ -38,6 +38,7 @@ mod draw2_arguments;
 pub mod events;
 mod fonts;
 mod hatchedit;
+mod header_arguments;
 mod import_progress;
 mod input;
 mod layer_arguments;
@@ -58,6 +59,7 @@ mod reference_status;
 // The typed `REFSET ADD|REMOVE` / `REFCLOSE SAVE|DISCARD` option lines.
 mod refedit_arguments;
 pub mod registry;
+mod scale_arguments;
 mod select_filter;
 mod settings;
 // The 2026-11-12 SHAPE/MINSERT/ADDSELECTED typed dispatch (sibling of
@@ -69,6 +71,7 @@ mod snapshot;
 mod space;
 mod status;
 mod status_view;
+mod table_export;
 mod text_batch;
 mod text_commands;
 mod util_arguments;

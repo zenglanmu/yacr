@@ -100,6 +100,36 @@ fn mspace_and_pspace_reuse_the_existing_space_switch_path() {
 }
 
 #[test]
+fn pspace_in_paper_space_is_a_named_noop_and_keeps_the_current_layout() {
+    // `application_with_layouts` stores `Sheet1` (drawable) and `Broken`
+    // (a Partial viewport). Standing on a paper layout that is **not** the first
+    // one must not be turned into a jump to `Sheet1`.
+    let (mut app, mut session) = application_with_layouts();
+    session.active_space = SpaceId::Paper(LayoutId(2));
+    let before = revision(&app);
+    let camera = app.workspace.viewports[&ViewportId(1)].camera;
+
+    let outcome =
+        execute(&mut app, &mut session, ExtendedCommandId::Pspace).expect("PSPACE is admitted");
+    assert!(diagnostic(&outcome, "pspace.noop")
+        .message
+        .contains("already in paper space"));
+    assert_eq!(
+        session.active_space,
+        SpaceId::Paper(LayoutId(2)),
+        "the active layout is kept"
+    );
+    assert_eq!(
+        app.workspace.viewports[&ViewportId(1)].camera,
+        camera,
+        "no re-fit, so the camera is bit-for-bit unchanged"
+    );
+    assert!(outcome.changes.is_none(), "no ChangeSet");
+    assert_eq!(revision(&app), before, "space switches write no drawing");
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
 fn pspace_without_a_paper_layout_is_a_named_noop() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);

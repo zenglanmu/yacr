@@ -382,6 +382,7 @@ mod stretch_kinds;
 mod stretch_polygon;
 mod table;
 mod table_edit;
+mod table_ops;
 mod text;
 mod text_batch;
 mod text_edit;

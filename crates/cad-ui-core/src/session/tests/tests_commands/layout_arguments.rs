@@ -59,6 +59,47 @@ fn layout_grammar_rejects_missing_options_and_illegal_names() {
 }
 
 #[test]
+fn layout_copy_is_a_typed_duplicate_and_template_is_a_named_refusal() {
+    let session = session_with_layouts(&[(2, "Sheet1", None)]);
+
+    // `COPY` needs both names; the source is the first token.
+    let missing = session
+        .command("LAYOUT COPY Sheet1")
+        .expect_err("COPY needs a new name");
+    assert!(missing.contains("LAYOUT COPY needs"), "{missing}");
+
+    // A real duplicate: the tab set grows and the source is kept.
+    session
+        .command("LAYOUT COPY Sheet1 Copy1")
+        .expect("LAYOUT COPY duplicates the layout");
+    let status = session.snapshot(None, None, 0);
+    let names: Vec<&str> = status.layouts.iter().map(|row| row.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["Sheet1", "Copy1"],
+        "source first, copy appended"
+    );
+
+    // The copy is a layout row like any other: a duplicate name is refused.
+    let duplicate = session
+        .command("LAYOUT COPY Sheet1 Copy1")
+        .expect_err("the copied name is taken");
+    assert!(duplicate.contains("layout.duplicate_name"), "{duplicate}");
+
+    // `TEMPLATE` (a DWT/DXF template import) is NOT IMPLEMENTED and must not be
+    // mapped onto `COPY`: it refuses by name and creates nothing.
+    let template = session
+        .command("LAYOUT TEMPLATE SomeTemplate")
+        .expect_err("LAYOUT TEMPLATE is a named refusal");
+    assert!(
+        template.contains("layout.template_not_implemented"),
+        "{template}"
+    );
+    let status = session.snapshot(None, None, 0);
+    assert_eq!(status.layouts.len(), 2, "the refusal created no layout");
+}
+
+#[test]
 fn layoutmerge_and_layoutwizard_apply_and_keep_their_name_grammar() {
     let session = session_with_layouts(&[
         (2, "Sheet One", None),
