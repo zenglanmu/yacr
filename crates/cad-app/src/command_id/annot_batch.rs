@@ -165,19 +165,33 @@
 //!
 //! # `HATCHSETORIGIN`
 //!
-//! `HATCHSETORIGIN <x> <y>` is modelled and parsed so the exact capability gap
-//! can be named, but it is an **unconditional named refusal**:
-//! [`cad_domain::HatchGeometry`] stores the plane (`HatchPlane.normal` +
-//! `elevation`) and the per-pattern-line base points
-//! (`HatchPatternLine.base_x` / `base_y`), but it has **no hatch pattern-origin
-//! field** corresponding to the DXF group-10 origin. Writing any of those fields
-//! would not be the requested origin, so the command refuses with
-//! `hatchsetorigin.missing_field: HatchGeometry has no pattern-origin field`.
+//! `HATCHSETORIGIN <x> <y>` places the pattern origin of **exactly one**
+//! directly addressable model-space hatch on the given hatch-plane point, in one
+//! transaction / one undo step. The stored field is the same one
+//! [`cad_domain::HatchGeometry::pattern_origin`] exposes — the phase
+//! displacement applied to the pattern's definition rows — because neither the
+//! DXF nor the DWG hatch record has a dedicated origin group (the phase lives in
+//! each row's base point, groups 43/44). The argument, however, is the **absolute**
+//! origin: [`cad_domain::HatchGeometry::absolute_pattern_origin`] is the composed
+//! base point of the first definition row (the hatch-level angle and scale
+//! applied, then the displacement added), and the written displacement is
+//! `d + (P − anchor)`, i.e. `P` minus that composed base. For a hatch whose first
+//! row has base `[0, 0]` and no displacement the two editors agree; for an
+//! imported hatch whose phase lives in the rows (`base != [0, 0]`) they
+//! deliberately differ, and the rows are never ignored. All other stored fields
+//! are preserved and the display is rebuilt through the domain constructor.
 //!
 //! A bare selector is `hatchsetorigin.needs_argument`; any other payload is
-//! `hatchsetorigin.payload`. The command reads the selection only to report
-//! whether the one selected hatch exists; it changes nothing, opens no
-//! transaction and records no history. Work-only (its declared intent is a write).
+//! `hatchsetorigin.payload`; non-finite coordinates are
+//! `hatchsetorigin.bad_point`. `hatchsetorigin.selection` (not exactly one ref),
+//! `hatchsetorigin.not_addressable`, `hatchsetorigin.not_hatch` and
+//! `hatchsetorigin.not_pattern` (a solid/gradient fill draws no rows) refuse
+//! before any write. `hatchsetorigin.missing_field` is the narrowed capability
+//! refusal: the pattern stores **no definition rows** (a user-defined pattern
+//! carrying only a spacing), so this model cannot name an origin to place; and
+//! `hatchsetorigin.unrepresentable` refuses a target displacement that is not
+//! finite. Repeating the current origin is `hatchsetorigin.unchanged` with no
+//! transaction. Work-only.
 //!
 //! # `XDLIST`
 //!

@@ -531,6 +531,35 @@ impl HatchGeometry {
         self.pattern_origin
     }
 
+    /// The pattern's **absolute origin** in the hatch-plane frame: where the
+    /// composed base point of the first definition row currently sits.
+    ///
+    /// [`HatchPattern::families`] composes the stored rows into the plane frame
+    /// (the hatch-level angle and scale applied to each row's base point) and
+    /// [`Self::pattern_origin`] then displaces every family, so the place the
+    /// pattern's own phase reference occupies is
+    /// `families()[0].base + pattern_origin`. That sum — and nothing else — is
+    /// the absolute origin this model can name exactly: there is no separate
+    /// origin record, because neither the DXF nor the DWG hatch record stores
+    /// one (the file's phase lives in the rows).
+    ///
+    /// The **first** row is the reference; a pattern with several rows keeps each
+    /// row's stored offset from it, so moving this point moves the whole pattern
+    /// rigidly (the dash phases and the `double` family's copy included). A
+    /// pattern that stores no rows (a user-defined pattern carrying only a
+    /// spacing has no base point at all) and a non-pattern fill both return
+    /// `None` rather than inventing an origin.
+    pub fn absolute_pattern_origin(&self) -> Option<[f64; 2]> {
+        let HatchFill::Pattern(pattern) = &self.fill else {
+            return None;
+        };
+        let base = pattern.families().first().map(|line| line.base)?;
+        Some([
+            base[0] + self.pattern_origin[0],
+            base[1] + self.pattern_origin[1],
+        ])
+    }
+
     /// The derived display: every boundary loop plus the style-filtered fill or
     /// pattern geometry.
     pub fn display(&self) -> &[SemanticGeometry] {

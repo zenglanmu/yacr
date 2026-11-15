@@ -1,13 +1,19 @@
 //! `HATCHSETBOUNDARY` (rebuild the hatch loops from selected closed entities) and
-//! `HATCHSETORIGIN` (a named refusal: the hatch domain has no pattern-origin
-//! field).
+//! `HATCHSETORIGIN` (place the pattern's absolute origin).
 //!
 //! Boundary loops use the same OCS projection and the same closed shapes as the
 //! existing HATCH/BOUNDARY path; the rebuild goes through
 //! [`cad_domain::HatchGeometry::new`] so the fill display is derived, never hand
 //! edited.
+//!
+//! `HATCHSETORIGIN <x> <y>` writes the same stored field `HATCHEDIT ORIGIN` writes
+//! (`HatchGeometry::pattern_origin`, the phase displacement of the definition
+//! rows) but resolves the point differently: its argument is the pattern's
+//! **absolute** origin, so the displacement is derived from the rows instead of
+//! being taken verbatim. See [`Application::hatch_set_origin`].
 
 use super::super::hatch_boundary::plane_projection;
+use super::super::hatch_edit::fill_kind;
 use super::*;
 
 /// The ellipse sampling count the boundary builder uses (`hatch_boundary`).
@@ -183,15 +189,31 @@ impl Application {
         )
     }
 
-    /// `HATCHSETORIGIN <x> <y>`: parsed and refused.
+    /// `HATCHSETORIGIN <x> <y>`: place the selected hatch's pattern origin on the
+    /// given hatch-plane point, in one transaction / one undo step.
     ///
-    /// The domain now carries a pattern origin (`HatchGeometry::pattern_origin`,
-    /// the phase displacement of the definition rows — see its type docs), but
-    /// this selector's own contract (an **absolute** origin for exactly one
-    /// selected hatch, with its own prompt/selection rules) is not implemented;
-    /// the implemented editor is `HATCHEDIT ORIGIN <x> <y>`, whose value is the
-    /// displacement from the stored rows. Refusing here keeps one definition of
-    /// the option rather than a second, silently different one.
+    /// The stored field is the same phase displacement `HATCHEDIT ORIGIN` writes
+    /// ([`HatchGeometry::pattern_origin`]), but the argument here is the pattern's
+    /// **absolute** origin: the point where the composed base of the first
+    /// definition row sits ([`HatchGeometry::absolute_pattern_origin`]). The
+    /// displacement that puts it on `(x, y)` is therefore
+    /// `d + (P - anchor)`, i.e. `P - composed_base` — derived from the stored
+    /// rows (with the hatch-level angle and scale composed in), never a straight
+    /// copy of `P`. For a hatch whose first row has base `[0, 0]` and no
+    /// displacement the two commands agree; for an imported hatch whose file
+    /// phase lives in the rows (`base != [0, 0]`) they deliberately differ.
+    ///
+    /// Exactly one selected, directly addressable model-space pattern hatch.
+    /// Refusals (nothing written, no transaction): `hatchsetorigin.payload`,
+    /// `hatchsetorigin.needs_argument`, `hatchsetorigin.bad_point` (a non-finite
+    /// `x`/`y`), `hatchsetorigin.selection` (not exactly one ref),
+    /// `hatchsetorigin.not_addressable`, `hatchsetorigin.not_hatch`,
+    /// `hatchsetorigin.not_pattern` (a solid/gradient fill draws no rows) and
+    /// `hatchsetorigin.missing_field` (the pattern stores no definition rows, so
+    /// it has no origin this model can name — a user-defined pattern carrying
+    /// only a spacing). The arithmetic is checked: a target displacement that is
+    /// not representable is `hatchsetorigin.unrepresentable`. Repeating the
+    /// current origin is `hatchsetorigin.unchanged` with no transaction.
     pub(crate) fn hatch_set_origin(
         &mut self,
         session: &mut SessionState,
@@ -244,7 +266,7 @@ impl Application {
             .get(&document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
             .drawing
-            .as_ref();
+            .clone();
         if reference.document != document_id
             || !reference.instance.0.is_empty()
             || reference.sub_element.is_some()
@@ -254,25 +276,92 @@ impl Application {
                 "HATCHSETORIGIN needs a directly addressable model-space hatch",
             ));
         }
-        let entity = drawing.entity(reference.entity).ok_or_else(|| {
+        let candidate = drawing.as_ref().clone();
+        let before = candidate.entity(reference.entity).cloned().ok_or_else(|| {
             invalid(
                 "hatchsetorigin.not_addressable",
                 format!("entity {} no longer exists", reference.entity.0),
             )
         })?;
-        if !matches!(entity.geometry, SemanticGeometry::Hatch(_)) {
+        if before.space != SpaceId::Model {
+            return Err(invalid(
+                "hatchsetorigin.not_addressable",
+                format!(
+                    "entity {} is not in model space; HATCHSETORIGIN edits model-space hatches",
+                    before.id.0
+                ),
+            ));
+        }
+        let SemanticGeometry::Hatch(hatch) = before.geometry.clone() else {
             return Err(CadError::Unsupported(format!(
                 "hatchsetorigin.not_hatch: entity {} is {}",
-                entity.id.0,
-                class_name(&entity.geometry)
+                before.id.0,
+                class_name(&before.geometry)
+            )));
+        };
+        // Only a pattern fill draws definition rows; a solid/gradient fill has no
+        // row to place, so it is the per-target named refusal (the same answer
+        // HATCHEDIT ORIGIN gives for that pair).
+        if !matches!(hatch.fill(), HatchFill::Pattern(_)) {
+            return Err(CadError::Unsupported(format!(
+                "hatchsetorigin.not_pattern: HATCHSETORIGIN applies to a pattern fill only; \
+                 hatch {} stores {}",
+                before.id.0,
+                fill_kind(hatch.fill())
             )));
         }
-        Err(CadError::Unsupported(format!(
-            "hatchsetorigin.missing_field: HATCHSETORIGIN's absolute pattern-origin form is not \
-             implemented (the requested origin ({x}, {y}) changes nothing); the implemented \
-             editor is HATCHEDIT ORIGIN <x> <y>, whose value is the phase displacement of the \
-             pattern's definition rows"
-        )))
+        let Some(anchor) = hatch
+            .absolute_pattern_origin()
+            .filter(|origin| origin[0].is_finite() && origin[1].is_finite())
+        else {
+            return Err(CadError::Unsupported(format!(
+                "hatchsetorigin.missing_field: hatch {} stores a pattern with no definition-row \
+                 base point, so this model cannot name its pattern origin; use HATCHEDIT ORIGIN \
+                 <x> <y> to set the phase displacement directly",
+                before.id.0
+            )));
+        };
+        // The absolute target minus the composed base of the first row is the
+        // displacement; expressed through the stored value so the current phase is
+        // carried, not discarded: d_new = d_old + (P - anchor).
+        let displacement = hatch.pattern_origin();
+        let target = [
+            displacement[0] + (x - anchor[0]),
+            displacement[1] + (y - anchor[1]),
+        ];
+        if !target[0].is_finite() || !target[1].is_finite() {
+            return Err(CadError::Unsupported(format!(
+                "hatchsetorigin.unrepresentable: the displacement that would put hatch {}'s \
+                 pattern origin on ({x}, {y}) is not a finite point",
+                before.id.0
+            )));
+        }
+        if target == displacement {
+            return Ok(unchanged(
+                "hatchsetorigin.unchanged",
+                format!(
+                    "HATCHSETORIGIN: hatch {}'s pattern origin already is ({x}, {y}) (nothing \
+                     was written)",
+                    before.id.0
+                ),
+            ));
+        }
+        let mut after = before.clone();
+        after.geometry = SemanticGeometry::Hatch(Box::new(hatch.with_pattern_origin(target)));
+        let entity = before.id.0;
+        commit_one_entity(
+            self,
+            document_id,
+            candidate,
+            before,
+            after,
+            "hatchsetorigin",
+            format!(
+                "HATCHSETORIGIN: hatch {entity}'s pattern origin set to ({x}, {y}) (stored phase \
+                 displacement ({}, {}); one transaction)",
+                target[0], target[1]
+            ),
+        )
     }
 }
 

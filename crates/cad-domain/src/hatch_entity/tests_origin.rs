@@ -127,6 +127,95 @@ fn a_new_or_imported_hatch_starts_at_the_zero_pattern_origin() {
 }
 
 #[test]
+fn the_absolute_pattern_origin_is_the_first_rows_composed_base_plus_the_displacement() {
+    // The fixture's single row has base `[0, 1]` and the hatch-level angle/scale
+    // are 0/1, so the composed base is the row's own base point. With no
+    // displacement the absolute origin is therefore `[0, 1]` — *not* the plane
+    // origin `[0, 0]`, because the file's phase lives in the row.
+    let hatch = build(
+        vec![rect(0.0, 0.0, 10.0, 10.0)],
+        HatchStyle::Normal,
+        spaced_pattern_fill(),
+    );
+    assert_eq!(hatch.absolute_pattern_origin(), Some([0.0, 1.0]));
+    // The displacement moves it: `+0.25` in y lands on `[0, 1.25]`, the same
+    // amount every visible line moved.
+    assert_eq!(
+        hatch
+            .with_pattern_origin([0.0, 0.25])
+            .absolute_pattern_origin(),
+        Some([0.0, 1.25])
+    );
+    assert_eq!(
+        hatch
+            .with_pattern_origin([2.0, -3.0])
+            .absolute_pattern_origin(),
+        Some([2.0, -2.0])
+    );
+
+    // The hatch-level angle composes into the base point too (a row base at
+    // `[1, 0]` turned 90 degrees sits at `[0, 1]`), and the hatch-level scale
+    // scales it — so the absolute origin follows the composed base, not the raw
+    // row.
+    let turned = build(
+        vec![rect(0.0, 0.0, 10.0, 10.0)],
+        HatchStyle::Normal,
+        HatchFill::Pattern(HatchPattern {
+            name: "USER".into(),
+            angle: std::f64::consts::FRAC_PI_2,
+            scale: 2.0,
+            double: false,
+            lines: vec![HatchPatternLine {
+                angle: 0.0,
+                base_x: 1.0,
+                base_y: 0.0,
+                offset_x: 0.0,
+                offset_y: 1.0,
+                dashes: Vec::new(),
+            }],
+        }),
+    );
+    let origin = turned.absolute_pattern_origin().expect("a pattern has one");
+    assert!(origin[0].abs() < 1e-12, "{origin:?}");
+    assert!((origin[1] - 2.0).abs() < 1e-12, "{origin:?}");
+}
+
+#[test]
+fn a_solid_fill_and_a_rowless_pattern_have_no_absolute_origin() {
+    // Nothing to place: a non-pattern fill draws no rows at all.
+    let solid = build(
+        vec![rect(0.0, 0.0, 10.0, 10.0)],
+        HatchStyle::Normal,
+        HatchFill::Solid,
+    );
+    assert_eq!(solid.absolute_pattern_origin(), None);
+    // A user-defined pattern with no definition rows (spacing only) has no base
+    // point either; `families()` composes nothing, so no origin is invented. The
+    // creation constructor rejects such a pattern (it cannot derive a display), so
+    // this one is built through the import path, which declares the degradation.
+    let (rowless, reasons) = HatchGeometry::from_import(
+        vec![rect(0.0, 0.0, 10.0, 10.0)],
+        HatchPlane::default(),
+        HatchStyle::Normal,
+        HatchFill::Pattern(HatchPattern {
+            name: "USER".into(),
+            angle: 0.0,
+            scale: 2.0,
+            double: false,
+            lines: Vec::new(),
+        }),
+        Vec::new(),
+        None,
+        HatchPatternType::UserDefined,
+    );
+    assert_eq!(
+        reasons,
+        vec!["hatch pattern has no line families".to_string()]
+    );
+    assert_eq!(rowless.absolute_pattern_origin(), None);
+}
+
+#[test]
 fn with_pattern_origin_translates_every_pattern_line_and_no_boundary() {
     let hatch = build(
         vec![rect(0.0, 0.0, 10.0, 10.0)],

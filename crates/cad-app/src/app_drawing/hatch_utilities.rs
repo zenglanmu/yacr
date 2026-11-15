@@ -7,8 +7,9 @@
 //!   closed polyline per hatch loop around the selected hatches, on each hatch's
 //!   own layer and space, in one transaction / one undo step. The source hatches
 //!   are retained.
-//! * [`crate::CommandId::HatchToBack`] — move every **model-space** hatch behind
-//!   every non-hatch object by rewriting only the stored `draw_order`, in one
+//! * [`crate::CommandId::HatchToBack`] — move every hatch behind every non-hatch
+//!   object **of its own draw-order scope** (model space, one paper layout, or
+//!   one block definition) by rewriting only the stored `draw_order`, in one
 //!   transaction / one undo step.
 //!
 //! Both handlers validate their whole input before staging anything, so a refusal
@@ -190,18 +191,25 @@ impl Application {
         })
     }
 
-    /// `HATCHTOBACK`: put every model-space hatch behind all other model-space
-    /// objects by rewriting their stored `draw_order` in one transaction.
+    /// `HATCHTOBACK`: put every hatch behind all other objects **of its own
+    /// draw-order scope** by rewriting their stored `draw_order` in one
+    /// transaction / one undo step.
     ///
-    /// No payload and no selection. With no hatches (`hatchtoback.none`) or with
-    /// every hatch already strictly below the lowest non-hatch order
-    /// (`hatchtoback.unchanged`) nothing is staged. Otherwise the hatches keep
+    /// A scope is everything that shares one draw-order sequence: model space,
+    /// one paper layout, or one block definition (`SpaceId`, the same field every
+    /// consumer of `DbEntity::draw_order` already groups by — no second ordering
+    /// mechanism). Each scope is planned independently: the hatches in it keep
     /// their relative order and receive the contiguous block
-    /// `min_order - n ..= min_order - 1`; the arithmetic is checked, so an
-    /// `i64` underflow is the explicit `hatchtoback.order_exhausted` refusal.
+    /// `min_non_hatch_order - n ..= min_non_hatch_order - 1`. A scope with no
+    /// hatch, or whose hatches are already strictly below its lowest non-hatch
+    /// order, is reported and left alone (a no-op, never an error). The
+    /// arithmetic is checked per scope, so an `i64` underflow is the explicit
+    /// `hatchtoback.order_exhausted` refusal for the whole run — every scope is
+    /// planned before anything is staged, so a refusal writes nothing.
     ///
-    /// Only model-space rows are considered: this build has no paper-space draw
-    /// order model, so layout hatches are left alone (declared, not silent).
+    /// Nothing at all is staged when no scope has a hatch (`hatchtoback.none`) or
+    /// when every hatch is already behind (`hatchtoback.unchanged`); the
+    /// diagnostic lists what happened per space/block either way.
     pub(crate) fn hatch_to_back(
         &mut self,
         _session: &SessionState,
@@ -222,57 +230,43 @@ impl Application {
         let mut candidate = document.drawing.as_ref().clone();
         let drawing = &mut candidate;
 
-        let model: Vec<DbEntity> = drawing
-            .entities()
-            .filter(|entity| entity.space == SpaceId::Model)
-            .cloned()
-            .collect();
-        let hatches: Vec<DbEntity> = model
-            .iter()
-            .filter(|entity| matches!(entity.geometry, SemanticGeometry::Hatch(_)))
-            .cloned()
-            .collect();
-        if hatches.is_empty() {
+        // 1. Group every row by the draw-order sequence it belongs to, then plan
+        //    every scope before staging anything (a refusal writes nothing).
+        let mut scopes: std::collections::BTreeMap<DrawOrderScope, Vec<DbEntity>> =
+            std::collections::BTreeMap::new();
+        for entity in drawing.entities() {
+            scopes
+                .entry(DrawOrderScope::of(&entity.space))
+                .or_default()
+                .push(entity.clone());
+        }
+        let mut planned: Vec<(DbEntity, DbEntity)> = Vec::new();
+        let mut reports: Vec<ScopeReport> = Vec::new();
+        for (scope, rows) in scopes {
+            let plan = plan_scope_behind(&rows)?;
+            let hatches = rows.iter().filter(|row| is_hatch(row)).count();
+            reports.push(ScopeReport {
+                label: scope.label(drawing),
+                hatches,
+                moved: plan.len(),
+            });
+            planned.extend(plan);
+        }
+        if reports.iter().all(|report| report.hatches == 0) {
             return Ok(CommandOutcome {
                 objects: Vec::new(),
                 changes: None,
                 diagnostics: vec![Diagnostic {
                     object: None,
                     code: "hatchtoback.none".into(),
-                    message: "HATCHTOBACK: no hatches in model space".into(),
+                    message: "HATCHTOBACK: no hatches in the drawing".into(),
                 }],
                 measurement: None,
                 point_report: None,
             });
         }
-        let min_order = model
-            .iter()
-            .filter(|entity| !matches!(entity.geometry, SemanticGeometry::Hatch(_)))
-            .map(|entity| entity.draw_order)
-            .min();
-        let Some(min_order) = min_order else {
-            // Nothing but hatches: each hatch is already behind every non-hatch.
-            return Ok(unchanged_outcome());
-        };
-        if hatches.iter().all(|entity| entity.draw_order < min_order) {
-            return Ok(unchanged_outcome());
-        }
-
-        let count = i64::try_from(hatches.len()).map_err(|_| order_exhausted())?;
-        let first = min_order.checked_sub(count).ok_or_else(order_exhausted)?;
-        // `first` is the lowest target and `first + (n-1) = min_order - 1` is the
-        // highest; both are representable once `min_order - n` is.
-        let mut ordered = hatches;
-        ordered.sort_by_key(|entity| (entity.draw_order, entity.id.0));
-        let mut planned: Vec<(DbEntity, DbEntity)> = Vec::with_capacity(ordered.len());
-        for (index, before) in ordered.into_iter().enumerate() {
-            let target = first + index as i64;
-            if before.draw_order == target {
-                continue;
-            }
-            let mut after = before.clone();
-            after.draw_order = target;
-            planned.push((before, after));
+        if planned.is_empty() {
+            return Ok(unchanged_outcome(&reports));
         }
 
         let transaction = next_transaction_id();
@@ -315,12 +309,120 @@ impl Application {
             diagnostics: vec![Diagnostic {
                 object: None,
                 code: "hatchtoback.applied".into(),
-                message: format!("HATCHTOBACK: moved {moved} hatch(es) behind every other object"),
+                message: format!(
+                    "HATCHTOBACK: moved {moved} hatch(es) behind every other object — {}",
+                    describe(&reports)
+                ),
             }],
             measurement: None,
             point_report: None,
         })
     }
+}
+
+/// One draw-order scope: a `SpaceId` without its `Ord`/`Hash` (the domain enum
+/// has neither), so the scopes iterate in a stable model → layout → block order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum DrawOrderScope {
+    Model,
+    Paper(LayoutId),
+    Block(BlockId),
+}
+
+impl DrawOrderScope {
+    fn of(space: &SpaceId) -> Self {
+        match space {
+            SpaceId::Model => DrawOrderScope::Model,
+            SpaceId::Paper(layout) => DrawOrderScope::Paper(*layout),
+            SpaceId::Block(block) => DrawOrderScope::Block(*block),
+        }
+    }
+
+    /// The report label: the space's own name where the drawing has one.
+    fn label(self, drawing: &DrawingDatabase) -> String {
+        match self {
+            DrawOrderScope::Model => "model space".into(),
+            DrawOrderScope::Paper(layout) => match drawing.layout(layout) {
+                Some(row) if !row.name.trim().is_empty() => format!("layout '{}'", row.name),
+                _ => format!("layout #{}", layout.0),
+            },
+            DrawOrderScope::Block(block) => match drawing.block_name(block) {
+                Some(name) if !name.trim().is_empty() => format!("block '{name}'"),
+                _ => format!("block #{}", block.0),
+            },
+        }
+    }
+}
+
+/// What one scope did, for the run's single diagnostic.
+struct ScopeReport {
+    label: String,
+    hatches: usize,
+    moved: usize,
+}
+
+fn describe(reports: &[ScopeReport]) -> String {
+    let parts: Vec<String> = reports
+        .iter()
+        .map(|report| {
+            if report.hatches == 0 {
+                format!("{}: no hatch", report.label)
+            } else if report.moved == 0 {
+                format!(
+                    "{}: {} hatch(es) already behind",
+                    report.label, report.hatches
+                )
+            } else {
+                format!("{}: {} moved", report.label, report.moved)
+            }
+        })
+        .collect();
+    parts.join("; ")
+}
+
+fn is_hatch(entity: &DbEntity) -> bool {
+    matches!(entity.geometry, SemanticGeometry::Hatch(_))
+}
+
+/// The reorder plan for one draw-order scope: its hatches run contiguous and in
+/// relative order, immediately below its lowest non-hatch row.
+///
+/// Returns the changed rows only (an already-correct hatch is skipped), so an
+/// empty plan means "nothing to do in this scope". The `i64` arithmetic is
+/// checked: `count` and `min_order - count` are the two refusals.
+fn plan_scope_behind(rows: &[DbEntity]) -> CadResult<Vec<(DbEntity, DbEntity)>> {
+    let mut hatches: Vec<&DbEntity> = rows.iter().filter(|row| is_hatch(row)).collect();
+    if hatches.is_empty() {
+        return Ok(Vec::new());
+    }
+    let min_order = rows
+        .iter()
+        .filter(|row| !is_hatch(row))
+        .map(|row| row.draw_order)
+        .min();
+    let Some(min_order) = min_order else {
+        // Nothing but hatches: each hatch is already behind every non-hatch.
+        return Ok(Vec::new());
+    };
+    if hatches.iter().all(|row| row.draw_order < min_order) {
+        return Ok(Vec::new());
+    }
+    let count = i64::try_from(hatches.len()).map_err(|_| order_exhausted())?;
+    let first = min_order.checked_sub(count).ok_or_else(order_exhausted)?;
+    // `first` is the lowest target and `first + (n-1) = min_order - 1` is the
+    // highest; both are representable once `min_order - n` is.
+    hatches.sort_by_key(|row| (row.draw_order, row.id.0));
+    let mut plan = Vec::with_capacity(hatches.len());
+    for (index, before) in hatches.into_iter().enumerate() {
+        let target = first + index as i64;
+        if before.draw_order == target {
+            continue;
+        }
+        let mut after = before.clone();
+        after.draw_order = target;
+        plan.push((before.clone(), after));
+    }
+    Ok(plan)
 }
 
 /// A command refusal carrying its stable reason code.
@@ -341,18 +443,22 @@ fn not_addressable(entity: EntityId, detail: &str) -> CadError {
 fn order_exhausted() -> CadError {
     refusal(
         "hatchtoback.order_exhausted",
-        "the target draw orders would underflow i64",
+        "the target draw orders would underflow i64 in at least one space or block",
     )
 }
 
-fn unchanged_outcome() -> CommandOutcome {
+fn unchanged_outcome(reports: &[ScopeReport]) -> CommandOutcome {
     CommandOutcome {
         objects: Vec::new(),
         changes: None,
         diagnostics: vec![Diagnostic {
             object: None,
             code: "hatchtoback.unchanged".into(),
-            message: "HATCHTOBACK: every hatch is already behind every other object".into(),
+            message: format!(
+                "HATCHTOBACK: every hatch is already behind every other object of its own space \
+                 — {}",
+                describe(reports)
+            ),
         }],
         measurement: None,
         point_report: None,

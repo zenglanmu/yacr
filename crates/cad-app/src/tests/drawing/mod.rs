@@ -326,6 +326,7 @@ mod hatch_edit_pattern_file;
 mod hatch_gradient;
 mod hatch_internal_point;
 mod hatch_predefined;
+mod hatch_set_origin;
 mod hatch_stitch;
 mod hatch_utilities;
 mod image;

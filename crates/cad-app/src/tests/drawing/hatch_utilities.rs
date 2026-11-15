@@ -12,7 +12,7 @@
 //!   `i64` underflow refusal.
 
 use super::*;
-use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
+use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
 
 fn p3(x: f64, y: f64, z: f64) -> Point3 {
     Point3 { x, y, z }
@@ -86,6 +86,16 @@ fn entity(
 }
 
 fn build(entities: Vec<DbEntity>, mode: AppMode) -> (Application, SessionState) {
+    build_with_blocks(entities, Vec::new(), mode)
+}
+
+/// The same drawing plus block-definition table rows (`(id, member ids)`), so a
+/// test can put rows in `SpaceId::Block(_)` and still build a valid database.
+fn build_with_blocks(
+    entities: Vec<DbEntity>,
+    blocks: Vec<(u128, Vec<u128>)>,
+    mode: AppMode,
+) -> (Application, SessionState) {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
     for (id, name) in [(LayerId(0), "0"), (LayerId(5), "HATCH")] {
         builder
@@ -96,13 +106,26 @@ fn build(entities: Vec<DbEntity>, mode: AppMode) -> (Application, SessionState) 
             })
             .unwrap();
     }
-    builder
-        .insert_layout(Layout {
-            id: LayoutId(1),
-            name: "Sheet1".into(),
-            viewports: Vec::new(),
-        })
-        .unwrap();
+    // Two layouts: `Sheet1` carries the paper-space fixtures and `Sheet2` is the
+    // deliberately hatch-free layout (a no-op scope, never an error).
+    for (id, name) in [(LayoutId(1), "Sheet1"), (LayoutId(2), "Sheet2")] {
+        builder
+            .insert_layout(Layout {
+                id,
+                name: name.into(),
+                viewports: Vec::new(),
+            })
+            .unwrap();
+    }
+    for (id, members) in blocks {
+        builder
+            .insert_block(BlockDefinition {
+                id: BlockId(id),
+                entities: members.into_iter().map(EntityId).collect(),
+                dynamic_visibility: None,
+            })
+            .unwrap();
+    }
     for row in entities {
         builder.insert_entity(row).unwrap();
     }
@@ -524,35 +547,306 @@ fn hatch_to_back_is_a_no_op_without_hatches_or_when_every_hatch_is_already_behin
 }
 
 #[test]
-fn hatch_to_back_leaves_paper_space_hatches_alone() {
-    let paper = entity(
-        2,
-        LayerId(5),
-        SpaceId::Paper(LayoutId(1)),
-        hatch_geometry(
-            vec![straight_ring(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])],
-            0.0,
-        ),
-        99,
+fn hatch_to_back_reorders_each_space_within_its_own_draw_order_sequence() {
+    // Model space and layout `Sheet1` are independent sequences: the model hatch
+    // runs below the model rows, the layout hatches below the layout rows, and
+    // neither order is compared with the other space.
+    let paper = |id: u128, order: i64| {
+        entity(
+            id,
+            LayerId(5),
+            SpaceId::Paper(LayoutId(1)),
+            hatch_geometry(
+                vec![straight_ring(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])],
+                0.0,
+            ),
+            order,
+        )
+    };
+    let (mut app, mut session) = build(
+        vec![
+            line(1, 10),
+            line(2, 30),
+            hatch(3, 40),
+            entity(
+                4,
+                LayerId(0),
+                SpaceId::Paper(LayoutId(1)),
+                SemanticGeometry::Line {
+                    start: p3(0.0, 0.0, 0.0),
+                    end: p3(1.0, 0.0, 0.0),
+                },
+                100,
+            ),
+            paper(5, 120),
+            paper(6, 90),
+            // `Sheet2` holds no hatch: a no-op scope, not an error.
+            entity(
+                7,
+                LayerId(0),
+                SpaceId::Paper(LayoutId(2)),
+                SemanticGeometry::Line {
+                    start: p3(0.0, 0.0, 0.0),
+                    end: p3(1.0, 0.0, 0.0),
+                },
+                7,
+            ),
+        ],
+        AppMode::Work,
     );
-    let (mut app, mut session) = build(vec![line(1, 10), paper], AppMode::Work);
-    let before = drawing_entity(&app, 2);
+    let before_revision = revision(&app);
+
     let outcome = execute(
         &mut app,
         &mut session,
         CommandId::HatchToBack,
         CommandPayload::None,
     )
-    .expect("paper-space hatches are outside this command's scope");
-    assert_eq!(outcome.diagnostics[0].code, "hatchtoback.none");
-    let after = drawing_entity(&app, 2);
-    assert_eq!(before.draw_order, after.draw_order);
+    .expect("HATCHTOBACK must succeed");
+    let diagnostic = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "hatchtoback.applied")
+        .expect("the success diagnostic lists every scope");
+    assert!(
+        diagnostic.message.contains("model space: 1 moved"),
+        "{}",
+        diagnostic.message
+    );
+    assert!(
+        diagnostic.message.contains("layout 'Sheet1': 2 moved"),
+        "{}",
+        diagnostic.message
+    );
+    assert!(
+        diagnostic.message.contains("layout 'Sheet2': no hatch"),
+        "{}",
+        diagnostic.message
+    );
+    assert_eq!(
+        outcome.objects.len(),
+        3,
+        "one model hatch plus two paper ones"
+    );
+    assert_eq!(revision(&app), Revision(before_revision.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+
+    // Model: min non-hatch 10, one hatch -> 9.
+    assert_eq!(drawing_entity(&app, 3).draw_order, 9);
+    // Layout: min non-hatch 100, two hatches -> 98..=99 in relative order 6 < 5.
+    assert_eq!(drawing_entity(&app, 6).draw_order, 98);
+    assert_eq!(drawing_entity(&app, 5).draw_order, 99);
+    // Every other row keeps its order, the hatch-free layout included.
+    assert_eq!(drawing_entity(&app, 1).draw_order, 10);
+    assert_eq!(drawing_entity(&app, 2).draw_order, 30);
+    assert_eq!(drawing_entity(&app, 4).draw_order, 100);
+    assert_eq!(drawing_entity(&app, 7).draw_order, 7);
+    for id in [3u128, 5, 6] {
+        assert!(
+            matches!(
+                drawing_entity(&app, id).geometry,
+                SemanticGeometry::Hatch(_)
+            ),
+            "entity {id} keeps its geometry"
+        );
+    }
+
+    // One undo restores every space's exact previous orders.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo restores both spaces");
     assert_eq!(undo_depth(&app), 0);
+    assert_eq!(drawing_entity(&app, 3).draw_order, 40);
+    assert_eq!(drawing_entity(&app, 5).draw_order, 120);
+    assert_eq!(drawing_entity(&app, 6).draw_order, 90);
+}
+
+#[test]
+fn hatch_to_back_reorders_a_block_definition_behind_its_own_members() {
+    // Block definitions carry their own member draw order (that is what an INSERT
+    // draws), so the reorder must run inside the definition too.
+    let member = |id: u128, is_hatch: bool, order: i64| {
+        let geometry = if is_hatch {
+            hatch_geometry(
+                vec![straight_ring(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])],
+                0.0,
+            )
+        } else {
+            SemanticGeometry::Line {
+                start: p3(0.0, 0.0, 0.0),
+                end: p3(1.0, 0.0, 0.0),
+            }
+        };
+        entity(id, LayerId(0), SpaceId::Block(BlockId(0)), geometry, order)
+    };
+    let (mut app, mut session) = build_with_blocks(
+        vec![
+            member(10, false, 5),
+            member(11, true, 9),
+            member(12, true, 2),
+        ],
+        vec![(0, vec![10, 11, 12])],
+        AppMode::Work,
+    );
+    let revision_before = revision(&app);
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchToBack,
+        CommandPayload::None,
+    )
+    .expect("HATCHTOBACK must reorder a block definition");
+    let diagnostic = &outcome.diagnostics[0];
+    assert!(
+        diagnostic.message.contains("block 'B0'") || diagnostic.message.contains("block #0"),
+        "{}",
+        diagnostic.message
+    );
+    assert_eq!(outcome.objects.len(), 2, "both member hatches moved");
+    assert_eq!(revision(&app), Revision(revision_before.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+    // min non-hatch is 5, two hatches -> 3..=4, keeping 12 (2) before 11 (9).
+    assert_eq!(drawing_entity(&app, 12).draw_order, 3);
+    assert_eq!(drawing_entity(&app, 11).draw_order, 4);
+    assert_eq!(drawing_entity(&app, 10).draw_order, 5);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo restores the block member orders");
+    assert_eq!(drawing_entity(&app, 11).draw_order, 9);
+    assert_eq!(drawing_entity(&app, 12).draw_order, 2);
+}
+
+#[test]
+fn hatch_to_back_reorders_a_mixed_selection_in_one_undo_step() {
+    // Model space, a layout and a block definition in one run: every scope is
+    // planned before anything is staged, so this is still exactly one
+    // transaction / one undo step.
+    let paper_hatch = entity(
+        3,
+        LayerId(5),
+        SpaceId::Paper(LayoutId(1)),
+        hatch_geometry(
+            vec![straight_ring(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])],
+            0.0,
+        ),
+        500,
+    );
+    let block_hatch = entity(
+        4,
+        LayerId(5),
+        SpaceId::Block(BlockId(0)),
+        hatch_geometry(
+            vec![straight_ring(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])],
+            0.0,
+        ),
+        60,
+    );
+    let block_line = entity(
+        5,
+        LayerId(0),
+        SpaceId::Block(BlockId(0)),
+        SemanticGeometry::Line {
+            start: p3(0.0, 0.0, 0.0),
+            end: p3(1.0, 0.0, 0.0),
+        },
+        20,
+    );
+    let paper_line = entity(
+        6,
+        LayerId(0),
+        SpaceId::Paper(LayoutId(1)),
+        SemanticGeometry::Line {
+            start: p3(0.0, 0.0, 0.0),
+            end: p3(1.0, 0.0, 0.0),
+        },
+        400,
+    );
+    let (mut app, mut session) = build_with_blocks(
+        vec![
+            line(1, 10),
+            hatch(2, 20),
+            paper_hatch,
+            block_hatch,
+            block_line,
+            paper_line,
+        ],
+        vec![(0, vec![4, 5])],
+        AppMode::Work,
+    );
+    let undo_before = undo_depth(&app);
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchToBack,
+        CommandPayload::None,
+    )
+    .expect("HATCHTOBACK over mixed scopes");
+    assert_eq!(outcome.objects.len(), 3, "one hatch per scope moved");
+    assert_eq!(
+        undo_depth(&app),
+        undo_before + 1,
+        "one transaction for every scope"
+    );
+    assert_eq!(drawing_entity(&app, 2).draw_order, 9);
+    assert_eq!(drawing_entity(&app, 3).draw_order, 399);
+    assert_eq!(drawing_entity(&app, 4).draw_order, 19);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("one undo restores every scope");
+    assert_eq!(drawing_entity(&app, 2).draw_order, 20);
+    assert_eq!(drawing_entity(&app, 3).draw_order, 500);
+    assert_eq!(drawing_entity(&app, 4).draw_order, 60);
 }
 
 #[test]
 fn hatch_to_back_refuses_an_i64_underflow_without_writing() {
-    let (mut app, mut session) = build(vec![line(1, i64::MIN), hatch(2, i64::MAX)], AppMode::Work);
+    // The model scope underflows; the layout scope would succeed. The refusal is
+    // for the whole run, so the layout hatch must not move either.
+    let paper_hatch = entity(
+        3,
+        LayerId(5),
+        SpaceId::Paper(LayoutId(1)),
+        hatch_geometry(
+            vec![straight_ring(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])],
+            0.0,
+        ),
+        500,
+    );
+    let paper_line = entity(
+        4,
+        LayerId(0),
+        SpaceId::Paper(LayoutId(1)),
+        SemanticGeometry::Line {
+            start: p3(0.0, 0.0, 0.0),
+            end: p3(1.0, 0.0, 0.0),
+        },
+        400,
+    );
+    let (mut app, mut session) = build(
+        vec![
+            line(1, i64::MIN),
+            hatch(2, i64::MAX),
+            paper_hatch,
+            paper_line,
+        ],
+        AppMode::Work,
+    );
     let before_revision = revision(&app);
     let error = execute(
         &mut app,
@@ -563,6 +857,7 @@ fn hatch_to_back_refuses_an_i64_underflow_without_writing() {
     .expect_err("the target range underflows i64");
     assert!(error.to_string().contains("hatchtoback.order_exhausted"));
     assert_eq!(drawing_entity(&app, 2).draw_order, i64::MAX);
+    assert_eq!(drawing_entity(&app, 3).draw_order, 500);
     assert_eq!(revision(&app), before_revision);
     assert_eq!(undo_depth(&app), 0);
 }

@@ -939,7 +939,7 @@ fn resolve_layer(drawing: &DrawingDatabase, name: &str) -> CadResult<LayerId> {
 }
 
 /// The human half of a fill refusal (the stored variant, never a pattern name).
-fn fill_kind(fill: &HatchFill) -> &'static str {
+pub(super) fn fill_kind(fill: &HatchFill) -> &'static str {
     match fill {
         HatchFill::Solid => "a solid fill",
         HatchFill::Pattern(_) => "a pattern fill",
