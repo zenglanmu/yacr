@@ -18,7 +18,7 @@
 //! | `0` Delta (`DE`) | `new = old + value` (negative shortens) | new arc length `old + value` |
 //! | `1` Percent (`PER`) | `new = old · value / 100` | new arc length `old · value / 100` |
 //! | `2` Total (`TOT`) | `new = value` (the absolute length) | `value` is the **included angle in degrees** |
-//! | Dynamic (`DY`) | the picked new end point, projected onto the line | the picked new end point, projected radially onto the arc |
+//! | Dynamic (`DY`) | the picked new end point, projected onto the line (spline: onto the end tangent beyond the end, onto the curve in front of it) | the picked new end point, projected radially onto the arc |
 //!
 //! The dynamic mode is accepted through the existing typed `Points` payload with
 //! exactly two points (`pick`, `new_end`) and the selection taken from the
@@ -48,10 +48,36 @@
 //! a straight tangent segment at the moving end, trimming splits at the new
 //! endpoint and preserves the bulges), elliptical arc (`Ellipse` with
 //! `sweep < 1 turn`; length/angle semantics exactly like ARC), and **open**
-//! SPLINE (trimming uses the exact arc-length sub-curve helpers; extending a
-//! NURBS curve has no continuation semantics and is refused by name
-//! `lengthen.spline_extend_unsupported`). Closed polylines, circles and full
-//! ellipses are refused as `lengthen.closed`.
+//! SPLINE. Closed polylines, circles, full ellipses and closed SPLINE frames are
+//! refused as `lengthen.closed` / `lengthen.closed_spline`.
+//!
+//! ### Open SPLINE: exact shrink, stated tangent extension
+//!
+//! Shortening a SPLINE stays **exact**: the kept piece is the source's own
+//! sub-curve (`cad_geometry` knot insertion + truncation, no re-fit). Growing one
+//! has no canonical answer (a NURBS curve is defined by its knot vector), so it
+//! uses one **declared policy** (`app_drawing/lengthen/spline_extend.rs`): the
+//! moving end continues along its own **unit end tangent** for exactly the
+//! requested growth `d = new − old`, stored as **one extra clamped knot span**
+//! whose control points `E, E + d/p·T, …, E + d·T` are collinear. Consequences,
+//! stated rather than hidden:
+//!
+//! * every stored control point, weight and interior knot is unchanged and the
+//!   joint keeps multiplicity `degree + 1`, so the old span is reproduced exactly;
+//! * the new end is exactly `E + d·T` and the tail is exactly `d` long;
+//! * the tail is **straight**: the joint is C0/G1 but the extension does **not**
+//!   continue the spline's curvature (curvature is 0 on the tail) and the curve is
+//!   never refitted or re-interpolated;
+//! * the "old" length of a SPLINE is a sampled polyline estimate
+//!   (chord height `extent × 1e-3`, ≤ 256 segments), so the growth is exact while
+//!   the resulting **total** is `old + d` only to that estimate's error.
+//!
+//! A closed SPLINE frame (first control point == last) has no end to move:
+//! `lengthen.closed_spline`. An unclamped moving end (appending a span would
+//! change the existing curve), a zero/non-finite end tangent, a non-positive
+//! growth and an invalid resulting definition are `lengthen.spline_unclamped`,
+//! `lengthen.spline_degenerate_tangent`, `lengthen.non_positive` and
+//! `lengthen.spline_extension_failed`.
 //!
 //! ## Transaction shape
 //!
@@ -68,6 +94,7 @@ use super::trim_curves::{cut_tolerance, norm_tau};
 use super::*;
 
 mod curves;
+mod spline_extend;
 use curves::{lengthen_ellipse, lengthen_polyline, lengthen_spline};
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -619,7 +646,7 @@ fn lengthen_geometry(
             settings,
             pick,
         ),
-        SemanticGeometry::Spline { .. } => lengthen_spline(geometry, settings, pick),
+        SemanticGeometry::Spline { .. } => lengthen_spline(geometry, settings, dynamic, pick),
         // A closed object has no ends to move: it is unaffected by LENGTHEN.
         SemanticGeometry::Circle { .. } => Err(refusal(
             "lengthen.closed",

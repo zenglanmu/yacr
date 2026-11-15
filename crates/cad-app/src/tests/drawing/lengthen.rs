@@ -467,8 +467,9 @@ fn closed_objects_are_refused_and_open_curves_are_supported() {
         other => panic!("expected a Polyline, got {other:?}"),
     }
 
-    // An open spline is supported for shortening; extending a NURBS curve has no
-    // continuation semantics and is refused by name.
+    // An open spline is supported in both directions now: growing appends one
+    // straight tangent span (the policy and its geometry are pinned by `mod
+    // spline`, lengthen_spline.rs), shrinking keeps the exact sub-curve.
     let fit = vec![
         point(0.0, 0.0),
         point(1.0, 2.0),
@@ -487,10 +488,8 @@ fn closed_objects_are_refused_and_open_curves_are_supported() {
     let (mut app, mut session) =
         app_with(vec![curve_entity(1, LayerId(0), spline, "AcDbSpline", 0)]);
     set_mode_value(&mut session, DELTA, 1.0);
-    let error = lengthen(&mut app, &mut session, vec![ref_of(1)])
-        .expect_err("extending a spline is refused");
-    assert_invalid(error, "lengthen.spline_extend_unsupported");
-    assert_eq!(undo_depth(&app), 0);
+    lengthen(&mut app, &mut session, vec![ref_of(1)]).expect("the open spline extends");
+    assert_eq!(undo_depth(&app), 1);
 }
 
 #[test]
@@ -941,3 +940,8 @@ fn dynamic_mode_unchanged_and_projection_failures_are_named() {
     assert_invalid(error, "lengthen.projection_failed");
     assert_eq!(undo_depth(&app), 0);
 }
+
+// The open-SPLINE extension policy, its exact shrink and its refusals live in
+// their own file (code-size limit): a private child module of these tests.
+#[path = "lengthen_spline.rs"]
+mod spline;

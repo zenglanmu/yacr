@@ -6,7 +6,9 @@
 
 use super::super::arc_length::ArcLengthTable;
 use super::super::polyline_curve::PolylineCurve;
-use super::super::trim_curves::{cut_tolerance, TargetCurve};
+use super::super::trim_curves::cut_tolerance;
+use super::super::trim_spline::SplineTarget;
+use super::spline_extend::{extend_spline, is_closed_frame, outward_tangent};
 use super::{error_detail, new_line_length, refusal, LengthenMode, LengthenSettings};
 use cad_domain::{CadResult, Point3, SemanticGeometry};
 use cad_geometry::distance;
@@ -400,52 +402,89 @@ fn ellipse_arc_length(center: Point3, major: Point3, minor: Point3, start: f64, 
     ArcLengthTable::sample(&point_at).total()
 }
 
-/// `LENGTHEN` on an open spline: trimming uses the exact sub-curve helper;
-/// extending a NURBS curve has no continuation semantics and is refused.
+/// `LENGTHEN` on an open spline.
+///
+/// **Shrinking stays exact**: the kept piece is the source's own sub-curve
+/// (`SplineTarget::with_span` = knot insertion + truncation in `cad_geometry`,
+/// never a re-fit), found by inverting the sampled arc length.
+///
+/// **Growing appends one straight tangent span** by the declared policy in
+/// [`super::spline_extend`]: the moving end continues along its own unit end
+/// tangent for exactly the requested growth, as an extra clamped knot span, so
+/// the source curve is unchanged on its own knot domain and the tail is exactly
+/// the requested length — but the tail is straight, i.e. the extension is
+/// tangent-continuous (C0/G1) and does **not** continue the spline's curvature.
+///
+/// The dynamic mode uses the same two rules: a picked point beyond the moving end
+/// extends along its tangent (the point projected onto that ray), a picked point
+/// in front of it shrinks to the curve's own projection.
 pub(super) fn lengthen_spline(
     geometry: &SemanticGeometry,
     settings: &LengthenSettings,
+    dynamic: Option<[Point3; 2]>,
     pick: Option<Point3>,
 ) -> CadResult<(SemanticGeometry, f64, f64, bool)> {
     let eps = cut_tolerance();
-    let curve = TargetCurve::new(
-        geometry,
-        "LENGTHEN",
-        "LINE, ARC, CIRCLE, ELLIPSE, SPLINE or LWPOLYLINE",
-    )?;
-    let old = curve.length();
+    let SemanticGeometry::Spline {
+        degree,
+        knots,
+        control_points,
+        weights,
+    } = geometry
+    else {
+        // Unreachable: the caller dispatches on the SPLINE variant.
+        return Err(refusal(
+            "lengthen.target_missing",
+            "the LENGTHEN spline solver received a non-SPLINE geometry",
+        ));
+    };
+    // The shorthand-expanded, validated definition both halves work on.
+    let spline = SplineTarget::new(*degree, knots, control_points, weights)?;
+    let old = spline.length();
     if !old.is_finite() || old <= eps {
         return Err(refusal(
             "lengthen.degenerate",
             "the LENGTHEN target SPLINE has no measurable length",
         ));
     }
-    if settings.mode == LengthenMode::Dynamic {
+    // A closed frame has no end to move, so it is refused for every mode before
+    // anything is measured or written (the geometry model carries no closed flag).
+    if is_closed_frame(spline.curve(), eps) {
         return Err(refusal(
-            "lengthen.invalid_payload",
-            "the dynamic LENGTHEN mode is resolved from its points, not a scalar length",
+            "lengthen.closed_spline",
+            format!(
+                "LENGTHEN does not affect a closed SPLINE: its first and last control points \
+                 coincide, so it has no end to move ({} control points)",
+                control_points.len()
+            ),
         ));
+    }
+    if settings.mode == LengthenMode::Dynamic {
+        let points = dynamic.ok_or_else(|| {
+            refusal(
+                "lengthen.invalid_payload",
+                "the dynamic LENGTHEN mode needs two picked points",
+            )
+        })?;
+        return dynamic_spline(&spline, points[1], old);
     }
     let new = new_line_length(old, settings)?;
-    if new > old + eps {
-        return Err(refusal(
-            "lengthen.spline_extend_unsupported",
-            "LENGTHEN cannot extend a SPLINE: a NURBS curve is defined by its knot vector, so \
-             moving an end would change its parameterisation and no continuation policy exists; \
-             shortening the spline is supported",
-        ));
-    }
     if (new - old).abs() <= eps {
         return Ok((geometry.clone(), old, old, false));
     }
-    let start_point = curve.point_at(0.0);
-    let end_point = curve.point_at(1.0);
+    let start_point = spline.point_at(0.0);
+    let end_point = spline.point_at(1.0);
     let move_start =
         pick.is_some_and(|point| distance(point, start_point) < distance(point, end_point));
+    if new > old {
+        // Grow: one straight span along the moving end's own tangent.
+        let geometry = extend_spline(spline.curve(), move_start, new - old)?;
+        return Ok((geometry, old, new, true));
+    }
     let (u0, span) = {
         // Invert the arc length (never the raw knot parameter) to find the
         // parameter span that keeps `new` of the curve.
-        let table = ArcLengthTable::sample(&|u: f64| curve.point_at(u));
+        let table = ArcLengthTable::sample(&|u: f64| spline.point_at(u));
         if !table.total().is_finite() || table.total() <= eps {
             return Err(refusal(
                 "lengthen.degenerate",
@@ -459,8 +498,87 @@ pub(super) fn lengthen_spline(
             (0.0, table.parameter_at(new))
         }
     };
-    let geometry = curve
+    let geometry = spline
         .with_span(u0, span)
         .map_err(|reason| refusal("lengthen.degenerate", reason))?;
     Ok((geometry, old, new, true))
+}
+
+/// The dynamic SPLINE edit (see [`lengthen_spline`]): beyond the moving end it is
+/// a tangent extension, in front of it an exact sub-curve shrink.
+fn dynamic_spline(
+    spline: &SplineTarget,
+    new_point: Point3,
+    old: f64,
+) -> CadResult<(SemanticGeometry, f64, f64, bool)> {
+    let eps = cut_tolerance();
+    let start_point = spline.point_at(0.0);
+    let end_point = spline.point_at(1.0);
+    let move_start = distance(new_point, start_point) < distance(new_point, end_point);
+    let anchor = if move_start { start_point } else { end_point };
+    let tangent = outward_tangent(spline.curve(), move_start, eps)?;
+    let along = cad_geometry::dot(
+        Point3 {
+            x: new_point.x - anchor.x,
+            y: new_point.y - anchor.y,
+            z: new_point.z - anchor.z,
+        },
+        tangent,
+    );
+    if !along.is_finite() {
+        return Err(refusal(
+            "lengthen.projection_failed",
+            "the dynamic LENGTHEN point has no finite projection onto the SPLINE end tangent",
+        ));
+    }
+    if along > eps {
+        let geometry = extend_spline(spline.curve(), move_start, along)?;
+        return Ok((geometry, old, old + along, true));
+    }
+    let u_pick = spline.project_param(new_point, eps).ok_or_else(|| {
+        refusal(
+            "lengthen.projection_failed",
+            "the dynamic LENGTHEN point has no projection onto the target SPLINE",
+        )
+    })?;
+    let (u0, span) = if move_start {
+        (u_pick, 1.0 - u_pick)
+    } else {
+        (0.0, u_pick)
+    };
+    if !span.is_finite() || span <= 0.0 || span >= 1.0 {
+        // The picked point projects onto (or past) the moving end itself: the end
+        // does not move, which is the named no-op rather than a fabricated edit.
+        return Ok((spline.geometry(), old, old, false));
+    }
+    let geometry = spline
+        .with_span(u0, span)
+        .map_err(|reason| refusal("lengthen.degenerate", reason))?;
+    let new = spline_length(&geometry)?;
+    if !new.is_finite() || new <= eps {
+        return Err(refusal(
+            "lengthen.non_positive",
+            "the LENGTHEN result has no measurable length",
+        ));
+    }
+    Ok((geometry, old, new, (old - new).abs() > eps))
+}
+
+/// The sampled world length of a stored SPLINE, measured exactly like the target
+/// (`SplineTarget::length`): the same estimate LENGTHEN reports, never a claim of
+/// analytic arc length.
+fn spline_length(geometry: &SemanticGeometry) -> CadResult<f64> {
+    let SemanticGeometry::Spline {
+        degree,
+        knots,
+        control_points,
+        weights,
+    } = geometry
+    else {
+        return Err(refusal(
+            "lengthen.target_missing",
+            "the LENGTHEN spline solver received a non-SPLINE geometry",
+        ));
+    };
+    Ok(SplineTarget::new(*degree, knots, control_points, weights)?.length())
 }

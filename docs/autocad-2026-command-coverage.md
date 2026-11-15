@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **115** |
-| 部分实现（有写明的界） | **864** |
+| 完整实现 | **116** |
+| 部分实现（有写明的界） | **863** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -117,14 +117,14 @@
 >
 > **官方 981 条已无「未实现」的可用命令名**：仅 `MEASURE` 与 `TRACE` 两条按**同名不同义**不计入
 > （本仓库同名命令分别表示测量入口与旧式宽线带），它们的官方语义在本构建仍无对应实现。计入
-> **979 已实现（115 完整 + 864 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
+> **979 已实现（116 完整 + 863 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
 > GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29，真实 2D 升级，无新命令名）**：`TRIM` 新增 **LWPOLYLINE 目标**（开放/闭合；bulge 还原为精确 ARC 后求交，保留拾取投影所在窗口，子弧 bulge 精确保留；一条事务/一步撤销；EXTEND 的 POLYLINE 目标仍按名拒绝）。该升级不改变 981 条状态总计，仍计入 **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 契约测试，GUI/GPU/像素 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29b）**：`HATCHEDIT` 新增 **`PATTERN <内置图案名>`**（按名称从现有 `.pat` 库取图案，保留 hatch 的角度/比例/double；未知名 `hatchedit.unknown_pattern`、缺名 `hatchedit.needs_pattern_name`、实心/渐变 `hatchedit.pattern_requires_pattern` 均具名拒绝；一条事务/一步撤销）。任意用户 `.pat` 图案文件仍需宿主文件 I/O，未接入。不影响 981 条状态总计。
 
-> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。计入 **979 已实现（115 完整 + 864 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
+> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LENGTHEN` 的开放样条**延长**按声明的端点切线直尾实现（缩短仍是精确子曲线）⇒ 晋升为**完整实现**。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。计入 **979 已实现（116 完整 + 863 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
 
 ### 纪律
 
@@ -207,6 +207,8 @@
 
 - P1 **已完成**（2026-11-09）：9 条晋升（`ALIGN` `BREAK` `DIVIDE` `SELECTSIMILAR` `MATCHPROP`
   `SETBYLAYER` `LIST` `DIMSPACE` `TORIENT`），`LENGTHEN` 因开放样条延长未实现保留 `部分实现`。
+  **2026-11-15 补齐**：开放样条延长按声明的端点切线直尾实现（增量精确、原曲线逐点不变、接缝 C0/G1），
+  `LENGTHEN` 晋升为**完整实现**。
 - P2 **已完成**（2026-11-09）：按严格口径 2 条晋升（`CHAMFER` `OFFSET`）；其余保留 `部分实现`：
   `FILLET`（椭圆/样条曲线对）、`JOIN`（`JOIN CLOSE` 混合 SPLINE）、`STRETCH`（多边形/lasso 捕获未接线）、
   `PEDIT`（多段线宽度/`plinegen`/顶点子菜单）、`MIRROR`（`MIRRTEXT=1` 字形镜像）、
@@ -757,7 +759,7 @@
 | `LAYVPI` | 部分实现 | 全视口冻结 + **指定视口索引形式**；AutoCAD 的“除当前视口”需要当前视口标记，本构建不存储 |
 | `LAYWALK` | 部分实现 | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
 | `LEADER` | 部分实现 | 同一共享引线计划（创建单个 MULTILEADER）；无引线样式对话框/块/公差注释 |
-| `LENGTHEN` | 部分实现 | `DE`/`PER`/`TOT` 从**靠近拾取点**的端点改长度；`DY` 拖一端；`LINE`/`ARC`/开放多段线/椭圆弧/开放样条；闭合对象拒绝；开放样条**延长**未实现（`lengthen.spline_extend_unsupported`），缩短精确 |
+| `LENGTHEN` | 完整实现 | `DE`/`PER`/`TOT` 从**靠近拾取点**的端点改长度；`DY` 拖一端；`LINE`/`ARC`/开放多段线/椭圆弧/开放样条；闭合对象拒绝。开放样条**缩短**是精确子曲线；**延长**按声明的**端点切线直尾**策略（沿单位端切线追加一个钳制节点段，`degree+1` 个共线等距控制点，尾长恰为增量；原曲线在其节点域上逐点不变），接缝只保证 C0/G1、曲率不延续；闭合/未钳制/切线退化/非正增量/结果非法逐条具名拒绝；一条事务/一步撤销 |
 | `LIGHT` | 部分实现 | 具名拒绝（`light.unsupported: 3D light objects are not modeled`）。 |
 | `LIGHTLIST` | 部分实现 | 具名拒绝（`lightlist.unsupported: 3D light objects are not modeled`）。 |
 | `LIGHTLISTCLOSE` | 部分实现 | 具名拒绝（`lightlistclose.unsupported: 3D light objects are not modeled`）。 |
@@ -1703,7 +1705,7 @@
 | 490 | `LAYVPI` | 部分实现 | Freezes selected layers in all layout viewports except the current viewport. | 全视口冻结 + **指定视口索引形式**；AutoCAD 的“除当前视口”需要当前视口标记，本构建不存储 |
 | 491 | `LAYWALK` | 部分实现 | Displays objects on selected layers and hides objects on all other layers. | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
 | 492 | `LEADER` | 部分实现 | Creates a line that connects annotation to a feature. | 同一共享引线计划（创建单个 MULTILEADER）；无引线样式对话框/块/公差注释 |
-| 493 | `LENGTHEN` | 部分实现 | Changes the length of objects and the included angle of arcs. | `DE`/`PER`/`TOT` 从**靠近拾取点**的端点改长度；`DY` 拖一端；`LINE`/`ARC`/开放多段线/椭圆弧/开放样条；闭合对象拒绝；开放样条**延长**未实现（`lengthen.spline_extend_unsupported`），缩短精确 |
+| 493 | `LENGTHEN` | 完整实现 | Changes the length of objects and the included angle of arcs. | `DE`/`PER`/`TOT`/`DY`；`LINE`/`ARC`/开放多段线/椭圆弧/开放样条；开放样条缩短精确、延长为声明的端点切线直尾（增量精确，接缝 C0/G1，曲率不延续）；闭合/未钳制/退化/非正增量具名拒绝；一条事务/一步撤销。 |
 | 494 | `LIGHT` | 部分实现 | Creates a light. | 具名拒绝（`light.unsupported: 3D light objects are not modeled`）。 |
 | 495 | `LIGHTLIST` | 部分实现 | Displays the Lights in Model palette that lists all lights in the model. | 具名拒绝（`lightlist.unsupported: 3D light objects are not modeled`）。 |
 | 496 | `LIGHTLISTCLOSE` | 部分实现 | Closes the Lights in Model palette. | 具名拒绝（`lightlistclose.unsupported: 3D light objects are not modeled`）。 |
