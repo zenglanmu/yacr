@@ -238,7 +238,7 @@
   "measure.kind.volume": "体积",
   "measure.kind.measuregeom_volume.hint": "未实现：本构建没有 3D 实体或体积模型，VOLUME 会显式拒绝，不会编造数值。",
   "draw.kind.massprop": "质量特性",
-  "draw.kind.massprop.hint": "请先选择至少一个闭合平面对象（圆、完整椭圆或含弧段的闭合多段线，且全部共面）；MASSPROP 报告面积、周长、包围盒与形心。惯性矩、主惯性轴、体积、密度、Add/Subtract 与 .mpr 文件未实现。",
+  "draw.kind.massprop.hint": "请先选择至少一个闭合平面对象（圆、完整椭圆、含弧段的闭合多段线、闭合样条或填充环，且全部共面）；MASSPROP 报告面积、周长、包围盒、形心、绕形心的二阶矩 Ix/Iy/Ixy、J、kx/ky，并对整个选择给出主惯性矩 I1/I2、主轴 axis1/axis2、主角与所用坐标系。体积、质量、密度、3D 惯性矩、Add/Subtract 与 .mpr 文件未建模。",
   "layers.panel": "图层",
   "layers.override_count": "临时覆盖 {count}",
   "layers.restore": "恢复",

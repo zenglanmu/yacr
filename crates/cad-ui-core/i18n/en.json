@@ -238,7 +238,7 @@
   "measure.kind.volume": "Volume",
   "measure.kind.measuregeom_volume.hint": "Not implemented: this build has no 3D solid or volume model; VOLUME is refused explicitly and no number is fabricated.",
   "draw.kind.massprop": "Mass properties",
-  "draw.kind.massprop.hint": "Select at least one closed planar object (circle, full ellipse or a closed polyline with any bulges, all coplanar); MASSPROP reports area, perimeter, bounding box and centroid. Moments of inertia, principal axes, volume, density, Add/Subtract and .mpr output are not implemented.",
+  "draw.kind.massprop.hint": "Select at least one closed planar object (circle, full ellipse, a closed polyline with any bulges, a closed spline or a hatch loop, all coplanar); MASSPROP reports area, perimeter, bounding box, centroid, the moments of inertia Ix/Iy/Ixy about the centroid, J, the radii of gyration kx/ky, and for the whole selection the principal moments of inertia I1/I2 with axis1/axis2, the principal angle and the frame used. Volume, mass, density, 3D inertia, Add/Subtract and .mpr files are not modelled.",
   "layers.panel": "Layers",
   "layers.override_count": "{count} overridden",
   "layers.restore": "Restore",
