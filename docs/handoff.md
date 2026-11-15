@@ -58,6 +58,8 @@
 cad-import-acadrust 430、cad-ui-core 744、cad-host 342、cad-representation 321、
 `cad-render-wgpu` 全 target（GPU 用例串行）。
 
+**真机 GUI 证据（wave 2）**：`scripts/collect-evidence.sh --backend wayland --no-build --dwg fixtures/dxf/qcad-flange/flange.dxf` → `NATURAL_EXIT exit=0` + 合成帧 （`/tmp/opencode/evidence-wave2/`）。真实 Vulkan `Quadro P620` 上 `BASE 1 2 0`、`BASE`、`SETVAR INSBASE`、`LIMITS 0 0 100 50`、`SCALELISTEDIT`、`STATUS` 全部被接受（entityCount 419 不变，无意外几何改动）；`SETVAR CVPORT` 在模型空间给出 `setvar.not_stored: CVPORT is modelled but it is a paper-space value … (switch with PSPACE first)` —— 具名解释而不是伪造值。边界：GUI 只证明命令被接受/按名拒绝，数值正确性由契约测试证明；`TABLEEXPORT` 需选中表格、`LAYOUT COPY`/`CHSPACE` 需图纸空间选择，本波**未**在真机点击验证；Windows/macOS/Android/Web NOT VERIFIED；无像素/GPU 性能结论。
+
 **声明边界（本轮新增）**：`BASE`/`LIMITS`/`SCALELISTEDIT` 的写入**没有撤销步**
 （`cad-history` 无 header/scale 补丁种类，诊断里声明 `*.no_history`）；导入侧仍不读
 `$INSBASE`/`$LIMMIN`/`$LIMMAX`；acadrust 的 DXF writer 不写 `$CANNOSCALE`，故改名级联不随导出保留。
