@@ -49,6 +49,47 @@
 //! value; a number outside `0..=2` is `wipeoutframe.out_of_range` (never a
 //! clamp). `SETVAR WIPEOUTFRAME [<n>]` reads/writes the same variable.
 //!
+//! # `CVPORT`: the session current-viewport marker
+//!
+//! `CVPORT` is the system variable that names **which viewport of the active
+//! paper layout** the viewport-scoped commands act on. It is session state only:
+//! the marker lives in `SessionState::viewport_markers` as one zero-based
+//! `cad_db::Layout::viewports` index per paper layout, so `CVPORT <n>` performs
+//! **no** database write, opens no transaction, bumps no revision, records no
+//! `cad-history` entry and produces no `ChangeSet` (and therefore no undo step).
+//!
+//! * Bare `CVPORT` reports the stored marker of the active layout (its position
+//!   and the layout's viewport count) and names the viewport `LAYVPI`,
+//!   `VPSCALE` and `VPCLIP` will target.
+//! * `CVPORT <n>` validates `n` against the active layout's viewport count and
+//!   refuses anything outside `1..=<count>` by name (`cvport.out_of_range`,
+//!   never clamped). The command line is **one-based** (AutoCAD's numbering: the
+//!   first viewport of a layout is `1`); the stored marker and every payload
+//!   index remain zero-based.
+//! * The marker is **per layout**: switching layouts reports that layout's own
+//!   stored marker, or the documented default `1` (its first viewport) when the
+//!   layout has never been pointed at one. A layout with **no viewport** has no
+//!   current viewport at all and reports `cvport.no_viewports` instead of a
+//!   fabricated `1`.
+//! * Model space is refused by name (`cvport.paper_space_required`): this build
+//!   stores the marker per paper layout only, and inventing a model-space
+//!   viewport id would be a fake.
+//!
+//! A stored marker that no longer names a viewport (the layout's viewport list
+//! shrank) is refused by every reader (`cvport.out_of_range` for `CVPORT`,
+//! `<command>.current_viewport_out_of_range` for the three commands) instead of
+//! silently falling back to the first viewport.
+//!
+//! Consumers:
+//!
+//! * `LAYVPI` (no index) freezes the named layers in every viewport **except**
+//!   the current one ([`crate::command_id::layout`]);
+//! * `VPSCALE` (no index) rescales the current viewport;
+//! * `VPCLIP` (no index) replaces the current viewport's clip.
+//!
+//! All three keep their explicit-index forms, and an explicit index always wins
+//! over the marker.
+//!
 //! # LINETYPE
 //!
 //! `LINETYPE LIST` is a read-only report of the drawing's linetype table.

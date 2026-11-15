@@ -10,14 +10,16 @@
 //! viewport-alignment writes each publish exactly one revision and one undo
 //! step. The typed `PAGESETUP`/`PSETUPIN` writes live here too
 //! (`page_setup_write`). `LAYVPI` writes real per-viewport layer overrides
-//! ([`cad_db::PaperViewport::layer_overrides`]); because this build has no
-//! viewport selection, the unscoped form applies them to every viewport of the
-//! active layout, the targeted form applies them to one viewport index, and
-//! neither touches the global layer table. The full boundary is in
-//! [`crate::command_id::layout`].
+//! ([`cad_db::PaperViewport::layer_overrides`]): the no-argument form applies
+//! them to every viewport of the active layout **except the current one** (the
+//! session `CVPORT` marker, AutoCAD's own default) and the explicit-index form to
+//! one viewport; neither touches the global layer table. `VPSCALE` and `VPCLIP`
+//! target the same marker unless their payload carries an explicit index. The
+//! full boundary is in [`crate::command_id::layout`].
 //!
-//! `MVIEW` and the polygonal `VPCLIP` live in the sibling `app_layout_mview`
-//! and `app_layout_vpclip` modules; `ALIGNSPACE`/`VPSYNC` live in
+//! `MVIEW` and both `VPCLIP` forms (rectangle and polygon, with their viewport
+//! targeting) live in the sibling `app_layout_mview` and `app_layout_vpclip`
+//! modules; `ALIGNSPACE`/`VPSYNC` live in
 //! `app_layout_viewport_align`. They are declared here (with an explicit
 //! `#[path]`) so this module keeps one dispatch and stays inside the 1000-line
 //! code gate.
@@ -165,6 +167,10 @@ impl Application {
                     // no longer restorable, so the reserved slot goes with it.
                     session.view_states.remove(VPMAX_RESTORE_VIEW);
                 }
+                // The deleted layout's `CVPORT` marker names a viewport that no
+                // longer exists; forget it so a later `CVPORT` report can never
+                // resurrect a dead layout's selection. Session state only.
+                session.forget_viewport_marker(id);
                 self.publish_layout_record(
                     document_id,
                     candidate,
@@ -492,172 +498,18 @@ impl Application {
                     point_report: None,
                 })
             }
-            LayoutPayload::ClipRect { min, max } => {
-                let layout_id = require_paper_space(session, "vpclip")?;
-                if !min.x.is_finite()
-                    || !min.y.is_finite()
-                    || !max.x.is_finite()
-                    || !max.y.is_finite()
-                    || min.x >= max.x
-                    || min.y >= max.y
-                {
-                    return Err(CadError::InvalidInput(
-                        "vpclip.degenerate_rect: VPCLIP RECT needs finite minx < maxx and \
-                         miny < maxy"
-                            .into(),
-                    ));
-                }
-                let document_id = command.document;
-                let drawing = self.drawing(document_id)?.clone();
-                let mut viewports = layout_viewports(&drawing, layout_id)?;
-                let viewport = viewports.first_mut().ok_or_else(|| {
-                    CadError::Unsupported(format!(
-                        "vpclip.no_viewport: layout {} has no viewport to clip; this build has \
-                         no viewport selection, so VPCLIP uses the first viewport",
-                        layout_id.0
-                    ))
-                })?;
-                let clip = vec![
-                    Point3 {
-                        x: min.x,
-                        y: min.y,
-                        z: 0.0,
-                    },
-                    Point3 {
-                        x: max.x,
-                        y: min.y,
-                        z: 0.0,
-                    },
-                    Point3 {
-                        x: max.x,
-                        y: max.y,
-                        z: 0.0,
-                    },
-                    Point3 {
-                        x: min.x,
-                        y: max.y,
-                        z: 0.0,
-                    },
-                ];
-                viewport.clip = clip;
-                let before = layout_row(&drawing, layout_id);
-                let transaction = next_transaction_id();
-                let mut candidate = drawing;
-                let change_set =
-                    candidate.set_layout_viewports(layout_id, viewports, transaction, "vpclip")?;
-                let after = layout_row(&candidate, layout_id);
-                self.publish_layout_record(
-                    document_id,
-                    candidate,
-                    transaction,
-                    "vpclip",
-                    vec![layout_patch(layout_id, before, after)],
-                )?;
-                Ok(CommandOutcome {
-                    objects: Vec::new(),
-                    changes: Some(Arc::new(change_set)),
-                    diagnostics: vec![Diagnostic {
-                        object: None,
-                        code: "vpclip.applied".into(),
-                        message: format!(
-                            "VPCLIP RECT: replaced the clip of viewport 0 in layout {} with the \
-                             rectangle ({}, {})-({}, {}); this build has no viewport selection, so \
-                             the first viewport was clipped (use the polygonal VPCLIP form for a \
-                             non-rectangular boundary)",
-                            layout_id.0, min.x, min.y, max.x, max.y
-                        ),
-                    }],
-                    measurement: None,
-                    point_report: None,
-                })
+            LayoutPayload::ClipRect { min, max, viewport } => {
+                self.clip_rect(session, command, *min, *max, *viewport)
             }
-            LayoutPayload::Scale { name } => {
-                let layout_id = require_paper_space(session, "vpscale")?;
-                let document_id = command.document;
-                let drawing = self.drawing(document_id)?.clone();
-                let (scale_name, factor) = resolve_viewport_scale(&drawing, name)?;
-                if !factor.is_finite() || factor <= 0.0 {
-                    return Err(CadError::InvalidInput(format!(
-                        "vpscale.invalid_factor: resolved scale {:?} has a non-finite or \
-                         non-positive factor {factor}",
-                        scale_name
-                    )));
-                }
-                let mut viewports = layout_viewports(&drawing, layout_id)?;
-                let viewport = viewports.first_mut().ok_or_else(|| {
-                    CadError::Unsupported(format!(
-                        "vpscale.no_viewport: layout {} has no viewport to scale; this build has \
-                         no viewport selection, so VPSCALE uses the first viewport",
-                        layout_id.0
-                    ))
-                })?;
-                // `factor` is paper/drawing, so the stored paper→model diagonal
-                // is its reciprocal (model units per paper unit).
-                let new_scale = 1.0 / factor;
-                let center = clip_center(&viewport.clip).ok_or_else(|| {
-                    CadError::InvalidInput(format!(
-                        "vpscale.invalid_viewport: the clip of layout {} viewport 0 has no \
-                         finite paper rectangle",
-                        layout_id.0
-                    ))
-                })?;
-                let old_scale = viewport.model_to_paper.matrix[0][0];
-                let old_scale_y = viewport.model_to_paper.matrix[1][1];
-                if !old_scale.is_finite()
-                    || !old_scale_y.is_finite()
-                    || old_scale <= 0.0
-                    || old_scale_y <= 0.0
-                {
-                    return Err(CadError::InvalidInput(format!(
-                        "vpscale.invalid_viewport: layout {} viewport 0 has a non-finite or \
-                         non-positive model_to_paper scale",
-                        layout_id.0
-                    )));
-                }
-                // Preserve the model point shown at the clip centre:
-                // anchor = translation + scale * paper_center.
-                let old_tx = viewport.model_to_paper.matrix[0][3];
-                let old_ty = viewport.model_to_paper.matrix[1][3];
-                let anchor_x = old_tx + old_scale * center.x;
-                let anchor_y = old_ty + old_scale_y * center.y;
-                viewport.model_to_paper.matrix[0][0] = new_scale;
-                viewport.model_to_paper.matrix[1][1] = new_scale;
-                viewport.model_to_paper.matrix[0][3] = anchor_x - new_scale * center.x;
-                viewport.model_to_paper.matrix[1][3] = anchor_y - new_scale * center.y;
-                let before = layout_row(&drawing, layout_id);
-                let transaction = next_transaction_id();
-                let mut candidate = drawing;
-                let change_set =
-                    candidate.set_layout_viewports(layout_id, viewports, transaction, "vpscale")?;
-                let after = layout_row(&candidate, layout_id);
-                self.publish_layout_record(
-                    document_id,
-                    candidate,
-                    transaction,
-                    "vpscale",
-                    vec![layout_patch(layout_id, before, after)],
-                )?;
-                Ok(CommandOutcome {
-                    objects: Vec::new(),
-                    changes: Some(Arc::new(change_set)),
-                    diagnostics: vec![Diagnostic {
-                        object: None,
-                        code: "vpscale.applied".into(),
-                        message: format!(
-                            "VPSCALE: applied scale {:?} (paper/drawing factor {factor}) to \
-                             viewport 0 of layout {}; stored model units per paper unit = \
-                             {new_scale}",
-                            scale_name, layout_id.0
-                        ),
-                    }],
-                    measurement: None,
-                    point_report: None,
-                })
+            LayoutPayload::Scale { name, viewport } => {
+                self.vp_scale(session, command, name, *viewport)
             }
             LayoutPayload::FreezeViewportLayers { layers } => {
                 self.freeze_viewport_layers(session, command, layers)
             }
-            LayoutPayload::ClipPolygon { points } => self.clip_polygon(session, command, points),
+            LayoutPayload::ClipPolygon { points, viewport } => {
+                self.clip_polygon(session, command, points, *viewport)
+            }
             LayoutPayload::FreezeViewportLayersIn { layers, viewport } => {
                 self.freeze_viewport_layers_at(session, command, layers, *viewport)
             }
@@ -668,6 +520,123 @@ impl Application {
                 self.page_setup_write(command, payload.as_ref())
             }
         }
+    }
+
+    /// `VPSCALE <scale>`: apply a scale to the targeted viewport.
+    ///
+    /// `explicit` is the payload's zero-based viewport index; `None` means the
+    /// session `CVPORT` current viewport of the active layout. The explicit index
+    /// always wins and a stale marker refuses by name
+    /// (`vpscale.current_viewport_out_of_range`), never silently retargeting the
+    /// first viewport.
+    ///
+    /// Both forms store the documented **`1 / factor`** paper→model diagonal
+    /// (`factor` is the paper/drawing ratio of the resolved scale) on the X and Y
+    /// axes and keep the model point shown at the clip centre: the translation is
+    /// recomputed as `anchor - new_scale * paper_center`, so the visible model
+    /// window is preserved. One validated `set_layout_viewports` write, one
+    /// revision, one undo step; the `CVPORT` marker itself is not written.
+    fn vp_scale(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        name: &str,
+        explicit: Option<usize>,
+    ) -> CadResult<CommandOutcome> {
+        let layout_id = require_paper_space(session, "vpscale")?;
+        let document_id = command.document;
+        let drawing = self.drawing(document_id)?.clone();
+        let (scale_name, factor) = resolve_viewport_scale(&drawing, name)?;
+        if !factor.is_finite() || factor <= 0.0 {
+            return Err(CadError::InvalidInput(format!(
+                "vpscale.invalid_factor: resolved scale {:?} has a non-finite or non-positive \
+                 factor {factor}",
+                scale_name
+            )));
+        }
+        let mut viewports = layout_viewports(&drawing, layout_id)?;
+        if viewports.is_empty() {
+            return Err(CadError::Unsupported(format!(
+                "vpscale.no_viewport: layout {} has no viewport to scale",
+                layout_id.0
+            )));
+        }
+        let index = crate::session_state::target_viewport(
+            layout_id,
+            explicit,
+            session.viewport_marker(layout_id),
+            viewports.len(),
+            "vpscale",
+        )?;
+        let viewport = &mut viewports[index];
+        // `factor` is paper/drawing, so the stored paper→model diagonal is its
+        // reciprocal (model units per paper unit).
+        let new_scale = 1.0 / factor;
+        let center = clip_center(&viewport.clip).ok_or_else(|| {
+            CadError::InvalidInput(format!(
+                "vpscale.invalid_viewport: the clip of layout {} viewport {index} has no finite \
+                 paper rectangle",
+                layout_id.0
+            ))
+        })?;
+        let old_scale = viewport.model_to_paper.matrix[0][0];
+        let old_scale_y = viewport.model_to_paper.matrix[1][1];
+        if !old_scale.is_finite()
+            || !old_scale_y.is_finite()
+            || old_scale <= 0.0
+            || old_scale_y <= 0.0
+        {
+            return Err(CadError::InvalidInput(format!(
+                "vpscale.invalid_viewport: layout {} viewport {index} has a non-finite or \
+                 non-positive model_to_paper scale",
+                layout_id.0
+            )));
+        }
+        // Preserve the model point shown at the clip centre:
+        // anchor = translation + scale * paper_center.
+        let old_tx = viewport.model_to_paper.matrix[0][3];
+        let old_ty = viewport.model_to_paper.matrix[1][3];
+        let anchor_x = old_tx + old_scale * center.x;
+        let anchor_y = old_ty + old_scale_y * center.y;
+        viewport.model_to_paper.matrix[0][0] = new_scale;
+        viewport.model_to_paper.matrix[1][1] = new_scale;
+        viewport.model_to_paper.matrix[0][3] = anchor_x - new_scale * center.x;
+        viewport.model_to_paper.matrix[1][3] = anchor_y - new_scale * center.y;
+        let before = layout_row(&drawing, layout_id);
+        let transaction = next_transaction_id();
+        let mut candidate = drawing;
+        let change_set =
+            candidate.set_layout_viewports(layout_id, viewports, transaction, "vpscale")?;
+        let after = layout_row(&candidate, layout_id);
+        self.publish_layout_record(
+            document_id,
+            candidate,
+            transaction,
+            "vpscale",
+            vec![layout_patch(layout_id, before, after)],
+        )?;
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: Some(Arc::new(change_set)),
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "vpscale.applied".into(),
+                message: format!(
+                    "VPSCALE: applied scale {:?} (paper/drawing factor {factor}) to viewport \
+                     {index} of layout {}; stored model units per paper unit = {new_scale}; the \
+                     target came from {} and the CVPORT marker itself was not written",
+                    scale_name,
+                    layout_id.0,
+                    if explicit.is_some() {
+                        "the explicit payload index, which overrides CVPORT"
+                    } else {
+                        "the session CVPORT current viewport"
+                    }
+                ),
+            }],
+            measurement: None,
+            point_report: None,
+        })
     }
 
     /// Create one layout row and record it as one undo step.

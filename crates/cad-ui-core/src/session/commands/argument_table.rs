@@ -104,6 +104,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     VIEW_SELECTOR,
     VIEWGO_SELECTOR,
     VPOINT_SELECTOR,
+    // `CVPORT <n>`: the session current-viewport marker of the active paper
+    // layout (one-based position; the bare selector reports it).
+    CVPORT_SELECTOR,
     // The 2026-11-07 layout/viewport batch argument forms, plus the typed
     // `PAGESETUP`/`PSETUPIN`/`MVIEW` writes. The dash spellings are distinct
     // extended selectors, not aliases, so each has its own row.

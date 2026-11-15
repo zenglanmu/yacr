@@ -1,27 +1,37 @@
-//! `LAYVPI`: freeze layers in every viewport of the active paper layout.
+//! `LAYVPI`: freeze layers in the active paper layout's viewports.
 //!
 //! The overrides live in [`cad_db::PaperViewport::layer_overrides`] (per
 //! viewport, never the global layer table), so the write is one validated
 //! `set_layout_viewports` call recorded as one [`cad_db::LayoutPatch`] — one
-//! revision and one undo step. This build has no viewport selection: the
-//! unscoped form (`FreezeViewportLayers`) declares the scope "every viewport of
-//! the active layout", stated in the `layvpi.frozen` diagnostic and in
+//! revision and one undo step.
+//!
+//! # Scope (AutoCAD's own default, now real)
+//!
+//! The no-argument form freezes the named layers in **every viewport except the
+//! current one**. The current viewport is the session `CVPORT` marker of the
+//! active layout ([`crate::command_id::extras`]); setting that marker is session
+//! state and never part of this write.
+//!
+//! The targeted form (`FreezeViewportLayersIn`) takes an explicit zero-based
+//! viewport index and always wins over the marker, so a caller can still freeze
+//! the current viewport itself. Both forms are documented in
 //! [`crate::command_id::layout`].
 //!
-//! AutoCAD's `LAYVPI` freezes in *all viewports except the current one*. This
-//! build stores no current-viewport marker for the freeze scope, so that exact
-//! default is **not** what the unscoped form does. The targeted form
-//! (`FreezeViewportLayersIn`) takes an explicit viewport index, which is how a
-//! caller expresses "all except the current one" today: it issues the
-//! per-index form for every index it wants and skips the current viewport. The
-//! command-line parser (`cad-ui-core`) does not produce that form yet — a
-//! documented residual of that out-of-scope lane, not a behaviour of this one.
+//! # Refusals (nothing frozen, no transaction, no undo entry)
 //!
-//! # Residual
+//! * `layvpi.paper_space_required` — the active space is not a paper layout;
+//! * `layvpi.invalid_argument` — no layer name;
+//! * `layvpi.unknown_layer` / `layvpi.ambiguous_layer` — a name that does not
+//!   resolve uniquely (resolved **before** anything mutates);
+//! * `layvpi.no_viewport` — the layout has no viewport at all;
+//! * `layvpi.no_other_viewport` — the no-argument form has nothing to freeze
+//!   because the layout's only viewport **is** the current one; the explicit
+//!   index form is the documented way to freeze it;
+//! * `layvpi.current_viewport_out_of_range` — the stored `CVPORT` marker no
+//!   longer names a viewport of this layout (never clamped to the first);
+//! * `layvpi.unknown_viewport` — an explicit index outside the viewport count.
 //!
-//! The unscoped form is `all viewports`, the targeted form is one index. The
-//! "except current" default needs a current-viewport marker the session does
-//! not own for layer freezes, so it stays unimplemented rather than guessed.
+//! An already-frozen state is `layvpi.unchanged` and opens no transaction.
 
 use super::*;
 
@@ -30,9 +40,11 @@ use cad_history::layout_patch;
 use crate::app_drawing::{layout_row, next_transaction_id};
 use crate::app_layout::{layout_viewports, require_paper_space};
 use crate::app_layout_names::resolve_layer_name;
+use crate::session_state::target_viewport;
 
 impl Application {
-    /// Handle `LayoutPayload::FreezeViewportLayers`.
+    /// Handle `LayoutPayload::FreezeViewportLayers`: every viewport except the
+    /// session `CVPORT` current one.
     pub(super) fn freeze_viewport_layers(
         &mut self,
         session: &SessionState,
@@ -53,7 +65,8 @@ impl Application {
         self.freeze_viewport_layers_impl(session, command, layers, Some(viewport))
     }
 
-    /// The one `LAYVPI` write, scoped to every viewport or to one index.
+    /// The one `LAYVPI` write: `only = None` is "every viewport but the current
+    /// one" (AutoCAD's default), `Some(i)` is the explicit index.
     fn freeze_viewport_layers_impl(
         &mut self,
         session: &SessionState,
@@ -93,19 +106,36 @@ impl Application {
                 layout_id.0
             )));
         }
-        if let Some(index) = only {
-            if index >= viewports.len() {
-                return Err(CadError::InvalidInput(format!(
-                    "layvpi.unknown_viewport: layout {} has {} viewport(s); there is no viewport \
-                     {index} to freeze",
-                    layout_id.0,
-                    viewports.len()
-                )));
+        let viewport_count = viewports.len();
+        // The current viewport is the session `CVPORT` marker. The no-argument
+        // form needs it to exclude it; the explicit form still validates it so a
+        // stale marker is reported rather than silently ignored.
+        let current = target_viewport(
+            layout_id,
+            only,
+            session.viewport_marker(layout_id),
+            viewport_count,
+            "layvpi",
+        )?;
+        let scope = match only {
+            Some(index) => Scope::Only(index),
+            None => {
+                if viewport_count == 1 {
+                    return Err(CadError::Unsupported(format!(
+                        "layvpi.no_other_viewport: layout {} has a single viewport and it is the \
+                         current one (CVPORT {}), so \"every viewport except the current one\" is \
+                         empty; use the explicit viewport-index form to freeze the current \
+                         viewport itself, or add another viewport first",
+                        layout_id.0,
+                        current + 1
+                    )));
+                }
+                Scope::EveryExcept(current)
             }
-        }
+        };
         let mut changed = false;
         for (index, viewport) in viewports.iter_mut().enumerate() {
-            if only.is_some_and(|wanted| wanted != index) {
+            if !scope.targets(index) {
                 continue;
             }
             for (id, _) in &frozen {
@@ -124,10 +154,7 @@ impl Application {
                     code: "layvpi.unchanged".into(),
                     message: format!(
                         "LAYVPI: {} already freezes the named layer(s); no transaction was opened",
-                        match only {
-                            Some(index) => format!("viewport {index} of layout {}", layout_id.0),
-                            None => format!("every viewport of layout {}", layout_id.0),
-                        }
+                        scope.describe(layout_id)
                     ),
                 }],
                 measurement: None,
@@ -137,7 +164,6 @@ impl Application {
         let before = layout_row(&drawing, layout_id);
         let transaction = next_transaction_id();
         let mut candidate = drawing;
-        let viewport_count = viewports.len();
         let change_set =
             candidate.set_layout_viewports(layout_id, viewports, transaction, "layvpi")?;
         let after = layout_row(&candidate, layout_id);
@@ -159,24 +185,58 @@ impl Application {
             diagnostics: vec![Diagnostic {
                 object: None,
                 code: "layvpi.frozen".into(),
-                message: match only {
-                    Some(index) => format!(
-                        "LAYVPI: froze layer(s) {names} in viewport {index} of layout {} ({} of \
-                         {viewport_count} viewport(s); the global layer table is unchanged)",
+                message: match scope {
+                    Scope::Only(index) => format!(
+                        "LAYVPI: froze layer(s) {names} in viewport {index} of layout {} (position \
+                         {} of {viewport_count}; the explicit index overrides the CVPORT marker and \
+                         the global layer table is unchanged)",
                         layout_id.0,
                         index + 1
                     ),
-                    None => format!(
-                        "LAYVPI: froze layer(s) {names} in all {viewport_count} viewport(s) of \
-                         layout {}; this form has no viewport selection, so every viewport of the \
-                         active layout received the override, and the global layer table is \
-                         unchanged",
-                        layout_id.0
+                    Scope::EveryExcept(current) => format!(
+                        "LAYVPI: froze layer(s) {names} in every viewport of layout {} except the \
+                         current one (CVPORT {}, zero-based index {current}): {} of {viewport_count} \
+                         viewport(s) received the override, the current viewport and the global \
+                         layer table are unchanged",
+                        layout_id.0,
+                        current + 1,
+                        viewport_count - 1
                     ),
                 },
             }],
             measurement: None,
             point_report: None,
         })
+    }
+}
+
+/// Which viewports one `LAYVPI` write touches.
+#[derive(Debug, Clone, Copy)]
+enum Scope {
+    /// Exactly one viewport (the explicit-index form).
+    Only(usize),
+    /// Every viewport but this one (AutoCAD's no-argument default).
+    EveryExcept(usize),
+}
+
+impl Scope {
+    /// Whether `index` receives the override.
+    fn targets(self, index: usize) -> bool {
+        match self {
+            Self::Only(wanted) => index == wanted,
+            Self::EveryExcept(current) => index != current,
+        }
+    }
+
+    /// The scope sentence the `layvpi.unchanged` report uses.
+    fn describe(self, layout: LayoutId) -> String {
+        match self {
+            Self::Only(index) => format!("viewport {index} of layout {}", layout.0),
+            Self::EveryExcept(current) => format!(
+                "every viewport of layout {} except the current one (CVPORT {})",
+                layout.0,
+                current + 1
+            ),
+        }
     }
 }

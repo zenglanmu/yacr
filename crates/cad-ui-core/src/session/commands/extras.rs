@@ -3,9 +3,10 @@
 //! These are **argument forms of canonical selectors**, never new IPC:
 //! [`PAN_SELECTOR`] (`-PAN`), [`TRACE_SELECTOR`], [`MOCORO_SELECTOR`],
 //! [`VIEWRES_SELECTOR`], [`VSCURRENT_SELECTOR`], [`WIPEOUTFRAME_SELECTOR`],
-//! [`COLOR_SELECTOR`] (`-COLOR` is the same token) and [`LINETYPE_SELECTOR`] are
-//! admitted by [`super::ARGUMENT_SELECTORS`], parsed here, and dispatched by the
-//! session as the matching [`cad_app::CommandId`] with a payload.
+//! [`CVPORT_SELECTOR`], [`COLOR_SELECTOR`] (`-COLOR` is the same token) and
+//! [`LINETYPE_SELECTOR`] are admitted by [`super::ARGUMENT_SELECTORS`], parsed
+//! here, and dispatched by the session as the matching [`cad_app::CommandId`]
+//! with a payload.
 //!
 //! `SKETCH` and `MSTRETCH` have **no** command-line grammar in this build:
 //! their complete input (a sampled point sequence / a rectangle list) is carried
@@ -22,6 +23,8 @@
 //! * `VSCURRENT <style>` (the command layer names the unsupported styles);
 //! * `WIPEOUTFRAME <0|1|2>` (the system-variable spelling of `WIPEOUT Frames`;
 //!   the bare selector reports the current value);
+//! * `CVPORT <n>` (the session current-viewport marker of the active paper
+//!   layout, one-based; the bare selector reports it);
 //! * `COLOR <aci 0..=256>` / `COLOR BYLAYER|BYBLOCK` (the session current-colour
 //!   token every created entity inherits; the bare selector reports it);
 //! * `LINETYPE LIST` or `LINETYPE SET <name>` (the name takes the whole
@@ -44,6 +47,8 @@ pub const VIEWRES_SELECTOR: &str = "VIEWRES";
 pub const VSCURRENT_SELECTOR: &str = "VSCURRENT";
 /// `WIPEOUTFRAME [0|1|2]` — the system-variable spelling of `WIPEOUT Frames`.
 pub const WIPEOUTFRAME_SELECTOR: &str = "WIPEOUTFRAME";
+/// `CVPORT [<n>]` — the session current-viewport marker of the active layout.
+pub const CVPORT_SELECTOR: &str = "CVPORT";
 /// `COLOR <aci>|BYLAYER|BYBLOCK` — the session current-colour token.
 pub const COLOR_SELECTOR: &str = "COLOR";
 /// `-COLOR <aci>|BYLAYER|BYBLOCK` — the prompt spelling of the same token.
@@ -202,6 +207,37 @@ pub fn parse_wipeoutframe_argument(argument: &str) -> Result<CommandPayload, Str
         )
     })?;
     Ok(CommandPayload::WipeoutFrame(frames))
+}
+
+/// `CVPORT <n>`: the session current-viewport marker of the active paper layout.
+///
+/// The grammar is one **positive** integer: a viewport *position* on the command
+/// line, one-based like AutoCAD (`1` is the layout's first viewport). `0`,
+/// non-integers and multi-token input are refused by name before dispatch; the
+/// upper bound is the active layout's viewport count, which only the command
+/// layer knows, so it is validated there (`cvport.out_of_range`, never clamped).
+pub fn parse_cvport_argument(argument: &str) -> Result<CommandPayload, String> {
+    let token = argument.trim();
+    if token.is_empty() || token.split_whitespace().count() != 1 {
+        return Err(invalid(
+            "CVPORT",
+            "CVPORT <viewport position> (one-based; the bare selector reports it)",
+        ));
+    }
+    let Ok(position) = token.parse::<u32>() else {
+        return Err(invalid(
+            "CVPORT",
+            "CVPORT needs one positive integer viewport position",
+        ));
+    };
+    if position == 0 {
+        return Err(
+            "cvport.out_of_range: CVPORT positions are one-based, so 0 is not a viewport; \
+             nothing was changed"
+                .into(),
+        );
+    }
+    Ok(CommandPayload::Cvport(position))
 }
 
 /// `256`: the ACI the handler and the create funnel read as `ByLayer`.

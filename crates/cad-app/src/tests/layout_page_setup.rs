@@ -476,6 +476,7 @@ fn vpclip_refuses_a_three_point_boundary_on_a_translation_free_viewport() {
             CommandId::VpClip,
             layout_payload(LayoutPayload::ClipPolygon {
                 points: vec![point(-5.0, -5.0), point(5.0, -5.0), point(0.0, 8.0)],
+                viewport: None,
             }),
         ),
     ));
@@ -495,6 +496,7 @@ fn vpclip_refuses_a_three_point_boundary_on_a_translation_free_viewport() {
                     point(5.0, 5.0),
                     point(0.0, 8.0),
                 ],
+                viewport: None,
             }),
         ),
     )
@@ -525,6 +527,7 @@ fn vpclip_polygon_replaces_the_clip_after_a_mview_and_round_trips() {
                 CommandId::VpClip,
                 layout_payload(LayoutPayload::ClipPolygon {
                     points: polygon.clone(),
+                    viewport: None,
                 }),
             ),
         )
@@ -575,6 +578,7 @@ fn vpclip_polygon_refuses_bad_boundaries_by_name() {
             CommandId::VpClip,
             layout_payload(LayoutPayload::ClipPolygon {
                 points: vec![point(0.0, 0.0), point(10.0, 0.0), point(0.0, 10.0)],
+                viewport: None,
             }),
         ),
     ));
@@ -613,7 +617,10 @@ fn vpclip_polygon_refuses_bad_boundaries_by_name() {
             &mut session,
             command(
                 CommandId::VpClip,
-                layout_payload(LayoutPayload::ClipPolygon { points }),
+                layout_payload(LayoutPayload::ClipPolygon {
+                    points,
+                    viewport: None,
+                }),
             ),
         ));
         assert!(error.contains(expected), "expected {expected}, got {error}");

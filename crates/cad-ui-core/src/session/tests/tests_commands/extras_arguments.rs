@@ -7,10 +7,11 @@ use super::super::test_support::*;
 use cad_app::{CommandPayload, LinetypeCommand, MocoroCommand};
 
 use crate::session::commands::{
-    parse_linetype_argument, parse_mocoro_argument, parse_pan_argument, parse_trace_argument,
-    parse_viewres_argument, parse_vscurrent_argument, parse_wipeoutframe_argument,
-    ARGUMENT_SELECTORS, LINETYPE_SELECTOR, MOCORO_SELECTOR, PAN_SELECTOR, TRACE_SELECTOR,
-    VIEWRES_SELECTOR, VSCURRENT_SELECTOR, WIPEOUTFRAME_SELECTOR,
+    parse_cvport_argument, parse_linetype_argument, parse_mocoro_argument, parse_pan_argument,
+    parse_trace_argument, parse_viewres_argument, parse_vscurrent_argument,
+    parse_wipeoutframe_argument, ARGUMENT_SELECTORS, CVPORT_SELECTOR, LINETYPE_SELECTOR,
+    MOCORO_SELECTOR, PAN_SELECTOR, TRACE_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR,
+    WIPEOUTFRAME_SELECTOR,
 };
 
 #[test]
@@ -22,6 +23,7 @@ fn every_extras_selector_has_a_table_row_and_its_argument_form_is_admitted() {
     assert_eq!(command_name(CommandId::ViewRes), Some("VIEWRES"));
     assert_eq!(command_name(CommandId::VisualStyle), Some("VSCURRENT"));
     assert_eq!(command_name(CommandId::WipeoutFrame), Some("WIPEOUTFRAME"));
+    assert_eq!(command_name(CommandId::Cvport), Some("CVPORT"));
     assert_eq!(command_name(CommandId::Linetype), Some("LINETYPE"));
     for selector in [
         PAN_SELECTOR,
@@ -30,6 +32,7 @@ fn every_extras_selector_has_a_table_row_and_its_argument_form_is_admitted() {
         VIEWRES_SELECTOR,
         VSCURRENT_SELECTOR,
         WIPEOUTFRAME_SELECTOR,
+        CVPORT_SELECTOR,
         LINETYPE_SELECTOR,
     ] {
         assert!(
@@ -240,4 +243,56 @@ fn wipeoutframe_command_stores_the_session_token_and_reports_it() {
     session
         .command("SETVAR WIPEOUTFRAME")
         .expect("SETVAR WIPEOUTFRAME reports");
+}
+
+#[test]
+fn cvport_grammar_is_one_positive_integer() {
+    // The command line is one-based: `1` is the layout's first viewport. The
+    // upper bound belongs to the application (it needs the layout's viewport
+    // count), so the parser admits any positive integer and refuses the rest.
+    for (text, expected) in [("1", 1), ("2", 2), ("  3  ", 3), ("42", 42)] {
+        assert!(
+            matches!(
+                parse_cvport_argument(text),
+                Ok(CommandPayload::Cvport(position)) if position == expected
+            ),
+            "{text:?} must parse to CVPORT {expected}"
+        );
+    }
+    // Zero is not a viewport: one-based numbering, refused by name.
+    let zero = match parse_cvport_argument("0") {
+        Err(reason) => reason,
+        Ok(_) => panic!("0 is not a viewport position"),
+    };
+    assert!(zero.contains("cvport.out_of_range"), "{zero}");
+    // Non-integers, multi-token input and an empty argument are the grammar
+    // refusal, never a fabricated default.
+    for text in ["", "ON", "1.0", "1 2", "-1", "0x1"] {
+        assert!(
+            parse_cvport_argument(text).is_err(),
+            "{text:?} must be refused"
+        );
+    }
+}
+
+#[test]
+fn cvport_selector_is_admitted_and_reaches_the_command_layer() {
+    assert_eq!(command_name(CommandId::Cvport), Some("CVPORT"));
+    assert!(
+        ARGUMENT_SELECTORS.contains(&CVPORT_SELECTOR),
+        "CVPORT must be an argument selector"
+    );
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    // The marker is per paper layout, so model space refuses by name instead of
+    // reporting AutoCAD's model-space `1`.
+    let error = session
+        .command("CVPORT")
+        .expect_err("model space has no current paper viewport");
+    assert!(error.contains("cvport.paper_space_required"), "{error}");
+    let error = session
+        .command("CVPORT 2")
+        .expect_err("model space has no current paper viewport");
+    assert!(error.contains("cvport.paper_space_required"), "{error}");
 }

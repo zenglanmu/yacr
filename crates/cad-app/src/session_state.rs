@@ -14,6 +14,9 @@ mod refedit;
 mod sysvar_monitor;
 mod toggles;
 mod view_extras;
+// The session `CVPORT` marker (one current viewport per paper layout), split
+// out so this file stays inside the code-size gate.
+mod viewport_marker;
 use crate::draw_tool::{
     DrawIntent, DrawPreview, DrawTool, DrawToolKind, ToolParameter, ToolParameterStore, ToolValue,
     DEFAULT_POLYGON_SIDES,
@@ -33,6 +36,11 @@ pub use modify_options::ModifyOptions;
 pub use refedit::{RefEditActive, RefEditMember, RefEditSession};
 pub use sysvar_monitor::SysVarMonitor;
 pub use view_extras::{ViewExtras, VisualStyleToken};
+pub use viewport_marker::ViewportMarkers;
+
+// The viewport-targeting resolver the `CVPORT` consumers (`LAYVPI`, `VPSCALE`,
+// `VPCLIP`) share. Crate-internal: it is a command-layer helper, not session API.
+pub(crate) use viewport_marker::target_viewport;
 
 /// One entity captured into the in-process clipboard: the row plus the
 /// per-entity render/visibility state the row does **not** carry.
@@ -89,6 +97,11 @@ pub struct SessionState {
     pub regen_generation: u64,
     /// `VPMAX`/`VPMIN` session marker; never drawing data.
     maximized_viewport: Option<LayoutViewportRef>,
+    /// The session `CVPORT` markers: one zero-based current viewport index per
+    /// paper layout. Session state only — never a database write, revision
+    /// bump, `cad-history` entry, undo step or `ChangeSet`; see
+    /// [`crate::session_state::ViewportMarkers`].
+    viewport_markers: ViewportMarkers,
     /// Session-only `VIEWRES` percentage and `VSCURRENT` style token.
     pub view_extras: ViewExtras,
     /// Session-only drafting flags toggled by the extended command batch
@@ -286,6 +299,7 @@ impl SessionState {
             groups: EntityGroups::new(),
             regen_generation: 0,
             maximized_viewport: None,
+            viewport_markers: ViewportMarkers::default(),
             view_extras: ViewExtras::default(),
             drafting_extras: DraftingExtras::default(),
             modify_options: ModifyOptions::default(),

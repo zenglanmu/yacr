@@ -32,34 +32,8 @@ pub use basic::*;
 mod style_tables;
 pub use style_tables::*;
 
-/// The direction of one `REFSET ADD|REMOVE` working-set edit.
-///
-/// Session-only: `REFSET` never writes the drawing, it only records which
-/// extracted entities (and which extra host objects) the in-place block edit
-/// owns. [`crate::CommandId::RefSet`] with a [`crate::CommandPayload::None`]
-/// means `Add` (AutoCAD's bare prompt default); the typed `REFSET REMOVE` line
-/// reaches this enum through the argument channel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RefSetOption {
-    /// Add the current selection to the working set.
-    Add,
-    /// Remove the current selection from the working set.
-    Remove,
-}
-
-/// The disposition of an active in-place block edit (`REFCLOSE SAVE|DISCARD`).
-///
-/// `Save` writes the working set back into the block definition; `Discard`
-/// deletes the extracted model-space clones and leaves the definition untouched.
-/// A bare `REFCLOSE` carries no option and is refused by name
-/// (`refclose.needs_option`), never defaulted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RefCloseOption {
-    /// Write the working set back into the block definition.
-    Save,
-    /// Delete the clones and leave the block definition unchanged.
-    Discard,
-}
+mod refedit_options;
+pub use refedit_options::{RefCloseOption, RefSetOption};
 
 pub enum CommandPayload {
     None,
@@ -929,6 +903,16 @@ pub enum CommandPayload {
     /// `0..=2` never reaches this payload: the typed parser refuses it by name
     /// (`wipeoutframe.out_of_range`) before dispatch.
     WipeoutFrame(WipeoutFrames),
+    /// `CVPORT <n>`: the session current-viewport marker of the active paper
+    /// layout, as a **one-based** viewport position (AutoCAD's own numbering).
+    ///
+    /// The bare selector carries [`CommandPayload::None`] and reports the
+    /// stored marker (and the viewport the three viewport-scoped commands will
+    /// target). `n` is validated against the active layout's viewport count by
+    /// the handler (`cvport.out_of_range`), never clamped. Session state only:
+    /// no database write, revision bump, `cad-history` entry or `ChangeSet`.
+    /// Contract: [`crate::command_id::extras`].
+    Cvport(u32),
     /// `COLOR <aci>`: the session current-colour ACI the create funnel stamps
     /// (`0` = ByBlock, `1..=255` = ACI, `256` = ByLayer); the bare selector keeps
     /// its report. Out of domain and Viewer are refused by the handler.

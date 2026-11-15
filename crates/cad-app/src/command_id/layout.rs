@@ -25,28 +25,53 @@
 //!   with their own stable code (`layoutwizard.plot_device_not_implemented`,
 //!   `layoutwizard.plot_style_not_implemented`,
 //!   `layoutwizard.title_block_not_implemented`) and are never applied.
-//! * `VPORTS` creates a declared simple `rows * cols` grid; `VPCLIP RECT` and
-//!   `VPSCALE` edit the **first** viewport because this build has no
-//!   per-viewport selection model. That is a declared narrowing, not a
-//!   fabricated second viewport authority.
+//! * `VPORTS` creates a declared simple `rows * cols` grid.
+//! * `VPCLIP RECT`/`VPCLIP` polygon and `VPSCALE` target the **session
+//!   `CVPORT` current viewport** of the active paper layout when their payload
+//!   carries no index, and the payload's explicit zero-based index otherwise
+//!   (the explicit index always wins). `CVPORT` itself is documented in
+//!   [`crate::command_id::extras`]; it is session state, so neither write below
+//!   touches it.
 //! * `LAYVPI <layer>[,<layer>...]` freezes real per-viewport layer overrides
 //!   ([`cad_db::PaperViewport::layer_overrides`]) in every viewport of the
-//!   active paper layout, as one revision and one undo step
-//!   (`layvpi.frozen`). It never writes the global layer table. Because this
-//!   build has no viewport selection, "all viewports of the active layout" is
-//!   the declared scope; an already-frozen state is a no-op
+//!   active paper layout **except the current one** (AutoCAD's own default,
+//!   read from the same `CVPORT` marker), as one revision and one undo step
+//!   (`layvpi.frozen`). It never writes the global layer table. The
+//!   explicit-index form (`FreezeViewportLayersIn`) freezes one viewport and
+//!   wins over the marker. An already-frozen state is a no-op
 //!   (`layvpi.unchanged`, no transaction), a layout without a viewport is
-//!   `layvpi.no_viewport`.
+//!   `layvpi.no_viewport`, and a single-viewport layout whose only viewport is
+//!   the current one has nothing to exclude (`layvpi.no_other_viewport`) —
+//!   never a silent "freeze everywhere".
 //! * `VPMAX` / `VPMIN` set and clear one session-only maximized-viewport marker
-//!   naming the active paper layout and its first viewport.
+//!   naming the active paper layout and its first viewport. They are **not**
+//!   wired to `CVPORT` in this lane (see the module's note below).
 //!
 //! # Polygonal viewports
 //!
 //! `VPCLIP` also writes a polygonal boundary (`LayoutPayload::ClipPolygon`): the
-//! validated 3+ point simple polygon replaces the first viewport's clip and
-//! `cad-representation` clips that viewport to it — concave boundaries included,
-//! for lines, meshes, images and conics alike. There is no
+//! validated 3+ point simple polygon replaces the **targeted** viewport's clip
+//! and `cad-representation` clips that viewport to it — concave boundaries
+//! included, for lines, meshes, images and conics alike. There is no
 //! "written but not renderable" residual.
+//!
+//! # Viewport targeting and the `CVPORT` marker
+//!
+//! `CVPORT [<n>]` ([`crate::command_id::extras`]) stores the active paper
+//! layout's current viewport, one **one-based** position per layout, as pure
+//! session state (no database write, revision, history entry or undo step). It is
+//! the target of the no-index `LAYVPI`/`VPSCALE`/`VPCLIP` forms and is validated
+//! against the layout's viewport count by every reader, so a stale marker refuses
+//! (`<command>.current_viewport_out_of_range`) instead of retargeting the first
+//! viewport. Switching layouts reports that layout's own marker, and a layout
+//! with no viewport reports `cvport.no_viewports` rather than a fabricated `1`.
+//!
+//! `VPMAX`/`VPMIN` still maximize the layout's **first** viewport
+//! (`target_viewport_index` in `app_layout_paper`, which falls back to index `0`
+//! and is shared with `MVSETUP`/`PSBSCALE`). Following `CVPORT` there is the
+//! semantically right next step (AutoCAD maximizes the current viewport), but it
+//! changes a helper outside this batch's authority, so it is **declared, not
+//! done**: `VPMAX` remains "first viewport (or the already-maximized one)".
 //!
 //! # The remaining hard boundary
 //!

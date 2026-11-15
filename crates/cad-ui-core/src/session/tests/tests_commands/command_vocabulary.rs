@@ -227,7 +227,7 @@ command_selector_contract! {
 
     Layout => "LAYOUT", LayoutMerge => "LAYOUTMERGE", LayoutWizard => "LAYOUTWIZARD",
     Vports => "VPORTS", VpMax => "VPMAX", VpMin => "VPMIN", VpClip => "VPCLIP",
-    VpScale => "VPSCALE", LayVpi => "LAYVPI",
+    VpScale => "VPSCALE", LayVpi => "LAYVPI", Cvport => "CVPORT",
 
     DimStyle => "DIMSTYLE", DimTextEdit => "DIMTEDIT",
     DimEdit => "DIMEDIT", DimOverride => "DIMOVERRIDE",
@@ -261,7 +261,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 241,
+        EXPECTED_COMMAND_COUNT, 242,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

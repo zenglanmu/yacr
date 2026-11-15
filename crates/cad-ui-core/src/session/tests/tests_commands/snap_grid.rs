@@ -280,6 +280,7 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "VIEW",
             "VIEWGO",
             "VPOINT",
+            "CVPORT",
             // The 2026-11-07 layout/viewport batch plus the typed page-setup
             // writes and MVIEW. The dash spellings are distinct selectors.
             "LAYOUT",

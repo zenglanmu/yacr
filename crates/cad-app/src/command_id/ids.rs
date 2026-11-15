@@ -1,8 +1,5 @@
-//! The `CommandId` vocabulary enum.
-//!
-//! Split out of `command_id.rs` (2026-11-12) so both files stay inside the
-//! 1000-line code gate. The public path is unchanged: `command_id.rs`
-//! re-exports the enum (`crate::CommandId`, `crate::command_id::CommandId`).
+//! The `CommandId` vocabulary enum, split out of `command_id.rs` (2026-11-12) so
+//! both files stay inside the 1000-line code gate; `command_id.rs` re-exports it.
 
 use super::ExtendedCommandId;
 
@@ -919,10 +916,12 @@ pub enum CommandId {
     /// drawing's scale table is the authority. Contract:
     /// [`crate::command_id::layout`].
     VpScale,
-    /// `LAYVPI <layer>[,<layer>...]`: named refusal — this build has no
-    /// per-viewport layer state, so it never freezes layers globally. Contract:
-    /// [`crate::command_id::layout`].
+    /// `LAYVPI <layer>[,<layer>...]`: per-viewport layer freeze in every viewport
+    /// except the session `CVPORT` one. Contract: [`crate::command_id::layout`].
     LayVpi,
+    /// `CVPORT [<n>]` (Viewer-legal): session current-viewport marker of the
+    /// active paper layout. Contract: [`crate::command_id::extras`].
+    Cvport,
     /// `DIMSTYLE` / `-DIMSTYLE`: list/query the stored DIMSTYLE table; the
     /// creation style is fixed to `Standard`. `SET` is a named refusal (no
     /// post-import style-table write API). Full contract:

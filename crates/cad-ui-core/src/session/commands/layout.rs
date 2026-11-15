@@ -469,7 +469,14 @@ pub fn parse_vpclip_argument(argument: &str) -> Result<LayoutPayload, String> {
             "vpclip.degenerate_rect: VPCLIP RECT needs finite minx < maxx and miny < maxy".into(),
         );
     }
-    Ok(LayoutPayload::ClipRect { min, max })
+    Ok(LayoutPayload::ClipRect {
+        min,
+        max,
+        // The command line has no viewport argument: the session `CVPORT`
+        // current viewport is the target. The explicit-index form is the
+        // payload's `viewport: Some(index)` channel.
+        viewport: None,
+    })
 }
 
 /// Parse one `VPSCALE <scale>` argument.
@@ -518,6 +525,9 @@ pub fn parse_vpscale_argument(argument: &str) -> Result<LayoutPayload, String> {
     }
     Ok(LayoutPayload::Scale {
         name: name.to_string(),
+        // No viewport argument on this line: the session `CVPORT` current
+        // viewport of the active paper layout is the target.
+        viewport: None,
     })
 }
 

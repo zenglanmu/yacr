@@ -1,7 +1,7 @@
-//! The 2026-11-07 extras batch view-only commands: `VIEWRES`, `VSCURRENT` and
-//! `WIPEOUTFRAME`.
+//! The 2026-11-07 extras batch view-only commands: `VIEWRES`, `VSCURRENT`,
+//! `WIPEOUTFRAME` and `CVPORT`.
 //!
-//! All three mutate [`SessionState`] only: no database write, revision bump,
+//! All four mutate [`SessionState`] only: no database write, revision bump,
 //! `cad-history` entry, `ChangeSet` or `ZOOM PREVIOUS` snapshot. `-PAN` is
 //! not implemented here: it rides the existing `CommandId::Pan` camera path with
 //! a `Points` delta, so it has no second camera authority.
@@ -13,8 +13,14 @@
 //! vector-plot context both read it (`cad-representation`'s
 //! `RepresentationContext::wipeout_frames`), which is what makes the
 //! `WIPEOUTFRAME 2` display/plot split real.
+//!
+//! `CVPORT` is **not** passive either: `LAYVPI`, `VPSCALE` and `VPCLIP` target
+//! the viewport it names. See [`crate::command_id::extras`] for the exact
+//! per-layout/session-only contract.
 
 use super::*;
+
+use crate::app_layout::{layout_viewports, require_paper_space};
 
 fn view_outcome(code: &str, message: String) -> CommandOutcome {
     CommandOutcome {
@@ -127,6 +133,95 @@ impl Application {
                     WipeoutFrames::DisplayNotPlot =>
                         "wipeout frames are displayed on screen but omitted from the vector plot",
                 }
+            ),
+        ))
+    }
+
+    /// `CVPORT [<n>]`: report or store the session current-viewport marker.
+    ///
+    /// The marker is the **one-based** position of the current viewport inside
+    /// the active paper layout's stored viewport list (AutoCAD's numbering); the
+    /// session stores the zero-based index. It is per layout and session-only:
+    /// no database write, revision bump, `cad-history` entry, undo step or
+    /// `ChangeSet` — this handler never touches `self.drawing` mutably.
+    ///
+    /// `LAYVPI`, `VPSCALE` and `VPCLIP` read the same marker, so the reported
+    /// value is exactly the viewport those commands will target.
+    ///
+    /// Refusals (nothing stored, nothing drawn):
+    ///
+    /// * `cvport.paper_space_required` — the active space is model space (this
+    ///   build keeps no model-space viewport id and reports no fake `1`);
+    /// * `cvport.no_viewports` — the active layout has no viewport at all;
+    /// * `cvport.out_of_range` — the requested/stored position is outside
+    ///   `1..=<viewport count>`; never clamped;
+    /// * `cvport.invalid_payload` — a payload that is not this command's own.
+    pub(crate) fn cvport(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let layout_id = require_paper_space(session, "cvport")?;
+        let viewports = {
+            let drawing = self.drawing(command.document)?;
+            layout_viewports(drawing, layout_id)?
+        };
+        let count = viewports.len();
+        if count == 0 {
+            return Err(CadError::Unsupported(format!(
+                "cvport.no_viewports: layout {} has no viewport; CVPORT has no current viewport to \
+                 report and this build never reports a fabricated 1 (create one with VPORTS or \
+                 MVIEW first)",
+                layout_id.0
+            )));
+        }
+        match &command.payload {
+            // Bare selector: report the stored marker, change nothing.
+            CommandPayload::None => {}
+            CommandPayload::Cvport(position) => {
+                // The command line is one-based; the stored marker is not (`0`
+                // is not a valid position, so it is not a silent alias for the
+                // first viewport either).
+                let position = *position as usize;
+                if position == 0 || position > count {
+                    return Err(CadError::InvalidInput(format!(
+                        "cvport.out_of_range: layout {} has {count} viewport(s); CVPORT takes a \
+                         viewport position in 1..={count}, got {position} and nothing was changed",
+                        layout_id.0
+                    )));
+                }
+                session.set_viewport_marker(layout_id, position - 1);
+            }
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "cvport.invalid_payload: CVPORT takes one viewport position (or no payload \
+                     for the report)"
+                        .into(),
+                ))
+            }
+        }
+        // A stale marker refuses here too instead of reporting a viewport that
+        // no command would target. The code is `cvport.out_of_range` (the same
+        // family the set form uses), never a clamp to the first viewport.
+        let marker = session.viewport_marker(layout_id);
+        if marker >= count {
+            return Err(CadError::InvalidInput(format!(
+                "cvport.out_of_range: the session CVPORT marker names viewport {} (zero-based \
+                 index {marker}), but layout {} has {count} viewport(s); set it again with \
+                 `CVPORT <n>` (1..={count}) — nothing was changed and nothing was clamped",
+                marker + 1,
+                layout_id.0
+            )));
+        }
+        Ok(view_outcome(
+            "cvport.value",
+            format!(
+                "CVPORT = {} of {count}: the current viewport of layout {} is its viewport at \
+                 zero-based index {marker}; LAYVPI (no index) freezes in every other viewport, and \
+                 VPSCALE/VPCLIP (no index) target this one (session state only; the drawing was not \
+                 written and no revision, history entry or undo step was recorded)",
+                marker + 1,
+                layout_id.0
             ),
         ))
     }

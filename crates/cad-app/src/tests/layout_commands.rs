@@ -657,6 +657,7 @@ fn vpclip_reclips_the_first_viewport_and_undo_restores_it() {
                 layout_payload(LayoutPayload::ClipRect {
                     min: point(10.0, 10.0),
                     max: point(60.0, 40.0),
+                    viewport: None,
                 }),
             ),
         )
@@ -695,6 +696,7 @@ fn vpclip_refuses_degenerate_rectangles_and_a_layout_without_viewports() {
             layout_payload(LayoutPayload::ClipRect {
                 min: point(10.0, 10.0),
                 max: point(10.0, 20.0),
+                viewport: None,
             }),
         ),
     ));
@@ -713,6 +715,7 @@ fn vpclip_refuses_degenerate_rectangles_and_a_layout_without_viewports() {
             layout_payload(LayoutPayload::ClipRect {
                 min: point(0.0, 0.0),
                 max: point(100.0, 50.0),
+                viewport: None,
             }),
         ),
     ));
@@ -732,6 +735,7 @@ fn vpscale_sets_the_stored_diagonal_and_preserves_the_model_anchor() {
                 CommandId::VpScale,
                 layout_payload(LayoutPayload::Scale {
                     name: "1:50".into(),
+                    viewport: None,
                 }),
             ),
         )
@@ -773,6 +777,7 @@ fn vpscale_refuses_a_layout_without_viewports() {
             CommandId::VpScale,
             layout_payload(LayoutPayload::Scale {
                 name: "1:100".into(),
+                viewport: None,
             }),
         ),
     ));
@@ -791,6 +796,7 @@ fn vpscale_refuses_invalid_scales_before_writing() {
             CommandId::VpScale,
             layout_payload(LayoutPayload::Scale {
                 name: "NOPE".into(),
+                viewport: None,
             }),
         ),
     ));
@@ -799,7 +805,10 @@ fn vpscale_refuses_invalid_scales_before_writing() {
         &mut session,
         command(
             CommandId::VpScale,
-            layout_payload(LayoutPayload::Scale { name: "0".into() }),
+            layout_payload(LayoutPayload::Scale {
+                name: "0".into(),
+                viewport: None,
+            }),
         ),
     ));
     assert!(zero.contains("vpscale.zero_scale"), "{zero}");
@@ -807,7 +816,10 @@ fn vpscale_refuses_invalid_scales_before_writing() {
         &mut session,
         command(
             CommandId::VpScale,
-            layout_payload(LayoutPayload::Scale { name: "NaN".into() }),
+            layout_payload(LayoutPayload::Scale {
+                name: "NaN".into(),
+                viewport: None,
+            }),
         ),
     ));
     assert!(
@@ -818,84 +830,6 @@ fn vpscale_refuses_invalid_scales_before_writing() {
     assert!(!undo_available(&app));
 }
 
-fn layvpi(layers: &[&str]) -> Command {
-    command(
-        CommandId::LayVpi,
-        layout_payload(LayoutPayload::FreezeViewportLayers {
-            layers: layers.iter().map(|name| (*name).to_string()).collect(),
-        }),
-    )
-}
-
-fn undo_depth(app: &Application) -> usize {
-    app.history
-        .get(&DOC)
-        .map(|history| history.undo_depth())
-        .unwrap_or(0)
-}
-
-fn override_of(app: &Application, layout: u128, viewport: usize) -> Option<bool> {
-    drawing(app)
-        .layout(LayoutId(layout))
-        .expect("layout exists")
-        .viewports[viewport]
-        .layer_overrides
-        .get(&LayerId(1))
-        .copied()
-}
-
-#[test]
-fn layvpi_freezes_layers_per_viewport_and_round_trips_through_undo_redo() {
-    let (mut app, mut session) = standard_fixture();
-    switch_to(&mut app, &mut session, "Sheet1");
-    let before = revision(&app);
-    let depth = undo_depth(&app);
-
-    let outcome = app
-        .execute(&mut session, layvpi(&["WALLS"]))
-        .expect("LAYVPI freezes real per-viewport state");
-    assert_eq!(codes(&outcome), vec!["layvpi.frozen"]);
-    assert!(outcome.diagnostics[0].message.contains("WALLS"));
-    assert_eq!(revision(&app), Revision(before.0 + 1), "one revision");
-    assert_eq!(undo_depth(&app), depth + 1, "exactly one undo step");
-    assert_eq!(override_of(&app, 1, 0), Some(true));
-    assert_eq!(override_of(&app, 2, 0), None, "other layout untouched");
-    assert!(drawing(&app).layer(LayerId(1)).unwrap().visible);
-
-    undo(&mut app, &mut session);
-    assert_eq!(override_of(&app, 1, 0), None, "undo restores the map");
-    redo(&mut app, &mut session);
-    assert_eq!(override_of(&app, 1, 0), Some(true), "redo reapplies it");
-}
-
-#[test]
-fn layvpi_refusals_and_the_unchanged_case_write_nothing() {
-    let (mut empty, mut empty_session) = fixture(&[(1, "Sheet1", false)]);
-    switch_to(&mut empty, &mut empty_session, "Sheet1");
-    let empty_before = revision(&empty);
-    let no_viewport = refusal(empty.execute(&mut empty_session, layvpi(&["WALLS"])));
-    assert!(no_viewport.contains("layvpi.no_viewport"), "{no_viewport}");
-    assert_eq!(revision(&empty), empty_before);
-    assert!(!undo_available(&empty), "a refusal records nothing");
-    let (mut app, mut session) = standard_fixture();
-    switch_to(&mut app, &mut session, "Sheet1");
-    let before = revision(&app);
-    let unknown = refusal(app.execute(&mut session, layvpi(&["NOPE"])));
-    assert!(unknown.contains("layvpi.unknown_layer"), "{unknown}");
-    assert_eq!(revision(&app), before);
-    assert!(!undo_available(&app), "a refusal records nothing");
-
-    app.execute(&mut session, layvpi(&["WALLS"]))
-        .expect("the first LAYVPI writes");
-    let written = revision(&app);
-    let depth = undo_depth(&app);
-    let outcome = app
-        .execute(&mut session, layvpi(&["WALLS"]))
-        .expect("a repeated LAYVPI is a declared no-op");
-    assert_eq!(codes(&outcome), vec!["layvpi.unchanged"]);
-    assert_eq!(revision(&app), written, "no revision bump");
-    assert_eq!(undo_depth(&app), depth, "no new undo step");
-}
 #[test]
 fn vpmax_and_vpmin_round_trip_session_state_only() {
     let (mut app, mut session) = standard_fixture();

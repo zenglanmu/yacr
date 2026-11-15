@@ -102,6 +102,9 @@ impl CadSession {
                     CommandId::VpScale,
                     CommandPayload::Layout(Box::new(LayoutPayload::Scale {
                         name: format!("{paper}:{drawing}"),
+                        // `ZOOM nXP` has no viewport argument; the session
+                        // `CVPORT` current viewport receives the scale.
+                        viewport: None,
                     })),
                 )
             }

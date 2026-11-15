@@ -319,6 +319,13 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // is the named `wipeoutframe.out_of_range` refusal. The bare selector reports
     // the current value. Set exactly like the panel does (session state, no write).
     ("WIPEOUTFRAME", CommandId::WipeoutFrame),
+    // CVPORT is the system variable that names the current viewport of the active
+    // paper layout. The bare selector reports it; `CVPORT <n>` sets it (`n` is a
+    // one-based viewport position in `1..=<viewport count>`, refused by name
+    // outside that range and never clamped). Session state only: no database
+    // write, revision, history entry or undo step. `LAYVPI`, `VPSCALE` and
+    // `VPCLIP` target the viewport it names.
+    ("CVPORT", CommandId::Cvport),
     ("LINETYPE", CommandId::Linetype),
 
     // The 2026-11-07 layout batch; every write form is a named refusal.

@@ -246,6 +246,7 @@ mod layers_isolate;
 mod layers_off;
 mod layers_previous;
 mod layout_commands;
+mod layout_cvport;
 mod layout_page_setup;
 mod layout_wizard;
 mod locked_layers;

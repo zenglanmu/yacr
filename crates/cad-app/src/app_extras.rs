@@ -4,8 +4,8 @@
 //!
 //! * `SKETCH` / `TRACE` / `MOCORO` / `MSTRETCH` / `LINETYPE` — `app_drawing`
 //!   (`extras_batch`, `mstretch`), because they create or edit entity rows;
-//! * `VIEWRES` / `VSCURRENT` / `WIPEOUTFRAME` — `app_view_extras`, session
-//!   display tokens only.
+//! * `VIEWRES` / `VSCURRENT` / `WIPEOUTFRAME` / `CVPORT` — `app_view_extras`,
+//!   session display tokens only.
 //!
 //! `-PAN` and `REGEN3` have **no** `CommandId` here: they are spellings that
 //! normalize onto `PAN` and `REGEN` in `cad-ui-core`, so there is one camera path
@@ -24,6 +24,7 @@ pub(crate) fn is_extras(id: CommandId) -> bool {
             | CommandId::ViewRes
             | CommandId::VisualStyle
             | CommandId::WipeoutFrame
+            | CommandId::Cvport
             | CommandId::Linetype
     )
 }
@@ -44,6 +45,7 @@ impl Application {
             CommandId::ViewRes => self.viewres(session, command),
             CommandId::VisualStyle => self.vscurrent(session, command),
             CommandId::WipeoutFrame => self.wipeout_frame(session, command),
+            CommandId::Cvport => self.cvport(session, command),
             CommandId::Linetype => self.linetype(session, command),
             other => Err(CadError::Invariant(format!(
                 "not an extras command: {other:?}"

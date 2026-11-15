@@ -77,11 +77,21 @@ pub enum LayoutPayload {
     /// active paper layout as one reversible write.
     Viewports { rows: u32, cols: u32 },
     /// `VPCLIP RECT <minx> <miny> <maxx> <maxy>`: validate the rectangle and
-    /// replace the **first** viewport's clip (this build has no viewport
-    /// selection).
-    ClipRect { min: Point3, max: Point3 },
+    /// replace the clip of the targeted viewport.
+    ///
+    /// `viewport` is the **zero-based** `cad_db::Layout::viewports` index of the
+    /// explicit-index form; `None` means "the session `CVPORT` current viewport
+    /// of the active paper layout". A payload index always wins over the marker,
+    /// and an index (or a stale marker) outside the viewport count is the named
+    /// `vpclip.unknown_viewport` / `vpclip.current_viewport_out_of_range`
+    /// refusal, never a silent redirect to the first viewport.
+    ClipRect {
+        min: Point3,
+        max: Point3,
+        viewport: Option<usize>,
+    },
     /// `VPCLIP` with a **polygonal** boundary: validate the 3+ point coplanar,
-    /// simple (non self-intersecting) polygon and replace the **first**
+    /// simple (non self-intersecting) polygon and replace the targeted
     /// viewport's clip with it.
     ///
     /// The boundary is stored verbatim in
@@ -90,26 +100,42 @@ pub enum LayoutPayload {
     /// (`cad-representation`) resolves the same polygon as its viewport clip and
     /// limits every primitive to it, concave boundaries included, so the write is
     /// a drawable viewport and not stored-only data.
-    ClipPolygon { points: Vec<Point3> },
-    /// `VPSCALE <scale>`: a standard scale name or ratio, resolved against the
-    /// drawing's scale table and applied to the **first** viewport.
-    Scale { name: String },
-    /// `LAYVPI <layer>[,<layer>...]`: resolve every name, then freeze those
-    /// layers in **every** viewport of the active paper layout
-    /// ([`cad_db::PaperViewport::layer_overrides`]) as one revision and one
-    /// undo step. The global layer table is never written.
     ///
-    /// AutoCAD's `LAYVPI` freezes in "all viewports except the current one";
-    /// this build has no viewport selection, so "all viewports of the active
-    /// layout" is the declared scope.
+    /// `viewport` carries the same targeting contract as
+    /// [`Self::ClipRect::viewport`]: `None` is the session `CVPORT` current
+    /// viewport, `Some(index)` is the explicit zero-based index.
+    ClipPolygon {
+        points: Vec<Point3>,
+        viewport: Option<usize>,
+    },
+    /// `VPSCALE <scale>`: a standard scale name or ratio, resolved against the
+    /// drawing's scale table and applied to the targeted viewport.
+    ///
+    /// `viewport` is the zero-based `cad_db::Layout::viewports` index; `None`
+    /// means the session `CVPORT` current viewport. The explicit index always
+    /// wins; both store the documented `1 / factor` paper→model diagonal and keep
+    /// the model anchor of the clip centre.
+    Scale {
+        name: String,
+        viewport: Option<usize>,
+    },
+    /// `LAYVPI <layer>[,<layer>...]`: resolve every name, then freeze those
+    /// layers in **every viewport of the active paper layout except the current
+    /// one** ([`cad_db::PaperViewport::layer_overrides`]) as one revision and
+    /// one undo step. The global layer table is never written.
+    ///
+    /// That is AutoCAD's own `LAYVPI` default: the current viewport comes from
+    /// the session `CVPORT` marker. A layout whose only viewport *is* the current
+    /// one has no viewport left to freeze and refuses by name
+    /// (`layvpi.no_other_viewport`) instead of freezing everywhere.
     FreezeViewportLayers { layers: Vec<String> },
     /// `LAYVPI` targeted at **one** viewport index of the active layout.
     ///
-    /// This is the viewport-targeting form: `viewport` indexes
-    /// [`cad_db::Layout::viewports`] of the active paper layout, so a caller can
-    /// express AutoCAD's "every viewport except the current one" by issuing the
-    /// per-index form for each index it wants. The index is validated against
-    /// the stored viewport count (`layvpi.unknown_viewport`).
+    /// This is the explicit-index form and it always wins over the `CVPORT`
+    /// marker: `viewport` indexes [`cad_db::Layout::viewports`] of the active
+    /// paper layout (zero-based), so a caller can still freeze the current
+    /// viewport itself. The index is validated against the stored viewport count
+    /// (`layvpi.unknown_viewport`).
     FreezeViewportLayersIn {
         layers: Vec<String>,
         viewport: usize,
