@@ -550,7 +550,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `SSX` | 部分实现 | 以**第一个选中对象**的五特性（类型/层/颜色/线型/空间）为模板，把匹配的模型空间对象并入选择 | 只枚举顶层模型空间；空选择/不可寻址模板拒绝；无交互选择提示 |
 | `SELECTCOUNT` | 部分实现 | 只读：统计与第一个选中对象五特性相同的模型空间对象数并报告 | 不修改选择、不写库、无事务；不展开块成员 |
 | `-FIND` | 部分实现 | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告计数/ids | 只读；不解析 MTEXT 格式 run；不搜索属性定义/表格/标注文字 |
-| `FIND` | 部分实现 | `FIND <needle> [=> <replacement>]`；报告或替换全部命中（替换一条事务/一步撤销；MULTILEADER 经 `with_text` 重建） | 不解析 MTEXT 格式 run；TEXT 单行遇换行按 `text.single_line_newline` 拒绝；无 Find 对话框/逐项确认/缩放高亮 |
+| `FIND` | 完整实现 | `FIND <needle> [=> <replacement>]`：遍历模型空间与全部图纸布局（分组报告：`model space` / `layout 'X'`），跨空间替换一条事务/一步撤销，拒绝时任何空间都不写；MTEXT / 带文字 MULTILEADER / `AcDbText`（含导入为 `Text` 的 ATTRIB/ATTDEF）/ 表格单元格都按**画出来的文本**匹配与替换（`\P` 换行、`%%d`/`\~` 转义、`\S` 分数、`^I` 制表）；多 run 命中保留各段格式码，插入文本被转义 | **全局范围**：无 Find 对话框/逐项确认/缩放高亮；块定义内命中只读具名（`block definitions, read-only (edit with BEDIT)`，一份定义被所有实例绘制，FIND 不动它）；部分命中结构化码 `find.mtext_partial_code`、替换被语法重画 `find.mtext_replacement_not_literal`；单行目标拒绝换行 `text.single_line_newline`；动态块未激活可见性成员不搜索（不绘制） |
 | `HIDEOBJECTS` | 部分实现 | 会话隐藏集：隐藏当前选择；共享可见性谓词影响拾取与渲染（`FLAG_HIDDEN`） | 无数据库写/撤销；隐藏对象仍留在常驻场景，仅 fragment 丢弃；屏幕空间 POINT 标记 overlay 仍可能绘制（声明） |
 | `ISOLATEOBJECTS` | 部分实现 | 会话隐藏集：隐藏除当前选择外的顶层模型空间对象 | 只按顶层身份隔离（只选中块成员时不会保留该成员所在的整个块）；无数据库写/撤销 |
 | `UNISOLATEOBJECTS` | 部分实现 | 清空会话隐藏集，恢复所有隐藏对象 | 无数据库写/撤销；不恢复已被删除的对象 |
