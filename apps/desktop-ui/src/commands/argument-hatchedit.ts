@@ -145,10 +145,10 @@ export function isHatchEditArgument(argument: string): boolean {
  * reads from the filesystem.
  *
  * Admission forwards such a tail with the case the user typed (`commands.ts`'s
- * `PATH_ARGUMENTS`) instead of the shared upper-cased normal form; every other
- * option is a keyword, a number or a name the host matches case-insensitively and
- * keeps the normal form. The predicate only classifies the option word — the path
- * itself is never read, resolved or checked here.
+ * `CASE_PRESERVING_ARGUMENTS`) instead of the shared upper-cased normal form;
+ * every other option is a keyword, a number or a name the host matches
+ * case-insensitively and keeps the normal form. The predicate only classifies the
+ * option word — the path itself is never read, resolved or checked here.
  */
 export function hatchEditArgumentCarriesPath(argument: string): boolean {
   return tokens(argument.toUpperCase())[0] === 'PATTERNFILE';

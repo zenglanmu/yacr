@@ -7,8 +7,9 @@
 // share with this table live in `argument-clip-grammar.ts`, so the two clip
 // grammars sit side by side and this table stays inside the code-size gate. The
 // `HATCHEDIT` option grammar lives in `argument-hatchedit.ts` for the same reason,
-// and the `COLOR`/`-COLOR` token grammar in `argument-color-grammar.ts` (one
-// predicate shared by both spellings).
+// the `COLOR`/`-COLOR` token grammar in `argument-color-grammar.ts` (one predicate
+// shared by both spellings), and the MULTILEADER/`SSX`/record grammars in
+// `argument-{mleader,selection,record}-grammar.ts`.
 import { isHatchEditArgument } from './argument-hatchedit.ts';
 import { isColorArgument } from './argument-color-grammar.ts';
 import {
@@ -17,22 +18,17 @@ import {
   isWipeoutFrameArgument,
 } from './argument-session-grammar.ts';
 import {
-  isClipArgument,
-  isSignedDecimal,
-  isXclipArgument,
-  tokens,
+  isClipArgument, isPositiveDecimal, isSignedDecimal, isXclipArgument, tokens,
 } from './argument-clip-grammar.ts';
+import {
+  isMLeaderAlignArgument, isMLeaderEditArgument, isMlEditArgument, isToleranceArgument,
+} from './argument-mleader-grammar.ts';
+import { isAddSelectedArgument, isAliasEditArgument, isMvSetupArgument } from './argument-record-grammar.ts';
+import { isSsxArgument } from './argument-selection-grammar.ts';
 
 /** The parser for the one typed-argument form a selector accepts. */
 export interface ArgumentSpec {
   readonly parse: (argument: string) => boolean;
-}
-
-/** Whether `text` is a plain positive decimal number (`2`, `0.5`, `1.25`). */
-function isPositiveDecimal(text: string): boolean {
-  if (!/^[0-9]+(\.[0-9]+)?$/.test(text)) return false;
-  const value = Number(text);
-  return Number.isFinite(value) && value > 0;
 }
 
 /**
@@ -767,6 +763,18 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     parse: isTableEditArgument,
   }),
 
+  // The 2026-11-15 audit batch: nine selectors whose host parser already took the
+  // typed argument while this table had no row (shapes in `argument-*-grammar.ts`;
+  // every documented model boundary is unchanged and stays the host's refusal).
+  ADDSELECTED: Object.freeze({ parse: isAddSelectedArgument }),
+  ALIASEDIT: Object.freeze({ parse: isAliasEditArgument }),
+  MLEDIT: Object.freeze({ parse: isMlEditArgument }),
+  '-MLEDIT': Object.freeze({ parse: isMlEditArgument }),
+  MLEADERALIGN: Object.freeze({ parse: isMLeaderAlignArgument }),
+  MLEADEREDIT: Object.freeze({ parse: isMLeaderEditArgument }),
+  MVSETUP: Object.freeze({ parse: isMvSetupArgument }),
+  TOLERANCE: Object.freeze({ parse: isToleranceArgument }),
+  SSX: Object.freeze({ parse: isSsxArgument }),
 });
 
 /** `DIMSTYLE`/`-DIMSTYLE`: `LIST`, `CURRENT` or `SET <name>` (name may have spaces). */

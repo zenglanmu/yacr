@@ -150,15 +150,22 @@ export function splitCommandText(text: unknown): SplitCommandText {
 }
 
 /**
- * The typed-argument selectors whose argument tail carries a **filesystem path**,
- * with the predicate that says whether *this* line's tail does.
+ * The typed-argument selectors whose argument tail must be forwarded with the
+ * **spelling the user typed**, with the predicate that says whether *this* line's
+ * tail is such a tail.
  *
  * Everything else keeps the shared normal form (`normalizeCommandText`: trimmed,
  * upper-cased), which the host's grammars read case-insensitively on both sides.
- * A path is not a keyword: upper-casing it changes a real file name, and on a
- * case-sensitive filesystem that is "missing". So for these selectors the tail is
- * forwarded with the spelling the user typed while the selector itself stays
- * upper-cased — the one exception, kept to paths only.
+ * Two kinds of tail are not keywords:
+ *
+ * * a **filesystem path** — upper-casing it changes a real file name, and on a
+ *   case-sensitive filesystem that is "missing";
+ * * **free text that is stored verbatim** — `TOLERANCE`'s frame compartment text
+ *   becomes TEXT entities, so its case is content, not grammar.
+ *
+ * For these selectors the tail is forwarded as typed while the selector itself
+ * stays upper-cased — the one exception, kept to tails whose bytes are
+ * load-bearing.
  *
  * * `IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>`: the
  *   file is an opaque single-token path (`parse_imageattach_argument`).
@@ -166,25 +173,30 @@ export function splitCommandText(text: unknown): SplitCommandText {
  *   resource strategy reads it). The other `HATCHEDIT` forms stay upper-cased:
  *   their tails are keywords, numbers or names the host matches
  *   case-insensitively.
+ * * `TOLERANCE <x> <y> <text…>`: the whole tail is the frame text, preserved
+ *   verbatim by the host (`parse_tolerance_argument`). The two coordinates are
+ *   numbers, so preserving their spelling is a no-op.
  */
-const PATH_ARGUMENTS: Readonly<Record<string, (argument: string) => boolean>> = Object.freeze({
+const CASE_PRESERVING_ARGUMENTS: Readonly<Record<string, (argument: string) => boolean>> = Object.freeze({
   IMAGEATTACH: () => true,
   HATCHEDIT: hatchEditArgumentCarriesPath,
+  TOLERANCE: () => true,
 });
 
 /**
  * The line as it will be sent to `cad_command`.
  *
- * `split.text` is the shared normal form, except when the selector's tail carries
- * a path ([`PATH_ARGUMENTS`]): then the **selector** stays upper-cased and the
- * tail keeps the typed text (including its internal separators, exactly like
- * `split.text` keeps them). Nothing is resolved, quoted or re-spaced: the path is
- * forwarded byte for byte and the host decides whether it exists.
+ * `split.text` is the shared normal form, except when the selector's tail is one
+ * of the case-preserving tails ([`CASE_PRESERVING_ARGUMENTS`]): then the
+ * **selector** stays upper-cased and the tail keeps the typed text (including its
+ * internal separators, exactly like `split.text` keeps them). Nothing is
+ * resolved, quoted or re-spaced: the tail is forwarded byte for byte and the host
+ * decides whether it exists or names what it is.
  */
 function commandTextForHost(split: SplitCommandText, text: unknown): string {
   if (split.argument === null) return split.text;
-  const carriesPath = PATH_ARGUMENTS[split.name];
-  if (!carriesPath || !carriesPath(split.argument)) return split.text;
+  const isCasePreserving = CASE_PRESERVING_ARGUMENTS[split.name];
+  if (!isCasePreserving || !isCasePreserving(split.argument)) return split.text;
   const typed = String(text ?? '').trim();
   const separated = typed.search(/[ \t]/);
   if (separated < 0) return split.text;
@@ -547,10 +559,11 @@ export function historyText(history: readonly string[], index: number | null, dr
  * A line may carry the one typed argument form ([`ARGUMENT_COMMANDS`]):
  * admission runs on the **base name** through the same vocabulary/capability
  * gates, and the returned `command` is the **full normalized line** so the host
- * receives (and validates) the value itself. A path-carrying tail
- * ([`PATH_ARGUMENTS`]: `IMAGEATTACH <file>`, `HATCHEDIT PATTERNFILE <path>`) is
- * the one exception: its selector is upper-cased and the tail keeps the typed
- * spelling, so a mixed-case path is not silently rewritten. An argument on a
+ * receives (and validates) the value itself. A case-preserving tail
+ * ([`CASE_PRESERVING_ARGUMENTS`]: `IMAGEATTACH <file>`,
+ * `HATCHEDIT PATTERNFILE <path>`, `TOLERANCE <x> <y> <text…>`) is the one
+ * exception: its selector is upper-cased and the tail keeps the typed spelling,
+ * so a mixed-case path or frame text is not silently rewritten. An argument on a
  * selector that takes none, or an argument outside the local syntax predicate,
  * is an explicit
  * `unsupported` answer with the shared reason key — the host remains the
@@ -563,9 +576,9 @@ export function historyText(history: readonly string[], index: number | null, dr
  */
 export function admitCommandText(text: unknown, { status = null, pending = false }: AvailabilityOptions = {}): CommandAdmission {
   const split = splitCommandText(text);
-  // The wire text: the shared normal form, or the typed spelling of a path tail
-  // (see `commandTextForHost`). `whole` below still tests the normal form, because
-  // a whole-line selector is a name, never a path.
+  // The wire text: the shared normal form, or the typed spelling of a
+  // case-preserving tail (see `commandTextForHost`). `whole` below still tests the
+  // normal form, because a whole-line selector is a name, never such a tail.
   const command = commandTextForHost(split, text);
   // A canonical selector may contain a space (`MEASURE AREA`, `AREA OBJECT`,
   // `ZOOM EXTENTS`). The host router resolves the **whole** trimmed line against its

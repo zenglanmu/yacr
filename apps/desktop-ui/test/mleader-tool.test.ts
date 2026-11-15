@@ -260,8 +260,10 @@ test('the text step keeps its generic semantics for MLEADER — no special case'
   assert.ok(app.includes('setToolText(invoke, text)'));
   assert.equal(app.includes("invoke('cad_command', { text"), false);
   assert.doesNotMatch(app, /mleader/i, 'the app shell must not special-case MLEADER');
-  // Across the whole chrome, only the model, the listing, the prompt table and
-  // the glyph mention the leader — the text step is inherited, not reimplemented.
+  // Across the whole chrome, only the model, the listing, the prompt table, the
+  // glyph and the **argument grammars of the MLEDIT/MLEADERALIGN/MLEADEREDIT
+  // selectors** (separate commands, never the MLEADER tool) mention the leader —
+  // the text step is inherited, not reimplemented.
   // The listing is the display catalog, which lives in `catalog.ts` (split out of
   // `commands.ts` verbatim), so that is the module this scan must name.
   const all = await readAppSource();
@@ -269,7 +271,10 @@ test('the text step keeps its generic semantics for MLEADER — no special case'
     .filter(([, , body]) => /mleader/i.test(body))
     .map(([, path]) => path.split('/').pop())
     .sort();
-  assert.deepEqual(owners, ['cad.ts', 'catalog-extended.ts', 'catalog.ts', 'gating.ts', 'icons.tsx', 'ribbon-model.ts']);
+  assert.deepEqual(owners, [
+    'argument-commands.ts', 'argument-mleader-grammar.ts',
+    'cad.ts', 'catalog-extended.ts', 'catalog.ts', 'gating.ts', 'icons.tsx', 'ribbon-model.ts',
+  ]);
 });
 
 test('no control implies the Options sub-prompt MLEADER does not have', () => {

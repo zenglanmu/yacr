@@ -8,9 +8,9 @@
 // limit).
 //
 // The helpers are exported so the table and its sibling grammar modules keep
-// exactly one definition of "one plain signed decimal", "one integer token" and
-// of whitespace tokenisation; this module never imports from its parent or its
-// siblings, so the dependency stays one-way.
+// exactly one definition of "one plain signed decimal", "one plain **positive**
+// decimal", "one integer token" and of whitespace tokenisation; this module never
+// imports from its parent or its siblings, so the dependency stays one-way.
 
 /** Split a typed argument into whitespace-separated tokens. */
 export function tokens(argument: string): readonly string[] {
@@ -42,6 +42,21 @@ export function isIntegerToken(text: string): boolean {
 export function isSignedDecimal(text: string): boolean {
   if (!/^[+-]?[0-9]+(\.[0-9]+)?$/.test(text)) return false;
   return Number.isFinite(Number(text));
+}
+
+/**
+ * Whether `text` is one plain positive decimal (`2`, `0.5`, `1.25`; never `0`,
+ * `-1` or `+2`).
+ *
+ * This is the host's `parse_positive_decimal`, shared by every selector whose
+ * value is a scale factor or spacing: no sign of any kind, no exponent, no bare
+ * `.`/`5.`. The magnitude is never judged beyond `> 0` — a value outside a
+ * documented range is the host's named refusal, not a local one.
+ */
+export function isPositiveDecimal(text: string): boolean {
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(text)) return false;
+  const value = Number(text);
+  return Number.isFinite(value) && value > 0;
 }
 
 /**
