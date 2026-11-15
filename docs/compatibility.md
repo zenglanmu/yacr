@@ -577,7 +577,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
 | `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心 `Circle`，一条事务/一步撤销 | 无中心点拾取提示（中心必须键入）；`inner=0` 只建外圆并报 `donut.inner_zero`；无宽度/填充环模型 |
-| `SOLID` | 部分实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（type-key `AcDbSolid`），一条事务/一步撤销；创建路径导出真 `SOLID` 记录（`0/SOLID` + `100/AcDbTrace`，边界→存储角序末两位互换，三角重复 `13`） | **导入**的 `SOLID`/`TRACE` 仍以 polyface mesh 重新导出（导入器合并两类 → 需类溯源）；不可表示几何保留 polyface 并声明；无 3D 厚度/挤出 |
+| `SOLID` | 完整实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（type-key `AcDbSolid`），一条事务/一步撤销；导出写**真类记录**：`AcDbSolid`→`0/SOLID`、`AcDbTrace`→`0/TRACE`（均 `100/AcDbTrace`，边界→存储角序末两位互换，三角重复 `13`）；类溯源由导入器 `Solid::is_trace` 保留，DXF 与 DWG 双路径都有导入→导出→再导入往返测试 | 声明式边界：5+ 点、逐点颜色、不在 `+Z` 共面（3D 旋转块内无 OCS 重建）、异三角化 → 保留 polyface 并在 `export.converted.mesh` 里注明类；无厚度/挤出（导入侧标 Partial） |
 | `HELIX` | 部分实现 | 平面 2D 螺旋 `Polyline`（64 段/圈，上限 4096 顶点），一条事务/一步撤销 | `height>0` 的 3D 弹簧按 `helix.3d_not_implemented` 拒绝；无扭转/半径渐变 |
 | `MLINE` | 部分实现 | 恰好两条平行 `LINE`，围绕基线按当前 MLSTYLE 间距放置，一条事务/一步撤销 | 无 join/cap/元素表/多段基线；不是完整 MLINE 实体 |
 | `MLSTYLE` | 部分实现 | 会话内最多 16 个命名多线样式（`LIST`/`SET`），喂 MLINE | 不写 DWG/不持久化；无对话框、无元素/接头样式 |
