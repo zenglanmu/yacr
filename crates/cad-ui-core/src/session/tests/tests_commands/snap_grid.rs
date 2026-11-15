@@ -320,6 +320,8 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "MOCORO",
             "VIEWRES",
             "VSCURRENT",
+            // The system-variable spelling of `WIPEOUT Frames` (same token).
+            "WIPEOUTFRAME",
             "LINETYPE",
             // The 2026-11 P3 option batch.
             "OVERKILL",
