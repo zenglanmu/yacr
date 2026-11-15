@@ -18,6 +18,9 @@ use crate::{AppMode, BackendChoice, MeasurementToolKind, SelectionMode, Standard
 mod text_batch;
 pub use text_batch::*;
 
+mod clip;
+pub use clip::ClipCommand;
+
 mod payload_extra;
 pub use payload_extra::*;
 
@@ -946,6 +949,10 @@ pub enum CommandPayload {
     /// display-only block clip boundary, stored in block-local space (Work-only);
     /// contract in [`crate::app_drawing::xclip_edit`].
     XClip(Box<XClipCommand>),
+    /// `CLIP RECT|POLY|ON|OFF|DELETE`: the same clip models `IMAGECLIP` and
+    /// `XCLIP` write, chosen by the single selected target's kind (Work-only);
+    /// contract in [`crate::app_drawing::clip_edit`].
+    Clip(Box<ClipCommand>),
     /// `MLEDIT` / `-MLEDIT <option> …`: the two-LINE subset of multiline editing
     /// (Work-only). The current selection is the object input: exactly two
     /// `LINE`s. Contract: [`crate::app_drawing::mledit`].

@@ -1191,8 +1191,8 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `MLEDIT` | **部分实现（具名拒绝）**：`mlinedit.unsupported: this build has no MLINE join/cap edit model` | 同上 |
 | `-MLEDIT` | **部分实现（具名拒绝）**：`-mlinedit.unsupported: this build has no MLINE join/cap edit model` | 同上 |
 | `BURST` | **部分实现（具名拒绝）**：`burst.unsupported: this build has no block-attribute model to preserve` | 同上 |
-| `CLIP` | **部分实现（具名拒绝）**：`clip.unsupported: this build has no image/xref clipping model` | 同上 |
-| `CLIPIT` | **部分实现（具名拒绝）**：`clipit.unsupported: this build has no image/xref clipping model` | 同上 |
+| `CLIP` | **完整实现**：`RECT`（目标自身裁剪空间）/`POLY`（仅光栅图像，凸且不自交）/`ON`/`OFF`/`DELETE`，分派到既有 `IMAGECLIP`/`XCLIP` 写路径，一条事务/一步撤销 | 块参照的多边形裁剪按名拒绝（`clip.polygon_block_not_renderable`，表示层只画矩形块裁剪）；旋转/倾斜参照沿用 `xclip.rotation_not_renderable`/`xclip.non_xy_plane`；图像 ON/OFF 无字段；PDF/DGN/DWF 底图未建模 |
+| `CLIPIT` | **完整实现**：预选择 1 个图像目标 + 闭合边界（`LINE`/`ARC`/`LWPOLYLINE`，复用 JOIN 链与 `VPCLIP` 多边形校验），一条事务/一步撤销 | 块参照目标按名拒绝（`clipit.polygon_block_not_renderable`，用 `CLIP RECT`）；开放/自交/退化/非凸/多目标/无边界具名拒绝；圆弧边界为 32 弦近似 |
 | `REGION` | **部分实现（具名拒绝）**：`region.unsupported: this build has no Region geometry model` | 同上 |
 | `ADDSELECTED` | **部分实现（具名拒绝）**：`addselected.unsupported: add-selected needs per-type creation prompts that this build does not model` | 同上 |
 | `WBLOCK` | **部分实现（具名拒绝）**：`wblock.unsupported: writing a block definition to a separate drawing file is not implemented` | 同上 |

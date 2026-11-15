@@ -136,9 +136,19 @@ impl Application {
         command: &Command,
         request: &XClipCommand,
     ) -> CadResult<CommandOutcome> {
-        // Bound the geometry before the selection is read: a malformed boundary
-        // is the same refusal with or without a selected INSERT, and it never
-        // opens a transaction.
+        Self::validate_xclip_boundary(request)?;
+        let (document_id, candidate, before) =
+            self.one_selected_insert(session, command, "XCLIP", "xclip")?;
+        self.write_block_clip(document_id, candidate, before, request)
+    }
+
+    /// The boundary-shape half of the pre-write validation: a malformed boundary
+    /// is the same refusal with or without a selected INSERT, and it never opens
+    /// a transaction.
+    ///
+    /// Shared with `CLIP`/`CLIPIT`, which resolve their own selection and then
+    /// hand the mapped boundary to [`Self::write_block_clip`].
+    pub(super) fn validate_xclip_boundary(request: &XClipCommand) -> CadResult<()> {
         if let XClipCommand::Rect([minx, miny, maxx, maxy]) = request {
             if ![minx, miny, maxx, maxy]
                 .iter()
@@ -168,9 +178,21 @@ impl Application {
             // `xclip.` prefix makes them the documented codes.
             crate::app_layout_geometry::validate_clip_polygon(&world, "xclip")?;
         }
+        Ok(())
+    }
 
-        let (document_id, mut candidate, before) =
-            self.one_selected_insert(session, command, "XCLIP", "xclip")?;
+    /// The validated write half of [`Self::xclip_write`]: one INSERT display row,
+    /// one transaction / one undo step.
+    ///
+    /// Split out so `CLIP`/`CLIPIT` reuse the block-clip model (`BlockClip`, the
+    /// display-transaction path and its undo patch) instead of a second one.
+    pub(super) fn write_block_clip(
+        &mut self,
+        document_id: DocumentId,
+        mut candidate: cad_db::DrawingDatabase,
+        before: DbEntity,
+        request: &XClipCommand,
+    ) -> CadResult<CommandOutcome> {
         let SemanticGeometry::Insert { transform, .. } = &before.geometry else {
             unreachable!("one_selected_insert verified the geometry");
         };

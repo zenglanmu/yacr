@@ -7,6 +7,7 @@
 mod alias_table;
 mod annot_arguments;
 mod classic_status;
+mod clip_arguments;
 mod command_vocabulary;
 mod command_vocabulary_clipboard;
 mod command_vocabulary_inquiry;

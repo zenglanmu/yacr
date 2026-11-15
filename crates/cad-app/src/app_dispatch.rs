@@ -134,6 +134,12 @@ impl Application {
             ExtendedCommandId::Shp2Blk => self.shape_to_block(session, command)?,
             ExtendedCommandId::MInsert => self.minsert(session, command)?,
             ExtendedCommandId::AddSelected => self.add_selected(session, command)?,
+            // CLIP/CLIPIT (2026-11-15): the generic boundary commands over the
+            // existing IMAGECLIP/XCLIP clip models. Work-only, one transaction /
+            // one undo step each; every refusal happens before the write.
+            ExtendedCommandId::Clip | ExtendedCommandId::ClipIt => {
+                self.clip_edit(session, command, ext)?
+            }
             // Wave 4 named refusals: a stable `Unsupported` reason per name.
             ExtendedCommandId::BScale
             | ExtendedCommandId::BlockReplace
@@ -141,8 +147,6 @@ impl Application {
             | ExtendedCommandId::DashBReplace
             | ExtendedCommandId::SplineEdit
             | ExtendedCommandId::Burst
-            | ExtendedCommandId::Clip
-            | ExtendedCommandId::ClipIt
             | ExtendedCommandId::Region
             | ExtendedCommandId::WBlock
             | ExtendedCommandId::DashWBlock

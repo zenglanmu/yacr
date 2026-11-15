@@ -896,8 +896,11 @@ impl ExtendedCommandId {
                 | Self::MInsert
                 | Self::AddSelected
                 // XCLIP writes one INSERT display attribute (the clip
-                // boundary) through the display-transaction path.
+                // boundary) through the display-transaction path; CLIP/CLIPIT
+                // write the same image/block clip models from a boundary.
                 | Self::Xclip
+                | Self::Clip
+                | Self::ClipIt
         )
     }
 }

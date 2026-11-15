@@ -2,6 +2,17 @@
 // verbatim into a sibling module when the batch tables pushed the parent past the
 // 1000-line code gate. Nothing here decides anything by itself: every predicate
 // is a local syntax aid, and the host stays the authority for semantics.
+//
+// The clip-family predicates (`CLIP`/`XCLIP`) and the two token helpers they
+// share with this table live in `argument-clip-grammar.ts`, so the two clip
+// grammars sit side by side and this table stays inside the code-size gate.
+import {
+  isClipArgument,
+  isSignedDecimal,
+  isXclipArgument,
+  tokens,
+} from './argument-clip-grammar.ts';
+
 /** The parser for the one typed-argument form a selector accepts. */
 export interface ArgumentSpec {
   readonly parse: (argument: string) => boolean;
@@ -54,20 +65,6 @@ function isZoomArgument(text: string): boolean {
  */
 function isDecimalNumber(text: string): boolean {
   if (!/^-?[0-9]+(\.[0-9]+)?$/.test(text)) return false;
-  return Number.isFinite(Number(text));
-}
-
-/**
- * Whether `text` is a finite decimal with an optional explicit sign (`45`,
- * `22.5`, `0`, `-90`, `+30`).
- *
- * `TORIENT` accepts an absolute rotation in either direction, so the host's
- * grammar admits an explicit `+`; this mirrors it for local admission. It is
- * otherwise the same single plain decimal (no exponent, no bare `.`/`5.`, no
- * embedded spaces).
- */
-function isSignedDecimal(text: string): boolean {
-  if (!/^[+-]?[0-9]+(\.[0-9]+)?$/.test(text)) return false;
   return Number.isFinite(Number(text));
 }
 
@@ -701,6 +698,17 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     parse: isXclipArgument,
   }),
   /**
+   * `CLIP RECT|POLY|ON|OFF|DELETE`: the generic boundary form over the same two
+   * clip models `IMAGECLIP`/`XCLIP` write, on exactly one selected image or
+   * block reference. The target kind, the target's clip space, the "images have
+   * no ON/OFF" rule and every geometry refusal stay the host's (`clip.*`,
+   * `imageclip.*`, `xclip.*`). A bare `CLIP` stays name-only; `CLIPIT` takes no
+   * argument at all.
+   */
+  CLIP: Object.freeze({
+    parse: isClipArgument,
+  }),
+  /**
    * `IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` or
    * `IMAGEADJUST RESET`: the display transfer of the one selected image. The
    * three percentages are plain integers (the host owns the `0..=100` range and
@@ -798,11 +806,6 @@ function isLeaderArgument(argument: string): boolean {
     && isCoordinatePair(parts[0]) && isCoordinatePair(parts[1]);
 }
 
-/** Split a typed argument into whitespace-separated tokens. */
-function tokens(argument: string): readonly string[] {
-  return argument.trim().split(/\s+/).filter(part => part.length > 0);
-}
-
 /** `VPORTS <rows> <cols>` / `-VPORTS`: two positive whole numbers. */
 function parseVportsGrid(argument: string): boolean {
   const parts = tokens(argument);
@@ -891,38 +894,6 @@ function isImageAdjustArgument(argument: string): boolean {
   if (parts.length === 3) return true;
   const word = parts[3].toUpperCase();
   return word === 'MONO' || word === 'COLOR';
-}
-
-/**
- * `XCLIP RECT <minx> <miny> <maxx> <maxy>`, `XCLIP POLY <x1> <y1> …`,
- * `XCLIP ON|OFF|DELETE|INVERT` or `XCLIP ?`.
- *
- * This is the local **syntax** gate only: `RECT` takes exactly four signed
- * decimals, `POLY` an even count of at least six signed decimals (three point
- * pairs), and the four switch words plus `?` stand alone. Coordinates are
- * block-local; rectangle ordering, polygon validity, the axis-aligned world
- * mapping and every declared render limit stay the host's
- * (`xclip.*` refusals), so nothing is rejected or clamped here for semantics.
- */
-function isXclipArgument(argument: string): boolean {
-  const parts = tokens(argument);
-  const head = parts[0];
-  if (!head) return false;
-  if (head === '?') return parts.length === 1;
-  const word = head.toUpperCase();
-  if (word === 'ON' || word === 'OFF' || word === 'DELETE' || word === 'INVERT') {
-    return parts.length === 1;
-  }
-  const coordinates = parts.slice(1);
-  if (word === 'RECT') {
-    return coordinates.length === 4 && coordinates.every(isSignedDecimal);
-  }
-  if (word === 'POLY') {
-    return coordinates.length >= 6
-      && coordinates.length % 2 === 0
-      && coordinates.every(isSignedDecimal);
-  }
-  return false;
 }
 
 /** The four property words `QSELECT`/`FILTER` accept. */

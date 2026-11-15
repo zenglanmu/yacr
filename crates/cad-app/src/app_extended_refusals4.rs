@@ -1,14 +1,16 @@
 //! Wave 4 **named refusals** for the extended command batch.
 //!
-//! Eighteen AutoCAD 2026 names describe features this build has no model or API
-//! for: block scaling/insert-array/replacement, NURBS editing, block-attribute
-//! bursts, image/xref clipping, Region geometry, per-type add-selected prompts,
-//! writing a block to a separate drawing file, a block editor and moving entities
-//! between model and paper space.
+//! Sixteen AutoCAD 2026 names describe features this build has no model or API
+//! for: block scaling/replacement, NURBS editing, block-attribute bursts, Region
+//! geometry, writing a block to a separate drawing file, a block editor and
+//! moving entities between model and paper space.
 //!
 //! `MINSERT`, `ADDSELECTED` and `MLEDIT`/`-MLEDIT` graduated to real entity
 //! writes (2026-11-12); the two-LINE multiline edit lives in
 //! [`crate::app_drawing::mledit`] and is no longer part of this refusal table.
+//! `CLIP` and `CLIPIT` graduated on 2026-11-15: both write the existing
+//! `ImageClip`/`BlockClip` models through [`crate::app_drawing::clip_edit`]
+//! instead of refusing.
 //!
 //! Each name is admitted by the vocabulary and then refused with
 //! `CadError::Unsupported` carrying a **stable** reason string. A refusal writes
@@ -60,10 +62,6 @@ fn reason(ext: ExtendedCommandId) -> String {
         }
         ExtendedCommandId::Burst => {
             "burst.unsupported: this build has no block-attribute model to preserve"
-        }
-        ExtendedCommandId::Clip => "clip.unsupported: this build has no image/xref clipping model",
-        ExtendedCommandId::ClipIt => {
-            "clipit.unsupported: this build has no image/xref clipping model"
         }
         ExtendedCommandId::Region => "region.unsupported: this build has no Region geometry model",
         ExtendedCommandId::WBlock => {

@@ -137,6 +137,10 @@ impl CadSession {
             // `XCLIP <RECT|POLY|ON|OFF|DELETE|INVERT|?>`: the block-local clip
             // boundary/switch rides the existing INSERT selection.
             super::commands::XCLIP_SELECTOR => self.xclip_argument(argument, text),
+            // `CLIP <RECT|POLY|ON|OFF|DELETE …>`: the generic boundary form over
+            // the same image/block clip models. `CLIPIT` takes no argument (its
+            // input is the selection), so it never reaches this dispatch.
+            super::commands::CLIP_SELECTOR => self.clip_argument(argument, text),
             // The table typed forms: `TABLE`/`-TABLE` creation and `TABLEDIT`.
             TABLE_SELECTOR | DASH_TABLE_SELECTOR | TABLEDIT_SELECTOR => {
                 self.table_argument(selector, argument, text)

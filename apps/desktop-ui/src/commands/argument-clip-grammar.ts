@@ -1,0 +1,101 @@
+// The clip-family typed-argument grammar (`CLIP`, `XCLIP`) plus the two token
+// helpers the whole table shares, split out of `argument-commands.ts` when the
+// clipping batch pushed that table past the 1000-line code gate.
+//
+// Nothing here decides anything by itself: every predicate is a local **syntax**
+// aid, and the host stays the authority for semantics (rectangle ordering,
+// polygon validity, the world/block-local mapping and every declared render
+// limit).
+//
+// The two helpers are exported so `argument-commands.ts` keeps exactly one
+// definition of "one plain signed decimal" and of whitespace tokenisation; this
+// module never imports from its parent, so the dependency stays one-way.
+
+/** Split a typed argument into whitespace-separated tokens. */
+export function tokens(argument: string): readonly string[] {
+  return argument.trim().split(/\s+/).filter(part => part.length > 0);
+}
+
+/**
+ * Whether `text` is a finite decimal with an optional explicit sign (`45`,
+ * `22.5`, `0`, `-90`, `+30`).
+ *
+ * `TORIENT` accepts an absolute rotation in either direction, so the host's
+ * grammar admits an explicit `+`; this mirrors it for local admission. It is
+ * otherwise the same single plain decimal (no exponent, no bare `.`/`5.`, no
+ * embedded spaces).
+ */
+export function isSignedDecimal(text: string): boolean {
+  if (!/^[+-]?[0-9]+(\.[0-9]+)?$/.test(text)) return false;
+  return Number.isFinite(Number(text));
+}
+
+/**
+ * `XCLIP RECT <minx> <miny> <maxx> <maxy>`, `XCLIP POLY <x1> <y1> …`,
+ * `XCLIP ON|OFF|DELETE|INVERT` or `XCLIP ?`.
+ *
+ * This is the local **syntax** gate only: `RECT` takes exactly four signed
+ * decimals, `POLY` an even count of at least six signed decimals (three point
+ * pairs), and the four switch words plus `?` stand alone. Coordinates are
+ * block-local; rectangle ordering, polygon validity, the axis-aligned world
+ * mapping and every declared render limit stay the host's (`xclip.*` refusals),
+ * so nothing is rejected or clamped here for semantics.
+ */
+export function isXclipArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  const head = parts[0];
+  if (!head) return false;
+  if (head === '?') return parts.length === 1;
+  const word = head.toUpperCase();
+  if (word === 'ON' || word === 'OFF' || word === 'DELETE' || word === 'INVERT') {
+    return parts.length === 1;
+  }
+  const coordinates = parts.slice(1);
+  if (word === 'RECT') {
+    return coordinates.length === 4 && coordinates.every(isSignedDecimal);
+  }
+  if (word === 'POLY') {
+    return coordinates.length >= 6
+      && coordinates.length % 2 === 0
+      && coordinates.every(isSignedDecimal);
+  }
+  return false;
+}
+
+/**
+ * `CLIP RECT <minx> <miny> <maxx> <maxy>`, `CLIP POLY <x1> <y1> …` or
+ * `CLIP ON|OFF|DELETE`: the generic boundary form over the same two clip models
+ * `IMAGECLIP` and `XCLIP` write.
+ *
+ * This is the local **syntax** gate only. `RECT` takes exactly four signed
+ * decimals (in the target's own clip space: image pixels, block-local for a
+ * reference), `POLY` an even count of at least six world-space signed decimals,
+ * and the three state words stand alone. The target kind, the rectangle
+ * ordering, the polygon validity, the "a block reference has no renderable
+ * polygon clip" refusal and the "images have no ON/OFF" rule are all host
+ * decisions (`clip.*`, `imageclip.*`, `xclip.*`), so nothing is rejected here
+ * for semantics.
+ *
+ * A bare `CLIP` stays name-only and the host answers its payload refusal.
+ * `CLIPIT` has no grammar at all (its input is the selection), so it is not a
+ * typed-argument selector.
+ */
+export function isClipArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  const head = parts[0];
+  if (!head) return false;
+  const word = head.toUpperCase();
+  if (word === 'ON' || word === 'OFF' || word === 'DELETE') {
+    return parts.length === 1;
+  }
+  const coordinates = parts.slice(1);
+  if (word === 'RECT') {
+    return coordinates.length === 4 && coordinates.every(isSignedDecimal);
+  }
+  if (word === 'POLY') {
+    return coordinates.length >= 6
+      && coordinates.length % 2 === 0
+      && coordinates.every(isSignedDecimal);
+  }
+  return false;
+}

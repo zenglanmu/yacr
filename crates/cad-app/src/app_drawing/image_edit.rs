@@ -196,9 +196,25 @@ impl Application {
                  <y1> <x2> <y2> <x3> <y3> …` or `OFF`)",
             ));
         };
-        let request = payload.as_ref();
-        let (document_id, mut candidate, before) =
+        let (document_id, candidate, before) =
             self.one_selected_image(session, command, "IMAGECLIP", "imageclip")?;
+        self.write_image_clip(document_id, candidate, before, payload.as_ref())
+    }
+
+    /// The validated write half of [`Self::image_clip`]: one transaction / one
+    /// undo step on one already-resolved image row.
+    ///
+    /// Split out so `CLIP`/`CLIPIT` (which use their own selection rules and may
+    /// select boundary entities too) reuse this exact validation and write path
+    /// instead of a second clip model. Every refusal here happens before the
+    /// transaction, so a refused request writes nothing.
+    pub(super) fn write_image_clip(
+        &mut self,
+        document_id: DocumentId,
+        mut candidate: cad_db::DrawingDatabase,
+        before: DbEntity,
+        request: &ImageClipCommand,
+    ) -> CadResult<CommandOutcome> {
         let SemanticGeometry::Image {
             origin, u, v, clip, ..
         } = &before.geometry
@@ -571,7 +587,17 @@ fn image_refusal(code: impl std::fmt::Display, detail: impl std::fmt::Display) -
 /// (`imageclip.polygon_self_intersection`) and a degenerate image basis
 /// (`imageclip.degenerate_plane`). A repeated final vertex is dropped; the stored
 /// N-gon keeps the engine's open form.
-fn polygon_clip(points: &[Point3], origin: Point3, u: Point3, v: Point3) -> CadResult<ImageClip> {
+///
+/// `pub(super)` so `CLIP`/`CLIPIT` can map a world ring through this one basis
+/// inverse and then apply the representation layer's convexity requirement to the
+/// **pixel-space** ring the fan triangulation actually consumes. It stays the
+/// single mapping; `IMAGECLIP`'s own behaviour is unchanged.
+pub(super) fn polygon_clip(
+    points: &[Point3],
+    origin: Point3,
+    u: Point3,
+    v: Point3,
+) -> CadResult<ImageClip> {
     let normal = cross(u, v);
     let normal_len = length(normal);
     if !normal_len.is_finite() || normal_len <= 1e-12 {

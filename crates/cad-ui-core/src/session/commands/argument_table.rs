@@ -92,6 +92,10 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // `XCLIP RECT|POLY|ON|OFF|DELETE|INVERT|?`: block-local clip grammar in
     // `commands::xclip`; the command layer owns the semantic refusals.
     XCLIP_SELECTOR,
+    // `CLIP RECT|POLY|ON|OFF|DELETE`: the generic boundary grammar over the two
+    // clip models, in `commands::clip`. `CLIPIT` is deliberately absent: its
+    // whole input is the selection, so a bare line reaches the command.
+    CLIP_SELECTOR,
     IMAGEADJUST_SELECTOR,
     DASH_IMAGEADJUST_SELECTOR,
     TABLE_SELECTOR,

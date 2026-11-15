@@ -8,15 +8,15 @@
 use cad_app::{CommandId, CommandPayload, ExtendedCommandId};
 
 use super::commands::{
-    invalid_arraypath_argument_reason, parse_arraypath_argument, parse_donut_argument,
-    parse_draworder_argument, parse_helix_argument, parse_imageadjust_argument,
-    parse_imageattach_argument, parse_imageclip_argument, parse_mline_argument,
-    parse_mlstyle_argument, parse_mpedit_argument, parse_solid_argument,
+    invalid_arraypath_argument_reason, parse_arraypath_argument, parse_clip_argument,
+    parse_donut_argument, parse_draworder_argument, parse_helix_argument,
+    parse_imageadjust_argument, parse_imageattach_argument, parse_imageclip_argument,
+    parse_mline_argument, parse_mlstyle_argument, parse_mpedit_argument, parse_solid_argument,
     parse_table_create_argument, parse_tabledit_argument, parse_trex_argument,
-    parse_xclip_argument, ARRAYPATH_SELECTOR, DASH_IMAGEADJUST_SELECTOR, DASH_TABLE_SELECTOR,
-    DONUT_SELECTOR, HELIX_SELECTOR, IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR, MLINE_SELECTOR,
-    MLSTYLE_SELECTOR, MPEDIT_SELECTOR, SOLID_SELECTOR, TABLEDIT_SELECTOR, TABLE_SELECTOR,
-    TREX_SELECTOR, XCLIP_SELECTOR,
+    parse_xclip_argument, ARRAYPATH_SELECTOR, CLIP_SELECTOR, DASH_IMAGEADJUST_SELECTOR,
+    DASH_TABLE_SELECTOR, DONUT_SELECTOR, HELIX_SELECTOR, IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR,
+    MLINE_SELECTOR, MLSTYLE_SELECTOR, MPEDIT_SELECTOR, SOLID_SELECTOR, TABLEDIT_SELECTOR,
+    TABLE_SELECTOR, TREX_SELECTOR, XCLIP_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::CadSession;
@@ -65,6 +65,16 @@ pub(crate) fn invalid_xclip_argument_reason(text: &str) -> String {
         "xclip.argument: unsupported or malformed XCLIP argument in `{}`: the typed forms are \
          `XCLIP RECT <minx> <miny> <maxx> <maxy>`, `XCLIP POLY <x1> <y1> <x2> <y2> <x3> <y3> …`, \
          `XCLIP ON|OFF|DELETE|INVERT` and `XCLIP ?`; nothing was changed",
+        text.trim()
+    )
+}
+
+/// The stable refusal for a `CLIP` argument outside the documented grammar.
+pub(crate) fn invalid_clip_argument_reason(text: &str) -> String {
+    format!(
+        "clip.argument: unsupported or malformed CLIP argument in `{}`: the typed forms are \
+         `CLIP RECT <minx> <miny> <maxx> <maxy>`, `CLIP POLY <x1> <y1> <x2> <y2> <x3> <y3> …` \
+         and `CLIP ON|OFF|DELETE`; nothing was changed",
         text.trim()
     )
 }
@@ -233,6 +243,35 @@ impl CadSession {
         match self.core.command(
             CommandId::Extended(ExtendedCommandId::Xclip),
             CommandPayload::XClip(Box::new(payload)),
+        ) {
+            Ok(()) => {
+                *self.error.borrow_mut() = None;
+                Ok(())
+            }
+            Err(error) => {
+                let text = cad_error_text(&error);
+                *self.error.borrow_mut() = Some(text.clone());
+                Err(text)
+            }
+        }
+    }
+
+    /// Apply one typed `CLIP ...` line.
+    ///
+    /// The parsed boundary or state word rides the existing command funnel with
+    /// `CommandId::Extended(ExtendedCommandId::Clip)`; the command layer owns
+    /// every semantic refusal (selection count and kind, the rectangle ordering,
+    /// polygon validity, the world→block-local mapping and the target-specific
+    /// `imageclip.*` / `xclip.*` codes). A malformed argument is refused before
+    /// IPC with the stable reason and changes nothing.
+    pub(super) fn clip_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some(payload) = parse_clip_argument(argument) else {
+            return self.refuse_argument(invalid_clip_argument_reason(text));
+        };
+        self.core.record_command(CLIP_SELECTOR);
+        match self.core.command(
+            CommandId::Extended(ExtendedCommandId::Clip),
+            CommandPayload::Clip(Box::new(payload)),
         ) {
             Ok(()) => {
                 *self.error.borrow_mut() = None;

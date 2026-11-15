@@ -49,7 +49,10 @@ impl PolylinePiece {
 }
 
 /// The point at `angle` on a circle/arc in its own plane.
-fn arc_point(center: Point3, normal: Point3, radius: f64, angle: f64) -> Point3 {
+///
+/// Shared with `CLIPIT`, which chord-approximates an arc boundary segment in the
+/// same plane frame the tessellator draws it in.
+pub(crate) fn arc_point(center: Point3, normal: Point3, radius: f64, angle: f64) -> Point3 {
     let (ax, ay, _) = arbitrary_axis(normal);
     add(
         center,

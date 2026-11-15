@@ -55,7 +55,9 @@ mod pieces;
 #[path = "join_plan.rs"]
 mod plan;
 
-pub(crate) use pieces::{chain_pieces, piece_from_geometry, PolylinePiece};
+// `arc_point` is re-exported for `CLIPIT`'s chord approximation of a curved
+// boundary segment (the same plane frame this chainer uses).
+pub(crate) use pieces::{arc_point, chain_pieces, piece_from_geometry, PolylinePiece};
 use plan::plan_join;
 
 /// The world tolerance the JOIN predicates use (the same shape

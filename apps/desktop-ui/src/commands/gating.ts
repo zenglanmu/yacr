@@ -161,14 +161,17 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'CONSTRAINTSETTINGS',
 
   // The 2026-11-09 Wave 4 batch: the twelve real selection edits and the
-  // eighteen named refusals all read the open drawing (the edits read its
-  // entities, the refusals answer from the build's model), so the start page
-  // disables them with the catalog's own "no drawing is open" sentence. None
-  // takes a capability gate: no file I/O is involved.
+  // named refusals all read the open drawing (the edits read its entities, the
+  // refusals answer from the build's model), so the start page disables them
+  // with the catalog's own "no drawing is open" sentence. None takes a
+  // capability gate: no file I/O is involved. `CLIP`/`CLIPIT` are **not** here:
+  // they became real selection-based clip writes (2026-11-15), so they answer the
+  // no-document case through `SELECTION_REQUIREMENTS` like the other
+  // selection-gated commands.
   'CENTERMARK', 'CENTERLINE', 'NCOPY', 'COPYTOLAYER', '-COPYTOLAYER',
   'CDORDER', 'FLATTEN', 'XPLODE', 'BTRIM', 'BEXTEND', 'CHANGE', 'CHPROP',
   'BSCALE', 'MINSERT', 'BLOCKREPLACE', 'BREPLACE', '-BREPLACE', 'SPLINEDIT',
-  'MLEDIT', '-MLEDIT', 'BURST', 'CLIP', 'CLIPIT', 'REGION', 'ADDSELECTED',
+  'MLEDIT', '-MLEDIT', 'BURST', 'REGION', 'ADDSELECTED',
   'WBLOCK', '-WBLOCK', 'BSAVE', 'BSAVEAS', 'CHSPACE',
 
   // The 2026-11-09 Wave 5 batch: the ATTDISP token, the six read-only
@@ -737,6 +740,18 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   LAYERP: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
   // LIST reports the current selection; zero objects is `list.selection`.
   LIST: Object.freeze({ count: 1, reasonKey: 'draw.kind.list.hint' }),
+  // CLIP (2026-11-15) writes a new boundary on **exactly one** selected raster
+  // image or block reference, so one object is the minimum that can produce a
+  // real clip; the host refuses a second target, a non-clippable kind and every
+  // boundary error by name (`clip.*`). The sentence is the command's own hint, so
+  // the disabled row and the refusal describe the same rule once.
+  CLIP: Object.freeze({ count: 1, reasonKey: 'draw.kind.clip.hint' }),
+  // CLIPIT needs the target **plus** at least one boundary entity, so two
+  // selected objects is the minimum that is not a guaranteed refusal. The table
+  // states a minimum: the host decides which ref is the target, refuses a second
+  // clippable object (`clipit.multiple_targets`) and every open/degenerate
+  // boundary by name. The sentence is the command's own hint.
+  CLIPIT: Object.freeze({ count: 2, reasonKey: 'draw.kind.clipit.hint' }),
   // MASSPROP (2026-11-07) measures the selected closed planar regions, so at
   // least one object is required. The table is a *minimum* (two objects are let
   // through locally and the host decides coplanarity/kind by name); the sentence

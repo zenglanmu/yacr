@@ -858,6 +858,11 @@ pub use image::*;
 mod xclip;
 pub use xclip::*;
 
+// The generic clip grammar (`CLIP`); `CLIPIT` takes no argument because its
+// whole input is the current selection.
+mod clip;
+pub use clip::*;
+
 mod table;
 pub use table::*;
 

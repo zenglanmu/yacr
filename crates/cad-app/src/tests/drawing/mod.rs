@@ -312,6 +312,8 @@ mod explode_imported;
 mod explode_insert;
 mod explode_self_reference;
 mod fillet_curves;
+mod fillet_sharp_corner;
+mod fillet_spline;
 mod gradient;
 mod grip;
 mod grip_fixture;
@@ -327,6 +329,8 @@ mod hatch_utilities;
 mod image;
 mod image_adjust;
 mod xclip;
+// The generic boundary commands over the image/block clip models.
+mod clip;
 // The polygonal IMAGECLIP mode (world-space boundary → pixel-space N-gon).
 mod image_clip_polygon;
 mod insert_block;

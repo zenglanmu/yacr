@@ -267,6 +267,9 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "IMAGEATTACH",
             "IMAGECLIP",
             "XCLIP",
+            // `CLIP` is the generic boundary form over the same two clip models;
+            // `CLIPIT` takes no argument (the selection is its whole input).
+            "CLIP",
             "IMAGEADJUST",
             "-IMAGEADJUST",
             // The table typed forms (`TABLE`, `-TABLE`, `TABLEDIT`).

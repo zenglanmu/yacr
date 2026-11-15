@@ -1,12 +1,16 @@
 //! Wave 4 named-refusal contracts: `BSCALE`, `BLOCKREPLACE`, `BREPLACE`,
-//! `-BREPLACE`, `SPLINEDIT`, `BURST`, `CLIP`, `CLIPIT`, `REGION`, `WBLOCK`,
-//! `-WBLOCK`, `BSAVE`, `BSAVEAS`, `CHSPACE`.
+//! `-BREPLACE`, `SPLINEDIT`, `BURST`, `REGION`, `WBLOCK`, `-WBLOCK`, `BSAVE`,
+//! `BSAVEAS`, `CHSPACE`.
 //!
 //! `MINSERT`, `ADDSELECTED` and `MLEDIT`/`-MLEDIT` were refusals in this wave and
 //! graduated to real entity writes on 2026-11-12 (`app_drawing::minsert`,
 //! `app_drawing::addselected`, `app_drawing::mledit`); their contracts live in
 //! `tests::drawing::minsert`, `tests::drawing::addselected` and
 //! `tests::extended_w9_mleader` and are no longer part of this table.
+//!
+//! `CLIP` and `CLIPIT` graduated on 2026-11-15 to real clip writes over the
+//! existing `ImageClip`/`BlockClip` models (`app_drawing::clip_edit`); their
+//! contract lives in `tests::drawing::clip`.
 //!
 //! Each name is admitted by the vocabulary and refused with
 //! `CadError::Unsupported` carrying a **stable** reason. A refusal must write
@@ -15,7 +19,7 @@
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 14] = [
+const REFUSALS: [(ExtendedCommandId, &str); 12] = [
     (
         ExtendedCommandId::BScale,
         "bscale.unsupported: BSCALE needs a factor and an insertion reference; use SCALE on the \
@@ -43,14 +47,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 14] = [
     (
         ExtendedCommandId::Burst,
         "burst.unsupported: this build has no block-attribute model to preserve",
-    ),
-    (
-        ExtendedCommandId::Clip,
-        "clip.unsupported: this build has no image/xref clipping model",
-    ),
-    (
-        ExtendedCommandId::ClipIt,
-        "clipit.unsupported: this build has no image/xref clipping model",
     ),
     (
         ExtendedCommandId::Region,
