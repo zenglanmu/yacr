@@ -51,7 +51,7 @@ pub mod plot_vector;
 
 pub use plot_vector::{
     build_vector_document, render_pdf, render_plot_pdf, render_plot_svg, render_svg,
-    vector_diagnostic, VectorDocument, VectorPage, VectorPath,
+    vector_diagnostic, VectorDocument, VectorPage, VectorPath, PAPER_BACKGROUND,
 };
 pub use text::{
     parse_mtext, sanitize_text, text_issue, FontEngine, ParsedText, ShapedText, StackedFraction,

@@ -50,6 +50,22 @@ impl WipeoutFrames {
             Self::DisplayNotPlot => "DISPLAY-NOT-PLOT",
         }
     }
+
+    /// The state for one documented `WIPEOUTFRAME` value, or `None` outside
+    /// `0..=2`.
+    ///
+    /// The three documented values are the whole domain: every other number is
+    /// refused by the caller with its own stable reason, never clamped to `0`
+    /// or to the nearest valid state (a silent clamp would make `WIPEOUTFRAME 3`
+    /// look like a successful hide).
+    pub fn from_number(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(Self::Off),
+            1 => Some(Self::On),
+            2 => Some(Self::DisplayNotPlot),
+            _ => None,
+        }
+    }
 }
 
 /// The current 2D isometric drafting plane token (`ISOPLANE`).

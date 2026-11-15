@@ -138,10 +138,18 @@ fn sysvdlg_lists_every_exposed_variable_and_marks_the_rest_not_tracked() {
     let before = revision(&app);
     let outcome = execute(&mut app, &mut session, ExtendedCommandId::SysVarDialog)
         .expect("SYSVDLG is admitted");
-    assert_eq!(count_code(&outcome, "sysvdlg.value"), 8);
+    assert_eq!(count_code(&outcome, "sysvdlg.value"), 9);
     assert_eq!(count_code(&outcome, "sysvarmonitor.value"), 0);
     for name in [
-        "PDMODE", "PDSIZE", "SNAPUNIT", "LTSCALE", "GRID", "SNAP", "ORTHO", "TEXTSIZE",
+        "PDMODE",
+        "PDSIZE",
+        "SNAPUNIT",
+        "LTSCALE",
+        "GRID",
+        "SNAP",
+        "ORTHO",
+        "TEXTSIZE",
+        "WIPEOUTFRAME",
     ] {
         assert!(
             outcome

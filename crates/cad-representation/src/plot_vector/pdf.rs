@@ -155,8 +155,10 @@ fn push_pdf_path(content: &mut Vec<u8>, path: &VectorPath, alphas: &[f32]) {
         content.extend_from_slice(b"h\n");
     }
     let operator = match (path.fill.is_some(), path.stroke.is_some()) {
-        (true, true) => "B",
-        (true, false) => "f",
+        // `f*`/`B*` are the even-odd variants, matching the raster HATCH and
+        // WIPEOUT fill rule (a self-intersecting ring is filled as drawn).
+        (true, true) => "B*",
+        (true, false) => "f*",
         (false, true) => "S",
         (false, false) => "n",
     };

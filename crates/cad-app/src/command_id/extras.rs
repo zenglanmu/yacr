@@ -39,6 +39,16 @@
 //! lane: the token is published as `SessionState::view_extras.visual_style` for
 //! a host to consume, and no pixel/GPU effect is verified.
 //!
+//! `WIPEOUTFRAME [0|1|2]` is the **system-variable spelling** of the
+//! `WIPEOUT Frames` option: `0` hides every frame (the mask still masks), `1`
+//! displays and plots them, `2` displays without plotting. It writes the same
+//! `SessionState::drafting_extras.wipeout_frames` token through the same setter
+//! the option and the drawing-settings panel use, so the three paths cannot
+//! disagree — and, unlike `VSCURRENT`, that token has real consumers: the
+//! display scene and the vector-plot context. The bare selector reports the
+//! value; a number outside `0..=2` is `wipeoutframe.out_of_range` (never a
+//! clamp). `SETVAR WIPEOUTFRAME [<n>]` reads/writes the same variable.
+//!
 //! # LINETYPE
 //!
 //! `LINETYPE LIST` is a read-only report of the drawing's linetype table.

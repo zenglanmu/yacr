@@ -382,6 +382,114 @@ fn viewres_is_a_session_percentage_with_named_range_refusals() {
 }
 
 #[test]
+fn wipeoutframe_command_writes_the_same_session_token_as_the_frames_option() {
+    // The system-variable spelling and the `WIPEOUT Frames` option are one
+    // token: the command stores exactly what the option stores, and nothing is
+    // written to the drawing (no revision, no undo entry).
+    let (mut app, mut session) = application_with_document();
+    let revision = drawing(&app).revision();
+    for (frames, value, label) in [
+        (WipeoutFrames::Off, 0, "OFF"),
+        (WipeoutFrames::DisplayNotPlot, 2, "DISPLAY-NOT-PLOT"),
+        (WipeoutFrames::On, 1, "ON"),
+    ] {
+        let outcome = execute(
+            &mut app,
+            &mut session,
+            CommandId::WipeoutFrame,
+            CommandPayload::WipeoutFrame(frames),
+        )
+        .expect("WIPEOUTFRAME stores the session state");
+        assert_eq!(session.drafting_extras.wipeout_frames(), frames);
+        assert_eq!(
+            session.drafting_extras.wipeout_frames().value(),
+            value,
+            "the stored numeric WIPEOUTFRAME value"
+        );
+        let diagnostic = outcome
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "wipeoutframe.value")
+            .expect("a stable wipeoutframe.value diagnostic");
+        assert!(diagnostic.message.contains(label), "{}", diagnostic.message);
+        assert!(diagnostic.message.contains(&value.to_string()));
+        assert_eq!(drawing(&app).revision(), revision, "no drawing write");
+        assert!(!app.can_undo(&DocumentId(1)), "no undo entry");
+    }
+
+    // The payload-less form is the read-only report: it prints the live value
+    // and changes nothing.
+    session
+        .drafting_extras
+        .set_wipeout_frames(WipeoutFrames::DisplayNotPlot);
+    let report = execute(
+        &mut app,
+        &mut session,
+        CommandId::WipeoutFrame,
+        CommandPayload::None,
+    )
+    .expect("the bare selector reports");
+    assert_eq!(
+        session.drafting_extras.wipeout_frames(),
+        WipeoutFrames::DisplayNotPlot,
+        "the report form never mutates the token"
+    );
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "wipeoutframe.value"
+            && diagnostic.message.contains("= 2 (DISPLAY-NOT-PLOT)")
+    }));
+
+    // A payload that is not this command's own is refused, not treated as a
+    // report, and the token survives the refusal.
+    let refused = execute(
+        &mut app,
+        &mut session,
+        CommandId::WipeoutFrame,
+        CommandPayload::ViewRes(50),
+    );
+    let error = format!("{}", refused.expect_err("foreign payload is refused"));
+    assert!(error.contains("wipeoutframe.invalid_payload"), "{error}");
+    assert_eq!(
+        session.drafting_extras.wipeout_frames(),
+        WipeoutFrames::DisplayNotPlot
+    );
+}
+
+#[test]
+fn wipeoutframe_reads_the_same_token_through_setvar() {
+    // `SETVAR WIPEOUTFRAME` is the read half of the same variable, so a change
+    // made by the command is what the sysvar report prints.
+    let (mut app, mut session) = application_with_document();
+    session
+        .drafting_extras
+        .set_wipeout_frames(WipeoutFrames::Off);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::SetVar,
+        CommandPayload::SetVar("WIPEOUTFRAME".into()),
+    )
+    .expect("SETVAR WIPEOUTFRAME is modelled");
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "setvar.value"
+                && diagnostic.message.contains("= 0")),
+        "{:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn wipeoutframe_is_viewer_legal() {
+    // Setting the frame display is session state only, so Viewer mode may do it
+    // (the mask creation itself stays Work-only).
+    assert!(!CommandId::WipeoutFrame.requires_work_mode());
+    assert!(CommandId::Wipeout.requires_work_mode());
+}
+
+#[test]
 fn vscurrent_stores_wireframe_and_refuses_other_styles_by_name() {
     let (mut app, mut session) = application_with_document();
     execute(

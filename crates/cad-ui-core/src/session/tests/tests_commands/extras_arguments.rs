@@ -1,14 +1,16 @@
 //! Typed-argument and vocabulary contract tests for the 2026-11-07 extras batch
 //! (`SKETCH`, `TRACE`, `MOCORO`, `MSTRETCH`, `-PAN`, `VIEWRES`, `VSCURRENT`,
-//! `REGEN3`, `LINETYPE`, `-LINETYPE`).
+//! `WIPEOUTFRAME`, `REGEN3`, `LINETYPE`, `-LINETYPE`).
 
 use super::super::super::*;
+use super::super::test_support::*;
 use cad_app::{CommandPayload, LinetypeCommand, MocoroCommand};
 
 use crate::session::commands::{
     parse_linetype_argument, parse_mocoro_argument, parse_pan_argument, parse_trace_argument,
-    parse_viewres_argument, parse_vscurrent_argument, ARGUMENT_SELECTORS, LINETYPE_SELECTOR,
-    MOCORO_SELECTOR, PAN_SELECTOR, TRACE_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR,
+    parse_viewres_argument, parse_vscurrent_argument, parse_wipeoutframe_argument,
+    ARGUMENT_SELECTORS, LINETYPE_SELECTOR, MOCORO_SELECTOR, PAN_SELECTOR, TRACE_SELECTOR,
+    VIEWRES_SELECTOR, VSCURRENT_SELECTOR, WIPEOUTFRAME_SELECTOR,
 };
 
 #[test]
@@ -19,6 +21,7 @@ fn every_extras_selector_has_a_table_row_and_its_argument_form_is_admitted() {
     assert_eq!(command_name(CommandId::MStretch), Some("MSTRETCH"));
     assert_eq!(command_name(CommandId::ViewRes), Some("VIEWRES"));
     assert_eq!(command_name(CommandId::VisualStyle), Some("VSCURRENT"));
+    assert_eq!(command_name(CommandId::WipeoutFrame), Some("WIPEOUTFRAME"));
     assert_eq!(command_name(CommandId::Linetype), Some("LINETYPE"));
     for selector in [
         PAN_SELECTOR,
@@ -26,6 +29,7 @@ fn every_extras_selector_has_a_table_row_and_its_argument_form_is_admitted() {
         MOCORO_SELECTOR,
         VIEWRES_SELECTOR,
         VSCURRENT_SELECTOR,
+        WIPEOUTFRAME_SELECTOR,
         LINETYPE_SELECTOR,
     ] {
         assert!(
@@ -150,4 +154,90 @@ fn vscurrent_admits_one_word_and_linetype_has_list_and_set_forms() {
     assert!(parse_linetype_argument("SET").is_err());
     assert!(parse_linetype_argument("LIST extra").is_err());
     assert!(parse_linetype_argument("LOAD x").is_err());
+}
+
+#[test]
+fn wipeoutframe_admits_exactly_the_three_documented_values() {
+    use cad_app::WipeoutFrames;
+    for (text, expected) in [
+        ("0", WipeoutFrames::Off),
+        ("1", WipeoutFrames::On),
+        ("2", WipeoutFrames::DisplayNotPlot),
+        ("  2  ", WipeoutFrames::DisplayNotPlot),
+    ] {
+        assert!(
+            matches!(
+                parse_wipeoutframe_argument(text),
+                Ok(CommandPayload::WipeoutFrame(frames)) if frames == expected
+            ),
+            "{text:?} must parse to {expected:?}"
+        );
+    }
+    // Out of range is a named refusal, never a clamp to the nearest state.
+    for text in ["3", "-1", "4", "100"] {
+        let error = parse_wipeoutframe_argument(text)
+            .err()
+            .expect("an out-of-range value is refused");
+        assert!(
+            error.contains("wipeoutframe.out_of_range"),
+            "{text:?}: {error}"
+        );
+    }
+    // Non-integers and multi-token arguments are the grammar refusal.
+    for text in ["", "ON", "OFF", "1.0", "2 3", "0x1"] {
+        assert!(
+            parse_wipeoutframe_argument(text).is_err(),
+            "{text:?} must be refused"
+        );
+    }
+}
+
+/// The live session `WIPEOUTFRAME` token (the host controller owns it).
+fn frames_of(session: &CadSession) -> cad_app::WipeoutFrames {
+    session
+        .core
+        .controller
+        .borrow()
+        .session
+        .drafting_extras
+        .wipeout_frames()
+}
+
+#[test]
+fn wipeoutframe_command_stores_the_session_token_and_reports_it() {
+    use cad_app::WipeoutFrames;
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    // The documented initial value is 1 (displayed and plotted).
+    assert_eq!(
+        frames_of(&session),
+        WipeoutFrames::On,
+        "WIPEOUTFRAME starts ON"
+    );
+    session
+        .command("WIPEOUTFRAME 2")
+        .expect("WIPEOUTFRAME 2 is admitted");
+    assert_eq!(frames_of(&session), WipeoutFrames::DisplayNotPlot);
+    // The bare selector is the report form and changes nothing.
+    session.command("WIPEOUTFRAME").expect("bare WIPEOUTFRAME");
+    assert_eq!(frames_of(&session), WipeoutFrames::DisplayNotPlot);
+    // An out-of-range value is refused by name before dispatch.
+    let error = session
+        .command("WIPEOUTFRAME 3")
+        .expect_err("3 is not a WIPEOUTFRAME value");
+    assert!(error.contains("wipeoutframe.out_of_range"), "{error}");
+    assert_eq!(
+        frames_of(&session),
+        WipeoutFrames::DisplayNotPlot,
+        "a refusal never changes the token"
+    );
+    // `SETVAR` writes and reports the same variable.
+    session
+        .command("SETVAR WIPEOUTFRAME 0")
+        .expect("SETVAR WIPEOUTFRAME 0 is admitted");
+    assert_eq!(frames_of(&session), WipeoutFrames::Off);
+    session
+        .command("SETVAR WIPEOUTFRAME")
+        .expect("SETVAR WIPEOUTFRAME reports");
 }

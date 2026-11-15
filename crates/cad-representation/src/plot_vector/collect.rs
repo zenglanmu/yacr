@@ -10,17 +10,46 @@ use super::vector_diagnostic;
 // Collection
 // ---------------------------------------------------------------------------
 
+/// One WIPEOUT mask waiting for the document's final mask stage.
+struct DeferredMask {
+    /// The source entity's display order (masks paint in ascending order).
+    draw_order: i64,
+    /// The boundary in page millimetres, y-up.
+    boundary: Vec<[f64; 2]>,
+    /// `WIPEOUTFRAME` 1 (plot the frame): emit the closed boundary outline after
+    /// the fill. `2`/`0` arrive here with `false` because the plot context is
+    /// built with the frame flag clear.
+    frame: bool,
+    /// The fragment's opacity (a mask erases, so this is the entity's alpha).
+    opacity: f32,
+    /// Whether this mask contributes a fill. `false` for an `inverted` mask (the
+    /// complement is not expressible as one ring) — its frame is still emitted.
+    fill: bool,
+    /// The frame's resolved colour and lineweight (the mask fill itself is the
+    /// page background, never this colour).
+    frame_color: [f32; 3],
+    frame_lineweight: f64,
+}
+
 /// Collect the path geometry of a display representation onto a planned page.
 ///
 /// Never fails for an unsupported primitive: those are recorded in the
 /// document's diagnostics and completeness instead of being dropped. It only
 /// fails when the page itself cannot define a physical transform.
+///
+/// WIPEOUT masks are **deferred** to a final stage: the raster renderer paints
+/// every mask in a last `depth_compare: Always` pass (ADR 0022), so the path
+/// document paints each mask's fill after every regular path — otherwise a
+/// mask's page-background fill would be overpainted by geometry the mask is
+/// supposed to hide. Masks paint in ascending `draw_order` (stable), then their
+/// boundary frames, exactly like the renderer's per-mask fill-then-frame draw.
 pub fn build_vector_document(
     representation: &DisplayRepresentation,
     page: &PlotPage,
 ) -> CadResult<VectorDocument> {
     let vector_page = VectorPage::from_plot_page(page)?;
     let mut document = VectorDocument::empty(&vector_page);
+    let mut masks: Vec<DeferredMask> = Vec::new();
     for fragment in &representation.fragments {
         let object = Some(ObjectId(fragment.source.entity.0));
         match &fragment.primitive {
@@ -72,33 +101,105 @@ pub fn build_vector_document(
                         .to_string(),
                 );
             }
-            // A mask has no path representation for its **fill**: it erases in the
-            // raster frame by flooding the background, and a path writer has no
-            // background flood (ADR 0022 D4). The boundary **frame**, however, is
-            // real vector geometry: when the mask carries `frame` it is emitted as
-            // a closed polyline (`WIPEOUTFRAME` 1 plots the frame; 2 does not,
-            // because the plot context is built without it). The skipped fill is
-            // always named, never silently dropped.
+            // A mask **does** have a path representation: its fill is the page
+            // background colour, not a transparent hole, so the paths painted
+            // before it really disappear — the paper equivalent of the raster
+            // clear-colour flood (ADR 0022 D1). The fill is deferred to the
+            // document's final stage because the raster mask pass paints last
+            // (ADR 0022 D2 subset). The boundary **frame** is real vector
+            // geometry: when the mask carries `frame` it is emitted as a closed
+            // polyline after its own fill (`WIPEOUTFRAME` 1 plots the frame; 2
+            // does not, because the plot context is built without it).
+            //
+            // `inverted` is still not expressible: the complement of an arbitrary
+            // polygon needs a multi-ring even-odd path, and the path model is a
+            // single ring. It is named, never silently dropped.
             DisplayPrimitive::Mask {
-                boundary, frame, ..
+                boundary,
+                inverted,
+                frame,
             } => {
-                if *frame {
-                    let mut outline: Vec<Point3> = boundary.iter().copied().collect();
-                    if let Some(first) = boundary.first() {
-                        outline.push(*first);
+                if boundary.len() < 3 {
+                    document.report(
+                        object,
+                        vector_diagnostic::MASK_BOUNDARY_DEGENERATE,
+                        "wipeout mask boundary has fewer than three vertices; the mask fill is \
+                         not drawn"
+                            .to_string(),
+                    );
+                } else {
+                    if *inverted {
+                        document.report(
+                            object,
+                            vector_diagnostic::MASK_INVERTED_UNSUPPORTED,
+                            "an inverted wipeout mask fills the complement of its boundary; the \
+                             path model is a single ring, so the fill is not drawn (the frame, \
+                             when enabled, still is)"
+                                .to_string(),
+                        );
                     }
-                    collect_lines(&mut document, object, &outline, fragment, &vector_page);
+                    let Some(boundary) = map_points(boundary, &vector_page) else {
+                        document.report(
+                            object,
+                            vector_diagnostic::NON_FINITE,
+                            "wipeout mask boundary has a non-finite mapped coordinate and was \
+                             omitted"
+                                .to_string(),
+                        );
+                        continue;
+                    };
+                    masks.push(DeferredMask {
+                        draw_order: fragment.draw_order,
+                        boundary,
+                        frame: *frame,
+                        opacity: fragment.alpha,
+                        fill: !*inverted,
+                        frame_color: fragment.color,
+                        frame_lineweight: finite_lineweight(fragment.lineweight),
+                    });
                 }
-                document.report(
-                    object,
-                    vector_diagnostic::MASK_UNSUPPORTED,
-                    "wipeout mask fill is skipped in vector output: there is no background flood in a path writer"
-                        .to_string(),
-                );
             }
         }
     }
+    // The final mask stage: fills (ascending display order) then each mask's
+    // boundary frame, mirroring the renderer's per-mask draw.
+    masks.sort_by_key(|mask| mask.draw_order);
+    let background = document.background;
+    for mask in &masks {
+        if mask.fill {
+            document.paths.push(VectorPath::polygon(
+                mask.boundary.clone(),
+                background,
+                mask.opacity,
+            ));
+        }
+        if mask.frame {
+            push_mask_frame_mapped(
+                &mut document,
+                &mask.boundary,
+                mask.frame_color,
+                mask.frame_lineweight,
+            );
+        }
+    }
     Ok(document)
+}
+
+/// Emit one mask's closed boundary frame from page-space points.
+///
+/// The ring repeats its first point so a stroked open polyline closes visually;
+/// the frame is stroked, never filled.
+fn push_mask_frame_mapped(
+    document: &mut VectorDocument,
+    boundary: &[[f64; 2]],
+    color: [f32; 3],
+    lineweight: f64,
+) {
+    let mut outline = boundary.to_vec();
+    outline.push(boundary[0]);
+    document
+        .paths
+        .push(VectorPath::polyline(outline, color, lineweight, 1.0));
 }
 
 fn collect_lines(

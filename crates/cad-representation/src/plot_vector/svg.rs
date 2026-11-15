@@ -38,10 +38,16 @@ fn svg_path(path: &VectorPath, height_mm: f64) -> String {
         .collect();
     let element = if path.closed { "polygon" } else { "polyline" };
     let fill = match (path.closed, path.fill) {
+        // A filled polygon uses the even-odd rule, the same rule the raster
+        // HATCH and WIPEOUT fills use: a self-intersecting ring is filled as
+        // drawn, never repaired or reinterpreted by the nonzero rule.
         (true, Some(color)) => hex_color(color),
         _ => "none".to_string(),
     };
     let mut attrs = format!("points=\"{}\" fill=\"{fill}\"", points.join(" "));
+    if path.closed && path.fill.is_some() {
+        attrs.push_str(" fill-rule=\"evenodd\"");
+    }
     match path.stroke {
         Some(color) => attrs.push_str(&format!(
             " stroke=\"{}\" stroke-width=\"{}\"",

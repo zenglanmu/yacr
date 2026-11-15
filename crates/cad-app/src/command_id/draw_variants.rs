@@ -30,6 +30,13 @@
 /// path (built with the frame flag clear) omits it. The state never writes the
 /// drawing.
 ///
+/// The same token has its own **system-variable selector**, `WIPEOUTFRAME
+/// [0|1|2]` ([`crate::CommandId::WipeoutFrame`]), which reports the value when
+/// bare and stores it otherwise — one setter, so the option and the variable can
+/// never disagree (`SETVAR WIPEOUTFRAME [<n>]` is the third spelling of the same
+/// read/write). An out-of-range value is the named `wipeoutframe.out_of_range`
+/// refusal, never a clamp.
+///
 /// Refusals (all before any write, all with a stable machine prefix):
 ///
 /// * `wipeout.payload` — the payload is not a point list / supported option;

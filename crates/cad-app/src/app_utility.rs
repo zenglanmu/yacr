@@ -754,8 +754,16 @@ fn with_payload(command: &Command, id: CommandId, payload: CommandPayload) -> Co
 /// report order. `SETVAR` and the `SYSVARMONITOR`/`SYSVDLG` reports read exactly
 /// this list, so a report can never advertise a variable the router does not
 /// model.
-pub(crate) const MODELLED_SYSTEM_VARIABLES: [&str; 8] = [
-    "PDMODE", "PDSIZE", "SNAPUNIT", "LTSCALE", "GRID", "SNAP", "ORTHO", "TEXTSIZE",
+pub(crate) const MODELLED_SYSTEM_VARIABLES: [&str; 9] = [
+    "PDMODE",
+    "PDSIZE",
+    "SNAPUNIT",
+    "LTSCALE",
+    "GRID",
+    "SNAP",
+    "ORTHO",
+    "TEXTSIZE",
+    "WIPEOUTFRAME",
 ];
 
 /// Read one modelled system variable as `(value, kind)`, or `None` when the name
@@ -777,6 +785,13 @@ pub(crate) fn modelled_system_variable(
             ToolValue::Number(height) => (height.to_string(), "real"),
             ToolValue::Flag(flag) => (flag.to_string(), "boolean"),
         },
+        // `WIPEOUTFRAME` is session display state (`0`/`1`/`2`), not a drawing
+        // header value: the report reads the same token the
+        // `WIPEOUTFRAME`/`WIPEOUT Frames` commands write.
+        "WIPEOUTFRAME" => (
+            session.drafting_extras.wipeout_frames().value().to_string(),
+            "integer",
+        ),
         _ => return None,
     };
     Some(value)

@@ -313,6 +313,12 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MSTRETCH", CommandId::MStretch),
     ("VIEWRES", CommandId::ViewRes),
     ("VSCURRENT", CommandId::VisualStyle),
+    // WIPEOUTFRAME is the system-variable spelling of the `WIPEOUT Frames` option:
+    // the same session token (`WipeoutFrames`), one setter. `0` hides the frames,
+    // `1` displays and plots them, `2` displays without plotting; any other value
+    // is the named `wipeoutframe.out_of_range` refusal. The bare selector reports
+    // the current value. Set exactly like the panel does (session state, no write).
+    ("WIPEOUTFRAME", CommandId::WipeoutFrame),
     ("LINETYPE", CommandId::Linetype),
 
     // The 2026-11-07 layout batch; every write form is a named refusal.

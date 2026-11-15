@@ -16,9 +16,12 @@
 //! write/read path and the no-write discipline only; they are **not** a pixel or
 //! plotting acceptance of the frame itself.
 //!
-//! Still declared limits: no picking an existing wipeout, no `FRAME` system
-//! variable command, and self-intersection is not rejected (the ring is stored as
-//! given and filled even-odd; only a zero net area is refused).
+//! Still declared limits: no picking an existing wipeout, `inverted: true`
+//! authoring, and self-intersection is not rejected (the ring is stored as
+//! given and filled even-odd; only a zero net area is refused). The `FRAME`
+//! system variable itself is **not** modelled (it also controls image/xref/PDF
+//! frames, which this build has no display model for); `WIPEOUTFRAME [0|1|2]` is
+//! the modelled spelling and shares this test module's token.
 
 use super::*;
 

@@ -28,7 +28,15 @@ use super::CadSession;
 
 /// The closed set of variables `SETVAR` reports or writes.
 const MODELLED_VARIABLES: &[&str] = &[
-    "PDMODE", "PDSIZE", "SNAPUNIT", "LTSCALE", "GRID", "SNAP", "ORTHO", "TEXTSIZE",
+    "PDMODE",
+    "PDSIZE",
+    "SNAPUNIT",
+    "LTSCALE",
+    "GRID",
+    "SNAP",
+    "ORTHO",
+    "TEXTSIZE",
+    "WIPEOUTFRAME",
 ];
 
 /// The three shell settings `SETVAR` can **write** but not read.
@@ -255,6 +263,16 @@ impl CadSession {
                     }
                 }
             }
+            // `WIPEOUTFRAME` is session display state, so `SETVAR` writes it
+            // through the very same command the typed `WIPEOUTFRAME <n>` line
+            // uses — one setter, one diagnostic, one refusal for `0..=2` outside
+            // the domain (never a clamp).
+            "WIPEOUTFRAME" => match super::commands::parse_wipeoutframe_argument(value) {
+                Ok(payload) => {
+                    self.dispatch_typed_argument(SETVAR_SELECTOR, CommandId::WipeoutFrame, payload)
+                }
+                Err(reason) => self.refuse_argument(reason),
+            },
             // The three persisted shell settings write through the same
             // validated/persisted settings path the `NAVVCUBEDISPLAY`
             // `DISPLAYVIEWCUBEIN2D` / `DISPLAYVIEWCUBEIN3D` selectors use. The

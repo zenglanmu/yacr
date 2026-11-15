@@ -13,7 +13,9 @@ use cad_domain::{
     LayerId, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH, TextAlignV,
 };
 
-use crate::{AppMode, BackendChoice, MeasurementToolKind, SelectionMode, StandardView};
+use crate::{
+    AppMode, BackendChoice, MeasurementToolKind, SelectionMode, StandardView, WipeoutFrames,
+};
 
 mod text_batch;
 pub use text_batch::*;
@@ -920,6 +922,13 @@ pub enum CommandPayload {
     ViewRes(u32),
     /// `VSCURRENT`: the session visual-style token (`WIREFRAME` only).
     VisualStyle(String),
+    /// `WIPEOUTFRAME <0|1|2>`: the session frame state for every wipeout.
+    ///
+    /// The bare selector carries [`CommandPayload::None`] and is the read-only
+    /// report (the same value `SETVAR WIPEOUTFRAME` prints). A number outside
+    /// `0..=2` never reaches this payload: the typed parser refuses it by name
+    /// (`wipeoutframe.out_of_range`) before dispatch.
+    WipeoutFrame(WipeoutFrames),
     /// `LINETYPE`: `LIST` or `SET <name>`.
     Linetype(crate::LinetypeCommand),
     /// `IMAGEATTACH <file> <x> <y> <w> <h> <scale>`: one real `Image` row (Work-only).

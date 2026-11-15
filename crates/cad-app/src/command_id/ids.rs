@@ -127,23 +127,21 @@ pub enum CommandId {
     /// simply ignored). A non-finite, coincident or collinear triple is
     /// `circle3p.degenerate` and changes nothing. Work-only.
     CreateCircle3P,
-    /// `CIRCLE D`: draw a CIRCLE from a centre and a **diameter** point.
-    ///
-    /// Payload is `Points([center, diameter])`: unlike [`CommandId::CreateCircle`]
-    /// the second pick lies on the far side of the circle, so the stored radius
-    /// is **half** the centre→pick distance (AutoCAD's Diameter option). A
-    /// non-finite pair or a zero distance is `circlediameter.degenerate` and
-    /// changes nothing. Work-only.
+    /// `CIRCLE D`: draw a CIRCLE from a centre and a **diameter** point
+    /// (`Points([center, diameter])`). Unlike [`CommandId::CreateCircle`] the
+    /// second pick lies on the far side, so the stored radius is **half** the
+    /// centre→pick distance (AutoCAD's Diameter option). A non-finite pair or a
+    /// zero distance is `circlediameter.degenerate`. Work-only.
     CreateCircleDiameter,
     /// Draw an ARC through three points (start, a point on the arc, end) on the
     /// work plane. The three points must be non-collinear and finite; a
     /// degenerate input is an explicit refusal that changes nothing. Work-only.
     CreateArc,
-    /// Draw an open LWPOLYLINE through the payload points (at least two, finite,
-    /// not all identical) on the active layer. `Points` authors straight segments
-    /// (`closed == false`) with the **uniform width** from the `polylineWidth` tool
-    /// parameter (default `0`, hairline); `Geometry(Polyline)` preserves the
-    /// payload's bulges, closed flag and `width`; per-vertex taper is not modeled. Work-only.
+    /// Draw an open LWPOLYLINE through at least two finite, not-all-identical
+    /// payload points on the active layer: `Points` authors straight segments
+    /// (`closed == false`) with the **uniform width** from the `polylineWidth`
+    /// tool parameter (default `0`, hairline); `Geometry(Polyline)` preserves
+    /// bulges, closed and `width`; per-vertex taper is not modeled. Work-only.
     CreatePolyline,
     /// `WIPEOUT`: closed polygon mask; see [`crate::command_id::draw_variants`].
     Wipeout,
@@ -973,6 +971,8 @@ pub enum CommandId {
     MStretch,
     /// `VIEWRES` (Viewer-legal): store the session circle-tessellation percentage.
     ViewRes,
+    /// `WIPEOUTFRAME [0|1|2]` (Viewer-legal): the session frame state every wipeout uses; contract: [`crate::command_id::extras`].
+    WipeoutFrame,
     /// `VSCURRENT` (Viewer-legal): store the 2D wireframe visual-style token.
     VisualStyle,
     /// `LINETYPE` (Viewer-legal for `LIST`; `SET` re-authorizes work mode):

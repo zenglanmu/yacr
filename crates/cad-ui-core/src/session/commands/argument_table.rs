@@ -150,6 +150,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     MOCORO_SELECTOR,
     VIEWRES_SELECTOR,
     VSCURRENT_SELECTOR,
+    // `WIPEOUTFRAME <0|1|2>`: the system-variable spelling of `WIPEOUT Frames`
+    // (same session token, one setter). The bare selector reports the value.
+    WIPEOUTFRAME_SELECTOR,
     LINETYPE_SELECTOR,
     // The 2026-11 P3 option batch: OVERKILL's dialog set, REVCLOUD's mode/arc
     // length, WIPEOUT's Frames/Polyline pair, TEXTMASK's offset/mask type and

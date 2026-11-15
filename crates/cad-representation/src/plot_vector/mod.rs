@@ -24,11 +24,27 @@
 //! document height; PDF user space is already y-up, so the PDF writer emits
 //! millimetres directly behind a `72/25.4` scale matrix.
 //!
+//! ## WIPEOUT masks
+//!
+//! A mask is the one primitive whose job is to *hide* geometry, so it cannot be
+//! a transparent hole: [`build_vector_document`] emits a closed polygon filled
+//! with the document's page background ([`PAPER_BACKGROUND`]) **after** every
+//! regular path, because the raster renderer paints masks in a final
+//! `depth_compare: Always` pass (ADR 0022). Fills are even-odd, so a
+//! self-intersecting boundary behaves like the raster fill. `WIPEOUTFRAME` 1
+//! then adds the closed boundary outline after its own fill; `2`/`0` arrive with
+//! the frame flag clear. Two limits stay named: an `inverted` mask (the
+//! complement of its ring) has no single-ring path
+//! ([`vector_diagnostic::MASK_INVERTED_UNSUPPORTED`]), and a mask that straddles
+//! a viewport window is not clipped to it — the paper builder already reports
+//! that as `representation.viewport_clip_partial`.
+//!
 //! ## Honesty
 //!
 //! A primitive that cannot be expressed as paths — an unshaped
 //! [`DisplayPrimitive::Text`], an [`DisplayPrimitive::Image`], an unexpanded
-//! [`DisplayPrimitive::Instance`], or a mesh with no triangles — is **never
+//! [`DisplayPrimitive::Instance`], an `inverted` mask, or a mesh with no
+//! triangles — is **never
 //! silently dropped**. Each case adds a stable diagnostic and downgrades the
 //! document's [`Completeness`] so the caller can report the gap. A degenerate
 //! or non-finite polyline is reported the same way.
@@ -43,7 +59,7 @@ mod svg;
 
 pub use collect::build_vector_document;
 pub use entry::{render_plot_pdf, render_plot_svg};
-pub use model::{VectorDocument, VectorPath};
+pub use model::{VectorDocument, VectorPath, PAPER_BACKGROUND};
 pub use page::VectorPage;
 pub use pdf::render_pdf;
 pub use svg::render_svg;
@@ -69,9 +85,13 @@ pub mod vector_diagnostic {
     pub const IMAGE_UNSUPPORTED: &str = "vector.image_unsupported";
     /// An INSERT instance reached the vector stage unexpanded.
     pub const UNEXPANDED_INSTANCE: &str = "vector.unexpanded_instance";
-    /// A WIPEOUT mask is deliberately skipped: vector output has no background
-    /// flood, and ADR 0022 D4 does not cover masks in plot output. Never silent.
-    pub const MASK_UNSUPPORTED: &str = "vector.mask_unsupported";
+    /// A WIPEOUT mask boundary had fewer than three vertices, so there is no
+    /// area to flood and no frame to stroke.
+    pub const MASK_BOUNDARY_DEGENERATE: &str = "vector.mask_boundary_degenerate";
+    /// An `inverted` WIPEOUT mask (clip mode Inside) fills the **complement** of
+    /// its boundary; the path model is a single ring, so the fill is not drawn.
+    /// Named, never silent (ADR 0022 D4 kept for this one import-only mode).
+    pub const MASK_INVERTED_UNSUPPORTED: &str = "vector.mask_inverted_unsupported";
 }
 
 #[cfg(test)]

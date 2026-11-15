@@ -2,7 +2,8 @@
 //!
 //! These are **argument forms of canonical selectors**, never new IPC:
 //! [`PAN_SELECTOR`] (`-PAN`), [`TRACE_SELECTOR`], [`MOCORO_SELECTOR`],
-//! [`VIEWRES_SELECTOR`], [`VSCURRENT_SELECTOR`] and [`LINETYPE_SELECTOR`] are
+//! [`VIEWRES_SELECTOR`], [`VSCURRENT_SELECTOR`], [`WIPEOUTFRAME_SELECTOR`] and
+//! [`LINETYPE_SELECTOR`] are
 //! admitted by [`super::ARGUMENT_SELECTORS`], parsed here, and dispatched by the
 //! session as the matching [`cad_app::CommandId`] with a payload.
 //!
@@ -19,6 +20,8 @@
 //!   `MOCORO SCALE <bx> <by> <factor>`;
 //! * `VIEWRES <integer 1..=1000>`;
 //! * `VSCURRENT <style>` (the command layer names the unsupported styles);
+//! * `WIPEOUTFRAME <0|1|2>` (the system-variable spelling of `WIPEOUT Frames`;
+//!   the bare selector reports the current value);
 //! * `LINETYPE LIST` or `LINETYPE SET <name>` (the name takes the whole
 //!   remainder, spaces allowed).
 
@@ -37,6 +40,8 @@ pub const MOCORO_SELECTOR: &str = "MOCORO";
 pub const VIEWRES_SELECTOR: &str = "VIEWRES";
 /// `VSCURRENT <style>`.
 pub const VSCURRENT_SELECTOR: &str = "VSCURRENT";
+/// `WIPEOUTFRAME [0|1|2]` — the system-variable spelling of `WIPEOUT Frames`.
+pub const WIPEOUTFRAME_SELECTOR: &str = "WIPEOUTFRAME";
 /// `LINETYPE LIST|SET <name>`.
 pub const LINETYPE_SELECTOR: &str = "LINETYPE";
 
@@ -160,6 +165,37 @@ pub fn parse_vscurrent_argument(argument: &str) -> Result<CommandPayload, String
         return Err(invalid("VSCURRENT", "VSCURRENT <style> (only WIREFRAME)"));
     }
     Ok(CommandPayload::VisualStyle(style.to_string()))
+}
+
+/// `WIPEOUTFRAME <0|1|2>`: the session frame state for every wipeout.
+///
+/// The grammar is the three documented values only. A non-integer and an
+/// out-of-range integer are refused **by name** (`wipeoutframe.out_of_range`,
+/// `invalid WIPEOUTFRAME argument`), never clamped to the nearest valid state:
+/// a silent clamp would make `WIPEOUTFRAME 3` look like a successful hide. The
+/// stored token is the very same [`cad_app::WipeoutFrames`] the `WIPEOUT Frames`
+/// option and the drawing-settings panel write.
+pub fn parse_wipeoutframe_argument(argument: &str) -> Result<CommandPayload, String> {
+    let token = argument.trim();
+    if token.is_empty() || token.split_whitespace().count() != 1 {
+        return Err(invalid(
+            "WIPEOUTFRAME",
+            "WIPEOUTFRAME <0|1|2> (0 = off, 1 = on, 2 = display but do not plot)",
+        ));
+    }
+    let Ok(value) = token.parse::<i64>() else {
+        return Err(invalid(
+            "WIPEOUTFRAME",
+            "WIPEOUTFRAME needs one integer: 0, 1 or 2",
+        ));
+    };
+    let frames = cad_app::WipeoutFrames::from_number(value).ok_or_else(|| {
+        format!(
+            "wipeoutframe.out_of_range: WIPEOUTFRAME accepts 0 (off), 1 (on) or 2 (display but \
+             do not plot); got {value} and nothing was changed"
+        )
+    })?;
+    Ok(CommandPayload::WipeoutFrame(frames))
 }
 
 /// `LINETYPE LIST` or `LINETYPE SET <name>` (the name may contain spaces).

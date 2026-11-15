@@ -301,34 +301,97 @@ fn image_is_reported_not_dropped() {
 }
 
 #[test]
-fn mask_without_frame_reports_only_the_skipped_fill() {
-    // `WIPEOUTFRAME 0` (OFF) and the plot build of `WIPEOUTFRAME 2`
-    // (DISPLAY) both arrive here with `frame = false`: the fill is still
-    // honestly named as unsupported, and no frame geometry is invented.
-    let mut fragment = lines(vec![]);
-    fragment.primitive = DisplayPrimitive::Mask {
-        boundary: Arc::from(
-            vec![paper(0.0, 0.0), paper(10.0, 0.0), paper(10.0, 10.0)].into_boxed_slice(),
-        ),
+fn mask_fill_is_the_page_background_emitted_after_every_other_path() {
+    // A `WIPEOUTFRAME 0` mask (no frame) still masks: its fill is a closed
+    // page-background polygon, and because the raster mask pass paints last, the
+    // path document paints it **after** the geometry it hides.
+    let boundary = vec![
+        paper(0.0, 0.0),
+        paper(10.0, 0.0),
+        paper(10.0, 10.0),
+        paper(0.0, 10.0),
+    ];
+    let mut mask = lines(vec![]);
+    mask.primitive = DisplayPrimitive::Mask {
+        boundary: Arc::from(boundary.into_boxed_slice()),
         inverted: false,
         frame: false,
     };
-    let document = build_vector_document(&representation(vec![fragment]), &simple_page()).unwrap();
-    assert!(
-        document.paths.is_empty(),
-        "a frame-less mask must not emit boundary geometry"
-    );
+    mask.draw_order = 1;
+    let mut under = lines(vec![paper(-5.0, 5.0), paper(15.0, 5.0)]);
+    under.draw_order = 0;
+    let document =
+        build_vector_document(&representation(vec![mask, under]), &simple_page()).unwrap();
+    assert_eq!(document.paths.len(), 2, "the line and the mask fill");
     assert_eq!(
-        document.diagnostics[0].code,
-        vector_diagnostic::MASK_UNSUPPORTED
+        document.paths[0].fill, None,
+        "the ordinary line is painted first"
+    );
+    let fill = document.paths.last().expect("the mask fill");
+    assert!(fill.closed, "the mask fill is a closed polygon");
+    assert_eq!(
+        fill.fill,
+        Some(PAPER_BACKGROUND),
+        "the fill is the page background colour, never a transparent hole"
+    );
+    assert_eq!(fill.stroke, None, "the fill alone paints no outline");
+    assert_eq!(fill.points.len(), 4, "the boundary ring is mapped verbatim");
+    assert!(
+        document.diagnostics.is_empty(),
+        "an ordinary mask is fully represented now: {:?}",
+        document.diagnostics
+    );
+
+    // The SVG really carries the flood: a white polygon with the even-odd rule.
+    let text = String::from_utf8(render_svg(&document).unwrap()).unwrap();
+    assert!(text.contains("fill=\"#FFFFFF\""), "{text}");
+    assert!(text.contains("fill-rule=\"evenodd\""), "{text}");
+    // And the PDF uses the even-odd fill operator, not a stroke-only path.
+    let pdf = String::from_utf8_lossy(&render_pdf(&document).unwrap()).into_owned();
+    assert!(pdf.contains("f*\n"), "{pdf}");
+}
+
+#[test]
+fn mask_fill_follows_display_order_and_a_later_mask_still_paints_last() {
+    // Two masks: ascending `draw_order`, stable. Both fills land after ordinary
+    // geometry, so neither can be overpainted by a line it must hide.
+    let mask = |size: f64, draw_order: i64| {
+        let mut fragment = lines(vec![]);
+        fragment.primitive = DisplayPrimitive::Mask {
+            boundary: Arc::from(
+                vec![paper(0.0, 0.0), paper(size, 0.0), paper(size, size)].into_boxed_slice(),
+            ),
+            inverted: false,
+            frame: false,
+        };
+        fragment.draw_order = draw_order;
+        fragment
+    };
+    let first = mask(1.0, 7);
+    let second = mask(2.0, 3);
+    let line = lines(vec![paper(0.0, 0.0), paper(3.0, 0.0)]);
+    let document =
+        build_vector_document(&representation(vec![first, line, second]), &simple_page()).unwrap();
+    assert_eq!(document.paths.len(), 3);
+    let fills: Vec<&VectorPath> = document.paths.iter().filter(|p| p.fill.is_some()).collect();
+    assert_eq!(fills.len(), 2, "both masks flood");
+    assert_eq!(
+        fills[0].points[2],
+        [2.0, 2.0],
+        "draw_order 3 paints before draw_order 7"
+    );
+    assert_eq!(fills[1].points[2], [1.0, 1.0]);
+    assert!(
+        document.paths.last().unwrap().fill.is_some(),
+        "masks are the document's final stage"
     );
 }
 
 #[test]
-fn mask_with_frame_plots_the_closed_boundary_and_names_the_skipped_fill() {
-    // `WIPEOUTFRAME 1` (ON): the boundary frame is real vector geometry, so it
-    // is plotted as a polyline whose last point repeats the first. The fill is
-    // still skipped and named.
+fn mask_with_frame_plots_the_fill_then_the_closed_boundary() {
+    // `WIPEOUTFRAME 1` (ON): the fill is still the page background, and the
+    // boundary frame follows it as a stroked closed polyline whose last point
+    // repeats the first — the renderer's per-mask fill-then-frame draw.
     let boundary = vec![paper(0.0, 0.0), paper(10.0, 0.0), paper(10.0, 10.0)];
     let mut fragment = lines(vec![]);
     fragment.primitive = DisplayPrimitive::Mask {
@@ -337,16 +400,58 @@ fn mask_with_frame_plots_the_closed_boundary_and_names_the_skipped_fill() {
         frame: true,
     };
     let document = build_vector_document(&representation(vec![fragment]), &simple_page()).unwrap();
-    assert_eq!(document.paths.len(), 1, "the frame is one polyline");
+    assert_eq!(document.paths.len(), 2, "one fill, one frame");
+    assert!(document.paths[0].fill.is_some(), "the fill is first");
+    let frame = &document.paths[1];
+    assert_eq!(frame.fill, None, "the frame is stroked, not filled");
     assert_eq!(
-        document.paths[0].points.len(),
+        frame.points.len(),
         4,
         "the closed ring repeats its first point"
     );
-    assert_eq!(document.paths[0].points[0], document.paths[0].points[3]);
+    assert_eq!(frame.points[0], frame.points[3]);
+    assert!(
+        document.diagnostics.is_empty(),
+        "a framed mask is fully represented: {:?}",
+        document.diagnostics
+    );
+}
+
+#[test]
+fn inverted_mask_fill_is_named_but_its_frame_still_plots() {
+    // `inverted` (clip mode Inside) fills the complement; a single-ring path
+    // cannot express that, so the fill is named as unsupported — and the frame,
+    // when it plots, is still real vector geometry.
+    let boundary = vec![paper(0.0, 0.0), paper(10.0, 0.0), paper(10.0, 10.0)];
+    let mut fragment = lines(vec![]);
+    fragment.primitive = DisplayPrimitive::Mask {
+        boundary: Arc::from(boundary.into_boxed_slice()),
+        inverted: true,
+        frame: true,
+    };
+    let document = build_vector_document(&representation(vec![fragment]), &simple_page()).unwrap();
+    assert_eq!(document.paths.len(), 1, "only the frame is drawn");
+    assert_eq!(document.paths[0].fill, None);
     assert_eq!(
         document.diagnostics[0].code,
-        vector_diagnostic::MASK_UNSUPPORTED
+        vector_diagnostic::MASK_INVERTED_UNSUPPORTED
+    );
+    assert!(matches!(document.completeness, Completeness::Partial(_)));
+}
+
+#[test]
+fn degenerate_mask_boundary_is_reported_not_dropped() {
+    let mut fragment = lines(vec![]);
+    fragment.primitive = DisplayPrimitive::Mask {
+        boundary: Arc::from(vec![paper(0.0, 0.0), paper(1.0, 0.0)].into_boxed_slice()),
+        inverted: false,
+        frame: true,
+    };
+    let document = build_vector_document(&representation(vec![fragment]), &simple_page()).unwrap();
+    assert!(document.paths.is_empty());
+    assert_eq!(
+        document.diagnostics[0].code,
+        vector_diagnostic::MASK_BOUNDARY_DEGENERATE
     );
 }
 
@@ -452,4 +557,144 @@ fn fully_opaque_pdf_has_no_transparency_objects() {
     let text = String::from_utf8_lossy(&render_pdf(&document).unwrap()).into_owned();
     assert!(!text.contains("/ExtGState"), "{text}");
     assert!(!text.contains(" gs\n"), "{text}");
+}
+
+// ---- paper-space plot of a real WIPEOUT --------------------------------
+
+/// A 1:1 paper layout over model space: paper (0,0)-(40,40) shows model
+/// (0,0)-(40,40), so a paper millimetre is a model unit.
+fn one_to_one_layout() -> cad_db::Layout {
+    use cad_domain::Transform3;
+    cad_db::Layout {
+        id: LayoutId(1),
+        name: "Layout1".into(),
+        viewports: vec![cad_db::PaperViewport {
+            clip: vec![
+                paper(0.0, 0.0),
+                paper(40.0, 0.0),
+                paper(40.0, 40.0),
+                paper(0.0, 40.0),
+            ],
+            model_to_paper: Transform3::identity(),
+            completeness: Completeness::Complete,
+            layer_overrides: std::collections::BTreeMap::new(),
+        }],
+    }
+}
+
+/// The real plot chain: database → `build_paper_space` → vector document → SVG.
+///
+/// This is the end-to-end contract the CLI and the desktop `SAVE`/`PLOT` share
+/// (they differ only in who calls it), so the mask flood is proven on the real
+/// paper representation, not only on a synthetic fragment list.
+#[test]
+fn paper_space_plot_floods_a_model_wipeout_after_the_geometry_it_hides() {
+    use cad_db::{DbEntity, DbObject};
+    use cad_domain::{LayerId, ObjectId, Revision, SpaceId};
+
+    let mut builder = cad_db::DrawingDatabaseBuilder::new(cad_domain::DatabaseId(1));
+    builder
+        .insert_layer(cad_db::Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    let mut entity = |id: u128, geometry: cad_domain::SemanticGeometry, order: i64| {
+        builder
+            .insert_entity(DbEntity {
+                object: DbObject {
+                    id: ObjectId(id),
+                    type_key: "AcDbEntity".into(),
+                    revision: Revision(0),
+                    source_handle: None,
+                },
+                id: EntityId(id),
+                layer: LayerId(0),
+                space: SpaceId::Model,
+                geometry,
+                draw_order: order,
+            })
+            .unwrap();
+    };
+    // A line runs through the mask; the mask must hide the part it covers.
+    entity(
+        1,
+        cad_domain::SemanticGeometry::Line {
+            start: paper(5.0, 20.0),
+            end: paper(35.0, 20.0),
+        },
+        0,
+    );
+    entity(
+        2,
+        cad_domain::SemanticGeometry::Mask {
+            boundary: vec![
+                paper(10.0, 10.0),
+                paper(30.0, 10.0),
+                paper(30.0, 30.0),
+                paper(10.0, 30.0),
+            ],
+            inverted: false,
+        },
+        1,
+    );
+    builder.insert_layout(one_to_one_layout()).unwrap();
+    let database = builder.finish().unwrap();
+
+    let registry = crate::ProviderRegistry::with_default_provider();
+    let context = crate::RepresentationContext::new(
+        DocumentId(1),
+        cad_domain::TolerancePolicy::default(),
+        cad_domain::TaskStamp::new(DocumentId(1), 0),
+    )
+    .with_wipeout_frames(true);
+    let representation =
+        crate::build_paper_space(&registry, &database, LayoutId(1), &context, &|_| true).unwrap();
+
+    let record = a4(PlotRotation::None);
+    let page = crate::plan_plot_for_record(&record, PlotTarget::Dpi(96.0)).unwrap();
+    let document = build_vector_document(&representation, &page).unwrap();
+    let svg = String::from_utf8(render_svg(&document).unwrap()).unwrap();
+
+    // The line is plotted, then the mask floods over it with the page colour.
+    let line_at = svg.find("points=").expect("the line path");
+    let fill_at = svg
+        .find("fill=\"#FFFFFF\"")
+        .expect("the mask fill must be in the SVG");
+    assert!(
+        fill_at > line_at,
+        "the mask fill must be painted after the geometry it hides:\n{svg}"
+    );
+    assert!(
+        svg[fill_at..].starts_with("fill=\"#FFFFFF\" fill-rule=\"evenodd\"")
+            || svg[fill_at..].contains("fill-rule=\"evenodd\""),
+        "the flood uses the even-odd fill rule:\n{svg}"
+    );
+    let pdf = String::from_utf8_lossy(&render_pdf(&document).unwrap()).into_owned();
+    assert!(
+        pdf.contains("f*\n"),
+        "the PDF fills the mask even-odd:\n{pdf}"
+    );
+
+    // The mask's own paper rectangle is what is flooded (page coordinates).
+    let flooded = document
+        .paths
+        .iter()
+        .find(|path| path.fill == Some(PAPER_BACKGROUND))
+        .expect("the mask fill path");
+    assert_eq!(flooded.points.len(), 4);
+
+    // Declared limit, pinned so it cannot silently disappear: a mask inside a
+    // viewport is not clipped to the viewport window (neither output does that),
+    // and the representation says so instead of pretending the flood is bounded
+    // by the window.
+    assert!(
+        representation
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("cannot be clipped")),
+        "the unclipped-mask limit must stay named: {:?}",
+        representation.diagnostics
+    );
 }
