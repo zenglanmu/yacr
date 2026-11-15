@@ -111,17 +111,24 @@ pub fn parse_helix_argument(argument: &str) -> Option<Draw2Payload> {
     })
 }
 
-/// `MLINE <spacing> <offset> <x1,y1> <x2,y2>`: spacing > 0, a finite offset and
-/// the two baseline points.
+/// `MLINE <spacing> <offset> <x1,y1> <x2,y2> [<x3,y3> …]`: spacing > 0, a finite
+/// offset and at least two baseline vertices.
+///
+/// The vertex list is unbounded here; the command layer owns the declared
+/// 2..=1024 bound (`mline.point_count`) because it is the entity-count rule, not
+/// a grammar rule.
 pub fn parse_mline_argument(argument: &str) -> Option<Draw2Payload> {
     let tokens = tokens(argument);
-    if tokens.len() != 4 {
+    if tokens.len() < 4 {
         return None;
     }
     Some(Draw2Payload::Mline {
         spacing: Some(parse_positive_decimal(tokens[0])?),
         offset: parse_signed_decimal(tokens[1])?,
-        points: vec![parse_point(tokens[2])?, parse_point(tokens[3])?],
+        points: tokens[2..]
+            .iter()
+            .map(|token| parse_point(token))
+            .collect::<Option<Vec<_>>>()?,
     })
 }
 

@@ -27,8 +27,12 @@
 //! `ADD` appends one leader line to the first root, from the typed arrow position
 //! to that root's existing dogleg vertex (the last vertex of its first line), so
 //! the derived dogleg is exactly the same as the sibling lines'. `REMOVE` drops
-//! one line by its 0-based index and refuses to empty a root (a root's leader
-//! line list is what the display and the export contract require).
+//! one line by its 0-based index. It may empty a root — that root then keeps its
+//! landing point and dogleg length (`LEADER` `40`/`11`) and draws no leader line,
+//! which the `LEADER{}` record can carry on export (no `LEADER_LINE{}` child).
+//! The only structural floor is the multileader itself: its **last** remaining
+//! line is refused by name (`mleaderedit.last_line`), because
+//! [`MultiLeaderGeometry::new`] requires at least one line.
 //!
 //! ## `MLEADERCOLLECT`
 //!
@@ -36,14 +40,34 @@
 //! lines are concatenated, the annotation strings are joined with `\P` (MTEXT's
 //! paragraph break) and the first leader's style snapshot/plane/attachment is
 //! used. Every collected root's landing point is retargeted to the base text
-//! position, because a multileader carries exactly one annotation. Leaders that disagree on style, plane or carry unmodelled reserved data
-//! are refused rather than silently losing those fields. The sources are deleted
-//! and the collected leader inserted in one transaction / one undo step.
+//! position, because a multileader carries exactly one annotation. The sources
+//! are deleted and the collected leader inserted in one transaction / one undo
+//! step.
+//!
+//! A differing style, `90` override mask or plane frame is **accepted**, not
+//! refused — collecting is what the command is for — and nothing is lost
+//! silently:
+//!
+//! * the per-line **path type** (leader-line `170` with override word `93` bit
+//!   `1`) and **arrowhead size** (`40` with bit `16`) of every collected line are
+//!   carried as per-line overrides whenever they differ from the base snapshot,
+//!   so those lines keep the appearance they had in their own leader;
+//! * the fields with **no per-line group in DXF** (annotation text height
+//!   `CONTEXT_DATA 41`, landing gap `145`, text style `343`, entity scale `45`)
+//!   and the one plane frame (`110`/`111`/`112`/`297`) are adopted from the base
+//!   leader, and the report names every adopted value and the entity it came
+//!   from (`mleadercollect.style_adopted` / `mleadercollect.plane_adopted`);
+//! * stored `reserved` data (break pairs, background fill, columns) still
+//!   refuses by name: it is per-source data with no merge semantics, and writing
+//!   a base root's break indices onto merged lines would be a lie.
 //!
 //! Every refusal is named (`mleaderalign.*`, `mleaderedit.*`,
 //! `mleadercollect.*`), happens before anything is staged, and the whole edit is
 //! all-or-nothing.
 
+use super::mleader_collect::{
+    effective_line_arrowhead, effective_line_path, same_measure, CollectAdoption,
+};
 use super::*;
 use crate::app_extended_w9_reports::text_explode::{replace_entities, ProducedEntity};
 use crate::command_payload::{MLeaderAlignMode, MLeaderEditAction};
@@ -54,7 +78,7 @@ use cad_domain::{
 };
 
 /// The relative tolerance for coincidence and coplanarity tests.
-const MLEADER_EDIT_EPS: f64 = 1e-9;
+pub(super) const MLEADER_EDIT_EPS: f64 = 1e-9;
 
 /// A named invalid-input refusal (`<prefix>.<code>: …`).
 fn invalid(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
@@ -320,7 +344,13 @@ impl Application {
     /// `mleadercollect.selection`, `mleadercollect.not_addressable`,
     /// `mleadercollect.target_missing`, `mleadercollect.space`,
     /// `mleadercollect.not_mleader`, `mleadercollect.content`,
-    /// `mleadercollect.style`, `mleadercollect.plane`, `mleadercollect.reserved`.
+    /// `mleadercollect.reserved`.
+    ///
+    /// A differing style, override mask or plane frame is **adopted** from the
+    /// first selected leader, and whatever the DXF format can carry per line
+    /// (path type `170`, arrowhead size `40` behind override word `93`) is kept
+    /// on the line itself; the rest is named in `mleadercollect.style_adopted`
+    /// / `mleadercollect.plane_adopted`. See [`CollectAdoption`].
     pub(crate) fn mleader_collect(
         &mut self,
         session: &mut SessionState,
@@ -358,48 +388,31 @@ impl Application {
                     ),
                 ));
             }
-            if leader.style_name() != base.style_name()
-                || leader.override_mask() != base.override_mask()
-            {
-                return Err(unsupported(
-                    "mleadercollect",
-                    "style",
-                    format!(
-                        "entity {} uses a different leader style/override mask; collecting \
-                         would silently drop one style snapshot",
-                        resolved.entity.id.0
-                    ),
-                ));
-            }
-            if leader.plane() != base.plane() {
-                return Err(unsupported(
-                    "mleadercollect",
-                    "plane",
-                    format!(
-                        "entity {} lies on a different plane frame; one collected leader has \
-                         one plane",
-                        resolved.entity.id.0
-                    ),
-                ));
-            }
             if !reserved_is_empty(leader.reserved()) {
                 return Err(unsupported(
                     "mleadercollect",
                     "reserved",
                     format!(
                         "entity {} carries unmodelled reserved data (breaks/background/columns); \
-                         collecting would drop it",
+                         break pairs and columns are per-source records with no merge semantics, \
+                         so collecting would drop them",
                         resolved.entity.id.0
                     ),
                 ));
             }
         }
 
+        let mut adoption = CollectAdoption::new(base);
+        let mut carried_per_line = false;
         let mut roots = Vec::new();
         let mut lines = Vec::new();
         let mut strings = Vec::with_capacity(leaders.len());
-        for resolved in &leaders {
+        for (source_index, resolved) in leaders.iter().enumerate() {
             let leader = &resolved.leader;
+            if source_index > 0 {
+                adoption.note_style(leader, resolved.entity.id.0);
+                adoption.note_plane(leader, resolved.entity.id.0);
+            }
             let root_offset = roots.len();
             for root in leader.roots() {
                 let mut root = root.clone();
@@ -409,13 +422,41 @@ impl Application {
                 // derived dogleg is rebuilt from that root's own last vertex. A
                 // multileader has exactly one annotation text, so leaving the
                 // other roots' landings elsewhere would draw leader lines to
-                // nothing.
+                // nothing. The root's own dogleg length/direction (LEADER `40` /
+                // `11`) travel with the clone, so no root loses its dogleg.
                 root.landing_point = base.text().location;
                 roots.push(root);
             }
             for line in leader.lines() {
+                // The per-line values this line actually draws with, resolved
+                // the one way the display resolves them.
+                let path = effective_line_path(leader, line);
+                let arrowhead = effective_line_arrowhead(leader, line);
                 let mut line = line.clone();
                 line.root_index += root_offset;
+                // DXF can carry both of these per line (170/40 behind override
+                // word 93), so a difference from the base snapshot is preserved
+                // instead of being adopted.
+                if path != adoption.path {
+                    line.path_type = path;
+                    line.override_flags |= MLeaderLine::PATH_TYPE;
+                    carried_per_line = true;
+                }
+                if !same_measure(arrowhead, adoption.arrowhead) {
+                    if arrowhead.is_finite() {
+                        line.arrowhead_size = arrowhead;
+                        line.override_flags |= MLeaderLine::ARROWHEAD_SIZE;
+                        carried_per_line = true;
+                    } else {
+                        // A non-finite source size cannot be written as an
+                        // override; the merged line falls back to the base
+                        // snapshot, and the report names it.
+                        adoption.note_field(
+                            "per-line arrowhead size (leader-line 40, non-finite source value)",
+                            resolved.entity.id.0,
+                        );
+                    }
+                }
                 lines.push(line);
             }
             strings.push(leader.text().string.clone());
@@ -468,6 +509,9 @@ impl Application {
                 root_count, line_count
             ),
         });
+        outcome
+            .diagnostics
+            .extend(adoption.report(carried_per_line));
         Ok(outcome)
     }
 
@@ -700,12 +744,20 @@ fn add_leader_line(leader: &MultiLeaderGeometry, arrow: Point3) -> CadResult<Mul
     MultiLeaderGeometry::new(parts)
 }
 
-/// Remove one leader line by its 0-based index, refusing to empty a root.
+/// Remove one leader line by its 0-based index.
+///
+/// Removing a root's **last** line is allowed: that root keeps its landing point
+/// and dogleg length (`LEADER` `40`/`11`) but draws no leader line, which is
+/// exactly what the user asked for and what the `LEADER{}` record can carry on
+/// export (a root with no `LEADER_LINE{}` child). The one structural floor is
+/// the multileader itself: [`MultiLeaderGeometry::new`] requires at least one
+/// leader line, so the leader's **only** remaining line is refused by name
+/// (`mleaderedit.last_line`), and nothing is written.
 fn remove_leader_line(
     leader: &MultiLeaderGeometry,
     line_index: usize,
 ) -> CadResult<MultiLeaderGeometry> {
-    let Some(line) = leader.lines().get(line_index) else {
+    let Some(_line) = leader.lines().get(line_index) else {
         return Err(invalid(
             "mleaderedit",
             "index",
@@ -715,19 +767,13 @@ fn remove_leader_line(
             ),
         ));
     };
-    let root_index = line.root_index;
-    let root_lines = leader
-        .lines()
-        .iter()
-        .filter(|line| line.root_index == root_index)
-        .count();
-    if root_lines <= 1 {
+    if leader.lines().len() <= 1 {
         return Err(unsupported(
             "mleaderedit",
             "last_line",
             format!(
-                "leader line {line_index} is the only line of root {root_index}; a root needs at \
-                 least one line, so REMOVE cannot empty it"
+                "leader line {line_index} is the multileader's only line; a MULTILEADER needs \
+                 at least one leader line, so REMOVE cannot empty it"
             ),
         ));
     }

@@ -652,10 +652,96 @@ fn mleaderedit_removes_one_line_and_refuses_to_empty_a_root() {
     );
 }
 
+/// A leader with two roots, one leader line each.
+fn two_root_leader(id: u128) -> DbEntity {
+    let mut entity = leader(
+        id,
+        "A",
+        p3(10.0, 5.0, 0.0),
+        p3(0.0, 5.0, 0.0),
+        p3(9.0, 5.0, 0.0),
+    );
+    let SemanticGeometry::MultiLeader(existing) = &entity.geometry else {
+        panic!("the fixture is a MULTILEADER");
+    };
+    let mut parts = MultiLeaderParts {
+        style: existing.style().clone(),
+        style_name: existing.style_name().to_string(),
+        override_mask: existing.override_mask(),
+        content: existing.content(),
+        text: existing.text().clone(),
+        roots: existing.roots().to_vec(),
+        lines: existing.lines().to_vec(),
+        reserved: existing.reserved().clone(),
+        plane: existing.plane(),
+    };
+    parts.roots.push(MLeaderRoot {
+        leader_index: 1,
+        landing_point: p3(30.0, -5.0, 0.0),
+        dogleg_vector: p3(-1.0, 0.0, 0.0),
+        dogleg_length: 1.0,
+    });
+    parts.lines.push(MLeaderLine {
+        root_index: 1,
+        index: 0,
+        points: vec![p3(35.0, -5.0, 0.0), p3(31.0, -5.0, 0.0)],
+        path_type: MLeaderPathType::StraightLineSegments,
+        override_flags: 0,
+        arrowhead_size: 0.5,
+        arrowhead_handle: None,
+    });
+    let (geometry, _) = MultiLeaderGeometry::from_import(parts);
+    entity.geometry = SemanticGeometry::MultiLeader(Box::new(geometry));
+    entity
+}
+
+#[test]
+fn mleaderedit_may_empty_a_root_but_never_the_leader() {
+    let (mut app, mut session) = app_with(vec![two_root_leader(1)]);
+    select(&mut session, &[1]);
+    let before = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::MLeaderEdit,
+        edit_payload(MLeaderEditAction::Remove { line_index: 0 }),
+    )
+    .expect("a root's last line may be removed while the leader keeps another");
+    assert_eq!(outcome.objects.len(), 1);
+    assert_eq!(revision(&app), Revision(before.0 + 1), "one transaction");
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+
+    let entities = model_entities(&app);
+    let kept = leader_of(&entities[0]);
+    assert_eq!(kept.roots().len(), 2, "the emptied root keeps its record");
+    assert_eq!(kept.lines().len(), 1);
+    assert_eq!(kept.lines()[0].root_index, 1);
+    // The emptied root keeps the landing point and dogleg length it had.
+    assert!(approx(kept.roots()[0].landing_point.x, 10.0));
+    assert!(approx(kept.roots()[0].dogleg_length, 1.0));
+
+    // The multileader itself cannot be emptied: its last line is refused.
+    let error = execute(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::MLeaderEdit,
+        edit_payload(MLeaderEditAction::Remove { line_index: 0 }),
+    )
+    .expect_err("a MULTILEADER needs one leader line");
+    assert!(
+        error.to_string().contains("mleaderedit.last_line"),
+        "{error}"
+    );
+    assert_eq!(
+        revision(&app),
+        Revision(before.0 + 1),
+        "the refusal wrote nothing"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // MLEADERCOLLECT
 // ---------------------------------------------------------------------------
-
 #[test]
 fn mleadercollect_merges_two_leaders_into_one_annotation() {
     let (mut app, mut session) = app_with(vec![

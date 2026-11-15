@@ -17,6 +17,10 @@ const HELIX_SEGMENTS_PER_TURN: usize = 64;
 const MAX_HELIX_VERTICES: usize = 4096;
 /// Smallest accepted SOLID / MLINE point separation, in world units.
 const MIN_BATCH_SEPARATION: f64 = 1e-12;
+/// The largest MLINE baseline this command accepts (2·(N-1) LINEs are written).
+const MAX_MLINE_VERTICES: usize = 1024;
+/// Smallest `1 + n₀·n₁` that still defines a finite MLINE miter corner.
+const MLINE_JOIN_EPS: f64 = 1e-9;
 /// Smallest accepted SOLID area (twice the shoelace sum), in world units².
 const MIN_SOLID_AREA: f64 = 1e-12;
 
@@ -197,7 +201,8 @@ impl Application {
         )
     }
 
-    /// `MLINE`: two parallel LINEs at the style spacing around a baseline.
+    /// `MLINE`: the mitered element LINEs of a multiline over an N-point
+    /// baseline.
     pub(crate) fn mline(
         &mut self,
         session: &SessionState,
@@ -220,11 +225,11 @@ impl Application {
                 "MLINE needs a Draw2::Mline { spacing, offset, points } payload",
             ));
         };
-        if points.len() != 2 {
+        if !(2..=MAX_MLINE_VERTICES).contains(&points.len()) {
             return Err(refusal(
                 "mline.point_count",
                 format!(
-                    "MLINE needs exactly two baseline points, got {}",
+                    "MLINE needs 2..={MAX_MLINE_VERTICES} baseline points, got {}",
                     points.len()
                 ),
             ));
@@ -251,7 +256,7 @@ impl Application {
                 format!("MLINE spacing must be finite and > 0, got {spacing}"),
             ));
         }
-        let geometries = mline_geometries(points[0], points[1], spacing, *offset)?;
+        let geometries = mline_geometries(points, spacing, *offset)?;
         self.commit_new_entities(session, command, geometries, "create mline")
     }
 
@@ -446,34 +451,76 @@ fn helix_points(base: Point3, radius: f64, turns: f64) -> Vec<Point3> {
     points
 }
 
-/// Build the two parallel LINEs of a partial MLINE.
+/// Build the element LINEs of a partial MLINE over an N-point baseline.
+///
+/// The stored form is **one LINE per element per segment** (this build has no
+/// `AcDbMline` entity), so an `N`-point baseline is `2·(N-1)` LINEs. Interior
+/// vertices are **mitered** — AutoCAD's default MLINE join — by offsetting each
+/// vertex to the intersection of the two adjacent offset lines
+/// (`n₀ + n₁) / (1 + n₀·n₁)`), so an element turns a corner without a notch and
+/// without a doubled segment.
+///
+/// Refusals (nothing written):
+///
+/// * `mline.degenerate_baseline` — a segment has no length;
+/// * `mline.join_degenerate` — an exact 180° reversal, whose miter point is at
+///   infinity (there is no finite corner to join).
 fn mline_geometries(
-    start: Point3,
-    end: Point3,
+    points: &[Point3],
     spacing: f64,
     offset: f64,
 ) -> CadResult<Vec<SemanticGeometry>> {
-    let (dx, dy) = (end.x - start.x, end.y - start.y);
-    let length = dx.hypot(dy);
-    if !length.is_finite() || length <= MIN_BATCH_SEPARATION {
-        return Err(refusal(
-            "mline.degenerate_baseline",
-            "the MLINE baseline has no length",
-        ));
+    let mut normals: Vec<(f64, f64)> = Vec::with_capacity(points.len().saturating_sub(1));
+    for pair in points.windows(2) {
+        let (dx, dy) = (pair[1].x - pair[0].x, pair[1].y - pair[0].y);
+        let length = dx.hypot(dy);
+        if !length.is_finite() || length <= MIN_BATCH_SEPARATION {
+            return Err(refusal(
+                "mline.degenerate_baseline",
+                "an MLINE baseline segment has no length",
+            ));
+        }
+        // The left normal of the segment (the element offset direction).
+        normals.push((-dy / length, dx / length));
     }
-    let (nx, ny) = (-dy / length, dx / length);
+    // One offset direction per vertex: the segment normal at an end, the miter
+    // direction at an interior corner.
+    let mut miters: Vec<(f64, f64)> = Vec::with_capacity(points.len());
+    miters.push(normals[0]);
+    for index in 1..points.len() - 1 {
+        let (n0, n1) = (normals[index - 1], normals[index]);
+        let denominator = 1.0 + (n0.0 * n1.0 + n0.1 * n1.1);
+        if denominator.abs() <= MLINE_JOIN_EPS {
+            return Err(refusal(
+                "mline.join_degenerate",
+                format!(
+                    "the baseline reverses direction by 180° at vertex {index}; its miter point \
+                     is at infinity, so the two elements have no finite corner to join"
+                ),
+            ));
+        }
+        miters.push(((n0.0 + n1.0) / denominator, (n0.1 + n1.1) / denominator));
+    }
+    miters.push(normals[normals.len() - 1]);
+
     let half = spacing / 2.0;
-    let line = |shift: f64| SemanticGeometry::Line {
-        start: Point3 {
-            x: start.x + nx * shift,
-            y: start.y + ny * shift,
-            z: start.z,
-        },
-        end: Point3 {
-            x: end.x + nx * shift,
-            y: end.y + ny * shift,
-            z: end.z,
-        },
-    };
-    Ok(vec![line(half + offset), line(-half + offset)])
+    let mut geometries = Vec::with_capacity(2 * normals.len());
+    for element in [half + offset, -half + offset] {
+        let shifted: Vec<Point3> = points
+            .iter()
+            .zip(&miters)
+            .map(|(point, (mx, my))| Point3 {
+                x: point.x + mx * element,
+                y: point.y + my * element,
+                z: point.z,
+            })
+            .collect();
+        for pair in shifted.windows(2) {
+            geometries.push(SemanticGeometry::Line {
+                start: pair[0],
+                end: pair[1],
+            });
+        }
+    }
+    Ok(geometries)
 }

@@ -105,6 +105,7 @@ mod mirror_curves;
 mod mleader;
 // The 2026-11-12 MULTILEADER edits: `MLEADERALIGN`, `MLEADEREDIT` and
 // `MLEADERCOLLECT` rebuild the stored definition through `MultiLeaderGeometry`.
+mod mleader_collect;
 mod mleader_edit;
 // `MLEDIT` / `-MLEDIT`: the two-LINE subset of multiline editing.
 mod mledit;

@@ -88,6 +88,14 @@ fn helix_and_mline_arguments_are_the_documented_token_counts() {
             ..
         })
     ));
+    // A polyline baseline: every coordinate pair after spacing/offset is a
+    // vertex. The 2..=1024 entity-count bound is the command layer's, not the
+    // grammar's.
+    assert!(matches!(
+        parse_mline_argument("2 0 0,0 10,0 10,5"),
+        Some(Draw2Payload::Mline { points, .. }) if points.len() == 3
+    ));
+    assert_eq!(parse_mline_argument("2 0 0,0 10,0 10"), None);
     assert_eq!(parse_mline_argument("0 0 0,0 10,0"), None);
     assert_eq!(parse_mline_argument("2 0 0,0"), None);
 }
