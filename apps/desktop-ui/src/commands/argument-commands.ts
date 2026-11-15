@@ -6,8 +6,11 @@
 // The clip-family predicates (`CLIP`/`XCLIP`) and the two token helpers they
 // share with this table live in `argument-clip-grammar.ts`, so the two clip
 // grammars sit side by side and this table stays inside the code-size gate. The
-// `HATCHEDIT` option grammar lives in `argument-hatchedit.ts` for the same reason.
+// `HATCHEDIT` option grammar lives in `argument-hatchedit.ts` for the same reason,
+// and the `COLOR`/`-COLOR` token grammar in `argument-color-grammar.ts` (one
+// predicate shared by both spellings).
 import { isHatchEditArgument } from './argument-hatchedit.ts';
+import { isColorArgument } from './argument-color-grammar.ts';
 import {
   isClipArgument,
   isSignedDecimal,
@@ -259,6 +262,17 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   }),
   LAYERPMODE: Object.freeze({
     parse: (argument: string) => ['ON', 'OFF'].includes(argument.trim().toUpperCase()),
+  }),
+  COLOR: Object.freeze({
+    // The session current-colour token: one ACI or one symbolic word (both
+    // spellings share `isColorArgument`). The closed `0..=256` domain is the
+    // host's, so `COLOR 257` travels and is named there (`color.invalid_value`)
+    // rather than becoming a local "unsupported".
+    parse: isColorArgument,
+  }),
+  '-COLOR': Object.freeze({
+    // AutoCAD's prompt spelling of the same token, same grammar: `-COLOR 5`.
+    parse: isColorArgument,
   }),
   LAYERSTATE: Object.freeze({
     parse: (argument: string) => {
