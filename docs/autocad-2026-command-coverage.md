@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **123** |
-| 部分实现（有写明的界） | **856** |
+| 完整实现 | **125** |
+| 部分实现（有写明的界） | **854** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -117,14 +117,14 @@
 >
 > **官方 981 条已无「未实现」的可用命令名**：仅 `MEASURE` 与 `TRACE` 两条按**同名不同义**不计入
 > （本仓库同名命令分别表示测量入口与旧式宽线带），它们的官方语义在本构建仍无对应实现。计入
-> **979 已实现（123 完整 + 856 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
+> **979 已实现（125 完整 + 854 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
 > GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29，真实 2D 升级，无新命令名）**：`TRIM` 新增 **LWPOLYLINE 目标**（开放/闭合；bulge 还原为精确 ARC 后求交，保留拾取投影所在窗口，子弧 bulge 精确保留；一条事务/一步撤销；EXTEND 的 POLYLINE 目标仍按名拒绝）。该升级不改变 981 条状态总计，仍计入 **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 契约测试，GUI/GPU/像素 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29b）**：`HATCHEDIT` 新增 **`PATTERN <内置图案名>`**（按名称从现有 `.pat` 库取图案，保留 hatch 的角度/比例/double；未知名 `hatchedit.unknown_pattern`、缺名 `hatchedit.needs_pattern_name`、实心/渐变 `hatchedit.pattern_requires_pattern` 均具名拒绝；一条事务/一步撤销）。任意用户 `.pat` 图案文件仍需宿主文件 I/O，未接入。不影响 981 条状态总计。
 
-> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD`、`LENGTHEN`、`FILLET`、`CLIP`、`CLIPIT`、`STRETCH`、`JOIN`、`TXT2MTXT`、`HATCHEDIT` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LENGTHEN` 的开放样条**延长**按声明的端点切线直尾实现（缩短仍是精确子曲线）⇒ 晋升为**完整实现**；`FILLET` 补齐**SPLINE 对**与**零半径全部平面对**（含 CIRCLE↔CIRCLE 复用 TRIM 的 CIRCLE→ARC 规则）⇒ 晋升为**完整实现**。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。`CLIP`/`CLIPIT` 改为真实命令：分派到既有 `IMAGECLIP`/`XCLIP` 写路径（`RECT`/`POLY`/`ON`/`OFF`/`DELETE`，`CLIPIT` 用选择里的 LINE/ARC/LWPOLYLINE 建闭合边界），并在写入前按名字拒绝表示层画不出的情形（块参照的多边形裁剪、非凸/自交图像多边形、旋转/倾斜参照、底图裁剪）。`TXT2MTXT` 的 `UNIFORM <factor>` 用新增的 MTEXT `TextLineSpacing`（DXF 44/73 往返）实现，导入侧的 `text.line_spacing_style_unsupported` blanket 拒绝随之收窄为只针对退化 factor。`HATCHEDIT` 新增 `ORIGIN <x> <y>`（图案相位原点，折回 pattern 行 43/44 导出）与 `PATTERNFILE <path.pat> [<name>]`（经宿主文件桥读用户 `.pat`，组 76 = 2 Custom）。计入 **979 已实现（123 完整 + 856 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
+> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD`、`LENGTHEN`、`FILLET`、`CLIP`、`CLIPIT`、`STRETCH`、`JOIN`、`TXT2MTXT`、`HATCHEDIT`、`HATCHSETORIGIN`、`HATCHTOBACK` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LENGTHEN` 的开放样条**延长**按声明的端点切线直尾实现（缩短仍是精确子曲线）⇒ 晋升为**完整实现**；`FILLET` 补齐**SPLINE 对**与**零半径全部平面对**（含 CIRCLE↔CIRCLE 复用 TRIM 的 CIRCLE→ARC 规则）⇒ 晋升为**完整实现**。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。`CLIP`/`CLIPIT` 改为真实命令：分派到既有 `IMAGECLIP`/`XCLIP` 写路径（`RECT`/`POLY`/`ON`/`OFF`/`DELETE`，`CLIPIT` 用选择里的 LINE/ARC/LWPOLYLINE 建闭合边界），并在写入前按名字拒绝表示层画不出的情形（块参照的多边形裁剪、非凸/自交图像多边形、旋转/倾斜参照、底图裁剪）。`TXT2MTXT` 的 `UNIFORM <factor>` 用新增的 MTEXT `TextLineSpacing`（DXF 44/73 往返）实现，导入侧的 `text.line_spacing_style_unsupported` blanket 拒绝随之收窄为只针对退化 factor。`HATCHEDIT` 新增 `ORIGIN <x> <y>`（图案相位原点，折回 pattern 行 43/44 导出）与 `PATTERNFILE <path.pat> [<name>]`（经宿主文件桥读用户 `.pat`，组 76 = 2 Custom）。`HATCHSETORIGIN` 不再是恒拒绝：图案原点只能经定义行到达，因此命令以**首个定义行的合成基点**为锚（`HatchGeometry::absolute_pattern_origin()`），写入 `P − 合成基点`，行列/角度/比例全部参与（`(0.5,1)` + `P=(2,3)` ⇒ 位移 `(1.5,2)`）；无定义行的图案保留收窄的 `missing_field`，非有限位移 `unrepresentable`，实体/渐变 `not_pattern`，一条事务/一步撤销。`HATCHTOBACK` 按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）先规划后写入，各范围 hatch 连续排在该范围最低非 hatch 次序之下并保持相对次序，i64 下溢仍按范围拒绝，一条事务/一步撤销、拒绝时不写任何范围。计入 **979 已实现（125 完整 + 854 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
 
 ### 纪律
 
@@ -698,8 +698,8 @@
 |  `HATCHEDIT` | 部分实现 | 多目标；`Style`/`PatternType`（含 **CUSTOM 76=2**）/**`PATTERN <内置图案名>`**（现有 `.pat` 库；任意用户 `.pat` 文件需宿主 I/O）/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate`/**Add-Remove Boundaries**；`Origin`/`Associate`/`Annotative` 未建模 |
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 预选择 hatch；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；无关联/无选项提示 |
 | `HATCHSETBOUNDARY` | 部分实现 | 恰好一个 hatch + 一条闭合 Polyline/Circle/完整 Ellipse，共面性校验；用 `HatchGeometry::new` 重建、丢弃旧种子；失败 `hatchsetboundary.rebuild_failed` |
-| `HATCHSETORIGIN` | 部分实现 | 恒按 `hatchsetorigin.missing_field` 拒绝（`HatchGeometry` 无图案原点字段）；不写入 |
-| `HATCHTOBACK` | 部分实现 | 全部模型空间 hatch 置底（仅改写存储 draw order、保持相对次序、可撤销）；图纸空间/块内不重排 |
+| `HATCHSETORIGIN` | 完整实现 | 绝对图案原点：以首个定义行的合成基点为锚（`absolute_pattern_origin()`）写入 `P − 合成基点`，变换后的行列/角度/比例全部参与；无定义行图案保留收窄的 `missing_field`；一条事务/一步撤销 |
+| `HATCHTOBACK` | 完整实现 | 按 `SpaceId` 逐范围重排（模型空间、各图纸布局、各块定义）：先规划后写入，保持相对次序，i64 下溢按范围拒绝；一条事务/一步撤销 |
 | `HELIX` | 部分实现 | 平面螺旋 `Polyline`；`height>0` 按 `helix.3d_not_implemented` 拒绝 |
 | `HELP` | 部分实现 | 具名拒绝（`help.unsupported`）：帮助系统由宿主负责，未实现。 |
 | `HIDE` | 部分实现 | 具名拒绝（`hide.unsupported: the renderer has no 3D hidden-line removal`）。 |
@@ -1633,8 +1633,8 @@
 |  416 | `HATCHEDIT` | 完整实现 | Modifies an existing hatch or fill. | 多目标；`Style`/`PatternType`/`PATTERN <内置图案名>`/`PATTERNFILE <path.pat> [<name>]`（经宿主文件桥读取用户 `.pat`，单图案/文件优先/内置回退，组 76 = 2 Custom；读取失败逐条具名拒绝）/`ORIGIN <x> <y>`（图案相位原点，导入导出按 pattern 行往返）/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate Hatches`/`Add**/**Remove Boundaries`，一条事务/一步撤销。**全局范围**：`Associate`/`Disassociate`/`Annotative`（无关联/反应器模型）、`DRAWORDER BOUNDARY`（无边界实体 id，属于同一反应器模型）、逐 loop 原点、交互对话框 |
 | 417 | `HATCHGENERATEBOUNDARY` | 部分实现 | Creates a non-associated polyline around a selected hatch. | 预选择输入（不弹 Select objects 选项）；每个 hatch loop 生成一条同层同空间的非关联闭合多段线（含内岛、保留 bulge）；源 hatch 保留；无关联性 |
 | 418 | `HATCHSETBOUNDARY` | 部分实现 | Redefines a selected hatch or fill to conform to a different closed boundary. | 恰好一个 hatch + 一条闭合 Polyline/Circle/完整 Ellipse，共面性校验；用 `HatchGeometry::new` 重建、丢弃旧种子；失败 `hatchsetboundary.rebuild_failed` |
-| 419 | `HATCHSETORIGIN` | 部分实现 | Controls the starting location of hatch pattern generation for a selected hatch. | 恒按 `hatchsetorigin.missing_field` 拒绝（`HatchGeometry` 无图案原点字段）；不写入 |
-| 420 | `HATCHTOBACK` | 部分实现 | Sets the draw order for all hatches in the drawing to be behind all other objects. | 仅模型空间：全部 hatch 连续放到最低非 hatch draw order 之下并保持相对次序；i64 下溢按名拒绝；图纸空间/块内不重排；一次事务可撤销 |
+| 419 | `HATCHSETORIGIN` | 完整实现 | Controls the starting location of hatch pattern generation for a selected hatch. | 绝对原点：`d = P − families()[0].base`（行列经角度/比例合成后参与），一条事务/一步撤销；无定义行的图案按 `hatchsetorigin.missing_field` 拒绝，非有限位移 `unrepresentable` |
+| 420 | `HATCHTOBACK` | 完整实现 | Sets the draw order for all hatches in the drawing to be behind all other objects. | 逐 `SpaceId` 范围（模型空间、各图纸布局、各块定义）：连续放到该范围最低非 hatch draw order 之下并保持相对次序，i64 下溢按范围拒绝，拒绝时不写任何范围；一次事务/一步撤销 |
 | 421 | `HELIX` | 部分实现 | Creates a 2D spiral or 3D spring. | 平面螺旋 `Polyline`；`height>0` 按 `helix.3d_not_implemented` 拒绝 |
 | 422 | `HELP` | 部分实现 | Displays the online or offline Help system. | 具名拒绝（`help.unsupported`）：帮助系统由宿主负责，未实现。 |
 | 423 | `HIDE` | 部分实现 | Displays a 3D model with hidden lines suppressed for the 2D Wireframe visual style. | 具名拒绝（`hide.unsupported: the renderer has no 3D hidden-line removal`）。 |

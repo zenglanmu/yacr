@@ -500,7 +500,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 每个选中 HATCH 的每个 loop 生成一条同层/同空间、非关联的闭合 LWPOLYLINE（保留 bulge） | 无关联性；无选项提示 |
 | `GRADIENT` | 部分实现 | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5）；边界必须在 +Z 平面；一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 | 无渐变预览、无 `-GRADIENT` 选项提示、无 .pat/关联性；非 `+Z` 平面/非闭合/退化边界按名拒绝；证据只有 `cad-app`/`cad-ui-core`/前端契约测试 |
 | `HATCHEDIT` | 部分实现 | 恰好一个直接可寻址的模型空间 HATCH；`ANGLE`/`SCALE`/`SOLID`/`GRADIENT` 等既有选项；`ADDBOUNDARIES`/`REMOVEBOUNDARIES` 现在真实：一个选中 hatch + 其余选中闭合实体为边界，重建 loop 集，一条事务/一步撤销 | 无交互对话框；`Origin` 无字段、`Associate`/`Annotative` 无模型、Boundary draw order 拒绝；证据只有契约测试 |
-| `HATCHTOBACK` | 部分实现 | 把所有模型空间 HATCH 的 draw order 排到所有非 HATCH 对象之后，保留相对顺序；一条事务/一步撤销 | 图纸空间/块空间不重排；无 Draw Order 对话框 |
+| `HATCHTOBACK` | 完整实现 | 把所有 HATCH 的 draw order 排到其所在 `SpaceId` 范围内的所有非 HATCH 对象之后（模型空间、各图纸布局、各块定义逐范围规划后一次写入），保留相对顺序；一条事务/一步撤销 | 无 AutoCAD 独立的 Draw Order 表（沿用实体存储的 `draw_order`）；块定义重排对全部块参照生效（模型固有）；无 Draw Order 对话框 |
 | `WIPEOUT` | 部分实现 | 开放多边形捕获（≥3 点、`+Z` 平面）生成一个 `AcDbWipeout`（`Mask{inverted:false}`）；`Frames ON/OFF/DISPLAY` 真实（显示/出图分离） | 无 `FRAME` 覆盖、无 Polyline/Erase Polyline 选项、无自交拒绝、无既有 wipeout 拾取 |
 | `POLYGON CIRCUMSCRIBED` | 部分实现 | 独立选择子：中心 + 切圆上一点，用 `R=r/cos(π/n)`、顶点在 `θ±π/n` 生成闭合外切正多边形 | `POLYGON` 的 `Edge` 分支、数值半径的捕捉旋转规则仍未实现 |
 | `DIMROTATED` | 部分实现 | 三次拾取（两原点 + 尺寸线位置）+ 会话 `dimRotation` 角度，复用 `DimensionKind::Linear{rotation}` 合成一个非关联尺寸 | 无 AutoCAD 的选项子提示；非 `+Z` 平面/退化输入按名拒绝 |
@@ -668,7 +668,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `QLEADER` / `LEADER` | 部分实现 | `<arrow x,y> <landing x,y> <文本>` 创建**一个** `MULTILEADER`（旧实体映射为 MULTILEADER）；一条事务/一步撤销 | 无 QLEADER 设置对话框、引线样式、注释类型、多引线段/附着选项 |
 | `TEXTFIT` | 部分实现 | `<目标宽度>` 仅按 `height = target / char_count` 改字形高度 | 真实宽度拉伸/压缩 NOT IMPLEMENTED；坏宽度、空选择、非文字、空文本具名拒绝 |
 | `HATCHSETBOUNDARY` | 部分实现 | 恰好一个 hatch + 一条闭合 Polyline/整圆/完整 Ellipse；共面性校验；用 `HatchGeometry::new` 重建并丢弃旧种子；一条事务/一步撤销 | 失败为 `hatchsetboundary.rebuild_failed`；无交互边界选择、无关联边界、无样条/椭圆弧/块内边界 |
-| `HATCHSETORIGIN` | 部分实现 | `<x> <y>` 参数校验后按 `hatchsetorigin.missing_field` 拒绝（`HATCHEDIT ORIGIN` 已实现图案相位原点；本命令的**绝对**原点语义仍未建模） | 不写入、不伪造 |
+| `HATCHSETORIGIN` | 完整实现 | `<x> <y>` 绝对图案原点：锚为首个定义行的合成基点（`absolute_pattern_origin()`），写入位移 `P − 锚`，行列/角度/比例参与；一条事务/一步撤销 | 无定义行的图案无法定位 → 收窄的 `hatchsetorigin.missing_field`；非有限位移 `unrepresentable`；非模型空间 hatch 不可寻址 |
 | `XDLIST` | 部分实现 | 只读；每个选中实体报告 `xdlist.not_retained` | 本构建不保留 xdata；不伪造条目 |
 
 > **证据边界**：以上 10 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
